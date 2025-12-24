@@ -1,0 +1,17 @@
+*
+!.gitattributes
+!.github/
+!docs/
+!etc/
+!lib/
+!src/
+!.github/**
+!docs/**
+!etc/**
+!lib/**
+!src/**
+!.clangd
+!CMakeLists.txt
+!LICENSE
+!README.md
+!make
