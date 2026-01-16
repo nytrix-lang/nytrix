@@ -1,0 +1,143 @@
+\input texinfo
+@settitle ny - Nytrix Compiler and Interpreter
+@setfilename ny.info
+
+@copying
+ny - Nytrix language compiler and interpreter tool.
+Copyright @copyright{} 2026 Nytrix Developers.
+GNU General Public License v3.0
+@end copying
+
+@dircategory Programming
+@direntry
+* ny: (ny).                    Nytrix compiler and interpreter tool.
+@end direntry
+
+@titlepage
+@title ny Manual
+@author Nytrix Developers
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@node Top
+@top ny - Nytrix Compiler and Interpreter
+
+The @command{ny} command is the primary tool for Nytrix. It supports JIT execution, AOT compilation, and an interactive REPL.
+
+@menu
+* Synopsis::           How to run ny.
+* Options::            Command line arguments.
+* Environment::        Environment variables.
+* Examples::           Common usage patterns.
+* See Also::           Related documentation.
+@end menu
+
+@node Synopsis
+@chapter Synopsis
+@example
+ny [OPTIONS] [FILE]
+@end example
+
+@node Options
+@chapter Options
+@section Optimization
+@table @code
+@item -O0, -O1, -O2, -O3
+Set LLVM optimization level (default -O0). @code{-O} is alias for @code{-O2}.
+@item -passes=@var{PIPE}
+Custom LLVM pass pipeline (e.g., 'default<O2>').
+@end table
+
+@section Execution
+@table @code
+@item -run
+JIT execute main() after compilation.
+@item -emit-only
+Only emit IR, don't execute (default).
+@item -o [path], --output=@var{PATH}
+Emit ELF at @var{path} (default @file{a.out}). Implies @code{-emit-only}.
+@item -strip, -no-strip
+Create stripped or unstripped binary.
+@item -c @var{CODE}
+Execute inline Nytrix code.
+@end table
+
+@section REPL
+@table @code
+@item -i, -interactive
+Interactive REPL with readline.
+@item -repl
+Read source from stdin (one-shot).
+@end table
+
+@section Debugging
+@table @code
+@item -v, -verbose
+Show compilation steps.
+@item --debug
+Enable verbose and debug logs.
+@item -vv, -vvv
+Increased verbosity levels.
+@item -time
+Show timing for each compilation phase.
+@item -dump-ast
+Dump the parsed Abstract Syntax Tree.
+@item -dump-llvm
+Print LLVM IR to stdout.
+@item -dump-tokens
+Dump lexer tokens.
+@item -dump-docs
+Extract and print function docstrings.
+@item -dump-funcs
+List all compiled functions.
+@item -dump-symbols
+Show the runtime symbol table.
+@item -dump-stats
+Print compilation statistics.
+@item -verify
+Verify the LLVM module.
+@item --dump-on-error
+Write @file{build/debug/last_source.ny} and @file{last_ir.ll} on errors.
+@item -trace
+Enable execution tracing.
+@item --color=@var{WHEN}
+Set color output: @code{auto}, @code{always}, or @code{never}.
+@item -safe-mode
+Enable all safety checks.
+@end table
+
+@section Info
+@table @code
+@item -h, -help, --help
+Show help message.
+@item -version
+Show version information.
+@end table
+
+@node Environment
+@chapter Environment Variables
+@table @code
+@item NYTRIX_RUN
+Same as @code{-run} flag.
+@item NYTRIX_DUMP_TOKENS
+Dump tokens during lexing.
+@end table
+
+@node Examples
+@chapter Examples
+@itemize @bullet
+@item @code{ny script.ny} (Run script)
+@item @code{ny -o bin main.ny} (Compile to native binary)
+@item @code{ny -e 'print(1+1)'} (Evaluate inline)
+@item @code{ny -i} (Open REPL)
+@end itemize
+
+@node See Also
+@chapter See Also
+@ref{Top, , Nytrix Language Reference, nytrix}
+
+@bye
