@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Nytrix Documentation</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Tektur:wght@400..900&family=Turret+Road:wght@300;400;500;700;800&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea'],
+                enableMenu: false
+            }
+        };
+    </script>
+
+    <style>
+        :root {
+            /* Modus Vivendi Inspired Palette (User Refined) */
+            --bg: #000000;
+            --panel: #020202;
+            --panel2: #000000;
+
+            --ink: #ffffff;
+            --dim: #989898;
+            /* Kept from previous Modus Vivendi */
+
+            --line: #111111;
+            --line2: #505050;
+            /* Kept from previous Modus Vivendi */
+
+            --accent: #b6a0ff;
+            --accent2: #00bcff;
+            --accent-cyan: #00d3d0;
+
+            --code: #000000;
+            --chip: #000000;
+            /* Set to match new --panel2 */
+
+            /* Syntax Highlighting */
+            --syn-module: #00bcff;
+            /* Module names */
+            --syn-kw: #b6a0ff;
+            --syn-str: #79a8ff;
+            --syn-num: #f78fe7;
+            --syn-call: #feacd0;
+            --syn-com: #989898;
+            /* Kept from previous Modus Vivendi */
+        }
+
+        * {
+            margin: 0;
+            margin-left: 0px;
+            padding: 0;
+            box-sizing: border-box;
+            border-radius: 0 !important;
+            cursor: default;
+        }
+
+        html {
+            font-family: "Tektur", sans-serif;
+            background: var(--bg)
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            line-height: 1.25
+        }
+
+        a,
+        button,
+        .item {
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .markdown-content a {
+            color: var(--accent);
+            text-decoration: underline;
+        }
+
+        .markdown-content a:hover {
+            color: var(--accent-cyan);
+        }
+
+        ::selection {
+            background: rgba(255, 255, 255, 0.2);
+            color: inherit;
+        }
+
+        .markdown-content ::selection,
+        .doc ::selection {
+            background: rgba(255, 255, 255, 0.2);
+            color: inherit;
+        }
+
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3 {
+            font-family: "Tektur", sans-serif;
+            color: var(--accent);
+            margin-top: 1.25em;
+            margin-bottom: 0.5em;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 0.2em;
+            letter-spacing: -0.01em;
+        }
+
+        .markdown-content p,
+        .markdown-content li {
+            font-family: "Turret Road", sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.6;
+            color: var(--ink);
+            margin-bottom: 0.8em;
+        }
+
+        .markdown-content ul,
+        .markdown-content ol {
+            padding-left: 20px;
+            margin-bottom: 1em;
+        }
+
+        .markdown-content code {
+            background: var(--panel2);
+            padding: 1px 4px;
+            font-family: "Fira Code", monospace;
+            font-size: 0.9em;
+            color: var(--accent-cyan);
+            border: 1px solid var(--line);
+        }
+
+        .markdown-content pre {
+            background: var(--code);
+            border: 1px solid var(--line);
+            padding: 12px;
+            margin-bottom: 1em;
+            overflow-x: auto;
+        }
+
+        .markdown-content pre code {
+            background: transparent;
+            padding: 0;
+            border: none;
+            color: var(--ink);
+            font-size: 11px;
+        }
+
+        .md-section {
+            margin-bottom: 40px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            padding: 16px;
+        }
+
+        .md-title {
+            font: 900 14px "Tektur";
+            color: var(--accent2);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            border-bottom: 2px solid var(--accent2);
+            display: inline-block;
+        }
+
+        /* MathJax Customization */
+        .MathJax {
+            color: var(--accent2) !important;
+            font-size: 1.1em !important;
+        }
+
+        ::-webkit-scrollbar {
+            width: 3px;
+            height: 3px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--line)
+        }
+
+        #dock-trigger {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 8px;
+            z-index: 100;
+            background: transparent;
+            /* Removed background */
+            opacity: 0;
+            /* Fully transparent */
+            transition: opacity 0.15s;
+            pointer-events: none;
+            /* Make it unclickable directly */
+        }
+
+        aside {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 240px;
+            background: var(--panel);
+            border-right: 1px solid var(--line);
+            display: flex;
+            flex-direction: column;
+            z-index: 90;
+            transition: transform 0.2s;
+            transform: translateX(-100%);
+            /* Hidden by default for all screen sizes */
+        }
+
+        aside.active {
+            /* Show aside when active */
+            transform: translateX(0);
+        }
+
+
+
+        .top {
+            padding: 12px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel2)
+        }
+
+        .brand {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 6px
+        }
+
+        .brand b {
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            font-size: 11px;
+            color: var(--accent)
+        }
+
+        .brand .meta {
+            font-size: 8px;
+            color: var(--dim);
+            font-family: "Turret Road"
+        }
+
+        .search {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            background: var(--code);
+            color: var(--ink);
+            outline: none;
+            font: 700 10px "Turret Road";
+            letter-spacing: 0.02em;
+        }
+
+        .search:focus {
+            border-color: var(--accent)
+        }
+
+        .nav {
+            flex: 1;
+            overflow: auto
+        }
+
+        .gtitle {
+            font: 700 9px "Turret Road";
+            letter-spacing: .15em;
+            text-transform: uppercase;
+            color: var(--dim);
+            /* Assuming this was the intended color property */
+            padding: 8px 12px;
+            background: transparent;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+
+        .gtitle:hover {
+            color: var(--accent);
+            background: var(--panel2);
+        }
+
+        .item {
+            display: block;
+            padding: 6px 12px;
+            font: 500 10px "Turret Road";
+            color: var(--ink);
+            text-decoration: none;
+            border-left: 2px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .item:hover {
+            color: var(--accent);
+            background: var(--panel2);
+            border-left-color: var(--accent);
+        }
+
+        .item.active {
+            color: var(--accent);
+            background: var(--panel2);
+            border-left-color: var(--accent);
+            font-weight: 700;
+        }
+
+        .item.is-function {
+            color: var(--syn-call);
+        }
+
+        /* Hierarchy Level Distinctions */
+
+        /* Level 0 - Top level categories (std, Home, etc) */
+        .gtitle[style*="padding-left: 12px"] {
+            color: var(--accent);
+            font-weight: 800;
+            font-size: 9px;
+            border-left: 3px solid var(--accent);
+        }
+
+        /* Level 1 - Module groups (cli, core, io, etc) */
+        .gtitle[style*="padding-left: 22px"] {
+            color: var(--accent2);
+            font-size: 8px;
+            border-left: 2px solid var(--line2);
+        }
+
+        /* Level 2 - Submodules */
+        .gtitle[style*="padding-left: 32px"] {
+            color: var(--dim);
+            font-size: 8px;
+            border-left: 1px solid var(--line);
+        }
+
+        /* Items at different levels */
+        .item[style*="padding-left: 22px"] {
+            color: var(--ink);
+            font-size: 10px;
+        }
+
+        .item[style*="padding-left: 32px"] {
+            color: var(--dim);
+            font-size: 9px;
+        }
+
+        .item[style*="padding-left: 42px"] {
+            color: var(--dim);
+            font-size: 9px;
+            opacity: 0.9;
+        }
+
+        /* Hover states for different levels */
+        .gtitle[style*="padding-left: 12px"]:hover {
+            background: var(--panel2);
+            border-left-color: var(--accent-cyan);
+        }
+
+        .gtitle[style*="padding-left: 22px"]:hover {
+            background: var(--panel2);
+            color: var(--accent);
+        }
+
+        .gtitle[style*="padding-left: 32px"]:hover {
+            background: var(--panel2);
+            color: var(--accent2);
+        }
+
+        .footer {
+            padding: 6px 12px;
+            border-top: 1px solid var(--line);
+            color: var(--dim);
+            font: 800 8px "Turret Road";
+            display: flex;
+            justify-content: space-between;
+            background: var(--panel2)
+        }
+
+        main {
+            flex: 1;
+            overflow: auto;
+            padding: 24px 4% 60px;
+            margin-left: 0;
+            /* No offset by default */
+            transition: margin-left 0.2s;
+        }
+
+        main.aside-active {
+            /* Adjust main when aside is active */
+            margin-left: 248px;
+        }
+
+        main.aside-active {
+            /* Adjust main when aside is active */
+            margin-left: 248px;
+        }
+
+        .header {
+            border-bottom: 1px solid var(--line);
+            margin-top: 20px;
+            margin-bottom: 24px;
+            padding-bottom: 16px
+        }
+
+        .mod-label {
+            font: 800 8px "Turret Road";
+            color: var(--accent);
+            letter-spacing: .2em;
+            margin-bottom: 2px
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: -0.01em;
+            color: var(--ink);
+            line-height: 1
+        }
+
+        .desc {
+            margin-top: 8px;
+            max-width: 85ch;
+            color: var(--ink);
+            font: 500 12px "Turret Road";
+            opacity: 0.9
+        }
+
+        .stats {
+            color: var(--dim);
+            font: 800 8px "Turret Road";
+            letter-spacing: .1em;
+            margin-top: 12px
+        }
+
+        .grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px
+        }
+
+        .module-divider {
+            border-top: 2px solid var(--line2);
+            margin: 48px 0;
+        }
+
+        .module-divider {
+            border-top: 2px solid var(--line2);
+            margin: 48px 0;
+        }
+
+        .card {
+            border: 1px solid var(--line);
+            background: var(--panel2);
+            padding: 8px
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            margin-bottom: 6px;
+            background: var(--panel)
+        }
+
+        .name {
+            font: 900 11px "Turret Road";
+            letter-spacing: .05em;
+            color: var(--accent-cyan)
+        }
+
+        .kind {
+            font: 900 8px "Turret Road";
+            text-transform: uppercase;
+            color: var(--dim);
+            border: 1px solid var(--line);
+            padding: 1px 4px
+        }
+
+        .card-body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .doc {
+            color: var(--ink);
+            font: 500 12px "Turret Road";
+            line-height: 1.5;
+            margin-bottom: 8px;
+            margin-left: 5px;
+        }
+
+        .doc ul,
+        .doc ol {
+            margin: 4px 0;
+            padding-left: 11px;
+        }
+
+        .doc li {
+            margin-bottom: 2px;
+        }
+
+        .doc b,
+        .doc strong {
+            color: var(--accent-cyan);
+            font-weight: 700;
+        }
+
+        .imports {
+            font-family: "Turret Road", sans-serif;
+            font-size: 11px;
+            font-style: normal;
+        }
+
+        .imports ul {
+            padding-left: 20px;
+            margin: 4px 0;
+            list-style-type: square;
+        }
+
+        .imports li {
+            margin-bottom: 4px;
+        }
+
+        .doc:empty {
+            display: none
+        }
+
+        .codebox {
+            border: 1px solid var(--line);
+            background: var(--code);
+            margin-bottom: 4px;
+        }
+
+        .codehd {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 3px 10px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+            font: 800 8px "Turret Road";
+            letter-spacing: .1em;
+            color: var(--dim)
+        }
+
+        .copy {
+            font: 900 8px "Turret Road";
+            padding: 0px 4px;
+            border: 1px solid var(--line);
+            background: transparent;
+            color: var(--dim);
+            outline: none
+        }
+
+        .copy:hover {
+            color: var(--accent);
+            border-color: var(--accent)
+        }
+
+        pre {
+            margin: 0;
+            padding: 4px 10px;
+            overflow: auto
+        }
+
+        code {
+            font-family: "Fira Code";
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--ink)
+        }
+
+        .syn-kw {
+            color: var(--syn-kw);
+            font-weight: 700
+        }
+
+        .syn-str {
+            color: var(--syn-str)
+        }
+
+        .syn-num {
+            color: var(--syn-num)
+        }
+
+        .syn-call {
+            color: var(--syn-call)
+        }
+
+        .syn-com {
+            color: var(--syn-com);
+            font-style: italic
+        }
+
+        .syn-module {
+            color: var(--syn-module);
+        }
+
+        .empty {
+            padding: 40px;
+            border: 1px solid var(--line);
+            color: var(--dim);
+            font: 800 9px "Turret Road";
+            text-align: center;
+            background: var(--panel)
+        }
+
+        .card:hover {
+            border-color: var(--accent)
+        }
+
+        .gtitle.collapsible {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 28px;
+        }
+
+        .gtitle.collapsible:hover {
+            background: var(--panel2);
+        }
+
+        .collapse-icon {
+            font-size: 8px;
+            color: var(--dim);
+            transition: transform 0.2s, color 0.15s;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
+        .gtitle.collapsible:hover .collapse-icon {
+            color: var(--accent);
+        }
+
+        .collapsible.active .collapse-icon {
+            transform: rotate(90deg);
+            color: var(--accent);
+        }
+
+        .collapsible-content {
+            display: none;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        .collapsible-content.active {
+            display: block;
+        }
+
+        .backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            /* backdrop-filter: blur(4px); Removed as per request */
+            z-index: 85;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .backdrop.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #hamburger {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            width: 32px;
+            height: 32px;
+            background: var(--panel2);
+            border: 1px solid var(--line);
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        #hamburger:hover {
+            border-color: var(--accent);
+            background: var(--panel);
+        }
+
+        #hamburger span {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            display: block;
+            width: 18px;
+            height: 2px;
+            background: var(--accent);
+            transition: all 0.25s ease;
+        }
+
+        #hamburger span:nth-child(1) {
+            top: 9px;
+        }
+
+        #hamburger span:nth-child(2) {
+            top: 15px;
+        }
+
+        #hamburger span:nth-child(3) {
+            top: 21px;
+        }
+
+        #hamburger.active {
+            left: 250px;
+            /* Move with sidebar if desired, or keep fixed */
+        }
+
+        #hamburger.active span:nth-child(1) {
+            top: 15px;
+            transform: translateX(-50%) rotate(45deg);
+        }
+
+        #hamburger.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        #hamburger.active span:nth-child(3) {
+            top: 15px;
+            transform: translateX(-50%) rotate(-45deg);
+        }
+
+        /* Mobile specific adjustments maybe? */
+        @media (max-width: 768px) {
+            #hamburger.active {
+                left: 10px;
+                /* Keep it left on mobile to avoid overlap if sidebar is full width, but here sidebar is 240px */
+            }
+        }
+
+        /* Markdown Content Styling */
+        .markdown-content {
+            margin-bottom: 40px;
+            padding: 30px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--ink);
+        }
+
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3 {
+            color: var(--accent);
+            margin: 30px 0 15px;
+            font-family: "Tektur", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 900;
+        }
+
+        .markdown-content h1 {
+            font-size: 22px;
+            border-bottom: 2px solid var(--line);
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .markdown-content h1::before {
+            content: ">>";
+            font-size: 14px;
+            opacity: 0.5;
+        }
+
+        .markdown-content h2 {
+            font-size: 18px;
+            border-left: 3px solid var(--accent);
+            padding-left: 15px;
+        }
+
+        .markdown-content h3 {
+            font-size: 15px;
+            color: var(--dim);
+        }
+
+        .markdown-content p {
+            margin-bottom: 15px;
+        }
+
+        .markdown-content code {
+            font-family: "Fira Code", monospace;
+            background: var(--chip);
+            padding: 2px 6px;
+            color: var(--accent-cyan);
+            font-size: 0.9em;
+        }
+
+        .markdown-content pre {
+            background: var(--code);
+            border: 1px solid var(--line);
+            padding: 20px;
+            margin: 20px 0;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .markdown-content pre::after {
+            content: "CODE_BLOCK";
+            position: absolute;
+            top: 0;
+            right: 0;
+            font: 900 7px "Turret Road";
+            background: var(--line);
+            padding: 2px 6px;
+            color: var(--dim);
+        }
+
+        .markdown-content pre code {
+            background: none;
+            padding: 0;
+            color: var(--ink);
+            display: block;
+        }
+
+        .markdown-content ul,
+        .markdown-content ol {
+            margin-bottom: 20px;
+            padding-left: 20px;
+        }
+
+        .markdown-content li {
+            margin-bottom: 8px;
+        }
+
+        .markdown-content li::marker {
+            color: var(--accent);
+            font-weight: 900;
+        }
+
+        .markdown-content a {
+            color: var(--accent);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .markdown-content a:hover {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+
+        .markdown-content blockquote {
+            border-left: 4px solid var(--line);
+            padding-left: 20px;
+            color: var(--dim);
+            font-style: italic;
+            margin: 20px 0;
+        }
+
+        .md-section {
+            margin-bottom: 60px;
+        }
+
+        .md-title {
+            font: 900 14px "Tektur";
+            letter-spacing: 0.2em;
+            color: var(--accent);
+            background: var(--panel2);
+            padding: 12px 15px;
+            border-left: 4px solid var(--accent);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .md-title::after {
+            content: "DOCUMENT_REF";
+            font: 800 8px "Turret Road";
+            opacity: 0.5;
+        }
+
+        /* Brand refinements */
+        .logo-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-mark {
+            width: 20px;
+            height: 20px;
+            background: var(--accent);
+            clip-path: polygon(0% 0%, 100% 0%, 100% 70%, 70% 100%, 0% 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--bg);
+            font: 900 10px "Tektur";
+        }
+
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-text b {
+            font-size: 12px !important;
+            line-height: 1;
+        }
+
+        .brand-text span {
+            font: 800 7px "Turret Road";
+            color: var(--dim);
+            letter-spacing: 0.1em;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="dock-trigger"></div>
+    <div id="backdrop" class="backdrop" onclick="toggleSidebar()"></div>
+
+    <div id="hamburger" onclick="toggleSidebar()">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <aside id="aside">
+        <div class="top">
+            <div class="brand">
+                <div class="logo-box">
+                    <div class="logo-mark">NY</div>
+                    <div class="brand-text">
+                        <b>NYTRIX</b>
+                        <span>STANDARD_CORE</span>
+                    </div>
+                </div>
+
+            </div>
+            <input class="search" id="search" placeholder="SEARCH" oninput="doSearch()" />
+        </div>
+        <div class="nav" id="nav"></div>
+        <div class="footer"><span id="modcount">0_MODS</span><span id="symcount">0_SYMS</span></div>
+    </aside>
+
+    <main id="content-area">
+        <div id="content"></div>
+    </main>
+
+    <script>
+        const data = DATA_PLACEHOLDER;
+        SCRIPT_PLACEHOLDER
+    </script>
+</body>
+
+</html>

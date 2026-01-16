@@ -1,0 +1,132 @@
+\input texinfo
+@settitle Nytrix Manual
+@setfilename nytrix.info
+
+@copying
+Nytrix - minimalist systems programming language.
+Copyright @copyright{} 2026 Nytrix Developers.
+GNU General Public License v3.0
+@end copying
+
+@dircategory Programming
+@direntry
+* Nytrix: (nytrix).           Minimalist systems programming language.
+@end direntry
+
+@titlepage
+@title Nytrix Manual
+@author Nytrix Developers
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@node Top
+@top nytrix - minimalist systems programming language
+
+Nytrix is a minimalist systems systems programming language with a small C core
+and a self-hosting standard library.
+
+@menu
+* Introduction::        Overview of the language.
+* Language Reference::  Syntax, types, and control flow.
+* Modules and Imports:: Organizing code.
+* Builtins::            Built-in functions and macros.
+* Runtime::             Internal tagged values and memory.
+* Indices::             Index of commands and concepts.
+@end menu
+
+@node Introduction
+@chapter Introduction
+Nytrix is a minimalist systems language with a small C core and a self-hosting standard library. It provides low-level control and predictable performance via LLVM.
+
+For information on using the @command{ny} compiler and interpreter tool, please refer to the @ref{Top, , ny Manual, ny}.
+
+@node Language Reference
+@chapter Language Reference
+
+@section Lexical Structure
+@table @asis
+@item Identifiers
+@code{[A-Za-z_][A-Za-z0-9_]*}
+@item Comments
+Semicolon (@code{;}) for single-line. Triple-quotes (@code{"""} or @code{'''}) for multi-line/docstrings.
+@end table
+
+@section Data Types
+@itemize @bullet
+@item @strong{Integers}: 64-bit signed. Dec, Hex (@code{0x}), Oct (@code{0o}), Bin (@code{0b}).
+@item @strong{Floats}: 64-bit IEEE 754.
+@item @strong{Booleans}: @code{true}, @code{false}.
+@item @strong{Nil}: @code{nil} (0).
+@item @strong{Strings}: UTF-8. Supports f-strings: @code{f"val: @{x@}"}.
+@item @strong{Containers}: Lists @code{[]}, Sets @code{@{@}}, Dicts @code{@{:@}}.
+@item @strong{Tuples}: @code{()}.
+@end itemize
+
+@section Declarations
+@table @code
+@item def
+@code{def x = val;} (defaults to 0).
+@item undef
+@code{undef x;} (removes identifier).
+@end table
+
+@section Control Flow
+@table @asis
+@item Conditional
+@code{if} / @code{elif} / @code{else}.
+@item Loops
+@code{while cond @{ ... @}}, @code{for x in iter @{ ... @}}.
+@item Matching
+@code{match x @{ case val: ... case _: ... @}}.
+@item Errors
+@code{try @{ ... @} catch (err) @{ ... @}}.
+@item Jumps
+@code{label:}, @code{goto label;}, @code{break}, @code{continue}, @code{return}.
+@item Defer
+@code{defer @{ ... @}} runs at scope exit.
+@end table
+
+@section Functions
+@table @asis
+@item Definition
+@code{fn name(a, b=0, ...rest) @{ ... @}}.
+@item Lambdas
+@code{lambda(x) @{ x * 2 @}}.
+@end table
+
+@node Modules and Imports
+@chapter Modules and Imports
+@table @asis
+@item module
+@code{module m @{ ... @}}. Exports via @code{export x;} or @code{module m *}.
+@item use
+@code{use name;}, @code{use "file.ny";}, @code{use name (a, b as c);}.
+@end table
+
+@node Builtins
+@chapter Builtins
+@table @code
+@item comptime
+@code{comptime @{ ... @}} executes at compile-time.
+@item embed
+@code{embed("path")} loads file as byte array.
+@item asm
+@code{asm("ir", "constraints", args...)} for inline LLVM.
+@item layout
+@code{layout L (f: type, ...)} for C-style structs.
+@end table
+
+@node Runtime
+@chapter Runtime
+64-bit tagged values (LSB=1: integer, LSB=0: pointer). Manual memory: @code{rt_malloc}, @code{rt_free}, @code{rt_realloc}. OS interop via @code{rt_syscall} and FFI (@code{std.os.ffi}).
+
+@node Indices
+@chapter Indices
+@appendix Index
+@printindex cp
+
+@bye

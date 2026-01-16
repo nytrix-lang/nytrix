@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+Nytrix syntax optimizer 'baker' - precompiles std library bundle for faster startup
+"""
+import os
+import sys
+from pathlib import Path
+
+def bundle_std():
+	"""Create optimized std bundle"""
+	std_dir = Path("src/std")
+	if not std_dir.exists():
+		print("Error: src/std/ directory not found", file=sys.stderr)
+		return 1
+	files = list(std_dir.rglob("*.ny"))
+	if not files:
+		print("Warning: No .ny files in std/", file=sys.stderr)
+		return 0
+	# Sort files but prioritize core files
+	def file_priority(f):
+		name = f.name
+		if name == "mod.ny": return 0
+		if name == "reflect.ny": return 1
+		return 10
+	# Sort files by full path to ensure deterministic order
+	sorted_files = sorted(list(set(files)), key=lambda f: (file_priority(f), str(f)))
+	output = []
+	symbols = []
+	for f in sorted_files:
+		content = f.read_text()
+		# Convert path to module name: src/std/foo/bar.ny -> std.foo.bar
+		try:
+			rel_path = f.relative_to("src/std")
+			parts = list(rel_path.parts)
+			if parts[-1] == "mod.ny":
+				parts.pop()
+			else:
+				parts[-1] = parts[-1].replace(".ny", "")
+			mod_name = "std." + ".".join(parts)
+			full_mod_name = mod_name
+			# Simple parser to find exported functions
+			for line in content.split('\n'):
+				line = line.strip()
+				if line.startswith('fn '):
+					name_part = line[3:].split('(')[0].strip()
+					if name_part.startswith('_'): continue
+					symbols.append((name_part, full_mod_name))
+		except ValueError:
+			continue
+		has_module_decl = False
+		for line in content.split('\n'):
+			ls = line.strip()
+			if not ls or ls.startswith(';;') or ls.startswith('#') or ls.startswith('use '):
+				continue
+			if ls.startswith('module ') or ls.startswith('module('):
+				has_module_decl = True
+				break
+			# If we hit an actual statement that doesn't start with module, it's not at the top
+			# We allow 'use' to precede 'module'
+			if ls.startswith('fn ') or ls.startswith('def '):
+				break
+		if has_module_decl:
+			output.append(f";; Module from {f}\n" + content + "\n")
+		else:
+			output.append(f";; Module from {f}\nmodule {full_mod_name} {{\n{content}\n}}\n")
+	# Write bundle
+	if len(sys.argv) > 1:
+		bundle_path = Path(sys.argv[1])
+	else:
+		bundle_path = Path("build/std_bundle.ny")
+	bundle_path.parent.mkdir(exist_ok=True, parents=True)
+	bundle_path.write_text('\n'.join(output))
+	# TODO stop using pragma once to make all more portable to other c compilers
+	# Switch to C instead of Python
+	# Write symbols header
+	sym_path = bundle_path.parent / "std_symbols.h"
+	with sym_path.open('w') as h:
+		h.write("#pragma once\n")
+		h.write("typedef struct { const char *sym; const char *mod; } nt_std_symbol;\n")
+		h.write("static const nt_std_symbol nt_std_symbols[] = {\n")
+		for sym, mod in symbols:
+			h.write(f'    {{"{sym}", "{mod}"}},\n')
+		h.write("    {0, 0}\n")
+		h.write("};\n")
+	print(f"Bundled {len(files)} std modules -> {bundle_path}")
+	print(f"Generated {len(symbols)} symbols -> {sym_path}")
+	return 0
+
+if __name__ == "__main__":
+	sys.exit(bundle_std())

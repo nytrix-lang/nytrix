@@ -1,0 +1,274 @@
+.TH NYTRIX 1 "" "Nytrix Manual"
+
+.SH NAME
+nytrix \- The Nytrix Language: philosophy, syntax, and core concepts
+
+.SH DESCRIPTION
+\fBNytrix\fR is a minimalist systems language with a tiny 64-bit core and everything else written in .ny. It targets explicit control, predictable performance, and zero-cost abstractions, backed by LLVM.
+
+\fBNytrix Design Philosophy:\fR
+Nytrix's design centers on:
+.RS
+.IP \(bu 4
+\fBMinimalist C Core\fR: The compiler's C core is small; most of the standard library is implemented in Nytrix itself ("everything in std in Ny"). This promotes transparency and extensibility.
+.IP \(bu 4
+\fBExplicit Control\fR: Programmers have fine-grained control over resources and execution, visible in manual memory management, low-level OS interaction, and FFI use.
+.IP \(bu 4
+\fBPredictable Performance\fR: Leveraging LLVM for JIT/AOT compilation, Nytrix aims for consistent performance and zero-cost abstractions, avoiding hidden overhead.
+.RE
+
+.SH LANGUAGE
+This section outlines Nytrix's syntax and core concepts. For command-line usage, see \fBny\fR(1).
+
+.SS Lexical Structure
+
+.TP
+.B Identifiers
+`[A-Za-z_][A-Za-z0-9_]*`. Names variables, functions, modules.
+.TP
+.B Comments
+Semicolon (`;`) starts a single-line comment.
+.TP
+.B Multiline Comments
+Triple-quoted strings (`"""..."""` or `'''...'''`) on their own lines function as multiline comments.
+.TP
+.B Docstrings
+Strings immediately following function definitions are captured as docstrings.
+
+.SS "Data Types"
+Nytrix provides fundamental data types:
+.TP
+.B Integers
+Decimal, hexadecimal (`0x`), octal (`0o`), binary (`0b`) literals.
+.TP
+.B Floats
+Standard notation (e.g., `1.0`, `.5`, `1e-3`).
+.TP
+.B Bool
+`true`, `false`.
+.TP
+.B Nil
+`nil` (maps to `0`).
+.TP
+.B Strings
+UTF-8 encoded, enclosed in double (`"..."`) or single (`'...'`) quotes.
+.TP
+.B Containers
+Built-in lists (`[a, b]`), sets (`{a, b}`), and dicts (`{"k": v}`).
+.TP
+.B Tuples
+Immutable, ordered; created with `tuple(expr)` or `(a, b,)` via std helpers.
+
+.SS "Memory Management"
+Nytrix uses a custom, low-level memory system for explicit control, performance, and debugging, foregoing automatic garbage collection.
+
+.TP
+.B Manual Allocation
+Memory is explicitly managed via `rt_malloc`, `rt_free`, and `rt_realloc`.
+.TP
+.B Custom Heap Structure
+`rt_malloc` ensures 64-byte alignment. Each heap block includes a 128+ byte metadata overhead for "magic numbers" (`NY_MAGIC1`, `NY_MAGIC2`, `NY_MAGIC3`) for integrity checks and original size.
+.TP
+.B Tagged Values
+`int64_t` is the universal value type. LSB tags integers (`1`) from pointers/other types (`0`). `rt_tag` and `rt_untag` manipulate this.
+.TP
+.B Strict Pointer Validation
+Macros like `is_heap_ptr` validate heap pointers by checking alignment and magic numbers.
+.TP
+.B Runtime Bounds Checking
+Memory access functions (`rt_loadX_idx`, `rt_storeX_idx`) use `rt_check_oob` to prevent buffer overflows.
+.TP
+.B Debugging Instrumentation
+Debug builds track allocations (`g_alloc`, `g_free`) and use magic numbers for buffer overflow checks.
+
+.SH "COMPILATION PROCESS"
+Nytrix source code transforms into machine code through these stages:
+
+.SS Lexical Analysis
+The lexer converts raw source into a token stream.
+.TP
+.B Token Definition
+`token_kind` defines token types (identifiers, keywords, operators, literals, punctuation). Each `token_t` stores type, lexeme, length, and precise source location for error reporting.
+.TP
+.B Input Handling
+The lexer processes characters, tracks line/column, and supports dynamic source context switching (e.g., for imports).
+.TP
+.B Token Recognition
+`lexer_next` identifies and categorizes elements: skips whitespace/comments, distinguishes identifiers/keywords, handles numeric/string literals (including f-strings and escapes), and recognizes operators/punctuation.
+.TP
+.B Error Reporting
+Unrecognized input yields `NY_T_EOF`. `token_t`'s source location enables informative error messages.
+
+.SS Syntactic Analysis (Parsing)
+The parser transforms the token stream into an Abstract Syntax Tree (AST), validating grammar rules.
+
+.TP
+.B Parsing Strategy
+Combines recursive descent for statements/structure and a Pratt parser for expressions (operator precedence).
+.TP
+.B Token Consumption
+Interacts with the lexer via `parser_advance`, `parser_match`, `parser_expect`, `parser_peek` for token retrieval and validation.
+.TP
+.B AST Construction
+Output is a hierarchical AST. `expr_t` (expressions), `stmt_t` (statements), `program_t` (root) are core structures. Nodes are arena-allocated for efficiency.
+.TP
+.B Language Construct Representation
+AST models Nytrix syntax comprehensively: basic elements, operations (unary, binary, logical, ternary), function calls, collections, control flow (`if`, `while`, `for`, `try-catch`, `return`, `break`, `continue`, `defer`, `goto`, `label`, `match`), declarations (variables, functions, `layout`, `use`, `module`, `export`), and special features (`comptime`, `fstring`, `asm`, `embed`).
+.TP
+.B Metadata Storage
+Each AST node (`expr_t`, `stmt_t`) includes `token_t tok` for source location (file, line, column, lexeme) and debugging.
+.TP
+.B AST Node Management
+Arena allocator (`arena_t`) efficiently manages AST nodes and strings. Dynamic arrays (`VEC`) handle lists. `program_free` deallocates the entire AST quickly.
+.TP
+.B Compilation Phase Relationship
+The AST is input for semantic analysis/type checking, Intermediate Representation (IR) generation, and final code generation. `ny_ast_to_json` aids debugging.
+
+.SS Code Generation
+Transforms AST into executable machine code using LLVM, supporting JIT and AOT.
+
+.TP
+.B Role of LLVM
+LLVM is the core backend, managing `LLVMContextRef`, `LLVMModuleRef`, `LLVMBuilderRef` (encapsulated in `codegen_t`) for IR construction, optimization, and execution/compilation.
+.TP
+.B AST to LLVM IR Translation
+Recursive traversal of Nytrix AST (`expr_t`, `stmt_t`) by `gen_expr`, `gen_stmt`, `gen_func` emits LLVM instructions. `scope` and `binding` manage symbol mapping to `LLVMValueRef`s.
+.TP
+.B Just-In-Time (JIT) Compilation
+`src/code/jit.c` manages JIT. LLVM IR modules are added to `LLVMExecutionEngineRef`. `register_jit_symbols` links Nytrix C runtime functions (`rt_malloc`, `rt_syscall`) to LLVM declarations for seamless calls.
+.TP
+.B Ahead-Of-Time (AOT) Compilation
+`src/code/llvm.c` handles AOT. `ny_llvm_emit_object` and `ny_llvm_emit_file` compile LLVM IR to native object files via `LLVMTargetMachineEmitToFile`. Linking to runtime happens via standard system linkers.
+.TP
+.B Symbol Management
+Nytrix manages internal symbols (`scope` for locals, `codegen_t` for functions/globals). JIT links `rt_` functions directly. AOT relies on system linkers.
+
+.SH "RUNTIME SYSTEM"
+Nytrix runtime provides services for execution, OS interaction, and external functionality.
+
+.SS "Foreign Function Interface (FFI)"
+Nytrix FFI directly calls C functions from shared libraries using POSIX `dlfcn.h`.
+
+.TP
+.B Direct `dlfcn.h` Integration
+Wraps `dlopen`, `dlsym`, `dlclose`, `dlerror` for maximum control, minimal overhead.
+.TP
+.B Universal `int64_t` Boundary
+All FFI arguments/returns are `int64_t`.
+.TP
+.B Tagged Pointer Handling
+Nytrix's tagged `int64_t` values are automatically untagged for C calls and retagged for returns. Raw C pointers pass unchanged.
+.TP
+.B Nytrix-Side Interface
+`std/os/ffi` exposes FFI with high-level functions like `dlopen`, `dlsym`, `call0` to `call13`, and `ffi_call`.
+.TP
+.B Data Type Marshalling
+FFI provides raw access; manual conversion for complex C types (floats, strings, structs) is required.
+.TP
+.B Security Considerations
+FFI grants direct access to OS. Use with untrusted code poses security risks due to lack of sandboxing. Errors are via `dlerror()`.
+
+.SS "OS Interaction"
+Nytrix runtime provides low-level OS access via `rt_` prefixed C functions in `src/rt/os.c`.
+
+.SS File I/O
+Raw file I/O uses POSIX file descriptors.
+.TP
+.B Direct System Call Access
+`rt_syscall` invokes POSIX calls (`SYS_open`, `SYS_close`, `SYS_lseek`, `SYS_stat`, `SYS_fstat`) for granular control.
+.TP
+.B Raw Read/Write
+`rt_sys_read_off` and `rt_sys_write_off` provide byte-level read/write with offsets on Nytrix-managed buffers.
+.TP
+.B File Descriptor Management
+POSIX integer file descriptors are passed via Nytrix's tagged value system.
+.TP
+.B Error Propagation and Safety
+System call errors return as negative integers. `rt_check_oob` enforces memory safety for buffer access.
+
+.SS Process Management
+Nytrix provides low-level control over OS processes via `rt_` prefixed functions.
+.TP
+.B Generic System Call Access (`rt_syscall`)
+Directly invokes POSIX calls like `fork(2)`, `wait4(2)`, `getpid(2)`, `getppid(2)`, `kill(2)`.
+.TP
+.B Program Execution (`rt_execve`)
+Wraps `execve(2)` to replace the current process image with a new program.
+.TP
+.B Tagged Value Handling
+Arguments (PIDs, status codes) and returns use Nytrix's `int64_t` tagged value representation.
+.TP
+.B Security and Control
+FFI grants powerful, unsandboxed OS control. Untrusted scripts pose risks. Developers manage process lifecycle.
+
+.SS Environment Variables and Current Directory
+Mechanisms to access environment variables and query the current working directory.
+.TP
+.B Environment Variable Access
+`std/os/mod.ny` exposes `os.env()` and `os.environ()`. C runtime accesses `environ` via `rt_envc`, `rt_envp`, and `rt_syscall` (for `getenv(3)`). `cstr_to_str` converts C strings.
+.TP
+.B Current Working Directory
+`os.getcwd()` (from `std/os/mod.ny`) uses `rt_syscall` to invoke `getcwd(2)`, converting the result to a Nytrix string.
+.TP
+.B Limitations
+Direct `rt_` functions for `setenv`, `unsetenv`, `chdir` were not found in `src/rt/os.c`. These may use `rt_syscall` directly or be implemented in stdlib.
+
+.SS Directory Management
+Manages directories via low-level syscalls and high-level stdlib wrappers.
+.TP
+.B Low-Level `rt_syscall` Access
+Underpins POSIX calls like `mkdir(2)`, `rmdir(2)`, `chdir(2)` for directory creation, deletion, and changing.
+.TP
+.B High-Level `std/io/fs.ny` Wrappers
+Provides `fs.mkdir(path)`, `fs.mkdirs(path)`, `fs.rmdir(path)`, `fs.listdir(path)` for idiomatic directory management.
+
+.SS Math Operations
+Mathematical capabilities blend low-level C runtime and high-level stdlib.
+.TP
+.B Core Runtime Functions (`src/rt/math.c`)
+Implements fundamental arithmetic, comparison, bitwise ops on `int64_t` tagged values. Includes `rt_srand`, `rt_rand64`, and float boxing/unboxing.
+.TP
+.B Nytrix Standard Library (`std/math/`)
+Builds on runtime: `std/math/float.ny` for float ops (`abs`, `floor`), `std/math/mod.ny` for general math (`min`, `max`, `pow`, `sqrt`), `std/math/random.ny` for higher-level random generation.
+.TP
+.B Transcendental Functions via FFI
+Accessible via FFI to external C libraries (`libm.so`), but requires manual `double` marshalling due to `int64_t` boundary.
+
+.SS String Operations
+Strings are managed by C runtime and Nytrix stdlib.
+.TP
+.B Memory Representation
+Strings are tagged `int64_t` pointers to null-terminated C char arrays. Hidden object headers store metadata (tag at `ptr - 8`, length at `ptr - 16`).
+.TP
+.B Core Runtime Functions (`src/rt/string.c`)
+Provides `rt_init_str` (creation), `rt_str_concat` (concatenation), `rt_to_str` (type conversion to string).
+.TP
+.B Nytrix Standard Library (`std/strings/str.ny`)
+Offers high-level API: `cstr_to_str` (C string conversion), `str_len`, `str_slice`, `find`, comparison functions. Leverages low-level FFI for direct memory manipulation.
+.TP
+.B Memory Management
+Strings are heap-allocated objects, subject to general memory management. Object headers with magic numbers aid tracking.
+
+.SH OPERATORS
+Nytrix supports standard arithmetic, comparison, logical, and unary operators.
+.TP
+.B Arithmetic
+`+`, `-`, `*`, `/`, `%`.
+.TP
+.B Comparison
+`==`, `!=`, `<`, `>`, `<=`, `>=`.
+.TP
+.B Logical
+`&&`, `||`, `!`.
+.TP
+.B Unary
+`-`.
+
+.SH "SEE ALSO"
+.BR ny (1)
+
+.SH BUGS
+Project is early stage; expect breaking changes, incomplete features, bugs.
+
+.SH LICENSE
+Refer to `LICENSE` file in source distribution.

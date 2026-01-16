@@ -1,0 +1,20 @@
+CompileFlags:
+  CompilationDatabase: ./build/cache
+  Add:
+    - -std=c11
+    - -Ibuild
+    - -Isrc
+    - -Isrc/ast
+    - -Isrc/base
+    - -Isrc/code
+    - -Isrc/lex
+    - -Isrc/parse
+    - -Isrc/repl
+    - -Isrc/rt
+    - -Isrc/wire
+    - -D_GNU_SOURCE
+    - -DNYTRIX_STD_PATH="/usr/share/nytrix/std_bundle.ny"
+
+Diagnostics:
+  Suppress:
+    - unused-parameter
