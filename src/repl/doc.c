@@ -1,0 +1,307 @@
+#include "base/loader.h"
+#include "parse/parser.h"
+#include "priv.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void doclist_set(doc_list_t *dl, const char *name, const char *doc,
+                 const char *def, const char *src, int kind) {
+  if (!dl || !name)
+    return;
+  for (size_t i = 0; i < dl->len; ++i) {
+    if (strcmp(dl->data[i].name, name) == 0) {
+      if (doc) {
+        free(dl->data[i].doc);
+        dl->data[i].doc = strdup(doc);
+      }
+      if (def) {
+        free(dl->data[i].def);
+        dl->data[i].def = strdup(def);
+      }
+      if (src) {
+        free(dl->data[i].src);
+        dl->data[i].src = strdup(src);
+      }
+      if (kind != 0)
+        dl->data[i].kind = kind;
+      return;
+    }
+  }
+  if (dl->len == dl->cap) {
+    size_t new_cap = dl->cap ? dl->cap * 2 : 64;
+    ny_doc_entry *nd = realloc(dl->data, new_cap * sizeof(ny_doc_entry));
+    if (!nd)
+      return;
+    memset(nd + dl->len, 0, (new_cap - dl->len) * sizeof(ny_doc_entry));
+    dl->data = nd;
+    dl->cap = new_cap;
+  }
+  dl->data[dl->len].name = strdup(name);
+  dl->data[dl->len].doc = doc ? strdup(doc) : NULL;
+  dl->data[dl->len].def = def ? strdup(def) : NULL;
+  dl->data[dl->len].src = src ? strdup(src) : NULL;
+  dl->data[dl->len].kind = kind;
+  dl->len += 1;
+}
+
+void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body,
+                           const char *prefix) {
+  for (size_t i = 0; i < body->len; ++i) {
+    stmt_t *s = body->data[i];
+    if (s->kind == NY_S_FUNC) {
+      char qname[512];
+      const char *name = s->as.fn.name;
+      if (prefix && *prefix && strncmp(name, prefix, strlen(prefix)) != 0) {
+        snprintf(qname, sizeof(qname), "%s.%s", prefix, name);
+        name = qname;
+      }
+      char def_buf[512];
+      int n = snprintf(def_buf, sizeof(def_buf), "fn %s(", name);
+      for (size_t j = 0; j < s->as.fn.params.len; ++j) {
+        const char *sep = (j + 1 < s->as.fn.params.len) ? ", " : "";
+        int written = snprintf(def_buf + n, sizeof(def_buf) - (size_t)n, "%s%s",
+                               s->as.fn.params.data[j].name, sep);
+        if (written > 0)
+          n += written;
+      }
+      snprintf(def_buf + n, sizeof(def_buf) - (size_t)n, ")");
+      char *src = NULL;
+      if (s->as.fn.src_start && s->as.fn.src_end > s->as.fn.src_start) {
+        src = ny_strndup(s->as.fn.src_start,
+                         (size_t)(s->as.fn.src_end - s->as.fn.src_start));
+      }
+      doclist_set(dl, name, s->as.fn.doc, def_buf, src, 3); // 3 = FN
+      if (src)
+        free(src);
+    } else if (s->kind == NY_S_MODULE) {
+      char qname[512];
+      const char *name = s->as.module.name;
+      if (prefix && *prefix && strncmp(name, prefix, strlen(prefix)) != 0) {
+        snprintf(qname, sizeof(qname), "%s.%s", prefix, name);
+        name = qname;
+      }
+      char *src = NULL;
+      if (s->as.module.src_start &&
+          s->as.module.src_end > s->as.module.src_start) {
+        src =
+            ny_strndup(s->as.module.src_start,
+                       (size_t)(s->as.module.src_end - s->as.module.src_start));
+      }
+      doclist_set(dl, name, "Module", "module", src, 2); // 2 = MOD
+      if (src)
+        free(src);
+      doclist_add_recursive(dl, &s->as.module.body, name);
+    }
+  }
+}
+
+void doclist_add_from_prog(doc_list_t *dl, program_t *prog) {
+  if (!dl || !prog)
+    return;
+  doclist_add_recursive(dl, &prog->body, NULL);
+}
+
+void doclist_free(doc_list_t *dl) {
+  if (!dl || !dl->data)
+    return;
+  for (size_t i = 0; i < dl->len; ++i) {
+    free(dl->data[i].name);
+    if (dl->data[i].doc)
+      free(dl->data[i].doc);
+    if (dl->data[i].def)
+      free(dl->data[i].def);
+    if (dl->data[i].src)
+      free(dl->data[i].src);
+  }
+  free(dl->data);
+}
+
+int doclist_print(const doc_list_t *dl, const char *name) {
+  if (!dl || !name || !*name)
+    return 0;
+  for (size_t i = 0; i < dl->len; ++i) {
+    if (strcmp(dl->data[i].name, name) == 0) {
+      const char *k_name = "Symbol";
+      if (dl->data[i].kind == 1) {
+        k_name = "Package";
+      } else if (dl->data[i].kind == 2) {
+        k_name = "Module";
+      } else if (dl->data[i].kind == 3) {
+        k_name = "Function";
+      }
+      printf("%s%s %s%s%s\n", clr(NY_CLR_GRAY), k_name, clr(NY_CLR_BOLD),
+             dl->data[i].name, clr(NY_CLR_RESET));
+      if (dl->data[i].def)
+        printf("%s%s%s\n", clr(NY_CLR_CYAN), dl->data[i].def,
+               clr(NY_CLR_RESET));
+      if (dl->data[i].doc)
+        printf("\n%s\n", dl->data[i].doc);
+      if (dl->data[i].src) {
+        printf("\n%sLogic:%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+        const char *s = dl->data[i].src;
+        while (*s && isspace(*s))
+          s++;
+        // Highlight logic
+        repl_highlight_line(s);
+        printf("\n");
+      }
+      return 1;
+    }
+  }
+  return 0;
+}
+
+void add_builtin_docs(doc_list_t *docs) {
+  // Memory
+  doclist_set(docs, "rt_malloc", "Allocates n bytes of memory on the heap.",
+              "fn rt_malloc(n)", NULL, 3);
+  doclist_set(docs, "rt_free",
+              "Frees memory previously allocated by rt_malloc.",
+              "fn rt_free(p)", NULL, 3);
+  doclist_set(docs, "rt_realloc", "Reallocates memory to a new size.",
+              "fn rt_realloc(p, n)", NULL, 3);
+
+  // Low level memory access
+  doclist_set(docs, "rt_load8", "Loads a single byte from memory address p.",
+              "fn rt_load8(p)", NULL, 3);
+  doclist_set(docs, "rt_store8", "Stores byte v at memory address p.",
+              "fn rt_store8(p, v)", NULL, 3);
+  doclist_set(docs, "rt_load16",
+              "Loads a 16-bit integer from memory address p.",
+              "fn rt_load16(p)", NULL, 3);
+  doclist_set(docs, "rt_store16",
+              "Stores 16-bit integer v at memory address p.",
+              "fn rt_store16(p, v)", NULL, 3);
+  doclist_set(docs, "rt_load32",
+              "Loads a 32-bit integer from memory address p.",
+              "fn rt_load32(p)", NULL, 3);
+  doclist_set(docs, "rt_store32",
+              "Stores 32-bit integer v at memory address p.",
+              "fn rt_store32(p, v)", NULL, 3);
+  doclist_set(docs, "rt_load64",
+              "Loads a 64-bit integer from memory address p.",
+              "fn rt_load64(p)", NULL, 3);
+  doclist_set(docs, "rt_store64",
+              "Stores 64-bit integer v at memory address p.",
+              "fn rt_store64(p, v)", NULL, 3);
+
+  // Pointer arithmetic
+  doclist_set(docs, "rt_ptr_add", "Adds offset to pointer.",
+              "fn rt_ptr_add(p, offset)", NULL, 3);
+  doclist_set(docs, "rt_ptr_sub",
+              "Subtracts offset from pointer or returns difference.",
+              "fn rt_ptr_sub(p, b)", NULL, 3);
+
+  // Syscall
+  doclist_set(docs, "rt_syscall", "Executes a raw Linux system call.",
+              "fn rt_syscall(n, a1, a2, a3, a4, a5, a6)", NULL, 3);
+  doclist_set(docs, "rt_exit", "Exits the program_t with status code.",
+              "fn rt_exit(code)", NULL, 3);
+  doclist_set(docs, "rt_errno", "Returns the last error number.",
+              "fn rt_errno()", NULL, 3);
+
+  // Math
+  doclist_set(docs, "rt_add", "Integer addition.", "fn rt_add(a, b)", NULL, 3);
+  doclist_set(docs, "rt_sub", "Integer subtraction.", "fn rt_sub(a, b)", NULL,
+              3);
+  doclist_set(docs, "rt_mul", "Integer multiplication.", "fn rt_mul(a, b)",
+              NULL, 3);
+  doclist_set(docs, "rt_div", "Integer division.", "fn rt_div(a, b)", NULL, 3);
+  doclist_set(docs, "rt_mod", "Integer modulus.", "fn rt_mod(a, b)", NULL, 3);
+  doclist_set(docs, "rt_and", "Bitwise AND.", "fn rt_and(a, b)", NULL, 3);
+  doclist_set(docs, "rt_or", "Bitwise OR.", "fn rt_or(a, b)", NULL, 3);
+  doclist_set(docs, "rt_xor", "Bitwise XOR.", "fn rt_xor(a, b)", NULL, 3);
+  doclist_set(docs, "rt_not", "Bitwise NOT.", "fn rt_not(a)", NULL, 3);
+  doclist_set(docs, "rt_shl", "Bitwise shift left.", "fn rt_shl(a, b)", NULL,
+              3);
+  doclist_set(docs, "rt_shr", "Bitwise shift right.", "fn rt_shr(a, b)", NULL,
+              3);
+
+  // Float
+  doclist_set(docs, "rt_flt_add", "Float addition.", "fn rt_flt_add(a, b)",
+              NULL, 3);
+  doclist_set(docs, "rt_flt_sub", "Float subtraction.", "fn rt_flt_sub(a, b)",
+              NULL, 3);
+  doclist_set(docs, "rt_flt_mul", "Float multiplication.",
+              "fn rt_flt_mul(a, b)", NULL, 3);
+  doclist_set(docs, "rt_flt_div", "Float division.", "fn rt_flt_div(a, b)",
+              NULL, 3);
+  doclist_set(docs, "rt_flt_from_int", "Convert int to float.",
+              "fn rt_flt_from_int(i)", NULL, 3);
+  doclist_set(docs, "rt_flt_to_int", "Convert float to int.",
+              "fn rt_flt_to_int(f)", NULL, 3);
+
+  // Type checks
+  doclist_set(docs, "rt_is_int", "Checks if value is an integer.",
+              "fn rt_is_int(v)", NULL, 3);
+  doclist_set(docs, "rt_is_ptr", "Checks if value is a pointer.",
+              "fn rt_is_ptr(v)", NULL, 3);
+
+  // Strings
+  doclist_set(docs, "rt_init_str", "Initializes a string.", "fn rt_init_str(s)",
+              NULL, 3);
+  doclist_set(docs, "rt_to_str", "Converts primitive to string.",
+              "fn rt_to_str(v)", NULL, 3);
+  doclist_set(docs, "rt_str_concat", "Concatenates two strings.",
+              "fn rt_str_concat(a, b)", NULL, 3);
+
+  // Dynamic Linking
+  doclist_set(docs, "rt_dlopen", "Opens a dynamic library.",
+              "fn rt_dlopen(path, flags)", NULL, 3);
+  doclist_set(docs, "rt_dlsym", "Resolves a symbol in a library.",
+              "fn rt_dlsym(handle, symbol)", NULL, 3);
+  doclist_set(docs, "rt_dlclose", "Closes a dynamic library.",
+              "fn rt_dlclose(handle)", NULL, 3);
+  doclist_set(docs, "rt_dlerror", "Returns the last dynamic linking error.",
+              "fn rt_dlerror()", NULL, 3);
+
+  // Threads
+  doclist_set(docs, "rt_thread_spawn", "Spawns a new thread.",
+              "fn rt_thread_spawn(fn_ptr, arg)", NULL, 3);
+  doclist_set(docs, "rt_thread_join", "Joins a thread.",
+              "fn rt_thread_join(thread)", NULL, 3);
+  doclist_set(docs, "rt_mutex_new", "Creates a new mutex.", "fn rt_mutex_new()",
+              NULL, 3);
+  doclist_set(docs, "rt_mutex_lock64", "Locks a mutex.",
+              "fn rt_mutex_lock64(m)", NULL, 3);
+  doclist_set(docs, "rt_mutex_unlock64", "Unlocks a mutex.",
+              "fn rt_mutex_unlock64(m)", NULL, 3);
+  doclist_set(docs, "rt_mutex_free", "Frees a mutex.", "fn rt_mutex_free(m)",
+              NULL, 3);
+
+  // Misc
+  doclist_set(docs, "rt_sleep", "Sleeps for n milliseconds.", "fn rt_sleep(ms)",
+              NULL, 3);
+  doclist_set(docs, "rt_panic", "Panics with a message.", "fn rt_panic(msg)",
+              NULL, 3);
+  doclist_set(docs, "rt_argc", "Returns argument count.", "fn rt_argc()", NULL,
+              3);
+  doclist_set(docs, "rt_argv", "Returns argument vector.", "fn rt_argv(i)",
+              NULL, 3);
+  doclist_set(docs, "rt_envp", "Returns environment variable at index.",
+              "fn rt_envp(i)", NULL, 3);
+  doclist_set(docs, "rt_envc", "Returns environment variable count.",
+              "fn rt_envc()", NULL, 3);
+}
+
+void repl_load_module_docs(doc_list_t *docs, const char *name) {
+  int idx = ny_std_find_module_by_name(name);
+  if (idx < 0)
+    return;
+  const char *path = ny_std_module_path((size_t)idx);
+  char *src = repl_read_file(path);
+  if (!src)
+    return;
+  parser_t ps;
+  parser_init(&ps, src, path);
+  program_t pr = parse_program(&ps);
+  if (!ps.had_error) {
+    if (pr.doc)
+      doclist_set(docs, name, pr.doc, "module", NULL, 2); // 2 = MOD
+    doclist_add_recursive(docs, &pr.body, name);
+  }
+  program_free(&pr, ps.arena);
+  free(src);
+}
