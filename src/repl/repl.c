@@ -182,6 +182,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     rl_bind_keyseq("\e[B", rl_history_search_forward);
     rl_bind_keyseq("\x12", rl_reverse_search_history);
     rl_redisplay_function = repl_redisplay;
+    rl_completion_display_matches_hook = repl_display_match_list;
   }
   char *input_buffer = NULL;
   int last_status = 0;
@@ -299,11 +300,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       if (!strcmp(cn, "h") || !strcmp(cn, "doc"))
         cn = "help";
       if (!strcmp(cn, "complete")) {
-        if (!*p) {
-          free(full_input);
-          continue;
-        }
-
         size_t count = 0;
         char **completions = nytrix_get_completions_for_prefix(p, &count);
 
@@ -538,6 +534,14 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           if (src) {
             repl_append_user_source(src);
             printf("Loaded %s (%zu bytes)\n", p, strlen(src));
+
+            parser_t ps;
+            parser_init(&ps, src, p);
+            program_t pr = parse_program(&ps);
+            if (!ps.had_error) {
+              doclist_add_from_prog(&docs, &pr);
+            }
+            program_free(&pr, ps.arena);
             free(src);
           } else
             perror("load");
@@ -549,6 +553,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         if (g_repl_user_source) {
           printf("%s--- Persistent Source ---%s\n%s", clr(NY_CLR_BOLD),
                  clr(NY_CLR_RESET), g_repl_user_source);
+          if (g_repl_user_source_len > 0 &&
+              g_repl_user_source[g_repl_user_source_len - 1] != '\n')
+            printf("\n");
         } else
           printf("No persistent variables defined.\n");
         free(full_input);
@@ -741,6 +748,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           free(undef_name);
         } else if (is_persistent_def(full_input)) {
           repl_append_user_source(full_input);
+          repl_update_docs(&docs, full_input);
         }
       } else {
         fprintf(stderr, "Failed to find function %s\n", fn_name);

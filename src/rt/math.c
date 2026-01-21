@@ -68,7 +68,7 @@ int64_t rt_flt_to_int(int64_t v) {
   int64_t b = rt_flt_unbox_val(v);
   double d;
   memcpy(&d, &b, 8);
-  return ((int64_t)d << 1) | 1;
+  return (int64_t)(((uint64_t)d << 1) | 1);
 }
 
 int64_t rt_flt_trunc(int64_t v) { return rt_flt_to_int(v); }
@@ -131,13 +131,13 @@ int64_t rt_sub(int64_t a, int64_t b) {
   if (is_any_ptr(a) && is_int(b))
     return a - (b >> 1);
   if (is_any_ptr(a) && is_any_ptr(b))
-    return ((a - b) << 1) | 1;
+    return (int64_t)(((uint64_t)(a - b) << 1) | 1);
   return 1;
 }
 
 int64_t rt_mul(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
-    return (((a >> 1) * (b >> 1)) << 1) | 1;
+    return (int64_t)((((uint64_t)(a >> 1) * (uint64_t)(b >> 1)) << 1) | 1);
   if (is_v_flt(a) || is_v_flt(b))
     return rt_flt_mul(a, b);
   return 0;
@@ -148,7 +148,7 @@ int64_t rt_div(int64_t a, int64_t b) {
     int64_t vb = b >> 1;
     if (vb == 0)
       return 0;
-    return (((a >> 1) / vb) << 1) | 1;
+    return (int64_t)((((uint64_t)(a >> 1) / (uint64_t)vb) << 1) | 1);
   }
   if (is_v_flt(a) || is_v_flt(b))
     return rt_flt_div(a, b);
@@ -160,7 +160,7 @@ int64_t rt_mod(int64_t a, int64_t b) {
     int64_t vb = b >> 1;
     if (vb == 0)
       return 1;
-    return (((a >> 1) % vb) << 1) | 1;
+    return (int64_t)((((uint64_t)(a >> 1) % (uint64_t)vb) << 1) | 1);
   }
   return b ? a % b : 1;
 }
@@ -230,18 +230,35 @@ int64_t rt_ge(int64_t a, int64_t b) {
 
 // Bitwise
 int64_t rt_and(int64_t a, int64_t b) {
-  return ((((a & 1 ? a >> 1 : a) & (b & 1 ? b >> 1 : b))) << 1) | 1;
+  return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) &
+                     (uint64_t)(b & 1 ? b >> 1 : b)))
+                       << 1 |
+                   1);
 }
 int64_t rt_or(int64_t a, int64_t b) {
-  return ((((a & 1 ? a >> 1 : a) | (b & 1 ? b >> 1 : b))) << 1) | 1;
+  return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) |
+                     (uint64_t)(b & 1 ? b >> 1 : b)))
+                       << 1 |
+                   1);
 }
 int64_t rt_xor(int64_t a, int64_t b) {
-  return ((((a & 1 ? a >> 1 : a) ^ (b & 1 ? b >> 1 : b))) << 1) | 1;
+  return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) ^
+                     (uint64_t)(b & 1 ? b >> 1 : b)))
+                       << 1 |
+                   1);
 }
 int64_t rt_shl(int64_t a, int64_t b) {
-  return ((((a & 1 ? a >> 1 : a) << (b & 1 ? b >> 1 : b))) << 1) | 1;
+  return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a)
+                     << (uint64_t)(b & 1 ? b >> 1 : b)))
+                       << 1 |
+                   1);
 }
 int64_t rt_shr(int64_t a, int64_t b) {
-  return ((((a & 1 ? a >> 1 : a) >> (b & 1 ? b >> 1 : b))) << 1) | 1;
+  return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) >>
+                     (uint64_t)(b & 1 ? b >> 1 : b)))
+                       << 1 |
+                   1);
 }
-int64_t rt_not(int64_t a) { return ((~(a & 1 ? a >> 1 : a)) << 1) | 1; }
+int64_t rt_not(int64_t a) {
+  return (int64_t)(((~(uint64_t)(a & 1 ? a >> 1 : a)) << 1) | 1);
+}

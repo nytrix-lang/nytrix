@@ -14,7 +14,7 @@ MAKEFLAGS += -j$(shell nproc) --no-print-directory
 BIN_NAME := ny
 BIN       := $(BUILD_DIR)/$(BIN_NAME)
 BIN_DEBUG := $(BUILD_DIR)/$(BIN_NAME)_debug
-BIN_LSP   := $(BUILD_DIR)/ny_lsp
+BIN_LSP   := $(BUILD_DIR)/ny-lsp
 
 TIDY_DIRS := src std etc/examples
 
@@ -45,15 +45,13 @@ CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstri
 CFLAGS_DEBUG   := $(CFLAGS_BASE) -O0 -DDEBUG $(SANFLAGS) $(PROFFLAGS)
 CFLAGS_RELEASE := $(CFLAGS_BASE) $(OPTFLAGS) -DNDEBUG $(SANFLAGS) $(PROFFLAGS)
 
-LDFLAGS := $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(SANFLAGS) $(PROFFLAGS)
+LDFLAGS := $(SANFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(PROFFLAGS)
 
 # Compiler Sources (Lib)
 # src subdirs
 SRC_COMPILER_DIRS := src/ast src/base src/lex src/code src/repl src/wire
 SRC_COMPILER := $(foreach dir,$(SRC_COMPILER_DIRS),$(wildcard $(dir)/*.c))
 SRC_COMPILER += src/parse/unity.c
-
-# Runtime Sources - Use amalgamated for build speed and consistency
 SRC_RUNTIME := src/rt/init.c
 
 # Cmd Sources
@@ -74,14 +72,17 @@ OBJ_CMD_NY_DEBUG     := $(BUILD_DIR)/cmd/ny/main_debug.o
 OBJ_CMD_NY_RELEASE   := $(BUILD_DIR)/cmd/ny/main.o
 OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 
-.PHONY: all bin debug repl lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man
+.PHONY: all bin debug repl lsp ny-lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man docs
 
-all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so
+docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1
+
+all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so docs
 	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
 
 bin: $(BIN)
 debug: $(BIN_DEBUG)
 lsp: $(BIN_LSP)
+ny-lsp: $(BIN_LSP)
 
 repl: $(BIN) $(BUILD_DIR)/std_bundle.ny
 	@./$(BIN) -i $(ARGS)
@@ -166,37 +167,35 @@ $(OBJ_CMD_LSP_RELEASE): src/cmd/ny-lsp/main.c | build
 # Link Rules
 $(BUILD_DIR)/libnytrixrt.so: $(OBJ_RUNTIME_SHARED) | build
 	@echo "  $(C_GREEN)LD (shared)$(C_RESET) $@"
-	@$(CC) -shared -Wl,-soname,libnytrixrt.so -o $@ $(OBJ_RUNTIME_SHARED) -ldl -lpthread $(SANFLAGS) $(PROFFLAGS)
+	@$(CC) $(SANFLAGS) -shared -Wl,-soname,libnytrixrt.so -o $@ $(OBJ_RUNTIME_SHARED) -ldl -lpthread $(PROFFLAGS)
 
 $(BIN_DEBUG): $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) | build
 	@echo "  $(C_GREEN)LD (debug)$(C_RESET) $@"
-	@$(CC) $(CFLAGS_DEBUG) -o $@ $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) $(LDFLAGS)
+	@$(CC) $(SANFLAGS) $(CFLAGS_DEBUG) -o $@ $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) $(LDFLAGS)
 
 $(BIN): $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) | build
 	@echo "  $(C_GREEN)LD (release)$(C_RESET) $@"
-	@$(CC) $(CFLAGS_RELEASE) -o $@ $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) $(LDFLAGS)
+	@$(CC) $(SANFLAGS) $(CFLAGS_RELEASE) -o $@ $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) $(LDFLAGS)
 
 $(BIN_LSP): $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) | build
 	@echo "  $(C_GREEN)LD (lsp)$(C_RESET) $@"
 	@$(CC) $(CFLAGS_RELEASE) -o $@ $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) $(LDFLAGS)
 
-BINDIR ?= $(PREFIX)/bin
+BINDIR ?= /bin
 LIBDIR ?= $(PREFIX)/lib
 SHAREDIR ?= $(PREFIX)/share/nytrix
-MANDIR ?= $(PREFIX)/share/man
+INFODIR  ?= $(PREFIX)/share/info
+MANDIR   ?= $(PREFIX)/share/man
 
-install: all install-man
+install: all install-info install-man
 	@echo "  $(C_GRAY)INSTALL$(C_RESET) $(BIN_NAME) to $(DESTDIR)$(BINDIR)"
 	@mkdir -p $(DESTDIR)$(BINDIR)
 	@mkdir -p $(DESTDIR)$(SHAREDIR)
 	@mkdir -p $(DESTDIR)$(LIBDIR)
 	@cp $(BIN) $(DESTDIR)$(BINDIR)/$(BIN_NAME)
 	@chmod 755 $(DESTDIR)$(BINDIR)/$(BIN_NAME)
-	@if [ ! "$(DESTDIR)$(BINDIR)/$(BIN_NAME)" -ef "$(DESTDIR)/bin/$(BIN_NAME)" ]; then \
-		echo "  $(C_GRAY)LINK$(C_RESET) $(DESTDIR)/bin/$(BIN_NAME) -> $(BINDIR)/$(BIN_NAME)"; \
-		mkdir -p $(DESTDIR)/bin; \
-		ln -sf $(BINDIR)/$(BIN_NAME) $(DESTDIR)/bin/$(BIN_NAME); \
-	fi
+	@cp $(BIN_LSP) $(DESTDIR)$(BINDIR)/ny-lsp
+	@chmod 755 $(DESTDIR)$(BINDIR)/ny-lsp
 	@cp $(BUILD_DIR)/std_bundle.ny $(DESTDIR)$(SHAREDIR)/std_bundle.ny
 	@chmod 644 $(DESTDIR)$(SHAREDIR)/std_bundle.ny
 	@cp $(BUILD_DIR)/libnytrixrt.so $(DESTDIR)$(LIBDIR)/libnytrixrt.so
@@ -212,24 +211,53 @@ install: all install-man
 	@cp -r std/* $(DESTDIR)$(SHAREDIR)/std/
 	@echo "  $(C_GREEN)✓ Installed$(C_RESET)"
 
-install-man:
+install-man: $(BUILD_DIR)/ny.1 $(BUILD_DIR)/nytrix.1
+	@echo "  $(C_GRAY)INSTALL$(C_RESET) man pages to $(DESTDIR)$(MANDIR)/man1"
 	@mkdir -p $(DESTDIR)$(MANDIR)/man1
-	@cp etc/info/man1/ny.1 $(DESTDIR)$(MANDIR)/man1/ny.1
-	@cp etc/info/man1/nytrix.1 $(DESTDIR)$(MANDIR)/man1/nytrix.1
+	@cp $(BUILD_DIR)/ny.1 $(DESTDIR)$(MANDIR)/man1/ny.1
+	@cp $(BUILD_DIR)/nytrix.1 $(DESTDIR)$(MANDIR)/man1/nytrix.1
 	@chmod 644 $(DESTDIR)$(MANDIR)/man1/ny.1
 	@chmod 644 $(DESTDIR)$(MANDIR)/man1/nytrix.1
 
-uninstall: uninstall-man
-	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing $(BIN_NAME) from $(DESTDIR)$(BINDIR)"
+install-info: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info
+	@echo "  $(C_GRAY)INSTALL$(C_RESET) info pages to $(DESTDIR)$(INFODIR)"
+	@mkdir -p $(DESTDIR)$(INFODIR)
+	@cp $(BUILD_DIR)/nytrix.info $(DESTDIR)$(INFODIR)/nytrix.info
+	@cp $(BUILD_DIR)/ny.info $(DESTDIR)$(INFODIR)/ny.info
+	@if command -v install-info >/dev/null 2>&1; then \
+		install-info --info-dir=$(DESTDIR)$(INFODIR) $(DESTDIR)$(INFODIR)/nytrix.info 2>/dev/null || true; \
+		install-info --info-dir=$(DESTDIR)$(INFODIR) $(DESTDIR)$(INFODIR)/ny.info 2>/dev/null || true; \
+	fi
+
+$(BUILD_DIR)/%.info: etc/info/%.texi | build
+#	@echo "  $(C_GRAY)MAKEINFO$(C_RESET) $<"
+	@makeinfo $< -o $@
+
+# Generate manpages from texinfo (User requested workflow)
+# Generate manpages from texinfo using custom tool
+$(BUILD_DIR)/%.1: etc/info/%.texi etc/tools/texi2man | build
+#	@echo "  $(C_GRAY)TEXI2MAN$(C_RESET) $<"
+	@python3 etc/tools/texi2man $< $* > $@
+
+uninstall: uninstall-info uninstall-man
+	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing $(BIN_NAME) and ny-lsp from $(DESTDIR)$(BINDIR)"
 	@rm -f $(DESTDIR)$(BINDIR)/$(BIN_NAME)
-	@rm -f $(DESTDIR)/bin/$(BIN_NAME)
+	@rm -f $(DESTDIR)$(BINDIR)/ny-lsp
 	@rm -rf $(DESTDIR)$(SHAREDIR)
 	@rm -f $(DESTDIR)$(LIBDIR)/libnytrixrt.so
 	@echo "  $(C_GREEN)✓ Uninstalled$(C_RESET)"
 
 uninstall-man:
-	@rm -f $(DESTDIR)$(MANDIR)/man1/ny.1
-	@rm -f $(DESTDIR)$(MANDIR)/man1/nytrix.1
+	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing man pages from $(DESTDIR)$(MANDIR)/man1"
+	@rm -f $(DESTDIR)$(MANDIR)/man1/ny.1 $(DESTDIR)$(MANDIR)/man1/nytrix.1
+
+uninstall-info:
+	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing info pages from $(DESTDIR)$(INFODIR)"
+	@if command -v install-info >/dev/null 2>&1; then \
+		install-info --delete --info-dir=$(DESTDIR)$(INFODIR) $(DESTDIR)$(INFODIR)/nytrix.info 2>/dev/null || true; \
+		install-info --delete --info-dir=$(DESTDIR)$(INFODIR) $(DESTDIR)$(INFODIR)/ny.info 2>/dev/null || true; \
+	fi
+	@rm -f $(DESTDIR)$(INFODIR)/nytrix.info $(DESTDIR)$(INFODIR)/ny.info
 
 test: $(BIN) $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
 	@NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN)
@@ -246,7 +274,12 @@ testbench: $(BIN) $(BUILD_DIR)/std_bundle.ny
 bench: testbench
 
 coverage:
-	@$(MAKE) debug PROFFLAGS="-fprofile-instr-generate -fcoverage-mapping"
+	@export IS_CLANG=$$( $(CC) --version 2>&1 | grep -q clang && echo 1 || echo 0 ); \
+	if [ "$$IS_CLANG" = "1" ]; then \
+		$(MAKE) debug PROFFLAGS="-fprofile-instr-generate -fcoverage-mapping"; \
+	else \
+		$(MAKE) debug PROFFLAGS="--coverage"; \
+	fi
 
 clean:
 	@rm -rf $(BUILD_DIR) .tmp
@@ -260,7 +293,7 @@ clean:
 tidy:
 	@echo "  $(C_GRAY)TIDY$(C_RESET) Formatting code..."
 	@python3 etc/tools/tidy $(TIDY_DIRS)
-#    @echo "  $(C_GREEN)✓ Tidy complete$(C_RESET)"
+#	@echo "  $(C_GREEN)✓ Tidy complete$(C_RESET)"
 
 bear:
 ifneq ($(BEAR),)

@@ -20,7 +20,9 @@
    (*(uint64_t *)((uintptr_t)(v) - 48) == NY_MAGIC2))
 #define is_any_ptr(v) (((v) != 0 && !((v) & 1) && (uintptr_t)(v) > 0x1000))
 
-static inline int64_t rt_tag(int64_t v) { return (v << 1) | 1; }
+static inline int64_t rt_tag(int64_t v) {
+  return (int64_t)(((uint64_t)v << 1) | 1);
+}
 static inline int64_t rt_untag(int64_t v) { return (v & 1) ? (v >> 1) : v; }
 static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 

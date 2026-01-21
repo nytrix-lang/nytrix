@@ -17,6 +17,7 @@ static const char *CLR_OPERATOR = "\033[31m";   // Red
 static const char *CLR_PAREN = "\033[37m";      // White
 static const char *CLR_MEMBER = "\033[35m";     // Magenta
 static const char *CLR_MATCH = "\033[1;33m";    // Bold Yellow
+static const char *CLR_VAR = "\033[34m";        // Blue
 
 // Helper to check if colorization is enabled
 static int is_color_enabled(void) {
@@ -360,36 +361,86 @@ void repl_redisplay(void) {
     return;
   }
 
-  // Calculate visible prompt length if it changed
+  // Calculate visible prompt length if it changed and prepare a clean prompt
+  // for display
+  static char *clean_prompt = NULL;
   if (!last_prompt || strcmp(last_prompt, rl_display_prompt) != 0) {
     if (last_prompt)
       free(last_prompt);
+    if (clean_prompt)
+      free(clean_prompt);
     last_prompt = strdup(rl_display_prompt);
+    clean_prompt = malloc(strlen(rl_display_prompt) + 1);
+
     last_visible_len = 0;
     int in_invisible = 0;
+    char *out = clean_prompt;
     for (const char *p = rl_display_prompt; *p; p++) {
       if (*p == '\001')
         in_invisible = 1;
       else if (*p == '\002')
         in_invisible = 0;
-      else if (!in_invisible)
-        last_visible_len++;
+      else {
+        *out++ = *p;
+        if (!in_invisible)
+          last_visible_len++;
+      }
     }
+    *out = '\0';
   }
 
   // Move to start of line, print prompt and highlighted buffer
   fputc('\r', stdout);
-  fputs(rl_display_prompt, stdout);
+  fputs(clean_prompt, stdout);
   repl_highlight_line_ex(rl_line_buffer, rl_point);
   fputs("\033[K", stdout); // Clear rest of line
 
-  // Move cursor back to rl_point
-  int buffer_len = (int)strlen(rl_line_buffer);
-  int move_back = buffer_len - rl_point;
+  // Calculate actual visible distance to move back.
+  // We must account for any character expansions (like tabs -> spaces)
+  // both before and after the cursor (rl_point).
+  int visible_total = 0;
+  int visible_point = 0;
+  for (int i = 0; rl_line_buffer[i]; i++) {
+    int width = (rl_line_buffer[i] == '\t') ? 2 : 1;
+    visible_total += width;
+    if (i < rl_point) {
+      visible_point += width;
+    }
+  }
 
+  int move_back = visible_total - visible_point;
   if (move_back > 0) {
     printf("\033[%dD", move_back);
   }
 
   fflush(stdout);
+}
+
+void repl_display_match_list(char **matches, int len, int max) {
+  (void)max;
+  printf("\n");
+  int cols = 0;
+  for (int i = 1; i <= len; i++) {
+    const char *m = matches[i];
+    const char *color = CLR_RESET;
+    int kind = 0;
+    if (is_keyword(m, strlen(m)))
+      color = CLR_KEYWORD;
+    else if (is_known_name(m, strlen(m), &kind)) {
+      if (kind == 3)
+        color = CLR_FUNCTION;
+      else if (kind == 4)
+        color = CLR_VAR;
+      else if (kind == 1 || kind == 2)
+        color = CLR_MEMBER;
+    } else if (m[0] == ':') {
+      color = CLR_BUILTIN;
+    }
+    printf("%s%-20s%s", color, m, CLR_RESET);
+    if (++cols % 4 == 0)
+      printf("\n");
+  }
+  if (cols % 4 != 0)
+    printf("\n");
+  rl_forced_update_display();
 }

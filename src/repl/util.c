@@ -1,3 +1,4 @@
+#include "base/util.h"
 #include "base/common.h"
 #include "priv.h"
 #include <ctype.h>
@@ -5,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 char *g_repl_user_source = NULL;
 size_t g_repl_user_source_len = 0;
@@ -59,19 +61,34 @@ char **repl_split_lines(const char *src, size_t *out_count) {
 }
 
 void repl_append_user_source(const char *src) {
+  if (!src || !*src)
+    return;
   size_t slen = strlen(src);
-  if (g_repl_user_source_len + slen + 2 >= g_repl_user_source_cap) {
-    g_repl_user_source_cap = (g_repl_user_source_len + slen + 1024) * 2;
+  int needs_newline = (src[slen - 1] != '\n');
+  int needs_prefix_newline =
+      (g_repl_user_source_len > 0 &&
+       g_repl_user_source[g_repl_user_source_len - 1] != '\n');
+
+  size_t required = g_repl_user_source_len + slen + (needs_newline ? 1 : 0) +
+                    (needs_prefix_newline ? 1 : 0) + 1;
+
+  if (required >= g_repl_user_source_cap) {
+    g_repl_user_source_cap = required + 1024;
     g_repl_user_source = realloc(g_repl_user_source, g_repl_user_source_cap);
   }
   if (!g_repl_user_source)
     return;
-  if (g_repl_user_source_len > 0 &&
-      g_repl_user_source[g_repl_user_source_len - 1] != '\n') {
+
+  if (needs_prefix_newline) {
     g_repl_user_source[g_repl_user_source_len++] = '\n';
   }
+
   memcpy(g_repl_user_source + g_repl_user_source_len, src, slen);
   g_repl_user_source_len += slen;
+
+  if (needs_newline) {
+    g_repl_user_source[g_repl_user_source_len++] = '\n';
+  }
   g_repl_user_source[g_repl_user_source_len] = '\0';
 }
 
@@ -191,5 +208,37 @@ void repl_print_error_snippet(const char *src, int line, int col) {
 int is_persistent_def(const char *src) {
   char *trimmed = ltrim((char *)src);
   return (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "fn ", 3) ||
-          !strncmp(trimmed, "use ", 4) || strchr(trimmed, '=') != NULL);
+          !strncmp(trimmed, "use ", 4) || !strncmp(trimmed, "module ", 7) ||
+          strchr(trimmed, '=') != NULL);
+}
+
+void repl_update_docs(doc_list_t *dl, const char *src) {
+  char *trimmed = ltrim((char *)src);
+  if (!strncmp(trimmed, "fn ", 3)) {
+    char *p = ltrim(trimmed + 3);
+    char *end = p;
+    while (*end && (isalnum((unsigned char)*end) || *end == '_'))
+      end++;
+    if (end > p) {
+      char *name = ny_strndup(p, (size_t)(end - p));
+      doclist_set(dl, name, "REPL defined function", NULL, NULL, 3);
+      free(name);
+    }
+  } else if (!strncmp(trimmed, "def ", 4)) {
+    char *p = ltrim(trimmed + 4);
+    char *end = p;
+    while (*end && (isalnum((unsigned char)*end) || *end == '_'))
+      end++;
+    if (end > p) {
+      char *name = ny_strndup(p, (size_t)(end - p));
+      doclist_set(dl, name, "REPL defined variable", NULL, NULL, 4);
+      free(name);
+    }
+  } else {
+    char *an = repl_assignment_target(src);
+    if (an) {
+      doclist_set(dl, an, "REPL defined variable", NULL, NULL, 4);
+      free(an);
+    }
+  }
 }

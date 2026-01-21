@@ -49,7 +49,7 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // *(uint64_t*)(obj_data + 8) = total_len - 128; // Raw capacity
   // *(uint64_t*)(obj_data + 16) = 0x4E59545249584EULL; // NY_MAGIC2
   *(uint64_t *)(obj_data + 48) =
-      (final_len << 1) | 1;           // Length at p-16 (tagged)
+      ((uint64_t)final_len << 1) | 1; // Length at p-16 (tagged)
   *(uint64_t *)(obj_data + 56) = 241; // Tag at p-8 (TAG_STR)
   // Write Data
   memcpy(obj_data + header_size, final_s, final_len);
@@ -219,8 +219,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_comptime_eval(cg, e->as.comptime_expr.body);
   case NY_E_LITERAL:
     if (e->as.literal.kind == NY_LIT_INT)
-      return LLVMConstInt(cg->type_i64,
-                          (uint64_t)((e->as.literal.as.i << 1) | 1), true);
+      return LLVMConstInt(cg->type_i64, ((uint64_t)e->as.literal.as.i << 1) | 1,
+                          true);
     if (e->as.literal.kind == NY_LIT_BOOL)
       return LLVMConstInt(cg->type_i64, e->as.literal.as.b ? 2 : 4, false);
     if (e->as.literal.kind == NY_LIT_STR) {
@@ -745,7 +745,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMValueRef vl = LLVMBuildCall2(
         cg->builder, ls->type, ls->value,
         (LLVMValueRef[]){LLVMConstInt(
-            cg->type_i64, (uint64_t)((e->as.list_like.len << 1) | 1), false)},
+            cg->type_i64, ((uint64_t)e->as.list_like.len << 1) | 1, false)},
         1, "");
     for (size_t i = 0; i < e->as.list_like.len; i++)
       vl = LLVMBuildCall2(
@@ -772,7 +772,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMValueRef dl = LLVMBuildCall2(
         cg->builder, ds->type, ds->value,
         (LLVMValueRef[]){LLVMConstInt(
-            cg->type_i64, (uint64_t)((e->as.dict.pairs.len << 2) | 1), false)},
+            cg->type_i64, ((uint64_t)e->as.dict.pairs.len << 2) | 1, false)},
         1, "");
     for (size_t i = 0; i < e->as.dict.pairs.len; i++)
       LLVMBuildCall2(
@@ -908,7 +908,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       return LLVMConstInt(cg->type_i64, 0, false);
     }
     LLVMValueRef env_alloc_size = LLVMConstInt(
-        cg->type_i64, (uint64_t)((captures.len * 8) << 1) | 1, false);
+        cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
     LLVMValueRef env_ptr =
         LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
                        (LLVMValueRef[]){env_alloc_size}, 1, "env");
@@ -924,7 +924,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       LLVMBuildStore(cg->builder, slot_val, dst);
     }
     /* Create Closure Object [Tag=105 | Code | Env] */
-    LLVMValueRef cls_size = LLVMConstInt(cg->type_i64, (16 << 1) | 1, false);
+    LLVMValueRef cls_size =
+        LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
     LLVMValueRef cls_ptr =
         LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
                        (LLVMValueRef[]){cls_size}, 1, "closure");

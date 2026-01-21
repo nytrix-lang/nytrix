@@ -41,8 +41,10 @@ int repl_pre_input_hook(void);
 void repl_highlight_line(const char *line);
 void repl_highlight_line_ex(const char *line, int cursor_pos);
 void repl_redisplay(void);
+void repl_display_match_list(char **matches, int len, int max);
 char **repl_enhanced_completion(const char *text, int start, int end);
 int is_persistent_def(const char *src);
+void repl_update_docs(doc_list_t *dl, const char *src);
 void repl_print_error_snippet(const char *src, int line, int col);
 
 char **nytrix_get_completions_for_prefix(const char *prefix, size_t *out_count);

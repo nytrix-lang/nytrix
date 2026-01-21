@@ -123,6 +123,34 @@ static void add_files(const char *text) {
   closedir(d);
 }
 
+static void add_normal_completions(const char *text) {
+  // Add stdlib
+  size_t mod_count = ny_std_module_count();
+  for (size_t i = 0; i < mod_count; i++) {
+    const char *m = ny_std_module_name(i);
+    if (fuzzy_score(m, text) > 0)
+      add_match(m);
+  }
+  // Add keywords
+  static const char *kws[] = {"fn",    "if",    "else",     "elif",   "while",
+                              "for",   "in",    "return",   "use",    "try",
+                              "catch", "break", "continue", "lambda", "defer",
+                              "true",  "false", "nil",      "def",    "module",
+                              "as",    NULL};
+  for (int i = 0; kws[i]; i++) {
+    if (strncmp(kws[i], text, strlen(text)) == 0)
+      add_match(kws[i]);
+  }
+  // Add docs/definitions
+  if (g_repl_docs) {
+    const doc_list_t *d = (const doc_list_t *)g_repl_docs;
+    for (size_t i = 0; i < d->len; i++) {
+      if (fuzzy_score(d->data[i].name, text) > 0)
+        add_match(d->data[i].name);
+    }
+  }
+}
+
 char *repl_enhanced_completion_generator(const char *text, int state) {
   static int idx = 0;
   if (state == 0) {
@@ -151,32 +179,8 @@ char *repl_enhanced_completion_generator(const char *text, int state) {
                (ctx == CTX_COMMAND && (strstr(rl_line_buffer, ":load") ||
                                        strstr(rl_line_buffer, ":cd")))) {
       add_files(text);
-    } else if (ctx == CTX_USE || ctx == CTX_MEMBER || ctx == CTX_NORMAL) {
-      // Add stdlib
-      size_t mod_count = ny_std_module_count();
-      for (size_t i = 0; i < mod_count; i++) {
-        const char *m = ny_std_module_name(i);
-        if (fuzzy_score(m, text) > 0)
-          add_match(m);
-      }
-      // Add keywords
-      static const char *kws[] = {
-          "fn",       "if",     "else",  "elif", "while", "for",
-          "in",       "return", "use",   "try",  "catch", "break",
-          "continue", "lambda", "defer", "true", "false", "nil",
-          "def",      "module", "as",    NULL};
-      for (int i = 0; kws[i]; i++) {
-        if (strncmp(kws[i], text, strlen(text)) == 0)
-          add_match(kws[i]);
-      }
-      // Add docs/definitions
-      if (g_repl_docs) {
-        const doc_list_t *d = (const doc_list_t *)g_repl_docs;
-        for (size_t i = 0; i < d->len; i++) {
-          if (fuzzy_score(d->data[i].name, text) > 0)
-            add_match(d->data[i].name);
-        }
-      }
+    } else {
+      add_normal_completions(text);
     }
   }
 
@@ -193,13 +197,44 @@ char **repl_enhanced_completion(const char *text, int start, int end) {
   return rl_completion_matches(text, repl_enhanced_completion_generator);
 }
 
-// Stubs for API used by others
+// API for external completion requests (e.g. :complete command)
 char **nytrix_get_completions_for_prefix(const char *prefix,
                                          size_t *out_count) {
-  (void)prefix;
+  if (matches) {
+    for (int i = 0; i < matches_len; i++)
+      free(matches[i]);
+    free(matches);
+  }
+  matches = NULL;
+  matches_len = 0;
+  matches_cap = 0;
+
+  int is_cmd_pref = (prefix && prefix[0] == ':');
+  int is_empty = (!prefix || !*prefix);
+
+  if (is_cmd_pref || is_empty) {
+    static const char *cmds[] = {
+        ":help", ":exit", ":quit",    ":clear",    ":reset", ":time",
+        ":vars", ":env",  ":history", ":pwd",      ":ls",    ":cd",
+        ":load", ":save", ":std",     ":complete", NULL};
+    for (int i = 0; cmds[i]; i++) {
+      if (is_empty || strncmp(cmds[i], prefix, strlen(prefix)) == 0)
+        add_match(cmds[i]);
+    }
+  }
+
+  if (!is_cmd_pref) {
+    add_normal_completions(prefix);
+  }
+
   if (out_count)
-    *out_count = 0;
-  return NULL;
+    *out_count = (size_t)matches_len;
+
+  char **res = matches;
+  matches = NULL;
+  matches_len = 0;
+  matches_cap = 0;
+  return res;
 }
 
 void nytrix_free_completions(char **completions, size_t count) {
