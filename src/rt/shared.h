@@ -12,7 +12,7 @@
 #define NY_MAGIC3 0xDEADBEEFCAFEBABEULL
 
 // Core Tags and Predicates
-static inline int is_int(int64_t v) { return (v & 1); }
+#define is_int(v) ((v) & 1)
 #define is_ptr(v) ((v) != 0 && ((v) & 7) == 0 && (uintptr_t)(v) > 0x1000)
 #define is_heap_ptr(v)                                                         \
   ((v) != 0 && ((v) & 63) == 0 && (uintptr_t)(v) > 0x1000 &&                   \

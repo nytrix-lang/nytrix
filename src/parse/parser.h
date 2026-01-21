@@ -8,7 +8,7 @@ typedef struct parser_t {
   lexer_t lex;
   token_t cur;
   token_t prev;
-  arena_t *arena; // Pointer to arena_t
+  arena_t *arena;
   const char *src;
   const char *filename;
   char *current_module;

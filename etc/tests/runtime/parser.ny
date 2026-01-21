@@ -29,7 +29,7 @@ assert(mod_result == 2, "modulo operator")
 
 ; If statements without parentheses
 if x % 2 == 1 {
-	print("x is odd")
+   print("x is odd")
 }
 
 ; List operations
@@ -52,9 +52,9 @@ assert(sq_result == 49, "function call in expression")
 def ternary_test = 42
 def ternary_result = 0
 if ternary_test > 40 {
-	ternary_result = 1
+   ternary_result = 1
 } else {
-	ternary_result = 0
+   ternary_result = 0
 }
 assert(ternary_result == 1, "if-else expression")
 

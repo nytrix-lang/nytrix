@@ -1,5 +1,5 @@
 CompileFlags:
-  CompilationDatabase: ./etc/cache
+  CompilationDatabase: ./build/cache
   Add:
     - -std=c11
     - -Ibuild

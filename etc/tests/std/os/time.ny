@@ -19,18 +19,18 @@ print("End ticks:", end)
 print("Diff:", end - start)
 
 if (end > 0 && start > 0) {
-	if (end > start) {
-		if (end - start < 500000000) {
-			 print("Warning: sleep duration < 0.5s (likely env/syscall issue): ", end - start)
-		}
-		; Always pass if monotonic increasing
-	} else {
-		print("Warning: Ticks backwards or wrapped? end < start")
-	}
+   if (end > start) {
+      if (end - start < 500000000) {
+          print("Warning: sleep duration < 0.5s (likely env/syscall issue): ", end - start)
+      }
+      ; Always pass if monotonic increasing
+   } else {
+      print("Warning: Ticks backwards or wrapped? end < start")
+   }
 } else {
-	print("Warning: ticks() returned 0 (syscall failed?)")
-	; Check if running in enviroment where MONOTONIC fails?
-	; Just allow test to proceed if ticks failed, but warn.
+   print("Warning: ticks() returned 0 (syscall failed?)")
+   ; Check if running in enviroment where MONOTONIC fails?
+   ; Just allow test to proceed if ticks failed, but warn.
 }
 
 ticks() ; Ensure it runs

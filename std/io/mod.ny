@@ -4,9 +4,9 @@
 use std.core
 use std.strings.str
 module std.io (
-	sys_write, sys_read, sys_open, sys_close, sys_stat, sys_fstat, file_open, file_close,
-	write_fd, read_fd, _print_write, print, input, file_read, file_write, file_append,
-	file_exists, file_remove, cwd, __repl_show, _print_marker
+   sys_write, sys_read, sys_open, sys_close, sys_stat, sys_fstat, file_open, file_close,
+   write_fd, read_fd, _print_write, print, input, file_read, file_write, file_append,
+   file_exists, file_remove, cwd, __repl_show, _print_marker
 )
 
 ; define IO_BUF = 8192
@@ -54,13 +54,13 @@ fn file_close(fd){
 }
 
 fn write_fd(fd, buf, len){
-	"Write `len` bytes from `buf` to file descriptor `fd`."
-	return sys_write(fd, buf, len)
+   "Write `len` bytes from `buf` to file descriptor `fd`."
+   return sys_write(fd, buf, len)
 }
 
 fn read_fd(fd, buf, n){
-	"Read up to `n` bytes from file descriptor `fd` into `buf`."
-	return sys_read(fd, buf, n)
+   "Read up to `n` bytes from file descriptor `fd` into `buf`."
+   return sys_read(fd, buf, n)
 }
 
 fn _print_write(s){
@@ -70,41 +70,41 @@ fn _print_write(s){
 }
 
 fn print(...args){
-	"Print values with separators and end; supports kwargs end/sep/step."
+   "Print values with separators and end; supports kwargs end/sep/step."
   def num_args = list_len(args)
   if(num_args == 0){
-	 sys_write(1, "\n", 1)
-	 return 0
+    sys_write(1, "\n", 1)
+    return 0
   }
   def end = "\n"
   def step = " "
   def i = 0
   ; Scan for kwargs
   while(i < num_args){
-	  def item = get(args, i)
-	  if(is_kwarg(item)){
-		  def k = get_kwarg_key(item)
-		  def v = get_kwarg_val(item)
-		  if(k == "end"){ end = v }
-		  if(k == "step" || k == "sep"){ step = v }
-	  }
-	  i = i + 1
+     def item = get(args, i)
+     if(is_kwarg(item)){
+        def k = get_kwarg_key(item)
+        def v = get_kwarg_val(item)
+        if(k == "end"){ end = v }
+        if(k == "step" || k == "sep"){ step = v }
+     }
+     i = i + 1
   }
   ; Print non-kwargs values
   i = 0
   def printed = 0
   def first = true
   while(i < num_args){
-	  def item = get(args, i)
-	  if(is_kwarg(item) == false){
-		  if(first == false){
-			  sys_write(1, step, str_len(step))
-		  }
-		  def s = _to_string(item)
-		  sys_write(1, s, str_len(s))
-		  first = false
-	  }
-	  i = i + 1
+     def item = get(args, i)
+     if(is_kwarg(item) == false){
+        if(first == false){
+           sys_write(1, step, str_len(step))
+        }
+        def s = _to_string(item)
+        sys_write(1, s, str_len(s))
+        first = false
+     }
+     i = i + 1
   }
   sys_write(1, end, str_len(end))
   return 0
@@ -113,35 +113,35 @@ fn print(...args){
 fn input(prompt){
   "Displays `prompt` and reads a line of input from stdin. Returns the input as a string."
   if(prompt != 0){
-	  sys_write(1, prompt, str_len(prompt))
+     sys_write(1, prompt, str_len(prompt))
   }
   def cap = 8192
   def buf = rt_malloc(cap)
   store64(buf, 120, -8) ; String tag
   def pos = 0
   while(1){
-	  def n = sys_read(0, buf, cap - pos - 1)
-	  if(n <= 0){ break }
-	  def i = 0
-	  while(i < n){
-		  if(load8(buf, pos + i) == 10){ ; Newline character
-			  pos = pos + i
-			  store8(buf, 0, pos)
-			  store64(buf, pos, -16)
-			  return buf
-		  }
-		  i = i + 1
-	  }
-	  pos = pos + n
-	  if(pos + 1 >= cap){
-		  def newcap = cap * 2
-		  def new_buf = rt_malloc(newcap)
-		  store64(new_buf, 120, -8)
-		  rt_memcpy(new_buf, buf, pos)
-		  rt_free(buf)
-		  buf = new_buf
-		  cap = newcap
-	  }
+     def n = sys_read(0, buf, cap - pos - 1)
+     if(n <= 0){ break }
+     def i = 0
+     while(i < n){
+        if(load8(buf, pos + i) == 10){ ; Newline character
+           pos = pos + i
+           store8(buf, 0, pos)
+           store64(buf, pos, -16)
+           return buf
+        }
+        i = i + 1
+     }
+     pos = pos + n
+     if(pos + 1 >= cap){
+        def newcap = cap * 2
+        def new_buf = rt_malloc(newcap)
+        store64(new_buf, 120, -8)
+        rt_memcpy(new_buf, buf, pos)
+        rt_free(buf)
+        buf = new_buf
+        cap = newcap
+     }
   }
   store8(buf, 0, pos)
   store64(buf, pos, -16)
@@ -157,18 +157,18 @@ fn file_read(path){
   store64(buf, 120, -8)
   def pos = 0
   while(1){
-	  def n = sys_read(fd, buf, cap - pos - 1, pos)
-	  if(n <= 0){ break }
-	  pos = pos + n
-	  if(pos + 1 >= cap){
-		  def next_cap = cap * 2
-		  def next_buf = rt_malloc(next_cap)
-		  store64(next_buf, 120, -8)
-		  rt_memcpy(next_buf, buf, pos)
-		  rt_free(buf)
-		  buf = next_buf
-		  cap = next_cap
-	  }
+     def n = sys_read(fd, buf, cap - pos - 1, pos)
+     if(n <= 0){ break }
+     pos = pos + n
+     if(pos + 1 >= cap){
+        def next_cap = cap * 2
+        def next_buf = rt_malloc(next_cap)
+        store64(next_buf, 120, -8)
+        rt_memcpy(next_buf, buf, pos)
+        rt_free(buf)
+        buf = next_buf
+        cap = next_cap
+     }
   }
   sys_close(fd)
   store8(buf, 0, pos) ; Null-terminate

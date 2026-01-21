@@ -13,8 +13,8 @@ def y = 2
 
 ; Comment before function
 fn add(a, b) {
-	; Comment inside function
-	return a + b  ; Return comment
+   ; Comment inside function
+   return a + b  ; Return comment
 }
 
 def result = add(x, y)
@@ -22,15 +22,15 @@ assert(result == 3, "function with comments")
 
 ; Comment before if
 if x == 1 {
-	; Comment inside if
-	def z = 3
+   ; Comment inside if
+   def z = 3
 }
 
 ; Comment before loop
 i = 0
 while i < 5 {
-	; Comment in loop
-	i = i + 1
+   ; Comment in loop
+   i = i + 1
 }
 assert(i == 5, "loop with comments")
 
@@ -45,17 +45,17 @@ assert(c == 30, "operations with comments")
 
 ; Nested comments in nested structures
 if 1 == 1 {
-	; Outer comment
-	if 2 == 2 {
-		; Inner comment
-		def nested = 42
-	}
+   ; Outer comment
+   if 2 == 2 {
+      ; Inner comment
+      def nested = 42
+   }
 }
 
 ; Comment at end of block
 fn test() {
-	def val = 100
-	; Last comment in function
+   def val = 100
+   ; Last comment in function
 }
 
 ; Comments with special characters

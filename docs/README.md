@@ -49,9 +49,7 @@ Ahead of time (AOT) Compiled.
 ### Binary
 
 ```bash
-ny -c "print('Hello ELF!')" -o && chmod +x a.out && ./a.out
-Success: Saved ELF: a.out
-Hello ELF!
+ny -c "print('Hello ELF!')" -o && ./a.out
 ```
 
 ### Install

@@ -121,36 +121,99 @@ void doclist_free(doc_list_t *dl) {
 int doclist_print(const doc_list_t *dl, const char *name) {
   if (!dl || !name || !*name)
     return 0;
+
+  int found_idx = -1;
+
+  // 1. Try exact match
   for (size_t i = 0; i < dl->len; ++i) {
     if (strcmp(dl->data[i].name, name) == 0) {
-      const char *k_name = "Symbol";
-      if (dl->data[i].kind == 1) {
-        k_name = "Package";
-      } else if (dl->data[i].kind == 2) {
-        k_name = "Module";
-      } else if (dl->data[i].kind == 3) {
-        k_name = "Function";
-      }
-      printf("%s%s %s%s%s\n", clr(NY_CLR_GRAY), k_name, clr(NY_CLR_BOLD),
-             dl->data[i].name, clr(NY_CLR_RESET));
-      if (dl->data[i].def)
-        printf("%s%s%s\n", clr(NY_CLR_CYAN), dl->data[i].def,
-               clr(NY_CLR_RESET));
-      if (dl->data[i].doc)
-        printf("\n%s\n", dl->data[i].doc);
-      if (dl->data[i].src) {
-        printf("\n%sLogic:%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
-        const char *s = dl->data[i].src;
-        while (*s && isspace(*s))
-          s++;
-        // Highlight logic
-        repl_highlight_line(s);
-        printf("\n");
-      }
-      return 1;
+      found_idx = (int)i;
+      goto found;
     }
   }
+
+  // 2. Try suffix match (e.g. "sys_write" matching "std.io.sys_write")
+  int match_idx = -1;
+  int match_count = 0;
+  size_t name_len = strlen(name);
+
+  for (size_t i = 0; i < dl->len; ++i) {
+    const char *entry_name = dl->data[i].name;
+    size_t entry_len = strlen(entry_name);
+
+    if (entry_len > name_len && entry_name[entry_len - name_len - 1] == '.' &&
+        strcmp(entry_name + entry_len - name_len, name) == 0) {
+      match_idx = (int)i;
+      match_count++;
+    } else if (name_len > entry_len && name[name_len - entry_len - 1] == '.' &&
+               strcmp(name + name_len - entry_len, entry_name) == 0) {
+      match_idx = (int)i;
+      match_count++;
+    }
+  }
+
+  if (match_count == 1) {
+    found_idx = match_idx;
+    goto found;
+  } else if (match_count > 1) {
+    printf("%sMultiple matches found for '%s':%s\n", clr(NY_CLR_YELLOW), name,
+           clr(NY_CLR_RESET));
+    for (size_t i = 0; i < dl->len; ++i) {
+      const char *en = dl->data[i].name;
+      size_t el = strlen(en);
+      if ((el > name_len && en[el - name_len - 1] == '.' &&
+           strcmp(en + el - name_len, name) == 0) ||
+          (name_len > el && name[name_len - el - 1] == '.' &&
+           strcmp(name + name_len - el, en) == 0)) {
+        printf("  - %s\n", en);
+      }
+    }
+    return 1;
+  }
+
   return 0;
+
+found: {
+  ny_doc_entry *e = &dl->data[found_idx];
+
+  const char *k_name = "Symbol";
+  if (e->kind == 1)
+    k_name = "Package";
+  else if (e->kind == 2)
+    k_name = "Module";
+  else if (e->kind == 3)
+    k_name = "Function";
+
+  printf("\n%s%s%s %s%s%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_MAGENTA), k_name,
+         clr(NY_CLR_CYAN), e->name, clr(NY_CLR_RESET));
+
+  if (e->def) {
+    printf("%s %s%s%s\n", clr(NY_CLR_GRAY), clr(NY_CLR_GREEN), e->def,
+           clr(NY_CLR_RESET));
+  }
+
+  printf("%s%s%s\n", clr(NY_CLR_GRAY),
+         "--------------------------------------------------",
+         clr(NY_CLR_RESET));
+
+  if (e->doc && strlen(e->doc) > 0) {
+    printf("%s\n", e->doc);
+  } else {
+    printf("%s(No documentation string available)%s\n", clr(NY_CLR_GRAY),
+           clr(NY_CLR_RESET));
+  }
+
+  if (e->src) {
+    printf("\n%sImplementation:%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    const char *s = e->src;
+    while (*s && isspace((unsigned char)*s))
+      s++;
+    repl_highlight_line(s);
+    printf("\n");
+  }
+  printf("\n");
+  return 1;
+}
 }
 
 void add_builtin_docs(doc_list_t *docs) {
@@ -238,6 +301,10 @@ void add_builtin_docs(doc_list_t *docs) {
               "fn rt_is_int(v)", NULL, 3);
   doclist_set(docs, "rt_is_ptr", "Checks if value is a pointer.",
               "fn rt_is_ptr(v)", NULL, 3);
+  doclist_set(docs, "rt_is_str", "Checks if value is a string.",
+              "fn rt_is_str(v)", NULL, 3);
+  doclist_set(docs, "rt_is_flt", "Checks if value is a float.",
+              "fn rt_is_flt(v)", NULL, 3);
 
   // Strings
   doclist_set(docs, "rt_init_str", "Initializes a string.", "fn rt_init_str(s)",

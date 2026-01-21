@@ -11,8 +11,8 @@ def x = 1.0
 def y = 1.000001
 def i = 0
 while(i < 1000000){
-	x = x * y
-	i = i + 1
+   x = x * y
+   i = i + 1
 }
 
 def end = ticks()

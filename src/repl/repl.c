@@ -1,6 +1,8 @@
 #include "base/common.h"
 #include "base/loader.h"
+#include "base/util.h"
 #include "code/code.h"
+#include "code/jit.h"
 #include "priv.h"
 #include "repl/types.h"
 #include <ctype.h>
@@ -81,10 +83,36 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   /* LLVM initialization moved into evaluation loop for isolation. */
   char *std_src_cached = NULL;
   if (std_mode != NY_STD_NONE) {
-    const char *prebuilt_env = getenv("NYTRIX_STD_PREBUILT");
-    if (prebuilt_env && access(prebuilt_env, R_OK) == 0) {
-      std_src_cached = repl_read_file(prebuilt_env);
+    const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
+    if (!prebuilt || access(prebuilt, R_OK) != 0) {
+#ifdef NYTRIX_STD_PATH
+      if (access(NYTRIX_STD_PATH, R_OK) == 0) {
+        prebuilt = NYTRIX_STD_PATH;
+      }
+#endif
     }
+
+    if (!prebuilt || access(prebuilt, R_OK) != 0) {
+      char *exe_dir = ny_get_executable_dir();
+      if (exe_dir) {
+        static char path_buf[4096];
+        snprintf(path_buf, sizeof(path_buf), "%s/std_bundle.ny", exe_dir);
+        if (access(path_buf, R_OK) == 0) {
+          prebuilt = path_buf;
+        } else {
+          snprintf(path_buf, sizeof(path_buf),
+                   "%s/../share/nytrix/std_bundle.ny", exe_dir);
+          if (access(path_buf, R_OK) == 0) {
+            prebuilt = path_buf;
+          }
+        }
+      }
+    }
+
+    if (prebuilt && access(prebuilt, R_OK) == 0) {
+      std_src_cached = repl_read_file(prebuilt);
+    }
+
     if (!std_src_cached) {
       std_src_cached = ny_build_std_bundle(NULL, 0, std_mode, 0, NULL);
     }
@@ -145,14 +173,19 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     init_code = "<stdin>";
   }
   if (use_readline) {
+    rl_variable_bind("enable-bracketed-paste", "on");
     rl_attempted_completion_function = repl_enhanced_completion;
+    rl_completer_quote_characters = "\"";
+    rl_filename_quote_characters = "\"";
+    rl_basic_word_break_characters = " \t\n\"\\'`@$><=;|&{}.(";
     rl_bind_keyseq("\e[A", rl_history_search_backward);
     rl_bind_keyseq("\e[B", rl_history_search_forward);
     rl_bind_keyseq("\x12", rl_reverse_search_history);
+    rl_redisplay_function = repl_redisplay;
   }
   char *input_buffer = NULL;
   int last_status = 0;
-  int incomplete_hinted = 0;
+
   LLVMLinkInMCJIT();
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
@@ -161,21 +194,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     char prompt_buf[64];
     const char *prompt;
     if (input_buffer) {
-      int p = 0, b = 0, c = 0;
-      count_unclosed(input_buffer, &p, &b, &c);
-      if (p + b + c > 0) {
-        char w[16] = "";
-        if (p > 0)
-          strcat(w, ")");
-        if (b > 0)
-          strcat(w, "]");
-        if (c > 0)
-          strcat(w, "}");
-        snprintf(prompt_buf, sizeof(prompt_buf), "%s...%s%s ",
-                 clr(NY_CLR_YELLOW), w, clr(NY_CLR_RESET));
-      } else
-        snprintf(prompt_buf, sizeof(prompt_buf), "%s... %s", clr(NY_CLR_YELLOW),
-                 clr(NY_CLR_RESET));
+      snprintf(prompt_buf, sizeof(prompt_buf), "\001%s\002..|\001%s\002",
+               clr(NY_CLR_YELLOW), clr(NY_CLR_RESET));
       prompt = prompt_buf;
       repl_indent_next = repl_calc_indent(input_buffer);
       rl_pre_input_hook = repl_pre_input_hook;
@@ -208,6 +228,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       break;
     } else if (use_readline) {
       line = readline(prompt);
+      if (line && tty_in)
+        printf("\n");
     } else {
       size_t cap = 0;
       ssize_t nread;
@@ -248,16 +270,11 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       input_buffer = line;
     if (is_input_complete(input_buffer))
       goto process_input;
-    if (tty_in && !incomplete_hinted) {
-      print_incomplete_hint(input_buffer);
-      incomplete_hinted = 1;
-    }
     continue;
 
   process_input:;
     char *full_input = input_buffer;
     input_buffer = NULL;
-    incomplete_hinted = 0;
     if (!full_input || !*full_input) {
       if (full_input)
         free(full_input);
@@ -265,6 +282,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     }
     if (!from_init)
       add_history(full_input);
+
     char *trimmed = ltrim(full_input);
     if (trimmed[0] == ':') {
       char *p = ltrim(trimmed + 1);
@@ -430,10 +448,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           free(g_repl_user_source);
           g_repl_user_source = NULL;
           g_repl_user_source_len = 0;
-          // g_repl_user_source_cap is hidden in util.c, we assume free nulls it
-          // effectively or next alloc resets? Actually util.c has
-          // g_repl_user_source_cap static. This reset here might desync cap if
-          // we don't reset cap. Since g_repl_user_source is NULL, next
+          // g_repl_user_source_cap is hidden in util.c, we assume free nulls
+          // it effectively or next alloc resets? Actually util.c has
+          // g_repl_user_source_cap static. This reset here might desync cap
+          // if we don't reset cap. Since g_repl_user_source is NULL, next
           // repl_append_user_source will realloc. But if old cap is large,
           // realloc(NULL, cap) -> valid? realloc(NULL, size) is malloc(size).
           // But cap might be stale.
@@ -562,10 +580,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       is_stmt = 1;
     if (!strncmp(trimmed, "fn ", 3))
       is_stmt = 1;
-    if (!strncmp(trimmed, "use ", 4))
-      is_stmt = 1;
     if (!strncmp(trimmed, "use ", 4)) {
-      /* In REPL we already load the full std bundle; acknowledge and skip. */
+      is_stmt = 1;
+      /* Load docs for the module being used to enable syntax highlighting for
+       * its members. */
       char *mod_name = ltrim(trimmed + 4);
       char *end = mod_name;
       while (*end && !isspace((unsigned char)*end) && *end != ';')
@@ -606,7 +624,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       strcat(full_src, g_repl_user_source);
       strcat(full_src, "\n");
     }
-    strcat(full_src, "fn __repl_show(x){ print(x)\n return 0 }\n");
+    /* Prelude uses are already injected by ny_build_std_bundle in
+     * std_src_cached. */
+
     // We don't wrap the current body in __repl_eval yet because
     // we want codegen_emit_script to handle top-level statements including
     // our body.
@@ -662,9 +682,13 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       // Register interned strings
       for (size_t i = 0; i < cg.interns.len; ++i) {
         if (cg.interns.data[i].gv) {
-          // const_string_ptr stores data at base+64, so map global to base
           LLVMAddGlobalMapping(eval_ee, cg.interns.data[i].gv,
                                (void *)((char *)cg.interns.data[i].data - 64));
+        }
+        if (cg.interns.data[i].val &&
+            cg.interns.data[i].val != cg.interns.data[i].gv) {
+          LLVMAddGlobalMapping(eval_ee, cg.interns.data[i].val,
+                               &cg.interns.data[i].data);
         }
       }
 #include "rt/runtime.h"
@@ -689,6 +713,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           }
         }
       }
+      register_jit_symbols(eval_ee, eval_mod);
+
       if (debug_enabled)
         fprintf(stderr, "DEBUG: Interpreter execution start\n");
       LLVMValueRef eval_fn_val = LLVMGetNamedFunction(eval_mod, fn_name);

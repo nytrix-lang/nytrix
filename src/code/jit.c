@@ -5,7 +5,6 @@
 
 // Runtime symbols declarations
 extern int64_t rt_malloc(int64_t);
-
 extern int64_t rt_free(int64_t);
 extern int64_t rt_realloc(int64_t, int64_t);
 extern int64_t rt_memcpy(int64_t, int64_t, int64_t);
@@ -86,7 +85,8 @@ extern int64_t rt_shr(int64_t, int64_t);
 extern int64_t rt_not(int64_t);
 extern int64_t rt_is_int(int64_t);
 extern int64_t rt_is_ptr(int64_t);
-
+extern int64_t rt_is_str(int64_t);
+extern int64_t rt_is_flt(int64_t);
 extern int64_t rt_to_str(int64_t);
 extern int64_t rt_str_concat(int64_t, int64_t);
 extern int64_t rt_eq(int64_t, int64_t);
@@ -147,7 +147,8 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
   MAP("rt_not", rt_not);
   MAP("rt_is_int", rt_is_int);
   MAP("rt_is_ptr", rt_is_ptr);
-
+  MAP("rt_is_str", rt_is_str);
+  MAP("rt_is_flt", rt_is_flt);
   MAP("rt_to_str", rt_to_str);
   MAP("rt_str_concat", rt_str_concat);
   MAP("rt_eq", rt_eq);
@@ -172,6 +173,9 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
   MAP("rt_dlclose", rt_dlclose);
   MAP("rt_dlerror", rt_dlerror);
   MAP("rt_kwarg", rt_kwarg);
+  MAP("rt_memcpy", rt_memcpy);
+  MAP("rt_memcmp", rt_memcmp);
+  MAP("rt_memset", rt_memset);
   MAP("rt_call0", rt_call0);
   MAP("rt_call1", rt_call1);
   MAP("rt_call2", rt_call2);

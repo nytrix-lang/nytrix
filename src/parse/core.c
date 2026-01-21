@@ -178,7 +178,13 @@ static const char *token_desc(token_t tok, char *buf, size_t cap) {
   const char *kind = parser_token_name(tok.kind);
   if (tok.kind == NY_T_IDENT || tok.kind == NY_T_NUMBER ||
       tok.kind == NY_T_STRING) {
+    if (!tok.lexeme) { // Add null check for lexeme
+      snprintf(buf, cap, "%s '<null>'", kind);
+      return buf;
+    }
     size_t n = tok.len < 24 ? tok.len : 24;
+    if (n > tok.len)
+      n = tok.len; // Ensure n does not exceed tok.len
     snprintf(buf, cap, "%s '%.*s'%s", kind, (int)n, tok.lexeme,
              tok.len > n ? "..." : "");
     return buf;

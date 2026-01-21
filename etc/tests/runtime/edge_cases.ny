@@ -4,9 +4,9 @@ use std.io
 
 ; Division by zero handling
 fn test_division() {
-	def result = 10 / 2
-	assert(result == 5, "normal division")
-	return result
+   def result = 10 / 2
+   assert(result == 5, "normal division")
+   return result
 }
 test_division()
 
@@ -64,22 +64,22 @@ def short_circuit = 1 or (10 / 0)  ; Should not divide by zero
 
 ; Function with no arguments
 fn no_args() {
-	return 42
+   return 42
 }
 assert(no_args() == 42, "function no args")
 
 ; Function with multiple arguments
 fn multi_args(a, b, c) {
-	return a + b + c
+   return a + b + c
 }
 assert(multi_args(1, 2, 3) == 6, "function multi args")
 
 ; Recursive edge cases
 fn factorial(n) {
-	if n <= 1 {
-		return 1
-	}
-	return n * factorial(n - 1)
+   if n <= 1 {
+      return 1
+   }
+   return n * factorial(n - 1)
 }
 assert(factorial(5) == 120, "factorial recursion")
 assert(factorial(0) == 1, "factorial base case")
@@ -87,16 +87,16 @@ assert(factorial(0) == 1, "factorial base case")
 ; Scope testing
 def outer = 10
 fn scope_test() {
-	def inner = 20
-	return inner + outer
+   def inner = 20
+   return inner + outer
 }
 assert(scope_test() == 30, "variable scope")
 
 ; Shadowing
 def shadow = 1
 fn shadow_test() {
-	def shadow = 2
-	return shadow
+   def shadow = 2
+   return shadow
 }
 assert(shadow_test() == 2, "variable shadowing in function")
 assert(shadow == 1, "original not shadowed")

@@ -8,13 +8,13 @@ use std.core
 print("Testing std.util.url (extra)...")
 
 fn cstr_eq(cptr, s){
-	def n = str_len(s)
-	def i = 0
-	while(i < n){
-		if(rt_load8_idx(cptr, i) != rt_load8_idx(s, i)){ return false }
-		i = i + 1
-	}
-	return rt_load8_idx(cptr, n) == 0
+   def n = str_len(s)
+   def i = 0
+   while(i < n){
+      if(rt_load8_idx(cptr, i) != rt_load8_idx(s, i)){ return false }
+      i = i + 1
+   }
+   return rt_load8_idx(cptr, n) == 0
 }
 
 def enc = urlencode("a b+c")

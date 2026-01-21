@@ -9,7 +9,6 @@ struct builtin_def {
   int args;
 } builtin_defs[] = {
     {"rt_malloc", 1},
-
     {"rt_free", 1},
     {"rt_realloc", 2},
     {"rt_memcpy", 3},
@@ -44,7 +43,8 @@ struct builtin_def {
     {"rt_ge", 2},
     {"rt_is_int", 1},
     {"rt_is_ptr", 1},
-
+    {"rt_is_str", 1},
+    {"rt_is_flt", 1},
     {"rt_to_str", 1},
     {"rt_panic", 1},
     {"rt_argc", 0},
@@ -208,8 +208,9 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
     if (alias_full) {
       return lookup_fun(cg, alias_full);
     }
-    const char *fallbacks[] = {"std.core",        "std.io",   "std.collections",
-                               "std.strings.str", "std.math", NULL};
+    const char *fallbacks[] = {
+        "std.core", "std.io", "std.collections", "std.strings.str", "std.math",
+        "std.os",   NULL};
     for (int j = 0; fallbacks[j]; ++j) {
       if (cg->current_mod && strcmp(cg->current_mod, fallbacks[j]) == 0)
         continue;
@@ -369,6 +370,16 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc) {
     if (score > best_score) {
       best_score = score;
       best = fs;
+    }
+  }
+  if (!best && strchr(name, '.') == NULL) {
+    const char *fallbacks[] = {"std.core", "std.io", "std.collections", NULL};
+    for (int j = 0; fallbacks[j]; ++j) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
+      fun_sig *fb = resolve_overload(cg, buf, argc);
+      if (fb)
+        return fb;
     }
   }
   return best;
@@ -588,10 +599,10 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
 
 void collect_use_modules(codegen_t *cg, stmt_t *s) {
   if (s->kind == NY_S_USE) {
-    if (s->as.use.import_all || s->as.use.imports.len > 0)
+    if (!s->as.use.import_all)
       return;
     const char *mod = s->as.use.module;
-    if (mod && *mod && s->as.use.import_all) {
+    if (mod && *mod) {
       for (size_t i = 0; i < cg->use_modules.len; ++i) {
         if (strcmp(cg->use_modules.data[i], mod) == 0)
           return;

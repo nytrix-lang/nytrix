@@ -16,6 +16,8 @@ BIN       := $(BUILD_DIR)/$(BIN_NAME)
 BIN_DEBUG := $(BUILD_DIR)/$(BIN_NAME)_debug
 BIN_LSP   := $(BUILD_DIR)/ny_lsp
 
+TIDY_DIRS := src std etc/examples
+
 C_RESET  := $(shell printf '\033[0m')
 C_GRAY   := $(shell printf '\033[90m')
 C_GREEN  := $(shell printf '\033[32m')
@@ -72,9 +74,10 @@ OBJ_CMD_NY_DEBUG     := $(BUILD_DIR)/cmd/ny/main_debug.o
 OBJ_CMD_NY_RELEASE   := $(BUILD_DIR)/cmd/ny/main.o
 OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 
-.PHONY: all bin debug repl lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage
+.PHONY: all bin debug repl lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man
 
 all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so
+	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
 
 bin: $(BIN)
 debug: $(BIN_DEBUG)
@@ -106,9 +109,10 @@ build:
 		$(BUILD_DIR)/compiler/release/ast $(BUILD_DIR)/compiler/release/code $(BUILD_DIR)/compiler/release/lex $(BUILD_DIR)/compiler/release/base $(BUILD_DIR)/compiler/release/repl $(BUILD_DIR)/compiler/release/wire $(BUILD_DIR)/compiler/release/parse \
 		$(BUILD_DIR)/rt/debug $(BUILD_DIR)/rt/release $(BUILD_DIR)/rt/shared \
 		$(BUILD_DIR)/cmd/ny $(BUILD_DIR)/cmd/ny-lsp
+	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
 
-$(BUILD_DIR)/std_bundle.ny: $(wildcard std/**/*.ny) etc/tools/bundle_std | build
-	@python3 etc/tools/bundle_std $@
+$(BUILD_DIR)/std_bundle.ny: $(wildcard std/**/*.ny) etc/tools/stdbundle | build
+	@python3 etc/tools/stdbundle $@
 
 $(BUILD_DIR)/std_symbols.h: $(BUILD_DIR)/std_bundle.ny | build
 	@touch $@
@@ -176,43 +180,68 @@ $(BIN_LSP): $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) | build
 	@echo "  $(C_GREEN)LD (lsp)$(C_RESET) $@"
 	@$(CC) $(CFLAGS_RELEASE) -o $@ $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) $(LDFLAGS)
 
-BINDIR ?= /bin
+BINDIR ?= $(PREFIX)/bin
 LIBDIR ?= $(PREFIX)/lib
-SHAREDIR ?= $(PREFIX)/share
+SHAREDIR ?= $(PREFIX)/share/nytrix
+MANDIR ?= $(PREFIX)/share/man
 
-install: all
+install: all install-man
 	@echo "  $(C_GRAY)INSTALL$(C_RESET) $(BIN_NAME) to $(DESTDIR)$(BINDIR)"
 	@mkdir -p $(DESTDIR)$(BINDIR)
-	@mkdir -p $(DESTDIR)$(SHAREDIR)/nytrix
-	@mkdir -p $(DESTDIR)$(LIBDIR)/nytrix
+	@mkdir -p $(DESTDIR)$(SHAREDIR)
+	@mkdir -p $(DESTDIR)$(LIBDIR)
 	@cp $(BIN) $(DESTDIR)$(BINDIR)/$(BIN_NAME)
 	@chmod 755 $(DESTDIR)$(BINDIR)/$(BIN_NAME)
-	@cp $(BUILD_DIR)/std_bundle.ny $(DESTDIR)$(SHAREDIR)/nytrix/std_bundle.ny
-	@chmod 644 $(DESTDIR)$(SHAREDIR)/nytrix/std_bundle.ny
-	@cp $(BUILD_DIR)/libnytrixrt.so $(DESTDIR)$(LIBDIR)/nytrix/libnytrixrt.so
-	@chmod 755 $(DESTDIR)$(LIBDIR)/nytrix/libnytrixrt.so
+	@if [ ! "$(DESTDIR)$(BINDIR)/$(BIN_NAME)" -ef "$(DESTDIR)/bin/$(BIN_NAME)" ]; then \
+		echo "  $(C_GRAY)LINK$(C_RESET) $(DESTDIR)/bin/$(BIN_NAME) -> $(BINDIR)/$(BIN_NAME)"; \
+		mkdir -p $(DESTDIR)/bin; \
+		ln -sf $(BINDIR)/$(BIN_NAME) $(DESTDIR)/bin/$(BIN_NAME); \
+	fi
+	@cp $(BUILD_DIR)/std_bundle.ny $(DESTDIR)$(SHAREDIR)/std_bundle.ny
+	@chmod 644 $(DESTDIR)$(SHAREDIR)/std_bundle.ny
+	@cp $(BUILD_DIR)/libnytrixrt.so $(DESTDIR)$(LIBDIR)/libnytrixrt.so
+	@chmod 755 $(DESTDIR)$(LIBDIR)/libnytrixrt.so
+	@echo "  $(C_GRAY)INSTALL$(C_RESET) full source tree to $(DESTDIR)$(SHAREDIR)/src"
+	@mkdir -p $(DESTDIR)$(SHAREDIR)/src
+	@for dir in ast base cmd code lex parse repl rt wire; do \
+		mkdir -p $(DESTDIR)$(SHAREDIR)/src/$$dir; \
+		cp -r src/$$dir/* $(DESTDIR)$(SHAREDIR)/src/$$dir/ 2>/dev/null || true; \
+	done
+	@echo "  $(C_GRAY)INSTALL$(C_RESET) stdlib to $(DESTDIR)$(SHAREDIR)/std"
+	@mkdir -p $(DESTDIR)$(SHAREDIR)/std
+	@cp -r std/* $(DESTDIR)$(SHAREDIR)/std/
 	@echo "  $(C_GREEN)✓ Installed$(C_RESET)"
 
-uninstall:
+install-man:
+	@mkdir -p $(DESTDIR)$(MANDIR)/man1
+	@cp etc/info/man1/ny.1 $(DESTDIR)$(MANDIR)/man1/ny.1
+	@cp etc/info/man1/nytrix.1 $(DESTDIR)$(MANDIR)/man1/nytrix.1
+	@chmod 644 $(DESTDIR)$(MANDIR)/man1/ny.1
+	@chmod 644 $(DESTDIR)$(MANDIR)/man1/nytrix.1
+
+uninstall: uninstall-man
 	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing $(BIN_NAME) from $(DESTDIR)$(BINDIR)"
 	@rm -f $(DESTDIR)$(BINDIR)/$(BIN_NAME)
-	@rm -f $(DESTDIR)$(SHAREDIR)/nytrix/std_bundle.ny
-	@rm -f $(DESTDIR)$(LIBDIR)/nytrix/libnytrixrt.so
-	@rmdir $(DESTDIR)$(SHAREDIR)/nytrix 2>/dev/null || true
-	@rmdir $(DESTDIR)$(LIBDIR)/nytrix 2>/dev/null || true
+	@rm -f $(DESTDIR)/bin/$(BIN_NAME)
+	@rm -rf $(DESTDIR)$(SHAREDIR)
+	@rm -f $(DESTDIR)$(LIBDIR)/libnytrixrt.so
 	@echo "  $(C_GREEN)✓ Uninstalled$(C_RESET)"
 
+uninstall-man:
+	@rm -f $(DESTDIR)$(MANDIR)/man1/ny.1
+	@rm -f $(DESTDIR)$(MANDIR)/man1/nytrix.1
+
 test: $(BIN) $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/run_tests --bin $(BIN)
+	@NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN)
 
 teststd: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/run_tests --bin $(BIN_DEBUG) --pattern "std"
+	@python3 etc/tools/tests --bin $(BIN_DEBUG) --pattern "std"
 
 testruntime: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/run_tests --bin $(BIN_DEBUG) --pattern "runtime"
+	@python3 etc/tools/tests --bin $(BIN_DEBUG) --pattern "runtime"
 
 testbench: $(BIN) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/run_tests --bin $(BIN) --pattern "bench"
+	@python3 etc/tools/tests --bin $(BIN) --pattern "bench"
 
 bench: testbench
 
@@ -230,11 +259,16 @@ clean:
 
 tidy:
 	@echo "  $(C_GRAY)TIDY$(C_RESET) Formatting code..."
-	@find src etc -type f \( -name "*.c" -o -name "*.h" \) -not -path "*/.*" -exec clang-format -i {} +
-	@find src etc -type f \( -name "*.ny" -o -name "*.py" -o -name "Makefile" -o -name "*.md" \) -not -path "*/.*" -exec sed -i -e 's/[[:space:]]*$$//' -e 's/\r//g' -e ':a; s/^\(\t*\)    /\1\t/; ta' {} +
-	@echo "  $(C_GREEN)✓ Tidy complete$(C_RESET)"
+	@python3 etc/tools/tidy $(TIDY_DIRS)
+#    @echo "  $(C_GREEN)✓ Tidy complete$(C_RESET)"
+
+bear:
 ifneq ($(BEAR),)
-	@mkdir -p ./etc/cache
-	@$(BEAR) --output ./etc/cache/compile_commands.json -- $(MAKE) bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so > /dev/null 2>&1
+	@echo "  $(C_GRAY)BEAR$(C_RESET) Generating compilation database..."
+	@mkdir -p $(BUILD_DIR)/cache
+	@$(BEAR) --output $(BUILD_DIR)/cache/compile_commands.json -- $(MAKE) bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so > /dev/null 2>&1
+	@echo "  $(C_GREEN)✓ etc/cache/compile_commands.json updated$(C_RESET)"
 else
+	@echo "  $(C_RED)Error:$(C_RESET) bear not found in PATH"
+	@exit 1
 endif

@@ -27,12 +27,12 @@ assert(g >= 0, "gid >= 0")
 def path = env("PATH")
 print("PATH:", path)
 if(path != 0){
-	def path_len = str_len(path)
-	print("PATH found len: ", path_len)
-	assert(path_len > 0, "env PATH len")
+   def path_len = str_len(path)
+   print("PATH found len: ", path_len)
+   assert(path_len > 0, "env PATH len")
 } else {
-	print("PATH not found")
-	assert(0, "env PATH")
+   print("PATH not found")
+   assert(0, "env PATH")
 }
 
 def e = environ()

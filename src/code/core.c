@@ -188,9 +188,13 @@ void codegen_dispose(codegen_t *cg) {
   for (size_t i = 0; i < cg->global_vars.len; i++) {
     free((void *)cg->global_vars.data[i].name);
   }
+  /* Do not free interned strings here; they may be referenced by persistent
+   * data structures in the runtime (e.g. dict keys in the REPL). */
+  /*
   for (size_t i = 0; i < cg->interns.len; i++) {
     free(cg->interns.data[i].alloc);
   }
+  */
   for (size_t i = 0; i < cg->aliases.len; i++) {
     free((void *)cg->aliases.data[i].name);
     free((void *)cg->aliases.data[i].stmt_t);

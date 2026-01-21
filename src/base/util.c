@@ -42,6 +42,18 @@ char *ny_read_file(const char *path) {
   size_t read = fread(content, 1, (size_t)size, f);
   content[read] = '\0';
   fclose(f);
+
+  // Skip shebang line if present (e.g., #!/bin/ny)
+  if (read >= 2 && content[0] == '#' && content[1] == '!') {
+    char *newline = strchr(content, '\n');
+    if (newline) {
+      // Move content past the shebang line
+      size_t skip_len = (newline - content) + 1;
+      size_t new_len = read - skip_len;
+      memmove(content, newline + 1, new_len + 1); // +1 for null terminator
+    }
+  }
+
   return content;
 }
 
@@ -95,7 +107,8 @@ void ny_write_text_file(const char *path, const char *contents) {
 
 static bool nytrix_has_sources(const char *root) {
   char probe[8192];
-  snprintf(probe, sizeof(probe), "%s/src/core/runtime/core.c", root);
+  // Check for the runtime include header as a sign of source presence
+  snprintf(probe, sizeof(probe), "%s/src/rt/runtime.h", root);
   return access(probe, R_OK) == 0;
 }
 
@@ -151,6 +164,18 @@ const char *ny_src_root(void) {
       *slash = '\0';
     }
   }
+
+  // Fallback to standard installation paths
+  const char *install_paths[] = {"/usr/share/nytrix", "/usr/local/share/nytrix",
+                                 "/opt/nytrix/share"};
+  for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]);
+       i++) {
+    if (nytrix_has_sources(install_paths[i])) {
+      snprintf(buf, sizeof(buf), "%s", install_paths[i]);
+      return buf;
+    }
+  }
+
   snprintf(buf, sizeof(buf), ".");
   return buf;
 }

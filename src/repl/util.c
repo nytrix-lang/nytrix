@@ -145,14 +145,24 @@ int is_input_complete(const char *src) {
 void print_incomplete_hint(const char *src) {
   int p, b, c;
   count_unclosed(src, &p, &b, &c);
-  if (p > 0)
-    printf("(missing %d ')') ", p);
-  if (b > 0)
-    printf("(missing %d ']') ", b);
-  if (c > 0)
-    printf("(missing %d '}') ", c);
-  if (p > 0 || b > 0 || c > 0)
-    printf("\n");
+  if (p > 0 || b > 0 || c > 0) {
+    printf("%s  ", clr(NY_CLR_GRAY));
+    if (p > 0)
+      printf("(missing %d ')') ", p);
+    if (b > 0)
+      printf("(missing %d ']') ", b);
+    if (c > 0)
+      printf("(missing %d '}') ", c);
+    printf("%s\n", clr(NY_CLR_RESET));
+  }
+}
+
+#include <sys/ioctl.h>
+int repl_is_input_pending(void) {
+  int n = 0;
+  if (ioctl(STDIN_FILENO, FIONREAD, &n) < 0)
+    return 0;
+  return n > 0;
 }
 
 int repl_calc_indent(const char *src) {
@@ -163,6 +173,8 @@ int repl_calc_indent(const char *src) {
 }
 
 int repl_pre_input_hook(void) {
+  if (repl_is_input_pending())
+    return 0;
   if (repl_indent_next > 0) {
     for (int i = 0; i < repl_indent_next; i++) {
       rl_insert_text(" ");

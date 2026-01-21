@@ -168,18 +168,28 @@ static void ny_std_init_modules(void) {
   struct stat st;
   if (stat(std_path, &st) == 0 && S_ISDIR(st.st_mode)) {
     scan_dir_recursive(std_path, std_path);
-  } else if (stat("src/std", &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive("src/std", "src/std");
   } else {
-    scan_dir_recursive("std", "std");
+    snprintf(std_path, sizeof(std_path), "%s/std", root);
+    if (stat(std_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      scan_dir_recursive(std_path, std_path);
+    } else if (stat("src/std", &st) == 0 && S_ISDIR(st.st_mode)) {
+      scan_dir_recursive("src/std", "src/std");
+    } else {
+      scan_dir_recursive("std", "std");
+    }
   }
 
   if (stat(lib_path, &st) == 0 && S_ISDIR(st.st_mode)) {
     scan_dir_recursive(lib_path, lib_path);
-  } else if (stat("src/lib", &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive("src/lib", "src/lib");
-  } else if (stat("lib", &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive("lib", "lib");
+  } else {
+    snprintf(lib_path, sizeof(lib_path), "%s/lib", root);
+    if (stat(lib_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      scan_dir_recursive(lib_path, lib_path);
+    } else if (stat("src/lib", &st) == 0 && S_ISDIR(st.st_mode)) {
+      scan_dir_recursive("src/lib", "src/lib");
+    } else if (stat("lib", &st) == 0 && S_ISDIR(st.st_mode)) {
+      scan_dir_recursive("lib", "lib");
+    }
   }
 
   if (ny_std_mods_len > 1) {
@@ -730,7 +740,12 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     const char *m = ny_std_prelude_list[i];
     if (m && *m) {
       char buf[256];
-      snprintf(buf, sizeof(buf), "use %s;", m);
+      // Expose core and io globally for convenience
+      if (strcmp(m, "std.core") == 0 || strcmp(m, "std.io") == 0) {
+        snprintf(buf, sizeof(buf), "use %s *;", m);
+      } else {
+        snprintf(buf, sizeof(buf), "use %s;", m);
+      }
       append_text(&bundle, &total, &cap, buf);
     }
   }

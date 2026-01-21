@@ -267,6 +267,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
             e->tok.filename ? e->tok.filename : "unknown", e->tok.line,
             e->tok.col, e->as.ident.name);
+    cg->had_error = 1;
     // Suggest
     const char *best = NULL;
     int best_d = 100;
@@ -631,8 +632,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
         if (!as_s)
           as_s = lookup_fun(cg, "std.core.append");
         if (!ls_s || !as_s) {
-          fprintf(stderr, "Error: variadic arguments require 'list' and "
-                          "'append' functions to be defined\n");
+          fprintf(stderr,
+                  "Error: variadic arguments require 'list' and "
+                  "'append' functions to be defined (missing std.core?)\n");
           cg->had_error = 1;
           return LLVMConstInt(cg->type_i64, 0, false);
         }

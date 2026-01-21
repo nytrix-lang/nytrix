@@ -138,12 +138,6 @@ static char **collect_use_modules(const char *src, size_t *out_count) {
   return uses;
 }
 
-static int is_std_or_lib_use(const char *name) {
-  return name &&
-         (strcmp(name, "std") == 0 || strcmp(name, "lib") == 0 ||
-          strncmp(name, "std.", 4) == 0 || strncmp(name, "lib.", 4) == 0);
-}
-
 static void append_std_prelude(char ***uses, size_t *len, size_t *cap) {
   size_t count = 0;
   const char **prelude = ny_std_prelude(&count);
@@ -158,15 +152,7 @@ static const char *resolve_std_bundle(const char *compile_time_path) {
     return env;
 
   static char path[4096];
-  const char *root = ny_src_root();
-  snprintf(path, sizeof(path), "%s/build/std_bundle.ny", root);
-  if (access(path, R_OK) == 0)
-    return path;
-
-  snprintf(path, sizeof(path), "%s/std_bundle.ny", root);
-  if (access(path, R_OK) == 0)
-    return path;
-
+  // 1. Check relative to binary
   char *exe_dir = ny_get_executable_dir();
   if (exe_dir) {
     snprintf(path, sizeof(path), "%s/std_bundle.ny", exe_dir);
@@ -177,7 +163,27 @@ static const char *resolve_std_bundle(const char *compile_time_path) {
       return path;
   }
 
-  return compile_time_path;
+  // 2. Check source root
+  const char *root = ny_src_root();
+  snprintf(path, sizeof(path), "%s/build/std_bundle.ny", root);
+  if (access(path, R_OK) == 0)
+    return path;
+  snprintf(path, sizeof(path), "%s/std_bundle.ny", root);
+  if (access(path, R_OK) == 0)
+    return path;
+
+  // 3. Fallback to compile-time path
+  if (compile_time_path && access(compile_time_path, R_OK) == 0)
+    return compile_time_path;
+
+  // 4. Hardcoded common paths
+  const char *common[] = {"/usr/share/nytrix/std_bundle.ny",
+                          "/usr/local/share/nytrix/std_bundle.ny"};
+  for (int i = 0; i < 2; i++)
+    if (access(common[i], R_OK) == 0)
+      return common[i];
+
+  return NULL;
 }
 
 static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
@@ -237,7 +243,7 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
 int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
   if (opt->mode == NY_MODE_VERSION) {
-    printf("Nytrix v0.1.01\n");
+    printf("Nytrix v0.1.2\n");
     return 0;
   }
   if (opt->mode == NY_MODE_HELP) {
@@ -285,13 +291,8 @@ int ny_pipeline_run(ny_options *opt) {
 
   std_mode_t std_mode = NY_STD_USE_LIST;
 
-  if (uses && use_count) {
-    for (size_t i = 0; i < use_count; i++) {
-      if (is_std_or_lib_use(uses[i])) {
-        append_std_prelude(&uses, &use_count, &use_cap);
-        break;
-      }
-    }
+  if (!opt->no_std) {
+    append_std_prelude(&uses, &use_count, &use_cap);
   }
   char *std_src = NULL;
   const char *prebuilt_path = resolve_std_bundle(
@@ -300,43 +301,81 @@ int ny_pipeline_run(ny_options *opt) {
           : (NYTRIX_STD_PATH ? NYTRIX_STD_PATH : "build/std_bundle.ny"));
 
   bool wants_full = (std_mode == NY_STD_FULL);
-  if (std_mode == NY_STD_USE_LIST) {
-    for (size_t i = 0; i < use_count; i++)
-      if (strcmp(uses[i], "std") == 0) {
-        wants_full = true;
-        break;
-      }
+  if (!opt->no_std) {
+    wants_full = true;
   }
 
   if (opt->no_std) {
     std_mode = NY_STD_NONE;
+    wants_full = false;
   }
 
   clock_t t_std = clock();
   if (prebuilt_path && access(prebuilt_path, R_OK) == 0 &&
       (std_mode == NY_STD_FULL ||
        (std_mode == NY_STD_USE_LIST && wants_full))) {
-    NY_LOG_INFO("Using prebuilt std bundle: %s\n", prebuilt_path);
+    if (verbose_enabled)
+      NY_LOG_INFO("Using prebuilt std bundle: %s\n", prebuilt_path);
     std_src = ny_read_file(prebuilt_path);
   } else if (std_mode != NY_STD_NONE) {
-    // NY_LOG_INFO("Building std bundle...\n");
+    // Fallback to building from individual files
     std_src = ny_build_std_bundle((const char **)uses, use_count, std_mode,
                                   opt->verbose, opt->input_file);
+  }
+
+  if (std_mode != NY_STD_NONE && !std_src) {
+    NY_LOG_ERR("Could not load standard library bundle or source files.\n");
+    NY_LOG_ERR("Checked paths: %s and %s/std\n",
+               prebuilt_path ? prebuilt_path : "NULL", ny_src_root());
+    return 1;
   }
   if (opt->do_timing)
     fprintf(stderr, "Stdlib load:  %.4fs\n",
             (double)(clock() - t_std) / CLOCKS_PER_SEC);
 
+  // 4. Construct final source with prelude + std + user
+  size_t plen = 0;
+  char *prelude = NULL;
+  if (!opt->no_std) {
+    size_t count = 0;
+    const char **p_list = ny_std_prelude(&count);
+    size_t cap = 1024;
+    prelude = malloc(cap);
+    prelude[0] = '\0';
+    for (size_t i = 0; i < count; ++i) {
+      char line[256];
+      if (strcmp(p_list[i], "std.core") == 0 ||
+          strcmp(p_list[i], "std.io") == 0) {
+        sprintf(line, "use %s *;\n", p_list[i]);
+      } else {
+        sprintf(line, "use %s;\n", p_list[i]);
+      }
+      size_t llen = strlen(line);
+      if (plen + llen + 1 > cap) {
+        cap *= 2;
+        prelude = realloc(prelude, cap);
+      }
+      strcpy(prelude + plen, line);
+      plen += llen;
+    }
+  }
+
   size_t slen = std_src ? strlen(std_src) : 0;
   size_t ulen = strlen(user_src);
-  char *source = malloc(slen + ulen + 2);
-  if (std_src) {
-    memcpy(source, std_src, slen);
-    source[slen] = '\n';
-    memcpy(source + slen + 1, user_src, ulen + 1);
-  } else {
-    memcpy(source, user_src, ulen + 1);
+  char *source = malloc(plen + slen + ulen + 3);
+  char *ptr = source;
+  if (prelude) {
+    memcpy(ptr, prelude, plen);
+    ptr += plen;
+    *ptr++ = '\n';
+    free(prelude);
   }
+  if (std_src) {
+    memcpy(ptr, std_src, slen);
+    ptr += slen;
+    *ptr++ = '\n';
+  }
+  memcpy(ptr, user_src, ulen + 1);
 
   const char *parse_name = opt->input_file ? opt->input_file : "<inline>";
   if (opt->dump_tokens) {
@@ -389,6 +428,10 @@ int ny_pipeline_run(ny_options *opt) {
   }
   NY_LOG_V2("Emitting script entry point...\n");
   LLVMValueRef script_fn = codegen_emit_script(&cg, "__script_top");
+  if (cg.had_error) {
+    NY_LOG_ERR("Codegen script entry failed\n");
+    return 1;
+  }
   if (opt->do_timing)
     fprintf(stderr, "Codegen:      %.4fs\n",
             (double)(clock() - t_codegen) / CLOCKS_PER_SEC);
@@ -428,12 +471,12 @@ int ny_pipeline_run(ny_options *opt) {
 
   if (opt->output_file) {
     char obj[4096];
-    sprintf(obj, "build/ny_tmp_%d.o", getpid());
+    sprintf(obj, "/tmp/ny_tmp_%d.o", getpid());
     ensure_aot_entry(&cg, script_fn);
     if (ny_llvm_emit_object(cg.module, obj)) {
       const char *cc = ny_builder_choose_cc();
       char rto[4096];
-      sprintf(rto, "build/ny_rt_%d.o", getpid());
+      sprintf(rto, "/tmp/ny_rt_%d.o", getpid());
       NY_LOG_V2("Compiling runtime to %s using %s (debug=%d)...\n", rto, cc,
                 opt->debug_symbols);
       if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols)) {

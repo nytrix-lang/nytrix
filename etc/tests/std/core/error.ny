@@ -16,31 +16,31 @@ assert_eq("hello", "hello", "strings equal")
 assert_eq([1, 2, 3], [1, 2, 3], "lists equal")
 
 fn test_catch(){
-	def caught = false
-	try {
-		panic("boom")
-	} catch e {
-		caught = true
-		if(e != "boom"){ panic("wrong error message") }
-	}
-	assert(caught, "should have caught panic")
+   def caught = false
+   try {
+      panic("boom")
+   } catch e {
+      caught = true
+      if(e != "boom"){ panic("wrong error message") }
+   }
+   assert(caught, "should have caught panic")
 }
 
 fn test_catch_nested(){
-	def code = 0
-	try {
-		try {
-			panic("inner")
-		} catch e {
-			code = 1
-			panic("outer")
-		}
-	} catch e2 {
-		if(code == 1 && e2 == "outer"){
-			code = 2
-		}
-	}
-	assert_eq(code, 2, "nested catch")
+   def code = 0
+   try {
+      try {
+         panic("inner")
+      } catch e {
+         code = 1
+         panic("outer")
+      }
+   } catch e2 {
+      if(code == 1 && e2 == "outer"){
+         code = 2
+      }
+   }
+   assert_eq(code, 2, "nested catch")
 }
 
 test_catch()

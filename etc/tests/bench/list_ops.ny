@@ -6,15 +6,15 @@ def start = ticks()
 lst = []
 i = 0
 while(i < 1000){
-	lst = append(lst, i)
-	i = i + 1
+   lst = append(lst, i)
+   i = i + 1
 }
 
 assert(len(lst) == 1000, "list size")
 
 sum = 0
 for(x in lst){
-	sum = sum + x
+   sum = sum + x
 }
 
 def end = ticks()
