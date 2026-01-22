@@ -1,3 +1,3 @@
-use test.runtime.imports.diamond.d as d
+use d
 module b ( val )
-fn val(){ return d.val() }
+fn val(){ return val() }

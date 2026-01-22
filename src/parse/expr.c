@@ -71,7 +71,7 @@ static expr_t *parse_fstring(parser_t *p, token_t tok) {
         // Keep arena_t state in sync called parser_init_with_arena which takes
         // arena_t ptr But sub.arena_t is same pointer. Allocations happened on
         // it. p->arena doesn't change typically.
-        fstring_part_t part = {NY_FSP_EXPR, {.e = sub_e}};
+        fstring_pa__t part = {.kind = NY_FSP_EXPR, .as.e = sub_e};
         vec_push(&e->as.fstring.parts, part);
         i++; // skip '}'
       } else {
@@ -86,7 +86,7 @@ static expr_t *parse_fstring(parser_t *p, token_t tok) {
         else
           i++;
       }
-      fstring_part_t part;
+      fstring_pa__t part;
       part.kind = NY_FSP_STR;
       part.as.s.data =
           decode_fstring_part(p, s + start, i - start, &part.as.s.len);

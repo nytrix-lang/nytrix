@@ -9,7 +9,6 @@ fn count_lines(path){
    if(len(src) == 0){ return [0, 0] }
    def code = 0
    def cmts = 0
-
    for l in split(src, "\n") {
       def line = strip(l)
       if(len(line) > 0){
@@ -26,7 +25,6 @@ fn count_lines(path){
 fn collect_files(dir, out_list){
    def items = listdir(dir)
    if(!items){ return out_list }
-
    for name in items {
       if(name == "." || name == ".." || name == ".git" || name == "build"){
          continue
@@ -47,10 +45,8 @@ print(f"{pad_end('File', 40)} Code  Comments")
 
 def all_files = []
 all_files = collect_files(".", all_files)
-
 def total_code = 0
 def total_cmts = 0
-
 for p in all_files {
    def res = count_lines(p)
    def c = res[0]

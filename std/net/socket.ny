@@ -71,15 +71,15 @@ fn socket_connect(host, port){
       ip = gethostbyname(host)
    }
    if(ip == 0){ return -1 }
-   def fd = rt_syscall(41, 2, 1, 0, 0,0,0) ; "AF_INET, SOCK_STREAM"
+   def fd = __syscall(41, 2, 1, 0, 0,0,0) ; "AF_INET, SOCK_STREAM"
    if(fd < 0){ return -1 }
-   def sa = rt_malloc(16)
+   def sa = __malloc(16)
    store16(sa, 2, 0)
    store16(sa, htons(port), 2)
    store32(sa, ip, 4)
    store64(sa, 0, 8)
-   if(rt_syscall(42, fd, sa, 16, 0,0,0) < 0){
-      rt_syscall(3, fd, 0,0,0,0,0)
+   if(__syscall(42, fd, sa, 16, 0,0,0) < 0){
+      __syscall(3, fd, 0,0,0,0,0)
       return -1
    }
    return fd
@@ -88,32 +88,32 @@ fn socket_connect(host, port){
 fn socket_bind(host, port){
    "Create a TCP socket, binds it to the specified host and port, and starts listening. Returns the file descriptor or -1 on error."
    def ip = ipv4_parse(host)
-   def fd = rt_syscall(41, 2, 1, 0, 0,0,0) "AF_INET, SOCK_STREAM"
+   def fd = __syscall(41, 2, 1, 0, 0,0,0) "AF_INET, SOCK_STREAM"
    if(fd < 0){ return -1 }
    ; Allow port reuse
-   def opt = rt_malloc(4)
+   def opt = __malloc(4)
    store32(opt, 1)
-   rt_syscall(54, fd, 1, 2, opt, 4, 0) ; "SOL_SOCKET, SO_REUSEADDR"
-   def sa = rt_malloc(16)
+   __syscall(54, fd, 1, 2, opt, 4, 0) ; "SOL_SOCKET, SO_REUSEADDR"
+   def sa = __malloc(16)
    store16(sa, 2, 0)
    store16(sa, htons(port), 2)
    store32(sa, ip, 4)
    store64(sa, 0, 8)
-   if(rt_syscall(49, fd, sa, 16, 0,0,0) < 0){ return -1 } ; "bind"
-   if(rt_syscall(50, fd, 128, 0, 0,0,0) < 0){ return -1 } ; "listen"
+   if(__syscall(49, fd, sa, 16, 0,0,0) < 0){ return -1 } ; "bind"
+   if(__syscall(50, fd, 128, 0, 0,0,0) < 0){ return -1 } ; "listen"
    return fd
 }
 
 fn socket_accept(server_fd){
    "Accepts an incoming connection on a listening socket. Returns the client file descriptor."
-   return rt_syscall(43, server_fd, 0, 0, 0,0,0) ; "accept"
+   return __syscall(43, server_fd, 0, 0, 0,0,0) ; "accept"
 }
 
 fn read_socket(fd, max_len){
    "Reads up to `max_len` bytes from a socket. Returns the data as a string."
-   def buf = rt_malloc(max_len + 1)
+   def buf = __malloc(max_len + 1)
    store64(buf - 8, 120)
-   def n = rt_syscall(0, fd, buf, max_len, 0,0,0)
+   def n = __syscall(0, fd, buf, max_len, 0,0,0)
    if(n < 0){ n = 0 }
    store8(buf, 0, n)
    return buf
@@ -121,10 +121,10 @@ fn read_socket(fd, max_len){
 
 fn write_socket(fd, data){
    "Writes data to a socket."
-   return rt_syscall(1, fd, data, str_len(data), 0,0,0)
+   return __syscall(1, fd, data, str_len(data), 0,0,0)
 }
 
 fn close_socket(fd){
    "Closes a socket file descriptor."
-   return rt_syscall(3, fd, 0,0,0,0,0)
+   return __syscall(3, fd, 0,0,0,0,0)
 }

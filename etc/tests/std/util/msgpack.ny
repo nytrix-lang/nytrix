@@ -41,13 +41,13 @@ fn test_encode_decode_list(){
 
 fn test_encode_decode_dict(){
    def d = dict()
-   setitem(d, "a", 1)
-   setitem(d, "b", "two")
+   dict_set(d, "a", 1)
+   dict_set(d, "b", "two")
    def encoded = msgpack_encode(d)
    def decoded = msgpack_decode(encoded)
    assert(list_len(decoded) == 2, "decoded dict length")
-   assert(getitem(decoded, "a") == 1, "decoded dict item 'a'")
-   assert(eq(getitem(decoded, "b"), "two"), "decoded dict item 'b'")
+   assert(dict_get(decoded, "a") == 1, "decoded dict item 'a'")
+   assert(eq(dict_get(decoded, "b"), "two"), "decoded dict item 'b'")
 }
 
 test_encode_decode_int()

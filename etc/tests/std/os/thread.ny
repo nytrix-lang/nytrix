@@ -6,7 +6,7 @@ use std.collections
 fn test_threads() {
    print("Testing Threads...")
    ; Alloc shared counter
-   def counter_ptr = rt_malloc(8)
+   def counter_ptr = __malloc(8)
    store64(counter_ptr, 0)
    def mtx = mutex_new()
    def ptr_val = load64(counter_ptr)
@@ -33,7 +33,7 @@ fn test_threads() {
    print("Final counter:", final)
    assert(final == 3, "thread mutex counter")
    mutex_free(mtx)
-   rt_free(counter_ptr)
+   __free(counter_ptr)
    print("✓ std.os.thread passed")
 }
 

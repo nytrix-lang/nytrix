@@ -12,10 +12,10 @@ fn inspect(x){
    print(f"Type:  {t}")
    print(f"Value: {repr(x)}")
    if(t == "list" || t == "dict" || t == "set"){
-      print(f"Len:   {itoa(len(x))}")
+      print(f"Len:   {to_str(len(x))}")
    }
    if(is_ptr(x)){
-      print(f"Addr:  0x{itoa(x)}") ; itoa doesn't do hex but we see large num
+      print(f"Addr:  0x{to_str(x)}") ; itoa doesn't do hex but we see large num
    }
    return 0
 }

@@ -6,7 +6,7 @@ fn test_memcpy(){
    def s = "hello world"
    def n = str_len(s)
    def d = malloc(n + 1)
-   rt_init_str(d, n)
+   __init_str(d, n)
    memcpy(d, s, n)
    store8(d, 0, n)
    assert(_str_eq(d, s), "memcpy works")

@@ -5,13 +5,13 @@ use std.core.error
 fn test_queue_basic(){
    print("Testing queue basic...")
    def q = queue()
-   assert(queue_size(q) == 0, "size 0")
-   q = enqueue(q, 1)
-   q = enqueue(q, 2)
-   assert(queue_size(q) == 2, "size 2")
-   assert(dequeue(q) == 1, "dequeue 1")
-   assert(dequeue(q) == 2, "dequeue 2")
-   assert(queue_size(q) == 0, "size 0")
+   assert(queue_len(q) == 0, "size 0")
+   q = queue_push(q, 1)
+   q = queue_push(q, 2)
+   assert(queue_len(q) == 2, "size 2")
+   assert(queue_pop(q) == 1, "dequeue 1")
+   assert(queue_pop(q) == 2, "dequeue 2")
+   assert(queue_len(q) == 0, "size 0")
    print("Basic queue passed")
 }
 
@@ -22,17 +22,17 @@ fn test_queue_stress(){
    def i = 0
    ; Enqueue 100
    while(i < n){
-      q = enqueue(q, i)
+      q = queue_push(q, i)
       i = i + 1
    }
-   assert(queue_size(q) == n, "Size 100")
+   assert(queue_len(q) == n, "Size 100")
    ; Dequeue 100
    i = 0
    while(i < n){
-      assert(dequeue(q) == i, "Dequeued correct val")
+      assert(queue_pop(q) == i, "Dequeued correct val")
       i = i + 1
    }
-   assert(queue_size(q) == 0, "Empty after stress")
+   assert(queue_len(q) == 0, "Empty after stress")
    print("Stress queue passed")
 }
 

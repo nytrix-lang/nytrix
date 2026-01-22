@@ -2,17 +2,17 @@ use std.core
 use std.io
 
 fn test_memory() {
-   print("Testing rt_malloc/rt_load8/rt_store8...")
-   def p = rt_malloc(10)
+   print("Testing __malloc/__load8/__store8...")
+   def p = __malloc(10)
    assert(p != 0, "malloc success")
-   rt_store8(p, 65)
-   rt_store8_idx(p, 1, 66)
-   assert(rt_load8(p) == 65, "load8 index 0")
-   assert(rt_load8_idx(p, 1) == 66, "load8 index 1")
+   __store8_idx(p, 0, 65)
+   __store8_idx(p, 1, 66)
+   assert(__load8_idx(p, 0) == 65, "load8 index 0")
+   assert(__load8_idx(p, 1) == 66, "load8 index 1")
    ; Test offset arithmetic
    def offset = 1
-   assert(rt_load8_idx(p, offset) == 66, "load8 with variable offset")
-   rt_free(p)
+   assert(__load8_idx(p, offset) == 66, "load8 with variable offset")
+   __free(p)
    print("✓ Memory primitives passed")
 }
 

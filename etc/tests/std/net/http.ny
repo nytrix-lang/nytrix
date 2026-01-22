@@ -14,7 +14,7 @@ assert(eq(get(part, 2), "/foo"), "http parse path")
 
 ; Test query parsing
 def q = http_parse_query("a=1&b=2")
-assert(eq(getitem(q, "a"), "1"), "query a")
-assert(eq(getitem(q, "b"), "2"), "query b")
+assert(eq(dict_get(q, "a"), "1"), "query a")
+assert(eq(dict_get(q, "b"), "2"), "query b")
 
 print("✓ std.net.http passed")

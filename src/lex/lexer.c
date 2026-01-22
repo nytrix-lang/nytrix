@@ -53,7 +53,7 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.lexeme = lx->src + start;
   tok.len = lx->pos - start;
   // For simplicity, line/col are at the END of token_t or current.
-  // Ideally we should track start_line/col. But parsing error reporting usually
+  // Ideally we should track sta__line/col. But parsing error reporting usually
   // handles "current token_t" pointing to valid location.
   tok.line = lx->line;
   tok.col = lx->col - (int)tok.len; // Approximate start col

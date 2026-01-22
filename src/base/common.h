@@ -8,6 +8,13 @@
 #include <string.h>
 #include <unistd.h>
 
+typedef enum {
+  STD_MODE_DEFAULT,
+  STD_MODE_NONE,
+  STD_MODE_FULL,
+  STD_MODE_MINIMAL,
+} std_mode_t;
+
 extern int color_mode;
 
 static inline bool color_enabled(void) {

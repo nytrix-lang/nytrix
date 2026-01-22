@@ -1,90 +1,93 @@
 ;; Keywords: cli mod
 ;; Cli Mod module.
 
-use std.strings.str
-use std.core.reflect
-use std.collections
 module std.cli (
-   argc, argv, args, has_flag, get_flag, parse_args
+   argc, argv, args, contains_flag, get_flag, parse_args
 )
 
 fn argc(){
-   "Argument count."
-   return rt_argc()  }
+   "Returns the number of command-line arguments."
+   __argc()
+}
 
 fn argv(i){
-   "Argument pointer by index."
-   return rt_argv(i)  }
+   "Returns the command-line argument string at index `i`."
+   __argv(i)
+}
 
 fn args(){
-   "All args as list of strings."
-   def n = rt_argc()
+   "Returns a [[std.core::list]] of all command-line arguments."
+   def n = __argc()
    def xs = list(8)
    def i = 0
    while(i < n){
-      xs = append(xs, rt_argv(i))
-      i = i + 1
+      xs = append(xs, __argv(i))
+      i += 1
    }
-   return xs
+   xs
 }
 
-fn has_flag(flag){
-   "Check if flag exists (exact ismatch)."
+fn contains_flag(flag){
+   "Checks if the specific `flag` (e.g., '--verbose') is present in the command-line arguments."
    def xs = args()
-   def i = 0  n = list_len(xs)
+   def i = 0  def n = list_len(xs)
    while(i < n){
-      if(eq(get(xs, i), flag)==1){ return 1  }
-      i = i + 1
+      if(eq(get(xs, i), flag)){ return true }
+      i += 1
    }
-   return 0
+   false
 }
 
 fn get_flag(flag, default=0){
-   "Get flag value: returns next arg or default."
+   "Retrieves the value associated with `flag`. Returns the next argument or `default` if the flag is missing or has no value."
    def xs = args()
-   def i = 0  n = list_len(xs)
+   def i = 0  def n = list_len(xs)
    while(i < n){
-      if(eq(get(xs, i), flag)==1){
-         if(i + 1 < n){ return get(xs, i+1)  }
-         return default
+      if(eq(get(xs, i), flag)){
+         if(i + 1 < n){ return get(xs, i + 1) }
+         break
       }
-      i = i + 1
+      i += 1
    }
-   return default
+   default
 }
 
 fn parse_args(xs){
-   "Parse args into {flags: dict, pos: list}."
+   "Parses a list of arguments `xs` into a dictionary with 'flags' and 'pos' (positional arguments)."
    def flags = dict(16)
    def pos = list(8)
-   def i =0  n=list_len(xs)
-   while(i<n){
-      def a = get(xs,i)
+   def i = 0  def n = list_len(xs)
+   while(i < n){
+      def a = get(xs, i)
       if(startswith(a, "--")){
-         if(len(a)==2){ pos = append(pos, a)  i=i+1  continue  }
+         if(len(a) == 2){
+            pos = append(pos, a)
+            i += 1
+            continue
+         }
          def eqi = find(a, "=")
          if(eqi >= 0){
             def k = strip(slice(a, 2, eqi))
-            def v = strip(slice(a, eqi+1, len(a)))
-            setitem(flags, k, v)
+            def v = strip(slice(a, eqi + 1, len(a)))
+            dict_set(flags, k, v)
          } else {
-            setitem(flags, slice(a, 2, len(a)), 1)
+            dict_set(flags, slice(a, 2, len(a)), 1)
          }
-      } else if(startswith(a, "-")){
-         if(len(a)==2 && i+1<n && !startswith(get(xs,i+1), "-")){
-            setitem(flags, slice(a,1,2), get(xs,i+1))
-            i=i+1
+      } elif(startswith(a, "-")){
+         if(len(a) == 2 && i + 1 < n && !startswith(get(xs, i+1), "-")){
+            dict_set(flags, slice(a, 1, 2), get(xs, i+1))
+            i += 1
          } else {
-            def j =1
-            while(j<len(a)){
-               setitem(flags, slice(a,j,j+1), 1)
-               j=j+1
+            def j = 1
+            while(j < len(a)){
+               dict_set(flags, slice(a, j, j + 1), 1)
+               j += 1
             }
          }
       } else {
          pos = append(pos, a)
       }
-      i=i+1
+      i += 1
    }
    return {"flags": flags, "pos": pos}
 }

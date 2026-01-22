@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nytrix Tidy
+Nytrix Tidy Formatter
 """
 import os,sys,subprocess,re
 

@@ -35,18 +35,18 @@ fn test_search(){
    def s = "banana"
    print("s ptr check:")
    if(is_ptr(s)){ print("s is ptr (aligned)") } else { print("s is NOT ptr (unaligned?)") }
-   ; print("s addr approx: ", itoa(s)) ; itoa might fail/box. s is ptr.
+   ; print("s addr approx: ", to_str(s)) ; itoa might fail/box. s is ptr.
    ; Debug count
    def sub = "a"
    def n = str_len(s)
    def m = str_len(sub)
-   print("banana len:", itoa(n))
-   print("a len:", itoa(m))
+   print("banana len:", to_str(n))
+   print("a len:", to_str(m))
    assert(find(s, "nan") == 2, "find nan")
    assert(find(s, "z") == -1, "find missing")
    assert(find(s, "ana") >= 0, "contains")
    def c1 = count(s, "a")
-   print("count(banana, a) =", itoa(c1))
+   print("count(banana, a) =", to_str(c1))
    assert(c1 == 3, "count a")
    assert(count(s, "an") == 2, "count an")
 }
@@ -85,7 +85,7 @@ fn test_conversion(){
    assert(atoi("123") == 123, "atoi 123")
    assert(atoi("-456") == -456, "atoi -456")
    assert(atoi("   789") == 789, "atoi whitespace")
-   assert(eq(itoa(123), "123"), "itoa 123")
+   assert(eq(to_str(123), "123"), "itoa 123")
 }
 
 fn test_case_trim(){

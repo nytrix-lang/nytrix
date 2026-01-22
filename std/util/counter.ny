@@ -14,8 +14,8 @@ fn counter(xs){
    def i = 0  def n = len(xs)
    while(i < n){
       def v = get(xs, i)
-      def c = getitem(d, v, 0)
-      d = setitem(d, v, c + 1)
+      def c = dict_get(d, v, 0)
+      d = dict_set(d, v, c + 1)
       i = i + 1
    }
    return d
@@ -23,8 +23,8 @@ fn counter(xs){
 
 fn counter_add(d, key, n){
    "Increment counter."
-   def c = getitem(d, key, 0)
-   return setitem(d, key, c + n)
+   def c = dict_get(d, key, 0)
+   return dict_set(d, key, c + n)
 }
 
 fn most_common(d){

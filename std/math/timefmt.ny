@@ -39,25 +39,26 @@ fn _ensure_fns(){
 }
 
 fn format_time(ts){
+   "Formats Unix timestamp `ts` into a UTC string (YYYY-MM-DD HH:MM:SS) using libc **strftime**."
    _ensure_fns()
    def raw = to_int(ts)
-   def tbuf = rt_malloc(8)
+   def tbuf = __malloc(8)
    store64(tbuf, raw, 0)
-   def tm_buf = rt_malloc(128)
+   def tm_buf = __malloc(128)
    def got = call2(_gmtime_r_fn, tbuf, tm_buf)
-   rt_free(tbuf)
+   __free(tbuf)
    if(got == 0){
-      rt_free(tm_buf)
+      __free(tm_buf)
       panic("timefmt: gmtime_r failed")
    }
-   def out = rt_malloc(32)
+   def out = __malloc(32)
    def len = call4(_strftime_fn, out, 32, "%Y-%m-%d %H:%M:%S", tm_buf)
-   rt_free(tm_buf)
+   __free(tm_buf)
    if(len == 0){
-      rt_free(out)
+      __free(out)
       panic("timefmt: strftime failed")
    }
    def result = cstr_to_str(out)
-   rt_free(out)
+   __free(out)
    return result
 }

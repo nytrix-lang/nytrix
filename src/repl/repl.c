@@ -29,12 +29,14 @@ void ny_repl_set_plain(int plain) { g_repl_plain = plain; }
 
 static const char *repl_std_mode_name(std_mode_t mode) {
   switch (mode) {
-  case NY_STD_NONE:
+  case STD_MODE_NONE:
     return "none";
-  case NY_STD_FULL:
+  case STD_MODE_FULL:
     return "full";
-  case NY_STD_USE_LIST:
-    return "use";
+  case STD_MODE_DEFAULT:
+    return "default";
+  case STD_MODE_MINIMAL:
+    return "minimal";
   default:
     return "unknown";
   }
@@ -48,20 +50,20 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (g_repl_plain || (plain && plain[0] != '0') || !isatty(STDOUT_FILENO)) {
     color_mode = 0;
   }
-  std_mode_t std_mode = NY_STD_FULL;
-  if (g_repl_std_override != (std_mode_t)-1)
+  std_mode_t std_mode = STD_MODE_DEFAULT;
+  if (g_repl_std_override != STD_MODE_DEFAULT)
     std_mode = g_repl_std_override;
   else {
     const char *env_std = getenv("NYTRIX_REPL_STD");
     if (env_std) {
       if (strcmp(env_std, "none") == 0)
-        std_mode = NY_STD_NONE;
+        std_mode = STD_MODE_NONE;
       else if (strcmp(env_std, "full") == 0)
-        std_mode = NY_STD_FULL;
+        std_mode = STD_MODE_FULL;
     }
   }
   if (getenv("NYTRIX_REPL_NO_STD"))
-    std_mode = NY_STD_NONE;
+    std_mode = STD_MODE_NONE;
   doc_list_t docs = {0};
   g_repl_docs = &docs;
   add_builtin_docs(&docs);
@@ -82,7 +84,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   /* LLVM initialization moved into evaluation loop for isolation. */
   char *std_src_cached = NULL;
-  if (std_mode != NY_STD_NONE) {
+  if (std_mode != STD_MODE_NONE) {
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
     if (!prebuilt || access(prebuilt, R_OK) != 0) {
 #ifdef NYTRIX_STD_PATH
@@ -203,10 +205,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     } else {
       const char *mode_tag = "";
       char mode_buf[16];
-      if (std_mode == NY_STD_NONE) {
+      if (std_mode == STD_MODE_NONE) {
         snprintf(mode_buf, sizeof(mode_buf), "[none]");
         mode_tag = mode_buf;
-      } else if (std_mode == NY_STD_FULL) {
+      } else if (std_mode == STD_MODE_FULL) {
         snprintf(mode_buf, sizeof(mode_buf), "[full]");
         mode_tag = mode_buf;
       }
@@ -454,7 +456,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           // Ideally util.c should provide `repl_reset_source()`.
           // I will assume for now it's fine or I will miss this detail.
         }
-        if (std_mode != NY_STD_NONE) {
+        if (std_mode != STD_MODE_NONE) {
           std_src_cached = ny_build_std_bundle(NULL, 0, std_mode, 0, NULL);
           if (std_src_cached) {
             parser_t ps;
@@ -604,8 +606,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       is_stmt = 1;
     if (!is_stmt && !strncmp(ltrim(full_input), "print", 5))
       is_stmt = 1;
-    int show = (!is_stmt && std_mode != NY_STD_NONE && tty_in);
-    int show_an = (an && std_mode != NY_STD_NONE && tty_in);
+    int show = (!is_stmt && std_mode != STD_MODE_NONE && tty_in);
+    int show_an = (an && std_mode != STD_MODE_NONE && tty_in);
     const char *fn_name = "__repl_eval";
     size_t blen = strlen(full_input) + (an ? strlen(an) : 0) + 128;
     char *body = malloc(blen);

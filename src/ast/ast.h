@@ -38,12 +38,9 @@ typedef enum lit_kind_t {
 typedef struct expr_t expr_t;
 typedef struct stmt_t stmt_t;
 
-typedef enum fstring_part_kind_t {
-  NY_FSP_STR,
-  NY_FSP_EXPR
-} fstring_part_kind_t;
-typedef struct fstring_part_t {
-  fstring_part_kind_t kind;
+typedef enum fstring_pa__kind_t { NY_FSP_STR, NY_FSP_EXPR } fstring_pa__kind_t;
+typedef struct fstring_pa__t {
+  fstring_pa__kind_t kind;
   union {
     struct {
       const char *data;
@@ -51,8 +48,8 @@ typedef struct fstring_part_t {
     } s;
     expr_t *e;
   } as;
-} fstring_part_t;
-typedef VEC(fstring_part_t) ny_fstring_part_list;
+} fstring_pa__t;
+typedef VEC(fstring_pa__t) ny_fstring_pa__list;
 
 typedef struct match_arm_t {
   VEC(struct expr_t *) patterns;
@@ -166,7 +163,7 @@ struct expr_t {
       struct stmt_t *body;
     } comptime_expr;
     struct {
-      ny_fstring_part_list parts;
+      ny_fstring_pa__list parts;
     } fstring;
     struct {
       const char *name;
@@ -200,9 +197,9 @@ typedef enum stmt_kind_t {
   NY_S_EXPORT,
 } stmt_kind_t;
 
-typedef struct stmt_export_t {
+typedef struct stmt_expo__t {
   VEC(const char *) names;
-} stmt_export_t;
+} stmt_expo__t;
 
 typedef struct stmt_defer_t {
   struct stmt_t *body;
@@ -295,7 +292,7 @@ struct stmt_t {
       const char *module;
       const char *alias;
       bool is_local;
-      bool import_all;
+      bool impo_all;
       ny_use_item_list imports;
     } use;
     stmt_var_t var;
@@ -316,11 +313,11 @@ struct stmt_t {
     struct {
       const char *name;
       ny_stmt_list body;
-      bool export_all;
+      bool expo_all;
       const char *src_start;
       const char *src_end;
     } module;
-    stmt_export_t exprt;
+    stmt_expo__t exprt;
   } as;
 };
 

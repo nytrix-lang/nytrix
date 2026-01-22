@@ -1,12 +1,7 @@
 #pragma once
 
+#include "base/common.h"
 #include <stddef.h>
-
-typedef enum std_mode_t {
-  NY_STD_NONE = 0,
-  NY_STD_USE_LIST = 1,
-  NY_STD_FULL = 2,
-} std_mode_t;
 
 // Build a std bundle in dependency-safe order.
 // modules: list of names (e.g., "std", "core", "io", "core.core", "std.io")

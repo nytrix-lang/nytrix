@@ -1,9 +1,9 @@
 ;; Keywords: math nt
 ;; Math Nt module.
 
+use std.math
 use std.core
 use std.core.reflect
-use std.math ; for abs, mod
 module std.math.nt (
    egcd, modinv, pow_mod, is_prime, next_prime
 )

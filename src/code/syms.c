@@ -8,95 +8,95 @@ struct builtin_def {
   const char *name;
   int args;
 } builtin_defs[] = {
-    {"rt_malloc", 1},
-    {"rt_free", 1},
-    {"rt_realloc", 2},
-    {"rt_memcpy", 3},
-    {"rt_memset", 3},
-    {"rt_memcmp", 3},
-    {"rt_load8_idx", 2},
-    {"rt_load16_idx", 2},
-    {"rt_load32_idx", 2},
-    {"rt_load64_idx", 2},
-    {"rt_store8_idx", 3},
-    {"rt_store16_idx", 3},
-    {"rt_store32_idx", 3},
-    {"rt_store64_idx", 3},
-    {"rt_sys_read_off", 4},
-    {"rt_sys_write_off", 4},
-    {"rt_add", 2},
-    {"rt_sub", 2},
-    {"rt_mul", 2},
-    {"rt_div", 2},
-    {"rt_mod", 2},
-    {"rt_and", 2},
-    {"rt_or", 2},
-    {"rt_xor", 2},
-    {"rt_shl", 2},
-    {"rt_shr", 2},
-    {"rt_not", 1},
-    {"rt_str_concat", 2},
-    {"rt_eq", 2},
-    {"rt_lt", 2},
-    {"rt_le", 2},
-    {"rt_gt", 2},
-    {"rt_ge", 2},
-    {"rt_is_int", 1},
-    {"rt_is_ptr", 1},
-    {"rt_is_str", 1},
-    {"rt_is_flt", 1},
-    {"rt_to_str", 1},
-    {"rt_panic", 1},
-    {"rt_argc", 0},
-    {"rt_argv", 1},
-    {"rt_envp", 0},
-    {"rt_envc", 0},
-    {"rt_errno", 0},
-    {"rt_syscall", 7},
-    {"rt_execve", 3},
-    {"rt_dlopen", 2},
-    {"rt_dlsym", 2},
-    {"rt_dlclose", 1},
-    {"rt_dlerror", 0},
-    {"rt_globals", 0},
-    {"rt_set_globals", 1},
-    {"rt_get_panic_val", 0},
-    {"rt_set_panic_env", 1},
-    {"rt_clear_panic_env", 0},
-    {"rt_jmpbuf_size", 0},
-    {"rt_thread_spawn", 2},
-    {"rt_thread_join", 1},
-    {"rt_mutex_new", 0},
-    {"rt_mutex_lock64", 1},
-    {"rt_mutex_unlock64", 1},
-    {"rt_mutex_free", 1},
-    {"rt_kwarg", 2},
-    {"rt_parse_ast", 1},
-    {"rt_set_args", 3},
-    {"rt_flt_from_int", 1},
-    {"rt_flt_to_int", 1},
-    {"rt_flt_trunc", 1},
-    {"rt_flt_add", 2},
-    {"rt_flt_sub", 2},
-    {"rt_flt_mul", 2},
-    {"rt_flt_div", 2},
-    {"rt_flt_lt", 2},
-    {"rt_flt_gt", 2},
-    {"rt_flt_eq", 2},
-    {"rt_flt_box_val", 1},
-    {"rt_flt_unbox_val", 1},
-    {"rt_rand64", 0},
-    {"rt_srand", 1},
+    {"__malloc", 1},
+    {"__free", 1},
+    {"__realloc", 2},
+    {"__memcpy", 3},
+    {"__memset", 3},
+    {"__memcmp", 3},
+    {"__load8_idx", 2},
+    {"__load16_idx", 2},
+    {"__load32_idx", 2},
+    {"__load64_idx", 2},
+    {"__store8_idx", 3},
+    {"__store16_idx", 3},
+    {"__store32_idx", 3},
+    {"__store64_idx", 3},
+    {"__sys_read_off", 4},
+    {"__sys_write_off", 4},
+    {"__add", 2},
+    {"__sub", 2},
+    {"__mul", 2},
+    {"__div", 2},
+    {"__mod", 2},
+    {"__and", 2},
+    {"__or", 2},
+    {"__xor", 2},
+    {"__shl", 2},
+    {"__shr", 2},
+    {"__not", 1},
+    {"__str_concat", 2},
+    {"__eq", 2},
+    {"__lt", 2},
+    {"__le", 2},
+    {"__gt", 2},
+    {"__ge", 2},
+    {"__is_int", 1},
+    {"__is_ptr", 1},
+    {"__is_str", 1},
+    {"__is_flt", 1},
+    {"__to_str", 1},
+    {"__panic", 1},
+    {"__argc", 0},
+    {"__argv", 1},
+    {"__envp", 0},
+    {"__envc", 0},
+    {"__errno", 0},
+    {"__syscall", 7},
+    {"__execve", 3},
+    {"__dlopen", 2},
+    {"__dlsym", 2},
+    {"__dlclose", 1},
+    {"__dlerror", 0},
+    {"__globals", 0},
+    {"__set_globals", 1},
+    {"__get_panic_val", 0},
+    {"__set_panic_env", 1},
+    {"__clear_panic_env", 0},
+    {"__jmpbuf_size", 0},
+    {"__thread_spawn", 2},
+    {"__thread_join", 1},
+    {"__mutex_new", 0},
+    {"__mutex_lock64", 1},
+    {"__mutex_unlock64", 1},
+    {"__mutex_free", 1},
+    {"__kwarg", 2},
+    {"__parse_ast", 1},
+    {"__set_args", 3},
+    {"__flt_from_int", 1},
+    {"__flt_to_int", 1},
+    {"__flt_trunc", 1},
+    {"__flt_add", 2},
+    {"__flt_sub", 2},
+    {"__flt_mul", 2},
+    {"__flt_div", 2},
+    {"__flt_lt", 2},
+    {"__flt_gt", 2},
+    {"__flt_eq", 2},
+    {"__flt_box_val", 1},
+    {"__flt_unbox_val", 1},
+    {"__rand64", 0},
+    {"__srand", 1},
 };
 
 bool builtin_allowed_comptime(const char *name) {
   // Disallow non-deterministic or system-interacting builtins at comptime.
   static const char *deny[] = {
-      "rt_argc",        "rt_argv",     "rt_envp",      "rt_envc",
-      "rt_errno",       "rt_syscall",  "rt_execve",    "rt_dlopen",
-      "rt_dlsym",       "rt_dlclose",  "rt_dlerror",   "rt_thread_spawn",
-      "rt_thread_join", "rt_rand64",   "rt_srand",     "rt_globals",
-      "rt_set_globals", "rt_set_args", "rt_parse_ast", NULL,
+      "__argc",        "__argv",     "__envp",      "__envc",
+      "__errno",       "__syscall",  "__execve",    "__dlopen",
+      "__dlsym",       "__dlclose",  "__dlerror",   "__thread_spawn",
+      "__thread_join", "__rand64",   "__srand",     "__globals",
+      "__set_globals", "__set_args", "__parse_ast", NULL,
   };
   for (int i = 0; deny[i]; ++i) {
     if (strcmp(name, deny[i]) == 0)
@@ -124,7 +124,7 @@ void add_builtins(codegen_t *cg) {
                       cg->type_i64, cg->type_i64, cg->type_i64},
       7, 0);
   for (size_t i = 0; i < sizeof(builtin_defs) / sizeof(builtin_defs[0]); ++i) {
-    if (cg->is_comptime && !builtin_allowed_comptime(builtin_defs[i].name))
+    if (cg->comptime && !builtin_allowed_comptime(builtin_defs[i].name))
       continue;
     LLVMTypeRef ty = NULL;
     switch (builtin_defs[i].args) {
@@ -162,11 +162,11 @@ void add_builtins(codegen_t *cg) {
     vec_push(&cg->fun_sigs, sig);
 
     // Alias common runtime functions
-    if (strcmp(builtin_defs[i].name, "rt_argc") == 0) {
+    if (strcmp(builtin_defs[i].name, "__argc") == 0) {
       fun_sig alias = sig;
       alias.name = strdup("argc");
       vec_push(&cg->fun_sigs, alias);
-    } else if (strcmp(builtin_defs[i].name, "rt_argv") == 0) {
+    } else if (strcmp(builtin_defs[i].name, "__argv") == 0) {
       fun_sig alias = sig;
       alias.name = strdup("argv");
       vec_push(&cg->fun_sigs, alias);
@@ -174,7 +174,7 @@ void add_builtins(codegen_t *cg) {
   }
   for (int n = 0; n <= 13; n++) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "rt_call%d", n);
+    snprintf(buf, sizeof(buf), "__call%d", n);
     LLVMTypeRef *pts = alloca(sizeof(LLVMTypeRef) * (size_t)(n + 1));
     for (int j = 0; j <= n; j++)
       pts[j] = cg->type_i64;
@@ -191,12 +191,10 @@ void add_builtins(codegen_t *cg) {
 }
 
 fun_sig *lookup_fun(codegen_t *cg, const char *name) {
-  if (!cg->fun_sigs.data)
-    return NULL;
-  // 1. Try namespaced lookup if name is not qualified
-  if (cg->current_mod && strchr(name, '.') == NULL) {
+  // 1a. Try namespaced lookup if name is not qualified
+  if (cg->current_module_name && strchr(name, '.') == NULL) {
     char buf[256];
-    snprintf(buf, sizeof(buf), "%s.%s", cg->current_mod, name);
+    snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
     for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
       if (strcmp(cg->fun_sigs.data[i].name, buf) == 0)
         return &cg->fun_sigs.data[i];
@@ -204,7 +202,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
   }
   // 1b. Try common fallbacks if name is not qualified
   if (strchr(name, '.') == NULL) {
-    const char *alias_full = resolve_import_alias(cg, name);
+    const char *alias_full = resolve_impo_alias(cg, name);
     if (alias_full) {
       return lookup_fun(cg, alias_full);
     }
@@ -212,7 +210,8 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
         "std.core", "std.io", "std.collections", "std.strings.str", "std.math",
         "std.os",   NULL};
     for (int j = 0; fallbacks[j]; ++j) {
-      if (cg->current_mod && strcmp(cg->current_mod, fallbacks[j]) == 0)
+      if (cg->current_module_name &&
+          strcmp(cg->current_module_name, fallbacks[j]) == 0)
         continue;
       char buf[256];
       snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
@@ -286,12 +285,10 @@ fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
   return NULL;
 }
 
-const char *resolve_import_alias(codegen_t *cg, const char *name) {
-  if (!cg->import_aliases.data || !name)
-    return NULL;
-  for (size_t i = 0; i < cg->import_aliases.len; ++i) {
-    if (strcmp(cg->import_aliases.data[i].name, name) == 0) {
-      return (const char *)cg->import_aliases.data[i].stmt_t;
+const char *resolve_impo_alias(codegen_t *cg, const char *name) {
+  for (size_t i = 0; i < cg->impo_aliases.len; ++i) {
+    if (strcmp(cg->impo_aliases.data[i].name, name) == 0) {
+      return (const char *)cg->impo_aliases.data[i].stmt_t;
     }
   }
   return NULL;
@@ -301,9 +298,9 @@ binding *lookup_global(codegen_t *cg, const char *name) {
   if (!cg->global_vars.data)
     return NULL;
   // 1. Try namespaced lookup if name is not qualified
-  if (cg->current_mod && strchr(name, '.') == NULL) {
+  if (cg->current_module_name && strchr(name, '.') == NULL) {
     char buf[256];
-    snprintf(buf, sizeof(buf), "%s.%s", cg->current_mod, name);
+    snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
     for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
       if (strcmp(cg->global_vars.data[i].name, buf) == 0)
         return &cg->global_vars.data[i];
@@ -311,14 +308,15 @@ binding *lookup_global(codegen_t *cg, const char *name) {
   }
   // 1b. Try common fallbacks if name is not qualified
   if (strchr(name, '.') == NULL) {
-    const char *alias_full = resolve_import_alias(cg, name);
+    const char *alias_full = resolve_impo_alias(cg, name);
     if (alias_full) {
       return lookup_global(cg, alias_full);
     }
     const char *fallbacks[] = {"std.core", "std.io", "std.os", "std.core.test",
                                NULL};
     for (int j = 0; fallbacks[j]; ++j) {
-      if (cg->current_mod && strcmp(cg->current_mod, fallbacks[j]) == 0)
+      if (cg->current_module_name &&
+          strcmp(cg->current_module_name, fallbacks[j]) == 0)
         continue;
       char buf[256];
       snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
@@ -399,28 +397,28 @@ void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
   vec_push(&scopes[depth].vars, b);
 }
 
-void add_import_alias(codegen_t *cg, const char *alias, const char *full_name) {
+void add_impo_alias(codegen_t *cg, const char *alias, const char *full_name) {
   if (!alias || !*alias || !full_name || !*full_name)
     return;
-  // fprintf(stderr, "DEBUG: add_import_alias alias=%s full=%s\n", alias,
+  // fprintf(stderr, "DEBUG: add_impo__alias alias=%s full=%s\n", alias,
   // full_name);
-  for (size_t i = 0; i < cg->import_aliases.len; ++i) {
-    if (cg->import_aliases.data[i].name &&
-        strcmp(cg->import_aliases.data[i].name, alias) == 0)
+  for (size_t i = 0; i < cg->impo_aliases.len; ++i) {
+    if (cg->impo_aliases.data[i].name &&
+        strcmp(cg->impo_aliases.data[i].name, alias) == 0)
       return;
   }
   binding alias_bind = {0};
   alias_bind.name = strdup(alias);
   alias_bind.stmt_t = (stmt_t *)strdup(full_name);
-  vec_push(&cg->import_aliases, alias_bind);
+  vec_push(&cg->impo_aliases, alias_bind);
 }
 
-void add_import_alias_from_full(codegen_t *cg, const char *full_name) {
+void add_impo_alias_from_full(codegen_t *cg, const char *full_name) {
   if (!full_name || !*full_name)
     return;
   const char *last_dot = strrchr(full_name, '.');
   const char *alias = last_dot ? last_dot + 1 : full_name;
-  add_import_alias(cg, alias, full_name);
+  add_impo_alias(cg, alias, full_name);
 }
 
 stmt_t *find_module_stmt(stmt_t *s, const char *name) {
@@ -440,7 +438,7 @@ stmt_t *find_module_stmt(stmt_t *s, const char *name) {
   return NULL;
 }
 
-bool module_has_export_list(const stmt_t *mod) {
+bool module_has_expo_list(const stmt_t *mod) {
   if (!mod || mod->kind != NY_S_MODULE)
     return false;
   for (size_t i = 0; i < mod->as.module.body.len; ++i) {
@@ -497,20 +495,20 @@ void add_imports_from_prefix(codegen_t *cg, const char *mod) {
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
     const char *name = cg->fun_sigs.data[i].name;
     if (strncmp(name, mod, mod_len) == 0 && name[mod_len] == '.') {
-      add_import_alias_from_full(cg, name);
+      add_impo_alias_from_full(cg, name);
     }
   }
   for (size_t i = 0; i < cg->global_vars.len; ++i) {
     const char *name = cg->global_vars.data[i].name;
     if (strncmp(name, mod, mod_len) == 0 && name[mod_len] == '.') {
-      add_import_alias_from_full(cg, name);
+      add_impo_alias_from_full(cg, name);
     }
   }
 }
 
 void process_use_imports(codegen_t *cg, stmt_t *s) {
   if (s->kind == NY_S_USE) {
-    if (!s->as.use.import_all && s->as.use.imports.len == 0)
+    if (!s->as.use.impo_all && s->as.use.imports.len == 0)
       return;
     const char *mod = s->as.use.module;
     if (s->as.use.imports.len > 0) {
@@ -521,14 +519,14 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
         size_t len = strlen(mod) + 1 + strlen(item->name) + 1;
         char *full = malloc(len);
         snprintf(full, len, "%s.%s", mod, item->name);
-        add_import_alias(cg, item->alias ? item->alias : item->name, full);
+        add_impo_alias(cg, item->alias ? item->alias : item->name, full);
         free(full);
       }
       return;
     }
-    if (s->as.use.import_all) {
+    if (s->as.use.impo_all) {
       str_list exports = {0};
-      bool has_export_list = false;
+      bool has_expo_list = false;
       stmt_t *mod_stmt = NULL;
       for (size_t i = 0; i < cg->prog->body.len; ++i) {
         mod_stmt = find_module_stmt(cg->prog->body.data[i], mod);
@@ -536,11 +534,11 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
           break;
       }
       if (mod_stmt) {
-        has_export_list = module_has_export_list(mod_stmt);
-        if (has_export_list) {
+        has_expo_list = module_has_expo_list(mod_stmt);
+        if (has_expo_list) {
           collect_module_exports(mod_stmt, &exports);
         }
-        if (!has_export_list || mod_stmt->as.module.export_all) {
+        if (!has_expo_list || mod_stmt->as.module.expo_all) {
           collect_module_defs(mod_stmt, &exports);
         }
       }
@@ -548,7 +546,7 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
         add_imports_from_prefix(cg, mod);
       } else {
         for (size_t i = 0; i < exports.len; ++i) {
-          add_import_alias_from_full(cg, exports.data[i]);
+          add_impo_alias_from_full(cg, exports.data[i]);
           free(exports.data[i]);
         }
         vec_free(&exports);
@@ -564,7 +562,7 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
 
 void collect_use_aliases(codegen_t *cg, stmt_t *s) {
   if (s->kind == NY_S_USE) {
-    if (s->as.use.import_all || s->as.use.imports.len > 0)
+    if (s->as.use.impo_all || s->as.use.imports.len > 0)
       return;
     const char *alias = s->as.use.alias;
     if (!alias) {
@@ -582,13 +580,13 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
       const char *target = item.name;
       const char *item_alias = item.alias ? item.alias : item.name;
       // Maps alias -> Module.target
-      binding import_bind = {0};
-      import_bind.name = strdup(item_alias);
+      binding impo_bind = {0};
+      impo_bind.name = strdup(item_alias);
       char *full_target =
           malloc(strlen(s->as.use.module) + 1 + strlen(target) + 1);
       sprintf(full_target, "%s.%s", s->as.use.module, target);
-      import_bind.stmt_t = (stmt_t *)full_target;
-      vec_push(&cg->import_aliases, import_bind);
+      impo_bind.stmt_t = (stmt_t *)full_target;
+      vec_push(&cg->impo_aliases, impo_bind);
     }
     vec_push(&cg->aliases, alias_bind);
   } else if (s->kind == NY_S_MODULE) {
@@ -599,7 +597,7 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
 
 void collect_use_modules(codegen_t *cg, stmt_t *s) {
   if (s->kind == NY_S_USE) {
-    if (!s->as.use.import_all)
+    if (!s->as.use.impo_all)
       return;
     const char *mod = s->as.use.module;
     if (mod && *mod) {

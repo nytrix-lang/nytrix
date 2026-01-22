@@ -30,90 +30,117 @@ fn RTLD_LOCAL(){
 
 fn dlopen(path, flags){
    "Open shared object and return handle or 0."
-   return rt_dlopen(path, flags)
+   return __dlopen(path, flags)
 }
 
 fn dlsym(handle, name){
    "Lookup symbol and return function/data pointer as int."
-   return rt_dlsym(handle, name)
+   return __dlsym(handle, name)
 }
 
 fn dlclose(handle){
    "Close shared object handle."
-   return rt_dlclose(handle)
+   return __dlclose(handle)
 }
 
 fn dlerror(){
    "Return last dl error string pointer."
-   return rt_dlerror()
+   return __dlerror()
 }
 
 fn call0_void(fptr){
    "Call fptr with 0 args and return 0."
-   rt_call0(fptr)
+   __call0(fptr)
    return 0
 }
 
 fn call1_void(fptr,a){
    "Call fptr with 1 arg and return 0."
-   rt_call1(fptr,a)
+   __call1(fptr,a)
    return 0
 }
 
 fn call2_void(fptr,a,b){
    "Call fptr with 2 args and return 0."
-   rt_call2(fptr,a,b)
+   __call2(fptr,a,b)
    return 0
 }
 
 fn call3_void(fptr,a,b,c){
    "Call fptr with 3 args and return 0."
-   rt_call3(fptr,a,b,c)
+   __call3(fptr,a,b,c)
    return 0
 }
 
 fn call0(fptr){
    "Call fnptr with 0-3 int64 args."
-   return rt_call0(fptr)  }
+   return __call0(fptr)
+}
+
 fn call1(fptr,a){
    "Call fptr with 1 int64 arg."
-   return rt_call1(fptr,a)  }
+   return __call1(fptr,a)
+}
+
 fn call2(fptr,a,b){
    "Call fptr with 2 int64 args."
-   return rt_call2(fptr,a,b)  }
+   return __call2(fptr,a,b)
+}
+
 fn call3(fptr,a,b,c){
    "Call fptr with 3 int64 args."
-   return rt_call3(fptr,a,b,c)  }
+   return __call3(fptr,a,b,c)
+}
+
 fn call4(fptr,a,b,c,d){
    "Call fptr with 4 int64 args."
-   return rt_call4(fptr,a,b,c,d)  }
+   return __call4(fptr,a,b,c,d)
+}
+
 fn call5(fptr,a,b,c,d,e){
    "Call fptr with 5 int64 args."
-   return rt_call5(fptr,a,b,c,d,e)  }
+   return __call5(fptr,a,b,c,d,e)
+}
+
 fn call6(fptr,a,b,c,d,e,g){
    "Call fptr with 6 int64 args."
-   return rt_call6(fptr,a,b,c,d,e,g)  }
+   return __call6(fptr,a,b,c,d,e,g)
+}
+
 fn call7(fptr,a,b,c,d,e,g,h){
    "Call fptr with 7 int64 args."
-   return rt_call7(fptr,a,b,c,d,e,g,h)  }
+   return __call7(fptr,a,b,c,d,e,g,h)
+}
+
 fn call8(fptr,a,b,c,d,e,g,h,i){
    "Call fptr with 8 int64 args."
-   return rt_call8(fptr,a,b,c,d,e,g,h,i)  }
+   return __call8(fptr,a,b,c,d,e,g,h,i)
+}
+
 fn call9(fptr,a,b,c,d,e,g,h,i,j){
    "Call fptr with 9 int64 args."
-   return rt_call9(fptr,a,b,c,d,e,g,h,i,j)  }
+   return __call9(fptr,a,b,c,d,e,g,h,i,j)
+}
+
 fn call10(fptr,a,b,c,d,e,g,h,i,j,k){
    "Call fptr with 10 int64 args."
-   return rt_call10(fptr,a,b,c,d,e,g,h,i,j,k)  }
+   return __call10(fptr,a,b,c,d,e,g,h,i,j,k)
+}
+
 fn call11(fptr,a,b,c,d,e,g,h,i,j,k,l){
    "Call fptr with 11 int64 args."
-   return rt_call11(fptr,a,b,c,d,e,g,h,i,j,k,l)  }
+   return __call11(fptr,a,b,c,d,e,g,h,i,j,k,l)
+}
+
 fn call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m){
    "Call fptr with 12 int64 args."
-   return rt_call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m)  }
+   return __call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m)
+}
+
 fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){
    "Call fptr with 13 int64 args."
-   return rt_call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n)  }
+   return __call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n)
+}
 
 fn ffi_call(fptr, args){
    "Call with list args (0-12 supported)."

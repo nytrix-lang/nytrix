@@ -33,7 +33,7 @@ fn test_uuid_uniqueness(){
          print("Collision on: ", u)
          panic("UUID collision! (Probability is tiny, check RNG)")
       }
-      add(s, u)
+      set_add(s, u)
       i = i + 1
    }
    print("UUID uniqueness passed")

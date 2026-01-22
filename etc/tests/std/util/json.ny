@@ -13,7 +13,7 @@ fn test_encode(){
    lst = append(lst, "a")
    assert(eq(json_encode(lst), "[1,\"a\"]"), "encode list")
    def d = dict()
-   setitem(d, "k", "v")
+   dict_set(d, "k", "v")
    assert(eq(json_encode(d), "{\"k\":\"v\"}"), "encode dict")
    print("Encode passed")
 }
@@ -28,8 +28,8 @@ fn test_decode(){
    assert(get(lst, 0) == 1, "decode list 0")
    assert(eq(get(lst, 1), "a"), "decode list 1")
    def d = json_decode("{\"k\": \"v\"}")
-   assert(getitem(d, "k", 0) != 0, "decode dict get")
-   assert(eq(getitem(d, "k", 0), "v"), "decode dict val")
+   assert(dict_get(d, "k", 0) != 0, "decode dict get")
+   assert(eq(dict_get(d, "k", 0), "v"), "decode dict val")
    print("Decode passed")
 }
 

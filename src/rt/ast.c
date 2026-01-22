@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int64_t rt_malloc(int64_t n);
+extern int64_t __malloc(int64_t n);
 
 #ifndef NYTRIX_RUNTIME_ONLY
-int64_t rt_parse_ast(int64_t source_ptr) {
+int64_t __parse_ast(int64_t source_ptr) {
   const char *source = (const char *)source_ptr;
   if (!source)
     return 0;
@@ -20,7 +20,7 @@ int64_t rt_parse_ast(int64_t source_ptr) {
   }
   size_t len = strlen(json);
   int64_t tagged_size = ((int64_t)(len + 1) << 1) | 1;
-  int64_t res = rt_malloc(tagged_size);
+  int64_t res = __malloc(tagged_size);
   *(int64_t *)((char *)res - 8) = 241;                      // TAG_STR (241)
   *(int64_t *)((char *)res - 16) = ((int64_t)len << 1) | 1; // Length
   memcpy((void *)res, json, len + 1);
@@ -29,7 +29,7 @@ int64_t rt_parse_ast(int64_t source_ptr) {
   return res;
 }
 #else
-int64_t rt_parse_ast(int64_t source_ptr) {
+int64_t __parse_ast(int64_t source_ptr) {
   (void)source_ptr;
   return 0; // Return None in AOT mode without compiler
 }

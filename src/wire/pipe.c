@@ -192,7 +192,7 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
   if (LLVMGetNamedFunction(cg->module, "main"))
     return;
   // Generate: int main(int argc, char **argv, char **envp) {
-  //   rt_set_args((int64_t)argc, (int64_t)argv, (int64_t)envp);
+  //   __set_args((int64_t)argc, (int64_t)argv, (int64_t)envp);
   //   return (int)script_fn();
   // }
   LLVMTypeRef i32 = LLVMInt32TypeInContext(cg->ctx);
@@ -216,14 +216,14 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
   LLVMValueRef argv_i64 = LLVMBuildPtrToInt(builder, argv, i64, "");
   LLVMValueRef envp_i64 = LLVMBuildPtrToInt(builder, envp, i64, "");
 
-  // Call rt_set_args
-  LLVMValueRef set_args_fn = LLVMGetNamedFunction(cg->module, "rt_set_args");
+  // Call __set_args
+  LLVMValueRef set_args_fn = LLVMGetNamedFunction(cg->module, "__set_args");
   if (!set_args_fn) {
     // Look it up from builtin defs/internal declarations if possible, or
     // declare it
     LLVMTypeRef set_args_ty =
         LLVMFunctionType(i64, (LLVMTypeRef[]){i64, i64, i64}, 3, 0);
-    set_args_fn = LLVMAddFunction(cg->module, "rt_set_args", set_args_ty);
+    set_args_fn = LLVMAddFunction(cg->module, "__set_args", set_args_ty);
   }
   LLVMBuildCall2(builder, LLVMGlobalGetValueType(set_args_fn), set_args_fn,
                  (LLVMValueRef[]){argc_i64, argv_i64, envp_i64}, 3, "");
@@ -289,7 +289,7 @@ int ny_pipeline_run(ny_options *opt) {
     fprintf(stderr, "Scan imports: %.4fs\n",
             (double)(clock() - t_scan) / CLOCKS_PER_SEC);
 
-  std_mode_t std_mode = NY_STD_USE_LIST;
+  std_mode_t std_mode = opt->std_mode;
 
   if (!opt->no_std) {
     append_std_prelude(&uses, &use_count, &use_cap);
@@ -300,30 +300,23 @@ int ny_pipeline_run(ny_options *opt) {
           ? opt->std_path
           : (NYTRIX_STD_PATH ? NYTRIX_STD_PATH : "build/std_bundle.ny"));
 
-  bool wants_full = (std_mode == NY_STD_FULL);
-  if (!opt->no_std) {
-    wants_full = true;
-  }
-
   if (opt->no_std) {
-    std_mode = NY_STD_NONE;
-    wants_full = false;
+    std_mode = STD_MODE_NONE;
   }
 
   clock_t t_std = clock();
   if (prebuilt_path && access(prebuilt_path, R_OK) == 0 &&
-      (std_mode == NY_STD_FULL ||
-       (std_mode == NY_STD_USE_LIST && wants_full))) {
+      (std_mode == STD_MODE_FULL || std_mode == STD_MODE_DEFAULT)) {
     if (verbose_enabled)
       NY_LOG_INFO("Using prebuilt std bundle: %s\n", prebuilt_path);
     std_src = ny_read_file(prebuilt_path);
-  } else if (std_mode != NY_STD_NONE) {
+  } else if (std_mode != STD_MODE_NONE) {
     // Fallback to building from individual files
     std_src = ny_build_std_bundle((const char **)uses, use_count, std_mode,
                                   opt->verbose, opt->input_file);
   }
 
-  if (std_mode != NY_STD_NONE && !std_src) {
+  if (std_mode != STD_MODE_NONE && !std_src) {
     NY_LOG_ERR("Could not load standard library bundle or source files.\n");
     NY_LOG_ERR("Checked paths: %s and %s/std\n",
                prebuilt_path ? prebuilt_path : "NULL", ny_src_root());
@@ -476,7 +469,7 @@ int ny_pipeline_run(ny_options *opt) {
     if (ny_llvm_emit_object(cg.module, obj)) {
       const char *cc = ny_builder_choose_cc();
       char rto[4096];
-      sprintf(rto, "/tmp/ny_rt_%d.o", getpid());
+      sprintf(rto, "/tmp/ny___%d.o", getpid());
       NY_LOG_V2("Compiling runtime to %s using %s (debug=%d)...\n", rto, cc,
                 opt->debug_symbols);
       if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols)) {

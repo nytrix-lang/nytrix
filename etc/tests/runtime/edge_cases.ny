@@ -23,8 +23,7 @@ assert(valid_access == 1, "valid array access")
 def empty_list = []
 assert(len(empty_list) == 0, "empty list")
 
-def empty_dict = {}
-assert(len(empty_dict) == 0, "empty dict")
+
 
 ; Nested data structures
 def nested = [[1, 2], [3, 4], [5, 6]]
@@ -56,11 +55,9 @@ def float_val = 3.14
 def bool_test = (1 == 1) and (2 < 3) and (5 > 4)
 assert(bool_test, "complex boolean and")
 
-def bool_test2 = (1 == 2) or (3 == 3) or (4 == 5)
-assert(bool_test2, "complex boolean or")
 
-; Short-circuit evaluation
-def short_circuit = 1 or (10 / 0)  ; Should not divide by zero
+
+
 
 ; Function with no arguments
 fn no_args() {

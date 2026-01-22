@@ -33,7 +33,7 @@ fn _url_hex_char(v){
 fn urlencode(s){
    "Percent-encode string."
    def n = str_len(s)
-   def out = rt_malloc(n*3 + 1)
+   def out = __malloc(n*3 + 1)
    def i =0  o=0
    while(i<n){
       def c = load8(s, i)
@@ -57,7 +57,7 @@ fn urlencode(s){
 fn urldecode(s){
    "Percent-decode string (accepts + as space)."
    def n = str_len(s)
-   def out = rt_malloc(n + 1)
+   def out = __malloc(n + 1)
    def i =0  o=0
    while(i<n){
       def c = load8(s, i)
@@ -108,12 +108,12 @@ fn url_parse(url){
    } else {
       result = append(result, "")
    }
-   def port_sep = find(authority, ":")
-   if(port_sep >= 0){
-      def host = slice(authority, 0, port_sep, 1)
-      def port_str = slice(authority, port_sep + 1, str_len(authority), 1)
+   def po__sep = find(authority, ":")
+   if(po__sep >= 0){
+      def host = slice(authority, 0, po__sep, 1)
+      def po__str = slice(authority, po__sep + 1, str_len(authority), 1)
       result = append(result, host)
-      result = append(result, atoi(port_str))
+      result = append(result, atoi(po__str))
    } else {
       result = append(result, authority)
       result = append(result, 80)
@@ -186,10 +186,10 @@ fn parse_query(query){
          def value = slice(pair, eq_pos + 1, str_len(pair), 1)
          def key_dec = urldecode(key)
          def value_dec = urldecode(value)
-         setitem(result, cstr_to_str(key_dec), cstr_to_str(value_dec))
+         dict_set(result, cstr_to_str(key_dec), cstr_to_str(value_dec))
       } else if(str_len(pair) > 0){
          def key_dec = urldecode(pair)
-         setitem(result, cstr_to_str(key_dec), 1)
+         dict_set(result, cstr_to_str(key_dec), 1)
       }
       i = pair_end + 1
    }

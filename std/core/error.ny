@@ -4,12 +4,12 @@
 use std.core
 use std.core.reflect
 module std.core.error (
-   panic, assert, assert_eq
+   panic, assert, asse__eq
 )
 
 fn panic(msg){
    "Raises a panic: jumps to the nearest surrounding catch handler  if none, prints the message to stderr and exits."
-   return rt_panic(msg)
+   return __panic(msg)
 }
 
 fn assert(cond, msg="assert failed"){
@@ -18,7 +18,7 @@ fn assert(cond, msg="assert failed"){
    return 0
 }
 
-fn assert_eq(a,b,msg="assert eq failed"){
+fn asse__eq(a,b,msg="assert eq failed"){
    "Asserts that two values are equal. If not, panics with the provided message."
    if(!eq(a,b)){ panic(msg) }
    return 0

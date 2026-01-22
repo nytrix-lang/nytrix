@@ -7,8 +7,8 @@ print("Testing sys...")
 
 fn test_errno(){
    def non_existent_file = "/tmp/non_existent_file_12345.tmp"
-   def fd = file_open(non_existent_file, 0, 0) ; O_RDONLY
-   assert(fd < 0, "file_open non-existent fails")
+   def fd = sys_open(non_existent_file, 0, 0) ; O_RDONLY
+   assert(fd < 0, "sys_open non-existent fails")
    def err = errno()
    assert(err != 0, "errno is set after failed syscall")
 }

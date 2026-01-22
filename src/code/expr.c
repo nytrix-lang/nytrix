@@ -42,7 +42,7 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // Write Header
   // We do NOT write heap magic numbers (NY_MAGIC1/2) here.
   // If we did, the runtime would treat this as a heap pointer and strict bounds
-  // checking (rt_check_oob) would forbid accessing header fields (like length
+  // checking (__check_oob) would forbid accessing header fields (like length
   // at -16). By leaving magics as 0, is_heap_ptr returns false, allowing
   // access.
   // *(uint64_t*)(obj_data) = 0x545249584E5954ULL; // NY_MAGIC1
@@ -96,41 +96,41 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
                         LLVMValueRef r) {
   const char *rt = NULL;
   if (strcmp(op, "+") == 0)
-    rt = "rt_add";
+    rt = "__add";
   else if (strcmp(op, "-") == 0)
-    rt = "rt_sub";
+    rt = "__sub";
   else if (strcmp(op, "*") == 0)
-    rt = "rt_mul";
+    rt = "__mul";
   else if (strcmp(op, "/") == 0)
-    rt = "rt_div";
+    rt = "__div";
   else if (strcmp(op, "%") == 0)
-    rt = "rt_mod";
+    rt = "__mod";
   else if (strcmp(op, "|") == 0)
-    rt = "rt_or";
+    rt = "__or";
   else if (strcmp(op, "&") == 0)
-    rt = "rt_and";
+    rt = "__and";
   else if (strcmp(op, "^") == 0)
-    rt = "rt_xor";
+    rt = "__xor";
   else if (strcmp(op, "<") == 0)
-    rt = "rt_lt";
+    rt = "__lt";
   else if (strcmp(op, "<=") == 0)
-    rt = "rt_le";
+    rt = "__le";
   else if (strcmp(op, ">") == 0)
-    rt = "rt_gt";
+    rt = "__gt";
   else if (strcmp(op, ">=") == 0)
-    rt = "rt_ge";
+    rt = "__ge";
   else if (strcmp(op, "<<") == 0)
-    rt = "rt_shl";
+    rt = "__shl";
   else if (strcmp(op, ">>") == 0)
-    rt = "rt_shr";
+    rt = "__shr";
   if (strcmp(op, "==") == 0) {
     fun_sig *s = lookup_fun(cg, "std.core.reflect.eq");
     if (!s)
       s = lookup_fun(cg, "eq");
     if (!s)
-      s = lookup_fun(cg, "rt_eq");
+      s = lookup_fun(cg, "__eq");
     if (!s) {
-      fprintf(stderr, "Error: '==' requires 'eq' (or rt_eq)\n");
+      fprintf(stderr, "Error: '==' requires 'eq' (or __eq)\n");
       cg->had_error = 1;
       return LLVMConstInt(cg->type_i64, 0, false);
     }
@@ -150,7 +150,7 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
   if (strcmp(op, "!=") == 0)
     return LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 6, false),
                         gen_binary(cg, "==", l, r), "");
-  // Simplified: handled by rt_* functions above
+  // Simplified: handled by __* functions above
   if (strcmp(op, "in") == 0) {
     fun_sig *s = lookup_fun(cg, "contains");
     if (!s) {
@@ -175,7 +175,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
                    .builder = bld,
                    .prog = cg->prog,
                    .llvm_ctx_owned = true,
-                   .is_comptime = true};
+                   .comptime = true};
   tcg.fun_sigs.len = tcg.fun_sigs.cap = 0;
   tcg.fun_sigs.data = NULL;
   tcg.interns.len = tcg.interns.cap = 0;
@@ -232,9 +232,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
                             "str_ptr");
     }
     if (e->as.literal.kind == NY_LIT_FLOAT) {
-      fun_sig *box_sig = lookup_fun(cg, "rt_flt_box_val");
+      fun_sig *box_sig = lookup_fun(cg, "__flt_box_val");
       if (!box_sig) {
-        NY_LOG_ERR("rt_flt_box_val not found\n");
+        NY_LOG_ERR("__flt_box_val not found\n");
         cg->had_error = 1;
         return LLVMConstInt(cg->type_i64, 0, false);
       }
@@ -357,13 +357,13 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
                              LLVMConstInt(cg->type_i64, 4, false),
                              LLVMConstInt(cg->type_i64, 2, false), "");
     if (strcmp(e->as.unary.op, "-") == 0) {
-      fun_sig *s = lookup_fun(cg, "rt_sub");
+      fun_sig *s = lookup_fun(cg, "__sub");
       return LLVMBuildCall2(
           cg->builder, s->type, s->value,
           (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false), r}, 2, "");
     }
     if (strcmp(e->as.unary.op, "~") == 0) {
-      fun_sig *s = lookup_fun(cg, "rt_not");
+      fun_sig *s = lookup_fun(cg, "__not");
       return LLVMBuildCall2(cg->builder, s->type, s->value, (LLVMValueRef[]){r},
                             1, "");
     }
@@ -568,7 +568,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     if (!ft) {
       size_t n = c ? c->args.len : (mc->args.len + 1);
       char buf[32];
-      snprintf(buf, sizeof(buf), "rt_call%zu", n);
+      snprintf(buf, sizeof(buf), "__call%zu", n);
       fun_sig *rsig = lookup_fun(cg, buf);
       if (!rsig) {
         fprintf(stderr, "%serror (linker): undefined symbol '%s'%s\n",
@@ -647,9 +647,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
           call_arg_t *a = &user_args[j];
           LLVMValueRef av = gen_expr(cg, scopes, depth, a->val);
           if (a->name) {
-            fun_sig *ks_s = lookup_fun(cg, "rt_kwarg");
+            fun_sig *ks_s = lookup_fun(cg, "__kwarg");
             if (!ks_s) {
-              fprintf(stderr, "Error: keyword args require 'rt_kwarg'\n");
+              fprintf(stderr, "Error: keyword args require '__kwarg'\n");
               cg->had_error = 1;
               return LLVMConstInt(cg->type_i64, 0, false);
             }
@@ -759,13 +759,13 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fun_sig *ds = lookup_fun(cg, "dict");
     if (!ds)
       ds = lookup_fun(cg, "std.collections.dict.dict");
-    fun_sig *ss = lookup_fun(cg, "setitem");
+    fun_sig *ss = lookup_fun(cg, "dict_set");
     if (!ss)
-      ss = lookup_fun(cg, "std.collections.dict.setitem");
+      ss = lookup_fun(cg, "std.collections.dict.dict_set");
     if (!ds || !ss) {
-      fprintf(stderr, "Error: dict requires dict/setitem (searched 'dict', "
-                      "'std.collections.dict.dict', 'setitem', "
-                      "'std.collections.dict.setitem')\n");
+      fprintf(stderr, "Error: dict requires dict/dict_set (searched 'dict', "
+                      "'std.collections.dict.dict', 'dict_set', "
+                      "'std.collections.dict.dict_set')\n");
       cg->had_error = 1;
       return LLVMConstInt(cg->type_i64, 0, false);
     }
@@ -853,15 +853,15 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMValueRef empty_runtime_global = const_string_ptr(cg, "", 0);
     LLVMValueRef res =
         LLVMBuildLoad2(cg->builder, cg->type_i64, empty_runtime_global, "");
-    fun_sig *cs = lookup_fun(cg, "rt_str_concat"),
-            *ts = lookup_fun(cg, "rt_to_str");
+    fun_sig *cs = lookup_fun(cg, "__str_concat"),
+            *ts = lookup_fun(cg, "__to_str");
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
-      fstring_part_t p = e->as.fstring.parts.data[i];
+      fstring_pa__t p = e->as.fstring.parts.data[i];
       LLVMValueRef pv;
       if (p.kind == NY_FSP_STR) {
-        LLVMValueRef part_runtime_global =
+        LLVMValueRef pa__runtime_global =
             const_string_ptr(cg, p.as.s.data, p.as.s.len);
-        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, part_runtime_global, "");
+        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, pa__runtime_global, "");
       } else {
         pv = LLVMBuildCall2(
             cg->builder, ts->type, ts->value,
@@ -901,9 +901,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       return fn_ptr_tagged;
     }
     /* Create Env */
-    fun_sig *malloc_sig = lookup_fun(cg, "rt_malloc");
+    fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
     if (!malloc_sig) {
-      fprintf(stderr, "Error: rt_malloc required for closures\n");
+      fprintf(stderr, "Error: __malloc required for closures\n");
       cg->had_error = 1;
       return LLVMConstInt(cg->type_i64, 0, false);
     }
@@ -952,14 +952,14 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return cls_ptr;
   }
   case NY_E_MATCH: {
-    LLVMValueRef old_store = cg->result_store;
+    LLVMValueRef old_store = cg->result_store_val;
     LLVMValueRef slot = build_alloca(cg, "match_res");
     LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 1, false), slot);
-    cg->result_store = slot;
+    cg->result_store_val = slot;
     stmt_t fake = {.kind = NY_S_MATCH, .as.match = e->as.match, .tok = e->tok};
     size_t d = depth;
-    gen_stmt(cg, scopes, &d, &fake, cg->func_root, true);
-    cg->result_store = old_store;
+    gen_stmt(cg, scopes, &d, &fake, cg->func_root_idx, true);
+    cg->result_store_val = old_store;
     return LLVMBuildLoad2(cg->builder, cg->type_i64, slot, "");
   }
   default: {

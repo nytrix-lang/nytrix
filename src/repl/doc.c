@@ -218,139 +218,129 @@ found: {
 
 void add_builtin_docs(doc_list_t *docs) {
   // Memory
-  doclist_set(docs, "rt_malloc", "Allocates n bytes of memory on the heap.",
-              "fn rt_malloc(n)", NULL, 3);
-  doclist_set(docs, "rt_free",
-              "Frees memory previously allocated by rt_malloc.",
-              "fn rt_free(p)", NULL, 3);
-  doclist_set(docs, "rt_realloc", "Reallocates memory to a new size.",
-              "fn rt_realloc(p, n)", NULL, 3);
+  doclist_set(docs, "__malloc", "Allocates n bytes of memory on the heap.",
+              "fn __malloc(n)", NULL, 3);
+  doclist_set(docs, "__free", "Frees memory previously allocated by __malloc.",
+              "fn __free(p)", NULL, 3);
+  doclist_set(docs, "__realloc", "Reallocates memory to a new size.",
+              "fn __realloc(p, n)", NULL, 3);
 
   // Low level memory access
-  doclist_set(docs, "rt_load8", "Loads a single byte from memory address p.",
-              "fn rt_load8(p)", NULL, 3);
-  doclist_set(docs, "rt_store8", "Stores byte v at memory address p.",
-              "fn rt_store8(p, v)", NULL, 3);
-  doclist_set(docs, "rt_load16",
-              "Loads a 16-bit integer from memory address p.",
-              "fn rt_load16(p)", NULL, 3);
-  doclist_set(docs, "rt_store16",
-              "Stores 16-bit integer v at memory address p.",
-              "fn rt_store16(p, v)", NULL, 3);
-  doclist_set(docs, "rt_load32",
-              "Loads a 32-bit integer from memory address p.",
-              "fn rt_load32(p)", NULL, 3);
-  doclist_set(docs, "rt_store32",
-              "Stores 32-bit integer v at memory address p.",
-              "fn rt_store32(p, v)", NULL, 3);
-  doclist_set(docs, "rt_load64",
-              "Loads a 64-bit integer from memory address p.",
-              "fn rt_load64(p)", NULL, 3);
-  doclist_set(docs, "rt_store64",
-              "Stores 64-bit integer v at memory address p.",
-              "fn rt_store64(p, v)", NULL, 3);
+  doclist_set(docs, "__load8", "Loads a single byte from memory address p.",
+              "fn __load8(p)", NULL, 3);
+  doclist_set(docs, "__store8", "Stores byte v at memory address p.",
+              "fn __store8(p, v)", NULL, 3);
+  doclist_set(docs, "__load16", "Loads a 16-bit integer from memory address p.",
+              "fn __load16(p)", NULL, 3);
+  doclist_set(docs, "__store16", "Stores 16-bit integer v at memory address p.",
+              "fn __store16(p, v)", NULL, 3);
+  doclist_set(docs, "__load32", "Loads a 32-bit integer from memory address p.",
+              "fn __load32(p)", NULL, 3);
+  doclist_set(docs, "__store32", "Stores 32-bit integer v at memory address p.",
+              "fn __store32(p, v)", NULL, 3);
+  doclist_set(docs, "__load64", "Loads a 64-bit integer from memory address p.",
+              "fn __load64(p)", NULL, 3);
+  doclist_set(docs, "__store64", "Stores 64-bit integer v at memory address p.",
+              "fn __store64(p, v)", NULL, 3);
 
   // Pointer arithmetic
-  doclist_set(docs, "rt_ptr_add", "Adds offset to pointer.",
-              "fn rt_ptr_add(p, offset)", NULL, 3);
-  doclist_set(docs, "rt_ptr_sub",
+  doclist_set(docs, "__ptr_add", "Adds offset to pointer.",
+              "fn __ptr_add(p, offset)", NULL, 3);
+  doclist_set(docs, "__ptr_sub",
               "Subtracts offset from pointer or returns difference.",
-              "fn rt_ptr_sub(p, b)", NULL, 3);
+              "fn __ptr_sub(p, b)", NULL, 3);
 
   // Syscall
-  doclist_set(docs, "rt_syscall", "Executes a raw Linux system call.",
-              "fn rt_syscall(n, a1, a2, a3, a4, a5, a6)", NULL, 3);
-  doclist_set(docs, "rt_exit", "Exits the program_t with status code.",
-              "fn rt_exit(code)", NULL, 3);
-  doclist_set(docs, "rt_errno", "Returns the last error number.",
-              "fn rt_errno()", NULL, 3);
+  doclist_set(docs, "__syscall", "Executes a raw Linux system call.",
+              "fn __syscall(n, a1, a2, a3, a4, a5, a6)", NULL, 3);
+  doclist_set(docs, "__exit", "Exits the program_t with status code.",
+              "fn __exit(code)", NULL, 3);
+  doclist_set(docs, "__errno", "Returns the last error number.", "fn __errno()",
+              NULL, 3);
 
   // Math
-  doclist_set(docs, "rt_add", "Integer addition.", "fn rt_add(a, b)", NULL, 3);
-  doclist_set(docs, "rt_sub", "Integer subtraction.", "fn rt_sub(a, b)", NULL,
+  doclist_set(docs, "__add", "Integer addition.", "fn __add(a, b)", NULL, 3);
+  doclist_set(docs, "__sub", "Integer subtraction.", "fn __sub(a, b)", NULL, 3);
+  doclist_set(docs, "__mul", "Integer multiplication.", "fn __mul(a, b)", NULL,
               3);
-  doclist_set(docs, "rt_mul", "Integer multiplication.", "fn rt_mul(a, b)",
-              NULL, 3);
-  doclist_set(docs, "rt_div", "Integer division.", "fn rt_div(a, b)", NULL, 3);
-  doclist_set(docs, "rt_mod", "Integer modulus.", "fn rt_mod(a, b)", NULL, 3);
-  doclist_set(docs, "rt_and", "Bitwise AND.", "fn rt_and(a, b)", NULL, 3);
-  doclist_set(docs, "rt_or", "Bitwise OR.", "fn rt_or(a, b)", NULL, 3);
-  doclist_set(docs, "rt_xor", "Bitwise XOR.", "fn rt_xor(a, b)", NULL, 3);
-  doclist_set(docs, "rt_not", "Bitwise NOT.", "fn rt_not(a)", NULL, 3);
-  doclist_set(docs, "rt_shl", "Bitwise shift left.", "fn rt_shl(a, b)", NULL,
-              3);
-  doclist_set(docs, "rt_shr", "Bitwise shift right.", "fn rt_shr(a, b)", NULL,
-              3);
+  doclist_set(docs, "__div", "Integer division.", "fn __div(a, b)", NULL, 3);
+  doclist_set(docs, "__mod", "Integer modulus.", "fn __mod(a, b)", NULL, 3);
+  doclist_set(docs, "__and", "Bitwise AND.", "fn __and(a, b)", NULL, 3);
+  doclist_set(docs, "__or", "Bitwise OR.", "fn __or(a, b)", NULL, 3);
+  doclist_set(docs, "__xor", "Bitwise XOR.", "fn __xor(a, b)", NULL, 3);
+  doclist_set(docs, "__not", "Bitwise NOT.", "fn __not(a)", NULL, 3);
+  doclist_set(docs, "__shl", "Bitwise shift left.", "fn __shl(a, b)", NULL, 3);
+  doclist_set(docs, "__shr", "Bitwise shift right.", "fn __shr(a, b)", NULL, 3);
 
   // Float
-  doclist_set(docs, "rt_flt_add", "Float addition.", "fn rt_flt_add(a, b)",
+  doclist_set(docs, "__flt_add", "Float addition.", "fn __flt_add(a, b)", NULL,
+              3);
+  doclist_set(docs, "__flt_sub", "Float subtraction.", "fn __flt_sub(a, b)",
               NULL, 3);
-  doclist_set(docs, "rt_flt_sub", "Float subtraction.", "fn rt_flt_sub(a, b)",
+  doclist_set(docs, "__flt_mul", "Float multiplication.", "fn __flt_mul(a, b)",
               NULL, 3);
-  doclist_set(docs, "rt_flt_mul", "Float multiplication.",
-              "fn rt_flt_mul(a, b)", NULL, 3);
-  doclist_set(docs, "rt_flt_div", "Float division.", "fn rt_flt_div(a, b)",
-              NULL, 3);
-  doclist_set(docs, "rt_flt_from_int", "Convert int to float.",
-              "fn rt_flt_from_int(i)", NULL, 3);
-  doclist_set(docs, "rt_flt_to_int", "Convert float to int.",
-              "fn rt_flt_to_int(f)", NULL, 3);
+  doclist_set(docs, "__flt_div", "Float division.", "fn __flt_div(a, b)", NULL,
+              3);
+  doclist_set(docs, "__flt_from_int", "Convert int to float.",
+              "fn __flt_from_int(i)", NULL, 3);
+  doclist_set(docs, "__flt_to_int", "Convert float to int.",
+              "fn __flt_to_int(f)", NULL, 3);
 
   // Type checks
-  doclist_set(docs, "rt_is_int", "Checks if value is an integer.",
-              "fn rt_is_int(v)", NULL, 3);
-  doclist_set(docs, "rt_is_ptr", "Checks if value is a pointer.",
-              "fn rt_is_ptr(v)", NULL, 3);
-  doclist_set(docs, "rt_is_str", "Checks if value is a string.",
-              "fn rt_is_str(v)", NULL, 3);
-  doclist_set(docs, "rt_is_flt", "Checks if value is a float.",
-              "fn rt_is_flt(v)", NULL, 3);
+  doclist_set(docs, "__is_int", "Checks if value is an integer.",
+              "fn __is_int(v)", NULL, 3);
+  doclist_set(docs, "__is_ptr", "Checks if value is a pointer.",
+              "fn __is_ptr(v)", NULL, 3);
+  doclist_set(docs, "__is_str", "Checks if value is a string.",
+              "fn __is_str(v)", NULL, 3);
+  doclist_set(docs, "__is_flt", "Checks if value is a float.", "fn __is_flt(v)",
+              NULL, 3);
 
   // Strings
-  doclist_set(docs, "rt_init_str", "Initializes a string.", "fn rt_init_str(s)",
+  doclist_set(docs, "__init_str", "Initializes a string.", "fn __init_str(s)",
               NULL, 3);
-  doclist_set(docs, "rt_to_str", "Converts primitive to string.",
-              "fn rt_to_str(v)", NULL, 3);
-  doclist_set(docs, "rt_str_concat", "Concatenates two strings.",
-              "fn rt_str_concat(a, b)", NULL, 3);
+  doclist_set(docs, "__to_str", "Converts primitive to string.",
+              "fn __to_str(v)", NULL, 3);
+  doclist_set(docs, "__str_concat", "Concatenates two strings.",
+              "fn __str_concat(a, b)", NULL, 3);
 
   // Dynamic Linking
-  doclist_set(docs, "rt_dlopen", "Opens a dynamic library.",
-              "fn rt_dlopen(path, flags)", NULL, 3);
-  doclist_set(docs, "rt_dlsym", "Resolves a symbol in a library.",
-              "fn rt_dlsym(handle, symbol)", NULL, 3);
-  doclist_set(docs, "rt_dlclose", "Closes a dynamic library.",
-              "fn rt_dlclose(handle)", NULL, 3);
-  doclist_set(docs, "rt_dlerror", "Returns the last dynamic linking error.",
-              "fn rt_dlerror()", NULL, 3);
+  doclist_set(docs, "__dlopen", "Opens a dynamic library.",
+              "fn __dlopen(path, flags)", NULL, 3);
+  doclist_set(docs, "__dlsym", "Resolves a symbol in a library.",
+              "fn __dlsym(handle, symbol)", NULL, 3);
+  doclist_set(docs, "__dlclose", "Closes a dynamic library.",
+              "fn __dlclose(handle)", NULL, 3);
+  doclist_set(docs, "__dlerror", "Returns the last dynamic linking error.",
+              "fn __dlerror()", NULL, 3);
 
   // Threads
-  doclist_set(docs, "rt_thread_spawn", "Spawns a new thread.",
-              "fn rt_thread_spawn(fn_ptr, arg)", NULL, 3);
-  doclist_set(docs, "rt_thread_join", "Joins a thread.",
-              "fn rt_thread_join(thread)", NULL, 3);
-  doclist_set(docs, "rt_mutex_new", "Creates a new mutex.", "fn rt_mutex_new()",
+  doclist_set(docs, "__thread_spawn", "Spawns a new thread.",
+              "fn __thread_spawn(fn_ptr, arg)", NULL, 3);
+  doclist_set(docs, "__thread_join", "Joins a thread.",
+              "fn __thread_join(thread)", NULL, 3);
+  doclist_set(docs, "__mutex_new", "Creates a new mutex.", "fn __mutex_new()",
               NULL, 3);
-  doclist_set(docs, "rt_mutex_lock64", "Locks a mutex.",
-              "fn rt_mutex_lock64(m)", NULL, 3);
-  doclist_set(docs, "rt_mutex_unlock64", "Unlocks a mutex.",
-              "fn rt_mutex_unlock64(m)", NULL, 3);
-  doclist_set(docs, "rt_mutex_free", "Frees a mutex.", "fn rt_mutex_free(m)",
+  doclist_set(docs, "__mutex_lock64", "Locks a mutex.", "fn __mutex_lock64(m)",
+              NULL, 3);
+  doclist_set(docs, "__mutex_unlock64", "Unlocks a mutex.",
+              "fn __mutex_unlock64(m)", NULL, 3);
+  doclist_set(docs, "__mutex_free", "Frees a mutex.", "fn __mutex_free(m)",
               NULL, 3);
 
   // Misc
-  doclist_set(docs, "rt_sleep", "Sleeps for n milliseconds.", "fn rt_sleep(ms)",
+  doclist_set(docs, "__sleep", "Sleeps for n milliseconds.", "fn __sleep(ms)",
               NULL, 3);
-  doclist_set(docs, "rt_panic", "Panics with a message.", "fn rt_panic(msg)",
+  doclist_set(docs, "__panic", "Panics with a message.", "fn __panic(msg)",
               NULL, 3);
-  doclist_set(docs, "rt_argc", "Returns argument count.", "fn rt_argc()", NULL,
+  doclist_set(docs, "__argc", "Returns argument count.", "fn __argc()", NULL,
               3);
-  doclist_set(docs, "rt_argv", "Returns argument vector.", "fn rt_argv(i)",
-              NULL, 3);
-  doclist_set(docs, "rt_envp", "Returns environment variable at index.",
-              "fn rt_envp(i)", NULL, 3);
-  doclist_set(docs, "rt_envc", "Returns environment variable count.",
-              "fn rt_envc()", NULL, 3);
+  doclist_set(docs, "__argv", "Returns argument vector.", "fn __argv(i)", NULL,
+              3);
+  doclist_set(docs, "__envp", "Returns environment variable at index.",
+              "fn __envp(i)", NULL, 3);
+  doclist_set(docs, "__envc", "Returns environment variable count.",
+              "fn __envc()", NULL, 3);
 }
 
 void repl_load_module_docs(doc_list_t *docs, const char *name) {

@@ -1,9 +1,9 @@
 #ifndef RT_COMMON_H
 #define RT_COMMON_H
 
+#include "base/common.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -20,11 +20,11 @@
    (*(uint64_t *)((uintptr_t)(v) - 48) == NY_MAGIC2))
 #define is_any_ptr(v) (((v) != 0 && !((v) & 1) && (uintptr_t)(v) > 0x1000))
 
-static inline int64_t rt_tag(int64_t v) {
+static inline int64_t __tag(int64_t v) {
   return (int64_t)(((uint64_t)v << 1) | 1);
 }
-static inline int64_t rt_untag(int64_t v) { return (v & 1) ? (v >> 1) : v; }
-static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
+static inline int64_t __untag(int64_t v) { return (v & 1) ? (v >> 1) : v; }
+static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 
 #define TAG_FLOAT 221     // (110 << 1) | 1
 #define TAG_STR 241       // (120 << 1) | 1
@@ -52,28 +52,28 @@ static inline int is_v_str(int64_t v) {
 }
 
 // Global declarations needed across runtime
-void rt_cleanup_args(void);
-int64_t rt_set_args(int64_t argc, int64_t argv, int64_t envp);
-int64_t rt_malloc(int64_t n);
-int64_t rt_free(int64_t ptr);
-int64_t rt_flt_unbox_val(int64_t v);
-int64_t rt_flt_box_val(int64_t bits);
-int64_t rt_str_concat(int64_t a, int64_t b);
-int64_t rt_panic(int64_t msg_ptr);
+void __cleanup_args(void);
+int64_t __set_args(int64_t argc, int64_t argv, int64_t envp);
+int64_t __malloc(int64_t n);
+int64_t __free(int64_t ptr);
+int64_t __flt_unbox_val(int64_t v);
+int64_t __flt_box_val(int64_t bits);
+int64_t __str_concat(int64_t a, int64_t b);
+int64_t __panic(int64_t msg_ptr);
 
 // Helper for memory OOB checks
-static inline size_t rt_get_heap_size(int64_t v) {
+static inline size_t __get_heap_size(int64_t v) {
   if (!is_heap_ptr(v))
     return (size_t)-1;
   return *(uint64_t *)((uintptr_t)v - 56);
 }
 
-static inline int rt_check_oob(const char *op, int64_t addr, int64_t idx,
-                               size_t access_sz) {
+static inline int __check_oob(const char *op, int64_t addr, int64_t idx,
+                              size_t access_sz) {
   (void)op;
   if (!is_heap_ptr(addr))
     return 1;
-  size_t sz = rt_get_heap_size(addr);
+  size_t sz = __get_heap_size(addr);
   // Handle negative indices (Header access) separately
   if ((intptr_t)idx < 0) {
     // Header is 64 bytes
@@ -88,7 +88,7 @@ static inline int rt_check_oob(const char *op, int64_t addr, int64_t idx,
   return 1;
 }
 
-static inline void rt_copy_mem(void *dst, const void *src, size_t n) {
+static inline void __copy_mem(void *dst, const void *src, size_t n) {
   char *d = (char *)dst;
   const char *s = (const char *)src;
   for (size_t i = 0; i < n; i++) {

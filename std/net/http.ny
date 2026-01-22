@@ -113,9 +113,9 @@ fn http_parse_query(q){
       if(eqi >= 0){
          def k = slice(part, 0, eqi, 1)
          def v = slice(part, eqi+1, len(part), 1)
-         setitem(d, k, v)
+         dict_set(d, k, v)
       } else {
-         setitem(d, part, 1)
+         dict_set(d, part, 1)
       }
       i = j + 1
    }

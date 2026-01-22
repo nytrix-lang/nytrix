@@ -104,10 +104,9 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   case NY_S_EXPR: {
     LLVMValueRef v = gen_expr(cg, scopes, *depth, s->as.expr.expr);
     if (is_tail) {
-      if (cg->result_store) {
-        if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
-          LLVMBuildStore(cg->builder, v, cg->result_store);
-        }
+      if (cg->result_store_val) {
+        LLVMBuildStore(cg->builder, v, cg->result_store_val);
+
       } else {
         emit_defers(cg, scopes, *depth, func_root);
         if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
@@ -294,10 +293,10 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     break;
   }
   case NY_S_TRY: {
-    fun_sig *sz_fn = lookup_fun(cg, "rt_jmpbuf_size");
-    fun_sig *set_env = lookup_fun(cg, "rt_set_panic_env");
-    fun_sig *clr_env = lookup_fun(cg, "rt_clear_panic_env");
-    fun_sig *get_err = lookup_fun(cg, "rt_get_panic_val");
+    fun_sig *sz_fn = lookup_fun(cg, "__jmpbuf_size");
+    fun_sig *set_env = lookup_fun(cg, "__set_panic_env");
+    fun_sig *clr_env = lookup_fun(cg, "__clear_panic_env");
+    fun_sig *get_err = lookup_fun(cg, "__get_panic_val");
     if (!sz_fn || !set_env || !clr_env || !get_err) {
       fprintf(stderr, "Error: missing rt try functions\n");
       cg->had_error = 1;

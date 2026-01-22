@@ -11,12 +11,12 @@ module std.core.debug (
 fn debug_print_val(val){
    "Prints a detailed debug representation of a single value."
    _print_write("Value(raw: ")
-   _print_write(itoa(val))
+   _print_write(to_str(val))
    _print_write(", type: ")
    _print_write(type(val))
    if(is_ptr(val)){
       _print_write(", addr: ")
-      _print_write(itoa(val))
+      _print_write(to_str(val))
    }
    _print_write(")\n")
 }

@@ -616,7 +616,7 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
                           const char *entry_path) {
   NY_LOG_V1("Building standard library bundle (mode=%d, count=%zu)\n", mode,
             module_count);
-  if (mode == NY_STD_NONE)
+  if (mode == STD_MODE_NONE)
     return NULL;
   ny_std_init_modules();
   // Fallback to prebuilt bundle if core std modules are missing (e.g. installed
@@ -633,7 +633,7 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
   mod_list mods = {0};
   char *entry_dir = entry_path ? dir_from_path(entry_path) : NULL;
   // 1. Seed the list
-  if (mode == NY_STD_FULL) {
+  if (mode == STD_MODE_FULL) {
     for (size_t i = 0; i < ny_std_mods_len; ++i) {
       mod_list_add(&mods, ny_std_mods[i].path, ny_std_mods[i].name, true);
     }
@@ -643,7 +643,7 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     size_t seed_count = module_count;
 
     // Always include prelude if mode >= USE_LIST (default)
-    if (mode >= NY_STD_USE_LIST) {
+    if (mode >= STD_MODE_DEFAULT) {
       for (size_t i = 0;
            i < sizeof(ny_std_prelude_list) / sizeof(ny_std_prelude_list[0]);
            ++i) {

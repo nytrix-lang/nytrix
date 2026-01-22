@@ -8,12 +8,12 @@ fn test_counter(){
    print("Testing Util Counter...")
    def xs = ["a", "b", "a", "c", "b", "a"]
    def c = counter(xs)
-   assert(getitem(c, "a", 0) == 3, "count a")
-   assert(getitem(c, "b", 0) == 2, "count b")
-   assert(getitem(c, "c", 0) == 1, "count c")
-   assert(getitem(c, "d", 0) == 0, "count d")
+   assert(dict_get(c, "a", 0) == 3, "count a")
+   assert(dict_get(c, "b", 0) == 2, "count b")
+   assert(dict_get(c, "c", 0) == 1, "count c")
+   assert(dict_get(c, "d", 0) == 0, "count d")
    c = counter_add(c, "d", 5)
-   assert(getitem(c, "d", 0) == 5, "count add")
+   assert(dict_get(c, "d", 0) == 5, "count add")
    def common = most_common(c)
    ; "d": 5, "a": 3, "b": 2, "c": 1.
    ; item 0: ["d", 5]

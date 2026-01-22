@@ -11,11 +11,8 @@ module std.math.bigint (
    _big_divmod_abs, bigint_div, bigint_mod, bigint_cmp, bigint_eq
 )
 
-; define BIGINT_MAGIC = 107
-; define BIGINT_BASE = 1000000000
-
 fn is_bigint(x){
-   "Return true if x is a bigint."
+   "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
    if(is_list(x) == false){ return false }
    if(list_len(x) < 3){ return false }
    return get(x, 0) == 107
@@ -26,26 +23,26 @@ fn _big_make(sign, digits){
    def n = list_len(digits)
    while(n > 0 && get(digits, n - 1) == 0){
       pop(digits)
-      n = n - 1
+      n -= 1
    }
    if(n == 0){
       sign = 0
    }
    def out = list(3)
-   out = append(out, 107)
-   out = append(out, sign)
-   out = append(out, digits)
-   return out
+    out = append(out, 107)
+    out = append(out, sign)
+    out = append(out, digits)
+   out
 }
 
 fn _big_digits(b){
    "Internal: return digits list."
-   return get(b, 2)
+   get(b, 2)
 }
 
 fn _big_sign(b){
    "Internal: return sign."
-   return get(b, 1)
+   get(b, 1)
 }
 
 fn _big_abs_cmp(a, b){
@@ -62,7 +59,7 @@ fn _big_abs_cmp(a, b){
       def vb = get(db, i)
       if(va < vb){ return -1 }
       if(va > vb){ return 1 }
-      i = i - 1
+      i -= 1
    }
    return 0
 }
@@ -74,22 +71,22 @@ fn _big_from_int(n){
    if(n < 0){ sign = -1  n = -n }
    def digits = list(4)
    while(n > 0){
-      digits = append(digits, n % 1000000000)
-      n = n / 1000000000
+       digits = append(digits, n % 1000000000)
+      n /= 1000000000
    }
-   return _big_make(sign, digits)
+   _big_make(sign, digits)
 }
 
 fn bigint(x){
-   "Convert int/str/bigint to bigint."
+   "Convert an integer, string, or existing bigint to a [[std.math.bigint::bigint]] object."
    if(is_bigint(x)){ return x }
    if(is_int(x)){ return _big_from_int(x) }
    if(is_str(x)){ return bigint_from_str(x) }
-   return _big_make(0, list(0))
+   _big_make(0, list(0))
 }
 
 fn bigint_from_str(s){
-   "Parse decimal string into bigint."
+   "Parses a decimal string into a [[std.math.bigint::bigint]]."
    if(str_len(s) == 0){ return _big_make(0, list(0)) }
    def sign = 1
    def i = 0
@@ -105,15 +102,15 @@ fn bigint_from_str(s){
          res = _big_mul_small(res, 10)
          res = _big_add_small(res, c - 48)
       }
-      i = i + 1
+      i += 1
    }
    def digs = list_clone(_big_digits(res))
    if(list_len(digs) == 0){ return _big_make(0, list(0)) }
-   return _big_make(sign, digs)
+   _big_make(sign, digs)
 }
 
 fn bigint_to_str(b){
-   "Convert bigint to decimal string."
+   "Converts a [[std.math.bigint::bigint]] to its decimal string representation."
    if(is_bigint(b) == false){ return "0" }
    def sign = _big_sign(b)
    def digits = _big_digits(b)
@@ -121,20 +118,20 @@ fn bigint_to_str(b){
    if(sign == 0 || n == 0){ return "0" }
    def out = ""
    def i = n - 1
-   out = itoa(get(digits, i))
-   i = i - 1
+   out = to_str(get(digits, i))
+   i -= 1
    while(i >= 0){
-      def part = itoa(get(digits, i))
+      def part = to_str(get(digits, i))
       def pad = 9 - str_len(part)
       while(pad > 0){
          out = f"{out}0"
-         pad = pad - 1
+         pad -= 1
       }
       out = f"{out}{part}"
-      i = i - 1
+      i -= 1
    }
    if(sign < 0){ out = f"-{out}" }
-   return out
+   out
 }
 
 fn _big_add_abs(a, b){
@@ -155,16 +152,16 @@ fn _big_add_abs(a, b){
       if(i < nb){ vb = get(db, i) }
       def sum = va + vb + carry
       if(sum >= 1000000000){
-         sum = sum - 1000000000
+         sum -= 1000000000
          carry = 1
       } else {
          carry = 0
       }
-      out = append(out, sum)
-      i = i + 1
+       out = append(out, sum)
+      i += 1
    }
-   if(carry){ out = append(out, carry) }
-   return _big_make(1, out)
+   if(carry){  out = append(out, carry) }
+   _big_make(1, out)
 }
 
 fn _big_sub_abs(a, b){
@@ -181,19 +178,19 @@ fn _big_sub_abs(a, b){
       def vb = 0
       if(i < nb){ vb = get(db, i) }
       if(va < vb){
-         va = va + 1000000000
+         va += 1000000000
          borrow = 1
       } else {
          borrow = 0
       }
-      out = append(out, va - vb)
-      i = i + 1
+       out = append(out, va - vb)
+      i += 1
    }
-   return _big_make(1, out)
+   _big_make(1, out)
 }
 
 fn bigint_add(a, b){
-   "Add two bigints."
+   "Adds two bigints together."
    if(is_bigint(a) == false){ a = bigint(a) }
    if(is_bigint(b) == false){ b = bigint(b) }
    def sa = _big_sign(a)
@@ -211,16 +208,16 @@ fn bigint_add(a, b){
       return _big_make(sa, list_clone(_big_digits(res)))
    }
    def res = _big_sub_abs(b, a)
-   return _big_make(sb, list_clone(_big_digits(res)))
+   _big_make(sb, list_clone(_big_digits(res)))
 }
 
 fn bigint_sub(a, b){
-   "Subtract two bigints."
+   "Subtracts bigint `b` from bigint `a`."
    if(is_bigint(a) == false){ a = bigint(a) }
    if(is_bigint(b) == false){ b = bigint(b) }
    def sb = _big_sign(b)
    def neg = _big_make(-sb, list_clone(_big_digits(b)))
-   return bigint_add(a, neg)
+   bigint_add(a, neg)
 }
 
 fn _big_mul_abs(a, b){
@@ -232,7 +229,7 @@ fn _big_mul_abs(a, b){
    if(na == 0 || nb == 0){ return _big_make(0, list(0)) }
    def out = list(na + nb + 1)
    def i = 0
-   while(i < na + nb + 1){ out = append(out, 0)  i = i + 1 }
+   while(i < na + nb + 1){  out = append(out, 0)  i += 1 }
    i = 0
    while(i < na){
       def carry = 0
@@ -242,28 +239,28 @@ fn _big_mul_abs(a, b){
          def cur = get(out, idx)
          def prod = cur + get(da, i) * get(db, j) + carry
          carry = prod / 1000000000
-         prod = prod % 1000000000
+         prod %= 1000000000
          set_idx(out, idx, prod)
-         j = j + 1
+         j += 1
       }
       if(carry > 0){
          def idx2 = i + nb
          set_idx(out, idx2, get(out, idx2) + carry)
       }
-      i = i + 1
+      i += 1
    }
-   return _big_make(1, out)
+   _big_make(1, out)
 }
 
 fn bigint_mul(a, b){
-   "Multiply two bigints."
+   "Multiplies two bigints."
    if(is_bigint(a) == false){ a = bigint(a) }
    if(is_bigint(b) == false){ b = bigint(b) }
    def sa = _big_sign(a)
    def sb = _big_sign(b)
    if(sa == 0 || sb == 0){ return _big_make(0, list(0)) }
    def res = _big_mul_abs(a, b)
-   return _big_make(sa * sb, list_clone(_big_digits(res)))
+   _big_make(sa * sb, list_clone(_big_digits(res)))
 }
 
 fn _big_mul_small(a, m){
@@ -277,12 +274,12 @@ fn _big_mul_small(a, m){
    while(i < na){
       def prod = get(da, i) * m + carry
       carry = prod / 1000000000
-      prod = prod % 1000000000
-      out = append(out, prod)
-      i = i + 1
+      prod %= 1000000000
+       out = append(out, prod)
+      i += 1
    }
-   if(carry > 0){ out = append(out, carry) }
-   return _big_make(_big_sign(a), out)
+   if(carry > 0){  out = append(out, carry) }
+   _big_make(_big_sign(a), out)
 }
 
 fn _big_add_small(a, v){
@@ -291,7 +288,7 @@ fn _big_add_small(a, v){
    def i = 0
    def carry = v
    while(carry > 0){
-      if(i >= list_len(da)){ da = append(da, 0) }
+      if(i >= list_len(da)){  da = append(da, 0) }
       def sum = get(da, i) + carry
       if(sum >= 1000000000){
          set_idx(da, i, sum - 1000000000)
@@ -300,24 +297,24 @@ fn _big_add_small(a, v){
          set_idx(da, i, sum)
          carry = 0
       }
-      i = i + 1
+      i += 1
    }
    def s = _big_sign(a)
    if(list_len(da) > 0){ s = 1 }
-   return _big_make(s, da)
+   _big_make(s, da)
 }
 
 fn _digits_prepend(digits, v){
    "Internal: prepend v to digits list."
    def out = list(list_len(digits) + 1)
-   out = append(out, v)
+    out = append(out, v)
    def i = 0
    def n = list_len(digits)
    while(i < n){
-      out = append(out, get(digits, i))
-      i = i + 1
+       out = append(out, get(digits, i))
+      i += 1
    }
-   return out
+   out
 }
 
 fn _big_divmod_abs(a, b){
@@ -330,7 +327,7 @@ fn _big_divmod_abs(a, b){
    def n = list_len(da)
    def qdigits = list(n)
    def i = 0
-   while(i < n){ qdigits = append(qdigits, 0)  i = i + 1 }
+   while(i < n){  qdigits = append(qdigits, 0)  i += 1 }
    def r = _big_make(0, list(0))
    def idx = n - 1
    while(idx >= 0){
@@ -357,7 +354,7 @@ fn _big_divmod_abs(a, b){
          r = _big_sub_abs(r, prod2)
       }
       set_idx(qdigits, idx, best)
-      idx = idx - 1
+      idx -= 1
    }
    def q = _big_make(1, qdigits)
    return [q, r]
@@ -373,7 +370,7 @@ fn bigint_div(a, b){
    if(sa == 0){ return _big_make(0, list(0)) }
    def res = _big_divmod_abs(a, b)
    def q = get(res, 0)
-   return _big_make(sa * sb, list_clone(_big_digits(q)))
+   _big_make(sa * sb, list_clone(_big_digits(q)))
 }
 
 fn bigint_mod(a, b){
@@ -384,11 +381,11 @@ fn bigint_mod(a, b){
    if(sb == 0){ panic("bigint division by zero") }
    def res = _big_divmod_abs(a, b)
    def r = get(res, 1)
-   return _big_make(_big_sign(a), list_clone(_big_digits(r)))
+   _big_make(_big_sign(a), list_clone(_big_digits(r)))
 }
 
 fn bigint_cmp(a, b){
-   "Compare bigints, returns -1/0/1."
+   "Compares two bigints. Returns -1 if a < b, 1 if a > b, and 0 if equal."
    if(is_bigint(a) == false){ a = bigint(a) }
    if(is_bigint(b) == false){ b = bigint(b) }
    def sa = _big_sign(a)
@@ -397,10 +394,10 @@ fn bigint_cmp(a, b){
    if(sa > sb){ return 1 }
    if(sa == 0){ return 0 }
    def c = _big_abs_cmp(a, b)
-   return c * sa
+   c * sa
 }
 
 fn bigint_eq(a, b){
-   "Return true if bigints are equal."
-   return bigint_cmp(a, b) == 0
+   "Returns **true** if bigints `a` and `b` are equal."
+   bigint_cmp(a, b) == 0
 }

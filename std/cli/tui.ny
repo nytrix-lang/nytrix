@@ -14,15 +14,28 @@ module std.cli.tui (
 
 ; ANSI Styling
 
-fn bold(s){ f"\033[1m{s}\033[0m" }
+fn bold(s){
+   "Wraps string `s` with ANSI bold escape codes."
+   f"\033[1m{s}\033[0m"
+}
 
-fn italic(s){ f"\033[3m{s}\033[0m" }
+fn italic(s){
+   "Wraps string `s` with ANSI italic escape codes."
+   f"\033[3m{s}\033[0m"
+}
 
-fn dim(s){ f"\033[2m{s}\033[0m" }
+fn dim(s){
+   "Wraps string `s` with ANSI dim/faint escape codes."
+   f"\033[2m{s}\033[0m"
+}
 
-fn underline(s){ f"\033[4m{s}\033[0m" }
+fn underline(s){
+   "Wraps string `s` with ANSI underline escape codes."
+   f"\033[4m{s}\033[0m"
+}
 
 fn color(s, c){
+   "Wraps string `s` with ANSI foreground color escape codes for color `c`."
    def code = case c {
       "black"   -> "30"
       "red"     -> "31"
@@ -234,9 +247,9 @@ fn bar(total=100, desc="Progress", width=40, bar_color="green", show_eta=1, leav
    bar = append(bar, bar_color)     ; "4: bar_color"
    bar = append(bar, show_eta)      ; "5: show_eta"
    bar = append(bar, leave)         ; "6: leave"
-   def start_time = ticks() / 1000000
-   bar = append(bar, start_time)    ; "7: start_time (ms)"
-   bar = append(bar, start_time)    ; "8: last_update_time (ms)"
+   def sta__time = ticks() / 1000000
+   bar = append(bar, sta__time)    ; "7: sta__time (ms)"
+   bar = append(bar, sta__time)    ; "8: last_update_time (ms)"
    bar = append(bar, 0)             ; "9: is_finished"
    bar = append(bar, 0)             ; "10: last_update_val"
    bar = append(bar, 0.0)           ; "11: avg_rate (items/sec)"
@@ -255,13 +268,13 @@ fn bar_update(bar, current){
    def width = get(bar, 3)
    def bar_color = get(bar, 4)
    def show_eta = get(bar, 5)
-   def start_time = get(bar, 7)
+   def sta__time = get(bar, 7)
    def last_time = get(bar, 8)
    def now = ticks() / 1000000
    def dt = now - last_time
    def avg_rate = get(bar, 11)
    if(dt > 150 || current == 1 || current == total){
-      def elapsed_sec = (now - start_time) / 1000.0
+      def elapsed_sec = (now - sta__time) / 1000.0
       if(elapsed_sec > 0.05){
          def inst_rate = current / elapsed_sec
          if(avg_rate == 0.0){ avg_rate = inst_rate }
@@ -282,26 +295,26 @@ fn bar_update(bar, current){
    def rate_str = ""
    def eta_str = ""
    if(show_eta && avg_rate > 0.001){
-      rate_str = f" [{itoa(int(avg_rate))} it/s]"
+      rate_str = f" [{to_str(int(avg_rate))} it/s]"
       def remaining = total - current
       if(remaining > 0){
          def eta_sec = 0
          if(avg_rate > 0.001){
             eta_sec = int(float(remaining) / avg_rate)
          }
-         if(eta_sec < 60){ eta_str = f" {itoa(eta_sec)}s" }
-         else { eta_str = f" {itoa(eta_sec / 60)}m{itoa(eta_sec % 60)}s" }
+         if(eta_sec < 60){ eta_str = f" {to_str(eta_sec)}s" }
+         else { eta_str = f" {to_str(eta_sec / 60)}m{to_str(eta_sec % 60)}s" }
       }
    }
    ; Format: \r\033[KDesc: 100%|████| 10/10 [12it/s 10s]
-   def pct_s = itoa(pct)
+   def pct_s = to_str(pct)
    if(pct < 10){ pct_s = f"  {pct_s}" }
    elif(pct < 100){ pct_s = f" {pct_s}" }
    def out = "\r\033[K"
    if(str_len(desc) > 0){ out = f"{out}{desc}: " }
    out = f"{out}{pct_s}%|"
    out = f"{out}{bar_str}{empty_str}| "
-   out = f"{out}{itoa(current)}/{itoa(total)}"
+   out = f"{out}{to_str(current)}/{to_str(total)}"
    out = f"{out}{rate_str}{eta_str}"
    sys_write(1, out, str_len(out))
    if(current >= total){ set_idx(bar, 9, 1) }

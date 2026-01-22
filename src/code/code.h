@@ -45,12 +45,12 @@ typedef struct codegen_t {
   int had_error;
   int lambda_count;
   VEC(binding) aliases;
-  VEC(binding) import_aliases;
+  VEC(binding) impo_aliases;
   VEC(char *) use_modules;
-  const char *current_mod;
-  bool is_comptime;
-  LLVMValueRef result_store;
-  size_t func_root;
+  const char *current_module_name;
+  bool comptime;
+  LLVMValueRef result_store_val;
+  size_t func_root_idx;
 } codegen_t;
 
 void codegen_init(codegen_t *cg, program_t *prog, const char *name);

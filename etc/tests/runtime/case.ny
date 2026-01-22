@@ -53,7 +53,7 @@ fn case_load(tag, ptr){
    return out
 }
 
-def mem = rt_malloc(24)
+def mem = __malloc(24)
 store64(mem, 0x44494354, 8)
 assert(case_load(0x4c495354, mem) == 0x44494354, "case load64")
 
@@ -145,7 +145,7 @@ fn case_return_string_space(tag){
    }
 }
 
-def mem2 = rt_malloc(24)
+def mem2 = __malloc(24)
 store64(mem2, 0x44494354, 8)
 assert(case_load_list(0x4c495354, mem2) == 0x44494354, "case quirks load64")
 assert(case_load_list(0x11111111, mem2) == 0, "case quirks load64 default")

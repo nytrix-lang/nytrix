@@ -11,9 +11,9 @@ assert(1 == 1, "equality assertion")
 assert(5 > 3, "comparison assertion")
 
 ; AssertEqual
-assert_eq(42, 42, "integers equal")
-assert_eq("hello", "hello", "strings equal")
-assert_eq([1, 2, 3], [1, 2, 3], "lists equal")
+asse__eq(42, 42, "integers equal")
+asse__eq("hello", "hello", "strings equal")
+asse__eq([1, 2, 3], [1, 2, 3], "lists equal")
 
 fn test_catch(){
    def caught = false
@@ -40,7 +40,7 @@ fn test_catch_nested(){
          code = 2
       }
    }
-   assert_eq(code, 2, "nested catch")
+   asse__eq(code, 2, "nested catch")
 }
 
 test_catch()

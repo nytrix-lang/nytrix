@@ -17,17 +17,17 @@ fn test_process(){
    def stdout = get(p, 2)
    ; Write to stdin
    def msg = "hello pipe"
-   rt_syscall(1, stdin, msg, str_len(msg), 0,0,0)
-   rt_syscall(3, stdin, 0,0,0,0,0) ; Close stdin to EOF
-   def buf = rt_malloc(100)
-   def nr = rt_syscall(0, stdout, buf, 100, 0,0,0)
+   __syscall(1, stdin, msg, str_len(msg), 0,0,0)
+   __syscall(3, stdin, 0,0,0,0,0) ; Close stdin to EOF
+   def buf = __malloc(100)
+   def nr = __syscall(0, stdout, buf, 100, 0,0,0)
    if(nr < 0){ nr = 0 }
    store64(buf, 120, -8) ; Tag as string
-   rt_store8_idx(buf, nr, 0)
+   __store8_idx(buf, nr, 0)
    assert(eq(buf, msg), "pipe echo match")
    ; Wait for child
    waitpid(pid, 0)
-   rt_syscall(3, stdout, 0,0,0,0,0)
+   __syscall(3, stdout, 0,0,0,0,0)
    print("✓ std.process.mod passed")
 }
 

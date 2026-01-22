@@ -9,7 +9,7 @@ module std.io.fmt (
 )
 
 fn format(fmt, ...args){
-   "Replace each '{}' in fmt with str(args[i])."
+   "Replace each '{}' in fmt with to_str(args[i])."
    def xs = args
    if(len(args) == 1){
       def first = get(args, 0)
@@ -30,7 +30,7 @@ fn format(fmt, ...args){
                if(i > start){ out = append(out, slice(fmt, start, i, 1)) }
                if(argi < len(xs)){
                   def v = get(xs, argi)
-                  out = append(out, str(v))
+                  out = append(out, to_str(v))
                   argi = argi + 1
                } else {
                   out = append(out, "{}")

@@ -13,7 +13,7 @@ fn test_uuid4(){
    while(i < 36){
       def c = load8(u, i)
       if(c == 0){
-         print("Zero byte found at index: ", itoa(i))
+         print("Zero byte found at index: ", to_str(i))
          panic("Zero byte in UUID")
       }
       i = i + 1

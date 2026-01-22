@@ -7,11 +7,11 @@ use std.strings.str
 
 print("Testing Util Convert...")
 
-def s123 = str(123)
-print("str(123):", s123)
-assert(eq(s123, "123"), "str(123)")
-assert(eq(str(true), "true"), "str(true)")
-assert(eq(str("s"), "s"), "str(s)")
+def s123 = to_str(123)
+print("to_str(123):", s123)
+assert(eq(s123, "123"), "to_str(123)")
+assert(eq(to_str(true), "true"), "to_str(true)")
+assert(eq(to_str("s"), "s"), "to_str(s)")
 
 def s_123 = int_to_str(123)
 print("int_to_str(123):", s_123)

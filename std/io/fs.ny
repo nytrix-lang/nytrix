@@ -12,7 +12,7 @@ module std.io.fs (
 
 fn mkdir(path){
    "Create a new directory at `path` with mode 0777."
-   return rt_syscall(83, path, 511, 0,0,0,0)
+   return __syscall(83, path, 511, 0,0,0,0)
 }
 
 fn mkdirs(path){
@@ -37,13 +37,13 @@ fn mkdirs(path){
 
 fn listdir(path){
    "Return a list of names of entries in the directory at `path` (excluding '.' and '..')."
-   def fd = file_open(path, 0, 0)
+   def fd = sys_open(path, 0, 0)
    if(!fd || fd < 0){ return list(8) }
    def res = list(8)
    def buf_sz = 4096
-   def buf = rt_malloc(buf_sz)
+   def buf = __malloc(buf_sz)
    while(1){
-      def nread = rt_syscall(217, fd, buf, buf_sz, 0,0,0)
+      def nread = __syscall(217, fd, buf, buf_sz, 0,0,0)
       if(nread <= 0){ break }
       def bpos = 0
       while(bpos < nread){
@@ -56,8 +56,8 @@ fn listdir(path){
          bpos = bpos + reclen
       }
    }
-   rt_free(buf)
-   file_close(fd)
+   __free(buf)
+   sys_close(fd)
    return res
 }
 
@@ -106,29 +106,29 @@ fn walk(path, cb){
 
 fn rename(oldpath, newpath){
    "Renames a file or directory from `oldpath` to `newpath`."
-   return rt_syscall(82, oldpath, newpath, 0,0,0,0)
+   return __syscall(82, oldpath, newpath, 0,0,0,0)
 }
 
 fn rmdir(path){
    "Removes the empty directory at `path`."
-   return rt_syscall(84, path, 0,0,0,0,0)
+   return __syscall(84, path, 0,0,0,0,0)
 }
 
 fn chmod(path, mode){
    "Changes the permissions of the file at `path` to `mode`."
-   return rt_syscall(90, path, mode, 0,0,0,0)
+   return __syscall(90, path, mode, 0,0,0,0)
 }
 
 fn chown(path, user, group){
    "Changes the ownership of the file at `path` to the specified `user` and `group` IDs."
-   return rt_syscall(92, path, user, group, 0,0,0)
+   return __syscall(92, path, user, group, 0,0,0)
 }
 
 fn stat(path){
    "Retrieves status information for the file at `path`. Returns a list [dev, ino, mode, nlink, uid, gid, size, atime, mtime, ctime]."
-   def buf = rt_malloc(144)
-   def r = rt_syscall(4, path, buf, 0,0,0,0)
-   if(r != 0){ rt_free(buf)  return list(8)  }
+   def buf = __malloc(144)
+   def r = __syscall(4, path, buf, 0,0,0,0)
+   if(r != 0){ __free(buf)  return list(8)  }
    def dev = (load64(buf, 0) << 1) | 1
    def ino = (load64(buf, 8) << 1) | 1
    def nlink = (load64(buf, 16) << 1) | 1
@@ -140,6 +140,6 @@ fn stat(path){
    def mtime = (load64(buf, 88) << 1) | 1
    def ctime = (load64(buf, 104) << 1) | 1
    def res = [dev, ino, mode, nlink, uid, gid, size, atime, mtime, ctime]
-   rt_free(buf)
+   __free(buf)
    return res
 }

@@ -31,12 +31,12 @@ fn _days_in_year(y){
 
 fn _pad2(n){
    "Internal: zero-pad integer to 2 digits."
-   return pad_start(itoa(n), 2, "0")
+   return pad_start(to_str(n), 2, "0")
 }
 
 fn _pad4(n){
    "Internal: zero-pad integer to 4 digits."
-   return pad_start(itoa(n), 4, "0")
+   return pad_start(to_str(n), 4, "0")
 }
 
 fn format_time(ts){

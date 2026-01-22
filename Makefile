@@ -41,7 +41,7 @@ endif
 
 OPTFLAGS := -O$(OPT)
 
-CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) $(LLVM_CFLAGS) -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\""
+CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) $(LLVM_CFLAGS) -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
 CFLAGS_DEBUG   := $(CFLAGS_BASE) -O0 -DDEBUG $(SANFLAGS) $(PROFFLAGS)
 CFLAGS_RELEASE := $(CFLAGS_BASE) $(OPTFLAGS) -DNDEBUG $(SANFLAGS) $(PROFFLAGS)
 
@@ -74,9 +74,12 @@ OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 
 .PHONY: all bin debug repl lsp ny-lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man docs
 
-docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1
+docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(BUILD_DIR)/std_bundle.ny | build
+#	Need python3-markdown
+	@echo "  $(C_CYAN)WEBDOC$(C_RESET) generating documentation at $(BUILD_DIR)/docs/index.html..."
+	@python3 etc/tools/webdoc $(BUILD_DIR)/std_bundle.ny -o $(BUILD_DIR)/docs/index.html
 
-all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so docs
+all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info
 	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
 
 bin: $(BIN)
@@ -101,6 +104,7 @@ help:
 	@echo "$(C_GREEN)make install$(C_RESET)            Install to $(PREFIX)"
 	@echo "$(C_GREEN)make clean$(C_RESET)              Remove build artifacts"
 	@echo "$(C_GREEN)make tidy$(C_RESET)               Format code using clang-format"
+	@echo "$(C_GREEN)make docs$(C_RESET)               Generate documentation"
 	@echo "$(C_GREEN)make coverage$(C_RESET)           Build with coverage flags"
 	@echo ""
 
@@ -233,8 +237,6 @@ $(BUILD_DIR)/%.info: etc/info/%.texi | build
 #	@echo "  $(C_GRAY)MAKEINFO$(C_RESET) $<"
 	@makeinfo $< -o $@
 
-# Generate manpages from texinfo (User requested workflow)
-# Generate manpages from texinfo using custom tool
 $(BUILD_DIR)/%.1: etc/info/%.texi etc/tools/texi2man | build
 #	@echo "  $(C_GRAY)TEXI2MAN$(C_RESET) $<"
 	@python3 etc/tools/texi2man $< $* > $@

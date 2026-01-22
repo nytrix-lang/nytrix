@@ -1,6 +1,6 @@
 #include "rt/shared.h"
 
-int64_t rt_str_concat(int64_t a, int64_t b) {
+int64_t __str_concat(int64_t a, int64_t b) {
   char buf_a[512], buf_b[512];
   const char *sa = NULL, *sb = NULL;
   if (is_v_str(a))
@@ -47,35 +47,35 @@ int64_t rt_str_concat(int64_t a, int64_t b) {
     return 0;
   size_t la = strlen(sa);
   size_t lb = strlen(sb);
-  int64_t res = rt_malloc((int64_t)((la + lb + 1) << 1 | 1));
+  int64_t res = __malloc((int64_t)((la + lb + 1) << 1 | 1));
   if (!res)
     return 0;
   *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
   *(int64_t *)(uintptr_t)((char *)res - 16) = (int64_t)(((la + lb) << 1) | 1);
   char *s = (char *)(uintptr_t)res;
-  rt_copy_mem(s, sa, la);
-  rt_copy_mem(s + la, sb, lb);
+  __copy_mem(s, sa, la);
+  __copy_mem(s + la, sb, lb);
   s[la + lb] = '\0';
   return res;
 }
 
-int64_t rt_to_str(int64_t v) {
+int64_t __to_str(int64_t v) {
   if (v == 0) {
-    int64_t res = rt_malloc((5 << 1) | 1);
+    int64_t res = __malloc((5 << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = (4 << 1) | 1;
     strcpy((char *)(uintptr_t)res, "none");
     return res;
   }
   if (v == 2) {
-    int64_t res = rt_malloc((5 << 1) | 1);
+    int64_t res = __malloc((5 << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = (4 << 1) | 1;
     strcpy((char *)(uintptr_t)res, "true");
     return res;
   }
   if (v == 4) {
-    int64_t res = rt_malloc((6 << 1) | 1);
+    int64_t res = __malloc((6 << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = (5 << 1) | 1;
     strcpy((char *)(uintptr_t)res, "false");
@@ -86,19 +86,19 @@ int64_t rt_to_str(int64_t v) {
     char buf[64];
     int len = sprintf(buf, "%ld", val);
     // fprintf(stderr, "DEBUG: to_str int %ld len %d s='%s'\n", val, len, buf);
-    int64_t res = rt_malloc(((int64_t)(len + 1) << 1) | 1);
+    int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    rt_copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
   if ((v & 3) == 2) {
     char buf[64];
     int len = sprintf(buf, "<fn 0x%lx>", (unsigned long)(v & ~3ULL));
-    int64_t res = rt_malloc(((int64_t)(len + 1) << 1) | 1);
+    int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    rt_copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
   if (is_ptr(v)) {
@@ -110,19 +110,19 @@ int64_t rt_to_str(int64_t v) {
       memcpy(&d, (void *)(uintptr_t)v, 8); // This memcpy is safe (len 8)
       char buf[64];
       int len = sprintf(buf, "%g", d);
-      int64_t res = rt_malloc(((int64_t)(len + 1) << 1) | 1);
+      int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
       *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
       *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-      rt_copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+      __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
       return res;
     }
     char buf[64];
     int len = sprintf(buf, "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
-    int64_t res = rt_malloc(((int64_t)(len + 1) << 1) | 1);
+    int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) =
         120; // 120 for arbitrary object string rep?
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    rt_copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
   return v;

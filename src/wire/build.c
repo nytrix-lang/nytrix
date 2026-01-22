@@ -116,17 +116,17 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     argv[idx++] = runtime_obj;
   if (runtime_ast_obj)
     argv[idx++] = runtime_ast_obj;
-  const char *shared_rt_path = NULL;
+  const char *shared___path = NULL;
   for (size_t i = 0; i < extra_count; ++i) {
     if (idx + 12 >= max_args)
       break;
     argv[idx++] = extra_objs[i];
     /* Remember the first .so so we can add an rpath */
-    if (!shared_rt_path) {
+    if (!shared___path) {
       const char *p = extra_objs[i];
       const char *dot = strrchr(p, '.');
       if (dot && strcmp(dot, ".so") == 0) {
-        shared_rt_path = p;
+        shared___path = p;
       }
     }
   }
@@ -135,14 +135,14 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   argv[idx++] = "-Wl,-O1";
   if (link_strip)
     argv[idx++] = "-Wl,-s";
-  if (shared_rt_path) {
+  if (shared___path) {
     static char rpath_buf[PATH_MAX];
-    const char *slash = strrchr(shared_rt_path, '/');
+    const char *slash = strrchr(shared___path, '/');
     if (slash) {
-      size_t len = (size_t)(slash - shared_rt_path);
+      size_t len = (size_t)(slash - shared___path);
       if (len >= sizeof(rpath_buf))
         len = sizeof(rpath_buf) - 1;
-      memcpy(rpath_buf, shared_rt_path, len);
+      memcpy(rpath_buf, shared___path, len);
       rpath_buf[len] = '\0';
       static char rpath_arg[PATH_MAX + 16];
       snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);

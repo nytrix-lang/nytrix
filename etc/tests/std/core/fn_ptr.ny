@@ -20,9 +20,9 @@ fn test_lambda_ptr() {
 }
 
 fn apply_op(a, b, op) {
-   print("Op: ", itoa(op))
+   print("Op: ", to_str(op))
    def res = op(a, b)
-   print("Op res: ", itoa(res))
+   print("Op res: ", to_str(res))
    return res
 }
 

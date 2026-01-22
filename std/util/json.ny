@@ -19,8 +19,9 @@ fn _json_hex2(n){
 }
 
 fn json_escape(s){
+   "Escapes control characters and double quotes in string `s` for JSON compatibility."
    def out = list(8)
-   def i = 0  n = str_len(s)
+   def i = 0  def n = str_len(s)
    while(i < n){
       def c = load8(s, i)
       out = append(out, case c {
@@ -34,27 +35,28 @@ fn json_escape(s){
             else { chr(c) }
          }
       })
-      i = i + 1
+      i += 1
    }
-   return join(out, "")
+   join(out, "")
 }
 
 fn json_encode(v){
+   "Serializes Nytrix value `v` into its JSON string representation."
    case type(v) {
      "list", "tuple" -> {
       def out = "["
-      def i = 0  n = list_len(v)
+      def i = 0  def n = list_len(v)
       while(i < n){
          out = f"{out}{json_encode(get(v, i))}"
          if(i + 1 < n){ out = f"{out}," }
-         i = i + 1
+         i += 1
       }
       f"{out}]"
      }
      "dict" -> {
       def out = "{"
       def its = items(v)
-      def i = 0  n = list_len(its)
+      def i = 0  def n = list_len(its)
       while(i < n){
          def p = get(its, i)
          def k = get(p, 0)
@@ -66,8 +68,8 @@ fn json_encode(v){
       f"{out}}"
      }
      "str" -> f"\"{json_escape(v)}\""
-     "int" -> itoa(v)
-     "float" -> rt_to_str(v)
+     "int" -> to_str(v)
+     "float" -> __to_str(v)
      "bool" -> case v { true -> "true" _ -> "false" }
      "none" -> "null"
      _      -> repr(v)
@@ -183,7 +185,7 @@ fn _json_init_dict(s, i, n){
       if(load8(s, i) != 58){ panic("json: expected : in dict") }
       i = i + 1
       def p_val = _json_parse_val(s, i, n)
-      res = setitem(res, key, get(p_val, 0))
+      res = dict_set(res, key, get(p_val, 0))
       i = get(p_val, 1)
       i = _json_skip_ws(s, i, n)
       if(load8(s, i) == 44){ i = i + 1 } "skip ,"

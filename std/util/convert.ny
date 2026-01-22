@@ -22,19 +22,19 @@ fn int_to_str(n) {
    def size = digits
    size = digits
    if (negative) { size = size + 1  }
-   def buf = rt_malloc(size + 1)
-   rt_init_str(buf, size) ; Tag String + Len
+   def buf = __malloc(size + 1)
+   __init_str(buf, size) ; Tag String + Len
    def pos = size
-   rt_store8_idx(buf, pos, 0)
+   __store8_idx(buf, pos, 0)
    pos = pos - 1
    while (n > 0) {
       def digit = n % 10
-      rt_store8_idx(buf, pos, 48 + digit)
+      __store8_idx(buf, pos, 48 + digit)
       pos = pos - 1
       n = n / 10
    }
    if (negative) {
-      rt_store8_idx(buf, 0, 45)
+      __store8_idx(buf, 0, 45)
    }
    return buf
 }
@@ -47,13 +47,13 @@ fn parse_int(s) {
    def result = 0
    def negative = 0
    def start = 0
-   if (rt_load8_idx(s, 0) == 45) {
+   if (__load8_idx(s, 0) == 45) {
       negative = 1
       start = 1
    }
    def i = start
    while (i < n) {
-      def c = rt_load8_idx(s, i)
+      def c = __load8_idx(s, i)
       if (c >= 48 && c <= 57) {
          result = result * 10 + (c - 48)
       }

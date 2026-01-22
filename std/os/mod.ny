@@ -10,78 +10,87 @@ module std.os (
 )
 
 fn pid(){
-   "Return current process id."
-   return rt_syscall(39,0,0,0,0,0,0)
+   "Returns the **process ID** of the calling process via **getpid(2)**."
+   __syscall(39,0,0,0,0,0,0)
 }
 
 fn ppid(){
-   "Return parent process id."
-   return rt_syscall(110,0,0,0,0,0,0)
+   "Returns the **parent process ID** of the calling process via **getppid(2)**."
+   __syscall(110,0,0,0,0,0,0)
 }
 
 fn env(name){
-   "Get environment variable."
-   def envp = rt_envp()
-   if(!envp){ return 0 }
-   def name_len = str_len(name)
-   def i = 0
-   while(load64(envp, i*8)){
-      def env_entry = load64(envp, i*8)
-      ;; Check if this entry starts with our variable name
-      def matches = 1
-      def j = 0
-      while (j < name_len) {
-         if (load8(env_entry, j) != load8(name, j)) {
-            matches = 0
+   "Retrieves the value of an environment variable `name`. Returns `0` if not found."
+   def envp = __envp()
+   if(!envp){ 0 }
+   else {
+      def name_len = str_len(name)
+      def i = 0
+      def res = 0
+      while(load64(envp, i*8)){
+         def env_entry = load64(envp, i*8)
+         ;; Check if this entry starts with our variable name
+         def matches = 1
+         def j = 0
+         while (j < name_len) {
+            if (load8(env_entry, j) != load8(name, j)) {
+               matches = 0
+               break
+            }
+            j += 1
+         }
+         ;; Check for '=' after the name (prevents partial matches)
+         if (matches && load8(env_entry, name_len) == 61) {
+            ;; Found it! Extract the value
+            res = cstr_to_str(env_entry, name_len + 1)
             break
          }
-         j = j + 1
+         i += 1
       }
-      ;; Check for '=' after the name (prevents partial matches)
-      if (matches && load8(env_entry, name_len) == 61) {
-         ;; Found it! Extract the value
-         return cstr_to_str(env_entry, name_len + 1)
-      }
-      i = i + 1
+      res
    }
-   return 0
 }
 
 fn environ(){
-   "All environment variables as a list of strings."
-   def envp = rt_envp()
-   if(!envp){ return list(8) }
-   def n = rt_envc()
-   if(n <= 0){ return list(8) }
-   def xs = list(8)
-   def i = 0
-   while(i < n && load64(envp, i*8)){
-      def s_raw = load64(envp, i*8)
-      xs = append(xs, s_raw)
-      i = i + 1
+   "Returns a [[std.core::list]] of all environment variables in `KEY=VALUE` format."
+   def envp = __envp()
+   if(!envp){ list(8) }
+   else {
+      def n = __envc()
+      if(n <= 0){ list(8) }
+      else {
+         def xs = list(8)
+         def i = 0
+         while(i < n && load64(envp, i*8)){
+            def s_raw = load64(envp, i*8)
+            xs = append(xs, s_raw)
+            i += 1
+         }
+         xs
+      }
    }
-   return xs
 }
 
 fn getcwd(){
-   "Current working directory."
-   def buf = rt_malloc(4096)
-   def len = rt_syscall(79, buf, 4096, 0,0,0,0)
+   "Returns the absolute path of the **current working directory**."
+   def buf = __malloc(4096)
+   def len = __syscall(79, buf, 4096, 0,0,0,0)
    if(len <= 0){
-      rt_free(buf)
-      return ""
+      __free(buf)
+      ""
+   } else {
+      def s = cstr_to_str(buf)
+      __free(buf)
+      s
    }
-   def s = cstr_to_str(buf)
-   rt_free(buf)
-   return s
 }
 
 fn uid(){
-   "Return user id."
-   return rt_syscall(102,0,0,0,0,0,0)
+   "Returns the **real user ID** of the calling process via **getuid(2)**."
+   __syscall(102,0,0,0,0,0,0)
 }
 
 fn gid(){
-   "Return group id."
-   return rt_syscall(104,0,0,0,0,0,0)
+   "Returns the **real group ID** of the calling process via **getgid(2)**."
+   __syscall(104,0,0,0,0,0,0)
 }

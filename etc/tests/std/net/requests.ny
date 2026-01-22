@@ -27,9 +27,9 @@ fn test_parse_url(){
 fn test_parse_query(){
    def q = "a=1&b=hello&c"
    def d = http_parse_query(q)
-   assert(eq(getitem(d, "a"), "1"), "query a")
-   assert(eq(getitem(d, "b"), "hello"), "query b")
-   assert(getitem(d, "c") == 1, "query c flag") ; defaults to 1 if no value? Implementation sets 1.
+   assert(eq(dict_get(d, "a"), "1"), "query a")
+   assert(eq(dict_get(d, "b"), "hello"), "query b")
+   assert(dict_get(d, "c") == 1, "query c flag") ; defaults to 1 if no value? Implementation sets 1.
 }
 
 test_parse_url()

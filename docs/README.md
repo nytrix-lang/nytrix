@@ -58,9 +58,18 @@ ny -c "print('Hello ELF!')" -o && ./a.out
 sudo make install
 ```
 
+### Docs
+
+Generate a static local documentation site.
+
+```bash
+make docs
+xdg-open build/docs/index.html >/dev/null 2>&1
+```
+
 ## Project Status
 
-> Note: Everything is work in progress. No stable state yet. The standard library is unfinished. This is a mockup.
+> Note: Everything is work in progress. No stable state yet. The standard library is unfinished.
 
 Expect breaking changes.
 

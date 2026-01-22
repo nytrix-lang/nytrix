@@ -1,8 +1,8 @@
 use std.core
-use test_module as tm
+use "./test_module.ny"
 
 fn test_local_import() {
-   def result = tm.local_add(5, 3)
+   def result = local_add(5, 3)
    if result == 8 {
       print("[PASS] Local import works: ./test_module")
       return true
@@ -12,7 +12,7 @@ fn test_local_import() {
 }
 
 fn test_local_function_call() {
-   def greeting = tm.local_greet("Tester")
+   def greeting = local_greet("Tester")
    print(f"[PASS] Local function called: {greeting}")
    return true
 }

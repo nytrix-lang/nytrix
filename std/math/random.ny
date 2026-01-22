@@ -11,12 +11,12 @@ module std.math.random (
 
 fn rand(){
    "Return a random 63-bit positive integer."
-   return rt_rand64() & 0x7FFFFFFFFFFFFFFF
+   return __rand64() & 0x7FFFFFFFFFFFFFFF
 }
 
 fn seed(n){
    "Seed the PRNG."
-   return rt_srand(n)
+   return __srand(n)
 }
 
 fn random(){
@@ -71,11 +71,11 @@ fn sample(xs, k){
    def res = list(8)
    def indices = list(8)
    def i = 0
-   while(i < n){ append(indices, i) i = i + 1 }
+   while(i < n){  indices = append(indices, i) i = i + 1 }
    shuffle(indices)
    i = 0
    while(i < k){
-      append(res, get(xs, get(indices, i)))
+       res = append(res, get(xs, get(indices, i)))
       i = i + 1
    }
    return res

@@ -46,6 +46,7 @@ typedef struct {
   bool debug_symbols;
   bool no_std;
   const char *std_path;
+  std_mode_t std_mode;
   int strip_override; // -1 default, 0 keep, 1 strip
   int color_mode;     // -1 auto, 0 never, 1 always
 

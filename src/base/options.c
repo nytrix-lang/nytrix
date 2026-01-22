@@ -14,6 +14,7 @@ void ny_options_init(ny_options *opt) {
   opt->mode = NY_MODE_RUN;
   opt->strip_override = -1;
   opt->color_mode = -1;
+  opt->std_mode = STD_MODE_DEFAULT;
 }
 
 void ny_options_usage(const char *prog) {
@@ -211,8 +212,24 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
 
       // Std
       else if (strcmp(a, "-std") == 0) {
-        if (i + 1 < argc)
-          i++; // ignore mode for now
+        if (i + 1 < argc) {
+          const char *mode = argv[++i];
+          if (strcmp(mode, "none") == 0)
+            opt->std_mode = STD_MODE_NONE;
+          else if (strcmp(mode, "full") == 0)
+            opt->std_mode = STD_MODE_FULL;
+          else if (strcmp(mode, "minimal") == 0)
+            opt->std_mode = STD_MODE_MINIMAL;
+          else {
+            fprintf(stderr, "unknown std mode: %s\n", mode);
+            ny_options_usage(argv[0]);
+            exit(1);
+          }
+        } else {
+          fprintf(stderr, "missing argument for -std\n");
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
       } else if (strcmp(a, "-no-std") == 0)
         opt->no_std = true;
       else if (strncmp(a, "--std-path=", 11) == 0)

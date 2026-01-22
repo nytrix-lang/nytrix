@@ -32,8 +32,8 @@ assert(is_prime(10) == 0, "prime 10")
 
 ; Time
 print("Testing Time...")
-; def t = time()
-; print("Time:", t)
-; assert(t > 0, "time > 0")
+def t = time()
+print("Time:", t)
+assert(t > 0, "time > 0")
 
 print("✓ std.math.more passed")

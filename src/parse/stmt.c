@@ -254,7 +254,7 @@ static stmt_t *parse_use(parser_t *p) {
   parser_expect(p, NY_T_USE, "'use'", NULL);
   stmt_t *s = stmt_new(p->arena, NY_S_USE, tok);
   s->as.use.is_local = false;
-  s->as.use.import_all = false;
+  s->as.use.impo_all = false;
   if (p->cur.kind == NY_T_STRING) {
     size_t slen = 0;
     const char *sval = parser_decode_string(p, p->cur, &slen);
@@ -300,10 +300,10 @@ static stmt_t *parse_use(parser_t *p) {
     return NULL;
   }
   if (parser_match(p, NY_T_STAR)) {
-    s->as.use.import_all = true;
+    s->as.use.impo_all = true;
   }
   if (p->cur.kind == NY_T_LPAREN) {
-    if (s->as.use.import_all) {
+    if (s->as.use.impo_all) {
       parser_error(p, p->cur, "use '*' cannot be combined with an import list",
                    NULL);
     }
@@ -335,7 +335,7 @@ static stmt_t *parse_use(parser_t *p) {
     parser_expect(p, NY_T_RPAREN, ")'", NULL);
   }
   s->as.use.alias = NULL;
-  if (!s->as.use.import_all && s->as.use.imports.len == 0 &&
+  if (!s->as.use.impo_all && s->as.use.imports.len == 0 &&
       parser_match(p, NY_T_AS)) {
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected identifier after 'as'", NULL);
@@ -343,7 +343,7 @@ static stmt_t *parse_use(parser_t *p) {
       s->as.use.alias = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
       parser_advance(p);
     }
-  } else if (s->as.use.import_all || s->as.use.imports.len > 0) {
+  } else if (s->as.use.impo_all || s->as.use.imports.len > 0) {
     if (p->cur.kind == NY_T_AS) {
       parser_error(p, p->cur,
                    "module alias cannot be combined with an import list", NULL);
@@ -439,9 +439,9 @@ static stmt_t *parse_module(parser_t *p) {
   buf[len] = '\0';
   char *mod_name = arena_strndup(p->arena, buf, len);
   free(buf);
-  bool export_all = false;
+  bool expo__all = false;
   if (parser_match(p, NY_T_STAR)) {
-    export_all = true;
+    expo__all = true;
   }
   token_kind end_kind = NY_T_EOF;
   if (p->cur.kind == NY_T_LPAREN) {
@@ -455,7 +455,7 @@ static stmt_t *parse_module(parser_t *p) {
   p->current_module = mod_name;
   stmt_t *mod_stmt = stmt_new(p->arena, NY_S_MODULE, tok);
   mod_stmt->as.module.name = mod_name;
-  mod_stmt->as.module.export_all = export_all;
+  mod_stmt->as.module.expo_all = expo__all;
   while (p->cur.kind != end_kind && p->cur.kind != NY_T_EOF) {
     if (p->cur.kind == NY_T_IDENT) {
       token_t next = parser_peek(p);
@@ -553,7 +553,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
     return s;
   }
   case NY_T_DEF: {
-    token_t start_tok = p->cur;
+    token_t sta__tok = p->cur;
     parser_advance(p);
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected identifier after 'def'", NULL);
@@ -572,7 +572,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
       rhs = zero;
     }
     parser_match(p, NY_T_SEMI);
-    stmt_t *s = stmt_new(p->arena, NY_S_VAR, start_tok);
+    stmt_t *s = stmt_new(p->arena, NY_S_VAR, sta__tok);
     char *final_name = (char *)ident.lexeme;
     size_t nlen = ident.len;
     bool mangled = false;
@@ -594,7 +594,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
     return s;
   }
   case NY_T_UNDEF: {
-    token_t start_tok = p->cur;
+    token_t sta__tok = p->cur;
     parser_advance(p);
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected identifier after 'undef'", NULL);
@@ -603,7 +603,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
     token_t ident = p->cur;
     parser_advance(p);
     parser_match(p, NY_T_SEMI);
-    stmt_t *s = stmt_new(p->arena, NY_S_VAR, start_tok);
+    stmt_t *s = stmt_new(p->arena, NY_S_VAR, sta__tok);
     const char *name_s = arena_strndup(p->arena, ident.lexeme, ident.len);
     vec_push(&s->as.var.names, name_s);
     s->as.var.expr = NULL;

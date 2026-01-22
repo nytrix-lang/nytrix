@@ -1,13 +1,12 @@
 ;; Keywords: math logic
 ;; Math Logic module.
 
+use std.math
 use std.core
 use std.core.reflect
 module std.math.logic (
    any, all
 )
-
-use std.math
 
 fn any(xs){
    "Any true?"

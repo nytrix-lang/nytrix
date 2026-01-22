@@ -72,10 +72,10 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
                    a);
     bind(scopes, fd, fn->as.fn.params.data[i].name, a, NULL);
   }
-  size_t old_root = cg->func_root;
-  cg->func_root = root;
+  size_t old_root = cg->func_root_idx;
+  cg->func_root_idx = root;
   gen_stmt(cg, scopes, &fd, fn->as.fn.body, root, true);
-  cg->func_root = old_root;
+  cg->func_root_idx = old_root;
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
     LLVMBuildRet(cg->builder, LLVMConstInt(cg->type_i64, 1, false));
   vec_free(&scopes[root].defers);

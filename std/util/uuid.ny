@@ -10,8 +10,8 @@ module std.util.uuid (
 
 fn uuid4(){
    "Generate UUIDv4-like string."
-   def out = rt_malloc(64)
-   rt_init_str(out, 36) ; Tag + Len 36
+   def out = __malloc(64)
+   __init_str(out, 36) ; Tag + Len 36
    def i=0  def o=0
    def r=0 def b=0
    def v1=0 def c1=255

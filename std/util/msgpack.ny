@@ -22,7 +22,7 @@ fn _be_bytes(n, count){
 }
 
 fn _append(lst, b){
-   return append(lst, b & 255)
+   append(lst, b & 255)
 }
 
 fn _append_many(lst, src){
@@ -36,6 +36,7 @@ fn _append_many(lst, src){
 }
 
 fn msgpack_encode(v){
+   "Encodes Nytrix value `v` into a Msgpack-formatted bytes buffer."
    def out = list(8)
    return _mp_enc(v, out)
 }
@@ -141,15 +142,18 @@ fn _mp_enc(v, out){
 }
 
 fn msgpack_decode(bytes){
+   "Decodes Msgpack-formatted buffer `bytes` into its Nytrix value."
    def p = _mp_dec(bytes, 0)
    return get(p, 0)
 }
 
 fn msgpack_decode_from(bytes, idx){
+   "Decodes Msgpack value from `bytes` starting at `idx`. Returns `[value, next_idx]`."
    return _mp_dec(bytes, idx)
 }
 
 fn msgpack_stream_decode(bytes){
+   "Decodes all Msgpack values from `bytes` and returns them as a list."
    def out = list(8)
    def i = 0
    def n = list_len(bytes)
@@ -177,7 +181,7 @@ fn _mp_dec(bytes, i){
          def pv = _mp_dec(bytes, i)
          def v = get(pv, 0)
          i = get(pv, 1)
-         m = setitem(m, k, v)
+         m = dict_set(m, k, v)
          j = j + 1
       }
       return [m, i]
@@ -197,14 +201,14 @@ fn _mp_dec(bytes, i){
    }
    if ((b & 224) == 160) {
       def l = b & 31
-      def s = rt_malloc(l + 1)
-      rt_init_str(s, l)
+      def s = __malloc(l + 1)
+      __init_str(s, l)
       def j = 0
       while(j < l){
-         rt_store8_idx(s, j, get(bytes, i + j))
+         __store8_idx(s, j, get(bytes, i + j))
          j = j + 1
       }
-      rt_store8_idx(s, l, 0)
+      __store8_idx(s, l, 0)
       return [s, i + l]
    }
    case b {
@@ -212,40 +216,40 @@ fn _mp_dec(bytes, i){
       217 -> {
          def l = get(bytes, i)
          i = i + 1
-         def s = rt_malloc(l + 1)
-         rt_init_str(s, l)
+         def s = __malloc(l + 1)
+         __init_str(s, l)
          def j = 0
          while(j < l){
-            rt_store8_idx(s, j, get(bytes, i + j))
+            __store8_idx(s, j, get(bytes, i + j))
             j = j + 1
          }
-         rt_store8_idx(s, l, 0)
+         __store8_idx(s, l, 0)
          return [s, i + l]
       }
       218 -> {
          def l = (get(bytes, i) << 8) | get(bytes, i + 1)
          i = i + 2
-         def s = rt_malloc(l + 1)
-         rt_init_str(s, l)
+         def s = __malloc(l + 1)
+         __init_str(s, l)
          def j = 0
          while(j < l){
-            rt_store8_idx(s, j, get(bytes, i + j))
+            __store8_idx(s, j, get(bytes, i + j))
             j = j + 1
          }
-         rt_store8_idx(s, l, 0)
+         __store8_idx(s, l, 0)
          return [s, i + l]
       }
       219 -> {
          def l = (get(bytes, i) << 24) | (get(bytes, i + 1) << 16) | (get(bytes, i + 2) << 8) | get(bytes, i + 3)
          i = i + 4
-         def s = rt_malloc(l + 1)
-         rt_init_str(s, l)
+         def s = __malloc(l + 1)
+         __init_str(s, l)
          def j = 0
          while(j < l){
-            rt_store8_idx(s, j, get(bytes, i + j))
+            __store8_idx(s, j, get(bytes, i + j))
             j = j + 1
          }
-         rt_store8_idx(s, l, 0)
+         __store8_idx(s, l, 0)
          return [s, i + l]
       }
       220 -> {
@@ -273,7 +277,7 @@ fn _mp_dec(bytes, i){
             def pv = _mp_dec(bytes, i)
             def v = get(pv, 0)
             i = get(pv, 1)
-            m = setitem(m, k, v)
+            m = dict_set(m, k, v)
             j = j + 1
          }
          return [m, i]

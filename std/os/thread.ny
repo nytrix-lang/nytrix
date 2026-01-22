@@ -11,32 +11,32 @@ fn thread_spawn(func, arg=0){
    ; func must be a function pointer or closure.
    ; runtime expects pure function pointer?
    ; Nytrix functions are just pointers.
-   return rt_thread_spawn(func, arg) ; TODO use syscalls instead
+   return __thread_spawn(func, arg) ; TODO use syscalls instead
 }
 
 fn thread_join(handle){
    "Waits for the thread `handle` to finish and returns its result."
-   return rt_thread_join(handle)
+   return __thread_join(handle)
 }
 
 ; Synchronization
 
 fn mutex_new(){
    "Create a new mutex."
-   return rt_mutex_new()
+   return __mutex_new()
 }
 
 fn mutex_lock(m){
    "Acquires the mutex `m`. Blocks if unavailable."
-   return rt_mutex_lock64(m)
+   return __mutex_lock64(m)
 }
 
 fn mutex_unlock(m){
    "Releases the mutex `m`."
-   return rt_mutex_unlock64(m)
+   return __mutex_unlock64(m)
 }
 
 fn mutex_free(m){
    "Destroys the mutex `m`."
-   return rt_mutex_free(m)
+   return __mutex_free(m)
 }

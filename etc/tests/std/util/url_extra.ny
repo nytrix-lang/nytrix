@@ -11,10 +11,10 @@ fn cstr_eq(cptr, s){
    def n = str_len(s)
    def i = 0
    while(i < n){
-      if(rt_load8_idx(cptr, i) != rt_load8_idx(s, i)){ return false }
+      if(__load8_idx(cptr, i) != __load8_idx(s, i)){ return false }
       i = i + 1
    }
-   return rt_load8_idx(cptr, n) == 0
+   return __load8_idx(cptr, n) == 0
 }
 
 def enc = urlencode("a b+c")
@@ -33,10 +33,10 @@ assert(get(p, 5) == "q=1", "url_parse query")
 assert(get(p, 6) == "frag", "url_parse fragment")
 
 def q = parse_query("a=1&b=2&flag")
-def qa = getitem(q, "a", 0)
-def qb = getitem(q, "b", 0)
+def qa = dict_get(q, "a", 0)
+def qb = dict_get(q, "b", 0)
 assert(eq(qa, "1"), "parse_query a")
 assert(eq(qb, "2"), "parse_query b")
-assert(getitem(q, "flag", 0) == 1, "parse_query flag")
+assert(dict_get(q, "flag", 0) == 1, "parse_query flag")
 
 print("✓ std.util.url extra passed")

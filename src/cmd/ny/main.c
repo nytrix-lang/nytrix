@@ -1,5 +1,6 @@
 #include "base/options.h"
 #include "code/jit.h"
+#include "rt/shared.h"
 #include "wire/pipe.h"
 #include <execinfo.h>
 #include <signal.h>
@@ -27,15 +28,15 @@ int main(int argc, char **argv, char **envp) {
   if (opt.input_file) {
     int s_argc = argc - opt.file_arg_idx;
     char **s_argv = &argv[opt.file_arg_idx];
-    rt_set_args((int64_t)s_argc, (int64_t)(uintptr_t)s_argv,
-                (int64_t)(uintptr_t)envp);
+    __set_args((int64_t)s_argc, (int64_t)(uintptr_t)s_argv,
+               (int64_t)(uintptr_t)envp);
   } else if (opt.command_string) {
     static char *eval_argv[] = {(char *)"nytrix", NULL};
-    rt_set_args(1, (int64_t)(uintptr_t)eval_argv, (int64_t)(uintptr_t)envp);
+    __set_args(1, (int64_t)(uintptr_t)eval_argv, (int64_t)(uintptr_t)envp);
   } else {
     // Default to all args (REPL or empty)
-    rt_set_args((int64_t)argc, (int64_t)(uintptr_t)argv,
-                (int64_t)(uintptr_t)envp);
+    __set_args((int64_t)argc, (int64_t)(uintptr_t)argv,
+               (int64_t)(uintptr_t)envp);
   }
 
   if (argc < 2 && opt.mode != NY_MODE_REPL && !opt.command_string &&

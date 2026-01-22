@@ -1,61 +1,55 @@
 ;; Keywords: collections queue
 ;; Collections Queue module.
 
-use std.core
 module std.collections.queue (
-   _queue_alloc, queue, _queue_cap, _queue_len, _queue_head, _queue_tail, _queue_get,
-   _queue_set, _queue_grow, queue_push, queue_pop, queue_len,
-   enqueue, dequeue, queue_size
+   queue, queue_push, queue_pop, queue_len
 )
-
-; define QUEUE_TAG = 106
-; define QUEUE_HDR = 32
 
 fn _queue_alloc(cap){
    "Internal: allocate a queue with capacity cap."
    if(cap < 8){ cap = 8 }
-   def p = rt_malloc(32 + cap * 8)
+   def p = __malloc(32 + cap * 8)
    store64(p, 106, -8)
    store64(p, 0, 0)   ; len
    store64(p, cap, 8) ; cap
    store64(p, 0, 16)  ; head
    store64(p, 0, 24)  ; tail
-   return p
+   p
 }
 
 fn queue(){
-   "Create a new FIFO queue."
-   return _queue_alloc(8)
+   "Creates a new FIFO **queue**."
+   _queue_alloc(8)
 }
 
 fn _queue_cap(q){
    "Internal: return queue capacity."
-   return load64(q, 8)
+   load64(q, 8)
 }
 
 fn _queue_len(q){
    "Internal: return queue length."
-   return load64(q, 0)
+   load64(q, 0)
 }
 
 fn _queue_head(q){
    "Internal: return queue head index."
-   return load64(q, 16)
+   load64(q, 16)
 }
 
 fn _queue_tail(q){
    "Internal: return queue tail index."
-   return load64(q, 24)
+   load64(q, 24)
 }
 
 fn _queue_get(q, i){
    "Internal: load item at ring index i."
-   return load64(q, 32 + i * 8)
+   load64(q, 32 + i * 8)
 }
 
 fn _queue_set(q, i, v){
    "Internal: store item at ring index i."
-   return store64(q, v, 32 + i * 8)
+   store64(q, v, 32 + i * 8)
 }
 
 fn _queue_grow(q){
@@ -68,18 +62,19 @@ fn _queue_grow(q){
    def i = 0
    while(i < n){
       def idx = h + i
-      if(idx >= cap){ idx = idx - cap }
+      if(idx >= cap){ idx -= cap }
       _queue_set(out, i, _queue_get(q, idx))
-      i = i + 1
+      i += 1
    }
    store64(out, n, 0)
    store64(out, 0, 16)
    store64(out, n, 24)
-   rt_free(q)
-   return out
+   __free(q)
+   out
 }
 
 fn queue_push(q, v){
+   "Pushes value `v` to the back of queue `q`."
    if(!is_ptr(q) || load64(q, -8) != 106){ q }
    else {
       def n = _queue_len(q)  def cap = _queue_cap(q)
@@ -95,6 +90,7 @@ fn queue_push(q, v){
 }
 
 fn queue_pop(q){
+   "Removes and returns the front element of queue `q`."
    if(!is_ptr(q) || load64(q, -8) != 106){ 0 }
    else {
       def n = _queue_len(q)
@@ -111,10 +107,6 @@ fn queue_pop(q){
 }
 
 fn queue_len(q){
+   "Returns the number of elements in queue `q`."
    if(!is_ptr(q) || load64(q, -8) != 106){ 0 } else { _queue_len(q) }
 }
-
-; Aliases
-fn enqueue(q, v){ return queue_push(q, v) }
-fn dequeue(q){ return queue_pop(q) }
-fn queue_size(q){ return queue_len(q) }

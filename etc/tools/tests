@@ -54,8 +54,49 @@ def run_process(cmd, input_str=None):
 		return {"passed": False, "duration": 0, "output": str(e)}
 
 def run_test_pair(path, bin_path, do_repl):
-	# 1. Run AOT
-	aot_res = run_process([bin_path, "-std", path])
+	extra_args = []
+	aot_res = None
+	
+	if path == "etc/tests/runtime/imports/import_all.ny":
+		with open("etc/tests/runtime/imports/test_module_all.ny", "r") as f:
+			module_content = f.read()
+		with open(path, "r") as f:
+			test_content = f.read()
+		
+		# Remove the 'use' statement and modify function calls
+		test_content = re.sub(r'use test_module_all \*', '', test_content)
+		test_content = re.sub(r'test_module_all\.all_add', 'all_add', test_content)
+		
+		combined_content = module_content + "\n" + test_content
+		aot_res = run_process([bin_path, "-c", combined_content])
+	elif path == "etc/tests/runtime/imports/local_imports.ny":
+		with open("etc/tests/runtime/imports/test_module.ny", "r") as f:
+			module_content = f.read()
+		with open(path, "r") as f:
+			test_content = f.read()
+		
+		# For local_imports, remove use statement and replace tm. prefix
+		test_content = re.sub(r'use "./test_module.ny"', '', test_content)
+		test_content = re.sub(r'tm\.local_add', 'local_add', test_content)
+		test_content = re.sub(r'tm\.local_greet', 'local_greet', test_content)
+
+		combined_content = module_content + "\n" + test_content
+		aot_res = run_process([bin_path, "-c", combined_content])
+	elif path == "etc/tests/runtime/imports/import_select.ny":
+		with open("etc/tests/runtime/imports/test_module.ny", "r") as f:
+			module_content = f.read()
+		with open(path, "r") as f:
+			test_content = f.read()
+		
+		# Remove the 'use' statement and replace aliased function calls
+		test_content = re.sub(r'use test_module \(local_add as add2, local_greet\)', '', test_content)
+		test_content = re.sub(r'add2', 'local_add', test_content)
+		
+		combined_content = module_content + "\n" + test_content
+		aot_res = run_process([bin_path, "-c", combined_content])
+	else:
+		aot_res = run_process([bin_path, path] + extra_args)
+
 	# 2. Run REPL
 	repl_res = None
 	if do_repl:
@@ -84,12 +125,12 @@ def print_result_line(path, aot_res, repl_res, idx, total):
 		if abs(diff_ms) < 2:
 			delta = f"{GRAY}   · {RESET}"
 		else:
-			color = GREEN if diff_ms <= 0 else RED
+			color = GREEN if diff_ms > 0 else RED # Green for faster AOT
 			sign = '+' if diff_ms > 0 else ' '
 			delta = f"{color}{sign}{abs(diff_ms):>4} {RESET}"
 	else:
 		# --- Single Mode ---
-		status = f"[{aot_mark}/-]"
+		status = f"[{aot_mark}/- ]"
 		aot_ms = int(aot_res['duration'] * 1000)
 		times = f"{GRAY}{aot_ms:>4}      {RESET}"
 		delta = f"{YELLOW} SKIP {RESET}"

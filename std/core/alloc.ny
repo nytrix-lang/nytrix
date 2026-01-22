@@ -8,7 +8,7 @@ module std.core.alloc (
 
 fn bump_new(cap){
    "Create a new bump allocator with the specified capacity. Returns a state list [buffer, capacity, offset]."
-   def buf = rt_malloc(cap)
+   def buf = __malloc(cap)
    return [buf, cap, 0]
 }
 
