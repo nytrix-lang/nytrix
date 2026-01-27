@@ -1,24 +1,12 @@
 use std.core
+use std.io
 use test_module (local_add as add2, local_greet)
 
-fn test_impo__list() {
-   def sum = add2(10, 5)
-   if sum != 15 {
-      print("[FAIL] use module (list) failed")
-      return false
-   }
-   def greeting = local_greet("Tester")
-   print(f"[PASS] import list rename works: {greeting}")
-   return true
-}
+;; Import system – use module (list) (Test)
 
-fn run_all_tests() {
-   print("Import System: use module (list)")
-   def passed = 0
-   def total = 1
-   if test_impo__list() { passed = passed + 1 }
-   print("")
-   print(f"Results: {passed}/{total} tests passed")
-}
+assert(add2(10, 5) == 15, "import list rename")
 
-run_all_tests()
+def g = local_greet("Tester")
+assert(g != 0, "import list function")
+
+print("✓ use module (list) tests passed")

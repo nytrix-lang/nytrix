@@ -122,7 +122,7 @@ Semicolon (@code{;}) for single-line. Triple-quotes (@code{"""} or @code{'''}) f
 
 @node Runtime
 @chapter Runtime
-64-bit tagged values (LSB=1: integer, LSB=0: pointer). Manual memory: @code{rt_malloc}, @code{rt_free}, @code{rt_realloc}. OS interop via @code{rt_syscall} and FFI (@code{std.os.ffi}).
+64-bit tagged values (LSB=1: integer, LSB=0: pointer). Manual memory: @code{__malloc}, @code{__free}, @code{__realloc}. OS interop via @code{__syscall} and FFI (@code{std.os.ffi}).
 
 @node Indices
 @chapter Indices

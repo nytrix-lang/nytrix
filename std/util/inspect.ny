@@ -7,7 +7,7 @@ module std.util.inspect (
 )
 
 fn inspect(x){
-   "Prints detailed information about value x."
+   "Prints detailed information about value `x`, including its type, representation, length (if applicable), and memory address (for pointers)."
    def t = type(x)
    print(f"Type:  {t}")
    print(f"Value: {repr(x)}")

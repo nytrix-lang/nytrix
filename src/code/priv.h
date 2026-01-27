@@ -23,7 +23,7 @@ bool builtin_allowed_comptime(const char *name);
 // Lookup (lookup.c)
 fun_sig *lookup_fun(codegen_t *cg, const char *name);
 fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc);
-const char *resolve_impo_alias(codegen_t *cg, const char *name);
+const char *resolve_import_alias(codegen_t *cg, const char *name);
 binding *lookup_global(codegen_t *cg, const char *name);
 fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
@@ -49,10 +49,10 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
 void collect_sigs(codegen_t *cg, stmt_t *s);
 
 // Module handling (module.c)
-void add_impo_alias(codegen_t *cg, const char *alias, const char *full_name);
-void add_impo_alias_from_full(codegen_t *cg, const char *full_name);
+void add_import_alias(codegen_t *cg, const char *alias, const char *full_name);
+void add_import_alias_from_full(codegen_t *cg, const char *full_name);
 stmt_t *find_module_stmt(stmt_t *s, const char *name);
-bool module_has_expo_list(const stmt_t *mod);
+bool module_has_export_list(const stmt_t *mod);
 void collect_module_exports(stmt_t *mod, str_list *exports);
 void collect_module_defs(stmt_t *mod, str_list *exports);
 void add_imports_from_prefix(codegen_t *cg, const char *mod);

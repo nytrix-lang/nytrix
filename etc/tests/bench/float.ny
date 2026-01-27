@@ -1,12 +1,13 @@
-use std.math.float
+use std.io
 use std.os.time
+use std.math.float
 use std.core
 use std.io.fmt
 
-print("Benchmarking Float...")
+;; Float (Benchmark)
+;; Tests floating point arithmetic performance.
 
 def start = ticks()
-
 def x = 1.0
 def y = 1.000001
 def i = 0

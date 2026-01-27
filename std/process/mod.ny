@@ -1,5 +1,5 @@
-;; Keywords: process mod
-;; Process Mod module.
+;; Keywords: process
+;; Process module.
 
 use std.collections
 use std.os.sys

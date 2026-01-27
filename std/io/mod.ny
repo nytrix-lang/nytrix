@@ -1,5 +1,5 @@
-;; Keywords: io mod
-;; Io Mod module.
+;; Keywords: io
+;; Io module.
 
 use std.core
 use std.strings.str
@@ -223,4 +223,9 @@ fn __repl_show(val){
   sys_write(1, s, str_len(s))
   sys_write(1, "\n", 1)
   val
+}
+
+fn _print_marker(){
+  "Internal: Dummy function to satisfy runtime expectation of _print_marker."
+  0
 }

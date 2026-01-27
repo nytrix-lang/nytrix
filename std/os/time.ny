@@ -7,7 +7,7 @@ module std.os.time (
 )
 
 fn time(){
-   "Unix time in seconds (epoch timestamp)."
+   "Returns the current Unix timestamp (seconds since epoch) using `clock_gettime(CLOCK_REALTIME)`."
    def ts = __malloc(16)
    def r = __syscall(228, 0, ts, 0,0,0,0) ; "clock_gettime(CLOCK_REALTIME)"
    if(r != 0){ __free(ts) return 0 }
@@ -20,7 +20,7 @@ fn time(){
 }
 
 fn msleep(ms){
-   "Sleep milliseconds."
+   "Suspends execution of the current thread for `ms` milliseconds."
    def ts = __malloc(16)
    store64(ts, to_int(ms / 1000), 0)
    store64(ts, to_int((ms % 1000) * 1000000), 8)
@@ -29,12 +29,12 @@ fn msleep(ms){
 }
 
 fn sleep(s){
-   "Sleep seconds."
+   "Suspends execution of the current thread for `s` seconds."
    msleep(s * 1000)
 }
 
 fn ticks(){
-   "Raw monotonic ticks (nanoseconds)."
+   "Returns a high-resolution monotonic tick count in nanoseconds. Useful for precise timing and benchmarking."
    def ts = __malloc(16)
    def r = __syscall(228, 1, ts, 0,0,0,0) ; "clock_gettime(CLOCK_MONOTONIC)"
    if(r != 0){ __free(ts) return 0 }

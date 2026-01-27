@@ -47,7 +47,7 @@ def run_process(cmd, input_str=None):
 		return {
 			"passed": result.returncode == 0,
 			"duration": duration,
-			"output": result.stdout + result.stderr
+			"output": (result.stdout or "") + (result.stderr or "")
 			# "time_ns": parse_time_ns(...) # optimization: skip regex if not needed
 		}
 	except Exception as e:
@@ -101,8 +101,16 @@ def run_test_pair(path, bin_path, do_repl):
 	repl_res = None
 	if do_repl:
 		try:
-			with open(path, "r") as f:
-				script = f.read()
+			script = ""
+			if path in [
+				"etc/tests/runtime/imports/import_all.ny",
+				"etc/tests/runtime/imports/local_imports.ny",
+				"etc/tests/runtime/imports/import_select.ny"
+			] and 'combined_content' in locals():
+				script = combined_content
+			else:
+				with open(path, "r") as f:
+					script = f.read()
 			repl_res = run_process([bin_path, "-i"], input_str=script)
 		except Exception as e:
 			repl_res = {"passed": False, "duration": 0, "output": str(e)}
@@ -123,7 +131,7 @@ def print_result_line(path, aot_res, repl_res, idx, total):
 		# Delta: "+123" (No ms suffix, no trailing space)
 		diff_ms = int((repl_res['duration'] - aot_res['duration']) * 1000)
 		if abs(diff_ms) < 2:
-			delta = f"{GRAY}   · {RESET}"
+			delta = f"{GRAY}{'·':>5} {RESET}"
 		else:
 			color = GREEN if diff_ms > 0 else RED # Green for faster AOT
 			sign = '+' if diff_ms > 0 else ' '

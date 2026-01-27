@@ -1,5 +1,7 @@
-;; Testing Raylib FFI Using Low Level ffi functions ...
 use std.os.ffi
+
+;; Raylib FFI (Example)
+;; Demonstrates low-level FFI calls to the Raylib graphics library.
 
 def h = dlopen("/usr/lib/libraylib.so", 2)
 if(h != 0){

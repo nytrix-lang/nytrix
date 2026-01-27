@@ -4,7 +4,7 @@
 use std.core
 use std.core.reflect
 module std.core.error (
-   panic, assert, asse__eq
+   panic, assert, assert_eq
 )
 
 fn panic(msg){
@@ -18,7 +18,7 @@ fn assert(cond, msg="assert failed"){
    return 0
 }
 
-fn asse__eq(a,b,msg="assert eq failed"){
+fn assert_eq(a,b,msg="assert eq failed"){
    "Asserts that two values are equal. If not, panics with the provided message."
    if(!eq(a,b)){ panic(msg) }
    return 0

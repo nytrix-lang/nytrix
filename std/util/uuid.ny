@@ -9,7 +9,7 @@ module std.util.uuid (
 )
 
 fn uuid4(){
-   "Generate UUIDv4-like string."
+   "Generates a random Version 4 UUID string (e.g., 'f47ac10b-58cc-4372-a567-0e02b2c3d479')."
    def out = __malloc(64)
    __init_str(out, 36) ; Tag + Len 36
    def i=0  def o=0

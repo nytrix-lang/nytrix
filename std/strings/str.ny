@@ -287,11 +287,11 @@ fn lower(s){
 fn repeat(s, n){
    "Returns a new string consisting of `s` repeated `n` times."
    if(n <= 0){ return "" }
-   def res = ""
-   def i = 0
+   def res = s
+   def i = 1
    while(i < n){
-      res = f"{res}{s}"
-      i += 1
+      res = res + s
+      i = i + 1
    }
    res
 }

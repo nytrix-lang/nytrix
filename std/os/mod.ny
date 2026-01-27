@@ -1,5 +1,5 @@
-;; Keywords: os mod
-;; Os Mod module.
+;; Keywords: os
+;; Os module.
 
 use std.core
 use std.strings.str

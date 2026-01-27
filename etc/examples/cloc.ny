@@ -1,8 +1,10 @@
-;; Nytrix Line of Code Counter
-use std.io *
-use std.io.fs *
-use std.strings.str *
+use std.io
+use std.io.fs
+use std.strings.str
 use std.core
+
+;; Cloc (Example)
+;; Nytrix Line of Code Counter tool.
 
 fn count_lines(path){
    def src = file_read(path)

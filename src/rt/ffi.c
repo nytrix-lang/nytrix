@@ -191,3 +191,22 @@ int64_t __call13(int64_t fn, int64_t a, int64_t b, int64_t c, int64_t d,
       (void *)__mask_ptr(fn);
   return f(a, b, c, d, e, g, h, i, j, k, l, m, n);
 }
+
+int64_t __call14(int64_t fn, int64_t a, int64_t b, int64_t c, int64_t d,
+                 int64_t e, int64_t g, int64_t h, int64_t i, int64_t j,
+                 int64_t k, int64_t l, int64_t m, int64_t n, int64_t o) {
+  int64_t (*f)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+               int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t) =
+      (void *)__mask_ptr(fn);
+  return f(a, b, c, d, e, g, h, i, j, k, l, m, n, o);
+}
+
+int64_t __call15(int64_t fn, int64_t a, int64_t b, int64_t c, int64_t d,
+                 int64_t e, int64_t g, int64_t h, int64_t i, int64_t j,
+                 int64_t k, int64_t l, int64_t m, int64_t n, int64_t o,
+                 int64_t p) {
+  int64_t (*f)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+               int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+               int64_t) = (void *)__mask_ptr(fn);
+  return f(a, b, c, d, e, g, h, i, j, k, l, m, n, o, p);
+}

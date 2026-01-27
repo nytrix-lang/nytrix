@@ -1,9 +1,10 @@
 use std.io
+use std.core.error
 
-; Test comments in various positions
+;; Comments parsing (Test)
 
 ; Single line comment at start
-def x = 1  ; Inline comment
+def x = 1  ; inline
 
 ; Multiple single line comments
 ; Comment line 1
@@ -11,61 +12,49 @@ def x = 1  ; Inline comment
 ; Comment line 3
 def y = 2
 
-; Comment before function
-fn add(a, b) {
-   ; Comment inside function
-   return a + b  ; Return comment
+fn add(a, b){
+   ; inside function
+   a + b  ; return comment
 }
 
 def result = add(x, y)
-assert(result == 3, "function with comments")
+assert(result == 3, "fn with comments")
 
-; Comment before if
 if x == 1 {
-   ; Comment inside if
+   ; inside if
    def z = 3
 }
 
-; Comment before loop
-i = 0
+def i = 0
 while i < 5 {
-   ; Comment in loop
+   ; inside loop
    i = i + 1
 }
 assert(i == 5, "loop with comments")
 
 ; Empty lines and comments
 
-; Multiple empty lines above
 
 def a = 10
 def b = 20
-def c = a + b  ; Inline math
-assert(c == 30, "operations with comments")
+def c = a + b  ; inline math
+assert(c == 30, "ops with comments")
 
-; Nested comments in nested structures
 if 1 == 1 {
-   ; Outer comment
+   ; outer
    if 2 == 2 {
-      ; Inner comment
+      ; inner
       def nested = 42
    }
 }
 
-; Comment at end of block
-fn test() {
+fn test(){
    def val = 100
-   ; Last comment in function
+   ; last comment
 }
 
-; Comments with special characters
 ; @#$%^&*()_+-=[]{}|;':",.<>?/
-
-; Unicode in comments
 ; 世界 🚀 ñ
+; very long comment very long comment very long comment very long comment very long comment
 
-; Very long comment line that goes on and on and on and on and on and on and on and on and on
-
-print("✓ Comments test passed")
-
-; Final comment at end of file
+print("✓ comments tests passed")

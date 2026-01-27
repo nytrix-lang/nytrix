@@ -17,6 +17,39 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
+void ny_llvm_prepare_module(LLVMModuleRef module) {
+  if (!ny_llvm_init_native())
+    return;
+  char *triple = LLVMGetDefaultTargetTriple();
+  LLVMSetTarget(module, triple);
+
+  // Set data layout from native target machine
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err) == 0) {
+    char *cpu = LLVMGetHostCPUName();
+    char *features = LLVMGetHostCPUFeatures();
+    LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
+        target, triple, cpu, features, LLVMCodeGenLevelDefault, LLVMRelocPIC,
+        LLVMCodeModelLarge);
+    if (tm) {
+      LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+      char *layout = LLVMCopyStringRepOfTargetData(td);
+      if (layout) {
+        LLVMSetDataLayout(module, layout);
+        LLVMDisposeMessage(layout);
+      }
+      LLVMDisposeTargetData(td);
+      LLVMDisposeTargetMachine(tm);
+    }
+    if (cpu)
+      LLVMDisposeMessage(cpu);
+    if (features)
+      LLVMDisposeMessage(features);
+  }
+  LLVMDisposeMessage(triple);
+}
+
 bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
   if (!module || !path)
     return false;
@@ -36,8 +69,8 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
   char *cpu = LLVMGetHostCPUName();
   char *features = LLVMGetHostCPUFeatures();
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features, LLVMCodeGenLevelDefault, LLVMRelocDefault,
-      LLVMCodeModelDefault);
+      target, triple, cpu, features, LLVMCodeGenLevelDefault, LLVMRelocPIC,
+      LLVMCodeModelLarge);
   if (!tm) {
     NY_LOG_ERR("Failed to create target machine\n");
     LLVMDisposeMessage(triple);
@@ -91,8 +124,8 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
   char *cpu = LLVMGetHostCPUName();
   char *features = LLVMGetHostCPUFeatures();
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features, LLVMCodeGenLevelDefault, LLVMRelocDefault,
-      LLVMCodeModelDefault);
+      target, triple, cpu, features, LLVMCodeGenLevelDefault, LLVMRelocPIC,
+      LLVMCodeModelLarge);
   if (!tm) {
     NY_LOG_ERR("Failed to create target machine\n");
     LLVMDisposeMessage(triple);

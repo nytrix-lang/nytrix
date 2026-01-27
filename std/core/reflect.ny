@@ -5,6 +5,7 @@ use std.core.error
 use std.strings.str
 use std.strings.bytes
 use std.math.bigint
+use std.core.primitives
 module std.core.reflect (len, contains, type, list_eq, dict_eq, set_eq, eq,  repr, hash, globals)
 
 fn len(x){
@@ -12,7 +13,7 @@ fn len(x){
    - For **str**: number of bytes.
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size."
-   if(x == 0){ return 0 }
+   if(__eq(x, 0)){ return 0 }
    if(is_list(x)){ return __load64_idx(x, 0) }
    if(is_tuple(x)){ return __load64_idx(x, 0) }
    if(is_dict(x)){
@@ -43,8 +44,8 @@ fn contains(container, item){
       while(probes < cap){
          def off = 16 + idx * 24
          def st = __load64_idx(container, off + 16)
-         if(st == 0){ return false }
-         if(st == 1){
+         if(__eq(st, 0)){ return false }
+         if(__eq(st, 1)){
             if(eq(__load64_idx(container, off), item)){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
@@ -64,8 +65,8 @@ fn contains(container, item){
       while(probes < cap){
          def off = 16 + idx * 24
          def st = __load64_idx(container, off + 16)
-         if(st == 0){ return false }
-         if(st == 1){
+         if(__eq(st, 0)){ return false }
+         if(__eq(st, 1)){
             if(eq(__load64_idx(container, off), item)){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
@@ -95,7 +96,7 @@ fn type(x){
    "Returns a string representing the **tag-type** of Nytrix value `x`.
    Return values: `none`, `int`, `float`, `str`, `list`, `dict`, `set`, `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
    ; None
-   if(x == 0){ return "none" }
+   if(__eq(x, 0)){ return "none" }
    ; Check if it's a tagged integer
    if(is_int(x)){ return "int" }
    ; Check if pointer
@@ -111,17 +112,17 @@ fn type(x){
       return "ptr"
    }
    ; Not none, not int, not ptr -> must be bool (2 or 4)
-   if(x == true || x == false){ return "bool" }
+   if(__eq(x, true) || __eq(x, false)){ return "bool" }
    return "unknown"
 }
 
 fn list_eq(a,b){
    "Performs deep structural equality comparison for two lists."
-   if(__load64_idx(a, 0) != __load64_idx(b, 0)){ return false }
+   if(!__eq(__load64_idx(a, 0), __load64_idx(b, 0))){ return false }
    def i = 0
    def n = __load64_idx(a, 0)
    while(i < n){
-      if(eq(__load64_idx(a, 16 + i * 8), __load64_idx(b, 16 + i * 8)) == false){ return false }
+      if(__eq(eq(__load64_idx(a, 16 + i * 8), __load64_idx(b, 16 + i * 8)), false)){ return false }
       i = i + 1
    }
    return true
@@ -129,13 +130,13 @@ fn list_eq(a,b){
 
 fn dict_eq(a,b){
    "Performs deep structural equality comparison for two dictionaries."
-   if(len(a)!=len(b)){ return false }
+   if(!__eq(len(a), len(b))){ return false }
    def its = items(a)
    def i=0
    def n=__load64_idx(its, 0)
    while(i<n){
       def p = __load64_idx(its, 16 + i * 8)
-      if(eq(dict_get(b, __load64_idx(p, 16), 0xdeadbeef), __load64_idx(p, 24)) == false){ return false }
+      if(__eq(eq(dict_get(b, __load64_idx(p, 16), 0xdeadbeef), __load64_idx(p, 24)), false)){ return false }
       i=i+1
    }
    return true
@@ -143,13 +144,13 @@ fn dict_eq(a,b){
 
 fn set_eq(a,b){
    "Performs deep structural equality comparison for two sets."
-   if(len(a)!=len(b)){ return false }
+   if(!__eq(len(a), len(b))){ return false }
    def its = items(a)
    def i=0
    def n=__load64_idx(its, 0)
    while(i<n){
       def p = __load64_idx(its, 16 + i * 8)
-      if(contains(b, __load64_idx(p, 16)) == false){ return false }
+      if(__eq(contains(b, __load64_idx(p, 16)), false)){ return false }
       i=i+1
    }
    return true
@@ -162,75 +163,77 @@ fn eq(a, b){
    if(!is_ptr(b)){ return false }
    def ta = type(a)
    def tb = type(b)
-   if(!__eq(ta, tb)){ return false }
-   if(__eq(ta, "list")){ return list_eq(a, b) }
-   if(__eq(ta, "dict")){ return dict_eq(a, b) }
-   if(__eq(ta, "set")){ return set_eq(a, b) }
-   if(__eq(ta, "float")){ return __flt_eq(a, b) }
-   if(__eq(ta, "bigint")){ return bigint_eq(a, b) }
-   if(__eq(ta, "str")){ return _str_eq(a, b) }
-   return _str_eq(a, b)
+   if(!_str_eq(ta, tb)){ return false }
+   if(_str_eq(ta, "list")){ return list_eq(a, b) }
+   if(_str_eq(ta, "tuple")){ return list_eq(a, b) }
+   if(_str_eq(ta, "dict")){ return dict_eq(a, b) }
+   if(_str_eq(ta, "set")){ return set_eq(a, b) }
+   if(_str_eq(ta, "float")){ return __flt_eq(a, b) }
+   if(_str_eq(ta, "bigint")){ return bigint_eq(a, b) }
+   if(_str_eq(ta, "str")){ return _str_eq(a, b) }
+   return false
 }
 
 
 fn repr(x){
    "Returns a **developer-friendly** string representation of `x`, suitable for debugging. Strings are quoted and collections are expanded recursively."
    def t = type(x)
-   return case t {
-      "none"   -> "none"
-      "bool"   -> case x { true -> "true" _ -> "false" }
-      "list" -> {
-         def n = __load64_idx(x, 0)
-         def out = "["
-         def i=0
-         while(i<n){
-            out = f"{out}{repr(__load64_idx(x, 16 + i * 8))}"
-            if(i+1<n){ out = f"{out}," }
-            i=i+1
-         }
-         f"{out}]"
-      }
-      "dict" -> {
-         def its = items(x)
-         def out = "{"
-         def i=0
-         def n=__load64_idx(its, 0)
-         while(i<n){
-            def p = __load64_idx(its, 16 + i * 8)
-            out = f"{out}{repr(__load64_idx(p, 16))}:{repr(__load64_idx(p, 24))}"
-            if(i+1<n){ out = f"{out}," }
-            i=i+1
-         }
-         f"{out}}"
-      }
-      "set" -> {
-         def its = items(x)
-         def out = "{"
-         def i=0
-         def n=__load64_idx(its, 0)
-         while(i<n){
-            def p = __load64_idx(its, 16 + i * 8)
-            out = f"{out}{repr(__load64_idx(p, 16))}"
-            if(i+1<n){ out = f"{out}," }
-            i=i+1
-         }
-         f"{out}}"
-      }
-      "bytes"  -> f"<bytes {bytes_len(x)}>"
-      "float"  -> __to_str(x)
-      "bigint" -> bigint_to_str(x)
-      "str"    -> f"\"{x}\""
-      "int"    -> to_str(x)
-      "ptr"    -> f"<ptr {x}>"
-      _        -> to_str(x)
+   if(__eq(t, "none")){ return "none" }
+   if(__eq(t, "bool")){
+      if(__eq(x, true)){ return "true" }
+      return "false"
    }
+   if(__eq(t, "list")){
+      def n = __load64_idx(x, 0)
+      def out = "["
+      def i=0
+      while(i<n){
+         out = f"{out}{repr(__load64_idx(x, 16 + i * 8))}"
+         if(i+1<n){ out = f"{out}," }
+         i=i+1
+      }
+      return f"{out}]"
+   }
+   if(__eq(t, "dict")){
+      def its = items(x)
+      def out = "{"
+      def i=0
+      def n=__load64_idx(its, 0)
+      while(i<n){
+         def p = __load64_idx(its, 16 + i * 8)
+         out = f"{out}{repr(__load64_idx(p, 16))}:{repr(__load64_idx(p, 24))}"
+         if(i+1<n){ out = f"{out}," }
+         i=i+1
+      }
+      return f"{out}}"
+   }
+   if(__eq(t, "set")){
+      def its = items(x)
+      def out = "{"
+      def i=0
+      def n=__load64_idx(its, 0)
+      while(i<n){
+         def p = __load64_idx(its, 16 + i * 8)
+         out = f"{out}{repr(__load64_idx(p, 16))}"
+         if(i+1<n){ out = f"{out}," }
+         i=i+1
+      }
+      return f"{out}}"
+   }
+   if(__eq(t, "bytes")){ return f"<bytes {bytes_len(x)}>" }
+   if(__eq(t, "float")){ return __to_str(x) }
+   if(__eq(t, "bigint")){ return bigint_to_str(x) }
+   if(__eq(t, "str")){ return f"\"{x}\"" }
+   if(__eq(t, "int")){ return to_str(x) }
+   if(__eq(t, "ptr")){ return f"<ptr {x}>" }
+   return to_str(x)
 }
 
 fn hash(x){
    "Returns a **64-bit FNV-1a hash** of value `x`. Currently supports integers and strings."
    def t = type(x)
-   if(t == "int"){ return x }
-   if(t == "str"){
+   if(__eq(t, "int")){ return x }
+   if(__eq(t, "str")){
       def h = 14695981039346656037
       def i = 0
       def n = str_len(x)
@@ -245,5 +248,5 @@ fn hash(x){
 
 fn globals(){
    "Returns a dictionary containing all currently defined global variables."
-   return __globals()
+   return primitives.globals()
 }

@@ -1,6 +1,11 @@
-; We should allow these forms for function and variable names.
-; This is a parser-heavy case, so it will be tested in development.
 use std.core
+
+;; std.strings.naming (Test)
+;; Parser naming edge cases (kebab-case, arrows, predicates).
+;; Actual definitions are parser-dependent and intentionally not executed here.
+
+; These tests assert that the test file itself parses and runs.
+; Real execution tests are enabled once the parser supports such identifiers.
 
 ;fn kebab-case() {
 ;    return 1

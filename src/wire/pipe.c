@@ -100,7 +100,7 @@ static void append_use(char ***uses, size_t *len, size_t *cap,
     *uses = tmp;
     *cap = new_cap;
   }
-  (*uses)[(*len)++] = strdup(name);
+  (*uses)[(*len)++] = ny_strdup(name);
 }
 
 static char **collect_use_modules(const char *src, size_t *out_count) {
@@ -243,7 +243,7 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
 int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
   if (opt->mode == NY_MODE_VERSION) {
-    printf("Nytrix v0.1.2\n");
+    printf("Nytrix v0.1.25\n");
     return 0;
   }
   if (opt->mode == NY_MODE_HELP) {
@@ -266,7 +266,7 @@ int ny_pipeline_run(ny_options *opt) {
 
   char *user_src = NULL;
   if (opt->command_string) {
-    user_src = strdup(opt->command_string);
+    user_src = ny_strdup(opt->command_string);
   } else if (opt->input_file) {
     user_src = ny_read_file(opt->input_file);
     if (!user_src) {
@@ -274,7 +274,7 @@ int ny_pipeline_run(ny_options *opt) {
       return 1;
     }
   } else {
-    user_src = strdup("fn main() { return 0\n }");
+    user_src = ny_strdup("fn main() { return 0\n }");
   }
   if (opt->do_timing)
     fprintf(stderr, "Read file:    %.4fs\n",
@@ -305,8 +305,17 @@ int ny_pipeline_run(ny_options *opt) {
   }
 
   clock_t t_std = clock();
+  bool has_local = false;
+  for (size_t i = 0; i < use_count; i++) {
+    if (strncmp(uses[i], "std.", 4) != 0 && strncmp(uses[i], "lib.", 4) != 0) {
+      has_local = true;
+      break;
+    }
+  }
+
   if (prebuilt_path && access(prebuilt_path, R_OK) == 0 &&
-      (std_mode == STD_MODE_FULL || std_mode == STD_MODE_DEFAULT)) {
+      (std_mode == STD_MODE_FULL || std_mode == STD_MODE_DEFAULT) &&
+      !has_local) {
     if (verbose_enabled)
       NY_LOG_INFO("Using prebuilt std bundle: %s\n", prebuilt_path);
     std_src = ny_read_file(prebuilt_path);
@@ -386,10 +395,12 @@ int ny_pipeline_run(ny_options *opt) {
 
   clock_t t_parse = clock();
   parser_t parser;
-  parser_init(&parser, source, parse_name);
+  arena_t *arena = (arena_t *)malloc(sizeof(arena_t));
+  memset(arena, 0, sizeof(arena_t));
+  parser_init_with_arena(&parser, source, std_src ? "<stdlib>" : parse_name,
+                         arena);
   if (std_src) {
-    parser.lex.filename = "<stdlib>";
-    parser.lex.split_pos = slen + 1; // +1 for the newline we added
+    parser.lex.split_pos = (prelude ? plen + 1 : 0) + slen + 1;
     parser.lex.split_filename = parse_name;
   }
   program_t prog = parse_program(&parser);
@@ -469,7 +480,7 @@ int ny_pipeline_run(ny_options *opt) {
     if (ny_llvm_emit_object(cg.module, obj)) {
       const char *cc = ny_builder_choose_cc();
       char rto[4096];
-      sprintf(rto, "/tmp/ny___%d.o", getpid());
+      sprintf(rto, "/tmp/ny_rt_%d.o", getpid());
       NY_LOG_V2("Compiling runtime to %s using %s (debug=%d)...\n", rto, cc,
                 opt->debug_symbols);
       if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols)) {
@@ -526,8 +537,13 @@ int ny_pipeline_run(ny_options *opt) {
     clock_t t_exec = clock();
     // Execution
     uint64_t saddr = LLVMGetFunctionAddress(ee, "__script_top");
-    if (saddr)
+    if (saddr) {
+      fprintf(stderr, "TRACE: Executing script...\n");
       ((void (*)(void))saddr)();
+      fprintf(stderr, "TRACE: Script finished.\n");
+    } else {
+      fprintf(stderr, "TRACE: __script_top NOT FOUND\n");
+    }
 
     LLVMValueRef main_v = LLVMGetNamedFunction(cg.module, "main");
     if (main_v) {

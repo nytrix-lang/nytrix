@@ -6,7 +6,6 @@
 
 #include <ctype.h>
 #include <dirent.h>
-#include <errno.h>
 #include <stdbool.h>
 #include <sys/stat.h>
 
@@ -35,9 +34,9 @@ static void std_push_mod(const char *name, const char *path,
     ny_std_mods_cap = nc;
   }
   ny_std_mods[ny_std_mods_len++] = (ny_std_mod){
-      .name = strdup(name),
-      .path = strdup(path),
-      .package = strdup(package),
+      .name = ny_strdup(name),
+      .path = ny_strdup(path),
+      .package = ny_strdup(package),
   };
 }
 
@@ -69,7 +68,7 @@ static void add_module_from_path(const char *root, const char *full_path) {
     rel++;
   if (!is_ny_file(rel))
     return;
-  char *name = strdup(rel);
+  char *name = ny_strdup(rel);
   if (!name) {
     fprintf(stderr, "oom\n");
     exit(1);
@@ -112,7 +111,7 @@ static void add_module_from_path(const char *root, const char *full_path) {
   strcat(final_copy, final_name);
   const char *dot = strchr(final_copy, '.');
   char *pkg = dot ? ny_strndup(final_copy, (size_t)(dot - final_copy))
-                  : strdup(final_copy);
+                  : ny_strdup(final_copy);
   if (!pkg) {
     fprintf(stderr, "oom\n");
     exit(1);
@@ -403,6 +402,18 @@ static void append_fn_proto(stmt_t *s, char **hdr, size_t *len, size_t *capv) {
     }
   }
 }
+static char *ny_modname_from_path(const char *path) {
+  if (!path)
+    return NULL;
+  const char *last_slash = strrchr(path, '/');
+  const char *start = last_slash ? last_slash + 1 : path;
+  char *name = ny_strdup(start);
+  char *dot = strrchr(name, '.');
+  if (dot && dot != name) {
+    *dot = '\0';
+  }
+  return name;
+}
 
 // --- User Module Support ---
 
@@ -420,10 +431,19 @@ static char *find_local_module(const char *name, const char *base_dir) {
   strcpy(path, base_dir);
   path[base_len] = '/';
   memcpy(path + base_len + 1, name, name_len + 1);
-  // Replace . with /
-  for (char *p = path; *p; ++p)
-    if (*p == '.')
-      *p = '/';
+  // Replace . with / if not a file path
+  if (strncmp(name, "./", 2) != 0 && strncmp(name, "/", 1) != 0 &&
+      strstr(name, ".ny") == NULL) {
+    for (char *p = path + base_len + 1; *p; ++p)
+      if (*p == '.')
+        *p = '/';
+  }
+
+  // Remove trailing .ny if we are going to add it
+  if (is_ny_file(path)) {
+    path[strlen(path) - 3] = '\0';
+  }
+
   strcat(path, ".ny");
   if (access(path, R_OK) == 0)
     return path;
@@ -469,7 +489,7 @@ static char *resolve_module_path(const char *raw, const char *base_dir,
   if (idx >= 0) {
     if (is_std_out)
       *is_std_out = true;
-    return strdup(ny_std_mods[idx].path);
+    return ny_strdup(ny_std_mods[idx].path);
   }
   if (!prefer_local || explicit_pkg)
     return NULL;
@@ -485,13 +505,13 @@ static char *resolve_module_path(const char *raw, const char *base_dir,
 
 static char *dir_from_path(const char *path) {
   if (!path || !*path)
-    return strdup(".");
+    return ny_strdup(".");
   const char *slash = strrchr(path, '/');
   if (!slash)
-    return strdup(".");
+    return ny_strdup(".");
   size_t len = (size_t)(slash - path);
   if (len == 0)
-    return strdup("/");
+    return ny_strdup("/");
   char *out = malloc(len + 1);
   if (!out) {
     fprintf(stderr, "oom\n");
@@ -538,8 +558,8 @@ static void mod_list_add(mod_list *list, const char *path, const char *name,
     list->entries = realloc(list->entries, new_cap * sizeof(mod_entry));
     list->cap = new_cap;
   }
-  list->entries[list->len++] = (mod_entry){.path = strdup(path),
-                                           .name = strdup(name),
+  list->entries[list->len++] = (mod_entry){.path = ny_strdup(path),
+                                           .name = ny_strdup(name),
                                            .processed = false,
                                            .is_std = is_std};
 }
@@ -576,7 +596,10 @@ static void scan_dependencies(mod_list *list, size_t idx) {
     bool is_std = false;
     char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
     if (path) {
-      mod_list_add(list, path, raw, is_std);
+      char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
+      mod_list_add(list, path, mname, is_std);
+      if (!is_std)
+        free(mname);
       free(path);
       continue;
     }
@@ -652,7 +675,10 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
         char *path = resolve_module_path(raw, entry_dir ? entry_dir : ".", true,
                                          &is_std);
         if (path) {
-          mod_list_add(&mods, path, raw, is_std);
+          char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
+          mod_list_add(&mods, path, mname, is_std);
+          if (!is_std)
+            free(mname);
           free(path);
         }
       }
@@ -681,7 +707,10 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
       char *path =
           resolve_module_path(raw, entry_dir ? entry_dir : ".", true, &is_std);
       if (path) {
-        mod_list_add(&mods, path, raw, is_std);
+        char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
+        mod_list_add(&mods, path, mname, is_std);
+        if (!is_std)
+          free(mname);
         free(path);
       } else {
         if (verbose)
@@ -787,9 +816,9 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
         append_text(&bundle, &total, &cap, txt);
         append_text(&bundle, &total, &cap, "\n");
       } else {
-        // Wrap all modules in their namespace
+        // Wrap all modules in their namespace, defaulting to export all (*)
         char *wrapped = malloc(strlen(txt) + strlen(mods.entries[i].name) + 64);
-        sprintf(wrapped, "module %s {\n%s\n}", mods.entries[i].name, txt);
+        sprintf(wrapped, "module %s * {\n%s\n}", mods.entries[i].name, txt);
         append_text(&bundle, &total, &cap, wrapped);
         free(wrapped);
       }

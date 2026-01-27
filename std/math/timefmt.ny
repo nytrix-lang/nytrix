@@ -2,63 +2,74 @@
 ;; Math Timefmt module.
 
 use std.core
-use std.core.error
 use std.strings.str
-use std.os.ffi
+
 module std.math.timefmt (
-   format_time
+   format_time, gmtime
 )
 
-def _libc = 0
-def _gmtime_r_fn = 0
-def _strftime_fn = 0
-
-; TODO: remove libc ffi and use syscalls instead
-
-fn _ensure_libc(){
-   if(_libc != 0){ return _libc }
-   def handle = dlopen("libc.so.6", RTLD_LAZY)
-   if(handle == 0){ handle = dlopen("libc.so", RTLD_LAZY) }
-   if(handle == 0){ handle = dlopen("/usr/lib/libc.dylib", RTLD_LAZY) }
-   if(handle == 0){ handle = dlopen("/lib/x86_64-linux-gnu/libc.so.6", RTLD_LAZY) }
-   if(handle == 0){ panic("timefmt: failed to load libc") }
-   _libc = handle
-   return handle
+fn is_leap(y) {
+   (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }
 
-fn _ensure_fns(){
-   _ensure_libc()
-   if(_gmtime_r_fn == 0){
-      _gmtime_r_fn = dlsym(_libc, "gmtime_r")
-      if(_gmtime_r_fn == 0){ panic("timefmt: gmtime_r not available") }
-   }
-   if(_strftime_fn == 0){
-      _strftime_fn = dlsym(_libc, "strftime")
-      if(_strftime_fn == 0){ panic("timefmt: strftime not available") }
-   }
+fn days_in_year(y) {
+   if (is_leap(y)) { 366 }
+   else { 365 }
 }
 
-fn format_time(ts){
-   "Formats Unix timestamp `ts` into a UTC string (YYYY-MM-DD HH:MM:SS) using libc **strftime**."
-   _ensure_fns()
-   def raw = to_int(ts)
-   def tbuf = __malloc(8)
-   store64(tbuf, raw, 0)
-   def tm_buf = __malloc(128)
-   def got = call2(_gmtime_r_fn, tbuf, tm_buf)
-   __free(tbuf)
-   if(got == 0){
-      __free(tm_buf)
-      panic("timefmt: gmtime_r failed")
+fn pad_z(v, n) {
+   def s = to_str(v)
+   while (len(s) < n) {
+      s = f"0{s}"
    }
-   def out = __malloc(32)
-   def len = call4(_strftime_fn, out, 32, "%Y-%m-%d %H:%M:%S", tm_buf)
-   __free(tm_buf)
-   if(len == 0){
-      __free(out)
-      panic("timefmt: strftime failed")
+   return s
+}
+
+fn gmtime(ts) {
+   "Breaks down Unix timestamp `ts` into its UTC components. Returns a dictionary with 'year', 'month', 'day', 'hour', 'min', 'sec'."
+   def res = dict(16)
+   def seconds = ts
+
+   def sec = seconds % 60
+   def minutes = seconds / 60
+   def m = minutes % 60
+   def hours = minutes / 60
+   def h = hours % 24
+   def days = hours / 24
+
+   def year = 1970
+   while (days >= days_in_year(year)) {
+      days = days - days_in_year(year)
+      year = year + 1
    }
-   def result = cstr_to_str(out)
-   __free(out)
-   return result
+
+   def month = 1
+   def mdays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+   if (is_leap(year)) { set_idx(mdays, 1, 29) }
+
+   while (days >= get(mdays, month - 1)) {
+      days = days - get(mdays, month - 1)
+      month = month + 1
+   }
+
+   dict_set(res, "year", year)
+   dict_set(res, "month", month)
+   dict_set(res, "day", days + 1)
+   dict_set(res, "hour", h)
+   dict_set(res, "min", m)
+   dict_set(res, "sec", sec)
+   return res
+}
+
+fn format_time(ts) {
+   "Formats Unix timestamp `ts` into a UTC string (YYYY-MM-DD HH:MM:SS) using pure Nytrix logic."
+   def t = gmtime(ts)
+   def y = get(t, "year")
+   def mo = get(t, "month")
+   def d = get(t, "day")
+   def h = get(t, "hour")
+   def mi = get(t, "min")
+   def s = get(t, "sec")
+
+   return f"{pad_z(y, 4)}-{pad_z(mo, 2)}-{pad_z(d, 2)} {pad_z(h, 2)}:{pad_z(mi, 2)}:{pad_z(s, 2)}"
 }

@@ -6,7 +6,7 @@ module std.util.convert (
 )
 
 fn int_to_str(n) {
-   "Convert integer/float to string."
+   "Converts an integer `n` to its decimal string representation."
    if (n == 0) { return "0" }
    def negative = 0
    if (n < 0) {
@@ -40,7 +40,7 @@ fn int_to_str(n) {
 }
 
 fn parse_int(s) {
-   "Convert string to int."
+   "Parses a decimal integer from string `s`. Returns 0 on failure."
    if (type(s) == "int") { return s  }
    def n = len(s)
    if (n == 0) { return 0  }
@@ -64,7 +64,7 @@ fn parse_int(s) {
 }
 
 fn to_bool(val) {
-   "Convert to bool."
+   "Converts any Nytrix value to its boolean equivalent. Non-zero integers, non-empty strings/lists, and `true` are truthy."
    def t = type(val)
    if (t == "bool") { return val  }
    if (t == "int") { return val != 0  }

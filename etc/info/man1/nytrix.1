@@ -64,19 +64,19 @@ Nytrix uses a custom, low-level memory system for explicit control, performance,
 
 .TP
 .B Manual Allocation
-Memory is explicitly managed via `rt_malloc`, `rt_free`, and `rt_realloc`.
+Memory is explicitly managed via `__malloc`, `__free`, and `__realloc`.
 .TP
 .B Custom Heap Structure
-`rt_malloc` ensures 64-byte alignment. Each heap block includes a 128+ byte metadata overhead for "magic numbers" (`NY_MAGIC1`, `NY_MAGIC2`, `NY_MAGIC3`) for integrity checks and original size.
+`__malloc` ensures 64-byte alignment. Each heap block includes a 128+ byte metadata overhead for "magic numbers" (`NY_MAGIC1`, `NY_MAGIC2`, `NY_MAGIC3`) for integrity checks and original size.
 .TP
 .B Tagged Values
-`int64_t` is the universal value type. LSB tags integers (`1`) from pointers/other types (`0`). `rt_tag` and `rt_untag` manipulate this.
+`int64_t` is the universal value type. LSB tags integers (`1`) from pointers/other types (`0`). `__tag` and `__untag` manipulate this.
 .TP
 .B Strict Pointer Validation
 Macros like `is_heap_ptr` validate heap pointers by checking alignment and magic numbers.
 .TP
 .B Runtime Bounds Checking
-Memory access functions (`rt_loadX_idx`, `rt_storeX_idx`) use `rt_check_oob` to prevent buffer overflows.
+Memory access functions (` __loadX_idx`, ` __storeX_idx`) use `__check_oob` to prevent buffer overflows.
 .TP
 .B Debugging Instrumentation
 Debug builds track allocations (`g_alloc`, `g_free`) and use magic numbers for buffer overflow checks.
@@ -135,13 +135,13 @@ LLVM is the core backend, managing `LLVMContextRef`, `LLVMModuleRef`, `LLVMBuild
 Recursive traversal of Nytrix AST (`expr_t`, `stmt_t`) by `gen_expr`, `gen_stmt`, `gen_func` emits LLVM instructions. `scope` and `binding` manage symbol mapping to `LLVMValueRef`s.
 .TP
 .B Just-In-Time (JIT) Compilation
-`src/code/jit.c` manages JIT. LLVM IR modules are added to `LLVMExecutionEngineRef`. `register_jit_symbols` links Nytrix C runtime functions (`rt_malloc`, `rt_syscall`) to LLVM declarations for seamless calls.
+`src/code/jit.c` manages JIT. LLVM IR modules are added to `LLVMExecutionEngineRef`. `register_jit_symbols` links Nytrix C runtime functions (`__malloc`, `__syscall`) to LLVM declarations for seamless calls.
 .TP
 .B Ahead-Of-Time (AOT) Compilation
 `src/code/llvm.c` handles AOT. `ny_llvm_emit_object` and `ny_llvm_emit_file` compile LLVM IR to native object files via `LLVMTargetMachineEmitToFile`. Linking to runtime happens via standard system linkers.
 .TP
 .B Symbol Management
-Nytrix manages internal symbols (`scope` for locals, `codegen_t` for functions/globals). JIT links `rt_` functions directly. AOT relies on system linkers.
+Nytrix manages internal symbols (`scope` for locals, `codegen_t` for functions/globals). JIT links ` __` functions directly. AOT relies on system linkers.
 
 .SH "RUNTIME SYSTEM"
 Nytrix runtime provides services for execution, OS interaction, and external functionality.
@@ -169,30 +169,30 @@ FFI provides raw access; manual conversion for complex C types (floats, strings,
 FFI grants direct access to OS. Use with untrusted code poses security risks due to lack of sandboxing. Errors are via `dlerror()`.
 
 .SS "OS Interaction"
-Nytrix runtime provides low-level OS access via `rt_` prefixed C functions in `src/rt/os.c`.
+Nytrix runtime provides low-level OS access via ` __` prefixed C functions in `src/rt/os.c`.
 
 .SS File I/O
 Raw file I/O uses POSIX file descriptors.
 .TP
 .B Direct System Call Access
-`rt_syscall` invokes POSIX calls (`SYS_open`, `SYS_close`, `SYS_lseek`, `SYS_stat`, `SYS_fstat`) for granular control.
+`__syscall` invokes POSIX calls (`SYS_open`, `SYS_close`, `SYS_lseek`, `SYS_stat`, `SYS_fstat`) for granular control.
 .TP
 .B Raw Read/Write
-`rt_sys_read_off` and `rt_sys_write_off` provide byte-level read/write with offsets on Nytrix-managed buffers.
+`__sys_read_off` and `__sys_write_off` provide byte-level read/write with offsets on Nytrix-managed buffers.
 .TP
 .B File Descriptor Management
 POSIX integer file descriptors are passed via Nytrix's tagged value system.
 .TP
 .B Error Propagation and Safety
-System call errors return as negative integers. `rt_check_oob` enforces memory safety for buffer access.
+System call errors return as negative integers. `__check_oob` enforces memory safety for buffer access.
 
 .SS Process Management
-Nytrix provides low-level control over OS processes via `rt_` prefixed functions.
+Nytrix provides low-level control over OS processes via ` __` prefixed functions.
 .TP
-.B Generic System Call Access (`rt_syscall`)
+.B Generic System Call Access (`__syscall`)
 Directly invokes POSIX calls like `fork(2)`, `wait4(2)`, `getpid(2)`, `getppid(2)`, `kill(2)`.
 .TP
-.B Program Execution (`rt_execve`)
+.B Program Execution (`__execve`)
 Wraps `execve(2)` to replace the current process image with a new program.
 .TP
 .B Tagged Value Handling
@@ -205,18 +205,18 @@ FFI grants powerful, unsandboxed OS control. Untrusted scripts pose risks. Devel
 Mechanisms to access environment variables and query the current working directory.
 .TP
 .B Environment Variable Access
-`std/os/mod.ny` exposes `os.env()` and `os.environ()`. C runtime accesses `environ` via `rt_envc`, `rt_envp`, and `rt_syscall` (for `getenv(3)`). `cstr_to_str` converts C strings.
+`std/os/mod.ny` exposes `os.env()` and `os.environ()`. C runtime accesses `environ` via `__envc`, `__envp`, and `__syscall` (for `getenv(3)`). `cstr_to_str` converts C strings.
 .TP
 .B Current Working Directory
-`os.getcwd()` (from `std/os/mod.ny`) uses `rt_syscall` to invoke `getcwd(2)`, converting the result to a Nytrix string.
+`os.getcwd()` (from `std/os/mod.ny`) uses `__syscall` to invoke `getcwd(2)`, converting the result to a Nytrix string.
 .TP
 .B Limitations
-Direct `rt_` functions for `setenv`, `unsetenv`, `chdir` were not found in `src/rt/os.c`. These may use `rt_syscall` directly or be implemented in stdlib.
+Direct ` __` functions for `setenv`, `unsetenv`, `chdir` were not found in `src/rt/os.c`. These may use `__syscall` directly or be implemented in stdlib.
 
 .SS Directory Management
 Manages directories via low-level syscalls and high-level stdlib wrappers.
 .TP
-.B Low-Level `rt_syscall` Access
+.B Low-Level `__syscall` Access
 Underpins POSIX calls like `mkdir(2)`, `rmdir(2)`, `chdir(2)` for directory creation, deletion, and changing.
 .TP
 .B High-Level `std/io/fs.ny` Wrappers
@@ -226,7 +226,7 @@ Provides `fs.mkdir(path)`, `fs.mkdirs(path)`, `fs.rmdir(path)`, `fs.listdir(path
 Mathematical capabilities blend low-level C runtime and high-level stdlib.
 .TP
 .B Core Runtime Functions (`src/rt/math.c`)
-Implements fundamental arithmetic, comparison, bitwise ops on `int64_t` tagged values. Includes `rt_srand`, `rt_rand64`, and float boxing/unboxing.
+Implements fundamental arithmetic, comparison, bitwise ops on `int64_t` tagged values. Includes `__srand`, `__rand64`, and float boxing/unboxing.
 .TP
 .B Nytrix Standard Library (`std/math/`)
 Builds on runtime: `std/math/float.ny` for float ops (`abs`, `floor`), `std/math/mod.ny` for general math (`min`, `max`, `pow`, `sqrt`), `std/math/random.ny` for higher-level random generation.
@@ -241,7 +241,7 @@ Strings are managed by C runtime and Nytrix stdlib.
 Strings are tagged `int64_t` pointers to null-terminated C char arrays. Hidden object headers store metadata (tag at `ptr - 8`, length at `ptr - 16`).
 .TP
 .B Core Runtime Functions (`src/rt/string.c`)
-Provides `rt_init_str` (creation), `rt_str_concat` (concatenation), `rt_to_str` (type conversion to string).
+Provides `__init_str` (creation), `__str_concat` (concatenation), `__to_str` (type conversion to string).
 .TP
 .B Nytrix Standard Library (`std/strings/str.ny`)
 Offers high-level API: `cstr_to_str` (C string conversion), `str_len`, `str_slice`, `find`, comparison functions. Leverages low-level FFI for direct memory manipulation.

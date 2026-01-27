@@ -1,23 +1,20 @@
 use std.io
 use std.util.progress
-use std.core.reflect
-use std.core.test
-use std.core
 use std.collections
+use std.core.error
 
-print("Testing Util Progress...")
+;; std.util.progress (Test)
+;; Tests progress_map and manual progress.
+
 print("Testing Util Progress...")
 
 def xs = [1, 2, 3]
-fn f(x){ return x*2 }
-
-def res = progress_map(f, xs, "Test Map")
-print("LEN:", len(res))
-print("RES:", res)
+def res = progress_map(fn(x){ x * 2 }, xs, "Test Map")
 assert(len(res) == 3, "progress_map len")
-assert(get(res, 0) == 2, "map val")
+assert(get(res, 0) == 2, "progress_map val")
 
 def p = progress(10, "Manual")
 progress_update(p, 5)
 progress_finish(p)
-print("✓ std.util.progress passed")
+
+print("✓ std.util.progress tests passed")

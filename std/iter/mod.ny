@@ -1,5 +1,5 @@
-;; Keywords: iter mod
-;; Iter Mod module.
+;; Keywords: iter
+;; Iter module.
 
 use std.core
 module std.iter (
@@ -7,7 +7,7 @@ module std.iter (
 )
 
 fn range(start, stop="<undef>", step=1){
-   "Returns a list of integers from start to stop (exclusive) with step."
+   "Returns a list of integers from `start` to `stop` (exclusive), incrementing by `step`. If only one argument is provided, it is treated as `stop` with `start=0`."
    if(step==0){ step=1 }
    if(is_str(stop) || stop == 0){
       if(stop == 0){
@@ -39,9 +39,8 @@ fn range(start, stop="<undef>", step=1){
 }
 
 fn map(iter, f){
-   "Applies function f to each element of iter."
+   "Applies function `f` to each element of collection `iter` and returns a list of results."
    if(is_list(iter)){
-      def out = list(list_len(iter))
       def out = list(list_len(iter))
       def i=0
       def n=list_len(iter)
@@ -55,9 +54,8 @@ fn map(iter, f){
 }
 
 fn filter(iter, f){
-   "Returns a new list with elements where f(x) is true."
+   "Returns a new list containing only the elements of collection `iter` for which function `f` returns a truthy value."
    if(is_list(iter)){
-      def out = list(8)
       def out = list(8)
       def i=0
       def n=list_len(iter)
@@ -72,9 +70,8 @@ fn filter(iter, f){
 }
 
 fn reduce(iter, f, init){
-   "Reduces iter using binary function f and initial value."
+   "Reduces collection `iter` to a single value by repeatedly applying function `f` to an accumulator (starting with `init`) and each element."
     if(is_list(iter)){
-      def acc = init
       def acc = init
       def i=0
       def n=list_len(iter)

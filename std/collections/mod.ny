@@ -1,5 +1,5 @@
-;; Keywords: collections mod
-;; Collections Mod module.
+;; Keywords: collections
+;; Collections module.
 
 use std.core
 use std.core.reflect

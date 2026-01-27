@@ -13,9 +13,9 @@ module std.math.bigint (
 
 fn is_bigint(x){
    "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
-   if(is_list(x) == false){ return false }
-   if(list_len(x) < 3){ return false }
-   return get(x, 0) == 107
+   if(__eq(is_list(x), false)){ return false }
+   if(__eq(list_len(x) < 3, true)){ return false }
+   return __eq(__load64_idx(x, 16), 107)
 }
 
 fn _big_make(sign, digits){

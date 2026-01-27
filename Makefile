@@ -41,7 +41,7 @@ endif
 
 OPTFLAGS := -O$(OPT)
 
-CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) $(LLVM_CFLAGS) -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
+CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) -I/usr/include -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -march=x86-64 -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
 CFLAGS_DEBUG   := $(CFLAGS_BASE) -O0 -DDEBUG $(SANFLAGS) $(PROFFLAGS)
 CFLAGS_RELEASE := $(CFLAGS_BASE) $(OPTFLAGS) -DNDEBUG $(SANFLAGS) $(PROFFLAGS)
 
@@ -51,7 +51,7 @@ LDFLAGS := $(SANFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(PROFFLAGS)
 # src subdirs
 SRC_COMPILER_DIRS := src/ast src/base src/lex src/code src/repl src/wire
 SRC_COMPILER := $(foreach dir,$(SRC_COMPILER_DIRS),$(wildcard $(dir)/*.c))
-SRC_COMPILER += src/parse/unity.c
+SRC_COMPILER += src/parse/shared.c
 SRC_RUNTIME := src/rt/init.c
 
 # Cmd Sources
@@ -75,7 +75,6 @@ OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 .PHONY: all bin debug repl lsp ny-lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man docs
 
 docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(BUILD_DIR)/std_bundle.ny | build
-#	Need python3-markdown
 	@echo "  $(C_CYAN)WEBDOC$(C_RESET) generating documentation at $(BUILD_DIR)/docs/index.html..."
 	@python3 etc/tools/webdoc $(BUILD_DIR)/std_bundle.ny -o $(BUILD_DIR)/docs/index.html
 

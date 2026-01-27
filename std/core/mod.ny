@@ -1,12 +1,16 @@
-;; Keywords: core mod
-;; Core Mod module.
+;; Keywords: core
+;; Core module.
 
+use std.core.primitives
 module std.core (
    bool, load8, load64, store8, store64, load16, load32, store16, store32, ptr_add, ptr_sub,
    malloc, free, realloc, list, is_ptr, is_int, is_nytrix_obj, is_list, is_dict,
-   is_set, is_tuple, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, kwarg,
+   is_set, is_tuple, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg,
    get_kwarg_key, get_kwarg_val, list_len, list_clone, load_item, store_item, get,
-   slice, set_idx, append, pop, list_clear, extend, to_str
+   slice, set_idx, append, pop, list_clear, extend, to_str,
+   __add, __sub, __mul, __div, __mod, __and, __or, __xor, __shl, __shr, __not,
+   __eq, __lt, __le, __gt, __ge, __argc, argc, __argv, __envc, envc, __envp, envp, __errno,
+   globals, set_globals
 )
 
 ;;; Memory Operations
@@ -102,68 +106,58 @@ fn list(cap=8){
   p
 }
 
-fn is_ptr(x){
-  "Returns **true** if `x` is a pointer (heap address)."
-  __is_ptr(x)
-}
-
-fn is_int(x){
-  "Returns **true** if `x` is a tagged integer."
-  __is_int(x)
-}
 
 fn is_nytrix_obj(x){
   "Check if a value is a valid Nytrix object pointer (aligned)."
-  is_ptr(x)
+  return is_ptr(x)
 }
 
 fn is_list(x){
   "Returns **true** if the value `x` is a **list**."
   if(is_int(x)){ return false }
-  if(!is_nytrix_obj(x)){ return false }
-  __load64_idx(x, -8) == 100
+  if(__eq(is_ptr(x), false)){ return false }
+  return __eq(__load64_idx(x, -8), 100)
 }
 
 fn is_dict(x){
   "Returns **true** if the value `x` is a **dictionary**."
   if(is_int(x)){ return false }
-  if(!is_nytrix_obj(x)){ return false }
-  __load64_idx(x, -8) == 101
+  if(__eq(is_ptr(x), false)){ return false }
+  return __eq(__load64_idx(x, -8), 101)
 }
 
 fn is_set(x){
   "Returns **true** if the value `x` is a **set**."
   if(is_int(x)){ return false }
-  if(!is_nytrix_obj(x)){ return false }
-  __load64_idx(x, -8) == 102
+  if(__eq(is_ptr(x), false)){ return false }
+  return __eq(__load64_idx(x, -8), 102)
 }
 
 fn is_tuple(x){
   "Returns **true** if the value `x` is a **tuple**."
   if(is_int(x)){ return false }
-  if(!is_nytrix_obj(x)){ return false }
-  def tag = __load64_idx(x, -8)
-  tag == 103
+  if(__eq(is_ptr(x), false)){ return false }
+  return __eq(__load64_idx(x, -8), 103)
 }
 
 fn is_str(x){
   "Returns **true** if the value `x` is a **string**."
   if(!is_ptr(x)){ return false }
   def tag = load64(x, -8)
-  tag == 120 || tag == 121 || tag == 241 || tag == 243
+  __eq(tag, 120) || __eq(tag, 121) || __eq(tag, 241) || __eq(tag, 243)
 }
 
 fn is_bytes(x){
   "Returns **true** if the value `x` is a **bytes buffer**."
   if(!is_ptr(x)){ return false }
-  load64(x, -8) == 122
+  __eq(load64(x, -8), 122)
 }
 
 fn is_float(x){
   "Returns **true** if the value `x` is a **floating-point** number."
   if(!is_ptr(x)){ return false }
   def tag = load64(x, -8)
-  tag == 110 || tag == 221
+  __eq(tag, 110) || __eq(tag, 221)
 }
 
 fn to_int(v){
@@ -179,16 +173,21 @@ fn from_int(v){
 fn is_kwargs(x){
   "Internal: Returns **true** if `x` is a keyword-argument wrapper object."
   if(!is_nytrix_obj(x)){ return false }
-  load64(x, -8) == 104
+  __eq(load64(x, -8), 104)
 }
 
-fn kwarg(k, v){
+fn __kwarg(k, v){
   "Create a keyword-argument wrapper object combining key `k` and value `v`."
   def p = __malloc(16) ; Tag at -8, Key(0), Val(8)
-  store64(p, 104, -8)   ; Tag 104 for Kwarg at -8
+  store64(p, 104, -8)   ; Tag 104 for Kwarg (stored as 209)
   store64(p, k, 0) ; Key at 0
   store64(p, v, 8) ; Val at 8
   p
+}
+
+fn kwarg(k, v){
+  "Create a keyword-argument wrapper object."
+  __kwarg(k, v)
 }
 
 fn get_kwarg_key(x){
@@ -203,19 +202,20 @@ fn get_kwarg_val(x){
 
 fn list_len(lst){
   "Returns the number of elements in a list, dictionary, set, or tuple. Returns `0` for other types."
-  if(!is_ptr(lst)){ 0 }
+  if(!is_ptr(lst)){ return 0 }
   else {
-   case __load64_idx(lst, -8) {
-     100, 101, 102, 103 -> __load64_idx(lst, 0)
-     _ -> 0
-   }
+    def tag = __load64_idx(lst, -8)
+    if(__eq(tag, 100) || __eq(tag, 101) || __eq(tag, 102) || __eq(tag, 103)){
+       return __load64_idx(lst, 0)
+    }
+    return 0
   }
 }
 
 fn list_clone(lst){
   "Creates a **shallow copy** of the list `lst`."
-  if(lst == 0){ return 0 }
-  if(is_list(lst) == false){ return 0 }
+  if(__eq(lst, 0)){ return 0 }
+  if(__eq(is_list(lst), false)){ return 0 }
   def n = list_len(lst)
   def out = list(n)
   def i = 0
@@ -242,108 +242,105 @@ fn store_item(lst, i, v){
 
 fn get(obj, i){
   "Generic element retriever. Handles indexing for strings, lists, dicts, and tuples."
-  case type(obj) {
-     "str" -> {
-        def n = str_len(obj)
-        if(i < 0){ i += n }
-        if(i < 0 || i >= n){ 0 }
-        else {
-         use std.strings.str
-         str_slice(obj, i, i + 1)
-        }
+  def t = type(obj)
+  if(__eq(t, "str")){
+     def n = str_len(obj)
+     if(i < 0){ i += n }
+     if(i < 0 || i >= n){ 0 }
+     else {
+      use std.strings.str
+      str_slice(obj, i, i + 1)
      }
-     "dict" -> dict_get(obj, i)
-     "list", "tuple" -> {
-        def n = list_len(obj)
-        if(i < 0){ i += n }
-        if(i < 0 || i >= n){ 0 }
-        else { load_item(obj, i) }
-     }
-     _ -> 0
   }
+  elif(__eq(t, "dict")){ dict_get(obj, i) }
+  elif(__eq(t, "list") || __eq(t, "tuple")){
+     def n = list_len(obj)
+     if(i < 0){ i += n }
+     if(i < 0 || i >= n){ 0 }
+     else { load_item(obj, i) }
+  }
+  else { 0 }
 }
 
 fn slice(obj, start, stop, step=1){
   "Generic **slice** operation for strings and lists."
-  case type(obj) {
-     "str" -> {
+  def t = type(obj)
+  if(__eq(t, "str")){
       use std.strings.str
       str_slice(obj, start, stop, step)
-     }
-     "list" -> {
-        def n = list_len(obj)
-        if(start < 0){ start = n + start }
-        if(stop < 0){ stop = n + stop }
-        if(step > 0){
-         if(start < 0){ start = 0 }
-         if(stop > n){ stop = n }
-         if(start >= stop){ return list(0) }
-        } else {
-         if(start >= n){ start = n - 1 }
-         if(stop < -1){ stop = -1 }
-         if(start <= stop){ return list(0) }
-        }
-        def out = list(8)
-        def i = start
-        if(step > 0){
-         while(i < stop){
-            out = append(out, get(obj, i))
-            i += step
-         }
-        } else {
-         while(i > stop){
-            out = append(out, get(obj, i))
-            i += step
-         }
-        }
-        out
-     }
-     _ -> 0
   }
+  elif(__eq(t, "list")){
+      def n = list_len(obj)
+      if(start < 0){ start = n + start }
+      if(stop < 0){ stop = n + stop }
+      if(step > 0){
+       if(start < 0){ start = 0 }
+       if(stop > n){ stop = n }
+       if(start >= stop){ return list(0) }
+      } else {
+       if(start >= n){ start = n - 1 }
+       if(stop < -1){ stop = -1 }
+       if(start <= stop){ return list(0) }
+      }
+      def out = list(8)
+      def i = start
+      if(step > 0){
+       while(i < stop){
+          out = append(out, get(obj, i))
+          i += step
+       }
+      } else {
+       while(i > stop){
+          out = append(out, get(obj, i))
+          i += step
+       }
+      }
+      out
+  }
+  else { 0 }
 }
 
 fn set_idx(obj, i, v){
   "Generic element setter. Supported for dicts and lists."
-  case type(obj) {
-     "dict" -> dict_set(obj, i, v)
-     "list" -> {
-        def n = list_len(obj)
-        if(i < 0){ i += n }
-        if(i < 0 || i >= n){ 0 }
-        else { store_item(obj, i, v) }
-     }
-     _ -> 0
+  def t = type(obj)
+  if(__eq(t, "dict")){ dict_set(obj, i, v) }
+  elif(__eq(t, "list")){
+     def n = list_len(obj)
+     if(i < 0){ i += n }
+     if(i < 0 || i >= n){ 0 }
+     else { store_item(obj, i, v) }
   }
+  else { 0 }
 }
 
 fn append(lst, v){
   "Appends value `v` to the end of list `lst`. Returns the (possibly reallocated) list ptr."
   if(!is_nytrix_obj(lst)){ lst }
   else {
-      def tag = load64(lst, -8)
-   def n = load64(lst, 0)
-   def cap = load64(lst, 8)
-   if(n >= cap){
-     def newcap = case cap { 0 -> 8 _ -> cap * 2 }
-     def newp = list(newcap)
-     store64(newp, tag, -8)
-     def i = 0
-     while(i < n){ store_item(newp, i, load_item(lst, i))  i += 1 }
-     free(lst)
-     lst = newp
-   }
-   store_item(lst, n, v)
-   store64(lst, n + 1, 0)
-   lst
+    def tag = load64(lst, -8)
+    def n = load64(lst, 0)
+    def cap = load64(lst, 8)
+    if(n >= cap){
+      def newcap = __eq(cap, 0) ? 8 : (cap * 2)
+      def newp = list(newcap)
+      store64(newp, tag, -8)
+      def i = 0
+      while(i < n){ store_item(newp, i, load_item(lst, i))  i += 1 }
+      free(lst)
+      lst = newp
+    }
+    store_item(lst, n, v)
+    store64(lst, n + 1, 0)
+    lst
   }
 }
 
 fn pop(lst){
   "Removes and returns the last element from list `lst`. Returns `0` if empty."
-  if(!is_ptr(lst)){ 0 }
+  if(!is_ptr(lst)){ return 0 }
   else {
    def n = load64(lst, 0)
-   if(n == 0){ 0 }
+   if(__eq(n, 0)){ 0 }
    else {
      def v = get(lst, n - 1)
      store64(lst, n - 1, 0)
@@ -362,8 +359,8 @@ fn list_clear(lst){
 
 fn extend(lst, other){
   "Appends all elements from collection `other` to the list `lst`."
-  if(is_list(lst) == false){ return lst }
-  if(is_list(other) == false){ return lst }
+  if(__eq(is_list(lst), false)){ return lst }
+  if(__eq(is_list(other), false)){ return lst }
   def i = 0
   def n = list_len(other)
   while(i < n){

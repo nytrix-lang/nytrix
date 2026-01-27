@@ -1,46 +1,48 @@
+use std.io
 use std.io.path
-use std.core
+use std.core.error
 
-fn test_basename(){
-   print("Testing basename...")
-   assert(eq(basename("/foo/bar.txt"), "bar.txt"), "basename file")
-   assert(eq(basename("/foo/bar/"), "bar"), "basename dir with slash")
-   assert(eq(basename("bar"), "bar"), "basename plain")
-   assert(eq(basename("/"), "/"), "basename root")
-   assert(eq(basename(""), ""), "basename empty")
-}
+;; std.io.path (Test)
+;; Tests basename, dirname, extname, join, and normalize.
 
-fn test_dirname(){
-   print("Testing dirname...")
-   assert(eq(dirname("/foo/bar.txt"), "/foo"), "dirname file")
-   assert(eq(dirname("/foo/bar/"), "/foo"), "dirname dir with slash")
-   assert(eq(dirname("bar"), "."), "dirname plain")
-   assert(eq(dirname("/"), "/"), "dirname root")
-   assert(eq(dirname("/foo"), "/"), "dirname root parent")
-}
+print("Testing basename...")
+assert(eq(basename("/foo/bar.txt"), "bar.txt"), "basename file")
+assert(eq(basename("/foo/bar/"), "bar"), "basename dir slash")
+assert(eq(basename("bar"), "bar"), "basename plain")
+assert(eq(basename("/"), "/"), "basename root")
+assert(eq(basename(""), ""), "basename empty")
 
-fn test_extname(){
-   print("Testing extname...")
-   assert(eq(extname("foo.txt"), ".txt"), "ext .txt")
-   assert(eq(extname("/path/to/foo.tar.gz"), ".gz"), "ext .gz")
-   assert(eq(extname("file"), ""), "ext none")
-   assert(eq(extname(".hidden"), ".hidden"), "ext .hidden")
-}
+print("Testing dirname...")
+assert(eq(dirname("/foo/bar.txt"), "/foo"), "dirname file")
+assert(eq(dirname("/foo/bar/"), "/foo"), "dirname dir slash")
+assert(eq(dirname("bar"), "."), "dirname plain")
+assert(eq(dirname("/"), "/"), "dirname root")
+assert(eq(dirname("/foo"), "/"), "dirname parent")
 
-fn test_join(){
-   print("Testing join...")
-   assert(eq(path_join("foo", "bar"), "foo/bar"), "join simple")
-   assert(eq(path_join("/foo", "bar"), "/foo/bar"), "join abs")
-   assert(eq(path_join("foo/", "bar"), "foo/bar"), "join trailing")
-   assert(eq(path_join("foo", "/bar"), "/bar"), "join absolute right")
-}
+print("Testing extname...")
+assert(eq(extname("foo.txt"), ".txt"), "ext .txt")
+assert(eq(extname("/path/to/foo.tar.gz"), ".gz"), "ext .gz")
+assert(eq(extname("file"), ""), "ext none")
+assert(eq(extname(".hidden"), ".hidden"), "ext hidden")
 
-fn test_main(){
-   test_basename()
-   test_dirname()
-   test_extname()
-   test_join()
-   print("✓ std.io.path tests passed")
-}
+print("Testing join...")
+assert(eq(path_join("foo", "bar"), "foo/bar"), "join simple")
+assert(eq(path_join("/foo", "bar"), "/foo/bar"), "join abs")
+assert(eq(path_join("foo/", "bar"), "foo/bar"), "join trailing")
+assert(eq(path_join("foo", "/bar"), "/bar"), "join abs right")
 
-test_main()
+print("Testing extra cases...")
+assert(basename("/a/b/c.txt") == "c.txt", "basename file")
+assert(basename("/a/b/") == "b", "basename trailing")
+assert(dirname("/a/b/c.txt") == "/a/b", "dirname file")
+assert(dirname("c.txt") == ".", "dirname relative")
+assert(extname("/a/b/c.txt") == ".txt", "ext txt")
+assert(extname("/a/b/c") == "", "ext none")
+
+def n1 = normalize("/a/./b/../c/")
+assert(n1 == "/a/c", "normalize")
+
+def j = path_join("/a", "b", "c")
+assert(j == "/a/b/c", "join multi")
+
+print("✓ std.io.path tests passed")

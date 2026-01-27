@@ -29,7 +29,7 @@ fn RTLD_LOCAL(){
 }
 
 fn dlopen(path, flags){
-   "Open shared object and return handle or 0."
+   "Opens a dynamic library file specified by `path`. Returns a library handle `ptr`, or `0` on failure. `flags` are typically `RTLD_LAZY` or `RTLD_NOW`."
    return __dlopen(path, flags)
 }
 
@@ -39,12 +39,12 @@ fn dlsym(handle, name){
 }
 
 fn dlclose(handle){
-   "Close shared object handle."
+   "Closes a library handle previously opened with `dlopen`."
    return __dlclose(handle)
 }
 
 fn dlerror(){
-   "Return last dl error string pointer."
+   "Returns a string describing the last error that occurred during an FFI operation."
    return __dlerror()
 }
 
@@ -143,7 +143,7 @@ fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){
 }
 
 fn ffi_call(fptr, args){
-   "Call with list args (0-12 supported)."
+   "Dynamically calls a function pointer `fptr` with a variable list of `args`. Supports functions with 0 to 13 arguments."
    def n = list_len(args)
    if(n==0){ return call0(fptr)  }
    if(n==1){ return call1(fptr, get(args,0))  }

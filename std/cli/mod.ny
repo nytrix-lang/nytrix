@@ -1,13 +1,14 @@
-;; Keywords: cli mod
-;; Cli Mod module.
+;; Keywords: cli
+;; Cli module.
 
+use std.core.primitives
 module std.cli (
    argc, argv, args, contains_flag, get_flag, parse_args
 )
 
 fn argc(){
    "Returns the number of command-line arguments."
-   __argc()
+   primitives.argc()
 }
 
 fn argv(i){
@@ -17,7 +18,7 @@ fn argv(i){
 
 fn args(){
    "Returns a [[std.core::list]] of all command-line arguments."
-   def n = __argc()
+   def n = primitives.argc()
    def xs = list(8)
    def i = 0
    while(i < n){

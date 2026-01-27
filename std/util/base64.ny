@@ -23,7 +23,7 @@ fn b64_index(c){
 }
 
 fn b64_encode(s){
-   "Encode string s to Base64."
+   "Encodes string `s` using Base64 encoding. Returns a new Base64-encoded string."
    def n = str_len(s)
    def out_len = ((n + 2) / 3) * 4
    def out = __malloc(out_len + 1)
@@ -53,7 +53,7 @@ fn b64_encode(s){
 }
 
 fn b64_decode(s){
-   "Decode Base64 string s to raw bytes string."
+   "Decodes a Base64-encoded string `s`. Returns the original data as a raw string."
    def n = str_len(s)
    def out = __malloc(n + 1)
    __init_str(out, n) ; String tag

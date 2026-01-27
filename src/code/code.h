@@ -45,7 +45,7 @@ typedef struct codegen_t {
   int had_error;
   int lambda_count;
   VEC(binding) aliases;
-  VEC(binding) impo_aliases;
+  VEC(binding) import_aliases;
   VEC(char *) use_modules;
   const char *current_module_name;
   bool comptime;

@@ -125,7 +125,6 @@ static inline char *ny_strndup(const char *s, size_t n) {
   return r;
 }
 
-// TODO: stop using macros
 // Simple growable array for POD types.
 
 #define VEC(type)                                                              \

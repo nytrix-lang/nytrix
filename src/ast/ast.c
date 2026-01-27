@@ -113,7 +113,9 @@ static void free_stmt(stmt_t *s) {
     break;
   case NY_S_VAR:
     vec_free(&s->as.var.names);
-    free_expr(s->as.var.expr);
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i)
+      free_expr(s->as.var.exprs.data[i]);
+    vec_free(&s->as.var.exprs);
     break;
   case NY_S_EXPR:
     free_expr(s->as.expr.expr);
@@ -393,13 +395,14 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
       if (i < s->as.var.names.len - 1)
         append(buf, len, cap, ",");
     }
-    append(buf, len, cap,
-           "],\"undef\":%s,\"expr_t\":", s->as.var.is_undef ? "true" : "false");
-    if (s->as.var.expr)
-      dump_expr(s->as.var.expr, buf, len, cap);
-    else
-      append(buf, len, cap, "null");
-    append(buf, len, cap, "}");
+    append(buf, len, cap, "],\"undef\":%s,\"exprs\":[",
+           s->as.var.is_undef ? "true" : "false");
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i) {
+      dump_expr(s->as.var.exprs.data[i], buf, len, cap);
+      if (i < s->as.var.exprs.len - 1)
+        append(buf, len, cap, ",");
+    }
+    append(buf, len, cap, "]}");
     break;
   case NY_S_EXPR:
     append(buf, len, cap, "{\"type\":\"expr_stmt\",\"expr_t\":");

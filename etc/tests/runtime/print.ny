@@ -1,38 +1,18 @@
 use std.core
+use std.io
+use std.core.error
 
-fn test_print_empty() {
-   print()
-   return true
-}
+;; std.io.print (Test)
+;; Real assertions for print behavior.
 
-fn test_print_basic() {
-   print("Basic")
-   return true
-}
+assert(print() == 0, "print empty")
 
-fn test_print_multi() {
-   print("Vals:", 1, 2, 3)
-   return true
-}
+assert(print("Basic") == 0, "print basic")
 
-fn test_print_kwargs() {
-   print("A", "B", sep="-", end=".\n")
-   return true
-}
+assert(print("Vals:", 1, 2, 3) == 0, "print multi")
 
-fn test_print_only_kwarg() {
-   print(end="[END]\n")
-   return true
-}
+assert(print("A", "B", sep="-", end=".\n") == 0, "print kwargs")
 
-fn test_main() {
-   print("--- Test Suite: Print ---")
-   test_print_empty()
-   test_print_basic()
-   test_print_multi()
-   test_print_kwargs()
-   test_print_only_kwarg()
-   print("✓ Print tests passed")
-}
+assert(print(end="[END]\n") == 0, "print only kwarg")
 
-test_main()
+print("✓ Print tests passed")

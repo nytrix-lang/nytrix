@@ -3,7 +3,7 @@
 
 use std.core
 module std.core.test (
-   STDERR_FD, write_stderr, t_assert, t_asse__eq, fail
+   STDERR_FD, write_stderr, t_assert, t_assert_eq, fail
 )
 
 def STDERR_FD = 2
@@ -23,7 +23,7 @@ fn t_assert(condition, message){
    }
 }
 
-fn t_asse__eq(a, b, message){
+fn t_assert_eq(a, b, message){
    "Asserts that two values are equal."
    if(a != b){
       write_stderr("Equality assertion failed: ")

@@ -1,3 +1,4 @@
+#include "base/util.h"
 #include "lex/lexer.h"
 #include "priv.h"
 #include <readline/readline.h>
@@ -369,7 +370,7 @@ void repl_redisplay(void) {
       free(last_prompt);
     if (clean_prompt)
       free(clean_prompt);
-    last_prompt = strdup(rl_display_prompt);
+    last_prompt = ny_strdup(rl_display_prompt);
     clean_prompt = malloc(strlen(rl_display_prompt) + 1);
 
     last_visible_len = 0;

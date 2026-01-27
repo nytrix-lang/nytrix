@@ -9,7 +9,7 @@ module std.util.url (
 )
 
 fn _is_alnum(c){
-   "URL encoding/decoding."
+   "Returns **true** if character code `c` is alphanumeric (A-Z, a-z, 0-9)."
    if(c>=48 && c<=57){ return 1  }
    if(c>=65 && c<=90){ return 1  }
    if(c>=97 && c<=122){ return 1  }
@@ -31,7 +31,7 @@ fn _url_hex_char(v){
 }
 
 fn urlencode(s){
-   "Percent-encode string."
+   "Percent-encodes string `s` for safe inclusion in a URL. Spaces are encoded as `%20`."
    def n = str_len(s)
    def out = __malloc(n*3 + 1)
    def i =0  o=0
@@ -55,7 +55,7 @@ fn urlencode(s){
 }
 
 fn urldecode(s){
-   "Percent-decode string (accepts + as space)."
+   "Decodes a percent-encoded string `s`. Treats both `+` and `%20` as space characters."
    def n = str_len(s)
    def out = __malloc(n + 1)
    def i =0  o=0
@@ -108,12 +108,12 @@ fn url_parse(url){
    } else {
       result = append(result, "")
    }
-   def po__sep = find(authority, ":")
-   if(po__sep >= 0){
-      def host = slice(authority, 0, po__sep, 1)
-      def po__str = slice(authority, po__sep + 1, str_len(authority), 1)
+   def port_sep = find(authority, ":")
+   if(port_sep >= 0){
+      def host = slice(authority, 0, port_sep, 1)
+      def port_str = slice(authority, port_sep + 1, str_len(authority), 1)
       result = append(result, host)
-      result = append(result, atoi(po__str))
+      result = append(result, atoi(port_str))
    } else {
       result = append(result, authority)
       result = append(result, 80)
@@ -156,7 +156,7 @@ fn url_parse(url){
 }
 
 fn parse_url(url){
-   "Compatible parse_url returning [host, port, path]."
+   "Compatibility wrapper for `url_parse` that returns a 3-item list: `[host, port, path]`."
    def p = url_parse(url)
    if(len(p) < 7){ return ["", 80, "/"] }
    def host = get(p, 2)

@@ -1,5 +1,5 @@
-;; Keywords: math mod
-;; Math Mod module.
+;; Keywords: math
+;; Math module.
 
 use std.core
 use std.core.reflect

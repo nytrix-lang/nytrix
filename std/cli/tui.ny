@@ -7,10 +7,119 @@ use std.collections
 use std.os.time
 use std.math.float
 use std.core
+use std.io
 module std.cli.tui (
-   bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update,
-   bar_finish, bar_range, bar_write
+    bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update,
+    bar_finish, bar_range, bar_write, get_terminal_size,
+    clear_screen, cursor_hide, cursor_show, cursor_move, cursor_up, cursor_down,
+    cursor_left, cursor_right, enable_wrap, disable_wrap, screen_reset,
+    color_names, get_color_name, get_color, shapes,
+    canvas, canvas_clear, canvas_set, canvas_print, canvas_box, canvas_refresh,
+    get_key, poll_key, set_raw_mode, set_cooked_mode, write_str
 )
+
+fn write_str(s){
+   "Safely write a Nytrix string to stdout (bypassing metadata)."
+   if(s){ sys_write(1, s + 8, str_len(s)) }
+}
+
+;; TUI Control
+
+fn clear_screen(){
+   "Clears the entire screen and moves cursor to home."
+   sys_write(1, "\033[2J", 4)
+   sys_write(1, "\033[H", 3)
+}
+
+fn cursor_hide(){
+   "Hides the terminal cursor."
+   sys_write(1, "\033[?25l", 6)
+}
+
+fn cursor_show(){
+   "Shows the terminal cursor."
+   sys_write(1, "\033[?25h", 6)
+}
+
+fn cursor_move(x, y){
+   "Moves the cursor to position (x, y). 1-based indexing."
+   def s = f"\033[{to_str(y)};{to_str(x)}H"
+   sys_write(1, s, str_len(s))
+}
+
+fn cursor_up(n=1){
+   "Moves cursor up by `n` lines."
+   if(is_int(n) == 0){ n = 1 }
+   def s = f"\033[{to_str(n)}A"
+   sys_write(1, s, str_len(s))
+}
+
+fn cursor_down(n=1){
+   "Moves cursor down by `n` lines."
+   if(is_int(n) == 0){ n = 1 }
+   def s = f"\033[{to_str(n)}B"
+   sys_write(1, s, str_len(s))
+}
+
+fn cursor_right(n=1){
+   "Moves cursor right by `n` columns."
+   if(is_int(n) == 0){ n = 1 }
+   def s = f"\033[{to_str(n)}C"
+   sys_write(1, s, str_len(s))
+}
+
+fn cursor_left(n=1){
+   "Moves cursor left by `n` columns."
+   if(is_int(n) == 0){ n = 1 }
+   def s = f"\033[{to_str(n)}D"
+   sys_write(1, s, str_len(s))
+}
+
+fn disable_wrap(){
+   "Disables line wrapping."
+   sys_write(1, "\033[?7l", 5)
+}
+
+fn enable_wrap(){
+   "Enables line wrapping."
+   sys_write(1, "\033[?7h", 5)
+}
+
+fn screen_reset(){
+   "Resets the terminal state: visible cursor, enabled wrap, cleared screen, reset styles."
+   set_cooked_mode()
+   sys_write(1, "\033[0m", 4)
+   cursor_show()
+   enable_wrap()
+   clear_screen()
+}
+
+;; Raw Mode Input
+
+fn set_raw_mode(){
+   "Enables raw mode for the terminal (no echo, no buffering)."
+   use std.process
+   run("/bin/stty", ["raw", "-echo"])
+}
+
+fn set_cooked_mode(){
+   "Restores terminal to normal mode."
+   use std.process
+   run("/bin/stty", ["-raw", "echo"])
+}
+
+fn get_key(){
+   "Reads a single key from stdin in raw mode. Blocks until key is pressed."
+   def b = bytes(1)
+   def n = sys_read(0, b, 1)
+   if(n <= 0){ return 0 }
+   bytes_get(b, 0)
+}
+
+fn poll_key(){
+   "Polls for a key without blocking. Returns 0 if no key."
+   0
+}
 
 ; ANSI Styling
 
@@ -53,6 +162,8 @@ fn color(s, c){
 
 fn style(text, color_name="", is_bold=0){
    "Applies ANSI styling to text."
+   if(is_str(color_name) == 0){ color_name = "" }
+   if(is_int(is_bold) == 0){ is_bold = 0 }
    def out = text
    if(is_bold){ out = f"\033[1m{out}" }
    if(str_len(color_name) > 0){
@@ -60,6 +171,44 @@ fn style(text, color_name="", is_bold=0){
    }
    if(is_bold || str_len(color_name) > 0){ out = f"{out}\033[0m" }
    return out
+}
+
+fn color_names(){
+   "Returns a list of supported color names."
+   def c = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray"]
+   c
+}
+
+fn get_color_name(idx){
+   "Returns the color name at index `idx` (cycling)."
+   def c = color_names()
+   def n = list_len(c)
+   get(c, idx % n)
+}
+
+fn get_color(text, idx){
+   "Returns `text` wrapped in the color at index `idx`."
+   color(text, get_color_name(idx))
+}
+
+fn shapes(){
+   "Returns a dictionary of common TUI shapes/symbols."
+   def s = dict(16)
+   dict_set(s, "v_line", "│")
+   dict_set(s, "h_line", "─")
+   dict_set(s, "top_left", "╭")
+   dict_set(s, "top_right", "╮")
+   dict_set(s, "bot_left", "╰")
+   dict_set(s, "bot_right", "╯")
+   dict_set(s, "cross", "┼")
+   dict_set(s, "t_down", "┬")
+   dict_set(s, "t_up", "┴")
+   dict_set(s, "t_left", "┤")
+   dict_set(s, "t_right", "├")
+   dict_set(s, "block", "█")
+   dict_set(s, "shade", "░")
+   dict_set(s, "dot", "•")
+   s
 }
 
 ; Components
@@ -82,18 +231,12 @@ fn panel(text, title="", border_color="white"){
    top = f"{top}╮"
    top = color(top, border_color)
    if(str_len(title) > 0){
-      ; Embed title in top border
-      ; This is a bit tricky with simple string concat if we want to replace the chars
-      ; easier to just print title above or doing a simple replacement if possible.
-      ; Actually, standard panels put title on the border.
-      ; We can reconstruct top.
       top = color("╭─ ", border_color)
       def title_col = color(title, "cyan")
       def mid_col = color(" ─", border_color)
       def bar_col = color("─", border_color)
       def cap_col = color("╮", border_color)
-      top = f"{top}{title_col}"
-      top = f"{top}{mid_col}"
+      top = f"{top}{title_col}{mid_col}"
       def rem = w - 2 - 2 - str_len(title) - 2
       i = 0
       while(i < rem){
@@ -104,104 +247,67 @@ fn panel(text, title="", border_color="white"){
    }
    print(top)
    ; Content
-   ; Pad text to width
    def padding = w - 4 - str_len(text)
-   def line = f"│ {text}"
-   i = 0
-   while(i < padding){
-      line = f"{line} "
-      i = i + 1
-   }
-   line = f"{line} │"
-   ; Color borders
    def cbar = color("│", border_color)
-   line = f"{cbar} {text} "
+   def line = f"{cbar} {text} "
    i = 0
-   while(i < padding){
-      line = f"{line} "
-      i = i + 1
-   }
+   while(i < padding){ line = f"{line} " i = i + 1 }
    line = f"{line}{cbar}"
    print(line)
    ; Bottom
    def bot = "╰"
    i = 0
-   while(i < w - 2){
-      bot = f"{bot}─"
-      i = i + 1
-   }
+   while(i < w - 2){ bot = f"{bot}─" i = i + 1 }
    bot = f"{bot}╯"
    print(color(bot, border_color))
 }
 
 fn table(headers, rows){
    "Prints a simple table."
-   ; Calculate column widths
    def cols = list_len(headers)
    def widths = list(8)
    def i = 0
    while(i < cols){
-      def w = str_len(get(headers, i))
-      widths = append(widths, w)
+      widths = append(widths, str_len(get(headers, i)))
       i = i + 1
    }
-   def r = 0
-   def nr = list_len(rows)
+   def r = 0 def nr = list_len(rows)
    while(r < nr){
       def row = get(rows, r)
       def c = 0
       while(c < cols){
          def val = get(row, c)
-         def l = str_len(val)
-         def cw = get(widths, c)
-         if(l > cw){
-            set_idx(widths, c, l)
-         }
+         if(str_len(val) > get(widths, c)){ set_idx(widths, c, str_len(val)) }
          c = c + 1
       }
       r = r + 1
    }
-   ; Print headers
    def line = ""
    i = 0
    while(i < cols){
       def h = get(headers, i)
-      w = get(widths, i)
+      def w = get(widths, i)
       line = f"{line}{bold(h)}"
       def pad = w - str_len(h) + 2
       def p = 0
-      while(p < pad){
-         line = f"{line} "
-         p = p + 1
-      }
+      while(p < pad){ line = f"{line} " p = p + 1 }
       line = f"{line} "
       i = i + 1
    }
    print(line)
-   ; Separator
-   def sep = ""
-   i = 0
-   while(i < str_len(line) - 10){ "approximation minus ansi codes"
-       sep = f"{sep}─"
-       i = i + 1
-   }
+   def sep = "" def slen = str_len(line) ; Approximation
+   i = 0 while(i < (slen / 2)){ sep = f"{sep}─" i = i + 1 }
    print(color(sep, "gray"))
-   ; Print rows
    r = 0
    while(r < nr){
-      row = get(rows, r)
-      line = ""
-      c = 0
+      def row = get(rows, r)
+      line = "" c = 0
       while(c < cols){
-         val = get(row, c)
-         w = get(widths, c)
+         def val = get(row, c)
+         def w = get(widths, c)
          line = f"{line}{val}"
-         pad = w - str_len(val) + 2
-         p = 0
-         while(p < pad){
-            line = f"{line} "
-            p = p + 1
-         }
+         def pad = w - str_len(val) + 2
+         def p = 0 while(p < pad){ line = f"{line} " p = p + 1 }
          line = f"{line} "
          c = c + 1
       }
@@ -210,145 +316,278 @@ fn table(headers, rows){
    }
 }
 
-fn tree(node, prefix=""){
+fn tree(node, pref="", head_in=""){
    "Prints a tree structure. Node is [label, [children...]] or just label string."
-   if(is_str(node)){
-      print(f"{prefix}{node}")
-      return 0
-   }
+   def prefix = case type(pref) { "str" -> pref _ -> "" }
+   def head = case type(head_in) { "str" -> head_in _ -> "" }
+   if(is_str(node)){ print(f"{prefix}{head}{node}") return 0 }
    def label = get(node, 0)
-   print(f"{prefix}{bold(label)}")
+   print(f"{prefix}{head}{bold(label)}")
    def children = get(node, 1)
    def count = list_len(children)
    def i = 0
    while(i < count){
       def last = (i == count - 1)
       def child = get(children, i)
-      def conn = "├── "
       def next_prefix = f"{prefix}│   "
-      if(last){
-         conn = "╰── "
-         next_prefix = f"{prefix}    "
-      }
-      tree(child, f"{prefix}{conn}")
+      def next_head = "├── "
+      if(last){ next_prefix = f"{prefix}    " next_head = "╰── " }
+      tree(child, next_prefix, next_head)
       i = i + 1
    }
 }
 
-; TODO Progress Bar like tqdm
-
-fn bar(total=100, desc="Progress", width=40, bar_color="green", show_eta=1, leave=1){
+fn bar(tot=100, d="Progress", w=40, bc="green", se=1, lv=1){
    "Create a progress bar. Returns a bar object (list)."
-   def bar = list(8)
-   bar = append(bar, total)         ; "0: total"
-   bar = append(bar, 0)             ; "1: current"
-   bar = append(bar, desc)          ; "2: description"
-   bar = append(bar, width)         ; "3: width"
-   bar = append(bar, bar_color)     ; "4: bar_color"
-   bar = append(bar, show_eta)      ; "5: show_eta"
-   bar = append(bar, leave)         ; "6: leave"
-   def sta__time = ticks() / 1000000
-   bar = append(bar, sta__time)    ; "7: sta__time (ms)"
-   bar = append(bar, sta__time)    ; "8: last_update_time (ms)"
-   bar = append(bar, 0)             ; "9: is_finished"
-   bar = append(bar, 0)             ; "10: last_update_val"
-   bar = append(bar, 0.0)           ; "11: avg_rate (items/sec)"
+   def total = case is_int(tot) { 1 -> tot _ -> 100 }
+   def desc = case is_str(d) { 1 -> d _ -> "Progress" }
+   def width = case is_int(w) { 1 -> w _ -> 40 }
+   def bar_color = case is_str(bc) { 1 -> bc _ -> "green" }
+   def show_eta = case is_int(se) { 1 -> se _ -> 1 }
+   def leave = case is_int(lv) { 1 -> lv _ -> 1 }
+   def bar = list(12)
+   bar = append(bar, total)         ; 0
+   bar = append(bar, 0)             ; 1
+   bar = append(bar, desc)          ; 2
+   bar = append(bar, width)         ; 3
+   bar = append(bar, bar_color)     ; 4
+   bar = append(bar, show_eta)      ; 5
+   bar = append(bar, leave)         ; 6
+   def start_time = ticks() / 1000000
+   bar = append(bar, start_time)    ; 7
+   bar = append(bar, start_time)    ; 8
+   bar = append(bar, 0)             ; 9
+   bar = append(bar, 0)             ; 10
+   bar = append(bar, 0.0)           ; 11
    return bar
 }
 
 fn bar_update(bar, current){
-   "Update progress bar to current and redraw."
+   "Updates the progress bar to the `current` value and renders it to stdout."
    if(get(bar, 9) == 1){ return 0 }
-   def last_val = get(bar, 10)
-   if(current <= last_val && current != 0 && current < get(bar, 0)){ return 0 }
-   set_idx(bar, 1, current)
-   set_idx(bar, 10, current)
-   def total = get(bar, 0)
-   def desc = get(bar, 2)
-   def width = get(bar, 3)
-   def bar_color = get(bar, 4)
-   def show_eta = get(bar, 5)
-   def sta__time = get(bar, 7)
-   def last_time = get(bar, 8)
-   def now = ticks() / 1000000
-   def dt = now - last_time
+   if(current <= get(bar, 10) && current != 0 && current < get(bar, 0)){ return 0 }
+   set_idx(bar, 1, current) set_idx(bar, 10, current)
+   def total = get(bar, 0) def desc = get(bar, 2) def width = get(bar, 3)
+   def bar_color = get(bar, 4) def show_eta = get(bar, 5)
+   def start_time = get(bar, 7) def last_time = get(bar, 8)
+   def now = ticks() / 1000000 def dt = now - last_time
    def avg_rate = get(bar, 11)
-   if(dt > 150 || current == 1 || current == total){
-      def elapsed_sec = (now - sta__time) / 1000.0
-      if(elapsed_sec > 0.05){
-         def inst_rate = current / elapsed_sec
-         if(avg_rate == 0.0){ avg_rate = inst_rate }
-         else { avg_rate = (avg_rate * 0.8) + (inst_rate * 0.2) }
-         set_idx(bar, 11, avg_rate)
-         set_idx(bar, 8, now)
+   if(dt > 150 || current == total){
+      def elapsed = (now - start_time) / 1000.0
+      if(elapsed > 0.05){
+         def inst = current / elapsed
+         avg_rate = case avg_rate == 0.0 { 1 -> inst _ -> (avg_rate * 0.8) + (inst * 0.2) }
+         set_idx(bar, 11, avg_rate) set_idx(bar, 8, now)
       }
    }
-   if(total == 0){ total = 1 }
-   def pct = (current * 100) / total
-   if(pct > 100){ pct = 100 }
-   def filled = (current * width) / total
-   if(filled > width){ filled = width }
-   def bar_str = repeat("█", filled)
-   bar_str = color(bar_str, bar_color)
-   def empty_str = repeat("░", width - filled)
-   empty_str = color(empty_str, "gray")
-   def rate_str = ""
-   def eta_str = ""
-   if(show_eta && avg_rate > 0.001){
-      rate_str = f" [{to_str(int(avg_rate))} it/s]"
-      def remaining = total - current
-      if(remaining > 0){
-         def eta_sec = 0
-         if(avg_rate > 0.001){
-            eta_sec = int(float(remaining) / avg_rate)
-         }
-         if(eta_sec < 60){ eta_str = f" {to_str(eta_sec)}s" }
-         else { eta_str = f" {to_str(eta_sec / 60)}m{to_str(eta_sec % 60)}s" }
-      }
-   }
-   ; Format: \r\033[KDesc: 100%|████| 10/10 [12it/s 10s]
-   def pct_s = to_str(pct)
-   if(pct < 10){ pct_s = f"  {pct_s}" }
-   elif(pct < 100){ pct_s = f" {pct_s}" }
-   def out = "\r\033[K"
-   if(str_len(desc) > 0){ out = f"{out}{desc}: " }
-   out = f"{out}{pct_s}%|"
-   out = f"{out}{bar_str}{empty_str}| "
-   out = f"{out}{to_str(current)}/{to_str(total)}"
-   out = f"{out}{rate_str}{eta_str}"
+   def den = case total == 0 { 1 -> 1 _ -> total }
+   def pct = (current * 100) / den
+   def filled = (current * width) / den
+   def b_len = case filled > width { 1 -> width _ -> filled }
+   def e_len = case width - filled < 0 { 1 -> 0 _ -> width - filled }
+   def b_str = color(repeat("█", b_len), bar_color)
+   def e_str = color(repeat("░", e_len), "gray")
+   def out = f"\r\033[K{desc}: {to_str(pct)}%|{b_str}{e_str}| {to_str(current)}/{to_str(total)}"
    sys_write(1, out, str_len(out))
    if(current >= total){ set_idx(bar, 9, 1) }
    return 0
 }
 
 fn bar_finish(bar){
-   "Finish the progress bar and optionally leave it on screen."
-   def total = get(bar, 0)
-   def current = get(bar, 1)
-   if(current < total){ bar_update(bar, total) }
-   def leave = get(bar, 6)
-   if(leave){
-      print("")
-   } else {
-      sys_write(1, "\r", 1)
-      def clear_line = "\033[K"
-      sys_write(1, clear_line, str_len(clear_line))
-   }
+   "Completes the progress bar, ensuring it reaches 100% and cleanup/newline as needed."
+   if(get(bar, 1) < get(bar, 0)){ bar_update(bar, get(bar, 0)) }
+   if(get(bar, 6)){ print("") } else { sys_write(1, "\r\033[K", 4) }
    set_idx(bar, 9, 1)
-   return 0
 }
 
 fn bar_range(n, desc=""){
-   "Create a progress bar for a range of n items."
+   "Compatibility wrapper for `bar(n, desc)`. Returns a new bar object."
    return bar(n, desc)
 }
-
 fn bar_write(bar_obj, msg){
-   "Write a message without breaking the bar, then redraw."
-   sys_write(1, "\r", 1)
-   def clear_line = "\033[K"
-   sys_write(1, clear_line, str_len(clear_line))
-   print(msg)
-   bar_update(bar_obj, get(bar_obj, 1))
-   return 0
+   "Clears the current progress bar line, prints `msg`, and redraws the bar."
+   sys_write(1, "\r\033[K", 4) print(msg) bar_update(bar_obj, get(bar_obj, 1))
+}
+
+def _term_buf = 0
+
+fn get_terminal_size(){
+   "Retrieves terminal [width, height] using ioctl, environment variables, or defaults."
+   if(!_term_buf){ _term_buf = __malloc(8) }
+   def buf = _term_buf
+
+   ;; Try ioctl on stdout (1)
+   def r = __syscall(16, 1, 0x5413, buf, 0, 0, 0)
+
+   ;; If stdout fails, try /dev/tty
+   if(r != 0){
+      use std.io
+      def fd = sys_open("/dev/tty", 0, 0)
+      if(fd > 0){
+         r = __syscall(16, fd, 0x5413, buf, 0, 0, 0)
+         sys_close(fd)
+      }
+   }
+
+   if(r == 0){
+      def rows = load8(buf, 0) | (load8(buf, 1) << 8)
+      def cols = load8(buf, 2) | (load8(buf, 3) << 8)
+      if(rows > 0 && cols > 0){
+         return [cols, rows]
+      }
+   }
+
+   ;; Fallback to Environment Variables
+   use std.os
+   def env_c = env("COLUMNS")
+   def env_l = env("LINES")
+   if(is_str(env_c) && is_str(env_l)){
+      def ic = 0 def il = 0
+      use std.core.reflect
+      ic = int(env_c) il = int(env_l)
+      if(ic > 0 && il > 0){ return [ic, il] }
+   }
+
+   return [80, 24] ; Final fallback
+}
+
+;; Canvas / Windowing System (ncurses-like)
+
+fn canvas(w, h){
+   "Creates a new terminal canvas for buffered drawing."
+   def c = list(8)
+   c = append(c, w) ; 0: width
+   c = append(c, h) ; 1: height
+   c = append(c, bytes(w * h)) ; 2: char buffer
+   c = append(c, bytes(w * h)) ; 3: attr buffer (0=norm, 1=bold)
+   c = append(c, bytes(w * h)) ; 4: color buffer (color index 0-8)
+   canvas_clear(c)
+   return c
+}
+
+fn canvas_clear(canv){
+   "Clears all buffers (characters, attributes, and colors) in the canvas."
+   def w = get(canv, 0) def h = get(canv, 1)
+   def buf = get(canv, 2) def attr = get(canv, 3) def col = get(canv, 4)
+   def i = 0 def n = w * h
+   while(i < n){
+      bytes_set(buf, i, 32)
+      bytes_set(attr, i, 0)
+      bytes_set(col, i, 0)
+      i = i + 1
+   }
+}
+
+fn canvas_set(canv, x, y, char, color_idx=0, is_bold=0){
+   "Sets a character and its attributes at (x, y) on the canvas."
+   def w = get(canv, 0) def h = get(canv, 1)
+   if(x < 0 || x >= w || y < 0 || y >= h){ return 0 }
+   def idx = y * w + x
+   def char_code = case is_str(char) { 1 -> ord(char) _ -> char }
+   bytes_set(get(canv, 2), idx, char_code)
+   bytes_set(get(canv, 3), idx, is_bold)
+   bytes_set(get(canv, 4), idx, color_idx)
+}
+
+fn canvas_print(canv, x, y, text, color_idx=0, is_bold=0){
+   "Prints a string horizontally on the canvas starting at (x, y)."
+   def i = 0 def l = str_len(text)
+   while(i < l){
+      canvas_set(canv, x + i, y, get(text, i), color_idx, is_bold)
+      i = i + 1
+   }
+}
+
+fn canvas_box(canv, x, y, w, h, title="", color_idx=0){
+   "Draws a styled box with an optional title on the canvas."
+   def s = shapes()
+   def i = 0
+   while(i < w){
+      canvas_set(canv, x + i, y, dict_get(s, "h_line"), color_idx)
+      canvas_set(canv, x + i, y + h - 1, dict_get(s, "h_line"), color_idx)
+      i = i + 1
+   }
+   i = 0
+   while(i < h){
+      canvas_set(canv, x, y + i, dict_get(s, "v_line"), color_idx)
+      canvas_set(canv, x + w - 1, y + i, dict_get(s, "v_line"), color_idx)
+      i = i + 1
+   }
+   canvas_set(canv, x, y, dict_get(s, "top_left"), color_idx)
+   canvas_set(canv, x + w - 1, y, dict_get(s, "top_right"), color_idx)
+   canvas_set(canv, x, y + h - 1, dict_get(s, "bot_left"), color_idx)
+   canvas_set(canv, x + w - 1, y + h - 1, dict_get(s, "bot_right"), color_idx)
+   if(str_len(title) > 0){
+      canvas_print(canv, x + 2, y, f" {title} ", color_idx, 1)
+   }
+}
+
+fn canvas_refresh(canv){
+   "Renders the entire canvas buffer to the physical terminal using an optimized single-write approach."
+   def w = get(canv, 0)
+   def h = get(canv, 1)
+   def buf = get(canv, 2)
+   def attr = get(canv, 3)
+   def col = get(canv, 4)
+
+   ;; Estimated buffer size: 15 chars per cell for extreme case + some overhead
+   def r_buf = bytes(w * h * 16 + 128)
+   def p = 0
+
+   ;; Home command: \033[H (27 91 72)
+   bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 72)
+   p = p + 3
+
+   def last_c = -1
+   def last_b = -1
+
+   def y = 0
+   while y < h {
+      def x = 0
+      while x < w {
+         def idx = y * w + x
+         def char = bytes_get(buf, idx)
+         def b = bytes_get(attr, idx)
+         def c = bytes_get(col, idx)
+
+         if c != last_c || b != last_b {
+            ;; \033[ (27 91)
+            bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) p = p + 2
+
+            if c == 0 && b == 0 {
+               bytes_set(r_buf, p, 48) p = p + 1 ;; '0'
+            } else {
+               if b {
+                  bytes_set(r_buf, p, 49) bytes_set(r_buf, p+1, 59) p = p + 2 ;; '1;'
+               }
+               def code = case c {
+                  1 -> 49 2 -> 50 3 -> 51
+                  4 -> 52 5 -> 53 6 -> 54
+                  7 -> 55 8 -> 48 _ -> 55
+               }
+               bytes_set(r_buf, p, 51) ;; '3'
+               if c == 8 { bytes_set(r_buf, p, 57) } ;; '9' for gray
+               bytes_set(r_buf, p+1, code)
+               p = p + 2
+            }
+            bytes_set(r_buf, p, 109) p = p + 1 ;; 'm'
+            last_c = c last_b = b
+         }
+
+         bytes_set(r_buf, p, char)
+         p = p + 1
+         x = x + 1
+      }
+      if y < h - 1 {
+         bytes_set(r_buf, p, 10) ;; '\n'
+         p = p + 1
+      }
+      y = y + 1
+   }
+
+   ;; Reset color at end: \033[0m
+   bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 48) bytes_set(r_buf, p+3, 109)
+   p = p + 4
+
+   sys_write(1, r_buf + 8, p)
 }

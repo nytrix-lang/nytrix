@@ -1,5 +1,8 @@
 use std.io
-; Control flow tests
+use std.core
+
+;; Control Flow (Test)
+;; Tests conditional logic including if, elif, and else statements, along with nesting.
 
 def x = 1
 if x == 1 {
@@ -46,4 +49,4 @@ if true {
    }
 }
 
-print("Control flow tests passed")
+print("✓ std.core.control tests passed")

@@ -1,4 +1,5 @@
 #include "priv.h"
+#include "rt/shared.h"
 #include "std_symbols.h"
 #include <alloca.h>
 #include <llvm-c/Analysis.h>
@@ -45,9 +46,9 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // checking (__check_oob) would forbid accessing header fields (like length
   // at -16). By leaving magics as 0, is_heap_ptr returns false, allowing
   // access.
-  // *(uint64_t*)(obj_data) = 0x545249584E5954ULL; // NY_MAGIC1
-  // *(uint64_t*)(obj_data + 8) = total_len - 128; // Raw capacity
-  // *(uint64_t*)(obj_data + 16) = 0x4E59545249584EULL; // NY_MAGIC2
+  *(uint64_t *)(obj_data) = NY_MAGIC1;
+  *(uint64_t *)(obj_data + 8) = (uint64_t)final_len; // Capacity
+  *(uint64_t *)(obj_data + 16) = NY_MAGIC2;
   *(uint64_t *)(obj_data + 48) =
       ((uint64_t)final_len << 1) | 1; // Length at p-16 (tagged)
   *(uint64_t *)(obj_data + 56) = 241; // Tag at p-8 (TAG_STR)
@@ -55,7 +56,7 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   memcpy(obj_data + header_size, final_s, final_len);
   obj_data[header_size + final_len] = '\0';
   // Write Tail
-  // *(uint64_t*)(obj_data + header_size + final_len + 1) = NY_MAGIC3
+  *(uint64_t *)(obj_data + header_size + final_len + 1) = NY_MAGIC3;
   LLVMTypeRef arr_ty =
       LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
   LLVMValueRef g = LLVMAddGlobal(cg->module, arr_ty, ".str");
@@ -856,12 +857,12 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fun_sig *cs = lookup_fun(cg, "__str_concat"),
             *ts = lookup_fun(cg, "__to_str");
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
-      fstring_pa__t p = e->as.fstring.parts.data[i];
+      fstring_part_t p = e->as.fstring.parts.data[i];
       LLVMValueRef pv;
       if (p.kind == NY_FSP_STR) {
-        LLVMValueRef pa__runtime_global =
+        LLVMValueRef part_runtime_global =
             const_string_ptr(cg, p.as.s.data, p.as.s.len);
-        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, pa__runtime_global, "");
+        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, part_runtime_global, "");
       } else {
         pv = LLVMBuildCall2(
             cg->builder, ts->type, ts->value,

@@ -1,3 +1,12 @@
+use std.core
 use d
-module b ( val )
-fn val(){ return val() }
+
+;; Module b (Test)
+
+module b (
+   val
+)
+
+fn val(){
+   val()
+}

@@ -1,13 +1,21 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "rt/shared.h"
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <time.h>
+#include <unistd.h>
+
+long syscall(long number, ...); // Explicit forward declaration
 
 // Syscall (inline asm on x86_64 for zero overhead)
 #ifdef __x86_64__
 int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
                   int64_t e, int64_t f) {
+  // fprintf(stderr, "DEBUG: syscall(n=%ld, a=%ld, b=%ld, c=%ld)\n", (long)n,
+  //         (long)a, (long)b, (long)c);
   long rn = (n & 1) ? (n >> 1) : n;
   long ra = a;
   long rb = b;
@@ -33,24 +41,6 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
                          "r"(_arg5), "r"(_arg6)
                        : "rcx", "r11", "memory");
   return (int64_t)((_num << 1) | 1);
-}
-#else
-int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
-                  int64_t e, int64_t f) {
-  int64_t raw_n = (n & 1) ? (n >> 1) : n;
-  int64_t raw_a = a;
-  int64_t raw_b = b;
-  int64_t raw_c = c;
-  int64_t raw_d = (d & 1) ? (d >> 1) : d;
-  int64_t raw_e = (e & 1) ? (e >> 1) : e;
-  int64_t raw_f = (f & 1) ? (f >> 1) : f;
-  if (raw_n != 59) {
-    raw_a = (a & 1) ? (a >> 1) : a;
-    raw_b = (b & 1) ? (b >> 1) : b;
-    raw_c = (c & 1) ? (c >> 1) : c;
-  }
-  int64_t res = syscall(raw_n, raw_a, raw_b, raw_c, raw_d, raw_e, raw_f);
-  return (res << 1) | 1;
 }
 #endif
 

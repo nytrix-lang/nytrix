@@ -1,7 +1,9 @@
 #!/bin/ny
-;; Args Example
-use std.cli *
-use std.io *
+use std.cli
+use std.io
+
+;; Args (Example)
+;; Demonstrates command line argument parsing.
 
 print(f"Argc: {argc()}")
 for i in range(argc()) {

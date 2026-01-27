@@ -194,7 +194,7 @@ fn _json_init_dict(s, i, n){
 }
 
 fn json_decode(s){
-   "Parse JSON string to value."
+   "Parses a JSON-formatted string `s` and returns the equivalent Nytrix value (integer, string, list, or dictionary)."
    def p = _json_parse_val(s, 0, str_len(s))
    return get(p, 0)
 }

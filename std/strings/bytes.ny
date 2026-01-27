@@ -9,7 +9,7 @@ module std.strings.bytes (
 )
 
 fn bytes(n){
-   "Create zeroed byte buffer."
+   "Creates a new bytes buffer of size `n`, initialized to zero."
    def p = __malloc(n + 8) ; length + data (tag at -8)
    store64(p, 122, -8)
    store64(p, n, 0)
@@ -18,7 +18,7 @@ fn bytes(n){
 }
 
 fn bytes_from_str(s){
-   "Copy string to bytes buffer."
+   "Creates a new bytes buffer containing the contents of string `s`."
    def n = str_len(s)
    def buf = __malloc(n + 8)
    store64(buf, 122, -8)
@@ -28,7 +28,7 @@ fn bytes_from_str(s){
 }
 
 fn bytes_len(b){
-   "Return length of bytes."
+   "Returns the number of bytes in the buffer `b`."
    if(b==0){ return 0  }
    if(__load64_idx(b, -8) != 122){ return 0  }
    return __load64_idx(b, 0)
@@ -85,7 +85,7 @@ fn bytes_concat(a, b){
 }
 
 fn bytes_to_str(b){
-   "Convert bytes to string."
+   "Converts the bytes buffer `b` back into a Nytrix string."
    def n = bytes_len(b)
    def s = __malloc(n + 1)
    __store64_idx(s, -8, 120) ; TAG_STR
@@ -95,7 +95,7 @@ fn bytes_to_str(b){
 }
 
 fn hex_encode(b){
-   "Hex encode bytes."
+   "Returns a hex-encoded string representation of the bytes in `b`."
    def hex = "0123456789abcdef"
    def n = bytes_len(b)
    def out = __malloc(n*2 + 8)
@@ -120,7 +120,7 @@ fn _hex_val(c){
 }
 
 fn hex_decode(s){
-   "Hex decode string to bytes (ignores invalid, stops on odd length)."
+   "Decodes a hex-encoded string `s` into a new bytes buffer. Stops if invalid characters are encountered."
    def n = str_len(s)
    def len_out = n/2
    def out = __malloc(len_out + 8)

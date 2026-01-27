@@ -44,8 +44,8 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->interns.len = cg->interns.cap = 0;
   cg->interns.data = NULL;
   cg->llvm_ctx_owned = false;
-  cg->impo_aliases.len = cg->impo_aliases.cap = 0;
-  cg->impo_aliases.data = NULL;
+  cg->import_aliases.len = cg->import_aliases.cap = 0;
+  cg->import_aliases.data = NULL;
   cg->comptime = false;
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
   cg->had_error = 0;
@@ -199,9 +199,9 @@ void codegen_dispose(codegen_t *cg) {
     free((void *)cg->aliases.data[i].name);
     free((void *)cg->aliases.data[i].stmt_t);
   }
-  for (size_t i = 0; i < cg->impo_aliases.len; i++) {
-    free((void *)cg->impo_aliases.data[i].name);
-    free((void *)cg->impo_aliases.data[i].stmt_t);
+  for (size_t i = 0; i < cg->import_aliases.len; i++) {
+    free((void *)cg->import_aliases.data[i].name);
+    free((void *)cg->import_aliases.data[i].stmt_t);
   }
   for (size_t i = 0; i < cg->use_modules.len; i++) {
     free((void *)cg->use_modules.data[i]);
@@ -210,7 +210,7 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->global_vars);
   vec_free(&cg->interns);
   vec_free(&cg->aliases);
-  vec_free(&cg->impo_aliases);
+  vec_free(&cg->import_aliases);
   vec_free(&cg->use_modules);
 }
 

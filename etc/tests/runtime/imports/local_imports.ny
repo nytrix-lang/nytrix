@@ -1,30 +1,13 @@
 use std.core
+use std.io
 use "./test_module.ny"
 
-fn test_local_import() {
-   def result = local_add(5, 3)
-   if result == 8 {
-      print("[PASS] Local import works: ./test_module")
-      return true
-   }
-   print("[FAIL] Local import failed")
-   return false
-}
+;; Import system – local module (Test)
 
-fn test_local_function_call() {
-   def greeting = local_greet("Tester")
-   print(f"[PASS] Local function called: {greeting}")
-   return true
-}
+def r = local_add(5, 3)
+assert(r == 8, "local_add import")
 
-fn run_all_tests() {
-   print("Import System: Local Module Tests")
-   def passed = 0
-   def total = 2
-   if test_local_import() { passed = passed + 1 }
-   if test_local_function_call() { passed = passed + 1 }
-   print("")
-   print(f"Results: {passed}/{total} tests passed")
-}
+def g = local_greet("Tester")
+assert(g != 0, "local_greet import")
 
-run_all_tests()
+print("✓ local module import tests passed")

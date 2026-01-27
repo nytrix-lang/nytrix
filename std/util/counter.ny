@@ -9,7 +9,7 @@ module std.util.counter (
 )
 
 fn counter(xs){
-   "Create counter from list or string."
+   "Creates a frequency counter dictionary from the elements of list or string `xs`."
    def d = dict(16)
    def i = 0  def n = len(xs)
    while(i < n){
@@ -22,13 +22,13 @@ fn counter(xs){
 }
 
 fn counter_add(d, key, n){
-   "Increment counter."
+   "Adds `n` to the count of `key` in counter dictionary `d`."
    def c = dict_get(d, key, 0)
    return dict_set(d, key, c + n)
 }
 
 fn most_common(d){
-   "Most common items (descending by count)."
+   "Returns a list of `[item, count]` pairs from counter `d`, sorted by count in descending order."
    def its = items(d)
    def n = len(its)
    ; selection sort by count desc

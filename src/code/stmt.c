@@ -1,3 +1,4 @@
+#include "base/util.h"
 #include "priv.h"
 #include <llvm-c/Core.h>
 #include <stdio.h>
@@ -17,6 +18,25 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     return;
   switch (s->kind) {
   case NY_S_VAR: {
+    bool dest = s->as.var.is_destructure;
+    bool parallel = (s->as.var.names.len == s->as.var.exprs.len) && !dest;
+
+    // Evaluate first expression if not parallel (broadcast or destructure)
+    LLVMValueRef first_val = NULL;
+    if (!parallel && s->as.var.exprs.len > 0) {
+      first_val = gen_expr(cg, scopes, *depth, s->as.var.exprs.data[0]);
+    }
+
+    fun_sig *gs = NULL;
+    if (dest) {
+      gs = lookup_fun(cg, "get");
+      if (!gs) {
+        fprintf(stderr, "Error: destructuring requires 'get' function\n");
+        cg->had_error = 1;
+        return;
+      }
+    }
+
     for (size_t i = 0; i < s->as.var.names.len; i++) {
       const char *n = s->as.var.names.data[i];
       LLVMValueRef slot;
@@ -54,7 +74,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         else {
           slot = LLVMAddGlobal(cg->module, cg->type_i64, n);
           LLVMSetInitializer(slot, LLVMConstInt(cg->type_i64, 0, false));
-          binding b = {strdup(n), slot, NULL};
+          binding b = {ny_strdup(n), slot, NULL};
           vec_push(&cg->global_vars, b);
         }
       } else {
@@ -77,13 +97,27 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
           }
         }
       }
-      LLVMValueRef val = gen_expr(cg, scopes, *depth, s->as.var.expr);
+
+      LLVMValueRef target_val = NULL;
+      if (parallel) {
+        target_val = gen_expr(cg, scopes, *depth, s->as.var.exprs.data[i]);
+      } else if (dest) {
+        // Tagged integer index: i -> (i << 1) | 1
+        uint64_t tagged_idx = ((uint64_t)i << 1) | 1;
+        LLVMValueRef idx_val = LLVMConstInt(cg->type_i64, tagged_idx, false);
+        target_val =
+            LLVMBuildCall2(cg->builder, gs->type, gs->value,
+                           (LLVMValueRef[]){first_val, idx_val}, 2, "");
+      } else {
+        target_val = first_val;
+      }
+
       if (!cg->builder) {
         fprintf(stderr, "ERROR: NULL builder in NY_S_VAR\n");
         exit(1);
       }
-      if (!val) {
-        fprintf(stderr, "ERROR: NULL val in NY_S_VAR\n");
+      if (!target_val) {
+        fprintf(stderr, "ERROR: NULL target_val in NY_S_VAR\n");
         exit(1);
       }
       if (!slot) {
@@ -96,7 +130,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         exit(1);
       }
       if (!LLVMGetBasicBlockTerminator(cur_block)) {
-        LLVMBuildStore(cg->builder, val, slot);
+        LLVMBuildStore(cg->builder, target_val, slot);
       }
     }
     break;
@@ -377,22 +411,30 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     break;
   case NY_S_BREAK: {
     LLVMBasicBlockRef db = NULL;
-    for (ssize_t i = (ssize_t)*depth; i >= 0; i--)
+    for (ssize_t i = (ssize_t)*depth; i >= 0; i--) {
+      for (ssize_t d = (ssize_t)scopes[i].defers.len - 1; d >= 0; --d)
+        gen_stmt(cg, scopes, (size_t *)&i, scopes[i].defers.data[d], func_root,
+                 false);
       if (scopes[i].break_bb) {
         db = scopes[i].break_bb;
         break;
       }
+    }
     if (db)
       LLVMBuildBr(cg->builder, db);
     break;
   }
   case NY_S_CONTINUE: {
     LLVMBasicBlockRef db = NULL;
-    for (ssize_t i = (ssize_t)*depth; i >= 0; i--)
+    for (ssize_t i = (ssize_t)*depth; i >= 0; i--) {
+      for (ssize_t d = (ssize_t)scopes[i].defers.len - 1; d >= 0; --d)
+        gen_stmt(cg, scopes, (size_t *)&i, scopes[i].defers.data[d], func_root,
+                 false);
       if (scopes[i].continue_bb) {
         db = scopes[i].continue_bb;
         break;
       }
+    }
     if (db)
       LLVMBuildBr(cg->builder, db);
     break;
@@ -416,10 +458,13 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     break;
   }
   case NY_S_MODULE: {
+    const char *prev = cg->current_module_name;
+    cg->current_module_name = s->as.module.name;
     for (size_t i = 0; i < s->as.module.body.len; ++i) {
       gen_stmt(cg, scopes, depth, s->as.module.body.data[i], func_root,
                is_tail);
     }
+    cg->current_module_name = prev;
     break;
   }
   case NY_S_EXPORT:

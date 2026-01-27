@@ -2,6 +2,7 @@
  * @file util.c
  * @brief Unified utilities for Nytrix compiler (File I/O + String)
  */
+#define _XOPEN_SOURCE 500
 #include "base/util.h"
 #include "base/common.h"
 #include <errno.h>
@@ -18,8 +19,6 @@
 #ifdef __linux__
 #include <linux/limits.h>
 #endif
-
-// --- File Utils ---
 
 char *ny_read_file(const char *path) {
   if (!path)

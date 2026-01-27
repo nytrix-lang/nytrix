@@ -1,6 +1,9 @@
+use std.core
 
-fn all_add(x, y) {
-   return x + y
+;; Global definitions (Test)
+
+fn all_add(x, y){
+   x + y
 }
 
 def all_value = 7

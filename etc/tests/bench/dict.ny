@@ -1,13 +1,13 @@
 use std.io
+use std.os.time
 use std.collections.dict
 use std.core
 use std.strings.str
 
-print("Debug Dict")
-def d = dict()
-print("Created dict")
-use std.os.time
+;; Dict (Benchmark)
+;; Tests dictionary insertion, retrieval, and iteration performance.
 
+def d = dict()
 def t_start = ticks()
 def i = 0
 while(i < 1000){
