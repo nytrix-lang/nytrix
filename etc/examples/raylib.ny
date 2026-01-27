@@ -1,5 +1,8 @@
-;; Testing Raylib FFI Using Low Level ffi functions ...
-use std.os.ffi
+#!/bin/ny
+;; Raylib FFI (Example) - LowLevel ffi calls
+
+use std.os.ffi *
+use std.str.io *
 
 def h = dlopen("/usr/lib/libraylib.so", 2)
 if(h != 0){
@@ -19,5 +22,5 @@ if(h != 0){
    dlclose(h)
    print("✓ Raylib window closed")
 } else {
-   print("Raylib not found")
+   print("[/usr/lib/libraylib.so] Raylib not found")
 }

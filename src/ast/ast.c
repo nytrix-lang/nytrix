@@ -1,6 +1,11 @@
 #include "ast/ast.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 expr_t *expr_new(arena_t *arena, expr_kind_t kind, token_t tok) {
+  if (!arena) {
+    NY_LOG_DEBUG("expr_new called with NULL arena!\n");
+  }
   expr_t *e = (expr_t *)arena_alloc(arena, sizeof(expr_t));
   e->kind = kind;
   e->tok = tok;
@@ -9,168 +14,22 @@ expr_t *expr_new(arena_t *arena, expr_kind_t kind, token_t tok) {
 }
 
 stmt_t *stmt_new(arena_t *arena, stmt_kind_t kind, token_t tok) {
+  if (!arena) {
+    NY_LOG_DEBUG("stmt_new called with NULL arena!\n");
+  }
   stmt_t *s = (stmt_t *)arena_alloc(arena, sizeof(stmt_t));
+
   s->kind = kind;
   s->tok = tok;
   memset(&s->as, 0, sizeof(s->as));
   return s;
 }
 
-static void free_expr(expr_t *e);
-static void free_stmt(stmt_t *s);
-
-static void free_expr_list(ny_expr_list *l) {
-  for (size_t i = 0; i < l->len; ++i)
-    free_expr(l->data[i]);
-  vec_free(l);
-}
-
-static void free_stmt_list(ny_stmt_list *l) {
-  for (size_t i = 0; i < l->len; ++i)
-    free_stmt(l->data[i]);
-  vec_free(l);
-}
-
-static void free_expr(expr_t *e) {
-  if (!e)
-    return;
-  switch (e->kind) {
-  case NY_E_UNARY:
-    free_expr(e->as.unary.right);
-    break;
-  case NY_E_BINARY:
-    free_expr(e->as.binary.left);
-    free_expr(e->as.binary.right);
-    break;
-  case NY_E_LOGICAL:
-    free_expr(e->as.logical.left);
-    free_expr(e->as.logical.right);
-    break;
-  case NY_E_CALL:
-    free_expr(e->as.call.callee);
-    for (size_t i = 0; i < e->as.call.args.len; ++i)
-      free_expr(e->as.call.args.data[i].val);
-    vec_free(&e->as.call.args);
-    break;
-  case NY_E_MEMCALL:
-    free_expr(e->as.memcall.target);
-    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
-      free_expr(e->as.memcall.args.data[i].val);
-    vec_free(&e->as.memcall.args);
-    break;
-  case NY_E_INDEX:
-    free_expr(e->as.index.target);
-    free_expr(e->as.index.start);
-    free_expr(e->as.index.stop);
-    free_expr(e->as.index.step);
-    break;
-  case NY_E_LAMBDA:
-  case NY_E_FN:
-    for (size_t i = 0; i < e->as.lambda.params.len; ++i)
-      free_expr(e->as.lambda.params.data[i].def);
-    vec_free(&e->as.lambda.params);
-    free_stmt(e->as.lambda.body);
-    break;
-  case NY_E_LIST:
-  case NY_E_TUPLE:
-  case NY_E_SET:
-    free_expr_list(&e->as.list_like);
-    break;
-  case NY_E_DICT:
-    for (size_t i = 0; i < e->as.dict.pairs.len; ++i) {
-      free_expr(e->as.dict.pairs.data[i].key);
-      free_expr(e->as.dict.pairs.data[i].value);
-    }
-    vec_free(&e->as.dict.pairs);
-    break;
-  case NY_E_ASM:
-    free_expr_list(&e->as.as_asm.args);
-    break;
-  case NY_E_COMPTIME:
-    free_stmt(e->as.comptime_expr.body);
-    break;
-  case NY_E_FSTRING:
-    for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
-      if (e->as.fstring.parts.data[i].kind == NY_FSP_EXPR)
-        free_expr(e->as.fstring.parts.data[i].as.e);
-    }
-    vec_free(&e->as.fstring.parts);
-    break;
-  default:
-    break;
-  }
-}
-
-static void free_stmt(stmt_t *s) {
-  if (!s)
-    return;
-  switch (s->kind) {
-  case NY_S_MODULE:
-    free_stmt_list(&s->as.module.body);
-    break;
-  case NY_S_BLOCK:
-    free_stmt_list(&s->as.block.body);
-    break;
-  case NY_S_VAR:
-    vec_free(&s->as.var.names);
-    free_expr(s->as.var.expr);
-    break;
-  case NY_S_EXPR:
-    free_expr(s->as.expr.expr);
-    break;
-  case NY_S_IF:
-    free_expr(s->as.iff.test);
-    free_stmt(s->as.iff.conseq);
-    free_stmt(s->as.iff.alt);
-    break;
-  case NY_S_WHILE:
-    free_expr(s->as.whl.test);
-    free_stmt(s->as.whl.body);
-    break;
-  case NY_S_FOR:
-    free_expr(s->as.fr.iterable);
-    free_stmt(s->as.fr.body);
-    break;
-  case NY_S_TRY:
-    free_stmt(s->as.tr.body);
-    free_stmt(s->as.tr.handler);
-    break;
-  case NY_S_FUNC:
-    for (size_t i = 0; i < s->as.fn.params.len; ++i)
-      free_expr(s->as.fn.params.data[i].def);
-    vec_free(&s->as.fn.params);
-    free_stmt(s->as.fn.body);
-    break;
-  case NY_S_RETURN:
-    free_expr(s->as.ret.value);
-    break;
-  case NY_S_DEFER:
-    free_stmt(s->as.de.body);
-    break;
-  case NY_S_LAYOUT:
-    vec_free(&s->as.layout.fields);
-    break;
-  case NY_S_MATCH:
-    free_expr(s->as.match.test);
-    for (size_t i = 0; i < s->as.match.arms.len; ++i) {
-      for (size_t j = 0; j < s->as.match.arms.data[i].patterns.len; ++j) {
-        free_expr(s->as.match.arms.data[i].patterns.data[j]);
-      }
-      vec_free(&s->as.match.arms.data[i].patterns);
-      free_stmt(s->as.match.arms.data[i].conseq);
-    }
-    vec_free(&s->as.match.arms);
-    free_stmt(s->as.match.default_conseq);
-    break;
-  default:
-    break;
-  }
-}
+void expr_free_members(expr_t *e) { (void)e; }
+void stmt_free_members(stmt_t *s) { (void)s; }
 
 void program_free(program_t *prog, arena_t *arena) {
-  if (prog) {
-    free_stmt_list(&prog->body);
-  }
+  (void)prog;
   arena_free(arena);
   free(arena);
 }
@@ -393,13 +252,14 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
       if (i < s->as.var.names.len - 1)
         append(buf, len, cap, ",");
     }
-    append(buf, len, cap,
-           "],\"undef\":%s,\"expr_t\":", s->as.var.is_undef ? "true" : "false");
-    if (s->as.var.expr)
-      dump_expr(s->as.var.expr, buf, len, cap);
-    else
-      append(buf, len, cap, "null");
-    append(buf, len, cap, "}");
+    append(buf, len, cap, "],\"undef\":%s,\"exprs\":[",
+           s->as.var.is_undef ? "true" : "false");
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i) {
+      dump_expr(s->as.var.exprs.data[i], buf, len, cap);
+      if (i < s->as.var.exprs.len - 1)
+        append(buf, len, cap, ",");
+    }
+    append(buf, len, cap, "]}");
     break;
   case NY_S_EXPR:
     append(buf, len, cap, "{\"type\":\"expr_stmt\",\"expr_t\":");

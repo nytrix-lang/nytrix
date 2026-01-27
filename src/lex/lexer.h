@@ -33,7 +33,9 @@ typedef enum token_kind {
   NY_T_LAYOUT,
   NY_T_MATCH,
   NY_T_EMBED,
+  NY_T_EXTERN,
   NY_T_DEF,
+  NY_T_MUT,
   NY_T_NIL,
   NY_T_UNDEF,
   NY_T_MODULE,
@@ -76,6 +78,7 @@ typedef enum token_kind {
   NY_T_DOT,
   NY_T_ELLIPSIS,
   NY_T_QUESTION,
+  NY_T_ERROR,
 } token_kind;
 
 typedef struct token_t {

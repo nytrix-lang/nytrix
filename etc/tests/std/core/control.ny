@@ -1,7 +1,9 @@
-use std.io
-; Control flow tests
+use std.core *
 
-def x = 1
+;; Control Flow (Test)
+;; Tests conditional logic including if, elif, and else statements, along with nesting.
+
+mut x = 1
 if x == 1 {
    assert(true, "if works")
 } else {
@@ -46,4 +48,4 @@ if true {
    }
 }
 
-print("Control flow tests passed")
+print("✓ std.core.control tests passed")

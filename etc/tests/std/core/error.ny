@@ -1,7 +1,11 @@
-use std.io
-; Test std.core.error - Error handling and assertions
-use std.core.error
-use std.core
+use std.os.time *
+use std.core.error *
+use std.core *
+use std.str.io *
+use std.core.reflect *
+
+;; Core Error (Test)
+;; Tests error handling and try-catch mechanisms.
 
 print("Testing std.core.error...")
 
@@ -11,39 +15,40 @@ assert(1 == 1, "equality assertion")
 assert(5 > 3, "comparison assertion")
 
 ; AssertEqual
-asse__eq(42, 42, "integers equal")
-asse__eq("hello", "hello", "strings equal")
-asse__eq([1, 2, 3], [1, 2, 3], "lists equal")
+assert_eq(42, 42, "integers equal")
+assert_eq("hello", "hello", "strings equal")
+assert_eq("hello", "hello", "strings equal")
+print("Testing list eq:")
+def l1 = [1, 2, 3]
+def l2 = [1, 2, 3]
+print(f"l1: {l1} l2: {l2}")
+print(f"eq: {eq(l1, l2)}")
+assert_eq(l1, l2, "lists equal")
 
-fn test_catch(){
-   def caught = false
+print("Testing catch...")
+mut caught = false
+try {
+   panic("boom")
+} catch e {
+   caught = true
+   if(e != "boom"){ panic("wrong error message") }
+}
+assert(caught, "should have caught panic")
+
+print("Testing nested catch...")
+mut code = 0
+try {
    try {
-      panic("boom")
+      panic("inner")
    } catch e {
-      caught = true
-      if(e != "boom"){ panic("wrong error message") }
+      code = 1
+      panic("outer")
    }
-   assert(caught, "should have caught panic")
-}
-
-fn test_catch_nested(){
-   def code = 0
-   try {
-      try {
-         panic("inner")
-      } catch e {
-         code = 1
-         panic("outer")
-      }
-   } catch e2 {
-      if(code == 1 && e2 == "outer"){
-         code = 2
-      }
+} catch e2 {
+   if(code == 1 && e2 == "outer"){
+      code = 2
    }
-   asse__eq(code, 2, "nested catch")
 }
-
-test_catch()
-test_catch_nested()
+assert_eq(code, 2, "nested catch")
 
 print("✓ std.core.error tests passed")

@@ -41,19 +41,15 @@ def norm(p,tab3):
 def main():
     dirs=sys.argv[1:] or ["src","std","etc/examples"]
     fs=git_files(dirs) or walk_files(dirs)
-
     ch=[f for f in fs if os.path.splitext(f)[1] in {".c",".h"}]
     for c in chunks(ch,256):
         subprocess.run(["clang-format","-i",*c],check=False)
-
     changed=0
     for f in fs:
         if os.path.splitext(f)[1] in EXTS:
             changed+=norm(f,True)
-
     if os.path.isfile("Makefile"):
         changed+=norm("Makefile",False)
-
     return 0
 
 if __name__=="__main__": raise SystemExit(main())

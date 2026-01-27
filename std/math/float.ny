@@ -1,7 +1,7 @@
 ;; Keywords: math float
 ;; Math Float module.
 
-use std.core
+use std.core *
 module std.math.float (
    _box, float, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil,
    round, abs, nan, inf, is_nan, is_inf
@@ -9,7 +9,7 @@ module std.math.float (
 
 fn _box(bits){
    "Internal: box raw float bits into a Nytrix float object."
-   def p = __malloc(8)
+   def p = malloc(8)
    store64(p - 8, 110)
    store64(p, bits)
    p
@@ -44,7 +44,7 @@ fn trunc(x){
 fn is_float(x){
    "Check if value is a float."
    if(!is_ptr(x)){ return false }
-   def tag = load64(x, -8)
+   mut tag = load64(x, -8)
    tag == 110 || tag == 221
 }
 
@@ -85,9 +85,9 @@ fn feq(a, b){
 
 fn floor(x){
    "Return the largest integer less than or equal to x."
-   def i = __flt_to_int(x)
+   def i = int(x)
    def f_i = float(i)
-   if(__flt_gt(f_i, x)){ ; i > x
+   if(fgt(f_i, x)){ ; i > x
       i - 1
    } else {
       i
@@ -96,9 +96,9 @@ fn floor(x){
 
 fn ceil(x){
    "Return the smallest integer greater than or equal to x."
-   def i = __flt_to_int(x)
+   def i = int(x)
    def f_i = float(i)
-   if(__flt_lt(f_i, x)){ ; i < x
+   if(flt(f_i, x)){ ; i < x
       i + 1
    } else {
       i
@@ -107,9 +107,9 @@ fn ceil(x){
 
 fn round(x){
    "Round to nearest integer."
-   def half = float(5)
+   mut half = float(5)
    half = fdiv(half, float(10)) ; 0.5
-   if(__flt_lt(x, float(0))){
+   if(flt(x, float(0))){
       ceil(fsub(float(x), half))
    } else {
       floor(fadd(float(x), half))
@@ -130,12 +130,12 @@ fn abs(x){
 
 fn nan(){
    "Box a quiet NaN."
-   __flt_div(float(0), float(0))
+   fdiv(float(0), float(0))
 }
 
 fn inf(){
    "Box infinity."
-   __flt_div(float(1), float(0))
+   fdiv(float(1), float(0))
 }
 
 fn is_nan(x){
@@ -156,3 +156,4 @@ fn is_inf(x){
    def inf_bits = 0x7ff0000000000000
    return (bits & mask) == (inf_bits & inf_bits)
 }
+

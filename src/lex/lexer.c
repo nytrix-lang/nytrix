@@ -53,7 +53,7 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.lexeme = lx->src + start;
   tok.len = lx->pos - start;
   // For simplicity, line/col are at the END of token_t or current.
-  // Ideally we should track sta__line/col. But parsing error reporting usually
+  // Ideally we should track start_line/col. But parsing error reporting usually
   // handles "current token_t" pointing to valid location.
   tok.line = lx->line;
   tok.col = lx->col - (int)tok.len; // Approximate start col
@@ -120,6 +120,8 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_ELIF;
     if (len == 5 && memcmp(start, "embed", 5) == 0)
       return NY_T_EMBED;
+    if (len == 6 && memcmp(start, "extern", 6) == 0)
+      return NY_T_EXTERN;
     break;
   case 'f':
     if (len > 1) {
@@ -162,6 +164,8 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_LAYOUT;
     break;
   case 'm':
+    if (len == 3 && memcmp(start, "mut", 3) == 0)
+      return NY_T_MUT;
     if (len == 6 && memcmp(start, "module", 6) == 0)
       return NY_T_MODULE;
     break;
@@ -200,6 +204,7 @@ token_t lexer_next(lexer_t *lx) {
     tok.len = 0;
     tok.line = lx->line;
     tok.col = lx->col;
+    tok.filename = lx->filename;
     return tok;
   }
   char c = advance(lx);
@@ -245,6 +250,8 @@ token_t lexer_next(lexer_t *lx) {
     }
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.kind = identifier_type(tok.lexeme, tok.len);
+    NY_LOG_V3("Lexer: identifier '%.*s' resolved to kind %d\n", (int)tok.len,
+              tok.lexeme, tok.kind);
     return tok;
   }
   if (isdigit(c)) {

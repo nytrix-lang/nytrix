@@ -21,7 +21,7 @@ A compact, predictable surface.
 
 ## Core syntax
 
-```
+```ny
 fn name(param=default, ...){ ... }
 if (cond) { ... } elif (cond) { ... } else { ... }
 while (cond) { ... }
@@ -40,12 +40,12 @@ Examples will follow.
 	* Module alias: `use std.math as m`, `use lib as l`, or `use ./util/time as t` (then call `m.sqrt`).
 	* Import all exports: `use std.math *` (brings exported names into scope).
 	* Import list: `use std.math (sqrt, pow as p)`.
-* **Resolution**: `std.*` always maps to `src/std/`, `lib`/`l` map to `src/lib/`, and bare/relative paths resolve from the importing file's directory (current directory first, then std/lib). Keep aliasing short so you know the origin at a glance.
+* **Resolution**: `std.*` always maps to `src/std/`, and bare/relative paths resolve from the importing file's directory (current directory first, then std/lib). Keep aliasing short so you know the origin at a glance.
 * **Namespacing**:
 ```nytrix
 module tui (bold, italic, dim, underline, color)
 ```
-Use `module name ( ... )` to declare exports; the list can be comma-separated. Use `module name *` to export all module-level functions and vars. You can also write `module Name` with no parentheses to define a module with no explicit export list; it treats the rest of the file as the module body. Functions and vars declared outside a module remain local to the file unless explicitly exported.
+Use `module name ( ... )` to declare exports; the list can be comma-separated. Use `module name *` to export all module-level functions and vars. You can also write `module name` with no parentheses to define a module with no explicit export list; it treats the rest of the file as the module body. Functions and vars declared outside a module remain local to the file unless explicitly exported.
 
 ## Operators
 

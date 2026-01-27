@@ -1,6 +1,10 @@
+#include "base/common.h"
+#include "base/util.h"
 #include "priv.h"
+#include "rt/shared.h"
 #include "std_symbols.h"
 #include <alloca.h>
+#include <ctype.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -10,6 +14,246 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+
+static void add_extern_sig(codegen_t *cg, const char *name, int arity) {
+  if (!cg || !name || !*name || arity < 0)
+    return;
+  for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
+    if (strcmp(cg->fun_sigs.data[i].name, name) == 0)
+      return;
+  }
+  LLVMTypeRef *pt = NULL;
+  if (arity > 0)
+    pt = alloca(sizeof(LLVMTypeRef) * (size_t)arity);
+  for (int i = 0; i < arity; i++)
+    pt[i] = cg->type_i64;
+  LLVMTypeRef ft =
+      LLVMFunctionType(cg->type_i64, pt, (unsigned)arity, 0);
+  LLVMValueRef f = LLVMGetNamedFunction(cg->module, name);
+  if (!f)
+    f = LLVMAddFunction(cg->module, name, ft);
+  fun_sig sig = {.name = ny_strdup(name),
+                 .type = ft,
+                 .value = f,
+                 .stmt_t = NULL,
+                 .arity = arity,
+                 .is_variadic = false,
+                 .is_extern = true,
+                 .link_name = ny_strdup(name)};
+  vec_push(&cg->fun_sigs, sig);
+}
+
+static bool handle_extern_all_args(codegen_t *cg, ny_call_arg_list *args) {
+  if (!args || args->len != 1)
+    return false;
+  expr_t *arg = args->data[0].val;
+  if (!arg || arg->kind != NY_E_LIST)
+    return false;
+  for (size_t i = 0; i < arg->as.list_like.len; i++) {
+    expr_t *item = arg->as.list_like.data[i];
+    const char *name = NULL;
+    int arity = 0;
+    if (item->kind == NY_E_LITERAL &&
+        item->as.literal.kind == NY_LIT_STR) {
+      name = item->as.literal.as.s.data;
+      arity = 0;
+    } else if ((item->kind == NY_E_LIST || item->kind == NY_E_TUPLE) &&
+               item->as.list_like.len == 2) {
+      expr_t *n = item->as.list_like.data[0];
+      expr_t *a = item->as.list_like.data[1];
+      if (n->kind == NY_E_LITERAL && n->as.literal.kind == NY_LIT_STR &&
+          a->kind == NY_E_LITERAL && a->as.literal.kind == NY_LIT_INT) {
+        name = n->as.literal.as.s.data;
+        arity = (int)a->as.literal.as.i;
+      }
+    }
+    if (!name || arity < 0) {
+      fprintf(stderr,
+              "Error: extern_all expects list of names or [name, arity]\n");
+      cg->had_error = 1;
+      return true;
+    }
+    add_extern_sig(cg, name, arity);
+  }
+  return true;
+}
+
+void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
+  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
+          tok.filename ? tok.filename : "unknown", tok.line, tok.col, name);
+  cg->had_error = 1;
+
+  const char *best = NULL;
+  int best_d = 100;
+  // Check funs
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    const char *cand = cg->fun_sigs.data[i].name;
+    int l1 = strlen(name);
+    int l2 = strlen(cand);
+    if (abs(l1 - l2) > 3)
+      continue;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    l2 = strlen(base);
+    int d[32][32];
+    if (l1 > 30)
+      l1 = 30;
+    if (l2 > 30)
+      l2 = 30;
+    for (int x = 0; x <= l1; x++)
+      d[x][0] = x;
+    for (int y = 0; y <= l2; y++)
+      d[0][y] = y;
+    for (int x = 1; x <= l1; x++) {
+      for (int y = 1; y <= l2; y++) {
+        int cost = (name[x - 1] == base[y - 1]) ? 0 : 1;
+        int dist_del = d[x - 1][y] + 1;
+        int dist_ins = d[x][y - 1] + 1;
+        int c_cost = d[x - 1][y - 1] + cost;
+        int min = dist_del < dist_ins ? dist_del : dist_ins;
+        if (c_cost < min)
+          min = c_cost;
+        d[x][y] = min;
+      }
+    }
+    int dist = d[l1][l2];
+    if (dist < best_d && dist < 4) {
+      best_d = dist;
+      best = cand;
+    }
+  }
+  // Check globals
+  for (size_t i = 0; i < cg->global_vars.len; ++i) {
+    const char *cand = cg->global_vars.data[i].name;
+    int l1 = strlen(name);
+    int l2 = strlen(cand);
+    if (abs(l1 - l2) > 3)
+      continue;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    l2 = strlen(base);
+    int d[32][32];
+    if (l1 > 30)
+      l1 = 30;
+    if (l2 > 30)
+      l2 = 30;
+    for (int x = 0; x <= l1; x++)
+      d[x][0] = x;
+    for (int y = 0; y <= l2; y++)
+      d[0][y] = y;
+    for (int x = 1; x <= l1; x++) {
+      for (int y = 1; y <= l2; y++) {
+        int cost = (name[x - 1] == base[y - 1]) ? 0 : 1;
+        int dist_del = d[x - 1][y] + 1;
+        int dist_ins = d[x][y - 1] + 1;
+        int c_cost = d[x - 1][y - 1] + cost;
+        int min = dist_del < dist_ins ? dist_del : dist_ins;
+        if (c_cost < min)
+          min = c_cost;
+        d[x][y] = min;
+      }
+    }
+    int dist = d[l1][l2];
+    if (dist < best_d && dist < 4) {
+      best_d = dist;
+      best = cand;
+    }
+  }
+  if (best)
+    fprintf(stderr, "       Did you mean '%s'?\n", best);
+}
+
+LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
+                         ny_param_list params, stmt_t *body, bool is_variadic,
+                         const char *name_hint) {
+  /* Capture All Visible Variables (scopes[1..depth]) */
+  binding_list captures = {0};
+  for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
+    for (size_t j = 0; j < scopes[i].vars.len; j++) {
+      vec_push(&captures, scopes[i].vars.data[j]);
+    }
+  }
+  char name[64];
+  if (name_hint && strncmp(name_hint, "__lambda", 8) == 0) {
+    snprintf(name, sizeof(name), "%s_%d", name_hint, cg->lambda_count++);
+  } else {
+    snprintf(name, sizeof(name), "%s_%d", name_hint ? name_hint : "__lambda",
+             cg->lambda_count++);
+  }
+  stmt_t sfn = {.kind = NY_S_FUNC,
+                .as.fn = {.name = strdup(name),
+                          .params = params,
+                          .body = body,
+                          .is_variadic = is_variadic}};
+  scope sc[64] = {0};
+  // Check if we actually need environment. name_hint check for __defer is
+  // heuristic.
+  bool uses_env = captures.len > 0;
+  if (name_hint && strcmp(name_hint, "__defer") == 0)
+    uses_env = true;
+
+  gen_func(cg, &sfn, name, sc, 0, uses_env ? &captures : NULL);
+  free((void *)sfn.as.fn.name);
+  LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
+  LLVMValueRef fn_ptr_tagged = LLVMBuildOr(
+      cg->builder, LLVMBuildPtrToInt(cg->builder, lf, cg->type_i64, ""),
+      LLVMConstInt(cg->type_i64, 2, false), "");
+
+  if (!uses_env) {
+    /* Standard function (tag 2) if no captures */
+    vec_free(&captures);
+    return fn_ptr_tagged;
+  }
+  /* Create Env */
+  fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
+  if (!malloc_sig) {
+    fprintf(stderr, "Error: __malloc required for closures\n");
+    cg->had_error = 1;
+    return LLVMConstInt(cg->type_i64, 0, false);
+  }
+  LLVMValueRef env_alloc_size = LLVMConstInt(
+      cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
+  LLVMValueRef env_ptr =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){env_alloc_size}, 1, "env");
+  LLVMValueRef env_raw = LLVMBuildIntToPtr(
+      cg->builder, env_ptr, LLVMPointerType(cg->type_i64, 0), "env_raw");
+  for (size_t i = 0; i < captures.len; i++) {
+    LLVMValueRef slot_val =
+        LLVMBuildLoad2(cg->builder, cg->type_i64, captures.data[i].value, "");
+    LLVMValueRef dst = LLVMBuildGEP2(
+        cg->builder, cg->type_i64, env_raw,
+        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
+        "");
+    LLVMBuildStore(cg->builder, slot_val, dst);
+  }
+  /* Create Closure Object [Tag=105 | Code | Env] */
+  LLVMValueRef cls_size =
+      LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
+  LLVMValueRef cls_ptr =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){cls_size}, 1, "closure");
+  LLVMValueRef cls_raw = LLVMBuildIntToPtr(
+      cg->builder, cls_ptr, LLVMPointerType(cg->type_i64, 0), "");
+  /* Set Tag -8 */
+  LLVMValueRef tag_addr = LLVMBuildGEP2(
+      cg->builder, LLVMInt8TypeInContext(cg->ctx),
+      LLVMBuildBitCast(cg->builder, cls_raw,
+                       LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0), ""),
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
+  LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 105, false),
+                 LLVMBuildBitCast(cg->builder, tag_addr,
+                                  LLVMPointerType(cg->type_i64, 0), ""));
+  /* Store Code at 0 */
+  LLVMBuildStore(cg->builder, fn_ptr_tagged, cls_raw);
+  /* Store Env at 8 */
+  LLVMValueRef env_store_addr = LLVMBuildGEP2(
+      cg->builder, cg->type_i64, cls_raw,
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
+  LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
+  vec_free(&captures);
+  return cls_ptr;
+}
 
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
   LLVMValueRef is_none =
@@ -45,9 +289,9 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // checking (__check_oob) would forbid accessing header fields (like length
   // at -16). By leaving magics as 0, is_heap_ptr returns false, allowing
   // access.
-  // *(uint64_t*)(obj_data) = 0x545249584E5954ULL; // NY_MAGIC1
-  // *(uint64_t*)(obj_data + 8) = total_len - 128; // Raw capacity
-  // *(uint64_t*)(obj_data + 16) = 0x4E59545249584EULL; // NY_MAGIC2
+  *(uint64_t *)(obj_data) = NY_MAGIC1;
+  *(uint64_t *)(obj_data + 8) = (uint64_t)final_len; // Capacity
+  *(uint64_t *)(obj_data + 16) = NY_MAGIC2;
   *(uint64_t *)(obj_data + 48) =
       ((uint64_t)final_len << 1) | 1; // Length at p-16 (tagged)
   *(uint64_t *)(obj_data + 56) = 241; // Tag at p-8 (TAG_STR)
@@ -55,7 +299,8 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   memcpy(obj_data + header_size, final_s, final_len);
   obj_data[header_size + final_len] = '\0';
   // Write Tail
-  // *(uint64_t*)(obj_data + header_size + final_len + 1) = NY_MAGIC3
+  uint64_t magic3 = NY_MAGIC3;
+  memcpy(obj_data + header_size + final_len + 1, &magic3, sizeof(magic3));
   LLVMTypeRef arr_ty =
       LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
   LLVMValueRef g = LLVMAddGlobal(cg->module, arr_ty, ".str");
@@ -192,10 +437,13 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     LLVMBuildRet(bld, LLVMConstInt(tcg.type_i64, 1, false));
   LLVMExecutionEngineRef ee;
   LLVMCreateJITCompilerForModule(&ee, mod, 3, NULL);
+  // EE now owns the module, so prevent codegen_dispose from freeing it
+  tcg.module = NULL;
   int64_t (*f)(void) = (int64_t (*)(void))LLVMGetFunctionAddress(ee, "ctm");
   int64_t res = f ? f() : 0;
   LLVMDisposeExecutionEngine(ee);
-  LLVMContextDispose(ctx);
+  codegen_dispose(
+      &tcg); // This will dispose the context since llvm_ctx_owned=true
   if ((res & 1) == 0) {
     fprintf(stderr, "Error: comptime must return an int64 (tagged int)\n");
     cg->had_error = 1;
@@ -264,90 +512,37 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       }
       return val;
     }
-    fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
-            e->tok.filename ? e->tok.filename : "unknown", e->tok.line,
-            e->tok.col, e->as.ident.name);
-    cg->had_error = 1;
-    // Suggest
-    const char *best = NULL;
-    int best_d = 100;
-    // Check funs
-    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-      const char *cand = cg->fun_sigs.data[i].name;
-      int l1 = strlen(e->as.ident.name);
-      int l2 = strlen(cand);
-      if (abs(l1 - l2) > 3)
-        continue;
-      const char *dot = strrchr(cand, '.');
-      const char *base = dot ? dot + 1 : cand;
-      l2 = strlen(base);
-      int d[32][32];
-      if (l1 > 30)
-        l1 = 30;
-      if (l2 > 30)
-        l2 = 30;
-      for (int x = 0; x <= l1; x++)
-        d[x][0] = x;
-      for (int y = 0; y <= l2; y++)
-        d[0][y] = y;
-      for (int x = 1; x <= l1; x++) {
-        for (int y = 1; y <= l2; y++) {
-          int cost = (e->as.ident.name[x - 1] == base[y - 1]) ? 0 : 1;
-          int dist_del = d[x - 1][y] + 1;
-          int dist_ins = d[x][y - 1] + 1;
-          int c_cost = d[x - 1][y - 1] + cost;
-          int min = dist_del < dist_ins ? dist_del : dist_ins;
-          if (c_cost < min)
-            min = c_cost;
-          d[x][y] = min;
-        }
-      }
-      int dist = d[l1][l2];
-      if (dist < best_d && dist < 4) {
-        best_d = dist;
-        best = cand;
-      }
+
+    /* Fallback: try dynamic global lookup (e.g. x -> get(globals(), "x")) */
+    fun_sig *getter = lookup_fun(cg, "get");
+    if (!getter)
+      getter = lookup_fun(cg, "std.core.get");
+    if (!getter)
+      getter = lookup_fun(cg, "std.core.reflect.get");
+    fun_sig *globals_f = lookup_fun(cg, "globals");
+    if (!globals_f)
+      globals_f = lookup_fun(cg, "std.core.primitives.globals");
+    if (!globals_f)
+      globals_f = lookup_fun(cg, "std.core.reflect.globals");
+    if (!globals_f)
+      globals_f = lookup_fun(cg, "std.core.globals");
+    if (getter && globals_f && strcmp(e->as.ident.name, "get") != 0 &&
+        strcmp(e->as.ident.name, "globals") != 0 &&
+        strcmp(e->as.ident.name, "is_int") != 0 &&
+        strcmp(e->as.ident.name, "is_ptr") != 0 &&
+        strcmp(e->as.ident.name, "is_none") != 0 &&
+        strncmp(e->as.ident.name, "__", 2) != 0) {
+      LLVMValueRef g = LLVMBuildCall2(cg->builder, globals_f->type,
+                                      globals_f->value, NULL, 0, "g_ptr");
+      LLVMValueRef name_global =
+          const_string_ptr(cg, e->as.ident.name, strlen(e->as.ident.name));
+      LLVMValueRef name_ptr =
+          LLVMBuildLoad2(cg->builder, cg->type_i64, name_global, "");
+      return LLVMBuildCall2(cg->builder, getter->type, getter->value,
+                            (LLVMValueRef[]){g, name_ptr}, 2, "g_val");
     }
-    // Check globals
-    for (size_t i = 0; i < cg->global_vars.len; ++i) {
-      const char *cand = cg->global_vars.data[i].name;
-      int l1 = strlen(e->as.ident.name);
-      int l2 = strlen(cand);
-      if (abs(l1 - l2) > 3)
-        continue;
-      const char *dot = strrchr(cand, '.');
-      const char *base = dot ? dot + 1 : cand;
-      l2 = strlen(base);
-      int d[32][32];
-      if (l1 > 30)
-        l1 = 30;
-      if (l2 > 30)
-        l2 = 30;
-      for (int x = 0; x <= l1; x++)
-        d[x][0] = x;
-      for (int y = 0; y <= l2; y++)
-        d[0][y] = y;
-      for (int x = 1; x <= l1; x++) {
-        for (int y = 1; y <= l2; y++) {
-          int cost = (e->as.ident.name[x - 1] == base[y - 1]) ? 0 : 1;
-          int dist_del = d[x - 1][y] + 1;
-          int dist_ins = d[x][y - 1] + 1;
-          int c_cost = d[x - 1][y - 1] + cost;
-          int min = dist_del < dist_ins ? dist_del : dist_ins;
-          if (c_cost < min)
-            min = c_cost;
-          d[x][y] = min;
-        }
-      }
-      int dist = d[l1][l2];
-      if (dist < best_d && dist < 4) {
-        best_d = dist;
-        best = cand;
-      }
-    }
-    if (best)
-      fprintf(stderr, "       Did you mean '%s'?\n", best);
-    cg->had_error = 1;
+
+    report_undef_symbol(cg, e->as.ident.name, e->tok);
     return LLVMConstInt(cg->type_i64, 0, false);
   }
   case NY_E_UNARY: {
@@ -386,6 +581,17 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     int sig_arity = 0;
     bool has_sig = false;
     bool skip_target = false;
+    if (c && c->callee->kind == NY_E_IDENT) {
+      const char *n = c->callee->as.ident.name;
+      if (strcmp(n, "extern_all") == 0 || strcmp(n, "__extern_all") == 0) {
+        if (handle_extern_all_args(cg, &c->args))
+          return LLVMConstInt(cg->type_i64, 0, false);
+      }
+    }
+    if (mc && mc->name && strcmp(mc->name, "extern_all") == 0) {
+      if (handle_extern_all_args(cg, &mc->args))
+        return LLVMConstInt(cg->type_i64, 0, false);
+    }
     if (mc) {
       char buf[128];
       const char *prefixes[] = {"dict_",  "list_", "str_",    "set_", "bytes_",
@@ -474,58 +680,34 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
         sig_found = lookup_fun(cg, mc->name);
     static_call_handling:;
       if (!sig_found) {
+        /* Fallback: try dynamic property lookup (e.g. obj.method -> get(obj,
+         * "method")) */
+        fun_sig *getter = lookup_fun(cg, "get");
+        if (!getter)
+          getter = lookup_fun(cg, "std.core.get");
+        if (!getter)
+          getter = lookup_fun(cg, "std.core.reflect.get");
+        if (!getter)
+          getter = lookup_fun(cg, "dict_get");
+        if (getter && strcmp(mc->name, "get") != 0) {
+          LLVMValueRef target_val = gen_expr(cg, scopes, depth, mc->target);
+          LLVMValueRef name_global =
+              const_string_ptr(cg, mc->name, strlen(mc->name));
+          LLVMValueRef name_ptr =
+              LLVMBuildLoad2(cg->builder, cg->type_i64, name_global, "");
+          callee = LLVMBuildCall2(cg->builder, getter->type, getter->value,
+                                  (LLVMValueRef[]){target_val, name_ptr}, 2,
+                                  "dyn_func");
+          ft = NULL; /* Trigger generic call handling */
+          has_sig = false;
+          goto skip_static_handling;
+        }
+
         const char *tname = (mc && mc->target->kind == NY_E_IDENT)
                                 ? mc->target->as.ident.name
                                 : "<expr_t>";
         fprintf(stderr, "Error: function %s.%s not found\n", tname, mc->name);
-        // Suggest corrections
-        const char *best_match = NULL;
-        int best_dist = 100;
-        for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-          const char *candidate = cg->fun_sigs.data[i].name;
-          // Simple distance check: Levenshtein or substring
-          // We'll implemented a simple distance inline to avoid large function
-          int len1 = strlen(mc->name);
-          int len2 = strlen(candidate);
-          if (abs(len1 - len2) > 3)
-            continue;
-          // Substring match for namespacing suggestions?
-          // Or just check suffix matching?
-          const char *dot = strrchr(candidate, '.');
-          const char *base = dot ? dot + 1 : candidate;
-          // Levenshtein on base name
-          int d[32][32]; // Max name length 31 for suggestion optimization
-          int l1 = strlen(mc->name);
-          int l2 = strlen(base);
-          if (l1 > 30)
-            l1 = 30;
-          if (l2 > 30)
-            l2 = 30;
-          for (int x = 0; x <= l1; x++)
-            d[x][0] = x;
-          for (int y = 0; y <= l2; y++)
-            d[0][y] = y;
-          for (int x = 1; x <= l1; x++) {
-            for (int y = 1; y <= l2; y++) {
-              int cost = (mc->name[x - 1] == base[y - 1]) ? 0 : 1;
-              int a = d[x - 1][y] + 1;
-              int b = d[x][y - 1] + 1;
-              int cost_sub = d[x - 1][y - 1] + cost;
-              int min = a < b ? a : b;
-              if (cost_sub < min)
-                min = cost_sub;
-              d[x][y] = min;
-            }
-          }
-          int dist = d[l1][l2];
-          if (dist < best_dist && dist < 4) {
-            best_dist = dist;
-            best_match = candidate;
-          }
-        }
-        if (best_match) {
-          fprintf(stderr, "       Did you mean '%s'?\n", best_match);
-        }
+        /* ... Levenshtein matches ... */
         cg->had_error = 1;
         return LLVMConstInt(cg->type_i64, 0, false);
       }
@@ -535,6 +717,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       is_variadic = sig_found->is_variadic;
       has_sig = true;
       callee = fv;
+    skip_static_handling:;
     } else {
       const char *name =
           (c->callee->kind == NY_E_IDENT) ? c->callee->as.ident.name : NULL;
@@ -758,14 +941,14 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_DICT: {
     fun_sig *ds = lookup_fun(cg, "dict");
     if (!ds)
-      ds = lookup_fun(cg, "std.collections.dict.dict");
+      ds = lookup_fun(cg, "std.core.dict.dict");
     fun_sig *ss = lookup_fun(cg, "dict_set");
     if (!ss)
-      ss = lookup_fun(cg, "std.collections.dict.dict_set");
+      ss = lookup_fun(cg, "std.core.dict.dict_set");
     if (!ds || !ss) {
       fprintf(stderr, "Error: dict requires dict/dict_set (searched 'dict', "
-                      "'std.collections.dict.dict', 'dict_set', "
-                      "'std.collections.dict.dict_set')\n");
+                      "'std.core.dict.dict', 'dict_set', "
+                      "'std.core.dict.dict_set')\n");
       cg->had_error = 1;
       return LLVMConstInt(cg->type_i64, 0, false);
     }
@@ -782,6 +965,30 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
               gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].value)},
           3, "");
     return dl;
+  }
+  case NY_E_SET: {
+    fun_sig *ss = lookup_fun(cg, "set");
+    if (!ss)
+      ss = lookup_fun(cg, "std.core.set.set");
+    fun_sig *as = lookup_fun(cg, "set_add");
+    if (!as)
+      as = lookup_fun(cg, "std.core.set.set_add");
+    if (!ss || !as) {
+      fprintf(stderr, "Error: set requires set/set_add\n");
+      cg->had_error = 1;
+      return LLVMConstInt(cg->type_i64, 0, false);
+    }
+    LLVMValueRef sl = LLVMBuildCall2(
+        cg->builder, ss->type, ss->value,
+        (LLVMValueRef[]){LLVMConstInt(
+            cg->type_i64, ((uint64_t)e->as.list_like.len << 1) | 1, false)},
+        1, "");
+    for (size_t i = 0; i < e->as.list_like.len; i++)
+      LLVMBuildCall2(cg->builder, as->type, as->value,
+                     (LLVMValueRef[]){sl, gen_expr(cg, scopes, depth,
+                                                   e->as.list_like.data[i])},
+                     2, "");
+    return sl;
   }
   case NY_E_LOGICAL: {
     bool and = strcmp(e->as.logical.op, "&&") == 0;
@@ -856,12 +1063,12 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fun_sig *cs = lookup_fun(cg, "__str_concat"),
             *ts = lookup_fun(cg, "__to_str");
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
-      fstring_pa__t p = e->as.fstring.parts.data[i];
+      fstring_part_t p = e->as.fstring.parts.data[i];
       LLVMValueRef pv;
       if (p.kind == NY_FSP_STR) {
-        LLVMValueRef pa__runtime_global =
+        LLVMValueRef part_runtime_global =
             const_string_ptr(cg, p.as.s.data, p.as.s.len);
-        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, pa__runtime_global, "");
+        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, part_runtime_global, "");
       } else {
         pv = LLVMBuildCall2(
             cg->builder, ts->type, ts->value,
@@ -875,81 +1082,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_LAMBDA:
   case NY_E_FN: {
     /* Capture All Visible Variables (scopes[1..depth]) */
-    binding_list captures = {0};
-    for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
-      for (size_t j = 0; j < scopes[i].vars.len; j++) {
-        vec_push(&captures, scopes[i].vars.data[j]);
-      }
-    }
-    char name[64];
-    snprintf(name, sizeof(name), "__lambda_%d", cg->lambda_count++);
-    stmt_t sfn = {.kind = NY_S_FUNC,
-                  .as.fn = {.name = strdup(name),
-                            .params = e->as.lambda.params,
-                            .body = e->as.lambda.body,
-                            .is_variadic = e->as.lambda.is_variadic}};
-    scope sc[64] = {0};
-    gen_func(cg, &sfn, name, sc, 0, &captures);
-    free((void *)sfn.as.fn.name);
-    LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
-    LLVMValueRef fn_ptr_tagged = LLVMBuildOr(
-        cg->builder, LLVMBuildPtrToInt(cg->builder, lf, cg->type_i64, ""),
-        LLVMConstInt(cg->type_i64, 2, false), "");
-    if (captures.len == 0 && e->kind != NY_E_LAMBDA) {
-      /* Standard function (tag 2) if no captures */
-      vec_free(&captures);
-      return fn_ptr_tagged;
-    }
-    /* Create Env */
-    fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
-    if (!malloc_sig) {
-      fprintf(stderr, "Error: __malloc required for closures\n");
-      cg->had_error = 1;
-      return LLVMConstInt(cg->type_i64, 0, false);
-    }
-    LLVMValueRef env_alloc_size = LLVMConstInt(
-        cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
-    LLVMValueRef env_ptr =
-        LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
-                       (LLVMValueRef[]){env_alloc_size}, 1, "env");
-    LLVMValueRef env_raw = LLVMBuildIntToPtr(
-        cg->builder, env_ptr, LLVMPointerType(cg->type_i64, 0), "env_raw");
-    for (size_t i = 0; i < captures.len; i++) {
-      LLVMValueRef slot_val =
-          LLVMBuildLoad2(cg->builder, cg->type_i64, captures.data[i].value, "");
-      LLVMValueRef dst = LLVMBuildGEP2(
-          cg->builder, cg->type_i64, env_raw,
-          (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
-          "");
-      LLVMBuildStore(cg->builder, slot_val, dst);
-    }
-    /* Create Closure Object [Tag=105 | Code | Env] */
-    LLVMValueRef cls_size =
-        LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
-    LLVMValueRef cls_ptr =
-        LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
-                       (LLVMValueRef[]){cls_size}, 1, "closure");
-    LLVMValueRef cls_raw = LLVMBuildIntToPtr(
-        cg->builder, cls_ptr, LLVMPointerType(cg->type_i64, 0), "");
-    /* Set Tag -8 */
-    LLVMValueRef tag_addr = LLVMBuildGEP2(
-        cg->builder, LLVMInt8TypeInContext(cg->ctx),
-        LLVMBuildBitCast(cg->builder, cls_raw,
-                         LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0),
-                         ""),
-        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
-    LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 105, false),
-                   LLVMBuildBitCast(cg->builder, tag_addr,
-                                    LLVMPointerType(cg->type_i64, 0), ""));
-    /* Store Code at 0 */
-    LLVMBuildStore(cg->builder, fn_ptr_tagged, cls_raw);
-    /* Store Env at 8 */
-    LLVMValueRef env_store_addr = LLVMBuildGEP2(
-        cg->builder, cg->type_i64, cls_raw,
-        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
-    LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
-    vec_free(&captures);
-    return cls_ptr;
+    return gen_closure(cg, scopes, depth, e->as.lambda.params,
+                       e->as.lambda.body, e->as.lambda.is_variadic, "__lambda");
   }
   case NY_E_MATCH: {
     LLVMValueRef old_store = cg->result_store_val;

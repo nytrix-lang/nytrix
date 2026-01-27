@@ -1,3 +1,4 @@
+#include "base/util.h"
 #include "lex/lexer.h"
 #include "priv.h"
 #include <readline/readline.h>
@@ -228,7 +229,7 @@ static void append_n(char **buf, size_t *size, size_t *cap, const char *s,
   (*buf)[*size] = '\0';
 }
 
-void repl_highlight_line_ex(const char *line, int cursor_pos) {
+void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
   if (!line || !*line)
     return;
 
@@ -346,14 +347,47 @@ void repl_highlight_line_ex(const char *line, int cursor_pos) {
 
     append_n(&db, &db_size, &db_cap, line + i++, 1);
   }
-  fputs(db, stdout);
+
+  // Output with indentation and per-line clearing
+  const char *p = db;
+  int first = 1;
+  while (*p) {
+    const char *nl = strchr(p, '\n');
+    if (nl) {
+      if (!first) {
+        for (int j = 0; j < indent; j++)
+          fputc(' ', stdout);
+      }
+      fwrite(p, 1, (size_t)(nl - p), stdout);
+      printf("\033[K\n");
+      p = nl + 1;
+      first = 0;
+    } else {
+      if (!first) {
+        for (int j = 0; j < indent; j++)
+          fputc(' ', stdout);
+      }
+      fputs(p, stdout);
+      printf("\033[K");
+      break;
+    }
+  }
 }
 
-void repl_highlight_line(const char *line) { repl_highlight_line_ex(line, -1); }
+void repl_highlight_line(const char *line) {
+  repl_highlight_line_ex(line, -1, 0);
+}
 
 // Optimization: cache visible prompt length
+static int g_last_cursor_row = 0;
+static int g_last_total_rows = 0;
 static char *last_prompt = NULL;
 static int last_visible_len = 0;
+
+void repl_reset_redisplay(void) {
+  g_last_cursor_row = 0;
+  g_last_total_rows = 0;
+}
 
 void repl_redisplay(void) {
   if (!is_color_enabled()) {
@@ -369,7 +403,7 @@ void repl_redisplay(void) {
       free(last_prompt);
     if (clean_prompt)
       free(clean_prompt);
-    last_prompt = strdup(rl_display_prompt);
+    last_prompt = ny_strdup(rl_display_prompt);
     clean_prompt = malloc(strlen(rl_display_prompt) + 1);
 
     last_visible_len = 0;
@@ -389,29 +423,56 @@ void repl_redisplay(void) {
     *out = '\0';
   }
 
-  // Move to start of line, print prompt and highlighted buffer
-  fputc('\r', stdout);
-  fputs(clean_prompt, stdout);
-  repl_highlight_line_ex(rl_line_buffer, rl_point);
-  fputs("\033[K", stdout); // Clear rest of line
+  // 1. Move cursor to the start of Line 0
+  if (g_last_cursor_row > 0) {
+    printf("\033[%dA", g_last_cursor_row);
+  }
+  printf("\r");
 
-  // Calculate actual visible distance to move back.
-  // We must account for any character expansions (like tabs -> spaces)
-  // both before and after the cursor (rl_point).
-  int visible_total = 0;
-  int visible_point = 0;
+  // 2. Clear from current position to bottom of screen (clears old multi-line
+  // content)
+  printf("\033[J");
+
+  // 3. Render everything from the start (Prompt + Highlighted Buffer)
+  fputs(clean_prompt, stdout);
+  repl_highlight_line_ex(rl_line_buffer, rl_point, last_visible_len);
+
+  // 4. Calculate coordinates of the cursor within the new buffer
+  int total_newlines = 0;
+  int cursor_newlines = 0;
+  int cursor_col = 0;
+
   for (int i = 0; rl_line_buffer[i]; i++) {
-    int width = (rl_line_buffer[i] == '\t') ? 2 : 1;
-    visible_total += width;
-    if (i < rl_point) {
-      visible_point += width;
+    if (rl_line_buffer[i] == '\n') {
+      total_newlines++;
+      if (i < rl_point) {
+        cursor_newlines++;
+        cursor_col = 0;
+      }
+    } else {
+      int width = (rl_line_buffer[i] == '\t') ? 2 : 1;
+      if (i < rl_point) {
+        cursor_col += width;
+      }
     }
   }
 
-  int move_back = visible_total - visible_point;
-  if (move_back > 0) {
-    printf("\033[%dD", move_back);
+  // 5. Move cursor back to its logical row/col.
+  // We are currently at the bottom of the buffer.
+  int move_up = total_newlines - cursor_newlines;
+  if (move_up > 0) {
+    printf("\033[%dA", move_up);
   }
+
+  printf("\r");
+  int h_pos = last_visible_len + cursor_col;
+  if (h_pos > 0) {
+    printf("\033[%dC", h_pos);
+  }
+
+  // Update tracking state
+  g_last_cursor_row = cursor_newlines;
+  g_last_total_rows = total_newlines;
 
   fflush(stdout);
 }

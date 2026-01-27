@@ -51,6 +51,8 @@ typedef struct {
   int color_mode;     // -1 auto, 0 never, 1 always
 
   bool repl_plain;
+  VEC(char *) link_dirs;
+  VEC(char *) link_libs;
 
   // Runtime args
   char **args;

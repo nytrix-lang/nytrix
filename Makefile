@@ -7,9 +7,14 @@ PROFILE ?= 0
 PREFIX ?= /usr
 DESTDIR ?=
 BUILD_DIR ?= build
+LOG_DIR   ?= $(BUILD_DIR)/logs
 LLVM_CONFIG ?= llvm-config
 
 MAKEFLAGS += -j$(shell nproc) --no-print-directory
+
+# Protect build tools from user environment leaks
+unexport LD_PRELOAD
+export ASAN_OPTIONS=detect_leaks=0
 
 BIN_NAME := ny
 BIN       := $(BUILD_DIR)/$(BIN_NAME)
@@ -30,10 +35,13 @@ LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core native mcjit)
 BEAR := $(shell command -v bear 2>/dev/null)
 
 SANFLAGS :=
+ASAN_LDFLAGS :=
+LD_PRELOAD_ASAN :=
 ifeq ($(SAN),1)
 SANFLAGS += -fsanitize=address,undefined -fno-sanitize-recover=all
+ASAN_LDFLAGS := -fsanitize=address,undefined
+LD_PRELOAD_ASAN := /usr/lib/clang/21/lib/linux/libclang_rt.asan-x86_64.so
 endif
-
 PROFFLAGS :=
 ifeq ($(PROFILE),1)
 PROFFLAGS += -pg
@@ -41,17 +49,17 @@ endif
 
 OPTFLAGS := -O$(OPT)
 
-CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) $(LLVM_CFLAGS) -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
+CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) -I/usr/include -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -march=x86-64 -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
 CFLAGS_DEBUG   := $(CFLAGS_BASE) -O0 -DDEBUG $(SANFLAGS) $(PROFFLAGS)
 CFLAGS_RELEASE := $(CFLAGS_BASE) $(OPTFLAGS) -DNDEBUG $(SANFLAGS) $(PROFFLAGS)
 
-LDFLAGS := $(SANFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(PROFFLAGS)
+LDFLAGS := $(ASAN_LDFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(PROFFLAGS)
 
 # Compiler Sources (Lib)
 # src subdirs
 SRC_COMPILER_DIRS := src/ast src/base src/lex src/code src/repl src/wire
 SRC_COMPILER := $(foreach dir,$(SRC_COMPILER_DIRS),$(wildcard $(dir)/*.c))
-SRC_COMPILER += src/parse/unity.c
+SRC_COMPILER += src/parse/shared.c
 SRC_RUNTIME := src/rt/init.c
 
 # Cmd Sources
@@ -72,40 +80,48 @@ OBJ_CMD_NY_DEBUG     := $(BUILD_DIR)/cmd/ny/main_debug.o
 OBJ_CMD_NY_RELEASE   := $(BUILD_DIR)/cmd/ny/main.o
 OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 
-.PHONY: all bin debug repl lsp ny-lsp help clean test teststd testruntime testbench bench tidy build install uninstall coverage install-man uninstall-man docs
+.PHONY: all bin debug repl lsp ny-lsp help clean test tidy build install uninstall coverage install-man uninstall-man docs
 
-docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(BUILD_DIR)/std_bundle.ny | build
-#	Need python3-markdown
-	@echo "  $(C_CYAN)WEBDOC$(C_RESET) generating documentation at $(BUILD_DIR)/docs/index.html..."
-	@python3 etc/tools/webdoc $(BUILD_DIR)/std_bundle.ny -o $(BUILD_DIR)/docs/index.html
-
-all: tidy bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info
-	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
+all: bin lsp $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so
 
 bin: $(BIN)
+
 debug: $(BIN_DEBUG)
+
 lsp: $(BIN_LSP)
-ny-lsp: $(BIN_LSP)
+
+ny-lsp: lsp
+
+docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(BUILD_DIR)/std_bundle.ny | build
+	@echo "  $(C_CYAN)WEBDOC$(C_RESET) generating documentation at $(BUILD_DIR)/docs/index.html..."
+	@mkdir -p /tmp/nytrix-info
+	@printf "ny mono file:///tmp/nytrix-info/NY.html\nny node file:///tmp/nytrix-info/\nnytrix mono file:///tmp/nytrix-info/NYTRIX.html\nnytrix node file:///tmp/nytrix-info/\n" > /tmp/nytrix-info/htmlxref.cnf
+	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/info/ny.texi -o /tmp/nytrix-info/NY.html
+	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/info/nytrix.texi -o /tmp/nytrix-info/NYTRIX.html
+	@python3 etc/tools/conv etc/info/ny.texi NY --format=md > /tmp/nytrix-info/NY.md
+	@python3 etc/tools/conv etc/info/nytrix.texi NYTRIX --format=md > /tmp/nytrix-info/NYTRIX.md
+	@python3 etc/tools/webdoc $(BUILD_DIR)/std_bundle.ny -o $(BUILD_DIR)/docs
 
 repl: $(BIN) $(BUILD_DIR)/std_bundle.ny
-	@./$(BIN) -i $(ARGS)
+	@$(BIN) -i
 
 help:
 	@echo "\n$(C_CYAN)Nytrix Build System$(C_RESET)"
 	@echo "$(C_GRAY)--------------------------------------------------$(C_RESET)"
-	@echo "$(C_GREEN)make$(C_RESET)                    Build release + std bundle + runtime so"
-	@echo "$(C_GREEN)make bin$(C_RESET)                Build release executable ($(BIN))"
-	@echo "$(C_GREEN)make debug$(C_RESET)              Build debug executable ($(BIN_DEBUG))"
-	@echo "$(C_GREEN)make repl$(C_RESET)               Run REPL (release)"
-	@echo "$(C_GREEN)make test [PAT=regex]$(C_RESET)   Run all test suites"
-	@echo "$(C_GREEN)make teststd$(C_RESET)            Run standard library tests"
-	@echo "$(C_GREEN)make testruntime$(C_RESET)        Run runtime compiler tests"
-	@echo "$(C_GREEN)make testbench$(C_RESET)          Run performance benchmarks"
-	@echo "$(C_GREEN)make install$(C_RESET)            Install to $(PREFIX)"
-	@echo "$(C_GREEN)make clean$(C_RESET)              Remove build artifacts"
-	@echo "$(C_GREEN)make tidy$(C_RESET)               Format code using clang-format"
-	@echo "$(C_GREEN)make docs$(C_RESET)               Generate documentation"
-	@echo "$(C_GREEN)make coverage$(C_RESET)           Build with coverage flags"
+	@echo "$(C_GREEN)make$(C_RESET)                      Build release + std bundle + runtime so"
+	@echo "$(C_GREEN)make bin$(C_RESET)                  Build release executable ($(BIN))"
+	@echo "$(C_GREEN)make debug$(C_RESET)                Build debug executable ($(BIN_DEBUG))"
+	@echo "$(C_GREEN)make repl$(C_RESET)                 Run REPL (release)"
+	@echo "$(C_GREEN)make test$(C_RESET)                 Run performance + unit tests (15s timeout)"
+	@echo "$(C_GREEN)make install$(C_RESET)              Install to $(DESTDIR)$(BINDIR)/$(BIN_NAME)"
+	@echo "$(C_GREEN)make clean$(C_RESET)                Remove build artifacts"
+	@echo "$(C_GREEN)make tidy$(C_RESET)                 Format code using clang-format"
+	@echo "$(C_GREEN)make docs$(C_RESET)                 Generate documentation"
+	@echo ""
+	@echo "$(C_CYAN)Build flags:$(C_RESET)"
+	@echo "  SAN=1        Enable AddressSanitizer"
+	@echo "  PROFILE=1    Enable profiling"
+	@echo "  OPT=N        Optimization level (0-3)"
 	@echo ""
 
 build:
@@ -171,19 +187,19 @@ $(OBJ_CMD_LSP_RELEASE): src/cmd/ny-lsp/main.c | build
 # Link Rules
 $(BUILD_DIR)/libnytrixrt.so: $(OBJ_RUNTIME_SHARED) | build
 	@echo "  $(C_GREEN)LD (shared)$(C_RESET) $@"
-	@$(CC) $(SANFLAGS) -shared -Wl,-soname,libnytrixrt.so -o $@ $(OBJ_RUNTIME_SHARED) -ldl -lpthread $(PROFFLAGS)
+	@$(CC) $(ASAN_LDFLAGS) -shared -Wl,-soname,libnytrixrt.so -o $@ $(OBJ_RUNTIME_SHARED) -ldl -lpthread $(PROFFLAGS)
 
-$(BIN_DEBUG): $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) | build
+$(BIN_DEBUG): $(OBJ_COMPILER_DEBUG) $(OBJ_RUNTIME_DEBUG) $(OBJ_CMD_NY_DEBUG) | build
 	@echo "  $(C_GREEN)LD (debug)$(C_RESET) $@"
-	@$(CC) $(SANFLAGS) $(CFLAGS_DEBUG) -o $@ $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) $(LDFLAGS)
+	@$(CC) $(ASAN_LDFLAGS) -o $@ $(OBJ_DEBUG) $(OBJ_CMD_NY_DEBUG) $(LDFLAGS)
 
 $(BIN): $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) | build
 	@echo "  $(C_GREEN)LD (release)$(C_RESET) $@"
-	@$(CC) $(SANFLAGS) $(CFLAGS_RELEASE) -o $@ $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) $(LDFLAGS)
+	@$(CC) $(ASAN_LDFLAGS) -o $@ $(OBJ_RELEASE) $(OBJ_CMD_NY_RELEASE) $(LDFLAGS)
 
 $(BIN_LSP): $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) | build
 	@echo "  $(C_GREEN)LD (lsp)$(C_RESET) $@"
-	@$(CC) $(CFLAGS_RELEASE) -o $@ $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) $(LDFLAGS)
+	@$(CC) $(ASAN_LDFLAGS) -o $@ $(OBJ_CMD_LSP_RELEASE) $(OBJ_RELEASE) $(LDFLAGS)
 
 BINDIR ?= /bin
 LIBDIR ?= $(PREFIX)/lib
@@ -234,12 +250,10 @@ install-info: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info
 	fi
 
 $(BUILD_DIR)/%.info: etc/info/%.texi | build
-#	@echo "  $(C_GRAY)MAKEINFO$(C_RESET) $<"
 	@makeinfo $< -o $@
 
-$(BUILD_DIR)/%.1: etc/info/%.texi etc/tools/texi2man | build
-#	@echo "  $(C_GRAY)TEXI2MAN$(C_RESET) $<"
-	@python3 etc/tools/texi2man $< $* > $@
+$(BUILD_DIR)/%.1: etc/info/%.texi etc/tools/conv | build
+	@python3 etc/tools/conv $< $* --format=man > $@
 
 uninstall: uninstall-info uninstall-man
 	@echo "  $(C_GRAY)UNINSTALL$(C_RESET) Removing $(BIN_NAME) and ny-lsp from $(DESTDIR)$(BINDIR)"
@@ -261,19 +275,43 @@ uninstall-info:
 	fi
 	@rm -f $(DESTDIR)$(INFODIR)/nytrix.info $(DESTDIR)$(INFODIR)/ny.info
 
-test: $(BIN) $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN)
+$(BUILD_DIR)/rt_debug.o: src/rt/init.c | build
+	@echo "  $(C_GRAY)CC (debug-rt)$(C_RESET) $<"
+	@$(CC) $(CFLAGS_DEBUG) -DNYTRIX_RUNTIME_ONLY -c $< -o $@
 
-teststd: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/tests --bin $(BIN_DEBUG) --pattern "std"
+test: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
+	@mkdir -p $(LOG_DIR)
+	@NYTRIX_ASAN=$(SAN) ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$(CURDIR)/.lsan.supp" NYTRIX_BUILD_STD_PATH=$(BUILD_DIR)/std_bundle.ny NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN_DEBUG) --log-dir $(LOG_DIR)
 
-testruntime: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/tests --bin $(BIN_DEBUG) --pattern "runtime"
+test-all: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
+	@mkdir -p $(LOG_DIR)
+	@NYTRIX_ASAN=$(SAN) ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$(CURDIR)/.lsan.supp" NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN_DEBUG) --log-dir $(LOG_DIR)
 
-testbench: $(BIN) $(BUILD_DIR)/std_bundle.ny
-	@python3 etc/tools/tests --bin $(BIN) --pattern "bench"
-
-bench: testbench
+ifeq ($(SAN),1)
+	@echo ""
+	@if [ -f $(LOG_DIR)/ASAN_SUMMARY.txt ]; then \
+		echo "  $(C_CYAN)ASAN Summary Report:$(C_RESET)"; \
+		cat $(LOG_DIR)/ASAN_SUMMARY.txt | head -20; \
+		echo "  $(C_GRAY)Full report:$(C_RESET) $(LOG_DIR)/ASAN_SUMMARY.txt"; \
+	fi
+	@if ls $(LOG_DIR)/asan/*.* >/dev/null 2>&1; then \
+		echo "  $(C_YELLOW)⚠ ASAN runtime logs found in:$(C_RESET) $(LOG_DIR)/asan/"; \
+	fi
+else ifeq ($(PROFILE),1)
+	@echo "  $(C_CYAN)Generating gprof reports...$(C_RESET)"
+	@mkdir -p $(LOG_DIR)/prof
+	@for gmon in gmon.out etc/tests/**/gmon.out; do \
+		if [ -f "$$gmon" ]; then \
+			base=$$(basename $$(dirname $$gmon)); \
+			gprof $(BIN_DEBUG) $$gmon > $(LOG_DIR)/prof/$$base.txt 2>/dev/null; \
+			rm -f $$gmon; \
+		fi; \
+	done
+	@if ls $(LOG_DIR)/prof/*.txt >/dev/null 2>&1; then \
+		echo "  $(C_GREEN)✓ gprof reports saved to:$(C_RESET) $(LOG_DIR)/prof/"; \
+		ls -1 $(LOG_DIR)/prof/ | head -5; \
+	fi
+endif
 
 coverage:
 	@export IS_CLANG=$$( $(CC) --version 2>&1 | grep -q clang && echo 1 || echo 0 ); \

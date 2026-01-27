@@ -1,24 +1,19 @@
-use std.os.sys
-use std.core
-use std.core.test
-use std.io.fs
+use std.os.sys *
+use std.core.error *
+use std.os.fs *
+
+;; std.os.sys (Test)
+;; Tests errno handling and raw syscall.
 
 print("Testing sys...")
 
-fn test_errno(){
-   def non_existent_file = "/tmp/non_existent_file_12345.tmp"
-   def fd = sys_open(non_existent_file, 0, 0) ; O_RDONLY
-   assert(fd < 0, "sys_open non-existent fails")
-   def err = errno()
-   assert(err != 0, "errno is set after failed syscall")
-}
+def non_existent_file = "/tmp/non_existent_file_12345.tmp"
+def fd = sys_open(non_existent_file, 0, 0)
+assert(fd < 0, "sys_open fails")
+def err = errno()
+assert(err != 0, "errno set")
 
-fn test_syscall_getpid(){
-   def pid = syscall(39) ; SYS_getpid
-   assert(pid > 0, "syscall(SYS_getpid) returns valid pid")
-}
-
-test_errno()
-test_syscall_getpid()
+def pid = syscall(39)
+assert(pid > 0, "syscall getpid")
 
 print("✓ std.os.sys tests passed")

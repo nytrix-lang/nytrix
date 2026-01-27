@@ -1,9 +1,10 @@
 ;; Keywords: core debug
 ;; Core Debug module.
 
-use std.core
-use std.core.reflect
-use std.strings.str
+use std.core *
+use std.core.reflect *
+use std.str.io *
+use std.str *
 module std.core.debug (
    debug_print_val, debug_print
 )
@@ -23,16 +24,17 @@ fn debug_print_val(val){
 
 fn debug_print(...args){
    "Prints a detailed debug representation of one or more values."
-   def xs = args
+   mut xs = args
    if(len(args) == 1){
       def first = get(args, 0)
       if(eq(type(first), "list")){ xs = first }
    }
    def n = len(xs)
-   def i = 0
+   mut i = 0
    while(i < n){
       def v = get(xs, i)
       debug_print_val(v)
       i = i + 1
    }
 }
+

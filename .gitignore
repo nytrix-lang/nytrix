@@ -1,3 +1,10 @@
-build
-.tmp
-etc/cache
+*
+!**/
+!.lsan.supp
+!Makefile
+!.clangd
+!LICENSE
+!docs/**
+!etc/**
+!src/**
+!std/**

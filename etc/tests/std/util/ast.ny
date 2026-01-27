@@ -1,31 +1,21 @@
-use std.io
-use std.util.ast
-use std.core
-use std.core.test
-use std.core.reflect
+use std.util.ast *
+use std.core.error *
+use std.core.reflect *
+
+;; std.util.ast (Test)
+;; Tests basic AST parsing.
 
 print("Testing ast...")
 
-fn test_parse(){
-   def src = "def x = 1"
-   def ast = parse_ast(src)
-   if(!is_list(ast)){
-      use std.util.inspect
-      print("AST Result: ", inspect(ast))
-   }
-   assert(is_list(ast), "ast is list")
-   ; We expect at least one statement
-   if(list_len(ast) > 0){
-      def stmt = get(ast, 0)
-      assert(is_dict(stmt), "stmt is dict")
-      ; Check if it has 'kind' or 'type'
-      ; The JSON structure depends on ast_json.c
-      ; Assuming reasonable names.
-      ; Just check it's not empty for now.
-      assert(len(stmt) > 0, "stmt not empty")
-   }
-}
+def src = "def x = 1"
+def ast = parse_ast(src)
 
-test_parse()
+assert(is_list(ast), "ast is list")
+
+if(list_len(ast) > 0){
+ def stmt = get(ast, 0)
+ assert(is_dict(stmt), "stmt is dict")
+ assert(len(stmt) > 0, "stmt not empty")
+}
 
 print("✓ std.util.ast tests passed")

@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include "base/util.h"
 #include "parse/parser.h"
 // Mock LSP Server using the same parser_t as the compiler.
 #include <ctype.h>
@@ -7,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 static ssize_t read_exact(int fd, void *buf, size_t len) {
@@ -266,8 +271,8 @@ static bool analyze_text(const char *text, char **out_msg, int *out_line,
   if (out_col)
     *out_col = parser.last_error_col > 0 ? parser.last_error_col - 1 : 0;
   if (out_msg) {
-    *out_msg = strdup(parser.last_error_msg[0] ? parser.last_error_msg
-                                               : "parse error");
+    *out_msg = ny_strdup(parser.last_error_msg[0] ? parser.last_error_msg
+                                                  : "parse error");
   }
   return true;
 }

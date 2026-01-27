@@ -42,7 +42,7 @@ and a self-hosting standard library.
 @chapter Introduction
 Nytrix is a minimalist systems language with a small C core and a self-hosting standard library. It provides low-level control and predictable performance via LLVM.
 
-For information on using the @command{ny} compiler and interpreter tool, please refer to the @ref{Top, , ny Manual, ny}.
+For information on using the @command{ny} compiler and interpreter tool, please refer to the @code{ny} manual.
 
 @node Language Reference
 @chapter Language Reference
@@ -116,13 +116,11 @@ Semicolon (@code{;}) for single-line. Triple-quotes (@code{"""} or @code{'''}) f
 @code{embed("path")} loads file as byte array.
 @item asm
 @code{asm("ir", "constraints", args...)} for inline LLVM.
-@item layout
-@code{layout L (f: type, ...)} for C-style structs.
 @end table
 
 @node Runtime
 @chapter Runtime
-64-bit tagged values (LSB=1: integer, LSB=0: pointer). Manual memory: @code{rt_malloc}, @code{rt_free}, @code{rt_realloc}. OS interop via @code{rt_syscall} and FFI (@code{std.os.ffi}).
+64-bit tagged values (LSB=1: integer, LSB=0: pointer). Manual memory: @code{__malloc}, @code{__free}, @code{__realloc}. OS interop via @code{__syscall} and FFI (@code{std.os.ffi}).
 
 @node Indices
 @chapter Indices

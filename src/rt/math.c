@@ -1,11 +1,11 @@
 #include "rt/shared.h"
 
-static uint64_t ___rng_state = 0x123456789ABCDEF0ULL;
-static int ___rng_forced_prng = 0;
+static uint64_t __rng_state = 0x123456789ABCDEF0ULL;
+static int __rng_forced_prng = 0;
 
 int64_t __srand(int64_t s) {
-  ___rng_state = (uint64_t)(s >> 1);
-  ___rng_forced_prng = 1;
+  __rng_state = (uint64_t)(s >> 1);
+  __rng_forced_prng = 1;
   return s;
 }
 
@@ -13,13 +13,13 @@ int64_t __rand64(void) {
   uint64_t val;
   int ok = 0;
 #if defined(__x86_64__)
-  if (!___rng_forced_prng) {
+  if (!__rng_forced_prng) {
     __asm__ volatile("rdrand %0; setc %b1" : "=r"(val), "=q"(ok));
   }
 #endif
   if (!ok) {
-    ___rng_state += 0x9e3779b97f4a7c15ULL;
-    uint64_t z = ___rng_state;
+    __rng_state += 0x9e3779b97f4a7c15ULL;
+    uint64_t z = __rng_state;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
     val = z ^ (z >> 31);
@@ -111,7 +111,7 @@ FLT_CMP(eq, ==)
 // Mixed Math
 int64_t __add(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
-    return a + b - 1;
+    return (int64_t)((uint64_t)a + (uint64_t)b - 1);
   if (is_v_flt(a) || is_v_flt(b))
     return __flt_add(a, b);
   if (is_any_ptr(a) && is_int(b))
@@ -125,7 +125,7 @@ int64_t __add(int64_t a, int64_t b) {
 
 int64_t __sub(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
-    return a - b + 1;
+    return (int64_t)((uint64_t)a - (uint64_t)b + 1);
   if (is_v_flt(a) || is_v_flt(b))
     return __flt_sub(a, b);
   if (is_any_ptr(a) && is_int(b))
@@ -178,11 +178,7 @@ int64_t __eq(int64_t a, int64_t b) {
       return 4;
     if (is_v_flt(a) || is_v_flt(b))
       return __flt_eq(a, b);
-    int64_t ta = *(int64_t *)((char *)(uintptr_t)a - 8);
-    int64_t tb = *(int64_t *)((char *)(uintptr_t)b - 8);
-    int a_is_str = (ta == TAG_STR || ta == TAG_STR_CONST);
-    int b_is_str = (tb == TAG_STR || tb == TAG_STR_CONST);
-    if (a_is_str && b_is_str) {
+    if (is_v_str(a) && is_v_str(b)) {
       int res =
           (strcmp((const char *)(uintptr_t)a, (const char *)(uintptr_t)b) == 0);
       return res ? 2 : 4;

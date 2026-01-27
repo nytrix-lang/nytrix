@@ -1,9 +1,10 @@
 ;; Keywords: net http
 ;; Net Http module.
 
-use std.net.socket
-use std.strings.str
-use std.core
+use std.net.socket *
+use std.core as core
+use std.core.dict as _d
+use std.str *
 module std.net.http (
    _http_parse_url, http_get, http_post, http_put, http_delete, http_get_url,
    http_parse_url, http_parse_query
@@ -11,20 +12,20 @@ module std.net.http (
 
 fn _http_parse_url(url){
    "HTTP helpers (wraps requests.http_get)."
-   def u = url
-   if(startswith(u, "http://")){ u = slice(u, 7, len(u), 1)  }
-   def host = u
-   def path = "/"
+   mut u = url
+   if(startswith(u, "http://")){ u = core.slice(u, 7, len(u), 1)  }
+   mut host = u
+   mut path = "/"
    def idx = find(u, "/")
    if(idx >= 0){
-      host = slice(u, 0, idx, 1)
-      path = slice(u, idx, len(u), 1)
+      host = core.slice(u, 0, idx, 1)
+      path = core.slice(u, idx, len(u), 1)
    }
-   def port = 80
+   mut port = 80
    def cidx = find(host, ":")
    if(cidx >= 0){
-      port = atoi(slice(host, cidx+1, len(host), 1))
-      host = slice(host, 0, cidx, 1)
+      port = atoi(core.slice(host, cidx+1, len(host), 1))
+      host = core.slice(host, 0, cidx, 1)
    }
    return [host, port, path]
 }
@@ -34,7 +35,7 @@ fn http_get(host, port, path){
    def fd = socket_connect(host, port)
    if(fd < 0){ return "" }
    write_socket(fd, f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
-   def res = ""
+   mut res = ""
    while(1){
       def chunk = read_socket(fd, 4096)
       if(len(chunk) == 0){ break }
@@ -49,7 +50,7 @@ fn http_post(host, port, path, data){
    def fd = socket_connect(host, port)
    if(fd < 0){ return "" }
    write_socket(fd, f"POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n{data}")
-   def res = ""
+   mut res = ""
    while(1){
       def chunk = read_socket(fd, 4096)
       if(len(chunk) == 0){ break }
@@ -64,7 +65,7 @@ fn http_put(host, port, path, data){
    def fd = socket_connect(host, port)
    if(fd < 0){ return "" }
    write_socket(fd, f"PUT {path} HTTP/1.1\r\nHost: {host}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n\r\n{data}")
-   def res = ""
+   mut res = ""
    while(1){
       def chunk = read_socket(fd, 4096)
       if(len(chunk) == 0){ break }
@@ -79,7 +80,7 @@ fn http_delete(host, port, path){
    def fd = socket_connect(host, port)
    if(fd < 0){ return "" }
    write_socket(fd, f"DELETE {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
-   def res = ""
+   mut res = ""
    while(1){
       def chunk = read_socket(fd, 4096)
       if(len(chunk) == 0){ break }
@@ -102,20 +103,20 @@ fn http_parse_url(url){
 
 fn http_parse_query(q){
    "Parses a URL query string (e.g., 'a=1&b=2') into a dictionary."
-   def d = dict(16)
+   def d = _d.dict(16)
    if(q==0){ return d  }
-   def i =0  n=len(q)
+   mut i =0  n=len(q)
    while(i<n){
-      def j =i
-      while(j<n && load8(q, j)!=38){ j=j+1  }
-      def part = slice(q, i, j, 1)
+      mut j =i
+      while(j<n && core.load8(q, j)!=38){ j=j+1  }
+      def part = core.slice(q, i, j, 1)
       def eqi = find(part, "=")
       if(eqi >= 0){
-         def k = slice(part, 0, eqi, 1)
-         def v = slice(part, eqi+1, len(part), 1)
-         dict_set(d, k, v)
+         def k = core.slice(part, 0, eqi, 1)
+         def v = core.slice(part, eqi+1, len(part), 1)
+         _d.dict_set(d, k, v)
       } else {
-         dict_set(d, part, 1)
+         _d.dict_set(d, part, 1)
       }
       i = j + 1
    }

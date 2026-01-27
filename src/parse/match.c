@@ -15,11 +15,11 @@ stmt_t *p_parse_match(parser_t *p) {
       match_arm_t arm;
       memset(&arm, 0, sizeof(arm));
       expr_t *first = p_parse_expr(p, 0);
-      vec_push(&arm.patterns, first);
+      vec_push_arena(p->arena, &arm.patterns, first);
       while (1) {
         if (parser_match(p, NY_T_COMMA)) {
           expr_t *pat = p_parse_expr(p, 0);
-          vec_push(&arm.patterns, pat);
+          vec_push_arena(p->arena, &arm.patterns, pat);
           continue;
         }
         if (p->cur.kind == NY_T_ARROW || p->cur.kind == NY_T_COLON ||
@@ -28,7 +28,7 @@ stmt_t *p_parse_match(parser_t *p) {
           break;
         }
         expr_t *pat = p_parse_expr(p, 0);
-        vec_push(&arm.patterns, pat);
+        vec_push_arena(p->arena, &arm.patterns, pat);
       }
       if (parser_match(p, NY_T_ARROW)) {
         if (p->cur.kind == NY_T_LBRACE) {
@@ -40,7 +40,7 @@ stmt_t *p_parse_match(parser_t *p) {
           stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, etok);
           stmt_t *es = stmt_new(p->arena, NY_S_EXPR, etok);
           es->as.expr.expr = e;
-          vec_push(&blk->as.block.body, es);
+          vec_push_arena(p->arena, &blk->as.block.body, es);
           arm.conseq = blk;
         }
       } else if (p->cur.kind == NY_T_LBRACE) {
@@ -50,7 +50,7 @@ stmt_t *p_parse_match(parser_t *p) {
                      NULL);
         arm.conseq = p_parse_block(p);
       }
-      vec_push(&s->as.match.arms, arm);
+      vec_push_arena(p->arena, &s->as.match.arms, arm);
     }
   }
   parser_expect(p, NY_T_RBRACE, "'}'", NULL);

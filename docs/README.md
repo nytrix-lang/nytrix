@@ -1,13 +1,19 @@
 
 # Nytrix
 
-Nytrix is a **minimalist systems language** with a tiny 64-bit core and everything else written in `.ny`. It targets explicit control, predictable performance, and zero-cost abstractions, backed by LLVM.
+Nytrix **Language**.
 
-## Core Model
+> Note: WIP expect breaking changes.
 
-* **Everything in std in Ny**: stdlib, collections, helpers
-* **Opt-in stdlib**: zero overhead unless used
-* **LLVM backend**: JIT and AOT via MCJIT
+## Philosophy
+
+Nytrix aims to stay small and extensible. Not there yet.
+
+* **Compiled**
+* Control > Convenience
+* Simple Semantics
+* Minimal Core
+* Scripting
 
 ## Build
 
@@ -22,10 +28,10 @@ Nytrix is a **minimalist systems language** with a tiny 64-bit core and everythi
 For now, Linux only.
 Tested on Arch Linux x86_64.
 
-### Build compiler
+### Install
 
 ```bash
-make -j$(nproc)
+sudo make install
 ```
 
 ## Usage
@@ -33,29 +39,19 @@ make -j$(nproc)
 ### Repl
 
 ```bash
-./build/ny -i
+ny -i
 ```
-
-Just in time (JIT) Compiled.
 
 ### Run
 
 ```bash
-./build/ny file.ny
+ny etc/examples/matrix.ny
 ```
-
-Ahead of time (AOT) Compiled.
 
 ### Binary
 
 ```bash
-ny -c "print('Hello ELF!')" -o && ./a.out
-```
-
-### Install
-
-```bash
-sudo make install
+ny -c "print('Hello NyELF!')" -o && ./a.out
 ```
 
 ### Docs
@@ -66,20 +62,6 @@ Generate a static local documentation site.
 make docs
 xdg-open build/docs/index.html >/dev/null 2>&1
 ```
-
-## Project Status
-
-> Note: Everything is work in progress. No stable state yet. The standard library is unfinished.
-
-Expect breaking changes.
-
-## Philosophy
-
-* Explicit control over convenience
-* Minimal core, maximal clarity
-* Opt-in features only
-
-Nytrix aims to stay small, fast, and extensible/moddable. Not there yet.
 
 ## License
 

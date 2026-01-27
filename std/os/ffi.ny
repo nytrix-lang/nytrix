@@ -1,164 +1,121 @@
 ;; Keywords: os ffi
 ;; Os Ffi module.
 
-use std.core
+use std.core as core
+use std.core.dict as _d
 module std.os.ffi (
    RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlsym, dlclose, dlerror,
    call0_void, call1_void, call2_void, call3_void, call0, call1, call2, call3, call4, call5,
-   call6, call7, call8, call9, call10, call11, call12, call13, ffi_call
+   call6, call7, call8, call9, call10, call11, call12, call13, ffi_call,
+   bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all
 )
 
-fn RTLD_LAZY(){
-   "dlopen flag: resolve symbols lazily."
-   return 1
-}
+fn RTLD_LAZY(){ "dlopen flag: resolve symbols lazily." return 1 }
+fn RTLD_NOW(){ "dlopen flag: resolve symbols immediately." return 2 }
+fn RTLD_GLOBAL(){ "dlopen flag: make symbols globally available." return 256 }
+fn RTLD_LOCAL(){ "dlopen flag: keep symbols local." return 0 }
 
-fn RTLD_NOW(){
-   "dlopen flag: resolve symbols immediately."
-   return 2
-}
+fn dlopen(path, flags){ "Opens a dynamic library." return __dlopen(path, flags) }
+fn dlsym(handle, symbol){ "Resolves a symbol." return __dlsym(handle, symbol) }
+fn dlclose(handle){ "Closes a library handle." return __dlclose(handle) }
+fn dlerror(){ "Returns the last error." return __dlerror() }
 
-fn RTLD_GLOBAL(){
-   "dlopen flag: make symbols globally available."
-   return 256
-}
+fn call0_void(fptr){ __call0(fptr) }
+fn call1_void(fptr,a){ __call1(fptr,a) }
+fn call2_void(fptr,a,b){ __call2(fptr,a,b) }
+fn call3_void(fptr,a,b,c){ __call3(fptr,a,b,c) }
 
-fn RTLD_LOCAL(){
-   "dlopen flag: keep symbols local."
-   return 0
-}
-
-fn dlopen(path, flags){
-   "Open shared object and return handle or 0."
-   return __dlopen(path, flags)
-}
-
-fn dlsym(handle, name){
-   "Lookup symbol and return function/data pointer as int."
-   return __dlsym(handle, name)
-}
-
-fn dlclose(handle){
-   "Close shared object handle."
-   return __dlclose(handle)
-}
-
-fn dlerror(){
-   "Return last dl error string pointer."
-   return __dlerror()
-}
-
-fn call0_void(fptr){
-   "Call fptr with 0 args and return 0."
-   __call0(fptr)
-   return 0
-}
-
-fn call1_void(fptr,a){
-   "Call fptr with 1 arg and return 0."
-   __call1(fptr,a)
-   return 0
-}
-
-fn call2_void(fptr,a,b){
-   "Call fptr with 2 args and return 0."
-   __call2(fptr,a,b)
-   return 0
-}
-
-fn call3_void(fptr,a,b,c){
-   "Call fptr with 3 args and return 0."
-   __call3(fptr,a,b,c)
-   return 0
-}
-
-fn call0(fptr){
-   "Call fnptr with 0-3 int64 args."
-   return __call0(fptr)
-}
-
-fn call1(fptr,a){
-   "Call fptr with 1 int64 arg."
-   return __call1(fptr,a)
-}
-
-fn call2(fptr,a,b){
-   "Call fptr with 2 int64 args."
-   return __call2(fptr,a,b)
-}
-
-fn call3(fptr,a,b,c){
-   "Call fptr with 3 int64 args."
-   return __call3(fptr,a,b,c)
-}
-
-fn call4(fptr,a,b,c,d){
-   "Call fptr with 4 int64 args."
-   return __call4(fptr,a,b,c,d)
-}
-
-fn call5(fptr,a,b,c,d,e){
-   "Call fptr with 5 int64 args."
-   return __call5(fptr,a,b,c,d,e)
-}
-
-fn call6(fptr,a,b,c,d,e,g){
-   "Call fptr with 6 int64 args."
-   return __call6(fptr,a,b,c,d,e,g)
-}
-
-fn call7(fptr,a,b,c,d,e,g,h){
-   "Call fptr with 7 int64 args."
-   return __call7(fptr,a,b,c,d,e,g,h)
-}
-
-fn call8(fptr,a,b,c,d,e,g,h,i){
-   "Call fptr with 8 int64 args."
-   return __call8(fptr,a,b,c,d,e,g,h,i)
-}
-
-fn call9(fptr,a,b,c,d,e,g,h,i,j){
-   "Call fptr with 9 int64 args."
-   return __call9(fptr,a,b,c,d,e,g,h,i,j)
-}
-
-fn call10(fptr,a,b,c,d,e,g,h,i,j,k){
-   "Call fptr with 10 int64 args."
-   return __call10(fptr,a,b,c,d,e,g,h,i,j,k)
-}
-
-fn call11(fptr,a,b,c,d,e,g,h,i,j,k,l){
-   "Call fptr with 11 int64 args."
-   return __call11(fptr,a,b,c,d,e,g,h,i,j,k,l)
-}
-
-fn call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m){
-   "Call fptr with 12 int64 args."
-   return __call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m)
-}
-
-fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){
-   "Call fptr with 13 int64 args."
-   return __call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n)
-}
+fn call0(fptr){ return __call0(fptr) }
+fn call1(fptr,a){ return __call1(fptr,a) }
+fn call2(fptr,a,b){ return __call2(fptr,a,b) }
+fn call3(fptr,a,b,c){ return __call3(fptr,a,b,c) }
+fn call4(fptr,a,b,c,d){ return __call4(fptr,a,b,c,d) }
+fn call5(fptr,a,b,c,d,e){ return __call5(fptr,a,b,c,d,e) }
+fn call6(fptr,a,b,c,d,e,g){ return __call6(fptr,a,b,c,d,e,g) }
+fn call7(fptr,a,b,c,d,e,g,h){ return __call7(fptr,a,b,c,d,e,g,h) }
+fn call8(fptr,a,b,c,d,e,g,h,i){ return __call8(fptr,a,b,c,d,e,g,h,i) }
+fn call9(fptr,a,b,c,d,e,g,h,i,j){ return __call9(fptr,a,b,c,d,e,g,h,i,j) }
+fn call10(fptr,a,b,c,d,e,g,h,i,j,k){ return __call10(fptr,a,b,c,d,e,g,h,i,j,k) }
+fn call11(fptr,a,b,c,d,e,g,h,i,j,k,l){ return __call11(fptr,a,b,c,d,e,g,h,i,j,k,l) }
+fn call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m){ return __call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m) }
+fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){ return __call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n) }
 
 fn ffi_call(fptr, args){
-   "Call with list args (0-12 supported)."
-   def n = list_len(args)
+   def n = core.list_len(args)
    if(n==0){ return call0(fptr)  }
-   if(n==1){ return call1(fptr, get(args,0))  }
-   if(n==2){ return call2(fptr, get(args,0), get(args,1))  }
-   if(n==3){ return call3(fptr, get(args,0), get(args,1), get(args,2))  }
-   if(n==4){ return call4(fptr, get(args,0), get(args,1), get(args,2), get(args,3))  }
-   if(n==5){ return call5(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4))  }
-   if(n==6){ return call6(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5))  }
-   if(n==7){ return call7(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6))  }
-   if(n==8){ return call8(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7))  }
-   if(n==9){ return call9(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7), get(args,8))  }
-   if(n==10){ return call10(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7), get(args,8), get(args,9))  }
-   if(n==11){ return call11(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7), get(args,8), get(args,9), get(args,10))  }
-   if(n==12){ return call12(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7), get(args,8), get(args,9), get(args,10), get(args,11))  }
-   if(n==13){ return call13(fptr, get(args,0), get(args,1), get(args,2), get(args,3), get(args,4), get(args,5), get(args,6), get(args,7), get(args,8), get(args,9), get(args,10), get(args,11), get(args,12))  }
-   panic("ffi_call supports 0-12 args")
+   if(n==1){ return call1(fptr, core.get(args,0))  }
+   if(n==2){ return call2(fptr, core.get(args,0), core.get(args,1))  }
+   if(n==3){ return call3(fptr, core.get(args,0), core.get(args,1), core.get(args,2))  }
+   if(n==4){ return call4(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3))  }
+   if(n==5){ return call5(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4))  }
+   if(n==6){ return call6(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5))  }
+   if(n==7){ return call7(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6))  }
+   if(n==8){ return call8(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7))  }
+   if(n==9){ return call9(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8))  }
+   if(n==10){ return call10(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8), core.get(args,9))  }
+   if(n==11){ return call11(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8), core.get(args,9), core.get(args,10))  }
+   if(n==12){ return call12(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8), core.get(args,9), core.get(args,10), core.get(args,11))  }
+   if(n==13){ return call13(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8), core.get(args,9), core.get(args,10), core.get(args,11), core.get(args,12))  }
+   panic("ffi_call supports 0-13 args")
+}
+
+fn bind(handle, name){
+   def fptr = dlsym(handle, name)
+   if(fptr != 0){
+      return fn(...args){ return ffi_call(fptr, args) }
+   }
    return 0
+}
+
+fn call_ext(handle, name, ...args){
+   def fptr = dlsym(handle, name)
+   if(fptr != 0){ return ffi_call(fptr, args) }
+   return 0
+}
+
+fn bind_all(handle, names){
+   mut res = _d.dict()
+   mut i = 0 mut n = core.list_len(names)
+   while(i < n){
+      def name = core.get(names, i)
+      def b = bind(handle, name)
+      if(b != 0){ res = core.set_idx(res, name, b) }
+      i += 1
+   }
+   res
+}
+
+fn bind_linked(names){
+   "Binds all `names` from the process default (linked) symbols and returns a dict."
+   bind_all(0, names)
+}
+
+fn import_all(handle, names){
+   mut g = __globals()
+   if(!core.is_dict(g)){
+      g = _d.dict(core.list_len(names) + 8)
+      __set_globals(g)
+   }
+   mut i = 0 mut n = core.list_len(names)
+   while(i < n){
+      def name = core.get(names, i)
+      def b = bind(handle, name)
+      if(b != 0){
+         def new_g = core.set_idx(g, name, b)
+         __set_globals(new_g)
+         g = new_g
+      }
+      i += 1
+   }
+   return true
+}
+
+fn import_linked(names){
+   "Imports all `names` from the process default (linked) symbols into globals."
+   import_all(0, names)
+}
+
+fn extern_all(names){
+   "Registers extern functions by name (or [name, arity]) for linked symbols."
+   0
 }

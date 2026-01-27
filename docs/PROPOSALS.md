@@ -1,6 +1,6 @@
 # Feature Ideas
 
-This document outlines proposed features to enhance Nytrix's ergonomics and systems capabilities without compromising its minimalist philosophy or binary size.
+This document outlines proposed features.
 
 ### `embed` (Compile-time Resources)
 Include binary files directly into the executable data section. Avoids runtime file I/O for static assets.

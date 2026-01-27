@@ -45,14 +45,14 @@ char *repl_read_file(const char *path) {
 char **repl_split_lines(const char *src, size_t *out_count) {
   size_t cap = 16, count = 0;
   char **lines = malloc(cap * sizeof(char *));
-  char *copy = strdup(src);
+  char *copy = ny_strdup(src);
   char *line = strtok(copy, "\n");
   while (line) {
     if (count >= cap) {
       cap *= 2;
       lines = realloc(lines, cap * sizeof(char *));
     }
-    lines[count++] = strdup(line);
+    lines[count++] = ny_strdup(line);
     line = strtok(NULL, "\n");
   }
   free(copy);
@@ -105,25 +105,77 @@ char *repl_assignment_target(const char *src) {
     while (*end && (isalnum((unsigned char)*end) || *end == '_'))
       end++;
     if (end > p)
-      return ny_strndup(p, end - p);
+      return ny_strndup(p, (size_t)(end - p));
   }
-  // Also check for 'x = ...'
+  // Check for 'x = ...' or 'x += ...' etc.
   char *eq = strchr(trimmed, '=');
   if (eq && eq != trimmed) {
-    char *p = trimmed;
-    while (p < eq && isspace((unsigned char)*p))
-      p++;
     char *end = eq - 1;
-    while (end > p && isspace((unsigned char)*end))
+    // Handle compound operators: += -= *= /= %= &= |= ^= <<= >>= != == <= >=
+    if (end >= trimmed && strchr("+-*/%&|^<>!=", *end)) {
+      // It's a compound op or a comparison.
+      // If it's ==, !=, <=, >=, it's a comparison (expression).
+      // If it's +=, -=, etc, it's an assignment (statement).
+      if ((*end == '=' || *end == '!' || *end == '<' || *end == '>') &&
+          (end == trimmed || *(end - 1) != *end)) {
+        // Likely == or != or <= or >=. But wait, <<= has two <.
+        // Simple heuristic: if it's == or !=, it's an expression.
+        if ((*end == '=' || *end == '!') ||
+            (end > trimmed && strchr("<>", *(end - 1)) == 0)) {
+          // Check for '==' or '!='
+          if (*end == '!')
+            return NULL;
+          if (*end == '=' && end > trimmed && *(end - 1) == '=')
+            return NULL;
+          // Comparisons are expressions unless they are used in assignments.
+          // For now, let's keep it simple.
+        }
+      }
       end--;
-    int valid = 1;
-    for (char *c = p; c <= end; c++)
-      if (!isalnum((unsigned char)*c) && *c != '_')
-        valid = 0;
-    if (valid && end >= p)
-      return ny_strndup(p, end - p + 1);
+    }
+    while (end >= trimmed && isspace((unsigned char)*end))
+      end--;
+    if (end < trimmed)
+      return NULL;
+    char *ident_end = end;
+    while (end >= trimmed &&
+           (isalnum((unsigned char)*end) || *end == '_' || *end == '.'))
+      end--;
+    char *ident_start = end + 1;
+    if (ident_end >= ident_start) {
+      // Check if it's a valid identifier (roughly)
+      if (isalnum((unsigned char)*ident_start) || *ident_start == '_') {
+        return ny_strndup(ident_start, (size_t)(ident_end - ident_start + 1));
+      }
+    }
   }
   return NULL;
+}
+
+int is_repl_stmt(const char *src) {
+  char *trimmed = ltrim((char *)src);
+  if (!*trimmed)
+    return 0;
+  if (strchr(src, '{'))
+    return 1;
+  const char *kw[] = {"def ",   "fn ",      "use ",    "module ", "undef ",
+                      "if ",    "while ",   "for ",    "try ",    "return ",
+                      "break",  "continue", "goto ",   "defer ",  "struct ",
+                      "class ", "layout ",  "extern ", NULL};
+  for (int i = 0; kw[i]; i++) {
+    size_t len = strlen(kw[i]);
+    if (strncmp(trimmed, kw[i], len) == 0) {
+      if (kw[i][len - 1] == ' ' || trimmed[len] == '\0' ||
+          isspace((unsigned char)trimmed[len]) || trimmed[len] == '(')
+        return 1;
+    }
+  }
+  char *an = repl_assignment_target(src);
+  if (an) {
+    free(an);
+    return 1;
+  }
+  return 0;
 }
 
 void count_unclosed(const char *src, int *out_paren, int *out_brack,
@@ -209,7 +261,7 @@ int is_persistent_def(const char *src) {
   char *trimmed = ltrim((char *)src);
   return (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "fn ", 3) ||
           !strncmp(trimmed, "use ", 4) || !strncmp(trimmed, "module ", 7) ||
-          strchr(trimmed, '=') != NULL);
+          !strncmp(trimmed, "extern ", 7) || strchr(trimmed, '=') != NULL);
 }
 
 void repl_update_docs(doc_list_t *dl, const char *src) {

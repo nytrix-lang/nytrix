@@ -1,9 +1,9 @@
-;; Keywords: math mod
-;; Math Mod module.
+;; Keywords: math
+;; Math module.
 
-use std.core
-use std.core.reflect
-use std.math.float
+use std.core *
+use std.core.reflect *
+use std.math.float *
 module std.math (
    abs, min, max, pow, mod, clamp, sign, sqrt, gcd, lcm, factorial, lerp
 )
@@ -26,14 +26,14 @@ fn max(a,b){
 
 fn pow(a,b){
    "Return `a` raised to the power of `b` (a^b) using an iterative loop."
-   def res = 1  def i = 0
+   mut res = 1  mut i = 0
    while(i < b){ res = res * a  i = i + 1 }
    return res
 }
 
 fn mod(a,b){
    "Return the remainder of `a` divided by `b`. The result always has the same sign as `b`."
-   def res = a - (a / b) * b
+   mut res = a - (a / b) * b
    if(res < 0){ res = res + abs(b) }
    return res
 }
@@ -55,8 +55,8 @@ fn sign(x){
 fn sqrt(x){
    "Return the square root of `x` using Newton's method (16 iterations)."
    if(x <= 0){ return 0  }
-   def r = x
-   def i = 0
+   mut r = x
+   mut i = 0
    while(i < 16){
       r = (r + x / r) / 2
       i = i + 1
@@ -66,9 +66,10 @@ fn sqrt(x){
 
 fn gcd(a,b){
    "Return the greatest common divisor of `a` and `b`."
-   def x = abs(a)  def y = abs(b)
+   mut x = abs(a)
+   mut y = abs(b)
    while(y != 0){
-      def t = mod(x, y)
+      def t = x % y
       x = y
       y = t
    }
@@ -84,8 +85,8 @@ fn lcm(a,b){
 fn factorial(n){
    "Return the factorial of `n`."
    if(n <= 1){ return 1 }
-   def res = 1
-   def i = 2
+   mut res = 1
+   mut i = 2
    while(i <= n){
       res = res * i
       i = i + 1
@@ -97,3 +98,4 @@ fn lerp(a,b,t){
    "Performs linear interpolation between `a` and `b` using factor `t` (usually 0.0 to 1.0)."
    return a + (b - a) * t
 }
+

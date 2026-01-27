@@ -1,14 +1,14 @@
 ;; Keywords: core alloc
 ;; Core Alloc module.
 
-use std.core
+use std.core *
 module std.core.alloc (
    bump_new, bump_alloc, bump_reset
 )
 
 fn bump_new(cap){
    "Create a new bump allocator with the specified capacity. Returns a state list [buffer, capacity, offset]."
-   def buf = __malloc(cap)
+   def buf = malloc(cap)
    return [buf, cap, 0]
 }
 

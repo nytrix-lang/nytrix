@@ -1,62 +1,22 @@
-use std.core
-use std.io
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
-fn test_modulus_with_inner_parens() {
-   def i = 15
-   if (i + 1) % 16 == 0 {
-      print("[PASS] Modulus with inner parentheses: (i + 1) % 16 == 0")
-      return true
-   }
-   print("[FAIL] Modulus with inner parentheses")
-   return false
-}
+;; Parser operator precedence (Test)
 
-fn test_modulus_with_outer_parens() {
-   def i = 15
-   if ((i + 1) % 16 == 0) {
-      print("[PASS] Modulus with outer parentheses: ((i + 1) % 16 == 0)")
-      return true
-   }
-   print("[FAIL] Modulus with outer parentheses")
-   return false
-}
+def i = 15
+assert((i + 1) % 16 == 0, "mod inner parens")
+assert(((i + 1) % 16) == 0, "mod outer parens")
 
-fn test_modulus_without_parens() {
-   def i = 16
-   if i % 8 == 0 {
-      print("[PASS] Modulus without parentheses: i % 8 == 0")
-      return true
-   }
-   print("[FAIL] Modulus without parentheses")
-   return false
-}
+def j = 16
+assert(j % 8 == 0, "mod no parens")
 
-fn test_complex_expression() {
-   def x = 10
-   def y = 5
-   if (x + y) * 2 % 10 == 0 {
-      print("[PASS] Complex expression: (x + y) * 2 % 10 == 0")
-      return true
-   }
-   print("[FAIL] Complex expression")
-   return false
-}
+def x = 10
+def y = 5
+assert((x + y) * 2 % 10 == 0, "complex precedence")
 
-fn run_all_tests() {
-   print("Parser Operator Precedence Tests")
-   def passed = 0
-   def total = 4
-   if test_modulus_with_inner_parens() { passed = passed + 1 }
-   if test_modulus_with_outer_parens() { passed = passed + 1 }
-   if test_modulus_without_parens() { passed = passed + 1 }
-   if test_complex_expression() { passed = passed + 1 }
-   print("")
-   print(f"Results: {passed}/{total} tests passed")
-   if passed == total {
-      print("✓ All tests PASSED")
-   } else {
-      print(f"✗ {total - passed} tests FAILED")
-   }
-}
-
-run_all_tests()
+print("✓ Parser operator precedence tests passed")

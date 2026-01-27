@@ -1,64 +1,63 @@
-;; Keywords: math timefmt
-;; Math Timefmt module.
+;; Keywords: strings timefmt
+;; Strings Timefmt module.
 
-use std.core
-use std.core.error
-use std.strings.str
-use std.os.ffi
+use std.core *
+use std.math *
+use std.str *
 module std.math.timefmt (
-   format_time
+   _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format_time
 )
 
-def _libc = 0
-def _gmtime_r_fn = 0
-def _strftime_fn = 0
-
-; TODO: remove libc ffi and use syscalls instead
-
-fn _ensure_libc(){
-   if(_libc != 0){ return _libc }
-   def handle = dlopen("libc.so.6", RTLD_LAZY)
-   if(handle == 0){ handle = dlopen("libc.so", RTLD_LAZY) }
-   if(handle == 0){ handle = dlopen("/usr/lib/libc.dylib", RTLD_LAZY) }
-   if(handle == 0){ handle = dlopen("/lib/x86_64-linux-gnu/libc.so.6", RTLD_LAZY) }
-   if(handle == 0){ panic("timefmt: failed to load libc") }
-   _libc = handle
-   return handle
+fn _is_leap(y){
+   "Return true if year y is a leap year."
+   if((y % 4) != 0){ return 0 }
+   if((y % 100) != 0){ return 1 }
+   if((y % 400) != 0){ return 0 }
+   return 1
 }
 
-fn _ensure_fns(){
-   _ensure_libc()
-   if(_gmtime_r_fn == 0){
-      _gmtime_r_fn = dlsym(_libc, "gmtime_r")
-      if(_gmtime_r_fn == 0){ panic("timefmt: gmtime_r not available") }
-   }
-   if(_strftime_fn == 0){
-      _strftime_fn = dlsym(_libc, "strftime")
-      if(_strftime_fn == 0){ panic("timefmt: strftime not available") }
-   }
+fn _days_in_month(y, m){
+   "Internal: days in month m for year y."
+   if(m==1 || m==3 || m==5 || m==7 || m==8 || m==10 || m==12){ return 31  }
+   if(m==4 || m==6 || m==9 || m==11){ return 30  }
+   if(m==2){ return 28 + _is_leap(y)  }
+   return 30
+}
+
+fn _days_in_year(y){
+   "Internal: days in year y."
+   return 365 + _is_leap(y)
+}
+
+fn _pad2(n){
+   "Internal: zero-pad integer to 2 digits."
+   return pad_start(to_str(n), 2, "0")
+}
+
+fn _pad4(n){
+   "Internal: zero-pad integer to 4 digits."
+   return pad_start(to_str(n), 4, "0")
 }
 
 fn format_time(ts){
-   "Formats Unix timestamp `ts` into a UTC string (YYYY-MM-DD HH:MM:SS) using libc **strftime**."
-   _ensure_fns()
-   def raw = to_int(ts)
-   def tbuf = __malloc(8)
-   store64(tbuf, raw, 0)
-   def tm_buf = __malloc(128)
-   def got = call2(_gmtime_r_fn, tbuf, tm_buf)
-   __free(tbuf)
-   if(got == 0){
-      __free(tm_buf)
-      panic("timefmt: gmtime_r failed")
+   "Format unix seconds to YYYY-MM-DD HH:MM:SS (UTC)."
+   if(ts < 0){ ts = 0  }
+   mut days = ts / 86400
+   mut rem = ts - days*86400
+   def hour = rem / 3600
+   rem = rem - hour*3600
+   def minute = rem / 60
+   def second = rem - minute*60
+   mut year = 1970
+   while(days >= _days_in_year(year)){
+      days = days - _days_in_year(year)
+      year = year + 1
    }
-   def out = __malloc(32)
-   def len = call4(_strftime_fn, out, 32, "%Y-%m-%d %H:%M:%S", tm_buf)
-   __free(tm_buf)
-   if(len == 0){
-      __free(out)
-      panic("timefmt: strftime failed")
+   mut month = 1
+   while(days >= _days_in_month(year, month)){
+      days = days - _days_in_month(year, month)
+      month = month + 1
    }
-   def result = cstr_to_str(out)
-   __free(out)
-   return result
+   def day = days + 1
+   return f"{_pad4(year)}-{_pad2(month)}-{_pad2(day)} {_pad2(hour)}:{_pad2(minute)}:{_pad2(second)}"
 }
