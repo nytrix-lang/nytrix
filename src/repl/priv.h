@@ -37,10 +37,12 @@ void count_unclosed(const char *src, int *out_paren, int *out_brack,
                     int *out_brace);
 void print_incomplete_hint(const char *src);
 int repl_calc_indent(const char *src);
+int is_repl_stmt(const char *src);
 int repl_pre_input_hook(void);
 void repl_highlight_line(const char *line);
-void repl_highlight_line_ex(const char *line, int cursor_pos);
+void repl_highlight_line_ex(const char *line, int cursor_pos, int indent);
 void repl_redisplay(void);
+void repl_reset_redisplay(void);
 void repl_display_match_list(char **matches, int len, int max);
 char **repl_enhanced_completion(const char *text, int start, int end);
 int is_persistent_def(const char *src);

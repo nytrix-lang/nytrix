@@ -1,48 +1,36 @@
-use std.core
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
-fn test_comptime_basic(){
-   print("Testing comptime basics...")
-   def v = comptime { return 1 + 2 + 3 }
-   assert(v == 6, "comptime basic")
-}
+;; comptime (Test)
 
-fn test_comptime_fallthrough(){
-   print("Testing comptime fallthrough...")
-   def v = comptime { def x = 10 }
-   assert(v == 0, "comptime fallthrough returns 0")
-}
+mut v1 = comptime { return 1 + 2 + 3 }
+assert(v1 == 6, "comptime basic")
 
-fn test_comptime_control_flow(){
-   print("Testing comptime control flow...")
-   def v = comptime {
-      def sum = 0
-      def i = 0
-      while(i < 5){
-         sum = sum + i
-         i = i + 1
-      }
-      if(sum == 10){ return sum }
-      return 0
+mut v2 = comptime { def x = 10 }
+assert(v2 == 0, "comptime fallthrough")
+
+mut v3 = comptime {
+   mut sum = 0
+   mut i = 0
+   while(i < 5){
+      sum = sum + i
+      i = i + 1
    }
-   assert(v == 10, "comptime control flow")
+   if(sum == 10){ return sum }
+   return 0
 }
+assert(v3 == 10, "comptime control flow")
 
-fn test_comptime_nested(){
-   print("Testing comptime nested...")
-   def v = comptime {
-      def inner = comptime { return 5 }
-      return inner * 2
-   }
-   assert(v == 10, "comptime nested")
+mut v4 = comptime {
+   def inner = comptime { return 5 }
+   return inner * 2
 }
+assert(v4 == 10, "comptime nested")
 
-fn test_main(){
-   test_comptime_basic()
-   test_comptime_fallthrough()
-   test_comptime_control_flow()
-   test_comptime_nested()
-   print("✓ Runtime comptime tests passed")
-}
+print("✓ comptime tests passed")
 
-test_main()

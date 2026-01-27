@@ -1,5 +1,6 @@
 #include "ast/json.h"
 #include "parse/parser.h"
+#include "rt/shared.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +16,7 @@ int64_t __parse_ast(int64_t source_ptr) {
   program_t prog = parse_program(&parser);
   char *json = ny_ast_to_json(&prog);
   if (!json) {
-    arena_free(parser.arena);
+    program_free(&prog, parser.arena);
     return 0;
   }
   size_t len = strlen(json);
@@ -24,8 +25,8 @@ int64_t __parse_ast(int64_t source_ptr) {
   *(int64_t *)((char *)res - 8) = 241;                      // TAG_STR (241)
   *(int64_t *)((char *)res - 16) = ((int64_t)len << 1) | 1; // Length
   memcpy((void *)res, json, len + 1);
-  arena_free(parser.arena);
-  // free(json); // json is likely in arena_t
+  program_free(&prog, parser.arena);
+  __free((int64_t)(uintptr_t)json);
   return res;
 }
 #else

@@ -1,9 +1,12 @@
 #!/bin/ny
-;; Args Example
-use std.cli *
-use std.io *
+;; Args (Example)
+
+use std.core *
+use std.os.args *
 
 print(f"Argc: {argc()}")
-for i in range(argc()) {
-   print(f"Arg {i}: {argv(i)}")
+mut i = 0
+while(i < argc()){
+    print(f"Argv[{i}]: {argv(i)}")
+    i += 1
 }

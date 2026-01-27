@@ -85,7 +85,6 @@ int64_t __to_str(int64_t v) {
     int64_t val = v >> 1;
     char buf[64];
     int len = sprintf(buf, "%ld", val);
-    // fprintf(stderr, "DEBUG: to_str int %ld len %d s='%s'\n", val, len, buf);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
@@ -101,13 +100,13 @@ int64_t __to_str(int64_t v) {
     __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
-  if (is_ptr(v)) {
+  if (is_heap_ptr(v)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    if (tag == TAG_STR || tag == TAG_STR_CONST)
+    if (tag == TAG_STR || tag == TAG_STR_CONST || tag == 120 || tag == 121)
       return v;
     if (tag == TAG_FLOAT) {
       double d;
-      memcpy(&d, (void *)(uintptr_t)v, 8); // This memcpy is safe (len 8)
+      memcpy(&d, (void *)(uintptr_t)v, 8);
       char buf[64];
       int len = sprintf(buf, "%g", d);
       int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
@@ -116,14 +115,23 @@ int64_t __to_str(int64_t v) {
       __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
       return res;
     }
+    // Generic heap object
     char buf[64];
     int len = sprintf(buf, "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
-    *(int64_t *)(uintptr_t)((char *)res - 8) =
-        120; // 120 for arbitrary object string rep?
+    *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
     __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
-  return v;
+  if (is_any_ptr(v)) {
+    char buf[64];
+    int len = sprintf(buf, "<ptr 0x%lx>", (unsigned long)v);
+    int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
+    *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
+    *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
+    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    return res;
+  }
+  return __to_str(0);
 }

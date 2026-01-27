@@ -1,4 +1,8 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "base/loader.h"
+#include "base/util.h"
 #include "parse/parser.h"
 #include "priv.h"
 #include "repl/types.h"
@@ -8,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 // Context detection
@@ -51,6 +56,26 @@ static compl_ctx_t get_context(const char *line, int pos) {
   return CTX_NORMAL;
 }
 
+// Helper for case-insensitive substring search
+static const char *strcasestr_impl(const char *haystack, const char *needle) {
+  if (!needle || !*needle)
+    return haystack;
+  for (; *haystack; ++haystack) {
+    if (tolower((unsigned char)*haystack) == tolower((unsigned char)*needle)) {
+      const char *h, *n;
+      for (h = haystack, n = needle; *h && *n; ++h, ++n) {
+        if (tolower((unsigned char)*h) != tolower((unsigned char)*n)) {
+          break;
+        }
+      }
+      if (!*n) {
+        return haystack;
+      }
+    }
+  }
+  return NULL;
+}
+
 // Simple fuzzy score (higher is better)
 static int fuzzy_score(const char *cand, const char *text) {
   if (!text || !*text)
@@ -59,7 +84,7 @@ static int fuzzy_score(const char *cand, const char *text) {
     return 100;
   if (strncmp(cand, text, strlen(text)) == 0)
     return 50;
-  if (strcasestr(cand, text))
+  if (strcasestr_impl(cand, text))
     return 10;
   return 0;
 }
@@ -77,7 +102,7 @@ static void add_match(const char *s) {
     matches_cap = matches_cap ? matches_cap * 2 : 64;
     matches = realloc(matches, matches_cap * sizeof(char *));
   }
-  matches[matches_len++] = strdup(s);
+  matches[matches_len++] = ny_strdup(s);
 }
 
 // File completion helper
@@ -185,7 +210,7 @@ char *repl_enhanced_completion_generator(const char *text, int state) {
   }
 
   if (matches && idx < matches_len) {
-    return strdup(matches[idx++]);
+    return ny_strdup(matches[idx++]);
   }
   return NULL;
 }

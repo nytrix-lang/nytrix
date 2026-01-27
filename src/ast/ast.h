@@ -38,9 +38,12 @@ typedef enum lit_kind_t {
 typedef struct expr_t expr_t;
 typedef struct stmt_t stmt_t;
 
-typedef enum fstring_pa__kind_t { NY_FSP_STR, NY_FSP_EXPR } fstring_pa__kind_t;
-typedef struct fstring_pa__t {
-  fstring_pa__kind_t kind;
+typedef enum fstring_part_kind_t {
+  NY_FSP_STR,
+  NY_FSP_EXPR
+} fstring_part_kind_t;
+typedef struct fstring_part_t {
+  fstring_part_kind_t kind;
   union {
     struct {
       const char *data;
@@ -48,8 +51,8 @@ typedef struct fstring_pa__t {
     } s;
     expr_t *e;
   } as;
-} fstring_pa__t;
-typedef VEC(fstring_pa__t) ny_fstring_pa__list;
+} fstring_part_t;
+typedef VEC(fstring_part_t) ny_fstring_part_list;
 
 typedef struct match_arm_t {
   VEC(struct expr_t *) patterns;
@@ -163,7 +166,7 @@ struct expr_t {
       struct stmt_t *body;
     } comptime_expr;
     struct {
-      ny_fstring_pa__list parts;
+      ny_fstring_part_list parts;
     } fstring;
     struct {
       const char *name;
@@ -185,6 +188,7 @@ typedef enum stmt_kind_t {
   NY_S_FOR,
   NY_S_TRY,
   NY_S_FUNC,
+  NY_S_EXTERN,
   NY_S_RETURN,
   NY_S_LABEL,
   NY_S_DEFER,
@@ -197,9 +201,9 @@ typedef enum stmt_kind_t {
   NY_S_EXPORT,
 } stmt_kind_t;
 
-typedef struct stmt_expo__t {
+typedef struct stmt_export_t {
   VEC(const char *) names;
-} stmt_expo__t;
+} stmt_export_t;
 
 typedef struct stmt_defer_t {
   struct stmt_t *body;
@@ -213,9 +217,11 @@ typedef struct stmt_block_t {
 
 typedef struct stmt_var_t {
   VEC(const char *) names;
-  expr_t *expr;
+  VEC(expr_t *) exprs;
   bool is_decl;
+  bool is_mut;
   bool is_undef;
+  bool is_destructure;
 } stmt_var_t;
 
 typedef struct stmt_if_t {
@@ -251,6 +257,14 @@ typedef struct stmt_func_t {
   const char *src_start;
   const char *src_end;
 } stmt_func_t;
+
+typedef struct stmt_extern_t {
+  const char *name;
+  const char *return_type;
+  ny_param_list params;
+  const char *link_name;
+  bool is_variadic;
+} stmt_extern_t;
 
 typedef struct stmt_return_t {
   expr_t *value; // optional
@@ -292,7 +306,7 @@ struct stmt_t {
       const char *module;
       const char *alias;
       bool is_local;
-      bool impo_all;
+      bool import_all;
       ny_use_item_list imports;
     } use;
     stmt_var_t var;
@@ -304,6 +318,7 @@ struct stmt_t {
     stmt_for_t fr;
     stmt_try_t tr;
     stmt_func_t fn;
+    stmt_extern_t ext;
     stmt_return_t ret;
     stmt_label_t label;
     stmt_goto_t go;
@@ -313,11 +328,12 @@ struct stmt_t {
     struct {
       const char *name;
       ny_stmt_list body;
-      bool expo_all;
+      bool export_all;
       const char *src_start;
       const char *src_end;
+      const char *path;
     } module;
-    stmt_expo__t exprt;
+    stmt_export_t exprt;
   } as;
 };
 
@@ -328,6 +344,8 @@ typedef struct program_t {
 
 expr_t *expr_new(arena_t *arena_t, expr_kind_t kind, token_t tok);
 stmt_t *stmt_new(arena_t *arena_t, stmt_kind_t kind, token_t tok);
+void expr_free_members(expr_t *e);
+void stmt_free_members(stmt_t *s);
 void program_free(program_t *prog, arena_t *arena_t);
 
 #endif

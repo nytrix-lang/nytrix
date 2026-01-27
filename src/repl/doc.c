@@ -1,4 +1,5 @@
 #include "base/loader.h"
+#include "base/util.h"
 #include "parse/parser.h"
 #include "priv.h"
 #include <ctype.h>
@@ -14,15 +15,15 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc,
     if (strcmp(dl->data[i].name, name) == 0) {
       if (doc) {
         free(dl->data[i].doc);
-        dl->data[i].doc = strdup(doc);
+        dl->data[i].doc = ny_strdup(doc);
       }
       if (def) {
         free(dl->data[i].def);
-        dl->data[i].def = strdup(def);
+        dl->data[i].def = ny_strdup(def);
       }
       if (src) {
         free(dl->data[i].src);
-        dl->data[i].src = strdup(src);
+        dl->data[i].src = ny_strdup(src);
       }
       if (kind != 0)
         dl->data[i].kind = kind;
@@ -38,10 +39,10 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc,
     dl->data = nd;
     dl->cap = new_cap;
   }
-  dl->data[dl->len].name = strdup(name);
-  dl->data[dl->len].doc = doc ? strdup(doc) : NULL;
-  dl->data[dl->len].def = def ? strdup(def) : NULL;
-  dl->data[dl->len].src = src ? strdup(src) : NULL;
+  dl->data[dl->len].name = ny_strdup(name);
+  dl->data[dl->len].doc = doc ? ny_strdup(doc) : NULL;
+  dl->data[dl->len].def = def ? ny_strdup(def) : NULL;
+  dl->data[dl->len].src = src ? ny_strdup(src) : NULL;
   dl->data[dl->len].kind = kind;
   dl->len += 1;
 }
@@ -217,130 +218,12 @@ found: {
 }
 
 void add_builtin_docs(doc_list_t *docs) {
-  // Memory
-  doclist_set(docs, "__malloc", "Allocates n bytes of memory on the heap.",
-              "fn __malloc(n)", NULL, 3);
-  doclist_set(docs, "__free", "Frees memory previously allocated by __malloc.",
-              "fn __free(p)", NULL, 3);
-  doclist_set(docs, "__realloc", "Reallocates memory to a new size.",
-              "fn __realloc(p, n)", NULL, 3);
-
-  // Low level memory access
-  doclist_set(docs, "__load8", "Loads a single byte from memory address p.",
-              "fn __load8(p)", NULL, 3);
-  doclist_set(docs, "__store8", "Stores byte v at memory address p.",
-              "fn __store8(p, v)", NULL, 3);
-  doclist_set(docs, "__load16", "Loads a 16-bit integer from memory address p.",
-              "fn __load16(p)", NULL, 3);
-  doclist_set(docs, "__store16", "Stores 16-bit integer v at memory address p.",
-              "fn __store16(p, v)", NULL, 3);
-  doclist_set(docs, "__load32", "Loads a 32-bit integer from memory address p.",
-              "fn __load32(p)", NULL, 3);
-  doclist_set(docs, "__store32", "Stores 32-bit integer v at memory address p.",
-              "fn __store32(p, v)", NULL, 3);
-  doclist_set(docs, "__load64", "Loads a 64-bit integer from memory address p.",
-              "fn __load64(p)", NULL, 3);
-  doclist_set(docs, "__store64", "Stores 64-bit integer v at memory address p.",
-              "fn __store64(p, v)", NULL, 3);
-
-  // Pointer arithmetic
-  doclist_set(docs, "__ptr_add", "Adds offset to pointer.",
-              "fn __ptr_add(p, offset)", NULL, 3);
-  doclist_set(docs, "__ptr_sub",
-              "Subtracts offset from pointer or returns difference.",
-              "fn __ptr_sub(p, b)", NULL, 3);
-
-  // Syscall
-  doclist_set(docs, "__syscall", "Executes a raw Linux system call.",
-              "fn __syscall(n, a1, a2, a3, a4, a5, a6)", NULL, 3);
-  doclist_set(docs, "__exit", "Exits the program_t with status code.",
-              "fn __exit(code)", NULL, 3);
-  doclist_set(docs, "__errno", "Returns the last error number.", "fn __errno()",
-              NULL, 3);
-
-  // Math
-  doclist_set(docs, "__add", "Integer addition.", "fn __add(a, b)", NULL, 3);
-  doclist_set(docs, "__sub", "Integer subtraction.", "fn __sub(a, b)", NULL, 3);
-  doclist_set(docs, "__mul", "Integer multiplication.", "fn __mul(a, b)", NULL,
-              3);
-  doclist_set(docs, "__div", "Integer division.", "fn __div(a, b)", NULL, 3);
-  doclist_set(docs, "__mod", "Integer modulus.", "fn __mod(a, b)", NULL, 3);
-  doclist_set(docs, "__and", "Bitwise AND.", "fn __and(a, b)", NULL, 3);
-  doclist_set(docs, "__or", "Bitwise OR.", "fn __or(a, b)", NULL, 3);
-  doclist_set(docs, "__xor", "Bitwise XOR.", "fn __xor(a, b)", NULL, 3);
-  doclist_set(docs, "__not", "Bitwise NOT.", "fn __not(a)", NULL, 3);
-  doclist_set(docs, "__shl", "Bitwise shift left.", "fn __shl(a, b)", NULL, 3);
-  doclist_set(docs, "__shr", "Bitwise shift right.", "fn __shr(a, b)", NULL, 3);
-
-  // Float
-  doclist_set(docs, "__flt_add", "Float addition.", "fn __flt_add(a, b)", NULL,
-              3);
-  doclist_set(docs, "__flt_sub", "Float subtraction.", "fn __flt_sub(a, b)",
-              NULL, 3);
-  doclist_set(docs, "__flt_mul", "Float multiplication.", "fn __flt_mul(a, b)",
-              NULL, 3);
-  doclist_set(docs, "__flt_div", "Float division.", "fn __flt_div(a, b)", NULL,
-              3);
-  doclist_set(docs, "__flt_from_int", "Convert int to float.",
-              "fn __flt_from_int(i)", NULL, 3);
-  doclist_set(docs, "__flt_to_int", "Convert float to int.",
-              "fn __flt_to_int(f)", NULL, 3);
-
-  // Type checks
-  doclist_set(docs, "__is_int", "Checks if value is an integer.",
-              "fn __is_int(v)", NULL, 3);
-  doclist_set(docs, "__is_ptr", "Checks if value is a pointer.",
-              "fn __is_ptr(v)", NULL, 3);
-  doclist_set(docs, "__is_str", "Checks if value is a string.",
-              "fn __is_str(v)", NULL, 3);
-  doclist_set(docs, "__is_flt", "Checks if value is a float.", "fn __is_flt(v)",
-              NULL, 3);
-
-  // Strings
-  doclist_set(docs, "__init_str", "Initializes a string.", "fn __init_str(s)",
-              NULL, 3);
-  doclist_set(docs, "__to_str", "Converts primitive to string.",
-              "fn __to_str(v)", NULL, 3);
-  doclist_set(docs, "__str_concat", "Concatenates two strings.",
-              "fn __str_concat(a, b)", NULL, 3);
-
-  // Dynamic Linking
-  doclist_set(docs, "__dlopen", "Opens a dynamic library.",
-              "fn __dlopen(path, flags)", NULL, 3);
-  doclist_set(docs, "__dlsym", "Resolves a symbol in a library.",
-              "fn __dlsym(handle, symbol)", NULL, 3);
-  doclist_set(docs, "__dlclose", "Closes a dynamic library.",
-              "fn __dlclose(handle)", NULL, 3);
-  doclist_set(docs, "__dlerror", "Returns the last dynamic linking error.",
-              "fn __dlerror()", NULL, 3);
-
-  // Threads
-  doclist_set(docs, "__thread_spawn", "Spawns a new thread.",
-              "fn __thread_spawn(fn_ptr, arg)", NULL, 3);
-  doclist_set(docs, "__thread_join", "Joins a thread.",
-              "fn __thread_join(thread)", NULL, 3);
-  doclist_set(docs, "__mutex_new", "Creates a new mutex.", "fn __mutex_new()",
-              NULL, 3);
-  doclist_set(docs, "__mutex_lock64", "Locks a mutex.", "fn __mutex_lock64(m)",
-              NULL, 3);
-  doclist_set(docs, "__mutex_unlock64", "Unlocks a mutex.",
-              "fn __mutex_unlock64(m)", NULL, 3);
-  doclist_set(docs, "__mutex_free", "Frees a mutex.", "fn __mutex_free(m)",
-              NULL, 3);
-
-  // Misc
-  doclist_set(docs, "__sleep", "Sleeps for n milliseconds.", "fn __sleep(ms)",
-              NULL, 3);
-  doclist_set(docs, "__panic", "Panics with a message.", "fn __panic(msg)",
-              NULL, 3);
-  doclist_set(docs, "__argc", "Returns argument count.", "fn __argc()", NULL,
-              3);
-  doclist_set(docs, "__argv", "Returns argument vector.", "fn __argv(i)", NULL,
-              3);
-  doclist_set(docs, "__envp", "Returns environment variable at index.",
-              "fn __envp(i)", NULL, 3);
-  doclist_set(docs, "__envc", "Returns environment variable count.",
-              "fn __envc()", NULL, 3);
+#define RT_DEF(name, p, args, sig, doc)                                        \
+  doclist_set(docs, name, doc, sig, NULL, 3);
+#define RT_GV(name, p, t, doc) doclist_set(docs, name, doc, "global", NULL, 4);
+#include "rt/defs.h"
+#undef RT_DEF
+#undef RT_GV
 }
 
 void repl_load_module_docs(doc_list_t *docs, const char *name) {

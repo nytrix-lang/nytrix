@@ -1,8 +1,10 @@
-use std.io
-use std.core.debug
-use std.util.inspect
-use std.core.test
-use std.core
+use std.core.debug *
+use std.util.inspect *
+use std.core.test *
+use std.core *
+
+;; Core Debug (Test)
+;; Tests debugging utilities including debug_print and object inspection.
 
 print("Testing Debug & Inspect...")
 
@@ -11,4 +13,4 @@ inspect(123)
 inspect("hello")
 inspect([1, 2])
 
-print("✓ std.core.debug passed")
+print("✓ std.core.debug tests passed")

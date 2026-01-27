@@ -71,8 +71,8 @@ static expr_t *parse_fstring(parser_t *p, token_t tok) {
         // Keep arena_t state in sync called parser_init_with_arena which takes
         // arena_t ptr But sub.arena_t is same pointer. Allocations happened on
         // it. p->arena doesn't change typically.
-        fstring_pa__t part = {.kind = NY_FSP_EXPR, .as.e = sub_e};
-        vec_push(&e->as.fstring.parts, part);
+        fstring_part_t part = {.kind = NY_FSP_EXPR, .as.e = sub_e};
+        vec_push_arena(p->arena, &e->as.fstring.parts, part);
         i++; // skip '}'
       } else {
         parser_error(p, tok, "unterminated interpolation in f-string", NULL);
@@ -86,11 +86,11 @@ static expr_t *parse_fstring(parser_t *p, token_t tok) {
         else
           i++;
       }
-      fstring_pa__t part;
+      fstring_part_t part;
       part.kind = NY_FSP_STR;
       part.as.s.data =
           decode_fstring_part(p, s + start, i - start, &part.as.s.len);
-      vec_push(&e->as.fstring.parts, part);
+      vec_push_arena(p->arena, &e->as.fstring.parts, part);
     }
   }
   return e;
@@ -109,7 +109,7 @@ static expr_t *parse_primary(parser_t *p) {
       stmt_t *ret = stmt_new(p->arena, NY_S_RETURN, tok);
       ret->as.ret.value = val;
       body = stmt_new(p->arena, NY_S_BLOCK, tok);
-      vec_push(&body->as.block.body, ret);
+      vec_push_arena(p->arena, &body->as.block.body, ret);
     }
     expr_t *e = expr_new(p->arena, NY_E_COMPTIME, tok);
     e->as.comptime_expr.body = body;
@@ -190,11 +190,11 @@ static expr_t *parse_primary(parser_t *p) {
     expr_t *inner = p_parse_expr(p, 0);
     if (p->cur.kind == NY_T_COMMA) {
       expr_t *tup = expr_new(p->arena, NY_E_TUPLE, tok);
-      vec_push(&tup->as.list_like, inner);
+      vec_push_arena(p->arena, &tup->as.list_like, inner);
       while (parser_match(p, NY_T_COMMA)) {
         if (p->cur.kind == NY_T_RPAREN)
           break;
-        vec_push(&tup->as.list_like, p_parse_expr(p, 0));
+        vec_push_arena(p->arena, &tup->as.list_like, p_parse_expr(p, 0));
       }
       parser_expect(p, NY_T_RPAREN, NULL, NULL);
       return tup;
@@ -208,7 +208,7 @@ static expr_t *parse_primary(parser_t *p) {
     if (p->cur.kind != NY_T_RBRACK) {
       while (true) {
         expr_t *item = p_parse_expr(p, 0);
-        vec_push(&lit->as.list_like, item);
+        vec_push_arena(p->arena, &lit->as.list_like, item);
         if (!parser_match(p, NY_T_COMMA))
           break;
         if (p->cur.kind == NY_T_RBRACK)
@@ -229,7 +229,7 @@ static expr_t *parse_primary(parser_t *p) {
     if (parser_match(p, NY_T_COLON)) {
       expr_t *dict = expr_new(p->arena, NY_E_DICT, tok);
       dict_pair_t pair = {first, p_parse_expr(p, 0)};
-      vec_push(&dict->as.dict.pairs, pair);
+      vec_push_arena(p->arena, &dict->as.dict.pairs, pair);
       while (parser_match(p, NY_T_COMMA)) {
         if (p->cur.kind == NY_T_RBRACE)
           break;
@@ -238,17 +238,17 @@ static expr_t *parse_primary(parser_t *p) {
         expr_t *v = p_parse_expr(p, 0);
         pair.key = k;
         pair.value = v;
-        vec_push(&dict->as.dict.pairs, pair);
+        vec_push_arena(p->arena, &dict->as.dict.pairs, pair);
       }
       parser_expect(p, NY_T_RBRACE, NULL, NULL);
       return dict;
     } else {
       expr_t *set = expr_new(p->arena, NY_E_SET, tok);
-      vec_push(&set->as.list_like, first);
+      vec_push_arena(p->arena, &set->as.list_like, first);
       while (parser_match(p, NY_T_COMMA)) {
         if (p->cur.kind == NY_T_RBRACE)
           break;
-        vec_push(&set->as.list_like, p_parse_expr(p, 0));
+        vec_push_arena(p->arena, &set->as.list_like, p_parse_expr(p, 0));
       }
       parser_expect(p, NY_T_RBRACE, NULL, NULL);
       return set;
@@ -272,7 +272,7 @@ static expr_t *parse_primary(parser_t *p) {
     e->as.as_asm.code = code;
     e->as.as_asm.constraints = constraints;
     while (parser_match(p, NY_T_COMMA)) {
-      vec_push(&e->as.as_asm.args, p_parse_expr(p, 0));
+      vec_push_arena(p->arena, &e->as.as_asm.args, p_parse_expr(p, 0));
     }
     parser_expect(p, NY_T_RPAREN, NULL, NULL);
     return e;
@@ -316,7 +316,7 @@ static expr_t *parse_primary(parser_t *p) {
       }
       if (parser_match(p, NY_T_ASSIGN))
         pr.def = p_parse_expr(p, 0);
-      vec_push(&lam->as.lambda.params, pr);
+      vec_push_arena(p->arena, &lam->as.lambda.params, pr);
       if (lam->as.lambda.is_variadic) {
         if (p->cur.kind == NY_T_COMMA) {
           parser_error(p, p->cur, "variadic parameter must be the last one",
@@ -365,7 +365,7 @@ static expr_t *parse_postfix(parser_t *p) {
         } else {
           arg.val = p_parse_expr(p, 0);
         }
-        vec_push(&call->as.call.args, arg);
+        vec_push_arena(p->arena, &call->as.call.args, arg);
         if (!parser_match(p, NY_T_COMMA))
           break;
       }
@@ -377,9 +377,10 @@ static expr_t *parse_postfix(parser_t *p) {
         parser_error(p, p->cur, "member access expects identifier", NULL);
         return expr;
       }
-      char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+      token_t id_tok = p->cur;
+      char *name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
       parser_advance(p);
-      expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, p->cur);
+      expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
       mc->as.memcall.target = expr;
       mc->as.memcall.name = name;
       if (p->cur.kind == NY_T_LPAREN) {
@@ -394,7 +395,7 @@ static expr_t *parse_postfix(parser_t *p) {
           } else {
             arg.val = p_parse_expr(p, 0);
           }
-          vec_push(&mc->as.memcall.args, arg);
+          vec_push_arena(p->arena, &mc->as.memcall.args, arg);
           if (!parser_match(p, NY_T_COMMA))
             break;
         }

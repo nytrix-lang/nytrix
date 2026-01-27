@@ -125,7 +125,6 @@ static inline char *ny_strndup(const char *s, size_t n) {
   return r;
 }
 
-// TODO: stop using macros
 // Simple growable array for POD types.
 
 #define VEC(type)                                                              \
@@ -154,6 +153,19 @@ static inline char *ny_strndup(const char *s, size_t n) {
     free((vec)->data);                                                         \
     (vec)->data = NULL;                                                        \
     (vec)->len = (vec)->cap = 0;                                               \
+  } while (0)
+
+#define vec_push_arena(arena, vec, value)                                      \
+  do {                                                                         \
+    if ((vec)->len == (vec)->cap) {                                            \
+      size_t new_cap = (vec)->cap ? (vec)->cap * 2 : 8;                        \
+      void *new_data = arena_alloc(arena, new_cap * sizeof(*(vec)->data));     \
+      if ((vec)->data)                                                         \
+        memcpy(new_data, (vec)->data, (vec)->len * sizeof(*(vec)->data));      \
+      (vec)->data = new_data;                                                  \
+      (vec)->cap = new_cap;                                                    \
+    }                                                                          \
+    (vec)->data[(vec)->len++] = (value);                                       \
   } while (0)
 
 // Arena tracking raw allocations for bulk free.

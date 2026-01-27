@@ -2,6 +2,7 @@
  * @file util.c
  * @brief Unified utilities for Nytrix compiler (File I/O + String)
  */
+#define _XOPEN_SOURCE 500
 #include "base/util.h"
 #include "base/common.h"
 #include <errno.h>
@@ -18,8 +19,6 @@
 #ifdef __linux__
 #include <linux/limits.h>
 #endif
-
-// --- File Utils ---
 
 char *ny_read_file(const char *path) {
   if (!path)
@@ -136,19 +135,6 @@ const char *ny_src_root(void) {
     snprintf(buf, sizeof(buf), "%s", env);
     return buf;
   }
-  char *exe_dir = ny_get_executable_dir();
-  if (exe_dir) {
-    char tmp[PATH_MAX];
-    snprintf(tmp, sizeof(tmp), "%s", exe_dir);
-    size_t len = strlen(tmp);
-    if (len >= 6 && strcmp(tmp + len - 6, "/build") == 0) {
-      tmp[len - 6] = '\0';
-    }
-    if (nytrix_has_sources(tmp)) {
-      snprintf(buf, sizeof(buf), "%s", tmp);
-      return buf;
-    }
-  }
   char cwd[PATH_MAX];
   if (getcwd(cwd, sizeof(cwd))) {
     char cur[PATH_MAX];
@@ -162,6 +148,20 @@ const char *ny_src_root(void) {
       if (!slash || slash == cur)
         break;
       *slash = '\0';
+    }
+  }
+
+  char *exe_dir = ny_get_executable_dir();
+  if (exe_dir) {
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s", exe_dir);
+    size_t len = strlen(tmp);
+    if (len >= 6 && strcmp(tmp + len - 6, "/build") == 0) {
+      tmp[len - 6] = '\0';
+    }
+    if (nytrix_has_sources(tmp)) {
+      snprintf(buf, sizeof(buf), "%s", tmp);
+      return buf;
     }
   }
 

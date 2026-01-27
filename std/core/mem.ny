@@ -1,14 +1,14 @@
 ;; Keywords: core mem
 ;; Core Mem module.
 
-use std.core
+use std.core *
 module std.core.mem (
    memchr, memcpy, memset, memcmp
 )
 
 fn memchr(ptr, val, n){
    "Find byte in memory."
-   def i = 0
+   mut i = 0
    while(i < n){
       if(load8(ptr, i) == val){ return ptr + i  }
       i = i + 1
@@ -18,8 +18,8 @@ fn memchr(ptr, val, n){
 
 fn memcpy(dst, src, n){
    "Copies `n` bytes from `src` memory address to `dst`. Optimized for 8-byte aligned transfers."
+   mut i = 0
    if(n >= 8 && (dst & 7) == 0 && (src & 7) == 0){
-      def i = 0
       while(i + 8 <= n){
          store64(dst, load64(src, i), i)
          i = i + 8
@@ -40,8 +40,8 @@ fn memcpy(dst, src, n){
 
 fn memset(p, val, n){
    "Fills the first `n` bytes of the memory area pointed to by `p` with the constant byte `val`."
+   mut i = 0
    if(n >= 8 && (p & 7) == 0 && val == 0){
-      def i = 0
       while(i + 8 <= n){
          store64(p, 0, i)
          i = i + 8
@@ -62,7 +62,7 @@ fn memset(p, val, n){
 
 fn memcmp(p1, p2, n){
    "Compares the first `n` bytes of memory areas `p1` and `p2`. Returns 0 if equal, or the difference between the first mismatching bytes."
-   def i = 0
+   mut i = 0
    while(i < n){
       def b1 = load8(p1, i)
       def b2 = load8(p2, i)
@@ -71,3 +71,4 @@ fn memcmp(p1, p2, n){
    }
    return 0
 }
+

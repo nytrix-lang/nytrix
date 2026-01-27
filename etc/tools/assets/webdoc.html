@@ -14,6 +14,8 @@
 
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         window.MathJax = {
@@ -22,7 +24,7 @@
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
             },
             options: {
-                skipHtmlTags: ['script', 'noscript', 'style', 'textarea'],
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
                 enableMenu: false
             }
         };
@@ -30,37 +32,34 @@
 
     <style>
         :root {
-            /* Modus Vivendi Inspired Palette (User Refined) */
+            /* Modus Vivendi */
             --bg: #000000;
             --panel: #020202;
             --panel2: #000000;
-
             --ink: #ffffff;
             --dim: #989898;
-            /* Kept from previous Modus Vivendi */
-
             --line: #111111;
             --line2: #505050;
-            /* Kept from previous Modus Vivendi */
-
             --accent: #b6a0ff;
             --accent2: #00bcff;
             --accent-cyan: #00d3d0;
-
             --code: #000000;
             --chip: #000000;
-            /* Set to match new --panel2 */
-
-            /* Syntax Highlighting */
             --syn-module: #00bcff;
-            /* Module names */
             --syn-kw: #b6a0ff;
             --syn-str: #79a8ff;
-            --syn-num: #f78fe7;
-            --syn-call: #feacd0;
+            --syn-num: #ffffff;
+            --syn-call: #d09dc0;
             --syn-com: #989898;
-            /* Kept from previous Modus Vivendi */
         }
+
+        .syn-kw { color: var(--syn-kw); }
+        .syn-str { color: var(--syn-str); }
+        .syn-num { color: var(--syn-num); }
+        .syn-call { color: var(--syn-call); }
+        .syn-com { color: var(--syn-com); }
+        .syn-module { color: var(--syn-module); }
+        .syn-var { color: var(--accent-cyan); }
 
         * {
             margin: 0;
@@ -146,7 +145,7 @@
             padding: 1px 4px;
             font-family: "Fira Code", monospace;
             font-size: 0.9em;
-            color: var(--accent-cyan);
+            color: var(--ink);
             border: 1px solid var(--line);
         }
 
@@ -165,6 +164,127 @@
             color: var(--ink);
             font-size: 11px;
         }
+
+        .html-content {
+            font-family: "Turret Road", sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.6;
+            color: var(--ink);
+        }
+
+        .html-content p {
+            margin: 0 0 0.8em;
+        }
+
+        .html-content h1,
+        .html-content h2,
+        .html-content h3 {
+            font-family: "Tektur", sans-serif;
+            color: var(--accent);
+            margin-top: 1.25em;
+            margin-bottom: 0.5em;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 0.2em;
+            letter-spacing: -0.01em;
+        }
+
+        .html-content a {
+            color: var(--accent);
+            text-decoration: underline;
+        }
+
+        .html-content a:hover {
+            color: var(--accent-cyan);
+        }
+
+        .html-content pre,
+        .html-content code,
+        .html-content kbd,
+        .html-content samp {
+            font-family: "Fira Code", monospace;
+        }
+
+        .html-content pre,
+        .html-content .example,
+        .html-content .smallexample {
+            background: var(--code);
+            border: 1px solid var(--line);
+            padding: 12px;
+            margin-bottom: 1em;
+            overflow-x: auto;
+        }
+
+        .html-content pre code,
+        .html-content .example code,
+        .html-content .smallexample code {
+            background: transparent;
+            padding: 0;
+            border: none;
+            color: var(--ink);
+            font-size: 11px;
+        }
+
+        .html-content ul,
+        .html-content ol {
+            padding-left: 14px;
+            margin: 0.5em 0 0.9em;
+        }
+
+        .html-content li {
+            margin: 0.35em 0;
+        }
+
+        .html-content ul.itemize.mark-bullet {
+            list-style: disc;
+            margin-left: 0;
+        }
+
+        .html-content .contents {
+            margin: 0.4em 0 1em 12px;
+        }
+
+        .html-content .mini-toc {
+            padding-left: 14px;
+            margin: 0.4em 0 0.8em;
+        }
+
+        .html-content .mini-toc li {
+            margin: 0.3em 0;
+        }
+
+        .html-content .toc-numbered-mark,
+        .html-content .toc-numbered-mark ul {
+            list-style: none;
+            padding-left: 14px;
+            margin: 0.4em 0 0.9em;
+        }
+
+        .html-content .toc-numbered-mark li {
+            margin: 0.3em 0;
+        }
+
+        .html-content .code,
+        .html-content code.code {
+            background: var(--panel2);
+            border: 1px solid var(--line);
+            padding: 1px 4px;
+            color: var(--ink);
+        }
+
+        .html-content code .syn-str,
+        .html-content code .syn-kw,
+        .html-content code .syn-num,
+        .html-content code .syn-call,
+        .html-content code .syn-com {
+            color: inherit;
+        }
+
+        .html-content code .syn-kw { color: var(--syn-kw); }
+        .html-content code .syn-str { color: var(--syn-str); }
+        .html-content code .syn-num { color: var(--syn-num); }
+        .html-content code .syn-call { color: var(--syn-call); }
+        .html-content code .syn-com { color: var(--syn-com); }
 
         .md-section {
             margin-bottom: 40px;
@@ -210,12 +330,9 @@
             width: 8px;
             z-index: 100;
             background: transparent;
-            /* Removed background */
             opacity: 0;
-            /* Fully transparent */
             transition: opacity 0.15s;
             pointer-events: none;
-            /* Make it unclickable directly */
         }
 
         aside {
@@ -231,11 +348,9 @@
             z-index: 90;
             transition: transform 0.2s;
             transform: translateX(-100%);
-            /* Hidden by default for all screen sizes */
         }
 
         aside.active {
-            /* Show aside when active */
             transform: translateX(0);
         }
 
@@ -292,7 +407,6 @@
             letter-spacing: .15em;
             text-transform: uppercase;
             color: var(--dim);
-            /* Assuming this was the intended color property */
             padding: 8px 12px;
             background: transparent;
             border-bottom: 1px solid var(--line);
@@ -476,7 +590,8 @@
         .card {
             border: 1px solid var(--line);
             background: var(--panel2);
-            padding: 8px
+            padding: 8px;
+            cursor: pointer;
         }
 
         .row {
@@ -812,10 +927,11 @@
 
         .markdown-content code {
             font-family: "Fira Code", monospace;
-            background: var(--chip);
+            background: var(--panel2);
             padding: 2px 6px;
-            color: var(--accent-cyan);
+            color: var(--ink);
             font-size: 0.9em;
+            border: 1px solid var(--line);
         }
 
         .markdown-content pre {
@@ -937,6 +1053,66 @@
             font: 800 7px "Turret Road";
             color: var(--dim);
             letter-spacing: 0.1em;
+        }
+
+        .doc-selector-container {
+            margin-bottom: 40px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            padding: 0;
+        }
+
+        .doc-selector-header {
+            font: 900 14px "Tektur";
+            letter-spacing: 0.2em;
+            color: var(--accent);
+            background: var(--panel2);
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--line);
+            text-transform: uppercase;
+        }
+
+        .doc-selector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1px;
+            background: var(--line);
+            padding: 0;
+        }
+
+        .doc-selector-card {
+            background: var(--panel2);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--ink);
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .doc-selector-card:hover {
+            background: var(--panel);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .doc-selector-icon {
+            font-size: 32px;
+            line-height: 1;
+        }
+
+        .doc-selector-name {
+            font: 700 11px "Turret Road";
+            letter-spacing: 0.1em;
+            color: var(--accent-cyan);
+            text-align: center;
+        }
+
+        .doc-selector-card:hover .doc-selector-name {
+            color: var(--accent);
         }
     </style>
 </head>

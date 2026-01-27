@@ -1,22 +1,15 @@
-use std.io
-use std.util.inspect
-use std.core
-use std.core.test
+use std.util.inspect *
+use std.core.error *
+
+;; std.util.inspect (Test)
+;; Tests inspect on basic types.
 
 print("Testing inspect...")
 
-fn test_inspect(){
-   def n = 123
-   inspect(n)
-   def s = "hello"
-   inspect(s)
-   def l = [1, 2, 3]
-   inspect(l)
-   def d = { "a": 1 }
-   inspect(d)
-   inspect(0) ; none
-}
-
-test_inspect()
+inspect(123)
+inspect("hello")
+inspect([1, 2, 3])
+inspect({ "a": 1 })
+inspect(0)
 
 print("✓ std.util.inspect tests passed")

@@ -8,6 +8,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 const char *ny_builder_choose_cc(void) {
   const char *cc = getenv("NYTRIX_CC");
   if (!cc)
@@ -103,8 +107,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
 bool ny_builder_link(const char *cc, const char *obj_path,
                      const char *runtime_obj, const char *runtime_ast_obj,
                      const char *const extra_objs[], size_t extra_count,
+                     const char *const link_dirs[], size_t link_dir_count,
+                     const char *const link_libs[], size_t link_lib_count,
                      const char *output_path, bool link_strip, bool debug) {
-  const size_t max_args = 64;
+  const size_t max_args = 128;
   const char *argv[max_args];
   size_t idx = 0;
   argv[idx++] = cc;
@@ -116,33 +122,39 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     argv[idx++] = runtime_obj;
   if (runtime_ast_obj)
     argv[idx++] = runtime_ast_obj;
-  const char *shared___path = NULL;
+  const char *shared_rt_path = NULL;
   for (size_t i = 0; i < extra_count; ++i) {
     if (idx + 12 >= max_args)
       break;
     argv[idx++] = extra_objs[i];
     /* Remember the first .so so we can add an rpath */
-    if (!shared___path) {
+    if (!shared_rt_path) {
       const char *p = extra_objs[i];
       const char *dot = strrchr(p, '.');
       if (dot && strcmp(dot, ".so") == 0) {
-        shared___path = p;
+        shared_rt_path = p;
       }
     }
   }
+  for (size_t i = 0; i < link_dir_count; ++i) {
+    if (idx + 1 >= max_args)
+      break;
+    argv[idx++] = link_dirs[i];
+  }
+  argv[idx++] = "-Wl,--build-id=none";
   argv[idx++] = "-Wl,--gc-sections";
-  argv[idx++] = "-Wl,--as-needed";
   argv[idx++] = "-Wl,-O1";
+  argv[idx++] = "-Wl,--no-as-needed";
   if (link_strip)
-    argv[idx++] = "-Wl,-s";
-  if (shared___path) {
+    argv[idx++] = "-Wl,--strip-all";
+  if (shared_rt_path) {
     static char rpath_buf[PATH_MAX];
-    const char *slash = strrchr(shared___path, '/');
+    const char *slash = strrchr(shared_rt_path, '/');
     if (slash) {
-      size_t len = (size_t)(slash - shared___path);
+      size_t len = (size_t)(slash - shared_rt_path);
       if (len >= sizeof(rpath_buf))
         len = sizeof(rpath_buf) - 1;
-      memcpy(rpath_buf, shared___path, len);
+      memcpy(rpath_buf, shared_rt_path, len);
       rpath_buf[len] = '\0';
       static char rpath_arg[PATH_MAX + 16];
       snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
@@ -166,7 +178,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   const char *shared_libs[16];
   size_t shared_count = 0;
   if (shared_env) {
-    shared_buf = strdup(shared_env);
+    shared_buf = ny_strdup(shared_env);
     if (shared_buf) {
       char *token_t = strtok(shared_buf, ":, ");
       while (token_t && shared_count < 16) {
@@ -180,6 +192,12 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   }
   if (shared_buf)
     free(shared_buf);
+  for (size_t i = 0; i < link_lib_count; ++i) {
+    if (idx + 1 >= max_args)
+      break;
+    argv[idx++] = link_libs[i];
+  }
+  argv[idx++] = "-Wl,--as-needed";
   argv[idx] = NULL;
   int rc = ny_exec_spawn(argv);
   if (rc != 0) {

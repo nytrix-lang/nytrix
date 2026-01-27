@@ -30,13 +30,14 @@ LLVMValueRef build_alloca(codegen_t *cg, const char *name) {
 }
 
 void codegen_init_with_context(codegen_t *cg, program_t *prog,
-                               LLVMModuleRef mod, LLVMContextRef ctx,
-                               LLVMBuilderRef builder) {
+                               struct arena_t *arena, LLVMModuleRef mod,
+                               LLVMContextRef ctx, LLVMBuilderRef builder) {
   memset(cg, 0, sizeof(codegen_t));
   cg->ctx = ctx;
   cg->module = mod;
   cg->builder = builder;
   cg->prog = prog;
+  cg->arena = arena;
   cg->fun_sigs.len = cg->fun_sigs.cap = 0;
   cg->fun_sigs.data = NULL;
   cg->global_vars.len = cg->global_vars.cap = 0;
@@ -44,8 +45,8 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->interns.len = cg->interns.cap = 0;
   cg->interns.data = NULL;
   cg->llvm_ctx_owned = false;
-  cg->impo_aliases.len = cg->impo_aliases.cap = 0;
-  cg->impo_aliases.data = NULL;
+  cg->import_aliases.len = cg->import_aliases.cap = 0;
+  cg->import_aliases.data = NULL;
   cg->comptime = false;
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
   cg->had_error = 0;
@@ -53,10 +54,12 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   add_builtins(cg);
 }
 
-void codegen_init(codegen_t *cg, program_t *prog, const char *name) {
+void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
+                  const char *name) {
   NY_LOG_V1("Initializing codegen for module: %s\n", name);
   memset(cg, 0, sizeof(codegen_t));
   cg->prog = prog;
+  cg->arena = arena;
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   cg->ctx = LLVMContextCreate();
@@ -176,7 +179,8 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
 }
 
 void codegen_dispose(codegen_t *cg) {
-  LLVMDisposeBuilder(cg->builder);
+  if (cg->builder)
+    LLVMDisposeBuilder(cg->builder);
   if (cg->llvm_ctx_owned) {
     if (cg->module)
       LLVMDisposeModule(cg->module);
@@ -184,24 +188,23 @@ void codegen_dispose(codegen_t *cg) {
   }
   for (size_t i = 0; i < cg->fun_sigs.len; i++) {
     free((void *)cg->fun_sigs.data[i].name);
+    if (cg->fun_sigs.data[i].link_name)
+      free((void *)cg->fun_sigs.data[i].link_name);
   }
   for (size_t i = 0; i < cg->global_vars.len; i++) {
     free((void *)cg->global_vars.data[i].name);
   }
-  /* Do not free interned strings here; they may be referenced by persistent
-   * data structures in the runtime (e.g. dict keys in the REPL). */
-  /*
   for (size_t i = 0; i < cg->interns.len; i++) {
-    free(cg->interns.data[i].alloc);
+    if (cg->interns.data[i].alloc)
+      free(cg->interns.data[i].alloc);
   }
-  */
   for (size_t i = 0; i < cg->aliases.len; i++) {
     free((void *)cg->aliases.data[i].name);
     free((void *)cg->aliases.data[i].stmt_t);
   }
-  for (size_t i = 0; i < cg->impo_aliases.len; i++) {
-    free((void *)cg->impo_aliases.data[i].name);
-    free((void *)cg->impo_aliases.data[i].stmt_t);
+  for (size_t i = 0; i < cg->import_aliases.len; i++) {
+    free((void *)cg->import_aliases.data[i].name);
+    free((void *)cg->import_aliases.data[i].stmt_t);
   }
   for (size_t i = 0; i < cg->use_modules.len; i++) {
     free((void *)cg->use_modules.data[i]);
@@ -210,8 +213,12 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->global_vars);
   vec_free(&cg->interns);
   vec_free(&cg->aliases);
-  vec_free(&cg->impo_aliases);
+  vec_free(&cg->import_aliases);
   vec_free(&cg->use_modules);
+  if (cg->prog && cg->prog_owned) {
+    program_free(cg->prog, (arena_t *)cg->arena);
+    free(cg->prog);
+  }
 }
 
 void codegen_reset(codegen_t *cg) { (void)cg; }

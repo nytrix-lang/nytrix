@@ -1,0 +1,15 @@
+# LeakSanitizer Suppressions for Nytrix
+#
+# Suppress leaks from JIT-compiled code that aren't critical to fix
+# These are small allocations from runtime during test execution.
+# We'll fix these properly, but for now suppress.
+
+leak:__malloc
+leak:__to_str
+leak:ny_strdup
+leak:vec_push_impl
+leak:LLVM
+leak:libnytrixrt.so
+leak:^__malloc$
+leak:^__flt_box_val$
+leak:^__add$

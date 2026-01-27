@@ -1,46 +1,33 @@
-use std.io
-use std.os.time
-use std.math.timefmt
-use std.core.test
-use std.core
-use std.strings.str
+use std.os.time *
+use std.math.timefmt *
+use std.core.error *
+
+;; std.math.time (Test)
+;; Tests time, ticks, sleep, and time formatting.
 
 print("Testing Math Time...")
 
 def t1 = time()
-print("Current time:", t1)
 assert(t1 > 0, "time > 0")
 
 def start = ticks()
-print("Start ticks:", start)
 sleep(1)
 def end = ticks()
-print("End ticks:", end)
-print("Diff:", end - start)
 
-if (end > 0 && start > 0) {
-   if (end > start) {
-      if (end - start < 500000000) {
-          print("Warning: sleep duration < 0.5s (likely env/syscall issue): ", end - start)
-      }
-      ; Always pass if monotonic increasing
-   } else {
-      print("Warning: Ticks backwards or wrapped? end < start")
-   }
+if(start > 0 && end > 0){
+ if(end < start){
+  print("Warning: ticks went backwards")
+ }
 } else {
-   print("Warning: ticks() returned 0 (syscall failed?)")
-   ; Check if running in enviroment where MONOTONIC fails?
-   ; Just allow test to proceed if ticks failed, but warn.
+ print("Warning: ticks unavailable")
 }
 
-ticks() ; Ensure it runs
+ticks()
 
-; Format time
 def fmt = format_time(0)
-print("Epoch:", fmt)
-assert(eq(fmt, "1970-01-01 00:00:00"), "timefmt epoch")
+assert(eq(fmt, "1970-01-01 00:00:00"), "epoch")
 
-def fmt2 = format_time(1672531200) ; 2023-01-01 00:00:00 UTC
-assert(eq(fmt2, "2023-01-01 00:00:00"), "timefmt 2023")
+def fmt2 = format_time(1672531200)
+assert(eq(fmt2, "2023-01-01 00:00:00"), "2023")
 
-print("✓ std.math.time passed")
+print("✓ std.math.time tests passed")

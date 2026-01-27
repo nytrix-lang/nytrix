@@ -48,6 +48,8 @@ const char *parser_token_name(token_kind k) {
     return "catch";
   case NY_T_USE:
     return "use";
+  case NY_T_LAYOUT:
+    return "layout";
   case NY_T_GOTO:
     return "goto";
   case NY_T_LAMBDA:
@@ -70,6 +72,18 @@ const char *parser_token_name(token_kind k) {
     return "asm";
   case NY_T_AS:
     return "as";
+  case NY_T_MATCH:
+    return "match";
+  case NY_T_EMBED:
+    return "embed";
+  case NY_T_EXTERN:
+    return "extern";
+  case NY_T_MUT:
+    return "mut";
+  case NY_T_MODULE:
+    return "module";
+  case NY_T_COMPTIME:
+    return "comptime";
   case NY_T_PLUS:
     return "+";
   case NY_T_MINUS:

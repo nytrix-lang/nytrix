@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-import os
-import sys
-import re
-import json
-import http.server
-import socketserver
-import argparse
+"""
+Nytrix Document Generator
+"""
+import os, sys, re, json, argparse, socketserver
+from pathlib import Path
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 template_path = os.path.join(script_dir, "assets", "webdoc.html")
@@ -13,333 +12,328 @@ if not os.path.exists(template_path):
     template_path = "webdoc.html"
 
 try:
-    with open(template_path, 'r') as f:
+    with open(template_path, "r") as f:
         HTML_TEMPLATE = f.read()
-    
     js_path = os.path.join(script_dir, "assets", "webdoc.js")
     if os.path.exists(js_path):
-        with open(js_path, 'r') as f:
-            js_content = f.read()
-            HTML_TEMPLATE = HTML_TEMPLATE.replace('SCRIPT_PLACEHOLDER', js_content)
-except:
-    HTML_TEMPLATE = "<html><body>Error: Template not found</body></html>"
+        with open(js_path, "r") as f:
+            JS_SCRIPT_TEMPLATE = f.read()
+    else:
+        print(f"Error: webdoc.js not found at {js_path}", file=sys.stderr)
+        sys.exit(1)
+except FileNotFoundError as e:
+    print(f"Error: {e}. Make sure assets folder exists.", file=sys.stderr)
+    sys.exit(1)
+
+def _extract_body_html(html_text):
+    body_match = re.search(r"<body[^>]*>(.*?)</body>", html_text, re.DOTALL | re.IGNORECASE)
+    if body_match:
+        return body_match.group(1)
+    return html_text
+
+def _refine_info_html(html_text):
+    html_text = html_text.replace(
+        '<div class="contents" style="margin-left: 20px;">',
+        '<div class="contents">'
+    )
+    html_text = html_text.replace(
+        '<ul class="mini-toc" style="margin-left: 20px;">',
+        '<ul class="mini-toc">'
+    )
+    html_text = re.sub(r'<div class="nav-panel">.*?</div>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+    html_text = re.sub(r'Next:\s.*?(\s|&nbsp;|</p>|<br>)', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'Previous:\s.*?(\s|&nbsp;|</p>|<br>)', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'Up:\s.*?(\s|&nbsp;|</p>|<br>)', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'\[Contents\]\s*\[Index\]', '', html_text, flags=re.IGNORECASE)
+    html_text = re.sub(r'\s*<a class="copiable-link"[^>]*>.*?</a>\s*', ' ', html_text, flags=re.DOTALL | re.IGNORECASE)
+    return html_text
+
+def deident_code(code_lines):
+    if not code_lines:
+        return ""
+    lines = code_lines.split("\n")
+    min_indent = -1
+    for line in lines:
+        if line.strip():
+            indent = len(line) - len(line.lstrip())
+            if min_indent == -1 or indent < min_indent:
+                min_indent = indent
+    if min_indent <= 0:
+        return code_lines
+    dedented_lines = []
+    for line in lines:
+        if len(line) >= min_indent:
+            dedented_lines.append(line[min_indent:])
+        else:
+            dedented_lines.append(line)
+    return "\n".join(dedented_lines)
 
 def load_markdown_docs(docs_dir):
     docs = []
     if not os.path.exists(docs_dir):
         return docs
     for filename in sorted(os.listdir(docs_dir)):
+        filepath = os.path.join(docs_dir, filename)
         if filename.endswith(".md"):
-            filepath = os.path.join(docs_dir, filename)
-            name = filename[:-3] # Remove .md
-            with open(filepath, 'r', encoding='utf-8') as f:
-                md_content = f.read()
-                docs.append({
-                    "name": name,
-                    "html": md_content # Send raw markdown to JS
-                })
+            name = filename[:-3]
+            with open(filepath, "r", encoding="utf-8") as f:
+                docs.append({"name": name, "format": "md", "html": f.read()})
+        elif filename.endswith(".html"):
+            name = filename[:-5]
+            with open(filepath, "r", encoding="utf-8") as f:
+                html = _extract_body_html(f.read())
+                html = _refine_info_html(html)
+                docs.append({"name": name, "format": "html", "html": html})
     return docs
 
-def find_missing_docs(root_dir):
-    missing_docs = []
-    
-    for dirpath, _, filenames in os.walk(root_dir):
-        for filename in filenames:
-            if not filename.endswith('.ny'):
-                continue
-            
-            filepath = os.path.join(dirpath, filename)
-            with open(filepath, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
-                # Simple check for function start
-                if line.startswith('fn ') or line.startswith('pub fn '):
-                    # extract name
-                    parts = line.split('(')[0].split()
-                    if not parts: 
-                        i+=1
-                        continue
-                    func_name = parts[-1]
-                    
-                    # Ignore private functions
-                    if func_name.startswith('_'):
-                        i += 1
-                        continue
-                        
-                    # Now check body for docstring.
-                    has_doc = False
-                    # Check current line after { if present
-                    if '{' in line:
-                        after_brace = line.split('{', 1)[1].strip()
-                        if after_brace.startswith('"') or after_brace.startswith("'"):
-                            has_doc = True
-                    
-                    if not has_doc:
-                        # Check next few lines
-                        for j in range(i + 1, min(i + 5, len(lines))):
-                            next_line = lines[j].strip()
-                            if not next_line: continue
-                            if next_line.startswith('"') or next_line.startswith("'"):
-                                has_doc = True
-                            if next_line.startswith('def ') or next_line.startswith('if') or next_line.startswith('return') or next_line.startswith('while') or next_line.startswith('}'):
-                                # Code started, stop looking
-                                break
-                            if has_doc: break
-                            
-                    if not has_doc:
-                        missing_docs.append(f"{filepath}:{i+1} {func_name}")
-                i += 1
+def sanitize_id(name):
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
-    return missing_docs
+def extract_docstring(body_text):
+    doc_pattern = re.compile(r'^\s*("([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\')', re.MULTILINE)
+    match = doc_pattern.search(body_text)
+    if match:
+        doc = (match.group(2) or match.group(4) or "").strip()
+        remaining = body_text[match.end():]
+        return doc, remaining
+    return "", body_text
 
-def parse_nytrix_docs(bundle_path):
-    if not os.path.exists(bundle_path): return []
-    with open(bundle_path, 'r') as f: content = f.read()
+def parse_function_body(chunk, start_pos):
+    depth = 0
+    in_string = False
+    in_comment = False
+    string_char = None
+    escape_next = False
+    body_start = -1
+    i = start_pos
+    while i < len(chunk):
+        char = chunk[i]
+        if escape_next:
+            escape_next = False
+            i += 1
+            continue
+        if char == "\\" and in_string:
+            escape_next = True
+            i += 1
+            continue
+        if char == ";" and not in_string:
+            in_comment = True
+            i += 1
+            continue
+        if char == "\n" and in_comment:
+            in_comment = False
+            i += 1
+            continue
+        if in_comment:
+            i += 1
+            continue
+        if char in ('"', "'") and not in_string:
+            in_string = True
+            string_char = char
+            i += 1
+            continue
+        if char == string_char and in_string:
+            in_string = False
+            string_char = None
+            i += 1
+            continue
+        if in_string:
+            i += 1
+            continue
+        if char == "{":
+            if depth == 0:
+                body_start = i
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0 and body_start != -1:
+                return chunk[body_start + 1:i], i + 1
+        i += 1
+    return None, start_pos
+
+def parse_imports(body_text):
+    imports = []
+    import_pattern = re.compile(r"use\s+([a-zA-Z0-9_.]+)(?:\s+as\s+([a-zA-Z0-9_]+))?")
+    for match in import_pattern.finditer(body_text):
+        full_path = match.group(1)
+        alias = match.group(2)
+        parts = full_path.split(".")
+        if len(parts) > 1:
+            module_target = ".".join(parts[:-1])
+            symbol_target = parts[-1]
+        else:
+            module_target = ""
+            symbol_target = full_path
+        imports.append({"full_path": full_path, "module_target": module_target, "symbol_target": symbol_target, "alias": alias})
+    return imports
+
+def clean_code_view(code_lines):
+    if not code_lines:
+        return ""
+    lines = code_lines.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+def parse_nytrix_docs(bundle_path, docs_dirs=None):
+    if not os.path.exists(bundle_path):
+        print(f"Error: Bundle file not found: {bundle_path}", file=sys.stderr)
+        return []
+    with open(bundle_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
     modules = []
-    # Split by module header, capturing the delimiter to extract filename
-    chunks = re.split(r'(;;\s*Module from\s+.*)', content)
-    
-    # Iterate over chunks, looking for header + body pairs
+    chunks = re.split(r"(;;\s*Module from\s+.*)", content)
     i = 0
+    parsed_count = 0
+
     while i < len(chunks):
         chunk = chunks[i]
         header = ""
         body = chunk
-        
-        # If this chunk is a header, the next one is the body
-        if chunk.strip().startswith(';; Module from'):
+        if chunk.strip().startswith(";; Module from"):
             header = chunk
             if i + 1 < len(chunks):
-                body = chunks[i+1]
-                i += 1 # Skip body in next iteration
+                body = chunks[i + 1]
+                i += 1
             else:
                 body = ""
         elif not chunk.strip():
             i += 1
             continue
-            
-        # Parse module from body
-        mod_match = re.search(r'module\s+([a-zA-Z0-9.]+)\s*\(', body)
+
+        mod_match = re.search(r"module\s+([a-zA-Z0-9.]+)\s*\(", body)
         if not mod_match:
             i += 1
             continue
-            
-        mod_name = mod_match.group(1)
-        
-        # Derive path (list of components) from mod_name
-        path = mod_name.split('.')
 
-        # Extract original file path from header
+        mod_name = mod_match.group(1)
+        path = mod_name.split(".")
+
         orig_file = ""
         if header:
-            module_source_pattern = re.compile(r';;\s*Module from\s+([a-zA-Z0-9_/.]+)\.ny')
-            module_source_match = module_source_pattern.search(header)
-            orig_file = module_source_match.group(1) + '.ny' if module_source_match else ""
+            file_match = re.search(r";;\s*Module from\s+([a-zA-Z0-9_/.]+)\.ny", header)
+            if file_match:
+                orig_file = file_match.group(1) + ".ny"
 
-        # If it's a mod.ny file, ensure the mod_name ends with .mod 
-        # to avoid repetition in sidebar and allow #std.cli.mod anchors
-        if orig_file.endswith('mod.ny') and not mod_name.endswith('.mod'):
-            mod_name += ".mod"
-            path = mod_name.split('.')
-        
         mod_doc = ""
-        lines = body.splitlines()
-        for line in lines:
-            if line.strip().startswith(';;') and 'Keywords:' not in line and 'Module from' not in line:
-                mod_doc += line.replace(';;', '').strip() + "\n"
-            elif 'module' in line: break
-        
-        # Use body for symbol parsing
-        chunk = body 
+        mod_doc_match = re.search(
+            r"module\s+[\w\.]+\s*\([^)]*\)\s*\{\s*(\"([^\"\\]*(\\.[^\"\\]*)*)\"|\'([^\'\\]*(\\.[^\'\\]*)*)\')",
+            body,
+            re.DOTALL,
+        )
+        if mod_doc_match:
+            mod_doc = (mod_doc_match.group(2) or mod_doc_match.group(4) or "").strip()
+
         symbols = []
+        fn_pattern = re.compile(r"fn\s+([a-zA-Z0-9_.:]+)\s*\((.*?)\)\s*\{", re.DOTALL)
+        for fn_match in fn_pattern.finditer(body):
+            fn_name = fn_match.group(1)
+            fn_args = fn_match.group(2).strip()
+            full_name = fn_name + (f"({fn_args})" if fn_args else "")
+            fn_body, _ = parse_function_body(body, fn_match.end() - 1)
+            if fn_body is None:
+                continue
+            doc, code_view = extract_docstring(fn_body)
+            code_view = deident_code(code_view)
+            code_view = clean_code_view(code_view)
+            imports = parse_imports(fn_body)
+            symbols.append({"id": sanitize_id(full_name), "name": full_name, "kind": "function", "doc": doc, "code": code_view, "imports": imports})
+
+        const_pattern = re.compile(r"def\s+define\s+([a-zA-Z0-9_]+)\s*=", re.MULTILINE)
+        for const_match in const_pattern.finditer(body):
+            const_name = const_match.group(1)
+            symbols.append({"id": sanitize_id(const_name), "name": const_name, "kind": "constant", "sig": f"def {const_name}", "doc": "Constant definition.", "code": const_match.group(0).strip()})
+
+        modules.append({"name": mod_name, "module_doc": mod_doc, "symbols": symbols, "path": path, "orig_file": orig_file})
+        parsed_count += 1
         i += 1
-        def sanitize_id(name):
-            return re.sub(r'[^a-zA-Z0-9_]', '_', name)
 
-        fn_start_pattern = re.compile(r'fn\s+([a-zA-Z0-9_.:]+)\s*\((.*?)\)\s*\{', re.DOTALL) # Updated to allow qualified names
-        # Updated doc_pattern to match a string literal at the beginning of the function body
-        doc_pattern = re.compile(r'\s*("((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', re.DOTALL)
-        curr_pos = 0
-        while True:
-            m = fn_start_pattern.search(chunk, curr_pos)
-            if not m: break
-            name, args = m.groups() # name is now "std.os.thread::mutex_free"
-            
-            full_name = name # No need to prepend mod_name anymore, as name is already qualified
-            if args.strip():
-                full_name += f"({args.strip()})" # Add arguments to the name if present
-            
-            # Robust parser for function body
-            start_bracket = m.end() - 1
-            body = ""
-            depth = 0
-            
-            # State constants
-            STATE_NORMAL = 0
-            STATE_STRING_DQ = 1 # "
-            STATE_STRING_SQ = 2 # '
-            STATE_COMMENT = 3   # ;
-            
-            state = STATE_NORMAL
-            
-            k = start_bracket
-            while k < len(chunk):
-                char = chunk[k]
-                
-                if state == STATE_NORMAL:
-                    if char == '"':
-                        state = STATE_STRING_DQ
-                    elif char == "'":
-                        state = STATE_STRING_SQ
-                    elif char == ';':
-                        state = STATE_COMMENT
-                    elif char == '{':
-                        depth += 1
-                    elif char == '}':
-                        depth -= 1
-                        if depth == 0:
-                            body = chunk[start_bracket:k+1]
-                            curr_pos = k + 1
-                            found_body = True
-                            break
-                            
-                elif state == STATE_STRING_DQ:
-                    if char == '"':
-                        # Check for escape
-                        backslashes = 0
-                        idx = k - 1
-                        while idx >= 0 and chunk[idx] == '\\':
-                            backslashes += 1
-                            idx -= 1
-                        if backslashes % 2 == 0:
-                            state = STATE_NORMAL
-                            
-                elif state == STATE_STRING_SQ:
-                    if char == "'":
-                         # Check for escape
-                        backslashes = 0
-                        idx = k - 1
-                        while idx >= 0 and chunk[idx] == '\\':
-                            backslashes += 1
-                            idx -= 1
-                        if backslashes % 2 == 0:
-                            state = STATE_NORMAL
-                            
-                elif state == STATE_COMMENT:
-                    if char == '\n':
-                        state = STATE_NORMAL
-                
-                k += 1
-            
-            if not found_body:
-                 # Safeguard: if we didn't find the end of the function, skip past the start to avoid infinite loop
-                 curr_pos = m.end()
-                 continue
-
-            doc_match = doc_pattern.search(body) # Define doc_match here
-            if doc_match:
-                # Updated doc assignment to use group 2 or 3 for the string content
-                doc = (doc_match.group(2) or doc_match.group(3) or "").strip()
-                code_view = body.replace(doc_match.group(0), '', 1).strip()
-            else:
-                doc = "" # Default doc to empty string if no match
-                code_view = body
-            
-            # Robust line-based stripping to preserve indentation
-            lines = code_view.splitlines()
-            if len(lines) > 1:
-                idx_start = 1
-                while idx_start < len(lines)-1 and not lines[idx_start].strip(): idx_start += 1
-                idx_end = len(lines) - 2
-                while idx_end >= idx_start and not lines[idx_end].strip(): idx_end -= 1
-                if idx_start <= idx_end:
-                    code_view = lines[0] + "\n" + "\n".join(lines[idx_start:idx_end+1]) + "\n" + lines[-1]
-                else:
-                    code_view = lines[0] + "\n" + lines[-1]
-            
-            # Extract imports from the function body
-            imports = []
-            import_pattern = re.compile(r'use\s+([a-zA-Z0-9_.]+)(?:\s+as\s+([a-zA-Z0-9_]+))?')
-            for m_import in import_pattern.finditer(body):
-                full_import_path = m_import.group(1)
-                alias = m_import.group(2)
-                
-                path_components = full_import_path.split('.')
-                symbol_name = path_components[-1]
-                module_target_path = ".".join(path_components[:-1]) if len(path_components) > 1 else ""
-
-                imports.append({
-                    'full_path': full_import_path,
-                    'alias': alias,
-                    'module_target': module_target_path,
-                    'symbol_target': symbol_name
-                })
-
-            symbols.append({"id": sanitize_id(full_name), "name": full_name, "kind": "function", "doc": doc, "code": code_view.strip(), "imports": imports})
-        def_pattern = re.compile(r'def\s+define\s+([a-zA-Z0-9_]+)\s*=', re.MULTILINE) # Exclude commented definitions
-        for m in def_pattern.finditer(chunk):
-            name = m.group(1)
-            symbols.append({"id": sanitize_id(name), "name": name, "kind": "constant", "sig": f"def {name}", "doc": "Constant definition.", "code": m.group(0).strip()})
-        modules.append({"name": mod_name, "module_doc": mod_doc.strip(), "symbols": symbols, "path": path})
-    
-    markdown_docs = load_markdown_docs(os.path.join(script_dir, "..", "..", "docs")) # root/docs is relative to etc/tools/webdoc
-    
+    if not docs_dirs:
+        docs_dirs = [os.path.join(script_dir, "..", "..", "docs")]
+    markdown_docs = []
+    seen = set()
+    for docs_dir in docs_dirs:
+        for doc in load_markdown_docs(docs_dir):
+            if doc["name"] in seen:
+                continue
+            markdown_docs.append(doc)
+            seen.add(doc["name"])
     overview_module = {
         "name": "Overview",
-        "module_doc": "Welcome to the Nytrix Standard Library Documentation.",
+        "module_doc": "Nytrix Standard Library - Comprehensive documentation for all modules and functions.",
         "symbols": [],
-        "categories_data": {},
         "path": ["Home"],
-        "markdown_docs": markdown_docs
+        "markdown_docs": markdown_docs,
     }
-    
     modules.insert(0, overview_module)
+    print(f"✓ Parsed {parsed_count} modules with {sum(len(m.get('symbols', [])) for m in modules)} total symbols")
     return modules
 
-def main():
-    parser = argparse.ArgumentParser(description='Nytrix Web Doc Generator')
-    parser.add_argument('input', help='Input bundle file (e.g. build/std_bundle.ny)')
-    parser.add_argument('--output', '-o', default='build/docs/index.html', help='Output HTML file')
-    parser.add_argument('--serve', '-s', action='store_true', help='Serve the generated docs')
-    parser.add_argument('--port', '-p', type=int, default=8000, help='Port for server')
-    parser.add_argument('--check-docs', action='store_true', help='Check for missing docstrings')
-    args = parser.parse_args()
-    
-    if args.check_docs:
-        print("Checking for missing docstrings...")
-        # Assume std is in current working directory or relative to script's typical location
-        # But script is in etc/tools/webdoc
-        # Maybe use a default std path or another arg
-        # We can try to guess or use CWD if it looks like the root
-        std_dir = "std"
-        if os.path.exists(std_dir):
-            missing = find_missing_docs(std_dir)
-            if missing:
-                for item in missing:
-                    print(f"MISSING: {item}")
-            else:
-                print("All public functions have docstrings!")
-        else:
-            print("Error: 'std' directory not found in current path.")
-        if not args.input: # Allow running just for check if input is optional or handled
-             return
+class CustomHandler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/":
+            self.path = "/index.html"
+        return SimpleHTTPRequestHandler.do_GET(self)
 
-    if not os.path.exists(args.input): sys.exit(1)
-    doc_data = parse_nytrix_docs(args.input)
-    html = HTML_TEMPLATE.replace('DATA_PLACEHOLDER', json.dumps(doc_data))
-    if os.path.dirname(args.output): os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    with open(args.output, 'w') as f: f.write(html)
-    if args.serve:
-        target_dir = os.path.abspath(os.path.dirname(args.output))
-        os.chdir(target_dir)
-        handler = http.server.SimpleHTTPRequestHandler
-        socketserver.TCPServer.allow_reuse_address = True
-        with socketserver.TCPServer(("", args.port), handler) as httpd:
-            try: httpd.serve_forever()
-            except KeyboardInterrupt: httpd.server_close()
+    def log_message(self, format, *args):
+        pass
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Nytrix Documentation Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s build/std_bundle.ny -o build/docs
+  %(prog)s build/std_bundle.ny --serve
+  %(prog)s --check-docs
+        """,
+    )
+    parser.add_argument("input", nargs="?", help="Path to std_bundle.ny")
+    parser.add_argument("-o", "--output", help="Output directory for documentation")
+    parser.add_argument("-s", "--serve", action="store_true", help="Serve documentation on local HTTP server")
+    parser.add_argument("-p", "--port", type=int, default=8000, help="Port for HTTP server (default: 8000)")
+    parser.add_argument("--check-docs", action="store_true", help="Check for missing docstrings")
+    args = parser.parse_args()
+
+    if not args.check_docs and not args.input:
+        parser.error("input file required (unless using --check-docs)")
+    if args.input and not os.path.exists(args.input):
+        print(f"Error: Input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.input:
+        print(f"   Source: {args.input}")
+        docs_dirs = [os.path.join(script_dir, "..", "..", "docs")]
+        extra_dir = os.getenv("NYTRIX_WEBDOC_INFO_DIR", "/tmp/nytrix-info")
+        if os.path.isdir(extra_dir):
+            docs_dirs.append(extra_dir)
+        data = parse_nytrix_docs(args.input, docs_dirs=docs_dirs)
+        if args.output:
+            output_dir = Path(args.output)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            html_path = output_dir / "index.html"
+            final_html = HTML_TEMPLATE.replace("DATA_PLACEHOLDER", json.dumps(data, indent=2))
+            final_html = final_html.replace("SCRIPT_PLACEHOLDER", JS_SCRIPT_TEMPLATE)
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(final_html)
+            print(f"✓ Documentation written to: {html_path}")
+        if args.serve:
+            serve_dir = args.output if args.output else os.path.dirname(args.input)
+            os.chdir(serve_dir)
+            print(f"\nServing documentation at http://localhost:{args.port}")
+            print("   Press Ctrl+C to stop\n")
+            try:
+                with socketserver.TCPServer(("", args.port), CustomHandler) as httpd:
+                    httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("\n✓ Server stopped")
+            except OSError:
+                print(f"Error: Port {args.port} already in use", file=sys.stderr)
+                sys.exit(1)
 
 if __name__ == "__main__":
     main()

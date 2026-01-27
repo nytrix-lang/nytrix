@@ -29,21 +29,22 @@ GNU General Public License v3.0
 The @command{ny} command is the primary tool for Nytrix. It supports JIT execution, AOT compilation, and an interactive REPL.
 
 @menu
-* Synopsis::           How to run ny.
 * Options::            Command line arguments.
 * Environment::        Environment variables.
 * Examples::           Common usage patterns.
 * See Also::           Related documentation.
 @end menu
 
-@node Synopsis
-@chapter Synopsis
-@example
-ny [OPTIONS] [FILE]
-@end example
-
 @node Options
 @chapter Options
+@section General
+@table @code
+@item --color=@var{WHEN}
+Set color output: @code{auto}, @code{always}, or @code{never}.
+@item -safe-mode
+Enable all safety checks.
+@end table
+
 @section Optimization
 @table @code
 @item -O0, -O1, -O2, -O3
@@ -61,9 +62,29 @@ Only emit IR, don't execute (default).
 @item -o [path], --output=@var{PATH}
 Emit ELF at @var{path} (default @file{a.out}). Implies @code{-emit-only}.
 @item -strip, -no-strip
-Create stripped or unstripped binary.
+Create stripped or unstripped binary (default: strip).
 @item -c @var{CODE}
 Execute inline Nytrix code.
+@end table
+
+@section Stdlib
+@table @code
+@item -std @var{MODE}
+Stdlib inclusion mode: @code{none}, @code{minimal}, or @code{full} (default: minimal).
+@item -no-std
+Disable stdlib prelude.
+@item --std-path=@var{PATH}
+Use a custom @file{std_bundle.ny}.
+@item --full-mod
+Alias for @code{-std full}.
+@end table
+
+@section Linking
+@table @code
+@item -L@var{DIR}
+Add a linker search path (repeatable).
+@item -l@var{LIB}
+Link against library (also accepts @code{-l @var{LIB}}).
 @end table
 
 @section REPL
@@ -104,10 +125,6 @@ Verify the LLVM module.
 Write @file{build/debug/last_source.ny} and @file{last_ir.ll} on errors.
 @item -trace
 Enable execution tracing.
-@item --color=@var{WHEN}
-Set color output: @code{auto}, @code{always}, or @code{never}.
-@item -safe-mode
-Enable all safety checks.
 @end table
 
 @section Info
@@ -121,10 +138,10 @@ Show version information.
 @node Environment
 @chapter Environment Variables
 @table @code
-@item NYTRIX_RUN
-Same as @code{-run} flag.
-@item NYTRIX_DUMP_TOKENS
-Dump tokens during lexing.
+@item NYTRIX_STD_PATH
+Override @file{std_bundle.ny} path.
+@item NYTRIX_STD_PREBUILT
+Use prebuilt stdlib source.
 @end table
 
 @node Examples
@@ -138,6 +155,6 @@ Dump tokens during lexing.
 
 @node See Also
 @chapter See Also
-@ref{Top, , Nytrix Language Reference, nytrix}
+Nytrix Language Reference (see the @code{nytrix} manual).
 
 @bye

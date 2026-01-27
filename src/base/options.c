@@ -1,8 +1,10 @@
 #include "base/options.h"
 #include "base/common.h"
+#include "base/util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // Global State
 int debug_enabled = 0;
@@ -14,14 +16,19 @@ void ny_options_init(ny_options *opt) {
   opt->mode = NY_MODE_RUN;
   opt->strip_override = -1;
   opt->color_mode = -1;
-  opt->std_mode = STD_MODE_DEFAULT;
+  opt->std_mode = STD_MODE_MINIMAL;
 }
+
 
 void ny_options_usage(const char *prog) {
   fprintf(
       stderr,
       "\n\033[1;36mNytrix Compiler\033[0m - Small core with stdlib in .ny\n\n");
-  fprintf(stderr, "\033[1mUSAGE:\033[0m %s [OPTIONS] file.ny\n\n", prog);
+  fprintf(stderr, "\033[1mGENERAL:\033[0m\n");
+  fprintf(stderr,
+          "  \033[35m--color=WHEN\033[0m       WHEN: auto | always | never\n");
+  fprintf(stderr,
+          "  \033[35m-safe-mode\033[0m         Enable all safety checks\n\n");
   fprintf(stderr, "\033[1mOPTIMIZATION:\033[0m\n");
   fprintf(stderr, "  \033[32m-O1/-O2/-O3\033[0m        Optimization level "
                   "(default: -O0)\n");
@@ -36,9 +43,23 @@ void ny_options_usage(const char *prog) {
                   "(default: a.out; implies -emit-only)\n");
   fprintf(stderr, "  \033[32m--output=<path>\033[0m    Same as -o\n");
   fprintf(stderr, "  \033[32m-strip, -no-strip\033[0m  Create "
-                  "stripped/unstripped binary\n");
+                  "stripped/unstripped binary (default: strip)\n");
   fprintf(stderr,
           "  \033[32m-c <code>\033[0m          Execute inline code\n\n");
+  fprintf(stderr, "\033[1mSTDLIB:\033[0m\n");
+  fprintf(stderr,
+          "  \033[32m-std [none|minimal|full]\033[0m Stdlib inclusion mode (default: minimal)\n");
+  fprintf(stderr,
+          "  \033[32m-no-std\033[0m            Disable stdlib prelude\n");
+  fprintf(stderr,
+          "  \033[32m--std-path=<path>\033[0m Use custom std_bundle.ny\n\n");
+  fprintf(stderr,
+          "  \033[32m--full-mod\033[0m         Alias for -std full\n\n");
+  fprintf(stderr, "\033[1mLINKING:\033[0m\n");
+  fprintf(stderr,
+          "  \033[32m-L<dir>\033[0m           Add a linker search path (repeatable)\n");
+  fprintf(stderr,
+          "  \033[32m-l<lib>\033[0m           Link against library (also accepts -l <lib>)\n\n");
   fprintf(stderr, "\033[1mREPL:\033[0m\n");
   fprintf(
       stderr,
@@ -67,22 +88,25 @@ void ny_options_usage(const char *prog) {
   fprintf(stderr,
           "  \033[34m-dump-stats\033[0m        Print compilation statistics\n");
   fprintf(stderr, "  \033[34m-verify\033[0m            Verify LLVM module\n");
+  fprintf(stderr, "  \033[34m-g\033[0m                 Emit debug symbols\n");
+  fprintf(stderr,
+          "  \033[34m--emit-ir=<path>\033[0m   Emit LLVM IR to file\n");
+  fprintf(stderr,
+          "  \033[34m--emit-asm=<path>\033[0m  Emit assembly to file\n");
   fprintf(stderr, "  \033[34m--dump-on-error\033[0m    Write "
                   "build/debug/last_source.ny and last_ir.ll on errors\n");
   fprintf(stderr,
           "  \033[34m-trace\033[0m             Enable execution tracing\n\n");
-  fprintf(stderr,
-          "  \033[35m--color=WHEN\033[0m       WHEN: auto | always | never\n");
-  fprintf(stderr,
-          "  \033[35m-safe-mode\033[0m         Enable all safety checks\n\n");
   fprintf(stderr, "\033[1mINFO:\033[0m\n");
   fprintf(stderr,
           "  \033[34m-h, -help, --help\033[0m  Show this help message\n");
   fprintf(stderr, "  \033[34m-version\033[0m           Show version info\n\n");
   fprintf(stderr, "\033[1mENVIRONMENT:\033[0m\n");
-  fprintf(stderr, "  \033[33mNYTRIX_RUN\033[0m         Same as -run flag\n");
   fprintf(stderr,
-          "  \033[33mNYTRIX_DUMP_TOKENS\033[0m Dump tokens during lexing\n\n");
+          "  \033[33mNYTRIX_STD_PATH\033[0m   Override std_bundle.ny path\n");
+  fprintf(stderr,
+          "  \033[33mNYTRIX_STD_PREBUILT\033[0m Use prebuilt stdlib source\n");
+  fprintf(stderr, "\n");
   fprintf(stderr, "\033[1mEXAMPLES:\033[0m\n");
   fprintf(stderr,
           "  \033[1;36m%s examples/quicksort.ny              # compile "
@@ -230,12 +254,51 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
           ny_options_usage(argv[0]);
           exit(1);
         }
+      } else if (strcmp(a, "--full-mod") == 0) {
+        opt->std_mode = STD_MODE_FULL;
       } else if (strcmp(a, "-no-std") == 0)
         opt->no_std = true;
       else if (strncmp(a, "--std-path=", 11) == 0)
         opt->std_path = a + 11;
       else if (strcmp(a, "--plain-repl") == 0)
         opt->repl_plain = true;
+
+      // Linker flags
+      else if (a[1] == 'L' && a[2] != '\0') {
+        vec_push(&opt->link_dirs, ny_strdup(a));
+      } else if (strcmp(a, "-L") == 0) {
+        if (i + 1 < argc) {
+          size_t len = 2 + strlen(argv[i + 1]);
+          char *buf = malloc(len + 1);
+          if (!buf) {
+            fprintf(stderr, "oom\n");
+            exit(1);
+          }
+          sprintf(buf, "-L%s", argv[++i]);
+          vec_push(&opt->link_dirs, buf);
+        } else {
+          fprintf(stderr, "missing argument for -L\n");
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+      } else if (a[1] == 'l' && a[2] != '\0') {
+        vec_push(&opt->link_libs, ny_strdup(a));
+      } else if (strcmp(a, "-l") == 0) {
+        if (i + 1 < argc) {
+          size_t len = 2 + strlen(argv[i + 1]);
+          char *buf = malloc(len + 1);
+          if (!buf) {
+            fprintf(stderr, "oom\n");
+            exit(1);
+          }
+          sprintf(buf, "-l%s", argv[++i]);
+          vec_push(&opt->link_libs, buf);
+        } else {
+          fprintf(stderr, "missing argument for -l\n");
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+      }
 
       // Color
       else if (strncmp(a, "--color=", 8) == 0) {
@@ -286,4 +349,22 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
     opt->run_jit = false;
   else if (opt->input_file || opt->command_string || opt->mode == NY_MODE_REPL)
     opt->run_jit = true;
+
+  // AUTO-DETECT STANDARD LIBRARY PATH
+  if (!opt->std_path) {
+    const char *env_std = getenv("NYTRIX_STD_PATH");
+    if (env_std) {
+      opt->std_path = env_std;
+    } else {
+      if (access("./build/std_bundle.ny", R_OK) == 0) {
+        opt->std_path = "./build/std_bundle.ny";
+      } else {
+#ifdef NYTRIX_STD_PATH
+        opt->std_path = NYTRIX_STD_PATH;
+#else
+        opt->std_path = "/usr/share/nytrix/std_bundle.ny";
+#endif
+      }
+    }
+  }
 }

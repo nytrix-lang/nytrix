@@ -1,17 +1,17 @@
 ;; Keywords: util counter
 ;; Util Counter module.
 
-use std.core
-use std.core.reflect
-use std.collections
+use std.core *
+use std.core.reflect *
+use std.core *
 module std.util.counter (
    counter, counter_add, most_common
 )
 
 fn counter(xs){
-   "Create counter from list or string."
-   def d = dict(16)
-   def i = 0  def n = len(xs)
+   "Creates a frequency counter dictionary from the elements of list or string `xs`."
+   mut d = dict(16)
+   mut i = 0  def n = len(xs)
    while(i < n){
       def v = get(xs, i)
       def c = dict_get(d, v, 0)
@@ -22,20 +22,20 @@ fn counter(xs){
 }
 
 fn counter_add(d, key, n){
-   "Increment counter."
+   "Adds `n` to the count of `key` in counter dictionary `d`."
    def c = dict_get(d, key, 0)
    return dict_set(d, key, c + n)
 }
 
 fn most_common(d){
-   "Most common items (descending by count)."
+   "Returns a list of `[item, count]` pairs from counter `d`, sorted by count in descending order."
    def its = items(d)
    def n = len(its)
    ; selection sort by count desc
-   def i = 0
+   mut i = 0
    while(i < n){
-      def max_idx = i
-      def j = i + 1
+      mut max_idx = i
+      mut j = i + 1
       while(j < n){
          def count_j = get(get(its, j), 1)
          def count_max = get(get(its, max_idx), 1)
@@ -53,3 +53,4 @@ fn most_common(d){
    }
    return its
 }
+
