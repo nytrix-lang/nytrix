@@ -1,6 +1,5 @@
-use std.io
-use std.math.timefmt
-use std.core.error
+use std.math.timefmt *
+use std.core.error *
 
 ;; std.math.timefmt (Test)
 ;; Tests timestamp formatting.

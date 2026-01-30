@@ -1,6 +1,5 @@
-use std.io
-use std.math.stat
-use std.core.error
+use std.math.stat *
+use std.core.error *
 
 ;; std.math.stat (Test)
 ;; Tests mean and median for odd and even datasets.

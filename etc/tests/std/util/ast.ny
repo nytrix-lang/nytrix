@@ -1,7 +1,6 @@
-use std.io
-use std.util.ast
-use std.core.error
-use std.core.reflect
+use std.util.ast *
+use std.core.error *
+use std.core.reflect *
 
 ;; std.util.ast (Test)
 ;; Tests basic AST parsing.

@@ -1,6 +1,5 @@
-use std.io
-use std.math.float
-use std.core.error
+use std.math.float *
+use std.core.error *
 
 ;; std.math.float (Test)
 ;; Tests float arithmetic, comparisons, floor, and ceil.

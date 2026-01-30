@@ -1,44 +1,41 @@
-use std.io
-use std.os.time
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
-;; Sieve of Eratosthenes (Optimized Benchmark)
-;; Odd-only sieve, byte flags.
+;; Sieve of Eratosthenes (Benchmark)
 
 fn sieve(n){
    if(n < 2){ return 0 }
-
-   ; only odds: index = x >> 1
    def size = (n >> 1) + 1
-   def flags = __malloc(size)
-
-   def i = 0
+   def flags = malloc(size)
+   mut i = 0
    while(i < size){
       store8(flags, 1, i)
       i += 1
    }
-
-   def count = 1 ; prime = 2
-
-   def p = 3
+   def count = 1
+   mut p = 3
    while(p * p <= n){
       if(load8(flags, p >> 1)){
-         def j = p * p
-         def step = p << 1
-         while(j <= n){
-            store8(flags, 0, j >> 1)
-            j += step
+         def sq = p * p
+         mut mul = sq
+         while(mul <= n){
+            store8(flags, 0, mul >> 1)
+            mul += p * 2
          }
       }
       p += 2
    }
-
-   i = 3
+   mut i = p
    while(i <= n){
       if(load8(flags, i >> 1)){ count += 1 }
       i += 2
    }
-
-   __free(flags)
+   free(flags)
    return count
 }
 
@@ -51,3 +48,4 @@ def t1 = ticks()
 
 print(f"Primes: {to_str(r)}")
 print(f"Time: {to_str((t1 - t0) / 1000000)} ms")
+

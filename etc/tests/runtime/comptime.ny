@@ -1,18 +1,22 @@
-use std.core
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; comptime (Test)
 
-def v1 = comptime { return 1 + 2 + 3 }
+mut v1 = comptime { return 1 + 2 + 3 }
 assert(v1 == 6, "comptime basic")
 
-def v2 = comptime { def x = 10 }
+mut v2 = comptime { def x = 10 }
 assert(v2 == 0, "comptime fallthrough")
 
-def v3 = comptime {
-   def sum = 0
-   def i = 0
+mut v3 = comptime {
+   mut sum = 0
+   mut i = 0
    while(i < 5){
       sum = sum + i
       i = i + 1
@@ -22,10 +26,11 @@ def v3 = comptime {
 }
 assert(v3 == 10, "comptime control flow")
 
-def v4 = comptime {
+mut v4 = comptime {
    def inner = comptime { return 5 }
    return inner * 2
 }
 assert(v4 == 10, "comptime nested")
 
 print("✓ comptime tests passed")
+

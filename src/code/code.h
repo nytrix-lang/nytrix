@@ -2,6 +2,8 @@
 
 #include "parse/parser.h"
 #include <llvm-c/Core.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 // Minimal LLVM IR generator using LLVM C API.
 // Link with llvm-config --libs core native
@@ -16,7 +18,7 @@ typedef struct fun_sig {
   const char *name;
   LLVMTypeRef type;
   LLVMValueRef value;
-  stmt_t *stmt_t;
+  struct stmt_t *stmt_t;
   int arity;
   bool is_variadic;
 } fun_sig;
@@ -34,6 +36,8 @@ typedef struct codegen_t {
   LLVMBuilderRef builder;
   LLVMContextRef ctx;
   program_t *prog;
+  arena_t *arena;
+  bool prog_owned;
   VEC(fun_sig) fun_sigs;
   VEC(binding) global_vars;
   VEC(string_intern) interns;
@@ -48,16 +52,19 @@ typedef struct codegen_t {
   VEC(binding) import_aliases;
   VEC(char *) use_modules;
   const char *current_module_name;
+  const char *source_string;
   bool comptime;
   LLVMValueRef result_store_val;
   size_t func_root_idx;
 } codegen_t;
 
-void codegen_init(codegen_t *cg, program_t *prog, const char *name);
-void codegen_init_with_context(codegen_t *cg, program_t *prog,
+void codegen_init(codegen_t *cg, program_t *prog, arena_t *arena,
+                  const char *name);
+void codegen_init_with_context(codegen_t *cg, program_t *prog, arena_t *arena,
                                LLVMModuleRef mod, LLVMContextRef ctx,
                                LLVMBuilderRef builder);
 void codegen_emit(codegen_t *cg);
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
 void codegen_dispose(codegen_t *cg);
 void codegen_reset(codegen_t *cg);
+char *normalize_module_name(const char *raw);

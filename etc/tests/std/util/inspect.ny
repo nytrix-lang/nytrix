@@ -1,6 +1,5 @@
-use std.io
-use std.util.inspect
-use std.core.error
+use std.util.inspect *
+use std.core.error *
 
 ;; std.util.inspect (Test)
 ;; Tests inspect on basic types.

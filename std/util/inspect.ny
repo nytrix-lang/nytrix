@@ -8,7 +8,7 @@ module std.util.inspect (
 
 fn inspect(x){
    "Prints detailed information about value `x`, including its type, representation, length (if applicable), and memory address (for pointers)."
-   def t = type(x)
+   mut t = type(x)
    print(f"Type:  {t}")
    print(f"Value: {repr(x)}")
    if(t == "list" || t == "dict" || t == "set"){
@@ -19,3 +19,4 @@ fn inspect(x){
    }
    return 0
 }
+

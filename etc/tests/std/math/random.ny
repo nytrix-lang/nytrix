@@ -1,6 +1,5 @@
-use std.io
-use std.math.random
-use std.core.error
+use std.math.random *
+use std.core.error *
 
 ;; std.math.random (Test)
 ;; Tests random float and randint bounds.

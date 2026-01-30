@@ -1,13 +1,12 @@
 use std.os.ffi as ffi
-use std.core.error
-use std.io
+use std.core.error *
 
 ;; std.os.ffi (Test)
 ;; Tests basic FFI loading and symbol calling.
 
 print("Testing FFI...")
 
-def h = ffi.dlopen("libc.so.6", 2)
+mut h = ffi.dlopen("libc.so.6", 2)
 if(h == 0){ h = ffi.dlopen("/lib/x86_64-linux-gnu/libc.so.6", 2) }
 if(h == 0){ h = ffi.dlopen("/usr/lib/libc.so.6", 2) }
 
@@ -15,7 +14,7 @@ if(h != 0){
  print("Loaded libc handle:", h)
  def abs_f = ffi.dlsym(h, "llabs")
  if(abs_f != 0){
-  def res = ffi.call1(abs_f, -50)
+  mut res = ffi.call1(abs_f, -50)
   print("llabs(-50) =", res)
   assert(res == 50, "ffi llabs")
  } else {
@@ -27,3 +26,4 @@ if(h != 0){
 }
 
 print("✓ FFI tests passed")
+

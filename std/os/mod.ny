@@ -2,47 +2,58 @@
 ;; Os module.
 
 use std.core
-use std.strings.str
-use std.collections
-use std.io
+use std.str *
+use std.core
+use std.str.io *
 module std.os (
-   pid, ppid, env, environ, getcwd, uid, gid
+   pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append,
+   file_remove, os, arch
 )
+
+fn os() {
+   "Returns the name of the operating system (e.g., 'linux', 'macos', 'windows')."
+   __os_name()
+}
+
+fn arch() {
+   "Returns the name of the system architecture (e.g., 'x86_64', 'aarch64')."
+   __arch_name()
+}
 
 fn pid(){
    "Returns the **process ID** of the calling process via **getpid(2)**."
-   __syscall(39,0,0,0,0,0,0)
+   syscall(39,0,0,0,0,0,0)
 }
 
 fn ppid(){
    "Returns the **parent process ID** of the calling process via **getppid(2)**."
-   __syscall(110,0,0,0,0,0,0)
+   syscall(110,0,0,0,0,0,0)
 }
 
-fn env(name){
-   "Retrieves the value of an environment variable `name`. Returns `0` if not found."
+fn env(key){
+   "Retrieves the value of an environment variable `key`. Returns `0` if not found."
    def envp = __envp()
    if(!envp){ 0 }
    else {
-      def name_len = str_len(name)
-      def i = 0
-      def res = 0
+      def key_len = str_len(key)
+      mut i = 0
+      mut res = 0
       while(load64(envp, i*8)){
          def env_entry = load64(envp, i*8)
          ;; Check if this entry starts with our variable name
-         def matches = 1
-         def j = 0
-         while (j < name_len) {
-            if (load8(env_entry, j) != load8(name, j)) {
+         mut matches = 1
+         mut j = 0
+         while (j < key_len) {
+            if (load8(env_entry, j) != load8(key, j)) {
                matches = 0
                break
             }
             j += 1
          }
          ;; Check for '=' after the name (prevents partial matches)
-         if (matches && load8(env_entry, name_len) == 61) {
+         if (matches && load8(env_entry, key_len) == 61) {
             ;; Found it! Extract the value
-            res = cstr_to_str(env_entry, name_len + 1)
+            res = cstr_to_str(env_entry, key_len + 1)
             break
          }
          i += 1
@@ -59,8 +70,8 @@ fn environ(){
       def n = __envc()
       if(n <= 0){ list(8) }
       else {
-         def xs = list(8)
-         def i = 0
+         mut xs = list(8)
+         mut i = 0
          while(i < n && load64(envp, i*8)){
             def s_raw = load64(envp, i*8)
             xs = append(xs, s_raw)
@@ -73,14 +84,14 @@ fn environ(){
 
 fn getcwd(){
    "Returns the absolute path of the **current working directory**."
-   def buf = __malloc(4096)
-   def len = __syscall(79, buf, 4096, 0,0,0,0)
+   mut buf = malloc(4096)
+   mut len = __syscall(79, buf, 4096, 0,0,0,0)
    if(len <= 0){
-      __free(buf)
+      free(buf)
       ""
    } else {
       def s = cstr_to_str(buf)
-      __free(buf)
+      free(buf)
       s
    }
 }
@@ -94,3 +105,67 @@ fn gid(){
    "Returns the **real group ID** of the calling process via **getgid(2)**."
    __syscall(104,0,0,0,0,0,0)
 }
+
+fn file_read(path){
+   "Reads entire file at `path` into a string. Returns empty string on failure."
+   def fd = __syscall(2, path, 0, 0, 0, 0, 0)
+   if(fd <= 0){ return "" }
+   mut cap = 4096
+   mut buf = malloc(cap)
+   def tmp = malloc(4096)
+   mut len = 0
+   while(true){
+      def r = __sys_read_off(fd, tmp, 4096, 0)
+      if(r <= 0){ break }
+      if(len + r >= cap){
+         while(len + r >= cap){ cap = cap * 2 }
+         buf = realloc(buf, cap)
+      }
+      mut i = 0
+      while(i < r){
+         store8(buf, load8(tmp, i), len + i)
+         i = i + 1
+      }
+      len = len + r
+   }
+   __syscall(3, fd, 0, 0, 0, 0, 0)
+   free(tmp)
+   store8(buf, 0, len)
+   init_str(buf, len)
+   buf
+}
+
+fn file_write(path, content){
+   "Writes string `content` to file at `path`. Returns bytes written or 0 on failure."
+   def fd = __syscall(2, path, 577, 420, 0,0,0) ;; open(path, WRONLY|CREAT|TRUNC, 0644)
+   if(fd < 0){ return 0 }
+   def n = str_len(content)
+   ;; TODO: handle bytes if needed
+   
+   mut res = __syscall(1, fd, content, n, 0,0,0)
+   __syscall(3, fd, 0,0,0,0,0)
+   res
+}
+
+fn file_exists(path){
+   "Returns true if file at `path` exists."
+   mut res = __syscall(21, path, 0, 0, 0, 0, 0)
+   res == 0
+}
+
+fn file_append(path, content){
+   "Appends string `content` to file at `path`. Returns bytes written or 0 on failure."
+   def fd = __syscall(2, path, 1089, 420, 0,0,0) ;; open(path, WRONLY|CREAT|APPEND, 0644)
+   if(fd < 0){ return 0 }
+   def n = str_len(content)
+   mut res = __syscall(1, fd, content, n, 0,0,0)
+   __syscall(3, fd, 0,0,0,0,0)
+   res
+}
+
+fn file_remove(path){
+   "Removes the file at `path`. Returns true on success."
+   mut res = __syscall(87, path, 0, 0, 0, 0, 0)
+   res == 0
+}
+

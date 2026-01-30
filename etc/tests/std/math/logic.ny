@@ -1,6 +1,5 @@
-use std.io
-use std.math.logic
-use std.core.error
+use std.math.logic *
+use std.core.error *
 
 ;; std.math.logic (Test)
 ;; Tests gcd, lcm, and factorial.

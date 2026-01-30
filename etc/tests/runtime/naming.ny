@@ -1,11 +1,14 @@
-use std.core
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
-;; std.strings.naming (Test)
+;; std.str.naming (Test)
 ;; Parser naming edge cases (kebab-case, arrows, predicates).
-;; Actual definitions are parser-dependent and intentionally not executed here.
-
-; These tests assert that the test file itself parses and runs.
-; Real execution tests are enabled once the parser supports such identifiers.
+;; Actual definitions are parser-dependent and still not implemented.
 
 ;fn kebab-case() {
 ;    return 1
@@ -22,4 +25,4 @@ use std.core
 ;assert(kebab-case() == 1)
 ;assert(do->predicate() == 1)
 ;assert(predicate?() == 1)
-print("✓ std.strings.naming tests passed")
+print("✓ std.str.naming tests passed")

@@ -1,11 +1,10 @@
-use std.io
-use std.math.float
-use std.math.stat
-use std.math.nt
-use std.os.time
-use std.core.test
-use std.collections
-use std.iter
+use std.math.float *
+use std.math.stat *
+use std.math.nt *
+use std.os.time *
+use std.core.test *
+use std.core.list *
+use std.core.iter *
 
 print("Testing Math Extras...")
 ; Float
@@ -14,7 +13,7 @@ assert(is_inf(inf()), "inf")
 
 ; Stat
 print("Testing Stat...")
-def d = list()
+mut d = list()
 d = append(d, 1)
 d = append(d, 2)
 d = append(d, 3)

@@ -1,10 +1,15 @@
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Comments parsing (Test)
 
 ; Single line comment at start
-def x = 1  ; inline
+mut x = 1  ; inline
 
 ; Multiple single line comments
 ; Comment line 1
@@ -17,7 +22,7 @@ fn add(a, b){
    a + b  ; return comment
 }
 
-def result = add(x, y)
+mut result = add(x, y)
 assert(result == 3, "fn with comments")
 
 if x == 1 {
@@ -25,7 +30,7 @@ if x == 1 {
    def z = 3
 }
 
-def i = 0
+mut i = 0
 while i < 5 {
    ; inside loop
    i = i + 1
@@ -37,7 +42,7 @@ assert(i == 5, "loop with comments")
 
 def a = 10
 def b = 20
-def c = a + b  ; inline math
+mut c = a + b  ; inline math
 assert(c == 30, "ops with comments")
 
 if 1 == 1 {
@@ -58,3 +63,4 @@ fn test(){
 ; very long comment very long comment very long comment very long comment very long comment
 
 print("✓ comments tests passed")
+

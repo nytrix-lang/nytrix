@@ -1,3 +1,11 @@
-build
+*
+!etc
+!docs
+!std
+!src
+!LICENSE
+!Makefile
+!.lsan.supp
+!.clangd
 .tmp
 etc/cache

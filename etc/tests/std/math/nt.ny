@@ -1,6 +1,5 @@
-use std.io
-use std.math.nt
-use std.core.error
+use std.math.nt *
+use std.core.error *
 
 ;; std.math.nt (Test)
 ;; Tests extended gcd, modular inverse, modular exponentiation, and primes.

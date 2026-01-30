@@ -1,7 +1,6 @@
-use std.io
-use std.core.tuple
-use std.core.reflect
-use std.core
+use std.core.tuple *
+use std.core.reflect *
+use std.core *
 
 ;; Core Tuple (Test)
 ;; Tests tuple creation, type properties, and behavior.

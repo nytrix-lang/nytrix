@@ -8,7 +8,7 @@ static stmt_t *parse_stmt_or_block(parser_t *p) {
   if (!s)
     return NULL;
   stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
-  vec_push(&blk->as.block.body, s);
+  vec_push_arena(p->arena, &blk->as.block.body, s);
   return blk;
 }
 
@@ -155,6 +155,8 @@ static stmt_t *parse_func(parser_t *p) {
     param_t pr = {0};
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "param must be identifier", NULL);
+      vec_free(&params);
+      stmt_free_members(fn_stmt);
       return NULL;
     }
     pr.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
@@ -169,7 +171,7 @@ static stmt_t *parse_func(parser_t *p) {
     }
     if (parser_match(p, NY_T_ASSIGN))
       pr.def = p_parse_expr(p, 0);
-    vec_push(&params, pr);
+    vec_push_arena(p->arena, &params, pr);
     if (fn_stmt->as.fn.is_variadic) {
       if (p->cur.kind == NY_T_COMMA) {
         parser_error(p, p->cur, "variadic parameter must be the last one",
@@ -324,7 +326,7 @@ static stmt_t *parse_use(parser_t *p) {
           parser_advance(p);
         }
       }
-      vec_push(&s->as.use.imports, item);
+      vec_push_arena(p->arena, &s->as.use.imports, item);
       if (parser_match(p, NY_T_COMMA)) {
         continue;
       }
@@ -396,7 +398,7 @@ static stmt_t *parse_layout(parser_t *p) {
     const char *tname = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     layout_field_t f = {fname, tname, 0};
-    vec_push(&s->as.layout.fields, f);
+    vec_push_arena(p->arena, &s->as.layout.fields, f);
     if (p->cur.kind == NY_T_COMMA)
       parser_advance(p);
   }
@@ -473,7 +475,7 @@ static stmt_t *parse_module(parser_t *p) {
         stmt_t *ex = stmt_new(p->arena, NY_S_EXPORT, p->cur);
         while (p->cur.kind == NY_T_IDENT) {
           char *ename = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-          vec_push(&ex->as.exprt.names, ename);
+          vec_push_arena(p->arena, &ex->as.exprt.names, ename);
           parser_advance(p);
           if (parser_match(p, NY_T_COMMA)) {
           } else {
@@ -482,13 +484,13 @@ static stmt_t *parse_module(parser_t *p) {
             break;
           }
         }
-        vec_push(&mod_stmt->as.module.body, ex);
+        vec_push_arena(p->arena, &mod_stmt->as.module.body, ex);
         continue;
       }
     }
     stmt_t *s = p_parse_stmt(p);
     if (s) {
-      vec_push(&mod_stmt->as.module.body, s);
+      vec_push_arena(p->arena, &mod_stmt->as.module.body, s);
     } else if (p->had_error) {
       // already synced or handled?
       // Need synchronize function exposed if used here.
@@ -557,6 +559,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
     s->as.de.body = p_parse_block(p);
     return s;
   }
+  case NY_T_MUT:
   case NY_T_DEF: {
     token_t start_tok = p->cur;
     parser_advance(p);
@@ -570,10 +573,11 @@ stmt_t *p_parse_stmt(parser_t *p) {
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected identifier in destructuring list",
                        NULL);
+          stmt_free_members(s);
           return NULL;
         }
-        vec_push(&s->as.var.names,
-                 arena_strndup(p->arena, p->cur.lexeme, p->cur.len));
+        vec_push_arena(p->arena, &s->as.var.names,
+                       arena_strndup(p->arena, p->cur.lexeme, p->cur.len));
         parser_advance(p);
         if (!parser_match(p, NY_T_COMMA))
           break;
@@ -583,6 +587,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
       while (true) {
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected identifier after 'def'", NULL);
+          stmt_free_members(s);
           return NULL;
         }
         token_t ident = p->cur;
@@ -603,7 +608,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
         const char *name_s = arena_strndup(p->arena, final_name, nlen);
         if (mangled)
           free(final_name);
-        vec_push(&s->as.var.names, name_s);
+        vec_push_arena(p->arena, &s->as.var.names, name_s);
 
         if (!parser_match(p, NY_T_COMMA))
           break;
@@ -612,7 +617,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
 
     if (parser_match(p, NY_T_ASSIGN)) {
       while (true) {
-        vec_push(&s->as.var.exprs, p_parse_expr(p, 0));
+        vec_push_arena(p->arena, &s->as.var.exprs, p_parse_expr(p, 0));
         if (!parser_match(p, NY_T_COMMA))
           break;
       }
@@ -621,7 +626,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
       expr_t *zero = expr_new(p->arena, NY_E_LITERAL, zero_tok);
       zero->as.literal.kind = NY_LIT_INT;
       zero->as.literal.as.i = 0;
-      vec_push(&s->as.var.exprs, zero);
+      vec_push_arena(p->arena, &s->as.var.exprs, zero);
     }
     parser_match(p, NY_T_SEMI);
     s->as.var.is_decl = true;
@@ -640,7 +645,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
     parser_match(p, NY_T_SEMI);
     stmt_t *s = stmt_new(p->arena, NY_S_VAR, start_tok);
     const char *name_s = arena_strndup(p->arena, ident.lexeme, ident.len);
-    vec_push(&s->as.var.names, name_s);
+    vec_push_arena(p->arena, &s->as.var.names, name_s);
     s->as.var.is_decl = true;
     s->as.var.is_undef = true;
     return s;
@@ -683,8 +688,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
       }
       if (lhs->kind == NY_E_IDENT) {
         stmt_t *s = stmt_new(p->arena, NY_S_VAR, ident_tok);
-        vec_push(&s->as.var.names, lhs->as.ident.name);
-        vec_push(&s->as.var.exprs, rhs);
+        vec_push_arena(p->arena, &s->as.var.names, lhs->as.ident.name);
+        vec_push_arena(p->arena, &s->as.var.exprs, rhs);
         s->as.var.is_decl = false;
         s->as.var.is_undef = false;
         return s;
@@ -693,8 +698,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
         callee->as.ident.name = arena_strndup(p->arena, "set_idx", 7);
         expr_t *call = expr_new(p->arena, NY_E_CALL, ident_tok);
         call->as.call.callee = callee;
-        vec_push(&call->as.call.args,
-                 ((call_arg_t){NULL, lhs->as.index.target}));
+        vec_push_arena(p->arena, &call->as.call.args,
+                       ((call_arg_t){NULL, lhs->as.index.target}));
         expr_t *idx_expr = lhs->as.index.start;
         if (!idx_expr) {
           expr_t *zero = expr_new(p->arena, NY_E_LITERAL, ident_tok);
@@ -702,8 +707,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
           zero->as.literal.as.i = 0;
           idx_expr = zero;
         }
-        vec_push(&call->as.call.args, ((call_arg_t){NULL, idx_expr}));
-        vec_push(&call->as.call.args, ((call_arg_t){NULL, rhs}));
+        vec_push_arena(p->arena, &call->as.call.args,
+                       ((call_arg_t){NULL, idx_expr}));
+        vec_push_arena(p->arena, &call->as.call.args,
+                       ((call_arg_t){NULL, rhs}));
         stmt_t *s = stmt_new(p->arena, NY_S_EXPR, ident_tok);
         s->as.expr.expr = call;
         return s;
@@ -739,7 +746,7 @@ stmt_t *p_parse_block(parser_t *p) {
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
     stmt_t *s = p_parse_stmt(p);
     if (s) {
-      vec_push(&blk->as.block.body, s);
+      vec_push_arena(p->arena, &blk->as.block.body, s);
     } else if (p->had_error) {
       // sync
       while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
@@ -767,7 +774,7 @@ program_t parse_program(parser_t *p) {
   while (p->cur.kind != NY_T_EOF) {
     stmt_t *s = p_parse_stmt(p);
     if (s) {
-      vec_push(&prog.body, s);
+      vec_push_arena(p->arena, &prog.body, s);
     } else if (p->had_error) {
       // sync
       while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&

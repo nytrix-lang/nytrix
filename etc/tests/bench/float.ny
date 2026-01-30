@@ -1,16 +1,17 @@
-use std.io
-use std.os.time
-use std.math.float
-use std.core
-use std.io.fmt
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Float (Benchmark)
-;; Tests floating point arithmetic performance.
 
 def start = ticks()
-def x = 1.0
+mut x = 1.0
 def y = 1.000001
-def i = 0
+mut i = 0
 while(i < 1000000){
    x = x * y
    i = i + 1

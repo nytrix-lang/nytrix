@@ -111,7 +111,7 @@ FLT_CMP(eq, ==)
 // Mixed Math
 int64_t __add(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
-    return a + b - 1;
+    return (int64_t)((uint64_t)a + (uint64_t)b - 1);
   if (is_v_flt(a) || is_v_flt(b))
     return __flt_add(a, b);
   if (is_any_ptr(a) && is_int(b))
@@ -125,7 +125,7 @@ int64_t __add(int64_t a, int64_t b) {
 
 int64_t __sub(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
-    return a - b + 1;
+    return (int64_t)((uint64_t)a - (uint64_t)b + 1);
   if (is_v_flt(a) || is_v_flt(b))
     return __flt_sub(a, b);
   if (is_any_ptr(a) && is_int(b))

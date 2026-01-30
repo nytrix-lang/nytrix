@@ -333,6 +333,8 @@ typedef struct program_t {
 
 expr_t *expr_new(arena_t *arena_t, expr_kind_t kind, token_t tok);
 stmt_t *stmt_new(arena_t *arena_t, stmt_kind_t kind, token_t tok);
+void expr_free_members(expr_t *e);
+void stmt_free_members(stmt_t *s);
 void program_free(program_t *prog, arena_t *arena_t);
 
 #endif

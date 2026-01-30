@@ -2,11 +2,14 @@
 ;; Core Reflect module.
 
 use std.core.error
-use std.strings.str
-use std.strings.bytes
+use std.str *
+use std.str.bytes *
 use std.math.bigint
 use std.core.primitives
-module std.core.reflect (len, contains, type, list_eq, dict_eq, set_eq, eq,  repr, hash, globals)
+use std.core.dict
+use std.core
+use std.str.io *
+module std.core.reflect (len, contains, type, list_eq, dict_eq, set_eq, eq, repr, hash, globals, items, keys, values, get, set, set_idx, slice, append, pop, extend, to_str)
 
 fn len(x){
    "Returns the number of elements in a collection or the length of a string.
@@ -14,13 +17,13 @@ fn len(x){
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size."
    if(__eq(x, 0)){ return 0 }
-   if(is_list(x)){ return __load64_idx(x, 0) }
-   if(is_tuple(x)){ return __load64_idx(x, 0) }
+   if(is_list(x)){ return load64(x, 0) }
+   if(is_tuple(x)){ return load64(x, 0) }
    if(is_dict(x)){
       ; Dict header: [Tag at -8 | Count at 0 | Capacity at 8 | Entries...]
-      return __load64_idx(x, 0)
+      return load64(x, 0)
    }
-   if(is_set(x)){ return __load64_idx(x, 0) }
+   if(is_set(x)){ return load64(x, 0) }
    if(is_bytes(x)){ return bytes_len(x) }
    if(is_bigint(x)){ return 0 }
    if(is_str(x)){ return str_len(x) }
@@ -35,18 +38,18 @@ fn contains(container, item){
    if(!container){ return false }
    ; Handle sets (dicts with tag 102)
    if(is_set(container)){
-      def cap = __load64_idx(container, 8)
-      def h = hash(item)
+      def cap = load64(container, 8)
+      mut h = hash(item)
       def mask = cap - 1
-      def idx = h & mask
-      def perturb = h
-      def probes = 0
+      mut idx = h & mask
+      mut perturb = h
+      mut probes = 0
       while(probes < cap){
          def off = 16 + idx * 24
-         def st = __load64_idx(container, off + 16)
+         def st = load64(container, off + 16)
          if(__eq(st, 0)){ return false }
          if(__eq(st, 1)){
-            if(eq(__load64_idx(container, off), item)){ return true }
+            if(eq(load64(container, off), item)){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
          perturb = perturb >> 5
@@ -56,18 +59,18 @@ fn contains(container, item){
    }
    ; Handle dicts
    if(is_dict(container)){
-      def cap = __load64_idx(container, 8)
-      def h = hash(item)
+      def cap = load64(container, 8)
+      mut h = hash(item)
       def mask = cap - 1
-      def idx = h & mask
-      def perturb = h
-      def probes = 0
+      mut idx = h & mask
+      mut perturb = h
+      mut probes = 0
       while(probes < cap){
          def off = 16 + idx * 24
-         def st = __load64_idx(container, off + 16)
+         def st = load64(container, off + 16)
          if(__eq(st, 0)){ return false }
          if(__eq(st, 1)){
-            if(eq(__load64_idx(container, off), item)){ return true }
+            if(eq(load64(container, off), item)){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
          perturb = perturb >> 5
@@ -77,10 +80,10 @@ fn contains(container, item){
    }
    ; Handle lists
    if(is_list(container)){
-      def i = 0
-      def n = __load64_idx(container, 0)
+      mut i = 0
+      def n = load64(container, 0)
       while(i < n){
-         if(eq(__load64_idx(container, 16 + i * 8), item)){ return true }
+         if(eq(load64(container, 16 + i * 8), item)){ return true }
          i = i + 1
       }
       return false
@@ -118,11 +121,20 @@ fn type(x){
 
 fn list_eq(a,b){
    "Performs deep structural equality comparison for two lists."
-   if(!__eq(__load64_idx(a, 0), __load64_idx(b, 0))){ return false }
-   def i = 0
-   def n = __load64_idx(a, 0)
-   while(i < n){
-      if(__eq(eq(__load64_idx(a, 16 + i * 8), __load64_idx(b, 16 + i * 8)), false)){ return false }
+   def na = load64(a, 0)
+   def nb = load64(b, 0)
+   if(!__eq(na, nb)){ 
+      print(f"DEBUG: list_eq length mismatch: {na} vs {nb}")
+      return false 
+   }
+   mut i = 0
+   while(i < na){
+      def va = load64(a, 16 + i * 8)
+      def vb = load64(b, 16 + i * 8)
+      if(__eq(eq(va, vb), false)){ 
+         print(f"DEBUG: list_eq mismatch at {i}: {va} vs {vb}")
+         return false 
+      }
       i = i + 1
    }
    return true
@@ -132,11 +144,11 @@ fn dict_eq(a,b){
    "Performs deep structural equality comparison for two dictionaries."
    if(!__eq(len(a), len(b))){ return false }
    def its = items(a)
-   def i=0
-   def n=__load64_idx(its, 0)
+   mut i=0
+   def n=load64(its, 0)
    while(i<n){
-      def p = __load64_idx(its, 16 + i * 8)
-      if(__eq(eq(dict_get(b, __load64_idx(p, 16), 0xdeadbeef), __load64_idx(p, 24)), false)){ return false }
+      def p = load64(its, 16 + i * 8)
+      if(__eq(eq(dict_get(b, load64(p, 16), 0xdeadbeef), load64(p, 24)), false)){ return false }
       i=i+1
    }
    return true
@@ -146,11 +158,11 @@ fn set_eq(a,b){
    "Performs deep structural equality comparison for two sets."
    if(!__eq(len(a), len(b))){ return false }
    def its = items(a)
-   def i=0
-   def n=__load64_idx(its, 0)
+   mut i=0
+   def n=load64(its, 0)
    while(i<n){
-      def p = __load64_idx(its, 16 + i * 8)
-      if(__eq(contains(b, __load64_idx(p, 16)), false)){ return false }
+      def p = load64(its, 16 + i * 8)
+      if(__eq(contains(b, load64(p, 16)), false)){ return false }
       i=i+1
    }
    return true
@@ -184,11 +196,11 @@ fn repr(x){
       return "false"
    }
    if(__eq(t, "list")){
-      def n = __load64_idx(x, 0)
-      def out = "["
-      def i=0
+      def n = load64(x, 0)
+      mut out = "["
+      mut i=0
       while(i<n){
-         out = f"{out}{repr(__load64_idx(x, 16 + i * 8))}"
+         out = f"{out}{repr(load64(x, 16 + i * 8))}"
          if(i+1<n){ out = f"{out}," }
          i=i+1
       }
@@ -196,12 +208,12 @@ fn repr(x){
    }
    if(__eq(t, "dict")){
       def its = items(x)
-      def out = "{"
-      def i=0
-      def n=__load64_idx(its, 0)
+      mut out = "{"
+      mut i=0
+      def n=load64(its, 0)
       while(i<n){
-         def p = __load64_idx(its, 16 + i * 8)
-         out = f"{out}{repr(__load64_idx(p, 16))}:{repr(__load64_idx(p, 24))}"
+         def p = load64(its, 16 + i * 8)
+         out = f"{out}{repr(load64(p, 16))}:{repr(load64(p, 24))}"
          if(i+1<n){ out = f"{out}," }
          i=i+1
       }
@@ -209,19 +221,19 @@ fn repr(x){
    }
    if(__eq(t, "set")){
       def its = items(x)
-      def out = "{"
-      def i=0
-      def n=__load64_idx(its, 0)
+      mut out = "{"
+      mut i=0
+      def n=load64(its, 0)
       while(i<n){
-         def p = __load64_idx(its, 16 + i * 8)
-         out = f"{out}{repr(__load64_idx(p, 16))}"
+         def p = load64(its, 16 + i * 8)
+         out = f"{out}{repr(load64(p, 16))}"
          if(i+1<n){ out = f"{out}," }
          i=i+1
       }
       return f"{out}}"
    }
    if(__eq(t, "bytes")){ return f"<bytes {bytes_len(x)}>" }
-   if(__eq(t, "float")){ return __to_str(x) }
+   if(__eq(t, "float")){ return to_str(x) }
    if(__eq(t, "bigint")){ return bigint_to_str(x) }
    if(__eq(t, "str")){ return f"\"{x}\"" }
    if(__eq(t, "int")){ return to_str(x) }
@@ -234,11 +246,11 @@ fn hash(x){
    def t = type(x)
    if(__eq(t, "int")){ return x }
    if(__eq(t, "str")){
-      def h = 14695981039346656037
-      def i = 0
+      mut h = 14695981039346656037
+      mut i = 0
       def n = str_len(x)
       while(i < n){
-         h = (h ^ __load8_idx(x, i)) * 1099511628211
+         h = (h ^ load8(x, i)) * 1099511628211
          i = i + 1
       }
       return h
@@ -250,3 +262,230 @@ fn globals(){
    "Returns a dictionary containing all currently defined global variables."
    return primitives.globals()
 }
+
+fn items(x){
+   "Generic item iterator. Returns a list of `[index/key, value]` pairs."
+   case type(x) {
+      "dict" -> {
+         use std.core.dict
+         dict_items(x)
+      }
+      "set"  -> {
+         use std.core.dict
+         def its = dict_items(x)
+         mut out = list(8)
+         mut i = 0  def n = list_len(its)
+         while(i < n){
+             out = append(out, get(get(its, i), 0))
+            i += 1
+         }
+         out
+      }
+      "list", "tuple", "str" -> {
+         mut out = list(8)
+         def n = len(x)
+         mut i = 0
+         while(i < n){
+             out = append(out, [i, get(x, i)])
+            i += 1
+         }
+         out
+      }
+      _ -> list(0)
+   }
+}
+
+fn keys(x){
+   "Generic key iterator. Returns keys or indices for the given collection."
+   case type(x) {
+      "dict" -> {
+         use std.core.dict
+         dict_keys(x)
+      }
+      "set"  -> items(x)
+      "list", "tuple", "str" -> {
+         mut out = list(8)
+         def n = len(x)
+         mut i = 0
+         while(i < n){  out = append(out, i)  i += 1 }
+         out
+      }
+      _ -> list(0)
+   }
+}
+
+fn values(x){
+   "Generic value iterator for all collection types."
+   case type(x) {
+      "dict" -> {
+         dict_values(x)
+      }
+      "set"  -> items(x)
+      "list", "tuple", "str" -> {
+         mut out = list(8)
+         def n = len(x)
+         mut i = 0
+         while(i < n){  out = append(out, get(x, i))  i += 1 }
+         out
+      }
+      _ -> list(0)
+   }
+}
+
+fn get(obj, key, default=0){
+   "Generic element retriever. Handles indexing for strings, lists, dicts, and tuples.
+    - `obj`: Collection (str, list, dict, tuple)
+    - `key`: Index or Key
+    - `default`: Value to return if key/index not found (default 0).
+   "
+   def t = type(obj)
+   if(__eq(t, "str")){
+      def n = len(obj)
+      if(key < 0){ key += n }
+      if(key < 0 || key >= n){ default }
+      else {
+       use std.str.str *
+       str_slice(obj, key, key + 1)
+      }
+   }
+   elif(__eq(t, "dict")){ dict_get(obj, key, default) }
+   elif(__eq(t, "list") || __eq(t, "tuple")){
+      def n = len(obj)
+      if(key < 0){ key += n }
+      if(key < 0 || key >= n){ default }
+      else { __load64_idx(obj, 16 + key * 8) }
+   }
+   else { default }
+}
+
+fn set_idx(obj, key, val){
+   "Generic element setter. Supported for dicts and lists. Returns the object or 0 on failure."
+   def t = type(obj)
+   if(__eq(t, "dict")){ dict_set(obj, key, val) }
+   elif(__eq(t, "list")){
+      def n = len(obj)
+      if(key < 0){ key += n }
+      if(key < 0 || key >= n){ 0 }
+      else { 
+         store64(obj, val, 16 + key * 8)
+         val 
+      }
+   }
+   else { 0 }
+}
+
+fn set(obj, key, val){
+   "Alias for set_idx."
+   set_idx(obj, key, val)
+}
+
+fn slice(obj, start, stop, step=1){
+   "Generic **slice** operation for strings and lists."
+   def t = type(obj)
+   if(__eq(t, "str")){
+       use std.str.str *
+       str_slice(obj, start, stop, step)
+   }
+   elif(__eq(t, "list")){
+       def n = len(obj)
+       if(start < 0){ start = n + start }
+       if(stop < 0){ stop = n + stop }
+       if(step > 0){
+        if(start < 0){ start = 0 }
+        if(stop > n){ stop = n }
+        if(start >= stop){ return list(0) }
+       } else {
+        if(start >= n){ start = n - 1 }
+        if(stop < -1){ stop = -1 }
+        if(start <= stop){ return list(0) }
+       }
+       mut out = list(8)
+       mut i = start
+       if(step > 0){
+        while(i < stop){
+           out = append(out, get(obj, i))
+           i += step
+        }
+       } else {
+        while(i > stop){
+           out = append(out, get(obj, i))
+           i += step
+        }
+       }
+       out
+   }
+   else { 0 }
+}
+
+fn append(lst, v){
+   "Appends value `v` to the end of list `lst`. Returns the (possibly reallocated) list ptr."
+   if(!is_list(lst)){ lst }
+   else {
+     mut out = lst
+     def tag = __load64_idx(out, -8)
+     def n = __load64_idx(out, 0)
+     def cap = __load64_idx(out, 8)
+     if(n >= cap){
+       def newcap = __eq(cap, 0) ? 8 : (cap * 2)
+       def newp = list(newcap)
+       store64(newp, tag, -8)
+       mut i = 0
+       while(i < n){ 
+          store64(newp, load64(out, 16 + i * 8), 16 + i * 8)  
+          i += 1 
+       }
+       free(out)
+       out = newp
+     }
+     store64(out, v, 16 + n * 8)
+     store64(out, n + 1, 0)
+     out
+   }
+}
+
+fn pop(lst){
+   "Removes and returns the last element from list `lst`. Returns `0` if empty."
+   if(!is_list(lst)){ return 0 }
+   else {
+    def n = __load64_idx(lst, 0)
+    if(__eq(n, 0)){ 0 }
+    else {
+      def v = get(lst, n - 1)
+      store64(lst, n - 1, 0)
+      v
+    }
+   }
+}
+
+fn extend(lst, other){
+   "Appends all elements from collection `other` to the list `lst`."
+   if(__eq(is_list(lst), false)){ return lst }
+   
+   mut i = 0
+   def n = len(other)
+   while(i < n){
+      lst = append(lst, get(other, i))
+      i += 1
+   }
+   lst
+}
+
+fn to_str(v){
+   "Converts any Nytrix value to its string representation. Handles recursive collection printing."
+   if(is_list(v)){
+      def n = len(v)
+      mut s = "["
+      mut i = 0
+      while(i < n){
+         s = f"{s}{to_str(get(v, i))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
+      }
+      f"{s}]"
+   } else {
+     if(is_dict(v)){ "{...}" }
+     elif(is_bytes(v)){ f"<bytes {bytes_len(v)}>" }
+     else { __to_str(v) }
+   }
+}
+

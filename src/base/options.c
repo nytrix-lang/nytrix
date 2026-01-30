@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // Global State
 int debug_enabled = 0;
@@ -286,4 +287,22 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
     opt->run_jit = false;
   else if (opt->input_file || opt->command_string || opt->mode == NY_MODE_REPL)
     opt->run_jit = true;
+
+  // AUTO-DETECT STANDARD LIBRARY PATH
+  if (!opt->std_path) {
+    const char *env_std = getenv("NYTRIX_STD_PATH");
+    if (env_std) {
+      opt->std_path = env_std;
+    } else {
+      if (access("./build/std_bundle.ny", R_OK) == 0) {
+        opt->std_path = "./build/std_bundle.ny";
+      } else {
+#ifdef NYTRIX_STD_PATH
+        opt->std_path = NYTRIX_STD_PATH;
+#else
+        opt->std_path = "/usr/share/nytrix/std_bundle.ny";
+#endif
+      }
+    }
+  }
 }

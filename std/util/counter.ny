@@ -3,15 +3,15 @@
 
 use std.core
 use std.core.reflect
-use std.collections
+use std.core
 module std.util.counter (
    counter, counter_add, most_common
 )
 
 fn counter(xs){
    "Creates a frequency counter dictionary from the elements of list or string `xs`."
-   def d = dict(16)
-   def i = 0  def n = len(xs)
+   mut d = dict(16)
+   mut i = 0  def n = len(xs)
    while(i < n){
       def v = get(xs, i)
       def c = dict_get(d, v, 0)
@@ -32,10 +32,10 @@ fn most_common(d){
    def its = items(d)
    def n = len(its)
    ; selection sort by count desc
-   def i = 0
+   mut i = 0
    while(i < n){
-      def max_idx = i
-      def j = i + 1
+      mut max_idx = i
+      mut j = i + 1
       while(j < n){
          def count_j = get(get(its, j), 1)
          def count_max = get(get(its, max_idx), 1)
@@ -53,3 +53,4 @@ fn most_common(d){
    }
    return its
 }
+

@@ -1,75 +1,63 @@
-;; Keywords: math timefmt
-;; Math Timefmt module.
+;; Keywords: strings timefmt
+;; Strings Timefmt module.
 
 use std.core
-use std.strings.str
-
+use std.math
+use std.str *
 module std.math.timefmt (
-   format_time, gmtime
+   _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format_time
 )
 
-fn is_leap(y) {
-   (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+fn _is_leap(y){
+   "Return true if year y is a leap year."
+   if((y % 4) != 0){ return 0 }
+   if((y % 100) != 0){ return 1 }
+   if((y % 400) != 0){ return 0 }
+   return 1
 }
 
-fn days_in_year(y) {
-   if (is_leap(y)) { 366 }
-   else { 365 }
+fn _days_in_month(y, m){
+   "Internal: days in month m for year y."
+   if(m==1 || m==3 || m==5 || m==7 || m==8 || m==10 || m==12){ return 31  }
+   if(m==4 || m==6 || m==9 || m==11){ return 30  }
+   if(m==2){ return 28 + _is_leap(y)  }
+   return 30
 }
 
-fn pad_z(v, n) {
-   def s = to_str(v)
-   while (len(s) < n) {
-      s = f"0{s}"
-   }
-   return s
+fn _days_in_year(y){
+   "Internal: days in year y."
+   return 365 + _is_leap(y)
 }
 
-fn gmtime(ts) {
-   "Breaks down Unix timestamp `ts` into its UTC components. Returns a dictionary with 'year', 'month', 'day', 'hour', 'min', 'sec'."
-   def res = dict(16)
-   def seconds = ts
+fn _pad2(n){
+   "Internal: zero-pad integer to 2 digits."
+   return pad_start(to_str(n), 2, "0")
+}
 
-   def sec = seconds % 60
-   def minutes = seconds / 60
-   def m = minutes % 60
-   def hours = minutes / 60
-   def h = hours % 24
-   def days = hours / 24
+fn _pad4(n){
+   "Internal: zero-pad integer to 4 digits."
+   return pad_start(to_str(n), 4, "0")
+}
 
-   def year = 1970
-   while (days >= days_in_year(year)) {
-      days = days - days_in_year(year)
+fn format_time(ts){
+   "Format unix seconds to YYYY-MM-DD HH:MM:SS (UTC)."
+   if(ts < 0){ ts = 0  }
+   mut days = ts / 86400
+   mut rem = ts - days*86400
+   def hour = rem / 3600
+   rem = rem - hour*3600
+   def minute = rem / 60
+   def second = rem - minute*60
+   mut year = 1970
+   while(days >= _days_in_year(year)){
+      days = days - _days_in_year(year)
       year = year + 1
    }
-
-   def month = 1
-   def mdays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-   if (is_leap(year)) { set_idx(mdays, 1, 29) }
-
-   while (days >= get(mdays, month - 1)) {
-      days = days - get(mdays, month - 1)
+   mut month = 1
+   while(days >= _days_in_month(year, month)){
+      days = days - _days_in_month(year, month)
       month = month + 1
    }
-
-   dict_set(res, "year", year)
-   dict_set(res, "month", month)
-   dict_set(res, "day", days + 1)
-   dict_set(res, "hour", h)
-   dict_set(res, "min", m)
-   dict_set(res, "sec", sec)
-   return res
-}
-
-fn format_time(ts) {
-   "Formats Unix timestamp `ts` into a UTC string (YYYY-MM-DD HH:MM:SS) using pure Nytrix logic."
-   def t = gmtime(ts)
-   def y = get(t, "year")
-   def mo = get(t, "month")
-   def d = get(t, "day")
-   def h = get(t, "hour")
-   def mi = get(t, "min")
-   def s = get(t, "sec")
-
-   return f"{pad_z(y, 4)}-{pad_z(mo, 2)}-{pad_z(d, 2)} {pad_z(h, 2)}:{pad_z(mi, 2)}:{pad_z(s, 2)}"
+   def day = days + 1
+   return f"{_pad4(year)}-{_pad2(month)}-{_pad2(day)} {_pad2(hour)}:{_pad2(minute)}:{_pad2(second)}"
 }

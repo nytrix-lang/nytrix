@@ -1,18 +1,21 @@
-use std.io
-use std.os.time
-use std.math.float
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Spectral Norm (Benchmark)
-;; Tests math performance and array access patterns.
 
 def N = 64
 def ITERS = 3
 
-def u = list(N)
-def v = list(N)
-def tmp = list(N)
+mut u = list(N)
+mut v = list(N)
+mut tmp = list(N)
 
-def i = 0
+mut i = 0
 while(i < N){
    u = append(u, 1.0)
    v = append(v, 0.0)
@@ -26,10 +29,10 @@ fn A(i, j){
 }
 
 fn mul_Av(x, out){
-   def i = 0
+   mut i = 0
    while(i < N){
-      def sum = 0.0
-      def j = 0
+      mut sum = 0.0
+      mut j = 0
       while(j < N){
          sum += A(i, j) * get(x, j)
          j += 1
@@ -40,10 +43,10 @@ fn mul_Av(x, out){
 }
 
 fn mul_Atv(x, out){
-   def i = 0
+   mut i = 0
    while(i < N){
-      def sum = 0.0
-      def j = 0
+      mut sum = 0.0
+      mut j = 0
       while(j < N){
          sum += A(j, i) * get(x, j)
          j += 1
@@ -64,8 +67,8 @@ while(i < ITERS){
    i += 1
 }
 
-def vbv = 0.0
-def vv = 0.0
+mut vbv = 0.0
+mut vv = 0.0
 i = 0
 while(i < N){
    vbv += get(u, i) * get(v, i)
@@ -78,3 +81,4 @@ def end = ticks()
 
 print("Result:", res)
 print("Time:", (end - start) / 1000000, "ms")
+

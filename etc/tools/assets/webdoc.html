@@ -30,36 +30,25 @@
 
     <style>
         :root {
-            /* Modus Vivendi Inspired Palette (User Refined) */
+            /* Modus Vivendi Inspired */
             --bg: #000000;
             --panel: #020202;
             --panel2: #000000;
-
             --ink: #ffffff;
             --dim: #989898;
-            /* Kept from previous Modus Vivendi */
-
             --line: #111111;
             --line2: #505050;
-            /* Kept from previous Modus Vivendi */
-
             --accent: #b6a0ff;
             --accent2: #00bcff;
             --accent-cyan: #00d3d0;
-
             --code: #000000;
             --chip: #000000;
-            /* Set to match new --panel2 */
-
-            /* Syntax Highlighting */
             --syn-module: #00bcff;
-            /* Module names */
             --syn-kw: #b6a0ff;
             --syn-str: #79a8ff;
             --syn-num: #f78fe7;
             --syn-call: #feacd0;
             --syn-com: #989898;
-            /* Kept from previous Modus Vivendi */
         }
 
         * {
@@ -210,12 +199,9 @@
             width: 8px;
             z-index: 100;
             background: transparent;
-            /* Removed background */
             opacity: 0;
-            /* Fully transparent */
             transition: opacity 0.15s;
             pointer-events: none;
-            /* Make it unclickable directly */
         }
 
         aside {
@@ -231,11 +217,9 @@
             z-index: 90;
             transition: transform 0.2s;
             transform: translateX(-100%);
-            /* Hidden by default for all screen sizes */
         }
 
         aside.active {
-            /* Show aside when active */
             transform: translateX(0);
         }
 
@@ -292,7 +276,6 @@
             letter-spacing: .15em;
             text-transform: uppercase;
             color: var(--dim);
-            /* Assuming this was the intended color property */
             padding: 8px 12px;
             background: transparent;
             border-bottom: 1px solid var(--line);
@@ -937,6 +920,66 @@
             font: 800 7px "Turret Road";
             color: var(--dim);
             letter-spacing: 0.1em;
+        }
+
+        .doc-selector-container {
+            margin-bottom: 40px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            padding: 0;
+        }
+
+        .doc-selector-header {
+            font: 900 14px "Tektur";
+            letter-spacing: 0.2em;
+            color: var(--accent);
+            background: var(--panel2);
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--line);
+            text-transform: uppercase;
+        }
+
+        .doc-selector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1px;
+            background: var(--line);
+            padding: 0;
+        }
+
+        .doc-selector-card {
+            background: var(--panel2);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--ink);
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .doc-selector-card:hover {
+            background: var(--panel);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .doc-selector-icon {
+            font-size: 32px;
+            line-height: 1;
+        }
+
+        .doc-selector-name {
+            font: 700 11px "Turret Road";
+            letter-spacing: 0.1em;
+            color: var(--accent-cyan);
+            text-align: center;
+        }
+
+        .doc-selector-card:hover .doc-selector-name {
+            color: var(--accent);
         }
     </style>
 </head>

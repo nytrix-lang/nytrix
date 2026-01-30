@@ -1,8 +1,7 @@
-use std.io
-use std.net.requests
-use std.net.http
-use std.collections.dict
-use std.core.error
+use std.net.requests *
+use std.net.http *
+use std.core.dict *
+use std.core.error *
 
 ;; std.net.requests (Test)
 ;; Tests URL and query parsing.

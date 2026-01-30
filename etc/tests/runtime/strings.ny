@@ -1,8 +1,12 @@
-use std.io
-use std.strings.str
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
-;; std.strings.str (Test)
+;; std.str (Test)
 ;; Basic string operations and parsing.
 
 def s1 = "hello"
@@ -39,6 +43,6 @@ assert(eq(get(parts, 3), "d"), "split 3")
 
 assert(eq(join(["x","y","z"], "-"), "x-y-z"), "join")
 
-assert(eq(replace_all("hello world", "world", "universe"), "hello universe"), "replace")
+assert(eq(str_replace("hello world", "world", "universe"), "hello universe"), "replace")
 
-print("✓ std.strings.str basic tests passed")
+print("✓ std.str basic tests passed")

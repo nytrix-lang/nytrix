@@ -1,10 +1,14 @@
-use std.core
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Runtime control flow + break + paren-less syntax (Test)
 
-def i = 0
+mut i = 0
 while(i < 10){
    if(i == 5){ break }
    i = i + 1
@@ -12,7 +16,7 @@ while(i < 10){
 assert(i == 5, "simple break")
 
 i = 0
-def flag = 0
+mut flag = 0
 while(i < 10){
    if(i == 5){
       flag = 1
@@ -24,8 +28,8 @@ assert(flag == 1, "update before break")
 assert(i == 5, "break stops loop")
 
 i = 0
-def j = 0
-def count = 0
+mut j = 0
+mut count = 0
 while(i < 3){
    j = 0
    while(j < 3){
@@ -38,13 +42,13 @@ while(i < 3){
 assert(count == 3, "nested break inner only")
 
 def m = 1
-def matches = 0
+mut matches = 0
 i = 0
 while(i < 6){
-   def is_match = 1
+   mut is_match = 1
    j = 0
    while(j < 1){
-      def char_match = 0
+      mut char_match = 0
       if(i == 1){ char_match = 1 }
       if(i == 3){ char_match = 1 }
       if(i == 5){ char_match = 1 }
@@ -77,7 +81,7 @@ i = 0
 while i < 3 { i = i + 1 }
 assert(i == 3, "while noparen")
 
-def s = 0
+mut s = 0
 for(x in [1,2,3]){ s = s + x }
 assert(s == 6, "for paren")
 
@@ -86,3 +90,4 @@ for x in [1,2,3] { s = s + x }
 assert(s == 6, "for noparen")
 
 print("✓ runtime control flow tests passed")
+

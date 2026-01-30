@@ -1,8 +1,7 @@
-use std.io
-use std.os.time
-use std.core.reflect
-use std.math.float
-use std.core
+use std.os.time *
+use std.core.reflect *
+use std.math.float *
+use std.core *
 
 ;; Core Reflect (Test)
 ;; Tests introspection, type checking, and reflection capabilities.
@@ -21,7 +20,7 @@ assert(eq(type(0), "none"), "type of none")
 assert(len([1, 2, 3]) == 3, "len of list")
 assert(len("hello") == 5, "len of string")
 assert(len([]) == 0, "len of empty list")
-def d = dict(8)
+mut d = dict(8)
 d = dict_set(d, "key", "value")
 assert(len(d) == 1, "len of dict")
 assert(len(float(1)) == 0, "len of float")
@@ -30,7 +29,7 @@ assert(len(float(1)) == 0, "len of float")
 def lst = [1, 2, 3, 4, 5]
 assert(contains(lst, 3), "list contains element")
 assert(!contains(lst, 10), "list doesn't contain element")
-def s = set()
+mut s = set()
 s = set_add(s, "a")
 s = set_add(s, "b")
 assert(contains(s, "a"), "set contains element")
@@ -46,10 +45,10 @@ assert(!eq("hello", "world"), "string inequality")
 assert(eq([1, 2, 3], [1, 2, 3]), "list equality")
 assert(!eq([1, 2, 3], [1, 2, 4]), "list inequality")
 assert(!eq([1, 2], [1, 2, 3]), "list different lengths")
-def d1 = dict(8)
+mut d1 = dict(8)
 d1 = dict_set(d1, "a", 1)
 d1 = dict_set(d1, "b", 2)
-def d2 = dict(8)
+mut d2 = dict(8)
 d2 = dict_set(d2, "a", 1)
 d2 = dict_set(d2, "b", 2)
 assert(eq(d1, d2), "dict equality")
@@ -64,8 +63,8 @@ assert(eq(repr("hello"), "\"hello\""), "repr of string")
 assert(eq(repr([1,2,3]), "[1,2,3]"), "repr of list")
 
 ; Hash
-def h1 = hash(42)
-def h2 = hash(42)
+mut h1 = hash(42)
+mut h2 = hash(42)
 assert(h1 == h2, "hash consistency for int")
 h1 = hash("hello")
 h2 = hash("hello")

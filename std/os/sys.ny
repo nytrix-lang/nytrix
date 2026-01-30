@@ -2,7 +2,7 @@
 ;; Os Sys module.
 
 module std.os.sys (
-   syscall, errno
+   syscall, errno, sys_open
 )
 
 fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){
@@ -13,4 +13,9 @@ fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){
 fn errno(){
    "Returns the value of the thread-local `errno` variable, indicating the last error encountered by a system call."
    return __errno() ; TODO use syscalls instead
+}
+
+fn sys_open(path, flags, mode){
+   "Opens a file using raw syscall."
+   syscall(2, path, flags, mode)
 }

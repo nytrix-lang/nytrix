@@ -40,7 +40,7 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
                        : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
                          "r"(_arg5), "r"(_arg6)
                        : "rcx", "r11", "memory");
-  return (int64_t)((_num << 1) | 1);
+  return (int64_t)(((uint64_t)_num << 1) | 1);
 }
 #endif
 
@@ -65,10 +65,22 @@ int64_t __sys_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
     len >>= 1;
   if (is_int(off))
     off >>= 1;
-  if (!__check_oob("sys_write", buf, off, (size_t)len))
+  if (!__check_oob("sys_write", buf, off, (size_t)len)) {
+    fprintf(
+        stderr,
+        "DEBUG WARNING: OOB detected in sys_write buf=%lx off=%lx len=%lx\n",
+        (long)buf, (long)off, (long)len);
     return -1LL;
-  ssize_t r =
-      write((int)fd, (char *)((intptr_t)buf + (intptr_t)off), (size_t)len);
+  }
+  char *ptr = (char *)((intptr_t)buf + (intptr_t)off);
+  // fprintf(stderr, "DEBUG: write(fd=%ld, ptr=%p, len=%ld)\n", (long)fd, ptr,
+  // (size_t)len);
+  ssize_t r = write((int)fd, ptr, (size_t)len);
+  if (r < 0) {
+    perror("DEBUG WARNING: write failed");
+  } else {
+    // fprintf(stderr, "DEBUG: write success, r=%ld\n", (long)r);
+  }
   return (int64_t)((r << 1) | 1);
 }
 
@@ -149,6 +161,52 @@ int64_t __mutex_free(int64_t m) {
   pthread_mutex_destroy((pthread_mutex_t *)(uintptr_t)m);
   free((void *)(uintptr_t)m);
   return 0;
+}
+
+int64_t __os_name(void) {
+#if defined(__linux__)
+  const char *s = "linux";
+#elif defined(__APPLE__)
+  const char *s = "macos";
+#elif defined(__FreeBSD__)
+  const char *s = "freebsd";
+#elif defined(_WIN32)
+  const char *s = "windows";
+#else
+  const char *s = "unknown";
+#endif
+  size_t len = strlen(s);
+  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
+  if (!res)
+    return 0;
+  *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
+  *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
+  strcpy((char *)(uintptr_t)res, s);
+  return res;
+}
+
+int64_t __arch_name(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+  const char *s = "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+  const char *s = "x86";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  const char *s = "aarch64";
+#elif defined(__arm__) || defined(_M_ARM)
+  const char *s = "arm";
+#elif defined(__riscv)
+  const char *s = "riscv";
+#else
+  const char *s = "unknown";
+#endif
+  size_t len = strlen(s);
+  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
+  if (!res)
+    return 0;
+  *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
+  *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
+  strcpy((char *)(uintptr_t)res, s);
+  return res;
 }
 
 // Sockets

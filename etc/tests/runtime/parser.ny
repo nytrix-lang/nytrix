@@ -1,18 +1,23 @@
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Parser edge cases and complex expressions (Test)
 
-def result1 = len(append([1, 2], 3))
+mut result1 = len(append([1, 2], 3))
 assert(result1 == 3, "nested calls")
 
-def result2 = (10 + 5) * 2 - 8 / 4
+mut result2 = (10 + 5) * 2 - 8 / 4
 assert(result2 == 28, "complex arithmetic")
 
-def result3 = ((5 + 3) * (10 - 2)) / 4
+mut result3 = ((5 + 3) * (10 - 2)) / 4
 assert(result3 == 16, "nested parentheses")
 
-def x = 5
+mut x = 5
 assert(x > 0, "gt")
 assert(x < 10, "lt")
 assert(x >= 5, "gte")
@@ -20,7 +25,7 @@ assert(x <= 5, "lte")
 assert(x == 5, "eq")
 assert(x != 4, "neq")
 
-def mod_result = 17 % 5
+mut mod_result = 17 % 5
 assert(mod_result == 2, "mod")
 
 if x % 2 == 1 {
@@ -40,7 +45,7 @@ fn square(x){ x * x }
 assert(square(7) == 49, "fn expr")
 
 def ternary_test = 42
-def ternary_result = 0
+mut ternary_result = 0
 if ternary_test > 40 {
    ternary_result = 1
 } else {
@@ -49,3 +54,4 @@ if ternary_test > 40 {
 assert(ternary_result == 1, "if else")
 
 print("✓ Parser tests passed")
+

@@ -1,7 +1,6 @@
-use std.io
-use std.os.sys
-use std.core.error
-use std.io.fs
+use std.os.sys *
+use std.core.error *
+use std.os.fs *
 
 ;; std.os.sys (Test)
 ;; Tests errno handling and raw syscall.

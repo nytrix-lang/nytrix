@@ -123,6 +123,12 @@ RT_DEF("__jmpbuf_size", __jmpbuf_size, 0, "fn __jmpbuf_size()",
        "Internal: returns size of jmp_buf.")
 RT_DEF("__get_panic_val", __get_panic_val, 0, "fn __get_panic_val()",
        "Internal: returns the panic message.")
+RT_DEF("__push_defer", __push_defer, 2, "fn __push_defer(f, e)",
+       "Internal: push defer.")
+RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",
+       "Internal: pop and run one defer.")
+RT_DEF("__run_defers_to", __run_defers_to, 1, "fn __run_defers_to(n)",
+       "Internal: run defers.")
 
 RT_DEF("__argc", __argc, 0, "fn __argc()",
        "Returns the number of command-line arguments.")
@@ -162,6 +168,10 @@ RT_DEF("__srand", __srand, 1, "fn __srand(s)",
        "Seeds the random number generator.")
 RT_DEF("__copy_mem", __copy_mem, 3, "fn __copy_mem(d, s, n)",
        "Copies n bytes from s to d (llvm intrinsic).")
+RT_DEF("__os_name", __os_name, 0, "fn __os_name()",
+       "Returns the name of the operating system.")
+RT_DEF("__arch_name", __arch_name, 0, "fn __arch_name()",
+       "Returns the name of the architecture.")
 
 #ifndef RT_GV
 #define RT_GV(n, p, t, d)

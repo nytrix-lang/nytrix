@@ -1,71 +1,72 @@
-use std.io
-use std.os.time
-use std.math.random
-use std.cli.tui
+#!/bin/ny
+use std.core *
+use std.math.random *
+use std.os.time *
+use std.str.bytes *
+use std.str.term *
 
 ;; Matrix Rain (Example)
 
-def t = get_terminal_size()
-def [W, H] = t
-if W <= 0 { W = 80 }
-if H <= 0 { H = 24 }
+def sz = get_terminal_size()
+def W = get(sz, 0)
+def H = get(sz, 1)
 
 def canv = canvas(W, H)
-def intensities, chars = bytes(W * H), bytes(W * H)
-def drop_y, drop_speed, drop_tail = list(W), list(W), list(W)
+def intensities = bytes(W * H)
+def chars = bytes(W * H)
+mut drop_y = list(W)
+mut drop_speed = list(W)
 
-for i in range(W) {
+mut i = 0
+while (i < W) {
     drop_y = append(drop_y, -(rand() % (H * 20)))
-    drop_speed = append(drop_speed, 15 + rand() % 35)
-    drop_tail = append(drop_tail, 8 + rand() % 15)
+    drop_speed = append(drop_speed, 15 + (rand() % 35))
+    i = i + 1
 }
 
-clear_screen()
 cursor_hide()
+clear_screen()
 
 try {
-    while 1 {
-        ;; Update
-        for x in range(W) {
+    while (1) {
+        mut x = 0
+        while (x < W) {
             def yf = get(drop_y, x) + get(drop_speed, x)
             set_idx(drop_y, x, yf)
             def y = yf / 20
-
-            if y >= 0 && y < H {
-                def idx = y * W + x
-                bytes_set(chars, idx, 33 + rand() % 94)
-                bytes_set(intensities, idx, 32)
+            if (y >= 0 && y < H) {
+                mut idx = y * W + x
+                bytes_set(chars, idx, 33 + (rand() % 94))
+                bytes_set(intensities, idx, 31)
             }
-
-            if y - get(drop_tail, x) >= H {
-                set_idx(drop_y, x, -(rand() % 40))
+            if (y > H + 10) {
+                set_idx(drop_y, x, 0)
             }
+            x = x + 1
         }
-
-        ;; Draw to Canvas
-        for i in range(W * H) {
-            def intensity = bytes_get(intensities, i)
-            if intensity > 0 {
-                def char = bytes_get(chars, i)
-                if rand() % 60 == 0 { char = 33 + rand() % 94 }
-
-                def color = 2 ;; Green
-                def bold = 0
-                if intensity > 28 { color = 7 bold = 1 }
-                elif intensity > 12 { color = 2 bold = 1 }
-                elif intensity > 4 { color = 2 bold = 0 }
-                else { color = 8 bold = 0 }
-
-                canvas_set(canv, i % W, i / W, char, color, bold)
-                bytes_set(intensities, i, intensity - 1)
+        mut idx = 0
+        def total = W * H
+        while (idx < total) {
+            def intensity = bytes_get(intensities, idx)
+            def cur_x = idx % W
+            def cur_y = idx / W
+            if (intensity > 0) {
+                def char = bytes_get(chars, idx)
+                mut color = 2
+                mut bold = 0
+                if (intensity > 28) { color = 7 bold = 1 }
+                elif (intensity > 15) { bold = 1 }
+                canvas_set(canv, cur_x, cur_y, char, color, bold)
+                bytes_set(intensities, idx, intensity - 1)
             } else {
-                canvas_set(canv, i % W, i / W, 32, 0, 0)
+                canvas_set(canv, cur_x, cur_y, 32, 0, 0)
             }
+            idx = idx + 1
         }
-
         canvas_refresh(canv)
-        msleep(10)
+        msleep(20)
     }
-} catch e {
+} catch (e) {
     screen_reset()
 }
+

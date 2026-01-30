@@ -48,6 +48,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   scopes[fd].vars.data = NULL;
   scopes[fd].defers.len = scopes[fd].defers.cap = 0;
   scopes[fd].defers.data = NULL;
+  scopes[fd].break_bb = NULL;
+  scopes[fd].continue_bb = NULL;
   size_t param_offset = 0;
   if (captures) {
     param_offset = 1;

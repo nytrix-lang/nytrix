@@ -29,6 +29,7 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
 void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
           stmt_t *stmt_t);
+void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
 
 // Expression generation (expr_t.c)
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
@@ -36,6 +37,9 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
                         LLVMValueRef r);
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len);
+LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
+                         ny_param_list params, stmt_t *body, bool is_variadic,
+                         const char *name_hint);
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
 
 // Statement generation (stmt_t.c)
@@ -60,8 +64,6 @@ void process_use_imports(codegen_t *cg, stmt_t *s);
 void collect_use_aliases(codegen_t *cg, stmt_t *s);
 void collect_use_modules(codegen_t *cg, stmt_t *s);
 void process_exports(codegen_t *cg, stmt_t *s);
-// Removed: add_exposed_imports, is_exposed (not found in current codegen_t.c,
-// staying strict to existing code)
 
 // Core utilities (core.c)
 LLVMValueRef build_alloca(codegen_t *cg, const char *name);

@@ -1,7 +1,10 @@
+#include "base/common.h"
+#include "base/util.h"
 #include "priv.h"
 #include "rt/shared.h"
 #include "std_symbols.h"
 #include <alloca.h>
+#include <ctype.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -11,6 +14,183 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+
+void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
+  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
+          tok.filename ? tok.filename : "unknown", tok.line, tok.col, name);
+  cg->had_error = 1;
+
+  const char *best = NULL;
+  int best_d = 100;
+  // Check funs
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    const char *cand = cg->fun_sigs.data[i].name;
+    int l1 = strlen(name);
+    int l2 = strlen(cand);
+    if (abs(l1 - l2) > 3)
+      continue;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    l2 = strlen(base);
+    int d[32][32];
+    if (l1 > 30)
+      l1 = 30;
+    if (l2 > 30)
+      l2 = 30;
+    for (int x = 0; x <= l1; x++)
+      d[x][0] = x;
+    for (int y = 0; y <= l2; y++)
+      d[0][y] = y;
+    for (int x = 1; x <= l1; x++) {
+      for (int y = 1; y <= l2; y++) {
+        int cost = (name[x - 1] == base[y - 1]) ? 0 : 1;
+        int dist_del = d[x - 1][y] + 1;
+        int dist_ins = d[x][y - 1] + 1;
+        int c_cost = d[x - 1][y - 1] + cost;
+        int min = dist_del < dist_ins ? dist_del : dist_ins;
+        if (c_cost < min)
+          min = c_cost;
+        d[x][y] = min;
+      }
+    }
+    int dist = d[l1][l2];
+    if (dist < best_d && dist < 4) {
+      best_d = dist;
+      best = cand;
+    }
+  }
+  // Check globals
+  for (size_t i = 0; i < cg->global_vars.len; ++i) {
+    const char *cand = cg->global_vars.data[i].name;
+    int l1 = strlen(name);
+    int l2 = strlen(cand);
+    if (abs(l1 - l2) > 3)
+      continue;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    l2 = strlen(base);
+    int d[32][32];
+    if (l1 > 30)
+      l1 = 30;
+    if (l2 > 30)
+      l2 = 30;
+    for (int x = 0; x <= l1; x++)
+      d[x][0] = x;
+    for (int y = 0; y <= l2; y++)
+      d[0][y] = y;
+    for (int x = 1; x <= l1; x++) {
+      for (int y = 1; y <= l2; y++) {
+        int cost = (name[x - 1] == base[y - 1]) ? 0 : 1;
+        int dist_del = d[x - 1][y] + 1;
+        int dist_ins = d[x][y - 1] + 1;
+        int c_cost = d[x - 1][y - 1] + cost;
+        int min = dist_del < dist_ins ? dist_del : dist_ins;
+        if (c_cost < min)
+          min = c_cost;
+        d[x][y] = min;
+      }
+    }
+    int dist = d[l1][l2];
+    if (dist < best_d && dist < 4) {
+      best_d = dist;
+      best = cand;
+    }
+  }
+  if (best)
+    fprintf(stderr, "       Did you mean '%s'?\n", best);
+}
+
+LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
+                         ny_param_list params, stmt_t *body, bool is_variadic,
+                         const char *name_hint) {
+  /* Capture All Visible Variables (scopes[1..depth]) */
+  binding_list captures = {0};
+  for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
+    for (size_t j = 0; j < scopes[i].vars.len; j++) {
+      vec_push(&captures, scopes[i].vars.data[j]);
+    }
+  }
+  char name[64];
+  if (name_hint && strncmp(name_hint, "__lambda", 8) == 0) {
+    snprintf(name, sizeof(name), "%s_%d", name_hint, cg->lambda_count++);
+  } else {
+    snprintf(name, sizeof(name), "%s_%d", name_hint ? name_hint : "__lambda",
+             cg->lambda_count++);
+  }
+  stmt_t sfn = {.kind = NY_S_FUNC,
+                .as.fn = {.name = strdup(name),
+                          .params = params,
+                          .body = body,
+                          .is_variadic = is_variadic}};
+  scope sc[64] = {0};
+  // Check if we actually need environment. name_hint check for __defer is
+  // heuristic.
+  bool uses_env = captures.len > 0;
+  if (name_hint && strcmp(name_hint, "__defer") == 0)
+    uses_env = true;
+
+  gen_func(cg, &sfn, name, sc, 0, uses_env ? &captures : NULL);
+  free((void *)sfn.as.fn.name);
+  LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
+  LLVMValueRef fn_ptr_tagged = LLVMBuildOr(
+      cg->builder, LLVMBuildPtrToInt(cg->builder, lf, cg->type_i64, ""),
+      LLVMConstInt(cg->type_i64, 2, false), "");
+
+  if (!uses_env) {
+    /* Standard function (tag 2) if no captures */
+    vec_free(&captures);
+    return fn_ptr_tagged;
+  }
+  /* Create Env */
+  fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
+  if (!malloc_sig) {
+    fprintf(stderr, "Error: __malloc required for closures\n");
+    cg->had_error = 1;
+    return LLVMConstInt(cg->type_i64, 0, false);
+  }
+  LLVMValueRef env_alloc_size = LLVMConstInt(
+      cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
+  LLVMValueRef env_ptr =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){env_alloc_size}, 1, "env");
+  LLVMValueRef env_raw = LLVMBuildIntToPtr(
+      cg->builder, env_ptr, LLVMPointerType(cg->type_i64, 0), "env_raw");
+  for (size_t i = 0; i < captures.len; i++) {
+    LLVMValueRef slot_val =
+        LLVMBuildLoad2(cg->builder, cg->type_i64, captures.data[i].value, "");
+    LLVMValueRef dst = LLVMBuildGEP2(
+        cg->builder, cg->type_i64, env_raw,
+        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
+        "");
+    LLVMBuildStore(cg->builder, slot_val, dst);
+  }
+  /* Create Closure Object [Tag=105 | Code | Env] */
+  LLVMValueRef cls_size =
+      LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
+  LLVMValueRef cls_ptr =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){cls_size}, 1, "closure");
+  LLVMValueRef cls_raw = LLVMBuildIntToPtr(
+      cg->builder, cls_ptr, LLVMPointerType(cg->type_i64, 0), "");
+  /* Set Tag -8 */
+  LLVMValueRef tag_addr = LLVMBuildGEP2(
+      cg->builder, LLVMInt8TypeInContext(cg->ctx),
+      LLVMBuildBitCast(cg->builder, cls_raw,
+                       LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0), ""),
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
+  LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 105, false),
+                 LLVMBuildBitCast(cg->builder, tag_addr,
+                                  LLVMPointerType(cg->type_i64, 0), ""));
+  /* Store Code at 0 */
+  LLVMBuildStore(cg->builder, fn_ptr_tagged, cls_raw);
+  /* Store Env at 8 */
+  LLVMValueRef env_store_addr = LLVMBuildGEP2(
+      cg->builder, cg->type_i64, cls_raw,
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
+  LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
+  vec_free(&captures);
+  return cls_ptr;
+}
 
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
   LLVMValueRef is_none =
@@ -56,7 +236,8 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   memcpy(obj_data + header_size, final_s, final_len);
   obj_data[header_size + final_len] = '\0';
   // Write Tail
-  *(uint64_t *)(obj_data + header_size + final_len + 1) = NY_MAGIC3;
+  uint64_t magic3 = NY_MAGIC3;
+  memcpy(obj_data + header_size + final_len + 1, &magic3, sizeof(magic3));
   LLVMTypeRef arr_ty =
       LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
   LLVMValueRef g = LLVMAddGlobal(cg->module, arr_ty, ".str");
@@ -193,10 +374,13 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     LLVMBuildRet(bld, LLVMConstInt(tcg.type_i64, 1, false));
   LLVMExecutionEngineRef ee;
   LLVMCreateJITCompilerForModule(&ee, mod, 3, NULL);
+  // EE now owns the module, so prevent codegen_dispose from freeing it
+  tcg.module = NULL;
   int64_t (*f)(void) = (int64_t (*)(void))LLVMGetFunctionAddress(ee, "ctm");
   int64_t res = f ? f() : 0;
   LLVMDisposeExecutionEngine(ee);
-  LLVMContextDispose(ctx);
+  codegen_dispose(
+      &tcg); // This will dispose the context since llvm_ctx_owned=true
   if ((res & 1) == 0) {
     fprintf(stderr, "Error: comptime must return an int64 (tagged int)\n");
     cg->had_error = 1;
@@ -265,90 +449,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       }
       return val;
     }
-    fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
-            e->tok.filename ? e->tok.filename : "unknown", e->tok.line,
-            e->tok.col, e->as.ident.name);
-    cg->had_error = 1;
-    // Suggest
-    const char *best = NULL;
-    int best_d = 100;
-    // Check funs
-    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-      const char *cand = cg->fun_sigs.data[i].name;
-      int l1 = strlen(e->as.ident.name);
-      int l2 = strlen(cand);
-      if (abs(l1 - l2) > 3)
-        continue;
-      const char *dot = strrchr(cand, '.');
-      const char *base = dot ? dot + 1 : cand;
-      l2 = strlen(base);
-      int d[32][32];
-      if (l1 > 30)
-        l1 = 30;
-      if (l2 > 30)
-        l2 = 30;
-      for (int x = 0; x <= l1; x++)
-        d[x][0] = x;
-      for (int y = 0; y <= l2; y++)
-        d[0][y] = y;
-      for (int x = 1; x <= l1; x++) {
-        for (int y = 1; y <= l2; y++) {
-          int cost = (e->as.ident.name[x - 1] == base[y - 1]) ? 0 : 1;
-          int dist_del = d[x - 1][y] + 1;
-          int dist_ins = d[x][y - 1] + 1;
-          int c_cost = d[x - 1][y - 1] + cost;
-          int min = dist_del < dist_ins ? dist_del : dist_ins;
-          if (c_cost < min)
-            min = c_cost;
-          d[x][y] = min;
-        }
-      }
-      int dist = d[l1][l2];
-      if (dist < best_d && dist < 4) {
-        best_d = dist;
-        best = cand;
-      }
-    }
-    // Check globals
-    for (size_t i = 0; i < cg->global_vars.len; ++i) {
-      const char *cand = cg->global_vars.data[i].name;
-      int l1 = strlen(e->as.ident.name);
-      int l2 = strlen(cand);
-      if (abs(l1 - l2) > 3)
-        continue;
-      const char *dot = strrchr(cand, '.');
-      const char *base = dot ? dot + 1 : cand;
-      l2 = strlen(base);
-      int d[32][32];
-      if (l1 > 30)
-        l1 = 30;
-      if (l2 > 30)
-        l2 = 30;
-      for (int x = 0; x <= l1; x++)
-        d[x][0] = x;
-      for (int y = 0; y <= l2; y++)
-        d[0][y] = y;
-      for (int x = 1; x <= l1; x++) {
-        for (int y = 1; y <= l2; y++) {
-          int cost = (e->as.ident.name[x - 1] == base[y - 1]) ? 0 : 1;
-          int dist_del = d[x - 1][y] + 1;
-          int dist_ins = d[x][y - 1] + 1;
-          int c_cost = d[x - 1][y - 1] + cost;
-          int min = dist_del < dist_ins ? dist_del : dist_ins;
-          if (c_cost < min)
-            min = c_cost;
-          d[x][y] = min;
-        }
-      }
-      int dist = d[l1][l2];
-      if (dist < best_d && dist < 4) {
-        best_d = dist;
-        best = cand;
-      }
-    }
-    if (best)
-      fprintf(stderr, "       Did you mean '%s'?\n", best);
-    cg->had_error = 1;
+    report_undef_symbol(cg, e->as.ident.name, e->tok);
+    return LLVMConstInt(cg->type_i64, 0, false);
     return LLVMConstInt(cg->type_i64, 0, false);
   }
   case NY_E_UNARY: {
@@ -876,81 +978,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_LAMBDA:
   case NY_E_FN: {
     /* Capture All Visible Variables (scopes[1..depth]) */
-    binding_list captures = {0};
-    for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
-      for (size_t j = 0; j < scopes[i].vars.len; j++) {
-        vec_push(&captures, scopes[i].vars.data[j]);
-      }
-    }
-    char name[64];
-    snprintf(name, sizeof(name), "__lambda_%d", cg->lambda_count++);
-    stmt_t sfn = {.kind = NY_S_FUNC,
-                  .as.fn = {.name = strdup(name),
-                            .params = e->as.lambda.params,
-                            .body = e->as.lambda.body,
-                            .is_variadic = e->as.lambda.is_variadic}};
-    scope sc[64] = {0};
-    gen_func(cg, &sfn, name, sc, 0, &captures);
-    free((void *)sfn.as.fn.name);
-    LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
-    LLVMValueRef fn_ptr_tagged = LLVMBuildOr(
-        cg->builder, LLVMBuildPtrToInt(cg->builder, lf, cg->type_i64, ""),
-        LLVMConstInt(cg->type_i64, 2, false), "");
-    if (captures.len == 0 && e->kind != NY_E_LAMBDA) {
-      /* Standard function (tag 2) if no captures */
-      vec_free(&captures);
-      return fn_ptr_tagged;
-    }
-    /* Create Env */
-    fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
-    if (!malloc_sig) {
-      fprintf(stderr, "Error: __malloc required for closures\n");
-      cg->had_error = 1;
-      return LLVMConstInt(cg->type_i64, 0, false);
-    }
-    LLVMValueRef env_alloc_size = LLVMConstInt(
-        cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
-    LLVMValueRef env_ptr =
-        LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
-                       (LLVMValueRef[]){env_alloc_size}, 1, "env");
-    LLVMValueRef env_raw = LLVMBuildIntToPtr(
-        cg->builder, env_ptr, LLVMPointerType(cg->type_i64, 0), "env_raw");
-    for (size_t i = 0; i < captures.len; i++) {
-      LLVMValueRef slot_val =
-          LLVMBuildLoad2(cg->builder, cg->type_i64, captures.data[i].value, "");
-      LLVMValueRef dst = LLVMBuildGEP2(
-          cg->builder, cg->type_i64, env_raw,
-          (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
-          "");
-      LLVMBuildStore(cg->builder, slot_val, dst);
-    }
-    /* Create Closure Object [Tag=105 | Code | Env] */
-    LLVMValueRef cls_size =
-        LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
-    LLVMValueRef cls_ptr =
-        LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
-                       (LLVMValueRef[]){cls_size}, 1, "closure");
-    LLVMValueRef cls_raw = LLVMBuildIntToPtr(
-        cg->builder, cls_ptr, LLVMPointerType(cg->type_i64, 0), "");
-    /* Set Tag -8 */
-    LLVMValueRef tag_addr = LLVMBuildGEP2(
-        cg->builder, LLVMInt8TypeInContext(cg->ctx),
-        LLVMBuildBitCast(cg->builder, cls_raw,
-                         LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0),
-                         ""),
-        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
-    LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 105, false),
-                   LLVMBuildBitCast(cg->builder, tag_addr,
-                                    LLVMPointerType(cg->type_i64, 0), ""));
-    /* Store Code at 0 */
-    LLVMBuildStore(cg->builder, fn_ptr_tagged, cls_raw);
-    /* Store Env at 8 */
-    LLVMValueRef env_store_addr = LLVMBuildGEP2(
-        cg->builder, cg->type_i64, cls_raw,
-        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
-    LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
-    vec_free(&captures);
-    return cls_ptr;
+    return gen_closure(cg, scopes, depth, e->as.lambda.params,
+                       e->as.lambda.body, e->as.lambda.is_variadic, "__lambda");
   }
   case NY_E_MATCH: {
     LLVMValueRef old_store = cg->result_store_val;

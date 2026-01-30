@@ -36,13 +36,14 @@ fn envp() {
 }
 
 ;; Type Predicates
+
 fn is_int(x) {
    "Returns **true** if `x` is a tagged integer."
    asm("andq $$1, $0; xorq $$1, $0; shlq $$1, $0; addq $$2, $0", "=r,0", x)
 }
 
 fn is_ptr(x) {
-   "Returns **true** if `x` is a pointer (heap address)."
+   "Returns **true** if `x` is a pointer (aligned, non-zero)."
    if (__eq(x, 0)) { return false }
    asm("andq $$7, $0; negq $0; sbbq $0, $0; andq $$2, $0; addq $$2, $0", "=r,0", x)
 }

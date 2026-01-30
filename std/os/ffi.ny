@@ -144,7 +144,7 @@ fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){
 
 fn ffi_call(fptr, args){
    "Dynamically calls a function pointer `fptr` with a variable list of `args`. Supports functions with 0 to 13 arguments."
-   def n = list_len(args)
+   mut n = list_len(args)
    if(n==0){ return call0(fptr)  }
    if(n==1){ return call1(fptr, get(args,0))  }
    if(n==2){ return call2(fptr, get(args,0), get(args,1))  }
@@ -162,3 +162,4 @@ fn ffi_call(fptr, args){
    panic("ffi_call supports 0-12 args")
    return 0
 }
+

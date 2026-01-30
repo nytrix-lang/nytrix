@@ -1,7 +1,6 @@
-use std.io
-use std.net.http
-use std.collections
-use std.core.error
+use std.net.http *
+use std.core.list *
+use std.core.error *
 
 ;; std.net.http (Test)
 ;; Tests URL and query parsing helpers.

@@ -1,8 +1,12 @@
-use std.io
-use std.os.time
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Mandelbrot Set (Benchmark)
-;; Strength reduction, loop unrolling, and minimal dispatch.
 
 fn mandelbrot(w, h, max_iter){
    def count = 0
@@ -12,17 +16,17 @@ fn mandelbrot(w, h, max_iter){
    def hh_sy = - (h * 0.5) * sy
    def four = 4.0
 
-   def c_im = hh_sy
-   def y = 0
+   mut c_im = hh_sy
+   mut y = 0
    while(y < h){
-      def c_re = hw_sx
-      def x = 0
+      mut c_re = hw_sx
+      mut x = 0
       while(x < w){
-         def zr = 0.0
-         def zi = 0.0
-         def zr2 = 0.0
-         def zi2 = 0.0
-         def i = 0
+         mut zr = 0.0
+         mut zi = 0.0
+         mut zr2 = 0.0
+         mut zi2 = 0.0
+         mut i = 0
          
          while(i < max_iter){
             zr2 = zr * zr
@@ -67,7 +71,7 @@ fn mandelbrot(w, h, max_iter){
    count
 }
 
-def size = 175
+def size = 100
 def WIDTH = size
 def HEIGHT = size
 def ITERS = 72

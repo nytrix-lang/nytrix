@@ -4,9 +4,24 @@
 #include <setjmp.h>
 
 // Globals & Panic
+// Globals & Panic
 int64_t g_globals_ptr = 1; // tagged (0)
-typedef VEC(jmp_buf *) jmp_buf_vec;
-static jmp_buf_vec g_panic_env_stack = {0};
+
+typedef struct {
+  void *fn;
+  int64_t env;
+} defer_t;
+
+typedef VEC(defer_t) defer_vec;
+static defer_vec g_defer_stack = {0};
+
+typedef struct {
+  jmp_buf *env;
+  size_t defer_base;
+} panic_env_t;
+
+typedef VEC(panic_env_t) panic_env_vec;
+static panic_env_vec g_panic_env_stack = {0};
 static int64_t g_panic_value = 0;
 
 int64_t __globals(void) { return g_globals_ptr; }
@@ -15,8 +30,33 @@ int64_t __set_globals(int64_t p) {
   return p;
 }
 
+void __push_defer(void *fn, int64_t env) {
+  vec_push(&g_defer_stack, ((defer_t){fn, env}));
+}
+
+void __pop_run_defer(void) {
+  if (g_defer_stack.len > 0) {
+    defer_t d = g_defer_stack.data[--g_defer_stack.len];
+    int64_t (*f)(int64_t) =
+        (int64_t (*)(int64_t))__mask_ptr((int64_t)(uintptr_t)d.fn);
+    if (f)
+      f(d.env);
+  }
+}
+
+void __run_defers_to(size_t target_len) {
+  while (g_defer_stack.len > target_len) {
+    defer_t d = g_defer_stack.data[--g_defer_stack.len];
+    int64_t (*f)(int64_t) =
+        (int64_t (*)(int64_t))__mask_ptr((int64_t)(uintptr_t)d.fn);
+    if (f)
+      f(d.env);
+  }
+}
+
 int64_t __set_panic_env(int64_t env_ptr) {
-  vec_push(&g_panic_env_stack, (jmp_buf *)(uintptr_t)env_ptr);
+  panic_env_t pe = {(jmp_buf *)(uintptr_t)env_ptr, g_defer_stack.len};
+  vec_push(&g_panic_env_stack, pe);
   return 0;
 }
 
@@ -33,8 +73,10 @@ int64_t __get_panic_val(void) { return g_panic_value; }
 int64_t __panic(int64_t msg_ptr) {
   if (g_panic_env_stack.len > 0) {
     g_panic_value = msg_ptr;
-    jmp_buf *env = g_panic_env_stack.data[g_panic_env_stack.len - 1];
-    longjmp(*env, 1);
+    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
+    // Run defers up to the catch block
+    __run_defers_to(pe.defer_base);
+    longjmp(*pe.env, 1);
   }
   // Make panic function robust
   if (is_int(msg_ptr)) {
@@ -59,10 +101,13 @@ char **__argv_ptr = NULL;
 char **__envp_ptr = NULL;
 
 int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
+  __cleanup_args();
   __argc_val = (argc << 1) | 1;
-  __argv_ptr = calloc(argc + 1, sizeof(char *));
+  __argv_ptr = (char **)(uintptr_t)__malloc(
+      ((int64_t)(argc + 1) * sizeof(char *) << 1) | 1);
   if (!__argv_ptr)
     return -1;
+  memset(__argv_ptr, 0, (argc + 1) * sizeof(char *));
   char **old_argv = (char **)argv_ptr;
   for (int i = 0; i < argc; i++) {
     if (old_argv[i]) {
@@ -85,9 +130,11 @@ int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
       env_count++;
   }
   __envc_val = (env_count << 1) | 1;
-  __envp_ptr = calloc(env_count + 1, sizeof(char *));
+  __envp_ptr = (char **)(uintptr_t)__malloc(
+      ((int64_t)(env_count + 1) * sizeof(char *) << 1) | 1);
   if (!__envp_ptr)
     return -1;
+  memset(__envp_ptr, 0, (env_count + 1) * sizeof(char *));
   for (int i = 0; i < env_count; i++) {
     size_t len = strlen(old_envp[i]);
     int64_t p = __malloc((int64_t)((len + 1) << 1 | 1));
@@ -103,11 +150,21 @@ int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
 
 void __cleanup_args(void) {
   if (__argv_ptr) {
-    free(__argv_ptr);
+    int argc = (__argc_val >> 1);
+    for (int i = 0; i < argc; i++) {
+      if (__argv_ptr[i])
+        __free((int64_t)(uintptr_t)__argv_ptr[i]);
+    }
+    __free((int64_t)(uintptr_t)__argv_ptr);
     __argv_ptr = NULL;
   }
   if (__envp_ptr) {
-    free(__envp_ptr);
+    int envc = (__envc_val >> 1);
+    for (int i = 0; i < envc; i++) {
+      if (__envp_ptr[i])
+        __free((int64_t)(uintptr_t)__envp_ptr[i]);
+    }
+    __free((int64_t)(uintptr_t)__envp_ptr);
     __envp_ptr = NULL;
   }
   __argc_val = 1;

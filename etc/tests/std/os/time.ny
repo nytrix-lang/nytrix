@@ -1,7 +1,6 @@
-use std.io
-use std.os.time
-use std.math.timefmt
-use std.core.error
+use std.os.time *
+use std.math.timefmt *
+use std.core.error *
 
 ;; std.math.time (Test)
 ;; Tests time, ticks, sleep, and time formatting.

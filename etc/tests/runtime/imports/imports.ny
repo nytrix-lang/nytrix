@@ -1,9 +1,19 @@
-use std.core
-use std.io
-use std.core.error
+use std.core *
+use std.core.reflect *
 
-;; Import system – explicit std usage (Test)
+print("Testing explicit std usage...")
+print("Explicit std import works")
 
-assert(print("Explicit std import works") == 0, "std.print callable")
+print("Testing relative file import...")
+use "./local_helper.ny" as helper
+mut v = helper.helper_val()
+print(f"helper.helper_val() returned: '{v}'")
+assert(v == 123, f"file module call: {v}")
+assert(helper.helper_add(1, 2) == 3, "file module add")
 
-print("✓ std explicit import tests passed")
+print("Testing relative file import with rename...")
+use "./local_helper.ny" (helper_add as my_add)
+assert(my_add(10, 10) == 20, "file module rename")
+
+print("✓ import system tests passed")
+

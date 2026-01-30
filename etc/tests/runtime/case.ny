@@ -1,12 +1,15 @@
-use std.core
-use std.io
-use std.core.error
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Case / control-flow / edge cases (Test)
 
 print("Testing case...")
 
-def g = 0
+mut g = 0
 fn set_g(v){
    g = v
    0
@@ -36,7 +39,7 @@ assert(case_return(0x44494354) == 5, "case return")
 assert(case_return(0) == 3, "case return default")
 
 fn case_expr(tag){
-   def out = 0
+   mut out = 0
    case tag {
       0x44494354 -> { out = 7  5 }
       _ -> { out = 9 }
@@ -47,7 +50,7 @@ fn case_expr(tag){
 assert(case_expr(0x44494354) == 7, "case expr block")
 
 fn case_load(tag, ptr){
-   def out = 0
+   mut out = 0
    case tag {
       0x4c495354, 0x5345545f, 0x5455504c -> { out = load64(ptr_add(ptr, 8)) }
       _ -> { out = 0 }
@@ -55,12 +58,12 @@ fn case_load(tag, ptr){
    out
 }
 
-def mem = __malloc(24)
+def mem = malloc(24)
 store64(mem, 0x44494354, 8)
 assert(case_load(0x4c495354, mem) == 0x44494354, "case load64")
 
 fn case_wild(tag){
-   def out = 0
+   mut out = 0
    case tag {
       _ -> { out = 11 }
    }
@@ -91,17 +94,16 @@ def min_small = -4611686018427387904
 assert(max_small > 0, "max_small")
 assert(min_small < 0, "min_small")
 
-use std.strings.str
 def empty = ""
 assert(len(empty) == 0, "empty string")
 
 def s = "   "
 assert(len(strip(s)) == 0, "strip whitespace")
 
-def l = list(0)
+mut l = list(0)
 assert(len(l) == 0, "empty list")
 
-def i = 0
+mut i = 0
 while(i < 100){
    l = append(l, i)
    i = i + 1
@@ -110,3 +112,4 @@ assert(len(l) == 100, "list growth")
 assert(get(l, 99) == 99, "list last")
 
 print("✓ Edge cases passed")
+

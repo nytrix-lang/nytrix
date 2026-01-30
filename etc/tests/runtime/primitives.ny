@@ -1,21 +1,25 @@
 use std.core
-use std.io
-use std.core.error
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; std.core runtime primitives (Test)
 
-def p = __malloc(10)
+def p = malloc(10)
 assert(p != 0, "malloc")
-__store8_idx(p, 0, 65)
-__store8_idx(p, 1, 66)
-assert(__load8_idx(p, 0) == 65, "load8 0")
-assert(__load8_idx(p, 1) == 66, "load8 1")
+store8(p, 65, 0)
+store8(p, 66, 1)
+assert(load8(p, 0) == 65, "load8 0")
+assert(load8(p, 1) == 66, "load8 1")
 def off = 1
-assert(__load8_idx(p, off) == 66, "load8 var")
-__free(p)
+assert(load8(p, off) == 66, "load8 var")
+free(p)
 
-def a = 10
-def b = 20
+mut a = 10
+mut b = 20
 assert(a + b == 30, "add")
 assert(b - a == 10, "sub")
 assert(a * b == 200, "mul")
@@ -36,11 +40,12 @@ def add10 = adder(10)
 assert(add5(10) == 15, "closure 5")
 assert(add10(10) == 20, "closure 10")
 
-def x = 42
+mut x = 42
 undef x
 assert(x == 0, "undef")
 
-def y = nil
+mut y = nil
 assert(y == 0, "nil")
 
 print("✓ std.core runtime tests passed")
+

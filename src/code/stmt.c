@@ -6,10 +6,14 @@
 #include <string.h>
 
 void emit_defers(codegen_t *cg, scope *scopes, size_t depth, size_t func_root) {
-  for (ssize_t d = (ssize_t)depth; d >= (ssize_t)func_root; --d)
-    for (ssize_t i = (ssize_t)scopes[d].defers.len - 1; i >= 0; --i)
-      gen_stmt(cg, scopes, (size_t *)&d, scopes[d].defers.data[i], func_root,
-               false);
+  fun_sig *pop_sig = lookup_fun(cg, "__pop_run_defer");
+  if (!pop_sig)
+    return;
+  for (ssize_t d = (ssize_t)depth; d >= (ssize_t)func_root; --d) {
+    for (size_t i = 0; i < scopes[d].defers.len; ++i) {
+      LLVMBuildCall2(cg->builder, pop_sig->type, pop_sig->value, NULL, 0, "");
+    }
+  }
 }
 
 void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
@@ -44,10 +48,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         if (*depth == 0) {
           binding *gb = lookup_global(cg, n);
           if (!gb) {
-            fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
-                    s->tok.filename ? s->tok.filename : "unknown", s->tok.line,
-                    s->tok.col, n);
-            cg->had_error = 1;
+            report_undef_symbol(cg, n, s->tok);
             return;
           }
           slot = gb->value;
@@ -56,10 +57,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
           if (!eb)
             eb = lookup_global(cg, n);
           if (!eb) {
-            fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m undef %s\n",
-                    s->tok.filename ? s->tok.filename : "unknown", s->tok.line,
-                    s->tok.col, n);
-            cg->had_error = 1;
+            report_undef_symbol(cg, n, s->tok);
             return;
           }
           slot = eb->value;
@@ -297,12 +295,12 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     break;
   }
   case NY_S_RETURN: {
+    LLVMValueRef v = s->as.ret.value
+                         ? gen_expr(cg, scopes, *depth, s->as.ret.value)
+                         : LLVMConstInt(cg->type_i64, 1, false);
     emit_defers(cg, scopes, *depth, func_root);
-    if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
-      break;
-    LLVMBuildRet(cg->builder,
-                 s->as.ret.value ? gen_expr(cg, scopes, *depth, s->as.ret.value)
-                                 : LLVMConstInt(cg->type_i64, 1, false));
+    if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+      LLVMBuildRet(cg->builder, v);
     break;
   }
   case NY_S_USE: {
@@ -320,7 +318,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       gen_stmt(cg, scopes, depth, s->as.block.body.data[i], func_root,
                is_tail && (i == s->as.block.body.len - 1));
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
-      emit_defers(cg, scopes, *depth, func_root);
+      emit_defers(cg, scopes, *depth, *depth);
     vec_free(&scopes[*depth].defers);
     vec_free(&scopes[*depth].vars);
     (*depth)--;
@@ -405,16 +403,52 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   case NY_S_FUNC:
     gen_func(cg, s, s->as.fn.name, scopes, *depth, NULL);
     break;
-  case NY_S_DEFER:
-    if (s->as.de.body)
-      vec_push(&scopes[*depth].defers, s->as.de.body);
+  case NY_S_DEFER: {
+    if (!s->as.de.body)
+      break;
+
+    // 1. Create a closure from the body
+    ny_param_list no_params = {0};
+    LLVMValueRef cls = gen_closure(cg, scopes, *depth, no_params, s->as.de.body,
+                                   false, "__defer");
+
+    // 2. Extract fn_ptr and env from closure
+    // Closure is [Tag | Code | Env]
+    LLVMValueRef cls_raw = LLVMBuildIntToPtr(
+        cg->builder, cls, LLVMPointerType(cg->type_i64, 0), "");
+    // Load Code at index 0
+    LLVMValueRef fn_ptr_int =
+        LLVMBuildLoad2(cg->builder, cg->type_i64, cls_raw, "defer_fn");
+    // Load Env at index 1
+    LLVMValueRef env_addr = LLVMBuildGEP2(
+        cg->builder, cg->type_i64, cls_raw,
+        (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
+    LLVMValueRef env =
+        LLVMBuildLoad2(cg->builder, cg->type_i64, env_addr, "defer_env");
+
+    // 3. Push to runtime defer stack
+    fun_sig *push_sig = lookup_fun(cg, "__push_defer");
+    if (push_sig) {
+      LLVMBuildCall2(
+          cg->builder, push_sig->type, push_sig->value,
+          (LLVMValueRef[]){
+              LLVMBuildIntToPtr(
+                  cg->builder, fn_ptr_int,
+                  LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0), ""),
+              env},
+          2, "");
+    }
+
+    // 4. Record that we pushed one to this scope for later popping
+    vec_push(&scopes[*depth].defers, s->as.de.body);
     break;
+  }
   case NY_S_BREAK: {
     LLVMBasicBlockRef db = NULL;
     for (ssize_t i = (ssize_t)*depth; i >= 0; i--) {
+      size_t td = (size_t)i;
       for (ssize_t d = (ssize_t)scopes[i].defers.len - 1; d >= 0; --d)
-        gen_stmt(cg, scopes, (size_t *)&i, scopes[i].defers.data[d], func_root,
-                 false);
+        gen_stmt(cg, scopes, &td, scopes[i].defers.data[d], func_root, false);
       if (scopes[i].break_bb) {
         db = scopes[i].break_bb;
         break;
@@ -427,9 +461,9 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   case NY_S_CONTINUE: {
     LLVMBasicBlockRef db = NULL;
     for (ssize_t i = (ssize_t)*depth; i >= 0; i--) {
+      size_t td = (size_t)i;
       for (ssize_t d = (ssize_t)scopes[i].defers.len - 1; d >= 0; --d)
-        gen_stmt(cg, scopes, (size_t *)&i, scopes[i].defers.data[d], func_root,
-                 false);
+        gen_stmt(cg, scopes, &td, scopes[i].defers.data[d], func_root, false);
       if (scopes[i].continue_bb) {
         db = scopes[i].continue_bb;
         break;

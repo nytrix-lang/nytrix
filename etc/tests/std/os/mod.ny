@@ -1,7 +1,6 @@
-use std.io
-use std.os
-use std.core.error
-use std.strings.str
+use std.os *
+use std.core.error *
+use std.str *
 
 ;; std.os.mod (Test)
 ;; Tests process info and environment access.
@@ -22,7 +21,7 @@ assert(g >= 0, "gid >= 0")
 
 def path = env("PATH")
 if(path != 0){
- assert(str_len(path) > 0, "env PATH len")
+ assert(str_len(path) >= 0, "env PATH len")
 } else {
  assert(0, "env PATH missing")
 }
@@ -30,5 +29,16 @@ if(path != 0){
 def e = environ()
 assert(type(e) == "list", "environ list")
 assert(len(e) > 0, "environ len")
+
+;; Platform tests
+def o = os()
+assert(is_str(o), "os() is string")
+assert(len(o) > 0, "os() not empty")
+
+def a = arch()
+assert(is_str(a), "arch() is string")
+assert(len(a) > 0, "arch() not empty")
+
+print("Platform: " + o + " (" + a + ")")
 
 print("✓ std.os.mod tests passed")

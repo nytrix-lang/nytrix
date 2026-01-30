@@ -1,3 +1,4 @@
+#include "base/loader.h"
 #include "base/options.h"
 #include "code/jit.h"
 #include "rt/shared.h"
@@ -46,5 +47,8 @@ int main(int argc, char **argv, char **envp) {
   }
 
   int exit_code = ny_pipeline_run(&opt);
+  // Cleanup
+  ny_std_free_modules();
+  __cleanup_args();
   return exit_code;
 }

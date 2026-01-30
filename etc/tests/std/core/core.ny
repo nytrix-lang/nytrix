@@ -1,6 +1,7 @@
-use std.io
-use std.core
-use std.collections
+use std.core *
+use std.core.list *
+use std.os *
+use std.str *
 
 ;; Core (Test)
 ;; Tests core memory, I/O operations, list operations, and type checking.
@@ -9,7 +10,7 @@ use std.collections
 def ptr = malloc(64)
 assert(ptr != 0, "malloc returns non-null")
 store64(ptr, 12345)
-def val = load64(ptr)
+mut val = load64(ptr)
 assert(val == 12345, "store64/load64")
 store8(ptr, 255)
 val = load8(ptr)
@@ -17,7 +18,7 @@ assert(val == 255, "store8/load8")
 free(ptr)
 
 ; List operations
-def lst = list(8)
+mut lst = list(8)
 assert(is_list(lst), "list creation")
 assert(list_len(lst) == 0, "empty list length")
 lst = append(lst, 10)
@@ -64,7 +65,7 @@ def test_data = "Hello, Nytrix!"
 def result = file_write(test_file, test_data)
 assert(result > 0, "file_write returns bytes written")
 assert(file_exists(test_file), "file exists after write")
-def content = file_read(test_file)
+mut content = file_read(test_file)
 assert(eq(content, test_data), "file content matches")
 file_append(test_file, " More data")
 content = file_read(test_file)

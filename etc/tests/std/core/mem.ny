@@ -1,6 +1,5 @@
-use std.io
-use std.core.mem
 use std.core
+use std.core.mem *
 
 ;; Core Mem (Test)
 ;; Tests low-level memory operations like memcpy, memset, memchr, and memcmp.
@@ -9,7 +8,8 @@ print("Testing memcpy...")
 def s = "hello world"
 def n = str_len(s)
 def d = malloc(n + 1)
-__init_str(d, n)
+store64(d, 241, -8)
+store64(d, n, -16)
 memcpy(d, s, n)
 store8(d, 0, n)
 assert(_str_eq(d, s), "memcpy works")
@@ -27,9 +27,9 @@ free(p)
 
 print("Testing memchr...")
 def s2 = "abcdef"
-def p2 = memchr(s2, 100, 6) ; 'd'
+mut p2 = memchr(s2, 100, 6) ; 'd'
 assert(p2 == s2 + 3, "memchr found char")
-def p3 = memchr(s2, 122, 6) ; 'z'
+mut p3 = memchr(s2, 122, 6) ; 'z'
 assert(p3 == 0, "memchr not found")
 
 print("Testing memcmp...")
@@ -37,3 +37,4 @@ assert(memcmp("abc", "abc", 3) == 0, "memcmp equal")
 assert(memcmp("abc", "abd", 3) != 0, "memcmp unequal")
 
 print("✓ std.core.mem tests passed")
+

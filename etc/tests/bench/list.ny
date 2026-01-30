@@ -1,8 +1,12 @@
-use std.io
-use std.os.time
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; List (Benchmark)
-;; Tests list allocation, appending, and iteration.
 
 def start = ticks()
 lst = []

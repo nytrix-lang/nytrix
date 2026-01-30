@@ -1,7 +1,8 @@
-use std.os.ffi
+#!/bin/ny
+use std.os.ffi *
+use std.str.io *
 
-;; Raylib FFI (Example)
-;; Demonstrates low-level FFI calls to the Raylib graphics library.
+;; Raylib FFI (Example) - LowLevel ffi calls
 
 def h = dlopen("/usr/lib/libraylib.so", 2)
 if(h != 0){
@@ -21,5 +22,5 @@ if(h != 0){
    dlclose(h)
    print("✓ Raylib window closed")
 } else {
-   print("Raylib not found")
+   print("[/usr/lib/libraylib.so] Raylib not found")
 }

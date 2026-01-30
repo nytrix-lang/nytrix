@@ -1,6 +1,5 @@
-use std.io
-use std.math
-use std.core.error
+use std.math *
+use std.core.error *
 
 ;; std.math.mod (Test)
 ;; Tests basic math, power, sqrt, floor, and ceil.

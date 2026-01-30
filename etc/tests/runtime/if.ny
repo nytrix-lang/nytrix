@@ -1,6 +1,10 @@
-use std.core
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; If strict syntax (Test)
 
@@ -25,7 +29,7 @@ if(0){
    print("if false else ok")
 }
 
-def val = 0
+mut val = 0
 if(1){
    val = 1
    val = 2

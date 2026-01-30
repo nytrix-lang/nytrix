@@ -155,6 +155,19 @@ static inline char *ny_strndup(const char *s, size_t n) {
     (vec)->len = (vec)->cap = 0;                                               \
   } while (0)
 
+#define vec_push_arena(arena, vec, value)                                      \
+  do {                                                                         \
+    if ((vec)->len == (vec)->cap) {                                            \
+      size_t new_cap = (vec)->cap ? (vec)->cap * 2 : 8;                        \
+      void *new_data = arena_alloc(arena, new_cap * sizeof(*(vec)->data));     \
+      if ((vec)->data)                                                         \
+        memcpy(new_data, (vec)->data, (vec)->len * sizeof(*(vec)->data));      \
+      (vec)->data = new_data;                                                  \
+      (vec)->cap = new_cap;                                                    \
+    }                                                                          \
+    (vec)->data[(vec)->len++] = (value);                                       \
+  } while (0)
+
 // Arena tracking raw allocations for bulk free.
 typedef struct arena_t {
   void **items;

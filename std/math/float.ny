@@ -9,7 +9,7 @@ module std.math.float (
 
 fn _box(bits){
    "Internal: box raw float bits into a Nytrix float object."
-   def p = __malloc(8)
+   def p = malloc(8)
    store64(p - 8, 110)
    store64(p, bits)
    p
@@ -44,7 +44,7 @@ fn trunc(x){
 fn is_float(x){
    "Check if value is a float."
    if(!is_ptr(x)){ return false }
-   def tag = load64(x, -8)
+   mut tag = load64(x, -8)
    tag == 110 || tag == 221
 }
 
@@ -107,7 +107,7 @@ fn ceil(x){
 
 fn round(x){
    "Round to nearest integer."
-   def half = float(5)
+   mut half = float(5)
    half = fdiv(half, float(10)) ; 0.5
    if(__flt_lt(x, float(0))){
       ceil(fsub(float(x), half))
@@ -156,3 +156,4 @@ fn is_inf(x){
    def inf_bits = 0x7ff0000000000000
    return (bits & mask) == (inf_bits & inf_bits)
 }
+

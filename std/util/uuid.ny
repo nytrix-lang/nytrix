@@ -3,22 +3,22 @@
 
 use std.core
 use std.math.random
-use std.io
+use std.str.io *
 module std.util.uuid (
    uuid4
 )
 
 fn uuid4(){
    "Generates a random Version 4 UUID string (e.g., 'f47ac10b-58cc-4372-a567-0e02b2c3d479')."
-   def out = __malloc(64)
-   __init_str(out, 36) ; Tag + Len 36
-   def i=0  def o=0
-   def r=0 def b=0
-   def v1=0 def c1=255
-   def v2=0 def c2=255
+   def out = malloc(64)
+   init_str(out, 36) ; Tag + Len 36
+   mut i=0  mut o=0
+   mut r=0 mut b=0
+   mut v1=0 mut c1=255
+   mut v2=0 mut c2=255
    while(i<16){
       r = rand()
-      def b = r % 256
+      b = r % 256
       if(i==6){ b = (b % 16) + 64  }
       if(i==8){ b = (b % 64) + 128  }
       v1 = (b / 16) % 16

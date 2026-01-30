@@ -23,12 +23,32 @@ bool builtin_allowed_comptime(const char *name) {
 }
 
 void add_builtins(codegen_t *cg) {
+  if (!cg) {
+    fprintf(stderr, "add_builtins: cg is NULL\n");
+    return;
+  }
+  if (!cg->ctx) {
+    fprintf(stderr, "add_builtins: cg->ctx is NULL\n");
+    return;
+  }
+  if (!cg->module) {
+    fprintf(stderr, "add_builtins: cg->module is NULL\n");
+    return;
+  }
+  if (!cg->type_i64) {
+    fprintf(stderr, "add_builtins: cg->type_i64 is NULL\n");
+    return;
+  }
+
   LLVMTypeRef fn_types[32]; // Cache types by arity
   for (int i = 0; i < 32; i++) {
     LLVMTypeRef *pts = alloca(sizeof(LLVMTypeRef) * (size_t)i);
     for (int j = 0; j < i; j++)
       pts[j] = cg->type_i64;
     fn_types[i] = LLVMFunctionType(cg->type_i64, pts, (unsigned)i, 0);
+    if (!fn_types[i])
+      fprintf(stderr, "add_builtins: failed to create fn_type for arity %d\n",
+              i);
   }
 
 #define RT_DEF(name, p, args, sig, doc)                                        \
@@ -66,7 +86,16 @@ void add_builtins(codegen_t *cg) {
 
 fun_sig *lookup_fun(codegen_t *cg, const char *name) {
   fun_sig *res = NULL;
-  // 1a. Try namespaced lookup if name is not qualified
+
+  // 1. Precise name match (local or unqualified global)
+  for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
+    if (strcmp(cg->fun_sigs.data[i].name, name) == 0) {
+      res = &cg->fun_sigs.data[i];
+      goto end;
+    }
+  }
+
+  // 2. Namespaced lookup if name is not qualified
   if (cg->current_module_name && strchr(name, '.') == NULL) {
     char buf[256];
     snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
@@ -77,47 +106,48 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
       }
     }
   }
-  // 1b. Try common fallbacks if name is not qualified
+
+  // 3. Import aliases and common fallbacks if name is not qualified
   if (strchr(name, '.') == NULL) {
     const char *alias_full = resolve_import_alias(cg, name);
     if (alias_full) {
-      res = lookup_fun(cg, alias_full);
-      goto end;
+      fun_sig *ares = lookup_fun(cg, alias_full);
+      if (ares) {
+        res = ares;
+        goto end;
+      }
     }
+
     const char *fallbacks[] = {"std.core",
                                "std.core.reflect",
                                "std.core.primitives",
                                "std.core.error",
                                "std.core.mem",
-                               "std.io",
-                               "std.io.path",
-                               "std.io.fs",
-                               "std.collections",
-                               "std.collections.dict",
-                               "std.collections.set",
-                               "std.collections.sort",
-                               "std.strings.str",
-                               "std.strings.bytes",
-                               "std.strings.timefmt",
+                               "std.core.list",
+                               "std.core.dict",
+                               "std.core.set",
+                               "std.core.sort",
+                               "std.str",
+                               "std.str.io",
+                               "std.str.path",
+                               "std.str.fmt",
                                "std.math",
                                "std.math.bigint",
                                "std.math.float",
                                "std.math.random",
-                               "std.process",
                                "std.os",
+                               "std.os.fs",
+                               "std.os.process",
                                "std.os.time",
                                "std.os.ffi",
+                               "std.os.args",
+                               "std.net",
                                "std.net.socket",
                                "std.net.http",
-                               "std.util.convert",
-                               "std.util.json",
-                               "std.util.regex",
-                               "std.util.url",
-                               "std.util.progress",
-                               "std.cli",
-                               "std.cli.tui",
+                               "std.util",
                                "std.util.inspect",
-                               "std.iter",
+                               "std.util.uuid",
+                               "std.core.iter",
                                NULL};
     for (int j = 0; fallbacks[j]; ++j) {
       if (cg->current_module_name &&
@@ -176,10 +206,6 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
   }
   for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
     const char *sig_name = cg->fun_sigs.data[i].name;
-    if (strcmp(sig_name, name) == 0) {
-      res = &cg->fun_sigs.data[i];
-      goto end;
-    }
     // Also try matching after the last dot if the input name is not qualified
     if (strchr(name, '.') == NULL) {
       const char *last_dot = strrchr(sig_name, '.');
@@ -198,13 +224,6 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
     }
   }
 end:;
-  if (!res && name && strcmp(name, "dict") == 0) {
-    // Let's see if std.collections.dict exists
-    for (size_t i = 0; i < cg->fun_sigs.len; i++) {
-      if (strcmp(cg->fun_sigs.data[i].name, "std.collections.dict") == 0) {
-      }
-    }
-  }
   return res;
 }
 
@@ -236,7 +255,14 @@ const char *resolve_import_alias(codegen_t *cg, const char *name) {
 binding *lookup_global(codegen_t *cg, const char *name) {
   if (!cg->global_vars.data)
     return NULL;
-  // 1. Try namespaced lookup if name is not qualified
+
+  // 1. Precise name match (local or unqualified global)
+  for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
+    if (strcmp(cg->global_vars.data[i].name, name) == 0)
+      return &cg->global_vars.data[i];
+  }
+
+  // 2. Namespaced lookup if name is not qualified
   if (cg->current_module_name && strchr(name, '.') == NULL) {
     char buf[256];
     snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
@@ -245,13 +271,46 @@ binding *lookup_global(codegen_t *cg, const char *name) {
         return &cg->global_vars.data[i];
     }
   }
-  // 1b. Try common fallbacks if name is not qualified
+
+  // 3. Import aliases and common fallbacks if name is not qualified
   if (strchr(name, '.') == NULL) {
     const char *alias_full = resolve_import_alias(cg, name);
     if (alias_full) {
-      return lookup_global(cg, alias_full);
+      binding *ares = lookup_global(cg, alias_full);
+      if (ares)
+        return ares;
     }
-    const char *fallbacks[] = {"std.core", "std.io", "std.os", "std.core.test",
+
+    const char *fallbacks[] = {"std.core",
+                               "std.core.reflect",
+                               "std.core.primitives",
+                               "std.core.error",
+                               "std.core.mem",
+                               "std.core.list",
+                               "std.core.dict",
+                               "std.core.set",
+                               "std.core.sort",
+                               "std.str",
+                               "std.str.io",
+                               "std.str.path",
+                               "std.str.fmt",
+                               "std.math",
+                               "std.math.bigint",
+                               "std.math.float",
+                               "std.math.random",
+                               "std.os",
+                               "std.os.fs",
+                               "std.os.process",
+                               "std.os.time",
+                               "std.os.ffi",
+                               "std.os.args",
+                               "std.net",
+                               "std.net.socket",
+                               "std.net.http",
+                               "std.util",
+                               "std.util.inspect",
+                               "std.util.uuid",
+                               "std.core.iter",
                                NULL};
     for (int j = 0; fallbacks[j]; ++j) {
       if (cg->current_module_name &&
@@ -267,8 +326,6 @@ binding *lookup_global(codegen_t *cg, const char *name) {
   }
   for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
     const char *sig_name = cg->global_vars.data[i].name;
-    if (strcmp(sig_name, name) == 0)
-      return &cg->global_vars.data[i];
     // Also try matching after the last dot if the input name is not qualified
     if (strchr(name, '.') == NULL) {
       const char *last_dot = strrchr(sig_name, '.');
@@ -451,11 +508,28 @@ void add_imports_from_prefix(codegen_t *cg, const char *mod) {
   }
 }
 
+char *normalize_module_name(const char *raw) {
+  if (!raw)
+    return NULL;
+  // If raw contains '/', assume it's a file path
+  if (strchr(raw, '/')) {
+    const char *last_slash = strrchr(raw, '/');
+    const char *start = last_slash ? last_slash + 1 : raw;
+    char *name = ny_strdup(start);
+    char *dot = strrchr(name, '.');
+    if (dot && dot != name) {
+      *dot = '\0';
+    }
+    return name;
+  }
+  return ny_strdup(raw);
+}
+
 void process_use_imports(codegen_t *cg, stmt_t *s) {
   if (s->kind == NY_S_USE) {
     if (!s->as.use.import_all && s->as.use.imports.len == 0)
       return;
-    const char *mod = s->as.use.module;
+    char *mod = normalize_module_name(s->as.use.module);
     if (s->as.use.imports.len > 0) {
       for (size_t i = 0; i < s->as.use.imports.len; ++i) {
         use_item_t *item = &s->as.use.imports.data[i];
@@ -467,17 +541,21 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
         add_import_alias(cg, item->alias ? item->alias : item->name, full);
         free(full);
       }
+      free(mod);
       return;
     }
     if (s->as.use.import_all) {
       str_list exports = {0};
       bool has_export_list = false;
       stmt_t *mod_stmt = NULL;
+      // Also try finding module definition stmt matching normalized name
       for (size_t i = 0; i < cg->prog->body.len; ++i) {
         mod_stmt = find_module_stmt(cg->prog->body.data[i], mod);
         if (mod_stmt)
           break;
       }
+      // If not found, maybe fallback to raw name? loader renames it though.
+
       if (mod_stmt) {
         has_export_list = module_has_export_list(mod_stmt);
         if (has_export_list) {
@@ -496,8 +574,10 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
         }
         vec_free(&exports);
       }
+      free(mod);
       return;
     }
+    free(mod);
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; ++i) {
       process_use_imports(cg, s->as.module.body.data[i]);
@@ -510,30 +590,23 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
     if (s->as.use.import_all || s->as.use.imports.len > 0)
       return;
     const char *alias = s->as.use.alias;
+    char *mod = normalize_module_name(s->as.use.module);
     if (!alias) {
-      // Infer alias from module path (last component)
-      const char *mod = s->as.use.module;
+      // Infer alias from module name (not path)
       const char *dot = strrchr(mod, '.');
       alias = dot ? dot + 1 : mod;
     }
     binding alias_bind = {0};
     alias_bind.name = ny_strdup(alias);
-    alias_bind.stmt_t = (stmt_t *)ny_strdup(s->as.use.module);
+    alias_bind.stmt_t = (stmt_t *)ny_strdup(mod);
     // Handle specific imports list: use Mod (a, b as c)
-    for (size_t i = 0; i < s->as.use.imports.len; ++i) {
-      use_item_t item = s->as.use.imports.data[i];
-      const char *target = item.name;
-      const char *item_alias = item.alias ? item.alias : item.name;
-      // Maps alias -> Module.target
-      binding import_bind = {0};
-      import_bind.name = ny_strdup(item_alias);
-      char *full_target =
-          malloc(strlen(s->as.use.module) + 1 + strlen(target) + 1);
-      sprintf(full_target, "%s.%s", s->as.use.module, target);
-      import_bind.stmt_t = (stmt_t *)full_target;
-      vec_push(&cg->import_aliases, import_bind);
-    }
+    // Actually this branch is for plain `use Mod` (or `use Mod as Alias`)
+    // The imports list is handled in the if earlier?
+    // Wait, collect_use_aliases logic above checks empty imports.
+    // So this handles `use Mod` and `use Mod as M`.
+
     vec_push(&cg->aliases, alias_bind);
+    free(mod);
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; i++)
       collect_use_aliases(cg, s->as.module.body.data[i]);

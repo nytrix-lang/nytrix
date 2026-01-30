@@ -162,6 +162,8 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_LAYOUT;
     break;
   case 'm':
+    if (len == 3 && memcmp(start, "mut", 3) == 0)
+      return NY_T_MUT;
     if (len == 6 && memcmp(start, "module", 6) == 0)
       return NY_T_MODULE;
     break;
@@ -200,6 +202,7 @@ token_t lexer_next(lexer_t *lx) {
     tok.len = 0;
     tok.line = lx->line;
     tok.col = lx->col;
+    tok.filename = lx->filename;
     return tok;
   }
   char c = advance(lx);

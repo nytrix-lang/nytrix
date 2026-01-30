@@ -1,6 +1,10 @@
-use std.core
-use std.io
-use std.core.error
+use std.core *
+use std.core.error *
+use std.core.reflect *
+use std.core.list *
+use std.core.dict *
+use std.str.io *
+use std.str *
 
 ;; Parser operator precedence (Test)
 

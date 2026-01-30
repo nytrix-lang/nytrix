@@ -1,7 +1,6 @@
-use std.io
-use std.util.counter
-use std.collections
-use std.core.error
+use std.util.counter *
+use std.core.list *
+use std.core.error *
 
 ;; std.util.counter (Test)
 ;; Tests counter creation, updates, and most_common.
@@ -9,7 +8,7 @@ use std.core.error
 print("Testing Util Counter...")
 
 def xs = ["a", "b", "a", "c", "b", "a"]
-def c = counter(xs)
+mut c = counter(xs)
 
 assert(dict_get(c, "a", 0) == 3, "count a")
 assert(dict_get(c, "b", 0) == 2, "count b")

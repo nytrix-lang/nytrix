@@ -24,6 +24,9 @@
 #include <time.h>
 #include <unistd.h>
 
+static int repl_move_up(int count, int key);
+static int repl_move_down(int count, int key);
+
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -31,6 +34,8 @@
 const doc_list_t *g_repl_docs = NULL;
 
 static std_mode_t g_repl_std_override = (std_mode_t)-1;
+/* effectively the mode REPL was initialized with */
+static std_mode_t g_repl_effective_mode = STD_MODE_DEFAULT;
 static int g_repl_plain = 0;
 
 // Persistent JIT State
@@ -47,6 +52,75 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
 
 void ny_repl_set_std_mode(std_mode_t mode) { g_repl_std_override = mode; }
 void ny_repl_set_plain(int plain) { g_repl_plain = plain; }
+
+static int repl_move_up(int count, int key) {
+  int p = rl_point;
+  int last_nl = -1;
+  for (int i = p - 1; i >= 0; i--) {
+    if (rl_line_buffer[i] == '\n') {
+      last_nl = i;
+      break;
+    }
+  }
+
+  if (last_nl != -1) {
+    int col = p - (last_nl + 1);
+    int prev_nl = -1;
+    for (int i = last_nl - 1; i >= 0; i--) {
+      if (rl_line_buffer[i] == '\n') {
+        prev_nl = i;
+        break;
+      }
+    }
+    int prev_start = prev_nl + 1;
+    int prev_len = last_nl - prev_start;
+    if (col > prev_len)
+      col = prev_len;
+    rl_point = prev_start + col;
+    rl_redisplay();
+    return 0;
+  }
+  return rl_get_previous_history(count, key);
+}
+
+static int repl_move_down(int count, int key) {
+  int p = rl_point;
+  int next_nl = -1;
+  for (int i = p; rl_line_buffer[i]; i++) {
+    if (rl_line_buffer[i] == '\n') {
+      next_nl = i;
+      break;
+    }
+  }
+
+  if (next_nl != -1) {
+    int last_nl = -1;
+    for (int i = p - 1; i >= 0; i--) {
+      if (rl_line_buffer[i] == '\n') {
+        last_nl = i;
+        break;
+      }
+    }
+    int col = p - (last_nl + 1);
+    int next_next_nl = -1;
+    for (int i = next_nl + 1; rl_line_buffer[i]; i++) {
+      if (rl_line_buffer[i] == '\n') {
+        next_next_nl = i;
+        break;
+      }
+    }
+    int next_start = next_nl + 1;
+    int next_len = (next_next_nl != -1)
+                       ? (next_next_nl - next_start)
+                       : (int)strlen(rl_line_buffer + next_start);
+    if (col > next_len)
+      col = next_len;
+    rl_point = next_start + col;
+    rl_redisplay();
+    return 0;
+  }
+  return rl_get_next_history(count, key);
+}
 
 static const char *repl_std_mode_name(std_mode_t mode) {
   switch (mode) {
@@ -141,13 +215,17 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
       if (!parser.had_error) {
         if (docs)
           doclist_add_from_prog(docs, prog);
-        codegen_init_with_context(&g_repl_cg, prog, mod, g_repl_ctx,
-                                  g_repl_builder);
+        codegen_init_with_context(&g_repl_cg, prog, parser.arena, mod,
+                                  g_repl_ctx, g_repl_builder);
+        g_repl_cg.prog_owned = true;
         codegen_emit(&g_repl_cg);
+      } else {
+        program_free(prog, parser.arena);
+        free(prog);
       }
     }
   } else {
-    codegen_init_with_context(&g_repl_cg, NULL, mod, g_repl_ctx,
+    codegen_init_with_context(&g_repl_cg, NULL, NULL, mod, g_repl_ctx,
                               g_repl_builder);
   }
 
@@ -168,24 +246,29 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
 }
 
 static void repl_shutdown_engine(void) {
-  if (g_repl_ee)
+  if (g_repl_ee) {
     LLVMDisposeExecutionEngine(g_repl_ee);
-  else if (g_repl_cg.module)
+    g_repl_ee = NULL;
+    g_repl_cg.module = NULL; // ee owned it
+  } else if (g_repl_cg.module) {
     LLVMDisposeModule(g_repl_cg.module);
+    g_repl_cg.module = NULL;
+  }
 
-  if (g_repl_builder)
+  if (g_repl_builder) {
     LLVMDisposeBuilder(g_repl_builder);
-  if (g_repl_ctx)
+    g_repl_builder = NULL;
+    g_repl_cg.builder = NULL;
+  }
+  if (g_repl_ctx) {
     LLVMContextDispose(g_repl_ctx);
+    g_repl_ctx = NULL;
+    g_repl_cg.ctx = NULL;
+  }
 
-  if (g_repl_cg.prog)
-    free(g_repl_cg.prog);
   codegen_dispose(&g_repl_cg);
-
   memset(&g_repl_cg, 0, sizeof(codegen_t));
-  g_repl_ctx = NULL;
-  g_repl_ee = NULL;
-  g_repl_builder = NULL;
+
   g_eval_count = 0;
   if (g_std_src_cached_persistent) {
     free(g_std_src_cached_persistent);
@@ -230,7 +313,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         LLVMModuleCreateWithNameInContext("repl_eval", g_repl_ctx);
     LLVMBuilderRef eval_builder = LLVMCreateBuilderInContext(g_repl_ctx);
     codegen_t cg;
-    codegen_init_with_context(&cg, &pr, eval_mod, g_repl_ctx, eval_builder);
+    codegen_init_with_context(&cg, &pr, ps.arena, eval_mod, g_repl_ctx,
+                              eval_builder);
 
     for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++)
       vec_push(&cg.fun_sigs, g_repl_cg.fun_sigs.data[i]);
@@ -339,8 +423,15 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       cg.aliases.len = 0;
       cg.import_aliases.len = 0;
       cg.use_modules.len = 0;
+
+      // Move interns to persistent state so they aren't freed by
+      // codegen_dispose
+      for (size_t i = 0; i < cg.interns.len; i++) {
+        vec_push(&g_repl_cg.interns, cg.interns.data[i]);
+      }
+      cg.interns.len = 0;
     }
-    LLVMDisposeBuilder(eval_builder);
+    codegen_dispose(&cg);
   } else {
     repl_print_error_snippet(full_input, ps.cur.line, ps.cur.col);
     last_status = 1;
@@ -358,10 +449,25 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
 static void repl_ensure_module(const char *name, std_mode_t std_mode,
                                doc_list_t *docs) {
   (void)std_mode;
+  char *norm_name = normalize_module_name(name);
   for (size_t i = 0; i < g_repl_cg.use_modules.len; i++) {
-    if (strcmp(g_repl_cg.use_modules.data[i], name) == 0)
+    if (strcmp(g_repl_cg.use_modules.data[i], norm_name) == 0) {
+      free(norm_name);
       return;
+    }
   }
+
+  // If it's a standard module and we are in default/full mode, assume it's
+  // preloaded
+  // If it's a standard module and we are in default/full mode, assume it's
+  // preloaded. We check g_repl_effective_mode because recursive calls might
+  // pass STD_MODE_NONE but the persistent env has std loaded.
+  if (g_repl_effective_mode != STD_MODE_NONE &&
+      ny_std_find_module_by_name(norm_name) >= 0) {
+    free(norm_name);
+    return;
+  }
+  free(norm_name);
 
   char *clean_name = ny_strdup(name);
   if (clean_name[0] == '"') {
@@ -403,6 +509,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   if (getenv("NYTRIX_REPL_NO_STD"))
     std_mode = STD_MODE_NONE;
+
+  g_repl_effective_mode = std_mode;
 
   doc_list_t docs = {0};
   g_repl_docs = &docs;
@@ -472,8 +580,12 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     rl_completer_quote_characters = "\"";
     rl_filename_quote_characters = "\"";
     rl_basic_word_break_characters = " \t\n\"\\'`@$><=;|&{}.(";
-    rl_bind_keyseq("\e[A", rl_history_search_backward);
-    rl_bind_keyseq("\e[B", rl_history_search_forward);
+    rl_bind_keyseq("\e[A", repl_move_up);
+    rl_bind_keyseq("\e[B", repl_move_down);
+    rl_bind_key(0x10, repl_move_up);        // Ctrl-P
+    rl_bind_key(0x0e, repl_move_down);      // Ctrl-N
+    rl_bind_keyseq("\eOA", repl_move_up);   // Secondary Up
+    rl_bind_keyseq("\eOB", repl_move_down); // Secondary Down
     rl_bind_keyseq("\x12", rl_reverse_search_history);
     rl_redisplay_function = repl_redisplay;
     rl_completion_display_matches_hook = repl_display_match_list;
@@ -483,6 +595,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   int last_status = 0;
 
   while (1) {
+    repl_reset_redisplay();
     char prompt_buf[128];
     const char *prompt;
     if (input_buffer) {
@@ -857,4 +970,12 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (history_path[0])
     write_history(history_path);
   doclist_free(&docs);
+
+  if (init_lines) {
+    for (size_t i = 0; i < init_lines_len; i++) {
+      free(init_lines[i]);
+    }
+    free(init_lines);
+  }
+  repl_shutdown_engine();
 }
