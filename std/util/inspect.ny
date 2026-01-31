@@ -23,6 +23,8 @@ fn inspect(x){
 
 fn repl_show(x){
    "Function used by the REPL to display values."
-   print(repr(x))
+   if(x != 0){
+      print(repr(x))
+   }
    x
 }

@@ -18,6 +18,50 @@ __attribute__((destructor)) static void __stats(void) {
 }
 #endif
 
+#if defined(__SANITIZE_ADDRESS__)
+#define NY_WITH_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define NY_WITH_ASAN 1
+#endif
+#endif
+#ifndef NY_WITH_ASAN
+#define NY_WITH_ASAN 0
+#endif
+
+#if NY_WITH_ASAN
+static void **g_quarantine = NULL;
+static size_t g_quarantine_len = 0;
+static size_t g_quarantine_cap = 0;
+
+static void quarantine_push(void *p) {
+  if (!p)
+    return;
+  for (size_t i = 0; i < g_quarantine_len; ++i) {
+    if (g_quarantine[i] == p)
+      return;
+  }
+  if (g_quarantine_len == g_quarantine_cap) {
+    size_t new_cap = g_quarantine_cap ? g_quarantine_cap * 2 : 1024;
+    void **next = realloc(g_quarantine, new_cap * sizeof(void *));
+    if (!next)
+      return;
+    g_quarantine = next;
+    g_quarantine_cap = new_cap;
+  }
+  g_quarantine[g_quarantine_len++] = p;
+}
+
+__attribute__((destructor)) static void quarantine_drain(void) {
+  for (size_t i = 0; i < g_quarantine_len; ++i)
+    free(g_quarantine[i]);
+  free(g_quarantine);
+  g_quarantine = NULL;
+  g_quarantine_len = 0;
+  g_quarantine_cap = 0;
+}
+#endif
+
 int64_t __malloc(int64_t size) {
   if (is_int(size))
     size >>= 1;
@@ -57,7 +101,16 @@ int64_t __free(int64_t ptr) {
       // long)ptr);
     }
 #endif
-    free((char *)(uintptr_t)ptr - 64);
+    void *base = (char *)(uintptr_t)ptr - 64;
+    // Clear allocation sentinels so repeated free attempts are ignored.
+    *(uint64_t *)base = 0;
+    *(uint64_t *)((char *)base + 16) = 0;
+#if NY_WITH_ASAN
+    // Avoid ASAN false-positive cascades from runtime pointer probes after free.
+    quarantine_push(base);
+#else
+    free(base);
+#endif
   }
   return 0;
 }

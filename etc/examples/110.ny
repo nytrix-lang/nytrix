@@ -26,7 +26,7 @@ fn step(curr, w) {
 }
 
 def t = get_terminal_size()
-mut w = get(t, 0)
+mut w = get(t, 0, 0)
 if(w <= 0){ w = 80 }
 w -= 1
 mut u = bytes(w)
@@ -34,7 +34,7 @@ mut i = 0
 while (i < w) { bytes_set(u, i, 0) i+=1 }
 bytes_set(u, 0, 1)
 
-def h = get(t, 1)
+mut h = get(t, 1, 0)
 if(h <= 0){ h = 24 }
 mut gen = 0
 while (gen < h - 2) {
@@ -46,7 +46,7 @@ while (gen < h - 2) {
       i += 1
    }
    bytes_set(out, w, 10)
-   sys_write(1, out, w + 1)
+   unwrap(sys_write(1, out, w + 1))
    free(out)
    def next = step(u, w)
    free(u)

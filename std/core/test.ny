@@ -15,6 +15,7 @@ fn write_stderr(s){
 }
 
 fn assert(cond, msg="Assertion failed"){
+   "Asserts `cond`; on failure prints message and exits with status 1."
    if(cond){ 1 }
    else {
       def s = f"Generic Assertion Failed: {msg}\n"
@@ -24,10 +25,12 @@ fn assert(cond, msg="Assertion failed"){
 }
 
 fn t_assert(cond, msg="Assertion failed"){
+   "Alias for `assert` used by test files."
    assert(cond, msg)
 }
 
 fn t_assert_eq(a, b, msg="Assertion failed"){
+   "Asserts equality; currently delegates to test framework behavior."
    if(a != b){
    }
 }

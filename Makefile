@@ -61,6 +61,7 @@ SRC_COMPILER_DIRS := src/ast src/base src/lex src/code src/repl src/wire
 SRC_COMPILER := $(foreach dir,$(SRC_COMPILER_DIRS),$(wildcard $(dir)/*.c))
 SRC_COMPILER += src/parse/shared.c
 SRC_RUNTIME := src/rt/init.c
+RT_AMALGAM_PARTS := $(filter-out src/rt/init.c,$(wildcard src/rt/*.c))
 
 # Cmd Sources
 SRC_CMD_NY := src/cmd/ny/main.c
@@ -161,15 +162,23 @@ $(BUILD_DIR)/rt/debug/%.o: src/rt/%.c | build
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS_DEBUG) -c $< -o $@
 
+# Runtime is built from src/rt/init.c, which textual-includes the other
+# src/rt/*.c files. Track those includes so edits rebuild init.o reliably.
+$(BUILD_DIR)/rt/debug/init.o: $(RT_AMALGAM_PARTS)
+
 $(BUILD_DIR)/rt/release/%.o: src/rt/%.c | build
 	@echo "  $(C_GRAY)CC (release)$(C_RESET) $<"
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS_RELEASE) -c $< -o $@
 
+$(BUILD_DIR)/rt/release/init.o: $(RT_AMALGAM_PARTS)
+
 $(BUILD_DIR)/rt/shared/%.o: src/rt/%.c | build
 	@echo "  $(C_GRAY)CC (shared)$(C_RESET) $<"
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS_RELEASE) -fPIC -c $< -o $@
+
+$(BUILD_DIR)/rt/shared/init.o: $(RT_AMALGAM_PARTS)
 
 # Cmd Rules
 $(OBJ_CMD_NY_DEBUG): src/cmd/ny/main.c | build

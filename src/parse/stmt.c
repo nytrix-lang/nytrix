@@ -103,7 +103,14 @@ static stmt_t *parse_while(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_WHILE, "'while'", NULL);
   expr_t *cond = p_parse_expr(p, 0);
+  if (p->cur.kind == NY_T_ASSIGN) {
+    parser_error(p, p->cur, "assignment in condition", "did you mean '=='?");
+    parser_advance(p);
+    p_parse_expr(p, 0); // Consume RHS
+  }
+  p->loop_depth++;
   stmt_t *body = parse_stmt_or_block(p);
+  p->loop_depth--;
   stmt_t *s = stmt_new(p->arena, NY_S_WHILE, tok);
   s->as.whl.test = cond;
   s->as.whl.body = body;
@@ -113,7 +120,29 @@ static stmt_t *parse_while(parser_t *p) {
 static stmt_t *parse_for(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FOR, "'for'", NULL);
-  bool has_paren = parser_match(p, NY_T_LPAREN);
+  bool has_paren = false;
+  if (p->cur.kind == NY_T_LPAREN) {
+    has_paren = true;
+    parser_advance(p);
+    // Check if it looks like for (int i = 0; ...
+    // Note: p->cur is now inside parens
+    if (p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_DEF ||
+        p->cur.kind == NY_T_MUT) {
+      token_t next = parser_peek(p);
+      if (next.kind == NY_T_ASSIGN || next.kind == NY_T_IDENT) {
+        parser_error(p, p->cur, "C-style for loops are not supported",
+                     "use 'for x in iterable' instead");
+        // Recover by consuming up to RPAREN
+        while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+          parser_advance(p);
+        }
+        if (p->cur.kind == NY_T_RPAREN)
+          parser_advance(p);
+        return NULL;
+      }
+    }
+  }
+
   if (p->cur.kind != NY_T_IDENT) {
     parser_error(p, p->cur, "for expects loop variable", NULL);
     return NULL;
@@ -124,7 +153,9 @@ static stmt_t *parse_for(parser_t *p) {
   expr_t *iter = p_parse_expr(p, 0);
   if (has_paren)
     parser_expect(p, NY_T_RPAREN, ")' after condition", NULL);
+  p->loop_depth++;
   stmt_t *body = parse_stmt_or_block(p);
+  p->loop_depth--;
   stmt_t *s = stmt_new(p->arena, NY_S_FOR, tok);
   s->as.fr.iter_var = id;
   s->as.fr.iterable = iter;
@@ -135,7 +166,10 @@ static stmt_t *parse_for(parser_t *p) {
 static stmt_t *parse_try(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_TRY, "'try'", NULL);
+  int saved_loop_depth = p->loop_depth;
+  p->loop_depth = 0;
   stmt_t *body = p_parse_block(p);
+  p->loop_depth = saved_loop_depth;
   parser_expect(p, NY_T_CATCH, "'catch'", NULL);
   const char *err = NULL;
   if (p->cur.kind == NY_T_LPAREN) {
@@ -205,10 +239,14 @@ static stmt_t *parse_func(parser_t *p) {
       break;
   }
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
-  if (parser_match(p, NY_T_COLON)) {
-    if (p->cur.kind != NY_T_IDENT)
-      parser_error(p, p->cur, "expected return type", NULL);
-    else {
+  if (parser_match(p, NY_T_COLON) || parser_match(p, NY_T_ARROW)) {
+    if (p->cur.kind != NY_T_IDENT) {
+      const char *hint =
+          (p->cur.kind == NY_T_LBRACE)
+              ? "did you mean to start the body? remove ':' or '->'"
+              : NULL;
+      parser_error(p, p->cur, "expected return type", hint);
+    } else {
       fn_stmt->as.fn.return_type =
           arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
       parser_advance(p);
@@ -287,7 +325,7 @@ static stmt_t *parse_extern(parser_t *p) {
   }
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   const char *return_type = NULL;
-  if (parser_match(p, NY_T_COLON)) {
+  if (parser_match(p, NY_T_COLON) || parser_match(p, NY_T_ARROW)) {
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected return type", NULL);
     } else {
@@ -450,6 +488,10 @@ static stmt_t *parse_use(parser_t *p) {
 static stmt_t *parse_break(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_BREAK, "'break'", NULL);
+  if (p->loop_depth <= 0) {
+    parser_error(p, tok, "'break' used outside of a loop",
+                 "put this inside a while/for body");
+  }
   stmt_t *s = stmt_new(p->arena, NY_S_BREAK, tok);
   parser_match(p, NY_T_SEMI);
   return s;
@@ -458,6 +500,10 @@ static stmt_t *parse_break(parser_t *p) {
 static stmt_t *parse_continue(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_CONTINUE, "'continue'", NULL);
+  if (p->loop_depth <= 0) {
+    parser_error(p, tok, "'continue' used outside of a loop",
+                 "put this inside a while/for body");
+  }
   stmt_t *s = stmt_new(p->arena, NY_S_CONTINUE, tok);
   parser_match(p, NY_T_SEMI);
   return s;
@@ -477,7 +523,8 @@ static stmt_t *parse_layout(parser_t *p) {
   s->as.layout.name = name;
   while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
     if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected field name", NULL);
+      parser_error(p, p->cur, "expected field name",
+                   "keywords cannot be used as field names");
       break;
     }
     const char *fname = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
@@ -648,7 +695,8 @@ static stmt_t *parse_module(parser_t *p) {
 }
 
 stmt_t *p_parse_stmt(parser_t *p) {
-  NY_LOG_V3("Parsing statement kind %d at line %d\n", p->cur.kind, p->cur.line);
+  NY_LOG_DEBUG("Parsing statement kind %d at line %d\n", p->cur.kind,
+               p->cur.line);
   switch (p->cur.kind) {
   case NY_T_SEMI:
     parser_advance(p);
@@ -787,6 +835,27 @@ stmt_t *p_parse_stmt(parser_t *p) {
   }
   case NY_T_IDENT: {
     token_t ident_tok = p->cur;
+    const char *id = (const char *)ident_tok.lexeme;
+    size_t id_len = ident_tok.len;
+
+    /* Omniscience: Help users from other languages */
+    if (id_len == 4 && strncmp(id, "func", 4) == 0) {
+      parser_error(p, ident_tok, "unrecognised keyword 'func'",
+                   "did you mean 'fn'?");
+    } else if (id_len == 8 && strncmp(id, "function", 8) == 0) {
+      parser_error(p, ident_tok, "unrecognised keyword 'function'",
+                   "did you mean 'fn'?");
+    } else if (id_len == 3 && strncmp(id, "let", 3) == 0) {
+      parser_error(p, ident_tok, "unrecognised keyword 'let'",
+                   "use 'def' for immutable or 'mut' for mutable variables");
+    } else if (id_len == 3 && strncmp(id, "var", 3) == 0) {
+      parser_error(p, ident_tok, "unrecognised keyword 'var'",
+                   "use 'mut' for mutable variables");
+    } else if (id_len == 6 && strncmp(id, "import", 6) == 0) {
+      parser_error(p, ident_tok, "unrecognised keyword 'import'",
+                   "use 'use' to import modules");
+    }
+
     token_t next = parser_peek(p);
     if (next.kind == NY_T_COLON) {
       parser_advance(p);

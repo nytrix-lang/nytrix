@@ -107,46 +107,73 @@ char *repl_assignment_target(const char *src) {
     if (end > p)
       return ny_strndup(p, (size_t)(end - p));
   }
-  // Check for 'x = ...' or 'x += ...' etc.
-  char *eq = strchr(trimmed, '=');
+  // Check top-level assignment like `x = ...` or `x += ...`.
+  // Ignore `=` inside calls/containers/strings so kwargs don't look like defs.
+  int paren = 0, brack = 0, brace = 0;
+  int in_str = 0;
+  char quote = '\0';
+  char *eq = NULL;
+  for (char *p = trimmed; *p; ++p) {
+    char ch = *p;
+    if (in_str) {
+      if (ch == '\\' && p[1]) {
+        ++p;
+        continue;
+      }
+      if (ch == quote) {
+        in_str = 0;
+        quote = '\0';
+      }
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      in_str = 1;
+      quote = ch;
+      continue;
+    }
+    if (ch == '(')
+      paren++;
+    else if (ch == ')' && paren > 0)
+      paren--;
+    else if (ch == '[')
+      brack++;
+    else if (ch == ']' && brack > 0)
+      brack--;
+    else if (ch == '{')
+      brace++;
+    else if (ch == '}' && brace > 0)
+      brace--;
+    else if (ch == '=' && paren == 0 && brack == 0 && brace == 0) {
+      char prev = (p > trimmed) ? *(p - 1) : '\0';
+      char next = *(p + 1);
+      // Comparisons: ==, !=, <=, >=
+      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' ||
+          next == '=')
+        continue;
+      eq = p;
+      break;
+    }
+  }
+
   if (eq && eq != trimmed) {
     char *end = eq - 1;
-    // Handle compound operators: += -= *= /= %= &= |= ^= <<= >>= != == <= >=
-    if (end >= trimmed && strchr("+-*/%&|^<>!=", *end)) {
-      // It's a compound op or a comparison.
-      // If it's ==, !=, <=, >=, it's a comparison (expression).
-      // If it's +=, -=, etc, it's an assignment (statement).
-      if ((*end == '=' || *end == '!' || *end == '<' || *end == '>') &&
-          (end == trimmed || *(end - 1) != *end)) {
-        // Likely == or != or <= or >=. But wait, <<= has two <.
-        // Simple heuristic: if it's == or !=, it's an expression.
-        if ((*end == '=' || *end == '!') ||
-            (end > trimmed && strchr("<>", *(end - 1)) == 0)) {
-          // Check for '==' or '!='
-          if (*end == '!')
-            return NULL;
-          if (*end == '=' && end > trimmed && *(end - 1) == '=')
-            return NULL;
-          // Comparisons are expressions unless they are used in assignments.
-          // For now, let's keep it simple.
-        }
-      }
+    while (end >= trimmed && isspace((unsigned char)*end))
       end--;
-    }
+    while (end >= trimmed && strchr("+-*/%&|^<>", *end))
+      end--;
     while (end >= trimmed && isspace((unsigned char)*end))
       end--;
     if (end < trimmed)
       return NULL;
+
     char *ident_end = end;
     while (end >= trimmed &&
            (isalnum((unsigned char)*end) || *end == '_' || *end == '.'))
       end--;
     char *ident_start = end + 1;
-    if (ident_end >= ident_start) {
-      // Check if it's a valid identifier (roughly)
-      if (isalnum((unsigned char)*ident_start) || *ident_start == '_') {
-        return ny_strndup(ident_start, (size_t)(ident_end - ident_start + 1));
-      }
+    if (ident_end >= ident_start && (*ident_start == '_' ||
+                                     isalpha((unsigned char)*ident_start))) {
+      return ny_strndup(ident_start, (size_t)(ident_end - ident_start + 1));
     }
   }
   return NULL;

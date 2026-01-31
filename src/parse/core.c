@@ -1,5 +1,64 @@
 #include "priv.h"
+#include "base/util.h"
 #include <stdarg.h>
+#include <stdint.h>
+
+static char **g_parse_diag_tbl = NULL;
+static size_t g_parse_diag_cap = 0;
+static size_t g_parse_diag_len = 0;
+
+static uint64_t parse_diag_hash(const char *s) {
+  uint64_t h = 1469598103934665603ULL;
+  for (; s && *s; ++s) {
+    h ^= (unsigned char)*s;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static bool parse_diag_grow(void) {
+  size_t new_cap = g_parse_diag_cap ? g_parse_diag_cap * 2 : 512;
+  char **new_tbl = calloc(new_cap, sizeof(char *));
+  if (!new_tbl)
+    return false;
+  for (size_t i = 0; i < g_parse_diag_cap; ++i) {
+    char *entry = g_parse_diag_tbl[i];
+    if (!entry)
+      continue;
+    size_t mask = new_cap - 1;
+    size_t idx = (size_t)parse_diag_hash(entry) & mask;
+    while (new_tbl[idx])
+      idx = (idx + 1) & mask;
+    new_tbl[idx] = entry;
+  }
+  free(g_parse_diag_tbl);
+  g_parse_diag_tbl = new_tbl;
+  g_parse_diag_cap = new_cap;
+  return true;
+}
+
+static bool parser_diag_should_emit(const char *filename, int line, int col,
+                                    const char *msg, const char *got) {
+  char key[1024];
+  snprintf(key, sizeof(key), "%s|%d|%d|%s|%s", filename ? filename : "<input>",
+           line, col, msg ? msg : "", got ? got : "");
+  if (g_parse_diag_cap == 0 && !parse_diag_grow())
+    return true; // fail open
+  if ((g_parse_diag_len + 1) * 3 >= g_parse_diag_cap * 2 &&
+      !parse_diag_grow())
+    return true; // fail open
+
+  size_t mask = g_parse_diag_cap - 1;
+  size_t idx = (size_t)parse_diag_hash(key) & mask;
+  while (g_parse_diag_tbl[idx]) {
+    if (strcmp(g_parse_diag_tbl[idx], key) == 0)
+      return false;
+    idx = (idx + 1) & mask;
+  }
+  g_parse_diag_tbl[idx] = ny_strdup(key);
+  g_parse_diag_len++;
+  return true;
+}
 
 void parser_advance(parser_t *p) {
   p->prev = p->cur;
@@ -166,6 +225,9 @@ const char *parser_token_name(token_kind k) {
 static void print_error_line(parser_t *p, const char *filename, int line,
                              int col, const char *msg, const char *got,
                              const char *hint) {
+  const char *out_file = filename ? filename : (p->filename ? p->filename : "<input>");
+  if (!parser_diag_should_emit(out_file, line, col, msg, got))
+    return;
   p->had_error = true;
   p->error_count++;
   p->last_error_line = line;
@@ -173,14 +235,13 @@ static void print_error_line(parser_t *p, const char *filename, int line,
   snprintf(p->last_error_msg, sizeof(p->last_error_msg), "%s", msg);
 
   // Emacs format: filename:line:col: type: message
-  fprintf(stderr,
-          "%s:%d:%d: \033[31merror:\033[0m %s\033[1m%s\033[0m (got %s)\n",
-          filename ? filename : (p->filename ? p->filename : "<input>"), line,
-          col, "\033[0m", msg, got);
-  if (hint)
-    fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n",
-            filename ? filename : (p->filename ? p->filename : "<input>"), line,
-            col, hint);
+  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s (got %s)\n", out_file, line,
+          col, msg, got);
+  if (hint) {
+    fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n", out_file, line, col,
+            hint);
+    fprintf(stderr, "  \033[32mfix:\033[0m %s\n", hint);
+  }
 
   if (p->error_limit > 0 && p->error_count >= p->error_limit) {
     fprintf(stderr, "Too many errors, aborting.\n");
@@ -219,6 +280,13 @@ static const char *expect_hint(token_kind expected, token_t got) {
     return "missing ']' before end of file";
   if (expected == NY_T_COLON && got.kind == NY_T_IDENT)
     return "use ':' after 'case'/'default' or for slices";
+  if (expected == NY_T_LBRACE &&
+      (got.kind == NY_T_ARROW || got.kind == NY_T_COLON))
+    return "return type belongs before the opening '{'";
+  if (expected == NY_T_RPAREN && got.lexeme && strcmp(got.lexeme, "->") == 0)
+    return "did you forget to close the parameter list ')' before '->'?";
+  if (expected == NY_T_LBRACE && got.kind == NY_T_IDENT)
+    return "did you forget the '{' before the function body?";
   return NULL;
 }
 
@@ -353,6 +421,7 @@ void parser_init_with_arena(parser_t *p, const char *src, const char *filename,
   p->last_error_msg[0] = '\0';
   p->current_module = NULL;
   p->block_depth = 0;
+  p->loop_depth = 0;
   parser_advance(p);
 }
 

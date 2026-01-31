@@ -1,3 +1,7 @@
+use std.core *
+use std.core.error *
+use std.str.io *
+
 extern fn c_getpid() as "getpid"
 extern fn my_getpid() as "getpid"
 

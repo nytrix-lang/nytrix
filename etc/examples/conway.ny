@@ -7,8 +7,8 @@ use std.os.time *
 use std.str.term *
 
 def t = get_terminal_size()
-mut W = get(t, 0)
-mut H = get(t, 1)
+mut W = get(t, 0, 0)
+mut H = get(t, 1, 0)
 
 if (W < 1) { W = 80 }
 if (H < 1) { H = 24 }
@@ -41,11 +41,11 @@ while (1) {
             def idx = yw + x
 
             mut n =
-                get(g, ym + xm) + get(g, ym + x) + get(g, ym + xp) +
-                get(g, yw + xm)                  + get(g, yw + xp) +
-                get(g, yp + xm) + get(g, yp + x) + get(g, yp + xp)
+                get(g, ym + xm, 0) + get(g, ym + x, 0) + get(g, ym + xp, 0) +
+                get(g, yw + xm, 0)                  + get(g, yw + xp, 0) +
+                get(g, yp + xm, 0) + get(g, yp + x, 0) + get(g, yp + xp, 0)
 
-            def cur  = get(g, idx)
+            def cur  = get(g, idx, 0)
             def live = (cur == 1 ? (n == 2 || n == 3) : (n == 3)) ? 1 : 0
 
             set_idx(ng, idx, live)

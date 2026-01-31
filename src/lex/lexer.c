@@ -61,6 +61,18 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   return tok;
 }
 
+static void lexer_error(lexer_t *lx, size_t start, const char *msg,
+                        const char *hint) {
+  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s\n",
+          lx->filename ? lx->filename : "<input>", lx->line,
+          lx->col - (int)(lx->pos - start), msg);
+  if (hint) {
+    fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n",
+            lx->filename ? lx->filename : "<input>", lx->line,
+            lx->col - (int)(lx->pos - start), hint);
+  }
+}
+
 static void skip_whitespace(lexer_t *lx) {
   for (;;) {
     char c = peek(lx);
@@ -164,6 +176,8 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_LAYOUT;
     break;
   case 'm':
+    if (len == 5 && memcmp(start, "match", 5) == 0)
+      return NY_T_MATCH;
     if (len == 3 && memcmp(start, "mut", 3) == 0)
       return NY_T_MUT;
     if (len == 6 && memcmp(start, "module", 6) == 0)
@@ -197,7 +211,7 @@ token_t lexer_next(lexer_t *lx) {
   skip_whitespace(lx);
   size_t start = lx->pos;
   if (lx->src[lx->pos] == '\0') {
-    NY_LOG_V3("Lexer reached EOF at %d:%d\n", lx->line, lx->col);
+    NY_LOG_DEBUG("Lexer reached EOF at %d:%d\n", lx->line, lx->col);
     token_t tok;
     tok.kind = NY_T_EOF;
     tok.lexeme = lx->src + start;
@@ -250,8 +264,8 @@ token_t lexer_next(lexer_t *lx) {
     }
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.kind = identifier_type(tok.lexeme, tok.len);
-    NY_LOG_V3("Lexer: identifier '%.*s' resolved to kind %d\n", (int)tok.len,
-              tok.lexeme, tok.kind);
+    NY_LOG_DEBUG("Lexer: identifier '%.*s' resolved to kind %d\n", (int)tok.len,
+                 tok.lexeme, tok.kind);
     return tok;
   }
   if (isdigit(c)) {
@@ -323,10 +337,22 @@ token_t lexer_next(lexer_t *lx) {
       return make_token(lx, NY_T_ARROW, start);
     if (match(lx, '='))
       return make_token(lx, NY_T_MINUS_EQ, start);
+    if (match(lx, '-')) {
+      lexer_error(lx, start,
+                  "decrement operator '--' is not supported in Nytrix",
+                  "use '-= 1' instead");
+      return lexer_next(lx);
+    }
     return make_token(lx, NY_T_MINUS, start);
   case '+':
     if (match(lx, '='))
       return make_token(lx, NY_T_PLUS_EQ, start);
+    if (match(lx, '+')) {
+      lexer_error(lx, start,
+                  "increment operator '++' is not supported in Nytrix",
+                  "use '+= 1' instead");
+      return lexer_next(lx);
+    }
     return make_token(lx, NY_T_PLUS, start);
   case '*':
     if (match(lx, '='))
@@ -335,6 +361,14 @@ token_t lexer_next(lexer_t *lx) {
   case '/':
     if (match(lx, '='))
       return make_token(lx, NY_T_SLASH_EQ, start);
+    if (match(lx, '/')) {
+      lexer_error(lx, start, "comments in Nytrix start with ';'",
+                  "use ';' instead of '//'");
+      // Skip the rest of the line to avoid cascading errors
+      while (peek(lx) != '\n' && peek(lx) != '\0')
+        advance(lx);
+      return lexer_next(lx);
+    }
     return make_token(lx, NY_T_SLASH, start);
   case '%':
     if (peek(lx) == '=') {
@@ -380,7 +414,10 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_QUESTION, start);
   }
   // Unknown token_t
-  token_t err_tok = make_token(lx, NY_T_EOF, start); // Placeholder
-  // fprintf(stderr, "Lexer: unrecognised char %c\n", c);
-  return err_tok;
+  char emsg[128];
+  snprintf(emsg, sizeof(emsg), "unrecognised character '%c' (ascii %d)", c,
+           (int)c);
+  lexer_error(lx, start, emsg,
+              "check for accidental non-ascii characters or typos");
+  return lexer_next(lx);
 }

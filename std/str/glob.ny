@@ -9,6 +9,7 @@ module std.str.glob (
 )
 
 fn _glob_match(p, s, pi, si){
+   "Internal recursive matcher used by `glob_match`."
    def plen = str_len(p)
    def slen = str_len(s)
    mut p_idx = pi

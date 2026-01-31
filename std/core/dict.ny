@@ -11,12 +11,14 @@ module std.core.dict (
 )
 
 fn _dict_pow2(n){
+   "Internal: rounds `n` up to the next power-of-two."
    mut v = 1
    while(v < n){ v = v << 1 }
    v
 }
 
 fn _dict_str_eq(a, b){
+   "Internal: byte-wise string equality for dictionary keys."
    if(!is_str(a) || !is_str(b)){ return false }
    def n = str_len(a)
    if(__eq(n, str_len(b)) == false){ return false }
@@ -29,11 +31,13 @@ fn _dict_str_eq(a, b){
 }
 
 fn _dict_key_eq(a, b){
+   "Internal: key equality with string fast-path."
    if(is_str(a) && is_str(b)){ return _dict_str_eq(a, b) }
    return __eq(a, b) || eq(a, b)
 }
 
 fn _dict_hash(x){
+   "Internal: hashes integers/strings for open-addressing lookup."
    if(is_int(x)){ return x }
    if(is_str(x)){
       mut h = 14695981039346656037
@@ -49,6 +53,7 @@ fn _dict_hash(x){
 }
 
 fn _dict_new(cap){
+   "Internal: allocates a dictionary storage block."
    if(cap < 8){ cap = 8 }
    cap = _dict_pow2(cap)
    def p = malloc(16 + cap * 24)
@@ -73,6 +78,7 @@ fn dict(cap=8){
 }
 
 fn _dict_insert(d, key, val){
+   "Internal: inserts or replaces a key/value pair."
    def cap = load64(d, 8)
    def h = _dict_hash(key)
    def mask = cap - 1
@@ -103,6 +109,7 @@ fn _dict_insert(d, key, val){
 }
 
 fn _dict_resize(d, newcap){
+   "Internal: rebuilds the hash table at a larger capacity."
    mut nd = _dict_new(newcap)
    def cap = load64(d, 8)
    mut i = 0
@@ -159,6 +166,7 @@ fn dict_get(d, key, default=0){
 }
 
 fn _dict_pair(a, b){
+   "Internal: packs `(a, b)` into a two-element list."
    def p = list(2)
    store64(p, a, 16)
    store64(p, b, 24)
@@ -229,4 +237,3 @@ fn dict_values(d){
    }
    out
 }
-

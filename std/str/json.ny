@@ -10,6 +10,7 @@ module std.str.json (
 )
 
 fn _json_trim(s){
+   "Internal: normalizes whitespace around a JSON token."
    if(!core.is_str(s)){ return "" }
    strip(s)
 }

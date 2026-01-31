@@ -13,6 +13,7 @@ typedef struct binding {
   LLVMValueRef value;
   struct stmt_t *stmt_t;
   bool is_mut;
+  bool is_used;
 } binding;
 
 typedef struct fun_sig {
@@ -24,6 +25,7 @@ typedef struct fun_sig {
   bool is_variadic;
   bool is_extern;
   const char *link_name;
+  const char *return_type;
 } fun_sig;
 
 typedef struct string_intern {
@@ -53,10 +55,14 @@ typedef struct codegen_t {
   int lambda_count;
   VEC(binding) aliases;
   VEC(binding) import_aliases;
+  VEC(binding) user_import_aliases;
   VEC(char *) use_modules;
+  VEC(char *) user_use_modules;
   const char *current_module_name;
   const char *source_string;
   bool comptime;
+  bool strict_diagnostics;
+  bool implicit_prelude;
   LLVMValueRef result_store_val;
   size_t func_root_idx;
 } codegen_t;

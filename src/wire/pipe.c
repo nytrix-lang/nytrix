@@ -245,24 +245,110 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
   LLVMDisposeBuilder(builder);
 }
 
-int ny_pipeline_run(ny_options *opt) {
-  int exit_code = 0;
+static void maybe_log_phase_time(bool enabled, const char *label,
+                                 clock_t start_time) {
+  if (!enabled)
+    return;
+  fprintf(stderr, "%-12s %.4fs\n", label,
+          (double)(clock() - start_time) / CLOCKS_PER_SEC);
+}
+
+static bool handle_non_compile_modes(const ny_options *opt, int *exit_code) {
   if (opt->mode == NY_MODE_VERSION) {
     printf("Nytrix v0.1.25\n");
-    return 0;
+    *exit_code = 0;
+    return true;
   }
   if (opt->mode == NY_MODE_HELP) {
     ny_options_usage(opt->argv0 ? opt->argv0 : "ny");
-    return 0;
+    *exit_code = 0;
+    return true;
   }
-
   if (opt->mode == NY_MODE_REPL) {
     LLVMLinkInMCJIT();
     ny_llvm_init_native();
     LLVMLoadLibraryPermanently(NULL);
     ny_repl_run(opt->opt_level, opt->opt_pipeline, opt->command_string, 0);
-    return 0;
+    *exit_code = 0;
+    return true;
   }
+  return false;
+}
+
+static char *load_user_source(const ny_options *opt) {
+  if (opt->command_string)
+    return ny_strdup(opt->command_string);
+  if (opt->input_file)
+    return ny_read_file(opt->input_file);
+  return ny_strdup("fn main() { return 0\n }");
+}
+
+static char *build_prelude(bool no_std, bool implicit_prelude, size_t *out_len) {
+  *out_len = 0;
+  if (no_std || !implicit_prelude)
+    return NULL;
+
+  size_t count = 0;
+  const char **p_list = ny_std_prelude(&count);
+  size_t cap = 1024;
+  char *prelude = malloc(cap);
+  if (!prelude)
+    return NULL;
+  prelude[0] = '\0';
+
+  for (size_t i = 0; i < count; ++i) {
+    char line[256];
+    if (strcmp(p_list[i], "std.core") == 0 || strcmp(p_list[i], "std.io") == 0)
+      sprintf(line, "use %s *;\n", p_list[i]);
+    else
+      sprintf(line, "use %s;\n", p_list[i]);
+    size_t llen = strlen(line);
+    if (*out_len + llen + 1 > cap) {
+      cap *= 2;
+      char *grown = realloc(prelude, cap);
+      if (!grown) {
+        free(prelude);
+        return NULL;
+      }
+      prelude = grown;
+    }
+    strcpy(prelude + *out_len, line);
+    *out_len += llen;
+  }
+  return prelude;
+}
+
+static bool verify_module_if_needed(const ny_options *opt, LLVMModuleRef module) {
+  if (!opt->verify_module)
+    return true;
+  char *err = NULL;
+  if (LLVMVerifyModule(module, LLVMPrintMessageAction, &err)) {
+    NY_LOG_ERR("Verification failed: %s\n", err);
+    LLVMDisposeMessage(err);
+    return false;
+  }
+  return true;
+}
+
+static void run_optimization_if_needed(const ny_options *opt, LLVMModuleRef module) {
+  if (opt->opt_level <= 0 && !opt->opt_pipeline)
+    return;
+  const char *passes = opt->opt_pipeline;
+  char buf[32];
+  if (!passes) {
+    sprintf(buf, "default<O%d>", opt->opt_level);
+    passes = buf;
+  }
+  NY_LOG_V3("Running passes: %s\n", passes);
+  LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
+  LLVMRunPasses(module, passes, NULL, popt);
+  LLVMDisposePassBuilderOptions(popt);
+}
+
+int ny_pipeline_run(ny_options *opt) {
+  int exit_code = 0;
+  if (handle_non_compile_modes(opt, &exit_code))
+    return exit_code;
 
   verbose_enabled = opt->verbose;
   clock_t t_start = 0;
@@ -279,33 +365,26 @@ int ny_pipeline_run(ny_options *opt) {
   codegen_t cg;
   memset(&cg, 0, sizeof(cg));
 
-  if (opt->command_string) {
-    user_src = ny_strdup(opt->command_string);
-  } else if (opt->input_file) {
-    user_src = ny_read_file(opt->input_file);
-    if (!user_src) {
+  user_src = load_user_source(opt);
+  if (!user_src) {
+    if (opt->input_file)
       NY_LOG_ERR("Failed to read file '%s'\n", opt->input_file);
-      return 1;
-    }
-  } else {
-    user_src = ny_strdup("fn main() { return 0\n }");
+    else
+      NY_LOG_ERR("Failed to allocate source input\n");
+    return 1;
   }
-  if (opt->do_timing)
-    fprintf(stderr, "Read file:    %.4fs\n",
-            (double)(clock() - t_start) / CLOCKS_PER_SEC);
+  maybe_log_phase_time(opt->do_timing, "Read file:", t_start);
 
   clock_t t_scan = clock();
   size_t use_cap = 0;
   uses = collect_use_modules(user_src, &use_count);
   use_cap = use_count;
 
-  if (opt->do_timing)
-    fprintf(stderr, "Scan imports: %.4fs\n",
-            (double)(clock() - t_scan) / CLOCKS_PER_SEC);
+  maybe_log_phase_time(opt->do_timing, "Scan imports:", t_scan);
 
   std_mode_t std_mode = opt->std_mode;
 
-  if (!opt->no_std) {
+  if (!opt->no_std && opt->implicit_prelude) {
     append_std_prelude(&uses, &use_count, &use_cap);
   }
 
@@ -349,35 +428,15 @@ int ny_pipeline_run(ny_options *opt) {
       ny_str_list_free(uses, use_count);
     return 1;
   }
-  if (opt->do_timing)
-    fprintf(stderr, "Stdlib load:  %.4fs\n",
-            (double)(clock() - t_std) / CLOCKS_PER_SEC);
+  maybe_log_phase_time(opt->do_timing, "Stdlib load:", t_std);
 
   // 4. Construct final source with prelude + std + user
   size_t plen = 0;
-  char *prelude = NULL;
-  if (!opt->no_std) {
-    size_t count = 0;
-    const char **p_list = ny_std_prelude(&count);
-    size_t cap = 1024;
-    prelude = malloc(cap);
-    prelude[0] = '\0';
-    for (size_t i = 0; i < count; ++i) {
-      char line[256];
-      if (strcmp(p_list[i], "std.core") == 0 ||
-          strcmp(p_list[i], "std.io") == 0) {
-        sprintf(line, "use %s *;\n", p_list[i]);
-      } else {
-        sprintf(line, "use %s;\n", p_list[i]);
-      }
-      size_t llen = strlen(line);
-      if (plen + llen + 1 > cap) {
-        cap *= 2;
-        prelude = realloc(prelude, cap);
-      }
-      strcpy(prelude + plen, line);
-      plen += llen;
-    }
+  char *prelude = build_prelude(opt->no_std, opt->implicit_prelude, &plen);
+  if (!opt->no_std && opt->implicit_prelude && !prelude) {
+    NY_LOG_ERR("Failed to build std prelude\n");
+    exit_code = 1;
+    goto exit_success;
   }
 
   size_t slen = std_src ? strlen(std_src) : 0;
@@ -422,9 +481,7 @@ int ny_pipeline_run(ny_options *opt) {
     parser.lex.split_filename = parse_name;
   }
   prog = parse_program(&parser);
-  if (opt->do_timing)
-    fprintf(stderr, "Parsing:      %.4fs\n",
-            (double)(clock() - t_parse) / CLOCKS_PER_SEC);
+  maybe_log_phase_time(opt->do_timing, "Parsing:", t_parse);
 
   if (parser.had_error) {
     NY_LOG_ERR("Compilation failed: %d errors\n", parser.error_count);
@@ -444,6 +501,7 @@ int ny_pipeline_run(ny_options *opt) {
 
   codegen_init(&cg, &prog, arena, "nytrix");
   cg.source_string = source;
+  cg.implicit_prelude = opt->implicit_prelude;
   cg.prog_owned = false; // prog is on stack
   NY_LOG_V2("Emitting IR...\n");
   codegen_emit(&cg);
@@ -459,40 +517,22 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
-  if (opt->do_timing)
-    fprintf(stderr, "Codegen:      %.4fs\n",
-            (double)(clock() - t_codegen) / CLOCKS_PER_SEC);
+  maybe_log_phase_time(opt->do_timing, "Codegen:", t_codegen);
 
   if (opt->dump_llvm)
     LLVMDumpModule(cg.module);
 
   clock_t t_ver = clock();
-  if (opt->verify_module) {
-    char *err = NULL;
-    if (LLVMVerifyModule(cg.module, LLVMPrintMessageAction, &err)) {
-      NY_LOG_ERR("Verification failed: %s\n", err);
-      LLVMDisposeMessage(err);
-      exit_code = 1;
-      goto exit_success;
-    }
+  if (!verify_module_if_needed(opt, cg.module)) {
+    exit_code = 1;
+    goto exit_success;
   }
   if (opt->do_timing && opt->verify_module)
     fprintf(stderr, "Verify:       %.4fs\n",
             (double)(clock() - t_ver) / CLOCKS_PER_SEC);
 
   clock_t t_opt = clock();
-  if (opt->opt_level > 0 || opt->opt_pipeline) {
-    const char *passes = opt->opt_pipeline;
-    char buf[32];
-    if (!passes) {
-      sprintf(buf, "default<O%d>", opt->opt_level);
-      passes = buf;
-    }
-    NY_LOG_V3("Running passes: %s\n", passes);
-    LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
-    LLVMRunPasses(cg.module, passes, NULL, popt);
-    LLVMDisposePassBuilderOptions(popt);
-  }
+  run_optimization_if_needed(opt, cg.module);
   if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
     fprintf(stderr, "Optimization: %.4fs\n",
             (double)(clock() - t_opt) / CLOCKS_PER_SEC);
@@ -566,28 +606,24 @@ int ny_pipeline_run(ny_options *opt) {
     }
 
     register_jit_symbols(ee, jmod, &cg);
-    if (opt->do_timing)
-      fprintf(stderr, "JIT Init:     %.4fs\n",
-              (double)(clock() - t_jit) / CLOCKS_PER_SEC);
+    maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
 
     clock_t t_exec = clock();
     // Execution
     uint64_t saddr = LLVMGetFunctionAddress(ee, "__script_top");
     if (saddr) {
-      if (verbose_enabled)
+      if (verbose_enabled >= 3)
         fprintf(stderr, "TRACE: Executing script...\n");
       ((void (*)(void))saddr)();
-      if (verbose_enabled)
+      if (verbose_enabled >= 3)
         fprintf(stderr, "TRACE: Script finished.\n");
     } else {
-      if (verbose_enabled)
+      if (verbose_enabled >= 3)
         fprintf(stderr, "TRACE: __script_top NOT FOUND\n");
     }
 
     // NOTE: Do not auto-invoke main() here. Script top-level controls execution.
-    if (opt->do_timing)
-      fprintf(stderr, "JIT Exec:     %.4fs\n",
-              (double)(clock() - t_exec) / CLOCKS_PER_SEC);
+    maybe_log_phase_time(opt->do_timing, "JIT Exec:", t_exec);
 
     LLVMDisposeExecutionEngine(ee);
   }
@@ -605,15 +641,6 @@ exit_success:
   codegen_dispose(&cg);
   program_free(&prog, arena);
 
-  if (opt->do_timing) {
-    double total = (double)(clock() - t_start) / CLOCKS_PER_SEC;
-    fprintf(stderr, "Total time:   %.4fs\n", total);
-  }
-  return exit_code;
-
-  if (opt->do_timing) {
-    double total = (double)(clock() - t_start) / CLOCKS_PER_SEC;
-    fprintf(stderr, "Total time:   %.4fs\n", total);
-  }
+  maybe_log_phase_time(opt->do_timing, "Total time:", t_start);
   return exit_code;
 }
