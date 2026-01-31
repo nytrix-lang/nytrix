@@ -21,75 +21,75 @@ module std.str.term (
 
 fn write_str(s){
    "Safely write a Nytrix string to stdout (bypassing metadata)."
-   if(s){ sys_write(1, s, str_len(s)) }
+   if(s){ unwrap(sys_write(1, s, str_len(s))) }
 }
 
 ;; TUI Control
 
 fn clear_screen(){
    "Clears the entire screen and moves cursor to home."
-   sys_write(1, "\033[2J", 4)
-   sys_write(1, "\033[H", 3)
+   unwrap(sys_write(1, "\033[2J", 4))
+   unwrap(sys_write(1, "\033[H", 3))
 }
 
 fn cursor_hide(){
    "Hides the terminal cursor."
-   sys_write(1, "\033[?25l", 6)
+   unwrap(sys_write(1, "\033[?25l", 6))
 }
 
 fn cursor_show(){
    "Shows the terminal cursor."
-   sys_write(1, "\033[?25h", 6)
+   unwrap(sys_write(1, "\033[?25h", 6))
 }
 
 fn cursor_move(x, y){
    "Moves the cursor to position (x, y). 1-based indexing."
    def s = f"\033[{to_str(y)};{to_str(x)}H"
-   sys_write(1, s, str_len(s))
+   unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn cursor_up(n=1){
    "Moves cursor up by `n` lines."
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}A"
-   sys_write(1, s, str_len(s))
+   unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn cursor_down(n=1){
    "Moves cursor down by `n` lines."
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}B"
-   sys_write(1, s, str_len(s))
+   unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn cursor_right(n=1){
    "Moves cursor right by `n` columns."
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}C"
-   sys_write(1, s, str_len(s))
+   unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn cursor_left(n=1){
    "Moves cursor left by `n` columns."
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}D"
-   sys_write(1, s, str_len(s))
+   unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn disable_wrap(){
    "Disables line wrapping."
-   sys_write(1, "\033[?7l", 5)
+   unwrap(sys_write(1, "\033[?7l", 5))
 }
 
 fn enable_wrap(){
    "Enables line wrapping."
-   sys_write(1, "\033[?7h", 5)
+   unwrap(sys_write(1, "\033[?7h", 5))
 }
 
 fn screen_reset(){
    "Resets the terminal state: visible cursor, enabled wrap, cleared screen, reset styles."
    set_cooked_mode()
-   sys_write(1, "\033[0m", 4)
+   unwrap(sys_write(1, "\033[0m", 4))
    cursor_show()
    enable_wrap()
    clear_screen()
@@ -165,7 +165,7 @@ fn style(text, color_name="", is_bold=0){
    "Applies ANSI styling to text."
    if(is_str(color_name) == 0){ color_name = "" }
    if(is_int(is_bold) == 0){ is_bold = 0 }
-   def out = text
+   mut out = text
    if(is_bold){ out = f"\033[1m{out}" }
    if(str_len(color_name) > 0){
       out = color(out, color_name)
@@ -217,14 +217,14 @@ fn shapes(){
 fn panel(text, title="", border_color="white"){
    "Prints a styled panel with optional title."
    def l = str_len(text)
-   def w = l + 4
+   mut w = l + 4
    if(str_len(title) > 0){
       def tl = str_len(title)
       if(tl + 4 > w){ w = tl + 4 }
    }
    ; Top
-   def top = "╭"
-   def i = 0
+   mut top = "╭"
+   mut i = 0
    while(i < w - 2){
       top = f"{top}─"
       i = i + 1
@@ -250,13 +250,13 @@ fn panel(text, title="", border_color="white"){
    ; Content
    def padding = w - 4 - str_len(text)
    def cbar = color("│", border_color)
-   def line = f"{cbar} {text} "
+   mut line = f"{cbar} {text} "
    i = 0
    while(i < padding){ line = f"{line} " i = i + 1 }
    line = f"{line}{cbar}"
    print(line)
    ; Bottom
-   def bot = "╰"
+   mut bot = "╰"
    i = 0
    while(i < w - 2){ bot = f"{bot}─" i = i + 1 }
    bot = f"{bot}╯"
@@ -266,16 +266,16 @@ fn panel(text, title="", border_color="white"){
 fn table(headers, rows){
    "Prints a simple table."
    def cols = list_len(headers)
-   def widths = list(8)
-   def i = 0
+   mut widths = list(8)
+   mut i = 0
    while(i < cols){
       widths = append(widths, str_len(get(headers, i)))
       i = i + 1
    }
-   def r = 0 def nr = list_len(rows)
+   mut r = 0 def nr = list_len(rows)
    while(r < nr){
       def row = get(rows, r)
-      def c = 0
+      mut c = 0
       while(c < cols){
          def val = get(row, c)
          if(str_len(val) > get(widths, c)){ set_idx(widths, c, str_len(val)) }
@@ -283,36 +283,36 @@ fn table(headers, rows){
       }
       r = r + 1
    }
-   def line = ""
+   mut line = ""
    i = 0
    while(i < cols){
       def h = get(headers, i)
       def w = get(widths, i)
       line = f"{line}{bold(h)}"
       def pad = w - str_len(h) + 2
-      def p = 0
+      mut p = 0
       while(p < pad){ line = f"{line} " p = p + 1 }
       line = f"{line} "
       i = i + 1
    }
    print(line)
-   def sep = "" def slen = str_len(line) ; Approximation
+   mut sep = "" def slen = str_len(line) ; Approximation
    i = 0 while(i < (slen / 2)){ sep = f"{sep}─" i = i + 1 }
    print(color(sep, "gray"))
    r = 0
    while(r < nr){
       def row = get(rows, r)
-      line = "" c = 0
+      mut line_row = "" mut c = 0
       while(c < cols){
          def val = get(row, c)
          def w = get(widths, c)
-         line = f"{line}{val}"
+         line_row = f"{line_row}{val}"
          def pad = w - str_len(val) + 2
-         def p = 0 while(p < pad){ line = f"{line} " p = p + 1 }
-         line = f"{line} "
+         mut p = 0 while(p < pad){ line_row = f"{line_row} " p = p + 1 }
+         line_row = f"{line_row} "
          c = c + 1
       }
-      print(line)
+      print(line_row)
       r = r + 1
    }
 }
@@ -326,12 +326,12 @@ fn tree(node, pref="", head_in=""){
    print(f"{prefix}{head}{bold(label)}")
    def children = get(node, 1)
    def count = list_len(children)
-   def i = 0
+   mut i = 0
    while(i < count){
       def last = (i == count - 1)
       def child = get(children, i)
-      def next_prefix = f"{prefix}│   "
-      def next_head = "├── "
+      mut next_prefix = f"{prefix}│   "
+      mut next_head = "├── "
       if(last){ next_prefix = f"{prefix}    " next_head = "╰── " }
       tree(child, next_prefix, next_head)
       i = i + 1
@@ -346,7 +346,7 @@ fn bar(tot=100, d="Progress", w=40, bc="green", se=1, lv=1){
    def bar_color = case is_str(bc) { 1 -> bc _ -> "green" }
    def show_eta = case is_int(se) { 1 -> se _ -> 1 }
    def leave = case is_int(lv) { 1 -> lv _ -> 1 }
-   def bar = list(12)
+   mut bar = list(12)
    bar = append(bar, total)         ; 0
    bar = append(bar, 0)             ; 1
    bar = append(bar, desc)          ; 2
@@ -372,7 +372,7 @@ fn bar_update(bar, current){
    def bar_color = get(bar, 4) def show_eta = get(bar, 5)
    def start_time = get(bar, 7) def last_time = get(bar, 8)
    def now = ticks() / 1000000 def dt = now - last_time
-   def avg_rate = get(bar, 11)
+   mut avg_rate = get(bar, 11)
    if(dt > 150 || current == total){
       def elapsed = (now - start_time) / 1000.0
       if(elapsed > 0.05){
@@ -389,7 +389,7 @@ fn bar_update(bar, current){
    def b_str = color(repeat("█", b_len), bar_color)
    def e_str = color(repeat("░", e_len), "gray")
    def out = f"\r\033[K{desc}: {to_str(pct)}%|{b_str}{e_str}| {to_str(current)}/{to_str(total)}"
-   sys_write(1, out, str_len(out))
+   unwrap(sys_write(1, out, str_len(out)))
    if(current >= total){ set_idx(bar, 9, 1) }
    return 0
 }
@@ -397,7 +397,7 @@ fn bar_update(bar, current){
 fn bar_finish(bar){
    "Completes the progress bar, ensuring it reaches 100% and cleanup/newline as needed."
    if(get(bar, 1) < get(bar, 0)){ bar_update(bar, get(bar, 0)) }
-   if(get(bar, 6)){ print("") } else { sys_write(1, "\r\033[K", 4) }
+   if(get(bar, 6)){ print("") } else { unwrap(sys_write(1, "\r\033[K", 4)) }
    set_idx(bar, 9, 1)
 }
 
@@ -407,10 +407,10 @@ fn bar_range(n, desc=""){
 }
 fn bar_write(bar_obj, msg){
    "Clears the current progress bar line, prints `msg`, and redraws the bar."
-   sys_write(1, "\r\033[K", 4) print(msg) bar_update(bar_obj, get(bar_obj, 1))
+   unwrap(sys_write(1, "\r\033[K", 4)) print(msg) bar_update(bar_obj, get(bar_obj, 1))
 }
 
-def _term_buf = 0
+mut _term_buf = 0
 
 fn get_terminal_size(){
    "Retrieves terminal [width, height] using ioctl, environment variables, or defaults."
@@ -418,7 +418,7 @@ fn get_terminal_size(){
    def buf = _term_buf
 
    ;; Try ioctl on stdout (1)
-   def r = syscall(16, 1, 0x5413, buf, 0, 0, 0)
+   mut r = syscall(16, 1, 0x5413, buf, 0, 0, 0)
 
    ;; If stdout fails, try /dev/tty
    if(r != 0){
@@ -426,7 +426,7 @@ fn get_terminal_size(){
       def fd = sys_open("/dev/tty", 0, 0)
       if(fd > 0){
          r = syscall(16, fd, 0x5413, buf, 0, 0, 0)
-         sys_close(fd)
+         unwrap(sys_close(fd))
       }
    }
 
@@ -443,7 +443,7 @@ fn get_terminal_size(){
    def env_c = env("COLUMNS")
    def env_l = env("LINES")
    if(is_str(env_c) && is_str(env_l)){
-      def ic = 0 def il = 0
+      mut ic = 0 mut il = 0
       use std.core.reflect *
       ic = int(env_c) il = int(env_l)
       if(ic > 0 && il > 0){ return [ic, il] }
@@ -456,7 +456,7 @@ fn get_terminal_size(){
 
 fn canvas(w, h){
    "Creates a new terminal canvas for buffered drawing."
-   def c = list(8)
+   mut c = list(8)
    c = append(c, w) ; 0: width
    c = append(c, h) ; 1: height
    c = append(c, bytes(w * h)) ; 2: char buffer
@@ -470,7 +470,7 @@ fn canvas_clear(canv){
    "Clears all buffers (characters, attributes, and colors) in the canvas."
    def w = get(canv, 0) def h = get(canv, 1)
    def buf = get(canv, 2) def attr = get(canv, 3) def col = get(canv, 4)
-   def i = 0 def n = w * h
+   mut i = 0 def n = w * h
    while(i < n){
       bytes_set(buf, i, 32)
       bytes_set(attr, i, 0)
@@ -492,7 +492,7 @@ fn canvas_set(canv, x, y, char, color_idx=0, is_bold=0){
 
 fn canvas_print(canv, x, y, text, color_idx=0, is_bold=0){
    "Prints a string horizontally on the canvas starting at (x, y)."
-   def i = 0 def l = str_len(text)
+   mut i = 0 def l = str_len(text)
    while(i < l){
       canvas_set(canv, x + i, y, get(text, i), color_idx, is_bold)
       i = i + 1
@@ -502,7 +502,7 @@ fn canvas_print(canv, x, y, text, color_idx=0, is_bold=0){
 fn canvas_box(canv, x, y, w, h, title="", color_idx=0){
    "Draws a styled box with an optional title on the canvas."
    def s = shapes()
-   def i = 0
+   mut i = 0
    while(i < w){
       canvas_set(canv, x + i, y, dict_get(s, "h_line"), color_idx)
       canvas_set(canv, x + i, y + h - 1, dict_get(s, "h_line"), color_idx)
@@ -533,18 +533,17 @@ fn canvas_refresh(canv){
 
    ;; Estimated buffer size: drastic increase to be safe
    def r_buf = bytes(w * h * 64 + 1024)
-   def p = 0
-
+   mut p = 0
    ;; Home command: \033[H (27 91 72)
    bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 72)
    p = p + 3
 
-   def last_c = -1
-   def last_b = -1
+   mut last_c = -1
+   mut last_b = -1
 
-   def y = 0
+   mut y = 0
    while y < h {
-      def x = 0
+      mut x = 0
       while x < w {
          def idx = y * w + x
          def char = bytes_get(buf, idx)
@@ -590,6 +589,6 @@ fn canvas_refresh(canv){
    bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 48) bytes_set(r_buf, p+3, 109)
    p = p + 4
 
-   sys_write(1, r_buf, p)
+   unwrap(sys_write(1, r_buf, p))
    free(r_buf)
 }

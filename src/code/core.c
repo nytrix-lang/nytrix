@@ -47,7 +47,15 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->llvm_ctx_owned = false;
   cg->import_aliases.len = cg->import_aliases.cap = 0;
   cg->import_aliases.data = NULL;
+  cg->user_import_aliases.len = cg->user_import_aliases.cap = 0;
+  cg->user_import_aliases.data = NULL;
+  cg->user_use_modules.len = cg->user_use_modules.cap = 0;
+  cg->user_use_modules.data = NULL;
   cg->comptime = false;
+  cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
+  cg->implicit_prelude = true;
+  if (cg->strict_diagnostics)
+    NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
   cg->had_error = 0;
   cg->lambda_count = 0;
@@ -67,6 +75,10 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   cg->module = LLVMModuleCreateWithNameInContext(name, cg->ctx);
   cg->builder = LLVMCreateBuilderInContext(cg->ctx);
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
+  cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
+  cg->implicit_prelude = true;
+  if (cg->strict_diagnostics)
+    NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
   add_builtins(cg);
   LLVMAddGlobal(cg->module, cg->type_i64, "__NYTRIX__");
 }
@@ -206,15 +218,24 @@ void codegen_dispose(codegen_t *cg) {
     free((void *)cg->import_aliases.data[i].name);
     free((void *)cg->import_aliases.data[i].stmt_t);
   }
+  for (size_t i = 0; i < cg->user_import_aliases.len; i++) {
+    free((void *)cg->user_import_aliases.data[i].name);
+    free((void *)cg->user_import_aliases.data[i].stmt_t);
+  }
   for (size_t i = 0; i < cg->use_modules.len; i++) {
     free((void *)cg->use_modules.data[i]);
+  }
+  for (size_t i = 0; i < cg->user_use_modules.len; i++) {
+    free((void *)cg->user_use_modules.data[i]);
   }
   vec_free(&cg->fun_sigs);
   vec_free(&cg->global_vars);
   vec_free(&cg->interns);
   vec_free(&cg->aliases);
   vec_free(&cg->import_aliases);
+  vec_free(&cg->user_import_aliases);
   vec_free(&cg->use_modules);
+  vec_free(&cg->user_use_modules);
   if (cg->prog && cg->prog_owned) {
     program_free(cg->prog, (arena_t *)cg->arena);
     free(cg->prog);

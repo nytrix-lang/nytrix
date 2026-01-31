@@ -117,6 +117,14 @@ static expr_t *parse_primary(parser_t *p) {
   }
   case NY_T_IDENT: {
     parser_advance(p);
+    /* Omniscience: Help users from other languages */
+    if (tok.len == 4 && strncmp(tok.lexeme, "null", 4) == 0) {
+      parser_error(p, tok, "unrecognised identifier 'null'",
+                   "did you mean '0' or 'nil'?");
+    } else if (tok.len == 4 && strncmp(tok.lexeme, "None", 4) == 0) {
+      parser_error(p, tok, "unrecognised identifier 'None'",
+                   "did you mean '0' or 'nil'?");
+    }
     expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
     id->as.ident.name = arena_strndup(p->arena, tok.lexeme, tok.len);
     return id;
@@ -343,7 +351,14 @@ static expr_t *parse_primary(parser_t *p) {
     return lam;
   }
   default:
-    parser_error(p, tok, "unexpected token_t", NULL);
+    if (tok.kind == NY_T_ASSIGN) {
+      parser_error(p, tok, "unexpected '='", "did you mean '=='?");
+    } else {
+      char msg[64];
+      snprintf(msg, sizeof(msg), "unexpected token '%s'",
+               parser_token_name(tok.kind));
+      parser_error(p, tok, msg, NULL);
+    }
     return NULL;
   }
 }

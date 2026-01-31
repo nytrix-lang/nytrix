@@ -17,6 +17,7 @@ void ny_options_init(ny_options *opt) {
   opt->strip_override = -1;
   opt->color_mode = -1;
   opt->std_mode = STD_MODE_MINIMAL;
+  opt->implicit_prelude = true;
 }
 
 
@@ -50,7 +51,9 @@ void ny_options_usage(const char *prog) {
   fprintf(stderr,
           "  \033[32m-std [none|minimal|full]\033[0m Stdlib inclusion mode (default: minimal)\n");
   fprintf(stderr,
-          "  \033[32m-no-std\033[0m            Disable stdlib prelude\n");
+          "  \033[32m--prelude\033[0m          Inject implicit std prelude uses (legacy behavior)\n");
+  fprintf(stderr,
+          "  \033[32m-no-std\033[0m            Disable stdlib loading\n");
   fprintf(stderr,
           "  \033[32m--std-path=<path>\033[0m Use custom std_bundle.ny\n\n");
   fprintf(stderr,
@@ -72,7 +75,7 @@ void ny_options_usage(const char *prog) {
   fprintf(stderr,
           "  \033[34m--debug\033[0m            Enable verbose + debug logs\n");
   fprintf(stderr,
-          "  \033[34m-vv, -vvv\033[0m          Increased verbosity levels\n");
+          "  \033[34m-v/-vv/-vvv\033[0m        Verbosity levels 1..3 (or --verbose=N)\n");
   fprintf(stderr,
           "  \033[34m-time\033[0m              Show timing for each phase\n");
   fprintf(stderr, "  \033[34m-dump-ast\033[0m          Dump parsed AST\n");
@@ -201,12 +204,38 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       else if (strcmp(a, "--debug") == 0) {
         opt->verbose = 3;
         debug_enabled = 1;
-      } else if (strcmp(a, "-v") == 0 || strcmp(a, "-verbose") == 0)
-        opt->verbose = 1;
-      else if (strcmp(a, "-vv") == 0)
-        opt->verbose = 2;
-      else if (strcmp(a, "-vvv") == 0)
-        opt->verbose = 3;
+      } else if (strcmp(a, "-verbose") == 0 || strcmp(a, "--verbose") == 0) {
+        if (opt->verbose < 1)
+          opt->verbose = 1;
+      } else if (strncmp(a, "--verbose=", 10) == 0) {
+        int lvl = atoi(a + 10);
+        if (lvl < 0)
+          lvl = 0;
+        if (lvl > 3)
+          lvl = 3;
+        if (opt->verbose < lvl)
+          opt->verbose = lvl;
+      } else if (a[0] == '-' && a[1] == 'v' && (a[2] == '\0' || a[2] == 'v')) {
+        int only_vs = 1;
+        int lvl = 0;
+        for (const char *p = a + 1; *p; ++p) {
+          if (*p != 'v') {
+            only_vs = 0;
+            break;
+          }
+          lvl++;
+        }
+        if (only_vs && lvl > 0) {
+          if (lvl > 3)
+            lvl = 3;
+          if (opt->verbose < lvl)
+            opt->verbose = lvl;
+        } else {
+          fprintf(stderr, "unknown option: %s\n", a);
+          ny_options_usage(argv[0]);
+          exit(1);
+        }
+      }
       else if (strcmp(a, "-time") == 0)
         opt->do_timing = true;
       else if (strcmp(a, "-dump-ast") == 0)
@@ -256,6 +285,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         }
       } else if (strcmp(a, "--full-mod") == 0) {
         opt->std_mode = STD_MODE_FULL;
+      } else if (strcmp(a, "--prelude") == 0) {
+        opt->implicit_prelude = true;
       } else if (strcmp(a, "-no-std") == 0)
         opt->no_std = true;
       else if (strncmp(a, "--std-path=", 11) == 0)

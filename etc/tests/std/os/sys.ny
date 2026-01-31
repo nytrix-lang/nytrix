@@ -8,10 +8,10 @@ use std.os.fs *
 print("Testing sys...")
 
 def non_existent_file = "/tmp/non_existent_file_12345.tmp"
-def fd = sys_open(non_existent_file, 0, 0)
-assert(fd < 0, "sys_open fails")
-def err = errno()
-assert(err != 0, "errno set")
+def r = sys_open(non_existent_file, 0, 0)
+assert(is_err(r), "sys_open fails")
+def code = __unwrap(r)
+assert(code < 0, "errno set in Result")
 
 def pid = syscall(39)
 assert(pid > 0, "syscall getpid")

@@ -618,8 +618,7 @@ static void scan_dependencies(mod_list *list, size_t idx) {
     }
     // Handle std specially if we want to support 'std' package inclusion
     if (strcmp(raw, "std") == 0) {
-      // If no local module matched, keep 'use std' as a no-op here
-      // (stdlib prelude is handled elsewhere).
+      // If no local module matched, keep 'use std' as a no-op here.
       continue;
     }
     // directory logic for std.*: if no direct module found, check if it's a
@@ -682,28 +681,9 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
       mod_list_add(&mods, ny_std_mods[i].path, ny_std_mods[i].name, true);
     }
   } else {
-    // PRELUDE / USE_LIST
+    // USE_LIST only: std prelude is explicit opt-in at call sites.
     const char **seed_modules = modules;
     size_t seed_count = module_count;
-
-    // Always include prelude if mode == DEFAULT or FULL
-    if (mode == STD_MODE_DEFAULT || mode == STD_MODE_FULL) {
-      for (size_t i = 0;
-           i < sizeof(ny_std_prelude_list) / sizeof(ny_std_prelude_list[0]);
-           ++i) {
-        const char *raw = ny_std_prelude_list[i];
-        bool is_std = false;
-        char *path = resolve_module_path(raw, entry_dir ? entry_dir : ".", true,
-                                         &is_std);
-        if (path) {
-          char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
-          mod_list_add(&mods, path, mname, is_std);
-          if (!is_std)
-            free(mname);
-          free(path);
-        }
-      }
-    }
 
     for (size_t i = 0; i < seed_count; ++i) {
       const char *raw = seed_modules[i];
@@ -792,21 +772,6 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     strcpy(bundle, prebuilt_src);
     total = strlen(bundle);
     free(prebuilt_src);
-  }
-  // Inject prelude uses so unqualified names can resolve via use-modules.
-  for (size_t i = 0;
-       i < sizeof(ny_std_prelude_list) / sizeof(ny_std_prelude_list[0]); ++i) {
-    const char *m = ny_std_prelude_list[i];
-    if (m && *m) {
-      char buf[256];
-      // Expose core and io globally for convenience
-      if (strcmp(m, "std.core") == 0 || strcmp(m, "std.str.io") == 0) {
-        snprintf(buf, sizeof(buf), "use %s *;", m);
-      } else {
-        snprintf(buf, sizeof(buf), "use %s;", m);
-      }
-      append_text(&bundle, &total, &cap, buf);
-    }
   }
   for (size_t i = 0; i < mods.len; ++i) {
     if (verbose)

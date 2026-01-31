@@ -18,7 +18,6 @@
 static inline bool is_valid_heap_ptr(int64_t v) {
   if (!is_ptr(v) || (v & 63) != 0)
     return false;
-  // This check is the important part
   uintptr_t raw_p_start = (uintptr_t)v - 64;
   uintptr_t raw_p_magic2 = (uintptr_t)v - 48;
   bool match = (*(uint64_t *)raw_p_start == NY_MAGIC1) &&
@@ -39,6 +38,8 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define TAG_FLOAT 221     // (110 << 1) | 1
 #define TAG_STR 241       // (120 << 1) | 1
 #define TAG_STR_CONST 243 // (121 << 1) | 1
+#define TAG_OK 201
+#define TAG_ERR 202
 
 static inline int is_v_flt(int64_t v) {
   if (!is_heap_ptr(v))
@@ -62,6 +63,18 @@ static inline int is_v_str(int64_t v) {
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
 
   return (tag == TAG_STR || tag == TAG_STR_CONST || tag == 120 || tag == 121);
+}
+
+static inline int is_v_ok(int64_t v) {
+  if (!is_heap_ptr(v))
+    return 0;
+  return *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_OK;
+}
+
+static inline int is_v_err(int64_t v) {
+  if (!is_heap_ptr(v))
+    return 0;
+  return *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_ERR;
 }
 
 // Global declarations needed across runtime

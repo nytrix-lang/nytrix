@@ -8,9 +8,9 @@ module std.core.iter (
 
 fn range(stop, start=0, step=1){
    "Returns a list of integers from start to stop (exclusive)."
-   def s = 0
-   def e = stop
-   def st = step
+   mut s = 0
+   mut e = stop
+   mut st = step
    if(start != 0){
       s = stop
       e = start

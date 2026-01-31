@@ -549,9 +549,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
 
   repl_init_engine(std_mode, &docs);
 
-  int repl_timing = 0;
+  g_repl_timing = 0;
   if (getenv("NYTRIX_REPL_TIME"))
-    repl_timing = 1;
+    g_repl_timing = 1;
 
   char **init_lines = NULL;
   size_t init_lines_len = 0, init_line_idx = 0;
@@ -807,8 +807,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         continue;
       }
       if (!strcmp(cn, "time")) {
-        repl_timing = !repl_timing;
-        printf("Timing: %s\n", repl_timing ? "on" : "off");
+        g_repl_timing = !g_repl_timing;
+        printf("Timing: %s\n", g_repl_timing ? "on" : "off");
         free(full_input);
         continue;
       }

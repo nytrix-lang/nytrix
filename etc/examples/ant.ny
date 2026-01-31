@@ -6,8 +6,8 @@ use std.os.time *
 use std.str.term *
 
 def t = get_terminal_size()
-mut W = get(t, 0)
-mut H = get(t, 1)
+mut W = get(t, 0, 0)
+mut H = get(t, 1, 0)
 
 if (W < 1) { W = 80 }
 if (H < 1) { H = 24 }
@@ -29,7 +29,7 @@ mut step = 0
 
 while (1) {
     def k = y * W + x
-    def v = get(grid, k)
+    def v = get(grid, k, 0)
 
     set_idx(grid, k, v ? 0 : 1)
     dir = (dir + (v ? 1 : 3)) % 4
@@ -54,7 +54,7 @@ while (1) {
             mut c = 0
             while (c < W) {
                 def is_ant = (c == x && r == y)
-                def cell   = get(grid, r * W + c)
+                def cell   = get(grid, r * W + c, 0)
 
                 if (is_ant) {
                     canvas_set(canv, c, r, 64, 1, 0)

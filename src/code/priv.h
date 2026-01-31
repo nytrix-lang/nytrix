@@ -29,7 +29,16 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
 void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
           stmt_t *stmt, bool is_mut);
+void scope_pop(scope *scopes, size_t *depth);
 void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
+bool ny_diag_should_emit(const char *kind, token_t tok, const char *name);
+bool ny_is_stdlib_tok(token_t tok);
+bool ny_strict_error_enabled(codegen_t *cg, token_t tok);
+void ny_diag_error(token_t tok, const char *fmt, ...);
+void ny_diag_warning(token_t tok, const char *fmt, ...);
+void ny_diag_hint(const char *fmt, ...);
+void ny_diag_fix(const char *fmt, ...);
+void ny_diag_note_tok(token_t tok, const char *fmt, ...);
 
 // Expression generation (expr_t.c)
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
@@ -41,6 +50,8 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          ny_param_list params, stmt_t *body, bool is_variadic,
                          const char *name_hint);
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
+LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e);
 
 // Statement generation (stmt_t.c)
 void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,

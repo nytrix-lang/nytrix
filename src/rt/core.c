@@ -201,3 +201,32 @@ void __copy_mem(void *dst, const void *src, size_t n) {
     d[i] = s[i];
   }
 }
+
+int64_t __result_ok(int64_t v) {
+  int64_t res = __malloc(((int64_t)8 << 1) | 1);
+  if (!res)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_OK;
+  *(int64_t *)((char *)(uintptr_t)res - 16) = (8 << 1) | 1;
+  *(int64_t *)(uintptr_t)res = v;
+  return res;
+}
+
+int64_t __result_err(int64_t e) {
+  int64_t res = __malloc(((int64_t)8 << 1) | 1);
+  if (!res)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_ERR;
+  *(int64_t *)((char *)(uintptr_t)res - 16) = (8 << 1) | 1;
+  *(int64_t *)(uintptr_t)res = e;
+  return res;
+}
+
+int64_t __is_ok(int64_t v) { return is_v_ok(v) ? 2 : 4; }
+int64_t __is_err(int64_t v) { return is_v_err(v) ? 2 : 4; }
+int64_t __unwrap(int64_t v) {
+  if (is_v_ok(v) || is_v_err(v)) {
+    return *(int64_t *)(uintptr_t)v;
+  }
+  return v;
+}

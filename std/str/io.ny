@@ -11,8 +11,9 @@ module std.str.io (
 )
 
 fn _write_str(s){
+   "Internal: writes a raw string to stdout without conversion."
    def n = str_len(s)
-   if(n > 0){ sys_write(1, s, n) }
+   if(n > 0){ unwrap(sys_write(1, s, n)) }
 }
 
 fn _print_write(v){
@@ -22,15 +23,34 @@ fn _print_write(v){
 }
 
 fn print(...args){
-   "Prints all arguments separated by spaces and ends with a newline."
+   "Prints values with optional keyword args `sep` and `end`."
+   mut sep = " "
+   mut end = "\n"
    def n = list_len(args)
+   mut vals = list(n)
    mut i = 0
    while(i < n){
-      _print_write(get(args, i))
-      if(i + 1 < n){ sys_write(1, " ", 1) }
+      def arg = get(args, i)
+      if(is_kwargs(arg)){
+         def k = get_kwarg_key(arg)
+         def v = get_kwarg_val(arg)
+         if(eq(k, "sep")){
+            sep = is_str(v) ? v : to_str(v)
+         } else if(eq(k, "end")){
+            end = is_str(v) ? v : to_str(v)
+         }
+      } else {
+         vals = append(vals, arg)
+      }
       i = i + 1
    }
-   sys_write(1, "\n", 1)
+   def m = list_len(vals)
+   i = 0
+   while(i < m){
+      _print_write(get(vals, i))
+      if(i + 1 < m){ _write_str(sep) }
+      i = i + 1
+   }
+   _write_str(end)
    0
 }
-

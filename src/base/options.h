@@ -45,6 +45,7 @@ typedef struct {
   bool safe_mode;
   bool debug_symbols;
   bool no_std;
+  bool implicit_prelude;
   const char *std_path;
   std_mode_t std_mode;
   int strip_override; // -1 default, 0 keep, 1 strip

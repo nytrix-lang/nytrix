@@ -11,12 +11,14 @@ module std.core.set (
 )
 
 fn _set_pow2(n){
+   "Internal: rounds `n` up to the next power-of-two."
    mut v = 1
    while(v < n){ v = v << 1 }
    v
 }
 
 fn _set_str_eq(a, b){
+   "Internal: byte-wise string equality for set keys."
    if(!is_str(a) || !is_str(b)){ return false }
    def n = str_len(a)
    if(eq(n, str_len(b)) == false){ return false }
@@ -29,11 +31,13 @@ fn _set_str_eq(a, b){
 }
 
 fn _set_key_eq(a, b){
+   "Internal: key equality with string fast-path."
    if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
    return eq(a, b)
 }
 
 fn _set_hash(x){
+   "Internal: hashes integers/strings for open-addressing lookup."
    if(is_int(x)){ return x }
    if(is_str(x)){
       mut h = 14695981039346656037
@@ -49,6 +53,7 @@ fn _set_hash(x){
 }
 
 fn _set_new(cap){
+   "Internal: allocates a set storage block."
    if(cap < 8){ cap = 8 }
    cap = _set_pow2(cap)
    def p = malloc(16 + cap * 24)
@@ -73,6 +78,7 @@ fn set(cap=8){
 }
 
 fn _set_insert(s, key){
+   "Internal: inserts a key if it is not already present."
    def cap = load64(s, 8)
    def h = _set_hash(key)
    def mask = cap - 1
@@ -102,6 +108,7 @@ fn _set_insert(s, key){
 }
 
 fn _set_resize(s, newcap){
+   "Internal: rebuilds the set at a larger capacity."
    mut ns = _set_new(newcap)
    def cap = load64(s, 8)
    mut i = 0
@@ -156,4 +163,3 @@ fn set_contains(s, key){
    }
    return false
 }
-

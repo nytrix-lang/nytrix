@@ -30,7 +30,10 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
                    .arity = (int)n_params,
                    .is_variadic = fn->as.fn.is_variadic,
                    .is_extern = false,
-                   .link_name = NULL};
+                   .link_name = NULL,
+                   .return_type = fn->as.fn.return_type
+                                      ? ny_strdup(fn->as.fn.return_type)
+                                      : NULL};
     vec_push(&cg->fun_sigs, sig);
   } else {
     // Overwrite: remove existing basic blocks if any
@@ -68,14 +71,17 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
       // Note: Bind to the captured name
       LLVMValueRef lv = build_alloca(cg, captures->data[i].name);
       LLVMBuildStore(cg->builder, val, lv);
-      bind(scopes, fd, captures->data[i].name, lv, NULL, true);
+      bind(scopes, fd, captures->data[i].name, lv, fn, true);
+      // Mark as used in the closure's local scope since they were implicitly
+      // captured
+      scopes[fd].vars.data[scopes[fd].vars.len - 1].is_used = true;
     }
   }
   for (size_t i = 0; i < fn->as.fn.params.len; i++) {
     LLVMValueRef a = build_alloca(cg, fn->as.fn.params.data[i].name);
     LLVMBuildStore(cg->builder, LLVMGetParam(f, (unsigned)(i + param_offset)),
                    a);
-    bind(scopes, fd, fn->as.fn.params.data[i].name, a, NULL, true);
+    bind(scopes, fd, fn->as.fn.params.data[i].name, a, fn, true);
   }
   size_t old_root = cg->func_root_idx;
   cg->func_root_idx = root;
@@ -101,8 +107,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   cg->func_root_idx = old_root;
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
     LLVMBuildRet(cg->builder, LLVMConstInt(cg->type_i64, 1, false));
-  vec_free(&scopes[root].defers);
-  vec_free(&scopes[root].vars);
+  scope_pop(scopes, &fd);
   if (cur)
     LLVMPositionBuilderAtEnd(cg->builder, cur);
 }
@@ -125,7 +130,10 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
                    .arity = (int)s->as.fn.params.len,
                    .is_variadic = s->as.fn.is_variadic,
                    .is_extern = false,
-                   .link_name = NULL};
+                   .link_name = NULL,
+                   .return_type = s->as.fn.return_type
+                                      ? ny_strdup(s->as.fn.return_type)
+                                      : NULL};
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_EXTERN) {
     size_t param_count = s->as.ext.params.len;
@@ -139,16 +147,18 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     LLVMValueRef f = LLVMGetNamedFunction(cg->module, s->as.ext.name);
     if (!f)
       f = LLVMAddFunction(cg->module, s->as.ext.name, ft);
-    fun_sig sig = {.name = ny_strdup(s->as.ext.name),
-                   .type = ft,
-                   .value = f,
-                   .stmt_t = s,
-                   .arity = (int)param_count,
-                   .is_variadic = s->as.ext.is_variadic,
-                   .is_extern = true,
-                   .link_name = s->as.ext.link_name
-                                    ? ny_strdup(s->as.ext.link_name)
-                                    : NULL};
+    fun_sig sig = {
+        .name = ny_strdup(s->as.ext.name),
+        .type = ft,
+        .value = f,
+        .stmt_t = s,
+        .arity = (int)param_count,
+        .is_variadic = s->as.ext.is_variadic,
+        .is_extern = true,
+        .link_name =
+            s->as.ext.link_name ? ny_strdup(s->as.ext.link_name) : NULL,
+        .return_type =
+            s->as.ext.return_type ? ny_strdup(s->as.ext.return_type) : NULL};
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_VAR) {
     for (size_t j = 0; j < s->as.var.names.len; j++) {
@@ -164,7 +174,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       if (!found) {
         LLVMValueRef g = LLVMAddGlobal(cg->module, cg->type_i64, n);
         LLVMSetInitializer(g, LLVMConstInt(cg->type_i64, 0, false));
-        binding b = {ny_strdup(n), g, NULL, s->as.var.is_mut};
+        binding b = {ny_strdup(n), g, s, s->as.var.is_mut, false};
         vec_push(&cg->global_vars, b);
       }
     }

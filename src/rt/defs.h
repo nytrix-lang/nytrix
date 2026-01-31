@@ -139,6 +139,16 @@ RT_DEF("__envc", __envc, 0, "fn __envc()",
 RT_DEF("__envp", __envp, 0, "fn __envp()",
        "Returns the raw environment variables pointer.")
 RT_DEF("__errno", __errno, 0, "fn __errno()", "Returns the last error number.")
+RT_DEF("__result_ok", __result_ok, 1, "fn __result_ok(v)",
+       "Creates an Ok result.")
+RT_DEF("__result_err", __result_err, 1, "fn __result_err(e)",
+       "Creates an Err result.")
+RT_DEF("__is_ok", __is_ok, 1, "fn __is_ok(v)",
+       "Checks if value is an Ok result.")
+RT_DEF("__is_err", __is_err, 1, "fn __is_err(v)",
+       "Checks if value is an Err result.")
+RT_DEF("__unwrap", __unwrap, 1, "fn __unwrap(v)",
+       "Unwraps a Result or returns the value.")
 
 RT_DEF("__thread_spawn", __thread_spawn, 2, "fn __thread_spawn(fn, arg)",
        "Spawns a new thread.")

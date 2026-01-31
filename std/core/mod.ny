@@ -198,11 +198,26 @@ fn from_int(v){
   asm("leaq 1(,$0,2), $0", "=r,0", v)
 }
 
-fn argc() { __argc() }
-fn argv() { __argv() }
-fn envc() { __envc() }
-fn envp() { __envp() }
-fn errno() { __errno() }
+fn argc() {
+  "Returns the process argument count."
+  __argc()
+}
+fn argv() {
+  "Returns the raw argv pointer."
+  __argv()
+}
+fn envc() {
+  "Returns the number of environment entries."
+  __envc()
+}
+fn envp() {
+  "Returns the raw envp pointer."
+  __envp()
+}
+fn errno() {
+  "Returns the current C runtime errno value."
+  __errno()
+}
 
 fn is_kwargs(x){
   "Internal: Returns **true** if `x` is a keyword-argument wrapper object."

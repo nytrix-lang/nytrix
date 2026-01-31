@@ -126,6 +126,7 @@ fn atoi(s){
 }
 
 fn _list_append(lst, v){
+   "Internal: appends `v` to `lst`, growing capacity if needed."
    if(!is_list(lst)){ return lst }
    mut n = load64(lst, 0)
    def cap = load64(lst, 8)
@@ -147,6 +148,7 @@ fn _list_append(lst, v){
 }
 
 fn _substr(s, start, stop){
+   "Internal: substring helper with clamped byte indices."
    mut n = str_len(s)
    if(start < 0){ start = 0 }
    if(stop > n){ stop = n }
@@ -165,6 +167,7 @@ fn _substr(s, start, stop){
 }
 
 fn _is_ws(c){
+   "Internal: returns true for ASCII whitespace byte values."
    if(c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13){ return true }
    return false
 }
@@ -192,15 +195,15 @@ fn split(s, sep){
    mut start = 0
    while(i <= n - sep_len){
       mut j = 0
-      mut match = 1
+      mut is_match = 1
       while(j < sep_len){
         if(load8(s, i + j) != load8(sep, j)){
-          match = 0
+          is_match = 0
           break
         }
          j = j + 1
       }
-      if(match){
+      if(is_match){
          out = _list_append(out, _substr(s, start, i))
          i = i + sep_len
          start = i

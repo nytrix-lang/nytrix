@@ -8,8 +8,8 @@ use std.str.bytes *
 use std.str.term *
 
 def sz = get_terminal_size()
-def W  = get(sz, 0)
-def H  = get(sz, 1)
+def W  = get(sz, 0, 0)
+def H  = get(sz, 1, 0)
 
 def canv        = canvas(W, H)
 def intensities = bytes(W * H)
@@ -31,7 +31,7 @@ clear_screen()
 while (1) {
     mut x = 0
     while (x < W) {
-        def yf = get(drop_y, x) + get(drop_speed, x)
+        def yf = get(drop_y, x, 0) + get(drop_speed, x, 0)
         set_idx(drop_y, x, yf)
 
         def y = yf / 20

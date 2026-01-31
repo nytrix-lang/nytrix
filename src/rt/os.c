@@ -17,6 +17,11 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
   // fprintf(stderr, "DEBUG: syscall(n=%ld, a=%ld, b=%ld, c=%ld)\n", (long)n,
   //         (long)a, (long)b, (long)c);
   long rn = (n & 1) ? (n >> 1) : n;
+  /*
+  fprintf(stdout, "DEBUG: syscall(n=%ld, a=%lx, b=%lx, c=%lx)\n", (long)rn,
+          (long)a, (long)b, (long)c);
+  fflush(stdout);
+  */
   long ra = a;
   long rb = b;
   long rc = c;
@@ -28,6 +33,7 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
     rb = (b & 1) ? (b >> 1) : b;
     rc = (c & 1) ? (c >> 1) : c;
   }
+
   register long _num __asm__("rax") = rn;
   register long _arg1 __asm__("rdi") = ra;
   register long _arg2 __asm__("rsi") = rb;

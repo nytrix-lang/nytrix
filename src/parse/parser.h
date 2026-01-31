@@ -20,6 +20,7 @@ typedef struct parser_t {
   char last_error_msg[256];
   const char *error_ctx;
   int block_depth;
+  int loop_depth;
 } parser_t;
 
 void parser_init(parser_t *p, const char *src, const char *filename);

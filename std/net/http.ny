@@ -105,7 +105,8 @@ fn http_parse_query(q){
    "Parses a URL query string (e.g., 'a=1&b=2') into a dictionary."
    def d = _d.dict(16)
    if(q==0){ return d  }
-   mut i =0  n=len(q)
+   mut i = 0
+   def n = len(q)
    while(i<n){
       mut j =i
       while(j<n && core.load8(q, j)!=38){ j=j+1  }

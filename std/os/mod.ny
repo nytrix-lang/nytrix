@@ -31,7 +31,7 @@ fn ppid(){
 }
 
 fn env(key){
-   "Retrieves the value of an environment variable `key`. Returns `0` if not found."
+   "Returns the value of environment variable `key`, or `0` when no matching entry exists."
    def ep = envp()
    if(!ep){ 0 }
    else {
@@ -63,7 +63,7 @@ fn env(key){
 }
 
 fn environ(){
-   "Returns a [[std.core::list]] of all environment variables in `KEY=VALUE` format."
+   "Returns a list of environment entries in `KEY=VALUE` format."
    def ep = envp()
    if(!ep){ list(8) }
    else {
@@ -83,7 +83,7 @@ fn environ(){
 }
 
 fn getcwd(){
-   "Returns the absolute path of the **current working directory**."
+   "Returns the current working directory as a string; returns `\"\"` if `getcwd(2)` fails."
    mut buf = malloc(4096)
    mut clen = syscall(79, buf, 4096, 0,0,0,0)
    if(clen <= 0){
@@ -106,65 +106,74 @@ fn gid(){
    syscall(104,0,0,0,0,0,0)
 }
 
-fn file_read(path){
-   "Reads entire file at `path` into a string. Returns empty string on failure."
-   def fd = syscall(2, path, 0, 0, 0, 0, 0)
-   if(fd <= 0){ return "" }
-   mut cap = 4096
-   mut buf = malloc(cap)
-   def tmp = malloc(4096)
-   mut tlen = 0
-   while(true){
-      def r = sys_read(fd, tmp, 4096)
-      if(r <= 0){ break }
-      if(tlen + r >= cap){
-         while(tlen + r >= cap){ cap = cap * 2 }
-         buf = realloc(buf, cap)
+fn file_read(path) -> Result {
+   "Reads the whole file at `path`; returns `ok(content_string)` or `err(errno_like_code)`."
+   match sys_open(path, 0, 0) { ; O_RDONLY
+      ok(fd) -> {
+         defer { unwrap(sys_close(fd)) }
+         mut cap = 4096
+         mut buf = malloc(cap)
+         def tmp = malloc(4096)
+         defer { free(tmp) }
+         mut tlen = 0
+         while(true){
+            match sys_read(fd, tmp, 4096) {
+               ok(r) -> {
+                  if(r <= 0){ break }
+                  if(tlen + r >= cap){
+                     while(tlen + r >= cap){ cap = cap * 2 }
+                     buf = realloc(buf, cap)
+                  }
+                  mut i = 0
+                  while(i < r){
+                     store8(buf, load8(tmp, i), tlen + i)
+                     i = i + 1
+                  }
+                  tlen = tlen + r
+               }
+               err(e) -> { return err(e) }
+            }
+         }
+         store8(buf, 0, tlen)
+         return ok(init_str(buf, tlen))
       }
-      mut i = 0
-      while(i < r){
-         store8(buf, load8(tmp, i), tlen + i)
-         i = i + 1
-      }
-      tlen = tlen + r
+      err(e) -> { return err(e) }
    }
-   syscall(3, fd, 0, 0, 0, 0, 0)
-   free(tmp)
-   store8(buf, 0, tlen)
-   init_str(buf, tlen)
-   buf
 }
 
-fn file_write(path, content){
-   "Writes string `content` to file at `path`. Returns bytes written or 0 on failure."
-   def fd = syscall(2, path, 577, 420, 0,0,0) ;; open(path, WRONLY|CREAT|TRUNC, 0644)
-   if(fd < 0){ return 0 }
-   def n = str_len(content)
-   ;; TODO: handle bytes if needed
-   
-   mut res = syscall(1, fd, content, n, 0,0,0)
-   syscall(3, fd, 0,0,0,0,0)
-   res
+fn file_write(path, content) -> Result {
+   "Writes `content` to `path` (truncate/create); returns `ok(bytes_written)` or `err(errno_like_code)`."
+   match sys_open(path, 577, 420) { ;; open(path, WRONLY|CREAT|TRUNC, 0644)
+      ok(fd) -> {
+         defer { unwrap(sys_close(fd)) }
+         def n = str_len(content)
+         return sys_write(fd, content, n)
+      }
+      err(e) -> { return err(e) }
+   }
 }
 
 fn file_exists(path){
-   "Returns true if file at `path` exists."
+   "Returns true when `path` exists (file or directory)."
    mut res = syscall(21, path, 0, 0, 0, 0, 0)
    res == 0
 }
 
-fn file_append(path, content){
-   "Appends string `content` to file at `path`. Returns bytes written or 0 on failure."
-   def fd = syscall(2, path, 1089, 420, 0,0,0) ;; open(path, WRONLY|CREAT|APPEND, 0644)
-   if(fd < 0){ return 0 }
-   def n = str_len(content)
-   mut res = syscall(1, fd, content, n, 0,0,0)
-   syscall(3, fd, 0,0,0,0,0)
-   res
+fn file_append(path, content) -> Result {
+   "Appends `content` to `path` (create if missing); returns `ok(bytes_written)` or `err(errno_like_code)`."
+   match sys_open(path, 1089, 420) { ;; open(path, WRONLY|CREAT|APPEND, 0644)
+      ok(fd) -> {
+         defer { unwrap(sys_close(fd)) }
+         def n = str_len(content)
+         return sys_write(fd, content, n)
+      }
+      err(e) -> { return err(e) }
+   }
 }
 
-fn file_remove(path){
-   "Removes the file at `path`. Returns true on success."
+fn file_remove(path) -> Result {
+   "Removes file `path`; returns `ok(0)` on success or `err(errno_like_code)`."
    mut res = syscall(87, path, 0, 0, 0, 0, 0)
-   res == 0
+   if(res < 0){ return err(res) }
+   return ok(0)
 }
