@@ -1,10 +1,10 @@
 ;; Keywords: net requests
 ;; Net Requests module.
 
-use std.net.http *
 module std.net.requests (
    requests_get, requests_get_host
 )
+use std.net.http *
 
 fn requests_get(url){
    "High-level helper to perform an HTTP GET request using a URL. Returns the response body."

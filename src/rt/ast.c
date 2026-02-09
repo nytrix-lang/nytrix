@@ -32,6 +32,13 @@ int64_t __parse_ast(int64_t source_ptr) {
 #else
 int64_t __parse_ast(int64_t source_ptr) {
   (void)source_ptr;
-  return 0; // Return None in AOT mode without compiler
+  const char *json = "[]";
+  size_t len = 2;
+  int64_t tagged_size = ((int64_t)(len + 1) << 1) | 1;
+  int64_t res = __malloc(tagged_size);
+  *(int64_t *)((char *)res - 8) = 241;
+  *(int64_t *)((char *)res - 16) = ((int64_t)len << 1) | 1;
+  memcpy((void *)res, json, len + 1);
+  return res;
 }
 #endif

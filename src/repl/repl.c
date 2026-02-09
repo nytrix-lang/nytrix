@@ -186,14 +186,25 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
       char *exe_dir = ny_get_executable_dir();
       if (exe_dir) {
         static char path_buf[4096];
-        snprintf(path_buf, sizeof(path_buf), "%s/std_bundle.ny", exe_dir);
+        snprintf(path_buf, sizeof(path_buf), "%s/std.ny", exe_dir);
         if (access(path_buf, R_OK) == 0)
           prebuilt = path_buf;
         else {
-          snprintf(path_buf, sizeof(path_buf),
-                   "%s/../share/nytrix/std_bundle.ny", exe_dir);
+          snprintf(path_buf, sizeof(path_buf), "%s/std_bundle.ny", exe_dir);
           if (access(path_buf, R_OK) == 0)
             prebuilt = path_buf;
+          else {
+            snprintf(path_buf, sizeof(path_buf), "%s/../share/nytrix/std.ny",
+                     exe_dir);
+            if (access(path_buf, R_OK) == 0)
+              prebuilt = path_buf;
+            else {
+              snprintf(path_buf, sizeof(path_buf),
+                       "%s/../share/nytrix/std_bundle.ny", exe_dir);
+              if (access(path_buf, R_OK) == 0)
+                prebuilt = path_buf;
+            }
+          }
         }
       }
     }
@@ -220,6 +231,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
                                   g_repl_ctx, g_repl_builder);
         g_repl_cg.prog_owned = true;
         codegen_emit(&g_repl_cg);
+
       } else {
         program_free(prog, parser.arena);
         free(prog);
@@ -299,13 +311,15 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   clock_t t0 = clock();
   parser_t ps;
   parser_init(&ps, body, "<repl_input>");
-  program_t pr = parse_program(&ps);
+  program_t *pr = malloc(sizeof(program_t));
+  *pr = parse_program(&ps);
 
   int last_status = 0;
+  bool persistent = false;
   if (!ps.had_error) {
     // Check for imports
-    for (size_t i = 0; i < pr.body.len; ++i) {
-      stmt_t *s = pr.body.data[i];
+    for (size_t i = 0; i < pr->body.len; ++i) {
+      stmt_t *s = pr->body.data[i];
       if (s->kind == NY_S_USE && s->as.use.module) {
         repl_ensure_module(s->as.use.module, std_mode, docs);
       }
@@ -315,19 +329,36 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         LLVMModuleCreateWithNameInContext("repl_eval", g_repl_ctx);
     LLVMBuilderRef eval_builder = LLVMCreateBuilderInContext(g_repl_ctx);
     codegen_t cg;
-    codegen_init_with_context(&cg, &pr, ps.arena, eval_mod, g_repl_ctx,
+    codegen_init_with_context(&cg, pr, ps.arena, eval_mod, g_repl_ctx,
                               eval_builder);
 
-    for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++)
-      vec_push(&cg.fun_sigs, g_repl_cg.fun_sigs.data[i]);
-    for (size_t i = 0; i < g_repl_cg.global_vars.len; i++)
-      vec_push(&cg.global_vars, g_repl_cg.global_vars.data[i]);
-    for (size_t i = 0; i < g_repl_cg.aliases.len; i++)
-      vec_push(&cg.aliases, g_repl_cg.aliases.data[i]);
-    for (size_t i = 0; i < g_repl_cg.import_aliases.len; i++)
-      vec_push(&cg.import_aliases, g_repl_cg.import_aliases.data[i]);
+    for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++) {
+      fun_sig s = g_repl_cg.fun_sigs.data[i];
+      s.owned = false;
+      vec_push(&cg.fun_sigs, s);
+    }
+    for (size_t i = 0; i < g_repl_cg.global_vars.len; i++) {
+      binding b = g_repl_cg.global_vars.data[i];
+      b.owned = false;
+      vec_push(&cg.global_vars, b);
+    }
+    for (size_t i = 0; i < g_repl_cg.aliases.len; i++) {
+      binding b = g_repl_cg.aliases.data[i];
+      b.owned = false;
+      vec_push(&cg.aliases, b);
+    }
+    for (size_t i = 0; i < g_repl_cg.import_aliases.len; i++) {
+      binding b = g_repl_cg.import_aliases.data[i];
+      b.owned = false;
+      vec_push(&cg.import_aliases, b);
+    }
+    for (size_t i = 0; i < g_repl_cg.enums.len; i++) {
+      enum_def_t *e = g_repl_cg.enums.data[i];
+      if (e)
+        vec_push(&cg.enums, e);
+    }
     for (size_t i = 0; i < g_repl_cg.use_modules.len; i++)
-      vec_push(&cg.use_modules, g_repl_cg.use_modules.data[i]);
+      vec_push(&cg.use_modules, ny_strdup(g_repl_cg.use_modules.data[i]));
 
     codegen_emit(&cg);
     char fn_name[64];
@@ -335,7 +366,9 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     LLVMValueRef eval_fn = codegen_emit_script(&cg, fn_name);
     (void)eval_fn;
 
-    if (g_repl_ee) {
+    if (cg.had_error) {
+      last_status = 1;
+    } else if (g_repl_ee) {
       LLVMAddModule(g_repl_ee, eval_mod);
       map_rt_syms_persistent(eval_mod, g_repl_ee);
       register_jit_symbols(g_repl_ee, eval_mod, &cg);
@@ -347,6 +380,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         if (cg.interns.data[i].val)
           LLVMAddGlobalMapping(g_repl_ee, cg.interns.data[i].val,
                                &cg.interns.data[i].data);
+      }
+
+      // Force resolution of new global variables to ensure they are emitted
+      for (size_t i = g_repl_cg.global_vars.len; i < cg.global_vars.len; i++) {
+        if (cg.global_vars.data[i].name && cg.global_vars.data[i].value) {
+          LLVMGetGlobalValueAddress(g_repl_ee, cg.global_vars.data[i].name);
+        }
       }
 
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
@@ -370,6 +410,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
           repl_remove_def(undef_name);
           free(undef_name);
         } else if (is_persistent_def(full_input)) {
+          persistent = true;
           if (!from_init)
             repl_append_user_source(full_input);
           repl_update_docs(docs, full_input);
@@ -380,7 +421,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
               s.name = ny_strdup(s.name);
               if (s.link_name)
                 s.link_name = ny_strdup(s.link_name);
+              if (s.return_type)
+                s.return_type = ny_strdup(s.return_type);
               s.stmt_t = NULL;
+              s.owned = true;
               vec_push(&g_repl_cg.fun_sigs, s);
             }
           }
@@ -388,6 +432,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
             if (i >= g_repl_cg.global_vars.len) {
               binding b = cg.global_vars.data[i];
               b.name = ny_strdup(b.name);
+              b.owned = true;
               vec_push(&g_repl_cg.global_vars, b);
             }
           }
@@ -396,6 +441,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
               binding alias_b = cg.aliases.data[i];
               alias_b.name = ny_strdup(alias_b.name);
               alias_b.stmt_t = (void *)ny_strdup((char *)alias_b.stmt_t);
+              alias_b.owned = true;
               vec_push(&g_repl_cg.aliases, alias_b);
             }
           }
@@ -404,8 +450,48 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
               binding import_b = cg.import_aliases.data[i];
               import_b.name = ny_strdup(import_b.name);
               import_b.stmt_t = (void *)ny_strdup((char *)import_b.stmt_t);
+              import_b.owned = true;
               vec_push(&g_repl_cg.import_aliases, import_b);
             }
+          }
+          for (size_t i = 0; i < cg.enums.len; i++) {
+            enum_def_t *src = cg.enums.data[i];
+            if (!src || !src->name)
+              continue;
+            int exists = 0;
+            for (size_t j = 0; j < g_repl_cg.enums.len; j++) {
+              enum_def_t *dst = g_repl_cg.enums.data[j];
+              if (dst && dst->name && strcmp(dst->name, src->name) == 0) {
+                exists = 1;
+                break;
+              }
+            }
+            if (exists)
+              continue;
+            enum_def_t *dst = malloc(sizeof(*dst));
+            if (!dst)
+              continue;
+            memset(dst, 0, sizeof(*dst));
+            dst->name = ny_strdup(src->name);
+            dst->stmt = NULL;
+            if (src->members.len > 0) {
+              dst->members.cap = src->members.len;
+              dst->members.len = src->members.len;
+              dst->members.data =
+                  malloc(sizeof(enum_member_def_t) * dst->members.cap);
+              if (dst->members.data) {
+                for (size_t k = 0; k < src->members.len; k++) {
+                  enum_member_def_t *sm = &src->members.data[k];
+                  dst->members.data[k].name =
+                      sm->name ? ny_strdup(sm->name) : NULL;
+                  dst->members.data[k].value = sm->value;
+                }
+              } else {
+                dst->members.cap = 0;
+                dst->members.len = 0;
+              }
+            }
+            vec_push(&g_repl_cg.enums, dst);
           }
           for (size_t i = 0; i < cg.use_modules.len; i++) {
             int exists = 0;
@@ -446,7 +532,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     printf("[Eval: %.3f ms]\n",
            (double)(clock() - t0) * 1000.0 / CLOCKS_PER_SEC);
 
-  program_free(&pr, ps.arena);
+  if (persistent) {
+    vec_push(&g_repl_cg.extra_progs, pr);
+    vec_push(&g_repl_cg.extra_arenas, ps.arena);
+  } else {
+    program_free(pr, ps.arena);
+    free(pr);
+  }
   free(body);
   return last_status;
 }
@@ -544,10 +636,13 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   g_repl_effective_mode = std_mode;
 
   doc_list_t docs = {0};
-  g_repl_docs = &docs;
-  add_builtin_docs(&docs);
-
-  repl_init_engine(std_mode, &docs);
+  doc_list_t *p_docs = NULL;
+  if (!batch_mode) {
+    g_repl_docs = &docs;
+    add_builtin_docs(&docs);
+    p_docs = &docs;
+  }
+  repl_init_engine(std_mode, p_docs);
 
   g_repl_timing = 0;
   if (getenv("NYTRIX_REPL_TIME"))
@@ -645,13 +740,24 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         snprintf(mode_buf, sizeof(mode_buf), "[full]");
         mode_tag = mode_buf;
       }
-      const char *base = last_status ? "\001\033[31m\002ny!\001\033[0m\002"
-                                     : "\001\033[36m\002ny\001\033[0m\002";
-      if (mode_tag[0])
-        snprintf(prompt_buf, sizeof(prompt_buf),
-                 "%s\001\033[90m\002%s\001\033[0m\002> ", base, mode_tag);
-      else
+      const char *base;
+      if (color_mode) {
+        base = last_status ? "\001\033[31m\002ny!\001\033[0m\002"
+                           : "\001\033[36m\002ny\001\033[0m\002";
+      } else {
+        base = last_status ? "ny!" : "ny";
+      }
+
+      if (mode_tag[0]) {
+        if (color_mode) {
+          snprintf(prompt_buf, sizeof(prompt_buf),
+                   "%s\001\033[90m\002%s\001\033[0m\002> ", base, mode_tag);
+        } else {
+          snprintf(prompt_buf, sizeof(prompt_buf), "%s%s> ", base, mode_tag);
+        }
+      } else {
         snprintf(prompt_buf, sizeof(prompt_buf), "%s> ", base);
+      }
       prompt = prompt_buf;
       rl_pre_input_hook = NULL;
     }

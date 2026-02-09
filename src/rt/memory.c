@@ -106,7 +106,8 @@ int64_t __free(int64_t ptr) {
     *(uint64_t *)base = 0;
     *(uint64_t *)((char *)base + 16) = 0;
 #if NY_WITH_ASAN
-    // Avoid ASAN false-positive cascades from runtime pointer probes after free.
+    // Avoid ASAN false-positive cascades from runtime pointer probes after
+    // free.
     quarantine_push(base);
 #else
     free(base);
@@ -132,7 +133,13 @@ int64_t __realloc(int64_t p_val, int64_t newsz) {
   int64_t res = __malloc(newsz << 1 | 1);
   if (!res)
     return 0;
-  memcpy((void *)(uintptr_t)res, (char *)p_val, old_size);
+  // Copy user data
+  memcpy((void *)(uintptr_t)res, (void *)(uintptr_t)p_val, old_size);
+  // Copy metadata from the header (p-16 and p-8)
+  *(int64_t *)((char *)(uintptr_t)res - 16) =
+      *(int64_t *)((char *)(uintptr_t)p_val - 16);
+  *(int64_t *)((char *)(uintptr_t)res - 8) =
+      *(int64_t *)((char *)(uintptr_t)p_val - 8);
   __free(p_val);
   return res;
 }
@@ -279,6 +286,7 @@ int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
 }
 
 int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
+  // if (idx == 0) printf("DEBUG: __store64_idx addr=%lx val=%lx\n", addr, val);
   if (!is_any_ptr(addr))
     return val;
   if (is_int(idx))

@@ -11,6 +11,7 @@ use std.str *
 
 def s1 = "hello"
 def s2 = "world"
+print(f"DEBUG: len(s1) = {len(s1)}")
 assert(len(s1) == 5, "len s1")
 assert(len(s2) == 5, "len s2")
 
@@ -21,6 +22,8 @@ assert(len(empty) == 0, "empty len")
 
 def concat = str_add(s1, s2)
 assert(len(concat) == 10, "concat len")
+def plus = s1 + s2
+assert(eq(plus, concat), "plus concat")
 
 def num_str = "42"
 assert(len(num_str) == 2, "num str len")

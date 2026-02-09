@@ -4,18 +4,6 @@
 #include "code/code.h"
 #include <llvm-c/Core.h>
 
-// Scope and binding types
-typedef VEC(binding) binding_list;
-typedef VEC(char *) ny_str_list;
-typedef VEC(char *) str_list;
-
-typedef struct scope {
-  VEC(binding) vars;
-  VEC(stmt_t *) defers;
-  LLVMBasicBlockRef break_bb;
-  LLVMBasicBlockRef continue_bb;
-} scope;
-
 // Builtins (builtins.c)
 void add_builtins(codegen_t *cg);
 bool builtin_allowed_comptime(const char *name);
@@ -28,7 +16,7 @@ binding *lookup_global(codegen_t *cg, const char *name);
 fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
 void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
-          stmt_t *stmt, bool is_mut);
+          stmt_t *stmt, bool is_mut, const char *type_name);
 void scope_pop(scope *scopes, size_t *depth);
 void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
 bool ny_diag_should_emit(const char *kind, token_t tok, const char *name);
@@ -39,6 +27,22 @@ void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_hint(const char *fmt, ...);
 void ny_diag_fix(const char *fmt, ...);
 void ny_diag_note_tok(token_t tok, const char *fmt, ...);
+LLVMTypeRef resolve_type_name(codegen_t *cg, const char *name, token_t tok);
+LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *name, token_t tok);
+const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
+                            expr_t *e);
+bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
+                                 const char *want, expr_t *expr, token_t tok,
+                                 const char *ctx);
+layout_def_t *lookup_layout(codegen_t *cg, const char *name);
+type_layout_t resolve_raw_layout(codegen_t *cg, const char *name, token_t tok);
+const char *codegen_qname(codegen_t *cg, const char *name,
+                          const char *module_name);
+void ny_dbg_loc(codegen_t *cg, token_t tok);
+enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name);
+enum_member_def_t *lookup_enum_member_owner(codegen_t *cg, const char *name,
+                                            enum_def_t **out_enum);
+char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a);
 
 // Expression generation (expr_t.c)
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
@@ -48,7 +52,7 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len);
 LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          ny_param_list params, stmt_t *body, bool is_variadic,
-                         const char *name_hint);
+                         const char *return_type, const char *name_hint);
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
 LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                            expr_t *e);
@@ -77,6 +81,6 @@ void collect_use_modules(codegen_t *cg, stmt_t *s);
 void process_exports(codegen_t *cg, stmt_t *s);
 
 // Core utilities (core.c)
-LLVMValueRef build_alloca(codegen_t *cg, const char *name);
+LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type);
 
 #endif // CODEGEN_INTERNAL_H

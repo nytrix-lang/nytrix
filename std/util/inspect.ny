@@ -1,11 +1,11 @@
 ;; Keywords: util inspect
 ;; Util Inspect module.
 
-use std
 module std.util.inspect (
    inspect,
    repl_show
 )
+use std
 
 fn inspect(x){
    "Prints detailed information about value `x`, including its type, representation, length (if applicable), and memory address (for pointers)."

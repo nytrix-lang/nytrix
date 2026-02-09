@@ -1,13 +1,13 @@
 ;; Keywords: math random
 ;; Math Random module.
 
+module std.math.random (
+   rand, seed, random, uniform, randint, randrange, choice, shuffle, sample
+)
 use std.core *
 use std.math *
 use std.core.reflect *
 use std.math.float *
-module std.math.random (
-   rand, seed, random, uniform, randint, randrange, choice, shuffle, sample
-)
 
 fn rand(){
    "Return a random 63-bit positive integer."

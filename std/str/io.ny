@@ -1,14 +1,14 @@
 ;; Keywords: str io
 ;; Basic IO helpers.
 
-use std.core *
-use std.core.reflect *
-use std.str *
-use std.os.sys *
-
 module std.str.io (
    _print_write, print
 )
+use std.core *
+use std.core as core
+use std.core.reflect *
+use std.str *
+use std.os.sys *
 
 fn _write_str(s){
    "Internal: writes a raw string to stdout without conversion."
@@ -26,7 +26,7 @@ fn print(...args){
    "Prints values with optional keyword args `sep` and `end`."
    mut sep = " "
    mut end = "\n"
-   def n = list_len(args)
+   def n = core.len(args)
    mut vals = list(n)
    mut i = 0
    while(i < n){
@@ -44,7 +44,7 @@ fn print(...args){
       }
       i = i + 1
    }
-   def m = list_len(vals)
+   def m = core.len(vals)
    i = 0
    while(i < m){
       _print_write(get(vals, i))

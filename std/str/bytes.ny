@@ -1,10 +1,10 @@
 ;; Keywords: str bytes
 ;; Bytes module.
 
-use std.core *
 module std.str.bytes (
    bytes, bytes_set, bytes_get, bytes_len
 )
+use std.core *
 
 fn bytes(n){
    "Allocates a bytes buffer of length `n`."

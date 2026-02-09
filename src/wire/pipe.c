@@ -19,6 +19,47 @@
 #include <time.h>
 #include <unistd.h>
 
+static void dump_debug_bundle(const ny_options *opt, const char *source,
+                              LLVMModuleRef module) {
+  if (!opt || !opt->dump_on_error)
+    return;
+  ny_ensure_dir("build");
+  ny_ensure_dir("build/debug");
+  if (source) {
+    ny_write_file("build/debug/last_source.ny", source, strlen(source));
+  }
+  if (module) {
+    char *err = NULL;
+    if (LLVMPrintModuleToFile(module, "build/debug/last_ir.ll", &err) != 0) {
+      if (err) {
+        NY_LOG_ERR("Failed to write IR dump: %s\n", err);
+        LLVMDisposeMessage(err);
+      }
+    }
+    ny_llvm_emit_file(module, "build/debug/last_asm.s", LLVMAssemblyFile);
+  }
+  NY_LOG_ERR("Debug bundle saved under build/debug/\n");
+  {
+    const size_t max_lines = 14;
+    const char *paths[] = {"build/debug/last_ir.ll", "build/debug/last_asm.s"};
+    const char *labels[] = {"IR snippet", "ASM snippet"};
+    for (size_t i = 0; i < 2; i++) {
+      char *content = ny_read_file(paths[i]);
+      if (!content)
+        continue;
+      NY_LOG_ERR("--- %s (%s) ---\n", labels[i], paths[i]);
+      size_t lines = 0;
+      for (char *p = content; *p && lines < max_lines; p++) {
+        fputc(*p, stderr);
+        if (*p == '\n')
+          lines++;
+      }
+      if (lines >= max_lines)
+        NY_LOG_ERR("...\n");
+      free(content);
+    }
+  }
+}
 // Helper functions for module scanning
 static char *dup_string_token(token_t t) {
   if (t.len < 2)
@@ -153,27 +194,27 @@ static const char *resolve_std_bundle(const char *compile_time_path) {
 
   static char path[4096];
   // 0. Check relative to current directory
-  if (access("build/std_bundle.ny", R_OK) == 0) {
-    strcpy(path, "build/std_bundle.ny");
+  if (access("build/std.ny", R_OK) == 0) {
+    strcpy(path, "build/std.ny");
     return path;
   }
   // 1. Check relative to binary
   char *exe_dir = ny_get_executable_dir();
   if (exe_dir) {
-    snprintf(path, sizeof(path), "%s/std_bundle.ny", exe_dir);
+    snprintf(path, sizeof(path), "%s/std.ny", exe_dir);
     if (access(path, R_OK) == 0)
       return path;
-    snprintf(path, sizeof(path), "%s/../share/nytrix/std_bundle.ny", exe_dir);
+    snprintf(path, sizeof(path), "%s/../share/nytrix/std.ny", exe_dir);
     if (access(path, R_OK) == 0)
       return path;
   }
 
   // 2. Check source root
   const char *root = ny_src_root();
-  snprintf(path, sizeof(path), "%s/build/std_bundle.ny", root);
+  snprintf(path, sizeof(path), "%s/build/std.ny", root);
   if (access(path, R_OK) == 0)
     return path;
-  snprintf(path, sizeof(path), "%s/std_bundle.ny", root);
+  snprintf(path, sizeof(path), "%s/std.ny", root);
   if (access(path, R_OK) == 0)
     return path;
 
@@ -283,7 +324,8 @@ static char *load_user_source(const ny_options *opt) {
   return ny_strdup("fn main() { return 0\n }");
 }
 
-static char *build_prelude(bool no_std, bool implicit_prelude, size_t *out_len) {
+static char *build_prelude(bool no_std, bool implicit_prelude,
+                           size_t *out_len) {
   *out_len = 0;
   if (no_std || !implicit_prelude)
     return NULL;
@@ -318,7 +360,8 @@ static char *build_prelude(bool no_std, bool implicit_prelude, size_t *out_len) 
   return prelude;
 }
 
-static bool verify_module_if_needed(const ny_options *opt, LLVMModuleRef module) {
+static bool verify_module_if_needed(const ny_options *opt,
+                                    LLVMModuleRef module) {
   if (!opt->verify_module)
     return true;
   char *err = NULL;
@@ -330,7 +373,8 @@ static bool verify_module_if_needed(const ny_options *opt, LLVMModuleRef module)
   return true;
 }
 
-static void run_optimization_if_needed(const ny_options *opt, LLVMModuleRef module) {
+static void run_optimization_if_needed(const ny_options *opt,
+                                       LLVMModuleRef module) {
   if (opt->opt_level <= 0 && !opt->opt_pipeline)
     return;
   const char *passes = opt->opt_pipeline;
@@ -485,6 +529,7 @@ int ny_pipeline_run(ny_options *opt) {
 
   if (parser.had_error) {
     NY_LOG_ERR("Compilation failed: %d errors\n", parser.error_count);
+    dump_debug_bundle(opt, source, NULL);
     exit_code = 1;
     goto exit_success;
   }
@@ -500,6 +545,10 @@ int ny_pipeline_run(ny_options *opt) {
   NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
 
   codegen_init(&cg, &prog, arena, "nytrix");
+  cg.debug_symbols = opt->debug_symbols;
+  cg.trace_exec = opt->trace_exec;
+  if (cg.debug_symbols)
+    codegen_debug_init(&cg, parse_name);
   cg.source_string = source;
   cg.implicit_prelude = opt->implicit_prelude;
   cg.prog_owned = false; // prog is on stack
@@ -507,6 +556,7 @@ int ny_pipeline_run(ny_options *opt) {
   codegen_emit(&cg);
   if (cg.had_error) {
     NY_LOG_ERR("Codegen failed\n");
+    dump_debug_bundle(opt, source, cg.module);
     exit_code = 1;
     goto exit_success;
   }
@@ -514,9 +564,11 @@ int ny_pipeline_run(ny_options *opt) {
   LLVMValueRef script_fn = codegen_emit_script(&cg, "__script_top");
   if (cg.had_error) {
     NY_LOG_ERR("Codegen script entry failed\n");
+    dump_debug_bundle(opt, source, cg.module);
     exit_code = 1;
     goto exit_success;
   }
+  codegen_debug_finalize(&cg);
   maybe_log_phase_time(opt->do_timing, "Codegen:", t_codegen);
 
   if (opt->dump_llvm)
@@ -524,6 +576,7 @@ int ny_pipeline_run(ny_options *opt) {
 
   clock_t t_ver = clock();
   if (!verify_module_if_needed(opt, cg.module)) {
+    dump_debug_bundle(opt, source, cg.module);
     exit_code = 1;
     goto exit_success;
   }
@@ -537,6 +590,27 @@ int ny_pipeline_run(ny_options *opt) {
     fprintf(stderr, "Optimization: %.4fs\n",
             (double)(clock() - t_opt) / CLOCKS_PER_SEC);
 
+  if (opt->emit_ir_path) {
+    char *err = NULL;
+    if (LLVMPrintModuleToFile(cg.module, opt->emit_ir_path, &err) != 0) {
+      NY_LOG_ERR("Failed to write IR to %s\n", opt->emit_ir_path);
+      if (err) {
+        NY_LOG_ERR("%s\n", err);
+        LLVMDisposeMessage(err);
+      }
+      exit_code = 1;
+      goto exit_success;
+    }
+  }
+
+  if (opt->emit_asm_path) {
+    if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile)) {
+      NY_LOG_ERR("Failed to write assembly to %s\n", opt->emit_asm_path);
+      exit_code = 1;
+      goto exit_success;
+    }
+  }
+
   if (opt->output_file) {
     char obj[4096];
     sprintf(obj, "/tmp/ny_tmp_%d.o", getpid());
@@ -549,6 +623,7 @@ int ny_pipeline_run(ny_options *opt) {
                 opt->debug_symbols);
       if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols)) {
         unlink(obj);
+        dump_debug_bundle(opt, source, cg.module);
         exit_code = 1;
         goto exit_success;
       }
@@ -556,20 +631,25 @@ int ny_pipeline_run(ny_options *opt) {
                         (opt->strip_override == -1 && !opt->debug_symbols);
       NY_LOG_V2("Linking executable %s (strip=%d, debug=%d)...\n",
                 opt->output_file, link_strip, opt->debug_symbols);
-      if (!ny_builder_link(cc, obj, rto, NULL, NULL, 0,
-                           (const char *const *)opt->link_dirs.data,
-                           opt->link_dirs.len,
-                           (const char *const *)opt->link_libs.data,
-                           opt->link_libs.len, opt->output_file,
-                           link_strip, opt->debug_symbols)) {
+      if (!ny_builder_link(
+              cc, obj, rto, NULL, NULL, 0,
+              (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
+              (const char *const *)opt->link_libs.data, opt->link_libs.len,
+              opt->output_file, link_strip, opt->debug_symbols)) {
         unlink(obj);
         unlink(rto);
+        dump_debug_bundle(opt, source, cg.module);
         exit_code = 1;
         goto exit_success;
       }
       unlink(obj);
       unlink(rto);
       NY_LOG_SUCCESS("Saved ELF: %s\n", opt->output_file);
+    } else {
+      NY_LOG_ERR("Failed to emit object file\n");
+      dump_debug_bundle(opt, source, cg.module);
+      exit_code = 1;
+      goto exit_success;
     }
   }
 
@@ -587,6 +667,7 @@ int ny_pipeline_run(ny_options *opt) {
     if (LLVMCreateMCJITCompilerForModule(&ee, jmod, &jopt, sizeof(jopt),
                                          &err)) {
       NY_LOG_ERR("JIT failed: %s\n", err);
+      dump_debug_bundle(opt, source, jmod);
       exit_code = 1;
       goto exit_success;
     }
@@ -622,7 +703,8 @@ int ny_pipeline_run(ny_options *opt) {
         fprintf(stderr, "TRACE: __script_top NOT FOUND\n");
     }
 
-    // NOTE: Do not auto-invoke main() here. Script top-level controls execution.
+    // NOTE: Do not auto-invoke main() here. Script top-level controls
+    // execution.
     maybe_log_phase_time(opt->do_timing, "JIT Exec:", t_exec);
 
     LLVMDisposeExecutionEngine(ee);

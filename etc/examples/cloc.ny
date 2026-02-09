@@ -29,6 +29,7 @@ fn do_glob(pattern){
    if(str_contains(d, "*")){ d = "." }
    def res_box = [list(8)]
    walk(d, fn(p){
+      if(startswith(p, "build/") || p == "build"){ return 0 }
       if(is_file(p) && (glob_match(pattern, p) || glob_match(pattern, basename(p)))){
          set_idx(res_box, 0, append(get(res_box, 0, 0), p))
       }

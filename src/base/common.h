@@ -155,6 +155,12 @@ static inline char *ny_strndup(const char *s, size_t n) {
     (vec)->len = (vec)->cap = 0;                                               \
   } while (0)
 
+#define vec_init(vec)                                                          \
+  do {                                                                         \
+    (vec)->data = NULL;                                                        \
+    (vec)->len = (vec)->cap = 0;                                               \
+  } while (0)
+
 #define vec_push_arena(arena, vec, value)                                      \
   do {                                                                         \
     if ((vec)->len == (vec)->cap) {                                            \
@@ -167,7 +173,6 @@ static inline char *ny_strndup(const char *s, size_t n) {
     }                                                                          \
     (vec)->data[(vec)->len++] = (value);                                       \
   } while (0)
-
 // Arena tracking raw allocations for bulk free.
 typedef struct arena_t {
   void **items;

@@ -1,14 +1,14 @@
 ;; Keywords: os process
 ;; Process module.
 
-use std.core *
-use std.os.sys *
-use std.str *
-use std.core.reflect *
-
 module std.os.process (
    run, popen, waitpid
 )
+use std.core *
+use std.core as core
+use std.os.sys *
+use std.str *
+use std.core.reflect *
 
 fn waitpid(pid, options){
    "Waits for `pid` using `wait4(2)` and returns the raw wait status; returns a negative errno-style value on syscall failure."
@@ -27,7 +27,7 @@ fn run(path, args) {
     "Forks and execs `path` with `args`, waits for completion, and returns the child exit code (0..255); returns `-1` if fork fails."
     mut pid = syscall(57, 0, 0, 0, 0, 0, 0) ; fork()
     if (pid == 0) {
-        def n = list_len(args)
+        def n = core.len(args)
         def argv = malloc((n + 1) * 8)
         mut i = 0
         while (i < n) {
@@ -104,7 +104,7 @@ fn popen(path, args){
         syscall(3, stdout_write, 0,0,0,0,0)
         
         ;; Exec
-        def n = list_len(args)
+        def n = core.len(args)
         def argv = malloc((n + 1) * 8)
         mut i = 0
         while(i < n){

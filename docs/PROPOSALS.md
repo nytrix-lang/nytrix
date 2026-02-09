@@ -2,14 +2,6 @@
 
 This document outlines proposed features.
 
-### `embed` (Compile-time Resources)
-Include binary files directly into the executable data section. Avoids runtime file I/O for static assets.
-
-**Syntax:**
-```nytrix
-def SHADER = embed("gfx/shader.glsl") ; returns Bytes pointer
-```
-
 ## Explicit Allocator Context
 Implicitly pass a `Context` struct (containing an allocator pointer) to functions.
 

@@ -1,6 +1,12 @@
 ;; Keywords: core reflect
 ;; Core Reflect module.
 
+module std.core.reflect (
+   len, contains, type, typeof,
+   add, sub, mul, div,
+   list_eq, dict_eq, set_eq, eq, repr, hash,
+   globals, items, keys, values, get, set, set_idx, slice, append, pop, extend, to_str
+)
 use std.core.error *
 use std.str *
 use std.str.str *
@@ -10,13 +16,13 @@ use std.core.primitives *
 use std.core.dict *
 use std.core *
 use std.str.io *
-module std.core.reflect (len, contains, type, typeof, list_eq, dict_eq, set_eq, eq, repr, hash, globals, items, keys, values, get, set, set_idx, slice, append, pop, extend, to_str)
 
 fn len(x){
    "Returns the number of elements in a collection or the length of a string.
    - For **str**: number of bytes.
    - For **list/tuple/dict/set**: number of items.
-   - For **bytes**: buffer size."
+   - For **bytes**: buffer size.
+   Returns `0` for other types."
    if(__eq(x, 0)){ return 0 }
    if(is_list(x)){ return load64(x, 0) }
    if(is_tuple(x)){ return load64(x, 0) }
@@ -34,7 +40,7 @@ fn len(x){
 fn contains(container, item){
    "Returns **true** if `item` exists within `container`.
    - **set/dict**: checks for key existence.
-   - **list**: checks for value presence.
+   - **list/tuple**: checks for value presence.
    - **str**: checks for substring presence."
    if(!container){ return false }
    ; Handle sets (dicts with tag 102)
@@ -80,7 +86,7 @@ fn contains(container, item){
       return false
    }
    ; Handle lists
-   if(is_list(container)){
+   if(is_list(container) || is_tuple(container)){
       mut i = 0
       def n = load64(container, 0)
       while(i < n){
@@ -118,6 +124,142 @@ fn type(x){
    ; Not none, not int, not ptr -> must be bool (2 or 4)
    if(__eq(x, true) || __eq(x, false)){ return "bool" }
    return "unknown"
+}
+
+fn add(a, b){
+   "Generic addition.
+   - **list/tuple + list/tuple**: element-wise sum (min length).
+   - Other types: delegates to builtin `__add` (ints, floats, strings, ptr math)."
+   if((is_list(a) || is_tuple(a)) && (is_list(b) || is_tuple(b))){
+      return _list_zip2(a, b, 0)
+   }
+   __add(a, b)
+}
+
+fn sub(a, b){
+   "Generic subtraction with list support.
+   - **list/tuple - list/tuple**: element-wise difference (min length).
+   - Other types: delegates to builtin `__sub`."
+   if((is_list(a) || is_tuple(a)) && (is_list(b) || is_tuple(b))){
+      return _list_zip2(a, b, 1)
+   }
+   __sub(a, b)
+}
+
+fn mul(a, b){
+   "Generic multiplication.
+   - **mat4 * mat4**: matrix product.
+   - **mat4 * vec4**: matrix-vector product.
+   - **list/tuple * list/tuple**: element-wise product (min length).
+   - **list/tuple * scalar**: scale each element.
+   - Other types: delegates to builtin `__mul`."
+   if(is_list(a) || is_tuple(a)){
+      if(_is_mat4(a)){
+         if((is_list(b) || is_tuple(b)) && len(b) == 16){ return _mat4_mul(a, b) }
+         if((is_list(b) || is_tuple(b)) && len(b) == 4){ return _mat4_mul_vec4(a, b) }
+      }
+      if(is_int(b) || is_float(b)){ return _list_scale(a, b, 0) }
+      if(is_list(b) || is_tuple(b)){ return _list_zip2(a, b, 2) }
+   }
+   if((is_list(b) || is_tuple(b)) && (is_int(a) || is_float(a))){ return _list_scale(b, a, 0) }
+   __mul(a, b)
+}
+
+fn div(a, b){
+   "Generic division.
+   - **list/tuple / list/tuple**: element-wise division (min length).
+   - **list/tuple / scalar**: divide each element by scalar.
+   - Other types: delegates to builtin `__div`."
+   if((is_list(a) || is_tuple(a)) && (is_list(b) || is_tuple(b))){
+      return _list_zip2(a, b, 3)
+   }
+   if((is_list(a) || is_tuple(a)) && (is_int(b) || is_float(b))){ return _list_scale(a, b, 1) }
+   __div(a, b)
+}
+
+fn _list_like(n){
+   "Internal: allocates a list container with length `n`."
+   list(n)
+}
+
+fn _list_zip2(a, b, op){
+   "Internal: element-wise list/tuple operations (op: 0 add, 1 sub, 2 mul, 3 div)."
+   def na = len(a)
+   def nb = len(b)
+   def n = (na < nb) ? na : nb
+   def out_tag = (is_tuple(a) && is_tuple(b)) ? 103 : 100
+   mut out = _list_like(n)
+   mut i = 0
+   while(i < n){
+      def x = get(a, i, 0)
+      def y = get(b, i, 0)
+      if(op == 0){ out = append(out, x + y) }
+      else if(op == 1){ out = append(out, x - y) }
+      else if(op == 2){ out = append(out, x * y) }
+      else { out = append(out, x / y) }
+      i = i + 1
+   }
+   if(out_tag == 103){ store64(out, 103, -8) }
+   return out
+}
+
+fn _list_scale(a, s, op){
+   "Internal: scales list/tuple `a` by scalar `s` (op: 0 mul, 1 div)."
+   def n = len(a)
+   def out_tag = is_tuple(a) ? 103 : 100
+   mut out = _list_like(n)
+   mut i = 0
+   while(i < n){
+      def x = get(a, i, 0)
+      if(op == 0){ out = append(out, x * s) }
+      else { out = append(out, x / s) }
+      i = i + 1
+   }
+   if(out_tag == 103){ store64(out, 103, -8) }
+   return out
+}
+
+fn _is_mat4(x){
+   "Internal: returns true if `x` looks like a 4x4 matrix list."
+   return (is_list(x) || is_tuple(x)) && len(x) == 16
+}
+
+fn _mat4_mul(a, b){
+   "Internal: multiplies two 4x4 matrices."
+   mut out = list(16)
+   mut r = 0
+   while(r < 4){
+      mut c = 0
+      while(c < 4){
+         mut s = 0
+         mut k = 0
+         while(k < 4){
+            s = s + get(a, r * 4 + k, 0) * get(b, k * 4 + c, 0)
+            k = k + 1
+         }
+         out = append(out, s)
+         c = c + 1
+      }
+      r = r + 1
+   }
+   return out
+}
+
+fn _mat4_mul_vec4(m, v){
+   "Internal: multiplies 4x4 matrix `m` by 4D vector `v`."
+   mut out = list(4)
+   mut r = 0
+   while(r < 4){
+      mut s = 0
+      mut c = 0
+      while(c < 4){
+         s = s + get(m, r * 4 + c, 0) * get(v, c, 0)
+         c = c + 1
+      }
+      out = append(out, s)
+      r = r + 1
+   }
+   return out
 }
 
 fn typeof(x){
@@ -272,7 +414,7 @@ fn items(x){
       "set"  -> {
          def its = dict_items(x)
          mut out = list(8)
-         mut i = 0  def n = list_len(its)
+         mut i = 0  def n = len(its)
          while(i < n){
              out = append(out, get(get(its, i), 0))
             i += 1

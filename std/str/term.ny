@@ -1,14 +1,6 @@
 ;; Keywords: cli tui
 ;; Cli Tui module.
 
-use std.str *
-use std.core.reflect *
-use std.core *
-use std.os.time *
-use std.math.float *
-use std.core *
-use std.core *
-use std.os.sys *
 module std.str.term (
     bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update,
     bar_finish, bar_range, bar_write, get_terminal_size,
@@ -18,6 +10,15 @@ module std.str.term (
     canvas, canvas_clear, canvas_set, canvas_print, canvas_box, canvas_refresh,
     get_key, poll_key, set_raw_mode, set_cooked_mode, write_str
 )
+use std.str *
+use std.core.reflect *
+use std.core *
+use std.core as core
+use std.os.time *
+use std.math.float *
+use std.core *
+use std.core *
+use std.os.sys *
 
 fn write_str(s){
    "Safely write a Nytrix string to stdout (bypassing metadata)."
@@ -183,7 +184,7 @@ fn color_names(){
 fn get_color_name(idx){
    "Returns the color name at index `idx` (cycling)."
    def c = color_names()
-   def n = list_len(c)
+   def n = core.len(c)
    get(c, idx % n)
 }
 
@@ -194,21 +195,21 @@ fn get_color(text, idx){
 
 fn shapes(){
    "Returns a dictionary of common TUI shapes/symbols."
-   def s = dict(16)
-   dict_set(s, "v_line", "│")
-   dict_set(s, "h_line", "─")
-   dict_set(s, "top_left", "╭")
-   dict_set(s, "top_right", "╮")
-   dict_set(s, "bot_left", "╰")
-   dict_set(s, "bot_right", "╯")
-   dict_set(s, "cross", "┼")
-   dict_set(s, "t_down", "┬")
-   dict_set(s, "t_up", "┴")
-   dict_set(s, "t_left", "┤")
-   dict_set(s, "t_right", "├")
-   dict_set(s, "block", "█")
-   dict_set(s, "shade", "░")
-   dict_set(s, "dot", "•")
+   def s = dict(64)
+   dict_set(s, "v_line", "\xe2\x94\x82")   ;; │
+   dict_set(s, "h_line", "\xe2\x94\x80")   ;; ─
+   dict_set(s, "top_left", "\xe2\x95\xad") ;; ╭
+   dict_set(s, "top_right", "\xe2\x95\xae");; ╮
+   dict_set(s, "bot_left", "\xe2\x95\xb0") ;; ╰
+   dict_set(s, "bot_right", "\xe2\x95\xaf");; ╯
+   dict_set(s, "cross", "\xe2\x94\xbc")    ;; ┼
+   dict_set(s, "t_down", "\xe2\x94\xac")   ;; ┬
+   dict_set(s, "t_up", "\xe2\x94\xb4")     ;; ┴
+   dict_set(s, "t_left", "\xe2\x94\xa4")   ;; ┤
+   dict_set(s, "t_right", "\xe2\x94\x9c")  ;; ├
+   dict_set(s, "shade", "\xe2\x96\x92")    ;; ▒
+   dict_set(s, "dot", "\xc2\xb7")          ;; ·
+   dict_set(s, "block", "\xe2\x96\x88")    ;; █
    s
 }
 
@@ -265,14 +266,14 @@ fn panel(text, title="", border_color="white"){
 
 fn table(headers, rows){
    "Prints a simple table."
-   def cols = list_len(headers)
+   def cols = core.len(headers)
    mut widths = list(8)
    mut i = 0
    while(i < cols){
       widths = append(widths, str_len(get(headers, i)))
       i = i + 1
    }
-   mut r = 0 def nr = list_len(rows)
+   mut r = 0 def nr = core.len(rows)
    while(r < nr){
       def row = get(rows, r)
       mut c = 0
@@ -325,7 +326,7 @@ fn tree(node, pref="", head_in=""){
    def label = get(node, 0)
    print(f"{prefix}{head}{bold(label)}")
    def children = get(node, 1)
-   def count = list_len(children)
+   def count = core.len(children)
    mut i = 0
    while(i < count){
       def last = (i == count - 1)
@@ -411,15 +412,28 @@ fn bar_write(bar_obj, msg){
 }
 
 mut _term_buf = 0
+mut _chr_cache = 0
+
+fn _chr_cached(code){
+   "Internal: cached ASCII byte -> single-character string."
+   if(code < 0 || code > 255){ return "" }
+   if(!_chr_cache){
+      _chr_cache = list(256)
+      mut i = 0
+      while(i < 256){
+         _chr_cache = append(_chr_cache, chr(i))
+         i = i + 1
+      }
+   }
+   get(_chr_cache, code, "")
+}
 
 fn get_terminal_size(){
    "Retrieves terminal [width, height] using ioctl, environment variables, or defaults."
    if(!_term_buf){ _term_buf = malloc(8) }
    def buf = _term_buf
-
    ;; Try ioctl on stdout (1)
    mut r = syscall(16, 1, 0x5413, buf, 0, 0, 0)
-
    ;; If stdout fails, try /dev/tty
    if(r != 0){
       use std.str.io *
@@ -429,7 +443,6 @@ fn get_terminal_size(){
          unwrap(sys_close(fd))
       }
    }
-
    if(r == 0){
       def rows = load8(buf, 0) | (load8(buf, 1) << 8)
       def cols = load8(buf, 2) | (load8(buf, 3) << 8)
@@ -437,7 +450,6 @@ fn get_terminal_size(){
          return [cols, rows]
       }
    }
-
    ;; Fallback to Environment Variables
    use std.os *
    def env_c = env("COLUMNS")
@@ -448,7 +460,6 @@ fn get_terminal_size(){
       ic = int(env_c) il = int(env_l)
       if(ic > 0 && il > 0){ return [ic, il] }
    }
-
    return [80, 24] ; Final fallback
 }
 
@@ -456,12 +467,20 @@ fn get_terminal_size(){
 
 fn canvas(w, h){
    "Creates a new terminal canvas for buffered drawing."
-   mut c = list(8)
+   mut c = list(10)
    c = append(c, w) ; 0: width
    c = append(c, h) ; 1: height
-   c = append(c, bytes(w * h)) ; 2: char buffer
+   ;; 2: char buffer (list of strings, one per cell, UTF-8 safe)
+   mut char_buf = list(w * h)
+   mut i = 0
+   while(i < w * h){
+      char_buf = append(char_buf, " ")
+      i = i + 1
+   }
+   c = append(c, char_buf)
    c = append(c, bytes(w * h)) ; 3: attr buffer (0=norm, 1=bold)
    c = append(c, bytes(w * h)) ; 4: color buffer (color index 0-8)
+   c = append(c, bytes(w * h)) ; 5: byte-length buffer
    canvas_clear(c)
    return c
 }
@@ -470,13 +489,41 @@ fn canvas_clear(canv){
    "Clears all buffers (characters, attributes, and colors) in the canvas."
    def w = get(canv, 0) def h = get(canv, 1)
    def buf = get(canv, 2) def attr = get(canv, 3) def col = get(canv, 4)
+   def blen = get(canv, 5)
    mut i = 0 def n = w * h
    while(i < n){
-      bytes_set(buf, i, 32)
+      set_idx(buf, i, " ")
       bytes_set(attr, i, 0)
       bytes_set(col, i, 0)
+      bytes_set(blen, i, 1)
       i = i + 1
    }
+}
+
+fn _byte_len(s){
+   "Internal: returns UTF-8 byte length (robust to char-count headers)."
+   if(!is_str(s)){ return 0 }
+   def n = str_len(s)
+   if(n == 0){ return 0 }
+   if(load8(s, n) == 0){ return n }
+   mut i = n
+   while(load8(s, i) != 0){ i = i + 1 }
+   i
+}
+
+fn _substr_bytes(s, start, len){
+   "Internal: substring helper with byte indices (UTF-8 safe if boundaries are valid)."
+   if(len <= 0){ return "" }
+   mut out = malloc(len + 1)
+   if(!out){ return "" }
+   init_str(out, len)
+   mut i = 0
+   while(i < len){
+      store8(out, load8(s, start + i), i)
+      i = i + 1
+   }
+   store8(out, 0, len)
+   out
 }
 
 fn canvas_set(canv, x, y, char, color_idx=0, is_bold=0){
@@ -484,18 +531,34 @@ fn canvas_set(canv, x, y, char, color_idx=0, is_bold=0){
    def w = get(canv, 0) def h = get(canv, 1)
    if(x < 0 || x >= w || y < 0 || y >= h){ return 0 }
    def idx = y * w + x
-   def char_code = case is_str(char) { 1 -> ord(char) _ -> char }
-   bytes_set(get(canv, 2), idx, char_code)
+   mut char_str = ""
+   if(is_str(char)){
+      char_str = char
+   } else {
+      char_str = _chr_cached(char)
+   }
+   if(str_len(char_str) == 0){ char_str = "?" }
+   set_idx(get(canv, 2), idx, char_str)
    bytes_set(get(canv, 3), idx, is_bold)
    bytes_set(get(canv, 4), idx, color_idx)
+   bytes_set(get(canv, 5), idx, _byte_len(char_str))
 }
 
 fn canvas_print(canv, x, y, text, color_idx=0, is_bold=0){
    "Prints a string horizontally on the canvas starting at (x, y)."
-   mut i = 0 def l = str_len(text)
+   mut i = 0
+   mut col = 0
+   def l = str_len(text)
    while(i < l){
-      canvas_set(canv, x + i, y, get(text, i), color_idx, is_bold)
-      i = i + 1
+      def b0 = load8(text, i)
+      mut clen = 1
+      if(b0 >= 240){ clen = 4 }
+      elif(b0 >= 224){ clen = 3 }
+      elif(b0 >= 192){ clen = 2 }
+      def ch = _substr_bytes(text, i, clen)
+      canvas_set(canv, x + col, y, ch, color_idx, is_bold)
+      i = i + clen
+      col = col + 1
    }
 }
 
@@ -530,30 +593,25 @@ fn canvas_refresh(canv){
    def buf = get(canv, 2)
    def attr = get(canv, 3)
    def col = get(canv, 4)
-
-   ;; Estimated buffer size: drastic increase to be safe
+   def blen = get(canv, 5)
    def r_buf = bytes(w * h * 64 + 1024)
    mut p = 0
    ;; Home command: \033[H (27 91 72)
    bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 72)
    p = p + 3
-
    mut last_c = -1
    mut last_b = -1
-
    mut y = 0
    while y < h {
       mut x = 0
       while x < w {
          def idx = y * w + x
-         def char = bytes_get(buf, idx)
+         def cell = get(buf, idx, " ")
          def b = bytes_get(attr, idx)
          def c = bytes_get(col, idx)
-
          if c != last_c || b != last_b {
             ;; \033[ (27 91)
             bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) p = p + 2
-
             if c == 0 && b == 0 {
                bytes_set(r_buf, p, 48) p = p + 1 ;; '0'
             } else {
@@ -573,9 +631,13 @@ fn canvas_refresh(canv){
             bytes_set(r_buf, p, 109) p = p + 1 ;; 'm'
             last_c = c last_b = b
          }
-
-         bytes_set(r_buf, p, char)
-         p = p + 1
+         def clen = bytes_get(blen, idx)
+         mut j = 0
+         while(j < clen){
+            bytes_set(r_buf, p, load8(cell, j))
+            p = p + 1
+            j = j + 1
+         }
          x = x + 1
       }
       if y < h - 1 {
@@ -584,11 +646,9 @@ fn canvas_refresh(canv){
       }
       y = y + 1
    }
-
    ;; Reset color at end: \033[0m
    bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 48) bytes_set(r_buf, p+3, 109)
    p = p + 4
-
    unwrap(sys_write(1, r_buf, p))
    free(r_buf)
 }

@@ -1,17 +1,23 @@
 ;; Keywords: str
 ;; String module.
 
-use std.core *
 module std.str (
-   str_len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, split, strip,
-   str_add, upper, lower, str_contains, join, str_replace, replace_all
+   str_len, len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, split, strip,
+   str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, chr, repeat, ord
 )
+use std.core *
+use std.core as core
 
 fn str_len(s){
    "Returns the number of bytes in a string."
    if(!s){ return 0 }
    if(!is_ptr(s)){ return 0 }
    load64(s, -16)
+}
+
+fn len(s){
+   "Alias for [[std.core::len]]. For strings, returns the number of bytes."
+   core.len(s)
 }
 
 fn find(s, sub){
@@ -50,6 +56,7 @@ fn cstr_to_str(p, offset=0){
    "Converts a C-string pointer to a Nytrix string. Optional offset skips bytes."
    if(!p){ return 0 }
    if(is_str(p)){ return p } ; Handle case where it's already a Nytrix string
+   if(!is_int(offset)){ offset = 0 }
    
    mut n = 0
    while(load8(p, offset + n) != 0){ n = n + 1 }
@@ -296,7 +303,7 @@ fn join(items, sep){
    "Joins a list of strings using separator `sep`."
    if(!is_list(items)){ return "" }
    if(!is_str(sep)){ return "" }
-   mut n = list_len(items)
+   mut n = core.len(items)
    if(n == 0){ return "" }
    mut out = get(items, 0)
    mut i = 1
@@ -319,4 +326,76 @@ fn str_replace(s, old, new){
 fn replace_all(s, old, new){
    "Alias for [[std.str::str_replace]]."
    str_replace(s, old, new)
+}
+
+fn to_hex(n, width=0){
+   "Converts an integer `n` to its hexadecimal string representation."
+   def hex_chars = "0123456789abcdef"
+   mut s = ""
+   if(n == 0){ s = "0" }
+   else {
+      mut val = n
+      while(val > 0){
+         def nibble = band(val, 0xF)
+         def char_code = load8(hex_chars, nibble)
+         def char_str_ptr = malloc(2) ; 1 byte for char, 1 for null terminator
+         store8(char_str_ptr, char_code, 0)
+         store8(char_str_ptr, 0, 1)
+         def char_str = cstr_to_str(char_str_ptr)
+         free(char_str_ptr)
+         s = str_add(char_str, s)
+         val = bshr(val, 4)
+      }
+   }
+   if(width > 0){
+      def slen = str_len(s)
+      if(width > slen){
+         mut pad = width - slen
+         while(pad > 0){
+            s = str_add("0", s)
+            pad = pad - 1
+         }
+      }
+   }
+   return s
+}
+
+fn chr(code){
+   "Returns a single-character string from an integer ASCII code."
+   if(code < 0 || code > 255){ return "" }
+   def char_buf = malloc(2)
+   if(!char_buf){ return "" }
+   store8(char_buf, code, 0)
+   store8(char_buf, 0, 1)
+   def s = cstr_to_str(char_buf)
+   free(char_buf)
+   return s
+}
+
+fn repeat(s, n){
+   "Returns string `s` repeated `n` times."
+   if(!is_str(s) || n < 0){ return "" }
+   if(n == 0){ return "" }
+   def slen = str_len(s)
+   def total_len = slen * n
+   mut out = malloc(total_len + 1)
+   if(!out){ return "" }
+   init_str(out, total_len)
+   mut i = 0
+   while(i < n){
+      mut j = 0
+      while(j < slen){
+         store8(out, load8(s, j), i * slen + j)
+         j = j + 1
+      }
+      i = i + 1
+   }
+   store8(out, 0, total_len)
+   return out
+}
+
+fn ord(s){
+   "Returns the ASCII byte value of the first character of string `s`."
+   if(!is_str(s) || str_len(s) == 0){ return 0 }
+   return load8(s, 0)
 }

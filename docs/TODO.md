@@ -1,8 +1,9 @@
+# Pending Fixes / Improvements Roadmap
 
-# TODO Pending Fixes and Improvements
+## Core
+- [ ] Support identifiers starting/ending with `->`, `!?`
+- [ ] Optional unbounded int/float defaults; refine bigint
 
-* [ ] Allow  variables and functions starting with numbers,kebabcase and `->` and `!?`.
-* [ ] Remove rt_ functions and reimplement in std.
-* [ ] Implement auto resize in runtime based in term size for examples. 
-* [ ] Implement int/float unbounded. for default operations when the module is imported. and refine bigint and rt.
-* [ ] Implement auto resize in runtime based in term size for examples.
+## GUI Projects
+
+- [ ] Terminal, Text Editor (LSP, Tree-sitter, file explorer, Git)

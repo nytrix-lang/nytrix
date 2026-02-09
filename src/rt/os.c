@@ -96,7 +96,7 @@ int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
   long renvp = (envp & 1) ? (envp >> 1) : envp;
   long res = syscall(SYS_execve, (const char *)rpath, (char *const *)rargv,
                      (char *const *)renvp);
-  return (int64_t)((res << 1) | 1);
+  return (int64_t)(((uint64_t)res << 1) | 1);
 }
 
 // Threads

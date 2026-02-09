@@ -1,4 +1,171 @@
 #include "priv.h"
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+
+static bool suffix_eq(const char *s, size_t len, const char *lit) {
+  size_t llen = strlen(lit);
+  if (len != llen)
+    return false;
+  for (size_t i = 0; i < llen; i++) {
+    if (tolower((unsigned char)s[i]) != lit[i])
+      return false;
+  }
+  return true;
+}
+
+static bool hint_is_float(lit_type_hint_t hint) {
+  return hint == NY_LIT_HINT_F32 || hint == NY_LIT_HINT_F64 ||
+         hint == NY_LIT_HINT_F128;
+}
+
+static lit_type_hint_t infer_int_hint(int64_t val) {
+  if (val >= INT32_MIN && val <= INT32_MAX)
+    return NY_LIT_HINT_I32;
+  return NY_LIT_HINT_I64;
+}
+
+static bool check_int_range(parser_t *p, token_t tok, uint64_t val,
+                            lit_type_hint_t hint) {
+  switch (hint) {
+  case NY_LIT_HINT_I8:
+    return val <= (uint64_t)INT8_MAX;
+  case NY_LIT_HINT_I16:
+    return val <= (uint64_t)INT16_MAX;
+  case NY_LIT_HINT_I32:
+    return val <= (uint64_t)INT32_MAX;
+  case NY_LIT_HINT_I64:
+    return val <= (uint64_t)INT64_MAX;
+  case NY_LIT_HINT_U8:
+    return val <= UINT8_MAX;
+  case NY_LIT_HINT_U16:
+    return val <= UINT16_MAX;
+  case NY_LIT_HINT_U32:
+    return val <= UINT32_MAX;
+  case NY_LIT_HINT_U64:
+    return true;
+  default:
+    break;
+  }
+  parser_error(p, tok, "integer literal out of range for suffix", NULL);
+  return false;
+}
+
+static bool parse_numeric_suffix(const char *s, size_t len, size_t *num_len,
+                                 lit_type_hint_t *hint,
+                                 bool *hint_explicit) {
+  *num_len = len;
+  *hint = NY_LIT_HINT_NONE;
+  *hint_explicit = false;
+  if (len < 2)
+    return true;
+  size_t i = len;
+  while (i > 0 && isdigit((unsigned char)s[i - 1]))
+    i--;
+  if (i == len)
+    return true; // no trailing digits
+  if (i == 0)
+    return true;
+  char c = s[i - 1];
+  bool is_hex = (len >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X'));
+  if (c != 'i' && c != 'I' && c != 'u' && c != 'U' && c != 'f' && c != 'F')
+    return true;
+  if (is_hex && (c == 'f' || c == 'F')) {
+    return true;
+  }
+  const char *suffix = s + i - 1;
+  size_t suffix_len = len - (i - 1);
+  if (suffix_eq(suffix, suffix_len, "i8"))
+    *hint = NY_LIT_HINT_I8;
+  else if (suffix_eq(suffix, suffix_len, "i16"))
+    *hint = NY_LIT_HINT_I16;
+  else if (suffix_eq(suffix, suffix_len, "i32"))
+    *hint = NY_LIT_HINT_I32;
+  else if (suffix_eq(suffix, suffix_len, "i64"))
+    *hint = NY_LIT_HINT_I64;
+  else if (suffix_eq(suffix, suffix_len, "u8"))
+    *hint = NY_LIT_HINT_U8;
+  else if (suffix_eq(suffix, suffix_len, "u16"))
+    *hint = NY_LIT_HINT_U16;
+  else if (suffix_eq(suffix, suffix_len, "u32"))
+    *hint = NY_LIT_HINT_U32;
+  else if (suffix_eq(suffix, suffix_len, "u64"))
+    *hint = NY_LIT_HINT_U64;
+  else if (suffix_eq(suffix, suffix_len, "f32"))
+    *hint = NY_LIT_HINT_F32;
+  else if (suffix_eq(suffix, suffix_len, "f64"))
+    *hint = NY_LIT_HINT_F64;
+  else if (suffix_eq(suffix, suffix_len, "f128"))
+    *hint = NY_LIT_HINT_F128;
+  else
+    return false;
+
+  *hint_explicit = true;
+  *num_len = i - 1;
+  return true;
+}
+
+static bool parse_type_name(parser_t *p, char **out_name) {
+  parser_t save = *p;
+  size_t ptr_depth = 0;
+  while (parser_match(p, NY_T_STAR))
+    ptr_depth++;
+
+  if (p->cur.kind != NY_T_IDENT) {
+    *p = save;
+    return false;
+  }
+
+  size_t cap = 64;
+  size_t len = 0;
+  char *buf = malloc(cap);
+  if (!buf) {
+    fprintf(stderr, "oom\n");
+    exit(1);
+  }
+  memcpy(buf, p->cur.lexeme, p->cur.len);
+  len += p->cur.len;
+  parser_advance(p);
+
+  while (parser_match(p, NY_T_DOT)) {
+    if (p->cur.kind != NY_T_IDENT) {
+      free(buf);
+      *p = save;
+      return false;
+    }
+    if (len + 1 + p->cur.len + 1 > cap) {
+      cap = (len + 1 + p->cur.len + 1) * 2;
+      char *nb = realloc(buf, cap);
+      if (!nb) {
+        free(buf);
+        fprintf(stderr, "oom\n");
+        exit(1);
+      }
+      buf = nb;
+    }
+    buf[len++] = '.';
+    memcpy(buf + len, p->cur.lexeme, p->cur.len);
+    len += p->cur.len;
+    parser_advance(p);
+  }
+
+  if (p->cur.kind != NY_T_RPAREN) {
+    free(buf);
+    *p = save;
+    return false;
+  }
+
+  size_t total = ptr_depth + len;
+  char *out = arena_alloc(p->arena, total + 1);
+  for (size_t i = 0; i < ptr_depth; i++)
+    out[i] = '*';
+  memcpy(out + ptr_depth, buf, len);
+  out[total] = '\0';
+  free(buf);
+  *out_name = out;
+  return true;
+}
 
 static int precedence(token_kind kind) {
   switch (kind) {
@@ -132,17 +299,65 @@ static expr_t *parse_primary(parser_t *p) {
   case NY_T_NUMBER: {
     parser_advance(p);
     expr_t *lit = expr_new(p->arena, NY_E_LITERAL, tok);
-    bool is_hex = (tok.len > 2 && tok.lexeme[0] == '0' &&
-                   (tok.lexeme[1] == 'x' || tok.lexeme[1] == 'X'));
-    if (!is_hex &&
-        (memchr(tok.lexeme, '.', tok.len) || memchr(tok.lexeme, 'e', tok.len) ||
-         memchr(tok.lexeme, 'E', tok.len))) {
-      lit->as.literal.kind = NY_LIT_FLOAT;
-      lit->as.literal.as.f = strtod(tok.lexeme, NULL);
-    } else {
-      lit->as.literal.kind = NY_LIT_INT;
-      lit->as.literal.as.i = strtoll(tok.lexeme, NULL, 0);
+    size_t num_len = tok.len;
+    lit_type_hint_t hint = NY_LIT_HINT_NONE;
+    bool hint_explicit = false;
+    if (!parse_numeric_suffix(tok.lexeme, tok.len, &num_len, &hint,
+                              &hint_explicit)) {
+      parser_error(p, tok, "unknown numeric literal suffix", NULL);
     }
+
+    char *num_buf = arena_strndup(p->arena, tok.lexeme, num_len);
+    bool is_hex = (num_len > 2 && num_buf[0] == '0' &&
+                   (num_buf[1] == 'x' || num_buf[1] == 'X'));
+    bool is_float = !is_hex &&
+                    (memchr(num_buf, '.', num_len) ||
+                     memchr(num_buf, 'e', num_len) ||
+                     memchr(num_buf, 'E', num_len));
+
+    if (hint_is_float(hint) || (!hint_explicit && is_float)) {
+      if (is_hex) {
+        parser_error(p, tok,
+                     "hexadecimal float literals are not supported yet", NULL);
+        lit->as.literal.kind = NY_LIT_FLOAT;
+        lit->as.literal.as.f = 0.0;
+      } else {
+        errno = 0;
+        double val = strtod(num_buf, NULL);
+        if (errno == ERANGE)
+          parser_error(p, tok, "float literal out of range", NULL);
+        lit->as.literal.kind = NY_LIT_FLOAT;
+        lit->as.literal.as.f = val;
+      }
+      if (!hint_explicit)
+        hint = NY_LIT_HINT_F64;
+    } else {
+      if (is_float) {
+        parser_error(p, tok, "integer suffix used on float literal", NULL);
+      }
+      errno = 0;
+      unsigned long long uval = strtoull(num_buf, NULL, 0);
+      if (errno == ERANGE) {
+        parser_error(p, tok, "integer literal out of range", NULL);
+        uval = 0;
+      }
+      bool forced_u64 = false;
+      if (!hint_explicit && uval > (unsigned long long)INT64_MAX) {
+        // Treat large literals as u64 by default instead of erroring.
+        hint = NY_LIT_HINT_U64;
+        forced_u64 = true;
+      }
+      lit->as.literal.kind = NY_LIT_INT;
+      lit->as.literal.as.i = (int64_t)uval;
+      if (!hint_explicit && !forced_u64)
+        hint = infer_int_hint((int64_t)uval);
+      if (hint_explicit && !check_int_range(p, tok, (uint64_t)uval, hint)) {
+        // Keep value but hint is still recorded for diagnostics.
+      }
+    }
+
+    lit->as.literal.hint = hint;
+    lit->as.literal.hint_explicit = hint_explicit;
     return lit;
   }
   case NY_T_TRUE:
@@ -159,6 +374,24 @@ static expr_t *parse_primary(parser_t *p) {
     lit->as.literal.kind = NY_LIT_INT;
     lit->as.literal.as.i = 0;
     return lit;
+  }
+  case NY_T_SIZEOF: {
+    parser_advance(p);
+    expr_t *e = expr_new(p->arena, NY_E_SIZEOF, tok);
+    parser_expect(p, NY_T_LPAREN, "'('", NULL);
+    char *type_name = NULL;
+    if (parse_type_name(p, &type_name)) {
+      e->as.szof.is_type = true;
+      e->as.szof.type_name = type_name;
+      e->as.szof.target = NULL;
+      parser_expect(p, NY_T_RPAREN, "')'", NULL);
+      return e;
+    }
+    e->as.szof.is_type = false;
+    e->as.szof.type_name = NULL;
+    e->as.szof.target = p_parse_expr(p, 0);
+    parser_expect(p, NY_T_RPAREN, "')'", NULL);
+    return e;
   }
   case NY_T_STRING: {
     parser_advance(p);
@@ -366,7 +599,42 @@ static expr_t *parse_primary(parser_t *p) {
 static expr_t *parse_postfix(parser_t *p) {
   expr_t *expr = parse_primary(p);
   for (;;) {
-    if (p->cur.kind == NY_T_LPAREN) {
+    if (p->cur.kind == NY_T_QUESTION) {
+      token_t tok = p->cur;
+      const char *s = p->lex.src + p->lex.pos;
+      int depth = 0;
+      bool found_colon = false;
+      while (*s && *s != '\n' && *s != ';') {
+        if (*s == '(' || *s == '[' || *s == '{')
+          depth++;
+        else if (*s == ')' || *s == ']' || *s == '}')
+          depth--;
+        else if (*s == ':' && depth == 0) {
+          found_colon = true;
+          break;
+        }
+        s++;
+      }
+
+      if (found_colon) {
+        parser_advance(p);
+        expr_t *true_expr = p_parse_expr(p, 0);
+        parser_expect(p, NY_T_COLON, ":", "ternary operator requires ':'");
+        expr_t *false_expr = p_parse_expr(p, 0);
+        expr_t *ternary = expr_new(p->arena, NY_E_TERNARY, tok);
+        ternary->as.ternary.cond = expr;
+        ternary->as.ternary.true_expr = true_expr;
+        ternary->as.ternary.false_expr = false_expr;
+        expr = ternary;
+        continue;
+      } else {
+        parser_advance(p);
+        expr_t *tr = expr_new(p->arena, NY_E_TRY, tok);
+        tr->as.unary.right = expr;
+        expr = tr;
+        continue;
+      }
+    } else if (p->cur.kind == NY_T_LPAREN) {
       parser_advance(p);
       expr_t *call = expr_new(p->arena, NY_E_CALL, p->cur);
       call->as.call.callee = expr;
@@ -395,11 +663,11 @@ static expr_t *parse_postfix(parser_t *p) {
       token_t id_tok = p->cur;
       char *name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
       parser_advance(p);
-      expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
-      mc->as.memcall.target = expr;
-      mc->as.memcall.name = name;
       if (p->cur.kind == NY_T_LPAREN) {
         parser_advance(p);
+        expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
+        mc->as.memcall.target = expr;
+        mc->as.memcall.name = name;
         while (p->cur.kind != NY_T_RPAREN) {
           call_arg_t arg = {0};
           if (p->cur.kind == NY_T_IDENT && parser_peek(p).kind == NY_T_ASSIGN) {
@@ -415,8 +683,13 @@ static expr_t *parse_postfix(parser_t *p) {
             break;
         }
         parser_expect(p, NY_T_RPAREN, NULL, NULL);
+        expr = mc;
+      } else {
+        expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);
+        m->as.member.target = expr;
+        m->as.member.name = name;
+        expr = m;
       }
-      expr = mc;
     } else if (p->cur.kind == NY_T_LBRACK) {
       parser_advance(p);
       expr_t *idx = expr_new(p->arena, NY_E_INDEX, p->cur);
@@ -477,19 +750,6 @@ static expr_t *parse_unary(parser_t *p) {
 expr_t *p_parse_expr(parser_t *p, int prec) {
   expr_t *left = parse_unary(p);
   while (true) {
-    if (prec < 1 && p->cur.kind == NY_T_QUESTION) {
-      token_t tok = p->cur;
-      parser_advance(p);
-      expr_t *true_expr = p_parse_expr(p, 0);
-      parser_expect(p, NY_T_COLON, ":'", "ternary operator requires ':'");
-      expr_t *false_expr = p_parse_expr(p, 0);
-      expr_t *ternary = expr_new(p->arena, NY_E_TERNARY, tok);
-      ternary->as.ternary.cond = left;
-      ternary->as.ternary.true_expr = true_expr;
-      ternary->as.ternary.false_expr = false_expr;
-      left = ternary;
-      continue;
-    }
     int pcur = precedence(p->cur.kind);
     if (pcur < prec || pcur == 0)
       break;

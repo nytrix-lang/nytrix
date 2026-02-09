@@ -1,11 +1,11 @@
 ;; Keywords: util ast
 ;; Util Ast module.
 
-use std.core *
-use std.str.json *
 module std.util.ast (
    parse_ast
 )
+use std.core *
+use std.str.json *
 
 fn parse_ast(source){
    "Parses Nytrix source code and returns the AST as a nested structure (list of dicts)."

@@ -1,12 +1,12 @@
 ;; Keywords: math nt
 ;; Math Nt module.
 
-use std.math *
-use std.core *
-use std.core.reflect *
 module std.math.nt (
    egcd, modinv, pow_mod, is_prime, next_prime
 )
+use std.math *
+use std.core *
+use std.core.reflect *
 
 fn egcd(a, b){
    "Extended Euclidean Algorithm. Returns [g, x, y] such that ax + by = g = gcd(a, b)."

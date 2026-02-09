@@ -1,14 +1,13 @@
 ;; Keywords: core dict
 ;; Core Dict module.
 
+module std.core.dict (
+   dict, dict_get, dict_set, dict_items, dict_keys, dict_values
+)
 use std.core *
 use std.core.error *
 use std.str *
 use std.str.io *
-
-module std.core.dict (
-   dict, dict_get, dict_set, dict_items, dict_keys, dict_values
-)
 
 fn _dict_pow2(n){
    "Internal: rounds `n` up to the next power-of-two."

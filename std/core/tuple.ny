@@ -1,10 +1,10 @@
 ;; Keywords: core tuple
 ;; Core Tuple module.
 
-use std.core *
 module std.core.tuple (
    tuple
 )
+use std.core *
 
 fn tuple(xs){
    "Create a new tuple from a list of elements. Tuples are immutable versions of lists."

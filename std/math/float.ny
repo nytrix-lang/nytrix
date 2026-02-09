@@ -1,11 +1,11 @@
 ;; Keywords: math float
 ;; Math Float module.
 
-use std.core *
 module std.math.float (
    _box, float, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil,
    round, abs, nan, inf, is_nan, is_inf
 )
+use std.core *
 
 fn _box(bits){
    "Internal: box raw float bits into a Nytrix float object."

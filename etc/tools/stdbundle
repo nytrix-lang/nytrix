@@ -10,7 +10,7 @@ import re
 def bundle_std():
     def file_priority(f):
         path_s = str(f)
-        if "core/primitives.ny" in path_s: return 0
+        if "core/mod.ny" in path_s: return 0
         if "os/sys.ny" in path_s: return 1
         if "str/mod.ny" in path_s: return 2
         if "str/io.ny" in path_s: return 3
@@ -19,7 +19,6 @@ def bundle_std():
         if "core/list.ny" in path_s: return 6
         if "core/dict.ny" in path_s: return 7
         if "core/set.ny" in path_s: return 8
-        if "core/mod.ny" in path_s: return 9
         if f.name == "mod.ny": return 20
         return 30
     

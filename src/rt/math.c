@@ -54,6 +54,22 @@ int64_t __flt_unbox_val(int64_t v) {
   return 0;
 }
 
+int64_t __flt_unbox_val32(int64_t v) {
+  double d = 0;
+  if (v & 1) {
+    d = (double)(v >> 1);
+  } else if (is_ptr(v)) {
+    int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+    if (tag == TAG_FLOAT) {
+      memcpy(&d, (void *)(uintptr_t)v, 8);
+    }
+  }
+  float f = (float)d;
+  uint32_t b;
+  memcpy(&b, &f, 4);
+  return (int64_t)b << 1 | 1;
+}
+
 int64_t __flt_from_int(int64_t v) {
   if (is_int(v)) {
     double d = (double)(v >> 1);
@@ -244,6 +260,7 @@ int64_t __xor(int64_t a, int64_t b) {
                    1);
 }
 int64_t __shl(int64_t a, int64_t b) {
+  // printf("DEBUG: __shl(%ld, %ld)\n", a, b);
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a)
                      << (uint64_t)(b & 1 ? b >> 1 : b)))
                        << 1 |

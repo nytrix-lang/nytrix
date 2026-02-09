@@ -1,16 +1,16 @@
 ;; Keywords: net socket
 ;; Net Socket module.
 
+module std.net.socket (
+   htons, ipv4_parse, gethostbyname, socket_connect, socket_bind, socket_accept,
+   read_socket, write_socket, close_socket
+)
 use std.core *
 use std.str *
 use std.core.reflect *
 use std.os.ffi *
 use std.core *
 use std.os.sys *
-module std.net.socket (
-   htons, ipv4_parse, gethostbyname, socket_connect, socket_bind, socket_accept,
-   read_socket, write_socket, close_socket
-)
 
 fn htons(x){
    "Convert a 16-bit integer from host byte order to network byte order (big-endian)."

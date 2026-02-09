@@ -1,10 +1,10 @@
 ;; Keywords: core iter
 ;; Iter helpers.
 
-use std.core *
 module std.core.iter (
    range
 )
+use std.core *
 
 fn range(stop, start=0, step=1){
    "Returns a list of integers from start to stop (exclusive)."

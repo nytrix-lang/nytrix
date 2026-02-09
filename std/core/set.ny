@@ -1,14 +1,13 @@
 ;; Keywords: core set
 ;; Core Set module.
 
+module std.core.set (
+   set, set_add, set_contains
+)
 use std.core *
 use std.core.error *
 use std.str *
 use std.str.io *
-
-module std.core.set (
-   set, set_add, set_contains
-)
 
 fn _set_pow2(n){
    "Internal: rounds `n` up to the next power-of-two."

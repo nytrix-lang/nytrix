@@ -1,14 +1,14 @@
 ;; Keywords: os
 ;; Os module.
 
-use std.core *
-use std.str *
-use std.os.sys *
-use std.str.io *
 module std.os (
    pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append,
    file_remove, os, arch
 )
+use std.core *
+use std.str *
+use std.os.sys *
+use std.str.io *
 
 fn os() {
    "Returns the name of the operating system (e.g., 'linux', 'macos', 'windows')."

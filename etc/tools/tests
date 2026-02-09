@@ -2,216 +2,153 @@
 """
 Nytrix Test Orchestrator
 """
-import os
-import sys
-import time
-import subprocess
-import glob
-import re
-import argparse
+import os, sys, time, glob, re, argparse, pty, select, subprocess, signal, hashlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-RESET  = "\033[0m"
-GRAY   = "\033[90m"
-RED    = "\033[31m"
-GREEN  = "\033[32m"
-CYAN   = "\033[36m"
-YELLOW = "\033[33m"
-BOLD   = "\033[1m"
+# Colors & Formatting
+RESET, GRAY, RED, GREEN, CYAN, YELLOW, BOLD, MAGENTA = "\033[0m", "\033[90m", "\033[31m", "\033[32m", "\033[36m", "\033[33m", "\033[1m", "\033[35m"
 
-def parse_time_ns(output):
-	match = re.search(r"Time \(ns\):\s*(\d+)", output)
-	return int(match.group(1)) if match else None
+def strip_ansi(s): return re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', s)
 
-def shorten_path(path):
-	display = path
-	if display.startswith("etc/tests/"):
-		display = display[len("etc/tests/"):]
-	if display.startswith("test/"):
-		display = display[5:]
-	if len(display) > 50:
-		parts = display.split('/')
-		if len(parts) > 2:
-			display = f"{parts[0]}/.../{parts[-1]}"
-	return display
+def find_ny_bin(preferred="build/ny"):
+    for p in (preferred + "_debug", preferred, "./build/ny_debug", "./build/ny", "ny"):
+        if os.path.exists(p): return os.path.abspath(p)
+    raise FileNotFoundError("Nytrix binary not found")
 
-def run_process(cmd, input_str=None, cwd=None, env=None):
-	start = time.time()
-	run_env = env or os.environ.copy()
-	if "NY_TEST_PRELOAD" in run_env:
-		run_env["LD_PRELOAD"] = run_env["NY_TEST_PRELOAD"]
+def run_proc(cmd, input_str=None, cwd=None, env=None, timeout=30):
+    start = time.time()
+    run_env = env or os.environ.copy()
+    if "NY_TEST_PRELOAD" in run_env: run_env["LD_PRELOAD"] = run_env["NY_TEST_PRELOAD"]
+    try:
+        res = subprocess.run(cmd, input=input_str, capture_output=True, text=True, timeout=timeout, env=run_env, cwd=cwd)
+        return {"passed": res.returncode == 0, "duration": time.time() - start, "stdout": res.stdout, "stderr": res.stderr, "code": res.returncode}
+    except Exception as e:
+        return {"passed": False, "duration": 0, "error": str(e), "code": -1}
 
-	try:
-		result = subprocess.run(
-			cmd,
-			input=input_str,
-			capture_output=True,
-			text=True,
-			timeout=30,
-			env=run_env,
-			cwd=cwd
-		)
-		duration = time.time() - start
-		return {
-			"passed": result.returncode == 0,
-			"duration": duration,
-			"output": (result.stdout or "") + (result.stderr or "")
-		}
-	except Exception as e:
-		return {"passed": False, "duration": 0, "output": str(e)}
+class ReplSession:
+    def __init__(self, bin_path):
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            env = os.environ.copy()
+            env.update({"ASAN_OPTIONS": "detect_leaks=0", "TERM": "xterm-256color"})
+            os.execvpe(bin_path, [bin_path, "-i"], env)
+    def read_until(self, rx, timeout=5):
+        buf, end = "", time.time() + timeout
+        while time.time() < end:
+            if self.fd in select.select([self.fd], [], [], 0.1)[0]:
+                try:
+                    data = os.read(self.fd, 8192).decode(errors="ignore")
+                    if not data: break
+                    buf += data
+                except OSError: break
+                if re.search(rx, strip_ansi(buf)): return buf
+        raise TimeoutError(f"Timeout waiting for {rx}")
+    def send(self, s): os.write(self.fd, (s + "\n").encode())
+    def close(self):
+        for s in (signal.SIGTERM, signal.SIGKILL):
+            try: os.kill(self.pid, s); break
+            except OSError: pass
+        try: os.close(self.fd)
+        except: pass
 
-def run_test_pair(path, bin_path, do_repl, log_dir=None, suite_name=None):
-    extra_args = []
-    extra_env = None
-    aot_res = None
-    aot_res = run_process([bin_path, path] + extra_args, env=extra_env)
-    repl_res = None
+def shorten(path):
+    p = path.replace("etc/tests/", "").replace("test/", "")
+    return (p[:20] + "..." + p[-27:]) if len(p) > 50 else p
+
+def run_test(path, bin_path, do_repl):
+    # 1. JIT/AOT Run
+    aot = run_proc([bin_path, path])
+    # 2. REPL Run
+    repl = None
     if do_repl:
-        try:
-            with open(path, "r") as f:
-                script = f.read()
-            test_dir = os.path.dirname(os.path.abspath(path))
-            repl_res = run_process([bin_path, "-i"], input_str=script, cwd=test_dir, env=extra_env)
-        except Exception as e:
-            repl_res = {"passed": False, "duration": 0, "output": str(e)}
-    if log_dir:
-        rel_path = path[len("etc/tests/"):] if path.startswith("etc/tests/") else path
-        test_name = rel_path.replace(".ny", "").replace("/", "-")
-        log_path = os.path.join(log_dir, f"{test_name}.log")
-        with open(log_path, "w") as f:
-            f.write(f"---\nAOT Output for {path} ---\n")
-            f.write(aot_res["output"])
-            if repl_res:
-                f.write(f"\n---\nREPL Output for {path} ---\n")
-                f.write(repl_res["output"])
-    return path, aot_res, repl_res
+        repl = run_proc([bin_path, "-i"], input_str=open(path).read(), cwd=os.path.dirname(path))
+    # 3. ELF Compile & Run
+    elf_fn = f"/tmp/ny_bin_{hashlib.md5(path.encode()).hexdigest()[:8]}"
+    if os.path.exists(elf_fn): os.remove(elf_fn)
+    comp = run_proc([bin_path, path, "-o", elf_fn])
+    if comp["passed"] and os.path.exists(elf_fn):
+        run = run_proc([elf_fn], cwd=os.path.dirname(path))
+        os.remove(elf_fn)
+        elf = {"passed": run["passed"], "duration": comp["duration"] + run["duration"], "stdout": run.get("stdout",""), "stderr": run.get("stderr",""), "code": run.get("code")}
+    else:
+        elf = {"passed": False, "duration": comp["duration"], "stdout": comp.get("stdout",""), "stderr": comp.get("stderr",""), "code": comp.get("code")}
+        
+    return path, aot, repl, elf
 
-def print_result_line(path, aot_res, repl_res, idx, total):
-	percent = f"{int((idx / total) * 100):>3}%"
-	display = shorten_path(path)
-	aot_mark = f"{GREEN}✓{RESET}" if aot_res['passed'] else f"{RED}✗{RESET}"
-	if repl_res:
-		repl_mark = f"{GREEN}✓{RESET}" if repl_res['passed'] else f"{RED}✗{RESET}"
-		status = f"[{aot_mark}/{repl_mark}]"
-		aot_ms = int(aot_res['duration'] * 1000)
-		repl_ms = int(repl_res['duration'] * 1000)
-		times = f"{GRAY}{aot_ms:>4}:{repl_ms:>4} {RESET}"
-		diff_ms = int((repl_res['duration'] - aot_res['duration']) * 1000)
-		if abs(diff_ms) < 2:
-			delta = f"{GRAY}{'·':>5} {RESET}"
-		else:
-			color = GREEN if diff_ms > 0 else RED
-			sign = '+' if diff_ms > 0 else ' '
-			delta = f"{color}{sign}{abs(diff_ms):>4} {RESET}"
-	else:
-		status = f"[{aot_mark}/- ]"
-		aot_ms = int(aot_res['duration'] * 1000)
-		times = f"{GRAY}{aot_ms:>4}      {RESET}"
-		delta = f"{YELLOW} SKIP {RESET}"
-	print(f"{GRAY}{percent}{RESET} {status} {times} {delta} {display}")
-	aot_ok = aot_res['passed']
-	repl_ok = repl_res['passed'] if repl_res else True
-	if not aot_ok:
-		print(f"{RED}AOT failure for {path}:{RESET}\n{aot_res['output']}\n")
-	if not repl_ok:
-		print(f"{RED}REPL failure for {path}:{RESET}\n{repl_res['output']}\n")
-	return aot_ok and repl_ok
+def print_res(path, aot, repl, elf, idx, total):
+    m_aot = f"{GREEN}✓{RESET}" if aot["passed"] else f"{RED}✗{RESET}"
+    m_rep = f"{GREEN}✓{RESET}" if (not repl or repl["passed"]) else f"{RED}✗{RESET}"
+    m_elf = f"{GREEN}✓{RESET}" if elf["passed"] else f"{RED}✗{RESET}"
+    
+    dur = int(aot['duration']*1000)
+    status = f"[{m_aot}/{m_rep}/{m_elf}] {GRAY}{dur:>4}ms{RESET}"
+    print(f"{GRAY}{idx*100//total:>3}%{RESET} {status} {shorten(path)}")
+    
+    if not aot["passed"]: print(f"{RED}AOT FAIL{RESET} (code {aot.get('code','?')}) {path}: {aot.get('stdout','')}{aot.get('stderr','')}")
+    if repl and not repl["passed"]: print(f"{RED}REPL FAIL{RESET} (code {repl.get('code','?')}) {path}: {repl.get('stdout','')}{repl.get('stderr','')}")
+    if not elf["passed"]: print(f"{RED}ELF FAIL{RESET} (code {elf.get('code','?')}) {path}: {elf.get('stdout','')}{elf.get('stderr','')}")
+    
+    return aot["passed"] and (not repl or repl["passed"]) and elf["passed"]
 
-def run_suite(name, tests, bin_path, jobs, do_repl, log_dir=None):
-	width = 65
-	name_fmt = f" [ {CYAN}{name}{RESET}{GRAY} ] "
-	dash_count = (width - len(name) - 6) // 2
-	dashes = "-" * dash_count
-	print(f"{GRAY}{dashes}{name_fmt}{dashes}{RESET}")
-	results_data = []
-	passed_count = 0
-	total = len(tests)
-	futures = []
-	if jobs == 1:
-		for idx, path in enumerate(tests, 1):
-			_, aot, repl = run_test_pair(path, bin_path, do_repl, log_dir, name)
-			if print_result_line(path, aot, repl, idx, total):
-				passed_count += 1
-			results_data.append((path, aot['duration']))
-	else:
-		ex = ProcessPoolExecutor(max_workers=jobs)
-		try:
-			for path in tests:
-				futures.append(ex.submit(run_test_pair, path, bin_path, do_repl, log_dir, name))
-			completed = 0
-			for fut in as_completed(futures):
-				completed += 1
-				path, aot, repl = fut.result()
-				if print_result_line(path, aot, repl, completed, total):
-					passed_count += 1
-				results_data.append((path, aot['duration']))
-		except KeyboardInterrupt:
-			print(f"\n{RED}Interrupted{RESET}")
-			ex.shutdown(wait=False, cancel_futures=True)
-			sys.exit(1)
-		finally:
-			ex.shutdown(wait=False)
-	return passed_count, total, results_data
+def run_smoke(bin_path):
+    RX = r'ny(!)?\s*>'
+    repl = ReplSession(bin_path)
+    try:
+        def interact(cmd, expected_rx):
+            print(f"{CYAN}ny>{RESET} {cmd}")
+            repl.send(cmd)
+            res = ""
+            while True:
+                res += repl.read_until(RX)
+                if len(re.findall(RX, strip_ansi(res))) < 2: continue
+                break
+            
+            for l in strip_ansi(res).splitlines():
+                l = l.strip()
+                if not l or any(l.startswith(p) for p in ["ny>", "ny!>"]) or cmd in l: continue
+                print(f"  {GRAY}↳{RESET} {l}")
+
+        repl.read_until(RX)
+        interact("1 + 1", r'2')
+        interact("def x = 123", RX)
+        interact("x * 2", r'246')
+        interact("str_len('hello')", r'5')
+        interact("[1, 2, 3].len()", r'3')
+    finally: repl.close()
+    return True
 
 def main():
-	parser = argparse.ArgumentParser(description="Nytrix Unified Test Runner")
-	parser.add_argument("--bin", default="build/ny", help="Binary path")
-	parser.add_argument("--jobs", type=int, default=0, help="Parallel jobs")
-	parser.add_argument("--pattern", help="Test filter regex")
-	parser.add_argument("--log-dir", help="Directory to save test logs")
-	args = parser.parse_args()
-	if args.log_dir:
-		args.log_dir = os.path.abspath(args.log_dir)
-		os.makedirs(args.log_dir, exist_ok=True)
-	bin_path = os.path.abspath(args.bin)
-	debug_bin = bin_path + "_debug" if not bin_path.endswith("_debug") else bin_path
-	if not os.path.exists(bin_path):
-		if os.path.exists("build/ny"): bin_path = "build/ny"
-		elif os.path.exists("ny"): bin_path = "ny"
-		else:
-			print(f"{RED}Binary {args.bin} not found{RESET}")
-			sys.exit(1)
-	jobs = args.jobs or int(os.getenv("JOBS") or os.getenv("NY_JOBS") or os.cpu_count() or 1)
-	suites = [
-		("Bench", "etc/tests/bench/*.ny", bin_path, True),
-		("Runtime", "etc/tests/runtime/**/*.ny", debug_bin if os.path.exists(debug_bin) else bin_path, True),
-		("Std", "etc/tests/std/**/*.ny", debug_bin if os.path.exists(debug_bin) else bin_path, True),
-	]
-	total_passed = 0
-	total_count = 0
-	all_timings = []
-	start_time = time.time()
-	for name, pattern, binary, do_repl in suites:
-		files = glob.glob(pattern, recursive=True)
-		if args.pattern:
-			regex = re.compile(args.pattern)
-			files = [t for t in files if regex.search(t)]
-		files = sorted(files)
-		if not files: continue
-		passed, count, timings = run_suite(name, files, binary, jobs, do_repl, args.log_dir)
-		total_passed += passed
-		total_count += count
-		all_timings.extend(timings)
-	total_dur = int((time.time() - start_time) * 1000)
-	#print(f"{GRAY}-----------------------------------------------------------------{RESET}")
-	#print(f"{BOLD}Slowest Tests:{RESET}")
-	all_timings.sort(key=lambda x: x[1], reverse=True)
-	for path, dur in all_timings[:5]:
-		pass
-		#print(f" {RED}{dur*1000:>4.0f}ms{RESET} {shorten_path(path)}")
-	#print(f"{GRAY}-----------------------------------------------------------------{RESET}")
-	if total_passed == total_count:
-		color = GREEN
-	else:
-		color = RED
-	print(f"Total: {total_count} tests | {color}{total_passed} passed{RESET} | {RED}{total_count - total_passed} failed{RESET}")
-	print(f"Time:  {total_dur} ms ({jobs} threads)")
-	if total_passed != total_count:
-		sys.exit(1)
+    p = argparse.ArgumentParser(); p.add_argument("--bin", default="build/ny"); p.add_argument("--jobs", type=int, default=0); p.add_argument("--pattern"); p.add_argument("--no-smoke", action="store_true")
+    args = p.parse_args(); bin_path = find_ny_bin(args.bin)
+    dbin = bin_path + "_debug" if "_debug" not in bin_path and os.path.exists(bin_path + "_debug") else bin_path
+    jobs = args.jobs or os.cpu_count() or 1
+    
+    WIDTH = 65
+    suites = [("Bench", "etc/tests/bench/*.ny", bin_path, True), ("Runtime", "etc/tests/runtime/**/*.ny", dbin, True), ("Std", "etc/tests/std/**/*.ny", dbin, True)]
+    
+    total_passed, total_count, timings = 0, 0, []
+    start = time.time()
+    if not args.no_smoke and not args.pattern:
+        name = "Repl"
+        side = (WIDTH - len(name) - 6) // 2
+        print(f"{GRAY}{'-'*side} [ {CYAN}{name}{RESET}{GRAY} ] {'-'*(WIDTH - side - len(name) - 6)}{RESET}")
+        run_smoke(bin_path)
+
+    for name, pattern, b, repl_mode in suites:
+        files = sorted([f for f in glob.glob(pattern, recursive=True) if not args.pattern or re.search(args.pattern, f)])
+        if not files: continue
+        side = (WIDTH - len(name) - 6) // 2
+        print(f"{GRAY}{'-'*side} [ {CYAN}{name}{RESET}{GRAY} ] {'-'*(WIDTH - side - len(name) - 6)}{RESET}")
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            futs = [ex.submit(run_test, f, b, repl_mode) for f in files]
+            for i, fut in enumerate(as_completed(futs), 1):
+                path, aot, rep, elf = fut.result()
+                if print_res(path, aot, rep, elf, i, len(files)): total_passed += 1
+                total_count += 1; timings.append((path, aot["duration"]))
+    
+    print(f"{GRAY}{'-'*WIDTH}{RESET}\nTotal: {total_count} | {GREEN if total_passed==total_count else RED}{total_passed} passed{RESET} | {total_count-total_passed} failed in {int((time.time()-start)*1000)}ms")
+    if total_passed != total_count: sys.exit(1)
 
 if __name__ == "__main__":
-	try:
-		main()
-	except KeyboardInterrupt:
-		print(f"\n{RED}Interrupted{RESET}")
-		sys.exit(1)
+    try: main()
+    except KeyboardInterrupt: sys.exit(1)

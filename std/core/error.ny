@@ -1,11 +1,11 @@
 ;; Keywords: core error
 ;; Core Error module.
 
-use std.core *
-use std.core.reflect *
 module std.core.error (
    panic, assert, assert_eq
 )
+use std.core *
+use std.core.reflect *
 
 fn panic(msg){
    "Raises a panic: jumps to the nearest surrounding catch handler  if none, prints the message to stderr and exits."
@@ -24,15 +24,34 @@ fn assert_eq(a,b,msg="assert eq failed"){
    return 0
 }
 
-fn ok(v) { "Creates an Ok result." return __result_ok(v) }
-fn err(e) { "Creates an Err result." return __result_err(e) }
-fn is_ok(v) { "Checks if value is an Ok result." return __is_ok(v) }
-fn is_err(v) { "Checks if value is an Err result." return __is_err(v) }
-fn unwrap(v) { "Unwraps a Result or returns the value. Panics if Err."
+fn ok(v) {
+   "Creates an **Ok** result."
+   return __result_ok(v)
+}
+
+fn err(e) {
+   "Creates an **Err** result."
+   return __result_err(e)
+}
+
+fn is_ok(v) {
+   "Returns **true** if `v` is an **Ok** result."
+   return __is_ok(v)
+}
+
+fn is_err(v) {
+   "Returns **true** if `v` is an **Err** result."
+   return __is_err(v)
+}
+
+fn unwrap(v) {
+   "Unwraps a Result or returns the value. Panics if **Err**."
    if(is_err(v)){ panic("unwrapped an Err: " + __to_str(__unwrap(v))) }
    return __unwrap(v)
 }
-fn unwrap_or(v, default) { "Unwraps a Result or returns the default value."
+
+fn unwrap_or(v, default) {
+   "Unwraps a Result or returns the default value."
    if(is_ok(v)){ return __unwrap(v) }
    return default
 }

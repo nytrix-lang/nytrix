@@ -61,7 +61,7 @@ void add_builtins(codegen_t *cg) {
     return;
   }
 
-  LLVMTypeRef fn_types[32]; // Cache types by arity
+  LLVMTypeRef fn_types[32];
   for (int i = 0; i < 32; i++) {
     LLVMTypeRef *pts = alloca(sizeof(LLVMTypeRef) * (size_t)i);
     for (int j = 0; j < i; j++)
@@ -72,7 +72,7 @@ void add_builtins(codegen_t *cg) {
               i);
   }
 
-#define RT_DEF(name, p, args, sig, doc)                                        \
+#define RT_DEF(name, implementation, args, sig, doc)                           \
   do {                                                                         \
     if (cg->comptime && !builtin_allowed_comptime(name))                       \
       break;                                                                   \
@@ -84,11 +84,12 @@ void add_builtins(codegen_t *cg) {
     } else {                                                                   \
       ty = fn_types[args];                                                     \
     }                                                                          \
-    LLVMValueRef f = LLVMGetNamedFunction(cg->module, name);                   \
+    const char *impl_name = #implementation;                                   \
+    LLVMValueRef f = LLVMGetNamedFunction(cg->module, impl_name);              \
     if (!f)                                                                    \
-      f = LLVMAddFunction(cg->module, name, ty);                               \
-    fun_sig sig_obj = {ny_strdup(name), ty,    f,    NULL, args,               \
-                       false,           false, NULL, NULL};                    \
+      f = LLVMAddFunction(cg->module, impl_name, ty);                          \
+    fun_sig sig_obj = {ny_strdup(name), ty,    f,    NULL, (int)args,          \
+                       false,           false, NULL, NULL, false};             \
     vec_push(&cg->fun_sigs, sig_obj);                                          \
   } while (0);
 
@@ -96,7 +97,7 @@ void add_builtins(codegen_t *cg) {
   do {                                                                         \
     LLVMValueRef g = LLVMAddGlobal(cg->module, cg->type_i64, name);            \
     LLVMSetLinkage(g, LLVMExternalLinkage);                                    \
-    binding b = {ny_strdup(name), g, NULL, false, false};                      \
+    binding b = {ny_strdup(name), g, NULL, false, false, false, NULL};         \
     vec_push(&cg->global_vars, b);                                             \
   } while (0);
 
@@ -104,6 +105,116 @@ void add_builtins(codegen_t *cg) {
 
 #undef RT_DEF
 #undef RT_GV
+}
+
+enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name) {
+  if (!name || !*name) {
+    return NULL;
+  }
+
+  const char *dot = strrchr(name, '.');
+
+  if (dot) {
+    // Fully qualified name: "EnumName.MemberName"
+    size_t enum_name_len = dot - name;
+    const char *member_name = dot + 1;
+
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      if (enum_def->name && strncmp(enum_def->name, name, enum_name_len) == 0 &&
+          enum_def->name[enum_name_len] == '\0') {
+        // Found the enum definition, now look for the member
+        for (size_t j = 0; j < enum_def->members.len; ++j) {
+          enum_member_def_t *member_def = &enum_def->members.data[j];
+          if (member_def->name && strcmp(member_def->name, member_name) == 0) {
+            return member_def;
+          }
+        }
+      }
+    }
+  } else {
+    // Unqualified name: "MemberName"
+    // Search all enums for a member with this name
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      for (size_t j = 0; j < enum_def->members.len; ++j) {
+        enum_member_def_t *member_def = &enum_def->members.data[j];
+        if (member_def->name && strcmp(member_def->name, name) == 0) {
+          return member_def;
+        }
+      }
+    }
+  }
+
+  return NULL;
+}
+
+enum_member_def_t *lookup_enum_member_owner(codegen_t *cg, const char *name,
+                                            enum_def_t **out_enum) {
+  if (out_enum)
+    *out_enum = NULL;
+  if (!name || !*name)
+    return NULL;
+
+  const char *dot = strrchr(name, '.');
+  if (dot) {
+    size_t enum_name_len = (size_t)(dot - name);
+    const char *member_name = dot + 1;
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      if (enum_def->name && strncmp(enum_def->name, name, enum_name_len) == 0 &&
+          enum_def->name[enum_name_len] == '\0') {
+        for (size_t j = 0; j < enum_def->members.len; ++j) {
+          enum_member_def_t *member_def = &enum_def->members.data[j];
+          if (member_def->name && strcmp(member_def->name, member_name) == 0) {
+            if (out_enum)
+              *out_enum = enum_def;
+            return member_def;
+          }
+        }
+      }
+    }
+    return NULL;
+  }
+
+  enum_member_def_t *found = NULL;
+  enum_def_t *owner = NULL;
+  int hits = 0;
+  for (size_t i = 0; i < cg->enums.len; ++i) {
+    enum_def_t *enum_def = cg->enums.data[i];
+    for (size_t j = 0; j < enum_def->members.len; ++j) {
+      enum_member_def_t *member_def = &enum_def->members.data[j];
+      if (member_def->name && strcmp(member_def->name, name) == 0) {
+        hits++;
+        found = member_def;
+        owner = enum_def;
+      }
+    }
+  }
+  if (hits == 1 && out_enum)
+    *out_enum = owner;
+  return (hits == 1) ? found : NULL;
+}
+
+char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
+  if (!e)
+    return NULL;
+  if (e->kind == NY_E_IDENT) {
+    const char *resolved_alias = resolve_import_alias(cg, e->as.ident.name);
+    if (resolved_alias)
+      return arena_strndup(a, resolved_alias, strlen(resolved_alias));
+    return arena_strndup(a, e->as.ident.name, strlen(e->as.ident.name));
+  }
+  if (e->kind == NY_E_MEMBER) {
+    char *target_name = codegen_full_name(cg, e->as.member.target, a);
+    if (!target_name)
+      return NULL;
+    size_t len = strlen(target_name) + 1 + strlen(e->as.member.name);
+    char *full_name = arena_alloc(a, len + 1);
+    snprintf(full_name, len + 1, "%s.%s", target_name, e->as.member.name);
+    return full_name;
+  }
+  return NULL;
 }
 
 fun_sig *lookup_fun(codegen_t *cg, const char *name) {
@@ -275,7 +386,8 @@ end:;
   return res;
 }
 
-static bool module_is_used(const codegen_t *cg, const char *mod, size_t mod_len) {
+static bool module_is_used(const codegen_t *cg, const char *mod,
+                           size_t mod_len) {
   bool user_only = !cg->implicit_prelude &&
                    (!cg->current_module_name ||
                     (strncmp(cg->current_module_name, "std.", 4) != 0 &&
@@ -302,8 +414,8 @@ static int typo_distance_if_relevant(const char *want, const char *cand) {
   return ny_levenshtein(want, cand);
 }
 
-static void maybe_add_suggestion(const char **s1, int *d1, const char **s2, int *d2,
-                                 const char *cand, int dist) {
+static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
+                                 int *d2, const char *cand, int dist) {
   if (dist >= 3 || !cand)
     return;
   if (*s1 && strcmp(*s1, cand) == 0)
@@ -339,7 +451,8 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     if (strcasecmp(name, cg->fun_sigs.data[i].name) == 0 ||
         (strrchr(cg->fun_sigs.data[i].name, '.') &&
          strcasecmp(name, strrchr(cg->fun_sigs.data[i].name, '.') + 1) == 0)) {
-      ny_diag_hint("did you mean '%s'? (case mismatch)", cg->fun_sigs.data[i].name);
+      ny_diag_hint("did you mean '%s'? (case mismatch)",
+                   cg->fun_sigs.data[i].name);
       ny_diag_fix("use the exact spelling '%s'", cg->fun_sigs.data[i].name);
       return;
     }
@@ -363,7 +476,9 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
   for (int i = 0; common[i].sym; i++) {
     if (strcmp(name, common[i].sym) == 0) {
       ny_diag_hint("%s", common[i].hint);
-      ny_diag_fix("import the suggested module or replace '%s' with the Nytrix equivalent", name);
+      ny_diag_fix("import the suggested module or replace '%s' with the Nytrix "
+                  "equivalent",
+                  name);
       return;
     }
   }
@@ -379,8 +494,8 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
       if (module_is_used(cg, cand, mod_len))
         continue;
       ny_diag_hint("'%s' exists in module '%.*s'", name, (int)mod_len, cand);
-      ny_diag_hint("add 'use %.*s;' or call '%s' explicitly", (int)mod_len, cand,
-                   cand);
+      ny_diag_hint("add 'use %.*s;' or call '%s' explicitly", (int)mod_len,
+                   cand, cand);
       ny_diag_fix("add at file top: use %.*s;", (int)mod_len, cand);
       return;
     }
@@ -393,7 +508,8 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
       if (module_is_used(cg, cand, mod_len))
         continue;
       ny_diag_hint("'%s' exists in module '%.*s'", name, (int)mod_len, cand);
-      ny_diag_hint("add 'use %.*s;' or reference '%s'", (int)mod_len, cand, cand);
+      ny_diag_hint("add 'use %.*s;' or reference '%s'", (int)mod_len, cand,
+                   cand);
       ny_diag_fix("add at file top: use %.*s;", (int)mod_len, cand);
       return;
     }
@@ -441,7 +557,8 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     ny_diag_hint("use strings for characters");
     ny_diag_fix("replace 'char' with a single-character string, e.g. \"a\"");
   } else if (strchr(name, '.') == NULL) {
-    ny_diag_fix("if '%s' is from stdlib, add 'use std.<module>;' at file top", name);
+    ny_diag_fix("if '%s' is from stdlib, add 'use std.<module>;' at file top",
+                name);
   }
 }
 
@@ -475,13 +592,13 @@ binding *lookup_global(codegen_t *cg, const char *name) {
     return NULL;
 
   // 1. Precise name match (local or unqualified global)
-    for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
-      if (strcmp(cg->global_vars.data[i].name, name) == 0) {
-        if (ny_block_implicit_std_symbol(cg, name, cg->global_vars.data[i].name))
-          continue;
-        cg->global_vars.data[i].is_used = true;
-        return &cg->global_vars.data[i];
-      }
+  for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
+    if (strcmp(cg->global_vars.data[i].name, name) == 0) {
+      if (ny_block_implicit_std_symbol(cg, name, cg->global_vars.data[i].name))
+        continue;
+      cg->global_vars.data[i].is_used = true;
+      return &cg->global_vars.data[i];
+    }
   }
 
   // 2. Namespaced lookup if name is not qualified
@@ -598,6 +715,13 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc) {
       }
     }
   }
+  if (cg->current_module_name && name && strchr(name, '.') == NULL) {
+    char scoped[256];
+    snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name, name);
+    fun_sig *scoped_res = resolve_overload(cg, scoped, argc);
+    if (scoped_res)
+      return scoped_res;
+  }
   if (strchr(name, '.') == NULL) {
     const char *alias_full = resolve_import_alias(cg, name);
     if (alias_full) {
@@ -629,7 +753,35 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc) {
     }
   }
   if (cg->implicit_prelude && !best && strchr(name, '.') == NULL) {
-    const char *fallbacks[] = {"std.core", "std.str.io", NULL};
+    const char *fallbacks[] = {"std.core",
+                               "std.core.reflect",
+                               "std.core.primitives",
+                               "std.core.error",
+                               "std.core.mem",
+                               "std.core.list",
+                               "std.core.dict",
+                               "std.core.set",
+                               "std.core.sort",
+                               "std.str",
+                               "std.str.io",
+                               "std.str.path",
+                               "std.str.fmt",
+                               "std.math",
+                               "std.math.bigint",
+                               "std.math.float",
+                               "std.math.random",
+                               "std.os",
+                               "std.os.fs",
+                               "std.os.process",
+                               "std.os.time",
+                               "std.os.ffi",
+                               "std.os.args",
+                               "std.net",
+                               "std.net.socket",
+                               "std.net.http",
+                               "std.util",
+                               "std.util.inspect",
+                               NULL};
     for (int j = 0; fallbacks[j]; ++j) {
       char buf[256];
       snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
@@ -665,18 +817,20 @@ static binding *scope_lookup_no_mark(scope *scopes, size_t depth,
 }
 
 void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
-          stmt_t *stmt, bool is_mut) {
+          stmt_t *stmt, bool is_mut, const char *type_name) {
   // Check for redefinition in current scope
   for (size_t i = 0; i < scopes[depth].vars.len; i++) {
     if (strcmp(scopes[depth].vars.data[i].name, name) == 0) {
       binding *prev = &scopes[depth].vars.data[i];
       if (stmt) {
-        ny_diag_error(stmt->tok, "redefinition of '%s' in the same scope", name);
+        ny_diag_error(stmt->tok, "redefinition of '%s' in the same scope",
+                      name);
         if (prev->stmt_t)
-          ny_diag_note_tok(prev->stmt_t->tok, "previous definition of '%s' is here",
-                           name);
+          ny_diag_note_tok(prev->stmt_t->tok,
+                           "previous definition of '%s' is here", name);
       } else {
-        ny_diag_error((token_t){0}, "redefinition of '%s' in argument list", name);
+        ny_diag_error((token_t){0}, "redefinition of '%s' in argument list",
+                      name);
       }
     }
   }
@@ -684,15 +838,17 @@ void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
   // Check for shadowing (only if depth > 0 to search parent scopes)
   if (depth > 0) {
     binding *shadow = scope_lookup_no_mark(scopes, depth - 1, name);
-    if (shadow && stmt && ny_diag_should_emit("shadow_local", stmt->tok, name)) {
+    if (shadow && stmt &&
+        ny_diag_should_emit("shadow_local", stmt->tok, name)) {
       ny_diag_warning(stmt->tok, "declaration of '%s' shadows a previous local",
                       name);
       if (shadow->stmt_t)
-        ny_diag_note_tok(shadow->stmt_t->tok, "previous '%s' declared here", name);
+        ny_diag_note_tok(shadow->stmt_t->tok, "previous '%s' declared here",
+                         name);
     }
   }
 
-  binding b = {name, v, stmt, is_mut, false};
+  binding b = {name, v, stmt, is_mut, false, false, type_name};
   vec_push(&scopes[depth].vars, b);
 }
 

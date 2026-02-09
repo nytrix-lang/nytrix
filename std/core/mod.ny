@@ -1,21 +1,21 @@
 ;; Keywords: core
 ;; Core module.
 
-use std.core.primitives *
-use std.core.reflect *
-use std.core.reflect as core_ref
-use std.core.set as core_set
 module std.core (
    bool, init_str, load8, load64, store8, store64, load16, load32, store16, store32, ptr_add, ptr_sub,
-   malloc, free, realloc, list, is_ptr, is_int, is_nytrix_obj, is_list, is_dict,
+   malloc, free, realloc, zalloc, list, is_ptr, is_int, is_nytrix_obj, is_list, is_dict,
    is_set, is_tuple, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg,
-   get_kwarg_key, get_kwarg_val, list_len, list_clone, load_item, store_item, get,
+   get_kwarg_key, get_kwarg_val, len, list_clone, load_item, store_item, get,
    slice, set_idx, append, pop, list_clear, extend, sort, to_str, typeof,
    set, set_add, set_contains,
    add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot,
    eq, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno,
    globals, set_globals
 )
+use std.core.primitives *
+use std.core.reflect *
+use std.core.reflect as core_ref
+use std.core.set as core_set
 
 ;;; Memory Operations
 
@@ -98,6 +98,11 @@ fn realloc(p, newsz){
   __realloc(p, newsz)
 }
 
+fn zalloc(n){
+  "Allocates `n` bytes on the heap and zero-initializes them. Currently aliases malloc."
+  malloc(n)
+}
+
 ;;; List Operations
 
 ;; List header: [TAG(8) | LEN(8) | CAP(8) | ...items]
@@ -130,6 +135,26 @@ fn set_contains(s, key){
 fn eq(a, b){
   "Structural equality (delegates to std.core.reflect.eq)."
   core_ref.eq(a, b)
+}
+
+fn add(a, b){
+  "Generic addition (delegates to std.core.reflect.add)."
+  core_ref.add(a, b)
+}
+
+fn sub(a, b){
+  "Generic subtraction (delegates to std.core.reflect.sub)."
+  core_ref.sub(a, b)
+}
+
+fn mul(a, b){
+  "Generic multiplication (delegates to std.core.reflect.mul)."
+  core_ref.mul(a, b)
+}
+
+fn div(a, b){
+  "Generic division (delegates to std.core.reflect.div)."
+  core_ref.div(a, b)
 }
 
 
@@ -227,10 +252,10 @@ fn is_kwargs(x){
 
 fn __kwarg(k, v){
   "Create a keyword-argument wrapper object combining key `k` and value `v`."
-  def p = malloc(16) ; Tag at -8, Key(0), Val(8)
-  store64(p, 104, -8)   ; Tag 104 for Kwarg (stored as 209)
-  store64(p, k, 0) ; Key at 0
-  store64(p, v, 8) ; Val at 8
+  def p = malloc(16)  ; Tag at -8, Key(0), Val(8)
+  store64(p, 104, -8) ; Tag 104 for Kwarg (stored as 209)
+  store64(p, k, 0)    ; Key at 0
+  store64(p, v, 8)    ; Val at 8
   p
 }
 
@@ -249,23 +274,16 @@ fn get_kwarg_val(x){
   load64(x, 8)
 }
 
-fn list_len(lst){
-  "Returns the number of elements in a list, dictionary, set, or tuple. Returns `0` for other types."
-  if(!is_ptr(lst)){ return 0 }
-  else {
-    def tag = load64(lst, -8)
-    if(eq(tag, 100) || eq(tag, 101) || eq(tag, 102) || eq(tag, 103)){
-       return load64(lst, 0)
-    }
-    return 0
-  }
+fn len(x){
+  "Returns the number of elements in a collection or length of a string/bytes. Returns `0` for other types."
+  core_ref.len(x)
 }
 
 fn list_clone(lst){
   "Creates a **shallow copy** of the list `lst`."
   if(eq(lst, 0)){ return 0 }
   if(eq(is_list(lst), false)){ return 0 }
-  def n = list_len(lst)
+  def n = len(lst)
   mut out = list(n)
   mut i = 0
   while(i < n){
@@ -292,7 +310,7 @@ fn store_item(lst, i, v){
 fn sort(lst){
   "In-place ascending sort for lists of numbers."
   if(!is_list(lst)){ return lst }
-  def n = list_len(lst)
+  def n = len(lst)
   mut i = 1
   while(i < n){
      def key = load64(lst, 16 + i * 8)

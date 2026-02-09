@@ -25,6 +25,165 @@ static int parse_runtime_call_arity(const char *name) {
   return arity;
 }
 
+static bool abi_type_is_tagged(const char *type_name) {
+  if (!type_name || !*type_name)
+    return true;
+  return strcmp(type_name, "int") == 0 || strcmp(type_name, "str") == 0 ||
+         strcmp(type_name, "bool") == 0 || strcmp(type_name, "Result") == 0;
+}
+
+static bool abi_type_is_ptr(const char *type_name) {
+  return type_name && type_name[0] == '*';
+}
+
+static bool abi_type_is_float(const char *type_name) {
+  return type_name && (strcmp(type_name, "f32") == 0 ||
+                       strcmp(type_name, "f64") == 0 ||
+                       strcmp(type_name, "f128") == 0);
+}
+
+static bool abi_type_is_signed_int(const char *type_name) {
+  return type_name && (strcmp(type_name, "i8") == 0 ||
+                       strcmp(type_name, "i16") == 0 ||
+                       strcmp(type_name, "i32") == 0 ||
+                       strcmp(type_name, "i64") == 0 ||
+                       strcmp(type_name, "i128") == 0 ||
+                       strcmp(type_name, "char") == 0);
+}
+
+static bool abi_type_is_unsigned_int(const char *type_name) {
+  return type_name && (strcmp(type_name, "u8") == 0 ||
+                       strcmp(type_name, "u16") == 0 ||
+                       strcmp(type_name, "u32") == 0 ||
+                       strcmp(type_name, "u64") == 0 ||
+                       strcmp(type_name, "u128") == 0);
+}
+
+static LLVMTypeRef abi_type_from_name(codegen_t *cg, const char *type_name) {
+  if (!type_name || !*type_name)
+    return cg->type_i64;
+  if (abi_type_is_ptr(type_name))
+    return cg->type_i8ptr;
+  if (abi_type_is_tagged(type_name))
+    return cg->type_i64;
+  if (strcmp(type_name, "void") == 0)
+    return LLVMVoidTypeInContext(cg->ctx);
+  if (strcmp(type_name, "char") == 0 || strcmp(type_name, "i8") == 0 ||
+      strcmp(type_name, "u8") == 0)
+    return cg->type_i8;
+  if (strcmp(type_name, "i16") == 0 || strcmp(type_name, "u16") == 0)
+    return cg->type_i16;
+  if (strcmp(type_name, "i32") == 0 || strcmp(type_name, "u32") == 0)
+    return cg->type_i32;
+  if (strcmp(type_name, "i64") == 0 || strcmp(type_name, "u64") == 0)
+    return cg->type_i64;
+  if (strcmp(type_name, "i128") == 0 || strcmp(type_name, "u128") == 0)
+    return cg->type_i128;
+  if (strcmp(type_name, "f32") == 0)
+    return cg->type_f32;
+  if (strcmp(type_name, "f64") == 0)
+    return cg->type_f64;
+  if (strcmp(type_name, "f128") == 0)
+    return cg->type_f128;
+  return cg->type_i64;
+}
+
+static LLVMValueRef abi_untag_int(codegen_t *cg, LLVMValueRef v,
+                                  bool is_signed) {
+  LLVMValueRef shift =
+      LLVMConstInt(cg->type_i64, 1, false);
+  if (is_signed) {
+    return LLVMBuildAShr(cg->builder, v, shift, "untag_i");
+  }
+  return LLVMBuildLShr(cg->builder, v, shift, "untag_u");
+}
+
+static LLVMValueRef abi_cast_int(codegen_t *cg, LLVMValueRef v,
+                                 LLVMTypeRef target, bool is_signed) {
+  if (LLVMTypeOf(v) == target)
+    return v;
+  unsigned src_w = LLVMGetIntTypeWidth(LLVMTypeOf(v));
+  unsigned dst_w = LLVMGetIntTypeWidth(target);
+  if (dst_w < src_w) {
+    return LLVMBuildTrunc(cg->builder, v, target, "int_trunc");
+  }
+  if (dst_w > src_w) {
+    return is_signed ? LLVMBuildSExt(cg->builder, v, target, "int_sext")
+                     : LLVMBuildZExt(cg->builder, v, target, "int_zext");
+  }
+  return LLVMBuildBitCast(cg->builder, v, target, "int_cast");
+}
+
+static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
+                                      const char *type_name) {
+  if (!type_name || abi_type_is_tagged(type_name))
+    return v;
+  if (abi_type_is_ptr(type_name)) {
+    return LLVMBuildIntToPtr(cg->builder, v, cg->type_i8ptr, "arg_ptr");
+  }
+  if (abi_type_is_float(type_name)) {
+    fun_sig *unbox = lookup_fun(cg, "__flt_unbox_val");
+    if (!unbox)
+      return v;
+    LLVMValueRef bits =
+        LLVMBuildCall2(cg->builder, unbox->type, unbox->value, &v, 1, "");
+    LLVMValueRef dbl = LLVMBuildBitCast(cg->builder, bits, cg->type_f64, "");
+    if (strcmp(type_name, "f64") == 0)
+      return dbl;
+    if (strcmp(type_name, "f32") == 0)
+      return LLVMBuildFPTrunc(cg->builder, dbl, cg->type_f32, "f32_arg");
+    if (strcmp(type_name, "f128") == 0)
+      return LLVMBuildFPExt(cg->builder, dbl, cg->type_f128, "f128_arg");
+    return dbl;
+  }
+  if (abi_type_is_signed_int(type_name)) {
+    LLVMValueRef raw = abi_untag_int(cg, v, true);
+    LLVMTypeRef target = abi_type_from_name(cg, type_name);
+    return abi_cast_int(cg, raw, target, true);
+  }
+  if (abi_type_is_unsigned_int(type_name)) {
+    LLVMValueRef raw = abi_untag_int(cg, v, false);
+    LLVMTypeRef target = abi_type_from_name(cg, type_name);
+    return abi_cast_int(cg, raw, target, false);
+  }
+  return v;
+}
+
+static LLVMValueRef box_extern_result(codegen_t *cg, LLVMValueRef v,
+                                      const char *type_name) {
+  if (!type_name || abi_type_is_tagged(type_name))
+    return v;
+  if (strcmp(type_name, "void") == 0)
+    return LLVMConstInt(cg->type_i64, 0, false);
+  if (abi_type_is_ptr(type_name)) {
+    return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, "ret_ptr");
+  }
+  if (abi_type_is_float(type_name)) {
+    fun_sig *box = lookup_fun(cg, "__flt_box_val");
+    if (!box)
+      return LLVMConstInt(cg->type_i64, 0, false);
+    LLVMValueRef dbl = v;
+    if (strcmp(type_name, "f32") == 0) {
+      dbl = LLVMBuildFPExt(cg->builder, v, cg->type_f64, "f32_to_f64");
+    } else if (strcmp(type_name, "f128") == 0) {
+      dbl = LLVMBuildFPTrunc(cg->builder, v, cg->type_f64, "f128_to_f64");
+    }
+    LLVMValueRef bits = LLVMBuildBitCast(cg->builder, dbl, cg->type_i64, "");
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1, "");
+  }
+  if (abi_type_is_signed_int(type_name) || abi_type_is_unsigned_int(type_name)) {
+    bool signed_int = abi_type_is_signed_int(type_name);
+    LLVMTypeRef target = cg->type_i64;
+    LLVMValueRef widened =
+        abi_cast_int(cg, v, target, signed_int);
+    LLVMValueRef sh = LLVMBuildShl(
+        cg->builder, widened, LLVMConstInt(cg->type_i64, 1, false), "");
+    return LLVMBuildOr(cg->builder, sh, LLVMConstInt(cg->type_i64, 1, false),
+                       "");
+  }
+  return v;
+}
+
 static void add_extern_sig(codegen_t *cg, const char *name, int arity) {
   if (!cg || !name || !*name || arity < 0)
     return;
@@ -76,13 +235,65 @@ static bool handle_extern_all_args(codegen_t *cg, ny_call_arg_list *args) {
       }
     }
     if (!name || arity < 0) {
-      ny_diag_error((token_t){0}, "extern_all expects list of names or [name, arity]");
+      ny_diag_error((token_t){0},
+                    "extern_all expects list of names or [name, arity]");
       cg->had_error = 1;
       return true;
     }
     add_extern_sig(cg, name, arity);
   }
   return true;
+}
+
+static bool layout_query_arg(expr_t *arg, const char **out) {
+  if (!arg || arg->kind != NY_E_LITERAL ||
+      arg->as.literal.kind != NY_LIT_STR)
+    return false;
+  *out = arg->as.literal.as.s.data;
+  return true;
+}
+
+static LLVMValueRef emit_layout_query(codegen_t *cg, token_t tok,
+                                      const char *layout_name,
+                                      const char *field_name,
+                                      bool want_align, bool want_offset) {
+  if (!layout_name) {
+    ny_diag_error(tok, "layout query expects a string literal name");
+    cg->had_error = 1;
+    return LLVMConstInt(cg->type_i64, 1, false);
+  }
+  layout_def_t *def = lookup_layout(cg, layout_name);
+  if (!def) {
+    ny_diag_error(tok, "unknown layout '%s'", layout_name);
+    cg->had_error = 1;
+    return LLVMConstInt(cg->type_i64, 1, false);
+  }
+  size_t val = def->size;
+  if (want_align)
+    val = def->align;
+  if (want_offset) {
+    if (!field_name) {
+      ny_diag_error(tok, "layout offset expects a field name");
+      cg->had_error = 1;
+      return LLVMConstInt(cg->type_i64, 1, false);
+    }
+    bool found = false;
+    for (size_t i = 0; i < def->fields.len; i++) {
+      layout_field_info_t *fi = &def->fields.data[i];
+      if (fi->name && strcmp(fi->name, field_name) == 0) {
+        val = fi->offset;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      ny_diag_error(tok, "unknown field '%s' in layout '%s'", field_name,
+                    layout_name);
+      cg->had_error = 1;
+      return LLVMConstInt(cg->type_i64, 1, false);
+    }
+  }
+  return LLVMConstInt(cg->type_i64, ((uint64_t)val << 1) | 1, false);
 }
 
 static void report_missing_runtime_call_helper(codegen_t *cg, token_t tok,
@@ -120,10 +331,25 @@ static void report_missing_runtime_call_helper(codegen_t *cg, token_t tok,
   cg->had_error = 1;
 }
 
-static bool check_call_arity_diag(codegen_t *cg, token_t tok, fun_sig *sig_found,
-                                  bool is_variadic, int sig_arity,
-                                  size_t call_argc, bool member_with_target) {
-  if (!is_variadic && call_argc != (size_t)sig_arity) {
+static bool check_call_arity_diag(codegen_t *cg, token_t tok,
+                                  fun_sig *sig_found, bool is_variadic,
+                                  int sig_arity, size_t call_argc,
+                                  bool member_with_target) {
+  size_t min_arity = (size_t)sig_arity;
+  if (!is_variadic && sig_found && sig_found->stmt_t &&
+      sig_found->stmt_t->kind == NY_S_FUNC) {
+    ny_param_list *params = &sig_found->stmt_t->as.fn.params;
+    if (params->len == (size_t)sig_arity) {
+      for (size_t i = 0; i < params->len; i++) {
+        if (params->data[i].def) {
+          min_arity = i;
+          break;
+        }
+      }
+    }
+  }
+  if (!is_variadic &&
+      (call_argc < min_arity || call_argc > (size_t)sig_arity)) {
     bool strict_err = ny_strict_error_enabled(cg, tok);
     bool is_stdlib = ny_is_stdlib_tok(tok);
     bool emit_diag;
@@ -146,13 +372,25 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok, fun_sig *sig_found
       else
         ny_diag_warning(tok, "arity mismatch for \033[1;37m'%s'\033[0m",
                         sig_found->name);
-      ny_diag_hint("expected %d arguments, got %zu", sig_arity, call_argc);
+      if (min_arity != (size_t)sig_arity) {
+        ny_diag_hint("expected %zu..%d arguments, got %zu", min_arity,
+                     sig_arity, call_argc);
+      } else {
+        ny_diag_hint("expected %d arguments, got %zu", sig_arity, call_argc);
+      }
       if (member_with_target)
-        ny_diag_hint("member calls pass the target object as the first argument");
+        ny_diag_hint(
+            "member calls pass the target object as the first argument");
       if (strict_err)
         ny_diag_hint("strict diagnostics are enabled; unset "
                      "NYTRIX_STRICT_DIAGNOSTICS to downgrade to warning");
-      ny_diag_fix("call '%s' with %d argument(s)", sig_found->name, sig_arity);
+      if (call_argc < min_arity) {
+        ny_diag_fix("call '%s' with at least %zu argument(s)",
+                    sig_found->name, min_arity);
+      } else {
+        ny_diag_fix("call '%s' with %d argument(s)", sig_found->name,
+                    sig_arity);
+      }
     }
     if (strict_err) {
       cg->had_error = 1;
@@ -161,7 +399,8 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok, fun_sig *sig_found
     return true;
   }
   if (is_variadic && call_argc < (size_t)sig_arity - 1) {
-    ny_diag_error(tok, "not enough arguments for variadic \033[1;37m'%s'\033[0m",
+    ny_diag_error(tok,
+                  "not enough arguments for variadic \033[1;37m'%s'\033[0m",
                   sig_found->name);
     ny_diag_hint("expected at least %d arguments, got %zu", sig_arity - 1,
                  call_argc);
@@ -191,6 +430,41 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     if (strcmp(n, "extern_all") == 0 || strcmp(n, "__extern_all") == 0) {
       if (handle_extern_all_args(cg, &c->args))
         return LLVMConstInt(cg->type_i64, 0, false);
+    }
+    if (strcmp(n, "__layout_size") == 0 || strcmp(n, "__layout_align") == 0 ||
+        strcmp(n, "__layout_offset") == 0) {
+      bool want_align = strcmp(n, "__layout_align") == 0;
+      bool want_offset = strcmp(n, "__layout_offset") == 0;
+      if (want_offset) {
+        if (c->args.len != 2) {
+          ny_diag_error(e->tok, "%s expects 2 arguments", n);
+          cg->had_error = 1;
+          return LLVMConstInt(cg->type_i64, 1, false);
+        }
+        const char *layout_name = NULL;
+        const char *field_name = NULL;
+        if (!layout_query_arg(c->args.data[0].val, &layout_name) ||
+            !layout_query_arg(c->args.data[1].val, &field_name)) {
+          ny_diag_error(e->tok, "%s expects string literal arguments", n);
+          cg->had_error = 1;
+          return LLVMConstInt(cg->type_i64, 1, false);
+        }
+        return emit_layout_query(cg, e->tok, layout_name, field_name, false,
+                                 true);
+      }
+      if (c->args.len != 1) {
+        ny_diag_error(e->tok, "%s expects 1 argument", n);
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 1, false);
+      }
+      const char *layout_name = NULL;
+      if (!layout_query_arg(c->args.data[0].val, &layout_name)) {
+        ny_diag_error(e->tok, "%s expects a string literal", n);
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 1, false);
+      }
+      return emit_layout_query(cg, e->tok, layout_name, NULL, want_align,
+                               false);
     }
   }
   if (mc && mc->name && strcmp(mc->name, "extern_all") == 0) {
@@ -240,7 +514,8 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         // If it was an ALIAS, but method not found, we shouldn't fall back to
         // standard methods
         if (is_alias) {
-          ny_diag_error(e->tok, "function %s.%s not found", module_name, mc->name);
+          ny_diag_error(e->tok, "function %s.%s not found", module_name,
+                        mc->name);
           if (verbose_enabled >= 1)
             ny_diag_hint("alias '%s' resolves to module '%s'", target_name,
                          module_name);
@@ -278,17 +553,23 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             const_string_ptr(cg, mc->name, strlen(mc->name));
         LLVMValueRef name_ptr =
             LLVMBuildLoad2(cg->builder, cg->type_i64, name_global, "");
+        ny_dbg_loc(cg, e->tok);
         callee = LLVMBuildCall2(cg->builder, getter->type, getter->value,
                                 (LLVMValueRef[]){target_val, name_ptr}, 2,
                                 "dyn_func");
+        if (mc->args.len == 0) {
+          return callee;
+        }
         ft = NULL; /* Trigger generic call handling */
         has_sig = false;
+        skip_target = true;
         goto skip_static_handling;
       }
 
       if (looked_like_module_target && resolved_module_name) {
         char dotted[256];
-        snprintf(dotted, sizeof(dotted), "%s.%s", resolved_module_name, mc->name);
+        snprintf(dotted, sizeof(dotted), "%s.%s", resolved_module_name,
+                 mc->name);
         report_undef_symbol(cg, dotted, e->tok);
       } else {
         report_undef_symbol(cg, mc->name, e->tok);
@@ -330,7 +611,39 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         has_sig = true;
         callee = fv;
       } else {
-        callee = gen_expr(cg, scopes, depth, c->callee);
+        if (name) {
+          fun_sig *globals_sig = lookup_fun(cg, "__globals");
+          fun_sig *getter = lookup_fun(cg, "std.core.reflect.get");
+          if (!getter)
+            getter = lookup_fun(cg, "std.core.get");
+          if (!getter)
+            getter = lookup_fun(cg, "get");
+          if (!getter)
+            getter = lookup_fun(cg, "dict_get");
+          if (globals_sig && getter) {
+            ny_dbg_loc(cg, e->tok);
+            LLVMValueRef gtbl = LLVMBuildCall2(
+                cg->builder, globals_sig->type, globals_sig->value, NULL, 0,
+                "");
+            LLVMValueRef name_global =
+                const_string_ptr(cg, name, strlen(name));
+            LLVMValueRef name_ptr = LLVMBuildLoad2(
+                cg->builder, cg->type_i64, name_global, "");
+            LLVMValueRef def_val =
+                LLVMConstInt(cg->type_i64, 0, false); // default: none
+            LLVMValueRef gargs[3] = {gtbl, name_ptr, def_val};
+            unsigned gargc = getter->arity >= 3 ? 3 : 2;
+            ny_dbg_loc(cg, e->tok);
+            callee = LLVMBuildCall2(cg->builder, getter->type, getter->value,
+                                    gargs, gargc, "dyn_global");
+            ft = NULL;
+            has_sig = false;
+          } else {
+            callee = gen_expr(cg, scopes, depth, c->callee);
+          }
+        } else {
+          callee = gen_expr(cg, scopes, depth, c->callee);
+        }
       }
     }
   }
@@ -360,6 +673,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       for (size_t i = 0; i < mc->args.len; i++)
         call_args[i + 2] = gen_expr(cg, scopes, depth, mc->args.data[i].val);
     }
+    ny_dbg_loc(cg, e->tok);
     LLVMValueRef res =
         LLVMBuildCall2(cg->builder, rty, rval, call_args, (unsigned)n + 1, "");
     free(call_args);
@@ -387,9 +701,25 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
   }
   size_t user_args_len = c ? c->args.len : mc->args.len;
   call_arg_t *user_args = c ? c->args.data : mc->args.data;
+  expr_t *default_expr = NULL;
+  ny_param_list *func_params = NULL;
+  if (has_sig && sig_found && sig_found->stmt_t) {
+    if (sig_found->stmt_t->kind == NY_S_FUNC)
+      func_params = &sig_found->stmt_t->as.fn.params;
+    else if (sig_found->stmt_t->kind == NY_S_EXTERN)
+      func_params = &sig_found->stmt_t->as.ext.params;
+  }
   for (size_t i = 0; i < final_argc; i++) {
     size_t user_idx = (mc && !skip_target) ? (i - 1) : i;
+    const char *param_type =
+        (func_params && i < func_params->len) ? func_params->data[i].type : NULL;
+    expr_t *expr_for_check = NULL;
     if (mc && !skip_target && i == 0) {
+      expr_for_check = mc->target;
+      if (param_type && expr_for_check)
+        ensure_expr_type_compatible(cg, scopes, depth, param_type,
+                                     expr_for_check, expr_for_check->tok,
+                                     "argument");
       args[i] = gen_expr(cg, scopes, depth, mc->target);
     } else if (has_sig && is_variadic && i == (size_t)sig_arity - 1) {
       /* Variadic packaging */
@@ -400,14 +730,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       if (!as_s)
         as_s = lookup_fun(cg, "std.core.append");
       if (!ls_s || !as_s) {
-        ny_diag_error(e->tok,
-                      "variadic arguments require list/append helpers");
+        ny_diag_error(e->tok, "variadic arguments require list/append helpers");
         ny_diag_hint("missing std.core imports for 'list'/'append'");
         cg->had_error = 1;
         goto call_fail;
       }
       LLVMTypeRef lty = ls_s->type, aty = as_s->type;
       LLVMValueRef lval = ls_s->value, aval = as_s->value;
+      ny_dbg_loc(cg, e->tok);
       LLVMValueRef vl = LLVMBuildCall2(
           cg->builder, lty, lval,
           (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 35, false)}, 1, "");
@@ -430,20 +760,44 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
               const_string_ptr(cg, a->name, strlen(a->name));
           LLVMValueRef name_ptr = LLVMBuildLoad2(cg->builder, cg->type_i64,
                                                  name_runtime_global, "");
+          ny_dbg_loc(cg, e->tok);
           av = LLVMBuildCall2(cg->builder, kty, kval,
                               (LLVMValueRef[]){name_ptr, av}, 2, "");
         }
+        ny_dbg_loc(cg, e->tok);
         vl = LLVMBuildCall2(cg->builder, aty, aval, (LLVMValueRef[]){vl, av}, 2,
                             "");
       }
       args[i] = vl;
       break;
     } else if (user_idx < user_args_len) {
+      expr_for_check = user_args[user_idx].val;
+      if (param_type && expr_for_check)
+        ensure_expr_type_compatible(cg, scopes, depth, param_type,
+                                     expr_for_check, expr_for_check->tok,
+                                     "argument");
       args[i] = gen_expr(cg, scopes, depth, user_args[user_idx].val);
     } else if (has_sig && sig_arity > (int)i && i < user_args_len) { // fallback
-      args[i] = LLVMConstInt(cg->type_i64, 0, false);
+      args[i] = LLVMConstInt(cg->type_i64, 0, false); // none
     } else {
-      args[i] = LLVMConstInt(cg->type_i64, 0, false);
+      default_expr = NULL;
+      if (has_sig && sig_found && sig_found->stmt_t &&
+          sig_found->stmt_t->kind == NY_S_FUNC) {
+        func_params = &sig_found->stmt_t->as.fn.params;
+        size_t param_idx = i;
+        if (param_idx < func_params->len) {
+          default_expr = func_params->data[param_idx].def;
+        }
+      }
+      if (default_expr) {
+        if (param_type)
+          ensure_expr_type_compatible(cg, scopes, depth, param_type,
+                                       default_expr, default_expr->tok,
+                                       "argument");
+        args[i] = gen_expr(cg, scopes, depth, default_expr);
+      } else {
+        args[i] = LLVMConstInt(cg->type_i64, 0, false); // none
+      }
     }
   }
   if (has_sig) {
@@ -453,10 +807,38 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
      * call_argc: %zu\n", callee_name, is_variadic, sig_arity, c ? c->args.len
      * : mc->args.len); */
   }
+  if (has_sig && sig_found && sig_found->is_extern) {
+    func_params = NULL;
+    if (sig_found->stmt_t && sig_found->stmt_t->kind == NY_S_EXTERN) {
+      func_params = &sig_found->stmt_t->as.ext.params;
+    }
+    if (func_params && func_params->len > 0) {
+      size_t max_conv = func_params->len;
+      size_t call_limit =
+          (has_sig && is_variadic) ? (size_t)sig_arity : final_argc;
+      if (max_conv > call_limit)
+        max_conv = call_limit;
+      for (size_t i = 0; i < max_conv; i++) {
+        if (sig_found->is_variadic && (int)i >= sig_arity - 1)
+          break;
+        const char *tname = func_params->data[i].type;
+        if (tname && *tname) {
+          args[i] = coerce_extern_arg(cg, args[i], tname);
+        }
+      }
+    }
+  }
+  ny_dbg_loc(cg, e->tok);
   LLVMValueRef res = LLVMBuildCall2(
       cg->builder, ft, callee, args,
       (unsigned)(has_sig && is_variadic ? (size_t)sig_arity : final_argc), "");
   free(args);
+  if (has_sig && sig_found && sig_found->is_extern) {
+    LLVMTypeRef ret_ty = LLVMGetReturnType(ft);
+    if (LLVMGetTypeKind(ret_ty) == LLVMVoidTypeKind)
+      return LLVMConstInt(cg->type_i64, 0, false);
+    return box_extern_result(cg, res, sig_found->return_type);
+  }
   return res;
 
 call_fail:

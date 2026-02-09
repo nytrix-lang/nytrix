@@ -1,10 +1,10 @@
 ;; Keywords: os thread
 ;; Os Thread module.
 
-use core.core
 module std.os.thread (
    thread_spawn, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free
 )
+use core.core
 
 fn thread_spawn(func, arg=0){
    "Spawns a new thread executing `func(arg)`. Returns the thread handle."

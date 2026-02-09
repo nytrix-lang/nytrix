@@ -1,6 +1,10 @@
 ;; Keywords: util utils
 ;; General utility module.
 
+module std.util.utils (
+   parse_ast,
+   counter, counter_add, most_common
+)
 use std.core *
 use std.math.random *
 use std.str.io *
@@ -9,11 +13,6 @@ use std.core.reflect *
 use std.core.dict *
 use std.core.error *
 use std.str.json *
-
-module std.util.utils (
-   parse_ast,
-   counter, counter_add, most_common
-)
 
 fn parse_ast(source){
    "Parses Nytrix source code and returns the AST as a nested structure (list of dicts)."
