@@ -5,6 +5,7 @@
 #include "std_symbols.h"
 #include <alloca.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -19,7 +20,8 @@
 
 // Helpers moved to gencall.c
 
-static LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...) {
+static LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt,
+                              ...) {
   va_list ap;
   va_start(ap, fmt);
   char msg[512];
@@ -32,9 +34,10 @@ static LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...) 
 
 LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          ny_param_list params, stmt_t *body, bool is_variadic,
-                         const char *name_hint) {
+                         const char *return_type, const char *name_hint) {
   /* Capture All Visible Variables (scopes[1..depth]) */
-  binding_list captures = {0};
+  binding_list captures;
+  vec_init(&captures);
   for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
     for (size_t j = 0; j < scopes[i].vars.len; j++) {
       vec_push(&captures, scopes[i].vars.data[j]);
@@ -56,6 +59,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   sfn.as.fn.params = params;
   sfn.as.fn.body = body;
   sfn.as.fn.is_variadic = is_variadic;
+  sfn.as.fn.return_type = return_type;
   // Copy location from body if possible
   if (body)
     sfn.tok = body->tok;
@@ -146,10 +150,13 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
 }
 
 LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
+  /* Interning loop disabled to prevent cross-module issues in REPL */
+  /*
   for (size_t i = 0; i < cg->interns.len; ++i)
     if (cg->interns.data[i].len == len &&
         memcmp(cg->interns.data[i].data, s, len) == 0)
       return cg->interns.data[i].val;
+  */
   const char *final_s = s;
   size_t final_len = len;
   size_t header_size = 64;
@@ -162,9 +169,9 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // checking (__check_oob) would forbid accessing header fields (like length
   // at -16). By leaving magics as 0, is_heap_ptr returns false, allowing
   // access.
-  *(uint64_t *)(obj_data) = NY_MAGIC1;
+  *(uint64_t *)(obj_data) = 0;                       // NY_MAGIC1;
   *(uint64_t *)(obj_data + 8) = (uint64_t)final_len; // Capacity
-  *(uint64_t *)(obj_data + 16) = NY_MAGIC2;
+  *(uint64_t *)(obj_data + 16) = 0;                  // NY_MAGIC2;
   *(uint64_t *)(obj_data + 48) =
       ((uint64_t)final_len << 1) | 1; // Length at p-16 (tagged)
   *(uint64_t *)(obj_data + 56) = 241; // Tag at p-8 (TAG_STR)
@@ -180,7 +187,7 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   LLVMSetInitializer(g, LLVMConstStringInContext(cg->ctx, obj_data,
                                                  (unsigned)total_len, true));
   LLVMSetGlobalConstant(g, true);
-  LLVMSetLinkage(g, LLVMPrivateLinkage);
+  LLVMSetLinkage(g, LLVMInternalLinkage);
   LLVMSetUnnamedAddr(g, true);
   LLVMSetAlignment(g, 64);
   // Store the global and metadata
@@ -212,35 +219,53 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
 
 LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
                         LLVMValueRef r) {
-  const char *rt = NULL;
-  if (strcmp(op, "+") == 0)
-    rt = "__add";
-  else if (strcmp(op, "-") == 0)
-    rt = "__sub";
-  else if (strcmp(op, "*") == 0)
-    rt = "__mul";
-  else if (strcmp(op, "/") == 0)
-    rt = "__div";
-  else if (strcmp(op, "%") == 0)
-    rt = "__mod";
-  else if (strcmp(op, "|") == 0)
-    rt = "__or";
-  else if (strcmp(op, "&") == 0)
-    rt = "__and";
-  else if (strcmp(op, "^") == 0)
-    rt = "__xor";
-  else if (strcmp(op, "<") == 0)
-    rt = "__lt";
-  else if (strcmp(op, "<=") == 0)
-    rt = "__le";
-  else if (strcmp(op, ">") == 0)
-    rt = "__gt";
-  else if (strcmp(op, ">=") == 0)
-    rt = "__ge";
-  else if (strcmp(op, "<<") == 0)
-    rt = "__shl";
-  else if (strcmp(op, ">>") == 0)
-    rt = "__shr";
+  const char *generic_name = NULL;
+  const char *builtin_name = NULL;
+
+  if (strcmp(op, "+") == 0) {
+    generic_name = "add";
+    builtin_name = "__add";
+  } else if (strcmp(op, "-") == 0) {
+    generic_name = "sub";
+    builtin_name = "__sub";
+  } else if (strcmp(op, "*") == 0) {
+    generic_name = "mul";
+    builtin_name = "__mul";
+  } else if (strcmp(op, "/") == 0) {
+    generic_name = "div";
+    builtin_name = "__div";
+  } else if (strcmp(op, "%") == 0) {
+    generic_name = "mod";
+    builtin_name = "__mod";
+  } else if (strcmp(op, "|") == 0) {
+    generic_name = "bor";
+    builtin_name = "__or";
+  } else if (strcmp(op, "&") == 0) {
+    generic_name = "band";
+    builtin_name = "__and";
+  } else if (strcmp(op, "^") == 0) {
+    generic_name = "bxor";
+    builtin_name = "__xor";
+  } else if (strcmp(op, "<") == 0) {
+    generic_name = "lt";
+    builtin_name = "__lt";
+  } else if (strcmp(op, "<=") == 0) {
+    generic_name = "le";
+    builtin_name = "__le";
+  } else if (strcmp(op, ">") == 0) {
+    generic_name = "gt";
+    builtin_name = "__gt";
+  } else if (strcmp(op, ">=") == 0) {
+    generic_name = "ge";
+    builtin_name = "__ge";
+  } else if (strcmp(op, "<<") == 0) {
+    generic_name = "bshl";
+    builtin_name = "__shl";
+  } else if (strcmp(op, ">>") == 0) {
+    generic_name = "bshr";
+    builtin_name = "__shr";
+  }
+
   if (strcmp(op, "==") == 0) {
     fun_sig *s = lookup_fun(cg, "std.core.reflect.eq");
     if (!s)
@@ -253,18 +278,39 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     return LLVMBuildCall2(cg->builder, s->type, s->value,
                           (LLVMValueRef[]){l, r}, 2, "");
   }
-  if (rt) {
-    fun_sig *s = lookup_fun(cg, rt);
+
+  if (generic_name) {
+    char full_generic[128];
+    snprintf(full_generic, sizeof(full_generic), "std.core.reflect.%s",
+             generic_name);
+    fun_sig *s = lookup_fun(cg, full_generic);
+    if (!s)
+      s = lookup_fun(cg, generic_name);
+
+    if (s && strcmp(s->name, builtin_name) != 0) {
+      if (s->stmt_t && !ny_is_stdlib_tok(s->stmt_t->tok)) {
+        s = NULL;
+      }
+    }
+    if (s && strcmp(s->name, builtin_name) != 0) {
+      return LLVMBuildCall2(cg->builder, s->type, s->value,
+                            (LLVMValueRef[]){l, r}, 2, "");
+    }
+  }
+
+  if (builtin_name) {
+    fun_sig *s = lookup_fun(cg, builtin_name);
     if (!s) {
-      return expr_fail(cg, (token_t){0}, "builtin %s missing", rt);
+      return expr_fail(cg, (token_t){0}, "builtin %s missing", builtin_name);
     }
     return LLVMBuildCall2(cg->builder, s->type, s->value,
                           (LLVMValueRef[]){l, r}, 2, "");
   }
+
   if (strcmp(op, "!=") == 0)
     return LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 6, false),
                         gen_binary(cg, "==", l, r), "");
-  // Simplified: handled by __* functions above
+
   if (strcmp(op, "in") == 0) {
     fun_sig *s = lookup_fun(cg, "contains");
     if (!s) {
@@ -280,18 +326,11 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   LLVMContextRef ctx = LLVMContextCreate();
   LLVMModuleRef mod = LLVMModuleCreateWithNameInContext("ct", ctx);
   LLVMBuilderRef bld = LLVMCreateBuilderInContext(ctx);
-  codegen_t tcg = {.ctx = ctx,
-                   .module = mod,
-                   .builder = bld,
-                   .prog = cg->prog,
-                   .llvm_ctx_owned = true,
-                   .comptime = true};
-  tcg.fun_sigs.len = tcg.fun_sigs.cap = 0;
-  tcg.fun_sigs.data = NULL;
-  tcg.interns.len = tcg.interns.cap = 0;
-  tcg.interns.data = NULL;
-  tcg.type_i64 = LLVMInt64TypeInContext(ctx);
-  add_builtins(&tcg);
+  codegen_t tcg;
+  codegen_init_with_context(&tcg, cg->prog, cg->arena, mod, ctx, bld);
+  tcg.llvm_ctx_owned = true;
+  tcg.comptime = true;
+
   LLVMValueRef fn =
       LLVMAddFunction(mod, "ctm", LLVMFunctionType(tcg.type_i64, NULL, 0, 0));
   LLVMPositionBuilderAtEnd(bld, LLVMAppendBasicBlock(fn, "e"));
@@ -319,6 +358,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 static LLVMValueRef gen_expr_unary(codegen_t *cg, scope *scopes, size_t depth,
                                    expr_t *e) {
   LLVMValueRef r = gen_expr(cg, scopes, depth, e->as.unary.right);
+  ny_dbg_loc(cg, e->tok);
   if (strcmp(e->as.unary.op, "!") == 0)
     return LLVMBuildSelect(cg->builder, to_bool(cg, r),
                            LLVMConstInt(cg->type_i64, 4, false),
@@ -344,16 +384,17 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
     fun_sig *s = lookup_fun(cg, "slice");
     if (!s)
       return expr_fail(cg, e->tok, "slice operation requires 'slice'");
-    LLVMValueRef start =
-        e->as.index.start ? gen_expr(cg, scopes, depth, e->as.index.start)
-                          : LLVMConstInt(cg->type_i64, 1, false); // 0 tagged
+    LLVMValueRef start = e->as.index.start
+                             ? gen_expr(cg, scopes, depth, e->as.index.start)
+                             : LLVMConstInt(cg->type_i64, 1, false); // 0 tagged
     LLVMValueRef stop =
         e->as.index.stop
             ? gen_expr(cg, scopes, depth, e->as.index.stop)
             : LLVMConstInt(cg->type_i64, ((0x3fffffffULL) << 1) | 1, false);
-    LLVMValueRef step =
-        e->as.index.step ? gen_expr(cg, scopes, depth, e->as.index.step)
-                         : LLVMConstInt(cg->type_i64, 3, false); // 1 tagged
+    LLVMValueRef step = e->as.index.step
+                            ? gen_expr(cg, scopes, depth, e->as.index.step)
+                            : LLVMConstInt(cg->type_i64, 3, false); // 1 tagged
+    ny_dbg_loc(cg, e->tok);
     return LLVMBuildCall2(
         cg->builder, s->type, s->value,
         (LLVMValueRef[]){gen_expr(cg, scopes, depth, e->as.index.target), start,
@@ -365,6 +406,7 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
     s = lookup_fun(cg, "std.core.get");
   if (!s)
     return expr_fail(cg, e->tok, "index operation requires 'get'");
+  ny_dbg_loc(cg, e->tok);
   return LLVMBuildCall2(
       cg->builder, s->type, s->value,
       (LLVMValueRef[]){gen_expr(cg, scopes, depth, e->as.index.target),
@@ -372,8 +414,8 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
       2, "");
 }
 
-static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes, size_t depth,
-                                       expr_t *e) {
+static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e) {
   fun_sig *ls = lookup_fun(cg, "list");
   if (!ls)
     ls = lookup_fun(cg, "std.core.list");
@@ -382,16 +424,17 @@ static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes, size_t dept
     as = lookup_fun(cg, "std.core.append");
   if (!ls || !as)
     return expr_fail(cg, e->tok, "list literal requires list/append helpers");
+  ny_dbg_loc(cg, e->tok);
   LLVMValueRef vl = LLVMBuildCall2(
       cg->builder, ls->type, ls->value,
       (LLVMValueRef[]){LLVMConstInt(
           cg->type_i64, ((uint64_t)e->as.list_like.len << 1) | 1, false)},
       1, "");
   for (size_t i = 0; i < e->as.list_like.len; i++)
-    vl = LLVMBuildCall2(
-        cg->builder, as->type, as->value,
-        (LLVMValueRef[]){vl, gen_expr(cg, scopes, depth, e->as.list_like.data[i])},
-        2, "");
+    vl = LLVMBuildCall2(cg->builder, as->type, as->value,
+                        (LLVMValueRef[]){vl, gen_expr(cg, scopes, depth,
+                                                      e->as.list_like.data[i])},
+                        2, "");
   return vl;
 }
 
@@ -399,12 +442,13 @@ static LLVMValueRef gen_expr_dict(codegen_t *cg, scope *scopes, size_t depth,
                                   expr_t *e) {
   fun_sig *ds = lookup_fun(cg, "dict");
   if (!ds)
-    ds = lookup_fun(cg, "std.core.dict.dict");
+    ds = lookup_fun(cg, "std.core.dict");
   fun_sig *ss = lookup_fun(cg, "dict_set");
   if (!ss)
-    ss = lookup_fun(cg, "std.core.dict.dict_set");
+    ss = lookup_fun(cg, "std.core.dict_set");
   if (!ds || !ss)
     return expr_fail(cg, e->tok, "dict literal requires dict/dict_set helpers");
+  ny_dbg_loc(cg, e->tok);
   LLVMValueRef dl = LLVMBuildCall2(
       cg->builder, ds->type, ds->value,
       (LLVMValueRef[]){LLVMConstInt(
@@ -413,8 +457,9 @@ static LLVMValueRef gen_expr_dict(codegen_t *cg, scope *scopes, size_t depth,
   for (size_t i = 0; i < e->as.dict.pairs.len; i++)
     LLVMBuildCall2(
         cg->builder, ss->type, ss->value,
-        (LLVMValueRef[]){dl, gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].key),
-                         gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].value)},
+        (LLVMValueRef[]){
+            dl, gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].key),
+            gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].value)},
         3, "");
   return dl;
 }
@@ -423,33 +468,36 @@ static LLVMValueRef gen_expr_set(codegen_t *cg, scope *scopes, size_t depth,
                                  expr_t *e) {
   fun_sig *ss = lookup_fun(cg, "set");
   if (!ss)
-    ss = lookup_fun(cg, "std.core.set.set");
+    ss = lookup_fun(cg, "std.core.set");
   fun_sig *as = lookup_fun(cg, "set_add");
   if (!as)
-    as = lookup_fun(cg, "std.core.set.set_add");
+    as = lookup_fun(cg, "std.core.set_add");
   if (!ss || !as)
     return expr_fail(cg, e->tok, "set literal requires set/set_add helpers");
+  ny_dbg_loc(cg, e->tok);
   LLVMValueRef sl = LLVMBuildCall2(
       cg->builder, ss->type, ss->value,
       (LLVMValueRef[]){LLVMConstInt(
           cg->type_i64, ((uint64_t)e->as.list_like.len << 1) | 1, false)},
       1, "");
   for (size_t i = 0; i < e->as.list_like.len; i++)
-    LLVMBuildCall2(
-        cg->builder, as->type, as->value,
-        (LLVMValueRef[]){sl, gen_expr(cg, scopes, depth, e->as.list_like.data[i])},
-        2, "");
+    LLVMBuildCall2(cg->builder, as->type, as->value,
+                   (LLVMValueRef[]){sl, gen_expr(cg, scopes, depth,
+                                                 e->as.list_like.data[i])},
+                   2, "");
   return sl;
 }
 
 static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
                                      expr_t *e) {
   bool and = strcmp(e->as.logical.op, "&&") == 0;
-  LLVMValueRef left = to_bool(cg, gen_expr(cg, scopes, depth, e->as.logical.left));
+  LLVMValueRef left =
+      to_bool(cg, gen_expr(cg, scopes, depth, e->as.logical.left));
   LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef f = LLVMGetBasicBlockParent(cur_bb);
   LLVMBasicBlockRef rhs_bb = LLVMAppendBasicBlock(f, "lrhs"),
-                  end_bb = LLVMAppendBasicBlock(f, "lend");
+                    end_bb = LLVMAppendBasicBlock(f, "lend");
+  ny_dbg_loc(cg, e->tok);
   if (and)
     LLVMBuildCondBr(cg->builder, left, rhs_bb, end_bb);
   else
@@ -469,6 +517,7 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
 }
 
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+
   // Check for dead code - don't generate instructions if block is terminated
   if (cg->builder) {
     LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
@@ -478,6 +527,10 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   }
   if (!e || cg->had_error)
     return LLVMConstInt(cg->type_i64, 0, false);
+  ny_dbg_loc(cg, e->tok);
+
+  // fprintf(stderr, "DEBUG: gen_expr kind %d tok %d\n", e->kind, e->tok.kind);
+
   switch (e->kind) {
   case NY_E_COMPTIME:
     return gen_comptime_eval(cg, e->as.comptime_expr.body);
@@ -500,8 +553,13 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       if (!box_sig) {
         return expr_fail(cg, e->tok, "__flt_box_val not found");
       }
+      double fval_d = e->as.literal.as.f;
+      if (e->as.literal.hint == NY_LIT_HINT_F32) {
+        float f32 = (float)fval_d;
+        fval_d = (double)f32;
+      }
       LLVMValueRef fval =
-          LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), e->as.literal.as.f);
+          LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), fval_d);
       return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
                             (LLVMValueRef[]){LLVMBuildBitCast(
                                 cg->builder, fval, cg->type_i64, "")},
@@ -512,12 +570,17 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     binding *b = scope_lookup(scopes, depth, e->as.ident.name);
     if (b) {
       b->is_used = true;
-      return LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "");
+      if (LLVMGetTypeKind(LLVMTypeOf(b->value)) == LLVMPointerTypeKind)
+        return LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "");
+      return b->value;
     }
     binding *gb = lookup_global(cg, e->as.ident.name);
     if (gb) {
       gb->is_used = true;
-      return LLVMBuildLoad2(cg->builder, cg->type_i64, gb->value, "");
+      if (LLVMGetTypeKind(LLVMTypeOf(gb->value)) == LLVMPointerTypeKind) {
+        return LLVMBuildLoad2(cg->builder, cg->type_i64, gb->value, "");
+      }
+      return gb->value;
     }
     fun_sig *s = lookup_fun(cg, e->as.ident.name);
     if (s) {
@@ -531,33 +594,10 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       return val;
     }
 
-    /* Fallback: try dynamic global lookup (e.g. x -> get(globals(), "x")) */
-    fun_sig *getter = lookup_fun(cg, "get");
-    if (!getter)
-      getter = lookup_fun(cg, "std.core.get");
-    if (!getter)
-      getter = lookup_fun(cg, "std.core.reflect.get");
-    fun_sig *globals_f = lookup_fun(cg, "globals");
-    if (!globals_f)
-      globals_f = lookup_fun(cg, "std.core.primitives.globals");
-    if (!globals_f)
-      globals_f = lookup_fun(cg, "std.core.reflect.globals");
-    if (!globals_f)
-      globals_f = lookup_fun(cg, "std.core.globals");
-    if (getter && globals_f && strcmp(e->as.ident.name, "get") != 0 &&
-        strcmp(e->as.ident.name, "globals") != 0 &&
-        strcmp(e->as.ident.name, "is_int") != 0 &&
-        strcmp(e->as.ident.name, "is_ptr") != 0 &&
-        strcmp(e->as.ident.name, "is_none") != 0 &&
-        strncmp(e->as.ident.name, "__", 2) != 0) {
-      LLVMValueRef g = LLVMBuildCall2(cg->builder, globals_f->type,
-                                      globals_f->value, NULL, 0, "g_ptr");
-      LLVMValueRef name_global =
-          const_string_ptr(cg, e->as.ident.name, strlen(e->as.ident.name));
-      LLVMValueRef name_ptr =
-          LLVMBuildLoad2(cg->builder, cg->type_i64, name_global, "");
-      return LLVMBuildCall2(cg->builder, getter->type, getter->value,
-                            (LLVMValueRef[]){g, name_ptr}, 2, "g_val");
+    // NEW: Try resolving as an unqualified enum member
+    enum_member_def_t *emd = lookup_enum_member(cg, e->as.ident.name);
+    if (emd) {
+      return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1, true);
     }
 
     report_undef_symbol(cg, e->as.ident.name, e->tok);
@@ -567,9 +607,12 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_expr_unary(cg, scopes, depth, e);
   }
   case NY_E_BINARY:
-    return gen_binary(cg, e->as.binary.op,
-                      gen_expr(cg, scopes, depth, e->as.binary.left),
-                      gen_expr(cg, scopes, depth, e->as.binary.right));
+  {
+    LLVMValueRef l = gen_expr(cg, scopes, depth, e->as.binary.left);
+    LLVMValueRef r = gen_expr(cg, scopes, depth, e->as.binary.right);
+    ny_dbg_loc(cg, e->tok);
+    return gen_binary(cg, e->as.binary.op, l, r);
+  }
   case NY_E_CALL:
   case NY_E_MEMCALL:
     return gen_call_expr(cg, scopes, depth, e);
@@ -586,6 +629,69 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_SET: {
     return gen_expr_set(cg, scopes, depth, e);
   }
+  case NY_E_PTR_TYPE:
+    return LLVMConstInt(cg->type_i64, 0, false);
+  case NY_E_DEREF: {
+    LLVMValueRef ptr = gen_expr(cg, scopes, depth, e->as.deref.target);
+    // Low level: treat ptr as raw address
+    ny_dbg_loc(cg, e->tok);
+    LLVMValueRef raw_ptr =
+        LLVMBuildIntToPtr(cg->builder, ptr, cg->type_i8ptr, "raw_ptr");
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, raw_ptr, "deref");
+  }
+  case NY_E_MEMBER: {
+    // First, attempt to resolve as a static enum member or qualified global.
+    char *full_name = codegen_full_name(cg, e, cg->arena);
+    if (full_name) {
+        enum_member_def_t *emd = lookup_enum_member(cg, full_name);
+        if (emd) {
+            return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1, true);
+        }
+        binding *gb = lookup_global(cg, full_name);
+        if (gb) {
+            gb->is_used = true;
+            if (LLVMGetTypeKind(LLVMTypeOf(gb->value)) == LLVMPointerTypeKind)
+                return LLVMBuildLoad2(cg->builder, cg->type_i64, gb->value, "");
+            return gb->value;
+        }
+    }
+
+    // Fallback to dynamic member access: `get(target, "member")`
+    LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.member.target);
+    LLVMValueRef key_str_global = const_string_ptr(cg, e->as.member.name, strlen(e->as.member.name));
+    LLVMValueRef key_str = LLVMBuildLoad2(cg->builder, cg->type_i64, key_str_global, "");
+
+    fun_sig *get_sig = lookup_fun(cg, "get");
+    if (!get_sig) {
+        return expr_fail(cg, e->tok, "Member access on a dynamic object requires the 'get' function.");
+    }
+
+    // Assume `get` can take a default value as a third argument.
+    LLVMValueRef args[] = {target, key_str};
+    ny_dbg_loc(cg, e->tok);
+    return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args, 2, "");
+  }
+  case NY_E_SIZEOF: {
+    const char *type_name = NULL;
+    if (e->as.szof.is_type)
+      type_name = e->as.szof.type_name;
+    if (!type_name && e->as.szof.target &&
+        e->as.szof.target->kind == NY_E_IDENT) {
+      type_name = e->as.szof.target->as.ident.name;
+    }
+    if (!type_name) {
+      ny_diag_error(e->tok, "sizeof expects a type name");
+      cg->had_error = 1;
+      return LLVMConstInt(cg->type_i64, 1, false);
+    }
+    type_layout_t tl = resolve_raw_layout(cg, type_name, e->tok);
+    if (!tl.is_valid) {
+      cg->had_error = 1;
+      return LLVMConstInt(cg->type_i64, 1, false);
+    }
+    uint64_t sz = (uint64_t)tl.size;
+    return LLVMConstInt(cg->type_i64, (sz << 1) | 1ULL, false);
+  }
   case NY_E_LOGICAL: {
     return gen_expr_logical(cg, scopes, depth, e);
   }
@@ -597,6 +703,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMBasicBlockRef true_bb = LLVMAppendBasicBlock(f, "tern_true");
     LLVMBasicBlockRef false_bb = LLVMAppendBasicBlock(f, "tern_false");
     LLVMBasicBlockRef end_bb = LLVMAppendBasicBlock(f, "tern_end");
+    ny_dbg_loc(cg, e->tok);
     LLVMBuildCondBr(cg->builder, cond, true_bb, false_bb);
     LLVMPositionBuilderAtEnd(cg->builder, true_bb);
     LLVMValueRef true_val =
@@ -609,6 +716,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMBuildBr(cg->builder, end_bb);
     LLVMBasicBlockRef false_end_bb = LLVMGetInsertBlock(cg->builder);
     LLVMPositionBuilderAtEnd(cg->builder, end_bb);
+    ny_dbg_loc(cg, e->tok);
     LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "tern");
     LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
                     (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
@@ -626,6 +734,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
         LLVMFunctionType(cg->type_i64, arg_types, nargs, false);
     LLVMValueRef asm_val = LLVMConstInlineAsm(
         func_type, e->as.as_asm.code, e->as.as_asm.constraints, true, false);
+    ny_dbg_loc(cg, e->tok);
     return LLVMBuildCall2(cg->builder, func_type, asm_val, llvm_args, nargs,
                           "");
   }
@@ -648,6 +757,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
             cg->builder, ts->type, ts->value,
             (LLVMValueRef[]){gen_expr(cg, scopes, depth, p.as.e)}, 1, "");
       }
+      ny_dbg_loc(cg, e->tok);
       res = LLVMBuildCall2(cg->builder, cs->type, cs->value,
                            (LLVMValueRef[]){res, pv}, 2, "");
     }
@@ -657,11 +767,78 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_FN: {
     /* Capture All Visible Variables (scopes[1..depth]) */
     return gen_closure(cg, scopes, depth, e->as.lambda.params,
-                       e->as.lambda.body, e->as.lambda.is_variadic, "__lambda");
+                       e->as.lambda.body, e->as.lambda.is_variadic,
+                       e->as.lambda.return_type, "__lambda");
+  }
+  case NY_E_EMBED: {
+    const char *fname = e->as.embed.path;
+    // fprintf(stderr, "DEBUG: embed opening '%s'\n", fname);
+    FILE *f = fopen(fname, "rb");
+    if (!f) {
+      char cwd[1024];
+      if (getcwd(cwd, sizeof(cwd)))
+        fprintf(stderr, "DEBUG: embed failed. CWD: %s, PATH: %s\n", cwd, fname);
+      return expr_fail(cg, e->tok, "failed to open file for embed: %s", fname);
+    }
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)size);
+    if (!buf) {
+      fclose(f);
+      return expr_fail(cg, e->tok, "OOM reading file for embed");
+    }
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
+      free(buf);
+      fclose(f);
+      return expr_fail(cg, e->tok, "failed to read file for embed: %s", fname);
+    }
+    fclose(f);
+    // fprintf(stderr, "DEBUG: file read, size %ld\n", size);
+    LLVMValueRef g = const_string_ptr(cg, buf, (size_t)size);
+    // fprintf(stderr, "DEBUG: global created\n");
+    free(buf);
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, g, "embed_ptr");
+  }
+  case NY_E_TRY: {
+    LLVMValueRef res = gen_expr(cg, scopes, depth, e->as.unary.right);
+    LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+    LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(f, "try_ok");
+    LLVMBasicBlockRef err_bb = LLVMAppendBasicBlock(f, "try_err");
+
+    fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok");
+    if (!is_ok_sig) {
+      return expr_fail(cg, e->tok, "__is_ok not found for '?' operator");
+    }
+    LLVMValueRef is_ok = LLVMBuildCall2(cg->builder, is_ok_sig->type,
+                                        is_ok_sig->value, &res, 1, "");
+    ny_dbg_loc(cg, e->tok);
+    LLVMBuildCondBr(cg->builder, to_bool(cg, is_ok), ok_bb, err_bb);
+
+    LLVMPositionBuilderAtEnd(cg->builder, err_bb);
+    // return res (which is the error result)
+    if (cg->result_store_val) {
+      LLVMBuildStore(cg->builder, res, cg->result_store_val);
+    } else {
+      emit_defers(cg, scopes, depth, cg->func_root_idx);
+      LLVMBuildRet(cg->builder, res);
+    }
+    // We need a dummy terminator if there are instructions after this try
+    // but LLVM usually handles this if we branch.
+
+    LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
+    // Unwrap value
+    fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap");
+    if (!unwrap_sig) {
+      return expr_fail(cg, e->tok, "__unwrap not found for '?' operator");
+    }
+    ny_dbg_loc(cg, e->tok);
+    return LLVMBuildCall2(cg->builder, unwrap_sig->type, unwrap_sig->value,
+                          &res, 1, "unwrapped");
   }
   case NY_E_MATCH: {
     LLVMValueRef old_store = cg->result_store_val;
-    LLVMValueRef slot = build_alloca(cg, "match_res");
+    LLVMValueRef slot = build_alloca(cg, "match_res", cg->type_i64);
     LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 1, false), slot);
     cg->result_store_val = slot;
     stmt_t fake = {.kind = NY_S_MATCH, .as.match = e->as.match, .tok = e->tok};
@@ -671,8 +848,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return LLVMBuildLoad2(cg->builder, cg->type_i64, slot, "");
   }
   default: {
-    return expr_fail(cg, e->tok, "unsupported expression kind %d (token kind %d)",
-                     e->kind, e->tok.kind);
+    return expr_fail(cg, e->tok,
+                     "unsupported expression kind %d (token kind %d)", e->kind,
+                     e->tok.kind);
   }
   }
 }

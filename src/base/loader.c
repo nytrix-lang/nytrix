@@ -211,9 +211,8 @@ static void ny_std_init_modules(void) {
 }
 
 static const char *ny_std_prelude_list[] = {
-    "std.core",        "std.core.error",       "std.core.reflect",
-    "std.core.dict", "std.core.set",
-    "std.str", "std.str.str", "std.core.iter",        "std.str.io",
+    "std.core",    "std.core.error", "std.core.reflect", "std.str",
+    "std.str.str", "std.core.iter",  "std.str.io",       "std.core.mem",
 };
 
 const char **ny_std_prelude(size_t *count) {
@@ -544,6 +543,20 @@ typedef struct {
   bool skip_std;
 } mod_list;
 
+static int mod_priority(const char *path) {
+  if (!path)
+    return 100;
+  if (strstr(path, "std/core/base.ny"))
+    return 0;
+  if (strstr(path, "std/core/mod.ny"))
+    return 1;
+  if (strstr(path, "std/core/primitives.ny"))
+    return 1; // Fallback
+  if (strstr(path, "std/core/reflect.ny"))
+    return 2;
+  return 100;
+}
+
 static int mod_entry_path_cmp(const void *a, const void *b) {
   const mod_entry *ma = (const mod_entry *)a;
   const mod_entry *mb = (const mod_entry *)b;
@@ -553,6 +566,10 @@ static int mod_entry_path_cmp(const void *a, const void *b) {
     return -1;
   if (!mb->path)
     return 1;
+  int pa = mod_priority(ma->path);
+  int pb = mod_priority(mb->path);
+  if (pa != pb)
+    return pa - pb;
   return strcmp(ma->path, mb->path);
 }
 
@@ -662,8 +679,8 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
   if (ny_std_find_module_by_name("std.core.mod") < 0) {
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
     if (!prebuilt || access(prebuilt, R_OK) != 0) {
-      if (access("build/std_bundle.ny", R_OK) == 0) {
-        prebuilt = "build/std_bundle.ny";
+      if (access("build/std.ny", R_OK) == 0) {
+        prebuilt = "build/std.ny";
       }
     }
     if (prebuilt && access(prebuilt, R_OK) == 0) {
@@ -684,6 +701,9 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     // USE_LIST only: std prelude is explicit opt-in at call sites.
     const char **seed_modules = modules;
     size_t seed_count = module_count;
+    if (!seed_modules && seed_count == 0 && mode == STD_MODE_DEFAULT) {
+      seed_modules = ny_std_prelude(&seed_count);
+    }
 
     for (size_t i = 0; i < seed_count; ++i) {
       const char *raw = seed_modules[i];

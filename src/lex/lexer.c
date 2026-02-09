@@ -130,6 +130,8 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_ELSE;
     if (len == 4 && memcmp(start, "elif", 4) == 0)
       return NY_T_ELIF;
+    if (len == 4 && memcmp(start, "enum", 4) == 0)
+      return NY_T_ENUM;
     if (len == 5 && memcmp(start, "embed", 5) == 0)
       return NY_T_EMBED;
     if (len == 6 && memcmp(start, "extern", 6) == 0)
@@ -173,7 +175,15 @@ static token_kind identifier_type(const char *start, size_t len) {
     if (len == 6 && memcmp(start, "lambda", 6) == 0)
       return NY_T_LAMBDA;
     if (len == 6 && memcmp(start, "layout", 6) == 0)
-      return NY_T_LAYOUT;
+      return NY_T_STRUCT;
+    break;
+  case 's':
+    if (len == 6) {
+      if (memcmp(start, "sizeof", 6) == 0)
+        return NY_T_SIZEOF;
+      if (memcmp(start, "struct", 6) == 0)
+        return NY_T_STRUCT;
+    }
     break;
   case 'm':
     if (len == 5 && memcmp(start, "match", 5) == 0)
@@ -273,11 +283,43 @@ token_t lexer_next(lexer_t *lx) {
       advance(lx); // consume 'x'
       while (isxdigit(peek(lx)))
         advance(lx);
+      char s = peek(lx);
+      if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
+           s == 'F') &&
+          isdigit(peek_next(lx))) {
+        advance(lx);
+        while (isdigit(peek(lx)))
+          advance(lx);
+      }
       return make_token(lx, NY_T_NUMBER, start);
     }
     while (isdigit(peek(lx)))
       advance(lx);
     if (peek(lx) == '.' && isdigit(peek_next(lx))) {
+      advance(lx);
+      while (isdigit(peek(lx)))
+        advance(lx);
+    }
+    if (peek(lx) == 'e' || peek(lx) == 'E') {
+      size_t save_pos = lx->pos;
+      int save_line = lx->line;
+      int save_col = lx->col;
+      advance(lx);
+      if (peek(lx) == '+' || peek(lx) == '-')
+        advance(lx);
+      if (isdigit(peek(lx))) {
+        while (isdigit(peek(lx)))
+          advance(lx);
+      } else {
+        lx->pos = save_pos;
+        lx->line = save_line;
+        lx->col = save_col;
+      }
+    }
+    char s = peek(lx);
+    if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
+         s == 'F') &&
+        isdigit(peek_next(lx))) {
       advance(lx);
       while (isdigit(peek(lx)))
         advance(lx);

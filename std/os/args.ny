@@ -1,10 +1,10 @@
 ;; Keywords: os args
 ;; Args helpers.
 
-use std.core *
 module std.os.args (
    args, argv
 )
+use std.core *
 
 fn argv(i){
    "Returns the argv string at index `i`, or 0."

@@ -1,12 +1,11 @@
 ;; Keywords: str slice
 ;; String helpers.
 
-use std.core *
-use std.str *
-
 module std.str.str (
    str_slice
 )
+use std.core *
+use std.str *
 
 fn str_slice(s, start, stop, step=1){
    "Returns a slice of string `s` from `start` to `stop` with optional `step`."

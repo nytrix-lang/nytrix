@@ -7,14 +7,14 @@ from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-template_path = os.path.join(script_dir, "assets", "webdoc.html")
+template_path = os.path.join(script_dir, "..", "assets", "web", "webdoc.html")
 if not os.path.exists(template_path):
     template_path = "webdoc.html"
 
 try:
     with open(template_path, "r") as f:
         HTML_TEMPLATE = f.read()
-    js_path = os.path.join(script_dir, "assets", "webdoc.js")
+    js_path = os.path.join(script_dir, "..", "assets", "web", "webdoc.js")
     if os.path.exists(js_path):
         with open(js_path, "r") as f:
             JS_SCRIPT_TEMPLATE = f.read()

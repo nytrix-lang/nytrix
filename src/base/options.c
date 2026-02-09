@@ -258,6 +258,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->dump_stats = true;
       else if (strcmp(a, "--dump-on-error") == 0)
         opt->dump_on_error = true;
+      else if (strcmp(a, "-trace") == 0)
+        opt->trace_exec = true;
       else if (strcmp(a, "-verify") == 0)
         opt->verify_module = true;
       else if (strcmp(a, "-g") == 0)

@@ -34,7 +34,7 @@ void repl_remove_def(const char *name);
 char *repl_assignment_target(const char *src);
 int is_input_complete(const char *src);
 void count_unclosed(const char *src, int *out_paren, int *out_brack,
-                    int *out_brace);
+                    int *out_brace, int *out_in_str);
 void print_incomplete_hint(const char *src);
 int repl_calc_indent(const char *src);
 int is_repl_stmt(const char *src);

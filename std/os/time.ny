@@ -1,11 +1,11 @@
 ;; Keywords: os time
 ;; Os Time module.
 
-use std.core *
-use std.os.sys *
 module std.os.time (
    time, sleep, msleep, ticks
 )
+use std.core *
+use std.os.sys *
 
 fn time(){
    "Returns the current Unix timestamp (seconds since epoch) using `clock_gettime(CLOCK_REALTIME)`."

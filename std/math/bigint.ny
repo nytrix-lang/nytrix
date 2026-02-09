@@ -1,28 +1,29 @@
 ;; Keywords: math bigint
 ;; Math Bigint module.
 
-use std.core *
-use std.core.error *
-use std.str *
-use std.str.io *
 module std.math.bigint (
    is_bigint, _big_make, _big_digits, _big_sign, _big_abs_cmp, _big_from_int, bigint,
    bigint_from_str, bigint_to_str, _big_add_abs, _big_sub_abs, bigint_add, bigint_sub,
    _big_mul_abs, bigint_mul, _big_mul_small, _big_add_small, _digits_prepend,
    _big_divmod_abs, bigint_div, bigint_mod, bigint_cmp, bigint_eq
 )
+use std.core *
+use std.core as core
+use std.core.error *
+use std.str *
+use std.str.io *
 
 fn is_bigint(x){
    "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
    if(eq(is_list(x), false)){ return false }
-   if(eq(list_len(x) < 3, true)){ return false }
+   if(eq(core.len(x) < 3, true)){ return false }
    return eq(load64(x, 16), 107)
 }
 
 fn _big_make(sign, digits){
    "Internal: build bigint with sign and digits (lsf), normalize."
    mut actual_digits = list_clone(digits)
-   mut n_actual = list_len(actual_digits)
+   mut n_actual = core.len(actual_digits)
    while(n_actual > 0 && get(actual_digits, n_actual - 1) == 0){
       pop(actual_digits)
       n_actual -= 1
@@ -51,8 +52,8 @@ fn _big_abs_cmp(a, b){
    "Internal: compare |a| and |b|, returns -1/0/1."
    mut da = _big_digits(a)
    def db = _big_digits(b)
-   mut na = list_len(da)
-   mut nb = list_len(db)
+   mut na = core.len(da)
+   mut nb = core.len(db)
    if(na < nb){ return -1 }
    if(na > nb){ return 1 }
    mut i = na - 1
@@ -107,7 +108,7 @@ fn bigint_from_str(s){
       i += 1
    }
    def digs = list_clone(_big_digits(res))
-   if(list_len(digs) == 0){ return _big_make(0, list(0)) }
+   if(core.len(digs) == 0){ return _big_make(0, list(0)) }
    _big_make(sign, digs)
 }
 
@@ -116,7 +117,7 @@ fn bigint_to_str(b){
    if(is_bigint(b) == false){ return "0" }
    mut sign = _big_sign(b)
    def digits = _big_digits(b)
-   mut n = list_len(digits)
+   mut n = core.len(digits)
    if(sign == 0 || n == 0){ return "0" }
    mut out = ""
    mut i = n - 1
@@ -140,8 +141,8 @@ fn _big_add_abs(a, b){
    "Internal: add |a| + |b|."
    mut da = _big_digits(a)
    def db = _big_digits(b)
-   mut na = list_len(da)
-   mut nb = list_len(db)
+   mut na = core.len(da)
+   mut nb = core.len(db)
    mut n = na
    if(nb > n){ n = nb }
    mut out = list(n + 1)
@@ -170,8 +171,8 @@ fn _big_sub_abs(a, b){
    "Internal: compute |a| - |b| where |a| >= |b|."
    mut da = _big_digits(a)
    def db = _big_digits(b)
-   mut na = list_len(da)
-   mut nb = list_len(db)
+   mut na = core.len(da)
+   mut nb = core.len(db)
    mut out = list(na)
    mut borrow = 0
    mut i = 0
@@ -226,8 +227,8 @@ fn _big_mul_abs(a, b){
    "Internal: multiply |a| * |b|."
    mut da = _big_digits(a)
    def db = _big_digits(b)
-   mut na = list_len(da)
-   mut nb = list_len(db)
+   mut na = core.len(da)
+   mut nb = core.len(db)
    if(na == 0 || nb == 0){ return _big_make(0, list(0)) }
    mut out = list(na + nb + 1)
    mut i = 0
@@ -269,7 +270,7 @@ fn _big_mul_small(a, m){
    "Internal: multiply bigint by small int m."
    if(m == 0){ return _big_make(0, list(0)) }
    mut da = _big_digits(a)
-   def na = list_len(da)
+   def na = core.len(da)
    mut out = list(na + 1)
    mut carry = 0
    mut i = 0
@@ -290,7 +291,7 @@ fn _big_add_small(a, v){
    mut i = 0
    mut carry = v
    while(carry > 0){
-      if(i >= list_len(da)){  da = append(da, 0) }
+      if(i >= core.len(da)){  da = append(da, 0) }
       mut sum = get(da, i) + carry
       if(sum >= 1000000000){
          set_idx(da, i, sum - 1000000000)
@@ -302,16 +303,16 @@ fn _big_add_small(a, v){
       i += 1
    }
    mut s = _big_sign(a)
-   if(list_len(da) > 0){ s = 1 }
+   if(core.len(da) > 0){ s = 1 }
    _big_make(s, da)
 }
 
 fn _digits_prepend(digits, v){
    "Internal: prepend v to digits list."
-   mut out = list(list_len(digits) + 1)
+   mut out = list(core.len(digits) + 1)
     out = append(out, v)
    mut i = 0
-   def n = list_len(digits)
+   def n = core.len(digits)
    while(i < n){
        out = append(out, get(digits, i))
       i += 1
@@ -326,7 +327,7 @@ fn _big_divmod_abs(a, b){
    if(cmp < 0){ return [_big_make(0, list(0)), a] }
    if(cmp == 0){ return [_big_make(1, [1]), _big_make(0, list(0))] }
    def da = _big_digits(a)
-   def n = list_len(da)
+   def n = core.len(da)
    mut qdigits = list(n)
    mut i = 0
    while(i < n){  qdigits = append(qdigits, 0)  i += 1 }

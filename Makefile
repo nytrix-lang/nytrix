@@ -10,7 +10,8 @@ BUILD_DIR ?= build
 LOG_DIR   ?= $(BUILD_DIR)/logs
 LLVM_CONFIG ?= llvm-config
 
-MAKEFLAGS += -j$(shell nproc) --no-print-directory
+JOBS      := $(shell expr $$(nproc) / 2)
+MAKEFLAGS += -j$(JOBS) --no-print-directory
 
 # Protect build tools from user environment leaks
 unexport LD_PRELOAD
@@ -20,6 +21,12 @@ BIN_NAME := ny
 BIN       := $(BUILD_DIR)/$(BIN_NAME)
 BIN_DEBUG := $(BUILD_DIR)/$(BIN_NAME)_debug
 BIN_LSP   := $(BUILD_DIR)/ny-lsp
+STD_BUNDLE := $(BUILD_DIR)/std.ny
+FUZZ_ITERS ?= 200
+FUZZ_TIMEOUT ?= 1.2
+FUZZ_JOBS ?= $(JOBS)
+FUZZ_MODE ?= mixed
+FUZZ_FLAGS ?=
 
 TIDY_DIRS := src std etc/examples
 
@@ -49,15 +56,15 @@ endif
 
 OPTFLAGS := -O$(OPT)
 
-CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) -I/usr/include -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -march=x86-64 -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std_bundle.ny\"" -DVERBOSE_BUILD
+CFLAGS_BASE := -std=c11 -g -fno-omit-frame-pointer -Wall -Wextra -Wshadow -Wstrict-prototypes -Wundef -Wcast-align -Wwrite-strings -Wunused -Isrc -Isrc/base -Isrc/rt -I$(BUILD_DIR) -I/usr/include -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -march=x86-64 -DNYTRIX_STD_PATH="\"$(PREFIX)/share/nytrix/std.ny\"" -DVERBOSE_BUILD
 CFLAGS_DEBUG   := $(CFLAGS_BASE) -O0 -DDEBUG $(SANFLAGS) $(PROFFLAGS)
 CFLAGS_RELEASE := $(CFLAGS_BASE) $(OPTFLAGS) -DNDEBUG $(SANFLAGS) $(PROFFLAGS)
 
-LDFLAGS := $(ASAN_LDFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -rdynamic $(PROFFLAGS)
+LDFLAGS := $(ASAN_LDFLAGS) $(LLVM_LDFLAGS) -lreadline -lm -lc -rdynamic $(PROFFLAGS)
 
 # Compiler Sources (Lib)
 # src subdirs
-SRC_COMPILER_DIRS := src/ast src/base src/lex src/code src/repl src/wire
+SRC_COMPILER_DIRS := src/ast src/base src/lex src/sema src/code src/repl src/wire
 SRC_COMPILER := $(foreach dir,$(SRC_COMPILER_DIRS),$(wildcard $(dir)/*.c))
 SRC_COMPILER += src/parse/shared.c
 SRC_RUNTIME := src/rt/init.c
@@ -81,9 +88,9 @@ OBJ_CMD_NY_DEBUG     := $(BUILD_DIR)/cmd/ny/main_debug.o
 OBJ_CMD_NY_RELEASE   := $(BUILD_DIR)/cmd/ny/main.o
 OBJ_CMD_LSP_RELEASE  := $(BUILD_DIR)/cmd/ny-lsp/main.o
 
-.PHONY: all bin debug repl lsp ny-lsp help clean test tidy build install uninstall coverage install-man uninstall-man docs
+.PHONY: all bin debug repl lsp ny-lsp help clean test fuzz tidy build install uninstall coverage install-man uninstall-man docs
 
-all: bin lsp $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so
+all: bin lsp $(STD_BUNDLE) $(BUILD_DIR)/libnytrixrt.so
 
 bin: $(BIN)
 
@@ -93,17 +100,17 @@ lsp: $(BIN_LSP)
 
 ny-lsp: lsp
 
-docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(BUILD_DIR)/std_bundle.ny | build
+docs: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info $(BUILD_DIR)/nytrix.1 $(BUILD_DIR)/ny.1 $(STD_BUNDLE) | build
 	@echo "  $(C_CYAN)WEBDOC$(C_RESET) generating documentation at $(BUILD_DIR)/docs/index.html..."
 	@mkdir -p /tmp/nytrix-info
 	@printf "ny mono file:///tmp/nytrix-info/NY.html\nny node file:///tmp/nytrix-info/\nnytrix mono file:///tmp/nytrix-info/NYTRIX.html\nnytrix node file:///tmp/nytrix-info/\n" > /tmp/nytrix-info/htmlxref.cnf
-	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/info/ny.texi -o /tmp/nytrix-info/NY.html
-	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/info/nytrix.texi -o /tmp/nytrix-info/NYTRIX.html
-	@python3 etc/tools/conv etc/info/ny.texi NY --format=md > /tmp/nytrix-info/NY.md
-	@python3 etc/tools/conv etc/info/nytrix.texi NYTRIX --format=md > /tmp/nytrix-info/NYTRIX.md
-	@python3 etc/tools/webdoc $(BUILD_DIR)/std_bundle.ny -o $(BUILD_DIR)/docs
+	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/assets/info/ny.texi -o /tmp/nytrix-info/NY.html
+	@makeinfo --no-split --html --conf-dir=/tmp/nytrix-info etc/assets/info/nytrix.texi -o /tmp/nytrix-info/NYTRIX.html
+	@python3 etc/tools/conv etc/assets/info/ny.texi NY --format=md > /tmp/nytrix-info/NY.md
+	@python3 etc/tools/conv etc/assets/info/nytrix.texi NYTRIX --format=md > /tmp/nytrix-info/NYTRIX.md
+	@python3 etc/tools/webdoc $(STD_BUNDLE) -o $(BUILD_DIR)/docs
 
-repl: $(BIN) $(BUILD_DIR)/std_bundle.ny
+repl: $(BIN) $(STD_BUNDLE)
 	@$(BIN) -i
 
 help:
@@ -114,6 +121,7 @@ help:
 	@echo "$(C_GREEN)make debug$(C_RESET)                Build debug executable ($(BIN_DEBUG))"
 	@echo "$(C_GREEN)make repl$(C_RESET)                 Run REPL (release)"
 	@echo "$(C_GREEN)make test$(C_RESET)                 Run performance + unit tests (15s timeout)"
+	@echo "$(C_GREEN)make fuzz$(C_RESET)                 Run parallel fuzz harness (etc/tools/fuzz)"
 	@echo "$(C_GREEN)make install$(C_RESET)              Install to $(DESTDIR)$(BINDIR)/$(BIN_NAME)"
 	@echo "$(C_GREEN)make clean$(C_RESET)                Remove build artifacts"
 	@echo "$(C_GREEN)make tidy$(C_RESET)                 Format code using clang-format"
@@ -133,10 +141,10 @@ build:
 		$(BUILD_DIR)/cmd/ny $(BUILD_DIR)/cmd/ny-lsp
 	@chmod -R a+rw $(BUILD_DIR) 2>/dev/null || true
 
-$(BUILD_DIR)/std_bundle.ny: $(wildcard std/**/*.ny) etc/tools/stdbundle | build
+$(STD_BUNDLE): $(wildcard std/**/*.ny) etc/tools/stdbundle | build
 	@python3 etc/tools/stdbundle $@
 
-$(BUILD_DIR)/std_symbols.h: $(BUILD_DIR)/std_bundle.ny | build
+$(BUILD_DIR)/std_symbols.h: $(STD_BUNDLE) | build
 	@touch $@
 
 # Implicit headers rule logic usually handled by -MMD, but explicit for key generated file
@@ -225,8 +233,8 @@ install: all install-info install-man
 	@chmod 755 $(DESTDIR)$(BINDIR)/$(BIN_NAME)
 	@cp $(BIN_LSP) $(DESTDIR)$(BINDIR)/ny-lsp
 	@chmod 755 $(DESTDIR)$(BINDIR)/ny-lsp
-	@cp $(BUILD_DIR)/std_bundle.ny $(DESTDIR)$(SHAREDIR)/std_bundle.ny
-	@chmod 644 $(DESTDIR)$(SHAREDIR)/std_bundle.ny
+	@cp $(STD_BUNDLE) $(DESTDIR)$(SHAREDIR)/std.ny
+	@chmod 644 $(DESTDIR)$(SHAREDIR)/std.ny
 	@cp $(BUILD_DIR)/libnytrixrt.so $(DESTDIR)$(LIBDIR)/libnytrixrt.so
 	@chmod 755 $(DESTDIR)$(LIBDIR)/libnytrixrt.so
 	@echo "  $(C_GRAY)INSTALL$(C_RESET) full source tree to $(DESTDIR)$(SHAREDIR)/src"
@@ -239,6 +247,10 @@ install: all install-info install-man
 	@mkdir -p $(DESTDIR)$(SHAREDIR)/std
 	@cp -r std/* $(DESTDIR)$(SHAREDIR)/std/
 	@echo "  $(C_GREEN)✓ Installed$(C_RESET)"
+	@if [ -n "$(SUDO_USER)" ] && [ "$(SUDO_USER)" != "root" ]; then \
+		echo "  $(C_GRAY)RESTORE$(C_RESET) build folder ownership to $(SUDO_USER)"; \
+		chown -R $(SUDO_USER):$(SUDO_USER) $(BUILD_DIR) 2>/dev/null || true; \
+	fi
 
 install-man: $(BUILD_DIR)/ny.1 $(BUILD_DIR)/nytrix.1
 	@echo "  $(C_GRAY)INSTALL$(C_RESET) man pages to $(DESTDIR)$(MANDIR)/man1"
@@ -258,10 +270,10 @@ install-info: $(BUILD_DIR)/nytrix.info $(BUILD_DIR)/ny.info
 		install-info --info-dir=$(DESTDIR)$(INFODIR) $(DESTDIR)$(INFODIR)/ny.info 2>/dev/null || true; \
 	fi
 
-$(BUILD_DIR)/%.info: etc/info/%.texi | build
+$(BUILD_DIR)/%.info: etc/assets/info/%.texi | build
 	@makeinfo $< -o $@
 
-$(BUILD_DIR)/%.1: etc/info/%.texi etc/tools/conv | build
+$(BUILD_DIR)/%.1: etc/assets/info/%.texi etc/tools/conv | build
 	@python3 etc/tools/conv $< $* --format=man > $@
 
 uninstall: uninstall-info uninstall-man
@@ -288,13 +300,19 @@ $(BUILD_DIR)/rt_debug.o: src/rt/init.c | build
 	@echo "  $(C_GRAY)CC (debug-rt)$(C_RESET) $<"
 	@$(CC) $(CFLAGS_DEBUG) -DNYTRIX_RUNTIME_ONLY -c $< -o $@
 
-test: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
+test: $(BIN_DEBUG) $(STD_BUNDLE)
 	@mkdir -p $(LOG_DIR)
-	@NYTRIX_ASAN=$(SAN) ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$(CURDIR)/.lsan.supp" NYTRIX_BUILD_STD_PATH=$(BUILD_DIR)/std_bundle.ny NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN_DEBUG) --log-dir $(LOG_DIR)
+	@NYTRIX_BUILD_STD_PATH=$(STD_BUNDLE) NYTRIX_STD_PREBUILT=$(STD_BUNDLE) python3 etc/tools/tests --no-smoke --jobs $(JOBS)
 
-test-all: $(BIN_DEBUG) $(BUILD_DIR)/std_bundle.ny
+fuzz: $(BIN_DEBUG) $(STD_BUNDLE)
 	@mkdir -p $(LOG_DIR)
-	@NYTRIX_ASAN=$(SAN) ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$(CURDIR)/.lsan.supp" NYTRIX_STD_PREBUILT=$(BUILD_DIR)/std_bundle.ny python3 etc/tools/tests --bin $(BIN_DEBUG) --log-dir $(LOG_DIR)
+	@NYTRIX_STD_PREBUILT=$(STD_BUNDLE) ./etc/tools/fuzz --bin $(BIN_DEBUG) --iterations $(FUZZ_ITERS) --timeout $(FUZZ_TIMEOUT) -j $(FUZZ_JOBS) --mode $(FUZZ_MODE) $(FUZZ_FLAGS)
+
+test-all: $(BIN_DEBUG) $(STD_BUNDLE)
+	@pkill -9 -f "etc/tools/tests" || true
+	@pkill -9 -f "build/ny" || true
+	@mkdir -p $(LOG_DIR)
+	@NYTRIX_ASAN=$(SAN) ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS="suppressions=$(CURDIR)/.lsan.supp" NYTRIX_STD_PREBUILT=$(STD_BUNDLE) python3 etc/tools/tests  --no-smoke --bin $(BIN_DEBUG) --log-dir $(LOG_DIR) --jobs $(JOBS)
 
 ifeq ($(SAN),1)
 	@echo ""
@@ -348,7 +366,7 @@ bear:
 ifneq ($(BEAR),)
 	@echo "  $(C_GRAY)BEAR$(C_RESET) Generating compilation database..."
 	@mkdir -p $(BUILD_DIR)/cache
-	@$(BEAR) --output $(BUILD_DIR)/cache/compile_commands.json -- $(MAKE) bin $(BIN_LSP) $(BUILD_DIR)/std_bundle.ny $(BUILD_DIR)/libnytrixrt.so > /dev/null 2>&1
+	@$(BEAR) --output $(BUILD_DIR)/cache/compile_commands.json -- $(MAKE) bin $(BIN_LSP) $(STD_BUNDLE) $(BUILD_DIR)/libnytrixrt.so > /dev/null 2>&1
 	@echo "  $(C_GREEN)✓ etc/cache/compile_commands.json updated$(C_RESET)"
 else
 	@echo "  $(C_RED)Error:$(C_RESET) bear not found in PATH"

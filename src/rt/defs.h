@@ -32,6 +32,12 @@ RT_DEF("__syscall", __syscall, 7, "fn __syscall(n, a1, a2, a3, a4, a5, a6)",
 RT_DEF("__execve", __execve, 3, "fn __execve(path, argv, envp)",
        "Standard execve(2) replacement.")
 
+RT_DEF("__tag", __tag, 1, "fn __tag(v)", "Tags a raw integer.")
+RT_DEF("__untag", __untag, 1, "fn __untag(v)", "Untags a Nytrix value.")
+RT_DEF("__is_int", __is_int, 1, "fn __is_int(v)",
+       "Checks if value is a tagged integer.")
+RT_DEF("__is_ptr", __is_ptr, 1, "fn __is_ptr(v)",
+       "Checks if value is a valid pointer.")
 RT_DEF("__add", __add, 2, "fn __add(a, b)", "Integer addition.")
 RT_DEF("__sub", __sub, 2, "fn __sub(a, b)", "Integer subtraction.")
 RT_DEF("__mul", __mul, 2, "fn __mul(a, b)", "Integer multiplication.")
@@ -123,6 +129,12 @@ RT_DEF("__jmpbuf_size", __jmpbuf_size, 0, "fn __jmpbuf_size()",
        "Internal: returns size of jmp_buf.")
 RT_DEF("__get_panic_val", __get_panic_val, 0, "fn __get_panic_val()",
        "Internal: returns the panic message.")
+RT_DEF("__trace_loc", __trace_loc, 3, "fn __trace_loc(file, line, col)",
+       "Internal: record the last executed source location.")
+RT_DEF("__trace_func", __trace_func, 1, "fn __trace_func(name)",
+       "Internal: record the current function name.")
+RT_DEF("__trace_dump", __trace_dump, 1, "fn __trace_dump(n)",
+       "Internal: dump recent trace entries.")
 RT_DEF("__push_defer", __push_defer, 2, "fn __push_defer(f, e)",
        "Internal: push defer.")
 RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",

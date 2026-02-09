@@ -1,3 +1,5 @@
+#include "code/priv.h"
+#include "base/util.h"
 #include "priv.h"
 #include "std_symbols.h"
 #include <alloca.h>
@@ -11,7 +13,7 @@
 #include <string.h>
 #include <sys/types.h>
 
-LLVMValueRef build_alloca(codegen_t *cg, const char *name) {
+LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type) {
   LLVMBuilderRef b = LLVMCreateBuilderInContext(cg->ctx);
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
   if (!f) {
@@ -24,7 +26,7 @@ LLVMValueRef build_alloca(codegen_t *cg, const char *name) {
     LLVMPositionBuilderBefore(b, first);
   else
     LLVMPositionBuilderAtEnd(b, entry);
-  LLVMValueRef res = LLVMBuildAlloca(b, cg->type_i64, name);
+  LLVMValueRef res = LLVMBuildAlloca(b, type, name);
   LLVMDisposeBuilder(b);
   return res;
 }
@@ -38,25 +40,29 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->builder = builder;
   cg->prog = prog;
   cg->arena = arena;
-  cg->fun_sigs.len = cg->fun_sigs.cap = 0;
-  cg->fun_sigs.data = NULL;
-  cg->global_vars.len = cg->global_vars.cap = 0;
-  cg->global_vars.data = NULL;
-  cg->interns.len = cg->interns.cap = 0;
-  cg->interns.data = NULL;
-  cg->llvm_ctx_owned = false;
-  cg->import_aliases.len = cg->import_aliases.cap = 0;
-  cg->import_aliases.data = NULL;
-  cg->user_import_aliases.len = cg->user_import_aliases.cap = 0;
-  cg->user_import_aliases.data = NULL;
-  cg->user_use_modules.len = cg->user_use_modules.cap = 0;
-  cg->user_use_modules.data = NULL;
+
   cg->comptime = false;
   cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
   cg->implicit_prelude = true;
   if (cg->strict_diagnostics)
     NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
+  cg->type_i1 = LLVMInt1TypeInContext(cg->ctx);
+  cg->type_i8 = LLVMInt8TypeInContext(cg->ctx);
+  cg->type_i16 = LLVMInt16TypeInContext(cg->ctx);
+  cg->type_i32 = LLVMInt32TypeInContext(cg->ctx);
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
+  cg->type_i128 = LLVMInt128TypeInContext(cg->ctx);
+  cg->type_u8 = cg->type_i8;
+  cg->type_u16 = cg->type_i16;
+  cg->type_u32 = cg->type_i32;
+  cg->type_u64 = cg->type_i64;
+  cg->type_u128 = cg->type_i128;
+  cg->type_f32 = LLVMFloatTypeInContext(cg->ctx);
+  cg->type_f64 = LLVMDoubleTypeInContext(cg->ctx);
+  cg->type_f128 = LLVMFP128TypeInContext(cg->ctx);
+  cg->type_bool = cg->type_i1;
+  cg->type_i8ptr = LLVMPointerType(cg->type_i8, 0);
+
   cg->had_error = 0;
   cg->lambda_count = 0;
   add_builtins(cg);
@@ -74,7 +80,23 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   cg->llvm_ctx_owned = true;
   cg->module = LLVMModuleCreateWithNameInContext(name, cg->ctx);
   cg->builder = LLVMCreateBuilderInContext(cg->ctx);
+  cg->type_i1 = LLVMInt1TypeInContext(cg->ctx);
+  cg->type_i8 = LLVMInt8TypeInContext(cg->ctx);
+  cg->type_i16 = LLVMInt16TypeInContext(cg->ctx);
+  cg->type_i32 = LLVMInt32TypeInContext(cg->ctx);
   cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
+  cg->type_i128 = LLVMInt128TypeInContext(cg->ctx);
+  cg->type_u8 = cg->type_i8;
+  cg->type_u16 = cg->type_i16;
+  cg->type_u32 = cg->type_i32;
+  cg->type_u64 = cg->type_i64;
+  cg->type_u128 = cg->type_i128;
+  cg->type_f32 = LLVMFloatTypeInContext(cg->ctx);
+  cg->type_f64 = LLVMDoubleTypeInContext(cg->ctx);
+  cg->type_f128 = LLVMFP128TypeInContext(cg->ctx);
+  cg->type_bool = cg->type_i1;
+  cg->type_i8ptr = LLVMPointerType(cg->type_i8, 0);
+
   cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
   cg->implicit_prelude = true;
   if (cg->strict_diagnostics)
@@ -83,11 +105,28 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   LLVMAddGlobal(cg->module, cg->type_i64, "__NYTRIX__");
 }
 
+const char *codegen_qname(codegen_t *cg, const char *name,
+                          const char *cur_mod) {
+  (void)cg;
+  if (!cur_mod || !*cur_mod)
+    return name;
+  size_t mlen = strlen(cur_mod);
+  // Check if already prefixed
+  if (strncmp(name, cur_mod, mlen) == 0 && name[mlen] == '.')
+    return name;
+  static char
+      buf[1024]; // Note: not thread safe, but codegen is single threaded
+  snprintf(buf, sizeof(buf), "%s.%s", cur_mod, name);
+  return ny_strdup(buf);
+}
+
 void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
                         const char *cur_mod) {
   if (s->kind == NY_S_FUNC) {
     cg->current_module_name = cur_mod;
-    gen_func(cg, s, s->as.fn.name, gsc, gd, NULL);
+    cg->current_module_name = cur_mod;
+    const char *final_name = codegen_qname(cg, s->as.fn.name, cur_mod);
+    gen_func(cg, s, final_name, gsc, gd, NULL);
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; i++)
       emit_top_functions(cg, s->as.module.body.data[i], gsc, gd,
@@ -106,6 +145,7 @@ void codegen_emit(codegen_t *cg) {
   // First pass: collect all signatures (including nested modules)
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
+
     collect_sigs(cg, s);
   }
   // Process exports to create aliases
@@ -129,6 +169,16 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
     return fn;
   fn = LLVMAddFunction(cg->module, name,
                        LLVMFunctionType(cg->type_i64, NULL, 0, 0));
+  LLVMMetadataRef prev_scope = cg->di_scope;
+  if (cg->debug_symbols && cg->di_builder) {
+    token_t tok = {0};
+    tok.filename = cg->debug_main_file ? cg->debug_main_file : "<inline>";
+    tok.line = 1;
+    tok.col = 1;
+    LLVMMetadataRef sp = codegen_debug_subprogram(cg, fn, name, tok);
+    if (sp)
+      cg->di_scope = sp;
+  }
   LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
   // Create two blocks: init (for internal setup) and body (for user code)
   LLVMBasicBlockRef init_block = LLVMAppendBasicBlock(fn, "init");
@@ -148,6 +198,9 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   }
   // 2. Now fill the init block
   LLVMPositionBuilderAtEnd(cg->builder, init_block);
+  if (cg->debug_symbols && cg->di_builder) {
+    LLVMSetCurrentDebugLocation2(cg->builder, NULL);
+  }
   // Initialize ALL runtime string pointers found
   LLVMTypeRef i8_ptr_ty = LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0);
   LLVMTypeRef asm_func_ty =
@@ -187,46 +240,44 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   if (cur) {
     LLVMPositionBuilderAtEnd(cg->builder, cur);
   }
+  cg->di_scope = prev_scope;
   return fn;
 }
 
 void codegen_dispose(codegen_t *cg) {
-  if (cg->builder)
+  if (!cg)
+    return;
+  codegen_debug_finalize(cg);
+  if (cg->builder) {
     LLVMDisposeBuilder(cg->builder);
+    cg->builder = NULL;
+  }
   if (cg->llvm_ctx_owned) {
-    if (cg->module)
+    if (cg->module) {
       LLVMDisposeModule(cg->module);
-    LLVMContextDispose(cg->ctx);
+      cg->module = NULL;
+    }
+    if (cg->ctx) {
+      LLVMContextDispose(cg->ctx);
+      cg->ctx = NULL;
+    }
   }
-  for (size_t i = 0; i < cg->fun_sigs.len; i++) {
-    free((void *)cg->fun_sigs.data[i].name);
-    if (cg->fun_sigs.data[i].link_name)
-      free((void *)cg->fun_sigs.data[i].link_name);
-  }
-  for (size_t i = 0; i < cg->global_vars.len; i++) {
-    free((void *)cg->global_vars.data[i].name);
-  }
-  for (size_t i = 0; i < cg->interns.len; i++) {
-    if (cg->interns.data[i].alloc)
-      free(cg->interns.data[i].alloc);
-  }
-  for (size_t i = 0; i < cg->aliases.len; i++) {
-    free((void *)cg->aliases.data[i].name);
-    free((void *)cg->aliases.data[i].stmt_t);
-  }
-  for (size_t i = 0; i < cg->import_aliases.len; i++) {
-    free((void *)cg->import_aliases.data[i].name);
-    free((void *)cg->import_aliases.data[i].stmt_t);
-  }
-  for (size_t i = 0; i < cg->user_import_aliases.len; i++) {
-    free((void *)cg->user_import_aliases.data[i].name);
-    free((void *)cg->user_import_aliases.data[i].stmt_t);
-  }
+
+  // fun_sig names/link_names may be shared across aliases and module exports;
+  // avoid freeing here to prevent double-free on shared pointers.
+  // Names/aliases may be shared or arena-backed; avoid freeing to prevent
+  // double-free across reused compilation contexts.
   for (size_t i = 0; i < cg->use_modules.len; i++) {
     free((void *)cg->use_modules.data[i]);
   }
   for (size_t i = 0; i < cg->user_use_modules.len; i++) {
     free((void *)cg->user_use_modules.data[i]);
+  }
+  for (size_t i = 0; i < cg->layouts.len; i++) {
+    layout_def_t *def = cg->layouts.data[i];
+    if (!def)
+      continue;
+    vec_free(&def->fields);
   }
   vec_free(&cg->fun_sigs);
   vec_free(&cg->global_vars);
@@ -236,6 +287,7 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->user_import_aliases);
   vec_free(&cg->use_modules);
   vec_free(&cg->user_use_modules);
+  vec_free(&cg->layouts);
   if (cg->prog && cg->prog_owned) {
     program_free(cg->prog, (arena_t *)cg->arena);
     free(cg->prog);

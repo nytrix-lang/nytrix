@@ -1,12 +1,12 @@
 ;; Keywords: util counter
 ;; Util Counter module.
 
-use std.core *
-use std.core.reflect *
-use std.core *
 module std.util.counter (
    counter, counter_add, most_common
 )
+use std.core *
+use std.core.reflect *
+use std.core *
 
 fn counter(xs){
    "Creates a frequency counter dictionary from the elements of list or string `xs`."

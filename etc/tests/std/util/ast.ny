@@ -12,7 +12,7 @@ def ast = parse_ast(src)
 
 assert(is_list(ast), "ast is list")
 
-if(list_len(ast) > 0){
+if(len(ast) > 0){
  def stmt = get(ast, 0)
  assert(is_dict(stmt), "stmt is dict")
  assert(len(stmt) > 0, "stmt not empty")

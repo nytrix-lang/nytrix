@@ -1,11 +1,11 @@
-;; std.util.general (Test)
-;; Tests general utility functions including UUIDv4.
-
 use std.util.general *
 use std.core.dict *
 use std.core.set *
 use std.core.reflect *
 use std.core.test *
+
+;; std.util.general (Test)
+;; Tests general utility functions including UUIDv4.
 
 print("Testing std.util.general (UUID & Extras)...")
 

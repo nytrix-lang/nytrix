@@ -10,20 +10,65 @@ module std.core.primitives (
    globals, set_globals, argc, envc, envp
 )
 
-fn add(a, b){ "Returns `a + b`." __add(a, b) }
-fn sub(a, b){ "Returns `a - b`." __sub(a, b) }
-fn mul(a, b){ "Returns `a * b`." __mul(a, b) }
-fn div(a, b){ "Returns `a / b`." __div(a, b) }
-fn mod(a, b){ "Returns `a % b`." __mod(a, b) }
+fn add(a, b){
+   "Returns `a + b` (numbers, pointer math, or string concatenation)."
+   __add(a, b)
+}
 
-fn band(a, b){ "Returns bitwise `a & b`." __and(a, b) }
-fn bor(a, b){ "Returns bitwise `a | b`." __or(a, b) }
-fn bxor(a, b){ "Returns bitwise `a ^ b`." __xor(a, b) }
-fn bshl(a, b){ "Returns `a << b`." __shl(a, b) }
-fn bshr(a, b){ "Returns `a >> b`." __shr(a, b) }
-fn bnot(a){ "Returns bitwise `~a`." __not(a) }
+fn sub(a, b){
+   "Returns `a - b`."
+   __sub(a, b)
+}
 
-fn argv(i){ "Returns the `i`-th command line argument." __argv(i) }
+fn mul(a, b){
+   "Returns `a * b`."
+   __mul(a, b)
+}
+
+fn div(a, b){
+   "Returns `a / b`."
+   __div(a, b)
+}
+
+fn mod(a, b){
+   "Returns `a % b`."
+   __mod(a, b)
+}
+
+fn band(a, b){
+   "Returns bitwise `a & b`."
+   __and(a, b)
+}
+
+fn bor(a, b){
+   "Returns bitwise `a | b`."
+   __or(a, b)
+}
+
+fn bxor(a, b){
+   "Returns bitwise `a ^ b`."
+   __xor(a, b)
+}
+
+fn bshl(a, b){
+   "Returns `a << b`."
+   __shl(a, b)
+}
+
+fn bshr(a, b){
+   "Returns `a >> b`."
+   __shr(a, b)
+}
+
+fn bnot(a){
+   "Returns bitwise `~a`."
+   __not(a)
+}
+
+fn argv(i){
+   "Returns the `i`-th command line argument."
+   __argv(i)
+}
 
 fn globals() {
    "Returns the pointer to the global variables table."

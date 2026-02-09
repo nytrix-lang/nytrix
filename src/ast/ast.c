@@ -65,19 +65,76 @@ static void append(char **buf, size_t *len, size_t *cap, const char *fmt, ...) {
 }
 
 static void dump_literal(literal_t *l, char **buf, size_t *len, size_t *cap) {
+  const char *hint = NULL;
+  switch (l->hint) {
+  case NY_LIT_HINT_I8:
+    hint = "i8";
+    break;
+  case NY_LIT_HINT_I16:
+    hint = "i16";
+    break;
+  case NY_LIT_HINT_I32:
+    hint = "i32";
+    break;
+  case NY_LIT_HINT_I64:
+    hint = "i64";
+    break;
+  case NY_LIT_HINT_U8:
+    hint = "u8";
+    break;
+  case NY_LIT_HINT_U16:
+    hint = "u16";
+    break;
+  case NY_LIT_HINT_U32:
+    hint = "u32";
+    break;
+  case NY_LIT_HINT_U64:
+    hint = "u64";
+    break;
+  case NY_LIT_HINT_F32:
+    hint = "f32";
+    break;
+  case NY_LIT_HINT_F64:
+    hint = "f64";
+    break;
+  case NY_LIT_HINT_F128:
+    hint = "f128";
+    break;
+  case NY_LIT_HINT_NONE:
+  default:
+    hint = NULL;
+    break;
+  }
+
   append(buf, len, cap, "{\"type\":\"literal\",\"kind\":");
   switch (l->kind) {
   case NY_LIT_INT:
-    append(buf, len, cap, "\"int\",\"value\":%ld}", l->as.i);
+    if (hint)
+      append(buf, len, cap, "\"int\",\"hint\":\"%s\",\"value\":%ld}", hint,
+             l->as.i);
+    else
+      append(buf, len, cap, "\"int\",\"value\":%ld}", l->as.i);
     break;
   case NY_LIT_FLOAT:
-    append(buf, len, cap, "\"float\",\"value\":%f}", l->as.f);
+    if (hint)
+      append(buf, len, cap, "\"float\",\"hint\":\"%s\",\"value\":%f}", hint,
+             l->as.f);
+    else
+      append(buf, len, cap, "\"float\",\"value\":%f}", l->as.f);
     break;
   case NY_LIT_BOOL:
-    append(buf, len, cap, "\"bool\",\"value\":%s}", l->as.b ? "true" : "false");
+    if (hint)
+      append(buf, len, cap, "\"bool\",\"hint\":\"%s\",\"value\":%s}", hint,
+             l->as.b ? "true" : "false");
+    else
+      append(buf, len, cap, "\"bool\",\"value\":%s}",
+             l->as.b ? "true" : "false");
     break;
   case NY_LIT_STR:
-    append(buf, len, cap, "\"string\",\"value\":\"");
+    if (hint)
+      append(buf, len, cap, "\"string\",\"hint\":\"%s\",\"value\":\"", hint);
+    else
+      append(buf, len, cap, "\"string\",\"value\":\"");
     for (size_t i = 0; i < l->as.s.len; ++i) {
       char c = l->as.s.data[i];
       if (c == '"')

@@ -1,13 +1,12 @@
 ;; Keywords: str path
 ;; Path helpers.
 
-use std.core *
-use std.core.reflect as core
-use std.str *
-
 module std.str.path (
    basename, dirname
 )
+use std.core *
+use std.core.reflect as core
+use std.str *
 
 fn dirname(path){
    "Returns the directory component of path."

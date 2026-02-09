@@ -27,7 +27,7 @@ if(h != 0){
  def names = ["malloc", "free", "getpid"]
  def lib = ffi.bind_all(h, names)
  if(lib.getpid != 0){
-    def pid = lib.getpid()
+    def pid = lib.getpid()()
     print("PID from bind_all lib (dot access):", pid)
     assert(typeof(pid) == "int", "pid is int")
     assert(pid > 0, "getpid works")

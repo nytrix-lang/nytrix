@@ -1,11 +1,112 @@
-#include "priv.h"
+#include "base/common.h"
 #include "base/util.h"
+#include "priv.h"
 #include <stdarg.h>
 #include <stdint.h>
 
 static char **g_parse_diag_tbl = NULL;
 static size_t g_parse_diag_cap = 0;
 static size_t g_parse_diag_len = 0;
+static char *g_parse_cached_file = NULL;
+static char *g_parse_cached_src = NULL;
+
+static const char *parse_load_source(const char *filename) {
+  if (!filename || filename[0] == '<')
+    return NULL;
+  if (g_parse_cached_file && strcmp(g_parse_cached_file, filename) == 0)
+    return g_parse_cached_src;
+  free(g_parse_cached_file);
+  free(g_parse_cached_src);
+  g_parse_cached_file = ny_strdup(filename);
+  g_parse_cached_src = ny_read_file(filename);
+  return g_parse_cached_src;
+}
+
+static bool parse_extract_line(const char *src, int line,
+                               const char **out_start, size_t *out_len) {
+  if (!src || line <= 0 || !out_start || !out_len)
+    return false;
+  const char *cur = src;
+  int cur_line = 1;
+  while (*cur && cur_line < line) {
+    if (*cur == '\n')
+      cur_line++;
+    cur++;
+  }
+  if (cur_line != line)
+    return false;
+  const char *start = cur;
+  while (*cur && *cur != '\n')
+    cur++;
+  *out_start = start;
+  *out_len = (size_t)(cur - start);
+  return true;
+}
+
+static void parse_print_snippet(const char *filename, int line, int col,
+                                size_t len) {
+  if (!filename || filename[0] == '<' || line <= 0 || col <= 0)
+    return;
+  const char *src = parse_load_source(filename);
+  if (!src)
+    return;
+  const char *line_start = NULL;
+  size_t line_len = 0;
+  if (!parse_extract_line(src, line, &line_start, &line_len))
+    return;
+  if (line_len == 0)
+    return;
+
+  size_t caret_col = (size_t)(col - 1);
+  if (caret_col > line_len)
+    caret_col = line_len;
+  size_t caret_len = len ? len : 1;
+  if (caret_col + caret_len > line_len)
+    caret_len = line_len > caret_col ? (line_len - caret_col) : 1;
+
+  const size_t max_len = 200;
+  size_t start = 0;
+  size_t end = line_len;
+  bool prefix = false;
+  bool suffix = false;
+  if (line_len > max_len) {
+    if (caret_col > max_len / 2)
+      start = caret_col - max_len / 2;
+    if (start + max_len > line_len)
+      start = line_len - max_len;
+    end = start + max_len;
+    prefix = start > 0;
+    suffix = end < line_len;
+  }
+
+  size_t show_len = end - start;
+  char *buf = malloc(show_len + 1);
+  if (!buf)
+    return;
+  for (size_t i = 0; i < show_len; i++) {
+    char c = line_start[start + i];
+    buf[i] = (c == '\t') ? ' ' : c;
+  }
+  buf[show_len] = '\0';
+
+  int width = 1;
+  for (int tmp = line; tmp >= 10; tmp /= 10)
+    width++;
+
+  fprintf(stderr, "  %s%*d%s | %s%s%s\n", clr(NY_CLR_GRAY), width, line,
+          clr(NY_CLR_RESET), prefix ? "..." : "", buf, suffix ? "..." : "");
+  size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
+  fprintf(stderr, "  %s%*s%s | ", clr(NY_CLR_GRAY), width, "",
+          clr(NY_CLR_RESET));
+  for (size_t i = 0; i < caret_pad; i++)
+    fputc(' ', stderr);
+  fputs(clr(NY_CLR_RED), stderr);
+  for (size_t i = 0; i < caret_len; i++)
+    fputc('^', stderr);
+  fputs(clr(NY_CLR_RESET), stderr);
+  fputc('\n', stderr);
+  free(buf);
+}
 
 static uint64_t parse_diag_hash(const char *s) {
   uint64_t h = 1469598103934665603ULL;
@@ -44,8 +145,7 @@ static bool parser_diag_should_emit(const char *filename, int line, int col,
            line, col, msg ? msg : "", got ? got : "");
   if (g_parse_diag_cap == 0 && !parse_diag_grow())
     return true; // fail open
-  if ((g_parse_diag_len + 1) * 3 >= g_parse_diag_cap * 2 &&
-      !parse_diag_grow())
+  if ((g_parse_diag_len + 1) * 3 >= g_parse_diag_cap * 2 && !parse_diag_grow())
     return true; // fail open
 
   size_t mask = g_parse_diag_cap - 1;
@@ -107,8 +207,8 @@ const char *parser_token_name(token_kind k) {
     return "catch";
   case NY_T_USE:
     return "use";
-  case NY_T_LAYOUT:
-    return "layout";
+  case NY_T_STRUCT:
+    return "struct";
   case NY_T_GOTO:
     return "goto";
   case NY_T_LAMBDA:
@@ -135,6 +235,8 @@ const char *parser_token_name(token_kind k) {
     return "match";
   case NY_T_EMBED:
     return "embed";
+  case NY_T_SIZEOF:
+    return "sizeof";
   case NY_T_EXTERN:
     return "extern";
   case NY_T_MUT:
@@ -225,7 +327,8 @@ const char *parser_token_name(token_kind k) {
 static void print_error_line(parser_t *p, const char *filename, int line,
                              int col, const char *msg, const char *got,
                              const char *hint) {
-  const char *out_file = filename ? filename : (p->filename ? p->filename : "<input>");
+  const char *out_file =
+      filename ? filename : (p->filename ? p->filename : "<input>");
   if (!parser_diag_should_emit(out_file, line, col, msg, got))
     return;
   p->had_error = true;
@@ -235,13 +338,15 @@ static void print_error_line(parser_t *p, const char *filename, int line,
   snprintf(p->last_error_msg, sizeof(p->last_error_msg), "%s", msg);
 
   // Emacs format: filename:line:col: type: message
-  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s (got %s)\n", out_file, line,
-          col, msg, got);
+  fprintf(stderr, "%s:%d:%d: %serror:%s %s (got %s)\n", out_file, line, col,
+          clr(NY_CLR_RED), clr(NY_CLR_RESET), msg, got);
   if (hint) {
-    fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n", out_file, line, col,
-            hint);
-    fprintf(stderr, "  \033[32mfix:\033[0m %s\n", hint);
+    fprintf(stderr, "%s:%d:%d: %snote:%s %s\n", out_file, line, col,
+            clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), hint);
+    fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN),
+            clr(NY_CLR_RESET), hint);
   }
+  parse_print_snippet(out_file, line, col, 1);
 
   if (p->error_limit > 0 && p->error_count >= p->error_limit) {
     fprintf(stderr, "Too many errors, aborting.\n");

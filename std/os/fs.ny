@@ -1,16 +1,16 @@
 ;; Keywords: os fs
 ;; Filesystem helpers.
 
+module std.os.fs (
+   is_file, is_dir, walk
+)
 use std.core *
+use std.core as core
 use std.os *
 use std.os.sys *
 use std.os.process *
 use std.str *
 use std.str.io *
-
-module std.os.fs (
-   is_file, is_dir, walk
-)
 
 fn is_file(path){
    "Returns true if path exists and is a regular file."
@@ -31,12 +31,6 @@ fn is_dir(path){
       }
       err(_) -> { return false }
    }
-}
-
-fn _read_fd_all(fd){
-   "Internal placeholder for legacy fd-to-string reader."
-   ;; Deprecated/unused by walk now
-   ""
 }
 
 fn list_dir(path){
@@ -85,7 +79,7 @@ fn walk(root, cb){
    cb(root)
    if(is_dir(root)){
       def items = list_dir(root)
-      def n = list_len(items)
+      def n = core.len(items)
       mut i = 0
       while(i < n){
          def name = get(items, i)

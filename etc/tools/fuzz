@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Nytrix fuzz harness
+"""
+import argparse
+import concurrent.futures
+import os
+import random
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+
+def rand_ident(rng):
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    return rng.choice(letters) + "".join(rng.choice(letters) for _ in range(rng.randint(1, 7)))
+
+def gen_expr(rng):
+    ints = [str(rng.randint(-20, 200)) for _ in range(6)]
+    atoms = ints + ['"x"', '"abc"', "true", "false"]
+    a = rng.choice(atoms)
+    b = rng.choice(atoms)
+    op = rng.choice(["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="])
+    return f"({a} {op} {b})"
+
+def gen_snippet(rng):
+    x = rand_ident(rng)
+    y = rand_ident(rng)
+    z = rand_ident(rng)
+    return "\n".join(
+        [
+            f"def {x} = {rng.randint(0, 9)}",
+            f"def {y} = {gen_expr(rng)}",
+            f"if({x} < 5){{ def {z} = {gen_expr(rng)} }} else {{ def {z} = {gen_expr(rng)} }}",
+            f"print({z})",
+        ]
+    )
+
+def gen_mem_snippet(rng):
+    n = rng.randint(8, 128)
+    idx = rng.randint(0, max(0, n - 1))
+    return "\n".join(
+        [
+            "use std.core *",
+            f"def p = malloc({n})",
+            f"store8(p, 65, {idx})",
+            f"def v = load8(p, {idx})",
+            "if(v != 65){ panic('mem mismatch') }",
+            "free(p)",
+        ]
+    )
+
+def gen_slice_snippet(rng):
+    a = rng.randint(0, 3)
+    b = rng.randint(4, 9)
+    step = rng.choice([1, 2, 3])
+    text = rng.choice(['"hello_world"', '"abcdefghij"', '"nytrix_slice_test"'])
+    return "\n".join(
+        [
+            f"def s = {text}",
+            f"def p = s[{a}:{b}:{step}]",
+            "print(p)",
+        ]
+    )
+
+def gen_import_snippet(rng):
+    mod = rng.choice(["std.core", "std.str", "std.core.reflect"])
+    return "\n".join(
+        [
+            f"use {mod} *",
+            f"def x = {rng.randint(1, 20)}",
+            "print(x)",
+        ]
+    )
+
+def gen_layout_snippet(rng):
+    name = "P" + rand_ident(rng)
+    x = rand_ident(rng)
+    y = rand_ident(rng)
+    return "\n".join(
+        [
+            f"layout {name} {{",
+            f"    int: {x},",
+            f"    int: {y}",
+            "}",
+            'print("ok")',
+        ]
+    )
+
+def run_case(ny_bin, src, timeout_s):
+    p = subprocess.run(
+        [ny_bin, "-c", src],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout_s,
+    )
+    err = p.stderr or ""
+    crashed = p.returncode < 0 or "Caught signal" in err or "AddressSanitizer" in err
+    panicked = "Panic:" in err
+    return crashed, panicked, p.returncode, p.stdout, p.stderr
+
+@dataclass
+class CaseResult:
+    index: int
+    seed: int
+    src: str
+    crashed: bool
+    panicked: bool
+    timed_out: bool
+    returncode: int
+    stdout: str
+    stderr: str
+
+def gen_case(index, base_seed, mode):
+    # Per-case deterministic seed keeps repro stable even with parallel scheduling.
+    case_seed = (base_seed * 0x9E3779B1 + index * 0x85EBCA6B) & 0xFFFFFFFF
+    rng = random.Random(case_seed)
+    if mode == "parser":
+        src = rng.choice([gen_snippet, gen_slice_snippet, gen_layout_snippet])(rng)
+    elif mode == "memory":
+        src = gen_mem_snippet(rng)
+    elif mode == "imports":
+        src = gen_import_snippet(rng)
+    elif mode == "slices":
+        src = gen_slice_snippet(rng)
+    else:
+        pick = rng.randint(0, 99)
+        if pick < 35:
+            src = gen_snippet(rng)
+        elif pick < 60:
+            src = gen_mem_snippet(rng)
+        elif pick < 78:
+            src = gen_slice_snippet(rng)
+        elif pick < 90:
+            src = gen_import_snippet(rng)
+        else:
+            src = gen_layout_snippet(rng)
+    return case_seed, src
+
+def run_case_index(ny_bin, timeout_s, index, base_seed, mode):
+    case_seed, src = gen_case(index, base_seed, mode)
+    try:
+        crashed, panicked, rc, out, err = run_case(ny_bin, src, timeout_s)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        crashed = True
+        panicked = False
+        timed_out = True
+        rc, out, err = 124, "", "timeout"
+    return CaseResult(
+        index=index,
+        seed=case_seed,
+        src=src,
+        crashed=crashed,
+        panicked=panicked,
+        timed_out=timed_out,
+        returncode=rc,
+        stdout=out,
+        stderr=err,
+    )
+
+def run_src_case(ny_bin, timeout_s, index, src, case_seed=0):
+    try:
+        crashed, panicked, rc, out, err = run_case(ny_bin, src, timeout_s)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        crashed = True
+        panicked = False
+        timed_out = True
+        rc, out, err = 124, "", "timeout"
+    return CaseResult(
+        index=index,
+        seed=case_seed,
+        src=src,
+        crashed=crashed,
+        panicked=panicked,
+        timed_out=timed_out,
+        returncode=rc,
+        stdout=out,
+        stderr=err,
+    )
+
+def save_crash_artifacts(seed, bad_cases, max_saved):
+    out_dir = f"/tmp/ny_fuzz_{seed}"
+    os.makedirs(out_dir, exist_ok=True)
+    keep = bad_cases[:max_saved]
+    for r in keep:
+        base = os.path.join(out_dir, f"case_{r.index:06d}_seed_{r.seed}")
+        with open(base + ".ny", "w", encoding="utf-8") as f:
+            f.write(r.src)
+        with open(base + ".stderr.txt", "w", encoding="utf-8") as f:
+            f.write(r.stderr or "")
+        with open(base + ".stdout.txt", "w", encoding="utf-8") as f:
+            f.write(r.stdout or "")
+    summary_path = os.path.join(out_dir, "summary.txt")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(f"seed={seed}\n")
+        f.write(f"bad_cases={len(bad_cases)}\n")
+        f.write(f"saved={len(keep)}\n")
+        if bad_cases:
+            first = bad_cases[0]
+            f.write(f"first_case={first.index}\n")
+            f.write(f"first_case_seed={first.seed}\n")
+            f.write(f"first_returncode={first.returncode}\n")
+    return out_dir
+
+def main():
+    ap = argparse.ArgumentParser(description="Targeted Nytrix parser/runtime fuzz harness")
+    ap.add_argument("--bin", default="build/ny_debug", help="ny binary path")
+    ap.add_argument("--iterations", type=int, default=200, help="number of generated cases")
+    ap.add_argument("--seed", type=int, default=None, help="RNG seed")
+    ap.add_argument("--timeout", type=float, default=1.2, help="timeout per case (seconds)")
+    ap.add_argument("-j", "--jobs", type=int, default=max(1, os.cpu_count() or 1),
+                    help="parallel workers")
+    ap.add_argument("--max-saved", type=int, default=16,
+                    help="max crashing cases to persist")
+    ap.add_argument("--stop-on-first", action="store_true",
+                    help="stop as soon as a crashing case is found")
+    ap.add_argument("--mode", choices=["mixed", "parser", "memory", "imports", "slices"],
+                    default="mixed", help="generator mode")
+    ap.add_argument("--replay-dir", default="",
+                    help="replay *.ny files from a directory instead of generating")
+    ap.add_argument("--fail-on-panic", action="store_true",
+                    help="treat runtime Panic as a failing case")
+    args = ap.parse_args()
+
+    if not os.path.exists(args.bin):
+        print(f"error: missing binary: {args.bin}", file=sys.stderr)
+        return 2
+
+    seed = args.seed if args.seed is not None else int(time.time())
+    jobs = max(1, int(args.jobs))
+    replay_sources = []
+    if args.replay_dir:
+        if not os.path.isdir(args.replay_dir):
+            print(f"[fuzz] replay dir does not exist: {args.replay_dir}", file=sys.stderr)
+            return 2
+        replay_sources = sorted(
+            os.path.join(args.replay_dir, n)
+            for n in os.listdir(args.replay_dir)
+            if n.endswith(".ny")
+        )
+        if not replay_sources:
+            print(f"[fuzz] no *.ny files in replay dir: {args.replay_dir}", file=sys.stderr)
+            return 2
+        print(f"[fuzz] seed={seed} replay={len(replay_sources)} jobs={jobs} mode={args.mode}")
+    else:
+        print(f"[fuzz] seed={seed} iterations={args.iterations} jobs={jobs} mode={args.mode}")
+
+    total = 0
+    crashes = 0
+    panics = 0
+    timeouts = 0
+    bad_results = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+        if replay_sources:
+            futures = []
+            for i, p in enumerate(replay_sources):
+                with open(p, "r", encoding="utf-8") as f:
+                    src = f.read()
+                futures.append(ex.submit(run_src_case, args.bin, args.timeout, i, src, i))
+        else:
+            futures = [
+                ex.submit(run_case_index, args.bin, args.timeout, i, seed, args.mode)
+                for i in range(args.iterations)
+            ]
+        for fut in concurrent.futures.as_completed(futures):
+            r = fut.result()
+            total += 1
+            if r.crashed:
+                crashes += 1
+            if r.panicked:
+                panics += 1
+            if r.timed_out:
+                timeouts += 1
+            is_bad = r.crashed or r.timed_out or (args.fail_on_panic and r.panicked)
+            if is_bad:
+                bad_results.append(r)
+                print(f"[fuzz] fail at case {r.index} seed={r.seed} rc={r.returncode}")
+                if args.stop_on_first:
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    break
+
+    print(f"[fuzz] done total={total} crashes={crashes} timeouts={timeouts} panics={panics}")
+    if bad_results:
+        bad_results.sort(key=lambda x: x.index)
+        out_dir = save_crash_artifacts(seed, bad_results, args.max_saved)
+        first = bad_results[0]
+        print(f"[fuzz] crash artifacts: {out_dir}")
+        print(f"[fuzz] first failing case: index={first.index} seed={first.seed} rc={first.returncode}")
+        print("[fuzz] first stderr:")
+        print((first.stderr or "")[:1200])
+        return 1
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

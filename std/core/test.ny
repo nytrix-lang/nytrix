@@ -1,11 +1,11 @@
 ;; Keywords: core test
 ;; Core Test module.
 
-use std.core *
-use std.os.sys *
 module std.core.test (
    assert, test, STDERR_FD, write_stderr, t_assert, t_assert_eq, fail
 )
+use std.core *
+use std.os.sys *
 
 def STDERR_FD = 2
 

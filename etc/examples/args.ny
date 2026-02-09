@@ -6,7 +6,7 @@ use std.os.args *
 
 print(f"Argc: {argc()}")
 def av = args()
-def n = list_len(av)
+def n = len(av)
 mut i = 0
 while(i < n){
     def arg = get(av, i, 0)

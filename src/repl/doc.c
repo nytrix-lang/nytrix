@@ -12,7 +12,7 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc,
   if (!dl || !name)
     return;
   for (size_t i = 0; i < dl->len; ++i) {
-    if (strcmp(dl->data[i].name, name) == 0) {
+    if (dl->data[i].name[0] == name[0] && strcmp(dl->data[i].name, name) == 0) {
       if (doc) {
         free(dl->data[i].doc);
         dl->data[i].doc = ny_strdup(doc);

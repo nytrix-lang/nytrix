@@ -30,7 +30,7 @@ fn sieve(n){
       }
       p += 2
    }
-   mut i = p
+   i = p
    while(i <= n){
       if(load8(flags, i >> 1)){ count += 1 }
       i += 2
@@ -48,4 +48,3 @@ def t1 = ticks()
 
 print(f"Primes: {to_str(r)}")
 print(f"Time: {to_str((t1 - t0) / 1000000)} ms")
-

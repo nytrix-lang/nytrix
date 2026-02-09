@@ -171,8 +171,8 @@ char *repl_assignment_target(const char *src) {
            (isalnum((unsigned char)*end) || *end == '_' || *end == '.'))
       end--;
     char *ident_start = end + 1;
-    if (ident_end >= ident_start && (*ident_start == '_' ||
-                                     isalpha((unsigned char)*ident_start))) {
+    if (ident_end >= ident_start &&
+        (*ident_start == '_' || isalpha((unsigned char)*ident_start))) {
       return ny_strndup(ident_start, (size_t)(ident_end - ident_start + 1));
     }
   }
@@ -206,7 +206,7 @@ int is_repl_stmt(const char *src) {
 }
 
 void count_unclosed(const char *src, int *out_paren, int *out_brack,
-                    int *out_brace) {
+                    int *out_brace, int *out_in_str) {
   int p = 0, b = 0, c = 0;
   int in_str = 0;
   for (const char *s = src; *s; s++) {
@@ -230,17 +230,19 @@ void count_unclosed(const char *src, int *out_paren, int *out_brack,
   *out_paren = p;
   *out_brack = b;
   *out_brace = c;
+  if (out_in_str)
+    *out_in_str = in_str;
 }
 
 int is_input_complete(const char *src) {
-  int p, b, c;
-  count_unclosed(src, &p, &b, &c);
-  return (p <= 0 && b <= 0 && c <= 0);
+  int p, b, c, s;
+  count_unclosed(src, &p, &b, &c, &s);
+  return (p <= 0 && b <= 0 && c <= 0 && s == 0);
 }
 
 void print_incomplete_hint(const char *src) {
   int p, b, c;
-  count_unclosed(src, &p, &b, &c);
+  count_unclosed(src, &p, &b, &c, NULL);
   if (p > 0 || b > 0 || c > 0) {
     printf("%s  ", clr(NY_CLR_GRAY));
     if (p > 0)
@@ -263,7 +265,7 @@ int repl_is_input_pending(void) {
 
 int repl_calc_indent(const char *src) {
   int p, b, c;
-  count_unclosed(src, &p, &b, &c);
+  count_unclosed(src, &p, &b, &c, NULL);
   int level = p + b + c;
   return level > 0 ? level * 2 : 0;
 }
@@ -288,7 +290,8 @@ int is_persistent_def(const char *src) {
   char *trimmed = ltrim((char *)src);
   return (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "fn ", 3) ||
           !strncmp(trimmed, "use ", 4) || !strncmp(trimmed, "module ", 7) ||
-          !strncmp(trimmed, "extern ", 7) || strchr(trimmed, '=') != NULL);
+          !strncmp(trimmed, "extern ", 7) || !strncmp(trimmed, "enum ", 5) ||
+          strchr(trimmed, '=') != NULL);
 }
 
 void repl_update_docs(doc_list_t *dl, const char *src) {

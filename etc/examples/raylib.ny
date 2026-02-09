@@ -1,26 +1,36 @@
 #!/bin/ny
-;; Raylib FFI (Example) - LowLevel ffi calls
+;; Raylib FFI (Example)
+;; https://github.com/raysan5/raylib
 
 use std.os.ffi *
 use std.str.io *
 
-def h = dlopen("/usr/lib/libraylib.so", 2)
+; '-L/usr/lib -lraylib' also works with extern
+
+def h = dlopen("/usr/lib/libraylib.so", RTLD_NOW())
 if(h != 0){
-   def InitWindow        = dlsym(h, "InitWindow")
-   def WindowShouldClose = dlsym(h, "WindowShouldClose")
-   def BeginDrawing      = dlsym(h, "BeginDrawing")
-   def EndDrawing        = dlsym(h, "EndDrawing")
-   def ClearBackground   = dlsym(h, "ClearBackground")
-   def CloseWindow       = dlsym(h, "CloseWindow")
-   call3_void(InitWindow, 800, 450, "Nytrix")
-   while(call0(WindowShouldClose) == 0){
-      call0_void(BeginDrawing)
-      call1_void(ClearBackground, 0xFF181818)
-      call0_void(EndDrawing)
+   def InitWindowP        = dlsym(h, "InitWindow")
+   def WindowShouldCloseP = dlsym(h, "WindowShouldClose")
+   def BeginDrawingP      = dlsym(h, "BeginDrawing")
+   def EndDrawingP        = dlsym(h, "EndDrawing")
+   def ClearBackgroundP   = dlsym(h, "ClearBackground")
+   def CloseWindowP       = dlsym(h, "CloseWindow")
+   def SetTargetFPSP      = dlsym(h, "SetTargetFPS")
+   if(InitWindowP == 0 || WindowShouldCloseP == 0 || BeginDrawingP == 0 ||
+      EndDrawingP == 0 || ClearBackgroundP == 0 || CloseWindowP == 0){
+      print("raylib symbols missing in loaded library")
+   } else {
+      call3_void(InitWindowP, 800, 450, "Nytrix")
+      if(SetTargetFPSP != 0){ call1_void(SetTargetFPSP, 120) }
+      while(call0(WindowShouldCloseP) == 0){
+         call0_void(BeginDrawingP)
+         call1_void(ClearBackgroundP, 0xFF181818)
+         call0_void(EndDrawingP)
    }
-   call0_void(CloseWindow)
+      call0_void(CloseWindowP)
+      print("✓ Raylib window closed")
+   }
    dlclose(h)
-   print("✓ Raylib window closed")
 } else {
    print("[/usr/lib/libraylib.so] Raylib not found")
 }

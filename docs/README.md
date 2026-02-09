@@ -28,6 +28,13 @@ Nytrix aims to stay small and extensible. Not there yet.
 For now, Linux only.
 Tested on Arch Linux x86_64.
 
+### Build
+
+```bash
+make
+./build/ny
+```
+
 ### Install
 
 ```bash
@@ -40,7 +47,7 @@ sudo make install
 
 ```bash
 ny -i
-```
+``` 
 
 ### Run
 
@@ -51,7 +58,7 @@ ny etc/examples/matrix.ny
 ### Binary
 
 ```bash
-ny -c "print('Hello NyELF!')" -o && ./a.out
+ny -c "print('Hello Ny!')" -o && ./a.out
 ```
 
 ### Docs

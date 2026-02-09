@@ -1,10 +1,10 @@
 ;; Keywords: core mem
 ;; Core Mem module.
 
-use std.core *
 module std.core.mem (
    memchr, memcpy, memset, memcmp
 )
+use std.core *
 
 fn memchr(ptr, val, n){
    "Find byte in memory."

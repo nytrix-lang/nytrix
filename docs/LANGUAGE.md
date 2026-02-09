@@ -1,55 +1,74 @@
-# Nytrix Language
+# Nytrix Language Spec
 
-A compact, predictable surface.
+Compact, predictable, expression-oriented systems language.  
+
+> WorkInProgress: Behavior may change. Tests are the source of truth.
+
+## System
+- compiler: LLVM-based, AOT
+- evaluation: expression-oriented
+- entry: global scope, top-to-bottom
 
 ## Lexical
+- identifiers: `[A-Za-z_][A-Za-z0-9_]*`
+- comments: `;` single line
+- ignored blocks: standalone non-docstring strings
+- docstrings: string immediately after `fn`
+- strings: `'...'`, `"..."`, `'''...'''`, `"""..."""`, UTF-8, `f"{expr}"`
 
-* Identifiers: `[A-Za-z_][A-Za-z0-9_]*`
-* Comments: a semicolon `;` starts a single-line comment.
-* Multiline Comments: non-docstring strings (e.g. `"""..."""`) on their own lines are treated as comments/ignored.
-* Docstrings: Strings immediately following a function definition are captured as docstrings. Supports single (`"`, `'`) or triple (`"""`, `'''`) quotes.
+## Types & Values
+- raw: `i32`, `i64`, `f64`
+- core: `bool`, `str`, `ptr`, `fn`
+- advanced: `Result`, `Option`, `List`, `Dict`, `Set`, `Tuple`
+- dynamic: `any`
+- literals:
+  - int: decimal, `0x`, `0o`, `0b`
+  - float: `1.0`, `.5`, `1e-3`
+  - bool: `true`, `false`
+  - nil: `nil`
+  - list: `[a, b]`
+  - set: `{a, b}`
+  - dict: `{"k": v}`
+  - tuple: `(a, b,)` or `tuple(x)`
 
-## Literals and types
-
-* Integers: decimal, `0x` hex, `0o` octal, `0b` binary.
-* Floats: `1.0`, `.5`, `1e-3`.
-* Bool: `true`, `false`.
-* None: `nil` (maps to `0`).
-* Strings: `"..."` or `'...'`, UTF-8.
-* Containers: lists `[a, b]`, sets `{a, b}`, dicts `{"k": v}`.
-* Tuples: `tuple(expr)` or `(a, b,)` via std helpers.
-
-## Core syntax
-
+## Syntax
 ```ny
-fn name(param=default, ...){ ... }
-if (cond) { ... } elif (cond) { ... } else { ... }
-while (cond) { ... }
-for (x in iterable) { ... }
-try { ... } catch(e) { ... }
-def name = value
-undef name
-```
+def x = 10
+mut y = 20
+fn f(a, b=default){...}
 
-Work in progress. Behavior may change.
-Tests are the source of truth.
-Examples will follow.
+if(c){...} elif(c){...} else{...}
+while(c){...}
+for(x in it){...}
 
-## Modules
-* **Imports**:
-	* Module alias: `use std.math as m`, `use lib as l`, or `use ./util/time as t` (then call `m.sqrt`).
-	* Import all exports: `use std.math *` (brings exported names into scope).
-	* Import list: `use std.math (sqrt, pow as p)`.
-* **Resolution**: `std.*` always maps to `src/std/`, and bare/relative paths resolve from the importing file's directory (current directory first, then std/lib). Keep aliasing short so you know the origin at a glance.
-* **Namespacing**:
-```nytrix
-module tui (bold, italic, dim, underline, color)
-```
-Use `module name ( ... )` to declare exports; the list can be comma-separated. Use `module name *` to export all module-level functions and vars. You can also write `module name` with no parentheses to define a module with no explicit export list; it treats the rest of the file as the module body. Functions and vars declared outside a module remain local to the file unless explicitly exported.
+match v { p -> e, _ -> d }
+try{...} catch(e){...}
+defer{...}
+
+def fd = open(...) ?
+````
 
 ## Operators
 
-* Arithmetic: `+ - * / %`
-* Comparison: `== != < > <= >=`
-* Logical: `&& || !`
-* Unary: `-`
+* arithmetic: `+ - * / %`
+* compare: `== != < > <= >=`
+* logical: `&& || !`
+* unary: `-`
+* error: `?`
+
+## Modules
+
+* export: `module m(a,b)` | `module m *` | `module m`
+* import: `use path as a` | `use path (a, b as c)` | `use path *`
+* resolution: `std.*` → standard library; relative/bare → current dir, then std/lib
+
+## Low-level
+
+`extern fn` `asm` `syscall`
+
+## Standard Library
+
+* `std.core`: base types, `Result`, `Option`
+* `std.str.io`: formatted I/O
+* `std.os.sys`: syscalls
+* `std.os.process`: processes

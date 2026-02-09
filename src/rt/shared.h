@@ -29,10 +29,10 @@ static inline bool is_valid_heap_ptr(int64_t v) {
 
 #define is_any_ptr(v) (((v) != 0 && !((v) & 1) && (uintptr_t)(v) > 0x1000))
 
-static inline int64_t __tag(int64_t v) {
+static inline int64_t rt_tag_v(int64_t v) {
   return (int64_t)(((uint64_t)v << 1) | 1);
 }
-static inline int64_t __untag(int64_t v) { return (v & 1) ? (v >> 1) : v; }
+static inline int64_t rt_untag_v(int64_t v) { return (v & 1) ? (v >> 1) : v; }
 static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 
 #define TAG_FLOAT 221     // (110 << 1) | 1
@@ -42,7 +42,7 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define TAG_ERR 202
 
 static inline int is_v_flt(int64_t v) {
-  if (!is_heap_ptr(v))
+  if (!is_ptr(v))
     return 0;
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return (tag == TAG_FLOAT || tag == 110);
@@ -56,7 +56,7 @@ static inline int is_ny_obj(int64_t v) {
 }
 
 static inline int is_v_str(int64_t v) {
-  if (!is_heap_ptr(v))
+  if (!is_ptr(v))
     return 0;
 
   // The tag is always at v - 8
@@ -66,13 +66,13 @@ static inline int is_v_str(int64_t v) {
 }
 
 static inline int is_v_ok(int64_t v) {
-  if (!is_heap_ptr(v))
+  if (!is_ptr(v))
     return 0;
   return *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_OK;
 }
 
 static inline int is_v_err(int64_t v) {
-  if (!is_heap_ptr(v))
+  if (!is_ptr(v))
     return 0;
   return *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_ERR;
 }
@@ -85,6 +85,10 @@ int64_t __free(int64_t ptr);
 int64_t __flt_unbox_val(int64_t v);
 int64_t __flt_box_val(int64_t bits);
 int64_t __str_concat(int64_t a, int64_t b);
+int64_t __trace_last_file(void);
+int64_t __trace_last_line(void);
+int64_t __trace_last_col(void);
+int64_t __trace_last_func(void);
 // Helper for memory OOB checks
 static inline size_t __get_heap_size(int64_t v) {
   if (!is_heap_ptr(v))

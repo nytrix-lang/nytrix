@@ -1,13 +1,13 @@
 ;; Keywords: core debug
 ;; Core Debug module.
 
+module std.core.debug (
+   debug_print_val, debug_print
+)
 use std.core *
 use std.core.reflect *
 use std.str.io *
 use std.str *
-module std.core.debug (
-   debug_print_val, debug_print
-)
 
 fn debug_print_val(val){
    "Prints a detailed debug representation of a single value."

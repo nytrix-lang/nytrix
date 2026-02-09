@@ -100,10 +100,13 @@ int64_t __to_str(int64_t v) {
     __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
+
+  if (is_v_str(v)) {
+    return v;
+  }
+
   if (is_heap_ptr(v)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    if (tag == TAG_STR || tag == TAG_STR_CONST || tag == 120 || tag == 121)
-      return v;
     if (tag == TAG_FLOAT) {
       double d;
       memcpy(&d, (void *)(uintptr_t)v, 8);
@@ -115,7 +118,7 @@ int64_t __to_str(int64_t v) {
       __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
       return res;
     }
-    // Generic heap object
+    // Generic Nytrix heap object
     char buf[64];
     int len = sprintf(buf, "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
@@ -124,7 +127,7 @@ int64_t __to_str(int64_t v) {
     __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
     return res;
   }
-  if (is_any_ptr(v)) {
+  if (is_ptr(v)) {
     char buf[64];
     int len = sprintf(buf, "<ptr 0x%lx>", (unsigned long)v);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);

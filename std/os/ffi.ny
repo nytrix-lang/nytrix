@@ -1,48 +1,148 @@
 ;; Keywords: os ffi
 ;; Os Ffi module.
 
-use std.core as core
-use std.core.dict as _d
 module std.os.ffi (
    RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlsym, dlclose, dlerror,
    call0_void, call1_void, call2_void, call3_void, call0, call1, call2, call3, call4, call5,
    call6, call7, call8, call9, call10, call11, call12, call13, ffi_call,
    bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all
 )
+use std.core as core
+use std.core.dict as _d
 
-fn RTLD_LAZY(){ "dlopen flag: resolve symbols lazily." return 1 }
-fn RTLD_NOW(){ "dlopen flag: resolve symbols immediately." return 2 }
-fn RTLD_GLOBAL(){ "dlopen flag: make symbols globally available." return 256 }
-fn RTLD_LOCAL(){ "dlopen flag: keep symbols local." return 0 }
+fn RTLD_LAZY(){
+   "dlopen flag: resolve symbols lazily."
+   return 1
+}
 
-fn dlopen(path, flags){ "Opens a dynamic library." return __dlopen(path, flags) }
-fn dlsym(handle, symbol){ "Resolves a symbol." return __dlsym(handle, symbol) }
-fn dlclose(handle){ "Closes a library handle." return __dlclose(handle) }
-fn dlerror(){ "Returns the last error." return __dlerror() }
+fn RTLD_NOW(){
+   "dlopen flag: resolve symbols immediately."
+   return 2
+}
 
-fn call0_void(fptr){ "Calls `fptr()` and ignores the return value." __call0(fptr) }
-fn call1_void(fptr,a){ "Calls `fptr(a)` and ignores the return value." __call1(fptr,a) }
-fn call2_void(fptr,a,b){ "Calls `fptr(a,b)` and ignores the return value." __call2(fptr,a,b) }
-fn call3_void(fptr,a,b,c){ "Calls `fptr(a,b,c)` and ignores the return value." __call3(fptr,a,b,c) }
+fn RTLD_GLOBAL(){
+   "dlopen flag: make symbols globally available."
+   return 256
+}
 
-fn call0(fptr){ "Calls `fptr()` and returns the raw result." return __call0(fptr) }
-fn call1(fptr,a){ "Calls `fptr(a)` and returns the raw result." return __call1(fptr,a) }
-fn call2(fptr,a,b){ "Calls `fptr(a,b)` and returns the raw result." return __call2(fptr,a,b) }
-fn call3(fptr,a,b,c){ "Calls `fptr(a,b,c)` and returns the raw result." return __call3(fptr,a,b,c) }
-fn call4(fptr,a,b,c,d){ "Calls `fptr(a,b,c,d)` and returns the raw result." return __call4(fptr,a,b,c,d) }
-fn call5(fptr,a,b,c,d,e){ "Calls `fptr(a,b,c,d,e)` and returns the raw result." return __call5(fptr,a,b,c,d,e) }
-fn call6(fptr,a,b,c,d,e,g){ "Calls `fptr(a,b,c,d,e,g)` and returns the raw result." return __call6(fptr,a,b,c,d,e,g) }
-fn call7(fptr,a,b,c,d,e,g,h){ "Calls `fptr(a,b,c,d,e,g,h)` and returns the raw result." return __call7(fptr,a,b,c,d,e,g,h) }
-fn call8(fptr,a,b,c,d,e,g,h,i){ "Calls `fptr(a,b,c,d,e,g,h,i)` and returns the raw result." return __call8(fptr,a,b,c,d,e,g,h,i) }
-fn call9(fptr,a,b,c,d,e,g,h,i,j){ "Calls `fptr(a,b,c,d,e,g,h,i,j)` and returns the raw result." return __call9(fptr,a,b,c,d,e,g,h,i,j) }
-fn call10(fptr,a,b,c,d,e,g,h,i,j,k){ "Calls `fptr(a,b,c,d,e,g,h,i,j,k)` and returns the raw result." return __call10(fptr,a,b,c,d,e,g,h,i,j,k) }
-fn call11(fptr,a,b,c,d,e,g,h,i,j,k,l){ "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l)` and returns the raw result." return __call11(fptr,a,b,c,d,e,g,h,i,j,k,l) }
-fn call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m){ "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l,m)` and returns the raw result." return __call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m) }
-fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){ "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l,m,n)` and returns the raw result." return __call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n) }
+fn RTLD_LOCAL(){
+   "dlopen flag: keep symbols local."
+   return 0
+}
+
+fn dlopen(path, flags){
+   "Opens a dynamic library."
+   return __dlopen(path, flags)
+}
+
+fn dlsym(handle, symbol){
+   "Resolves a symbol."
+   return __dlsym(handle, symbol)
+}
+
+fn dlclose(handle){
+   "Closes a library handle."
+   return __dlclose(handle)
+}
+
+fn dlerror(){
+   "Returns the last error."
+   return __dlerror()
+}
+
+fn call0_void(fptr){
+   "Calls `fptr()` and ignores the return value."
+   __call0(fptr)
+}
+
+fn call1_void(fptr,a){
+   "Calls `fptr(a)` and ignores the return value."
+   __call1(fptr,a)
+}
+
+fn call2_void(fptr,a,b){
+   "Calls `fptr(a,b)` and ignores the return value."
+   __call2(fptr,a,b)
+}
+
+fn call3_void(fptr,a,b,c){
+   "Calls `fptr(a,b,c)` and ignores the return value."
+   __call3(fptr,a,b,c)
+}
+
+fn call0(fptr){
+   "Calls `fptr()` and returns the raw result."
+   return __call0(fptr)
+}
+
+fn call1(fptr,a){
+   "Calls `fptr(a)` and returns the raw result."
+   return __call1(fptr,a)
+}
+
+fn call2(fptr,a,b){
+   "Calls `fptr(a,b)` and returns the raw result."
+   return __call2(fptr,a,b)
+}
+
+fn call3(fptr,a,b,c){
+   "Calls `fptr(a,b,c)` and returns the raw result."
+   return __call3(fptr,a,b,c)
+}
+
+fn call4(fptr,a,b,c,d){
+   "Calls `fptr(a,b,c,d)` and returns the raw result."
+   return __call4(fptr,a,b,c,d)
+}
+
+fn call5(fptr,a,b,c,d,e){
+   "Calls `fptr(a,b,c,d,e)` and returns the raw result."
+   return __call5(fptr,a,b,c,d,e)
+}
+
+fn call6(fptr,a,b,c,d,e,g){
+   "Calls `fptr(a,b,c,d,e,g)` and returns the raw result."
+   return __call6(fptr,a,b,c,d,e,g)
+}
+
+fn call7(fptr,a,b,c,d,e,g,h){
+   "Calls `fptr(a,b,c,d,e,g,h)` and returns the raw result."
+   return __call7(fptr,a,b,c,d,e,g,h)
+}
+
+fn call8(fptr,a,b,c,d,e,g,h,i){
+   "Calls `fptr(a,b,c,d,e,g,h,i)` and returns the raw result."
+   return __call8(fptr,a,b,c,d,e,g,h,i)
+}
+
+fn call9(fptr,a,b,c,d,e,g,h,i,j){
+   "Calls `fptr(a,b,c,d,e,g,h,i,j)` and returns the raw result."
+   return __call9(fptr,a,b,c,d,e,g,h,i,j)
+}
+
+fn call10(fptr,a,b,c,d,e,g,h,i,j,k){
+   "Calls `fptr(a,b,c,d,e,g,h,i,j,k)` and returns the raw result."
+   return __call10(fptr,a,b,c,d,e,g,h,i,j,k)
+}
+
+fn call11(fptr,a,b,c,d,e,g,h,i,j,k,l){
+   "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l)` and returns the raw result."
+   return __call11(fptr,a,b,c,d,e,g,h,i,j,k,l)
+}
+
+fn call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m){
+   "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l,m)` and returns the raw result."
+   return __call12(fptr,a,b,c,d,e,g,h,i,j,k,l,m)
+}
+
+fn call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n){
+   "Calls `fptr(a,b,c,d,e,g,h,i,j,k,l,m,n)` and returns the raw result."
+   return __call13(fptr,a,b,c,d,e,g,h,i,j,k,l,m,n)
+}
 
 fn ffi_call(fptr, args){
    "Calls `fptr` with arguments from `args` (supported arity: 0..13)."
-   def n = core.list_len(args)
+   def n = core.len(args)
    if(n==0){ return call0(fptr)  }
    if(n==1){ return call1(fptr, core.get(args,0))  }
    if(n==2){ return call2(fptr, core.get(args,0), core.get(args,1))  }
@@ -64,7 +164,10 @@ fn bind(handle, name){
    "Resolves `name` from `handle` and returns a callable wrapper, or 0."
    def fptr = dlsym(handle, name)
    if(fptr != 0){
-      return fn(...args){ return ffi_call(fptr, args) }
+      return fn(...args){
+         "Calls the bound symbol with the provided arguments."
+         return ffi_call(fptr, args)
+      }
    }
    return 0
 }
@@ -79,7 +182,7 @@ fn call_ext(handle, name, ...args){
 fn bind_all(handle, names){
    "Resolves each symbol in `names` and returns a dict of bound callables."
    mut res = _d.dict()
-   mut i = 0 mut n = core.list_len(names)
+   mut i = 0 mut n = core.len(names)
    while(i < n){
       def name = core.get(names, i)
       def b = bind(handle, name)
@@ -98,17 +201,15 @@ fn import_all(handle, names){
    "Imports all resolvable symbols into the global table."
    mut g = __globals()
    if(!core.is_dict(g)){
-      g = _d.dict(core.list_len(names) + 8)
+      g = _d.dict(core.len(names) + 8)
       __set_globals(g)
    }
-   mut i = 0 mut n = core.list_len(names)
+   mut i = 0 mut n = core.len(names)
    while(i < n){
       def name = core.get(names, i)
       def b = bind(handle, name)
       if(b != 0){
-         def new_g = core.set_idx(g, name, b)
-         __set_globals(new_g)
-         g = new_g
+         _d.dict_set(g, name, b)
       }
       i += 1
    }

@@ -1,12 +1,12 @@
 ;; Keywords: strings timefmt
 ;; Strings Timefmt module.
 
-use std.core *
-use std.math *
-use std.str *
 module std.math.timefmt (
    _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format_time
 )
+use std.core *
+use std.math *
+use std.str *
 
 fn _is_leap(y){
    "Return true if year y is a leap year."

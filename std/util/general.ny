@@ -1,12 +1,12 @@
 ;; Keywords: util general
 ;; General utility module.
 
-use std.core *
-use std.math.random *
-use std.str.io *
 module std.util.general (
    uuid
 )
+use std.core *
+use std.math.random *
+use std.str.io *
 
 fn uuid(){
    "Generates a random Version 4 UUID string (e.g., 'f47ac10b-58cc-4372-a567-0e02b2c3d479')."

@@ -1,4 +1,5 @@
 use std.core *
+use std.str.str *
 use std.str *
 
 ;; std.str (Test)
@@ -19,7 +20,7 @@ assert(atoi("123") == 123, "atoi")
 assert(atoi("-7") == -7, "atoi negative")
 
 mut parts = split("a,b,c", ",")
-assert(list_len(parts) == 3, "split count")
+assert(len(parts) == 3, "split count")
 assert(get(parts, 0) == "a", "split first")
 assert(get(parts, 2) == "c", "split last")
 
@@ -34,5 +35,11 @@ assert(join(items, ",") == "a,b,c", "join")
 
 assert(str_replace("a-b-a", "a", "x") == "x-b-x", "str_replace")
 assert(replace_all("a-b-a", "-", ":") == "a:b:a", "replace_all")
+
+def s = "abcdef"
+assert(_str_eq(str_slice(s, 0, 3), "abc"), "slice start")
+assert(_str_eq(str_slice(s, 1, 5, 2), "bd"), "slice step")
+assert(_str_eq(str_slice(s, -3, -1), "de"), "slice negative")
+assert(_str_eq(str_slice(s, 0, 0), ""), "slice empty")
 
 print("✓ std.str tests passed")

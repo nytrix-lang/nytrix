@@ -1,12 +1,11 @@
 ;; Keywords: str glob
 ;; Simple glob matching.
 
-use std.core *
-use std.str *
-
 module std.str.glob (
    glob_match
 )
+use std.core *
+use std.str *
 
 fn _glob_match(p, s, pi, si){
    "Internal recursive matcher used by `glob_match`."

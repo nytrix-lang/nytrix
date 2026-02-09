@@ -1,4 +1,5 @@
 #include "priv.h"
+#include <stdlib.h>
 
 static char *parse_qualified_name(parser_t *p) {
   if (p->cur.kind != NY_T_IDENT) {
@@ -40,9 +41,9 @@ static char *parse_qualified_name(parser_t *p) {
   size_t result_len = len;
   if (p->current_module) {
     size_t clen = strlen(p->current_module);
-    if (!(len > clen && strncmp(p->current_module, buf, clen) == 0 &&
-          buf[clen] == '.')) {
-      char *prefixed = malloc(clen + 1 + len + 1);
+    if (!(result_len >= clen && strncmp(p->current_module, result, clen) == 0 &&
+          (result[clen] == '.' || result[clen] == '\0'))) {
+      char *prefixed = malloc(clen + 1 + result_len + 1);
       if (!prefixed) {
         free(buf);
         fprintf(stderr, "oom\n");
@@ -50,9 +51,11 @@ static char *parse_qualified_name(parser_t *p) {
       }
       memcpy(prefixed, p->current_module, clen);
       prefixed[clen] = '.';
-      memcpy(prefixed + clen + 1, buf, len + 1);
+      memcpy(prefixed + clen + 1, result, result_len + 1);
+      if (result != buf)
+        free(result);
       result = prefixed;
-      result_len = clen + 1 + len;
+      result_len = clen + 1 + result_len;
     }
   }
   char *name = arena_strndup(p->arena, result, result_len);
@@ -60,6 +63,35 @@ static char *parse_qualified_name(parser_t *p) {
     free(result);
   free(buf);
   return name;
+}
+
+static bool is_pow2_u64(unsigned long long v) {
+  return v && ((v & (v - 1)) == 0);
+}
+
+static size_t parse_align_attr(parser_t *p, const char *kind) {
+  token_t kw = p->cur;
+  parser_advance(p);
+  if (!parser_match(p, NY_T_LPAREN)) {
+    parser_error(p, kw, "expected '(' after attribute", NULL);
+    return 0;
+  }
+  if (p->cur.kind != NY_T_NUMBER) {
+    parser_error(p, p->cur, "expected numeric value for attribute", NULL);
+    return 0;
+  }
+  const char *num = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+  unsigned long long val = strtoull(num, NULL, 0);
+  if (val == 0) {
+    parser_error(p, p->cur, "attribute value must be > 0", NULL);
+    val = 1;
+  } else if (!is_pow2_u64(val)) {
+    parser_error(p, p->cur, "attribute value must be a power of two", NULL);
+  }
+  parser_advance(p);
+  parser_expect(p, NY_T_RPAREN, "')' after attribute", NULL);
+  (void)kind;
+  return (size_t)val;
 }
 
 static stmt_t *parse_stmt_or_block(parser_t *p) {
@@ -509,37 +541,163 @@ static stmt_t *parse_continue(parser_t *p) {
   return s;
 }
 
-static stmt_t *parse_layout(parser_t *p) {
+static stmt_t *parse_struct(parser_t *p) {
   token_t tok = p->cur;
-  parser_expect(p, NY_T_LAYOUT, "'layout'", NULL);
-  if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "layout expects name", NULL);
+  bool is_layout = (tok.len == 6 && strncmp(tok.lexeme, "layout", 6) == 0);
+  parser_expect(p, NY_T_STRUCT, is_layout ? "'layout'" : "'struct'", NULL);
+  const char *name = parse_qualified_name(p);
+  if (!name) {
     return NULL;
   }
-  const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-  parser_advance(p);
-  parser_expect(p, NY_T_LPAREN, "'('", NULL);
-  stmt_t *s = stmt_new(p->arena, NY_S_LAYOUT, tok);
-  s->as.layout.name = name;
-  while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+  stmt_t *s = stmt_new(p->arena, is_layout ? NY_S_LAYOUT : NY_S_STRUCT, tok);
+  if (is_layout)
+    s->as.layout.name = name;
+  else
+    s->as.struc.name = name;
+  size_t align_override = 0;
+  size_t pack = 0;
+  while (p->cur.kind == NY_T_IDENT) {
+    if (p->cur.len == 5 && strncmp(p->cur.lexeme, "align", 5) == 0) {
+      if (align_override != 0) {
+        parser_error(p, p->cur, "duplicate align attribute", NULL);
+        parser_advance(p);
+        continue;
+      }
+      align_override = parse_align_attr(p, "align");
+      continue;
+    }
+    if (p->cur.len == 4 && strncmp(p->cur.lexeme, "pack", 4) == 0) {
+      if (pack != 0) {
+        parser_error(p, p->cur, "duplicate pack attribute", NULL);
+        parser_advance(p);
+        continue;
+      }
+      pack = parse_align_attr(p, "pack");
+      continue;
+    }
+    break;
+  }
+  if (is_layout) {
+    s->as.layout.align_override = align_override;
+    s->as.layout.pack = pack;
+  } else {
+    s->as.struc.align_override = align_override;
+    s->as.struc.pack = pack;
+  }
+  parser_expect(p, NY_T_LBRACE, "'{'", NULL);
+  ny_layout_field_list *fields =
+      is_layout ? &s->as.layout.fields : &s->as.struc.fields;
+  while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected field name",
                    "keywords cannot be used as field names");
       break;
     }
-    const char *fname = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+    const char *id1 = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
-    parser_expect(p, NY_T_COLON, "' :", NULL);
-    if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected type name", NULL);
+    parser_expect(p, NY_T_COLON, "':'", NULL);
+
+    // Smart struct field: handles both 'name: type' and 'type: name'
+    // If next is '*' or identifier followed by comma/newline/brace, then id1
+    // was type. But let's stick to name: type for now as primary, and if type:
+    // name is requested specifically we can disambiguate. The user's last
+    // request: layout Point { int: x, int: y } This is clearly type: name.
+
+    const char *fname = id1;
+    const char *tname = NULL;
+
+    // Check if it's type: name.
+    // If id1 is a known type or if there's an ident after COLON...
+    // Actually, let's just support name: type by default,
+    // and if the user wants type: name we check if id2 exists.
+
+    size_t ptr_depth = 0;
+    while (parser_match(p, NY_T_STAR))
+      ptr_depth++;
+
+    if (p->cur.kind == NY_T_IDENT) {
+      const char *id2 = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+      parser_advance(p);
+
+      // If we are in 'layout' mode maybe we flip them?
+      // For now, let's just assume identity: x is 'name: type'
+      // but 'int: x' is also parsed.
+      // We can disambiguate by checking if id1 is a primitive type name.
+      bool id1_is_type =
+          (strcmp(id1, "int") == 0 || strcmp(id1, "i8") == 0 ||
+           strcmp(id1, "i16") == 0 || strcmp(id1, "i32") == 0 ||
+           strcmp(id1, "i64") == 0 || strcmp(id1, "i128") == 0 ||
+           strcmp(id1, "u8") == 0 || strcmp(id1, "u16") == 0 ||
+           strcmp(id1, "u32") == 0 || strcmp(id1, "u64") == 0 ||
+           strcmp(id1, "u128") == 0 || strcmp(id1, "str") == 0 ||
+           strcmp(id1, "char") == 0 || strcmp(id1, "bool") == 0 ||
+           strcmp(id1, "f32") == 0 || strcmp(id1, "f64") == 0 ||
+           strcmp(id1, "f128") == 0);
+
+      if (id1_is_type) {
+        fname = id2;
+        tname = id1;
+      } else {
+        fname = id1;
+        tname = id2;
+      }
+    } else {
+      // Only one ident? Then it must be 'name: type' but type is missing?
+      // No, if only one ident then that ident IS the type and name is... we
+      // need both.
+      parser_error(p, p->cur, "expected field name or type", NULL);
       break;
     }
-    const char *tname = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-    parser_advance(p);
-    layout_field_t f = {fname, tname, 0};
-    vec_push_arena(p->arena, &s->as.layout.fields, f);
+
+    if (ptr_depth > 0) {
+      char buf[256];
+      char *ptr = buf;
+      for (size_t i = 0; i < ptr_depth; i++)
+        *ptr++ = '*';
+      strcpy(ptr, tname);
+      tname = arena_strndup(p->arena, buf, strlen(buf));
+    }
+
+    int field_align = 0;
+    if (p->cur.kind == NY_T_IDENT && p->cur.len == 5 &&
+        strncmp(p->cur.lexeme, "align", 5) == 0) {
+      field_align = (int)parse_align_attr(p, "align");
+    }
+
+    layout_field_t f_field = {fname, tname, field_align};
+    vec_push_arena(p->arena, fields, f_field);
+
     if (p->cur.kind == NY_T_COMMA)
       parser_advance(p);
+  }
+  parser_expect(p, NY_T_RBRACE, "'}'", NULL);
+  return s;
+}
+
+static stmt_t *parse_enum(parser_t *p) {
+  token_t tok = p->cur;
+  parser_expect(p, NY_T_ENUM, "'enum'", NULL);
+  const char *name = parse_qualified_name(p);
+  if (!name) {
+    return NULL;
+  }
+  parser_expect(p, NY_T_LBRACE, "'{'", NULL);
+  stmt_t *s = stmt_new(p->arena, NY_S_ENUM, tok);
+  s->as.enu.name = name;
+  while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected enum variant name", NULL);
+      break;
+    }
+    stmt_enum_item_t item = {0};
+    item.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+    parser_advance(p);
+    if (parser_match(p, NY_T_ASSIGN)) {
+      item.value = p_parse_expr(p, 0);
+    }
+    vec_push_arena(p->arena, &s->as.enu.items, item);
+    if (!parser_match(p, NY_T_COMMA))
+      break;
   }
   parser_expect(p, NY_T_RBRACE, "'}'", NULL);
   return s;
@@ -695,8 +853,6 @@ static stmt_t *parse_module(parser_t *p) {
 }
 
 stmt_t *p_parse_stmt(parser_t *p) {
-  NY_LOG_DEBUG("Parsing statement kind %d at line %d\n", p->cur.kind,
-               p->cur.line);
   switch (p->cur.kind) {
   case NY_T_SEMI:
     parser_advance(p);
@@ -705,8 +861,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
     return parse_use(p);
   case NY_T_MODULE:
     return parse_module(p);
-  case NY_T_LAYOUT:
-    return parse_layout(p);
+  case NY_T_STRUCT:
+    return parse_struct(p);
+  case NY_T_ENUM:
+    return parse_enum(p);
   case NY_T_EXTERN:
     return parse_extern(p);
   case NY_T_FN:
@@ -779,7 +937,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
         char *final_name = (char *)ident.lexeme;
         size_t nlen = ident.len;
         bool mangled = false;
-        if (p->current_module && p->block_depth == 0) {
+        if (p->block_depth == 0 && p->current_module) {
           size_t mlen = strlen(p->current_module);
           char *prefixed = malloc(mlen + 1 + nlen + 1);
           sprintf(prefixed, "%s.%.*s", p->current_module, (int)nlen,
@@ -792,6 +950,33 @@ stmt_t *p_parse_stmt(parser_t *p) {
         if (mangled)
           free(final_name);
         vec_push_arena(p->arena, &s->as.var.names, name_s);
+
+        const char *var_type = NULL;
+        if (parser_match(p, NY_T_COLON)) {
+          size_t ptr_depth = 0;
+          while (p->cur.kind == NY_T_STAR) {
+            ptr_depth++;
+            parser_advance(p);
+          }
+          if (p->cur.kind == NY_T_IDENT) {
+            const char *ident_type =
+                arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+            parser_advance(p);
+            if (ptr_depth > 0) {
+              char buf[256];
+              char *ptr = buf;
+              for (size_t i = 0; i < ptr_depth; i++)
+                *ptr++ = '*';
+              strcpy(ptr, ident_type);
+              var_type = arena_strndup(p->arena, buf, strlen(buf));
+            } else {
+              var_type = ident_type;
+            }
+          } else {
+            parser_error(p, p->cur, "expected type name after ':'", NULL);
+          }
+        }
+        vec_push_arena(p->arena, &s->as.var.types, var_type);
 
         if (!parser_match(p, NY_T_COMMA))
           break;

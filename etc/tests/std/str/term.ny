@@ -7,7 +7,7 @@ use std.str *
 
 def sz = get_terminal_size()
 assert(is_list(sz), "terminal size list")
-assert(list_len(sz) == 2, "terminal size len")
+assert(len(sz) == 2, "terminal size len")
 
 def w = get(sz, 0)
 def h = get(sz, 1)
@@ -15,7 +15,7 @@ assert(w > 0, "terminal width")
 assert(h > 0, "terminal height")
 
 def names = color_names()
-assert(list_len(names) >= 5, "color_names")
+assert(len(names) >= 5, "color_names")
 assert(is_str(get_color_name(0)), "get_color_name")
 
 def colored = get_color("x", 1)

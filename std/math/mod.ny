@@ -1,12 +1,12 @@
 ;; Keywords: math
 ;; Math module.
 
-use std.core *
-use std.core.reflect *
-use std.math.float *
 module std.math (
    abs, min, max, pow, mod, clamp, sign, sqrt, gcd, lcm, factorial, lerp
 )
+use std.core *
+use std.core.reflect *
+use std.math.float *
 
 fn abs(x){
    "Return the absolute value of `x`."
