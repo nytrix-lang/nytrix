@@ -108,14 +108,7 @@ static void parse_print_snippet(const char *filename, int line, int col,
   free(buf);
 }
 
-static uint64_t parse_diag_hash(const char *s) {
-  uint64_t h = 1469598103934665603ULL;
-  for (; s && *s; ++s) {
-    h ^= (unsigned char)*s;
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
+static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
 
 static bool parse_diag_grow(void) {
   size_t new_cap = g_parse_diag_cap ? g_parse_diag_cap * 2 : 512;
@@ -343,8 +336,8 @@ static void print_error_line(parser_t *p, const char *filename, int line,
   if (hint) {
     fprintf(stderr, "%s:%d:%d: %snote:%s %s\n", out_file, line, col,
             clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), hint);
-    fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN),
-            clr(NY_CLR_RESET), hint);
+    fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN), clr(NY_CLR_RESET),
+            hint);
   }
   parse_print_snippet(out_file, line, col, 1);
 
@@ -364,7 +357,7 @@ static const char *token_desc(token_t tok, char *buf, size_t cap) {
     }
     size_t n = tok.len < 24 ? tok.len : 24;
     if (n > tok.len)
-      n = tok.len; // Ensure n does not exceed tok.len
+      n = tok.len;
     snprintf(buf, cap, "%s '%.*s'%s", kind, (int)n, tok.lexeme,
              tok.len > n ? "..." : "");
     return buf;
@@ -421,6 +414,9 @@ void parser_expect(parser_t *p, token_kind kind, const char *msg,
   } else {
     parser_error(p, p->cur, msg, hint);
   }
+  // Error-recovery: always consume one token on mismatch to avoid parser
+  if (p->cur.kind != NY_T_EOF)
+    parser_advance(p);
 }
 
 token_t parser_peek(parser_t *p) {

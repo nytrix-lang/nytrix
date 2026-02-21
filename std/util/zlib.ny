@@ -16,6 +16,8 @@ use std.os.ffi *
 use std.os.sys *
 use std.os.time *
 use std.str *
+use std.os.dirs *
+use std.os.path *
 
 mut _lib = 0
 mut _uncompress = 0
@@ -82,12 +84,9 @@ fn _init(){
       if(!_gzclose){ _gzclose = _load_sym("gzclose") }
       return !!_uncompress && !!_compress2 && !!_compressBound
    }
-   _lib = __dlopen("/usr/lib/libz.so.1", RTLD_NOW() | RTLD_LOCAL())
-   if(_lib == 0){ _lib = __dlopen("libz.so.1", RTLD_NOW() | RTLD_LOCAL()) }
-   if(_lib == 0){
-      _lib = __dlopen("/usr/lib/libz.so", RTLD_NOW() | RTLD_LOCAL())
-      if(_lib == 0){ _lib = __dlopen("libz.so", RTLD_NOW() | RTLD_LOCAL()) }
-   }
+   _lib = dlopen_any("z", RTLD_NOW() | RTLD_LOCAL())
+   if(_lib == 0){ _lib = dlopen_any("zlib", RTLD_NOW() | RTLD_LOCAL()) }
+   if(_lib == 0){ _lib = dlopen_any("zlib1", RTLD_NOW() | RTLD_LOCAL()) }
    if(_lib == 0){ return false }
    _uncompress = _load_sym("uncompress")
    _compress2 = _load_sym("compress2")
@@ -166,14 +165,14 @@ fn parse_gzip_header(s){
       p = p + xlen
    }
    if((flg & 8) != 0){
-      while(p < n && load8(s, p) != 0){ p = p + 1 }
+      while(p < n && load8(s, p) != 0){ p += 1 }
       if(p >= n){ return _err_map("format", "truncated gzip filename") }
-      p = p + 1
+      p += 1
    }
    if((flg & 16) != 0){
-      while(p < n && load8(s, p) != 0){ p = p + 1 }
+      while(p < n && load8(s, p) != 0){ p += 1 }
       if(p >= n){ return _err_map("format", "truncated gzip comment") }
-      p = p + 1
+      p += 1
    }
    if((flg & 2) != 0){
       if(p + 2 > n){ return _err_map("format", "truncated gzip hdr crc") }
@@ -242,7 +241,10 @@ fn decompress_zlib(s){
 
 fn _gzip_tmp_path(){
    "Internal: returns a temporary gzip file path."
-   "/tmp/ny_gzip_" + to_str(syscall(39)) + "_" + to_str(ticks()) + ".gz"
+   mut base = temp_dir()
+   if(!is_str(base) || str_len(base) == 0){ base = "." }
+   def name = "ny_gzip_" + to_str(pid()) + "_" + to_str(ticks()) + ".gz"
+   normalize(base + sep() + name)
 }
 
 fn decompress_gzip(s){
@@ -255,29 +257,29 @@ fn decompress_gzip(s){
    if(!_init()){ return _set_error("libz unavailable") }
    if(!_gzopen || !_gzread || !_gzclose){ return _set_error("gzip symbols unavailable") }
    def path = _gzip_tmp_path()
-   match file_write(path, s) {
+   match file_write(path, s){
       err(_) -> { return _set_error("failed to stage gzip data") }
       ok(_) -> { 0 }
    }
    def gz = call2(_gzopen, path, "rb")
    if(gz == 0){
-      syscall(87, path, 0,0,0,0,0)
+      match file_remove(path){ _ -> {} }
       return _set_error("gzopen failed")
    }
    mut out = ""
    def buf = malloc(65537)
    if(buf == 0){
       call1(_gzclose, gz)
-      syscall(87, path, 0,0,0,0,0)
+      match file_remove(path){ _ -> {} }
       return _set_error("gzip read buffer alloc failed")
    }
    mut loops = 0
    while(true){
-      loops = loops + 1
+      loops += 1
       if(loops > 10000){
          free(buf)
          call1(_gzclose, gz)
-         syscall(87, path, 0,0,0,0,0)
+         match file_remove(path){ _ -> {} }
          return _set_error("gzread loop limit reached")
       }
       def r = call3(_gzread, gz, buf, 65536)
@@ -285,13 +287,13 @@ fn decompress_gzip(s){
       if(rr > 65536){
          free(buf)
          call1(_gzclose, gz)
-         syscall(87, path, 0,0,0,0,0)
+         match file_remove(path){ _ -> {} }
          return _set_error("gzread returned invalid size")
       }
       if(rr < 0){
          free(buf)
          call1(_gzclose, gz)
-         syscall(87, path, 0,0,0,0,0)
+         match file_remove(path){ _ -> {} }
          return _set_error("gzread failed")
       }
       if(rr == 0){ break }
@@ -301,7 +303,7 @@ fn decompress_gzip(s){
    }
    free(buf)
    call1(_gzclose, gz)
-   syscall(87, path, 0,0,0,0,0)
+   match file_remove(path){ _ -> {} }
    def n = str_len(s)
    if(n >= 8){
       def expect_crc = _u32_le(s, n - 8)
@@ -354,4 +356,69 @@ fn compress_zlib(s, level=6){
 fn compress(s, level=6){
    "Alias for `compress_zlib`."
    compress_zlib(s, level)
+}
+
+if(comptime{__main()}){
+    use std.util.zlib as z
+    use std.core *
+    use std.core.dict *
+    use std.core.error *
+    use std.str *
+
+    print("Testing std.util.zlib...")
+
+    if(!z.available()){
+        print("✓ std.util.zlib tests skipped (zlib not available)")
+        return
+    }
+
+    fn _from_list(xs){
+       "Test helper."
+       def n = len(xs)
+       def out = malloc(n + 1)
+       init_str(out, n)
+       mut i = 0
+       while(i < n){
+          store8(out, get(xs, i), i)
+          i = i + 1
+       }
+       store8(out, 0, n)
+       out
+    }
+
+    def payload = "hello nytrix zlib\n"
+    def z_bytes_list = [120,156,203,72,205,201,201,87,200,171,44,41,202,172,80,168,202,201,76,226,2,0,67,45,6,190]
+    def g_bytes_list = [31,139,8,0,0,0,0,0,0,255,203,72,205,201,201,87,200,171,44,41,202,172,80,168,202,201,76,226,2,0,139,77,171,160,18,0,0,0]
+
+    def z_bytes = _from_list(z_bytes_list)
+    def g_bytes = _from_list(g_bytes_list)
+
+    assert(z.available(), "zlib available")
+    assert(z.is_zlib(z_bytes), "zlib signature")
+    assert(z.is_gzip(g_bytes), "gzip signature")
+
+    mut zh = z.parse_zlib_header(z_bytes)
+    assert(dict_get(zh, "ok", false), "zlib header parse")
+    assert(dict_get(zh, "header_size", 0) == 2, "zlib header size")
+
+    mut gh = z.parse_gzip_header(g_bytes)
+    assert(dict_get(gh, "ok", false), "gzip header parse")
+    assert(dict_get(gh, "header_size", 0) == 10, "gzip header size")
+
+    assert((z.decompress_zlib(z_bytes) == payload), "zlib decompress")
+    assert((z.decompress_gzip(g_bytes) == payload), "gzip decompress")
+    assert((z.decompress(z_bytes) == payload), "auto zlib decompress")
+    assert((z.decompress(g_bytes) == payload), "auto gzip decompress")
+
+    def comp = z.compress(payload, 6)
+    assert(z.is_zlib(comp), "compress emits zlib stream")
+    assert((z.decompress(comp) == payload), "compress/decompress roundtrip")
+
+    ;; Corrupt one byte in gzip trailer (CRC) and expect failure.
+    store8(g_bytes, (load8(g_bytes, str_len(g_bytes) - 8) ^ 1), str_len(g_bytes) - 8)
+    def bad = z.decompress_gzip(g_bytes)
+    assert((bad == ""), "gzip bad stream returns empty")
+    assert(str_len(z.error()) > 0, "gzip bad stream has error")
+
+    print("✓ std.util.zlib tests passed")
 }

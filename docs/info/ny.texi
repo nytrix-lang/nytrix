@@ -1,0 +1,267 @@
+\input texinfo
+@settitle ny - Nytrix Compiler and Interpreter
+@setfilename ny.info
+
+@copying
+ny - Nytrix language compiler and interpreter tool.
+Copyright @copyright{} 2026 Nytrix Developers.
+GNU General Public License v3.0
+@end copying
+
+@dircategory Programming
+@direntry
+* ny: (ny).                    Nytrix compiler and interpreter tool.
+@end direntry
+
+@titlepage
+@title ny Manual
+@author Nytrix Developers
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@node Top
+@top ny - Nytrix Compiler and Interpreter
+
+The @command{ny} command is the primary tool for Nytrix. It supports JIT execution, AOT compilation, and an interactive REPL.
+
+@menu
+* Options::            Command line arguments.
+* Environment::        Supported environment variables.
+* Examples::           Common usage patterns.
+* See Also::           Related documentation.
+@end menu
+
+@node Options
+@chapter Options
+
+@section General
+@table @code
+@item --color=@var{WHEN}
+Set color output: @code{auto}, @code{always}, or @code{never}.
+@item -safe-mode, --safe-mode, --safe
+Enable strict safety/effect/alias checks.
+@item --effect-require-known
+Require known effects for user functions (default on).
+@item --no-effect-require-known
+Allow unknown effects.
+@item --alias-require-known
+Require known alias/escape facts (default on).
+@item --no-alias-require-known
+Allow unknown alias/escape facts.
+@item --alias-require-no-escape
+Require no argument escape / return alias.
+@end table
+
+Typed contracts are non-null by default: @code{nil} is accepted only for nullable types (for example @code{?int}) and pointer-like types (for example @code{*int}).
+
+@section Optimization
+@table @code
+@item -O0, -O1, -O2, -O3, -O
+Set optimization level (default @code{-O2}; @code{-O} aliases @code{-O2}).
+@item --fast
+Convenience mode: keeps optimization high, disables verify, prefers stripped output.
+@item -passes=@var{PIPE}
+Custom LLVM pass pipeline (for example @code{default<O2>}).
+@item --opt-dce, --dce, --no-opt-dce, --no-dce
+Enable/disable dead-code elimination override.
+@item --opt-internalize, --no-opt-internalize
+Enable/disable symbol internalization override.
+@item --opt-loops, --no-opt-loops
+Enable/disable loop optimization override.
+@item --opt-autotune, --no-opt-autotune
+Enable/disable adaptive optimization-level tuning override.
+@end table
+
+@section Parallelism
+@table @code
+@item --gpu=@var{MODE}, --gpu @var{MODE}
+GPU mode: @code{off}, @code{auto}, @code{opencl}.
+@item --gpu-backend=@var{B}, --gpu-backend @var{B}
+Backend: @code{none}, @code{auto}, @code{opencl}, @code{cuda}, @code{hip}, @code{metal}.
+@item --gpu-offload=@var{M}, --gpu-offload @var{M}
+Offload policy: @code{off}, @code{auto}, @code{on}, @code{force}.
+@item --gpu-min-work=@var{N}, --gpu-min-work @var{N}
+Minimum work-items before GPU offload.
+@item --gpu-async, --no-gpu-async
+Enable/disable async GPU dispatch preference.
+@item --gpu-fast-math, --no-gpu-fast-math
+Enable/disable relaxed GPU math.
+@item --accel-target=@var{T}, --accel-target @var{T}
+Accelerator target: @code{auto}, @code{none}, @code{nvptx}, @code{amdgpu}, @code{spirv}, @code{hsaco}.
+@item --accel-object=@var{K}, --accel-object @var{K}
+Device artifact kind: @code{auto}, @code{none}, @code{ptx}, @code{o}, @code{spv}, @code{hsaco}.
+@item --gpu-target=@var{T}, --gpu-target @var{T}
+Compatibility alias; maps target to backend/accelerator.
+@item --parallel=@var{MODE}, --parallel @var{MODE}
+Parallel mode: @code{off}, @code{auto}, @code{threads}.
+@item --threads=@var{N}, --threads @var{N}
+Thread budget for parallel work.
+@item --parallel-min-work=@var{N}, --parallel-min-work @var{N}
+Minimum work-items before threaded parallel execution.
+@end table
+
+@section Build Tuning
+@table @code
+@item --host-triple=@var{TRIPLE}, --host-triple @var{TRIPLE}
+Host target triple for native build.
+@item --arm-float-abi=@var{ABI}, --arm-float-abi @var{ABI}
+ARM float ABI: @code{soft}, @code{softfp}, or @code{hard}.
+@item --host-cflags=@var{FLAGS}, --host-cflags @var{FLAGS}
+Extra host compiler flags.
+@item --host-ldflags=@var{FLAGS}, --host-ldflags @var{FLAGS}
+Extra host linker flags.
+@item --gprof, --no-gprof, -pg, --profile
+Enable/disable @code{-pg} in native build path.
+@item --std-builtin-ops, --no-std-builtin-ops
+Enable/disable std builtin-op lowering preference.
+@item --debug-locals, --no-debug-locals
+Enable/disable local/global debug records.
+@item --dwarf-version=@var{N}
+DWARF version for @code{-g} builds (2..5).
+@item --dwarf-split-inlining, --no-dwarf-split-inlining
+Enable/disable split-inline callsite debug info.
+@item --dwarf-profile-info, --no-dwarf-profile-info
+Enable/disable profiling-friendly location info.
+@end table
+
+@section Execution
+@table @code
+@item -run
+JIT execute @code{main()} after compilation.
+@item -emit-only
+Only emit output, do not execute (default).
+@item -o [@var{PATH}], --output [@var{PATH}], --output=@var{PATH}
+Emit native binary at @var{PATH}; implies @code{-emit-only}. If omitted, uses default output name.
+@item -strip, --strip, -no-strip, --no-strip
+Create stripped or unstripped binary (default stripped).
+@item -c @var{CODE}, -e @var{CODE}, --eval @var{CODE}
+Execute inline Nytrix code.
+@item --
+Stop option parsing; remaining arguments are passed as script/runtime arguments.
+@end table
+
+@section Stdlib
+@table @code
+@item -std @var{MODE}
+Stdlib inclusion mode: @code{none}, @code{minimal}, @code{full} (default @code{minimal}).
+@item -no-std
+Disable stdlib loading.
+@item --std-path=@var{PATH}
+Use custom @file{std_bundle.ny}.
+@item --full-mod
+Alias for @code{-std full}.
+@end table
+
+@section Linking
+@table @code
+@item -L@var{DIR}, -L @var{DIR}
+Add linker search path (repeatable).
+@item -l@var{LIB}, -l @var{LIB}
+Link against library (repeatable).
+@end table
+
+@section REPL
+@table @code
+@item -i, -interactive
+Interactive REPL.
+@item -repl
+Read source from stdin (one-shot).
+@item --plain-repl
+Force plain REPL mode without advanced line UI.
+@end table
+
+@section Debugging
+@table @code
+@item -v, -vv, -vvv, -verbose, --verbose, --verbose=@var{N}
+Control verbosity level.
+@item --debug
+Enable verbose + debug logs.
+@item -time
+Show timing for each phase.
+@item -dump-ast
+Dump parsed AST.
+@item -dump-llvm
+Print LLVM IR to stdout.
+@item -dump-tokens
+Dump lexer tokens.
+@item -dump-docs
+Extract and print function docstrings.
+@item -dump-funcs
+List all compiled functions.
+@item -dump-symbols
+Show runtime symbol table.
+@item -dump-stats
+Print compilation statistics.
+@item -verify
+Verify LLVM module.
+@item -g
+Emit debug symbols.
+@item --emit-ir=@var{PATH}
+Emit LLVM IR to file.
+@item --ir-full, --ir-no-std
+Include or omit std/lib definitions in emitted IR.
+@item --emit-asm=@var{PATH}
+Emit assembly to file.
+@item --dump-on-error
+Write @file{build/debug/last_source.ny} and @file{build/debug/last_ir.ll} on errors.
+@item -trace
+Enable execution tracing.
+@end table
+
+@section Info
+@table @code
+@item -h, -help, --help
+Show help message.
+@item --help env
+Show supported environment variables.
+@item --help-env, --env-help
+Alias forms for environment help.
+@item -version, --version
+Show version information.
+@end table
+
+@node Environment
+@chapter Environment Variables
+
+Policy env overrides are disabled by default. Use CLI flags for
+GPU/parallel/effect/debug behavior.
+
+@table @code
+@item NYTRIX_STD_PATH
+Override @code{std_bundle.ny} lookup path.
+@item NYTRIX_STD_PREBUILT
+Use prebuilt stdlib source.
+@item NYTRIX_BUILD_STD_PATH
+Override bundled std path.
+@item NYTRIX_HOST_TRIPLE, NYTRIX_ARM_FLOAT_ABI
+Host-target build tuning.
+@item NYTRIX_HOST_CFLAGS, NYTRIX_HOST_LDFLAGS
+Host compiler/linker tuning.
+@end table
+
+@node Examples
+@chapter Examples
+@itemize @bullet
+@item @code{ny etc/tests/benchmark/sieve.ny}
+Compile only (default mode).
+@item @code{ny -O2 -run etc/tests/benchmark/sieve.ny}
+Compile and run optimized.
+@item @code{ny --gpu-backend=cuda --gpu-offload=force --threads=8 etc/tests/benchmark/vector.ny}
+Run with explicit accelerator/thread policy.
+@item @code{ny --host-cflags='-march=native' --dwarf-version=5 -g -o app etc/tests/runtime/control.ny}
+AOT build with explicit host/debug tuning.
+@item @code{ny -c 'print("hello")'}
+Execute inline code.
+@item @code{ny -i}
+Start REPL.
+@end itemize
+
+@node See Also
+@chapter See Also
+Nytrix Language Reference (see the @code{nytrix} manual).
+
+@bye

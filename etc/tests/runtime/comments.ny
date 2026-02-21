@@ -9,7 +9,7 @@ use std.str *
 ;; Comments parsing (Test)
 
 ;; Single line comment at start
-mut x = 1  ;; inline
+mut x = 1 ;; inline
 
 ;; Multiple single line comments
 ;; Comment line 1
@@ -19,7 +19,7 @@ def y = 2
 
 fn add(a, b){
    ;; inside function
-   a + b  ;; return comment
+   a + b ;; return comment
 }
 
 mut result = add(x, y)
@@ -39,10 +39,9 @@ assert(i == 5, "loop with comments")
 
 ;; Empty lines and comments
 
-
 def a = 10
 def b = 20
-mut c = a + b  ;; inline math
+mut c = a + b ;; inline math
 assert(c == 30, "ops with comments")
 
 if 1 == 1 {

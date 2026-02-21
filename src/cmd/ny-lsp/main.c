@@ -3,7 +3,6 @@
 #endif
 #include "base/util.h"
 #include "parse/parser.h"
-// Mock LSP Server using the same parser_t as the compiler.
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -11,8 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
 #include <unistd.h>
+#endif
 
 static ssize_t read_exact(int fd, void *buf, size_t len) {
   size_t total = 0;
@@ -326,8 +327,8 @@ static void handle_request(const char *body) {
 }
 
 int main(void) {
-  // Ensure stdout is unbuffered for LSP.
-  setlinebuf(stdout);
+  // Keep LSP responses flushed immediately across platforms.
+  setvbuf(stdout, NULL, _IONBF, 0);
   while (1) {
     char *msg = read_message();
     if (!msg)

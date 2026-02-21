@@ -54,4 +54,3 @@ if ternary_test > 40 {
 assert(ternary_result == 1, "if else")
 
 print("✓ Parser tests passed")
-

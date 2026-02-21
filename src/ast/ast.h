@@ -77,6 +77,7 @@ typedef VEC(fstring_part_t) ny_fstring_part_list;
 
 typedef struct match_arm_t {
   VEC(struct expr_t *) patterns;
+  struct expr_t *guard; // optional "if <expr>" guard
   stmt_t *conseq;
 } match_arm_t;
 typedef struct param_t {
@@ -88,6 +89,13 @@ typedef struct param_t {
 typedef VEC(param_t) ny_param_list;
 typedef VEC(expr_t *) ny_expr_list;
 typedef VEC(match_arm_t) ny_match_arm_list;
+
+typedef struct attribute_t {
+  const char *name;
+  token_t tok;
+  ny_expr_list args;
+} attribute_t;
+typedef VEC(attribute_t) ny_attribute_list;
 
 typedef struct stmt_match_t {
   expr_t *test;
@@ -264,6 +272,7 @@ typedef enum stmt_kind_t {
   NY_S_EXPORT,
   NY_S_STRUCT,
   NY_S_ENUM,
+  NY_S_MACRO,
 } stmt_kind_t;
 
 typedef struct stmt_export_t {
@@ -322,6 +331,13 @@ typedef struct stmt_func_t {
   bool is_variadic;
   const char *src_start;
   const char *src_end;
+  bool attr_naked;
+  bool attr_jit;
+  bool attr_thread;
+  bool attr_pure;
+  bool attrs_resolved;
+  bool effect_contract_known;
+  uint32_t effect_contract_mask;
 } stmt_func_t;
 
 typedef struct stmt_extern_t {
@@ -376,6 +392,7 @@ struct stmt_t {
   stmt_kind_t kind;
   token_t tok;
   void *sema; // Add sema field (generic pointer for semantic info)
+  ny_attribute_list attributes;
   union {
     stmt_block_t block;
     struct {
@@ -412,6 +429,11 @@ struct stmt_t {
     } module;
     stmt_export_t exprt;
     stmt_enum_t enu;
+    struct {
+      const char *name;
+      ny_expr_list args;
+      stmt_t *body; // block
+    } macro;
   } as;
 };
 

@@ -1,32 +1,65 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include "base/loader.h"
 #include "base/util.h"
 #include "lex/lexer.h"
 #include "priv.h"
-#include <readline/readline.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Standard 16-Color Palette
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
+
+#if !defined(_WIN32)
+#if defined(__APPLE__)
+#if __has_include(<readline/readline.h>)
+#include <readline/readline.h>
+#elif __has_include(<editline/readline.h>)
+#include <editline/readline.h>
+#define NYTRIX_LIBEDIT 1
+#else
+#define NYTRIX_NO_READLINE 1
+#endif
+#else
+#include <readline/readline.h>
+#endif
+#endif
+
+#if !defined(NYTRIX_DISABLE_READLINE_EXTRA)
+#if defined(NYTRIX_LIBEDIT)
+#define NYTRIX_DISABLE_READLINE_EXTRA 1
+#else
+#define NYTRIX_DISABLE_READLINE_EXTRA 0
+#endif
+#endif
+
 static const char *CLR_RESET = "\033[0m";
-static const char *CLR_KEYWORD = "\033[1;36m";  // Bold Cyan
-static const char *CLR_BUILTIN = "\033[1;35m";  // Bold Magenta
-static const char *CLR_STRING = "\033[32m";     // Green
+static const char *CLR_KEYWORD = "\033[1;35m";  // Bold Magenta
+static const char *CLR_BUILTIN = "\033[1;36m";  // Bold Cyan
+static const char *CLR_STRING = "\033[0;32m";   // Green (dim)
 static const char *CLR_NUMBER = "\033[33m";     // Yellow
 static const char *CLR_COMMENT = "\033[90m";    // Gray
 static const char *CLR_FUNCTION = "\033[1;34m"; // Bold Blue
-static const char *CLR_OPERATOR = "\033[31m";   // Red
+static const char *CLR_OPERATOR = "\033[1;37m"; // Bold White
 static const char *CLR_PAREN = "\033[37m";      // White
-static const char *CLR_MEMBER = "\033[35m";     // Magenta
+static const char *CLR_MEMBER = "\033[36m";     // Cyan
 static const char *CLR_MATCH = "\033[1;33m";    // Bold Yellow
-static const char *CLR_VAR = "\033[34m";        // Blue
+static const char *CLR_TYPE = "\033[1;32m";     // Bold Green
 
-// Helper to check if colorization is enabled
 static int is_color_enabled(void) {
   const char *plain = getenv("NYTRIX_REPL_PLAIN");
+  if (!color_enabled())
+    return 0;
   return !(plain && plain[0] != '0');
 }
 
-// Find matching parenthesis
 static int find_matching_paren(const char *line, int pos) {
   if (pos < 0 || !line[pos])
     return -1;
@@ -74,33 +107,39 @@ static int find_matching_paren(const char *line, int pos) {
   return -1;
 }
 
-// Check if identifier looks like a function call
-static int is_function_call(const char *line, size_t pos) {
+static int is_fn_call(const char *line, int pos) {
   while (line[pos] && (line[pos] == ' ' || line[pos] == '\t'))
     pos++;
   return line[pos] == '(';
 }
 
-// Check if name is known in docs
 static int is_known_name(const char *name, size_t len, int *out_kind) {
   if (!g_repl_docs)
     return 0;
 
-  // Single loop for both exact and suffix matches
   int suffix_match_idx = -1;
+
   for (size_t i = 0; i < g_repl_docs->len; i++) {
     const char *en = g_repl_docs->data[i].name;
     size_t elen = strlen(en);
 
+    // Exact match
     if (elen == len && memcmp(en, name, len) == 0) {
       if (out_kind)
         *out_kind = g_repl_docs->data[i].kind;
       return 1;
     }
 
-    // Suffix match (lower priority, stored if no exact match found yet)
-    if (suffix_match_idx == -1 && elen > len && en[elen - len - 1] == '.' &&
+    // Suffix match (e.g. "add" matching "std.core.add")
+    if (elen > len && en[elen - len - 1] == '.' &&
         memcmp(en + elen - len, name, len) == 0) {
+      suffix_match_idx = (int)i;
+    }
+
+    // Prefix match (e.g. "std.core.add" matching "add" if 'name' is the full
+    // one)
+    if (len > elen && name[len - elen - 1] == '.' &&
+        memcmp(name + len - elen, en, elen) == 0) {
       suffix_match_idx = (int)i;
     }
   }
@@ -140,6 +179,8 @@ static int is_keyword(const char *s, size_t len) {
       return 1;
     if (len == 5 && !memcmp(s, "defer", 5))
       return 1;
+    if (len == 5 && !memcmp(s, "class", 5))
+      return 1;
     break;
   case 'e':
     if (len == 4 && !memcmp(s, "else", 4))
@@ -147,6 +188,10 @@ static int is_keyword(const char *s, size_t len) {
     if (len == 4 && !memcmp(s, "elif", 4))
       return 1;
     if (len == 5 && !memcmp(s, "embed", 5))
+      return 1;
+    if (len == 4 && !memcmp(s, "enum", 4))
+      return 1;
+    if (len == 6 && !memcmp(s, "extern", 6))
       return 1;
     break;
   case 'f':
@@ -178,6 +223,8 @@ static int is_keyword(const char *s, size_t len) {
       return 1;
     if (len == 6 && !memcmp(s, "module", 6))
       return 1;
+    if (len == 3 && !memcmp(s, "mut", 3))
+      return 1;
     break;
   case 'n':
     if (len == 3 && !memcmp(s, "nil", 3))
@@ -201,6 +248,10 @@ static int is_keyword(const char *s, size_t len) {
     break;
   case 'w':
     if (len == 5 && !memcmp(s, "while", 5))
+      return 1;
+    break;
+  case 's':
+    if (len == 6 && !memcmp(s, "struct", 6))
       return 1;
     break;
   }
@@ -229,9 +280,14 @@ static void append_n(char **buf, size_t *size, size_t *cap, const char *s,
   (*buf)[*size] = '\0';
 }
 
-void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
+void repl_highlight_line_ex(const char *line, int cursor_pos,
+                            const char *ml_prompt) {
   if (!line || !*line)
     return;
+  if (!is_color_enabled()) {
+    fputs(line, stdout);
+    return;
+  }
 
   if (line[0] == ':') {
     printf("%s%s%s", CLR_BUILTIN, line, CLR_RESET);
@@ -267,25 +323,40 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
       continue;
     }
 
-    if (line[i] == ';') {
-      append_str(&db, &db_size, &db_cap, CLR_COMMENT);
-      append_str(&db, &db_size, &db_cap, line + i);
-      append_str(&db, &db_size, &db_cap, CLR_RESET);
-      break;
-    }
-
-    if (line[i] == '"' || (line[i] == 'f' && line[i + 1] == '"')) {
+    if (line[i] == '"' ||
+        (line[i] == 'f' && line[i + 1] == '"' &&
+         (i == 0 || !isalnum((unsigned char)line[i - 1]))) ||
+        line[i] == '\'') {
+      char q = line[i];
+      if (q == 'f')
+        q = '"';
       append_str(&db, &db_size, &db_cap, CLR_STRING);
       if (line[i] == 'f')
         append_n(&db, &db_size, &db_cap, line + i++, 1);
       append_n(&db, &db_size, &db_cap, line + i++, 1);
-      while (line[i] && line[i] != '"') {
+      while (line[i] && line[i] != q) {
         if (line[i] == '\\' && line[i + 1])
           append_n(&db, &db_size, &db_cap, line + i++, 1);
         append_n(&db, &db_size, &db_cap, line + i++, 1);
       }
-      if (line[i] == '"')
+      if (line[i] == q)
         append_n(&db, &db_size, &db_cap, line + i++, 1);
+      append_str(&db, &db_size, &db_cap, CLR_RESET);
+      continue;
+    }
+
+    if (line[i] == ';') {
+      append_str(&db, &db_size, &db_cap, CLR_COMMENT);
+      const char *eol = strchr(line + i, '\n');
+      if (eol) {
+        size_t comment_len = (size_t)(eol - (line + i));
+        append_n(&db, &db_size, &db_cap, line + i, comment_len);
+        i += comment_len;
+      } else {
+        append_str(&db, &db_size, &db_cap, line + i);
+        append_str(&db, &db_size, &db_cap, CLR_RESET);
+        break;
+      }
       append_str(&db, &db_size, &db_cap, CLR_RESET);
       continue;
     }
@@ -300,14 +371,15 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
 
     if (isalpha((unsigned char)line[i]) || line[i] == '_') {
       size_t start = i;
-      while (line[i] && (isalnum((unsigned char)line[i]) || line[i] == '_'))
+      while (line[i] && (isalnum((unsigned char)line[i]) || line[i] == '_' ||
+                         line[i] == '.'))
         i++;
       size_t len = i - start;
       const char *color = NULL;
       int kind = 0;
       if (is_keyword(line + start, len))
         color = CLR_KEYWORD;
-      else if (is_function_call(line, i))
+      else if (is_fn_call(line, i))
         color = CLR_FUNCTION;
       else if (is_known_name(line + start, len, &kind)) {
         if (kind == 2 || kind == 1)
@@ -325,8 +397,15 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
       continue;
     }
 
-    if (strchr("+-*/%=&|^<>!.~", line[i])) {
+    if (strchr("+-*%/%=&|^<>!.~", line[i])) {
       append_str(&db, &db_size, &db_cap, CLR_OPERATOR);
+      append_n(&db, &db_size, &db_cap, line + i++, 1);
+      append_str(&db, &db_size, &db_cap, CLR_RESET);
+      continue;
+    }
+
+    if (strchr("()[]{};,", line[i])) {
+      append_str(&db, &db_size, &db_cap, CLR_PAREN);
       append_n(&db, &db_size, &db_cap, line + i++, 1);
       append_str(&db, &db_size, &db_cap, CLR_RESET);
       continue;
@@ -338,35 +417,22 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
       continue;
     }
 
-    if (strchr("()[]{},", line[i])) {
-      append_str(&db, &db_size, &db_cap, CLR_PAREN);
-      append_n(&db, &db_size, &db_cap, line + i++, 1);
-      append_str(&db, &db_size, &db_cap, CLR_RESET);
-      continue;
-    }
-
     append_n(&db, &db_size, &db_cap, line + i++, 1);
   }
 
-  // Output with indentation and per-line clearing
   const char *p = db;
-  int first = 1;
-  while (*p) {
+  int fst = 1;
+  while (1) {
+    if (fst)
+      fst = 0;
+    else if (ml_prompt)
+      fputs(ml_prompt, stdout);
     const char *nl = strchr(p, '\n');
     if (nl) {
-      if (!first) {
-        for (int j = 0; j < indent; j++)
-          fputc(' ', stdout);
-      }
       fwrite(p, 1, (size_t)(nl - p), stdout);
       printf("\033[K\n");
       p = nl + 1;
-      first = 0;
     } else {
-      if (!first) {
-        for (int j = 0; j < indent; j++)
-          fputc(' ', stdout);
-      }
       fputs(p, stdout);
       printf("\033[K");
       break;
@@ -375,133 +441,89 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, int indent) {
 }
 
 void repl_highlight_line(const char *line) {
-  repl_highlight_line_ex(line, -1, 0);
+  repl_highlight_line_ex(line, -1, NULL);
 }
 
-// Optimization: cache visible prompt length
-static int g_last_cursor_row = 0;
-static int g_last_total_rows = 0;
-static char *last_prompt = NULL;
-static int last_visible_len = 0;
-
-void repl_reset_redisplay(void) {
-  g_last_cursor_row = 0;
-  g_last_total_rows = 0;
-}
-
-void repl_redisplay(void) {
-  if (!is_color_enabled()) {
-    rl_redisplay();
+void repl_display_match_list(char **matches, int len, int max_arg) {
+  if (!matches || len <= 0)
     return;
+
+  int term_width = 80;
+#ifdef _WIN32
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+    term_width = info.srWindow.Right - info.srWindow.Left + 1;
   }
+#else
+  struct winsize ws;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+    term_width = ws.ws_col;
+  }
+#endif
 
-  // Calculate visible prompt length if it changed and prepare a clean prompt
-  // for display
-  static char *clean_prompt = NULL;
-  if (!last_prompt || strcmp(last_prompt, rl_display_prompt) != 0) {
-    if (last_prompt)
-      free(last_prompt);
-    if (clean_prompt)
-      free(clean_prompt);
-    last_prompt = ny_strdup(rl_display_prompt);
-    clean_prompt = malloc(strlen(rl_display_prompt) + 1);
+  int max_len = 0;
+  for (int i = 0; i < len; i++) {
+    int l = (int)strlen(matches[i]);
+    if (l > max_len)
+      max_len = l;
+  }
+  (void)max_arg;
 
-    last_visible_len = 0;
-    int in_invisible = 0;
-    char *out = clean_prompt;
-    for (const char *p = rl_display_prompt; *p; p++) {
-      if (*p == '\001')
-        in_invisible = 1;
-      else if (*p == '\002')
-        in_invisible = 0;
-      else {
-        *out++ = *p;
-        if (!in_invisible)
-          last_visible_len++;
+  int col_width = max_len + 2;
+  if (col_width > term_width)
+    col_width = term_width;
+
+  int num_cols = term_width / col_width;
+  if (num_cols < 1)
+    num_cols = 1;
+
+  int rows = (len + num_cols - 1) / num_cols;
+
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < num_cols; c++) {
+      int idx = c * rows + r;
+      if (idx >= len)
+        break;
+
+      const char *m = matches[idx];
+      const char *color = CLR_RESET;
+      int kind = 0;
+      if (m[0] == ':') {
+        color = CLR_BUILTIN;
+      } else if (is_keyword(m, strlen(m))) {
+        color = CLR_KEYWORD;
+      } else if (!strcmp(m, "int") || !strcmp(m, "float") ||
+                 !strcmp(m, "str") || !strcmp(m, "list") ||
+                 !strcmp(m, "dict") || !strcmp(m, "set") ||
+                 !strcmp(m, "tuple") || !strcmp(m, "bytes") ||
+                 !strcmp(m, "bool")) {
+        color = CLR_TYPE;
+      } else if (strncmp(m, "__", 2) == 0) {
+        color = CLR_BUILTIN;
+      } else if (is_known_name(m, strlen(m), &kind)) {
+        if (kind == 3)
+          color = CLR_FUNCTION;
+        else if (kind == 2 || kind == 1)
+          color = CLR_MEMBER;
+      } else {
+        size_t mlen = strlen(m);
+        if (mlen > 0 && (m[mlen - 1] == '/' || m[mlen - 1] == '\\')) {
+          color = CLR_FUNCTION;
+        } else if (strchr(m, '.')) {
+          if (ny_std_find_module_by_name(m) >= 0)
+            color = CLR_MEMBER;
+        }
+      }
+
+      if (c == num_cols - 1 || (idx + rows) >= len) {
+        printf("%s%s%s", color, m, CLR_RESET);
+      } else {
+        printf("%s%-*s%s", color, col_width, m, CLR_RESET);
       }
     }
-    *out = '\0';
-  }
-
-  // 1. Move cursor to the start of Line 0
-  if (g_last_cursor_row > 0) {
-    printf("\033[%dA", g_last_cursor_row);
-  }
-  printf("\r");
-
-  // 2. Clear from current position to bottom of screen (clears old multi-line
-  // content)
-  printf("\033[J");
-
-  // 3. Render everything from the start (Prompt + Highlighted Buffer)
-  fputs(clean_prompt, stdout);
-  repl_highlight_line_ex(rl_line_buffer, rl_point, last_visible_len);
-
-  // 4. Calculate coordinates of the cursor within the new buffer
-  int total_newlines = 0;
-  int cursor_newlines = 0;
-  int cursor_col = 0;
-
-  for (int i = 0; rl_line_buffer[i]; i++) {
-    if (rl_line_buffer[i] == '\n') {
-      total_newlines++;
-      if (i < rl_point) {
-        cursor_newlines++;
-        cursor_col = 0;
-      }
-    } else {
-      int width = (rl_line_buffer[i] == '\t') ? 2 : 1;
-      if (i < rl_point) {
-        cursor_col += width;
-      }
-    }
-  }
-
-  // 5. Move cursor back to its logical row/col.
-  // We are currently at the bottom of the buffer.
-  int move_up = total_newlines - cursor_newlines;
-  if (move_up > 0) {
-    printf("\033[%dA", move_up);
-  }
-
-  printf("\r");
-  int h_pos = last_visible_len + cursor_col;
-  if (h_pos > 0) {
-    printf("\033[%dC", h_pos);
-  }
-
-  // Update tracking state
-  g_last_cursor_row = cursor_newlines;
-  g_last_total_rows = total_newlines;
-
-  fflush(stdout);
-}
-
-void repl_display_match_list(char **matches, int len, int max) {
-  (void)max;
-  printf("\n");
-  int cols = 0;
-  for (int i = 1; i <= len; i++) {
-    const char *m = matches[i];
-    const char *color = CLR_RESET;
-    int kind = 0;
-    if (is_keyword(m, strlen(m)))
-      color = CLR_KEYWORD;
-    else if (is_known_name(m, strlen(m), &kind)) {
-      if (kind == 3)
-        color = CLR_FUNCTION;
-      else if (kind == 4)
-        color = CLR_VAR;
-      else if (kind == 1 || kind == 2)
-        color = CLR_MEMBER;
-    } else if (m[0] == ':') {
-      color = CLR_BUILTIN;
-    }
-    printf("%s%-20s%s", color, m, CLR_RESET);
-    if (++cols % 4 == 0)
-      printf("\n");
-  }
-  if (cols % 4 != 0)
     printf("\n");
-  rl_forced_update_display();
+  }
 }
+
+void repl_reset_redisplay(void) {}
+void repl_redisplay(void) {}

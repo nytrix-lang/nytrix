@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Nytrix Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Tektur:wght@400..900&family=Turret+Road:wght@300;400;500;700;800&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                enableMenu: false
+            }
+        };
+    </script>
+
+    <style>
+        CSS_PLACEHOLDER
+    </style>
+</head>
+
+<body>
+    <div id="dock-trigger"></div>
+    <div id="backdrop" class="backdrop" onclick="toggleSidebar()"></div>
+
+    <div id="hamburger" onclick="toggleSidebar()">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <aside id="aside">
+        <div class="top">
+            <div class="brand">
+                <div class="logo-box">
+                    <div class="logo-mark">NY</div>
+                    <div class="brand-text">
+                        <b>NYTRIX</b>
+                        <span>STANDARD_CORE</span>
+                    </div>
+                </div>
+
+            </div>
+            <input class="search" id="search" placeholder="SEARCH" oninput="doSearch()" />
+        </div>
+        <div class="nav" id="nav"></div>
+        <div class="footer"><span id="modcount">0_MODS</span><span id="symcount">0_SYMS</span></div>
+    </aside>
+
+    <main id="content-area">
+        <div id="content"></div>
+    </main>
+
+    <script>
+        const data = DATA_PLACEHOLDER;
+        SCRIPT_PLACEHOLDER
+    </script>
+</body>
+
+</html>

@@ -1,12 +1,15 @@
 #pragma once
 
+#include "base/compat.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 typedef enum {
   STD_MODE_DEFAULT,
@@ -32,7 +35,7 @@ static inline bool color_enabled(void) {
     return false;
   }
 
-  enabled = isatty(STDERR_FILENO);
+  enabled = isatty(STDOUT_FILENO);
   return enabled != 0;
 }
 
@@ -173,6 +176,7 @@ static inline char *ny_strndup(const char *s, size_t n) {
     }                                                                          \
     (vec)->data[(vec)->len++] = (value);                                       \
   } while (0)
+
 // Arena tracking raw allocations for bulk free.
 typedef struct arena_t {
   void **items;

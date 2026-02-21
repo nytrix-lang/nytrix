@@ -10,10 +10,10 @@ module std.core (
    set, set_add, set_contains,
    add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot,
    eq, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno,
-   globals, set_globals
+   globals, set_globals,
+   OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM
 )
 use std.core.primitives *
-use std.core.reflect *
 use std.core.reflect as core_ref
 use std.core.set as core_set
 
@@ -27,7 +27,7 @@ fn bool(x){
 fn init_str(p, n){
   "Initialize string header at pointer `p` with length `n`."
   store64(p, 120, -8) ; Raw TAG_STR
-  store64(p, n, -16)          ; Tagged Length
+  store64(p, n, -16) ; Tagged Length
   p
 }
 
@@ -82,7 +82,7 @@ fn ptr_sub(p, n){
 }
 
 fn malloc(n){
-  "Allocates `n` bytes on the heap. Returns a `ptr`."
+  "Allocates `n` bytes on the heap. Returns a ptr."
   __malloc(n)
 }
 
@@ -112,8 +112,8 @@ fn list(cap=8){
   def p = malloc(16 + cap * 8)
   if(!p){ panic("list malloc failed") }
   store64(p, 100, -8) ; "L" tag
-  store64(p, 0, 0)    ; Len
-  store64(p, cap, 8)  ; Cap
+  store64(p, 0, 0) ; Len
+  store64(p, cap, 8) ; Cap
   p
 }
 
@@ -157,105 +157,94 @@ fn div(a, b){
   core_ref.div(a, b)
 }
 
-
 fn is_nytrix_obj(x){
   "Check if a value is a valid Nytrix object pointer (aligned)."
-  return is_ptr(x)
+  __is_ny_obj(x)
 }
 
 fn is_list(x){
   "Returns **true** if the value `x` is a **list**."
-  if(is_int(x)){ return false }
-  def p = is_ptr(x)
-  if(__eq(p, false)){ return false }
-  def tag = load64(x, -8)
-  return __eq(tag, 100)
+  if(!__is_ny_obj(x)){ return false }
+  return __tagof(x) == 100
 }
 
 fn is_dict(x){
   "Returns **true** if the value `x` is a **dictionary**."
-  if(is_int(x)){ return false }
-  if(__eq(is_ptr(x), false)){ return false }
-  return __eq(load64(x, -8), 101)
+  if(!__is_ny_obj(x)){ return false }
+  return __tagof(x) == 101
 }
 
 fn is_set(x){
   "Returns **true** if the value `x` is a **set**."
-  if(is_int(x)){ return false }
-  if(__eq(is_ptr(x), false)){ return false }
-  return __eq(load64(x, -8), 102)
+  if(!__is_ny_obj(x)){ return false }
+  return __tagof(x) == 102
 }
 
 fn is_tuple(x){
   "Returns **true** if the value `x` is a **tuple**."
-  if(is_int(x)){ return false }
-  if(__eq(is_ptr(x), false)){ return false }
-  return __eq(load64(x, -8), 103)
+  if(!__is_ny_obj(x)){ return false }
+  return __tagof(x) == 103
 }
 
 fn is_str(x){
   "Returns **true** if the value `x` is a **string**."
-  if(!is_ptr(x)){ return false }
-  def tag = load64(x, -8)
-  __eq(tag, 120) || __eq(tag, 121) || __eq(tag, 241) || __eq(tag, 243)
+  __is_str_obj(x)
 }
 
 fn is_bytes(x){
   "Returns **true** if the value `x` is a **bytes buffer**."
-  if(!is_ptr(x)){ return false }
-  __eq(load64(x, -8), 122)
+  if(!__is_ny_obj(x)){ return false }
+  __tagof(x) == 122
 }
 
 fn is_float(x){
   "Returns **true** if the value `x` if a **floating-point** number."
-  if(!is_ptr(x)){ return false }
-  def tag = load64(x, -8)
-  __eq(tag, 110) || __eq(tag, 221)
+  __is_float_obj(x)
 }
 
 fn to_int(v){
   "Unwraps a tagged integer or pointer value to a raw, untagged integer."
-  asm("sarq $$1, $0", "=r,0", v)
+  __untag(v)
 }
 
 fn from_int(v){
   "Wraps a raw machine integer into a Nytrix-tagged integer."
-  asm("leaq 1(,$0,2), $0", "=r,0", v)
+  __tag(v)
 }
 
-fn argc() {
+fn argc(){
   "Returns the process argument count."
   __argc()
 }
-fn argv() {
+fn argv(){
   "Returns the raw argv pointer."
-  __argv()
+  __argvp()
 }
-fn envc() {
+fn envc(){
   "Returns the number of environment entries."
   __envc()
 }
-fn envp() {
+fn envp(){
   "Returns the raw envp pointer."
   __envp()
 }
-fn errno() {
+fn errno(){
   "Returns the current C runtime errno value."
   __errno()
 }
 
 fn is_kwargs(x){
   "Internal: Returns **true** if `x` is a keyword-argument wrapper object."
-  if(!is_nytrix_obj(x)){ return false }
-  __eq(load64(x, -8), 104)
+  if(!__is_ny_obj(x)){ return false }
+  __tagof(x) == 104
 }
 
 fn __kwarg(k, v){
   "Create a keyword-argument wrapper object combining key `k` and value `v`."
-  def p = malloc(16)  ; Tag at -8, Key(0), Val(8)
+  def p = malloc(16) ; Tag at -8, Key(0), Val(8)
   store64(p, 104, -8) ; Tag 104 for Kwarg (stored as 209)
-  store64(p, k, 0)    ; Key at 0
-  store64(p, v, 8)    ; Val at 8
+  store64(p, k, 0) ; Key at 0
+  store64(p, v, 8) ; Val at 8
   p
 }
 
@@ -281,8 +270,8 @@ fn len(x){
 
 fn list_clone(lst){
   "Creates a **shallow copy** of the list `lst`."
-  if(eq(lst, 0)){ return 0 }
-  if(eq(is_list(lst), false)){ return 0 }
+  if(lst == 0){ return 0 }
+  if(!is_list(lst)){ return 0 }
   def n = len(lst)
   mut out = list(n)
   mut i = 0
@@ -317,10 +306,10 @@ fn sort(lst){
      mut j = i - 1
      while(j >= 0 && load64(lst, 16 + j * 8) > key){
         store64(lst, load64(lst, 16 + j * 8), 16 + (j + 1) * 8)
-        j = j - 1
+        j -= 1
      }
      store64(lst, key, 16 + (j + 1) * 8)
-     i = i + 1
+     i += 1
   }
   lst
 }
@@ -330,4 +319,117 @@ fn list_clear(lst){
   if(!is_list(lst)){ return lst }
   store64(lst, 0, 0)
   lst
+}
+
+def OS = __os_name()
+def ARCH = __arch_name()
+def IS_LINUX   = __eq(OS, "linux")
+def IS_MACOS   = __eq(OS, "macos")
+def IS_WINDOWS = __eq(OS, "windows")
+def IS_X86_64  = __eq(ARCH, "x86_64")
+def IS_AARCH64 = __eq(ARCH, "aarch64") || __eq(ARCH, "arm64")
+def IS_ARM     = __eq(ARCH, "arm")
+
+if(comptime{__main()}){
+    use std.core *
+    use std.core.list *
+    use std.os *
+    use std.os.dirs *
+    use std.os.path *
+    use std.str *
+    use std.os.sys *
+
+    ; Memory operations
+    def ptr = malloc(64)
+    assert(ptr != 0, "malloc returns non-null")
+    store64(ptr, 12345)
+    mut val = load64(ptr)
+    assert(val == 12345, "store64/load64")
+    store8(ptr, 255)
+    val = load8(ptr)
+    assert(val == 255, "store8/load8")
+    free(ptr)
+
+    ; List operations
+    mut lst = list(8)
+    assert(is_list(lst), "list creation")
+    assert(len(lst) == 0, "empty list length")
+    lst = append(lst, 10)
+    lst = append(lst, 20)
+    lst = append(lst, 30)
+    assert(len(lst) == 3, "list length after appends")
+    assert(get(lst, 0) == 10, "get first element")
+    assert(get(lst, 1) == 20, "get second element")
+    assert(get(lst, 2) == 30, "get third element")
+    assert(get(lst, -1) == 30, "negative indexing")
+    set_idx(lst, 1, 25)
+    assert(get(lst, 1) == 25, "set element")
+    val = pop(lst)
+    assert(val == 30, "pop returns last element")
+    assert(len(lst) == 2, "length after pop")
+    def lst2 = [40, 50]
+    lst = extend(lst, lst2)
+    assert(len(lst) == 4, "extend length")
+    lst = list_clear(lst)
+    assert(len(lst) == 0, "clear list")
+
+    ; Type checking
+    assert(is_int(42), "is_int on integer")
+    assert(!is_int("string"), "is_int on string")
+    assert(is_ptr("string"), "is_ptr on string")
+    assert(!is_ptr(42), "is_ptr on integer")
+    assert(is_list([1, 2, 3]), "is_list on list")
+    assert(!is_list(42), "is_list on integer")
+    def d = dict(8)
+    assert(is_dict(d), "is_dict on dict")
+    assert(!is_dict([]), "is_dict on list")
+
+    ; 'in' operator
+    def in_list = [1, 2, 3]
+    assert(contains(in_list, 1), "in operator on list")
+    assert(!contains(in_list, 4), "in operator on list (not found)")
+    def in_str = "hello"
+    assert(contains(in_str, "ell"), "in operator on string")
+    assert(!contains(in_str, "xyz"), "in operator on string (not found)")
+
+    ; File operations
+    def test_file = normalize(temp_dir() + sep() + "nytrix_core_test.txt")
+    def test_data = "Hello, Nytrix!"
+    mut result = file_remove(test_file) ; Cleanup previous run
+    result = file_write(test_file, test_data)
+
+    if(is_err(result)){
+        print("file_write failed to: " + test_file)
+        print("Error code: " + to_str(__unwrap(result)))
+        print("System errno: " + to_str(errno()))
+        panic("file_write failed")
+    }
+
+    assert(is_ok(result), "file_write returns ok")
+    assert(__unwrap(result) > 0, "file_write returns bytes written")
+    assert(file_exists(test_file), "file exists after write")
+    mut r = file_read(test_file)
+    assert(is_ok(r), "file_read returns ok")
+    mut content = __unwrap(r)
+    assert((content == test_data), "file content matches")
+
+    mut append_res = file_append(test_file, " More data")
+    assert(is_ok(append_res), "file_append returns ok")
+    r = file_read(test_file)
+    assert(is_ok(r), "file_read(2) returns ok")
+    content = __unwrap(r)
+    assert(str_contains(content, "More data"), "file append works")
+
+    mut remove_res = file_remove(test_file)
+    assert(is_ok(remove_res), "file remove")
+    assert(!file_exists(test_file), "file removed")
+
+    ; String helpers
+    def s1 = "hello"
+    def s2 = "hello"
+    def s3 = "world"
+    assert(_str_eq(s1, s2), "string equality")
+    assert(!_str_eq(s1, s3), "string inequality")
+
+    print("✓ std.core.mod tests passed")
 }

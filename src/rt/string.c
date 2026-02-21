@@ -1,4 +1,5 @@
 #include "rt/shared.h"
+#include <inttypes.h>
 
 int64_t __str_concat(int64_t a, int64_t b) {
   char buf_a[512], buf_b[512];
@@ -6,7 +7,7 @@ int64_t __str_concat(int64_t a, int64_t b) {
   if (is_v_str(a))
     sa = (const char *)(uintptr_t)a;
   else if (is_int(a)) {
-    snprintf(buf_a, sizeof(buf_a), "%ld", a >> 1);
+    snprintf(buf_a, sizeof(buf_a), "%" PRId64, (int64_t)(a >> 1));
     sa = buf_a;
   } else if (is_v_flt(a)) {
     double d;
@@ -26,7 +27,7 @@ int64_t __str_concat(int64_t a, int64_t b) {
   if (is_v_str(b))
     sb = (const char *)(uintptr_t)b;
   else if (is_int(b)) {
-    snprintf(buf_b, sizeof(buf_b), "%ld", b >> 1);
+    snprintf(buf_b, sizeof(buf_b), "%" PRId64, (int64_t)(b >> 1));
     sb = buf_b;
   } else if (is_v_flt(b)) {
     double d;
@@ -53,8 +54,10 @@ int64_t __str_concat(int64_t a, int64_t b) {
   *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
   *(int64_t *)(uintptr_t)((char *)res - 16) = (int64_t)(((la + lb) << 1) | 1);
   char *s = (char *)(uintptr_t)res;
-  __copy_mem(s, sa, la);
-  __copy_mem(s + la, sb, lb);
+  __copy_mem((int64_t)(uintptr_t)s, (int64_t)(uintptr_t)sa,
+             ((int64_t)la << 1) | 1);
+  __copy_mem((int64_t)(uintptr_t)(s + la), (int64_t)(uintptr_t)sb,
+             ((int64_t)lb << 1) | 1);
   s[la + lb] = '\0';
   return res;
 }
@@ -84,11 +87,12 @@ int64_t __to_str(int64_t v) {
   if (v & 1) { // is_int
     int64_t val = v >> 1;
     char buf[64];
-    int len = sprintf(buf, "%ld", val);
+    int len = sprintf(buf, "%" PRId64, (int64_t)val);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)buf,
+               ((int64_t)(len + 1) << 1) | 1);
     return res;
   }
   if ((v & 3) == 2) {
@@ -97,7 +101,8 @@ int64_t __to_str(int64_t v) {
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)buf,
+               ((int64_t)(len + 1) << 1) | 1);
     return res;
   }
 
@@ -115,7 +120,8 @@ int64_t __to_str(int64_t v) {
       int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
       *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
       *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-      __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+      __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)buf,
+                 ((int64_t)(len + 1) << 1) | 1);
       return res;
     }
     // Generic Nytrix heap object
@@ -124,7 +130,8 @@ int64_t __to_str(int64_t v) {
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)buf,
+               ((int64_t)(len + 1) << 1) | 1);
     return res;
   }
   if (is_ptr(v)) {
@@ -133,7 +140,8 @@ int64_t __to_str(int64_t v) {
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((void *)(uintptr_t)res, buf, (size_t)len + 1);
+    __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)buf,
+               ((int64_t)(len + 1) << 1) | 1);
     return res;
   }
   return __to_str(0);

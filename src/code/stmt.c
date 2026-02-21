@@ -1,20 +1,35 @@
 #include "base/util.h"
+#include "braun.h"
+#include "llvm.h"
+#include "nullnarrow.h"
 #include "priv.h"
 #include <llvm-c/Core.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
+                                 bool is_mut);
+
 static void scope_enter(scope *scopes, size_t *depth,
                         LLVMBasicBlockRef break_bb,
                         LLVMBasicBlockRef continue_bb) {
   (*depth)++;
-  scopes[*depth].vars.len = scopes[*depth].vars.cap = 0;
-  scopes[*depth].vars.data = NULL;
-  scopes[*depth].defers.len = scopes[*depth].defers.cap = 0;
-  scopes[*depth].defers.data = NULL;
+  memset(&scopes[*depth], 0, sizeof(scopes[*depth]));
   scopes[*depth].break_bb = break_bb;
   scopes[*depth].continue_bb = continue_bb;
+}
+
+static inline void braun_write_local_value(codegen_t *cg, size_t depth,
+                                           bool is_global_target,
+                                           const char *name,
+                                           LLVMValueRef value) {
+  if (!cg || !cg->braun || !name || !value)
+    return;
+  if (depth == 0 || is_global_target)
+    return;
+  ny_braun_mark_current_block(cg);
+  braun_ssa_write_var(cg->braun, name, value);
 }
 
 static void report_reassign_immutable(codegen_t *cg, token_t tok, const char *n,
@@ -30,6 +45,57 @@ static void report_reassign_immutable(codegen_t *cg, token_t tok, const char *n,
   ny_diag_fix(
       "change the declaration to 'mut %s = ...' or assign to a new name", n);
   cg->had_error = 1;
+}
+
+static bool ensure_mutable_binding_for_assign(codegen_t *cg, token_t tok,
+                                              const char *name,
+                                              const binding *b,
+                                              bool is_global) {
+  if (!b)
+    return false;
+  if (b->is_mut)
+    return true;
+  report_reassign_immutable(cg, tok, name, is_global, b);
+  return false;
+}
+
+static void stmt_var_setup_local_binding(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *var_stmt,
+    sema_var_t *sema, size_t idx, const char *name, const char *decl_type,
+    bool prefer_direct_locals, bool *bind_direct, LLVMValueRef *slot) {
+  if (!cg || !scopes || !var_stmt || !name || !bind_direct || !slot)
+    return;
+  if (prefer_direct_locals ||
+      can_bind_decl_direct(cg, name, var_stmt->as.var.is_mut)) {
+    *bind_direct = true;
+    return;
+  }
+  LLVMTypeRef var_type = cg->type_i64;
+  if (sema && sema->resolved_types.len > idx) {
+    var_type = sema->resolved_types.data[idx];
+  } else if (decl_type) {
+    var_type = resolve_type_name(cg, decl_type, var_stmt->tok);
+  }
+  *slot = build_alloca(cg, name, var_type);
+  scope_bind(cg, scopes, depth, name, *slot, var_stmt, var_stmt->as.var.is_mut,
+             decl_type, true);
+}
+
+static binding *stmt_var_lookup_existing(codegen_t *cg, scope *scopes,
+                                         size_t depth, const char *name,
+                                         bool *is_global) {
+  if (is_global)
+    *is_global = false;
+  if (!cg || !scopes || !name)
+    return NULL;
+  binding *b = NULL;
+  if (depth > 0)
+    b = scope_lookup(scopes, depth, name);
+  if (b)
+    return b;
+  if (is_global)
+    *is_global = true;
+  return lookup_global(cg, name);
 }
 
 static bool ensure_store_ready(codegen_t *cg, token_t tok, LLVMValueRef value,
@@ -52,6 +118,15 @@ static bool ensure_store_ready(codegen_t *cg, token_t tok, LLVMValueRef value,
     cg->had_error = 1;
     return false;
   }
+  if (LLVMGetTypeKind(LLVMTypeOf(slot)) != LLVMPointerTypeKind) {
+    ny_diag_error(tok,
+                  "internal codegen failure: assignment destination is not "
+                  "addressable in "
+                  "%s",
+                  ctx);
+    cg->had_error = 1;
+    return false;
+  }
   LLVMBasicBlockRef cur_block = LLVMGetInsertBlock(cg->builder);
   if (!cur_block) {
     ny_diag_error(tok, "internal codegen failure: missing insert block");
@@ -59,6 +134,19 @@ static bool ensure_store_ready(codegen_t *cg, token_t tok, LLVMValueRef value,
     return false;
   }
   return !LLVMGetBasicBlockTerminator(cur_block);
+}
+
+static bool can_bind_decl_direct(const codegen_t *cg, const char *name,
+                                 bool is_mut) {
+  if (!is_mut)
+    return true;
+  if (!cg || !name || !cg->assigned_names_data || cg->assigned_names_len == 0)
+    return false;
+  uint64_t h = ny_hash64_cstr(name);
+  return !ny_name_set_has_hash(
+      (const char *const *)cg->assigned_names_data, cg->assigned_names_len,
+      cg->assigned_name_hashes_data, cg->assigned_name_hashes_len,
+      cg->assigned_names_bloom, name, h);
 }
 
 static void gen_loop_control(codegen_t *cg, scope *scopes, size_t depth,
@@ -73,6 +161,8 @@ static void gen_loop_control(codegen_t *cg, scope *scopes, size_t depth,
   }
   if (jump_bb) {
     ny_dbg_loc(cg, tok);
+    LLVMBasicBlockRef from_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, jump_bb, from_bb);
     LLVMBuildBr(cg->builder, jump_bb);
     return;
   }
@@ -101,6 +191,29 @@ static void emit_trace_loc(codegen_t *cg, token_t tok) {
       LLVMConstInt(cg->type_i64, ((uint64_t)col << 1) | 1, false);
   LLVMBuildCall2(cg->builder, ts->type, ts->value,
                  (LLVMValueRef[]){fstr, line_v, col_v}, 3, "");
+}
+
+static bool stmt_is_direct_thread_attr_call(codegen_t *cg, expr_t *e) {
+  if (!cg || !e || e->kind != NY_E_CALL || !e->as.call.callee ||
+      e->as.call.callee->kind != NY_E_IDENT)
+    return false;
+  const char *name = e->as.call.callee->as.ident.name;
+  if (!name || !*name)
+    return false;
+  fun_sig *sig = lookup_fun(cg, name);
+  if (!sig || sig->is_extern || !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
+    return false;
+  return sig->stmt_t->as.fn.attr_thread;
+}
+
+static label_binding *find_label_binding(codegen_t *cg, const char *name) {
+  if (!cg || !name)
+    return NULL;
+  for (size_t i = 0; i < cg->labels.len; i++) {
+    if (strcmp(cg->labels.data[i].name, name) == 0)
+      return &cg->labels.data[i];
+  }
+  return NULL;
 }
 
 static bool match_pattern_is_wild(expr_t *pat) {
@@ -144,11 +257,66 @@ static enum_member_def_t *match_pattern_enum_member(codegen_t *cg, expr_t *pat,
   return NULL;
 }
 
+static LLVMValueRef match_pattern_result_cond(codegen_t *cg, scope *scopes,
+                                              size_t depth, stmt_t *owner_stmt,
+                                              LLVMValueRef testv, expr_t *pat) {
+  if (!pat || pat->kind != NY_E_CALL || !pat->as.call.callee ||
+      pat->as.call.callee->kind != NY_E_IDENT)
+    return NULL;
+
+  const char *callee = pat->as.call.callee->as.ident.name;
+  if (!callee)
+    return NULL;
+  bool is_ok_pat = (strcmp(callee, "ok") == 0);
+  bool is_err_pat = (strcmp(callee, "err") == 0);
+  if (!is_ok_pat && !is_err_pat)
+    return NULL;
+
+  fun_sig *check_sig = lookup_fun(cg, is_ok_pat ? "__is_ok" : "__is_err");
+  if (!check_sig)
+    return NULL;
+
+  LLVMValueRef tag_check =
+      LLVMBuildCall2(cg->builder, check_sig->type, check_sig->value,
+                     (LLVMValueRef[]){testv}, 1, "");
+  LLVMValueRef pat_cond = to_bool(cg, tag_check);
+
+  if (pat->as.call.args.len > 0) {
+    expr_t *arg0 = pat->as.call.args.data[0].val;
+    if (arg0 && arg0->kind == NY_E_IDENT) {
+      fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap");
+      if (unwrap_sig) {
+        LLVMValueRef val =
+            LLVMBuildCall2(cg->builder, unwrap_sig->type, unwrap_sig->value,
+                           (LLVMValueRef[]){testv}, 1, "");
+        scope_bind(cg, scopes, depth, arg0->as.ident.name, val, owner_stmt,
+                   false, NULL, false);
+      }
+    }
+  }
+  return pat_cond;
+}
+
+static const char *binding_assign_type(const binding *b) {
+  if (!b)
+    return NULL;
+  if (b->decl_type_name && *b->decl_type_name)
+    return b->decl_type_name;
+  return b->type_name;
+}
+
 static void match_check_exhaustive(codegen_t *cg, stmt_t *s) {
   if (!cg || !s)
     return;
   if (s->as.match.default_conseq)
     return;
+  for (size_t i = 0; i < s->as.match.arms.len; ++i) {
+    if (s->as.match.arms.data[i].guard) {
+      // Guards can reject otherwise-matching patterns at runtime, so static
+      // exhaustiveness checks are not reliable here.
+      return;
+    }
+  }
 
   bool has_wild = false;
   bool has_other = false;
@@ -214,8 +382,7 @@ static void match_check_exhaustive(codegen_t *cg, stmt_t *s) {
 
   if (!has_other && (has_ok || has_err)) {
     if (!has_ok || !has_err) {
-      ny_diag_error(s->tok,
-                    "non-exhaustive match for Result (missing %s arm)",
+      ny_diag_error(s->tok, "non-exhaustive match for Result (missing %s arm)",
                     has_ok ? "err(...)" : "ok(...)");
       cg->had_error = 1;
     }
@@ -226,8 +393,7 @@ static void match_check_exhaustive(codegen_t *cg, stmt_t *s) {
   if (!has_other && !enum_owner && !has_ok && !has_err &&
       (has_true || has_false)) {
     if (!(has_true && has_false)) {
-      ny_diag_error(s->tok,
-                    "non-exhaustive match for bool (missing %s)",
+      ny_diag_error(s->tok, "non-exhaustive match for bool (missing %s)",
                     has_true ? "false" : "true");
       cg->had_error = 1;
     }
@@ -277,30 +443,92 @@ static void match_check_exhaustive(codegen_t *cg, stmt_t *s) {
   vec_free(&matched);
 }
 
+static void gen_stmt_with_null_narrow(codegen_t *cg, scope *scopes,
+                                      size_t *depth,
+                                      const ny_null_narrow_list_t *narrow,
+                                      bool true_branch, stmt_t *body,
+                                      size_t func_root, bool is_tail) {
+  if (!body)
+    return;
+  ny_null_narrow_restore_list_t applied;
+  ny_null_narrow_apply(cg, scopes, *depth, narrow, true_branch, &applied);
+  gen_stmt(cg, scopes, depth, body, func_root, is_tail);
+  ny_null_narrow_restore(&applied);
+}
+
 static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                         size_t func_root, bool is_tail) {
-  LLVMValueRef c = to_bool(cg, gen_expr(cg, scopes, *depth, s->as.iff.test));
+  ny_null_narrow_list_t narrow;
+  vec_init(&narrow);
+  (void)ny_null_narrow_collect(s->as.iff.test, &narrow);
+
+  LLVMValueRef val = gen_expr(cg, scopes, *depth, s->as.iff.test);
+  if (LLVMIsAConstantInt(val)) {
+    uint64_t raw = LLVMConstIntGetZExtValue(val);
+    // Nytrix truthiness: not None (0), not false (4), not 0 (1)
+    bool truthy = (raw != 0 && raw != 4 && raw != 1);
+    if (truthy) {
+      gen_stmt_with_null_narrow(cg, scopes, depth, &narrow, true,
+                                s->as.iff.conseq, func_root, is_tail);
+    } else if (s->as.iff.alt) {
+      gen_stmt_with_null_narrow(cg, scopes, depth, &narrow, false,
+                                s->as.iff.alt, func_root, is_tail);
+    }
+    vec_free(&narrow);
+    return;
+  }
+
+  LLVMValueRef c = to_bool(cg, val);
+  LLVMBasicBlockRef entry = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+
   LLVMBasicBlockRef tb = LLVMAppendBasicBlock(f, "it"),
                     eb = s->as.iff.alt ? LLVMAppendBasicBlock(f, "ie") : NULL,
                     next = LLVMAppendBasicBlock(f, "in");
+  LLVMBasicBlockRef then_end = NULL;
+  LLVMBasicBlockRef else_end = NULL;
+  bool then_fallthrough = false;
+  bool else_fallthrough = false;
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder, c, tb, eb ? eb : next);
+  ny_braun_add_predecessor(cg, tb, entry);
+  if (eb)
+    ny_braun_add_predecessor(cg, eb, entry);
+  else
+    ny_braun_add_predecessor(cg, next, entry);
   LLVMPositionBuilderAtEnd(cg->builder, tb);
-  gen_stmt(cg, scopes, depth, s->as.iff.conseq, func_root, is_tail);
-  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+  ny_braun_enter_block(cg, tb);
+  ny_braun_seal_block(cg, tb);
+  gen_stmt_with_null_narrow(cg, scopes, depth, &narrow, true, s->as.iff.conseq,
+                            func_root, is_tail);
+  then_end = LLVMGetInsertBlock(cg->builder);
+  then_fallthrough = !LLVMGetBasicBlockTerminator(then_end);
+  if (then_fallthrough)
     LLVMBuildBr(cg->builder, next);
   if (eb) {
     LLVMPositionBuilderAtEnd(cg->builder, eb);
-    gen_stmt(cg, scopes, depth, s->as.iff.alt, func_root, is_tail);
-    if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+    ny_braun_enter_block(cg, eb);
+    ny_braun_seal_block(cg, eb);
+    gen_stmt_with_null_narrow(cg, scopes, depth, &narrow, false, s->as.iff.alt,
+                              func_root, is_tail);
+    else_end = LLVMGetInsertBlock(cg->builder);
+    else_fallthrough = !LLVMGetBasicBlockTerminator(else_end);
+    if (else_fallthrough)
       LLVMBuildBr(cg->builder, next);
   }
   LLVMPositionBuilderAtEnd(cg->builder, next);
+  ny_braun_enter_block(cg, next);
+  if (then_fallthrough)
+    ny_braun_add_predecessor(cg, next, then_end);
+  if (eb && else_fallthrough)
+    ny_braun_add_predecessor(cg, next, else_end);
+  ny_braun_seal_block(cg, next);
+  vec_free(&narrow);
 }
 
 static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root, bool is_tail) {
+  LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
   scope_enter(scopes, depth, scopes[*depth].break_bb,
               scopes[*depth].continue_bb);
   for (size_t i = 0; i < s->as.block.body.len; i++) {
@@ -308,7 +536,13 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
       LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
       if (cur && LLVMGetBasicBlockTerminator(cur)) {
         stmt_t *unreach = s->as.block.body.data[i];
-        ny_diag_warning(unreach->tok, "unreachable code");
+        // Stdlib has many comptime-pruned branches; avoid noisy false positives
+        // unless diagnostics are explicitly strict/verbose.
+        bool stdlib_quiet = ny_is_stdlib_tok(unreach->tok) &&
+                            !ny_strict_error_enabled(cg, unreach->tok) &&
+                            verbose_enabled < 2;
+        if (!stdlib_quiet)
+          ny_diag_warning(unreach->tok, "unreachable code");
         break;
       }
     }
@@ -318,33 +552,47 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
     emit_defers(cg, scopes, *depth, *depth);
   scope_pop(scopes, depth);
+  codegen_debug_pop_block(cg, dbg_scope);
 }
 
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+  LLVMBasicBlockRef pre = LLVMGetInsertBlock(cg->builder);
   LLVMBasicBlockRef cb = LLVMAppendBasicBlock(f, "wc"),
                     bb = LLVMAppendBasicBlock(f, "wb"),
                     eb = LLVMAppendBasicBlock(f, "we");
   ny_dbg_loc(cg, s->tok);
   LLVMBuildBr(cg->builder, cb);
+  ny_braun_add_predecessor(cg, cb, pre);
   LLVMPositionBuilderAtEnd(cg->builder, cb);
+  ny_braun_enter_block(cg, cb);
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder,
                   to_bool(cg, gen_expr(cg, scopes, *depth, s->as.whl.test)), bb,
                   eb);
+  ny_braun_add_predecessor(cg, bb, cb);
+  ny_braun_add_predecessor(cg, eb, cb);
+  ny_braun_seal_block(cg, bb);
   LLVMPositionBuilderAtEnd(cg->builder, bb);
+  ny_braun_enter_block(cg, bb);
+  LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
   scope_enter(scopes, depth, eb, cb);
   gen_stmt(cg, scopes, depth, s->as.whl.body, func_root, false);
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
     emit_defers(cg, scopes, *depth, *depth);
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
       ny_dbg_loc(cg, s->tok);
+      ny_braun_add_predecessor(cg, cb, LLVMGetInsertBlock(cg->builder));
       LLVMBuildBr(cg->builder, cb);
     }
   }
   scope_pop(scopes, depth);
+  codegen_debug_pop_block(cg, dbg_scope);
+  ny_braun_seal_block(cg, cb);
   LLVMPositionBuilderAtEnd(cg->builder, eb);
+  ny_braun_enter_block(cg, eb);
+  ny_braun_seal_block(cg, eb);
 }
 
 static bool get_for_iter_helpers(codegen_t *cg, token_t tok, fun_sig **ls,
@@ -367,46 +615,68 @@ static bool get_for_iter_helpers(codegen_t *cg, token_t tok, fun_sig **ls,
 static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                          size_t func_root) {
   LLVMValueRef itv = gen_expr(cg, scopes, *depth, s->as.fr.iterable);
-  LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+  LLVMBasicBlockRef pre = LLVMGetInsertBlock(cg->builder);
+  LLVMValueRef f = LLVMGetBasicBlockParent(pre);
   LLVMBasicBlockRef cb = LLVMAppendBasicBlock(f, "fc"),
                     bb = LLVMAppendBasicBlock(f, "fb"),
+                    lb = LLVMAppendBasicBlock(f, "fl"),
                     eb = LLVMAppendBasicBlock(f, "fe");
-  LLVMValueRef idx_p = build_alloca(cg, "idx", cg->type_i64);
-  LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 1, false), idx_p);
   fun_sig *ls = NULL, *gs = NULL;
   if (!get_for_iter_helpers(cg, s->tok, &ls, &gs))
     return;
-  ny_dbg_loc(cg, s->tok);
-  LLVMBuildBr(cg->builder, cb);
-  LLVMPositionBuilderAtEnd(cg->builder, cb);
-  LLVMValueRef i_val = LLVMBuildLoad2(cg->builder, cg->type_i64, idx_p, "");
+  // calls in the condition block.
   LLVMValueRef n_val = LLVMBuildCall2(cg->builder, ls->type, ls->value,
                                       (LLVMValueRef[]){itv}, 1, "");
+  ny_dbg_loc(cg, s->tok);
+  LLVMBuildBr(cg->builder, cb);
+  ny_braun_add_predecessor(cg, cb, pre);
+  LLVMPositionBuilderAtEnd(cg->builder, cb);
+  ny_braun_enter_block(cg, cb);
+  LLVMValueRef i_start = LLVMConstInt(cg->type_i64, 1, false);
+  LLVMValueRef i_val = LLVMBuildPhi(cg->builder, cg->type_i64, "for_i");
+  LLVMAddIncoming(i_val, &i_start, &pre, 1);
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder,
                   LLVMBuildICmp(cg->builder, LLVMIntSLT, i_val, n_val, ""), bb,
                   eb);
+  ny_braun_add_predecessor(cg, bb, cb);
+  ny_braun_add_predecessor(cg, eb, cb);
+  ny_braun_seal_block(cg, bb);
   LLVMPositionBuilderAtEnd(cg->builder, bb);
+  ny_braun_enter_block(cg, bb);
   LLVMValueRef item = LLVMBuildCall2(cg->builder, gs->type, gs->value,
                                      (LLVMValueRef[]){itv, i_val}, 2, "");
-  LLVMValueRef iv = build_alloca(cg, s->as.fr.iter_var, cg->type_i64);
-  LLVMBuildStore(cg->builder, item, iv);
-  LLVMBuildStore(cg->builder,
-                 LLVMBuildAdd(cg->builder, i_val,
-                              LLVMConstInt(cg->type_i64, 2, false), ""),
-                 idx_p);
-  scope_enter(scopes, depth, eb, cb);
-  bind(scopes, *depth, s->as.fr.iter_var, iv, s, false, NULL);
+  LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
+  scope_enter(scopes, depth, eb, lb);
+  scope_bind(cg, scopes, *depth, s->as.fr.iter_var, item, s, false, NULL,
+             false);
   gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
     emit_defers(cg, scopes, *depth, *depth);
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
       ny_dbg_loc(cg, s->tok);
-      LLVMBuildBr(cg->builder, cb);
+      /* Normal for-loop flow must go through the latch so i_next is computed
+       * before re-entering the condition block. Jumping directly to cb keeps
+       * i_val unchanged and can spin forever. */
+      ny_braun_add_predecessor(cg, lb, LLVMGetInsertBlock(cg->builder));
+      LLVMBuildBr(cg->builder, lb);
     }
   }
   scope_pop(scopes, depth);
+  codegen_debug_pop_block(cg, dbg_scope);
+  LLVMPositionBuilderAtEnd(cg->builder, lb);
+  ny_braun_enter_block(cg, lb);
+  ny_braun_seal_block(cg, lb);
+  LLVMValueRef i_next = LLVMBuildAdd(cg->builder, i_val,
+                                     LLVMConstInt(cg->type_i64, 2, false), "");
+  ny_dbg_loc(cg, s->tok);
+  ny_braun_add_predecessor(cg, cb, lb);
+  LLVMBuildBr(cg->builder, cb);
+  LLVMAddIncoming(i_val, &i_next, &lb, 1);
+  ny_braun_seal_block(cg, cb);
   LLVMPositionBuilderAtEnd(cg->builder, eb);
+  ny_braun_enter_block(cg, eb);
+  ny_braun_seal_block(cg, eb);
 }
 
 static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
@@ -428,22 +698,43 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       LLVMBuildCall2(cg->builder, sz_fn->type, sz_fn->value, NULL, 0, "");
   LLVMValueRef jmpbuf = LLVMBuildArrayAlloca(
       cg->builder, LLVMInt8TypeInContext(cg->ctx), sz_val, "jmpbuf");
+  /* Keep jmp_buf sufficiently aligned across ABIs (notably Windows). */
+  LLVMSetAlignment(jmpbuf, 16);
   LLVMValueRef jmpbuf_ptr =
       LLVMBuildPtrToInt(cg->builder, jmpbuf, cg->type_i64, "");
   LLVMBuildCall2(cg->builder, set_env->type, set_env->value,
                  (LLVMValueRef[]){jmpbuf_ptr}, 1, "");
-  LLVMValueRef setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
+  LLVMValueRef setjmp_func = NULL;
+#ifdef _WIN32
+  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
   if (!setjmp_func)
     setjmp_func = LLVMGetNamedFunction(cg->module, "setjmp");
+#else
+  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
+  if (!setjmp_func)
+    setjmp_func = LLVMGetNamedFunction(cg->module, "setjmp");
+#endif
+  LLVMTypeRef arg_t = ny_llvm_ptr_type(cg->ctx);
+  LLVMTypeRef ret_t = LLVMInt32TypeInContext(cg->ctx);
   if (!setjmp_func) {
-    LLVMTypeRef arg_t = LLVMPointerTypeInContext(cg->ctx, 0);
-    LLVMTypeRef ret_t = LLVMInt32TypeInContext(cg->ctx);
+#ifdef _WIN32
+    setjmp_func = LLVMAddFunction(
+        cg->module, "_setjmp",
+        LLVMFunctionType(ret_t, (LLVMTypeRef[]){arg_t, arg_t}, 2, 0));
+#else
     setjmp_func = LLVMAddFunction(cg->module, "setjmp",
                                   LLVMFunctionType(ret_t, &arg_t, 1, 0));
+#endif
   }
+#ifdef _WIN32
+  LLVMValueRef sj_res = LLVMBuildCall2(
+      cg->builder, LLVMGlobalGetValueType(setjmp_func), setjmp_func,
+      (LLVMValueRef[]){jmpbuf, LLVMConstNull(arg_t)}, 2, "sj_res");
+#else
   LLVMValueRef sj_res =
       LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(setjmp_func),
                      setjmp_func, (LLVMValueRef[]){jmpbuf}, 1, "sj_res");
+#endif
   LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
   LLVMBasicBlockRef try_b =
       LLVMAppendBasicBlockInContext(cg->ctx, func, "try_body");
@@ -467,13 +758,14 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMValueRef err_val = LLVMBuildCall2(cg->builder, get_err->type,
                                         get_err->value, NULL, 0, "err");
   if (s->as.tr.err) {
+    LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
     scope_enter(scopes, depth, scopes[*depth].break_bb,
                 scopes[*depth].continue_bb);
-    LLVMValueRef err_var = build_alloca(cg, s->as.tr.err, cg->type_i64);
-    LLVMBuildStore(cg->builder, err_val, err_var);
-    bind(scopes, *depth, s->as.tr.err, err_var, s, false, NULL);
+    scope_bind(cg, scopes, *depth, s->as.tr.err, err_val, s, false, NULL,
+               false);
     gen_stmt(cg, scopes, depth, s->as.tr.handler, func_root, is_tail);
     scope_pop(scopes, depth);
+    codegen_debug_pop_block(cg, dbg_scope);
   } else {
     gen_stmt(cg, scopes, depth, s->as.tr.handler, func_root, is_tail);
   }
@@ -502,23 +794,50 @@ static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
 
   fun_sig *push_sig = lookup_fun(cg, "__push_defer");
   if (push_sig) {
-    LLVMBuildCall2(
-        cg->builder, push_sig->type, push_sig->value,
-        (LLVMValueRef[]){LLVMBuildIntToPtr(
-                             cg->builder, fn_ptr_int,
-                             LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0),
-                             ""),
-                         env},
-        2, "");
+    LLVMBuildCall2(cg->builder, push_sig->type, push_sig->value,
+                   (LLVMValueRef[]){fn_ptr_int, env}, 2, "");
   }
 
   vec_push(&scopes[depth].defers, s->as.de.body);
 }
 
 static void gen_stmt_struct(codegen_t *cg, stmt_t *s) {
-  (void)cg;
-  (void)s;
-  // TODO: Register LLVM struct type
+  if (lookup_layout(cg, s->as.struc.name))
+    return;
+
+  const char *name = s->as.struc.name;
+  LLVMTypeRef st = LLVMStructCreateNamed(cg->ctx, name);
+
+  // Register early to allow recursive pointers
+  layout_def_t *def = malloc(sizeof(layout_def_t));
+  memset(def, 0, sizeof(*def));
+  def->name = ny_strdup(name);
+  def->llvm_type = st;
+  def->is_layout = (s->kind == NY_S_LAYOUT);
+  def->stmt = s;
+  vec_push(&cg->layouts, def);
+
+  size_t count = s->as.struc.fields.len;
+  LLVMTypeRef *element_types =
+      malloc(sizeof(LLVMTypeRef) * (count > 0 ? count : 1));
+
+  for (size_t i = 0; i < count; i++) {
+    layout_field_t *f = &s->as.struc.fields.data[i];
+    type_layout_t f_layout = resolve_raw_layout(cg, f->type_name, s->tok);
+    if (f_layout.is_valid && f_layout.llvm_type) {
+      element_types[i] = f_layout.llvm_type;
+    } else {
+      element_types[i] = cg->type_i64;
+    }
+  }
+
+  LLVMStructSetBody(st, element_types, (unsigned)count,
+                    s->as.struc.pack ? true : false);
+  free(element_types);
+
+  LLVMTargetDataRef td = LLVMGetModuleDataLayout(cg->module);
+  def->size = LLVMStoreSizeOfType(td, st);
+  def->align = LLVMABIAlignmentOfType(td, st);
 }
 
 static void gen_stmt_module(codegen_t *cg, scope *scopes, size_t *depth,
@@ -588,6 +907,9 @@ void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth) {
   case NY_S_DEFER:
     collect_labels(cg, func, s->as.de.body, depth + 1);
     break;
+  case NY_S_MACRO:
+    collect_labels(cg, func, s->as.macro.body, depth + 1);
+    break;
   default:
     break;
   }
@@ -597,12 +919,14 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
               size_t func_root, bool is_tail) {
   if (!s || cg->had_error)
     return;
+  ny_braun_mark_current_block(cg);
   ny_dbg_loc(cg, s->tok);
   emit_trace_loc(cg, s->tok);
   switch (s->kind) {
   case NY_S_VAR: {
     bool dest = s->as.var.is_destructure;
     bool parallel = (s->as.var.names.len == s->as.var.exprs.len) && !dest;
+    bool prefer_direct_locals = (cg->braun && cg->braun->enabled);
 
     // Evaluate first expression if not parallel (broadcast or destructure)
     LLVMValueRef first_val = NULL;
@@ -624,43 +948,66 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
     for (size_t i = 0; i < s->as.var.names.len; i++) {
       const char *n = s->as.var.names.data[i];
-      LLVMValueRef slot;
+      LLVMValueRef slot = NULL;
+      bool bind_direct = false;
+      binding *resolved_local = NULL;
+      binding *resolved_global = NULL;
+      sema_var_t *sema = (sema_var_t *)s->sema;
+      const char *decl_type = NULL;
+      if (s->as.var.types.len > i)
+        decl_type = s->as.var.types.data[i];
       if (s->as.var.is_undef) {
-        if (*depth == 0) {
-          binding *gb = lookup_global(cg, n);
-          if (!gb) {
-            report_undef_symbol(cg, n, s->tok);
-            return;
-          }
-          slot = gb->value;
-        } else {
-          binding *eb = scope_lookup(scopes, *depth, n);
-          if (!eb)
-            eb = lookup_global(cg, n);
-          if (!eb) {
-            report_undef_symbol(cg, n, s->tok);
-            return;
-          }
-          slot = eb->value;
+        bool target_is_global = false;
+        LLVMValueRef zero = LLVMConstInt(cg->type_i64, 0, false);
+        binding *eb =
+            stmt_var_lookup_existing(cg, scopes, *depth, n, &target_is_global);
+        if (!eb) {
+          report_undef_symbol(cg, n, s->tok);
+          return;
         }
-        LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 0, false), slot);
+        if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
+                                               target_is_global)) {
+          continue;
+        }
+        if (target_is_global || eb->is_slot) {
+          slot = eb->value;
+        } else {
+          eb->value = zero;
+          braun_write_local_value(cg, *depth, false, n, zero);
+          continue;
+        }
+        if (ensure_store_ready(cg, s->tok, zero, slot, "NY_S_VAR(undef)")) {
+          LLVMBuildStore(cg->builder, zero, slot);
+          braun_write_local_value(cg, *depth, target_is_global, n, zero);
+        }
         continue;
       }
       if (*depth == 0) {
         binding *gb = lookup_global(cg, n);
-        if (gb)
+        if (gb) {
+          resolved_global = gb;
           slot = gb->value;
-        else {
+        } else {
           slot = LLVMAddGlobal(cg->module, cg->type_i64,
                                n); // Global vars still default to i64 for now
           LLVMSetInitializer(slot, LLVMConstInt(cg->type_i64, 0, false));
           const char *type_name = NULL;
           if (s->as.var.types.len > i)
             type_name = s->as.var.types.data[i];
-          binding b = {ny_strdup(n), slot, NULL,
-                       s->as.var.is_mut ? true : false, false,
-                       true,         type_name};
+          binding b = {.name = ny_strdup(n),
+                       .value = slot,
+                       .stmt_t = NULL,
+                       .is_slot = true,
+                       .is_mut = s->as.var.is_mut ? true : false,
+                       .is_used = false,
+                       .owned = true,
+                       .type_name = type_name,
+                       .decl_type_name = type_name,
+                       .name_hash = 0};
           vec_push(&cg->global_vars, b);
+          if (cg->debug_symbols && cg->di_builder) {
+            codegen_debug_global_variable(cg, n, slot, s->tok);
+          }
           if (s->tok.filename) {
             ny_diag_warning(
                 s->tok,
@@ -672,51 +1019,44 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
           }
         }
       } else {
-        sema_var_t *sema = (sema_var_t *)s->sema;
         if (s->as.var.is_decl) {
-          LLVMTypeRef var_type = cg->type_i64;
-          if (sema && sema->resolved_types.len > i) {
-            var_type = sema->resolved_types.data[i];
-          } else if (s->as.var.types.len > i) {
-            var_type = resolve_type_name(cg, s->as.var.types.data[i], s->tok);
-          }
-          slot = build_alloca(cg, n, var_type);
-          const char *type_name = NULL;
-          if (s->as.var.types.len > i)
-            type_name = s->as.var.types.data[i];
-          bind(scopes, *depth, n, slot, s, s->as.var.is_mut, type_name);
+          stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
+                                       decl_type, prefer_direct_locals,
+                                       &bind_direct, &slot);
         } else {
-          binding *eb = scope_lookup(scopes, *depth, n);
+          bool target_is_global = false;
+          binding *eb = stmt_var_lookup_existing(cg, scopes, *depth, n,
+                                                 &target_is_global);
           if (eb) {
-            if (!eb->is_mut) {
-              report_reassign_immutable(cg, s->tok, n, false, eb);
+            if (!ensure_mutable_binding_for_assign(cg, s->tok, n, eb,
+                                                   target_is_global)) {
+              continue;
             }
-            slot = eb->value;
+            if (target_is_global) {
+              resolved_global = eb;
+              if (!eb->is_slot) {
+                ny_diag_error(s->tok,
+                              "cannot assign to non-addressable value '%s'", n);
+                cg->had_error = 1;
+                continue;
+              }
+              slot = eb->value;
+            } else {
+              resolved_local = eb;
+              if (eb->is_slot)
+                slot = eb->value;
+            }
           } else {
-            // Check global scope as well
-            binding *gb = lookup_global(cg, n);
-            if (gb) {
-              if (!gb->is_mut) {
-                report_reassign_immutable(cg, s->tok, n, true, gb);
-              }
-              slot = gb->value;
-            } else { // Implicit declaration in local scope
-              LLVMTypeRef var_type = cg->type_i64;
-              if (sema && sema->resolved_types.len > i) {
-                var_type = sema->resolved_types.data[i];
-              }
-              slot = build_alloca(cg, n, var_type);
-              bind(scopes, *depth, n, slot, s, s->as.var.is_mut, NULL);
-            }
+            // Implicit declaration in local scope
+            stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
+                                         NULL, prefer_direct_locals,
+                                         &bind_direct, &slot);
           }
         }
       }
 
       LLVMValueRef target_val = NULL;
       expr_t *expr_for_check = NULL;
-      const char *decl_type = NULL;
-      if (s->as.var.types.len > i)
-        decl_type = s->as.var.types.data[i];
       if (parallel) {
         expr_for_check = s->as.var.exprs.data[i];
         target_val = gen_expr(cg, scopes, *depth, expr_for_check);
@@ -736,29 +1076,45 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       if (!s->as.var.is_destructure) {
         const char *want = decl_type;
         if (!s->as.var.is_decl) {
-          binding *cur = scope_lookup(scopes, *depth, n);
-          if (cur && cur->type_name)
-            want = cur->type_name;
-          else {
-            binding *gb = lookup_global(cg, n);
-            if (gb && gb->type_name)
-              want = gb->type_name;
-          }
+          binding *cur = resolved_local;
+          if (cur)
+            want = binding_assign_type(cur);
+          else if (resolved_global)
+            want = binding_assign_type(resolved_global);
         }
         if (want && expr_for_check)
           ensure_expr_type_compatible(cg, scopes, *depth, want, expr_for_check,
-                                       expr_for_check->tok, "assignment");
+                                      expr_for_check->tok, "assignment");
       }
 
+      if (bind_direct) {
+        scope_bind(cg, scopes, *depth, n, target_val, s, s->as.var.is_mut,
+                   decl_type, false);
+        braun_write_local_value(cg, *depth, false, n, target_val);
+        continue;
+      }
+      if (resolved_local && !resolved_local->is_slot) {
+        resolved_local->value = target_val;
+        braun_write_local_value(cg, *depth, false, n, target_val);
+        continue;
+      }
       if (ensure_store_ready(cg, s->tok, target_val, slot, "NY_S_VAR")) {
         LLVMBuildStore(cg->builder, target_val, slot);
+        bool is_global_target = (*depth == 0) || (resolved_global != NULL);
+        braun_write_local_value(cg, *depth, is_global_target, n, target_val);
       }
     }
     break;
   }
   case NY_S_EXPR: {
     expr_t *e = s->as.expr.expr;
-    if (e->kind == NY_E_CALL && e->as.call.callee->kind == NY_E_IDENT) {
+    if (!e) {
+      ny_diag_error(s->tok, "missing expression statement payload");
+      cg->had_error = 1;
+      return;
+    }
+    if (e->kind == NY_E_CALL && e->as.call.callee &&
+        e->as.call.callee->kind == NY_E_IDENT) {
       fun_sig *sig = lookup_fun(cg, e->as.call.callee->as.ident.name);
       if (sig && sig->return_type && (size_t)sig->return_type > 0x1000) {
         if (strcmp(sig->return_type, "Result") == 0 ||
@@ -779,13 +1135,17 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         }
       }
     }
+    bool prev_detach_stmt_call = cg->thread_detach_stmt_call;
+    if (!is_tail && stmt_is_direct_thread_attr_call(cg, e))
+      cg->thread_detach_stmt_call = true;
     LLVMValueRef v = gen_expr(cg, scopes, *depth, e);
+    cg->thread_detach_stmt_call = prev_detach_stmt_call;
     if (!v) {
       ny_diag_error(s->tok, "failed to generate expression");
       cg->had_error = 1;
       return;
     }
-    if (is_tail) {
+    if (is_tail && !cg->current_fn_attr_naked) {
       if (cg->result_store_val) {
         LLVMBuildStore(cg->builder, v, cg->result_store_val);
       } else {
@@ -816,53 +1176,19 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       LLVMValueRef cond = NULL;
       int has_wild = 0;
 
-      // We need to handle potential bindings in the arm
       // Create a sub-scope for the arm
       scope_enter(scopes, depth, scopes[*depth].break_bb,
                   scopes[*depth].continue_bb);
 
       for (size_t j = 0; j < arm->patterns.len; ++j) {
         expr_t *pat = arm->patterns.data[j];
-        if (pat && pat->kind == NY_E_IDENT && pat->as.ident.name &&
-            strcmp(pat->as.ident.name, "_") == 0) {
+        if (match_pattern_is_wild(pat)) {
           has_wild = 1;
           break;
         }
 
-        LLVMValueRef pat_cond = NULL;
-        if (pat->kind == NY_E_CALL && pat->as.call.callee->kind == NY_E_IDENT) {
-          const char *callee = pat->as.call.callee->as.ident.name;
-          bool is_ok_pat = (strcmp(callee, "ok") == 0);
-          bool is_err_pat = (strcmp(callee, "err") == 0);
-          if (is_ok_pat || is_err_pat) {
-            fun_sig *check_sig =
-                lookup_fun(cg, is_ok_pat ? "__is_ok" : "__is_err");
-            if (check_sig) {
-              LLVMValueRef tag_check =
-                  LLVMBuildCall2(cg->builder, check_sig->type, check_sig->value,
-                                 (LLVMValueRef[]){testv}, 1, "");
-              pat_cond = to_bool(cg, tag_check);
-
-              // If match, bind the first argument
-              if (pat->as.call.args.len > 0) {
-                expr_t *arg0 = pat->as.call.args.data[0].val;
-                if (arg0->kind == NY_E_IDENT) {
-                  fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap");
-                  if (unwrap_sig) {
-                    LLVMValueRef val = LLVMBuildCall2(
-                        cg->builder, unwrap_sig->type, unwrap_sig->value,
-                        (LLVMValueRef[]){testv}, 1, "");
-                    LLVMValueRef slot =
-                        build_alloca(cg, arg0->as.ident.name, cg->type_i64);
-                    LLVMBuildStore(cg->builder, val, slot);
-                    bind(scopes, *depth, arg0->as.ident.name, slot, s, false,
-                         NULL);
-                  }
-                }
-              }
-            }
-          }
-        }
+        LLVMValueRef pat_cond =
+            match_pattern_result_cond(cg, scopes, *depth, s, testv, pat);
 
         if (!pat_cond) {
           LLVMValueRef pv = gen_expr(cg, scopes, *depth, pat);
@@ -885,6 +1211,15 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       ny_dbg_loc(cg, btok);
       LLVMBuildCondBr(cg->builder, cond, arm_bb, next_bb);
       LLVMPositionBuilderAtEnd(cg->builder, arm_bb);
+      if (arm->guard) {
+        ny_dbg_loc(cg, arm->guard->tok);
+        LLVMValueRef guard_v = gen_expr(cg, scopes, *depth, arm->guard);
+        LLVMValueRef guard_b = to_bool(cg, guard_v);
+        LLVMBasicBlockRef guard_pass_bb =
+            LLVMAppendBasicBlock(f, "match_guard_pass");
+        LLVMBuildCondBr(cg->builder, guard_b, guard_pass_bb, next_bb);
+        LLVMPositionBuilderAtEnd(cg->builder, guard_pass_bb);
+      }
       gen_stmt(cg, scopes, depth, arm->conseq, func_root, is_tail);
       if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
         LLVMBuildBr(cg->builder, end);
@@ -975,36 +1310,63 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   case NY_S_EXPORT:
     break;
   case NY_S_LABEL: {
-    for (size_t i = 0; i < cg->labels.len; i++) {
-      if (strcmp(cg->labels.data[i].name, s->as.label.name) == 0) {
-        if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
-          LLVMBuildBr(cg->builder, cg->labels.data[i].bb);
-        }
-        LLVMPositionBuilderAtEnd(cg->builder, cg->labels.data[i].bb);
-        return;
+    label_binding *lb = find_label_binding(cg, s->as.label.name);
+    if (lb) {
+      if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+        LLVMBuildBr(cg->builder, lb->bb);
       }
+      LLVMPositionBuilderAtEnd(cg->builder, lb->bb);
+      return;
     }
     break;
   }
   case NY_S_GOTO: {
-    for (size_t i = 0; i < cg->labels.len; i++) {
-      if (strcmp(cg->labels.data[i].name, s->as.go.name) == 0) {
-        size_t target_depth = cg->labels.data[i].depth;
-        if (*depth > target_depth) {
-          emit_defers(cg, scopes, *depth, target_depth + 1);
-        }
-        LLVMBuildBr(cg->builder, cg->labels.data[i].bb);
-        // Create a dummy block for any subsequent dead code to avoid
-        // "terminator already exists"
-        LLVMValueRef f =
-            LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-        LLVMPositionBuilderAtEnd(cg->builder, LLVMAppendBasicBlock(f, "dead"));
-        return;
+    label_binding *lb = find_label_binding(cg, s->as.go.name);
+    if (lb) {
+      size_t target_depth = lb->depth;
+      if (*depth > target_depth) {
+        emit_defers(cg, scopes, *depth, target_depth + 1);
       }
+      LLVMBuildBr(cg->builder, lb->bb);
+      // Create a dummy block for any subsequent dead code to avoid
+      // "terminator already exists"
+      LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+      LLVMPositionBuilderAtEnd(cg->builder, LLVMAppendBasicBlock(f, "dead"));
+      return;
     }
     ny_diag_error(s->tok, "undefined label \033[1;37m'%s'\033[0m",
                   s->as.go.name);
     cg->had_error = 1;
+    break;
+  }
+  case NY_S_MACRO: {
+    const char *macro_name = (s->as.macro.name && *s->as.macro.name)
+                                 ? s->as.macro.name
+                                 : "<unknown>";
+    for (size_t i = 0; i < s->as.macro.args.len; i++) {
+      expr_t *arg = s->as.macro.args.data[i];
+      if (!arg)
+        continue;
+      (void)gen_expr(cg, scopes, *depth, arg);
+    }
+    if (s->as.macro.body) {
+      ny_diag_warning(s->tok,
+                      "macro statement '%s' fell back to direct body execution",
+                      macro_name);
+      if (verbose_enabled >= 1) {
+        ny_diag_hint(
+            "register '%s' in std.core.syntax to customize expansion behavior",
+            macro_name);
+      }
+      gen_stmt(cg, scopes, depth, s->as.macro.body, func_root, is_tail);
+      break;
+    }
+    ny_diag_warning(s->tok, "macro statement not implemented: '%s'",
+                    macro_name);
+    if (verbose_enabled >= 1) {
+      ny_diag_hint("register '%s' in std.core.syntax to implement this macro",
+                   macro_name);
+    }
     break;
   }
   default:

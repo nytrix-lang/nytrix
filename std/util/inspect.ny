@@ -5,7 +5,9 @@ module std.util.inspect (
    inspect,
    repl_show
 )
-use std
+use std.core *
+use std.core.reflect *
+use std.str.io *
 
 fn inspect(x){
    "Prints detailed information about value `x`, including its type, representation, length (if applicable), and memory address (for pointers)."
@@ -27,4 +29,20 @@ fn repl_show(x){
       print(repr(x))
    }
    x
+}
+
+if(comptime{__main()}){
+    use std.util.inspect *
+    use std.core.dict *
+    use std.core.error *
+
+    print("Testing inspect...")
+
+    inspect(123)
+    inspect("hello")
+    inspect([1, 2, 3])
+    inspect({ "a": 1 })
+    inspect(0)
+
+    print("✓ std.util.inspect tests passed")
 }

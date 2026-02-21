@@ -119,15 +119,7 @@ static void diag_print_snippet(token_t tok, const char *color) {
   free(buf);
 }
 
-static uint64_t diag_hash(const char *s) {
-  // FNV-1a 64-bit
-  uint64_t h = 1469598103934665603ULL;
-  for (; s && *s; ++s) {
-    h ^= (unsigned char)*s;
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
+static uint64_t diag_hash(const char *s) { return ny_hash64_cstr(s); }
 
 static bool diag_tbl_grow(void) {
   size_t new_cap = g_diag_seen_cap ? g_diag_seen_cap * 2 : 1024;

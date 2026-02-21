@@ -15,9 +15,9 @@ use std.str.io *
 
 fn is_bigint(x){
    "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
-   if(eq(is_list(x), false)){ return false }
-   if(eq(core.len(x) < 3, true)){ return false }
-   return eq(load64(x, 16), 107)
+   if((is_list(x))){ return false }
+   if((core.len(x) < 3)){ return false }
+   return (load64(x, 16) == 107)
 }
 
 fn _big_make(sign, digits){
@@ -75,7 +75,7 @@ fn _big_from_int(n){
    mut digits = list(4)
    while(n > 0){
        digits = append(digits, n % 1000000000)
-      n /= 1000000000
+      n = n / 1000000000
    }
    _big_make(sign, digits)
 }
@@ -114,7 +114,7 @@ fn bigint_from_str(s){
 
 fn bigint_to_str(b){
    "Converts a [[std.math.bigint::bigint]] to its decimal string representation."
-   if(is_bigint(b) == false){ return "0" }
+   if(is_bigint(b)){ return "0" }
    mut sign = _big_sign(b)
    def digits = _big_digits(b)
    mut n = core.len(digits)
@@ -194,8 +194,8 @@ fn _big_sub_abs(a, b){
 
 fn bigint_add(a, b){
    "Adds two bigints together."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sa == 0){ return b }
@@ -216,8 +216,8 @@ fn bigint_add(a, b){
 
 fn bigint_sub(a, b){
    "Subtracts bigint `b` from bigint `a`."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sb = _big_sign(b)
    def neg = _big_make(-sb, list_clone(_big_digits(b)))
    bigint_add(a, neg)
@@ -257,8 +257,8 @@ fn _big_mul_abs(a, b){
 
 fn bigint_mul(a, b){
    "Multiplies two bigints."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sa == 0 || sb == 0){ return _big_make(0, list(0)) }
@@ -365,8 +365,8 @@ fn _big_divmod_abs(a, b){
 
 fn bigint_div(a, b){
    "Integer division of bigints."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sb == 0){ panic("bigint division by zero") }
@@ -378,8 +378,8 @@ fn bigint_div(a, b){
 
 fn bigint_mod(a, b){
    "Modulo of bigints."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sb = _big_sign(b)
    if(sb == 0){ panic("bigint division by zero") }
    def res = _big_divmod_abs(a, b)
@@ -389,8 +389,8 @@ fn bigint_mod(a, b){
 
 fn bigint_cmp(a, b){
    "Compares two bigints. Returns -1 if a < b, 1 if a > b, and 0 if equal."
-   if(is_bigint(a) == false){ a = bigint(a) }
-   if(is_bigint(b) == false){ b = bigint(b) }
+   if(is_bigint(a)){ a = bigint(a) }
+   if(is_bigint(b)){ b = bigint(b) }
    mut sa = _big_sign(a)
    def sb = _big_sign(b)
    if(sa < sb){ return -1 }
@@ -405,3 +405,43 @@ fn bigint_eq(a, b){
    bigint_cmp(a, b) == 0
 }
 
+if(comptime{__main()}){
+    use std.math.bigint *
+    use std.core.error *
+    use std.core.reflect *
+
+    print("Testing bigint basic...")
+    mut a = bigint_from_str("1")
+    mut b = bigint_from_str("999999999")
+    mut s = bigint_add(a, b)
+    assert((bigint_to_str(s) == "1000000000"), "add simple 1: got " + bigint_to_str(s))
+
+    a = bigint_from_str("1000000000")
+    b = bigint_from_str("1000000000")
+    s = bigint_add(a, b)
+    assert((bigint_to_str(s) == "2000000000"), "add simple 2")
+    def d = bigint_sub(bigint_from_str("1000000000000000000000000000000"), bigint_from_str("135802467913580246791358024680"))
+    assert((bigint_to_str(d) == "864197532086419753208641975320"), "sub")
+    def m = bigint_mul(bigint_from_str("123456789"), bigint_from_str("987654321"))
+    assert((bigint_to_str(m) == "121932631112635269"), "mul")
+    mut q = bigint_div(bigint_from_str("1000000000000"), bigint_from_str("12345"))
+    mut r = bigint_mod(bigint_from_str("1000000000000"), bigint_from_str("12345"))
+    assert((bigint_to_str(q) == "81004455"), "div")
+    assert((bigint_to_str(r) == "3025"), "mod")
+    print("bigint basic passed")
+
+    print("Testing bigint sign...")
+    a = bigint_from_str("-999999999999")
+    b = bigint_from_str("2")
+    s = bigint_add(a, b)
+    assert((bigint_to_str(s) == "-999999999997"), "add sign")
+    def p = bigint_mul(a, b)
+    assert((bigint_to_str(p) == "-1999999999998"), "mul sign")
+    q = bigint_div(a, b)
+    assert((bigint_to_str(q) == "-499999999999"), "div sign")
+    r = bigint_mod(a, b)
+    assert((bigint_to_str(r) == "-1"), "mod sign")
+    print("bigint sign passed")
+
+    print("✓ std.math.bigint tests passed")
+}

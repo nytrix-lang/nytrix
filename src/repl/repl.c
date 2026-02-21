@@ -6,26 +6,29 @@
 #include "base/util.h"
 #include "code/code.h"
 #include "code/jit.h"
+#include "code/llvm.h"
 #include "priv.h"
 #include "repl/types.h"
 #include "rt/runtime.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <limits.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
-#include <readline/history.h>
-#include <readline/readline.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <time.h>
-#include <unistd.h>
 
-static int repl_move_up(int count, int key);
-static int repl_move_down(int count, int key);
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#include "repl/read.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -34,7 +37,8 @@ static int repl_move_down(int count, int key);
 const doc_list_t *g_repl_docs = NULL;
 static VEC(char *) g_repl_loading_modules = {0};
 
-static std_mode_t g_repl_std_override = (std_mode_t)-1;
+static std_mode_t g_repl_std_override = STD_MODE_DEFAULT;
+static int g_repl_has_std_override = 0;
 /* effectively the mode REPL was initialized with */
 static std_mode_t g_repl_effective_mode = STD_MODE_DEFAULT;
 static int g_repl_plain = 0;
@@ -47,81 +51,37 @@ static int g_eval_count = 0;
 static LLVMBuilderRef g_repl_builder = NULL;
 static char *g_std_src_cached_persistent = NULL;
 static int g_repl_timing = 0;
+volatile sig_atomic_t g_repl_sigint = 0;
+
+#ifndef _WIN32
+static volatile sig_atomic_t g_repl_eval_active = 0;
+static sigjmp_buf g_repl_eval_jmp;
+#endif
+
+static void repl_on_sigint(int sig) {
+  (void)sig;
+  g_repl_sigint = 1;
+#ifndef _WIN32
+  if (g_repl_eval_active) {
+    g_repl_eval_active = 0;
+    siglongjmp(g_repl_eval_jmp, 1);
+  }
+#endif
+
+#ifndef _WIN32
+  const char nl = '\n';
+  (void)write(STDOUT_FILENO, &nl, 1);
+#endif
+}
 
 static void repl_ensure_module(const char *name, std_mode_t std_mode,
                                doc_list_t *docs);
 
-void ny_repl_set_std_mode(std_mode_t mode) { g_repl_std_override = mode; }
+void ny_repl_set_std_mode(std_mode_t mode) {
+  g_repl_std_override = mode;
+  g_repl_has_std_override = 1;
+}
 void ny_repl_set_plain(int plain) { g_repl_plain = plain; }
-
-static int repl_move_up(int count, int key) {
-  int p = rl_point;
-  int last_nl = -1;
-  for (int i = p - 1; i >= 0; i--) {
-    if (rl_line_buffer[i] == '\n') {
-      last_nl = i;
-      break;
-    }
-  }
-
-  if (last_nl != -1) {
-    int col = p - (last_nl + 1);
-    int prev_nl = -1;
-    for (int i = last_nl - 1; i >= 0; i--) {
-      if (rl_line_buffer[i] == '\n') {
-        prev_nl = i;
-        break;
-      }
-    }
-    int prev_start = prev_nl + 1;
-    int prev_len = last_nl - prev_start;
-    if (col > prev_len)
-      col = prev_len;
-    rl_point = prev_start + col;
-    rl_redisplay();
-    return 0;
-  }
-  return rl_get_previous_history(count, key);
-}
-
-static int repl_move_down(int count, int key) {
-  int p = rl_point;
-  int next_nl = -1;
-  for (int i = p; rl_line_buffer[i]; i++) {
-    if (rl_line_buffer[i] == '\n') {
-      next_nl = i;
-      break;
-    }
-  }
-
-  if (next_nl != -1) {
-    int last_nl = -1;
-    for (int i = p - 1; i >= 0; i--) {
-      if (rl_line_buffer[i] == '\n') {
-        last_nl = i;
-        break;
-      }
-    }
-    int col = p - (last_nl + 1);
-    int next_next_nl = -1;
-    for (int i = next_nl + 1; rl_line_buffer[i]; i++) {
-      if (rl_line_buffer[i] == '\n') {
-        next_next_nl = i;
-        break;
-      }
-    }
-    int next_start = next_nl + 1;
-    int next_len = (next_next_nl != -1)
-                       ? (next_next_nl - next_start)
-                       : (int)strlen(rl_line_buffer + next_start);
-    if (col > next_len)
-      col = next_len;
-    rl_point = next_start + col;
-    rl_redisplay();
-    return 0;
-  }
-  return rl_get_next_history(count, key);
-}
 
 static const char *repl_std_mode_name(std_mode_t mode) {
   switch (mode) {
@@ -138,10 +98,28 @@ static const char *repl_std_mode_name(std_mode_t mode) {
   }
 }
 
+static void repl_restore_terminal_state(void) {
+  /*
+   * TUI snippets can leave the terminal in raw/hidden/no-wrap/alt-buffer state
+   * on errors or manual interruption. Force a sane interactive REPL baseline.
+   */
+  (void)__tty_raw(0);
+  fputs("\033[0m\033[?25h\033[?7h\033[?1049l", stdout);
+  fflush(stdout);
+}
+
 static void map_rt_syms_persistent(LLVMModuleRef mod,
                                    LLVMExecutionEngineRef ee) {
-#define RT_DEF(name, p, args, sig, doc) {name, (void *)p},
+#define RT_DEF(name, p, args, sig, doc) {name, (void *)p}, {#p, (void *)p},
 #define RT_GV(name, p, t, doc) {name, (void *)&p},
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
   struct {
     const char *n;
     void *p;
@@ -178,10 +156,17 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   g_repl_ctx = LLVMContextCreate();
   LLVMModuleRef mod =
       LLVMModuleCreateWithNameInContext("repl_base", g_repl_ctx);
+  ny_llvm_prepare_module(mod);
   g_repl_builder = LLVMCreateBuilderInContext(g_repl_ctx);
+  const char *std_init_fn_name = NULL;
 
   if (mode != STD_MODE_NONE) {
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
+    if ((!prebuilt || access(prebuilt, R_OK) != 0)) {
+      const char *build_std = getenv("NYTRIX_BUILD_STD_PATH");
+      if (build_std && access(build_std, R_OK) == 0)
+        prebuilt = build_std;
+    }
     if (!prebuilt || access(prebuilt, R_OK) != 0) {
       char *exe_dir = ny_get_executable_dir();
       if (exe_dir) {
@@ -231,6 +216,11 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
                                   g_repl_ctx, g_repl_builder);
         g_repl_cg.prog_owned = true;
         codegen_emit(&g_repl_cg);
+        if (!g_repl_cg.had_error) {
+          codegen_emit_script(&g_repl_cg, "__repl_std_init");
+          std_init_fn_name = "__repl_std_init";
+        }
+        ny_llvm_apply_host_attrs(mod);
 
       } else {
         program_free(prog, parser.arena);
@@ -244,9 +234,38 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
 
   struct LLVMMCJITCompilerOptions options;
   LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
-  options.CodeModel = LLVMCodeModelLarge;
+  // Favor fast interactive compile latency by default.
+  options.CodeModel = LLVMCodeModelJITDefault;
   options.OptLevel = 0;
-  options.EnableFastISel = 0;
+  options.EnableFastISel = 1;
+  {
+    const char *cm = getenv("NYTRIX_JIT_CODE_MODEL");
+    if (cm && *cm) {
+      if (strcmp(cm, "large") == 0)
+        options.CodeModel = LLVMCodeModelLarge;
+      else if (strcmp(cm, "medium") == 0)
+        options.CodeModel = LLVMCodeModelMedium;
+      else if (strcmp(cm, "small") == 0)
+        options.CodeModel = LLVMCodeModelSmall;
+    }
+  }
+  {
+    const char *jit_opt = getenv("NYTRIX_REPL_JIT_OPT");
+    if (jit_opt && *jit_opt) {
+      int lvl = atoi(jit_opt);
+      if (lvl < 0)
+        lvl = 0;
+      if (lvl > 3)
+        lvl = 3;
+      options.OptLevel = (unsigned)lvl;
+    }
+  }
+  {
+    const char *fast_isel = getenv("NYTRIX_REPL_FAST_ISEL");
+    if (fast_isel && *fast_isel && !ny_env_is_truthy(fast_isel)) {
+      options.EnableFastISel = 0;
+    }
+  }
   char *err = NULL;
   if (LLVMCreateMCJITCompilerForModule(&g_repl_ee, mod, &options,
                                        sizeof(options), &err) != 0) {
@@ -255,6 +274,12 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   } else {
     map_rt_syms_persistent(mod, g_repl_ee);
     register_jit_symbols(g_repl_ee, mod, &g_repl_cg);
+    if (std_init_fn_name) {
+      uint64_t init_addr = LLVMGetFunctionAddress(g_repl_ee, std_init_fn_name);
+      if (init_addr) {
+        ((int64_t (*)(void))init_addr)();
+      }
+    }
   }
 }
 
@@ -293,20 +318,53 @@ static void repl_shutdown_engine(void) {
 static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                              std_mode_t std_mode, int tty_in, doc_list_t *docs,
                              int from_init) {
+  const char *eval_input = full_input;
+  char *eval_input_owned = NULL;
   char *trimmed = ltrim((char *)full_input);
+  if (trimmed[0] == '#' && trimmed[1] == '!') {
+    const char *nl = strchr(trimmed, '\n');
+    if (nl && nl[1] != '\0') {
+      eval_input_owned = ny_strdup(nl + 1);
+      eval_input = eval_input_owned;
+      trimmed = ltrim(eval_input_owned);
+    } else {
+      // Shebang-only snippet: treat as no-op.
+      return 0;
+    }
+  }
+
   int show = (!is_stmt && std_mode != STD_MODE_NONE && tty_in);
   int show_an = (an && std_mode != STD_MODE_NONE && tty_in);
+  if (show_an) {
+    /*
+     * Avoid flooding REPL output for pasted blocks/TUI setup where assignment
+     * targets can be large buffers (canvas/list/bytes/etc).
+     */
+    if (strchr(eval_input, '\n')) {
+      show_an = 0;
+    } else if (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "mut ", 4) ||
+               !strncmp(trimmed, "fn ", 3) || !strncmp(trimmed, "use ", 4) ||
+               !strncmp(trimmed, "while", 5) || !strncmp(trimmed, "for", 3) ||
+               !strncmp(trimmed, "if", 2)) {
+      show_an = 0;
+    }
+  }
+  const char *use_inspect = (std_mode != STD_MODE_NONE && (show || show_an))
+                                ? "use std.util.inspect\n"
+                                : "";
 
-  size_t blen = strlen(full_input) + (an ? strlen(an) : 0) + 128;
+  size_t blen =
+      strlen(eval_input) + (an ? strlen(an) : 0) + strlen(use_inspect) + 128;
   char *body = malloc(blen);
   if (show)
-    snprintf(body, blen, "repl_show(%s\n)\n", full_input);
+    snprintf(body, blen, "%srepl_show(%s\n)\n", use_inspect, eval_input);
   else if (!is_stmt)
-    snprintf(body, blen, "return %s\n", full_input);
+    snprintf(body, blen, "%sreturn %s\n", use_inspect, eval_input);
   else if (show_an)
-    snprintf(body, blen, "%s\nrepl_show(%s\n)\n", full_input, an);
+    snprintf(body, blen, "%s%s\nrepl_show(%s\n)\n", use_inspect, eval_input,
+             an);
   else
-    snprintf(body, blen, "%s\n", full_input);
+    snprintf(body, blen, "%s%s\n", use_inspect, eval_input);
 
   clock_t t0 = clock();
   parser_t ps;
@@ -327,6 +385,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
 
     LLVMModuleRef eval_mod =
         LLVMModuleCreateWithNameInContext("repl_eval", g_repl_ctx);
+    ny_llvm_prepare_module(eval_mod);
     LLVMBuilderRef eval_builder = LLVMCreateBuilderInContext(g_repl_ctx);
     codegen_t cg;
     codegen_init_with_context(&cg, pr, ps.arena, eval_mod, g_repl_ctx,
@@ -352,6 +411,11 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       b.owned = false;
       vec_push(&cg.import_aliases, b);
     }
+    for (size_t i = 0; i < g_repl_cg.user_import_aliases.len; i++) {
+      binding b = g_repl_cg.user_import_aliases.data[i];
+      b.owned = false;
+      vec_push(&cg.user_import_aliases, b);
+    }
     for (size_t i = 0; i < g_repl_cg.enums.len; i++) {
       enum_def_t *e = g_repl_cg.enums.data[i];
       if (e)
@@ -359,12 +423,17 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     }
     for (size_t i = 0; i < g_repl_cg.use_modules.len; i++)
       vec_push(&cg.use_modules, ny_strdup(g_repl_cg.use_modules.data[i]));
+    for (size_t i = 0; i < g_repl_cg.user_use_modules.len; i++) {
+      vec_push(&cg.user_use_modules,
+               ny_strdup(g_repl_cg.user_use_modules.data[i]));
+    }
 
     codegen_emit(&cg);
     char fn_name[64];
     snprintf(fn_name, sizeof(fn_name), "__eval_%d", g_eval_count++);
     LLVMValueRef eval_fn = codegen_emit_script(&cg, fn_name);
     (void)eval_fn;
+    ny_llvm_apply_host_attrs(eval_mod);
 
     if (cg.had_error) {
       last_status = 1;
@@ -382,7 +451,6 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                                &cg.interns.data[i].data);
       }
 
-      // Force resolution of new global variables to ensure they are emitted
       for (size_t i = g_repl_cg.global_vars.len; i < cg.global_vars.len; i++) {
         if (cg.global_vars.data[i].name && cg.global_vars.data[i].value) {
           LLVMGetGlobalValueAddress(g_repl_ee, cg.global_vars.data[i].name);
@@ -391,11 +459,25 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
 
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
       if (addr) {
+        int interrupted = 0;
+#ifndef _WIN32
+        if (sigsetjmp(g_repl_eval_jmp, 1) == 0) {
+          g_repl_eval_active = 1;
+          ((void (*)(void))addr)();
+          g_repl_eval_active = 0;
+          last_status = 0;
+        } else {
+          interrupted = 1;
+          g_repl_eval_active = 0;
+          last_status = 1;
+        }
+#else
         ((void (*)(void))addr)();
         last_status = 0;
+#endif
 
         char *undef_name = NULL;
-        if (!strncmp(trimmed, "undef ", 6)) {
+        if (!interrupted && !strncmp(trimmed, "undef ", 6)) {
           char *up = trimmed + 6;
           while (*up == ' ' || *up == '\t')
             up++;
@@ -409,11 +491,11 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         if (undef_name) {
           repl_remove_def(undef_name);
           free(undef_name);
-        } else if (is_persistent_def(full_input)) {
+        } else if (!interrupted && is_persistent_def(eval_input)) {
           persistent = true;
           if (!from_init)
-            repl_append_user_source(full_input);
-          repl_update_docs(docs, full_input);
+            repl_append_user_source(eval_input);
+          repl_update_docs(docs, eval_input);
 
           for (size_t i = 0; i < cg.fun_sigs.len; i++) {
             if (i >= g_repl_cg.fun_sigs.len) {
@@ -452,6 +534,16 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
               import_b.stmt_t = (void *)ny_strdup((char *)import_b.stmt_t);
               import_b.owned = true;
               vec_push(&g_repl_cg.import_aliases, import_b);
+            }
+          }
+          for (size_t i = 0; i < cg.user_import_aliases.len; i++) {
+            if (i >= g_repl_cg.user_import_aliases.len) {
+              binding user_import_b = cg.user_import_aliases.data[i];
+              user_import_b.name = ny_strdup(user_import_b.name);
+              user_import_b.stmt_t =
+                  (void *)ny_strdup((char *)user_import_b.stmt_t);
+              user_import_b.owned = true;
+              vec_push(&g_repl_cg.user_import_aliases, user_import_b);
             }
           }
           for (size_t i = 0; i < cg.enums.len; i++) {
@@ -506,25 +598,46 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
               vec_push(&g_repl_cg.use_modules,
                        ny_strdup(cg.use_modules.data[i]));
           }
+          for (size_t i = 0; i < cg.user_use_modules.len; i++) {
+            int exists = 0;
+            for (size_t j = 0; j < g_repl_cg.user_use_modules.len; j++) {
+              if (strcmp(g_repl_cg.user_use_modules.data[j],
+                         cg.user_use_modules.data[i]) == 0) {
+                exists = 1;
+                break;
+              }
+            }
+            if (!exists) {
+              vec_push(&g_repl_cg.user_use_modules,
+                       ny_strdup(cg.user_use_modules.data[i]));
+            }
+          }
         }
       }
 
-      cg.fun_sigs.len = 0;
-      cg.global_vars.len = 0;
-      cg.aliases.len = 0;
-      cg.import_aliases.len = 0;
-      cg.use_modules.len = 0;
-
       // Move interns to persistent state so they aren't freed by
-      // codegen_dispose
+      // codegen_dispose.
       for (size_t i = 0; i < cg.interns.len; i++) {
         vec_push(&g_repl_cg.interns, cg.interns.data[i]);
       }
       cg.interns.len = 0;
     }
+    /*
+     * This eval context borrows persistent symbol/alias/module/enum entries
+     * from g_repl_cg. Keep disposal from freeing shared names/pointers after
+     * failed evals, which otherwise corrupts future REPL lookups.
+     */
+    cg.fun_sigs.len = 0;
+    cg.global_vars.len = 0;
+    cg.aliases.len = 0;
+    cg.import_aliases.len = 0;
+    cg.user_import_aliases.len = 0;
+    cg.enums.len = 0;
+    cg.use_modules.len = 0;
+    cg.user_use_modules.len = 0;
     codegen_dispose(&cg);
   } else {
-    repl_print_error_snippet(full_input, ps.cur.line, ps.cur.col);
+    repl_print_error_snippet(eval_input, ps.cur.line, ps.cur.col);
     last_status = 1;
   }
 
@@ -540,6 +653,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     free(pr);
   }
   free(body);
+  if (eval_input_owned)
+    free(eval_input_owned);
   return last_status;
 }
 
@@ -563,7 +678,8 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
   char *entry_name = ny_strdup(norm_name);
   vec_push(&g_repl_loading_modules, entry_name);
 
-  if (name[0] == '.' || name[0] == '/' || strchr(name, '/') != NULL) {
+  if (name[0] == '.' || name[0] == '/' || name[0] == '\\' ||
+      strchr(name, '/') != NULL || strchr(name, '\\') != NULL) {
     char *src = repl_read_file(name);
     if (src) {
       repl_eval_snippet(src, 1, NULL, STD_MODE_NONE, 0, docs, 1);
@@ -584,8 +700,8 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
   }
 
   const char *entry_path = NULL;
-  if (clean_name[0] == '.' || clean_name[0] == '/' ||
-      strchr(clean_name, '/') != NULL) {
+  if (clean_name[0] == '.' || clean_name[0] == '/' || clean_name[0] == '\\' ||
+      strchr(clean_name, '/') != NULL || strchr(clean_name, '\\') != NULL) {
     static char cwd_buf[PATH_MAX];
     if (getcwd(cwd_buf, sizeof(cwd_buf)))
       entry_path = cwd_buf;
@@ -614,14 +730,14 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                  int batch_mode) {
   (void)opt_level;
   (void)opt_pipeline;
+
   const char *plain = getenv("NYTRIX_REPL_PLAIN");
   if (g_repl_plain || (plain && plain[0] != '0') || !isatty(STDOUT_FILENO)) {
     color_mode = 0;
   }
-  std_mode_t std_mode = STD_MODE_DEFAULT;
-  if (g_repl_std_override != STD_MODE_DEFAULT)
-    std_mode = g_repl_std_override;
-  else {
+  std_mode_t std_mode =
+      g_repl_has_std_override ? g_repl_std_override : STD_MODE_DEFAULT;
+  if (!g_repl_has_std_override) {
     const char *env_std = getenv("NYTRIX_REPL_STD");
     if (env_std) {
       if (strcmp(env_std, "none") == 0)
@@ -668,68 +784,75 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
 
   char history_path[PATH_MAX] = {0};
   const char *home = getenv("HOME");
+#ifdef _WIN32
+  if (!home)
+    home = getenv("USERPROFILE");
+#endif
   if (home) {
-    snprintf(history_path, sizeof(history_path), "%s/.nytrix_history", home);
-    read_history(history_path);
-    stifle_history(1000);
+    ny_join_path(history_path, sizeof(history_path), home, ".nytrix_history");
+    ny_readline_read_history(history_path);
+    ny_readline_stifle_history(1000);
   }
 
   int tty_in = isatty(STDIN_FILENO);
-  int use_readline = tty_in;
-  const char *rl_env = getenv("NYTRIX_REPL_RL");
-  if (rl_env && (*rl_env == '0' || strcasecmp(rl_env, "false") == 0))
-    use_readline = 0;
 
-  if (!use_readline && !tty_in && !init_code) {
-    size_t cap = 1024, len = 0;
-    char *buf = malloc(cap);
-    if (!buf) {
-      exit(1);
-    }
-    int ch;
-    while ((ch = fgetc(stdin)) != EOF) {
-      if (len + 1 >= cap) {
-        cap *= 2;
-        buf = realloc(buf, cap);
+  /*
+   * Streaming stdin line-by-line is much faster for test-runner REPL mode.
+   * The full-stdin slurp path remains opt-in for debugging.
+   */
+  if (!tty_in && !init_code) {
+    const char *slurp = getenv("NYTRIX_REPL_SLURP_STDIN");
+    if (slurp && slurp[0] != '0') {
+      size_t cap = 1024, len = 0;
+      char *buf = malloc(cap);
+      if (!buf) {
+        exit(1);
       }
-      buf[len++] = (char)ch;
+      int ch;
+      while ((ch = fgetc(stdin)) != EOF) {
+        if (len + 1 >= cap) {
+          cap *= 2;
+          buf = realloc(buf, cap);
+        }
+        buf[len++] = (char)ch;
+      }
+      buf[len] = '\0';
+      init_lines = malloc(sizeof(char *));
+      if (!init_lines) {
+        free(buf);
+        exit(1);
+      }
+      init_lines[0] = buf;
+      init_lines_len = 1;
+      init_code = "<stdin>";
     }
-    buf[len] = '\0';
-    init_lines = repl_split_lines(buf, &init_lines_len);
-    free(buf);
-    init_code = "<stdin>";
-  }
-
-  if (use_readline) {
-    rl_variable_bind("enable-bracketed-paste", "on");
-    rl_attempted_completion_function = repl_enhanced_completion;
-    rl_completer_quote_characters = "\"";
-    rl_filename_quote_characters = "\"";
-    rl_basic_word_break_characters = " \t\n\"\\'`@$><=;|&{}.(";
-    rl_bind_keyseq("\e[A", repl_move_up);
-    rl_bind_keyseq("\e[B", repl_move_down);
-    rl_bind_key(0x10, repl_move_up);        // Ctrl-P
-    rl_bind_key(0x0e, repl_move_down);      // Ctrl-N
-    rl_bind_keyseq("\eOA", repl_move_up);   // Secondary Up
-    rl_bind_keyseq("\eOB", repl_move_down); // Secondary Down
-    rl_bind_keyseq("\x12", rl_reverse_search_history);
-    rl_redisplay_function = repl_redisplay;
-    rl_completion_display_matches_hook = repl_display_match_list;
   }
 
   char *input_buffer = NULL;
   int last_status = 0;
+#ifdef _WIN32
+  void(__cdecl * prev_sigint)(int) = signal(SIGINT, repl_on_sigint);
+#else
+  struct sigaction sa_int;
+  struct sigaction prev_sigint;
+  memset(&sa_int, 0, sizeof(sa_int));
+  sa_int.sa_handler = repl_on_sigint;
+  sigemptyset(&sa_int.sa_mask);
+  sa_int.sa_flags = 0;
+  sigaction(SIGINT, &sa_int, &prev_sigint);
+#endif
 
   while (1) {
+    g_repl_sigint = 0;
     repl_reset_redisplay();
     char prompt_buf[128];
     const char *prompt;
     if (input_buffer) {
-      snprintf(prompt_buf, sizeof(prompt_buf), "\001%s\002..|\001%s\002",
-               clr(NY_CLR_YELLOW), clr(NY_CLR_RESET));
+      snprintf(prompt_buf, sizeof(prompt_buf), "%s..|%s", clr(NY_CLR_YELLOW),
+               clr(NY_CLR_RESET));
       prompt = prompt_buf;
       repl_indent_next = repl_calc_indent(input_buffer);
-      rl_pre_input_hook = repl_pre_input_hook;
+
     } else {
       const char *mode_tag = "";
       char mode_buf[32];
@@ -742,16 +865,15 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       }
       const char *base;
       if (color_mode) {
-        base = last_status ? "\001\033[31m\002ny!\001\033[0m\002"
-                           : "\001\033[36m\002ny\001\033[0m\002";
+        base = last_status ? "\033[31mny!\033[0m" : "\033[36mny\033[0m";
       } else {
         base = last_status ? "ny!" : "ny";
       }
 
       if (mode_tag[0]) {
         if (color_mode) {
-          snprintf(prompt_buf, sizeof(prompt_buf),
-                   "%s\001\033[90m\002%s\001\033[0m\002> ", base, mode_tag);
+          snprintf(prompt_buf, sizeof(prompt_buf), "%s\033[90m%s\033[0m> ",
+                   base, mode_tag);
         } else {
           snprintf(prompt_buf, sizeof(prompt_buf), "%s%s> ", base, mode_tag);
         }
@@ -759,7 +881,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         snprintf(prompt_buf, sizeof(prompt_buf), "%s> ", base);
       }
       prompt = prompt_buf;
-      rl_pre_input_hook = NULL;
     }
 
     char *line = NULL;
@@ -769,31 +890,99 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       from_init = 1;
     } else if (batch_mode) {
       break;
-    } else if (use_readline) {
-      line = readline(prompt);
-      if (line && tty_in)
-        printf("\n");
-    } else {
-      size_t cap = 0;
-      if (tty_in) {
-        fputs(prompt, stdout);
-        fflush(stdout);
-      }
-      if (getline(&line, &cap, stdin) == -1) {
+    } else if (tty_in) {
+      line = ny_readline(prompt);
+      if (line && g_repl_sigint) {
         free(line);
+        line = NULL;
+      }
+      if (line && tty_in) {
+        // ny_readline already prints the final newline
+      }
+
+    } else {
+      size_t cap = 256;
+      size_t len = 0;
+      char *buf = malloc(cap);
+      if (!buf)
+        break;
+      int ch;
+      while ((ch = fgetc(stdin)) != EOF) {
+        if (ch == '\n')
+          break;
+        if (len + 1 >= cap) {
+          cap *= 2;
+          buf = realloc(buf, cap);
+        }
+        buf[len++] = (char)ch;
+      }
+      if (len == 0 && ch == EOF) {
+        free(buf);
+        buf = NULL;
         break;
       }
-      size_t nl = strlen(line);
-      if (nl > 0 && line[nl - 1] == '\n')
-        line[nl - 1] = '\0';
+      buf[len] = '\0';
+      line = buf;
     }
 
-    if (!line)
+    if (!line) {
+      if (g_repl_sigint) {
+        if (!input_buffer) {
+          repl_restore_terminal_state();
+          break;
+        }
+        last_status = 1;
+        if (input_buffer) {
+          free(input_buffer);
+          input_buffer = NULL;
+          printf("Canceled multiline input\n");
+        }
+        repl_restore_terminal_state();
+        continue;
+      }
       break;
+    }
+    if (g_repl_sigint && !from_init) {
+      free(line);
+      if (input_buffer) {
+        free(input_buffer);
+        input_buffer = NULL;
+        last_status = 1;
+        printf("Canceled multiline input\n");
+        repl_restore_terminal_state();
+        continue;
+      }
+      repl_restore_terminal_state();
+      break;
+    }
+    // ny_readline already fully manages its own multiline buffer internally,
+    // so when it returns `line`, it is the *complete* block of code!
+    // We don't need to manually read line-by-line or concatenate `input_buffer`
+    // here for TTY input.
+    if (tty_in && !from_init) {
+      if (input_buffer)
+        free(input_buffer);
+      input_buffer = line;
+      goto process_input;
+    }
+
+    if (input_buffer && !from_init) {
+      char *line_trimmed = ltrim(line);
+      rtrim_inplace(line_trimmed);
+      if (!strcmp(line_trimmed, ":cancel") || !strcmp(line_trimmed, ":c")) {
+        free(line);
+        free(input_buffer);
+        input_buffer = NULL;
+        last_status = 1;
+        printf("Canceled multiline input\n");
+        continue;
+      }
+    }
     if (input_buffer && !from_init && strlen(line) == 0) {
       free(line);
-      if (!is_input_complete(input_buffer))
+      if (!is_input_complete(input_buffer)) {
         continue;
+      }
       goto process_input;
     }
     if (!from_init && strlen(line) == 0 && !input_buffer) {
@@ -811,9 +1000,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       input_buffer = line;
     }
 
-    if (!is_input_complete(input_buffer))
+    if (!is_input_complete(input_buffer)) {
       continue;
-
+    }
   process_input:;
     char *full_input = input_buffer;
     input_buffer = NULL;
@@ -823,7 +1012,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       continue;
     }
     if (!from_init)
-      add_history(full_input);
+      ny_readline_add_history(full_input);
 
     char *trimmed = ltrim(full_input);
     if (trimmed[0] == ':') {
@@ -890,7 +1079,12 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         continue;
       }
       if (!strcmp(cn, "cd")) {
-        if (chdir(*p ? p : getenv("HOME")) != 0)
+        const char *dst = *p ? p : getenv("HOME");
+#ifdef _WIN32
+        if (!dst)
+          dst = getenv("USERPROFILE");
+#endif
+        if (chdir(dst ? dst : ".") != 0)
           perror("cd");
         free(full_input);
         continue;
@@ -919,18 +1113,15 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         continue;
       }
       if (!strcmp(cn, "history") || !strcmp(cn, "hist")) {
-        HISTORY_STATE *st = history_get_history_state();
-        for (int i = 0; i < st->length; i++)
-          if (st->entries[i])
-            printf("%d: %s\n", i + history_base, st->entries[i]->line);
-        free(st);
+        printf("History fully implemented using arrows, to list just open the "
+               "file.\n");
         free(full_input);
         continue;
       }
       if (!strcmp(cn, "save")) {
         if (!*p)
           printf("Usage: :save <filename>\n");
-        else if (write_history(p) != 0)
+        else if (ny_readline_write_history(p) != 0)
           perror("save");
         else
           printf("History saved to %s\n", p);
@@ -958,6 +1149,24 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         free(full_input);
         continue;
       }
+      if (!strcmp(cn, "run")) {
+        if (!*p) {
+          printf("Usage: :run <filename>\n");
+        } else {
+          char *src = repl_read_file(p);
+          if (src) {
+            last_status =
+                repl_eval_snippet(src, 1, NULL, std_mode, tty_in, &docs, 0);
+            free(src);
+            repl_restore_terminal_state();
+          } else {
+            perror("run");
+            last_status = 1;
+          }
+        }
+        free(full_input);
+        continue;
+      }
       if (!strcmp(cn, "vars")) {
         if (g_repl_user_source)
           printf("%s--- Persistent Source ---%s\n%s", clr(NY_CLR_BOLD),
@@ -973,8 +1182,13 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         continue;
       }
       if (!strcmp(cn, "env")) {
+#ifdef _WIN32
+        char **envp = _environ;
+#else
         extern char **environ;
-        for (char **env = environ; *env; env++)
+        char **envp = environ;
+#endif
+        for (char **env = envp; env && *env; env++)
           printf("%s\n", *env);
         free(full_input);
         continue;
@@ -1049,6 +1263,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           printf("  %-15s Exit the REPL\n", ":exit/:quit/:q");
           printf("  %-15s Clear the screen\n", ":clear/:cls");
           printf("  %-15s Reset the REPL state\n", ":reset");
+          printf("  %-15s Cancel current multiline input\n", ":cancel/:c");
           printf("  %-15s Toggle execution timing\n", ":time");
           printf("  %-15s Show persistent source (defs/vars)\n", ":vars");
           printf("  %-15s Show environment variables\n", ":env");
@@ -1057,6 +1272,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           printf("  %-15s List files in current directory\n", ":ls");
           printf("  %-15s Change current directory\n", ":cd [path]");
           printf("  %-15s Load a file\n", ":load [file]");
+          printf("  %-15s Evaluate and run a file\n", ":run [file]");
           printf("  %-15s Save session/source to file\n", ":save [file]");
           printf("  %-15s Show standard library info\n", ":std");
           printf("  %-15s Help for [name] (e.g. :help std.io)\n",
@@ -1082,6 +1298,19 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       free(full_input);
       continue;
     }
+    if (trimmed[0] == '#' && trimmed[1] == '!') {
+      char *nl = strchr(trimmed, '\n');
+      if (!nl) {
+        free(full_input);
+        continue;
+      }
+      memmove(trimmed, nl + 1, strlen(nl + 1) + 1);
+      trimmed = ltrim(full_input);
+      if (trimmed[0] == '\0') {
+        free(full_input);
+        continue;
+      }
+    }
 
     int is_stmt = is_repl_stmt(full_input);
     if (!strncmp(trimmed, "use ", 4)) {
@@ -1098,6 +1327,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
 
     last_status =
         repl_eval_snippet(full_input, is_stmt, an, std_mode, tty_in, &docs, 0);
+    repl_restore_terminal_state();
 
     if (an)
       free(an);
@@ -1105,7 +1335,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
 
   if (history_path[0])
-    write_history(history_path);
+    ny_readline_write_history(history_path);
   doclist_free(&docs);
 
   if (init_lines) {
@@ -1115,4 +1345,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     free(init_lines);
   }
   repl_shutdown_engine();
+#ifdef _WIN32
+  signal(SIGINT, prev_sigint);
+#else
+  sigaction(SIGINT, &prev_sigint, NULL);
+#endif
 }

@@ -1,6 +1,9 @@
 #include "base/loader.h"
 #include "ast/ast.h"
 #include "base/common.h"
+#ifdef _WIN32
+#include "base/compat.h"
+#endif
 #include "base/util.h"
 #include "parse/parser.h"
 
@@ -8,6 +11,10 @@
 #include <dirent.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#define access _access
+#endif
 
 typedef struct ny_std_mod {
   char *name;    // package.module
@@ -19,24 +26,46 @@ static ny_std_mod *ny_std_mods = NULL;
 static size_t ny_std_mods_len = 0;
 static size_t ny_std_mods_cap = 0;
 
+static void ny_loader_oom(void) {
+  fprintf(stderr, "oom\n");
+  exit(1);
+}
+
+static void *ny_loader_xmalloc(size_t n) {
+  void *p = malloc(n);
+  if (!p)
+    ny_loader_oom();
+  return p;
+}
+
+static void *ny_loader_xrealloc(void *p, size_t n) {
+  void *q = realloc(p, n);
+  if (!q)
+    ny_loader_oom();
+  return q;
+}
+
+static char *ny_loader_xstrdup(const char *s) {
+  char *d = ny_strdup(s);
+  if (!d)
+    ny_loader_oom();
+  return d;
+}
+
 static void std_push_mod(const char *name, const char *path,
                          const char *package) {
   if (!name || !path || !package)
     return;
   if (ny_std_mods_len == ny_std_mods_cap) {
     size_t nc = ny_std_mods_cap ? ny_std_mods_cap * 2 : 64;
-    ny_std_mod *nm = realloc(ny_std_mods, nc * sizeof(ny_std_mod));
-    if (!nm) {
-      fprintf(stderr, "oom\n");
-      exit(1);
-    }
+    ny_std_mod *nm = ny_loader_xrealloc(ny_std_mods, nc * sizeof(ny_std_mod));
     ny_std_mods = nm;
     ny_std_mods_cap = nc;
   }
   ny_std_mods[ny_std_mods_len++] = (ny_std_mod){
-      .name = ny_strdup(name),
-      .path = ny_strdup(path),
-      .package = ny_strdup(package),
+      .name = ny_loader_xstrdup(name),
+      .path = ny_loader_xstrdup(path),
+      .package = ny_loader_xstrdup(package),
   };
 }
 
@@ -60,11 +89,7 @@ static int is_ny_file(const char *name) {
 
 static char *path_join(const char *a, const char *b) {
   size_t al = strlen(a), bl = strlen(b);
-  char *out = malloc(al + bl + 2);
-  if (!out) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
+  char *out = ny_loader_xmalloc(al + bl + 2);
   memcpy(out, a, al);
   out[al] = '/';
   memcpy(out + al + 1, b, bl);
@@ -81,11 +106,7 @@ static void add_module_from_path(const char *root, const char *full_path) {
     rel++;
   if (!is_ny_file(rel))
     return;
-  char *name = ny_strdup(rel);
-  if (!name) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
+  char *name = ny_loader_xstrdup(rel);
   size_t n = strlen(name);
   name[n - 3] = '\0'; // strip .ny
   n -= 3;
@@ -97,6 +118,19 @@ static void add_module_from_path(const char *root, const char *full_path) {
   for (char *p = name; *p; ++p) {
     if (*p == '/')
       *p = '.';
+  }
+  // Strip .lib segment if present (e.g. std.core.lib.alloc -> std.core.alloc)
+  char *lib_ptr = strstr(name, ".lib.");
+  if (lib_ptr) {
+    size_t rest_len = strlen(lib_ptr + 5); // Skip ".lib."
+    memmove(lib_ptr + 1, lib_ptr + 5,
+            rest_len + 1); // Overwrite "lib." with "." + rest
+  } else {
+    // Check for trailing .lib (e.g. std/core/lib/mod.ny -> std.core.lib)
+    size_t len = strlen(name);
+    if (len > 4 && strcmp(name + len - 4, ".lib") == 0) {
+      name[len - 4] = '\0';
+    }
   }
   // Strip "src.std." or "src.lib." prefix if present
   const char *final_name = name;
@@ -115,20 +149,14 @@ static void add_module_from_path(const char *root, const char *full_path) {
     prefix = "std.";
   else if (strstr(root, "lib") != NULL)
     prefix = "lib.";
-  char *final_copy = malloc(strlen(prefix) + strlen(final_name) + 1);
-  if (!final_copy) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
+  char *final_copy = ny_loader_xmalloc(strlen(prefix) + strlen(final_name) + 1);
   strcpy(final_copy, prefix);
   strcat(final_copy, final_name);
   const char *dot = strchr(final_copy, '.');
   char *pkg = dot ? ny_strndup(final_copy, (size_t)(dot - final_copy))
-                  : ny_strdup(final_copy);
-  if (!pkg) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
+                  : ny_loader_xstrdup(final_copy);
+  if (!pkg)
+    ny_loader_oom();
   std_push_mod(final_copy, full_path, pkg);
   free(final_copy);
   free(name);
@@ -142,7 +170,8 @@ static void scan_dir_recursive(const char *root, const char *dir) {
   }
   struct dirent *ent;
   while ((ent = readdir(d)) != NULL) {
-    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0 ||
+        strcmp(ent->d_name, "test") == 0)
       continue;
     char *fp = path_join(dir, ent->d_name);
     struct stat st;
@@ -167,6 +196,39 @@ static int mod_cmp(const void *a, const void *b) {
   return strcmp(ma->name, mb->name);
 }
 
+static bool ny_scan_recursive_if_dir(const char *root, const char *dir) {
+  struct stat st;
+  if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+    scan_dir_recursive(root, dir);
+    return true;
+  }
+  return false;
+}
+
+static void ny_scan_std_or_lib_roots(const char *src_root, const char *pkg) {
+  char path_src[4096];
+  char path_root[4096];
+  char path_local_src[64];
+
+  snprintf(path_src, sizeof(path_src), "%s/src/%s", src_root, pkg);
+  if (ny_scan_recursive_if_dir(path_src, path_src))
+    return;
+
+  snprintf(path_root, sizeof(path_root), "%s/%s", src_root, pkg);
+  if (ny_scan_recursive_if_dir(path_root, path_root))
+    return;
+
+  snprintf(path_local_src, sizeof(path_local_src), "src/%s", pkg);
+  if (ny_scan_recursive_if_dir(path_local_src, path_local_src))
+    return;
+
+  if (strcmp(pkg, "std") == 0) {
+    scan_dir_recursive("std", "std");
+    return;
+  }
+  (void)ny_scan_recursive_if_dir(pkg, pkg);
+}
+
 static void ny_std_init_modules(void) {
   static int init = 0;
   if (init)
@@ -174,75 +236,48 @@ static void ny_std_init_modules(void) {
   init = 1;
 
   const char *root = ny_src_root();
-  char std_path[4096], lib_path[4096];
-  snprintf(std_path, sizeof(std_path), "%s/src/std", root);
-  snprintf(lib_path, sizeof(lib_path), "%s/src/lib", root);
-
-  struct stat st;
-  if (stat(std_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive(std_path, std_path);
-  } else {
-    snprintf(std_path, sizeof(std_path), "%s/std", root);
-    if (stat(std_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-      scan_dir_recursive(std_path, std_path);
-    } else if (stat("src/std", &st) == 0 && S_ISDIR(st.st_mode)) {
-      scan_dir_recursive("src/std", "src/std");
-    } else {
-      scan_dir_recursive("std", "std");
-    }
-  }
-
-  if (stat(lib_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive(lib_path, lib_path);
-  } else {
-    snprintf(lib_path, sizeof(lib_path), "%s/lib", root);
-    if (stat(lib_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-      scan_dir_recursive(lib_path, lib_path);
-    } else if (stat("src/lib", &st) == 0 && S_ISDIR(st.st_mode)) {
-      scan_dir_recursive("src/lib", "src/lib");
-    } else if (stat("lib", &st) == 0 && S_ISDIR(st.st_mode)) {
-      scan_dir_recursive("lib", "lib");
-    }
-  }
+  ny_scan_std_or_lib_roots(root, "std");
+  ny_scan_std_or_lib_roots(root, "lib");
 
   if (ny_std_mods_len > 1) {
     qsort(ny_std_mods, ny_std_mods_len, sizeof(ny_std_mod), mod_cmp);
   }
 }
 
-static const char *ny_std_prelude_list[] = {
-    "std.core",    "std.core.error", "std.core.reflect", "std.str",
-    "std.str.str", "std.core.iter",  "std.str.io",       "std.core.mem",
-};
-
-const char **ny_std_prelude(size_t *count) {
-  if (count)
-    *count = sizeof(ny_std_prelude_list) / sizeof(ny_std_prelude_list[0]);
-  return ny_std_prelude_list;
-}
-
 static const char *ny_std_pkgs[64] = {0};
 static size_t ny_std_pkgs_len = 0;
 static int ny_std_pkgs_init = 0;
+
+static int ny_cstr_ptr_cmp(const void *a, const void *b) {
+  const char *aa = *(const char *const *)a;
+  const char *bb = *(const char *const *)b;
+  if (!aa && !bb)
+    return 0;
+  if (!aa)
+    return -1;
+  if (!bb)
+    return 1;
+  return strcmp(aa, bb);
+}
 
 static void ny_std_init_packages(void) {
   if (ny_std_pkgs_init)
     return;
   ny_std_pkgs_init = 1;
   ny_std_init_modules();
-  for (size_t i = 0; i < ny_std_mods_len; ++i) {
-    const char *pkg = ny_std_mods[i].package;
-    int seen = 0;
-    for (size_t j = 0; j < ny_std_pkgs_len; ++j) {
-      if (strcmp(ny_std_pkgs[j], pkg) == 0) {
-        seen = 1;
-        break;
-      }
+  const size_t pkg_cap = sizeof(ny_std_pkgs) / sizeof(ny_std_pkgs[0]);
+  for (size_t i = 0; i < ny_std_mods_len && ny_std_pkgs_len < pkg_cap; ++i) {
+    ny_std_pkgs[ny_std_pkgs_len++] = ny_std_mods[i].package;
+  }
+  if (ny_std_pkgs_len > 1) {
+    qsort(ny_std_pkgs, ny_std_pkgs_len, sizeof(ny_std_pkgs[0]),
+          ny_cstr_ptr_cmp);
+    size_t out = 1;
+    for (size_t i = 1; i < ny_std_pkgs_len; ++i) {
+      if (strcmp(ny_std_pkgs[out - 1], ny_std_pkgs[i]) != 0)
+        ny_std_pkgs[out++] = ny_std_pkgs[i];
     }
-    if (!seen &&
-        ny_std_pkgs_len < (sizeof(ny_std_pkgs) / sizeof(ny_std_pkgs[0]))) {
-      ny_std_pkgs[ny_std_pkgs_len++] = pkg;
-    }
+    ny_std_pkgs_len = out;
   }
 }
 
@@ -293,7 +328,40 @@ static const char *strip_pkg_prefix(const char *name) {
   return name;
 }
 
+static int ny_find_module_exact_name(const char *name) {
+  if (!name)
+    return -1;
+  size_t lo = 0, hi = ny_std_mods_len;
+  while (lo < hi) {
+    size_t mid = lo + ((hi - lo) >> 1);
+    int cmp = strcmp(name, ny_std_mods[mid].name);
+    if (cmp == 0)
+      return (int)mid;
+    if (cmp < 0)
+      hi = mid;
+    else
+      lo = mid + 1;
+  }
+  return -1;
+}
+
+static int ny_find_module_prefixed_name(const char *name) {
+  if (!name)
+    return -1;
+  if (strncmp(name, "std.", 4) == 0 || strncmp(name, "lib.", 4) == 0)
+    return -1;
+  char pbuf[512];
+  snprintf(pbuf, sizeof(pbuf), "std.%s", name);
+  int idx = ny_find_module_exact_name(pbuf);
+  if (idx >= 0)
+    return idx;
+  snprintf(pbuf, sizeof(pbuf), "lib.%s", name);
+  return ny_find_module_exact_name(pbuf);
+}
+
 int ny_std_find_module_by_name(const char *name) {
+  if (!name || !*name)
+    return -1;
   ny_std_init_modules();
   const char *tries[4] = {name, NULL, NULL, NULL};
   char buf_mod[256], buf_core[256];
@@ -305,25 +373,12 @@ int ny_std_find_module_by_name(const char *name) {
     const char *curr = tries[t];
     if (!curr)
       continue;
-    // 1. Exact or suffixed
-    for (size_t i = 0; i < ny_std_mods_len; ++i) {
-      if (strcmp(ny_std_mods[i].name, curr) == 0)
-        return (int)i;
-    }
-    // 2. With std. or lib. prefix
-    if (strncmp(curr, "std.", 4) != 0 && strncmp(curr, "lib.", 4) != 0) {
-      char pbuf[512];
-      snprintf(pbuf, sizeof(pbuf), "std.%s", curr);
-      for (size_t i = 0; i < ny_std_mods_len; ++i) {
-        if (strcmp(ny_std_mods[i].name, pbuf) == 0)
-          return (int)i;
-      }
-      snprintf(pbuf, sizeof(pbuf), "lib.%s", curr);
-      for (size_t i = 0; i < ny_std_mods_len; ++i) {
-        if (strcmp(ny_std_mods[i].name, pbuf) == 0)
-          return (int)i;
-      }
-    }
+    int idx = ny_find_module_exact_name(curr);
+    if (idx >= 0)
+      return idx;
+    idx = ny_find_module_prefixed_name(curr);
+    if (idx >= 0)
+      return idx;
   }
   return -1;
 }
@@ -335,11 +390,17 @@ static int find_module_index(const char *name) {
 static bool is_package_name(const char *pkg) {
   if (!pkg)
     return false;
-  ny_std_init_modules();
-  for (size_t i = 0; i < ny_std_mods_len; ++i) {
-    if (strcmp(ny_std_mods[i].package, pkg) == 0) {
+  ny_std_init_packages();
+  size_t lo = 0, hi = ny_std_pkgs_len;
+  while (lo < hi) {
+    size_t mid = lo + ((hi - lo) >> 1);
+    int cmp = strcmp(pkg, ny_std_pkgs[mid]);
+    if (cmp == 0)
       return true;
-    }
+    if (cmp < 0)
+      hi = mid;
+    else
+      lo = mid + 1;
   }
   return false;
 }
@@ -409,10 +470,20 @@ static void append_fn_proto(stmt_t *s, char **hdr, size_t *len, size_t *capv) {
     }
   }
 }
+static const char *last_sep(const char *path) {
+  const char *a = strrchr(path, '/');
+  const char *b = strrchr(path, '\\');
+  if (!a)
+    return b;
+  if (!b)
+    return a;
+  return (a > b) ? a : b;
+}
+
 static char *ny_modname_from_path(const char *path) {
   if (!path)
     return NULL;
-  const char *last_slash = strrchr(path, '/');
+  const char *last_slash = last_sep(path);
   const char *start = last_slash ? last_slash + 1 : path;
   char *name = ny_strdup(start);
   char *dot = strrchr(name, '.');
@@ -421,8 +492,6 @@ static char *ny_modname_from_path(const char *path) {
   }
   return name;
 }
-
-// --- User Module Support ---
 
 static char *find_local_module(const char *name, const char *base_dir) {
   if (!name || !*name)
@@ -439,8 +508,14 @@ static char *find_local_module(const char *name, const char *base_dir) {
   path[base_len] = '/';
   memcpy(path + base_len + 1, name, name_len + 1);
   // Replace . with / if not a file path
-  if (strncmp(name, "./", 2) != 0 && strncmp(name, "/", 1) != 0 &&
-      strstr(name, ".ny") == NULL) {
+  bool is_abs = false;
+  if (strncmp(name, "./", 2) == 0 || strncmp(name, "/", 1) == 0)
+    is_abs = true;
+  if (name[0] == '\\' && name[1] == '\\')
+    is_abs = true;
+  if (isalpha((unsigned char)name[0]) && name[1] == ':')
+    is_abs = true;
+  if (!is_abs && strstr(name, ".ny") == NULL && strstr(name, "\\") == NULL) {
     for (char *p = path + base_len + 1; *p; ++p)
       if (*p == '.')
         *p = '/';
@@ -500,7 +575,6 @@ static char *resolve_module_path(const char *raw, const char *base_dir,
   }
   if (!prefer_local || explicit_pkg)
     return NULL;
-  // Fallback to local if std/lib didn't match
   char *local = find_local_module(raw, base_dir);
   if (local) {
     if (is_std_out)
@@ -513,7 +587,7 @@ static char *resolve_module_path(const char *raw, const char *base_dir,
 static char *dir_from_path(const char *path) {
   if (!path || !*path)
     return ny_strdup(".");
-  const char *slash = strrchr(path, '/');
+  const char *slash = last_sep(path);
   if (!slash)
     return ny_strdup(".");
   size_t len = (size_t)(slash - path);
@@ -551,7 +625,7 @@ static int mod_priority(const char *path) {
   if (strstr(path, "std/core/mod.ny"))
     return 1;
   if (strstr(path, "std/core/primitives.ny"))
-    return 1; // Fallback
+    return 1;
   if (strstr(path, "std/core/reflect.ny"))
     return 2;
   return 100;
@@ -581,13 +655,62 @@ static void mod_list_add(mod_list *list, const char *path, const char *name,
   }
   if (list->len == list->cap) {
     size_t new_cap = list->cap ? list->cap * 2 : 16;
-    list->entries = realloc(list->entries, new_cap * sizeof(mod_entry));
+    list->entries =
+        ny_loader_xrealloc(list->entries, new_cap * sizeof(mod_entry));
     list->cap = new_cap;
   }
-  list->entries[list->len++] = (mod_entry){.path = ny_strdup(path),
-                                           .name = ny_strdup(name),
+  list->entries[list->len++] = (mod_entry){.path = ny_loader_xstrdup(path),
+                                           .name = ny_loader_xstrdup(name),
                                            .processed = false,
                                            .is_std = is_std};
+}
+
+static void scan_stmt_uses(mod_list *list, stmt_t *s, const char *base_dir,
+                           bool prefer_local) {
+  if (!s)
+    return;
+  if (s->kind == NY_S_USE) {
+    const char *raw = s->as.use.module;
+    bool explicit_std =
+        (strcmp(raw, "std") == 0) || (strncmp(raw, "std.", 4) == 0);
+    bool explicit_lib =
+        (strcmp(raw, "lib") == 0) || (strncmp(raw, "lib.", 4) == 0);
+    bool explicit_pkg = explicit_std || explicit_lib;
+    bool is_std = false;
+    char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
+    if (path) {
+      if (!(list->skip_std && is_std)) {
+        char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
+        mod_list_add(list, path, mname, is_std);
+        if (!is_std)
+          free(mname);
+      }
+      free(path);
+      return;
+    }
+    if (strcmp(raw, "std") == 0) {
+      return;
+    }
+    if ((!prefer_local || explicit_std) && (explicit_std || !explicit_pkg)) {
+      const char *pkg_name = strip_pkg_prefix(raw);
+      if (is_package_name(pkg_name)) {
+        if (list->skip_std)
+          return;
+        ny_std_init_modules();
+        for (size_t k = 0; k < ny_std_mods_len; ++k) {
+          if (strcmp(ny_std_mods[k].package, pkg_name) == 0) {
+            mod_list_add(list, ny_std_mods[k].path, ny_std_mods[k].name, true);
+          }
+        }
+      }
+    }
+    return;
+  }
+  if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      scan_stmt_uses(list, s->as.module.body.data[i], base_dir, prefer_local);
+    }
+  }
 }
 
 static void scan_dependencies(mod_list *list, size_t idx) {
@@ -610,55 +733,7 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   char *base_dir = dir_from_path(list->entries[idx].path);
   bool prefer_local = !list->entries[idx].is_std;
   for (size_t i = 0; i < prog.body.len; ++i) {
-    stmt_t *s = prog.body.data[i];
-    if (s->kind != NY_S_USE)
-      continue;
-    const char *raw = s->as.use.module;
-    bool explicit_std =
-        (strcmp(raw, "std") == 0) || (strncmp(raw, "std.", 4) == 0);
-    bool explicit_lib =
-        (strcmp(raw, "lib") == 0) || (strncmp(raw, "lib.", 4) == 0);
-    bool explicit_pkg = explicit_std || explicit_lib;
-    bool is_std = false;
-    char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
-    if (path) {
-      if (list->skip_std && is_std) {
-        free(path);
-        continue;
-      }
-      char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
-      mod_list_add(list, path, mname, is_std);
-      if (!is_std)
-        free(mname);
-      free(path);
-      continue;
-    }
-    // Handle std specially if we want to support 'std' package inclusion
-    if (strcmp(raw, "std") == 0) {
-      // If no local module matched, keep 'use std' as a no-op here.
-      continue;
-    }
-    // directory logic for std.*: if no direct module found, check if it's a
-    // package
-    if ((!prefer_local || explicit_std) && (explicit_std || !explicit_pkg)) {
-      // Check if it's a package wildcard or directory
-      const char *pkg_name = strip_pkg_prefix(raw);
-      if (is_package_name(pkg_name)) {
-        if (list->skip_std)
-          continue;
-        // Add all modules in this package
-        ny_std_init_modules();
-        for (size_t k = 0; k < ny_std_mods_len; ++k) {
-          if (strcmp(ny_std_mods[k].package, pkg_name) == 0) {
-            mod_list_add(list, ny_std_mods[k].path, ny_std_mods[k].name, true);
-          }
-        }
-        continue;
-      }
-    }
-    // If we reached here, it wasn't a standard package and wasn't resolved.
-    // Maybe it's a directory import for user modules? Not supported yet.
-    // NY_LOG_WARN("Could not resolve module '%s'\n", raw);
+    scan_stmt_uses(list, prog.body.data[i], base_dir, prefer_local);
   }
   program_free(&prog, parser.arena);
   free(base_dir);
@@ -673,7 +748,6 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
   if (mode == STD_MODE_NONE && module_count == 0)
     return NULL;
   ny_std_init_modules();
-  // Fallback to prebuilt bundle if core std modules are missing (e.g. installed
   // mode or artifacts only)
   char *prebuilt_src = NULL;
   if (ny_std_find_module_by_name("std.core.mod") < 0) {
@@ -698,11 +772,16 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
       mod_list_add(&mods, ny_std_mods[i].path, ny_std_mods[i].name, true);
     }
   } else {
-    // USE_LIST only: std prelude is explicit opt-in at call sites.
     const char **seed_modules = modules;
     size_t seed_count = module_count;
-    if (!seed_modules && seed_count == 0 && mode == STD_MODE_DEFAULT) {
-      seed_modules = ny_std_prelude(&seed_count);
+
+    // If no explicit imports were discovered, fall back to full std seeding.
+    // This mirrors prebuilt-bundle behavior and keeps scripts with only
+    // nested/conditional uses working when prebuilt loading is unavailable.
+    if (seed_count == 0 && mode != STD_MODE_NONE) {
+      for (size_t j = 0; j < ny_std_mods_len; ++j) {
+        mod_list_add(&mods, ny_std_mods[j].path, ny_std_mods[j].name, true);
+      }
     }
 
     for (size_t i = 0; i < seed_count; ++i) {
@@ -747,21 +826,14 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     for (size_t i = 0; i < current_len; ++i) {
       if (!mods.entries[i].processed) {
         scan_dependencies(&mods, i);
-        // scan_dependencies might add elements to mods, invalidating loop
         // constraint? We used 'current_len' so new elements are processed in
-        // next outer loop iteration or next indices
         if (mods.len > current_len)
           changed = true;
       }
     }
     // If we processed items without adding new ones, we might still have
-    // unprocessed items? scan_dependencies sets 'processed=true'. So we loop
-    // until no new items are added AND all are processed. The inner loop
-    // processes [0..current_len]. If nothing added, next loop processes same
-    // range but they are already processed. We need to ensure we catch newly
     // appended items. Actually, simpler:
   }
-  // Re-run loop specifically to catch up with appended items
   for (size_t i = 0; i < mods.len; ++i) {
     if (!mods.entries[i].processed) {
       scan_dependencies(&mods, i);
@@ -799,7 +871,6 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
              mods.entries[i].path);
     char *txt = read_file(mods.entries[i].path);
     if (txt) {
-      // Check if module already has a 'module' declaration
       bool has_decl = false;
       const char *p = txt;
       while (*p) {
@@ -873,7 +944,10 @@ char *ny_std_generate_header(std_mode_t mode) {
   program_free(&prog, parser.arena);
   free(bundle);
   if (getenv("NYTRIX_DUMP_HEADER")) {
-    FILE *df = fopen("/tmp/nytrix_std_header.ny", "w");
+    char dump_path[4096];
+    ny_join_path(dump_path, sizeof(dump_path), ny_get_temp_dir(),
+                 "nytrix_std_header.ny");
+    FILE *df = fopen(dump_path, "w");
     if (df) {
       fputs(header, df);
       fclose(df);

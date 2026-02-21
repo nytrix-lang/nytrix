@@ -20,11 +20,11 @@ fn _set_str_eq(a, b){
    "Internal: byte-wise string equality for set keys."
    if(!is_str(a) || !is_str(b)){ return false }
    def n = str_len(a)
-   if(eq(n, str_len(b)) == false){ return false }
+   if(!((n == str_len(b)))){ return false }
    mut i = 0
    while(i < n){
       if(load8(a, i) != load8(b, i)){ return false }
-      i = i + 1
+      i += 1
    }
    return true
 }
@@ -32,7 +32,7 @@ fn _set_str_eq(a, b){
 fn _set_key_eq(a, b){
    "Internal: key equality with string fast-path."
    if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
-   return eq(a, b)
+   return (a == b)
 }
 
 fn _set_hash(x){
@@ -44,7 +44,7 @@ fn _set_hash(x){
       def n = str_len(x)
       while(i < n){
          h = (h ^ load8(x, i)) * 1099511628211
-         i = i + 1
+         i += 1
       }
       return h
    }
@@ -66,7 +66,7 @@ fn _set_new(cap){
       store64(p, 0, off)
       store64(p, 0, off + 8)
       store64(p, 0, off + 16)
-      i = i + 1
+      i += 1
    }
    p
 }
@@ -87,21 +87,21 @@ fn _set_insert(s, key){
    while(probes < cap){
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
-      if(eq(st, 0)){
+      if(st == 0){
          store64(s, key, off)
          store64(s, 1, off + 8)
          store64(s, 1, off + 16)
          store64(s, load64(s, 0) + 1, 0)
          return s
       }
-      if(eq(st, 1)){
+      if(st == 1){
          if(_set_key_eq(load64(s, off), key)){
             return s
          }
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
       perturb = perturb >> 5
-      probes = probes + 1
+      probes += 1
    }
    return s
 }
@@ -114,10 +114,10 @@ fn _set_resize(s, newcap){
    while(i < cap){
       def off = 16 + i * 24
       def st = load64(s, off + 16)
-      if(eq(st, 1)){
+      if(st == 1){
          ns = _set_insert(ns, load64(s, off))
       }
-      i = i + 1
+      i += 1
    }
    free(s)
    ns
@@ -126,10 +126,7 @@ fn _set_resize(s, newcap){
 fn set_add(s, key){
    "Adds `key` to set `s`. Returns the (possibly reallocated) set."
    if(!s){ s = _set_new(8) }
-   if(!is_set(s)){ 
-      print(f"DEBUG: set_add failed on {s} tag {load64(s, -8)}")
-      panic("set_add called on non-set") 
-   }
+   if(!is_set(s)){ panic("set_add called on non-set") }
    def count = load64(s, 0)
    def cap = load64(s, 8)
    if(count * 10 >= cap * 7){
@@ -150,15 +147,39 @@ fn set_contains(s, key){
    while(probes < cap){
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
-      if(eq(st, 0)){ return false }
-      if(eq(st, 1)){
+      if(st == 0){ return false }
+      if(st == 1){
          if(_set_key_eq(load64(s, off), key)){
             return true
          }
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
       perturb = perturb >> 5
-      probes = probes + 1
+      probes += 1
    }
    return false
+}
+
+if(comptime{__main()}){
+    use std.core *
+    use std.core.set *
+
+    def s = set(8)
+    assert(is_set(s), "is_set(s)")
+    assert(!set_contains(s, "key1"), "empty set contains")
+
+    set_add(s, "key1")
+    assert(set_contains(s, "key1"), "contains key1")
+    assert(!set_contains(s, "key2"), "not contains key2")
+
+    set_add(s, "key2")
+    assert(set_contains(s, "key1"), "contains key1 (2)")
+    assert(set_contains(s, "key2"), "contains key2")
+
+    def s2 = set(8)
+    set_add(s2, 123)
+    assert(set_contains(s2, 123), "contains int key")
+    assert(!set_contains(s2, 124), "not contains int key")
+
+    print("✓ std.core.set tests passed")
 }

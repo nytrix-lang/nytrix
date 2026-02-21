@@ -1,12 +1,15 @@
 #include "priv.h"
 #include <stdlib.h>
 
-static char *parse_qualified_name(parser_t *p) {
+static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
+                                      const char *after_dot_err) {
   if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected identifier", NULL);
+    parser_error(p, p->cur, first_err ? first_err : "expected identifier",
+                 NULL);
     return NULL;
   }
-  size_t cap = 256, len = 0;
+  size_t cap = (size_t)p->cur.len + 32;
+  size_t len = 0;
   char *buf = malloc(cap);
   if (!buf) {
     fprintf(stderr, "oom\n");
@@ -17,7 +20,10 @@ static char *parse_qualified_name(parser_t *p) {
   parser_advance(p);
   while (parser_match(p, NY_T_DOT)) {
     if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected identifier after '.'", NULL);
+      parser_error(p, p->cur,
+                   after_dot_err ? after_dot_err
+                                 : "expected identifier after '.'",
+                   NULL);
       free(buf);
       return NULL;
     }
@@ -37,32 +43,82 @@ static char *parse_qualified_name(parser_t *p) {
     parser_advance(p);
   }
   buf[len] = '\0';
-  char *result = buf;
-  size_t result_len = len;
+  return buf;
+}
+
+static void parser_sync_stmt_boundary(parser_t *p) {
+  while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
+         p->cur.kind != NY_T_RBRACE) {
+    parser_advance(p);
+  }
+  if (p->cur.kind == NY_T_SEMI)
+    parser_advance(p);
+}
+
+static void parse_stmt_append_or_sync(parser_t *p, ny_stmt_list *out) {
+  stmt_t *s = p_parse_stmt(p);
+  if (s) {
+    vec_push_arena(p->arena, out, s);
+  } else if (p->had_error) {
+    parser_sync_stmt_boundary(p);
+  }
+}
+
+static char *parse_qualified_name(parser_t *p) {
+  char *owned = parse_dotted_ident_owned(p, "expected identifier",
+                                         "expected identifier after '.'");
+  if (!owned)
+    return NULL;
+  size_t result_len = strlen(owned);
   if (p->current_module) {
     size_t clen = strlen(p->current_module);
-    if (!(result_len >= clen && strncmp(p->current_module, result, clen) == 0 &&
-          (result[clen] == '.' || result[clen] == '\0'))) {
+    if (!(result_len >= clen && strncmp(p->current_module, owned, clen) == 0 &&
+          (owned[clen] == '.' || owned[clen] == '\0'))) {
       char *prefixed = malloc(clen + 1 + result_len + 1);
       if (!prefixed) {
-        free(buf);
+        free(owned);
         fprintf(stderr, "oom\n");
         exit(1);
       }
       memcpy(prefixed, p->current_module, clen);
       prefixed[clen] = '.';
-      memcpy(prefixed + clen + 1, result, result_len + 1);
-      if (result != buf)
-        free(result);
-      result = prefixed;
+      memcpy(prefixed + clen + 1, owned, result_len + 1);
+      free(owned);
+      owned = prefixed;
       result_len = clen + 1 + result_len;
     }
   }
-  char *name = arena_strndup(p->arena, result, result_len);
-  if (result != buf)
-    free(result);
-  free(buf);
+  char *name = arena_strndup(p->arena, owned, result_len);
+  free(owned);
   return name;
+}
+
+static const char *parse_type_ref(parser_t *p, const char *err_msg) {
+  size_t nullable_depth = 0;
+  while (parser_match(p, NY_T_QUESTION))
+    nullable_depth++;
+
+  size_t ptr_depth = 0;
+  while (parser_match(p, NY_T_STAR))
+    ptr_depth++;
+
+  char *base =
+      parse_dotted_ident_owned(p, err_msg ? err_msg : "expected type name",
+                               "expected identifier after '.' in type");
+  if (!base)
+    return NULL;
+  size_t len = strlen(base);
+  size_t total = nullable_depth + ptr_depth + len;
+  char *out = arena_alloc(p->arena, total + 1);
+  size_t at = 0;
+  for (size_t i = 0; i < nullable_depth; i++)
+    out[at++] = '?';
+  for (size_t i = 0; i < ptr_depth; i++)
+    out[at++] = '*';
+  memcpy(out + at, base, len);
+  out[total] = '\0';
+  free(base);
+  return out;
 }
 
 static bool is_pow2_u64(unsigned long long v) {
@@ -94,137 +150,6 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
   return (size_t)val;
 }
 
-static stmt_t *parse_stmt_or_block(parser_t *p) {
-  if (p->cur.kind == NY_T_LBRACE)
-    return p_parse_block(p);
-  token_t tok = p->cur;
-  stmt_t *s = p_parse_stmt(p);
-  if (!s)
-    return NULL;
-  stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
-  vec_push_arena(p->arena, &blk->as.block.body, s);
-  return blk;
-}
-
-static stmt_t *parse_if(parser_t *p) {
-  token_t tok = p->cur;
-  if (p->cur.kind == NY_T_IF || p->cur.kind == NY_T_ELIF)
-    parser_advance(p);
-  else
-    parser_expect(p, NY_T_IF, "'if' or 'elif'", NULL);
-  expr_t *cond = p_parse_expr(p, 0);
-  stmt_t *block = parse_stmt_or_block(p);
-  stmt_t *alt = NULL;
-  if (parser_match(p, NY_T_ELSE)) {
-    if (p->cur.kind == NY_T_IF) {
-      alt = parse_if(p);
-    } else {
-      alt = parse_stmt_or_block(p);
-    }
-  } else if (p->cur.kind == NY_T_ELIF) {
-    alt = parse_if(p);
-  }
-  stmt_t *s = stmt_new(p->arena, NY_S_IF, tok);
-  s->as.iff.test = cond;
-  s->as.iff.conseq = block;
-  s->as.iff.alt = alt;
-  return s;
-}
-
-static stmt_t *parse_while(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_WHILE, "'while'", NULL);
-  expr_t *cond = p_parse_expr(p, 0);
-  if (p->cur.kind == NY_T_ASSIGN) {
-    parser_error(p, p->cur, "assignment in condition", "did you mean '=='?");
-    parser_advance(p);
-    p_parse_expr(p, 0); // Consume RHS
-  }
-  p->loop_depth++;
-  stmt_t *body = parse_stmt_or_block(p);
-  p->loop_depth--;
-  stmt_t *s = stmt_new(p->arena, NY_S_WHILE, tok);
-  s->as.whl.test = cond;
-  s->as.whl.body = body;
-  return s;
-}
-
-static stmt_t *parse_for(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_FOR, "'for'", NULL);
-  bool has_paren = false;
-  if (p->cur.kind == NY_T_LPAREN) {
-    has_paren = true;
-    parser_advance(p);
-    // Check if it looks like for (int i = 0; ...
-    // Note: p->cur is now inside parens
-    if (p->cur.kind == NY_T_IDENT || p->cur.kind == NY_T_DEF ||
-        p->cur.kind == NY_T_MUT) {
-      token_t next = parser_peek(p);
-      if (next.kind == NY_T_ASSIGN || next.kind == NY_T_IDENT) {
-        parser_error(p, p->cur, "C-style for loops are not supported",
-                     "use 'for x in iterable' instead");
-        // Recover by consuming up to RPAREN
-        while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
-          parser_advance(p);
-        }
-        if (p->cur.kind == NY_T_RPAREN)
-          parser_advance(p);
-        return NULL;
-      }
-    }
-  }
-
-  if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "for expects loop variable", NULL);
-    return NULL;
-  }
-  char *id = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-  parser_advance(p);
-  parser_expect(p, NY_T_IN, "'in'", NULL);
-  expr_t *iter = p_parse_expr(p, 0);
-  if (has_paren)
-    parser_expect(p, NY_T_RPAREN, ")' after condition", NULL);
-  p->loop_depth++;
-  stmt_t *body = parse_stmt_or_block(p);
-  p->loop_depth--;
-  stmt_t *s = stmt_new(p->arena, NY_S_FOR, tok);
-  s->as.fr.iter_var = id;
-  s->as.fr.iterable = iter;
-  s->as.fr.body = body;
-  return s;
-}
-
-static stmt_t *parse_try(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_TRY, "'try'", NULL);
-  int saved_loop_depth = p->loop_depth;
-  p->loop_depth = 0;
-  stmt_t *body = p_parse_block(p);
-  p->loop_depth = saved_loop_depth;
-  parser_expect(p, NY_T_CATCH, "'catch'", NULL);
-  const char *err = NULL;
-  if (p->cur.kind == NY_T_LPAREN) {
-    parser_advance(p);
-    if (p->cur.kind != NY_T_IDENT)
-      parser_error(p, p->cur, "expected identifier after '(", NULL);
-    else {
-      err = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-      parser_advance(p);
-    }
-    parser_expect(p, NY_T_RPAREN, NULL, NULL);
-  } else if (p->cur.kind == NY_T_IDENT) {
-    err = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-    parser_advance(p);
-  }
-  stmt_t *handler = p_parse_block(p);
-  stmt_t *s = stmt_new(p->arena, NY_S_TRY, tok);
-  s->as.tr.body = body;
-  s->as.tr.err = err;
-  s->as.tr.handler = handler;
-  return s;
-}
-
 static stmt_t *parse_func(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
@@ -248,12 +173,7 @@ static stmt_t *parse_func(parser_t *p) {
     pr.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     if (parser_match(p, NY_T_COLON)) {
-      if (p->cur.kind != NY_T_IDENT)
-        parser_error(p, p->cur, "expected type name", NULL);
-      else {
-        pr.type = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-        parser_advance(p);
-      }
+      pr.type = parse_type_ref(p, "expected type name");
     }
     if (parser_match(p, NY_T_ASSIGN))
       pr.def = p_parse_expr(p, 0);
@@ -272,16 +192,11 @@ static stmt_t *parse_func(parser_t *p) {
   }
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   if (parser_match(p, NY_T_COLON) || parser_match(p, NY_T_ARROW)) {
-    if (p->cur.kind != NY_T_IDENT) {
-      const char *hint =
-          (p->cur.kind == NY_T_LBRACE)
-              ? "did you mean to start the body? remove ':' or '->'"
-              : NULL;
-      parser_error(p, p->cur, "expected return type", hint);
+    if (p->cur.kind == NY_T_LBRACE) {
+      parser_error(p, p->cur, "expected return type",
+                   "did you mean to start the body? remove ':' or '->'");
     } else {
-      fn_stmt->as.fn.return_type =
-          arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-      parser_advance(p);
+      fn_stmt->as.fn.return_type = parse_type_ref(p, "expected return type");
     }
   }
   if (parser_match(p, NY_T_SEMI)) {
@@ -340,12 +255,7 @@ static stmt_t *parse_extern(parser_t *p) {
     pr.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     if (parser_match(p, NY_T_COLON)) {
-      if (p->cur.kind == NY_T_IDENT) {
-        pr.type = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-        parser_advance(p);
-      } else {
-        parser_error(p, p->cur, "expected type name", NULL);
-      }
+      pr.type = parse_type_ref(p, "expected type name");
     }
     vec_push_arena(p->arena, &params, pr);
     if (is_variadic)
@@ -358,12 +268,7 @@ static stmt_t *parse_extern(parser_t *p) {
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   const char *return_type = NULL;
   if (parser_match(p, NY_T_COLON) || parser_match(p, NY_T_ARROW)) {
-    if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected return type", NULL);
-    } else {
-      return_type = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-      parser_advance(p);
-    }
+    return_type = parse_type_ref(p, "expected return type");
   }
   const char *link_name = NULL;
   if (parser_match(p, NY_T_AS)) {
@@ -389,30 +294,6 @@ static stmt_t *parse_extern(parser_t *p) {
   return s;
 }
 
-static stmt_t *parse_return(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_RETURN, "'return'", NULL);
-  stmt_t *s = stmt_new(p->arena, NY_S_RETURN, tok);
-  if (p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_RBRACE)
-    s->as.ret.value = p_parse_expr(p, 0);
-  parser_match(p, NY_T_SEMI);
-  return s;
-}
-
-static stmt_t *parse_goto(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_GOTO, "'goto'", NULL);
-  if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "goto expects label", NULL);
-    return NULL;
-  }
-  stmt_t *s = stmt_new(p->arena, NY_S_GOTO, tok);
-  s->as.go.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-  parser_advance(p);
-  parser_match(p, NY_T_SEMI);
-  return s;
-}
-
 static stmt_t *parse_use(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_USE, "'use'", NULL);
@@ -426,38 +307,12 @@ static stmt_t *parse_use(parser_t *p) {
     s->as.use.is_local = true;
     parser_advance(p);
   } else if (p->cur.kind == NY_T_IDENT) {
-    size_t cap = 64, len = 0;
-    char *buf = malloc(cap);
-    if (!buf) {
-      fprintf(stderr, "oom\n");
-      exit(1);
-    }
-    memcpy(buf, p->cur.lexeme, p->cur.len);
-    len += p->cur.len;
-    parser_advance(p);
-    while (parser_match(p, NY_T_DOT)) {
-      if (p->cur.kind != NY_T_IDENT) {
-        parser_error(p, p->cur, "expected identifier after '.'", NULL);
-        free(buf);
-        return NULL;
-      }
-      if (len + 1 + p->cur.len + 1 > cap) {
-        cap = (len + 1 + p->cur.len + 1) * 2;
-        char *nb = realloc(buf, cap);
-        if (!nb) {
-          fprintf(stderr, "oom\n");
-          exit(1);
-        }
-        buf = nb;
-      }
-      buf[len++] = '.';
-      memcpy(buf + len, p->cur.lexeme, p->cur.len);
-      len += p->cur.len;
-      parser_advance(p);
-    }
-    buf[len] = '\0';
-    s->as.use.module = arena_strndup(p->arena, buf, len);
-    free(buf);
+    char *owned = parse_dotted_ident_owned(p, "expected module name",
+                                           "expected identifier after '.'");
+    if (!owned)
+      return NULL;
+    s->as.use.module = arena_strndup(p->arena, owned, strlen(owned));
+    free(owned);
   } else {
     parser_error(p, p->cur, "use expects module identifier or string path",
                  NULL);
@@ -513,30 +368,6 @@ static stmt_t *parse_use(parser_t *p) {
                    "module alias cannot be combined with an import list", NULL);
     }
   }
-  parser_match(p, NY_T_SEMI);
-  return s;
-}
-
-static stmt_t *parse_break(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_BREAK, "'break'", NULL);
-  if (p->loop_depth <= 0) {
-    parser_error(p, tok, "'break' used outside of a loop",
-                 "put this inside a while/for body");
-  }
-  stmt_t *s = stmt_new(p->arena, NY_S_BREAK, tok);
-  parser_match(p, NY_T_SEMI);
-  return s;
-}
-
-static stmt_t *parse_continue(parser_t *p) {
-  token_t tok = p->cur;
-  parser_expect(p, NY_T_CONTINUE, "'continue'", NULL);
-  if (p->loop_depth <= 0) {
-    parser_error(p, tok, "'continue' used outside of a loop",
-                 "put this inside a while/for body");
-  }
-  stmt_t *s = stmt_new(p->arena, NY_S_CONTINUE, tok);
   parser_match(p, NY_T_SEMI);
   return s;
 }
@@ -597,19 +428,8 @@ static stmt_t *parse_struct(parser_t *p) {
     parser_advance(p);
     parser_expect(p, NY_T_COLON, "':'", NULL);
 
-    // Smart struct field: handles both 'name: type' and 'type: name'
-    // If next is '*' or identifier followed by comma/newline/brace, then id1
-    // was type. But let's stick to name: type for now as primary, and if type:
-    // name is requested specifically we can disambiguate. The user's last
-    // request: layout Point { int: x, int: y } This is clearly type: name.
-
     const char *fname = id1;
     const char *tname = NULL;
-
-    // Check if it's type: name.
-    // If id1 is a known type or if there's an ident after COLON...
-    // Actually, let's just support name: type by default,
-    // and if the user wants type: name we check if id2 exists.
 
     size_t ptr_depth = 0;
     while (parser_match(p, NY_T_STAR))
@@ -619,20 +439,15 @@ static stmt_t *parse_struct(parser_t *p) {
       const char *id2 = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
       parser_advance(p);
 
-      // If we are in 'layout' mode maybe we flip them?
-      // For now, let's just assume identity: x is 'name: type'
-      // but 'int: x' is also parsed.
-      // We can disambiguate by checking if id1 is a primitive type name.
-      bool id1_is_type =
-          (strcmp(id1, "int") == 0 || strcmp(id1, "i8") == 0 ||
-           strcmp(id1, "i16") == 0 || strcmp(id1, "i32") == 0 ||
-           strcmp(id1, "i64") == 0 || strcmp(id1, "i128") == 0 ||
-           strcmp(id1, "u8") == 0 || strcmp(id1, "u16") == 0 ||
-           strcmp(id1, "u32") == 0 || strcmp(id1, "u64") == 0 ||
-           strcmp(id1, "u128") == 0 || strcmp(id1, "str") == 0 ||
-           strcmp(id1, "char") == 0 || strcmp(id1, "bool") == 0 ||
-           strcmp(id1, "f32") == 0 || strcmp(id1, "f64") == 0 ||
-           strcmp(id1, "f128") == 0);
+      bool id1_is_type = (strcmp(id1, "int") == 0 || strcmp(id1, "i8") == 0 ||
+                          strcmp(id1, "i16") == 0 || strcmp(id1, "i32") == 0 ||
+                          strcmp(id1, "i64") == 0 || strcmp(id1, "i128") == 0 ||
+                          strcmp(id1, "u8") == 0 || strcmp(id1, "u16") == 0 ||
+                          strcmp(id1, "u32") == 0 || strcmp(id1, "u64") == 0 ||
+                          strcmp(id1, "u128") == 0 || strcmp(id1, "str") == 0 ||
+                          strcmp(id1, "char") == 0 ||
+                          strcmp(id1, "bool") == 0 || strcmp(id1, "f32") == 0 ||
+                          strcmp(id1, "f64") == 0 || strcmp(id1, "f128") == 0);
 
       if (id1_is_type) {
         fname = id2;
@@ -642,9 +457,6 @@ static stmt_t *parse_struct(parser_t *p) {
         tname = id2;
       }
     } else {
-      // Only one ident? Then it must be 'name: type' but type is missing?
-      // No, if only one ident then that ident IS the type and name is... we
-      // need both.
       parser_error(p, p->cur, "expected field name or type", NULL);
       break;
     }
@@ -706,38 +518,12 @@ static stmt_t *parse_enum(parser_t *p) {
 static stmt_t *parse_module(parser_t *p) {
   token_t tok = p->cur;
   parser_advance(p);
-  if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected module name", NULL);
+  char *owned_mod = parse_dotted_ident_owned(p, "expected module name",
+                                             "expected identifier after '.'");
+  if (!owned_mod)
     return NULL;
-  }
-  size_t cap = 256, len = 0;
-  char *buf = malloc(cap);
-  memcpy(buf, p->cur.lexeme, p->cur.len);
-  len += p->cur.len;
-  parser_advance(p);
-  while (parser_match(p, NY_T_DOT)) {
-    if (p->cur.kind != NY_T_IDENT) {
-      parser_error(p, p->cur, "expected identifier after '.'", NULL);
-      free(buf);
-      return NULL;
-    }
-    if (len + 1 + p->cur.len >= cap) {
-      cap *= 2;
-      char *nb = realloc(buf, cap);
-      if (!nb) {
-        free(buf);
-        return NULL;
-      }
-      buf = nb;
-    }
-    buf[len++] = '.';
-    memcpy(buf + len, p->cur.lexeme, p->cur.len);
-    len += p->cur.len;
-    parser_advance(p);
-  }
-  buf[len] = '\0';
-  char *mod_name = arena_strndup(p->arena, buf, len);
-  free(buf);
+  char *mod_name = arena_strndup(p->arena, owned_mod, strlen(owned_mod));
+  free(owned_mod);
   bool export_all = false;
   if (parser_match(p, NY_T_STAR)) {
     export_all = true;
@@ -757,13 +543,9 @@ static stmt_t *parse_module(parser_t *p) {
   mod_stmt->as.module.path = p->filename;
   mod_stmt->as.module.export_all = export_all;
 
-  // If it's a file-level module (no braces), we read until the next 'module' or
-  // EOF
   bool file_level = (end_kind == NY_T_EOF || end_kind == NY_T_RPAREN);
 
   while (p->cur.kind != end_kind && p->cur.kind != NY_T_EOF) {
-    // If we are in file-level mode, stop if filename changes OR another
-    // 'module' keyword is seen
     if (file_level && end_kind == NY_T_EOF) {
       if (p->cur.filename && tok.filename &&
           strcmp(p->cur.filename, tok.filename) != 0) {
@@ -798,28 +580,13 @@ static stmt_t *parse_module(parser_t *p) {
         continue;
       }
     }
-    stmt_t *s = p_parse_stmt(p);
-    if (s) {
-      vec_push_arena(p->arena, &mod_stmt->as.module.body, s);
-    } else if (p->had_error) {
-      while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
-             p->cur.kind != NY_T_RBRACE) {
-        parser_advance(p);
-      }
-      if (p->cur.kind == NY_T_SEMI)
-        parser_advance(p);
-    }
+    parse_stmt_append_or_sync(p, &mod_stmt->as.module.body);
   }
 
-  // If we just finished an export list 'module name ( ... )',
-  // and no brace follows, continue as a file-level module.
   if (end_kind == NY_T_RPAREN) {
     parser_expect(p, NY_T_RPAREN, "')'", NULL);
     if (p->cur.kind != NY_T_LBRACE && p->block_depth == 0) {
       end_kind = NY_T_EOF;
-      // Continue the loop! (Actually just repeat the logic or use a goto?)
-      // A cleaner way is to just use a 'goto' back to the top of while loop
-      // but we need to reset file_level and end_kind correctly.
       file_level = true;
       while (p->cur.kind != end_kind && p->cur.kind != NY_T_EOF) {
         if (p->cur.filename && tok.filename &&
@@ -829,17 +596,7 @@ static stmt_t *parse_module(parser_t *p) {
         if (p->cur.kind == NY_T_MODULE) {
           break;
         }
-        stmt_t *s = p_parse_stmt(p);
-        if (s) {
-          vec_push_arena(p->arena, &mod_stmt->as.module.body, s);
-        } else if (p->had_error) {
-          while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
-                 p->cur.kind != NY_T_RBRACE) {
-            parser_advance(p);
-          }
-          if (p->cur.kind == NY_T_SEMI)
-            parser_advance(p);
-        }
+        parse_stmt_append_or_sync(p, &mod_stmt->as.module.body);
       }
     }
   } else if (end_kind == NY_T_RBRACE) {
@@ -850,6 +607,67 @@ static stmt_t *parse_module(parser_t *p) {
   mod_stmt->as.module.src_start = tok.lexeme;
   mod_stmt->as.module.src_end = p->prev.lexeme + p->prev.len;
   return mod_stmt;
+}
+
+// Parse a single attribute like @naked or @extern("printf")
+static attribute_t parse_attr(parser_t *p) {
+  if (p->cur.kind != NY_T_IDENT) {
+    parser_error(p, p->cur, "expected identifier after '@'", NULL);
+    return (attribute_t){0};
+  }
+  attribute_t attr = {0};
+  attr.tok = p->cur;
+  attr.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+  parser_advance(p);
+
+  if (parser_match(p, NY_T_LPAREN)) {
+    while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+      expr_t *e = p_parse_expr(p, 0);
+      if (e)
+        vec_push_arena(p->arena, &attr.args, e);
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    parser_expect(p, NY_T_RPAREN, "')' after attribute", NULL);
+  }
+  return attr;
+}
+
+// Parse a macro statement like: task { ... } or parallel(8) { ... }
+static stmt_t *parse_macro_stmt(parser_t *p) {
+  token_t tok = p->cur;
+  if (p->cur.kind != NY_T_IDENT) {
+    parser_error(p, p->cur, "expected macro name", NULL);
+    return NULL;
+  }
+
+  const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+  parser_advance(p);
+
+  ny_expr_list args = {0};
+  if (parser_match(p, NY_T_LPAREN)) {
+    while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+      expr_t *e = p_parse_expr(p, 0);
+      if (e)
+        vec_push_arena(p->arena, &args, e);
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    parser_expect(p, NY_T_RPAREN, "')'", NULL);
+  }
+
+  stmt_t *body = NULL;
+  if (p->cur.kind == NY_T_LBRACE) {
+    body = p_parse_block(p);
+  } else {
+    parser_match(p, NY_T_SEMI);
+  }
+
+  stmt_t *s = stmt_new(p->arena, NY_S_MACRO, tok);
+  s->as.macro.name = name;
+  s->as.macro.args = args;
+  s->as.macro.body = body;
+  return s;
 }
 
 stmt_t *p_parse_stmt(parser_t *p) {
@@ -869,27 +687,49 @@ stmt_t *p_parse_stmt(parser_t *p) {
     return parse_extern(p);
   case NY_T_FN:
     return parse_func(p);
+  case NY_T_AT: {
+    ny_attribute_list attrs = {0};
+    while (p->cur.kind == NY_T_AT) {
+      parser_advance(p);
+      attribute_t attr = parse_attr(p);
+      if (!attr.name) {
+        parser_error(p, p->cur, "expected attribute name", NULL);
+        return NULL;
+      }
+      vec_push_arena(p->arena, &attrs, attr);
+    }
+    if (p->cur.kind != NY_T_FN) {
+      parser_error(p, p->cur, "function attributes must be followed by 'fn'",
+                   NULL);
+      return NULL;
+    }
+    stmt_t *func = parse_func(p);
+    if (func && func->kind == NY_S_FUNC) {
+      func->attributes = attrs;
+    }
+    return func;
+  }
   case NY_T_IF:
-    return parse_if(p);
+    return ny_parse_if_stmt(p);
   case NY_T_ELIF:
     parser_error(p, p->cur, "'elif' without 'if'",
                  "check if you forgot the preceding 'if' block");
     parser_advance(p);
     return NULL;
   case NY_T_WHILE:
-    return parse_while(p);
+    return ny_parse_while_stmt(p);
   case NY_T_FOR:
-    return parse_for(p);
+    return ny_parse_for_stmt(p);
   case NY_T_TRY:
-    return parse_try(p);
+    return ny_parse_try_stmt(p);
   case NY_T_RETURN:
-    return parse_return(p);
+    return ny_parse_return_stmt(p);
   case NY_T_BREAK:
-    return parse_break(p);
+    return ny_parse_break_stmt(p);
   case NY_T_CONTINUE:
-    return parse_continue(p);
+    return ny_parse_continue_stmt(p);
   case NY_T_GOTO:
-    return parse_goto(p);
+    return ny_parse_goto_stmt(p);
   case NY_T_MATCH:
     return p_parse_match(p);
   case NY_T_DEFER: {
@@ -914,6 +754,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected identifier in destructuring list",
                        NULL);
+          if (p->cur.kind != NY_T_EOF)
+            parser_advance(p);
           stmt_free_members(s);
           return NULL;
         }
@@ -928,6 +770,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
       while (true) {
         if (p->cur.kind != NY_T_IDENT) {
           parser_error(p, p->cur, "expected identifier after 'def'", NULL);
+          if (p->cur.kind != NY_T_EOF)
+            parser_advance(p);
           stmt_free_members(s);
           return NULL;
         }
@@ -953,28 +797,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
 
         const char *var_type = NULL;
         if (parser_match(p, NY_T_COLON)) {
-          size_t ptr_depth = 0;
-          while (p->cur.kind == NY_T_STAR) {
-            ptr_depth++;
-            parser_advance(p);
-          }
-          if (p->cur.kind == NY_T_IDENT) {
-            const char *ident_type =
-                arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-            parser_advance(p);
-            if (ptr_depth > 0) {
-              char buf[256];
-              char *ptr = buf;
-              for (size_t i = 0; i < ptr_depth; i++)
-                *ptr++ = '*';
-              strcpy(ptr, ident_type);
-              var_type = arena_strndup(p->arena, buf, strlen(buf));
-            } else {
-              var_type = ident_type;
-            }
-          } else {
-            parser_error(p, p->cur, "expected type name after ':'", NULL);
-          }
+          var_type = parse_type_ref(p, "expected type name after ':'");
         }
         vec_push_arena(p->arena, &s->as.var.types, var_type);
 
@@ -1022,6 +845,11 @@ stmt_t *p_parse_stmt(parser_t *p) {
     token_t ident_tok = p->cur;
     const char *id = (const char *)ident_tok.lexeme;
     size_t id_len = ident_tok.len;
+    token_t next = parser_peek(p);
+
+    if (next.kind == NY_T_LBRACE) {
+      return parse_macro_stmt(p);
+    }
 
     /* Omniscience: Help users from other languages */
     if (id_len == 4 && strncmp(id, "func", 4) == 0) {
@@ -1041,7 +869,6 @@ stmt_t *p_parse_stmt(parser_t *p) {
                    "use 'use' to import modules");
     }
 
-    token_t next = parser_peek(p);
     if (next.kind == NY_T_COLON) {
       parser_advance(p);
       parser_expect(p, NY_T_COLON, NULL,
@@ -1052,6 +879,27 @@ stmt_t *p_parse_stmt(parser_t *p) {
       return s;
     }
     expr_t *lhs = p_parse_expr(p, 0);
+    if (!lhs) {
+      parser_sync_stmt_boundary(p);
+      return NULL;
+    }
+    if (lhs->kind == NY_E_CALL && lhs->as.call.callee &&
+        lhs->as.call.callee->kind == NY_E_IDENT && p->cur.kind == NY_T_LBRACE) {
+      stmt_t *s = stmt_new(p->arena, NY_S_MACRO, ident_tok);
+      s->as.macro.name = lhs->as.call.callee->as.ident.name;
+      for (size_t i = 0; i < lhs->as.call.args.len; i++) {
+        call_arg_t *arg = &lhs->as.call.args.data[i];
+        if (arg->name) {
+          parser_error(p, arg->val ? arg->val->tok : ident_tok,
+                       "named arguments are not supported in macro statements",
+                       NULL);
+        }
+        vec_push_arena(p->arena, &s->as.macro.args, arg->val);
+      }
+      s->as.macro.body = p_parse_block(p);
+      return s;
+    }
+
     token_kind assign_op = NY_T_EOF;
     if (p->cur.kind == NY_T_ASSIGN || p->cur.kind == NY_T_PLUS_EQ ||
         p->cur.kind == NY_T_MINUS_EQ || p->cur.kind == NY_T_STAR_EQ ||
@@ -1119,6 +967,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
   default: {
     token_t first = p->cur;
     expr_t *e = p_parse_expr(p, 0);
+    if (!e) {
+      parser_sync_stmt_boundary(p);
+      return NULL;
+    }
     stmt_t *s = stmt_new(p->arena, NY_S_EXPR, first);
     s->as.expr.expr = e;
     parser_match(p, NY_T_SEMI);
@@ -1133,18 +985,7 @@ stmt_t *p_parse_block(parser_t *p) {
   p->block_depth++;
   stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
-    stmt_t *s = p_parse_stmt(p);
-    if (s) {
-      vec_push_arena(p->arena, &blk->as.block.body, s);
-    } else if (p->had_error) {
-      // sync
-      while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
-             p->cur.kind != NY_T_RBRACE) {
-        parser_advance(p);
-      }
-      if (p->cur.kind == NY_T_SEMI)
-        parser_advance(p);
-    }
+    parse_stmt_append_or_sync(p, &blk->as.block.body);
   }
   p->block_depth--;
   parser_expect(p, NY_T_RBRACE, "'}'", NULL);
@@ -1161,18 +1002,7 @@ program_t parse_program(parser_t *p) {
             p->lex.filename ? p->lex.filename : "<unknown>");
   program_t prog = {0};
   while (p->cur.kind != NY_T_EOF) {
-    stmt_t *s = p_parse_stmt(p);
-    if (s) {
-      vec_push_arena(p->arena, &prog.body, s);
-    } else if (p->had_error) {
-      // sync
-      while (p->cur.kind != NY_T_EOF && p->cur.kind != NY_T_SEMI &&
-             p->cur.kind != NY_T_RBRACE) {
-        parser_advance(p);
-      }
-      if (p->cur.kind == NY_T_SEMI)
-        parser_advance(p);
-    }
+    parse_stmt_append_or_sync(p, &prog.body);
   }
   if (prog.body.len > 0) {
     stmt_t *s0 = prog.body.data[0];

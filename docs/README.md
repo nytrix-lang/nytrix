@@ -1,73 +1,57 @@
 
 # Nytrix
 
-Nytrix **Language**.
+Nytrix is a compact systems language with explicit imports and a small runtime core.
 
-> Note: WIP expect breaking changes.
-
-## Philosophy
-
-Nytrix aims to stay small and extensible. Not there yet.
+> Status: work in progress. Expect breaking changes.
 
 * **Compiled**
 * Control > Convenience
 * Simple Semantics
 * Minimal Core
-* Scripting
 
-## Build
+**Dependencies**
+- LLVM 21+
+- Python 3
 
-### Requirements
+**Arch**
+- x86_x64
+- arm64
 
-* LLVM 21+
-* readline
-* python3
-* clang
-* LibC
-
-For now, Linux only.
-Tested on Arch Linux x86_64.
+**Os**
+- Linux
+- MacOS
+- Windows
 
 ### Build
 
 ```bash
-make
-./build/ny
+chmod +x make
+./make
 ```
+
+or `python3 ./make`
 
 ### Install
 
 ```bash
-sudo make install
+./make install
 ```
 
-## Usage
-
-### Repl
+### Usage
 
 ```bash
 ny -i
-``` 
-
-### Run
-
-```bash
-ny etc/examples/matrix.ny
-```
-
-### Binary
-
-```bash
+ny etc/tests/matrix.ny
 ny -c "print('Hello Ny!')" -o && ./a.out
 ```
 
+If `ny` is not installed system-wide, use `./build/release/ny`.
+
 ### Docs
 
-Generate a static local documentation site.
-
 ```bash
-make docs
-xdg-open build/docs/index.html >/dev/null 2>&1
+./make docs
 ```
 
 ## License

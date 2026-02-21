@@ -12,9 +12,9 @@ use std.core as core
 use std.core *
 use std.math *
 
-fn is_vector(v){ 
+fn is_vector(v){
     "Returns true if `v` is a vector (represented as a list)."
-    is_list(v) 
+    is_list(v)
 }
 
 fn _mk(n, fill=0){
@@ -22,52 +22,56 @@ fn _mk(n, fill=0){
    mut out = list(n)
    mut i = 0
    while(i < n){
-      out = append(out, fill)
-      i = i + 1
+      store_item(out, i, fill)
+      i += 1
    }
+   store64(out, n, 0)
    out
 }
 
 fn vec2(x=0, y=0){
    "Creates a 2D vector [x, y]."
-   mut v = list(2)
-   v = append(v, x)
-   v = append(v, y)
+   def v = list(2)
+   store_item(v, 0, x)
+   store_item(v, 1, y)
+   store64(v, 2, 0) ; Update Length
    v
 }
 
 fn vec3(x=0, y=0, z=0){
    "Creates a 3D vector [x, y, z]."
-   mut v = list(3)
-   v = append(v, x)
-   v = append(v, y)
-   v = append(v, z)
+   def v = list(3)
+   store_item(v, 0, x)
+   store_item(v, 1, y)
+   store_item(v, 2, z)
+   store64(v, 3, 0) ; Update Length
    v
 }
 
 fn vec4(x=0, y=0, z=0, w=0){
    "Creates a 4D vector [x, y, z, w]."
-   mut v = list(4)
-   v = append(v, x)
-   v = append(v, y)
-   v = append(v, z)
-   v = append(v, w)
+   def v = list(4)
+   store_item(v, 0, x)
+   store_item(v, 1, y)
+   store_item(v, 2, z)
+   store_item(v, 3, w)
+   store64(v, 4, 0) ; Update Length
    v
 }
 
-fn dim(v){ 
+fn dim(v){
     "Returns the dimension (number of elements) of vector `v`."
-    len(v) 
+    len(v)
 }
 
-fn at(v, i, default=0){ 
+fn at(v, i, default=0){
     "Returns the element at index `i` of vector `v`, or `default` if not found."
-    get(v, i, default) 
+    get(v, i, default)
 }
 
 fn set(v, i, x){
    "Sets the element at index `i` of vector `v` to `x`.
-   
+
    Returns the modified vector."
    store_item(v, i, x)
    v
@@ -80,16 +84,23 @@ fn _zip2(a, b, op){
    def n = (na < nb) ? na : nb
    mut out = list(n)
    mut i = 0
-   while(i < n){
-      def x = get(a, i, 0)
-      def y = get(b, i, 0)
-      if(op == 0){ out = append(out, x + y) }
-      else {
-          if(op == 1){ out = append(out, x - y) }
-          else { out = append(out, x * y) }
+   if(op == 0){
+      while(i < n){
+         store_item(out, i, get(a, i, 0) + get(b, i, 0))
+         i += 1
       }
-      i = i + 1
+   } elif(op == 1){
+      while(i < n){
+         store_item(out, i, get(a, i, 0) - get(b, i, 0))
+         i += 1
+      }
+   } else {
+      while(i < n){
+         store_item(out, i, get(a, i, 0) * get(b, i, 0))
+         i += 1
+      }
    }
+   store64(out, n, 0)
    out
 }
 
@@ -98,14 +109,14 @@ fn v_add(a, b){
    _zip2(a, b, 0)
 }
 
-fn v_sub(a, b){ 
+fn v_sub(a, b){
     "Returns the element-wise difference of vectors `a` and `b` (a - b)."
-    _zip2(a, b, 1) 
+    _zip2(a, b, 1)
 }
 
-fn hadamard(a, b){ 
+fn hadamard(a, b){
     "Returns the Hadamard (element-wise) product of vectors `a` and `b`."
-    _zip2(a, b, 2) 
+    _zip2(a, b, 2)
 }
 
 fn v_mul(a, b){
@@ -121,17 +132,17 @@ fn v_div(a, b){
    divs(a, b)
 }
 
-;; Generic Dispatch wrappers
-fn add(a, b){ 
+;; Generic dispatch wrappers
+fn add(a, b){
     "Generic addition: supports both numbers and vectors."
     if(is_vector(a) && is_vector(b)){ return v_add(a, b) }
-    core.add(a, b)
+    a + b
 }
 
 fn sub(a, b){
     "Generic subtraction: supports both numbers and vectors."
     if(is_vector(a) && is_vector(b)){ return v_sub(a, b) }
-    core.sub(a, b)
+    a - b
 }
 
 fn mul(a, b){
@@ -139,13 +150,13 @@ fn mul(a, b){
     if(is_vector(a) && is_vector(b)){ return hadamard(a, b) }
     if(is_vector(a) && (is_int(b) || is_float(b))){ return scale(a, b) }
     if(is_vector(b) && (is_int(a) || is_float(a))){ return scale(b, a) }
-    core.mul(a, b)
+    a * b
 }
 
 fn div(a, b){
     "Generic division: supports numbers and vector-scalar division."
     if(is_vector(a) && (is_int(b) || is_float(b))){ return divs(a, b) }
-    core.div(a, b)
+    a / b
 }
 
 fn scale(v, s){
@@ -154,9 +165,10 @@ fn scale(v, s){
    mut out = list(n)
    mut i = 0
    while(i < n){
-      out = append(out, get(v, i, 0) * s)
-      i = i + 1
+      store_item(out, i, get(v, i, 0) * s)
+      i += 1
    }
+   store64(out, n, 0)
    out
 }
 
@@ -166,9 +178,10 @@ fn divs(v, s){
    mut out = list(n)
    mut i = 0
    while(i < n){
-      out = append(out, get(v, i, 0) / s)
-      i = i + 1
+      store_item(out, i, get(v, i, 0) / s)
+      i += 1
    }
+   store64(out, n, 0)
    out
 }
 
@@ -181,7 +194,7 @@ fn dot(a, b){
    mut i = 0
    while(i < n){
       acc = acc + get(a, i, 0) * get(b, i, 0)
-      i = i + 1
+      i += 1
    }
    acc
 }
@@ -202,14 +215,14 @@ fn cross3(a, b){
    )
 }
 
-fn len2(v){ 
+fn len2(v){
     "Returns the squared magnitude (Euclidean length) of vector `v`."
-    dot(v, v) 
+    dot(v, v)
 }
 
-fn magnitude(v){ 
+fn magnitude(v){
     "Returns the magnitude (Euclidean length) of vector `v`."
-    sqrt(len2(v)) 
+    sqrt(len2(v))
 }
 
 fn normalize(v){
@@ -222,4 +235,31 @@ fn normalize(v){
 fn lerp(a, b, t){
    "Performs linear interpolation between vectors `a` and `b` by factor `t`."
    add(a, scale(sub(b, a), t))
+}
+
+if(comptime{__main()}){
+    use std.math.vector as v
+    use std.core *
+
+    def a = v.vec3(1, 2, 3)
+    def b = v.vec3(4, 5, 6)
+
+    def s = a + b
+    assert(get(s, 0, 0) == 5, "vector add x")
+    assert(get(s, 1, 0) == 7, "vector add y")
+    assert(get(s, 2, 0) == 9, "vector add z")
+
+    assert(v.dot(a, b) == 32, "vector dot")
+
+    def c = v.cross3(a, b)
+    assert(get(c, 0, 0) == -3, "vector cross x")
+    assert(get(c, 1, 0) == 6, "vector cross y")
+    assert(get(c, 2, 0) == -3, "vector cross z")
+
+    def h = v.hadamard(a, b)
+    assert(get(h, 0, 0) == 4, "vector hadamard x")
+    assert(get(h, 1, 0) == 10, "vector hadamard y")
+    assert(get(h, 2, 0) == 18, "vector hadamard z")
+
+    print("✓ std.math.vector tests passed")
 }

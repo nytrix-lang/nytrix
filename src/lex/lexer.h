@@ -80,6 +80,7 @@ typedef enum token_kind {
   NY_T_DOT,
   NY_T_ELLIPSIS,
   NY_T_QUESTION,
+  NY_T_AT,
   NY_T_ERROR,
 } token_kind;
 

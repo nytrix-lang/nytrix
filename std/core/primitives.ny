@@ -70,75 +70,110 @@ fn argv(i){
    __argv(i)
 }
 
-fn globals() {
+fn globals(){
    "Returns the pointer to the global variables table."
    __globals()
 }
 
-fn set_globals(p) {
+fn set_globals(p){
    "Sets the pointer to the global variables table."
    __set_globals(p)
 }
 
-fn argc() {
+fn argc(){
    "Returns the number of command-line arguments."
    __argc()
 }
 
-fn envc() {
+fn envc(){
    "Returns the number of environment variables."
    __envc()
 }
 
-fn envp() {
+fn envp(){
    "Returns the raw environment variables pointer."
    __envp()
 }
 
-fn errno() {
+fn errno(){
    "Returns the last error number."
    __errno()
 }
 
-fn eq(a, b) {
+fn eq(a, b){
    "Returns **true** if `a == b` (reference or integer equality)."
    __eq(a, b)
 }
 
-fn lt(a, b) {
+fn lt(a, b){
    "Returns **true** if `a < b` (integer/pointer comparison)."
    __lt(a, b)
 }
 
-fn le(a, b) {
+fn le(a, b){
    "Returns **true** if `a <= b` (integer/pointer comparison)."
    __le(a, b)
 }
 
-fn gt(a, b) {
+fn gt(a, b){
    "Returns **true** if `a > b` (integer/pointer comparison)."
    __gt(a, b)
 }
 
-fn ge(a, b) {
+fn ge(a, b){
    "Returns **true** if `a >= b` (integer/pointer comparison)."
    __ge(a, b)
 }
 
 ;; Type Predicates
 
-fn is_int(x) {
+fn is_int(x){
    "Returns **true** if `x` is a tagged integer."
-   asm("andq $$1, $0; setz %al; movzbq %al, $0; shlq $$1, $0; addq $$2, $0", "=r,0", x)
+   __is_int(x)
 }
 
-fn is_ptr(x) {
+fn is_ptr(x){
    "Returns **true** if `x` is a pointer (aligned, non-zero)."
-   if (__eq(x, 0)) { return false }
-   asm("andq $$7, $0; setnz %al; movzbq %al, $0; shlq $$1, $0; addq $$2, $0", "=r,0", x)
+   if(!x){ return false }
+   if(__is_int(x)){ return false }
+   ;; Accept any machine pointer shape; heap-object checks are done separately.
+   if((__and(x, 7) != 0)){ return false }
+   return true
 }
 
-fn is_none(x) {
+fn is_none(x){
    "Returns **true** if `x` is **none** (null)."
-   __eq(x, 0)
+   x == 0
+}
+
+if(comptime{__main()}){
+    use std.core.primitives *
+    use std.core.test *
+
+    assert((1 + 2) == 3, "add")
+    assert((5 - 2) == 3, "sub")
+    assert((3 * 4) == 12, "mul")
+    assert((10 / 2) == 5, "div")
+    assert((10 % 3) == 1, "mod")
+
+    assert((1 == 1), "eq true")
+    assert(!(1 == 2), "eq false")
+    assert((2 > 1), "gt")
+    assert((1 < 2), "lt")
+    assert((1 >= 1), "ge")
+    assert((1 <= 1), "le")
+
+    assert((5 & 3) == 1, "band")
+    assert((4 | 2) == 6, "bor")
+    assert((5 ^ 3) == 6, "bxor")
+    assert((1 << 2) == 4, "bshl")
+    assert((4 >> 1) == 2, "bshr")
+
+    assert(is_int(123), "is_int")
+    assert(!is_int("s"), "is_int str")
+
+    assert(is_none(0), "is_none")
+    assert(!is_none(1), "is_none int")
+
+    print("✓ std.core.primitives tests passed")
 }

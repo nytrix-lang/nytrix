@@ -2,17 +2,21 @@
 #define _GNU_SOURCE
 #endif
 #include "base/loader.h"
+#ifdef _WIN32
+#include "base/compat.h"
+#endif
 #include "base/util.h"
 #include "parse/parser.h"
 #include "priv.h"
 #include "repl/types.h"
 #include <ctype.h>
 #include <dirent.h>
-#include <readline/readline.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
+#endif
 #include <sys/stat.h>
 
 // Context detection
@@ -30,7 +34,6 @@ static compl_ctx_t get_context(const char *line, int pos) {
   if (line[0] == ':')
     return CTX_COMMAND;
 
-  // Check if inside string
   int in_str = 0;
   for (int i = 0; i < pos; i++) {
     if (line[i] == '"' && (i == 0 || line[i - 1] != '\\'))
@@ -56,7 +59,6 @@ static compl_ctx_t get_context(const char *line, int pos) {
   return CTX_NORMAL;
 }
 
-// Helper for case-insensitive substring search
 static const char *strcasestr_impl(const char *haystack, const char *needle) {
   if (!needle || !*needle)
     return haystack;
@@ -74,6 +76,37 @@ static const char *strcasestr_impl(const char *haystack, const char *needle) {
     }
   }
   return NULL;
+}
+
+static int is_break_char(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' ||
+         c == '\'' || c == '`' || c == '@' || c == '$' || c == '>' ||
+         c == '<' || c == '=' || c == ';' || c == '|' || c == '&' || c == '{' ||
+         c == '}' || c == '.' || c == '(';
+}
+
+static void extract_prefix(const char *line, int pos, char *out,
+                           size_t out_cap) {
+  if (!out || out_cap == 0) {
+    return;
+  }
+  out[0] = '\0';
+  if (!line || pos <= 0) {
+    return;
+  }
+  if ((size_t)pos > strlen(line))
+    pos = (int)strlen(line);
+  int start = pos;
+  while (start > 0 && !is_break_char(line[start - 1])) {
+    start--;
+  }
+  int len = pos - start;
+  if (len <= 0)
+    return;
+  if ((size_t)len >= out_cap)
+    len = (int)out_cap - 1;
+  memcpy(out, line + start, (size_t)len);
+  out[len] = '\0';
 }
 
 // Simple fuzzy score (higher is better)
@@ -105,20 +138,31 @@ static void add_match(const char *s) {
   matches[matches_len++] = ny_strdup(s);
 }
 
-// File completion helper
 static void add_files(const char *text) {
   char dir_path[512] = ".";
   const char *prefix = text;
   const char *last_slash = strrchr(text, '/');
-  if (last_slash) {
-    size_t dlen = (size_t)(last_slash - text);
+  const char *last_bslash = strrchr(text, '\\');
+  const char *last_sep =
+      (!last_slash)
+          ? last_bslash
+          : (!last_bslash
+                 ? last_slash
+                 : (last_bslash > last_slash ? last_bslash : last_slash));
+  char sep = last_sep && *last_sep == '\\' ? '\\' : '/';
+  if (last_sep) {
+    size_t dlen = (size_t)(last_sep - text);
     if (dlen < sizeof(dir_path)) {
       memcpy(dir_path, text, dlen);
       dir_path[dlen] = '\0';
       if (dir_path[0] == '\0')
         strcpy(dir_path, "/");
+      if (dlen == 2 && dir_path[1] == ':' && dlen + 1 < sizeof(dir_path)) {
+        dir_path[dlen] = '\\';
+        dir_path[dlen + 1] = '\0';
+      }
     }
-    prefix = last_slash + 1;
+    prefix = last_sep + 1;
   }
 
   DIR *d = opendir(dir_path);
@@ -135,12 +179,16 @@ static void add_files(const char *text) {
       } else if (strcmp(dir_path, "/") == 0) {
         snprintf(full, sizeof(full), "/%s", de->d_name);
       } else {
-        snprintf(full, sizeof(full), "%s/%s", dir_path, de->d_name);
+        snprintf(full, sizeof(full), "%s%c%s", dir_path, sep, de->d_name);
       }
 
       struct stat st;
       if (stat(full, &st) == 0 && S_ISDIR(st.st_mode)) {
-        strcat(full, "/");
+        size_t fl = strlen(full);
+        if (fl + 2 < sizeof(full)) {
+          full[fl] = sep;
+          full[fl + 1] = '\0';
+        }
       }
       add_match(full);
     }
@@ -177,49 +225,16 @@ static void add_normal_completions(const char *text) {
 }
 
 char *repl_enhanced_completion_generator(const char *text, int state) {
-  static int idx = 0;
-  if (state == 0) {
-    if (matches) {
-      for (int i = 0; i < matches_len; i++)
-        free(matches[i]);
-      free(matches);
-    }
-    matches = NULL;
-    matches_len = 0;
-    matches_cap = 0;
-    idx = 0;
-
-    compl_ctx_t ctx = get_context(rl_line_buffer, rl_point);
-
-    if (ctx == CTX_COMMAND) {
-      static const char *cmds[] = {":help",    ":exit", ":quit", ":clear",
-                                   ":reset",   ":time", ":vars", ":env",
-                                   ":history", ":pwd",  ":ls",   ":cd",
-                                   ":load",    ":save", ":std",  NULL};
-      for (int i = 0; cmds[i]; i++) {
-        if (strncmp(cmds[i], text, strlen(text)) == 0)
-          add_match(cmds[i]);
-      }
-    } else if (ctx == CTX_STRING ||
-               (ctx == CTX_COMMAND && (strstr(rl_line_buffer, ":load") ||
-                                       strstr(rl_line_buffer, ":cd")))) {
-      add_files(text);
-    } else {
-      add_normal_completions(text);
-    }
-  }
-
-  if (matches && idx < matches_len) {
-    return ny_strdup(matches[idx++]);
-  }
+  (void)text;
+  (void)state;
   return NULL;
 }
 
 char **repl_enhanced_completion(const char *text, int start, int end) {
+  (void)text;
   (void)start;
   (void)end;
-  rl_attempted_completion_over = 1;
-  return rl_completion_matches(text, repl_enhanced_completion_generator);
+  return NULL;
 }
 
 // API for external completion requests (e.g. :complete command)
@@ -255,6 +270,52 @@ char **nytrix_get_completions_for_prefix(const char *prefix,
   if (out_count)
     *out_count = (size_t)matches_len;
 
+  char **res = matches;
+  matches = NULL;
+  matches_len = 0;
+  matches_cap = 0;
+  return res;
+}
+
+char **nytrix_get_completions_for_line(const char *line, int cursor,
+                                       size_t *out_count) {
+  if (matches) {
+    for (int i = 0; i < matches_len; i++)
+      free(matches[i]);
+    free(matches);
+  }
+  matches = NULL;
+  matches_len = 0;
+  matches_cap = 0;
+
+  char prefix[256];
+  extract_prefix(line, cursor, prefix, sizeof(prefix));
+  compl_ctx_t ctx = get_context(line, cursor);
+  int is_cmd = (line && line[0] == ':');
+  int wants_files = 0;
+  if (ctx == CTX_STRING)
+    wants_files = 1;
+  if (ctx == CTX_COMMAND &&
+      (strcasestr_impl(line, ":load") || strcasestr_impl(line, ":cd")))
+    wants_files = 1;
+
+  if ((ctx == CTX_COMMAND || is_cmd) && !wants_files) {
+    static const char *cmds[] = {
+        ":help", ":exit", ":quit",    ":clear",    ":reset", ":time",
+        ":vars", ":env",  ":history", ":pwd",      ":ls",    ":cd",
+        ":load", ":save", ":std",     ":complete", NULL};
+    for (int i = 0; cmds[i]; i++) {
+      if (!prefix[0] || strncmp(cmds[i], prefix, strlen(prefix)) == 0)
+        add_match(cmds[i]);
+    }
+  } else if (wants_files) {
+    add_files(prefix);
+  } else {
+    add_normal_completions(prefix);
+  }
+
+  if (out_count)
+    *out_count = (size_t)matches_len;
   char **res = matches;
   matches = NULL;
   matches_len = 0;

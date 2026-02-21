@@ -10,6 +10,15 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
+
 #define RT_DEF(name, p, args, sig, doc) extern int64_t p();
 #define RT_GV(name, p, t, doc) extern t p;
 

@@ -6,6 +6,7 @@ module std.str.term (
     bar_finish, bar_range, bar_write, get_terminal_size,
     clear_screen, cursor_hide, cursor_show, cursor_move, cursor_up, cursor_down,
     cursor_left, cursor_right, enable_wrap, disable_wrap, screen_reset,
+    enter_alt_screen, leave_alt_screen, tui_begin, tui_end, is_quit_key,
     color_names, get_color_name, get_color, shapes,
     canvas, canvas_clear, canvas_set, canvas_print, canvas_box, canvas_refresh,
     get_key, poll_key, set_raw_mode, set_cooked_mode, write_str
@@ -16,9 +17,30 @@ use std.core *
 use std.core as core
 use std.os.time *
 use std.math.float *
-use std.core *
-use std.core *
 use std.os.sys *
+use std.os *
+use std.os.path *
+
+mut _vt_enabled = 0
+mut _alt_enabled = 0
+
+fn _is_windows(){
+   "Internal helper."
+   __os_name() == "windows"
+}
+
+fn _is_macos(){
+   "Internal helper."
+   __os_name() == "macos"
+}
+
+fn _ensure_vt(){
+   "Internal helper."
+   if(_vt_enabled){ return 0 }
+   if(_is_windows()){ __enable_vt() }
+   _vt_enabled = 1
+   0
+}
 
 fn write_str(s){
    "Safely write a Nytrix string to stdout (bypassing metadata)."
@@ -29,28 +51,33 @@ fn write_str(s){
 
 fn clear_screen(){
    "Clears the entire screen and moves cursor to home."
+   _ensure_vt()
    unwrap(sys_write(1, "\033[2J", 4))
    unwrap(sys_write(1, "\033[H", 3))
 }
 
 fn cursor_hide(){
    "Hides the terminal cursor."
+   _ensure_vt()
    unwrap(sys_write(1, "\033[?25l", 6))
 }
 
 fn cursor_show(){
    "Shows the terminal cursor."
+   _ensure_vt()
    unwrap(sys_write(1, "\033[?25h", 6))
 }
 
 fn cursor_move(x, y){
    "Moves the cursor to position (x, y). 1-based indexing."
+   _ensure_vt()
    def s = f"\033[{to_str(y)};{to_str(x)}H"
    unwrap(sys_write(1, s, str_len(s)))
 }
 
 fn cursor_up(n=1){
    "Moves cursor up by `n` lines."
+   _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}A"
    unwrap(sys_write(1, s, str_len(s)))
@@ -58,6 +85,7 @@ fn cursor_up(n=1){
 
 fn cursor_down(n=1){
    "Moves cursor down by `n` lines."
+   _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}B"
    unwrap(sys_write(1, s, str_len(s)))
@@ -65,6 +93,7 @@ fn cursor_down(n=1){
 
 fn cursor_right(n=1){
    "Moves cursor right by `n` columns."
+   _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}C"
    unwrap(sys_write(1, s, str_len(s)))
@@ -72,6 +101,7 @@ fn cursor_right(n=1){
 
 fn cursor_left(n=1){
    "Moves cursor left by `n` columns."
+   _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
    def s = f"\033[{to_str(n)}D"
    unwrap(sys_write(1, s, str_len(s)))
@@ -79,16 +109,19 @@ fn cursor_left(n=1){
 
 fn disable_wrap(){
    "Disables line wrapping."
+   _ensure_vt()
    unwrap(sys_write(1, "\033[?7l", 5))
 }
 
 fn enable_wrap(){
    "Enables line wrapping."
+   _ensure_vt()
    unwrap(sys_write(1, "\033[?7h", 5))
 }
 
 fn screen_reset(){
    "Resets the terminal state: visible cursor, enabled wrap, cleared screen, reset styles."
+   _ensure_vt()
    set_cooked_mode()
    unwrap(sys_write(1, "\033[0m", 4))
    cursor_show()
@@ -96,31 +129,110 @@ fn screen_reset(){
    clear_screen()
 }
 
+fn enter_alt_screen(){
+   "Switches to terminal alternate screen buffer."
+   _ensure_vt()
+   if(_alt_enabled){ return 0 }
+   unwrap(sys_write(1, "\033[?1049h\033[H", 11))
+   _alt_enabled = 1
+   0
+}
+
+fn leave_alt_screen(){
+   "Leaves alternate screen buffer and returns to previous screen."
+   _ensure_vt()
+   if(!_alt_enabled){ return 0 }
+   unwrap(sys_write(1, "\033[?1049l", 8))
+   _alt_enabled = 0
+   0
+}
+
+fn tui_begin(){
+   "Enters stable full-screen TUI mode."
+   _ensure_vt()
+   set_raw_mode()
+   disable_wrap()
+   clear_screen()
+   cursor_hide()
+   0
+}
+
+fn tui_end(){
+   "Restores terminal after TUI mode."
+   _ensure_vt()
+   set_cooked_mode()
+   unwrap(sys_write(1, "\033[0m", 4))
+   cursor_show()
+   enable_wrap()
+   clear_screen()
+   0
+}
+
+fn is_quit_key(key){
+   "Returns true for standard quit keys: q, Q, Esc, Ctrl-C."
+   key == 113 || key == 81 || key == 27 || key == 3
+}
+
 ;; Raw Mode Input
+
+fn _stty_bin(){
+   "Internal: resolves stty binary path."
+   if(file_exists("/usr/bin/stty")){ return "/usr/bin/stty" }
+   if(file_exists("/bin/stty")){ return "/bin/stty" }
+   "stty"
+}
 
 fn set_raw_mode(){
    "Enables raw mode for the terminal (no echo, no buffering)."
+   def rt = __tty_raw(1)
+   if(rt == 0){ return 0 }
+   if(_is_windows()){ return rt }
    use std.os.process *
-   run("/bin/stty", ["raw", "-echo"])
+   def st = _stty_bin()
+   mut rc = rt
+   if(_is_macos()){
+      rc = run(st, ["-f", "/dev/tty", "raw", "-echo"])
+   } else {
+      rc = run(st, ["-F", "/dev/tty", "raw", "-echo"])
+   }
+   if(rc != 0){ rc = run(st, ["raw", "-echo"]) }
+   rc
 }
 
 fn set_cooked_mode(){
    "Restores terminal to normal mode."
+   def rt = __tty_raw(0)
+   if(rt == 0){ return 0 }
+   if(_is_windows()){ return rt }
    use std.os.process *
-   run("/bin/stty", ["-raw", "echo"])
+   def st = _stty_bin()
+   mut rc = rt
+   if(_is_macos()){
+      rc = run(st, ["-f", "/dev/tty", "-raw", "echo"])
+   } else {
+      rc = run(st, ["-F", "/dev/tty", "-raw", "echo"])
+   }
+   if(rc != 0){ rc = run(st, ["-raw", "echo"]) }
+   rc
 }
 
 fn get_key(){
    "Reads a single key from stdin in raw mode. Blocks until key is pressed."
    def b = bytes(1)
-   def n = sys_read(0, b, 1)
-   if(n <= 0){ return 0 }
-   bytes_get(b, 0)
+   match sys_read(0, b, 1){
+      ok(n) -> {
+         if(n <= 0){ return 0 }
+         bytes_get(b, 0)
+      }
+      err(_) -> { 0 }
+   }
 }
 
 fn poll_key(){
    "Polls for a key without blocking. Returns 0 if no key."
-   0
+   def pending = __tty_pending()
+   if(pending <= 0){ return 0 }
+   get_key()
 }
 
 ; ANSI Styling
@@ -196,20 +308,20 @@ fn get_color(text, idx){
 fn shapes(){
    "Returns a dictionary of common TUI shapes/symbols."
    def s = dict(64)
-   dict_set(s, "v_line", "\xe2\x94\x82")   ;; │
-   dict_set(s, "h_line", "\xe2\x94\x80")   ;; ─
+   dict_set(s, "v_line", "\xe2\x94\x82") ;; │
+   dict_set(s, "h_line", "\xe2\x94\x80") ;; ─
    dict_set(s, "top_left", "\xe2\x95\xad") ;; ╭
-   dict_set(s, "top_right", "\xe2\x95\xae");; ╮
+   dict_set(s, "top_right", "\xe2\x95\xae") ;; ╮
    dict_set(s, "bot_left", "\xe2\x95\xb0") ;; ╰
-   dict_set(s, "bot_right", "\xe2\x95\xaf");; ╯
-   dict_set(s, "cross", "\xe2\x94\xbc")    ;; ┼
-   dict_set(s, "t_down", "\xe2\x94\xac")   ;; ┬
-   dict_set(s, "t_up", "\xe2\x94\xb4")     ;; ┴
-   dict_set(s, "t_left", "\xe2\x94\xa4")   ;; ┤
-   dict_set(s, "t_right", "\xe2\x94\x9c")  ;; ├
-   dict_set(s, "shade", "\xe2\x96\x92")    ;; ▒
-   dict_set(s, "dot", "\xc2\xb7")          ;; ·
-   dict_set(s, "block", "\xe2\x96\x88")    ;; █
+   dict_set(s, "bot_right", "\xe2\x95\xaf") ;; ╯
+   dict_set(s, "cross", "\xe2\x94\xbc") ;; ┼
+   dict_set(s, "t_down", "\xe2\x94\xac") ;; ┬
+   dict_set(s, "t_up", "\xe2\x94\xb4") ;; ┴
+   dict_set(s, "t_left", "\xe2\x94\xa4") ;; ┤
+   dict_set(s, "t_right", "\xe2\x94\x9c") ;; ├
+   dict_set(s, "shade", "\xe2\x96\x92") ;; ▒
+   dict_set(s, "dot", "\xc2\xb7") ;; ·
+   dict_set(s, "block", "\xe2\x96\x88") ;; █
    s
 }
 
@@ -228,7 +340,7 @@ fn panel(text, title="", border_color="white"){
    mut i = 0
    while(i < w - 2){
       top = f"{top}─"
-      i = i + 1
+      i += 1
    }
    top = f"{top}╮"
    top = color(top, border_color)
@@ -243,7 +355,7 @@ fn panel(text, title="", border_color="white"){
       i = 0
       while(i < rem){
          top = f"{top}{bar_col}"
-         i = i + 1
+         i += 1
       }
       top = f"{top}{cap_col}"
    }
@@ -253,13 +365,13 @@ fn panel(text, title="", border_color="white"){
    def cbar = color("│", border_color)
    mut line = f"{cbar} {text} "
    i = 0
-   while(i < padding){ line = f"{line} " i = i + 1 }
+   while(i < padding){ line = f"{line} " i += 1 }
    line = f"{line}{cbar}"
    print(line)
    ; Bottom
    mut bot = "╰"
    i = 0
-   while(i < w - 2){ bot = f"{bot}─" i = i + 1 }
+   while(i < w - 2){ bot = f"{bot}─" i += 1 }
    bot = f"{bot}╯"
    print(color(bot, border_color))
 }
@@ -271,7 +383,7 @@ fn table(headers, rows){
    mut i = 0
    while(i < cols){
       widths = append(widths, str_len(get(headers, i)))
-      i = i + 1
+      i += 1
    }
    mut r = 0 def nr = core.len(rows)
    while(r < nr){
@@ -280,9 +392,9 @@ fn table(headers, rows){
       while(c < cols){
          def val = get(row, c)
          if(str_len(val) > get(widths, c)){ set_idx(widths, c, str_len(val)) }
-         c = c + 1
+         c += 1
       }
-      r = r + 1
+      r += 1
    }
    mut line = ""
    i = 0
@@ -292,13 +404,13 @@ fn table(headers, rows){
       line = f"{line}{bold(h)}"
       def pad = w - str_len(h) + 2
       mut p = 0
-      while(p < pad){ line = f"{line} " p = p + 1 }
+      while(p < pad){ line = f"{line} " p += 1 }
       line = f"{line} "
-      i = i + 1
+      i += 1
    }
    print(line)
    mut sep = "" def slen = str_len(line) ; Approximation
-   i = 0 while(i < (slen / 2)){ sep = f"{sep}─" i = i + 1 }
+   i = 0 while(i < (slen / 2)){ sep = f"{sep}─" i += 1 }
    print(color(sep, "gray"))
    r = 0
    while(r < nr){
@@ -309,19 +421,19 @@ fn table(headers, rows){
          def w = get(widths, c)
          line_row = f"{line_row}{val}"
          def pad = w - str_len(val) + 2
-         mut p = 0 while(p < pad){ line_row = f"{line_row} " p = p + 1 }
+         mut p = 0 while(p < pad){ line_row = f"{line_row} " p += 1 }
          line_row = f"{line_row} "
-         c = c + 1
+         c += 1
       }
       print(line_row)
-      r = r + 1
+      r += 1
    }
 }
 
 fn tree(node, pref="", head_in=""){
    "Prints a tree structure. Node is [label, [children...]] or just label string."
-   def prefix = case type(pref) { "str" -> pref _ -> "" }
-   def head = case type(head_in) { "str" -> head_in _ -> "" }
+   def prefix = case type(pref){ "str" -> pref _ -> "" }
+   def head = case type(head_in){ "str" -> head_in _ -> "" }
    if(is_str(node)){ print(f"{prefix}{head}{node}") return 0 }
    def label = get(node, 0)
    print(f"{prefix}{head}{bold(label)}")
@@ -335,32 +447,32 @@ fn tree(node, pref="", head_in=""){
       mut next_head = "├── "
       if(last){ next_prefix = f"{prefix}    " next_head = "╰── " }
       tree(child, next_prefix, next_head)
-      i = i + 1
+      i += 1
    }
 }
 
 fn bar(tot=100, d="Progress", w=40, bc="green", se=1, lv=1){
    "Create a progress bar. Returns a bar object (list)."
-   def total = case is_int(tot) { 1 -> tot _ -> 100 }
-   def desc = case is_str(d) { 1 -> d _ -> "Progress" }
-   def width = case is_int(w) { 1 -> w _ -> 40 }
-   def bar_color = case is_str(bc) { 1 -> bc _ -> "green" }
-   def show_eta = case is_int(se) { 1 -> se _ -> 1 }
-   def leave = case is_int(lv) { 1 -> lv _ -> 1 }
+   def total = case is_int(tot){ 1 -> tot _ -> 100 }
+   def desc = case is_str(d){ 1 -> d _ -> "Progress" }
+   def width = case is_int(w){ 1 -> w _ -> 40 }
+   def bar_color = case is_str(bc){ 1 -> bc _ -> "green" }
+   def show_eta = case is_int(se){ 1 -> se _ -> 1 }
+   def leave = case is_int(lv){ 1 -> lv _ -> 1 }
    mut bar = list(12)
-   bar = append(bar, total)         ; 0
-   bar = append(bar, 0)             ; 1
-   bar = append(bar, desc)          ; 2
-   bar = append(bar, width)         ; 3
-   bar = append(bar, bar_color)     ; 4
-   bar = append(bar, show_eta)      ; 5
-   bar = append(bar, leave)         ; 6
+   bar = append(bar, total) ; 0
+   bar = append(bar, 0) ; 1
+   bar = append(bar, desc) ; 2
+   bar = append(bar, width) ; 3
+   bar = append(bar, bar_color) ; 4
+   bar = append(bar, show_eta) ; 5
+   bar = append(bar, leave) ; 6
    def start_time = ticks() / 1000000
-   bar = append(bar, start_time)    ; 7
-   bar = append(bar, start_time)    ; 8
-   bar = append(bar, 0)             ; 9
-   bar = append(bar, 0)             ; 10
-   bar = append(bar, 0.0)           ; 11
+   bar = append(bar, start_time) ; 7
+   bar = append(bar, start_time) ; 8
+   bar = append(bar, 0) ; 9
+   bar = append(bar, 0) ; 10
+   bar = append(bar, 0.0) ; 11
    return bar
 }
 
@@ -370,7 +482,7 @@ fn bar_update(bar, current){
    if(current <= get(bar, 10) && current != 0 && current < get(bar, 0)){ return 0 }
    set_idx(bar, 1, current) set_idx(bar, 10, current)
    def total = get(bar, 0) def desc = get(bar, 2) def width = get(bar, 3)
-   def bar_color = get(bar, 4) def show_eta = get(bar, 5)
+   def bar_color = get(bar, 4)
    def start_time = get(bar, 7) def last_time = get(bar, 8)
    def now = ticks() / 1000000 def dt = now - last_time
    mut avg_rate = get(bar, 11)
@@ -422,7 +534,7 @@ fn _chr_cached(code){
       mut i = 0
       while(i < 256){
          _chr_cache = append(_chr_cache, chr(i))
-         i = i + 1
+         i += 1
       }
    }
    get(_chr_cache, code, "")
@@ -432,26 +544,14 @@ fn get_terminal_size(){
    "Retrieves terminal [width, height] using ioctl, environment variables, or defaults."
    if(!_term_buf){ _term_buf = malloc(8) }
    def buf = _term_buf
-   ;; Try ioctl on stdout (1)
-   mut r = syscall(16, 1, 0x5413, buf, 0, 0, 0)
-   ;; If stdout fails, try /dev/tty
-   if(r != 0){
-      use std.str.io *
-      def fd = sys_open("/dev/tty", 0, 0)
-      if(fd > 0){
-         r = syscall(16, fd, 0x5413, buf, 0, 0, 0)
-         unwrap(sys_close(fd))
-      }
-   }
-   if(r == 0){
-      def rows = load8(buf, 0) | (load8(buf, 1) << 8)
-      def cols = load8(buf, 2) | (load8(buf, 3) << 8)
+   if(__tty_size(buf) == 0){
+      def cols = load32(buf, 0)
+      def rows = load32(buf, 4)
       if(rows > 0 && cols > 0){
          return [cols, rows]
       }
    }
    ;; Fallback to Environment Variables
-   use std.os *
    def env_c = env("COLUMNS")
    def env_l = env("LINES")
    if(is_str(env_c) && is_str(env_l)){
@@ -475,7 +575,7 @@ fn canvas(w, h){
    mut i = 0
    while(i < w * h){
       char_buf = append(char_buf, " ")
-      i = i + 1
+      i += 1
    }
    c = append(c, char_buf)
    c = append(c, bytes(w * h)) ; 3: attr buffer (0=norm, 1=bold)
@@ -496,7 +596,7 @@ fn canvas_clear(canv){
       bytes_set(attr, i, 0)
       bytes_set(col, i, 0)
       bytes_set(blen, i, 1)
-      i = i + 1
+      i += 1
    }
 }
 
@@ -507,7 +607,7 @@ fn _byte_len(s){
    if(n == 0){ return 0 }
    if(load8(s, n) == 0){ return n }
    mut i = n
-   while(load8(s, i) != 0){ i = i + 1 }
+   while(load8(s, i) != 0){ i += 1 }
    i
 }
 
@@ -520,7 +620,7 @@ fn _substr_bytes(s, start, len){
    mut i = 0
    while(i < len){
       store8(out, load8(s, start + i), i)
-      i = i + 1
+      i += 1
    }
    store8(out, 0, len)
    out
@@ -535,7 +635,11 @@ fn canvas_set(canv, x, y, char, color_idx=0, is_bold=0){
    if(is_str(char)){
       char_str = char
    } else {
-      char_str = _chr_cached(char)
+      if(char >= 0 && char <= 255){
+         char_str = _chr_cached(char)
+      } else {
+         char_str = chr(char)
+      }
    }
    if(str_len(char_str) == 0){ char_str = "?" }
    set_idx(get(canv, 2), idx, char_str)
@@ -558,7 +662,7 @@ fn canvas_print(canv, x, y, text, color_idx=0, is_bold=0){
       def ch = _substr_bytes(text, i, clen)
       canvas_set(canv, x + col, y, ch, color_idx, is_bold)
       i = i + clen
-      col = col + 1
+      col += 1
    }
 }
 
@@ -569,13 +673,13 @@ fn canvas_box(canv, x, y, w, h, title="", color_idx=0){
    while(i < w){
       canvas_set(canv, x + i, y, dict_get(s, "h_line"), color_idx)
       canvas_set(canv, x + i, y + h - 1, dict_get(s, "h_line"), color_idx)
-      i = i + 1
+      i += 1
    }
    i = 0
    while(i < h){
       canvas_set(canv, x, y + i, dict_get(s, "v_line"), color_idx)
       canvas_set(canv, x + w - 1, y + i, dict_get(s, "v_line"), color_idx)
-      i = i + 1
+      i += 1
    }
    canvas_set(canv, x, y, dict_get(s, "top_left"), color_idx)
    canvas_set(canv, x + w - 1, y, dict_get(s, "top_right"), color_idx)
@@ -613,7 +717,7 @@ fn canvas_refresh(canv){
             ;; \033[ (27 91)
             bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) p = p + 2
             if c == 0 && b == 0 {
-               bytes_set(r_buf, p, 48) p = p + 1 ;; '0'
+               bytes_set(r_buf, p, 48) p += 1 ;; '0'
             } else {
                if b {
                   bytes_set(r_buf, p, 49) bytes_set(r_buf, p+1, 59) p = p + 2 ;; '1;'
@@ -628,27 +732,61 @@ fn canvas_refresh(canv){
                bytes_set(r_buf, p+1, code)
                p = p + 2
             }
-            bytes_set(r_buf, p, 109) p = p + 1 ;; 'm'
+            bytes_set(r_buf, p, 109) p += 1 ;; 'm'
             last_c = c last_b = b
          }
          def clen = bytes_get(blen, idx)
          mut j = 0
          while(j < clen){
             bytes_set(r_buf, p, load8(cell, j))
-            p = p + 1
-            j = j + 1
+            p += 1
+            j += 1
          }
-         x = x + 1
+         x += 1
       }
       if y < h - 1 {
          bytes_set(r_buf, p, 10) ;; '\n'
-         p = p + 1
+         p += 1
       }
-      y = y + 1
+      y += 1
    }
    ;; Reset color at end: \033[0m
    bytes_set(r_buf, p, 27) bytes_set(r_buf, p+1, 91) bytes_set(r_buf, p+2, 48) bytes_set(r_buf, p+3, 109)
    p = p + 4
    unwrap(sys_write(1, r_buf, p))
    free(r_buf)
+}
+
+if(comptime{__main()}){
+    use std.core *
+    use std.core.dict *
+    use std.str.term *
+    use std.str *
+
+    def sz = get_terminal_size()
+    assert(is_list(sz), "terminal size list")
+    assert(len(sz) == 2, "terminal size len")
+
+    def w = get(sz, 0)
+    def h = get(sz, 1)
+    assert(w > 0, "terminal width")
+    assert(h > 0, "terminal height")
+
+    def names = color_names()
+    assert(len(names) >= 5, "color_names")
+    assert(is_str(get_color_name(0)), "get_color_name")
+
+    def colored = get_color("x", 1)
+    assert(str_len(colored) > 1, "get_color")
+
+    def shp = shapes()
+    assert(is_dict(shp), "shapes dict")
+    assert(str_len(dict_get(shp, "h_line", "")) > 0, "shape h_line")
+
+    def c = canvas(4, 2)
+    canvas_set(c, 0, 0, 65)
+    canvas_print(c, 1, 0, "B")
+    canvas_clear(c)
+
+    print("✓ std.str.term tests passed")
 }

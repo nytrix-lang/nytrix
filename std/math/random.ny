@@ -34,20 +34,20 @@ fn uniform(a, b){
 fn randint(a, b){
    "Return a random integer in [a, b]."
    if(a == b){ return a }
-   return a + mod(rand(), (b - a + 1))
+   return a + (rand() % (b - a + 1))
 }
 
 fn randrange(a, b){
    "Return a random integer in [a, b)."
    if(a == b){ return a }
-   return a + mod(rand(), (b - a))
+   return a + (rand() % (b - a))
 }
 
 fn choice(xs){
    "Return a random element from a non-empty sequence xs."
    mut n = len(xs)
    if(n == 0){ return 0 }
-   return get(xs, mod(rand(), n))
+   return get(xs, (rand() % n))
 }
 
 fn shuffle(xs){
@@ -56,11 +56,11 @@ fn shuffle(xs){
    if(n <= 1){ return xs }
    mut i = n - 1
    while(i > 0){
-      def j = mod(rand(), i + 1)
+      def j = (rand() % i + 1)
       def tmp = get(xs, i)
       set_idx(xs, i, get(xs, j))
       set_idx(xs, j, tmp)
-      i = i - 1
+      i -= 1
    }
    return xs
 }
@@ -72,13 +72,31 @@ fn sample(xs, k){
    mut res = list(8)
    mut indices = list(8)
    mut i = 0
-   while(i < n){  indices = append(indices, i) i = i + 1 }
+   while(i < n){  indices = append(indices, i) i += 1 }
    shuffle(indices)
    i = 0
    while(i < k){
        res = append(res, get(xs, get(indices, i)))
-      i = i + 1
+      i += 1
    }
    return res
 }
 
+if(comptime{__main()}){
+    use std.math.random *
+    use std.core *
+    use std.core.error *
+
+    print("Testing random...")
+
+    def r = random()
+    assert(is_float(r), "random returns float")
+    assert(r >= 0.0, "random >= 0")
+    assert(r < 1.0, "random < 1")
+
+    def ri = randint(10, 20)
+    assert(ri >= 10, "randint >= 10")
+    assert(ri < 21, "randint < 21")
+
+    print("✓ std.math.random tests passed")
+}

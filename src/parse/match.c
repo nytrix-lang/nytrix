@@ -22,13 +22,18 @@ stmt_t *p_parse_match(parser_t *p) {
           vec_push_arena(p->arena, &arm.patterns, pat);
           continue;
         }
-        if (p->cur.kind == NY_T_ARROW || p->cur.kind == NY_T_COLON ||
-            p->cur.kind == NY_T_LBRACE || p->cur.kind == NY_T_RBRACE ||
-            p->cur.kind == NY_T_ELSE || p->cur.kind == NY_T_EOF) {
+        if (p->cur.kind == NY_T_IF || p->cur.kind == NY_T_ARROW ||
+            p->cur.kind == NY_T_COLON || p->cur.kind == NY_T_LBRACE ||
+            p->cur.kind == NY_T_RBRACE || p->cur.kind == NY_T_ELSE ||
+            p->cur.kind == NY_T_EOF) {
           break;
         }
         expr_t *pat = p_parse_expr(p, 0);
         vec_push_arena(p->arena, &arm.patterns, pat);
+      }
+      arm.guard = NULL;
+      if (parser_match(p, NY_T_IF)) {
+        arm.guard = p_parse_expr(p, 0);
       }
       if (parser_match(p, NY_T_ARROW)) {
         if (p->cur.kind == NY_T_LBRACE) {

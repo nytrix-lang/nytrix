@@ -27,14 +27,29 @@ fn debug_print(...args){
    mut xs = args
    if(len(args) == 1){
       def first = get(args, 0)
-      if(eq(type(first), "list")){ xs = first }
+      if(type(first) == "list"){ xs = first }
    }
    def n = len(xs)
    mut i = 0
    while(i < n){
       def v = get(xs, i)
       debug_print_val(v)
-      i = i + 1
+      i += 1
    }
 }
 
+if(comptime{__main()}){
+    use std.core.debug *
+    use std.util.inspect *
+    use std.core.test *
+    use std.core *
+
+    print("Testing Debug & Inspect...")
+
+    debug_print("test_val", 123)
+    inspect(123)
+    inspect("hello")
+    inspect([1, 2])
+
+    print("✓ std.core.debug tests passed")
+}

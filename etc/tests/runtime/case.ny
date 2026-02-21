@@ -1,3 +1,4 @@
+use std.core *
 use std.core.error *
 use std.core.reflect *
 use std.core.list *
@@ -97,8 +98,10 @@ assert(min_small < 0, "min_small")
 def empty = ""
 assert(len(empty) == 0, "empty string")
 
-def s = "   "
-assert(len(strip(s)) == 0, "strip whitespace")
+if(__is_main_script()){
+    def s = "   "
+    assert(len(strip(s)) == 0, "strip whitespace")
+}
 
 mut l = list(0)
 assert(len(l) == 0, "empty list")
@@ -112,4 +115,3 @@ assert(len(l) == 100, "list growth")
 assert(get(l, 99) == 99, "list last")
 
 print("✓ Edge cases passed")
-

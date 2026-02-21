@@ -1,18 +1,30 @@
 #include "base/common.h"
 #include "rt/shared.h"
 #include <errno.h>
+#include <inttypes.h>
 #include <setjmp.h>
 #include <stdlib.h>
+
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
+
+#ifndef _WIN32
+extern char **environ;
+#endif
 
 int color_mode __attribute__((weak)) = 0;
 int debug_enabled __attribute__((weak)) = 0;
 
-// Globals & Panic
-// Globals & Panic
 int64_t g_globals_ptr = 1; // tagged (0)
 
 typedef struct {
-  void *fn;
+  int64_t fn;
   int64_t env;
 } defer_t;
 
@@ -43,7 +55,11 @@ static int g_trace_print = -1;
 static size_t trace_str_len(int64_t v) {
   if (!is_v_str(v))
     return 0;
-  int64_t tagged_len = *(int64_t *)((char *)(uintptr_t)v - 16);
+  uintptr_t lp = (uintptr_t)v - 16;
+  if (!rt_addr_readable(lp, sizeof(int64_t)))
+    return 0;
+  int64_t tagged_len = 0;
+  memcpy(&tagged_len, (const void *)lp, sizeof(tagged_len));
   if (!is_int(tagged_len))
     return 0;
   return (size_t)(tagged_len >> 1);
@@ -60,7 +76,7 @@ static void trace_print_loc(void) {
           (long)col);
   if (is_v_str(g_trace_func)) {
     const char *fn = (const char *)(uintptr_t)g_trace_func;
-    size_t fnlen = trace_str_len(g_trace_func);
+    size_t fnlen = trace_str_len(g_trace_func); // Fixed here
     fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
   }
   fputc('\n', stderr);
@@ -91,28 +107,31 @@ int64_t __set_globals(int64_t p) {
   return p;
 }
 
-void __push_defer(void *fn, int64_t env) {
+int64_t __push_defer(int64_t fn, int64_t env) {
   vec_push(&g_defer_stack, ((defer_t){fn, env}));
+  return 0;
 }
 
-void __pop_run_defer(void) {
+int64_t __pop_run_defer(void) {
   if (g_defer_stack.len > 0) {
     defer_t d = g_defer_stack.data[--g_defer_stack.len];
-    int64_t (*f)(int64_t) =
-        (int64_t (*)(int64_t))__mask_ptr((int64_t)(uintptr_t)d.fn);
+    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))__mask_ptr(d.fn);
     if (f)
       f(d.env);
   }
+  return 0;
 }
 
-void __run_defers_to(size_t target_len) {
+int64_t __run_defers_to(int64_t target_len_v) {
+  size_t target_len =
+      (size_t)(is_int(target_len_v) ? (target_len_v >> 1) : target_len_v);
   while (g_defer_stack.len > target_len) {
     defer_t d = g_defer_stack.data[--g_defer_stack.len];
-    int64_t (*f)(int64_t) =
-        (int64_t (*)(int64_t))__mask_ptr((int64_t)(uintptr_t)d.fn);
+    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))__mask_ptr(d.fn);
     if (f)
       f(d.env);
   }
+  return 0;
 }
 
 int64_t __set_panic_env(int64_t env_ptr) {
@@ -157,8 +176,7 @@ int64_t __trace_dump(int64_t count) {
   size_t want = (size_t)(is_int(count) ? rt_untag_v(count) : count);
   if (want == 0 || want > g_trace_len)
     want = g_trace_len;
-  size_t start =
-      (g_trace_idx + TRACE_RING - want) % TRACE_RING;
+  size_t start = (g_trace_idx + TRACE_RING - want) % TRACE_RING;
   for (size_t i = 0; i < want; i++) {
     size_t idx = (start + i) % TRACE_RING;
     int64_t file = g_trace_files[idx];
@@ -174,7 +192,7 @@ int64_t __trace_dump(int64_t count) {
     fprintf(stderr, "  at %.*s:%ld:%ld", (int)flen, fname, (long)l, (long)c);
     if (is_v_str(func)) {
       const char *fn = (const char *)(uintptr_t)func;
-      size_t fnlen = trace_str_len(func);
+      size_t fnlen = trace_str_len(func); // Fixed here
       fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
     }
     fputc('\n', stderr);
@@ -187,7 +205,7 @@ int64_t __panic(int64_t msg_ptr) {
     g_panic_value = msg_ptr;
     panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
     // Run defers up to the catch block
-    __run_defers_to(pe.defer_base);
+    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
     longjmp(*pe.env, 1);
   }
   if (is_v_str(g_trace_file)) {
@@ -196,70 +214,75 @@ int64_t __panic(int64_t msg_ptr) {
   }
   // Make panic function robust
   if (is_int(msg_ptr)) {
-    fprintf(stderr, "Panic: <integer value> %ld (raw)\n", msg_ptr);
+    fprintf(stderr, "Panic: <integer value> %" PRId64 " (raw)\n",
+            (int64_t)msg_ptr);
   } else if (is_v_str(msg_ptr)) { // This implies is_heap_ptr(msg_ptr)
     const char *msg = (const char *)(uintptr_t)msg_ptr;
-    size_t msg_len =
-        __get_heap_size(msg_ptr); // We know it's a valid string heap object
+    size_t msg_len = trace_str_len(msg_ptr);
     fprintf(stderr, "Panic: %.*s\n", (int)msg_len, msg);
   } else {
-    // Fallback for non-int, non-string messages (e.g., potentially bad
     // pointers)
-    fprintf(stderr, "Panic: <unknown type> %lx (raw)\n", msg_ptr);
+    fprintf(stderr, "Panic: <unknown type> %" PRIx64 " (raw)\n",
+            (uint64_t)msg_ptr);
   }
   exit(1);
 }
 
-// Args & Env
 int64_t __argc_val = 1; // tagged 0
 int64_t __envc_val = 1; // tagged 0
-char **__argv_ptr = NULL;
-char **__envp_ptr = NULL;
+int64_t *__argv_ptr = NULL;
+int64_t *__envp_ptr = NULL;
 
 int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
   __cleanup_args();
   __argc_val = (argc << 1) | 1;
-  __argv_ptr = (char **)(uintptr_t)__malloc(
-      ((int64_t)(argc + 1) * sizeof(char *) << 1) | 1);
+  __argv_ptr = (int64_t *)(uintptr_t)__malloc(
+      ((int64_t)(argc + 1) * sizeof(int64_t) << 1) | 1);
   if (!__argv_ptr)
     return -1;
-  memset(__argv_ptr, 0, (argc + 1) * sizeof(char *));
+  memset(__argv_ptr, 0, (argc + 1) * sizeof(int64_t));
   char **old_argv = (char **)argv_ptr;
   for (int i = 0; i < argc; i++) {
     if (old_argv[i]) {
       size_t len = strlen(old_argv[i]);
-      int64_t p = __malloc((int64_t)((len + 1) << 1 | 1));
+      int64_t p = __malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
       if (!p)
         return -1;
       *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
       *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
-      __copy_mem((void *)(uintptr_t)p, old_argv[i], len + 1);
-      __argv_ptr[i] = (char *)(uintptr_t)p;
+      __copy_mem((int64_t)(uintptr_t)p, (int64_t)(uintptr_t)old_argv[i],
+                 (int64_t)((len + 1) * sizeof(char) << 1) | 1);
+      __argv_ptr[i] = p;
     } else {
-      __argv_ptr[i] = NULL;
+      __argv_ptr[i] = 0;
     }
   }
   char **old_envp = (char **)envp_ptr;
+#ifndef _WIN32
+  if (!old_envp)
+    old_envp = environ;
+#endif
   int env_count = 0;
   if (old_envp) {
     while (old_envp[env_count])
       env_count++;
   }
   __envc_val = (env_count << 1) | 1;
-  __envp_ptr = (char **)(uintptr_t)__malloc(
-      ((int64_t)(env_count + 1) * sizeof(char *) << 1) | 1);
+  __envp_ptr = (int64_t *)(uintptr_t)__malloc(
+      ((int64_t)(env_count + 1) * sizeof(int64_t) << 1) | 1);
   if (!__envp_ptr)
     return -1;
-  memset(__envp_ptr, 0, (env_count + 1) * sizeof(char *));
+  memset(__envp_ptr, 0, (env_count + 1) * sizeof(int64_t));
   for (int i = 0; i < env_count; i++) {
     size_t len = strlen(old_envp[i]);
-    int64_t p = __malloc((int64_t)((len + 1) << 1 | 1));
+    int64_t p = __malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
     if (!p)
       return -1;
     *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
     *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((void *)(uintptr_t)p, old_envp[i], len + 1);
-    __envp_ptr[i] = (char *)(uintptr_t)p;
+    __copy_mem((int64_t)(uintptr_t)p, (int64_t)(uintptr_t)old_envp[i],
+               (int64_t)((len + 1) * sizeof(char) << 1) | 1);
+    __envp_ptr[i] = p;
   }
   return 0;
 }
@@ -269,7 +292,7 @@ void __cleanup_args(void) {
     int argc = (__argc_val >> 1);
     for (int i = 0; i < argc; i++) {
       if (__argv_ptr[i])
-        __free((int64_t)(uintptr_t)__argv_ptr[i]);
+        __free(__argv_ptr[i]);
     }
     __free((int64_t)(uintptr_t)__argv_ptr);
     __argv_ptr = NULL;
@@ -278,7 +301,7 @@ void __cleanup_args(void) {
     int envc = (__envc_val >> 1);
     for (int i = 0; i < envc; i++) {
       if (__envp_ptr[i])
-        __free((int64_t)(uintptr_t)__envp_ptr[i]);
+        __free(__envp_ptr[i]);
     }
     __free((int64_t)(uintptr_t)__envp_ptr);
     __envp_ptr = NULL;
@@ -287,22 +310,27 @@ void __cleanup_args(void) {
   __envc_val = 1;
 }
 
-int64_t __argc(void) { return __argc_val; }
+int64_t ny_rt_argc(void) { return __argc_val; }
 int64_t __envc(void) { return __envc_val; }
 int64_t __envp(void) { return (int64_t)__envp_ptr; }
+int64_t ny_rt_argvp(void) { return (int64_t)__argv_ptr; }
 
-int64_t __argv(int64_t i) {
+int64_t ny_rt_argv(int64_t i) {
   if (!is_int(i))
     return 0;
   int idx = (int)(i >> 1);
   if (idx < 0 || idx >= (__argc_val >> 1))
     return 0;
-  const char *s = __argv_ptr[idx];
+  int64_t raw = __argv_ptr[idx];
+  if (!raw)
+    return 0;
+  const char *s = (const char *)(uintptr_t)raw;
   size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
+  int64_t res = __malloc(((int64_t)(len + 1) * sizeof(char) << 1) | 1);
   *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_STR;
   *(int64_t *)((char *)(uintptr_t)res - 16) = ((int64_t)len << 1) | 1;
-  __copy_mem((void *)(uintptr_t)res, s, len + 1);
+  __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)s,
+             (int64_t)((len + 1) * sizeof(char) << 1) | 1);
   return res;
 }
 
@@ -310,17 +338,34 @@ int64_t __tag(int64_t v) { return rt_tag_v(v); }
 int64_t __untag(int64_t v) { return rt_untag_v(v); }
 int64_t __is_int(int64_t v) { return is_int(v) ? 2 : 4; }
 int64_t __is_ptr(int64_t v) { return is_ptr(v) ? 2 : 4; }
+int64_t __is_ny_obj(int64_t v) { return is_ny_obj(v) ? 2 : 4; }
+int64_t __is_str_obj(int64_t v) { return is_v_str(v) ? 2 : 4; }
+int64_t __is_float_obj(int64_t v) { return is_v_flt(v) ? 2 : 4; }
+int64_t __tagof(int64_t v) {
+  if (!is_ptr(v))
+    return 0;
+  uintptr_t tp = (uintptr_t)v - 8;
+  if (!rt_addr_readable(tp, sizeof(int64_t)))
+    return 0;
+  int64_t tag = 0;
+  memcpy(&tag, (const void *)tp, sizeof(tag));
+  return tag;
+}
 
-// Misc
 int64_t __errno_val = 1;
 int64_t __errno(void) { return (int64_t)((errno << 1) | 1); }
 
-void __copy_mem(void *dst, const void *src, size_t n) {
-  char *d = (char *)dst;
-  const char *s = (const char *)src;
-  for (size_t i = 0; i < n; i++) {
+int64_t __copy_mem(int64_t dst, int64_t src, int64_t n) {
+  if (is_int(n))
+    n >>= 1;
+  if (n <= 0)
+    return dst;
+  char *d = (char *)(uintptr_t)dst;
+  const char *s = (const char *)(uintptr_t)src;
+  for (int64_t i = 0; i < n; i++) {
     d[i] = s[i];
   }
+  return dst;
 }
 
 int64_t __result_ok(int64_t v) {

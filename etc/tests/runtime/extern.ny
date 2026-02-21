@@ -1,9 +1,15 @@
 use std.core *
 use std.core.error *
 use std.str.io *
+use std.os.sys *
 
-extern fn c_getpid() as "getpid"
-extern fn my_getpid() as "getpid"
+if(comptime{ __os_name() == "windows" }){
+    extern fn c_getpid(): i32 as "GetCurrentProcessId"
+    extern fn my_getpid(): i32 as "GetCurrentProcessId"
+} else {
+    extern fn c_getpid(): i32 as "getpid"
+    extern fn my_getpid(): i32 as "getpid"
+}
 
 print("Testing runtime extern support via libc...")
 

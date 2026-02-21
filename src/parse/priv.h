@@ -27,5 +27,14 @@ expr_t *p_parse_expr(parser_t *p, int prec);
 stmt_t *p_parse_stmt(parser_t *p);
 stmt_t *p_parse_block(parser_t *p);
 stmt_t *p_parse_match(parser_t *p);
+stmt_t *ny_parse_stmt_or_block(parser_t *p);
+stmt_t *ny_parse_if_stmt(parser_t *p);
+stmt_t *ny_parse_while_stmt(parser_t *p);
+stmt_t *ny_parse_for_stmt(parser_t *p);
+stmt_t *ny_parse_try_stmt(parser_t *p);
+stmt_t *ny_parse_return_stmt(parser_t *p);
+stmt_t *ny_parse_break_stmt(parser_t *p);
+stmt_t *ny_parse_continue_stmt(parser_t *p);
+stmt_t *ny_parse_goto_stmt(parser_t *p);
 
 #endif

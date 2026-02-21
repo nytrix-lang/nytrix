@@ -33,7 +33,7 @@ assert(Status.Pending == 2, "Status.Pending")
 print("✓ basic enum tests passed")
 
 ;; Enum Matching
-fn describe_color(c) {
+fn describe_color(c){
     match c {
         Color.Red -> "it is red"
         Color.Green -> "it is green"

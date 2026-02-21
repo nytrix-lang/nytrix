@@ -44,8 +44,7 @@ fn trunc(x){
 fn is_float(x){
    "Check if value is a float."
    if(!is_ptr(x)){ return false }
-   mut tag = load64(x, -8)
-   tag == 110 || tag == 221
+   __is_float_obj(x)
 }
 
 fn fadd(a, b){
@@ -105,14 +104,18 @@ fn ceil(x){
    }
 }
 
+def PI = _box(0x400921fb54442d18)
+
+def HALF = _box(0x3fe0000000000000) ;; 0.5
+def NAN_VAL = _box(0x7ff8000000000000)
+def INF_VAL = _box(0x7ff0000000000000)
+
 fn round(x){
    "Round to nearest integer."
-   mut half = float(5)
-   half = fdiv(half, float(10)) ; 0.5
    if(flt(x, float(0))){
-      ceil(fsub(float(x), half))
+      ceil(fsub(float(x), HALF))
    } else {
-      floor(fadd(float(x), half))
+      floor(fadd(float(x), HALF))
    }
 }
 
@@ -130,12 +133,12 @@ fn abs(x){
 
 fn nan(){
    "Box a quiet NaN."
-   fdiv(float(0), float(0))
+   NAN_VAL
 }
 
 fn inf(){
    "Box infinity."
-   fdiv(float(1), float(0))
+   INF_VAL
 }
 
 fn is_nan(x){
@@ -157,3 +160,34 @@ fn is_inf(x){
    return (bits & mask) == (inf_bits & inf_bits)
 }
 
+if(comptime{__main()}){
+    use std.math.float *
+    use std.core.error *
+
+    assert(feq(fadd(float(1), float(2)), float(3)), "add")
+    assert(feq(fsub(float(3), float(2)), float(1)), "sub")
+    assert(feq(fmul(float(2), float(3)), float(6)), "mul")
+    assert(feq(fdiv(float(6), float(2)), float(3)), "div")
+
+    assert(flt(float(1), float(2)), "lt")
+    assert(fgt(float(2), float(1)), "gt")
+
+    assert(floor(float(1)) == 1, "floor int")
+    assert(floor(fadd(float(1), float(0))) == 1, "floor 1.0")
+
+    def f3 = float(3)
+    def f2 = float(2)
+    def f1_5 = fdiv(f3, f2)
+    assert(floor(f1_5) == 1, "floor 1.5")
+    assert(ceil(f1_5) == 2, "ceil 1.5")
+
+    def f0 = float(0)
+    def fn1_5 = fsub(f0, f1_5)
+    assert(floor(fn1_5) == -2, "floor -1.5")
+    assert(ceil(fn1_5) == -1, "ceil -1.5")
+
+    assert(is_nan(nan()), "is_nan")
+    assert(is_inf(inf()), "is_inf")
+
+    print("✓ std.math.float tests passed")
+}

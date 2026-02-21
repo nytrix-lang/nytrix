@@ -2,11 +2,15 @@
 #include "base/common.h"
 #include "priv.h"
 #include <ctype.h>
-#include <readline/readline.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#define NYTRIX_NO_READLINE 1
+#endif
 
 char *g_repl_user_source = NULL;
 size_t g_repl_user_source_len = 0;
@@ -207,25 +211,45 @@ int is_repl_stmt(const char *src) {
 
 void count_unclosed(const char *src, int *out_paren, int *out_brack,
                     int *out_brace, int *out_in_str) {
-  int p = 0, b = 0, c = 0;
-  int in_str = 0;
-  for (const char *s = src; *s; s++) {
-    if (*s == '"' && (s == src || *(s - 1) != '\\'))
-      in_str = !in_str;
-    if (in_str)
-      continue;
-    if (*s == '(')
-      p++;
-    else if (*s == ')')
-      p--;
-    if (*s == '[')
-      b++;
-    else if (*s == ']')
-      b--;
-    if (*s == '{')
-      c++;
-    else if (*s == '}')
-      c--;
+  int p = 0, b = 0, c = 0, in_str = 0;
+  char quote = 0;
+  const char *s = src;
+  while (*s) {
+    if (in_str) {
+      if (*s == '\\' && s[1]) {
+        s += 2;
+      } else if (*s == quote) {
+        in_str = 0;
+        quote = 0;
+        s++;
+      } else {
+        s++;
+      }
+    } else {
+      if (*s == '"' || *s == '\'') {
+        in_str = 1;
+        quote = *s;
+        s++;
+      } else if (*s == ';' || *s == '#') {
+        while (*s && *s != '\n')
+          s++;
+      } else {
+        if (*s == '(')
+          p++;
+        else if (*s == ')')
+          p--;
+        else if (*s == '[')
+          b++;
+        else if (*s == ']')
+          b--;
+        else if (*s == '{')
+          c++;
+        else if (*s == '}')
+          c--;
+        if (*s)
+          s++;
+      }
+    }
   }
   *out_paren = p;
   *out_brack = b;
@@ -237,7 +261,7 @@ void count_unclosed(const char *src, int *out_paren, int *out_brack,
 int is_input_complete(const char *src) {
   int p, b, c, s;
   count_unclosed(src, &p, &b, &c, &s);
-  return (p <= 0 && b <= 0 && c <= 0 && s == 0);
+  return (p == 0 && b == 0 && c == 0 && s == 0);
 }
 
 void print_incomplete_hint(const char *src) {
@@ -251,17 +275,41 @@ void print_incomplete_hint(const char *src) {
       printf("(missing %d ']') ", b);
     if (c > 0)
       printf("(missing %d '}') ", c);
+    printf("(use :cancel to abort)");
     printf("%s\n", clr(NY_CLR_RESET));
   }
 }
 
+#ifndef _WIN32
 #include <sys/ioctl.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
+int repl_is_input_pending(void) {
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD count = 0;
+  if (GetNumberOfConsoleInputEvents(hIn, &count) && count > 0) {
+    INPUT_RECORD recs[128];
+    DWORD readCount = 0;
+    DWORD toRead = count > 128 ? 128 : count;
+    if (PeekConsoleInputA(hIn, recs, toRead, &readCount)) {
+      for (DWORD i = 0; i < readCount; i++) {
+        if (recs[i].EventType == KEY_EVENT && recs[i].Event.KeyEvent.bKeyDown) {
+          return 1;
+        }
+      }
+    }
+  }
+  return 0;
+}
+#else
 int repl_is_input_pending(void) {
   int n = 0;
   if (ioctl(STDIN_FILENO, FIONREAD, &n) < 0)
     return 0;
   return n > 0;
 }
+#endif
 
 int repl_calc_indent(const char *src) {
   int p, b, c;
@@ -270,6 +318,9 @@ int repl_calc_indent(const char *src) {
   return level > 0 ? level * 2 : 0;
 }
 
+#if defined(_WIN32) || defined(NYTRIX_NO_READLINE)
+int repl_pre_input_hook(void) { return 0; }
+#else
 int repl_pre_input_hook(void) {
   if (repl_is_input_pending())
     return 0;
@@ -280,6 +331,7 @@ int repl_pre_input_hook(void) {
   }
   return 0;
 }
+#endif
 
 void repl_print_error_snippet(const char *src, int line, int col) {
   (void)src;

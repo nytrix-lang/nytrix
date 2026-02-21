@@ -34,12 +34,12 @@ layout Wide {
    c: u8
 }
 
-layout Packed pack(1) {
+layout Packed pack(1){
    a: u8,
    b: u32
 }
 
-layout Aligned align(16) {
+layout Aligned align(16){
    a: u8
 }
 

@@ -18,10 +18,9 @@ stmt_t *stmt_new(arena_t *arena, stmt_kind_t kind, token_t tok) {
     NY_LOG_DEBUG("stmt_new called with NULL arena!\n");
   }
   stmt_t *s = (stmt_t *)arena_alloc(arena, sizeof(stmt_t));
-
+  memset(s, 0, sizeof(stmt_t));
   s->kind = kind;
   s->tok = tok;
-  memset(&s->as, 0, sizeof(s->as));
   return s;
 }
 
@@ -389,6 +388,18 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
     break;
   case NY_S_CONTINUE:
     append(buf, len, cap, "{\"type\":\"continue\"}");
+    break;
+  case NY_S_MACRO:
+    append(buf, len, cap, "{\"type\":\"macro\",\"name\":\"%s\",\"args\":[",
+           s->as.macro.name);
+    for (size_t i = 0; i < s->as.macro.args.len; ++i) {
+      dump_expr(s->as.macro.args.data[i], buf, len, cap);
+      if (i < s->as.macro.args.len - 1)
+        append(buf, len, cap, ",");
+    }
+    append(buf, len, cap, "],\"body\":");
+    dump_stmt(s->as.macro.body, buf, len, cap);
+    append(buf, len, cap, "}");
     break;
   default:
     append(buf, len, cap, "{\"type\":\"unknown_stmt\"}");

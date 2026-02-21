@@ -10,7 +10,7 @@ int64_t __srand(int64_t s) {
 }
 
 int64_t __rand64(void) {
-  uint64_t val;
+  uint64_t val = 0;
   int ok = 0;
 #if defined(__x86_64__)
   if (!__rng_forced_prng) {
@@ -28,7 +28,6 @@ int64_t __rand64(void) {
   return (int64_t)res;
 }
 
-// Float Primitives
 int64_t __flt_box_val(int64_t bits) {
   int64_t res = __malloc(17);
   *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_FLOAT;
@@ -43,13 +42,10 @@ int64_t __flt_unbox_val(int64_t v) {
     memcpy(&res, &d, 8);
     return res;
   }
-  if (is_ptr(v)) {
-    int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    if (tag == TAG_FLOAT) {
-      int64_t bits;
-      memcpy(&bits, (void *)(uintptr_t)v, 8);
-      return bits;
-    }
+  if (is_v_flt(v) && rt_addr_readable((uintptr_t)v, sizeof(int64_t))) {
+    int64_t bits;
+    memcpy(&bits, (const void *)(uintptr_t)v, sizeof(bits));
+    return bits;
   }
   return 0;
 }
@@ -58,11 +54,8 @@ int64_t __flt_unbox_val32(int64_t v) {
   double d = 0;
   if (v & 1) {
     d = (double)(v >> 1);
-  } else if (is_ptr(v)) {
-    int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    if (tag == TAG_FLOAT) {
-      memcpy(&d, (void *)(uintptr_t)v, 8);
-    }
+  } else if (is_v_flt(v) && rt_addr_readable((uintptr_t)v, sizeof(double))) {
+    memcpy(&d, (const void *)(uintptr_t)v, sizeof(d));
   }
   float f = (float)d;
   uint32_t b;
@@ -84,12 +77,12 @@ int64_t __flt_to_int(int64_t v) {
   int64_t b = __flt_unbox_val(v);
   double d;
   memcpy(&d, &b, 8);
-  return (int64_t)(((uint64_t)d << 1) | 1);
+  int64_t i = (int64_t)d;
+  return rt_tag_v((int64_t)i);
 }
 
 int64_t __flt_trunc(int64_t v) { return __flt_to_int(v); }
 
-// Float Ops
 #define FLT_OP(name, op)                                                       \
   int64_t __flt_##name(int64_t a, int64_t b) {                                 \
     double da, db;                                                             \
@@ -124,7 +117,6 @@ FLT_CMP(le, <=)
 FLT_CMP(ge, >=)
 FLT_CMP(eq, ==)
 
-// Mixed Math
 int64_t __add(int64_t a, int64_t b) {
   if (is_int(a) && is_int(b))
     return (int64_t)((uint64_t)a + (uint64_t)b - 1);
@@ -181,7 +173,6 @@ int64_t __mod(int64_t a, int64_t b) {
   return b ? a % b : 1;
 }
 
-// Logic
 int64_t __eq(int64_t a, int64_t b) {
   if (a == b)
     return 2; // True
@@ -195,9 +186,31 @@ int64_t __eq(int64_t a, int64_t b) {
     if (is_v_flt(a) || is_v_flt(b))
       return __flt_eq(a, b);
     if (is_v_str(a) && is_v_str(b)) {
-      int res =
-          (strcmp((const char *)(uintptr_t)a, (const char *)(uintptr_t)b) == 0);
-      return res ? 2 : 4;
+      uintptr_t la_p = (uintptr_t)a - 16;
+      uintptr_t lb_p = (uintptr_t)b - 16;
+      if (!rt_addr_readable(la_p, sizeof(int64_t)) ||
+          !rt_addr_readable(lb_p, sizeof(int64_t)))
+        return 4;
+      int64_t la_tagged = 0, lb_tagged = 0;
+      memcpy(&la_tagged, (const void *)la_p, sizeof(la_tagged));
+      memcpy(&lb_tagged, (const void *)lb_p, sizeof(lb_tagged));
+      if (!is_int(la_tagged) || !is_int(lb_tagged))
+        return 4;
+      if (la_tagged < 0 || lb_tagged < 0)
+        return 4;
+      size_t la = (size_t)(la_tagged >> 1);
+      size_t lb = (size_t)(lb_tagged >> 1);
+      if (la != lb)
+        return 4;
+      if (la == 0)
+        return 2;
+      if (!rt_addr_readable((uintptr_t)a, la) ||
+          !rt_addr_readable((uintptr_t)b, lb))
+        return 4;
+      return memcmp((const void *)(uintptr_t)a, (const void *)(uintptr_t)b,
+                    la) == 0
+                 ? 2
+                 : 4;
     }
   }
   return 4;
@@ -240,7 +253,6 @@ int64_t __ge(int64_t a, int64_t b) {
   return 4;
 }
 
-// Bitwise
 int64_t __and(int64_t a, int64_t b) {
   return (int64_t)((((uint64_t)(a & 1 ? a >> 1 : a) &
                      (uint64_t)(b & 1 ? b >> 1 : b)))

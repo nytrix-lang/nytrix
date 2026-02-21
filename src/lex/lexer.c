@@ -54,9 +54,8 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.len = lx->pos - start;
   // For simplicity, line/col are at the END of token_t or current.
   // Ideally we should track start_line/col. But parsing error reporting usually
-  // handles "current token_t" pointing to valid location.
   tok.line = lx->line;
-  tok.col = lx->col - (int)tok.len; // Approximate start col
+  tok.col = lx->col - (int)tok.len;
   tok.filename = lx->filename;
   return tok;
 }
@@ -79,6 +78,13 @@ static void skip_whitespace(lexer_t *lx) {
     if (isspace(c)) {
       advance(lx);
     } else if (c == ';') {
+      while (peek(lx) != '\n' && peek(lx) != '\0')
+        advance(lx);
+    } else if (c == '#') {
+      /* Allow shell-style comments/shebang lines for script/REPL interop. */
+      advance(lx);
+      if (peek(lx) == '!')
+        advance(lx);
       while (peek(lx) != '\n' && peek(lx) != '\0')
         advance(lx);
     } else {
@@ -454,6 +460,8 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_COLON, start);
   case '?':
     return make_token(lx, NY_T_QUESTION, start);
+  case '@':
+    return make_token(lx, NY_T_AT, start);
   }
   // Unknown token_t
   char emsg[128];

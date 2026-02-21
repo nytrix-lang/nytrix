@@ -6,12 +6,13 @@ module std.core.test (
 )
 use std.core *
 use std.os.sys *
+use std.str *
 
 def STDERR_FD = 2
 
 fn write_stderr(s){
    "Writes the given string to stderr."
-   syscall(1, STDERR_FD, s, str_len(s), 0,0,0)
+   unwrap(sys_write(STDERR_FD, s, str_len(s)))
 }
 
 fn assert(cond, msg="Assertion failed"){
@@ -20,7 +21,7 @@ fn assert(cond, msg="Assertion failed"){
    else {
       def s = f"Generic Assertion Failed: {msg}\n"
       write_stderr(s)
-      syscall(60, 1, 0,0,0,0,0)
+      __exit(1)
    }
 }
 
@@ -30,8 +31,11 @@ fn t_assert(cond, msg="Assertion failed"){
 }
 
 fn t_assert_eq(a, b, msg="Assertion failed"){
-   "Asserts equality; currently delegates to test framework behavior."
+   "Asserts equality; on failure prints message and exits with status 1."
    if(a != b){
+      def s = f"Assertion Eq Failed: {a} != {b} - {msg}\n"
+      write_stderr(s)
+      __exit(1)
    }
 }
 
@@ -40,5 +44,39 @@ fn fail(message){
    write_stderr("Test failed: ")
    write_stderr(message)
    write_stderr("\n")
-   syscall(60, 1, 0,0,0,0,0)
+   __exit(1)
+}
+
+if(comptime{__main()}){
+    ;; Basic assertion helpers plus control-flow checks.
+
+    assert(true, "assert true")
+    t_assert(true, "t_assert true")
+    t_assert_eq(2 + 2, 4, "t_assert_eq")
+    t_assert_eq(STDERR_FD, 2, "stderr fd")
+
+    mut x = 1
+    if x == 1 {
+       assert(true, "if works")
+    } else {
+       assert(false, "else failed")
+    }
+
+    x = 2
+    if x == 1 {
+       assert(false, "if failed")
+    } elif x == 2 {
+       assert(true, "elif works")
+    } else {
+       assert(false, "else failed")
+    }
+
+    x = 4
+    if x == 1 {
+       assert(false, "if failed")
+    } elif x == 2 {
+       assert(false, "elif failed")
+    } else {
+       assert(true, "else works")
+    }
 }

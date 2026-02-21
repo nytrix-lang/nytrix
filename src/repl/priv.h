@@ -29,6 +29,8 @@ char **repl_split_lines(const char *src, size_t *out_count);
 char *ltrim(char *s);
 void rtrim_inplace(char *s);
 int repl_is_input_pending(void);
+int repl_wait_input_brief(int ms);
+void repl_flush_pending_stdin(void);
 void repl_append_user_source(const char *src);
 void repl_remove_def(const char *name);
 char *repl_assignment_target(const char *src);
@@ -40,7 +42,7 @@ int repl_calc_indent(const char *src);
 int is_repl_stmt(const char *src);
 int repl_pre_input_hook(void);
 void repl_highlight_line(const char *line);
-void repl_highlight_line_ex(const char *line, int cursor_pos, int indent);
+void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_prompt);
 void repl_redisplay(void);
 void repl_reset_redisplay(void);
 void repl_display_match_list(char **matches, int len, int max);
@@ -50,6 +52,8 @@ void repl_update_docs(doc_list_t *dl, const char *src);
 void repl_print_error_snippet(const char *src, int line, int col);
 
 char **nytrix_get_completions_for_prefix(const char *prefix, size_t *out_count);
+char **nytrix_get_completions_for_line(const char *line, int cursor,
+                                       size_t *out_count);
 void nytrix_free_completions(char **completions, size_t count);
 
 // Commands

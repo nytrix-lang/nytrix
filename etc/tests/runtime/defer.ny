@@ -3,7 +3,7 @@ use std.str *
 
 mut log = ""
 
-fn test_unwind() {
+fn test_unwind(){
   log = log + "1"
   defer { log = log + "2" }
   try {
@@ -11,9 +11,9 @@ fn test_unwind() {
      log = log + "P"
      panic("Something went wrong")
      log = log + "X"
-  } catch err {
-     log = log + "C"
-  }
+     } catch err {
+        print("Caught error:", err)
+        log = log + "C"  }
   log = log + "4"
 }
 
@@ -27,7 +27,7 @@ test_unwind()
 ;; 2: Outer defer (run on function exit)
 assert(log == "1P3C42", "Defer unwind order")
 
-fn test_basic_order() {
+fn test_basic_order(){
   log = ""
   log = log + "S|"
   defer { log = log + "D1|" }
@@ -38,7 +38,7 @@ fn test_basic_order() {
 test_basic_order()
 assert(log == "S|E|D2|D1|", "Basic defer execution order")
 
-fn test_scoping() {
+fn test_scoping(){
   log = ""
   {
     defer { log = log + "ID|" }

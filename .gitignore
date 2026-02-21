@@ -1,10 +1,12 @@
 *
 !**/
+!CMakeLists.txt
 !.lsan.supp
-!Makefile
+!make
 !.clangd
 !LICENSE
 !docs/**
 !etc/**
 !src/**
 !std/**
+!repl_pwn_test.py

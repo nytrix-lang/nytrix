@@ -1,5 +1,5 @@
 CompileFlags:
-  CompilationDatabase: ./build/cache
+  CompilationDatabase: ./build/release
   Add:
     - -std=c11
     - -Ibuild

@@ -1,9 +1,20 @@
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
+
 RT_DEF("__malloc", __malloc, 1, "fn __malloc(n)",
        "Allocates n bytes of memory on the heap.")
 RT_DEF("__free", __free, 1, "fn __free(p)",
        "Frees memory previously allocated by __malloc.")
 RT_DEF("__realloc", __realloc, 2, "fn __realloc(p, n)",
        "Reallocates memory to a new size.")
+RT_DEF("__runtime_cleanup", __runtime_cleanup, 0, "fn __runtime_cleanup()",
+       "Frees runtime-owned allocations and argument buffers at shutdown.")
 
 RT_DEF("__load8_idx", __load8_idx, 2, "fn __load8(p, i)",
        "Loads a single byte from memory address p + i.")
@@ -27,6 +38,78 @@ RT_DEF("__sys_read_off", __sys_read_off, 4, "fn __sys_read_off(fd, p, n, i)",
        "Reads n bytes from fd into address p + i.")
 RT_DEF("__sys_write_off", __sys_write_off, 4, "fn __sys_write_off(fd, p, n, i)",
        "Writes n bytes to fd from address p + i.")
+RT_DEF("__open", __open, 3, "fn __open(path, flags, mode)",
+       "Portable open(2) wrapper.")
+RT_DEF("__close", __close, 1, "fn __close(fd)", "Portable close(2) wrapper.")
+RT_DEF("__ioctl", __ioctl, 3, "fn __ioctl(fd, req, arg)",
+       "Portable ioctl(2) wrapper.")
+RT_DEF("__clock_gettime", __clock_gettime, 2, "fn __clock_gettime(clk, ts)",
+       "Portable clock_gettime wrapper.")
+RT_DEF("__nanosleep", __nanosleep, 1, "fn __nanosleep(ts)",
+       "Portable nanosleep wrapper.")
+RT_DEF("__getpid", __getpid, 0, "fn __getpid()", "Portable getpid wrapper.")
+RT_DEF("__getppid", __getppid, 0, "fn __getppid()", "Portable getppid wrapper.")
+RT_DEF("__getuid", __getuid, 0, "fn __getuid()", "Portable getuid wrapper.")
+RT_DEF("__getgid", __getgid, 0, "fn __getgid()", "Portable getgid wrapper.")
+RT_DEF("__getcwd", __getcwd, 2, "fn __getcwd(buf, size)",
+       "Portable getcwd wrapper.")
+RT_DEF("__access", __access, 2, "fn __access(path, mode)",
+       "Portable access wrapper.")
+RT_DEF("__unlink", __unlink, 1, "fn __unlink(path)", "Portable unlink wrapper.")
+RT_DEF("__pipe", __pipe, 1, "fn __pipe(fds_ptr)", "Portable pipe wrapper.")
+RT_DEF("__dup2", __dup2, 2, "fn __dup2(oldfd, newfd)", "Portable dup2 wrapper.")
+RT_DEF("__fork", __fork, 0, "fn __fork()",
+       "Portable fork wrapper (non-Windows).")
+RT_DEF("__wait4", __wait4, 3, "fn __wait4(pid, status_ptr, options)",
+       "Portable wait4 wrapper (waitpid on non-Windows).")
+RT_DEF("__spawn_wait", __spawn_wait, 2, "fn __spawn_wait(path, argv)",
+       "Windows: spawn process and wait; returns exit code. Non-Windows: -1.")
+RT_DEF("__spawn_pipe", __spawn_pipe, 3, "fn __spawn_pipe(path, argv, fds_ptr)",
+       "Windows: spawn process with pipes; returns pid and fills fds_ptr.")
+RT_DEF("__wait_process", __wait_process, 1, "fn __wait_process(pid)",
+       "Windows: wait by pid and return exit code. Non-Windows: -1.")
+RT_DEF("__exit", __exit, 1, "fn __exit(code)", "Portable exit wrapper.")
+RT_DEF("__enable_vt", __enable_vt, 0, "fn __enable_vt()",
+       "Enable VT escape processing on Windows.")
+RT_DEF("__tty_raw", __tty_raw, 1, "fn __tty_raw(enable)",
+       "Set stdin terminal raw mode when enable=1; restore cooked mode when 0.")
+RT_DEF("__tty_pending", __tty_pending, 0, "fn __tty_pending()",
+       "Returns pending stdin byte count for tty input (0 when none).")
+RT_DEF("__tty_size", __tty_size, 1, "fn __tty_size(out_ptr)",
+       "Writes tty cols/rows (int32,int32) to out_ptr; returns 0 on success.")
+RT_DEF("__is_dir", __is_dir, 1, "fn __is_dir(path)",
+       "Portable directory check.")
+RT_DEF("__dir_open", __dir_open, 1, "fn __dir_open(path)",
+       "Open directory handle.")
+RT_DEF("__dir_read", __dir_read, 1, "fn __dir_read(handle)",
+       "Read next directory entry.")
+RT_DEF("__dir_close", __dir_close, 1, "fn __dir_close(handle)",
+       "Close directory handle.")
+RT_DEF("__socket", __socket, 3, "fn __socket(domain, type, protocol)",
+       "Portable socket wrapper.")
+RT_DEF("__connect", __connect, 3, "fn __connect(fd, addr, addrlen)",
+       "Portable connect wrapper.")
+RT_DEF("__bind", __bind, 3, "fn __bind(fd, addr, addrlen)",
+       "Portable bind wrapper.")
+RT_DEF("__listen", __listen, 2, "fn __listen(fd, backlog)",
+       "Portable listen wrapper.")
+RT_DEF("__accept", __accept, 3, "fn __accept(fd, addr, addrlen)",
+       "Portable accept wrapper.")
+RT_DEF("__sendto", __sendto, 6,
+       "fn __sendto(fd, buf, len, flags, addr, addrlen)",
+       "Portable sendto wrapper.")
+RT_DEF("__recvfrom", __recvfrom, 6,
+       "fn __recvfrom(fd, buf, len, flags, addr, addrlen)",
+       "Portable recvfrom wrapper.")
+RT_DEF("__setsockopt", __setsockopt, 5,
+       "fn __setsockopt(fd, level, optname, optval, optlen)",
+       "Portable setsockopt wrapper.")
+RT_DEF("__recv", __recv, 4, "fn __recv(fd, buf, len, flags)",
+       "Portable recv wrapper.")
+RT_DEF("__send", __send, 4, "fn __send(fd, buf, len, flags)",
+       "Portable send wrapper.")
+RT_DEF("__closesocket", __closesocket, 1, "fn __closesocket(fd)",
+       "Portable socket close wrapper.")
 RT_DEF("__syscall", __syscall, 7, "fn __syscall(n, a1, a2, a3, a4, a5, a6)",
        "Executes a raw Linux system call.")
 RT_DEF("__execve", __execve, 3, "fn __execve(path, argv, envp)",
@@ -38,6 +121,14 @@ RT_DEF("__is_int", __is_int, 1, "fn __is_int(v)",
        "Checks if value is a tagged integer.")
 RT_DEF("__is_ptr", __is_ptr, 1, "fn __is_ptr(v)",
        "Checks if value is a valid pointer.")
+RT_DEF("__is_ny_obj", __is_ny_obj, 1, "fn __is_ny_obj(v)",
+       "Checks if value is a Nytrix heap object.")
+RT_DEF("__is_str_obj", __is_str_obj, 1, "fn __is_str_obj(v)",
+       "Checks if value is a Nytrix string object.")
+RT_DEF("__is_float_obj", __is_float_obj, 1, "fn __is_float_obj(v)",
+       "Checks if value is a Nytrix float object.")
+RT_DEF("__tagof", __tagof, 1, "fn __tagof(v)",
+       "Returns the raw runtime tag stored at v-8, or 0.")
 RT_DEF("__add", __add, 2, "fn __add(a, b)", "Integer addition.")
 RT_DEF("__sub", __sub, 2, "fn __sub(a, b)", "Integer subtraction.")
 RT_DEF("__mul", __mul, 2, "fn __mul(a, b)", "Integer multiplication.")
@@ -85,6 +176,8 @@ RT_DEF("__dlerror", __dlerror, 0, "fn __dlerror()",
 
 RT_DEF("__call0", __call0, 1, "fn __call0(fptr)", "Call fptr with 0 args.")
 RT_DEF("__call1", __call1, 2, "fn __call1(fptr, a)", "Call fptr with 1 arg.")
+RT_DEF("__call1_i64", __call1_i64, 2, "fn __call1_i64(fptr, a)",
+       "Call fptr with one i64 argument and i64 return.")
 RT_DEF("__call2", __call2, 3, "fn __call2(fptr, a, b)",
        "Call fptr with 2 args.")
 RT_DEF("__call3", __call3, 4, "fn __call3(fptr, a, b, c)",
@@ -142,9 +235,11 @@ RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",
 RT_DEF("__run_defers_to", __run_defers_to, 1, "fn __run_defers_to(n)",
        "Internal: run defers.")
 
-RT_DEF("__argc", __argc, 0, "fn __argc()",
+RT_DEF("__argc", ny_rt_argc, 0, "fn __argc()",
        "Returns the number of command-line arguments.")
-RT_DEF("__argv", __argv, 1, "fn __argv(i)",
+RT_DEF("__argvp", ny_rt_argvp, 0, "fn __argvp()",
+       "Returns the raw argv pointer.")
+RT_DEF("__argv", ny_rt_argv, 1, "fn __argv(i)",
        "Returns the command-line argument string at index i.")
 RT_DEF("__envc", __envc, 0, "fn __envc()",
        "Returns the number of environment variables.")
@@ -164,6 +259,12 @@ RT_DEF("__unwrap", __unwrap, 1, "fn __unwrap(v)",
 
 RT_DEF("__thread_spawn", __thread_spawn, 2, "fn __thread_spawn(fn, arg)",
        "Spawns a new thread.")
+RT_DEF("__thread_spawn_call", __thread_spawn_call, 3,
+       "fn __thread_spawn_call(fn, argc, argv)",
+       "Spawns a new thread and invokes fn with argc arguments from argv.")
+RT_DEF("__thread_launch_call", __thread_launch_call, 3,
+       "fn __thread_launch_call(fn, argc, argv)",
+       "Launches a detached thread and invokes fn with argc arguments.")
 RT_DEF("__thread_join", __thread_join, 1, "fn __thread_join(t)",
        "Joins a thread.")
 RT_DEF("__mutex_new", __mutex_new, 0, "fn __mutex_new()",
@@ -195,6 +296,7 @@ RT_DEF("__os_name", __os_name, 0, "fn __os_name()",
 RT_DEF("__arch_name", __arch_name, 0, "fn __arch_name()",
        "Returns the name of the architecture.")
 
+
 #ifndef RT_GV
 #define RT_GV(n, p, t, d)
 #endif
@@ -203,9 +305,9 @@ RT_GV("std.core.primitives.__argc_val", __argc_val, int64_t,
       "Global: argc value.")
 RT_GV("std.core.primitives.__envc_val", __envc_val, int64_t,
       "Global: envc value.")
-RT_GV("std.core.primitives.__argv_ptr", __argv_ptr, char **,
+RT_GV("std.core.primitives.__argv_ptr", __argv_ptr, int64_t *,
       "Global: argv pointer.")
-RT_GV("std.core.primitives.__envp_ptr", __envp_ptr, char **,
+RT_GV("std.core.primitives.__envp_ptr", __envp_ptr, int64_t *,
       "Global: envp pointer.")
 RT_GV("std.core.primitives.__errno_val", __errno_val, int64_t,
       "Global: errno value.")

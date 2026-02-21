@@ -41,4 +41,3 @@ mut a = 1
 }
 
 print("✓ Scope tests passed")
-

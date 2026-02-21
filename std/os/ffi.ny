@@ -2,13 +2,16 @@
 ;; Os Ffi module.
 
 module std.os.ffi (
-   RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlsym, dlclose, dlerror,
-   call0_void, call1_void, call2_void, call3_void, call0, call1, call2, call3, call4, call5,
+   RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlopen_any, dlsym, dlclose, dlerror,
+   call0_void, call1_void, call2_void, call3_void, call0, call1, call1_i64, call2, call3, call4, call5,
    call6, call7, call8, call9, call10, call11, call12, call13, ffi_call,
    bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all
 )
 use std.core as core
 use std.core.dict as _d
+use std.str *
+use std.os *
+use std.os.path as ospath
 
 fn RTLD_LAZY(){
    "dlopen flag: resolve symbols lazily."
@@ -33,6 +36,59 @@ fn RTLD_LOCAL(){
 fn dlopen(path, flags){
    "Opens a dynamic library."
    return __dlopen(path, flags)
+}
+
+fn _try(path, flags){
+   "Internal helper."
+   def h = __dlopen(path, flags)
+   if(h != 0){ return h }
+   0
+}
+
+fn dlopen_any(name, flags=0){
+   "Opens a dynamic library by base name across OSes."
+   if(!is_str(name) || str_len(name) == 0){ return 0 }
+   def n = str_len(name)
+   if(n >= 4){
+      if(endswith(name, ".so") || endswith(name, ".dylib") || endswith(name, ".dll")){ return _try(name, flags) }
+   }
+   def has_sep = ospath.has_sep(name)
+   if(__os_name() == "windows"){
+      def h0 = _try(name, flags)
+      if(h0){ return h0 }
+      def h1 = _try(name + ".dll", flags)
+      if(h1){ return h1 }
+      if(!has_sep){
+         def h2 = _try("lib" + name + ".dll", flags)
+         if(h2){ return h2 }
+      }
+      return 0
+   }
+   if(__os_name() == "macos"){
+      def h0 = _try(name, flags)
+      if(h0){ return h0 }
+      def h1 = _try(name + ".dylib", flags)
+      if(h1){ return h1 }
+      if(!has_sep){
+         def h2 = _try("lib" + name + ".dylib", flags)
+         if(h2){ return h2 }
+      }
+      return 0
+   }
+   ;; linux/other
+   def h0 = _try(name, flags)
+   if(h0){ return h0 }
+   def h1 = _try(name + ".so", flags)
+   if(h1){ return h1 }
+   def h2 = _try(name + ".so.1", flags)
+   if(h2){ return h2 }
+   if(!has_sep){
+      def h3 = _try("lib" + name + ".so", flags)
+      if(h3){ return h3 }
+      def h4 = _try("lib" + name + ".so.1", flags)
+      if(h4){ return h4 }
+   }
+   0
 }
 
 fn dlsym(handle, symbol){
@@ -78,6 +134,11 @@ fn call0(fptr){
 fn call1(fptr,a){
    "Calls `fptr(a)` and returns the raw result."
    return __call1(fptr,a)
+}
+
+fn call1_i64(fptr,a){
+   "Calls `fptr(a)` with one 64-bit integer argument/return path."
+   return __call1_i64(fptr,a)
 }
 
 fn call2(fptr,a,b){
@@ -221,7 +282,53 @@ fn import_linked(names){
    import_all(0, names)
 }
 
-fn extern_all(names){
+fn extern_all(){
    "Registers extern functions by name (or [name, arity]) for linked symbols."
    0
+}
+
+if(comptime{__main()}){
+    use std.core *
+    use std.os.ffi as ffi
+    use std.core.error *
+    use std.os.sys *
+
+    print("Testing FFI...")
+
+    def osn = os()
+    mut h = 0
+
+    if(eq(osn, "windows")){
+        h = ffi.dlopen("msvcrt.dll", ffi.RTLD_NOW())
+        if(h == 0){ h = ffi.dlopen("ucrtbase.dll", ffi.RTLD_NOW()) }
+    } else {
+        h = ffi.dlopen_any("c", ffi.RTLD_NOW())
+        if(h == 0){ h = ffi.dlopen("/usr/lib/libSystem.B.dylib", ffi.RTLD_NOW()) }
+        if(h == 0){ h = ffi.dlopen("libSystem.B.dylib", ffi.RTLD_NOW()) }
+        if(h == 0){ h = ffi.dlopen("libc.so.6", ffi.RTLD_NOW()) }
+        if(h == 0){ h = ffi.dlopen("/lib/x86_64-linux-gnu/libc.so.6", ffi.RTLD_NOW()) }
+        if(h == 0){ h = ffi.dlopen("/usr/lib/libc.so.6", ffi.RTLD_NOW()) }
+        if(h == 0){ h = ffi.dlopen("libc.so", ffi.RTLD_NOW()) }
+    }
+
+    if(h != 0){
+     print("Loaded libc handle:", h)
+
+     ; Test direct symbol call.
+     mut abs_f = 0
+     if(eq(osn, "windows")){
+         abs_f = ffi.dlsym(h, "_llabs")
+     } else {
+         abs_f = ffi.dlsym(h, "llabs")
+     }
+
+     if(abs_f != 0){
+      mut res = ffi.call1_i64(abs_f, -50)
+      print("llabs(-50) =", res)
+      assert(res == 50, "ffi llabs")
+     }
+     ffi.dlclose(h)
+    } else {
+     print("Skipping FFI tests (libc not found)")
+    }
 }

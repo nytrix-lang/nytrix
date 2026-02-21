@@ -1,14 +1,722 @@
 #include "base/util.h"
 #include "priv.h"
+#ifndef _WIN32
 #include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static bool ny_user_ctx_without_prelude(const codegen_t *cg) {
-  if (cg->implicit_prelude)
+/*
+ * Lookup hot-path cache:
+ * Symbol resolution in codegen repeatedly scans fun/global vectors. Keep a
+ * tiny direct-mapped cache per query kind and invalidate entries when codegen
+ * context mutates (stamp changes).
+ */
+#define NY_LOOKUP_CACHE_SLOTS 2048u
+#define NY_LOOKUP_KEY_MAX 96u
+#define NY_LOOKUP_EXACT_INDEX_SLOTS 8192u
+#define NY_MODULE_USED_INDEX_SLOTS 1024u
+#define NY_OVERLOAD_NAME_INDEX_SLOTS 8192u
+
+typedef struct ny_fun_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_LOOKUP_KEY_MAX];
+  fun_sig *value;
+} ny_fun_lookup_cache_entry_t;
+
+typedef struct ny_global_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_LOOKUP_KEY_MAX];
+  binding *value;
+} ny_global_lookup_cache_entry_t;
+
+typedef struct ny_alias_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_LOOKUP_KEY_MAX];
+  const char *value;
+} ny_alias_lookup_cache_entry_t;
+
+typedef struct ny_overload_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint32_t argc;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_LOOKUP_KEY_MAX];
+  fun_sig *value;
+} ny_overload_lookup_cache_entry_t;
+
+static ny_fun_lookup_cache_entry_t g_fun_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+static ny_global_lookup_cache_entry_t
+    g_global_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+static ny_alias_lookup_cache_entry_t
+    g_alias_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+static ny_overload_lookup_cache_entry_t
+    g_overload_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+
+typedef struct ny_fun_exact_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  fun_sig *value;
+  uint8_t state;
+} ny_fun_exact_index_entry_t;
+
+typedef struct ny_global_exact_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  binding *value;
+  uint8_t state;
+} ny_global_exact_index_entry_t;
+
+typedef struct ny_fun_tail_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *tail_name;
+  fun_sig *value;
+  uint8_t state;
+} ny_fun_tail_index_entry_t;
+
+typedef struct ny_global_tail_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *tail_name;
+  binding *value;
+  uint8_t state;
+} ny_global_tail_index_entry_t;
+
+typedef struct ny_module_used_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  uint8_t state;
+} ny_module_used_index_entry_t;
+
+static ny_fun_exact_index_entry_t
+    g_fun_exact_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
+static ny_global_exact_index_entry_t
+    g_global_exact_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
+static ny_fun_tail_index_entry_t g_fun_tail_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
+static ny_global_tail_index_entry_t
+    g_global_tail_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
+static ny_module_used_index_entry_t
+    g_use_module_index[NY_MODULE_USED_INDEX_SLOTS];
+static ny_module_used_index_entry_t
+    g_user_use_module_index[NY_MODULE_USED_INDEX_SLOTS];
+static int32_t g_overload_name_heads[NY_OVERLOAD_NAME_INDEX_SLOTS];
+static int32_t *g_overload_name_next = NULL;
+static size_t g_overload_name_next_cap = 0;
+
+static const codegen_t *g_fun_exact_index_cg = NULL;
+static const codegen_t *g_global_exact_index_cg = NULL;
+static const codegen_t *g_fun_tail_index_cg = NULL;
+static const codegen_t *g_global_tail_index_cg = NULL;
+static const codegen_t *g_use_module_index_cg = NULL;
+static const codegen_t *g_user_use_module_index_cg = NULL;
+static const codegen_t *g_overload_name_index_cg = NULL;
+static uint64_t g_fun_exact_index_stamp = 0;
+static uint64_t g_global_exact_index_stamp = 0;
+static uint64_t g_fun_tail_index_stamp = 0;
+static uint64_t g_global_tail_index_stamp = 0;
+static uint64_t g_use_module_index_stamp = 0;
+static uint64_t g_user_use_module_index_stamp = 0;
+static uint64_t g_overload_name_index_stamp = 0;
+static bool g_fun_exact_index_ready = false;
+static bool g_global_exact_index_ready = false;
+static bool g_fun_tail_index_ready = false;
+static bool g_global_tail_index_ready = false;
+static bool g_use_module_index_ready = false;
+static bool g_user_use_module_index_ready = false;
+static bool g_overload_name_index_ready = false;
+
+typedef struct ny_lookup_stamp_cache_t {
+  const codegen_t *cg;
+  void *module;
+  void *ctx;
+  const void *fun_data;
+  const void *global_data;
+  const void *alias_data;
+  const void *import_alias_data;
+  const void *user_import_alias_data;
+  const void *use_modules_data;
+  const void *user_use_modules_data;
+  size_t fun_len;
+  size_t global_len;
+  size_t alias_len;
+  size_t import_alias_len;
+  size_t user_import_alias_len;
+  size_t use_modules_len;
+  size_t user_use_modules_len;
+  const char *current_module_name;
+  uint64_t stamp;
+  bool ready;
+} ny_lookup_stamp_cache_t;
+
+static ny_lookup_stamp_cache_t g_lookup_stamp_cache;
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail);
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail);
+static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp);
+static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash);
+
+typedef void *(*ny_recurse_lookup_fn)(codegen_t *cg, const char *name,
+                                      void *ctx);
+
+typedef struct ny_overload_recurse_ctx_t {
+  size_t argc;
+} ny_overload_recurse_ctx_t;
+
+static void *ny_lookup_fun_recurse(codegen_t *cg, const char *name, void *ctx) {
+  (void)ctx;
+  return lookup_fun(cg, name);
+}
+
+static void *ny_lookup_global_recurse(codegen_t *cg, const char *name,
+                                      void *ctx) {
+  (void)ctx;
+  return lookup_global(cg, name);
+}
+
+static void *ny_lookup_overload_recurse(codegen_t *cg, const char *name,
+                                        void *ctx) {
+  ny_overload_recurse_ctx_t *ov = (ny_overload_recurse_ctx_t *)ctx;
+  return resolve_overload(cg, name, ov ? ov->argc : 0);
+}
+
+static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
+                                           bool qualified,
+                                           ny_recurse_lookup_fn recurse,
+                                           void *ctx) {
+  if (!cg || !name || !*name || qualified || !recurse)
+    return NULL;
+
+  if (cg->current_module_name && *cg->current_module_name) {
+    char scoped[256];
+    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
+                      name);
+    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+      void *scoped_res = recurse(cg, scoped, ctx);
+      if (scoped_res)
+        return scoped_res;
+    }
+  }
+
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (!alias_full || !*alias_full)
+    return NULL;
+  if (strcmp(alias_full, name) == 0)
+    return NULL;
+  return recurse(cg, alias_full, ctx);
+}
+
+static inline uint64_t ny_mix64(uint64_t h, uint64_t v) {
+  h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+  return h;
+}
+
+static uint64_t ny_lookup_stamp(const codegen_t *cg) {
+  if (g_lookup_stamp_cache.ready && g_lookup_stamp_cache.cg == cg &&
+      g_lookup_stamp_cache.module == (void *)cg->module &&
+      g_lookup_stamp_cache.ctx == (void *)cg->ctx &&
+      g_lookup_stamp_cache.fun_data == (const void *)cg->fun_sigs.data &&
+      g_lookup_stamp_cache.global_data == (const void *)cg->global_vars.data &&
+      g_lookup_stamp_cache.alias_data == (const void *)cg->aliases.data &&
+      g_lookup_stamp_cache.import_alias_data ==
+          (const void *)cg->import_aliases.data &&
+      g_lookup_stamp_cache.user_import_alias_data ==
+          (const void *)cg->user_import_aliases.data &&
+      g_lookup_stamp_cache.use_modules_data ==
+          (const void *)cg->use_modules.data &&
+      g_lookup_stamp_cache.user_use_modules_data ==
+          (const void *)cg->user_use_modules.data &&
+      g_lookup_stamp_cache.fun_len == cg->fun_sigs.len &&
+      g_lookup_stamp_cache.global_len == cg->global_vars.len &&
+      g_lookup_stamp_cache.alias_len == cg->aliases.len &&
+      g_lookup_stamp_cache.import_alias_len == cg->import_aliases.len &&
+      g_lookup_stamp_cache.user_import_alias_len ==
+          cg->user_import_aliases.len &&
+      g_lookup_stamp_cache.use_modules_len == cg->use_modules.len &&
+      g_lookup_stamp_cache.user_use_modules_len == cg->user_use_modules.len &&
+      g_lookup_stamp_cache.current_module_name == cg->current_module_name) {
+    return g_lookup_stamp_cache.stamp;
+  }
+
+  uint64_t h = 0xcbf29ce484222325ULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->module);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->ctx);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  h = ny_mix64(h, (uint64_t)cg->aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->user_import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+
+  g_lookup_stamp_cache.cg = cg;
+  g_lookup_stamp_cache.module = (void *)cg->module;
+  g_lookup_stamp_cache.ctx = (void *)cg->ctx;
+  g_lookup_stamp_cache.fun_data = (const void *)cg->fun_sigs.data;
+  g_lookup_stamp_cache.global_data = (const void *)cg->global_vars.data;
+  g_lookup_stamp_cache.alias_data = (const void *)cg->aliases.data;
+  g_lookup_stamp_cache.import_alias_data =
+      (const void *)cg->import_aliases.data;
+  g_lookup_stamp_cache.user_import_alias_data =
+      (const void *)cg->user_import_aliases.data;
+  g_lookup_stamp_cache.use_modules_data = (const void *)cg->use_modules.data;
+  g_lookup_stamp_cache.user_use_modules_data =
+      (const void *)cg->user_use_modules.data;
+  g_lookup_stamp_cache.fun_len = cg->fun_sigs.len;
+  g_lookup_stamp_cache.global_len = cg->global_vars.len;
+  g_lookup_stamp_cache.alias_len = cg->aliases.len;
+  g_lookup_stamp_cache.import_alias_len = cg->import_aliases.len;
+  g_lookup_stamp_cache.user_import_alias_len = cg->user_import_aliases.len;
+  g_lookup_stamp_cache.use_modules_len = cg->use_modules.len;
+  g_lookup_stamp_cache.user_use_modules_len = cg->user_use_modules.len;
+  g_lookup_stamp_cache.current_module_name = cg->current_module_name;
+  g_lookup_stamp_cache.stamp = h;
+  g_lookup_stamp_cache.ready = true;
+  return h;
+}
+
+static inline uint64_t ny_fun_index_version(const codegen_t *cg) {
+  uint64_t h = 0x9ae16a3b2f90404fULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  return h;
+}
+
+static inline uint64_t ny_global_index_version(const codegen_t *cg) {
+  uint64_t h = 0x517cc1b727220a95ULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  return h;
+}
+
+static inline bool ny_fun_sig_in_current_sigs(const codegen_t *cg,
+                                              const fun_sig *sig) {
+  if (!cg || !sig || !cg->fun_sigs.data || cg->fun_sigs.len == 0)
     return false;
+  const fun_sig *begin = cg->fun_sigs.data;
+  const fun_sig *end = begin + cg->fun_sigs.len;
+  return sig >= begin && sig < end;
+}
+
+static inline uint64_t ny_fun_tail_index_version(const codegen_t *cg) {
+  uint64_t h = 0xa0761d6478bd642fULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+  return h;
+}
+
+static inline uint64_t ny_global_tail_index_version(const codegen_t *cg) {
+  uint64_t h = 0xe7037ed1a0b428dbULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+  return h;
+}
+
+static inline uint64_t ny_module_used_index_version(const codegen_t *cg,
+                                                    bool user_only) {
+  uint64_t h = user_only ? 0x6f4f6b7d3159635bULL : 0x6e40f31a0e31f26bULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  if (user_only) {
+    h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+    h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  } else {
+    h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+    h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  }
+  return h;
+}
+
+static inline uint32_t ny_fun_name_len(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (fs->name[0] == '\0') {
+    fs->name_len = 0;
+    return 0;
+  }
+  /*
+   * Treat cached length as valid only when a matching hash has been computed.
+   * Some code paths clone signatures and reset hash while changing the name.
+   */
+  if (fs->name_len && fs->name_hash)
+    return fs->name_len;
+  size_t n = strlen(fs->name);
+  fs->name_len = (uint32_t)n;
+  return (uint32_t)n;
+}
+
+static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (!fs->name_hash) {
+    fs->name_hash = ny_hash_name(fs->name, ny_fun_name_len(fs));
+  }
+  return fs->name_hash;
+}
+
+/* Build open-addressed exact/tail indexes for both fun/global symbol vectors.
+ */
+#define NY_DEFINE_EXACT_INDEX_REBUILD(                                         \
+    fn_name, index_arr, index_cg, index_stamp, index_ready, vec_field,         \
+    item_type, item_name_expr, item_len_expr, item_hash_expr, entry_type,      \
+    entry_name_field, entry_value_field, item_value_expr)                      \
+  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
+    memset(index_arr, 0, sizeof(index_arr));                                   \
+    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
+      item_type *item = &cg->vec_field.data[i];                                \
+      const char *name = (item_name_expr);                                     \
+      if (!name || !*name)                                                     \
+        continue;                                                              \
+      size_t len = (size_t)(item_len_expr);                                    \
+      uint64_t hash = (item_hash_expr);                                        \
+      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
+      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
+        entry_type *e = &index_arr[pos];                                       \
+        if (!e->state) {                                                       \
+          e->state = 1u;                                                       \
+          e->hash = hash;                                                      \
+          e->len = (uint32_t)len;                                              \
+          e->entry_name_field = name;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        if (e->hash == hash && e->len == (uint32_t)len &&                      \
+            memcmp(e->entry_name_field, name, len) == 0 &&                     \
+            e->entry_name_field[len] == '\0') {                                \
+          break;                                                               \
+        }                                                                      \
+        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
+      }                                                                        \
+    }                                                                          \
+    index_cg = cg;                                                             \
+    index_stamp = stamp;                                                       \
+    index_ready = true;                                                        \
+  }
+
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_fun_exact_index_rebuild, g_fun_exact_index,
+                              g_fun_exact_index_cg, g_fun_exact_index_stamp,
+                              g_fun_exact_index_ready, fun_sigs, fun_sig,
+                              item->name, ny_fun_name_len(item),
+                              ny_fun_name_hash(item),
+                              ny_fun_exact_index_entry_t, name, value, item)
+
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_global_exact_index_rebuild,
+                              g_global_exact_index, g_global_exact_index_cg,
+                              g_global_exact_index_stamp,
+                              g_global_exact_index_ready, global_vars, binding,
+                              item->name, ny_binding_name_len(item),
+                              ny_binding_name_hash(item),
+                              ny_global_exact_index_entry_t, name, value, item)
+
+#undef NY_DEFINE_EXACT_INDEX_REBUILD
+
+fun_sig *lookup_fun_exact(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  size_t len = strlen(name);
+  bool rebuilt_after_stale = false;
+  uint64_t stamp = 0;
+  uint64_t hash = 0;
+  size_t pos = 0;
+retry:
+  stamp = ny_fun_index_version(cg);
+  if (!g_fun_exact_index_ready || g_fun_exact_index_cg != cg ||
+      g_fun_exact_index_stamp != stamp) {
+    ny_fun_exact_index_rebuild(cg, stamp);
+  }
+  hash = ny_hash_name(name, len);
+  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_fun_exact_index_entry_t *e = &g_fun_exact_index[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->name, name, len) == 0 && e->name[len] == '\0') {
+      if (!ny_fun_sig_in_current_sigs(cg, e->value)) {
+        if (!rebuilt_after_stale) {
+          ny_fun_exact_index_rebuild(cg, stamp);
+          rebuilt_after_stale = true;
+          goto retry;
+        }
+        return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+binding *lookup_global_exact(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  size_t len = strlen(name);
+  uint64_t stamp = ny_global_index_version(cg);
+  if (!g_global_exact_index_ready || g_global_exact_index_cg != cg ||
+      g_global_exact_index_stamp != stamp) {
+    ny_global_exact_index_rebuild(cg, stamp);
+  }
+  uint64_t hash = ny_hash_name(name, len);
+  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_global_exact_index_entry_t *e = &g_global_exact_index[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->name, name, len) == 0 && e->name[len] == '\0') {
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+static bool ny_cacheable_name(const char *name, size_t *out_len) {
+  if (!name || !*name)
+    return false;
+  size_t len = strlen(name);
+  if (len == 0 || len >= NY_LOOKUP_KEY_MAX)
+    return false;
+  *out_len = len;
+  return true;
+}
+
+static inline uint64_t ny_overload_cache_hash(const char *name, size_t len,
+                                              size_t argc) {
+  return ny_hash_name(name, len) ^ ((uint64_t)argc * 11400714819323198485ULL);
+}
+
+#define NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name)                    \
+  ((e)->state && (e)->cg == (cg) && (e)->stamp == (stamp) &&                   \
+   (e)->hash == (hash) && (e)->len == (uint16_t)(len) &&                       \
+   memcmp((e)->key, (name), (len)) == 0)
+
+#define NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value_expr)                \
+  do {                                                                         \
+    (e)->cg = (cg);                                                            \
+    (e)->stamp = ny_lookup_stamp(cg);                                          \
+    (e)->hash = (hash);                                                        \
+    (e)->len = (uint16_t)(len);                                                \
+    memcpy((e)->key, (name), (len));                                           \
+    (e)->key[(len)] = '\0';                                                    \
+    (e)->value = (value_expr);                                                 \
+    (e)->state = (value_expr) ? 2u : 1u;                                       \
+  } while (0)
+
+static int ny_fun_cache_get(codegen_t *cg, const char *name, fun_sig **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  uint64_t hash = ny_hash_name(name, len);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_fun_lookup_cache_entry_t *e =
+      &g_fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_fun_sig_in_current_sigs(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_fun_cache_put(codegen_t *cg, const char *name, fun_sig *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  uint64_t hash = ny_hash_name(name, len);
+  ny_fun_lookup_cache_entry_t *e =
+      &g_fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_fun_sig_in_current_sigs(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+#define NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(fn_name, entry_type, table_name,     \
+                                          out_type)                            \
+  static int fn_name(codegen_t *cg, const char *name, out_type out) {          \
+    size_t len = 0;                                                            \
+    if (!ny_cacheable_name(name, &len))                                        \
+      return -1;                                                               \
+    uint64_t hash = ny_hash_name(name, len);                                   \
+    uint64_t stamp = ny_lookup_stamp(cg);                                      \
+    entry_type *e = &table_name[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];          \
+    if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))                  \
+      return -1;                                                               \
+    if (e->state == 2u) {                                                      \
+      *out = e->value;                                                         \
+      return 1;                                                                \
+    }                                                                          \
+    return 0;                                                                  \
+  }
+
+#define NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(fn_name, entry_type, table_name,     \
+                                          value_type)                          \
+  static void fn_name(codegen_t *cg, const char *name, value_type value) {     \
+    size_t len = 0;                                                            \
+    if (!ny_cacheable_name(name, &len))                                        \
+      return;                                                                  \
+    uint64_t hash = ny_hash_name(name, len);                                   \
+    entry_type *e = &table_name[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];          \
+    NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);                        \
+  }
+
+NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(ny_global_cache_get,
+                                  ny_global_lookup_cache_entry_t,
+                                  g_global_lookup_cache, binding **)
+NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(ny_global_cache_put,
+                                  ny_global_lookup_cache_entry_t,
+                                  g_global_lookup_cache, binding *)
+
+NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(ny_alias_cache_get,
+                                  ny_alias_lookup_cache_entry_t,
+                                  g_alias_lookup_cache, const char **)
+NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(ny_alias_cache_put,
+                                  ny_alias_lookup_cache_entry_t,
+                                  g_alias_lookup_cache, const char *)
+
+#undef NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET
+#undef NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT
+
+static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
+                                 fun_sig **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  uint64_t hash = ny_overload_cache_hash(name, len, argc);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_overload_lookup_cache_entry_t *e =
+      &g_overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name) ||
+      e->argc != (uint32_t)argc)
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_fun_sig_in_current_sigs(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_overload_cache_put(codegen_t *cg, const char *name, size_t argc,
+                                  fun_sig *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  uint64_t hash = ny_overload_cache_hash(name, len, argc);
+  ny_overload_lookup_cache_entry_t *e =
+      &g_overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_fun_sig_in_current_sigs(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+  e->argc = (uint32_t)argc;
+}
+
+#undef NY_CACHE_ENTRY_MATCH
+#undef NY_CACHE_ENTRY_FILL
+
+static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
+  memset(g_overload_name_heads, 0xff, sizeof(g_overload_name_heads));
+  size_t len = cg->fun_sigs.len;
+  if (g_overload_name_next_cap < len) {
+    int32_t *grown = realloc(g_overload_name_next, sizeof(int32_t) * len);
+    if (!grown) {
+      g_overload_name_index_ready = false;
+      g_overload_name_index_cg = NULL;
+      g_overload_name_index_stamp = 0;
+      return;
+    }
+    g_overload_name_next = grown;
+    g_overload_name_next_cap = len;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    g_overload_name_next[i] = -1;
+  }
+  for (ssize_t i = (ssize_t)len - 1; i >= 0; --i) {
+    fun_sig *fs = &cg->fun_sigs.data[i];
+    if (!fs->name || !*fs->name)
+      continue;
+    uint64_t hash = ny_fun_name_hash(fs);
+    size_t bucket = (size_t)(hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u));
+    g_overload_name_next[i] = g_overload_name_heads[bucket];
+    g_overload_name_heads[bucket] = (int32_t)i;
+  }
+  g_overload_name_index_cg = cg;
+  g_overload_name_index_stamp = stamp;
+  g_overload_name_index_ready = true;
+}
+
+static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
+  uint64_t stamp = ny_fun_index_version(cg);
+  if (!g_overload_name_index_ready || g_overload_name_index_cg != cg ||
+      g_overload_name_index_stamp != stamp) {
+    ny_overload_name_index_rebuild(cg, stamp);
+  }
+  if (!g_overload_name_index_ready)
+    return -1;
+  return g_overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
+}
+
+static bool ny_user_ctx_is_non_std(const codegen_t *cg) {
   if (!cg->current_module_name)
     return true;
   return strncmp(cg->current_module_name, "std.", 4) != 0 &&
@@ -17,7 +725,7 @@ static bool ny_user_ctx_without_prelude(const codegen_t *cg) {
 
 static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
                                          const char *candidate_name) {
-  if (!ny_user_ctx_without_prelude(cg))
+  if (!ny_user_ctx_is_non_std(cg))
     return false;
   if (!query || strchr(query, '.'))
     return false;
@@ -30,11 +738,23 @@ static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
 bool builtin_allowed_comptime(const char *name) {
   // Disallow non-deterministic or system-interacting builtins at comptime.
   static const char *deny[] = {
-      "__syscall",      "__execve",      "__dlopen",
-      "__dlsym",        "__dlclose",     "__dlerror",
-      "__thread_spawn", "__thread_join", "__rand64",
-      "__srand",        "__globals",     "__set_globals",
-      "__set_args",     "__parse_ast",   NULL,
+      "__syscall",
+      "__execve",
+      "__dlopen",
+      "__dlsym",
+      "__dlclose",
+      "__dlerror",
+      "__thread_spawn",
+      "__thread_spawn_call",
+      "__thread_launch_call",
+      "__thread_join",
+      "__rand64",
+      "__srand",
+      "__globals",
+      "__set_globals",
+      "__set_args",
+      "__parse_ast",
+      NULL,
   };
   for (int i = 0; deny[i]; ++i) {
     if (strcmp(name, deny[i]) == 0)
@@ -72,14 +792,14 @@ void add_builtins(codegen_t *cg) {
               i);
   }
 
-#define RT_DEF(name, implementation, args, sig, doc)                           \
+#define RT_DEF(rt_name, implementation, args, sig, doc)                        \
   do {                                                                         \
-    if (cg->comptime && !builtin_allowed_comptime(name))                       \
+    if (cg->comptime && !builtin_allowed_comptime(rt_name))                    \
       break;                                                                   \
     LLVMTypeRef ty = NULL;                                                     \
-    if (strcmp(name, "__copy_mem") == 0) {                                     \
+    if (strcmp(rt_name, "__copy_mem") == 0) {                                  \
       ty = LLVMFunctionType(                                                   \
-          LLVMVoidTypeInContext(cg->ctx),                                      \
+          cg->type_i64,                                                        \
           (LLVMTypeRef[]){cg->type_i64, cg->type_i64, cg->type_i64}, 3, 0);    \
     } else {                                                                   \
       ty = fn_types[args];                                                     \
@@ -88,18 +808,53 @@ void add_builtins(codegen_t *cg) {
     LLVMValueRef f = LLVMGetNamedFunction(cg->module, impl_name);              \
     if (!f)                                                                    \
       f = LLVMAddFunction(cg->module, impl_name, ty);                          \
-    fun_sig sig_obj = {ny_strdup(name), ty,    f,    NULL, (int)args,          \
-                       false,           false, NULL, NULL, false};             \
+    fun_sig sig_obj = {.name = ny_strdup(rt_name),                             \
+                       .type = ty,                                             \
+                       .value = f,                                             \
+                       .stmt_t = NULL,                                         \
+                       .arity = (int)args,                                     \
+                       .is_variadic = false,                                   \
+                       .is_extern = false,                                     \
+                       .effects = NY_FX_ALL,                                   \
+                       .args_escape = true,                                    \
+                       .args_mutated = true,                                   \
+                       .returns_alias = true,                                  \
+                       .effects_known = false,                                 \
+                       .link_name = NULL,                                      \
+                       .return_type = NULL,                                    \
+                       .owned = false,                                         \
+                       .name_hash = 0};                                        \
     vec_push(&cg->fun_sigs, sig_obj);                                          \
   } while (0);
 
-#define RT_GV(name, p, t, doc)                                                 \
+#define RT_GV(rt_name, p, t, doc)                                              \
   do {                                                                         \
-    LLVMValueRef g = LLVMAddGlobal(cg->module, cg->type_i64, name);            \
-    LLVMSetLinkage(g, LLVMExternalLinkage);                                    \
-    binding b = {ny_strdup(name), g, NULL, false, false, false, NULL};         \
+    LLVMValueRef g = LLVMGetNamedGlobal(cg->module, rt_name);                  \
+    if (!g) {                                                                  \
+      g = LLVMAddGlobal(cg->module, cg->type_i64, rt_name);                    \
+      LLVMSetLinkage(g, LLVMExternalLinkage);                                  \
+    }                                                                          \
+    binding b = {.name = ny_strdup(rt_name),                                   \
+                 .value = g,                                                   \
+                 .stmt_t = NULL,                                               \
+                 .is_slot = true,                                              \
+                 .is_mut = false,                                              \
+                 .is_used = false,                                             \
+                 .owned = false,                                               \
+                 .type_name = NULL,                                            \
+                 .decl_type_name = NULL,                                       \
+                 .name_hash = 0};                                              \
     vec_push(&cg->global_vars, b);                                             \
   } while (0);
+
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
 
 #include "rt/defs.h"
 
@@ -218,122 +973,58 @@ char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
 }
 
 fun_sig *lookup_fun(codegen_t *cg, const char *name) {
-  fun_sig *res = NULL;
+  if (!name || !*name)
+    return NULL;
+  fun_sig *cached = NULL;
+  int cache_state = ny_fun_cache_get(cg, name, &cached);
+  if (cache_state == 1)
+    return cached;
+  if (cache_state == 0)
+    return NULL;
 
-  if (cg->implicit_prelude && name && strcmp(name, "eq") == 0 &&
-      strchr(name, '.') == NULL) {
-    for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-      if (strcmp(cg->fun_sigs.data[i].name, "std.core.reflect.eq") == 0) {
-        return &cg->fun_sigs.data[i];
-      }
-    }
-  }
+  fun_sig *res = NULL;
+  bool qualified = strchr(name, '.') != NULL;
 
   // 1. Precise name match (local or unqualified global)
-  for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-    if (strcmp(cg->fun_sigs.data[i].name, name) == 0) {
-      if (ny_block_implicit_std_symbol(cg, name, cg->fun_sigs.data[i].name))
-        continue;
-      res = &cg->fun_sigs.data[i];
-      goto end;
-    }
-  }
+  res = lookup_fun_exact(cg, name);
+  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
+    goto end;
+  res = NULL;
 
-  // 2. Namespaced lookup if name is not qualified
-  if (cg->current_module_name && strchr(name, '.') == NULL) {
-    if (strcmp(name, "__globals") == 0) {
-      fprintf(stderr,
-              "DEBUG: lookup_fun searching for __globals (cur_mod=%s)\n",
-              cg->current_module_name ? cg->current_module_name : "NULL");
-    }
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
-    for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-      if (strcmp(cg->fun_sigs.data[i].name, buf) == 0) {
-        res = &cg->fun_sigs.data[i];
-        goto end;
-      }
-    }
-  }
-
-  // 3. Import aliases and common fallbacks if name is not qualified
-  if (strchr(name, '.') == NULL) {
-    const char *alias_full = resolve_import_alias(cg, name);
-    if (alias_full) {
-      fun_sig *ares = lookup_fun(cg, alias_full);
-      if (ares) {
-        res = ares;
-        goto end;
-      }
-    }
-
-    if (cg->implicit_prelude) {
-      const char *fallbacks[] = {"std.core",
-                                 "std.core.reflect",
-                                 "std.core.primitives",
-                                 "std.core.error",
-                                 "std.core.mem",
-                                 "std.core.list",
-                                 "std.core.dict",
-                                 "std.core.set",
-                                 "std.core.sort",
-                                 "std.str",
-                                 "std.str.io",
-                                 "std.str.path",
-                                 "std.str.fmt",
-                                 "std.math",
-                                 "std.math.bigint",
-                                 "std.math.float",
-                                 "std.math.random",
-                                 "std.os",
-                                 "std.os.fs",
-                                 "std.os.process",
-                                 "std.os.time",
-                                 "std.os.ffi",
-                                 "std.os.args",
-                                 "std.net",
-                                 "std.net.socket",
-                                 "std.net.http",
-                                 "std.util",
-                                 "std.util.inspect",
-                                 "std.util.uuid",
-                                 "std.core.iter",
-                                 NULL};
-      for (int j = 0; fallbacks[j]; ++j) {
-        if (cg->current_module_name &&
-            strcmp(cg->current_module_name, fallbacks[j]) == 0)
-          continue;
-        char buf[256];
-        snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
-        for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-          if (strcmp(cg->fun_sigs.data[i].name, buf) == 0) {
-            res = &cg->fun_sigs.data[i];
-            goto end;
-          }
-        }
-      }
-    }
-  }
+  // 2. Current module scope + import alias fallback (unqualified names only)
+  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                      ny_lookup_fun_recurse, NULL);
+  if (res)
+    goto end;
   // Check aliases if name has dot
-  const char *dot = strchr(name, '.');
+  const char *dot = qualified ? strchr(name, '.') : NULL;
   if (dot) {
     size_t prefix_len = dot - name;
     for (size_t i = 0; i < cg->aliases.len; ++i) {
-      const char *alias = cg->aliases.data[i].name;
-      if (strlen(alias) == prefix_len &&
-          strncmp(name, alias, prefix_len) == 0) {
-        const char *real_mod_name = (const char *)cg->aliases.data[i].stmt_t;
+      binding *al = &cg->aliases.data[i];
+      const char *alias = al->name;
+      size_t alias_len = (size_t)ny_binding_name_len(al);
+      if (alias_len == prefix_len && strncmp(name, alias, prefix_len) == 0) {
+        const char *real_mod_name = (const char *)al->stmt_t;
         // Avoid infinite recursion if alias matches itself
         if (strncmp(name, real_mod_name, prefix_len) == 0 &&
             real_mod_name[prefix_len] == '\0') {
           continue;
         }
         // Construct resolved name: real_mod_name + dot + suffix
-        char *resolved = malloc(strlen(real_mod_name) + strlen(dot) + 1);
-        strcpy(resolved, real_mod_name);
-        strcat(resolved, dot);
+        size_t mod_len = strlen(real_mod_name);
+        size_t dot_len = strlen(dot);
+        size_t full_len = mod_len + dot_len;
+        char stack_buf[256];
+        char *resolved =
+            full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+        if (!resolved)
+          continue;
+        memcpy(resolved, real_mod_name, mod_len);
+        memcpy(resolved + mod_len, dot, dot_len + 1);
         fun_sig *recursive_res = lookup_fun(cg, resolved);
-        free(resolved);
+        if (resolved != stack_buf)
+          free(resolved);
         if (recursive_res) {
           res = recursive_res;
           goto end;
@@ -341,7 +1032,6 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
       }
     }
   } else {
-    // Check if the whole name is a module alias, try alias_target.name
     for (size_t i = 0; i < cg->aliases.len; ++i) {
       if (strcmp(cg->aliases.data[i].name, name) == 0) {
         const char *real_mod_name = (const char *)cg->aliases.data[i].stmt_t;
@@ -355,54 +1045,246 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
       }
     }
   }
-  for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-    const char *sig_name = cg->fun_sigs.data[i].name;
-    // Also try matching after the last dot if the input name is not qualified
-    if (strchr(name, '.') == NULL) {
-      const char *last_dot = strrchr(sig_name, '.');
-      if (last_dot && strcmp(last_dot + 1, name) == 0) {
-        // We found a match in a module. But is this module "used"?
-        // Check if the prefix (module name) is in use_modules
-        size_t mod_len = last_dot - sig_name;
-        bool user_only = !cg->implicit_prelude &&
-                         (!cg->current_module_name ||
-                          (strncmp(cg->current_module_name, "std.", 4) != 0 &&
-                           strncmp(cg->current_module_name, "lib.", 4) != 0));
-        char *const *mods_data =
-            user_only ? cg->user_use_modules.data : cg->use_modules.data;
-        size_t mods_len =
-            user_only ? cg->user_use_modules.len : cg->use_modules.len;
-        for (size_t m = 0; m < mods_len; ++m) {
-          const char *um = mods_data[m];
-          if (strlen(um) == mod_len && strncmp(um, sig_name, mod_len) == 0) {
-            res = &cg->fun_sigs.data[i];
-            goto end;
-          }
-        }
+  if (!res && !qualified) {
+    res = ny_fun_tail_find(cg, name);
+    if (res)
+      goto end;
+  }
+  if (!res && cg->parent) {
+    fun_sig *p = lookup_fun(cg->parent, name);
+    if (p && p->value) {
+      const char *fn_link_name = LLVMGetValueName(p->value);
+      LLVMValueRef my_fn = LLVMGetNamedFunction(cg->module, fn_link_name);
+      if (my_fn) {
+        fun_sig *n = arena_alloc(cg->arena, sizeof(fun_sig));
+        *n = *p;
+        n->value = my_fn;
+        res = n;
+        goto end;
       }
     }
   }
-end:;
+end:
+  if (res && !ny_fun_sig_in_current_sigs(cg, res) && !cg->parent) {
+    res = NULL;
+  }
+  ny_fun_cache_put(cg, name, res);
   return res;
 }
 
-static bool module_is_used(const codegen_t *cg, const char *mod,
-                           size_t mod_len) {
-  bool user_only = !cg->implicit_prelude &&
-                   (!cg->current_module_name ||
-                    (strncmp(cg->current_module_name, "std.", 4) != 0 &&
-                     strncmp(cg->current_module_name, "lib.", 4) != 0));
+static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
+                                         uint64_t stamp) {
+  ny_module_used_index_entry_t *index =
+      user_only ? g_user_use_module_index : g_use_module_index;
+  memset(index, 0,
+         sizeof(ny_module_used_index_entry_t) * NY_MODULE_USED_INDEX_SLOTS);
   char *const *mods_data =
       user_only ? cg->user_use_modules.data : cg->use_modules.data;
   size_t mods_len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
   for (size_t i = 0; i < mods_len; ++i) {
     const char *used = mods_data[i];
-    if (!used)
+    if (!used || !*used)
       continue;
-    if (strlen(used) == mod_len && strncmp(used, mod, mod_len) == 0)
+    size_t used_len = strlen(used);
+    uint64_t hash = ny_hash_name(used, used_len);
+    size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+    for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+      ny_module_used_index_entry_t *e = &index[pos];
+      if (!e->state) {
+        e->state = 1u;
+        e->hash = hash;
+        e->len = (uint32_t)used_len;
+        e->name = used;
+        break;
+      }
+      if (e->hash == hash && e->len == (uint32_t)used_len &&
+          memcmp(e->name, used, used_len) == 0 && e->name[used_len] == '\0') {
+        break;
+      }
+      pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
+    }
+  }
+  if (user_only) {
+    g_user_use_module_index_cg = cg;
+    g_user_use_module_index_stamp = stamp;
+    g_user_use_module_index_ready = true;
+  } else {
+    g_use_module_index_cg = cg;
+    g_use_module_index_stamp = stamp;
+    g_use_module_index_ready = true;
+  }
+}
+
+static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
+                                  const char *mod, size_t mod_len) {
+  if (!mod || !*mod)
+    return false;
+  uint64_t stamp = ny_module_used_index_version(cg, user_only);
+  ny_module_used_index_entry_t *index =
+      user_only ? g_user_use_module_index : g_use_module_index;
+  bool ready =
+      user_only ? g_user_use_module_index_ready : g_use_module_index_ready;
+  const codegen_t *idx_cg =
+      user_only ? g_user_use_module_index_cg : g_use_module_index_cg;
+  uint64_t idx_stamp =
+      user_only ? g_user_use_module_index_stamp : g_use_module_index_stamp;
+  if (!ready || idx_cg != cg || idx_stamp != stamp) {
+    ny_module_used_index_rebuild(cg, user_only, stamp);
+  }
+  uint64_t hash = ny_hash_name(mod, mod_len);
+  size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+    ny_module_used_index_entry_t *e = &index[pos];
+    if (!e->state)
+      return false;
+    if (e->hash == hash && e->len == (uint32_t)mod_len &&
+        memcmp(e->name, mod, mod_len) == 0 && e->name[mod_len] == '\0') {
       return true;
+    }
+    pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
   }
   return false;
+}
+
+static bool module_is_used(codegen_t *cg, const char *mod, size_t mod_len) {
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  return ny_module_used_lookup(cg, user_only, mod, mod_len);
+}
+
+#define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
+    fn_name, index_arr, index_cg, index_stamp, index_ready, vec_field,         \
+    item_type, item_name_expr, item_name_len, entry_type, entry_tail_field,    \
+    entry_value_field, item_value_expr)                                        \
+  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
+    memset(index_arr, 0, sizeof(index_arr));                                   \
+    const char *last_mod = NULL;                                               \
+    size_t last_mod_len = 0;                                                   \
+    bool last_mod_used = false;                                                \
+    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
+      item_type *item = &cg->vec_field.data[i];                                \
+      const char *sig_name = (item_name_expr);                                 \
+      if (!sig_name || !*sig_name)                                             \
+        continue;                                                              \
+      const char *dot = strrchr(sig_name, '.');                                \
+      if (!dot)                                                                \
+        continue;                                                              \
+      size_t mod_len = (size_t)(dot - sig_name);                               \
+      bool mod_used = false;                                                   \
+      if (last_mod && last_mod_len == mod_len &&                               \
+          memcmp(last_mod, sig_name, mod_len) == 0) {                          \
+        mod_used = last_mod_used;                                              \
+      } else {                                                                 \
+        mod_used = module_is_used(cg, sig_name, mod_len);                      \
+        last_mod = sig_name;                                                   \
+        last_mod_len = mod_len;                                                \
+        last_mod_used = mod_used;                                              \
+      }                                                                        \
+      if (!mod_used)                                                           \
+        continue;                                                              \
+      const char *tail = dot + 1;                                              \
+      if (!*tail)                                                              \
+        continue;                                                              \
+      size_t sig_len = (size_t)(item_name_len);                                \
+      size_t len = sig_len - mod_len - 1u;                                     \
+      uint64_t hash = ny_hash_name(tail, len);                                 \
+      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
+      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
+        entry_type *e = &index_arr[pos];                                       \
+        if (!e->state) {                                                       \
+          e->state = 1u;                                                       \
+          e->hash = hash;                                                      \
+          e->len = (uint32_t)len;                                              \
+          e->entry_tail_field = tail;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        if (e->hash == hash && e->len == (uint32_t)len &&                      \
+            memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
+            e->entry_tail_field[len] == '\0') {                                \
+          break;                                                               \
+        }                                                                      \
+        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
+      }                                                                        \
+    }                                                                          \
+    index_cg = cg;                                                             \
+    index_stamp = stamp;                                                       \
+    index_ready = true;                                                        \
+  }
+
+NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, g_fun_tail_index,
+                             g_fun_tail_index_cg, g_fun_tail_index_stamp,
+                             g_fun_tail_index_ready, fun_sigs, fun_sig,
+                             item->name, ny_fun_name_len(item),
+                             ny_fun_tail_index_entry_t, tail_name, value, item)
+
+NY_DEFINE_TAIL_INDEX_REBUILD(ny_global_tail_index_rebuild, g_global_tail_index,
+                             g_global_tail_index_cg, g_global_tail_index_stamp,
+                             g_global_tail_index_ready, global_vars, binding,
+                             item->name, ny_binding_name_len(item),
+                             ny_global_tail_index_entry_t, tail_name, value,
+                             item)
+
+#undef NY_DEFINE_TAIL_INDEX_REBUILD
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  bool rebuilt_after_stale = false;
+  uint64_t stamp = 0;
+  uint64_t hash = 0;
+  size_t pos = 0;
+retry:
+  stamp = ny_fun_tail_index_version(cg);
+  if (!g_fun_tail_index_ready || g_fun_tail_index_cg != cg ||
+      g_fun_tail_index_stamp != stamp) {
+    ny_fun_tail_index_rebuild(cg, stamp);
+  }
+  hash = ny_hash_name(tail, len);
+  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_fun_tail_index_entry_t *e = &g_fun_tail_index[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      if (!ny_fun_sig_in_current_sigs(cg, e->value)) {
+        if (!rebuilt_after_stale) {
+          ny_fun_tail_index_rebuild(cg, stamp);
+          rebuilt_after_stale = true;
+          goto retry;
+        }
+        return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  uint64_t stamp = ny_global_tail_index_version(cg);
+  if (!g_global_tail_index_ready || g_global_tail_index_cg != cg ||
+      g_global_tail_index_stamp != stamp) {
+    ny_global_tail_index_rebuild(cg, stamp);
+  }
+  uint64_t hash = ny_hash_name(tail, len);
+  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_global_tail_index_entry_t *e = &g_global_tail_index[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
 }
 
 static int typo_distance_if_relevant(const char *want, const char *cand) {
@@ -575,659 +1457,135 @@ fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
 }
 
 const char *resolve_import_alias(codegen_t *cg, const char *name) {
-  binding *data = ny_user_ctx_without_prelude(cg) ? cg->user_import_aliases.data
-                                                  : cg->import_aliases.data;
-  size_t len = ny_user_ctx_without_prelude(cg) ? cg->user_import_aliases.len
-                                               : cg->import_aliases.len;
+  if (!name || !*name)
+    return NULL;
+  const char *cached = NULL;
+  int cache_state = ny_alias_cache_get(cg, name, &cached);
+  if (cache_state == 1)
+    return cached;
+  if (cache_state == 0)
+    return NULL;
+
+  const char *res = NULL;
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  binding *data =
+      user_only ? cg->user_import_aliases.data : cg->import_aliases.data;
+  size_t len = user_only ? cg->user_import_aliases.len : cg->import_aliases.len;
   for (size_t i = 0; i < len; ++i) {
     if (strcmp(data[i].name, name) == 0) {
-      return (const char *)data[i].stmt_t;
+      res = (const char *)data[i].stmt_t;
+      break;
     }
   }
-  return NULL;
+  ny_alias_cache_put(cg, name, res);
+  return res;
 }
 
 binding *lookup_global(codegen_t *cg, const char *name) {
-  if (!cg->global_vars.data)
+  if (!name || !*name)
+    return NULL;
+  binding *cached = NULL;
+  int cache_state = ny_global_cache_get(cg, name, &cached);
+  if (cache_state == 1) {
+    cached->is_used = true;
+    return cached;
+  }
+  if (cache_state == 0)
     return NULL;
 
+  binding *res = NULL;
+  bool qualified = strchr(name, '.') != NULL;
+  if (!cg->global_vars.data)
+    goto end;
+
   // 1. Precise name match (local or unqualified global)
-  for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
-    if (strcmp(cg->global_vars.data[i].name, name) == 0) {
-      if (ny_block_implicit_std_symbol(cg, name, cg->global_vars.data[i].name))
-        continue;
-      cg->global_vars.data[i].is_used = true;
-      return &cg->global_vars.data[i];
-    }
-  }
+  res = lookup_global_exact(cg, name);
+  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
+    goto end;
+  res = NULL;
 
-  // 2. Namespaced lookup if name is not qualified
-  if (cg->current_module_name && strchr(name, '.') == NULL) {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%s.%s", cg->current_module_name, name);
-    for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
-      if (strcmp(cg->global_vars.data[i].name, buf) == 0) {
-        cg->global_vars.data[i].is_used = true;
-        return &cg->global_vars.data[i];
-      }
-    }
+  // 2. Current module scope + import alias fallback (unqualified names only)
+  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                      ny_lookup_global_recurse, NULL);
+  if (res)
+    goto end;
+  if (!qualified) {
+    res = ny_global_tail_find(cg, name);
+    if (res)
+      goto end;
   }
+  goto end;
 
-  // 3. Import aliases and common fallbacks if name is not qualified
-  if (strchr(name, '.') == NULL) {
-    const char *alias_full = resolve_import_alias(cg, name);
-    if (alias_full) {
-      binding *ares = lookup_global(cg, alias_full);
-      if (ares)
-        return ares;
-    }
-
-    if (cg->implicit_prelude) {
-      const char *fallbacks[] = {"std.core",
-                                 "std.core.reflect",
-                                 "std.core.primitives",
-                                 "std.core.error",
-                                 "std.core.mem",
-                                 "std.core.list",
-                                 "std.core.dict",
-                                 "std.core.set",
-                                 "std.core.sort",
-                                 "std.str",
-                                 "std.str.io",
-                                 "std.str.path",
-                                 "std.str.fmt",
-                                 "std.math",
-                                 "std.math.bigint",
-                                 "std.math.float",
-                                 "std.math.random",
-                                 "std.os",
-                                 "std.os.fs",
-                                 "std.os.process",
-                                 "std.os.time",
-                                 "std.os.ffi",
-                                 "std.os.args",
-                                 "std.net",
-                                 "std.net.socket",
-                                 "std.net.http",
-                                 "std.util",
-                                 "std.util.inspect",
-                                 "std.util.uuid",
-                                 "std.core.iter",
-                                 NULL};
-      for (int j = 0; fallbacks[j]; ++j) {
-        if (cg->current_module_name &&
-            strcmp(cg->current_module_name, fallbacks[j]) == 0)
-          continue;
-        char buf[256];
-        snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
-        for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
-          if (strcmp(cg->global_vars.data[i].name, buf) == 0)
-            return &cg->global_vars.data[i];
-        }
-      }
-    }
-  }
-  for (ssize_t i = (ssize_t)cg->global_vars.len - 1; i >= 0; --i) {
-    const char *sig_name = cg->global_vars.data[i].name;
-    // Also try matching after the last dot if the input name is not qualified
-    if (strchr(name, '.') == NULL) {
-      const char *last_dot = strrchr(sig_name, '.');
-      if (last_dot && strcmp(last_dot + 1, name) == 0) {
-        size_t mod_len = last_dot - sig_name;
-        bool user_only = !cg->implicit_prelude &&
-                         (!cg->current_module_name ||
-                          (strncmp(cg->current_module_name, "std.", 4) != 0 &&
-                           strncmp(cg->current_module_name, "lib.", 4) != 0));
-        char *const *mods_data =
-            user_only ? cg->user_use_modules.data : cg->use_modules.data;
-        size_t mods_len =
-            user_only ? cg->user_use_modules.len : cg->use_modules.len;
-        for (size_t m = 0; m < mods_len; ++m) {
-          const char *um = mods_data[m];
-          if (strlen(um) == mod_len && strncmp(um, sig_name, mod_len) == 0) {
-            return &cg->global_vars.data[i];
-          }
-        }
-      }
-    }
-  }
-  return NULL;
+end:
+  if (res)
+    res->is_used = true;
+  ny_global_cache_put(cg, name, res);
+  return res;
 }
 
 fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc) {
-  if (cg->implicit_prelude && name && strcmp(name, "eq") == 0 &&
-      strchr(name, '.') == NULL) {
-    for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-      fun_sig *fs = &cg->fun_sigs.data[i];
-      if (strcmp(fs->name, "std.core.reflect.eq") == 0 ||
-          strcmp(fs->name, "std.core.eq") == 0) {
-        return fs;
-      }
-    }
-  }
-  if (cg->implicit_prelude && name && strcmp(name, "set") == 0 &&
-      strchr(name, '.') == NULL) {
-    for (ssize_t i = (ssize_t)cg->fun_sigs.len - 1; i >= 0; --i) {
-      fun_sig *fs = &cg->fun_sigs.data[i];
-      if (strcmp(fs->name, "std.core.set.set") == 0 ||
-          strcmp(fs->name, "std.core.set") == 0) {
-        return fs;
-      }
-    }
-  }
-  if (cg->current_module_name && name && strchr(name, '.') == NULL) {
-    char scoped[256];
-    snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name, name);
-    fun_sig *scoped_res = resolve_overload(cg, scoped, argc);
-    if (scoped_res)
-      return scoped_res;
-  }
-  if (strchr(name, '.') == NULL) {
-    const char *alias_full = resolve_import_alias(cg, name);
-    if (alias_full) {
-      return resolve_overload(cg, alias_full, argc);
-    }
-  }
+  if (!name || !*name)
+    return NULL;
+  fun_sig *cached = NULL;
+  int cache_state = ny_overload_cache_get(cg, name, argc, &cached);
+  if (cache_state == 1)
+    return cached;
+  if (cache_state == 0)
+    return NULL;
+
   fun_sig *best = NULL;
-  int best_score = -1;
-  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    fun_sig *fs = &cg->fun_sigs.data[i];
-    if (strcmp(fs->name, name) != 0)
-      continue;
-    int score = -1;
-    if (!fs->is_variadic) {
-      if (fs->arity == (int)argc)
-        score = 100;
-      else if ((int)argc < fs->arity)
-        score = 80;
-    } else {
-      int fixed = fs->arity - 1;
-      if ((int)argc >= fixed)
-        score = 60 + (int)fixed;
-    }
-    if (score > best_score) {
+  bool qualified = strchr(name, '.') != NULL;
+
+  ny_overload_recurse_ctx_t ov_ctx = {.argc = argc};
+  best = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                       ny_lookup_overload_recurse, &ov_ctx);
+  if (best)
+    goto end;
+  {
+    int best_score = -1;
+    size_t name_len = strlen(name);
+    uint64_t want_hash = ny_hash_name(name, name_len);
+    int32_t idx = ny_overload_name_bucket_head(cg, want_hash);
+    while (idx >= 0) {
+      if ((size_t)idx >= cg->fun_sigs.len)
+        break;
+      fun_sig *fs = &cg->fun_sigs.data[idx];
+      idx = g_overload_name_next[idx];
+      if (ny_fun_name_hash(fs) != want_hash)
+        continue;
+      if ((size_t)ny_fun_name_len(fs) != name_len)
+        continue;
+      if (!(fs->name == name || (memcmp(fs->name, name, name_len) == 0 &&
+                                 fs->name[name_len] == '\0')))
+        continue;
       if (ny_block_implicit_std_symbol(cg, name, fs->name))
         continue;
-      best_score = score;
-      best = fs;
+      int score = -1;
+      if (!fs->is_variadic) {
+        if (fs->arity == (int)argc) {
+          best = fs;
+          best_score = 100;
+          break;
+        }
+        if ((int)argc < fs->arity)
+          score = 80;
+      } else {
+        int fixed = fs->arity - 1;
+        if ((int)argc >= fixed)
+          score = 60 + (int)fixed;
+      }
+      if (score > best_score) {
+        best_score = score;
+        best = fs;
+      }
     }
   }
-  if (cg->implicit_prelude && !best && strchr(name, '.') == NULL) {
-    const char *fallbacks[] = {"std.core",
-                               "std.core.reflect",
-                               "std.core.primitives",
-                               "std.core.error",
-                               "std.core.mem",
-                               "std.core.list",
-                               "std.core.dict",
-                               "std.core.set",
-                               "std.core.sort",
-                               "std.str",
-                               "std.str.io",
-                               "std.str.path",
-                               "std.str.fmt",
-                               "std.math",
-                               "std.math.bigint",
-                               "std.math.float",
-                               "std.math.random",
-                               "std.os",
-                               "std.os.fs",
-                               "std.os.process",
-                               "std.os.time",
-                               "std.os.ffi",
-                               "std.os.args",
-                               "std.net",
-                               "std.net.socket",
-                               "std.net.http",
-                               "std.util",
-                               "std.util.inspect",
-                               NULL};
-    for (int j = 0; fallbacks[j]; ++j) {
-      char buf[256];
-      snprintf(buf, sizeof(buf), "%s.%s", fallbacks[j], name);
-      fun_sig *fb = resolve_overload(cg, buf, argc);
-      if (fb)
-        return fb;
-    }
+  goto end;
+
+end:
+  if (best && !ny_fun_sig_in_current_sigs(cg, best) && !cg->parent) {
+    best = NULL;
   }
+  ny_overload_cache_put(cg, name, argc, best);
   return best;
-}
-
-binding *scope_lookup(scope *scopes, size_t depth, const char *name) {
-  for (ssize_t s = (ssize_t)depth; s >= 0; --s)
-    for (ssize_t i = (ssize_t)scopes[s].vars.len - 1; i >= 0; --i)
-      if (strcmp(scopes[s].vars.data[i].name, name) == 0) {
-        NY_LOG_DEBUG("scope_lookup: found '%s' at depth %zd, is_mut=%d\n", name,
-                     s, scopes[s].vars.data[i].is_mut);
-        scopes[s].vars.data[i].is_used = true;
-        return &scopes[s].vars.data[i];
-      }
-  return NULL;
-}
-
-static binding *scope_lookup_no_mark(scope *scopes, size_t depth,
-                                     const char *name) {
-  for (ssize_t s = (ssize_t)depth; s >= 0; --s) {
-    for (ssize_t i = (ssize_t)scopes[s].vars.len - 1; i >= 0; --i) {
-      if (strcmp(scopes[s].vars.data[i].name, name) == 0)
-        return &scopes[s].vars.data[i];
-    }
-  }
-  return NULL;
-}
-
-void bind(scope *scopes, size_t depth, const char *name, LLVMValueRef v,
-          stmt_t *stmt, bool is_mut, const char *type_name) {
-  // Check for redefinition in current scope
-  for (size_t i = 0; i < scopes[depth].vars.len; i++) {
-    if (strcmp(scopes[depth].vars.data[i].name, name) == 0) {
-      binding *prev = &scopes[depth].vars.data[i];
-      if (stmt) {
-        ny_diag_error(stmt->tok, "redefinition of '%s' in the same scope",
-                      name);
-        if (prev->stmt_t)
-          ny_diag_note_tok(prev->stmt_t->tok,
-                           "previous definition of '%s' is here", name);
-      } else {
-        ny_diag_error((token_t){0}, "redefinition of '%s' in argument list",
-                      name);
-      }
-    }
-  }
-
-  // Check for shadowing (only if depth > 0 to search parent scopes)
-  if (depth > 0) {
-    binding *shadow = scope_lookup_no_mark(scopes, depth - 1, name);
-    if (shadow && stmt &&
-        ny_diag_should_emit("shadow_local", stmt->tok, name)) {
-      ny_diag_warning(stmt->tok, "declaration of '%s' shadows a previous local",
-                      name);
-      if (shadow->stmt_t)
-        ny_diag_note_tok(shadow->stmt_t->tok, "previous '%s' declared here",
-                         name);
-    }
-  }
-
-  binding b = {name, v, stmt, is_mut, false, false, type_name};
-  vec_push(&scopes[depth].vars, b);
-}
-
-void scope_pop(scope *scopes, size_t *depth) {
-  for (size_t i = 0; i < scopes[*depth].vars.len; i++) {
-    binding *b = &scopes[*depth].vars.data[i];
-    if (!b->stmt_t)
-      continue;
-    bool is_stdlib = b->stmt_t->tok.filename &&
-                     (strcmp(b->stmt_t->tok.filename, "<stdlib>") == 0 ||
-                      strcmp(b->stmt_t->tok.filename, "<repl_std>") == 0);
-    if (!b->is_used && b->name && b->name[0] != '_' &&
-        ny_diag_should_emit("unused_var", b->stmt_t->tok, b->name) &&
-        (!is_stdlib || verbose_enabled >= 2)) {
-      ny_diag_warning(b->stmt_t->tok, "unused variable \033[1;37m'%s'\033[0m",
-                      b->name);
-    }
-  }
-  vec_free(&scopes[*depth].defers);
-  vec_free(&scopes[*depth].vars);
-  (*depth)--;
-}
-
-void add_import_alias(codegen_t *cg, const char *alias, const char *full_name) {
-  if (!alias || !*alias || !full_name || !*full_name)
-    return;
-  for (size_t i = 0; i < cg->import_aliases.len; ++i) {
-    if (cg->import_aliases.data[i].name &&
-        strcmp(cg->import_aliases.data[i].name, alias) == 0)
-      return;
-  }
-  binding alias_bind = {0};
-  alias_bind.name = ny_strdup(alias);
-  alias_bind.stmt_t = (stmt_t *)ny_strdup(full_name);
-  vec_push(&cg->import_aliases, alias_bind);
-}
-
-void add_import_alias_from_full(codegen_t *cg, const char *full_name) {
-  if (!full_name || !*full_name)
-    return;
-  const char *last_dot = strrchr(full_name, '.');
-  const char *alias = last_dot ? last_dot + 1 : full_name;
-  add_import_alias(cg, alias, full_name);
-}
-
-static void add_user_import_alias(codegen_t *cg, const char *alias,
-                                  const char *full_name) {
-  if (!alias || !*alias || !full_name || !*full_name)
-    return;
-  for (size_t i = 0; i < cg->user_import_aliases.len; ++i) {
-    if (cg->user_import_aliases.data[i].name &&
-        strcmp(cg->user_import_aliases.data[i].name, alias) == 0)
-      return;
-  }
-  binding alias_bind = {0};
-  alias_bind.name = ny_strdup(alias);
-  alias_bind.stmt_t = (stmt_t *)ny_strdup(full_name);
-  vec_push(&cg->user_import_aliases, alias_bind);
-}
-
-static void add_user_import_alias_from_full(codegen_t *cg,
-                                            const char *full_name) {
-  if (!full_name || !*full_name)
-    return;
-  const char *last_dot = strrchr(full_name, '.');
-  const char *alias = last_dot ? last_dot + 1 : full_name;
-  add_user_import_alias(cg, alias, full_name);
-}
-
-stmt_t *find_module_stmt(stmt_t *s, const char *name) {
-  if (!s || !name)
-    return NULL;
-  if (s->kind == NY_S_MODULE && s->as.module.name &&
-      strcmp(s->as.module.name, name) == 0) {
-    return s;
-  }
-  if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      stmt_t *found = find_module_stmt(s->as.module.body.data[i], name);
-      if (found)
-        return found;
-    }
-  }
-  return NULL;
-}
-
-bool module_has_export_list(const stmt_t *mod) {
-  if (!mod || mod->kind != NY_S_MODULE)
-    return false;
-  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
-    if (mod->as.module.body.data[i]->kind == NY_S_EXPORT)
-      return true;
-  }
-  return false;
-}
-
-void collect_module_exports(stmt_t *mod, str_list *exports) {
-  if (!mod || mod->kind != NY_S_MODULE)
-    return;
-  const char *mod_name = mod->as.module.name;
-  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
-    stmt_t *child = mod->as.module.body.data[i];
-    if (child->kind != NY_S_EXPORT)
-      continue;
-    for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
-      const char *name = child->as.exprt.names.data[j];
-      if (!name)
-        continue;
-      char *full = NULL;
-      if (strchr(name, '.')) {
-        full = ny_strdup(name);
-      } else {
-        size_t len = strlen(mod_name) + 1 + strlen(name) + 1;
-        full = malloc(len);
-        snprintf(full, len, "%s.%s", mod_name, name);
-      }
-      vec_push(exports, full);
-    }
-  }
-}
-
-void collect_module_defs(stmt_t *mod, str_list *exports) {
-  if (!mod || mod->kind != NY_S_MODULE)
-    return;
-  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
-    stmt_t *child = mod->as.module.body.data[i];
-    if (child->kind == NY_S_FUNC) {
-      vec_push(exports, ny_strdup(child->as.fn.name));
-    } else if (child->kind == NY_S_VAR) {
-      for (size_t j = 0; j < child->as.var.names.len; ++j) {
-        vec_push(exports, ny_strdup(child->as.var.names.data[j]));
-      }
-    }
-  }
-}
-
-void add_imports_from_prefix(codegen_t *cg, const char *mod) {
-  if (!mod || !*mod)
-    return;
-  size_t mod_len = strlen(mod);
-  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    const char *name = cg->fun_sigs.data[i].name;
-    if (strncmp(name, mod, mod_len) == 0 && name[mod_len] == '.') {
-      add_import_alias_from_full(cg, name);
-    }
-  }
-  for (size_t i = 0; i < cg->global_vars.len; ++i) {
-    const char *name = cg->global_vars.data[i].name;
-    if (strncmp(name, mod, mod_len) == 0 && name[mod_len] == '.') {
-      add_import_alias_from_full(cg, name);
-    }
-  }
-}
-
-char *normalize_module_name(const char *raw) {
-  if (!raw)
-    return NULL;
-  // If raw contains '/', assume it's a file path
-  if (strchr(raw, '/')) {
-    const char *last_slash = strrchr(raw, '/');
-    const char *start = last_slash ? last_slash + 1 : raw;
-    char *name = ny_strdup(start);
-    char *dot = strrchr(name, '.');
-    if (dot && dot != name) {
-      *dot = '\0';
-    }
-    return name;
-  }
-  return ny_strdup(raw);
-}
-
-void process_use_imports(codegen_t *cg, stmt_t *s) {
-  if (s->kind == NY_S_USE) {
-    if (!s->as.use.import_all && s->as.use.imports.len == 0)
-      return;
-    bool user_use = !ny_is_stdlib_tok(s->tok);
-    char *mod = normalize_module_name(s->as.use.module);
-    if (s->as.use.imports.len > 0) {
-      for (size_t i = 0; i < s->as.use.imports.len; ++i) {
-        use_item_t *item = &s->as.use.imports.data[i];
-        if (!item->name)
-          continue;
-        size_t len = strlen(mod) + 1 + strlen(item->name) + 1;
-        char *full = malloc(len);
-        snprintf(full, len, "%s.%s", mod, item->name);
-        const char *alias = item->alias ? item->alias : item->name;
-        add_import_alias(cg, alias, full);
-        if (user_use)
-          add_user_import_alias(cg, alias, full);
-        free(full);
-      }
-      free(mod);
-      return;
-    }
-    if (s->as.use.import_all) {
-      str_list exports = {0};
-      bool has_export_list = false;
-      stmt_t *mod_stmt = NULL;
-      // Also try finding module definition stmt matching normalized name
-      for (size_t i = 0; i < cg->prog->body.len; ++i) {
-        mod_stmt = find_module_stmt(cg->prog->body.data[i], mod);
-        if (mod_stmt)
-          break;
-      }
-      // If not found, maybe fallback to raw name? loader renames it though.
-
-      if (mod_stmt) {
-        has_export_list = module_has_export_list(mod_stmt);
-        if (has_export_list) {
-          collect_module_exports(mod_stmt, &exports);
-        }
-        if (!has_export_list || mod_stmt->as.module.export_all) {
-          collect_module_defs(mod_stmt, &exports);
-        }
-      }
-      if (!mod_stmt || exports.len == 0) {
-        add_imports_from_prefix(cg, mod);
-      } else {
-        for (size_t i = 0; i < exports.len; ++i) {
-          add_import_alias_from_full(cg, exports.data[i]);
-          if (user_use)
-            add_user_import_alias_from_full(cg, exports.data[i]);
-          free(exports.data[i]);
-        }
-        vec_free(&exports);
-      }
-      free(mod);
-      return;
-    }
-    free(mod);
-  } else if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      process_use_imports(cg, s->as.module.body.data[i]);
-    }
-  }
-}
-
-void collect_use_aliases(codegen_t *cg, stmt_t *s) {
-  if (s->kind == NY_S_USE) {
-    if (s->as.use.import_all || s->as.use.imports.len > 0)
-      return;
-    const char *alias = s->as.use.alias;
-    char *mod = normalize_module_name(s->as.use.module);
-    if (!alias) {
-      // Infer alias from module name (not path)
-      const char *dot = strrchr(mod, '.');
-      alias = dot ? dot + 1 : mod;
-    }
-    binding alias_bind = {0};
-    alias_bind.name = ny_strdup(alias);
-    alias_bind.stmt_t = (stmt_t *)ny_strdup(mod);
-    // Handle specific imports list: use Mod (a, b as c)
-    // Actually this branch is for plain `use Mod` (or `use Mod as Alias`)
-    // The imports list is handled in the if earlier?
-    // Wait, collect_use_aliases logic above checks empty imports.
-    // So this handles `use Mod` and `use Mod as M`.
-
-    vec_push(&cg->aliases, alias_bind);
-    free(mod);
-  } else if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; i++)
-      collect_use_aliases(cg, s->as.module.body.data[i]);
-  }
-}
-
-void collect_use_modules(codegen_t *cg, stmt_t *s) {
-  if (s->kind == NY_S_USE) {
-    if (!s->as.use.import_all && s->as.use.imports.len > 0)
-      return;
-    const char *mod = s->as.use.module;
-    if (mod && *mod) {
-      bool seen_global = false;
-      for (size_t i = 0; i < cg->use_modules.len; ++i) {
-        if (strcmp(cg->use_modules.data[i], mod) == 0) {
-          seen_global = true;
-          break;
-        }
-      }
-      if (!seen_global)
-        vec_push(&cg->use_modules, ny_strdup(mod));
-      if (!ny_is_stdlib_tok(s->tok)) {
-        bool seen_user = false;
-        for (size_t i = 0; i < cg->user_use_modules.len; ++i) {
-          if (strcmp(cg->user_use_modules.data[i], mod) == 0) {
-            seen_user = true;
-            break;
-          }
-        }
-        if (!seen_user)
-          vec_push(&cg->user_use_modules, ny_strdup(mod));
-      }
-    }
-  } else if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; i++)
-      collect_use_modules(cg, s->as.module.body.data[i]);
-  }
-}
-
-void process_exports(codegen_t *cg, stmt_t *s) {
-  if (s->kind == NY_S_MODULE) {
-    const char *prev_mod = cg->current_module_name;
-    cg->current_module_name = s->as.module.name;
-    const char *mod_name = s->as.module.name;
-    if (cg->implicit_prelude && s->as.module.export_all) {
-      str_list defs = {0};
-      collect_module_defs(s, &defs);
-      for (size_t i = 0; i < defs.len; i++) {
-        const char *full_target = defs.data[i];
-        const char *last_dot = strrchr(full_target, '.');
-        const char *short_name = last_dot ? last_dot + 1 : full_target;
-
-        if (strcmp(full_target, short_name) != 0) {
-          fun_sig *fs = lookup_fun(cg, full_target);
-          if (fs) {
-            bool exists = false;
-            for (ssize_t k = (ssize_t)cg->fun_sigs.len - 1; k >= 0; k--) {
-              if (strcmp(cg->fun_sigs.data[k].name, short_name) == 0) {
-                exists = true;
-                break;
-              }
-            }
-            if (!exists) {
-              fun_sig ns = *fs;
-              ns.name = ny_strdup(short_name);
-              vec_push(&cg->fun_sigs, ns);
-            }
-          } else {
-            binding *gb = lookup_global(cg, full_target);
-            if (gb) {
-              bool exists = false;
-              for (ssize_t k = (ssize_t)cg->global_vars.len - 1; k >= 0; k--) {
-                if (strcmp(cg->global_vars.data[k].name, short_name) == 0) {
-                  exists = true;
-                  break;
-                }
-              }
-              if (!exists) {
-                binding nb = *gb;
-                nb.name = ny_strdup(short_name);
-                vec_push(&cg->global_vars, nb);
-              }
-            }
-          }
-        }
-        free(defs.data[i]);
-      }
-      vec_free(&defs);
-    }
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      stmt_t *child = s->as.module.body.data[i];
-      if (child->kind == NY_S_EXPORT) {
-        for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
-          const char *target = child->as.exprt.names.data[j];
-          char alias[256];
-          snprintf(alias, sizeof(alias), "%s.%s", mod_name, target);
-          char full_target[256];
-          snprintf(full_target, sizeof(full_target), "%s.%s", mod_name, target);
-          fun_sig *fs = lookup_fun(cg, full_target);
-          if (!fs)
-            fs = lookup_fun(cg, target);
-          if (fs) {
-            fun_sig new_sig = *fs;
-            new_sig.name = ny_strdup(alias);
-            vec_push(&cg->fun_sigs, new_sig);
-          } else {
-            binding *gb = lookup_global(cg, full_target);
-            if (!gb)
-              gb = lookup_global(cg, target);
-            if (gb) {
-              binding new_bind = *gb;
-              new_bind.name = ny_strdup(alias);
-              vec_push(&cg->global_vars, new_bind);
-            }
-          }
-        }
-      } else if (child->kind == NY_S_MODULE) {
-        process_exports(cg, child);
-      }
-    }
-    cg->current_module_name = prev_mod;
-  }
 }

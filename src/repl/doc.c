@@ -221,6 +221,14 @@ void add_builtin_docs(doc_list_t *docs) {
 #define RT_DEF(name, p, args, sig, doc)                                        \
   doclist_set(docs, name, doc, sig, NULL, 3);
 #define RT_GV(name, p, t, doc) doclist_set(docs, name, doc, "global", NULL, 4);
+#ifdef _WIN32
+#ifdef __argc
+#undef __argc
+#endif
+#ifdef __argv
+#undef __argv
+#endif
+#endif
 #include "rt/defs.h"
 #undef RT_DEF
 #undef RT_GV

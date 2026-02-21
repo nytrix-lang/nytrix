@@ -6,6 +6,7 @@ module std.str.glob (
 )
 use std.core *
 use std.str *
+use std.os *
 
 fn _glob_match(p, s, pi, si){
    "Internal recursive matcher used by `glob_match`."
@@ -40,6 +41,25 @@ fn _glob_match(p, s, pi, si){
 
 fn glob_match(pattern, path){
    "Wildcard match with '*' and '?' support."
-   if(pattern == "**/*.ny"){ return endswith(path, ".ny") }
-   _glob_match(pattern, path, 0, 0)
+   mut p = pattern
+   mut s = path
+   if(__os_name() == "windows"){
+      p = replace_all(p, "\\", "/")
+      s = replace_all(s, "\\", "/")
+   }
+   if(p == "**/*.ny"){ return endswith(s, ".ny") }
+   _glob_match(p, s, 0, 0)
+}
+
+if(comptime{__main()}){
+    use std.core *
+    use std.str.glob *
+
+    assert(glob_match("*.ny", "test.ny"), "glob *.ny match")
+    assert(!glob_match("*.ny", "test.txt"), "glob *.ny non-match")
+    assert(glob_match("a?c.ny", "abc.ny"), "glob ? match")
+    assert(!glob_match("a?c.ny", "abbc.ny"), "glob ? non-match")
+    assert(glob_match("**/test/*.ny", "std/core/test/mod.ny"), "glob ** match")
+
+    print("✓ std.str.glob tests passed")
 }

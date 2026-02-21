@@ -53,8 +53,7 @@ static bool check_int_range(parser_t *p, token_t tok, uint64_t val,
 }
 
 static bool parse_numeric_suffix(const char *s, size_t len, size_t *num_len,
-                                 lit_type_hint_t *hint,
-                                 bool *hint_explicit) {
+                                 lit_type_hint_t *hint, bool *hint_explicit) {
   *num_len = len;
   *hint = NY_LIT_HINT_NONE;
   *hint_explicit = false;
@@ -108,6 +107,9 @@ static bool parse_numeric_suffix(const char *s, size_t len, size_t *num_len,
 
 static bool parse_type_name(parser_t *p, char **out_name) {
   parser_t save = *p;
+  size_t nullable_depth = 0;
+  while (parser_match(p, NY_T_QUESTION))
+    nullable_depth++;
   size_t ptr_depth = 0;
   while (parser_match(p, NY_T_STAR))
     ptr_depth++;
@@ -156,11 +158,14 @@ static bool parse_type_name(parser_t *p, char **out_name) {
     return false;
   }
 
-  size_t total = ptr_depth + len;
+  size_t total = nullable_depth + ptr_depth + len;
   char *out = arena_alloc(p->arena, total + 1);
+  size_t at = 0;
+  for (size_t i = 0; i < nullable_depth; i++)
+    out[at++] = '?';
   for (size_t i = 0; i < ptr_depth; i++)
-    out[i] = '*';
-  memcpy(out + ptr_depth, buf, len);
+    out[at++] = '*';
+  memcpy(out + at, buf, len);
   out[total] = '\0';
   free(buf);
   *out_name = out;
@@ -310,15 +315,14 @@ static expr_t *parse_primary(parser_t *p) {
     char *num_buf = arena_strndup(p->arena, tok.lexeme, num_len);
     bool is_hex = (num_len > 2 && num_buf[0] == '0' &&
                    (num_buf[1] == 'x' || num_buf[1] == 'X'));
-    bool is_float = !is_hex &&
-                    (memchr(num_buf, '.', num_len) ||
-                     memchr(num_buf, 'e', num_len) ||
-                     memchr(num_buf, 'E', num_len));
+    bool is_float = !is_hex && (memchr(num_buf, '.', num_len) ||
+                                memchr(num_buf, 'e', num_len) ||
+                                memchr(num_buf, 'E', num_len));
 
     if (hint_is_float(hint) || (!hint_explicit && is_float)) {
       if (is_hex) {
-        parser_error(p, tok,
-                     "hexadecimal float literals are not supported yet", NULL);
+        parser_error(p, tok, "hexadecimal float literals are not supported yet",
+                     NULL);
         lit->as.literal.kind = NY_LIT_FLOAT;
         lit->as.literal.as.f = 0.0;
       } else {
