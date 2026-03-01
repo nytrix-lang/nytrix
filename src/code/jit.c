@@ -39,15 +39,22 @@ void *ny_jit_resolve_symbol(const char *symbol) {
     if (sym)
       return (void *)sym;
   }
-  const char *dlls[] = {"ucrtbase.dll", "msvcrt.dll", "kernel32.dll",
-                        "ws2_32.dll", NULL};
-  for (size_t i = 0; dlls[i]; ++i) {
-    HMODULE h = GetModuleHandleA(dlls[i]);
-    if (!h)
-      h = LoadLibraryA(dlls[i]);
-    if (!h)
+  static HMODULE cached_dlls[5] = {0};
+  static int dlls_init = 0;
+  const char *dll_names[] = {"ucrtbase.dll", "msvcrt.dll", "kernel32.dll",
+                             "ws2_32.dll"};
+  if (!dlls_init) {
+    for (int i = 0; i < 4; i++) {
+      cached_dlls[i] = GetModuleHandleA(dll_names[i]);
+      if (!cached_dlls[i])
+        cached_dlls[i] = LoadLibraryA(dll_names[i]);
+    }
+    dlls_init = 1;
+  }
+  for (int i = 0; i < 4; i++) {
+    if (!cached_dlls[i])
       continue;
-    FARPROC sym = GetProcAddress(h, symbol);
+    FARPROC sym = GetProcAddress(cached_dlls[i], symbol);
     if (sym)
       return (void *)sym;
   }

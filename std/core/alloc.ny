@@ -155,7 +155,9 @@ fn _ensure_context(ctx){
 fn new_allocator(alloc_fn, realloc_fn=0, free_fn=0, state=0, name="custom"){
    "Creates allocator descriptor `[alloc_fn, realloc_fn, free_fn, state, name]`."
    if(!alloc_fn){ panic("alloc_fn cannot be none") }
-   return [alloc_fn, realloc_fn, free_fn, state, name]
+   def res = [alloc_fn, realloc_fn, free_fn, state, name]
+   ;; print("new_allocator: res=", res, " is_list=", is_list(res))
+   return res
 }
 
 fn allocator_name(allocator){

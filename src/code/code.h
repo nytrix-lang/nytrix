@@ -138,6 +138,10 @@ typedef struct string_intern {
   void *alloc;
 } string_intern;
 
+typedef struct intern_entry {
+  uint32_t intern_idx; // 1-based index into interns vector. 0 means empty.
+} intern_entry;
+
 struct braun_ssa_context;
 
 typedef struct codegen_t {
@@ -152,6 +156,9 @@ typedef struct codegen_t {
   VEC(fun_sig) fun_sigs;
   VEC(binding) global_vars;
   VEC(string_intern) interns;
+  intern_entry *intern_map;
+  size_t intern_map_cap;
+  size_t intern_map_len;
   bool llvm_ctx_owned;
   LLVMExecutionEngineRef ee;
   LLVMValueRef setjmp_fn;

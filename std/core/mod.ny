@@ -216,125 +216,135 @@ fn dict_keys(d){
 
 fn dict_values(d){
   "Returns dictionary values."
-  core_dict.dict_values(d)
+  return core_dict.dict_values(d)
 }
 
 fn set_add(s, key){
   "Adds `key` to set `s`. Returns the (possibly reallocated) set."
-  core_set.set_add(s, key)
+  return core_set.set_add(s, key)
 }
 
 fn set_contains(s, key){
   "Returns true if `key` is in set `s`."
-  core_set.set_contains(s, key)
+  return core_set.set_contains(s, key)
 }
 
 fn eq(a, b){
   "Structural equality (delegates to std.core.reflect.eq)."
-  core_ref.eq(a, b)
+  return core_ref.eq(a, b)
 }
 
 fn add(a, b){
   "Generic addition (delegates to std.core.reflect.add)."
-  core_ref.add(a, b)
+  return core_ref.add(a, b)
 }
 
 fn sub(a, b){
   "Generic subtraction (delegates to std.core.reflect.sub)."
-  core_ref.sub(a, b)
+  return core_ref.sub(a, b)
 }
 
 fn mul(a, b){
   "Generic multiplication (delegates to std.core.reflect.mul)."
-  core_ref.mul(a, b)
+  return core_ref.mul(a, b)
 }
 
 fn div(a, b){
   "Generic division (delegates to std.core.reflect.div)."
-  core_ref.div(a, b)
+  return core_ref.div(a, b)
 }
 
 fn is_nytrix_obj(x){
   "Check if a value is a valid Nytrix object pointer (aligned)."
-  __is_ny_obj(x)
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag >= 100 && tag <= 255
 }
 
 fn is_list(x){
   "Returns **true** if the value `x` is a **list**."
-  if(!__is_ny_obj(x)){ return false }
-  return __tagof(x) == 100
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 100
 }
 
 fn is_dict(x){
   "Returns **true** if the value `x` is a **dictionary**."
-  if(!__is_ny_obj(x)){ return false }
-  return __tagof(x) == 101
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 101
 }
 
 fn is_set(x){
   "Returns **true** if the value `x` is a **set**."
-  if(!__is_ny_obj(x)){ return false }
-  return __tagof(x) == 102
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 102
 }
 
 fn is_tuple(x){
   "Returns **true** if the value `x` is a **tuple**."
-  if(!__is_ny_obj(x)){ return false }
-  return __tagof(x) == 103
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 103
 }
 
 fn is_str(x){
   "Returns **true** if the value `x` is a **string**."
-  __is_str_obj(x)
+  return __is_str_obj(x)
 }
 
 fn is_bytes(x){
   "Returns **true** if the value `x` is a **bytes buffer**."
-  if(!__is_ny_obj(x)){ return false }
-  __tagof(x) == 122
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 122
 }
 
 fn is_float(x){
   "Returns **true** if the value `x` if a **floating-point** number."
-  __is_float_obj(x)
+  return __is_float_obj(x)
 }
+
 
 fn to_int(v){
   "Unwraps a tagged integer or pointer value to a raw, untagged integer."
-  __untag(v)
+  return __untag(v)
 }
 
 fn from_int(v){
   "Wraps a raw machine integer into a Nytrix-tagged integer."
-  __tag(v)
+  return __tag(v)
 }
 
 fn argc(){
   "Returns the process argument count."
-  __argc()
+  return __argc()
 }
 fn argv(){
   "Returns the raw argv pointer."
-  __argvp()
+  return __argvp()
 }
 fn envc(){
   "Returns the number of environment entries."
-  __envc()
+  return __envc()
 }
 fn envp(){
   "Returns the raw envp pointer."
-  __envp()
+  return __envp()
 }
 fn errno(){
   "Returns the current C runtime errno value."
-  __errno()
+  return __errno()
 }
 
 fn is_kwargs(x){
   "Internal: Returns **true** if `x` is a keyword-argument wrapper object."
-  if(!__is_ny_obj(x)){ return false }
-  __tagof(x) == 104
+  def tag = __tagof(x)
+  if(!__is_int(tag)){ return false }
+  return tag == 104
 }
+
 
 fn __kwarg(k, v){
   "Create a keyword-argument wrapper object combining key `k` and value `v`."

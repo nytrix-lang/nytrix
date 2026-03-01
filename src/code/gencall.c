@@ -28,6 +28,48 @@ static int parse_runtime_call_arity(const char *name) {
   return arity;
 }
 
+static LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                   const char *name) {
+  if (!cg || !v)
+    return v;
+  if (LLVMTypeOf(v) == cg->type_i64)
+    return v;
+  return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, name ? name : "");
+}
+
+static LLVMValueRef ny_build_is_ptr_pred(codegen_t *cg, LLVMValueRef v,
+                                         const char *name) {
+  LLVMValueRef nonzero = LLVMBuildICmp(
+      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 0, false),
+      name ? name : "ptr_nz");
+  LLVMValueRef low_bits =
+      LLVMBuildAnd(cg->builder, v, LLVMConstInt(cg->type_i64, 7, false),
+                   "ptr_low_bits");
+  LLVMValueRef aligned = LLVMBuildICmp(
+      cg->builder, LLVMIntEQ, low_bits, LLVMConstInt(cg->type_i64, 0, false),
+      "ptr_aligned");
+  LLVMValueRef gt_min = LLVMBuildICmp(
+      cg->builder, LLVMIntUGT, v, LLVMConstInt(cg->type_i64, 0x1000, false),
+      "ptr_gt_min");
+  return LLVMBuildAnd(cg->builder, nonzero,
+                      LLVMBuildAnd(cg->builder, aligned, gt_min, "ptr_and"),
+                      "ptr_pred");
+}
+
+static LLVMValueRef ny_build_untagged_or_raw_i64(codegen_t *cg, LLVMValueRef v,
+                                                 const char *name) {
+  LLVMValueRef lsb = LLVMBuildAnd(cg->builder, v,
+                                  LLVMConstInt(cg->type_i64, 1, false),
+                                  "idx_lsb");
+  LLVMValueRef is_tagged = LLVMBuildICmp(
+      cg->builder, LLVMIntEQ, lsb, LLVMConstInt(cg->type_i64, 1, false),
+      "idx_is_tagged");
+  LLVMValueRef untagged = LLVMBuildAShr(
+      cg->builder, v, LLVMConstInt(cg->type_i64, 1, false), "idx_untag");
+  return LLVMBuildSelect(cg->builder, is_tagged, untagged, v,
+                         name ? name : "idx_raw");
+}
+
 static LLVMValueRef
 ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
                               LLVMValueRef callee, LLVMValueRef *args,
@@ -149,14 +191,21 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
   }
   hit_cond = LLVMBuildAnd(cg->builder, hit_cond, memo_lookup_ok, "");
   LLVMBuildCondBr(cg->builder, hit_cond, hit_bb, miss_bb);
+  ny_braun_add_predecessor(cg, hit_bb, cur_bb);
+  ny_braun_add_predecessor(cg, miss_bb, cur_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, hit_bb);
+  ny_braun_enter_block(cg, hit_bb);
+  ny_braun_seal_block(cg, hit_bb);
   ny_dbg_loc(cg, tok);
   LLVMValueRef hit_res = LLVMBuildLoad2(cg->builder, cg->type_i64, res_g, "");
   LLVMBuildBr(cg->builder, join_bb);
   LLVMBasicBlockRef hit_end_bb = LLVMGetInsertBlock(cg->builder);
+  ny_braun_add_predecessor(cg, join_bb, hit_end_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, miss_bb);
+  ny_braun_enter_block(cg, miss_bb);
+  ny_braun_seal_block(cg, miss_bb);
   ny_dbg_loc(cg, tok);
   LLVMValueRef depth_inc = LLVMBuildAdd(
       cg->builder, depth_now, LLVMConstInt(cg->type_i64, 1, false), "");
@@ -227,8 +276,11 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
   LLVMBuildStore(cg->builder, new_valid, valid_g);
   LLVMBuildBr(cg->builder, join_bb);
   LLVMBasicBlockRef miss_end_bb = LLVMGetInsertBlock(cg->builder);
+  ny_braun_add_predecessor(cg, join_bb, miss_end_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, join_bb);
+  ny_braun_enter_block(cg, join_bb);
+  ny_braun_seal_block(cg, join_bb);
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "memo_res");
   LLVMAddIncoming(phi, (LLVMValueRef[]){hit_res, miss_res},
                   (LLVMBasicBlockRef[]){hit_end_bb, miss_end_bb}, 2);
@@ -272,8 +324,6 @@ NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_getter, cached_fn_get, "get",
                                  "dict_get")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_globals, cached_fn_globals,
                                  "__globals")
-NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_list, cached_fn_list, "list",
-                                 "std.core.list")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_kwarg, cached_fn_kwarg, "__kwarg",
                                  "std.core.__kwarg")
 
@@ -720,6 +770,298 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
   if (c && c->callee && c->callee->kind == NY_E_IDENT &&
       c->callee->as.ident.name) {
     const char *n = c->callee->as.ident.name;
+    bool want_load_item_checked = (strcmp(n, "__load_item") == 0);
+    bool want_load_item_fast = (strcmp(n, "__load_item_fast") == 0);
+    if ((want_load_item_checked || want_load_item_fast) && c->args.len == 2) {
+      LLVMValueRef lst_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
+      if (!lst_v || !idx_v) {
+        ny_diag_error(e->tok, "failed to evaluate arguments for %s", n);
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      lst_v = ny_cast_to_i64(cg, lst_v, "load_item_lst");
+      idx_v = ny_cast_to_i64(cg, idx_v, "load_item_idx");
+      ny_dbg_loc(cg, e->tok);
+      if (want_load_item_fast) {
+        LLVMValueRef idx_raw =
+            ny_build_untagged_or_raw_i64(cg, idx_v, "load_item_idx_raw");
+        LLVMValueRef scaled = LLVMBuildShl(
+            cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
+            "load_item_scaled");
+        LLVMValueRef byte_off =
+            LLVMBuildAdd(cg->builder, scaled,
+                         LLVMConstInt(cg->type_i64, 16, false),
+                         "load_item_off");
+        LLVMValueRef addr =
+            LLVMBuildAdd(cg->builder, lst_v, byte_off, "load_item_addr");
+        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
+                                             LLVMPointerType(cg->type_i64, 0),
+                                             "load_item_ptr_i64");
+        return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "load_item_val");
+      }
+      LLVMValueRef is_ptr_pred = ny_build_is_ptr_pred(cg, lst_v, "load_item_ptr");
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(fn, "load_item.ok");
+      LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "load_item.fail");
+      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "load_item.join");
+      LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
+      ny_braun_add_predecessor(cg, ok_bb, cur_bb);
+      ny_braun_add_predecessor(cg, fail_bb, cur_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
+      ny_braun_enter_block(cg, ok_bb);
+      ny_braun_seal_block(cg, ok_bb);
+      LLVMValueRef idx_raw =
+          ny_build_untagged_or_raw_i64(cg, idx_v, "load_item_idx_raw");
+      LLVMValueRef scaled = LLVMBuildShl(
+          cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
+          "load_item_scaled");
+      LLVMValueRef byte_off =
+          LLVMBuildAdd(cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+                       "load_item_off");
+      LLVMValueRef addr =
+          LLVMBuildAdd(cg->builder, lst_v, byte_off, "load_item_addr");
+      LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
+                                           LLVMPointerType(cg->type_i64, 0),
+                                           "load_item_ptr_i64");
+      LLVMValueRef ok_val =
+          LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "load_item_val");
+      LLVMBasicBlockRef ok_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, ok_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, fail_bb);
+      ny_braun_enter_block(cg, fail_bb);
+      ny_braun_seal_block(cg, fail_bb);
+      LLVMBasicBlockRef fail_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, fail_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, join_bb);
+      ny_braun_enter_block(cg, join_bb);
+      ny_braun_seal_block(cg, join_bb);
+      LLVMValueRef phi =
+          LLVMBuildPhi(cg->builder, cg->type_i64, "load_item_result");
+      LLVMValueRef incoming_vals[2] = {ok_val, LLVMConstInt(cg->type_i64, 0, false)};
+      LLVMBasicBlockRef incoming_bbs[2] = {ok_end_bb, fail_end_bb};
+      LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+      return phi;
+    }
+    bool want_store_item_checked = (strcmp(n, "__store_item") == 0);
+    bool want_store_item_fast = (strcmp(n, "__store_item_fast") == 0);
+    if ((want_store_item_checked || want_store_item_fast) && c->args.len == 3) {
+      LLVMValueRef lst_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
+      LLVMValueRef val_v = gen_expr(cg, scopes, depth, c->args.data[2].val);
+      if (!lst_v || !idx_v || !val_v) {
+        ny_diag_error(e->tok, "failed to evaluate arguments for %s", n);
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      lst_v = ny_cast_to_i64(cg, lst_v, "store_item_lst");
+      idx_v = ny_cast_to_i64(cg, idx_v, "store_item_idx");
+      val_v = ny_cast_to_i64(cg, val_v, "store_item_val");
+      ny_dbg_loc(cg, e->tok);
+      if (want_store_item_fast) {
+        LLVMValueRef idx_raw =
+            ny_build_untagged_or_raw_i64(cg, idx_v, "store_item_idx_raw");
+        LLVMValueRef scaled = LLVMBuildShl(
+            cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
+            "store_item_scaled");
+        LLVMValueRef byte_off = LLVMBuildAdd(
+            cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+            "store_item_off");
+        LLVMValueRef addr =
+            LLVMBuildAdd(cg->builder, lst_v, byte_off, "store_item_addr");
+        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
+                                             LLVMPointerType(cg->type_i64, 0),
+                                             "store_item_ptr_i64");
+        LLVMBuildStore(cg->builder, val_v, ptr);
+        return val_v;
+      }
+      LLVMValueRef is_ptr_pred =
+          ny_build_is_ptr_pred(cg, lst_v, "store_item_ptr");
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(fn, "store_item.ok");
+      LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "store_item.fail");
+      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "store_item.join");
+      LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
+      ny_braun_add_predecessor(cg, ok_bb, cur_bb);
+      ny_braun_add_predecessor(cg, fail_bb, cur_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
+      ny_braun_enter_block(cg, ok_bb);
+      ny_braun_seal_block(cg, ok_bb);
+      LLVMValueRef idx_raw =
+          ny_build_untagged_or_raw_i64(cg, idx_v, "store_item_idx_raw");
+      LLVMValueRef scaled = LLVMBuildShl(
+          cg->builder, idx_raw, LLVMConstInt(cg->type_i64, 3, false),
+          "store_item_scaled");
+      LLVMValueRef byte_off = LLVMBuildAdd(
+          cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+          "store_item_off");
+      LLVMValueRef addr =
+          LLVMBuildAdd(cg->builder, lst_v, byte_off, "store_item_addr");
+      LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
+                                           LLVMPointerType(cg->type_i64, 0),
+                                           "store_item_ptr_i64");
+      LLVMBuildStore(cg->builder, val_v, ptr);
+      LLVMBasicBlockRef ok_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, ok_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, fail_bb);
+      ny_braun_enter_block(cg, fail_bb);
+      ny_braun_seal_block(cg, fail_bb);
+      LLVMBasicBlockRef fail_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, fail_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, join_bb);
+      ny_braun_enter_block(cg, join_bb);
+      ny_braun_seal_block(cg, join_bb);
+      LLVMValueRef phi =
+          LLVMBuildPhi(cg->builder, cg->type_i64, "store_item_result");
+      LLVMValueRef incoming_vals[2] = {val_v, LLVMConstInt(cg->type_i64, 0, false)};
+      LLVMBasicBlockRef incoming_bbs[2] = {ok_end_bb, fail_end_bb};
+      LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+      return phi;
+    }
+    bool want_is_ny_obj = (strcmp(n, "__is_ny_obj") == 0);
+    bool want_is_str_obj = (strcmp(n, "__is_str_obj") == 0);
+    bool want_tagof = (strcmp(n, "__tagof") == 0);
+    if ((want_is_ny_obj || want_is_str_obj || want_tagof) && c->args.len == 1) {
+      LLVMValueRef arg_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      if (!arg_v) {
+        ny_diag_error(e->tok, "failed to evaluate argument for %s", n);
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      if (LLVMTypeOf(arg_v) != cg->type_i64) {
+        arg_v = LLVMBuildPtrToInt(cg->builder, arg_v, cg->type_i64,
+                                  "obj_intrinsic_arg");
+      }
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef is_nonzero = LLVMBuildICmp(
+          cg->builder, LLVMIntNE, arg_v, LLVMConstInt(cg->type_i64, 0, false),
+          "obj_nz");
+      LLVMValueRef low_bits =
+          LLVMBuildAnd(cg->builder, arg_v, LLVMConstInt(cg->type_i64, 7, false),
+                       "obj_low_bits");
+      LLVMValueRef align_ok = LLVMBuildICmp(
+          cg->builder, LLVMIntEQ, low_bits, LLVMConstInt(cg->type_i64, 0, false),
+          "obj_align_ok");
+      LLVMValueRef ptr_min = LLVMBuildICmp(
+          cg->builder, LLVMIntUGT, arg_v, LLVMConstInt(cg->type_i64, 0x1000, false),
+          "obj_gt_min");
+      LLVMValueRef is_ptr_pred =
+          LLVMBuildAnd(cg->builder, is_nonzero,
+                       LLVMBuildAnd(cg->builder, align_ok, ptr_min, "obj_ptr_and"),
+                       "obj_is_ptr");
+
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef ptr_bb = LLVMAppendBasicBlock(fn, "obj.ptr");
+      LLVMBasicBlockRef not_ptr_bb = LLVMAppendBasicBlock(fn, "obj.not_ptr");
+      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "obj.join");
+
+      LLVMBuildCondBr(cg->builder, is_ptr_pred, ptr_bb, not_ptr_bb);
+      ny_braun_add_predecessor(cg, ptr_bb, cur_bb);
+      ny_braun_add_predecessor(cg, not_ptr_bb, cur_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, ptr_bb);
+      ny_braun_enter_block(cg, ptr_bb);
+      ny_braun_seal_block(cg, ptr_bb);
+      LLVMValueRef tag_addr =
+          LLVMBuildSub(cg->builder, arg_v, LLVMConstInt(cg->type_i64, 8, false),
+                       "obj_tag_addr");
+      LLVMValueRef tag_ptr =
+          LLVMBuildIntToPtr(cg->builder, tag_addr, LLVMPointerType(cg->type_i64, 0),
+                            "obj_tag_ptr");
+      LLVMValueRef tag_v =
+          LLVMBuildLoad2(cg->builder, cg->type_i64, tag_ptr, "obj_tag");
+      LLVMValueRef ptr_result = LLVMConstInt(cg->type_i64, 0, false);
+      if (want_is_ny_obj) {
+        LLVMValueRef ge_100 =
+            LLVMBuildICmp(cg->builder, LLVMIntUGE, tag_v,
+                          LLVMConstInt(cg->type_i64, 100, false), "obj_ge_100");
+        LLVMValueRef le_255 =
+            LLVMBuildICmp(cg->builder, LLVMIntULE, tag_v,
+                          LLVMConstInt(cg->type_i64, 255, false), "obj_le_255");
+        LLVMValueRef is_obj =
+            LLVMBuildAnd(cg->builder, ge_100, le_255, "obj_is_ny_obj");
+        ptr_result = LLVMBuildSelect(
+            cg->builder, is_obj, LLVMConstInt(cg->type_i64, 2, false),
+            LLVMConstInt(cg->type_i64, 4, false), "obj_is_ny_obj_v");
+      } else if (want_is_str_obj) {
+        LLVMValueRef is_str =
+            LLVMBuildICmp(cg->builder, LLVMIntEQ, tag_v,
+                          LLVMConstInt(cg->type_i64, 120, false), "obj_is_str");
+        LLVMValueRef is_const_str =
+            LLVMBuildICmp(cg->builder, LLVMIntEQ, tag_v,
+                          LLVMConstInt(cg->type_i64, 121, false),
+                          "obj_is_const_str");
+        LLVMValueRef is_any_str =
+            LLVMBuildOr(cg->builder, is_str, is_const_str, "obj_is_any_str");
+        ptr_result = LLVMBuildSelect(
+            cg->builder, is_any_str, LLVMConstInt(cg->type_i64, 2, false),
+            LLVMConstInt(cg->type_i64, 4, false), "obj_is_str_v");
+      } else {
+        LLVMValueRef tag_shift =
+            LLVMBuildShl(cg->builder, tag_v, LLVMConstInt(cg->type_i64, 1, false),
+                         "obj_tagof_shift");
+        ptr_result =
+            LLVMBuildOr(cg->builder, tag_shift, LLVMConstInt(cg->type_i64, 1, false),
+                        "obj_tagof_v");
+      }
+      LLVMBasicBlockRef ptr_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, ptr_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, not_ptr_bb);
+      ny_braun_enter_block(cg, not_ptr_bb);
+      ny_braun_seal_block(cg, not_ptr_bb);
+      LLVMValueRef not_ptr_result =
+          want_tagof ? LLVMConstInt(cg->type_i64, 0, false)
+                     : LLVMConstInt(cg->type_i64, 4, false);
+      LLVMBasicBlockRef not_ptr_end_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBuildBr(cg->builder, join_bb);
+      ny_braun_add_predecessor(cg, join_bb, not_ptr_end_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, join_bb);
+      ny_braun_enter_block(cg, join_bb);
+      ny_braun_seal_block(cg, join_bb);
+      LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "obj_intrinsic_v");
+      LLVMValueRef incoming_vals[2] = {ptr_result, not_ptr_result};
+      LLVMBasicBlockRef incoming_bbs[2] = {ptr_end_bb, not_ptr_end_bb};
+      LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+      return phi;
+    }
+    if (strcmp(n, "__is_int") == 0 && c->args.len == 1) {
+      LLVMValueRef arg_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      if (!arg_v) {
+        ny_diag_error(e->tok, "failed to evaluate argument for __is_int");
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      if (LLVMTypeOf(arg_v) != cg->type_i64) {
+        arg_v =
+            LLVMBuildPtrToInt(cg->builder, arg_v, cg->type_i64, "is_int_arg");
+      }
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef lsb =
+          LLVMBuildAnd(cg->builder, arg_v, LLVMConstInt(cg->type_i64, 1, 0),
+                       "is_int_lsb");
+      LLVMValueRef pred = LLVMBuildICmp(
+          cg->builder, LLVMIntEQ, lsb, LLVMConstInt(cg->type_i64, 1, 0),
+          "is_int_pred");
+      return LLVMBuildSelect(cg->builder, pred,
+                             LLVMConstInt(cg->type_i64, 2, false),
+                             LLVMConstInt(cg->type_i64, 4, false), "is_int_v");
+    }
     if (strcmp(n, "extern_all") == 0 || strcmp(n, "__extern_all") == 0) {
       if (handle_extern_all_args(cg, &c->args))
         return LLVMConstInt(cg->type_i64, 0, false);
@@ -1068,28 +1410,24 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         goto call_fail;
       }
     } else if (has_sig && is_variadic && i == (size_t)sig_arity - 1) {
-      /* Variadic packaging: build list in-place to avoid append call chains. */
-      fun_sig *ls_s = ny_gencall_list(cg);
+      /* Variadic packaging: build list in-place. */
+      fun_sig *ls_s = lookup_fun(cg, "__list_new");
       fun_sig *st_s = lookup_fun(cg, "__store64_idx");
       if (!ls_s || !st_s) {
         ny_diag_error(e->tok,
-                      "variadic arguments require list/__store64_idx helpers");
-        ny_diag_hint(
-            "missing std.core imports for 'list' or runtime '__store64_idx'");
+                      "variadic arguments require __list_new/__store64_idx "
+                      "helpers");
         cg->had_error = 1;
         goto call_fail;
       }
-      LLVMTypeRef lty = ls_s->type, sty = st_s->type;
-      LLVMValueRef lval = ls_s->value, sval = st_s->value;
       size_t var_count =
           (user_args_len > user_idx) ? (user_args_len - user_idx) : 0;
-      size_t list_cap = var_count > 0 ? var_count : 1;
-      uint64_t tagged_cap = (((uint64_t)list_cap) << 1) | 1u;
       ny_dbg_loc(cg, e->tok);
       LLVMValueRef vl = LLVMBuildCall2(
-          cg->builder, lty, lval,
-          (LLVMValueRef[]){LLVMConstInt(cg->type_i64, tagged_cap, false)}, 1,
-          "");
+          cg->builder, ls_s->type, ls_s->value,
+          (LLVMValueRef[]){LLVMConstInt(
+              cg->type_i64, (((uint64_t)var_count << 1) | 1u), false)},
+          1, "");
       size_t out_i = 0;
       for (size_t j = user_idx; j < user_args_len; j++) {
         call_arg_t *a = &user_args[j];
@@ -1104,41 +1442,37 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           fun_sig *ks_s = ny_gencall_kwarg(cg);
           if (!ks_s) {
             ny_diag_error(e->tok, "keyword args require '__kwarg'");
-            ny_diag_hint("import std.core or call without keyword arguments");
             cg->had_error = 1;
             goto call_fail;
           }
-          LLVMTypeRef kty = ks_s->type;
-          LLVMValueRef kval = ks_s->value;
           LLVMValueRef name_runtime_global =
               const_string_ptr(cg, a->name, strlen(a->name));
           LLVMValueRef name_ptr = LLVMBuildLoad2(cg->builder, cg->type_i64,
                                                  name_runtime_global, "");
           ny_dbg_loc(cg, e->tok);
-          av = LLVMBuildCall2(cg->builder, kty, kval,
+          av = LLVMBuildCall2(cg->builder, ks_s->type, ks_s->value,
                               (LLVMValueRef[]){name_ptr, av}, 2, "");
         }
-        uint64_t tagged_off =
-            ((((uint64_t)16 + (uint64_t)out_i * 8u) << 1) | 1u);
+        uint64_t tagged_off = ((((uint64_t)16 + (uint64_t)out_i * 8u) << 1) | 1u);
         ny_dbg_loc(cg, e->tok);
         (void)LLVMBuildCall2(
-            cg->builder, sty, sval,
+            cg->builder, st_s->type, st_s->value,
             (LLVMValueRef[]){vl, LLVMConstInt(cg->type_i64, tagged_off, false),
                              av},
             3, "");
         out_i++;
       }
-      ny_dbg_loc(cg, e->tok);
+      // Set variadic list length at offset 0
       (void)LLVMBuildCall2(
-          cg->builder, sty, sval,
-          (LLVMValueRef[]){vl, LLVMConstInt(cg->type_i64, 1, false),
-                           LLVMConstInt(cg->type_i64,
-                                        ((((uint64_t)var_count) << 1) | 1u),
-                                        false)},
+          cg->builder, st_s->type, st_s->value,
+          (LLVMValueRef[]){
+              vl, LLVMConstInt(cg->type_i64, 1, false),
+              LLVMConstInt(cg->type_i64, (((uint64_t)out_i << 1) | 1u), false)},
           3, "");
       args[i] = vl;
       break;
-    } else if (user_idx < user_args_len) {
+    }
+ else if (user_idx < user_args_len) {
       expr_for_check = user_args[user_idx].val;
       if (param_type && expr_for_check)
         ensure_expr_type_compatible(cg, scopes, depth, param_type,

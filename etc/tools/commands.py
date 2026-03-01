@@ -15,12 +15,6 @@ from context import ROOT, host_os, c, OK_SYMBOL
 from utils import run, run_capture, step, warn, err, log_ok, env_int, env_bool, strip_ansi, ir_stats
 from cmake import cmake_build_dir
 
-from tidy import run_tidy
-from std import run_std_bundle
-from fuzz import run_fuzz_harness
-from conv import run_conv
-from web import run_web_gen
-
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 def _py(*args):
@@ -120,6 +114,8 @@ def run_test(build_dir, test_kind, std_bundle, test_jobs=0, timeout="auto", unkn
     run(cmd, env=env)
 
 def run_fuzz(build_dir, jobs=0, iterations=0, timeout_s=0.0, mode=""):
+    from fuzz import run_fuzz_harness
+
     bin_debug = resolve_primary_bin(build_dir, "debug")
     if not Path(bin_debug).exists():
         fallback = resolve_primary_bin(build_dir, "release")
@@ -171,6 +167,8 @@ def run_repl(build_dir, kind="release", unknown=None):
     os.execv(str(ny_bin), cmd)
 
 def run_std(build_dir, kind="release"):
+    from std import run_std_bundle
+
     bdir = cmake_build_dir(build_dir, kind)
     bundle_path = bdir / "std.ny"
     run_std_bundle(bundle_path)
@@ -182,6 +180,8 @@ def run_fmt(unknown=None):
     run(cmd)
 
 def run_docs(build_dir):
+    from web import run_web_gen
+
     bdir = cmake_build_dir(build_dir, "release")
     bundle_path = bdir / "std.ny"
     run_web_gen(bundle_path, build_dir / "docs")

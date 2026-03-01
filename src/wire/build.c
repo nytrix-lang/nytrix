@@ -90,7 +90,7 @@ static int ny_file_mtime(const char *path, time_t *out_mtime) {
   return 0;
 }
 
-#if !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(_WIN32)
 static bool ny_tool_in_path(const char *tool) {
   if (!tool || !*tool)
     return false;
@@ -148,6 +148,11 @@ static bool ny_tool_in_path(const char *tool) {
   }
   free(buf);
   return found;
+}
+#else
+static bool ny_tool_in_path(const char *tool) {
+  (void)tool;
+  return false;
 }
 #endif
 static time_t ny_runtime_latest_dep_mtime(const char *root) {
@@ -583,6 +588,7 @@ int ny_exec_spawn(const char *const argv[]) {
 
 bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
                                 const char *out_ast, bool debug, bool profile) {
+  bool has_ccache = ny_tool_in_path("ccache");
   const char *root = ny_src_root();
   static char include_arg[PATH_MAX + 12];
   static char llvm_include_arg[PATH_MAX + 12];
@@ -599,6 +605,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
 #ifdef _WIN32
   bool msvc = is_msvc_cc(cc);
   if (msvc) {
+    // ccache not typically used with MSVC/cl.exe via direct invocation in this context
+    // or requires specific configuration (sccache). Skipping for MSVC path.
     snprintf(include_arg, sizeof(include_arg), "/I%s/src", root);
     const char *llvm_inc = find_llvm_include_dir();
     if (llvm_inc && *llvm_inc)
@@ -681,59 +689,63 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
     return true;
 #if defined(__APPLE__) || defined(_WIN32)
-  const char *const runtime_args[] = {
-      cc,
-      "-std=gnu11",
-      debug ? "-g3" : "-O2",
-      dwarf_flag,
-      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer",
-      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls",
+  const char *runtime_args[128];
+  size_t ra_i = 0;
+  if (has_ccache) runtime_args[ra_i++] = "ccache";
+  runtime_args[ra_i++] = cc;
+  runtime_args[ra_i++] = "-std=gnu11";
+  runtime_args[ra_i++] = debug ? "-g3" : "-O2";
+  runtime_args[ra_i++] = dwarf_flag;
+  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
-      arm_float_abi_flag,
+  runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
 #if !defined(_WIN32)
-      "-fPIC",
+  runtime_args[ra_i++] = "-fPIC";
 #endif
-      "-fvisibility=hidden",
-      "-ffunction-sections",
-      "-fdata-sections",
+  runtime_args[ra_i++] = "-fvisibility=hidden";
+  runtime_args[ra_i++] = "-ffunction-sections";
+  runtime_args[ra_i++] = "-fdata-sections";
 #ifdef _WIN32
-      "-D_CRT_SECURE_NO_WARNINGS",
-      "-D_CRT_NONSTDC_NO_WARNINGS",
+  runtime_args[ra_i++] = "-D_CRT_SECURE_NO_WARNINGS";
+  runtime_args[ra_i++] = "-D_CRT_NONSTDC_NO_WARNINGS";
 #endif
-      "-DNYTRIX_RUNTIME_ONLY",
-      include_arg,
-      llvm_include_arg,
-      "-c",
-      runtime_src,
-      "-o",
-      out_runtime,
-      profile ? "-pg" : NULL,
-      NULL};
+  runtime_args[ra_i++] = "-DNYTRIX_RUNTIME_ONLY";
+  runtime_args[ra_i++] = include_arg;
+  runtime_args[ra_i++] = llvm_include_arg;
+  runtime_args[ra_i++] = "-c";
+  runtime_args[ra_i++] = runtime_src;
+  runtime_args[ra_i++] = "-o";
+  runtime_args[ra_i++] = out_runtime;
+  if (profile) runtime_args[ra_i++] = "-pg";
+  runtime_args[ra_i] = NULL;
 #else
-  const char *const runtime_args[] = {
-      cc,
-      "-std=gnu11",
-      debug ? "-g3" : "-O2",
-      dwarf_flag,
-      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer",
-      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls",
+  const char *runtime_args[128];
+  size_t ra_i = 0;
+  if (has_ccache) runtime_args[ra_i++] = "ccache";
+  runtime_args[ra_i++] = cc;
+  runtime_args[ra_i++] = "-std=gnu11";
+  runtime_args[ra_i++] = debug ? "-g3" : "-O2";
+  runtime_args[ra_i++] = dwarf_flag;
+  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
-      arm_float_abi_flag,
+  runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
-      "-fno-pie",
-      "-fvisibility=hidden",
-      "-ffunction-sections",
-      "-fdata-sections",
-      "-DNYTRIX_RUNTIME_ONLY",
-      include_arg,
-      llvm_include_arg,
-      "-c",
-      runtime_src,
-      "-o",
-      out_runtime,
-      profile ? "-pg" : NULL,
-      NULL};
+  runtime_args[ra_i++] = "-fno-pie";
+  runtime_args[ra_i++] = "-fvisibility=hidden";
+  runtime_args[ra_i++] = "-ffunction-sections";
+  runtime_args[ra_i++] = "-fdata-sections";
+  runtime_args[ra_i++] = "-DNYTRIX_RUNTIME_ONLY";
+  runtime_args[ra_i++] = include_arg;
+  runtime_args[ra_i++] = llvm_include_arg;
+  runtime_args[ra_i++] = "-c";
+  runtime_args[ra_i++] = runtime_src;
+  runtime_args[ra_i++] = "-o";
+  runtime_args[ra_i++] = out_runtime;
+  if (profile) runtime_args[ra_i++] = "-pg";
+  runtime_args[ra_i] = NULL;
 #endif
   if (verbose_enabled >= 2) {
     fprintf(stderr, "[**] Spawning runtime build:");
@@ -753,36 +765,38 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   if (!out_ast)
     ny_update_runtime_cache(cache_obj, out_runtime);
   if (out_ast) {
-    const char *const ast_args[] = {
-        cc,
-        "-std=gnu11",
-        debug ? "-g3" : "-Os",
-        dwarf_flag,
-        debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer",
-        debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls",
+    const char *ast_args[128];
+    size_t aa_i = 0;
+    if (has_ccache) ast_args[aa_i++] = "ccache";
+    ast_args[aa_i++] = cc;
+    ast_args[aa_i++] = "-std=gnu11";
+    ast_args[aa_i++] = debug ? "-g3" : "-Os";
+    ast_args[aa_i++] = dwarf_flag;
+    ast_args[aa_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+    ast_args[aa_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
-        arm_float_abi_flag,
+    ast_args[aa_i++] = arm_float_abi_flag;
 #endif
 #if !defined(_WIN32)
-        "-fPIC",
+    ast_args[aa_i++] = "-fPIC";
 #endif
 #if !defined(__APPLE__) && !defined(_WIN32)
-        "-fno-pie",
+    ast_args[aa_i++] = "-fno-pie";
 #endif
-        "-fvisibility=hidden",
-        "-ffunction-sections",
-        "-fdata-sections",
+    ast_args[aa_i++] = "-fvisibility=hidden";
+    ast_args[aa_i++] = "-ffunction-sections";
+    ast_args[aa_i++] = "-fdata-sections";
 #ifdef _WIN32
-        "-D_CRT_SECURE_NO_WARNINGS",
-        "-D_CRT_NONSTDC_NO_WARNINGS",
+    ast_args[aa_i++] = "-D_CRT_SECURE_NO_WARNINGS";
+    ast_args[aa_i++] = "-D_CRT_NONSTDC_NO_WARNINGS";
 #endif
-        include_arg,
-        llvm_include_arg,
-        "-c",
-        ast_src,
-        "-o",
-        out_ast,
-        NULL};
+    ast_args[aa_i++] = include_arg;
+    ast_args[aa_i++] = llvm_include_arg;
+    ast_args[aa_i++] = "-c";
+    ast_args[aa_i++] = ast_src;
+    ast_args[aa_i++] = "-o";
+    ast_args[aa_i++] = out_ast;
+    ast_args[aa_i] = NULL;
     char *ast_pool[16];
     size_t ast_pool_len = 0;
     rc = spawn_with_host_flags(ast_args, getenv("NYTRIX_HOST_CFLAGS"), ast_pool,
@@ -813,7 +827,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   (void)link_strip;
   bool msvc = is_msvc_cc(cc);
   if (msvc) {
-    char *dyn_args[64];
+    char *dyn_args[NY_MAX_LINK_ARGS];
     size_t dyn_count = 0;
     static char out_arg[PATH_MAX + 8];
     snprintf(out_arg, sizeof(out_arg), "/Fe:%s", output_path);
@@ -838,11 +852,15 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       if (strncmp(ld, "/LIBPATH:", 9) == 0) {
         argv[idx++] = ld;
       } else if (ld[0] == '-' && ld[1] == 'L') {
+        if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
+          break;
         char tmp[PATH_MAX + 16];
         snprintf(tmp, sizeof(tmp), "/LIBPATH:%s", ld + 2);
         dyn_args[dyn_count] = ny_strdup(tmp);
         argv[idx++] = dyn_args[dyn_count++];
       } else if (is_path_like(ld)) {
+        if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
+          break;
         char tmp[PATH_MAX + 16];
         snprintf(tmp, sizeof(tmp), "/LIBPATH:%s", ld);
         dyn_args[dyn_count] = ny_strdup(tmp);
@@ -858,6 +876,8 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       if (strncmp(lib, "/DEFAULTLIB:", 12) == 0) {
         argv[idx++] = lib;
       } else if (lib[0] == '-' && lib[1] == 'l') {
+        if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
+          break;
         char tmp[PATH_MAX];
         snprintf(tmp, sizeof(tmp), "%s.lib", lib + 2);
         dyn_args[dyn_count] = ny_strdup(tmp);
@@ -866,6 +886,8 @@ bool ny_builder_link(const char *cc, const char *obj_path,
                  has_ext(lib, ".dll") || is_path_like(lib)) {
         argv[idx++] = lib;
       } else {
+        if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
+          break;
         char tmp[PATH_MAX];
         snprintf(tmp, sizeof(tmp), "%s.lib", lib);
         dyn_args[dyn_count] = ny_strdup(tmp);
@@ -971,10 +993,6 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   }
   argv[idx++] = "-o";
   argv[idx++] = output_path;
-  bool link_readline = false;
-#ifndef _WIN32
-  link_readline = ny_env_enabled("NYTRIX_LINK_READLINE");
-#endif
 #ifndef _WIN32
   argv[idx++] = "-lm";
 #endif
@@ -982,8 +1000,6 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   argv[idx++] = "-pthread";
   argv[idx++] = "-lpthread";
 #endif
-  if (link_readline)
-    argv[idx++] = "-lreadline";
 #if !defined(__APPLE__) && !defined(_WIN32)
   argv[idx++] = "-ldl";
 #endif

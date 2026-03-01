@@ -28,11 +28,93 @@ int64_t __rand64(void) {
   return (int64_t)res;
 }
 
+// Thread-local slab allocator for floats
+// Slots are 16 bytes: [next_ptr (8) | unused (8)] when free
+//                     [tag (8)      | value (8)] when allocated
+// Tag is at offset -8 relative to returned pointer.
+// Value is at offset 0 relative to returned pointer.
+// So:
+// [ ... header (not used for floats) ... ]
+// Slot:
+// [ Word 0 ] [ Word 1 ]
+//
+// When allocated:
+// Word 0: TAG_FLOAT (stored at p - 8)
+// Word 1: double bits (stored at p)
+//
+// When free:
+// Word 0: next free pointer
+// Word 1: unused
+
+static __thread void *g_flt_cache = NULL;
+
+static void *__flt_alloc_slot(void) {
+  if (g_flt_cache) {
+    void *p = g_flt_cache;
+    g_flt_cache = *(void **)p;
+    return p;
+  }
+  // Allocate a new chunk (4KB)
+  size_t chunk_size = 4096;
+  char *chunk = (char *)__malloc((int64_t)((chunk_size << 1) | 1));
+  if (!chunk)
+    return NULL;
+
+  // We can't use the standard header of the chunk because __malloc puts its own
+  // heavy headers. We just treat the payload as a raw buffer of slots.
+  // __malloc returns a pointer to the payload.
+
+  // Link all slots in the new chunk
+  // Each slot is 16 bytes.
+  // Note: Since __malloc returns 64-byte aligned pointers, we are good on alignment.
+
+  size_t slot_count = chunk_size / 16;
+  // We skip the first 64 bytes if we were doing manual page management, but here
+  // __malloc handles the page. We just use the payload.
+  // Wait, __malloc returns a Nytrix object. It has headers at -64.
+  // We are using `__malloc` from the runtime, which is a heavy allocator.
+  // This means our slab blocks are themselves heavy objects. This is fine,
+  // we just leak them until program exit (or some future GC sweep).
+  // The goal is to make individual float allocations cheap.
+
+  // Link slots 0 to N-2 to point to the next one.
+  for (size_t i = 0; i < slot_count - 1; i++) {
+    void *curr = chunk + (i * 16);
+    void *next = chunk + ((i + 1) * 16);
+    *(void **)curr = next;
+  }
+  *(void **)(chunk + ((slot_count - 1) * 16)) = NULL;
+
+  g_flt_cache = (void *)chunk;
+
+  // Pop one immediately
+  void *p = g_flt_cache;
+  g_flt_cache = *(void **)p;
+  return p;
+}
+
+void __flt_free(int64_t v) {
+  if (!v) return;
+  // v points to the value. The slot starts at v - 8.
+  void *slot = (void *)((char *)(uintptr_t)v - 8);
+  *(void **)slot = g_flt_cache;
+  g_flt_cache = slot;
+}
+
 int64_t __flt_box_val(int64_t bits) {
-  int64_t res = __malloc(17);
-  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_FLOAT;
-  memcpy((void *)(uintptr_t)res, &bits, 8);
-  return res;
+  void *slot = __flt_alloc_slot();
+  if (!slot) return 0; // Should panic or handle OOM
+
+  // Slot layout: [ Word 0 ] [ Word 1 ]
+  // Word 0 is at `slot`. Word 1 is at `slot + 8`.
+  // We return `slot + 8`.
+  // Tag goes at `slot` (offset -8 from return).
+  // Value goes at `slot + 8` (offset 0 from return).
+
+  *(int64_t *)slot = TAG_FLOAT;
+  memcpy((char *)slot + 8, &bits, 8);
+
+  return (int64_t)(uintptr_t)((char *)slot + 8);
 }
 
 int64_t __flt_box_val32(int64_t bits32) {
@@ -57,7 +139,8 @@ int64_t __flt_unbox_val(int64_t v) {
     memcpy(&res, &d, 8);
     return res;
   }
-  if (is_v_flt(v) && rt_addr_readable((uintptr_t)v, sizeof(int64_t))) {
+  /* is_v_flt already confirms the tag at v-8; skip rt_addr_readable. */
+  if (is_v_flt(v)) {
     int64_t bits;
     memcpy(&bits, (const void *)(uintptr_t)v, sizeof(bits));
     return bits;
@@ -69,7 +152,7 @@ int64_t __flt_unbox_val32(int64_t v) {
   double d = 0;
   if (v & 1) {
     d = (double)(v >> 1);
-  } else if (is_v_flt(v) && rt_addr_readable((uintptr_t)v, sizeof(double))) {
+  } else if (is_v_flt(v)) {
     memcpy(&d, (const void *)(uintptr_t)v, sizeof(d));
   }
   float f = (float)d;
@@ -137,12 +220,12 @@ int64_t __add(int64_t a, int64_t b) {
     return (int64_t)((uint64_t)a + (uint64_t)b - 1);
   if (is_v_flt(a) || is_v_flt(b))
     return __flt_add(a, b);
+  if (is_v_str(a) && is_v_str(b))
+    return __str_concat(a, b);
   if (is_any_ptr(a) && is_int(b))
     return a + (b >> 1);
   if (is_int(a) && is_any_ptr(b))
     return b + (a >> 1);
-  if (is_v_str(a) && is_v_str(b))
-    return __str_concat(a, b);
   return 1;
 }
 

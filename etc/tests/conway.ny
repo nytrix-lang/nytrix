@@ -21,12 +21,14 @@ def LEN_ALIVE   = str_len(CHAR_ALIVE)
 def LEN_DEAD    = 1
 
 ;; State Init
-def t = get_terminal_size()
-mut W = get(t, 0, 0)
-mut H = get(t, 1, 0)
+def tSize = get_terminal_size()
+mut W = get(tSize, 0, 0)
+mut H = get(tSize, 1, 0)
 if(W < 2){ W = 80 }
-if(H < 1){ H = 24 }
+if(H < 2){ H = 25 }
 if(W % 2 == 1){ W -= 1 }
+H -= 0 ;; Full screen
+
 
 def LW    = W / 2
 def CANV  = canvas(W, H)
@@ -73,8 +75,8 @@ fn set_pair(x, y, ch, lch, c){
 fn seed_grid(g, n){
    mut i = 0
    while(i < n){
-      def r = mod(to_int(rand()), 2)
-      if(r == 0){ bytes_set(g, i, CELL_ALIVE) } else { bytes_set(g, i, CELL_DEAD) }
+      def r = randint(0, 1)
+      if(r == 1){ __store8_idx(g, i, CELL_ALIVE) } else { __store8_idx(g, i, CELL_DEAD) }
       i += 1
    }
 }
@@ -87,7 +89,7 @@ fn draw_full(g){
       while(x < LW){
          def idx = yw + x
          def sx = x * 2
-         if(bytes_get(g, idx)){
+         if(__load8_idx(g, idx)){
             set_pair(sx, y, CHAR_ALIVE, LEN_ALIVE, COLOR_ALIVE)
          } else {
             set_pair(sx, y, CHAR_DEAD, LEN_DEAD, COLOR_DEAD)
@@ -97,6 +99,8 @@ fn draw_full(g){
       y += 1
    }
 }
+
+
 
 fn step(cur, nxt){
    mut alive = 0
@@ -112,20 +116,20 @@ fn step(cur, nxt){
 
          if(y > 0){
             def ym = (y - 1) * LW
-            if(x > 0){ n += bytes_get(cur, ym + xm) }
-            n += bytes_get(cur, ym + x)
-            if(x < LW - 1){ n += bytes_get(cur, ym + xp) }
+            if(x > 0){ n += __load8_idx(cur, ym + xm) }
+            n += __load8_idx(cur, ym + x)
+            if(x < LW - 1){ n += __load8_idx(cur, ym + xp) }
          }
-         if(x > 0){ n += bytes_get(cur, yw + xm) }
-         if(x < LW - 1){ n += bytes_get(cur, yw + xp) }
+         if(x > 0){ n += __load8_idx(cur, yw + xm) }
+         if(x < LW - 1){ n += __load8_idx(cur, yw + xp) }
          if(y < H - 1){
             def yp = (y + 1) * LW
-            if(x > 0){ n += bytes_get(cur, yp + xm) }
-            n += bytes_get(cur, yp + x)
-            if(x < LW - 1){ n += bytes_get(cur, yp + xp) }
+            if(x > 0){ n += __load8_idx(cur, yp + xm) }
+            n += __load8_idx(cur, yp + x)
+            if(x < LW - 1){ n += __load8_idx(cur, yp + xp) }
          }
 
-         def curv = bytes_get(cur, idx)
+         def curv = __load8_idx(cur, idx)
          mut live = CELL_DEAD
          if(curv == CELL_ALIVE){
             if(n == 2 || n == 3){ live = CELL_ALIVE }
@@ -133,17 +137,8 @@ fn step(cur, nxt){
             if(n == 3){ live = CELL_ALIVE }
          }
 
-         bytes_set(nxt, idx, live)
+         __store8_idx(nxt, idx, live)
          if(live){ alive += 1 }
-
-         if(live != curv){
-            def sx = x * 2
-            if(live){
-               set_pair(sx, y, CHAR_ALIVE, LEN_ALIVE, COLOR_ALIVE)
-            } else {
-               set_pair(sx, y, CHAR_DEAD, LEN_DEAD, COLOR_DEAD)
-            }
-         }
          x += 1
       }
       y += 1
@@ -152,12 +147,14 @@ fn step(cur, nxt){
 }
 
 ;; Main Line
-tui_begin()
-defer { tui_end() }
 seed(ticks())
 
 seed_grid(G, TOTAL)
 draw_full(G)
+
+tui_begin()
+defer { tui_end() }
+
 canvas_refresh(CANV)
 
 while(1){
@@ -165,16 +162,21 @@ while(1){
    if(is_quit_key(key)){ break }
 
    def alive = step(G, G2)
+   
    if(alive == 0){
       seed_grid(G2, TOTAL)
       draw_full(G2)
    }
+
+   canvas_print(CANV, 0, 0, "ESC: Quit", 7, 0)
    canvas_refresh(CANV)
 
    def tmp = G
    G = G2
    G2 = tmp
 
+   msleep(150)
    step_count += 1
    if(max_steps > 0 && step_count >= max_steps){ break }
 }
+tui_end()

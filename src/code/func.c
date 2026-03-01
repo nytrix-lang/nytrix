@@ -734,10 +734,14 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
     return;
   }
   LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
-  LLVMPositionBuilderAtEnd(cg->builder, LLVMAppendBasicBlock(f, "entry"));
+  LLVMBasicBlockRef entry_bb = LLVMAppendBasicBlock(f, "entry");
+  LLVMPositionBuilderAtEnd(cg->builder, entry_bb);
   if (cg->braun)
     braun_ssa_reset(cg->braun);
   ny_braun_mark_current_block(cg);
+  // Entry block has no predecessors — seal it immediately so Braun SSA never
+  // creates incomplete PHIs at the function entry.
+  ny_braun_seal_block(cg, entry_bb);
   LLVMMetadataRef prev_scope = cg->di_scope;
   if (cg->debug_symbols && cg->di_builder) {
     LLVMMetadataRef sp = codegen_debug_subprogram(cg, f, name, fn->tok);

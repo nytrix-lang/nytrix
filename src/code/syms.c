@@ -670,7 +670,12 @@ static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
   memset(g_overload_name_heads, 0xff, sizeof(g_overload_name_heads));
   size_t len = cg->fun_sigs.len;
   if (g_overload_name_next_cap < len) {
-    int32_t *grown = realloc(g_overload_name_next, sizeof(int32_t) * len);
+    size_t new_cap = g_overload_name_next_cap * 2;
+    if (new_cap < len)
+      new_cap = len;
+    if (new_cap < 1024)
+      new_cap = 1024;
+    int32_t *grown = realloc(g_overload_name_next, sizeof(int32_t) * new_cap);
     if (!grown) {
       g_overload_name_index_ready = false;
       g_overload_name_index_cg = NULL;
@@ -678,7 +683,7 @@ static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
       return;
     }
     g_overload_name_next = grown;
-    g_overload_name_next_cap = len;
+    g_overload_name_next_cap = new_cap;
   }
   for (size_t i = 0; i < len; ++i) {
     g_overload_name_next[i] = -1;

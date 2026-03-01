@@ -1,4 +1,5 @@
 #include "base/util.h"
+#include "code/visitor.h"
 #include "priv.h"
 
 #include <ctype.h>
@@ -217,270 +218,185 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
                                               assigned_hash_list *local_hashes,
                                               uint64_t local_bloom[4]);
 
-static uint32_t ny_expr_effects(codegen_t *cg, expr_t *e,
-                                assigned_name_list *local_names,
-                                assigned_hash_list *local_hashes,
-                                uint64_t local_bloom[4]);
-
 static uint32_t ny_stmt_effects(codegen_t *cg, stmt_t *s,
                                 assigned_name_list *local_names,
                                 assigned_hash_list *local_hashes,
                                 uint64_t local_bloom[4]);
 
-static uint32_t ny_expr_effects(codegen_t *cg, expr_t *e,
-                                assigned_name_list *local_names,
-                                assigned_hash_list *local_hashes,
-                                uint64_t local_bloom[4]) {
+typedef struct ny_purity_scope_checkpoint_t {
+  size_t name_len;
+  size_t hash_len;
+  uint64_t bloom[4];
+} ny_purity_scope_checkpoint_t;
+
+static void ny_purity_scope_save(const assigned_name_list *local_names,
+                                 const assigned_hash_list *local_hashes,
+                                 const uint64_t local_bloom[4],
+                                 ny_purity_scope_checkpoint_t *cp) {
+  if (!cp)
+    return;
+  cp->name_len = local_names ? local_names->len : 0;
+  cp->hash_len = local_hashes ? local_hashes->len : 0;
+  if (local_bloom) {
+    cp->bloom[0] = local_bloom[0];
+    cp->bloom[1] = local_bloom[1];
+    cp->bloom[2] = local_bloom[2];
+    cp->bloom[3] = local_bloom[3];
+  } else {
+    cp->bloom[0] = 0;
+    cp->bloom[1] = 0;
+    cp->bloom[2] = 0;
+    cp->bloom[3] = 0;
+  }
+}
+
+static void ny_purity_scope_restore(assigned_name_list *local_names,
+                                    assigned_hash_list *local_hashes,
+                                    uint64_t local_bloom[4],
+                                    const ny_purity_scope_checkpoint_t *cp) {
+  if (!cp)
+    return;
+  if (local_names)
+    local_names->len = cp->name_len;
+  if (local_hashes)
+    local_hashes->len = cp->hash_len;
+  if (local_bloom) {
+    local_bloom[0] = cp->bloom[0];
+    local_bloom[1] = cp->bloom[1];
+    local_bloom[2] = cp->bloom[2];
+    local_bloom[3] = cp->bloom[3];
+  }
+}
+
+typedef struct ny_effects_ctx {
+  codegen_t *cg;
+  assigned_name_list *local_names;
+  assigned_hash_list *local_hashes;
+  uint64_t *local_bloom;
+  uint32_t result;
+  ny_purity_scope_checkpoint_t cp;
+} ny_effects_ctx;
+
+static bool effects_visit_expr(ny_visitor_t *v, expr_t *e) {
+  ny_effects_ctx *ctx = (ny_effects_ctx *)v->ctx;
   if (!e)
-    return NY_FX_NONE;
+    return false;
+
   switch (e->kind) {
-  case NY_E_IDENT:
-  case NY_E_LITERAL:
-  case NY_E_INFERRED_MEMBER:
-  case NY_E_EMBED:
-    return NY_FX_NONE;
-  case NY_E_UNARY:
-    return ny_expr_effects(cg, e->as.unary.right, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_BINARY:
-  case NY_E_LOGICAL:
-    return ny_expr_effects(cg, e->as.binary.left, local_names, local_hashes,
-                           local_bloom) |
-           ny_expr_effects(cg, e->as.binary.right, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_TERNARY:
-    return ny_expr_effects(cg, e->as.ternary.cond, local_names, local_hashes,
-                           local_bloom) |
-           ny_expr_effects(cg, e->as.ternary.true_expr, local_names,
-                           local_hashes, local_bloom) |
-           ny_expr_effects(cg, e->as.ternary.false_expr, local_names,
-                           local_hashes, local_bloom);
   case NY_E_CALL: {
-    uint32_t fx = ny_expr_effects(cg, e->as.call.callee, local_names,
-                                  local_hashes, local_bloom);
+    ny_visit_expr(v, e->as.call.callee);
     for (size_t i = 0; i < e->as.call.args.len; i++) {
-      fx |= ny_expr_effects(cg, e->as.call.args.data[i].val, local_names,
-                            local_hashes, local_bloom);
+      ny_visit_expr(v, e->as.call.args.data[i].val);
     }
-    fun_sig *sig = ny_purity_resolve_call_sig(cg, &e->as.call, local_names,
-                                              local_hashes, local_bloom);
-    fx |= ny_sig_effects(sig);
+    fun_sig *sig = ny_purity_resolve_call_sig(
+        ctx->cg, &e->as.call, ctx->local_names, ctx->local_hashes,
+        ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0});
+    ctx->result |= ny_sig_effects(sig);
     if (!sig)
-      fx |= NY_FX_FFI;
-    return fx;
+      ctx->result |= NY_FX_FFI;
+    return false; // Manually traversed children
   }
   case NY_E_MEMCALL: {
-    uint32_t fx = ny_expr_effects(cg, e->as.memcall.target, local_names,
-                                  local_hashes, local_bloom);
+    ny_visit_expr(v, e->as.memcall.target);
     for (size_t i = 0; i < e->as.memcall.args.len; i++) {
-      fx |= ny_expr_effects(cg, e->as.memcall.args.data[i].val, local_names,
-                            local_hashes, local_bloom);
+      ny_visit_expr(v, e->as.memcall.args.data[i].val);
     }
     fun_sig *sig = ny_purity_resolve_memcall_sig(
-        cg, &e->as.memcall, local_names, local_hashes, local_bloom);
-    fx |= ny_sig_effects(sig);
+        ctx->cg, &e->as.memcall, ctx->local_names, ctx->local_hashes,
+        ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0});
+    ctx->result |= ny_sig_effects(sig);
     if (!sig)
-      fx |= NY_FX_FFI;
-    return fx;
+      ctx->result |= NY_FX_FFI;
+    return false; // Manually traversed children
   }
-  case NY_E_INDEX:
-    return ny_expr_effects(cg, e->as.index.target, local_names, local_hashes,
-                           local_bloom) |
-           ny_expr_effects(cg, e->as.index.start, local_names, local_hashes,
-                           local_bloom) |
-           ny_expr_effects(cg, e->as.index.stop, local_names, local_hashes,
-                           local_bloom) |
-           ny_expr_effects(cg, e->as.index.step, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_MEMBER:
-    return ny_expr_effects(cg, e->as.member.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_PTR_TYPE:
-    return ny_expr_effects(cg, e->as.ptr_type.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_DEREF:
-    return ny_expr_effects(cg, e->as.deref.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_SIZEOF:
-    if (e->as.szof.is_type)
-      return NY_FX_NONE;
-    return ny_expr_effects(cg, e->as.szof.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_TRY:
-    return ny_expr_effects(cg, e->as.try_expr.target, local_names, local_hashes,
-                           local_bloom);
   case NY_E_LIST:
   case NY_E_TUPLE:
-  case NY_E_SET: {
-    uint32_t fx = NY_FX_ALLOC;
-    for (size_t i = 0; i < e->as.list_like.len; i++)
-      fx |= ny_expr_effects(cg, e->as.list_like.data[i], local_names,
-                            local_hashes, local_bloom);
-    return fx;
-  }
-  case NY_E_DICT: {
-    uint32_t fx = NY_FX_ALLOC;
-    for (size_t i = 0; i < e->as.dict.pairs.len; i++) {
-      fx |= ny_expr_effects(cg, e->as.dict.pairs.data[i].key, local_names,
-                            local_hashes, local_bloom);
-      fx |= ny_expr_effects(cg, e->as.dict.pairs.data[i].value, local_names,
-                            local_hashes, local_bloom);
-    }
-    return fx;
-  }
-  case NY_E_COMPTIME:
-    return ny_stmt_effects(cg, e->as.comptime_expr.body, local_names,
-                           local_hashes, local_bloom);
-  case NY_E_FSTRING: {
-    uint32_t fx = NY_FX_ALLOC;
-    for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
-      fstring_part_t *part = &e->as.fstring.parts.data[i];
-      if (part->kind == NY_FSP_EXPR)
-        fx |= ny_expr_effects(cg, part->as.e, local_names, local_hashes,
-                              local_bloom);
-    }
-    return fx;
-  }
-  case NY_E_MATCH: {
-    uint32_t fx = ny_expr_effects(cg, e->as.match.test, local_names,
-                                  local_hashes, local_bloom);
-    for (size_t i = 0; i < e->as.match.arms.len; i++) {
-      match_arm_t *arm = &e->as.match.arms.data[i];
-      for (size_t j = 0; j < arm->patterns.len; j++) {
-        fx |= ny_expr_effects(cg, arm->patterns.data[j], local_names,
-                              local_hashes, local_bloom);
-      }
-      fx |= ny_expr_effects(cg, arm->guard, local_names, local_hashes,
-                            local_bloom);
-      fx |= ny_stmt_effects(cg, arm->conseq, local_names, local_hashes,
-                            local_bloom);
-    }
-    fx |= ny_stmt_effects(cg, e->as.match.default_conseq, local_names,
-                          local_hashes, local_bloom);
-    return fx;
-  }
-  case NY_E_ASM:
-    return NY_FX_FFI;
+  case NY_E_SET:
+  case NY_E_DICT:
+  case NY_E_FSTRING:
   case NY_E_LAMBDA:
   case NY_E_FN:
-    return NY_FX_ALLOC;
+    ctx->result |= NY_FX_ALLOC;
+    return true; // Continue traversal
+  case NY_E_ASM:
+    ctx->result |= NY_FX_FFI;
+    return true; // Continue traversal
+  default:
+    return true;
   }
-  return NY_FX_ALL;
+}
+
+static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
+  ny_effects_ctx *ctx = (ny_effects_ctx *)v->ctx;
+  if (!s)
+    return false;
+
+  switch (s->kind) {
+  case NY_S_BLOCK: {
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(ctx->local_names, ctx->local_hashes,
+                         ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0},
+                         &cp);
+    for (size_t i = 0; i < s->as.block.body.len; i++) {
+      ny_visit_stmt(v, s->as.block.body.data[i]);
+    }
+    ny_purity_scope_restore(
+        ctx->local_names, ctx->local_hashes,
+        ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
+    return false; // Manually traversed children
+  }
+  case NY_S_VAR: {
+    for (size_t i = 0; i < s->as.var.exprs.len; i++) {
+      ny_visit_expr(v, s->as.var.exprs.data[i]);
+    }
+    if (s->as.var.is_decl) {
+      for (size_t i = 0; i < s->as.var.names.len; i++) {
+        assigned_name_add(ctx->local_names, ctx->local_hashes,
+                          ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0},
+                          s->as.var.names.data[i]);
+      }
+    }
+    return false; // Manually traversed children
+  }
+  case NY_S_FOR: {
+    ny_visit_expr(v, s->as.fr.iterable);
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(ctx->local_names, ctx->local_hashes,
+                         ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0},
+                         &cp);
+    assigned_name_add(ctx->local_names, ctx->local_hashes,
+                      ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0},
+                      s->as.fr.iter_var);
+    ny_visit_stmt(v, s->as.fr.body);
+    ny_purity_scope_restore(
+        ctx->local_names, ctx->local_hashes,
+        ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
+    return false; // Manually traversed children
+  }
+  case NY_S_MACRO: {
+    ctx->result |= NY_FX_ALL;
+    return true; // Continue traversal
+  }
+  default:
+    return true;
+  }
 }
 
 static uint32_t ny_stmt_effects(codegen_t *cg, stmt_t *s,
                                 assigned_name_list *local_names,
                                 assigned_hash_list *local_hashes,
                                 uint64_t local_bloom[4]) {
-  if (!s)
-    return NY_FX_NONE;
-  switch (s->kind) {
-  case NY_S_BLOCK: {
-    uint32_t fx = NY_FX_NONE;
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
-    for (size_t i = 0; i < s->as.block.body.len; i++)
-      fx |= ny_stmt_effects(cg, s->as.block.body.data[i], local_names,
-                            local_hashes, local_bloom);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
-    return fx;
-  }
-  case NY_S_VAR: {
-    uint32_t fx = NY_FX_NONE;
-    for (size_t i = 0; i < s->as.var.exprs.len; i++)
-      fx |= ny_expr_effects(cg, s->as.var.exprs.data[i], local_names,
-                            local_hashes, local_bloom);
-    if (s->as.var.is_decl) {
-      for (size_t i = 0; i < s->as.var.names.len; i++) {
-        assigned_name_add(local_names, local_hashes, local_bloom,
-                          s->as.var.names.data[i]);
-      }
-    }
-    return fx;
-  }
-  case NY_S_EXPR:
-    return ny_expr_effects(cg, s->as.expr.expr, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_RETURN:
-    return ny_expr_effects(cg, s->as.ret.value, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_IF:
-    return ny_expr_effects(cg, s->as.iff.test, local_names, local_hashes,
-                           local_bloom) |
-           ny_stmt_effects(cg, s->as.iff.conseq, local_names, local_hashes,
-                           local_bloom) |
-           ny_stmt_effects(cg, s->as.iff.alt, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_WHILE:
-    return ny_expr_effects(cg, s->as.whl.test, local_names, local_hashes,
-                           local_bloom) |
-           ny_stmt_effects(cg, s->as.whl.body, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_FOR: {
-    uint32_t fx = ny_expr_effects(cg, s->as.fr.iterable, local_names,
-                                  local_hashes, local_bloom);
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
-    assigned_name_add(local_names, local_hashes, local_bloom,
-                      s->as.fr.iter_var);
-    fx |= ny_stmt_effects(cg, s->as.fr.body, local_names, local_hashes,
-                          local_bloom);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
-    return fx;
-  }
-  case NY_S_MATCH: {
-    uint32_t fx = ny_expr_effects(cg, s->as.match.test, local_names,
-                                  local_hashes, local_bloom);
-    for (size_t i = 0; i < s->as.match.arms.len; i++) {
-      match_arm_t *arm = &s->as.match.arms.data[i];
-      for (size_t j = 0; j < arm->patterns.len; j++) {
-        fx |= ny_expr_effects(cg, arm->patterns.data[j], local_names,
-                              local_hashes, local_bloom);
-      }
-      fx |= ny_expr_effects(cg, arm->guard, local_names, local_hashes,
-                            local_bloom);
-      fx |= ny_stmt_effects(cg, arm->conseq, local_names, local_hashes,
-                            local_bloom);
-    }
-    fx |= ny_stmt_effects(cg, s->as.match.default_conseq, local_names,
-                          local_hashes, local_bloom);
-    return fx;
-  }
-  case NY_S_TRY:
-    return ny_stmt_effects(cg, s->as.tr.body, local_names, local_hashes,
-                           local_bloom) |
-           ny_stmt_effects(cg, s->as.tr.handler, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_DEFER:
-    return ny_stmt_effects(cg, s->as.de.body, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_MACRO: {
-    uint32_t fx = NY_FX_ALL;
-    for (size_t i = 0; i < s->as.macro.args.len; i++) {
-      fx |= ny_expr_effects(cg, s->as.macro.args.data[i], local_names,
-                            local_hashes, local_bloom);
-    }
-    fx |= ny_stmt_effects(cg, s->as.macro.body, local_names, local_hashes,
-                          local_bloom);
-    return fx;
-  }
-  default:
-    return NY_FX_NONE;
-  }
+  if (!s) return NY_FX_NONE;
+  ny_effects_ctx ctx = {.cg = cg,
+                        .local_names = local_names,
+                        .local_hashes = local_hashes,
+                        .local_bloom = local_bloom,
+                        .result = NY_FX_NONE};
+  ny_visitor_t v = {.ctx = &ctx,
+                    .visit_expr_pre = effects_visit_expr,
+                    .visit_stmt_pre = effects_visit_stmt};
+  ny_visit_stmt(&v, s);
+  return ctx.result;
 }
 
 static uint32_t ny_func_decl_effects(codegen_t *cg, stmt_t *fn_stmt) {
@@ -558,263 +474,55 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
   return lookup_fun(cg, dotted);
 }
 
-static bool ny_expr_is_pure(codegen_t *cg, expr_t *e,
-                            assigned_name_list *local_names,
-                            assigned_hash_list *local_hashes,
-                            uint64_t local_bloom[4]);
+#define CHECK_PURE_EXPR(e)                                                     \
+  do {                                                                         \
+    if (!ny_expr_check_safe_internal(cg, (e), local_names, local_hashes,       \
+                                     local_bloom, memo_safe_only))             \
+      return false;                                                            \
+  } while (0)
+
+#define CHECK_PURE_STMT(s)                                                     \
+  do {                                                                         \
+    if (!ny_stmt_check_safe_internal(cg, (s), local_names, local_hashes,       \
+                                     local_bloom, memo_safe_only))             \
+      return false;                                                            \
+  } while (0)
+
+static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
+                                         assigned_name_list *local_names,
+                                         assigned_hash_list *local_hashes,
+                                         uint64_t local_bloom[4],
+                                         bool memo_safe_only);
+
+static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
+                                         assigned_name_list *local_names,
+                                         assigned_hash_list *local_hashes,
+                                         uint64_t local_bloom[4],
+                                         bool memo_safe_only);
+
 
 static bool ny_stmt_is_pure(codegen_t *cg, stmt_t *s,
                             assigned_name_list *local_names,
                             assigned_hash_list *local_hashes,
-                            uint64_t local_bloom[4]);
+                            uint64_t local_bloom[4]) {
+  return ny_stmt_check_safe_internal(cg, s, local_names, local_hashes,
+                                     local_bloom, false);
+}
 
-static bool ny_expr_is_memo_safe(codegen_t *cg, expr_t *e,
-                                 assigned_name_list *local_names,
-                                 assigned_hash_list *local_hashes,
-                                 uint64_t local_bloom[4]);
 
 static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
                                  assigned_name_list *local_names,
                                  assigned_hash_list *local_hashes,
-                                 uint64_t local_bloom[4]);
-
-static bool ny_expr_is_pure(codegen_t *cg, expr_t *e,
-                            assigned_name_list *local_names,
-                            assigned_hash_list *local_hashes,
-                            uint64_t local_bloom[4]) {
-  if (!e)
-    return true;
-  switch (e->kind) {
-  case NY_E_LITERAL:
-    return true;
-  case NY_E_IDENT: {
-    const char *name = e->as.ident.name;
-    if (!name || !*name)
-      return false;
-    if (assigned_name_contains(local_names, local_hashes, local_bloom, name))
-      return true;
-    if (lookup_enum_member(cg, name))
-      return true;
-    if (lookup_fun(cg, name))
-      return true;
-    return false;
-  }
-  case NY_E_UNARY:
-    return ny_expr_is_pure(cg, e->as.unary.right, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_BINARY:
-  case NY_E_LOGICAL:
-    return ny_expr_is_pure(cg, e->as.binary.left, local_names, local_hashes,
-                           local_bloom) &&
-           ny_expr_is_pure(cg, e->as.binary.right, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_TERNARY:
-    return ny_expr_is_pure(cg, e->as.ternary.cond, local_names, local_hashes,
-                           local_bloom) &&
-           ny_expr_is_pure(cg, e->as.ternary.true_expr, local_names,
-                           local_hashes, local_bloom) &&
-           ny_expr_is_pure(cg, e->as.ternary.false_expr, local_names,
-                           local_hashes, local_bloom);
-  case NY_E_CALL: {
-    for (size_t i = 0; i < e->as.call.args.len; i++) {
-      if (!ny_expr_is_pure(cg, e->as.call.args.data[i].val, local_names,
-                           local_hashes, local_bloom))
-        return false;
-    }
-    fun_sig *sig = ny_purity_resolve_call_sig(cg, &e->as.call, local_names,
-                                              local_hashes, local_bloom);
-    return ny_sig_is_pure(sig);
-  }
-  case NY_E_MEMCALL: {
-    for (size_t i = 0; i < e->as.memcall.args.len; i++) {
-      if (!ny_expr_is_pure(cg, e->as.memcall.args.data[i].val, local_names,
-                           local_hashes, local_bloom))
-        return false;
-    }
-    fun_sig *sig = ny_purity_resolve_memcall_sig(
-        cg, &e->as.memcall, local_names, local_hashes, local_bloom);
-    return ny_sig_is_pure(sig);
-  }
-  case NY_E_INDEX:
-  case NY_E_MEMBER:
-  case NY_E_DEREF:
-  case NY_E_TRY:
-  case NY_E_LIST:
-  case NY_E_TUPLE:
-  case NY_E_DICT:
-  case NY_E_SET:
-  case NY_E_ASM:
-  case NY_E_COMPTIME:
-  case NY_E_FSTRING:
-  case NY_E_INFERRED_MEMBER:
-  case NY_E_EMBED:
-  case NY_E_LAMBDA:
-  case NY_E_FN:
-    return false;
-  case NY_E_PTR_TYPE:
-    return ny_expr_is_pure(cg, e->as.ptr_type.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_SIZEOF:
-    if (e->as.szof.is_type)
-      return true;
-    return ny_expr_is_pure(cg, e->as.szof.target, local_names, local_hashes,
-                           local_bloom);
-  case NY_E_MATCH:
-    if (!ny_expr_is_pure(cg, e->as.match.test, local_names, local_hashes,
-                         local_bloom))
-      return false;
-    for (size_t i = 0; i < e->as.match.arms.len; i++) {
-      match_arm_t *arm = &e->as.match.arms.data[i];
-      for (size_t j = 0; j < arm->patterns.len; j++) {
-        if (!ny_expr_is_pure(cg, arm->patterns.data[j], local_names,
-                             local_hashes, local_bloom))
-          return false;
-      }
-      if (!ny_expr_is_pure(cg, arm->guard, local_names, local_hashes,
-                           local_bloom))
-        return false;
-      if (!ny_stmt_is_pure(cg, arm->conseq, local_names, local_hashes,
-                           local_bloom))
-        return false;
-    }
-    return ny_stmt_is_pure(cg, e->as.match.default_conseq, local_names,
-                           local_hashes, local_bloom);
-  }
-  return false;
-}
-
-static bool ny_stmt_is_pure(codegen_t *cg, stmt_t *s,
-                            assigned_name_list *local_names,
-                            assigned_hash_list *local_hashes,
-                            uint64_t local_bloom[4]) {
-  if (!s)
-    return true;
-  switch (s->kind) {
-  case NY_S_BLOCK: {
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
-    bool pure = true;
-    for (size_t i = 0; i < s->as.block.body.len; i++) {
-      if (!ny_stmt_is_pure(cg, s->as.block.body.data[i], local_names,
-                           local_hashes, local_bloom)) {
-        pure = false;
-        break;
-      }
-    }
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
-    return pure;
-  }
-  case NY_S_VAR:
-    if (!s->as.var.is_decl) {
-      for (size_t i = 0; i < s->as.var.names.len; i++) {
-        if (!assigned_name_contains(local_names, local_hashes, local_bloom,
-                                    s->as.var.names.data[i])) {
-          return false;
-        }
-      }
-    }
-    for (size_t i = 0; i < s->as.var.exprs.len; i++) {
-      if (!ny_expr_is_pure(cg, s->as.var.exprs.data[i], local_names,
-                           local_hashes, local_bloom))
-        return false;
-    }
-    if (s->as.var.is_decl) {
-      for (size_t i = 0; i < s->as.var.names.len; i++) {
-        assigned_name_add(local_names, local_hashes, local_bloom,
-                          s->as.var.names.data[i]);
-      }
-    }
-    return true;
-  case NY_S_EXPR:
-    return ny_expr_is_pure(cg, s->as.expr.expr, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_RETURN:
-    return ny_expr_is_pure(cg, s->as.ret.value, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_IF:
-    return ny_expr_is_pure(cg, s->as.iff.test, local_names, local_hashes,
-                           local_bloom) &&
-           ny_stmt_is_pure(cg, s->as.iff.conseq, local_names, local_hashes,
-                           local_bloom) &&
-           ny_stmt_is_pure(cg, s->as.iff.alt, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_WHILE:
-    return ny_expr_is_pure(cg, s->as.whl.test, local_names, local_hashes,
-                           local_bloom) &&
-           ny_stmt_is_pure(cg, s->as.whl.body, local_names, local_hashes,
-                           local_bloom);
-  case NY_S_FOR: {
-    if (!ny_expr_is_pure(cg, s->as.fr.iterable, local_names, local_hashes,
-                         local_bloom))
-      return false;
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
-    assigned_name_add(local_names, local_hashes, local_bloom,
-                      s->as.fr.iter_var);
-    bool pure = ny_stmt_is_pure(cg, s->as.fr.body, local_names, local_hashes,
-                                local_bloom);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
-    return pure;
-  }
-  case NY_S_MATCH:
-    if (!ny_expr_is_pure(cg, s->as.match.test, local_names, local_hashes,
-                         local_bloom))
-      return false;
-    for (size_t i = 0; i < s->as.match.arms.len; i++) {
-      match_arm_t *arm = &s->as.match.arms.data[i];
-      for (size_t j = 0; j < arm->patterns.len; j++) {
-        if (!ny_expr_is_pure(cg, arm->patterns.data[j], local_names,
-                             local_hashes, local_bloom))
-          return false;
-      }
-      if (!ny_expr_is_pure(cg, arm->guard, local_names, local_hashes,
-                           local_bloom))
-        return false;
-      if (!ny_stmt_is_pure(cg, arm->conseq, local_names, local_hashes,
-                           local_bloom))
-        return false;
-    }
-    return ny_stmt_is_pure(cg, s->as.match.default_conseq, local_names,
-                           local_hashes, local_bloom);
-  case NY_S_TRY:
-  case NY_S_DEFER:
-  case NY_S_GOTO:
-  case NY_S_LABEL:
-  case NY_S_FUNC:
-  case NY_S_EXTERN:
-  case NY_S_LAYOUT:
-  case NY_S_MODULE:
-  case NY_S_USE:
-  case NY_S_EXPORT:
-  case NY_S_STRUCT:
-  case NY_S_ENUM:
-  case NY_S_MACRO:
-    return false;
-  case NY_S_BREAK:
-  case NY_S_CONTINUE:
-    return true;
-  }
-  return false;
-}
-
-static bool ny_expr_is_memo_safe(codegen_t *cg, expr_t *e,
-                                 assigned_name_list *local_names,
-                                 assigned_hash_list *local_hashes,
                                  uint64_t local_bloom[4]) {
+  return ny_stmt_check_safe_internal(cg, s, local_names, local_hashes,
+                                     local_bloom, true);
+}
+
+static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
+                                         assigned_name_list *local_names,
+                                         assigned_hash_list *local_hashes,
+                                         uint64_t local_bloom[4],
+                                         bool memo_safe_only) {
   if (!e)
     return true;
   switch (e->kind) {
@@ -833,110 +541,93 @@ static bool ny_expr_is_memo_safe(codegen_t *cg, expr_t *e,
     return false;
   }
   case NY_E_UNARY:
-    return ny_expr_is_memo_safe(cg, e->as.unary.right, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_EXPR(e->as.unary.right);
+    return true;
   case NY_E_BINARY:
   case NY_E_LOGICAL:
-    return ny_expr_is_memo_safe(cg, e->as.binary.left, local_names,
-                                local_hashes, local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.binary.right, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_EXPR(e->as.binary.left);
+    CHECK_PURE_EXPR(e->as.binary.right);
+    return true;
   case NY_E_TERNARY:
-    return ny_expr_is_memo_safe(cg, e->as.ternary.cond, local_names,
-                                local_hashes, local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.ternary.true_expr, local_names,
-                                local_hashes, local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.ternary.false_expr, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_EXPR(e->as.ternary.cond);
+    CHECK_PURE_EXPR(e->as.ternary.true_expr);
+    CHECK_PURE_EXPR(e->as.ternary.false_expr);
+    return true;
   case NY_E_CALL: {
     for (size_t i = 0; i < e->as.call.args.len; i++) {
-      if (!ny_expr_is_memo_safe(cg, e->as.call.args.data[i].val, local_names,
-                                local_hashes, local_bloom))
-        return false;
+      CHECK_PURE_EXPR(e->as.call.args.data[i].val);
     }
     fun_sig *sig = ny_purity_resolve_call_sig(cg, &e->as.call, local_names,
                                               local_hashes, local_bloom);
-    return ny_sig_is_memo_safe(sig);
+    return memo_safe_only ? ny_sig_is_memo_safe(sig) : ny_sig_is_pure(sig);
   }
   case NY_E_MEMCALL: {
     for (size_t i = 0; i < e->as.memcall.args.len; i++) {
-      if (!ny_expr_is_memo_safe(cg, e->as.memcall.args.data[i].val, local_names,
-                                local_hashes, local_bloom))
-        return false;
+      CHECK_PURE_EXPR(e->as.memcall.args.data[i].val);
     }
     fun_sig *sig = ny_purity_resolve_memcall_sig(
         cg, &e->as.memcall, local_names, local_hashes, local_bloom);
-    return ny_sig_is_memo_safe(sig);
+    return memo_safe_only ? ny_sig_is_memo_safe(sig) : ny_sig_is_pure(sig);
   }
   case NY_E_INDEX:
-    return ny_expr_is_memo_safe(cg, e->as.index.target, local_names,
-                                local_hashes, local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.index.start, local_names,
-                                local_hashes, local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.index.stop, local_names, local_hashes,
-                                local_bloom) &&
-           ny_expr_is_memo_safe(cg, e->as.index.step, local_names, local_hashes,
-                                local_bloom);
+    if (!memo_safe_only)
+      return false;
+    CHECK_PURE_EXPR(e->as.index.target);
+    CHECK_PURE_EXPR(e->as.index.start);
+    CHECK_PURE_EXPR(e->as.index.stop);
+    CHECK_PURE_EXPR(e->as.index.step);
+    return true;
   case NY_E_MEMBER:
-    return ny_expr_is_memo_safe(cg, e->as.member.target, local_names,
-                                local_hashes, local_bloom);
   case NY_E_DEREF:
-    return ny_expr_is_memo_safe(cg, e->as.deref.target, local_names,
-                                local_hashes, local_bloom);
+    if (!memo_safe_only)
+      return false;
+    CHECK_PURE_EXPR(e->as.member.target);
+    return true;
   case NY_E_LIST:
   case NY_E_TUPLE:
   case NY_E_SET:
+    if (!memo_safe_only)
+      return false;
     for (size_t i = 0; i < e->as.list_like.len; i++) {
-      if (!ny_expr_is_memo_safe(cg, e->as.list_like.data[i], local_names,
-                                local_hashes, local_bloom))
-        return false;
+      CHECK_PURE_EXPR(e->as.list_like.data[i]);
     }
     return true;
   case NY_E_DICT:
+    if (!memo_safe_only)
+      return false;
     for (size_t i = 0; i < e->as.dict.pairs.len; i++) {
-      if (!ny_expr_is_memo_safe(cg, e->as.dict.pairs.data[i].key, local_names,
-                                local_hashes, local_bloom))
-        return false;
-      if (!ny_expr_is_memo_safe(cg, e->as.dict.pairs.data[i].value, local_names,
-                                local_hashes, local_bloom))
-        return false;
+      CHECK_PURE_EXPR(e->as.dict.pairs.data[i].key);
+      CHECK_PURE_EXPR(e->as.dict.pairs.data[i].value);
     }
     return true;
   case NY_E_PTR_TYPE:
-    return ny_expr_is_memo_safe(cg, e->as.ptr_type.target, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_EXPR(e->as.ptr_type.target);
+    return true;
   case NY_E_SIZEOF:
     if (e->as.szof.is_type)
       return true;
-    return ny_expr_is_memo_safe(cg, e->as.szof.target, local_names,
-                                local_hashes, local_bloom);
-  case NY_E_MATCH:
-    if (!ny_expr_is_memo_safe(cg, e->as.match.test, local_names, local_hashes,
-                              local_bloom))
-      return false;
+    CHECK_PURE_EXPR(e->as.szof.target);
+    return true;
+  case NY_E_MATCH: {
+    CHECK_PURE_EXPR(e->as.match.test);
     for (size_t i = 0; i < e->as.match.arms.len; i++) {
       match_arm_t *arm = &e->as.match.arms.data[i];
       for (size_t j = 0; j < arm->patterns.len; j++) {
-        if (!ny_expr_is_memo_safe(cg, arm->patterns.data[j], local_names,
-                                  local_hashes, local_bloom))
-          return false;
+        CHECK_PURE_EXPR(arm->patterns.data[j]);
       }
-      if (!ny_expr_is_memo_safe(cg, arm->guard, local_names, local_hashes,
-                                local_bloom))
-        return false;
-      if (!ny_stmt_is_memo_safe(cg, arm->conseq, local_names, local_hashes,
-                                local_bloom))
-        return false;
+      CHECK_PURE_EXPR(arm->guard);
+      CHECK_PURE_STMT(arm->conseq);
     }
-    return ny_stmt_is_memo_safe(cg, e->as.match.default_conseq, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_STMT(e->as.match.default_conseq);
+    return true;
+  }
   case NY_E_FSTRING:
+    if (!memo_safe_only)
+      return false;
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
       fstring_part_t *part = &e->as.fstring.parts.data[i];
-      if (part->kind == NY_FSP_EXPR &&
-          !ny_expr_is_memo_safe(cg, part->as.e, local_names, local_hashes,
-                                local_bloom)) {
-        return false;
+      if (part->kind == NY_FSP_EXPR) {
+        CHECK_PURE_EXPR(part->as.e);
       }
     }
     return true;
@@ -952,32 +643,27 @@ static bool ny_expr_is_memo_safe(codegen_t *cg, expr_t *e,
   return false;
 }
 
-static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
-                                 assigned_name_list *local_names,
-                                 assigned_hash_list *local_hashes,
-                                 uint64_t local_bloom[4]) {
+static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
+                                         assigned_name_list *local_names,
+                                         assigned_hash_list *local_hashes,
+                                         uint64_t local_bloom[4],
+                                         bool memo_safe_only) {
   if (!s)
     return true;
   switch (s->kind) {
   case NY_S_BLOCK: {
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     bool safe = true;
     for (size_t i = 0; i < s->as.block.body.len; i++) {
-      if (!ny_stmt_is_memo_safe(cg, s->as.block.body.data[i], local_names,
-                                local_hashes, local_bloom)) {
+      if (!ny_stmt_check_safe_internal(cg, s->as.block.body.data[i],
+                                       local_names, local_hashes, local_bloom,
+                                       memo_safe_only)) {
         safe = false;
         break;
       }
     }
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     return safe;
   }
   case NY_S_VAR:
@@ -990,9 +676,7 @@ static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
       }
     }
     for (size_t i = 0; i < s->as.var.exprs.len; i++) {
-      if (!ny_expr_is_memo_safe(cg, s->as.var.exprs.data[i], local_names,
-                                local_hashes, local_bloom))
-        return false;
+      CHECK_PURE_EXPR(s->as.var.exprs.data[i]);
     }
     if (s->as.var.is_decl) {
       for (size_t i = 0; i < s->as.var.names.len; i++) {
@@ -1002,63 +686,45 @@ static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
     }
     return true;
   case NY_S_EXPR:
-    return ny_expr_is_memo_safe(cg, s->as.expr.expr, local_names, local_hashes,
-                                local_bloom);
+    CHECK_PURE_EXPR(s->as.expr.expr);
+    return true;
   case NY_S_RETURN:
-    return ny_expr_is_memo_safe(cg, s->as.ret.value, local_names, local_hashes,
-                                local_bloom);
+    CHECK_PURE_EXPR(s->as.ret.value);
+    return true;
   case NY_S_IF:
-    return ny_expr_is_memo_safe(cg, s->as.iff.test, local_names, local_hashes,
-                                local_bloom) &&
-           ny_stmt_is_memo_safe(cg, s->as.iff.conseq, local_names, local_hashes,
-                                local_bloom) &&
-           ny_stmt_is_memo_safe(cg, s->as.iff.alt, local_names, local_hashes,
-                                local_bloom);
+    CHECK_PURE_EXPR(s->as.iff.test);
+    CHECK_PURE_STMT(s->as.iff.conseq);
+    CHECK_PURE_STMT(s->as.iff.alt);
+    return true;
   case NY_S_WHILE:
-    return ny_expr_is_memo_safe(cg, s->as.whl.test, local_names, local_hashes,
-                                local_bloom) &&
-           ny_stmt_is_memo_safe(cg, s->as.whl.body, local_names, local_hashes,
-                                local_bloom);
+    CHECK_PURE_EXPR(s->as.whl.test);
+    CHECK_PURE_STMT(s->as.whl.body);
+    return true;
   case NY_S_FOR: {
-    if (!ny_expr_is_memo_safe(cg, s->as.fr.iterable, local_names, local_hashes,
-                              local_bloom))
-      return false;
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    CHECK_PURE_EXPR(s->as.fr.iterable);
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     assigned_name_add(local_names, local_hashes, local_bloom,
                       s->as.fr.iter_var);
-    bool safe = ny_stmt_is_memo_safe(cg, s->as.fr.body, local_names,
-                                     local_hashes, local_bloom);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    bool safe = ny_stmt_check_safe_internal(cg, s->as.fr.body, local_names,
+                                            local_hashes, local_bloom,
+                                            memo_safe_only);
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     return safe;
   }
-  case NY_S_MATCH:
-    if (!ny_expr_is_memo_safe(cg, s->as.match.test, local_names, local_hashes,
-                              local_bloom))
-      return false;
+  case NY_S_MATCH: {
+    CHECK_PURE_EXPR(s->as.match.test);
     for (size_t i = 0; i < s->as.match.arms.len; i++) {
       match_arm_t *arm = &s->as.match.arms.data[i];
       for (size_t j = 0; j < arm->patterns.len; j++) {
-        if (!ny_expr_is_memo_safe(cg, arm->patterns.data[j], local_names,
-                                  local_hashes, local_bloom))
-          return false;
+        CHECK_PURE_EXPR(arm->patterns.data[j]);
       }
-      if (!ny_expr_is_memo_safe(cg, arm->guard, local_names, local_hashes,
-                                local_bloom))
-        return false;
-      if (!ny_stmt_is_memo_safe(cg, arm->conseq, local_names, local_hashes,
-                                local_bloom))
-        return false;
+      CHECK_PURE_EXPR(arm->guard);
+      CHECK_PURE_STMT(arm->conseq);
     }
-    return ny_stmt_is_memo_safe(cg, s->as.match.default_conseq, local_names,
-                                local_hashes, local_bloom);
+    CHECK_PURE_STMT(s->as.match.default_conseq);
+    return true;
+  }
   case NY_S_TRY:
   case NY_S_DEFER:
   case NY_S_GOTO:
@@ -1079,6 +745,9 @@ static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
   }
   return false;
 }
+
+#undef CHECK_PURE_EXPR
+#undef CHECK_PURE_STMT
 
 typedef struct ny_escape_summary_t {
   bool args_escape;
@@ -1564,21 +1233,14 @@ static void ny_collect_escape_stmt(
     return;
   switch (s->kind) {
   case NY_S_BLOCK: {
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     for (size_t i = 0; i < s->as.block.body.len; i++) {
       ny_collect_escape_stmt(cg, s->as.block.body.data[i], param_names,
                              param_hashes, param_bloom, local_names,
                              local_hashes, local_bloom, out);
     }
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     break;
   }
   case NY_S_VAR:
@@ -1649,21 +1311,14 @@ static void ny_collect_escape_stmt(
     ny_collect_escape_expr(cg, s->as.fr.iterable, param_names, param_hashes,
                            param_bloom, local_names, local_hashes, local_bloom,
                            out);
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     assigned_name_add(local_names, local_hashes, local_bloom,
                       s->as.fr.iter_var);
     ny_collect_escape_stmt(cg, s->as.fr.body, param_names, param_hashes,
                            param_bloom, local_names, local_hashes, local_bloom,
                            out);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     break;
   }
   case NY_S_MATCH:
@@ -2024,20 +1679,13 @@ static void ny_collect_calls_stmt(codegen_t *cg, stmt_t *s,
     return;
   switch (s->kind) {
   case NY_S_BLOCK: {
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     for (size_t i = 0; i < s->as.block.body.len; i++) {
       ny_collect_calls_stmt(cg, s->as.block.body.data[i], local_names,
                             local_hashes, local_bloom, out_calls);
     }
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     break;
   }
   case NY_S_VAR:
@@ -2077,20 +1725,13 @@ static void ny_collect_calls_stmt(codegen_t *cg, stmt_t *s,
   case NY_S_FOR: {
     ny_collect_calls_expr(cg, s->as.fr.iterable, local_names, local_hashes,
                           local_bloom, out_calls);
-    size_t old_name_len = local_names->len;
-    size_t old_hash_len = local_hashes->len;
-    uint64_t old_bloom[4] = {local_bloom[0], local_bloom[1], local_bloom[2],
-                             local_bloom[3]};
+    ny_purity_scope_checkpoint_t cp = {0};
+    ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     assigned_name_add(local_names, local_hashes, local_bloom,
                       s->as.fr.iter_var);
     ny_collect_calls_stmt(cg, s->as.fr.body, local_names, local_hashes,
                           local_bloom, out_calls);
-    local_names->len = old_name_len;
-    local_hashes->len = old_hash_len;
-    local_bloom[0] = old_bloom[0];
-    local_bloom[1] = old_bloom[1];
-    local_bloom[2] = old_bloom[2];
-    local_bloom[3] = old_bloom[3];
+    ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     break;
   }
   case NY_S_MATCH:

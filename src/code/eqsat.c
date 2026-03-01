@@ -132,7 +132,49 @@ static void egraph_insert_hash(egraph *g, eclass_id id, const enode *n) {
   }
 }
 
+static void egraph_resize_hash_table(egraph *g) {
+  size_t new_size = g->hash_table_size * 2;
+  eclass_id *new_table = calloc(new_size, sizeof(eclass_id));
+  if (!new_table) {
+    fprintf(stderr, "Fatal: egraph hash table resize failed (out of memory)\n");
+    abort();
+  }
+
+  for (size_t i = 0; i < new_size; i++) {
+    new_table[i] = ECLASS_INVALID;
+  }
+
+  for (size_t i = 0; i < g->class_count; i++) {
+    eclass *ec = &g->classes[i];
+    // Re-insert only if canonical to avoid redundant/stale entries
+    if (ec->parent != ec->id)
+      continue;
+
+    // Insert ALL nodes of the canonical class
+    for (size_t k = 0; k < ec->node_count; k++) {
+      enode *n = &ec->nodes[k];
+      uint64_t h = hash_enode(n);
+      size_t idx = h % new_size;
+      for (size_t j = 0; j < new_size; j++) {
+        size_t probe = (idx + j) % new_size;
+        if (new_table[probe] == ECLASS_INVALID) {
+          new_table[probe] = ec->id;
+          break;
+        }
+      }
+    }
+  }
+
+  free(g->hash_table);
+  g->hash_table = new_table;
+  g->hash_table_size = new_size;
+}
+
 static eclass_id egraph_add_node(egraph *g, const enode *n) {
+  if (g->node_count * 2 >= g->hash_table_size) {
+    egraph_resize_hash_table(g);
+  }
+
   eclass_id existing = egraph_lookup_hash(g, n);
   if (existing != ECLASS_INVALID)
     return existing;
@@ -147,6 +189,7 @@ static eclass_id egraph_add_node(egraph *g, const enode *n) {
     ec->cost = 1;
   }
   egraph_insert_hash(g, id, n);
+  g->node_count++;
   return id;
 }
 

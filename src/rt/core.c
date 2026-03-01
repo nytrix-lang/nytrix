@@ -65,21 +65,46 @@ static size_t trace_str_len(int64_t v) {
   return (size_t)(tagged_len >> 1);
 }
 
-static void trace_print_loc(void) {
-  if (!is_v_str(g_trace_file))
+void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
+                       const char *prefix) {
+  if (!is_v_str(file))
     return;
-  const char *file = (const char *)(uintptr_t)g_trace_file;
-  size_t flen = trace_str_len(g_trace_file);
-  int64_t line = is_int(g_trace_line) ? rt_untag_v(g_trace_line) : 0;
-  int64_t col = is_int(g_trace_col) ? rt_untag_v(g_trace_col) : 0;
-  fprintf(stderr, "[trace] %.*s:%ld:%ld", (int)flen, file, (long)line,
-          (long)col);
-  if (is_v_str(g_trace_func)) {
-    const char *fn = (const char *)(uintptr_t)g_trace_func;
-    size_t fnlen = trace_str_len(g_trace_func);
+  const char *fname = (const char *)(uintptr_t)file;
+  size_t flen = trace_str_len(file);
+  int64_t l = is_int(line) ? rt_untag_v(line) : 0;
+  int64_t c = is_int(col) ? rt_untag_v(col) : 0;
+  fprintf(stderr, "%s%.*s:%ld:%ld", prefix ? prefix : "", (int)flen, fname,
+          (long)l, (long)c);
+  if (is_v_str(func)) {
+    const char *fn = (const char *)(uintptr_t)func;
+    size_t fnlen = trace_str_len(func);
     fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
   }
   fputc('\n', stderr);
+}
+
+int64_t __rt_alloc_string_len(const char *s, size_t len) {
+  if (!s)
+    return 0;
+  int64_t p = __malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
+  if (!p)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
+  *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
+  memcpy((void *)(uintptr_t)p, s, len);
+  ((char *)(uintptr_t)p)[len] = '\0';
+  return p;
+}
+
+int64_t __rt_alloc_string(const char *s) {
+  if (!s)
+    return 0;
+  return __rt_alloc_string_len(s, strlen(s));
+}
+
+static void trace_print_loc(void) {
+  print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
+                    "[trace] ");
 }
 
 static void trace_record(int64_t file, int64_t line, int64_t col,
@@ -179,38 +204,13 @@ int64_t __trace_dump(int64_t count) {
   size_t start = (g_trace_idx + TRACE_RING - want) % TRACE_RING;
   for (size_t i = 0; i < want; i++) {
     size_t idx = (start + i) % TRACE_RING;
-    int64_t file = g_trace_files[idx];
-    int64_t line = g_trace_lines[idx];
-    int64_t col = g_trace_cols[idx];
-    int64_t func = g_trace_funcs[idx];
-    if (!is_v_str(file))
-      continue;
-    const char *fname = (const char *)(uintptr_t)file;
-    size_t flen = trace_str_len(file);
-    int64_t l = is_int(line) ? rt_untag_v(line) : 0;
-    int64_t c = is_int(col) ? rt_untag_v(col) : 0;
-    fprintf(stderr, "  at %.*s:%ld:%ld", (int)flen, fname, (long)l, (long)c);
-    if (is_v_str(func)) {
-      const char *fn = (const char *)(uintptr_t)func;
-      size_t fnlen = trace_str_len(func);
-      fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
-    }
-    fputc('\n', stderr);
+    print_trace_entry(g_trace_files[idx], g_trace_lines[idx], g_trace_cols[idx],
+                      g_trace_funcs[idx], "  at ");
   }
   return 0;
 }
 
-int64_t __panic(int64_t msg_ptr) {
-  if (g_panic_env_stack.len > 0) {
-    g_panic_value = msg_ptr;
-    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
-    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
-    longjmp(*pe.env, 1);
-  }
-  if (is_v_str(g_trace_file)) {
-    fprintf(stderr, "Panic location: ");
-    trace_print_loc();
-  }
+static void print_panic_msg(int64_t msg_ptr) {
   if (is_int(msg_ptr)) {
     fprintf(stderr, "Panic: <integer value> %" PRId64 " (raw)\n",
             (int64_t)msg_ptr);
@@ -222,6 +222,20 @@ int64_t __panic(int64_t msg_ptr) {
     fprintf(stderr, "Panic: <unknown type> %" PRIx64 " (raw)\n",
             (uint64_t)msg_ptr);
   }
+}
+
+int64_t __panic(int64_t msg_ptr) {
+  if (g_panic_env_stack.len > 0) {
+    g_panic_value = msg_ptr;
+    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
+    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
+    longjmp(*pe.env, 1);
+  }
+  if (is_v_str(g_trace_file)) {
+    print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
+                      "Panic location: ");
+  }
+  print_panic_msg(msg_ptr);
   exit(1);
 }
 
@@ -240,19 +254,7 @@ int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
   memset(__argv_ptr, 0, (argc + 1) * sizeof(int64_t));
   char **old_argv = (char **)argv_ptr;
   for (int i = 0; i < argc; i++) {
-    if (old_argv[i]) {
-      size_t len = strlen(old_argv[i]);
-      int64_t p = __malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
-      if (!p)
-        return -1;
-      *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
-      *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
-      __copy_mem((int64_t)(uintptr_t)p, (int64_t)(uintptr_t)old_argv[i],
-                 (int64_t)((len + 1) * sizeof(char) << 1) | 1);
-      __argv_ptr[i] = p;
-    } else {
-      __argv_ptr[i] = 0;
-    }
+    __argv_ptr[i] = old_argv[i] ? __rt_alloc_string(old_argv[i]) : 0;
   }
   char **old_envp = (char **)envp_ptr;
 #ifndef _WIN32
@@ -271,15 +273,7 @@ int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
     return -1;
   memset(__envp_ptr, 0, (env_count + 1) * sizeof(int64_t));
   for (int i = 0; i < env_count; i++) {
-    size_t len = strlen(old_envp[i]);
-    int64_t p = __malloc((int64_t)((len + 1) * sizeof(char) << 1) | 1);
-    if (!p)
-      return -1;
-    *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
-    *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
-    __copy_mem((int64_t)(uintptr_t)p, (int64_t)(uintptr_t)old_envp[i],
-               (int64_t)((len + 1) * sizeof(char) << 1) | 1);
-    __envp_ptr[i] = p;
+    __envp_ptr[i] = __rt_alloc_string(old_envp[i]);
   }
   return 0;
 }
@@ -321,33 +315,27 @@ int64_t ny_rt_argv(int64_t i) {
   int64_t raw = __argv_ptr[idx];
   if (!raw)
     return 0;
-  const char *s = (const char *)(uintptr_t)raw;
-  size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)(len + 1) * sizeof(char) << 1) | 1);
-  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_STR;
-  *(int64_t *)((char *)(uintptr_t)res - 16) = ((int64_t)len << 1) | 1;
-  __copy_mem((int64_t)(uintptr_t)res, (int64_t)(uintptr_t)s,
-             (int64_t)((len + 1) * sizeof(char) << 1) | 1);
-  return res;
+  return __rt_alloc_string((const char *)(uintptr_t)raw);
 }
 
 int64_t __tag(int64_t v) { return rt_tag_v(v); }
 int64_t __untag(int64_t v) { return rt_untag_v(v); }
 int64_t __is_int(int64_t v) { return is_int(v) ? 2 : 4; }
-int64_t __is_ptr(int64_t v) { return is_ptr(v) ? 2 : 4; }
+int64_t __is_ptr(int64_t v) {
+  return is_ptr(v) ? 2 : 4;
+}
 int64_t __is_ny_obj(int64_t v) { return is_ny_obj(v) ? 2 : 4; }
 int64_t __is_str_obj(int64_t v) { return is_v_str(v) ? 2 : 4; }
 int64_t __is_float_obj(int64_t v) { return is_v_flt(v) ? 2 : 4; }
 int64_t __tagof(int64_t v) {
-  if (!is_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
-  return tag;
+  if (!is_ptr(v)) return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+  return rt_tag_v(tag);
 }
+
+
+
 
 int64_t __errno_val = 1;
 int64_t __errno(void) { return (int64_t)((errno << 1) | 1); }
@@ -357,33 +345,24 @@ int64_t __copy_mem(int64_t dst, int64_t src, int64_t n) {
     n >>= 1;
   if (n <= 0)
     return dst;
-  char *d = (char *)(uintptr_t)dst;
-  const char *s = (const char *)(uintptr_t)src;
-  for (int64_t i = 0; i < n; i++) {
-    d[i] = s[i];
-  }
+  memcpy((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)n);
   return dst;
 }
 
-int64_t __result_ok(int64_t v) {
-  int64_t res = __malloc(((int64_t)8 << 1) | 1);
+int64_t __rt_result_alloc(int64_t tag, int64_t v) {
+  int64_t sz = (int64_t)sizeof(int64_t);
+  int64_t res = __malloc(((int64_t)sz << 1) | 1);
   if (!res)
     return 0;
-  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_OK;
-  *(int64_t *)((char *)(uintptr_t)res - 16) = (8 << 1) | 1;
+  *(int64_t *)((char *)(uintptr_t)res - 8) = tag;
+  *(int64_t *)((char *)(uintptr_t)res - 16) = (sz << 1) | 1;
   *(int64_t *)(uintptr_t)res = v;
   return res;
 }
 
-int64_t __result_err(int64_t e) {
-  int64_t res = __malloc(((int64_t)8 << 1) | 1);
-  if (!res)
-    return 0;
-  *(int64_t *)((char *)(uintptr_t)res - 8) = TAG_ERR;
-  *(int64_t *)((char *)(uintptr_t)res - 16) = (8 << 1) | 1;
-  *(int64_t *)(uintptr_t)res = e;
-  return res;
-}
+int64_t __result_ok(int64_t v) { return __rt_result_alloc(TAG_OK, v); }
+
+int64_t __result_err(int64_t e) { return __rt_result_alloc(TAG_ERR, e); }
 
 int64_t __is_ok(int64_t v) { return is_v_ok(v) ? 2 : 4; }
 int64_t __is_err(int64_t v) { return is_v_err(v) ? 2 : 4; }
@@ -393,3 +372,80 @@ int64_t __unwrap(int64_t v) {
   }
   return v;
 }
+int64_t __list_new(int64_t n_v) {
+  int64_t n = is_int(n_v) ? (n_v >> 1) : n_v;
+  if (n < 0) n = 0;
+  // Standard layout: 16 bytes header (length, capacity) + n * 8 bytes data
+  int64_t p = __malloc(16 + n * 8);
+  if (!p) return 0;
+  // Standard Nytrix tags are at p-8
+  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_LIST;
+  *(int64_t *)((char *)(uintptr_t)p + 0) = 1; // Length = 0 (tagged: (0<<1)|1 = 1)
+  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1; // Capacity = n
+  return p;
+}
+
+int64_t __append(int64_t lst, int64_t val) {
+  if (!is_ptr(lst)) return lst;
+  if (__tagof(lst) != ((TAG_LIST << 1) | 1)) return lst;
+  int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
+  int64_t n = len_v >> 1;
+  int64_t cap_v = *(int64_t *)((char *)(uintptr_t)lst + 8);
+  int64_t cap = cap_v >> 1;
+
+  if (n >= cap) {
+    int64_t new_cap = cap == 0 ? 8 : (cap * 2);
+    int64_t new_p = __malloc(16 + new_cap * 8);
+    if (!new_p) return lst;
+    *(int64_t *)((char *)(uintptr_t)new_p - 8) = TAG_LIST;
+    *(int64_t *)((char *)(uintptr_t)new_p + 0) = len_v;
+    *(int64_t *)((char *)(uintptr_t)new_p + 8) = (new_cap << 1) | 1;
+    memcpy((char *)(uintptr_t)new_p + 16, (char *)(uintptr_t)lst + 16, n * 8);
+    // Note: We don't free(lst) here because it might be shared.
+    // In a real RC system we would check refcount or let GC handle it.
+    lst = new_p;
+  }
+  
+  *(int64_t *)((char *)(uintptr_t)lst + 16 + n * 8) = val;
+  *(int64_t *)((char *)(uintptr_t)lst + 0) = ((n + 1) << 1) | 1;
+  return lst;
+}
+int64_t __load_item(int64_t lst, int64_t i_v) {
+  if (!is_ptr(lst)) return 0;
+  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
+  return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
+}
+int64_t __store_item(int64_t lst, int64_t i_v, int64_t val) {
+  if (!is_ptr(lst)) return 0;
+  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
+  *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8) = val;
+  return val;
+}
+
+int64_t __load_item_fast(int64_t lst, int64_t i_v) {
+  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
+  return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
+}
+
+int64_t __store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
+  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
+  *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8) = val;
+  return val;
+}
+
+/* Fast list-length read: reads the tagged length word at lst+0 and returns the
+ * raw (untagged) element count.  Avoids the full __load64_idx bounds-check +
+ * rt_addr_readable machinery when all we need is the length. */
+int64_t __list_len(int64_t lst) {
+  if (!is_ptr(lst)) return 1; /* tagged 0 */
+  int64_t tagged = *(int64_t *)((char *)(uintptr_t)lst + 0);
+  return tagged; /* caller uses tagged value directly in Nytrix arithmetic */
+}
+
+/* Fast list-length write: stores `n` (tagged integer) at lst+0. */
+int64_t __list_set_len(int64_t lst, int64_t n) {
+  if (!is_ptr(lst)) return 0;
+  *(int64_t *)((char *)(uintptr_t)lst + 0) = n;
+  return n;
+}
+

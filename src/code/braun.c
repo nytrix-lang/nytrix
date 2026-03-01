@@ -68,6 +68,11 @@ static void braun_replace_def_value(braun_ssa_context *ctx, LLVMValueRef old_v,
         info->defs[j].is_incomplete = false;
       }
     }
+    for (size_t j = 0; j < info->incomplete_phi_count; j++) {
+      if (info->incomplete_phis[j] == old_v) {
+        info->incomplete_phis[j] = new_v;
+      }
+    }
   }
 }
 
@@ -170,10 +175,6 @@ void braun_ssa_add_predecessor(braun_ssa_context *ctx, LLVMBasicBlockRef pred) {
   if (!ctx->enabled || !ctx->current_block)
     return;
   braun_block_info *info = braun_get_or_create_block(ctx, ctx->current_block);
-  for (size_t i = 0; i < info->pred_count; i++) {
-    if (info->preds[i] == pred)
-      return;
-  }
   if (info->pred_count >= info->pred_capacity) {
     info->pred_capacity *= 2;
     info->preds =
@@ -199,8 +200,10 @@ void braun_ssa_seal_block(braun_ssa_context *ctx, LLVMBasicBlockRef bb) {
   info->sealed = true;
   for (size_t i = 0; i < info->incomplete_phi_count; i++) {
     LLVMValueRef phi = info->incomplete_phis[i];
+    if (!phi || !LLVMIsAPHINode(phi))
+      continue;
     const char *var_name = info->incomplete_phi_names[i];
-    braun_add_phi_operands(ctx, var_name, phi, bb);
+    phi = braun_add_phi_operands(ctx, var_name, phi, bb);
     uint64_t hash = ny_hash64_cstr(var_name);
     braun_var_def *def = braun_find_def_in_block(info, var_name, hash);
     if (def && def->value == phi)
@@ -260,10 +263,10 @@ static LLVMValueRef braun_read_var_in_block(braun_ssa_context *ctx,
   return braun_read_var_recursive(ctx, var_name, block);
 }
 
-void braun_ssa_try_remove_trivial_phi(braun_ssa_context *ctx,
-                                      LLVMValueRef phi) {
-  if (!ctx->enabled)
-    return;
+LLVMValueRef braun_ssa_try_remove_trivial_phi(braun_ssa_context *ctx,
+                                             LLVMValueRef phi) {
+  if (!ctx->enabled || !phi || !LLVMIsAPHINode(phi))
+    return phi;
   LLVMValueRef same = NULL;
   unsigned count = LLVMCountIncoming(phi);
   for (unsigned i = 0; i < count; i++) {
@@ -271,15 +274,47 @@ void braun_ssa_try_remove_trivial_phi(braun_ssa_context *ctx,
     if (op == same || op == phi)
       continue;
     if (same != NULL) {
-      return;
+      return phi;
     }
     same = op;
   }
   if (same == NULL)
     same = LLVMGetUndef(LLVMTypeOf(phi));
+  
+  // Collect PHI users before replacing
+  size_t phi_user_count = 0;
+  LLVMValueRef *phi_users = NULL;
+  LLVMUseRef use = LLVMGetFirstUse(phi);
+  while (use) {
+    LLVMValueRef user = LLVMGetUser(use);
+    if (user != phi && LLVMIsAPHINode(user)) {
+      phi_user_count++;
+    }
+    use = LLVMGetNextUse(use);
+  }
+  if (phi_user_count > 0) {
+    phi_users = alloca(sizeof(LLVMValueRef) * phi_user_count);
+    size_t idx = 0;
+    use = LLVMGetFirstUse(phi);
+    while (use) {
+      LLVMValueRef user = LLVMGetUser(use);
+      if (user != phi && LLVMIsAPHINode(user)) {
+        phi_users[idx++] = user;
+      }
+      use = LLVMGetNextUse(use);
+    }
+  }
+
   LLVMReplaceAllUsesWith(phi, same);
   braun_replace_def_value(ctx, phi, same);
+  LLVMInstructionEraseFromParent(phi);
   ctx->phi_nodes_eliminated++;
+
+  for (size_t i = 0; i < phi_user_count; i++) {
+    braun_ssa_try_remove_trivial_phi(ctx, phi_users[i]);
+  }
+
+  return same;
 }
 
 static LLVMValueRef braun_add_phi_operands(braun_ssa_context *ctx,
@@ -296,12 +331,7 @@ static LLVMValueRef braun_add_phi_operands(braun_ssa_context *ctx,
       val = LLVMGetUndef(LLVMTypeOf(phi));
     LLVMAddIncoming(phi, &val, &pred, 1);
   }
-  braun_ssa_try_remove_trivial_phi(ctx, phi);
-  uint64_t hash = ny_hash64_cstr(var_name);
-  braun_var_def *def = braun_find_def_in_block(info, var_name, hash);
-  if (def && def->value)
-    return def->value;
-  return phi;
+  return braun_ssa_try_remove_trivial_phi(ctx, phi);
 }
 
 static LLVMValueRef braun_read_var_recursive(braun_ssa_context *ctx,
