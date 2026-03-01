@@ -29,27 +29,15 @@ fn _list_finish(out, len){
 }
 
 fn range2(start, stop, step=1){
-   "Returns `[start, start+step, ...]` up to `stop` (exclusive)."
+   "Returns a lazy Range object `[start, start+step, ...]` up to `stop` (exclusive)."
    mut st = step
    if(st == 0){ st = 1 }
-   def cnt = _range_count(start, stop, st)
-   mut out = list(cnt)
-   mut i = start
-   mut idx = 0
-   if(st > 0){
-      while(i < stop){
-         _list_set(out, idx, i)
-         idx += 1
-         i = i + st
-      }
-   } else {
-      while(i > stop){
-         _list_set(out, idx, i)
-         idx += 1
-         i = i + st
-      }
-   }
-   _list_finish(out, idx)
+   mut obj = malloc(24)
+   store64(obj, 106, -8) ; Tag Range
+   store64(obj, start, 0)
+   store64(obj, stop, 8)
+   store64(obj, st, 16)
+   obj
 }
 
 fn range(a, b=0, step=1){

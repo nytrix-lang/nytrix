@@ -242,7 +242,7 @@ static bool ny_is_parallel_mode(const char *mode) {
 void ny_options_init(ny_options *opt) {
   memset(opt, 0, sizeof(ny_options));
   opt->mode = NY_MODE_RUN;
-  opt->opt_level = 2;
+  opt->opt_level = 0;
   opt->strip_override = -1;
   opt->color_mode = -1;
   opt->gpu_async = -1;
@@ -259,8 +259,8 @@ void ny_options_init(ny_options *opt) {
   opt->ir_include_std = false;
   opt->opt_dce = -1;
   opt->opt_internalize = -1;
-  opt->opt_loops = -1;
-  opt->opt_autotune = -1;
+  opt->opt_loops = 0;
+  opt->opt_autotune = 0;
 }
 
 static void ny_options_usage_impl(const char *prog, bool show_env) {
@@ -377,14 +377,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   fprintf(stderr, "  \033[32m-l<lib>\033[0m           Link against library "
                   "(also accepts -l <lib>)\n\n");
   fprintf(stderr, "\033[1mREPL:\033[0m\n");
-#ifdef _WIN32
   fprintf(stderr, "  \033[32m-i, -interactive\033[0m   Interactive REPL with "
                   "line editing\n");
-#else
-  fprintf(
-      stderr,
-      "  \033[32m-i, -interactive\033[0m   Interactive REPL with readline\n");
-#endif
   fprintf(stderr, "  \033[32m-repl\033[0m              Read source from stdin "
                   "(one-shot)\n\n");
   fprintf(stderr, "\033[1mDEBUGGING:\033[0m\n");
@@ -755,6 +749,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       else if (strcmp(a, "-std") == 0) {
         if (i + 1 < argc) {
           opt->std_mode = ny_parse_std_mode_or_die(argv[++i], argv[0]);
+          opt->std_mode_explicit = true;
         } else {
           fprintf(stderr, "missing argument for -std\n");
           ny_options_usage(argv[0]);
@@ -762,9 +757,11 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         }
       } else if (strcmp(a, "--full-mod") == 0) {
         opt->std_mode = STD_MODE_FULL;
-      } else if (strcmp(a, "-no-std") == 0)
+        opt->std_mode_explicit = true;
+      } else if (strcmp(a, "-no-std") == 0) {
         opt->no_std = true;
-      else if (strncmp(a, "--std-path=", 11) == 0)
+        opt->std_mode_explicit = true;
+      } else if (strncmp(a, "--std-path=", 11) == 0)
         opt->std_path = a + 11;
       else if (strcmp(a, "--plain-repl") == 0)
         opt->repl_plain = true;
@@ -866,4 +863,14 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       }
     }
   }
+}
+void ny_options_free(ny_options *opt) {
+  if (!opt)
+    return;
+  for (size_t i = 0; i < opt->link_dirs.len; i++)
+    free(opt->link_dirs.data[i]);
+  vec_free(&opt->link_dirs);
+  for (size_t i = 0; i < opt->link_libs.len; i++)
+    free(opt->link_libs.data[i]);
+  vec_free(&opt->link_libs);
 }

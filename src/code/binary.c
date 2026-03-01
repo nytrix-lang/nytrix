@@ -85,75 +85,116 @@ static fun_sig *ny_helper_contains(codegen_t *cg) {
   return s;
 }
 
+typedef enum {
+  NY_BINOP_ADD,
+  NY_BINOP_SUB,
+  NY_BINOP_MUL,
+  NY_BINOP_DIV,
+  NY_BINOP_MOD,
+  NY_BINOP_AND,
+  NY_BINOP_OR,
+  NY_BINOP_XOR,
+  NY_BINOP_SHL,
+  NY_BINOP_SHR,
+  NY_BINOP_EQ,
+  NY_BINOP_NE,
+  NY_BINOP_LT,
+  NY_BINOP_LE,
+  NY_BINOP_GT,
+  NY_BINOP_GE,
+  NY_BINOP_IN,
+  NY_BINOP_UNKNOWN
+} ny_binop_kind_t;
+
+typedef struct {
+  const char *op;
+  const char *generic;
+  const char *builtin;
+  ny_binop_kind_t kind;
+  bool fast_int_supported;
+  const char *overflow_intr;
+} op_map_t;
+
+static const op_map_t op_map[] = {
+    {"+", "add", "__add", NY_BINOP_ADD, true, "llvm.sadd.with.overflow.i64"},
+    {"-", "sub", "__sub", NY_BINOP_SUB, true, "llvm.ssub.with.overflow.i64"},
+    {"*", "mul", "__mul", NY_BINOP_MUL, true, "llvm.smul.with.overflow.i64"},
+    {"/", "div", "__div", NY_BINOP_DIV, true, NULL},
+    {"%", "mod", "__mod", NY_BINOP_MOD, true, NULL},
+    {"|", "bor", "__or", NY_BINOP_OR, true, NULL},
+    {"&", "band", "__and", NY_BINOP_AND, true, NULL},
+    {"^", "bxor", "__xor", NY_BINOP_XOR, true, NULL},
+    {"<", "lt", "__lt", NY_BINOP_LT, true, NULL},
+    {"<=", "le", "__le", NY_BINOP_LE, true, NULL},
+    {">", "gt", "__gt", NY_BINOP_GT, true, NULL},
+    {">=", "ge", "__ge", NY_BINOP_GE, true, NULL},
+    {"<<", "bshl", "__shl", NY_BINOP_SHL, true, NULL},
+    {">>", "bshr", "__shr", NY_BINOP_SHR, true, NULL},
+    {"==", NULL, NULL, NY_BINOP_EQ, true, NULL},
+    {"!=", NULL, NULL, NY_BINOP_NE, false, NULL},
+    {"in", NULL, NULL, NY_BINOP_IN, false, NULL},
+    {NULL, NULL, NULL, NY_BINOP_UNKNOWN, false, NULL}};
+
 static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
-                                                       const char *builtin_name,
+                                                       const op_map_t *entry,
                                                        LLVMValueRef l,
                                                        LLVMValueRef r,
                                                        fun_sig *fallback) {
-  if (!builtin_name || !fallback)
+  if (!fallback || !entry)
     return NULL;
-  if (!ny_env_enabled("NYTRIX_FAST_INT_BINOPS"))
+  if (!ny_env_enabled_default_on("NYTRIX_FAST_INT_BINOPS"))
     return NULL;
-  bool supports =
-      strcmp(builtin_name, "__add") == 0 ||
-      strcmp(builtin_name, "__sub") == 0 ||
-      strcmp(builtin_name, "__mul") == 0 ||
-      strcmp(builtin_name, "__div") == 0 ||
-      strcmp(builtin_name, "__mod") == 0 || strcmp(builtin_name, "__eq") == 0 ||
-      strcmp(builtin_name, "__lt") == 0 || strcmp(builtin_name, "__le") == 0 ||
-      strcmp(builtin_name, "__gt") == 0 || strcmp(builtin_name, "__ge") == 0 ||
-      strcmp(builtin_name, "__and") == 0 || strcmp(builtin_name, "__or") == 0 ||
-      strcmp(builtin_name, "__xor") == 0 ||
-      strcmp(builtin_name, "__shl") == 0 || strcmp(builtin_name, "__shr") == 0;
-  if (!supports)
+
+  if (!entry->fast_int_supported)
     return NULL;
+
+  ny_binop_kind_t kind = entry->kind;
+
   LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
   LLVMBasicBlockRef fast_bb = LLVMAppendBasicBlock(fn, "bin.int.fast");
   LLVMBasicBlockRef slow_bb = LLVMAppendBasicBlock(fn, "bin.runtime.slow");
   LLVMBasicBlockRef merge_bb = LLVMAppendBasicBlock(fn, "bin.merge");
   LLVMValueRef both_int = LLVMBuildAnd(cg->builder, ny_is_tagged_int(cg, l),
-                                       ny_is_tagged_int(cg, r), "both_int");
+                                       ny_is_tagged_int(cg, r), "bin.both_int");
   LLVMBuildCondBr(cg->builder, both_int, fast_bb, slow_bb);
+  ny_braun_add_predecessor(cg, fast_bb, entry_bb);
+  ny_braun_add_predecessor(cg, slow_bb, entry_bb);
   LLVMPositionBuilderAtEnd(cg->builder, fast_bb);
+  ny_braun_enter_block(cg, fast_bb);
   LLVMValueRef li = ny_untag_int(cg, l);
   LLVMValueRef ri = ny_untag_int(cg, r);
   LLVMValueRef fast_value = NULL;
   LLVMBasicBlockRef fast_done_bb = NULL;
-  if (strcmp(builtin_name, "__sub") == 0 && l == r) {
+  if (kind == NY_BINOP_SUB && l == r) {
     fast_value = ny_const_tagged_int_value(cg, 0);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (strcmp(builtin_name, "__xor") == 0 && l == r) {
+  } else if (kind == NY_BINOP_XOR && l == r) {
     fast_value = ny_const_tagged_int_value(cg, 0);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if ((strcmp(builtin_name, "__and") == 0 ||
-              strcmp(builtin_name, "__or") == 0) &&
-             l == r) {
+  } else if ((kind == NY_BINOP_AND || kind == NY_BINOP_OR) && l == r) {
     fast_value = l;
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if ((strcmp(builtin_name, "__eq") == 0 ||
-              strcmp(builtin_name, "__le") == 0 ||
-              strcmp(builtin_name, "__ge") == 0) &&
+  } else if ((kind == NY_BINOP_EQ || kind == NY_BINOP_LE || kind == NY_BINOP_GE) &&
              l == r) {
     fast_value = ny_const_tagged_bool_value(cg, true);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if ((strcmp(builtin_name, "__lt") == 0 ||
-              strcmp(builtin_name, "__gt") == 0) &&
+  } else if ((kind == NY_BINOP_LT || kind == NY_BINOP_GT) &&
              l == r) {
     fast_value = ny_const_tagged_bool_value(cg, false);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (strcmp(builtin_name, "__add") == 0 ||
-             strcmp(builtin_name, "__sub") == 0 ||
-             strcmp(builtin_name, "__mul") == 0) {
-    const char *intr_name =
-        strcmp(builtin_name, "__add") == 0   ? "llvm.sadd.with.overflow.i64"
-        : strcmp(builtin_name, "__sub") == 0 ? "llvm.ssub.with.overflow.i64"
-                                             : "llvm.smul.with.overflow.i64";
+  } else if (kind == NY_BINOP_ADD || kind == NY_BINOP_SUB || kind == NY_BINOP_MUL) {
+    const char *intr_name = entry->overflow_intr;
     LLVMTypeRef intr_ty = NULL;
     LLVMValueRef intr = ny_get_overflow_intrinsic_i64(cg, intr_name, &intr_ty);
     LLVMValueRef packed =
@@ -163,12 +204,15 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMValueRef ov = LLVMBuildExtractValue(cg->builder, packed, 1, "arith_ov");
     LLVMBasicBlockRef fast_ok_bb = LLVMAppendBasicBlock(fn, "bin.int.fast.ok");
     LLVMBuildCondBr(cg->builder, ov, slow_bb, fast_ok_bb);
+    ny_braun_add_predecessor(cg, slow_bb, LLVMGetInsertBlock(cg->builder));
+    ny_braun_add_predecessor(cg, fast_ok_bb, LLVMGetInsertBlock(cg->builder));
     LLVMPositionBuilderAtEnd(cg->builder, fast_ok_bb);
+    ny_braun_enter_block(cg, fast_ok_bb);
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (strcmp(builtin_name, "__div") == 0 ||
-             strcmp(builtin_name, "__mod") == 0) {
+  } else if (kind == NY_BINOP_DIV || kind == NY_BINOP_MOD) {
     LLVMValueRef is_zero =
         LLVMBuildICmp(cg->builder, LLVMIntEQ, ri,
                       LLVMConstInt(cg->type_i64, 0, false), "divmod_zero");
@@ -176,31 +220,30 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMValueRef safe_divisor =
         LLVMBuildSelect(cg->builder, is_zero, one, ri, "safe_divisor");
     LLVMValueRef raw =
-        (strcmp(builtin_name, "__div") == 0)
+        (kind == NY_BINOP_DIV)
             ? LLVMBuildUDiv(cg->builder, li, safe_divisor, "udiv_fast")
             : LLVMBuildURem(cg->builder, li, safe_divisor, "urem_fast");
     LLVMValueRef nonzero_res = ny_tag_int(cg, raw);
     LLVMValueRef zero_res = LLVMConstInt(
-        cg->type_i64, strcmp(builtin_name, "__div") == 0 ? 0 : 1, false);
+        cg->type_i64, kind == NY_BINOP_DIV ? 0 : 1, false);
     fast_value =
         LLVMBuildSelect(cg->builder, is_zero, zero_res, nonzero_res, "divmod");
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (strcmp(builtin_name, "__and") == 0 ||
-             strcmp(builtin_name, "__or") == 0 ||
-             strcmp(builtin_name, "__xor") == 0) {
+  } else if (kind == NY_BINOP_AND || kind == NY_BINOP_OR || kind == NY_BINOP_XOR) {
     LLVMValueRef raw = NULL;
-    if (strcmp(builtin_name, "__and") == 0)
+    if (kind == NY_BINOP_AND)
       raw = LLVMBuildAnd(cg->builder, li, ri, "and_fast");
-    else if (strcmp(builtin_name, "__or") == 0)
+    else if (kind == NY_BINOP_OR)
       raw = LLVMBuildOr(cg->builder, li, ri, "or_fast");
     else
       raw = LLVMBuildXor(cg->builder, li, ri, "xor_fast");
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (strcmp(builtin_name, "__shl") == 0 ||
-             strcmp(builtin_name, "__shr") == 0) {
+  } else if (kind == NY_BINOP_SHL || kind == NY_BINOP_SHR) {
     LLVMValueRef zero = LLVMConstInt(cg->type_i64, 0, false);
     LLVMValueRef sixty_four = LLVMConstInt(cg->type_i64, 64, false);
     LLVMValueRef ge_zero =
@@ -212,35 +255,46 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMBasicBlockRef fast_shift_bb =
         LLVMAppendBasicBlock(fn, "bin.int.fast.shift");
     LLVMBuildCondBr(cg->builder, in_range, fast_shift_bb, slow_bb);
+    ny_braun_add_predecessor(cg, fast_shift_bb, LLVMGetInsertBlock(cg->builder));
+    ny_braun_add_predecessor(cg, slow_bb, LLVMGetInsertBlock(cg->builder));
     LLVMPositionBuilderAtEnd(cg->builder, fast_shift_bb);
-    LLVMValueRef raw = (strcmp(builtin_name, "__shl") == 0)
+    ny_braun_enter_block(cg, fast_shift_bb);
+    LLVMValueRef raw = (kind == NY_BINOP_SHL)
                            ? LLVMBuildShl(cg->builder, li, ri, "shl_fast")
                            : LLVMBuildLShr(cg->builder, li, ri, "shr_fast");
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
   } else {
     LLVMIntPredicate pred = LLVMIntEQ;
-    if (strcmp(builtin_name, "__lt") == 0)
+    if (kind == NY_BINOP_LT)
       pred = LLVMIntSLT;
-    else if (strcmp(builtin_name, "__le") == 0)
+    else if (kind == NY_BINOP_LE)
       pred = LLVMIntSLE;
-    else if (strcmp(builtin_name, "__gt") == 0)
+    else if (kind == NY_BINOP_GT)
       pred = LLVMIntSGT;
-    else if (strcmp(builtin_name, "__ge") == 0)
+    else if (kind == NY_BINOP_GE)
       pred = LLVMIntSGE;
     LLVMValueRef cmp = LLVMBuildICmp(cg->builder, pred, li, ri, "icmp_fast");
     fast_value = ny_tag_bool(cg, cmp);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
     LLVMBuildBr(cg->builder, merge_bb);
   }
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
+  ny_braun_enter_block(cg, slow_bb);
+  ny_braun_seal_block(cg, slow_bb);
   LLVMValueRef slow_value =
       LLVMBuildCall2(cg->builder, fallback->type, fallback->value,
-                     (LLVMValueRef[]){l, r}, 2, "bin_runtime");
+                     (LLVMValueRef[]){l, r}, 2, "bin.slow");
   LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
+  ny_braun_add_predecessor(cg, merge_bb, slow_done_bb);
   LLVMBuildBr(cg->builder, merge_bb);
+
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
+  ny_braun_enter_block(cg, merge_bb);
+  ny_braun_seal_block(cg, merge_bb);
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "bin_result");
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
@@ -253,61 +307,63 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
   if (!l || !r)
     return LLVMConstInt(cg->type_i64, 0, false);
   bool prefer_builtin_ops = ny_should_prefer_builtin_ops(cg);
-  const char *generic_name = NULL;
-  const char *builtin_name = NULL;
-  if (strcmp(op, "+") == 0) {
-    generic_name = "add";
-    builtin_name = "__add";
-  } else if (strcmp(op, "-") == 0) {
-    generic_name = "sub";
-    builtin_name = "__sub";
-  } else if (strcmp(op, "*") == 0) {
-    generic_name = "mul";
-    builtin_name = "__mul";
-  } else if (strcmp(op, "/") == 0) {
-    generic_name = "div";
-    builtin_name = "__div";
-  } else if (strcmp(op, "%") == 0) {
-    generic_name = "mod";
-    builtin_name = "__mod";
-  } else if (strcmp(op, "|") == 0) {
-    generic_name = "bor";
-    builtin_name = "__or";
-  } else if (strcmp(op, "&") == 0) {
-    generic_name = "band";
-    builtin_name = "__and";
-  } else if (strcmp(op, "^") == 0) {
-    generic_name = "bxor";
-    builtin_name = "__xor";
-  } else if (strcmp(op, "<") == 0) {
-    generic_name = "lt";
-    builtin_name = "__lt";
-  } else if (strcmp(op, "<=") == 0) {
-    generic_name = "le";
-    builtin_name = "__le";
-  } else if (strcmp(op, ">") == 0) {
-    generic_name = "gt";
-    builtin_name = "__gt";
-  } else if (strcmp(op, ">=") == 0) {
-    generic_name = "ge";
-    builtin_name = "__ge";
-  } else if (strcmp(op, "<<") == 0) {
-    generic_name = "bshl";
-    builtin_name = "__shl";
-  } else if (strcmp(op, ">>") == 0) {
-    generic_name = "bshr";
-    builtin_name = "__shr";
+
+  const op_map_t *entry = NULL;
+  for (const op_map_t *m = op_map; m->op; m++) {
+    if (strcmp(op, m->op) == 0) {
+      entry = m;
+      break;
+    }
   }
+
+  if (!entry) {
+    return expr_fail(cg, (token_t){0}, "undefined operator '%s'", op);
+  }
+
+  const char *generic_name = entry->generic;
+  const char *builtin_name = entry->builtin;
+  ny_binop_kind_t kind = entry->kind;
+
+  if (kind == NY_BINOP_IN) {
+    fun_sig *s = ny_helper_contains(cg);
+    if (!s)
+      return expr_fail(cg, (token_t){0}, "'in' requires 'contains'");
+    return LLVMBuildCall2(cg->builder, s->type, s->value,
+                          (LLVMValueRef[]){r, l}, 2, "");
+  }
+
+  if (kind == NY_BINOP_NE) {
+    int64_t li = 0, ri = 0;
+    if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
+      return ny_const_tagged_bool_value(cg, li != ri);
+    return LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 6, false),
+                        gen_binary(cg, "==", l, r), "");
+  }
+
+  if (kind == NY_BINOP_EQ) {
+     int64_t li = 0, ri = 0;
+    if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
+      return ny_const_tagged_bool_value(cg, li == ri);
+    fun_sig *s = prefer_builtin_ops ? lookup_fun(cg, "__eq") : ny_helper_eq(cg);
+    if (!s)
+      return expr_fail(cg, (token_t){0}, "'==' requires 'eq' (or __eq)");
+    LLVMValueRef fast = ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
+    if (fast)
+      return fast;
+    return LLVMBuildCall2(cg->builder, s->type, s->value,
+                          (LLVMValueRef[]){l, r}, 2, "");
+  }
+
   if (builtin_name) {
     int64_t li = 0, ri = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri)) {
-      if (strcmp(builtin_name, "__add") == 0)
+      if (kind == NY_BINOP_ADD)
         return ny_const_tagged_int_value(cg, li + ri);
-      if (strcmp(builtin_name, "__sub") == 0)
+      if (kind == NY_BINOP_SUB)
         return ny_const_tagged_int_value(cg, li - ri);
-      if (strcmp(builtin_name, "__mul") == 0)
+      if (kind == NY_BINOP_MUL)
         return ny_const_tagged_int_value(cg, li * ri);
-      if (strcmp(builtin_name, "__div") == 0) {
+      if (kind == NY_BINOP_DIV) {
         if (ri == 0)
           return LLVMConstInt(cg->type_i64, 0, false);
         if (li == INT64_MIN && ri == -1)
@@ -317,46 +373,34 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
         return ny_const_tagged_int_value(cg, li / ri);
       }
     skip_const_div_fold:
-      if (strcmp(builtin_name, "__mod") == 0) {
+      if (kind == NY_BINOP_MOD) {
         if (ri == 0)
           return LLVMConstInt(cg->type_i64, 1, false);
         if (ri == 1 || ri == -1)
           return ny_const_tagged_int_value(cg, 0);
         return ny_const_tagged_int_value(cg, li % ri);
       }
-      if (strcmp(builtin_name, "__and") == 0)
+      if (kind == NY_BINOP_AND)
         return ny_const_tagged_int_value(cg, li & ri);
-      if (strcmp(builtin_name, "__or") == 0)
+      if (kind == NY_BINOP_OR)
         return ny_const_tagged_int_value(cg, li | ri);
-      if (strcmp(builtin_name, "__xor") == 0)
+      if (kind == NY_BINOP_XOR)
         return ny_const_tagged_int_value(cg, li ^ ri);
-      if (strcmp(builtin_name, "__lt") == 0)
+      if (kind == NY_BINOP_LT)
         return ny_const_tagged_bool_value(cg, li < ri);
-      if (strcmp(builtin_name, "__le") == 0)
+      if (kind == NY_BINOP_LE)
         return ny_const_tagged_bool_value(cg, li <= ri);
-      if (strcmp(builtin_name, "__gt") == 0)
+      if (kind == NY_BINOP_GT)
         return ny_const_tagged_bool_value(cg, li > ri);
-      if (strcmp(builtin_name, "__ge") == 0)
+      if (kind == NY_BINOP_GE)
         return ny_const_tagged_bool_value(cg, li >= ri);
-      if (strcmp(builtin_name, "__shl") == 0 && ri >= 0 && ri < 64)
+      if (kind == NY_BINOP_SHL && ri >= 0 && ri < 64)
         return ny_const_tagged_int_value(cg, (int64_t)(((uint64_t)li) << ri));
-      if (strcmp(builtin_name, "__shr") == 0 && ri >= 0 && ri < 64)
+      if (kind == NY_BINOP_SHR && ri >= 0 && ri < 64)
         return ny_const_tagged_int_value(cg, (int64_t)(((uint64_t)li) >> ri));
     }
   }
-  if (strcmp(op, "==") == 0) {
-    int64_t li = 0, ri = 0;
-    if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
-      return ny_const_tagged_bool_value(cg, li == ri);
-    fun_sig *s = prefer_builtin_ops ? lookup_fun(cg, "__eq") : ny_helper_eq(cg);
-    if (!s)
-      return expr_fail(cg, (token_t){0}, "'==' requires 'eq' (or __eq)");
-    LLVMValueRef fast = ny_try_emit_tagged_int_fast_binary(cg, "__eq", l, r, s);
-    if (fast)
-      return fast;
-    return LLVMBuildCall2(cg->builder, s->type, s->value,
-                          (LLVMValueRef[]){l, r}, 2, "");
-  }
+
   if (generic_name && !prefer_builtin_ops) {
     char full_generic[128];
     snprintf(full_generic, sizeof(full_generic), "std.core.reflect.%s",
@@ -371,7 +415,7 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     if (s && strcmp(s->name, builtin_name) != 0) {
       if (builtin_name) {
         LLVMValueRef fast =
-            ny_try_emit_tagged_int_fast_binary(cg, builtin_name, l, r, s);
+            ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
         if (fast)
           return fast;
       }
@@ -384,25 +428,12 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     if (!s)
       return expr_fail(cg, (token_t){0}, "builtin %s missing", builtin_name);
     LLVMValueRef fast =
-        ny_try_emit_tagged_int_fast_binary(cg, builtin_name, l, r, s);
+        ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
     if (fast)
       return fast;
     return LLVMBuildCall2(cg->builder, s->type, s->value,
                           (LLVMValueRef[]){l, r}, 2, "");
   }
-  if (strcmp(op, "!=") == 0) {
-    int64_t li = 0, ri = 0;
-    if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
-      return ny_const_tagged_bool_value(cg, li != ri);
-    return LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 6, false),
-                        gen_binary(cg, "==", l, r), "");
-  }
-  if (strcmp(op, "in") == 0) {
-    fun_sig *s = ny_helper_contains(cg);
-    if (!s)
-      return expr_fail(cg, (token_t){0}, "'in' requires 'contains'");
-    return LLVMBuildCall2(cg->builder, s->type, s->value,
-                          (LLVMValueRef[]){r, l}, 2, "");
-  }
+
   return expr_fail(cg, (token_t){0}, "undefined operator '%s'", op);
 }

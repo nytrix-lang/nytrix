@@ -365,7 +365,7 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   }
 }
 
-bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -408,8 +408,12 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
     features = "";
   }
   apply_target_attrs(module, cpu, features);
+  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
+  if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
+  else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
+  else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features ? features : "", LLVMCodeGenLevelDefault,
+      target, triple, cpu, features ? features : "", cgo,
       LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
@@ -452,7 +456,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
 }
 
 bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
-                       LLVMCodeGenFileType kind) {
+                       LLVMCodeGenFileType kind, int opt_level) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -495,8 +499,12 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
     features = "";
   }
   apply_target_attrs(module, cpu, features);
+  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
+  if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
+  else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
+  else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features ? features : "", LLVMCodeGenLevelDefault,
+      target, triple, cpu, features ? features : "", cgo,
       LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");

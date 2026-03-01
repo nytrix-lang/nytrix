@@ -110,5 +110,179 @@ if(comptime{__main()}){
     assert(memcmp("abc", "abc", 3) == 0, "memcmp equal")
     assert(memcmp("abc", "abd", 3) != 0, "memcmp unequal")
 
+    print("Testing optimized paths...")
+    def large_sz = 100
+    def p1 = malloc(large_sz)
+    def p2 = malloc(large_sz)
+    memset(p1, 0, large_sz)
+    mut k = 0
+    while(k < large_sz){
+        store8(p2, k, k)
+        k += 1
+    }
+    memcpy(p1, p2, large_sz)
+    k = 0
+    while(k < large_sz){
+        assert(load8(p1, k) == k, f"memcpy optimized at offset {k}")
+        k += 1
+    }
+    memset(p1, 0, large_sz)
+    k = 0
+    while(k < large_sz){
+        assert(load8(p1, k) == 0, f"memset optimized at offset {k}")
+        k += 1
+    }
+    free(p1)
+    free(p2)
+
+    print("Testing Comprehensive Optimization Coverage...")
+
+    ; Allocate large enough aligned buffers
+    def buf_size = 256
+    def src = malloc(buf_size)
+    def dst = malloc(buf_size)
+
+    assert((src & 7) == 0, "Source buffer should be 8-byte aligned")
+    assert((dst & 7) == 0, "Dest buffer should be 8-byte aligned")
+
+    ; Initialize source with a sequence
+    mut i = 0
+    while (i < buf_size) {
+        store8(src, i & 255, i)
+        i += 1
+    }
+
+    ; 1. Test memcpy with aligned pointers and n > 8 (multiple of 8) -> Optimized Loop
+    memset(dst, 0, buf_size)
+    memcpy(dst, src, 64)
+    ; Check buffer sequence
+    i = 0
+    while (i < 64) {
+        def val = load8(dst, i)
+        def expected = i & 255
+        assert(val == expected, f"memcpy aligned n=64 at index {i}")
+        i += 1
+    }
+    assert(load8(dst, 64) == 0, "memcpy buffer overflow check")
+
+    ; 2. Test memcpy with aligned pointers and n not a multiple of 8 -> Optimized Loop + Cleanup
+    memset(dst, 0, buf_size)
+    memcpy(dst, src, 67)
+    ; Check buffer sequence
+    i = 0
+    while (i < 67) {
+        def val = load8(dst, i)
+        def expected = i & 255
+        assert(val == expected, f"memcpy aligned n=67 at index {i}")
+        i += 1
+    }
+    assert(load8(dst, 67) == 0, "memcpy buffer overflow check")
+
+    ; 3. Test memcpy with unaligned pointers (offset) -> Slow Path
+    memset(dst, 0, buf_size)
+    ; Use src+1 as source. Expected content: src[1]...src[64]
+    memcpy(dst, src + 1, 64)
+
+    i = 0
+    while (i < 64) {
+        def val = load8(dst, i)
+        def expected = (i + 1) & 255
+        assert(val == expected, f"memcpy unaligned src at {i}")
+        i += 1
+    }
+
+    memset(dst, 0, buf_size)
+    memcpy(dst + 3, src, 64)
+    ; Check pre-check (first 3 bytes should be 0)
+    i = 0
+    while (i < 3) {
+        def val = load8(dst, i)
+        assert(val == 0, f"memcpy unaligned dst pre-check at index {i}")
+        i += 1
+    }
+    ; Check the copied part
+    i = 0
+    while (i < 64) {
+        def val = load8(dst + 3, i)
+        def expected = i & 255
+        assert(val == expected, f"memcpy unaligned dst at {i}")
+        i += 1
+    }
+
+    ; 4. Test memcpy with n < 8 -> Slow Path
+    memset(dst, 0, buf_size)
+    memcpy(dst, src, 7)
+    ; Check buffer sequence
+    i = 0
+    while (i < 7) {
+        def val = load8(dst, i)
+        def expected = i & 255
+        assert(val == expected, f"memcpy small n=7 at index {i}")
+        i += 1
+    }
+    assert(load8(dst, 7) == 0, "memcpy small n=7 overflow check")
+
+    ; 5. Test memset with val = 0 and aligned pointer -> Optimized Path
+    ; Fill dst with garbage first
+    i = 0
+    while(i < 64) {
+        store8(dst, 255, i)
+        i += 1
+    }
+    memset(dst, 0, 64)
+    ; Check buffer content
+    i = 0
+    while (i < 64) {
+        def val = load8(dst, i)
+        assert(val == 0, f"memset val=0 aligned n=64 at index {i}")
+        i += 1
+    }
+
+    ; 6. Test memset with val = 0, aligned, n not multiple of 8 -> Optimized + Cleanup
+    i = 0
+    while(i < 70) {
+        store8(dst, 255, i)
+        i += 1
+    }
+    memset(dst, 0, 67)
+    ; Check buffer content
+    i = 0
+    while (i < 67) {
+        def val = load8(dst, i)
+        assert(val == 0, f"memset val=0 aligned n=67 at index {i}")
+        i += 1
+    }
+    assert(load8(dst, 67) == 255, "memset overflow check")
+
+    ; 7. Test memset with val != 0 -> Slow Path
+    memset(dst, 0, 64)
+    memset(dst, 170, 64) ; 0xAA = 170
+    ; Check buffer content
+    i = 0
+    while (i < 64) {
+        def val = load8(dst, i)
+        assert(val == 170, f"memset val=0xAA at index {i}")
+        i += 1
+    }
+
+    ; 8. Test memset with unaligned pointer -> Slow Path
+    i = 0
+    while(i < 64) {
+        store8(dst, 255, i)
+        i += 1
+    }
+    memset(dst + 1, 0, 60)
+    assert(load8(dst) == 255, "memset unaligned pre-check")
+    ; check the zeroed part (dst+1 to dst+61)
+    i = 1
+    while (i < 61) {
+        assert(load8(dst, i) == 0, f"memset unaligned at {i}")
+        i += 1
+    }
+    assert(load8(dst, 61) == 255, "memset unaligned post-check")
+
+    free(src)
+    free(dst)
+
     print("✓ std.core.mem tests passed")
 }

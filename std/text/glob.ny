@@ -61,5 +61,32 @@ if(comptime{__main()}){
     assert(!glob_match("a?c.ny", "abbc.ny"), "glob ? non-match")
     assert(glob_match("**/test/*.ny", "std/core/test/mod.ny"), "glob ** match")
 
+    ; Basic wildcard '*' tests
+    assert(glob_match("*", "anything"), "glob * matches anything")
+    assert(glob_match("*", ""), "glob * matches empty string")
+    assert(glob_match("a*b", "ab"), "glob a*b matches ab")
+    assert(glob_match("a*b", "acb"), "glob a*b matches acb")
+    assert(glob_match("a*b", "a/b"), "glob a*b matches a/b")
+    assert(glob_match("*a*", "bab"), "glob *a* matches bab")
+    assert(!glob_match("*a*", "bb"), "glob *a* non-match bb")
+
+    ; Basic wildcard '?' tests
+    assert(glob_match("?", "a"), "glob ? matches single char")
+    assert(!glob_match("?", ""), "glob ? non-match empty")
+    assert(glob_match("a?b", "acb"), "glob a?b matches acb")
+    assert(glob_match("a?b", "a/b"), "glob a?b matches a/b")
+
+    ; Empty pattern tests
+    assert(glob_match("", ""), "glob empty matches empty")
+    assert(!glob_match("", "a"), "glob empty non-match a")
+
+    ; '**' behavior (acts as '*')
+    assert(glob_match("a**b", "ab"), "glob a**b matches ab")
+    assert(glob_match("a**b", "acb"), "glob a**b matches acb")
+
+    ; Specific **/*.ny optimization
+    assert(glob_match("**/*.ny", "foo/bar/baz.ny"), "glob **/*.ny match nested")
+    assert(!glob_match("**/*.ny", "foo/bar/baz.txt"), "glob **/*.ny non-match ext")
+
     print("✓ std.text.glob tests passed")
 }

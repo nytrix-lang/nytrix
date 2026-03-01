@@ -454,12 +454,13 @@ static stmt_t *parse_struct(parser_t *p) {
       break;
     }
     if (ptr_depth > 0) {
-      char buf[256];
-      char *ptr = buf;
-      for (size_t i = 0; i < ptr_depth; i++)
-        *ptr++ = '*';
-      strcpy(ptr, tname);
-      tname = arena_strndup(p->arena, buf, strlen(buf));
+      size_t tname_len = strlen(tname);
+      size_t total_len = ptr_depth + tname_len;
+      char *new_tname = arena_alloc(p->arena, total_len + 1);
+      memset(new_tname, '*', ptr_depth);
+      memcpy(new_tname + ptr_depth, tname, tname_len);
+      new_tname[total_len] = '\0';
+      tname = new_tname;
     }
     int field_align = 0;
     if (p->cur.kind == NY_T_IDENT && p->cur.len == 5 &&

@@ -147,9 +147,14 @@ char *ny_read_file(const char *path) {
   if (read >= 2 && content[0] == '#' && content[1] == '!') {
     char *newline = strchr(content, '\n');
     if (newline) {
-      size_t skip_len = (newline - content) + 1;
-      size_t new_len = read - skip_len;
-      memmove(content, newline + 1, new_len + 1);
+      size_t skip_len = (size_t)(newline - content) + 1;
+      if (skip_len < read) {
+        size_t new_len = read - skip_len;
+        memmove(content, newline + 1, new_len);
+        content[new_len] = '\0';
+      } else {
+        content[0] = '\0';
+      }
     }
   }
   return content;
@@ -367,6 +372,12 @@ bool ny_env_enabled(const char *name) {
   return ny_env_is_truthy(getenv(name));
 }
 
+bool ny_env_enabled_default_on(const char *name) {
+  const char *v = getenv(name);
+  if (!v || !*v)
+    return true;
+  return ny_env_is_truthy(v);
+}
 void ny_str_list_append(char ***list, size_t *len, size_t *cap,
                         const char *str) {
   if (*len == *cap) {
@@ -411,35 +422,54 @@ uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed) {
 int ny_levenshtein(const char *s1, const char *s2) {
   size_t l1 = strlen(s1);
   size_t l2 = strlen(s2);
-  if (l1 == 0)
-    return l2;
+
+  if (l1 < l2) {
+    return ny_levenshtein(s2, s1);
+  }
+
   if (l2 == 0)
     return l1;
-  int *v0 = malloc((l2 + 1) * sizeof(int));
-  int *v1 = malloc((l2 + 1) * sizeof(int));
-  if (!v0 || !v1)
-    exit(1);
+
+  int stack_v[2048];
+  int *v = stack_v;
+  bool v_heap = false;
+
+  if (l2 + 1 > 2048) {
+    v = malloc((l2 + 1) * sizeof(int));
+    if (!v)
+      exit(1);
+    v_heap = true;
+  }
+
   for (size_t i = 0; i <= l2; i++)
-    v0[i] = i;
+    v[i] = i;
+
   for (size_t i = 0; i < l1; i++) {
-    v1[0] = i + 1;
+    int current_left = i + 1;
+    int prev_diag = v[0];
+    v[0] = current_left;
+
     for (size_t j = 0; j < l2; j++) {
+      int up = v[j + 1];
+      int diag = prev_diag;
       int cost = (s1[i] == s2[j]) ? 0 : 1;
-      int del = v0[j + 1] + 1;
-      int ins = v1[j] + 1;
-      int sub = v0[j] + cost;
-      int min = del;
+
+      int min = up + 1;
+      int ins = current_left + 1;
       if (ins < min)
         min = ins;
+      int sub = diag + cost;
       if (sub < min)
         min = sub;
-      v1[j + 1] = min;
+
+      prev_diag = up;
+      v[j + 1] = min;
+      current_left = min;
     }
-    for (size_t j = 0; j <= l2; j++)
-      v0[j] = v1[j];
   }
-  int res = v0[l2];
-  free(v0);
-  free(v1);
+
+  int res = v[l2];
+  if (v_heap)
+    free(v);
   return res;
 }

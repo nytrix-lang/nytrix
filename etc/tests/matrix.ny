@@ -23,7 +23,9 @@ def tSize = get_terminal_size()
 mut W = get(tSize, 0, 0)
 mut H = get(tSize, 1, 0)
 if(W < 1){ W = 80 }
-if(H < 1){ H = 24 }
+if(H < 2){ H = 25 }
+H -= 0 ;; Full screen
+
 mut max_frames = 0
 mut frame_count = 0
 
@@ -74,7 +76,7 @@ while(1){
    def key = poll_key()
    if(is_quit_key(key)){ break }
 
-   ;; Update columns
+   ;; Update columns.
    mut x = 0
    while(x < W){
       def yf = get(DY, x, 0) + get(DS, x, 0)
@@ -92,7 +94,7 @@ while(1){
       x += 1
    }
 
-   ;; Render buffer
+   ;; Render buffer.
    mut idx = 0
    def n = W * H
    while(idx < n){
@@ -122,7 +124,12 @@ while(1){
       }
       idx += 1
    }
+
+   canvas_print(CANV, 0, 0, "ESC: Quit", 7, 0)
    canvas_refresh(CANV)
+
+    msleep(16)
    frame_count += 1
    if(max_frames > 0 && frame_count >= max_frames){ break }
 }
+tui_end()

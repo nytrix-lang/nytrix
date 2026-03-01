@@ -1,3 +1,4 @@
+#define _CRT_RAND_S
 #include "wire/pipe.h"
 #include "base/common.h"
 #include "base/loader.h"
@@ -22,6 +23,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <fcntl.h>
+#include <errno.h>
 #ifndef _WIN32
 #include <unistd.h>
 #else
@@ -136,7 +139,7 @@ static void dump_debug_bundle(const ny_options *opt, const char *source,
       }
     }
     ny_llvm_emit_file(dump_mod ? dump_mod : module, "build/debug/last_asm.s",
-                      LLVMAssemblyFile);
+                      LLVMAssemblyFile, opt->opt_level);
     if (dump_mod)
       LLVMDisposeModule(dump_mod);
   }
@@ -182,12 +185,6 @@ static const char *ny_windows_output_path(const char *raw, char *buf,
 }
 #endif
 
-static bool ny_env_enabled_default_on(const char *name) {
-  const char *v = getenv(name);
-  if (!v || !*v)
-    return true;
-  return ny_env_is_truthy(v);
-}
 
 static ny_opt_profile_kind_t
 ny_opt_profile_kind_from_name(const char *profile_name) {
@@ -280,6 +277,51 @@ static int ny_guided_inline_threshold(ny_opt_profile_kind_t profile_kind,
   if (eff_opt_level == 1)
     return 125;
   return 50;
+}
+
+static LLVMCodeGenOptLevel ny_jit_codegen_opt_level(const ny_options *opt)
+    __attribute__((unused));
+static LLVMCodeGenOptLevel ny_jit_codegen_opt_level(const ny_options *opt) {
+  const char *raw = getenv("NYTRIX_JIT_CODEGEN_OPT");
+  if (raw && *raw) {
+    if (strcmp(raw, "0") == 0 || strcasecmp(raw, "o0") == 0 ||
+        strcasecmp(raw, "none") == 0)
+      return LLVMCodeGenLevelNone;
+    if (strcmp(raw, "1") == 0 || strcasecmp(raw, "o1") == 0 ||
+        strcasecmp(raw, "less") == 0)
+      return LLVMCodeGenLevelLess;
+    if (strcmp(raw, "2") == 0 || strcasecmp(raw, "o2") == 0 ||
+        strcasecmp(raw, "default") == 0)
+      return LLVMCodeGenLevelDefault;
+    if (strcmp(raw, "3") == 0 || strcasecmp(raw, "o3") == 0 ||
+        strcasecmp(raw, "aggressive") == 0)
+      return LLVMCodeGenLevelAggressive;
+  }
+  ny_opt_profile_kind_t profile_kind =
+      ny_opt_profile_kind_from_name(getenv("NYTRIX_OPT_PROFILE"));
+  switch (profile_kind) {
+  case NY_OPT_PROFILE_NONE:
+  case NY_OPT_PROFILE_COMPILE:
+    return LLVMCodeGenLevelNone;
+  case NY_OPT_PROFILE_SIZE:
+    return LLVMCodeGenLevelLess;
+  case NY_OPT_PROFILE_SPEED:
+    return LLVMCodeGenLevelAggressive;
+  case NY_OPT_PROFILE_BALANCED:
+    return LLVMCodeGenLevelDefault;
+  case NY_OPT_PROFILE_CUSTOM:
+  case NY_OPT_PROFILE_DEFAULT:
+  default:
+    break;
+  }
+  int level = opt ? opt->opt_level : 2;
+  if (level <= 0)
+    return LLVMCodeGenLevelNone;
+  if (level == 1)
+    return LLVMCodeGenLevelLess;
+  if (level >= 3)
+    return LLVMCodeGenLevelAggressive;
+  return LLVMCodeGenLevelDefault;
 }
 
 static bool ny_should_use_aot_cache(const ny_options *opt) {
@@ -456,11 +498,47 @@ static int ny_write_file_atomic(const char *path, const char *content,
   if (!path || !*path || !content)
     return -1;
   char tmp[4096];
-  snprintf(tmp, sizeof(tmp), "%s.tmp.%ld.%lu", path, (long)getpid(),
-           (unsigned long)clock());
-  FILE *f = fopen(tmp, "wb");
-  if (!f)
+#ifndef _WIN32
+  snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
+  int fd = mkstemp(tmp);
+  if (fd < 0)
     return -1;
+  FILE *f = fdopen(fd, "wb");
+  if (!f) {
+    close(fd);
+    unlink(tmp);
+    return -1;
+  }
+#else
+  int fd = -1;
+  int retries = 100;
+  while (retries > 0) {
+    unsigned int r = 0;
+    if (rand_s(&r) != 0) {
+      r = (unsigned int)rand();
+    }
+    snprintf(tmp, sizeof(tmp), "%s.tmp.%u.%lu", path, r,
+             (unsigned long)clock());
+    fd = _open(tmp, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY,
+               _S_IREAD | _S_IWRITE);
+    if (fd >= 0) {
+      break;
+    }
+    if (errno != EEXIST) {
+      return -1;
+    }
+    retries--;
+  }
+  if (fd < 0) {
+    return -1;
+  }
+  FILE *f = _fdopen(fd, "wb");
+  if (!f) {
+    _close(fd);
+    (void)unlink(tmp);
+    return -1;
+  }
+#endif
   size_t written = fwrite(content, 1, len, f);
   int close_rc = fclose(f);
   if (written != len || close_rc != 0) {
@@ -756,15 +834,22 @@ static bool handle_non_compile_modes(const ny_options *opt, int *exit_code) {
     LLVMLinkInMCJIT();
     ny_llvm_init_native();
     LLVMLoadLibraryPermanently(NULL);
-    std_mode_t repl_std_mode = opt->no_std ? STD_MODE_NONE : opt->std_mode;
-    ny_repl_set_std_mode(repl_std_mode);
-    ny_repl_set_plain(opt->repl_plain ? 1 : 0);
     int repl_batch = 0;
 #ifdef _WIN32
     repl_batch = (_isatty(_fileno(stdin)) == 0);
 #else
     repl_batch = (isatty(STDIN_FILENO) == 0);
 #endif
+    std_mode_t repl_std_mode = opt->no_std ? STD_MODE_NONE : opt->std_mode;
+    if (repl_batch && !opt->std_mode_explicit) {
+      const char *env_std = getenv("NYTRIX_REPL_STD");
+      const char *env_no_std = getenv("NYTRIX_REPL_NO_STD");
+      if ((!env_std || !*env_std) && (!env_no_std || !*env_no_std)) {
+        repl_std_mode = STD_MODE_NONE;
+      }
+    }
+    ny_repl_set_std_mode(repl_std_mode);
+    ny_repl_set_plain(opt->repl_plain ? 1 : 0);
     ny_repl_run(opt->opt_level, opt->opt_pipeline, opt->command_string,
                 repl_batch);
     *exit_code = 0;
@@ -818,7 +903,8 @@ static bool ny_ir_is_std_symbol(const char *name) {
           strncmp(name, "src.lib.", 8) == 0);
 }
 
-static void ny_ir_externalize_std_definitions(LLVMModuleRef module) {
+static void ny_ir_externalize_std_definitions(const ny_options *opt,
+                                               LLVMModuleRef module) {
   if (!module)
     return;
   for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;) {
@@ -848,12 +934,17 @@ static void ny_ir_externalize_std_definitions(LLVMModuleRef module) {
   }
   LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
   if (popt) {
-    LLVMErrorRef perr = LLVMRunPasses(module, "globaldce", NULL, popt);
-    if (perr) {
-      char *msg = LLVMGetErrorMessage(perr);
-      NY_LOG_WARN("IR std-prune pass failed: %s\n", msg ? msg : "<unknown>");
-      if (msg)
-        LLVMDisposeErrorMessage(msg);
+    bool enable_dce = true;
+    if (opt && opt->opt_level == 0)
+      enable_dce = false;
+    if (enable_dce) {
+      LLVMErrorRef perr = LLVMRunPasses(module, "globaldce", NULL, popt);
+      if (perr) {
+        char *msg = LLVMGetErrorMessage(perr);
+        NY_LOG_WARN("IR std-prune pass failed: %s\n", msg ? msg : "<unknown>");
+        if (msg)
+          LLVMDisposeErrorMessage(msg);
+      }
     }
     LLVMDisposePassBuilderOptions(popt);
   }
@@ -868,7 +959,7 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
     return NULL;
   LLVMStripModuleDebugInfo(dump_mod);
   if (!opt || !opt->ir_include_std)
-    ny_ir_externalize_std_definitions(dump_mod);
+    ny_ir_externalize_std_definitions(opt, dump_mod);
   return dump_mod;
 }
 
@@ -962,8 +1053,13 @@ static void run_optimization_if_needed(const ny_options *opt,
   const char *passes = opt->opt_pipeline;
   char buf[96];
   if (!passes) {
-    bool with_attributor = !ny_env_enabled("NYTRIX_NO_ATTRIBUTOR");
-    if (profile_compile)
+    bool with_attributor = (profile_speed || eff_opt_level >= 3);
+    const char *with_attr_env = getenv("NYTRIX_WITH_ATTRIBUTOR");
+    if (with_attr_env && *with_attr_env)
+      with_attributor = ny_env_enabled("NYTRIX_WITH_ATTRIBUTOR");
+    if (ny_env_enabled("NYTRIX_NO_ATTRIBUTOR"))
+      with_attributor = false;
+    if (profile_compile || profile_none)
       with_attributor = false;
     const char *core_pipeline = NULL;
     char core_buf[32];
@@ -1309,6 +1405,13 @@ int ny_pipeline_run(ny_options *opt) {
   maybe_log_phase_time(opt->do_timing, "Stdlib load:", t_std);
   size_t slen = std_src ? strlen(std_src) : 0;
   size_t ulen = strlen(user_src);
+  if (slen > (SIZE_MAX - ulen - 2)) {
+    NY_LOG_ERR("Source code too large to concatenate\n");
+    if (user_src) free(user_src);
+    if (std_src) free(std_src);
+    if (uses) ny_str_list_free(uses, use_count);
+    return 1;
+  }
   source = malloc(slen + ulen + 2);
   char *ptr = source;
   if (std_src) {
@@ -1505,7 +1608,7 @@ skip_compilation:
       LLVMDisposeModule(dump_mod);
   }
   if (opt->emit_asm_path) {
-    if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile)) {
+    if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile, opt->opt_level)) {
       NY_LOG_ERR("Failed to write assembly to %s\n", opt->emit_asm_path);
       exit_code = 1;
       goto exit_success;
@@ -1517,7 +1620,7 @@ skip_compilation:
     snprintf(obj_name, sizeof(obj_name), "ny_tmp_%d.o", getpid());
     ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
     ensure_aot_entry(&cg, script_fn);
-    if (ny_llvm_emit_object(cg.module, obj)) {
+    if (ny_llvm_emit_object(cg.module, obj, opt->opt_level)) {
       const char *cc = ny_builder_choose_cc();
       char rto[4096];
       char rto_name[64];
@@ -1587,7 +1690,7 @@ skip_compilation:
       }
     }
     {
-      if (ny_env_enabled("NYTRIX_JIT_FAST_ISEL"))
+      if (ny_env_enabled_default_on("NYTRIX_JIT_FAST_ISEL"))
         jopt.EnableFastISel = 1;
     }
     LLVMModuleRef jmod = cg.module;

@@ -125,16 +125,11 @@ static void print_last_trace(void) {
   int64_t tcol = __trace_last_col();
   int64_t line = is_int(tline) ? rt_untag_v(tline) : 0;
   int64_t col = is_int(tcol) ? rt_untag_v(tcol) : 0;
-  fprintf(stderr, "%sLast Nytrix location:%s %.*s:%ld:%ld", clr(NY_CLR_CYAN),
-          clr(NY_CLR_RESET), (int)flen, fname, (long)line, (long)col);
   int64_t fn = __trace_last_func();
-  if (is_v_str(fn)) {
-    const char *fnname = (const char *)(uintptr_t)fn;
-    int64_t fntagged = *(int64_t *)((char *)(uintptr_t)fn - 16);
-    size_t fnlen = is_int(fntagged) ? (size_t)(fntagged >> 1) : 0;
-    fprintf(stderr, " (fn %.*s)", (int)fnlen, fnname);
-  }
-  fputc('\n', stderr);
+  char prefix[256];
+  snprintf(prefix, sizeof(prefix), "%sLast Nytrix location:%s ",
+           clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  print_trace_entry(file, tline, tcol, fn, prefix);
   print_trace_snippet(fname, (int)line, (int)col);
 }
 
@@ -370,6 +365,7 @@ int main(int argc, char **argv, char **envp) {
     return 0;
   }
   int exit_code = ny_pipeline_run(&opt);
+  ny_options_free(&opt);
   ny_std_free_modules();
   __runtime_cleanup();
   return exit_code;

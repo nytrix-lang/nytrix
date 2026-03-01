@@ -58,6 +58,7 @@ typedef struct {
   const char *arm_float_abi;
   const char *std_path;
   std_mode_t std_mode;
+  bool std_mode_explicit;
   int strip_override;
   int color_mode;
   int opt_dce;
@@ -85,6 +86,7 @@ typedef struct {
 
 void ny_options_init(ny_options *opt);
 void ny_options_parse(ny_options *opt, int argc, char **argv);
+void ny_options_free(ny_options *opt);
 void ny_options_usage(const char *argv0);
 void ny_options_usage_env(const char *argv0);
 

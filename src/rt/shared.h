@@ -87,8 +87,8 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
   enum {
     RT_READABLE_CACHE_SLOTS = 64,
     RT_READABLE_MAP_CACHE_CAP = 1024,
-    RT_READABLE_MAP_REFRESH_INTERVAL = 16384
-  };
+    RT_READABLE_MAP_REFRESH_INTERVAL = 1000000
+  }; // Increase from 16k
   typedef struct {
     uintptr_t lo;
     uintptr_t hi;
@@ -221,17 +221,12 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
 }
 
 static inline bool is_valid_heap_ptr(int64_t v) {
-  if (!is_ptr(v) || (v & 63) != 0)
-    return false;
-  uintptr_t raw_p_start = (uintptr_t)v - 64;
-  uintptr_t raw_p_magic2 = raw_p_start + 16;
-  if (!rt_addr_readable(raw_p_start, 24))
-    return false;
-  uint64_t m1 = 0, m2 = 0;
-  memcpy(&m1, (const void *)raw_p_start, sizeof(m1));
-  memcpy(&m2, (const void *)raw_p_magic2, sizeof(m2));
-  bool match = (m1 == NY_MAGIC1) && (m2 == NY_MAGIC2);
-  return match;
+  // 16-byte aligned pointer in Nytrix range
+  if (!(v > 0x1000 && (v & 15) == 0)) return false;
+  if (!rt_addr_readable((uintptr_t)v - 32, 32)) return false;
+  uint64_t m1 = *(uint64_t *)((char *)(uintptr_t)v - 32);
+  uint64_t m2 = *(uint64_t *)((char *)(uintptr_t)v - 24);
+  return (m1 == NY_MAGIC1 && m2 == NY_MAGIC2);
 }
 
 #define is_heap_ptr(v) is_valid_heap_ptr(v)
@@ -251,7 +246,7 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 #define NY_NATIVE_IS(v)                                                        \
   ((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) && (((v) & 3) == NY_NATIVE_TAG))
 #define NY_NATIVE_ENCODE(p)                                                    \
-  ((int64_t)(NY_NATIVE_MARK |                                                 \
+  ((int64_t)(NY_NATIVE_MARK |                                                  \
              (((uint64_t)(uintptr_t)(p) << 2) | (uint64_t)NY_NATIVE_TAG)))
 #define NY_NATIVE_DECODE(v)                                                    \
   ((void *)(uintptr_t)((((uint64_t)(v)) & ~NY_NATIVE_MARK) >> 2))
@@ -265,88 +260,58 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define NY_NATIVE_DECODE(v) ((void *)(uintptr_t)(((uint64_t)(v)) >> 3))
 #endif
 
-#define TAG_FLOAT 221
-#define TAG_STR 241
-#define TAG_STR_CONST 243
-#define TAG_OK 201
-#define TAG_ERR 202
+#define TAG_LIST 100
+#define TAG_DICT 101
+#define TAG_TUPLE 103
+#define TAG_OK 104
+#define TAG_ERR 105
+#define TAG_FLOAT 110
+#define TAG_STR 120
+#define TAG_STR_CONST 121
 
 static inline int is_v_flt(int64_t v) {
-  if (!is_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
-  return tag == TAG_FLOAT;
+  if (!is_ptr(v)) return 0;
+  // Boxed floats from slab are always 16-byte aligned at slot start, so v is slot+8.
+  if ((v & 15) != 8) return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 16)) return 0; // Cover tag and bits
+  return (*(int64_t *)((char *)(uintptr_t)v - 8) == TAG_FLOAT);
 }
 
 static inline int is_ny_obj(int64_t v) {
-  if (!is_heap_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
-  if (is_int(tag)) {
-    int64_t norm = tag >> 1;
-    return (norm >= 100 && norm <= 125);
+  if (!is_ptr(v)) return 0; // is_ptr already checks (v & 7) == 0
+  bool heap = is_heap_ptr(v);
+  if (!heap) {
+    // For non-heap (static) objects, we only mandate 8-byte alignment and tag check.
+    if (!rt_addr_readable((uintptr_t)v - 16, 24)) return 0;
   }
-  return (tag >= 100 && tag <= 125) || (tag >= 200 && tag <= 250);
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+  return (tag >= 100 && tag <= 255);
 }
 
 static inline int is_v_str(int64_t v) {
-  if (!is_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
-  if (tag != TAG_STR && tag != TAG_STR_CONST)
-    return 0;
-  uintptr_t lp = (uintptr_t)v - 16;
-  if (!rt_addr_readable(lp, sizeof(int64_t)))
-    return 0;
-  int64_t len_raw = 0;
-  memcpy(&len_raw, (const void *)lp, sizeof(len_raw));
-  if (!is_int(len_raw) || len_raw < 0)
-    return 0;
-  uint64_t len_u = (uint64_t)(len_raw >> 1);
-  if (len_u > (1ULL << 40))
-    return 0;
-  if (len_u >= UINTPTR_MAX - (uintptr_t)v)
-    return 0;
-  if (!rt_addr_readable((uintptr_t)v, (size_t)len_u + 1))
-    return 0;
-  unsigned char nul = 1;
-  memcpy(&nul, (const void *)((uintptr_t)v + (uintptr_t)len_u), sizeof(nul));
-  if (nul != 0)
-    return 0;
-  return 1;
+  if (!is_ptr(v)) return 0;
+  if (!is_heap_ptr(v)) {
+    if (!rt_addr_readable((uintptr_t)v - 16, 24)) return 0;
+  }
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+  return (tag == TAG_STR || tag == TAG_STR_CONST) ? 1 : 0;
 }
 
 static inline int is_v_ok(int64_t v) {
-  if (!is_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
+  if (!is_ptr(v)) return 0;
+  if (!is_heap_ptr(v)) {
+    if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  }
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return tag == TAG_OK;
 }
 
 static inline int is_v_err(int64_t v) {
-  if (!is_ptr(v))
-    return 0;
-  uintptr_t tp = (uintptr_t)v - 8;
-  if (!rt_addr_readable(tp, sizeof(int64_t)))
-    return 0;
-  int64_t tag = 0;
-  memcpy(&tag, (const void *)tp, sizeof(tag));
+  if (!is_ptr(v)) return 0;
+  if (!is_heap_ptr(v)) {
+    if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  }
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return tag == TAG_ERR;
 }
 
@@ -362,36 +327,36 @@ int64_t __trace_last_file(void);
 int64_t __trace_last_line(void);
 int64_t __trace_last_col(void);
 int64_t __trace_last_func(void);
+void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
+                      const char *prefix);
 
 static inline size_t __get_heap_size(int64_t v) {
-  if (!is_heap_ptr(v))
-    return (size_t)-1;
-  uintptr_t sp = (uintptr_t)v - 56;
-  if (!rt_addr_readable(sp, sizeof(uint64_t)))
-    return (size_t)-1;
-  uint64_t sz = 0;
-  memcpy(&sz, (const void *)sp, sizeof(sz));
-  return (size_t)sz;
+  if (!is_heap_ptr(v)) return (size_t)-1;
+  int64_t raw = *(int64_t *)((char *)(uintptr_t)v - 16);
+  // If bit 0 is set, it's a tagged integer from Nytrix (e.g. from bytes() or string init)
+  // We must untag it to get the actual byte length for OOB checks.
+  if (raw & 1) raw >>= 1;
+  return (size_t)raw;
 }
 
 static inline int __check_oob(const char *op, int64_t addr, int64_t idx,
                               size_t access_sz) {
   (void)op;
   if ((intptr_t)idx < 0) {
-    if ((intptr_t)idx < -64)
-      return 0;
-    uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
-    return rt_addr_readable(p, access_sz) ? 1 : 0;
-  }
-  if (!is_heap_ptr(addr))
+    // Header is 32 bytes
+    if ((intptr_t)idx < -32) return 0;
     return 1;
-  size_t sz = __get_heap_size(addr);
-  if ((size_t)idx + access_sz > sz) {
-    return 0;
   }
+  if (!is_heap_ptr(addr)) return 1;
+  size_t sz = __get_heap_size(addr);
+  if ((size_t)idx + access_sz > sz) return 0;
   return 1;
 }
 
 int64_t __copy_mem(int64_t dst, int64_t src, int64_t n);
+int64_t __rt_alloc_string(const char *s);
+int64_t __rt_alloc_string_len(const char *s, size_t len);
+int64_t __list_len(int64_t lst);
+int64_t __list_set_len(int64_t lst, int64_t n);
 
 #endif

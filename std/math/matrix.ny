@@ -250,27 +250,30 @@ fn mat4_rotate(angle, axis){
 }
 
 fn mat4_ortho(l, r, b, t, n, f){
-   "Auto-generated docstring: mat4_ortho."
+    "Creates an orthographic projection matrix."
+    def rl = float(r) - float(l)
+    def tb = float(t) - float(b)
+    def f_n = float(f) - float(n)
     mut m = mat4_zero()
-    set(m, 0, 0, 2 / (r - l))
-    set(m, 1, 1, 2 / (t - b))
-    set(m, 2, 2, -2 / (f - n))
-    set(m, 3, 3, 1)
-    set(m, 3, 0, -(r + l) / (r - l))
-    set(m, 3, 1, -(t + b) / (t - b))
-    set(m, 3, 2, -(f + n) / (f - n))
+    set(m, 0, 0, 2.0 / rl)
+    set(m, 1, 1, 2.0 / tb)
+    set(m, 2, 2, -2.0 / f_n)
+    set(m, 3, 3, 1.0)
+    set(m, 0, 3, -(float(r) + float(l)) / rl)
+    set(m, 1, 3, -(float(t) + float(b)) / tb)
+    set(m, 2, 3, -(float(f) + float(n)) / f_n)
     m
 }
 
 fn mat4_perspective(fovy, aspect, near, far){
-   "Auto-generated docstring: mat4_perspective."
-    def tan_half_fovy = tan(fovy / 2)
+    "Creates a perspective projection matrix."
+    def tan_half_fovy = tan(float(fovy) / 2.0)
     mut m = mat4_zero()
-    set(m, 0, 0, 1 / (aspect * tan_half_fovy))
-    set(m, 1, 1, 1 / tan_half_fovy)
-    set(m, 2, 2, -(far + near) / (far - near))
-    set(m, 2, 3, -1)
-    set(m, 3, 2, -(2 * far * near) / (far - near))
+    set(m, 0, 0, 1.0 / (float(aspect) * tan_half_fovy))
+    set(m, 1, 1, 1.0 / tan_half_fovy)
+    set(m, 2, 2, -(float(far) + float(near)) / (float(far) - float(near)))
+    set(m, 2, 3, -1.0)
+    set(m, 3, 2, -(2.0 * float(far) * float(near)) / (float(far) - float(near)))
     m
 }
 
@@ -297,12 +300,12 @@ fn mat4_look_at(eye, center, up){
 }
 
 fn mat4_to_buffer(m, buf){
-    "Copies 4x4 matrix elements to a raw memory buffer."
+    "Copies 4x4 matrix elements to a raw memory buffer (Column-Major for GPU)."
     mut i = 0
     while(i < 4){
         mut j = 0
         while(j < 4){
-            store32_f32(buf, at(m, i, j), (i * 4 + j) * 4)
+            store32_f32(buf, at(m, j, i), (i * 4 + j) * 4)
             j += 1
         }
         i += 1

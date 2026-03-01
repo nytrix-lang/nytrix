@@ -58,6 +58,9 @@ static char *read_message(void) {
   }
   if (content_len <= 0)
     return NULL;
+  /* Cap message size at 10MB to prevent DoS via memory exhaustion */
+  if (content_len > 10 * 1024 * 1024)
+    return NULL;
   char *body = malloc((size_t)content_len + 1);
   if (!body)
     return NULL;

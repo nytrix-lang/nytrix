@@ -130,6 +130,14 @@ fn sys_free(p){
    0
 }
 
+;; --- Internal Unboxing ---
+fn _u(x){ 
+   "Unboxes x if it is a tagged integer, otherwise returns x as-is. 
+   Critical for Vulkan handles which are stored as integers but used as raw values."
+   if(is_int(x)){ return to_int(x) } 
+   x 
+}
+
 ;; Function pointers
 mut _vkCreateInstance = 0
 mut _vkDestroyInstance = 0
@@ -372,315 +380,315 @@ fn vk_init(){
 ;; Wrapper functions
 fn create_instance(pCreateInfo, pAllocator, pInstance){
    "Vulkan wrapper: create_instance."
-   _vkCreateInstance( pCreateInfo, pAllocator, pInstance)
+   call3(_vkCreateInstance, _u(pCreateInfo), _u(pAllocator), _u(pInstance))
 }
 fn destroy_instance(instance, pAllocator){
    "Vulkan wrapper: destroy_instance."
-   _vkDestroyInstance( instance, pAllocator)
+   call2(_vkDestroyInstance, _u(instance), _u(pAllocator))
 }
 fn enumerate_physical_devices(instance, pCount, pDevices){
    "Vulkan wrapper: enumerate_physical_devices."
-   _vkEnumeratePhysicalDevices( instance, pCount, pDevices)
+   call3(_vkEnumeratePhysicalDevices, _u(instance), _u(pCount), _u(pDevices))
 }
 fn get_physical_device_properties(device, pProperties){
    "Vulkan wrapper: get_physical_device_properties."
-   _vkGetPhysicalDeviceProperties( device, pProperties)
+   call2(_vkGetPhysicalDeviceProperties, _u(device), _u(pProperties))
 }
 fn get_physical_device_memory_properties(device, pProperties){
    "Vulkan wrapper: get_physical_device_memory_properties."
-   _vkGetPhysicalDeviceMemoryProperties( device, pProperties)
+   call2(_vkGetPhysicalDeviceMemoryProperties, _u(device), _u(pProperties))
 }
 fn get_physical_device_queue_family_properties(device, pCount, pProperties){
    "Vulkan wrapper: get_physical_device_queue_family_properties."
-   _vkGetPhysicalDeviceQueueFamilyProperties( device, pCount, pProperties)
+   call3(_vkGetPhysicalDeviceQueueFamilyProperties, _u(device), _u(pCount), _u(pProperties))
 }
 fn create_device(pd, pCreateInfo, pAllocator, pDevice){
    "Vulkan wrapper: create_device."
-   _vkCreateDevice( pd, pCreateInfo, pAllocator, pDevice)
+   call4(_vkCreateDevice, _u(pd), _u(pCreateInfo), _u(pAllocator), _u(pDevice))
 }
 fn destroy_device(device, pAllocator){
    "Vulkan wrapper: destroy_device."
-   _vkDestroyDevice( device, pAllocator)
+   call2(_vkDestroyDevice, _u(device), _u(pAllocator))
 }
 fn get_device_queue(device, family, idx, pQueue){
    "Vulkan wrapper: get_device_queue."
-   _vkGetDeviceQueue( device, family, idx, pQueue)
+   call4(_vkGetDeviceQueue, _u(device), _u(family), _u(idx), _u(pQueue))
 }
 
 fn create_xlib_surface_khr(instance, pCreateInfo, pAllocator, pSurface){
    "Vulkan wrapper: create_xlib_surface_khr."
-   _vkCreateXlibSurfaceKHR( instance, pCreateInfo, pAllocator, pSurface)
+   call4(_vkCreateXlibSurfaceKHR, _u(instance), _u(pCreateInfo), _u(pAllocator), _u(pSurface))
 }
 fn destroy_surface_khr(instance, surface, pAllocator){
    "Vulkan wrapper: destroy_surface_khr."
-   _vkDestroySurfaceKHR( instance, surface, pAllocator)
+   call3(_vkDestroySurfaceKHR, _u(instance), _u(surface), _u(pAllocator))
 }
 fn get_physical_device_surface_support_khr(pd, family, surface, pSupported){
    "Vulkan wrapper: get_physical_device_surface_support_khr."
-   _vkGetPhysicalDeviceSurfaceSupportKHR( pd, family, surface, pSupported)
+   call4(_vkGetPhysicalDeviceSurfaceSupportKHR, _u(pd), _u(family), _u(surface), _u(pSupported))
 }
 fn get_physical_device_surface_formats_khr(pd, surface, pCount, pFormats){
    "Vulkan wrapper: get_physical_device_surface_formats_khr."
-   _vkGetPhysicalDeviceSurfaceFormatsKHR( pd, surface, pCount, pFormats)
+   call4(_vkGetPhysicalDeviceSurfaceFormatsKHR, _u(pd), _u(surface), _u(pCount), _u(pFormats))
 }
 fn get_physical_device_surface_capabilities_khr(pd, surface, pCaps){
    "Vulkan wrapper: get_physical_device_surface_capabilities_khr."
-   _vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pd, surface, pCaps)
+   call3(_vkGetPhysicalDeviceSurfaceCapabilitiesKHR, _u(pd), _u(surface), _u(pCaps))
 }
 fn get_physical_device_surface_present_modes_khr(pd, surface, pCount, pModes){
    "Vulkan wrapper: get_physical_device_surface_present_modes_khr."
-   _vkGetPhysicalDeviceSurfacePresentModesKHR( pd, surface, pCount, pModes)
+   call4(_vkGetPhysicalDeviceSurfacePresentModesKHR, _u(pd), _u(surface), _u(pCount), _u(pModes))
 }
 
 fn create_swapchain_khr(device, pCreateInfo, pAllocator, pSwapchain){
    "Vulkan wrapper: create_swapchain_khr."
-   _vkCreateSwapchainKHR( device, pCreateInfo, pAllocator, pSwapchain)
+   call4(_vkCreateSwapchainKHR, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pSwapchain))
 }
 fn destroy_swapchain_khr(device, swapchain, pAllocator){
    "Vulkan wrapper: destroy_swapchain_khr."
-   _vkDestroySwapchainKHR( device, swapchain, pAllocator)
+   call3(_vkDestroySwapchainKHR, _u(device), _u(swapchain), _u(pAllocator))
 }
 fn get_swapchain_images_khr(device, swapchain, pCount, pImages){
    "Vulkan wrapper: get_swapchain_images_khr."
-   _vkGetSwapchainImagesKHR( device, swapchain, pCount, pImages)
+   call4(_vkGetSwapchainImagesKHR, _u(device), _u(swapchain), _u(pCount), _u(pImages))
 }
 fn acquire_next_image_khr(device, swapchain, timeout, semaphore, fence, pIndex){
    "Vulkan wrapper: acquire_next_image_khr."
-   _vkAcquireNextImageKHR( device, swapchain, timeout, semaphore, fence, pIndex)
+   call6(_vkAcquireNextImageKHR, _u(device), _u(swapchain), _u(timeout), _u(semaphore), _u(fence), _u(pIndex))
 }
 fn queue_present_khr(queue, pPresentInfo){
    "Vulkan wrapper: queue_present_khr."
-   _vkQueuePresentKHR( queue, pPresentInfo)
+   call2(_vkQueuePresentKHR, _u(queue), _u(pPresentInfo))
 }
 
 fn create_image(device, pCreateInfo, pAllocator, pImage){
    "Vulkan wrapper: create_image."
-   _vkCreateImage( device, pCreateInfo, pAllocator, pImage)
+   call4(_vkCreateImage, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pImage))
 }
 fn destroy_image(device, image, pAllocator){
    "Vulkan wrapper: destroy_image."
-   _vkDestroyImage( device, image, pAllocator)
+   call3(_vkDestroyImage, _u(device), _u(image), _u(pAllocator))
 }
 fn get_image_memory_requirements(device, image, pMemoryRequirements){
    "Vulkan wrapper: get_image_memory_requirements."
-   _vkGetImageMemoryRequirements( device, image, pMemoryRequirements)
+   call3(_vkGetImageMemoryRequirements, _u(device), _u(image), _u(pMemoryRequirements))
 }
 fn bind_image_memory(device, image, memory, memoryOffset){
    "Vulkan wrapper: bind_image_memory."
-   _vkBindImageMemory( device, image, memory, memoryOffset)
+   call4(_vkBindImageMemory, _u(device), _u(image), _u(memory), _u(memoryOffset))
 }
 fn create_image_view(device, pCreateInfo, pAllocator, pView){
    "Vulkan wrapper: create_image_view."
-   _vkCreateImageView( device, pCreateInfo, pAllocator, pView)
+   call4(_vkCreateImageView, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pView))
 }
 fn destroy_image_view(device, view, pAllocator){
    "Vulkan wrapper: destroy_image_view."
-   _vkDestroyImageView( device, view, pAllocator)
+   call3(_vkDestroyImageView, _u(device), _u(view), _u(pAllocator))
 }
 fn create_sampler(device, pCreateInfo, pAllocator, pSampler){
    "Vulkan wrapper: create_sampler."
-   _vkCreateSampler( device, pCreateInfo, pAllocator, pSampler)
+   call4(_vkCreateSampler, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pSampler))
 }
 fn destroy_sampler(device, sampler, pAllocator){
    "Vulkan wrapper: destroy_sampler."
-   _vkDestroySampler( device, sampler, pAllocator)
+   call3(_vkDestroySampler, _u(device), _u(sampler), _u(pAllocator))
 }
 fn create_shader_module(device, pCreateInfo, pAllocator, pModule){
    "Vulkan wrapper: create_shader_module."
-   _vkCreateShaderModule( device, pCreateInfo, pAllocator, pModule)
+   call4(_vkCreateShaderModule, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pModule))
 }
 fn destroy_shader_module(device, mod_obj, pAllocator){
    "Vulkan wrapper: destroy_shader_module."
-   _vkDestroyShaderModule( device, mod_obj, pAllocator)
+   call3(_vkDestroyShaderModule, _u(device), _u(mod_obj), _u(pAllocator))
 }
 fn create_pipeline_layout(device, pCreateInfo, pAllocator, pLayout){
    "Vulkan wrapper: create_pipeline_layout."
-   _vkCreatePipelineLayout( device, pCreateInfo, pAllocator, pLayout)
+   call4(_vkCreatePipelineLayout, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pLayout))
 }
 fn destroy_pipeline_layout(device, layout_obj, pAllocator){
    "Vulkan wrapper: destroy_pipeline_layout."
-   _vkDestroyPipelineLayout( device, layout_obj, pAllocator)
+   call3(_vkDestroyPipelineLayout, _u(device), _u(layout_obj), _u(pAllocator))
 }
 fn create_render_pass(device, pCreateInfo, pAllocator, pPass){
    "Vulkan wrapper: create_render_pass."
-   _vkCreateRenderPass( device, pCreateInfo, pAllocator, pPass)
+   call4(_vkCreateRenderPass, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pPass))
 }
 fn destroy_render_pass(device, pass, pAllocator){
    "Vulkan wrapper: destroy_render_pass."
-   _vkDestroyRenderPass( device, pass, pAllocator)
+   call3(_vkDestroyRenderPass, _u(device), _u(pass), _u(pAllocator))
 }
 fn create_graphics_pipelines(device, cache, n_count, pCreateInfos, pAllocator, pPipelines){
    "Vulkan wrapper: create_graphics_pipelines."
-   _vkCreateGraphicsPipelines( device, cache, n_count, pCreateInfos, pAllocator, pPipelines)
+   call6(_vkCreateGraphicsPipelines, _u(device), _u(cache), _u(n_count), _u(pCreateInfos), _u(pAllocator), _u(pPipelines))
 }
 fn destroy_pipeline(device, pipeline, pAllocator){
    "Vulkan wrapper: destroy_pipeline."
-   _vkDestroyPipeline( device, pipeline, pAllocator)
+   call3(_vkDestroyPipeline, _u(device), _u(pipeline), _u(pAllocator))
 }
 fn create_framebuffer(device, pCreateInfo, pAllocator, pFramebuffer){
    "Vulkan wrapper: create_framebuffer."
-   _vkCreateFramebuffer( device, pCreateInfo, pAllocator, pFramebuffer)
+   call4(_vkCreateFramebuffer, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pFramebuffer))
 }
 fn destroy_framebuffer(device, framebuffer, pAllocator){
    "Vulkan wrapper: destroy_framebuffer."
-   _vkDestroyFramebuffer( device, framebuffer, pAllocator)
+   call3(_vkDestroyFramebuffer, _u(device), _u(framebuffer), _u(pAllocator))
 }
 fn create_command_pool(device, pCreateInfo, pAllocator, pPool){
    "Vulkan wrapper: create_command_pool."
-   _vkCreateCommandPool( device, pCreateInfo, pAllocator, pPool)
+   call4(_vkCreateCommandPool, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pPool))
 }
 fn destroy_command_pool(device, pool, pAllocator){
    "Vulkan wrapper: destroy_command_pool."
-   _vkDestroyCommandPool( device, pool, pAllocator)
+   call3(_vkDestroyCommandPool, _u(device), _u(pool), _u(pAllocator))
 }
 fn allocate_command_buffers(device, pAllocateInfo, pBuffers){
    "Vulkan wrapper: allocate_command_buffers."
-   _vkAllocateCommandBuffers( device, pAllocateInfo, pBuffers)
+   call3(_vkAllocateCommandBuffers, _u(device), _u(pAllocateInfo), _u(pBuffers))
 }
 fn free_command_buffers(device, pool, n_count, pBuffers){
    "Vulkan wrapper: free_command_buffers."
-   _vkFreeCommandBuffers( device, pool, n_count, pBuffers)
+   call4(_vkFreeCommandBuffers, _u(device), _u(pool), _u(n_count), _u(pBuffers))
 }
 fn begin_command_buffer(buffer, pBeginInfo){
    "Vulkan wrapper: begin_command_buffer."
-   _vkBeginCommandBuffer( buffer, pBeginInfo)
+   call2(_vkBeginCommandBuffer, _u(buffer), _u(pBeginInfo))
 }
 fn end_command_buffer(buffer){
    "Vulkan wrapper: end_command_buffer."
-   _vkEndCommandBuffer( buffer)
+   call1(_vkEndCommandBuffer, _u(buffer))
 }
 fn queue_submit(queue, n_count, pSubmits, fence){
    "Vulkan wrapper: queue_submit."
-   _vkQueueSubmit( queue, n_count, pSubmits, fence)
+   call4(_vkQueueSubmit, _u(queue), _u(n_count), _u(pSubmits), _u(fence))
 }
 fn cmd_begin_render_pass(buffer, pBeginInfo, contents){
    "Vulkan wrapper: cmd_begin_render_pass."
-   _vkCmdBeginRenderPass( buffer, pBeginInfo, contents)
+   call3(_vkCmdBeginRenderPass, _u(buffer), _u(pBeginInfo), _u(contents))
 }
 fn cmd_end_render_pass(buffer){
    "Vulkan wrapper: cmd_end_render_pass."
-   _vkCmdEndRenderPass( buffer)
+   call1(_vkCmdEndRenderPass, _u(buffer))
 }
 fn cmd_bind_pipeline(buffer, bindPoint, pipeline){
    "Vulkan wrapper: cmd_bind_pipeline."
-   _vkCmdBindPipeline( buffer, bindPoint, pipeline)
+   call3(_vkCmdBindPipeline, _u(buffer), _u(bindPoint), _u(pipeline))
 }
 fn cmd_draw(buffer, vertexCount, instanceCount, firstVertex, firstInstance){
    "Vulkan wrapper: cmd_draw."
-   _vkCmdDraw( buffer, vertexCount, instanceCount, firstVertex, firstInstance)
+   call5(_vkCmdDraw, _u(buffer), _u(vertexCount), _u(instanceCount), _u(firstVertex), _u(firstInstance))
 }
 fn cmd_clear_attachments(buffer, n_count, pAttachments, rect_count, pRects){
    "Vulkan wrapper: cmd_clear_attachments."
-   _vkCmdClearAttachments(buffer, n_count, pAttachments, rect_count, pRects)
+   call5(_vkCmdClearAttachments, _u(buffer), _u(n_count), _u(pAttachments), _u(rect_count), _u(pRects))
 }
 fn cmd_set_viewport(buffer, first, count, pViewports){
    "Vulkan wrapper: cmd_set_viewport."
-   _vkCmdSetViewport(buffer, first, count, pViewports)
+   call4(_vkCmdSetViewport, _u(buffer), _u(first), _u(count), _u(pViewports))
 }
 fn cmd_set_scissor(buffer, first, count, pScissors){
    "Vulkan wrapper: cmd_set_scissor."
-   _vkCmdSetScissor(buffer, first, count, pScissors)
+   call4(_vkCmdSetScissor, _u(buffer), _u(first), _u(count), _u(pScissors))
 }
 fn cmd_push_constants(buffer, pipe_layout, stages, offset, size, pValues){
    "Vulkan wrapper: cmd_push_constants."
-   _vkCmdPushConstants(buffer, pipe_layout, stages, offset, size, pValues)
+   call6(_vkCmdPushConstants, _u(buffer), _u(pipe_layout), _u(stages), _u(offset), _u(size), _u(pValues))
 }
 fn create_semaphore(device, pCreateInfo, pAllocator, pSemaphore){
    "Vulkan wrapper: create_semaphore."
-   _vkCreateSemaphore( device, pCreateInfo, pAllocator, pSemaphore)
+   call4(_vkCreateSemaphore, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pSemaphore))
 }
 fn destroy_semaphore(device, semaphore, pAllocator){
    "Vulkan wrapper: destroy_semaphore."
-   _vkDestroySemaphore( device, semaphore, pAllocator)
+   call3(_vkDestroySemaphore, _u(device), _u(semaphore), _u(pAllocator))
 }
 fn create_fence(device, pCreateInfo, pAllocator, pFence){
    "Vulkan wrapper: create_fence."
-   _vkCreateFence( device, pCreateInfo, pAllocator, pFence)
+   call4(_vkCreateFence, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pFence))
 }
 fn destroy_fence(device, fence, pAllocator){
    "Vulkan wrapper: destroy_fence."
-   _vkDestroyFence( device, fence, pAllocator)
+   call3(_vkDestroyFence, _u(device), _u(fence), _u(pAllocator))
 }
 fn wait_for_fences(device, n_count, pFences, waitAll, timeout){
    "Vulkan wrapper: wait_for_fences."
-   _vkWaitForFences( device, n_count, pFences, waitAll, timeout)
+   call5(_vkWaitForFences, _u(device), _u(n_count), _u(pFences), _u(waitAll), _u(timeout))
 }
 fn reset_fences(device, n_count, pFences){
    "Vulkan wrapper: reset_fences."
-   _vkResetFences( device, n_count, pFences)
+   call3(_vkResetFences, _u(device), _u(n_count), _u(pFences))
 }
 fn device_wait_idle(device){
    "Vulkan wrapper: device_wait_idle."
-   _vkDeviceWaitIdle(device)
+   call1(_vkDeviceWaitIdle, _u(device))
 }
 
 ;; New Wrappers
 fn create_buffer(device, pCreateInfo, pAllocator, pBuffer){
    "Vulkan wrapper: create_buffer."
-   _vkCreateBuffer( device, pCreateInfo, pAllocator, pBuffer)
+   call4(_vkCreateBuffer, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pBuffer))
 }
 fn destroy_buffer(device, buffer, pAllocator){
    "Vulkan wrapper: destroy_buffer."
-   _vkDestroyBuffer( device, buffer, pAllocator)
+   call3(_vkDestroyBuffer, _u(device), _u(buffer), _u(pAllocator))
 }
 fn get_buffer_memory_requirements(device, buffer, pMemoryRequirements){
    "Vulkan wrapper: get_buffer_memory_requirements."
-   _vkGetBufferMemoryRequirements( device, buffer, pMemoryRequirements)
+   call3(_vkGetBufferMemoryRequirements, _u(device), _u(buffer), _u(pMemoryRequirements))
 }
 fn allocate_memory(device, pAllocateInfo, pAllocator, pMemory){
    "Vulkan wrapper: allocate_memory."
-   _vkAllocateMemory( device, pAllocateInfo, pAllocator, pMemory)
+   call4(_vkAllocateMemory, _u(device), _u(pAllocateInfo), _u(pAllocator), _u(pMemory))
 }
 fn free_memory(device, memory, pAllocator){
    "Vulkan wrapper: free_memory."
-   _vkFreeMemory( device, memory, pAllocator)
+   call3(_vkFreeMemory, _u(device), _u(memory), _u(pAllocator))
 }
 fn bind_buffer_memory(device, buffer, memory, memoryOffset){
    "Vulkan wrapper: bind_buffer_memory."
-   _vkBindBufferMemory( device, buffer, memory, memoryOffset)
+   call4(_vkBindBufferMemory, _u(device), _u(buffer), _u(memory), _u(memoryOffset))
 }
 fn map_memory(device, memory, offset, size, flags, ppData){
    "Vulkan wrapper: map_memory."
-   _vkMapMemory( device, memory, offset, size, flags, ppData)
+   call6(_vkMapMemory, _u(device), _u(memory), _u(offset), _u(size), _u(flags), _u(ppData))
 }
 fn unmap_memory(device, memory){
    "Vulkan wrapper: unmap_memory."
-   _vkUnmapMemory( device, memory)
+   call2(_vkUnmapMemory, _u(device), _u(memory))
 }
 fn cmd_bind_vertex_buffers(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets){
    "Vulkan wrapper: cmd_bind_vertex_buffers."
-   _vkCmdBindVertexBuffers( commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets)
+   call5(_vkCmdBindVertexBuffers, _u(commandBuffer), _u(firstBinding), _u(bindingCount), _u(pBuffers), _u(pOffsets))
 }
 
 fn create_descriptor_set_layout(device, pCreateInfo, pAllocator, pSetLayout){
    "Vulkan wrapper: create_descriptor_set_layout."
-   _vkCreateDescriptorSetLayout( device, pCreateInfo, pAllocator, pSetLayout)
+   call4(_vkCreateDescriptorSetLayout, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pSetLayout))
 }
 fn destroy_descriptor_set_layout(device, setLayout, pAllocator){
    "Vulkan wrapper: destroy_descriptor_set_layout."
-   _vkDestroyDescriptorSetLayout( device, setLayout, pAllocator)
+   call3(_vkDestroyDescriptorSetLayout, _u(device), _u(setLayout), _u(pAllocator))
 }
 fn create_descriptor_pool(device, pCreateInfo, pAllocator, pDescriptorPool){
    "Vulkan wrapper: create_descriptor_pool."
-   _vkCreateDescriptorPool( device, pCreateInfo, pAllocator, pDescriptorPool)
+   call4(_vkCreateDescriptorPool, _u(device), _u(pCreateInfo), _u(pAllocator), _u(pDescriptorPool))
 }
 fn destroy_descriptor_pool(device, descriptorPool, pAllocator){
    "Vulkan wrapper: destroy_descriptor_pool."
-   _vkDestroyDescriptorPool( device, descriptorPool, pAllocator)
+   call3(_vkDestroyDescriptorPool, _u(device), _u(descriptorPool), _u(pAllocator))
 }
 fn allocate_descriptor_sets(device, pAllocateInfo, pDescriptorSets){
    "Vulkan wrapper: allocate_descriptor_sets."
-   _vkAllocateDescriptorSets( device, pAllocateInfo, pDescriptorSets)
+   call3(_vkAllocateDescriptorSets, _u(device), _u(pAllocateInfo), _u(pDescriptorSets))
 }
 fn free_descriptor_sets(device, descriptorPool, descriptorSetCount, pDescriptorSets){
    "Vulkan wrapper: free_descriptor_sets."
-   _vkFreeDescriptorSets( device, descriptorPool, descriptorSetCount, pDescriptorSets)
+   call4(_vkFreeDescriptorSets, _u(device), _u(descriptorPool), _u(descriptorSetCount), _u(pDescriptorSets))
 }
 fn update_descriptor_sets(device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies){
    "Vulkan wrapper: update_descriptor_sets."
-   _vkUpdateDescriptorSets( device, descriptorWriteCount, pDescriptorWrites, descriptorCopyCount, pDescriptorCopies)
+   call5(_vkUpdateDescriptorSets, _u(device), _u(descriptorWriteCount), _u(pDescriptorWrites), _u(descriptorCopyCount), _u(pDescriptorCopies))
 }
 fn cmd_bind_descriptor_sets(commandBuffer, pipelineBindPoint, layout_h, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets){
    "Vulkan wrapper: cmd_bind_descriptor_sets."
-   _vkCmdBindDescriptorSets( commandBuffer, pipelineBindPoint, layout_h, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets)
+   call8(_vkCmdBindDescriptorSets, _u(commandBuffer), _u(pipelineBindPoint), _u(layout_h), _u(firstSet), _u(descriptorSetCount), _u(pDescriptorSets), _u(dynamicOffsetCount), _u(pDynamicOffsets))
 }

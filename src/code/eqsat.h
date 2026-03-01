@@ -58,6 +58,7 @@ typedef struct egraph {
   eclass *classes;
   size_t class_count;
   size_t class_capacity;
+  size_t node_count;
   eclass_id *hash_table;
   size_t hash_table_size;
   uint64_t rewrites_applied;

@@ -124,8 +124,7 @@ static void add_module_from_path(const char *root, const char *full_path) {
   char *lib_ptr = strstr(name, ".lib.");
   if (lib_ptr) {
     size_t rest_len = strlen(lib_ptr + 5);
-    memmove(lib_ptr + 1, lib_ptr + 5,
-            rest_len + 1);
+    memmove(lib_ptr + 1, lib_ptr + 5, rest_len + 1);
   } else {
     size_t len = strlen(name);
     if (len > 4 && strcmp(name + len - 4, ".lib") == 0) {
@@ -466,11 +465,14 @@ static char *read_declared_module_name(const char *path) {
       while (*p && ny_mod_ident_char(*p))
         p++;
       size_t len = (size_t)(p - start);
-      char *name = ny_loader_xmalloc(len + 1);
-      memcpy(name, start, len);
-      name[len] = '\0';
-      free(txt);
-      return name;
+      if (len > 0) {
+        char *name = ny_loader_xmalloc(len + 1);
+        memcpy(name, start, len);
+        name[len] = '\0';
+        free(txt);
+        return name;
+      }
+      break;
     }
     break;
   }

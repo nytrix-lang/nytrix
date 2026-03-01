@@ -168,9 +168,10 @@ def resolve_build_dir():
         return env_dir, ""
 
     default_dir = Path("build").resolve()
-    blocked = first_unwritable_path(default_dir)
-    if blocked is None and ensure_dir_writable(default_dir):
+    if ensure_dir_writable(default_dir):
         return default_dir, ""
+
+    blocked = first_unwritable_path(default_dir)
     if blocked is None:
         blocked = default_dir
 
