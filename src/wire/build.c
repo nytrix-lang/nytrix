@@ -803,8 +803,8 @@ bool ny_builder_link(const char *cc, const char *obj_path,
                      const char *const link_libs[], size_t link_lib_count,
                      const char *output_path, bool link_strip, bool debug,
                      bool profile) {
-  const size_t max_args = 128;
-  const char *argv[max_args];
+#define NY_MAX_LINK_ARGS 128
+  const char *argv[NY_MAX_LINK_ARGS];
   size_t idx = 0;
 #if defined(__arm__) && !defined(__aarch64__)
   const char *arm_float_abi_flag = ny_builder_arm_float_abi_flag();
@@ -826,12 +826,12 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       argv[idx++] = runtime_obj;
     if (runtime_ast_obj)
       argv[idx++] = runtime_ast_obj;
-    for (size_t i = 0; i < extra_count && idx + 8 < max_args; ++i) {
+    for (size_t i = 0; i < extra_count && idx + 8 < NY_MAX_LINK_ARGS; ++i) {
       argv[idx++] = extra_objs[i];
     }
     argv[idx++] = out_arg;
     argv[idx++] = "/link";
-    for (size_t i = 0; i < link_dir_count && idx + 2 < max_args; ++i) {
+    for (size_t i = 0; i < link_dir_count && idx + 2 < NY_MAX_LINK_ARGS; ++i) {
       const char *ld = link_dirs[i];
       if (!ld)
         continue;
@@ -851,7 +851,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
         argv[idx++] = ld;
       }
     }
-    for (size_t i = 0; i < link_lib_count && idx + 2 < max_args; ++i) {
+    for (size_t i = 0; i < link_lib_count && idx + 2 < NY_MAX_LINK_ARGS; ++i) {
       const char *lib = link_libs[i];
       if (!lib)
         continue;
@@ -917,7 +917,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     argv[idx++] = runtime_ast_obj;
   const char *shared_rt_path = NULL;
   for (size_t i = 0; i < extra_count; ++i) {
-    if (idx + 12 >= max_args)
+    if (idx + 12 >= NY_MAX_LINK_ARGS)
       break;
     argv[idx++] = extra_objs[i];
     if (!shared_rt_path) {
@@ -929,7 +929,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     }
   }
   for (size_t i = 0; i < link_dir_count; ++i) {
-    if (idx + 1 >= max_args)
+    if (idx + 1 >= NY_MAX_LINK_ARGS)
       break;
     argv[idx++] = link_dirs[i];
   }
@@ -1010,7 +1010,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   if (shared_buf)
     free(shared_buf);
   for (size_t i = 0; i < link_lib_count; ++i) {
-    if (idx + 1 >= max_args)
+    if (idx + 1 >= NY_MAX_LINK_ARGS)
       break;
     argv[idx++] = link_libs[i];
   }

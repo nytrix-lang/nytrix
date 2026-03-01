@@ -305,11 +305,20 @@ def main():
         if any(c in ("help", "-h", "--help") for c in args.commands):
             _print_help()
             return 0
-        bad = [c for c in args.commands if c not in valid]
-        if bad:
-            err("unknown command(s): " + ", ".join(bad))
-            _print_help()
-            return 1
+
+        valid_cmds = []
+        extra_args = list(unknown)
+        for c_cmd in args.commands:
+            if c_cmd in valid:
+                valid_cmds.append(c_cmd)
+            else:
+                extra_args.append(c_cmd)
+        
+        unknown = extra_args
+        args.commands = valid_cmds
+        
+        if not args.commands:
+            args.commands = ["all"]
 
         ensure_deps()
         cc, llvm, root = configure_toolchain()
@@ -433,11 +442,6 @@ def main():
         print()
         warn("interrupted")
         return 130
-
-def run(cmd):
-    res = subprocess.run(cmd)
-    if res.returncode != 0:
-        sys.exit(res.returncode)
 
 if __name__ == "__main__":
     import subprocess

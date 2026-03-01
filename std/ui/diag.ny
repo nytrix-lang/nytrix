@@ -12,7 +12,7 @@ use std.ui.backend as ui_backend
 use std.ui.gfx.vulkan *
 
 fn _yn(v){
-   "Auto-generated docstring: _yn."
+   "Internal helper to convert a boolean to 'yes' or 'no'."
    if(v){ return "yes" }
    "no"
 }

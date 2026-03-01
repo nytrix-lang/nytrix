@@ -181,5 +181,26 @@ if(comptime{__main()}){
     assert(set_contains(s2, 123), "contains int key")
     assert(!set_contains(s2, 124), "not contains int key")
 
+    def s_col = set(8)
+    set_add(s_col, 0)
+    set_add(s_col, 8)
+    set_add(s_col, 16)
+    assert(set_contains(s_col, 0), "collision 0")
+    assert(set_contains(s_col, 8), "collision 8")
+    assert(set_contains(s_col, 16), "collision 16")
+
+    def s_stress = set(8)
+    mut i = 0
+    while(i < 1000){
+        set_add(s_stress, i)
+        i += 1
+    }
+    i = 0
+    while(i < 1000){
+        assert(set_contains(s_stress, i), f"stress contains {i}")
+        i += 1
+    }
+    assert(!set_contains(s_stress, 1000), "stress not contains 1000")
+
     print("✓ std.core.set tests passed")
 }

@@ -418,9 +418,9 @@ if(comptime{__main()}){
     assert((z.decompress(z_bytes) == payload), "auto zlib decompress")
     assert((z.decompress(g_bytes) == payload), "auto gzip decompress")
 
-    def comp = z.compress(payload, 6)
-    assert(z.is_zlib(comp), "compress emits zlib stream")
-    assert((z.decompress(comp) == payload), "compress/decompress roundtrip")
+    def z_comp = z.compress(payload, 6)
+    assert(z.is_zlib(z_comp), "compress emits zlib stream")
+    assert((z.decompress(z_comp) == payload), "compress/decompress roundtrip")
 
     ;; Corrupt one byte in gzip trailer (CRC) and expect failure.
     store8(g_bytes, (load8(g_bytes, str_len(g_bytes) - 8) ^ 1), str_len(g_bytes) - 8)

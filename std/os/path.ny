@@ -163,12 +163,12 @@ fn normalize(p){
    mut parts = list(len(raw_parts))
    mut i = 0
    while(i < len(raw_parts)){
-      def comp = get(raw_parts, i, "")
-      if(str_len(comp) == 0 || comp == "."){
+      def p_comp = get(raw_parts, i, "")
+      if(str_len(p_comp) == 0 || p_comp == "."){
          i += 1
          continue
       }
-      if(comp == ".."){
+      if(p_comp == ".."){
          if(len(parts) > 0){
             def last = get(parts, len(parts) - 1, "")
             if(last != ".."){
@@ -177,11 +177,11 @@ fn normalize(p){
                continue
             }
          }
-         if(!abs){ parts = append(parts, comp) }
+         if(!abs){ parts = append(parts, p_comp) }
          i += 1
          continue
       }
-      parts = append(parts, comp)
+      parts = append(parts, p_comp)
       i += 1
    }
    mut out = ""

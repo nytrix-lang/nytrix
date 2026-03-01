@@ -4,6 +4,7 @@
 use std.core *
 use std.core.dict *
 use std.os.args *
+use std.os *
 use std.text.term *
 
 ;; Constants
@@ -50,6 +51,10 @@ mut y       = 0
 mut dir     = DIR_UP
 mut max_steps = 0
 mut step_count = 0
+
+if(env("CI") || env("NYTRIX_TEST_MODE") == "1"){
+   max_steps = 100
+}
 
 def av = args()
 mut ai = 0

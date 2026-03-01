@@ -273,7 +273,7 @@ class CustomHandler(SimpleHTTPRequestHandler):
         pass
 
 def run_web_gen(bundle_path, output_dir=None, serve=False, port=8000):
-    assets_dir = ROOT / "docs" / "assets"
+    assets_dir = ROOT / "etc" / "assets" / "website"
     template_path = assets_dir / "web.html"
     js_path = assets_dir / "web.js"
     css_path = assets_dir / "web.css"
