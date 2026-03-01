@@ -24,7 +24,7 @@ fn normalize_backend_name(name){
 }
 
 fn _slice_from(s, start){
-   "Auto-generated docstring: _slice_from."
+   "Internal helper to slice a string from start to end."
    def n = str_len(s)
    if(start <= 0){ return s }
    if(start >= n){ return "" }
@@ -40,7 +40,7 @@ fn _slice_from(s, start){
 }
 
 fn _strip_known_versions(src){
-   "Auto-generated docstring: _strip_known_versions."
+   "Removes common #version directives from a GLSL string."
    mut out = replace_all(src, "\r\n", "\n")
    out = replace_all(out, "#version 120\n", "")
    out = replace_all(out, "#version 330\n", "")
@@ -57,7 +57,7 @@ fn _vertex_to_vk450(src){
 }
 
 fn _fragment_to_vk450(src){
-   "Auto-generated docstring: _fragment_to_vk450."
+   "Heuristically transpiles a legacy GLSL fragment shader to Vulkan-GLSL 450."
    mut out = _strip_known_versions(src)
    if(str_contains(out, "gl_FragColor")){
       out = replace_all(out, "gl_FragColor", "fragColor")
@@ -73,7 +73,7 @@ fn _fragment_to_vk450(src){
 }
 
 fn _parse_marker(line, prefix){
-   "Auto-generated docstring: _parse_marker."
+   "Parses a shader stage marker (e.g. #vertex [backend])."
    def trimmed = strip(line)
    if(!startswith(trimmed, prefix)){ return 0 }
    mut tail = strip(str_replace(trimmed, prefix, ""))
@@ -82,7 +82,7 @@ fn _parse_marker(line, prefix){
 }
 
 fn parse_combined_shader(combined_src){
-   "Auto-generated docstring: parse_combined_shader."
+   "Parses a single file containing multiple shader stages into a stage dictionary."
    mut defs = dict(8)
    def lines = split(replace_all(combined_src, "\r\n", "\n"), "\n")
    mut target = ""
@@ -131,12 +131,12 @@ fn transpile_shader_defs(defs){
 }
 
 fn transpile_shader_source(combined_src){
-   "Auto-generated docstring: transpile_shader_source."
+   "Convenience wrapper to parse and transpile a combined shader string."
    transpile_shader_defs(parse_combined_shader(combined_src))
 }
 
 fn select_shader_defs(defs, backend=SHADER_BACKEND_VK450){
-   "Auto-generated docstring: select_shader_defs."
+   "Selects the appropriate shader variants for the specified backend."
    defs = transpile_shader_defs(defs)
    mut out = dict(8)
    out = dict_set(out, "backend", SHADER_BACKEND_VK450)
@@ -147,7 +147,7 @@ fn select_shader_defs(defs, backend=SHADER_BACKEND_VK450){
 }
 
 fn select_shader_source(combined_src, backend=SHADER_BACKEND_VK450){
-   "Auto-generated docstring: select_shader_source."
+   "Convenience wrapper to parse, transpile, and select shader sources."
    select_shader_defs(parse_combined_shader(combined_src), backend)
 }
 

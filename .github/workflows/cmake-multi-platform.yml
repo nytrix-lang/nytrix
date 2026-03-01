@@ -1,0 +1,105 @@
+name: CMake on multiple platforms
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [Release]
+        c_compiler: [clang, cl]
+        include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+        exclude:
+          - os: windows-latest
+            c_compiler: clang
+          - os: ubuntu-latest
+            c_compiler: cl
+          - os: macos-latest
+            c_compiler: cl
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: false
+
+    - name: Install Dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-dev libclang-dev libreadline-dev
+        # Ensure llvm-config is in PATH as 'llvm-config'
+        if ! command -v llvm-config &> /dev/null; then
+          # Find the latest llvm-config-XX
+          LATEST_LLVM=$(ls /usr/bin/llvm-config-* 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST_LLVM" ]; then
+            echo "Symlinking $LATEST_LLVM to /usr/bin/llvm-config"
+            sudo ln -s "$LATEST_LLVM" /usr/bin/llvm-config
+          else
+            echo "Could not find llvm-config!"
+            exit 1
+          fi
+        fi
+        echo "NYTRIX_LLVM_INCLUDE=$(llvm-config --includedir)" >> $GITHUB_ENV
+
+    - name: Install Dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install llvm readline
+        echo "PATH=$(brew --prefix llvm)/bin:$PATH" >> $GITHUB_ENV
+        echo "LDFLAGS=-L$(brew --prefix llvm)/lib -L$(brew --prefix readline)/lib" >> $GITHUB_ENV
+        echo "CPPFLAGS=-I$(brew --prefix llvm)/include -I$(brew --prefix readline)/include" >> $GITHUB_ENV
+        echo "NYTRIX_LLVM_INCLUDE=$(brew --prefix llvm)/include" >> $GITHUB_ENV
+        # Add to CMAKE_PREFIX_PATH for find_package/find_path
+        echo "CMAKE_PREFIX_PATH=$(brew --prefix llvm);$(brew --prefix readline)" >> $GITHUB_ENV
+
+    - name: Install Dependencies (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install llvm -y
+        # Chocolatey installs to C:\Program Files\LLVM
+        $env:Path += ";C:\Program Files\LLVM\bin"
+        echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        # Set environment variables for CMake to find headers if llvm-config fails or isn't used
+        echo "NYTRIX_LLVM_HEADERS=C:\Program Files\LLVM\include" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "LLVM_ROOT=C:\Program Files\LLVM" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Disable readline on Windows (not usually available/used the same way)
+        echo "NYTRIX_NO_READLINE=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: Test
+      run: python3 -B ./make test
+

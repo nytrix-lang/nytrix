@@ -11,7 +11,8 @@ module std.os (
    OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM,
    GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE,
    ACCEL_TARGET, ACCEL_OBJECT,
-   PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK
+   PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK,
+   set_clipboard_text, get_clipboard_text
 )
 use std.core *
 use std.core.error *
@@ -19,8 +20,19 @@ use std.text *
 use std.os.sys *
 use std.text.io *
 use std.os.path as ospath
+use std.os.clipboard as cb
 
 def OS = __os_name()
+
+fn set_clipboard_text(text){
+   "Sets the system clipboard text."
+   cb.set_text(text)
+}
+
+fn get_clipboard_text(){
+   "Retrieves text from the system clipboard."
+   cb.get_text()
+}
 def ARCH = __arch_name()
 def IS_LINUX   = eq(OS, "linux")
 def IS_MACOS   = eq(OS, "macos")

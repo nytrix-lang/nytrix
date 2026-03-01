@@ -1,6 +1,7 @@
 #include "base/common.h"
 #include "base/util.h"
 #include "priv.h"
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -396,6 +397,8 @@ token_t parser_peek(parser_t *p) {
 
 char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
                              size_t *out_len) {
+  if (len == SIZE_MAX)
+    return NULL;
   const char *end = cur + len;
   char *out = arena_alloc(arena, len + 1);
   size_t oi = 0;
@@ -422,11 +425,13 @@ char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
         out[oi++] = '"';
         break;
       case 'x': {
-        if (cur + 2 < end) {
+        if (cur + 2 < end && isxdigit((unsigned char)cur[1]) &&
+            isxdigit((unsigned char)cur[2])) {
           char hex[3] = {cur[1], cur[2], 0};
           out[oi++] = (char)strtol(hex, NULL, 16);
           cur += 2;
         } else {
+          out[oi++] = '\\';
           out[oi++] = 'x';
         }
         break;
@@ -471,6 +476,11 @@ const char *parser_decode_string(parser_t *p, token_t tok, size_t *out_len) {
   bool triple = len >= 6 && lex[0] == lex[1] && lex[1] == lex[2];
   size_t head = triple ? 3 : 1;
   size_t tail = triple ? 3 : 1;
+  if (len < head + tail) {
+    if (out_len)
+      *out_len = 0;
+    return "";
+  }
   const char *cur = lex + head;
   size_t inner_len = len - head - tail;
   return parser_unescape_string(p->arena, cur, inner_len, out_len);

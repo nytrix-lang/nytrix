@@ -5,6 +5,7 @@ use std.core *
 use std.math.random *
 use std.os.args *
 use std.os.time *
+use std.os *
 use std.text *
 use std.text.bytes *
 use std.text.term *
@@ -38,6 +39,10 @@ def TOTAL = LW * H
 mut G     = bytes(TOTAL)
 mut G2    = bytes(TOTAL)
 mut max_steps = 0
+
+if(env("CI") || env("NYTRIX_TEST_MODE") == "1"){
+   max_steps = 100
+}
 
 def av = args()
 mut ai = 0

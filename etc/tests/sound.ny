@@ -3,6 +3,12 @@ use std.text.io *
 use std.audio *
 use std.audio.source.synth *
 use std.os.time *
+use std.os *
+
+if(env("CI") || env("NYTRIX_TEST_MODE") == "1"){
+   print("Skipping sound test in CI/Test Mode")
+   __exit(0)
+}
 
 print("Sound Example starting...")
 if(!init()) {

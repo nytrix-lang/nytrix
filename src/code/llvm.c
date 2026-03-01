@@ -412,7 +412,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path) {
       target, triple, cpu, features ? features : "", LLVMCodeGenLevelDefault,
       LLVMRelocPIC, host_code_model());
   if (!tm) {
-    NY_LOG_ERR("Failed to create target machine\n");
+    NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
       free(triple);
     else
@@ -499,7 +499,7 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
       target, triple, cpu, features ? features : "", LLVMCodeGenLevelDefault,
       LLVMRelocPIC, host_code_model());
   if (!tm) {
-    NY_LOG_ERR("Failed to create target machine\n");
+    NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
       free(triple);
     else

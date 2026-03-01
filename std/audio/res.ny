@@ -18,6 +18,7 @@ use std.audio.formats.ogg as ogg
 use std.audio.formats.opus as opus
 use std.audio.formats.acc as acc
 use std.audio.formats.flac as flac
+use std.audio.formats.mp3 as mp3
 use std.audio.source *
 
 mut _cache = dict(32)
@@ -78,6 +79,9 @@ fn load(filepath){
    }
    elif(ext == ".acc" || ext == ".aac"){
       sound = acc.decode(data)
+   }
+   elif(ext == ".mp3"){
+      sound = mp3.decode(data)
    }
    elif(ext == ".flac"){
       def img = flac.decode(data)
@@ -161,4 +165,44 @@ fn get_sound_info(sound){
    info = dict_set(info, "duration", duration)
    info = dict_set(info, "frames", frames)
    info
+}
+if(comptime{__main()}){
+   use std.core.error *
+   
+   print("Testing std.audio.res audio loading...")
+   
+   fn verify_audio(filepath, name){
+      def s = load(filepath)
+      if(s == 0){
+         print("  FAILED: Could not load " + filepath)
+         return false
+      }
+      
+      def info = get_sound_info(s)
+      def rate = dict_get(info, "rate")
+      def chan = dict_get(info, "channels")
+      
+      if(rate <= 0 || chan <= 0){
+         print("  FAILED: " + name + " invalid info: " + to_str(rate) + "Hz, " + to_str(chan) + "ch")
+         return false
+      }
+      
+      print("  SUCCESS: " + name + " (" + to_str(rate) + "Hz, " + to_str(chan) + "ch)")
+      true
+   }
+
+   init()
+   mut ok = true
+   ok = ok && verify_audio("etc/assets/audio/test_sine.wav", "WAV")
+   ok = ok && verify_audio("etc/assets/audio/test_sine.ogg", "OGG")
+   ok = ok && verify_audio("etc/assets/audio/test_sine.flac", "FLAC")
+   ok = ok && verify_audio("etc/assets/audio/test_sine.mp3", "MP3")
+
+   if(ok){
+      print("✓ std.audio.res all audio format tests passed")
+   } else {
+      print("✗ SOME std.audio.res TESTS FAILED")
+      __exit(1)
+   }
+   shutdown()
 }

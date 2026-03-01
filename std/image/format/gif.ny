@@ -1,7 +1,7 @@
 ;; Keywords: image gif lzw
 ;; References:
-;; - https://www.w3.org/Graphics/GIF/spec-gif89a.txt
 ;; - https://en.wikipedia.org/wiki/GIF
+;; - https://www.w3.org/Graphics/GIF/spec-gif89a.txt
 
 module std.image.format.gif (
    decode, encode
@@ -84,18 +84,18 @@ fn _gif_lzw_decode(comp, min_code_size, out_len){
    mut old_code = -1
    mut out_p = 0
    def out = init_str(malloc(out_len + 1), out_len)
-   fn _read_code(comp, bit_pos, code_size){
+   fn _read_code(src, b_pos, c_size){
       "Internal helper for `read_code`."
-      def bit_n = len(comp) * 8
-      if(bit_pos + code_size > bit_n){ return [-1, bit_pos] }
+      def bit_n = len(src) * 8
+      if(b_pos + c_size > bit_n){ return [-1, b_pos] }
       mut v = 0
       mut i = 0
-      while(i < code_size){
-         def b = load8(comp, (bit_pos + i) / 8)
-         v = v | (((b >> ((bit_pos + i) & 7)) & 1) << i)
+      while(i < c_size){
+         def b = load8(src, (b_pos + i) / 8)
+         v = v | (((b >> ((b_pos + i) & 7)) & 1) << i)
          i += 1
       }
-      [v, bit_pos + code_size]
+      [v, b_pos + c_size]
    }
    while(out_p < out_len){
       def rr = _read_code(comp, bit_pos, code_size)
@@ -270,9 +270,9 @@ fn decode(data){
       p += 1
       def sb = _gif_read_subblocks(data, p)
       if(!sb){ return 0 }
-      def comp = dict_get(sb, "blob")
+      def blob_comp = dict_get(sb, "blob")
       p = dict_get(sb, "next")
-      def idx_raw = _gif_lzw_decode(comp, min_code_size, iw * ih)
+      def idx_raw = _gif_lzw_decode(blob_comp, min_code_size, iw * ih)
       if(!idx_raw){ return 0 }
       def idx = interlace ? _gif_deinterlace(idx_raw, iw, ih) : idx_raw
       if(!idx){ return 0 }
@@ -338,16 +338,16 @@ fn _gif_lzw_pack_uncompressed(idx){
    def out = list(len(idx) * 2)
    mut acc = 0
    mut bits = 0
-   fn _put(out, acc, bits, code){
+   fn _put(p_out, p_acc, p_bits, code){
       "Internal helper for `put`."
-      mut a = acc
-      mut b = bits
+      mut a = p_acc
+      mut b = p_bits
       mut i = 0
       while(i < 9){
          a = a | (((code >> i) & 1) << b)
          b += 1
          if(b == 8){
-            append(out, a & 255)
+            append(p_out, a & 255)
             a = 0
             b = 0
          }

@@ -69,11 +69,11 @@ fn _decode_dib(dib){
    def h = h_all / 2
    def planes = _u16le(dib, 12)
    def bpp = _u16le(dib, 14)
-   def comp = _u32le(dib, 16)
+   def ico_compression = _u32le(dib, 16)
    def clr_used = _u32le(dib, 32)
    if(planes != 1){ return 0 }
    if(bpp != 1 && bpp != 4 && bpp != 8 && bpp != 24 && bpp != 32){ return 0 }
-   if(comp != 0){ return 0 }
+   if(ico_compression != 0){ return 0 }
    mut pal_n = 0
    if(bpp <= 8){
       pal_n = clr_used
