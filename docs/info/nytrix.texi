@@ -1,0 +1,223 @@
+\input texinfo
+@settitle Nytrix Manual
+@setfilename nytrix.info
+
+@copying
+Nytrix - minimalist systems programming language.
+Copyright @copyright{} 2026 Nytrix Developers.
+GNU General Public License v3.0
+@end copying
+
+@dircategory Programming
+@direntry
+* Nytrix: (nytrix).           Minimalist systems programming language.
+@end direntry
+
+@titlepage
+@title Nytrix Manual
+@author Nytrix Developers
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@node Top
+@top nytrix - minimalist systems programming language
+
+Nytrix is a minimalist systems language with a small C core and a
+self-hosting standard library.
+
+@menu
+* Introduction::        Overview and execution model.
+* Language Reference::  Syntax, values, declarations, and control flow.
+* Modules and Imports:: Organizing code with explicit @code{use}.
+* Extensible Syntax::   Registry-based macros, attributes, and rewrites.
+* Builtins::            Compile-time and low-level builtins.
+* Runtime::             Tagged-value runtime model.
+* Indices::             Index of commands and concepts.
+@end menu
+
+@node Introduction
+@chapter Introduction
+
+Nytrix keeps language and runtime surface small, with most features living in
+@file{std/}. There is no implicit prelude; symbols are brought into scope
+explicitly via @code{use}.
+
+Execution modes are provided by @command{ny}:
+
+@itemize @bullet
+@item @code{ny file.ny}: parse/compile in emit-only mode (default).
+@item @code{ny -run file.ny}: compile and JIT-run @code{main()}.
+@item @code{ny -c '...'}: run inline Nytrix code.
+@end itemize
+
+@node Language Reference
+@chapter Language Reference
+
+@section Lexical Structure
+@table @asis
+@item Identifiers
+@code{[A-Za-z_][A-Za-z0-9_]*}
+@item Comments
+Single-line comments start with @code{;}. A common style is @code{;;}.
+@item Strings
+Single, double, and triple-quoted strings are supported. f-strings are also supported.
+@end table
+
+@section Values and Literals
+@itemize @bullet
+@item @strong{Integers}: decimal, hex (@code{0x}), octal (@code{0o}), binary (@code{0b}).
+@item @strong{Numeric suffixes}: @code{i8/i16/i32/i64}, @code{u8/u16/u32/u64}, @code{f32/f64/f128}.
+@item @strong{Booleans}: @code{true}, @code{false}.
+@item @strong{Nil}: @code{nil}.
+@item @strong{Containers}: list literals @code{[1, 2, 3]} and dict literals @code{@{"k": v@}}.
+@item @strong{Sets/Tuples}: provided by std constructors (for example @code{set(...)} and @code{tuple([...])}).
+@end itemize
+
+@section Declarations and Types
+
+@table @code
+@item def
+Immutable binding.
+@item mut
+Mutable binding.
+@item undef
+Clears a binding.
+@end table
+
+Optional type annotations are supported on variables, parameters, and returns.
+Nullable types use @code{?T}; pointer types use @code{*T}.
+
+@example
+def x: int = 1
+mut y: ?int = nil
+
+fn add(a: int, b: int): int @{
+   return a + b
+@}
+@end example
+
+@section Functions
+
+@example
+fn adder(x)@{
+   lambda(y)@{ x + y @}
+@}
+
+fn log(...args)@{
+   return args
+@}
+@end example
+
+External declarations support symbol aliases:
+
+@example
+extern fn c_getpid(): i32 as "getpid"
+@end example
+
+@section Control Flow
+@table @asis
+@item Conditionals
+@code{if} / @code{elif} / @code{else}. Paren and no-paren condition forms are used in tests.
+@item Loops
+@code{while} and @code{for x in iter}.
+@item Pattern matching
+@code{match} supports guarded arms; @code{case} supports fast multi-label dispatch.
+@item Errors
+@code{try @{ ... @} catch err @{ ... @}}.
+@item Scope exit
+@code{defer @{ ... @}}.
+@end table
+
+Compile-time blocks use @code{comptime @{ ... @}}.
+
+@section Operators
+@itemize @bullet
+@item Arithmetic: @code{+ - * / %}
+@item Comparison: @code{== != < <= > >=}
+@item Logical: @code{&& || !}
+@item Bitwise/integer: @code{& | ^ << >>}
+@item Ternary: @code{cond ? a : b}
+@end itemize
+
+@code{?} is used for nullable types and ternary expressions; it is not an error-propagation operator.
+
+@node Modules and Imports
+@chapter Modules and Imports
+
+Module declarations commonly use explicit export lists or star export:
+
+@example
+module pkg.name (sym1, sym2)
+module local *
+@end example
+
+Import forms used across std and runtime tests:
+
+@example
+use std.core
+use std.core *
+use std.str as str
+use std.core (len, append as push)
+use "./local.ny" (helper_add as my_add)
+@end example
+
+Standard library layout follows package roots such as
+@file{std/core/lib/*.ny}, @file{std/core/test/*.ny}, and @file{std/core/mod.ny}.
+
+@node Extensible Syntax
+@chapter Extensible Syntax
+
+Nytrix exposes syntax extension through @code{std.core.syntax}.
+The API is registry-based and deterministic.
+
+@example
+use std.core.syntax as syntax
+
+mut reg = syntax.new_registry()
+reg = syntax.register_macro_in(reg, "double", handler)
+reg = syntax.register_attribute_in(reg, "mark", attr_handler)
+@end example
+
+Core surface includes:
+
+@itemize @bullet
+@item Registries: @code{new_registry}, @code{registry}, @code{reset_registry}
+@item Macros: @code{register_macro}, @code{expand_macro}, @code{expand_form}, @code{expand_form_deep}
+@item Attributes: @code{register_attribute}, @code{apply_attribute}
+@item Rewrites: @code{new_rewriter}, @code{register_rewrite}, @code{rewrite_fixpoint}
+@end itemize
+
+Behavior is designed for deterministic order, explicit state, and safe fallbacks
+(missing macro handlers yield @code{nil}; missing attribute handlers return the input node).
+
+@node Builtins
+@chapter Builtins
+
+@table @code
+@item comptime
+@code{comptime @{ ... @}} executes at compile time.
+@item embed
+@code{embed("path")} embeds file content.
+@item asm
+@code{asm("template", "constraints", args...)} provides inline assembly.
+@item Attributes
+Built-in function attributes include @code{@@extern}, @code{@@naked}, @code{@@jit}, @code{@@thread}, @code{@@pure}, @code{@@effects(...)}, and @code{@@llvm(...)}.
+@end table
+
+@node Runtime
+@chapter Runtime
+
+Nytrix uses 64-bit tagged values (LSB=1 for integers, LSB=0 for pointers).
+Manual allocation primitives include @code{__malloc}, @code{__free}, and @code{__realloc}.
+System/FFI interop is provided through std modules such as @code{std.os.sys} and @code{std.os.ffi}.
+
+@node Indices
+@chapter Indices
+@appendix Index
+@printindex cp
+
+@bye
