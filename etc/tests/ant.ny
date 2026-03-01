@@ -34,12 +34,14 @@ def H_R_L = "\xe2\x96\x88"
 def H_R_R = "\xe2\x96\x84"
 
 ;; State Init
-def t = get_terminal_size()
-mut W = get(t, 0, 0)
-mut H = get(t, 1, 0)
+def tSize = get_terminal_size()
+mut W = get(tSize, 0, 0)
+mut H = get(tSize, 1, 0)
 if(W < 2){ W = 80 }
-if(H < 1){ H = 24 }
+if(H < 2){ H = 25 }
 if(W % 2 == 1){ W -= 1 }
+H -= 0 ;; Full screen
+
 
 def LW   = W / 2
 def CANV = canvas(W, H)
@@ -140,8 +142,8 @@ while(1){
         black = dict_set(black, k, 1)
         dir = (dir + 1) % 4
     }
-    visited = dict_set(visited, k, 1)
 
+    visited = dict_set(visited, key_of(x, y), 1)
     if(dir == DIR_UP){
         y -= 1
     } elif(dir == DIR_RIGHT){
@@ -154,7 +156,10 @@ while(1){
 
     visited = dict_set(visited, key_of(x, y), 1)
     render_world()
+    canvas_print(CANV, 0, 0, "ESC: Quit", 7, 0)
     canvas_refresh(CANV)
+    msleep(33)
     step_count += 1
     if(max_steps > 0 && step_count >= max_steps){ break }
 }
+tui_end()

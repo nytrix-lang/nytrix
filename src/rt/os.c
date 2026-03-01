@@ -28,8 +28,6 @@ extern char **environ;
 #elif !defined(_WIN32)
 extern char **environ;
 #endif
-static int64_t __make_str(const char *s);
-
 int64_t __call0(int64_t f);
 int64_t __call1(int64_t f, int64_t a0);
 int64_t __call2(int64_t f, int64_t a0, int64_t a1);
@@ -584,6 +582,56 @@ int64_t __tty_raw(int64_t enable) {
 #endif
 }
 
+/*
+ * Terminal-safe signal handler for SIGINT / SIGTERM
+ * Restores the saved termios, exits alt-screen, resets attrs, shows cursor.
+ * Called automatically when set_raw_mode() activates raw mode.
+  */
+#ifndef _WIN32
+#include <signal.h>
+static volatile sig_atomic_t __tty_sig_installed = 0;
+static struct sigaction __tty_old_sigint;
+static struct sigaction __tty_old_sigterm;
+
+static void __tty_sig_restore(int sig) {
+  /* Restore termios */
+  if (__tty_mode_saved) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &__tty_mode_prev);
+    __tty_mode_saved = 0;
+  }
+  /* Exit alt-screen, reset all SGR attrs, show cursor, enable wrap */
+  const char *cleanup =
+      "\033[0m"      /* reset SGR */
+      "\033[?25h"   /* show cursor */
+      "\033[?7h"    /* enable wrap */
+      "\033[?1049l" /* leave alt screen */
+      "\033[0m"     /* reset SGR again on main screen */
+      "\033[?25h"   /* show cursor on main screen */
+      "\033[?7h";   /* enable wrap on main screen */
+  write(STDOUT_FILENO, cleanup, 38);
+  fsync(STDOUT_FILENO);
+  /* Re-raise with original handler */
+  struct sigaction *old = (sig == SIGTERM) ? &__tty_old_sigterm : &__tty_old_sigint;
+  sigaction(sig, old, NULL);
+  raise(sig);
+}
+
+int64_t __tty_install_cleanup(void) {
+  if (__tty_sig_installed) return 0;
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = __tty_sig_restore;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESETHAND;
+  sigaction(SIGINT,  &sa, &__tty_old_sigint);
+  sigaction(SIGTERM, &sa, &__tty_old_sigterm);
+  __tty_sig_installed = 1;
+  return 0;
+}
+#else
+int64_t __tty_install_cleanup(void) { return 0; }
+#endif
+
 int64_t __tty_pending(void) {
 #ifdef _WIN32
   return rt_tag_v((int64_t)(_kbhit() ? 1 : 0));
@@ -708,7 +756,7 @@ int64_t __dir_read(int64_t handle) {
     const char *name = data->cFileName;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
       continue;
-    return __make_str(name);
+    return __rt_alloc_string(name);
   }
 #else
   DIR *dir = (DIR *)(uintptr_t)handle;
@@ -719,7 +767,7 @@ int64_t __dir_read(int64_t handle) {
     const char *name = ent->d_name;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
       continue;
-    return __make_str(name);
+    return __rt_alloc_string(name);
   }
   return 0;
 #endif
@@ -1807,15 +1855,8 @@ int64_t __os_name(void) {
 #else
   const char *s = "unknown";
 #endif
-  size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
-  if (!res)
-    return 0;
-  *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
-  *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-  strcpy((char *)(uintptr_t)res, s);
-  cached = res;
-  return res;
+  cached = __rt_alloc_string(s);
+  return cached;
 }
 
 int64_t __arch_name(void) {
@@ -1835,24 +1876,6 @@ int64_t __arch_name(void) {
 #else
   const char *s = "unknown";
 #endif
-  size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
-  if (!res)
-    return 0;
-  *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
-  *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-  strcpy((char *)(uintptr_t)res, s);
-  cached = res;
-  return res;
-}
-
-static int64_t __make_str(const char *s) {
-  size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
-  if (!res)
-    return 0;
-  *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
-  *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
-  strcpy((char *)(uintptr_t)res, s);
-  return res;
+  cached = __rt_alloc_string(s);
+  return cached;
 }

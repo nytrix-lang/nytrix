@@ -79,6 +79,7 @@ RT_DEF("__tty_size", __tty_size, 1, "fn __tty_size(out_ptr)",
        "Writes tty cols/rows (int32,int32) to out_ptr; returns 0 on success.")
 RT_DEF("__is_dir", __is_dir, 1, "fn __is_dir(path)",
        "Portable directory check.")
+
 RT_DEF("__dir_open", __dir_open, 1, "fn __dir_open(path)",
        "Open directory handle.")
 RT_DEF("__dir_read", __dir_read, 1, "fn __dir_read(handle)",
@@ -146,6 +147,23 @@ RT_DEF("__lt", __lt, 2, "fn __lt(a, b)", "Integer less than.")
 RT_DEF("__le", __le, 2, "fn __le(a, b)", "Integer less than or equal.")
 RT_DEF("__gt", __gt, 2, "fn __gt(a, b)", "Integer greater than.")
 RT_DEF("__ge", __ge, 2, "fn __ge(a, b)", "Integer greater than or equal.")
+RT_DEF("__list_new", __list_new, 1, "fn __list_new(n)",
+       "Allocates a list of n capacity/length.")
+RT_DEF("__load_item", __load_item, 2, "fn __load_item(lst, i)",
+       "Loads element i from list lst.")
+RT_DEF("__store_item", __store_item, 3, "fn __store_item(lst, i, v)",
+       "Stores v at element i in list lst.")
+RT_DEF("__load_item_fast", __load_item_fast, 2, "fn __load_item_fast(lst, i)",
+       "Unchecked list element load (internal hot path).")
+RT_DEF("__store_item_fast", __store_item_fast, 3,
+       "fn __store_item_fast(lst, i, v)",
+       "Unchecked list element store (internal hot path).")
+RT_DEF("__append", __append, 2, "fn __append(lst, v)",
+       "Appends v to list lst.")
+RT_DEF("__list_len", __list_len, 1, "fn __list_len(lst)",
+       "Fast read of the element count (tagged) from a list header.")
+RT_DEF("__list_set_len", __list_set_len, 2, "fn __list_set_len(lst, n)",
+       "Fast write of the element count (tagged) into a list header.")
 
 RT_DEF("__flt_box_val", __flt_box_val, 1, "fn __flt_box_val(f)",
        "Boxes a raw float into a Nytrix object.")

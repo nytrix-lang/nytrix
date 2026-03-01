@@ -4,7 +4,7 @@ Nytrix Build System
 """
 import sys
 sys.dont_write_bytecode = True
-import os, argparse, shutil, tempfile
+import os, argparse, shutil, tempfile, time
 from pathlib import Path
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
@@ -180,6 +180,25 @@ def _enable_real_test_env():
     os.environ["NYTRIX_AOT_CACHE"] = "0"
     os.environ["NYTRIX_STD_CACHE"] = "0"
 
+
+def _enable_full_test_matrix_env():
+    os.environ.setdefault("NYTRIX_TEST_NATIVE", "1")
+    os.environ.setdefault("NYTRIX_TEST_BENCHMARK_NATIVE", "1")
+    os.environ.setdefault("NYTRIX_TEST_RUNTIME_NATIVE", "1")
+    os.environ.setdefault("NYTRIX_TEST_STD_NATIVE", "1")
+    os.environ.setdefault("NYTRIX_TEST_BENCHMARK_REPL", "1")
+    os.environ.setdefault("NYTRIX_TEST_RUNTIME_REPL", "1")
+    os.environ.setdefault("NYTRIX_TEST_STD_REPL", "1")
+
+
+def _enable_make_test_defaults():
+    if _env_on("NYTRIX_TEST_FAST"):
+        log("TEST", "NYTRIX_TEST_FAST=1: using fast cached test mode")
+        return
+    _enable_real_test_env()
+    _enable_full_test_matrix_env()
+    log("TEST", "make test: forcing full uncached matrix (AOT+REPL+native)")
+
 def _linux_mem_total_gib():
     if host_os() != "linux":
         return 0.0
@@ -290,12 +309,32 @@ def _print_help():
     for key, desc in ENV_GATES:
         print(f"  {key:<24} {desc}")
 
+def _timed_call(profile_enabled, timings, label, fn, *args, **kwargs):
+    if not profile_enabled:
+        return fn(*args, **kwargs)
+    t0 = time.perf_counter()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        timings.append((label, time.perf_counter() - t0))
+
+def _print_profile_summary(timings, total_s):
+    if not timings:
+        return
+    log("PROFILE", f"total={total_s * 1000.0:.1f}ms")
+    for label, dt in timings:
+        log("PROFILE", f"{label}={dt * 1000.0:.1f}ms")
+
 def main():
     parser = argparse.ArgumentParser(description="Nytrix Build Tool")
     parser.add_argument("commands", nargs="*", default=["all"])
     parser.add_argument("-j", "--jobs", type=int, default=0)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--profile", action="store_true", help="print per-phase timing summary")
     args, unknown = parser.parse_known_args()
+    profile_enabled = args.profile or _env_on("NYTRIX_PROFILE")
+    timings = []
+    total_t0 = time.perf_counter()
     try:
         if BUILD_DIR_NOTICE:
             log("BUILD_DIR", c('36', BUILD_DIR_NOTICE))
@@ -320,9 +359,11 @@ def main():
         if not args.commands:
             args.commands = ["all"]
 
-        ensure_deps()
-        cc, llvm, root = configure_toolchain()
-        llvm_inc = resolve_llvm_headers(BUILD_DIR, cc, llvm, root)
+        _timed_call(profile_enabled, timings, "ensure_deps", ensure_deps)
+        cc, llvm, root = _timed_call(profile_enabled, timings, "configure_toolchain", configure_toolchain)
+        llvm_inc = _timed_call(
+            profile_enabled, timings, "resolve_llvm_headers", resolve_llvm_headers, BUILD_DIR, cc, llvm, root
+        )
 
         non_windows_runtime = [] if host_os() == "windows" else ["nytrixrt"]
         build_targets = {
@@ -395,8 +436,19 @@ def main():
 
             if targets and not skip_build:
                 if cmd != "std":
-                    ensure_std_bundle_fresh(BUILD_DIR, kind)
-                cmake_build(
+                    _timed_call(
+                        profile_enabled,
+                        timings,
+                        f"{cmd}:std_fresh_check",
+                        ensure_std_bundle_fresh,
+                        BUILD_DIR,
+                        kind,
+                    )
+                _timed_call(
+                    profile_enabled,
+                    timings,
+                    f"{cmd}:cmake_build",
+                    cmake_build,
                     BUILD_DIR,
                     kind,
                     cc,
@@ -408,40 +460,76 @@ def main():
                 )
 
             if cmd == "test":
-                if clean_seen:
-                    _enable_real_test_env()
-                    log("TEST", "clean+test detected: forcing real uncached test run")
-                elif _env_on("NYTRIX_TEST_REAL"):
-                    _enable_real_test_env()
-                    log("TEST", "NYTRIX_TEST_REAL=1: forcing real uncached test run")
+                _enable_make_test_defaults()
                 std_bundle = BUILD_DIR / kind / "std.ny"
-                run_test(BUILD_DIR, kind, std_bundle, n_jobs, unknown=unknown)
-                _run_optional_gates(BUILD_DIR, kind, n_jobs, unknown)
+                _timed_call(
+                    profile_enabled,
+                    timings,
+                    "test:run_test",
+                    run_test,
+                    BUILD_DIR,
+                    kind,
+                    std_bundle,
+                    n_jobs,
+                    unknown=unknown,
+                )
+                _timed_call(
+                    profile_enabled,
+                    timings,
+                    "test:optional_gates",
+                    _run_optional_gates,
+                    BUILD_DIR,
+                    kind,
+                    n_jobs,
+                    unknown,
+                )
             elif cmd == "all":
                 if _has_optional_gates():
                     std_bundle = BUILD_DIR / kind / "std.ny"
-                    run_test(BUILD_DIR, kind, std_bundle, n_jobs, unknown=unknown)
-                    _run_optional_gates(BUILD_DIR, kind, n_jobs, unknown)
+                    _timed_call(
+                        profile_enabled,
+                        timings,
+                        "all:run_test",
+                        run_test,
+                        BUILD_DIR,
+                        kind,
+                        std_bundle,
+                        n_jobs,
+                        unknown=unknown,
+                    )
+                    _timed_call(
+                        profile_enabled,
+                        timings,
+                        "all:optional_gates",
+                        _run_optional_gates,
+                        BUILD_DIR,
+                        kind,
+                        n_jobs,
+                        unknown,
+                    )
             elif cmd == "repl":
-                run_repl(BUILD_DIR, kind, unknown=unknown)
+                _timed_call(profile_enabled, timings, "repl:run", run_repl, BUILD_DIR, kind, unknown=unknown)
             elif cmd == "fuzz":
-                run_fuzz(BUILD_DIR, jobs=n_jobs)
+                _timed_call(profile_enabled, timings, "fuzz:run", run_fuzz, BUILD_DIR, jobs=n_jobs)
             elif cmd == "std":
-                run_std(BUILD_DIR)
+                _timed_call(profile_enabled, timings, "std:bundle", run_std, BUILD_DIR)
             elif cmd == "fmt":
-                run_fmt(unknown=unknown)
+                _timed_call(profile_enabled, timings, "fmt:run", run_fmt, unknown=unknown)
             elif cmd == "docs":
-                run_docs(BUILD_DIR)
+                _timed_call(profile_enabled, timings, "docs:run", run_docs, BUILD_DIR)
             elif cmd == "install":
-                run_install(BUILD_DIR, kind)
+                _timed_call(profile_enabled, timings, "install:run", run_install, BUILD_DIR, kind)
             elif cmd == "uninstall":
-                run_uninstall(BUILD_DIR, kind)
+                _timed_call(profile_enabled, timings, "uninstall:run", run_uninstall, BUILD_DIR, kind)
 
         return 0
     except KeyboardInterrupt:
         print()
         warn("interrupted")
         return 130
+    finally:
+        if profile_enabled:
+            _print_profile_summary(timings, time.perf_counter() - total_t0)
 
 if __name__ == "__main__":
     import subprocess

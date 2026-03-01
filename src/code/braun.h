@@ -72,7 +72,8 @@ bool braun_ssa_is_tracked(braun_ssa_context *ctx, const char *var_name);
 
 bool braun_ssa_is_defined(braun_ssa_context *ctx, const char *var_name);
 
-void braun_ssa_try_remove_trivial_phi(braun_ssa_context *ctx, LLVMValueRef phi);
+LLVMValueRef braun_ssa_try_remove_trivial_phi(braun_ssa_context *ctx,
+                                              LLVMValueRef phi);
 
 void braun_ssa_get_stats(braun_ssa_context *ctx, uint64_t *phi_created,
                          uint64_t *phi_eliminated, uint64_t *allocas_avoided);

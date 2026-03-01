@@ -104,3 +104,86 @@ fn get_item(d, key, default){
    if(v == 0){ return default }
    v
 }
+
+if(comptime{__main()}){
+   use std.core.test *
+   use std.core.mem *
+
+   print("Running std.audio.source tests...")
+
+   fn create_test_data(size){
+       def ptr = malloc(size)
+       mut i = 0
+       while(i < size){
+           store8(ptr, i % 255, i)
+           i += 1
+       }
+       ptr
+   }
+
+   ;; Test 1: Basic Read
+   {
+       print("Test 1: Basic Read")
+       def data_size = 100
+       def ptr = create_test_data(data_size)
+       ;; 1 channel, 44100 rate, 8 bits (1 byte per frame)
+       def src = make_memory_source(ptr, data_size, 1, 44100, 8)
+       def buf = malloc(100)
+
+       def read_count = read(src, buf, 10)
+       t_assert_eq(read_count, 10, "read 10 frames")
+
+       t_assert(memcmp(ptr, buf, 10) == 0, "buffer content matches source")
+
+       free(buf)
+       free(ptr)
+   }
+
+   ;; Test 2: Partial Read (near end)
+   {
+       print("Test 2: Partial Read")
+       def data_size = 15
+       def ptr = create_test_data(data_size)
+       def src = make_memory_source(ptr, data_size, 1, 44100, 8)
+       def buf = malloc(20)
+
+       read(src, buf, 10) ;; Read 10, cursor at 10
+       def read_count = read(src, buf, 10) ;; Try to read 10 more, only 5 left
+
+       t_assert_eq(read_count, 5, "read remaining 5 frames")
+
+       ;; verify content of last 5 bytes
+       t_assert(memcmp(ptr + 10, buf, 5) == 0, "last 5 bytes match")
+
+       free(buf)
+       free(ptr)
+   }
+
+   ;; Test 3: Empty Read (at end)
+   {
+       print("Test 3: Empty Read")
+       def data_size = 10
+       def ptr = create_test_data(data_size)
+       def src = make_memory_source(ptr, data_size, 1, 44100, 8)
+       def buf = malloc(10)
+
+       read(src, buf, 10) ;; Read all
+       def read_count = read(src, buf, 10) ;; Try to read more
+
+       t_assert_eq(read_count, 0, "read 0 frames at end")
+
+       free(buf)
+       free(ptr)
+   }
+
+   ;; Test 4: Invalid Source
+   {
+       print("Test 4: Invalid Source")
+       def buf = malloc(10)
+       t_assert_eq(read(list(), buf, 10), 0, "read from empty list returns 0")
+       t_assert_eq(read(0, buf, 10), 0, "read from 0 returns 0")
+       free(buf)
+   }
+
+   print("✓ std.audio.source tests passed")
+}

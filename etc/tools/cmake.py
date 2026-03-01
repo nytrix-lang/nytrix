@@ -13,7 +13,7 @@ from pathlib import Path
 from context import ROOT, host_os, c, COLOR_ON
 from utils import (
     run, run_capture, which, cmake_path, warn, err, log_ok, step, env_int,
-    log, file_sha1
+    log
 )
 from detect import (
     windows_llvm_candidates, find_windows_sdk, find_msvc_dirs, 
@@ -179,42 +179,94 @@ def guard_build_permissions(bdir):
     err("  BUILD_DIR=$HOME/.cache/nytrix-build py make test")
     raise SystemExit(1)
 
+def _std_source_fingerprint(path, mode):
+    try:
+        st = path.stat()
+    except OSError:
+        return "missing"
+
+    if mode != "content":
+        return f"{st.st_mtime_ns}:{st.st_size}"
+
+    import hashlib
+
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
 def ensure_std_bundle_fresh(build_dir, kind):
     bdir = cmake_build_dir(build_dir, kind)
-    
+    mode_raw = (os.environ.get("NYTRIX_STD_FRESH_SIG") or "meta").strip().lower()
+    mode = "content" if mode_raw in ("content", "sha1", "hash") else "meta"
+
     h = ""
     std_root = ROOT/"std"
     if std_root.exists():
         files = sorted(std_root.rglob("*.ny"))
         tool = ROOT/"etc"/"tools"/"std.py"
-        if tool.exists(): files.append(tool)
+        if tool.exists():
+            files.append(tool)
         if files:
             import hashlib
+
             hasher = hashlib.sha1()
+            root_resolved = ROOT.resolve()
             for p in files:
-                rel = p.resolve().relative_to(ROOT.resolve()).as_posix()
+                try:
+                    rel = p.resolve().relative_to(root_resolved).as_posix()
+                except Exception:
+                    rel = p.as_posix()
                 hasher.update(rel.encode("utf-8", "ignore") + b"\0")
-                try: hasher.update(file_sha1(p).encode("ascii"))
-                except: hasher.update(b"missing")
+                try:
+                    fp = _std_source_fingerprint(p, mode)
+                except OSError:
+                    fp = "missing"
+                hasher.update(fp.encode("ascii", "ignore"))
                 hasher.update(b"\0")
             h = hasher.hexdigest()
-    
-    if not h: return
-    
+
+    if not h:
+        return
+
     sig_file = bdir/"std_sources.sha1"
-    try: prev = sig_file.read_text(encoding="utf-8").strip()
-    except: prev = ""
-    
-    if prev == h: return
-    
+    try:
+        prev = sig_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        prev = ""
+
+    if prev == h:
+        return
+
     for out in (bdir/"std.ny", bdir/"std_symbols.h"):
-        try: out.unlink()
-        except: pass
-        
+        try:
+            out.unlink()
+        except OSError:
+            pass
+
     try:
         bdir.mkdir(parents=True, exist_ok=True)
         sig_file.write_text(h+"\n", encoding="utf-8")
-    except: pass
+    except OSError:
+        pass
+
+def _detect_compiler_launcher():
+    if os.environ.get("NYTRIX_DISABLE_COMPILER_LAUNCHER", "0").strip().lower() in ("1", "true", "yes", "on"):
+        return ""
+
+    raw = (os.environ.get("NYTRIX_COMPILER_LAUNCHER") or "").strip()
+    if raw:
+        return raw
+
+    for cand in ("sccache", "ccache"):
+        path = shutil.which(cand)
+        if path:
+            return path
+    return ""
 
 def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     cfg = "Debug" if kind == "debug" else "Release"
@@ -259,6 +311,7 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     rel_dbg_on = rel_dbg in ("1", "true", "yes", "on", "y")
     prefix_default = "C:/nytrix" if host_os() == "windows" else "/usr"
     prefix = os.environ.get("PREFIX", prefix_default)
+    compiler_launcher = _detect_compiler_launcher()
     
     cache = bdir/"CMakeCache.txt"
     needs_run = True
@@ -267,7 +320,10 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
         try:
             txt = cache.read_text(encoding="utf-8", errors="ignore")
             # Cheap check for home directory mismatch
-            if f"CMAKE_HOME_DIRECTORY:INTERNAL={str(ROOT)}" not in txt.replace("\\","/"): 
+            if f"CMAKE_HOME_DIRECTORY:INTERNAL={str(ROOT).replace('\\','/')}" not in txt.replace("\\","/"): 
+                 warn(f"Stale CMake cache detected (path mismatch); purging {bdir}")
+                 shutil.rmtree(bdir, ignore_errors=True)
+                 bdir.mkdir(parents=True, exist_ok=True)
                  needs_run = True
             else:
                  needs_run = False
@@ -287,6 +343,15 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
                          needs_run = True
                  else:
                      if "NYTRIX_PGO_PROFILE:STRING=" not in norm_txt:
+                         needs_run = True
+                 if compiler_launcher:
+                     want_launcher = cmake_path(compiler_launcher)
+                     if f"CMAKE_C_COMPILER_LAUNCHER:FILEPATH={want_launcher}" not in norm_txt and \
+                        f"CMAKE_C_COMPILER_LAUNCHER:STRING={want_launcher}" not in norm_txt:
+                         needs_run = True
+                 else:
+                     if "CMAKE_C_COMPILER_LAUNCHER:FILEPATH=" in norm_txt or \
+                        "CMAKE_C_COMPILER_LAUNCHER:STRING=" in norm_txt:
                          needs_run = True
         except: pass
 
@@ -321,6 +386,8 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     if llvm_inc_root:
         llvm_inc = cmake_path(llvm_inc_root) if host_os()=="windows" else str(llvm_inc_root)
         args.append(f"-DNYTRIX_LLVM_INCLUDE={llvm_inc}")
+    if compiler_launcher:
+        args.append(f"-DCMAKE_C_COMPILER_LAUNCHER={cmake_path(compiler_launcher)}")
     if rc_cmake: args.append(f"-DCMAKE_RC_COMPILER={rc_cmake}")
     if win_sdk_inc_flags: args.append(f"-DNYTRIX_WINSDK_CFLAGS={';'.join(win_sdk_inc_flags)}")
     if win_sdk_lib_flags: args.append(f"-DNYTRIX_WINSDK_LDFLAGS={';'.join(win_sdk_lib_flags)}")

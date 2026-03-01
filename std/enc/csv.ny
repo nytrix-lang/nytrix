@@ -110,5 +110,32 @@ if(comptime{__main()}){
    assert(len(rows2) == 3, "csv roundtrip count")
    assert(get(get(rows2, 1), 0) == "John \"Big\" Doe", "csv roundtrip data")
    
+   ;; Edge cases
+   assert(len(decode("")) == 0, "empty input")
+   assert(len(decode(123)) == 0, "non-string input")
+
+   ;; Single row
+   def rows3 = decode("a,b,c")
+   assert(len(rows3) == 1, "single row")
+   assert(len(get(rows3, 0)) == 3, "single row columns")
+
+   ;; Empty cells
+   def rows4 = decode("a,,c")
+   assert(get(get(rows4, 0), 1) == "", "empty cell")
+
+   ;; Quoted newline
+   def rows6 = decode("a,\"b\nc\",d")
+   assert(len(rows6) == 1, "quoted newline row count")
+   assert(get(get(rows6, 0), 1) == "b\nc", "quoted newline content")
+
+   ;; Semicolon separator
+   def rows7 = decode("a;b;c", ";")
+   assert(len(rows7) == 1, "semicolon separator")
+   assert(len(get(rows7, 0)) == 3, "semicolon columns")
+
+   ;; Only separators
+   def rows8 = decode(",,,")
+   assert(len(get(rows8, 0)) == 4, "only separators")
+
    print("✓ std.enc.csv tests passed")
 }

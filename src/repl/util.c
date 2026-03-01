@@ -8,8 +8,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#define NYTRIX_NO_READLINE 1
 #endif
 
 char *g_repl_user_source = NULL;
@@ -307,20 +305,7 @@ int repl_calc_indent(const char *src) {
   return level > 0 ? level * 2 : 0;
 }
 
-#if defined(_WIN32) || defined(NYTRIX_NO_READLINE)
 int repl_pre_input_hook(void) { return 0; }
-#else
-int repl_pre_input_hook(void) {
-  if (repl_is_input_pending())
-    return 0;
-  if (repl_indent_next > 0) {
-    for (int i = 0; i < repl_indent_next; i++) {
-      rl_insert_text(" ");
-    }
-  }
-  return 0;
-}
-#endif
 
 void repl_print_error_snippet(const char *src, int line, int col) {
   (void)src;

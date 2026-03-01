@@ -140,69 +140,33 @@ __attribute__((destructor)) static void quarantine_drain(void) {
 #endif
 
 int64_t __malloc(int64_t size) {
-  if (is_int(size))
-    size >>= 1;
-  if (size < 0)
-    return 0;
-  if (size < 64)
-    size = 64;
-
-  if ((uint64_t)size > SIZE_MAX - 192)
-    return 0;
-
-  size = (size + 63) & ~63ULL;
-  size_t total = (size_t)size + 128;
+  if (is_int(size)) size >>= 1;
+  if (size < 0) return 0;
+  
+  size_t n = (size_t)size;
+  size_t body = (n + 15) & ~15ULL;
+  size_t total = body + 32;
+  
   void *p = NULL;
-#ifdef __APPLE__
-  if (posix_memalign(&p, 64, total) != 0)
-    p = NULL;
-#elif defined(_WIN32)
-  p = _aligned_malloc(total, 64);
-#else
-  p = aligned_alloc(64, total);
-#endif
-  if (!p)
-    return 0;
+  if (posix_memalign(&p, 16, total) != 0) return 0;
+  if (!p) return 0;
+  
   memset(p, 0, total);
-#ifndef NDEBUG
-  g_alloc += total;
-#endif
-  int64_t res = (int64_t)(uintptr_t)((char *)p + 64);
   *(uint64_t *)p = NY_MAGIC1;
-  *(uint64_t *)((char *)p + 8) = (uint64_t)size;
-  *(uint64_t *)((char *)p + 16) = NY_MAGIC2;
-  *(uint64_t *)((char *)p + 64 + size) = NY_MAGIC3;
-#if NY_TRACK_LIVE_ALLOCS
-  ny_live_alloc_lock();
-  ny_live_link(p);
-  ny_live_alloc_unlock();
-#endif
-  return res;
+  *(uint64_t *)((char *)p + 8) = NY_MAGIC2;
+  *(uint64_t *)((char *)p + 16) = (uint64_t)body;
+  
+  return (int64_t)(uintptr_t)((char *)p + 32);
 }
+
 
 int64_t __free(int64_t ptr) {
   if (is_heap_ptr(ptr)) {
-    size_t sz = __get_heap_size(ptr);
-    (void)sz;
-#ifndef NDEBUG
-    size_t total = sz + 128;
-    g_free += total;
-    if (*(uint64_t *)((char *)(uintptr_t)ptr + sz) != NY_MAGIC3) {
-    }
-#endif
-    void *base = (char *)(uintptr_t)ptr - 64;
-#if NY_TRACK_LIVE_ALLOCS
-    ny_live_alloc_lock();
-    ny_live_unlink(base);
-    ny_live_alloc_unlock();
-#endif
-    *(uint64_t *)base = 0;
-    *(uint64_t *)((char *)base + 16) = 0;
-#if NY_WITH_ASAN
-    quarantine_push(base);
-#else
-    ny_aligned_free(base);
-#endif
+    void *base = (char *)(uintptr_t)ptr - 32;
+    free(base);
+  } else if (is_v_flt(ptr)) {
+    // Light float object (slab allocated)
+    __flt_free(ptr);
   }
   return 0;
 }
@@ -230,30 +194,25 @@ int64_t __runtime_cleanup(void) {
 }
 
 int64_t __realloc(int64_t p_val, int64_t newsz) {
-  if (is_int(newsz))
-    newsz >>= 1;
-  if (newsz < 0)
-    newsz = 0;
-  if (!is_heap_ptr(p_val))
-    return __malloc(
-        newsz << 1 |
-        1);
-  char *op = (char *)(uintptr_t)p_val - 64;
-  size_t old_size = *(uint64_t *)(op + 8);
-  if ((size_t)newsz <= old_size) {
-    return p_val;
-  }
+  if (is_int(newsz)) newsz >>= 1;
+  if (newsz < 0) newsz = 0;
+  if (!is_heap_ptr(p_val)) return __malloc(newsz << 1 | 1);
+  
+  char *cap_ptr = (char *)(uintptr_t)p_val - 16;
+  size_t old_cap = *(uint64_t *)cap_ptr;
+  if ((size_t)newsz <= old_cap) return p_val;
+  
   int64_t res = __malloc(newsz << 1 | 1);
-  if (!res)
-    return 0;
-  memcpy((void *)(uintptr_t)res, (void *)(uintptr_t)p_val, old_size);
-  *(int64_t *)((char *)(uintptr_t)res - 16) =
-      *(int64_t *)((char *)(uintptr_t)p_val - 16);
-  *(int64_t *)((char *)(uintptr_t)res - 8) =
-      *(int64_t *)((char *)(uintptr_t)p_val - 8);
+  if (!res) return 0;
+  
+  memcpy((void *)(uintptr_t)res, (void *)(uintptr_t)p_val, old_cap);
+  // Transfer tag
+  *(int64_t *)((char *)(uintptr_t)res - 8) = *(int64_t *)((char *)(uintptr_t)p_val - 8);
+  
   __free(p_val);
   return res;
 }
+
 
 int64_t __memcpy(int64_t dst, int64_t src, int64_t n) {
   if (is_int(n))
@@ -273,11 +232,8 @@ int64_t __memset(int64_t dst, int64_t v, int64_t n) {
     v >>= 1;
   if (is_int(n))
     n >>= 1;
-  if (n > 0) {
-    char *d = (char *)(uintptr_t)dst;
-    for (size_t i = 0; i < (size_t)n; ++i)
-      d[i] = (char)v;
-  }
+  if (n > 0)
+    memset((void *)(uintptr_t)dst, (int)(v & 0xff), (size_t)n);
   return dst;
 }
 
@@ -304,12 +260,21 @@ int64_t __load8_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("load8", addr, idx, 1))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return 1;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 1 > sz)
+      return 1;
+  } else if (!__check_oob("load8", addr, idx, 1)) {
     return 1;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !rt_addr_readable(p, 1))
+  if (!hdr && !heap && !rt_addr_readable(p, 1))
     return 1;
   int64_t val = (((int64_t)*(uint8_t *)p) << 1) | 1;
   return val;
@@ -321,15 +286,28 @@ int64_t __load16_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("load16", addr, idx, 2))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return 1;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 2 > sz)
+      return 1;
+  } else if (!__check_oob("load16", addr, idx, 2)) {
     return 1;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !rt_addr_readable(p, 2))
+  if (!hdr && !heap && !rt_addr_readable(p, 2))
     return 1;
   uint16_t v = 0;
-  memcpy(&v, (const void *)p, sizeof(v));
+  if ((p & (uintptr_t)1u) == 0) {
+    v = *(const uint16_t *)p;
+  } else {
+    memcpy(&v, (const void *)p, sizeof(v));
+  }
   return (((int64_t)v) << 1) | 1;
 }
 
@@ -339,31 +317,75 @@ int64_t __load32_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("load32", addr, idx, 4))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return 1;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 4 > sz)
+      return 1;
+  } else if (!__check_oob("load32", addr, idx, 4)) {
     return 1;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !rt_addr_readable(p, 4))
+  if (!hdr && !heap && !rt_addr_readable(p, 4))
     return 1;
   uint32_t v = 0;
-  memcpy(&v, (const void *)p, sizeof(v));
+  if ((p & (uintptr_t)3u) == 0) {
+    v = *(const uint32_t *)p;
+  } else {
+    memcpy(&v, (const void *)p, sizeof(v));
+  }
   return (((int64_t)v) << 1) | 1;
 }
 
 int64_t __load64_idx(int64_t addr, int64_t idx) {
   if (!is_any_ptr(addr))
     return 0;
+  if (is_int(idx) && is_heap_ptr(addr)) {
+    intptr_t off = (intptr_t)(idx >> 1);
+    if (off >= 0) {
+      size_t sz = __get_heap_size(addr);
+      if ((size_t)off + 8 > sz)
+        return 0;
+    } else if (off < -32) {
+      return 0;
+    }
+    uintptr_t p = (uintptr_t)((intptr_t)addr + off);
+    if (p < 0x1000)
+      return 0;
+    if ((p & (uintptr_t)7u) == 0) {
+      return *(const int64_t *)p;
+    }
+    int64_t v = 0;
+    memcpy(&v, (const void *)p, sizeof(v));
+    return v;
+  }
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("load64", addr, idx, 8))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return 0;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 8 > sz)
+      return 0;
+  } else if (!__check_oob("load64", addr, idx, 8)) {
     return 0;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 0;
-  if (!hdr && !rt_addr_readable(p, 8))
+  if (!hdr && !heap && !rt_addr_readable(p, 8))
     return 0;
+  if ((p & (uintptr_t)7u) == 0) {
+    return *(const int64_t *)p;
+  }
   int64_t v = 0;
   memcpy(&v, (const void *)p, sizeof(v));
   return v;
@@ -375,12 +397,21 @@ int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("store8", addr, idx, 1))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return val;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 1 > sz)
+      return val;
+  } else if (!__check_oob("store8", addr, idx, 1)) {
     return val;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !rt_addr_readable(p, 1))
+  if (!hdr && !heap && !rt_addr_readable(p, 1))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   *(uint8_t *)p = (uint8_t)v;
@@ -393,16 +424,29 @@ int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("store16", addr, idx, 2))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return val;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 2 > sz)
+      return val;
+  } else if (!__check_oob("store16", addr, idx, 2)) {
     return val;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !rt_addr_readable(p, 2))
+  if (!hdr && !heap && !rt_addr_readable(p, 2))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint16_t raw = (uint16_t)v;
-  memcpy((void *)p, &raw, sizeof(raw));
+  if ((p & (uintptr_t)1u) == 0) {
+    *(uint16_t *)p = raw;
+  } else {
+    memcpy((void *)p, &raw, sizeof(raw));
+  }
   return val;
 }
 
@@ -412,40 +456,93 @@ int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("store32", addr, idx, 4))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return val;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 4 > sz)
+      return val;
+  } else if (!__check_oob("store32", addr, idx, 4)) {
     return val;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !rt_addr_readable(p, 4))
+  if (!hdr && !heap && !rt_addr_readable(p, 4))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint32_t raw = (uint32_t)v;
-  memcpy((void *)p, &raw, sizeof(raw));
+  if ((p & (uintptr_t)3u) == 0) {
+    *(uint32_t *)p = raw;
+  } else {
+    memcpy((void *)p, &raw, sizeof(raw));
+  }
   return val;
 }
 
 int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
   if (!is_any_ptr(addr))
     return val;
+  if (is_int(idx) && is_heap_ptr(addr)) {
+    intptr_t off = (intptr_t)(idx >> 1);
+    if (off >= 0) {
+      size_t sz = __get_heap_size(addr);
+      if ((size_t)off + 8 > sz)
+        return val;
+    } else if (off < -32) {
+      return val;
+    }
+    uintptr_t p = (uintptr_t)((intptr_t)addr + off);
+    if (p < 0x1000)
+      return val;
+    int64_t raw = val;
+    if (off == -8 && is_int(raw)) {
+      int64_t u = raw >> 1;
+      if (u >= 100 && u <= 255)
+        raw = u;
+    } else if (off == -16 && !is_int(raw)) {
+      raw = rt_tag_v(raw);
+    }
+    if ((p & (uintptr_t)7u) == 0) {
+      *(int64_t *)p = raw;
+    } else {
+      memcpy((void *)p, &raw, sizeof(raw));
+    }
+    return val;
+  }
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
-  if (!__check_oob("store64", addr, idx, 8))
+  bool heap = is_heap_ptr(addr);
+  if (hdr) {
+    if ((intptr_t)idx < -32)
+      return val;
+  } else if (heap) {
+    size_t sz = __get_heap_size(addr);
+    if ((size_t)idx + 8 > sz)
+      return val;
+  } else if (!__check_oob("store64", addr, idx, 8)) {
     return val;
+  }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !rt_addr_readable(p, 8))
+  if (!hdr && !heap && !rt_addr_readable(p, 8))
     return val;
   int64_t raw = val;
   if (idx == -8 && is_int(raw)) {
     int64_t u = raw >> 1;
-    if (u >= 200 && u <= 255)
+    if (u >= 100 && u <= 255)
       raw = u;
   } else if (idx == -16 && !is_int(raw)) {
     raw = rt_tag_v(raw);
   }
-  memcpy((void *)p, &raw, sizeof(raw));
+  if ((p & (uintptr_t)7u) == 0) {
+    *(int64_t *)p = raw;
+  } else {
+    memcpy((void *)p, &raw, sizeof(raw));
+  }
   return val;
 }

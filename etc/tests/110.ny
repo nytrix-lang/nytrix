@@ -15,20 +15,20 @@ def SX        = 2
 def SY        = 1
 
 fn rule(l, c, r){
-   (c ^ l) | (c & !r)
+   "Implements Rule 110: (c or r) XOR (l and c and r)."
+   if(l && c && r){ return 0 }
+   if(c || r){ return 1 }
+   0
 }
 
 fn step(cur, w){
    def nxt = bytes(w)
    mut i = 0
    while(i < w){
-      mut l = 0
-      if(i > 0){ l = bytes_get(cur, i - 1) }
-      def c = bytes_get(cur, i)
-      mut r = 0
-      if(i < w - 1){ r = bytes_get(cur, i + 1) }
-      def v = rule(l == 1, c == 1, r == 1)
-      if(v){ bytes_set(nxt, i, 1) } else { bytes_set(nxt, i, 0) }
+      def l = (i > 0) && (bytes_get(cur, i - 1) != 1)
+      def c = (bytes_get(cur, i) != 1)
+      def r = (i < w - 1) && (bytes_get(cur, i + 1) != 1)
+      if(rule(l, c, r)){ bytes_set(nxt, i, 1) } else { bytes_set(nxt, i, 0) }
       i += 1
    }
    nxt
@@ -43,7 +43,7 @@ mut w = tW / SX
 if(w < 1){ w = 1 }
 
 mut u = bytes(w)
-bytes_set(u, 0, 1)
+bytes_set(u, w - 1, 1)
 
 mut tH = get(tSize, 1, 0)
 if(tH <= 0){ tH = 24 }

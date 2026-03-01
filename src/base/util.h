@@ -20,6 +20,7 @@ bool ny_extract_line(const char *src, int line, const char **out_start,
 char *ny_strdup(const char *s);
 bool ny_env_is_truthy(const char *value);
 bool ny_env_enabled(const char *name);
+bool ny_env_enabled_default_on(const char *name);
 void ny_str_list_append(char ***list, size_t *len, size_t *cap,
                         const char *str);
 void ny_str_list_free(char **list, size_t count);

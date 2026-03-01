@@ -31,7 +31,7 @@ use std.os *
 use std.os.time *
 use std.text as str
 
-use std.ui.backend as ui_backend
+use std.ui.glfw as ui_backend
 
 def _W_TAG = 0
 def _W_ID = 1
