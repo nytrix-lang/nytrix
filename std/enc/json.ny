@@ -552,5 +552,102 @@ if(comptime{__main()}){
     def dec_uni = json_decode(enc_uni)
     assert((dec_uni == "price:" + chr(8364)), "json encode unicode utf8")
 
+    ;; Error path tests
+    def err_non_str = json_try_decode(123)
+    assert(dict_get(err_non_str, "ok", true) == false, "json error non-string")
+    assert(dict_get(err_non_str, "error", "") == "json input must be a string", "json error msg non-string")
+
+    def err_trailing = json_try_decode("123 abc")
+    assert(dict_get(err_trailing, "ok", true) == false, "json error trailing chars")
+    assert(dict_get(err_trailing, "error", "") == "trailing characters after JSON value", "json error msg trailing chars")
+
+    def err_empty = json_try_decode("")
+    assert(dict_get(err_empty, "ok", true) == false, "json error empty")
+    assert(dict_get(err_empty, "error", "") == "unexpected end of input", "json error msg empty")
+
+    def err_token = json_try_decode("abc")
+    assert(dict_get(err_token, "ok", true) == false, "json error unexpected token")
+    assert(dict_get(err_token, "error", "") == "unexpected token", "json error msg unexpected token")
+
+    def err_lit_trail = json_try_decode("truex")
+    assert(dict_get(err_lit_trail, "ok", true) == false, "json error literal trailing")
+    assert(dict_get(err_lit_trail, "error", "") == "trailing characters after JSON value", "json error msg literal trailing")
+
+    def err_lit_trunc = json_try_decode("tru")
+    assert(dict_get(err_lit_trunc, "ok", true) == false, "json error literal trunc")
+    assert(dict_get(err_lit_trunc, "error", "") == "unexpected end while parsing literal", "json error msg literal trunc")
+
+    def err_obj_key = json_try_decode("{:1}")
+    assert(dict_get(err_obj_key, "ok", true) == false, "json error obj missing key")
+    assert(dict_get(err_obj_key, "error", "") == "expected string key", "json error msg obj missing key")
+
+    def err_obj_colon = json_try_decode("{\"a\" 1}")
+    assert(dict_get(err_obj_colon, "ok", true) == false, "json error obj missing colon")
+    assert(dict_get(err_obj_colon, "error", "") == "expected ':' after object key", "json error msg obj missing colon")
+
+    def err_obj_comma = json_try_decode("{\"a\":1 \"b\":2}")
+    assert(dict_get(err_obj_comma, "ok", true) == false, "json error obj missing comma")
+    assert(dict_get(err_obj_comma, "error", "") == "expected ',' or '}' in object", "json error msg obj missing comma")
+
+    def err_arr_comma = json_try_decode("[1 2]")
+    assert(dict_get(err_arr_comma, "ok", true) == false, "json error arr missing comma")
+    assert(dict_get(err_arr_comma, "error", "") == "expected ',' or ']' in array", "json error msg arr missing comma")
+
+    def err_str_term = json_try_decode("\"abc")
+    assert(dict_get(err_str_term, "ok", true) == false, "json error str unterminated")
+    assert(dict_get(err_str_term, "error", "") == "unterminated string", "json error msg str unterminated")
+
+    def err_str_esc = json_try_decode("\"\\x\"")
+    assert(dict_get(err_str_esc, "ok", true) == false, "json error str invalid escape")
+    assert(dict_get(err_str_esc, "error", "") == "invalid escape sequence", "json error msg str invalid escape")
+
+    def err_str_uni = json_try_decode("\"\\u123\"")
+    assert(dict_get(err_str_uni, "ok", true) == false, "json error str short unicode")
+    assert(dict_get(err_str_uni, "error", "") == "invalid unicode escape", "json error msg str short unicode")
+
+    def err_str_ctrl = json_try_decode("\"\n\"")
+    assert(dict_get(err_str_ctrl, "ok", true) == false, "json error str control char")
+    assert(dict_get(err_str_ctrl, "error", "") == "invalid control character in string", "json error msg str control char")
+
+    def err_num_lead = json_try_decode("0123")
+    assert(dict_get(err_num_lead, "ok", true) == false, "json error num leading zero")
+    assert(dict_get(err_num_lead, "error", "") == "leading zero in number", "json error msg num leading zero")
+
+    def err_num_frac = json_try_decode("1.")
+    assert(dict_get(err_num_frac, "ok", true) == false, "json error num invalid fraction")
+    assert(dict_get(err_num_frac, "error", "") == "invalid fraction in number", "json error msg num invalid fraction")
+
+    def err_invalid_lit = json_try_decode("truu")
+    assert(dict_get(err_invalid_lit, "ok", true) == false, "json error invalid literal truu")
+    assert(dict_get(err_invalid_lit, "error", "") == "invalid literal", "json error msg invalid literal truu")
+
+    def err_unterminated_esc = json_try_decode("\"\\")
+    assert(dict_get(err_unterminated_esc, "ok", true) == false, "json error unterminated escape")
+    assert(dict_get(err_unterminated_esc, "error", "") == "unterminated escape sequence", "json error msg unterminated escape")
+
+    def err_invalid_surrogate = json_try_decode("\"\\uD83D\\x\"")
+    assert(dict_get(err_invalid_surrogate, "ok", true) == false, "json error invalid surrogate \\x")
+    assert(dict_get(err_invalid_surrogate, "error", "") == "invalid unicode surrogate pair", "json error msg invalid surrogate \\x")
+
+    def err_invalid_surrogate_high = json_try_decode("\"\\uD83D\\uD83D\"")
+    assert(dict_get(err_invalid_surrogate_high, "ok", true) == false, "json error invalid surrogate high high")
+    assert(dict_get(err_invalid_surrogate_high, "error", "") == "invalid unicode surrogate pair", "json error msg invalid surrogate high high")
+
+    def err_invalid_num_minus = json_try_decode("-")
+    assert(dict_get(err_invalid_num_minus, "ok", true) == false, "json error invalid number minus")
+    assert(dict_get(err_invalid_num_minus, "error", "") == "invalid number", "json error msg invalid number minus")
+
+    def err_invalid_num_minus_char = json_try_decode("-a")
+    assert(dict_get(err_invalid_num_minus_char, "ok", true) == false, "json error invalid number minus char")
+    assert(dict_get(err_invalid_num_minus_char, "error", "") == "invalid number", "json error msg invalid number minus char")
+
+    def err_invalid_exp = json_try_decode("1e")
+    assert(dict_get(err_invalid_exp, "ok", true) == false, "json error invalid exponent")
+    assert(dict_get(err_invalid_exp, "error", "") == "invalid exponent in number", "json error msg invalid exponent")
+
+    def err_invalid_exp_plus = json_try_decode("1e+")
+    assert(dict_get(err_invalid_exp_plus, "ok", true) == false, "json error invalid exponent plus")
+    assert(dict_get(err_invalid_exp_plus, "error", "") == "invalid exponent in number", "json error msg invalid exponent plus")
+
     print("✓ std.enc.json tests passed")
 }

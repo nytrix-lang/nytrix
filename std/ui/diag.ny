@@ -8,7 +8,9 @@ module std.ui.diag (
 use std.core *
 use std.os *
 use std.ui.window as window
-use std.ui.backend as ui_backend
+use std.core *
+use std.os *
+use std.ui.window as window
 use std.ui.gfx.vulkan *
 
 fn _yn(v){
@@ -19,14 +21,10 @@ fn _yn(v){
 
 fn probe(){
    "Returns a dictionary describing detected backend and graphics capabilities."
-   mut d = dict(16)
+   mut d = dict(8)
    d = dict_set(d, "os", __os_name())
    d = dict_set(d, "window_backend", window.backend())
    d = dict_set(d, "window_available", window.available())
-   d = dict_set(d, "x11", ui_backend.x11_available())
-   d = dict_set(d, "wayland", ui_backend.wayland_available())
-   d = dict_set(d, "win32", ui_backend.win32_available())
-   d = dict_set(d, "cocoa", ui_backend.cocoa_available())
    d = dict_set(d, "vulkan", vk_available())
    d
 }
@@ -37,10 +35,6 @@ fn probe_text(){
    "os=" + to_str(get(d, "os", "?")) +
    " window=" + to_str(get(d, "window_backend", "ny")) +
    " available=" + _yn(get(d, "window_available", false)) +
-   " x11=" + _yn(get(d, "x11", false)) +
-   " wayland=" + _yn(get(d, "wayland", false)) +
-   " win32=" + _yn(get(d, "win32", false)) +
-   " cocoa=" + _yn(get(d, "cocoa", false)) +
    " vk=" + _yn(get(d, "vulkan", false))
 }
 

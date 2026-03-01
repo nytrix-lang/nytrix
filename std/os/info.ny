@@ -738,53 +738,66 @@ fn ram_short(){
 
 fn gpu_name(){
    "Returns the name or primary identifier of the system's GPU.
-   Linux uses sysfs ; macOS uses system_profiler; Windows uses wmic/powershell."
+   Linux uses sysfs ; macOS uses system_profiler (cached); Windows uses wmic/powershell (cached)."
    if(_gpu_name_loaded){ return _gpu_name_cache }
+
+   ;; Fast path for macOS to avoid system_profiler unless explicitly requested or needed
    if(_is_macos()){
-      def out = _cmd_out("system_profiler", ["SPDisplaysDataType", "-detailLevel", "mini"])
-      if(str_len(out) > 0){
-         def lines = split(out, "\n")
-         mut i = 0
-         while(i < len(lines)){
-            def ln = strip(get(lines, i, ""))
-            if(startswith(ln, "Chipset Model:")){
-               _gpu_name_cache = _after_colon(ln)
-               _gpu_name_loaded = true
-               return _gpu_name_cache
-            }
-            if(startswith(ln, "Model:")){
-               _gpu_name_cache = _after_colon(ln)
-               _gpu_name_loaded = true
-               return _gpu_name_cache
-            }
-            i += 1
-         }
-         _gpu_name_cache = _first_line(out)
+      ;; Check for Apple Silicon GPU via sysctl (fast)
+      def soc = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
+      if(str_contains(soc, "Apple M")){
+         _gpu_name_cache = "Apple GPU (" + strip(soc) + ")"
          _gpu_name_loaded = true
          return _gpu_name_cache
       }
-      _gpu_name_cache = os() + " gpu"
+      ;; Fallback to slower system_profiler only if NYTRIX_GPU_DEEP_SCAN is set
+      if(_gpu_deep_scan_enabled()){
+         def out = _cmd_out("system_profiler", ["SPDisplaysDataType", "-detailLevel", "mini"])
+         if(str_len(out) > 0){
+            def lines = split(out, "\n")
+            mut i = 0
+            while(i < len(lines)){
+               def ln = strip(get(lines, i, ""))
+               if(startswith(ln, "Chipset Model:")){
+                  _gpu_name_cache = _after_colon(ln)
+                  _gpu_name_loaded = true
+                  return _gpu_name_cache
+               }
+               if(startswith(ln, "Model:")){
+                  _gpu_name_cache = _after_colon(ln)
+                  _gpu_name_loaded = true
+                  return _gpu_name_cache
+               }
+               i += 1
+            }
+         }
+      }
+      _gpu_name_cache = "macos gpu"
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
+
    if(_is_windows()){
-      mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
-      if(str_len(out) > 0){
-         def lines = split(out, "\n")
-         def v = _find_value(lines, "Name")
-         if(str_len(v) > 0){
-            _gpu_name_cache = v
+      ;; Avoid slow wmic/powershell unless deep scan enabled
+      if(_gpu_deep_scan_enabled()){
+         mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
+         if(str_len(out) > 0){
+            def lines = split(out, "\n")
+            def v = _find_value(lines, "Name")
+            if(str_len(v) > 0){
+               _gpu_name_cache = v
+               _gpu_name_loaded = true
+               return _gpu_name_cache
+            }
+         }
+         out = _cmd_out("powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name)"])
+         if(str_len(out) > 0){
+            _gpu_name_cache = _first_line(out)
             _gpu_name_loaded = true
             return _gpu_name_cache
          }
       }
-      out = _cmd_out("powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name)"])
-      if(str_len(out) > 0){
-         _gpu_name_cache = _first_line(out)
-         _gpu_name_loaded = true
-         return _gpu_name_cache
-      }
-      _gpu_name_cache = os() + " gpu"
+      _gpu_name_cache = "windows gpu"
       _gpu_name_loaded = true
       return _gpu_name_cache
    }

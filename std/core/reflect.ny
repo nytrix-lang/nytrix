@@ -24,15 +24,26 @@ fn len(x){
    - For **bytes**: buffer size.
    Returns `0` for other types."
    if(x == 0){ return 0 }
-   if(is_int(x)){ return 0 }
-   if(is_str(x)){ return str_len(x) }
-   if(!is_ptr(x)){ return 0 }
+   if(__is_int(x)){ return 0 }
+   if(__is_str_obj(x)){ return str_len(x) }
    def kind = __tagof(x)
    case kind {
-      100 -> load64(x, 0) ; List
-      103 -> load64(x, 0) ; Tuple
-      101 -> load64(x, 0) ; Dict
-      102 -> load64(x, 0) ; Set
+      100 -> __load64_idx(x, 0) ; List
+      103 -> __load64_idx(x, 0) ; Tuple
+      101 -> __load64_idx(x, 0) ; Dict
+      102 -> __load64_idx(x, 0) ; Set
+      106 -> {            ; Range
+         def start = __load64_idx(x, 0)
+         def stop = __load64_idx(x, 8)
+         def step = __load64_idx(x, 16)
+         if(step == 0){ return 0 }
+         if(step > 0){
+            if(start >= stop){ return 0 }
+            return ((stop - start - 1) / step) + 1
+         }
+         if(start <= stop){ return 0 }
+         return ((start - stop - 1) / (0 - step)) + 1
+      }
       122 -> bytes_len(x) ; Bytes
       _   -> 0
    }
@@ -44,8 +55,9 @@ fn contains(container, item){
    - **list/tuple**: checks for value presence.
    - **str**: checks for substring presence."
    if(!container){ return false }
-   if(is_set(container) || is_dict(container)){
-      def cap = load64(container, 8)
+   def tag = __tagof(container)
+   if(tag == 102 || tag == 101){
+      def cap = __load64_idx(container, 8)
       mut h = hash(item)
       def mask = cap - 1
       mut idx = h & mask
@@ -53,10 +65,10 @@ fn contains(container, item){
       mut probes = 0
       while(probes < cap){
          def off = 16 + idx * 24
-         def st = load64(container, off + 16)
+         def st = __load64_idx(container, off + 16)
          if(st == 0){ return false }
          if(st == 1){
-            if(load64(container, off) == item){ return true }
+            if(__load64_idx(container, off) == item){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
          perturb = perturb >> 5
@@ -64,16 +76,16 @@ fn contains(container, item){
       }
       return false
    }
-   if(is_list(container) || is_tuple(container)){
+   if(tag == 100 || tag == 103){
       mut i = 0
-      def n = load64(container, 0)
+      def n = __load64_idx(container, 0)
       while(i < n){
-         if(load64(container, 16 + i * 8) == item){ return true }
+         if(__load_item(container, i) == item){ return true }
          i += 1
       }
       return false
    }
-   if(is_str(container)){ return find(container, item) >= 0 }
+   if(__is_str_obj(container)){ return find(container, item) >= 0 }
    return false
 }
 
@@ -155,8 +167,8 @@ fn div(a, b){
 
 fn _is_list_or_tuple(x){
    "Internal: fast list/tuple check that avoids deep runtime object validation."
-   if(!__is_ny_obj(x)){ return false }
    def tag = __tagof(x)
+   if(!__is_int(tag)){ return false }
    return tag == 100 || tag == 103
 }
 
@@ -174,15 +186,18 @@ fn _list_zip2(a, b, op){
    mut out = _list_like(n)
    mut i = 0
    while(i < n){
-      def x = get(a, i, 0)
-      def y = get(b, i, 0)
-      if(op == 0){ out = append(out, x + y) }
-      else if(op == 1){ out = append(out, x - y) }
-      else if(op == 2){ out = append(out, x * y) }
-      else { out = append(out, x / y) }
+      def x = __load_item(a, i)
+      def y = __load_item(b, i)
+      mut z = 0
+      if(op == 0){ z = x + y }
+      else if(op == 1){ z = x - y }
+      else if(op == 2){ z = x * y }
+      else { z = x / y }
+      __store_item(out, i, z)
       i += 1
    }
-   if(out_tag == 103){ store64(out, 103, -8) }
+   __store64_idx(out, 0, n)
+   if(out_tag == 103){ __store64_idx(out, -8, 103) }
    return out
 }
 
@@ -193,12 +208,15 @@ fn _list_scale(a, s, op){
    mut out = _list_like(n)
    mut i = 0
    while(i < n){
-      def x = get(a, i, 0)
-      if(op == 0){ out = append(out, x * s) }
-      else { out = append(out, x / s) }
+      def x = __load_item(a, i)
+      mut z = 0
+      if(op == 0){ z = x * s }
+      else { z = x / s }
+      __store_item(out, i, z)
       i += 1
    }
-   if(out_tag == 103){ store64(out, 103, -8) }
+   __store64_idx(out, 0, n)
+   if(out_tag == 103){ __store64_idx(out, -8, 103) }
    return out
 }
 
@@ -252,13 +270,13 @@ fn typeof(x){
 
 fn list_eq(a,b){
    "Performs deep structural equality comparison for two lists."
-   def na = load64(a, 0)
-   def nb = load64(b, 0)
+   def na = __load64_idx(a, 0)
+   def nb = __load64_idx(b, 0)
    if(!(na == nb)){ return false }
    mut i = 0
    while(i < na){
-      def va = load64(a, 16 + i * 8)
-      def vb = load64(b, 16 + i * 8)
+      def va = __load_item(a, i)
+      def vb = __load_item(b, i)
       if(!(va == vb)){ return false }
       i += 1
    }
@@ -270,10 +288,10 @@ fn dict_eq(a,b){
    if(!(len(a) == len(b))){ return false }
    def its = items(a)
    mut i=0
-   def n=load64(its, 0)
+   def n=__load64_idx(its, 0)
    while(i<n){
-      def p = load64(its, 16 + i * 8)
-      if(!(dict_get(b, load64(p, 16), 0xdeadbeef) == load64(p, 24))){ return false }
+      def p = __load64_idx(its, 16 + i * 8)
+      if(!(dict_get(b, __load64_idx(p, 16), 0xdeadbeef) == __load64_idx(p, 24))){ return false }
       i=i+1
    }
    return true
@@ -284,10 +302,10 @@ fn set_eq(a,b){
    if(!(len(a) == len(b))){ return false }
    def its = items(a)
    mut i=0
-   def n=load64(its, 0)
+   def n=__load64_idx(its, 0)
    while(i<n){
-      def p = load64(its, 16 + i * 8)
-      if(!(contains(b, load64(p, 16)))){ return false }
+      def p = __load64_idx(its, 16 + i * 8)
+      if(!(contains(b, __load64_idx(p, 16)))){ return false }
       i=i+1
    }
    return true
@@ -296,11 +314,12 @@ fn set_eq(a,b){
 fn eq(a, b){
    "Structural equality operator. Compares values by content (strings/collections) or identity (primitives)."
    if(__eq(a, b)){ return true }
-   if(!__is_ny_obj(a) || !__is_ny_obj(b)){ return false }
    def ta = __tagof(a)
    def tb = __tagof(b)
+   if(!__is_int(ta) || !__is_int(tb)){ return false }
+   if(ta < 100 || ta > 255 || tb < 100 || tb > 255){ return false }
    if(ta == tb){
-      case ta {
+      return case ta {
          100 -> list_eq(a, b)
          103 -> list_eq(a, b)
          120 -> _str_eq(a, b)
@@ -311,9 +330,10 @@ fn eq(a, b){
          _   -> false
       }
    } else {
-      false
+      return false
    }
 }
+
 
 fn repr(x){
    "Function `repr`."
@@ -480,21 +500,32 @@ fn get(obj, key, default=0){
     - `key`: Index or Key
     - `default`: Value to return if key/index not found (default 0).
    "
-   if(is_str(obj)){
-      def n = len(obj)
+   if(__is_str_obj(obj)){
+      def n = str_len(obj)
       if(key < 0){ key = key + n }
-      if(key < 0 || key >= n){ default }
+      if(key < 0 || key >= n){ return default }
       else {
-       use std.text.str *
-       str_slice(obj, key, key + 1)
+        use std.text.str *
+        return str_slice(obj, key, key + 1)
       }
    }
-   elif(is_dict(obj)){ dict_get(obj, key, default) }
-   elif(is_list(obj) || is_tuple(obj)){
+   def tag = __tagof(obj)
+   if(tag == 101){ return dict_get(obj, key, default) }
+   elif(tag == 100 || tag == 103){
+      def n = __load64_idx(obj, 0)
+      if(key < 0){ key = key + n }
+      if(key < 0 || key >= n){ return default }
+      else { return __load_item(obj, key) }
+   }
+   elif(tag == 106){ ; Range
       def n = len(obj)
       if(key < 0){ key = key + n }
-      if(key < 0 || key >= n){ default }
-      else { load64(obj, 16 + key * 8) }
+      if(key < 0 || key >= n){ return default }
+      else {
+         def start = __load64_idx(obj, 0)
+         def step = __load64_idx(obj, 16)
+         return start + key * step
+      }
    }
    else {
        if(!obj || obj == globals()){ return default }
@@ -502,20 +533,22 @@ fn get(obj, key, default=0){
     }
 }
 
+
 fn set_idx(obj, key, val){
    "Generic element setter. Supported for dicts and lists. Returns the object or 0 on failure."
-   if(is_dict(obj)){ dict_set(obj, key, val) }
+   if(is_dict(obj)){ return dict_set(obj, key, val) }
    elif(is_list(obj)){
       def n = len(obj)
       if(key < 0){ key = key + n }
-      if(key < 0 || key >= n){ 0 }
+      if(key < 0 || key >= n){ return 0 }
       else {
-         store64(obj, val, 16 + key * 8)
-         val
+         __store_item(obj, key, val)
+         return val
       }
    }
-   else { 0 }
+   else { return 0 }
 }
+
 
 fn set(obj, key, val){
    "Alias for set_idx."
@@ -525,7 +558,7 @@ fn set(obj, key, val){
 fn slice(obj, start, stop, step=1){
    "Generic **slice** operation for strings and lists."
    if(is_str(obj)){
-       utf8_slice(obj, start, stop, step)
+       return utf8_slice(obj, start, stop, step)
    }
    elif(is_list(obj)){
        def n = len(obj)
@@ -553,49 +586,52 @@ fn slice(obj, start, stop, step=1){
            i = i + step
         }
        }
-       out
+       return out
    }
-   else { 0 }
+   else { return 0 }
 }
+
 
 fn append(lst, v){
    "Appends value `v` to the end of list `lst`. Returns the (possibly reallocated) list ptr."
-   if(!is_list(lst)){ lst }
+   if(!is_list(lst)){ return lst }
    else {
      mut out = lst
-     def n = load64(out, 0)
-     def cap = load64(out, 8)
+     def n = __load64_idx(out, 0)
+     def cap = __load64_idx(out, 8)
      if(n >= cap){
        def newcap = (cap == 0) ? 8 : (cap * 2)
        def newp = list(newcap)
-       store64(newp, load64(out, -8), -8)
+       __store64_idx(newp, -8, __load64_idx(out, -8))
        mut i = 0
        while(i < n){
-          store64(newp, load64(out, 16 + i * 8), 16 + i * 8)
+          __store64_idx(newp, 16 + i * 8, __load64_idx(out, 16 + i * 8))
           i += 1
        }
        free(out)
        out = newp
      }
-     store64(out, v, 16 + n * 8)
-     store64(out, n + 1, 0)
-     out
+     __store64_idx(out, 16 + n * 8, v)
+     __store64_idx(out, 0, n + 1)
+     return out
    }
 }
+
 
 fn pop(lst){
    "Removes and returns the last element from list `lst`. Returns `0` if empty."
    if(!is_list(lst)){ return 0 }
    else {
-    def n = load64(lst, 0)
-    if(n == 0){ 0 }
+    def n = __load64_idx(lst, 0)
+    if(n == 0){ return 0 }
     else {
       def v = get(lst, n - 1)
-      store64(lst, n - 1, 0)
-      v
+      __store64_idx(lst, 0, n - 1)
+      return v
     }
    }
 }
+
 
 fn extend(lst, other){
    "Appends all elements from collection `other` to the list `lst`."

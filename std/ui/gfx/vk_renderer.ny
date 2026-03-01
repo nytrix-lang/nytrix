@@ -4,7 +4,10 @@
 module std.ui.gfx.vk_renderer (
    init, shutdown,
    begin_frame, end_frame,
-   clear, draw_rect, draw_line
+   clear, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line,
+   create_texture, update_texture_rect, bind_texture,
+   draw_triangle, draw_triangle_3d,
+   set_mvp
 )
 
 use std.core *
@@ -12,7 +15,7 @@ use std.core.mem *
 use std.math *
 use std.math.matrix *
 use std.ui.gfx.vulkan *
-use std.ui.backend.x11 as ui_x11
+use std.ui.glfw as ui_glfw
 use std.os *
 use std.os.process as proc
 use std.os.ffi *
@@ -93,6 +96,7 @@ mut _image_index = 0
 mut _frame_open = false
 mut _window_ref = 0
 mut _current_mvp = 0
+mut _total_frames = 0
 def MAX_FRAMES_IN_FLIGHT = 2
 
 fn init(win){
@@ -239,6 +243,75 @@ fn _find_memory_type(type_filter, properties){
       i += 1
    }
    -1
+}
+
+fn update_texture_rect(tex_id, x, y, w, h, pixels){
+   "Partially updates a texture's pixel data."
+   if(tex_id < 0 || tex_id >= len(_textures)){ return false }
+   def tex_obj = get(_textures, tex_id)
+   def image = dict_get(tex_obj, "image")
+   
+   def img_size = w * h * 4
+   if(img_size > _staging_capacity){ return false }
+   
+   memcpy(_staging_map, pixels, img_size)
+   
+   ;; 1. Transition Image: Shader Read Only -> Transfer Dst
+   ;; 2. Copy Staging -> Image
+   ;; 3. Transition Image: Transfer Dst -> Shader Read Only
+   
+   mut alloc_info = sys_malloc(32)
+   memset(alloc_info, 0, 32)
+   store32(alloc_info, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO), 0)
+   store64(alloc_info, to_int(_command_pool), 16)
+   store32(alloc_info, 0, 24) ;; PRIMARY
+   store32(alloc_info, 1, 28)
+   mut cb_ptr = sys_malloc(8)
+   if(allocate_command_buffers(_device, alloc_info, cb_ptr) != 0){ return false }
+   def cb = load64(cb_ptr, 0)
+   
+   mut bi = sys_malloc(32)
+   memset(bi, 0, 32)
+   store32(bi, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO), 0)
+   store32(bi, 1, 16) ;; ONE_TIME_SUBMIT
+   begin_command_buffer(cb, bi)
+   
+   mut region = sys_malloc(56)
+   memset(region, 0, 56)
+   store32(region, to_int(VK_IMAGE_ASPECT_COLOR_BIT), 16)
+   store32(region, 0, 20) ;; mipLevel
+   store32(region, 0, 24) ;; baseArrayLayer
+   store32(region, 1, 28) ;; layerCount
+   store32(region, x, 32) ;; offset.x
+   store32(region, y, 36) ;; offset.y
+   store32(region, 0, 40) ;; offset.z
+   store32(region, w, 44) ;; extent.width
+   store32(region, h, 48) ;; extent.height
+   store32(region, 1, 52) ;; extent.depth
+   
+   cmd_copy_buffer_to_image(cb, to_int(_staging_buffer), to_int(image), to_int(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL), 1, region)
+   
+   end_command_buffer(cb)
+   
+   mut submit_info = sys_malloc(72)
+   memset(submit_info, 0, 72)
+   store32(submit_info, to_int(VK_STRUCTURE_TYPE_SUBMIT_INFO), 0)
+   store32(submit_info, 1, 40) ;; commandBufferCount
+   mut cb_ptr_arr = sys_malloc(8)
+   store64(cb_ptr_arr, to_int(cb), 0)
+   store64(submit_info, to_int(cb_ptr_arr), 48)
+   
+   queue_submit(to_int(_graphics_queue), 1, submit_info, 0)
+   device_wait_idle(_device)
+   
+   free_command_buffers(_device, _command_pool, 1, cb_ptr)
+   sys_free(alloc_info)
+   sys_free(cb_ptr)
+   sys_free(bi)
+   sys_free(region)
+   sys_free(submit_info)
+   sys_free(cb_ptr_arr)
+   true
 }
 
 fn create_texture(width, height, pixels){
@@ -406,8 +479,8 @@ fn _update_default_mvp(win){
    "Recalculates the default orthographic projection matrix for the window."
    def w = float(get(win, 5, 800))
    def h = float(get(win, 6, 600))
-   def m = mat4_ortho(0.0, w, 0.0, h, -1.0, 1.0)
-   set_mvp(m)
+   def proj = mat4_ortho(0.0, float(w), 0.0, float(h), -1.0, 1.0)
+   set_mvp(proj)
 }
 
 fn _create_vertex_buffer(){
@@ -489,14 +562,11 @@ fn _create_instance(){
    store64(app_info, to_int(0), 32)     ;; pEngineName
    store32(app_info, 1, 40)
    store32(app_info, 0x00401000, 44)
-   mut ext1 = sys_malloc(64) 
-   mut i1 = 0 def s1 = "VK_KHR_surface" while(i1 < 14){ store8(ext1, load8(s1, i1), i1) i1 += 1 } store8(ext1, 0, 14)
-   mut ext2 = sys_malloc(64)
-   mut i2 = 0 def s2 = "VK_KHR_xlib_surface" while(i2 < 19){ store8(ext2, load8(s2, i2), i2) i2 += 1 } store8(ext2, 0, 19)
-   mut ext_ptrs = sys_malloc(32)
-   memset(ext_ptrs, 0, 32)
-   store64(ext_ptrs, to_int(ext1), 0)
-   store64(ext_ptrs, to_int(ext2), 8)
+   
+   def exts_list = ui_glfw.get_required_instance_extensions()
+   def ext_count = get(exts_list, 0)
+   def ext_ptrs = get(exts_list, 1)
+   
    ;; Create VkInstanceCreateInfo manually with explicit zeroing
    mut create_info = sys_malloc(64)
    memset(create_info, 0, 64)
@@ -506,7 +576,7 @@ fn _create_instance(){
    store64(create_info, to_int(app_info), 24)
    store32(create_info, 0, 32)         ;; layers
    store64(create_info, to_int(0), 40)
-   store32(create_info, 2, 48)         ;; extensions
+   store32(create_info, ext_count, 48)         ;; extensions
    store64(create_info, to_int(ext_ptrs), 56)
    mut inst_ptr = sys_malloc(8)
    store64(inst_ptr, to_int(0), 0)
@@ -529,24 +599,14 @@ fn _create_instance(){
 
 fn _create_surface(win){
    "Creates the native window surface (WSI)."
-   ;; Pull native X11 handles from backend state/window metadata.
-   def disp = ui_x11.native_display()
    def window = get(win, 22, 0)
-   if(!_vkCreateXlibSurfaceKHR || !disp || !window){
-      if(_is_debug()){ print("Vulkan: No X11 surface support or no display/window handle") }
+   if(!window){
+      if(_is_debug()){ print("Vulkan: No window handle") }
       return false
    }
-   mut create_info = sys_malloc(40)
-   store32(create_info, VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, 0)
-   store64(create_info, to_int(0), 8)    ;; pNext
-   store32(create_info, 0, 16)          ;; flags
-   ;; Store raw native handles into the C struct fields.
-   ;; `storeptr` has inconsistent behavior in this runtime path.
-   store64(create_info, to_int(disp), 24)   ;; Display*
-   store64(create_info, to_int(window), 32) ;; Window (XID / unsigned long)
    mut surf_ptr = sys_malloc(8)
    store64(surf_ptr, 0, 0)
-   def res = call4(_vkCreateXlibSurfaceKHR, _instance, create_info, 0, surf_ptr)
+   def res = ui_glfw.create_vulkan_surface(_instance, window, 0, surf_ptr)
    if(res != 0){
       if(_is_debug()){ print(f"Vulkan: Surface creation failed with code {res}") }
       return false
@@ -1387,9 +1447,31 @@ fn begin_frame(){
    store32(ri, 2, 48) ;; clearValueCount
    store64(ri, to_int(clear_values), 56)
    call3(_vkCmdBeginRenderPass, cb, ri, 0)
+    
+   ;; Set dynamic viewport/scissor
+   mut vp = sys_malloc(24)
+   store32_f32(vp, 0.0, 0) store32_f32(vp, 0.0, 4)
+   store32_f32(vp, float(_swapchain_extent_w), 8) store32_f32(vp, float(_swapchain_extent_h), 12)
+   store32_f32(vp, 0.0, 16) store32_f32(vp, 1.0, 20)
+   cmd_set_viewport(cb, 0, 1, vp)
+    
+   mut sci = sys_malloc(16)
+   store32(sci, 0, 0) store32(sci, 0, 4)
+   store32(sci, _swapchain_extent_w, 8) store32(sci, _swapchain_extent_h, 12)
+   cmd_set_scissor(cb, 0, 1, sci)
+    
+   sys_free(vp) sys_free(sci)
+
    _frame_open = true
    _vertex_offset = 0
-   if(_window_ref){ _update_default_mvp(_window_ref) }
+   _total_frames += 1
+   if(_window_ref){
+      _update_default_mvp(_window_ref)
+      if(_total_frames % 60 == 0 && _is_debug()){
+         def w = get(_window_ref, 5) def h = get(_window_ref, 6)
+         print(f"Vulkan Frame {_total_frames}: Window {w}x{h}, Extent {_swapchain_extent_w}x{_swapchain_extent_h}")
+      }
+   }
    sys_free(fence_ptr)
    sys_free(img_idx_ptr)
    sys_free(bi)
@@ -1402,12 +1484,12 @@ fn _flush(){
    "Submits pending vertex data to the GPU and executes a draw call."
    if(_vertex_offset == 0){ return }
    def cb = get(_command_buffers, _current_frame)
-   call3(_vkCmdBindPipeline, cb, 0, _pipeline)
+   cmd_bind_pipeline(cb, 0, _pipeline)
 
    ;; Bind Texture
-   mut tex_id = _current_texture_id
-   if(tex_id < 0 || tex_id >= len(_textures)){ tex_id = _default_texture }
-   def tex = get(_textures, tex_id)
+   mut tid = _current_texture_id
+   if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
+   def tex = get(_textures, tid)
    def ds = dict_get(tex, "ds", 0)
    if(ds){
       mut ds_ptr = sys_malloc(8)
@@ -1417,17 +1499,17 @@ fn _flush(){
    }
 
    mut off = sys_malloc(8)
-   store64(off, 0, 0)
+   store64(off, to_int(0), 0)
    mut buf_ptr = sys_malloc(8)
-   store64(buf_ptr, _vertex_buffer, 0)
+   store64(buf_ptr, to_int(_vertex_buffer), 0)
    cmd_bind_vertex_buffers(cb, 0, 1, buf_ptr, off)
    sys_free(off)
    sys_free(buf_ptr)
 
-   call6(_vkCmdPushConstants, cb, _pipeline_layout, 1, 0, 64, _current_mvp)
+   call6(_vkCmdPushConstants, to_int(cb), to_int(_pipeline_layout), to_int(1), to_int(0), to_int(64), _current_mvp)
 
-   def count = _vertex_offset / 36
-   call5(_vkCmdDraw, cb, count, 1, 0, 0)
+   def count = to_int(_vertex_offset / 36)
+   call5(_vkCmdDraw, to_int(cb), count, to_int(1), to_int(0), to_int(0))
 
    _vertex_offset = 0
 }
@@ -1557,22 +1639,15 @@ fn clear(r, g, b, a){
    store32(rect, _swapchain_extent_w, 8) store32(rect, _swapchain_extent_h, 12) ;; extent
    store32(rect, 0, 16) ;; baseArrayLayer
    store32(rect, 1, 20) ;; layerCount
-   call5(_vkCmdClearAttachments, cb, 1, ca, 1, rect)
+   call5(_vkCmdClearAttachments, to_int(cb), to_int(1), to_int(ca), to_int(1), to_int(rect))
    sys_free(ca)
    sys_free(rect)
 }
 
 fn draw_rect(x, y, w, h, r, g, b, a){
    "Batches a colored rectangle for rendering."
-   if(!_frame_open){ return 0 }
-   bind_texture(_default_texture)
-   _check_flush(6 * 36)
-   _push_vertex(x, y, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x, y + h, 0.0, 0.0, 1.0, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, 1.0, 1.0, r, g, b, a)
-   _push_vertex(x, y, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, 1.0, 1.0, r, g, b, a)
-   _push_vertex(x + w, y, 0.0, 1.0, 0.0, r, g, b, a)
+   ;; Optimized to use textured path with default white texture
+   draw_rect_tex(x, y, w, h, _default_texture, r, g, b, a)
 }
 
 fn draw_rect_tex(x, y, w, h, tex_id, r, g, b, a){
@@ -1586,6 +1661,29 @@ fn draw_rect_tex(x, y, w, h, tex_id, r, g, b, a){
    _push_vertex(x, y, 0.0, 0.0, 0.0, r, g, b, a)
    _push_vertex(x + w, y + h, 0.0, 1.0, 1.0, r, g, b, a)
    _push_vertex(x + w, y, 0.0, 1.0, 0.0, r, g, b, a)
+}
+
+fn draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a){
+   "Batches a textured rectangle with explicit UV coordinates."
+   if(!_frame_open){ return 0 }
+   bind_texture(tex_id)
+   _check_flush(6 * 36)
+   _push_vertex(x, y, 0.0, u1, v1, r, g, b, a)
+   _push_vertex(x, y + h, 0.0, u1, v2, r, g, b, a)
+   _push_vertex(x + w, y + h, 0.0, u2, v2, r, g, b, a)
+   _push_vertex(x, y, 0.0, u1, v1, r, g, b, a)
+   _push_vertex(x + w, y + h, 0.0, u2, v2, r, g, b, a)
+   _push_vertex(x + w, y, 0.0, u2, v1, r, g, b, a)
+}
+
+fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
+   "Batches a colored 3D triangle for rendering."
+   if(!_frame_open){ return 0 }
+   bind_texture(_default_texture)
+   _check_flush(3 * 36)
+   _push_vertex(x1, y1, z1, 0.0, 0.0, r, g, b, a)
+   _push_vertex(x2, y2, z2, 0.0, 0.0, r, g, b, a)
+   _push_vertex(x3, y3, z3, 0.0, 0.0, r, g, b, a)
 }
 
 fn draw_triangle(x1, y1, x2, y2, x3, y3, r, g, b, a){
@@ -1642,7 +1740,20 @@ fn shutdown(){
    if(_staging_memory){ free_memory(_device, _staging_memory, 0) }
    if(_default_sampler){ destroy_sampler(_device, _default_sampler, 0) }
    if(_descriptor_pool){ destroy_descriptor_pool(_device, _descriptor_pool, 0) }
-   ;; TODO: Destroy textures
+
+   mut i = 0
+   while(i < len(_textures)){
+      def tex = get(_textures, i)
+      def view = dict_get(tex, "view", 0)
+      def img = dict_get(tex, "image", 0)
+      def mem = dict_get(tex, "memory", 0)
+      if(view){ destroy_image_view(_device, view, 0) }
+      if(img){ destroy_image(_device, img, 0) }
+      if(mem){ free_memory(_device, mem, 0) }
+      i += 1
+   }
+   _textures = []
+
    _destroy_swapchain_objects()
    if(_device){ destroy_device(_device, 0) }
    if(_surface){ destroy_surface_khr(_instance, _surface, 0) }

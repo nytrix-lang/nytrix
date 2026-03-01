@@ -22,10 +22,10 @@ fn _mk(n, fill=0){
    mut out = list(n)
    mut i = 0
    while(i < n){
-      store_item(out, i, fill)
+      __store_item_fast(out, i, fill)
       i += 1
    }
-   store64(out, n, 0)
+   __list_set_len(out, n)
    out
 }
 
@@ -78,28 +78,28 @@ fn set(v, i, x){
 
 fn _zip2(a, b, op){
    "Internal: Performs element-wise operation `op` on two vectors."
-   def na = len(a)
-   def nb = len(b)
+   def na = __list_len(a)
+   def nb = __list_len(b)
    def n = (na < nb) ? na : nb
    mut out = list(n)
    mut i = 0
    if(op == 0){
       while(i < n){
-         store_item(out, i, get(a, i, 0) + get(b, i, 0))
+         __store_item_fast(out, i, __load_item_fast(a, i) + __load_item_fast(b, i))
          i += 1
       }
    } elif(op == 1){
       while(i < n){
-         store_item(out, i, get(a, i, 0) - get(b, i, 0))
+         __store_item_fast(out, i, __load_item_fast(a, i) - __load_item_fast(b, i))
          i += 1
       }
    } else {
       while(i < n){
-         store_item(out, i, get(a, i, 0) * get(b, i, 0))
+         __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i))
          i += 1
       }
    }
-   store64(out, n, 0)
+   __list_set_len(out, n)
    out
 }
 
@@ -160,39 +160,39 @@ fn div(a, b){
 
 fn scale(v, s){
    "Multiplies vector `v` by scalar `s`."
-   def n = len(v)
+   def n = __list_len(v)
    mut out = list(n)
    mut i = 0
    while(i < n){
-      store_item(out, i, get(v, i, 0) * s)
+      __store_item_fast(out, i, __load_item_fast(v, i) * s)
       i += 1
    }
-   store64(out, n, 0)
+   __list_set_len(out, n)
    out
 }
 
 fn divs(v, s){
    "Divides vector `v` by scalar `s`."
-   def n = len(v)
+   def n = __list_len(v)
    mut out = list(n)
    mut i = 0
    while(i < n){
-      store_item(out, i, get(v, i, 0) / s)
+      __store_item_fast(out, i, __load_item_fast(v, i) / s)
       i += 1
    }
-   store64(out, n, 0)
+   __list_set_len(out, n)
    out
 }
 
 fn dot(a, b){
    "Returns the dot product of vectors `a` and `b`."
-   def na = len(a)
-   def nb = len(b)
+   def na = __list_len(a)
+   def nb = __list_len(b)
    def n = (na < nb) ? na : nb
    mut acc = 0
    mut i = 0
    while(i < n){
-      acc = acc + get(a, i, 0) * get(b, i, 0)
+      acc = acc + __load_item_fast(a, i) * __load_item_fast(b, i)
       i += 1
    }
    acc

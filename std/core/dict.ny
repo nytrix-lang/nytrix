@@ -137,7 +137,13 @@ fn _dict_resize(d, newcap){
 fn dict_set(d, key, val){
    "Sets key `key` to value `val` in dict `d`. Returns the (possibly reallocated) dict."
    if(!d){ d = _dict_new(8) }
-   if(!is_dict(d)){ panic("dict_set called on non-dictionary") }
+   if(!is_dict(d)){ 
+      print("dict_set panic. d=", d, " tag=", __tagof(d))
+      if(is_int(d)){ panic("dict_set (INT)") }
+      if(is_list(d)){ panic("dict_set (LIST)") }
+      if(is_str(d)){ panic("dict_set (STR)") }
+      panic("dict_set called on non-dictionary (PTR)") 
+   }
    def count = load64(d, 0)
    def cap = load64(d, 8)
    if(count * 10 >= cap * 7){
@@ -349,6 +355,69 @@ if(comptime{__main()}){
     assert(len(ks) == 3, "dict_keys len")
     assert(len(vs) == 3, "dict_values len")
     assert(len(it) == 3, "dict_items len")
+
+    ;; Stress test
+    print("Testing dict stress...")
+    mut ds = dict(8)
+    mut i = 0
+    def N = 1000
+
+    while (i < N) {
+        def key = f"key-{i}"
+        ds = dict_set(ds, key, i)
+        i += 1
+    }
+
+    assert(dict_len(ds) == N, "stress insert len")
+
+    i = 0
+    while (i < N) {
+        def key = f"key-{i}"
+        assert(dict_has(ds, key), "stress has key")
+        assert(dict_get(ds, key) == i, "stress get value")
+        i += 1
+    }
+
+    i = 0
+    while (i < N) {
+        if (i % 2 == 0) {
+            def key = f"key-{i}"
+            ds = dict_del(ds, key)
+        }
+        i += 1
+    }
+
+    assert(dict_len(ds) == N / 2, "stress delete len")
+
+    i = 0
+    while (i < N) {
+        def key = f"key-{i}"
+        if (i % 2 == 0) {
+            assert(!dict_has(ds, key), "stress deleted key gone")
+        } else {
+            assert(dict_has(ds, key), "stress kept key present")
+            assert(dict_get(ds, key) == i, "stress kept value correct")
+        }
+        i += 1
+    }
+    print("✓ dict stress test passed")
+
+    ;; Collision test
+    print("Testing dict collision...")
+    mut dc = dict(8)
+    i = 0
+    def M = 500
+    while (i < M) {
+        dc = dict_set(dc, to_str(i), i)
+        i += 1
+    }
+    assert(dict_len(dc) == M, "collision len")
+    i = 0
+    while (i < M) {
+        assert(dict_get(dc, to_str(i)) == i, "collision get value")
+        i += 1
+    }
+    print("✓ dict collision test passed")
 
     print("✓ std.core.dict tests passed")
 }

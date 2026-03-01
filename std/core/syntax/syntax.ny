@@ -27,6 +27,7 @@ fn _ensure_registry(reg){
    reg
 }
 
+
 fn _ensure_name(name){
    "Internal helper."
    if(!is_str(name)){ panic("syntax name must be a string") }

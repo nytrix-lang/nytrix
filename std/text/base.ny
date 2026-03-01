@@ -306,6 +306,28 @@ if(comptime{__main()}){
     def enc32 = encode32(s)
     assert(enc32 == "NBSWY3DP", "base32 encode")
     assert(decode32(enc32) == s, "base32 decode")
+
+    ;; Base32 Hex Tests
+    def enc32hex = encode32_hex(s)
+    assert(enc32hex == "D1IMOR3F", "base32 hex encode")
+    assert(decode32_hex(enc32hex) == s, "base32 hex decode")
+
+    ;; Base32 Hex RFC 4648 Test Vectors
+    assert(encode32_hex("") == "", "base32 hex vector 1")
+    assert(encode32_hex("f") == "CO======", "base32 hex vector 2")
+    assert(encode32_hex("fo") == "CPNG====", "base32 hex vector 3")
+    assert(encode32_hex("foo") == "CPNMU===", "base32 hex vector 4")
+    assert(encode32_hex("foob") == "CPNMUOG=", "base32 hex vector 5")
+    assert(encode32_hex("fooba") == "CPNMUOJ1", "base32 hex vector 6")
+    assert(encode32_hex("foobar") == "CPNMUOJ1E8======", "base32 hex vector 7")
+
+    assert(decode32_hex("") == "", "base32 hex decode vector 1")
+    assert(decode32_hex("CO======") == "f", "base32 hex decode vector 2")
+    assert(decode32_hex("CPNG====") == "fo", "base32 hex decode vector 3")
+    assert(decode32_hex("CPNMU===") == "foo", "base32 hex decode vector 4")
+    assert(decode32_hex("CPNMUOG=") == "foob", "base32 hex decode vector 5")
+    assert(decode32_hex("CPNMUOJ1") == "fooba", "base32 hex decode vector 6")
+    assert(decode32_hex("CPNMUOJ1E8======") == "foobar", "base32 hex decode vector 7")
     
     ;; Base16 Tests
     def enc16 = encode16(s)

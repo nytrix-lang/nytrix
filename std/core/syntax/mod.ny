@@ -30,7 +30,9 @@ use std.core.syntax.syntax as syntax_impl
 use std.core.syntax.builtin as syntax_builtin
 
 mut __registry = syntax_impl.new_registry()
+if(!__registry){ panic("__registry initialization failed") }
 __registry = syntax_builtin.register_defaults(__registry)
+if(!__registry){ panic("__registry defaults failed") }
 
 fn new_registry(cap=8){
    "Creates a new explicit syntax registry."

@@ -721,12 +721,21 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                     LLVMConstInt(LLVMInt32TypeInContext(cg->ctx), 0, false),
                     ""),
       try_b, catch_b);
+  LLVMBasicBlockRef pre_b = LLVMGetInsertBlock(cg->builder);
+  ny_braun_add_predecessor(cg, try_b, pre_b);
+  ny_braun_add_predecessor(cg, catch_b, pre_b);
   LLVMPositionBuilderAtEnd(cg->builder, try_b);
+  ny_braun_enter_block(cg, try_b);
+  ny_braun_seal_block(cg, try_b);
   gen_stmt(cg, scopes, depth, s->as.tr.body, func_root, is_tail);
   LLVMBuildCall2(cg->builder, clr_env->type, clr_env->value, NULL, 0, "");
-  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+    ny_braun_add_predecessor(cg, end_b, LLVMGetInsertBlock(cg->builder));
     LLVMBuildBr(cg->builder, end_b);
+  }
   LLVMPositionBuilderAtEnd(cg->builder, catch_b);
+  ny_braun_enter_block(cg, catch_b);
+  ny_braun_seal_block(cg, catch_b);
   LLVMBuildCall2(cg->builder, clr_env->type, clr_env->value, NULL, 0, "");
   LLVMValueRef err_val = LLVMBuildCall2(cg->builder, get_err->type,
                                         get_err->value, NULL, 0, "err");
@@ -742,9 +751,13 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   } else {
     gen_stmt(cg, scopes, depth, s->as.tr.handler, func_root, is_tail);
   }
-  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+    ny_braun_add_predecessor(cg, end_b, LLVMGetInsertBlock(cg->builder));
     LLVMBuildBr(cg->builder, end_b);
+  }
   LLVMPositionBuilderAtEnd(cg->builder, end_b);
+  ny_braun_enter_block(cg, end_b);
+  ny_braun_seal_block(cg, end_b);
 }
 
 static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
@@ -1153,32 +1166,53 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       if (arm->patterns.len > 0 && arm->patterns.data[0])
         btok = arm->patterns.data[0]->tok;
       ny_dbg_loc(cg, btok);
+      LLVMBasicBlockRef cur_pre_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildCondBr(cg->builder, cond, arm_bb, next_bb);
+      ny_braun_add_predecessor(cg, arm_bb, cur_pre_bb);
+      ny_braun_add_predecessor(cg, next_bb, cur_pre_bb);
+
       LLVMPositionBuilderAtEnd(cg->builder, arm_bb);
+      ny_braun_enter_block(cg, arm_bb);
+      ny_braun_seal_block(cg, arm_bb);
       if (arm->guard) {
         ny_dbg_loc(cg, arm->guard->tok);
         LLVMValueRef guard_v = gen_expr(cg, scopes, *depth, arm->guard);
         LLVMValueRef guard_b = to_bool(cg, guard_v);
         LLVMBasicBlockRef guard_pass_bb =
             LLVMAppendBasicBlock(f, "match_guard_pass");
+        LLVMBasicBlockRef cur_guard_pre = LLVMGetInsertBlock(cg->builder);
         LLVMBuildCondBr(cg->builder, guard_b, guard_pass_bb, next_bb);
+        ny_braun_add_predecessor(cg, guard_pass_bb, cur_guard_pre);
+        ny_braun_add_predecessor(cg, next_bb, cur_guard_pre);
+
         LLVMPositionBuilderAtEnd(cg->builder, guard_pass_bb);
+        ny_braun_enter_block(cg, guard_pass_bb);
+        ny_braun_seal_block(cg, guard_pass_bb);
       }
       gen_stmt(cg, scopes, depth, arm->conseq, func_root, is_tail);
-      if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+      if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+        ny_braun_add_predecessor(cg, end, LLVMGetInsertBlock(cg->builder));
         LLVMBuildBr(cg->builder, end);
+      }
       scope_pop(scopes, depth);
       LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+      ny_braun_enter_block(cg, next_bb);
+      ny_braun_seal_block(cg, next_bb);
     }
     if (s->as.match.default_conseq) {
       gen_stmt(cg, scopes, depth, s->as.match.default_conseq, func_root,
                is_tail);
-      if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+      if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+        ny_braun_add_predecessor(cg, end, LLVMGetInsertBlock(cg->builder));
         LLVMBuildBr(cg->builder, end);
+      }
     } else {
+      ny_braun_add_predecessor(cg, end, LLVMGetInsertBlock(cg->builder));
       LLVMBuildBr(cg->builder, end);
     }
     LLVMPositionBuilderAtEnd(cg->builder, end);
+    ny_braun_enter_block(cg, end);
+    ny_braun_seal_block(cg, end);
     break;
   }
   case NY_S_WHILE: {
@@ -1269,6 +1303,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       if (*depth > target_depth) {
         emit_defers(cg, scopes, *depth, target_depth + 1);
       }
+      ny_braun_add_predecessor(cg, lb->bb, LLVMGetInsertBlock(cg->builder));
       LLVMBuildBr(cg->builder, lb->bb);
       LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
       LLVMPositionBuilderAtEnd(cg->builder, LLVMAppendBasicBlock(f, "dead"));

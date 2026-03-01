@@ -437,6 +437,12 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->fun_sigs);
   vec_free(&cg->global_vars);
   vec_free(&cg->interns);
+  if (cg->intern_map) {
+    free(cg->intern_map);
+    cg->intern_map = NULL;
+    cg->intern_map_cap = 0;
+    cg->intern_map_len = 0;
+  }
   vec_free(&cg->aliases);
   vec_free(&cg->import_aliases);
   vec_free(&cg->user_import_aliases);
