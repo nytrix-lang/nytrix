@@ -14,21 +14,21 @@ use std.ui.gfx.shader as shader_mod
 use std.ui.diag as diag
 
 fn shader_transpile(combined_src){
-   "Auto-generated docstring: shader_transpile."
+   "Proxy to graphics shader transpiler."
    shader_mod.transpile_shader_source(combined_src)
 }
 
 fn probe(){
-   "Auto-generated docstring: probe."
+   "Performs a diagnostic probe of the UI system."
    diag.probe()
 }
 
 fn probe_text(){
-   "Auto-generated docstring: probe_text."
+   "Returns diagnostic information as a string."
    diag.probe_text()
 }
 
 fn print_probe(){
-   "Auto-generated docstring: print_probe."
+   "Prints diagnostic information to stdout."
    diag.print_probe()
 }

@@ -65,7 +65,7 @@ fn decode(buf) -> int {
    while(offset < sub(size, 8)) {
        def chunk_id = read_be32(buf, offset)
        def chunk_size = read_be32(buf, add(offset, 4))
-       def next_chunk = add(offset, add(8, chunk_size))
+       mut next_chunk = add(offset, add(8, chunk_size))
        if(band(chunk_size, 1) != 0) { next_chunk = add(next_chunk, 1) }
        if(next_chunk > size) { break }
        if(chunk_id == COMM_ID) {

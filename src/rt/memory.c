@@ -146,6 +146,10 @@ int64_t __malloc(int64_t size) {
     return 0;
   if (size < 64)
     size = 64;
+
+  if ((uint64_t)size > SIZE_MAX - 192)
+    return 0;
+
   size = (size + 63) & ~63ULL;
   size_t total = (size_t)size + 128;
   void *p = NULL;

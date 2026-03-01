@@ -22,7 +22,7 @@ mut _backend_name = "none"
 mut _debug = -1
 
 fn _env_enabled(name){
-   "Auto-generated docstring: _env_enabled."
+   "Returns true if the environment variable is set to a truthy string value."
    def v = env(name)
    if(!v){ return false }
    def n = lower(v)
@@ -30,7 +30,7 @@ fn _env_enabled(name){
 }
 
 fn _is_debug(){
-   "Auto-generated docstring: _is_debug."
+   "Returns true if UI debugging is enabled."
    if(_debug == -1){
       _debug = _env_enabled("NY_UI_DEBUG") ? 1 : 0
    }
@@ -65,7 +65,7 @@ fn _try_backend_by_name(name){
 }
 
 fn init(){
-   "Auto-generated docstring: init."
+   "Initializes and selects the most appropriate native UI backend."
    if(_active_backend != 0){ return _active_backend }
    if(_is_debug()){ print("UI Backend: Initializing...") }
    if(_env_enabled("NY_HEADLESS")){
@@ -103,19 +103,19 @@ fn init(){
 }
 
 fn shutdown(){
-   "Auto-generated docstring: shutdown."
+   "Shuts down the active UI backend."
    if(_is_debug()){ print(f"UI Backend: Shutting down '{_backend_name}'") }
    _active_backend = 0
    _backend_name = "none"
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if any native UI backend can be successfully initialized."
    init() != 0
 }
 
 fn create_native_window(win){
-   "Auto-generated docstring: create_native_window."
+   "Delegates native window creation to the active backend."
    def b = init()
    if(_is_debug()){ print(f"UI Backend: Creating window via '{_backend_name}'") }
    if(b == 1){ return ui_x11.create_native_window(win) }
@@ -126,7 +126,7 @@ fn create_native_window(win){
 }
 
 fn poll_events(win){
-   "Auto-generated docstring: poll_events."
+   "Delegates event polling for a specific window to the active backend."
    def b = init()
    if(b == 1){ return ui_x11.poll_events(win) }
    if(b == 2){ return ui_win32.poll_events(win) }
@@ -136,7 +136,7 @@ fn poll_events(win){
 }
 
 fn swap_buffers(win){
-   "Auto-generated docstring: swap_buffers."
+   "Delegates buffer swapping (GPU) for a specific window to the active backend."
    def b = init()
    if(b == 1){ ui_x11.swap_buffers(win) }
    elif(b == 2){ ui_win32.swap_buffers(win) }
@@ -145,7 +145,7 @@ fn swap_buffers(win){
 }
 
 fn make_current(win){
-   "Auto-generated docstring: make_current."
+   "Delegates making a graphics context current to the active backend."
    def b = init()
    if(b == 1){ ui_x11.make_current(win) }
    elif(b == 2){ ui_win32.make_current(win) }
@@ -154,7 +154,7 @@ fn make_current(win){
 }
 
 fn blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: blit_buffer."
+   "Delegates raw buffer blitting (CPU) to the active backend."
    def b = init()
    if(b == 1){ return ui_x11.blit_buffer(win, buf, w, h) }
    if(b == 2){ return ui_win32.blit_buffer(win, buf, w, h) }
@@ -164,33 +164,33 @@ fn blit_buffer(win, buf, w, h){
 }
 
 fn get_backend_id(){
-   "Auto-generated docstring: get_backend_id."
+   "Returns the internal numeric ID of the active backend."
    _active_backend
 }
 fn get_backend_name(){
-   "Auto-generated docstring: get_backend_name."
+   "Returns the human-readable name of the active backend."
    _backend_name
 }
 
 fn x11_available(){
-   "Auto-generated docstring: x11_available."
+   "Checks if the X11 backend is available on this system."
    ui_x11.available()
 }
 fn wayland_available(){
-   "Auto-generated docstring: wayland_available."
+   "Checks if the Wayland backend is available. Note: experimental."
    ui_wayland.available()
 }
 fn win32_available(){
-   "Auto-generated docstring: win32_available."
+   "Checks if the Win32 backend is available."
    ui_win32.available()
 }
 fn cocoa_available(){
-   "Auto-generated docstring: cocoa_available."
+   "Checks if the Cocoa (macOS) backend is available."
    ui_cocoa.available()
 }
 
 fn mock_available(){
-   "Auto-generated docstring: mock_available."
+   "Always returns false; mock backend is deprecated in favor of headless VK/GL."
    false
 }
 

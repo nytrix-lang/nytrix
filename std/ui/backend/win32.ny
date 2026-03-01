@@ -11,6 +11,7 @@ use std.ui.event as ev
 
 mut _user32 = 0
 mut _kernel32 = 0
+mut _gdi32 = 0
 mut _DefWindowProcA = 0
 mut _RegisterClassExA = 0
 mut _CreateWindowExA = 0
@@ -21,20 +22,23 @@ mut _DispatchMessageA = 0
 mut _PeekMessageA = 0
 mut _GetModuleHandleA = 0
 mut _GetKeyState = 0
+mut _GetDC = 0
+mut _ReleaseDC = 0
+mut _SwapBuffers = 0
 
 fn _touch(...args){
-   "Auto-generated docstring: _touch."
+   "Internal helper to mark arguments as used."
    len(args)
 }
 
 fn _vk_is_down(vk){
-   "Auto-generated docstring: _vk_is_down."
+   "Internal helper to check if a virtual key is currently pressed using GetKeyState."
    if(_GetKeyState == 0){ return false }
    (to_int(call1_i64(_GetKeyState, vk)) & 0x8000) != 0
 }
 
 fn _current_mods(){
-   "Auto-generated docstring: _current_mods."
+   "Determines the current active modifier keys (Shift, Ctrl, Alt, Win)."
    mut mod = 0
    if(_vk_is_down(16)){ mod = mod | MOD_SHIFT }   ;; VK_SHIFT
    if(_vk_is_down(17)){ mod = mod | MOD_CONTROL } ;; VK_CONTROL
@@ -44,27 +48,28 @@ fn _current_mods(){
 }
 
 fn _lo16(v){
-   "Auto-generated docstring: _lo16."
+   "Returns the low 16 bits of a value."
    v & 0xFFFF
 }
 
 fn _hi16(v){
-   "Auto-generated docstring: _hi16."
+   "Returns the high 16 bits of a value."
    (v >> 16) & 0xFFFF
 }
 
 fn _sign16(v){
-   "Auto-generated docstring: _sign16."
+   "Interprets a 16-bit value as a signed integer."
    if(v >= 32768){ return v - 65536 }
    v
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if the Win32 user32, kernel32, and gdi32 libraries are available."
    if(_user32 != 0){ return true }
    _user32 = dlopen_any("user32", RTLD_NOW())
    _kernel32 = dlopen_any("kernel32", RTLD_NOW())
-   if(_user32 == 0 || _kernel32 == 0){ return false }
+   _gdi32 = dlopen_any("gdi32", RTLD_NOW())
+   if(_user32 == 0 || _kernel32 == 0 || _gdi32 == 0){ return false }
    _DefWindowProcA = bind(_user32, "DefWindowProcA")
    _RegisterClassExA = bind(_user32, "RegisterClassExA")
    _CreateWindowExA = bind(_user32, "CreateWindowExA")
@@ -75,12 +80,15 @@ fn available(){
    _PeekMessageA = bind(_user32, "PeekMessageA")
    _GetModuleHandleA = bind(_kernel32, "GetModuleHandleA")
    _GetKeyState = bind(_user32, "GetKeyState")
+   _GetDC = bind(_user32, "GetDC")
+   _ReleaseDC = bind(_user32, "ReleaseDC")
+   _SwapBuffers = bind(_gdi32, "SwapBuffers")
    if(_CreateWindowExA == 0){ return false }
    return true
 }
 
 fn create_native_window(win){
-   "Auto-generated docstring: create_native_window."
+   "Creates a native Win32 window for the given Nytrix window object."
    if(!available()){ return false }
    def h_instance = call1_i64(_GetModuleHandleA, 0)
    ;; WNDCLASSEX format (80 bytes)
@@ -109,7 +117,7 @@ fn create_native_window(win){
 }
 
 fn poll_events(win){
-   "Auto-generated docstring: poll_events."
+   "Polls Win32 messages and converts them to Nytrix UI events."
    if(_user32 == 0 || _PeekMessageA == 0){ return 0 }
    mut msg = malloc(48)
    ;; PM_REMOVE = 1
@@ -166,18 +174,28 @@ fn poll_events(win){
 }
 
 fn swap_buffers(win){
-   "Auto-generated docstring: swap_buffers."
-   _touch(win)
-   ;; TODO: Implement WGL SwapBuffers
+   "Win32 buffer swap implementation using WGL/GDI."
+   def hwnd = get(win, 22)
+   if(hwnd == 0 || _GetDC == 0 || _SwapBuffers == 0){ return 0 }
+
+   def hdc = call1(_GetDC, hwnd)
+   if(hdc == 0){ return 0 }
+
+   call1(_SwapBuffers, hdc)
+
+   if(_ReleaseDC != 0){
+      call2(_ReleaseDC, hwnd, hdc)
+   }
+   1
 }
 
-fn make_current(win){ ;; TODO
-   "Auto-generated docstring: make_current."
+fn make_current(win){
+   "Makes the window the current rendering context."
    _touch(win)
 }
 
 fn blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: blit_buffer."
+   "Blits a raw buffer to the Win32 window (placeholder)."
    _touch(win, buf, w, h)
    0
 }

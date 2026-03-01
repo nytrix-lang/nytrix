@@ -120,7 +120,7 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
     LLVMAddSymbol(name, (void *)(uintptr_t)(fn_ptr));                          \
     LLVMValueRef val = LLVMGetNamedFunction(mod, name);                        \
     if (val) {                                                                 \
-      LLVMAddGlobalMapping(ee, val, (void *)fn_ptr);                           \
+      LLVMAddGlobalMapping(ee, val, (void *)(uintptr_t)fn_ptr);                \
     }                                                                          \
   } while (0)
 #define MAP_GV(name, ptr)                                                      \

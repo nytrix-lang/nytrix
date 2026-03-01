@@ -5,6 +5,7 @@ use std.core *
 use std.math.random *
 use std.os.args *
 use std.os.time *
+use std.os *
 use std.text *
 use std.text.bytes *
 use std.text.term *
@@ -25,6 +26,10 @@ if(W < 1){ W = 80 }
 if(H < 1){ H = 24 }
 mut max_frames = 0
 mut frame_count = 0
+
+if(env("CI") || env("NYTRIX_TEST_MODE") == "1"){
+   max_frames = 100
+}
 
 def av = args()
 mut ai = 0

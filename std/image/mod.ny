@@ -105,11 +105,67 @@ if(comptime{__main()}){
    
    print("Testing std.image dispatcher...")
    
-   def bmp_h = malloc(14) init_str(bmp_h, 14) store8(bmp_h, 66, 0) store8(bmp_h, 77, 1)
-   def png_h = malloc(8) init_str(png_h, 8) store8(png_h, 137, 0) store8(png_h, 80, 1)
-   
-   load_mem(bmp_h)
-   load_mem(png_h)
-   
-   print("✓ std.image dispatcher tests passed")
+   fn verify_img(path, name){
+      def res = load(path)
+      if(!res){
+         print("  FAILED: Could not load " + path)
+         return false
+      }
+      
+      def w = get(res, "width")
+      def h = get(res, "height")
+      if(w != 2 || h != 2){
+         print("  FAILED: " + name + " invalid dimensions " + to_str(w) + "x" + to_str(h))
+         return false
+      }
+
+      def data = get(res, "data")
+      def chan = get(res, "channels")
+      
+      ;; Check top-left pixel (Red)
+      if(chan >= 3){
+         def r = load8(data, 0)
+         def g = load8(data, 1)
+         def b = load8(data, 2)
+         
+         ;; For JPEG we allow some error
+         mut tolerance = 5
+         if(str.contains(name, "JPEG")){ tolerance = 40 }
+         
+         if(abs(r - 255) > tolerance || g > tolerance || b > tolerance){
+            print("  FAILED: " + name + " pixel(0,0) mismatch: RGB(" + to_str(r) + "," + to_str(g) + "," + to_str(b) + ") expected RGB(255,0,0)")
+            return false
+         }
+      } elif(chan == 1){
+         def v = load8(data, 0)
+         if(abs(v - 76) > 20){ ;; Gray value for Red is approx 76
+            print("  FAILED: " + name + " pixel(0,0) mismatch: Gray(" + to_str(v) + ") expected approx 76")
+            return false
+         }
+      }
+      
+      print("  SUCCESS: " + name + " (" + to_str(w) + "x" + to_str(h) + ")")
+      true
+   }
+
+   mut ok = true
+   ok = ok && verify_img("etc/assets/images/test_rgba.png", "PNG RGBA")
+   ok = ok && verify_img("etc/assets/images/test_rgb.png", "PNG RGB")
+   ok = ok && verify_img("etc/assets/images/test_gray.png", "PNG Gray")
+   ok = ok && verify_img("etc/assets/images/test_graya.png", "PNG Gray+Alpha")
+   ok = ok && verify_img("etc/assets/images/test_palette.png", "PNG Palette")
+   ok = ok && verify_img("etc/assets/images/test.jpg", "JPEG")
+   ok = ok && verify_img("etc/assets/images/test_rgba_uncompressed.tga", "TGA RGBA Uncompressed")
+   ok = ok && verify_img("etc/assets/images/test_rgba_rle.tga", "TGA RGBA RLE")
+   ok = ok && verify_img("etc/assets/images/test_rgb_uncompressed.tga", "TGA RGB Uncompressed")
+   ok = ok && verify_img("etc/assets/images/test_rgb_rle.tga", "TGA RGB RLE")
+   ok = ok && verify_img("etc/assets/images/test_rgba.bmp", "BMP RGBA")
+   ok = ok && verify_img("etc/assets/images/test_rgb.bmp", "BMP RGB")
+
+   if(ok){
+      print("✓ std.image all format tests passed")
+   } else {
+      print("✗ SOME std.image TESTS FAILED")
+      __exit(1)
+   }
 }

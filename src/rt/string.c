@@ -87,7 +87,7 @@ int64_t __to_str(int64_t v) {
   if (v & 1) {
     int64_t val = v >> 1;
     char buf[64];
-    int len = sprintf(buf, "%" PRId64, (int64_t)val);
+    int len = snprintf(buf, sizeof(buf), "%" PRId64, (int64_t)val);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
@@ -97,7 +97,7 @@ int64_t __to_str(int64_t v) {
   }
   if ((v & 3) == 2) {
     char buf[64];
-    int len = sprintf(buf, "<fn 0x%lx>", (unsigned long)(v & ~3ULL));
+    int len = snprintf(buf, sizeof(buf), "<fn 0x%lx>", (unsigned long)(v & ~3ULL));
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
@@ -114,7 +114,7 @@ int64_t __to_str(int64_t v) {
       double d;
       memcpy(&d, (void *)(uintptr_t)v, 8);
       char buf[64];
-      int len = sprintf(buf, "%g", d);
+      int len = snprintf(buf, sizeof(buf), "%g", d);
       int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
       *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
       *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
@@ -123,7 +123,7 @@ int64_t __to_str(int64_t v) {
       return res;
     }
     char buf[64];
-    int len = sprintf(buf, "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
+    int len = snprintf(buf, sizeof(buf), "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
@@ -133,7 +133,7 @@ int64_t __to_str(int64_t v) {
   }
   if (is_ptr(v)) {
     char buf[64];
-    int len = sprintf(buf, "<ptr 0x%lx>", (unsigned long)v);
+    int len = snprintf(buf, sizeof(buf), "<ptr 0x%lx>", (unsigned long)v);
     int64_t res = __malloc(((int64_t)(len + 1) << 1) | 1);
     *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
     *(int64_t *)(uintptr_t)((char *)res - 16) = ((int64_t)len << 1) | 1;
