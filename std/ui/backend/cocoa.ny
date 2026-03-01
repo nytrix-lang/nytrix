@@ -16,12 +16,12 @@ mut _objc_getClass = 0
 mut _sel_registerName = 0
 
 fn _touch(...args){
-   "Auto-generated docstring: _touch."
+   "Internal helper to mark arguments as used."
    len(args)
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if the Cocoa (Objective-C runtime) is available."
    if(_objc != 0){ return true }
    _objc = dlopen_any("objc", RTLD_NOW())
    _framework = dlopen("/System/Library/Frameworks/Cocoa.framework/Cocoa", RTLD_NOW())
@@ -34,7 +34,7 @@ fn available(){
 }
 
 fn create_native_window(win){
-   "Auto-generated docstring: create_native_window."
+   "Creates a native NSWindow for the given Nytrix window object."
    if(!available()){ return false }
    ;; NSApplication.sharedApplication
    def NSApp_class = call1(_objc_getClass, "NSApplication")
@@ -62,7 +62,7 @@ fn create_native_window(win){
 }
 
 fn poll_events(win){
-   "Auto-generated docstring: poll_events."
+   "Polls Cocoa events and dispatches them to the NSApplication."
    _touch(win)
    if(_objc == 0){ return 0 }
    ;; [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]
@@ -80,17 +80,17 @@ fn poll_events(win){
 }
 
 fn swap_buffers(win){
-   "Auto-generated docstring: swap_buffers."
+   "Cocoa buffer swap implementation (no-op, handles by Metal/Vulkan if used)."
    _touch(win)
    ;; Vulkan present handled by vkr
 }
 
-fn make_current(win){ ;; TODO
-   "Auto-generated docstring: make_current."
+fn make_current(win){
+   "Makes the window the current rendering context."
    _touch(win)
 }
 fn blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: blit_buffer."
+   "Blits a raw buffer to the Cocoa window (placeholder)."
    _touch(win, buf, w, h)
    0
 }

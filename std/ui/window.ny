@@ -62,7 +62,7 @@ def _W_MODIFIERS = 24
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
 
 fn _seq_equal(a, b){
-   "Auto-generated docstring: _seq_equal."
+   "Checks if two key event sequences (chords) are functionally identical."
    if(len(a) != len(b)){ return false }
    mut i = 0
    def mask = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
@@ -80,7 +80,7 @@ fn _seq_equal(a, b){
 }
 
 fn _seq_is_prefix(pref, full){
-   "Auto-generated docstring: _seq_is_prefix."
+   "Checks if one key sequence is a proper prefix of another."
    if(len(pref) >= len(full)){ return false }
    mut i = 0
    def mask = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
@@ -98,7 +98,7 @@ fn _seq_is_prefix(pref, full){
 }
 
 fn _str_slice(s, start){
-   "Auto-generated docstring: _str_slice."
+   "Internal helper to slice a string from start to end."
    def slen = str.str_len(s)
    if(start >= slen){ return "" }
    mut out = malloc(slen - start + 1)
@@ -113,12 +113,12 @@ fn _str_slice(s, start){
 }
 
 fn _normalize_mod(mod){
-   "Auto-generated docstring: _normalize_mod."
+   "Masks modifier bits to only the supported standard modifiers."
    mod & _MOD_MASK
 }
 
 fn _normalize_key(key){
-   "Auto-generated docstring: _normalize_key."
+   "Normalizes a key code for stable comparisons across different keyboard layouts and backends."
    ;; Normalize ASCII letters to uppercase for stable chord matching.
    if(key >= 97 && key <= 122){ return key - 32 }
    ;; Normalize common non-printable key aliases from X11 keysyms.
@@ -134,7 +134,7 @@ fn _normalize_key(key){
 }
 
 fn _mod_bit_for_key(key){
-   "Auto-generated docstring: _mod_bit_for_key."
+   "Returns the modifier bitmask corresponding to a native keysym/VK code."
    ;; X11 keysyms + Win32 virtual-key codes for modifier keys.
    if(key == 0xFFE1 || key == 0xFFE2 || key == 16){ return MOD_SHIFT }
    if(key == 0xFFE3 || key == 0xFFE4 || key == 17){ return MOD_CONTROL }
@@ -145,7 +145,7 @@ fn _mod_bit_for_key(key){
 }
 
 fn _mods_from_key_states(ks){
-   "Auto-generated docstring: _mods_from_key_states."
+   "Reconstructs modifier bitmask from the active key states dictionary."
    if(!is_dict(ks)){ return 0 }
    mut mods = 0
    if(dict_get(ks, 0xFFE1, false) || dict_get(ks, 0xFFE2, false) || dict_get(ks, 16, false)){
@@ -168,7 +168,7 @@ fn _mods_from_key_states(ks){
 }
 
 fn _parse_single_key(tok){
-   "Auto-generated docstring: _parse_single_key."
+   "Parses a single key notation string (e.g. 'Ctrl-Alt-K') into a [key, mod] list."
    mut mods = 0
    mut p = str.upper(tok)
    while(true){
@@ -217,7 +217,7 @@ fn _parse_single_key(tok){
 }
 
 fn _parse_notation(notation){
-   "Auto-generated docstring: _parse_notation."
+   "Parses a full key sequence notation (e.g. 'Ctrl-X Ctrl-C')."
    def toks = str.split(notation, " ")
    mut seq = []
    mut i = 0
@@ -236,18 +236,18 @@ mut _windows = list(8)
 mut _sys_backend = 0 ;; unresolved; then 1=X11, 2=Win32, 3=Cocoa, 4=Wayland, -1=mock
 
 fn backend(){
-   "Auto-generated docstring: backend."
+   "Returns the name of the active UI backend."
    ui_backend.get_backend_name()
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if a native UI backend is available on this system."
    ui_backend.available()
 }
 
 mut _debug = -1
 fn _is_debug(){
-   "Auto-generated docstring: _is_debug."
+   "Returns true if UI debugging is enabled via NY_UI_DEBUG."
    if(_debug == -1){
       def v = env("NY_UI_DEBUG")
       _debug = (v && (eq(v, "1") || eq(v, "true"))) ? 1 : 0
@@ -256,17 +256,17 @@ fn _is_debug(){
 }
 
 fn _is_window(win){
-   "Auto-generated docstring: _is_window."
+   "Validation helper to check if an object is a valid Nytrix window list."
    is_list(win) && len(win) > 10 && get(win, 0, "") == "std.ui.window"
 }
 
 fn _sys_init(){
-   "Auto-generated docstring: _sys_init."
+   "Ensures the underlying platform backend is initialized."
    _sys_backend = ui_backend.init()
 }
 
 fn open_window(name, x, y, w, h, flags=0){
-   "Auto-generated docstring: open_window."
+   "Creates and opens a new native window."
    if(!is_str(name)){ name = to_str(name) }
    if(w < 1){ w = 1 }
    if(h < 1){ h = 1 }
@@ -287,16 +287,16 @@ fn open_window(name, x, y, w, h, flags=0){
    win = append(win, true)
    win = append(win, _sys_backend)
    win = append(win, dict(16)) ;; KEY_STATES
-   win = append(win, 0)      ;; MOUSE_X
-   win = append(win, 0)      ;; MOUSE_Y
-   win = append(win, dict(8)) ;; MOUSE_BUTTONS
-   win = append(win, [])      ;; CHORD_SEQ
-   win = append(win, 0)       ;; CHORD_TIME
-   win = append(win, [])      ;; BINDINGS
+   win = append(win, 0)        ;; MOUSE_X
+   win = append(win, 0)        ;; MOUSE_Y
+   win = append(win, dict(8))  ;; MOUSE_BUTTONS
+   win = append(win, [])       ;; CHORD_SEQ
+   win = append(win, 0)        ;; CHORD_TIME
+   win = append(win, [])       ;; BINDINGS
    win = append(win, dict(16)) ;; LAST_KEY_STATES
-   win = append(win, 0)       ;; NATIVE_CTX
-   win = append(win, 0)       ;; NATIVE_AUX
-   win = append(win, 0)       ;; MODIFIERS (normalized MOD_* mask)
+   win = append(win, 0)        ;; NATIVE_CTX
+   win = append(win, 0)        ;; NATIVE_AUX
+   win = append(win, 0)        ;; MODIFIERS (normalized MOD_* mask)
    if(_is_debug()){ print(f"UI: Creating window '{name}' {w}x{h}") }
    def created = ui_backend.create_native_window(win)
    if(!created){ return false }
@@ -306,24 +306,24 @@ fn open_window(name, x, y, w, h, flags=0){
 }
 
 fn create_window(name, x, y, w, h, flags=0){
-   "Auto-generated docstring: create_window."
+   "Alias for open_window."
    open_window(name, x, y, w, h, flags)
 }
 
 fn window_id(win){
-   "Auto-generated docstring: window_id."
+   "Returns the numeric ID of the window."
    if(!_is_window(win)){ return 0 }
    get(win, _W_ID, 0)
 }
 
 fn window_title(win){
-   "Auto-generated docstring: window_title."
+   "Returns the current title of the window."
    if(!_is_window(win)){ return "" }
    get(win, _W_TITLE, "")
 }
 
 fn window_set_title(win, title){
-   "Auto-generated docstring: window_set_title."
+   "Sets the title of the window."
    if(!_is_window(win)){ return false }
    if(!is_str(title)){ title = to_str(title) }
    set_idx(win, _W_TITLE, title)
@@ -331,19 +331,19 @@ fn window_set_title(win, title){
 }
 
 fn window_position(win){
-   "Auto-generated docstring: window_position."
+   "Returns the current screen position coordinates [x, y] of the window."
    if(!_is_window(win)){ return [0, 0] }
    return [get(win, _W_X, 0), get(win, _W_Y, 0)]
 }
 
 fn window_size(win){
-   "Auto-generated docstring: window_size."
+   "Returns the current dimensions [width, height] of the window."
    if(!_is_window(win)){ return [0, 0] }
    return [get(win, _W_W, 0), get(win, _W_H, 0)]
 }
 
 fn window_move(win, x, y){
-   "Auto-generated docstring: window_move."
+   "Moves the window to a new screen position."
    if(!_is_window(win)){ return false }
    set_idx(win, _W_X, x)
    set_idx(win, _W_Y, y)
@@ -354,7 +354,7 @@ fn window_move(win, x, y){
 }
 
 fn window_resize(win, w, h){
-   "Auto-generated docstring: window_resize."
+   "Resizes the window."
    if(!_is_window(win)){ return false }
    if(w < 1){ w = 1 }
    if(h < 1){ h = 1 }
@@ -367,13 +367,13 @@ fn window_resize(win, w, h){
 }
 
 fn window_should_close(win){
-   "Auto-generated docstring: window_should_close."
+   "Returns true if the window has been marked for closure."
    if(!_is_window(win)){ return true }
    !!get(win, _W_SHOULD_CLOSE, false)
 }
 
 fn window_set_should_close(win, should_close=true){
-   "Auto-generated docstring: window_set_should_close."
+   "Marks the window as needing to close."
    if(!_is_window(win)){ return false }
    def old = window_should_close(win)
    def now = !!should_close
@@ -383,25 +383,25 @@ fn window_set_should_close(win, should_close=true){
 }
 
 fn window_close(win){
-   "Auto-generated docstring: window_close."
+   "Initiates the window closure process."
    window_set_should_close(win, true)
 }
 
 fn window_exit_key(win){
-   "Auto-generated docstring: window_exit_key."
+   "Returns the key code that triggers window closure (default ESC)."
    if(!_is_window(win)){ return KEY_NULL }
    get(win, _W_EXIT_KEY, KEY_ESCAPE)
 }
 
 fn window_set_exit_key(win, key){
-   "Auto-generated docstring: window_set_exit_key."
+   "Configures the key that triggers window closure."
    if(!_is_window(win)){ return false }
    set_idx(win, _W_EXIT_KEY, key)
    true
 }
 
 fn window_push_event(win, kind, data=0){
-   "Auto-generated docstring: window_push_event."
+   "Pushes an artificial event into the window's event queue."
    if(!_is_window(win)){ return false }
    mut q = get(win, _W_EVENTS, 0)
    if(!is_list(q)){ q = list(8) }
@@ -411,7 +411,7 @@ fn window_push_event(win, kind, data=0){
 }
 
 fn window_bind(win, notation, action){
-   "Auto-generated docstring: window_bind."
+   "Binds a key sequence to a callback function."
    if(!_is_window(win) || !is_str(notation)){ return false }
    def seq = _parse_notation(notation)
    if(len(seq) == 0){ return false }
@@ -434,15 +434,13 @@ fn window_bind(win, notation, action){
 }
 
 fn _window_process_internal(win, e){
-   "Auto-generated docstring: _window_process_internal."
+   "Internal dispatcher for processing raw events and updating window state."
    def typ = event_type(e)
    if(typ == EVENT_KEY_PRESSED || typ == EVENT_KEY_RELEASED){
       mut data = event_data(e)
       def raw_key = is_dict(data) ? dict_get(data, "key", 0) : data
       def key = _normalize_key(raw_key)
       mut mod = _normalize_mod(is_dict(data) ? dict_get(data, "mod", 0) : 0)
-      ;; Update last state
-      set_idx(win, _W_LAST_KEY_STATES, dict_clone(get(win, _W_KEY_STATES, dict(16))))
       mut ks = get(win, _W_KEY_STATES, 0)
       if(!ks){ ks = dict(16) }
       ks = dict_set(ks, key, (typ == EVENT_KEY_PRESSED))
@@ -550,45 +548,49 @@ fn _window_process_internal(win, e){
 }
 
 fn window_check_event(win){
-   "Auto-generated docstring: window_check_event."
+   "Polls and returns the next pending event for the window."
    if(!_is_window(win)){ return 0 }
    ;; Poll platform evts
+   ui_backend.poll_events(win)
+   mut q = get(win, _W_EVENTS, 0)
+   if(!is_list(q) || len(q) == 0){ return 0 }
+   
    mut tries = 0
    while(tries < 16){
-      ui_backend.poll_events(win)
-      def q = get(win, _W_EVENTS, 0)
-      if(!is_list(q) || len(q) == 0){ return 0 }
+      if(len(q) == 0){ break }
       def e = ev.queue_pop(q)
+      set_idx(win, _W_EVENTS, q) ;; Update queue state after pop
       if(!_window_process_internal(win, e)){
          return e
       }
       tries += 1
+      q = get(win, _W_EVENTS, 0) ;; Refresh queue ref if updated internally
    }
    0
 }
 
 fn event_type(e){
-   "Auto-generated docstring: event_type."
+   "Returns the type constant of the event."
    ev.event_type(e)
 }
 
 fn event_window(e){
-   "Auto-generated docstring: event_window."
+   "Returns the window object associated with the event."
    ev.event_window(e)
 }
 
 fn event_window_id(e){
-   "Auto-generated docstring: event_window_id."
+   "Returns the unique ID of the window associated with the event."
    ev.event_window_id(e)
 }
 
 fn event_data(e){
-   "Auto-generated docstring: event_data."
+   "Returns the payload/data associated with the event."
    ev.event_data(e)
 }
 
 fn window_key_down(win, key){
-   "Auto-generated docstring: window_key_down."
+   "Returns true if the specified key is currently held down in the window."
    if(!_is_window(win)){ return false }
    key = _normalize_key(key)
    mut ks = get(win, _W_KEY_STATES, 0)
@@ -597,13 +599,13 @@ fn window_key_down(win, key){
 }
 
 fn window_modifiers(win){
-   "Auto-generated docstring: window_modifiers."
+   "Returns the current modifier bitmask for the window."
    if(!_is_window(win)){ return 0 }
    _normalize_mod(get(win, _W_MODIFIERS, 0))
 }
 
 fn window_mod_down(win, mod){
-   "Auto-generated docstring: window_mod_down."
+   "Returns true if the specified modifier combination is currently active."
    if(!_is_window(win)){ return false }
    mod = _normalize_mod(mod)
    if(mod == 0){ return false }
@@ -611,7 +613,7 @@ fn window_mod_down(win, mod){
 }
 
 fn window_key_pressed(win, key){
-   "Auto-generated docstring: window_key_pressed."
+   "Returns true if the specified key was pressed in the most recent frame."
    if(!_is_window(win)){ return false }
    key = _normalize_key(key)
    def ks = get(win, _W_KEY_STATES, 0)
@@ -621,25 +623,30 @@ fn window_key_pressed(win, key){
 }
 
 fn window_swap_buffers(win){
-   "Auto-generated docstring: window_swap_buffers."
+   "Swaps the front and back buffers for the window (GPU context)."
    if(!_is_window(win)){ return }
    ui_backend.swap_buffers(win)
 }
 fn window_make_current(win){
-   "Auto-generated docstring: window_make_current."
+   "Makes the window's graphics context current for the calling thread."
    if(!_is_window(win)){ return }
    ui_backend.make_current(win)
 }
 
+fn window_update_input(win){
+   "Snapshots the current input state for delta comparisons (e.g. key_pressed)."
+   if(!_is_window(win)){ return }
+   set_idx(win, _W_LAST_KEY_STATES, dict_clone(get(win, _W_KEY_STATES, dict(16))))
+}
 
 fn window_mouse_position(win){
-   "Auto-generated docstring: window_mouse_position."
+   "Returns the current mouse cursor position [x, y] relative to the window."
    if(!_is_window(win)){ return [0, 0] }
    return [get(win, _W_MOUSE_X, 0), get(win, _W_MOUSE_Y, 0)]
 }
 
 fn window_mouse_button_down(win, button){
-   "Auto-generated docstring: window_mouse_button_down."
+   "Returns true if the specified mouse button is currently held down."
    if(!_is_window(win)){ return false }
    mut mb = get(win, _W_MOUSE_BUTTONS, 0)
    if(!mb){ return false }
@@ -647,7 +654,7 @@ fn window_mouse_button_down(win, button){
 }
 
 fn window_on_key(win, key, pressed=true, repeat=false, mod=0){
-   "Auto-generated docstring: window_on_key."
+   "Internal entry point for reporting raw key events into the window system."
    if(!_is_window(win)){ return false }
    key = _normalize_key(key)
    mod = _normalize_mod(mod)
@@ -672,7 +679,7 @@ fn window_on_key(win, key, pressed=true, repeat=false, mod=0){
 }
 
 fn window_match_chord(event, key, mod=0){
-   "Auto-generated docstring: window_match_chord."
+   "Convenience helper to check if an event matches a specific key+mod chord."
    if(event_type(event) != EVENT_KEY_PRESSED){ return false }
    def data = event_data(event)
    if(!is_dict(data)){ return false }
@@ -684,7 +691,7 @@ fn window_match_chord(event, key, mod=0){
 }
 
 fn poll_events(){
-   "Auto-generated docstring: poll_events."
+   "Polls events for all currently open windows."
    mut i = 0
    while(i < len(_windows)){
       def w = get(_windows, i)
@@ -697,7 +704,7 @@ fn poll_events(){
 }
 
 fn windows_open(){
-   "Auto-generated docstring: windows_open."
+   "Returns the count of windows that are currently open."
    mut i = 0
    mut n = 0
    while(i < len(_windows)){
@@ -709,7 +716,7 @@ fn windows_open(){
 }
 
 fn window_last(){
-   "Auto-generated docstring: window_last."
+   "Returns the most recently created window object."
    if(len(_windows) == 0){ return 0 }
    def w = get(_windows, len(_windows) - 1, 0)
    if(_is_window(w)){ return w }
@@ -717,7 +724,7 @@ fn window_last(){
 }
 
 fn window_blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: window_blit_buffer."
+   "Blits a raw pixel buffer directly to the window (CPU mode)."
    if(!_is_window(win)){ return 0 }
    ui_backend.blit_buffer(win, buf, w, h)
 }

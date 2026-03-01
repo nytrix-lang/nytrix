@@ -1089,7 +1089,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   char entry_name[64];
   static int ctm_count = 0;
-  sprintf(entry_name, "__ctm_entry_%d", ctm_count++);
+  snprintf(entry_name, sizeof(entry_name), "__ctm_entry_%d", ctm_count++);
 
   // Any function that is currently incomplete (not terminated) is likely the
   // one containing the comptime block or one of its parents in a recursive

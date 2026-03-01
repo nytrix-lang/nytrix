@@ -50,12 +50,12 @@ mut _xdg_wm_base_listener_ptr = 0
 mut _xdg_toplevel_listener_ptr = 0
 
 fn _touch(...args){
-   "Auto-generated docstring: _touch."
+   "Internal helper to mark arguments as used."
    len(args)
 }
 
 fn _new_wl_interface(name, version, req_cnt, req_ptr, ev_cnt, ev_ptr){
-   "Auto-generated docstring: _new_wl_interface."
+   "Internal helper to construct a Wayland interface structure in memory."
    def ptr = malloc(48)
    store64(ptr, to_int(str_ptr(name)))
    store32(ptr + 8, version)
@@ -67,7 +67,7 @@ fn _new_wl_interface(name, version, req_cnt, req_ptr, ev_cnt, ev_ptr){
 }
 
 fn _setup_xdg_interfaces(){
-   "Auto-generated docstring: _setup_xdg_interfaces."
+   "Initializes the standard XDG shell interfaces (wm_base, surface, toplevel)."
    if(_xdg_wm_base_interface != 0){ return 0 }
    ;; xdg_wm_base events: ping(u)
    def xdg_wm_base_events = malloc(24)
@@ -93,7 +93,7 @@ fn _setup_xdg_interfaces(){
 }
 
 fn _registry_global(data, registry, id, interface_name_ptr, version){
-   "Auto-generated docstring: _registry_global."
+   "Wayland registry callback: handles binding of global interfaces."
    _touch(data, version)
    def name = str_from_ptr(interface_name_ptr)
    if(name == "wl_compositor"){
@@ -109,13 +109,13 @@ fn _registry_global(data, registry, id, interface_name_ptr, version){
 }
 
 fn _registry_global_remove(data, registry, id){
-   "Auto-generated docstring: _registry_global_remove."
+   "Wayland registry callback: handles interface removal (no-op)."
    _touch(data, registry, id)
    0
 }
 
 fn _xdg_wm_base_ping(data, wm_base, serial){
-   "Auto-generated docstring: _xdg_wm_base_ping."
+   "Responds to Wayland compositor ping messages."
    _touch(data)
    ;; Pong back (opcode 3)
    call(_wl_proxy_marshal_flags, wm_base, 3, 0, 1, 0, serial)
@@ -123,7 +123,7 @@ fn _xdg_wm_base_ping(data, wm_base, serial){
 }
 
 fn _xdg_surface_configure(data, surface, serial){
-   "Auto-generated docstring: _xdg_surface_configure."
+   "Handles XDG surface configuration events."
    ;; Ack configure (opcode 4)
    call(_wl_proxy_marshal_flags, surface, 4, 0, 1, 0, serial)
    ;; Commit the surface after ack (opcode 6 in wl_surface)
@@ -138,7 +138,7 @@ fn _xdg_surface_configure(data, surface, serial){
 }
 
 fn _wl_emit(win, kind, data=0){
-   "Auto-generated docstring: _wl_emit."
+   "Pushes a Wayland-triggered event into the Nytrix window queue."
    if(win == 0){ return 0 }
    def q = get(win, 10, 0)
    set_idx(win, 10, ev.queue_push(q, ev.make_event(kind, win, get(win, 1), data)))
@@ -146,7 +146,7 @@ fn _wl_emit(win, kind, data=0){
 }
 
 fn _xdg_toplevel_configure(data, toplevel, w, h, states){
-   "Auto-generated docstring: _xdg_toplevel_configure."
+   "Handles XDG toplevel resize and state changes."
    _touch(toplevel, states)
    if(data == 0){ return 0 }
    mut nw = w
@@ -171,7 +171,7 @@ fn _xdg_toplevel_configure(data, toplevel, w, h, states){
 }
 
 fn _xdg_toplevel_close(data, toplevel){
-   "Auto-generated docstring: _xdg_toplevel_close."
+   "Handles Wayland window close requests."
    _touch(toplevel)
    if(data != 0){
       set_idx(data, 8, true)
@@ -183,7 +183,7 @@ fn _xdg_toplevel_close(data, toplevel){
 mut _debug = -1
 
 fn _is_debug(){
-   "Auto-generated docstring: _is_debug."
+   "Returns true if Wayland-specific debugging is enabled."
    if(_debug == -1){
       def v = env("NY_UI_DEBUG")
       _debug = (v && (eq(v, "1") || eq(v, "true"))) ? 1 : 0
@@ -192,7 +192,7 @@ fn _is_debug(){
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if a Wayland display connection can be established."
    def w_disp_env = env("WAYLAND_DISPLAY")
    def xdg_sess = env("XDG_SESSION_TYPE")
    if(str_len(w_disp_env) == 0 && xdg_sess != "wayland"){ return false }
@@ -252,7 +252,7 @@ fn available(){
 }
 
 fn create_native_window(win){
-   "Auto-generated docstring: create_native_window."
+   "Creates a native Wayland surface and XDG toplevel for the given window."
    if(!available() || _compositor_ptr == 0 || _xdg_wm_base_ptr == 0){ return false }
    def title = get(win, 2, "Window")
    def w = get(win, 5, 800)
@@ -322,7 +322,7 @@ fn create_native_window(win){
 }
 
 fn poll_events(win){
-   "Auto-generated docstring: poll_events."
+   "Polls Wayland display messages and flushes the outgoing queue."
    _touch(win)
    if(_disp == 0){ return 0 }
    call1(_wl_display_dispatch_pending, _disp)
@@ -331,17 +331,17 @@ fn poll_events(win){
 }
 
 fn swap_buffers(win){
-   "Auto-generated docstring: swap_buffers."
+   "Wayland buffer swap implementation (no-op, handles by Vulkan/EGL)."
    _touch(win)
    ;; TODO: Implement EGL/Wayland swap
 }
 fn make_current(win){
-   "Auto-generated docstring: make_current."
+   "Makes the window the current rendering context (placeholder)."
    _touch(win)
    ;; TODO: Implement EGL/Wayland make_current
 }
 fn blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: blit_buffer."
+   "Blits a raw buffer to the Wayland surface (placeholder)."
    _touch(win, buf, w, h)
    0
 }

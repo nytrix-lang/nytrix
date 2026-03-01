@@ -17,47 +17,47 @@ use std.text *
 ;; Low-level byte readers (big-endian)
 
 fn _be_byte(d, p){
-   "Auto-generated docstring: _u8."
+   "Returns an unsigned 8-bit byte from the data buffer at offset p."
    mut v = load8(d, p)
    if(v < 0){ v += 256 }
    v
 }
 fn _i8(d, p){
-   "Auto-generated docstring: _i8."
+   "Returns a signed 8-bit byte from the data buffer."
    def v = _be_byte(d, p)
    if(v >= 128){ return v - 256 }
    v
 }
 fn _be_word(d, p){
-   "Auto-generated docstring: _u16."
+   "Returns a big-endian unsigned 16-bit word."
    def hi = _be_byte(d, p)
    def lo = _be_byte(d, p + 1)
    return (hi * 256) + lo
 }
 fn _be_sword(d, p){
-   "Auto-generated docstring: _i16."
+   "Returns a big-endian signed 16-bit word."
    def v = _be_word(d,p)
    if(v >= 32768){ return v - 65536 }
    return v
 }
 fn _be_dword(d, p){
-   "Auto-generated docstring: _u32."
+   "Returns a big-endian unsigned 32-bit double word."
    def hi = _be_word(d, p)
    def lo = _be_word(d, p + 2)
    return (hi * 65536) + lo
 }
 
 fn _tag4(d, p, a, b, c, e){
-   "Auto-generated docstring: _tag4."
+   "Validation helper to check 4-byte signature tags."
    _be_byte(d, p) == a && _be_byte(d, p + 1) == b && _be_byte(d, p + 2) == c && _be_byte(d, p + 3) == e
 }
 fn _tag(d, p, t){
-   "Auto-generated docstring: _tag."
+   "Validation helper to check string-based 4-byte tags."
    _tag4(d, p, load8(t,0), load8(t,1), load8(t,2), load8(t,3))
 }
 
 fn _is_font(d){
-   "Auto-generated docstring: _is_font."
+   "Returns true if the data buffer starts with a known font signature."
    if(_tag4(d,0,49,0,0,0)){ return 1 }  ;; TrueType 1  (0x31, 0, 0, 0 = '1' 0 0 0)
    if(_tag(d,0,"OTTO")){ return 1 }     ;; OTF/CFF
    if(_tag4(d,0,0,1,0,0)){ return 1 }   ;; OpenType 1.0
@@ -85,7 +85,7 @@ fn _find_table(d, fontstart, tag_code){
 }
 
 fn _get_font_offset(d, index){
-   "Auto-generated docstring: _get_font_offset."
+   "Returns the byte offset for the N-th font in a collection (TTC)."
    if(_is_font(d)){
       if(index == 0){ return 0 }
       return -1
@@ -105,7 +105,7 @@ fn _get_font_offset(d, index){
 ;; Keys: data, start, cmap_idx, loca, head, glyf, hhea, hmtx, kern, loca_fmt, n_glyphs
 
 fn _make_info(d, fontstart){
-   "Auto-generated docstring: _make_info."
+   "Internal helper to construct a font info dictionary."
    mut info = dict(12)
    info = dict_set(info, "data",  d)
    info = dict_set(info, "start", fontstart)
@@ -152,14 +152,14 @@ fn _make_info(d, fontstart){
 
 
 fn _l2(a, b){
-   "Auto-generated docstring: _l2."
+   "Internal helper to create a 2-element list."
    mut l = list(2)
    l = append(l, a)
    l = append(l, b)
    l
 }
 fn _l3(a, b, c){
-   "Auto-generated docstring: _l3."
+   "Internal helper to create a 3-element list."
    mut l = list(3)
    l = append(l, a)
    l = append(l, b)
@@ -167,7 +167,7 @@ fn _l3(a, b, c){
    l
 }
 fn _l4(a, b, c, d){
-   "Auto-generated docstring: _l4."
+   "Internal helper to create a 4-element list."
    mut l = list(4)
    l = append(l, a)
    l = append(l, b)
@@ -299,7 +299,7 @@ fn scale_for_em(info, pixels){
 ;; Glyph index lookup
 
 fn _cmap_fmt4_find(d, cmap_idx, cp){
-   "Auto-generated docstring: _cmap_fmt4_find."
+   "Internal helper for cmap Format 4 (segment mapping to delta values)."
    def seg_count_x2 = _be_word(d, cmap_idx + 6)
    def seg_count = seg_count_x2 / 2
    def end_arr   = cmap_idx + 14
@@ -326,7 +326,7 @@ fn _cmap_fmt4_find(d, cmap_idx, cp){
 }
 
 fn _cmap_fmt12_find(d, cmap_idx, cp){
-   "Auto-generated docstring: _cmap_fmt12_find."
+   "Internal helper for cmap Format 12 (segmented coverage)."
    def n_groups = _be_dword(d, cmap_idx + 12)
    mut lo = 0 mut hi = n_groups
    while(lo < hi){
@@ -432,7 +432,7 @@ fn get_kern(info, g1, g2){
 ;; Returns list of contours, each contour is list of [x,y,on_curve]
 
 fn _glyph_contours(info, gi){
-   "Auto-generated docstring: _glyph_contours."
+   "Extracts raw contour points for glyph `gi` from the 'glyf' table."
    def d   = dict_get(info, "data")
    def off = _glyph_offset(info, gi)
    if(off < 0){ return list(0) }
@@ -534,7 +534,7 @@ fn _glyph_contours(info, gi){
 ;; Rasterizes contours to a 1-channel 8bpp alpha bitmap.
 
 fn _lerp(t, a, b){
-   "Auto-generated docstring: _lerp."
+   "Linearly interpolates between two scalar values."
    a + t * (b - a)
 }
 
@@ -768,7 +768,7 @@ fn get_glyph_bitmap(info, scale_x, scale_y, gi){
 }
 
 fn _ord_at(s, i){
-   "Auto-generated docstring: _ord_at."
+   "Returns the unsigned byte value at offset i in string s."
    def v = load8(s, i)
    if(v >= 0){ v } else { v + 256 }
 }

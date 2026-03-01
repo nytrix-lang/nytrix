@@ -63,7 +63,7 @@ mut _WM_PROTOCOLS = 0
 mut _debug = -1
 
 fn _is_debug(){
-   "Auto-generated docstring: _is_debug."
+   "Returns true if X11-specific debugging is enabled."
    if(_debug == -1){
       def v = env("NY_UI_DEBUG")
       _debug = (v && (eq(v, "1") || eq(v, "true"))) ? 1 : 0
@@ -72,7 +72,7 @@ fn _is_debug(){
 }
 
 fn _x11_state_to_mod(state){
-   "Auto-generated docstring: _x11_state_to_mod."
+   "Converts X11 modifier state bits to internal Nytrix MOD flags."
    mut mod = 0
    if((state & ShiftMask) != 0){ mod = mod | MOD_SHIFT }
    if((state & ControlMask) != 0){ mod = mod | MOD_CONTROL }
@@ -82,7 +82,7 @@ fn _x11_state_to_mod(state){
 }
 
 fn available(){
-   "Auto-generated docstring: available."
+   "Returns true if the X11 display can be opened."
    if(_disp != 0){ return true }
    if(_x11_handle == 0){
       if(_is_debug()){ print("X11: Loading libX11...") }
@@ -131,7 +131,7 @@ fn available(){
 }
 
 fn create_native_window(win){
-   "Auto-generated docstring: create_native_window."
+   "Creates a native X11 window for the given Nytrix window object."
    if(!available()){ return false }
    def scr = call1_i64(_XDefaultScreen_sym, _disp)
    def root = call2(_XRootWindow_sym, _disp, scr)
@@ -176,12 +176,12 @@ fn create_native_window(win){
 }
 
 fn native_display(){
-   "Auto-generated docstring: native_display."
+   "Returns the raw X11 Display pointer."
    _disp
 }
 
 fn poll_events(win){
-   "Auto-generated docstring: poll_events."
+   "Polls X11 events and pushes them into the window's event queue."
    if(_disp == 0 || _XPending_sym == 0 || _XNextEvent_sym == 0){ return 0 }
    while(to_int(call1_i64(_XPending_sym, _disp)) > 0){
       mut ev_buf = malloc(256) 
@@ -283,17 +283,17 @@ fn poll_events(win){
 }
 
 fn swap_buffers(win){
-   "Auto-generated docstring: swap_buffers."
+   "X11 buffer swap implementation (no-op for software rendering, flushes display)."
    _touch(win)
    if(_XFlush_sym != 0){ call1(_XFlush_sym, _disp) }
 }
 fn make_current(win){
-   "Auto-generated docstring: make_current."
+   "Makes the window the current target (no-op for X11 backend)."
    _touch(win)
 }
 
 fn blit_buffer(win, buf, w, h){
-   "Auto-generated docstring: blit_buffer."
+   "Blits a raw software buffer to the X11 window."
    if(_disp == 0 || _XCreateImage_sym == 0){ return 0 }
    def scr = call1_i64(_XDefaultScreen_sym, _disp)
    def visual = call2(_XDefaultVisual_sym, _disp, scr)
