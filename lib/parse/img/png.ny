@@ -1,5 +1,5 @@
 ;; Keywords: image png rfc2083
-;; Reference: 
+;; Reference:
 ;; - https://en.wikipedia.org/wiki/PNG
 ;; - https://www.rfc-editor.org/rfc/rfc2083.html
 
@@ -348,22 +348,22 @@ fn store32_be(s, v, i){
 
 if(comptime{__main()}){
    use std.core.error *
-   
+
    fn _from_list(xs){
       "Internal helper for `from_list`."
        def n = len(xs)
        def out = init_str(malloc(n + 1), n)
        mut i = 0
-       while(i < n){ 
+       while(i < n){
           store8(out, get(xs, i), i)
-          i += 1 
+          i += 1
        }
        out
    }
 
    def png_list = [137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,0,0,0,0,58,126,1,19,0,0,0,10,73,68,65,84,120,156,99,96,0,0,0,2,0,1,226,33,188,51,0,0,0,0,73,69,78,68,174,66,96,130]
    def png_data = _from_list(png_list)
-   
+
    if(!zlib.available()){
       print("✓ std.image.png tests skipped (zlib missing)")
       return
@@ -373,10 +373,10 @@ if(comptime{__main()}){
    assert(img != 0, "png decode")
    assert(dict_get(img, "width") == 1, "png width")
    assert(dict_get(img, "height") == 1, "png height")
-   
+
    def enc = encode(img)
    assert(len(enc) > 8, "png encode length")
    assert(load8(enc, 1) == 80, "png encode signature P")
-   
+
    print("✓ std.image.png tests passed")
 }

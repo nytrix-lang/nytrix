@@ -3,19 +3,19 @@
 
 module std.ui.input (
    ;; Key Codes
-   KEY_NULL, KEY_ESCAPE, 
+   KEY_NULL, KEY_ESCAPE,
    KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE,
    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
-   
+
    ;; Modifier flags
    MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META,
-   
+
    ;; Mouse Buttons
    MOUSE_LEFT, MOUSE_RIGHT, MOUSE_MIDDLE,
-   
+
    ;; Logic
    normalize_key, parse_notation, mod_bit_for_key, mods_from_key_states,
-   
+
    ;; High-level (Active Window)
    key_down, key_pressed, mouse_pos, mouse_button_down, mouse_button_pressed
 )
@@ -104,7 +104,7 @@ fn _parse_single_key(tok){
       elif(startswith(p, "OPTION-")){ mods = mods | MOD_ALT p = str_slice(p, 7) }
       elif(startswith(p, "ALT-")){ mods = mods | MOD_ALT p = str_slice(p, 4) }
       elif(startswith(p, "A-")){ mods = mods | MOD_ALT p = str_slice(p, 2) }
-      elif(startswith(p, "M-")){ mods = mods | MOD_ALT p = str_slice(p, 2) } 
+      elif(startswith(p, "M-")){ mods = mods | MOD_ALT p = str_slice(p, 2) }
       elif(startswith(p, "META-")){ mods = mods | MOD_META p = str_slice(p, 5) }
       elif(startswith(p, "G-")){ mods = mods | MOD_META p = str_slice(p, 2) }
       elif(startswith(p, "COMMAND-")){ mods = mods | MOD_SUPER p = str_slice(p, 8) }

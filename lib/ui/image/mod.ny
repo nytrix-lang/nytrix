@@ -102,16 +102,16 @@ fn free(img){
 
 if(comptime{__main()}){
    use std.core.error *
-   
+
    print("Testing std.image dispatcher...")
-   
+
    fn verify_img(path, name){
       def res = load(path)
       if(!res){
          print("  FAILED: Could not load " + path)
          return false
       }
-      
+
       def w = get(res, "width")
       def h = get(res, "height")
       if(w != 2 || h != 2){
@@ -121,17 +121,17 @@ if(comptime{__main()}){
 
       def data = get(res, "data")
       def chan = get(res, "channels")
-      
+
       ;; Check top-left pixel (Red)
       if(chan >= 3){
          def r = load8(data, 0)
          def g = load8(data, 1)
          def b = load8(data, 2)
-         
+
          ;; For JPEG we allow some error
          mut tolerance = 5
          if(str.contains(name, "JPEG")){ tolerance = 40 }
-         
+
          if(abs(r - 255) > tolerance || g > tolerance || b > tolerance){
             print("  FAILED: " + name + " pixel(0,0) mismatch: RGB(" + to_str(r) + "," + to_str(g) + "," + to_str(b) + ") expected RGB(255,0,0)")
             return false
@@ -143,7 +143,7 @@ if(comptime{__main()}){
             return false
          }
       }
-      
+
       print("  SUCCESS: " + name + " (" + to_str(w) + "x" + to_str(h) + ")")
       true
    }

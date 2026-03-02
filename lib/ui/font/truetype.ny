@@ -150,7 +150,6 @@ fn _make_info(d, fontstart){
    info
 }
 
-
 fn _l2(a, b){
    "Internal helper to create a 2-element list."
    mut l = list(2)
@@ -437,7 +436,7 @@ fn _glyph_contours(info, gi){
    def off = _glyph_offset(info, gi)
    if(off < 0){ return list(0) }
    def n_contours = _be_sword(d, off)
-   if(n_contours < 0){ return list(0) } ;; composite — skip for now
+   if(n_contours < 0){ return list(0) } ;; composite - skip for now
    mut n_pts_arr = 0
    if(n_contours > 0){
       n_pts_arr = _be_word(d, off + 10 + (n_contours - 1) * 2) + 1

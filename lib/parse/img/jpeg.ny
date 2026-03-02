@@ -11,7 +11,6 @@ use std.core *
 use std.core.dict *
 use std.math *
 
-
 fn _huff_new_node(ctx){
    "Internal helper for `huff_new_node`."
    mut nodes = dict_get(ctx, "nodes")
@@ -108,7 +107,6 @@ fn _huff_decode(nodes, bs){
    }
 }
 
-
 fn _bs_make(data, start){
    "Internal helper for `bs_make`."
    def bs = dict(5)
@@ -155,14 +153,12 @@ fn _bs_get_bits(bs, n){
    val
 }
 
-
 fn _decode_coeff(size, bits){
    "Internal helper for `decode_coeff`."
    if(size == 0){ return 0 }
    if((bits >> (size - 1)) & 1){ return bits }
    bits - (1 << size) + 1
 }
-
 
 def _IDCT = [
    0.707107,  0.707107,  0.707107,  0.707107,  0.707107,  0.707107,  0.707107,  0.707107,
@@ -244,7 +240,6 @@ fn _idct_and_dequant(coeff_lin, quant_table, out, out_off, out_w){
    }
 }
 
-
 fn _decode_data_unit(bs, dc_huff, ac_huff, quant_table, dc_coeff, plane, plane_off, plane_w){
    "Internal helper for `decode_data_unit`."
    def dc_size = _huff_decode(dc_huff, bs)
@@ -274,7 +269,6 @@ fn _decode_data_unit(bs, dc_huff, ac_huff, quant_table, dc_coeff, plane, plane_o
    }
    _idct_and_dequant(coeff, quant_table, plane, plane_off, plane_w)
 }
-
 
 fn decode(data){
    "Decodes a Baseline JPEG (SOF0) from a byte string. Returns image dict or 0."
@@ -408,7 +402,7 @@ fn decode(data){
          while(ci < sc_n){
             def cid = get(scan_comps, ci)
             def cinfo = get(comp_info, cid)
-            if(!is_dict(cinfo)){ 
+            if(!is_dict(cinfo)){
                ci += 1
                continue
             }
