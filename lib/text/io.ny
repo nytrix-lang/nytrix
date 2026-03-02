@@ -13,12 +13,12 @@ fn _write_str(s){
 }
 
 fn _print_join3(a, b, c){
-   "Internal helper."
+   "Internal: concatenates three strings into one."
    __str_concat(__str_concat(a, b), c)
 }
 
 fn _print_list_repr(v, open, close){
-   "Internal helper."
+   "Internal: formats a list or tuple for display with `open` and `close` delimiters."
    def n = load64(v, 0)
    mut s = open
    mut i = 0
@@ -32,7 +32,7 @@ fn _print_list_repr(v, open, close){
 }
 
 fn _print_to_str(v){
-   "Internal helper."
+   "Internal: convert value `v` to its printable string form."
    if(v == true){ return "true" }
    if(v == false){ return "false" }
    if(!v){ return "none" }
