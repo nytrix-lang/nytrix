@@ -135,6 +135,14 @@ static bool attr_arg_text_view(expr_t *arg, const char **text, size_t *len) {
     *len = arg->as.literal.as.s.len;
     return true;
   }
+  // 'none' / 'nil' are tokenized as NY_T_NIL (literal int 0), but in
+  // attribute context we want the original keyword text.
+  if (arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT &&
+      arg->as.literal.as.i == 0 && arg->tok.lexeme && arg->tok.len > 0) {
+    *text = arg->tok.lexeme;
+    *len  = arg->tok.len;
+    return true;
+  }
   return false;
 }
 

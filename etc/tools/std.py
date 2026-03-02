@@ -19,7 +19,7 @@ _USE_DECL_RE = re.compile(r'^\s*use\s+([a-zA-Z_][a-zA-Z0-9_\.]*)\b')
 def _declared_module_name(content):
     for raw in content.splitlines():
         line = raw.strip()
-        if not line or line.startswith(";;"):
+        if not line or line.startswith(";") or line.startswith("#"):
             continue
         m = _MODULE_DECL_RE.match(line)
         if m:
@@ -31,7 +31,7 @@ def _used_modules(content):
     seen = set()
     for raw in content.splitlines():
         line = raw.strip()
-        if not line or line.startswith(";;"):
+        if not line or line.startswith(";") or line.startswith("#"):
             continue
         m = _USE_DECL_RE.match(line)
         if not m:
@@ -150,7 +150,7 @@ def run_std_bundle(bundle_path=None):
         rel_path = rec["rel_path"]
         full_mod_name = rec["module"]
         
-        bundled_output_lines.append(f";; Module from {rel_path.as_posix().replace('.ny', '')}\n")
+        bundled_output_lines.append(f"#line 1 \"lib/{rel_path.as_posix()}\"\n")
         # Only prepend module declaration if it doesn't already have one
         if not _declared_module_name(content):
             bundled_output_lines.append(f"module {full_mod_name} *\n")

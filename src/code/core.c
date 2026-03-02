@@ -54,6 +54,7 @@ static void ny_cg_init_options(codegen_t *cg) {
                           ny_effect_analysis_requested();
   cg->auto_memoize = ny_env_enabled("NYTRIX_AUTO_MEMO");
   cg->auto_memoize_impure = ny_env_enabled("NYTRIX_AUTO_MEMO_IMPURE");
+  cg->trace_exec = ny_env_enabled("NYTRIX_TRACE");
 #ifdef DEBUG
   cg->debug_symbols = true;
   cg->trace_exec = true;

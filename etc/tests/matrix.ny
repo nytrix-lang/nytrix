@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Matrix Rain (Example) - https://en.wikipedia.org/wiki/Digital_rain
+;; Matrix Rain - https://en.wikipedia.org/wiki/Digital_rain
 
 use std.core *
 use std.math.random *

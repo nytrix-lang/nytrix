@@ -257,6 +257,8 @@ RT_DEF("__trace_func", __trace_func, 1, "fn __trace_func(name)",
        "Internal: record the current function name.")
 RT_DEF("__trace_dump", __trace_dump, 1, "fn __trace_dump(n)",
        "Internal: dump recent trace entries.")
+RT_DEF("__get_backtrace", __get_backtrace, 1, "fn __get_backtrace(n)",
+       "Returns the current Nytrix backtrace as a list of [file, line, col, func] frames.")
 RT_DEF("__push_defer", __push_defer, 2, "fn __push_defer(f, e)",
        "Internal: push defer.")
 RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",

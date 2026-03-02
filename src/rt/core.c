@@ -72,14 +72,21 @@ void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
     return;
   const char *fname = (const char *)(uintptr_t)file;
   size_t flen = trace_str_len(file);
-  int64_t l = is_int(line) ? rt_untag_v(line) : 0;
-  int64_t c = is_int(col) ? rt_untag_v(col) : 0;
-  fprintf(stderr, "%s%.*s:%ld:%ld", prefix ? prefix : "", (int)flen, fname,
-          (long)l, (long)c);
+  int64_t l = is_int(line) ? rt_untag_v(line) : line;
+  int64_t c = is_int(col) ? rt_untag_v(col) : col;
+
+  const char *pre = prefix ? prefix : "";
+  const char *c1 = color_mode ? clr(NY_CLR_CYAN) : "";
+  const char *c2 = color_mode ? clr(NY_CLR_GRAY) : "";
+  const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+
+  fprintf(stderr, "%s%s%.*s:%s%ld:%ld%s", pre, c1, (int)flen, fname, c2,
+          (long)l, (long)c, rs);
   if (is_v_str(func)) {
     const char *fn = (const char *)(uintptr_t)func;
     size_t fnlen = trace_str_len(func);
-    fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
+    const char *fnc = color_mode ? clr(NY_CLR_YELLOW) : "";
+    fprintf(stderr, " (%sfn %.*s%s)", fnc, (int)fnlen, fn, rs);
   }
   fputc('\n', stderr);
 }
@@ -196,49 +203,68 @@ int64_t __trace_last_line(void) { return g_trace_line; }
 int64_t __trace_last_col(void) { return g_trace_col; }
 int64_t __trace_last_func(void) { return g_trace_func; }
 
+static void print_rt_snippet(int64_t file_ptr, int64_t line_ptr,
+                             int64_t col_ptr) {
+  if (!is_v_str(file_ptr))
+    return;
+  const char *file = (const char *)(uintptr_t)file_ptr;
+  int64_t line = is_int(line_ptr) ? rt_untag_v(line_ptr) : line_ptr;
+  int64_t col = is_int(col_ptr) ? rt_untag_v(col_ptr) : col_ptr;
+  if (line <= 0)
+    return;
+
+  FILE *f = fopen(file, "r");
+  if (!f)
+    return;
+
+  char buf[1024];
+  int curr = 1;
+  while (curr < line && fgets(buf, sizeof(buf), f)) {
+    curr++;
+  }
+
+  if (curr == line && fgets(buf, sizeof(buf), f)) {
+    size_t blen = strlen(buf);
+    while (blen > 0 &&
+           (buf[blen - 1] == '\n' || buf[blen - 1] == '\r' ||
+            buf[blen - 1] == ' ')) {
+      buf[--blen] = '\0';
+    }
+
+    const char *gray = color_mode ? clr(NY_CLR_GRAY) : "";
+    const char *red = color_mode ? clr(NY_CLR_RED) : "";
+    const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+
+    fprintf(stderr, "%s%4d | %s%s\n", gray, (int)line, rs, buf);
+    fprintf(stderr, "%s     | %s", gray, rs);
+    for (int i = 1; i < col; i++) {
+      if (i <= (int)blen && buf[i - 1] == '\t')
+        fputc('\t', stderr);
+      else
+        fputc(' ', stderr);
+    }
+    fprintf(stderr, "%s^%s\n", red, rs);
+  }
+  fclose(f);
+}
+
 int64_t __trace_dump(int64_t count) {
   if (g_trace_len == 0)
     return 0;
   size_t want = (size_t)(is_int(count) ? rt_untag_v(count) : count);
   if (want == 0 || want > g_trace_len)
     want = g_trace_len;
-  size_t start = (g_trace_idx + TRACE_RING - want) % TRACE_RING;
+  
+  // Print newest first
   for (size_t i = 0; i < want; i++) {
-    size_t idx = (start + i) % TRACE_RING;
+    size_t idx = (g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING;
     print_trace_entry(g_trace_files[idx], g_trace_lines[idx], g_trace_cols[idx],
                       g_trace_funcs[idx], "  at ");
   }
   return 0;
 }
 
-static void print_panic_msg(int64_t msg_ptr) {
-  if (is_int(msg_ptr)) {
-    fprintf(stderr, "Panic: <integer value> %" PRId64 " (raw)\n",
-            (int64_t)msg_ptr);
-  } else if (is_v_str(msg_ptr)) {
-    const char *msg = (const char *)(uintptr_t)msg_ptr;
-    size_t msg_len = trace_str_len(msg_ptr);
-    fprintf(stderr, "Panic: %.*s\n", (int)msg_len, msg);
-  } else {
-    fprintf(stderr, "Panic: <unknown type> %" PRIx64 " (raw)\n",
-            (uint64_t)msg_ptr);
-  }
-}
-
-int64_t __panic(int64_t msg_ptr) {
-  if (g_panic_env_stack.len > 0) {
-    g_panic_value = msg_ptr;
-    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
-    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
-    longjmp(*pe.env, 1);
-  }
-  if (is_v_str(g_trace_file)) {
-    print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
-                      "Panic location: ");
-  }
-  print_panic_msg(msg_ptr);
-  exit(1);
-}
+// Higher level panic logic below primitives
 
 int64_t __argc_val = 1;
 int64_t __envc_val = 1;
@@ -451,4 +477,73 @@ int64_t __list_set_len(int64_t lst, int64_t n) {
   if (!is_ptr(lst)) return 0;
   *(int64_t *)((char *)(uintptr_t)lst + 0) = n;
   return n;
+}
+
+static void print_panic_msg(int64_t msg_ptr) {
+  const char *red = color_mode ? clr(NY_CLR_RED) : "";
+  const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+  
+  if (is_int(msg_ptr)) {
+    fprintf(stderr, "%sPanic (int):%s %" PRId64 "\n", red, rs,
+            (int64_t)rt_untag_v(msg_ptr));
+  } else if (is_v_str(msg_ptr)) {
+    const char *msg = (const char *)(uintptr_t)msg_ptr;
+    size_t msg_len = trace_str_len(msg_ptr);
+    fprintf(stderr, "%sPanic:%s %.*s\n", red, rs, (int)msg_len, msg);
+  } else if (is_v_err(msg_ptr)) {
+    int64_t err = __unwrap(msg_ptr);
+    fprintf(stderr, "%sPanic (err):%s ", red, rs);
+    print_panic_msg(err);
+  } else {
+    fprintf(stderr, "%sPanic (raw):%s 0x%" PRIx64 "\n", red, rs,
+            (uint64_t)msg_ptr);
+  }
+}
+
+int64_t __get_backtrace(int64_t count_v) {
+  if (g_trace_len == 0)
+    return __list_new(0);
+  size_t want = (size_t)(is_int(count_v) ? rt_untag_v(count_v) : count_v);
+  if (want == 0 || want > g_trace_len)
+    want = g_trace_len;
+  int64_t lst = __list_new(is_int(want) ? (int64_t)want : __tag((int64_t)want));
+  size_t start = (g_trace_idx + TRACE_RING - want) % TRACE_RING;
+  for (size_t i = 0; i < want; i++) {
+    size_t idx = (start + i) % TRACE_RING;
+    int64_t frame = __list_new(__tag(4));
+    __append(frame, g_trace_files[idx]);
+    __append(frame, g_trace_lines[idx]);
+    __append(frame, g_trace_cols[idx]);
+    __append(frame, g_trace_funcs[idx]);
+    __append(lst, frame);
+  }
+  return lst;
+}
+
+int64_t __panic(int64_t msg_ptr) {
+  if (g_panic_env_stack.len > 0) {
+    g_panic_value = msg_ptr;
+    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
+    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
+    longjmp(*pe.env, 1);
+  }
+  
+  fputc('\n', stderr);
+  print_panic_msg(msg_ptr);
+
+  if (is_v_str(g_trace_file)) {
+    print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
+                      "  at ");
+    print_rt_snippet(g_trace_file, g_trace_line, g_trace_col);
+  }
+  
+  if (g_trace_len > 0) {
+    const char *cyan = color_mode ? clr(NY_CLR_CYAN) : "";
+    const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+    fprintf(stderr, "\n%sLast Nytrix frames:%s\n", cyan, rs);
+    __trace_dump(((int64_t)10 << 1) | 1); // last 10
+  }
+  
+  fprintf(stderr, "\n");
+  exit(1);
 }

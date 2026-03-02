@@ -281,8 +281,6 @@ int64_t __memcmp(int64_t a, int64_t b, int64_t n) {
 }
 
 int64_t __load8_idx(int64_t addr, int64_t idx) {
-  if (!is_any_ptr(addr))
-    return 1;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -307,8 +305,6 @@ int64_t __load8_idx(int64_t addr, int64_t idx) {
 }
 
 int64_t __load16_idx(int64_t addr, int64_t idx) {
-  if (!is_any_ptr(addr))
-    return 1;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -338,8 +334,6 @@ int64_t __load16_idx(int64_t addr, int64_t idx) {
 }
 
 int64_t __load32_idx(int64_t addr, int64_t idx) {
-  if (!is_any_ptr(addr))
-    return 1;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -369,8 +363,6 @@ int64_t __load32_idx(int64_t addr, int64_t idx) {
 }
 
 int64_t __load64_idx(int64_t addr, int64_t idx) {
-  if (!is_any_ptr(addr))
-    return 0;
   if (is_int(idx) && is_heap_ptr(addr)) {
     intptr_t off = (intptr_t)(idx >> 1);
     if (off >= 0) {
@@ -418,8 +410,6 @@ int64_t __load64_idx(int64_t addr, int64_t idx) {
 }
 
 int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
-  if (!is_any_ptr(addr))
-    return val;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -445,8 +435,6 @@ int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
 }
 
 int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
-  if (!is_any_ptr(addr))
-    return val;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -477,8 +465,6 @@ int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
 }
 
 int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
-  if (!is_any_ptr(addr))
-    return val;
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -509,8 +495,6 @@ int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
 }
 
 int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
-  if (!is_any_ptr(addr))
-    return val;
   if (is_int(idx) && is_heap_ptr(addr)) {
     intptr_t off = (intptr_t)(idx >> 1);
     if (off >= 0) {

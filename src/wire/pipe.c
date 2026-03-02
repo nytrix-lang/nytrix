@@ -1349,13 +1349,25 @@ int ny_pipeline_run(ny_options *opt) {
     if (uses) ny_str_list_free(uses, use_count);
     return 1;
   }
-  source = malloc(slen + ulen + 2);
+  size_t line_directive_len = 0;
+  char line_buf[1024];
+  if (parse_name && parse_name[0] != '<') {
+    line_directive_len = snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", parse_name);
+  }
+
+  source = malloc(slen + ulen + line_directive_len + 4);
   char *ptr = source;
   if (std_src) {
     memcpy(ptr, std_src, slen);
     ptr += slen;
-    *ptr++ = '\n';
+    if (ptr > source && ptr[-1] != '\n') *ptr++ = '\n';
   }
+  
+  if (line_directive_len > 0) {
+    memcpy(ptr, line_buf, line_directive_len);
+    ptr += line_directive_len;
+  }
+  
   memcpy(ptr, user_src, ulen + 1);
   if (ny_should_use_aot_cache(opt)) {
     ny_build_aot_cache_path(opt, source, parse_name, prebuilt_path, output_path,

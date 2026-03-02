@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Raylib FFI (Example)
+;; Raylib FFI
 ;; https://github.com/raysan5/raylib
 
 use std.os.ffi *
@@ -7,7 +7,7 @@ use std.os *
 use std.text *
 use std.text.io *
 
-; '-L/usr/lib -lraylib' also works with extern
+;; '-L/usr/lib -lraylib' also works with extern
 
 def is_linux = eq(__os_name(), "linux")
 def display = env("DISPLAY")
