@@ -194,29 +194,29 @@ fn encode(img, bpp=24){
 
 if(comptime{__main()}){
    use std.core.error *
-   
+
    fn make_test_tga(){
       "Implements `make_test_tga`."
       def data = malloc(21)
       init_str(data, 21)
-      store8(data, 0, 0) store8(data, 0, 1) 
+      store8(data, 0, 0) store8(data, 0, 1)
       store8(data, 2, 2)
       store16(data, 1, 12) store16(data, 1, 14)
       store8(data, 24, 16) store8(data, 0, 17)
       store8(data, 255, 18) store8(data, 0, 19) store8(data, 0, 20)
       data
    }
-   
+
    def tga_data = make_test_tga()
    def img = decode(tga_data)
    assert(img != 0, "tga decode")
    assert(dict_get(img, "width") == 1, "tga width")
    def p = dict_get(img, "data")
    assert(load8(p, 2) == 255, "tga blue channel")
-   
+
    def enc_data = encode(img)
    assert(load8(enc_data, 2) == 2, "tga encode type")
    assert(load16(enc_data, 12) == 1, "tga encode width")
-   
+
    print("✓ std.image.tga tests passed")
 }

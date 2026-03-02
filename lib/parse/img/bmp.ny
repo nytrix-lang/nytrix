@@ -1,5 +1,5 @@
 ;; Keywords: image bmp rfc7854
-;; Reference: 
+;; Reference:
 ;; - https://en.wikipedia.org/wiki/BMP_file_format
 ;; - https://www.rfc-editor.org/rfc/rfc7854.html
 
@@ -215,7 +215,7 @@ fn encode(img){
 
 if(comptime{__main()}){
    use std.core.error *
-   
+
    fn make_test_bmp(){
       "Implements `make_test_bmp`."
       def data = malloc(58)
@@ -228,7 +228,7 @@ if(comptime{__main()}){
       store8(data, 255, 54) store8(data, 0, 55) store8(data, 0, 56) store8(data, 0, 57)
       data
    }
-   
+
    def bmp_data = make_test_bmp()
    def img = decode(bmp_data)
    assert(img != 0, "bmp decode")
@@ -236,10 +236,10 @@ if(comptime{__main()}){
    assert(dict_get(img, "height") == 1, "bmp height")
    def p = dict_get(img, "data")
    assert(load8(p, 2) == 255, "bmp red channel")
-   
+
    def enc_data = encode(img)
    assert(load8(enc_data, 0) == 66, "bmp encode signature")
    assert(load8(enc_data, 54) == 255, "bmp encode pixel")
-   
+
    print("✓ std.image.bmp tests passed")
 }

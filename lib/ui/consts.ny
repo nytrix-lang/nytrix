@@ -119,7 +119,6 @@ def WINDOW_CAPTURE_MOUSE = (1 << 16)
 def WINDOW_CPU = (1 << 18)
 def WINDOW_VULKAN = (1 << 19)
 
-
 def EVENT_WAIT_NO_WAIT = 0
 def EVENT_WAIT_NEXT = -1
 

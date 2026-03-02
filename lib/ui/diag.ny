@@ -52,4 +52,3 @@ if(comptime{__main()}){
    assert(is_str(get(d, "window_backend", "")), "diag backend string")
    print("✓ std.ui.diag tests passed")
 }
-
