@@ -1,19 +1,19 @@
 #!/bin/ny
 ;; Cloc (Example) - Line of Code Counter
 
-use std.core *
-use std.core.error *
-use std.text *
-use std.text.glob *
-use std.text.io *
-use std.text.bytes *
-use std.os *
-use std.os.fs *
-use std.os.args *
-use std.os.path as ospath
+use lib.core *
+use lib.core.error *
+use lib.text *
+use lib.text.glob *
+use lib.text.io *
+use lib.text.bytes *
+use lib.os *
+use lib.os.fs *
+use lib.os.args *
+use lib.os.path as ospath
 
 def SKIP_DIRS = ["build", ".git", ".cache", "node_modules", "__pycache__", ".venv", "dist", "out", ".", ".."]
-def SOURCE_ROOTS = ["src", "std", "etc/tests"]
+def SOURCE_ROOTS = ["src", "lib", "etc/tests"]
 def SOURCE_EXTS = ["**/*.ny", "**/*.nyt", "**/*.c", "**/*.h"]
 
 fn _is_ws(c){
@@ -221,7 +221,7 @@ mut row_paths = list(len(files))
 mut row_counts = list(len(files))
 mut total_lines = 0
 mut total_src = 0
-mut total_std = 0
+mut total_lib = 0
 mut total_tests = 0
 
 for(f in files){
@@ -233,8 +233,8 @@ for(f in files){
    def np = replace_all(f, "\\", "/")
    if(startswith(np, "src/")){
       total_src += lc
-   } elif(startswith(np, "std/")){
-      total_std += lc
+   } elif(startswith(np, "lib/")){
+      total_lib += lc
    } elif(startswith(np, "etc/tests/")){
       total_tests += lc
    }
@@ -250,9 +250,9 @@ if(show_full){
    print(f"Files: {len(files)}")
    print(f"Total lines: {total_lines}")
    print(f"src: {total_src}")
-   print(f"std: {total_std}")
+   print(f"lib: {total_lib}")
    print(f"etc/tests: {total_tests}")
-   print(f"other: {total_lines - total_src - total_std - total_tests}")
+   print(f"other: {total_lines - total_src - total_lib - total_tests}")
    print(f"Top {top_n}:")
    print_top(row_paths, row_counts, top_n)
 }

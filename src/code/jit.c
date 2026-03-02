@@ -26,6 +26,9 @@ void ny_jit_init_native_once(void) {
 void *ny_jit_resolve_symbol(const char *symbol) {
   if (!symbol || !*symbol)
     return NULL;
+  if (getenv("NYTRIX_DEBUG_FFI")) {
+    fprintf(stderr, "JIT: resolve_symbol('%s')\n", symbol);
+  }
   void *ptr = LLVMSearchForAddressOfSymbol(symbol);
   if (ptr)
     return ptr;

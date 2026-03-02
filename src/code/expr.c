@@ -1,6 +1,6 @@
 #include "base/common.h"
 #include "base/util.h"
-#include "braun.h"
+
 #include "llvm.h"
 #include "nullnarrow.h"
 #include "priv.h"
@@ -864,7 +864,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     return fn_ptr_raw;
   }
   /* Create Env */
-  fun_sig *malloc_sig = lookup_fun(cg, "__malloc");
+  fun_sig *malloc_sig = lookup_fun(cg, "__malloc", 0);
   if (!malloc_sig) {
     token_t tok = body ? body->tok : (token_t){0};
     return expr_fail(cg, tok, "__malloc required for closures");
@@ -1079,7 +1079,6 @@ LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v) {
                      "tag_int");
 }
 
-
 static fun_sig *ny_helper_lookup(codegen_t *cg, fun_sig **cache_slot,
                                  const char *const *names, size_t names_len) {
   if (!cg || !names || names_len == 0)
@@ -1091,7 +1090,7 @@ static fun_sig *ny_helper_lookup(codegen_t *cg, fun_sig **cache_slot,
     const char *name = names[i];
     if (!name || !*name)
       continue;
-    fun_sig *sig = lookup_fun(cg, name);
+    fun_sig *sig = lookup_fun(cg, name, 0);
     if (sig) {
       if (cache_slot)
         *cache_slot = sig;
@@ -1351,32 +1350,26 @@ static LLVMValueRef gen_unary_op_common(
   LLVMBasicBlockRef slow_bb = LLVMAppendBasicBlock(fn, "un.runtime.slow");
   LLVMBasicBlockRef merge_bb = LLVMAppendBasicBlock(fn, "un.merge");
   LLVMBuildCondBr(cg->builder, ny_is_tagged_int(cg, r), fast_bb, slow_bb);
-  ny_braun_add_predecessor(cg, fast_bb, entry_bb);
-  ny_braun_add_predecessor(cg, slow_bb, entry_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, fast_bb);
-  ny_braun_enter_block(cg, fast_bb);
-  ny_braun_seal_block(cg, fast_bb);
+
   LLVMValueRef raw = ny_untag_int(cg, r);
   LLVMValueRef res_raw = build_fast(cg->builder, raw, op_name);
   LLVMValueRef fast_value = ny_tag_int(cg, res_raw);
   LLVMBasicBlockRef fast_done_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, merge_bb);
-  ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
-  ny_braun_enter_block(cg, slow_bb);
-  ny_braun_seal_block(cg, slow_bb);
+
   LLVMValueRef slow_value = LLVMBuildCall2(cg->builder, slow_sig->type,
                                            slow_sig->value, slow_args,
                                            (unsigned)slow_argc, "");
   LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
-  ny_braun_add_predecessor(cg, merge_bb, slow_done_bb);
+
   LLVMBuildBr(cg->builder, merge_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
-  ny_braun_enter_block(cg, merge_bb);
-  ny_braun_seal_block(cg, merge_bb);
+
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "un_result");
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
@@ -1448,8 +1441,8 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
 
 static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *e) {
-  fun_sig *ls = lookup_fun(cg, "__list_new");
-  fun_sig *st = lookup_fun(cg, "__store64_idx");
+  fun_sig *ls = lookup_fun(cg, "__list_new", 0);
+  fun_sig *st = lookup_fun(cg, "__store64_idx", 0);
   if (!ls || !st)
     return expr_fail(cg, e->tok,
                      "list literal requires __list_new/__store64_idx helpers");
@@ -1541,11 +1534,9 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
     LLVMBuildCondBr(cg->builder, left, rhs_bb, end_bb);
   else
     LLVMBuildCondBr(cg->builder, left, end_bb, rhs_bb);
-  ny_braun_add_predecessor(cg, rhs_bb, cur_bb);
-  ny_braun_add_predecessor(cg, end_bb, cur_bb);
+
   LLVMPositionBuilderAtEnd(cg->builder, rhs_bb);
-  ny_braun_enter_block(cg, rhs_bb);
-  ny_braun_seal_block(cg, rhs_bb);
+
   ny_null_narrow_restore_list_t rhs_applied;
   if (narrow_rhs)
     ny_null_narrow_apply(cg, scopes, depth, &rhs_narrow, true, &rhs_applied);
@@ -1555,10 +1546,9 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
   vec_free(&rhs_narrow);
   LLVMBuildBr(cg->builder, end_bb);
   LLVMBasicBlockRef rend_bb = LLVMGetInsertBlock(cg->builder);
-  ny_braun_add_predecessor(cg, end_bb, rend_bb);
+
   LLVMPositionBuilderAtEnd(cg->builder, end_bb);
-  ny_braun_enter_block(cg, end_bb);
-  ny_braun_seal_block(cg, end_bb);
+
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "");
   LLVMAddIncoming(phi,
                   (LLVMValueRef[]){and ? LLVMConstInt(cg->type_i64, 4, false)
@@ -1579,7 +1569,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   }
   if (!e || cg->had_error)
     return LLVMConstInt(cg->type_i64, 0, false);
-  ny_braun_mark_current_block(cg);
+
   ny_dbg_loc(cg, e->tok);
 
   switch (e->kind) {
@@ -1621,11 +1611,6 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     binding *b = scope_lookup(scopes, depth, e->as.ident.name);
     if (b) {
       b->is_used = true;
-      if (cg->braun && braun_ssa_is_tracked(cg->braun, e->as.ident.name)) {
-        LLVMValueRef v = braun_ssa_read_var(cg->braun, e->as.ident.name);
-        if (v)
-          return v;
-      }
       if (b->is_slot) {
         return LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "");
       }
@@ -1639,7 +1624,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       }
       return gb->value;
     }
-    fun_sig *s = lookup_fun(cg, e->as.ident.name);
+    fun_sig *s = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);
     if (s) {
       LLVMValueRef sv = s->value;
       // Return raw callable pointer as int. Do not apply ad-hoc low-bit tags:
@@ -1767,27 +1752,23 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMBasicBlockRef end_bb = LLVMAppendBasicBlock(f, "tern_end");
     ny_dbg_loc(cg, e->tok);
     LLVMBuildCondBr(cg->builder, cond, true_bb, false_bb);
-    ny_braun_add_predecessor(cg, true_bb, cur_bb);
-    ny_braun_add_predecessor(cg, false_bb, cur_bb);
+
     LLVMPositionBuilderAtEnd(cg->builder, true_bb);
-    ny_braun_enter_block(cg, true_bb);
-    ny_braun_seal_block(cg, true_bb);
+
     LLVMValueRef true_val =
         gen_expr(cg, scopes, depth, e->as.ternary.true_expr);
     LLVMBuildBr(cg->builder, end_bb);
     LLVMBasicBlockRef true_end_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, end_bb, true_end_bb);
+
     LLVMPositionBuilderAtEnd(cg->builder, false_bb);
-    ny_braun_enter_block(cg, false_bb);
-    ny_braun_seal_block(cg, false_bb);
+
     LLVMValueRef false_val =
         gen_expr(cg, scopes, depth, e->as.ternary.false_expr);
     LLVMBuildBr(cg->builder, end_bb);
     LLVMBasicBlockRef false_end_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, end_bb, false_end_bb);
+
     LLVMPositionBuilderAtEnd(cg->builder, end_bb);
-    ny_braun_enter_block(cg, end_bb);
-    ny_braun_seal_block(cg, end_bb);
+
     ny_dbg_loc(cg, e->tok);
     LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "tern");
     LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
@@ -1876,21 +1857,17 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(f, "try_ok");
     LLVMBasicBlockRef err_bb = LLVMAppendBasicBlock(f, "try_err");
 
-    fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok");
+    fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok", 0);
     if (!is_ok_sig) {
       return expr_fail(cg, e->tok, "__is_ok not found for '?' operator");
     }
     LLVMValueRef is_ok = LLVMBuildCall2(cg->builder, is_ok_sig->type,
                                         is_ok_sig->value, &res, 1, "");
-    LLVMBasicBlockRef pre_try_bb = LLVMGetInsertBlock(cg->builder);
     ny_dbg_loc(cg, e->tok);
     LLVMBuildCondBr(cg->builder, to_bool(cg, is_ok), ok_bb, err_bb);
-    ny_braun_add_predecessor(cg, ok_bb, pre_try_bb);
-    ny_braun_add_predecessor(cg, err_bb, pre_try_bb);
 
     LLVMPositionBuilderAtEnd(cg->builder, err_bb);
-    ny_braun_enter_block(cg, err_bb);
-    ny_braun_seal_block(cg, err_bb);
+
     // return res (which is the error result)
     if (cg->result_store_val) {
       LLVMBuildStore(cg->builder, res, cg->result_store_val);
@@ -1901,10 +1878,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     // We need a dummy terminator if there are instructions after this try
 
     LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
-    ny_braun_enter_block(cg, ok_bb);
-    ny_braun_seal_block(cg, ok_bb);
+
     // Unwrap value
-    fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap");
+    fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
     if (!unwrap_sig) {
       return expr_fail(cg, e->tok, "__unwrap not found for '?' operator");
     }

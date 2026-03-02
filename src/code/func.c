@@ -1,5 +1,5 @@
 #include "base/util.h"
-#include "braun.h"
+
 #include "llvm.h"
 #include "priv.h"
 #ifndef _WIN32
@@ -12,14 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static inline void braun_seed_local_value(codegen_t *cg, const char *name,
-                                          LLVMValueRef value) {
-  if (!cg || !cg->braun || !name || !value)
-    return;
-  ny_braun_mark_current_block(cg);
-  braun_ssa_write_var(cg->braun, name, value);
-}
 
 static size_t align_up_size(size_t value, size_t align) {
   if (align == 0)
@@ -78,7 +70,7 @@ static bool layout_add_field(codegen_t *cg, layout_def_t *def,
 static void emit_trace_func(codegen_t *cg, const char *name) {
   if (!cg || !cg->trace_exec || !cg->builder || !name)
     return;
-  fun_sig *ts = lookup_fun(cg, "__trace_func");
+  fun_sig *ts = lookup_fun(cg, "__trace_func", 0);
   if (!ts)
     return;
   LLVMValueRef nstr_g = const_string_ptr(cg, name, strlen(name));
@@ -426,7 +418,6 @@ static void register_layout_def(codegen_t *cg, stmt_t *s, bool is_layout) {
   vec_push(&cg->layouts, def);
 }
 
-
 static void collect_assigned_names_expr(expr_t *e,
                                         assigned_name_list *out_names,
                                         assigned_hash_list *out_hashes,
@@ -736,12 +727,10 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
   LLVMBasicBlockRef entry_bb = LLVMAppendBasicBlock(f, "entry");
   LLVMPositionBuilderAtEnd(cg->builder, entry_bb);
-  if (cg->braun)
-    braun_ssa_reset(cg->braun);
-  ny_braun_mark_current_block(cg);
+
   // Entry block has no predecessors — seal it immediately so Braun SSA never
   // creates incomplete PHIs at the function entry.
-  ny_braun_seal_block(cg, entry_bb);
+
   LLVMMetadataRef prev_scope = cg->di_scope;
   if (cg->debug_symbols && cg->di_builder) {
     LLVMMetadataRef sp = codegen_debug_subprogram(cg, f, name, fn->tok);
@@ -787,7 +776,6 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
           scope_bind(cg, scopes, fd, captures->data[i].name, lv,
                      captures->data[i].stmt_t ? captures->data[i].stmt_t : fn,
                      true, captures->data[i].type_name, true);
-          braun_seed_local_value(cg, captures->data[i].name, val);
         } else {
           scope_bind(cg, scopes, fd, captures->data[i].name, val,
                      captures->data[i].stmt_t ? captures->data[i].stmt_t : fn,
@@ -813,7 +801,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
           codegen_debug_variable(cg, param_name, slot, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, true);
         }
-        braun_seed_local_value(cg, param_name, param_val);
+
       } else {
         scope_bind(cg, scopes, fd, param_name, param_val, fn, true,
                    fn->as.fn.params.data[i].type, false);
@@ -957,7 +945,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       bool found = lookup_global_exact(cg, final_name) != NULL;
       if (!found) {
         LLVMValueRef g = LLVMAddGlobal(cg->module, cg->type_i64, final_name);
-        LLVMSetInitializer(g, LLVMConstInt(cg->type_i64, 0, false));
+        if (!(cg->skip_stdlib && ny_is_stdlib_tok(s->tok)))
+          LLVMSetInitializer(g, LLVMConstInt(cg->type_i64, 0, false));
         const char *type_name = NULL;
         if (s->as.var.types.len > j)
           type_name = s->as.var.types.data[j];

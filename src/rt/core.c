@@ -43,7 +43,7 @@ static int64_t g_trace_file = 0;
 static int64_t g_trace_line = 1;
 static int64_t g_trace_col = 1;
 static int64_t g_trace_func = 0;
-#define TRACE_RING 32
+#define TRACE_RING 256
 static int64_t g_trace_files[TRACE_RING] = {0};
 static int64_t g_trace_lines[TRACE_RING] = {0};
 static int64_t g_trace_cols[TRACE_RING] = {0};
@@ -328,14 +328,14 @@ int64_t __is_ny_obj(int64_t v) { return is_ny_obj(v) ? 2 : 4; }
 int64_t __is_str_obj(int64_t v) { return is_v_str(v) ? 2 : 4; }
 int64_t __is_float_obj(int64_t v) { return is_v_flt(v) ? 2 : 4; }
 int64_t __tagof(int64_t v) {
+  if (v == 0) return 0;
+  if (is_int(v)) return rt_tag_v(1);
+  if ((v & 7) == 6) return rt_tag_v(6);
   if (!is_ptr(v)) return 0;
   if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return rt_tag_v(tag);
 }
-
-
-
 
 int64_t __errno_val = 1;
 int64_t __errno(void) { return (int64_t)((errno << 1) | 1); }
@@ -405,7 +405,7 @@ int64_t __append(int64_t lst, int64_t val) {
     // In a real RC system we would check refcount or let GC handle it.
     lst = new_p;
   }
-  
+
   *(int64_t *)((char *)(uintptr_t)lst + 16 + n * 8) = val;
   *(int64_t *)((char *)(uintptr_t)lst + 0) = ((n + 1) << 1) | 1;
   return lst;
@@ -448,4 +448,3 @@ int64_t __list_set_len(int64_t lst, int64_t n) {
   *(int64_t *)((char *)(uintptr_t)lst + 0) = n;
   return n;
 }
-

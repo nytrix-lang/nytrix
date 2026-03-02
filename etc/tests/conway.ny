@@ -29,7 +29,6 @@ if(H < 2){ H = 25 }
 if(W % 2 == 1){ W -= 1 }
 H -= 0 ;; Full screen
 
-
 def LW    = W / 2
 def CANV  = canvas(W, H)
 def CBUF  = get(CANV, 2)
@@ -100,8 +99,6 @@ fn draw_full(g){
    }
 }
 
-
-
 fn step(cur, nxt){
    mut alive = 0
    mut y = 0
@@ -162,7 +159,7 @@ while(1){
    if(is_quit_key(key)){ break }
 
    def alive = step(G, G2)
-   
+
    if(alive == 0){
       seed_grid(G2, TOTAL)
       draw_full(G2)

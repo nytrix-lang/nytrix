@@ -4,6 +4,7 @@
 module std.core.primitives (
    add, sub, mul, div, mod,
    band, bor, bxor, bshl, bshr, bnot,
+   and, or,
    eq, lt, le, gt, ge,
    argv, errno,
    is_int, is_ptr, is_none,
@@ -40,7 +41,17 @@ fn band(a, b){
    __and(a, b)
 }
 
+fn and(a, b){
+   "Returns bitwise `a & b`."
+   __and(a, b)
+}
+
 fn bor(a, b){
+   "Returns bitwise `a | b`."
+   __or(a, b)
+}
+
+fn or(a, b){
    "Returns bitwise `a | b`."
    __or(a, b)
 }

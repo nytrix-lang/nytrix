@@ -31,8 +31,17 @@ static bool ny_builtin_name_is_pure(const char *name) {
 static bool ny_is_std_qname(const char *name) {
   if (!name || !*name)
     return false;
-  return strncmp(name, "std.", 4) == 0 || strncmp(name, "lib.", 4) == 0 ||
-         strncmp(name, "src.std.", 8) == 0 || strncmp(name, "src.lib.", 8) == 0;
+  if (name[0] == 's' && name[1] == 't' && name[2] == 'd' && name[3] == '.')
+    return true;
+  if (name[0] == 'l' && name[1] == 'i' && name[2] == 'b' && name[3] == '.')
+    return true;
+  if (name[0] == 's' && name[1] == 'r' && name[2] == 'c' && name[3] == '.') {
+    if (name[4] == 's' && name[5] == 't' && name[6] == 'd' && name[7] == '.')
+      return true;
+    if (name[4] == 'l' && name[5] == 'i' && name[6] == 'b' && name[7] == '.')
+      return true;
+  }
+  return false;
 }
 
 static bool ny_sig_is_pure(fun_sig *sig) {
@@ -432,11 +441,11 @@ static fun_sig *ny_purity_resolve_call_sig(codegen_t *cg, expr_call_t *call,
     return NULL;
   if (assigned_name_contains(local_names, local_hashes, local_bloom, name))
     return NULL;
-  fun_sig *sig = resolve_overload(cg, name, call->args.len);
+  fun_sig *sig = resolve_overload(cg, name, call->args.len, 0);
   if (!sig)
     sig = lookup_use_module_fun(cg, name, call->args.len);
   if (!sig)
-    sig = lookup_fun(cg, name);
+    sig = lookup_fun(cg, name, 0);
   return sig;
 }
 
@@ -460,7 +469,7 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
   if (!module_name)
     module_name = target_name;
   if (!module_like) {
-    if (lookup_global(cg, target_name) || lookup_fun(cg, target_name))
+    if (lookup_global(cg, target_name) || lookup_fun(cg, target_name, 0))
       return NULL;
     module_like = true;
   }
@@ -471,7 +480,7 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
       snprintf(dotted, sizeof(dotted), "%s.%s", module_name, mc->name);
   if (written <= 0 || (size_t)written >= sizeof(dotted))
     return NULL;
-  return lookup_fun(cg, dotted);
+  return lookup_fun(cg, dotted, 0);
 }
 
 #define CHECK_PURE_EXPR(e)                                                     \
@@ -500,7 +509,6 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
                                          uint64_t local_bloom[4],
                                          bool memo_safe_only);
 
-
 static bool ny_stmt_is_pure(codegen_t *cg, stmt_t *s,
                             assigned_name_list *local_names,
                             assigned_hash_list *local_hashes,
@@ -508,7 +516,6 @@ static bool ny_stmt_is_pure(codegen_t *cg, stmt_t *s,
   return ny_stmt_check_safe_internal(cg, s, local_names, local_hashes,
                                      local_bloom, false);
 }
-
 
 static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
                                  assigned_name_list *local_names,
@@ -536,7 +543,7 @@ static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
       return true;
     if (lookup_enum_member(cg, name))
       return true;
-    if (lookup_fun(cg, name))
+    if (lookup_fun(cg, name, 0))
       return true;
     return false;
   }

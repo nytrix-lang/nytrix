@@ -1,56 +1,20 @@
 #ifndef CODEGEN_INTERNAL_H
 #define CODEGEN_INTERNAL_H
 
-#include "code/braun.h"
 #include "code/code.h"
 #include <llvm-c/Core.h>
-
-static inline void ny_braun_mark_current_block(codegen_t *cg) {
-  if (!cg || !cg->braun || !cg->builder)
-    return;
-  LLVMBasicBlockRef bb = LLVMGetInsertBlock(cg->builder);
-  if (!bb)
-    return;
-  if (cg->braun->current_block == bb)
-    return;
-  braun_ssa_start_block(cg->braun, bb);
-}
-
-static inline void ny_braun_enter_block(codegen_t *cg, LLVMBasicBlockRef bb) {
-  if (!cg || !cg->braun || !bb)
-    return;
-  if (cg->braun->current_block == bb)
-    return;
-  braun_ssa_start_block(cg->braun, bb);
-}
-
-static inline void ny_braun_add_predecessor(codegen_t *cg, LLVMBasicBlockRef bb,
-                                            LLVMBasicBlockRef pred) {
-  if (!cg || !cg->braun || !bb || !pred)
-    return;
-  LLVMBasicBlockRef saved = cg->braun->current_block;
-  braun_ssa_start_block(cg->braun, bb);
-  braun_ssa_add_predecessor(cg->braun, pred);
-  if (saved)
-    braun_ssa_start_block(cg->braun, saved);
-}
-
-static inline void ny_braun_seal_block(codegen_t *cg, LLVMBasicBlockRef bb) {
-  if (!cg || !cg->braun || !bb)
-    return;
-  braun_ssa_seal_block(cg->braun, bb);
-}
 
 void add_builtins(codegen_t *cg);
 bool builtin_allowed_comptime(const char *name);
 
-fun_sig *lookup_fun(codegen_t *cg, const char *name);
+fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash);
 fun_sig *lookup_fun_exact(codegen_t *cg, const char *name);
 fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc);
 const char *resolve_import_alias(codegen_t *cg, const char *name);
 binding *lookup_global(codegen_t *cg, const char *name);
 binding *lookup_global_exact(codegen_t *cg, const char *name);
-fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc);
+fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
+                          uint64_t hash);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
 void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
                 LLVMValueRef v, stmt_t *stmt, bool is_mut,
@@ -123,6 +87,8 @@ void process_use_imports(codegen_t *cg, stmt_t *s);
 void collect_use_aliases(codegen_t *cg, stmt_t *s);
 void collect_use_modules(codegen_t *cg, stmt_t *s);
 void process_exports(codegen_t *cg, stmt_t *s);
+
+void ny_sym_state_free(codegen_t *cg);
 
 void codegen_emit_string_init(codegen_t *cg);
 LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type);

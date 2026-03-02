@@ -191,21 +191,16 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
   }
   hit_cond = LLVMBuildAnd(cg->builder, hit_cond, memo_lookup_ok, "");
   LLVMBuildCondBr(cg->builder, hit_cond, hit_bb, miss_bb);
-  ny_braun_add_predecessor(cg, hit_bb, cur_bb);
-  ny_braun_add_predecessor(cg, miss_bb, cur_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, hit_bb);
-  ny_braun_enter_block(cg, hit_bb);
-  ny_braun_seal_block(cg, hit_bb);
+
   ny_dbg_loc(cg, tok);
   LLVMValueRef hit_res = LLVMBuildLoad2(cg->builder, cg->type_i64, res_g, "");
   LLVMBuildBr(cg->builder, join_bb);
   LLVMBasicBlockRef hit_end_bb = LLVMGetInsertBlock(cg->builder);
-  ny_braun_add_predecessor(cg, join_bb, hit_end_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, miss_bb);
-  ny_braun_enter_block(cg, miss_bb);
-  ny_braun_seal_block(cg, miss_bb);
+
   ny_dbg_loc(cg, tok);
   LLVMValueRef depth_inc = LLVMBuildAdd(
       cg->builder, depth_now, LLVMConstInt(cg->type_i64, 1, false), "");
@@ -276,11 +271,9 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
   LLVMBuildStore(cg->builder, new_valid, valid_g);
   LLVMBuildBr(cg->builder, join_bb);
   LLVMBasicBlockRef miss_end_bb = LLVMGetInsertBlock(cg->builder);
-  ny_braun_add_predecessor(cg, join_bb, miss_end_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, join_bb);
-  ny_braun_enter_block(cg, join_bb);
-  ny_braun_seal_block(cg, join_bb);
+
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "memo_res");
   LLVMAddIncoming(phi, (LLVMValueRef[]){hit_res, miss_res},
                   (LLVMBasicBlockRef[]){hit_end_bb, miss_end_bb}, 2);
@@ -298,7 +291,7 @@ static fun_sig *ny_gencall_lookup_helper(codegen_t *cg, fun_sig **cache_slot,
     const char *name = names[i];
     if (!name || !*name)
       continue;
-    fun_sig *sig = lookup_fun(cg, name);
+    fun_sig *sig = lookup_fun(cg, name, 0);
     if (sig) {
       if (cache_slot)
         *cache_slot = sig;
@@ -328,7 +321,6 @@ NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_kwarg, cached_fn_kwarg, "__kwarg",
                                  "std.core.__kwarg")
 
 #undef NY_DEFINE_GENCALL_LOOKUP_WRAPPER
-
 
 static bool ny_gencall_is_thread_attr(fun_sig *sig) {
   if (!sig || sig->is_extern || !sig->stmt_t)
@@ -807,12 +799,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "load_item.fail");
       LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "load_item.join");
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
-      ny_braun_add_predecessor(cg, ok_bb, cur_bb);
-      ny_braun_add_predecessor(cg, fail_bb, cur_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
-      ny_braun_enter_block(cg, ok_bb);
-      ny_braun_seal_block(cg, ok_bb);
+
       LLVMValueRef idx_raw =
           ny_build_untagged_or_raw_i64(cg, idx_v, "load_item_idx_raw");
       LLVMValueRef scaled = LLVMBuildShl(
@@ -830,18 +819,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "load_item_val");
       LLVMBasicBlockRef ok_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, ok_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, fail_bb);
-      ny_braun_enter_block(cg, fail_bb);
-      ny_braun_seal_block(cg, fail_bb);
+
       LLVMBasicBlockRef fail_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, fail_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
-      ny_braun_enter_block(cg, join_bb);
-      ny_braun_seal_block(cg, join_bb);
+
       LLVMValueRef phi =
           LLVMBuildPhi(cg->builder, cg->type_i64, "load_item_result");
       LLVMValueRef incoming_vals[2] = {ok_val, LLVMConstInt(cg->type_i64, 0, false)};
@@ -889,12 +874,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "store_item.fail");
       LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "store_item.join");
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
-      ny_braun_add_predecessor(cg, ok_bb, cur_bb);
-      ny_braun_add_predecessor(cg, fail_bb, cur_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
-      ny_braun_enter_block(cg, ok_bb);
-      ny_braun_seal_block(cg, ok_bb);
+
       LLVMValueRef idx_raw =
           ny_build_untagged_or_raw_i64(cg, idx_v, "store_item_idx_raw");
       LLVMValueRef scaled = LLVMBuildShl(
@@ -911,18 +893,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMBuildStore(cg->builder, val_v, ptr);
       LLVMBasicBlockRef ok_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, ok_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, fail_bb);
-      ny_braun_enter_block(cg, fail_bb);
-      ny_braun_seal_block(cg, fail_bb);
+
       LLVMBasicBlockRef fail_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, fail_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
-      ny_braun_enter_block(cg, join_bb);
-      ny_braun_seal_block(cg, join_bb);
+
       LLVMValueRef phi =
           LLVMBuildPhi(cg->builder, cg->type_i64, "store_item_result");
       LLVMValueRef incoming_vals[2] = {val_v, LLVMConstInt(cg->type_i64, 0, false)};
@@ -969,12 +947,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "obj.join");
 
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ptr_bb, not_ptr_bb);
-      ny_braun_add_predecessor(cg, ptr_bb, cur_bb);
-      ny_braun_add_predecessor(cg, not_ptr_bb, cur_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, ptr_bb);
-      ny_braun_enter_block(cg, ptr_bb);
-      ny_braun_seal_block(cg, ptr_bb);
+
       LLVMValueRef tag_addr =
           LLVMBuildSub(cg->builder, arg_v, LLVMConstInt(cg->type_i64, 8, false),
                        "obj_tag_addr");
@@ -1019,21 +994,17 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
       LLVMBasicBlockRef ptr_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, ptr_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, not_ptr_bb);
-      ny_braun_enter_block(cg, not_ptr_bb);
-      ny_braun_seal_block(cg, not_ptr_bb);
+
       LLVMValueRef not_ptr_result =
           want_tagof ? LLVMConstInt(cg->type_i64, 0, false)
                      : LLVMConstInt(cg->type_i64, 4, false);
       LLVMBasicBlockRef not_ptr_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
-      ny_braun_add_predecessor(cg, join_bb, not_ptr_end_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
-      ny_braun_enter_block(cg, join_bb);
-      ny_braun_seal_block(cg, join_bb);
+
       LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "obj_intrinsic_v");
       LLVMValueRef incoming_vals[2] = {ptr_result, not_ptr_result};
       LLVMBasicBlockRef incoming_bbs[2] = {ptr_end_bb, not_ptr_end_bb};
@@ -1129,13 +1100,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       // If it's NOT an alias, check if it doesn't exist as a local
       // variable/function, in which case it might be a direct module usage
       // (e.g. math.add)
-      if (is_alias || (lookup_fun(cg, target_name) == NULL &&
+      if (is_alias || (lookup_fun(cg, target_name, 0) == NULL &&
                        scope_lookup(scopes, depth, target_name) == NULL)) {
         looked_like_module_target = true;
         resolved_module_name = module_name;
         char dotted[256];
         snprintf(dotted, sizeof(dotted), "%s.%s", module_name, mc->name);
-        sig_found = lookup_fun(cg, dotted);
+        sig_found = lookup_fun(cg, dotted, 0);
         if (sig_found && !ny_sig_in_current_sigs(cg, sig_found))
           sig_found = NULL;
         if (sig_found) {
@@ -1166,13 +1137,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     // Priority 2: Check standard prefixes (dict_, list_, etc.)
     for (int i = 0; prefixes[i]; i++) {
       snprintf(buf, sizeof(buf), "%s%s", prefixes[i], mc->name);
-      sig_found = lookup_fun(cg, buf);
+      sig_found = lookup_fun(cg, buf, 0);
       if (sig_found)
         break;
     }
     // Priority 3: Direct name
     if (!sig_found)
-      sig_found = lookup_fun(cg, mc->name);
+      sig_found = lookup_fun(cg, mc->name, 0);
     if (sig_found && !ny_sig_in_current_sigs(cg, sig_found))
       sig_found = NULL;
   static_call_handling:;
@@ -1245,11 +1216,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
     }
     if (!callee) {
-      sig_found = name ? resolve_overload(cg, name, c->args.len) : NULL;
+      uint64_t hash = (c && c->callee && c->callee->kind == NY_E_IDENT)
+                          ? c->callee->as.ident.hash
+                          : 0;
+      sig_found = name ? resolve_overload(cg, name, c->args.len, hash) : NULL;
       if (!sig_found && name)
         sig_found = lookup_use_module_fun(cg, name, c->args.len);
       if (!sig_found && name)
-        sig_found = lookup_fun(cg, name);
+        sig_found = lookup_fun(cg, name, hash);
       if (sig_found && !ny_sig_in_current_sigs(cg, sig_found))
         sig_found = NULL;
       if (sig_found) {
@@ -1292,7 +1266,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     size_t n = c ? c->args.len : (mc->args.len + 1);
     char buf[32];
     snprintf(buf, sizeof(buf), "__call%zu", n);
-    fun_sig *rsig = lookup_fun(cg, buf);
+    fun_sig *rsig = lookup_fun(cg, buf, 0);
     if (!rsig) {
       report_missing_runtime_call_helper(cg, e->tok, buf, n);
       return LLVMConstInt(cg->type_i64, 0, false);
@@ -1411,8 +1385,8 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
     } else if (has_sig && is_variadic && i == (size_t)sig_arity - 1) {
       /* Variadic packaging: build list in-place. */
-      fun_sig *ls_s = lookup_fun(cg, "__list_new");
-      fun_sig *st_s = lookup_fun(cg, "__store64_idx");
+      fun_sig *ls_s = lookup_fun(cg, "__list_new", 0);
+      fun_sig *st_s = lookup_fun(cg, "__store64_idx", 0);
       if (!ls_s || !st_s) {
         ny_diag_error(e->tok,
                       "variadic arguments require __list_new/__store64_idx "
@@ -1560,12 +1534,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       return LLVMConstInt(cg->type_i64, 0, false);
     }
     bool detach_stmt_call = cg->thread_detach_stmt_call;
-    fun_sig *spawn_sig =
-        detach_stmt_call ? NULL : lookup_fun(cg, "__thread_spawn_call");
-    fun_sig *launch_sig =
-        detach_stmt_call ? lookup_fun(cg, "__thread_launch_call") : NULL;
-    fun_sig *join_sig =
-        detach_stmt_call ? NULL : lookup_fun(cg, "__thread_join");
+          fun_sig *spawn_sig =
+              detach_stmt_call ? NULL : lookup_fun(cg, "__thread_spawn_call", 0);
+          fun_sig *launch_sig =
+              detach_stmt_call ? lookup_fun(cg, "__thread_launch_call", 0) : NULL;
+          fun_sig *join_sig =
+              detach_stmt_call ? NULL : lookup_fun(cg, "__thread_join", 0);
+
     if ((!detach_stmt_call && (!spawn_sig || !join_sig)) ||
         (detach_stmt_call && !launch_sig)) {
       ny_diag_error(e->tok, "missing runtime thread helpers");

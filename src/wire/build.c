@@ -91,41 +91,7 @@ static int ny_file_mtime(const char *path, time_t *out_mtime) {
 }
 
 #if !defined(_WIN32)
-static bool ny_tool_in_path(const char *tool) {
-  if (!tool || !*tool)
-    return false;
-  if (strcmp(tool, "ld.lld") == 0) {
-    static int cached_ld_lld = -1;
-    if (cached_ld_lld >= 0)
-      return cached_ld_lld == 1;
-    bool found_now = false;
-    const char *path = getenv("PATH");
-    if (!path || !*path) {
-      cached_ld_lld = 0;
-      return false;
-    }
-    char *buf = ny_strdup(path);
-    if (!buf) {
-      cached_ld_lld = 0;
-      return false;
-    }
-    const char delim[2] = ":";
-    char *save = NULL;
-    for (char *tok = strtok_r(buf, delim, &save); tok;
-         tok = strtok_r(NULL, delim, &save)) {
-      if (!*tok)
-        continue;
-      char full[PATH_MAX];
-      snprintf(full, sizeof(full), "%s/%s", tok, tool);
-      if (access(full, X_OK) == 0 || access(full, F_OK) == 0) {
-        found_now = true;
-        break;
-      }
-    }
-    free(buf);
-    cached_ld_lld = found_now ? 1 : 0;
-    return found_now;
-  }
+static bool ny_check_path_for_tool(const char *tool) {
   const char *path = getenv("PATH");
   if (!path || !*path)
     return false;
@@ -148,6 +114,28 @@ static bool ny_tool_in_path(const char *tool) {
   }
   free(buf);
   return found;
+}
+
+static bool ny_tool_in_path(const char *tool) {
+  if (!tool || !*tool)
+    return false;
+  if (strcmp(tool, "ld.lld") == 0) {
+    static int cached_ld_lld = -1;
+    if (cached_ld_lld >= 0)
+      return cached_ld_lld == 1;
+    bool found = ny_check_path_for_tool(tool);
+    cached_ld_lld = found ? 1 : 0;
+    return found;
+  }
+  if (strcmp(tool, "ccache") == 0) {
+    static int cached_ccache = -1;
+    if (cached_ccache >= 0)
+      return cached_ccache == 1;
+    bool found = ny_check_path_for_tool(tool);
+    cached_ccache = found ? 1 : 0;
+    return found;
+  }
+  return ny_check_path_for_tool(tool);
 }
 #else
 static bool ny_tool_in_path(const char *tool) {
@@ -588,7 +576,6 @@ int ny_exec_spawn(const char *const argv[]) {
 
 bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
                                 const char *out_ast, bool debug, bool profile) {
-  bool has_ccache = ny_tool_in_path("ccache");
   const char *root = ny_src_root();
   static char include_arg[PATH_MAX + 12];
   static char llvm_include_arg[PATH_MAX + 12];
@@ -688,6 +675,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
                         llvm_include_arg);
   if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
     return true;
+  bool has_ccache = ny_tool_in_path("ccache");
 #if defined(__APPLE__) || defined(_WIN32)
   const char *runtime_args[128];
   size_t ra_i = 0;
@@ -912,11 +900,15 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   if (profile)
     argv[idx++] = "-pg";
 #if !defined(__APPLE__) && !defined(_WIN32)
-  const char *lld_env = getenv("NYTRIX_USE_LLD");
-  bool use_lld =
-      lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
-  if (use_lld)
-    argv[idx++] = "-fuse-ld=lld";
+  if (ny_tool_in_path("mold")) {
+    argv[idx++] = "-fuse-ld=mold";
+  } else {
+    const char *lld_env = getenv("NYTRIX_USE_LLD");
+    bool use_lld =
+        lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
+    if (use_lld)
+      argv[idx++] = "-fuse-ld=lld";
+  }
 #endif
 #if defined(__APPLE__)
   bool enable_mac_pie = ny_env_enabled("NYTRIX_MAC_PIE");

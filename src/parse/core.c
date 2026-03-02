@@ -23,7 +23,6 @@ static const char *parse_load_source(const char *filename) {
   return g_parse_cached_src;
 }
 
-
 static void parse_print_snippet(const char *filename, int line, int col,
                                 size_t len) {
   if (!filename || filename[0] == '<' || line <= 0 || col <= 0)
@@ -31,57 +30,7 @@ static void parse_print_snippet(const char *filename, int line, int col,
   const char *src = parse_load_source(filename);
   if (!src)
     return;
-  const char *line_start = NULL;
-  size_t line_len = 0;
-  if (!ny_extract_line(src, line, &line_start, &line_len))
-    return;
-  if (line_len == 0)
-    return;
-  size_t caret_col = (size_t)(col - 1);
-  if (caret_col > line_len)
-    caret_col = line_len;
-  size_t caret_len = len ? len : 1;
-  if (caret_col + caret_len > line_len)
-    caret_len = line_len > caret_col ? (line_len - caret_col) : 1;
-  const size_t max_len = 200;
-  size_t start = 0;
-  size_t end = line_len;
-  bool prefix = false;
-  bool suffix = false;
-  if (line_len > max_len) {
-    if (caret_col > max_len / 2)
-      start = caret_col - max_len / 2;
-    if (start + max_len > line_len)
-      start = line_len - max_len;
-    end = start + max_len;
-    prefix = start > 0;
-    suffix = end < line_len;
-  }
-  size_t show_len = end - start;
-  char *buf = malloc(show_len + 1);
-  if (!buf)
-    return;
-  for (size_t i = 0; i < show_len; i++) {
-    char c = line_start[start + i];
-    buf[i] = (c == '\t') ? ' ' : c;
-  }
-  buf[show_len] = '\0';
-  int width = 1;
-  for (int tmp = line; tmp >= 10; tmp /= 10)
-    width++;
-  fprintf(stderr, "  %s%*d%s | %s%s%s\n", clr(NY_CLR_GRAY), width, line,
-          clr(NY_CLR_RESET), prefix ? "..." : "", buf, suffix ? "..." : "");
-  size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
-  fprintf(stderr, "  %s%*s%s | ", clr(NY_CLR_GRAY), width, "",
-          clr(NY_CLR_RESET));
-  for (size_t i = 0; i < caret_pad; i++)
-    fputc(' ', stderr);
-  fputs(clr(NY_CLR_RED), stderr);
-  for (size_t i = 0; i < caret_len; i++)
-    fputc('^', stderr);
-  fputs(clr(NY_CLR_RESET), stderr);
-  fputc('\n', stderr);
-  free(buf);
+  ny_print_snippet(src, line, col, len, NY_CLR_RED);
 }
 
 static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
@@ -131,6 +80,7 @@ static bool parser_diag_should_emit(const char *filename, int line, int col,
 void parser_advance(parser_t *p) {
   p->prev = p->cur;
   p->cur = lexer_next(&p->lex);
+  p->skipped_newline = p->lex.skipped_newline;
 }
 
 bool parser_match(parser_t *p, token_kind kind) {
@@ -287,8 +237,14 @@ const char *parser_token_name(token_kind k) {
     return ">>";
   case NY_T_BITNOT:
     return "~";
-  default:
+  case NY_T_ELLIPSIS:
+    return "...";
+  case NY_T_QUESTION:
     return "?";
+  case NY_T_AT:
+    return "@";
+  default:
+    return "unknown";
   }
 }
 

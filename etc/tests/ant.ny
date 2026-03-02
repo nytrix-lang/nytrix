@@ -42,7 +42,6 @@ if(H < 2){ H = 25 }
 if(W % 2 == 1){ W -= 1 }
 H -= 0 ;; Full screen
 
-
 def LW   = W / 2
 def CANV = canvas(W, H)
 

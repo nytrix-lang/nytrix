@@ -1,294 +1,224 @@
-;; Keywords: ui window glfw ffi
-;; GLFW Backend for std.ui.window
+;; Keywords: ui glfw
+;; GLFW backend — dynamic loading via FFI.
 
 module std.ui.glfw (
-   available, init, create_native_window, poll_events,
-   swap_buffers, make_current, blit_buffer, get_backend_name,
-   native_window, create_vulkan_surface, get_required_instance_extensions,
-   _glfwVulkanSupported_sym, _glfwGetRequiredInstanceExtensions_sym
+   ;; Lifecycle
+   init, terminate,
+   ;; Windows
+   create_window, destroy_window, should_close, set_should_close,
+   set_title, get_size, get_framebuffer_size, set_size,
+   ;; Frame
+   poll_events, swap_buffers, swap_interval,
+   ;; Input
+   get_key, get_mouse_button, get_cursor_pos,
+   ;; Callbacks
+   set_key_callback, set_mouse_button_callback,
+   set_scroll_callback, set_cursor_pos_callback,
+   set_window_size_callback, set_close_callback,
+   ;; Vulkan
+   vulkan_supported, required_extensions, create_surface,
+   ;; Hints / consts
+   apply_hints,
+   GLFW_NO_API, GLFW_CLIENT_API, GLFW_RESIZABLE, GLFW_DECORATED,
+   GLFW_VISIBLE, GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FOCUSED,
+   GLFW_FLOATING, GLFW_MAXIMIZED, GLFW_FOCUS_ON_SHOW,
+   GLFW_PRESS, GLFW_RELEASE, GLFW_REPEAT,
+   KEY_ESCAPE, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE,
+   KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
+   KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6,
+   KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+   MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE,
+   MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER,
+   get_backend_name
 )
 
 use std.core *
-use std.core.dict *
-use std.os *
-use std.os.ffi *
 use std.ui.consts *
-use std.ui.event as ev
-use std.text *
+use std.os.ffi as ffi
 
-mut _glfw_handle = 0
-mut _initialized = false
+;; FFI Helper
 
-;; GLFW Constants
-def GLFW_CLIENT_API = 0x00022001
-def GLFW_NO_API = 0
-def GLFW_OPENGL_API = 0x00030001
-def GLFW_RESIZABLE = 0x00020003
-def GLFW_VISIBLE = 0x00020004
-def GLFW_DECORATED = 0x00020005
-def GLFW_FOCUSED = 0x00020001
-def GLFW_AUTO_ICONIFY = 0x00020006
-def GLFW_FLOATING = 0x00020007
-def GLFW_MAXIMIZED = 0x00020008
-def GLFW_CENTER_CURSOR = 0x00020009
-def GLFW_TRANSPARENT_FRAMEBUFFER = 0x0002000A
-def GLFW_FOCUS_ON_SHOW = 0x0002000C
-def GLFW_SCALE_TO_MONITOR = 0x0002000D
+mut _lib = 0
 
-def GLFW_PRESS = 1
-def GLFW_RELEASE = 0
-def GLFW_REPEAT = 2
-
-;; Key codes (partial)
-def GLFW_KEY_ESCAPE = 256
-def GLFW_KEY_ENTER = 257
-def GLFW_KEY_TAB = 258
-def GLFW_KEY_BACKSPACE = 259
-def GLFW_KEY_LEFT = 263
-def GLFW_KEY_UP = 265
-def GLFW_KEY_RIGHT = 262
-def GLFW_KEY_DOWN = 264
-
-mut _glfwInit_sym = 0
-mut _glfwTerminate_sym = 0
-mut _glfwWindowHint_sym = 0
-mut _glfwCreateWindow_sym = 0
-mut _glfwDestroyWindow_sym = 0
-mut _glfwWindowShouldClose_sym = 0
-mut _glfwSetWindowShouldClose_sym = 0
-mut _glfwPollEvents_sym = 0
-mut _glfwSwapBuffers_sym = 0
-mut _glfwMakeContextCurrent_sym = 0
-mut _glfwGetWindowSize_sym = 0
-mut _glfwSetWindowSize_sym = 0
-mut _glfwGetCursorPos_sym = 0
-mut _glfwGetKey_sym = 0
-mut _glfwGetMouseButton_sym = 0
-mut _glfwVulkanSupported_sym = 0
-mut _glfwCreateWindowSurface_sym = 0
-mut _glfwGetRequiredInstanceExtensions_sym = 0
-
-fn available(){
-   "Checks if GLFW is available on the system."
-   if(_initialized){ return true }
-   if(_glfw_handle == 0){
-      _glfw_handle = dlopen_any("glfw", RTLD_NOW())
-      if(_glfw_handle == 0){ _glfw_handle = dlopen_any("glfw3", RTLD_NOW()) }
-      if(_glfw_handle == 0){ return false }
-
-      _glfwInit_sym = dlsym(_glfw_handle, "glfwInit")
-      _glfwTerminate_sym = dlsym(_glfw_handle, "glfwTerminate")
-      _glfwWindowHint_sym = dlsym(_glfw_handle, "glfwWindowHint")
-      _glfwCreateWindow_sym = dlsym(_glfw_handle, "glfwCreateWindow")
-      _glfwDestroyWindow_sym = dlsym(_glfw_handle, "glfwDestroyWindow")
-      _glfwWindowShouldClose_sym = dlsym(_glfw_handle, "glfwWindowShouldClose")
-      _glfwSetWindowShouldClose_sym = dlsym(_glfw_handle, "glfwSetWindowShouldClose")
-      _glfwPollEvents_sym = dlsym(_glfw_handle, "glfwPollEvents")
-      _glfwSwapBuffers_sym = dlsym(_glfw_handle, "glfwSwapBuffers")
-      _glfwMakeContextCurrent_sym = dlsym(_glfw_handle, "glfwMakeContextCurrent")
-      _glfwGetWindowSize_sym = dlsym(_glfw_handle, "glfwGetWindowSize")
-      _glfwSetWindowSize_sym = dlsym(_glfw_handle, "glfwSetWindowSize")
-      _glfwGetCursorPos_sym = dlsym(_glfw_handle, "glfwGetCursorPos")
-      _glfwGetKey_sym = dlsym(_glfw_handle, "glfwGetKey")
-      _glfwGetMouseButton_sym = dlsym(_glfw_handle, "glfwGetMouseButton")
-      _glfwVulkanSupported_sym = dlsym(_glfw_handle, "glfwVulkanSupported")
-      _glfwCreateWindowSurface_sym = dlsym(_glfw_handle, "glfwCreateWindowSurface")
-      _glfwGetRequiredInstanceExtensions_sym = dlsym(_glfw_handle, "glfwGetRequiredInstanceExtensions")
-   }
-   return true
-}
-
-fn init(){
-   "Initializes GLFW."
-   if(_initialized){ return true }
-   if(!available()){ return false }
-   def res = call0(_glfwInit_sym)
-   if(res == 0){ return false }
-   _initialized = true
-   true
-}
-
-fn create_native_window(win){
-   "Creates a native GLFW window."
-   if(!init()){ return false }
-
-   def title = get(win, 2, "Window")
-   def w = get(win, 5, 800)
-   def h = get(win, 6, 600)
-   def flags = get(win, 7, 0)
-
-   ;; Set hints
-   if((flags & WINDOW_VULKAN) != 0){
-      call2_void(_glfwWindowHint_sym, GLFW_CLIENT_API, GLFW_NO_API)
-   }
-
-   if((flags & WINDOW_TRANSPARENT) != 0){
-      call2_void(_glfwWindowHint_sym, GLFW_TRANSPARENT_FRAMEBUFFER, 1)
-   }
-
-   if((flags & WINDOW_NO_BORDER) != 0){
-      call2_void(_glfwWindowHint_sym, GLFW_DECORATED, 0)
-   }
-
-   if((flags & WINDOW_NO_RESIZE) != 0){
-      call2_void(_glfwWindowHint_sym, GLFW_RESIZABLE, 0)
-   }
-
-   ;; Create window
-   def glfw_win = call5(_glfwCreateWindow_sym, w, h, title, 0, 0)
-   if(glfw_win == 0){ return false }
-
-   set_idx(win, 22, glfw_win) ;; NATIVE_CTX
-
-   if((flags & WINDOW_VULKAN) == 0){
-      call1_void(_glfwMakeContextCurrent_sym, glfw_win)
-   }
-
-   true
-}
-
-fn poll_events(win){
-   "Polls GLFW events and updates window state."
-   if(!_initialized){ return 0 }
-   call0_void(_glfwPollEvents_sym)
-
-   def glfw_win = get(win, 22, 0)
-   if(glfw_win == 0){ return 0 }
-
-   ;; Check for close
-   if(call1(_glfwWindowShouldClose_sym, glfw_win) != 0){
-      set_idx(win, 8, true) ;; SHOULD_CLOSE
-      def q = get(win, 10, [])
-      set_idx(win, 10, append(q, ev.make_event(EVENT_QUIT, win, get(win, 1), 0)))
-   }
-
-   ;; Manually poll some keys for simulation if needed,
-   ;; but GLFW doesn't give us a list of changed keys easily without callbacks.
-   ;; Since we don't have callbacks yet, we might just poll the common quit keys.
-
-   if(call2(_glfwGetKey_sym, glfw_win, GLFW_KEY_ESCAPE) == GLFW_PRESS){
-      set_idx(win, 8, true)
-   }
-
-   ;; Update size if changed
-   mut w_ptr = malloc(4)
-   mut h_ptr = malloc(4)
-   call3_void(_glfwGetWindowSize_sym, glfw_win, w_ptr, h_ptr)
-   def nw = load32(w_ptr)
-   def nh = load32(h_ptr)
-   free(w_ptr)
-   free(h_ptr)
-
-   if(nw != get(win, 5) || nh != get(win, 6)){
-      def old_w = get(win, 5)
-      def old_h = get(win, 6)
-      set_idx(win, 5, nw)
-      set_idx(win, 6, nh)
-      mut r = dict(4)
-      r = dict_set(r, "w", nw)
-      r = dict_set(r, "h", nh)
-      def q = get(win, 10, [])
-      set_idx(win, 10, append(q, ev.make_event(EVENT_WINDOW_RESIZED, win, get(win, 1), r)))
-   }
-
-   ;; Mouse pos
-   mut x_ptr = malloc(8)
-   mut y_ptr = malloc(8)
-   call3_void(_glfwGetCursorPos_sym, glfw_win, x_ptr, y_ptr)
-   ;; Cursor pos is double (8 bytes)
-   ;; For now, just load as 64-bit int and we'll have issues if it's float,
-   ;; but Nytrix unbox might handle it if we use load32_f32 or similar.
-   ;; Actually let's assume they are small enough for now or we need a proper double loader.
-   ;; We'll just use load64 and hope for the best for a quick prototype.
-   ;; Wait, Nytrix doesn't have load64_f64.
-
-   0
-}
-
-fn swap_buffers(win){
-   "Swaps GLFW buffers."
-   def glfw_win = get(win, 22, 0)
-   if(glfw_win != 0){
-      call1_void(_glfwSwapBuffers_sym, glfw_win)
-   }
-}
-
-fn make_current(win){
-   "Makes GLFW context current."
-   def glfw_win = get(win, 22, 0)
-   if(glfw_win != 0){
-      call1_void(_glfwMakeContextCurrent_sym, glfw_win)
-   }
-}
-
-fn blit_buffer(win, buf, w, h){
-   "GLFW doesn't have a direct blit, use OpenGL or similar if needed."
-   0
-}
-
-fn native_window(win){
-   "Returns the native GLFW window handle."
-   get(win, 22, 0)
-}
-
-fn create_vulkan_surface(instance, glfw_win, allocator, pSurface){
-   "Wraps glfwCreateWindowSurface."
-   if(_glfwCreateWindowSurface_sym == 0){ return -1 }
-   call4(_glfwCreateWindowSurface_sym, instance, glfw_win, allocator, pSurface)
-}
-
-fn get_required_instance_extensions(){
-   "Returns [count, pExtensions] for Vulkan instance creation."
-   if(_glfwGetRequiredInstanceExtensions_sym == 0){
-      init()
-   }
-   if(_glfwGetRequiredInstanceExtensions_sym == 0){
-      print("GLFW: _glfwGetRequiredInstanceExtensions_sym is 0 even after init!")
-      mut l = list(2)
-      l = append(l, 0)
-      l = append(l, 0)
-      return l
-   }
-
-   if(_glfwVulkanSupported_sym != 0){
-      def sup = call0(_glfwVulkanSupported_sym)
-      if(sup == 0){
-         print("GLFW ERROR: glfwVulkanSupported returned 0 inside get_required_instance_extensions!")
-      } else {
-         print("GLFW: glfwVulkanSupported is TRUE inside get_required_instance_extensions.")
+fn _call(nm, args) {
+   "Internal: Dynamic dispatch for GLFW C functions."
+   if(!_lib){
+      _lib = ffi.dlopen_any("glfw", ffi.RTLD_LAZY() | ffi.RTLD_GLOBAL())
+      if(!_lib){
+         _lib = ffi.dlopen_any("glfw3", ffi.RTLD_LAZY() | ffi.RTLD_GLOBAL())
       }
    }
-
-   mut count_ptr = malloc(4)
-   def exts = call1(_glfwGetRequiredInstanceExtensions_sym, count_ptr)
-   def count = load32(count_ptr)
-
-   if(count == 0){
-      print("GLFW ERROR: get_required_instance_extensions returned count 0!")
-   }
-
-   mut l2 = list(2)
-   l2 = append(l2, count)
-   l2 = append(l2, exts)
-   l2
+   if(!_lib){ return 0 }
+   def f = ffi.dlsym(_lib, nm)
+   if(!f){ return 0 }
+   ffi.ffi_call(f, args)
 }
 
-fn get_backend_name(){
-   "glfw"
+;; Window hint constants
+
+def GLFW_CLIENT_API             = 0x00022001
+def GLFW_NO_API                 = 0
+def GLFW_OPENGL_API             = 0x00030001
+def GLFW_RESIZABLE              = 0x00020003
+def GLFW_VISIBLE                = 0x00020004
+def GLFW_DECORATED              = 0x00020005
+def GLFW_FOCUSED                = 0x00020001
+def GLFW_AUTO_ICONIFY           = 0x00020006
+def GLFW_FLOATING               = 0x00020007
+def GLFW_MAXIMIZED              = 0x00020008
+def GLFW_CENTER_CURSOR          = 0x00020009
+def GLFW_TRANSPARENT_FRAMEBUFFER= 0x0002000A
+def GLFW_FOCUS_ON_SHOW          = 0x0002000C
+def GLFW_SCALE_TO_MONITOR       = 0x0002000D
+
+def GLFW_PRESS   = 1
+def GLFW_RELEASE = 0
+def GLFW_REPEAT  = 2
+
+;; Key codes
+def KEY_ESCAPE    = 256
+def KEY_ENTER     = 257
+def KEY_TAB       = 258
+def KEY_BACKSPACE = 259
+def KEY_RIGHT     = 262
+def KEY_LEFT      = 263
+def KEY_DOWN      = 264
+def KEY_UP        = 265
+def KEY_F1  = 290
+def KEY_F2  = 291
+def KEY_F3  = 292
+def KEY_F4  = 293
+def KEY_F5  = 294
+def KEY_F6  = 295
+def KEY_F7  = 296
+def KEY_F8  = 297
+def KEY_F9  = 298
+def KEY_F10 = 299
+def KEY_F11 = 300
+def KEY_F12 = 301
+def KEY_SPACE = 32
+
+def MOUSE_BUTTON_LEFT   = 0
+def MOUSE_BUTTON_RIGHT  = 1
+def MOUSE_BUTTON_MIDDLE = 2
+
+def MOD_SHIFT   = 0x0001
+def MOD_CONTROL = 0x0002
+def MOD_ALT     = 0x0004
+def MOD_SUPER   = 0x0008
+
+;; Lifecycle
+
+mut _ready = false
+
+fn init() {
+   "Initializes the GLFW library."
+   if(_ready){ return true }
+   _call("glfwWindowHint", [GLFW_CLIENT_API, GLFW_NO_API])
+   if(_call("glfwInit", []) == 0){ return false }
+   _ready = true
+   true
 }
 
-if(comptime{__main()}){
-   use std.core.error *
-
-   if(available()){
-      print("✓ GLFW Backend available")
-      assert(init(), "GLFW init")
-      assert(_glfwCreateWindow_sym != 0, "glfwCreateWindow symbol resolved")
-      assert(_glfwPollEvents_sym != 0, "glfwPollEvents symbol resolved")
-      assert(_glfwTerminate_sym != 0, "glfwTerminate symbol resolved")
-      print("✓ GLFW Backend initialized and symbols resolved")
-      call0_void(_glfwTerminate_sym)
-   } else {
-      print("! GLFW Backend NOT available on this system (skipping functional tests)")
-   }
+fn terminate() {
+   "Shuts down the GLFW library."
+   if(_ready){ _call("glfwTerminate", []) _ready = false }
 }
+
+;; Window management
+
+fn apply_hints(flags) {
+   "Applies window creation hints based on the specified flags."
+   if((flags & WINDOW_TRANSPARENT) != 0){ _call("glfwWindowHint", [GLFW_TRANSPARENT_FRAMEBUFFER, 1]) }
+   if((flags & WINDOW_NO_BORDER)   != 0){ _call("glfwWindowHint", [GLFW_DECORATED, 0]) }
+   if((flags & WINDOW_NO_RESIZE)   != 0){ _call("glfwWindowHint", [GLFW_RESIZABLE, 0]) }
+   if((flags & WINDOW_FLOATING)    != 0){ _call("glfwWindowHint", [GLFW_FLOATING, 1]) }
+   if((flags & WINDOW_MAXIMIZE)    != 0){ _call("glfwWindowHint", [GLFW_MAXIMIZED, 1]) }
+}
+
+fn create_window(title, w, h, flags=0) {
+   "Creates a new GLFW window."
+   init()
+   apply_hints(flags)
+   _call("glfwCreateWindow", [w, h, title, 0, 0])
+}
+
+fn destroy_window(win)         { "Destroys a GLFW window." if(win){ _call("glfwDestroyWindow", [win]) } }
+fn should_close(win)           { "Returns true if the window should close." _call("glfwWindowShouldClose", [win]) != 0 }
+fn set_should_close(win, v=1)  { "Sets the window's close flag." _call("glfwSetWindowShouldClose", [win, v]) }
+fn set_title(win, title)       { "Updates the window title." _call("glfwSetWindowTitle", [win, title]) }
+fn poll_events()               { "Polls for pending window events." if(_ready){ _call("glfwPollEvents", []) } }
+fn swap_buffers(win)           { "Swaps the front and back buffers." _call("glfwSwapBuffers", [win]) }
+fn swap_interval(n)            { "Sets the swap interval (VSync)." _call("glfwSwapInterval", [n]) }
+
+fn get_size(win) {
+   "Returns the window size as [width, height]."
+   mut wp = malloc(4)
+   mut hp = malloc(4)
+   _call("glfwGetWindowSize", [win, wp, hp])
+   def w = load32(wp, 0)
+   def h = load32(hp, 0)
+   free(wp)
+   free(hp)
+   [w, h]
+}
+
+fn get_framebuffer_size(win) {
+   "Returns the framebuffer size as [width, height]."
+   mut wp = malloc(4)
+   mut hp = malloc(4)
+   _call("glfwGetFramebufferSize", [win, wp, hp])
+   def w = load32(wp, 0)
+   def h = load32(hp, 0)
+   free(wp)
+   free(hp)
+   [w, h]
+}
+
+fn set_size(win, w, h) { "Resizes the window." _call("glfwSetWindowSize", [win, w, h]) }
+
+;; Input
+
+fn get_key(win, key)          { "Returns the state of a key." _call("glfwGetKey", [win, key]) }
+fn get_mouse_button(win, btn) { "Returns the state of a mouse button." _call("glfwGetMouseButton", [win, btn]) }
+
+fn get_cursor_pos(win) {
+   "Returns the cursor position as [x, y]."
+   mut xp = malloc(8)
+   mut yp = malloc(8)
+   _call("glfwGetCursorPos", [win, xp, yp])
+   def x = load64(xp, 0)
+   def y = load64(yp, 0)
+   free(xp)
+   free(yp)
+   [x, y]
+}
+
+;; Callbacks
+
+fn set_key_callback(win, cb)          { "Sets the key input callback." _call("glfwSetKeyCallback", [win, cb]) }
+fn set_mouse_button_callback(win, cb) { "Sets the mouse button callback." _call("glfwSetMouseButtonCallback", [win, cb]) }
+fn set_scroll_callback(win, cb)       { "Sets the scroll callback." _call("glfwSetScrollCallback", [win, cb]) }
+fn set_cursor_pos_callback(win, cb)   { "Sets the cursor position callback." _call("glfwSetCursorPosCallback", [win, cb]) }
+fn set_window_size_callback(win, cb)  { "Sets the window resize callback." _call("glfwSetWindowSizeCallback", [win, cb]) }
+fn set_close_callback(win, cb)        { "Sets the window close callback." _call("glfwSetWindowCloseCallback", [win, cb]) }
+
+;; Vulkan integration
+
+fn vulkan_supported() { "Returns true if Vulkan is supported by the backend." _call("glfwVulkanSupported", []) != 0 }
+
+fn required_extensions() {
+   "Returns the Vulkan instance extensions required by GLFW."
+   mut cp = malloc(4)
+   def exts  = _call("glfwGetRequiredInstanceExtensions", [cp])
+   def count = load32(cp, 0)
+   free(cp)
+   [count, exts]
+}
+
+fn create_surface(instance, win, allocator, surface) {
+   "Creates a Vulkan window surface."
+   _call("glfwCreateWindowSurface", [instance, win, allocator, surface])
+}
+
+fn get_backend_name() { "Returns the backend name." "glfw" }

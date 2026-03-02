@@ -315,7 +315,7 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
     binding *gb = lookup_global(cg, e->as.ident.name);
     if (gb && gb->type_name)
       return gb->type_name;
-    fun_sig *sig = lookup_fun(cg, e->as.ident.name);
+    fun_sig *sig = lookup_fun(cg, e->as.ident.name, 0);
     if (sig && sig->return_type)
       return sig->return_type;
     return NULL;
@@ -323,7 +323,7 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
   case NY_E_CALL:
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
       const char *n = e->as.call.callee->as.ident.name;
-      fun_sig *sig = lookup_fun(cg, n);
+      fun_sig *sig = lookup_fun(cg, n, 0);
       if (sig && sig->return_type)
         return sig->return_type;
     }
@@ -333,7 +333,7 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
       char dotted[256];
       const char *target = e->as.memcall.target->as.ident.name;
       snprintf(dotted, sizeof(dotted), "%s.%s", target, e->as.memcall.name);
-      fun_sig *sig = lookup_fun(cg, dotted);
+      fun_sig *sig = lookup_fun(cg, dotted, 0);
       if (sig && sig->return_type)
         return sig->return_type;
     }
