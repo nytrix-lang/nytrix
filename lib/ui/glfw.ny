@@ -2,22 +2,22 @@
 ;; GLFW backend — dynamic loading via FFI.
 
 module std.ui.glfw (
-   ;; Lifecycle
+   ; Lifecycle
    init, terminate,
-   ;; Windows
+   ; Windows
    create_window, destroy_window, should_close, set_should_close,
    set_title, get_size, get_framebuffer_size, set_size,
-   ;; Frame
+   ; Frame
    poll_events, swap_buffers, swap_interval,
-   ;; Input
+   ; Input
    get_key, get_mouse_button, get_cursor_pos,
-   ;; Callbacks
+   ; Callbacks
    set_key_callback, set_mouse_button_callback,
    set_scroll_callback, set_cursor_pos_callback,
    set_window_size_callback, set_close_callback,
-   ;; Vulkan
+   ; Vulkan
    vulkan_supported, required_extensions, create_surface,
-   ;; Hints / consts
+   ; Hints / consts
    apply_hints,
    GLFW_NO_API, GLFW_CLIENT_API, GLFW_RESIZABLE, GLFW_DECORATED,
    GLFW_VISIBLE, GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FOCUSED,
@@ -114,7 +114,6 @@ mut _ready = false
 fn init() {
    "Initializes the GLFW library."
    if(_ready){ return true }
-   _call("glfwWindowHint", [GLFW_CLIENT_API, GLFW_NO_API])
    if(_call("glfwInit", []) == 0){ return false }
    _ready = true
    true
@@ -139,6 +138,7 @@ fn apply_hints(flags) {
 fn create_window(title, w, h, flags=0) {
    "Creates a new GLFW window."
    init()
+   _call("glfwWindowHint", [GLFW_CLIENT_API, GLFW_NO_API])
    apply_hints(flags)
    _call("glfwCreateWindow", [w, h, title, 0, 0])
 }

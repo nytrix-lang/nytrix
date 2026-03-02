@@ -42,32 +42,28 @@ fn _touch(...args){
 }
 
 fn _is_debug(){
-   "Internal helper for `is_debug`."
    if(_debug == -1){
       def v = env("NY_AUDIO_DEBUG")
-      _debug = (v && (eq(v, "1") || eq(v, "true"))) ? 1 : 0
+      _debug = (v && (str_len(v) > 0)) ? 1 : 0
    }
    _debug
 }
 
 fn _is_mix_debug(){
-   "Internal helper for `is_mix_debug`."
    if(_debug_mix == -1){
       def v = env("NY_AUDIO_DEBUG_MIX")
-      _debug_mix = (v && (eq(v, "1") || eq(v, "true"))) ? 1 : 0
+      _debug_mix = (v && (str_len(v) > 0)) ? 1 : 0
    }
    _debug_mix
 }
 
 fn _env_enabled(name){
-   "Internal helper for `env_enabled`."
    def v = env(name)
    if(!v){ return false }
-   eq(v, "1") || eq(v, "true")
+   str_len(v) > 0
 }
 
 fn _is_async_mode(){
-   "Internal helper for `is_async_mode`."
    if(_async_mode == -1){
       def v = env("NY_AUDIO_ASYNC")
       if(!v){
@@ -76,10 +72,8 @@ fn _is_async_mode(){
          } else {
             _async_mode = 1
          }
-      } elif(eq(v, "1") || eq(v, "true") || eq(v, "on") || eq(v, "yes")){
-         _async_mode = 1
       } else {
-         _async_mode = 0
+         _async_mode = (eq(v, "0") || eq(v, "false") || eq(v, "off")) ? 0 : 1
       }
    }
    _async_mode
@@ -216,37 +210,52 @@ fn init(force_async=false){
    if(_ctx != 0){ return true }
    if(_is_debug()){ print("Audio: Initializing context...") }
    def ctx = create()
-   if(!connect(ctx)){
+   def nctx = connect(ctx)
+   if(!nctx){
       if(_is_debug()){ print("Audio: Failed to connect to any backend.") }
       return false
    }
-   def count = get_output_device_count(ctx)
+   _ctx = nctx
+   if(_is_debug()){
+       print("Audio: Context connected to backend: " + get_backend_name())
+   }
+
+   def count = get_output_device_count(_ctx)
+   if(_is_debug()){ print("Audio: Found " + to_str(count) + " output devices.") }
    if(count == 0){
-      if(_is_debug()){ print("Audio: No output devices found.") }
-      disconnect(ctx)
+      if(_is_debug()){
+           print("Audio: No output devices found.")
+      }
+      disconnect(_ctx)
+      _ctx = 0
       return false
    }
-   def dev = get_output_device(ctx, get_default_output_device_index(ctx))
-   def stream = outstream_create(dev)
+   def dev = get_output_device(_ctx, get_default_output_device_index(_ctx))
+   mut stream = outstream_create(dev)
    mut out_format = _get_output_format_pref()
    def out_rate = _get_output_rate()
-   if(!outstream_open(stream, out_format, out_rate, 2, 0)){
+   def nstream = outstream_open(stream, out_format, out_rate, 2, 0)
+   if(!nstream){
       out_format = FORMAT_S16LE
-      if(!outstream_open(stream, out_format, out_rate, 2, 0)){
+      def nstream2 = outstream_open(stream, out_format, out_rate, 2, 0)
+      if(!nstream2){
          if(_is_debug()){ print("Audio: Failed to open output stream.") }
          outstream_destroy(stream)
-         disconnect(ctx)
+         disconnect(nctx)
          return false
       }
+      stream = nstream2
+   } else {
+      stream = nstream
    }
    _out_format = out_format
    if(!outstream_start(stream)){
       if(_is_debug()){ print("Audio: Failed to start output stream.") }
       outstream_destroy(stream)
-      disconnect(ctx)
+      disconnect(nctx)
       return false
    }
-   _ctx = ctx
+   _ctx = nctx
    _stream = stream
    _prime_stream()
    if(force_async || _is_async_mode()){
@@ -418,5 +427,5 @@ fn get_master_volume(){
 }
 fn get_backend_name(){
    "Gets backend name."
-   io_backend_name(_ctx)
+   return io_backend_name(_ctx)
 }

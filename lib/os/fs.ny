@@ -11,7 +11,7 @@ use std.os.path as ospath
 use std.text *
 
 fn is_file(path){
-   "Returns true if path exists and is a regular file."
+   "Returns true if the given `path` exists and points to a regular file."
    if(!is_str(path)){ return false }
    def p = ospath.normalize(path)
    if(!(file_exists(p))){ return false }
@@ -20,7 +20,7 @@ fn is_file(path){
 }
 
 fn is_dir(path){
-   "Returns true if path is a directory."
+   "Returns true if the given `path` exists and points to a directory."
    if(!is_str(path)){ return false }
    if(path == "." || path == ".."){ return true }
    def p = ospath.normalize(path)
@@ -28,7 +28,7 @@ fn is_dir(path){
 }
 
 fn list_dir(path){
-   "Returns a list of filenames in the directory `path`."
+   "Returns a list of filenames contained within the directory at `path`. Excludes '.' and '..' entries."
    if(!is_str(path)){ return list(0) }
    def p = ospath.normalize(path)
    def h = __dir_open(p)
@@ -45,7 +45,7 @@ fn list_dir(path){
 }
 
 fn walk(root, cb){
-   "Walk files under root and call cb(path) recursively."
+   "Recursively traverses the filesystem starting at `root`, calling `cb(path)` for every file and directory encountered."
    if(!is_str(root)){ return 0 }
    mut r = ospath.normalize(root)
    if(str_len(r) == 0){ r = "." }

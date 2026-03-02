@@ -45,7 +45,7 @@ fn pow_mod(base, exp, mod){
 }
 
 fn is_prime(n){
-   "Check if n is prime."
+   "Returns true if `n` is a prime number, using trial division."
    if(n <= 1){ return 0 }
    if(n <= 3){ return 1 }
    if(n % 2 == 0 || n % 3 == 0){ return 0 }
@@ -58,7 +58,7 @@ fn is_prime(n){
 }
 
 fn next_prime(n){
-   "Return the smallest prime strictly greater than n."
+   "Returns the smallest prime number strictly greater than `n`."
    if(n <= 1){ return 2 }
    mut p = n
    while(1){

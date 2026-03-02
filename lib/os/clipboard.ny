@@ -10,7 +10,7 @@ use std.core *
 use std.os *
 
 fn set_text(text){
-   "Sets the system clipboard text. Falls back to xsel/wl-copy/xclip on Linux."
+   "Copies the provided `text` to the system clipboard. Uses platform-specific tools: xsel/wl-copy/xclip on Linux, pbcopy on macOS, and clip on Windows."
    if(eq(os(), "linux")){
       mut tool = ""
       if(posix_spawn(["which", "xsel"])){ tool = "xsel" }
@@ -28,7 +28,7 @@ fn set_text(text){
 }
 
 fn get_text(){
-   "Retrieves text from the system clipboard. Falls back to xsel/wl-paste/xclip on Linux."
+   "Retrieves the current text content from the system clipboard. Uses platform-specific tools: xsel/wl-paste/xclip on Linux, pbpaste on macOS, and Powershell on Windows."
    mut res = ""
    def tmp = "/build/cache/ny_clipboard_tmp.txt"
    if(eq(os(), "linux")){
@@ -49,7 +49,7 @@ fn get_text(){
       def res_err = sys_file_read(tmp)
       if(is_ok(res_err)){
          res = unwrap(res_err)
-         ;; Optionally strip trailing newline if added by tools like powershell
+         ; Optionally strip trailing newline if added by tools like powershell
          def n = str_len(res)
          if(n > 0 && str_slice(res, n - 1, n) == "\n"){
             res = str_slice(res, 0, n - 1)
@@ -64,11 +64,11 @@ fn get_text(){
 }
 
 fn set_clipboard_text(text){
-   "Alias for set_text."
+   "Convenience alias for `set_text`."
    set_text(text)
 }
 
 fn get_clipboard_text(){
-   "Alias for get_text."
+   "Convenience alias for `get_text`."
    get_text()
 }

@@ -55,35 +55,58 @@ fn is_available(){
 }
 
 fn init(ctx){
-   "Initializes module state."
-    if(_lib != 0){ return true }
+    "Initializes module state."
+    if(_lib != 0){ return ctx }
+    if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: Loading libpulse-simple...") }
     _lib = dlopen_any("pulse-simple", RTLD_NOW())
-    if(_lib == 0){ return false }
+    if(_lib == 0){ 
+        if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: libpulse-simple not found.") }
+        return 0 
+    }
     _pa_simple_new = dlsym(_lib, "pa_simple_new")
     _pa_simple_free = dlsym(_lib, "pa_simple_free")
     _pa_simple_write = dlsym(_lib, "pa_simple_write")
     _pa_simple_drain = dlsym(_lib, "pa_simple_drain")
     _pa_simple_flush = dlsym(_lib, "pa_simple_flush")
+    _pa_simple_set_latency = dlsym(_lib, "pa_simple_set_latency")
     def lib_main = dlopen_any("pulse", RTLD_NOW())
     if(lib_main != 0){ _pa_strerror = dlsym(lib_main, "pa_strerror") }
-    if(_pa_simple_new == 0 || _pa_simple_free == 0 || _pa_simple_write == 0){
+    if(!_pa_simple_new || !_pa_simple_free || !_pa_simple_write){
+        if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: Mandatory symbols missing.") }
         dlclose(_lib)
         _lib = 0
-        _pa_simple_new = 0
-        _pa_simple_free = 0
-        _pa_simple_write = 0
-        _pa_simple_drain = 0
-        _pa_simple_flush = 0
-        return false
+        return 0
     }
     mut dev = dict(8)
     dev = dict_set(dev, "name", "PulseAudio Default")
-    dev = dict_set(dev, "id", "pulse")
+    dev = dict_set(dev, "id", "pulse_default")
     dev = dict_set(dev, "ctx", ctx)
-    mut devices = get(ctx, "devices", list())
-    devices = append(devices, dev)
-    ctx = dict_set(ctx, "devices", devices)
-    true
+    if(env("NY_AUDIO_DEBUG")){ 
+        print("Audio: Pulse: dev=" + to_str(dev) + " dev-tag=" + to_str(__tagof(dev))) 
+    }
+    
+    mut old_devices = dict_get(ctx, "devices", list())
+    if(!is_list(old_devices)){ old_devices = list() }
+    
+    if(env("NY_AUDIO_DEBUG")){ 
+        print("Audio: Pulse: old_devices=" + to_str(old_devices) + " od-tag=" + to_str(__tagof(old_devices))) 
+    }
+    
+    def new_devices = append(old_devices, dev)
+    
+    if(env("NY_AUDIO_DEBUG")){ 
+        def ntag = __tagof(new_devices)
+        print("Audio: Pulse: devices count=" + to_str(len(new_devices)) + " nd-tag=" + to_str(ntag) + " is_100=" + to_str(ntag == 100))
+        print("Audio: Pulse: first device=" + to_str(core.get(new_devices, 0)))
+    }
+
+
+
+
+
+    
+    ctx = dict_set(ctx, "devices", new_devices)
+    ctx
 }
 
 fn shutdown(ctx){
@@ -101,10 +124,10 @@ fn stream_open(stream){
    "Implements `stream_open`."
     if(_pa_simple_new == 0){ return false }
     def ss = malloc(12)
-    def format = get(stream, "format", 1)
+    def format = core.get(stream, "format", 1)
     def bits = (format == 2) ? 32 : 16
-    def rate = get(stream, "sample_rate")
-    def channels = get(stream, "channels")
+    def rate = core.get(stream, "sample_rate")
+    def channels = core.get(stream, "channels")
     def pa_fmt = (format == 2) ? PA_SAMPLE_FLOAT32LE : PA_SAMPLE_S16LE
     store32(ss, pa_fmt, 0)
     store32(ss, rate, 4)
@@ -141,21 +164,32 @@ fn stream_open(stream){
     if(!app_name || len(app_name) == 0){ app_name = "Nytrix Audio" }
     mut stream_name = env("NY_AUDIO_PULSE_STREAM")
     if(!stream_name || len(stream_name) == 0){ stream_name = "Nytrix Output" }
+    if(env("NY_AUDIO_DEBUG")){ 
+        print("Audio: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format))
+    }
     def pa = call9(_pa_simple_new, 0, app_name, PA_STREAM_PLAYBACK, out_dev, stream_name, ss, 0, attr, err_ptr)
-    free(ss)
-    if(attr){ free(attr) }
     if(pa == 0){
-        if(env("NY_AUDIO_DEBUG") && _pa_strerror != 0){
-            def err = load32(err_ptr, 0)
-            print(f"Pulse: stream_open failed: {call1(_pa_strerror, err)}")
+        if(env("NY_AUDIO_DEBUG")){ 
+            def errno = load32(err_ptr, 0)
+            mut msg = f"pa_simple_new failed (error {errno})"
+            if(_pa_strerror != 0){
+                def err_msg = call1(_pa_strerror, errno)
+                if(err_msg != 0){ msg = msg + ": " + cstr_to_str(err_msg) }
+            }
+            print("Audio: Pulse: " + msg)
         }
+        free(ss)
+        if(attr){ free(attr) }
         free(err_ptr)
         return false
     }
+    if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: Stream opened successfully.") }
+    free(ss)
+    if(attr){ free(attr) }
     free(err_ptr)
     stream = dict_set(stream, "handle", pa)
     stream = dict_set(stream, "bits_per_sample", bits)
-    true
+    stream
 }
 
 fn stream_start(stream){

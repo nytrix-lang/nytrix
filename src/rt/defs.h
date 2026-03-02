@@ -197,9 +197,14 @@ RT_DEF("__dlerror", __dlerror, 0, "fn __dlerror()",
        "Returns the last dynamic linking error.")
 
 RT_DEF("__call0", __call0, 1, "fn __call0(fptr)", "Call fptr with 0 args.")
+RT_DEF("__call0_i32", __call0_i32, 1, "fn __call0_i32(fptr)", "Call fptr with 0 args and i32 return.")
 RT_DEF("__call1", __call1, 2, "fn __call1(fptr, a)", "Call fptr with 1 arg.")
 RT_DEF("__call1_i64", __call1_i64, 2, "fn __call1_i64(fptr, a)",
        "Call fptr with one i64 argument and i64 return.")
+RT_DEF("__call1_u32", __call1_u32, 2, "fn __call1_u32(fptr, a)",
+       "Call fptr with one u32 argument and u32 return.")
+RT_DEF("__call1_u32_void", __call1_u32_void, 2, "fn __call1_u32_void(fptr, a)",
+       "Call fptr with one u32 argument and no return value.")
 RT_DEF("__call2", __call2, 3, "fn __call2(fptr, a, b)",
        "Call fptr with 2 args.")
 RT_DEF("__call3", __call3, 4, "fn __call3(fptr, a, b, c)",

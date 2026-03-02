@@ -312,8 +312,8 @@ NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_flt_unbox, cached_fn_flt_unbox,
                                  "__flt_unbox_val")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_flt_box, cached_fn_flt_box,
                                  "__flt_box_val")
-NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_getter, cached_fn_get, "get",
-                                 "std.core.get", "std.core.reflect.get",
+NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_getter, cached_fn_get,
+                                 "std.core.get", "std.core.reflect.get", "get",
                                  "dict_get")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_globals, cached_fn_globals,
                                  "__globals")
@@ -520,7 +520,7 @@ static void add_extern_sig(codegen_t *cg, const char *name, int arity) {
                  .effects_known = false,
                  .link_name = ny_strdup(name),
                  .return_type = NULL,
-                 .owned = false,
+                 .owned = true,
                  .name_hash = 0};
   vec_push(&cg->fun_sigs, sig);
 }
@@ -723,6 +723,19 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok,
     return false;
   }
   return true;
+}
+
+static bool is_problematic_value_struct(const char *type_name) {
+  if (!type_name || !*type_name)
+    return false;
+  // This is a hardcoded list of known problematic types.
+  // A real fix would involve a more robust type system check.
+  if (strcmp(type_name, "Color") == 0 || strcmp(type_name, "Vector2") == 0 ||
+      strcmp(type_name, "Vector3") == 0 || strcmp(type_name, "Vector4") == 0 ||
+      strcmp(type_name, "Rectangle") == 0) {
+    return true;
+  }
+  return false;
 }
 
 LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
@@ -1510,6 +1523,19 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           break;
         const char *tname = func_params->data[i].type;
         if (tname && *tname) {
+          if (cg->is_repl && is_problematic_value_struct(tname)) {
+            ny_diag_error(e->tok,
+                          "REPL JIT cannot pass struct '%s' by value for "
+                          "function '%s'",
+                          tname, sig_meta->name);
+            ny_diag_hint("This is a known limitation of the REPL's dynamic "
+                         "compiler, which works correctly from a file.");
+            ny_diag_hint("Workaround: avoid calling FFI functions that take "
+                         "structs by value directly in the REPL.");
+            cg->had_error = 1;
+            free(args);
+            return LLVMConstInt(cg->type_i64, 0, false);
+          }
           args[i] = coerce_extern_arg(cg, args[i], tname);
         }
       }

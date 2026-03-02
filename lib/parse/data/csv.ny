@@ -22,7 +22,7 @@ fn decode(data, sep=","){
    while(i < n){
       def c = load8(data, i)
       if(in_quote){
-         if(c == 34){ ;; '"'
+         if(c == 34){ ; '"'
             if(i + 1 < n && load8(data, i + 1) == 34){
                cell = cell + "\""
                i += 1
@@ -38,12 +38,12 @@ fn decode(data, sep=","){
          } elif(c == s_code){
             row = append(row, cell)
             cell = ""
-         } elif(c == 10){ ;; '\n'
+         } elif(c == 10){ ; '\n'
             row = append(row, cell)
             rows = append(rows, row)
             row = []
             cell = ""
-         } elif(c == 13){ ;; '\r'
+         } elif(c == 13){ ; '\r'
             if(i + 1 < n && load8(data, i + 1) == 10){
                i += 1
             }
@@ -75,7 +75,7 @@ fn encode(rows, sep=","){
       def c_len = len(row)
       while(j < c_len){
          mut cell = to_str(get(row, j))
-         ;; Escape if needed
+         ; Escape if needed
          if(str.str_contains(cell, sep) || str.str_contains(cell, "\"") || str.str_contains(cell, "\n") || str.str_contains(cell, "\r")){
             mut escaped = "\""
             mut k = 0
@@ -110,30 +110,30 @@ if(comptime{__main()}){
    assert(len(rows2) == 3, "csv roundtrip count")
    assert(get(get(rows2, 1), 0) == "John \"Big\" Doe", "csv roundtrip data")
 
-   ;; Edge cases
+   ; Edge cases
    assert(len(decode("")) == 0, "empty input")
    assert(len(decode(123)) == 0, "non-string input")
 
-   ;; Single row
+   ; Single row
    def rows3 = decode("a,b,c")
    assert(len(rows3) == 1, "single row")
    assert(len(get(rows3, 0)) == 3, "single row columns")
 
-   ;; Empty cells
+   ; Empty cells
    def rows4 = decode("a,,c")
    assert(get(get(rows4, 0), 1) == "", "empty cell")
 
-   ;; Quoted newline
+   ; Quoted newline
    def rows6 = decode("a,\"b\nc\",d")
    assert(len(rows6) == 1, "quoted newline row count")
    assert(get(get(rows6, 0), 1) == "b\nc", "quoted newline content")
 
-   ;; Semicolon separator
+   ; Semicolon separator
    def rows7 = decode("a;b;c", ";")
    assert(len(rows7) == 1, "semicolon separator")
    assert(len(get(rows7, 0)) == 3, "semicolon columns")
 
-   ;; Only separators
+   ; Only separators
    def rows8 = decode(",,,")
    assert(len(get(rows8, 0)) == 4, "only separators")
 

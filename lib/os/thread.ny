@@ -8,9 +8,6 @@ use std.core *
 
 fn thread_spawn(func, arg=0){
    "Spawns a new thread executing `func(arg)`. Returns the thread handle."
-   ; func must be a function pointer or closure.
-   ; runtime expects pure function pointer?
-   ; Nytrix functions are just pointers.
    return __thread_spawn(func, arg)
 }
 
@@ -19,25 +16,25 @@ fn thread_join(handle){
    return __thread_join(handle)
 }
 
-; Synchronization
+;; Synchronization
 
 fn mutex_new(){
-   "Create a new mutex."
+   "Returns a new mutex object for thread synchronization."
    return __mutex_new()
 }
 
 fn mutex_lock(m){
-   "Acquires the mutex `m`. Blocks if unavailable."
+   "Locks the mutex `m`. If the mutex is already locked, the calling thread will block until it becomes available."
    return __mutex_lock64(m)
 }
 
 fn mutex_unlock(m){
-   "Releases the mutex `m`."
+   "Unlocks the mutex `m`, allowing other threads to acquire it."
    return __mutex_unlock64(m)
 }
 
 fn mutex_free(m){
-   "Destroys the mutex `m`."
+   "Frees the resources associated with mutex `m`. The mutex must be unlocked before freeing."
    return __mutex_free(m)
 }
 

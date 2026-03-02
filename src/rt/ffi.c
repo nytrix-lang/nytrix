@@ -173,6 +173,15 @@ int64_t __call0(int64_t f) {
   return ((int64_t (*)(void))__mask_ptr(f))();
 }
 
+int64_t __call0_i32(int64_t f) {
+  if (!f) return 1;
+  if (NY_NATIVE_IS(f)) {
+    int32_t res = ((int32_t (*)(void))NY_NATIVE_DECODE(f))();
+    return rt_tag_v((int64_t)res);
+  }
+  return __call0(f);
+}
+
 int64_t __call1(int64_t f, int64_t a0) {
   if (!f)
     return 1;
@@ -201,6 +210,16 @@ int64_t __call1_i64(int64_t f, int64_t a0) {
         ((int64_t (*)(int64_t))NY_NATIVE_DECODE(f))(rt_untag_v(a0));
     return rt_tag_v(res_raw);
 #endif
+  }
+  return __call1(f, a0);
+}
+
+int64_t __call1_u32(int64_t f, int64_t a0) {
+  if (!f) return 1;
+  if (NY_NATIVE_IS(f)) {
+    uint32_t arg = (uint32_t)rt_untag_v(a0);
+    uint32_t res = ((uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
+    return rt_tag_v((int64_t)res);
   }
   return __call1(f, a0);
 }
@@ -540,6 +559,15 @@ int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
 
 void __call0_void(int64_t f) { __call0(f); }
 void __call1_void(int64_t f, int64_t a0) { __call1(f, a0); }
+void __call1_u32_void(int64_t f, int64_t a0) {
+  if (!f) return;
+  if (NY_NATIVE_IS(f)) {
+    uint32_t arg = (uint32_t)rt_untag_v(a0);
+    ((void (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
+    return;
+  }
+  __call1(f, a0);
+}
 void __call2_void(int64_t f, int64_t a0, int64_t a1) { __call2(f, a0, a1); }
 void __call3_void(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   __call3(f, a0, a1, a2);

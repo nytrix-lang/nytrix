@@ -33,7 +33,7 @@ if(comptime{__main()}){
     assert(is_list(ag), "args() returns list")
     assert(len(ag) > 0, "args() not empty")
 
-    ;; Check first arg is program name
+    ; Check first arg is program name
     def prog = get(ag, 0)
     assert(is_str(prog), "arg 0 is string")
     assert(str_len(prog) > 0, "arg 0 non-empty")

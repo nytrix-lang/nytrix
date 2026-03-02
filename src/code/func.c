@@ -956,7 +956,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
                      .is_slot = true,
                      .is_mut = s->as.var.is_mut,
                      .is_used = false,
-                     .owned = false,
+                     .owned = true,
                      .type_name = type_name,
                      .decl_type_name = type_name,
                      .name_hash = 0};

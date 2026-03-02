@@ -10,7 +10,7 @@ use std.core.reflect as core_ref
 use std.core.syntax.syntax as syntax_impl
 
 fn _ensure_argc(name, args, want){
-   "Internal helper."
+   "Internal: validates that the number of arguments in `args` matches `want` for attribute `name`."
    if(core_ref.len(args) != want){
       panic("@" + name + " expects " + to_str(want) + " argument(s)")
    }
@@ -18,7 +18,7 @@ fn _ensure_argc(name, args, want){
 }
 
 fn _set_flag(node, key, value=true){
-   "Internal helper."
+   "Internal: sets a metadata flag `key` to `value` on a syntax `node` dictionary."
    if(!is_dict(node)){ return node }
    dict_set(node, key, value)
 }

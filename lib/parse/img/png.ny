@@ -13,7 +13,7 @@ use std.math as math
 use std.enc.zlib as zlib
 
 fn _png_paeth(a, b, c){
-   "Internal helper for `paeth`."
+   "Internal: implements the Paeth predictor for PNG filtering."
    def p = a + b - c
    def pa = math.abs(p - a)
    def pb = math.abs(p - b)
@@ -24,12 +24,12 @@ fn _png_paeth(a, b, c){
 }
 
 fn _dbg(msg){
-   "Internal helper for `dbg`."
+   "Internal: prints a debug message to stdout if `NY_PNG_DEBUG` is set."
    if(env("NY_PNG_DEBUG")){ print("PNG: " + msg) }
 }
 
 fn _fail(msg){
-   "Internal helper for `fail`."
+   "Internal: logs an error message and returns 0 to indicate failure."
    _dbg("fail: " + msg)
    0
 }
@@ -70,11 +70,11 @@ fn decode(data){
             return _fail("unsupported bit depth " + to_str(bit_depth))
          }
       } elif(chunk_type == 1347179589){
-         palette = init_str(malloc(length + 1), length)
+         palette = init_str(malloc(length + 1 + 16) + 16, length)
          if(length > 0){ __copy_mem(palette, data + chunk_data, length) }
       } elif(chunk_type == 1951551059){
          if(color_type == 3){
-            palette_alpha = init_str(malloc(length + 1), length)
+            palette_alpha = init_str(malloc(length + 1 + 16) + 16, length)
             if(length > 0){ __copy_mem(palette_alpha, data + chunk_data, length) }
          } elif(color_type == 0 && length >= 2){
             trns_gray = (load8(data, chunk_data) << 8) | load8(data, chunk_data + 1)
@@ -84,7 +84,7 @@ fn decode(data){
             trns_b = (load8(data, chunk_data + 4) << 8) | load8(data, chunk_data + 5)
          }
       } elif(chunk_type == 1229209940){
-         mut chunk = init_str(malloc(length + 1), length)
+         mut chunk = init_str(malloc(length + 1 + 16) + 16, length)
          if(length > 0){ __copy_mem(chunk, data + chunk_data, length) }
          idat_list = append(idat_list, chunk)
       } elif(chunk_type == 1229278788){
@@ -113,7 +113,7 @@ fn decode(data){
    } else {
       stride = w * channels * bytes_per_sample
    }
-   def pixels = init_str(malloc(w * h * 4 + 1), w * h * 4)
+   def pixels = init_str(malloc(w * h * 4 + 1 + 16) + 16, w * h * 4)
    memset(pixels, 0, w * h * 4)
    mut y = 0
    mut raw_p = 0
@@ -248,7 +248,7 @@ fn encode(img){
    def h = dict_get(img, "height")
    def pixels = dict_get(img, "data")
    mut header = "\x89PNG\r\n\x1a\n"
-   mut ihdr = init_str(malloc(13 + 1), 13)
+   mut ihdr = init_str(malloc(13 + 1 + 16) + 16, 13)
    store32_be(ihdr, w, 0)
    store32_be(ihdr, h, 4)
    store8(ihdr, 8, 8)
@@ -258,7 +258,7 @@ fn encode(img){
    store8(ihdr, 0, 12)
    header = header + _make_chunk("IHDR", ihdr)
    def raw_size = h * (w * 4 + 1)
-   mut raw = init_str(malloc(raw_size + 1), raw_size)
+   mut raw = init_str(malloc(raw_size + 1 + 16) + 16, raw_size)
    memset(raw, 0, raw_size)
    mut y = 0
    while(y < h){
@@ -273,7 +273,7 @@ fn encode(img){
 }
 
 fn _join_chunks(chunks){
-   "Internal helper for `join_chunks`."
+   "Internal: concatenates a list of IDAT byte chunks into a single string."
    mut total = 0
    mut i = 0
    def n = len(chunks)
@@ -282,7 +282,7 @@ fn _join_chunks(chunks){
       i += 1
    }
    if(total == 0){ return "" }
-   def res = init_str(malloc(total + 1), total)
+   def res = init_str(malloc(total + 1 + 16) + 16, total)
    mut p = 0
    i = 0
    while(i < n){
@@ -296,7 +296,7 @@ fn _join_chunks(chunks){
 }
 
 fn _make_chunk(type, data){
-   "Internal helper for `make_chunk`."
+   "Internal: wraps `data` into a PNG chunk of `type` with length and CRC32."
    def length = len(data)
    mut out = malloc(8 + length + 4 + 1)
    init_str(out, 8 + length + 4)
@@ -313,7 +313,7 @@ fn _make_chunk(type, data){
 
 mut _crc_table = 0
 fn _crc32(data, length){
-   "Internal helper for `crc32`."
+   "Internal: computes the CRC32 checksum of `data` over `length` bytes."
    if(!_crc_table){
       _crc_table = list(256)
       mut i = 0
@@ -339,7 +339,7 @@ fn _crc32(data, length){
 }
 
 fn store32_be(s, v, i){
-   "Implements `store32_be`."
+   "Utility: stores 32-bit integer `v` into string `s` at index `i` in Big-Endian format."
    store8(s, (v >> 24) & 255, i)
    store8(s, (v >> 16) & 255, i + 1)
    store8(s, (v >> 8) & 255, i + 2)
@@ -352,7 +352,7 @@ if(comptime{__main()}){
    fn _from_list(xs){
       "Internal helper for `from_list`."
        def n = len(xs)
-       def out = init_str(malloc(n + 1), n)
+       def out = init_str(malloc(n + 1 + 16) + 16, n)
        mut i = 0
        while(i < n){
           store8(out, get(xs, i), i)
@@ -378,5 +378,14 @@ if(comptime{__main()}){
    assert(len(enc) > 8, "png encode length")
    assert(load8(enc, 1) == 80, "png encode signature P")
 
-   print("✓ std.image.png tests passed")
+   print("✓ std.image.png tests passed (synthetic)")
+   
+   match file_read("etc/assets/images/test.png"){
+      ok(data) -> {
+         def img2 = decode(data)
+         assert(img2 != 0, "png test.png decode")
+         print("✓ std.image.png tests passed (test.png)")
+      }
+      err(_) -> { print("! test.png skipped (not found)") }
+   }
 }

@@ -190,7 +190,7 @@ fn _parse_single_key(tok) {
       } else { break }
    }
    mut key = 0
-   def pl = str.upper(p) == p ? str.str_len(p) : 0
+   def _pl = str.upper(p) == p ? str.str_len(p) : 0
    if(str.str_len(p) == 1) {
       key = load8(p, 0)
       if(key >= 97 && key <= 122){ key -= 32 }
@@ -684,14 +684,14 @@ fn window_swap_buffers(win) {
    if(handle){ ui_backend.swap_buffers(handle) }
 }
 
-fn window_make_current(win) {
+fn window_make_current(_win) {
    "Sets the window as the current graphics context."
-   ;; No-op in Vulkan/static mode — retained for API compatibility.
+   ; No-op in Vulkan/static mode — retained for API compatibility.
 }
 
-fn window_blit_buffer(win, buf, w, h) {
+fn window_blit_buffer(_win, _buf, _w, _h) {
    "Blits a raw pixel buffer into the window."
-   ;; CPU blit not yet implemented in the static GLFW backend.
+   ; CPU blit not yet implemented in the static GLFW backend.
    0
 }
 

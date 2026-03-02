@@ -1,16 +1,16 @@
 #!/bin/ny
 ;; Cloc (Example) - Line of Code Counter
 
-use lib.core *
-use lib.core.error *
-use lib.text *
-use lib.text.glob *
-use lib.text.io *
-use lib.text.bytes *
-use lib.os *
-use lib.os.fs *
-use lib.os.args *
-use lib.os.path as ospath
+use std.core *
+use std.core.error *
+use std.text *
+use std.text.glob *
+use std.text.io *
+use std.text.bytes *
+use std.os *
+use std.os.fs *
+use std.os.args *
+use std.os.path as ospath
 
 def SKIP_DIRS = ["build", ".git", ".cache", "node_modules", "__pycache__", ".venv", "dist", "out", ".", ".."]
 def SOURCE_ROOTS = ["src", "lib", "etc/tests"]

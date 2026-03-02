@@ -37,10 +37,10 @@ fn is_available(){
 
 fn init(ctx){
    "Initializes module state."
-    if(!is_available()){ return false }
-    if(_lib != 0){ return true }
+    if(!is_available()){ return 0 }
+    if(_lib != 0){ return ctx }
     _lib = dlopen_any("winmm.dll", RTLD_NOW())
-    if(_lib == 0){ return false }
+    if(_lib == 0){ return 0 }
     _waveOutOpen = dlsym(_lib, "waveOutOpen")
     _waveOutClose = dlsym(_lib, "waveOutClose")
     _waveOutPrepareHeader = dlsym(_lib, "waveOutPrepareHeader")
@@ -50,17 +50,19 @@ fn init(ctx){
     if(!_waveOutOpen || !_waveOutClose || !_waveOutPrepareHeader || !_waveOutUnprepareHeader || !_waveOutWrite || !_waveOutReset){
         dlclose(_lib)
         _lib = 0
-        return false
+        return 0
     }
     mut dev = dict(8)
     dev = dict_set(dev, "name", "Windows Multimedia")
     dev = dict_set(dev, "id", "winmm")
     dev = dict_set(dev, "ctx", ctx)
-    mut devices = get(ctx, "devices", list())
-    devices = append(devices, dev)
-    ctx = dict_set(ctx, "devices", devices)
-    true
+    def old_devices = get(ctx, "devices", list())
+    def new_devices = append(old_devices, dev)
+    ctx = dict_set(ctx, "devices", new_devices)
+    ctx
 }
+
+
 
 fn shutdown(ctx){
    "Shuts down module state."
@@ -76,9 +78,9 @@ fn stream_open(stream){
     if(!_lib){ return false }
     def hWaveOut = malloc(8)
     def wfx = malloc(18)
-    def format = get(stream, "format")
-    def sample_rate = get(stream, "sample_rate")
-    def channels = get(stream, "channels")
+    def format = core.get(stream, "format")
+    def sample_rate = core.get(stream, "sample_rate")
+    def channels = core.get(stream, "channels")
     def bits_per_sample = (format == 2) ? 32 : 16
     store16(wfx, WAVE_FORMAT_PCM, 0)
     store16(wfx, channels, 2)
@@ -97,7 +99,7 @@ fn stream_open(stream){
     free(hWaveOut)
     stream = dict_set(stream, "handle", handle)
     stream = dict_set(stream, "bits_per_sample", bits_per_sample)
-    true
+    stream
 }
 
 fn stream_start(stream){

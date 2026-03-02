@@ -13,7 +13,7 @@ use std.core *
 use std.math *
 
 fn is_vector(v){
-    "Returns true if `v` is a vector (represented as a list)."
+    "Returns true if `v` is a list-based vector object."
     is_list(v)
 }
 
@@ -30,7 +30,7 @@ fn _mk(n, fill=0){
 }
 
 fn vec2(x=0, y=0){
-   "Creates a 2D vector [x, y]."
+   "Creates a new 2D vector [x, y]. Defaults to [0, 0] if no arguments provided."
    def v = list(2)
    store_item(v, 0, x)
    store_item(v, 1, y)
@@ -39,7 +39,7 @@ fn vec2(x=0, y=0){
 }
 
 fn vec3(x=0, y=0, z=0){
-   "Creates a 3D vector [x, y, z]."
+   "Creates a new 3D vector [x, y, z]. Defaults to [0, 0, 0] if no arguments provided."
    def v = list(3)
    store_item(v, 0, x)
    store_item(v, 1, y)
@@ -49,7 +49,7 @@ fn vec3(x=0, y=0, z=0){
 }
 
 fn vec4(x=0, y=0, z=0, w=0){
-   "Creates a 4D vector [x, y, z, w]."
+   "Creates a new 4D vector [x, y, z, w]. Defaults to [0, 0, 0, 0] if no arguments provided."
    def v = list(4)
    store_item(v, 0, x)
    store_item(v, 1, y)
@@ -70,8 +70,7 @@ fn at(v, i, default=0){
 }
 
 fn set(v, i, x){
-   "Sets the element at index `i` of vector `v` to `x`.
-   Returns the modified vector."
+   "Sets the element at index `i` of vector `v` to value `x` and returns the vector."
    store_item(v, i, x)
    v
 }
@@ -119,14 +118,14 @@ fn hadamard(a, b){
 }
 
 fn v_mul(a, b){
-   "Multiplies vector `a` by vector or scalar `b`."
+   "Returns the product of vector `a` and `b`. If `b` is a scalar, performs scaling. If `b` is a vector, performs element-wise multiplication."
    if(is_int(b) || is_float(b)){ return scale(a, b) }
    if(is_vector(b)){ return hadamard(a, b) }
    scale(a, b)
 }
 
 fn v_div(a, b){
-   "Divides vector `a` by scalar `b`."
+   "Returns the quotient of vector `a` divided by scalar `b`."
    if(is_int(b) || is_float(b)){ return divs(a, b) }
    divs(a, b)
 }
@@ -199,7 +198,7 @@ fn dot(a, b){
 }
 
 fn cross3(a, b){
-   "Returns the cross product of 3D vectors `a` and `b`."
+   "Returns the vector cross product of two 3D vectors `a` and `b`."
    if(len(a) < 3 || len(b) < 3){ return vec3(0, 0, 0) }
    def ax = get(a, 0, 0)
    def ay = get(a, 1, 0)
@@ -225,37 +224,36 @@ fn magnitude(v){
 }
 
 fn normalize(v){
-   "Returns a normalized version of vector `v` (unit vector)."
+   "Returns a unit-length vector pointing in the same direction as `v`. Returns a copy of `v` if it has zero magnitude."
    def l = magnitude(v)
    if(l == 0){ return list_clone(v) }
    divs(v, l)
 }
 
 fn lerp(a, b, t){
-   "Performs linear interpolation between vectors `a` and `b` by factor `t`."
+   "Linearly interpolates between vectors `a` and `b` using factor `t` (usually in range [0, 1])."
    add(a, scale(sub(b, a), t))
 }
 
 if(comptime{__main()}){
-    use std.math.vector as v
     use std.core *
 
-    def a = v.vec3(1, 2, 3)
-    def b = v.vec3(4, 5, 6)
+    def a = vec3(1, 2, 3)
+    def b = vec3(4, 5, 6)
 
-    def s = a + b
+    def s = v_add(a, b)
     assert(get(s, 0, 0) == 5, "vector add x")
     assert(get(s, 1, 0) == 7, "vector add y")
     assert(get(s, 2, 0) == 9, "vector add z")
 
-    assert(v.dot(a, b) == 32, "vector dot")
+    assert(dot(a, b) == 32, "vector dot")
 
-    def c = v.cross3(a, b)
+    def c = cross3(a, b)
     assert(get(c, 0, 0) == -3, "vector cross x")
     assert(get(c, 1, 0) == 6, "vector cross y")
     assert(get(c, 2, 0) == -3, "vector cross z")
 
-    def h = v.hadamard(a, b)
+    def h = hadamard(a, b)
     assert(get(h, 0, 0) == 4, "vector hadamard x")
     assert(get(h, 1, 0) == 10, "vector hadamard y")
     assert(get(h, 2, 0) == 18, "vector hadamard z")

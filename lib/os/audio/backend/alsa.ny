@@ -101,11 +101,12 @@ fn init(ctx){
     dev = dict_set(dev, "name", "ALSA Default")
     dev = dict_set(dev, "id", "default")
     dev = dict_set(dev, "ctx", ctx)
-    mut devices = get(ctx, "devices", list())
-    devices = append(devices, dev)
-    ctx = dict_set(ctx, "devices", devices)
-    true
+    def old_devices = get(ctx, "devices", list())
+    def new_devices = append(old_devices, dev)
+    ctx = dict_set(ctx, "devices", new_devices)
+    ctx
 }
+
 
 fn shutdown(ctx){
    "Shuts down module state."
@@ -123,23 +124,23 @@ fn shutdown(ctx){
 fn stream_open(stream){
    "Implements `stream_open`."
     if(_snd_pcm_open == 0 || _snd_pcm_set_params == 0 || _snd_pcm_close == 0){ return false }
-    def device = get(stream, "device")
+    def device = core.get(stream, "device")
     mut dev_id = env("NY_AUDIO_ALSA_DEVICE")
     if(!dev_id || len(dev_id) == 0){
-        dev_id = get(device, "id", "")
+        dev_id = core.get(device, "id", "")
         if(!is_str(dev_id) || len(dev_id) == 0 || eq(dev_id, "default")){
             dev_id = ""
         }
     }
-    def format = get(stream, "format", 1)
+    def format = core.get(stream, "format", 1)
     mut alsa_fmt = SND_PCM_FORMAT_S16_LE
     mut bits = 16
     if(format != 1){
         alsa_fmt = SND_PCM_FORMAT_FLOAT_LE
         bits = 32
     }
-    def rate = get(stream, "sample_rate")
-    def channels = get(stream, "channels")
+    def rate = core.get(stream, "sample_rate")
+    def channels = core.get(stream, "channels")
     def pcm_ptr = malloc(8)
     mut opened = 0
     mut chosen = ""
@@ -169,7 +170,7 @@ fn stream_open(stream){
     stream = dict_set(stream, "handle", opened)
     stream = dict_set(stream, "alsa_device", chosen)
     stream = dict_set(stream, "bits_per_sample", bits)
-    true
+    stream
 }
 
 fn stream_start(stream){

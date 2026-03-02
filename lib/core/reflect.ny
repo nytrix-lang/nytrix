@@ -93,7 +93,7 @@ fn type(x){
    "Returns a string representing the **tag-type** of Nytrix value `x`.
    Return values: `none`, `int`, `float`, `str`, `list`, `dict`, `set`, `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
    if(x == true || x == false){ return "bool" }
-   if(is_int(x)){ return "int" }
+   if(__is_int(x)){ return "int" }
    if(is_str(x)){ return "str" }
    if(__is_ny_obj(x)){
       def tag = __tagof(x)
@@ -123,7 +123,7 @@ fn add(a, b){
    if(_is_list_or_tuple(a) && _is_list_or_tuple(b)){
       return _list_zip2(a, b, 0)
    }
-   __add(a, b)
+   return __add(a, b)
 }
 
 fn sub(a, b){
@@ -133,7 +133,7 @@ fn sub(a, b){
    if(_is_list_or_tuple(a) && _is_list_or_tuple(b)){
       return _list_zip2(a, b, 1)
    }
-   __sub(a, b)
+   return __sub(a, b)
 }
 
 fn mul(a, b){
@@ -148,11 +148,11 @@ fn mul(a, b){
          if(_is_list_or_tuple(b) && len(b) == 16){ return _mat4_mul(a, b) }
          if(_is_list_or_tuple(b) && len(b) == 4){ return _mat4_mul_vec4(a, b) }
       }
-      if(is_int(b) || is_float(b)){ return _list_scale(a, b, 0) }
+      if(__is_int(b) || is_float(b)){ return _list_scale(a, b, 0) }
       if(_is_list_or_tuple(b)){ return _list_zip2(a, b, 2) }
    }
-   if(_is_list_or_tuple(b) && (is_int(a) || is_float(a))){ return _list_scale(b, a, 0) }
-   __mul(a, b)
+   if(_is_list_or_tuple(b) && (__is_int(a) || is_float(a))){ return _list_scale(b, a, 0) }
+   return __mul(a, b)
 }
 
 fn div(a, b){
@@ -163,24 +163,24 @@ fn div(a, b){
    if(_is_list_or_tuple(a) && _is_list_or_tuple(b)){
       return _list_zip2(a, b, 3)
    }
-   if(_is_list_or_tuple(a) && (is_int(b) || is_float(b))){ return _list_scale(a, b, 1) }
-   __div(a, b)
+   if(_is_list_or_tuple(a) && (__is_int(b) || is_float(b))){ return _list_scale(a, b, 1) }
+   return __div(a, b)
 }
 
 fn _is_list_or_tuple(x){
-   "Internal: fast list/tuple check that avoids deep runtime object validation."
+   "Internal: returns true if `x` is a collection of type list or tuple."
    def tag = __tagof(x)
    if(!__is_int(tag)){ return false }
    return tag == 100 || tag == 103
 }
 
 fn _list_like(n){
-   "Internal: allocates a list container with length `n`."
+   "Internal: allocates a new list with an initial capacity of `n`."
    list(n)
 }
 
 fn _list_zip2(a, b, op){
-   "Internal: element-wise list/tuple operations (op: 0 add, 1 sub, 2 mul, 3 div)."
+   "Internal: performs element-wise binary operations between lists `a` and `b` (0: add, 1: sub, 2: mul, 3: div)."
    def na = len(a)
    def nb = len(b)
    def n = (na < nb) ? na : nb
@@ -191,10 +191,10 @@ fn _list_zip2(a, b, op){
       def x = __load_item(a, i)
       def y = __load_item(b, i)
       mut z = 0
-      if(op == 0){ z = x + y }
-      else if(op == 1){ z = x - y }
-      else if(op == 2){ z = x * y }
-      else { z = x / y }
+      if(op == 0){ z = __add(x, y) }
+      else if(op == 1){ z = __sub(x, y) }
+      else if(op == 2){ z = __mul(x, y) }
+      else { z = __div(x, y) }
       __store_item(out, i, z)
       i += 1
    }
@@ -204,7 +204,7 @@ fn _list_zip2(a, b, op){
 }
 
 fn _list_scale(a, s, op){
-   "Internal: scales list/tuple `a` by scalar `s` (op: 0 mul, 1 div)."
+   "Internal: performs element-wise operations between list `a` and scalar `s` (0: multiplication, 1: division)."
    def n = len(a)
    def out_tag = is_tuple(a) ? 103 : 100
    mut out = _list_like(n)
@@ -212,8 +212,8 @@ fn _list_scale(a, s, op){
    while(i < n){
       def x = __load_item(a, i)
       mut z = 0
-      if(op == 0){ z = x * s }
-      else { z = x / s }
+      if(op == 0){ z = __mul(x, s) }
+      else { z = __div(x, s) }
       __store_item(out, i, z)
       i += 1
    }
@@ -223,12 +223,12 @@ fn _list_scale(a, s, op){
 }
 
 fn _is_mat4(x){
-   "Internal: returns true if `x` looks like a 4x4 matrix list."
+   "Internal: returns true if `x` is a collection with exactly 16 elements (matching a 4x4 matrix)."
    return _is_list_or_tuple(x) && len(x) == 16
 }
 
 fn _mat4_mul(a, b){
-   "Internal: multiplies two 4x4 matrices."
+   "Internal: performs matrix multiplication for two 4x4 matrices `a` and `b`."
    mut out = list(16)
    mut r = 0
    while(r < 4){
@@ -249,7 +249,7 @@ fn _mat4_mul(a, b){
 }
 
 fn _mat4_mul_vec4(m, v){
-   "Internal: multiplies 4x4 matrix `m` by 4D vector `v`."
+   "Internal: performs matrix-proportion multiplication of 4x4 matrix `m` and 4D vector `v`."
    mut out = list(4)
    mut r = 0
    while(r < 4){
@@ -279,7 +279,7 @@ fn list_eq(a,b){
    while(i < na){
       def va = __load_item(a, i)
       def vb = __load_item(b, i)
-      if(!(va == vb)){ return false }
+      if(!eq(va, vb)){ return false }
       i += 1
    }
    return true
@@ -290,10 +290,10 @@ fn dict_eq(a,b){
    if(!(len(a) == len(b))){ return false }
    def its = items(a)
    mut i=0
-   def n=__load64_idx(its, 0)
+   def n=len(its)
    while(i<n){
-      def p = __load64_idx(its, 16 + i * 8)
-      if(!(dict_get(b, __load64_idx(p, 16), 0xdeadbeef) == __load64_idx(p, 24))){ return false }
+      def p = get(its, i)
+      if(!eq(dict_get(b, get(p, 0), 0xdeadbeef), get(p, 1))){ return false }
       i=i+1
    }
    return true
@@ -304,10 +304,9 @@ fn set_eq(a,b){
    if(!(len(a) == len(b))){ return false }
    def its = items(a)
    mut i=0
-   def n=__load64_idx(its, 0)
+   def n=len(its)
    while(i<n){
-      def p = __load64_idx(its, 16 + i * 8)
-      if(!(contains(b, __load64_idx(p, 16)))){ return false }
+      if(!(contains(b, get(its, i)))){ return false }
       i=i+1
    }
    return true
@@ -325,22 +324,28 @@ fn eq(a, b){
          100 -> list_eq(a, b)
          103 -> list_eq(a, b)
          120 -> _str_eq(a, b)
+         121 -> _str_eq(a, b)
          101 -> dict_eq(a, b)
          102 -> set_eq(a, b)
          110 -> __flt_eq(a, b)
          130 -> bigint_eq(a, b)
          _   -> false
       }
+   } elif((ta == 120 || ta == 121) && (tb == 120 || tb == 121)){
+      return _str_eq(a, b)
    } else {
       return false
    }
 }
 
 fn repr(x){
-   "Function `repr`."
+   "Returns a programmer-friendly string representation of value `x`.
+    - Strings are quoted.
+    - Collections are shown with their structural contents.
+    - Primitives are shown as their literal values."
    if(x == true){ return "true" }
    if(x == false){ return "false" }
-   if(is_int(x)){ return __to_str(x) }
+   if(__is_int(x)){ return __to_str(x) }
    if(!x){ return "none" }
    if(is_str(x)){ return f"\"{x}\"" }
    if(!__is_ny_obj(x)){
@@ -405,7 +410,7 @@ fn repr(x){
 
 fn hash(x){
    "Returns a **64-bit FNV-1a hash** of value `x`. Currently supports integers and strings."
-   if(is_int(x)){ return x }
+   if(__is_int(x)){ return x }
    if(is_str(x)){
       mut h = 14695981039346656037
       mut i = 0
@@ -506,7 +511,7 @@ fn get(obj, key, default=0){
       if(key < 0){ key = key + n }
       if(key < 0 || key >= n){ return default }
       else {
-        use std.text.str *
+        use std.text *
         return str_slice(obj, key, key + 1)
       }
    }
@@ -606,7 +611,6 @@ fn append(lst, v){
           __store64_idx(newp, 16 + i * 8, __load64_idx(out, 16 + i * 8))
           i += 1
        }
-       free(out)
        out = newp
      }
      __store64_idx(out, 16 + n * 8, v)
@@ -642,14 +646,16 @@ fn extend(lst, other){
 }
 
 fn to_str(v){
-   "Function `to_str`."
+   "Returns a human-readable string representation of value `v`.
+    - Strings are returned as-is.
+    - Pointers and complex objects are formatted with markers.
+    - Ints/floats/bigints are converted to their decimal form."
    if(v == true){ return "true" }
    if(v == false){ return "false" }
-   if(is_int(v)){ return __to_str(v) }
+   if(__is_int(v)){ return __to_str(v) }
    if(!v){ return "none" }
    if(is_str(v)){ return v }
    def kind = __tagof(v)
-   if(to_int(kind) == 6){ return f"<ffi_ptr 0x{to_int(v)}>" }
    if(!__is_ny_obj(v)){ return __to_str(v) }
    ; Check for bigint first (it's a list with special marker)
    if(kind == 100 && is_list(v) && len(v) >= 3 && get(v, 0) == 107){ return bigint_to_str(v) }
@@ -681,7 +687,6 @@ fn to_str(v){
       122 -> f"<bytes {bytes_len(v)}>"
       110 -> __to_str(v)
       130 -> bigint_to_str(v)
-      6   -> f"<ffi_ptr {v}>"
       _   -> f"<ptr {v} tag={__tagof(v)}>"
    }
 }
@@ -697,7 +702,7 @@ if(comptime{__main()}){
     assert((type("hello") == "str"), "type of string")
     assert((type([1, 2, 3]) == "list"), "type of list")
     assert((type(dict(8)) == "dict"), "type of dict")
-    assert((type(set()) == "set"), "type of set")
+    assert((type(set_new()) == "set"), "type of set")
     assert((type(float(1)) == "float"), "type of float")
     assert((type(true) == "bool"), "type of bool")
     assert((type(0) == "int"), "type of zero int")

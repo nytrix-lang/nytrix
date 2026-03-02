@@ -1,7 +1,6 @@
 ;; Keywords: image gif lzw
-;; References:
+;; Reference:
 ;; - https://en.wikipedia.org/wiki/GIF
-;; - https://www.w3.org/Graphics/GIF/spec-gif89a.txt
 
 module std.image.format.gif (
    decode, encode
@@ -10,475 +9,587 @@ module std.image.format.gif (
 use std.core *
 use std.core.dict *
 
-fn _u16le(s, i){
-   "Internal helper for `u16le`."
-   load8(s, i) | (load8(s, i + 1) << 8)
+;; Decoder
+
+fn _u16le(s, i) {
+   def b1 = load8(s, i)
+   def b2 = load8(s, i + 1)
+   return b1 | (b2 << 8)
 }
 
-fn _mk_zero_list(n){
-   "Internal helper for `mk_zero_list`."
-   def xs = list(n)
-   mut i = 0
-   while(i < n){
-      append(xs, 0)
-      i += 1
+fn _mk_z(n) {
+   mut l = list(n)
+   mut iCount = 0
+   while(iCount < n) {
+      l = append(l, 0)
+      iCount += 1
    }
-   xs
+   return l
 }
 
-fn _list_to_bytes(xs){
-   "Internal helper for `list_to_bytes`."
+fn _l2b(xs) {
    def n = len(xs)
-   def out = init_str(malloc(n + 1), n)
-   mut i = 0
-   while(i < n){
-      store8(out, get(xs, i), i)
-      i += 1
+   def out = init_str(malloc(n + 1 + 16) + 16, n)
+   mut iCount = 0
+   while(iCount < n) {
+      store8(out, get(xs, iCount) & 255, iCount)
+      iCount += 1
    }
-   out
+   store8(out, 0, n)
+   return out
 }
 
-fn _gif_read_subblocks(data, p){
-   "Internal helper for `gif_read_subblocks`."
+fn _g_sb(data, p) {
    def n = len(data)
    mut q = p
    mut total = 0
-   while(1){
-      if(q >= n){ return 0 }
+   while(q < n) {
       def sz = load8(data, q)
       q += 1
-      if(sz == 0){ break }
-      if(q + sz > n){ return 0 }
+      if(sz == 0) {
+         break
+      }
       total += sz
       q += sz
    }
-   def out = init_str(malloc(total + 1), total)
+   def out = init_str(malloc(total + 1 + 16) + 16, total)
    mut w = 0
-   q = p
-   while(1){
-      def sz = load8(data, q)
-      q += 1
-      if(sz == 0){ break }
-      __copy_mem(out + w, data + q, sz)
+   mut q2 = p
+   while(q2 < n) {
+      def sz = load8(data, q2)
+      q2 += 1
+      if(sz == 0) {
+         break
+      }
+      __copy_mem(out + w, data + q2, sz)
       w += sz
-      q += sz
+      q2 += sz
    }
    mut res = dict(2)
-   res = dict_set(res, "blob", out)
-   res = dict_set(res, "next", q)
-   res
+   dict_set(res, "blob", out)
+   dict_set(res, "next", q2)
+   return res
 }
 
-fn _gif_lzw_decode(comp, min_code_size, out_len){
-   "Internal helper for `gif_lzw_decode`."
-   if(!is_str(comp) || out_len <= 0){ return 0 }
-   if(min_code_size < 2 || min_code_size > 8){ return 0 }
-   def clear = 1 << min_code_size
-   def end_code = clear + 1
-   def prefix = _mk_zero_list(4096)
-   def suffix = _mk_zero_list(4096)
-   def stack = _mk_zero_list(4096)
-   mut bit_pos = 0
-   mut code_size = min_code_size + 1
-   mut next_code = end_code + 1
-   mut old_code = -1
-   mut out_p = 0
-   def out = init_str(malloc(out_len + 1), out_len)
-   fn _read_code(src, b_pos, c_size){
-      "Internal helper for `read_code`."
-      def bit_n = len(src) * 8
-      if(b_pos + c_size > bit_n){ return [-1, b_pos] }
-      mut v = 0
-      mut i = 0
-      while(i < c_size){
-         def b = load8(src, (b_pos + i) / 8)
-         v = v | (((b >> ((b_pos + i) & 7)) & 1) << i)
-         i += 1
-      }
-      [v, b_pos + c_size]
+fn _g_lzw_dec(comp, mcs, olen) {
+   if(!is_str(comp) || olen <= 0) {
+      return 0
    }
-   while(out_p < out_len){
-      def rr = _read_code(comp, bit_pos, code_size)
-      def code = get(rr, 0)
-      bit_pos = get(rr, 1)
-      if(code < 0){ break }
-      if(code == clear){
-         code_size = min_code_size + 1
-         next_code = end_code + 1
-         old_code = -1
+   def clr = 1 << mcs
+   def end_code = clr + 1
+   def pre = _mk_z(4096)
+   def suf = _mk_z(4096)
+   def stk = _mk_z(4096)
+   mut bpos = 0
+   mut csz = mcs + 1
+   mut nextcode = end_code + 1
+   mut oldcode = -1
+   mut op = 0
+   def out = init_str(malloc(olen + 1 + 16) + 16, olen)
+   memset(out, 0, olen)
+   while(op < olen) {
+      mut code = 0
+      mut k = 0
+      while(k < csz) {
+         def bit_off = bpos + k
+         if(bit_off >= (len(comp) * 8)) {
+            code = -1
+            break
+         }
+         def byte = load8(comp, bit_off / 8)
+         if((byte >> (bit_off & 7)) & 1) {
+            code = code | (1 << k)
+         }
+         k += 1
+      }
+      bpos += csz
+      if(code == -1 || code == end_code) {
+         break
+      }
+      if(code == clr) {
+         csz = mcs + 1
+         nextcode = end_code + 1
+         oldcode = -1
          continue
       }
-      if(code == end_code){ break }
-      if(old_code < 0){
-         if(code >= clear){ return 0 }
-         store8(out, code, out_p)
-         out_p += 1
-         old_code = code
-         continue
-      }
-      mut in_code = code
       mut cur = code
+      mut extra_char = -1
+      if(code >= nextcode) {
+         if(oldcode == -1) {
+            break
+         }
+         cur = oldcode
+         extra_char = 1
+      }
       mut sp = 0
-      mut special = false
-      if(code == next_code){
-         cur = old_code
-         special = true
-      } elif(code > next_code){
-         return 0
-      }
-      while(cur >= clear){
-         if(cur >= next_code || sp >= 4096){ return 0 }
-         store_item(stack, sp, get(suffix, cur))
+      mut xVal = cur
+      while(xVal >= clr && sp < 4096) {
+         store_item(stk, sp, get(suf, xVal))
          sp += 1
-         cur = get(prefix, cur)
+         xVal = get(pre, xVal)
       }
-      if(cur < 0 || cur >= clear){ return 0 }
-      def first = cur
-      store_item(stack, sp, first)
-      sp += 1
-      if(special){
-         if(sp >= 4096){ return 0 }
-         store_item(stack, sp, first)
-         sp += 1
+      def first = xVal
+      if(op < olen) {
+         store8(out, first, op)
+         op += 1
       }
-      while(sp > 0 && out_p < out_len){
+      while(sp > 0 && op < olen) {
          sp -= 1
-         store8(out, get(stack, sp), out_p)
-         out_p += 1
+         store8(out, get(stk, sp), op)
+         op += 1
       }
-      if(next_code < 4096){
-         store_item(prefix, next_code, old_code)
-         store_item(suffix, next_code, first)
-         next_code += 1
-         if(next_code == (1 << code_size) && code_size < 12){
-            code_size += 1
+      if(extra_char == 1 && op < olen) {
+         store8(out, first, op)
+         op += 1
+      }
+      if(oldcode != -1 && nextcode < 4096) {
+         store_item(pre, nextcode, oldcode)
+         store_item(suf, nextcode, first)
+         nextcode += 1
+         if(nextcode == (1 << (csz)) && csz < 12) {
+            csz += 1
          }
       }
-      old_code = in_code
+      oldcode = code
    }
-   if(out_p != out_len){ return 0 }
-   out
+   return out
 }
 
-fn _gif_deinterlace(src, w, h){
-   "Internal helper for `gif_deinterlace`."
-   if(!is_str(src) || len(src) < w * h){ return 0 }
-   def out = init_str(malloc(w * h + 1), w * h)
+fn _g_di(src, w, h) {
+   def out = init_str(malloc(w * h + 1 + 16) + 16, w * h)
+   memset(out, 0, w * h)
    mut p = 0
-   def starts = [0, 4, 2, 1]
-   def steps = [8, 8, 4, 2]
-   mut pass = 0
-   while(pass < 4){
-      mut y = get(starts, pass)
-      def st = get(steps, pass)
-      while(y < h){
+   def sta = [0, 4, 2, 1]
+   def ste = [8, 8, 4, 2]
+   mut passcount = 0
+   while(passcount < 4) {
+      mut y = get(sta, passcount)
+      def st = get(ste, passcount)
+      while(y < h) {
          mut x = 0
-         while(x < w){
-            if(p >= len(src)){ return 0 }
-            store8(out, load8(src, p), y * w + x)
-            p += 1
+         while(x < w) {
+            if(p < len(src)) {
+               store8(out, load8(src, p), y * w + x)
+               p += 1
+            }
             x += 1
          }
          y += st
       }
-      pass += 1
+      passcount += 1
    }
-   out
+   return out
 }
 
-fn decode(data){
-   "Decodes the first GIF frame into RGBA."
-   if(!is_str(data) || len(data) < 13){ return 0 }
-   if(load8(data, 0) != 71 || load8(data, 1) != 73 || load8(data, 2) != 70){ return 0 }
+fn decode(data) {
+   if(!is_str(data) || len(data) < 13) {
+      return 0
+   }
+   if(load8(data, 0) != 71 || load8(data, 1) != 73 || load8(data, 2) != 70) {
+      return 0
+   }
    def w = _u16le(data, 6)
    def h = _u16le(data, 8)
-   if(w <= 0 || h <= 0){ return 0 }
-   def packed = load8(data, 10)
-   def gct_flag = (packed >> 7) & 1
-   def gct_sz = 1 << ((packed & 7) + 1)
+   def flags = load8(data, 10)
    mut p = 13
-   mut gct = ""
-   if(gct_flag){
-      def n = gct_sz * 3
-      if(p + n > len(data)){ return 0 }
-      gct = init_str(malloc(n + 1), n)
-      __copy_mem(gct, data + p, n)
-      p += n
+   mut gaddr = -1
+   if(flags & 128) {
+      gaddr = p
+      p += (1 << ((flags & 7) + 1)) * 3
    }
-   def canvas = init_str(malloc(w * h * 4 + 1), w * h * 4)
-   memset(canvas, 0, w * h * 4)
-   mut trans_valid = false
-   mut trans_idx = 0
-   mut got_frame = false
-   while(p < len(data)){
-      def b = load8(data, p)
+   def canv = init_str(malloc(w * h * 4 + 1 + 16) + 16, (w * h * 4))
+   memset(canv, 0, (w * h * 4))
+   mut trans_idx = -1
+   while(p < (len(data) - 1)) {
+      def bt = load8(data, p)
       p += 1
-      if(b == 0x3B){ break }
-      if(b == 0x21){
-         if(p >= len(data)){ return 0 }
-         def label = load8(data, p)
+      if(bt == 0x3B) {
+         break
+      }
+      if(bt == 0x21) {
+         def ext_type = load8(data, p)
          p += 1
-         if(label == 0xF9){
-            if(p + 6 > len(data)){ return 0 }
+         if(ext_type == 0xF9) {
             def sz = load8(data, p)
-            if(sz != 4){ return 0 }
-            def gc_packed = load8(data, p + 1)
-            trans_valid = (gc_packed & 1) != 0
-            trans_idx = load8(data, p + 4)
-            if(load8(data, p + 5) != 0){ return 0 }
-            p += 6
-         } else {
-            if(p >= len(data)){ return 0 }
-            def first_sz = load8(data, p)
-            p += 1
-            if(p + first_sz > len(data)){ return 0 }
-            p += first_sz
-            while(1){
-               if(p >= len(data)){ return 0 }
-               def sz = load8(data, p)
-               p += 1
-               if(sz == 0){ break }
-               if(p + sz > len(data)){ return 0 }
-               p += sz
+            if(sz == 4) {
+               def gce_f = load8(data, p + 1)
+               if(gce_f & 1) {
+                  trans_idx = load8(data, p + 4)
+               } else {
+                  trans_idx = -1
+               }
             }
+            p += sz + 1
+            while(p < len(data) && load8(data, p) != 0) {
+               p += (load8(data, p) + 1)
+            }
+            if(p < len(data)) {
+               p += 1
+            }
+            continue
+         }
+         while(p < len(data)) {
+            def sz_ext = load8(data, p)
+            p += 1
+            if(sz_ext == 0) {
+               break
+            }
+            p += sz_ext
          }
          continue
       }
-      if(b != 0x2C){ return 0 }
-      if(p + 9 > len(data)){ return 0 }
-      def left = _u16le(data, p)
-      def top = _u16le(data, p + 2)
-      def iw = _u16le(data, p + 4)
-      def ih = _u16le(data, p + 6)
-      def ipacked = load8(data, p + 8)
+      if(bt != 0x2C) {
+         continue
+      }
+      def fx = _u16le(data, p)
+      def fy = _u16le(data, p + 2)
+      def fw = _u16le(data, p + 4)
+      def fh = _u16le(data, p + 6)
+      def ffl = load8(data, p + 8)
       p += 9
-      if(iw <= 0 || ih <= 0){ return 0 }
-      def lct_flag = (ipacked >> 7) & 1
-      def interlace = (ipacked >> 6) & 1
-      def lct_sz = 1 << ((ipacked & 7) + 1)
-      mut pal = gct
-      if(lct_flag){
-         def n = lct_sz * 3
-         if(p + n > len(data)){ return 0 }
-         pal = init_str(malloc(n + 1), n)
-         __copy_mem(pal, data + p, n)
-         p += n
+      mut cp_addr = gaddr
+      if(ffl & 128) {
+         cp_addr = p
+         p += (1 << ((ffl & 7) + 1)) * 3
       }
-      if(!is_str(pal) || len(pal) < 3){ return 0 }
-      if(p >= len(data)){ return 0 }
-      def min_code_size = load8(data, p)
+      if(p >= len(data)) {
+         break
+      }
+      def mcs = load8(data, p)
       p += 1
-      def sb = _gif_read_subblocks(data, p)
-      if(!sb){ return 0 }
-      def blob_comp = dict_get(sb, "blob")
-      p = dict_get(sb, "next")
-      def idx_raw = _gif_lzw_decode(blob_comp, min_code_size, iw * ih)
-      if(!idx_raw){ return 0 }
-      def idx = interlace ? _gif_deinterlace(idx_raw, iw, ih) : idx_raw
-      if(!idx){ return 0 }
-      mut y = 0
-      while(y < ih){
-         mut x = 0
-         while(x < iw){
-            def pi = load8(idx, y * iw + x)
-            def pr = pi * 3
-            mut r = 0 mut g = 0 mut bl = 0
-            if(pr + 2 < len(pal)){
-               r = load8(pal, pr)
-               g = load8(pal, pr + 1)
-               bl = load8(pal, pr + 2)
-            }
-            def dx = left + x
-            def dy = top + y
-            if(dx >= 0 && dx < w && dy >= 0 && dy < h){
-               def off = (dy * w + dx) * 4
-               store8(canvas, r, off)
-               store8(canvas, g, off + 1)
-               store8(canvas, bl, off + 2)
-               def a = (trans_valid && pi == trans_idx) ? 0 : 255
-               store8(canvas, a, off + 3)
-            }
-            x += 1
-         }
-         y += 1
+      def blocks_res = _g_sb(data, p)
+      if(!blocks_res) {
+         return 0
       }
-      got_frame = true
+      p = dict_get(blocks_res, "next")
+      mut idx_data = _g_lzw_dec(dict_get(blocks_res, "blob"), mcs, (fw * fh))
+      if(is_int(idx_data)) {
+         return 0
+      }
+      if(ffl & 64) {
+         idx_data = _g_di(idx_data, fw, fh)
+      }
+      mut y_loop = 0
+      while(y_loop < fh) {
+         mut x_loop = 0
+         while(x_loop < fw) {
+            if((fy + y_loop) < h && (fx + x_loop) < w) {
+               def pi = load8(idx_data, (y_loop * fw + x_loop))
+               if(pi != trans_idx) {
+                  def off_pix = ((fy + y_loop) * w + (fx + x_loop)) * 4
+                  if(cp_addr != -1) {
+                     store8(canv, load8(data, cp_addr + pi * 3), off_pix)
+                     store8(canv, load8(data, cp_addr + pi * 3 + 1), off_pix + 1)
+                     store8(canv, load8(data, cp_addr + pi * 3 + 2), off_pix + 2)
+                     store8(canv, 255, off_pix + 3)
+                  }
+               }
+            }
+            x_loop += 1
+         }
+         y_loop += 1
+      }
+      trans_idx = -1
       break
    }
-   if(!got_frame){ return 0 }
-   mut out = dict(4)
-   out = dict_set(out, "data", canvas)
-   out = dict_set(out, "width", w)
-   out = dict_set(out, "height", h)
-   out = dict_set(out, "channels", 4)
-   out
+   mut out_dict = dict(4)
+   dict_set(out_dict, "data", canv)
+   dict_set(out_dict, "width", w)
+   dict_set(out_dict, "height", h)
+   dict_set(out_dict, "channels", 4)
+   return out_dict
 }
 
-fn _gif_palette_332(){
-   "Internal helper for `gif_palette_332`."
-   def pal = init_str(malloc(256 * 3 + 1), 256 * 3)
-   mut i = 0
-   while(i < 256){
-      def r3 = (i >> 5) & 7
-      def g3 = (i >> 2) & 7
-      def b2 = i & 3
-      store8(pal, (r3 * 255) / 7, i * 3)
-      store8(pal, (g3 * 255) / 7, i * 3 + 1)
-      store8(pal, (b2 * 255) / 3, i * 3 + 2)
-      i += 1
-   }
-   pal
-}
+;; Encoder section
 
-fn _gif_lzw_pack_uncompressed(idx){
-   "Internal helper for `gif_lzw_pack_uncompressed`."
-   if(!is_str(idx)){ return 0 }
-   def clear = 256
-   def end_code = 257
-   def out = list(len(idx) * 2)
-   mut acc = 0
-   mut bits = 0
-   fn _put(p_out, p_acc, p_bits, code){
-      "Internal helper for `put`."
-      mut a = p_acc
-      mut b = p_bits
-      mut i = 0
-      while(i < 9){
-         a = a | (((code >> i) & 1) << b)
-         b += 1
-         if(b == 8){
-            append(p_out, a & 255)
-            a = 0
-            b = 0
+fn encode(img) {
+   def w = dict_get(img, "width")
+   def h = dict_get(img, "height")
+   def d = dict_get(img, "data")
+   def ch = dict_get(img, "channels", 4)
+   
+   mut col_map = dict(256)
+   mut pal_list = list(768)
+   mut trans_idx_enc = -1
+   mut n_cols = 0
+   mut has_trans_enc = false
+   
+   mut iScan = 0
+   while(iScan < (w * h)) {
+      if(ch >= 4) {
+         if(load8(d, iScan * ch + 3) < 128) {
+            has_trans_enc = true
+            trans_idx_enc = 0
+            n_cols = 1
+            pal_list = append(pal_list, 0)
+            pal_list = append(pal_list, 0)
+            pal_list = append(pal_list, 0)
+            break
          }
-         i += 1
       }
-      [a, b]
+      iScan += 1
    }
-   mut i = 0
-   while(i < len(idx)){
-      def r1 = _put(out, acc, bits, clear)
-      acc = get(r1, 0) bits = get(r1, 1)
-      def r2 = _put(out, acc, bits, load8(idx, i))
-      acc = get(r2, 0) bits = get(r2, 1)
-      i += 1
-   }
-   def r3 = _put(out, acc, bits, clear)
-   acc = get(r3, 0) bits = get(r3, 1)
-   def r4 = _put(out, acc, bits, end_code)
-   acc = get(r4, 0) bits = get(r4, 1)
-   if(bits > 0){ append(out, acc & 255) }
-   _list_to_bytes(out)
-}
 
-fn _out_u8(out, v){
-   "Internal helper for `out_u8`."
-   append(out, v & 255)
-}
-fn _out_u16le(out, v){
-   "Internal helper for `out_u16le`."
-   _out_u8(out, v) _out_u8(out, v >> 8)
-}
-fn _out_bytes(out, s){
-   "Internal helper for `out_bytes`."
-   mut i = 0
-   while(i < len(s)){
-      _out_u8(out, load8(s, i))
-      i += 1
+   mut iC = 0
+   mut over = false
+   while(iC < (w * h)) {
+      def off_c = iC * ch
+      mut skip_p = false
+      if(ch >= 4) {
+         if(load8(d, off_c + 3) < 128) {
+            skip_p = true
+         }
+      }
+      
+      if(!skip_p) {
+         def r = load8(d, off_c)
+         def g = (ch >= 3) ? load8(d, off_c + 1) : r
+         def b = (ch >= 3) ? load8(d, off_c + 2) : r
+         def rgb = (r << 16) | (g << 8) | b
+         if(!dict_has(col_map, rgb)) {
+            if(n_cols < 256) {
+               dict_set(col_map, rgb, n_cols)
+               pal_list = append(pal_list, r)
+               pal_list = append(pal_list, g)
+               pal_list = append(pal_list, b)
+               n_cols += 1
+            } else {
+               over = true
+               iC = (w * h)
+            }
+         }
+      }
+      iC += 1
    }
-}
 
-fn encode(img){
-   "Encodes image dict to GIF89a (single frame, fixed 256-color palette)."
-   if(!is_dict(img)){ return 0 }
-   def w = dict_get(img, "width", 0)
-   def h = dict_get(img, "height", 0)
-   def data = dict_get(img, "data", 0)
-   mut ch = dict_get(img, "channels", 4)
-   if(w <= 0 || h <= 0 || !is_str(data)){ return 0 }
-   if(ch < 1){ ch = 1 } elif(ch > 4){ ch = 4 }
-   if(len(data) < w * h * ch){ return 0 }
-   def pal = _gif_palette_332()
-   def idx = init_str(malloc(w * h + 1), w * h)
-   mut has_trans = false
-   mut i = 0
-   while(i < w * h){
-      def off = i * ch
-      def r = load8(data, off)
-      def g = (ch >= 3) ? load8(data, off + 1) : r
-      def b = (ch >= 3) ? load8(data, off + 2) : r
-      def a = (ch == 2 || ch == 4) ? load8(data, off + (ch - 1)) : 255
-      if(a < 128){
-         has_trans = true
-         store8(idx, 0, i)
+   mut use_fix = over
+   if(n_cols == 0) {
+      use_fix = true
+   }
+   
+   def idx_buf = init_str(malloc(w * h + 1 + 16) + 16, (w * h))
+   mut iC2 = 0
+   while(iC2 < (w * h)) {
+      def off_c2 = iC2 * ch
+      mut is_t = false
+      if(ch >= 4) {
+         if(load8(d, off_c2 + 3) < 128) {
+            is_t = true
+         }
+      }
+      
+      if(is_t) {
+         store8(idx_buf, trans_idx_enc, iC2)
       } else {
-         def pi = ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6)
-         store8(idx, pi, i)
+         def r2 = load8(d, off_c2)
+         def g2 = (ch >= 3) ? load8(d, off_c2 + 1) : r2
+         def b2 = (ch >= 3) ? load8(d, off_c2 + 2) : r2
+         if(use_fix) {
+            def ri = (r2 * 7 + 127) / 255
+            def gi = (g2 * 7 + 127) / 255
+            def bi = (b2 * 3 + 127) / 255
+            mut clr_i = (ri << 5) | (gi << 2) | bi
+            if(clr_i == trans_idx_enc && has_trans_enc) {
+               if(clr_i < 255) {
+                  clr_i += 1
+               } else {
+                  clr_i -= 1
+               }
+            }
+            store8(idx_buf, clr_i, iC2)
+         } else {
+            def rgb2 = (r2 << 16) | (g2 << 8) | b2
+            store8(idx_buf, dict_get(col_map, rgb2, 0), iC2)
+         }
       }
-      i += 1
+      iC2 += 1
    }
-   def lzw = _gif_lzw_pack_uncompressed(idx)
-   if(!lzw){ return 0 }
-   def out = list(4096)
-   _out_u8(out, 71) _out_u8(out, 73) _out_u8(out, 70) _out_u8(out, 56) _out_u8(out, 57) _out_u8(out, 97)
-   _out_u16le(out, w)
-   _out_u16le(out, h)
-   _out_u8(out, 0xF7)
-   _out_u8(out, 0)
-   _out_u8(out, 0)
-   _out_bytes(out, pal)
-   if(has_trans){
-      _out_u8(out, 0x21) _out_u8(out, 0xF9) _out_u8(out, 4)
-      _out_u8(out, 0x01)
-      _out_u16le(out, 0)
-      _out_u8(out, 0)
-      _out_u8(out, 0)
-   }
-   _out_u8(out, 0x2C)
-   _out_u16le(out, 0) _out_u16le(out, 0)
-   _out_u16le(out, w) _out_u16le(out, h)
-   _out_u8(out, 0)
-   _out_u8(out, 8)
-   mut p = 0
-   while(p < len(lzw)){
-      mut n = len(lzw) - p
-      if(n > 255){ n = 255 }
-      _out_u8(out, n)
-      mut j = 0
-      while(j < n){
-         _out_u8(out, load8(lzw, p + j))
-         j += 1
-      }
-      p += n
-   }
-   _out_u8(out, 0)
-   _out_u8(out, 0x3B)
-   _list_to_bytes(out)
-}
 
-if(comptime{__main()}){
-   use std.core.error *
-   def w = 4 def h = 4
-   def px = init_str(malloc(w * h * 4), w * h * 4)
-   mut i = 0
-   while(i < w * h){
-      def o = i * 4
-      store8(px, (i * 40) & 255, o)
-      store8(px, (i * 70) & 255, o + 1)
-      store8(px, (i * 20) & 255, o + 2)
-      store8(px, 255, o + 3)
-      i += 1
+   def clr_code = 256
+   def end_code_lzw = 257
+   mut out_l = list(w * h * 2)
+   mut acc_bits = 0
+   mut bits_count = 0
+   mut csz_enc = 9
+   mut next_code = 258
+   
+   mut kClr = 0
+   while(kClr < csz_enc) {
+      if((clr_code >> kClr) & 1) {
+         acc_bits = acc_bits | (1 << bits_count)
+      }
+      bits_count += 1
+      if(bits_count == 8) {
+         out_l = append(out_l, acc_bits)
+         acc_bits = 0
+         bits_count = 0
+      }
+      kClr += 1
    }
-   mut img = dict(4)
-   img = dict_set(img, "width", w)
-   img = dict_set(img, "height", h)
-   img = dict_set(img, "channels", 4)
-   img = dict_set(img, "data", px)
-   def enc = encode(img)
-   assert(enc && len(enc) > 32, "gif encode")
-   def dec = decode(enc)
-   assert(dec != 0, "gif decode")
-   assert(dict_get(dec, "width") == w, "gif width")
-   assert(dict_get(dec, "height") == h, "gif height")
-   print("✓ std.image.gif tests passed")
+
+   mut dict_lzw = dict(4096)
+   mut ent = load8(idx_buf, 0)
+   mut iIdx = 1
+   while(iIdx < (w * h)) {
+      def c_sym = load8(idx_buf, iIdx)
+      def key = (ent << 16) | c_sym
+      if(dict_has(dict_lzw, key)) {
+         ent = dict_get(dict_lzw, key)
+      } else {
+         mut kEnt = 0
+         while(kEnt < csz_enc) {
+            if((ent >> kEnt) & 1) {
+               acc_bits = acc_bits | (1 << bits_count)
+            }
+            bits_count += 1
+            if(bits_count == 8) {
+               out_l = append(out_l, acc_bits)
+               acc_bits = 0
+               bits_count = 0
+            }
+            kEnt += 1
+         }
+         if(next_code < 4096) {
+            dict_set(dict_lzw, key, next_code)
+            next_code += 1
+            if(next_code == (1 << csz_enc) + 1 && csz_enc < 12) {
+               csz_enc += 1
+            }
+         } else {
+            dict_lzw = dict(4096)
+            mut kClr2 = 0
+            while(kClr2 < csz_enc) {
+               if((clr_code >> kClr2) & 1) {
+                  acc_bits = acc_bits | (1 << bits_count)
+               }
+               bits_count += 1
+               if(bits_count == 8) {
+                  out_l = append(out_l, acc_bits)
+                  acc_bits = 0
+                  bits_count = 0
+               }
+               kClr2 += 1
+            }
+            csz_enc = 9
+            next_code = 258
+         }
+         ent = c_sym
+      }
+      iIdx += 1
+   }
+
+   mut kFin = 0
+   while(kFin < csz_enc) {
+      if((ent >> kFin) & 1) {
+         acc_bits = acc_bits | (1 << bits_count)
+      }
+      bits_count += 1
+      if(bits_count == 8) {
+         out_l = append(out_l, acc_bits)
+         acc_bits = 0
+         bits_count = 0
+      }
+      kFin += 1
+   }
+
+   mut kEnd = 0
+   while(kEnd < csz_enc) {
+      if((end_code_lzw >> kEnd) & 1) {
+         acc_bits = acc_bits | (1 << bits_count)
+      }
+      bits_count += 1
+      if(bits_count == 8) {
+         out_l = append(out_l, acc_bits)
+         acc_bits = 0
+         bits_count = 0
+      }
+      kEnd += 1
+   }
+   if(bits_count > 0) {
+      out_l = append(out_l, acc_bits)
+   }
+
+   mut res_l = list(len(out_l) + 1024)
+   res_l = append(res_l, 71)
+   res_l = append(res_l, 73)
+   res_l = append(res_l, 70)
+   res_l = append(res_l, 56)
+   res_l = append(res_l, 57)
+   res_l = append(res_l, 97)
+   res_l = append(res_l, (w & 255))
+   res_l = append(res_l, (w >> 8))
+   res_l = append(res_l, (h & 255))
+   res_l = append(res_l, (h >> 8))
+   
+   if(use_fix) {
+      res_l = append(res_l, 247)
+      res_l = append(res_l, 0)
+      res_l = append(res_l, 0)
+      mut iPal = 0
+      while(iPal < 256) {
+         res_l = append(res_l, (iPal & 0xE0))
+         res_l = append(res_l, ((iPal << 3) & 0xE0))
+         res_l = append(res_l, ((iPal << 6) & 0xC0))
+         iPal += 1
+      }
+   } else {
+      mut psz = 0
+      while((1 << (psz + 1)) < n_cols) { psz += 1 }
+      res_l = append(res_l, (128 | psz))
+      res_l = append(res_l, 0)
+      res_l = append(res_l, 0)
+      mut iPal2 = 0
+      while(iPal2 < (1 << (psz + 1))) {
+         if((iPal2 * 3 + 2) < len(pal_list)) {
+            res_l = append(res_l, get(pal_list, iPal2 * 3))
+            res_l = append(res_l, get(pal_list, iPal2 * 3 + 1))
+            res_l = append(res_l, get(pal_list, iPal2 * 3 + 2))
+         } else {
+            res_l = append(res_l, 0)
+            res_l = append(res_l, 0)
+            res_l = append(res_l, 0)
+         }
+         iPal2 += 1
+      }
+   }
+
+   if(has_trans_enc) {
+      res_l = append(res_l, 0x21)
+      res_l = append(res_l, 0xF9)
+      res_l = append(res_l, 4)
+      res_l = append(res_l, 1)
+      res_l = append(res_l, 0)
+      res_l = append(res_l, 0)
+      res_l = append(res_l, trans_idx_enc)
+      res_l = append(res_l, 0)
+   }
+
+   res_l = append(res_l, 0x2C)
+   res_l = append(res_l, 0)
+   res_l = append(res_l, 0)
+   res_l = append(res_l, 0)
+   res_l = append(res_l, 0)
+   res_l = append(res_l, (w & 255))
+   res_l = append(res_l, (w >> 8))
+   res_l = append(res_l, (h & 255))
+   res_l = append(res_l, (h >> 8))
+   res_l = append(res_l, 0)
+   res_l = append(res_l, 8)
+
+   mut pOut = 0
+   while(pOut < len(out_l)) {
+      def remain = len(out_l) - pOut
+      def sz_chunk = (remain > 255) ? 255 : remain
+      res_l = append(res_l, sz_chunk)
+      mut iChunk = 0
+      while(iChunk < sz_chunk) {
+         res_l = append(res_l, get(out_l, pOut + iChunk))
+         iChunk += 1
+      }
+      pOut += sz_chunk
+   }
+   res_l = append(res_l, 0)
+   res_l = append(res_l, 0x3B)
+
+   return _l2b(res_l)
 }

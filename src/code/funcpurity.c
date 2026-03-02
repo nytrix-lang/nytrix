@@ -1918,14 +1918,20 @@ static bool ny_mark_recursive_components(ny_idx_list *edges,
 static bool ny_func_decl_is_pure(codegen_t *cg, stmt_t *fn_stmt) {
   if (!cg || !fn_stmt || fn_stmt->kind != NY_S_FUNC || !fn_stmt->as.fn.body)
     return false;
+  if (!fn_stmt->as.fn.name || !*fn_stmt->as.fn.name)
+    return false;
   if (fn_stmt->as.fn.attr_thread || fn_stmt->as.fn.attr_naked)
     return false;
   assigned_name_list local_names = {0};
   assigned_hash_list local_hashes = {0};
   uint64_t local_bloom[4] = {0, 0, 0, 0};
-  for (size_t i = 0; i < fn_stmt->as.fn.params.len; i++) {
-    assigned_name_add(&local_names, &local_hashes, local_bloom,
-                      fn_stmt->as.fn.params.data[i].name);
+  if (fn_stmt->as.fn.params.len > 0 && fn_stmt->as.fn.params.data != NULL) {
+    for (size_t i = 0; i < fn_stmt->as.fn.params.len; i++) {
+      const char *pname = fn_stmt->as.fn.params.data[i].name;
+      if (pname && *pname) {
+        assigned_name_add(&local_names, &local_hashes, local_bloom, pname);
+      }
+    }
   }
   bool pure = ny_stmt_is_pure(cg, fn_stmt->as.fn.body, &local_names,
                               &local_hashes, local_bloom);
@@ -1937,14 +1943,20 @@ static bool ny_func_decl_is_pure(codegen_t *cg, stmt_t *fn_stmt) {
 static bool ny_func_decl_is_memo_safe(codegen_t *cg, stmt_t *fn_stmt) {
   if (!cg || !fn_stmt || fn_stmt->kind != NY_S_FUNC || !fn_stmt->as.fn.body)
     return false;
+  if (!fn_stmt->as.fn.name || !*fn_stmt->as.fn.name)
+    return false;
   if (fn_stmt->as.fn.attr_thread || fn_stmt->as.fn.attr_naked)
     return false;
   assigned_name_list local_names = {0};
   assigned_hash_list local_hashes = {0};
   uint64_t local_bloom[4] = {0, 0, 0, 0};
-  for (size_t i = 0; i < fn_stmt->as.fn.params.len; i++) {
-    assigned_name_add(&local_names, &local_hashes, local_bloom,
-                      fn_stmt->as.fn.params.data[i].name);
+  if (fn_stmt->as.fn.params.len > 0 && fn_stmt->as.fn.params.data != NULL) {
+    for (size_t i = 0; i < fn_stmt->as.fn.params.len; i++) {
+      const char *pname = fn_stmt->as.fn.params.data[i].name;
+      if (pname && *pname) {
+        assigned_name_add(&local_names, &local_hashes, local_bloom, pname);
+      }
+    }
   }
   bool safe = ny_stmt_is_memo_safe(cg, fn_stmt->as.fn.body, &local_names,
                                    &local_hashes, local_bloom);
@@ -1968,9 +1980,12 @@ typedef enum ny_infer_pass_kind_t {
       } else
 
 #define NY_FOREACH_NON_STD_FUNC_SIG(cg, sig_var)                               \
-  NY_FOREACH_FUNC_SIG(cg, sig_var)                                             \
-  if (ny_is_std_qname(sig_var->name)) {                                        \
-  } else
+  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)                  \
+    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL;      \
+         sig_var = NULL)                                                       \
+      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC ||            \
+          ny_is_std_qname(sig_var->name)) {                                    \
+      } else
 
 #define NY_FOREACH_POLICY_SIG(cg, include_std_flag, sig_var)                   \
   for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)                  \
@@ -1980,11 +1995,20 @@ typedef enum ny_infer_pass_kind_t {
           (!(include_std_flag) && ny_is_std_qname(sig_var->name))) {           \
       } else
 
-static bool ny_apply_infer_pass_to_sig(codegen_t *cg, fun_sig *sig,
-                                       sema_func_t *sema,
+static bool ny_apply_infer_pass_to_sig(codegen_t *cg, size_t sig_idx,
                                        ny_infer_pass_kind_t pass) {
-  if (!cg || !sig || !sema || !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
+  if (!cg || sig_idx >= cg->fun_sigs.len)
     return false;
+  fun_sig *sig = &cg->fun_sigs.data[sig_idx];
+  if (!sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
+    return false;
+  sema_func_t *sema = (sema_func_t *)sig->stmt_t->sema;
+  if (!sema)
+    return false;
+
+  if (verbose_enabled >= 3) {
+    fprintf(stderr, "[*] Purity: analyzing %s (pass=%d)\n", sig->name, (int)pass);
+  }
   bool changed = false;
   const char *saved_mod = cg->current_module_name;
   cg->current_module_name = ny_module_prefix_stable(cg, sig->name);
@@ -2047,11 +2071,11 @@ static void ny_run_infer_fixed_point(codegen_t *cg, int max_iters,
     return;
   for (int iter = 0; iter < max_iters; iter++) {
     bool changed = false;
-    NY_FOREACH_NON_STD_FUNC_SIG(cg, sig) {
-      sema_func_t *sema = (sema_func_t *)sig->stmt_t->sema;
-      if (!sema)
+    for (size_t i = 0; i < cg->fun_sigs.len; i++) {
+      fun_sig *sig = &cg->fun_sigs.data[i];
+      if (!sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC || ny_is_std_qname(sig->name))
         continue;
-      if (ny_apply_infer_pass_to_sig(cg, sig, sema, pass))
+      if (ny_apply_infer_pass_to_sig(cg, i, pass))
         changed = true;
     }
     if (!changed)
@@ -2060,19 +2084,9 @@ static void ny_run_infer_fixed_point(codegen_t *cg, int max_iters,
 }
 
 void infer_pure_functions(codegen_t *cg) {
-  if (!cg)
+  if (!cg || !cg->auto_purity_infer)
     return;
-  bool run_effect_infer = cg->auto_purity_infer;
-  if (!run_effect_infer) {
-    NY_FOREACH_FUNC_SIG(cg, sig) {
-      if (sig->stmt_t->as.fn.effect_contract_known) {
-        run_effect_infer = true;
-        break;
-      }
-    }
-  }
-  if (!run_effect_infer)
-    return;
+  bool run_effect_infer = true;
   bool has_functions = false;
   NY_FOREACH_FUNC_SIG(cg, sig) {
     sig->is_recursive = false;
