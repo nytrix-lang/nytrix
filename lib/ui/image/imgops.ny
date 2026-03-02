@@ -2,7 +2,7 @@
 ;; Reference:
 ;; - https://github.com/nothings/stb/blob/master/stb_image_resize2.h
 
-module std.image.ops (
+module std.image.imgops (
    resize
 )
 
@@ -59,15 +59,15 @@ if(comptime{__main()}){
    mut pix = malloc(16)
    store32(pix, 0xFF0000FF, 0) store32(pix, 0x00FF00FF, 4)
    store32(pix, 0x0000FFFF, 8) store32(pix, 0xFFFFFFFF, 12)
-   
+
    mut img = dict()
    dict_set(img, "data", pix)
    dict_set(img, "width", 2)
    dict_set(img, "height", 2)
-   
+
    def res = resize(img, 4, 4)
    assert(dict_get(res, "width") == 4, "resize width")
    assert(dict_get(res, "height") == 4, "resize height")
-   
+
    print("✓ std.image.ops tests passed")
 }
