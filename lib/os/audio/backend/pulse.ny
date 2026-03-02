@@ -1,6 +1,6 @@
 ;; Keywords: audio pulse linux io
 
-module std.audio.backend.pulse (
+module std.os.audio.backend.pulse (
     is_available, init, shutdown,
     stream_open, stream_start, stream_stop,
     write

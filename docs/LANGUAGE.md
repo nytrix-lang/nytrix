@@ -111,12 +111,6 @@ Import forms used across std and runtime tests:
 - `use std.core (len, append as push)`
 - `use "./local.ny" (helper as h)`
 
-Common std tree layout:
-
-- `std/<pkg>/lib/mod.ny`
-- `std/<pkg>/test/*.ny`
-- `std/<pkg>/lib/*.ny`
-
 ## Extensible Syntax (`std.core.syntax`)
 
 Import:

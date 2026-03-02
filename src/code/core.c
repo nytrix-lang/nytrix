@@ -1,5 +1,4 @@
 #include "base/util.h"
-#include "braun.h"
 #include "code/llvm.h"
 #include "code/priv.h"
 #include "priv.h"
@@ -17,18 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/types.h>
-
-static bool braun_should_init(void) {
-  return ny_env_enabled("NYTRIX_BRAUN") || ny_env_enabled("NYTRIX_BRAUN_SSA");
-}
-
-static bool ny_env_enabled_default_on_local(const char *name) {
-  const char *v = getenv(name);
-  if (!v || !*v)
-    return true;
-  return ny_env_enabled(name);
-}
 
 static bool ny_effect_analysis_requested(void) {
   const char *forbid = getenv("NYTRIX_EFFECT_FORBID");
@@ -38,6 +27,35 @@ static bool ny_effect_analysis_requested(void) {
          ny_env_enabled("NYTRIX_EFFECT_DIAG_VERBOSE") ||
          ny_env_enabled("NYTRIX_EFFECT_REQUIRE_PURE") ||
          ny_env_enabled("NYTRIX_EFFECT_REQUIRE_KNOWN");
+}
+
+static void ny_cg_init_types(codegen_t *cg) {
+  cg->type_i1 = LLVMInt1TypeInContext(cg->ctx);
+  cg->type_i8 = LLVMInt8TypeInContext(cg->ctx);
+  cg->type_i16 = LLVMInt16TypeInContext(cg->ctx);
+  cg->type_i32 = LLVMInt32TypeInContext(cg->ctx);
+  cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
+  cg->type_i128 = LLVMInt128TypeInContext(cg->ctx);
+  cg->type_u8 = cg->type_i8;
+  cg->type_u16 = cg->type_i16;
+  cg->type_u32 = cg->type_i32;
+  cg->type_u64 = cg->type_i64;
+  cg->type_u128 = cg->type_i128;
+  cg->type_f32 = LLVMFloatTypeInContext(cg->ctx);
+  cg->type_f64 = LLVMDoubleTypeInContext(cg->ctx);
+  cg->type_f128 = LLVMFP128TypeInContext(cg->ctx);
+  cg->type_bool = cg->type_i1;
+  cg->type_i8ptr = LLVMPointerType(cg->type_i8, 0);
+}
+
+static void ny_cg_init_options(codegen_t *cg) {
+  cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
+  cg->auto_purity_infer = ny_env_enabled_default_on("NYTRIX_AUTO_PURITY") ||
+                          ny_effect_analysis_requested();
+  cg->auto_memoize = ny_env_enabled("NYTRIX_AUTO_MEMO");
+  cg->auto_memoize_impure = ny_env_enabled("NYTRIX_AUTO_MEMO_IMPURE");
+  if (cg->strict_diagnostics)
+    NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
 }
 
 static void ny_debug_apply_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
@@ -90,42 +108,9 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->alloca_builder = LLVMCreateBuilderInContext(ctx);
   cg->prog = prog;
   cg->arena = arena;
-  ny_llvm_prepare_module(cg->module);
-  cg->comptime = false;
-  cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
-  cg->auto_purity_infer = ny_env_enabled_default_on_local("NYTRIX_AUTO_PURITY");
-  if (!cg->auto_purity_infer && ny_effect_analysis_requested())
-    cg->auto_purity_infer = true;
-  cg->auto_memoize = ny_env_enabled("NYTRIX_AUTO_MEMO");
-  cg->auto_memoize_impure = ny_env_enabled("NYTRIX_AUTO_MEMO_IMPURE");
-  cg->auto_memo_site_seq = 0;
-  if (braun_should_init()) {
-    cg->braun = malloc(sizeof(*cg->braun));
-    if (cg->braun) {
-      braun_ssa_init(cg->braun, cg, arena);
-      braun_ssa_set_enabled(cg->braun, true);
-    }
-  }
-  if (cg->strict_diagnostics)
-    NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
-  cg->type_i1 = LLVMInt1TypeInContext(cg->ctx);
-  cg->type_i8 = LLVMInt8TypeInContext(cg->ctx);
-  cg->type_i16 = LLVMInt16TypeInContext(cg->ctx);
-  cg->type_i32 = LLVMInt32TypeInContext(cg->ctx);
-  cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
-  cg->type_i128 = LLVMInt128TypeInContext(cg->ctx);
-  cg->type_u8 = cg->type_i8;
-  cg->type_u16 = cg->type_i16;
-  cg->type_u32 = cg->type_i32;
-  cg->type_u64 = cg->type_i64;
-  cg->type_u128 = cg->type_i128;
-  cg->type_f32 = LLVMFloatTypeInContext(cg->ctx);
-  cg->type_f64 = LLVMDoubleTypeInContext(cg->ctx);
-  cg->type_f128 = LLVMFP128TypeInContext(cg->ctx);
-  cg->type_bool = cg->type_i1;
-  cg->type_i8ptr = LLVMPointerType(cg->type_i8, 0);
-  cg->had_error = 0;
-  cg->lambda_count = 0;
+  ny_llvm_prepare_module(cg->module, 3);
+  ny_cg_init_types(cg);
+  ny_cg_init_options(cg);
   add_builtins(cg);
 }
 
@@ -142,39 +127,12 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   cg->module = LLVMModuleCreateWithNameInContext(name, cg->ctx);
   cg->builder = LLVMCreateBuilderInContext(cg->ctx);
   cg->alloca_builder = LLVMCreateBuilderInContext(cg->ctx);
-  ny_llvm_prepare_module(cg->module);
-  cg->type_i1 = LLVMInt1TypeInContext(cg->ctx);
-  cg->type_i8 = LLVMInt8TypeInContext(cg->ctx);
-  cg->type_i16 = LLVMInt16TypeInContext(cg->ctx);
-  cg->type_i32 = LLVMInt32TypeInContext(cg->ctx);
-  cg->type_i64 = LLVMInt64TypeInContext(cg->ctx);
-  cg->type_i128 = LLVMInt128TypeInContext(cg->ctx);
-  cg->type_u8 = cg->type_i8;
-  cg->type_u16 = cg->type_i16;
-  cg->type_u32 = cg->type_i32;
-  cg->type_u64 = cg->type_i64;
-  cg->type_u128 = cg->type_i128;
-  cg->type_f32 = LLVMFloatTypeInContext(cg->ctx);
-  cg->type_f64 = LLVMDoubleTypeInContext(cg->ctx);
-  cg->type_f128 = LLVMFP128TypeInContext(cg->ctx);
-  cg->type_bool = cg->type_i1;
-  cg->type_i8ptr = LLVMPointerType(cg->type_i8, 0);
-  if (braun_should_init()) {
-    cg->braun = malloc(sizeof(*cg->braun));
-    if (cg->braun) {
-      braun_ssa_init(cg->braun, cg, arena);
-      braun_ssa_set_enabled(cg->braun, true);
-    }
-  }
-  cg->strict_diagnostics = getenv("NYTRIX_STRICT_DIAGNOSTICS") != NULL;
-  cg->auto_purity_infer = ny_env_enabled_default_on_local("NYTRIX_AUTO_PURITY");
-  if (!cg->auto_purity_infer && ny_effect_analysis_requested())
-    cg->auto_purity_infer = true;
-  cg->auto_memoize = ny_env_enabled("NYTRIX_AUTO_MEMO");
-  cg->auto_memoize_impure = ny_env_enabled("NYTRIX_AUTO_MEMO_IMPURE");
-  cg->auto_memo_site_seq = 0;
-  if (cg->strict_diagnostics)
-    NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
+  ny_llvm_prepare_module(cg->module, 3);
+  vec_reserve(&cg->fun_sigs, 16384);
+  vec_reserve(&cg->global_vars, 4096);
+  vec_reserve(&cg->interns, 4096);
+  ny_cg_init_types(cg);
+  ny_cg_init_options(cg);
   add_builtins(cg);
   LLVMAddGlobal(cg->module, cg->type_i64, "__NYTRIX__");
 }
@@ -208,24 +166,55 @@ void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
 void codegen_emit(codegen_t *cg) {
   scope gsc[64] = {0};
   size_t gd = 0;
+
+  clock_t t_use = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
-    collect_use_aliases(cg, cg->prog->body.data[i]);
-    collect_use_modules(cg, cg->prog->body.data[i]);
+    stmt_t *s = cg->prog->body.data[i];
+    collect_use_aliases(cg, s);
+    collect_use_modules(cg, s);
   }
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "[*] Codegen: use processing: %.4fs\n", (double)(clock() - t_use) / CLOCKS_PER_SEC);
+
+  clock_t t_sigs = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     collect_sigs(cg, s);
   }
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "[*] Codegen: collect_sigs:   %.4fs\n", (double)(clock() - t_sigs) / CLOCKS_PER_SEC);
+
+  clock_t t_exports = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
-    process_exports(cg, cg->prog->body.data[i]);
+    stmt_t *s = cg->prog->body.data[i];
+    process_exports(cg, s);
   }
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "[*] Codegen: exports:        %.4fs\n", (double)(clock() - t_exports) / CLOCKS_PER_SEC);
+
+  clock_t t_imports = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
-    process_use_imports(cg, cg->prog->body.data[i]);
+    stmt_t *s = cg->prog->body.data[i];
+    process_use_imports(cg, s);
   }
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "[*] Codegen: imports:        %.4fs\n", (double)(clock() - t_imports) / CLOCKS_PER_SEC);
+
+  clock_t t_purity = clock();
   infer_pure_functions(cg);
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "[*] Codegen: purity infer:   %.4fs\n", (double)(clock() - t_purity) / CLOCKS_PER_SEC);
+
+  clock_t t_emit_top = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
-    emit_top_functions(cg, cg->prog->body.data[i], gsc, gd, NULL);
+    stmt_t *s = cg->prog->body.data[i];
+    if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok)) {
+      continue;
+    }
+    emit_top_functions(cg, s, gsc, gd, NULL);
   }
+  if (verbose_enabled >= 1)
+    fprintf(stderr, "[*] Codegen: emit top:       %.4fs\n", (double)(clock() - t_emit_top) / CLOCKS_PER_SEC);
 }
 
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
@@ -248,38 +237,33 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
     LLVMSetCurrentDebugLocation2(cg->builder, NULL);
   }
   LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
-  if (cg->braun)
-    braun_ssa_reset(cg->braun);
   LLVMBasicBlockRef init_block = LLVMAppendBasicBlock(fn, "init");
   LLVMBasicBlockRef body_block = LLVMAppendBasicBlock(fn, "body");
   LLVMPositionBuilderAtEnd(cg->builder, body_block);
-  if (cg->braun)
-    braun_ssa_start_block(cg->braun, body_block);
   scope sc[64] = {0};
   size_t d = 0;
+  LLVMValueRef std_init = LLVMGetNamedFunction(cg->module, "__std_init");
+  if (std_init) {
+    LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(std_init), std_init, NULL, 0, "");
+  }
+
   for (size_t i = 0; i < cg->prog->body.len; i++) {
-    if (cg->prog->body.data[i]->kind != NY_S_FUNC) {
-      gen_stmt(cg, sc, &d, cg->prog->body.data[i], 0, false);
+    stmt_t *s = cg->prog->body.data[i];
+    if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok))
+      continue;
+    if (s->kind != NY_S_FUNC) {
+      gen_stmt(cg, sc, &d, s, 0, false);
     }
   }
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
     LLVMBuildRet(cg->builder, LLVMConstInt(cg->type_i64, 1, false));
   }
   LLVMPositionBuilderAtEnd(cg->builder, init_block);
-  if (cg->braun) {
-    braun_ssa_start_block(cg->braun, init_block);
-    braun_ssa_seal_block(cg->braun, init_block);
-  }
   if (cg->debug_symbols && cg->di_builder) {
     LLVMSetCurrentDebugLocation2(cg->builder, NULL);
   }
   codegen_emit_string_init(cg);
   LLVMBuildBr(cg->builder, body_block);
-  if (cg->braun) {
-    braun_ssa_start_block(cg->braun, body_block);
-    braun_ssa_add_predecessor(cg->braun, init_block);
-    braun_ssa_seal_block(cg->braun, body_block);
-  }
   vec_free(&sc[0].defers);
   vec_free(&sc[0].vars);
   if (cur) {
@@ -325,22 +309,8 @@ void codegen_emit_string_init(codegen_t *cg) {
 void codegen_dispose(codegen_t *cg) {
   if (!cg)
     return;
-  if (cg->braun) {
-    if (ny_env_enabled("NYTRIX_BRAUN_DIAG")) {
-      uint64_t phi_created = 0, phi_eliminated = 0, allocas_avoided = 0;
-      braun_ssa_get_stats(cg->braun, &phi_created, &phi_eliminated,
-                          &allocas_avoided);
-      fprintf(
-          stderr,
-          "[braun] phi-created=%llu phi-eliminated=%llu writes-tracked=%llu\n",
-          (unsigned long long)phi_created, (unsigned long long)phi_eliminated,
-          (unsigned long long)allocas_avoided);
-    }
-    braun_ssa_dispose(cg->braun);
-    free(cg->braun);
-    cg->braun = NULL;
-  }
   codegen_debug_finalize(cg);
+  ny_sym_state_free(cg);
   if (cg->alloca_builder) {
     LLVMDisposeBuilder(cg->alloca_builder);
     cg->alloca_builder = NULL;
@@ -366,28 +336,14 @@ void codegen_dispose(codegen_t *cg) {
   for (size_t i = 0; i < cg->fun_sigs.len; i++) {
     fun_sig *sig = &cg->fun_sigs.data[i];
     free((void *)sig->name);
-    if (sig->link_name) {
-      bool seen = false;
-      for (size_t j = 0; j < i; j++) {
-        if (cg->fun_sigs.data[j].link_name == sig->link_name) {
-          seen = true;
-          break;
-        }
-      }
-      if (!seen)
-        free((void *)sig->link_name);
+    for (size_t j = 0; j < i; j++) {
+      if (cg->fun_sigs.data[j].link_name == sig->link_name)
+        sig->link_name = NULL;
+      if (cg->fun_sigs.data[j].return_type == sig->return_type)
+        sig->return_type = NULL;
     }
-    if (sig->return_type) {
-      bool seen = false;
-      for (size_t j = 0; j < i; j++) {
-        if (cg->fun_sigs.data[j].return_type == sig->return_type) {
-          seen = true;
-          break;
-        }
-      }
-      if (!seen)
-        free((void *)sig->return_type);
-    }
+    free((void *)sig->link_name);
+    free((void *)sig->return_type);
   }
   for (size_t i = 0; i < cg->global_vars.len; i++) {
     free((void *)cg->global_vars.data[i].name);

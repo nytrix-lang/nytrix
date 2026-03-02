@@ -36,30 +36,6 @@ fn mandelbrot(w, h, max_iter){
             zi = (zr + zr) * zi + c_im
             zr = zr2 - zi2 + c_re
             i += 1
-
-            if(i == max_iter){ break }
-            zr2 = zr * zr
-            zi2 = zi * zi
-            if(zr2 + zi2 > four){ break }
-            zi = (zr + zr) * zi + c_im
-            zr = zr2 - zi2 + c_re
-            i += 1
-
-            if(i == max_iter){ break }
-            zr2 = zr * zr
-            zi2 = zi * zi
-            if(zr2 + zi2 > four){ break }
-            zi = (zr + zr) * zi + c_im
-            zr = zr2 - zi2 + c_re
-            i += 1
-
-            if(i == max_iter){ break }
-            zr2 = zr * zr
-            zi2 = zi * zi
-            if(zr2 + zi2 > four){ break }
-            zi = (zr + zr) * zi + c_im
-            zr = zr2 - zi2 + c_re
-            i += 1
          }
 
          if(i == max_iter){ count += 1 }

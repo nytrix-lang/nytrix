@@ -9,14 +9,14 @@ use std.os.time *
 
 ;; Float (Benchmark)
 
+use std.core.iter *
+
 def start = ticks()
 mut x = 1.0
 def y = 1.000001
-mut i = 0
 def iters = 500000
-while(i < iters){
+for(i in range(0, iters)){
    x = x * y
-   i = i + 1
 }
 
 def end = ticks()

@@ -17,11 +17,11 @@
  * tiny direct-mapped cache per query kind and invalidate entries when codegen
  * context mutates (stamp changes).
  */
-#define NY_LOOKUP_CACHE_SLOTS 2048u
+#define NY_LOOKUP_CACHE_SLOTS 8192u
 #define NY_LOOKUP_KEY_MAX 96u
-#define NY_LOOKUP_EXACT_INDEX_SLOTS 8192u
+#define NY_LOOKUP_EXACT_INDEX_SLOTS 16384u
 #define NY_MODULE_USED_INDEX_SLOTS 1024u
-#define NY_OVERLOAD_NAME_INDEX_SLOTS 8192u
+#define NY_OVERLOAD_NAME_INDEX_SLOTS 16384u
 
 typedef struct ny_fun_lookup_cache_entry_t {
   const codegen_t *cg;
@@ -64,14 +64,6 @@ typedef struct ny_overload_lookup_cache_entry_t {
   fun_sig *value;
 } ny_overload_lookup_cache_entry_t;
 
-static ny_fun_lookup_cache_entry_t g_fun_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
-static ny_global_lookup_cache_entry_t
-    g_global_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
-static ny_alias_lookup_cache_entry_t
-    g_alias_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
-static ny_overload_lookup_cache_entry_t
-    g_overload_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
-
 typedef struct ny_fun_exact_index_entry_t {
   uint64_t hash;
   uint32_t len;
@@ -111,47 +103,9 @@ typedef struct ny_module_used_index_entry_t {
   uint8_t state;
 } ny_module_used_index_entry_t;
 
-static ny_fun_exact_index_entry_t
-    g_fun_exact_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
-static ny_global_exact_index_entry_t
-    g_global_exact_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
-static ny_fun_tail_index_entry_t g_fun_tail_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
-static ny_global_tail_index_entry_t
-    g_global_tail_index[NY_LOOKUP_EXACT_INDEX_SLOTS];
-static ny_module_used_index_entry_t
-    g_use_module_index[NY_MODULE_USED_INDEX_SLOTS];
-static ny_module_used_index_entry_t
-    g_user_use_module_index[NY_MODULE_USED_INDEX_SLOTS];
-static int32_t g_overload_name_heads[NY_OVERLOAD_NAME_INDEX_SLOTS];
-static int32_t *g_overload_name_next = NULL;
-static size_t g_overload_name_next_cap = 0;
-
-static const codegen_t *g_fun_exact_index_cg = NULL;
-static const codegen_t *g_global_exact_index_cg = NULL;
-static const codegen_t *g_fun_tail_index_cg = NULL;
-static const codegen_t *g_global_tail_index_cg = NULL;
-static const codegen_t *g_use_module_index_cg = NULL;
-static const codegen_t *g_user_use_module_index_cg = NULL;
-static const codegen_t *g_overload_name_index_cg = NULL;
-static uint64_t g_fun_exact_index_stamp = 0;
-static uint64_t g_global_exact_index_stamp = 0;
-static uint64_t g_fun_tail_index_stamp = 0;
-static uint64_t g_global_tail_index_stamp = 0;
-static uint64_t g_use_module_index_stamp = 0;
-static uint64_t g_user_use_module_index_stamp = 0;
-static uint64_t g_overload_name_index_stamp = 0;
-static bool g_fun_exact_index_ready = false;
-static bool g_global_exact_index_ready = false;
-static bool g_fun_tail_index_ready = false;
-static bool g_global_tail_index_ready = false;
-static bool g_use_module_index_ready = false;
-static bool g_user_use_module_index_ready = false;
-static bool g_overload_name_index_ready = false;
-
 typedef struct ny_lookup_stamp_cache_t {
-  const codegen_t *cg;
-  void *module;
-  void *ctx;
+  const void *module;
+  const void *ctx;
   const void *fun_data;
   const void *global_data;
   const void *alias_data;
@@ -171,61 +125,62 @@ typedef struct ny_lookup_stamp_cache_t {
   bool ready;
 } ny_lookup_stamp_cache_t;
 
-static ny_lookup_stamp_cache_t g_lookup_stamp_cache;
+typedef struct ny_sym_state_t {
+  ny_lookup_stamp_cache_t stamp_cache;
 
-static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail);
-static binding *ny_global_tail_find(codegen_t *cg, const char *tail);
-static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp);
-static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash);
+  ny_fun_lookup_cache_entry_t fun_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_global_lookup_cache_entry_t global_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_alias_lookup_cache_entry_t alias_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_overload_lookup_cache_entry_t overload_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
 
-typedef void *(*ny_recurse_lookup_fn)(codegen_t *cg, const char *name,
-                                      void *ctx);
+  ny_fun_exact_index_entry_t fun_exact[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_global_exact_index_entry_t global_exact[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_fun_tail_index_entry_t fun_tail[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_global_tail_index_entry_t global_tail[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_module_used_index_entry_t use_module[NY_MODULE_USED_INDEX_SLOTS];
+  ny_module_used_index_entry_t user_use_module[NY_MODULE_USED_INDEX_SLOTS];
+  int32_t overload_name_heads[NY_OVERLOAD_NAME_INDEX_SLOTS];
+  int32_t *overload_name_next;
+  size_t overload_name_next_cap;
 
-typedef struct ny_overload_recurse_ctx_t {
-  size_t argc;
-} ny_overload_recurse_ctx_t;
+  uint64_t fun_exact_stamp;
+  uint64_t global_exact_stamp;
+  uint64_t fun_tail_stamp;
+  uint64_t global_tail_stamp;
+  uint64_t use_module_stamp;
+  uint64_t user_use_module_stamp;
+  uint64_t overload_name_stamp;
+  bool fun_exact_ready;
+  bool global_exact_ready;
+  bool fun_tail_ready;
+  bool global_tail_ready;
+  bool use_module_ready;
+  bool user_use_module_ready;
+  bool overload_name_ready;
+} ny_sym_state_t;
 
-static void *ny_lookup_fun_recurse(codegen_t *cg, const char *name, void *ctx) {
-  (void)ctx;
-  return lookup_fun(cg, name);
-}
-
-static void *ny_lookup_global_recurse(codegen_t *cg, const char *name,
-                                      void *ctx) {
-  (void)ctx;
-  return lookup_global(cg, name);
-}
-
-static void *ny_lookup_overload_recurse(codegen_t *cg, const char *name,
-                                        void *ctx) {
-  ny_overload_recurse_ctx_t *ov = (ny_overload_recurse_ctx_t *)ctx;
-  return resolve_overload(cg, name, ov ? ov->argc : 0);
-}
-
-static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
-                                           bool qualified,
-                                           ny_recurse_lookup_fn recurse,
-                                           void *ctx) {
-  if (!cg || !name || !*name || qualified || !recurse)
+static ny_sym_state_t *ny_get_sym_state(const codegen_t *cg) {
+  if (!cg)
     return NULL;
-
-  if (cg->current_module_name && *cg->current_module_name) {
-    char scoped[256];
-    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
-                      name);
-    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
-      void *scoped_res = recurse(cg, scoped, ctx);
-      if (scoped_res)
-        return scoped_res;
+  if (!cg->sym_state) {
+    ny_sym_state_t *s = calloc(1, sizeof(ny_sym_state_t));
+    if (!s) {
+      fprintf(stderr, "oom\n");
+      exit(1);
     }
+    ((codegen_t *)cg)->sym_state = s;
   }
+  return (ny_sym_state_t *)cg->sym_state;
+}
 
-  const char *alias_full = resolve_import_alias(cg, name);
-  if (!alias_full || !*alias_full)
-    return NULL;
-  if (strcmp(alias_full, name) == 0)
-    return NULL;
-  return recurse(cg, alias_full, ctx);
+void ny_sym_state_free(codegen_t *cg) {
+  if (!cg || !cg->sym_state)
+    return;
+  ny_sym_state_t *s = (ny_sym_state_t *)cg->sym_state;
+  if (s->overload_name_next)
+    free(s->overload_name_next);
+  free(s);
+  cg->sym_state = NULL;
 }
 
 static inline uint64_t ny_mix64(uint64_t h, uint64_t v) {
@@ -233,77 +188,23 @@ static inline uint64_t ny_mix64(uint64_t h, uint64_t v) {
   return h;
 }
 
-static uint64_t ny_lookup_stamp(const codegen_t *cg) {
-  if (g_lookup_stamp_cache.ready && g_lookup_stamp_cache.cg == cg &&
-      g_lookup_stamp_cache.module == (void *)cg->module &&
-      g_lookup_stamp_cache.ctx == (void *)cg->ctx &&
-      g_lookup_stamp_cache.fun_data == (const void *)cg->fun_sigs.data &&
-      g_lookup_stamp_cache.global_data == (const void *)cg->global_vars.data &&
-      g_lookup_stamp_cache.alias_data == (const void *)cg->aliases.data &&
-      g_lookup_stamp_cache.import_alias_data ==
-          (const void *)cg->import_aliases.data &&
-      g_lookup_stamp_cache.user_import_alias_data ==
-          (const void *)cg->user_import_aliases.data &&
-      g_lookup_stamp_cache.use_modules_data ==
-          (const void *)cg->use_modules.data &&
-      g_lookup_stamp_cache.user_use_modules_data ==
-          (const void *)cg->user_use_modules.data &&
-      g_lookup_stamp_cache.fun_len == cg->fun_sigs.len &&
-      g_lookup_stamp_cache.global_len == cg->global_vars.len &&
-      g_lookup_stamp_cache.alias_len == cg->aliases.len &&
-      g_lookup_stamp_cache.import_alias_len == cg->import_aliases.len &&
-      g_lookup_stamp_cache.user_import_alias_len ==
-          cg->user_import_aliases.len &&
-      g_lookup_stamp_cache.use_modules_len == cg->use_modules.len &&
-      g_lookup_stamp_cache.user_use_modules_len == cg->user_use_modules.len &&
-      g_lookup_stamp_cache.current_module_name == cg->current_module_name) {
-    return g_lookup_stamp_cache.stamp;
-  }
+static bool ny_user_ctx_is_non_std(const codegen_t *cg) {
+  if (!cg->current_module_name)
+    return true;
+  return strncmp(cg->current_module_name, "std.", 4) != 0 &&
+         strncmp(cg->current_module_name, "lib.", 4) != 0;
+}
 
-  uint64_t h = 0xcbf29ce484222325ULL;
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->module);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->ctx);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->aliases.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->import_aliases.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_import_aliases.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
-  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
-  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
-  h = ny_mix64(h, (uint64_t)cg->aliases.len);
-  h = ny_mix64(h, (uint64_t)cg->import_aliases.len);
-  h = ny_mix64(h, (uint64_t)cg->user_import_aliases.len);
-  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
-  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
-  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
-
-  g_lookup_stamp_cache.cg = cg;
-  g_lookup_stamp_cache.module = (void *)cg->module;
-  g_lookup_stamp_cache.ctx = (void *)cg->ctx;
-  g_lookup_stamp_cache.fun_data = (const void *)cg->fun_sigs.data;
-  g_lookup_stamp_cache.global_data = (const void *)cg->global_vars.data;
-  g_lookup_stamp_cache.alias_data = (const void *)cg->aliases.data;
-  g_lookup_stamp_cache.import_alias_data =
-      (const void *)cg->import_aliases.data;
-  g_lookup_stamp_cache.user_import_alias_data =
-      (const void *)cg->user_import_aliases.data;
-  g_lookup_stamp_cache.use_modules_data = (const void *)cg->use_modules.data;
-  g_lookup_stamp_cache.user_use_modules_data =
-      (const void *)cg->user_use_modules.data;
-  g_lookup_stamp_cache.fun_len = cg->fun_sigs.len;
-  g_lookup_stamp_cache.global_len = cg->global_vars.len;
-  g_lookup_stamp_cache.alias_len = cg->aliases.len;
-  g_lookup_stamp_cache.import_alias_len = cg->import_aliases.len;
-  g_lookup_stamp_cache.user_import_alias_len = cg->user_import_aliases.len;
-  g_lookup_stamp_cache.use_modules_len = cg->use_modules.len;
-  g_lookup_stamp_cache.user_use_modules_len = cg->user_use_modules.len;
-  g_lookup_stamp_cache.current_module_name = cg->current_module_name;
-  g_lookup_stamp_cache.stamp = h;
-  g_lookup_stamp_cache.ready = true;
-  return h;
+static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
+                                         const char *candidate_name) {
+  if (!ny_user_ctx_is_non_std(cg))
+    return false;
+  if (!query || strchr(query, '.'))
+    return false;
+  if (!candidate_name || !*candidate_name)
+    return false;
+  return strncmp(candidate_name, "std.", 4) == 0 ||
+         strncmp(candidate_name, "lib.", 4) == 0;
 }
 
 static inline uint64_t ny_fun_index_version(const codegen_t *cg) {
@@ -321,7 +222,6 @@ static inline uint64_t ny_global_index_version(const codegen_t *cg) {
   h = ny_mix64(h, (uint64_t)cg->global_vars.len);
   return h;
 }
-
 
 static inline uint64_t ny_fun_tail_index_version(const codegen_t *cg) {
   uint64_t h = 0xa0761d6478bd642fULL;
@@ -370,10 +270,6 @@ static inline uint32_t ny_fun_name_len(fun_sig *fs) {
     fs->name_len = 0;
     return 0;
   }
-  /*
-   * Treat cached length as valid only when a matching hash has been computed.
-   * Some code paths clone signatures and reset hash while changing the name.
-   */
   if (fs->name_len && fs->name_hash)
     return fs->name_len;
   size_t n = strlen(fs->name);
@@ -390,14 +286,217 @@ static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
   return fs->name_hash;
 }
 
-/* Build open-addressed exact/tail indexes for both fun/global symbol vectors.
- */
+static uint64_t ny_lookup_stamp(const codegen_t *cg) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_lookup_stamp_cache_t *c = &s->stamp_cache;
+  if (c->ready &&
+      c->module == (const void *)cg->module &&
+      c->ctx == (const void *)cg->ctx &&
+      c->fun_data == (const void *)cg->fun_sigs.data &&
+      c->global_data == (const void *)cg->global_vars.data &&
+      c->alias_data == (const void *)cg->aliases.data &&
+      c->import_alias_data == (const void *)cg->import_aliases.data &&
+      c->user_import_alias_data == (const void *)cg->user_import_aliases.data &&
+      c->use_modules_data == (const void *)cg->use_modules.data &&
+      c->user_use_modules_data == (const void *)cg->user_use_modules.data &&
+      c->fun_len == cg->fun_sigs.len &&
+      c->global_len == cg->global_vars.len &&
+      c->alias_len == cg->aliases.len &&
+      c->import_alias_len == cg->import_aliases.len &&
+      c->user_import_alias_len == cg->user_import_aliases.len &&
+      c->use_modules_len == cg->use_modules.len &&
+      c->user_use_modules_len == cg->user_use_modules.len &&
+      c->current_module_name == cg->current_module_name) {
+    return c->stamp;
+  }
+
+  uint64_t h = 0xcbf29ce484222325ULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->module);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->ctx);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  h = ny_mix64(h, (uint64_t)cg->aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->user_import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+
+  c->module = (const void *)cg->module;
+  c->ctx = (const void *)cg->ctx;
+  c->fun_data = (const void *)cg->fun_sigs.data;
+  c->global_data = (const void *)cg->global_vars.data;
+  c->alias_data = (const void *)cg->aliases.data;
+  c->import_alias_data = (const void *)cg->import_aliases.data;
+  c->user_import_alias_data = (const void *)cg->user_import_aliases.data;
+  c->use_modules_data = (const void *)cg->use_modules.data;
+  c->user_use_modules_data = (const void *)cg->user_use_modules.data;
+  c->fun_len = cg->fun_sigs.len;
+  c->global_len = cg->global_vars.len;
+  c->alias_len = cg->aliases.len;
+  c->import_alias_len = cg->import_aliases.len;
+  c->user_import_alias_len = cg->user_import_aliases.len;
+  c->use_modules_len = cg->use_modules.len;
+  c->user_use_modules_len = cg->user_use_modules.len;
+  c->current_module_name = cg->current_module_name;
+  c->stamp = h;
+  c->ready = true;
+  return h;
+}
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail);
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail);
+static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp);
+static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash);
+
+typedef void *(*ny_recurse_lookup_fn)(codegen_t *cg, const char *name,
+                                      void *ctx);
+
+typedef struct ny_overload_recurse_ctx_t {
+  size_t argc;
+  uint64_t hash;
+} ny_overload_recurse_ctx_t;
+
+static void *ny_lookup_fun_recurse(codegen_t *cg, const char *name, void *ctx) {
+  uint64_t hash = ctx ? *(uint64_t *)ctx : 0;
+  return lookup_fun(cg, name, hash);
+}
+
+static void *ny_lookup_global_recurse(codegen_t *cg, const char *name,
+                                      void *ctx) {
+  (void)ctx;
+  return lookup_global(cg, name);
+}
+
+static void *ny_lookup_overload_recurse(codegen_t *cg, const char *name,
+                                        void *ctx) {
+  ny_overload_recurse_ctx_t *ov = (ny_overload_recurse_ctx_t *)ctx;
+  return resolve_overload(cg, name, ov ? ov->argc : 0, ov ? ov->hash : 0);
+}
+
+static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
+                                           bool qualified,
+                                           ny_recurse_lookup_fn recurse,
+                                           void *ctx) {
+  if (!cg || !name || !*name || qualified || !recurse)
+    return NULL;
+
+  if (cg->current_module_name && *cg->current_module_name) {
+    char scoped[256];
+    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
+                      name);
+    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+      void *scoped_res = recurse(cg, scoped, ctx);
+      if (scoped_res)
+        return scoped_res;
+    }
+  }
+
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (!alias_full || !*alias_full)
+    return NULL;
+  if (strcmp(alias_full, name) == 0)
+    return NULL;
+  return recurse(cg, alias_full, ctx);
+}
+
+static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
+                                  const char *mod, size_t mod_len);
+
+static bool module_is_used(codegen_t *cg, const char *mod, size_t mod_len) {
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  return ny_module_used_lookup(cg, user_only, mod, mod_len);
+}
+
+static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
+                                         uint64_t stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_module_used_index_entry_t *index =
+      user_only ? s->user_use_module : s->use_module;
+  memset(index, 0,
+         sizeof(ny_module_used_index_entry_t) * NY_MODULE_USED_INDEX_SLOTS);
+  char *const *mods_data =
+      user_only ? cg->user_use_modules.data : cg->use_modules.data;
+  size_t mods_len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
+  for (size_t i = 0; i < mods_len; ++i) {
+    const char *used = mods_data[i];
+    if (!used || !*used)
+      continue;
+    size_t used_len = strlen(used);
+    uint64_t hash = ny_hash_name(used, used_len);
+    size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+    for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+      ny_module_used_index_entry_t *e = &index[pos];
+      if (!e->state) {
+        e->state = 1u;
+        e->hash = hash;
+        e->len = (uint32_t)used_len;
+        e->name = used;
+        break;
+      }
+      if (e->hash == hash && e->len == (uint32_t)used_len &&
+          memcmp(e->name, used, used_len) == 0 && e->name[used_len] == '\0') {
+        break;
+      }
+      pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
+    }
+  }
+  if (user_only) {
+    s->user_use_module_stamp = stamp;
+    s->user_use_module_ready = true;
+  } else {
+    s->use_module_stamp = stamp;
+    s->use_module_ready = true;
+  }
+}
+
+static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
+                                  const char *mod, size_t mod_len) {
+  if (!mod || !*mod)
+    return false;
+  uint64_t stamp = ny_module_used_index_version(cg, user_only);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_module_used_index_entry_t *index =
+      user_only ? s->user_use_module : s->use_module;
+  bool ready =
+      user_only ? s->user_use_module_ready : s->use_module_ready;
+  uint64_t idx_stamp =
+      user_only ? s->user_use_module_stamp : s->use_module_stamp;
+  if (!ready || idx_stamp != stamp) {
+    ny_module_used_index_rebuild(cg, user_only, stamp);
+    s = ny_get_sym_state(cg);
+    index = user_only ? s->user_use_module : s->use_module;
+  }
+  uint64_t hash = ny_hash_name(mod, mod_len);
+  size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+    ny_module_used_index_entry_t *e = &index[pos];
+    if (!e->state)
+      return false;
+    if (e->hash == hash && e->len == (uint32_t)mod_len &&
+        memcmp(e->name, mod, mod_len) == 0 && e->name[mod_len] == '\0') {
+      return true;
+    }
+    pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
+  }
+  return false;
+}
+
 #define NY_DEFINE_EXACT_INDEX_REBUILD(                                         \
-    fn_name, index_arr, index_cg, index_stamp, index_ready, vec_field,         \
+    fn_name, index_field, stamp_field, ready_field, vec_field,                 \
     item_type, item_name_expr, item_len_expr, item_hash_expr, entry_type,      \
     entry_name_field, entry_value_field, item_value_expr)                      \
   static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
-    memset(index_arr, 0, sizeof(index_arr));                                   \
+    ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
+    memset(s->index_field, 0, sizeof(s->index_field));                         \
     for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
       item_type *item = &cg->vec_field.data[i];                                \
       const char *name = (item_name_expr);                                     \
@@ -407,7 +506,7 @@ static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
       uint64_t hash = (item_hash_expr);                                        \
       size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
       for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
-        entry_type *e = &index_arr[pos];                                       \
+        entry_type *e = &s->index_field[pos];                                  \
         if (!e->state) {                                                       \
           e->state = 1u;                                                       \
           e->hash = hash;                                                      \
@@ -424,23 +523,20 @@ static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
         pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
       }                                                                        \
     }                                                                          \
-    index_cg = cg;                                                             \
-    index_stamp = stamp;                                                       \
-    index_ready = true;                                                        \
+    s->stamp_field = stamp;                                                    \
+    s->ready_field = true;                                                     \
   }
 
-NY_DEFINE_EXACT_INDEX_REBUILD(ny_fun_exact_index_rebuild, g_fun_exact_index,
-                              g_fun_exact_index_cg, g_fun_exact_index_stamp,
-                              g_fun_exact_index_ready, fun_sigs, fun_sig,
-                              item->name, ny_fun_name_len(item),
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_fun_exact_index_rebuild, fun_exact,
+                              fun_exact_stamp, fun_exact_ready, fun_sigs,
+                              fun_sig, item->name, ny_fun_name_len(item),
                               ny_fun_name_hash(item),
                               ny_fun_exact_index_entry_t, name, value, item)
 
-NY_DEFINE_EXACT_INDEX_REBUILD(ny_global_exact_index_rebuild,
-                              g_global_exact_index, g_global_exact_index_cg,
-                              g_global_exact_index_stamp,
-                              g_global_exact_index_ready, global_vars, binding,
-                              item->name, ny_binding_name_len(item),
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_global_exact_index_rebuild, global_exact,
+                              global_exact_stamp, global_exact_ready,
+                              global_vars, binding, item->name,
+                              ny_binding_name_len(item),
                               ny_binding_name_hash(item),
                               ny_global_exact_index_entry_t, name, value, item)
 
@@ -456,14 +552,15 @@ fun_sig *lookup_fun_exact(codegen_t *cg, const char *name) {
   size_t pos = 0;
 retry:
   stamp = ny_fun_index_version(cg);
-  if (!g_fun_exact_index_ready || g_fun_exact_index_cg != cg ||
-      g_fun_exact_index_stamp != stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->fun_exact_ready || s->fun_exact_stamp != stamp) {
     ny_fun_exact_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
   }
   hash = ny_hash_name(name, len);
   pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
-    ny_fun_exact_index_entry_t *e = &g_fun_exact_index[pos];
+    ny_fun_exact_index_entry_t *e = &s->fun_exact[pos];
     if (!e->state)
       return NULL;
     if (e->hash == hash && e->len == (uint32_t)len &&
@@ -488,18 +585,27 @@ binding *lookup_global_exact(codegen_t *cg, const char *name) {
     return NULL;
   size_t len = strlen(name);
   uint64_t stamp = ny_global_index_version(cg);
-  if (!g_global_exact_index_ready || g_global_exact_index_cg != cg ||
-      g_global_exact_index_stamp != stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->global_exact_ready || s->global_exact_stamp != stamp) {
     ny_global_exact_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
   }
   uint64_t hash = ny_hash_name(name, len);
   size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
-    ny_global_exact_index_entry_t *e = &g_global_exact_index[pos];
+    ny_global_exact_index_entry_t *e = &s->global_exact[pos];
     if (!e->state)
       return NULL;
     if (e->hash == hash && e->len == (uint32_t)len &&
         memcmp(e->name, name, len) == 0 && e->name[len] == '\0') {
+      if (!ny_binding_is_valid(cg, e->value)) {
+        ny_global_exact_index_rebuild(cg, stamp);
+        s = ny_get_sym_state(cg);
+        e = &s->global_exact[pos]; // Simple retry
+        if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
+            memcmp(e->name, name, len) != 0)
+          return NULL;
+      }
       return e->value;
     }
     pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
@@ -539,14 +645,17 @@ static inline uint64_t ny_overload_cache_hash(const char *name, size_t len,
     (e)->state = (value_expr) ? 2u : 1u;                                       \
   } while (0)
 
-static int ny_fun_cache_get(codegen_t *cg, const char *name, fun_sig **out) {
+static int ny_fun_cache_get(codegen_t *cg, const char *name, uint64_t hash,
+                            fun_sig **out) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return -1;
-  uint64_t hash = ny_hash_name(name, len);
+  if (!hash)
+    hash = ny_hash_name(name, len);
   uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_fun_lookup_cache_entry_t *e =
-      &g_fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+      &s->fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
   if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
     return -1;
   if (e->state == 2u) {
@@ -561,13 +670,16 @@ static int ny_fun_cache_get(codegen_t *cg, const char *name, fun_sig **out) {
   return 0;
 }
 
-static void ny_fun_cache_put(codegen_t *cg, const char *name, fun_sig *value) {
+static void ny_fun_cache_put(codegen_t *cg, const char *name, uint64_t hash,
+                             fun_sig *value) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return;
-  uint64_t hash = ny_hash_name(name, len);
+  if (!hash)
+    hash = ny_hash_name(name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_fun_lookup_cache_entry_t *e =
-      &g_fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+      &s->fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
   if (value && !ny_sig_in_current_sigs(cg, value)) {
     e->state = 0u;
     e->value = NULL;
@@ -576,61 +688,90 @@ static void ny_fun_cache_put(codegen_t *cg, const char *name, fun_sig *value) {
   NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
 }
 
-#define NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(fn_name, entry_type, table_name,     \
-                                          out_type)                            \
-  static int fn_name(codegen_t *cg, const char *name, out_type out) {          \
-    size_t len = 0;                                                            \
-    if (!ny_cacheable_name(name, &len))                                        \
-      return -1;                                                               \
-    uint64_t hash = ny_hash_name(name, len);                                   \
-    uint64_t stamp = ny_lookup_stamp(cg);                                      \
-    entry_type *e = &table_name[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];          \
-    if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))                  \
-      return -1;                                                               \
-    if (e->state == 2u) {                                                      \
-      *out = e->value;                                                         \
-      return 1;                                                                \
-    }                                                                          \
-    return 0;                                                                  \
-  }
-
-#define NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(fn_name, entry_type, table_name,     \
-                                          value_type)                          \
-  static void fn_name(codegen_t *cg, const char *name, value_type value) {     \
-    size_t len = 0;                                                            \
-    if (!ny_cacheable_name(name, &len))                                        \
-      return;                                                                  \
-    uint64_t hash = ny_hash_name(name, len);                                   \
-    entry_type *e = &table_name[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];          \
-    NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);                        \
-  }
-
-NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(ny_global_cache_get,
-                                  ny_global_lookup_cache_entry_t,
-                                  g_global_lookup_cache, binding **)
-NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(ny_global_cache_put,
-                                  ny_global_lookup_cache_entry_t,
-                                  g_global_lookup_cache, binding *)
-
-NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET(ny_alias_cache_get,
-                                  ny_alias_lookup_cache_entry_t,
-                                  g_alias_lookup_cache, const char **)
-NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT(ny_alias_cache_put,
-                                  ny_alias_lookup_cache_entry_t,
-                                  g_alias_lookup_cache, const char *)
-
-#undef NY_DEFINE_SIMPLE_LOOKUP_CACHE_GET
-#undef NY_DEFINE_SIMPLE_LOOKUP_CACHE_PUT
-
-static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
-                                 fun_sig **out) {
+static int ny_global_cache_get(codegen_t *cg, const char *name, binding **out) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return -1;
-  uint64_t hash = ny_overload_cache_hash(name, len, argc);
+  uint64_t hash = ny_hash_name(name, len);
   uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_global_lookup_cache_entry_t *e =
+      &s->global_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_binding_is_valid(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_global_cache_put(codegen_t *cg, const char *name,
+                                binding *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  uint64_t hash = ny_hash_name(name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_global_lookup_cache_entry_t *e =
+      &s->global_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_binding_is_valid(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+static int ny_alias_cache_get(codegen_t *cg, const char *name,
+                               const char **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  uint64_t hash = ny_hash_name(name, len);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_alias_lookup_cache_entry_t *e =
+      &s->alias_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_alias_cache_put(codegen_t *cg, const char *name,
+                               const char *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  uint64_t hash = ny_hash_name(name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_alias_lookup_cache_entry_t *e =
+      &s->alias_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
+                                 uint64_t hash, fun_sig **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  if (!hash)
+    hash = ny_overload_cache_hash(name, len, argc);
+  else
+    hash ^= ((uint64_t)argc * 11400714819323198485ULL);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_overload_lookup_cache_entry_t *e =
-      &g_overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+      &s->overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
   if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name) ||
       e->argc != (uint32_t)argc)
     return -1;
@@ -647,13 +788,17 @@ static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
 }
 
 static void ny_overload_cache_put(codegen_t *cg, const char *name, size_t argc,
-                                  fun_sig *value) {
+                                  uint64_t hash, fun_sig *value) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return;
-  uint64_t hash = ny_overload_cache_hash(name, len, argc);
+  if (!hash)
+    hash = ny_overload_cache_hash(name, len, argc);
+  else
+    hash ^= ((uint64_t)argc * 11400714819323198485ULL);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_overload_lookup_cache_entry_t *e =
-      &g_overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+      &s->overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
   if (value && !ny_sig_in_current_sigs(cg, value)) {
     e->state = 0u;
     e->value = NULL;
@@ -667,26 +812,26 @@ static void ny_overload_cache_put(codegen_t *cg, const char *name, size_t argc,
 #undef NY_CACHE_ENTRY_FILL
 
 static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
-  memset(g_overload_name_heads, 0xff, sizeof(g_overload_name_heads));
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  memset(s->overload_name_heads, 0xff, sizeof(s->overload_name_heads));
   size_t len = cg->fun_sigs.len;
-  if (g_overload_name_next_cap < len) {
-    size_t new_cap = g_overload_name_next_cap * 2;
+  if (s->overload_name_next_cap < len) {
+    size_t new_cap = s->overload_name_next_cap * 2;
     if (new_cap < len)
       new_cap = len;
     if (new_cap < 1024)
       new_cap = 1024;
-    int32_t *grown = realloc(g_overload_name_next, sizeof(int32_t) * new_cap);
+    int32_t *grown = realloc(s->overload_name_next, sizeof(int32_t) * new_cap);
     if (!grown) {
-      g_overload_name_index_ready = false;
-      g_overload_name_index_cg = NULL;
-      g_overload_name_index_stamp = 0;
+      s->overload_name_ready = false;
+      s->overload_name_stamp = 0;
       return;
     }
-    g_overload_name_next = grown;
-    g_overload_name_next_cap = new_cap;
+    s->overload_name_next = grown;
+    s->overload_name_next_cap = new_cap;
   }
   for (size_t i = 0; i < len; ++i) {
-    g_overload_name_next[i] = -1;
+    s->overload_name_next[i] = -1;
   }
   for (ssize_t i = (ssize_t)len - 1; i >= 0; --i) {
     fun_sig *fs = &cg->fun_sigs.data[i];
@@ -694,42 +839,167 @@ static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
       continue;
     uint64_t hash = ny_fun_name_hash(fs);
     size_t bucket = (size_t)(hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u));
-    g_overload_name_next[i] = g_overload_name_heads[bucket];
-    g_overload_name_heads[bucket] = (int32_t)i;
+    s->overload_name_next[i] = s->overload_name_heads[bucket];
+    s->overload_name_heads[bucket] = (int32_t)i;
   }
-  g_overload_name_index_cg = cg;
-  g_overload_name_index_stamp = stamp;
-  g_overload_name_index_ready = true;
+  s->overload_name_stamp = stamp;
+  s->overload_name_ready = true;
 }
 
 static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
   uint64_t stamp = ny_fun_index_version(cg);
-  if (!g_overload_name_index_ready || g_overload_name_index_cg != cg ||
-      g_overload_name_index_stamp != stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->overload_name_ready || s->overload_name_stamp != stamp) {
     ny_overload_name_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
   }
-  if (!g_overload_name_index_ready)
+  if (!s->overload_name_ready)
     return -1;
-  return g_overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
+  return s->overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
 }
 
-static bool ny_user_ctx_is_non_std(const codegen_t *cg) {
-  if (!cg->current_module_name)
-    return true;
-  return strncmp(cg->current_module_name, "std.", 4) != 0 &&
-         strncmp(cg->current_module_name, "lib.", 4) != 0;
+#define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
+    fn_name, index_field, stamp_field, ready_field, vec_field,                 \
+    item_type, item_name_expr, item_name_len, entry_type, entry_tail_field,    \
+    entry_value_field, item_value_expr)                                        \
+  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
+    ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
+    memset(s->index_field, 0, sizeof(s->index_field));                         \
+    const char *last_mod = NULL;                                               \
+    size_t last_mod_len = 0;                                                   \
+    bool last_mod_used = false;                                                \
+    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
+      item_type *item = &cg->vec_field.data[i];                                \
+      const char *sig_name = (item_name_expr);                                 \
+      if (!sig_name || !*sig_name)                                             \
+        continue;                                                              \
+      const char *dot = strrchr(sig_name, '.');                                \
+      if (!dot)                                                                \
+        continue;                                                              \
+      size_t mod_len = (size_t)(dot - sig_name);                               \
+      bool mod_used = false;                                                   \
+      if (last_mod && last_mod_len == mod_len &&                               \
+          memcmp(last_mod, sig_name, mod_len) == 0) {                          \
+        mod_used = last_mod_used;                                              \
+      } else {                                                                 \
+        mod_used = module_is_used(cg, sig_name, mod_len);                      \
+        last_mod = sig_name;                                                   \
+        last_mod_len = mod_len;                                                \
+        last_mod_used = mod_used;                                              \
+      }                                                                        \
+      if (!mod_used)                                                           \
+        continue;                                                              \
+      const char *tail = dot + 1;                                              \
+      if (!*tail)                                                              \
+        continue;                                                              \
+      size_t sig_len = (size_t)(item_name_len);                                \
+      size_t len = sig_len - mod_len - 1u;                                     \
+      uint64_t hash = ny_hash_name(tail, len);                                 \
+      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
+      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
+        entry_type *e = &s->index_field[pos];                                  \
+        if (!e->state) {                                                       \
+          e->state = 1u;                                                       \
+          e->hash = hash;                                                      \
+          e->len = (uint32_t)len;                                              \
+          e->entry_tail_field = tail;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        if (e->hash == hash && e->len == (uint32_t)len &&                      \
+            memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
+            e->entry_tail_field[len] == '\0') {                                \
+          break;                                                               \
+        }                                                                      \
+        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
+      }                                                                        \
+    }                                                                          \
+    s->stamp_field = stamp;                                                    \
+    s->ready_field = true;                                                     \
+  }
+
+NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, fun_tail,
+                             fun_tail_stamp, fun_tail_ready, fun_sigs,
+                             fun_sig, item->name, ny_fun_name_len(item),
+                             ny_fun_tail_index_entry_t, tail_name, value, item)
+
+NY_DEFINE_TAIL_INDEX_REBUILD(ny_global_tail_index_rebuild, global_tail,
+                             global_tail_stamp, global_tail_ready, global_vars,
+                             binding, item->name, ny_binding_name_len(item),
+                             ny_global_tail_index_entry_t, tail_name, value,
+                             item)
+
+#undef NY_DEFINE_TAIL_INDEX_REBUILD
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  bool rebuilt_after_stale = false;
+  uint64_t stamp = 0;
+  uint64_t hash = 0;
+  size_t pos = 0;
+retry:
+  stamp = ny_fun_tail_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->fun_tail_ready || s->fun_tail_stamp != stamp) {
+    ny_fun_tail_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  hash = ny_hash_name(tail, len);
+  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_fun_tail_index_entry_t *e = &s->fun_tail[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      if (!ny_sig_in_current_sigs(cg, e->value)) {
+        if (!rebuilt_after_stale) {
+          ny_fun_tail_index_rebuild(cg, stamp);
+          rebuilt_after_stale = true;
+          goto retry;
+        }
+        return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
 }
 
-static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
-                                         const char *candidate_name) {
-  if (!ny_user_ctx_is_non_std(cg))
-    return false;
-  if (!query || strchr(query, '.'))
-    return false;
-  if (!candidate_name || !*candidate_name)
-    return false;
-  return strncmp(candidate_name, "std.", 4) == 0 ||
-         strncmp(candidate_name, "lib.", 4) == 0;
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  uint64_t stamp = ny_global_tail_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->global_tail_ready || s->global_tail_stamp != stamp) {
+    ny_global_tail_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  uint64_t hash = ny_hash_name(tail, len);
+  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_global_tail_index_entry_t *e = &s->global_tail[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      if (!ny_binding_is_valid(cg, e->value)) {
+        ny_global_tail_index_rebuild(cg, stamp);
+        s = ny_get_sym_state(cg);
+        e = &s->global_tail[pos]; // Simple retry
+        if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
+            memcmp(e->tail_name, tail, len) != 0)
+          return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
 }
 
 bool builtin_allowed_comptime(const char *name) {
@@ -805,9 +1075,10 @@ void add_builtins(codegen_t *cg) {
     LLVMValueRef f = LLVMGetNamedFunction(cg->module, impl_name);              \
     if (!f)                                                                    \
       f = LLVMAddFunction(cg->module, impl_name, ty);                          \
-    fun_sig sig_obj;                                                           \
-    ny_fun_sig_init(&sig_obj, rt_name, ty, f, NULL, (int)args, false, false);  \
-    vec_push(&cg->fun_sigs, sig_obj);                                          \
+    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));                \
+    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false);   \
+    sig_obj->is_stable = true;                                                 \
+    vec_push(&cg->fun_sigs, *sig_obj);                                         \
   } while (0);
 
 #define RT_GV(rt_name, p, t, doc)                                              \
@@ -824,9 +1095,11 @@ void add_builtins(codegen_t *cg) {
                  .is_mut = false,                                              \
                  .is_used = false,                                             \
                  .owned = false,                                               \
+                 .is_stable = true,                                            \
                  .type_name = NULL,                                            \
                  .decl_type_name = NULL,                                       \
-                 .name_hash = 0};                                              \
+                 .name_hash = 0,                                               \
+                 .name_len = 0};                                               \
     vec_push(&cg->global_vars, b);                                             \
   } while (0);
 
@@ -955,11 +1228,11 @@ char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
   return NULL;
 }
 
-fun_sig *lookup_fun(codegen_t *cg, const char *name) {
+fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   if (!name || !*name)
     return NULL;
   fun_sig *cached = NULL;
-  int cache_state = ny_fun_cache_get(cg, name, &cached);
+  int cache_state = ny_fun_cache_get(cg, name, hash, &cached);
   if (cache_state == 1)
     return cached;
   if (cache_state == 0)
@@ -976,7 +1249,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
 
   // 2. Current module scope + import alias fallback (unqualified names only)
   res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
-                                      ny_lookup_fun_recurse, NULL);
+                                      ny_lookup_fun_recurse, hash ? &hash : NULL);
   if (res)
     goto end;
   // Check aliases if name has dot
@@ -1005,7 +1278,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
           continue;
         memcpy(resolved, real_mod_name, mod_len);
         memcpy(resolved + mod_len, dot, dot_len + 1);
-        fun_sig *recursive_res = lookup_fun(cg, resolved);
+        fun_sig *recursive_res = lookup_fun(cg, resolved, 0);
         if (resolved != stack_buf)
           free(resolved);
         if (recursive_res) {
@@ -1020,7 +1293,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
         const char *real_mod_name = (const char *)cg->aliases.data[i].stmt_t;
         char buf[256];
         snprintf(buf, sizeof(buf), "%s.%s", real_mod_name, name);
-        fun_sig *s = lookup_fun(cg, buf);
+        fun_sig *s = lookup_fun(cg, buf, 0);
         if (s) {
           res = s;
           goto end;
@@ -1034,7 +1307,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
       goto end;
   }
   if (!res && cg->parent) {
-    fun_sig *p = lookup_fun(cg->parent, name);
+    fun_sig *p = lookup_fun(cg->parent, name, hash);
     if (p && p->value) {
       const char *fn_link_name = LLVMGetValueName(p->value);
       LLVMValueRef my_fn = LLVMGetNamedFunction(cg->module, fn_link_name);
@@ -1042,6 +1315,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name) {
         fun_sig *n = arena_alloc(cg->arena, sizeof(fun_sig));
         *n = *p;
         n->value = my_fn;
+        n->is_stable = true;
         res = n;
         goto end;
       }
@@ -1051,223 +1325,161 @@ end:
   if (res && !ny_sig_in_current_sigs(cg, res) && !cg->parent) {
     res = NULL;
   }
-  ny_fun_cache_put(cg, name, res);
+  ny_fun_cache_put(cg, name, hash, res);
   return res;
 }
 
-static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
-                                         uint64_t stamp) {
-  ny_module_used_index_entry_t *index =
-      user_only ? g_user_use_module_index : g_use_module_index;
-  memset(index, 0,
-         sizeof(ny_module_used_index_entry_t) * NY_MODULE_USED_INDEX_SLOTS);
-  char *const *mods_data =
-      user_only ? cg->user_use_modules.data : cg->use_modules.data;
-  size_t mods_len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
-  for (size_t i = 0; i < mods_len; ++i) {
-    const char *used = mods_data[i];
-    if (!used || !*used)
-      continue;
-    size_t used_len = strlen(used);
-    uint64_t hash = ny_hash_name(used, used_len);
-    size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
-    for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
-      ny_module_used_index_entry_t *e = &index[pos];
-      if (!e->state) {
-        e->state = 1u;
-        e->hash = hash;
-        e->len = (uint32_t)used_len;
-        e->name = used;
-        break;
-      }
-      if (e->hash == hash && e->len == (uint32_t)used_len &&
-          memcmp(e->name, used, used_len) == 0 && e->name[used_len] == '\0') {
-        break;
-      }
-      pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
-    }
+fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
+  if (!name || !*name)
+    return NULL;
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (alias_full) {
+    fun_sig *aliased = resolve_overload(cg, alias_full, argc, 0);
+    if (aliased)
+      return aliased;
   }
-  if (user_only) {
-    g_user_use_module_index_cg = cg;
-    g_user_use_module_index_stamp = stamp;
-    g_user_use_module_index_ready = true;
-  } else {
-    g_use_module_index_cg = cg;
-    g_use_module_index_stamp = stamp;
-    g_use_module_index_ready = true;
-  }
+  return NULL;
 }
 
-static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
-                                  const char *mod, size_t mod_len) {
-  if (!mod || !*mod)
-    return false;
-  uint64_t stamp = ny_module_used_index_version(cg, user_only);
-  ny_module_used_index_entry_t *index =
-      user_only ? g_user_use_module_index : g_use_module_index;
-  bool ready =
-      user_only ? g_user_use_module_index_ready : g_use_module_index_ready;
-  const codegen_t *idx_cg =
-      user_only ? g_user_use_module_index_cg : g_use_module_index_cg;
-  uint64_t idx_stamp =
-      user_only ? g_user_use_module_index_stamp : g_use_module_index_stamp;
-  if (!ready || idx_cg != cg || idx_stamp != stamp) {
-    ny_module_used_index_rebuild(cg, user_only, stamp);
-  }
-  uint64_t hash = ny_hash_name(mod, mod_len);
-  size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
-  for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
-    ny_module_used_index_entry_t *e = &index[pos];
-    if (!e->state)
-      return false;
-    if (e->hash == hash && e->len == (uint32_t)mod_len &&
-        memcmp(e->name, mod, mod_len) == 0 && e->name[mod_len] == '\0') {
-      return true;
-    }
-    pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
-  }
-  return false;
-}
+const char *resolve_import_alias(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  const char *cached = NULL;
+  int cache_state = ny_alias_cache_get(cg, name, &cached);
+  if (cache_state == 1)
+    return cached;
+  if (cache_state == 0)
+    return NULL;
 
-static bool module_is_used(codegen_t *cg, const char *mod, size_t mod_len) {
+  const char *res = NULL;
   bool user_only = ny_user_ctx_is_non_std(cg);
-  return ny_module_used_lookup(cg, user_only, mod, mod_len);
+  binding *data =
+      user_only ? cg->user_import_aliases.data : cg->import_aliases.data;
+  size_t len = user_only ? cg->user_import_aliases.len : cg->import_aliases.len;
+  for (size_t i = 0; i < len; ++i) {
+    if (strcmp(data[i].name, name) == 0) {
+      res = (const char *)data[i].stmt_t;
+      break;
+    }
+  }
+  ny_alias_cache_put(cg, name, res);
+  return res;
 }
 
-#define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
-    fn_name, index_arr, index_cg, index_stamp, index_ready, vec_field,         \
-    item_type, item_name_expr, item_name_len, entry_type, entry_tail_field,    \
-    entry_value_field, item_value_expr)                                        \
-  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
-    memset(index_arr, 0, sizeof(index_arr));                                   \
-    const char *last_mod = NULL;                                               \
-    size_t last_mod_len = 0;                                                   \
-    bool last_mod_used = false;                                                \
-    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
-      item_type *item = &cg->vec_field.data[i];                                \
-      const char *sig_name = (item_name_expr);                                 \
-      if (!sig_name || !*sig_name)                                             \
-        continue;                                                              \
-      const char *dot = strrchr(sig_name, '.');                                \
-      if (!dot)                                                                \
-        continue;                                                              \
-      size_t mod_len = (size_t)(dot - sig_name);                               \
-      bool mod_used = false;                                                   \
-      if (last_mod && last_mod_len == mod_len &&                               \
-          memcmp(last_mod, sig_name, mod_len) == 0) {                          \
-        mod_used = last_mod_used;                                              \
-      } else {                                                                 \
-        mod_used = module_is_used(cg, sig_name, mod_len);                      \
-        last_mod = sig_name;                                                   \
-        last_mod_len = mod_len;                                                \
-        last_mod_used = mod_used;                                              \
-      }                                                                        \
-      if (!mod_used)                                                           \
-        continue;                                                              \
-      const char *tail = dot + 1;                                              \
-      if (!*tail)                                                              \
-        continue;                                                              \
-      size_t sig_len = (size_t)(item_name_len);                                \
-      size_t len = sig_len - mod_len - 1u;                                     \
-      uint64_t hash = ny_hash_name(tail, len);                                 \
-      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
-      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
-        entry_type *e = &index_arr[pos];                                       \
-        if (!e->state) {                                                       \
-          e->state = 1u;                                                       \
-          e->hash = hash;                                                      \
-          e->len = (uint32_t)len;                                              \
-          e->entry_tail_field = tail;                                          \
-          e->entry_value_field = (item_value_expr);                            \
-          break;                                                               \
-        }                                                                      \
-        if (e->hash == hash && e->len == (uint32_t)len &&                      \
-            memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
-            e->entry_tail_field[len] == '\0') {                                \
-          break;                                                               \
-        }                                                                      \
-        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
-      }                                                                        \
-    }                                                                          \
-    index_cg = cg;                                                             \
-    index_stamp = stamp;                                                       \
-    index_ready = true;                                                        \
-  }
-
-NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, g_fun_tail_index,
-                             g_fun_tail_index_cg, g_fun_tail_index_stamp,
-                             g_fun_tail_index_ready, fun_sigs, fun_sig,
-                             item->name, ny_fun_name_len(item),
-                             ny_fun_tail_index_entry_t, tail_name, value, item)
-
-NY_DEFINE_TAIL_INDEX_REBUILD(ny_global_tail_index_rebuild, g_global_tail_index,
-                             g_global_tail_index_cg, g_global_tail_index_stamp,
-                             g_global_tail_index_ready, global_vars, binding,
-                             item->name, ny_binding_name_len(item),
-                             ny_global_tail_index_entry_t, tail_name, value,
-                             item)
-
-#undef NY_DEFINE_TAIL_INDEX_REBUILD
-
-static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail) {
-  if (!tail || !*tail)
+binding *lookup_global(codegen_t *cg, const char *name) {
+  if (!name || !*name)
     return NULL;
-  size_t len = strlen(tail);
-  bool rebuilt_after_stale = false;
-  uint64_t stamp = 0;
-  uint64_t hash = 0;
-  size_t pos = 0;
-retry:
-  stamp = ny_fun_tail_index_version(cg);
-  if (!g_fun_tail_index_ready || g_fun_tail_index_cg != cg ||
-      g_fun_tail_index_stamp != stamp) {
-    ny_fun_tail_index_rebuild(cg, stamp);
+  binding *cached = NULL;
+  int cache_state = ny_global_cache_get(cg, name, &cached);
+  if (cache_state == 1) {
+    cached->is_used = true;
+    return cached;
   }
-  hash = ny_hash_name(tail, len);
-  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
-  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
-    ny_fun_tail_index_entry_t *e = &g_fun_tail_index[pos];
-    if (!e->state)
-      return NULL;
-    if (e->hash == hash && e->len == (uint32_t)len &&
-        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
-      if (!ny_sig_in_current_sigs(cg, e->value)) {
-        if (!rebuilt_after_stale) {
-          ny_fun_tail_index_rebuild(cg, stamp);
-          rebuilt_after_stale = true;
-          goto retry;
+  if (cache_state == 0)
+    return NULL;
+
+  binding *res = NULL;
+  bool qualified = strchr(name, '.') != NULL;
+  if (!cg->global_vars.data)
+    goto end;
+
+  // 1. Precise name match (local or unqualified global)
+  res = lookup_global_exact(cg, name);
+  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
+    goto end;
+  res = NULL;
+
+  // 2. Current module scope + import alias fallback (unqualified names only)
+  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                      ny_lookup_global_recurse, NULL);
+  if (res)
+    goto end;
+  if (!qualified) {
+    res = ny_global_tail_find(cg, name);
+    if (res)
+      goto end;
+  }
+  goto end;
+
+end:
+  if (res)
+    res->is_used = true;
+  ny_global_cache_put(cg, name, res);
+  return res;
+}
+
+fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
+                          uint64_t hash) {
+  if (!name || !*name)
+    return NULL;
+  fun_sig *cached = NULL;
+  int cache_state = ny_overload_cache_get(cg, name, argc, hash, &cached);
+  if (cache_state == 1)
+    return cached;
+  if (cache_state == 0)
+    return NULL;
+
+  fun_sig *best = NULL;
+  bool qualified = strchr(name, '.') != NULL;
+
+  ny_overload_recurse_ctx_t ov_ctx = {.argc = argc, .hash = hash};
+  best = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                       ny_lookup_overload_recurse, &ov_ctx);
+  if (best)
+    goto end;
+  {
+    int best_score = -1;
+    size_t name_len = strlen(name);
+    uint64_t want_hash = hash ? hash : ny_hash_name(name, name_len);
+    int32_t idx = ny_overload_name_bucket_head(cg, want_hash);
+    ny_sym_state_t *s = ny_get_sym_state(cg);
+    while (idx >= 0) {
+      if ((size_t)idx >= cg->fun_sigs.len)
+        break;
+      fun_sig *fs = &cg->fun_sigs.data[idx];
+      idx = s->overload_name_next[idx];
+      if (ny_fun_name_hash(fs) != want_hash)
+        continue;
+      if ((size_t)ny_fun_name_len(fs) != name_len)
+        continue;
+      if (!(fs->name == name || (memcmp(fs->name, name, name_len) == 0 &&
+                                 fs->name[name_len] == '\0')))
+        continue;
+      if (ny_block_implicit_std_symbol(cg, name, fs->name))
+        continue;
+      int score = -1;
+      if (!fs->is_variadic) {
+        if (fs->arity == (int)argc) {
+          best = fs;
+          best_score = 100;
+          break;
         }
-        return NULL;
+        if ((int)argc < fs->arity)
+          score = 80;
+      } else {
+        int fixed = fs->arity - 1;
+        if ((int)argc >= fixed)
+          score = 60 + (int)fixed;
       }
-      return e->value;
+      if (score > best_score) {
+        best_score = score;
+        best = fs;
+      }
     }
-    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
   }
-  return NULL;
-}
+  if (!best && !qualified) {
+    best = ny_fun_tail_find(cg, name);
+  }
+  if (!best && cg->parent) {
+    best = resolve_overload(cg->parent, name, argc, hash);
+  }
 
-static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
-  if (!tail || !*tail)
-    return NULL;
-  size_t len = strlen(tail);
-  uint64_t stamp = ny_global_tail_index_version(cg);
-  if (!g_global_tail_index_ready || g_global_tail_index_cg != cg ||
-      g_global_tail_index_stamp != stamp) {
-    ny_global_tail_index_rebuild(cg, stamp);
+end:
+  if (best && !ny_sig_in_current_sigs(cg, best) && !cg->parent) {
+    best = NULL;
   }
-  uint64_t hash = ny_hash_name(tail, len);
-  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
-  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
-    ny_global_tail_index_entry_t *e = &g_global_tail_index[pos];
-    if (!e->state)
-      return NULL;
-    if (e->hash == hash && e->len == (uint32_t)len &&
-        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
-      return e->value;
-    }
-    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
-  }
-  return NULL;
+  ny_overload_cache_put(cg, name, argc, hash, best);
+  return best;
 }
 
 static int typo_distance_if_relevant(const char *want, const char *cand) {
@@ -1337,6 +1549,10 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
                 {"printf", "Nytrix uses 'print' or 'std.str.fmt'"},
                 {"malloc", "try 'alloc' or 'std.core.mem.alloc'"},
                 {"free", "try 'std.core.mem.free'"},
+                {"VkInstance", "try 'import std.ui.gfx.vulkan'"},
+                {"glfwInit", "try 'import std.ui.glfw'"},
+                {"image_load", "try 'import std.image'"},
+                {"AudioSource", "try 'import std.audio'"},
                 {NULL, NULL}};
   for (int i = 0; common[i].sym; i++) {
     if (strcmp(name, common[i].sym) == 0) {
@@ -1425,150 +1641,4 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
     ny_diag_fix("if '%s' is from stdlib, add 'use std.<module>;' at file top",
                 name);
   }
-}
-
-fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
-  if (!name || !*name)
-    return NULL;
-  const char *alias_full = resolve_import_alias(cg, name);
-  if (alias_full) {
-    fun_sig *aliased = resolve_overload(cg, alias_full, argc);
-    if (aliased)
-      return aliased;
-  }
-  return NULL;
-}
-
-const char *resolve_import_alias(codegen_t *cg, const char *name) {
-  if (!name || !*name)
-    return NULL;
-  const char *cached = NULL;
-  int cache_state = ny_alias_cache_get(cg, name, &cached);
-  if (cache_state == 1)
-    return cached;
-  if (cache_state == 0)
-    return NULL;
-
-  const char *res = NULL;
-  bool user_only = ny_user_ctx_is_non_std(cg);
-  binding *data =
-      user_only ? cg->user_import_aliases.data : cg->import_aliases.data;
-  size_t len = user_only ? cg->user_import_aliases.len : cg->import_aliases.len;
-  for (size_t i = 0; i < len; ++i) {
-    if (strcmp(data[i].name, name) == 0) {
-      res = (const char *)data[i].stmt_t;
-      break;
-    }
-  }
-  ny_alias_cache_put(cg, name, res);
-  return res;
-}
-
-binding *lookup_global(codegen_t *cg, const char *name) {
-  if (!name || !*name)
-    return NULL;
-  binding *cached = NULL;
-  int cache_state = ny_global_cache_get(cg, name, &cached);
-  if (cache_state == 1) {
-    cached->is_used = true;
-    return cached;
-  }
-  if (cache_state == 0)
-    return NULL;
-
-  binding *res = NULL;
-  bool qualified = strchr(name, '.') != NULL;
-  if (!cg->global_vars.data)
-    goto end;
-
-  // 1. Precise name match (local or unqualified global)
-  res = lookup_global_exact(cg, name);
-  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
-    goto end;
-  res = NULL;
-
-  // 2. Current module scope + import alias fallback (unqualified names only)
-  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
-                                      ny_lookup_global_recurse, NULL);
-  if (res)
-    goto end;
-  if (!qualified) {
-    res = ny_global_tail_find(cg, name);
-    if (res)
-      goto end;
-  }
-  goto end;
-
-end:
-  if (res)
-    res->is_used = true;
-  ny_global_cache_put(cg, name, res);
-  return res;
-}
-
-fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc) {
-  if (!name || !*name)
-    return NULL;
-  fun_sig *cached = NULL;
-  int cache_state = ny_overload_cache_get(cg, name, argc, &cached);
-  if (cache_state == 1)
-    return cached;
-  if (cache_state == 0)
-    return NULL;
-
-  fun_sig *best = NULL;
-  bool qualified = strchr(name, '.') != NULL;
-
-  ny_overload_recurse_ctx_t ov_ctx = {.argc = argc};
-  best = ny_lookup_try_scoped_or_alias(cg, name, qualified,
-                                       ny_lookup_overload_recurse, &ov_ctx);
-  if (best)
-    goto end;
-  {
-    int best_score = -1;
-    size_t name_len = strlen(name);
-    uint64_t want_hash = ny_hash_name(name, name_len);
-    int32_t idx = ny_overload_name_bucket_head(cg, want_hash);
-    while (idx >= 0) {
-      if ((size_t)idx >= cg->fun_sigs.len)
-        break;
-      fun_sig *fs = &cg->fun_sigs.data[idx];
-      idx = g_overload_name_next[idx];
-      if (ny_fun_name_hash(fs) != want_hash)
-        continue;
-      if ((size_t)ny_fun_name_len(fs) != name_len)
-        continue;
-      if (!(fs->name == name || (memcmp(fs->name, name, name_len) == 0 &&
-                                 fs->name[name_len] == '\0')))
-        continue;
-      if (ny_block_implicit_std_symbol(cg, name, fs->name))
-        continue;
-      int score = -1;
-      if (!fs->is_variadic) {
-        if (fs->arity == (int)argc) {
-          best = fs;
-          best_score = 100;
-          break;
-        }
-        if ((int)argc < fs->arity)
-          score = 80;
-      } else {
-        int fixed = fs->arity - 1;
-        if ((int)argc >= fixed)
-          score = 60 + (int)fixed;
-      }
-      if (score > best_score) {
-        best_score = score;
-        best = fs;
-      }
-    }
-  }
-  goto end;
-
-end:
-  if (best && !ny_sig_in_current_sigs(cg, best) && !cg->parent) {
-    best = NULL;
-  }
-  ny_overload_cache_put(cg, name, argc, best);
-  return best;
 }

@@ -299,7 +299,7 @@ static void ny_export_aliased_symbol(codegen_t *cg, const char *mod_name,
   snprintf(full_target, sizeof(full_target), "%s.%s", mod_name, target);
   fun_sig *fs = lookup_fun_exact(cg, full_target);
   if (!fs)
-    fs = lookup_fun(cg, target);
+    fs = lookup_fun(cg, target, 0);
   if (fs) {
     fun_sig new_sig = *fs;
     new_sig.name = ny_strdup(alias);

@@ -196,11 +196,18 @@ fn new_context(allocator=0){
    return [allocator]
 }
 
-mut __context = new_context()
+mut __context = 0
+
+fn __init_context(){
+   if(!__context){
+      __context = new_context()
+   }
+   __context
+}
 
 fn context(){
    "Returns process-wide default allocation context."
-   __context
+   __init_context()
 }
 
 fn set_context(ctx){
@@ -211,7 +218,7 @@ fn set_context(ctx){
 
 fn _resolve_context(ctx=0){
    "Internal helper. Resolves explicit context or global default context."
-   if(!ctx){ return __context }
+   if(!ctx){ return __init_context() }
    _ensure_context(ctx)
 }
 

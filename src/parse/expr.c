@@ -288,6 +288,7 @@ static expr_t *parse_primary(parser_t *p) {
     }
     expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
     id->as.ident.name = arena_strndup(p->arena, tok.lexeme, tok.len);
+    id->as.ident.hash = tok.hash;
     return id;
   }
   case NY_T_NUMBER: {
@@ -622,6 +623,8 @@ static expr_t *parse_postfix(parser_t *p) {
         continue;
       }
     } else if (p->cur.kind == NY_T_LPAREN) {
+      if (p->skipped_newline)
+        break;
       parser_advance(p);
       expr_t *call = expr_new(p->arena, NY_E_CALL, p->cur);
       call->as.call.callee = expr;
@@ -678,6 +681,8 @@ static expr_t *parse_postfix(parser_t *p) {
         expr = m;
       }
     } else if (p->cur.kind == NY_T_LBRACK) {
+      if (p->skipped_newline)
+        break;
       parser_advance(p);
       expr_t *idx = expr_new(p->arena, NY_E_INDEX, p->cur);
       idx->as.index.target = expr;

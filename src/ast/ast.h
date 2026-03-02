@@ -177,6 +177,7 @@ struct expr_t {
   union {
     struct {
       const char *name;
+      uint64_t hash;
     } ident;
     literal_t literal;
     struct {

@@ -121,7 +121,6 @@ static inline void assigned_name_add(assigned_name_list *names,
   ny_name_bloom_add(bloom, hash);
 }
 
-
 typedef struct label_binding {
   const char *name;
   LLVMBasicBlockRef bb;
@@ -142,8 +141,6 @@ typedef struct intern_entry {
   uint32_t intern_idx; // 1-based index into interns vector. 0 means empty.
 } intern_entry;
 
-struct braun_ssa_context;
-
 typedef struct codegen_t {
   LLVMModuleRef module;
   LLVMBuilderRef builder;
@@ -151,7 +148,6 @@ typedef struct codegen_t {
   LLVMContextRef ctx;
   program_t *prog;
   arena_t *arena;
-  struct braun_ssa_context *braun;
   bool prog_owned;
   VEC(fun_sig) fun_sigs;
   VEC(binding) global_vars;
@@ -240,6 +236,7 @@ typedef struct codegen_t {
   int64_t current_enum_val;
   struct codegen_t *parent;
   bool skip_stdlib;
+  void *sym_state;
 } codegen_t;
 
 void codegen_init(codegen_t *cg, program_t *prog, arena_t *arena,
@@ -266,9 +263,26 @@ LLVMMetadataRef codegen_debug_loc_scope(codegen_t *cg, token_t tok);
 
 static inline bool ny_sig_in_current_sigs(const codegen_t *cg,
                                           const fun_sig *sig) {
-  if (!cg || !sig || !cg->fun_sigs.data || cg->fun_sigs.len == 0)
+  if (!sig)
+    return false;
+  if (sig->is_stable)
+    return true;
+  if (!cg || !cg->fun_sigs.data || cg->fun_sigs.len == 0)
     return false;
   const fun_sig *begin = cg->fun_sigs.data;
   const fun_sig *end = begin + cg->fun_sigs.len;
   return sig >= begin && sig < end;
+}
+
+static inline bool ny_binding_is_valid(const codegen_t *cg,
+                                       const binding *b) {
+  if (!b)
+    return false;
+  if (b->is_stable)
+    return true;
+  if (!cg || !cg->global_vars.data || cg->global_vars.len == 0)
+    return false;
+  const binding *begin = cg->global_vars.data;
+  const binding *end = begin + cg->global_vars.len;
+  return b >= begin && b < end;
 }

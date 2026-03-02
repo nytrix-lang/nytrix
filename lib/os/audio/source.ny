@@ -1,6 +1,6 @@
 ;; Keywords: sound source
 
-module std.audio.source (
+module std.os.audio.source (
    make_memory_source,
    read, seek, tell, length, format, sample_format,
    SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32
@@ -8,7 +8,7 @@ module std.audio.source (
 
 use std.core *
 use std.core.dict *
-use std.audio.source.memory as memory
+use std.os.audio.source.memory as memory
 
 def SAMPLE_FMT_S16 = 1
 def SAMPLE_FMT_U8 = 2
@@ -109,7 +109,7 @@ if(comptime{__main()}){
    use std.core.test *
    use std.core.mem *
 
-   print("Running std.audio.source tests...")
+   print("Running std.os.audio.source tests...")
 
    fn create_test_data(size){
        def ptr = malloc(size)
@@ -185,5 +185,5 @@ if(comptime{__main()}){
        free(buf)
    }
 
-   print("✓ std.audio.source tests passed")
+   print("✓ std.os.audio.source tests passed")
 }

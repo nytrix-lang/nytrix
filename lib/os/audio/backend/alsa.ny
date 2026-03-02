@@ -1,6 +1,6 @@
 ;; Keywords: audio alsa linux io
 
-module std.audio.backend.alsa (
+module std.os.audio.backend.alsa (
     is_available, init, shutdown,
     stream_open, stream_start, stream_stop,
     write

@@ -29,67 +29,13 @@ static const char *diag_load_source(const char *filename) {
   return g_diag_cached_src;
 }
 
-
 static void diag_print_snippet(token_t tok, const char *color) {
   if (!tok.filename || tok.filename[0] == '<' || tok.line <= 0 || tok.col <= 0)
     return;
   const char *src = diag_load_source(tok.filename);
   if (!src)
     return;
-  const char *line_start = NULL;
-  size_t line_len = 0;
-  if (!ny_extract_line(src, tok.line, &line_start, &line_len))
-    return;
-  if (line_len == 0)
-    return;
-  size_t caret_col = (size_t)(tok.col - 1);
-  if (caret_col > line_len)
-    caret_col = line_len;
-  size_t caret_len = tok.len ? tok.len : 1;
-  if (caret_col + caret_len > line_len)
-    caret_len = line_len > caret_col ? (line_len - caret_col) : 1;
-  const size_t max_len = 200;
-  size_t start = 0;
-  size_t end = line_len;
-  bool prefix = false;
-  bool suffix = false;
-  if (line_len > max_len) {
-    if (caret_col > max_len / 2)
-      start = caret_col - max_len / 2;
-    if (start + max_len > line_len)
-      start = line_len - max_len;
-    end = start + max_len;
-    prefix = start > 0;
-    suffix = end < line_len;
-  }
-  size_t show_len = end - start;
-  char *buf = malloc(show_len + 1);
-  if (!buf)
-    return;
-  for (size_t i = 0; i < show_len; i++) {
-    char c = line_start[start + i];
-    buf[i] = (c == '\t') ? ' ' : c;
-  }
-  buf[show_len] = '\0';
-  int line_no = tok.line;
-  int width = 1;
-  for (int tmp = line_no; tmp >= 10; tmp /= 10)
-    width++;
-  const char *gray = clr(NY_CLR_GRAY);
-  const char *reset = clr(NY_CLR_RESET);
-  const char *mark = clr(color);
-  fprintf(stderr, "  %s%*d%s | %s%s%s\n", gray, width, line_no, reset,
-          prefix ? "..." : "", buf, suffix ? "..." : "");
-  size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
-  fprintf(stderr, "  %s%*s%s | ", gray, width, "", reset);
-  for (size_t i = 0; i < caret_pad; i++)
-    fputc(' ', stderr);
-  fputs(mark, stderr);
-  for (size_t i = 0; i < caret_len; i++)
-    fputc('^', stderr);
-  fputs(reset, stderr);
-  fputc('\n', stderr);
-  free(buf);
+  ny_print_snippet(src, tok.line, tok.col, tok.len, color);
 }
 
 static uint64_t diag_hash(const char *s) { return ny_hash64_cstr(s); }
@@ -149,7 +95,7 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
 }
 
 bool ny_is_stdlib_tok(token_t tok) {
-  if (!tok.filename)
+  if (!tok.filename || tok.filename[0] != '<')
     return false;
   return strcmp(tok.filename, "<stdlib>") == 0 ||
          strcmp(tok.filename, "<repl_std>") == 0;
@@ -168,16 +114,6 @@ static bool ny_diag_emit_unique(const char *level, token_t tok,
   snprintf(key, sizeof(key), "line|%s|%s|%d|%d|%s", level, file, line, col,
            rendered ? rendered : "");
   return diag_mark_seen(key);
-}
-
-static int ny_diag_budget(unsigned kind_count, int v0_budget, int v1_budget) {
-  if (!g_last_primary_emitted)
-    return 0;
-  if (verbose_enabled >= 2)
-    return 1;
-  if (verbose_enabled >= 1)
-    return (int)kind_count < v1_budget;
-  return (int)kind_count < v0_budget;
 }
 
 static void ny_diag_vprint(const char *level, const char *color, token_t tok,
@@ -221,7 +157,7 @@ void ny_diag_warning(token_t tok, const char *fmt, ...) {
 }
 
 void ny_diag_hint(const char *fmt, ...) {
-  if (!ny_diag_budget(g_primary_hint_count, 2, 3))
+  if (!g_last_primary_emitted)
     return;
   va_list ap;
   va_start(ap, fmt);
@@ -239,7 +175,7 @@ void ny_diag_hint(const char *fmt, ...) {
 }
 
 void ny_diag_fix(const char *fmt, ...) {
-  if (!ny_diag_budget(g_primary_fix_count, 1, 2))
+  if (!g_last_primary_emitted)
     return;
   va_list ap;
   va_start(ap, fmt);
@@ -257,7 +193,7 @@ void ny_diag_fix(const char *fmt, ...) {
 }
 
 void ny_diag_note_tok(token_t tok, const char *fmt, ...) {
-  if (!ny_diag_budget(g_primary_note_count, 1, 2))
+  if (!g_last_primary_emitted)
     return;
   va_list ap;
   va_start(ap, fmt);
