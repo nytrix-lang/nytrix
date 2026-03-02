@@ -200,7 +200,7 @@ endfunction()
 
 set(STD_BUNDLE "${CMAKE_BINARY_DIR}/std.ny")
 set(STD_SYMBOLS "${CMAKE_BINARY_DIR}/std_symbols.h")
-file(GLOB_RECURSE STD_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/std/*.ny")
+file(GLOB_RECURSE STD_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/lib/*.ny")
 
 add_custom_command(
   OUTPUT "${STD_BUNDLE}" "${STD_SYMBOLS}"
@@ -363,6 +363,12 @@ if (MSVC)
 else()
   add_compile_options($<$<CONFIG:Debug>:-O0> $<$<CONFIG:Release>:-O3>)
   add_compile_options(-fno-omit-frame-pointer)
+  if (NOT APPLE)
+    find_program(MOLD_EXE NAMES mold)
+    if (MOLD_EXE)
+      add_link_options("-fuse-ld=mold")
+    endif()
+  endif()
 endif()
 add_compile_definitions($<$<CONFIG:Debug>:DEBUG>)
 add_compile_definitions($<$<CONFIG:Release>:NDEBUG>)

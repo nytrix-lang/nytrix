@@ -90,7 +90,7 @@ fn _dict_find_off(d, key){
    mut idx = band(h, mask)
    mut perturb = h
    mut i = 0
-   while(i < cap){
+   while(i < (cap + 32)){
       def off = 16 + idx * 24
       def state = load64(d, off + 16)
       if(state == 0){ return off }

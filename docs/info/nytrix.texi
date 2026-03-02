@@ -43,7 +43,7 @@ self-hosting standard library.
 @chapter Introduction
 
 Nytrix keeps language and runtime surface small, with most features living in
-@file{std/}. There is no implicit prelude; symbols are brought into scope
+@file{lib/}. There is no implicit prelude; symbols are brought into scope
 explicitly via @code{use}.
 
 Execution modes are provided by @command{ny}:
@@ -158,24 +158,24 @@ module local *
 Import forms used across std and runtime tests:
 
 @example
-use std.core
-use std.core *
-use std.str as str
-use std.core (len, append as push)
+use lib.core
+use lib.core *
+use lib.str as str
+use lib.core (len, append as push)
 use "./local.ny" (helper_add as my_add)
 @end example
 
 Standard library layout follows package roots such as
-@file{std/core/lib/*.ny}, @file{std/core/test/*.ny}, and @file{std/core/mod.ny}.
+@file{lib/core/lib/*.ny}, @file{lib/core/test/*.ny}, and @file{lib/core/mod.ny}.
 
 @node Extensible Syntax
 @chapter Extensible Syntax
 
-Nytrix exposes syntax extension through @code{std.core.syntax}.
+Nytrix exposes syntax extension through @code{lib.core.syntax}.
 The API is registry-based and deterministic.
 
 @example
-use std.core.syntax as syntax
+use lib.core.syntax as syntax
 
 mut reg = syntax.new_registry()
 reg = syntax.register_macro_in(reg, "double", handler)

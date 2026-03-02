@@ -19,10 +19,12 @@ typedef struct {
   const char *input_file;
   const char *output_file;
   const char *command_string;
+  const char *entry_name;
   const char *argv0;
   int opt_level;
   const char *opt_pipeline;
   const char *emit_ir_path;
+  const char *emit_bc_path;
   const char *emit_asm_path;
   bool ir_include_std;
   int verbose;

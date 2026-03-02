@@ -45,3 +45,5 @@ const char *ny_src_root(void);
 char *ny_get_executable_dir(void);
 
 #endif
+
+void ny_print_snippet(const char *src, int line, int col, int len, const char *color);

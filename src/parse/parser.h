@@ -15,6 +15,7 @@ typedef struct parser_t {
   int error_count;
   int error_limit;
   bool had_error;
+  bool skipped_newline;
   int last_error_line;
   int last_error_col;
   char last_error_msg[256];

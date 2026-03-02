@@ -169,27 +169,22 @@ static binding *scope_lookup_no_mark(scope *scopes, size_t depth,
   return scope_lookup_impl(scopes, depth, name, false);
 }
 
+static void scope_cache_clear(scope_lookup_cache_ref_t c) {
+  *c.lookup_name = NULL;
+  *c.lookup_name_len = 0;
+  *c.lookup_hit = NULL;
+  *c.lookup_vars_len = 0;
+  *c.lookup_vars_data = NULL;
+  *c.lookup_miss_name = NULL;
+  *c.lookup_miss_name_len = 0;
+  *c.lookup_miss_hash = 0;
+  *c.lookup_miss_vars_len = 0;
+  *c.lookup_miss_vars_data = NULL;
+}
+
 static void scope_lookup_cache_reset(scope *sc) {
-  sc->lookup_name = NULL;
-  sc->lookup_name_len = 0;
-  sc->lookup_hit = NULL;
-  sc->lookup_vars_len = 0;
-  sc->lookup_vars_data = NULL;
-  sc->lookup_miss_name = NULL;
-  sc->lookup_miss_name_len = 0;
-  sc->lookup_miss_hash = 0;
-  sc->lookup_miss_vars_len = 0;
-  sc->lookup_miss_vars_data = NULL;
-  sc->lookup_name_no_mark = NULL;
-  sc->lookup_name_len_no_mark = 0;
-  sc->lookup_hit_no_mark = NULL;
-  sc->lookup_vars_len_no_mark = 0;
-  sc->lookup_vars_data_no_mark = NULL;
-  sc->lookup_miss_name_no_mark = NULL;
-  sc->lookup_miss_name_len_no_mark = 0;
-  sc->lookup_miss_hash_no_mark = 0;
-  sc->lookup_miss_vars_len_no_mark = 0;
-  sc->lookup_miss_vars_data_no_mark = NULL;
+  scope_cache_clear(scope_lookup_cache_ref(sc, true));
+  scope_cache_clear(scope_lookup_cache_ref(sc, false));
 }
 
 void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
@@ -233,7 +228,7 @@ void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
   }
   binding b = {
       name,      v,         stmt,      is_slot,           is_mut, false, false,
-      type_name, type_name, want_hash, (uint32_t)name_len};
+      false,     type_name, type_name, want_hash, (uint32_t)name_len};
   vec_push(&scopes[depth].vars, b);
   ny_scope_bloom_add(&scopes[depth], want_hash);
   scope_lookup_cache_reset(&scopes[depth]);

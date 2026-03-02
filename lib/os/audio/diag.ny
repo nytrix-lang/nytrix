@@ -1,13 +1,13 @@
 ;; Keywords: sound diagnostics backend
 
-module std.audio.diag (
+module std.os.audio.diag (
    probe, probe_text, print_probe
 )
 
 use std.core *
 use std.core.dict *
 use std.os *
-use std.audio.backend as backend
+use std.os.audio.backend as backend
 
 fn _yn(v){
    "Internal helper for `yn`."
@@ -31,6 +31,6 @@ fn probe_text(){
 }
 
 fn print_probe(){
-   "Prints std.audio diagnostics summary."
-   print("std.audio.diag:", probe_text())
+   "Prints std.os.audio diagnostics summary."
+   print("std.os.audio.diag:", probe_text())
 }

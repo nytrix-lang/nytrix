@@ -1,7 +1,7 @@
 use std.core *
 use std.text.io *
-use std.audio *
-use std.audio.source.synth *
+use std.os.audio *
+use std.os.audio.source.synth *
 use std.os.time *
 use std.os *
 

@@ -558,8 +558,8 @@ fn bind_texture(tex_id){
 
 fn _update_default_mvp(win){
    "Recalculates the default orthographic projection matrix for the window."
-   def w = float(get(win, 5, 800))
-   def h = float(get(win, 6, 600))
+   def w = float(dict_get(win, "w", 800))
+   def h = float(dict_get(win, "h", 600))
    def proj = mat4_ortho(0.0, float(w), 0.0, float(h), -1.0, 1.0)
    set_mvp(proj)
 }
@@ -641,7 +641,7 @@ fn _create_instance(){
    store32(app_info, 1, 40)
    store32(app_info, 0x00401000, 44)
 
-   def exts_list = ui_glfw.get_required_instance_extensions()
+   def exts_list = ui_glfw.required_extensions()
    def ext_count = get(exts_list, 0)
    def ext_ptrs = get(exts_list, 1)
 
@@ -654,8 +654,15 @@ fn _create_instance(){
    store64_raw(create_info, ext_ptrs, 56)
    mut inst_ptr = sys_malloc(8)
    store32(inst_ptr, 0, 0) store32(inst_ptr, 0, 4)
-   if(_is_debug()){ print(f"Vulkan: Creating instance with wrapper...") }
-   def res = create_instance(create_info, 0, inst_ptr)
+   if(_is_debug()){
+      print("Vulkan: Creating instance with wrapper...")
+      print("Vulkan: resolve vk_create_instance = " + to_str(vk_create_instance))
+   }
+   def res = vk_create_instance(create_info, 0, inst_ptr)
+   if(_is_debug()){
+      print("Vulkan: create_instance returned " + to_str(res))
+      print("Vulkan: inst_ptr[0] = " + to_str(load64(inst_ptr, 0)))
+   }
    if(res != 0){
       if(_is_debug()){ print(f"Vulkan: Instance creation failed with code {res}") }
       return false
@@ -673,14 +680,14 @@ fn _create_instance(){
 
 fn _create_surface(win){
    "Creates the native window surface (WSI)."
-   def window = get(win, 22, 0)
+   def window = dict_get(win, "handle", 0)
    if(!window){
       if(_is_debug()){ print("Vulkan: No window handle") }
       return false
    }
    mut surf_ptr = sys_malloc(8)
-   store32(surf_ptr, 0, 0) store32(surf_ptr, 0, 4)
-   def res = ui_glfw.create_vulkan_surface(_instance, window, 0, surf_ptr)
+   store32(surf_ptr, 0, 0); store32(surf_ptr, 0, 4)
+   def res = ui_glfw.create_surface(_instance, window, 0, surf_ptr)
    if(res != 0){
       if(_is_debug()){ print(f"Vulkan: Surface creation failed with code {res}") }
       return false
@@ -1538,7 +1545,8 @@ fn begin_frame(){
    if(_window_ref){
       _update_default_mvp(_window_ref)
       if(_total_frames % 60 == 0 && _is_debug()){
-         def w = get(_window_ref, 5) def h = get(_window_ref, 6)
+         def w = dict_get(_window_ref, "w", 800)
+         def h = dict_get(_window_ref, "h", 600)
          print(f"Vulkan Frame {_total_frames}: Window {w}x{h}, Extent {_swapchain_extent_w}x{_swapchain_extent_h}")
       }
    }

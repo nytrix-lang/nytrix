@@ -3,6 +3,7 @@
 #include "base/util.h"
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
+#include <llvm-c/IRReader.h>
 #include <llvm-c/Core.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,7 +80,7 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path) {
     std_hash ^= ny_hash_string(stdlib_path);
   }
   static char path[1024];
-  snprintf(path, sizeof(path), "%s/%lx_%lx.bc", dir, src_hash, std_hash);
+  snprintf(path, sizeof(path), "%s/%lx_%lx.ll", dir, src_hash, std_hash);
   return strdup(path);
 }
 
@@ -89,23 +90,34 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
     return false;
   LLVMMemoryBufferRef buf = NULL;
   char *msg = NULL;
+  if (access(cache_path, R_OK) != 0) return false;
   if (LLVMCreateMemoryBufferWithContentsOfFile(cache_path, &buf, &msg) != 0) {
-    if (msg)
-      LLVMDisposeMessage(msg);
+    if (msg) LLVMDisposeMessage(msg);
     return false;
   }
-  if (LLVMParseBitcodeInContext(ctx, buf, out_module, &msg) != 0) {
-    if (msg)
-      LLVMDisposeMessage(msg);
-    LLVMDisposeMemoryBuffer(buf);
+  if (LLVMParseIRInContext(ctx, buf, out_module, &msg) != 0) {
+    if (msg) LLVMDisposeMessage(msg);
     return false;
   }
-  LLVMDisposeMemoryBuffer(buf);
   return true;
 }
 
 bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
   if (!cache_path || !module)
     return false;
-  return LLVMWriteBitcodeToFile(module, cache_path) == 0;
+  char *err = NULL;
+  if (LLVMPrintModuleToFile(module, cache_path, &err) != 0) {
+    if (err) LLVMDisposeMessage(err);
+    return false;
+  }
+  return true;
+}
+
+bool ny_jit_cache_load_ir(const char *cache_path, LLVMContextRef ctx,
+                          LLVMModuleRef *out_module) {
+  return ny_jit_cache_load(cache_path, ctx, out_module);
+}
+
+bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module) {
+  return ny_jit_cache_save(cache_path, module);
 }

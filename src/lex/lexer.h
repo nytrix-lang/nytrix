@@ -88,6 +88,7 @@ typedef struct token_t {
   token_kind kind;
   const char *lexeme;
   size_t len;
+  uint64_t hash;
   int line;
   int col;
   const char *filename;
@@ -101,9 +102,12 @@ typedef struct lexer_t {
   int col;
   size_t split_pos;
   const char *split_filename;
+  bool skipped_newline;
 } lexer_t;
 
 void lexer_init(lexer_t *lx, const char *src, const char *filename);
 token_t lexer_next(lexer_t *lx);
+char *dup_string_token(token_t t);
+char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok);
 
 #endif

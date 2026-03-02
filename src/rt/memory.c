@@ -6,6 +6,14 @@
 #include <malloc.h>
 #endif
 
+static int g_mem_trace = -1;
+static inline bool mem_trace_enabled(void) {
+  if (g_mem_trace >= 0) return g_mem_trace != 0;
+  const char *env = getenv("NYTRIX_MEM_TRACE");
+  g_mem_trace = (env && *env == '1') ? 1 : 0;
+  return g_mem_trace != 0;
+}
+
 #ifndef NDEBUG
 static uint64_t g_alloc = 0;
 static uint64_t g_free = 0;
@@ -41,6 +49,17 @@ __attribute__((destructor)) static void __stats(void) {
 #else
 #define NY_TRACK_LIVE_ALLOCS 0
 #endif
+
+static inline void *ny_aligned_alloc(size_t alignment, size_t size) {
+#ifdef _WIN32
+  return _aligned_malloc(size, alignment);
+#else
+  void *p = NULL;
+  if (posix_memalign(&p, alignment, size) != 0)
+    return NULL;
+  return p;
+#endif
+}
 
 static inline void ny_aligned_free(void *p) {
 #ifdef _WIN32
@@ -142,28 +161,36 @@ __attribute__((destructor)) static void quarantine_drain(void) {
 int64_t __malloc(int64_t size) {
   if (is_int(size)) size >>= 1;
   if (size < 0) return 0;
-  
+
   size_t n = (size_t)size;
   size_t body = (n + 15) & ~15ULL;
   size_t total = body + 32;
-  
-  void *p = NULL;
-  if (posix_memalign(&p, 16, total) != 0) return 0;
+
+  void *p = ny_aligned_alloc(16, total);
   if (!p) return 0;
-  
+
   memset(p, 0, total);
   *(uint64_t *)p = NY_MAGIC1;
   *(uint64_t *)((char *)p + 8) = NY_MAGIC2;
   *(uint64_t *)((char *)p + 16) = (uint64_t)body;
-  
-  return (int64_t)(uintptr_t)((char *)p + 32);
-}
 
+  int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
+  if (mem_trace_enabled() && total > 1024 * 1024) {
+    fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n", (void *)(uintptr_t)res, body, total);
+  }
+  return res;
+}
 
 int64_t __free(int64_t ptr) {
   if (is_heap_ptr(ptr)) {
     void *base = (char *)(uintptr_t)ptr - 32;
-    free(base);
+    if (mem_trace_enabled()) {
+      size_t body = *(uint64_t *)((char *)base + 16);
+      if (body > 1024 * 1024) {
+        fprintf(stderr, "[mem] large free  %p (body=%zu)\n", (void *)(uintptr_t)ptr, body);
+      }
+    }
+    ny_aligned_free(base);
   } else if (is_v_flt(ptr)) {
     // Light float object (slab allocated)
     __flt_free(ptr);
@@ -197,22 +224,21 @@ int64_t __realloc(int64_t p_val, int64_t newsz) {
   if (is_int(newsz)) newsz >>= 1;
   if (newsz < 0) newsz = 0;
   if (!is_heap_ptr(p_val)) return __malloc(newsz << 1 | 1);
-  
+
   char *cap_ptr = (char *)(uintptr_t)p_val - 16;
   size_t old_cap = *(uint64_t *)cap_ptr;
   if ((size_t)newsz <= old_cap) return p_val;
-  
+
   int64_t res = __malloc(newsz << 1 | 1);
   if (!res) return 0;
-  
+
   memcpy((void *)(uintptr_t)res, (void *)(uintptr_t)p_val, old_cap);
   // Transfer tag
   *(int64_t *)((char *)(uintptr_t)res - 8) = *(int64_t *)((char *)(uintptr_t)p_val - 8);
-  
+
   __free(p_val);
   return res;
 }
-
 
 int64_t __memcpy(int64_t dst, int64_t src, int64_t n) {
   if (is_int(n))

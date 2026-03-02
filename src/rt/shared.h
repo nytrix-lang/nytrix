@@ -30,7 +30,7 @@
 #define NY_MAGIC3 0xDEADBEEFCAFEBABEULL
 
 #define is_int(v) ((v) & 1)
-#define is_ptr(v) ((v) != 0 && ((v) & 7) == 0 && (uintptr_t)(v) > 0x1000)
+#define is_ptr(v) (((v) & 1) == 0 && (uintptr_t)(v) > 0x1000)
 
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
@@ -236,7 +236,11 @@ static inline bool is_valid_heap_ptr(int64_t v) {
 static inline int64_t rt_tag_v(int64_t v) {
   return (int64_t)(((uint64_t)v << 1) | 1);
 }
-static inline int64_t rt_untag_v(int64_t v) { return (v & 1) ? (v >> 1) : v; }
+static inline int64_t rt_untag_v(int64_t v) {
+  if (v & 1) return (v >> 1);
+  if ((v & 7) == 6) return (v >> 3);
+  return v;
+}
 #if UINTPTR_MAX == 0xffffffff
 
 static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
@@ -278,7 +282,7 @@ static inline int is_v_flt(int64_t v) {
 }
 
 static inline int is_ny_obj(int64_t v) {
-  if (!is_ptr(v)) return 0; // is_ptr already checks (v & 7) == 0
+  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
   bool heap = is_heap_ptr(v);
   if (!heap) {
     // For non-heap (static) objects, we only mandate 8-byte alignment and tag check.
@@ -289,7 +293,7 @@ static inline int is_ny_obj(int64_t v) {
 }
 
 static inline int is_v_str(int64_t v) {
-  if (!is_ptr(v)) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
   if (!is_heap_ptr(v)) {
     if (!rt_addr_readable((uintptr_t)v - 16, 24)) return 0;
   }
@@ -298,7 +302,7 @@ static inline int is_v_str(int64_t v) {
 }
 
 static inline int is_v_ok(int64_t v) {
-  if (!is_ptr(v)) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
   if (!is_heap_ptr(v)) {
     if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
   }
@@ -307,7 +311,7 @@ static inline int is_v_ok(int64_t v) {
 }
 
 static inline int is_v_err(int64_t v) {
-  if (!is_ptr(v)) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
   if (!is_heap_ptr(v)) {
     if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
   }

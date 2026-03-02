@@ -14,6 +14,8 @@
 #ifdef _WIN32
 #include <io.h>
 #define access _access
+#include <stdlib.h>
+#define realpath(N,R) _fullpath((R),(N),_MAX_PATH)
 #endif
 
 typedef struct ny_std_mod {
@@ -310,16 +312,6 @@ static const char *strip_std_prefix(const char *name) {
   if (!name)
     return name;
   if (strncmp(name, "std.", 4) == 0)
-    return name + 4;
-  return name;
-}
-
-static const char *strip_pkg_prefix(const char *name) {
-  if (!name)
-    return name;
-  if (strncmp(name, "std.", 4) == 0)
-    return name + 4;
-  if (strncmp(name, "lib.", 4) == 0)
     return name + 4;
   return name;
 }
@@ -668,13 +660,13 @@ typedef struct {
 static int mod_priority(const char *path) {
   if (!path)
     return 100;
-  if (strstr(path, "std/core/base.ny"))
+  if (strstr(path, "core/base.ny"))
     return 0;
-  if (strstr(path, "std/core/mod.ny"))
+  if (strstr(path, "core/mod.ny"))
     return 1;
-  if (strstr(path, "std/core/primitives.ny"))
+  if (strstr(path, "core/primitives.ny"))
     return 1;
-  if (strstr(path, "std/core/reflect.ny"))
+  if (strstr(path, "core/reflect.ny"))
     return 2;
   return 100;
 }
@@ -713,54 +705,6 @@ static void mod_list_add(mod_list *list, const char *path, const char *name,
                                            .is_std = is_std};
 }
 
-static void scan_stmt_uses(mod_list *list, stmt_t *s, const char *base_dir,
-                           bool prefer_local) {
-  if (!s)
-    return;
-  if (s->kind == NY_S_USE) {
-    const char *raw = s->as.use.module;
-    bool explicit_std =
-        (strcmp(raw, "std") == 0) || (strncmp(raw, "std.", 4) == 0);
-    bool explicit_lib =
-        (strcmp(raw, "lib") == 0) || (strncmp(raw, "lib.", 4) == 0);
-    bool explicit_pkg = explicit_std || explicit_lib;
-    bool is_std = false;
-    char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
-    if (path) {
-      if (!(list->skip_std && is_std)) {
-        char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
-        mod_list_add(list, path, mname, is_std);
-        if (!is_std)
-          free(mname);
-      }
-      free(path);
-      return;
-    }
-    if (strcmp(raw, "std") == 0) {
-      return;
-    }
-    if ((!prefer_local || explicit_std) && (explicit_std || !explicit_pkg)) {
-      const char *pkg_name = strip_pkg_prefix(raw);
-      if (is_package_name(pkg_name)) {
-        if (list->skip_std)
-          return;
-        ny_std_init_modules();
-        for (size_t k = 0; k < ny_std_mods_len; ++k) {
-          if (strcmp(ny_std_mods[k].package, pkg_name) == 0) {
-            mod_list_add(list, ny_std_mods[k].path, ny_std_mods[k].name, true);
-          }
-        }
-      }
-    }
-    return;
-  }
-  if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      scan_stmt_uses(list, s->as.module.body.data[i], base_dir, prefer_local);
-    }
-  }
-}
-
 static void scan_dependencies(mod_list *list, size_t idx) {
   if (list->entries[idx].processed)
     return;
@@ -771,17 +715,56 @@ static void scan_dependencies(mod_list *list, size_t idx) {
     NY_LOG_V2("Failed to read file: %s\n", list->entries[idx].path);
     return;
   }
-  NY_LOG_V3("Parsing file: %s (size: %zu)\n", list->entries[idx].path,
-            strlen(txt));
-  parser_t parser;
-  parser_init(&parser, txt, list->entries[idx].path);
-  program_t prog = parse_program(&parser);
+
   char *base_dir = dir_from_path(list->entries[idx].path);
   bool prefer_local = !list->entries[idx].is_std;
-  for (size_t i = 0; i < prog.body.len; ++i) {
-    scan_stmt_uses(list, prog.body.data[i], base_dir, prefer_local);
+
+  // Optimized scanner for 'use' and 'module'
+  lexer_t lx;
+  lexer_init(&lx, txt, list->entries[idx].path);
+  int depth = 0;
+  for (;;) {
+    token_t t = lexer_next(&lx);
+    if (t.kind == NY_T_EOF) break;
+
+process_tok:
+    if (t.kind == NY_T_LBRACE || t.kind == NY_T_LPAREN || t.kind == NY_T_LBRACK) {
+      depth++;
+    } else if (t.kind == NY_T_RBRACE || t.kind == NY_T_RPAREN || t.kind == NY_T_RBRACK) {
+      if (depth > 0) depth--;
+    } else if (depth == 0) {
+      if (t.kind == NY_T_MODULE) {
+        // Skip module name (could be multiple tokens like std.core.set)
+        for (;;) {
+          t = lexer_next(&lx);
+          if (t.kind != NY_T_IDENT && t.kind != NY_T_DOT) break;
+        }
+        if (t.kind != NY_T_EOF) goto process_tok;
+      } else if (t.kind == NY_T_USE) {
+        token_t mod_tok = lexer_next(&lx);
+        if (mod_tok.kind == NY_T_IDENT || mod_tok.kind == NY_T_STRING) {
+          token_t next_tok;
+          char *raw = parse_use_name(&lx, &mod_tok, &next_tok);
+          if (raw) {
+            bool is_std = false;
+            char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
+            if (path) {
+              if (!(list->skip_std && is_std)) {
+                char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
+                mod_list_add(list, path, mname, is_std);
+                if (!is_std) free(mname);
+              }
+              free(path);
+            }
+            free(raw);
+          }
+          t = next_tok;
+          if (t.kind != NY_T_EOF) goto process_tok;
+        }
+      }
+    }
   }
-  program_free(&prog, parser.arena);
+
   free(base_dir);
   free(txt);
 }
@@ -819,8 +802,14 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     const char **seed_modules = modules;
     size_t seed_count = module_count;
     if (seed_count == 0 && mode != STD_MODE_NONE) {
-      for (size_t j = 0; j < ny_std_mods_len; ++j) {
-        mod_list_add(&mods, ny_std_mods[j].path, ny_std_mods[j].name, true);
+      int core_idx = ny_std_find_module_by_name("std.core");
+      if (core_idx >= 0) {
+        mod_list_add(&mods, ny_std_mods[core_idx].path, ny_std_mods[core_idx].name, true);
+      } else {
+        // Fallback to all if core not found
+        for (size_t j = 0; j < ny_std_mods_len; ++j) {
+          mod_list_add(&mods, ny_std_mods[j].path, ny_std_mods[j].name, true);
+        }
       }
     }
     for (size_t i = 0; i < seed_count; ++i) {
@@ -894,6 +883,14 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     free(prebuilt_src);
   }
   for (size_t i = 0; i < mods.len; ++i) {
+    if (entry_path && mods.entries[i].path) {
+      char abs_entry[4096], abs_mod[4096];
+      if (realpath(entry_path, abs_entry) && realpath(mods.entries[i].path, abs_mod)) {
+        if (strcmp(abs_entry, abs_mod) == 0) continue;
+      } else if (strcmp(mods.entries[i].path, entry_path) == 0) {
+        continue;
+      }
+    }
     if (verbose)
       printf("Including module: %s (%s)\n", mods.entries[i].name,
              mods.entries[i].path);
@@ -931,6 +928,10 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
         append_text(&bundle, &total, &cap, wrapped);
         free(wrapped);
       }
+      char use_stmt[512];
+      sprintf(use_stmt, "use %s *", mods.entries[i].name);
+      append_text(&bundle, &total, &cap, use_stmt);
+      append_text(&bundle, &total, &cap, "\n");
       free(txt);
     }
   }

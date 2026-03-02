@@ -1,6 +1,6 @@
 ;; Keywords: audio jack linux io
 
-module std.audio.backend.jack (
+module std.os.audio.backend.jack (
     is_available, init, shutdown,
     stream_open, stream_start, stream_stop,
     write
@@ -9,6 +9,7 @@ module std.audio.backend.jack (
 use std.core *
 use std.core.dict *
 use std.os *
+use std.os.time *
 use std.os.ffi *
 
 def JACK_NO_START_SERVER = 0x01
@@ -401,7 +402,7 @@ fn write(handle, buf, frames, frame_bytes=4){
       if(writable <= 0){
          stalls += 1
          if(stalls > 5000){ return false }
-         sleep_ms(1)
+         msleep(1)
          continue
       }
       stalls = 0
@@ -429,7 +430,7 @@ fn write(handle, buf, frames, frame_bytes=4){
       def need = chunk * 4
       def wrote = call3(_jack_ringbuffer_write, rb, tmp, need)
       if(wrote <= 0){
-         sleep_ms(1)
+         msleep(1)
          continue
       }
       done += wrote / 4

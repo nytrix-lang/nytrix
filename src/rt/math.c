@@ -17,7 +17,7 @@ int64_t __rand64(void) {
     __asm__ volatile("rdrand %0; setc %b1" : "=r"(val), "=q"(ok));
   }
 #endif
-  if (!ok) {
+  if (!ok) { // TODO proper way for non arch
     __rng_state += 0x9e3779b97f4a7c15ULL;
     uint64_t z = __rng_state;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
