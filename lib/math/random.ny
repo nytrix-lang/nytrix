@@ -12,11 +12,11 @@ use std.math.float *
 fn rand(){
    "Return a random 63-bit positive integer."
    def r = __rand64() & 0x7FFFFFFFFFFFFFFF
-   from_int(r) ;; Convert raw to tagged int
+   from_int(r) ; Convert raw to tagged int
 }
 
 fn seed(n){
-   "Seed the PRNG."
+   "Sets the random seed for the pseudo-random number generator to `n`."
    return __srand(n)
 }
 
@@ -51,7 +51,7 @@ fn choice(xs){
 }
 
 fn shuffle(xs){
-   "Shuffle the list xs in place."
+   "Shuffles the elements of list `xs` in-place using the Fisher-Yates algorithm."
    def n = len(xs)
    if(n <= 1){ return xs }
    mut i = n - 1
@@ -66,7 +66,7 @@ fn shuffle(xs){
 }
 
 fn sample(xs, k){
-   "Return a k-length list of unique elements chosen from xs."
+   "Returns a new list containing `k` unique elements randomly chosen from sequence `xs`."
    def n = len(xs)
    if(k > n){ k = n }
    mut res = list(8)

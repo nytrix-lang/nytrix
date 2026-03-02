@@ -32,7 +32,9 @@ fn _dict_str_eq(a, b){
 
 fn _dict_key_eq(a, b){
    "Internal: key equality with string fast-path."
-   if(is_str(a) && is_str(b)){ return _dict_str_eq(a, b) }
+   if(is_str(a) && is_str(b)){ 
+      return _dict_str_eq(a, b)
+   }
    return (a == b)
 }
 
@@ -51,8 +53,6 @@ fn _dict_hash(x){
       return band(h, 2147483647)
    }
    if(is_ptr(x)){
-      ;; Use the pointer address itself, shifted to avoid alignment bits.
-      ;; to_int(x) returns the raw machine pointer if x is an aligned pointer.
       return band(bshr(to_int(x), 3), 2147483647)
    }
    return 0
@@ -60,14 +60,14 @@ fn _dict_hash(x){
 
 fn _dict_new(cap){
    "Internal: allocates a new dictionary with the given capacity."
-   ;; Header: count(8) + cap(8) = 16 bytes
-   ;; Each slot: key(8) + val(8) + state(8, 0=empty, 1=filled) = 24 bytes
+   ; Header: count(8) + cap(8) = 16 bytes
+   ; Each slot: key(8) + val(8) + state(8, 0=empty, 1=filled) = 24 bytes
    def size = 16 + cap * 24
    mut p = __malloc(size)
    memset(p, 0, size)
-   store64(p, 101, -8) ;; tag
-   store64(p, 0, 0)   ;; count
-   store64(p, cap, 8) ;; cap
+   store8(p, 101, -8) ; tag
+   store64(p, 0, 0)   ; count (tagged 0)
+   store64(p, cap, 8) ; cap
    p
 }
 
@@ -87,17 +87,17 @@ fn _dict_find_off(d, key){
    def cap = load64(d, 8)
    def mask = cap - 1
    def h = _dict_hash(key)
-   mut idx = band(h, mask)
+   mut idx = h & mask
    mut perturb = h
    mut i = 0
    while(i < (cap + 32)){
       def off = 16 + idx * 24
       def state = load64(d, off + 16)
-      if(state == 0){ return off }
+      if(!state){ return off }
       if(_dict_key_eq(load64(d, off), key)){ return off }
 
-      perturb = bshr(perturb, 5)
-      idx = band(idx * 5 + perturb + 1, mask)
+      perturb = perturb >> 5
+      idx = (idx * 5 + perturb + 1) & mask
       i = i + 1
    }
    return -1
@@ -112,12 +112,11 @@ fn _dict_resize(d){
    mut i = 0
    while(i < old_cap){
       def off = 16 + i * 24
-      if(load64(d, off + 16) == 1){
-         dict_set(nd, load64(d, off), load64(d, off + 8))
+      if(load64(d, off + 16)){
+         nd = dict_set(nd, load64(d, off), load64(d, off + 8))
       }
       i = i + 1
    }
-   ;; Note: we return the new dictionary object.
    nd
 }
 
@@ -125,34 +124,33 @@ fn dict_set(d, key, val){
    "Inserts or updates a key/value pair in dictionary `d`."
    if(!is_dict(d)){ return d }
 
-   ;; Resize if load factor > 2/3
-   mut count = load64(d, 0)
-   def cap = load64(d, 8)
-   if(count * 3 > cap * 2){
-      d = _dict_resize(d)
-      count = load64(d, 0)
+   def tc = load64(d, 0)
+   def tca = load64(d, 8)
+   if(tc * 3 > tca * 2){
+      mut nd = _dict_resize(d)
+      return dict_set(nd, key, val)
    }
 
    def off = _dict_find_off(d, key)
    if(off < 0){ panic("Dictionary overflow") }
 
    def state = load64(d, off + 16)
-   if(state == 0){
+   if(!state){
       store64(d, key, off)
       store64(d, val, off + 8)
       store64(d, 1, off + 16)
-      store64(d, count + 1, 0)
+      store64(d, tc + 1, 0) ; Increment tagged count
    } else {
       store64(d, val, off + 8)
    }
    d
 }
 
-fn dict_get(d, key, default=nil){
+fn dict_get(d, key, default=0){
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
    if(!is_dict(d)){ return default }
    def off = _dict_find_off(d, key)
-   if(off < 0 || load64(d, off + 16) == 0){ return default }
+   if(off < 0 || !load64(d, off + 16)){ return default }
    load64(d, off + 8)
 }
 
@@ -160,7 +158,7 @@ fn dict_has(d, key){
    "Returns **true** if `key` exists in dictionary `d`."
    if(!is_dict(d)){ return false }
    def off = _dict_find_off(d, key)
-   if(off < 0 || load64(d, off + 16) == 0){ return false }
+   if(off < 0 || !load64(d, off + 16)){ return false }
    true
 }
 
@@ -168,9 +166,9 @@ fn dict_del(d, key){
    "Removes `key` from dictionary `d`. Returns the dictionary."
    if(!is_dict(d)){ return d }
    def off = _dict_find_off(d, key)
-   if(off >= 0 && load64(d, off + 16) == 1){
+   if(off >= 0 && load64(d, off + 16)){
       store64(d, 0, off + 16)
-      store64(d, load64(d, 0) - 1, 0)
+      store64(d, load64(d, 0) - 1, 0) ; Decrement tagged count
    }
    d
 }
@@ -185,7 +183,7 @@ fn dict_clone(d){
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
-      if(load64(d, off + 16) == 1){
+      if(load64(d, off + 16)){
          store64(nd, load64(d, off), off)
          store64(nd, load64(d, off + 8), off + 8)
          store64(nd, 1, off + 16)
@@ -202,7 +200,7 @@ fn dict_merge(dst, src){
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
-      if(load64(src, off + 16) == 1){
+      if(load64(src, off + 16)){
          dst = dict_set(dst, load64(src, off), load64(src, off + 8))
       }
       i = i + 1
@@ -220,15 +218,14 @@ fn _dict_pair(a, b){
 
 fn dict_items(d){
    "Returns a list of [key, value] pairs."
-   if(!is_dict(d)){ return list(0) }
-   def count = load64(d, 0)
-   mut out = list(count)
+   if(!is_dict(d)){ return list() }
+   mut out = list()
    def cap = load64(d, 8)
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
-      if(load64(d, off + 16) == 1){
-         append(out, _dict_pair(load64(d, off), load64(d, off + 8)))
+      if(load64(d, off + 16)){
+         out = append(out, _dict_pair(load64(d, off), load64(d, off + 8)))
       }
       i = i + 1
    }
@@ -237,15 +234,14 @@ fn dict_items(d){
 
 fn dict_keys(d){
    "Returns a list of keys."
-   if(!is_dict(d)){ return list(0) }
-   def count = load64(d, 0)
-   mut out = list(count)
+   if(!is_dict(d)){ return list() }
+   mut out = list()
    def cap = load64(d, 8)
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
-      if(load64(d, off + 16) == 1){
-         append(out, load64(d, off))
+      if(load64(d, off + 16)){
+         out = append(out, load64(d, off))
       }
       i = i + 1
    }
@@ -254,15 +250,14 @@ fn dict_keys(d){
 
 fn dict_values(d){
    "Returns a list of values."
-   if(!is_dict(d)){ return list(0) }
-   def count = load64(d, 0)
-   mut out = list(count)
+   if(!is_dict(d)){ return list() }
+   mut out = list()
    def cap = load64(d, 8)
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
-      if(load64(d, off + 16) == 1){
-         append(out, load64(d, off + 8))
+      if(load64(d, off + 16)){
+         out = append(out, load64(d, off + 8))
       }
       i = i + 1
    }

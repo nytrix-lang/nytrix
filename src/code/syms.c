@@ -1078,6 +1078,7 @@ void add_builtins(codegen_t *cg) {
     fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));                \
     ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false);   \
     sig_obj->is_stable = true;                                                 \
+    sig_obj->owned = false;                                                    \
     vec_push(&cg->fun_sigs, *sig_obj);                                         \
   } while (0);
 

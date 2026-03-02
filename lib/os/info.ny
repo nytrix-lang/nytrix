@@ -15,17 +15,17 @@ use std.os.io *
 use std.os.path *
 
 fn _is_windows(){
-   "Internal helper."
+   "Internal: returns true if the host operating system is Windows."
    eq(__os_name(), "windows")
 }
 
 fn _is_macos(){
-   "Internal helper."
+   "Internal: returns true if the host operating system is macOS."
    eq(__os_name(), "macos")
 }
 
 fn _is_linux(){
-   "Internal helper."
+   "Internal: returns true if the host operating system is Linux."
    eq(__os_name(), "linux")
 }
 
@@ -57,7 +57,7 @@ mut _system_info_loaded = false
 mut _system_info_cache = 0
 
 fn _linux_cpuinfo_text(){
-   "Internal helper."
+   "Internal: retrieves and caches the contents of `/proc/cpuinfo` on Linux."
    if(!_is_linux()){ return "" }
    if(_linux_cpuinfo_loaded){ return _linux_cpuinfo_cache }
    _linux_cpuinfo_cache = _read_text(normalize("/proc/cpuinfo"))
@@ -190,7 +190,7 @@ fn _find_prefixed_line_value(text, prefix){
       if(j == m){
          mut k = line_start + j
          while(k < line_end){
-            if(load8(text, k) == 58){ ;; ':'
+            if(load8(text, k) == 58){ ; ':'
                k += 1
                break
             }
@@ -207,7 +207,7 @@ fn _find_prefixed_line_value(text, prefix){
 }
 
 fn _format_mem_usage_kb(total_kb, free_kb){
-   "Internal helper."
+   "Internal: formats memory usage as 'Used/Total MB' given values in kilobytes."
    if(total_kb <= 0){ return "" }
    def used_mb = (total_kb - free_kb) / 1024
    def total_mb = total_kb / 1024
@@ -309,7 +309,7 @@ fn _macos_cpu_features_raw(){
    if(str_len(out) > 0 && str_len(out2) > 0){ return strip(out + " " + out2) }
    if(str_len(out) > 0){ return strip(out) }
    if(str_len(out2) > 0){ return strip(out2) }
-   ;; Apple Silicon/Generic: collect enabled hw.optional feature flags.
+   ; Apple Silicon/Generic: collect enabled hw.optional feature flags.
    def all = _cmd_out("sysctl", ["hw.optional"])
    if(str_len(all) == 0){ return "" }
    def lines = split(all, "\n")
@@ -323,7 +323,7 @@ fn _macos_cpu_features_raw(){
             def key = strip(slice(ln, 0, idx, 1))
             def val = strip(slice(ln, idx + 1, str_len(ln), 1))
             if(eq(val, "1")){
-               ;; Clean up prefix (hw.optional. => "")
+               ; Clean up prefix (hw.optional. => "")
                def clean = slice(key, 12, str_len(key), 1)
                feats = append(feats, clean)
             }
@@ -454,7 +454,7 @@ fn cpu_feature_map(){
    "
    if(_cpu_feature_map_loaded){ return dict_clone(_cpu_feature_map_cache) }
    mut m = dict(64)
-   ;; Ensure curated/common aliases are always present and normalized.
+   ; Ensure curated/common aliases are always present and normalized.
    def curated = cpu_features()
    mut j = 0
    while(j < len(curated)){
@@ -591,7 +591,7 @@ fn cpu_name(){
    Linux uses /proc, macOS uses sysctl, Windows uses wmic/powershell."
    if(_cpu_name_loaded){ return _cpu_name_cache }
    mut out = ""
-   if(load8(__os_name(), 0) == 108){ ;; 'l' - linux
+   if(load8(__os_name(), 0) == 108){ ; 'l' - linux
       def ls = _cmd_out("lscpu", [])
       if(str_len(ls) > 0){
          def lines = split(ls, "\n")
@@ -623,14 +623,14 @@ fn cpu_name(){
             }
          }
       }
-   } elif(load8(__os_name(), 0) == 109){ ;; 'm' - macos
+   } elif(load8(__os_name(), 0) == 109){ ; 'm' - macos
       mut mac_out = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
       if(str_len(mac_out) > 0){ out = _first_line(mac_out) }
       if(str_len(out) == 0){
          mac_out = _cmd_out("sysctl", ["-n", "hw.model"])
          if(str_len(mac_out) > 0){ out = _first_line(mac_out) }
       }
-   } elif(load8(__os_name(), 0) == 119){ ;; 'w' - windows
+   } elif(load8(__os_name(), 0) == 119){ ; 'w' - windows
       mut win_out = _cmd_out("wmic", ["cpu", "get", "Name", "/value"])
       if(str_len(win_out) > 0){
          def lines = split(win_out, "\n")
@@ -741,16 +741,16 @@ fn gpu_name(){
    Linux uses sysfs ; macOS uses system_profiler (cached); Windows uses wmic/powershell (cached)."
    if(_gpu_name_loaded){ return _gpu_name_cache }
 
-   ;; Fast path for macOS to avoid system_profiler unless explicitly requested or needed
+   ; Fast path for macOS to avoid system_profiler unless explicitly requested or needed
    if(_is_macos()){
-      ;; Check for Apple Silicon GPU via sysctl (fast)
+      ; Check for Apple Silicon GPU via sysctl (fast)
       def soc = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
       if(str_contains(soc, "Apple M")){
          _gpu_name_cache = "Apple GPU (" + strip(soc) + ")"
          _gpu_name_loaded = true
          return _gpu_name_cache
       }
-      ;; Fallback to slower system_profiler only if NYTRIX_GPU_DEEP_SCAN is set
+      ; Fallback to slower system_profiler only if NYTRIX_GPU_DEEP_SCAN is set
       if(_gpu_deep_scan_enabled()){
          def out = _cmd_out("system_profiler", ["SPDisplaysDataType", "-detailLevel", "mini"])
          if(str_len(out) > 0){
@@ -778,7 +778,7 @@ fn gpu_name(){
    }
 
    if(_is_windows()){
-      ;; Avoid slow wmic/powershell unless deep scan enabled
+      ; Avoid slow wmic/powershell unless deep scan enabled
       if(_gpu_deep_scan_enabled()){
          mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
          if(str_len(out) > 0){
@@ -806,7 +806,7 @@ fn gpu_name(){
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
-   ;; 2. Fallback: DRM sysfs (card0-card7)
+   ; 2. Fallback: DRM sysfs (card0-card7)
    def max_cards = _gpu_scan_cards_limit()
    mut i = 0
    while(i < max_cards){
@@ -825,7 +825,7 @@ fn gpu_name(){
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
-   ;; 3. Fallback: PCI bus sysfs (scan /sys/bus/pci/devices)
+   ; 3. Fallback: PCI bus sysfs (scan /sys/bus/pci/devices)
    def pci_path = normalize("/sys/bus/pci/devices")
    if(file_exists(pci_path)){
       def entries = list_dir(pci_path)
@@ -835,7 +835,7 @@ fn gpu_name(){
          def class_file = normalize(pci_path + "/" + entry + "/class")
          if(file_exists(class_file)){
             def class_hex = strip(_read_text(class_file))
-            ;; Display controller: 0x030000, 3D controller: 0x030200
+            ; Display controller: 0x030000, 3D controller: 0x030200
             if(startswith(class_hex, "0x0300") || startswith(class_hex, "0x0302")){
                def vf = normalize(pci_path + "/" + entry + "/vendor")
                def df = normalize(pci_path + "/" + entry + "/device")

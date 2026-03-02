@@ -12,7 +12,7 @@ use std.core *
 use std.math *
 
 fn quat(x=0, y=0, z=0, w=1){
-   "Creates a quaternion [x, y, z, w]."
+   "Creates a 4-component quaternion [x, y, z, w]. Defaults to identity if no arguments provided."
    def q = list(4)
    store_item(q, 0, x)
    store_item(q, 1, y)
@@ -23,17 +23,17 @@ fn quat(x=0, y=0, z=0, w=1){
 }
 
 fn quat_identity(){
-   "Creates an identity quaternion [0, 0, 0, 1]."
+   "Returns a new identity quaternion [0, 0, 0, 1] representing no rotation."
    quat(0, 0, 0, 1)
 }
 
 fn quat_dot(a, b){
-   "Returns the dot product of quaternions `a` and `b`."
+   "Returns the scalar dot product of quaternions `a` and `b`."
    get(a,0)*get(b,0) + get(a,1)*get(b,1) + get(a,2)*get(b,2) + get(a,3)*get(b,3)
 }
 
 fn quat_norm(q){
-   "Returns the normalized version of quaternion `q`."
+   "Returns a new normalized (unit-length) quaternion derived from `q`. If `q` has zero length, returns identity."
    def d2 = quat_dot(q, q)
    if(d2 == 0){ return quat_identity() }
    def inv_l = 1 / sqrt(d2)
@@ -41,7 +41,7 @@ fn quat_norm(q){
 }
 
 fn quat_mul(a, b){
-   "Multiplies two quaternions `a` and `b`."
+   "Returns the Hamilton product of quaternions `a` and `b` (composing rotations `a` after `b`)."
    def ax = get(a,0) def ay = get(a,1) def az = get(a,2) def aw = get(a,3)
    def bx = get(b,0) def by = get(b,1) def bz = get(b,2) def bw = get(b,3)
    quat(
@@ -53,7 +53,7 @@ fn quat_mul(a, b){
 }
 
 fn quat_slerp(a, b, t){
-   "Spherical linear interpolation between quaternions `a` and `b` by factor `t`."
+   "Performs spherical linear interpolation (SLERP) between quaternions `a` and `b` by factor `t` [0, 1]."
    mut cos_theta = quat_dot(a, b)
    mut b_rot = b
    if(cos_theta < 0){
@@ -61,7 +61,7 @@ fn quat_slerp(a, b, t){
       b_rot = quat(-get(b,0), -get(b,1), -get(b,2), -get(b,3))
    }
    if(cos_theta > 0.9995){
-      ;; Linear interpolation for very close angles
+      ; Linear interpolation for very close angles
       def it = 1 - t
       return quat_norm(quat(
          get(a,0)*it + get(b_rot,0)*t,
@@ -84,7 +84,7 @@ fn quat_slerp(a, b, t){
 }
 
 fn quat_to_mat4(q){
-   "Converts a quaternion to a 4x4 rotation matrix."
+   "Converts quaternion `q` to a 4x4 rotation matrix representation."
    def nq = quat_norm(q)
    def x = get(nq, 0) def y = get(nq, 1) def z = get(nq, 2) def w = get(nq, 3)
    def xx = x*x def yy = y*y def zz = z*z
@@ -105,7 +105,7 @@ fn quat_to_mat4(q){
 }
 
 fn mul(a, b){
-   "Generic multiplication: supports quaternion-quaternion products."
+   "Generic multiplication operator supporting quaternion-quaternion products."
    if(is_list(a) && len(a) == 4 && is_list(b) && len(b) == 4){
       return quat_mul(a, b)
    }
@@ -119,8 +119,8 @@ if(comptime{__main()}){
    def q1 = q.quat_identity()
    assert(get(q1, 3) == 1, "quat identity w")
 
-   def q2 = q.quat(1, 0, 0, 0) ;; 180 deg around X?
-   ;; No, quat(sin(th/2)*ax, ..., cos(th/2))
+   def q2 = q.quat(1, 0, 0, 0) ; 180 deg around X?
+   ; No, quat(sin(th/2)*ax, ..., cos(th/2))
 
    def qm = q1 * q2
    assert(get(qm, 0) == 1, "quat mul x")

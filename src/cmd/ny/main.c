@@ -169,10 +169,12 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
 }
 
 int main(int argc, char **argv, char **envp) {
+/*
   signal(SIGSEGV, handle_segv);
   signal(SIGABRT, handle_segv);
   signal(SIGFPE, handle_segv);
   signal(SIGILL, handle_segv);
+*/
   ny_options opt;
   ny_options_init(&opt);
   ny_options_parse(&opt, argc, argv);

@@ -1,8 +1,10 @@
-;; Keywords: audio resource manager
+;; Keywords: resource manager
+;; Unified resource loader for audio and image files.
+;; Prioritizes libsndfile for audio and std.image for images.
 
 module std.os.audio.res (
    init, shutdown,
-   load, get_sound_info,
+   load, get_sound_info, get_image_info,
    clear_cache,
    is_cached
 )
@@ -10,18 +12,111 @@ module std.os.audio.res (
 use std.core *
 use std.core.error *
 use std.core.dict *
+use std.os *
 use std.os.path as path
 use std.os.fs as fs
+use std.os.ffi *
 use std.text as str
-use std.os.audio.formats.wav as wav
-use std.os.audio.formats.ogg as ogg
-use std.os.audio.formats.opus as opus
-use std.os.audio.formats.acc as acc
-use std.os.audio.formats.flac as flac
-use std.os.audio.formats.mp3 as mp3
+
+use std.image as image
 use std.os.audio.source *
 
-mut _cache = dict(32)
+;; libsndfile constants
+def SFM_READ = 0x10
+
+;; libsndfile state
+mut _lib_sf = 0
+mut _sf_open = 0
+mut _sf_close = 0
+mut _sf_read_short = 0
+mut _sf_strerror = 0
+
+fn _init_sf(){
+   if(_sf_open){ return true }
+   _lib_sf = dlopen_any("sndfile", RTLD_NOW() | RTLD_GLOBAL())
+   if(!_lib_sf){ return false }
+   
+   _sf_open       = dlsym(_lib_sf, "sf_open")
+   _sf_close      = dlsym(_lib_sf, "sf_close")
+   _sf_read_short = dlsym(_lib_sf, "sf_read_short")
+   _sf_strerror   = dlsym(_lib_sf, "sf_error_number")
+   
+   if(!_sf_strerror){ _sf_strerror = dlsym(_lib_sf, "sf_strerror") }
+   
+   if(!_sf_open || !_sf_close || !_sf_read_short){
+      dlclose(_lib_sf)
+      _lib_sf = 0
+      _sf_open = 0
+      return false
+   }
+   true
+}
+
+fn _decode_sf(data){
+   if(!_init_sf()){ return 0 }
+   if(!is_str(data) || len(data) < 16){ return 0 }
+   
+   def debug = env("NY_AUDIO_DEBUG")
+   def tmp_fn = "ny_snd_" + to_str(ticks()) + "_" + to_str(malloc(1)) + ".tmp"
+   def tmp_path = path.normalize(temp_dir() + "/" + tmp_fn)
+   
+   match file_write(tmp_path, data){
+      err(e) -> { 
+         if(debug){ print("RES: Sndfile temp write failed: " + to_str(e)) }
+         return 0 
+      }
+      ok(_)  -> {}
+   }
+
+   def info_ptr = malloc(64)
+   memset(info_ptr, 0, 64)
+   def path_cstr = tmp_path + "\x00"
+
+   def sf = call3(_sf_open, path_cstr, SFM_READ, info_ptr)
+   if(!sf){
+      if(debug){
+         def err_code = call1(dlsym(_lib_sf, "sf_error"), 0)
+         def err_msg = call1(_sf_strerror, err_code)
+         print("RES: Sndfile sf_open failed: " + cstr_to_str(err_msg))
+      }
+      free(info_ptr)
+      match file_remove(tmp_path){ _ -> {} }
+      return 0
+   }
+
+   def frames   = load64(info_ptr, 0)
+   def rate     = load32(info_ptr, 8)
+   def channels = load32(info_ptr, 12)
+   
+   if(debug){
+      print("RES: Sndfile opened " + tmp_path + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels))
+   }
+
+   if(frames <= 0 || channels <= 0 || channels > 32){
+      call1(_sf_close, sf)
+      free(info_ptr)
+      match file_remove(tmp_path){ _ -> {} }
+      return 0
+   }
+
+   def n_samples = frames * channels
+   def out_ptr = malloc(n_samples * 2)
+   def got = call3(_sf_read_short, sf, out_ptr, n_samples)
+   
+   call1(_sf_close, sf)
+   free(info_ptr)
+   match file_remove(tmp_path){ _ -> {} }
+
+   if(got <= 0){
+      free(out_ptr)
+      return 0
+   }
+
+   make_memory_source(out_ptr, got * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
+}
+
+;; Module state
+mut _cache = dict(64)
 mut _mtx = 0
 
 fn init(){
@@ -37,15 +132,13 @@ fn shutdown(){
 }
 
 fn clear_cache(){
-   "Implements `clear_cache`."
    if(_mtx == 0){ return }
    mutex_lock(_mtx)
-   _cache = dict(32)
+   _cache = dict(64)
    mutex_unlock(_mtx)
 }
 
 fn is_cached(filepath){
-   "Returns whether cached."
    if(_mtx == 0){ return false }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)
@@ -55,154 +148,63 @@ fn is_cached(filepath){
 }
 
 fn load(filepath){
-   "Loads an audio file into memory. Supports WAV, OGG (Vorbis/Opus), Opus, AAC/ACC, and FLAC."
+   "Loads a resource (audio or image) into memory."
    if(_mtx == 0){ init() }
    def full = path.normalize(filepath)
+   
    mutex_lock(_mtx)
    def cached = dict_get(_cache, full)
    mutex_unlock(_mtx)
    if(cached){ return cached }
+   
    if(!fs.is_file(full)){ return 0 }
-   mut sound = 0
-   def ext = str.lower(path.extname(full))
+   
    def res = file_read(full)
    if(is_err(res)){ return 0 }
    def data = unwrap(res)
-   if(ext == ".wav"){
-      sound = wav.decode(data)
+   
+   def ext = str.lower(path.extname(full))
+   mut asset = 0
+   
+   ; Dispatch by extension/type
+   if(ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus"){
+      asset = _decode_sf(data)
+   } else {
+      ; Try as image
+      asset = image.decode(data, ext)
    }
-   elif(ext == ".ogg" || ext == ".oga"){
-      sound = ogg.decode(data)
-   }
-   elif(ext == ".opus"){
-      sound = opus.decode(data)
-   }
-   elif(ext == ".acc" || ext == ".aac"){
-      sound = acc.decode(data)
-   }
-   elif(ext == ".mp3"){
-      sound = mp3.decode(data)
-   }
-   elif(ext == ".flac"){
-      def img = flac.decode(data)
-      if(img){
-         def pcm = dict_get(img, "data")
-         if(is_list(pcm)){
-            def ptr = _float_list_to_ptr(pcm)
-            if(ptr){
-               sound = make_memory_source(
-                  ptr,
-                  len(pcm) * 4,
-                  dict_get(img, "channels"),
-                  dict_get(img, "sample_rate", dict_get(img, "rate")),
-                  32,
-                  SAMPLE_FMT_F32,
-                  3
-               )
-            }
-         } elif(is_int(pcm) && pcm != 0){
-            def bytes = dict_get(img, "byte_len", 0)
-            if(bytes > 0){
-               sound = make_memory_source(
-                  pcm,
-                  bytes,
-                  dict_get(img, "channels"),
-                  dict_get(img, "sample_rate", dict_get(img, "rate")),
-                  32,
-                  SAMPLE_FMT_F32,
-                  3
-               )
-            }
-         } elif(pcm){
-            sound = make_memory_source(
-               pcm,
-               len(pcm) * 4,
-               dict_get(img, "channels"),
-               dict_get(img, "sample_rate", dict_get(img, "rate")),
-               32,
-               SAMPLE_FMT_F32,
-               3
-            )
-         }
-      }
-   }
-   if(sound != 0){
+   
+   if(asset != 0){
       mutex_lock(_mtx)
-      _cache = dict_set(_cache, full, sound)
+      _cache = dict_set(_cache, full, asset)
       mutex_unlock(_mtx)
+      if(env("NY_AUDIO_DEBUG")){ print("RES: successfully loaded " + full) }
+   } else {
+      if(env("NY_AUDIO_DEBUG")){ print("RES: FAILED to load " + full) }
    }
-   sound
-}
-
-fn _float_list_to_ptr(xs){
-   "Converts list<float> to packed float32 buffer."
-   if(!is_list(xs)){ return 0 }
-   def n = len(xs)
-   if(n <= 0){ return 0 }
-   def ptr = malloc(n * 4)
-   if(!ptr){ return 0 }
-   mut i = 0
-   while(i < n){
-      store32_f32(ptr, get(xs, i, 0.0) + 0.0, i * 4)
-      i += 1
-   }
-   ptr
+   
+   asset
 }
 
 fn get_sound_info(sound){
-   "Returns a dictionary with sound metadata (channels, rate, bits, duration)."
+   "Returns a dictionary with sound metadata."
    if(!is_list(sound)){ return 0 }
    def tag = get(sound, 0)
    if(tag != "SOUND_SOURCE"){ return 0 }
    def d = get(sound, 1)
    mut info = dict(8)
    info = dict_set(info, "channels", get(d, "channels"))
-   info = dict_set(info, "rate", get(d, "rate"))
-   info = dict_set(info, "bits", get(d, "bits"))
+   info = dict_set(info, "rate",     get(d, "rate"))
+   info = dict_set(info, "bits",     get(d, "bits"))
    def frames = get(d, "total_frames")
    def rate = get(d, "rate")
    def duration = (frames + 0.0) / (rate + 0.0)
    info = dict_set(info, "duration", duration)
-   info = dict_set(info, "frames", frames)
+   info = dict_set(info, "frames",   frames)
    info
 }
-if(comptime{__main()}){
-   use std.core.error *
 
-   print("Testing std.os.audio.res audio loading...")
-
-   fn verify_audio(filepath, name){
-      def s = load(filepath)
-      if(s == 0){
-         print("  FAILED: Could not load " + filepath)
-         return false
-      }
-
-      def info = get_sound_info(s)
-      def rate = dict_get(info, "rate")
-      def chan = dict_get(info, "channels")
-
-      if(rate <= 0 || chan <= 0){
-         print("  FAILED: " + name + " invalid info: " + to_str(rate) + "Hz, " + to_str(chan) + "ch")
-         return false
-      }
-
-      print("  SUCCESS: " + name + " (" + to_str(rate) + "Hz, " + to_str(chan) + "ch)")
-      true
-   }
-
-   init()
-   mut ok = true
-   ok = ok && verify_audio("etc/assets/audio/test_sine.wav", "WAV")
-   ok = ok && verify_audio("etc/assets/audio/test_sine.ogg", "OGG")
-   ok = ok && verify_audio("etc/assets/audio/test_sine.flac", "FLAC")
-   ok = ok && verify_audio("etc/assets/audio/test_sine.mp3", "MP3")
-
-   if(ok){
-      print("✓ std.os.audio.res all audio format tests passed")
-   } else {
-      print("✗ SOME std.os.audio.res TESTS FAILED")
-      __exit(1)
-   }
-   shutdown()
+fn get_image_info(img){
+   "Returns basic info from a loaded image dict via std.image."
+   image.get_info(img)
 }

@@ -180,12 +180,12 @@ fn _json_parse_val(st){
     _json_skip_ws(st)
     def c = _json_peek(st)
     if(c < 0){ return _json_set_error(st, "unexpected end of input") }
-    if(c == 123){ return _json_parse_obj(st) } ;; '{'
-    if(c == 91){ return _json_parse_arr(st) } ;; '['
-    if(c == 34){ return _json_parse_str(st) } ;; '"'
-    if(c == 116){ return _json_parse_literal(st, "true", true) } ;; true
-    if(c == 102){ return _json_parse_literal(st, "false", false) } ;; false
-    if(c == 110){ return _json_parse_literal(st, "null", 0) } ;; null
+    if(c == 123){ return _json_parse_obj(st) } ; '{'
+    if(c == 91){ return _json_parse_arr(st) } ; '['
+    if(c == 34){ return _json_parse_str(st) } ; '"'
+    if(c == 116){ return _json_parse_literal(st, "true", true) } ; true
+    if(c == 102){ return _json_parse_literal(st, "false", false) } ; false
+    if(c == 110){ return _json_parse_literal(st, "null", 0) } ; null
     if(c == 45 || (c >= 48 && c <= 57)){ return _json_parse_num(st) }
     _json_set_error(st, "unexpected token")
 }
@@ -210,11 +210,11 @@ fn _json_parse_obj(st){
         d = dict_set(d, key, val)
         _json_skip_ws(st)
         def c = _json_peek(st)
-        if(c == 44){ ;; ','
+        if(c == 44){ ; ','
             set_idx(st, 2, get(st, 2) + 1)
             continue
         }
-        if(c == 125){ ;; '}'
+        if(c == 125){ ; '}'
             set_idx(st, 2, get(st, 2) + 1)
             return d
         }
@@ -267,21 +267,21 @@ fn _json_parse_str(st){
             if(pos >= n){ return _json_set_error(st, "unterminated escape sequence") }
             def esc = load8(s, pos)
             match esc {
-                34 -> { out = out + "\"" } ;; "
-                92 -> { out = out + "\\" } ;; \
-                47 -> { out = out + "/" } ;; /
-                98 -> { out = out + chr(8) } ;; \b
-                102 -> { out = out + chr(12) } ;; \f
-                110 -> { out = out + "\n" } ;; \n
-                114 -> { out = out + "\r" } ;; \r
-                116 -> { out = out + "\t" } ;; \t
+                34 -> { out = out + "\"" } ; "
+                92 -> { out = out + "\\" } ; \
+                47 -> { out = out + "/" } ; /
+                98 -> { out = out + chr(8) } ; \b
+                102 -> { out = out + chr(12) } ; \f
+                110 -> { out = out + "\n" } ; \n
+                114 -> { out = out + "\r" } ; \r
+                116 -> { out = out + "\t" } ; \t
                 117 -> {
                     if(pos + 4 >= n){ return _json_set_error(st, "invalid unicode escape") }
                     mut cp1 = _json_hex4(s, pos + 1)
                     if(cp1 < 0){ return _json_set_error(st, "invalid unicode escape") }
                     pos = pos + 4
                     mut cp = cp1
-                    ;; Handle UTF-16 surrogate pairs.
+                    ; Handle UTF-16 surrogate pairs.
                     if(cp1 >= 55296 && cp1 <= 56319){
                         if(pos + 6 >= n){ return _json_set_error(st, "invalid unicode surrogate pair") }
                         if(load8(s, pos + 1) != 92 || load8(s, pos + 2) != 117){
@@ -302,7 +302,7 @@ fn _json_parse_str(st){
             }
         } else {
             if(c < 32){ return _json_set_error(st, "invalid control character in string") }
-            ;; Preserve original UTF-8 bytes from the source text.
+            ; Preserve original UTF-8 bytes from the source text.
             out = out + _json_byte_to_str(c)
         }
         pos += 1
@@ -416,7 +416,7 @@ fn _json_escape_string(s){
                 if(c < 32){
                     out = out + "\\u00" + _json_hex_digit((c / 16) % 16) + _json_hex_digit(c % 16)
                 } else {
-                    ;; Preserve original UTF-8 bytes from the source text.
+                    ; Preserve original UTF-8 bytes from the source text.
                     out = out + _json_byte_to_str(c)
                 }
             }
@@ -552,7 +552,7 @@ if(comptime{__main()}){
     def dec_uni = json_decode(enc_uni)
     assert((dec_uni == "price:" + chr(8364)), "json encode unicode utf8")
 
-    ;; Error path tests
+    ; Error path tests
     def err_non_str = json_try_decode(123)
     assert(dict_get(err_non_str, "ok", true) == false, "json error non-string")
     assert(dict_get(err_non_str, "error", "") == "json input must be a string", "json error msg non-string")

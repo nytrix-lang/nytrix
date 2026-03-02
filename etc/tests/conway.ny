@@ -145,9 +145,7 @@ fn step(cur, nxt){
 
 ;; Main Line
 seed(ticks())
-
 seed_grid(G, TOTAL)
-draw_full(G)
 
 tui_begin()
 defer { tui_end() }
@@ -172,7 +170,7 @@ while(1){
    G = G2
    G2 = tmp
 
-   msleep(150)
+   msleep(15)
    step_count += 1
    if(max_steps > 0 && step_count >= max_steps){ break }
 }

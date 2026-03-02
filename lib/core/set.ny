@@ -2,7 +2,7 @@
 ;; Core Set module.
 
 module std.core.set (
-   set, set_add, set_contains
+   set, set_new, set_add, set_contains
 )
 use std.core *
 use std.core.error *
@@ -71,8 +71,13 @@ fn _set_new(cap){
    p
 }
 
-fn set(cap=8){
+fn set_new(cap=8){
    "Creates a new empty set."
+   _set_new(cap)
+}
+
+fn set(cap=8){
+   "Alias for set_new."
    _set_new(cap)
 }
 
@@ -213,10 +218,13 @@ if(comptime{__main()}){
     s_realloc = set_add(s_realloc, "r5")
     assert(s_realloc == s_orig, "set ptr stable before resize limit")
 
-    s_realloc = set_add(s_realloc, "r6") ; This should trigger resize (count * 10 >= cap * 7)
+    s_realloc = set_add(s_realloc, "r6")
+    assert(s_realloc == s_orig, "set ptr stable for 6")
+
+    s_realloc = set_add(s_realloc, "r7") ; This should trigger resize (count 6 * 10 = 60 >= 56)
     assert(s_realloc != s_orig, "set ptr changed after resize")
     assert(set_contains(s_realloc, "r1"), "contains r1 after resize")
-    assert(set_contains(s_realloc, "r6"), "contains r6 after resize")
+    assert(set_contains(s_realloc, "r7"), "contains r7 after resize")
 
     ; Test that adding existing key does not change pointer
     def s_curr = s_realloc

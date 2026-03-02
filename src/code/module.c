@@ -264,11 +264,11 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
       const char *dot = strrchr(mod, '.');
       alias = dot ? dot + 1 : mod;
     }
-    binding alias_bind = {0};
-    alias_bind.name = ny_strdup(alias);
-    alias_bind.stmt_t = (stmt_t *)ny_strdup(mod);
-    vec_push(&cg->aliases, alias_bind);
-    free(mod);
+          binding alias_bind = {0};
+          alias_bind.name = ny_strdup(alias);
+          alias_bind.stmt_t = (stmt_t *)ny_strdup(mod);
+          alias_bind.owned = true;
+          vec_push(&cg->aliases, alias_bind);    free(mod);
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       collect_use_aliases(cg, s->as.module.body.data[i]);

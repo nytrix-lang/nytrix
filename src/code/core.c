@@ -54,6 +54,10 @@ static void ny_cg_init_options(codegen_t *cg) {
                           ny_effect_analysis_requested();
   cg->auto_memoize = ny_env_enabled("NYTRIX_AUTO_MEMO");
   cg->auto_memoize_impure = ny_env_enabled("NYTRIX_AUTO_MEMO_IMPURE");
+#ifdef DEBUG
+  cg->debug_symbols = true;
+  cg->trace_exec = true;
+#endif
   if (cg->strict_diagnostics)
     NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
 }
@@ -333,38 +337,46 @@ void codegen_dispose(codegen_t *cg) {
       cg->ctx = NULL;
     }
   }
-  for (size_t i = 0; i < cg->fun_sigs.len; i++) {
-    fun_sig *sig = &cg->fun_sigs.data[i];
-    free((void *)sig->name);
-    for (size_t j = 0; j < i; j++) {
-      if (cg->fun_sigs.data[j].link_name == sig->link_name)
-        sig->link_name = NULL;
-      if (cg->fun_sigs.data[j].return_type == sig->return_type)
-        sig->return_type = NULL;
-    }
-    free((void *)sig->link_name);
-    free((void *)sig->return_type);
-  }
-  for (size_t i = 0; i < cg->global_vars.len; i++) {
-    free((void *)cg->global_vars.data[i].name);
-  }
-  for (size_t i = 0; i < cg->interns.len; i++) {
-    if (cg->interns.data[i].alloc)
-      free(cg->interns.data[i].alloc);
-  }
-  for (size_t i = 0; i < cg->aliases.len; i++) {
-    free((void *)cg->aliases.data[i].name);
-    free((void *)cg->aliases.data[i].stmt_t);
-  }
-  for (size_t i = 0; i < cg->import_aliases.len; i++) {
-    free((void *)cg->import_aliases.data[i].name);
-    free((void *)cg->import_aliases.data[i].stmt_t);
-  }
-  for (size_t i = 0; i < cg->user_import_aliases.len; i++) {
-    free((void *)cg->user_import_aliases.data[i].name);
-    free((void *)cg->user_import_aliases.data[i].stmt_t);
-  }
-  for (size_t i = 0; i < cg->use_modules.len; i++) {
+      for (size_t i = 0; i < cg->fun_sigs.len; i++) {
+        fun_sig *sig = &cg->fun_sigs.data[i];
+        if (sig->owned) {
+          free((void *)sig->name);
+          for (size_t j = 0; j < i; j++) {
+            if (cg->fun_sigs.data[j].link_name == sig->link_name)
+              sig->link_name = NULL;
+            if (cg->fun_sigs.data[j].return_type == sig->return_type)
+              sig->return_type = NULL;
+          }
+          free((void *)sig->link_name);
+          free((void *)sig->return_type);
+        }
+      }
+      for (size_t i = 0; i < cg->global_vars.len; i++) {
+        if (cg->global_vars.data[i].owned)
+          free((void *)cg->global_vars.data[i].name);
+      }
+      for (size_t i = 0; i < cg->interns.len; i++) {
+        if (cg->interns.data[i].alloc)
+          free(cg->interns.data[i].alloc);
+      }
+      for (size_t i = 0; i < cg->aliases.len; i++) {
+        if (cg->aliases.data[i].owned) {
+          free((void *)cg->aliases.data[i].name);
+          free((void *)cg->aliases.data[i].stmt_t);
+        }
+      }
+      for (size_t i = 0; i < cg->import_aliases.len; i++) {
+        if (cg->import_aliases.data[i].owned) {
+          free((void *)cg->import_aliases.data[i].name);
+          free((void *)cg->import_aliases.data[i].stmt_t);
+        }
+      }
+      for (size_t i = 0; i < cg->user_import_aliases.len; i++) {
+        if (cg->user_import_aliases.data[i].owned) {
+          free((void *)cg->user_import_aliases.data[i].name);
+          free((void *)cg->user_import_aliases.data[i].stmt_t);
+        }
+      }  for (size_t i = 0; i < cg->use_modules.len; i++) {
     free((void *)cg->use_modules.data[i]);
   }
   for (size_t i = 0; i < cg->user_use_modules.len; i++) {

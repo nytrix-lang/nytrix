@@ -15,14 +15,14 @@ fn sum(xs){
 }
 
 fn mean(xs){
-   "Mean of list of numbers."
+   "Returns the arithmetic mean (average) of the elements in list `xs`. Returns 0 if the list is empty."
    mut n = len(xs)
    if(n == 0){ return 0 }
    return sum(xs) / n
 }
 
 fn median(xs){
-   "Median (simple sort copy)."
+   "Returns the median value of list `xs`. For even-sized lists, returns the average of the two middle elements."
    mut n = len(xs)
    if(n == 0){ return 0 }
    def tmp = list_clone(xs)

@@ -7,17 +7,21 @@ module std.core.mem (
 use std.core *
 
 fn memchr(ptr, val, n){
-   "Find byte in memory."
+   "Searches for the first occurrence of byte `val` in the first `n` bytes of memory area `ptr`. Returns the address of the byte if found, otherwise 0."
    mut i = 0
    while(i < n){
-      if(load8(ptr, i) == val){ return ptr + i  }
+      def b = load8(ptr, i)
+      if(val == 100){
+          print(f"DEBUG: memchr i={i} val={val} b={b} tag={__tagof(ptr)}")
+      }
+      if(b == val){ return ptr + i  }
       i += 1
    }
    return 0
 }
 
 fn memcpy(dst, src, n){
-   "Copies `n` bytes from `src` memory address to `dst`. Optimized for 8-byte aligned transfers."
+   "Copies `n` bytes from `src` memory address to `dst`. Optimized for 8-byte aligned transfers if both pointers are 8-byte aligned."
    mut i = 0
    if(n >= 8 && (dst & 7) == 0 && (src & 7) == 0){
       while(i + 8 <= n){
@@ -87,7 +91,13 @@ if(comptime{__main()}){
     store64(d, len_s, -16)
     memcpy(d, s, len_s)
     store8(d, 0, len_s)
-    assert(_str_eq(d, s), "memcpy works")
+    mut ok = true
+    mut j = 0
+    while(j < len_s){
+        if(load8(d, j) != load8(s, j)){ ok = false }
+        j += 1
+    }
+    assert(ok, "memcpy works")
     free(d)
 
     print("Testing memset...")
@@ -114,14 +124,14 @@ if(comptime{__main()}){
     print("Testing optimized paths...")
     def large_sz = 100
     def p1 = malloc(large_sz)
-    def p2 = malloc(large_sz)
+    def p4 = malloc(large_sz)
     memset(p1, 0, large_sz)
     mut k = 0
     while(k < large_sz){
-        store8(p2, k, k)
+        store8(p4, k, k)
         k += 1
     }
-    memcpy(p1, p2, large_sz)
+    memcpy(p1, p4, large_sz)
     k = 0
     while(k < large_sz){
         assert(load8(p1, k) == k, f"memcpy optimized at offset {k}")
@@ -134,7 +144,7 @@ if(comptime{__main()}){
         k += 1
     }
     free(p1)
-    free(p2)
+    free(p4)
 
     print("Testing Comprehensive Optimization Coverage...")
 

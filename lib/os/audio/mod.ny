@@ -17,10 +17,10 @@ use std.os *
 use std.os.audio.backend as snd_backend
 use std.os.audio.res as res
 
-fn init(async=false){
+fn init(){
    "Initializes module state."
    res.init()
-   return snd_backend.init(async)
+   return snd_backend.init(false)
 }
 
 fn shutdown(){
