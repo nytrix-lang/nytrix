@@ -83,6 +83,7 @@ typedef struct ny_global_exact_index_entry_t {
 typedef struct ny_fun_tail_index_entry_t {
   uint64_t hash;
   uint32_t len;
+  uint32_t mod_len;
   const char *tail_name;
   fun_sig *value;
   uint8_t state;
@@ -91,6 +92,7 @@ typedef struct ny_fun_tail_index_entry_t {
 typedef struct ny_global_tail_index_entry_t {
   uint64_t hash;
   uint32_t len;
+  uint32_t mod_len;
   const char *tail_name;
   binding *value;
   uint8_t state;
@@ -898,10 +900,15 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
       size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
       for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
         entry_type *e = &s->index_field[pos];                                  \
+        uint8_t new_state = ny_module_used_lookup(cg, true, sig_name, mod_len) ? 3u : 1u; \
+        if (cg->current_module_name && strlen(cg->current_module_name) == mod_len && \
+            memcmp(cg->current_module_name, sig_name, mod_len) == 0) new_state = 10u; \
+        else if (mod_len >= 8 && memcmp(sig_name, "std.core", 8) == 0 && (sig_name[8] == '.' || sig_name[8] == '\0')) new_state = 5u; \
         if (!e->state) {                                                       \
-          e->state = 1u;                                                       \
+          e->state = new_state;                                                \
           e->hash = hash;                                                      \
           e->len = (uint32_t)len;                                              \
+          e->mod_len = (uint32_t)mod_len;                                      \
           e->entry_tail_field = tail;                                          \
           e->entry_value_field = (item_value_expr);                            \
           break;                                                               \
@@ -909,6 +916,15 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
         if (e->hash == hash && e->len == (uint32_t)len &&                      \
             memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
             e->entry_tail_field[len] == '\0') {                                \
+          bool replace = false;                                                \
+          if (new_state > e->state) replace = true;                            \
+          else if (new_state == e->state && mod_len < (size_t)e->mod_len) replace = true; \
+          if (replace) {                                                       \
+            e->entry_tail_field = tail;                                        \
+            e->entry_value_field = (item_value_expr);                          \
+            e->state = new_state;                                              \
+            e->mod_len = (uint32_t)mod_len;                                    \
+          }                                                                    \
           break;                                                               \
         }                                                                      \
         pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
@@ -1301,6 +1317,13 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
         }
       }
     }
+  }
+  if (!res && !qualified && cg->current_module_name) {
+    char mod_buf[256];
+    snprintf(mod_buf, sizeof(mod_buf), "%s.%s", cg->current_module_name, name);
+    res = lookup_fun_exact(cg, mod_buf);
+    if (res)
+      goto end;
   }
   if (!res && !qualified) {
     res = ny_fun_tail_find(cg, name);

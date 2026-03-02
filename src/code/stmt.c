@@ -861,7 +861,8 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     return;
 
   ny_dbg_loc(cg, s->tok);
-  emit_trace_loc(cg, s->tok);
+  if (cg->trace_exec)
+    emit_trace_loc(cg, s->tok);
   switch (s->kind) {
   case NY_S_VAR: {
     bool dest = s->as.var.is_destructure;

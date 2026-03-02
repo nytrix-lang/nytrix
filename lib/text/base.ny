@@ -26,15 +26,15 @@ def B16_CHARS = std.text.ascii.digits + "ABCDEF"
 
 fn _b64_unmap(c, url=false){
     "Internal: Maps a character code to its 6-bit value based on RFC 4648."
-    if(c >= 65 && c <= 90){ return c - 65 } ;; A-Z
-    if(c >= 97 && c <= 122){ return c - 71 } ;; a-z
-    if(c >= 48 && c <= 57){ return c + 4 } ;; 0-9
+    if(c >= 65 && c <= 90){ return c - 65 } ; A-Z
+    if(c >= 97 && c <= 122){ return c - 71 } ; a-z
+    if(c >= 48 && c <= 57){ return c + 4 } ; 0-9
     if(!url){
-        if(c == 43){ return 62 } ;; +
-        if(c == 47){ return 63 } ;; /
+        if(c == 43){ return 62 } ; +
+        if(c == 47){ return 63 } ; /
     } else {
-        if(c == 45){ return 62 } ;; -
-        if(c == 95){ return 63 } ;; _
+        if(c == 45){ return 62 } ; -
+        if(c == 95){ return 63 } ; _
     }
     -1
 }
@@ -78,9 +78,9 @@ fn _decode64_internal(s, url=false){
         if(v1 == 0){ break }
         def c1 = _b64_unmap(v1, url)
         if(c1 == -1){
-            if(v1 == 61){ break } ;; RFC 4648 padding char '='
+            if(v1 == 61){ break } ; RFC 4648 padding char '='
             i += 1
-            ;; Skip other characters
+            ; Skip other characters
             while(i < n && _b64_unmap(load8(s, i), url) == -1){ i += 1 }
             continue
         }
@@ -140,13 +140,13 @@ fn decode64_url(s){
 fn _b32_unmap(c, hex=false){
     "Internal: Maps a character code to its 5-bit value based on RFC 4648."
     if(!hex){
-        if(c >= 65 && c <= 90){ return c - 65 } ;; A-Z
-        if(c >= 97 && c <= 122){ return c - 97 } ;; a-z (decoded case-insensitively)
-        if(c >= 50 && c <= 55){ return c - 24 } ;; 2-7
+        if(c >= 65 && c <= 90){ return c - 65 } ; A-Z
+        if(c >= 97 && c <= 122){ return c - 97 } ; a-z (decoded case-insensitively)
+        if(c >= 50 && c <= 55){ return c - 24 } ; 2-7
     } else {
-        if(c >= 48 && c <= 57){ return c - 48 } ;; 0-9
-        if(c >= 65 && c <= 86){ return c - 55 } ;; A-V
-        if(c >= 97 && c <= 118){ return c - 87 } ;; a-v
+        if(c >= 48 && c <= 57){ return c - 48 } ; 0-9
+        if(c >= 65 && c <= 86){ return c - 55 } ; A-V
+        if(c >= 97 && c <= 118){ return c - 87 } ; a-v
     }
     -1
 }
@@ -296,23 +296,23 @@ fn decode16(s){
 if(comptime{__main()}){
     use std.core.error *
 
-    ;; Base64 Tests
+    ; Base64 Tests
     def s = "hello"
     def enc64 = encode64(s)
     assert(enc64 == "aGVsbG8=", "base64 encode")
     assert(decode64(enc64) == s, "base64 decode")
 
-    ;; Base32 Tests
+    ; Base32 Tests
     def enc32 = encode32(s)
     assert(enc32 == "NBSWY3DP", "base32 encode")
     assert(decode32(enc32) == s, "base32 decode")
 
-    ;; Base32 Hex Tests
+    ; Base32 Hex Tests
     def enc32hex = encode32_hex(s)
     assert(enc32hex == "D1IMOR3F", "base32 hex encode")
     assert(decode32_hex(enc32hex) == s, "base32 hex decode")
 
-    ;; Base32 Hex RFC 4648 Test Vectors
+    ; Base32 Hex RFC 4648 Test Vectors
     assert(encode32_hex("") == "", "base32 hex vector 1")
     assert(encode32_hex("f") == "CO======", "base32 hex vector 2")
     assert(encode32_hex("fo") == "CPNG====", "base32 hex vector 3")
@@ -329,13 +329,13 @@ if(comptime{__main()}){
     assert(decode32_hex("CPNMUOJ1") == "fooba", "base32 hex decode vector 6")
     assert(decode32_hex("CPNMUOJ1E8======") == "foobar", "base32 hex decode vector 7")
 
-    ;; Base16 Tests
+    ; Base16 Tests
     def enc16 = encode16(s)
     assert(enc16 == "68656C6C6F", "base16 encode")
     assert(decode16(enc16) == s, "base16 decode")
     assert(decode16("68656c6c6f") == s, "base16 decode lowercase")
 
-    ;; URL Safe Tests
+    ; URL Safe Tests
     assert(encode64_url("\xff\xff\xff") == "____", "base64 url encode")
     assert(decode64_url("____") == "\xff\xff\xff", "base64 url decode")
 

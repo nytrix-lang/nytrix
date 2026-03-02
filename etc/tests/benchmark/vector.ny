@@ -5,8 +5,7 @@ use std.os.time *
 use std.math.vector as v
 use std.core.dict *
 
-;; Vector Benchmark (Merged: Vanilla + Offload)
-;; Evaluates hadamard product performance with adaptive workload.
+;; Vector Benchmark (Benchmark)
 
 def n = 8192
 mut rounds = 128
@@ -28,7 +27,6 @@ if(!is_dict(st_raw)){
    st = dict_set(st, "active", false)
 }
 
-;; Adjust rounds for slow/constrained platforms if offload is not active
 if(dict_get(st, "active", false) == false){
    rounds = 24
    if(os() == "macos" || os() == "windows"){ rounds = 12 }

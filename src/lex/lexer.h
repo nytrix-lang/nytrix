@@ -90,6 +90,7 @@ typedef struct token_t {
   size_t len;
   uint64_t hash;
   int line;
+  int real_line;
   int col;
   const char *filename;
 } token_t;
@@ -99,6 +100,7 @@ typedef struct lexer_t {
   const char *filename;
   size_t pos;
   int line;
+  int real_line;
   int col;
   size_t split_pos;
   const char *split_filename;

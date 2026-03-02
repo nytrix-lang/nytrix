@@ -72,31 +72,41 @@ static void print_last_trace(void) {
 }
 
 static void handle_segv(int sig) {
-#ifdef _WIN32
-  fprintf(stderr, "%sCaught signal %d%s\n", clr(NY_CLR_RED), sig,
-          clr(NY_CLR_RESET));
-  print_last_trace();
-  fprintf(stderr, "%sRecent Nytrix trace:%s\n", clr(NY_CLR_CYAN),
-          clr(NY_CLR_RESET));
-  __trace_dump(((int64_t)8 << 1) | 1);
-  exit(128 + sig);
-#else
+  const char *name = (sig == SIGSEGV) ? "Segmentation Fault" :
+                     (sig == SIGABRT) ? "Abort" :
+                     (sig == SIGFPE)  ? "Arithmetic Exception" :
+                     (sig == SIGILL)  ? "Illegal Instruction" : "Signal";
+
+  fprintf(stderr, "\n%s%s CRASH: %s (%d) %s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RED), name, sig, clr(NY_CLR_RESET));
+  
+#ifndef _WIN32
+  fprintf(stderr, "%s--- System Backtrace ---%s\n", clr(NY_CLR_GRAY), clr(NY_CLR_RESET));
   void *bt[64];
   int n = backtrace(bt, 64);
-  fprintf(stderr, "%sCaught signal %d (%s), backtrace:%s\n", clr(NY_CLR_RED),
-          sig, strsignal(sig), clr(NY_CLR_RESET));
   backtrace_symbols_fd(bt, n, STDERR_FILENO);
-  print_last_trace();
-  fprintf(stderr, "%sRecent Nytrix trace:%s\n", clr(NY_CLR_CYAN),
-          clr(NY_CLR_RESET));
-  __trace_dump(((int64_t)8 << 1) | 1);
-  fprintf(stderr,
-          "%sHint:%s re-run with %s-trace -g --dump-on-error --emit-asm=build/"
-          "debug/last_asm.s --emit-ir=build/debug/last_ir.ll%s\n",
-          clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), clr(NY_CLR_BOLD),
-          clr(NY_CLR_RESET));
-  exit(128 + sig);
 #endif
+
+  print_last_trace();
+  
+  fprintf(stderr, "\n%s--- Nytrix Trace Ring ---%s\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  __trace_dump(((int64_t)16 << 1) | 1);
+
+  fprintf(stderr, "\n%sPotential Causes:%s\n", clr(NY_CLR_YELLOW), clr(NY_CLR_RESET));
+  if (sig == SIGSEGV) {
+    fprintf(stderr, "  - Null pointer dereference (nil access)\n");
+    fprintf(stderr, "  - Out of bounds memory access\n");
+    fprintf(stderr, "  - Stack overflow in recursing function\n");
+  } else if (sig == SIGFPE) {
+    fprintf(stderr, "  - Division by zero\n");
+    fprintf(stderr, "  - Float-to-int overflow\n");
+  }
+
+  fprintf(stderr, "\n%sDebug Suggestion:%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  fprintf(stderr, "  Run with %s-trace -v%s to see all transitions.\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  fprintf(stderr, "  Add %s--dump-on-error%s to save IR/ASM of the failing module.\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  
+  fprintf(stderr, "\n");
+  exit(128 + sig);
 }
 
 static void ny_setenv_force(const char *key, const char *value) {

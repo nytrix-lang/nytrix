@@ -22,7 +22,6 @@ fn fib(n){
    return b
 }
 
-;; Keep throughput-friendly defaults for test runs.
 def iters = 50000
 mut i = 0
 mut r = 0

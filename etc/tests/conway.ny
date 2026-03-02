@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Conway's Game of Life (Example) - https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life
+;; Conway's Game of Life - https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life
 
 use std.core *
 use std.math.random *
@@ -27,7 +27,7 @@ mut H = get(tSize, 1, 0)
 if(W < 2){ W = 80 }
 if(H < 2){ H = 25 }
 if(W % 2 == 1){ W -= 1 }
-H -= 0 ;; Full screen
+H -= 0
 
 def LW    = W / 2
 def CANV  = canvas(W, H)
@@ -74,7 +74,7 @@ fn set_pair(x, y, ch, lch, c){
 fn seed_grid(g, n){
    mut i = 0
    while(i < n){
-      def r = randint(0, 1)
+      def r = randint(0, 4) ;; Lower density: ~20%
       if(r == 1){ __store8_idx(g, i, CELL_ALIVE) } else { __store8_idx(g, i, CELL_DEAD) }
       i += 1
    }
@@ -150,27 +150,25 @@ seed_grid(G, TOTAL)
 tui_begin()
 defer { tui_end() }
 
-canvas_refresh(CANV)
-
 while(1){
    def key = poll_key()
    if(is_quit_key(key)){ break }
 
-   def alive = step(G, G2)
-
-   if(alive == 0){
-      seed_grid(G2, TOTAL)
-      draw_full(G2)
-   }
-
+   draw_full(G)
    canvas_print(CANV, 0, 0, "ESC: Quit", 7, 0)
    canvas_refresh(CANV)
 
-   def tmp = G
-   G = G2
-   G2 = tmp
+   def alive = step(G, G2)
 
-   msleep(15)
+   if(alive == 0){
+      seed_grid(G, TOTAL)
+   } else {
+      def tmp = G
+      G = G2
+      G2 = tmp
+   }
+
+   msleep(35)
    step_count += 1
    if(max_steps > 0 && step_count >= max_steps){ break }
 }

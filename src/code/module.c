@@ -275,20 +275,30 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
   }
 }
 
-void collect_use_modules(codegen_t *cg, stmt_t *s) {
+static void collect_use_modules_inner(codegen_t *cg, stmt_t *s,
+                                      bool in_std_mod) {
   if (s->kind == NY_S_USE) {
     if (!s->as.use.import_all && s->as.use.imports.len > 0)
       return;
+    bool has_alias = !s->as.use.import_all && s->as.use.alias;
     const char *mod = s->as.use.module;
     if (mod && *mod) {
       ny_push_use_module_unique(cg, false, mod);
-      if (!ny_is_stdlib_tok(s->tok))
+      if (!in_std_mod && !has_alias)
         ny_push_use_module_unique(cg, true, mod);
     }
   } else if (s->kind == NY_S_MODULE) {
+    const char *mname = s->as.module.name;
+    bool is_std = mname && (strncmp(mname, "std.", 4) == 0 ||
+                            strncmp(mname, "lib.", 4) == 0);
     for (size_t i = 0; i < s->as.module.body.len; ++i)
-      collect_use_modules(cg, s->as.module.body.data[i]);
+      collect_use_modules_inner(cg, s->as.module.body.data[i],
+                                in_std_mod || is_std);
   }
+}
+
+void collect_use_modules(codegen_t *cg, stmt_t *s) {
+  collect_use_modules_inner(cg, s, false);
 }
 
 static void ny_export_aliased_symbol(codegen_t *cg, const char *mod_name,

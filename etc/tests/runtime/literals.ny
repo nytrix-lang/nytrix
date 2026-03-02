@@ -1,6 +1,6 @@
 use std.core *
 
-; Numeric literal suffix coverage
+;; Numeric literal suffix coverage
 
 def a = 1i32
 

@@ -14,7 +14,7 @@ if(comptime{ __os_name() == "windows" }){
 print("Testing runtime extern support via libc...")
 
 def pid = c_getpid()
-; print("c_getpid returned:", pid)
+;; print("c_getpid returned:", pid)
 
 def my_pid = my_getpid()
 assert(my_pid == pid, "my_getpid (aliased) works")
