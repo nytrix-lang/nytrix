@@ -23,14 +23,11 @@ static const char *parse_load_source(const char *filename) {
   return g_parse_cached_src;
 }
 
-static void parse_print_snippet(const char *filename, int line, int col,
+static void parse_print_snippet(parser_t *p, int real_line, int col,
                                 size_t len) {
-  if (!filename || filename[0] == '<' || line <= 0 || col <= 0)
+  if (!p || !p->src || real_line <= 0 || col <= 0)
     return;
-  const char *src = parse_load_source(filename);
-  if (!src)
-    return;
-  ny_print_snippet(src, line, col, len, NY_CLR_RED);
+  ny_print_snippet(p->src, real_line, col, len, NY_CLR_RED);
 }
 
 static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
@@ -248,7 +245,7 @@ const char *parser_token_name(token_kind k) {
   }
 }
 
-static void print_error_line(parser_t *p, const char *filename, int line,
+static void print_error_line(parser_t *p, const char *filename, int line, int real_line,
                              int col, const char *msg, const char *got,
                              const char *hint) {
   const char *out_file =
@@ -268,7 +265,7 @@ static void print_error_line(parser_t *p, const char *filename, int line,
     fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN), clr(NY_CLR_RESET),
             hint);
   }
-  parse_print_snippet(out_file, line, col, 1);
+  parse_print_snippet(p, real_line, col, 1);
   if (p->error_limit > 0 && p->error_count >= p->error_limit) {
     fprintf(stderr, "Too many errors, aborting.\n");
     exit(1);
@@ -313,6 +310,12 @@ static const char *expect_hint(token_kind expected, token_t got) {
     return "did you forget to close the parameter list ')' before '->'?";
   if (expected == NY_T_LBRACE && got.kind == NY_T_IDENT)
     return "did you forget the '{' before the function body?";
+  if (expected == NY_T_FN && got.kind == NY_T_IDENT && got.len == 4 && memcmp(got.lexeme, "func", 4) == 0)
+    return "use 'fn' instead of 'func'";
+  if (expected == NY_T_DEF && (got.kind == NY_T_IDENT && ((got.len == 3 && memcmp(got.lexeme, "let", 3) == 0) || (got.len == 3 && memcmp(got.lexeme, "var", 3) == 0))))
+    return "use 'def' for immutable or 'mut' for mutable variables";
+  if (got.kind == NY_T_COLON && (expected == NY_T_LBRACE || expected == NY_T_LPAREN))
+    return "Nytrix does not use ':' after if/while/fn headers, use '{' for the body";
   return NULL;
 }
 
@@ -321,7 +324,7 @@ void parser_error(parser_t *p, token_t tok, const char *msg, const char *hint) {
     hint = "check for missing ';' or unmatched brace";
   char buf[64];
   const char *got = token_desc(tok, buf, sizeof(buf));
-  print_error_line(p, tok.filename, tok.line, tok.col, msg, got, hint);
+  print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col, msg, got, hint);
 }
 
 void parser_expect(parser_t *p, token_kind kind, const char *msg,
@@ -337,7 +340,7 @@ void parser_expect(parser_t *p, token_kind kind, const char *msg,
       hint = expect_hint(kind, p->cur);
     char buf[64];
     const char *got_desc = token_desc(p->cur, buf, sizeof(buf));
-    print_error_line(p, p->cur.filename, p->cur.line, p->cur.col, def_msg,
+    print_error_line(p, p->cur.filename, p->cur.line, p->cur.real_line, p->cur.col, def_msg,
                      got_desc, hint);
   } else {
     parser_error(p, p->cur, msg, hint);

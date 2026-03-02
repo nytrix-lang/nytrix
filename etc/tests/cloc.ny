@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Cloc (Example) - Line of Code Counter
+;; Cloc - Line of Code Counter
 
 use std.core *
 use std.core.error *

@@ -896,6 +896,9 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
              mods.entries[i].path);
     char *txt = read_file(mods.entries[i].path);
     if (txt) {
+      char line_buf[1024];
+      snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", mods.entries[i].path);
+      append_text(&bundle, &total, &cap, line_buf);
       bool has_decl = false;
       const char *p = txt;
       while (*p) {

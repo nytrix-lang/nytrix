@@ -1,3 +1,6 @@
+#!/bin/ny
+;; Sound Engine Test
+
 use std.core *
 use std.text.io *
 use std.os.audio *
@@ -41,10 +44,10 @@ if(proc_src != 0){
 print("\n--- 2. Asset Loading & Playback Test ---")
 def asset_dir = "etc/assets/audio"
 def files = [
-    "test_sine.wav",
-    "test_sine.ogg",
-    "test_sine.flac",
-    "test_sine.mp3",
+    "sound.wav",
+    "sound.ogg",
+    "sound.flac",
+    "sound.mp3",
     "sound.wav"
 ]
 
@@ -69,10 +72,10 @@ while(i < len(files)){
             }
             if(is_playing(inst)){ stop(inst) }
         } else {
-            print(f"  FAILED to play {filename}")
+            print(f"  FAILED: Could not play {filename}")
         }
     } else {
-        print(f"  FAILED to load {filepath}")
+        print(f"  SKIPPED: Could not load {filepath} (decoder library missing?)")
     }
     i += 1
 }

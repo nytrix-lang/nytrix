@@ -137,7 +137,7 @@ fn atoi(s){
 }
 
 fn _list_append(lst, v){
-   "Internal: appends `v` to `lst`, growing capacity if needed."
+   "Internal: appends value `v` to the list `lst`, dynamically growing its capacity if required."
    if(!is_list(lst)){ return lst }
    mut n = load64(lst, 0)
    def cap = load64(lst, 8)
@@ -159,7 +159,7 @@ fn _list_append(lst, v){
 }
 
 fn _substr(s, start, stop){
-   "Internal: substring helper with clamped byte indices."
+   "Internal: returns a substring of `s` using byte-based `start` and `stop` indices. Indices are clamped to the string's length."
    mut n = str_len(s)
    if(start < 0){ start = 0 }
    if(stop > n){ stop = n }
@@ -178,7 +178,7 @@ fn _substr(s, start, stop){
 }
 
 fn _is_ws(c){
-   "Internal: returns true for ASCII whitespace byte values."
+   "Internal: returns true if the byte `c` corresponds to an ASCII whitespace character (space, tab, newline, etc.)."
    if(c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13){ return true }
    return false
 }
@@ -322,7 +322,7 @@ fn join(items, sep){
 }
 
 fn str_replace(s, old, new){
-   "Replaces all occurrences of `old` in `s` with `new`."
+   "Replaces all occurrences of old in s with new."
    if(!is_str(s) || !is_str(old) || !is_str(new)){ return s }
    if(str_len(old) == 0){ return s }
    def parts = split(s, old)
@@ -420,12 +420,12 @@ fn repeat(s, n){
 }
 
 fn _is_utf8_cont(c){
-   "Internal: continuation byte check."
+   "Internal: returns true if byte `c` is a valid UTF-8 continuation byte (10xxxxxx)."
    c >= 128 && c <= 191
 }
 
 fn _utf8_seq_len(s, i, n){
-   "Internal: returns UTF-8 sequence width at byte offset `i`; -1 if invalid."
+   "Internal: returns the expected length (1-4 bytes) of the UTF-8 character starting at byte index `i` in string `s`. Returns -1 if the sequence is invalid."
    if(i < 0 || i >= n){ return -1 }
    def b0 = load8(s, i)
    if(b0 < 128){ return 1 }
@@ -440,7 +440,7 @@ fn _utf8_seq_len(s, i, n){
       def b1 = load8(s, i + 1)
       def b2 = load8(s, i + 2)
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2)){ return -1 }
-      ;; Reject overlong forms and UTF-16 surrogate range.
+      ; Reject overlong forms and UTF-16 surrogate range.
       if(b0 == 224 && b1 < 160){ return -1 }
       if(b0 == 237 && b1 >= 160){ return -1 }
       return 3
@@ -451,7 +451,7 @@ fn _utf8_seq_len(s, i, n){
       def b2 = load8(s, i + 2)
       def b3 = load8(s, i + 3)
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2) || !_is_utf8_cont(b3)){ return -1 }
-      ;; Reject overlong forms and code points beyond U+10FFFF.
+      ; Reject overlong forms and code points beyond U+10FFFF.
       if(b0 == 240 && b1 < 144){ return -1 }
       if(b0 == 244 && b1 > 143){ return -1 }
       return 4
@@ -460,7 +460,7 @@ fn _utf8_seq_len(s, i, n){
 }
 
 fn _utf8_decode_at(s, i, w){
-   "Internal: decodes UTF-8 sequence at `i` with known width `w`."
+   "Internal: decodes a multi-byte UTF-8 character at byte index `i` given its confirmed width `w`."
    def b0 = load8(s, i)
    if(w == 1){ return b0 }
    if(w == 2){
@@ -583,43 +583,44 @@ fn str_slice(s, start, stop, step=1){
          j += 1
          i = i + step
       }
-        }
-        store8(out, 0, cnt)
-        return out
-     }
-   
-     fn utf8_slice(s, start, stop, step=1){
-        "Returns a UTF-8 code-point slice of string `s`."
-        if(!is_str(s)){ return 0 }
-        if(!is_int(step)){ step = 1 }
-        if(step == 0){ step = 1 }
-        def n = utf8_len(s)
-        if(start < 0){ start = n + start }
-        if(stop < 0){ stop = n + stop }
-        if(step > 0){
-           if(start < 0){ start = 0 }
-           if(stop > n){ stop = n }
-           if(start >= stop){ return "" }
-        } else {
-           if(start >= n){ start = n - 1 }
-           if(stop < -1){ stop = -1 }
-           if(start <= stop){ return "" }
-        }
-        mut out = ""
-        mut i = start
-        if(step > 0){
-           while(i < stop){
-              out = out + chr(ord_at(s, i))
-              i = i + step
-           }
-        } else {
-           while(i > stop){
-              out = out + chr(ord_at(s, i))
-              i = i + step
-           }
-        }
-        return out
-     }
+   }
+   store8(out, 0, cnt)
+   return out
+}
+
+fn utf8_slice(s, start, stop, step=1){
+   "Returns a UTF-8 code-point slice of string `s`."
+   if(!is_str(s)){ return 0 }
+   if(!is_int(step)){ step = 1 }
+   if(step == 0){ step = 1 }
+   def n = utf8_len(s)
+   if(start < 0){ start = n + start }
+   if(stop < 0){ stop = n + stop }
+   if(step > 0){
+      if(start < 0){ start = 0 }
+      if(stop > n){ stop = n }
+      if(start >= stop){ return "" }
+   } else {
+      if(start >= n){ start = n - 1 }
+      if(stop < -1){ stop = -1 }
+      if(start <= stop){ return "" }
+   }
+   mut out = ""
+   mut i = start
+   if(step > 0){
+      while(i < stop){
+         out = out + chr(ord_at(s, i))
+         i = i + step
+      }
+   } else {
+      while(i > stop){
+         out = out + chr(ord_at(s, i))
+         i = i + step
+      }
+   }
+   return out
+}
+
 if(comptime{__main()}){
     use std.core *
     use std.text *
@@ -656,8 +657,8 @@ if(comptime{__main()}){
     assert(str_replace("a-b-a", "a", "x") == "x-b-x", "str_replace")
     assert(replace_all("a-b-a", "-", ":") == "a:b:a", "replace_all")
 
-    def euro = chr(8364) ;; U+20AC
-    def grin = chr(128512) ;; U+1F600
+    def euro = chr(8364) ; U+20AC
+    def grin = chr(128512) ; U+1F600
     def mixed = "A" + euro + grin
     assert(ord("A") == 65, "ord ascii")
     assert(ord(euro) == 8364, "ord unicode bmp")
@@ -679,11 +680,11 @@ if(comptime{__main()}){
     assert(!utf8_valid(bad), "utf8_valid false")
     assert(utf8_len(bad) == 1, "utf8_len invalid byte fallback")
 
-    def s = "abcdef"
-    assert(_str_eq(str_slice(s, 0, 3), "abc"), "slice start")
-    assert(_str_eq(str_slice(s, 1, 5, 2), "bd"), "slice step")
-    assert(_str_eq(str_slice(s, -3, -1), "de"), "slice negative")
-    assert(_str_eq(str_slice(s, 0, 0), ""), "slice empty")
+    def s2 = "abcdef"
+    assert(_str_eq(str_slice(s2, 0, 3), "abc"), "slice start")
+    assert(_str_eq(str_slice(s2, 1, 5, 2), "bd"), "slice step")
+    assert(_str_eq(str_slice(s2, -3, -1), "de"), "slice negative")
+    assert(_str_eq(str_slice(s2, 0, 0), ""), "slice empty")
 
     print("✓ std.text tests passed")
 }

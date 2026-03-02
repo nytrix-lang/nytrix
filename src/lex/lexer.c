@@ -25,6 +25,7 @@ void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->filename = filename;
   lx->pos = 0;
   lx->line = 1;
+  lx->real_line = 1;
   lx->col = 1;
   lx->split_pos = 0;
   lx->split_filename = NULL;
@@ -42,6 +43,7 @@ static inline char advance(lexer_t *lx) {
   char c = lx->src[lx->pos++];
   if (c == '\n') {
     lx->line++;
+    lx->real_line++;
     lx->col = 1;
     lx->skipped_newline = true;
   } else {
@@ -73,6 +75,7 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.len = lx->pos - start;
   tok.hash = 0;
   tok.line = lx->line;
+  tok.real_line = lx->real_line;
   tok.col = lx->col - (int)tok.len;
   tok.filename = lx->filename;
   return tok;
@@ -80,13 +83,15 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
 
 static void lexer_error(lexer_t *lx, size_t start, const char *msg,
                         const char *hint) {
+  int col = lx->col - (int)(lx->pos - start);
   fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s\n",
-          lx->filename ? lx->filename : "<input>", lx->line,
-          lx->col - (int)(lx->pos - start), msg);
+          lx->filename ? lx->filename : "<input>", lx->line, col, msg);
   if (hint) {
     fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n",
-            lx->filename ? lx->filename : "<input>", lx->line,
-            lx->col - (int)(lx->pos - start), hint);
+            lx->filename ? lx->filename : "<input>", lx->line, col, hint);
+  }
+  if (lx->src && lx->real_line > 0) {
+    ny_print_snippet(lx->src, lx->real_line, col, 1, "\033[31m");
   }
 }
 
@@ -96,21 +101,64 @@ static void skip_whitespace(lexer_t *lx) {
     if (IS_SPACE(c)) {
       advance(lx);
     } else if (c == ';') {
+      advance(lx);
       while (peek(lx) != '\n' && peek(lx) != '\0')
         advance(lx);
     } else if (c == '#') {
-      advance(lx);
-      if (peek(lx) == '!')
-        advance(lx);
-      while (peek(lx) != '\n' && peek(lx) != '\0')
-        advance(lx);
-    } else {
+      size_t start_pos = lx->pos;
+      bool bol = (start_pos == 0 || lx->src[start_pos - 1] == '\n');
+      if (bol) {
+        advance(lx); // consume '#'
+        const char *p = lx->src + lx->pos;
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t')) {
+          p += 4;
+          while (*p == ' ' || *p == '\t') p++;
+        }
+        if (isdigit(*p)) {
+          char *end;
+          int line_val = (int)strtoll(p, &end, 10);
+          p = end;
+          while (*p == ' ' || *p == '\t') p++;
+          if (*p == '"') {
+            p++;
+            const char *f = p;
+            while (*p && *p != '"' && *p != '\n') p++;
+            if (*p == '"') {
+              size_t flen = (size_t)(p - f);
+              char *nf = malloc(flen + 1);
+              memcpy(nf, f, flen);
+              nf[flen] = '\0';
+              lx->filename = nf;
+              p++;
+            }
+          }
+          lx->line = line_val;
+          lx->pos = (size_t)(p - lx->src);
+          lx->col = 1; // It's a directive, reset col for the next char
+          while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+          if (peek(lx) == '\n') {
+            advance(lx); // consume the newline of the directive
+            lx->line--;   // so the NEXT line starts at line_val
+            lx->real_line--;
+          }
+          continue;
+        } else {
+          // treat as shebang or comment
+          while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+        }
+      } else {
+        // treat as comment (not at bol)
+        while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+      }
+    }
+ else {
       break;
     }
   }
 }
 
-static token_kind identifier_type(const char *start, size_t len) {
+static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
   switch (start[0]) {
   case 'a':
     if (len > 1) {
@@ -139,6 +187,10 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_CONTINUE;
     if (len == 8 && memcmp(start, "comptime", 8) == 0)
       return NY_T_COMPTIME;
+    if (len == 5 && memcmp(start, "const", 5) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'const' is not a keyword in Nytrix", "use 'def' for constants");
+      return NY_T_IDENT;
+    }
     break;
   case 'd':
     if (len == 5 && memcmp(start, "defer", 5) == 0)
@@ -187,10 +239,28 @@ static token_kind identifier_type(const char *start, size_t len) {
       if (start[1] == 'n')
         return NY_T_IN;
     }
+    if (len == 6 && memcmp(start, "import", 6) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'import' is not used in Nytrix", "use 'use' instead");
+      return NY_T_IDENT;
+    }
+    if (len == 7 && memcmp(start, "include", 7) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'include' is not used in Nytrix", "use 'use' instead");
+      return NY_T_IDENT;
+    }
     break;
   case 'n':
-    if (len == 3 && memcmp(start, "nil", 3) == 0)
+    if (len == 3 && memcmp(start, "nil", 3) == 0) {
       return NY_T_NIL;
+    }
+    if (len == 4 && memcmp(start, "none", 4) == 0) {
+      return NY_T_NIL;
+    }
+    break;
+  case 'N':
+    if (len == 4 && memcmp(start, "NULL", 4) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'NULL' is not used in Nytrix", "use '0' or 'none' instead");
+      return NY_T_IDENT;
+    }
     break;
   case 'l':
     if (len == 6 && memcmp(start, "lambda", 6) == 0)
@@ -206,6 +276,16 @@ static token_kind identifier_type(const char *start, size_t len) {
         return NY_T_STRUCT;
     }
     break;
+  case 'v':
+    if (len == 3 && memcmp(start, "var", 3) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'var' is not a keyword in Nytrix", "use 'mut' or 'def' instead");
+      return NY_T_IDENT;
+    }
+    if (len == 4 && memcmp(start, "void", 4) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'void' is not used in Nytrix", "simply omit it or use 'none'");
+      return NY_T_IDENT;
+    }
+    break;
   case 'm':
     if (len == 5 && memcmp(start, "match", 5) == 0)
       return NY_T_MATCH;
@@ -213,6 +293,12 @@ static token_kind identifier_type(const char *start, size_t len) {
       return NY_T_MUT;
     if (len == 6 && memcmp(start, "module", 6) == 0)
       return NY_T_MODULE;
+    break;
+  case 'p':
+    if (len == 6 && memcmp(start, "printf", 6) == 0) {
+      lexer_error(lx, (size_t)(start - lx->src), "'printf' is not used in Nytrix", "use 'print' instead");
+      return NY_T_IDENT;
+    }
     break;
   case 'r':
     if (len == 6 && memcmp(start, "return", 6) == 0)
@@ -295,7 +381,7 @@ token_t lexer_next(lexer_t *lx) {
     lx->col += (int)len;
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.hash = hash;
-    tok.kind = identifier_type(tok.lexeme, tok.len);
+    tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
   }
   if (IS_DIGIT(c)) {
@@ -431,6 +517,8 @@ token_t lexer_next(lexer_t *lx) {
     if (match(lx, '.')) {
       if (match(lx, '.'))
         return make_token(lx, NY_T_ELLIPSIS, start);
+      lx->pos--;
+      lx->col--;
     }
     return make_token(lx, NY_T_DOT, start);
   case '-':
@@ -463,10 +551,21 @@ token_t lexer_next(lexer_t *lx) {
     if (match(lx, '='))
       return make_token(lx, NY_T_SLASH_EQ, start);
     if (match(lx, '/')) {
-      lexer_error(lx, start, "comments in Nytrix start with ';'",
-                  "use ';' instead of '//'");
+      lexer_error(lx, start, "C-style line comments '//' are not supported",
+                  "use ';' instead");
       while (peek(lx) != '\n' && peek(lx) != '\0')
         advance(lx);
+      return lexer_next(lx);
+    }
+    if (match(lx, '*')) {
+      lexer_error(lx, start, "C-style block comments '/* */' are not supported",
+                  "use ';' for line comments or spaces for inlining");
+      while (peek(lx) != '\0' && !(peek(lx) == '*' && peek_next(lx) == '/'))
+        advance(lx);
+      if (peek(lx) == '*') {
+        advance(lx); // *
+        advance(lx); // /
+      }
       return lexer_next(lx);
     }
     return make_token(lx, NY_T_SLASH, start);
@@ -477,12 +576,26 @@ token_t lexer_next(lexer_t *lx) {
     }
     return make_token(lx, NY_T_PERCENT, start);
   case '!':
-    if (match(lx, '='))
+    if (match(lx, '=')) {
+      if (match(lx, '=')) {
+        lexer_error(lx, start, "strict inequality operator '!==' is not supported", "use '!=' instead");
+        return lexer_next(lx);
+      }
       return make_token(lx, NY_T_NEQ, start);
+    }
     return make_token(lx, NY_T_NOT, start);
   case '=':
-    if (match(lx, '='))
+    if (match(lx, '=')) {
+      if (match(lx, '=')) {
+        lexer_error(lx, start, "strict equality operator '===' is not supported", "use '==' instead");
+        return lexer_next(lx);
+      }
       return make_token(lx, NY_T_EQ, start);
+    }
+    if (match(lx, '>')) {
+      lexer_error(lx, start, "fat arrow operator '=>' is not supported", "use '->' for match cases");
+      return lexer_next(lx);
+    }
     return make_token(lx, NY_T_ASSIGN, start);
   case '<':
     if (match(lx, '='))
