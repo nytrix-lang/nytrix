@@ -554,7 +554,7 @@ fn window_check_event(win){
    ui_backend.poll_events(win)
    mut q = get(win, _W_EVENTS, 0)
    if(!is_list(q) || len(q) == 0){ return 0 }
-   
+
    mut tries = 0
    while(tries < 16){
       if(len(q) == 0){ break }
