@@ -11,6 +11,9 @@
 #include "wire/build.h"
 #include "wire/cache.h"
 #include <llvm-c/Analysis.h>
+#include <llvm-c/BitReader.h>
+#include <llvm-c/BitWriter.h>
+#include <llvm-c/IRReader.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/Error.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -184,7 +187,6 @@ static const char *ny_windows_output_path(const char *raw, char *buf,
   return buf;
 }
 #endif
-
 
 static ny_opt_profile_kind_t
 ny_opt_profile_kind_from_name(const char *profile_name) {
@@ -561,12 +563,12 @@ static bool ny_std_sources_available(void) {
     return false;
   char std_src[4096];
   struct stat st;
-  snprintf(std_src, sizeof(std_src), "%s/src/std", root);
-  if (stat(std_src, &st) == 0 && S_ISDIR(st.st_mode))
-    return true;
-  snprintf(std_src, sizeof(std_src), "%s/std", root);
-  if (stat(std_src, &st) == 0 && S_ISDIR(st.st_mode))
-    return true;
+  const char *cands[] = {"src/std", "std", "src/lib", "lib"};
+  for (size_t i = 0; i < 4; i++) {
+    snprintf(std_src, sizeof(std_src), "%s/%s", root, cands[i]);
+    if (stat(std_src, &st) == 0 && S_ISDIR(st.st_mode))
+      return true;
+  }
   return false;
 }
 
@@ -596,71 +598,6 @@ static void ny_build_std_cache_path(const ny_options *opt,
   const char *tmp = ny_get_temp_dir();
   snprintf(out, out_len, "%s/ny_std_cache_%016llx.ny", tmp,
            (unsigned long long)h);
-}
-static char *dup_string_token(token_t t) {
-  if (t.len < 2)
-    return NULL;
-  size_t head = 1, tail = 1;
-  if (t.len >= 6 && t.lexeme[0] == t.lexeme[1] && t.lexeme[1] == t.lexeme[2]) {
-    head = 3;
-    tail = 3;
-  }
-  if (t.len < head + tail)
-    return NULL;
-  size_t out_len = t.len - head - tail;
-  char *out = malloc(out_len + 1);
-  if (!out)
-    return NULL;
-  memcpy(out, t.lexeme + head, out_len);
-  out[out_len] = '\0';
-  return out;
-}
-
-static char *parse_use_name(lexer_t *lx, token_t *entry_tok,
-                            token_t *out_last_tok) {
-  token_t t = *entry_tok;
-  if (t.kind == NY_T_STRING) {
-    char *name = dup_string_token(t);
-    if (out_last_tok)
-      *out_last_tok = lexer_next(lx);
-    return name;
-  }
-  if (t.kind != NY_T_IDENT)
-    return NULL;
-  size_t cap = 64, len = 0;
-  char *buf = malloc(cap);
-  if (!buf)
-    return NULL;
-  memcpy(buf, t.lexeme, t.len);
-  len += t.len;
-  for (;;) {
-    token_t tok = lexer_next(lx);
-    if (tok.kind == NY_T_DOT) {
-      token_t id = lexer_next(lx);
-      if (id.kind != NY_T_IDENT) {
-        free(buf);
-        return NULL;
-      }
-      if (len + 1 + id.len + 1 > cap) {
-        cap = (len + 1 + id.len + 1) * 2;
-        char *nb = realloc(buf, cap);
-        if (!nb) {
-          free(buf);
-          return NULL;
-        }
-        buf = nb;
-      }
-      buf[len++] = '.';
-      memcpy(buf + len, id.lexeme, id.len);
-      len += id.len;
-    } else {
-      if (out_last_tok)
-        *out_last_tok = tok;
-      break;
-    }
-  }
-  buf[len] = '\0';
-  return buf;
 }
 
 static void append_use(char ***uses, size_t *len, size_t *cap,
@@ -1477,13 +1414,11 @@ int ny_pipeline_run(ny_options *opt) {
           goto skip_compilation;
         }
       } else {
-        if (opt->verbose)
-          fprintf(stderr, "JIT cache miss: %s\n", jit_cache_file);
         codegen_dispose(&cg);
       }
     }
-  } else {
   }
+
   clock_t t_parse = clock();
   parser_t parser;
   arena = (arena_t *)malloc(sizeof(arena_t));
@@ -1511,16 +1446,6 @@ int ny_pipeline_run(ny_options *opt) {
   clock_t t_codegen = clock();
   NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
   codegen_init(&cg, &prog, arena, "nytrix");
-  LLVMModuleRef cached_std_mod = NULL;
-  char *std_cache_ptr = NULL;
-  if (ny_jit_cache_enabled() && std_src) {
-    std_cache_ptr = ny_jit_cache_path(std_src, "stdlib_only");
-    if (ny_jit_cache_load(std_cache_ptr, cg.ctx, &cached_std_mod)) {
-      if (opt->verbose)
-        fprintf(stderr, "Stdlib cache hit: %s\n", std_cache_ptr);
-      cg.skip_stdlib = true;
-    }
-  }
   cg.debug_symbols = opt->debug_symbols;
   cg.debug_opt_level = opt->opt_level;
   cg.debug_opt_pipeline = opt->opt_pipeline;
@@ -1531,16 +1456,6 @@ int ny_pipeline_run(ny_options *opt) {
   cg.prog_owned = false;
   NY_LOG_V2("Emitting IR...\n");
   codegen_emit(&cg);
-  if (cached_std_mod) {
-    if (LLVMLinkModules2(cg.module, cached_std_mod)) {
-      NY_LOG_ERR("Failed to link cached stdlib\n");
-      exit_code = 1;
-      goto exit_success;
-    }
-    cached_std_mod = NULL;
-  }
-  if (std_cache_ptr)
-    free(std_cache_ptr);
   if (cg.had_error) {
     NY_LOG_ERR("Codegen failed\n");
     dump_debug_bundle(opt, source, cg.module);
@@ -1548,7 +1463,7 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
   NY_LOG_V2("Emitting script entry point...\n");
-  script_fn = codegen_emit_script(&cg, "__script_top");
+  script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name : "__script_top");
   if (cg.had_error) {
     NY_LOG_ERR("Codegen script entry failed\n");
     dump_debug_bundle(opt, source, cg.module);
@@ -1557,6 +1472,7 @@ int ny_pipeline_run(ny_options *opt) {
   }
   codegen_debug_finalize(&cg);
   maybe_log_phase_time(opt->do_timing, "Codegen:", t_codegen);
+
   if (opt->dump_llvm) {
     LLVMModuleRef dump_mod = ny_prepare_ir_dump_module(opt, cg.module);
     LLVMDumpModule(dump_mod ? dump_mod : cg.module);
@@ -1606,6 +1522,13 @@ skip_compilation:
     }
     if (dump_mod)
       LLVMDisposeModule(dump_mod);
+  }
+  if (opt->emit_bc_path) {
+    if (LLVMWriteBitcodeToFile(cg.module, opt->emit_bc_path) != 0) {
+      NY_LOG_ERR("Failed to write bitcode to %s\n", opt->emit_bc_path);
+      exit_code = 1;
+      goto exit_success;
+    }
   }
   if (opt->emit_asm_path) {
     if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile, opt->opt_level)) {
@@ -1719,6 +1642,9 @@ skip_compilation:
       }
     }
     register_jit_symbols(ee, jmod, &cg);
+    if (loaded_from_cache) {
+      ny_jit_map_unresolved_symbols(ee, jmod, NULL);
+    }
     maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
     clock_t t_exec = clock();
     uint64_t saddr = LLVMGetFunctionAddress(ee, "__script_top");

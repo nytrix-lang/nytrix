@@ -189,5 +189,5 @@ fn mouse_button_pressed(button){
    "Returns true if the specified mouse button was pressed in the active window."
    def win = uiw.window_last()
    if(!win){ return false }
-   uiw.window_mouse_button_down(win, button)
+   uiw.window_mouse_button_pressed(win, button)
 }

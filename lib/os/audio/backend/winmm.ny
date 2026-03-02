@@ -1,6 +1,6 @@
 ;; Keywords: audio winmm windows io
 
-module std.audio.backend.winmm (
+module std.os.audio.backend.winmm (
     is_available, init, shutdown,
     stream_open, stream_start, stream_stop,
     write
@@ -9,6 +9,7 @@ module std.audio.backend.winmm (
 use std.core *
 use std.core.dict *
 use std.os *
+use std.os.time *
 use std.os.ffi *
 
 fn _touch(...args){
@@ -134,7 +135,7 @@ fn write(handle, buf, bytes){
         return false
     }
     while((load32(hdr, 24) & 1) == 0){
-        sleep_ms(1)
+        msleep(1)
     }
     call2_void(_waveOutUnprepareHeader, handle, hdr)
     free(hdr)

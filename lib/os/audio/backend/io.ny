@@ -1,6 +1,6 @@
 ;; Keywords: audio io system
 
-module std.audio.backend.io (
+module std.os.audio.backend.io (
     create, connect, disconnect,
     get_output_device_count, get_output_device,
     get_default_output_device_index,
@@ -19,10 +19,10 @@ use std.core.dict *
 use std.os *
 use std.text *
 
-use std.audio.backend.alsa as audio_alsa
-use std.audio.backend.pulse as audio_pulse
-use std.audio.backend.jack as audio_jack
-use std.audio.backend.winmm as audio_winmm
+use std.os.audio.backend.alsa as audio_alsa
+use std.os.audio.backend.pulse as audio_pulse
+use std.os.audio.backend.jack as audio_jack
+use std.os.audio.backend.winmm as audio_winmm
 
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
@@ -305,5 +305,5 @@ if(comptime{__main()}){
     } else {
         assert(get_output_device_count(ctx) == 0, "audio io no devices when not connected")
     }
-    print("✓ std.audio.backend.io tests passed")
+    print("✓ std.os.audio.backend.io tests passed")
 }

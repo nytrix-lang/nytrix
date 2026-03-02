@@ -17,7 +17,7 @@ module std.core (
    eq, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno,
    globals, set_globals,
    OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM,
-   is_truthy, is_falsy, not_none, panic_if
+   is_truthy, is_falsy, not_none, panic_if, print
 )
 use std.core.primitives *
 use std.core.reflect as core_ref

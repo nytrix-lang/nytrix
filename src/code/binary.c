@@ -47,13 +47,6 @@ static LLVMValueRef ny_get_overflow_intrinsic_i64(codegen_t *cg,
   return fn;
 }
 
-static bool ny_env_enabled_default_on_local(const char *name) {
-  const char *v = getenv(name);
-  if (!v || !*v)
-    return true;
-  return ny_env_is_truthy(v);
-}
-
 static bool ny_should_prefer_builtin_ops(const codegen_t *cg) {
   if (!cg || !cg->current_module_name || !*cg->current_module_name)
     return false;
@@ -64,22 +57,22 @@ static bool ny_should_prefer_builtin_ops(const codegen_t *cg) {
     return false;
   if (strncmp(mod, "std.core.reflect", 16) == 0)
     return false;
-  return ny_env_enabled_default_on_local("NYTRIX_STD_BUILTIN_OPS");
+  return ny_env_enabled_default_on("NYTRIX_STD_BUILTIN_OPS");
 }
 
 static fun_sig *ny_helper_eq(codegen_t *cg) {
-  fun_sig *s = lookup_fun(cg, "std.core.reflect.eq");
+  fun_sig *s = lookup_fun(cg, "std.core.reflect.eq", 0);
   if (!s)
-    s = lookup_fun(cg, "eq");
+    s = lookup_fun(cg, "eq", 0);
   if (!s)
-    s = lookup_fun(cg, "__eq");
+    s = lookup_fun(cg, "__eq", 0);
   if (s)
     cg->cached_fn_eq = s;
   return s;
 }
 
 static fun_sig *ny_helper_contains(codegen_t *cg) {
-  fun_sig *s = lookup_fun(cg, "contains");
+  fun_sig *s = lookup_fun(cg, "contains", 0);
   if (s)
     cg->cached_fn_contains = s;
   return s;
@@ -158,10 +151,9 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
   LLVMValueRef both_int = LLVMBuildAnd(cg->builder, ny_is_tagged_int(cg, l),
                                        ny_is_tagged_int(cg, r), "bin.both_int");
   LLVMBuildCondBr(cg->builder, both_int, fast_bb, slow_bb);
-  ny_braun_add_predecessor(cg, fast_bb, entry_bb);
-  ny_braun_add_predecessor(cg, slow_bb, entry_bb);
+
   LLVMPositionBuilderAtEnd(cg->builder, fast_bb);
-  ny_braun_enter_block(cg, fast_bb);
+
   LLVMValueRef li = ny_untag_int(cg, l);
   LLVMValueRef ri = ny_untag_int(cg, r);
   LLVMValueRef fast_value = NULL;
@@ -169,29 +161,29 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
   if (kind == NY_BINOP_SUB && l == r) {
     fast_value = ny_const_tagged_int_value(cg, 0);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if (kind == NY_BINOP_XOR && l == r) {
     fast_value = ny_const_tagged_int_value(cg, 0);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if ((kind == NY_BINOP_AND || kind == NY_BINOP_OR) && l == r) {
     fast_value = l;
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if ((kind == NY_BINOP_EQ || kind == NY_BINOP_LE || kind == NY_BINOP_GE) &&
              l == r) {
     fast_value = ny_const_tagged_bool_value(cg, true);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if ((kind == NY_BINOP_LT || kind == NY_BINOP_GT) &&
              l == r) {
     fast_value = ny_const_tagged_bool_value(cg, false);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if (kind == NY_BINOP_ADD || kind == NY_BINOP_SUB || kind == NY_BINOP_MUL) {
     const char *intr_name = entry->overflow_intr;
@@ -204,13 +196,12 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMValueRef ov = LLVMBuildExtractValue(cg->builder, packed, 1, "arith_ov");
     LLVMBasicBlockRef fast_ok_bb = LLVMAppendBasicBlock(fn, "bin.int.fast.ok");
     LLVMBuildCondBr(cg->builder, ov, slow_bb, fast_ok_bb);
-    ny_braun_add_predecessor(cg, slow_bb, LLVMGetInsertBlock(cg->builder));
-    ny_braun_add_predecessor(cg, fast_ok_bb, LLVMGetInsertBlock(cg->builder));
+
     LLVMPositionBuilderAtEnd(cg->builder, fast_ok_bb);
-    ny_braun_enter_block(cg, fast_ok_bb);
+
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if (kind == NY_BINOP_DIV || kind == NY_BINOP_MOD) {
     LLVMValueRef is_zero =
@@ -229,7 +220,7 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     fast_value =
         LLVMBuildSelect(cg->builder, is_zero, zero_res, nonzero_res, "divmod");
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if (kind == NY_BINOP_AND || kind == NY_BINOP_OR || kind == NY_BINOP_XOR) {
     LLVMValueRef raw = NULL;
@@ -241,7 +232,7 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
       raw = LLVMBuildXor(cg->builder, li, ri, "xor_fast");
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else if (kind == NY_BINOP_SHL || kind == NY_BINOP_SHR) {
     LLVMValueRef zero = LLVMConstInt(cg->type_i64, 0, false);
@@ -255,16 +246,15 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMBasicBlockRef fast_shift_bb =
         LLVMAppendBasicBlock(fn, "bin.int.fast.shift");
     LLVMBuildCondBr(cg->builder, in_range, fast_shift_bb, slow_bb);
-    ny_braun_add_predecessor(cg, fast_shift_bb, LLVMGetInsertBlock(cg->builder));
-    ny_braun_add_predecessor(cg, slow_bb, LLVMGetInsertBlock(cg->builder));
+
     LLVMPositionBuilderAtEnd(cg->builder, fast_shift_bb);
-    ny_braun_enter_block(cg, fast_shift_bb);
+
     LLVMValueRef raw = (kind == NY_BINOP_SHL)
                            ? LLVMBuildShl(cg->builder, li, ri, "shl_fast")
                            : LLVMBuildLShr(cg->builder, li, ri, "shr_fast");
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   } else {
     LLVMIntPredicate pred = LLVMIntEQ;
@@ -279,22 +269,20 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     LLVMValueRef cmp = LLVMBuildICmp(cg->builder, pred, li, ri, "icmp_fast");
     fast_value = ny_tag_bool(cg, cmp);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
-    ny_braun_add_predecessor(cg, merge_bb, fast_done_bb);
+
     LLVMBuildBr(cg->builder, merge_bb);
   }
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
-  ny_braun_enter_block(cg, slow_bb);
-  ny_braun_seal_block(cg, slow_bb);
+
   LLVMValueRef slow_value =
       LLVMBuildCall2(cg->builder, fallback->type, fallback->value,
                      (LLVMValueRef[]){l, r}, 2, "bin.slow");
   LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
-  ny_braun_add_predecessor(cg, merge_bb, slow_done_bb);
+
   LLVMBuildBr(cg->builder, merge_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
-  ny_braun_enter_block(cg, merge_bb);
-  ny_braun_seal_block(cg, merge_bb);
+
   LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "bin_result");
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
@@ -341,10 +329,10 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
   }
 
   if (kind == NY_BINOP_EQ) {
-     int64_t li = 0, ri = 0;
+    int64_t li = 0, ri = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
       return ny_const_tagged_bool_value(cg, li == ri);
-    fun_sig *s = prefer_builtin_ops ? lookup_fun(cg, "__eq") : ny_helper_eq(cg);
+    fun_sig *s = prefer_builtin_ops ? lookup_fun(cg, "__eq", 0) : ny_helper_eq(cg);
     if (!s)
       return expr_fail(cg, (token_t){0}, "'==' requires 'eq' (or __eq)");
     LLVMValueRef fast = ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
@@ -405,9 +393,9 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     char full_generic[128];
     snprintf(full_generic, sizeof(full_generic), "std.core.reflect.%s",
              generic_name);
-    fun_sig *s = lookup_fun(cg, full_generic);
+    fun_sig *s = lookup_fun(cg, full_generic, 0);
     if (!s)
-      s = lookup_fun(cg, generic_name);
+      s = lookup_fun(cg, generic_name, 0);
     if (s && strcmp(s->name, builtin_name) != 0) {
       if (s->stmt_t && !ny_is_stdlib_tok(s->stmt_t->tok))
         s = NULL;
@@ -424,7 +412,7 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     }
   }
   if (builtin_name) {
-    fun_sig *s = lookup_fun(cg, builtin_name);
+    fun_sig *s = lookup_fun(cg, builtin_name, 0);
     if (!s)
       return expr_fail(cg, (token_t){0}, "builtin %s missing", builtin_name);
     LLVMValueRef fast =

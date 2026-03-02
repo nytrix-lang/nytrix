@@ -1,7 +1,24 @@
 #include "lex/lexer.h"
+#include "base/util.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
+
+static const uint8_t ny_lex_table[256] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, // 0-15
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 16-31
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 32-47 (space is 1)
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, // 48-63 (digits are 4)
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 64-79 (A-O are 2)
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 2, // 80-95 (P-Z are 2, _ is 2)
+    0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 96-111 (a-o are 2)
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0  // 112-127 (p-z are 2)
+};
+
+#define IS_SPACE(c) (ny_lex_table[(uint8_t)(c)] & 1)
+#define IS_ALPHA(c) (ny_lex_table[(uint8_t)(c)] & 2)
+#define IS_DIGIT(c) (ny_lex_table[(uint8_t)(c)] & 4)
+#define IS_ALNUM(c) (ny_lex_table[(uint8_t)(c)] & 6)
 
 void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->src = src;
@@ -11,11 +28,10 @@ void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->col = 1;
   lx->split_pos = 0;
   lx->split_filename = NULL;
+  lx->skipped_newline = false;
 }
 
-static char peek(lexer_t *lx) { return lx->src[lx->pos]; }
-
-static char advance(lexer_t *lx) {
+static inline char advance(lexer_t *lx) {
   if (lx->src[lx->pos] == '\0')
     return '\0';
   if (lx->split_pos > 0 && lx->pos == lx->split_pos) {
@@ -27,11 +43,14 @@ static char advance(lexer_t *lx) {
   if (c == '\n') {
     lx->line++;
     lx->col = 1;
+    lx->skipped_newline = true;
   } else {
     lx->col++;
   }
   return c;
 }
+
+static inline char peek(lexer_t *lx) { return lx->src[lx->pos]; }
 
 static char peek_next(lexer_t *lx) {
   if (lx->src[lx->pos] == '\0')
@@ -52,6 +71,7 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.kind = kind;
   tok.lexeme = lx->src + start;
   tok.len = lx->pos - start;
+  tok.hash = 0;
   tok.line = lx->line;
   tok.col = lx->col - (int)tok.len;
   tok.filename = lx->filename;
@@ -73,7 +93,7 @@ static void lexer_error(lexer_t *lx, size_t start, const char *msg,
 static void skip_whitespace(lexer_t *lx) {
   for (;;) {
     char c = peek(lx);
-    if (isspace(c)) {
+    if (IS_SPACE(c)) {
       advance(lx);
     } else if (c == ';') {
       while (peek(lx) != '\n' && peek(lx) != '\0')
@@ -102,8 +122,6 @@ static token_kind identifier_type(const char *start, size_t len) {
           return NY_T_ASM;
         break;
       case 'n':
-        if (len == 3 && start[2] == 'd')
-          return NY_T_AND;
         break;
       }
     }
@@ -221,6 +239,7 @@ static token_kind identifier_type(const char *start, size_t len) {
 }
 
 token_t lexer_next(lexer_t *lx) {
+  lx->skipped_newline = false;
   skip_whitespace(lx);
   size_t start = lx->pos;
   if (lx->src[lx->pos] == '\0') {
@@ -262,69 +281,113 @@ token_t lexer_next(lexer_t *lx) {
     }
     return make_token(lx, NY_T_FSTRING, start);
   }
-  if (isalpha(c) || c == '_') {
-    for (;;) {
-      char p = peek(lx);
-      if (isalnum(p) || p == '_' || p == '?' ||
-          (p == '!' && peek_next(lx) != '=')) {
-        advance(lx);
-      } else {
-        break;
-      }
+  if (IS_ALPHA(c)) {
+    const char *p = lx->src + lx->pos;
+    uint64_t hash = NY_FNV1A64_OFFSET_BASIS;
+    hash ^= (uint8_t)c;
+    hash *= NY_FNV1A64_PRIME;
+    while (IS_ALNUM(*p)) {
+      hash ^= (uint8_t)*p;
+      hash *= NY_FNV1A64_PRIME;
+      p++;
     }
+    size_t len = p - (lx->src + lx->pos);
+    lx->pos += len;
+    lx->col += (int)len;
     token_t tok = make_token(lx, NY_T_IDENT, start);
+    tok.hash = hash;
     tok.kind = identifier_type(tok.lexeme, tok.len);
     NY_LOG_DEBUG("Lexer: identifier '%.*s' resolved to kind %d\n", (int)tok.len,
                  tok.lexeme, tok.kind);
     return tok;
   }
-  if (isdigit(c)) {
-    if (c == '0' && (peek(lx) == 'x' || peek(lx) == 'X')) {
-      advance(lx);
-      while (isxdigit(peek(lx)))
-        advance(lx);
-      char s = peek(lx);
+  if (IS_DIGIT(c)) {
+    uint64_t hash = NY_FNV1A64_OFFSET_BASIS;
+    hash ^= (uint8_t)c;
+    hash *= NY_FNV1A64_PRIME;
+    if (c == '0' && (lx->src[lx->pos] == 'x' || lx->src[lx->pos] == 'X')) {
+      hash ^= (uint8_t)lx->src[lx->pos];
+      hash *= NY_FNV1A64_PRIME;
+      lx->pos++; lx->col++;
+      while (isxdigit(lx->src[lx->pos])) {
+        hash ^= (uint8_t)lx->src[lx->pos];
+        hash *= NY_FNV1A64_PRIME;
+        lx->pos++; lx->col++;
+      }
+      char s = lx->src[lx->pos];
       if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
            s == 'F') &&
-          isdigit(peek_next(lx))) {
-        advance(lx);
-        while (isdigit(peek(lx)))
-          advance(lx);
+          isdigit(lx->src[lx->pos + 1])) {
+        hash ^= (uint8_t)lx->src[lx->pos];
+        hash *= NY_FNV1A64_PRIME;
+        lx->pos++; lx->col++;
+        while (isdigit(lx->src[lx->pos])) {
+          hash ^= (uint8_t)lx->src[lx->pos];
+          hash *= NY_FNV1A64_PRIME;
+          lx->pos++; lx->col++;
+        }
       }
-      return make_token(lx, NY_T_NUMBER, start);
+      token_t tok = make_token(lx, NY_T_NUMBER, start);
+      tok.hash = hash;
+      return tok;
     }
-    while (isdigit(peek(lx)))
-      advance(lx);
-    if (peek(lx) == '.' && isdigit(peek_next(lx))) {
-      advance(lx);
-      while (isdigit(peek(lx)))
-        advance(lx);
+    while (IS_DIGIT(lx->src[lx->pos])) {
+      hash ^= (uint8_t)lx->src[lx->pos];
+      hash *= NY_FNV1A64_PRIME;
+      lx->pos++; lx->col++;
     }
-    if (peek(lx) == 'e' || peek(lx) == 'E') {
+    if (lx->src[lx->pos] == '.' && IS_DIGIT(lx->src[lx->pos + 1])) {
+      hash ^= (uint8_t)lx->src[lx->pos];
+      hash *= NY_FNV1A64_PRIME;
+      lx->pos++; lx->col++;
+      while (IS_DIGIT(lx->src[lx->pos])) {
+        hash ^= (uint8_t)lx->src[lx->pos];
+        hash *= NY_FNV1A64_PRIME;
+        lx->pos++; lx->col++;
+      }
+    }
+    if (lx->src[lx->pos] == 'e' || lx->src[lx->pos] == 'E') {
       size_t save_pos = lx->pos;
       int save_line = lx->line;
       int save_col = lx->col;
-      advance(lx);
-      if (peek(lx) == '+' || peek(lx) == '-')
-        advance(lx);
-      if (isdigit(peek(lx))) {
-        while (isdigit(peek(lx)))
-          advance(lx);
+      uint64_t save_hash = hash;
+      hash ^= (uint8_t)lx->src[lx->pos];
+      hash *= NY_FNV1A64_PRIME;
+      lx->pos++; lx->col++;
+      if (lx->src[lx->pos] == '+' || lx->src[lx->pos] == '-') {
+        hash ^= (uint8_t)lx->src[lx->pos];
+        hash *= NY_FNV1A64_PRIME;
+        lx->pos++; lx->col++;
+      }
+      if (IS_DIGIT(lx->src[lx->pos])) {
+        while (IS_DIGIT(lx->src[lx->pos])) {
+          hash ^= (uint8_t)lx->src[lx->pos];
+          hash *= NY_FNV1A64_PRIME;
+          lx->pos++; lx->col++;
+        }
       } else {
         lx->pos = save_pos;
         lx->line = save_line;
         lx->col = save_col;
+        hash = save_hash;
       }
     }
-    char s = peek(lx);
+    char s = lx->src[lx->pos];
     if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
          s == 'F') &&
-        isdigit(peek_next(lx))) {
-      advance(lx);
-      while (isdigit(peek(lx)))
-        advance(lx);
+        IS_DIGIT(lx->src[lx->pos + 1])) {
+      hash ^= (uint8_t)lx->src[lx->pos];
+      hash *= NY_FNV1A64_PRIME;
+      lx->pos++; lx->col++;
+      while (IS_DIGIT(lx->src[lx->pos])) {
+        hash ^= (uint8_t)lx->src[lx->pos];
+        hash *= NY_FNV1A64_PRIME;
+        lx->pos++; lx->col++;
+      }
     }
-    return make_token(lx, NY_T_NUMBER, start);
+    token_t tok = make_token(lx, NY_T_NUMBER, start);
+    tok.hash = hash;
+    return tok;
   }
   if (c == '"' || c == '\'') {
     char quote = c;
@@ -461,4 +524,69 @@ token_t lexer_next(lexer_t *lx) {
   lexer_error(lx, start, emsg,
               "check for accidental non-ascii characters or typos");
   return lexer_next(lx);
+}
+
+char *dup_string_token(token_t t) {
+  if (t.len < 2)
+    return NULL;
+  size_t head = 1, tail = 1;
+  if (t.len >= 6 && t.lexeme[0] == t.lexeme[1] && t.lexeme[1] == t.lexeme[2]) {
+    head = 3;
+    tail = 3;
+  }
+  if (t.len < head + tail)
+    return NULL;
+  size_t out_len = t.len - head - tail;
+  char *out = malloc(out_len + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, t.lexeme + head, out_len);
+  out[out_len] = '\0';
+  return out;
+}
+
+char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
+  token_t t = *entry_tok;
+  if (t.kind == NY_T_STRING) {
+    char *name = dup_string_token(t);
+    if (out_last_tok)
+      *out_last_tok = lexer_next(lx);
+    return name;
+  }
+  if (t.kind != NY_T_IDENT)
+    return NULL;
+  size_t cap = 64, len = 0;
+  char *buf = malloc(cap);
+  if (!buf)
+    return NULL;
+  memcpy(buf, t.lexeme, t.len);
+  len += t.len;
+  for (;;) {
+    token_t tok = lexer_next(lx);
+    if (tok.kind == NY_T_DOT) {
+      token_t id = lexer_next(lx);
+      if (id.kind != NY_T_IDENT) {
+        free(buf);
+        return NULL;
+      }
+      if (len + 1 + id.len + 1 > cap) {
+        cap = (len + 1 + id.len + 1) * 2;
+        char *nb = realloc(buf, cap);
+        if (!nb) {
+          free(buf);
+          return NULL;
+        }
+        buf = nb;
+      }
+      buf[len++] = '.';
+      memcpy(buf + len, id.lexeme, id.len);
+      len += id.len;
+    } else {
+      if (out_last_tok)
+        *out_last_tok = tok;
+      break;
+    }
+  }
+  buf[len] = '\0';
+  return buf;
 }

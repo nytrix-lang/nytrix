@@ -8,9 +8,6 @@ module std.ui.diag (
 use std.core *
 use std.os *
 use std.ui.window as window
-use std.core *
-use std.os *
-use std.ui.window as window
 use std.ui.gfx.vulkan *
 
 fn _yn(v){
@@ -32,10 +29,10 @@ fn probe(){
 fn probe_text(){
    "Returns a human-readable summary line for backend diagnostics."
    def d = probe()
-   "os=" + to_str(get(d, "os", "?")) +
-   " window=" + to_str(get(d, "window_backend", "ny")) +
-   " available=" + _yn(get(d, "window_available", false)) +
-   " vk=" + _yn(get(d, "vulkan", false))
+   "os=" + to_str(dict_get(d, "os", "?")) +
+   " window=" + to_str(dict_get(d, "window_backend", "ny")) +
+   " available=" + _yn(dict_get(d, "window_available", false)) +
+   " vk=" + _yn(dict_get(d, "vulkan", false))
 }
 
 fn print_probe(){
@@ -48,7 +45,7 @@ if(comptime{__main()}){
 
    def d = probe()
    assert(is_dict(d), "diag probe dict")
-   assert(is_str(get(d, "os", "")), "diag os string")
-   assert(is_str(get(d, "window_backend", "")), "diag backend string")
+   assert(is_str(dict_get(d, "os", "")), "diag os string")
+   assert(is_str(dict_get(d, "window_backend", "")), "diag backend string")
    print("✓ std.ui.diag tests passed")
 }

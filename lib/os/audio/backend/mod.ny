@@ -1,6 +1,6 @@
 ;; Keywords: audio backend
 
-module std.audio.backend (
+module std.os.audio.backend (
    init, shutdown,
    play, stop, is_playing,
    set_master_volume, get_master_volume,
@@ -10,14 +10,15 @@ module std.audio.backend (
 use std.core *
 use std.os *
 use std.os.thread *
+use std.os.time *
 use std.text *
-use std.audio.backend.io (
+use std.os.audio.backend.io (
    create, connect, disconnect,
    get_output_device_count, get_output_device, get_default_output_device_index,
    outstream_create, outstream_open, outstream_start, outstream_write_frames, outstream_destroy,
    FORMAT_S16LE, FORMAT_FLOAT32LE, get_backend_name as io_backend_name
 )
-use std.audio.mixer as mixer
+use std.os.audio.mixer as mixer
 
 mut _ctx = 0
 mut _stream = 0
@@ -210,7 +211,7 @@ fn _cleanup_partial(){
    _idle_sleep_ms = 0
 }
 
-fn init(){
+fn init(force_async=false){
    "Initializes module state."
    if(_ctx != 0){ return true }
    if(_is_debug()){ print("Audio: Initializing context...") }
@@ -248,7 +249,7 @@ fn init(){
    _ctx = ctx
    _stream = stream
    _prime_stream()
-   if(_is_async_mode()){
+   if(force_async || _is_async_mode()){
       if(!_start_mixer_thread()){
          if(_is_debug()){
             print("Audio: Failed to spawn mixer thread; falling back to sync mode.")
@@ -320,7 +321,7 @@ fn _audio_thread(arg){
       }
       mutex_unlock(_mtx)
       if(len(actives) == 0){
-         sleep_ms(idle_sleep)
+         msleep(idle_sleep)
          continue
       }
       if(_is_mix_debug()){
@@ -352,7 +353,7 @@ fn _audio_thread(arg){
       }
       if(!outstream_write_frames(_stream, mix_buf, period_frames)){
          if(_is_debug()){ print("Audio: Write error, device might be busy or lost.") }
-         sleep_ms(10)
+         msleep(10)
       }
    }
    free(mix_buf)

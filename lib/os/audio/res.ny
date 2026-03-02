@@ -1,6 +1,6 @@
 ;; Keywords: audio resource manager
 
-module std.audio.res (
+module std.os.audio.res (
    init, shutdown,
    load, get_sound_info,
    clear_cache,
@@ -13,13 +13,13 @@ use std.core.dict *
 use std.os.path as path
 use std.os.fs as fs
 use std.text as str
-use std.audio.formats.wav as wav
-use std.audio.formats.ogg as ogg
-use std.audio.formats.opus as opus
-use std.audio.formats.acc as acc
-use std.audio.formats.flac as flac
-use std.audio.formats.mp3 as mp3
-use std.audio.source *
+use std.os.audio.formats.wav as wav
+use std.os.audio.formats.ogg as ogg
+use std.os.audio.formats.opus as opus
+use std.os.audio.formats.acc as acc
+use std.os.audio.formats.flac as flac
+use std.os.audio.formats.mp3 as mp3
+use std.os.audio.source *
 
 mut _cache = dict(32)
 mut _mtx = 0
@@ -169,7 +169,7 @@ fn get_sound_info(sound){
 if(comptime{__main()}){
    use std.core.error *
 
-   print("Testing std.audio.res audio loading...")
+   print("Testing std.os.audio.res audio loading...")
 
    fn verify_audio(filepath, name){
       def s = load(filepath)
@@ -199,9 +199,9 @@ if(comptime{__main()}){
    ok = ok && verify_audio("etc/assets/audio/test_sine.mp3", "MP3")
 
    if(ok){
-      print("✓ std.audio.res all audio format tests passed")
+      print("✓ std.os.audio.res all audio format tests passed")
    } else {
-      print("✗ SOME std.audio.res TESTS FAILED")
+      print("✗ SOME std.os.audio.res TESTS FAILED")
       __exit(1)
    }
    shutdown()

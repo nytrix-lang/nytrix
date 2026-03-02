@@ -262,7 +262,7 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
-void ny_llvm_prepare_module(LLVMModuleRef module) {
+void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
   if (!ny_llvm_init_native())
     return;
   char *raw_triple = NULL;
@@ -293,8 +293,13 @@ void ny_llvm_prepare_module(LLVMModuleRef module) {
     } else if (!feat_buf[0] && arm32) {
       features = "";
     }
+    LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
+    if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
+    else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
+    else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-        target, triple, cpu, features ? features : "", LLVMCodeGenLevelDefault,
+        target, triple, cpu, features ? features : "", cgo,
         LLVMRelocPIC, host_code_model());
     if (tm) {
       LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);

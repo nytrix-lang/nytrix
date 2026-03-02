@@ -11,7 +11,7 @@ fn thread_spawn(func, arg=0){
    ; func must be a function pointer or closure.
    ; runtime expects pure function pointer?
    ; Nytrix functions are just pointers.
-   return __thread_spawn(func, arg) ; TODO use syscalls instead
+   return __thread_spawn(func, arg)
 }
 
 fn thread_join(handle){

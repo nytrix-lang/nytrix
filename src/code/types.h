@@ -67,6 +67,7 @@ typedef struct binding {
   bool is_mut;
   bool is_used;
   bool owned;
+  bool is_stable;
   const char *type_name;
   const char *decl_type_name;
   uint64_t name_hash;
@@ -97,6 +98,7 @@ typedef struct fun_sig {
   bool is_extern;
   bool is_pure;
   bool is_memo_safe;
+  bool is_stable;
   uint32_t effects;
   bool args_escape;
   bool args_mutated;

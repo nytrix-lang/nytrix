@@ -13,9 +13,7 @@ fn bytes(n){
    if(!p){ return 0 }
    memset(p, 0, n)
    store64(p, 122, -8)
-   store64(p, n, -16) ;; Store length untagged or tagged?
-   ;; Actually, if we use it for __check_oob, it MUST be the physical size.
-   ;; For bytes, n is the size.
+   store64(p, n, -16)
    p
 }
 

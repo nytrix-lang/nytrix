@@ -274,7 +274,7 @@ def run_sanitizer(build_dir, sanitizer, jobs=0, unknown=None):
     if not extra_args and not env_bool("NYTRIX_SANITIZER_FULL", default=False):
         pattern = (os.environ.get("NYTRIX_SANITIZER_PATTERN") or "").strip()
         if not pattern:
-            pattern = "etc/tests/runtime/|std/"
+            pattern = "etc/tests/runtime/|lib/"
         extra_args += ["--pattern", pattern]
 
     step(f"run {san} gate: build_dir={env['BUILD_DIR']}")

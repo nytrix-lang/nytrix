@@ -48,69 +48,7 @@ static void print_trace_snippet(const char *file, int line, int col) {
   char *src = ny_read_file(file);
   if (!src)
     return;
-  const char *cur = src;
-  int cur_line = 1;
-  while (*cur && cur_line < line) {
-    if (*cur == '\n')
-      cur_line++;
-    cur++;
-  }
-  if (cur_line != line) {
-    free(src);
-    return;
-  }
-  const char *line_start = cur;
-  while (*cur && *cur != '\n')
-    cur++;
-  size_t line_len = (size_t)(cur - line_start);
-  if (line_len == 0) {
-    free(src);
-    return;
-  }
-  size_t caret_col = (size_t)(col - 1);
-  if (caret_col > line_len)
-    caret_col = line_len;
-  size_t caret_len = 1;
-  const size_t max_len = 200;
-  size_t start = 0;
-  size_t end = line_len;
-  bool prefix = false, suffix = false;
-  if (line_len > max_len) {
-    if (caret_col > max_len / 2)
-      start = caret_col - max_len / 2;
-    if (start + max_len > line_len)
-      start = line_len - max_len;
-    end = start + max_len;
-    prefix = start > 0;
-    suffix = end < line_len;
-  }
-  size_t show_len = end - start;
-  char *buf = malloc(show_len + 1);
-  if (!buf) {
-    free(src);
-    return;
-  }
-  for (size_t i = 0; i < show_len; i++) {
-    char c = line_start[start + i];
-    buf[i] = (c == '\t') ? ' ' : c;
-  }
-  buf[show_len] = '\0';
-  int width = 1;
-  for (int tmp = line; tmp >= 10; tmp /= 10)
-    width++;
-  fprintf(stderr, "  %s%*d%s | %s%s%s\n", clr(NY_CLR_GRAY), width, line,
-          clr(NY_CLR_RESET), prefix ? "..." : "", buf, suffix ? "..." : "");
-  fprintf(stderr, "  %s%*s%s | ", clr(NY_CLR_GRAY), width, "",
-          clr(NY_CLR_RESET));
-  size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
-  for (size_t i = 0; i < caret_pad; i++)
-    fputc(' ', stderr);
-  fputs(clr(NY_CLR_RED), stderr);
-  for (size_t i = 0; i < caret_len; i++)
-    fputc('^', stderr);
-  fputs(clr(NY_CLR_RESET), stderr);
-  fputc('\n', stderr);
-  free(buf);
+  ny_print_snippet(src, line, col, 1, NY_CLR_RED);
   free(src);
 }
 

@@ -58,19 +58,19 @@ def run_std_bundle(bundle_path=None):
         if f.name == "mod.ny": return 20
         return 30
     
-    std_dir = ROOT / "std"
-    if not std_dir.exists():
-        log("STD", "Error: std/ directory not found")
+    lib_dir = ROOT / "lib"
+    if not lib_dir.exists():
+        log("STD", "Error: lib/ directory not found")
         return 1
         
     files = []
-    for f in std_dir.rglob("*.ny"):
+    for f in lib_dir.rglob("*.ny"):
         if f.name.endswith("_test.ny"):
             continue
 
         files.append(f)
     if not files:
-        log("STD", "Warning: No .ny files in std/")
+        log("STD", "Warning: No .ny files in lib/")
         return 0
         
     sorted_files = sorted(list(set(files)), key=lambda f: (file_priority(f.relative_to(ROOT)), str(f)))
@@ -78,13 +78,13 @@ def run_std_bundle(bundle_path=None):
     file_recs = []
     for f in sorted_files:
         content = f.read_text(encoding="utf-8")
-        rel_path = f.relative_to(std_dir)
+        rel_path = f.relative_to(lib_dir)
         parts = list(rel_path.parts)
         if parts[-1] == "mod.ny":
             parts.pop()
         else:
             parts[-1] = parts[-1].replace(".ny", "")
-        fallback_mod_name = "std." + ".".join(parts)
+        fallback_mod_name = "lib." + ".".join(parts)
         declared_mod_name = _declared_module_name(content)
         full_mod_name = declared_mod_name if declared_mod_name else fallback_mod_name
         file_recs.append({
@@ -151,7 +151,10 @@ def run_std_bundle(bundle_path=None):
         full_mod_name = rec["module"]
         
         bundled_output_lines.append(f";; Module from {rel_path.as_posix().replace('.ny', '')}\n")
-        bundled_output_lines.append(f"module {full_mod_name} *\n")
+        # Only prepend module declaration if it doesn't already have one
+        if not _declared_module_name(content):
+            bundled_output_lines.append(f"module {full_mod_name} *\n")
+        
         bundled_output_lines.append(content)
         bundled_output_lines.append("\n")
         bundled_output_lines.append(f"use {full_mod_name} *\n") # Make symbols available to subsequent modules in the bundle
@@ -183,7 +186,7 @@ def run_std_bundle(bundle_path=None):
     sym_lines = [
         "#pragma once",
         "typedef struct { const char *sym; const char *mod; } nt_std_symbol;",
-        "static const nt_std_symbols[] = {",
+        "static const nt_std_symbol nt_std_symbols[] = {",
     ]
     for sym in sorted(symbol_map.keys()):
         mod = symbol_map[sym]
@@ -209,7 +212,7 @@ def run_std_bundle(bundle_path=None):
         bundle_path_disp = c('1', str(bundle_disp))
         sym_path_disp = c('1', str(sym_disp))
         
-        log_ok(f"Bundled {modules_disp} std modules -> {bundle_path_disp}")
+        log_ok(f"Bundled {modules_disp} lib modules -> {bundle_path_disp}")
         log_ok(f"Generated {symbols_disp} symbols -> {sym_path_disp}")
     else:
         pass
@@ -218,7 +221,7 @@ def run_std_bundle(bundle_path=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Bundle std/*.ny into a single std file and symbol index",
+        description="Bundle lib/*.ny into a single std file and symbol index",
     )
     ap.add_argument(
         "bundle_path",
