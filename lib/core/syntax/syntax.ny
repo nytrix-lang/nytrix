@@ -22,37 +22,37 @@ use std.core.dict *
 use std.core.reflect as core_ref
 
 fn _ensure_registry(reg){
-   "Internal helper."
+   "Internal: validates that `reg` is a valid syntax registry dictionary."
    if(!is_dict(reg)){ panic("syntax registry must be a dict") }
    reg
 }
 
 fn _ensure_name(name){
-   "Internal helper."
+   "Internal: validates that `name` is a non-empty string used for syntax elements."
    if(!is_str(name)){ panic("syntax name must be a string") }
    if(core_ref.len(name) == 0){ panic("syntax name cannot be empty") }
    name
 }
 
 fn _ensure_handler(handler){
-   "Internal helper."
+   "Internal: validates that a syntax handler (macro or attribute) is provided."
    if(!handler){ panic("syntax handler cannot be none") }
    handler
 }
 
 fn _to_list(x){
-   "Internal helper."
+   "Internal: ensures `x` is returned as a list, falling back to an empty list."
    if(is_list(x)){ return x }
    list(0)
 }
 
 fn _empty_list(){
-   "Internal helper."
+   "Internal: returns a new empty list."
    list(0)
 }
 
 fn _list_without(xs, want){
-   "Internal helper."
+   "Internal: returns a copy of list `xs` with all occurrences of `want` removed."
    mut out = list(core_ref.len(xs))
    mut i = 0
    while(i < core_ref.len(xs)){
@@ -64,34 +64,34 @@ fn _list_without(xs, want){
 }
 
 fn _registry_dict(reg, key, cap=8){
-   "Internal helper."
+   "Internal: retrieves a dictionary from the registry at `key`, initializing it if missing."
    def v = dict_get(reg, key, 0)
    if(is_dict(v)){ return v }
    dict(cap)
 }
 
 fn _registry_list(reg, key, cap=8){
-   "Internal helper."
+   "Internal: retrieves a list from the registry at `key`, initializing it if missing."
    def v = dict_get(reg, key, 0)
    if(is_list(v)){ return v }
    list(cap)
 }
 
 fn _ensure_rewriter(rw){
-   "Internal helper."
+   "Internal: validates that `rw` is a valid rewriter dictionary."
    if(!is_dict(rw)){ panic("syntax rewriter must be a dict") }
    rw
 }
 
 fn _rewriter_dict(rw, key, cap=8){
-   "Internal helper."
+   "Internal: retrieves a dictionary from the rewriter at `key`, initializing it if missing."
    def v = dict_get(rw, key, 0)
    if(is_dict(v)){ return v }
    dict(cap)
 }
 
 fn _rewriter_list(rw, key, cap=8){
-   "Internal helper."
+   "Internal: retrieves a list from the rewriter at `key`, initializing it if missing."
    def v = dict_get(rw, key, 0)
    if(is_list(v)){ return v }
    list(cap)
@@ -191,7 +191,7 @@ fn unregister_attribute(reg, name){
 }
 
 fn _merge_macros(dst, src, overwrite=true){
-   "Internal helper."
+   "Internal: merges macro handlers from `src` registry into `dst`."
    def src_macros = _registry_dict(src, "macros")
    def src_order = _registry_list(src, "macro_order")
    mut i = 0
@@ -211,7 +211,7 @@ fn _merge_macros(dst, src, overwrite=true){
 }
 
 fn _merge_attributes(dst, src, overwrite=true){
-   "Internal helper."
+   "Internal: merges attribute handlers from `src` registry into `dst`."
    def src_attrs = _registry_dict(src, "attrs")
    def src_order = _registry_list(src, "attr_order")
    mut i = 0
@@ -286,7 +286,7 @@ fn list_attributes(reg){
 }
 
 fn _macro_node(name, args, body, tok){
-   "Internal helper."
+   "Internal: creates a macro node dictionary representation."
    mut node = dict(8)
    node = dict_set(node, "name", name)
    node = dict_set(node, "args", _to_list(args))
@@ -296,25 +296,25 @@ fn _macro_node(name, args, body, tok){
 }
 
 fn _is_macro_node(node){
-   "Internal helper."
+   "Internal: checks if `node` is a valid macro node dictionary."
    if(!is_dict(node)){ return false }
    is_str(dict_get(node, "name", 0))
 }
 
 fn _macro_node_name(node){
-   "Internal helper."
+   "Internal: returns the name of a macro node."
    if(!_is_macro_node(node)){ return "" }
    dict_get(node, "name", "")
 }
 
 fn _macro_node_args(node){
-   "Internal helper."
+   "Internal: returns the arguments of a macro node."
    if(!_is_macro_node(node)){ return _empty_list() }
    _to_list(dict_get(node, "args", _empty_list()))
 }
 
 fn _to_macro_node(value, tok=0){
-   "Internal helper."
+   "Internal: converts a value or form into a macro node if possible."
    if(_is_macro_node(value)){ return value }
    if(is_form(value)){
       return _macro_node(form_head(value), form_tail(value), 0, tok)
@@ -323,7 +323,7 @@ fn _to_macro_node(value, tok=0){
 }
 
 fn _macro_node_to_form(node){
-   "Internal helper."
+   "Internal: converts a macro node back into a Lisp-style form list."
    if(!_is_macro_node(node)){ return node }
    mut out = append(list(0), _macro_node_name(node))
    def args = _macro_node_args(node)
@@ -412,7 +412,7 @@ fn expand_form(reg, value, tok=0, max_steps=64){
 }
 
 fn _expand_form_list(reg, xs, tok=0, max_steps=64){
-   "Internal helper."
+   "Internal: recursively expands all forms within list `xs`."
    mut out = list(core_ref.len(xs))
    mut i = 0
    while(i < core_ref.len(xs)){

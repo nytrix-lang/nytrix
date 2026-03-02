@@ -387,7 +387,7 @@ if(comptime{__main()}){
     }
     if(c < 0){
       print("Skipping socket test: client connect failed after", tries, "tries. Error:", c)
-      ;; Best-effort unblock server accept so join does not hang.
+      ; Best-effort unblock server accept so join does not hang.
       mut kick = -1
       mut kick_tries = 0
       while(kick < 0 && kick_tries < CONNECT_RETRIES){

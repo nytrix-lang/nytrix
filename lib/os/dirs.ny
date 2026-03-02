@@ -10,22 +10,22 @@ use std.os *
 use std.os.path as ospath
 
 fn _is_windows(){
-   "Internal helper."
+   "Internal: returns true if the host operating system is Windows."
    __os_name() == "windows"
 }
 
 fn _is_macos(){
-   "Internal helper."
+   "Internal: returns true if the host operating system is macOS (Darwin)."
    __os_name() == "macos"
 }
 
 fn _is_non_empty(v){
-   "Internal helper."
+   "Internal: returns true if `v` is a non-empty string."
    is_str(v) && str_len(v) > 0
 }
 
 fn _env_path(name){
-   "Internal helper."
+   "Internal: retrieves the value of environment variable `name` and returns its normalized path."
    def v = env(name)
    if(_is_non_empty(v)){ return ospath.normalize(v) }
    ""
@@ -61,7 +61,7 @@ fn _non_empty_or(primary, fallback){
 }
 
 fn home_dir(){
-   "Function `home_dir`."
+   "Returns the path to the current user's home directory, using OS-specific environment variables."
    if(__os_name() == "windows"){
       def h = _env_path("USERPROFILE")
       if(str_len(h) > 0){ return h }
@@ -78,7 +78,7 @@ fn home_dir(){
 }
 
 fn temp_dir(){
-   "Function `temp_dir`."
+   "Returns the path to the system's temporary directory."
    if(__os_name() == "windows"){
       def t = _first_env_path2("TEMP", "TMP")
       if(str_len(t) > 0){ return t }
@@ -90,7 +90,7 @@ fn temp_dir(){
 }
 
 fn config_dir(){
-   "Function `config_dir`."
+   "Returns the path to the current user's configuration directory (e.g., ~/.config on Linux)."
    if(_is_windows()){
       def a = _env_path("APPDATA")
       if(str_len(a) > 0){ return a }
@@ -105,7 +105,7 @@ fn config_dir(){
 }
 
 fn data_dir(){
-   "Function `data_dir`."
+   "Returns the path to the current user's persistent data directory (e.g., ~/.local/share on Linux)."
    if(_is_windows()){
       def a = _env_path("LOCALAPPDATA")
       if(str_len(a) > 0){ return a }
@@ -120,7 +120,7 @@ fn data_dir(){
 }
 
 fn cache_dir(){
-   "Function `cache_dir`."
+   "Returns the path to the current user's cache directory (e.g., ~/.cache on Linux)."
    if(_is_windows()){
       def a = _env_path("LOCALAPPDATA")
       if(str_len(a) > 0){ return ospath.normalize(ospath.join(a, "Temp")) }

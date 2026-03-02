@@ -15,8 +15,10 @@ static inline void ny_name_bloom_add(uint64_t bloom[4], uint64_t hash) {
     return;
   unsigned b0 = (unsigned)(hash & 255u);
   unsigned b1 = (unsigned)((hash >> 8) & 255u);
-  bloom[b0 >> 6] |= (uint64_t)1u << (b0 & 63u);
-  bloom[b1 >> 6] |= (uint64_t)1u << (b1 & 63u);
+  if ((b0 >> 6) < 4)
+    bloom[b0 >> 6] |= (uint64_t)1u << (b0 & 63u);
+  if ((b1 >> 6) < 4)
+    bloom[b1 >> 6] |= (uint64_t)1u << (b1 & 63u);
 }
 
 static inline bool ny_name_bloom_maybe_has(const uint64_t bloom[4],
@@ -25,10 +27,14 @@ static inline bool ny_name_bloom_maybe_has(const uint64_t bloom[4],
     return false;
   unsigned b0 = (unsigned)(hash & 255u);
   unsigned b1 = (unsigned)((hash >> 8) & 255u);
-  if ((bloom[b0 >> 6] & ((uint64_t)1u << (b0 & 63u))) == 0)
-    return false;
-  if ((bloom[b1 >> 6] & ((uint64_t)1u << (b1 & 63u))) == 0)
-    return false;
+  if ((b0 >> 6) < 4) {
+    if ((bloom[b0 >> 6] & ((uint64_t)1u << (b0 & 63u))) == 0)
+      return false;
+  }
+  if ((b1 >> 6) < 4) {
+    if ((bloom[b1 >> 6] & ((uint64_t)1u << (b1 & 63u))) == 0)
+      return false;
+  }
   return true;
 }
 
@@ -56,6 +62,7 @@ static inline void ny_fun_sig_init(fun_sig *sig, const char *name,
   sig->args_escape = true;
   sig->args_mutated = true;
   sig->returns_alias = true;
+  sig->owned = true;
 }
 
 static inline void ny_fun_sig_free_members(fun_sig *sig) {
@@ -90,7 +97,7 @@ static inline bool assigned_name_has(const assigned_name_list *names,
                                       const assigned_hash_list *hashes,
                                       const char *name, uint64_t hash,
                                       const uint64_t bloom[4]) {
-  if (!names || !hashes || !name)
+  if (!names || !hashes || !name || !names->data || !hashes->data)
     return false;
   return ny_name_set_has_hash(names->data, names->len, hashes->data, hashes->len,
                               bloom, name, hash);
@@ -221,6 +228,7 @@ typedef struct codegen_t {
   bool auto_memoize;
   bool auto_memoize_impure;
   uint64_t auto_memo_site_seq;
+  bool is_repl;
   LLVMValueRef result_store_val;
   size_t func_root_idx;
   const char **assigned_names_data;

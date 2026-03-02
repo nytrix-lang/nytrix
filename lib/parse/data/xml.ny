@@ -34,7 +34,7 @@ fn _parse_attr(s, p, n){
    mut attrs = dict()
    while(p < n){
       p = _skip_ws(s, p, n)
-      if(p >= n || load8(s, p) == 62 || load8(s, p) == 47){ break } ;; '>' or '/'
+      if(p >= n || load8(s, p) == 62 || load8(s, p) == 47){ break } ; '>' or '/'
       mut key = ""
       while(p < n){
          def c = load8(s, p)
@@ -43,11 +43,11 @@ fn _parse_attr(s, p, n){
          p += 1
       }
       p = _skip_ws(s, p, n)
-      if(p < n && load8(s, p) == 61){ ;; '='
+      if(p < n && load8(s, p) == 61){ ; '='
          p += 1
          p = _skip_ws(s, p, n)
          def quote = load8(s, p)
-         if(quote == 34 || quote == 39){ ;; '"' or "'"
+         if(quote == 34 || quote == 39){ ; '"' or "'"
             p += 1
             mut val = ""
             while(p < n && load8(s, p) != quote){
@@ -74,9 +74,9 @@ fn parse(data){
    while(p < n){
       p = _skip_ws(data, p, n)
       if(p >= n){ break }
-      if(load8(data, p) == 60){ ;; '<'
+      if(load8(data, p) == 60){ ; '<'
          p += 1
-         if(p < n && load8(data, p) == 47){ ;; '</'
+         if(p < n && load8(data, p) == 47){ ; '</'
             p += 1
             mut name = ""
             while(p < n && load8(data, p) != 62){
@@ -87,10 +87,10 @@ fn parse(data){
             if(len(stack) > 1){
                stack = pop(stack)
             }
-         } elif(p < n && load8(data, p) == 33){ ;; '<!' (Comment or CDATA)
+         } elif(p < n && load8(data, p) == 33){ ; '<!' (Comment or CDATA)
             while(p < n && load8(data, p) != 62){ p += 1 }
             p += 1
-         } elif(p < n && load8(data, p) == 63){ ;; '<?' (Declaration)
+         } elif(p < n && load8(data, p) == 63){ ; '<?' (Declaration)
             while(p < n && load8(data, p) != 62){ p += 1 }
             p += 1
          } else {

@@ -64,7 +64,7 @@ fn _fragment_to_vk450(src){
       out = "layout(location = 0) out vec4 fragColor;\n" + out
    }
    if(!str_contains(out, "layout(location = 0) out")){
-       ;; Ensure output is declared for VK if missing
+       ; Ensure output is declared for VK if missing
        if(str_contains(out, "out vec4")){
            out = str_replace(out, "out vec4", "layout(location = 0) out vec4")
        }
@@ -135,7 +135,7 @@ fn transpile_shader_source(combined_src){
    transpile_shader_defs(parse_combined_shader(combined_src))
 }
 
-fn select_shader_defs(defs, backend=SHADER_BACKEND_VK450){
+fn select_shader_defs(defs, _backend=SHADER_BACKEND_VK450){
    "Selects the appropriate shader variants for the specified backend."
    defs = transpile_shader_defs(defs)
    mut out = dict(8)

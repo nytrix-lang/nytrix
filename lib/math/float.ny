@@ -10,81 +10,80 @@ use std.core *
 
 fn _box(bits){
    "Internal: box raw float bits into a Nytrix float object."
-   def p = malloc(8)
-   store64(p - 8, 110)
-   store64(p, bits)
+   def p = malloc(16) + 8
+   store64(p, 110, -8) ; Tag for float
+   store64(p, bits)    ; Payload
    p
 }
 
 fn float(x){
-   "Create a float from conversion."
+   "Converts `x` (integer or box) to a boxed Nytrix float (double-precision)."
    if(is_ptr(x)){
       if(is_float(x)){ return x }
    }
    if(is_int(x)){
-      __flt_box_val(__flt_unbox_val(x))
-   } else {
-      x
+      return __flt_box_val(__flt_unbox_val(x))
    }
+   __flt_box_val(x)
 }
 
 fn int(x){
-   "Convert a float to an integer (truncates)."
+   "Converts float `x` to a tagged integer by truncating the fractional part."
    if(is_int(x)){ x }
    elif(!is_float(x)){ 0 }
    else { __flt_to_int(x) }
 }
 
 fn trunc(x){
-   "Truncate a float to integer."
+   "Truncates the fractional part of float `x`, returning the result as a tagged integer."
    if(is_int(x)){ x }
    elif(!is_float(x)){ 0 }
    else { __flt_trunc(x) }
 }
 
 fn is_float(x){
-   "Check if value is a float."
+   "Returns true if `x` is a boxed floating-point object."
    if(!is_ptr(x)){ return false }
    __is_float_obj(x)
 }
 
 fn fadd(a, b){
-   "Add two numbers as floats."
+   "Returns the sum of two values `a` and `b` treated as floats."
    __flt_add(a, b)
 }
 
 fn fsub(a, b){
-   "Subtract two numbers as floats."
+   "Returns the difference between `a` and `b` treated as floats."
    __flt_sub(a, b)
 }
 
 fn fmul(a, b){
-   "Multiply two numbers as floats."
+   "Returns the product of `a` and `b` treated as floats."
    __flt_mul(a, b)
 }
 
 fn fdiv(a, b){
-   "Divide two numbers as floats."
+   "Returns the quotient of `a` and `b` (a/b) treated as floats."
    __flt_div(a, b)
 }
 
 fn flt(a, b){
-   "Return true if a < b."
+   "Returns true if float `a` is less than float `b`."
    __flt_lt(a, b)
 }
 
 fn fgt(a, b){
-   "Return true if a > b."
+   "Returns true if float `a` is greater than float `b`."
    __flt_gt(a, b)
 }
 
 fn feq(a, b){
-   "Return true if a == b."
+   "Returns true if float `a` is equal to float `b`."
    __flt_eq(a, b)
 }
 
 fn floor(x){
-   "Return the largest integer less than or equal to x."
+   "Returns the largest integer less than or equal to float `x`."
    def i = int(x)
    def f_i = float(i)
    if(fgt(f_i, x)){ ; i > x
@@ -95,7 +94,7 @@ fn floor(x){
 }
 
 fn ceil(x){
-   "Return the smallest integer greater than or equal to x."
+   "Returns the smallest integer greater than or equal to float `x`."
    def i = int(x)
    def f_i = float(i)
    if(flt(f_i, x)){ ; i < x
@@ -107,12 +106,12 @@ fn ceil(x){
 
 def PI = _box(0x400921fb54442d18)
 
-def HALF = _box(0x3fe0000000000000) ;; 0.5
+def HALF = _box(0x3fe0000000000000) ; 0.5
 def NAN_VAL = _box(0x7ff8000000000000)
 def INF_VAL = _box(0x7ff0000000000000)
 
 fn round(x){
-   "Round to nearest integer."
+   "Rounds float `x` to the nearest integer."
    if(flt(x, float(0))){
       ceil(fsub(float(x), HALF))
    } else {
@@ -121,7 +120,7 @@ fn round(x){
 }
 
 fn abs(x){
-   "Return absolute value for int or float."
+   "Returns the absolute value of `x` (works for both int and float types)."
    if(is_int(x)){
       if(x < 0){ -x }
       else { x }
@@ -133,17 +132,17 @@ fn abs(x){
 }
 
 fn nan(){
-   "Box a quiet NaN."
+   "Returns a quiet NaN (Not-a-Number) float."
    NAN_VAL
 }
 
 fn inf(){
-   "Box infinity."
+   "Returns an infinity float."
    INF_VAL
 }
 
 fn is_nan(x){
-   "Return true if x is a NaN float."
+   "Returns true if float `x` is Not-a-Number."
    if(!is_float(x)){ return 0 }
    def bits = load64(x)
    def mask = 0x7ff0000000000000
@@ -153,7 +152,7 @@ fn is_nan(x){
 }
 
 fn is_inf(x){
-   "Return true if x is positive or negative infinity."
+   "Returns true if float `x` is positive or negative infinity."
    if(!is_float(x)){ return false }
    def bits = load64(x)
    def mask = 0x7fffffffffffffff

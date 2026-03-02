@@ -30,28 +30,36 @@ fn matrix(r, c){
         store_item(m, 2 + i, 0)
         i += 1
     }
-    store64(m, 2 + n, 0) ;; Set Len
+    store64(m, 2 + n, 0) ; Set Len
     m
 }
 
 fn rows(m){ "Returns the number of rows in matrix `m`." get(m, 0) }
 fn cols(m){ "Returns the number of columns in matrix `m`." get(m, 1) }
 
-fn at(m, r, c, default=0){
-    "Returns the element at row `r` and column `c`."
+fn _mat_at(m, r, c, default=0){
     if(r < 0 || r >= rows(m) || c < 0 || c >= cols(m)){ return default }
     get(m, 2 + r * cols(m) + c)
 }
 
-fn set(m, r, c, v){
-    "Sets the element at row `r` and column `c` to `v`."
+fn _mat_set(m, r, c, v){
     if(r < 0 || r >= rows(m) || c < 0 || c >= cols(m)){ return m }
     store_item(m, 2 + r * cols(m) + c, v)
     m
 }
 
+fn at(m, r, c, default=0){
+    "Returns the element at row `r` and column `c`."
+    _mat_at(m, r, c, default)
+}
+
+fn set(m, r, c, v){
+    "Sets the element at row `r` and column `c` to `v`."
+    _mat_set(m, r, c, v)
+}
+
 fn is_matrix(m){
-   "Auto-generated docstring: is_matrix."
+   "Returns true if `m` is a matrix object with valid row and column counts."
     if(!is_list(m) || len(m) < 2){ return false }
     def r = get(m, 0)
     def c = get(m, 1)
@@ -68,7 +76,7 @@ fn transpose(m){
     while(i < r){
         mut j = 0
         while(j < c){
-            set(out, j, i, at(m, i, j))
+            _mat_set(out, j, i, _mat_at(m, i, j))
             j += 1
         }
         i += 1
@@ -108,7 +116,7 @@ fn sub(a, b){
 
 fn mul(a, b){
     "Matrix multiplication (supports matrix-matrix and matrix-vector)."
-    if(!is_matrix(a)){ return a * b }
+    if(!is_matrix(a)){ return __mul(a, b) }
     if(is_matrix(b)){
         def r1 = rows(a)
         def c1 = cols(a)
@@ -123,10 +131,10 @@ fn mul(a, b){
                 mut s = 0
                 mut k = 0
                 while(k < c1){
-                    s = s + at(a, i, k) * at(b, k, j)
+                    s = __add(s, __mul(_mat_at(a, i, k), _mat_at(b, k, j)))
                     k += 1
                 }
-                set(out, i, j, s)
+                _mat_set(out, i, j, s)
                 j += 1
             }
             i += 1
@@ -134,7 +142,6 @@ fn mul(a, b){
         return out
     }
     if(is_list(b)){
-        ;; Assuming it's a vector
         def r = rows(a)
         def c = cols(a)
         if(c != len(b)){ return 0 }
@@ -144,7 +151,7 @@ fn mul(a, b){
             mut s = 0
             mut k = 0
             while(k < c){
-                s = s + at(a, i, k) * get(b, k)
+                s = __add(s, __mul(_mat_at(a, i, k), get(b, k)))
                 k += 1
             }
             store_item(out, i, s)
@@ -153,13 +160,12 @@ fn mul(a, b){
         store64(out, r, 0)
         return out
     }
-    ;; Scalar multiplication
     def r = rows(a)
     def c = cols(a)
     mut out = matrix(r, c)
     mut i = 0
     while(i < r * c){
-        store_item(out, 2 + i, get(a, 2 + i) * b)
+        store_item(out, 2 + i, __mul(get(a, 2 + i), b))
         i += 1
     }
     out
@@ -168,66 +174,82 @@ fn mul(a, b){
 ;; Specialized 4x4 API (compat layer)
 
 fn mat4_zero(){
-   "Auto-generated docstring: mat4_zero."
+   "Returns a new 4x4 matrix filled with zero values."
    matrix(4, 4)
 }
 
 fn mat4_identity(){
-   "Auto-generated docstring: mat4_identity."
+   "Returns a new 4x4 identity matrix."
     mut m = mat4_zero()
-    set(m, 0, 0, 1)
-    set(m, 1, 1, 1)
-    set(m, 2, 2, 1)
-    set(m, 3, 3, 1)
+    _mat_set(m, 0, 0, 1)
+    _mat_set(m, 1, 1, 1)
+    _mat_set(m, 2, 2, 1)
+    _mat_set(m, 3, 3, 1)
     m
 }
 
 fn mat4_get(m, r, c, default=0){
-   "Auto-generated docstring: mat4_get."
-   at(m, r, c, default)
+   "Returns the element at row `r` and column `c` of a 4x4 matrix."
+   _mat_at(m, r, c, default)
 }
 fn mat4_set(m, r, c, v){
-   "Auto-generated docstring: mat4_set."
-   set(m, r, c, v)
+   "Sets the element at row `r` and column `c` of a 4x4 matrix to `v`."
+   _mat_set(m, r, c, v)
 }
 fn mat4_transpose(m){
-   "Auto-generated docstring: mat4_transpose."
+   "Returns the transpose of a 4x4 matrix."
    transpose(m)
 }
 fn mat4_add(a, b){
-   "Auto-generated docstring: mat4_add."
+   "Returns the sum of two 4x4 matrices."
    add(a, b)
 }
 fn mat4_mul(a, b){
-   "Auto-generated docstring: mat4_mul."
+   "Returns the product of two 4x4 matrices."
    mul(a, b)
 }
 fn mat4_mul_vec4(m, v){
-   "Auto-generated docstring: mat4_mul_vec4."
-   mul(m, v)
+   "Returns the product of 4x4 matrix `m` and 4D vector `v`."
+   def r = rows(m)
+   def c = cols(m)
+   if(c != len(v)){ return 0 }
+   def out = list(r)
+   mut i = 0
+   while(i < r){
+       mut s = 0
+       mut k = 0
+       while(k < c){
+           s = __add(s, __mul(_mat_at(m, i, k), get(v, k)))
+           k += 1
+       }
+       store_item(out, i, s)
+       i += 1
+   }
+   store64(out, r, 0)
+   out
 }
 
 fn mat4_translate(tx, ty, tz){
-   "Auto-generated docstring: mat4_translate."
+   "Returns a 4x4 translation matrix for offsets (tx, ty, tz)."
     mut m = mat4_identity()
-    set(m, 0, 3, tx)
-    set(m, 1, 3, ty)
-    set(m, 2, 3, tz)
+    _mat_set(m, 0, 3, tx)
+    _mat_set(m, 1, 3, ty)
+    _mat_set(m, 2, 3, tz)
     m
 }
 
 fn mat4_scale(sx, sy, sz){
-   "Auto-generated docstring: mat4_scale."
+   "Returns a 4x4 scaling matrix with factors (sx, sy, sz)."
     mut m = mat4_zero()
-    set(m, 0, 0, sx)
-    set(m, 1, 1, sy)
-    set(m, 2, 2, sz)
-    set(m, 3, 3, 1)
+    _mat_set(m, 0, 0, sx)
+    _mat_set(m, 1, 1, sy)
+    _mat_set(m, 2, 2, sz)
+    _mat_set(m, 3, 3, 1)
     m
 }
 
 fn mat4_rotate(angle, axis){
-   "Auto-generated docstring: mat4_rotate."
+   "Returns a 4x4 rotation matrix for `angle` radians around `axis` vector."
     use std.math.vector *
     def v = normalize(axis)
     def x = get(v, 0, 1)
@@ -237,15 +259,15 @@ fn mat4_rotate(angle, axis){
     def c = cos(angle)
     def oc = 1 - c
     mut m = mat4_identity()
-    set(m, 0, 0, x * x * oc + c)
-    set(m, 0, 1, x * y * oc - z * s)
-    set(m, 0, 2, x * z * oc + y * s)
-    set(m, 1, 0, y * x * oc + z * s)
-    set(m, 1, 1, y * y * oc + c)
-    set(m, 1, 2, y * z * oc - x * s)
-    set(m, 2, 0, z * x * oc - y * s)
-    set(m, 2, 1, z * y * oc + x * s)
-    set(m, 2, 2, z * z * oc + c)
+    _mat_set(m, 0, 0, x * x * oc + c)
+    _mat_set(m, 0, 1, x * y * oc - z * s)
+    _mat_set(m, 0, 2, x * z * oc + y * s)
+    _mat_set(m, 1, 0, y * x * oc + z * s)
+    _mat_set(m, 1, 1, y * y * oc + c)
+    _mat_set(m, 1, 2, y * z * oc - x * s)
+    _mat_set(m, 2, 0, z * x * oc - y * s)
+    _mat_set(m, 2, 1, z * y * oc + x * s)
+    _mat_set(m, 2, 2, z * z * oc + c)
     m
 }
 
@@ -255,13 +277,13 @@ fn mat4_ortho(l, r, b, t, n, f){
     def tb = float(t) - float(b)
     def f_n = float(f) - float(n)
     mut m = mat4_zero()
-    set(m, 0, 0, 2.0 / rl)
-    set(m, 1, 1, 2.0 / tb)
-    set(m, 2, 2, -2.0 / f_n)
-    set(m, 3, 3, 1.0)
-    set(m, 0, 3, -(float(r) + float(l)) / rl)
-    set(m, 1, 3, -(float(t) + float(b)) / tb)
-    set(m, 2, 3, -(float(f) + float(n)) / f_n)
+    _mat_set(m, 0, 0, 2.0 / rl)
+    _mat_set(m, 1, 1, 2.0 / tb)
+    _mat_set(m, 2, 2, -2.0 / f_n)
+    _mat_set(m, 3, 3, 1.0)
+    _mat_set(m, 0, 3, -(float(r) + float(l)) / rl)
+    _mat_set(m, 1, 3, -(float(t) + float(b)) / tb)
+    _mat_set(m, 2, 3, -(float(f) + float(n)) / f_n)
     m
 }
 
@@ -269,33 +291,33 @@ fn mat4_perspective(fovy, aspect, near, far){
     "Creates a perspective projection matrix."
     def tan_half_fovy = tan(float(fovy) / 2.0)
     mut m = mat4_zero()
-    set(m, 0, 0, 1.0 / (float(aspect) * tan_half_fovy))
-    set(m, 1, 1, 1.0 / tan_half_fovy)
-    set(m, 2, 2, -(float(far) + float(near)) / (float(far) - float(near)))
-    set(m, 2, 3, -1.0)
-    set(m, 3, 2, -(2.0 * float(far) * float(near)) / (float(far) - float(near)))
+    _mat_set(m, 0, 0, 1.0 / (float(aspect) * tan_half_fovy))
+    _mat_set(m, 1, 1, 1.0 / tan_half_fovy)
+    _mat_set(m, 2, 2, -(float(far) + float(near)) / (float(far) - float(near)))
+    _mat_set(m, 2, 3, -1.0)
+    _mat_set(m, 3, 2, -(2.0 * float(far) * float(near)) / (float(far) - float(near)))
     m
 }
 
 fn mat4_look_at(eye, center, up){
-   "Auto-generated docstring: mat4_look_at."
+   "Returns a view matrix that points from `eye` towards `center` with `up` direction."
     use std.math.vector *
     def f = normalize(sub(center, eye))
     def s = normalize(cross3(f, up))
     def u = cross3(s, f)
     mut m = mat4_identity()
-    set(m, 0, 0, get(s, 0))
-    set(m, 0, 1, get(s, 1))
-    set(m, 0, 2, get(s, 2))
-    set(m, 1, 0, get(u, 0))
-    set(m, 1, 1, get(u, 1))
-    set(m, 1, 2, get(u, 2))
-    set(m, 2, 0, -get(f, 0))
-    set(m, 2, 1, -get(f, 1))
-    set(m, 2, 2, -get(f, 2))
-    set(m, 3, 0, -dot(s, eye))
-    set(m, 3, 1, -dot(u, eye))
-    set(m, 3, 2, dot(f, eye))
+    _mat_set(m, 0, 0, get(s, 0))
+    _mat_set(m, 0, 1, get(s, 1))
+    _mat_set(m, 0, 2, get(s, 2))
+    _mat_set(m, 1, 0, get(u, 0))
+    _mat_set(m, 1, 1, get(u, 1))
+    _mat_set(m, 1, 2, get(u, 2))
+    _mat_set(m, 2, 0, -get(f, 0))
+    _mat_set(m, 2, 1, -get(f, 1))
+    _mat_set(m, 2, 2, -get(f, 2))
+    _mat_set(m, 3, 0, -dot(s, eye))
+    _mat_set(m, 3, 1, -dot(u, eye))
+    _mat_set(m, 3, 2, dot(f, eye))
     m
 }
 
@@ -305,7 +327,7 @@ fn mat4_to_buffer(m, buf){
     while(i < 4){
         mut j = 0
         while(j < 4){
-            store32_f32(buf, at(m, j, i), (i * 4 + j) * 4)
+            store32_f32(buf, _mat_at(m, j, i), (i * 4 + j) * 4)
             j += 1
         }
         i += 1
@@ -313,24 +335,22 @@ fn mat4_to_buffer(m, buf){
 }
 
 if(comptime{__main()}){
-    use std.math.matrix as mat
+    def m2x3 = matrix(2, 3)
+    assert(rows(m2x3) == 2, "rows")
+    assert(cols(m2x3) == 3, "cols")
 
-    def m2x3 = mat.matrix(2, 3)
-    assert(mat.rows(m2x3) == 2, "rows")
-    assert(mat.cols(m2x3) == 3, "cols")
+    _mat_set(m2x3, 0, 1, 5)
+    assert(_mat_at(m2x3, 0, 1) == 5, "at/set")
 
-    mat.set(m2x3, 0, 1, 5)
-    assert(mat.at(m2x3, 0, 1) == 5, "at/set")
+    def m3x2 = transpose(m2x3)
+    assert(rows(m3x2) == 3, "transpose rows")
+    assert(_mat_at(m3x2, 1, 0) == 5, "transpose value")
 
-    def m3x2 = mat.transpose(m2x3)
-    assert(mat.rows(m3x2) == 3, "transpose rows")
-    assert(mat.at(m3x2, 1, 0) == 5, "transpose value")
-
-    def I = mat.mat4_identity()
-    assert(mat.at(I, 0, 0) == 1, "mat4 identity")
+    def I = mat4_identity()
+    assert(_mat_at(I, 0, 0) == 1, "mat4 identity")
 
     def v = [1, 2, 3, 4]
-    def res = mat.mul(I, v)
+    def res = mat4_mul_vec4(I, v)
     assert(get(res, 0) == 1, "mat mul vec x")
     assert(get(res, 3) == 4, "mat mul vec w")
 

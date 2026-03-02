@@ -139,8 +139,6 @@ static binding *scope_lookup_impl(scope *scopes, size_t depth, const char *name,
       if (b->name == name ||
           (memcmp(b->name, name, name_len) == 0 && b->name[name_len] == '\0')) {
         if (mark_used) {
-          NY_LOG_DEBUG("scope_lookup: found '%s' at depth %zd, is_mut=%d\n",
-                       name, s, b->is_mut);
           b->is_used = true;
         }
         *c.lookup_name = name;

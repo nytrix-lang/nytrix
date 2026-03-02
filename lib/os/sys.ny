@@ -11,7 +11,7 @@ fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){
    "Performs a raw Linux syscall (`num`) with up to 6 arguments and returns the raw kernel result."
    if(__os_name() != "linux"){ return -1 }
    mut n = num
-   ;; Map common x86_64 syscalls to ARM/AArch64 equivalents when needed.
+   ; Map common x86_64 syscalls to ARM/AArch64 equivalents when needed.
    if(__arch_name() == "aarch64" || __arch_name() == "arm64"){
       if(num == 39){ n = 172 } ; getpid
       elif(num == 0){ n = 63 } ; read

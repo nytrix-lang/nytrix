@@ -15,9 +15,9 @@ use std.text.io *
 
 fn is_bigint(x){
    "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
-   if((is_list(x))){ return false }
-   if((core.len(x) < 3)){ return false }
-   return (load64(x, 16) == 107)
+   if(!is_list(x)){ return false }
+   if(core.len(x) < 3){ return false }
+   return (get(x, 0) == 107)
 }
 
 fn _big_make(sign, digits){
@@ -40,12 +40,12 @@ fn _big_make(sign, digits){
 
 fn _big_digits(b){
    "Internal: return digits list."
-   load64(b, 32)
+   get(b, 2)
 }
 
 fn _big_sign(b){
    "Internal: return sign."
-   load64(b, 24)
+   get(b, 1)
 }
 
 fn _big_abs_cmp(a, b){
@@ -114,7 +114,7 @@ fn bigint_from_str(s){
 
 fn bigint_to_str(b){
    "Converts a [[std.math.bigint::bigint]] to its decimal string representation."
-   if(is_bigint(b)){ return "0" }
+   b = bigint(b)
    mut sign = _big_sign(b)
    def digits = _big_digits(b)
    mut n = core.len(digits)
@@ -194,8 +194,8 @@ fn _big_sub_abs(a, b){
 
 fn bigint_add(a, b){
    "Adds two bigints together."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sa == 0){ return b }
@@ -208,16 +208,16 @@ fn bigint_add(a, b){
    if(cmp == 0){ return _big_make(0, list(0)) }
    if(cmp > 0){
       def res = _big_sub_abs(a, b)
-      return _big_make(sa, list_clone(_big_digits(res)))
+      return _big_make(sa, _big_digits(res))
    }
    def res = _big_sub_abs(b, a)
-   _big_make(sb, list_clone(_big_digits(res)))
+   _big_make(sb, _big_digits(res))
 }
 
 fn bigint_sub(a, b){
    "Subtracts bigint `b` from bigint `a`."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sb = _big_sign(b)
    def neg = _big_make(-sb, list_clone(_big_digits(b)))
    bigint_add(a, neg)
@@ -257,8 +257,8 @@ fn _big_mul_abs(a, b){
 
 fn bigint_mul(a, b){
    "Multiplies two bigints."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sa == 0 || sb == 0){ return _big_make(0, list(0)) }
@@ -365,8 +365,8 @@ fn _big_divmod_abs(a, b){
 
 fn bigint_div(a, b){
    "Integer division of bigints."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
    if(sb == 0){ panic("bigint division by zero") }
@@ -378,8 +378,8 @@ fn bigint_div(a, b){
 
 fn bigint_mod(a, b){
    "Modulo of bigints."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sb = _big_sign(b)
    if(sb == 0){ panic("bigint division by zero") }
    def res = _big_divmod_abs(a, b)
@@ -389,8 +389,8 @@ fn bigint_mod(a, b){
 
 fn bigint_cmp(a, b){
    "Compares two bigints. Returns -1 if a < b, 1 if a > b, and 0 if equal."
-   if(is_bigint(a)){ a = bigint(a) }
-   if(is_bigint(b)){ b = bigint(b) }
+   a = bigint(a)
+   b = bigint(b)
    mut sa = _big_sign(a)
    def sb = _big_sign(b)
    if(sa < sb){ return -1 }

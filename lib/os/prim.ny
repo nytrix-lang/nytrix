@@ -20,8 +20,8 @@ fn ppid(){
 
 fn env(key){
    "Returns the value of environment variable `key`."
-   def ep = envp()
-   if(!ep){ 0 }
+   def ep = __envp()
+   if(!ep){ return 0 }
    else {
       def key_len = str_len(key)
       mut i = 0
@@ -49,8 +49,8 @@ fn env(key){
 
 fn environ(){
    "Returns a list of environment entries."
-   def ep = envp()
-   if(!ep){ list(8) }
+   def ep = __envp()
+   if(!ep){ return list(8) }
    else {
       def n = envc()
       if(n <= 0){ list(8) }

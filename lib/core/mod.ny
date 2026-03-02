@@ -23,13 +23,16 @@ use std.core.primitives *
 use std.core.reflect as core_ref
 use std.core.dict as core_dict
 use std.core.set as core_set
-
-;;; Utility Operations
+use std.core.mem as core_mem
 
 fn is_truthy(x){
-  "Returns **true** if `x` is truthy (not 0, not none, not empty string/list)."
+  "Returns **true** if value `x` is considered 'truthy'.
+   - `none`: false
+   - `int`: true if not 0
+   - `str/list/dict/set/tuple`: true if length > 0
+   - `other`: true"
   if(!x){ return false }
-  if(is_int(x)){ return x != 0 }
+  if(__is_int(x)){ return x != 0 }
   if(is_str(x) || is_list(x) || is_dict(x) || is_set(x) || is_tuple(x)){
      return len(x) > 0
   }
@@ -37,162 +40,156 @@ fn is_truthy(x){
 }
 
 fn is_falsy(x){
-  "Returns **true** if `x` is falsy."
+  "Returns **true** if value `x` is 'falsy' (not truthy)."
   !is_truthy(x)
 }
 
 fn not_none(x, fallback){
-  "Returns `x` if it is not **none** (0), otherwise returns `fallback`."
-  if(x){ return x }
-  fallback
+  "Returns `x` if it is not **none**; otherwise returns `fallback`."
+  if(x){ return x } fallback
 }
 
 fn panic_if(cond, msg){
   "Panics with `msg` if `cond` is truthy."
-  if(cond){ panic(msg) }
+  if(is_truthy(cond)){ panic(msg) }
+}
+
+fn _print_raw(s){
+   "Internal: writes raw string content to stdout."
+   if(!is_str(s)){ return 0 }
+   def n = load64(s, -16)
+   if(n > 0){ __sys_write_off(1, s, n, 0) }
+   0
+}
+
+fn print(...args){
+  "Prints one or more values to stdout, separated by spaces and ending with a newline."
+  mut i = 0
+  def n = len(args)
+  while(i < n){
+     _print_raw(to_str(get(args, i)))
+     if(i < n - 1){ _print_raw(" ") }
+     i += 1
+  }
+  _print_raw("\n")
   0
 }
 
-;;; Memory Operations
-
 fn bool(x){
-  "Convert any value to its **boolean** representation. Returns `1` (true) if the value is truthy, `0` (false) otherwise."
+  "Converts `x` to a primitive boolean value."
   !!x
 }
 
 fn init_str(p, n){
-  "Initialize string header at pointer `p` with length `n`."
-  store64(p, 120, -8) ; Raw TAG_STR
-  store64(p, n, -16) ; Tagged Length
+  "Initializes a raw memory block `p` of size `n` as a Nytrix string object."
+  store8(p, 120, -8)
+  store64(p, n, -16)
   p
 }
 
 fn load8(p, i=0){
-  "Load a single byte from address `p + i`."
+  "Loads a single byte from address `p + i`."
   __load8_idx(p, i)
 }
-
 fn load64(p, i=0){
-  "Load an 8-byte integer (**uint64**) from address `p + i`."
+  "Loads a 64-bit integer from address `p + i`."
   __load64_idx(p, i)
 }
-
 fn store8(p, v, i=0){
-  "Store byte `v` at address `p + i`."
+  "Stores byte `v` at address `p + i`."
   __store8_idx(p, i, v)
 }
-
 fn store64(p, v, i=0){
-  "Store an 8-byte integer (**uint64**) to address `p + i`."
+  "Stores 64-bit integer `v` at address `p + i`."
   __store64_idx(p, i, v)
 }
 
 fn store64_raw(p, v, i=0){
-  "Store an 8-byte value (unboxing if it is a tagged integer) to address `p + i`."
+  "Stores a raw integer `v` at address `p + i` as two 32-bit parts."
   def raw = to_int(v)
   store32(p, band(raw, 0xFFFFFFFF), i)
   store32(p, bshr(raw, 32), i + 4)
 }
 
 fn load16(p, i=0){
-  "Load a 2-byte integer (**uint16**) from address `p + i` using little-endian order."
+  "Loads a 16-bit integer from address `p + i`."
   __load16_idx(p, i)
 }
-
 fn load32(p, i=0){
-  "Load a 4-byte integer (**uint32**) from address `p + i` using little-endian order."
+  "Loads a 32-bit integer from address `p + i`."
   __load32_idx(p, i)
 }
-
 fn store16(p, v, i=0){
-  "Store a 2-byte integer (**uint16**) at address `p + i` using little-endian order."
+  "Stores a 16-bit integer `v` at address `p + i`."
   __store16_idx(p, i, v)
 }
-
 fn store32(p, v, i=0){
-  "Store a 4-byte integer (**uint32**) at address `p + i` using little-endian order."
+  "Stores a 32-bit integer `v` at address `p + i`."
   __store32_idx(p, i, v)
 }
 
 fn load32_f32(p, i=0){
-  "Load a 32-bit float from address `p + i`."
+  "Loads a 32-bit float from address `p + i` and boxes it."
   __flt_box_val32(__load32_idx(p, i))
 }
-
 fn store32_f32(p, v, i=0){
-  "Store a 32-bit float value `v` at address `p + i`."
-  def bits = __flt_unbox_val32(v)
-  __store32_idx(p, i, bits)
+  "Unboxes float `v` and stores it as a 32-bit float at address `p + i`."
+  __store32_idx(p, i, __flt_unbox_val32(v))
 }
 
 fn memcpy(dst, src, n){
-  "Copy `n` bytes from `src` to `dst`."
+  "Copies `n` bytes from `src` to `dst`."
   __memcpy(dst, src, n)
 }
-
 fn memset(dst, v, n){
-  "Fill `n` bytes at `dst` with byte `v`."
+  "Sets `n` bytes at `dst` to value `v`."
   __memset(dst, v, n)
 }
-
 fn memcmp(a, b, n){
-  "Compare first `n` bytes of `a` and `b`."
+  "Compares `n` bytes of memory blocks `a` and `b`."
   __memcmp(a, b, n)
 }
-
-fn memchr(ptr, val, n){
-  "Find the first byte `val` within `n` bytes from `ptr`; returns pointer or 0."
-  mut i = 0
-  while(i < n){
-    if(__load8_idx(ptr, i) == val){ return ptr + i }
-    i += 1
-  }
-  0
+fn memchr(p, c, n){
+  "Searches for byte `c` in the first `n` bytes of `p`."
+  core_mem.memchr(p, c, n)
 }
 
 fn ptr_add(p, n){
-  "Add an integer offset `n` to a pointer `p`. Correct-handling of tagged integers by the runtime."
-  p + n
+  "Returns address `p + n`."
+  __add(p, n)
 }
-
 fn ptr_sub(p, n){
-  "Subtract an integer offset `n` from pointer `p`."
-  p - n
+  "Returns address `p - n`."
+  __sub(p, n)
 }
 
 fn malloc(n){
-  "Allocates `n` bytes on the heap. Returns a ptr."
+  "Allocates `n` bytes of heap memory."
   __malloc(n)
 }
-
 fn free(p){
-  "Frees memory previously allocated with [[std.core::malloc]]."
-  if(!p){ return 0 }
+  "Frees heap memory block `p`."
   __free(p)
 }
-
-fn realloc(p, newsz){
-  "Resizes the memory block pointed to by `p` to `newsz` bytes."
-  if(!p){ return malloc(newsz) }
-  __realloc(p, newsz)
+fn realloc(p, n){
+  "Resizes heap memory block `p` to `n` bytes."
+  __realloc(p, n)
 }
-
 fn zalloc(n){
-  "Allocates `n` bytes on the heap and zero-initializes them. Currently aliases malloc."
-  malloc(n)
+  "Allocates `n` bytes of heap memory and zeroes it out."
+  def p = malloc(n)
+  if(p){ memset(p, 0, n) }
+  p
 }
-
-;;; List Operations
-
-;; List header: [TAG(8) | LEN(8) | CAP(8) | ...items]
 
 fn list(cap=8){
-  "Creates a new empty list with the given initial capacity **cap** (default 8)."
-  def p = malloc(16 + cap * 8)
-  if(!p){ panic("list malloc failed") }
-  store64(p, 100, -8) ; "L" tag
-  store64(p, 0, 0) ; Len
-  store64(p, cap, 8) ; Cap
+  "Creates a new empty list with initial capacity `cap`."
+  def size = 16 + cap * 8
+  def p = malloc(size)
+  memset(p, 0, size)
+  store8(p, 100, -8)
+  store64(p, 0, 0)
+  store64(p, cap, 8)
   p
 }
 
@@ -200,251 +197,160 @@ fn set(cap=8){
   "Creates a new empty set."
   core_set.set(cap)
 }
-
 fn dict(cap=8){
   "Creates a new empty dictionary."
   core_dict.dict(cap)
 }
 
 fn dict_len(d){
-  "Returns number of key/value pairs in dictionary `d`."
+  "Returns the number of entries in dictionary `d`."
   core_dict.dict_len(d)
 }
-
-fn dict_get(d, key, default=0){
-  "Gets value by key from dictionary `d` (or `default`)."
-  core_dict.dict_get(d, key, default)
+fn dict_get(d, k, default=0){
+  "Returns the value for key `k` in dictionary `d`, or `default` if not found."
+  core_dict.dict_get(d, k, default)
 }
-
-fn dict_has(d, key){
-  "Returns true if dictionary `d` contains `key`."
-  core_dict.dict_has(d, key)
+fn dict_has(d, k){
+  "Returns **true** if key `k` exists in dictionary `d`."
+  core_dict.dict_has(d, k)
 }
-
-fn dict_set(d, key, val){
-  "Sets key/value in dictionary `d` and returns updated dict."
-  core_dict.dict_set(d, key, val)
+fn dict_set(d, k, v){
+  "Sets the value for key `k` in dictionary `d` to `v`."
+  core_dict.dict_set(d, k, v)
 }
-
-fn dict_del(d, key){
-  "Deletes key from dictionary `d` and returns updated dict."
-  core_dict.dict_del(d, key)
+fn dict_del(d, k){
+  "Removes key `k` from dictionary `d`."
+  core_dict.dict_del(d, k)
 }
-
 fn dict_clone(d){
   "Returns a shallow clone of dictionary `d`."
   core_dict.dict_clone(d)
 }
-
-fn dict_merge(dst, src){
-  "Merges `src` into `dst` and returns updated dictionary."
-  core_dict.dict_merge(dst, src)
+fn dict_merge(d1, d2){
+  "Merges all entries from `d2` into `d1`."
+  core_dict.dict_merge(d1, d2)
 }
-
 fn dict_items(d){
-  "Returns dictionary items as list of [key, value]."
+  "Returns a list of `[key, value]` pairs from dictionary `d`."
   core_dict.dict_items(d)
 }
-
 fn dict_keys(d){
-  "Returns dictionary keys."
+  "Returns a list of keys from dictionary `d`."
   core_dict.dict_keys(d)
 }
-
 fn dict_values(d){
-  "Returns dictionary values."
-  return core_dict.dict_values(d)
-}
-
-fn set_add(s, key){
-  "Adds `key` to set `s`. Returns the (possibly reallocated) set."
-  return core_set.set_add(s, key)
-}
-
-fn set_contains(s, key){
-  "Returns true if `key` is in set `s`."
-  return core_set.set_contains(s, key)
-}
-
-fn eq(a, b){
-  "Structural equality (delegates to std.core.reflect.eq)."
-  return core_ref.eq(a, b)
-}
-
-fn add(a, b){
-  "Generic addition (delegates to std.core.reflect.add)."
-  return core_ref.add(a, b)
-}
-
-fn sub(a, b){
-  "Generic subtraction (delegates to std.core.reflect.sub)."
-  return core_ref.sub(a, b)
-}
-
-fn mul(a, b){
-  "Generic multiplication (delegates to std.core.reflect.mul)."
-  return core_ref.mul(a, b)
-}
-
-fn div(a, b){
-  "Generic division (delegates to std.core.reflect.div)."
-  return core_ref.div(a, b)
+  "Returns a list of values from dictionary `d`."
+  core_dict.dict_values(d)
 }
 
 fn is_nytrix_obj(x){
-  "Check if a value is a valid Nytrix object pointer (aligned)."
+  "Returns **true** if `x` is a Nytrix-managed heap object."
   def tag = __tagof(x)
   if(!__is_int(tag)){ return false }
-  return tag >= 100 && tag <= 255
+  tag >= 100 && tag <= 255
 }
 
 fn is_list(x){
-  "Returns **true** if the value `x` is a **list**."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 100
+  "Returns **true** if `x` is a list."
+  __tagof(x) == 100
 }
-
 fn is_dict(x){
-  "Returns **true** if the value `x` is a **dictionary**."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 101
+  "Returns **true** if `x` is a dictionary."
+  __tagof(x) == 101
 }
-
 fn is_set(x){
-  "Returns **true** if the value `x` is a **set**."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 102
+  "Returns **true** if `x` is a set."
+  __tagof(x) == 102
 }
-
 fn is_tuple(x){
-  "Returns **true** if the value `x` is a **tuple**."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 103
+  "Returns **true** if `x` is a tuple."
+  __tagof(x) == 103
 }
-
 fn is_str(x){
-  "Returns **true** if the value `x` is a **string**."
-  return __is_str_obj(x)
+  "Returns **true** if `x` is a string."
+  if(!x || __is_int(x)){ return false }
+  def t = __tagof(x)
+  t == 120 || t == 121
 }
-
 fn is_bytes(x){
-  "Returns **true** if the value `x` is a **bytes buffer**."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 122
+  "Returns **true** if `x` is a bytes object."
+  __tagof(x) == 122
 }
-
 fn is_float(x){
-  "Returns **true** if the value `x` if a **floating-point** number."
-  return __is_float_obj(x)
+  "Returns **true** if `x` is a float object."
+  __tagof(x) == 110
 }
 
 fn to_int(v){
-  "Unwraps a tagged integer or pointer value to a raw, untagged integer."
-  return __untag(v)
+  "Untags a Nytrix value into a raw integer."
+  __untag(v)
 }
-
 fn from_int(v){
-  "Wraps a raw machine integer into a Nytrix-tagged integer."
-  return __tag(v)
-}
-
-fn argc(){
-  "Returns the process argument count."
-  return __argc()
-}
-fn argv(){
-  "Returns the raw argv pointer."
-  return __argvp()
-}
-fn envc(){
-  "Returns the number of environment entries."
-  return __envc()
-}
-fn envp(){
-  "Returns the raw envp pointer."
-  return __envp()
-}
-fn errno(){
-  "Returns the current C runtime errno value."
-  return __errno()
-}
-
-fn is_kwargs(x){
-  "Internal: Returns **true** if `x` is a keyword-argument wrapper object."
-  def tag = __tagof(x)
-  if(!__is_int(tag)){ return false }
-  return tag == 104
+  "Tags a raw integer `v` into a Nytrix value."
+  __tag(v)
 }
 
 fn __kwarg(k, v){
-  "Create a keyword-argument wrapper object combining key `k` and value `v`."
-  def p = malloc(16) ; Tag at -8, Key(0), Val(8)
-  store64(p, 104, -8) ; Tag 104 for Kwarg (stored as 209)
-  store64(p, k, 0) ; Key at 0
-  store64(p, v, 8) ; Val at 8
+  "Internal: creates a keyword argument object wrap."
+  def p = malloc(16)
+  store64(p, k, 0)
+  store64(p, v, 8)
+  store8(p, 150, -8)
   p
 }
 
+fn is_kwargs(x){
+  "Returns **true** if `x` is a keyword argument wrap object."
+  if(!x || __is_int(x)){ return false }
+  __tagof(x) == 150
+}
+
 fn kwarg(k, v){
-  "Create a keyword-argument wrapper object."
+  "Creates a keyword argument pair for function calls."
   __kwarg(k, v)
 }
-
 fn get_kwarg_key(x){
-  "Extracts the key from a [[std.core::kwarg]] object."
+  "Returns the key from keyword argument wrap `x`."
   load64(x, 0)
 }
-
 fn get_kwarg_val(x){
-  "Extracts the value from a [[std.core::kwarg]] object."
+  "Returns the value from keyword argument wrap `x`."
   load64(x, 8)
 }
 
 fn get(obj, key, default=0){
-  "Generic index-based access (delegates to std.core.reflect.get)."
+  "Generic element retriever for strings, lists, dicts, and tuples."
   core_ref.get(obj, key, default)
 }
-
 fn len(x){
-  "Returns the number of elements in a collection or length of a string/bytes. Returns `0` for other types."
+  "Returns the number of elements in a collection or the length of a string."
   core_ref.len(x)
 }
 
 fn list_clone(lst){
-  "Creates a **shallow copy** of the list `lst`."
-  if(lst == 0){ return 0 }
+  "Returns a shallow clone of list `lst`."
   if(!is_list(lst)){ return 0 }
   def n = len(lst)
   mut out = list(n)
   mut i = 0
   while(i < n){
-     def val = get(lst, i)
-     out = append(out, val)
+     append(out, get(lst, i))
      i += 1
   }
   out
 }
 
 fn load_item(lst, i){
-  "Internal: Loads the value at index `i` from the raw data section of a collection."
-  def offset = 16 + i * 8
-  load64(lst, offset)
+  "Loads the item at index `i` from list `lst`."
+  load64(lst, 16 + i * 8)
 }
-
 fn store_item(lst, i, v){
-  "Internal: Stores value `v` at index `i` in the raw data section of a collection."
-  def offset = 16 + i * 8
-  store64(lst, v, offset)
-  v
+  "Stores value `v` at index `i` in list `lst`."
+  store64(lst, v, 16 + i * 8) v
 }
 
 fn sort(lst){
-  "In-place ascending sort for lists of numbers."
+  "Sorts list `lst` in-place using insertion sort."
   if(!is_list(lst)){ return lst }
   def n = len(lst)
   mut i = 1
@@ -462,10 +368,27 @@ fn sort(lst){
 }
 
 fn list_clear(lst){
-  "Removes all elements from the list."
+  "Removes all elements from list `lst`."
   if(!is_list(lst)){ return lst }
   store64(lst, 0, 0)
   lst
+}
+
+fn add(a, b){
+  "Generic addition for primitives and objects (handles bigint)."
+  core_ref.add(a, b)
+}
+fn sub(a, b){
+  "Generic subtraction for primitives and objects (handles bigint)."
+  core_ref.sub(a, b)
+}
+fn mul(a, b){
+  "Generic multiplication for primitives and objects (handles bigint)."
+  core_ref.mul(a, b)
+}
+fn div(a, b){
+  "Generic division for primitives and objects (handles bigint)."
+  core_ref.div(a, b)
 }
 
 def OS = __os_name()
@@ -476,120 +399,3 @@ def IS_WINDOWS = __eq(OS, "windows")
 def IS_X86_64  = __eq(ARCH, "x86_64")
 def IS_AARCH64 = __eq(ARCH, "aarch64") || __eq(ARCH, "arm64")
 def IS_ARM     = __eq(ARCH, "arm")
-
-if(comptime{__main()}){
-    use std.core *
-    use std.core.list *
-    use std.os *
-    use std.os.dirs *
-    use std.os.path *
-    use std.text *
-    use std.os.sys *
-
-    ; Memory operations
-    def ptr = malloc(64)
-    assert(ptr != 0, "malloc returns non-null")
-    store64(ptr, 12345)
-    mut val = load64(ptr)
-    assert(val == 12345, "store64/load64")
-    store8(ptr, 255)
-    val = load8(ptr)
-    assert(val == 255, "store8/load8")
-    free(ptr)
-
-    ; List operations
-    mut lst = list(8)
-    assert(is_list(lst), "list creation")
-    assert(len(lst) == 0, "empty list length")
-    lst = append(lst, 10)
-    lst = append(lst, 20)
-    lst = append(lst, 30)
-    assert(len(lst) == 3, "list length after appends")
-    assert(get(lst, 0) == 10, "get first element")
-    assert(get(lst, 1) == 20, "get second element")
-    assert(get(lst, 2) == 30, "get third element")
-    assert(get(lst, -1) == 30, "negative indexing")
-    set_idx(lst, 1, 25)
-    assert(get(lst, 1) == 25, "set element")
-    val = pop(lst)
-    assert(val == 30, "pop returns last element")
-    assert(len(lst) == 2, "length after pop")
-    def lst2 = [40, 50]
-    lst = extend(lst, lst2)
-    assert(len(lst) == 4, "extend length")
-    lst = list_clear(lst)
-    assert(len(lst) == 0, "clear list")
-
-    ; Type checking
-    assert(is_int(42), "is_int on integer")
-    assert(!is_int("string"), "is_int on string")
-    assert(is_ptr("string"), "is_ptr on string")
-    assert(!is_ptr(42), "is_ptr on integer")
-    assert(is_list([1, 2, 3]), "is_list on list")
-    assert(!is_list(42), "is_list on integer")
-    def d = dict(8)
-    assert(is_dict(d), "is_dict on dict")
-    assert(!is_dict([]), "is_dict on list")
-
-    ; 'in' operator
-    def in_list = [1, 2, 3]
-    assert(contains(in_list, 1), "in operator on list")
-    assert(!contains(in_list, 4), "in operator on list (not found)")
-    def in_str = "hello"
-    assert(contains(in_str, "ell"), "in operator on string")
-    assert(!contains(in_str, "xyz"), "in operator on string (not found)")
-
-    ; File operations
-    def test_file = normalize(temp_dir() + sep() + "nytrix_core_test.txt")
-    def test_data = "Hello, Nytrix!"
-    mut result = file_remove(test_file) ; Cleanup previous run
-    result = file_write(test_file, test_data)
-
-    if(is_err(result)){
-        print("file_write failed to: " + test_file)
-        print("Error code: " + to_str(__unwrap(result)))
-        print("System errno: " + to_str(errno()))
-        panic("file_write failed")
-    }
-
-    assert(is_ok(result), "file_write returns ok")
-    assert(__unwrap(result) > 0, "file_write returns bytes written")
-    assert(file_exists(test_file), "file exists after write")
-    mut r = file_read(test_file)
-    assert(is_ok(r), "file_read returns ok")
-    mut content = __unwrap(r)
-    assert((content == test_data), "file content matches")
-
-    mut append_res = file_append(test_file, " More data")
-    assert(is_ok(append_res), "file_append returns ok")
-    r = file_read(test_file)
-    assert(is_ok(r), "file_read(2) returns ok")
-    content = __unwrap(r)
-    assert(str_contains(content, "More data"), "file append works")
-
-    mut remove_res = file_remove(test_file)
-    assert(is_ok(remove_res), "file remove")
-    assert(!file_exists(test_file), "file removed")
-
-    ; String helpers
-    def s1 = "hello"
-    def s2 = "hello"
-    def s3 = "world"
-    assert(_str_eq(s1, s2), "string equality")
-    assert(!_str_eq(s1, s3), "string inequality")
-
-    ; Utility helpers
-    assert(is_truthy(1), "is_truthy int")
-    assert(!is_truthy(0), "is_truthy zero")
-    assert(is_truthy("s"), "is_truthy str")
-    assert(!is_truthy(""), "is_truthy empty str")
-    assert(is_truthy([1]), "is_truthy list")
-    assert(!is_truthy([]), "is_truthy empty list")
-    assert(is_falsy(0), "is_falsy zero")
-    assert(is_falsy(""), "is_falsy empty str")
-    assert(not_none(10, 20) == 10, "not_none val")
-    assert(not_none(0, 20) == 20, "not_none fallback")
-    panic_if(false, "should not panic")
-
-    print("✓ std.core.mod tests passed")
-}

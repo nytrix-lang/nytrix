@@ -3,10 +3,28 @@
 
 module std.core.error (
    panic, assert, assert_eq,
-   ok, err, is_ok, is_err, unwrap, unwrap_or
+   ok, err, is_ok, is_err, unwrap, unwrap_or,
+   format_backtrace
 )
 use std.core *
 use std.core.reflect as core_ref
+
+fn format_backtrace(entries){
+   "Returns a formatted string of the backtrace entries (list of [file, line, col, fn])."
+   mut out = ""
+   mut i = 0
+   def n = len(entries)
+   while(i < n){
+      def f = get(entries, i)
+      def file = get(f, 0)
+      def line = get(f, 1)
+      def col = get(f, 2)
+      def f_name = get(f, 3)
+      out = f"{out}  at {file}:{line}:{col} (fn {f_name})\n"
+      i += 1
+   }
+   out
+}
 
 fn panic(msg){
    "Raises a panic: jumps to the nearest surrounding catch handler  if none, prints the message to stderr and exits."

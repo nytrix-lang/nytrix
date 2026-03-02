@@ -1,9 +1,10 @@
 ;; Keywords: sound source
 
 module std.os.audio.source (
-   make_memory_source,
-   read, seek, tell, length, format, sample_format,
-   SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32
+    make_memory_source,
+    read, seek, tell, length, format, sample_format,
+    source_channels, source_rate, source_bits, source_length,
+    SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32
 )
 
 use std.core *
@@ -80,6 +81,25 @@ fn format(src){
    fmt
 }
 
+fn source_channels(src){
+   if(!is_list(src)){ return 0 }
+   get(get(src, 1), "channels", 0)
+}
+
+fn source_rate(src){
+   if(!is_list(src)){ return 0 }
+   get(get(src, 1), "rate", 0)
+}
+
+fn source_bits(src){
+   if(!is_list(src)){ return 0 }
+   get(get(src, 1), "bits", 0)
+}
+
+fn source_length(src){
+   length(src)
+}
+
 fn sample_format(src){
    "Returns source sample format enum."
    if(!is_list(src)){ return 0 }
@@ -121,12 +141,12 @@ if(comptime{__main()}){
        ptr
    }
 
-   ;; Test 1: Basic Read
+   ; Test 1: Basic Read
    {
        print("Test 1: Basic Read")
        def data_size = 100
        def ptr = create_test_data(data_size)
-       ;; 1 channel, 44100 rate, 8 bits (1 byte per frame)
+       ; 1 channel, 44100 rate, 8 bits (1 byte per frame)
        def src = make_memory_source(ptr, data_size, 1, 44100, 8)
        def buf = malloc(100)
 
@@ -139,7 +159,7 @@ if(comptime{__main()}){
        free(ptr)
    }
 
-   ;; Test 2: Partial Read (near end)
+   ; Test 2: Partial Read (near end)
    {
        print("Test 2: Partial Read")
        def data_size = 15
@@ -147,19 +167,19 @@ if(comptime{__main()}){
        def src = make_memory_source(ptr, data_size, 1, 44100, 8)
        def buf = malloc(20)
 
-       read(src, buf, 10) ;; Read 10, cursor at 10
-       def read_count = read(src, buf, 10) ;; Try to read 10 more, only 5 left
+       read(src, buf, 10) ; Read 10, cursor at 10
+       def read_count = read(src, buf, 10) ; Try to read 10 more, only 5 left
 
        t_assert_eq(read_count, 5, "read remaining 5 frames")
 
-       ;; verify content of last 5 bytes
+       ; verify content of last 5 bytes
        t_assert(memcmp(ptr + 10, buf, 5) == 0, "last 5 bytes match")
 
        free(buf)
        free(ptr)
    }
 
-   ;; Test 3: Empty Read (at end)
+   ; Test 3: Empty Read (at end)
    {
        print("Test 3: Empty Read")
        def data_size = 10
@@ -167,8 +187,8 @@ if(comptime{__main()}){
        def src = make_memory_source(ptr, data_size, 1, 44100, 8)
        def buf = malloc(10)
 
-       read(src, buf, 10) ;; Read all
-       def read_count = read(src, buf, 10) ;; Try to read more
+       read(src, buf, 10) ; Read all
+       def read_count = read(src, buf, 10) ; Try to read more
 
        t_assert_eq(read_count, 0, "read 0 frames at end")
 
@@ -176,7 +196,7 @@ if(comptime{__main()}){
        free(ptr)
    }
 
-   ;; Test 4: Invalid Source
+   ; Test 4: Invalid Source
    {
        print("Test 4: Invalid Source")
        def buf = malloc(10)

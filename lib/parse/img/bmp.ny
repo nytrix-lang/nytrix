@@ -91,7 +91,7 @@ fn decode(data){
       }
       if(palette_entries <= 0){ return 0 }
    }
-   def pixels = init_str(malloc(w * abs_h * 4), w * abs_h * 4)
+   def pixels = init_str(malloc(w * abs_h * 4 + 16) + 16, w * abs_h * 4)
    memset(pixels, 0, w * abs_h * 4)
    mut y = 0
    while(y < abs_h){
@@ -241,5 +241,14 @@ if(comptime{__main()}){
    assert(load8(enc_data, 0) == 66, "bmp encode signature")
    assert(load8(enc_data, 54) == 255, "bmp encode pixel")
 
-   print("✓ std.image.bmp tests passed")
+   print("✓ std.image.bmp tests passed (synthetic)")
+
+   match file_read("etc/assets/images/test.bmp"){
+      ok(data) -> {
+         def img2 = decode(data)
+         assert(img2 != 0, "bmp test.bmp decode")
+         print("✓ std.image.bmp tests passed (test.bmp)")
+      }
+      err(_) -> { print("! test.bmp skipped (not found)") }
+   }
 }

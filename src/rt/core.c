@@ -21,6 +21,7 @@ extern char **environ;
 int color_mode __attribute__((weak)) = 0;
 int debug_enabled __attribute__((weak)) = 0;
 
+
 int64_t g_globals_ptr = 1;
 
 typedef struct {
@@ -381,7 +382,8 @@ int64_t __list_new(int64_t n_v) {
   // Standard Nytrix tags are at p-8
   *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_LIST;
   *(int64_t *)((char *)(uintptr_t)p + 0) = 1; // Length = 0 (tagged: (0<<1)|1 = 1)
-  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1; // Capacity = n
+  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1; // Capacity = n (tagged)
+
   return p;
 }
 
@@ -389,9 +391,9 @@ int64_t __append(int64_t lst, int64_t val) {
   if (!is_ptr(lst)) return lst;
   if (__tagof(lst) != ((TAG_LIST << 1) | 1)) return lst;
   int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
-  int64_t n = len_v >> 1;
+  int64_t n = is_int(len_v) ? (len_v >> 1) : len_v;
   int64_t cap_v = *(int64_t *)((char *)(uintptr_t)lst + 8);
-  int64_t cap = cap_v >> 1;
+  int64_t cap = is_int(cap_v) ? (cap_v >> 1) : cap_v;
 
   if (n >= cap) {
     int64_t new_cap = cap == 0 ? 8 : (cap * 2);
@@ -401,8 +403,6 @@ int64_t __append(int64_t lst, int64_t val) {
     *(int64_t *)((char *)(uintptr_t)new_p + 0) = len_v;
     *(int64_t *)((char *)(uintptr_t)new_p + 8) = (new_cap << 1) | 1;
     memcpy((char *)(uintptr_t)new_p + 16, (char *)(uintptr_t)lst + 16, n * 8);
-    // Note: We don't free(lst) here because it might be shared.
-    // In a real RC system we would check refcount or let GC handle it.
     lst = new_p;
   }
 
@@ -410,11 +410,15 @@ int64_t __append(int64_t lst, int64_t val) {
   *(int64_t *)((char *)(uintptr_t)lst + 0) = ((n + 1) << 1) | 1;
   return lst;
 }
+
+
+
 int64_t __load_item(int64_t lst, int64_t i_v) {
   if (!is_ptr(lst)) return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
   return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
 }
+
 int64_t __store_item(int64_t lst, int64_t i_v, int64_t val) {
   if (!is_ptr(lst)) return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;

@@ -16,7 +16,7 @@ fn spawn(path, args){
    if(!is_str(path)){ return 0 }
    def res = popen(path, args)
    if(res == 0){ return 0 }
-   ;; res = [pid, child_stdin, child_stdout]
+   ; res = [pid, child_stdin, child_stdout]
    mut p = dict(4)
    dict_set(p, "pid", get(res, 0))
    dict_set(p, "in", get(res, 1))
@@ -126,7 +126,7 @@ if(comptime{__main()}){
     use std.text *
     use std.os.sys *
 
-    ;; pwntools-like process IO primitives.
+    ; pwntools-like process IO primitives.
 
     def osn = os()
     mut cat_cmd = "/bin/cat"

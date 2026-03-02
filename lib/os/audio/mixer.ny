@@ -49,17 +49,6 @@ fn _fmt_from_meta(bits, format_tag, sample_fmt){
    SAMPLE_FMT_S16
 }
 
-fn _sample_bytes(fmt, bits){
-   "Internal helper for `sample_bytes`."
-   if(fmt == SAMPLE_FMT_U8){ return 1 }
-   if(fmt == SAMPLE_FMT_S16){ return 2 }
-   if(fmt == SAMPLE_FMT_S24){ return 3 }
-   if(fmt == SAMPLE_FMT_S32 || fmt == SAMPLE_FMT_F32){ return 4 }
-   mut b = bits / 8
-   if(b <= 0){ b = 2 }
-   b
-}
-
 fn _load24_s(ptr, off){
    "Internal helper for `load24_s`."
    def b0 = load8(ptr, off)
@@ -99,6 +88,127 @@ fn _sample_at(ptr, frame_idx, channel_idx, channels, sample_fmt, bits){
    load16_s(ptr, off) / 32768.0
 }
 
+fn _sample_bytes(fmt, bits){
+   "Internal helper for `sample_bytes`."
+   if(fmt == SAMPLE_FMT_U8){ return 1 }
+   if(fmt == SAMPLE_FMT_S16){ return 2 }
+   if(fmt == SAMPLE_FMT_S24){ return 3 }
+   if(fmt == SAMPLE_FMT_S32 || fmt == SAMPLE_FMT_F32){ return 4 }
+   mut b = bits / 8
+   if(b <= 0){ b = 2 }
+   b
+}
+
+fn _read_cursor(inst){
+   "Reads cursor from instance as integer. Works around float spill bug."
+   def raw = get(inst, 1)
+   __flt_to_int(raw + 0.0)
+}
+
+fn _write_cursor(inst, val){
+   "Writes integer cursor back to instance as float."
+   store_item(inst, 1, val + 0.0)
+}
+
+fn _mix_one_s16(acc, s_ptr, s_channels, total_frames, cursor_start, period_frames, looping, gain_l, gain_r, unit_gain){
+   "Fast S16 mixing path. Returns new cursor position (integer)."
+   mut idx = cursor_start
+   mut f = 0
+   while(f < period_frames){
+      if(idx >= total_frames){
+         if(looping){
+            while(idx >= total_frames){ idx = idx - total_frames }
+         } else { break }
+      }
+      def ai = f * 2
+      def al_off = ai * 4
+      def ar_off = (ai + 1) * 4
+      mut s_l = load16_s(s_ptr, idx * s_channels * 2)
+      mut s_r = s_l
+      if(s_channels > 1){
+         s_r = load16_s(s_ptr, (idx * s_channels + 1) * 2)
+      }
+      mut add_l = s_l
+      mut add_r = s_r
+      if(!unit_gain){
+         add_l = __flt_to_int((s_l + 0.0) * gain_l)
+         add_r = __flt_to_int((s_r + 0.0) * gain_r)
+      }
+      store32(acc, _load32_s(acc, al_off) + add_l, al_off)
+      store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
+      idx += 1
+      f += 1
+   }
+   idx
+}
+
+fn _mix_one_f32(acc, s_ptr, s_channels, total_frames, cursor_start, period_frames, looping, gain_l, gain_r){
+   "Fast F32 mixing path. Returns new cursor position (integer)."
+   mut idx = cursor_start
+   mut f = 0
+   while(f < period_frames){
+      if(idx >= total_frames){
+         if(looping){
+            while(idx >= total_frames){ idx = idx - total_frames }
+         } else { break }
+      }
+      def ai = f * 2
+      def al_off = ai * 4
+      def ar_off = (ai + 1) * 4
+      mut s_l = load32_f32(s_ptr, idx * s_channels * 4)
+      mut s_r = s_l
+      if(s_channels > 1){
+         s_r = load32_f32(s_ptr, (idx * s_channels + 1) * 4)
+      }
+      def add_l = __flt_to_int(s_l * gain_l * 32767.0)
+      def add_r = __flt_to_int(s_r * gain_r * 32767.0)
+      store32(acc, _load32_s(acc, al_off) + add_l, al_off)
+      store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
+      idx += 1
+      f += 1
+   }
+   idx
+}
+
+fn _mix_one_generic(acc, s_ptr, s_channels, s_fmt, s_bits, total_frames, cursor_start, period_frames, looping, step, gain_l, gain_r){
+   "Generic resampling mixing path. Returns new cursor (integer, truncated)."
+   mut current = cursor_start + 0.0
+   def total_f = total_frames + 0.0
+   mut f = 0
+   while(f < period_frames){
+      if(current >= total_f){
+         if(looping){
+            while(current >= total_f){ current = current - total_f }
+         } else { break }
+      }
+      def idx = __flt_to_int(current)
+      mut idx_next = idx + 1
+      if(idx_next >= total_frames){
+         idx_next = looping ? 0 : (total_frames - 1)
+      }
+      def frac = current - (idx + 0.0)
+      mut l0 = _sample_at(s_ptr, idx, 0, s_channels, s_fmt, s_bits)
+      mut l1 = _sample_at(s_ptr, idx_next, 0, s_channels, s_fmt, s_bits)
+      mut left = l0 + (l1 - l0) * frac
+      mut right = left
+      if(s_channels > 1){
+         mut r0 = _sample_at(s_ptr, idx, 1, s_channels, s_fmt, s_bits)
+         mut r1 = _sample_at(s_ptr, idx_next, 1, s_channels, s_fmt, s_bits)
+         right = r0 + (r1 - r0) * frac
+      }
+      def ai = f * 2
+      def al_off = ai * 4
+      def ar_off = (ai + 1) * 4
+      def add_l = __flt_to_int(left * gain_l * 32767.0)
+      def add_r = __flt_to_int(right * gain_r * 32767.0)
+      store32(acc, _load32_s(acc, al_off) + add_l, al_off)
+      store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
+      current = current + step
+      f += 1
+   }
+   __flt_to_int(current)
+}
+
 fn mix_sounds(mix_buf, buf_size, active_sounds, master_vol, mtx, out_rate=44100, out_format=1){
    "Implements `mix_sounds`."
    if(_debug == -1){
@@ -123,7 +233,7 @@ fn mix_sounds(mix_buf, buf_size, active_sounds, master_vol, mtx, out_rate=44100,
    while(i < len(active_sounds)){
       def inst = get(active_sounds, i)
       def sound = get(inst, 0)
-      mut cursor = get_item(inst, 1, 0.0)
+      def cursor_i = _read_cursor(inst)
       def pitch = get_item(inst, 2, 1.0)
       def vol = get_item(inst, 3, 1.0)
       def looping = get_item(inst, 4, false)
@@ -165,125 +275,35 @@ fn mix_sounds(mix_buf, buf_size, active_sounds, master_vol, mtx, out_rate=44100,
       def fast_s16 = (s_fmt == SAMPLE_FMT_S16) && (s_channels <= 2) && (abs(step - 1.0) < 0.000001)
       def fast_f32 = (s_fmt == SAMPLE_FMT_F32) && (s_channels <= 2) && (abs(step - 1.0) < 0.000001)
       def unit_gain = (abs(gain_l - 1.0) < 0.000001) && (abs(gain_r - 1.0) < 0.000001)
-      mut f = 0
-      mut current_cursor = cursor + 0.0
-      def total_frames_f = total_frames + 0.0
+      mut new_cursor = cursor_i
       if(fast_s16){
-         mut idx_i = __flt_to_int(current_cursor)
-         while(f < period_frames){
-            if(idx_i >= total_frames){
-               if(looping){
-                  while(idx_i >= total_frames){ idx_i = idx_i - total_frames }
-               } else { break }
-            }
-            def ai = f * 2
-            def al_off = ai * 4
-            def ar_off = (ai + 1) * 4
-            mut s_l = load16_s(s_ptr, idx_i * s_channels * 2)
-            mut s_r = s_l
-            if(s_channels > 1){
-               s_r = load16_s(s_ptr, (idx_i * s_channels + 1) * 2)
-            }
-            mut add_l = s_l
-            mut add_r = s_r
-            if(!unit_gain){
-               add_l = __flt_to_int((s_l + 0.0) * gain_l)
-               add_r = __flt_to_int((s_r + 0.0) * gain_r)
-            }
-            store32(acc, _load32_s(acc, al_off) + add_l, al_off)
-            store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
-            idx_i += 1
-            f += 1
-         }
-         current_cursor = idx_i + 0.0
+         new_cursor = _mix_one_s16(acc, s_ptr, s_channels, total_frames, cursor_i, period_frames, looping, gain_l, gain_r, unit_gain)
       } elif(fast_f32){
-         mut idx_i = __flt_to_int(current_cursor)
-         while(f < period_frames){
-            if(idx_i >= total_frames){
-               if(looping){
-                  while(idx_i >= total_frames){ idx_i = idx_i - total_frames }
-               } else { break }
-            }
-            def ai = f * 2
-            def al_off = ai * 4
-            def ar_off = (ai + 1) * 4
-            mut s_l = load32_f32(s_ptr, idx_i * s_channels * 4)
-            mut s_r = s_l
-            if(s_channels > 1){
-               s_r = load32_f32(s_ptr, (idx_i * s_channels + 1) * 4)
-            }
-            def add_l = __flt_to_int(s_l * gain_l * 32767.0)
-            def add_r = __flt_to_int(s_r * gain_r * 32767.0)
-            store32(acc, _load32_s(acc, al_off) + add_l, al_off)
-            store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
-            idx_i += 1
-            f += 1
-         }
-         current_cursor = idx_i + 0.0
+         new_cursor = _mix_one_f32(acc, s_ptr, s_channels, total_frames, cursor_i, period_frames, looping, gain_l, gain_r)
       } else {
-         while(f < period_frames){
-            if(current_cursor >= total_frames_f){
-               if(looping){
-                  while(current_cursor >= total_frames_f){ current_cursor = current_cursor - total_frames_f }
-               } else { break }
-            }
-            def idx = __flt_to_int(current_cursor)
-            mut idx_next = idx + 1
-            if(idx_next >= total_frames){
-               idx_next = looping ? 0 : (total_frames - 1)
-            }
-            def frac = current_cursor - (idx + 0.0)
-            mut l0 = _sample_at(s_ptr, idx, 0, s_channels, s_fmt, s_bits)
-            mut l1 = _sample_at(s_ptr, idx_next, 0, s_channels, s_fmt, s_bits)
-            mut left = l0 + (l1 - l0) * frac
-            mut right = left
-            if(s_channels > 1){
-               mut r0 = _sample_at(s_ptr, idx, 1, s_channels, s_fmt, s_bits)
-               mut r1 = _sample_at(s_ptr, idx_next, 1, s_channels, s_fmt, s_bits)
-               right = r0 + (r1 - r0) * frac
-            }
-            def ai = f * 2
-            def al_off = ai * 4
-            def ar_off = (ai + 1) * 4
-            def add_l = __flt_to_int(left * gain_l * 32767.0)
-            def add_r = __flt_to_int(right * gain_r * 32767.0)
-            store32(acc, _load32_s(acc, al_off) + add_l, al_off)
-            store32(acc, _load32_s(acc, ar_off) + add_r, ar_off)
-            current_cursor = current_cursor + step
-            f += 1
-         }
+         new_cursor = _mix_one_generic(acc, s_ptr, s_channels, s_fmt, s_bits, total_frames, cursor_i, period_frames, looping, step, gain_l, gain_r)
       }
-      if(looping || current_cursor < total_frames_f){
-         store_item(inst, 1, current_cursor)
+      if(looping || new_cursor < total_frames){
+         _write_cursor(inst, new_cursor)
          new_actives = append(new_actives, inst)
       }
       i += 1
    }
    _unlock(mtx)
-   mut peak_l = 0
-   mut peak_r = 0
    mut s = 0
    def total_samples = period_frames * 2
    while(s < total_samples){
       def off = s * 4
       mut x = _load32_s(acc, off)
-      if((s & 1) == 0){
-         if(abs(x) > peak_l){ peak_l = abs(x) }
-      } else {
-         if(abs(x) > peak_r){ peak_r = abs(x) }
-      }
       if(out_format == 2){
-         mut f = x / 32768.0
-         if(f > 1.0){ f = 1.0 }
-         if(f < -1.0){ f = -1.0 }
-         store32_f32(mix_buf, f, s * 4)
+         mut fv = x / 32768.0
+         if(fv > 1.0){ fv = 1.0 }
+         if(fv < -1.0){ fv = -1.0 }
+         store32_f32(mix_buf, fv, s * 4)
       } else {
          store16(mix_buf, clamp_s16(x), s * 2)
       }
       s += 1
-   }
-   if(_debug && (peak_l > 32000 || peak_r > 32000)){
-      print(f"MIXER: high peak L={peak_l} R={peak_r}")
    }
    new_actives
 }

@@ -9,7 +9,7 @@ use std.core *
 use std.core.reflect *
 
 fn any(xs){
-   "Any true?"
+   "Returns true if at least one element in `xs` is truthy. If `xs` is not a list, returns `bool(xs)`."
    if(is_list(xs)==0){ return bool(xs)  }
    mut i =0
    while(i<len(xs)){
@@ -20,7 +20,7 @@ fn any(xs){
 }
 
 fn all(xs){
-   "All true?"
+   "Returns true if all elements in `xs` are truthy. If `xs` is not a list, returns `bool(xs)`."
    if(is_list(xs)==0){ return bool(xs)  }
    mut i =0
    while(i<len(xs)){

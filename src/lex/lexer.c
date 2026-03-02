@@ -243,7 +243,6 @@ token_t lexer_next(lexer_t *lx) {
   skip_whitespace(lx);
   size_t start = lx->pos;
   if (lx->src[lx->pos] == '\0') {
-    NY_LOG_DEBUG("Lexer reached EOF at %d:%d\n", lx->line, lx->col);
     token_t tok;
     tok.kind = NY_T_EOF;
     tok.lexeme = lx->src + start;
@@ -297,8 +296,6 @@ token_t lexer_next(lexer_t *lx) {
     token_t tok = make_token(lx, NY_T_IDENT, start);
     tok.hash = hash;
     tok.kind = identifier_type(tok.lexeme, tok.len);
-    NY_LOG_DEBUG("Lexer: identifier '%.*s' resolved to kind %d\n", (int)tok.len,
-                 tok.lexeme, tok.kind);
     return tok;
   }
   if (IS_DIGIT(c)) {

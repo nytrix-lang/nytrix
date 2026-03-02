@@ -451,7 +451,7 @@ fn gpu_offload_status(work_items=0){
          reason = "eligible"
       }
    }
-   ;; Backend runtime dispatch is not integrated yet, so active path is CPU fallback.
+   ; Backend runtime dispatch is not integrated yet, so active path is CPU fallback.
    mut active = false
    mut active_reason = "runtime_backend_unimplemented"
    if(!policy_selected){ active_reason = "policy_not_selected" }
