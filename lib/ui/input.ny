@@ -2,21 +2,21 @@
 ;; Input management for std.ui.
 
 module std.ui.input (
-   ;; Key Codes
+   ; Key Codes
    KEY_NULL, KEY_ESCAPE,
    KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE,
    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
 
-   ;; Modifier flags
+   ; Modifier flags
    MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META,
 
-   ;; Mouse Buttons
+   ; Mouse Buttons
    MOUSE_LEFT, MOUSE_RIGHT, MOUSE_MIDDLE,
 
-   ;; Logic
+   ; Logic
    normalize_key, parse_notation, mod_bit_for_key, mods_from_key_states,
 
-   ;; High-level (Active Window)
+   ; High-level (Active Window)
    key_down, key_pressed, mouse_pos, mouse_button_down, mouse_button_pressed
 )
 
@@ -43,9 +43,9 @@ def MOUSE_MIDDLE  = 2
 
 fn normalize_key(key){
    "Normalizes a key code for stable comparisons across different keyboard layouts and backends."
-   ;; Normalize ASCII letters to uppercase for stable chord matching.
+   ; Normalize ASCII letters to uppercase for stable chord matching.
    if(key >= 97 && key <= 122){ return key - 32 }
-   ;; Normalize common non-printable key aliases from X11 keysyms.
+   ; Normalize common non-printable key aliases from X11 keysyms.
    if(key == 0xFF1B){ return KEY_ESCAPE }
    if(key == 0xFF0D){ return KEY_ENTER }
    if(key == 0xFF08){ return KEY_BACKSPACE }
@@ -59,7 +59,7 @@ fn normalize_key(key){
 
 fn mod_bit_for_key(key){
    "Returns the modifier bitmask corresponding to a native keysym/VK code."
-   ;; X11 keysyms + Win32 virtual-key codes for modifier keys.
+   ; X11 keysyms + Win32 virtual-key codes for modifier keys.
    if(key == 0xFFE1 || key == 0xFFE2 || key == 16){ return MOD_SHIFT }
    if(key == 0xFFE3 || key == 0xFFE4 || key == 17){ return MOD_CONTROL }
    if(key == 0xFFE9 || key == 0xFFEA || key == 18){ return MOD_ALT }
@@ -159,7 +159,7 @@ fn parse_notation(notation){
 
 fn key_down(key){
    "Returns true if the given key is currently held down in the active window."
-   def win = uiw.window_last() ;; For now, use last window if no active tracked here
+   def win = uiw.window_last() ; For now, use last window if no active tracked here
    if(!win){ return false }
    uiw.window_key_down(win, key)
 }

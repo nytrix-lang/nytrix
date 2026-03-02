@@ -8,7 +8,7 @@ use std.core *
 use std.text *
 
 fn _is_windows(){
-   "Internal helper."
+   "Internal: returns true if the host OS is Windows."
    eq(__os_name(), "windows")
 }
 
@@ -19,14 +19,14 @@ fn sep(){
 }
 
 fn _is_sep(c){
-   "Internal helper."
+   "Internal: returns true if byte `c` is a path separator '/' or '\\'."
    if(c == 47){ return true }
    if(c == 92){ return true }
    false
 }
 
 fn _is_alpha(c){
-   "Internal helper."
+   "Internal: returns true if byte `c` is an ASCII letter."
    if(c >= 65){
       if(c <= 90){ return true }
    }
@@ -49,7 +49,7 @@ fn has_sep(p){
 }
 
 fn is_abs(p){
-   "Function `is_abs`."
+   "Returns true if path `p` is an absolute path for the current platform."
    if(!is_str(p)){ return false }
    def n = str_len(p)
    if(n == 0){ return false }
@@ -64,7 +64,7 @@ fn is_abs(p){
 }
 
 fn join(a, b){
-   "Function `join`."
+   "Joins two path segments, inserting a platform separator if necessary."
    if(!is_str(a) || str_len(a) == 0){ return b }
    if(!is_str(b) || str_len(b) == 0){ return a }
    if(is_abs(b)){ return b }
@@ -76,11 +76,11 @@ fn join(a, b){
       def bc = __load8_idx(b, 0)
       if(_is_sep(ac) || _is_sep(bc)){ return a + b }
    }
-   a + s + b
+   return a + s + b
 }
 
 fn _is_drive_prefix(p){
-   "Internal helper."
+   "Internal: returns true if string `p` starts with a Windows-style drive letter (e.g. 'C:')."
    if(!is_str(p)){ return false }
    def n = str_len(p)
    if(n < 2){ return false }
@@ -90,7 +90,7 @@ fn _is_drive_prefix(p){
 }
 
 fn _last_sep_idx(s){
-   "Internal helper."
+   "Internal: returns the byte index of the last character that is a path separator, or -1."
    if(!is_str(s)){ return -1 }
    mut i = str_len(s) - 1
    while(i >= 0){
@@ -101,7 +101,7 @@ fn _last_sep_idx(s){
 }
 
 fn _slice_str(s, start, stop){
-   "Internal helper."
+   "Internal: byte-slice helper for path strings."
    if(!is_str(s)){ return "" }
    def n = str_len(s)
    if(start < 0){ start = 0 }
@@ -123,7 +123,7 @@ fn _slice_str(s, start, stop){
 }
 
 fn normalize(p){
-   "Function `normalize`."
+   "Normalizes path `p`, collapsing redundant separators and resolving '.' and '..' components."
    if(!is_str(p)){ return "" }
    if(str_len(p) == 0){ return "" }
    def sepch = sep()
@@ -141,25 +141,26 @@ fn normalize(p){
       if(n >= 2 && _is_sep(load8(s, 0)) && _is_sep(load8(s, 1))){
          prefix = "\\\\"
          abs = true
-         rest = _slice_str(s, 2, n)
+         rest = _substr(s, 2, n)
       } elif(_is_drive_prefix(s)){
-         prefix = _slice_str(s, 0, 2)
-         rest = _slice_str(s, 2, n)
+         prefix = _substr(s, 0, 2)
+         rest = _substr(s, 2, n)
          if(str_len(rest) > 0 && _is_sep(load8(rest, 0))){
             abs = true
-            rest = _slice_str(rest, 1, str_len(rest))
+            rest = _substr(rest, 1, str_len(rest))
          }
       } elif(n > 0 && _is_sep(load8(s, 0))){
          abs = true
-         rest = _slice_str(s, 1, n)
+         rest = _substr(s, 1, n)
       }
    } else {
       if(_is_sep(load8(s, 0))){
          abs = true
-         rest = _slice_str(s, 1, n)
+         rest = _substr(s, 1, n)
       }
    }
    def raw_parts = split(rest, sepch)
+   if(env("NY_PATH_DEBUG")){ print("Path: normalize rest='" + rest + "' raw_parts count=" + to_str(len(raw_parts))) }
    mut parts = list(len(raw_parts))
    mut i = 0
    while(i < len(raw_parts)){
@@ -196,6 +197,7 @@ fn normalize(p){
    }
    mut idx = 0
    def part_count = len(parts)
+   if(env("NY_PATH_DEBUG")){ print("Path: normalize part_count=" + to_str(part_count)) }
    while(idx < part_count){
       def part = get(parts, idx, "")
       if(str_len(out) > 0){
@@ -205,17 +207,18 @@ fn normalize(p){
       out = out + part
       idx += 1
    }
+   if(env("NY_PATH_DEBUG")){ print("Path: normalize final out='" + out + "'") }
    if(str_len(out) == 0 && part_count == 0){
       if(abs){ return sepch }
       if(str_len(prefix) > 0){ return prefix }
       if(n == 0){ return "" }
       return "."
    }
-   out
+   return out
 }
 
 fn basename(p){
-   "Function `basename`."
+   "Returns the final component of a path (the file or directory name)."
    if(!is_str(p)){ return "" }
    def npath = normalize(p)
    def n = str_len(npath)
@@ -225,14 +228,14 @@ fn basename(p){
    mut i = n - 1
    while(i >= 0 && _is_sep(load8(npath, i))){ i -= 1 }
    if(i < 0){ return sep() }
-   def head = _slice_str(npath, 0, i + 1)
+   def head = _substr(npath, 0, i + 1)
    def j = _last_sep_idx(head)
    if(j < 0){ return head }
-   _slice_str(head, j + 1, str_len(head))
+   return _substr(head, j + 1, str_len(head))
 }
 
 fn dirname(p){
-   "Function `dirname`."
+   "Returns the directory component of a path."
    if(!is_str(p)){ return "." }
    def npath = normalize(p)
    def n = str_len(npath)
@@ -244,18 +247,18 @@ fn dirname(p){
    }
    mut end = n
    while(end > 1 && _is_sep(load8(npath, end - 1))){ end -= 1 }
-   def trimmed = _slice_str(npath, 0, end)
+   def trimmed = _substr(npath, 0, end)
    def j = _last_sep_idx(trimmed)
    if(j < 0){ return "." }
    if(j == 0){ return s }
    if(_is_windows() && j == 2 && _is_drive_prefix(trimmed)){
-      return _slice_str(trimmed, 0, 3)
+      return _substr(trimmed, 0, 3)
    }
-   _slice_str(trimmed, 0, j)
+   return _substr(trimmed, 0, j)
 }
 
 fn _last_index_byte(s, want){
-   "Internal helper."
+   "Internal: returns the last byte index of byte `want` in string `s`."
    if(!is_str(s)){ return -1 }
    mut i = str_len(s) - 1
    while(i >= 0){
@@ -271,7 +274,7 @@ fn extname(p){
    def b = basename(p)
    def n = str_len(b)
    if(n == 0){ return "" }
-   def dot = _last_index_byte(b, 46) ;; '.'
+   def dot = _last_index_byte(b, 46) ; '.'
    if(dot <= 0 || dot == n - 1){ return "" }
    def out = malloc(n - dot + 1)
    if(!out){ return "" }
@@ -282,7 +285,7 @@ fn extname(p){
       i += 1
    }
    store8(out, 0, n - dot)
-   out
+   return out
 }
 
 fn splitext(p){
@@ -292,50 +295,49 @@ fn splitext(p){
    if(str_len(ext) == 0){ return [p, ""] }
    def root_len = str_len(p) - str_len(ext)
    if(root_len < 0){ return [p, ""] }
-   [_slice_str(p, 0, root_len), ext]
+   [_substr(p, 0, root_len), ext]
 }
 
 if(comptime{__main()}){
-    use std.os.path as path
     use std.core *
     use std.core.error *
     use std.text *
 
-    def s = path.sep()
+    def s = sep()
     assert(str_len(s) == 1, "sep is one byte")
 
     def is_win = (s == "\\")
 
     if(is_win){
-       assert(path.is_abs("C:\\tmp"), "windows is_abs drive")
-       assert(path.is_abs("\\\\server\\share"), "windows is_abs unc")
+       assert(is_abs("C:\\tmp"), "windows is_abs drive")
+       assert(is_abs("\\\\server\\share"), "windows is_abs unc")
     } else {
-       assert(path.is_abs("/tmp"), "unix is_abs absolute")
-       assert(!path.is_abs("tmp"), "unix is_abs relative")
+       assert(is_abs("/tmp"), "unix is_abs absolute")
+       assert(!is_abs("tmp"), "unix is_abs relative")
     }
 
-    assert((path.join("a", "b") == "a" + s + "b"), "join simple")
-    assert((path.normalize("a/./b/../c") == "a" + s + "c"), "normalize relative")
+    assert((join("a", "b") == "a" + s + "b"), "join simple")
+    assert((normalize("a/./b/../c") == "a" + s + "c"), "normalize relative")
 
-    assert((path.basename("a" + s + "b" + s + "c.txt") == "c.txt"), "basename file")
-    assert((path.dirname("a" + s + "b" + s + "c.txt") == "a" + s + "b"), "dirname nested")
+    assert((basename("a" + s + "b" + s + "c.txt") == "c.txt"), "basename file")
+    assert((dirname("a" + s + "b" + s + "c.txt") == "a" + s + "b"), "dirname nested")
 
     if(!is_win){
-       assert((path.dirname("/tmp") == "/"), "dirname absolute child")
-       assert((path.dirname("/") == "/"), "dirname root")
-       assert((path.basename("/") == "/"), "basename root")
+       assert((dirname("/tmp") == "/"), "dirname absolute child")
+       assert((dirname("/") == "/"), "dirname root")
+       assert((basename("/") == "/"), "basename root")
     }
 
-    assert((path.extname("file.txt") == ".txt"), "extname simple")
-    assert((path.extname("archive.tar.gz") == ".gz"), "extname last extension")
-    assert((path.extname(".bashrc") == ""), "extname hidden no extension")
-    assert((path.extname("noext") == ""), "extname missing")
+    assert((extname("file.txt") == ".txt"), "extname simple")
+    assert((extname("archive.tar.gz") == ".gz"), "extname last extension")
+    assert((extname(".bashrc") == ""), "extname hidden no extension")
+    assert((extname("noext") == ""), "extname missing")
 
-    def sp = path.splitext("archive.tar.gz")
+    def sp = splitext("archive.tar.gz")
     assert((get(sp, 0) == "archive.tar"), "splitext root")
     assert((get(sp, 1) == ".gz"), "splitext ext")
 
-    def sp2 = path.splitext("noext")
+    def sp2 = splitext("noext")
     assert((get(sp2, 0) == "noext"), "splitext noext root")
     assert((get(sp2, 1) == ""), "splitext noext ext")
 

@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Args (Example)
+;; Args
 
 use std.core *
 use std.os.args *

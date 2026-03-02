@@ -11,7 +11,7 @@ use std.core *
 use std.core.error *
 
 fn cps_return(v){
-   "Wrap a plain value into a CPS computation."
+   "Wraps a plain value `v` into a CPS computation that immediately passes it to the continuation."
    return fn(k){
       "Auto-generated docstring: anonymous function."
       k(v)
@@ -19,7 +19,7 @@ fn cps_return(v){
 }
 
 fn cps_run(c, k=0){
-   "Run CPS computation `c`. If `k` is omitted, uses identity continuation."
+   "Runs a CPS computation `c`. If no continuation `k` is provided, the computation's final value is returned directly."
    if(k == 0){
       return c(fn(v){
          "Auto-generated docstring: anonymous function."
@@ -30,7 +30,7 @@ fn cps_run(c, k=0){
 }
 
 fn cps_transform_unary(f){
-   "Transform direct unary function `f(x) -> y` into CPS `f_cps(x, k)`."
+   "Wraps a standard unary function `f(x)` to behave as a CPS function `f(x, k)`."
    return fn(x, k){
       "Auto-generated docstring: anonymous function."
       k(f(x))
@@ -38,7 +38,7 @@ fn cps_transform_unary(f){
 }
 
 fn cps_transform_binary(f){
-   "Transform direct binary function `f(a, b) -> y` into CPS `f_cps(a, b, k)`."
+   "Wraps a binary function `f(a, b)` to behave as a CPS function `f(a, b, k)`."
    return fn(a, b, k){
       "Auto-generated docstring: anonymous function."
       k(f(a, b))
@@ -46,7 +46,7 @@ fn cps_transform_binary(f){
 }
 
 fn cps_map(c, f){
-   "Map function `f` over CPS computation `c`."
+   "Applies a transformation function `f` to the result of a CPS computation `c`."
    return fn(k){
       "Auto-generated docstring: anonymous function."
       c(fn(v){
@@ -57,7 +57,7 @@ fn cps_map(c, f){
 }
 
 fn cps_bind(c, f){
-   "Monadic bind for CPS: chain `c` into `f`."
+   "Chains two CPS computations together. Passes the result of `c` to function `f`, which must return a new CPS computation."
    return fn(k){
       "Auto-generated docstring: anonymous function."
       c(fn(v){
@@ -69,7 +69,7 @@ fn cps_bind(c, f){
 }
 
 fn cps_apply(cf, ca){
-   "Apply CPS function container `cf` to CPS argument container `ca`."
+   "Applies a CPS computation containing a function `cf` to a CPS computation containing an argument `ca`."
    cps_bind(cf, fn(f){
       "Auto-generated docstring: anonymous function."
       cps_map(ca, f)
@@ -77,7 +77,7 @@ fn cps_apply(cf, ca){
 }
 
 fn cps_lift2(f, ca, cb){
-   "Lift binary function `f(a, b)` to work over CPS computations."
+   "Lifts a standard binary function `f` to operate on the results of two CPS computations `ca` and `cb`."
    cps_bind(ca, fn(a){
       "Auto-generated docstring: anonymous function."
       cps_map(cb, fn(b){
@@ -88,7 +88,7 @@ fn cps_lift2(f, ca, cb){
 }
 
 fn cps_pipe(v, funcs){
-   "Apply a list of CPS unary transforms (`a -> CPS[b]`) left-to-right."
+   "Threads an initial value `v` through a sequence of unary CPS functions in `funcs`."
    mut c = cps_return(v)
    mut i = 0
    def n = len(funcs)
@@ -101,29 +101,29 @@ fn cps_pipe(v, funcs){
 }
 
 fn cps_step_done(v){
-   "Create trampoline terminal step."
+   "Creates a terminal trampoline step containing the final result `v`."
    return [0, v]
 }
 
 fn cps_step_more(thunk){
-   "Create trampoline continuation step. `thunk()` must return next step."
+   "Creates a continuation trampoline step that will execute `thunk()` to obtain the next step."
    return [1, thunk]
 }
 
 fn cps_is_done(step){
-   "Returns true if trampoline step is terminal."
+   "Returns true if the given trampoline `step` is a terminal step."
    if(!is_list(step) || len(step) < 2){ return true }
    get(step, 0, 0) == 0
 }
 
 fn cps_step_value(step){
-   "Extract payload from trampoline step."
+   "Extracts the result value from a terminal step or the thunk from a continuation step."
    if(!is_list(step) || len(step) < 2){ return step }
    get(step, 1, 0)
 }
 
 fn cps_trampoline(step, max_steps=0){
-   "Run trampoline steps until done. Set `max_steps` > 0 to guard runaway loops."
+   "Executes trampoline steps iteratively until a terminal step is reached. Prevents stack overflow for deep recursion."
    mut cur = step
    mut iters = 0
    while(true){

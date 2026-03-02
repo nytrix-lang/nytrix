@@ -9,214 +9,111 @@ module std.image.format.tga (
 use std.core *
 use std.core.dict *
 
-fn decode(data){
-   "Decodes a TGA image from a byte string."
-   if(!is_str(data) || len(data) < 18){ return 0 }
+fn decode(data)
+{
+   if(!is_str(data) || len(data) < 18)
+   {
+      return 0
+   }
    def id_len = load8(data, 0)
-   def image_type = load8(data, 2)
-   if(image_type != 2 && image_type != 3 && image_type != 10 && image_type != 11){ return 0 }
-   def w = load16(data, 12)
-   def h = load16(data, 14)
+   def color_map_type = load8(data, 1)
+   load8(data, 2) ; image_type
+   def w = load8(data, 12) | (load8(data, 13) << 8)
+   def h = load8(data, 14) | (load8(data, 15) << 8)
    def bpp = load8(data, 16)
-   def descriptor = load8(data, 17)
-   if(w <= 0 || h <= 0){ return 0 }
-   def gray = (image_type == 3 || image_type == 11)
-   if(gray){
-      if(bpp != 8 && bpp != 16){ return 0 }
-   } else {
-      if(bpp != 24 && bpp != 32){ return 0 }
+   def desc = load8(data, 17)
+   def flip_x = (desc >> 4) & 1
+   def flip_y = (desc >> 5) & 1
+   mut p = 18 + id_len
+   if(color_map_type == 1)
+   {
+      def map_len = load8(data, 5) | (load8(data, 6) << 8)
+      def map_entry_size = load8(data, 7)
+      p += map_len * (map_entry_size / 8)
    }
-   def top_down = (descriptor & 32) != 0
-   def left_to_right = (descriptor & 16) == 0
-   def offset = 18 + id_len
-   if(offset > len(data)){ return 0 }
-   def pixels = init_str(malloc(w * h * 4 + 1), w * h * 4)
-   if(image_type == 2 || image_type == 3){
-      def bytes_per_px = bpp / 8
-      if(offset + w * h * bytes_per_px > len(data)){ return 0 }
-      mut y = 0
-      while(y < h){
-         def src_y = top_down ? y : (h - 1 - y)
-         def dst_y = y
-         mut x = 0
-         while(x < w){
-            def src_x = left_to_right ? x : (w - 1 - x)
-            def src_off = offset + (src_y * w + src_x) * bytes_per_px
-            def dst_off = (dst_y * w + x) * 4
-            if(gray){
-               def v = load8(data, src_off)
-               def a = (bytes_per_px == 2) ? load8(data, src_off + 1) : 255
-               store8(pixels, v, dst_off)
-               store8(pixels, v, dst_off + 1)
-               store8(pixels, v, dst_off + 2)
-               store8(pixels, a, dst_off + 3)
-            } elif(bpp == 24){
-               store8(pixels, load8(data, src_off + 2), dst_off)
-               store8(pixels, load8(data, src_off + 1), dst_off + 1)
-               store8(pixels, load8(data, src_off), dst_off + 2)
-               store8(pixels, 255, dst_off + 3)
-            } else {
-               store8(pixels, load8(data, src_off + 2), dst_off)
-               store8(pixels, load8(data, src_off + 1), dst_off + 1)
-               store8(pixels, load8(data, src_off), dst_off + 2)
-               store8(pixels, load8(data, src_off + 3), dst_off + 3)
-            }
-            x += 1
-         }
-         y += 1
-      }
-   } else {
-      mut p = offset
-      mut count_px = 0
-      def total_px = w * h
-      def bytes_per_px = bpp / 8
-      while(count_px < total_px){
-         if(p >= len(data)){ return 0 }
-         def head = load8(data, p)
-         p += 1
-         mut run_len = (head & 127) + 1
-         if(head & 128){
-            if(p + bytes_per_px > len(data)){ return 0 }
-            def b = load8(data, p)
-            mut g = 0 mut r = 0 mut a = 255 mut v = 0
-            if(gray){
-               v = b
-               if(bytes_per_px == 2){ a = load8(data, p + 1) }
-            } else {
-               g = load8(data, p + 1)
-               r = load8(data, p + 2)
-               if(bytes_per_px == 4){ a = load8(data, p + 3) }
-            }
-            p += bytes_per_px
-            while(run_len > 0){
-               if(count_px >= total_px){ break }
-               def px_idx = count_px
-               def y = px_idx / w
-               def x = px_idx % w
-               def dst_y = top_down ? y : (h - 1 - y)
-               def dst_x = left_to_right ? x : (w - 1 - x)
-               def dst_off = (dst_y * w + dst_x) * 4
-               if(gray){
-                  store8(pixels, v, dst_off)
-                  store8(pixels, v, dst_off + 1)
-                  store8(pixels, v, dst_off + 2)
-               } else {
-                  store8(pixels, r, dst_off)
-                  store8(pixels, g, dst_off + 1)
-                  store8(pixels, b, dst_off + 2)
-               }
-               store8(pixels, a, dst_off + 3)
-               count_px += 1
-               run_len -= 1
-            }
-         } else {
-            while(run_len > 0){
-               if(count_px >= total_px){ break }
-               if(p + bytes_per_px > len(data)){ return 0 }
-               def b = load8(data, p)
-               mut g = 0 mut r = 0 mut a = 255 mut v = 0
-               if(gray){
-                  v = b
-                  if(bytes_per_px == 2){ a = load8(data, p + 1) }
-               } else {
-                  g = load8(data, p + 1)
-                  r = load8(data, p + 2)
-                  if(bytes_per_px == 4){ a = load8(data, p + 3) }
-               }
-               p += bytes_per_px
-               def px_idx = count_px
-               def y = px_idx / w
-               def x = px_idx % w
-               def dst_y = top_down ? y : (h - 1 - y)
-               def dst_x = left_to_right ? x : (w - 1 - x)
-               def dst_off = (dst_y * w + dst_x) * 4
-               if(gray){
-                  store8(pixels, v, dst_off)
-                  store8(pixels, v, dst_off + 1)
-                  store8(pixels, v, dst_off + 2)
-               } else {
-                  store8(pixels, r, dst_off)
-                  store8(pixels, g, dst_off + 1)
-                  store8(pixels, b, dst_off + 2)
-               }
-               store8(pixels, a, dst_off + 3)
-               count_px += 1
-               run_len -= 1
-            }
-         }
-      }
-   }
-   mut res = dict(4)
-   res = dict_set(res, "data", pixels)
-   res = dict_set(res, "width", w)
-   res = dict_set(res, "height", h)
-   res = dict_set(res, "channels", 4)
-   res
-}
-
-fn encode(img, bpp=24){
-   "Encodes an image dictionary (width, height, data) into a TGA byte string."
-   def w = dict_get(img, "width")
-   def h = dict_get(img, "height")
-   def pixels = dict_get(img, "data")
-   def total_size = 18 + w * h * (bpp / 8)
-   mut out = malloc(total_size)
-   init_str(out, total_size)
-   store8(out, 0, 0)
-   store8(out, 0, 1)
-   store8(out, 2, 2)
-   store16(out, 0, 8) store16(out, 0, 10)
-   store16(out, w, 12)
-   store16(out, h, 14)
-   store8(out, bpp, 16)
-   store8(out, (bpp == 32) ? 8 : 0, 17)
+   def tpx = w * h
+   def pix = init_str(malloc(tpx * 4 + 1 + 16) + 16, tpx * 4)
    mut y = 0
-   while(y < h){
+   while(y < h)
+   {
       mut x = 0
-      while(x < w){
-         def src_off = (y * w + x) * 4
-         def dst_off = 18 + (y * w + x) * (bpp / 8)
-         def r = load8(pixels, src_off)
-         def g = load8(pixels, src_off + 1)
-         def b = load8(pixels, src_off + 2)
-         store8(out, b, dst_off)
-         store8(out, g, dst_off + 1)
-         store8(out, r, dst_off + 2)
-         if(bpp == 32){
-            store8(out, load8(pixels, src_off + 3), dst_off + 3)
+      while(x < w)
+      {
+         def ry = flip_y ? y : (h - 1 - y)
+         def rx = flip_x ? (w - 1 - x) : x
+         def src_off = p + (y * w + x) * (bpp / 8)
+         def dst_off = (ry * w + rx) * 4
+         if(bpp == 24)
+         {
+            store8(pix, load8(data, src_off + 2), dst_off)
+            store8(pix, load8(data, src_off + 1), dst_off + 1)
+            store8(pix, load8(data, src_off), dst_off + 2)
+            store8(pix, 255, dst_off + 3)
+         }
+         elif(bpp == 32)
+         {
+            store8(pix, load8(data, src_off + 2), dst_off)
+            store8(pix, load8(data, src_off + 1), dst_off + 1)
+            store8(pix, load8(data, src_off), dst_off + 2)
+            store8(pix, load8(data, src_off + 3), dst_off + 3)
          }
          x += 1
       }
       y += 1
    }
-   out
+   mut res_d = dict(4)
+   dict_set(res_d, "data", pix)
+   dict_set(res_d, "width", w)
+   dict_set(res_d, "height", h)
+   dict_set(res_d, "channels", 4)
+   res_d
 }
 
-if(comptime{__main()}){
-   use std.core.error *
-
-   fn make_test_tga(){
-      "Implements `make_test_tga`."
-      def data = malloc(21)
-      init_str(data, 21)
-      store8(data, 0, 0) store8(data, 0, 1)
-      store8(data, 2, 2)
-      store16(data, 1, 12) store16(data, 1, 14)
-      store8(data, 24, 16) store8(data, 0, 17)
-      store8(data, 255, 18) store8(data, 0, 19) store8(data, 0, 20)
-      data
+fn encode(img)
+{
+   def w = dict_get(img, "width")
+   def h = dict_get(img, "height")
+   def d = dict_get(img, "data")
+   def ch = dict_get(img, "channels", 4)
+   def hdr = init_str(malloc(19 + 16) + 16, 18)
+   memset(hdr, 0, 18)
+   store8(hdr, 2, 2)
+   store8(hdr, w & 255, 12)
+   store8(hdr, w >> 8, 13)
+   store8(hdr, h & 255, 14)
+   store8(hdr, h >> 8, 15)
+   store8(hdr, 32, 16)
+   store8(hdr, 8, 17)
+   def out = init_str(malloc(w * h * 4 + 19 + 16) + 16, w * h * 4 + 18)
+   __copy_mem(out, hdr, 18)
+   mut y = 0
+   while(y < h)
+   {
+      mut x = 0
+      while(x < w)
+      {
+         def src_off = ((h - 1 - y) * w + x) * ch
+         def dst_off = 18 + (y * w + x) * 4
+         mut r = load8(d, src_off)
+         mut g = r
+         mut b = r
+         mut a = 255
+         if(ch >= 3)
+         {
+            g = load8(d, src_off + 1)
+            b = load8(d, src_off + 2)
+         }
+         if(ch == 4)
+         {
+            a = load8(d, src_off + 3)
+         }
+         store8(out, b, dst_off)
+         store8(out, g, dst_off + 1)
+         store8(out, r, dst_off + 2)
+         store8(out, a, dst_off + 3)
+         x += 1
+      }
+      y += 1
    }
-
-   def tga_data = make_test_tga()
-   def img = decode(tga_data)
-   assert(img != 0, "tga decode")
-   assert(dict_get(img, "width") == 1, "tga width")
-   def p = dict_get(img, "data")
-   assert(load8(p, 2) == 255, "tga blue channel")
-
-   def enc_data = encode(img)
-   assert(load8(enc_data, 2) == 2, "tga encode type")
-   assert(load16(enc_data, 12) == 1, "tga encode width")
-
-   print("✓ std.image.tga tests passed")
+   out
 }

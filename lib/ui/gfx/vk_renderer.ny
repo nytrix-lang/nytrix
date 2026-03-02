@@ -5,8 +5,8 @@ module std.ui.gfx.vk_renderer (
    init, shutdown,
    begin_frame, end_frame,
    clear, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line,
-   create_texture, update_texture_rect, bind_texture,
-   draw_triangle, draw_triangle_3d,
+   create_texture, update_texture_rect, bind_texture, texture_size, destroy_texture, read_framebuffer,
+   _draw_triangle_2d, draw_triangle_3d,
    set_mvp
 )
 
@@ -27,7 +27,7 @@ fn _is_debug(){
    false
 }
 
-fn _touch(...args){
+fn _touch(..._args){
    "Internal helper to mark arguments as used."
    0
 }
@@ -73,17 +73,17 @@ mut _vertex_buffer = 0
 mut _vertex_memory = 0
 mut _vertex_map = 0
 mut _vertex_offset = 0
-def _vertex_capacity = 2359296 ;; 64k * 36 bytes
+def _vertex_capacity = 2359296 ; 64k * 36 bytes
 
 mut _staging_buffer = 0
 mut _staging_memory = 0
 mut _staging_map = 0
-def _staging_capacity = 16777216 ;; 16MB
+def _staging_capacity = 16777216 ; 16MB
 
 mut _default_texture = 0
 mut _default_sampler = 0
 mut _descriptor_pool = 0
-mut _textures = [] ;; list of { image, view, memory, descriptor_set, width, height }
+mut _textures = [] ; list of { image, view, memory, descriptor_set, width, height }
 
 mut _current_texture_id = -1
 
@@ -162,8 +162,8 @@ fn _create_staging_buffer(){
    mut ci = sys_malloc(56)
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store32(ci, 0, 16) ;; flags
-   store64_raw(ci, _staging_capacity, 24) ;; size
+   store32(ci, 0, 16) ; flags
+   store64_raw(ci, _staging_capacity, 24) ; size
    store32(ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 32)
    store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36)
    mut buf_ptr = sys_malloc(8)
@@ -182,7 +182,7 @@ fn _create_staging_buffer(){
    mut i = 0
    while(i < mem_type_count){
       if((type_bits & (1 << i)) != 0){
-         def flags = load32(mem_props, 8 + i * 8 + 4)
+         def flags = load32(mem_props, 4 + i * 8)
          if((flags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
             mem_type_index = i
             break
@@ -218,9 +218,9 @@ fn _create_descriptor_pool(){
    mut pool_ci = sys_malloc(40)
    memset(pool_ci, 0, 40)
    store32(pool_ci, VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, 0)
-   store32(pool_ci, 0, 16) ;; flags
-   store32(pool_ci, 1000, 20) ;; maxSets
-   store32(pool_ci, 1, 24) ;; poolSizeCount
+   store32(pool_ci, 0, 16) ; flags
+   store32(pool_ci, 1000, 20) ; maxSets
+   store32(pool_ci, 1, 24) ; poolSizeCount
    store64_raw(pool_ci, pool_size, 32)
 
    mut pool_ptr = sys_malloc(8)
@@ -237,7 +237,7 @@ fn _find_memory_type(type_filter, properties){
    mut i = 0
    while(i < count){
       if((type_filter & (1 << i)) != 0){
-         def flags = load32(mem_props, 8 + i * 8 + 4)
+         def flags = load32(mem_props, 4 + i * 8)
          if((flags & properties) == properties){ return i }
       }
       i += 1
@@ -256,15 +256,15 @@ fn update_texture_rect(tex_id, x, y, w, h, pixels){
 
    memcpy(_staging_map, pixels, img_size)
 
-   ;; 1. Transition Image: Shader Read Only -> Transfer Dst
-   ;; 2. Copy Staging -> Image
-   ;; 3. Transition Image: Transfer Dst -> Shader Read Only
+   ; 1. Transition Image: Shader Read Only -> Transfer Dst
+   ; 2. Copy Staging -> Image
+   ; 3. Transition Image: Transfer Dst -> Shader Read Only
 
    mut alloc_info = sys_malloc(32)
    memset(alloc_info, 0, 32)
    store32(alloc_info, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO), 0)
    store64_raw(alloc_info, _command_pool, 16)
-   store32(alloc_info, 0, 24) ;; PRIMARY
+   store32(alloc_info, 0, 24) ; PRIMARY
    store32(alloc_info, 1, 28)
    mut cb_ptr = sys_malloc(8)
    if(allocate_command_buffers(_device, alloc_info, cb_ptr) != 0){ return false }
@@ -273,21 +273,21 @@ fn update_texture_rect(tex_id, x, y, w, h, pixels){
    mut bi = sys_malloc(32)
    memset(bi, 0, 32)
    store32(bi, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO), 0)
-   store32(bi, 1, 16) ;; ONE_TIME_SUBMIT
+   store32(bi, 1, 16) ; ONE_TIME_SUBMIT
    begin_command_buffer(cb, bi)
 
    mut region = sys_malloc(56)
    memset(region, 0, 56)
    store32(region, to_int(VK_IMAGE_ASPECT_COLOR_BIT), 16)
-   store32(region, 0, 20) ;; mipLevel
-   store32(region, 0, 24) ;; baseArrayLayer
-   store32(region, 1, 28) ;; layerCount
-   store32(region, x, 32) ;; offset.x
-   store32(region, y, 36) ;; offset.y
-   store32(region, 0, 40) ;; offset.z
-   store32(region, w, 44) ;; extent.width
-   store32(region, h, 48) ;; extent.height
-   store32(region, 1, 52) ;; extent.depth
+   store32(region, 0, 20) ; mipLevel
+   store32(region, 0, 24) ; baseArrayLayer
+   store32(region, 1, 28) ; layerCount
+   store32(region, x, 32) ; offset.x
+   store32(region, y, 36) ; offset.y
+   store32(region, 0, 40) ; offset.z
+   store32(region, w, 44) ; extent.width
+   store32(region, h, 48) ; extent.height
+   store32(region, 1, 52) ; extent.depth
 
    cmd_copy_buffer_to_image(cb, to_int(_staging_buffer), to_int(image), to_int(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL), 1, region)
 
@@ -296,7 +296,7 @@ fn update_texture_rect(tex_id, x, y, w, h, pixels){
    mut submit_info = sys_malloc(72)
    memset(submit_info, 0, 72)
    store32(submit_info, to_int(VK_STRUCTURE_TYPE_SUBMIT_INFO), 0)
-   store32(submit_info, 1, 40) ;; commandBufferCount
+   store32(submit_info, 1, 40) ; commandBufferCount
    mut cb_ptr_arr = sys_malloc(8)
    store64_raw(cb_ptr_arr, cb, 0)
    store64_raw(submit_info, cb_ptr_arr, 48)
@@ -316,34 +316,34 @@ fn update_texture_rect(tex_id, x, y, w, h, pixels){
 
 fn create_texture(width, height, pixels){
    "Creates a GPU texture from raw pixel data."
-   ;; 1. Create Image
+   ; 1. Create Image
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
    store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
-   store32(img_ci, 0, 16) ;; flags
-   store32(img_ci, 1, 20) ;; imageType = 2D
-   store32(img_ci, 37, 24) ;; format R8G8B8A8_UNORM
+   store32(img_ci, 0, 16) ; flags
+   store32(img_ci, 1, 20) ; imageType = 2D
+   store32(img_ci, 37, 24) ; format R8G8B8A8_UNORM
    store32(img_ci, width, 28)
    store32(img_ci, height, 32)
-   store32(img_ci, 1, 36) ;; depth
-   store32(img_ci, 1, 40) ;; mipLevels
-   store32(img_ci, 1, 44) ;; arrayLayers
-   store32(img_ci, 1, 48) ;; samples
-   store32(img_ci, 0, 52) ;; tiling = OPTIMAL
+   store32(img_ci, 1, 36) ; depth
+   store32(img_ci, 1, 40) ; mipLevels
+   store32(img_ci, 1, 44) ; arrayLayers
+   store32(img_ci, 1, 48) ; samples
+   store32(img_ci, 0, 52) ; tiling = OPTIMAL
    store32(img_ci, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 56)
    store32(img_ci, VK_SHARING_MODE_EXCLUSIVE, 60)
-   store32(img_ci, 0, 64) ;; queueCount
-   store32(img_ci, 0, 80) ;; initialLayout = UNDEFINED
+   store32(img_ci, 0, 64) ; queueCount
+   store32(img_ci, 0, 80) ; initialLayout = UNDEFINED
 
    mut img_ptr = sys_malloc(8)
    if(create_image(_device, img_ci, 0, img_ptr) != 0){ return 0 }
    def image = load64(img_ptr, 0)
 
-   ;; 2. Allocate Memory
+   ; 2. Allocate Memory
    mut mem_req = sys_malloc(24)
    get_image_memory_requirements(_device, image, mem_req)
    def size = load64(mem_req, 0)
-   def align = load64(mem_req, 8)
+   def _align = load64(mem_req, 8)
    def type_bits = load32(mem_req, 16)
    def mem_type = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
 
@@ -358,22 +358,22 @@ fn create_texture(width, height, pixels){
    def memory = load64(mem_ptr, 0)
    bind_image_memory(_device, image, memory, 0)
 
-   ;; 3. Create ImageView
+   ; 3. Create ImageView
    mut view_ci = sys_malloc(80)
    memset(view_ci, 0, 80)
    store32(view_ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
    store64_raw(view_ci, image, 24)
-   store32(view_ci, 1, 32) ;; viewType 2D
-   store32(view_ci, 37, 36) ;; format R8G8B8A8
+   store32(view_ci, 1, 32) ; viewType 2D
+   store32(view_ci, 37, 36) ; format R8G8B8A8
    store32(view_ci, VK_IMAGE_ASPECT_COLOR_BIT, 56)
-   store32(view_ci, 1, 64) ;; levelCount
-   store32(view_ci, 1, 72) ;; layerCount
+   store32(view_ci, 1, 64) ; levelCount
+   store32(view_ci, 1, 72) ; layerCount
 
    mut view_ptr = sys_malloc(8)
    if(create_image_view(_device, view_ci, 0, view_ptr) != 0){ return 0 }
    def view = load64(view_ptr, 0)
 
-   ;; 4. Upload Pixels (via Staging)
+   ; 4. Upload Pixels (via Staging)
    def img_size = width * height * 4
    if(_staging_map && pixels){
       mut i = 0
@@ -382,12 +382,12 @@ fn create_texture(width, height, pixels){
          i += 1
       }
 
-      ;; Upload pixels using a one-time command buffer
+      ; Upload pixels using a one-time command buffer
       mut alloc_info_cb = sys_malloc(32)
       memset(alloc_info_cb, 0, 32)
       store32(alloc_info_cb, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
       store64_raw(alloc_info_cb, _command_pool, 16)
-      store32(alloc_info_cb, 0, 24) ;; PRIMARY
+      store32(alloc_info_cb, 0, 24) ; PRIMARY
       store32(alloc_info_cb, 1, 28)
       mut cb_ptr = sys_malloc(8)
       if(allocate_command_buffers(_device, alloc_info_cb, cb_ptr) == 0){
@@ -395,41 +395,41 @@ fn create_texture(width, height, pixels){
          mut bi = sys_malloc(32)
          memset(bi, 0, 32)
          store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
-         store32(bi, 1, 16) ;; ONE_TIME_SUBMIT
+         store32(bi, 1, 16) ; ONE_TIME_SUBMIT
          begin_command_buffer(cb, bi)
 
-         ;; Transition: UNDEFINED -> TRANSFER_DST_OPTIMAL
+         ; Transition: UNDEFINED -> TRANSFER_DST_OPTIMAL
          mut bar1 = sys_malloc(72)
          memset(bar1, 0, 72)
          store32(bar1, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
-         store32(bar1, 0, 16) ;; srcAccess
-         store32(bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 20) ;; dstAccess
+         store32(bar1, 0, 16) ; srcAccess
+         store32(bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 20) ; dstAccess
          store32(bar1, VK_IMAGE_LAYOUT_UNDEFINED, 24)
          store32(bar1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 28)
-         store32(bar1, -1, 32) ;; srcQueueFamilyIndex (IGNORED)
-         store32(bar1, -1, 36) ;; dstQueueFamilyIndex (IGNORED)
+         store32(bar1, -1, 32) ; srcQueueFamilyIndex (IGNORED)
+         store32(bar1, -1, 36) ; dstQueueFamilyIndex (IGNORED)
          store64_raw(bar1, image, 40)
          store32(bar1, VK_IMAGE_ASPECT_COLOR_BIT, 48)
-         store32(bar1, 0, 52) store32(bar1, 1, 56) ;; mip
-         store32(bar1, 0, 60) store32(bar1, 1, 64) ;; layers
+         store32(bar1, 0, 52) store32(bar1, 1, 56) ; mip
+         store32(bar1, 0, 60) store32(bar1, 1, 64) ; layers
          cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, bar1)
 
          mut region = sys_malloc(56)
          memset(region, 0, 56)
          store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 16)
-         store32(region, 0, 20) ;; mipLevel
-         store32(region, 0, 24) ;; baseArrayLayer
-         store32(region, 1, 28) ;; layerCount
-         store32(region, 0, 32) ;; offset.x
-         store32(region, 0, 36) ;; offset.y
-         store32(region, 0, 40) ;; offset.z
-         store32(region, width, 44) ;; extent.width
-         store32(region, height, 48) ;; extent.height
-         store32(region, 1, 52) ;; extent.depth
+         store32(region, 0, 20) ; mipLevel
+         store32(region, 0, 24) ; baseArrayLayer
+         store32(region, 1, 28) ; layerCount
+         store32(region, 0, 32) ; offset.x
+         store32(region, 0, 36) ; offset.y
+         store32(region, 0, 40) ; offset.z
+         store32(region, width, 44) ; extent.width
+         store32(region, height, 48) ; extent.height
+         store32(region, 1, 52) ; extent.depth
 
          cmd_copy_buffer_to_image(cb, _staging_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, region)
 
-         ;; Transition: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+         ; Transition: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
          mut bar2 = sys_malloc(72)
          memset(bar2, 0, 72)
          store32(bar2, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
@@ -450,7 +450,7 @@ fn create_texture(width, height, pixels){
          mut submit_info = sys_malloc(72)
          memset(submit_info, 0, 72)
          store32(submit_info, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-         store32(submit_info, 1, 40) ;; commandBufferCount
+         store32(submit_info, 1, 40) ; commandBufferCount
          mut cb_ptr_arr = sys_malloc(8)
          store64_raw(cb_ptr_arr, cb, 0)
          store64_raw(submit_info, cb_ptr_arr, 48)
@@ -470,7 +470,7 @@ fn create_texture(width, height, pixels){
       sys_free(cb_ptr)
    }
 
-   ;; 5. Create Descriptor Set
+   ; 5. Create Descriptor Set
    mut alloc_info_ds = sys_malloc(40)
    memset(alloc_info_ds, 0, 40)
    store32(alloc_info_ds, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0)
@@ -484,7 +484,7 @@ fn create_texture(width, height, pixels){
    if(allocate_descriptor_sets(_device, alloc_info_ds, ds_ptr) != 0){ return 0 }
    def ds = load64(ds_ptr, 0)
 
-   ;; 6. Update Descriptor Set
+   ; 6. Update Descriptor Set
    mut image_info = sys_malloc(24)
    store64_raw(image_info, _default_sampler, 0)
    store64_raw(image_info, view, 8)
@@ -494,9 +494,9 @@ fn create_texture(width, height, pixels){
    memset(write_ds, 0, 64)
    store32(write_ds, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
    store64_raw(write_ds, ds, 16)
-   store32(write_ds, 0, 24) ;; dstBinding
-   store32(write_ds, 0, 28) ;; dstArrayElement
-   store32(write_ds, 1, 32) ;; descriptorCount
+   store32(write_ds, 0, 24) ; dstBinding
+   store32(write_ds, 0, 28) ; dstArrayElement
+   store32(write_ds, 1, 32) ; descriptorCount
    store32(write_ds, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
    store64_raw(write_ds, image_info, 40)
 
@@ -516,23 +516,23 @@ fn create_texture(width, height, pixels){
 
 fn _create_default_texture(){
    "Creates the default 1x1 white texture for untextured drawing."
-   ;; Create sampler first
+   ; Create sampler first
    mut sampler_ci = sys_malloc(80)
    memset(sampler_ci, 0, 80)
    store32(sampler_ci, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, 0)
-   store32(sampler_ci, 0, 16) ;; flags
-   store32(sampler_ci, 1, 20) ;; magFilter = LINEAR
-   store32(sampler_ci, 1, 24) ;; minFilter = LINEAR
-   store32(sampler_ci, 0, 28) ;; mipmapMode = NEAREST
-   store32(sampler_ci, 2, 32) ;; addressModeU = CLAMP_TO_EDGE
-   store32(sampler_ci, 2, 36) ;; addressModeV
-   store32(sampler_ci, 2, 40) ;; addressModeW
+   store32(sampler_ci, 0, 16) ; flags
+   store32(sampler_ci, 1, 20) ; magFilter = LINEAR
+   store32(sampler_ci, 1, 24) ; minFilter = LINEAR
+   store32(sampler_ci, 0, 28) ; mipmapMode = NEAREST
+   store32(sampler_ci, 2, 32) ; addressModeU = CLAMP_TO_EDGE
+   store32(sampler_ci, 2, 36) ; addressModeV
+   store32(sampler_ci, 2, 40) ; addressModeW
 
    mut sampler_ptr = sys_malloc(8)
    if(create_sampler(_device, sampler_ci, 0, sampler_ptr) != 0){ return false }
    _default_sampler = load64(sampler_ptr, 0)
 
-   ;; Create 1x1 white texture
+   ; Create 1x1 white texture
    def pixels = sys_malloc(4)
    store32(pixels, 0xFFFFFFFF, 0)
    def tex_id = create_texture(1, 1, pixels)
@@ -556,6 +556,139 @@ fn bind_texture(tex_id){
    _current_texture_id = tex_id
 }
 
+fn texture_size(tex_id){
+   "Returns [width, height] for a texture ID, or 0 if invalid."
+   if(!is_int(tex_id) || tex_id < 0 || tex_id >= len(_textures)){ return 0 }
+   def tex = get(_textures, tex_id, 0)
+   if(!tex || !is_dict(tex)){ return 0 }
+   [dict_get(tex, "width", 0), dict_get(tex, "height", 0)]
+}
+
+fn destroy_texture(tex_id){
+   "Destroys a texture and frees its GPU resources."
+   if(!is_int(tex_id) || tex_id < 0 || tex_id >= len(_textures)){ return }
+   def tex = get(_textures, tex_id, 0)
+   if(!tex || !is_dict(tex)){ return }
+   def img = dict_get(tex, "image", 0)
+   def view = dict_get(tex, "view", 0)
+   def mem = dict_get(tex, "memory", 0)
+   if(view){ destroy_image_view(_device, view, 0) }
+   if(img){ destroy_image(_device, img, 0) }
+   if(mem){ free_memory(_device, mem, 0) }
+}
+
+fn read_framebuffer(){
+   "Reads the current swapchain image back to CPU memory. Returns {data, width, height, channels} or 0."
+   if(!_device || !_swapchain || _image_index < 0){ return 0 }
+   def w = _swapchain_extent_w
+   def h = _swapchain_extent_h
+   if(w <= 0 || h <= 0){ return 0 }
+   def size = w * h * 4
+   ; Create a host-visible buffer for readback
+   mut buf_ci = sys_malloc(56)
+   memset(buf_ci, 0, 56)
+   store32(buf_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
+   store64_raw(buf_ci, size, 16)
+   store32(buf_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 24)
+   store32(buf_ci, VK_SHARING_MODE_EXCLUSIVE, 28)
+   mut buf_ptr = sys_malloc(8)
+   if(create_buffer(_device, buf_ci, 0, buf_ptr) != 0){ sys_free(buf_ci) sys_free(buf_ptr) return 0 }
+   def readback_buf = load64(buf_ptr, 0)
+   ; Allocate host-visible memory
+   mut mem_req = sys_malloc(24)
+   get_buffer_memory_requirements(_device, readback_buf, mem_req)
+   def req_size = load64(mem_req, 0)
+   def type_bits = load32(mem_req, 16)
+   def mem_idx = get_memory_type_index(_physical_device, type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+   if(mem_idx < 0){ destroy_buffer(_device, readback_buf, 0) return 0 }
+   mut alloc_info = sys_malloc(64)
+   memset(alloc_info, 0, 64)
+   store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
+   store64_raw(alloc_info, req_size, 16)
+   store32(alloc_info, mem_idx, 24)
+   mut mem_ptr = sys_malloc(8)
+   if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ destroy_buffer(_device, readback_buf, 0) return 0 }
+   def readback_mem = load64(mem_ptr, 0)
+   bind_buffer_memory(_device, readback_buf, readback_mem, 0)
+   ; Record copy command
+   def src_image = get(_swapchain_images, _image_index, 0)
+   if(!src_image){ destroy_buffer(_device, readback_buf, 0) free_memory(_device, readback_mem, 0) return 0 }
+   mut cb_ai = sys_malloc(32)
+   memset(cb_ai, 0, 32)
+   store32(cb_ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
+   store64_raw(cb_ai, _command_pool, 8)
+   store32(cb_ai, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 16)
+   store32(cb_ai, 1, 20)
+   mut cb_p = sys_malloc(8)
+   allocate_command_buffers(_device, cb_ai, cb_p)
+   def cb = load64(cb_p, 0)
+   mut bi = sys_malloc(64)
+   memset(bi, 0, 64)
+   store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+   store32(bi, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, 16)
+   begin_command_buffer(cb, bi)
+   ; Transition image: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
+   mut barrier = sys_malloc(72)
+   memset(barrier, 0, 72)
+   store32(barrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
+   store32(barrier, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 16)
+   store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 20)
+   store32(barrier, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 24)
+   store32(barrier, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 28)
+   store64_raw(barrier, src_image, 40)
+   store32(barrier, VK_IMAGE_ASPECT_COLOR_BIT, 48)
+   store32(barrier, 1, 56) ; levelCount
+   store32(barrier, 1, 64) ; layerCount
+   cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, barrier)
+   ; Copy image to buffer
+   mut region = sys_malloc(56)
+   memset(region, 0, 56)
+   store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 0) ; aspectMask
+   store32(region, w, 20) ; imageExtent.width
+   store32(region, h, 24) ; imageExtent.height
+   store32(region, 1, 28) ; imageExtent.depth
+   cmd_copy_image_to_buffer(cb, src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback_buf, 1, region)
+   ; Transition back: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
+   store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 16)
+   store32(barrier, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 20)
+   store32(barrier, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 24)
+   store32(barrier, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 28)
+   cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0, 0, 0, 1, barrier)
+   end_command_buffer(cb)
+   ; Submit and wait
+   mut si = sys_malloc(72)
+   memset(si, 0, 72)
+   store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store32(si, 1, 24)
+   store64_raw(si, cb_p, 32)
+   queue_submit(_graphics_queue, 1, si, 0)
+   queue_wait_idle(_graphics_queue)
+   free_command_buffers(_device, _command_pool, 1, cb_p)
+   ; Map and copy pixels
+   mut map_p = sys_malloc(8)
+   map_memory(_device, readback_mem, 0, size, 0, map_p)
+   def mapped = load64(map_p, 0)
+   def pixels = malloc(size)
+   ; Swapchain format is B8G8R8A8 — convert to RGBA
+   mut px = 0
+   while(px < size){
+      store8(pixels, load8(mapped, px + 2), px)     ; R <- B
+      store8(pixels, load8(mapped, px + 1), px + 1) ; G
+      store8(pixels, load8(mapped, px + 0), px + 2) ; B <- R
+      store8(pixels, load8(mapped, px + 3), px + 3) ; A
+      px += 4
+   }
+   unmap_memory(_device, readback_mem)
+   destroy_buffer(_device, readback_buf, 0)
+   free_memory(_device, readback_mem, 0)
+   mut result = dict(4)
+   result = dict_set(result, "data", pixels)
+   result = dict_set(result, "width", w)
+   result = dict_set(result, "height", h)
+   result = dict_set(result, "channels", 4)
+   result
+}
+
 fn _update_default_mvp(win){
    "Recalculates the default orthographic projection matrix for the window."
    def w = float(dict_get(win, "w", 800))
@@ -566,13 +699,13 @@ fn _update_default_mvp(win){
 
 fn _create_vertex_buffer(){
    "Creates the GPU vertex buffer for batch rendering."
-   mut ci = sys_malloc(56) ;; VkBufferCreateInfo
+   mut ci = sys_malloc(56) ; VkBufferCreateInfo
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store32(ci, 0, 16) ;; flags
-   store64_raw(ci, _vertex_capacity, 24) ;; size
-   store32(ci, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32) ;; usage
-   store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36) ;; sharingMode
+   store32(ci, 0, 16) ; flags
+   store64_raw(ci, _vertex_capacity, 24) ; size
+   store32(ci, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32) ; usage
+   store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36) ; sharingMode
    mut buf_ptr = sys_malloc(8)
    def res = create_buffer(_device, ci, 0, buf_ptr)
    if(res != 0){
@@ -580,22 +713,26 @@ fn _create_vertex_buffer(){
       return false
    }
    _vertex_buffer = load64(buf_ptr, 0)
+   if(_is_debug()){ print(f"Vulkan: vertex_buffer h={_vertex_buffer}") }
 
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, _vertex_buffer, mem_req)
    def size = load64(mem_req, 0)
    def align = load64(mem_req, 8)
    def type_bits = load32(mem_req, 16)
+   if(_is_debug()){ print(f"Vulkan: vtx mem_req size={size} align={align} type_bits={type_bits}") }
 
-   ;; Find memory type (Host Visible | Host Coherent)
-   mut mem_props = sys_malloc(520) ;; VkPhysicalDeviceMemoryProperties (roughly)
+   ; Find memory type (Host Visible | Host Coherent)
+   mut mem_props = sys_malloc(520) ; VkPhysicalDeviceMemoryProperties (roughly)
    get_physical_device_memory_properties(_physical_device, mem_props)
    def mem_type_count = load32(mem_props, 0)
+   if(_is_debug()){ print(f"Vulkan: mem_type_count={mem_type_count}") }
    mut mem_type_index = -1
    mut i = 0
    while(i < mem_type_count){
       if((type_bits & (1 << i)) != 0){
-         def flags = load32(mem_props, 8 + i * 8 + 4) ;; propertyFlags
+         def flags = load32(mem_props, 4 + i * 8) ; propertyFlags
+         if(_is_debug()){ print(f"Vulkan: mem_type[{i}] flags={flags}") }
          if((flags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
             mem_type_index = i
             break
@@ -607,6 +744,7 @@ fn _create_vertex_buffer(){
       if(_is_debug()){ print("Vulkan: Could not find suitable memory for vertex buffer") }
       return false
    }
+   if(_is_debug()){ print(f"Vulkan: selected mem_type_index={mem_type_index}") }
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
@@ -616,12 +754,15 @@ fn _create_vertex_buffer(){
 
    mut mem_ptr = sys_malloc(8)
    def alloc_res = allocate_memory(_device, alloc_info, 0, mem_ptr)
+   if(_is_debug()){ print(f"Vulkan: allocate_memory res={alloc_res}") }
    if(alloc_res != 0){
       if(_is_debug()){ print(f"Vulkan: Vertex memory allocation failed {alloc_res}") }
       return false
    }
    _vertex_memory = load64(mem_ptr, 0)
+   if(_is_debug()){ print(f"Vulkan: vertex_memory h={_vertex_memory}") }
 
+   if(_is_debug()){ print(f"Vulkan: binding buffer={_vertex_buffer} mem={_vertex_memory}") }
    bind_buffer_memory(_device, _vertex_buffer, _vertex_memory, 0)
 
    mut map_ptr = sys_malloc(8)
@@ -633,7 +774,7 @@ fn _create_vertex_buffer(){
 
 fn _create_instance(){
    "Creates the Vulkan instance."
-   ;; Create all structures with system malloc to avoid any Nytrix metadata issues
+   ; Create all structures with system malloc to avoid any Nytrix metadata issues
    mut app_info = sys_malloc(48)
    memset(app_info, 0, 48)
    store32(app_info, VK_STRUCTURE_TYPE_APPLICATION_INFO, 0)
@@ -645,12 +786,12 @@ fn _create_instance(){
    def ext_count = get(exts_list, 0)
    def ext_ptrs = get(exts_list, 1)
 
-   ;; Create VkInstanceCreateInfo manually with explicit zeroing
+   ; Create VkInstanceCreateInfo manually with explicit zeroing
    mut create_info = sys_malloc(64)
    memset(create_info, 0, 64)
    store32(create_info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, 0)
    store64_raw(create_info, app_info, 24)
-   store32(create_info, ext_count, 48)         ;; extensions
+   store32(create_info, ext_count, 48)         ; extensions
    store64_raw(create_info, ext_ptrs, 56)
    mut inst_ptr = sys_malloc(8)
    store32(inst_ptr, 0, 0) store32(inst_ptr, 0, 4)
@@ -707,13 +848,13 @@ fn _pick_physical_device(){
    "Selects a suitable physical GPU for rendering."
    mut count_ptr = sys_malloc(4)
    store32(count_ptr, 0, 0)
-   def res1 = enumerate_physical_devices(_instance, count_ptr, 0)
+   def _res1 = enumerate_physical_devices(_instance, count_ptr, 0)
    def count = load32(count_ptr, 0)
    if(_is_debug()){ print(f"Vulkan: Physical devices found: {count}") }
    if(count == 0){ return false }
    mut devices_ptr = sys_malloc(count * 8)
    enumerate_physical_devices(_instance, count_ptr, devices_ptr)
-   ;; Just pick the first device
+   ; Just pick the first device
    if(_is_debug()){
       _dbg_handle("physical.out.raw", load64(devices_ptr, 0))
    }
@@ -739,7 +880,7 @@ fn _create_logical_device(){
    mut i = 0
    while(i < count){
       def flags = load32(props, i * prop_stride)
-      if((flags & 1) != 0){ ;; VK_QUEUE_GRAPHICS_BIT
+      if((flags & 1) != 0){ ; VK_QUEUE_GRAPHICS_BIT
          graphics_family = i
          break
       }
@@ -750,16 +891,16 @@ fn _create_logical_device(){
       return false
    }
    _graphics_family_index = graphics_family
-   ;; Queue priority (1.0f in IEEE-754)
+   ; Queue priority (1.0f in IEEE-754)
    mut priorities = sys_malloc(4)
    store32(priorities, 0x3f800000, 0)
    mut queue_create_info = sys_malloc(40)
    store32(queue_create_info, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 0)
-   store32(queue_create_info, 0, 8) store32(queue_create_info, 0, 12)   ;; pNext
-   store32(queue_create_info, 0, 16)          ;; flags
-   store32(queue_create_info, graphics_family, 20) ;; queueFamilyIndex
-   store32(queue_create_info, 1, 24)               ;; queueCount
-   store64_raw(queue_create_info, priorities, 32) ;; pQueuePriorities
+   store32(queue_create_info, 0, 8) store32(queue_create_info, 0, 12)   ; pNext
+   store32(queue_create_info, 0, 16)          ; flags
+   store32(queue_create_info, graphics_family, 20) ; queueFamilyIndex
+   store32(queue_create_info, 1, 24)               ; queueCount
+   store64_raw(queue_create_info, priorities, 32) ; pQueuePriorities
    mut ext1 = sys_malloc(32)
    memset(ext1, 0, 32)
    _strcpy(ext1, "VK_KHR_swapchain")
@@ -767,15 +908,15 @@ fn _create_logical_device(){
    store64_raw(ext_ptrs, ext1, 0)
    mut create_info = sys_malloc(72)
    store32(create_info, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, 0)
-   store32(create_info, 0, 8) store32(create_info, 0, 12)                   ;; pNext
-   store32(create_info, 0, 16)                         ;; flags
-   store32(create_info, 1, 20)                         ;; queueCreateInfoCount
-   store64_raw(create_info, queue_create_info, 24) ;; pQueueCreateInfos
-   store32(create_info, 0, 32)                         ;; enabledLayerCount
-   store32(create_info, 0, 40) store32(create_info, 0, 44)                 ;; ppEnabledLayerNames
-   store32(create_info, 1, 48)                         ;; enabledExtensionCount
-   store64_raw(create_info, ext_ptrs, 56)          ;; ppEnabledExtensionNames
-   store32(create_info, 0, 64) store32(create_info, 0, 68)                 ;; pEnabledFeatures
+   store32(create_info, 0, 8) store32(create_info, 0, 12)                   ; pNext
+   store32(create_info, 0, 16)                         ; flags
+   store32(create_info, 1, 20)                         ; queueCreateInfoCount
+   store64_raw(create_info, queue_create_info, 24) ; pQueueCreateInfos
+   store32(create_info, 0, 32)                         ; enabledLayerCount
+   store32(create_info, 0, 40) store32(create_info, 0, 44)                 ; ppEnabledLayerNames
+   store32(create_info, 1, 48)                         ; enabledExtensionCount
+   store64_raw(create_info, ext_ptrs, 56)          ; ppEnabledExtensionNames
+   store32(create_info, 0, 64) store32(create_info, 0, 68)                 ; pEnabledFeatures
    mut dev_ptr = sys_malloc(8)
    store32(dev_ptr, 0, 0) store32(dev_ptr, 0, 4)
    if(_is_debug()){
@@ -804,23 +945,23 @@ fn _create_logical_device(){
    if(_is_debug()){
       _dbg_handle("queue", _graphics_queue)
    }
-   ;; Use same queue for presenting for now (most GPUs support this)
+   ; Use same queue for presenting for now (most GPUs support this)
    _present_queue = _graphics_queue
    true
 }
 
 fn _choose_composite_alpha(flags){
    "Heuristic to choose supported composite alpha mode for swapchain."
-   if((flags & 0x1) != 0){ return 0x1 } ;; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-   if((flags & 0x2) != 0){ return 0x2 } ;; PRE_MULTIPLIED
-   if((flags & 0x4) != 0){ return 0x4 } ;; POST_MULTIPLIED
-   if((flags & 0x8) != 0){ return 0x8 } ;; INHERIT
+   if((flags & 0x1) != 0){ return 0x1 } ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+   if((flags & 0x2) != 0){ return 0x2 } ; PRE_MULTIPLIED
+   if((flags & 0x4) != 0){ return 0x4 } ; POST_MULTIPLIED
+   if((flags & 0x8) != 0){ return 0x8 } ; INHERIT
    0x1
 }
 
 fn _create_swapchain(win){
    "Initializes the Vulkan swapchain for the given window."
-   mut caps = sys_malloc(128) ;; VkSurfaceCapabilitiesKHR
+   mut caps = sys_malloc(128) ; VkSurfaceCapabilitiesKHR
    memset(caps, 0, 128)
    get_physical_device_surface_capabilities_khr(_physical_device, _surface, caps)
    mut req_w = int(get(win, 5, 1))
@@ -846,35 +987,35 @@ fn _create_swapchain(win){
    }
    _swapchain_extent_w = w
    _swapchain_extent_h = h
-   ;; Min image count + 1 for smoother frame pacing when possible.
+   ; Min image count + 1 for smoother frame pacing when possible.
    mut min_imgs = load32(caps, 0)
    mut max_imgs = load32(caps, 4)
    mut count = min_imgs + 1
    if(max_imgs > 0 && count > max_imgs){ count = max_imgs }
-   def pre_transform = load32(caps, 40) ;; currentTransform
-   def composite_alpha = _choose_composite_alpha(load32(caps, 44)) ;; supportedCompositeAlpha
+   def pre_transform = load32(caps, 40) ; currentTransform
+   def composite_alpha = _choose_composite_alpha(load32(caps, 44)) ; supportedCompositeAlpha
    mut create_info = sys_malloc(128)
    memset(create_info, 0, 128)
    store32(create_info, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, 0)
-   store32(create_info, 0, 8) store32(create_info, 0, 12)   ;; pNext
-   store32(create_info, 0, 16)         ;; flags
+   store32(create_info, 0, 8) store32(create_info, 0, 12)   ; pNext
+   store32(create_info, 0, 16)         ; flags
    store64_raw(create_info, _surface, 24)
    store32(create_info, count, 32)
    _swapchain_format = VK_FORMAT_B8G8R8A8_UNORM
-   store32(create_info, _swapchain_format, 36) ;; format
-   store32(create_info, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, 40) ;; colorSpace
-   store32(create_info, w, 44) ;; extent.width
-   store32(create_info, h, 48) ;; extent.height
-   store32(create_info, 1, 52) ;; imageArrayLayers
+   store32(create_info, _swapchain_format, 36) ; format
+   store32(create_info, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, 40) ; colorSpace
+   store32(create_info, w, 44) ; extent.width
+   store32(create_info, h, 48) ; extent.height
+   store32(create_info, 1, 52) ; imageArrayLayers
    store32(create_info, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 56)
    store32(create_info, VK_SHARING_MODE_EXCLUSIVE, 60)
-   store32(create_info, 0, 64) ;; queueCount
-   store32(create_info, 0, 72) store32(create_info, 0, 76) ;; pQueueFamilyIndices
-   store32(create_info, pre_transform, 80) ;; preTransform
-   store32(create_info, composite_alpha, 84) ;; compositeAlpha
+   store32(create_info, 0, 64) ; queueCount
+   store32(create_info, 0, 72) store32(create_info, 0, 76) ; pQueueFamilyIndices
+   store32(create_info, pre_transform, 80) ; preTransform
+   store32(create_info, composite_alpha, 84) ; compositeAlpha
    store32(create_info, VK_PRESENT_MODE_FIFO_KHR, 88)
-   store32(create_info, 1, 92) ;; clipped
-   store32(create_info, 0, 96) store32(create_info, 0, 100) ;; oldSwapchain
+   store32(create_info, 1, 92) ; clipped
+   store32(create_info, 0, 96) store32(create_info, 0, 100) ; oldSwapchain
    mut sc_ptr = sys_malloc(8)
    store32(sc_ptr, 0, 0) store32(sc_ptr, 0, 4)
    if(_is_debug()){
@@ -891,7 +1032,7 @@ fn _create_swapchain(win){
    _swapchain = load64(sc_ptr, 0)
    if(_is_debug()){ _dbg_handle("swapchain", _swapchain) }
    _swapchain_format = VK_FORMAT_B8G8R8A8_UNORM
-   ;; Get images
+   ; Get images
    mut img_count_ptr = sys_malloc(4)
    store32(img_count_ptr, 0, 0)
    def gi_res = get_swapchain_images_khr(_device, _swapchain, img_count_ptr, 0)
@@ -945,7 +1086,7 @@ fn _recreate_swapchain(){
    device_wait_idle(_device)
    _destroy_swapchain_objects()
 
-   ;; Fix: Clean up old depth resources
+   ; Fix: Clean up old depth resources
    if(_depth_image){ destroy_image(_device, _depth_image, 0) _depth_image = 0 }
    if(_depth_view){ destroy_image_view(_device, _depth_view, 0) _depth_view = 0 }
    if(_depth_memory){ free_memory(_device, _depth_memory, 0) _depth_memory = 0 }
@@ -953,7 +1094,7 @@ fn _recreate_swapchain(){
    if(!_create_swapchain(_window_ref)){ return false }
    if(!_create_image_views()){ return false }
 
-   ;; Fix: Rebuild depth resources to match new swapchain size
+   ; Fix: Rebuild depth resources to match new swapchain size
    if(!_create_depth_resources()){ return false }
 
    if(!_create_framebuffers()){ return false }
@@ -970,18 +1111,18 @@ fn _create_image_views(){
       mut create_info = sys_malloc(80)
       memset(create_info, 0, 80)
       store32(create_info, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
-      store32(create_info, 0, 8) store32(create_info, 0, 12) ;; pNext
-      store32(create_info, 0, 16) ;; flags
+      store32(create_info, 0, 8) store32(create_info, 0, 12) ; pNext
+      store32(create_info, 0, 16) ; flags
       store64_raw(create_info, image_handle, 24)
-      store32(create_info, 1, 32) ;; viewType (2D = 1)
+      store32(create_info, 1, 32) ; viewType (2D = 1)
       store32(create_info, _swapchain_format, 36)
-      ;; components (all identity=0)
-      ;; subresourceRange
+      ; components (all identity=0)
+      ; subresourceRange
       store32(create_info, VK_IMAGE_ASPECT_COLOR_BIT, 56)
-      store32(create_info, 0, 60) ;; baseMipLevel
-      store32(create_info, 1, 64) ;; levelCount
-      store32(create_info, 0, 68) ;; baseArrayLayer
-      store32(create_info, 1, 72) ;; layerCount
+      store32(create_info, 0, 60) ; baseMipLevel
+      store32(create_info, 1, 64) ; levelCount
+      store32(create_info, 0, 68) ; baseArrayLayer
+      store32(create_info, 1, 72) ; layerCount
       mut view_ptr = sys_malloc(8)
       def iv_res = create_image_view(_device, create_info, 0, view_ptr)
       if(iv_res != 0){
@@ -998,27 +1139,27 @@ fn _create_image_views(){
 
 fn _create_depth_resources(){
    "Allocates and initializes the depth buffer for 3D/ordered rendering."
-   ;; Format 126 = VK_FORMAT_D32_SFLOAT, 129 = D24_UNORM_S8_UINT
-   ;; We will try D32_SFLOAT first
+   ; Format 126 = VK_FORMAT_D32_SFLOAT, 129 = D24_UNORM_S8_UINT
+   ; We will try D32_SFLOAT first
    def depth_format = 126
 
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
    store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
-   store32(img_ci, 0, 16) ;; flags
-   store32(img_ci, 1, 20) ;; imageType 2D
+   store32(img_ci, 0, 16) ; flags
+   store32(img_ci, 1, 20) ; imageType 2D
    store32(img_ci, depth_format, 24)
    store32(img_ci, _swapchain_extent_w, 28)
    store32(img_ci, _swapchain_extent_h, 32)
-   store32(img_ci, 1, 36) ;; extent.depth
-   store32(img_ci, 1, 40) ;; mipLevels
-   store32(img_ci, 1, 44) ;; arrayLayers
-   store32(img_ci, 1, 48) ;; samples
-   store32(img_ci, 0, 52) ;; tiling OPTIMAL
-   store32(img_ci, 32, 56) ;; usage DEPTH_STENCIL_ATTACHMENT
-   store32(img_ci, 0, 60) ;; sharing exclusive
-   store32(img_ci, 0, 64) ;; queueCount
-   store32(img_ci, 0, 80) ;; initialLayout undefined
+   store32(img_ci, 1, 36) ; extent.depth
+   store32(img_ci, 1, 40) ; mipLevels
+   store32(img_ci, 1, 44) ; arrayLayers
+   store32(img_ci, 1, 48) ; samples
+   store32(img_ci, 0, 52) ; tiling OPTIMAL
+   store32(img_ci, 32, 56) ; usage DEPTH_STENCIL_ATTACHMENT
+   store32(img_ci, 0, 60) ; sharing exclusive
+   store32(img_ci, 0, 64) ; queueCount
+   store32(img_ci, 0, 80) ; initialLayout undefined
 
    mut img_ptr = sys_malloc(8)
    if(create_image(_device, img_ci, 0, img_ptr) != 0){ return false }
@@ -1046,7 +1187,7 @@ fn _create_depth_resources(){
    store64_raw(view_ci, _depth_image, 24)
    store32(view_ci, 1, 32)
    store32(view_ci, depth_format, 36)
-   store32(view_ci, 0x00000002, 56) ;; ASPECT_DEPTH
+   store32(view_ci, 0x00000002, 56) ; ASPECT_DEPTH
    store32(view_ci, 1, 64)
    store32(view_ci, 1, 72)
    mut view_ptr = sys_malloc(8)
@@ -1057,66 +1198,66 @@ fn _create_depth_resources(){
 
 fn _create_render_pass(){
    "Defines the Vulkan render pass (color + depth attachments)."
-   ;; attachments: 0=color, 1=depth
+   ; attachments: 0=color, 1=depth
    mut atts = sys_malloc(72)
-   ;; Color Attachment
+   ; Color Attachment
    store32(atts, _swapchain_format, 4)
    store32(atts, 1, 8)
-   store32(atts, 0, 12) ;; loadOp CLEAR (0=LOAD, 1=CLEAR in my simplified mapping? Wait, checking earlier code...)
-   ;; Wait, check `vulkan.ny` or previous `vk_renderer.ny`
-   ;; In `_create_render_pass`: loadOp (2 = CLEAR)
-   store32(atts, 1, 12) ;; loadOp CLEAR
-   store32(atts, 1, 16) ;; storeOp STORE
-   store32(atts, 0, 20) ;; stencilLoad
-   store32(atts, 0, 24) ;; stencilStore
-   store32(atts, 0, 28) ;; initialLayout UNDEFINED
-   store32(atts, 1000001002, 32) ;; finalLayout PRESENT_SRC
+   store32(atts, 0, 12) ; loadOp CLEAR (0=LOAD, 1=CLEAR in my simplified mapping? Wait, checking earlier code...)
+   ; Wait, check `vulkan.ny` or previous `vk_renderer.ny`
+   ; In `_create_render_pass`: loadOp (2 = CLEAR)
+   store32(atts, 1, 12) ; loadOp CLEAR
+   store32(atts, 1, 16) ; storeOp STORE
+   store32(atts, 0, 20) ; stencilLoad
+   store32(atts, 0, 24) ; stencilStore
+   store32(atts, 0, 28) ; initialLayout UNDEFINED
+   store32(atts, 1000001002, 32) ; finalLayout PRESENT_SRC
 
-   ;; Depth Attachment (offset 36)
-   store32(atts, 126, 36+4) ;; format D32_SFLOAT
-   store32(atts, 1, 36+8) ;; samples 1
-   store32(atts, 1, 36+12) ;; loadOp CLEAR
-   store32(atts, 0, 36+16) ;; storeOp DONT_CARE
-   store32(atts, 0, 36+20) ;; stencilLoad DONT_CARE
-   store32(atts, 0, 36+24) ;; stencilStore DONT_CARE
-   store32(atts, 0, 36+28) ;; initialLayout UNDEFINED
-   store32(atts, 3, 36+32) ;; finalLayout DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+   ; Depth Attachment (offset 36)
+   store32(atts, 126, 36+4) ; format D32_SFLOAT
+   store32(atts, 1, 36+8) ; samples 1
+   store32(atts, 1, 36+12) ; loadOp CLEAR
+   store32(atts, 0, 36+16) ; storeOp DONT_CARE
+   store32(atts, 0, 36+20) ; stencilLoad DONT_CARE
+   store32(atts, 0, 36+24) ; stencilStore DONT_CARE
+   store32(atts, 0, 36+28) ; initialLayout UNDEFINED
+   store32(atts, 3, 36+32) ; finalLayout DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 
-   ;; Refs
+   ; Refs
    mut car = sys_malloc(8)
    store32(car, 0, 0)
-   store32(car, 2, 4) ;; layout COLOR_ATTACHMENT
+   store32(car, 2, 4) ; layout COLOR_ATTACHMENT
 
    mut dar = sys_malloc(8)
    store32(dar, 1, 0)
-   store32(dar, 3, 4) ;; layout DEPTH_STENCIL_ATTACHMENT
+   store32(dar, 3, 4) ; layout DEPTH_STENCIL_ATTACHMENT
 
-   ;; Subpass
+   ; Subpass
    mut sd = sys_malloc(72)
    memset(sd, 0, 72)
-   store32(sd, 0, 4) ;; BIND_POINT_GRAPHICS
-   store32(sd, 1, 24) ;; colorCount
+   store32(sd, 0, 4) ; BIND_POINT_GRAPHICS
+   store32(sd, 1, 24) ; colorCount
    store64_raw(sd, car, 32)
-   store64_raw(sd, dar, 48) ;; pDepthStencilAttachment
+   store64_raw(sd, dar, 48) ; pDepthStencilAttachment
 
-   ;; Dependency
+   ; Dependency
    mut dep = sys_malloc(28)
-   store32(dep, -1, 0) ;; srcSubpass EXTERNAL
-   store32(dep, 0, 4) ;; dstSubpass
-   store32(dep, 0x00000400, 8) ;; srcStageMask COLOR_ATTACHMENT_OUTPUT
-   store32(dep, 0x00000400, 12) ;; dstStageMask COLOR_ATTACHMENT_OUTPUT
-   store32(dep, 0, 16) ;; srcAccessMask
-   store32(dep, 0x00000100 | 0x00000010, 20) ;; dstAccessMask COLOR_WRITE | DEPTH_WRITE
-   store32(dep, 0, 24) ;; dependencyFlags
+   store32(dep, -1, 0) ; srcSubpass EXTERNAL
+   store32(dep, 0, 4) ; dstSubpass
+   store32(dep, 0x00000400, 8) ; srcStageMask COLOR_ATTACHMENT_OUTPUT
+   store32(dep, 0x00000400, 12) ; dstStageMask COLOR_ATTACHMENT_OUTPUT
+   store32(dep, 0, 16) ; srcAccessMask
+   store32(dep, 0x00000100 | 0x00000010, 20) ; dstAccessMask COLOR_WRITE | DEPTH_WRITE
+   store32(dep, 0, 24) ; dependencyFlags
 
    mut create_info = sys_malloc(64)
    memset(create_info, 0, 64)
    store32(create_info, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, 0)
-   store32(create_info, 2, 20) ;; attachmentCount
+   store32(create_info, 2, 20) ; attachmentCount
    store64_raw(create_info, atts, 24)
-   store32(create_info, 1, 32) ;; subpassCount
+   store32(create_info, 1, 32) ; subpassCount
    store64_raw(create_info, sd, 40)
-   store32(create_info, 1, 48) ;; depCount
+   store32(create_info, 1, 48) ; depCount
    store64_raw(create_info, dep, 56)
 
    mut pass_ptr = sys_malloc(8)
@@ -1142,11 +1283,11 @@ fn _create_framebuffers(){
       memset(create_info, 0, 64)
       store32(create_info, VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, 0)
       store64_raw(create_info, _render_pass, 24)
-      store32(create_info, 2, 32) ;; attachmentCount
+      store32(create_info, 2, 32) ; attachmentCount
       store64_raw(create_info, attach_ptr, 40)
       store32(create_info, _swapchain_extent_w, 48)
       store32(create_info, _swapchain_extent_h, 52)
-      store32(create_info, 1, 56) ;; layers
+      store32(create_info, 1, 56) ; layers
       mut fb_ptr = sys_malloc(8)
       def fb_res = create_framebuffer(_device, create_info, 0, fb_ptr)
       if(fb_res != 0){ return false }
@@ -1166,8 +1307,8 @@ fn _create_sync_objects(){
       mut si = sys_malloc(24)
       memset(si, 0, 24)
       store32(si, VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, 0)
-      store32(si, 0, 8) store32(si, 0, 12) ;; pNext
-      store32(si, 0, 16) ;; flags
+      store32(si, 0, 8) store32(si, 0, 12) ; pNext
+      store32(si, 0, 16) ; flags
       mut sem1 = sys_malloc(8)
       def s1_res = create_semaphore(_device, si, 0, sem1)
       if(s1_res != 0){
@@ -1185,8 +1326,8 @@ fn _create_sync_objects(){
       mut fi = sys_malloc(24)
       memset(fi, 0, 24)
       store32(fi, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
-      store32(fi, 0, 8) store32(fi, 0, 12) ;; pNext
-      store32(fi, 1, 16) ;; flags (1 = SIGNAL_BIT)
+      store32(fi, 0, 8) store32(fi, 0, 12) ; pNext
+      store32(fi, 1, 16) ; flags (1 = SIGNAL_BIT)
       mut fence = sys_malloc(8)
       def f_res = create_fence(_device, fi, 0, fence)
       if(f_res != 0){
@@ -1204,7 +1345,7 @@ fn _create_command_pool(){
    mut create_info = sys_malloc(32)
    memset(create_info, 0, 32)
    store32(create_info, VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, 0)
-   store32(create_info, 2, 16) ;; flags (2 = RESET_BIT)
+   store32(create_info, 2, 16) ; flags (2 = RESET_BIT)
    store32(create_info, _graphics_family_index, 20)
    mut pool_ptr = sys_malloc(8)
    def cp_res = create_command_pool(_device, create_info, 0, pool_ptr)
@@ -1223,7 +1364,7 @@ fn _create_command_buffers(){
    memset(ai, 0, 32)
    store32(ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
    store64_raw(ai, _command_pool, 16)
-   store32(ai, 0, 24) ;; level (0 = PRIMARY)
+   store32(ai, 0, 24) ; level (0 = PRIMARY)
    store32(ai, MAX_FRAMES_IN_FLIGHT, 28)
    mut bufs_ptr = sys_malloc(MAX_FRAMES_IN_FLIGHT * 8)
    def cb_res = allocate_command_buffers(_device, ai, bufs_ptr)
@@ -1251,11 +1392,11 @@ fn _create_shader_module(path){
    def size = len(code)
    mut ci = sys_malloc(128)
    memset(ci, 0, 128)
-   store32(ci, 16, 0) ;; VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+   store32(ci, 16, 0) ; VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
    store32(ci, 0, 8) store32(ci, 0, 12)
-   store32(ci, 0, 16) ;; flags
-   store64_raw(ci, size, 24) ;; codeSize (bytes)
-   store64_raw(ci, code, 32) ;; pCode
+   store32(ci, 0, 16) ; flags
+   store64_raw(ci, size, 24) ; codeSize (bytes)
+   store64_raw(ci, code, 32) ; pCode
    mut mod_ptr = sys_malloc(8)
    def vk_res = create_shader_module(_device, ci, 0, mod_ptr)
    if(vk_res != 0){
@@ -1267,15 +1408,15 @@ fn _create_shader_module(path){
 
 fn _ensure_shader_binaries(){
    "Internal helper to compile default shader sources via glslc."
-   def vert_spv = "build/cache/shader.vert.spv"
-   def frag_spv = "build/cache/shader.frag.spv"
+   def vert_spv = "/build/cache/ny_shader.vert.spv"
+   def frag_spv = "/build/cache/ny_shader.frag.spv"
    if(_is_debug()){ print("Vulkan: Generating shader binaries with glslc...") }
    def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(push_constant) uniform PC { mat4 mvp; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nvoid main(){\n  gl_Position = pc.mvp * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n}\n"
    def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  outColor = texture(texSampler, vUV) * vColor;\n}\n"
-   if(is_err(file_write("build/cache/shader.vert", vert_src))){ return false }
-   if(is_err(file_write("build/cache/shader.frag", frag_src))){ return false }
-   if(proc.run("glslc", ["glslc", "build/cache/shader.vert", "-o", vert_spv]) != 0){ return false }
-   if(proc.run("glslc", ["glslc", "build/cache/shader.frag", "-o", frag_spv]) != 0){ return false }
+   if(is_err(file_write("/build/cache/ny_shader.vert", vert_src))){ return false }
+   if(is_err(file_write("/build/cache/ny_shader.frag", frag_src))){ return false }
+   if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
+   if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
    file_exists(vert_spv) && file_exists(frag_spv)
 }
 
@@ -1285,21 +1426,13 @@ fn _create_graphics_pipeline(){
       if(_is_debug()){ print("Vulkan: Could not prepare shader binaries") }
       return false
    }
-   _vert_module = _create_shader_module("build/cache/shader.vert.spv")
-   _frag_module = _create_shader_module("build/cache/shader.frag.spv")
+   _vert_module = _create_shader_module("/build/cache/ny_shader.vert.spv")
+   _frag_module = _create_shader_module("/build/cache/ny_shader.frag.spv")
    if(!_vert_module || !_frag_module){ return false }
 
-   ;; Descriptor Set Layout
-   mut dsl_binding = alloc(VkDescriptorSetLayoutBinding)
-   set(dsl_binding, VkDescriptorSetLayoutBinding, "binding", 0)
-   set(dsl_binding, VkDescriptorSetLayoutBinding, "descriptorType", VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-   set(dsl_binding, VkDescriptorSetLayoutBinding, "descriptorCount", 1)
-   set(dsl_binding, VkDescriptorSetLayoutBinding, "stageFlags", VK_SHADER_STAGE_FRAGMENT_BIT)
-
-   mut dsl_ci = alloc(VkDescriptorSetLayoutCreateInfo)
-   set(dsl_ci, VkDescriptorSetLayoutCreateInfo, "sType", VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
-   set(dsl_ci, VkDescriptorSetLayoutCreateInfo, "bindingCount", 1)
-   set(dsl_ci, VkDescriptorSetLayoutCreateInfo, "pBindings", dsl_binding)
+   ; Descriptor Set Layout
+   def dsl_binding = VkDescriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, 0)
+   def dsl_ci = VkDescriptorSetLayoutCreateInfo(1, dsl_binding)
 
    mut dsl_ptr = sys_malloc(8)
    def dsl_res = create_descriptor_set_layout(_device, dsl_ci, 0, dsl_ptr)
@@ -1309,20 +1442,15 @@ fn _create_graphics_pipeline(){
    }
    _descriptor_set_layout = load64(dsl_ptr, 0)
 
-   ;; Pipeline Layout
+   ; Pipeline Layout
    mut pc_range = sys_malloc(12)
-   store32(pc_range, 1, 0) ;; STAGE_VERTEX
+   store32(pc_range, 1, 0) ; STAGE_VERTEX
    store32(pc_range, 0, 4)
    store32(pc_range, 64, 8)
    mut dsl_arr = sys_malloc(8)
    store64_raw(dsl_arr, _descriptor_set_layout, 0)
 
-   mut layout_ci = alloc(VkPipelineLayoutCreateInfo)
-   set(layout_ci, VkPipelineLayoutCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
-   set(layout_ci, VkPipelineLayoutCreateInfo, "setLayoutCount", 1)
-   set(layout_ci, VkPipelineLayoutCreateInfo, "pSetLayouts", dsl_arr)
-   set(layout_ci, VkPipelineLayoutCreateInfo, "pushConstantRangeCount", 1)
-   set(layout_ci, VkPipelineLayoutCreateInfo, "pPushConstantRanges", pc_range)
+   def layout_ci = VkPipelineLayoutCreateInfo(1, dsl_arr, 1, pc_range)
 
    mut layout_ptr = sys_malloc(8)
    def pl_res = create_pipeline_layout(_device, layout_ci, 0, layout_ptr)
@@ -1332,114 +1460,50 @@ fn _create_graphics_pipeline(){
    }
    _pipeline_layout = load64(layout_ptr, 0)
 
-   ;; Vertex Input State
+   ; Vertex Input State
    mut binding_desc = sys_malloc(12)
-   store32(binding_desc, 0, 0) ;; binding
-   store32(binding_desc, 36, 4) ;; stride
-   store32(binding_desc, 0, 8) ;; inputRate VERTEX
+   store32(binding_desc, 0, 0) ; binding
+   store32(binding_desc, 36, 4) ; stride
+   store32(binding_desc, 0, 8) ; inputRate VERTEX
 
-   mut attr_desc = sys_malloc(48) ;; 3 attributes
-   ;; 0: Position (vec3) offset 0
+   mut attr_desc = sys_malloc(48) ; 3 attributes
+   ; 0: Position (vec3) offset 0
    store32(attr_desc, 0, 0) store32(attr_desc, 0, 4) store32(attr_desc, 106, 8) store32(attr_desc, 0, 12)
-   ;; 1: UV (vec2) offset 12
+   ; 1: UV (vec2) offset 12
    store32(attr_desc, 1, 16) store32(attr_desc, 0, 20) store32(attr_desc, 103, 24) store32(attr_desc, 12, 28)
-   ;; 2: Color (vec4) offset 20
+   ; 2: Color (vec4) offset 20
    store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 109, 40) store32(attr_desc, 20, 44)
 
-   mut vi = alloc(VkPipelineVertexInputStateCreateInfo)
-   set(vi, VkPipelineVertexInputStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
-   set(vi, VkPipelineVertexInputStateCreateInfo, "vertexBindingDescriptionCount", 1)
-   set(vi, VkPipelineVertexInputStateCreateInfo, "pVertexBindingDescriptions", binding_desc)
-   set(vi, VkPipelineVertexInputStateCreateInfo, "vertexAttributeDescriptionCount", 3)
-   set(vi, VkPipelineVertexInputStateCreateInfo, "pVertexAttributeDescriptions", attr_desc)
+   def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 3, attr_desc)
 
-   ;; Common States
-   mut viewport_state = alloc(VkPipelineViewportStateCreateInfo)
-   set(viewport_state, VkPipelineViewportStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO)
-   set(viewport_state, VkPipelineViewportStateCreateInfo, "viewportCount", 1)
-   set(viewport_state, VkPipelineViewportStateCreateInfo, "scissorCount", 1)
-
-   mut rs = alloc(VkPipelineRasterizationStateCreateInfo)
-   set(rs, VkPipelineRasterizationStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
-   set(rs, VkPipelineRasterizationStateCreateInfo, "polygonMode", 0) ;; FILL
-   set(rs, VkPipelineRasterizationStateCreateInfo, "cullMode", 0) ;; NONE
-   set(rs, VkPipelineRasterizationStateCreateInfo, "frontFace", 0) ;; CLOCKWISE
-   set(rs, VkPipelineRasterizationStateCreateInfo, "lineWidth", 1.0)
-
-   mut ms = alloc(VkPipelineMultisampleStateCreateInfo)
-   set(ms, VkPipelineMultisampleStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
-   set(ms, VkPipelineMultisampleStateCreateInfo, "rasterizationSamples", 1)
-
-   mut cba = alloc(VkPipelineColorBlendAttachmentState)
-   set(cba, VkPipelineColorBlendAttachmentState, "blendEnable", 1)
-   set(cba, VkPipelineColorBlendAttachmentState, "srcColorBlendFactor", 6) ;; SRC_ALPHA
-   set(cba, VkPipelineColorBlendAttachmentState, "dstColorBlendFactor", 7) ;; ONE_MINUS_SRC_ALPHA
-   set(cba, VkPipelineColorBlendAttachmentState, "colorBlendOp", 0) ;; ADD
-   set(cba, VkPipelineColorBlendAttachmentState, "srcAlphaBlendFactor", 1) ;; ONE
-   set(cba, VkPipelineColorBlendAttachmentState, "dstAlphaBlendFactor", 7) ;; ONE_MINUS_SRC_ALPHA
-   set(cba, VkPipelineColorBlendAttachmentState, "alphaBlendOp", 0) ;; ADD
-   set(cba, VkPipelineColorBlendAttachmentState, "colorWriteMask", 15) ;; RGBA
-
-   mut cb = alloc(VkPipelineColorBlendStateCreateInfo)
-   set(cb, VkPipelineColorBlendStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
-   set(cb, VkPipelineColorBlendStateCreateInfo, "attachmentCount", 1)
-   set(cb, VkPipelineColorBlendStateCreateInfo, "pAttachments", cba)
+   ; Common States
+   def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
+   def rs = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0)
+   def ms = VkPipelineMultisampleStateCreateInfo(1, 0, 0.0, 0, 0, 0)
+   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15)
+   def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
 
    mut dyn_states = sys_malloc(8)
    store32(dyn_states, 0, 0)
    store32(dyn_states, 1, 4)
-   mut ds = alloc(VkPipelineDynamicStateCreateInfo)
-   set(ds, VkPipelineDynamicStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
-   set(ds, VkPipelineDynamicStateCreateInfo, "dynamicStateCount", 2)
-   set(ds, VkPipelineDynamicStateCreateInfo, "pDynamicStates", dyn_states)
+   def ds = VkPipelineDynamicStateCreateInfo(2, dyn_states)
 
-   ;; Pipeline
-   mut stages = sys_malloc(sizeof_struct(VkPipelineShaderStageCreateInfo) * 2)
+   ; Pipeline
    mut main_str = sys_malloc(8)
-   store8(main_str, 109, 0) ;; m
-   store8(main_str, 97, 1)  ;; a
-   store8(main_str, 105, 2) ;; i
-   store8(main_str, 110, 3) ;; n
+   store8(main_str, 109, 0) ; m
+   store8(main_str, 97, 1)  ; a
+   store8(main_str, 105, 2) ; i
+   store8(main_str, 110, 3) ; n
    store8(main_str, 0, 4)
-
-   mut s1 = stages
-   set(s1, VkPipelineShaderStageCreateInfo, "sType", 18) ;; VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-   set(s1, VkPipelineShaderStageCreateInfo, "stage", 1) ;; VERTEX
-   set(s1, VkPipelineShaderStageCreateInfo, "module", _vert_module)
-   set(s1, VkPipelineShaderStageCreateInfo, "pName", main_str)
-
-   mut s2 = stages + sizeof_struct(VkPipelineShaderStageCreateInfo)
-   set(s2, VkPipelineShaderStageCreateInfo, "sType", 18)
-   set(s2, VkPipelineShaderStageCreateInfo, "stage", 16) ;; FRAGMENT
-   set(s2, VkPipelineShaderStageCreateInfo, "module", _frag_module)
-   set(s2, VkPipelineShaderStageCreateInfo, "pName", main_str)
-
-   mut ia = alloc(VkPipelineInputAssemblyStateCreateInfo)
-   set(ia, VkPipelineInputAssemblyStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO)
-   set(ia, VkPipelineInputAssemblyStateCreateInfo, "topology", 3) ;; TRIANGLE_LIST
-
-   mut dss = alloc(VkPipelineDepthStencilStateCreateInfo)
-   set(dss, VkPipelineDepthStencilStateCreateInfo, "sType", VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
-   set(dss, VkPipelineDepthStencilStateCreateInfo, "depthTestEnable", 1)
-   set(dss, VkPipelineDepthStencilStateCreateInfo, "depthWriteEnable", 1)
-   set(dss, VkPipelineDepthStencilStateCreateInfo, "depthCompareOp", 1) ;; LESS
-
-   mut ci = alloc(VkGraphicsPipelineCreateInfo)
-   set(ci, VkGraphicsPipelineCreateInfo, "sType", VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
-   set(ci, VkGraphicsPipelineCreateInfo, "stageCount", 2)
-   set(ci, VkGraphicsPipelineCreateInfo, "pStages", stages)
-   set(ci, VkGraphicsPipelineCreateInfo, "pVertexInputState", vi)
-   set(ci, VkGraphicsPipelineCreateInfo, "pInputAssemblyState", ia)
-   set(ci, VkGraphicsPipelineCreateInfo, "pViewportState", viewport_state)
-   set(ci, VkGraphicsPipelineCreateInfo, "pRasterizationState", rs)
-   set(ci, VkGraphicsPipelineCreateInfo, "pMultisampleState", ms)
-   set(ci, VkGraphicsPipelineCreateInfo, "pDepthStencilState", dss)
-   set(ci, VkGraphicsPipelineCreateInfo, "pColorBlendState", cb)
-   set(ci, VkGraphicsPipelineCreateInfo, "pDynamicState", ds)
-   set(ci, VkGraphicsPipelineCreateInfo, "layout", _pipeline_layout)
-   set(ci, VkGraphicsPipelineCreateInfo, "renderPass", _render_pass)
-   set(ci, VkGraphicsPipelineCreateInfo, "subpass", 0)
-   set(ci, VkGraphicsPipelineCreateInfo, "basePipelineIndex", -1)
+   def s1 = VkPipelineShaderStageCreateInfo(1, _vert_module, main_str)
+   def s2 = VkPipelineShaderStageCreateInfo(16, _frag_module, main_str)
+   ; Pack two stage structs contiguously (48 bytes each)
+   mut stages = sys_malloc(96)
+   memcpy(stages, s1, 48)
+   memcpy(stages + 48, s2, 48)
+   def ia = VkPipelineInputAssemblyStateCreateInfo(3, 0)
+   def dss = VkPipelineDepthStencilStateCreateInfo(1, 1, 1, 0, 0, 0, 0, 0.0, 0.0)
+   def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
     mut pipe_ptr = sys_malloc(8)
     store64(pipe_ptr, 0xDEADC0DEBEEFCAFE)
     if(_is_debug()){
@@ -1465,8 +1529,9 @@ fn _create_graphics_pipeline(){
 
 fn begin_frame(){
    "Prepares the renderer for a new frame (sync, acquire image, begin recording)."
+   if(!_device){ return false }
    _frame_open = false
-   ;; Wait for previous frame's fence
+   ; Wait for previous frame's fence
    def fence = get(_in_flight_fences, _current_frame)
    mut fence_ptr = sys_malloc(8)
    store64_raw(fence_ptr, fence, 0)
@@ -1480,24 +1545,24 @@ fn begin_frame(){
       sys_free(fence_ptr)
       return false
    }
-   ;; Acquire next image
+   ; Acquire next image
    mut img_idx_ptr = sys_malloc(4)
    def sem = get(_image_available_semaphores, _current_frame)
    def acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, img_idx_ptr)
-   if(acq == 3294966292 || acq == -1000001004){ ;; VK_ERROR_OUT_OF_DATE_KHR
+   if(acq == 3294966292 || acq == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
       sys_free(fence_ptr)
       sys_free(img_idx_ptr)
       _recreate_swapchain()
       return false
    }
-   if(acq != 0 && acq != 1000001003){ ;; VK_SUBOPTIMAL_KHR is non-fatal
+   if(acq != 0 && acq != 1000001003){ ; VK_SUBOPTIMAL_KHR is non-fatal
       if(_is_debug()){ print(f"Vulkan: vkAcquireNextImageKHR failed with code {acq}") }
       sys_free(fence_ptr)
       sys_free(img_idx_ptr)
       return false
    }
    _image_index = load32(img_idx_ptr, 0)
-   ;; Begin recording
+   ; Begin recording
    def cb = get(_command_buffers, _current_frame)
    mut bi = sys_malloc(32)
    memset(bi, 0, 32)
@@ -1510,10 +1575,10 @@ fn begin_frame(){
       sys_free(bi)
       return false
    }
-   ;; Begin Render Pass
+   ; Begin Render Pass
    mut clear_values = sys_malloc(32)
-   store32(clear_values, 0x3f800000, 0) store32(clear_values, 0, 4) store32(clear_values, 0, 8) store32(clear_values, 0x3f800000, 12) ;; Color (Red)
-   store32_f32(clear_values, 1.0, 16) store32(clear_values, 0, 20) ;; Depth
+   store32(clear_values, 0x3f800000, 0) store32(clear_values, 0, 4) store32(clear_values, 0, 8) store32(clear_values, 0x3f800000, 12) ; Color (Red)
+   store32_f32(clear_values, 1.0, 16) store32(clear_values, 0, 20) ; Depth
 
    mut ri = sys_malloc(64)
    memset(ri, 0, 64)
@@ -1521,11 +1586,11 @@ fn begin_frame(){
    store64_raw(ri, _render_pass, 16)
    store64_raw(ri, to_int(get(_framebuffers, _image_index)), 24)
    store32(ri, _swapchain_extent_w, 40); store32(ri, _swapchain_extent_h, 44)
-   store32(ri, 2, 48) ;; clearValueCount
+   store32(ri, 2, 48) ; clearValueCount
    store64_raw(ri, clear_values, 56)
    cmd_begin_render_pass(cb, ri, 0)
 
-   ;; Set dynamic viewport/scissor
+   ; Set dynamic viewport/scissor
    mut vp = sys_malloc(24)
    store32_f32(vp, 0.0, 0) store32_f32(vp, 0.0, 4)
    store32_f32(vp, float(_swapchain_extent_w), 8) store32_f32(vp, float(_swapchain_extent_h), 12)
@@ -1564,7 +1629,7 @@ fn _flush(){
    def cb = get(_command_buffers, _current_frame)
    cmd_bind_pipeline(cb, 0, _pipeline)
 
-   ;; Bind Texture
+   ; Bind Texture
    mut tid = _current_texture_id
    if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
    def tex = get(_textures, tid)
@@ -1632,12 +1697,12 @@ fn end_frame(){
    mut si = sys_malloc(128)
    memset(si, 0, 128)
    store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-   store32(si, 1, 16) ;; waitSemaphoreCount
+   store32(si, 1, 16) ; waitSemaphoreCount
    store64_raw(si, wait_sems, 24)
    store64_raw(si, wait_stages, 32)
-   store32(si, 1, 40) ;; commandBufferCount
+   store32(si, 1, 40) ; commandBufferCount
    store64_raw(si, cb_ptr, 48)
-   store32(si, 1, 56) ;; signalSemaphoreCount
+   store32(si, 1, 56) ; signalSemaphoreCount
    store64_raw(si, signal_sems, 64)
    def fence = get(_in_flight_fences, _current_frame)
    def sub_res = queue_submit(_graphics_queue, 1, si, fence)
@@ -1655,13 +1720,13 @@ fn end_frame(){
    mut pi = sys_malloc(64)
    memset(pi, 0, 64)
    store32(pi, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, 0)
-   store32(pi, 1, 16) ;; waitSemaphoreCount
+   store32(pi, 1, 16) ; waitSemaphoreCount
    store64_raw(pi, signal_sems, 24)
-   store32(pi, 1, 32) ;; swapchainCount
+   store32(pi, 1, 32) ; swapchainCount
    store64_raw(pi, scs, 40)
    store64_raw(pi, idxs, 48)
    def pr = queue_present_khr(_present_queue, pi)
-   if(pr == 3294966292 || pr == -1000001004){ ;; VK_ERROR_OUT_OF_DATE_KHR
+   if(pr == 3294966292 || pr == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
       _frame_open = false
       sys_free(wait_sems)
       sys_free(signal_sems)
@@ -1674,7 +1739,7 @@ fn end_frame(){
       _recreate_swapchain()
       return false
    }
-   if(pr != 0 && pr != 1000001003){ ;; VK_SUBOPTIMAL_KHR is non-fatal
+   if(pr != 0 && pr != 1000001003){ ; VK_SUBOPTIMAL_KHR is non-fatal
       if(_is_debug()){ print(f"Vulkan: vkQueuePresentKHR failed with code {pr}") }
       sys_free(wait_sems)
       sys_free(signal_sems)
@@ -1706,17 +1771,17 @@ fn clear(r, g, b, a){
    mut ca = sys_malloc(24)
    memset(ca, 0, 24)
    store32(ca, VK_IMAGE_ASPECT_COLOR_BIT, 0)
-   store32(ca, 0, 4) ;; colorAttachment
+   store32(ca, 0, 4) ; colorAttachment
    store32_f32(ca, r, 8)
    store32_f32(ca, g, 12)
    store32_f32(ca, b, 16)
    store32_f32(ca, a, 20)
    mut rect = sys_malloc(24)
    memset(rect, 0, 24)
-   store32(rect, 0, 0) store32(rect, 0, 4) ;; offset
-   store32(rect, _swapchain_extent_w, 8) store32(rect, _swapchain_extent_h, 12) ;; extent
-   store32(rect, 0, 16) ;; baseArrayLayer
-   store32(rect, 1, 20) ;; layerCount
+   store32(rect, 0, 0) store32(rect, 0, 4) ; offset
+   store32(rect, _swapchain_extent_w, 8) store32(rect, _swapchain_extent_h, 12) ; extent
+   store32(rect, 0, 16) ; baseArrayLayer
+   store32(rect, 1, 20) ; layerCount
    cmd_clear_attachments(cb, 1, ca, 1, rect)
    sys_free(ca)
    sys_free(rect)
@@ -1724,7 +1789,7 @@ fn clear(r, g, b, a){
 
 fn draw_rect(x, y, w, h, r, g, b, a){
    "Batches a colored rectangle for rendering."
-   ;; Optimized to use textured path with default white texture
+   ; Optimized to use textured path with default white texture
    draw_rect_tex(x, y, w, h, _default_texture, r, g, b, a)
 }
 
@@ -1764,7 +1829,7 @@ fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
    _push_vertex(x3, y3, z3, 0.0, 0.0, r, g, b, a)
 }
 
-fn draw_triangle(x1, y1, x2, y2, x3, y3, r, g, b, a){
+fn _draw_triangle_2d(x1, y1, x2, y2, x3, y3, r, g, b, a){
    "Batches a colored triangle for rendering."
    if(!_frame_open){ return 0 }
    _check_flush(3 * 36)
@@ -1792,8 +1857,8 @@ fn draw_line(x1, y1, x2, y2, thickness, r, g, b, a){
    def cy = y2 - ny * half_t
    def dx2 = x1 - nx * half_t
    def dy2 = y1 - ny * half_t
-   draw_triangle(ax, ay, bx, by, cx, cy, r, g, b, a)
-   draw_triangle(ax, ay, cx, cy, dx2, dy2, r, g, b, a)
+   _draw_triangle_2d(ax, ay, bx, by, cx, cy, r, g, b, a)
+   _draw_triangle_2d(ax, ay, cx, cy, dx2, dy2, r, g, b, a)
 }
 
 fn _strcpy(dst, src){
@@ -1809,7 +1874,12 @@ fn _strcpy(dst, src){
 
 fn shutdown(){
    "Shuts down the Vulkan renderer and releases all associated resources."
-   if(_device){ device_wait_idle(_device) }
+   if(!_device){
+      if(_surface){ destroy_surface_khr(_instance, _surface, 0) }
+      if(_instance){ destroy_instance(_instance, 0) }
+      return
+   }
+   device_wait_idle(_device)
    if(_vertex_buffer){ destroy_buffer(_device, _vertex_buffer, 0) }
    if(_depth_image){ destroy_image(_device, _depth_image, 0) }
    if(_depth_view){ destroy_image_view(_device, _depth_view, 0) }

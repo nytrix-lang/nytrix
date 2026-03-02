@@ -100,15 +100,15 @@ fn lerp(a,b,t){
    return a + (b - a) * t
 }
 
-def PI   = 3.14159265358979323846
-def PHI  = 1.61803398874989484820
-def E    = 2.71828182845904523536
-def TAU  = 6.28318530717958647692
-def LN2  = 0.69314718055994530941
-def LN10 = 2.30258509299404568402
+def PI   = float(3.14159265358979323846)
+def PHI  = float(1.61803398874989484820)
+def E    = float(2.71828182845904523536)
+def TAU  = fmul(float(2.0), PI)
+def LN2  = float(0.69314718055994530941)
+def LN10 = float(2.30258509299404568402)
 
-def _HALF_PI = 1.57079632679489661923
-def _ATAN_K  = 0.273
+def _HALF_PI = fdiv(PI, float(2.0))
+def _ATAN_K  = float(0.273)
 
 fn _fmod(a, b){
    "Auto-generated docstring: _fmod."
@@ -206,7 +206,7 @@ fn atan2(y, x){
    if(flt(x, 0.0) && flt(y, 0.0)){ return fsub(atan(fdiv(y, x)), PI) }
    if(fgt(y, 0.0)){ return _HALF_PI }
    if(flt(y, 0.0)){ return fsub(0.0, _HALF_PI) }
-   if(is_inf(x)){ ;; x is inf, y is finite
+   if(is_inf(x)){ ; x is inf, y is finite
        return fgt(x, 0.0) ? 0.0 : PI
    }
    0.0

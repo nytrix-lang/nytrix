@@ -48,7 +48,7 @@ fn fail(message){
 }
 
 if(comptime{__main()}){
-    ;; Basic assertion helpers plus control-flow checks.
+    ; Basic assertion helpers plus control-flow checks.
 
     assert(true, "assert true")
     t_assert(true, "t_assert true")

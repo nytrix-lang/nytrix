@@ -3,7 +3,7 @@
 
 module std.core.iter (
    range, range2, enumerate, map_list, filter_list, repeat, take, zip2,
-   any, all, fold, find, find_index, chain, flatten, filter_map,
+   any, all, fold, find_if, find_index_if, chain, flatten, filter_map,
    zip_with, cycle, partition
 )
 use std.core *
@@ -42,7 +42,7 @@ fn fold(xs, init, fn2){
    acc
 }
 
-fn find(xs, pred, default=0){
+fn find_if(xs, pred, default=0){
    "Returns the first element `v` in `xs` where `pred(v)` is truthy, or `default`."
    def n = len(xs)
    mut i = 0
@@ -54,7 +54,7 @@ fn find(xs, pred, default=0){
    default
 }
 
-fn find_index(xs, pred){
+fn find_index_if(xs, pred){
    "Returns the index of the first element in `xs` where `pred(v)` is truthy, or -1."
    def n = len(xs)
    mut i = 0
@@ -187,7 +187,7 @@ fn partition(xs, pred){
 }
 
 fn _range_count(start, stop, step){
-   "Internal helper."
+   "Internal: calculates the number of elements in a range from `start` to `stop` with `step`."
    if(step == 0){ return 0 }
    if(step > 0){
       if(start >= stop){ return 0 }
@@ -198,12 +198,12 @@ fn _range_count(start, stop, step){
 }
 
 fn _list_set(out, idx, value){
-   "Internal helper."
+   "Internal: sets the element at `idx` in list `out` to `value` (bypassing safety checks)."
    store64(out, value, 16 + idx * 8)
 }
 
 fn _list_finish(out, len){
-   "Internal helper."
+   "Internal: sets the final length of the provided list `out` to `len` and returns the list."
    store64(out, len, 0)
    out
 }
@@ -345,11 +345,10 @@ if(comptime{__main()}){
     assert(it.all([4, 5, 6], fn(v){ v > 3 }), "all true")
     assert(!it.all([4, 5, 6], fn(v){ v > 5 }), "all false")
     assert(it.fold([1, 2, 3, 4], 0, fn(a, v){ a + v }) == 10, "fold sum")
-    assert(it.find([10, 20, 30], fn(v){ v > 15 }) == 20, "find")
-    assert(it.find([10, 20, 30], fn(v){ v > 50 }, -1) == -1, "find missing")
-    assert(it.find_index([10, 20, 30], fn(v){ v > 15 }) == 1, "find_index")
-
-    assert(it.chain([1, 2], [3, 4]) == [1, 2, 3, 4], "chain")
+          assert(it.find_if([10, 20, 30], fn(v){ v > 15 }) == 20, "find")
+          assert(it.find_if([10, 20, 30], fn(v){ v > 50 }, -1) == -1, "find missing")
+          assert(it.find_index_if([10, 20, 30], fn(v){ v > 15 }) == 1, "find_index")
+        assert(it.chain([1, 2], [3, 4]) == [1, 2, 3, 4], "chain")
     assert(it.flatten([[1, 2], 3, [4, 5]]) == [1, 2, 3, 4, 5], "flatten")
     assert(it.filter_map([1, 2, 3, 4], fn(v){
         if((v % 2) == 0){ return v * 10 }

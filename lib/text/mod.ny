@@ -5,7 +5,7 @@ module std.text (
    str_len, len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, split, strip,
    str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, chr, repeat, ord,
    utf8_valid, utf8_len, ord_at, str_slice, utf8_slice,
-   _utf8_seq_len, _utf8_decode_at
+   _utf8_seq_len, _utf8_decode_at, _substr
 )
 use std.core *
 use std.core as core
@@ -14,12 +14,12 @@ fn str_len(s){
    "Returns the number of bytes in a string."
    if(!s){ return 0 }
    if(!is_str(s)){ return 0 }
-   load64(s, -16)
+   return load64(s, -16)
 }
 
 fn len(s){
    "Alias for [[std.core::len]]. For strings, returns the number of bytes."
-   core.len(s)
+   return core.len(s)
 }
 
 fn find(s, sub){
@@ -174,7 +174,7 @@ fn _substr(s, start, stop){
       i += 1
    }
    store8(out, 0, len)
-   out
+   return out
 }
 
 fn _is_ws(c){
@@ -192,10 +192,11 @@ fn strip(s){
    while(start < n && _is_ws(load8(s, start))){ start += 1 }
    mut end = n
    while(end > start && _is_ws(load8(s, end - 1))){ end -= 1 }
-   _substr(s, start, end)
+   return _substr(s, start, end)
 }
 
 fn split(s, sep){
+   if(env("NY_TEXT_DEBUG")){ print("Text: split s='" + s + "' sep='" + sep + "'") }
    "Splits string `s` by separator `sep` and returns a list of strings."
    if(!is_str(s)){ return list(0) }
    mut sep_len = str_len(sep)
@@ -206,10 +207,10 @@ fn split(s, sep){
    mut start = 0
    while(i <= n - sep_len){
       mut j = 0
-      mut is_match = 1
+      mut is_match = true
       while(j < sep_len){
         if(load8(s, i + j) != load8(sep, j)){
-          is_match = 0
+          is_match = false
           break
         }
          j += 1
@@ -223,7 +224,8 @@ fn split(s, sep){
       }
    }
    out = _list_append(out, _substr(s, start, n))
-   out
+   if(env("NY_TEXT_DEBUG")){ print("Text: split returning count=" + to_str(len(out))) }
+   return out
 }
 
 fn str_add(a, b){
@@ -247,7 +249,7 @@ fn str_add(a, b){
       j += 1
    }
    store8(out, 0, total)
-   out
+   return out
 }
 
 fn upper(s){
@@ -264,7 +266,7 @@ fn upper(s){
       i += 1
    }
    store8(out, 0, n)
-   out
+   return out
 }
 
 fn lower(s){
@@ -281,7 +283,7 @@ fn lower(s){
       i += 1
    }
    store8(out, 0, n)
-   out
+   return out
 }
 
 fn endswith(s, suffix){
@@ -316,7 +318,7 @@ fn join(items, sep){
       out = str_add(out, get(items, i))
       i += 1
    }
-   out
+   return out
 }
 
 fn str_replace(s, old, new){
@@ -324,12 +326,12 @@ fn str_replace(s, old, new){
    if(!is_str(s) || !is_str(old) || !is_str(new)){ return s }
    if(str_len(old) == 0){ return s }
    def parts = split(s, old)
-   join(parts, new)
+   return join(parts, new)
 }
 
 fn replace_all(s, old, new){
    "Alias for [[std.str::str_replace]]."
-   str_replace(s, old, new)
+   return str_replace(s, old, new)
 }
 
 fn to_hex(n, width=0){
@@ -581,44 +583,43 @@ fn str_slice(s, start, stop, step=1){
          j += 1
          i = i + step
       }
-   }
-   store8(out, 0, cnt)
-   out
-}
-
-fn utf8_slice(s, start, stop, step=1){
-   "Returns a UTF-8 code-point slice of string `s`."
-   if(!is_str(s)){ return 0 }
-   if(!is_int(step)){ step = 1 }
-   if(step == 0){ step = 1 }
-   def n = utf8_len(s)
-   if(start < 0){ start = n + start }
-   if(stop < 0){ stop = n + stop }
-   if(step > 0){
-      if(start < 0){ start = 0 }
-      if(stop > n){ stop = n }
-      if(start >= stop){ return "" }
-   } else {
-      if(start >= n){ start = n - 1 }
-      if(stop < -1){ stop = -1 }
-      if(start <= stop){ return "" }
-   }
-   mut out = ""
-   mut i = start
-   if(step > 0){
-      while(i < stop){
-         out = out + chr(ord_at(s, i))
-         i = i + step
-      }
-   } else {
-      while(i > stop){
-         out = out + chr(ord_at(s, i))
-         i = i + step
-      }
-   }
-   out
-}
-
+        }
+        store8(out, 0, cnt)
+        return out
+     }
+   
+     fn utf8_slice(s, start, stop, step=1){
+        "Returns a UTF-8 code-point slice of string `s`."
+        if(!is_str(s)){ return 0 }
+        if(!is_int(step)){ step = 1 }
+        if(step == 0){ step = 1 }
+        def n = utf8_len(s)
+        if(start < 0){ start = n + start }
+        if(stop < 0){ stop = n + stop }
+        if(step > 0){
+           if(start < 0){ start = 0 }
+           if(stop > n){ stop = n }
+           if(start >= stop){ return "" }
+        } else {
+           if(start >= n){ start = n - 1 }
+           if(stop < -1){ stop = -1 }
+           if(start <= stop){ return "" }
+        }
+        mut out = ""
+        mut i = start
+        if(step > 0){
+           while(i < stop){
+              out = out + chr(ord_at(s, i))
+              i = i + step
+           }
+        } else {
+           while(i > stop){
+              out = out + chr(ord_at(s, i))
+              i = i + step
+           }
+        }
+        return out
+     }
 if(comptime{__main()}){
     use std.core *
     use std.text *

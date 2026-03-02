@@ -283,7 +283,7 @@ fn is_available(){
 
 fn init(ctx){
    "Initializes JACK backend and appends default JACK device."
-   if(!_load_lib()){ return false }
+   if(!_load_lib()){ return 0 }
    mut dev = dict(8)
    dev = dict_set(dev, "name", "JACK Default")
    dev = dict_set(dev, "id", "jack")
@@ -291,8 +291,9 @@ fn init(ctx){
    mut devices = get(ctx, "devices", list())
    devices = append(devices, dev)
    ctx = dict_set(ctx, "devices", devices)
-   true
+   ctx
 }
+
 
 fn shutdown(ctx){
    "Shuts down JACK backend global state."
@@ -304,14 +305,14 @@ fn stream_open(stream){
    "Opens JACK client, registers output ports, and installs process callback."
    if(!_load_lib()){ return false }
 
-   mut channels = get(stream, "channels", 2)
+   mut channels = core.get(stream, "channels", 2)
    if(channels <= 0){ channels = 2 }
    if(channels > 8){ channels = 8 }
 
-   mut format = get(stream, "format", FORMAT_S16LE)
+   mut format = core.get(stream, "format", FORMAT_S16LE)
    if(format != FORMAT_FLOAT32LE){ format = FORMAT_S16LE }
 
-   def rate = get(stream, "sample_rate", 48000)
+   def rate = core.get(stream, "sample_rate", 48000)
    mut name = env("NY_AUDIO_JACK_CLIENT")
    if(!is_str(name) || len(name) == 0){ name = "nytrix" }
 
@@ -352,7 +353,7 @@ fn stream_open(stream){
    stream = dict_set(stream, "handle", client)
    stream = dict_set(stream, "bits_per_sample", (format == FORMAT_FLOAT32LE) ? 32 : 16)
    stream = dict_set(stream, "sample_rate", rate)
-   true
+   stream
 }
 
 fn stream_start(stream){

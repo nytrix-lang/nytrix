@@ -44,6 +44,7 @@ COMMANDS = (
     "install",
     "uninstall",
     "clean",
+    "debug",
 )
 
 ENV_GATES = (
@@ -347,9 +348,11 @@ def main():
 
         valid_cmds = []
         extra_args = list(unknown)
+        is_debug_build = "debug" in args.commands
         for c_cmd in args.commands:
             if c_cmd in valid:
-                valid_cmds.append(c_cmd)
+                if c_cmd != "debug":
+                    valid_cmds.append(c_cmd)
             else:
                 extra_args.append(c_cmd)
         
@@ -415,7 +418,7 @@ def main():
                 clean_seen = True
                 continue
 
-            kind = "debug" if cmd == "fuzz" else "release"
+            kind = "debug" if is_debug_build or cmd == "fuzz" else "release"
             n_jobs, jobs_note = _resolve_jobs(args.jobs)
             if jobs_note:
                 log("HOST", jobs_note)

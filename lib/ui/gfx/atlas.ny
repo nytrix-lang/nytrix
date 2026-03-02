@@ -25,7 +25,7 @@ fn atlas_create(w=2048, h=2048){
    a = dict_set(a, "tex_id", tex_id)
    a = dict_set(a, "width", w)
    a = dict_set(a, "height", h)
-   a = dict_set(a, "cx", 2) ;; start with small padding
+   a = dict_set(a, "cx", 2) ; start with small padding
    a = dict_set(a, "cy", 2)
    a = dict_set(a, "max_row_h", 0)
    a = dict_set(a, "items", dict(256))
@@ -34,8 +34,8 @@ fn atlas_create(w=2048, h=2048){
 
 fn atlas_destroy(a){
    "Destroys the atlas and its underlying texture."
-   ;; texture_destroy not implemented in vkr yet?
-   ;; vkr.shutdown handles all textures for now.
+   ; texture_destroy not implemented in vkr yet?
+   ; vkr.shutdown handles all textures for now.
 }
 
 fn atlas_add(a, key, w, h, pixels){
@@ -51,7 +51,7 @@ fn atlas_add(a, key, w, h, pixels){
    mut cy = dict_get(a, "cy")
    mut mrh = dict_get(a, "max_row_h")
 
-   ;; Simple shelf packing with 2px padding
+   ; Simple shelf packing with 2px padding
    if(cx + w + 2 > aw){
       cx = 2
       cy = cy + mrh + 2
@@ -59,11 +59,11 @@ fn atlas_add(a, key, w, h, pixels){
    }
 
    if(cy + h + 2 > ah){
-      ;; Atlas full!
+      ; Atlas full!
       return 0
    }
 
-   ;; Update texture data on GPU
+   ; Update texture data on GPU
    vkr.update_texture_rect(dict_get(a, "tex_id"), cx, cy, w, h, pixels)
 
    if(h > mrh){ mrh = h }

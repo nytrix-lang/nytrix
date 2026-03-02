@@ -56,16 +56,16 @@ def _grads = [
 ]
 
 fn _lerp(a, b, t){
-   "Auto-generated docstring: _lerp."
+   "Internal: performs linear interpolation between `a` and `b` with weight `t`."
    a + (b - a) * t
 }
 fn _ease(t){
-   "Auto-generated docstring: _ease."
+   "Internal: implements the quintic s-curve (6t^5 - 15t^4 + 10t^3) for smooth interpolation."
    t * t * t * (t * (t * 6 - 15) + 10)
 }
 
 fn _grad(idx, x, y, z){
-   "Auto-generated docstring: _grad."
+   "Internal: computes the dot product of a pre-defined gradient vector with the distance vector (x, y, z)."
    def g = get(_grads, idx)
    get(g, 0) * x + get(g, 1) * y + get(g, 2) * z
 }
@@ -112,12 +112,12 @@ fn perlin3_seed(x, y, z, seed=0){
 }
 
 fn perlin3(x, y, z){
-   "Computes 3D Perlin noise value at (x, y, z)."
+   "Computes 3D Perlin noise value at coordinates (x, y, z). Returns a value approximately in the range [-1.0, 1.0]."
    perlin3_seed(x, y, z, 0)
 }
 
 fn fbm3(x, y, z, lacunarity=2.0, gain=0.5, octaves=6){
-   "Computes 3D Fractal Brownian Motion noise."
+   "Computes 3D Fractal Brownian Motion noise (sum of octaves of Perlin noise with increasing frequency and decreasing amplitude)."
    mut sum = 0.0
    mut freq = 1.0
    mut amp = 1.0
@@ -132,7 +132,7 @@ fn fbm3(x, y, z, lacunarity=2.0, gain=0.5, octaves=6){
 }
 
 fn turbulence3(x, y, z, lacunarity=2.0, gain=0.5, octaves=6){
-   "Computes 3D Turbulence noise."
+   "Computes 3D Turbulence noise (sum of absolute values of octaves of Perlin noise), creating sharper features like ridges."
    mut sum = 0.0
    mut freq = 1.0
    mut amp = 1.0
