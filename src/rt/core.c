@@ -440,9 +440,7 @@ int64_t __append(int64_t lst, int64_t val) {
 
 
 int64_t __load_item(int64_t lst, int64_t i_v) {
-  if (!is_ptr(lst)) return 0;
-  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
-  return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
+  return __rt_load_item_fast(lst, i_v);
 }
 
 int64_t __store_item(int64_t lst, int64_t i_v, int64_t val) {
@@ -453,8 +451,7 @@ int64_t __store_item(int64_t lst, int64_t i_v, int64_t val) {
 }
 
 int64_t __load_item_fast(int64_t lst, int64_t i_v) {
-  int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
-  return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
+  return __rt_load_item_fast(lst, i_v);
 }
 
 int64_t __store_item_fast(int64_t lst, int64_t i_v, int64_t val) {

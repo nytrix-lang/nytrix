@@ -8,7 +8,7 @@ module std.os.audio.source (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os.audio.source.memory as memory
 
 def SAMPLE_FMT_S16 = 1

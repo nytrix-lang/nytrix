@@ -7,7 +7,7 @@ module std.os.info (
    has_opencl, system_info
 )
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.text *
 use std.os *
 use std.os.fs *
@@ -917,7 +917,7 @@ if(comptime{__main()}){
     use std.text *
     use std.core *
     use std.core.error *
-    use std.core.dict *
+    use std.core.dict_mod *
 
     print("Testing std.os.info...")
 

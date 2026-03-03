@@ -8,7 +8,7 @@ module std.image.format.bmp (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 
 fn _ctz32(x){
    "Internal helper for `ctz32`."

@@ -57,7 +57,7 @@ fn most_common(d){
 if(comptime{__main()}){
     use std.util.counter *
     use std.core *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core.list *
     use std.core.error *
 

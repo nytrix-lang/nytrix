@@ -925,11 +925,39 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
   LLVMValueRef is_zero =
       LLVMBuildICmp(cg->builder, LLVMIntEQ, v,
                     LLVMConstInt(cg->type_i64, 1, false), "is_zero");
-  return LLVMBuildNot(
-      cg->builder,
-      LLVMBuildOr(cg->builder, LLVMBuildOr(cg->builder, is_none, is_false, ""),
-                  is_zero, ""),
-      "to_bool");
+  
+  LLVMValueRef basic_false = LLVMBuildOr(cg->builder, LLVMBuildOr(cg->builder, is_none, is_false, ""),
+                                         is_zero, "");
+  
+  // Also check if it's a float 0.0
+  LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+  LLVMBasicBlockRef check_flt_bb = LLVMAppendBasicBlock(fn, "bool.check_flt");
+  LLVMBasicBlockRef end_bb = LLVMAppendBasicBlock(fn, "bool.end");
+  
+  LLVMBuildCondBr(cg->builder, basic_false, check_flt_bb, end_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
+  LLVMValueRef is_flt = ny_is_float(cg, v);
+  
+  LLVMBasicBlockRef flt_real_check_bb = LLVMAppendBasicBlock(fn, "bool.flt_real_check");
+  LLVMBuildCondBr(cg->builder, is_flt, flt_real_check_bb, end_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, flt_real_check_bb);
+  LLVMValueRef fv = ny_unbox_float(cg, v);
+  LLVMValueRef is_f_zero = LLVMBuildFCmp(cg->builder, LLVMRealOEQ, fv, LLVMConstReal(cg->type_f64, 0.0), "is_f_zero");
+  LLVMBasicBlockRef flt_real_check_end_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBuildBr(cg->builder, end_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, end_bb);
+  LLVMValueRef phi = LLVMBuildPhi(cg->builder, LLVMInt1TypeInContext(cg->ctx), "is_false_final");
+  LLVMValueRef vals[3] = {LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false), 
+                          LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false),
+                          is_f_zero};
+  LLVMBasicBlockRef bbs[3] = {cur_bb, check_flt_bb, flt_real_check_end_bb};
+  LLVMAddIncoming(phi, vals, bbs, 3);
+  
+  return LLVMBuildNot(cg->builder, phi, "to_bool");
 }
 
 static void intern_map_resize(codegen_t *cg, size_t new_cap) {
@@ -1077,6 +1105,55 @@ LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v) {
       LLVMBuildShl(cg->builder, v, LLVMConstInt(cg->type_i64, 1, false), "");
   return LLVMBuildOr(cg->builder, sh, LLVMConstInt(cg->type_i64, 1, false),
                      "tag_int");
+}
+
+LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v) {
+  fun_sig *s = lookup_fun(cg, "__is_float_obj", 0);
+  if (!s)
+    return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+  LLVMValueRef res_tagged =
+      LLVMBuildCall2(cg->builder, s->type, s->value, (LLVMValueRef[]){v}, 1, "");
+  return LLVMBuildICmp(cg->builder, LLVMIntEQ, res_tagged,
+                       LLVMConstInt(cg->type_i64, 2, false), "is_flt");
+}
+
+LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v) {
+  LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
+  LLVMBasicBlockRef int_bb = LLVMAppendBasicBlock(fn, "unbox_flt.int");
+  LLVMBasicBlockRef check_flt_bb = LLVMAppendBasicBlock(fn, "unbox_flt.check_flt");
+  LLVMBasicBlockRef flt_bb = LLVMAppendBasicBlock(fn, "unbox_flt.flt");
+  LLVMBasicBlockRef fallback_bb = LLVMAppendBasicBlock(fn, "unbox_flt.fallback");
+  LLVMBasicBlockRef done_bb = LLVMAppendBasicBlock(fn, "unbox_flt.done");
+  
+  LLVMBuildCondBr(cg->builder, ny_is_tagged_int(cg, v), int_bb, check_flt_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, int_bb);
+  LLVMValueRef raw_int = ny_untag_int(cg, v);
+  LLVMValueRef d_from_i = LLVMBuildSIToFP(cg->builder, raw_int, cg->type_f64, "d_from_i");
+  LLVMBasicBlockRef int_done_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBuildBr(cg->builder, done_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
+  LLVMBuildCondBr(cg->builder, ny_is_float(cg, v), flt_bb, fallback_bb);
+
+  LLVMPositionBuilderAtEnd(cg->builder, flt_bb);
+  LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(cg->type_f64, 0), "");
+  LLVMValueRef d_from_p = LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "d_from_p");
+  LLVMBasicBlockRef flt_done_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBuildBr(cg->builder, done_bb);
+
+  LLVMPositionBuilderAtEnd(cg->builder, fallback_bb);
+  LLVMValueRef zero = LLVMConstReal(cg->type_f64, 0.0);
+  LLVMBasicBlockRef fallback_done_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBuildBr(cg->builder, done_bb);
+  
+  LLVMPositionBuilderAtEnd(cg->builder, done_bb);
+  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_f64, "unbox_flt_res");
+  LLVMValueRef incoming_vals[3] = {d_from_i, d_from_p, zero};
+  LLVMBasicBlockRef incoming_bbs[3] = {int_done_bb, flt_done_bb, fallback_done_bb};
+  LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 3);
+  return phi;
 }
 
 static fun_sig *ny_helper_lookup(codegen_t *cg, fun_sig **cache_slot,
@@ -1241,9 +1318,11 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
    */
   LLVMStripModuleDebugInfo(mod);
 #else
-  LLVMDIBuilderRef snapshot_dib = LLVMCreateDIBuilder(mod);
-  LLVMDIBuilderFinalize(snapshot_dib);
-  LLVMDisposeDIBuilder(snapshot_dib);
+  if (LLVMGetModuleContext(mod)) {
+    LLVMDIBuilderRef snapshot_dib = LLVMCreateDIBuilder(mod);
+    LLVMDIBuilderFinalize(snapshot_dib);
+    LLVMDisposeDIBuilder(snapshot_dib);
+  }
 #endif
 
   // 5. Verification Check (now should pass)
@@ -1264,76 +1343,60 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   tcg.debug_symbols = cg->debug_symbols;
   tcg.di_builder = NULL;
 
+  codegen_prepare(&tcg);
+
   LLVMValueRef entry_fn = LLVMAddFunction(
       mod, entry_name, LLVMFunctionType(tcg.type_i64, NULL, 0, 0));
   LLVMPositionBuilderAtEnd(
       bld, LLVMAppendBasicBlockInContext(ctm_ctx, entry_fn, "e"));
 
-  if (tcg.debug_symbols) {
-    ny_dbg_loc(&tcg, body->tok);
-  }
-
-  scope sc[64] = {0};
-  size_t d = 0;
-  gen_stmt(&tcg, sc, &d, body, 0, true);
-  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(bld)))
+  gen_stmt(&tcg, (scope[64]){0}, (size_t[]){0}, body, 0, false);
+  if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(bld))) {
     LLVMBuildRet(bld, LLVMConstInt(tcg.type_i64, 1, false));
+  }
 
-  // 7. JIT-execute the snapshotted module with MCJIT
-  ny_jit_init_native_once();
-
-  LLVMExecutionEngineRef ee;
-  struct LLVMMCJITCompilerOptions jopt;
-  LLVMInitializeMCJITCompilerOptions(&jopt, sizeof(jopt));
-  jopt.OptLevel = 0;
-#ifdef _WIN32
-  jopt.CodeModel = LLVMCodeModelLarge;
-#endif
-
-  if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jopt, sizeof(jopt), &err) !=
-      0) {
+  // 7. JIT Execute.
+  LLVMExecutionEngineRef ee = NULL;
+  if (LLVMCreateMCJITCompilerForModule(&ee, mod, NULL, 0, &err) != 0) {
+    NY_LOG_ERR("Comptime JIT error: %s\n", err);
+    LLVMDisposeMessage(err);
     codegen_dispose(&tcg);
-    if (!ctm_ctx_owned && mod)
-      LLVMDisposeModule(mod);
-    if (ctm_ctx_owned && ctm_ctx)
-      LLVMContextDispose(ctm_ctx);
-    if (prev_bb)
-      LLVMPositionBuilderAtEnd(cg->builder, prev_bb);
-    return expr_fail(cg, body->tok, "comptime JIT init failed: %s",
-                     err ? err : "unknown error");
+    LLVMContextDispose(ctm_ctx);
+    return expr_fail(cg, body->tok, "failed to create mcjit");
   }
-  tcg.ee = ee;
 
-  // 8. Dynamic Symbol Mapping
-  // Register built-in runtime symbols first; this is required on Windows
-  // where many symbols are not exported for dynamic symbol lookup.
   register_jit_symbols(ee, mod, &tcg);
-  ny_jit_map_unresolved_symbols(ee, mod, entry_name);
-
-  uint64_t saddr = LLVMGetFunctionAddress(ee, entry_name);
-  int64_t res = 0;
-  if (saddr) {
-    int64_t (*ctm_fn)(void) = (int64_t (*)(void))saddr;
-    res = ctm_fn();
+  uint64_t addr = LLVMGetFunctionAddress(ee, entry_name);
+  int64_t res = 1;
+  if (addr) {
+    res = ((int64_t(*)(void))addr)();
   }
 
-  tcg.module = NULL; // EE owns this module now.
+  LLVMDisposeExecutionEngine(ee);
   codegen_dispose(&tcg);
-  if (ctm_ctx_owned && ctm_ctx)
+  if (ctm_ctx_owned)
     LLVMContextDispose(ctm_ctx);
 
   if (prev_bb)
     LLVMPositionBuilderAtEnd(cg->builder, prev_bb);
 
-  if (!saddr)
-    return expr_fail(cg, body->tok,
-                     "comptime JIT entry point discovery failed");
+  return LLVMConstInt(cg->type_i64, (uint64_t)res, false);
+}
 
-  if (!is_int(res) && !is_ptr(res)) {
-    return expr_fail(cg, body->tok,
-                     "comptime must return tagged int64 or bool");
+bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy) {
+  if (!s || s->kind != NY_S_IF || !s->as.iff.test || cg->is_preparing)
+    return false;
+  if (s->as.iff.test->kind != NY_E_COMPTIME)
+    return false;
+  LLVMValueRef val =
+      gen_comptime_eval(cg, s->as.iff.test->as.comptime_expr.body);
+  if (val && LLVMIsAConstantInt(val)) {
+    uint64_t raw = LLVMConstIntGetZExtValue(val);
+    if (truthy)
+      *truthy = (raw != 0 && raw != 4 && raw != 1);
+    return true;
   }
-  return LLVMConstInt(cg->type_i64, (uint64_t)res, true);
+  return false;
 }
 
 static LLVMValueRef gen_unary_op_common(

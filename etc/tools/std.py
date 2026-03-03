@@ -46,7 +46,6 @@ def _used_modules(content):
 def run_std_bundle(bundle_path=None):
     def file_priority(f):
         path_s = f.as_posix()
-        if "core/mod.ny" in path_s: return 0
         if "os/sys.ny" in path_s: return 1
         if "str/mod.ny" in path_s: return 2
         if "str/io.ny" in path_s: return 3
@@ -55,6 +54,7 @@ def run_std_bundle(bundle_path=None):
         if "core/list.ny" in path_s: return 6
         if "core/dict.ny" in path_s: return 7
         if "core/set.ny" in path_s: return 8
+        if "core/mod.ny" in path_s: return 10
         if f.name == "mod.ny": return 20
         return 30
     
@@ -162,11 +162,17 @@ def run_std_bundle(bundle_path=None):
         
         for line in content.split('\n'):
             line = line.strip()
-            if line.startswith('fn '):
-                # Simple parser for fn name
-                name_part = line[3:].split('(')[0].strip()
-                if not name_part.startswith('_') and name_part:
-                    symbol_map[f"{full_mod_name}.{name_part}"] = full_mod_name
+            if line.startswith('fn ') or line.startswith('@extern'):
+                rem = line
+                if rem.startswith('@extern'):
+                    rem = rem[7:].strip()
+                if rem.startswith('fn '):
+                    name_part = rem[3:].split('(')[0].strip()
+                    # Allow __ intrinsics but skip _ private
+                    is_intrinsic = name_part.startswith('__')
+                    is_private = name_part.startswith('_') and not is_intrinsic
+                    if not is_private and name_part:
+                        symbol_map[f"{full_mod_name}.{name_part}"] = full_mod_name
             elif line.startswith('def '):
                 def_match = re.match(r'def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=', line)
                 if def_match:

@@ -13,7 +13,7 @@ module std.os (
    GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE,
    ACCEL_TARGET, ACCEL_OBJECT,
    PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK,
-   set_clipboard_text, get_clipboard_text
+   set_clipboard_text, get_clipboard_text, exit
 )
 use std.core *
 use std.core.error *
@@ -166,6 +166,11 @@ fn file_remove(path) -> Result {
       break
    }
    return err(res)
+}
+
+fn exit(code=0){
+   "Terminates the calling process with the given status code."
+   __exit(code)
 }
 
 if(comptime{__main()}){

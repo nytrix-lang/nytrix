@@ -11,7 +11,7 @@ module std.os.audio.res (
 
 use std.core *
 use std.core.error *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os *
 use std.os.path as path
 use std.os.fs as fs

@@ -5,7 +5,7 @@ module std.core.syntax.builtin (
    register_defaults
 )
 use std.core *
-use std.core.dict *
+use std.core.dict_impl *
 use std.core.reflect as core_ref
 use std.core.syntax.syntax as syntax_impl
 

@@ -109,13 +109,6 @@ int64_t __dlsym(int64_t handle, int64_t name) {
   void *h = NY_NATIVE_IS(handle) ? NY_NATIVE_DECODE(handle)
                                  : (void *)(uintptr_t)handle;
   const char *nm = (!is_int(name)) ? (const char*)name : (const char*)(uintptr_t)(name >> 1);
-  if (getenv("NYTRIX_DEBUG_FFI")) {
-    int readable = nm && rt_addr_readable((uintptr_t)nm, 1);
-    fprintf(stderr, "FFI: dlsym(h=%p, name=%p, is_int=%d, readable=%d)\n", h, (void*)nm, (int)is_int(name), readable);
-    if (readable) {
-      fprintf(stderr, "FFI: symbol name: '%s'\n", nm);
-    }
-  }
 #ifdef _WIN32
   p = (void *)GetProcAddress((HMODULE)h, nm);
 #else
@@ -241,18 +234,12 @@ int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
 }
 
 int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
-  if (getenv("NYTRIX_DEBUG_FFI")) fprintf(stderr, "FFI: __call3(f=0x%lx)\n", (unsigned long)f);
   if (!f)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t v0 = rt_untag_v(a0);
     int64_t v1 = rt_untag_v(a1);
     int64_t v2 = rt_untag_v(a2);
-    if (getenv("NYTRIX_DEBUG_FFI")) {
-      fprintf(stderr, "FFI: call3(f=%p) args=(0x%lx, 0x%lx, 0x%lx)\n",
-              NY_NATIVE_DECODE(f), (unsigned long)v0, (unsigned long)v1,
-              (unsigned long)v2);
-    }
     return rt_tag_v(NY_NATIVE_RET3(NY_NATIVE_DECODE(f), v0, v1, v2));
   }
   if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {

@@ -17,7 +17,7 @@ module std.ui.input (
    normalize_key, parse_notation, mod_bit_for_key, mods_from_key_states,
 
    ; High-level (Active Window)
-   key_down, key_pressed, mouse_pos, mouse_button_down, mouse_button_pressed
+   key_down, key_pressed, key_chord, mouse_pos, mouse_button_down, mouse_button_pressed
 )
 
 use std.core *
@@ -91,29 +91,49 @@ fn mods_from_key_states(ks){
    mods
 }
 
+fn _slice_end(s, st) { str_slice(s, st, str_len(s)) }
+
 fn _parse_single_key(tok){
    "Parses a single key notation string (e.g. 'Ctrl-Alt-K') into a [key, mod] list."
    mut mods = 0
    mut p = upper(tok)
    while(true){
-      if(startswith(p, "CONTROL-")){ mods = mods | MOD_CONTROL p = str_slice(p, 8) }
-      elif(startswith(p, "CTRL-")){ mods = mods | MOD_CONTROL p = str_slice(p, 5) }
-      elif(startswith(p, "C-")){ mods = mods | MOD_CONTROL p = str_slice(p, 2) }
-      elif(startswith(p, "SHIFT-")){ mods = mods | MOD_SHIFT p = str_slice(p, 6) }
-      elif(startswith(p, "S-")){ mods = mods | MOD_SHIFT p = str_slice(p, 2) }
-      elif(startswith(p, "OPTION-")){ mods = mods | MOD_ALT p = str_slice(p, 7) }
-      elif(startswith(p, "ALT-")){ mods = mods | MOD_ALT p = str_slice(p, 4) }
-      elif(startswith(p, "A-")){ mods = mods | MOD_ALT p = str_slice(p, 2) }
-      elif(startswith(p, "M-")){ mods = mods | MOD_ALT p = str_slice(p, 2) }
-      elif(startswith(p, "META-")){ mods = mods | MOD_META p = str_slice(p, 5) }
-      elif(startswith(p, "G-")){ mods = mods | MOD_META p = str_slice(p, 2) }
-      elif(startswith(p, "COMMAND-")){ mods = mods | MOD_SUPER p = str_slice(p, 8) }
-      elif(startswith(p, "CMD-")){ mods = mods | MOD_SUPER p = str_slice(p, 4) }
-      elif(startswith(p, "WIN-")){ mods = mods | MOD_SUPER p = str_slice(p, 4) }
-      elif(startswith(p, "SUPER-")){ mods = mods | MOD_SUPER p = str_slice(p, 6) }
-      elif(startswith(p, "HYPER-")){ mods = mods | MOD_SUPER p = str_slice(p, 6) }
-      elif(startswith(p, "H-")){ mods = mods | MOD_SUPER p = str_slice(p, 2) }
-      elif(startswith(p, "D-")){ mods = mods | MOD_SUPER p = str_slice(p, 2) }
+      if(startswith(p, "CONTROL-")){ mods = mods | MOD_CONTROL
+         p = _slice_end(p, 8) }
+      elif(startswith(p, "CTRL-")){ mods = mods | MOD_CONTROL
+         p = _slice_end(p, 5) }
+      elif(startswith(p, "C-")){ mods = mods | MOD_CONTROL
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "SHIFT-")){ mods = mods | MOD_SHIFT
+         p = _slice_end(p, 6) }
+      elif(startswith(p, "S-")){ mods = mods | MOD_SHIFT
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "OPTION-")){ mods = mods | MOD_ALT
+         p = _slice_end(p, 7) }
+      elif(startswith(p, "ALT-")){ mods = mods | MOD_ALT
+         p = _slice_end(p, 4) }
+      elif(startswith(p, "A-")){ mods = mods | MOD_ALT
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "M-")){ mods = mods | MOD_ALT
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "META-")){ mods = mods | MOD_META
+         p = _slice_end(p, 5) }
+      elif(startswith(p, "G-")){ mods = mods | MOD_META
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "COMMAND-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 8) }
+      elif(startswith(p, "CMD-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 4) }
+      elif(startswith(p, "WIN-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 4) }
+      elif(startswith(p, "SUPER-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 6) }
+      elif(startswith(p, "HYPER-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 6) }
+      elif(startswith(p, "H-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 2) }
+      elif(startswith(p, "D-")){ mods = mods | MOD_SUPER
+         p = _slice_end(p, 2) }
       else { break }
    }
    mut key = 0
@@ -169,6 +189,19 @@ fn key_pressed(key){
    def win = uiw.window_last()
    if(!win){ return false }
    uiw.window_key_pressed(win, key)
+}
+
+fn key_chord(notation){
+   "Returns true if a specific chord (e.g. 'Ctrl-S') was just pressed."
+   def win = uiw.window_last()
+   if(!win){ return false }
+   def seq = parse_notation(notation)
+   if(len(seq) != 1){ return false }
+   def pair = get(seq, 0)
+   if(!uiw.window_key_pressed(win, get(pair, 0))){ return false }
+   def mod = get(pair, 1)
+   if(mod != 0 && (uiw.window_modifiers(win) & mod) != mod){ return false }
+   true
 }
 
 fn mouse_pos(){
