@@ -6,7 +6,7 @@ module std.util.common (
 )
 
 use std.core *
-use std.text *
+use std.str *
 use std.os.prim *
 
 fn touch(...args){

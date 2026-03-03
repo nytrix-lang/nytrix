@@ -176,7 +176,7 @@ def save_crash_artifacts(seed, bad_cases, max_saved):
         (base.with_suffix(".ny")).write_text(r.src, encoding="utf-8")
         (base.with_suffix(".stderr.txt")).write_text(r.stderr or "", encoding="utf-8")
         (base.with_suffix(".stdout.txt")).write_text(r.stdout or "", encoding="utf-8")
-    
+
     summary_path = out_dir / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write(f"seed={seed}\n")
@@ -190,15 +190,15 @@ def save_crash_artifacts(seed, bad_cases, max_saved):
 def run_fuzz_harness(bin_path, iterations=200, jobs=1, timeout_s=1.2, mode="mixed", fail_on_panic=False):
     seed = int(time.time())
     bin_path = str(Path(bin_path).resolve())
-    
+
     log("FUZZ", f"seed={seed} iterations={iterations} jobs={jobs} mode={mode}")
-    
+
     bad_results = []
     total = 0
     crashes = 0
     panics = 0
     timeouts = 0
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
         futures = [
             ex.submit(run_case_index, bin_path, timeout_s, i, seed, mode)
@@ -210,14 +210,14 @@ def run_fuzz_harness(bin_path, iterations=200, jobs=1, timeout_s=1.2, mode="mixe
             if r.crashed: crashes += 1
             if r.panicked: panics += 1
             if r.timed_out: timeouts += 1
-            
+
             is_bad = r.crashed or r.timed_out or (fail_on_panic and r.panicked)
             if is_bad:
                 bad_results.append(r)
                 warn(f"fail at case {r.index} seed={r.seed} rc={r.returncode}")
 
     log_ok(f"done total={total} crashes={crashes} timeouts={timeouts} panics={panics}")
-    
+
     if bad_results:
         bad_results.sort(key=lambda x: x.index)
         pass

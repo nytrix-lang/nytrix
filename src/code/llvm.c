@@ -95,8 +95,7 @@ static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
   case NY_LLVM_OPT_PROFILE_SPEED:
     if (opt_level <= 0)
       return LLVMCodeGenLevelNone;
-    return (opt_level >= 2) ? LLVMCodeGenLevelAggressive
-                            : LLVMCodeGenLevelLess;
+    return (opt_level >= 2) ? LLVMCodeGenLevelAggressive : LLVMCodeGenLevelLess;
   case NY_LLVM_OPT_PROFILE_BALANCED:
   case NY_LLVM_OPT_PROFILE_DEFAULT:
   default:
@@ -402,13 +401,14 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level,
 
   char cpu_buf[128] = {0};
   char feat_buf[256] = {0};
-  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
-  
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf,
+                     sizeof(feat_buf));
+
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
 
-  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, raw_triple, cpu_buf, feat_buf, cgo,
-      LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, raw_triple, cpu_buf, feat_buf, cgo,
+                              LLVMRelocPIC, host_code_model());
 
   if (!tm) {
     LLVMDisposeMessage(raw_triple);
@@ -463,9 +463,9 @@ void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
     }
     LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
 
-    LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-        target, triple, cpu, features ? features : "", cgo,
-        LLVMRelocPIC, host_code_model());
+    LLVMTargetMachineRef tm =
+        LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                                cgo, LLVMRelocPIC, host_code_model());
     if (tm) {
       LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
       char *layout = LLVMCopyStringRepOfTargetData(td);
@@ -535,7 +535,8 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   }
 }
 
-bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) {
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
+                         int opt_level) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -579,9 +580,9 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) 
   }
   apply_target_attrs(module, cpu, features);
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features ? features : "", cgo,
-      LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                              cgo, LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
@@ -595,6 +596,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) 
   LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
   char *layout = LLVMCopyStringRepOfTargetData(td);
   if (layout) {
+
     LLVMSetDataLayout(module, layout);
     LLVMDisposeMessage(layout);
   }
@@ -667,9 +669,9 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
   }
   apply_target_attrs(module, cpu, features);
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-      target, triple, cpu, features ? features : "", cgo,
-      LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                              cgo, LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)

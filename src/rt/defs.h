@@ -60,6 +60,10 @@ RT_DEF("__pipe", __pipe, 1, "fn __pipe(fds_ptr)", "Portable pipe wrapper.")
 RT_DEF("__dup2", __dup2, 2, "fn __dup2(oldfd, newfd)", "Portable dup2 wrapper.")
 RT_DEF("__fork", __fork, 0, "fn __fork()",
        "Portable fork wrapper (non-Windows).")
+RT_DEF("__setsid", __setsid, 0, "fn __setsid()",
+       "Portable setsid wrapper (non-Windows).")
+RT_DEF("__openpty", __openpty, 1, "fn __openpty(fds_ptr)",
+       "Portable openpty wrapper (non-Windows).")
 RT_DEF("__wait4", __wait4, 3, "fn __wait4(pid, status_ptr, options)",
        "Portable wait4 wrapper (waitpid on non-Windows).")
 RT_DEF("__spawn_wait", __spawn_wait, 2, "fn __spawn_wait(path, argv)",
@@ -158,8 +162,7 @@ RT_DEF("__load_item_fast", __load_item_fast, 2, "fn __load_item_fast(lst, i)",
 RT_DEF("__store_item_fast", __store_item_fast, 3,
        "fn __store_item_fast(lst, i, v)",
        "Unchecked list element store (internal hot path).")
-RT_DEF("__append", __append, 2, "fn __append(lst, v)",
-       "Appends v to list lst.")
+RT_DEF("__append", __append, 2, "fn __append(lst, v)", "Appends v to list lst.")
 RT_DEF("__list_len", __list_len, 1, "fn __list_len(lst)",
        "Fast read of the element count (tagged) from a list header.")
 RT_DEF("__list_set_len", __list_set_len, 2, "fn __list_set_len(lst, n)",
@@ -197,7 +200,8 @@ RT_DEF("__dlerror", __dlerror, 0, "fn __dlerror()",
        "Returns the last dynamic linking error.")
 
 RT_DEF("__call0", __call0, 1, "fn __call0(fptr)", "Call fptr with 0 args.")
-RT_DEF("__call0_i32", __call0_i32, 1, "fn __call0_i32(fptr)", "Call fptr with 0 args and i32 return.")
+RT_DEF("__call0_i32", __call0_i32, 1, "fn __call0_i32(fptr)",
+       "Call fptr with 0 args and i32 return.")
 RT_DEF("__call1", __call1, 2, "fn __call1(fptr, a)", "Call fptr with 1 arg.")
 RT_DEF("__call1_i64", __call1_i64, 2, "fn __call1_i64(fptr, a)",
        "Call fptr with one i64 argument and i64 return.")
@@ -211,8 +215,8 @@ RT_DEF("__call3", __call3, 4, "fn __call3(fptr, a, b, c)",
        "Call fptr with 3 args.")
 RT_DEF("__call4", __call4, 5, "fn __call4(fptr, a, b, c, d)",
        "Call fptr with 4 args.")
-RT_DEF("__call4_f32_void", __call4_f32_void, 5, "fn __call4_f32_void(fptr, a, b, c, d)",
-       "Call fptr with 4 float args.")
+RT_DEF("__call4_f32_void", __call4_f32_void, 5,
+       "fn __call4_f32_void(fptr, a, b, c, d)", "Call fptr with 4 float args.")
 RT_DEF("__call5", __call5, 6, "fn __call5(fptr, a, b, c, d, e)",
        "Call fptr with 5 args.")
 RT_DEF("__call6", __call6, 7, "fn __call6(fptr, a, b, c, d, e, f)",
@@ -249,6 +253,8 @@ RT_DEF("__clear_panic_env", __clear_panic_env, 0, "fn __clear_panic_env()",
        "Internal: clears panic jump environment.")
 RT_DEF("__jmpbuf_size", __jmpbuf_size, 0, "fn __jmpbuf_size()",
        "Internal: returns size of jmp_buf.")
+RT_DEF("__jmpbuf_align", __jmpbuf_align, 0, "fn __jmpbuf_align()",
+       "Internal: returns alignment of jmp_buf.")
 RT_DEF("__get_panic_val", __get_panic_val, 0, "fn __get_panic_val()",
        "Internal: returns the panic message.")
 RT_DEF("__trace_loc", __trace_loc, 3, "fn __trace_loc(file, line, col)",
@@ -258,7 +264,8 @@ RT_DEF("__trace_func", __trace_func, 1, "fn __trace_func(name)",
 RT_DEF("__trace_dump", __trace_dump, 1, "fn __trace_dump(n)",
        "Internal: dump recent trace entries.")
 RT_DEF("__get_backtrace", __get_backtrace, 1, "fn __get_backtrace(n)",
-       "Returns the current Nytrix backtrace as a list of [file, line, col, func] frames.")
+       "Returns the current Nytrix backtrace as a list of [file, line, col, "
+       "func] frames.")
 RT_DEF("__push_defer", __push_defer, 2, "fn __push_defer(f, e)",
        "Internal: push defer.")
 RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",
@@ -322,10 +329,23 @@ RT_DEF("__srand", __srand, 1, "fn __srand(s)",
        "Seeds the random number generator.")
 RT_DEF("__copy_mem", __copy_mem, 3, "fn __copy_mem(d, s, n)",
        "Copies n bytes from s to d (llvm intrinsic).")
+RT_DEF("__simd_mat4_mul", __simd_mat4_mul, 3, "fn __simd_mat4_mul(a, b, out)",
+       "SIMD-accelerated 4x4 column-major float matrix multiply "
+       "(SSE2/NEON/scalar).")
+RT_DEF("__simd_mat4_mul_ptr", __simd_mat4_mul_ptr, 3,
+       "fn __simd_mat4_mul_ptr(a_ptr, b_ptr, out_ptr)",
+       "SIMD-accelerated 4x4 float matrix multiply using raw pointers.")
+RT_DEF("__mat4_to_buffer", __mat4_to_buffer, 2, "fn __mat4_to_buffer(m, buf)",
+       "Optimized conversion of 4x4 matrix object to raw float buffer.")
+RT_DEF("__mat4_from_buffer", __mat4_from_buffer, 2,
+       "fn __mat4_from_buffer(m, buf)",
+       "Optimized conversion of raw float buffer back into 4x4 matrix object.")
 RT_DEF("__os_name", __os_name, 0, "fn __os_name()",
        "Returns the name of the operating system.")
 RT_DEF("__arch_name", __arch_name, 0, "fn __arch_name()",
        "Returns the name of the architecture.")
+RT_DEF("__main", __main, 0, "fn __main()",
+       "Checks if the current module is the main entry point.")
 
 #ifndef RT_GV
 #define RT_GV(n, p, t, d)

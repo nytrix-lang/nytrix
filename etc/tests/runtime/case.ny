@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 
 ;; Case / control-flow / edge cases (Test)
 
@@ -99,10 +99,10 @@ def empty = ""
 assert(len(empty) == 0, "empty string")
 
 if(__is_main_script()){
-    def s = "   "
-    def stripped = strip(s)
-    print(f"DEBUG: strip('   ') len = {len(stripped)}")
-    assert(len(stripped) == 0, "strip whitespace")
+   def s = "   "
+   def stripped = strip(s)
+   print(f"DEBUG: strip('   ') len = {len(stripped)}")
+   assert(len(stripped) == 0, "strip whitespace")
 }
 
 mut l = list(0)

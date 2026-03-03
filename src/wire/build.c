@@ -611,8 +611,9 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
 #ifdef _WIN32
   bool msvc = is_msvc_cc(cc);
   if (msvc) {
-    // ccache not typically used with MSVC/cl.exe via direct invocation in this context
-    // or requires specific configuration (sccache). Skipping for MSVC path.
+    // ccache not typically used with MSVC/cl.exe via direct invocation in this
+    // context or requires specific configuration (sccache). Skipping for MSVC
+    // path.
     snprintf(include_arg, sizeof(include_arg), "/I%s/src", root);
     const char *llvm_inc = find_llvm_include_dir();
     if (llvm_inc && *llvm_inc)
@@ -628,7 +629,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
     const char *const runtime_args[] = {cc,
                                         "/nologo",
                                         "/std:c11",
-                                        debug ? "/Od" : "/O2",
+                                        debug ? "/Od" : "/Os",
                                         "/MD",
                                         "/D_CRT_SECURE_NO_WARNINGS",
                                         "/D_CRT_NONSTDC_NO_WARNINGS",
@@ -659,7 +660,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
       const char *const ast_args[] = {cc,
                                       "/nologo",
                                       "/std:c11",
-                                      debug ? "/Od" : "/O2",
+                                      debug ? "/Od" : "/Os",
                                       "/MD",
                                       "/D_CRT_SECURE_NO_WARNINGS",
                                       "/D_CRT_NONSTDC_NO_WARNINGS",
@@ -698,13 +699,16 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
 #if defined(__APPLE__) || defined(_WIN32)
   const char *runtime_args[128];
   size_t ra_i = 0;
-  if (has_ccache) runtime_args[ra_i++] = "ccache";
+  if (has_ccache)
+    runtime_args[ra_i++] = "ccache";
   runtime_args[ra_i++] = cc;
   runtime_args[ra_i++] = "-std=gnu11";
-  runtime_args[ra_i++] = debug ? "-g3" : "-O2";
+  runtime_args[ra_i++] = debug ? "-g3" : "-Os";
   runtime_args[ra_i++] = dwarf_flag;
-  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  runtime_args[ra_i++] =
+      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] =
+      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
@@ -725,18 +729,22 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   runtime_args[ra_i++] = runtime_src;
   runtime_args[ra_i++] = "-o";
   runtime_args[ra_i++] = out_runtime;
-  if (profile) runtime_args[ra_i++] = "-pg";
+  if (profile)
+    runtime_args[ra_i++] = "-pg";
   runtime_args[ra_i] = NULL;
 #else
   const char *runtime_args[128];
   size_t ra_i = 0;
-  if (has_ccache) runtime_args[ra_i++] = "ccache";
+  if (has_ccache)
+    runtime_args[ra_i++] = "ccache";
   runtime_args[ra_i++] = cc;
   runtime_args[ra_i++] = "-std=gnu11";
-  runtime_args[ra_i++] = debug ? "-g3" : "-O2";
+  runtime_args[ra_i++] = debug ? "-g3" : "-Os";
   runtime_args[ra_i++] = dwarf_flag;
-  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  runtime_args[ra_i++] =
+      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] =
+      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
@@ -751,7 +759,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   runtime_args[ra_i++] = runtime_src;
   runtime_args[ra_i++] = "-o";
   runtime_args[ra_i++] = out_runtime;
-  if (profile) runtime_args[ra_i++] = "-pg";
+  if (profile)
+    runtime_args[ra_i++] = "-pg";
   runtime_args[ra_i] = NULL;
 #endif
   if (verbose_enabled >= 2) {
@@ -774,13 +783,16 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   if (out_ast) {
     const char *ast_args[128];
     size_t aa_i = 0;
-    if (has_ccache) ast_args[aa_i++] = "ccache";
+    if (has_ccache)
+      ast_args[aa_i++] = "ccache";
     ast_args[aa_i++] = cc;
     ast_args[aa_i++] = "-std=gnu11";
     ast_args[aa_i++] = debug ? "-g3" : "-Os";
     ast_args[aa_i++] = dwarf_flag;
-    ast_args[aa_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-    ast_args[aa_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+    ast_args[aa_i++] =
+        debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+    ast_args[aa_i++] =
+        debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if defined(__arm__) && !defined(__aarch64__)
     ast_args[aa_i++] = arm_float_abi_flag;
 #endif

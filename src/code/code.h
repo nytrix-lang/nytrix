@@ -1,11 +1,11 @@
 #pragma once
 
 #include "ast/ast.h"
-#include "code/types.h"
 #include "base/util.h"
+#include "code/types.h"
 #include <llvm-c/Core.h>
-#include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/DebugInfo.h>
+#include <llvm-c/ExecutionEngine.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -94,13 +94,13 @@ ny_name_set_has_hash(const char *const *names, size_t names_len,
 }
 
 static inline bool assigned_name_has(const assigned_name_list *names,
-                                      const assigned_hash_list *hashes,
-                                      const char *name, uint64_t hash,
-                                      const uint64_t bloom[4]) {
+                                     const assigned_hash_list *hashes,
+                                     const char *name, uint64_t hash,
+                                     const uint64_t bloom[4]) {
   if (!names || !hashes || !name || !names->data || !hashes->data)
     return false;
-  return ny_name_set_has_hash(names->data, names->len, hashes->data, hashes->len,
-                              bloom, name, hash);
+  return ny_name_set_has_hash(names->data, names->len, hashes->data,
+                              hashes->len, bloom, name, hash);
 }
 
 static inline bool assigned_name_contains(const assigned_name_list *names,
@@ -261,6 +261,9 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog, arena_t *arena,
                                LLVMModuleRef mod, LLVMContextRef ctx,
                                LLVMBuilderRef builder);
 void codegen_prepare(codegen_t *cg);
+void collect_sigs(codegen_t *cg, struct stmt_t *s);
+void collect_use_modules(codegen_t *cg, struct stmt_t *s);
+void codegen_repopulate_interns(codegen_t *cg);
 void codegen_emit(codegen_t *cg);
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
 void codegen_collect_links(codegen_t *cg, program_t *prog);
@@ -292,8 +295,7 @@ static inline bool ny_sig_in_current_sigs(const codegen_t *cg,
   return sig >= begin && sig < end;
 }
 
-static inline bool ny_binding_is_valid(const codegen_t *cg,
-                                       const binding *b) {
+static inline bool ny_binding_is_valid(const codegen_t *cg, const binding *b) {
   if (!b)
     return false;
   if (b->is_stable)

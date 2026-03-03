@@ -7,6 +7,7 @@ module std.ui.event (
 )
 use std.core *
 use std.ui.consts *
+use std.util.common as common
 
 def _E_TAG = 0
 def _E_TYPE = 1
@@ -16,67 +17,61 @@ def _E_DATA = 4
 
 fn is_event(ev){
    "Returns true when `ev` is a std.ui event payload."
-   is_list(ev) && len(ev) > _E_DATA && get(ev, _E_TAG, "") == "std.ui.event"
+   common.touch(ev)
+   is_list(ev) && len(ev) >= 5 && get(ev, _E_TAG, "") == "std.ui.event"
 }
 
 fn make_event(kind, win, win_id=0, data=0){
    "Constructs an event payload."
-   mut ev = list(6)
-   ev = append(ev, "std.ui.event")
-   ev = append(ev, kind)
-   ev = append(ev, win)
-   ev = append(ev, win_id)
-   ev = append(ev, data)
-   ev
+   common.touch(kind) common.touch(win) common.touch(win_id) common.touch(data)
+   ["std.ui.event", kind, win, win_id, data]
 }
 
 fn event_type(ev){
    "Returns event type enum value."
+   common.touch(ev)
    if(!is_event(ev)){ return EVENT_NONE }
    get(ev, _E_TYPE, EVENT_NONE)
 }
 
 fn event_window(ev){
    "Returns the event's associated window object."
+   common.touch(ev)
    if(!is_event(ev)){ return 0 }
    get(ev, _E_WINDOW, 0)
 }
 
 fn event_window_id(ev){
    "Returns the event's associated window id."
+   common.touch(ev)
    if(!is_event(ev)){ return 0 }
    get(ev, _E_WINDOW_ID, 0)
 }
 
 fn event_data(ev){
    "Returns event payload data."
+   common.touch(ev)
    if(!is_event(ev)){ return 0 }
    get(ev, _E_DATA, 0)
 }
 
 fn queue_push(q, ev){
    "Appends event `ev` to queue `q` and returns queue."
-   if(!is_list(q)){ q = list(8) }
+   common.touch(q) common.touch(ev)
+   if(!is_list(q)){ q = [] }
    append(q, ev)
 }
 
 fn queue_pop(q){
-   "Pops the oldest event from queue `q` (FIFO), or 0."
-   if(!is_list(q)){ return 0 }
-   def n = len(q)
-   if(n == 0){ return 0 }
-   def first = get(q, 0)
-   mut i = 1
-   while(i < n){
-      set_idx(q, i - 1, get(q, i))
-      i += 1
-   }
-   pop(q)
-   first
+   "Pops the oldest event from queue `q` (FIFO). Returns oldest event or 0 if empty."
+   common.touch(q)
+   if(!is_list(q) || len(q) == 0){ return 0 }
+   get(q, 0)
 }
 
 fn queue_len(q){
    "Returns queue length."
+   common.touch(q)
    if(!is_list(q)){ return 0 }
    len(q)
 }

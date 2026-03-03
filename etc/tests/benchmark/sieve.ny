@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 use std.os *
 use std.os.time *
 
@@ -41,8 +41,8 @@ fn sieve(n){
          def sq = p * p
          mut mul = sq
          while(mul <= n){
-            store8(flags, 0, mul >> 1)
-            mul += p * 2
+         store8(flags, 0, mul >> 1)
+         mul += p * 2
          }
       }
       p += 2

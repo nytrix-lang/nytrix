@@ -9,7 +9,8 @@ typedef enum {
   NY_MODE_REPL,
   NY_MODE_BUILD,
   NY_MODE_VERSION,
-  NY_MODE_HELP
+  NY_MODE_HELP,
+  NY_MODE_BUNDLE
 } ny_mode;
 
 #include "base/loader.h"
@@ -60,6 +61,8 @@ typedef struct {
   const char *host_triple;
   const char *arm_float_abi;
   const char *std_path;
+  const char *bundle_std_path;
+  const char *bundle_symbols_path;
   std_mode_t std_mode;
   bool std_mode_explicit;
   int strip_override;

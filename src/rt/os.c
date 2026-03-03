@@ -6,11 +6,11 @@
 #include <stdlib.h>
 #include <time.h>
 #ifdef _WIN32
-#include <windows.h>
 #include <conio.h>
 #include <direct.h>
 #include <io.h>
 #include <process.h>
+#include <windows.h>
 #else
 #include <dirent.h>
 #include <pthread.h>
@@ -19,8 +19,14 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
-#include <termios.h>
 #include <unistd.h>
+#endif
+#ifdef __linux__
+#include <pty.h>
+#include <utmp.h>
+#endif
+#ifdef __APPLE__
+#include <util.h>
 #endif
 #ifdef __APPLE__
 #include <spawn.h>
@@ -69,15 +75,32 @@ static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
     *needs_free = false;
   if (!rargv)
     return NULL;
-  int64_t *src = (int64_t *)(uintptr_t)rargv;
+
+  int64_t tag = *(int64_t *)((char *)rargv - 8);
+  char **dst = NULL;
   size_t count = 0;
-  while (src[count] != 0 && src[count] != 1)
-    count++;
-  char **dst = (char **)calloc(count + 1, sizeof(char *));
-  if (!dst)
-    return NULL;
-  for (size_t i = 0; i < count; i++)
-    dst[i] = (char *)(uintptr_t)rt_untag_v(src[i]);
+
+  if (tag == TAG_LIST || tag == TAG_TUPLE) {
+    count = rt_untag_v(*(int64_t *)rargv);
+    dst = (char **)calloc(count + 1, sizeof(char *));
+    if (!dst)
+      return NULL;
+    int64_t *src = (int64_t *)((char *)rargv + 16);
+    for (size_t i = 0; i < count; i++) {
+      dst[i] = (char *)(uintptr_t)rt_untag_v(src[i]);
+    }
+  } else {
+    // Fallback for raw NULL-terminated array
+    int64_t *src = (int64_t *)(uintptr_t)rargv;
+    while (src[count] != 0 && src[count] != 1)
+      count++;
+    dst = (char **)calloc(count + 1, sizeof(char *));
+    if (!dst)
+      return NULL;
+    for (size_t i = 0; i < count; i++)
+      dst[i] = (char *)(uintptr_t)rt_untag_v(src[i]);
+  }
+
   if (needs_free)
     *needs_free = true;
   return dst;
@@ -90,22 +113,7 @@ static char **ny_native_envp(intptr_t renvp, bool *needs_free) {
       *needs_free = false;
     return NULL;
   }
-  int64_t *src = (int64_t *)(uintptr_t)renvp;
-  size_t count = 0;
-  while (src[count] != 0 && src[count] != 1)
-    count++;
-  char **dst = (char **)calloc(count + 1, sizeof(char *));
-  if (!dst) {
-    if (needs_free)
-      *needs_free = false;
-    return NULL;
-  }
-  for (size_t i = 0; i < count; i++)
-    dst[i] = (char *)(uintptr_t)rt_untag_v(src[i]);
-  dst[count] = NULL;
-  if (needs_free)
-    *needs_free = true;
-  return dst;
+  return ny_native_argv(renvp, needs_free);
 }
 #endif
 
@@ -173,14 +181,13 @@ int64_t __sys_read_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
     off >>= 1;
   if (!__check_oob("sys_read", buf, off, (size_t)len))
     return -1LL;
+  char *ptr = (char *)((intptr_t)rt_untag_v(buf) + (intptr_t)off);
 #ifdef _WIN32
-  ssize_t r = _read((int)fd, (char *)((intptr_t)buf + (intptr_t)off),
-                    (unsigned int)len);
+  ssize_t r = _read((int)fd, ptr, (unsigned int)len);
   if (r < 0)
     r = -errno;
 #else
-  ssize_t r =
-      read((int)fd, (char *)((intptr_t)buf + (intptr_t)off), (size_t)len);
+  ssize_t r = read((int)fd, ptr, (size_t)len);
   if (r < 0)
     r = -errno;
 #endif
@@ -196,7 +203,7 @@ int64_t __sys_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
     off >>= 1;
   if (!__check_oob("sys_write", buf, off, (size_t)len))
     return -1LL;
-  char *ptr = (char *)((intptr_t)buf + (intptr_t)off);
+  char *ptr = (char *)((intptr_t)rt_untag_v(buf) + (intptr_t)off);
 #ifdef _WIN32
   ssize_t r = _write((int)fd, ptr, (unsigned int)len);
   if (r < 0)
@@ -508,6 +515,34 @@ static int __tty_mode_saved = 0;
 static struct termios __tty_mode_prev;
 #endif
 
+int64_t __openpty(int64_t fds_ptr) {
+  intptr_t ptr = (intptr_t)rt_untag_v(fds_ptr);
+#if !defined(_WIN32)
+  int m, s;
+  int r = openpty(&m, &s, NULL, NULL, NULL);
+  if (r == 0) {
+    if (ptr) {
+      ((int32_t *)ptr)[0] = m;
+      ((int32_t *)ptr)[1] = s;
+    }
+  } else {
+    r = -errno;
+  }
+  return rt_tag_v((int64_t)r);
+#else
+  (void)ptr;
+  return rt_tag_v((int64_t)-1);
+#endif
+}
+
+int64_t __setsid(void) {
+#ifdef _WIN32
+  return rt_tag_v((int64_t)-1);
+#else
+  return rt_tag_v((int64_t)setsid());
+#endif
+}
+
 int64_t __tty_raw(int64_t enable) {
   if (is_int(enable))
     enable >>= 1;
@@ -600,30 +635,31 @@ static void __tty_sig_restore(int sig) {
     __tty_mode_saved = 0;
   }
   /* Exit alt-screen, reset all SGR attrs, show cursor, enable wrap */
-  const char *cleanup =
-      "\033[0m"      /* reset SGR */
-      "\033[?25h"   /* show cursor */
-      "\033[?7h"    /* enable wrap */
-      "\033[?1049l" /* leave alt screen */
-      "\033[0m"     /* reset SGR again on main screen */
-      "\033[?25h"   /* show cursor on main screen */
-      "\033[?7h";   /* enable wrap on main screen */
+  const char *cleanup = "\033[0m"     /* reset SGR */
+                        "\033[?25h"   /* show cursor */
+                        "\033[?7h"    /* enable wrap */
+                        "\033[?1049l" /* leave alt screen */
+                        "\033[0m"     /* reset SGR again on main screen */
+                        "\033[?25h"   /* show cursor on main screen */
+                        "\033[?7h";   /* enable wrap on main screen */
   write(STDOUT_FILENO, cleanup, 38);
   fsync(STDOUT_FILENO);
   /* Re-raise with original handler */
-  struct sigaction *old = (sig == SIGTERM) ? &__tty_old_sigterm : &__tty_old_sigint;
+  struct sigaction *old =
+      (sig == SIGTERM) ? &__tty_old_sigterm : &__tty_old_sigint;
   sigaction(sig, old, NULL);
   raise(sig);
 }
 
 int64_t __tty_install_cleanup(void) {
-  if (__tty_sig_installed) return 0;
+  if (__tty_sig_installed)
+    return 0;
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
   sa.sa_handler = __tty_sig_restore;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESETHAND;
-  sigaction(SIGINT,  &sa, &__tty_old_sigint);
+  sigaction(SIGINT, &sa, &__tty_old_sigint);
   sigaction(SIGTERM, &sa, &__tty_old_sigterm);
   __tty_sig_installed = 1;
   return 0;
@@ -1431,9 +1467,9 @@ int64_t __wait_process(int64_t pid) {
 }
 
 int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
-  intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
-  intptr_t rargv = (intptr_t)((argv & 1) ? (argv >> 1) : argv);
-  intptr_t renvp = (intptr_t)((envp & 1) ? (envp >> 1) : envp);
+  intptr_t rpath = (intptr_t)rt_untag_v(path);
+  intptr_t rargv = (intptr_t)rt_untag_v(argv);
+  intptr_t renvp = (intptr_t)rt_untag_v(envp);
 #ifdef _WIN32
   (void)rpath;
   (void)rargv;
@@ -1446,6 +1482,9 @@ int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
   char **ev = renvp ? ny_native_envp(renvp, &env_free) : environ;
   int64_t res =
       execve((const char *)rpath, (char *const *)av, (char *const *)ev);
+  if (res < 0) {
+    perror("execve");
+  }
   if (av_free)
     free(av);
   if (env_free)
@@ -1556,12 +1595,14 @@ static DWORD WINAPI __thread_trampoline(LPVOID p) {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       ret = rt_tag_v(f(rt_untag_v(arg)));
-    } else if (is_heap_ptr(fn) && *(int64_t *)((uintptr_t)fn - 8) == 105) {
-      int64_t code = *(int64_t *)fn;
-      int64_t env = *(int64_t *)(fn + 8);
-      ret = ((int64_t (*)(int64_t, int64_t))__mask_ptr(code))(env, arg);
+    } else if (is_heap_ptr(fn) &&
+               *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
+      int64_t base = rt_untag_v(fn);
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      ret = ((int64_t (*)(int64_t, int64_t))code)(env, arg);
     } else {
-      ret = ((int64_t (*)(int64_t))__mask_ptr(fn))(arg);
+      ret = ((int64_t (*)(int64_t))fn)(arg);
     }
   }
   if (st)
@@ -1714,12 +1755,14 @@ static void *__thread_trampoline(void *p) {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       res = rt_tag_v(f(rt_untag_v(arg)));
-    } else if (is_heap_ptr(fn) && *(int64_t *)((uintptr_t)fn - 8) == 105) {
-      int64_t code = *(int64_t *)fn;
-      int64_t env = *(int64_t *)(fn + 8);
-      res = ((int64_t (*)(int64_t, int64_t))__mask_ptr(code))(env, arg);
+    } else if (is_heap_ptr(fn) &&
+               *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
+      int64_t base = rt_untag_v(fn);
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      res = ((int64_t (*)(int64_t, int64_t))code)(env, arg);
     } else {
-      res = ((int64_t (*)(int64_t))__mask_ptr(fn))(arg);
+      res = ((int64_t (*)(int64_t))fn)(arg);
     }
   }
   if (ta->argv)
@@ -1879,3 +1922,5 @@ int64_t __arch_name(void) {
   cached = __rt_alloc_string(s);
   return cached;
 }
+
+int64_t __main(void) { return (getenv("NYTRIX_TEST_MODE") != NULL) ? 2 : 4; }

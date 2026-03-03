@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 
 ;; Comments parsing (Test)
 
@@ -58,7 +58,7 @@ fn test(){
 }
 
 ;; @#$%^&*()_+-=[]{}|;':",.<>?/
-;; 世界 🫠 ñ
+;; 言 🫪
 ;; very long comment very long comment very long comment very long comment very kinda usless
 
 print("✓ comments tests passed")

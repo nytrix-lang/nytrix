@@ -89,9 +89,7 @@ void repl_append_user_source(const char *src) {
   g_repl_user_source[g_repl_user_source_len] = '\0';
 }
 
-void repl_remove_def(const char *name) {
-  (void)name;
-}
+void repl_remove_def(const char *name) { (void)name; }
 
 char *repl_assignment_target(const char *src) {
   char *trimmed = ltrim((char *)src);

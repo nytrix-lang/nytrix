@@ -6,15 +6,8 @@ module std.core.set_mod (
 )
 use std.core *
 use std.core.error *
-use std.text *
-use std.text.io *
-
-fn _set_pow2(n){
-   "Internal: rounds `n` up to the next power-of-two."
-   mut v = 1
-   while(v < n){ v = v << 1 }
-   v
-}
+use std.str *
+use std.str.io *
 
 fn _set_str_eq(a, b){
    "Internal: byte-wise string equality for set keys."
@@ -54,7 +47,7 @@ fn _set_hash(x){
 fn _set_new(cap){
    "Internal: allocates a set storage block."
    if(cap < 8){ cap = 8 }
-   cap = _set_pow2(cap)
+   cap = _pow2(cap)
    def p = malloc(16 + cap * 24)
    if(!p){ panic("set malloc failed") }
    store64(p, 102, -8)
@@ -101,7 +94,7 @@ fn _set_insert(s, key){
       }
       if(st == 1){
          if(_set_key_eq(load64(s, off), key)){
-            return s
+         return s
          }
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
@@ -156,7 +149,7 @@ fn set_contains(s, key){
       if(st == 0){ return false }
       if(st == 1){
          if(_set_key_eq(load64(s, off), key)){
-            return true
+         return true
          }
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
@@ -167,69 +160,69 @@ fn set_contains(s, key){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.core.set_mod *
+   use std.core *
+   use std.core.set_mod *
 
-    mut s = set(8)
-    assert(is_set(s), "is_set(s)")
-    assert(!set_contains(s, "key1"), "empty set contains")
+   mut s = set(8)
+   assert(is_set(s), "is_set(s)")
+   assert(!set_contains(s, "key1"), "empty set contains")
 
-    s = set_add(s, "key1")
-    assert(set_contains(s, "key1"), "contains key1")
-    assert(!set_contains(s, "key2"), "not contains key2")
+   s = set_add(s, "key1")
+   assert(set_contains(s, "key1"), "contains key1")
+   assert(!set_contains(s, "key2"), "not contains key2")
 
-    s = set_add(s, "key2")
-    assert(set_contains(s, "key1"), "contains key1 (2)")
-    assert(set_contains(s, "key2"), "contains key2")
+   s = set_add(s, "key2")
+   assert(set_contains(s, "key1"), "contains key1 (2)")
+   assert(set_contains(s, "key2"), "contains key2")
 
-    mut s2 = set(8)
-    s2 = set_add(s2, 123)
-    assert(set_contains(s2, 123), "contains int key")
-    assert(!set_contains(s2, 124), "not contains int key")
+   mut s2 = set(8)
+   s2 = set_add(s2, 123)
+   assert(set_contains(s2, 123), "contains int key")
+   assert(!set_contains(s2, 124), "not contains int key")
 
-    mut s_col = set(8)
-    s_col = set_add(s_col, 0)
-    s_col = set_add(s_col, 8)
-    s_col = set_add(s_col, 16)
-    assert(set_contains(s_col, 0), "collision 0")
-    assert(set_contains(s_col, 8), "collision 8")
-    assert(set_contains(s_col, 16), "collision 16")
+   mut s_col = set(8)
+   s_col = set_add(s_col, 0)
+   s_col = set_add(s_col, 8)
+   s_col = set_add(s_col, 16)
+   assert(set_contains(s_col, 0), "collision 0")
+   assert(set_contains(s_col, 8), "collision 8")
+   assert(set_contains(s_col, 16), "collision 16")
 
-    mut s_stress = set(8)
-    mut i = 0
-    while(i < 1000){
-        s_stress = set_add(s_stress, i)
-        i += 1
-    }
-    i = 0
-    while(i < 1000){
-        assert(set_contains(s_stress, i), f"stress contains {i}")
-        i += 1
-    }
-    assert(!set_contains(s_stress, 1000), "stress not contains 1000")
+   mut s_stress = set(8)
+   mut i = 0
+   while(i < 1000){
+      s_stress = set_add(s_stress, i)
+      i += 1
+   }
+   i = 0
+   while(i < 1000){
+      assert(set_contains(s_stress, i), f"stress contains {i}")
+      i += 1
+   }
+   assert(!set_contains(s_stress, 1000), "stress not contains 1000")
 
-    ; Verify set reallocation
-    mut s_realloc = set(8)
-    def s_orig = s_realloc
-    s_realloc = set_add(s_realloc, "r1")
-    s_realloc = set_add(s_realloc, "r2")
-    s_realloc = set_add(s_realloc, "r3")
-    s_realloc = set_add(s_realloc, "r4")
-    s_realloc = set_add(s_realloc, "r5")
-    assert(s_realloc == s_orig, "set ptr stable before resize limit")
+   ; Verify set reallocation
+   mut s_realloc = set(8)
+   def s_orig = s_realloc
+   s_realloc = set_add(s_realloc, "r1")
+   s_realloc = set_add(s_realloc, "r2")
+   s_realloc = set_add(s_realloc, "r3")
+   s_realloc = set_add(s_realloc, "r4")
+   s_realloc = set_add(s_realloc, "r5")
+   assert(s_realloc == s_orig, "set ptr stable before resize limit")
 
-    s_realloc = set_add(s_realloc, "r6")
-    assert(s_realloc == s_orig, "set ptr stable for 6")
+   s_realloc = set_add(s_realloc, "r6")
+   assert(s_realloc == s_orig, "set ptr stable for 6")
 
-    s_realloc = set_add(s_realloc, "r7") ; This should trigger resize (count 6 * 10 = 60 >= 56)
-    assert(s_realloc != s_orig, "set ptr changed after resize")
-    assert(set_contains(s_realloc, "r1"), "contains r1 after resize")
-    assert(set_contains(s_realloc, "r7"), "contains r7 after resize")
+   s_realloc = set_add(s_realloc, "r7") ; This should trigger resize (count 6 * 10 = 60 >= 56)
+   assert(s_realloc != s_orig, "set ptr changed after resize")
+   assert(set_contains(s_realloc, "r1"), "contains r1 after resize")
+   assert(set_contains(s_realloc, "r7"), "contains r7 after resize")
 
-    ; Test that adding existing key does not change pointer
-    def s_curr = s_realloc
-    s_realloc = set_add(s_realloc, "r1")
-    assert(s_realloc == s_curr, "set ptr stable on existing key")
+   ; Test that adding existing key does not change pointer
+   def s_curr = s_realloc
+   s_realloc = set_add(s_realloc, "r1")
+   assert(s_realloc == s_curr, "set ptr stable on existing key")
 
-    print("✓ std.core.set_mod tests passed")
+   print("✓ std.core.set_mod tests passed")
 }

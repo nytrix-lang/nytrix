@@ -108,7 +108,7 @@ fn _pack_wave_s16_mono(kind, total_frames, step, rate, amp, loop_safe, duty){
       if(!loop_safe){
          if(i < fade){ env = i / (fade + 0.0) }
          elif(i >= total_frames - fade){
-            env = (total_frames - i) / (fade + 0.0)
+         env = (total_frames - i) / (fade + 0.0)
          }
       }
       mut val = _wave_sample(kind, phase, duty, step) * (amp + 0.0) * env

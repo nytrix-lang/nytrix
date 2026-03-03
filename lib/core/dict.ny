@@ -7,15 +7,8 @@ module std.core.dict_mod (
 )
 use std.core *
 use std.core.error *
-use std.text *
-use std.text.io *
-
-fn _dict_pow2(n){
-   "Internal: rounds `n` up to the next power-of-two."
-   mut v = 1
-   while(v < n){ v = v << 1 }
-   v
-}
+use std.str *
+use std.str.io *
 
 fn _dict_str_eq(a, b){
    "Internal: byte-wise string equality for dictionary keys."
@@ -32,7 +25,7 @@ fn _dict_str_eq(a, b){
 
 fn _dict_key_eq(a, b){
    "Internal: key equality with string fast-path."
-   if(is_str(a) && is_str(b)){ 
+   if(is_str(a) && is_str(b)){
       return _dict_str_eq(a, b)
    }
    return (a == b)
@@ -66,14 +59,14 @@ fn _dict_new(cap){
    mut p = __malloc(size)
    memset(p, 0, size)
    store8(p, 101, -8) ; tag
-   store64(p, 0, 0)   ; count (tagged 0)
+   store64(p, 0, 0) ; count (tagged 0)
    store64(p, cap, 8) ; cap
    p
 }
 
 fn dict(cap=8){
    "Creates a new empty dictionary."
-   _dict_new(_dict_pow2(cap))
+   _dict_new(_pow2(cap))
 }
 
 fn dict_len(d){
@@ -265,45 +258,45 @@ fn dict_values(d){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.core.dict_mod *
-    use std.core.test *
+   use std.core *
+   use std.core.dict_mod *
+   use std.core.test *
 
-    mut d = dict(4)
-    assert(dict_len(d) == 0, "dict_len empty")
-    assert(!dict_has(d, "a"), "dict_has missing")
+   mut d = dict(4)
+   assert(dict_len(d) == 0, "dict_len empty")
+   assert(!dict_has(d, "a"), "dict_has missing")
 
-    d = dict_set(d, "a", 1)
-    d = dict_set(d, "b", 2)
-    d = dict_set(d, "c", 3)
-    assert(dict_len(d) == 3, "dict_len after set")
-    assert(dict_has(d, "b"), "dict_has present")
-    assert(dict_get(d, "b", 0) == 2, "dict_get present")
-    assert(dict_get(d, "x", 77) == 77, "dict_get default")
+   d = dict_set(d, "a", 1)
+   d = dict_set(d, "b", 2)
+   d = dict_set(d, "c", 3)
+   assert(dict_len(d) == 3, "dict_len after set")
+   assert(dict_has(d, "b"), "dict_has present")
+   assert(dict_get(d, "b", 0) == 2, "dict_get present")
+   assert(dict_get(d, "x", 77) == 77, "dict_get default")
 
-    mut d2 = dict_clone(d)
-    d2 = dict_set(d2, "b", 22)
-    assert(dict_get(d, "b", 0) == 2, "dict_clone original unchanged")
-    assert(dict_get(d2, "b", 0) == 22, "dict_clone modified copy")
+   mut d2 = dict_clone(d)
+   d2 = dict_set(d2, "b", 22)
+   assert(dict_get(d, "b", 0) == 2, "dict_clone original unchanged")
+   assert(dict_get(d2, "b", 0) == 22, "dict_clone modified copy")
 
-    mut d3 = dict(4)
-    d3 = dict_set(d3, "b", 200)
-    d3 = dict_set(d3, "d", 4)
-    d = dict_merge(d, d3)
-    assert(dict_len(d) == 4, "dict_merge len")
-    assert(dict_get(d, "b", 0) == 200, "dict_merge overwrite")
-    assert(dict_get(d, "d", 0) == 4, "dict_merge new key")
+   mut d3 = dict(4)
+   d3 = dict_set(d3, "b", 200)
+   d3 = dict_set(d3, "d", 4)
+   d = dict_merge(d, d3)
+   assert(dict_len(d) == 4, "dict_merge len")
+   assert(dict_get(d, "b", 0) == 200, "dict_merge overwrite")
+   assert(dict_get(d, "d", 0) == 4, "dict_merge new key")
 
-    d = dict_del(d, "b")
-    assert(!dict_has(d, "b"), "dict_del removed")
-    assert(dict_len(d) == 3, "dict_del len")
+   d = dict_del(d, "b")
+   assert(!dict_has(d, "b"), "dict_del removed")
+   assert(dict_len(d) == 3, "dict_del len")
 
-    def ks = dict_keys(d)
-    def vs = dict_values(d)
-    def it = dict_items(d)
-    assert(len(ks) == 3, "dict_keys len")
-    assert(len(vs) == 3, "dict_values len")
-    assert(len(it) == 3, "dict_items len")
+   def ks = dict_keys(d)
+   def vs = dict_values(d)
+   def it = dict_items(d)
+   assert(len(ks) == 3, "dict_keys len")
+   assert(len(vs) == 3, "dict_values len")
+   assert(len(it) == 3, "dict_items len")
 
-    print("✓ std.core.dict tests passed")
+   print("✓ std.core.dict tests passed")
 }

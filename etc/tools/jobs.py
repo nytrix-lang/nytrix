@@ -65,14 +65,14 @@ def auto_threads(profile, logical, physical, kind):
         return max(1, min(physical, logical // 2 if logical >= 8 else logical))
 
     ratio = smt_factor(logical, physical)
-    
+
     if p == "smt":
         if kind == "test":
             if host_os() == "windows":
                 return max(1, min(6, max(1, logical // 4 if logical >= 8 else logical // 2)))
             return max(1, min(24, int(logical * 0.6)))
         return max(1, min(logical, int(logical * 0.85)))
-        
+
     if kind == "test":
         if host_os() == "windows":
             base = max(1, physical // 2 if logical >= 12 else physical)
@@ -85,12 +85,12 @@ def auto_threads(profile, logical, physical, kind):
         else:
             reserve = 1 if logical > 2 else 0
             jobs = logical - reserve
-        
+
         jobs = min(jobs, default_test_jobs_soft_cap(logical))
         if jobs < 2 and logical >= 4 and is_arm_riscv_machine():
             jobs = 2
         return max(1, min(logical, jobs))
-        
+
     if ratio >= 1.8:
         jobs = int(physical * 1.5)
     else:

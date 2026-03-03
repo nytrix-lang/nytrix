@@ -7,7 +7,7 @@ module std.ui.key (
 )
 
 use std.core *
-use std.text *
+use std.str *
 use std.ui.consts *
 
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
@@ -20,14 +20,14 @@ fn normalize_mod(mod){
 fn normalize_key(key){
    "Normalizes native key codes for stable comparisons across backends."
    if(key >= 97 && key <= 122){ return key - 32 }
-   if(key == 0xFF1B){ return KEY_ESCAPE }
-   if(key == 0xFF0D){ return 13 }
-   if(key == 0xFF08){ return 8 }
-   if(key == 0xFF09){ return 9 }
-   if(key == 0xFF51){ return 1000 }
-   if(key == 0xFF52){ return 1001 }
-   if(key == 0xFF53){ return 1002 }
-   if(key == 0xFF54){ return 1003 }
+   if(key == 0xFF0D || key == 257){ return 13 }
+   if(key == 0xFF08 || key == 259){ return 8 }
+   if(key == 0xFF09 || key == 258){ return 9 }
+   if(key == 0xFF1B || key == 256){ return 27 }
+   if(key == 0xFF51 || key == 263){ return 1000 } ; Left
+   if(key == 0xFF52 || key == 265){ return 1001 } ; Up
+   if(key == 0xFF53 || key == 262){ return 1002 } ; Right
+   if(key == 0xFF54 || key == 264){ return 1003 } ; Down
    key
 }
 

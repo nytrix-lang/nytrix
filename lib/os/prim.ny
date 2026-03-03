@@ -31,15 +31,15 @@ fn env(key){
          mut matches = 1
          mut j = 0
          while(j < key_len){
-            if(load8(env_entry, j) != load8(key, j)){
+         if(load8(env_entry, j) != load8(key, j)){
                matches = 0
                break
-            }
-            j += 1
+         }
+         j += 1
          }
          if(matches && load8(env_entry, key_len) == 61){
-            res = cstr_to_str(env_entry, key_len + 1)
-            break
+         res = cstr_to_str(env_entry, key_len + 1)
+         break
          }
          i += 1
       }
@@ -58,9 +58,9 @@ fn environ(){
          mut xs = list(8)
          mut i = 0
          while(i < n && load64(ep, i*8)){
-            def s_raw = load64(ep, i*8)
-            xs = append(xs, cstr_to_str(s_raw))
-            i += 1
+         def s_raw = load64(ep, i*8)
+         xs = append(xs, cstr_to_str(s_raw))
+         i += 1
          }
          xs
       }

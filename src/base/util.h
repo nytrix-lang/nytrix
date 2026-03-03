@@ -9,6 +9,7 @@
 
 char *ny_read_file(const char *path);
 int ny_write_file(const char *path, const char *content, size_t len);
+bool ny_write_if_changed(const char *path, const char *content, size_t len);
 void ny_write_text_file(const char *path, const char *contents);
 int ny_copy_file(const char *src, const char *dst);
 int ny_ensure_dir(const char *path);
@@ -42,10 +43,12 @@ static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   return ny_fnv1a64(&v, sizeof(v), seed ? seed : NY_FNV1A64_OFFSET_BASIS);
 }
 int ny_levenshtein(const char *s1, const char *s2);
+bool ny_log_should_emit(const char *fmt);
 
 const char *ny_src_root(void);
 char *ny_get_executable_dir(void);
 
 #endif
 
-void ny_print_snippet(const char *src, int line, int col, int len, const char *color);
+void ny_print_snippet(const char *src, int line, int col, int len,
+                      const char *color);

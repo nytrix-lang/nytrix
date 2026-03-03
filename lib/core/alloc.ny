@@ -289,108 +289,108 @@ fn ctx_zalloc(n, ctx=0){
 }
 
 if(comptime{__main()}){
-    use std.os.time *
-    use std.core.alloc *
-    use std.core *
+   use std.os.time *
+   use std.core.alloc *
+   use std.core *
 
-    mut __ctx_alloc_n = 0
+   mut __ctx_alloc_n = 0
 
-    fn __ctx_alloc_thunk(){
+   fn __ctx_alloc_thunk(){
        "Auto-generated docstring: __ctx_alloc_thunk."
        ctx_alloc(__ctx_alloc_n)
-    }
+   }
 
-    ; Bump allocator basics.
-    def state = bump_new(1024)
-    assert(is_list(state), "bump state is a list")
-    assert(bump_capacity(state) == 1024, "bump_capacity reports configured capacity")
-    assert(bump_used(state) == 0, "fresh bump allocator has zero used bytes")
-    assert(bump_available(state) == 1024, "fresh bump allocator exposes full availability")
-    def m0 = bump_mark(state)
-    assert(m0 == 0, "fresh bump mark is zero")
-    def p1 = bump_alloc(state, 10)
-    assert(p1 != 0, "first bump alloc ok")
-    store8(p1, 100)
-    mut p2 = bump_alloc(state, 20)
-    assert(p2 == p1 + 10, "bump alloc is sequential")
-    assert(bump_used(state) == 30, "bump_used tracks consumed bytes")
-    assert(bump_available(state) == 994, "bump_available tracks free bytes")
-    bump_reset(state)
-    mut p3 = bump_alloc(state, 5)
-    assert(p3 == p1, "bump reset works")
-    assert(bump_used(state) == 5, "bump_reset rewinds usage")
+   ; Bump allocator basics.
+   def state = bump_new(1024)
+   assert(is_list(state), "bump state is a list")
+   assert(bump_capacity(state) == 1024, "bump_capacity reports configured capacity")
+   assert(bump_used(state) == 0, "fresh bump allocator has zero used bytes")
+   assert(bump_available(state) == 1024, "fresh bump allocator exposes full availability")
+   def m0 = bump_mark(state)
+   assert(m0 == 0, "fresh bump mark is zero")
+   def p1 = bump_alloc(state, 10)
+   assert(p1 != 0, "first bump alloc ok")
+   store8(p1, 100)
+   mut p2 = bump_alloc(state, 20)
+   assert(p2 == p1 + 10, "bump alloc is sequential")
+   assert(bump_used(state) == 30, "bump_used tracks consumed bytes")
+   assert(bump_available(state) == 994, "bump_available tracks free bytes")
+   bump_reset(state)
+   mut p3 = bump_alloc(state, 5)
+   assert(p3 == p1, "bump reset works")
+   assert(bump_used(state) == 5, "bump_reset rewinds usage")
 
-    ; Bump allocator marks and aligned allocation.
-    def state_aligned = bump_new(64)
-    def a0 = bump_alloc(state_aligned, 3)
-    assert(a0 != 0, "unaligned pre-allocation should succeed")
-    def m1 = bump_mark(state_aligned)
-    def a1 = bump_alloc_aligned(state_aligned, 8, 16)
-    assert(a1 != 0 && (a1 % 16) == 0, "bump_alloc_aligned should honor requested alignment")
-    def a2 = bump_alloc(state_aligned, 4)
-    assert(a2 != 0, "post-aligned allocation should still work")
-    assert(bump_release(state_aligned, m1), "bump_release should accept valid marker")
-    def a3 = bump_alloc_aligned(state_aligned, 8, 16)
-    assert(a3 == a1, "bump_release should make aligned range reusable")
-    assert(!bump_release(state_aligned, 999), "bump_release should reject invalid marker")
+   ; Bump allocator marks and aligned allocation.
+   def state_aligned = bump_new(64)
+   def a0 = bump_alloc(state_aligned, 3)
+   assert(a0 != 0, "unaligned pre-allocation should succeed")
+   def m1 = bump_mark(state_aligned)
+   def a1 = bump_alloc_aligned(state_aligned, 8, 16)
+   assert(a1 != 0 && (a1 % 16) == 0, "bump_alloc_aligned should honor requested alignment")
+   def a2 = bump_alloc(state_aligned, 4)
+   assert(a2 != 0, "post-aligned allocation should still work")
+   assert(bump_release(state_aligned, m1), "bump_release should accept valid marker")
+   def a3 = bump_alloc_aligned(state_aligned, 8, 16)
+   assert(a3 == a1, "bump_release should make aligned range reusable")
+   assert(!bump_release(state_aligned, 999), "bump_release should reject invalid marker")
 
-    ; Bump overflow.
-    def state2 = bump_new(8)
-    assert(bump_alloc(state2, 10) == 0, "bump overflow returns 0")
+   ; Bump overflow.
+   def state2 = bump_new(8)
+   assert(bump_alloc(state2, 10) == 0, "bump overflow returns 0")
 
-    ; Heap-backed context.
-    def heap_ctx = new_context(heap_allocator())
-    def hp = ctx_alloc(24, heap_ctx)
-    assert(hp != 0, "ctx_alloc uses heap context")
-    store8(hp, 77)
-    assert(load8(hp) == 77, "heap context memory is writable")
-    def hp2 = ctx_realloc(hp, 32, heap_ctx)
-    assert(hp2 != 0, "ctx_realloc works for heap allocator")
-    ctx_free(hp2, heap_ctx)
+   ; Heap-backed context.
+   def heap_ctx = new_context(heap_allocator())
+   def hp = ctx_alloc(24, heap_ctx)
+   assert(hp != 0, "ctx_alloc uses heap context")
+   store8(hp, 77)
+   assert(load8(hp) == 77, "heap context memory is writable")
+   def hp2 = ctx_realloc(hp, 32, heap_ctx)
+   assert(hp2 != 0, "ctx_realloc works for heap allocator")
+   ctx_free(hp2, heap_ctx)
 
-    ; Bump-backed context.
-    def arena_ctx = new_context(bump_allocator(64))
-    def ap1 = ctx_alloc(8, arena_ctx)
-    def ap2 = ctx_alloc(8, arena_ctx)
-    assert(ap1 != 0 && ap2 == ap1 + 8, "ctx_alloc follows bump allocator state")
-    assert(ctx_realloc(ap1, 16, arena_ctx) == 0,
+   ; Bump-backed context.
+   def arena_ctx = new_context(bump_allocator(64))
+   def ap1 = ctx_alloc(8, arena_ctx)
+   def ap2 = ctx_alloc(8, arena_ctx)
+   assert(ap1 != 0 && ap2 == ap1 + 8, "ctx_alloc follows bump allocator state")
+   assert(ctx_realloc(ap1, 16, arena_ctx) == 0,
            "bump-backed realloc is unsupported and returns 0")
-    ctx_free(ap1, arena_ctx)
+   ctx_free(ap1, arena_ctx)
 
-    ; Reset bump state through allocator descriptor.
-    def arena_state = allocator_state(context_allocator(arena_ctx))
-    bump_reset(arena_state)
-    def ap3 = ctx_alloc(8, arena_ctx)
-    assert(ap3 == ap1, "allocator_state exposes bump state for reset")
+   ; Reset bump state through allocator descriptor.
+   def arena_state = allocator_state(context_allocator(arena_ctx))
+   bump_reset(arena_state)
+   def ap3 = ctx_alloc(8, arena_ctx)
+   assert(ap3 == ap1, "allocator_state exposes bump state for reset")
 
-    ; Default/global context switching.
-    def prev_ctx = context()
-    set_context(arena_ctx)
-    def gp1 = ctx_alloc(4)
-    def gp2 = ctx_alloc(4)
-    assert(gp2 == gp1 + 4, "global context routes implicit ctx_alloc")
-    set_context(prev_ctx)
+   ; Default/global context switching.
+   def prev_ctx = context()
+   set_context(arena_ctx)
+   def gp1 = ctx_alloc(4)
+   def gp2 = ctx_alloc(4)
+   assert(gp2 == gp1 + 4, "global context routes implicit ctx_alloc")
+   set_context(prev_ctx)
 
-    ; set_context_allocator updates existing context.
-    def swap_ctx = new_context()
-    set_context_allocator(bump_allocator(32), swap_ctx)
-    def sp1 = ctx_alloc(8, swap_ctx)
-    def sp2 = ctx_alloc(8, swap_ctx)
-    assert(sp2 == sp1 + 8, "set_context_allocator swaps allocator in-place")
+   ; set_context_allocator updates existing context.
+   def swap_ctx = new_context()
+   set_context_allocator(bump_allocator(32), swap_ctx)
+   def sp1 = ctx_alloc(8, swap_ctx)
+   def sp2 = ctx_alloc(8, swap_ctx)
+   assert(sp2 == sp1 + 8, "set_context_allocator swaps allocator in-place")
 
-    ; Scoped context switching.
-    __ctx_alloc_n = 5
-    def wp1 = with_context(arena_ctx, __ctx_alloc_thunk)
-    __ctx_alloc_n = 5
-    def wp2 = with_context(arena_ctx, __ctx_alloc_thunk)
-    assert(wp2 == wp1 + 5, "with_context temporarily switches allocator context")
-    assert(context() == prev_ctx, "with_context restores previous context")
+   ; Scoped context switching.
+   __ctx_alloc_n = 5
+   def wp1 = with_context(arena_ctx, __ctx_alloc_thunk)
+   __ctx_alloc_n = 5
+   def wp2 = with_context(arena_ctx, __ctx_alloc_thunk)
+   assert(wp2 == wp1 + 5, "with_context temporarily switches allocator context")
+   assert(context() == prev_ctx, "with_context restores previous context")
 
-    ; Zeroed allocation.
-    def zp = ctx_zalloc(8, heap_ctx)
-    assert(zp != 0, "ctx_zalloc allocates memory")
-    assert(load8(zp, 0) == 0 && load8(zp, 7) == 0, "ctx_zalloc zero-fills memory")
-    ctx_free(zp, heap_ctx)
+   ; Zeroed allocation.
+   def zp = ctx_zalloc(8, heap_ctx)
+   assert(zp != 0, "ctx_zalloc allocates memory")
+   assert(load8(zp, 0) == 0 && load8(zp, 7) == 0, "ctx_zalloc zero-fills memory")
+   ctx_free(zp, heap_ctx)
 
-    print("✓ std.core.alloc tests passed")
+   print("✓ std.core.alloc tests passed")
 }

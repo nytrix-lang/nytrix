@@ -5,7 +5,7 @@ module std.os.path (
    sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext
 )
 use std.core *
-use std.text *
+use std.str *
 use std.os.platform as platform
 use std.util.common as common
 
@@ -143,8 +143,8 @@ fn normalize(p){
          prefix = _substr(s, 0, 2)
          rest = _substr(s, 2, n)
          if(str_len(rest) > 0 && _is_sep(load8(rest, 0))){
-            abs = true
-            rest = _substr(rest, 1, str_len(rest))
+         abs = true
+         rest = _substr(rest, 1, str_len(rest))
          }
       } elif(n > 0 && _is_sep(load8(s, 0))){
          abs = true
@@ -168,12 +168,12 @@ fn normalize(p){
       }
       if(p_comp == ".."){
          if(len(parts) > 0){
-            def last = get(parts, len(parts) - 1, "")
-            if(last != ".."){
+         def last = get(parts, len(parts) - 1, "")
+         if(last != ".."){
                pop(parts)
                i += 1
                continue
-            }
+         }
          }
          if(!abs){ parts = append(parts, p_comp) }
          i += 1
@@ -285,48 +285,48 @@ fn splitext(p){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.core.error *
-    use std.text *
-    use std.os.platform as platform
+   use std.core *
+   use std.core.error *
+   use std.str *
+   use std.os.platform as platform
 
-    def s = sep()
-    assert(str_len(s) == 1, "sep is one byte")
+   def s = sep()
+   assert(str_len(s) == 1, "sep is one byte")
 
-    def is_win = (s == "\\")
+   def is_win = (s == "\\")
 
-    if(is_win){
+   if(is_win){
        assert(is_abs("C:\\tmp"), "windows is_abs drive")
        assert(is_abs("\\\\server\\share"), "windows is_abs unc")
-    } else {
+   } else {
        assert(is_abs("/tmp"), "unix is_abs absolute")
        assert(!is_abs("tmp"), "unix is_abs relative")
-    }
+   }
 
-    assert((join("a", "b") == "a" + s + "b"), "join simple")
-    assert((normalize("a/./b/../c") == "a" + s + "c"), "normalize relative")
+   assert((join("a", "b") == "a" + s + "b"), "join simple")
+   assert((normalize("a/./b/../c") == "a" + s + "c"), "normalize relative")
 
-    assert((basename("a" + s + "b" + s + "c.txt") == "c.txt"), "basename file")
-    assert((dirname("a" + s + "b" + s + "c.txt") == "a" + s + "b"), "dirname nested")
+   assert((basename("a" + s + "b" + s + "c.txt") == "c.txt"), "basename file")
+   assert((dirname("a" + s + "b" + s + "c.txt") == "a" + s + "b"), "dirname nested")
 
-    if(!is_win){
+   if(!is_win){
        assert((dirname("/tmp") == "/"), "dirname absolute child")
        assert((dirname("/") == "/"), "dirname root")
        assert((basename("/") == "/"), "basename root")
-    }
+   }
 
-    assert((extname("file.txt") == ".txt"), "extname simple")
-    assert((extname("archive.tar.gz") == ".gz"), "extname last extension")
-    assert((extname(".bashrc") == ""), "extname hidden no extension")
-    assert((extname("noext") == ""), "extname missing")
+   assert((extname("file.txt") == ".txt"), "extname simple")
+   assert((extname("archive.tar.gz") == ".gz"), "extname last extension")
+   assert((extname(".bashrc") == ""), "extname hidden no extension")
+   assert((extname("noext") == ""), "extname missing")
 
-    def sp = splitext("archive.tar.gz")
-    assert((get(sp, 0) == "archive.tar"), "splitext root")
-    assert((get(sp, 1) == ".gz"), "splitext ext")
+   def sp = splitext("archive.tar.gz")
+   assert((get(sp, 0) == "archive.tar"), "splitext root")
+   assert((get(sp, 1) == ".gz"), "splitext ext")
 
-    def sp2 = splitext("noext")
-    assert((get(sp2, 0) == "noext"), "splitext noext root")
-    assert((get(sp2, 1) == ""), "splitext noext ext")
+   def sp2 = splitext("noext")
+   assert((get(sp2, 0) == "noext"), "splitext noext root")
+   assert((get(sp2, 1) == ""), "splitext noext ext")
 
-    print("✓ std.os.path tests passed")
+   print("✓ std.os.path tests passed")
 }

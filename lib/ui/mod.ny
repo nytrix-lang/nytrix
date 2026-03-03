@@ -2,7 +2,7 @@
 ;; Aggregated std.ui entrypoint.
 
 module std.ui (
-   window, event, consts, gfx, shader_mod, diag,
+   window, event, consts, gfx, shader_mod, diag, terminal, vterm,
    shader_transpile, probe, probe_text, print_probe
 )
 
@@ -12,6 +12,8 @@ use std.ui.consts as consts
 use std.ui.gfx as gfx
 use std.ui.gfx.shader as shader_mod
 use std.ui.diag as diag
+use std.ui.terminal as terminal
+use std.ui.vterm as vterm
 
 fn shader_transpile(combined_src){
    "Proxy to graphics shader transpiler."

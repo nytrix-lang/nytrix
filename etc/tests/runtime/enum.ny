@@ -1,17 +1,17 @@
 use std.core *
-use std.text.io *
+use std.str.io *
 
 ;; Basic Enums
 enum Color {
-    Red,
-    Green,
-    Blue
+   Red,
+   Green,
+   Blue
 }
 
 enum Status {
-    Ok = 0,
-    Error = 1,
-    Pending = 2
+   Ok = 0,
+   Error = 1,
+   Pending = 2
 }
 
 print("Testing basic enums...")
@@ -34,12 +34,12 @@ print("✓ basic enum tests passed")
 
 ;; Enum Matching
 fn describe_color(c){
-    match c {
-        Color.Red -> "it is red"
-        Color.Green -> "it is green"
-        Color.Blue -> "it is blue"
-        _ -> "unknown color"
-    }
+   match c {
+      Color.Red -> "it is red"
+      Color.Green -> "it is green"
+      Color.Blue -> "it is blue"
+      _ -> "unknown color"
+   }
 }
 
 print("Testing enum matching...")
@@ -51,13 +51,13 @@ print("✓ enum match tests passed")
 
 ;; Module Exported Enums
 module MyEnums (
-    FileMode
+   FileMode
 )
 
 enum FileMode {
-    Read = 0,
-    Write = 1,
-    Append = 2
+   Read = 0,
+   Write = 1,
+   Append = 2
 }
 
 use MyEnums (FileMode)
@@ -69,13 +69,13 @@ print("✓ module enum tests passed")
 
 ;; Cross-Module Enum Usage
 module M1 (
-    CrossColor
+   CrossColor
 )
 
 enum CrossColor {
-    CRed,
-    CGreen,
-    CBlue
+   CRed,
+   CGreen,
+   CBlue
 }
 
 print("Testing cross-module enums...")

@@ -2,6 +2,7 @@
 #include "code/llvm.h"
 #include "code/priv.h"
 #include "priv.h"
+#include "rt/shared.h"
 #ifndef _WIN32
 #include <alloca.h>
 #else
@@ -16,8 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <sys/types.h>
+#include <time.h>
 
 static bool ny_effect_analysis_requested(void) {
   const char *forbid = getenv("NYTRIX_EFFECT_FORBID");
@@ -65,26 +66,37 @@ static void ny_cg_init_options(codegen_t *cg) {
     NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
 }
 
-static void ny_debug_apply_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
-  if (!cg || !fn || !cg->debug_symbols)
+void ny_apply_base_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
+  if (!cg || !fn)
     return;
-  LLVMAttributeRef fp =
-      LLVMCreateStringAttribute(cg->ctx, "frame-pointer", 13, "all", 3);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, fp);
-  LLVMAttributeRef dtc =
-      LLVMCreateStringAttribute(cg->ctx, "disable-tail-calls", 18, "true", 4);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, dtc);
-  LLVMAttributeRef nfpe = LLVMCreateStringAttribute(
-      cg->ctx, "no-frame-pointer-elim", 21, "true", 4);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, nfpe);
-  LLVMAttributeRef nfpenl = LLVMCreateStringAttribute(
-      cg->ctx, "no-frame-pointer-elim-non-leaf", 30, "true", 4);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, nfpenl);
-  unsigned uw_kind = LLVMGetEnumAttributeKindForName("uwtable", 7);
-  if (uw_kind != 0) {
-    LLVMAttributeRef uw = LLVMCreateEnumAttribute(cg->ctx, uw_kind, 0);
-    LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, uw);
+
+  const char *triple = LLVMGetTarget(cg->module);
+  bool is_apple =
+      triple && (strstr(triple, "apple") || strstr(triple, "darwin") ||
+                 strstr(triple, "macos"));
+  bool is_arm64 =
+      triple && (strstr(triple, "arm64") || strstr(triple, "aarch64"));
+  bool is_apple_arm64 = is_apple && is_arm64;
+
+  if (cg->debug_symbols || is_apple) {
+    // For Apple targets, we must provide frame pointers for the fortified
+    // setjmp/longjmp stack checks to work correctly.
+    add_fn_string_attr(cg, fn, "frame-pointer", "all");
+
+    if (is_apple_arm64) {
+      add_fn_string_attr(cg, fn, "no-frame-pointer-elim", "true");
+      add_fn_string_attr(cg, fn, "no-frame-pointer-elim-non-leaf", "true");
+      // Disable red-zone for JIT stability.
+      add_fn_string_attr(cg, fn, "no-red-zone", "true");
+    }
+
+    // Use Sync UWTable (1) for longjmp compatibility on many platforms.
+    add_fn_enum_attr(cg, fn, "uwtable", 1);
   }
+}
+
+static void ny_debug_apply_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
+  ny_apply_base_fn_attrs(cg, fn);
 }
 
 LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type) {
@@ -161,6 +173,18 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   vec_reserve(&cg->fun_sigs, 16384);
   vec_reserve(&cg->global_vars, 4096);
   vec_reserve(&cg->interns, 4096);
+  vec_init(&cg->aliases);
+  vec_init(&cg->import_aliases);
+  vec_init(&cg->user_import_aliases);
+  vec_init(&cg->use_modules);
+  vec_init(&cg->user_use_modules);
+  vec_init(&cg->link_allowed_modules);
+  vec_init(&cg->labels);
+  vec_init(&cg->extra_arenas);
+  vec_init(&cg->extra_progs);
+  vec_init(&cg->enums);
+  vec_init(&cg->layouts);
+  vec_init(&cg->links);
   ny_cg_init_types(cg);
   ny_cg_init_options(cg);
   add_builtins(cg);
@@ -400,7 +424,9 @@ static bool ny_link_allowed_for_module(codegen_t *cg, const char *mod) {
     return true;
   if (!mod || !*mod)
     return true;
-  if (strncmp(mod, "std.", 4) != 0 && strncmp(mod, "lib.", 4) != 0)
+  if (strncmp(mod, "std.", 4) == 0)
+    return true;
+  if (strncmp(mod, "lib.", 4) != 0)
     return true;
   if (cg->link_allowed_modules.len == 0 && !cg->current_module_name)
     return true;
@@ -517,7 +543,8 @@ void codegen_prepare(codegen_t *cg) {
     process_use_imports(cg, s);
   }
 
-  /* Re-scan for #link after imports are resolved (module bodies may be loaded now). */
+  /* Re-scan for #link after imports are resolved (module bodies may be loaded
+   * now). */
   ny_build_link_allowed_modules(cg);
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
@@ -525,7 +552,8 @@ void codegen_prepare(codegen_t *cg) {
   }
   for (size_t p = 0; p < cg->extra_progs.len; p++) {
     program_t *prog = cg->extra_progs.data[p];
-    if (!prog) continue;
+    if (!prog)
+      continue;
     for (size_t i = 0; i < prog->body.len; i++) {
       stmt_t *s = prog->body.data[i];
       process_links(cg, s, NULL);
@@ -535,6 +563,33 @@ void codegen_prepare(codegen_t *cg) {
   infer_pure_functions(cg);
 
   cg->is_preparing = false;
+}
+
+void codegen_repopulate_interns(codegen_t *cg) {
+  if (!cg || !cg->module)
+    return;
+
+  // Scan all globals to find .str.runtime.X and .str.data.X
+  for (LLVMValueRef g = LLVMGetFirstGlobal(cg->module); g;
+       g = LLVMGetNextGlobal(g)) {
+    const char *name = LLVMGetValueName(g);
+    if (!name)
+      continue;
+
+    if (strncmp(name, ".str.runtime.", 13) == 0) {
+      const char *suffix = name + 13;
+      char data_name[256];
+      snprintf(data_name, sizeof(data_name), ".str.data.%s", suffix);
+      LLVMValueRef dg = LLVMGetNamedGlobal(cg->module, data_name);
+      if (dg) {
+        string_intern in = {0};
+        in.gv = dg;
+        in.val = g;
+        in.module = cg->module;
+        vec_push(&cg->interns, in);
+      }
+    }
+  }
 }
 
 void codegen_emit(codegen_t *cg) {
@@ -550,7 +605,8 @@ void codegen_emit(codegen_t *cg) {
     emit_top_functions(cg, s, gsc, gd, NULL);
   }
   if (verbose_enabled >= 1)
-    fprintf(stderr, "[*] Codegen: emit top:       %.4fs\n", (double)(clock() - t_emit_top) / CLOCKS_PER_SEC);
+    fprintf(stderr, "[*] Codegen: emit top:       %.4fs\n",
+            (double)(clock() - t_emit_top) / CLOCKS_PER_SEC);
 }
 
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
@@ -580,15 +636,23 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   size_t d = 0;
   LLVMValueRef std_init = LLVMGetNamedFunction(cg->module, "__std_init");
   if (std_init) {
-    LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(std_init), std_init, NULL, 0, "");
+    LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(std_init), std_init,
+                   NULL, 0, "");
   }
 
+  size_t stmt_count = 0;
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok))
       continue;
     if (s->kind != NY_S_FUNC) {
+      if (stmt_count > 0 && stmt_count % 100 == 0) {
+        LLVMBasicBlockRef next_bb = ny_llvm_append_block(fn, "top_chunk");
+        LLVMBuildBr(cg->builder, next_bb);
+        LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+      }
       gen_stmt(cg, sc, &d, s, 0, false);
+      stmt_count++;
     }
   }
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
@@ -625,9 +689,15 @@ void codegen_emit_string_init(codegen_t *cg) {
     LLVMTypeRef rt_ty = LLVMTypeOf(runtime_ptr_global);
     LLVMValueRef global_i8_ptr =
         LLVMBuildBitCast(cg->builder, str_array_global, i8_ptr_ty, "");
-    LLVMValueRef runtime_base =
-        LLVMBuildCall2(cg->builder, asm_func_ty, identity_asm,
-                       (LLVMValueRef[]){global_i8_ptr}, 1, "");
+
+    LLVMValueRef runtime_base;
+    if (cg->comptime) {
+      runtime_base = global_i8_ptr;
+    } else {
+      runtime_base = LLVMBuildCall2(cg->builder, asm_func_ty, identity_asm,
+                                    (LLVMValueRef[]){global_i8_ptr}, 1, "");
+    }
+
     LLVMValueRef indices[] = {LLVMConstInt(cg->type_i64, 64, 0)};
     LLVMValueRef str_data_ptr =
         LLVMBuildInBoundsGEP2(cg->builder, LLVMInt8TypeInContext(cg->ctx),

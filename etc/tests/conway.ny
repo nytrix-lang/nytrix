@@ -6,11 +6,10 @@ use std.math.random *
 use std.os.args *
 use std.os.time *
 use std.os *
-use std.text *
-use std.text.bytes *
-use std.text.term *
+use std.str *
+use std.str.bytes *
+use std.str.term *
 
-;; Constants
 def CELL_ALIVE  = 1
 def CELL_DEAD   = 0
 def COLOR_ALIVE = 2
@@ -20,7 +19,6 @@ def CHAR_DEAD   = " "
 def LEN_ALIVE   = str_len(CHAR_ALIVE)
 def LEN_DEAD    = 1
 
-;; State Init
 def tSize = get_terminal_size()
 mut W = get(tSize, 0, 0)
 mut H = get(tSize, 1, 0)
@@ -74,7 +72,7 @@ fn set_pair(x, y, ch, lch, c){
 fn seed_grid(g, n){
    mut i = 0
    while(i < n){
-      def r = randint(0, 4) ;; Lower density: ~20%
+      def r = randint(0, 4)
       if(r == 1){ __store8_idx(g, i, CELL_ALIVE) } else { __store8_idx(g, i, CELL_DEAD) }
       i += 1
    }
@@ -89,9 +87,9 @@ fn draw_full(g){
          def idx = yw + x
          def sx = x * 2
          if(__load8_idx(g, idx)){
-            set_pair(sx, y, CHAR_ALIVE, LEN_ALIVE, COLOR_ALIVE)
+         set_pair(sx, y, CHAR_ALIVE, LEN_ALIVE, COLOR_ALIVE)
          } else {
-            set_pair(sx, y, CHAR_DEAD, LEN_DEAD, COLOR_DEAD)
+         set_pair(sx, y, CHAR_DEAD, LEN_DEAD, COLOR_DEAD)
          }
          x += 1
       }
@@ -112,26 +110,26 @@ fn step(cur, nxt){
          def xp = x + 1
 
          if(y > 0){
-            def ym = (y - 1) * LW
-            if(x > 0){ n += __load8_idx(cur, ym + xm) }
-            n += __load8_idx(cur, ym + x)
-            if(x < LW - 1){ n += __load8_idx(cur, ym + xp) }
+         def ym = (y - 1) * LW
+         if(x > 0){ n += __load8_idx(cur, ym + xm) }
+         n += __load8_idx(cur, ym + x)
+         if(x < LW - 1){ n += __load8_idx(cur, ym + xp) }
          }
          if(x > 0){ n += __load8_idx(cur, yw + xm) }
          if(x < LW - 1){ n += __load8_idx(cur, yw + xp) }
          if(y < H - 1){
-            def yp = (y + 1) * LW
-            if(x > 0){ n += __load8_idx(cur, yp + xm) }
-            n += __load8_idx(cur, yp + x)
-            if(x < LW - 1){ n += __load8_idx(cur, yp + xp) }
+         def yp = (y + 1) * LW
+         if(x > 0){ n += __load8_idx(cur, yp + xm) }
+         n += __load8_idx(cur, yp + x)
+         if(x < LW - 1){ n += __load8_idx(cur, yp + xp) }
          }
 
          def curv = __load8_idx(cur, idx)
          mut live = CELL_DEAD
          if(curv == CELL_ALIVE){
-            if(n == 2 || n == 3){ live = CELL_ALIVE }
+         if(n == 2 || n == 3){ live = CELL_ALIVE }
          } else {
-            if(n == 3){ live = CELL_ALIVE }
+         if(n == 3){ live = CELL_ALIVE }
          }
 
          __store8_idx(nxt, idx, live)
@@ -143,7 +141,6 @@ fn step(cur, nxt){
    alive
 }
 
-;; Main Line
 seed(ticks())
 seed_grid(G, TOTAL)
 

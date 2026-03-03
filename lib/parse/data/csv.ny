@@ -7,7 +7,7 @@ module std.enc.csv (
 )
 
 use std.core *
-use std.text as str
+use std.str as str
 
 fn decode(data, sep=","){
    "Decodes a CSV string into a list of lists."
@@ -23,36 +23,36 @@ fn decode(data, sep=","){
       def c = load8(data, i)
       if(in_quote){
          if(c == 34){ ; '"'
-            if(i + 1 < n && load8(data, i + 1) == 34){
+         if(i + 1 < n && load8(data, i + 1) == 34){
                cell = cell + "\""
                i += 1
-            } else {
-               in_quote = false
-            }
          } else {
-            cell = cell + chr(c)
+               in_quote = false
+         }
+         } else {
+         cell = cell + chr(c)
          }
       } else {
          if(c == 34){
-            in_quote = true
+         in_quote = true
          } elif(c == s_code){
-            row = append(row, cell)
-            cell = ""
+         row = append(row, cell)
+         cell = ""
          } elif(c == 10){ ; '\n'
-            row = append(row, cell)
-            rows = append(rows, row)
-            row = []
-            cell = ""
+         row = append(row, cell)
+         rows = append(rows, row)
+         row = []
+         cell = ""
          } elif(c == 13){ ; '\r'
-            if(i + 1 < n && load8(data, i + 1) == 10){
+         if(i + 1 < n && load8(data, i + 1) == 10){
                i += 1
-            }
-            row = append(row, cell)
-            rows = append(rows, row)
-            row = []
-            cell = ""
+         }
+         row = append(row, cell)
+         rows = append(rows, row)
+         row = []
+         cell = ""
          } else {
-            cell = cell + chr(c)
+         cell = cell + chr(c)
          }
       }
       i += 1
@@ -77,15 +77,15 @@ fn encode(rows, sep=","){
          mut cell = to_str(get(row, j))
          ; Escape if needed
          if(str.str_contains(cell, sep) || str.str_contains(cell, "\"") || str.str_contains(cell, "\n") || str.str_contains(cell, "\r")){
-            mut escaped = "\""
-            mut k = 0
-            while(k < len(cell)){
+         mut escaped = "\""
+         mut k = 0
+         while(k < len(cell)){
                def c = load8(cell, k)
                if(c == 34){ escaped = escaped + "\"\"" }
                else { escaped = escaped + chr(c) }
                k += 1
-            }
-            cell = escaped + "\""
+         }
+         cell = escaped + "\""
          }
          out = out + cell
          if(j + 1 < c_len){ out = out + sep }

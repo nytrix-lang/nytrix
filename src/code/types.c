@@ -319,8 +319,7 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
       if (b && b->type_name)
         return b->type_name;
     }
-    binding *gb =
-        lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
+    binding *gb = lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
     if (gb && gb->type_name)
       return gb->type_name;
     fun_sig *sig = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);

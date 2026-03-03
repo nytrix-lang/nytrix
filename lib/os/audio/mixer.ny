@@ -117,7 +117,7 @@ fn _mix_one_s16(acc, s_ptr, s_channels, total_frames, cursor_start, period_frame
    while(f < period_frames){
       if(idx >= total_frames){
          if(looping){
-            while(idx >= total_frames){ idx = idx - total_frames }
+         while(idx >= total_frames){ idx = idx - total_frames }
          } else { break }
       }
       def ai = f * 2
@@ -149,7 +149,7 @@ fn _mix_one_f32(acc, s_ptr, s_channels, total_frames, cursor_start, period_frame
    while(f < period_frames){
       if(idx >= total_frames){
          if(looping){
-            while(idx >= total_frames){ idx = idx - total_frames }
+         while(idx >= total_frames){ idx = idx - total_frames }
          } else { break }
       }
       def ai = f * 2
@@ -178,7 +178,7 @@ fn _mix_one_generic(acc, s_ptr, s_channels, s_fmt, s_bits, total_frames, cursor_
    while(f < period_frames){
       if(current >= total_f){
          if(looping){
-            while(current >= total_f){ current = current - total_f }
+         while(current >= total_f){ current = current - total_f }
          } else { break }
       }
       def idx = __flt_to_int(current)
@@ -321,7 +321,7 @@ fn clamp_s16(v){
    v
 }
 
-fn load16_s(ptr, off) {
+fn load16_s(ptr, off){
    "Implements `load16_s`."
    def v = load16(ptr, off)
    if(v > 32767){ return v - 65536 }

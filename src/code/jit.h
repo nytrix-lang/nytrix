@@ -12,6 +12,8 @@ void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
 
 void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
                           codegen_t *cg);
+void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options,
+                         LLVMModuleRef mod);
 int64_t __set_args(int64_t argc, int64_t argv, int64_t envp);
 
 #endif

@@ -36,6 +36,6 @@ static inline uintptr_t ny_cast_f2a(void (*f)(void)) {
   return c.addr;
 }
 
-#define NY_PTR_CAST(type, val) (((ny_ptr_cast_t){.obj = (void*)(val)}).type)
+#define NY_PTR_CAST(type, val) (((ny_ptr_cast_t){.obj = (void *)(val)}).type)
 
 #endif

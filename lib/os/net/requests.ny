@@ -102,45 +102,45 @@ fn requests_parse_response(raw){
 }
 
 if(comptime{__main()}){
-    use std.net.requests *
-    use std.core *
-    use std.core.dict_mod *
-    use std.core.error *
-    use std.text.io *
+   use std.net.requests *
+   use std.core *
+   use std.core.dict_mod *
+   use std.core.error *
+   use std.str.io *
 
-    print("Testing net.requests...")
+   print("Testing net.requests...")
 
-    def url = "http://example.com:8080/foo/bar"
-    def parts = requests_parse_url(url)
-    assert((get(parts, 0) == "example.com"), "host")
-    assert(get(parts, 1) == 8080, "port")
-    assert((get(parts, 2) == "/foo/bar"), "path")
+   def url = "http://example.com:8080/foo/bar"
+   def parts = requests_parse_url(url)
+   assert((get(parts, 0) == "example.com"), "host")
+   assert(get(parts, 1) == 8080, "port")
+   assert((get(parts, 2) == "/foo/bar"), "path")
 
-    def url2 = "example.org"
-    def parts2 = requests_parse_url(url2)
-    assert((get(parts2, 0) == "example.org"), "host no scheme")
-    assert(get(parts2, 1) == 80, "default port")
-    assert((get(parts2, 2) == "/"), "default path")
+   def url2 = "example.org"
+   def parts2 = requests_parse_url(url2)
+   assert((get(parts2, 0) == "example.org"), "host no scheme")
+   assert(get(parts2, 1) == 80, "default port")
+   assert((get(parts2, 2) == "/"), "default path")
 
-    def ex = requests_parse_url_ex("https://user:pw@example.org/a/b?x=1#f")
-    assert(dict_get(ex, "ok", false), "url_ex ok")
-    assert((dict_get(ex, "scheme", "") == "https"), "url_ex scheme")
-    assert((dict_get(ex, "userinfo", "") == "user:pw"), "url_ex userinfo")
-    assert((dict_get(ex, "host", "") == "example.org"), "url_ex host")
-    assert(dict_get(ex, "port", 0) == 443, "url_ex default https port")
-    assert((dict_get(ex, "target", "") == "/a/b?x=1"), "url_ex target")
+   def ex = requests_parse_url_ex("https://user:pw@example.org/a/b?x=1#f")
+   assert(dict_get(ex, "ok", false), "url_ex ok")
+   assert((dict_get(ex, "scheme", "") == "https"), "url_ex scheme")
+   assert((dict_get(ex, "userinfo", "") == "user:pw"), "url_ex userinfo")
+   assert((dict_get(ex, "host", "") == "example.org"), "url_ex host")
+   assert(dict_get(ex, "port", 0) == 443, "url_ex default https port")
+   assert((dict_get(ex, "target", "") == "/a/b?x=1"), "url_ex target")
 
-    def q = "a=1&b=hello&c"
-    def d = requests_parse_query(q)
-    assert((dict_get(d, "a") == "1"), "query a")
-    assert((dict_get(d, "b") == "hello"), "query b")
-    assert(dict_get(d, "c") == 1, "query c flag")
+   def q = "a=1&b=hello&c"
+   def d = requests_parse_query(q)
+   assert((dict_get(d, "a") == "1"), "query a")
+   assert((dict_get(d, "b") == "hello"), "query b")
+   assert(dict_get(d, "c") == 1, "query c flag")
 
-    def raw = "HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nbad"
-    def parsed = requests_parse_response(raw)
-    assert(dict_get(parsed, "status", 0) == 404, "parse response status")
-    assert((dict_get(parsed, "reason", "") == "Not Found"), "parse response reason")
-    assert((dict_get(parsed, "body", "") == "bad"), "parse response body")
+   def raw = "HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nbad"
+   def parsed = requests_parse_response(raw)
+   assert(dict_get(parsed, "status", 0) == 404, "parse response status")
+   assert((dict_get(parsed, "reason", "") == "Not Found"), "parse response reason")
+   assert((dict_get(parsed, "body", "") == "bad"), "parse response body")
 
-    print("✓ std.net.requests tests passed")
+   print("✓ std.net.requests tests passed")
 }

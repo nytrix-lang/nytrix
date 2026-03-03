@@ -48,8 +48,10 @@ int64_t __str_concat(int64_t a, int64_t b) {
   if (!sa || !sb)
     return 0;
 
-  if (la > (int)sizeof(buf_a) && sa == buf_a) la = sizeof(buf_a);
-  if (lb > (int)sizeof(buf_b) && sb == buf_b) lb = sizeof(buf_b);
+  if (la > (int)sizeof(buf_a) && sa == buf_a)
+    la = sizeof(buf_a);
+  if (lb > (int)sizeof(buf_b) && sb == buf_b)
+    lb = sizeof(buf_b);
 
   int64_t res = __malloc((int64_t)((la + lb + 1) << 1 | 1));
   if (!res)
@@ -84,6 +86,7 @@ int64_t __to_str(int64_t v) {
   const char *s;
   int len;
   rt_val_to_str_info(v, buf, sizeof(buf), &s, &len);
-  if (len > (int)sizeof(buf) && s == buf) len = sizeof(buf);
+  if (len > (int)sizeof(buf) && s == buf)
+    len = sizeof(buf);
   return __rt_alloc_string_len(s, len);
 }

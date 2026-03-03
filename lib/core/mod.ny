@@ -12,18 +12,53 @@ module std.core (
    slice, set_idx, append, pop, list_clear, extend, sort, to_str, typeof,
    dict, dict_len, dict_get, dict_has, dict_set, dict_del, dict_clone, dict_merge,
    dict_items, dict_keys, dict_values,
-   set, set_add, set_contains,
+   set, set_add, set_contains, contains, hash, repr,
    add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot,
-   eq, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno,
+   eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno,
    globals, set_globals,
    OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM,
-   is_truthy, is_falsy, not_none, panic_if, print
+   is_truthy, is_falsy, not_none, panic_if, assert, assert_eq, print, eprint,
+   _pow2
 )
 use std.core.primitives *
 use std.core.reflect as core_ref
 use std.core.dict_mod *
 use std.core.set_mod *
 use std.core.mem as core_mem
+use std.core.error as error
+
+fn assert(cond, msg="assert failed"){
+   if(!cond){ panic(msg) }
+}
+
+fn assert_eq(a, b, msg="assert eq failed"){
+   if(!eq(a, b)){ panic(msg) }
+}
+
+fn eq(a, b){
+   "Checks structural equality between any two values."
+   core_ref.eq(a, b)
+}
+
+fn ne(a, b){
+   "Checks structural inequality."
+   !core_ref.eq(a, b)
+}
+
+fn contains(container, item){
+   "Checks if a collection (list, dict, set, string) contains an item."
+   core_ref.contains(container, item)
+}
+
+fn hash(x){
+   "Computes structural hash of a value."
+   core_ref.hash(x)
+}
+
+fn repr(x){
+   "Returns the structural string representation of a value (quotes for strings, etc)."
+   core_ref.repr(x)
+}
 
 fn is_truthy(x){
   "Returns **true** if value `x` is considered 'truthy'.
@@ -72,6 +107,27 @@ fn print(...args){
      i += 1
   }
   _print_raw("\n")
+  0
+}
+
+fn _eprint_raw(s){
+   "Internal: writes raw string content to stderr."
+   if(!is_str(s)){ return 0 }
+   def n = load64(s, -16)
+   if(n > 0){ __sys_write_off(2, s, n, 0) }
+   0
+}
+
+fn eprint(...args){
+  "Prints one or more values to stderr, separated by spaces and ending with a newline."
+  mut i = 0
+  def n = len(args)
+  while(i < n){
+     _eprint_raw(to_str(get(args, i)))
+     if(i < n - 1){ _eprint_raw(" ") }
+     i += 1
+  }
+  _eprint_raw("\n")
   0
 }
 
@@ -317,8 +373,8 @@ fn sort(lst){
      def key = load64(lst, 16 + i * 8)
      mut j = i - 1
      while(j >= 0 && load64(lst, 16 + j * 8) > key){
-        store64(lst, load64(lst, 16 + j * 8), 16 + (j + 1) * 8)
-        j -= 1
+      store64(lst, load64(lst, 16 + j * 8), 16 + (j + 1) * 8)
+      j -= 1
      }
      store64(lst, key, 16 + (j + 1) * 8)
      i += 1
@@ -358,3 +414,10 @@ def IS_WINDOWS = __eq(OS, "windows")
 def IS_X86_64  = __eq(ARCH, "x86_64")
 def IS_AARCH64 = __eq(ARCH, "aarch64") || __eq(ARCH, "arm64")
 def IS_ARM     = __eq(ARCH, "arm")
+
+fn _pow2(n){
+   "Returns the next power-of-two >= n."
+   mut v = 1
+   while(v < n){ v = v << 1 }
+   v
+}

@@ -32,16 +32,16 @@ fn resize(img, new_w, new_h){
          def y_weight = py - float(y_l)
          mut c = 0
          while(c < 4){
-            def a = float(load8(pixels, (y_l * w + x_l) * 4 + c))
-            def b = float(load8(pixels, (y_l * w + x_h) * 4 + c))
-            def d = float(load8(pixels, (y_h * w + x_l) * 4 + c))
-            def e = float(load8(pixels, (y_h * w + x_h) * 4 + c))
-            def val = a * (1 - x_weight) * (1 - y_weight) +
+         def a = float(load8(pixels, (y_l * w + x_l) * 4 + c))
+         def b = float(load8(pixels, (y_l * w + x_h) * 4 + c))
+         def d = float(load8(pixels, (y_h * w + x_l) * 4 + c))
+         def e = float(load8(pixels, (y_h * w + x_h) * 4 + c))
+         def val = a * (1 - x_weight) * (1 - y_weight) +
                       b * x_weight * (1 - y_weight) +
                       d * y_weight * (1 - x_weight) +
                       e * x_weight * y_weight
-            store8(new_pixels, int(val), (y * new_w + x) * 4 + c)
-            c += 1
+         store8(new_pixels, int(val), (y * new_w + x) * 4 + c)
+         c += 1
          }
          x += 1
       }
