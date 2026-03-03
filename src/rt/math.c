@@ -148,17 +148,29 @@ FLT_CMP(eq, ==)
 
 int64_t __add(int64_t a, int64_t b) {
   if ((a & 1) && (b & 1)) return (int64_t)((uint64_t)a + (uint64_t)b - 1);
+  // Handle ptr+int BEFORE is_v_flt to avoid reading guard pages at ptr-8
+  // for non-heap pointers (e.g., Vulkan-mapped memory). Use is_v_flt_mapped
+  // (uncached mincore) so stale page-cache entries can't cause SIGSEGV.
+  if (is_any_ptr(a) && (b & 1)) {
+    if (is_v_flt_mapped(a)) return __flt_add(a, b);
+    return a + (b >> 1);
+  }
+  if ((a & 1) && is_any_ptr(b)) {
+    if (is_v_flt_mapped(b)) return __flt_add(a, b);
+    return b + (a >> 1);
+  }
   if (is_v_flt(a) || is_v_flt(b)) return __flt_add(a, b);
   if (is_v_str(a) && is_v_str(b)) return __str_concat(a, b);
-  if (is_any_ptr(a) && (b & 1)) return a + (b >> 1);
-  if ((a & 1) && is_any_ptr(b)) return b + (a >> 1);
   return 1;
 }
 
 int64_t __sub(int64_t a, int64_t b) {
   if ((a & 1) && (b & 1)) return (int64_t)((uint64_t)a - (uint64_t)b + 1);
+  if (is_any_ptr(a) && (b & 1)) {
+    if (is_v_flt_mapped(a)) return __flt_sub(a, b);
+    return a - (b >> 1);
+  }
   if (is_v_flt(a) || is_v_flt(b)) return __flt_sub(a, b);
-  if (is_any_ptr(a) && (b & 1)) return a - (b >> 1);
   return 1;
 }
 

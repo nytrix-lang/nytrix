@@ -12,11 +12,13 @@ module std.ui.window (
    WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE,
    WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE,
    WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN,
+   CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_LOCKED,
    KEY_NULL, KEY_ESCAPE, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META,
    create_window, open_window, window_id, window_title, window_set_title, window_position, window_size,
    window_move, window_resize, window_should_close, window_set_should_close, window_close,
    window_exit_key, window_set_exit_key, window_key_down, window_modifiers, window_mod_down,
    window_mouse_position, window_mouse_button_down, window_mouse_button_pressed,
+   window_set_cursor_mode, window_get_cursor_pos, window_set_cursor_pos,
    window_match_chord, window_bind, window_key_pressed,
    window_push_event, window_check_event, event_type, event_window, event_window_id, event_data,
    window_on_key, poll_events, windows_open, window_last, window_swap_buffers, window_make_current,
@@ -671,4 +673,35 @@ fn window_last() {
    def w = get(_windows, len(_windows) - 1, 0)
    if(_is_window(w)){ return w }
    0
+}
+
+def CURSOR_NORMAL = 0x00034001
+def CURSOR_HIDDEN = 0x00034002
+def CURSOR_LOCKED = 0x00034003
+
+fn window_set_cursor_mode(win, mode){
+   "Sets the cursor mode for the window (Normal, Hidden, or Locked)."
+   if(!_is_window(win)){ return false }
+   def handle = dict_get(win, "handle", 0)
+   if(handle){
+      ;; GLFW_CURSOR (0x00033001)
+      ui_backend.set_input_mode(handle, 0x00033001, mode)
+   }
+   true
+}
+
+fn window_get_cursor_pos(win){
+   "Returns the absolute cursor position [x, y] from the native backend."
+   if(!_is_window(win)){ return [0.0, 0.0] }
+   def handle = dict_get(win, "handle", 0)
+   if(handle){ return ui_backend.get_cursor_pos(handle) }
+   [0.0, 0.0]
+}
+
+fn window_set_cursor_pos(win, x, y){
+   "Sets the cursor position in the window."
+   if(!_is_window(win)){ return false }
+   def handle = dict_get(win, "handle", 0)
+   if(handle){ ui_backend.set_cursor_pos(handle, x, y) }
+   true
 }

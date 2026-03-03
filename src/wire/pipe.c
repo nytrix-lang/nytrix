@@ -730,7 +730,7 @@ static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
   if (opt->emit_only)
     return false;
   if (opt->run_jit)
-    return false;
+    return false; // Disable for JIT to avoid linking issues
   return true;
 }
 
@@ -1283,32 +1283,26 @@ static void run_dead_strip_if_needed(const ny_options *opt,
   bool is_jit = opt->run_jit && (opt->mode != NY_MODE_REPL);
   if (!is_aot && !is_jit)
     return;
-  bool dce_enabled;
+
+  bool dce_enabled = false;
   if (is_aot) {
-    dce_enabled =
-        (opt->opt_dce == 1) ||
-        (opt->opt_dce == -1 && ny_env_enabled_default_on("NYTRIX_AOT_DCE"));
+    dce_enabled = (opt->opt_dce != 0);
   } else {
-    dce_enabled =
-        (opt->opt_dce == 1) ||
-        (opt->opt_dce == -1 && ny_env_enabled_default_on("NYTRIX_JIT_DCE"));
+    // For JIT, only enable if explicitly requested via -O1+ or env var.
+    // Default (opt_dce == -1) is OFF for JIT.
+    dce_enabled = (opt->opt_dce == 1) || (ny_env_enabled("NYTRIX_JIT_DCE"));
   }
-  if (opt->opt_dce == 0)
-    dce_enabled = false;
+  
   if (!dce_enabled)
     return;
-  bool internalize_enabled;
+
+  bool internalize_enabled = false;
   if (is_aot) {
-    internalize_enabled = (opt->opt_internalize == 1) ||
-                          (opt->opt_internalize == -1 &&
-                           ny_env_enabled_default_on("NYTRIX_AOT_INTERNALIZE"));
+    internalize_enabled = (opt->opt_internalize != 0);
   } else {
-    internalize_enabled = (opt->opt_internalize == 1) ||
-                          (opt->opt_internalize == -1 &&
-                           ny_env_enabled_default_on("NYTRIX_JIT_INTERNALIZE"));
+    internalize_enabled = (opt->opt_internalize == 1) || (ny_env_enabled("NYTRIX_JIT_INTERNALIZE"));
   }
-  if (opt->opt_internalize == 0)
-    internalize_enabled = false;
+
   if (internalize_enabled) {
     size_t internalized_fns = 0;
     size_t internalized_globals = 0;
@@ -2057,9 +2051,7 @@ skip_compilation:
     }
   }
     register_jit_symbols(ee, jmod, &cg);
-    if (loaded_from_cache) {
-      ny_jit_map_unresolved_symbols(ee, jmod, NULL);
-    }
+    ny_jit_map_unresolved_symbols(ee, jmod, NULL);
     maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
     clock_t t_exec = clock();
     uint64_t saddr = LLVMGetFunctionAddress(ee, "__script_top");

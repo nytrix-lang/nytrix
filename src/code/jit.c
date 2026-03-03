@@ -122,8 +122,11 @@ void *ny_jit_load_library(const char *path) {
   return NULL;
 #else
   void *h = dlopen(path, RTLD_GLOBAL | RTLD_LAZY);
-  if (h)
+  if (h) {
+    if (verbose_enabled >= 2)
+      fprintf(stderr, "JIT: loaded library '%s' (handle=%p)\n", path, h);
     return h;
+  }
   const bool has_dot = strchr(path, '.') != NULL;
   const bool has_sep = strchr(path, '/') != NULL;
 #ifdef __APPLE__
@@ -131,29 +134,39 @@ void *ny_jit_load_library(const char *path) {
     char buf[256];
     snprintf(buf, sizeof(buf), "lib%s.dylib", path);
     h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
-    if (h)
+    if (h) {
+      if (verbose_enabled >= 2)
+        fprintf(stderr, "JIT: loaded library '%s' as '%s'\n", path, buf);
       return h;
+    }
     snprintf(buf, sizeof(buf), "lib%s.0.dylib", path);
     h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
-    if (h)
-      return h;
+    if (h) return h;
   }
 #else
   if (!has_dot && !has_sep) {
     char buf[256];
     snprintf(buf, sizeof(buf), "lib%s.so", path);
     h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
-    if (h)
+    if (h) {
+      if (verbose_enabled >= 2)
+        fprintf(stderr, "JIT: loaded library '%s' as '%s'\n", path, buf);
       return h;
-    const char *vers[] = {"0", "1", "2", "3", "8", "12", "14", "18"};
+    }
+    const char *vers[] = {"3", "2", "1", "0", "8", "12", "14", "18"};
     for (size_t i = 0; i < sizeof(vers) / sizeof(vers[0]); i++) {
       snprintf(buf, sizeof(buf), "lib%s.so.%s", path, vers[i]);
       h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
-      if (h)
+      if (h) {
+        if (verbose_enabled >= 2)
+          fprintf(stderr, "JIT: loaded library '%s' as '%s'\n", path, buf);
         return h;
+      }
     }
   }
 #endif
+  if (verbose_enabled >= 2)
+    fprintf(stderr, "JIT: failed to load library '%s': %s\n", path, dlerror());
   return NULL;
 #endif
 }
@@ -223,14 +236,20 @@ void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
   for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
        f = LLVMGetNextFunction(f)) {
     const char *name = LLVMGetValueName(f);
-    if (!name || !*name)
+    if (!name || !*name || strncmp(name, "llvm.", 5) == 0)
       continue;
     if (LLVMCountBasicBlocks(f) > 0 &&
         (!entry_name || strcmp(name, entry_name) != 0))
       continue;
     void *addr = resolve_symbol_with_fallback(name);
-    if (addr)
+    if (addr) {
+      if (verbose_enabled >= 3)
+        fprintf(stderr, "JIT: mapped symbol '%s' to %p\n", name, addr);
       LLVMAddGlobalMapping(ee, f, addr);
+    } else {
+      if (verbose_enabled >= 2)
+        fprintf(stderr, "JIT: unresolved symbol '%s'\n", name);
+    }
   }
 }
 
