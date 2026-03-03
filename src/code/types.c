@@ -311,14 +311,19 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
     return NULL;
   case NY_E_IDENT: {
     if (scopes) {
-      binding *b = scope_lookup(scopes, depth, e->as.ident.name);
+      size_t name_len = (size_t)e->tok.len;
+      if (name_len == 0)
+        name_len = strlen(e->as.ident.name);
+      binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
       if (b && b->type_name)
         return b->type_name;
     }
-    binding *gb = lookup_global(cg, e->as.ident.name);
+    binding *gb =
+        lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
     if (gb && gb->type_name)
       return gb->type_name;
-    fun_sig *sig = lookup_fun(cg, e->as.ident.name, 0);
+    fun_sig *sig = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);
     if (sig && sig->return_type)
       return sig->return_type;
     return NULL;
@@ -326,7 +331,8 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
   case NY_E_CALL:
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
       const char *n = e->as.call.callee->as.ident.name;
-      fun_sig *sig = lookup_fun(cg, n, 0);
+      uint64_t h = e->as.call.callee->as.ident.hash;
+      fun_sig *sig = lookup_fun(cg, n, h);
       if (sig && sig->return_type)
         return sig->return_type;
     }

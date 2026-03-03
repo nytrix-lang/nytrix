@@ -26,6 +26,7 @@ typedef struct {
   const char *emit_ir_path;
   const char *emit_bc_path;
   const char *emit_asm_path;
+  const char *emit_module;
   bool ir_include_std;
   int verbose;
   bool run_jit;
@@ -67,6 +68,7 @@ typedef struct {
   int opt_internalize;
   int opt_loops;
   int opt_autotune;
+  bool opt_level_explicit;
   bool repl_plain;
   const char *gpu_mode;
   const char *gpu_backend;

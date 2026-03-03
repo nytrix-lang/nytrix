@@ -9,12 +9,6 @@ use std.core.dict_mod *
 use std.os *
 use std.os.audio.backend as backend
 
-fn _yn(v){
-   "Internal helper for `yn`."
-   if(v){ return "yes" }
-   "no"
-}
-
 fn probe(){
    "Returns a dictionary describing detected sound backend capabilities."
    mut d = dict(8)

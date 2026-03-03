@@ -12,24 +12,15 @@ use std.os *
 use std.os.sys *
 use std.os.path *
 use std.os.ffi *
-
-fn _is_windows(){
-   "Internal helper."
-   __os_name() == "windows"
-}
-
-fn _is_macos(){
-   "Internal helper."
-   __os_name() == "macos"
-}
+use std.os.platform as platform
 
 ;; Socket Constants
 def AF_INET     = 2
 def SOCK_STREAM = 1
 def SOCK_DGRAM  = 2
 
-def SOL_SOCKET = (_is_windows() || _is_macos()) ? 65535 : 1
-def SO_REUSEADDR = (_is_windows() || _is_macos()) ? 4 : 2
+def SOL_SOCKET = (platform.is_windows() || platform.is_macos()) ? 65535 : 1
+def SO_REUSEADDR = (platform.is_windows() || platform.is_macos()) ? 4 : 2
 
 fn htons(x){
    "Convert a 16-bit integer from host byte order to network byte order (big-endian)."

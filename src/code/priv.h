@@ -4,6 +4,19 @@
 #include "code/code.h"
 #include <llvm-c/Core.h>
 
+static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return "";
+  return (cg && cg->llvm_value_names) ? name : "";
+}
+#define NY_LLVM_NAME(cg, name) ny_llvm_name((cg), (name))
+
+static inline LLVMBasicBlockRef ny_llvm_append_block(LLVMValueRef fn,
+                                                     const char *name) {
+  return LLVMAppendBasicBlockInContext(LLVMGetModuleContext(LLVMGetGlobalParent(fn)),
+                                       fn, name);
+}
+
 void add_builtins(codegen_t *cg);
 bool builtin_allowed_comptime(const char *name);
 
@@ -12,10 +25,13 @@ fun_sig *lookup_fun_exact(codegen_t *cg, const char *name);
 fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc);
 const char *resolve_import_alias(codegen_t *cg, const char *name);
 binding *lookup_global(codegen_t *cg, const char *name);
+binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash);
 binding *lookup_global_exact(codegen_t *cg, const char *name);
 fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
                           uint64_t hash);
 binding *scope_lookup(scope *scopes, size_t depth, const char *name);
+binding *scope_lookup_hash(scope *scopes, size_t depth, const char *name,
+                           size_t name_len, uint64_t hash);
 void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
                 LLVMValueRef v, stmt_t *stmt, bool is_mut,
                 const char *type_name, bool is_slot);

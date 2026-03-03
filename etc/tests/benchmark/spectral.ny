@@ -5,12 +5,28 @@ use std.core.list *
 use std.core.dict *
 use std.text.io *
 use std.text *
+use std.os *
 use std.os.time *
 
 ;; Spectral Norm (Benchmark)
 
-def N = 56
-def ITERS = 2
+fn _bench_scale_percent(){
+   def raw = env("NYTRIX_BENCH_SCALE")
+   if(is_str(raw) && str_len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+
+fn _bench_scale(val, minv){
+   mut out = (val * _bench_scale_percent()) / 100
+   if(out < minv){ out = minv }
+   out
+}
+
+def N = _bench_scale(56, 16)
+def ITERS = _bench_scale(2, 1)
 
 mut u = list(N)
 mut v = list(N)

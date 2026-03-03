@@ -95,10 +95,16 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
 }
 
 bool ny_is_stdlib_tok(token_t tok) {
-  if (!tok.filename || tok.filename[0] != '<')
+  if (!tok.filename)
     return false;
-  return strcmp(tok.filename, "<stdlib>") == 0 ||
-         strcmp(tok.filename, "<repl_std>") == 0;
+  if (tok.filename[0] == '<') {
+    return strcmp(tok.filename, "<stdlib>") == 0 ||
+           strcmp(tok.filename, "<repl_std>") == 0;
+  }
+  if (strncmp(tok.filename, "lib/", 4) == 0 ||
+      strncmp(tok.filename, "lib\\", 4) == 0)
+    return true;
+  return false;
 }
 
 bool ny_strict_error_enabled(codegen_t *cg, token_t tok) {

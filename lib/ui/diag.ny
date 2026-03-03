@@ -9,12 +9,7 @@ use std.core *
 use std.os *
 use std.ui.window as window
 use std.ui.gfx.vulkan *
-
-fn _yn(v){
-   "Internal helper to convert a boolean to 'yes' or 'no'."
-   if(v){ return "yes" }
-   "no"
-}
+use std.util.common as common
 
 fn probe(){
    "Returns a dictionary describing detected backend and graphics capabilities."
@@ -31,8 +26,8 @@ fn probe_text(){
    def d = probe()
    "os=" + to_str(dict_get(d, "os", "?")) +
    " window=" + to_str(dict_get(d, "window_backend", "ny")) +
-   " available=" + _yn(dict_get(d, "window_available", false)) +
-   " vk=" + _yn(dict_get(d, "vulkan", false))
+   " available=" + common.yn(dict_get(d, "window_available", false)) +
+   " vk=" + common.yn(dict_get(d, "vulkan", false))
 }
 
 fn print_probe(){

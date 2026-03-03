@@ -287,7 +287,7 @@ static expr_t *parse_primary(parser_t *p) {
                    "did you mean '0' or 'nil'?");
     }
     expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
-    id->as.ident.name = arena_strndup(p->arena, tok.lexeme, tok.len);
+    id->as.ident.name = parser_intern_hash(p, tok.lexeme, tok.len, tok.hash);
     id->as.ident.hash = tok.hash;
     return id;
   }

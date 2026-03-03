@@ -25,6 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 #include <time.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -32,6 +35,12 @@
 #include <unistd.h>
 #else
 #include <io.h>
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define NY_UNUSED_FUNC __attribute__((unused))
+#else
+#define NY_UNUSED_FUNC
 #endif
 
 typedef struct ny_ir_stats_t {
@@ -52,13 +61,24 @@ typedef enum ny_opt_profile_kind_t {
   NY_OPT_PROFILE_CUSTOM,
 } ny_opt_profile_kind_t;
 
-static bool ny_env_enabled_strict(const char *name) {
-  const char *v = getenv(name);
-  if (!v || !*v)
-    return false;
-  return (strcmp(v, "1") == 0 || strcmp(v, "true") == 0 ||
-          strcmp(v, "True") == 0 || strcmp(v, "yes") == 0 ||
-          strcmp(v, "on") == 0 || strcmp(v, "y") == 0 || strcmp(v, "Y") == 0);
+static void ny_ensure_dir_recursive_local(const char *path) {
+  if (!path || !*path)
+    return;
+  char tmp[1024];
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  size_t len = strlen(tmp);
+  if (len == 0)
+    return;
+  if (tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  for (char *p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      ny_ensure_dir(tmp);
+      *p = '/';
+    }
+  }
+  ny_ensure_dir(tmp);
 }
 
 static bool ny_valid_native_artifact(const char *path) {
@@ -89,7 +109,8 @@ static bool ny_valid_native_artifact(const char *path) {
 #endif
 }
 
-static void ny_collect_ir_stats(LLVMModuleRef module, ny_ir_stats_t *out) {
+static NY_UNUSED_FUNC void ny_collect_ir_stats(LLVMModuleRef module,
+                                               ny_ir_stats_t *out) {
   if (!out) {
     return;
   }
@@ -207,8 +228,8 @@ ny_opt_profile_kind_from_name(const char *profile_name) {
   return NY_OPT_PROFILE_CUSTOM;
 }
 
-static const char *ny_opt_profile_name(ny_opt_profile_kind_t kind,
-                                       const char *custom_name) {
+static NY_UNUSED_FUNC const char *ny_opt_profile_name(
+    ny_opt_profile_kind_t kind, const char *custom_name) {
   switch (kind) {
   case NY_OPT_PROFILE_SPEED:
     return "speed";
@@ -243,8 +264,8 @@ static int ny_env_int(const char *name, int fallback) {
   return (int)n;
 }
 
-static int ny_guided_inline_threshold(ny_opt_profile_kind_t profile_kind,
-                                      int eff_opt_level) {
+static NY_UNUSED_FUNC int ny_guided_inline_threshold(
+    ny_opt_profile_kind_t profile_kind, int eff_opt_level) {
   int explicit_thr = ny_env_int("NYTRIX_INLINE_THRESHOLD", -2);
   if (explicit_thr >= -1)
     return explicit_thr;
@@ -617,6 +638,318 @@ static void append_use(char ***uses, size_t *len, size_t *cap,
   (*uses)[(*len)++] = ny_strdup(name);
 }
 
+typedef struct {
+  char **names;
+  size_t len;
+  size_t cap;
+} ny_module_list;
+
+typedef struct {
+  char *name;
+  char *bc_path;
+#ifndef _WIN32
+  pid_t pid;
+#endif
+  int exit_code;
+} ny_module_job;
+
+static void ny_module_list_add(ny_module_list *list, const char *name) {
+  if (!list || !name || !*name)
+    return;
+  for (size_t i = 0; i < list->len; i++) {
+    if (strcmp(list->names[i], name) == 0)
+      return;
+  }
+  if (list->len == list->cap) {
+    size_t nc = list->cap ? list->cap * 2 : 8;
+    char **nn = realloc(list->names, nc * sizeof(char *));
+    if (!nn)
+      return;
+    list->names = nn;
+    list->cap = nc;
+  }
+  list->names[list->len++] = ny_strdup(name);
+}
+
+static NY_UNUSED_FUNC void ny_collect_top_modules(const program_t *prog,
+                                                  ny_module_list *out) {
+  if (!prog || !out)
+    return;
+  for (size_t i = 0; i < prog->body.len; i++) {
+    stmt_t *s = prog->body.data[i];
+    if (s && s->kind == NY_S_MODULE && s->as.module.name) {
+      ny_module_list_add(out, s->as.module.name);
+    }
+  }
+}
+
+static NY_UNUSED_FUNC void ny_free_module_list(ny_module_list *list) {
+  if (!list)
+    return;
+  for (size_t i = 0; i < list->len; i++)
+    free(list->names[i]);
+  free(list->names);
+  list->names = NULL;
+  list->len = list->cap = 0;
+}
+
+static int ny_parallel_default_jobs(void) {
+#ifndef _WIN32
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  if (ncpu > 0 && ncpu < 1024)
+    return (int)ncpu;
+#endif
+  return 4;
+}
+
+static NY_UNUSED_FUNC int ny_parallel_module_jobs(const ny_options *opt,
+                                                  size_t total) {
+  if (!opt)
+    return 1;
+  if (opt->thread_count > 0)
+    return opt->thread_count;
+  int jobs = ny_parallel_default_jobs();
+  if (jobs < 1)
+    jobs = 1;
+  if ((size_t)jobs > total)
+    jobs = (int)total;
+  if (jobs < 1)
+    jobs = 1;
+  return jobs;
+}
+
+static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
+  if (!opt || !opt->parallel_mode)
+    return false;
+  if (strcmp(opt->parallel_mode, "modules") != 0)
+    return false;
+  if (getenv("NYTRIX_PARALLEL_DISABLE"))
+    return false;
+  if (!opt->input_file)
+    return false;
+  if (opt->emit_only)
+    return false;
+  if (opt->run_jit)
+    return false;
+  return true;
+}
+
+#ifndef _WIN32
+static void ny_module_job_free(ny_module_job *job) {
+  if (!job)
+    return;
+  free(job->name);
+  free(job->bc_path);
+  job->name = NULL;
+  job->bc_path = NULL;
+}
+
+static char *ny_sanitize_modname(const char *name) {
+  if (!name)
+    return ny_strdup("mod");
+  size_t n = strlen(name);
+  char *out = malloc(n + 1);
+  if (!out)
+    return NULL;
+  for (size_t i = 0; i < n; i++) {
+    char c = name[i];
+    out[i] = (c == '.') ? '_' : c;
+  }
+  out[n] = '\0';
+  return out;
+}
+
+static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
+                                const char *tmp_dir, ny_module_job *job) {
+  if (!opt || !module_name || !tmp_dir || !job)
+    return false;
+  char *san = ny_sanitize_modname(module_name);
+  if (!san)
+    return false;
+  static unsigned long long ny_mod_seq = 0;
+  char bc_path[1024];
+  unsigned long long seq = ++ny_mod_seq;
+  snprintf(bc_path, sizeof(bc_path), "%s/ny_mod_%s_%ld_%llu.bc", tmp_dir, san,
+           (long)getpid(), (unsigned long long)seq);
+  free(san);
+  char emit_bc_arg[1100];
+  char emit_mod_arg[1100];
+  snprintf(emit_bc_arg, sizeof(emit_bc_arg), "--emit-bc=%s", bc_path);
+  snprintf(emit_mod_arg, sizeof(emit_mod_arg), "--emit-module=%s",
+           module_name);
+
+  char std_path_arg[1100];
+  const char *std_path = NULL;
+  if (opt->std_path) {
+    snprintf(std_path_arg, sizeof(std_path_arg), "--std-path=%s", opt->std_path);
+    std_path = std_path_arg;
+  }
+
+  char opt_arg[16];
+  const char *argv[20];
+  int idx = 0;
+  argv[idx++] = opt->argv0 ? opt->argv0 : "ny";
+  if (opt->opt_level > 0) {
+    snprintf(opt_arg, sizeof(opt_arg), "-O%d", opt->opt_level);
+    argv[idx++] = opt_arg;
+  } else {
+    argv[idx++] = "-O0";
+  }
+  argv[idx++] = "-emit-only";
+  argv[idx++] = emit_bc_arg;
+  argv[idx++] = emit_mod_arg;
+  argv[idx++] = "--parallel=off";
+  if (opt->opt_pipeline && *opt->opt_pipeline) {
+    argv[idx++] = "-passes";
+    argv[idx++] = opt->opt_pipeline;
+  }
+  if (opt->no_std)
+    argv[idx++] = "--no-std";
+  if (std_path)
+    argv[idx++] = std_path;
+  argv[idx++] = opt->input_file;
+  argv[idx++] = NULL;
+
+  pid_t pid = fork();
+  if (pid < 0)
+    return false;
+  if (pid == 0) {
+    setenv("NYTRIX_PARALLEL_DISABLE", "1", 1);
+    setenv("NYTRIX_WORKER", "1", 1);
+    if (opt->opt_level > 0 || (opt->opt_pipeline && *opt->opt_pipeline))
+      setenv("NYTRIX_WORKER_OPT", "1", 1);
+    execvp(argv[0], (char *const *)argv);
+    _exit(1);
+  }
+  job->name = ny_strdup(module_name);
+  job->bc_path = ny_strdup(bc_path);
+  job->pid = pid;
+  job->exit_code = -1;
+  return true;
+}
+
+static NY_UNUSED_FUNC bool ny_wait_module_jobs(ny_module_job *jobs,
+                                               size_t job_count) {
+  bool ok = true;
+  for (size_t i = 0; i < job_count; i++) {
+    int status = 0;
+    if (waitpid(jobs[i].pid, &status, 0) < 0) {
+      ok = false;
+      jobs[i].exit_code = 1;
+      continue;
+    }
+    if (WIFEXITED(status)) {
+      jobs[i].exit_code = WEXITSTATUS(status);
+      if (jobs[i].exit_code != 0)
+        ok = false;
+    } else {
+      jobs[i].exit_code = 1;
+      ok = false;
+    }
+  }
+  return ok;
+}
+#endif
+
+static bool ny_cache_path_is_ir(const char *cache_path) {
+  if (!cache_path)
+    return false;
+  const char *ext = strrchr(cache_path, '.');
+  if (!ext)
+    return false;
+  return strcmp(ext, ".ll") == 0 || strcmp(ext, ".ir") == 0 ||
+         strcmp(ext, ".llvm") == 0;
+}
+
+static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
+                                 const char *cache_path) {
+  if (!ctx || !main_mod || !cache_path)
+    return false;
+  LLVMMemoryBufferRef buf = NULL;
+  char *msg = NULL;
+  if (LLVMCreateMemoryBufferWithContentsOfFile(cache_path, &buf, &msg) != 0) {
+    if (msg)
+      LLVMDisposeMessage(msg);
+    return false;
+  }
+  LLVMModuleRef mod = NULL;
+  bool parsed = false;
+  bool buf_owned_by_module = false;
+  if (ny_cache_path_is_ir(cache_path)) {
+    parsed = (LLVMParseIRInContext(ctx, buf, &mod, &msg) == 0);
+    buf_owned_by_module = parsed;
+  } else {
+    parsed = (LLVMParseBitcodeInContext2(ctx, buf, &mod) == 0);
+  }
+  if (!parsed && msg) {
+    LLVMDisposeMessage(msg);
+    msg = NULL;
+  }
+  if (!parsed || !buf_owned_by_module) {
+    LLVMDisposeMemoryBuffer(buf);
+  }
+  if (!parsed) {
+    return false;
+  }
+  if (LLVMLinkModules2(main_mod, mod) != 0) {
+    LLVMDisposeModule(mod);
+    return false;
+  }
+  return true;
+}
+
+static bool ny_verify_bitcode(LLVMContextRef ctx, const char *bc_path) {
+  if (!ctx || !bc_path)
+    return false;
+  LLVMMemoryBufferRef buf = NULL;
+  char *msg = NULL;
+  if (LLVMCreateMemoryBufferWithContentsOfFile(bc_path, &buf, &msg) != 0) {
+    if (msg)
+      LLVMDisposeMessage(msg);
+    return false;
+  }
+  LLVMModuleRef mod = NULL;
+  bool ok = (LLVMParseBitcodeInContext2(ctx, buf, &mod) == 0);
+  if (mod)
+    LLVMDisposeModule(mod);
+  LLVMDisposeMemoryBuffer(buf);
+  return ok;
+}
+
+static bool ny_reemit_bitcode_via_ir(LLVMModuleRef module, const char *bc_path) {
+  if (!module || !bc_path)
+    return false;
+  char *ir = LLVMPrintModuleToString(module);
+  if (!ir)
+    return false;
+  size_t ir_len = strlen(ir);
+  LLVMMemoryBufferRef buf =
+      LLVMCreateMemoryBufferWithMemoryRangeCopy(ir, ir_len, "nytrix_ir");
+  LLVMDisposeMessage(ir);
+  if (!buf)
+    return false;
+  LLVMContextRef fresh_ctx = LLVMContextCreate();
+  LLVMModuleRef parsed = NULL;
+  char *msg = NULL;
+  bool buf_owned_by_module = false;
+  if (!fresh_ctx || LLVMParseIRInContext(fresh_ctx, buf, &parsed, &msg) != 0) {
+    if (msg)
+      LLVMDisposeMessage(msg);
+    LLVMDisposeMemoryBuffer(buf);
+    if (fresh_ctx)
+      LLVMContextDispose(fresh_ctx);
+    return false;
+  }
+  buf_owned_by_module = true;
+  if (!buf_owned_by_module)
+    LLVMDisposeMemoryBuffer(buf);
+  bool ok = (LLVMWriteBitcodeToFile(parsed, bc_path) == 0);
+  LLVMDisposeModule(parsed);
+  if (fresh_ctx)
+    LLVMContextDispose(fresh_ctx);
+  return ok;
+}
+
 static char **collect_use_modules(const char *src, size_t *out_count) {
   lexer_t lx;
   lexer_init(&lx, src, "<collect_use>");
@@ -816,8 +1149,9 @@ static bool verify_module_if_needed(const ny_options *opt,
   return true;
 }
 
-static void ny_dump_ir_if_requested(LLVMModuleRef module, const char *path,
-                                    const char *stage) {
+static NY_UNUSED_FUNC void ny_dump_ir_if_requested(LLVMModuleRef module,
+                                                   const char *path,
+                                                   const char *stage) {
   if (!module || !path || !*path)
     return;
   char *err = NULL;
@@ -900,9 +1234,10 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
   return dump_mod;
 }
 
-static void ny_log_opt_skipped_if_diag(bool opt_diag, const char *profile_name,
-                                       int eff_opt_level,
-                                       const ny_ir_stats_t *stats) {
+static NY_UNUSED_FUNC void ny_log_opt_skipped_if_diag(bool opt_diag,
+                                                      const char *profile_name,
+                                                      int eff_opt_level,
+                                                      const ny_ir_stats_t *stats) {
   if (!opt_diag || !stats)
     return;
   fprintf(stderr, "[opt] profile=%s O=%d passes=skipped\n", profile_name,
@@ -1052,6 +1387,20 @@ int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
   if (handle_non_compile_modes(opt, &exit_code))
     return exit_code;
+  if (getenv("NYTRIX_WORKER") && !getenv("NYTRIX_WORKER_OPT")) {
+    opt->opt_level = 0;
+    opt->opt_pipeline = NULL;
+    opt->opt_dce = 0;
+  }
+  bool fast_compiler = ny_env_enabled("NYTRIX_FAST_COMPILER");
+  if (fast_compiler) {
+    opt->opt_level = 0;
+    opt->opt_pipeline = NULL;
+    opt->opt_loops = 0;
+    opt->opt_autotune = 0;
+    opt->verify_module = false;
+    opt->debug_symbols = false;
+  }
   verbose_enabled = opt->verbose;
   clock_t t_start = 0;
   if (opt->do_timing)
@@ -1096,6 +1445,9 @@ int ny_pipeline_run(ny_options *opt) {
   if (opt->no_std) {
     std_mode = STD_MODE_NONE;
   }
+  if (std_mode == STD_MODE_DEFAULT && use_count == 0) {
+    std_mode = STD_MODE_NONE;
+  }
   clock_t t_std = clock();
   bool has_local = false;
   for (size_t i = 0; i < use_count; i++) {
@@ -1106,8 +1458,11 @@ int ny_pipeline_run(ny_options *opt) {
   }
   bool std_sources_ok = ny_std_sources_available();
   bool prebuilt_ok = prebuilt_path && access(prebuilt_path, R_OK) == 0;
+  bool prefer_prebuilt = ny_env_enabled("NYTRIX_STD_PREFER_PREBUILT");
   bool prebuilt_preferred =
-      (std_mode == STD_MODE_FULL || std_mode == STD_MODE_DEFAULT) && !has_local;
+      (std_mode == STD_MODE_FULL ||
+       (prefer_prebuilt && std_mode == STD_MODE_DEFAULT)) &&
+      !has_local;
   bool prebuilt_required = !std_sources_ok;
   if (std_mode != STD_MODE_NONE && prebuilt_ok &&
       (prebuilt_preferred || prebuilt_required)) {
@@ -1219,10 +1574,13 @@ int ny_pipeline_run(ny_options *opt) {
   }
   char *jit_cache_file = NULL;
   bool loaded_from_cache = false;
-  if ((opt->run_jit || opt->output_file) && opt->mode != NY_MODE_REPL &&
+  if (!fast_compiler &&
+      (opt->run_jit || opt->output_file ||
+       (opt->emit_only && !opt->output_file && !opt->run_jit)) &&
+      opt->mode != NY_MODE_REPL &&
       ny_jit_cache_enabled() && !opt->dump_ast && !opt->dump_llvm &&
-      !opt->emit_ir_path) {
-    jit_cache_file = ny_jit_cache_path(source, prebuilt_path);
+      !opt->emit_ir_path && !opt->emit_bc_path) {
+    jit_cache_file = ny_jit_cache_path(source, prebuilt_path, 0);
     if (jit_cache_file) {
       codegen_init(&cg, NULL, NULL, "nytrix");
       if (ny_jit_cache_load(jit_cache_file, cg.ctx, &cg.module)) {
@@ -1238,6 +1596,23 @@ int ny_pipeline_run(ny_options *opt) {
           cg.module = NULL;
           loaded_from_cache = false;
         } else {
+          /* Even on cache hit, parse to collect #link libs for externs. */
+          parser_t tmp_parser;
+          arena_t *tmp_arena = (arena_t *)malloc(sizeof(arena_t));
+          if (tmp_arena) {
+            memset(tmp_arena, 0, sizeof(arena_t));
+            parser_init_with_arena(&tmp_parser, source,
+                                   std_src ? "<stdlib>" : parse_name,
+                                   tmp_arena);
+            if (std_src) {
+              tmp_parser.lex.split_pos = slen + 1;
+              tmp_parser.lex.split_filename = parse_name;
+            }
+            program_t tmp_prog = parse_program(&tmp_parser);
+            codegen_collect_links(&cg, &tmp_prog);
+            arena_free(tmp_arena);
+            free(tmp_arena);
+          }
           goto skip_compilation;
         }
       } else {
@@ -1270,13 +1645,41 @@ int ny_pipeline_run(ny_options *opt) {
       printf("  [%zu] Kind=%d\n", i, s->kind);
     }
   }
+  bool parallel_modules = false;
+#ifndef _WIN32
+  ny_module_list mods = {0};
+  if (!fast_compiler && ny_parallel_modules_enabled(opt)) {
+    ny_collect_top_modules(&prog, &mods);
+    if (mods.len > 0)
+      parallel_modules = true;
+  }
+#endif
   clock_t t_codegen = clock();
   NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
   codegen_init(&cg, &prog, arena, "nytrix");
+  codegen_collect_links(&cg, &prog);
   cg.debug_symbols = opt->debug_symbols;
   cg.debug_opt_level = opt->opt_level;
   cg.debug_opt_pipeline = opt->opt_pipeline;
   cg.trace_exec = opt->trace_exec;
+  const char *std_bc_cache = getenv("NYTRIX_STD_BC_CACHE");
+  bool use_std_bc_cache = false;
+  if (!opt->no_std && std_bc_cache && *std_bc_cache &&
+      access(std_bc_cache, R_OK) == 0) {
+    cg.skip_stdlib = true;
+    use_std_bc_cache = true;
+  }
+  if (opt->emit_module) {
+    cg.emit_module_name = opt->emit_module;
+    cg.emit_module_decls_only = true;
+    cg.emit_script = false;
+  }
+#ifndef _WIN32
+  if (!opt->emit_module && parallel_modules) {
+    cg.emit_module_name = "";
+    cg.emit_module_decls_only = true;
+  }
+#endif
   if (cg.debug_symbols)
     codegen_debug_init(&cg, parse_name);
   cg.source_string = source;
@@ -1288,6 +1691,88 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
+#ifndef _WIN32
+  ny_module_job *mod_jobs = NULL;
+  size_t mod_job_count = 0;
+  clock_t t_parallel = 0;
+  size_t mods_len = 0;
+  if (!fast_compiler && ny_parallel_modules_enabled(opt)) {
+    if (opt->do_timing)
+      t_parallel = clock();
+    if (parallel_modules && mods.len > 0) {
+      mods_len = mods.len;
+      mod_jobs = calloc(mods.len, sizeof(ny_module_job));
+      if (mod_jobs) {
+        mod_job_count = mods.len;
+        int max_jobs = ny_parallel_module_jobs(opt, mods.len);
+        size_t started = 0;
+        size_t finished = 0;
+        size_t running = 0;
+        const char *tmp_dir = ny_get_temp_dir();
+        while (finished < mods.len) {
+          while (started < mods.len && running < (size_t)max_jobs) {
+            if (!ny_spawn_module_job(opt, mods.names[started], tmp_dir,
+                                     &mod_jobs[started])) {
+              parallel_modules = false;
+              break;
+            }
+            started++;
+            running++;
+          }
+          if (!parallel_modules)
+            break;
+          int status = 0;
+          pid_t pid = wait(&status);
+          if (pid < 0) {
+            parallel_modules = false;
+            break;
+          }
+          for (size_t i = 0; i < started; i++) {
+            if (mod_jobs[i].pid == pid) {
+              if (WIFEXITED(status))
+                mod_jobs[i].exit_code = WEXITSTATUS(status);
+              else
+                mod_jobs[i].exit_code = 1;
+              if (mod_jobs[i].exit_code != 0)
+                parallel_modules = false;
+              break;
+            }
+          }
+          running--;
+          finished++;
+        }
+        if (!parallel_modules) {
+          for (size_t i = 0; i < started; i++) {
+            if (mod_jobs[i].pid > 0) {
+              int st = 0;
+              (void)waitpid(mod_jobs[i].pid, &st, 0);
+            }
+          }
+        }
+      } else {
+        parallel_modules = false;
+      }
+    } else {
+      parallel_modules = false;
+    }
+  }
+  ny_free_module_list(&mods);
+  if (mods_len > 0 && !parallel_modules) {
+    NY_LOG_ERR("Parallel module build failed\n");
+    exit_code = 1;
+    goto exit_success;
+  }
+  if (!parallel_modules && mod_jobs) {
+    for (size_t i = 0; i < mod_job_count; i++) {
+      if (mod_jobs[i].bc_path)
+        (void)unlink(mod_jobs[i].bc_path);
+      ny_module_job_free(&mod_jobs[i]);
+    }
+    free(mod_jobs);
+    mod_jobs = NULL;
+    mod_job_count = 0;
+  }
+#endif
   NY_LOG_V2("Emitting IR...\n");
   codegen_emit(&cg);
   if (cg.had_error) {
@@ -1296,14 +1781,46 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
-  NY_LOG_V2("Emitting script entry point...\n");
-  script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name : "__script_top");
-  if (cg.had_error) {
-    NY_LOG_ERR("Codegen script entry failed\n");
-    dump_debug_bundle(opt, source, cg.module);
-    exit_code = 1;
-    goto exit_success;
+  if (use_std_bc_cache) {
+    ny_ir_externalize_std_definitions(opt, cg.module);
+    if (!ny_link_module_cache(cg.ctx, cg.module, std_bc_cache)) {
+      NY_LOG_ERR("Failed to link std cache: %s\n", std_bc_cache);
+      exit_code = 1;
+      goto exit_success;
+    }
   }
+  if (cg.emit_script) {
+    NY_LOG_V2("Emitting script entry point...\n");
+    script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name : "__script_top");
+    if (cg.had_error) {
+      NY_LOG_ERR("Codegen script entry failed\n");
+      dump_debug_bundle(opt, source, cg.module);
+      exit_code = 1;
+      goto exit_success;
+    }
+  }
+#ifndef _WIN32
+  if (parallel_modules && mod_jobs) {
+    for (size_t i = 0; i < mod_job_count; i++) {
+      if (!mod_jobs[i].bc_path)
+        continue;
+      if (!ny_link_module_cache(cg.ctx, cg.module, mod_jobs[i].bc_path)) {
+        NY_LOG_ERR("Failed to link module cache for %s\n",
+                   mod_jobs[i].name ? mod_jobs[i].name : "<module>");
+        exit_code = 1;
+        goto exit_success;
+      }
+      (void)unlink(mod_jobs[i].bc_path);
+      ny_module_job_free(&mod_jobs[i]);
+    }
+    free(mod_jobs);
+    mod_jobs = NULL;
+    mod_job_count = 0;
+    if (opt->do_timing && t_parallel)
+      fprintf(stderr, "Parallel modules: %.4fs\n",
+              (double)(clock() - t_parallel) / CLOCKS_PER_SEC);
+  }
+#endif
   codegen_debug_finalize(&cg);
   maybe_log_phase_time(opt->do_timing, "Codegen:", t_codegen);
 
@@ -1324,10 +1841,23 @@ int ny_pipeline_run(ny_options *opt) {
             (double)(clock() - t_ver) / CLOCKS_PER_SEC);
   clock_t t_opt = clock();
   run_dead_strip_if_needed(opt, cg.module);
-  ny_llvm_optimize_module(cg.module, opt->opt_level);
-  if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
-    fprintf(stderr, "Optimization: %.4fs\n",
-            (double)(clock() - t_opt) / CLOCKS_PER_SEC);
+  if (!fast_compiler) {
+    int eff_opt = opt->opt_level;
+    if (parallel_modules && !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {
+      eff_opt = 0;
+    }
+    if (opt->run_jit) {
+      int jit_level = ny_env_int("NYTRIX_JIT_OPT_LEVEL", -1);
+      if (jit_level < 0)
+        jit_level = 0;
+      if (jit_level > eff_opt)
+        eff_opt = jit_level;
+    }
+    ny_llvm_optimize_module(cg.module, eff_opt, opt->opt_pipeline);
+    if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
+      fprintf(stderr, "Optimization: %.4fs\n",
+              (double)(clock() - t_opt) / CLOCKS_PER_SEC);
+  }
   if (jit_cache_file && !loaded_from_cache) {
     if (ny_jit_cache_save(jit_cache_file, cg.module)) {
       if (opt->verbose)
@@ -1360,7 +1890,11 @@ skip_compilation:
       LLVMDisposeModule(dump_mod);
   }
   if (opt->emit_bc_path) {
-    if (LLVMWriteBitcodeToFile(cg.module, opt->emit_bc_path) != 0) {
+    bool wrote = ny_reemit_bitcode_via_ir(cg.module, opt->emit_bc_path);
+    if (wrote && !ny_verify_bitcode(cg.ctx, opt->emit_bc_path)) {
+      wrote = false;
+    }
+    if (!wrote) {
       NY_LOG_ERR("Failed to write bitcode to %s\n", opt->emit_bc_path);
       exit_code = 1;
       goto exit_success;
@@ -1396,19 +1930,55 @@ skip_compilation:
       }
       bool link_strip = opt->strip_override == 1 ||
                         (opt->strip_override == -1 && !opt->debug_symbols);
+      if (output_path && *output_path) {
+        char out_dir[1024];
+        snprintf(out_dir, sizeof(out_dir), "%s", output_path);
+        char *slash = strrchr(out_dir, '/');
+        if (slash && slash != out_dir) {
+          *slash = '\0';
+          ny_ensure_dir_recursive_local(out_dir);
+        }
+      }
       NY_LOG_V2("Linking executable %s (strip=%d, debug=%d)...\n", output_path,
                 link_strip, opt->debug_symbols);
+      /* Merge #link directives from codegen into link_libs */
+      VEC(char *) merged_libs;
+      vec_init(&merged_libs);
+      for (size_t li = 0; li < opt->link_libs.len; li++)
+        vec_push(&merged_libs, opt->link_libs.data[li]);
+      for (size_t li = 0; li < cg.links.len; li++) {
+        const char *name = cg.links.data[li];
+        if (!name) continue;
+        bool dup = false;
+        for (size_t lj = 0; lj < merged_libs.len; lj++) {
+          const char *e = merged_libs.data[lj];
+          if (e && e[0] == '-' && e[1] == 'l' && strcmp(e + 2, name) == 0) {
+            dup = true; break;
+          }
+        }
+        if (!dup) {
+          char buf[256];
+          snprintf(buf, sizeof(buf), "-l%s", name);
+          vec_push(&merged_libs, ny_strdup(buf));
+        }
+      }
       if (!ny_builder_link(
               cc, obj, rto, NULL, NULL, 0,
               (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
-              (const char *const *)opt->link_libs.data, opt->link_libs.len,
+              (const char *const *)merged_libs.data, merged_libs.len,
               output_path, link_strip, opt->debug_symbols, opt->gprof == 1)) {
         unlink(obj);
         unlink(rto);
         dump_debug_bundle(opt, source, cg.module);
         exit_code = 1;
+        for (size_t li = opt->link_libs.len; li < merged_libs.len; li++)
+          free(merged_libs.data[li]);
+        vec_free(&merged_libs);
         goto exit_success;
       }
+      for (size_t li = opt->link_libs.len; li < merged_libs.len; li++)
+        free(merged_libs.data[li]);
+      vec_free(&merged_libs);
       unlink(obj);
       unlink(rto);
       if (aot_cache_path[0] != '\0' &&
@@ -1438,6 +2008,14 @@ skip_compilation:
     LLVMInitializeMCJITCompilerOptions(&jopt, sizeof(jopt));
     jopt.CodeModel = LLVMCodeModelJITDefault;
     {
+      int jit_level = ny_env_int("NYTRIX_JIT_OPT_LEVEL", -1);
+      if (jit_level < 0)
+        jit_level = 0;
+      if (jit_level < 0) jit_level = 0;
+      if (jit_level > 3) jit_level = 3;
+      jopt.OptLevel = (unsigned)jit_level;
+    }
+    {
       const char *cm = getenv("NYTRIX_JIT_CODE_MODEL");
       if (cm && *cm) {
         if (strcmp(cm, "large") == 0)
@@ -1449,7 +2027,8 @@ skip_compilation:
       }
     }
     {
-      if (ny_env_enabled_default_on("NYTRIX_JIT_FAST_ISEL"))
+      /* FastISel speeds compile but can hurt runtime; keep opt-in. */
+      if (ny_env_enabled("NYTRIX_JIT_FAST_ISEL"))
         jopt.EnableFastISel = 1;
     }
     LLVMModuleRef jmod = cg.module;
@@ -1473,10 +2052,10 @@ skip_compilation:
               cg.interns.data[i].val != cg.interns.data[i].gv) {
             LLVMAddGlobalMapping(ee, cg.interns.data[i].val,
                                  &cg.interns.data[i].data);
-          }
         }
       }
     }
+  }
     register_jit_symbols(ee, jmod, &cg);
     if (loaded_from_cache) {
       ny_jit_map_unresolved_symbols(ee, jmod, NULL);

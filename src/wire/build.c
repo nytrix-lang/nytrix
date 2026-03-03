@@ -367,10 +367,29 @@ static const char *find_llvm_include_dir(void) {
 
 static int spawn_with_host_flags(const char *const base[], const char *env,
                                  char *pool[], size_t *pool_len) {
-  (void)env;
-  (void)pool;
-  (void)pool_len;
-  return ny_exec_spawn(base);
+  const size_t max = 128;
+  const char *argv[128];
+  size_t idx = 0;
+  while (base[idx] && idx + 1 < max) {
+    argv[idx] = base[idx];
+    idx++;
+  }
+  if (env && *env && idx + 1 < max) {
+    char *copy = ny_strdup(env);
+    if (copy) {
+      char *tok = strtok(copy, " \t");
+      while (tok && idx + 1 < max) {
+        argv[idx++] = tok;
+        tok = strtok(NULL, " \t");
+      }
+      if (*pool_len < 16)
+        pool[(*pool_len)++] = copy;
+      else
+        free(copy);
+    }
+  }
+  argv[idx] = NULL;
+  return ny_exec_spawn(argv);
 }
 #else
 static void append_host_flags(const char *env, const char *argv[], size_t *idx,

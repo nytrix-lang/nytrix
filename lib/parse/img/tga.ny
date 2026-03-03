@@ -8,9 +8,10 @@ module std.image.format.tga (
 
 use std.core *
 use std.core.dict_mod *
+use std.parse.bin as pbin
 
-fn decode(data)
-{
+fn decode(data){
+   "Decodes an uncompressed 24-bit or 32-bit TGA image."
    if(!is_str(data) || len(data) < 18)
    {
       return 0
@@ -18,8 +19,8 @@ fn decode(data)
    def id_len = load8(data, 0)
    def color_map_type = load8(data, 1)
    load8(data, 2) ; image_type
-   def w = load8(data, 12) | (load8(data, 13) << 8)
-   def h = load8(data, 14) | (load8(data, 15) << 8)
+   def w = pbin.u16le(data, 12)
+   def h = pbin.u16le(data, 14)
    def bpp = load8(data, 16)
    def desc = load8(data, 17)
    def flip_x = (desc >> 4) & 1
@@ -27,7 +28,7 @@ fn decode(data)
    mut p = 18 + id_len
    if(color_map_type == 1)
    {
-      def map_len = load8(data, 5) | (load8(data, 6) << 8)
+      def map_len = pbin.u16le(data, 5)
       def map_entry_size = load8(data, 7)
       p += map_len * (map_entry_size / 8)
    }
@@ -69,8 +70,8 @@ fn decode(data)
    res_d
 }
 
-fn encode(img)
-{
+fn encode(img){
+   "Encodes an image dictionary as a 32-bit BGRA TGA byte string."
    def w = dict_get(img, "width")
    def h = dict_get(img, "height")
    def d = dict_get(img, "data")

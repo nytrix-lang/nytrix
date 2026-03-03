@@ -193,12 +193,12 @@ def _enable_full_test_matrix_env():
 
 
 def _enable_make_test_defaults():
-    if _env_on("NYTRIX_TEST_FAST"):
-        log("TEST", "NYTRIX_TEST_FAST=1: using fast cached test mode")
+    if _env_on("NYTRIX_TEST_FULL") or _env_on("NYTRIX_TEST_COLD"):
+        _enable_real_test_env()
+        _enable_full_test_matrix_env()
+        log("TEST", "make test: forcing full uncached matrix (AOT+REPL+native)")
         return
-    _enable_real_test_env()
-    _enable_full_test_matrix_env()
-    log("TEST", "make test: forcing full uncached matrix (AOT+REPL+native)")
+    log("TEST", "make test: fast cached mode (set NYTRIX_TEST_FULL=1 for cold runs)")
 
 def _linux_mem_total_gib():
     if host_os() != "linux":
@@ -362,6 +362,9 @@ def main():
         if not args.commands:
             args.commands = ["all"]
 
+        will_run_tests = any(c in ("test", "all") for c in args.commands)
+        if will_run_tests and "NYTRIX_TEST_NATIVE_DEPS" not in os.environ:
+            os.environ["NYTRIX_TEST_NATIVE_DEPS"] = "1"
         _timed_call(profile_enabled, timings, "ensure_deps", ensure_deps)
         cc, llvm, root = _timed_call(profile_enabled, timings, "configure_toolchain", configure_toolchain)
         llvm_inc = _timed_call(
@@ -439,14 +442,18 @@ def main():
 
             if targets and not skip_build:
                 if cmd != "std":
-                    _timed_call(
-                        profile_enabled,
-                        timings,
-                        f"{cmd}:std_fresh_check",
-                        ensure_std_bundle_fresh,
-                        BUILD_DIR,
-                        kind,
-                    )
+                    use_std_bundle = True
+                    if cmd == "test" and not _env_on("NYTRIX_TEST_USE_STD_BUNDLE"):
+                        use_std_bundle = False
+                    if use_std_bundle:
+                        _timed_call(
+                            profile_enabled,
+                            timings,
+                            f"{cmd}:std_fresh_check",
+                            ensure_std_bundle_fresh,
+                            BUILD_DIR,
+                            kind,
+                        )
                 _timed_call(
                     profile_enabled,
                     timings,
@@ -464,7 +471,9 @@ def main():
 
             if cmd == "test":
                 _enable_make_test_defaults()
-                std_bundle = BUILD_DIR / kind / "std.ny"
+                std_bundle = None
+                if _env_on("NYTRIX_TEST_USE_STD_BUNDLE"):
+                    std_bundle = BUILD_DIR / kind / "std.ny"
                 _timed_call(
                     profile_enabled,
                     timings,

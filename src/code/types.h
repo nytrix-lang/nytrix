@@ -72,6 +72,9 @@ typedef struct binding {
   const char *decl_type_name;
   uint64_t name_hash;
   uint32_t name_len;
+  uint64_t tail_hash;
+  uint32_t tail_len;
+  bool tail_cached;
 } binding;
 
 typedef VEC(binding) binding_list;
@@ -110,6 +113,9 @@ typedef struct fun_sig {
   bool owned;
   uint64_t name_hash;
   uint32_t name_len;
+  uint64_t tail_hash;
+  uint32_t tail_len;
+  bool tail_cached;
 } fun_sig;
 
 typedef struct enum_member_def_t {
