@@ -7,7 +7,7 @@ module std.image.format.jpeg (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.math *
 use std.math.float as f
 

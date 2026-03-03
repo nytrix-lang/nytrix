@@ -33,7 +33,7 @@ fn repl_show(x){
 
 if(comptime{__main()}){
     use std.util.inspect *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core.error *
 
     print("Testing inspect...")

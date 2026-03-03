@@ -20,11 +20,11 @@ module std.ui.window (
    window_match_chord, window_bind, window_key_pressed,
    window_push_event, window_check_event, event_type, event_window, event_window_id, event_data,
    window_on_key, poll_events, windows_open, window_last, window_swap_buffers, window_make_current,
-   window_blit_buffer
+   window_blit_buffer, window_update_input
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.ui.consts *
 use std.ui.event as ev
 use std.os *
@@ -261,7 +261,7 @@ fn open_window(name, x, y, w, h, flags=0) {
       handle = ui_backend.create_window(name, w, h, flags)
       if(!handle){ return false }
    }
-   mut win = dict()
+   mut win = dict(64)
    win = dict_set(win, "handle",         handle)
    win = dict_set(win, "id",             _next_window_id)
    win = dict_set(win, "title",          name)
@@ -274,12 +274,12 @@ fn open_window(name, x, y, w, h, flags=0) {
    win = dict_set(win, "exit_key",       KEY_ESCAPE)
    win = dict_set(win, "events",         [])
    win = dict_set(win, "visible",        (flags & WINDOW_HIDE) == 0)
-   win = dict_set(win, "key_states",     dict())
-   win = dict_set(win, "last_key_states",dict())
+   win = dict_set(win, "key_states",     dict(256))
+   win = dict_set(win, "last_key_states",dict(256))
    win = dict_set(win, "mouse_x",        0)
    win = dict_set(win, "mouse_y",        0)
-   win = dict_set(win, "mouse_buttons",      dict())
-   win = dict_set(win, "last_mouse_buttons", dict())
+   win = dict_set(win, "mouse_buttons",      dict(32))
+   win = dict_set(win, "last_mouse_buttons", dict(32))
    win = dict_set(win, "chord_seq",      [])
    win = dict_set(win, "chord_time",     0)
    win = dict_set(win, "bindings",       [])
@@ -353,15 +353,18 @@ fn window_resize(win, w, h) {
 }
 
 fn window_should_close(win) {
-   "Returns true if the window has been requested to close."
+   "Returns true if the window has been requested to close. Also polls input events."
    if(!_is_window(win)){ return true }
+   window_update_input(win)
+   ui_backend.poll_events()
+   _check_native_state(win)
    !!dict_get(win, "should_close", false)
 }
 
 fn window_set_should_close(win, should_close=true) {
    "Sets the window's close request flag."
    if(!_is_window(win)){ return false }
-   def old = window_should_close(win)
+   def old = !!dict_get(win, "should_close", false)
    def now = !!should_close
    dict_set(win, "should_close", now)
    if(now && !old){ window_push_event(win, EVENT_QUIT) }
@@ -506,10 +509,10 @@ fn _window_process_internal(win, e) {
 }
 
 fn _check_native_state(win) {
-   "Internal: Syncs window state with the native backend (close requests, resizing)."
+   "Internal: Syncs window state with the native backend (close requests, resizing, input)."
    def handle = dict_get(win, "handle", 0)
    if(!handle){ return }
-   if(ui_backend.should_close(handle) && !window_should_close(win)) {
+   if(ui_backend.should_close(handle) && !dict_get(win, "should_close", false)) {
       dict_set(win, "should_close", true)
       window_push_event(win, EVENT_QUIT)
    }
@@ -522,7 +525,99 @@ fn _check_native_state(win) {
       data = dict_set(data, "h", nh)
       window_resize(win, nw, nh)
    }
+
+   ; Poll keyboard state from GLFW directly (no callback system).
+   ; Map: [glfw_code, ny_code]
+   def key_map = [
+      [256, 27],    ; GLFW_KEY_ESCAPE  → NY KEY_ESCAPE
+      [32,  32],    ; SPACE
+      [65,  65], [66,66], [67,67], [68,68], [69,69], [70,70], [71,71], [72,72],
+      [73,  73], [74,74], [75,75], [76,76], [77,77], [78,78], [79,79], [80,80],
+      [81,  81], [82,82], [83,83], [84,84], [85,85], [86,86], [87,87], [88,88],
+      [89,  89], [90,90],
+      [48,  48], [49,49], [50,50], [51,51], [52,52],
+      [53,  53], [54,54], [55,55], [56,56], [57,57],
+      [262, 1002],  ; GLFW_KEY_RIGHT → 1002
+      [263, 1000],  ; GLFW_KEY_LEFT  → 1000
+      [264, 1003],  ; GLFW_KEY_DOWN  → 1003
+      [265, 1001],  ; GLFW_KEY_UP    → 1001
+      [340, 16],    ; GLFW_KEY_LEFT_SHIFT → 16
+      [341, 17],    ; GLFW_KEY_LEFT_CONTROL → 17
+      [342, 18],    ; GLFW_KEY_LEFT_ALT → 18
+      [344, 16],    ; GLFW_KEY_RIGHT_SHIFT → 16
+      [345, 17],    ; GLFW_KEY_RIGHT_CONTROL → 17
+      [257, 13],    ; GLFW_KEY_ENTER → 13
+      [259, 8],     ; GLFW_KEY_BACKSPACE → 8
+      [258, 9],     ; GLFW_KEY_TAB → 9
+      [290, 1004], [291, 1005], [292, 1006], [293, 1007], ; F1-F4
+      [294, 1008], [295, 1009], [296, 1010], [297, 1011]  ; F5-F8
+   ]
+
+   mut ks = dict_get(win, "key_states", dict(256))
+   if(!ks){ ks = dict(256) }
+   mut changed = false
+   mut i = 0
+   while(i < len(key_map)){
+      def pair   = get(key_map, i)
+      def glfw_k = get(pair, 0)
+      def ny_k   = get(pair, 1)
+      def now    = ui_backend.get_key(handle, glfw_k) == 1
+      def was    = !!dict_get(ks, ny_k, false)
+      if(now != was){
+         ks = dict_set(ks, ny_k, now)
+         changed = true
+         def typ = now ? EVENT_KEY_PRESSED : EVENT_KEY_RELEASED
+         mut data = dict()
+         data = dict_set(data, "key",     ny_k)
+         data = dict_set(data, "pressed", now)
+         data = dict_set(data, "repeat",  false)
+         data = dict_set(data, "mod",     0)
+         window_push_event(win, typ, data)
+         if(now && ny_k == window_exit_key(win)){ window_set_should_close(win, true) }
+      }
+      i += 1
+   }
+   if(changed){
+      dict_set(win, "key_states", ks)
+      dict_set(win, "modifiers", _mods_from_key_states(ks))
+   }
+
+   ; Poll mouse cursor position
+   def mpos = ui_backend.get_cursor_pos(handle)
+   def mx   = int(get(mpos, 0, 0))
+   def my   = int(get(mpos, 1, 0))
+   def omx  = dict_get(win, "mouse_x", 0)
+   def omy  = dict_get(win, "mouse_y", 0)
+   if(mx != omx || my != omy){
+      dict_set(win, "mouse_x", mx)
+      dict_set(win, "mouse_y", my)
+      mut mdata = dict()
+      mdata = dict_set(mdata, "x", mx)
+      mdata = dict_set(mdata, "y", my)
+      window_push_event(win, EVENT_MOUSE_POS_CHANGED, mdata)
+   }
+
+   ; Poll mouse buttons (0=LMB, 1=RMB, 2=MMB)
+   mut mb = dict_get(win, "mouse_buttons", dict(32))
+   if(!mb){ mb = dict(32) }
+   mut bi = 0
+   while(bi < 3){
+      def btn_now = ui_backend.get_mouse_button(handle, bi) == 1
+      def btn_was = !!dict_get(mb, bi, false)
+      if(btn_now != btn_was){
+         mb = dict_set(mb, bi, btn_now)
+         def btyp = btn_now ? EVENT_MOUSE_BUTTON_PRESSED : EVENT_MOUSE_BUTTON_RELEASED
+         mut bdata = dict()
+         bdata = dict_set(bdata, "button", bi)
+         bdata = dict_set(bdata, "x", dict_get(win, "mouse_x", 0))
+         bdata = dict_set(bdata, "y", dict_get(win, "mouse_y", 0))
+         window_push_event(win, btyp, bdata)
+      }
+      bi += 1
+   }
+   dict_set(win, "mouse_buttons", mb)
 }
+
 
 fn window_check_event(win) {
    "Polls and processes the next pending event for the window."
@@ -546,9 +641,9 @@ fn window_check_event(win) {
 ;; Event accessors
 
 fn event_type(e)      { "Returns the type of the event." ev.event_type(e) }
-fn event_window(e)    { "Returns the window object associated with the event." ev.event_window(e) }
-fn event_window_id(e) { "Returns the ID of the window associated with the event." ev.event_window_id(e) }
-fn event_data(e)      { "Returns the extra data associated with the event." ev.event_data(e) }
+fn event_window(_e)    { "Returns the window object associated with the event." ev.event_window(_e) }
+fn event_window_id(_e) { "Returns the ID of the window associated with the event." ev.event_window_id(_e) }
+fn event_data(_e)      { "Returns the extra data associated with the event." ev.event_data(_e) }
 
 ;; Input state
 
@@ -669,10 +764,14 @@ fn window_bind(win, notation, action) {
 }
 
 fn window_update_input(win) {
-   "Internal: Cycles input state at the start of a frame (copy current to last)."
+   "Internal: Cycles input state at the start of a frame (swap current to last)."
    if(!_is_window(win)){ return }
-   dict_set(win, "last_key_states",    dict_clone(dict_get(win, "key_states",    dict())))
-   dict_set(win, "last_mouse_buttons", dict_clone(dict_get(win, "mouse_buttons", dict())))
+   def ks = dict_get(win, "key_states", dict())
+   def mb = dict_get(win, "mouse_buttons", dict())
+   dict_set(win, "last_key_states",    ks)
+   dict_set(win, "last_mouse_buttons", mb)
+   dict_set(win, "key_states",         dict_clone(ks))
+   dict_set(win, "mouse_buttons",      dict_clone(mb))
 }
 
 ;; Frame / buffer
@@ -728,5 +827,3 @@ fn window_last() {
    if(_is_window(w)){ return w }
    0
 }
-
-;; Self-test

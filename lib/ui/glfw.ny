@@ -39,6 +39,10 @@ use std.os.ffi as ffi
 ;; FFI Helper
 
 mut _lib = 0
+mut _size_wp = 0
+mut _size_hp = 0
+mut _cursor_xp = 0
+mut _cursor_yp = 0
 
 fn _call(nm, args) {
    "Internal: Dynamic dispatch for GLFW C functions."
@@ -133,6 +137,7 @@ fn apply_hints(flags) {
    if((flags & WINDOW_NO_RESIZE)   != 0){ _call("glfwWindowHint", [GLFW_RESIZABLE, 0]) }
    if((flags & WINDOW_FLOATING)    != 0){ _call("glfwWindowHint", [GLFW_FLOATING, 1]) }
    if((flags & WINDOW_MAXIMIZE)    != 0){ _call("glfwWindowHint", [GLFW_MAXIMIZED, 1]) }
+   if((flags & WINDOW_HIDE)        != 0){ _call("glfwWindowHint", [GLFW_VISIBLE, 0]) }
 }
 
 fn create_window(title, w, h, flags=0) {
@@ -151,28 +156,22 @@ fn poll_events()               { "Polls for pending window events." if(_ready){ 
 fn swap_buffers(win)           { "Swaps the front and back buffers." _call("glfwSwapBuffers", [win]) }
 fn swap_interval(n)            { "Sets the swap interval (VSync)." _call("glfwSwapInterval", [n]) }
 
+fn _ensure_size_bufs(){
+   if(!_size_wp){ _size_wp = malloc(4) _size_hp = malloc(4) }
+}
+
 fn get_size(win) {
    "Returns the window size as [width, height]."
-   mut wp = malloc(4)
-   mut hp = malloc(4)
-   _call("glfwGetWindowSize", [win, wp, hp])
-   def w = load32(wp, 0)
-   def h = load32(hp, 0)
-   free(wp)
-   free(hp)
-   [w, h]
+   _ensure_size_bufs()
+   _call("glfwGetWindowSize", [win, _size_wp, _size_hp])
+   [load32(_size_wp, 0), load32(_size_hp, 0)]
 }
 
 fn get_framebuffer_size(win) {
    "Returns the framebuffer size as [width, height]."
-   mut wp = malloc(4)
-   mut hp = malloc(4)
-   _call("glfwGetFramebufferSize", [win, wp, hp])
-   def w = load32(wp, 0)
-   def h = load32(hp, 0)
-   free(wp)
-   free(hp)
-   [w, h]
+   _ensure_size_bufs()
+   _call("glfwGetFramebufferSize", [win, _size_wp, _size_hp])
+   [load32(_size_wp, 0), load32(_size_hp, 0)]
 }
 
 fn set_size(win, w, h) { "Resizes the window." _call("glfwSetWindowSize", [win, w, h]) }
@@ -184,14 +183,9 @@ fn get_mouse_button(win, btn) { "Returns the state of a mouse button." _call("gl
 
 fn get_cursor_pos(win) {
    "Returns the cursor position as [x, y]."
-   mut xp = malloc(8)
-   mut yp = malloc(8)
-   _call("glfwGetCursorPos", [win, xp, yp])
-   def x = load64(xp, 0)
-   def y = load64(yp, 0)
-   free(xp)
-   free(yp)
-   [x, y]
+   if(!_cursor_xp){ _cursor_xp = malloc(8) _cursor_yp = malloc(8) }
+   _call("glfwGetCursorPos", [win, _cursor_xp, _cursor_yp])
+   [load64_f64(_cursor_xp, 0), load64_f64(_cursor_yp, 0)]
 }
 
 ;; Callbacks
@@ -209,11 +203,9 @@ fn vulkan_supported() { "Returns true if Vulkan is supported by the backend." _c
 
 fn required_extensions() {
    "Returns the Vulkan instance extensions required by GLFW."
-   mut cp = malloc(4)
-   def exts  = _call("glfwGetRequiredInstanceExtensions", [cp])
-   def count = load32(cp, 0)
-   free(cp)
-   [count, exts]
+   _ensure_size_bufs()
+   def exts = _call("glfwGetRequiredInstanceExtensions", [_size_wp])
+   [load32(_size_wp, 0), exts]
 }
 
 fn create_surface(instance, win, allocator, surface) {

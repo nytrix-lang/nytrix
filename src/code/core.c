@@ -113,7 +113,22 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog,
   cg->alloca_builder = LLVMCreateBuilderInContext(ctx);
   cg->prog = prog;
   cg->arena = arena;
+  cg->owned_metadata = false;
   ny_llvm_prepare_module(cg->module, 3);
+  vec_reserve(&cg->fun_sigs, 1024);
+  vec_reserve(&cg->global_vars, 256);
+  vec_reserve(&cg->interns, 256);
+  vec_init(&cg->aliases);
+  vec_init(&cg->import_aliases);
+  vec_init(&cg->user_import_aliases);
+  vec_init(&cg->use_modules);
+  vec_init(&cg->user_use_modules);
+  vec_init(&cg->labels);
+  vec_init(&cg->extra_arenas);
+  vec_init(&cg->extra_progs);
+  vec_init(&cg->enums);
+  vec_init(&cg->layouts);
+  vec_init(&cg->links);
   ny_cg_init_types(cg);
   ny_cg_init_options(cg);
   add_builtins(cg);
@@ -133,6 +148,7 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   cg->builder = LLVMCreateBuilderInContext(cg->ctx);
   cg->alloca_builder = LLVMCreateBuilderInContext(cg->ctx);
   ny_llvm_prepare_module(cg->module, 3);
+  cg->owned_metadata = true;
   vec_reserve(&cg->fun_sigs, 16384);
   vec_reserve(&cg->global_vars, 4096);
   vec_reserve(&cg->interns, 4096);
@@ -168,47 +184,64 @@ void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
   }
 }
 
-void codegen_emit(codegen_t *cg) {
-  scope gsc[64] = {0};
-  size_t gd = 0;
+static void process_links(codegen_t *cg, stmt_t *s) {
+  if (s->kind == NY_S_LINK) {
+    if (s->as.link.lib) {
+      bool found = false;
+      for (size_t i = 0; i < cg->links.len; i++) {
+        if (strcmp(cg->links.data[i], s->as.link.lib) == 0) {
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        vec_push(&cg->links, ny_strdup(s->as.link.lib));
+    }
+  } else if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; i++)
+      process_links(cg, s->as.module.body.data[i]);
+  } else if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; i++)
+      process_links(cg, s->as.block.body.data[i]);
+  }
+}
 
-  clock_t t_use = clock();
+void codegen_prepare(codegen_t *cg) {
+  if (!cg || !cg->prog || cg->is_preparing)
+    return;
+
+  cg->is_preparing = true;
+
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     collect_use_aliases(cg, s);
     collect_use_modules(cg, s);
+    process_links(cg, s);
   }
-  if (verbose_enabled >= 2)
-    fprintf(stderr, "[*] Codegen: use processing: %.4fs\n", (double)(clock() - t_use) / CLOCKS_PER_SEC);
 
-  clock_t t_sigs = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     collect_sigs(cg, s);
   }
-  if (verbose_enabled >= 2)
-    fprintf(stderr, "[*] Codegen: collect_sigs:   %.4fs\n", (double)(clock() - t_sigs) / CLOCKS_PER_SEC);
 
-  clock_t t_exports = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     process_exports(cg, s);
   }
-  if (verbose_enabled >= 2)
-    fprintf(stderr, "[*] Codegen: exports:        %.4fs\n", (double)(clock() - t_exports) / CLOCKS_PER_SEC);
 
-  clock_t t_imports = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     process_use_imports(cg, s);
   }
-  if (verbose_enabled >= 2)
-    fprintf(stderr, "[*] Codegen: imports:        %.4fs\n", (double)(clock() - t_imports) / CLOCKS_PER_SEC);
 
-  clock_t t_purity = clock();
   infer_pure_functions(cg);
-  if (verbose_enabled >= 2)
-    fprintf(stderr, "[*] Codegen: purity infer:   %.4fs\n", (double)(clock() - t_purity) / CLOCKS_PER_SEC);
+
+  cg->is_preparing = false;
+}
+
+void codegen_emit(codegen_t *cg) {
+  scope gsc[64] = {0};
+  size_t gd = 0;
 
   clock_t t_emit_top = clock();
   for (size_t i = 0; i < cg->prog->body.len; i++) {
@@ -338,79 +371,12 @@ void codegen_dispose(codegen_t *cg) {
       cg->ctx = NULL;
     }
   }
-      for (size_t i = 0; i < cg->fun_sigs.len; i++) {
-        fun_sig *sig = &cg->fun_sigs.data[i];
-        if (sig->owned) {
-          free((void *)sig->name);
-          for (size_t j = 0; j < i; j++) {
-            if (cg->fun_sigs.data[j].link_name == sig->link_name)
-              sig->link_name = NULL;
-            if (cg->fun_sigs.data[j].return_type == sig->return_type)
-              sig->return_type = NULL;
-          }
-          free((void *)sig->link_name);
-          free((void *)sig->return_type);
-        }
-      }
-      for (size_t i = 0; i < cg->global_vars.len; i++) {
-        if (cg->global_vars.data[i].owned)
-          free((void *)cg->global_vars.data[i].name);
-      }
-      for (size_t i = 0; i < cg->interns.len; i++) {
-        if (cg->interns.data[i].alloc)
-          free(cg->interns.data[i].alloc);
-      }
-      for (size_t i = 0; i < cg->aliases.len; i++) {
-        if (cg->aliases.data[i].owned) {
-          free((void *)cg->aliases.data[i].name);
-          free((void *)cg->aliases.data[i].stmt_t);
-        }
-      }
-      for (size_t i = 0; i < cg->import_aliases.len; i++) {
-        if (cg->import_aliases.data[i].owned) {
-          free((void *)cg->import_aliases.data[i].name);
-          free((void *)cg->import_aliases.data[i].stmt_t);
-        }
-      }
-      for (size_t i = 0; i < cg->user_import_aliases.len; i++) {
-        if (cg->user_import_aliases.data[i].owned) {
-          free((void *)cg->user_import_aliases.data[i].name);
-          free((void *)cg->user_import_aliases.data[i].stmt_t);
-        }
-      }  for (size_t i = 0; i < cg->use_modules.len; i++) {
-    free((void *)cg->use_modules.data[i]);
-  }
-  for (size_t i = 0; i < cg->user_use_modules.len; i++) {
-    free((void *)cg->user_use_modules.data[i]);
-  }
-  for (size_t i = 0; i < cg->labels.len; i++) {
-    free((void *)cg->labels.data[i].name);
-  }
-  for (size_t i = 0; i < cg->enums.len; i++) {
-    enum_def_t *enu = cg->enums.data[i];
-    if (!enu)
-      continue;
-    free((void *)enu->name);
-    for (size_t j = 0; j < enu->members.len; j++) {
-      free((void *)enu->members.data[j].name);
-    }
-    vec_free(&enu->members);
-  }
-  for (size_t i = 0; i < cg->layouts.len; i++) {
-    layout_def_t *def = cg->layouts.data[i];
-    if (!def)
-      continue;
-    free((void *)def->name);
-    vec_free(&def->fields);
-  }
   vec_free(&cg->fun_sigs);
   vec_free(&cg->global_vars);
   vec_free(&cg->interns);
   if (cg->intern_map) {
     free(cg->intern_map);
     cg->intern_map = NULL;
-    cg->intern_map_cap = 0;
-    cg->intern_map_len = 0;
   }
   vec_free(&cg->aliases);
   vec_free(&cg->import_aliases);
@@ -420,6 +386,9 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->labels);
   vec_free(&cg->enums);
   vec_free(&cg->layouts);
+  vec_free(&cg->links);
+  vec_free(&cg->extra_arenas);
+  vec_free(&cg->extra_progs);
   if (cg->prog && cg->prog_owned) {
     program_free(cg->prog, (arena_t *)cg->arena);
     free(cg->prog);

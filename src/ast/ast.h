@@ -261,6 +261,7 @@ typedef enum stmt_kind_t {
   NY_S_TRY,
   NY_S_FUNC,
   NY_S_EXTERN,
+  NY_S_LINK,
   NY_S_RETURN,
   NY_S_LABEL,
   NY_S_DEFER,
@@ -336,6 +337,8 @@ typedef struct stmt_func_t {
   bool attr_jit;
   bool attr_thread;
   bool attr_pure;
+  bool is_extern;
+  const char *link_name;
   bool attrs_resolved;
   bool effect_contract_known;
   uint32_t effect_contract_mask;
@@ -413,6 +416,9 @@ struct stmt_t {
     stmt_try_t tr;
     stmt_func_t fn;
     stmt_extern_t ext;
+    struct {
+      const char *lib;
+    } link;
     stmt_return_t ret;
     stmt_label_t label;
     stmt_goto_t go;

@@ -244,6 +244,8 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   bool is_jit = false;
   bool is_thread = false;
   bool is_pure = false;
+  bool is_extern = false;
+  const char *link_name = NULL;
   bool has_effect_contract = false;
   uint32_t effect_contract_mask = NY_FX_NONE;
   for (size_t i = 0; i < fn_stmt->attributes.len; i++) {
@@ -262,6 +264,16 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     }
     if (attr_name_eq(attr, "pure")) {
       mark_simple_flag_attr(cg, fn_stmt, attr, "@pure", &is_pure);
+      continue;
+    }
+    if (attr_name_eq(attr, "extern")) {
+      is_extern = true;
+      if (attr->args.len > 0) {
+        expr_t *arg = attr->args.data[0];
+        if (arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_STR) {
+          link_name = arg->as.literal.as.s.data;
+        }
+      }
       continue;
     }
     if (attr_name_eq(attr, "effects")) {
@@ -292,6 +304,8 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   decl->attr_jit = is_jit;
   decl->attr_thread = is_thread;
   decl->attr_pure = is_pure;
+  decl->is_extern = is_extern;
+  decl->link_name = link_name ? ny_strdup(link_name) : NULL;
   if (is_pure) {
     decl->effect_contract_known = true;
     decl->effect_contract_mask = NY_FX_NONE;
@@ -904,15 +918,17 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
                          (unsigned)sema_func->resolved_param_types.len, 0);
     const char *final_name =
         codegen_qname(cg, s->as.fn.name, cg->current_module_name);
-    LLVMValueRef f = LLVMGetNamedFunction(cg->module, final_name);
-    if (!f)
-      f = LLVMAddFunction(cg->module, final_name, ft);
     resolve_fn_attrs(cg, s);
+    const char *ln = s->as.fn.link_name ? s->as.fn.link_name : final_name;
+    LLVMValueRef f = LLVMGetNamedFunction(cg->module, ln);
+    if (!f)
+      f = LLVMAddFunction(cg->module, ln, ft);
     apply_fn_attrs(cg, f, s);
     LLVMSetAlignment(f, 16);
     fun_sig sig;
     ny_fun_sig_init(&sig, final_name, ft, f, s, (int)s->as.fn.params.len,
-                    s->as.fn.is_variadic, false);
+                    s->as.fn.is_variadic, s->as.fn.is_extern);
+    sig.link_name = s->as.fn.link_name ? ny_strdup(s->as.fn.link_name) : NULL;
     sig.return_type = s->as.fn.return_type ? ny_strdup(s->as.fn.return_type) : NULL;
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_EXTERN) {

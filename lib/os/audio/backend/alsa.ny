@@ -7,7 +7,7 @@ module std.os.audio.backend.alsa (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os.ffi *
 use std.os.thread *
 

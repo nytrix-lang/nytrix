@@ -25,6 +25,7 @@ typedef enum ny_builtin_type_kind_t {
   NY_BT_F64,
   NY_BT_F128,
   NY_BT_RESULT,
+  NY_BT_PTR,
 } ny_builtin_type_kind_t;
 
 static const char *type_skip_nullable(const char *name) {
@@ -70,6 +71,8 @@ static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
         return NY_BT_F64;
     } else if (name[0] == 's' && name[1] == 't' && name[2] == 'r') {
       return NY_BT_STR;
+    } else if (name[0] == 'p' && name[1] == 't' && name[2] == 'r') {
+      return NY_BT_PTR;
     }
     break;
   case 4:
@@ -127,7 +130,7 @@ static bool is_nullable_type_name(const char *name) {
 
 static bool is_ptr_type_name(const char *name) {
   name = type_skip_nullable(name);
-  return name && name[0] == '*';
+  return (name && name[0] == '*') || (strcmp(name, "ptr") == 0);
 }
 
 static bool is_float_type_name(const char *name) {
@@ -385,6 +388,9 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
       }
       if (is_float_type_name(want))
         return true;
+      /* Allow integer literals as ptr (null pointer idiom for extern calls) */
+      if (strcmp(want, "ptr") == 0)
+        return true;
       if (is_bool_type_name(want) || is_str_type_name(want) ||
           is_result_type_name(want)) {
         ny_diag_error(tok, "cannot assign integer literal to %s", want);
@@ -413,6 +419,9 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
         cg->had_error = 1;
         return false;
       }
+      /* Allow string literals as ptr (C const char*) for extern fn calls */
+      if (strcmp(want, "ptr") == 0 || strcmp(want, "i64") == 0)
+        return true;
       ny_diag_error(tok, "cannot assign string literal to %s", want);
       cg->had_error = 1;
       return false;
@@ -464,6 +473,7 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_F64:
   case NY_BT_F128:
   case NY_BT_RESULT:
+  case NY_BT_PTR:
     return cg->type_i64;
   default:
     break;
@@ -494,6 +504,8 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   case NY_BT_BOOL:
   case NY_BT_RESULT:
     return cg->type_i64;
+  case NY_BT_PTR:
+    return cg->type_i8ptr;
   case NY_BT_VOID:
     return LLVMVoidTypeInContext(cg->ctx);
   case NY_BT_CHAR:
