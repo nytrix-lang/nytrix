@@ -24,22 +24,22 @@ fn args(){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.os.args *
-    use std.text *
-    use std.text.io *
+   use std.core *
+   use std.os.args *
+   use std.str *
+   use std.str.io *
 
-    def ag = args()
-    assert(is_list(ag), "args() returns list")
-    assert(len(ag) > 0, "args() not empty")
+   def ag = args()
+   assert(is_list(ag), "args() returns list")
+   assert(len(ag) > 0, "args() not empty")
 
-    ; Check first arg is program name
-    def prog = get(ag, 0)
-    assert(is_str(prog), "arg 0 is string")
-    assert(str_len(prog) > 0, "arg 0 non-empty")
+   ; Check first arg is program name
+   def prog = get(ag, 0)
+   assert(is_str(prog), "arg 0 is string")
+   assert(str_len(prog) > 0, "arg 0 non-empty")
 
-    def a0 = argv(0)
-    assert((a0 == prog), "argv(0) matches args()[0]")
+   def a0 = argv(0)
+   assert((a0 == prog), "argv(0) matches args()[0]")
 
-    print("✓ std.os.args tests passed")
+   print("✓ std.os.args tests passed")
 }

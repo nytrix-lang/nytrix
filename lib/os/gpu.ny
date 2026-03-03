@@ -11,7 +11,7 @@ module std.os.gpu (
 )
 
 use std.core *
-use std.text *
+use std.str *
 use std.os.prim *
 use std.util.common as common
 
@@ -86,16 +86,6 @@ fn _normalize_accel_object(v){
    if(s == "cubin"){ s = "ptx" }
    if(s == "none" || s == "auto" || s == "ptx" || s == "o" || s == "spv" || s == "hsaco"){ return s }
    "auto"
-}
-
-fn _list_has(xs, x){
-   "Internal: returns true when list `xs` contains string `x`."
-   mut i = 0
-   while(i < len(xs)){
-      if(eq(get(xs, i, ""), x)){ return true }
-      i += 1
-   }
-   false
 }
 
 mut _opencl_runtime_loaded = false
@@ -478,11 +468,11 @@ fn accel_targets(){
    "Returns canonical accelerator targets ordered by current host preference."
    mut xs = list(8)
    def pref = accel_target()
-   if(pref != "none" && !_list_has(xs, pref)){ xs = append(xs, pref) }
-   if(!_list_has(xs, "nvptx")){ xs = append(xs, "nvptx") }
-   if(!_list_has(xs, "amdgpu")){ xs = append(xs, "amdgpu") }
-   if(!_list_has(xs, "spirv")){ xs = append(xs, "spirv") }
-   if(!_list_has(xs, "hsaco")){ xs = append(xs, "hsaco") }
+   if(pref != "none" && !contains(xs, pref)){ xs = append(xs, pref) }
+   if(!contains(xs, "nvptx")){ xs = append(xs, "nvptx") }
+   if(!contains(xs, "amdgpu")){ xs = append(xs, "amdgpu") }
+   if(!contains(xs, "spirv")){ xs = append(xs, "spirv") }
+   if(!contains(xs, "hsaco")){ xs = append(xs, "hsaco") }
    xs
 }
 

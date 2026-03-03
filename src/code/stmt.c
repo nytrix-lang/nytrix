@@ -479,9 +479,9 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
   if (then_fallthrough)
 
-  if (eb && else_fallthrough)
+    if (eb && else_fallthrough)
 
-  vec_free(&narrow);
+      vec_free(&narrow);
 }
 
 static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
@@ -544,7 +544,6 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
   codegen_debug_pop_block(cg, dbg_scope);
 
   LLVMPositionBuilderAtEnd(cg->builder, eb);
-
 }
 
 static bool get_for_iter_helpers(codegen_t *cg, token_t tok, fun_sig **ls,
@@ -584,7 +583,8 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMPositionBuilderAtEnd(cg->builder, cb);
 
   LLVMValueRef i_start = LLVMConstInt(cg->type_i64, 1, false);
-  LLVMValueRef i_val = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "for_i"));
+  LLVMValueRef i_val =
+      LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "for_i"));
   LLVMAddIncoming(i_val, &i_start, &pre, 1);
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder,
@@ -593,8 +593,13 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
   LLVMPositionBuilderAtEnd(cg->builder, bb);
 
-  LLVMValueRef item = LLVMBuildCall2(cg->builder, gs->type, gs->value,
-                                     (LLVMValueRef[]){itv, i_val}, 2, "");
+  unsigned get_param_count = LLVMCountParamTypes(gs->type);
+  LLVMValueRef get_args[3] = {
+      itv, i_val,
+      LLVMConstInt(cg->type_i64, 1,
+                   false)}; // 1 parses as 'none' internally for Nytrix
+  LLVMValueRef item = LLVMBuildCall2(cg->builder, gs->type, gs->value, get_args,
+                                     get_param_count, "");
   LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
   scope_enter(scopes, depth, eb, lb);
   scope_bind(cg, scopes, *depth, s->as.fr.iter_var, item, s, false, NULL,
@@ -620,55 +625,73 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMAddIncoming(i_val, &i_next, &lb, 1);
 
   LLVMPositionBuilderAtEnd(cg->builder, eb);
-
 }
 
 static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                          size_t func_root, bool is_tail) {
-  fun_sig *sz_fn = lookup_fun(cg, "__jmpbuf_size", 0);
   fun_sig *set_env = lookup_fun(cg, "__set_panic_env", 0);
   fun_sig *clr_env = lookup_fun(cg, "__clear_panic_env", 0);
   fun_sig *get_err = lookup_fun(cg, "__get_panic_val", 0);
-  if (!sz_fn || !set_env || !clr_env || !get_err) {
+  if (!set_env || !clr_env || !get_err) {
     ny_diag_error(s->tok, "missing runtime support for try/catch");
     if (verbose_enabled >= 1)
       ny_diag_hint("required runtime symbols: "
-                   "__jmpbuf_size/__set_panic_env/__clear_panic_env/"
-                   "__get_panic_val");
+                   "__set_panic_env/__clear_panic_env/__get_panic_val");
     cg->had_error = 1;
     return;
   }
-  LLVMValueRef sz_val =
-      LLVMBuildCall2(cg->builder, sz_fn->type, sz_fn->value, NULL, 0, "");
-  LLVMValueRef jmpbuf = LLVMBuildArrayAlloca(
-      cg->builder, LLVMInt8TypeInContext(cg->ctx), sz_val, "jmpbuf");
+
+  // Allocate a static size for jump buffer (1024 bytes is enough on any OS).
+  // Use build_alloca to ensure it's in the entry block.
+  LLVMTypeRef arr_type = LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), 1024);
+  LLVMValueRef jmpbuf = build_alloca(cg, "jmpbuf", arr_type);
   LLVMSetAlignment(jmpbuf, 16);
+
+  LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+  ny_apply_base_fn_attrs(cg, func);
+
   LLVMValueRef jmpbuf_ptr =
       LLVMBuildPtrToInt(cg->builder, jmpbuf, cg->type_i64, "");
   LLVMBuildCall2(cg->builder, set_env->type, set_env->value,
                  (LLVMValueRef[]){jmpbuf_ptr}, 1, "");
+
   LLVMValueRef setjmp_func = NULL;
-#ifdef _WIN32
-  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
-  if (!setjmp_func)
-    setjmp_func = LLVMGetNamedFunction(cg->module, "setjmp");
-#else
-  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
-  if (!setjmp_func)
-    setjmp_func = LLVMGetNamedFunction(cg->module, "setjmp");
-#endif
-  LLVMTypeRef arg_t = ny_llvm_ptr_type(cg->ctx);
   LLVMTypeRef ret_t = LLVMInt32TypeInContext(cg->ctx);
-  if (!setjmp_func) {
+  LLVMTypeRef arg_t = ny_llvm_ptr_type(cg->ctx);
+
 #ifdef _WIN32
+  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
+  if (!setjmp_func) {
     setjmp_func = LLVMAddFunction(
         cg->module, "_setjmp",
         LLVMFunctionType(ret_t, (LLVMTypeRef[]){arg_t, arg_t}, 2, 0));
-#else
-    setjmp_func = LLVMAddFunction(cg->module, "setjmp",
-                                  LLVMFunctionType(ret_t, &arg_t, 1, 0));
-#endif
   }
+#else
+  // Prefer _setjmp (no signal mask save/restore) to match NY_LONGJMP=_longjmp.
+  setjmp_func = LLVMGetNamedFunction(cg->module, "_setjmp");
+  if (!setjmp_func)
+    setjmp_func = LLVMGetNamedFunction(cg->module, "setjmp");
+  if (!setjmp_func) {
+    setjmp_func =
+        LLVMAddFunction(cg->module, "_setjmp",
+                        LLVMFunctionType(ret_t, (LLVMTypeRef[]){arg_t}, 1, 0));
+  }
+#endif
+
+  if (setjmp_func) {
+    unsigned rt_kind = LLVMGetEnumAttributeKindForName("returns_twice", 13);
+    if (rt_kind != 0) {
+      LLVMAttributeRef rt_attr = LLVMCreateEnumAttribute(cg->ctx, rt_kind, 0);
+      LLVMAddAttributeAtIndex(setjmp_func, LLVMAttributeFunctionIndex, rt_attr);
+    }
+    unsigned nuw_kind = LLVMGetEnumAttributeKindForName("nounwind", 8);
+    if (nuw_kind != 0) {
+      LLVMAttributeRef nuw_attr = LLVMCreateEnumAttribute(cg->ctx, nuw_kind, 0);
+      LLVMAddAttributeAtIndex(setjmp_func, LLVMAttributeFunctionIndex,
+                              nuw_attr);
+    }
+  }
+
 #ifdef _WIN32
   LLVMValueRef sj_res = LLVMBuildCall2(
       cg->builder, LLVMGlobalGetValueType(setjmp_func), setjmp_func,
@@ -678,7 +701,14 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(setjmp_func),
                      setjmp_func, (LLVMValueRef[]){jmpbuf}, 1, "sj_res");
 #endif
-  LLVMValueRef func = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+  if (sj_res && LLVMIsAInstruction(sj_res)) {
+    unsigned rt_kind = LLVMGetEnumAttributeKindForName("returns_twice", 13);
+    if (rt_kind != 0) {
+      LLVMAttributeRef rt_attr = LLVMCreateEnumAttribute(cg->ctx, rt_kind, 0);
+      LLVMAddCallSiteAttribute(sj_res, LLVMAttributeFunctionIndex, rt_attr);
+    }
+  }
+
   LLVMBasicBlockRef try_b =
       LLVMAppendBasicBlockInContext(cg->ctx, func, "try_body");
   LLVMBasicBlockRef catch_b =
@@ -721,7 +751,6 @@ static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     LLVMBuildBr(cg->builder, end_b);
   }
   LLVMPositionBuilderAtEnd(cg->builder, end_b);
-
 }
 
 static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
@@ -733,13 +762,13 @@ static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
                                  false, NULL, "__defer");
   LLVMValueRef cls_raw =
       LLVMBuildIntToPtr(cg->builder, cls, LLVMPointerType(cg->type_i64, 0), "");
-  LLVMValueRef fn_ptr_int =
-      LLVMBuildLoad2(cg->builder, cg->type_i64, cls_raw, NY_LLVM_NAME(cg, "defer_fn"));
+  LLVMValueRef fn_ptr_int = LLVMBuildLoad2(cg->builder, cg->type_i64, cls_raw,
+                                           NY_LLVM_NAME(cg, "defer_fn"));
   LLVMValueRef env_addr = LLVMBuildGEP2(
       cg->builder, cg->type_i64, cls_raw,
       (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
-  LLVMValueRef env =
-      LLVMBuildLoad2(cg->builder, cg->type_i64, env_addr, NY_LLVM_NAME(cg, "defer_env"));
+  LLVMValueRef env = LLVMBuildLoad2(cg->builder, cg->type_i64, env_addr,
+                                    NY_LLVM_NAME(cg, "defer_env"));
   fun_sig *push_sig = lookup_fun(cg, "__push_defer", 0);
   if (push_sig) {
     LLVMBuildCall2(cg->builder, push_sig->type, push_sig->value,
@@ -915,7 +944,6 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         }
         if (ensure_store_ready(cg, s->tok, zero, slot, "NY_S_VAR(undef)")) {
           LLVMBuildStore(cg->builder, zero, slot);
-
         }
         continue;
       }
@@ -925,8 +953,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
           resolved_global = gb;
           slot = gb->value;
         } else {
-          slot = LLVMAddGlobal(cg->module, cg->type_i64,
-                               n);
+          slot = LLVMAddGlobal(cg->module, cg->type_i64, n);
           LLVMSetInitializer(slot, LLVMConstInt(cg->type_i64, 0, false));
           const char *type_name = NULL;
           if (s->as.var.types.len > i)
@@ -1143,7 +1170,6 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         LLVMBuildCondBr(cg->builder, guard_b, guard_pass_bb, next_bb);
 
         LLVMPositionBuilderAtEnd(cg->builder, guard_pass_bb);
-
       }
       gen_stmt(cg, scopes, depth, arm->conseq, func_root, is_tail);
       if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
@@ -1152,7 +1178,6 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       }
       scope_pop(scopes, depth);
       LLVMPositionBuilderAtEnd(cg->builder, next_bb);
-
     }
     if (s->as.match.default_conseq) {
       gen_stmt(cg, scopes, depth, s->as.match.default_conseq, func_root,

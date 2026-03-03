@@ -11,7 +11,7 @@ use std.core *
 use std.os *
 use std.os.thread *
 use std.os.time *
-use std.text *
+use std.str *
 use std.util.common as common
 use std.os.audio.backend.io (
    create, connect, disconnect,
@@ -55,9 +55,9 @@ fn _is_async_mode(){
       def v = env("NY_AUDIO_ASYNC")
       if(!v){
          if(_ctx && eq(io_backend_name(_ctx), "pulse")){
-            _async_mode = 0
+         _async_mode = 0
          } else {
-            _async_mode = 1
+         _async_mode = 1
          }
       } else {
          _async_mode = (eq(v, "0") || eq(v, "false") || eq(v, "off")) ? 0 : 1
@@ -192,8 +192,8 @@ fn _cleanup_partial(){
    _idle_sleep_ms = 0
 }
 
-fn init(force_async=false){
-   "Initializes module state."
+fn _do_init(force_async=false){
+   "Internal helper for module initialization."
    if(_ctx != 0){ return true }
    if(_is_debug()){ print("Audio: Initializing context...") }
    def ctx = create()
@@ -248,7 +248,7 @@ fn init(force_async=false){
    if(force_async || _is_async_mode()){
       if(!_start_mixer_thread()){
          if(_is_debug()){
-            print("Audio: Failed to spawn mixer thread; falling back to sync mode.")
+         print("Audio: Failed to spawn mixer thread; falling back to sync mode.")
          }
       }
    }
@@ -257,6 +257,11 @@ fn init(force_async=false){
       print(f"Audio: Backend '{io_backend_name(_ctx)}' ready @ {_get_output_rate()}Hz format={fmt} period={_get_period_frames()} prime={_get_prime_periods()}.")
    }
    true
+}
+
+fn init(force_async=false){
+   "Initializes module state."
+   _do_init(force_async)
 }
 
 fn _make_inst(sound, pitch, vol, looping, pan){
@@ -325,15 +330,15 @@ fn _audio_thread(arg){
          mut has_signal = false
          mut peak = 0.0
          if(_out_format == FORMAT_FLOAT32LE){
-            while(probe < buf_size){
+         while(probe < buf_size){
                def x = load32_f32(mix_buf, probe)
                def ax = abs(x)
                if(ax > peak){ peak = ax }
                if(ax > 0.000001){ has_signal = true }
                probe += 4
-            }
+         }
          } else {
-            while(probe < buf_size){
+         while(probe < buf_size){
                mut x = load16(mix_buf, probe)
                if(x > 32767){ x = x - 65536 }
                def ax = (x < 0) ? (0 - x) : x
@@ -341,10 +346,10 @@ fn _audio_thread(arg){
                if(fx > peak){ peak = fx }
                if(x != 0){ has_signal = true }
                probe += 2
-            }
+         }
          }
          if(peak > 0.0){
-            print(f"Audio: mix probe active={len(actives)} signal={has_signal} peak={peak}")
+         print(f"Audio: mix probe active={len(actives)} signal={has_signal} peak={peak}")
          }
       }
       if(!outstream_write_frames(_stream, mix_buf, period_frames)){
@@ -359,7 +364,7 @@ fn _audio_thread(arg){
 
 fn play(sound, pitch=1.0, vol=1.0, looping=false, pan=0.0){
    "Implements `play`."
-   if(!_ctx && !init()){ return 0 }
+   if(!_ctx && !_do_init()){ return 0 }
    if(!_thread && looping){
       if(!_start_mixer_thread() && _is_debug()){
          print("Audio: looping requested but mixer thread start failed; using sync mode.")

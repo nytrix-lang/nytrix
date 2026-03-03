@@ -88,12 +88,12 @@ def _sanitizer_env(build_dir, sanitizer):
 
 def run_test(build_dir, test_kind, std_bundle, test_jobs=0, timeout="auto", unknown=None):
     test_bin = resolve_primary_bin(build_dir, test_kind).resolve()
-    
+
     env = os.environ.copy()
     if std_bundle is not None:
         env["NYTRIX_BUILD_STD_PATH"] = str(std_bundle.resolve())
     env.setdefault("NYTRIX_TEST_CACHE", "1")
-    
+
     if host_os() == "windows":
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
@@ -104,7 +104,7 @@ def run_test(build_dir, test_kind, std_bundle, test_jobs=0, timeout="auto", unkn
     jobs_disp = c('1;33', str(test_jobs))
     timeout_disp = c('1;35', timeout)
     step(f"run tests: bin={bin_disp} jobs={jobs_disp} timeout={timeout_disp}")
-    
+
     cmd = [
         *_py(ROOT/"etc"/"tools"/"test.py"),
         "--bin", str(test_bin), "--jobs", str(test_jobs)
@@ -172,17 +172,12 @@ def run_repl(build_dir, kind="release", unknown=None):
     os.execv(str(ny_bin), cmd)
 
 def run_std(build_dir, kind="release"):
-    from std import run_std_bundle
-
-    bdir = cmake_build_dir(build_dir, kind)
-    bundle_path = bdir / "std.ny"
-    run_std_bundle(bundle_path)
+    from cmake import cmake_build
+    cmake_build(build_dir, kind, None, None, None, None, target="std_bundle")
 
 def run_fmt(unknown=None):
-    cmd = [*_py(ROOT / "etc" / "tools" / "nyfmt.py")]
-    if unknown:
-        cmd.extend(unknown)
-    run(cmd)
+    from tidy import run_tidy
+    run_tidy(unknown)
 
 def run_docs(build_dir):
     from web import run_web_gen
@@ -295,18 +290,18 @@ def run_optcheck(build_dir):
     bin_debug = resolve_primary_bin(build_dir, "debug")
     out_dir = build_dir/"cache"/"optcheck"
     out_dir.mkdir(parents=True, exist_ok=True)
-    
+
     src = out_dir/"optcheck.ny"
     src.write_text(
         "fn loop_sum(n){\n  mut i=0\n  mut s=0\n  while(i<n){ s+=i; i+=1 }\n  s\n}\n\n"
         "fn main(){\n  def a = loop_sum(200)\n  def b = loop_sum(120)\n  if(a > b){ a-b } else { b-a }\n}\n",
         encoding="utf-8"
     )
-    
+
     profiles = ("none", "compile", "balanced", "speed", "size")
     print(c("36", "Optimization Check (LLVM IR)"))
     print(c("90", "-"*64))
-    
+
     for profile in profiles:
         ir_path = out_dir/f"{profile}.ll"
         env = os.environ.copy()

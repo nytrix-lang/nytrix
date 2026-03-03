@@ -80,7 +80,7 @@ static bool ny_comptime_main_enabled(void) {
 }
 
 static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
-                                   ny_ct_fast_val_t *out) {
+                                  ny_ct_fast_val_t *out) {
   if (!op || !r || !out)
     return false;
   if (strcmp(op, "!") == 0) {
@@ -177,8 +177,8 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
 #undef NY_CT_OP_BOOL
 
 static bool ny_ct_fast_eval_binary(const char *op, const ny_ct_fast_val_t *l,
-                                    const ny_ct_fast_val_t *r,
-                                    ny_ct_fast_val_t *out) {
+                                   const ny_ct_fast_val_t *r,
+                                   ny_ct_fast_val_t *out) {
   if (!op || !l || !r || !out)
     return false;
   if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
@@ -349,29 +349,61 @@ static bool ny_try_eval_comptime_fast(stmt_t *body, int64_t *out_tagged) {
   if (!body || !out_tagged)
     return false;
 
-  expr_t *e = NULL;
   if (body->kind == NY_S_BLOCK) {
-    if (body->as.block.body.len != 1)
-      return false;
-    stmt_t *s = body->as.block.body.data[0];
-    if (!s)
-      return false;
-    if (s->kind == NY_S_RETURN) {
-      e = s->as.ret.value;
-    } else if (s->kind == NY_S_EXPR) {
-      e = s->as.expr.expr;
-    } else {
-      return false;
+    int64_t res = 0; // None by default
+    for (size_t i = 0; i < body->as.block.body.len; ++i) {
+      stmt_t *s = body->as.block.body.data[i];
+      if (!s)
+        continue;
+      if (s->kind == NY_S_FUNC || s->kind == NY_S_EXTERN ||
+          s->kind == NY_S_LINK || s->kind == NY_S_MODULE ||
+          s->kind == NY_S_STRUCT || s->kind == NY_S_LAYOUT ||
+          s->kind == NY_S_ENUM || s->kind == NY_S_MACRO ||
+          s->kind == NY_S_USE || s->kind == NY_S_EXPORT) {
+        // Harmless declarations during fast eval
+        continue;
+      }
+      if (!ny_try_eval_comptime_fast(s, &res)) {
+        return false;
+      }
     }
-  } else if (body->kind == NY_S_RETURN) {
+    *out_tagged = res;
+    return true;
+  }
+
+  if (body->kind == NY_S_IF) {
+    ny_ct_fast_val_t cond_v = {0};
+    bool truthy = false;
+    if (ny_try_eval_comptime_expr_fast(body->as.iff.test, &cond_v, 0) &&
+        ny_ct_fast_truthy(&cond_v, &truthy)) {
+      if (truthy) {
+        if (body->as.iff.conseq)
+          return ny_try_eval_comptime_fast(body->as.iff.conseq, out_tagged);
+        *out_tagged = 0;
+        return true;
+      } else {
+        if (body->as.iff.alt)
+          return ny_try_eval_comptime_fast(body->as.iff.alt, out_tagged);
+        *out_tagged = 0;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  expr_t *e = NULL;
+  if (body->kind == NY_S_RETURN) {
     e = body->as.ret.value;
   } else if (body->kind == NY_S_EXPR) {
     e = body->as.expr.expr;
   } else {
     return false;
   }
-  if (!e)
-    return false;
+
+  if (!e) {
+    *out_tagged = 0;
+    return true;
+  }
 
   ny_ct_fast_val_t v = {0};
   if (!ny_try_eval_comptime_expr_fast(e, &v, 0))
@@ -383,6 +415,10 @@ static bool ny_try_eval_comptime_fast(stmt_t *body, int64_t *out_tagged) {
   }
   if (v.kind == NY_CT_FAST_INT) {
     *out_tagged = (int64_t)((((uint64_t)v.i) << 1) | 1u);
+    return true;
+  }
+  if (v.kind == NY_CT_FAST_NONE) {
+    *out_tagged = 0;
     return true;
   }
   return false;
@@ -784,11 +820,13 @@ static LLVMValueRef ny_try_host_platform_ident(codegen_t *cg,
 
   if (strcmp(name, "OS") == 0) {
     LLVMValueRef g = const_string_ptr(cg, os, strlen(os));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g, NY_LLVM_NAME(cg, "host_os"));
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
+                          NY_LLVM_NAME(cg, "host_os"));
   }
   if (strcmp(name, "ARCH") == 0) {
     LLVMValueRef g = const_string_ptr(cg, arch, strlen(arch));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g, NY_LLVM_NAME(cg, "host_arch"));
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
+                          NY_LLVM_NAME(cg, "host_arch"));
   }
   if (strcmp(name, "IS_LINUX") == 0)
     return strcmp(os, "linux") == 0 ? tag_true : tag_false;
@@ -885,9 +923,11 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
         cg->builder, cg->type_i64, env_raw,
         (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
         "");
-    LLVMBuildStore(cg->builder, slot_val, dst);
+    if (dst && slot_val) {
+      LLVMBuildStore(cg->builder, slot_val, dst);
+    }
   }
-  /* Create Closure Object [Tag=105 | Code | Env] */
+  /* Create Closure Object [Tag=106 (TAG_CLOSURE) | Code | Env] */
   LLVMValueRef cls_size =
       LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
   LLVMValueRef cls_ptr =
@@ -901,16 +941,22 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
       LLVMBuildBitCast(cg->builder, cls_raw,
                        LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0), ""),
       (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
-  LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 105, false),
-                 LLVMBuildBitCast(cg->builder, tag_addr,
-                                  LLVMPointerType(cg->type_i64, 0), ""));
+  if (tag_addr) {
+    LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, TAG_CLOSURE, false),
+                   LLVMBuildBitCast(cg->builder, tag_addr,
+                                    LLVMPointerType(cg->type_i64, 0), ""));
+  }
   /* Store Code at 0 */
-  LLVMBuildStore(cg->builder, fn_ptr_raw, cls_raw);
+  if (cls_raw && fn_ptr_raw) {
+    LLVMBuildStore(cg->builder, fn_ptr_raw, cls_raw);
+  }
   /* Store Env at 8 */
   LLVMValueRef env_store_addr = LLVMBuildGEP2(
       cg->builder, cg->type_i64, cls_raw,
       (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
-  LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
+  if (env_store_addr && env_ptr) {
+    LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
+  }
   vec_free(&captures);
   return cls_ptr;
 }
@@ -925,38 +971,43 @@ LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
   LLVMValueRef is_zero =
       LLVMBuildICmp(cg->builder, LLVMIntEQ, v,
                     LLVMConstInt(cg->type_i64, 1, false), "is_zero");
-  
-  LLVMValueRef basic_false = LLVMBuildOr(cg->builder, LLVMBuildOr(cg->builder, is_none, is_false, ""),
-                                         is_zero, "");
-  
+
+  LLVMValueRef basic_false =
+      LLVMBuildOr(cg->builder, LLVMBuildOr(cg->builder, is_none, is_false, ""),
+                  is_zero, "");
+
   // Also check if it's a float 0.0
   LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
   LLVMBasicBlockRef check_flt_bb = ny_llvm_append_block(fn, "bool.check_flt");
   LLVMBasicBlockRef end_bb = ny_llvm_append_block(fn, "bool.end");
-  
+
   LLVMBuildCondBr(cg->builder, basic_false, check_flt_bb, end_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
   LLVMValueRef is_flt = ny_is_float(cg, v);
-  
-  LLVMBasicBlockRef flt_real_check_bb = ny_llvm_append_block(fn, "bool.flt_real_check");
+
+  LLVMBasicBlockRef flt_real_check_bb =
+      ny_llvm_append_block(fn, "bool.flt_real_check");
   LLVMBuildCondBr(cg->builder, is_flt, flt_real_check_bb, end_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, flt_real_check_bb);
   LLVMValueRef fv = ny_unbox_float(cg, v);
-  LLVMValueRef is_f_zero = LLVMBuildFCmp(cg->builder, LLVMRealOEQ, fv, LLVMConstReal(cg->type_f64, 0.0), "is_f_zero");
+  LLVMValueRef is_f_zero =
+      LLVMBuildFCmp(cg->builder, LLVMRealOEQ, fv,
+                    LLVMConstReal(cg->type_f64, 0.0), "is_f_zero");
   LLVMBasicBlockRef flt_real_check_end_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, end_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, end_bb);
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, LLVMInt1TypeInContext(cg->ctx), "is_false_final");
-  LLVMValueRef vals[3] = {LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false), 
-                          LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false),
-                          is_f_zero};
+  LLVMValueRef phi = LLVMBuildPhi(cg->builder, LLVMInt1TypeInContext(cg->ctx),
+                                  "is_false_final");
+  LLVMValueRef vals[3] = {
+      LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false),
+      LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false), is_f_zero};
   LLVMBasicBlockRef bbs[3] = {cur_bb, check_flt_bb, flt_real_check_end_bb};
   LLVMAddIncoming(phi, vals, bbs, 3);
-  
+
   return LLVMBuildNot(cg->builder, phi, NY_LLVM_NAME(cg, "to_bool"));
 }
 
@@ -1049,35 +1100,44 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   // Write Tail
   uint64_t magic3 = NY_MAGIC3;
   memcpy(obj_data + header_size + final_len + 1, &magic3, sizeof(magic3));
-  LLVMTypeRef arr_ty =
-      LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
-  LLVMValueRef g = LLVMAddGlobal(cg->module, arr_ty, ".str");
-  LLVMSetInitializer(g, LLVMConstStringInContext(cg->ctx, obj_data,
-                                                 (unsigned)total_len, true));
-  LLVMSetGlobalConstant(g, true);
-  LLVMSetLinkage(g, LLVMInternalLinkage);
-  LLVMSetUnnamedAddr(g, true);
-  LLVMSetAlignment(g, 64);
+  char data_name[128];
+  snprintf(data_name, sizeof(data_name), ".str.data.%llx",
+           (unsigned long long)key_hash);
+  LLVMValueRef g = LLVMGetNamedGlobal(cg->module, data_name);
+  if (!g) {
+    LLVMTypeRef arr_ty =
+        LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
+    g = LLVMAddGlobal(cg->module, arr_ty, data_name);
+    LLVMSetInitializer(g, LLVMConstStringInContext(cg->ctx, obj_data,
+                                                   (unsigned)total_len, true));
+    LLVMSetGlobalConstant(g, true);
+    LLVMSetLinkage(g, LLVMPrivateLinkage);
+    LLVMSetUnnamedAddr(g, true);
+    LLVMSetAlignment(g, 64);
+  }
+
+  char ptr_name[128];
+  snprintf(ptr_name, sizeof(ptr_name), ".str.runtime.%llx",
+           (unsigned long long)key_hash);
+  LLVMValueRef runtime_ptr_global = LLVMGetNamedGlobal(cg->module, ptr_name);
+  if (!runtime_ptr_global) {
+    runtime_ptr_global = LLVMAddGlobal(cg->module, cg->type_i64, ptr_name);
+    LLVMSetInitializer(runtime_ptr_global,
+                       LLVMConstInt(cg->type_i64, 0, false));
+    LLVMSetLinkage(runtime_ptr_global, LLVMPrivateLinkage);
+  }
+
   // Store the global and metadata
   string_intern in = {.data = obj_data + header_size,
                       .len = final_len,
                       .hash = key_hash,
-                      .val = g,
+                      .val = runtime_ptr_global,
                       .gv = g,
                       .module = cg->module,
                       .alloc = obj_data};
   vec_push(&cg->interns, in);
   intern_map_put(cg, key_hash, (uint32_t)cg->interns.len);
-  // Create a global i64 variable to hold the runtime pointer address
-  // This is initialized to 0 but will be set in a runtime init function
-  char ptr_name[128];
-  snprintf(ptr_name, sizeof(ptr_name), ".str.runtime.%zu", cg->interns.len - 1);
-  LLVMValueRef runtime_ptr_global =
-      LLVMAddGlobal(cg->module, cg->type_i64, ptr_name);
-  LLVMSetInitializer(runtime_ptr_global, LLVMConstInt(cg->type_i64, 0, false));
-  LLVMSetLinkage(runtime_ptr_global, LLVMInternalLinkage);
-  // Store this runtime pointer global in the intern struct
-  cg->interns.data[cg->interns.len - 1].val = runtime_ptr_global;
+
   // Return the runtime pointer global (callers will load from it)
   return runtime_ptr_global;
 }
@@ -1091,8 +1151,10 @@ LLVMValueRef ny_is_tagged_int(codegen_t *cg, LLVMValueRef v) {
     return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
   }
   LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
-  LLVMValueRef lsb = LLVMBuildAnd(cg->builder, v, one, NY_LLVM_NAME(cg, "int_lsb"));
-  return LLVMBuildICmp(cg->builder, LLVMIntEQ, lsb, one, NY_LLVM_NAME(cg, "is_tagged_int"));
+  LLVMValueRef lsb =
+      LLVMBuildAnd(cg->builder, v, one, NY_LLVM_NAME(cg, "int_lsb"));
+  return LLVMBuildICmp(cg->builder, LLVMIntEQ, lsb, one,
+                       NY_LLVM_NAME(cg, "is_tagged_int"));
 }
 
 LLVMValueRef ny_untag_int(codegen_t *cg, LLVMValueRef v) {
@@ -1111,8 +1173,8 @@ LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v) {
   fun_sig *s = lookup_fun(cg, "__is_float_obj", 0);
   if (!s)
     return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
-  LLVMValueRef res_tagged =
-      LLVMBuildCall2(cg->builder, s->type, s->value, (LLVMValueRef[]){v}, 1, "");
+  LLVMValueRef res_tagged = LLVMBuildCall2(cg->builder, s->type, s->value,
+                                           (LLVMValueRef[]){v}, 1, "");
   return LLVMBuildICmp(cg->builder, LLVMIntEQ, res_tagged,
                        LLVMConstInt(cg->type_i64, 2, false), "is_flt");
 }
@@ -1121,25 +1183,30 @@ LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v) {
   LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
   LLVMBasicBlockRef int_bb = ny_llvm_append_block(fn, "unbox_flt.int");
-  LLVMBasicBlockRef check_flt_bb = ny_llvm_append_block(fn, "unbox_flt.check_flt");
+  LLVMBasicBlockRef check_flt_bb =
+      ny_llvm_append_block(fn, "unbox_flt.check_flt");
   LLVMBasicBlockRef flt_bb = ny_llvm_append_block(fn, "unbox_flt.flt");
-  LLVMBasicBlockRef fallback_bb = ny_llvm_append_block(fn, "unbox_flt.fallback");
+  LLVMBasicBlockRef fallback_bb =
+      ny_llvm_append_block(fn, "unbox_flt.fallback");
   LLVMBasicBlockRef done_bb = ny_llvm_append_block(fn, "unbox_flt.done");
-  
+
   LLVMBuildCondBr(cg->builder, ny_is_tagged_int(cg, v), int_bb, check_flt_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, int_bb);
   LLVMValueRef raw_int = ny_untag_int(cg, v);
-  LLVMValueRef d_from_i = LLVMBuildSIToFP(cg->builder, raw_int, cg->type_f64, NY_LLVM_NAME(cg, "d_from_i"));
+  LLVMValueRef d_from_i = LLVMBuildSIToFP(cg->builder, raw_int, cg->type_f64,
+                                          NY_LLVM_NAME(cg, "d_from_i"));
   LLVMBasicBlockRef int_done_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, done_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
   LLVMBuildCondBr(cg->builder, ny_is_float(cg, v), flt_bb, fallback_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, flt_bb);
-  LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(cg->type_f64, 0), "");
-  LLVMValueRef d_from_p = LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, NY_LLVM_NAME(cg, "d_from_p"));
+  LLVMValueRef ptr =
+      LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(cg->type_f64, 0), "");
+  LLVMValueRef d_from_p = LLVMBuildLoad2(cg->builder, cg->type_f64, ptr,
+                                         NY_LLVM_NAME(cg, "d_from_p"));
   LLVMBasicBlockRef flt_done_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, done_bb);
 
@@ -1147,11 +1214,13 @@ LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v) {
   LLVMValueRef zero = LLVMConstReal(cg->type_f64, 0.0);
   LLVMBasicBlockRef fallback_done_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, done_bb);
-  
+
   LLVMPositionBuilderAtEnd(cg->builder, done_bb);
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_f64, NY_LLVM_NAME(cg, "unbox_flt_res"));
+  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_f64,
+                                  NY_LLVM_NAME(cg, "unbox_flt_res"));
   LLVMValueRef incoming_vals[3] = {d_from_i, d_from_p, zero};
-  LLVMBasicBlockRef incoming_bbs[3] = {int_done_bb, flt_done_bb, fallback_done_bb};
+  LLVMBasicBlockRef incoming_bbs[3] = {int_done_bb, flt_done_bb,
+                                       fallback_done_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 3);
   return phi;
 }
@@ -1160,8 +1229,7 @@ static fun_sig *ny_helper_lookup(codegen_t *cg, fun_sig **cache_slot,
                                  const char *const *names, size_t names_len) {
   if (!cg || !names || names_len == 0)
     return NULL;
-  if (cache_slot && *cache_slot &&
-      ny_sig_in_current_sigs(cg, *cache_slot))
+  if (cache_slot && *cache_slot && ny_sig_in_current_sigs(cg, *cache_slot))
     return *cache_slot;
   for (size_t i = 0; i < names_len; ++i) {
     const char *name = names[i];
@@ -1295,6 +1363,15 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   // LLVM verification errors.
   for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
        f = LLVMGetNextFunction(f)) {
+    if (LLVMIsDeclaration(f)) {
+      if (verbose_enabled >= 2) {
+        fprintf(stderr, "[jit] snapshot decl: %s\n", LLVMGetValueName(f));
+      }
+    }
+  }
+
+  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+       f = LLVMGetNextFunction(f)) {
     if (strcmp(LLVMGetValueName(f), entry_name) == 0)
       continue;
     bool broken = false;
@@ -1306,6 +1383,10 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       }
     }
     if (broken) {
+      if (verbose_enabled >= 1) {
+        fprintf(stderr, "[jit] clearing broken function: %s\n",
+                LLVMGetValueName(f));
+      }
       ny_llvm_clear_function(f);
     }
   }
@@ -1343,12 +1424,15 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   tcg.debug_symbols = cg->debug_symbols;
   tcg.di_builder = NULL;
 
-  codegen_prepare(&tcg);
+  // codegen_prepare(&tcg);
 
   LLVMValueRef entry_fn = LLVMAddFunction(
       mod, entry_name, LLVMFunctionType(tcg.type_i64, NULL, 0, 0));
   LLVMPositionBuilderAtEnd(
       bld, LLVMAppendBasicBlockInContext(ctm_ctx, entry_fn, "e"));
+
+  codegen_repopulate_interns(&tcg);
+  codegen_emit_string_init(&tcg);
 
   gen_stmt(&tcg, (scope[64]){0}, (size_t[]){0}, body, 0, false);
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(bld))) {
@@ -1357,7 +1441,11 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   // 7. JIT Execute.
   LLVMExecutionEngineRef ee = NULL;
-  if (LLVMCreateMCJITCompilerForModule(&ee, mod, NULL, 0, &err) != 0) {
+  struct LLVMMCJITCompilerOptions jit_opts;
+  ny_jit_init_options(&jit_opts, mod);
+  jit_opts.EnableFastISel = 1;
+  if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
+                                       &err) != 0) {
     NY_LOG_ERR("Comptime JIT error: %s\n", err);
     LLVMDisposeMessage(err);
     codegen_dispose(&tcg);
@@ -1369,7 +1457,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   uint64_t addr = LLVMGetFunctionAddress(ee, entry_name);
   int64_t res = 1;
   if (addr) {
-    res = ((int64_t(*)(void))addr)();
+    res = ((int64_t (*)(void))addr)();
   }
 
   LLVMDisposeExecutionEngine(ee);
@@ -1424,16 +1512,17 @@ static LLVMValueRef gen_unary_op_common(
 
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
 
-  LLVMValueRef slow_value = LLVMBuildCall2(cg->builder, slow_sig->type,
-                                           slow_sig->value, slow_args,
-                                           (unsigned)slow_argc, "");
+  LLVMValueRef slow_value =
+      LLVMBuildCall2(cg->builder, slow_sig->type, slow_sig->value, slow_args,
+                     (unsigned)slow_argc, "");
   LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
 
   LLVMBuildBr(cg->builder, merge_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
 
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "un_result"));
+  LLVMValueRef phi =
+      LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "un_result"));
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -1495,11 +1584,18 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
   if (!s)
     return expr_fail(cg, e->tok, "index operation requires 'get'");
   ny_dbg_loc(cg, e->tok);
-  return LLVMBuildCall2(
-      cg->builder, s->type, s->value,
-      (LLVMValueRef[]){gen_expr(cg, scopes, depth, e->as.index.target),
-                       gen_expr(cg, scopes, depth, e->as.index.start)},
-      2, "");
+  LLVMValueRef args[16];
+  args[0] = gen_expr(cg, scopes, depth, e->as.index.target);
+  args[1] = gen_expr(cg, scopes, depth, e->as.index.start);
+  unsigned arg_count = s->arity;
+  if (arg_count < 2)
+    arg_count = 2;
+  if (arg_count > 16)
+    arg_count = 16;
+  for (unsigned i = 2; i < arg_count; i++) {
+    args[i] = LLVMConstInt(cg->type_i64, 1, false); // Tagged 0 default
+  }
+  return LLVMBuildCall2(cg->builder, s->type, s->value, args, arg_count, "");
 }
 
 static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
@@ -1511,13 +1607,19 @@ static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
                      "list literal requires __list_new/__store64_idx helpers");
   ny_dbg_loc(cg, e->tok);
   size_t item_count = e->as.list_like.len;
-  LLVMValueRef vl =
-      LLVMBuildCall2(cg->builder, ls->type, ls->value,
-                     (LLVMValueRef[]){LLVMConstInt(
-                         cg->type_i64, (((uint64_t)item_count << 1) | 1u),
-                         false)},
-                     1, "");
+  LLVMValueRef vl = LLVMBuildCall2(
+      cg->builder, ls->type, ls->value,
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64,
+                                    (((uint64_t)item_count << 1) | 1u), false)},
+      1, "");
   for (size_t i = 0; i < item_count; i++) {
+    if (i > 0 && i % 64 == 0) {
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef cur_fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef next_bb = ny_llvm_append_block(cur_fn, "lst_chunk");
+      LLVMBuildBr(cg->builder, next_bb);
+      LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+    }
     LLVMValueRef item = gen_expr(cg, scopes, depth, e->as.list_like.data[i]);
     uint64_t tagged_off = ((((uint64_t)16 + (uint64_t)i * 8u) << 1) | 1u);
     ny_dbg_loc(cg, e->tok);
@@ -1549,13 +1651,21 @@ static LLVMValueRef gen_expr_dict(codegen_t *cg, scope *scopes, size_t depth,
       (LLVMValueRef[]){LLVMConstInt(
           cg->type_i64, ((uint64_t)e->as.dict.pairs.len << 2) | 1, false)},
       1, "");
-  for (size_t i = 0; i < e->as.dict.pairs.len; i++)
+  for (size_t i = 0; i < e->as.dict.pairs.len; i++) {
+    if (i > 0 && i % 64 == 0) {
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef cur_fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef next_bb = ny_llvm_append_block(cur_fn, "dct_chunk");
+      LLVMBuildBr(cg->builder, next_bb);
+      LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+    }
     LLVMBuildCall2(
         cg->builder, ss->type, ss->value,
         (LLVMValueRef[]){
             dl, gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].key),
             gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].value)},
         3, "");
+  }
   return dl;
 }
 
@@ -1674,9 +1784,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
       name_len = strlen(e->as.ident.name);
-    binding *b =
-        scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
-                          e->as.ident.hash);
+    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
+                                   e->as.ident.hash);
     if (b) {
       b->is_used = true;
       if (b->is_slot) {
@@ -1697,7 +1806,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       LLVMValueRef sv = s->value;
       // Return raw callable pointer as int. Do not apply ad-hoc low-bit tags:
       // on 32-bit targets, tag `2` collides with NY_NATIVE_TAG and causes
-      // __callN/__thread dispatch to treat Nytrix functions as native pointers.
+      // __callN/__thread dispatch to treat Nytrix functions as native
+      // pointers.
       return LLVMBuildPtrToInt(cg->builder, sv, cg->type_i64, "");
     }
 
@@ -1745,9 +1855,10 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMValueRef ptr = gen_expr(cg, scopes, depth, e->as.deref.target);
     // Low level: treat ptr as raw address
     ny_dbg_loc(cg, e->tok);
-    LLVMValueRef raw_ptr =
-        LLVMBuildIntToPtr(cg->builder, ptr, cg->type_i8ptr, NY_LLVM_NAME(cg, "raw_ptr"));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, raw_ptr, NY_LLVM_NAME(cg, "deref"));
+    LLVMValueRef raw_ptr = LLVMBuildIntToPtr(cg->builder, ptr, cg->type_i8ptr,
+                                             NY_LLVM_NAME(cg, "raw_ptr"));
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, raw_ptr,
+                          NY_LLVM_NAME(cg, "deref"));
   }
   case NY_E_MEMBER: {
     // First, attempt to resolve as a static enum member or qualified global.
@@ -1782,10 +1893,20 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     }
 
     // Assume `get` can take a default value as a third argument.
-    LLVMValueRef args[] = {target, key_str};
+    LLVMValueRef args[16];
+    args[0] = target;
+    args[1] = key_str;
+    unsigned arg_count = get_sig->arity;
+    if (arg_count < 2)
+      arg_count = 2;
+    if (arg_count > 16)
+      arg_count = 16;
+    for (unsigned i = 2; i < arg_count; i++) {
+      args[i] = LLVMConstInt(cg->type_i64, 1, false); // Tagged 0 default
+    }
     ny_dbg_loc(cg, e->tok);
-    return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args, 2,
-                          "");
+    return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args,
+                          arg_count, "");
   }
   case NY_E_SIZEOF: {
     const char *type_name = NULL;
@@ -1839,7 +1960,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMPositionBuilderAtEnd(cg->builder, end_bb);
 
     ny_dbg_loc(cg, e->tok);
-    LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
+    LLVMValueRef phi =
+        LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
     LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
                     (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
     return phi;
@@ -1918,7 +2040,8 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fclose(f);
     LLVMValueRef g = const_string_ptr(cg, buf, (size_t)size);
     free(buf);
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g, NY_LLVM_NAME(cg, "embed_ptr"));
+    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
+                          NY_LLVM_NAME(cg, "embed_ptr"));
   }
   case NY_E_TRY: {
     LLVMValueRef res = gen_expr(cg, scopes, depth, e->as.unary.right);

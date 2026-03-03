@@ -13,8 +13,8 @@ use std.core *
 use std.math *
 
 fn is_vector(v){
-    "Returns true if `v` is a list-based vector object."
-    is_list(v)
+   "Returns true if `v` is a list-based vector object."
+   is_list(v)
 }
 
 fn _mk(n, fill=0){
@@ -60,13 +60,13 @@ fn vec4(x=0, y=0, z=0, w=0){
 }
 
 fn dim(v){
-    "Returns the dimension (number of elements) of vector `v`."
-    len(v)
+   "Returns the dimension (number of elements) of vector `v`."
+   len(v)
 }
 
 fn at(v, i, default=0){
-    "Returns the element at index `i` of vector `v`, or `default` if not found."
-    get(v, i, default)
+   "Returns the element at index `i` of vector `v`, or `default` if not found."
+   get(v, i, default)
 }
 
 fn set(v, i, x){
@@ -108,13 +108,13 @@ fn v_add(a, b){
 }
 
 fn v_sub(a, b){
-    "Returns the element-wise difference of vectors `a` and `b` (a - b)."
-    _zip2(a, b, 1)
+   "Returns the element-wise difference of vectors `a` and `b` (a - b)."
+   _zip2(a, b, 1)
 }
 
 fn hadamard(a, b){
-    "Returns the Hadamard (element-wise) product of vectors `a` and `b`."
-    _zip2(a, b, 2)
+   "Returns the Hadamard (element-wise) product of vectors `a` and `b`."
+   _zip2(a, b, 2)
 }
 
 fn v_mul(a, b){
@@ -132,29 +132,29 @@ fn v_div(a, b){
 
 ;; Generic dispatch wrappers
 fn add(a, b){
-    "Generic addition: supports both numbers and vectors."
-    if(is_vector(a) && is_vector(b)){ return v_add(a, b) }
-    a + b
+   "Generic addition: supports both numbers and vectors."
+   if(is_vector(a) && is_vector(b)){ return v_add(a, b) }
+   a + b
 }
 
 fn sub(a, b){
-    "Generic subtraction: supports both numbers and vectors."
-    if(is_vector(a) && is_vector(b)){ return v_sub(a, b) }
-    a - b
+   "Generic subtraction: supports both numbers and vectors."
+   if(is_vector(a) && is_vector(b)){ return v_sub(a, b) }
+   a - b
 }
 
 fn mul(a, b){
-    "Generic multiplication: supports numbers, scalar-vector, and vector-vector products."
-    if(is_vector(a) && is_vector(b)){ return hadamard(a, b) }
-    if(is_vector(a) && (is_int(b) || is_float(b))){ return scale(a, b) }
-    if(is_vector(b) && (is_int(a) || is_float(a))){ return scale(b, a) }
-    a * b
+   "Generic multiplication: supports numbers, scalar-vector, and vector-vector products."
+   if(is_vector(a) && is_vector(b)){ return hadamard(a, b) }
+   if(is_vector(a) && (is_int(b) || is_float(b))){ return scale(a, b) }
+   if(is_vector(b) && (is_int(a) || is_float(a))){ return scale(b, a) }
+   a * b
 }
 
 fn div(a, b){
-    "Generic division: supports numbers and vector-scalar division."
-    if(is_vector(a) && (is_int(b) || is_float(b))){ return divs(a, b) }
-    a / b
+   "Generic division: supports numbers and vector-scalar division."
+   if(is_vector(a) && (is_int(b) || is_float(b))){ return divs(a, b) }
+   a / b
 }
 
 fn scale(v, s){
@@ -214,13 +214,13 @@ fn cross3(a, b){
 }
 
 fn len2(v){
-    "Returns the squared magnitude (Euclidean length) of vector `v`."
-    dot(v, v)
+   "Returns the squared magnitude (Euclidean length) of vector `v`."
+   dot(v, v)
 }
 
 fn magnitude(v){
-    "Returns the magnitude (Euclidean length) of vector `v`."
-    sqrt(len2(v))
+   "Returns the magnitude (Euclidean length) of vector `v`."
+   sqrt(len2(v))
 }
 
 fn normalize(v){
@@ -236,27 +236,27 @@ fn lerp(a, b, t){
 }
 
 if(comptime{__main()}){
-    use std.core *
+   use std.core *
 
-    def a = vec3(1, 2, 3)
-    def b = vec3(4, 5, 6)
+   def a = vec3(1, 2, 3)
+   def b = vec3(4, 5, 6)
 
-    def s = v_add(a, b)
-    assert(get(s, 0, 0) == 5, "vector add x")
-    assert(get(s, 1, 0) == 7, "vector add y")
-    assert(get(s, 2, 0) == 9, "vector add z")
+   def s = v_add(a, b)
+   assert(get(s, 0, 0) == 5, "vector add x")
+   assert(get(s, 1, 0) == 7, "vector add y")
+   assert(get(s, 2, 0) == 9, "vector add z")
 
-    assert(dot(a, b) == 32, "vector dot")
+   assert(dot(a, b) == 32, "vector dot")
 
-    def c = cross3(a, b)
-    assert(get(c, 0, 0) == -3, "vector cross x")
-    assert(get(c, 1, 0) == 6, "vector cross y")
-    assert(get(c, 2, 0) == -3, "vector cross z")
+   def c = cross3(a, b)
+   assert(get(c, 0, 0) == -3, "vector cross x")
+   assert(get(c, 1, 0) == 6, "vector cross y")
+   assert(get(c, 2, 0) == -3, "vector cross z")
 
-    def h = hadamard(a, b)
-    assert(get(h, 0, 0) == 4, "vector hadamard x")
-    assert(get(h, 1, 0) == 10, "vector hadamard y")
-    assert(get(h, 2, 0) == 18, "vector hadamard z")
+   def h = hadamard(a, b)
+   assert(get(h, 0, 0) == 4, "vector hadamard x")
+   assert(get(h, 1, 0) == 10, "vector hadamard y")
+   assert(get(h, 2, 0) == 18, "vector hadamard z")
 
-    print("✓ std.math.vector tests passed")
+   print("✓ std.math.vector tests passed")
 }

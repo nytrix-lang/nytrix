@@ -1,5 +1,5 @@
 ;; Keywords: core cps continuation
-;; Continuation-Passing Style (CPS) helpers.
+;; Continuation-Passing Style.
 
 module std.core.cps (
    cps_return, cps_run,
@@ -138,78 +138,78 @@ fn cps_trampoline(step, max_steps=0){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.core.error *
-    use std.core.cps *
-    use std.os.mod
-    use std.str.mod
+   use std.core *
+   use std.core.error *
+   use std.core.cps *
+   use std.os.mod
+   use std.str.mod
 
-    print("Testing std.core.cps...")
+   print("Testing std.core.cps...")
 
-    fn inc(x){
+   fn inc(x){
        "Test helper."
        x + 1
-    }
-    fn mul(a, b){
+   }
+   fn mul(a, b){
        "Test helper."
        a * b
-    }
+   }
 
-    ; direct -> CPS transforms
-    def inc_cps = cps_transform_unary(inc)
-    def mul_cps = cps_transform_binary(mul)
+   ; direct -> CPS transforms
+   def inc_cps = cps_transform_unary(inc)
+   def mul_cps = cps_transform_binary(mul)
 
-    assert(inc_cps(41, fn(v){
+   assert(inc_cps(41, fn(v){
        "Auto-generated docstring: anonymous function."
        v
-    }) == 42, "cps_transform_unary")
-    assert(mul_cps(6, 7, fn(v){
+   }) == 42, "cps_transform_unary")
+   assert(mul_cps(6, 7, fn(v){
        "Auto-generated docstring: anonymous function."
        v
-    }) == 42, "cps_transform_binary")
+   }) == 42, "cps_transform_binary")
 
-    ; return/map/bind/run
-    mut c = cps_return(10)
-    c = cps_map(c, fn(v){
+   ; return/map/bind/run
+   mut c = cps_return(10)
+   c = cps_map(c, fn(v){
        "Auto-generated docstring: anonymous function."
        v + 2
-    })
-    c = cps_bind(c, fn(v){
+   })
+   c = cps_bind(c, fn(v){
        "Auto-generated docstring: anonymous function."
        cps_return(v * 3)
-    })
-    assert(cps_run(c) == 36, "cps_return/map/bind/run")
+   })
+   assert(cps_run(c) == 36, "cps_return/map/bind/run")
 
-    ; apply/lift2
-    def cf = cps_return(fn(v){
+   ; apply/lift2
+   def cf = cps_return(fn(v){
        "Auto-generated docstring: anonymous function."
        v * 2
-    })
-    def cv = cps_return(21)
-    assert(cps_run(cps_apply(cf, cv)) == 42, "cps_apply")
+   })
+   def cv = cps_return(21)
+   assert(cps_run(cps_apply(cf, cv)) == 42, "cps_apply")
 
-    def ca = cps_return(20)
-    def cb = cps_return(22)
-    def csum = cps_lift2(fn(a, b){
+   def ca = cps_return(20)
+   def cb = cps_return(22)
+   def csum = cps_lift2(fn(a, b){
        "Auto-generated docstring: anonymous function."
        a + b
-    }, ca, cb)
-    assert(cps_run(csum) == 42, "cps_lift2")
+   }, ca, cb)
+   assert(cps_run(csum) == 42, "cps_lift2")
 
-    ; pipe
-    fn add1_c(x){
+   ; pipe
+   fn add1_c(x){
        "Test helper."
        cps_return(x + 1)
-    }
-    fn mul2_c(x){
+   }
+   fn mul2_c(x){
        "Test helper."
        cps_return(x * 2)
-    }
-    def piped = cps_pipe(10, [add1_c, mul2_c, add1_c])
-    assert(cps_run(piped) == 23, "cps_pipe")
+   }
+   def piped = cps_pipe(10, [add1_c, mul2_c, add1_c])
+   assert(cps_run(piped) == 23, "cps_pipe")
 
-    ; trampoline for deep CPS recursion
-    fn sum_cps_step(n, acc, k){
+   ; trampoline for deep CPS recursion
+   fn sum_cps_step(n, acc, k){
        "Test helper."
        if(n == 0){
           return cps_step_more(fn(){
@@ -221,17 +221,17 @@ if(comptime{__main()}){
           "Auto-generated docstring: anonymous function."
           sum_cps_step(n - 1, acc + n, k)
        })
-    }
+   }
 
-    def arch_name = lower(arch())
-    def is_arm32 = str_contains(arch_name, "arm") && !str_contains(arch_name, "64")
-    def n = is_arm32 ? 200 : 500
-    def got = cps_trampoline(sum_cps_step(n, 0, fn(v){
+   def arch_name = lower(arch())
+   def is_arm32 = str_contains(arch_name, "arm") && !str_contains(arch_name, "64")
+   def n = is_arm32 ? 200 : 500
+   def got = cps_trampoline(sum_cps_step(n, 0, fn(v){
        "Auto-generated docstring: anonymous function."
        cps_step_done(v)
-    }))
-    def want = (n * (n + 1)) / 2
-    assert(got == want, "cps_trampoline deep recursion")
+   }))
+   def want = (n * (n + 1)) / 2
+   assert(got == want, "cps_trampoline deep recursion")
 
-    print("✓ std.core.cps tests passed")
+   print("✓ std.core.cps tests passed")
 }

@@ -98,6 +98,8 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
 
 static void lexer_error(lexer_t *lx, size_t start, const char *msg,
                         const char *hint) {
+  if (!ny_log_should_emit(msg))
+    return;
   int col = lx->col - (int)(lx->pos - start);
   fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s\n",
           lx->filename ? lx->filename : "<input>", lx->line, col, msg);
@@ -142,27 +144,34 @@ static void skip_whitespace(lexer_t *lx) {
       if (bol) {
         // Peek ahead to see if it's a line directive or shebang
         const char *p = lx->src + lx->pos + 1;
-        while (*p == ' ' || *p == '\t') p++;
-        bool is_line_dir = (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) || isdigit(*p);
+        while (*p == ' ' || *p == '\t')
+          p++;
+        bool is_line_dir = (strncmp(p, "line", 4) == 0 &&
+                            (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) ||
+                           isdigit(*p);
         bool is_shebang = (start_pos == 0 && *p == '!');
-        
+
         if (is_line_dir) {
           advance(lx); // consume '#'
           p = lx->src + lx->pos;
-          while (*p == ' ' || *p == '\t') p++;
+          while (*p == ' ' || *p == '\t')
+            p++;
           if (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t')) {
             p += 4;
-            while (*p == ' ' || *p == '\t') p++;
+            while (*p == ' ' || *p == '\t')
+              p++;
           }
           if (isdigit(*p)) {
             char *end;
             int line_val = (int)strtoll(p, &end, 10);
             p = end;
-            while (*p == ' ' || *p == '\t') p++;
+            while (*p == ' ' || *p == '\t')
+              p++;
             if (*p == '"') {
               p++;
               const char *f = p;
-              while (*p && *p != '"' && *p != '\n') p++;
+              while (*p && *p != '"' && *p != '\n')
+                p++;
               if (*p == '"') {
                 size_t flen = (size_t)(p - f);
                 char *nf = malloc(flen + 1);
@@ -175,7 +184,8 @@ static void skip_whitespace(lexer_t *lx) {
             lx->line = line_val;
             lx->pos = (size_t)(p - lx->src);
             lx->col = 1;
-            while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+            while (peek(lx) != '\n' && peek(lx) != '\0')
+              advance(lx);
             if (peek(lx) == '\n') {
               advance(lx);
               lx->line--;
@@ -184,14 +194,14 @@ static void skip_whitespace(lexer_t *lx) {
             continue;
           }
         } else if (is_shebang) {
-          while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+          while (peek(lx) != '\n' && peek(lx) != '\0')
+            advance(lx);
           continue;
         }
       }
       // If it's not a processed directive, let it be a token (like #link)
       break;
-    }
- else {
+    } else {
       break;
     }
   }
@@ -227,7 +237,9 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
     if (len == 8 && memcmp(start, "comptime", 8) == 0)
       return NY_T_COMPTIME;
     if (len == 5 && memcmp(start, "const", 5) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'const' is not a keyword in Nytrix", "use 'def' for constants");
+      lexer_error(lx, (size_t)(start - lx->src),
+                  "'const' is not a keyword in Nytrix",
+                  "use 'def' for constants");
       return NY_T_IDENT;
     }
     break;
@@ -279,11 +291,13 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
         return NY_T_IN;
     }
     if (len == 6 && memcmp(start, "import", 6) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'import' is not used in Nytrix", "use 'use' instead");
+      lexer_error(lx, (size_t)(start - lx->src),
+                  "'import' is not used in Nytrix", "use 'use' instead");
       return NY_T_IDENT;
     }
     if (len == 7 && memcmp(start, "include", 7) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'include' is not used in Nytrix", "use 'use' instead");
+      lexer_error(lx, (size_t)(start - lx->src),
+                  "'include' is not used in Nytrix", "use 'use' instead");
       return NY_T_IDENT;
     }
     break;
@@ -297,7 +311,8 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
     break;
   case 'N':
     if (len == 4 && memcmp(start, "NULL", 4) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'NULL' is not used in Nytrix", "use '0' or 'none' instead");
+      lexer_error(lx, (size_t)(start - lx->src), "'NULL' is not used in Nytrix",
+                  "use '0' or 'none' instead");
       return NY_T_IDENT;
     }
     break;
@@ -317,11 +332,14 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
     break;
   case 'v':
     if (len == 3 && memcmp(start, "var", 3) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'var' is not a keyword in Nytrix", "use 'mut' or 'def' instead");
+      lexer_error(lx, (size_t)(start - lx->src),
+                  "'var' is not a keyword in Nytrix",
+                  "use 'mut' or 'def' instead");
       return NY_T_IDENT;
     }
     if (len == 4 && memcmp(start, "void", 4) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'void' is not used in Nytrix", "simply omit it or use 'none'");
+      lexer_error(lx, (size_t)(start - lx->src), "'void' is not used in Nytrix",
+                  "simply omit it or use 'none'");
       return NY_T_IDENT;
     }
     break;
@@ -335,7 +353,8 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
     break;
   case 'p':
     if (len == 6 && memcmp(start, "printf", 6) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'printf' is not used in Nytrix", "use 'print' instead");
+      lexer_error(lx, (size_t)(start - lx->src),
+                  "'printf' is not used in Nytrix", "use 'print' instead");
       return NY_T_IDENT;
     }
     break;
@@ -437,17 +456,21 @@ token_t lexer_next(lexer_t *lx) {
   }
   if (IS_DIGIT(c)) {
     if (c == '0' && (src[lx->pos] == 'x' || src[lx->pos] == 'X')) {
-      lx->pos++; lx->col++;
+      lx->pos++;
+      lx->col++;
       while (isxdigit(src[lx->pos])) {
-        lx->pos++; lx->col++;
+        lx->pos++;
+        lx->col++;
       }
       char s = src[lx->pos];
       if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
            s == 'F') &&
           isdigit(src[lx->pos + 1])) {
-        lx->pos++; lx->col++;
+        lx->pos++;
+        lx->col++;
         while (isdigit(src[lx->pos])) {
-          lx->pos++; lx->col++;
+          lx->pos++;
+          lx->col++;
         }
       }
       token_t tok = make_token(lx, NY_T_NUMBER, start);
@@ -461,26 +484,31 @@ token_t lexer_next(lexer_t *lx) {
       lx->col += 8;
     }
     while (IS_DIGIT(src[lx->pos])) {
-      lx->pos++; lx->col++;
+      lx->pos++;
+      lx->col++;
     }
     if (src[lx->pos] == '.' && IS_DIGIT(src[lx->pos + 1])) {
-      lx->pos++; lx->col++;
+      lx->pos++;
+      lx->col++;
       while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
              ny_is_digit8((const unsigned char *)(src + lx->pos))) {
         lx->pos += 8;
         lx->col += 8;
       }
       while (IS_DIGIT(src[lx->pos])) {
-        lx->pos++; lx->col++;
+        lx->pos++;
+        lx->col++;
       }
     }
     if (src[lx->pos] == 'e' || src[lx->pos] == 'E') {
       size_t save_pos = lx->pos;
       int save_line = lx->line;
       int save_col = lx->col;
-      lx->pos++; lx->col++;
+      lx->pos++;
+      lx->col++;
       if (src[lx->pos] == '+' || src[lx->pos] == '-') {
-        lx->pos++; lx->col++;
+        lx->pos++;
+        lx->col++;
       }
       if (IS_DIGIT(src[lx->pos])) {
         while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
@@ -489,7 +517,8 @@ token_t lexer_next(lexer_t *lx) {
           lx->col += 8;
         }
         while (IS_DIGIT(src[lx->pos])) {
-          lx->pos++; lx->col++;
+          lx->pos++;
+          lx->col++;
         }
       } else {
         lx->pos = save_pos;
@@ -501,14 +530,16 @@ token_t lexer_next(lexer_t *lx) {
     if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
          s == 'F') &&
         IS_DIGIT(src[lx->pos + 1])) {
-      lx->pos++; lx->col++;
+      lx->pos++;
+      lx->col++;
       while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
              ny_is_digit8((const unsigned char *)(src + lx->pos))) {
         lx->pos += 8;
         lx->col += 8;
       }
       while (IS_DIGIT(src[lx->pos])) {
-        lx->pos++; lx->col++;
+        lx->pos++;
+        lx->col++;
       }
     }
     token_t tok = make_token(lx, NY_T_NUMBER, start);
@@ -621,7 +652,9 @@ token_t lexer_next(lexer_t *lx) {
   case '!':
     if (match(lx, '=')) {
       if (match(lx, '=')) {
-        lexer_error(lx, start, "strict inequality operator '!==' is not supported", "use '!=' instead");
+        lexer_error(lx, start,
+                    "strict inequality operator '!==' is not supported",
+                    "use '!=' instead");
         return lexer_next(lx);
       }
       return make_token(lx, NY_T_NEQ, start);
@@ -630,13 +663,16 @@ token_t lexer_next(lexer_t *lx) {
   case '=':
     if (match(lx, '=')) {
       if (match(lx, '=')) {
-        lexer_error(lx, start, "strict equality operator '===' is not supported", "use '==' instead");
+        lexer_error(lx, start,
+                    "strict equality operator '===' is not supported",
+                    "use '==' instead");
         return lexer_next(lx);
       }
       return make_token(lx, NY_T_EQ, start);
     }
     if (match(lx, '>')) {
-      lexer_error(lx, start, "fat arrow operator '=>' is not supported", "use '->' for match cases");
+      lexer_error(lx, start, "fat arrow operator '=>' is not supported",
+                  "use '->' for match cases");
       return lexer_next(lx);
     }
     return make_token(lx, NY_T_ASSIGN, start);

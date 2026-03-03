@@ -4,7 +4,9 @@ stmt_t *ny_parse_stmt_or_block(parser_t *p) {
   if (p->cur.kind == NY_T_LBRACE)
     return p_parse_block(p);
   if (p->cur.kind == NY_T_COLON) {
-    parser_error(p, p->cur, "stray ':'", "Nytrix does not use ':' to start blocks, use '{' ... '}' instead");
+    parser_error(
+        p, p->cur, "stray ':'",
+        "Nytrix does not use ':' to start blocks, use '{' ... '}' instead");
     parser_advance(p);
   }
   token_t tok = p->cur;

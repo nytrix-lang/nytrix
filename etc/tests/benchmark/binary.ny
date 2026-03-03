@@ -2,9 +2,9 @@ use std.core *
 use std.core.error *
 use std.core.reflect *
 use std.core.dict *
-use std.text.io *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str.io *
+use std.str *
 use std.os *
 use std.os.time *
 

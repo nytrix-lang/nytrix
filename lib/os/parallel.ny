@@ -7,7 +7,7 @@ module std.os.parallel (
 )
 
 use std.core *
-use std.text *
+use std.str *
 use std.os.prim *
 use std.util.common as common
 

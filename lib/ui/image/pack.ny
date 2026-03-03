@@ -101,9 +101,9 @@ fn _skyline_find_min_y(nodes, first_idx, x0, width){
          waste += visited_w * (ny - min_y)
          min_y = ny
          if(_nx(nodes, node_idx) < x0){
-            visited_w += nx2 - x0
+         visited_w += nx2 - x0
          } else {
-            visited_w += nx2 - _nx(nodes, node_idx)
+         visited_w += nx2 - _nx(nodes, node_idx)
          }
       } else {
          mut under_w = nx2 - _nx(nodes, node_idx)
@@ -138,18 +138,18 @@ fn _skyline_find_best_pos(ctx, w, h){
       def wst = get(res, 1)
       if(heur == HEURISTIC_BL){
          if(y < best_y){
-            best_y    = y
-            best_prev = prev_idx
-            best_x    = _nx(nodes, node_idx)
+         best_y    = y
+         best_prev = prev_idx
+         best_x    = _nx(nodes, node_idx)
          }
       } else {
          if(y + h <= ch){
-            if(y < best_y || (y == best_y && wst < best_waste)){
+         if(y < best_y || (y == best_y && wst < best_waste)){
                best_y    = y
                best_waste = wst
                best_prev = prev_idx
                best_x    = _nx(nodes, node_idx)
-            }
+         }
          }
       }
       prev_idx = node_idx
@@ -164,19 +164,19 @@ fn _skyline_find_best_pos(ctx, w, h){
          def xpos = _nx(nodes, tail_idx) - aw
          if(xpos < 0){ tail_idx = _nn(nodes, tail_idx) }
          while(_nx(nodes, _nn(nodes, nd2)) <= xpos){
-            pv2 = nd2
-            nd2 = _nn(nodes, nd2)
+         pv2 = nd2
+         nd2 = _nn(nodes, nd2)
          }
          def res = _skyline_find_min_y(nodes, nd2, xpos, aw)
          def y   = get(res, 0)
          def wst = get(res, 1)
          if(y + h <= ch && y <= best_y){
-            if(y < best_y || wst < best_waste || (wst == best_waste && xpos < best_x)){
+         if(y < best_y || wst < best_waste || (wst == best_waste && xpos < best_x)){
                best_x    = xpos
                best_y    = y
                best_waste = wst
                best_prev = pv2
-            }
+         }
          }
          tail_idx = _nn(nodes, tail_idx)
       }
@@ -274,14 +274,14 @@ fn pack(ctx, rects){
       } else {
          def res = _skyline_pack_one(ctx, rw, rh)
          if(get(res, 0)){
-            dict_set(r, "x", get(res, 1))
-            dict_set(r, "y", get(res, 2))
-            dict_set(r, "packed", 1)
+         dict_set(r, "x", get(res, 1))
+         dict_set(r, "y", get(res, 2))
+         dict_set(r, "packed", 1)
          } else {
-            dict_set(r, "x", 0)
-            dict_set(r, "y", 0)
-            dict_set(r, "packed", 0)
-            all_packed = 0
+         dict_set(r, "x", 0)
+         dict_set(r, "y", 0)
+         dict_set(r, "packed", 0)
+         all_packed = 0
          }
       }
       i += 1

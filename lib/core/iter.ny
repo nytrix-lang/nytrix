@@ -103,9 +103,9 @@ fn flatten(xss){
          def m = len(inner)
          mut j = 0
          while(j < m){
-            _list_set(out, pos, get(inner, j))
-            pos += 1
-            j += 1
+         _list_set(out, pos, get(inner, j))
+         pos += 1
+         j += 1
          }
       } else {
          _list_set(out, pos, inner)
@@ -312,55 +312,55 @@ fn zip2(a, b){
 }
 
 if(comptime{__main()}){
-    use std.core.iter as it
-    use std.core.error *
+   use std.core.iter as it
+   use std.core.error *
 
-    print("Testing std.core.iter...")
+   print("Testing std.core.iter...")
 
-    assert((it.range(5) == [0, 1, 2, 3, 4]), "range(stop)")
-    assert((it.range(2, 6) == [2, 3, 4, 5]), "range(start, stop)")
-    assert((it.range(6, 2, -2) == [6, 4]), "range(start, stop, step)")
+   assert((it.range(5) == [0, 1, 2, 3, 4]), "range(stop)")
+   assert((it.range(2, 6) == [2, 3, 4, 5]), "range(start, stop)")
+   assert((it.range(6, 2, -2) == [6, 4]), "range(start, stop, step)")
 
-    assert((it.range2(1, 8, 3) == [1, 4, 7]), "range2")
-    assert((it.enumerate(["a", "b"], 10) == [[10, "a"], [11, "b"]]), "enumerate")
+   assert((it.range2(1, 8, 3) == [1, 4, 7]), "range2")
+   assert((it.enumerate(["a", "b"], 10) == [[10, "a"], [11, "b"]]), "enumerate")
 
-    def sq = it.map_list([1, 2, 3], fn(v){
+   def sq = it.map_list([1, 2, 3], fn(v){
        "Auto-generated docstring: anonymous function."
        v * v
-    })
-    assert((sq == [1, 4, 9]), "map_list")
+   })
+   assert((sq == [1, 4, 9]), "map_list")
 
-    def even = it.filter_list([1, 2, 3, 4, 5, 6], fn(v){
+   def even = it.filter_list([1, 2, 3, 4, 5, 6], fn(v){
        "Auto-generated docstring: anonymous function."
        (v % 2) == 0
-    })
-    assert((even == [2, 4, 6]), "filter_list")
+   })
+   assert((even == [2, 4, 6]), "filter_list")
 
-    assert((it.repeat("x", 3) == ["x", "x", "x"]), "repeat")
-    assert((it.take([9, 8, 7], 2) == [9, 8]), "take")
-    assert((it.zip2(["a", "b", "c"], [1, 2]) == [["a", 1], ["b", 2]]), "zip2")
+   assert((it.repeat("x", 3) == ["x", "x", "x"]), "repeat")
+   assert((it.take([9, 8, 7], 2) == [9, 8]), "take")
+   assert((it.zip2(["a", "b", "c"], [1, 2]) == [["a", 1], ["b", 2]]), "zip2")
 
-    assert(it.any([1, 2, 3], fn(v){ v > 2 }), "any true")
-    assert(!it.any([1, 2, 3], fn(v){ v > 5 }), "any false")
-    assert(it.all([4, 5, 6], fn(v){ v > 3 }), "all true")
-    assert(!it.all([4, 5, 6], fn(v){ v > 5 }), "all false")
-    assert(it.fold([1, 2, 3, 4], 0, fn(a, v){ a + v }) == 10, "fold sum")
+   assert(it.any([1, 2, 3], fn(v){ v > 2 }), "any true")
+   assert(!it.any([1, 2, 3], fn(v){ v > 5 }), "any false")
+   assert(it.all([4, 5, 6], fn(v){ v > 3 }), "all true")
+   assert(!it.all([4, 5, 6], fn(v){ v > 5 }), "all false")
+   assert(it.fold([1, 2, 3, 4], 0, fn(a, v){ a + v }) == 10, "fold sum")
           assert(it.find_if([10, 20, 30], fn(v){ v > 15 }) == 20, "find")
           assert(it.find_if([10, 20, 30], fn(v){ v > 50 }, -1) == -1, "find missing")
           assert(it.find_index_if([10, 20, 30], fn(v){ v > 15 }) == 1, "find_index")
-        assert(it.chain([1, 2], [3, 4]) == [1, 2, 3, 4], "chain")
-    assert(it.flatten([[1, 2], 3, [4, 5]]) == [1, 2, 3, 4, 5], "flatten")
-    assert(it.filter_map([1, 2, 3, 4], fn(v){
-        if((v % 2) == 0){ return v * 10 }
-        0
-    }) == [20, 40], "filter_map")
+      assert(it.chain([1, 2], [3, 4]) == [1, 2, 3, 4], "chain")
+   assert(it.flatten([[1, 2], 3, [4, 5]]) == [1, 2, 3, 4, 5], "flatten")
+   assert(it.filter_map([1, 2, 3, 4], fn(v){
+      if((v % 2) == 0){ return v * 10 }
+      0
+   }) == [20, 40], "filter_map")
 
-    assert(it.zip_with([1, 2], [10, 20], fn(a, b){ a + b }) == [11, 22], "zip_with")
-    assert(it.cycle([1, 2], 3) == [1, 2, 1, 2, 1, 2], "cycle")
+   assert(it.zip_with([1, 2], [10, 20], fn(a, b){ a + b }) == [11, 22], "zip_with")
+   assert(it.cycle([1, 2], 3) == [1, 2, 1, 2, 1, 2], "cycle")
 
-    def pt = it.partition([1, 2, 3, 4, 5], fn(v){ v > 3 })
-    assert(get(pt, 0) == [4, 5], "partition true")
-    assert(get(pt, 1) == [1, 2, 3], "partition false")
+   def pt = it.partition([1, 2, 3, 4, 5], fn(v){ v > 3 })
+   assert(get(pt, 0) == [4, 5], "partition true")
+   assert(get(pt, 1) == [1, 2, 3], "partition false")
 
-    print("✓ std.core.iter tests passed")
+   print("✓ std.core.iter tests passed")
 }

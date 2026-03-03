@@ -9,7 +9,9 @@ module std.image.format.png (
 
 use std.core *
 use std.core.dict_mod *
+use std.core.mem as core_mem
 use std.math as math
+use std.math.hash as hash
 use std.enc.zlib as zlib
 
 fn _png_paeth(a, b, c){
@@ -21,6 +23,14 @@ fn _png_paeth(a, b, c){
    if(pa <= pb && pa <= pc){ return a }
    if(pb <= pc){ return b }
    return c
+}
+
+fn _s32be(p, v, o){
+   "Internal: stores a 32-bit big-endian integer `v` at `p + o`."
+   store8(p, (v >> 24) & 255, o)
+   store8(p, (v >> 16) & 255, o + 1)
+   store8(p, (v >> 8) & 255, o + 2)
+   store8(p, v & 255, o + 3)
 }
 
 fn _dbg(msg){
@@ -67,21 +77,21 @@ fn decode(data){
          def interlace_method = load8(data, chunk_data + 12)
          if(compression_method != 0 || filter_method != 0 || interlace_method != 0){ return _fail("unsupported IHDR methods") }
          if(bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16){
-            return _fail("unsupported bit depth " + to_str(bit_depth))
+         return _fail("unsupported bit depth " + to_str(bit_depth))
          }
       } elif(chunk_type == 1347179589){
          palette = init_str(malloc(length + 1 + 16) + 16, length)
          if(length > 0){ __copy_mem(palette, data + chunk_data, length) }
       } elif(chunk_type == 1951551059){
          if(color_type == 3){
-            palette_alpha = init_str(malloc(length + 1 + 16) + 16, length)
-            if(length > 0){ __copy_mem(palette_alpha, data + chunk_data, length) }
+         palette_alpha = init_str(malloc(length + 1 + 16) + 16, length)
+         if(length > 0){ __copy_mem(palette_alpha, data + chunk_data, length) }
          } elif(color_type == 0 && length >= 2){
-            trns_gray = (load8(data, chunk_data) << 8) | load8(data, chunk_data + 1)
+         trns_gray = (load8(data, chunk_data) << 8) | load8(data, chunk_data + 1)
          } elif(color_type == 2 && length >= 6){
-            trns_r = (load8(data, chunk_data) << 8) | load8(data, chunk_data + 1)
-            trns_g = (load8(data, chunk_data + 2) << 8) | load8(data, chunk_data + 3)
-            trns_b = (load8(data, chunk_data + 4) << 8) | load8(data, chunk_data + 5)
+         trns_r = (load8(data, chunk_data) << 8) | load8(data, chunk_data + 1)
+         trns_g = (load8(data, chunk_data + 2) << 8) | load8(data, chunk_data + 3)
+         trns_b = (load8(data, chunk_data + 4) << 8) | load8(data, chunk_data + 5)
          }
       } elif(chunk_type == 1229209940){
          mut chunk = init_str(malloc(length + 1 + 16) + 16, length)
@@ -142,7 +152,7 @@ fn decode(data){
          def dst_off = (y * w + i) * 4
          def src_off = raw_p + i * channels * bytes_per_sample
          if(bit_depth < 8){
-            if(color_type == 0){
+         if(color_type == 0){
                def packed_off = raw_p + ((i * bit_depth) / 8)
                def packed_shift = 8 - bit_depth - ((i * bit_depth) & 7)
                def packed_mask = (1 << bit_depth) - 1
@@ -157,7 +167,7 @@ fn decode(data){
                store8(pixels, v, dst_off + 1)
                store8(pixels, v, dst_off + 2)
                store8(pixels, a, dst_off + 3)
-            } elif(color_type == 3){
+         } elif(color_type == 3){
                def packed_off = raw_p + ((i * bit_depth) / 8)
                def packed_shift = 8 - bit_depth - ((i * bit_depth) & 7)
                def packed_mask = (1 << bit_depth) - 1
@@ -170,13 +180,13 @@ fn decode(data){
                   if(palette_alpha && idx < len(palette_alpha)){ a = load8(palette_alpha, idx) }
                   store8(pixels, a, dst_off + 3)
                }
-            }
+         }
          } elif(color_type == 2){
-            mut r = load8(raw, src_off)
-            mut g = load8(raw, src_off + bytes_per_sample)
-            mut b = load8(raw, src_off + 2 * bytes_per_sample)
-            mut a = 255
-            if(bit_depth == 16){
+         mut r = load8(raw, src_off)
+         mut g = load8(raw, src_off + bytes_per_sample)
+         mut b = load8(raw, src_off + 2 * bytes_per_sample)
+         mut a = 255
+         if(bit_depth == 16){
                r = load8(raw, src_off)
                g = load8(raw, src_off + 2)
                b = load8(raw, src_off + 4)
@@ -186,48 +196,48 @@ fn decode(data){
                   def bb = (load8(raw, src_off + 4) << 8) | load8(raw, src_off + 5)
                   if(rr == trns_r && gg == trns_g && bb == trns_b){ a = 0 }
                }
-            } elif(trns_r >= 0){
+         } elif(trns_r >= 0){
                if(r == (trns_r & 255) && g == (trns_g & 255) && b == (trns_b & 255)){ a = 0 }
-            }
-            store8(pixels, r, dst_off)
-            store8(pixels, g, dst_off + 1)
-            store8(pixels, b, dst_off + 2)
-            store8(pixels, a, dst_off + 3)
+         }
+         store8(pixels, r, dst_off)
+         store8(pixels, g, dst_off + 1)
+         store8(pixels, b, dst_off + 2)
+         store8(pixels, a, dst_off + 3)
          } elif(color_type == 6){
-            store8(pixels, load8(raw, src_off), dst_off)
-            store8(pixels, load8(raw, src_off + bytes_per_sample), dst_off + 1)
-            store8(pixels, load8(raw, src_off + 2 * bytes_per_sample), dst_off + 2)
-            store8(pixels, load8(raw, src_off + 3 * bytes_per_sample), dst_off + 3)
+         store8(pixels, load8(raw, src_off), dst_off)
+         store8(pixels, load8(raw, src_off + bytes_per_sample), dst_off + 1)
+         store8(pixels, load8(raw, src_off + 2 * bytes_per_sample), dst_off + 2)
+         store8(pixels, load8(raw, src_off + 3 * bytes_per_sample), dst_off + 3)
          } elif(color_type == 0){
-            mut v = load8(raw, src_off)
-            mut a = 255
-            if(bit_depth == 16){
+         mut v = load8(raw, src_off)
+         mut a = 255
+         if(bit_depth == 16){
                v = load8(raw, src_off)
                if(trns_gray >= 0 && (((load8(raw, src_off) << 8) | load8(raw, src_off + 1)) == trns_gray)){ a = 0 }
-            } elif(trns_gray >= 0 && v == (trns_gray & 255)){
+         } elif(trns_gray >= 0 && v == (trns_gray & 255)){
                a = 0
-            }
-            store8(pixels, v, dst_off)
-            store8(pixels, v, dst_off + 1)
-            store8(pixels, v, dst_off + 2)
-            store8(pixels, a, dst_off + 3)
+         }
+         store8(pixels, v, dst_off)
+         store8(pixels, v, dst_off + 1)
+         store8(pixels, v, dst_off + 2)
+         store8(pixels, a, dst_off + 3)
          } elif(color_type == 4){
-            def v = load8(raw, src_off)
-            def a = load8(raw, src_off + bytes_per_sample)
-            store8(pixels, v, dst_off)
-            store8(pixels, v, dst_off + 1)
-            store8(pixels, v, dst_off + 2)
-            store8(pixels, a, dst_off + 3)
+         def v = load8(raw, src_off)
+         def a = load8(raw, src_off + bytes_per_sample)
+         store8(pixels, v, dst_off)
+         store8(pixels, v, dst_off + 1)
+         store8(pixels, v, dst_off + 2)
+         store8(pixels, a, dst_off + 3)
          } elif(color_type == 3){
-            def idx = load8(raw, src_off)
-            if(palette && idx * 3 + 2 < len(palette)){
+         def idx = load8(raw, src_off)
+         if(palette && idx * 3 + 2 < len(palette)){
                store8(pixels, load8(palette, idx * 3), dst_off)
                store8(pixels, load8(palette, idx * 3 + 1), dst_off + 1)
                store8(pixels, load8(palette, idx * 3 + 2), dst_off + 2)
                mut a = 255
                if(palette_alpha && idx < len(palette_alpha)){ a = load8(palette_alpha, idx) }
                store8(pixels, a, dst_off + 3)
-            }
+         }
          }
          i += 1
       }
@@ -243,33 +253,80 @@ fn decode(data){
 }
 
 fn encode(img){
-   "Encodes an image dictionary to PNG. (Simplified: No filtering, single IDAT)"
+   "Encodes an image dictionary to PNG. Supports RGB and RGBA."
+   if(!img){ return 0 }
    def w = dict_get(img, "width")
    def h = dict_get(img, "height")
    def pixels = dict_get(img, "data")
-   mut header = "\x89PNG\r\n\x1a\n"
-   mut ihdr = init_str(malloc(13 + 1 + 16) + 16, 13)
-   store32_be(ihdr, w, 0)
-   store32_be(ihdr, h, 4)
-   store8(ihdr, 8, 8)
-   store8(ihdr, 6, 9)
-   store8(ihdr, 0, 10)
-   store8(ihdr, 0, 11)
-   store8(ihdr, 0, 12)
-   header = header + _make_chunk("IHDR", ihdr)
-   def raw_size = h * (w * 4 + 1)
-   mut raw = init_str(malloc(raw_size + 1 + 16) + 16, raw_size)
-   memset(raw, 0, raw_size)
+   if(!w || !h || !pixels){ return 0 }
+
+   def ch = dict_get(img, "channels", dict_get(img, "bpp", 4))
+   def color_type = (ch == 4) ? 6 : 2
+
+   def ihdr_p = malloc(13 + 1 + 16) + 16
+   _s32be(ihdr_p, w, 0)
+   _s32be(ihdr_p, h, 4)
+   store8(ihdr_p, 8, 8) ; Bit depth 8
+   store8(ihdr_p, color_type, 9)
+   store8(ihdr_p, 0, 10) ; Compression (deflate)
+   store8(ihdr_p, 0, 11) ; Filter (none)
+   store8(ihdr_p, 0, 12) ; Interlace (none)
+   def ihdr = init_str(ihdr_p, 13)
+
+   def stride = w * ch
+   def raw_size = h * (stride + 1)
+   def raw_p = malloc(raw_size + 1 + 16) + 16
+   if(!raw_p){ return 0 }
+   memset(raw_p, 0, raw_size)
+   ;if(true){ ; Debug first pixel
+   ;   def r = load8(pixels, 0)
+   ;   def g = load8(pixels, 1)
+   ;   def b = load8(pixels, 2)
+   ;   print(f"PNG: Encoding first pixel R={r} G={g} B={b}")
+   ;}
+
    mut y = 0
    while(y < h){
-      store8(raw, 0, y * (w * 4 + 1))
-      __copy_mem(raw + y * (w * 4 + 1) + 1, pixels + y * w * 4, w * 4)
+      def row_start = y * (stride + 1)
+      def src_off = y * stride
+      store8(raw_p, 0, row_start) ; Filter 0
+
+      mut x = 0
+      while(x < w){
+         def sx = src_off + x * ch
+         def dx = row_start + 1 + x * ch
+         store8(raw_p, load8(pixels, sx), dx)
+         store8(raw_p, load8(pixels, sx + 1), dx + 1)
+         store8(raw_p, load8(pixels, sx + 2), dx + 2)
+         if(ch == 4){ store8(raw_p, load8(pixels, sx + 3), dx + 3) }
+         x += 1
+      }
       y += 1
    }
+
+   def raw = init_str(raw_p, raw_size)
    def compressed = zlib.compress(raw)
-   header = header + _make_chunk("IDAT", compressed)
-   header = header + _make_chunk("IEND", "")
-   header
+   if(!compressed || str_len(compressed) == 0){ return 0 }
+
+   def ihdr_chunk = _make_chunk("IHDR", ihdr)
+   def idat_chunk = _make_chunk("IDAT", compressed)
+   def iend_chunk = _make_chunk("IEND", "")
+
+   def sig = "\x89PNG\r\n\x1a\n"
+   def total_file_len = 8 + str_len(ihdr_chunk) + str_len(idat_chunk) + str_len(iend_chunk)
+   def final_p = malloc(total_file_len + 1 + 16) + 16
+
+   mut off = 0
+   core_mem.memcpy(to_int(final_p) + off, sig, 8)
+   off = off + 8
+   core_mem.memcpy(to_int(final_p) + off, ihdr_chunk, str_len(ihdr_chunk))
+   off = off + str_len(ihdr_chunk)
+   core_mem.memcpy(to_int(final_p) + off, idat_chunk, str_len(idat_chunk))
+   off = off + str_len(idat_chunk)
+   core_mem.memcpy(to_int(final_p) + off, iend_chunk, str_len(iend_chunk))
+
+   def res = init_str(final_p, total_file_len)
+   res
 }
 
 fn _join_chunks(chunks){
@@ -282,60 +339,49 @@ fn _join_chunks(chunks){
       i += 1
    }
    if(total == 0){ return "" }
-   def res = init_str(malloc(total + 1 + 16) + 16, total)
+
+   def res_p = malloc(total + 1 + 16) + 16
    mut p = 0
    i = 0
    while(i < n){
       def ch = get(chunks, i)
       def clen = len(ch)
-      __copy_mem(res + p, ch, clen)
+      core_mem.memcpy(res_p + p, ch, clen)
       p = p + clen
       i += 1
    }
-   res
+   init_str(res_p, total)
 }
 
 fn _make_chunk(type, data){
    "Internal: wraps `data` into a PNG chunk of `type` with length and CRC32."
-   def length = len(data)
-   mut out = malloc(8 + length + 4 + 1)
-   init_str(out, 8 + length + 4)
-   store32_be(out, length, 0)
-   store8(out, ord_at(type, 0), 4)
-   store8(out, ord_at(type, 1), 5)
-   store8(out, ord_at(type, 2), 6)
-   store8(out, ord_at(type, 3), 7)
-   if(length > 0){ __copy_mem(out + 8, data, length) }
-   def crc = _crc32(out + 4, length + 4)
-   store32_be(out, crc, 8 + length)
-   out
-}
+   def length = str_len(data)
+   def total = 8 + length + 4
+   def res_p = malloc(total + 1 + 16) + 16
+   if(!res_p){ return 0 }
+   _s32be(res_p, length, 0)
+   store8(res_p, load8(to_int(type), 0), 4)
+   store8(res_p, load8(to_int(type), 1), 5)
+   store8(res_p, load8(to_int(type), 2), 6)
+   store8(res_p, load8(to_int(type), 3), 7)
 
-mut _crc_table = 0
-fn _crc32(data, length){
-   "Internal: computes the CRC32 checksum of `data` over `length` bytes."
-   if(!_crc_table){
-      _crc_table = list(256)
-      mut i = 0
-      while(i < 256){
-         mut c = i
-         mut j = 0
-         while(j < 8){
-            if(c & 1){ c = 0xEDB88320 ^ (c >> 1) }
-            else { c = c >> 1 }
-            j += 1
-         }
-         append(_crc_table, c)
-         i += 1
-      }
+   if(length > 0){
+      core_mem.memcpy(to_int(res_p) + 8, to_int(data), length)
    }
-   mut crc = 0xFFFFFFFF
-   mut k = 0
-   while(k < length){
-      crc = get(_crc_table, (crc ^ load8(data, k)) & 0xFF) ^ (crc >> 8)
-      k += 1
+
+   def cs = init_str(malloc(length + 4 + 1 + 16) + 16, length + 4)
+   store8(cs, load8(to_int(type), 0), 0)
+   store8(cs, load8(to_int(type), 1), 1)
+   store8(cs, load8(to_int(type), 2), 2)
+   store8(cs, load8(to_int(type), 3), 3)
+   if(length > 0){
+      core_mem.memcpy(to_int(cs) + 4, to_int(data), length)
    }
-   crc ^ 0xFFFFFFFF
+   def crc = hash.crc32(cs)
+   free(to_int(cs) - 16)
+
+   _s32be(res_p, crc, 8 + length)
+   init_str(res_p, total)
 }
 
 fn store32_be(s, v, i){
@@ -368,7 +414,7 @@ if(comptime{__main()}){
    assert(load8(enc, 1) == 80, "png encode signature P")
 
    print("✓ std.image.png tests passed (synthetic)")
-   
+
    match file_read("etc/assets/images/test.png"){
       ok(data) -> {
          def img2 = decode(data)

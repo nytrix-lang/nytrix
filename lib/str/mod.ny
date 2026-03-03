@@ -1,11 +1,11 @@
 ;; Keywords: text str
 ;; Text and String module.
 
-module std.text (
-   str_len, len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, atof, split, strip,
+module std.str (
+   str_len, len, find, find_last, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, atof, split, strip,
    str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, chr, repeat, ord,
    utf8_valid, utf8_len, ord_at, str_slice, utf8_slice,
-   _utf8_seq_len, _utf8_decode_at, _substr
+   _utf8_seq_len, _utf8_decode_at, _utf8_encode_at, _substr
 )
 use std.core *
 use std.core as core
@@ -37,6 +37,24 @@ fn find(s, sub){
       }
       if(j == m){ return i }
       i += 1
+   }
+   return -1
+}
+fn find_last(s, sub){
+   "Returns the index of the last occurrence of `sub` in `s`, or -1."
+   mut n = str_len(s)
+   mut m = str_len(sub)
+   if(m == 0){ return n }
+   if(n < m){ return -1 }
+   mut i = n - m
+   while(i >= 0){
+      mut j = 0
+      while(j < m){
+         if(load8(s, i + j) != load8(sub, j)){ break }
+         j += 1
+      }
+      if(j == m){ return i }
+      i -= 1
    }
    return -1
 }
@@ -149,7 +167,7 @@ fn atof(s){
    } elif(load8(s, 0) == 43){ ;; '+'
       i = 1
    }
-   
+
    mut val = 0.0
    while(i < n){
       mut c = load8(s, i)
@@ -157,7 +175,7 @@ fn atof(s){
       val = val * 10.0 + __flt_box_val(__flt_from_int(c - 48))
       i += 1
    }
-   
+
    if(i < n && load8(s, i) == 46){ ;; '.'
       i += 1
       mut frac = 0.1
@@ -169,13 +187,13 @@ fn atof(s){
          i += 1
       }
    }
-   
+
    if(i < n && (load8(s, i) == 101 || load8(s, i) == 69)){ ;; 'e' or 'E'
       i += 1
       mut esign = 1
       if(i < n && load8(s, i) == 45){ esign = -1 i += 1 }
       elif(i < n && load8(s, i) == 43){ i += 1 }
-      
+
       mut eval = 0
       while(i < n){
          mut c = load8(s, i)
@@ -183,7 +201,7 @@ fn atof(s){
          eval = eval * 10 + (c - 48)
          i += 1
       }
-      
+
       mut e = 0
       mut epow = 1.0
       while(e < eval){
@@ -193,7 +211,7 @@ fn atof(s){
       if(esign > 0){ val = val * epow }
       else { val = val / epow }
    }
-   
+
    sign * val
 }
 
@@ -271,10 +289,10 @@ fn split(s, sep){
       mut j = 0
       mut is_match = true
       while(j < sep_len){
-        if(load8(s, i + j) != load8(sep, j)){
+      if(load8(s, i + j) != load8(sep, j)){
           is_match = false
           break
-        }
+      }
          j += 1
       }
       if(is_match){
@@ -420,8 +438,8 @@ fn to_hex(n, width=0){
       if(width > slen){
          mut pad = width - slen
          while(pad > 0){
-            s = str_add("0", s)
-            pad -= 1
+         s = str_add("0", s)
+         pad -= 1
          }
       }
    }
@@ -438,19 +456,19 @@ fn chr(code){
       store8(char_buf, code, 0)
       len = 1
    } else if(code <= 2047){
-      store8(char_buf, 192 | (code >> 6), 0)
-      store8(char_buf, 128 | (code & 63), 1)
+      store8(char_buf, (192 | (code >> 6)), 0)
+      store8(char_buf, (128 | (code & 63)), 1)
       len = 2
    } else if(code <= 65535){
-      store8(char_buf, 224 | (code >> 12), 0)
-      store8(char_buf, 128 | ((code >> 6) & 63), 1)
-      store8(char_buf, 128 | (code & 63), 2)
+      store8(char_buf, (224 | (code >> 12)), 0)
+      store8(char_buf, (128 | ((code >> 6) & 63)), 1)
+      store8(char_buf, (128 | (code & 63)), 2)
       len = 3
    } else {
-      store8(char_buf, 240 | (code >> 18), 0)
-      store8(char_buf, 128 | ((code >> 12) & 63), 1)
-      store8(char_buf, 128 | ((code >> 6) & 63), 2)
-      store8(char_buf, 128 | (code & 63), 3)
+      store8(char_buf, (240 | (code >> 18)), 0)
+      store8(char_buf, (128 | ((code >> 12) & 63)), 1)
+      store8(char_buf, (128 | ((code >> 6) & 63)), 2)
+      store8(char_buf, (128 | (code & 63)), 3)
       len = 4
    }
    store8(char_buf, 0, len)
@@ -483,24 +501,25 @@ fn repeat(s, n){
 
 fn _is_utf8_cont(c){
    "Internal: returns true if byte `c` is a valid UTF-8 continuation byte (10xxxxxx)."
-   c >= 128 && c <= 191
+   def cc = c & 255
+   cc >= 128 && cc <= 191
 }
 
 fn _utf8_seq_len(s, i, n){
    "Internal: returns the expected length (1-4 bytes) of the UTF-8 character starting at byte index `i` in string `s`. Returns -1 if the sequence is invalid."
    if(i < 0 || i >= n){ return -1 }
-   def b0 = load8(s, i)
+   def b0 = load8(s, i) & 255
    if(b0 < 128){ return 1 }
    if(b0 >= 194 && b0 <= 223){
       if(i + 1 >= n){ return -1 }
-      def b1 = load8(s, i + 1)
+      def b1 = load8(s, i + 1) & 255
       if(!_is_utf8_cont(b1)){ return -1 }
       return 2
    }
    if(b0 >= 224 && b0 <= 239){
       if(i + 2 >= n){ return -1 }
-      def b1 = load8(s, i + 1)
-      def b2 = load8(s, i + 2)
+      def b1 = load8(s, i + 1) & 255
+      def b2 = load8(s, i + 2) & 255
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2)){ return -1 }
       ; Reject overlong forms and UTF-16 surrogate range.
       if(b0 == 224 && b1 < 160){ return -1 }
@@ -509,9 +528,9 @@ fn _utf8_seq_len(s, i, n){
    }
    if(b0 >= 240 && b0 <= 244){
       if(i + 3 >= n){ return -1 }
-      def b1 = load8(s, i + 1)
-      def b2 = load8(s, i + 2)
-      def b3 = load8(s, i + 3)
+      def b1 = load8(s, i + 1) & 255
+      def b2 = load8(s, i + 2) & 255
+      def b3 = load8(s, i + 3) & 255
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2) || !_is_utf8_cont(b3)){ return -1 }
       ; Reject overlong forms and code points beyond U+10FFFF.
       if(b0 == 240 && b1 < 144){ return -1 }
@@ -523,24 +542,48 @@ fn _utf8_seq_len(s, i, n){
 
 fn _utf8_decode_at(s, i, w){
    "Internal: decodes a multi-byte UTF-8 character at byte index `i` given its confirmed width `w`."
-   def b0 = load8(s, i)
+   def b0 = load8(s, i) & 255
    if(w == 1){ return b0 }
    if(w == 2){
-      def b1 = load8(s, i + 1)
-      return ((b0 & 31) << 6) | (b1 & 63)
+      def b1 = load8(s, i + 1) & 255
+      return ( ((b0 & 31) << 6) | (b1 & 63) )
    }
    if(w == 3){
-      def b1 = load8(s, i + 1)
-      def b2 = load8(s, i + 2)
-      return ((b0 & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63)
+      def b1 = load8(s, i + 1) & 255
+      def b2 = load8(s, i + 2) & 255
+      return ( ( ((b0 & 15) << 12) | ((b1 & 63) << 6) ) | (b2 & 63) )
    }
    if(w == 4){
-      def c1 = load8(s, i + 1)
-      def c2 = load8(s, i + 2)
-      def c3 = load8(s, i + 3)
-      return ((b0 & 7) << 18) | ((c1 & 63) << 12) | ((c2 & 63) << 6) | (c3 & 63)
+      def b1 = load8(s, i + 1) & 255
+      def b2 = load8(s, i + 2) & 255
+      def b3 = load8(s, i + 3) & 255
+      return ( ( ( ((b0 & 7) << 18) | ((b1 & 63) << 12) ) | ((b2 & 63) << 6) ) | (b3 & 63) )
    }
    0
+}
+
+fn _utf8_encode_at(p, i, code){
+   "Internal: encodes a Unicode code point into the pointer `p` at offset `i`. Returns the number of bytes written."
+   if(code < 0 || code > 1114111){ return 0 }
+   if(code <= 127){
+      store8(p, code, i)
+      return 1
+   } elif(code <= 2047){
+      store8(p, (192 | (code >> 6)), i)
+      store8(p, (128 | (code & 63)), i + 1)
+      return 2
+   } elif(code <= 65535){
+      store8(p, (224 | (code >> 12)), i)
+      store8(p, (128 | ((code >> 6) & 63)), i + 1)
+      store8(p, (128 | (code & 63)), i + 2)
+      return 3
+   } else {
+      store8(p, (240 | (code >> 18)), i)
+      store8(p, (128 | ((code >> 12) & 63)), i + 1)
+      store8(p, (128 | ((code >> 6) & 63)), i + 2)
+      store8(p, (128 | (code & 63)), i + 3)
+      return 4
+   }
 }
 
 fn utf8_valid(s){
@@ -684,69 +727,69 @@ fn utf8_slice(s, start, stop, step=1){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.text *
+   use std.core *
+   use std.str *
 
-    def s = "hello"
-    assert(str_len(s) == 5, "str_len")
-    assert(find(s, "ell") == 1, "find substring")
-    assert(find(s, "zzz") == -1, "find missing")
+   def s = "hello"
+   assert(str_len(s) == 5, "str_len")
+   assert(find(s, "ell") == 1, "find substring")
+   assert(find(s, "zzz") == -1, "find missing")
 
-    assert(_str_eq("a", "a"), "_str_eq true")
-    assert(!_str_eq("a", "b"), "_str_eq false")
+   assert(_str_eq("a", "a"), "_str_eq true")
+   assert(!_str_eq("a", "b"), "_str_eq false")
 
-    assert(pad_start("7", 3, "0") == "007", "pad_start")
-    assert(startswith("hello", "he"), "startswith")
-    assert(endswith("hello", "lo"), "endswith")
+   assert(pad_start("7", 3, "0") == "007", "pad_start")
+   assert(startswith("hello", "he"), "startswith")
+   assert(endswith("hello", "lo"), "endswith")
 
-    assert(atoi("123") == 123, "atoi")
-    assert(atoi("-7") == -7, "atoi negative")
+   assert(atoi("123") == 123, "atoi")
+   assert(atoi("-7") == -7, "atoi negative")
 
-    mut parts = split("a,b,c", ",")
-    assert(len(parts) == 3, "split count")
-    assert(get(parts, 0) == "a", "split first")
-    assert(get(parts, 2) == "c", "split last")
+   mut parts = split("a,b,c", ",")
+   assert(len(parts) == 3, "split count")
+   assert(get(parts, 0) == "a", "split first")
+   assert(get(parts, 2) == "c", "split last")
 
-    assert(strip("  hi \n") == "hi", "strip")
-    assert(str_add("he", "llo") == "hello", "str_add")
-    assert(upper("heLlo") == "HELLO", "upper")
-    assert(lower("HeLLo") == "hello", "lower")
-    assert(str_contains("hello", "ell"), "str_contains")
+   assert(strip("  hi \n") == "hi", "strip")
+   assert(str_add("he", "llo") == "hello", "str_add")
+   assert(upper("heLlo") == "HELLO", "upper")
+   assert(lower("HeLLo") == "hello", "lower")
+   assert(str_contains("hello", "ell"), "str_contains")
 
-    mut items = ["a", "b", "c"]
-    assert(join(items, ",") == "a,b,c", "join")
+   mut items = ["a", "b", "c"]
+   assert(join(items, ",") == "a,b,c", "join")
 
-    assert(str_replace("a-b-a", "a", "x") == "x-b-x", "str_replace")
-    assert(replace_all("a-b-a", "-", ":") == "a:b:a", "replace_all")
+   assert(str_replace("a-b-a", "a", "x") == "x-b-x", "str_replace")
+   assert(replace_all("a-b-a", "-", ":") == "a:b:a", "replace_all")
 
-    def euro = chr(8364) ; U+20AC
-    def grin = chr(128512) ; U+1F600
-    def mixed = "A" + euro + grin
-    assert(ord("A") == 65, "ord ascii")
-    assert(ord(euro) == 8364, "ord unicode bmp")
-    assert(ord(grin) == 128512, "ord unicode astral")
-    assert(utf8_len(mixed) == 3, "utf8_len code points")
-    assert(utf8_valid(mixed), "utf8_valid true")
-    assert(ord_at(mixed, 0) == 65, "ord_at first")
-    assert(ord_at(mixed, 1) == 8364, "ord_at middle")
-    assert(ord_at(mixed, -1) == 128512, "ord_at negative index")
-    assert(_str_eq(utf8_slice(mixed, 0, 2), "A" + euro), "utf8_slice basic")
-    assert(_str_eq(utf8_slice(mixed, 0, 3, 2), "A" + grin), "utf8_slice step")
-    assert(_str_eq(utf8_slice(mixed, -2, -1), euro), "utf8_slice negative bounds")
-    assert(_str_eq(slice(mixed, 1, 3), euro + grin), "generic slice utf8")
+   def euro = chr(8364) ; U+20AC
+   def grin = chr(128512) ; U+1F600
+   def mixed = "A" + euro + grin
+   assert(ord("A") == 65, "ord ascii")
+   assert(ord(euro) == 8364, "ord unicode bmp")
+   assert(ord(grin) == 128512, "ord unicode astral")
+   assert(utf8_len(mixed) == 3, "utf8_len code points")
+   assert(utf8_valid(mixed), "utf8_valid true")
+   assert(ord_at(mixed, 0) == 65, "ord_at first")
+   assert(ord_at(mixed, 1) == 8364, "ord_at middle")
+   assert(ord_at(mixed, -1) == 128512, "ord_at negative index")
+   assert(_str_eq(utf8_slice(mixed, 0, 2), "A" + euro), "utf8_slice basic")
+   assert(_str_eq(utf8_slice(mixed, 0, 3, 2), "A" + grin), "utf8_slice step")
+   assert(_str_eq(utf8_slice(mixed, -2, -1), euro), "utf8_slice negative bounds")
+   assert(_str_eq(slice(mixed, 1, 3), euro + grin), "generic slice utf8")
 
-    def bad = malloc(2)
-    init_str(bad, 1)
-    store8(bad, 255, 0)
-    store8(bad, 0, 1)
-    assert(!utf8_valid(bad), "utf8_valid false")
-    assert(utf8_len(bad) == 1, "utf8_len invalid byte fallback")
+   def bad = malloc(2)
+   init_str(bad, 1)
+   store8(bad, 255, 0)
+   store8(bad, 0, 1)
+   assert(!utf8_valid(bad), "utf8_valid false")
+   assert(utf8_len(bad) == 1, "utf8_len invalid byte fallback")
 
-    def s2 = "abcdef"
-    assert(_str_eq(str_slice(s2, 0, 3), "abc"), "slice start")
-    assert(_str_eq(str_slice(s2, 1, 5, 2), "bd"), "slice step")
-    assert(_str_eq(str_slice(s2, -3, -1), "de"), "slice negative")
-    assert(_str_eq(str_slice(s2, 0, 0), ""), "slice empty")
+   def s2 = "abcdef"
+   assert(_str_eq(str_slice(s2, 0, 3), "abc"), "slice start")
+   assert(_str_eq(str_slice(s2, 1, 5, 2), "bd"), "slice step")
+   assert(_str_eq(str_slice(s2, -3, -1), "de"), "slice negative")
+   assert(_str_eq(str_slice(s2, 0, 0), ""), "slice empty")
 
-    print("✓ std.text tests passed")
+   print("✓ std.str tests passed")
 }

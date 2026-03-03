@@ -17,7 +17,7 @@ from utils import (
     log
 )
 from detect import (
-    windows_llvm_candidates, find_windows_sdk, find_msvc_dirs, 
+    windows_llvm_candidates, find_windows_sdk, find_msvc_dirs,
     check_windows_toolchain, find_rc, windows_sdk_dirs, HOST_CFLAGS, HOST_LDFLAGS
 )
 from deps import ensure_windows_llvm_import_lib
@@ -31,69 +31,69 @@ from deps import (
 def llvm_flags(llvm_config, llvm_root, build_dir=None):
     cflags = []
     ldflags = []
-    
+
     if host_os() != "windows" and llvm_config and which(llvm_config):
         try:
             cflags = shlex.split(subprocess.check_output([llvm_config, "--cflags"], text=True).strip())
-            ldflags = shlex.split(subprocess.check_output([llvm_config, "--ldflags", "--libs", "core", "native", "mcjit"], text=True).strip())
+            ldflags = shlex.split(subprocess.check_output([llvm_config, "--ldflags", "--libs", "all", "--system-libs"], text=True).strip())
             return cflags, ldflags
         except Exception as e:
             raise SystemExit(f"llvm-config failed: {e}")
-            
+
     if host_os() == "windows":
          if not llvm_root and llvm_config and which(llvm_config):
              try:
                  p = subprocess.check_output([llvm_config, "--prefix"], text=True).strip()
                  if p: llvm_root = p
              except: pass
-             
+
     if not llvm_root:
         raise SystemExit("LLVM not found. Set LLVM_ROOT or add LLVM bin to PATH.")
-        
+
     root = Path(llvm_root)
     include = root/"include"
     libdir = root/"lib"
     bindir = root/"bin"
-    
+
     if include.exists():
         inc = cmake_path(include) if host_os()=="windows" else str(include)
         cflags += [f"-I{inc}"]
     if (include/"llvm-c").exists():
         inc = cmake_path(include/"llvm-c") if host_os()=="windows" else str(include/"llvm-c")
         cflags += [f"-I{inc}"]
-        
+
     if libdir.exists():
         lib = cmake_path(libdir) if host_os()=="windows" else str(libdir)
         ldflags += [f"-L{lib}"]
     if bindir.exists():
         lib = cmake_path(bindir) if host_os()=="windows" else str(bindir)
         ldflags += [f"-L{lib}"]
-        
+
     if host_os() == "windows":
         picked = None
         for c in (libdir/"LLVM-C.lib", libdir/"libLLVM-C.lib", bindir/"LLVM-C.lib", bindir/"libLLVM-C.lib"):
             if c.exists():
                 picked = c
                 break
-        
+
         if picked and picked.name.lower() in ("llvm-c.lib", "libllvm-c.lib"):
              if not (bindir/"LLVM-C.dll").exists():
                  for alt in (libdir/"libLLVM.lib", bindir/"libLLVM.lib"):
                       if alt.exists():
                           picked = alt
                           break
-                          
+
         if not picked and build_dir:
             lib = ensure_windows_llvm_import_lib(llvm_root, build_dir)
             if lib: picked = Path(lib)
-            
+
         if picked:
             ldflags.append(str(picked))
             return cflags, ldflags
-            
+
         if (bindir/"LLVM-C.dll").exists():
             raise SystemExit("LLVM-C.dll found but import lib missing.")
-            
+
         libs = sorted(list(libdir.glob("LLVM*.lib")) + list(bindir.glob("LLVM*.lib")))
         ldflags.extend(str(p) for p in libs)
         return cflags, ldflags
@@ -103,7 +103,7 @@ def llvm_flags(llvm_config, llvm_root, build_dir=None):
         if cand.exists():
             ldflags.append(str(cand))
             return cflags, ldflags
-            
+
     ldflags.extend(str(p) for p in sorted(libdir.glob("libLLVM*")))
     return cflags, ldflags
 
@@ -209,9 +209,6 @@ def ensure_std_bundle_fresh(build_dir, kind):
     std_root = ROOT/"std"
     if std_root.exists():
         files = sorted(std_root.rglob("*.ny"))
-        tool = ROOT/"etc"/"tools"/"std.py"
-        if tool.exists():
-            files.append(tool)
         if files:
             import hashlib
 
@@ -289,12 +286,12 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
             raise SystemExit("LLVM include root is invalid (missing llvm-c/Core.h).")
         os.environ["NYTRIX_LLVM_HEADERS"] = llvm_inc_root
         os.environ["NYTRIX_LLVM_INCLUDE"] = llvm_inc_root
-    
+
     cflags_llvm, ldflags_llvm = llvm_flags(llvm_config, llvm_root, build_dir)
     if host_os()=="windows" and llvm_inc_root:
         cflags_llvm = [f for f in cflags_llvm if not str(f).startswith("-I")]
         cflags_llvm = [f"-I{cmake_path(llvm_inc_root)}"] + cflags_llvm
-    
+
     win_sdk_inc_flags = []
     win_sdk_lib_flags = []
     if host_os()=="windows":
@@ -315,15 +312,15 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     prefix_default = "C:/nytrix" if host_os() == "windows" else "/usr"
     prefix = os.environ.get("PREFIX", prefix_default)
     compiler_launcher = _detect_compiler_launcher()
-    
+
     cache = bdir/"CMakeCache.txt"
     needs_run = True
-    
+
     if cache.exists():
         try:
             txt = cache.read_text(encoding="utf-8", errors="ignore")
             # Cheap check for home directory mismatch
-            if f"CMAKE_HOME_DIRECTORY:INTERNAL={str(ROOT).replace('\\','/')}" not in txt.replace("\\","/"): 
+            if f"CMAKE_HOME_DIRECTORY:INTERNAL={str(ROOT).replace('\\','/')}" not in txt.replace("\\","/"):
                  warn(f"Stale CMake cache detected (path mismatch); purging {bdir}")
                  shutil.rmtree(bdir, ignore_errors=True)
                  bdir.mkdir(parents=True, exist_ok=True)
@@ -370,7 +367,7 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     rc = find_rc()
     cc_cmake = cmake_path(cc) if host_os()=="windows" else cc
     rc_cmake = cmake_path(rc) if (host_os()=="windows" and rc) else rc
-    
+
     args = [
         "cmake", "-S", str(ROOT), "-B", str(bdir),
         f"-DCMAKE_BUILD_TYPE={cfg}",
@@ -397,9 +394,9 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     if rc_cmake: args.append(f"-DCMAKE_RC_COMPILER={rc_cmake}")
     if win_sdk_inc_flags: args.append(f"-DNYTRIX_WINSDK_CFLAGS={';'.join(win_sdk_inc_flags)}")
     if win_sdk_lib_flags: args.append(f"-DNYTRIX_WINSDK_LDFLAGS={';'.join(win_sdk_lib_flags)}")
-    
+
     if which("ninja"): args += ["-G", "Ninja"]
-    
+
     quiet = os.environ.get("NYTRIX_VERBOSE") != "1"
     if quiet:
         args += ["-Wno-dev", "--log-level=WARNING"]
@@ -411,29 +408,29 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
         log_ok(f"cmake ({kind}) configured")
     else:
         run(args)
-        
+
     return bdir
 
 def cmake_build(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root, target=None, jobs=0):
     key = (kind, str(build_dir))
     bdir = CONFIGURED.get(key)
-    
+
     if not bdir:
          bdir = cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root)
          CONFIGURED[key] = bdir
-         
+
     if which("ninja") and os.environ.get("NYTRIX_NINJA_HEAL","1")!="0":
         pass
-        
+
     t_list = target if isinstance(target, (list, tuple)) else ([target] if target else [])
     t_disp = ", ".join(t_list) if t_list else "default"
-    
+
     step(f"build {kind}: {t_disp}")
-    
+
     cmd = ["cmake", "--build", str(bdir)]
     if jobs > 0: cmd += ["-j", str(jobs)]
     if t_list: cmd += ["--target"] + t_list
-    
+
     guard_build_permissions(bdir)
 
     env = os.environ.copy()
@@ -449,5 +446,5 @@ def cmake_build(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root, targ
         copied = stage_windows_llvm_runtime(llvm_root, bdir)
         if copied:
             log("LLVM", f"staged {copied} runtime DLL(s) in {bdir}")
-    
+
     return bdir

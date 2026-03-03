@@ -8,7 +8,7 @@ module std.os.info (
 )
 use std.core *
 use std.core.dict_mod *
-use std.text *
+use std.str *
 use std.os *
 use std.os.fs *
 use std.os.io *
@@ -92,7 +92,7 @@ fn _find_value(lines, key){
       if(startswith(ln, key)){
          def idx = find(ln, "=")
          if(idx >= 0){
-            return strip(core.slice(ln, idx + 1, str_len(ln), 1))
+         return strip(core.slice(ln, idx + 1, str_len(ln), 1))
          }
          return strip(ln)
       }
@@ -128,8 +128,8 @@ fn _after_colon(s){
          init_str(out, n - i)
          mut k = 0
          while(i + k < n){
-            store8(out, load8(s, i + k), k)
-            k += 1
+         store8(out, load8(s, i + k), k)
+         k += 1
          }
          store8(out, 0, n - i)
          return strip(out)
@@ -176,11 +176,11 @@ fn _find_prefixed_line_value(text, prefix){
       if(j == m){
          mut k = line_start + j
          while(k < line_end){
-            if(load8(text, k) == 58){ ; ':'
+         if(load8(text, k) == 58){ ; ':'
                k += 1
                break
-            }
-            k += 1
+         }
+         k += 1
          }
          while(k < line_end && (load8(text, k) == 32 || load8(text, k) == 9)){ k += 1 }
          if(k < line_end){ return strip(slice(text, k, line_end, 1)) }
@@ -227,15 +227,15 @@ fn cpu_logical_count(){
       if(out <= 0){
          def cpu = _linux_cpuinfo_text()
          if(str_len(cpu) > 0){
-            def lines = split(cpu, "\n")
-            mut n = 0
-            mut i = 0
-            while(i < len(lines)){
+         def lines = split(cpu, "\n")
+         mut n = 0
+         mut i = 0
+         while(i < len(lines)){
                def ln = strip(get(lines, i, ""))
                if(startswith(ln, "processor")){ n += 1 }
                i += 1
-            }
-            if(n > 0){ out = n }
+         }
+         if(n > 0){ out = n }
          }
       }
    } elif(platform.is_macos()){
@@ -279,8 +279,8 @@ fn _linux_cpu_features_raw(){
       while(i < len(lines2)){
          def ln = strip(get(lines2, i, ""))
          if(startswith(ln, "flags") || startswith(ln, "Features") || startswith(ln, "isa")){
-            def v = _after_colon(ln)
-            if(str_len(v) > 0){ return strip(v) }
+         def v = _after_colon(ln)
+         if(str_len(v) > 0){ return strip(v) }
          }
          i += 1
       }
@@ -306,13 +306,13 @@ fn _macos_cpu_features_raw(){
       if(startswith(ln, "hw.optional.")){
          def idx = find(ln, ":")
          if(idx >= 0){
-            def key = strip(slice(ln, 0, idx, 1))
-            def val = strip(slice(ln, idx + 1, str_len(ln), 1))
-            if(eq(val, "1")){
+         def key = strip(slice(ln, 0, idx, 1))
+         def val = strip(slice(ln, idx + 1, str_len(ln), 1))
+         if(eq(val, "1")){
                ; Clean up prefix (hw.optional. => "")
                def clean = slice(key, 12, str_len(key), 1)
                feats = append(feats, clean)
-            }
+         }
          }
       }
       i += 1
@@ -488,8 +488,8 @@ fn _gpu_scan_cards_limit(){
       if(str_len(s) > 0){
          def v = atoi(s)
          if(v > 0){
-            n = v
-            if(n > 8){ n = 8 }
+         n = v
+         if(n > 8){ n = 8 }
          }
       }
    }
@@ -584,16 +584,16 @@ fn cpu_name(){
          def lm = _find_colon_line_value(lines, "Model name")
          if(str_len(lm) > 0){ out = lm }
          if(str_len(out) == 0){
-            def la = _find_colon_line_value(lines, "Architecture")
-            if(str_len(la) > 0){ out = la }
+         def la = _find_colon_line_value(lines, "Architecture")
+         if(str_len(la) > 0){ out = la }
          }
       }
       if(str_len(out) == 0){
          def cpu = _linux_cpuinfo_text()
          if(str_len(cpu) > 0){
-            def lines2 = split(cpu, "\n")
-            mut i = 0
-            while(i < len(lines2)){
+         def lines2 = split(cpu, "\n")
+         mut i = 0
+         while(i < len(lines2)){
                def ln = strip(get(lines2, i, ""))
                if(startswith(ln, "model name") || startswith(ln, "Hardware")){
                   def v = _after_colon(ln)
@@ -603,10 +603,10 @@ fn cpu_name(){
                   }
                }
                i += 1
-            }
-            if(str_len(out) == 0){
+         }
+         if(str_len(out) == 0){
                out = _first_line(cpu)
-            }
+         }
          }
       }
    } elif(load8(__os_name(), 0) == 109){ ; 'm' - macos
@@ -650,14 +650,14 @@ fn ram_short(){
          def total_kb = _first_number(total_v)
          def avail_kb = _first_number(avail_v)
          if(total_kb > 0){
-            if(avail_kb <= 0){
+         if(avail_kb <= 0){
                _ram_short_cache = to_str(total_kb / 1024) + "MB total"
                _ram_short_loaded = true
                return _ram_short_cache
-            }
-            _ram_short_cache = _format_mem_usage_kb(total_kb, avail_kb)
-            _ram_short_loaded = true
-            return _ram_short_cache
+         }
+         _ram_short_cache = _format_mem_usage_kb(total_kb, avail_kb)
+         _ram_short_loaded = true
+         return _ram_short_cache
          }
       }
    } elif(platform.is_macos()){
@@ -675,16 +675,16 @@ fn ram_short(){
          mut spec_p = 0
          mut i = 0
          while(i < len(lines)){
-            def ln = strip(get(lines, i, ""))
-            if(startswith(ln, "Mach Virtual Memory Statistics")){
+         def ln = strip(get(lines, i, ""))
+         if(startswith(ln, "Mach Virtual Memory Statistics")){
                page_sz = _first_number(ln)
                if(page_sz <= 0){ page_sz = 4096 }
-            } elif(startswith(ln, "Pages free:")){
+         } elif(startswith(ln, "Pages free:")){
                free_p = _first_number(ln)
-            } elif(startswith(ln, "Pages speculative:")){
+         } elif(startswith(ln, "Pages speculative:")){
                spec_p = _first_number(ln)
-            }
-            i += 1
+         }
+         i += 1
          }
          def free_b = (free_p + spec_p) * page_sz
          mut used_b = total_b - free_b
@@ -740,9 +740,9 @@ fn gpu_name(){
       if(_gpu_deep_scan_enabled()){
          def out = _cmd_out("system_profiler", ["SPDisplaysDataType", "-detailLevel", "mini"])
          if(str_len(out) > 0){
-            def lines = split(out, "\n")
-            mut i = 0
-            while(i < len(lines)){
+         def lines = split(out, "\n")
+         mut i = 0
+         while(i < len(lines)){
                def ln = strip(get(lines, i, ""))
                if(startswith(ln, "Chipset Model:")){
                   _gpu_name_cache = _after_colon(ln)
@@ -755,7 +755,7 @@ fn gpu_name(){
                   return _gpu_name_cache
                }
                i += 1
-            }
+         }
          }
       }
       _gpu_name_cache = "macos gpu"
@@ -768,19 +768,19 @@ fn gpu_name(){
       if(_gpu_deep_scan_enabled()){
          mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
          if(str_len(out) > 0){
-            def lines = split(out, "\n")
-            def v = _find_value(lines, "Name")
-            if(str_len(v) > 0){
+         def lines = split(out, "\n")
+         def v = _find_value(lines, "Name")
+         if(str_len(v) > 0){
                _gpu_name_cache = v
                _gpu_name_loaded = true
                return _gpu_name_cache
-            }
+         }
          }
          out = _cmd_out("powershell", ["-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name)"])
          if(str_len(out) > 0){
-            _gpu_name_cache = _first_line(out)
-            _gpu_name_loaded = true
-            return _gpu_name_cache
+         _gpu_name_cache = _first_line(out)
+         _gpu_name_loaded = true
+         return _gpu_name_cache
          }
       }
       _gpu_name_cache = "windows gpu"
@@ -820,9 +820,9 @@ fn gpu_name(){
          def entry = get(entries, j, "")
          def class_file = normalize(pci_path + "/" + entry + "/class")
          if(file_exists(class_file)){
-            def class_hex = strip(_read_text(class_file))
-            ; Display controller: 0x030000, 3D controller: 0x030200
-            if(startswith(class_hex, "0x0300") || startswith(class_hex, "0x0302")){
+         def class_hex = strip(_read_text(class_file))
+         ; Display controller: 0x030000, 3D controller: 0x030200
+         if(startswith(class_hex, "0x0300") || startswith(class_hex, "0x0302")){
                def vf = normalize(pci_path + "/" + entry + "/vendor")
                def df = normalize(pci_path + "/" + entry + "/device")
                if(file_exists(vf) && file_exists(df)){
@@ -834,7 +834,7 @@ fn gpu_name(){
                      return _gpu_name_cache
                   }
                }
-            }
+         }
          }
          j += 1
       }
@@ -898,50 +898,50 @@ fn system_info(){
 }
 
 if(comptime{__main()}){
-    use std.os.info *
-    use std.os *
-    use std.text *
-    use std.core *
-    use std.core.error *
-    use std.core.dict_mod *
+   use std.os.info *
+   use std.os *
+   use std.str *
+   use std.core *
+   use std.core.error *
+   use std.core.dict_mod *
 
-    print("Testing std.os.info...")
+   print("Testing std.os.info...")
 
-    def hn = hostname()
-    assert(is_str(hn) && str_len(strip(hn)) > 0, "hostname")
+   def hn = hostname()
+   assert(is_str(hn) && str_len(strip(hn)) > 0, "hostname")
 
-    def si = system_info()
-    assert(is_dict(si), "system_info dict")
-    assert(eq(dict_get(si, "os", ""), os()), "system_info os")
-    assert(eq(dict_get(si, "arch", ""), arch()), "system_info arch")
-    mut platform_v = dict_get(si, "platform", "")
-    if(!is_str(platform_v) || str_len(strip(platform_v)) == 0){
+   def si = system_info()
+   assert(is_dict(si), "system_info dict")
+   assert(eq(dict_get(si, "os", ""), os()), "system_info os")
+   assert(eq(dict_get(si, "arch", ""), arch()), "system_info arch")
+   mut platform_v = dict_get(si, "platform", "")
+   if(!is_str(platform_v) || str_len(strip(platform_v)) == 0){
        platform_v = dict_get(si, "os", "") + "/" + dict_get(si, "arch", "")
-    }
-    assert(str_len(strip(platform_v)) > 0, "system_info platform")
-    assert(str_len(strip(dict_get(si, "hostname", ""))) > 0, "system_info hostname")
-    assert(str_len(strip(dict_get(si, "cpu", ""))) > 0, "system_info cpu")
-    mut logical = dict_get(si, "logical_cpus", 0)
-    if(logical < 1){ logical = cpu_logical_count() }
-    if(logical < 1){ logical = 1 }
-    assert(logical >= 1, "system_info logical_cpus")
-    assert(is_str(cpu_features_raw()), "cpu_features_raw api")
-    assert(is_list(cpu_features()), "cpu_features api")
-    assert(is_dict(cpu_feature_map()), "cpu_feature_map api")
-    assert((has_cpu_feature("sse4.1") == has_cpu_feature("sse4_1")), "feature alias sse4.1")
-    assert((has_cpu_feature("sse41") == has_cpu_feature("sse4_1")), "feature alias sse41")
-    assert((has_cpu_feature("sha_ni") == has_cpu_feature("sha")), "feature alias sha_ni")
-    assert(str_len(strip(dict_get(si, "ram", ""))) > 0, "system_info ram")
-    assert(str_len(strip(dict_get(si, "gpu", ""))) > 0, "system_info gpu")
-    assert(is_str(dict_get(si, "cpu_features_raw", "")), "system_info cpu_features_raw")
-    def sif = dict_get(si, "cpu_features", list(1))
-    assert(is_list(sif), "system_info cpu_features list")
-    def sfm = dict_get(si, "cpu_feature_map", 0)
-    assert(is_dict(sfm), "system_info cpu_feature_map dict")
-    assert((dict_get(sfm, "sha", false) == has_cpu_feature("sha")), "system_info cpu_feature_map mirrors api")
-    mut i = 0
-    mut _feature_probe_checks = 0
-    while(i < len(sif) && _feature_probe_checks < 3){
+   }
+   assert(str_len(strip(platform_v)) > 0, "system_info platform")
+   assert(str_len(strip(dict_get(si, "hostname", ""))) > 0, "system_info hostname")
+   assert(str_len(strip(dict_get(si, "cpu", ""))) > 0, "system_info cpu")
+   mut logical = dict_get(si, "logical_cpus", 0)
+   if(logical < 1){ logical = cpu_logical_count() }
+   if(logical < 1){ logical = 1 }
+   assert(logical >= 1, "system_info logical_cpus")
+   assert(is_str(cpu_features_raw()), "cpu_features_raw api")
+   assert(is_list(cpu_features()), "cpu_features api")
+   assert(is_dict(cpu_feature_map()), "cpu_feature_map api")
+   assert((has_cpu_feature("sse4.1") == has_cpu_feature("sse4_1")), "feature alias sse4.1")
+   assert((has_cpu_feature("sse41") == has_cpu_feature("sse4_1")), "feature alias sse41")
+   assert((has_cpu_feature("sha_ni") == has_cpu_feature("sha")), "feature alias sha_ni")
+   assert(str_len(strip(dict_get(si, "ram", ""))) > 0, "system_info ram")
+   assert(str_len(strip(dict_get(si, "gpu", ""))) > 0, "system_info gpu")
+   assert(is_str(dict_get(si, "cpu_features_raw", "")), "system_info cpu_features_raw")
+   def sif = dict_get(si, "cpu_features", list(1))
+   assert(is_list(sif), "system_info cpu_features list")
+   def sfm = dict_get(si, "cpu_feature_map", 0)
+   assert(is_dict(sfm), "system_info cpu_feature_map dict")
+   assert((dict_get(sfm, "sha", false) == has_cpu_feature("sha")), "system_info cpu_feature_map mirrors api")
+   mut i = 0
+   mut _feature_probe_checks = 0
+   while(i < len(sif) && _feature_probe_checks < 3){
        def feat = strip(get(sif, i, ""))
        if(str_len(feat) > 0){
           assert(dict_get(sfm, feat, false), "system_info cpu_feature_map contains sampled feature")
@@ -949,49 +949,49 @@ if(comptime{__main()}){
           _feature_probe_checks += 1
        }
        i += 1
-    }
-    if(len(sif) > 0){
+   }
+   if(len(sif) > 0){
        assert(_feature_probe_checks > 0, "system_info cpu_features sample processed")
-    }
-    def cl = dict_get(si, "opencl", false)
-    assert((cl == true || cl == false), "system_info opencl bool")
-    assert(str_len(strip(dict_get(si, "gpu_mode", ""))) > 0, "system_info gpu_mode")
-    assert(str_len(strip(dict_get(si, "gpu_backend", ""))) > 0, "system_info gpu_backend")
-    assert(str_len(strip(dict_get(si, "gpu_offload", ""))) > 0, "system_info gpu_offload")
-    assert(dict_get(si, "gpu_min_work", -1) >= 0, "system_info gpu_min_work")
-    def gasync = dict_get(si, "gpu_async", false)
-    assert((gasync == true || gasync == false), "system_info gpu_async")
-    def gfast = dict_get(si, "gpu_fast_math", false)
-    assert((gfast == true || gfast == false), "system_info gpu_fast_math")
-    def gav = dict_get(si, "gpu_available", false)
-    assert((gav == true || gav == false), "system_info gpu_available")
-    def at = dict_get(si, "accel_target", "")
-    assert((eq(at, "none") || eq(at, "nvptx") || eq(at, "amdgpu") || eq(at, "spirv") || eq(at, "hsaco")), "system_info accel_target")
-    def atg = dict_get(si, "accel_targets", list(1))
-    assert(is_list(atg), "system_info accel_targets list")
-    assert(len(atg) >= 4, "system_info accel_targets size")
-    def abk = dict_get(si, "accel_binary_kind", "")
-    assert((eq(abk, "none") || eq(abk, "ptx") || eq(abk, "o") || eq(abk, "spv") || eq(abk, "hsaco")), "system_info accel_binary_kind")
-    def abe = dict_get(si, "accel_binary_ext", "")
-    assert((eq(abe, "") || eq(abe, ".ptx") || eq(abe, ".o") || eq(abe, ".spv") || eq(abe, ".hsaco")), "system_info accel_binary_ext")
-    def ast = dict_get(si, "accel_status", 0)
-    assert(is_dict(ast), "system_info accel_status dict")
-    def aav = dict_get(si, "accel_available", false)
-    assert((aav == true || aav == false), "system_info accel_available")
-    assert(str_len(strip(dict_get(si, "gpu_selected_backend", ""))) > 0, "system_info gpu_selected_backend")
-    def gpol = dict_get(si, "gpu_offload_policy_selected", false)
-    assert((gpol == true || gpol == false), "system_info gpu_offload_policy_selected")
-    def gact = dict_get(si, "gpu_offload_active", false)
-    assert((gact == true || gact == false), "system_info gpu_offload_active")
-    assert(str_len(strip(dict_get(si, "gpu_offload_reason", ""))) > 0, "system_info gpu_offload_reason")
-    assert(str_len(strip(dict_get(si, "gpu_offload_active_reason", ""))) > 0, "system_info gpu_offload_active_reason")
-    assert(str_len(strip(dict_get(si, "parallel_mode", ""))) > 0, "system_info parallel_mode")
-    assert(dict_get(si, "parallel_threads", -1) >= 0, "system_info parallel_threads")
-    assert(dict_get(si, "parallel_min_work", -1) >= 0, "system_info parallel_min_work")
-    assert(dict_get(si, "parallel_effective_threads", 0) >= 1, "system_info parallel_effective_threads")
-    def psel = dict_get(si, "parallel_policy_selected", false)
-    assert((psel == true || psel == false), "system_info parallel_policy_selected")
-    assert(str_len(strip(dict_get(si, "parallel_reason", ""))) > 0, "system_info parallel_reason")
+   }
+   def cl = dict_get(si, "opencl", false)
+   assert((cl == true || cl == false), "system_info opencl bool")
+   assert(str_len(strip(dict_get(si, "gpu_mode", ""))) > 0, "system_info gpu_mode")
+   assert(str_len(strip(dict_get(si, "gpu_backend", ""))) > 0, "system_info gpu_backend")
+   assert(str_len(strip(dict_get(si, "gpu_offload", ""))) > 0, "system_info gpu_offload")
+   assert(dict_get(si, "gpu_min_work", -1) >= 0, "system_info gpu_min_work")
+   def gasync = dict_get(si, "gpu_async", false)
+   assert((gasync == true || gasync == false), "system_info gpu_async")
+   def gfast = dict_get(si, "gpu_fast_math", false)
+   assert((gfast == true || gfast == false), "system_info gpu_fast_math")
+   def gav = dict_get(si, "gpu_available", false)
+   assert((gav == true || gav == false), "system_info gpu_available")
+   def at = dict_get(si, "accel_target", "")
+   assert((eq(at, "none") || eq(at, "nvptx") || eq(at, "amdgpu") || eq(at, "spirv") || eq(at, "hsaco")), "system_info accel_target")
+   def atg = dict_get(si, "accel_targets", list(1))
+   assert(is_list(atg), "system_info accel_targets list")
+   assert(len(atg) >= 4, "system_info accel_targets size")
+   def abk = dict_get(si, "accel_binary_kind", "")
+   assert((eq(abk, "none") || eq(abk, "ptx") || eq(abk, "o") || eq(abk, "spv") || eq(abk, "hsaco")), "system_info accel_binary_kind")
+   def abe = dict_get(si, "accel_binary_ext", "")
+   assert((eq(abe, "") || eq(abe, ".ptx") || eq(abe, ".o") || eq(abe, ".spv") || eq(abe, ".hsaco")), "system_info accel_binary_ext")
+   def ast = dict_get(si, "accel_status", 0)
+   assert(is_dict(ast), "system_info accel_status dict")
+   def aav = dict_get(si, "accel_available", false)
+   assert((aav == true || aav == false), "system_info accel_available")
+   assert(str_len(strip(dict_get(si, "gpu_selected_backend", ""))) > 0, "system_info gpu_selected_backend")
+   def gpol = dict_get(si, "gpu_offload_policy_selected", false)
+   assert((gpol == true || gpol == false), "system_info gpu_offload_policy_selected")
+   def gact = dict_get(si, "gpu_offload_active", false)
+   assert((gact == true || gact == false), "system_info gpu_offload_active")
+   assert(str_len(strip(dict_get(si, "gpu_offload_reason", ""))) > 0, "system_info gpu_offload_reason")
+   assert(str_len(strip(dict_get(si, "gpu_offload_active_reason", ""))) > 0, "system_info gpu_offload_active_reason")
+   assert(str_len(strip(dict_get(si, "parallel_mode", ""))) > 0, "system_info parallel_mode")
+   assert(dict_get(si, "parallel_threads", -1) >= 0, "system_info parallel_threads")
+   assert(dict_get(si, "parallel_min_work", -1) >= 0, "system_info parallel_min_work")
+   assert(dict_get(si, "parallel_effective_threads", 0) >= 1, "system_info parallel_effective_threads")
+   def psel = dict_get(si, "parallel_policy_selected", false)
+   assert((psel == true || psel == false), "system_info parallel_policy_selected")
+   assert(str_len(strip(dict_get(si, "parallel_reason", ""))) > 0, "system_info parallel_reason")
 
-    print("✓ std.os.info tests passed")
+   print("✓ std.os.info tests passed")
 }

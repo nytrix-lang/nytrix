@@ -1,10 +1,10 @@
 ;; Keywords: sound source
 
 module std.os.audio.source (
-    make_memory_source,
-    read, seek, tell, length, format, sample_format,
-    source_channels, source_rate, source_bits, source_length,
-    SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32
+   make_memory_source,
+   read, seek, tell, length, format, sample_format,
+   source_channels, source_rate, source_bits, source_length,
+   SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32
 )
 
 use std.core *

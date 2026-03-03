@@ -6,11 +6,10 @@ use std.math.random *
 use std.os.args *
 use std.os.time *
 use std.os *
-use std.text *
-use std.text.bytes *
-use std.text.term *
+use std.str *
+use std.str.bytes *
+use std.str.term *
 
-;; Constants
 def COLOR_DARK  = 2
 def COLOR_LIGHT = 7
 def COLOR_WHITE = 7
@@ -18,13 +17,12 @@ def COLOR_BG    = 0
 def THRESH_HI   = 28
 def THRESH_MD   = 15
 
-;; State Init
 def tSize = get_terminal_size()
 mut W = get(tSize, 0, 0)
 mut H = get(tSize, 1, 0)
 if(W < 1){ W = 80 }
 if(H < 2){ H = 25 }
-H -= 0 ;; Full screen
+H -= 0
 
 mut max_frames = 0
 mut frame_count = 0
@@ -76,7 +74,6 @@ while(1){
    def key = poll_key()
    if(is_quit_key(key)){ break }
 
-   ;; Update columns.
    mut x = 0
    while(x < W){
       def yf = get(DY, x, 0) + get(DS, x, 0)
@@ -94,7 +91,6 @@ while(1){
       x += 1
    }
 
-   ;; Render buffer.
    mut idx = 0
    def n = W * H
    while(idx < n){
@@ -104,11 +100,11 @@ while(1){
          mut fg = COLOR_DARK
          mut b  = 0
          if(t > THRESH_HI){
-            fg = COLOR_WHITE
-            b  = 1
+         fg = COLOR_WHITE
+         b  = 1
          } elif(t > THRESH_MD){
-            fg = COLOR_LIGHT
-            b  = 1
+         fg = COLOR_LIGHT
+         b  = 1
          }
 
          set_idx(CBUF, idx, get(ASCII, cc - 33, " "))
@@ -128,7 +124,7 @@ while(1){
    canvas_print(CANV, 0, 0, "ESC: Quit", 7, 0)
    canvas_refresh(CANV)
 
-    msleep(16)
+   msleep(16)
    frame_count += 1
    if(max_frames > 0 && frame_count >= max_frames){ break }
 }

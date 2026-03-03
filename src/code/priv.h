@@ -13,8 +13,8 @@ static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
 
 static inline LLVMBasicBlockRef ny_llvm_append_block(LLVMValueRef fn,
                                                      const char *name) {
-  return LLVMAppendBasicBlockInContext(LLVMGetModuleContext(LLVMGetGlobalParent(fn)),
-                                       fn, name);
+  return LLVMAppendBasicBlockInContext(
+      LLVMGetModuleContext(LLVMGetGlobalParent(fn)), fn, name);
 }
 
 void add_builtins(codegen_t *cg);
@@ -112,5 +112,10 @@ void ny_sym_state_free(codegen_t *cg);
 
 void codegen_emit_string_init(codegen_t *cg);
 LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type);
+void add_fn_string_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                        const char *val);
+void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                      uint64_t val);
+void ny_apply_base_fn_attrs(codegen_t *cg, LLVMValueRef fn);
 
 #endif

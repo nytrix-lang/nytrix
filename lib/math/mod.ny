@@ -1,7 +1,7 @@
 ;; Keywords: math
 ;; Math module.
 
-module std.math (
+module std.math ( fmod,
    abs, min, max, pow, mod, clamp, sign, sqrt, gcd, lcm, factorial, lerp,
    sin, cos, tan, asin, acos, atan, atan2,
    PI, PHI, E, TAU, LN2, LN10
@@ -110,7 +110,7 @@ def LN10 = float(2.30258509299404568402)
 def _HALF_PI = fdiv(PI, float(2.0))
 def _ATAN_K  = float(0.273)
 
-fn _fmod(a, b){
+fn fmod(a, b){
    "Auto-generated docstring: _fmod."
    a = float(a)
    b = float(b)
@@ -137,7 +137,7 @@ fn sin(x){
    "Sine (radians), Nytrix implementation."
    mut fx = float(x)
    if(is_nan(fx) || is_inf(fx)){ return nan() }
-   fx = _fmod(fx, TAU)
+   fx = fmod(fx, TAU)
    if(flt(fx, 0.0)){ fx = fadd(fx, TAU) }
    mut sgn = float(1)
    if(fgt(fx, PI)){
@@ -225,49 +225,49 @@ fn acos(x){
 }
 
 if(comptime{__main()}){
-    use std.math *
-    use std.math.float *
-    use std.core.error *
+   use std.math *
+   use std.math.float *
+   use std.core.error *
 
-    assert(abs(-5) == 5, "abs neg")
-    assert(abs(5) == 5, "abs pos")
-    assert(abs(0) == 0, "abs zero")
+   assert(abs(-5) == 5, "abs neg")
+   assert(abs(5) == 5, "abs pos")
+   assert(abs(0) == 0, "abs zero")
 
-    assert(min(3,7) == 3, "min")
-    assert(min(7,3) == 3, "min rev")
-    assert(max(3,7) == 7, "max")
-    assert(max(7,3) == 7, "max rev")
+   assert(min(3,7) == 3, "min")
+   assert(min(7,3) == 3, "min rev")
+   assert(max(3,7) == 7, "max")
+   assert(max(7,3) == 7, "max rev")
 
-    assert(pow(2,3) == 8, "pow 2^3")
-    assert(pow(5,2) == 25, "pow 5^2")
-    assert(pow(10,0) == 1, "pow 10^0")
-    assert(pow(2,10) == 1024, "pow 2^10")
-    assert(gcd(12,18) == 6, "gcd")
-    assert(lcm(12,18) == 36, "lcm")
+   assert(pow(2,3) == 8, "pow 2^3")
+   assert(pow(5,2) == 25, "pow 5^2")
+   assert(pow(10,0) == 1, "pow 10^0")
+   assert(pow(2,10) == 1024, "pow 2^10")
+   assert(gcd(12,18) == 6, "gcd")
+   assert(lcm(12,18) == 36, "lcm")
 
-    assert(sqrt(16) == 4, "sqrt 16")
-    assert(sqrt(25) == 5, "sqrt 25")
-    assert(sqrt(1) == 1, "sqrt 1")
-    assert(sqrt(0) == 0, "sqrt 0")
+   assert(sqrt(16) == 4, "sqrt 16")
+   assert(sqrt(25) == 5, "sqrt 25")
+   assert(sqrt(1) == 1, "sqrt 1")
+   assert(sqrt(0) == 0, "sqrt 0")
 
-    fn near(a, b, eps){
+   fn near(a, b, eps){
        "Auto-generated docstring: near."
        abs(a - b) <= eps
-    }
-    assert(near(sin(0.0), 0.0, 0.000001), "sin 0")
-    assert(near(sin(PI / 2.0), 1.0, 0.0005), "sin pi/2")
-    assert(near(cos(0.0), 1.0, 0.000001), "cos 0")
-    assert(near(cos(PI), -1.0, 0.001), "cos pi")
-    assert(near(tan(0.0), 0.0, 0.000001), "tan 0")
-    assert(near(atan(1.0), PI / 4.0, 0.005), "atan 1")
-    assert(near(atan2(1.0, 1.0), PI / 4.0, 0.005), "atan2 1,1")
-    assert(near(asin(0.5), PI / 6.0, 0.005), "asin 0.5")
-    assert(near(acos(0.5), PI / 3.0, 0.005), "acos 0.5")
+   }
+   assert(near(sin(0.0), 0.0, 0.000001), "sin 0")
+   assert(near(sin(PI / 2.0), 1.0, 0.0005), "sin pi/2")
+   assert(near(cos(0.0), 1.0, 0.000001), "cos 0")
+   assert(near(cos(PI), -1.0, 0.001), "cos pi")
+   assert(near(tan(0.0), 0.0, 0.000001), "tan 0")
+   assert(near(atan(1.0), PI / 4.0, 0.005), "atan 1")
+   assert(near(atan2(1.0, 1.0), PI / 4.0, 0.005), "atan2 1,1")
+   assert(near(asin(0.5), PI / 6.0, 0.005), "asin 0.5")
+   assert(near(acos(0.5), PI / 3.0, 0.005), "acos 0.5")
 
-    assert(floor(3) == 3, "floor pos")
-    assert(floor(-3) == -3, "floor neg")
-    assert(ceil(3) == 3, "ceil pos")
-    assert(ceil(-3) == -3, "ceil neg")
+   assert(floor(3) == 3, "floor pos")
+   assert(floor(-3) == -3, "floor neg")
+   assert(ceil(3) == 3, "ceil pos")
+   assert(ceil(-3) == -3, "ceil neg")
 
-    print("✓ std.math.mod tests passed")
+   print("✓ std.math.mod tests passed")
 }

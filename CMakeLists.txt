@@ -72,7 +72,8 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
 
   # Attempt to use llvm-config
   find_program(LLVM_CONFIG_EXE NAMES llvm-config llvm-config-18 llvm-config-17 llvm-config-16
-               PATHS "C:/Program Files/LLVM/bin" "C:/tools/llvm/bin")
+               PATHS "C:/Program Files/LLVM/bin" "C:/tools/llvm/bin"
+                     "/opt/homebrew/opt/llvm/bin" "/usr/local/opt/llvm/bin")
   if (LLVM_CONFIG_EXE)
     message(STATUS "Found llvm-config: ${LLVM_CONFIG_EXE}")
     execute_process(COMMAND ${LLVM_CONFIG_EXE} --cflags OUTPUT_VARIABLE LLVM_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -204,11 +205,10 @@ file(GLOB_RECURSE STD_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/lib/*.ny")
 
 add_custom_command(
   OUTPUT "${STD_BUNDLE}" "${STD_SYMBOLS}"
-  COMMAND "${CMAKE_COMMAND}" -E env PYTHONDONTWRITEBYTECODE=1
-          "${Python3_EXECUTABLE}" -B "${NYTRIX_ROOT}/etc/tools/std.py" "${STD_BUNDLE}"
+  COMMAND $<TARGET_FILE:ny> --bundle-std="${STD_BUNDLE}" --bundle-symbols="${STD_SYMBOLS}" --verbose=1
   WORKING_DIRECTORY "${NYTRIX_ROOT}"
-  DEPENDS "${NYTRIX_ROOT}/etc/tools/std.py" ${STD_SOURCES}
-  COMMENT "Bundling std"
+  DEPENDS ny ${STD_SOURCES}
+  COMMENT "Bundling std natively"
 )
 
 add_custom_target(std_bundle ALL DEPENDS "${STD_BUNDLE}" "${STD_SYMBOLS}")
@@ -248,8 +248,7 @@ add_library(nytrix_compiler OBJECT ${SRC_COMPILER})
 set_property(TARGET nytrix_compiler PROPERTY POSITION_INDEPENDENT_CODE ON)
 add_library(nytrix_runtime OBJECT "${RT_INIT}")
 
-add_dependencies(nytrix_compiler std_bundle)
-add_dependencies(nytrix_runtime std_bundle)
+# nytrix_compiler and nytrix_runtime don't depend on std_bundle at compile time anymore.
 nytrix_apply_compile_perf_flags(nytrix_compiler)
 nytrix_apply_compile_perf_flags(nytrix_runtime)
 
@@ -420,7 +419,7 @@ add_executable(ny
   $<TARGET_OBJECTS:nytrix_compiler>
   $<TARGET_OBJECTS:nytrix_runtime>
 )
-add_dependencies(ny std_bundle)
+# ny doesn't depend on std_bundle at compile time anymore, as it's used to BUILD it.
   target_include_directories(ny PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/base"
@@ -471,7 +470,6 @@ if (NYTRIX_BUILD_LSP)
     $<TARGET_OBJECTS:nytrix_compiler>
     $<TARGET_OBJECTS:nytrix_runtime>
   )
-  add_dependencies(ny-lsp std_bundle)
   target_include_directories(ny-lsp PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/base"
@@ -578,12 +576,12 @@ else()
   endforeach()
 
   if (UNIX AND NOT APPLE)
-    target_link_libraries(ny PRIVATE dl)
+    target_link_libraries(ny PRIVATE dl util)
   endif()
   target_link_options(ny PRIVATE -rdynamic)
 
   if (NYTRIX_BUILD_LSP)
-    target_link_libraries(ny-lsp PRIVATE m pthread)
+    target_link_libraries(ny-lsp PRIVATE m pthread util)
     foreach(_flag IN LISTS _all_ldflags)
       if(_flag MATCHES "^-L" OR _flag MATCHES "^-l")
         target_link_options(ny-lsp PRIVATE "${_flag}")

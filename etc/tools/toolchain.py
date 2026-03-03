@@ -77,7 +77,7 @@ def detect_package_manager():
 
 def install_toolchain(target):
     if target in ("win", "mingw"): target = "windows"
-    
+
     if target == "all":
         ok = True
         for t in ARCH_MAP:
@@ -108,7 +108,7 @@ def install_toolchain(target):
                 try:
                     run(["sudo", "pacman", "-Sy", "--noconfirm"] + info["pacman"])
                 except: pass
-            
+
             if "aur" in info and not shutil.which(info["bin"]):
                 for helper in ["yay", "paru"]:
                     if shutil.which(helper):
@@ -126,7 +126,7 @@ def install_toolchain(target):
         else:
             err(f"Failed to install {target} toolchain.")
             return False
-            
+
     except Exception as e:
         err(f"Failed to install {target} toolchain: {e}")
         return False
