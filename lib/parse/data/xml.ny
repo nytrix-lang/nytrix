@@ -7,7 +7,7 @@ module std.enc.xml (
 )
 
 use std.core *
-use std.text as str
+use std.str as str
 
 fn Node(name, attr=dict(), children=[], text=""){
    "Auto-generated docstring: Node."
@@ -48,14 +48,14 @@ fn _parse_attr(s, p, n){
          p = _skip_ws(s, p, n)
          def quote = load8(s, p)
          if(quote == 34 || quote == 39){ ; '"' or "'"
-            p += 1
-            mut val = ""
-            while(p < n && load8(s, p) != quote){
+         p += 1
+         mut val = ""
+         while(p < n && load8(s, p) != quote){
                val = val + chr(load8(s, p))
                p += 1
-            }
-            p += 1
-            attrs = dict_set(attrs, key, val)
+         }
+         p += 1
+         attrs = dict_set(attrs, key, val)
          }
       } else {
          attrs = dict_set(attrs, key, true)
@@ -77,61 +77,61 @@ fn parse(data){
       if(load8(data, p) == 60){ ; '<'
          p += 1
          if(p < n && load8(data, p) == 47){ ; '</'
-            p += 1
-            mut name = ""
-            while(p < n && load8(data, p) != 62){
+         p += 1
+         mut name = ""
+         while(p < n && load8(data, p) != 62){
                name = name + chr(load8(data, p))
                p += 1
-            }
-            p += 1
-            if(len(stack) > 1){
+         }
+         p += 1
+         if(len(stack) > 1){
                stack = pop(stack)
-            }
+         }
          } elif(p < n && load8(data, p) == 33){ ; '<!' (Comment or CDATA)
-            while(p < n && load8(data, p) != 62){ p += 1 }
-            p += 1
+         while(p < n && load8(data, p) != 62){ p += 1 }
+         p += 1
          } elif(p < n && load8(data, p) == 63){ ; '<?' (Declaration)
-            while(p < n && load8(data, p) != 62){ p += 1 }
-            p += 1
+         while(p < n && load8(data, p) != 62){ p += 1 }
+         p += 1
          } else {
-            mut name = ""
-            while(p < n){
+         mut name = ""
+         while(p < n){
                def c = load8(data, p)
                if(c == 62 || c == 47 || c <= 32){ break }
                name = name + chr(c)
                p += 1
-            }
-            def attr_res = _parse_attr(data, p, n)
-            def attrs = get(attr_res, 0)
-            p = get(attr_res, 1)
-            mut self_closing = false
-            if(p < n && load8(data, p) == 47){
+         }
+         def attr_res = _parse_attr(data, p, n)
+         def attrs = get(attr_res, 0)
+         p = get(attr_res, 1)
+         mut self_closing = false
+         if(p < n && load8(data, p) == 47){
                self_closing = true
                p += 1
-            }
-            if(p < n && load8(data, p) == 62){ p += 1 }
-            def node = Node(name, attrs)
-            if(root == 0){ root = node }
-            if(len(stack) > 0){
+         }
+         if(p < n && load8(data, p) == 62){ p += 1 }
+         def node = Node(name, attrs)
+         if(root == 0){ root = node }
+         if(len(stack) > 0){
                def parent = get(stack, len(stack) - 1)
                mut children = dict_get(parent, "children")
                children = append(children, node)
                dict_set(parent, "children", children)
-            }
-            if(!self_closing){
+         }
+         if(!self_closing){
                stack = append(stack, node)
-            }
+         }
          }
       } else {
          mut text = ""
          while(p < n && load8(data, p) != 60){
-            text = text + chr(load8(data, p))
-            p += 1
+         text = text + chr(load8(data, p))
+         p += 1
          }
          if(len(stack) > 0){
-            def current = get(stack, len(stack) - 1)
-            def existing = dict_get(current, "text")
-            dict_set(current, "text", existing + str.strip(text))
+         def current = get(stack, len(stack) - 1)
+         def existing = dict_get(current, "text")
+         dict_set(current, "text", existing + str.strip(text))
          }
       }
    }
@@ -180,11 +180,11 @@ if(comptime{__main()}){
    def item1 = get(children, 0)
    assert(dict_get(item1, "name") == "item", "xml child name")
    assert(dict_get(dict_get(item1, "attr"), "id") == "1", "xml attr")
-    assert(dict_get(item1, "text") == "Hello", "xml text content")
+   assert(dict_get(item1, "text") == "Hello", "xml text content")
 
-    def encoded = encode(root)
-    assert(str.str_contains(encoded, "id='1'"), "xml encode attr")
-    assert(str.str_contains(encoded, "</root>"), "xml encode root close")
+   def encoded = encode(root)
+   assert(str.str_contains(encoded, "id='1'"), "xml encode attr")
+   assert(str.str_contains(encoded, "</root>"), "xml encode root close")
 
-    print("✓ std.enc.xml tests passed")
+   print("✓ std.enc.xml tests passed")
 }

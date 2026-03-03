@@ -78,19 +78,20 @@ static void emit_trace_func(codegen_t *cg, const char *name) {
   LLVMBuildCall2(cg->builder, ts->type, ts->value, &nstr, 1, "");
 }
 
-static void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name) {
+void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                      uint64_t val) {
   if (!cg || !fn || !name)
     return;
   unsigned kind_id =
       LLVMGetEnumAttributeKindForName(name, (unsigned)strlen(name));
   if (kind_id == 0)
     return;
-  LLVMAttributeRef attr = LLVMCreateEnumAttribute(cg->ctx, kind_id, 0);
+  LLVMAttributeRef attr = LLVMCreateEnumAttribute(cg->ctx, kind_id, val);
   LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, attr);
 }
 
-static void add_fn_string_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
-                               const char *value) {
+void add_fn_string_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                        const char *value) {
   if (!cg || !fn || !name || !*name)
     return;
   if (!value)
@@ -140,7 +141,7 @@ static bool attr_arg_text_view(expr_t *arg, const char **text, size_t *len) {
   if (arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT &&
       arg->as.literal.as.i == 0 && arg->tok.lexeme && arg->tok.len > 0) {
     *text = arg->tok.lexeme;
-    *len  = arg->tok.len;
+    *len = arg->tok.len;
     return true;
   }
   return false;
@@ -322,23 +323,17 @@ static void apply_fn_attrs(codegen_t *cg, LLVMValueRef fn,
   if (!cg || !fn || !fn_stmt || fn_stmt->kind != NY_S_FUNC)
     return;
   const stmt_func_t *decl = &fn_stmt->as.fn;
-  if (cg->debug_symbols) {
-    add_fn_string_attr(cg, fn, "frame-pointer", "all");
-    add_fn_string_attr(cg, fn, "disable-tail-calls", "true");
-    add_fn_string_attr(cg, fn, "no-frame-pointer-elim", "true");
-    add_fn_string_attr(cg, fn, "no-frame-pointer-elim-non-leaf", "true");
-    add_fn_enum_attr(cg, fn, "uwtable");
-  }
+  ny_apply_base_fn_attrs(cg, fn);
   if (decl->attr_naked) {
-    add_fn_enum_attr(cg, fn, "naked");
+    add_fn_enum_attr(cg, fn, "naked", 0);
   }
   if (decl->attr_jit) {
-    add_fn_enum_attr(cg, fn, "alwaysinline");
-    add_fn_enum_attr(cg, fn, "hot");
+    add_fn_enum_attr(cg, fn, "alwaysinline", 0);
+    add_fn_enum_attr(cg, fn, "hot", 0);
   }
   if (decl->attr_thread) {
-    add_fn_enum_attr(cg, fn, "noinline");
-    add_fn_enum_attr(cg, fn, "cold");
+    add_fn_enum_attr(cg, fn, "noinline", 0);
+    add_fn_enum_attr(cg, fn, "cold", 0);
   }
   for (size_t i = 0; i < fn_stmt->attributes.len; i++) {
     const attribute_t *attr = &fn_stmt->attributes.data[i];
@@ -402,9 +397,6 @@ static void register_layout_def(codegen_t *cg, stmt_t *s, bool is_layout) {
   for (size_t i = 0; i < cg->layouts.len; i++) {
     layout_def_t *def = cg->layouts.data[i];
     if (def && def->name && strcmp(def->name, name) == 0) {
-      ny_diag_error(s->tok, "redefinition of layout '%s'", name);
-      ny_diag_note_tok(def->stmt->tok, "previous definition here");
-      cg->had_error = 1;
       return;
     }
   }
@@ -767,7 +759,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   assigned_name_list assigned_names = {0};
   assigned_hash_list assigned_hashes = {0};
   uint64_t assigned_bloom[4] = {0, 0, 0, 0};
-  bool use_assigned_prepass = ny_env_enabled("NYTRIX_ASSIGNED_PREPASS");
+  bool use_assigned_prepass =
+      !ny_env_enabled("NYTRIX_DISABLE_ASSIGNED_PREPASS");
   if (use_assigned_prepass) {
     collect_assigned_names_stmt(fn->as.fn.body, &assigned_names,
                                 &assigned_hashes, assigned_bloom);
@@ -777,15 +770,22 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   if (!fn->as.fn.attr_naked) {
     if (captures) {
       param_offset = 1;
-      LLVMValueRef env_arg = LLVMGetParam(f, 0);
-      LLVMValueRef env_raw = LLVMBuildIntToPtr(
-          cg->builder, env_arg, LLVMPointerType(cg->type_i64, 0), "env_raw");
+      unsigned actual_params = LLVMCountParams(f);
+      LLVMValueRef env_arg = (actual_params > 0) ? LLVMGetParam(f, 0) : NULL;
+      LLVMValueRef env_raw =
+          env_arg
+              ? LLVMBuildIntToPtr(cg->builder, env_arg,
+                                  LLVMPointerType(cg->type_i64, 0), "env_raw")
+              : NULL;
       for (size_t i = 0; i < captures->len; i++) {
-        LLVMValueRef src = LLVMBuildGEP2(
-            cg->builder, cg->type_i64, env_raw,
-            (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
-            "");
-        LLVMValueRef val = LLVMBuildLoad2(cg->builder, cg->type_i64, src, "");
+        LLVMValueRef src =
+            env_raw ? LLVMBuildGEP2(cg->builder, cg->type_i64, env_raw,
+                                    (LLVMValueRef[]){LLVMConstInt(
+                                        cg->type_i64, (uint64_t)i, false)},
+                                    1, "")
+                    : NULL;
+        LLVMValueRef val =
+            src ? LLVMBuildLoad2(cg->builder, cg->type_i64, src, "") : NULL;
         bool needs_slot =
             !use_assigned_prepass ||
             (captures->data[i].is_mut &&
@@ -794,7 +794,9 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
         if (needs_slot) {
           LLVMValueRef lv =
               build_alloca(cg, captures->data[i].name, cg->type_i64);
-          LLVMBuildStore(cg->builder, val, lv);
+          if (lv && val) {
+            LLVMBuildStore(cg->builder, val, lv);
+          }
           scope_bind(cg, scopes, fd, captures->data[i].name, lv,
                      captures->data[i].stmt_t ? captures->data[i].stmt_t : fn,
                      true, captures->data[i].type_name, true);
@@ -807,19 +809,24 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
         scopes[fd].vars.data[scopes[fd].vars.len - 1].is_used = true;
       }
     }
+    unsigned actual_params = LLVMCountParams(f);
     for (size_t i = 0; i < fn->as.fn.params.len; i++) {
       const char *param_name = fn->as.fn.params.data[i].name;
-      LLVMValueRef param_val = LLVMGetParam(f, (unsigned)(i + param_offset));
+      unsigned param_idx = (unsigned)(i + param_offset);
+      LLVMValueRef param_val =
+          (param_idx < actual_params) ? LLVMGetParam(f, param_idx) : NULL;
       bool needs_slot =
           !use_assigned_prepass ||
           assigned_name_contains(&assigned_names, &assigned_hashes,
                                  assigned_bloom, param_name);
       if (needs_slot) {
         LLVMValueRef slot = build_alloca(cg, param_name, cg->type_i64);
-        LLVMBuildStore(cg->builder, param_val, slot);
+        if (slot && param_val) {
+          LLVMBuildStore(cg->builder, param_val, slot);
+        }
         scope_bind(cg, scopes, fd, param_name, slot, fn, true,
                    fn->as.fn.params.data[i].type, true);
-        if (cg->debug_symbols && cg->di_builder) {
+        if (cg->debug_symbols && cg->di_builder && slot) {
           codegen_debug_variable(cg, param_name, slot, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, true);
         }
@@ -827,7 +834,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
       } else {
         scope_bind(cg, scopes, fd, param_name, param_val, fn, true,
                    fn->as.fn.params.data[i].type, false);
-        if (cg->debug_symbols && cg->di_builder) {
+        if (cg->debug_symbols && cg->di_builder && param_val) {
           codegen_debug_variable(cg, param_name, param_val, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, false);
         }
@@ -929,7 +936,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     ny_fun_sig_init(&sig, final_name, ft, f, s, (int)s->as.fn.params.len,
                     s->as.fn.is_variadic, s->as.fn.is_extern);
     sig.link_name = s->as.fn.link_name ? ny_strdup(s->as.fn.link_name) : NULL;
-    sig.return_type = s->as.fn.return_type ? ny_strdup(s->as.fn.return_type) : NULL;
+    sig.return_type =
+        s->as.fn.return_type ? ny_strdup(s->as.fn.return_type) : NULL;
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_EXTERN) {
     sema_func_t *sema_func = arena_alloc(cg->arena, sizeof(sema_func_t));
@@ -960,7 +968,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     ny_fun_sig_init(&sig, final_name, ft, f, s, (int)param_count,
                     s->as.ext.is_variadic, true);
     sig.link_name = s->as.ext.link_name ? ny_strdup(s->as.ext.link_name) : NULL;
-    sig.return_type = s->as.ext.return_type ? ny_strdup(s->as.ext.return_type) : NULL;
+    sig.return_type =
+        s->as.ext.return_type ? ny_strdup(s->as.ext.return_type) : NULL;
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_VAR) {
     for (size_t j = 0; j < s->as.var.names.len; j++) {
@@ -979,8 +988,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
                 (cg->current_module_name &&
                  strcmp(cg->current_module_name, cg->emit_module_name) == 0);
           } else {
-            define_here = (!cg->current_module_name ||
-                           !*cg->current_module_name);
+            define_here =
+                (!cg->current_module_name || !*cg->current_module_name);
           }
         }
         if (define_here) {
@@ -1024,11 +1033,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     cg->current_enum_val = 0;
     for (size_t i = 0; i < cg->enums.len; i++) {
       if (strcmp(cg->enums.data[i]->name, enu->name) == 0) {
-        ny_diag_error(s->tok, "redefinition of enum '%s'", enu->name);
-        ny_diag_note_tok(cg->enums.data[i]->stmt->tok,
-                         "previous definition here");
-        cg->had_error = 1;
-        goto end_enum_processing;
+        return;
       }
     }
     for (size_t i = 0; i < s->as.enu.items.len; i++) {
@@ -1061,7 +1066,6 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     next_enum_member:;
     }
     vec_push(&cg->enums, enu);
-  end_enum_processing:;
   } else if (s->kind == NY_S_STRUCT) {
     register_layout_def(cg, s, false);
   } else if (s->kind == NY_S_LAYOUT) {

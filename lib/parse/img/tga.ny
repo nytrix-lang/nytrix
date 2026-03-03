@@ -46,17 +46,17 @@ fn decode(data){
          def dst_off = (ry * w + rx) * 4
          if(bpp == 24)
          {
-            store8(pix, load8(data, src_off + 2), dst_off)
-            store8(pix, load8(data, src_off + 1), dst_off + 1)
-            store8(pix, load8(data, src_off), dst_off + 2)
-            store8(pix, 255, dst_off + 3)
+         store8(pix, load8(data, src_off + 2), dst_off)
+         store8(pix, load8(data, src_off + 1), dst_off + 1)
+         store8(pix, load8(data, src_off), dst_off + 2)
+         store8(pix, 255, dst_off + 3)
          }
          elif(bpp == 32)
          {
-            store8(pix, load8(data, src_off + 2), dst_off)
-            store8(pix, load8(data, src_off + 1), dst_off + 1)
-            store8(pix, load8(data, src_off), dst_off + 2)
-            store8(pix, load8(data, src_off + 3), dst_off + 3)
+         store8(pix, load8(data, src_off + 2), dst_off)
+         store8(pix, load8(data, src_off + 1), dst_off + 1)
+         store8(pix, load8(data, src_off), dst_off + 2)
+         store8(pix, load8(data, src_off + 3), dst_off + 3)
          }
          x += 1
       }
@@ -83,8 +83,8 @@ fn encode(img){
    store8(hdr, w >> 8, 13)
    store8(hdr, h & 255, 14)
    store8(hdr, h >> 8, 15)
-   store8(hdr, 32, 16)
-   store8(hdr, 8, 17)
+   store8(hdr, 32, 16) ; 32 bpp
+   store8(hdr, 40, 17) ; Origin top-left (bit 5 = 32) + 8 bits alpha
    def out = init_str(malloc(w * h * 4 + 19 + 16) + 16, w * h * 4 + 18)
    __copy_mem(out, hdr, 18)
    mut y = 0
@@ -93,7 +93,7 @@ fn encode(img){
       mut x = 0
       while(x < w)
       {
-         def src_off = ((h - 1 - y) * w + x) * ch
+         def src_off = (y * w + x) * ch
          def dst_off = 18 + (y * w + x) * 4
          mut r = load8(d, src_off)
          mut g = r
@@ -101,12 +101,12 @@ fn encode(img){
          mut a = 255
          if(ch >= 3)
          {
-            g = load8(d, src_off + 1)
-            b = load8(d, src_off + 2)
+         g = load8(d, src_off + 1)
+         b = load8(d, src_off + 2)
          }
          if(ch == 4)
          {
-            a = load8(d, src_off + 3)
+         a = load8(d, src_off + 3)
          }
          store8(out, b, dst_off)
          store8(out, g, dst_off + 1)

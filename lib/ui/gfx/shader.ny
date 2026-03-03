@@ -9,7 +9,7 @@ module std.ui.gfx.shader (
 
 use std.core *
 use std.core.dict_mod *
-use std.text *
+use std.str *
 
 def SHADER_BACKEND_VK450 = "vkglsl450"
 

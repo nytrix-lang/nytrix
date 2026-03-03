@@ -10,7 +10,7 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 from context import BUILD_DIR, BUILD_DIR_NOTICE, ROOT, host_os, is_arm_riscv_machine, c
 from utils import log, log_ok, warn, err
-from detect import configure_toolchain
+from detect import configure_toolchain, setup_session_env
 from deps import (
     ensure_deps,
     find_llvm_c_include_root,
@@ -31,6 +31,7 @@ from commands import (
     run_asan,
     run_ubsan,
 )
+from tidy import run_tidy
 
 COMMANDS = (
     "all",
@@ -45,6 +46,7 @@ COMMANDS = (
     "uninstall",
     "clean",
     "debug",
+    "tidy",
 )
 
 ENV_GATES = (
@@ -327,6 +329,7 @@ def _print_profile_summary(timings, total_s):
         log("PROFILE", f"{label}={dt * 1000.0:.1f}ms")
 
 def main():
+    setup_session_env()
     parser = argparse.ArgumentParser(description="Nytrix Build Tool")
     parser.add_argument("commands", nargs="*", default=["all"])
     parser.add_argument("-j", "--jobs", type=int, default=0)
@@ -355,10 +358,10 @@ def main():
                     valid_cmds.append(c_cmd)
             else:
                 extra_args.append(c_cmd)
-        
+
         unknown = extra_args
         args.commands = valid_cmds
-        
+
         if not args.commands:
             args.commands = ["all"]
 
@@ -377,11 +380,16 @@ def main():
             "bin": ["ny"],
             "std": ["std_bundle"],
             "test": ["ny"],
-            "repl": ["ny"],
+            "repl": ["ny", *non_windows_runtime],
             "fuzz": ["ny"],
             "docs": ["ny", "std_bundle"],
             "install": ["ny", "ny-lsp", "std_bundle", *non_windows_runtime],
+            "tidy": [],
         }
+
+        # Auto-tidy logic
+        if any(c in ("all", "bin", "std", "test", "tidy") for c in args.commands):
+            _timed_call(profile_enabled, timings, "tidy:run", run_tidy)
 
         clean_seen = False
         for cmd in args.commands:
@@ -533,6 +541,8 @@ def main():
                 _timed_call(profile_enabled, timings, "install:run", run_install, BUILD_DIR, kind)
             elif cmd == "uninstall":
                 _timed_call(profile_enabled, timings, "uninstall:run", run_uninstall, BUILD_DIR, kind)
+            elif cmd == "tidy":
+                pass # Already run above
 
         return 0
     except KeyboardInterrupt:

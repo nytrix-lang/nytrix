@@ -200,9 +200,9 @@ fn _merge_macros(dst, src, overwrite=true){
       if(is_str(name) && core_ref.len(name) > 0){
          def handler = dict_get(src_macros, name, 0)
          if(handler){
-            if(!is_macro_registered(dst, name) || overwrite){
+         if(!is_macro_registered(dst, name) || overwrite){
                dst = register_macro(dst, name, handler)
-            }
+         }
          }
       }
       i += 1
@@ -220,9 +220,9 @@ fn _merge_attributes(dst, src, overwrite=true){
       if(is_str(name) && core_ref.len(name) > 0){
          def handler = dict_get(src_attrs, name, 0)
          if(handler){
-            if(!is_attr_registered(dst, name) || overwrite){
+         if(!is_attr_registered(dst, name) || overwrite){
                dst = register_attribute(dst, name, handler)
-            }
+         }
          }
       }
       i += 1
@@ -519,60 +519,60 @@ fn apply_attribute(reg, name, node, args=0){
 
 if(comptime{__main()}){
 
-    fn macro_id(node){
+   fn macro_id(node){
        "Test helper."
        node
-    }
+   }
 
-    fn attr_mark(node, args){
+   fn attr_mark(node, args){
        "Test helper."
        dict_set(node, "marked", true)
-    }
+   }
 
-    fn rw_double(v){
+   fn rw_double(v){
        "Test helper."
        if(is_int(v)){ return v * 2 }
        v
-    }
+   }
 
-    mut reg = new_registry(8)
-    assert(len(list_macros(reg)) == 0, "new_registry macros")
-    assert(len(list_attributes(reg)) == 0, "new_registry attrs")
+   mut reg = new_registry(8)
+   assert(len(list_macros(reg)) == 0, "new_registry macros")
+   assert(len(list_attributes(reg)) == 0, "new_registry attrs")
 
-    reg = register_macro(reg, "id", macro_id)
-    assert(is_macro_registered(reg, "id"), "register_macro")
-    assert(get_macro_handler(reg, "id"), "get_macro_handler")
+   reg = register_macro(reg, "id", macro_id)
+   assert(is_macro_registered(reg, "id"), "register_macro")
+   assert(get_macro_handler(reg, "id"), "get_macro_handler")
 
-    def f = form("id", [10, 20])
-    assert(is_form(f, "id"), "is_form")
-    assert(form_head(f, "") == "id", "form_head")
-    assert(len(form_tail(f)) == 2, "form_tail")
+   def f = form("id", [10, 20])
+   assert(is_form(f, "id"), "is_form")
+   assert(form_head(f, "") == "id", "form_head")
+   assert(len(form_tail(f)) == 2, "form_tail")
 
-    def expanded = expand_form(reg, f)
-    assert(is_form(expanded, "id"), "expand_form")
-    assert(form_head(expanded, "") == "id", "expand_form head")
-    assert(len(form_tail(expanded)) == 2, "expand_form tail")
+   def expanded = expand_form(reg, f)
+   assert(is_form(expanded, "id"), "expand_form")
+   assert(form_head(expanded, "") == "id", "expand_form head")
+   assert(len(form_tail(expanded)) == 2, "expand_form tail")
 
-    reg = register_attribute(reg, "mark", attr_mark)
-    assert(is_attr_registered(reg, "mark"), "register_attribute")
-    def n = apply_attribute(reg, "mark", dict(2), list(0))
-    assert(dict_get(n, "marked", false), "apply_attribute")
+   reg = register_attribute(reg, "mark", attr_mark)
+   assert(is_attr_registered(reg, "mark"), "register_attribute")
+   def n = apply_attribute(reg, "mark", dict(2), list(0))
+   assert(dict_get(n, "marked", false), "apply_attribute")
 
-    mut reg2 = new_registry(4)
-    reg2 = register_macro(reg2, "id2", macro_id)
-    reg = merge_registry(reg, reg2, true)
-    assert(is_macro_registered(reg, "id2"), "merge_registry")
+   mut reg2 = new_registry(4)
+   reg2 = register_macro(reg2, "id2", macro_id)
+   reg = merge_registry(reg, reg2, true)
+   assert(is_macro_registered(reg, "id2"), "merge_registry")
 
-    reg = unregister_macro(reg, "id")
-    assert(!is_macro_registered(reg, "id"), "unregister_macro")
-    reg = unregister_attribute(reg, "mark")
-    assert(!is_attr_registered(reg, "mark"), "unregister_attribute")
+   reg = unregister_macro(reg, "id")
+   assert(!is_macro_registered(reg, "id"), "unregister_macro")
+   reg = unregister_attribute(reg, "mark")
+   assert(!is_attr_registered(reg, "mark"), "unregister_attribute")
 
-    mut rw = new_rewriter(4)
-    rw = register_rewrite(rw, "double", rw_double)
-    assert(contains(list_rewrites(rw), "double"), "register_rewrite")
-    assert(rewrite_once(rw, 3) == 6, "rewrite_once")
-    assert(rewrite_fixpoint(rw, 3, 1) == 6, "rewrite_fixpoint")
-    rw = clear_rewriter(rw)
-    assert(len(list_rewrites(rw)) == 0, "clear_rewriter")
+   mut rw = new_rewriter(4)
+   rw = register_rewrite(rw, "double", rw_double)
+   assert(contains(list_rewrites(rw), "double"), "register_rewrite")
+   assert(rewrite_once(rw, 3) == 6, "rewrite_once")
+   assert(rewrite_fixpoint(rw, 3, 1) == 6, "rewrite_fixpoint")
+   rw = clear_rewriter(rw)
+   assert(len(list_rewrites(rw)) == 0, "clear_rewriter")
 }

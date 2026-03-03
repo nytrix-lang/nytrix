@@ -8,14 +8,12 @@ module std.core.reflect (
    globals, items, keys, values, get, set, set_idx, slice, append, pop, extend, to_str
 )
 use std.core.error *
-use std.text *
-use std.text.str *
-use std.text.bytes *
-use std.math.bigint *
+use std.str *
+use std.str.str *
+use std.str.bytes *
 use std.core.primitives *
 use std.core.dict_mod *
 use std.core *
-use std.text.io *
 
 fn len(x){
    "Returns the number of elements in a collection or the length of a string.
@@ -32,14 +30,14 @@ fn len(x){
       103 -> __load64_idx(x, 0) ; Tuple
       101 -> __load64_idx(x, 0) ; Dict
       102 -> __load64_idx(x, 0) ; Set
-      106 -> {            ; Range
+      106 -> { ; Range
          def start = __load64_idx(x, 0)
          def stop = __load64_idx(x, 8)
          def step = __load64_idx(x, 16)
          if(step == 0){ return 0 }
          if(step > 0){
-            if(start >= stop){ return 0 }
-            return ((stop - start - 1) / step) + 1
+         if(start >= stop){ return 0 }
+         return ((stop - start - 1) / step) + 1
          }
          if(start <= stop){ return 0 }
          return ((start - stop - 1) / (0 - step)) + 1
@@ -68,7 +66,7 @@ fn contains(container, item){
          def st = __load64_idx(container, off + 16)
          if(st == 0){ return false }
          if(st == 1){
-            if(__load64_idx(container, off) == item){ return true }
+         if(__load64_idx(container, off) == item){ return true }
          }
          idx = (idx * 5 + 1 + (perturb >> 5)) & mask
          perturb = perturb >> 5
@@ -237,8 +235,8 @@ fn _mat4_mul(a, b){
          mut s = 0
          mut k = 0
          while(k < 4){
-            s = s + get(a, r * 4 + k, 0) * get(b, k * 4 + c, 0)
-            k += 1
+         s = s + get(a, r * 4 + k, 0) * get(b, k * 4 + c, 0)
+         k += 1
          }
          out = append(out, s)
          c += 1
@@ -328,7 +326,11 @@ fn eq(a, b){
          101 -> dict_eq(a, b)
          102 -> set_eq(a, b)
          110 -> __flt_eq(a, b)
-         130 -> bigint_eq(a, b)
+         130 -> {
+         def f = get(globals(), "std.math.bigint.bigint_eq")
+         if(f){ return f(a, b) }
+         false
+         }
          _   -> false
       }
    } elif((ta == 120 || ta == 121) && (tb == 120 || tb == 121)){
@@ -340,9 +342,9 @@ fn eq(a, b){
 
 fn repr(x){
    "Returns a programmer-friendly string representation of value `x`.
-    - Strings are quoted.
-    - Collections are shown with their structural contents.
-    - Primitives are shown as their literal values."
+   - Strings are quoted.
+   - Collections are shown with their structural contents.
+   - Primitives are shown as their literal values."
    if(x == true){ return "true" }
    if(x == false){ return "false" }
    if(__is_int(x)){ return __to_str(x) }
@@ -353,16 +355,20 @@ fn repr(x){
    }
    def kind = __tagof(x)
    ; Check for bigint first (it's a list with special marker)
-   if(kind == 100 && is_list(x) && len(x) >= 3 && get(x, 0) == 107){ return bigint_to_str(x) }
+   if(kind == 100 && is_list(x) && len(x) >= 3 && get(x, 0) == 107){
+      def f = get(globals(), "std.math.bigint.bigint_to_str")
+      if(f){ return f(x) }
+      return "<bigint>"
+   }
    return case kind {
       100 -> {
          def n = len(x)
          mut s = "["
          mut i = 0
          while(i < n){
-            s = f"{s}{repr(get(x, i))}"
-            if(i < n - 1){ s = f"{s}, " }
-            i += 1
+         s = f"{s}{repr(get(x, i))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s}]"
       }
@@ -371,9 +377,9 @@ fn repr(x){
          mut s = "("
          mut i = 0
          while(i < n){
-            s = f"{s}{repr(get(x, i))}"
-            if(i < n - 1){ s = f"{s}, " }
-            i += 1
+         s = f"{s}{repr(get(x, i))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s})"
       }
@@ -383,10 +389,10 @@ fn repr(x){
          mut i = 0
          def n = len(its)
          while(i < n){
-            def p = get(its, i)
-            s = f"{s}{repr(get(p, 0))}: {repr(get(p, 1))}"
-            if(i < n - 1){ s = f"{s}, " }
-            i += 1
+         def p = get(its, i)
+         s = f"{s}{repr(get(p, 0))}: {repr(get(p, 1))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s}}}"
       }
@@ -395,15 +401,19 @@ fn repr(x){
          mut s = "{"
          mut i = 0
          while(i < len(its)){
-            s = f"{s}{repr(get(its, i))}"
-            if(i < len(its) - 1){ s = f"{s}, " }
-            i += 1
+         s = f"{s}{repr(get(its, i))}"
+         if(i < len(its) - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s}}}"
       }
       110 -> to_str(x)
       122 -> f"<bytes {bytes_len(x)}>"
-      130 -> bigint_to_str(x)
+      130 -> {
+         def f = get(globals(), "std.math.bigint.bigint_to_str")
+         if(f){ return f(x) }
+         return "<bigint>"
+      }
       _   -> f"<ptr {x} tag={__tagof(x)}>"
    }
 }
@@ -502,17 +512,17 @@ fn values(x){
 
 fn get(obj, key, default=0){
    "Generic element retriever. Handles indexing for strings, lists, dicts, and tuples.
-    - `obj`: Collection (str, list, dict, tuple)
-    - `key`: Index or Key
-    - `default`: Value to return if key/index not found (default 0).
+   - `obj`: Collection (str, list, dict, tuple)
+   - `key`: Index or Key
+   - `default`: Value to return if key/index not found (default 0).
    "
    if(__is_str_obj(obj)){
       def n = str_len(obj)
       if(key < 0){ key = key + n }
       if(key < 0 || key >= n){ return default }
       else {
-        use std.text *
-        return str_slice(obj, key, key + 1)
+      use std.str *
+      return str_slice(obj, key, key + 1)
       }
    }
    def tag = __tagof(obj)
@@ -536,7 +546,7 @@ fn get(obj, key, default=0){
    else {
        if(!obj || obj == globals()){ return default }
        return get(globals(), key, default)
-    }
+   }
 }
 
 fn set_idx(obj, key, val){
@@ -569,26 +579,26 @@ fn slice(obj, start, stop, step=1){
        if(start < 0){ start = n + start }
        if(stop < 0){ stop = n + stop }
        if(step > 0){
-        if(start < 0){ start = 0 }
-        if(stop > n){ stop = n }
-        if(start >= stop){ return list(0) }
+      if(start < 0){ start = 0 }
+      if(stop > n){ stop = n }
+      if(start >= stop){ return list(0) }
        } else {
-        if(start >= n){ start = n - 1 }
-        if(stop < -1){ stop = -1 }
-        if(start <= stop){ return list(0) }
+      if(start >= n){ start = n - 1 }
+      if(stop < -1){ stop = -1 }
+      if(start <= stop){ return list(0) }
        }
        mut out = list(8)
        mut i = start
        if(step > 0){
-        while(i < stop){
+      while(i < stop){
            out = append(out, get(obj, i))
            i = i + step
-        }
+      }
        } else {
-        while(i > stop){
+      while(i > stop){
            out = append(out, get(obj, i))
            i = i + step
-        }
+      }
        }
        return out
    }
@@ -623,13 +633,13 @@ fn pop(lst){
    "Removes and returns the last element from list `lst`. Returns `0` if empty."
    if(!is_list(lst)){ return 0 }
    else {
-    def n = __load64_idx(lst, 0)
-    if(n == 0){ return 0 }
-    else {
+   def n = __load64_idx(lst, 0)
+   if(n == 0){ return 0 }
+   else {
       def v = get(lst, n - 1)
       __store64_idx(lst, 0, n - 1)
       return v
-    }
+   }
    }
 }
 
@@ -647,9 +657,9 @@ fn extend(lst, other){
 
 fn to_str(v){
    "Returns a human-readable string representation of value `v`.
-    - Strings are returned as-is.
-    - Pointers and complex objects are formatted with markers.
-    - Ints/floats/bigints are converted to their decimal form."
+   - Strings are returned as-is.
+   - Pointers and complex objects are formatted with markers.
+   - Ints/floats/bigints are converted to their decimal form."
    if(v == true){ return "true" }
    if(v == false){ return "false" }
    if(__is_int(v)){ return __to_str(v) }
@@ -658,16 +668,20 @@ fn to_str(v){
    def kind = __tagof(v)
    if(!__is_ny_obj(v)){ return __to_str(v) }
    ; Check for bigint first (it's a list with special marker)
-   if(kind == 100 && is_list(v) && len(v) >= 3 && get(v, 0) == 107){ return bigint_to_str(v) }
+   if(kind == 100 && is_list(v) && len(v) >= 3 && get(v, 0) == 107){
+      def f = get(globals(), "std.math.bigint.bigint_to_str")
+      if(f){ return f(v) }
+      return "<bigint>"
+   }
    return case kind {
       100 -> {
          def n = len(v)
          mut s = "["
          mut i = 0
          while(i < n){
-            s = f"{s}{to_str(get(v, i))}"
-            if(i < n - 1){ s = f"{s}, " }
-            i += 1
+         s = f"{s}{to_str(get(v, i))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s}]"
       }
@@ -676,9 +690,9 @@ fn to_str(v){
          mut s = "("
          mut i = 0
          while(i < n){
-            s = f"{s}{to_str(get(v, i))}"
-            if(i < n - 1){ s = f"{s}, " }
-            i += 1
+         s = f"{s}{to_str(get(v, i))}"
+         if(i < n - 1){ s = f"{s}, " }
+         i += 1
          }
          return f"{s})"
       }
@@ -686,82 +700,86 @@ fn to_str(v){
       102 -> "{...}"
       122 -> f"<bytes {bytes_len(v)}>"
       110 -> __to_str(v)
-      130 -> bigint_to_str(v)
+      130 -> {
+         def f = get(globals(), "std.math.bigint.bigint_to_str")
+         if(f){ return f(v) }
+         return "<bigint>"
+      }
       _   -> f"<ptr {v} tag={__tagof(v)}>"
    }
 }
 
 if(comptime{__main()}){
-    use std.os.time *
-    use std.core.reflect *
-    use std.math.float *
-    use std.core *
+   use std.os.time *
+   use std.core.reflect *
+   use std.math.float *
+   use std.core *
 
-    ; Type
-    assert((type(42) == "int"), "type of integer")
-    assert((type("hello") == "str"), "type of string")
-    assert((type([1, 2, 3]) == "list"), "type of list")
-    assert((type(dict(8)) == "dict"), "type of dict")
-    assert((type(set_new()) == "set"), "type of set")
-    assert((type(float(1)) == "float"), "type of float")
-    assert((type(true) == "bool"), "type of bool")
-    assert((type(0) == "int"), "type of zero int")
+   ; Type
+   assert((type(42) == "int"), "type of integer")
+   assert((type("hello") == "str"), "type of string")
+   assert((type([1, 2, 3]) == "list"), "type of list")
+   assert((type(dict(8)) == "dict"), "type of dict")
+   assert((type(set_new()) == "set"), "type of set")
+   assert((type(float(1)) == "float"), "type of float")
+   assert((type(true) == "bool"), "type of bool")
+   assert((type(0) == "int"), "type of zero int")
 
-    ; Len
-    assert(len([1, 2, 3]) == 3, "len of list")
-    assert(len("hello") == 5, "len of string")
-    assert(len([]) == 0, "len of empty list")
-    mut d = dict(8)
-    d = dict_set(d, "key", "value")
-    assert(len(d) == 1, "len of dict")
-    assert(len(float(1)) == 0, "len of float")
+   ; Len
+   assert(len([1, 2, 3]) == 3, "len of list")
+   assert(len("hello") == 5, "len of string")
+   assert(len([]) == 0, "len of empty list")
+   mut d = dict(8)
+   d = dict_set(d, "key", "value")
+   assert(len(d) == 1, "len of dict")
+   assert(len(float(1)) == 0, "len of float")
 
-    ; Contains
-    def lst = [1, 2, 3, 4, 5]
-    assert(contains(lst, 3), "list contains element")
-    assert(!contains(lst, 10), "list doesn't contain element")
-    mut s = set()
-    s = set_add(s, "a")
-    s = set_add(s, "b")
-    assert(contains(s, "a"), "set contains element")
-    assert(!contains(s, "c"), "set doesn't contain element")
-    assert(contains("hello world", "world"), "string contains substring")
-    assert(!contains("hello", "xyz"), "string doesn't contain substring")
+   ; Contains
+   def lst = [1, 2, 3, 4, 5]
+   assert(contains(lst, 3), "list contains element")
+   assert(!contains(lst, 10), "list doesn't contain element")
+   mut s = set()
+   s = set_add(s, "a")
+   s = set_add(s, "b")
+   assert(contains(s, "a"), "set contains element")
+   assert(!contains(s, "c"), "set doesn't contain element")
+   assert(contains("hello world", "world"), "string contains substring")
+   assert(!contains("hello", "xyz"), "string doesn't contain substring")
 
-    ; Eq
-    assert((42 == 42), "int equality")
-    assert(!(42 == 43), "int inequality")
-    assert(("hello" == "hello"), "string equality")
-    assert(!("hello" == "world"), "string inequality")
-    assert(([1, 2, 3] == [1, 2, 3]), "list equality")
-    assert(!([1, 2, 3] == [1, 2, 4]), "list inequality")
-    assert(!([1, 2] == [1, 2, 3]), "list different lengths")
-    mut d1 = dict(8)
-    d1 = dict_set(d1, "a", 1)
-    d1 = dict_set(d1, "b", 2)
-    mut d2 = dict(8)
-    d2 = dict_set(d2, "a", 1)
-    d2 = dict_set(d2, "b", 2)
-    assert((d1 == d2), "dict equality")
-    assert((float(1) == float(1)), "float equality")
+   ; Eq
+   assert((42 == 42), "int equality")
+   assert(!(42 == 43), "int inequality")
+   assert(("hello" == "hello"), "string equality")
+   assert(!("hello" == "world"), "string inequality")
+   assert(([1, 2, 3] == [1, 2, 3]), "list equality")
+   assert(!([1, 2, 3] == [1, 2, 4]), "list inequality")
+   assert(!([1, 2] == [1, 2, 3]), "list different lengths")
+   mut d1 = dict(8)
+   d1 = dict_set(d1, "a", 1)
+   d1 = dict_set(d1, "b", 2)
+   mut d2 = dict(8)
+   d2 = dict_set(d2, "a", 1)
+   d2 = dict_set(d2, "b", 2)
+   assert((d1 == d2), "dict equality")
+   assert((float(1) == float(1)), "float equality")
 
-    ; Repr
-    assert((repr(42) == "42"), "repr of int")
-    assert((repr(true) == "true"), "repr of true")
-    assert((repr(false) == "false"), "repr of false")
-    assert((repr(0) == "0"), "repr of zero int")
-    assert((repr("hello") == "\"hello\""), "repr of string")
-    assert((repr([1,2,3]) == "[1, 2, 3]"), "repr of list")
+   ; Repr
+   assert((repr(42) == "42"), "repr of int")
+   assert((repr(true) == "true"), "repr of true")
+   assert((repr(false) == "false"), "repr of false")
+   assert((repr(0) == "0"), "repr of zero int")
+   assert((repr("hello") == "\"hello\""), "repr of string")
+   assert((repr([1,2,3]) == "[1, 2, 3]"), "repr of list")
 
-    ; Hash
-    mut h1 = hash(42)
-    mut h2 = hash(42)
-    assert(h1 == h2, "hash consistency for int")
-    h1 = hash("hello")
-    h2 = hash("hello")
-    assert(h1 == h2, "hash consistency for string")
-    def h3 = hash("world")
-    assert(h1 != h3, "different strings have different hashes")
+   ; Hash
+   mut h1 = hash(42)
+   mut h2 = hash(42)
+   assert(h1 == h2, "hash consistency for int")
+   h1 = hash("hello")
+   h2 = hash("hello")
+   assert(h1 == h2, "hash consistency for string")
+   def h3 = hash("world")
+   assert(h1 != h3, "different strings have different hashes")
 
-    print("✓ std.core.reflect tests passed")
+   print("✓ std.core.reflect tests passed")
 }

@@ -361,7 +361,8 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     if (s->as.var.is_decl) {
       for (size_t i = 0; i < s->as.var.names.len; i++) {
         assigned_name_add(ctx->local_names, ctx->local_hashes,
-                          ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0},
+                          ctx->local_bloom ? ctx->local_bloom
+                                           : (uint64_t[4]){0},
                           s->as.var.names.data[i]);
       }
     }
@@ -395,7 +396,8 @@ static uint32_t ny_stmt_effects(codegen_t *cg, stmt_t *s,
                                 assigned_name_list *local_names,
                                 assigned_hash_list *local_hashes,
                                 uint64_t local_bloom[4]) {
-  if (!s) return NY_FX_NONE;
+  if (!s)
+    return NY_FX_NONE;
   ny_effects_ctx ctx = {.cg = cg,
                         .local_names = local_names,
                         .local_hashes = local_hashes,
@@ -498,16 +500,16 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
   } while (0)
 
 static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
-                                         assigned_name_list *local_names,
-                                         assigned_hash_list *local_hashes,
-                                         uint64_t local_bloom[4],
-                                         bool memo_safe_only);
+                                        assigned_name_list *local_names,
+                                        assigned_hash_list *local_hashes,
+                                        uint64_t local_bloom[4],
+                                        bool memo_safe_only);
 
 static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
-                                         assigned_name_list *local_names,
-                                         assigned_hash_list *local_hashes,
-                                         uint64_t local_bloom[4],
-                                         bool memo_safe_only);
+                                        assigned_name_list *local_names,
+                                        assigned_hash_list *local_hashes,
+                                        uint64_t local_bloom[4],
+                                        bool memo_safe_only);
 
 static bool ny_stmt_is_pure(codegen_t *cg, stmt_t *s,
                             assigned_name_list *local_names,
@@ -526,10 +528,10 @@ static bool ny_stmt_is_memo_safe(codegen_t *cg, stmt_t *s,
 }
 
 static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
-                                         assigned_name_list *local_names,
-                                         assigned_hash_list *local_hashes,
-                                         uint64_t local_bloom[4],
-                                         bool memo_safe_only) {
+                                        assigned_name_list *local_names,
+                                        assigned_hash_list *local_hashes,
+                                        uint64_t local_bloom[4],
+                                        bool memo_safe_only) {
   if (!e)
     return true;
   switch (e->kind) {
@@ -651,10 +653,10 @@ static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
 }
 
 static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
-                                         assigned_name_list *local_names,
-                                         assigned_hash_list *local_hashes,
-                                         uint64_t local_bloom[4],
-                                         bool memo_safe_only) {
+                                        assigned_name_list *local_names,
+                                        assigned_hash_list *local_hashes,
+                                        uint64_t local_bloom[4],
+                                        bool memo_safe_only) {
   if (!s)
     return true;
   switch (s->kind) {
@@ -713,9 +715,9 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
     ny_purity_scope_save(local_names, local_hashes, local_bloom, &cp);
     assigned_name_add(local_names, local_hashes, local_bloom,
                       s->as.fr.iter_var);
-    bool safe = ny_stmt_check_safe_internal(cg, s->as.fr.body, local_names,
-                                            local_hashes, local_bloom,
-                                            memo_safe_only);
+    bool safe =
+        ny_stmt_check_safe_internal(cg, s->as.fr.body, local_names,
+                                    local_hashes, local_bloom, memo_safe_only);
     ny_purity_scope_restore(local_names, local_hashes, local_bloom, &cp);
     return safe;
   }
@@ -2008,7 +2010,8 @@ static bool ny_apply_infer_pass_to_sig(codegen_t *cg, size_t sig_idx,
     return false;
 
   if (verbose_enabled >= 3) {
-    fprintf(stderr, "[*] Purity: analyzing %s (pass=%d)\n", sig->name, (int)pass);
+    fprintf(stderr, "[*] Purity: analyzing %s (pass=%d)\n", sig->name,
+            (int)pass);
   }
   bool changed = false;
   const char *saved_mod = cg->current_module_name;
@@ -2074,7 +2077,8 @@ static void ny_run_infer_fixed_point(codegen_t *cg, int max_iters,
     bool changed = false;
     for (size_t i = 0; i < cg->fun_sigs.len; i++) {
       fun_sig *sig = &cg->fun_sigs.data[i];
-      if (!sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC || ny_is_std_qname(sig->name))
+      if (!sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC ||
+          ny_is_std_qname(sig->name))
         continue;
       if (ny_apply_infer_pass_to_sig(cg, i, pass))
         changed = true;

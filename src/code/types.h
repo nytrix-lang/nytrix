@@ -34,7 +34,8 @@ typedef struct ny_ct_fast_val_t {
 } ny_ct_fast_val_t;
 
 static inline ny_ct_fast_val_t ny_ct_fast_none(void) {
-  return (ny_ct_fast_val_t){.kind = NY_CT_FAST_NONE, .i = 0, .b = false, .s = NULL};
+  return (ny_ct_fast_val_t){
+      .kind = NY_CT_FAST_NONE, .i = 0, .b = false, .s = NULL};
 }
 
 static inline bool ny_ct_fast_truthy(const ny_ct_fast_val_t *v, bool *out) {

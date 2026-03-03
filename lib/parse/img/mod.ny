@@ -10,7 +10,7 @@ module std.image (
 use std.core *
 use std.core.dict_mod *
 use std.os *
-use std.text as str
+use std.str as str
 use std.image.format.bmp as bmp
 use std.image.format.gif as gif
 use std.image.format.jpeg as jpeg
@@ -26,32 +26,32 @@ def FORMAT_RGB_ALPHA = 4
 fn decode(data, ext=""){
    "Decodes an image from bytes. Optional `ext` can help with TGA/BMP dispatch."
    if(!is_str(data) || len(data) < 4){ return 0 }
-   
+
    def b0 = load8(data, 0)
    def b1 = load8(data, 1)
    def b2 = load8(data, 2)
    def b3 = load8(data, 3)
-   
+
    ; 1. PNG Signature: 89 50 4E 47
    if(b0 == 137 && b1 == 80 && b2 == 78 && b3 == 71){
       return png.decode(data)
    }
-   
+
    ; 2. JPEG Signature: FF D8 FF
    if(b0 == 255 && b1 == 216 && b2 == 255){
       return jpeg.decode(data)
    }
-   
+
    ; 3. BMP Signature: BM (42 4D)
    if(b0 == 66 && b1 == 77){
       return bmp.decode(data)
    }
-   
+
    ; 4. GIF Signature: GIF8
    if(b0 == 71 && b1 == 73 && b2 == 70 && b3 == 56){
       return gif.decode(data)
    }
-   
+
    ; 5. Fallback to extension for formats without fixed signatures (like TGA)
    def lext = str.lower(ext)
    if(lext == ".tga"){
@@ -65,7 +65,7 @@ fn decode(data, ext=""){
    } elif(lext == ".gif"){
       return gif.decode(data)
    }
-   
+
    ; Try TGA as last resort if it looks like uncompressed RGB
    if(len(data) > 18){
       def img_type = load8(data, 2)
@@ -142,9 +142,9 @@ if(comptime{__main()}){
       print("Testing " + name + " dispatch: " + path)
       match file_read(path){
          ok(data) -> {
-            def img = decode(data, path)
-            assert(img != 0, name + " decode failed")
-            print("  ✓ SUCCESS: " + to_str(dict_get(img, "width")) + "x" + to_str(dict_get(img, "height")))
+         def img = decode(data, path)
+         assert(img != 0, name + " decode failed")
+         print("  ✓ SUCCESS: " + to_str(dict_get(img, "width")) + "x" + to_str(dict_get(img, "height")))
          }
          err(_) -> { print("  ! SKIPPED: " + path + " not found") }
       }

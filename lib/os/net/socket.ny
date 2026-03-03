@@ -6,7 +6,7 @@ module std.net.socket (
    read_socket, write_socket, close_socket
 )
 use std.core *
-use std.text *
+use std.str *
 use std.core.reflect *
 use std.os *
 use std.os.sys *
@@ -38,11 +38,11 @@ fn ipv4_parse(s){
       if(c==0 || c==46){
          if(oct > 255){ return 0 }
          val = val + oct * case shift {
-            0  -> 1
-            8  -> 256
-            16 -> 65536
-            24 -> 16777216
-            _  -> 0
+         0  -> 1
+         8  -> 256
+         16 -> 65536
+         24 -> 16777216
+         _  -> 0
          }
          if(c == 0){ return val }
          oct = 0
@@ -80,15 +80,15 @@ fn _lookup_hosts(name, hosts){
       if(len(line) > 0 && load8(line, 0) != 35){ ; '#'
          def parts = split(line, " ")
          if(len(parts) >= 2){
-            def ip_str = strip(get(parts, 0))
-            mut j = 1
-            while(j < len(parts)){
+         def ip_str = strip(get(parts, 0))
+         mut j = 1
+         while(j < len(parts)){
                def host_alias = strip(get(parts, j))
                if(len(host_alias) > 0 && host_alias == name){
                   return ipv4_parse(ip_str)
                }
                j += 1
-            }
+         }
          }
       }
       i += 1
@@ -118,7 +118,7 @@ fn gethostbyname(name){
 
 fn dns_query(name, server){
    "Performs a basic DNS A-record query via UDP. No libc dependency."
-   use std.text.bytes *
+   use std.str.bytes *
    def buf = bytes(512)
    ; Header: ID=0x1234, Flags=0x0100 (Recursive Query), QDCOUNT=1
    bytes_set(buf, 0, 0x12) bytes_set(buf, 1, 0x34)
@@ -282,34 +282,34 @@ fn close_socket(fd){
 }
 
 if(comptime{__main()}){
-    use std.net.socket *
-    use std.os.thread *
-    use std.os.time *
-    use std.core.error *
+   use std.net.socket *
+   use std.os.thread *
+   use std.os.time *
+   use std.core.error *
 
-    def PORT = 54000 + ((ticks() / 1000000) % 2000)
-    def CONNECT_RETRIES = 200
-    def CONNECT_RETRY_MS = 25
-    def SERVER_READY_WAIT_MS = 5000
-    def SERVER_READY_POLL_MS = 10
+   def PORT = 54000 + ((ticks() / 1000000) % 2000)
+   def CONNECT_RETRIES = 200
+   def CONNECT_RETRY_MS = 25
+   def SERVER_READY_WAIT_MS = 5000
+   def SERVER_READY_POLL_MS = 10
 
-    fn join_if_valid_thread(handle){
+   fn join_if_valid_thread(handle){
        "Test helper."
      if(handle != 0 && handle != -1){
       return thread_join(handle)
      }
      return -1
-    }
+   }
 
-    fn server_task(arg){
+   fn server_task(arg){
        "Test helper."
      def port = get(arg, 0)
      def state = get(arg, 1)
      def s = socket_bind("127.0.0.1", port)
      if(s < 0){
-        store64(state, -1)
-        print("Server: socket_bind failed, error:", s)
-        return -1
+      store64(state, -1)
+      print("Server: socket_bind failed, error:", s)
+      return -1
      }
      store64(state, 1)
      def c = socket_accept(s)
@@ -322,95 +322,95 @@ if(comptime{__main()}){
      store64(state, 2)
      def req = read_socket(c, 1024)
      if(is_err(req)){
-        store64(state, -3)
-        print("Server: read_socket failed, error:", unwrap_err(req))
-        close_socket(c)
-        close_socket(s)
-        return -1
+      store64(state, -3)
+      print("Server: read_socket failed, error:", unwrap_err(req))
+      close_socket(c)
+      close_socket(s)
+      return -1
      }
      if(unwrap(req) == "ping"){
-        def write_res = write_socket(c, "pong")
-        if(is_err(write_res)){
-            print("Server: write_socket failed, error:", unwrap_err(write_res))
-        }
+      def write_res = write_socket(c, "pong")
+      if(is_err(write_res)){
+         print("Server: write_socket failed, error:", unwrap_err(write_res))
+      }
      }
      close_socket(c)
      close_socket(s)
      store64(state, 3)
      return 0
-    }
+   }
 
-    def state_ptr = malloc(8)
-    if(state_ptr == 0){
+   def state_ptr = malloc(8)
+   if(state_ptr == 0){
      print("Skipping socket test: could not allocate shared state.")
      return 0
-    }
-    store64(state_ptr, 0)
-    mut args = list()
-    args = append(args, PORT)
-    args = append(args, state_ptr)
-    def t = thread_spawn(server_task, args)
-    if(t == 0 || t == -1){
+   }
+   store64(state_ptr, 0)
+   mut args = list()
+   args = append(args, PORT)
+   args = append(args, state_ptr)
+   def t = thread_spawn(server_task, args)
+   if(t == 0 || t == -1){
      print("Skipping socket test: thread_spawn failed, handle:", t)
      free(state_ptr)
      return 0
-    }
+   }
 
-    mut waited = 0
-    while(load64(state_ptr) == 0 && waited < SERVER_READY_WAIT_MS){
+   mut waited = 0
+   while(load64(state_ptr) == 0 && waited < SERVER_READY_WAIT_MS){
       msleep(SERVER_READY_POLL_MS)
       waited += SERVER_READY_POLL_MS
-    }
-    def server_state = load64(state_ptr)
-    if(server_state < 0){
+   }
+   def server_state = load64(state_ptr)
+   if(server_state < 0){
       print("Skipping socket test: server init failed. state:", server_state)
       join_if_valid_thread(t)
       free(state_ptr)
       return 0
-    }
+   }
 
-    mut c = -1
-    mut tries = 0
-    while(c < 0 && tries < CONNECT_RETRIES){
+   mut c = -1
+   mut tries = 0
+   while(c < 0 && tries < CONNECT_RETRIES){
       c = socket_connect("127.0.0.1", PORT)
       if(c < 0){ msleep(CONNECT_RETRY_MS) }
       tries += 1
-    }
-    if(c < 0){
+   }
+   if(c < 0){
       print("Skipping socket test: client connect failed after", tries, "tries. Error:", c)
       ; Best-effort unblock server accept so join does not hang.
       mut kick = -1
       mut kick_tries = 0
       while(kick < 0 && kick_tries < CONNECT_RETRIES){
-        kick = socket_connect("127.0.0.1", PORT)
-        if(kick < 0){ msleep(CONNECT_RETRY_MS) }
-        kick_tries += 1
+      kick = socket_connect("127.0.0.1", PORT)
+      if(kick < 0){ msleep(CONNECT_RETRY_MS) }
+      kick_tries += 1
       }
       if(kick >= 0){ close_socket(kick) }
       join_if_valid_thread(t)
       free(state_ptr)
       return 0 ; End test
-    } else {
+   } else {
       def write_res = write_socket(c, "ping")
       if(is_err(write_res)){
-        print("Client: write_socket failed, error:", unwrap_err(write_res))
-        close_socket(c)
-        join_if_valid_thread(t)
-        free(state_ptr)
-        panic("Client: write_socket failed")
+      print("Client: write_socket failed, error:", unwrap_err(write_res))
+      close_socket(c)
+      join_if_valid_thread(t)
+      free(state_ptr)
+      panic("Client: write_socket failed")
       }
       def res_val = read_socket(c, 1024)
       if(is_err(res_val)){
-        print("Client: read_socket failed, error:", unwrap_err(res_val))
-        close_socket(c)
-        join_if_valid_thread(t)
-        free(state_ptr)
-        panic("Client: read_socket failed")
+      print("Client: read_socket failed, error:", unwrap_err(res_val))
+      close_socket(c)
+      join_if_valid_thread(t)
+      free(state_ptr)
+      panic("Client: read_socket failed")
       }
       assert((unwrap(res_val) == "pong"), "socket ping/pong")
       close_socket(c)
       join_if_valid_thread(t)
       free(state_ptr)
       print("✓ std.net.socket tests passed")
-    }
+   }
 }

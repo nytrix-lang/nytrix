@@ -1,7 +1,7 @@
 ;; Keywords: str path
 ;; Path helpers.
 
-module std.text.path (
+module std.str.path (
    sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext
 )
 use std.core *
@@ -53,31 +53,31 @@ fn splitext(path){
 }
 
 if(comptime{__main()}){
-    use std.text.path as path
-    use std.core *
-    use std.core.error *
-    use std.text *
+   use std.str.path as path
+   use std.core *
+   use std.core.error *
+   use std.str *
 
-    print("Testing std.text.path...")
+   print("Testing std.str.path...")
 
-    def s = path.sep()
-    assert(str_len(s) == 1, "sep is one byte")
+   def s = path.sep()
+   assert(str_len(s) == 1, "sep is one byte")
 
-    if(s == "\\"){
+   if(s == "\\"){
        assert(path.is_abs("C:\\tmp"), "is_abs windows drive")
-    } else {
+   } else {
        assert(path.is_abs("/tmp"), "is_abs unix absolute")
-    }
+   }
 
-    assert((path.join("a", "b") == "a" + s + "b"), "join")
-    assert((path.normalize("a/./b/../c") == "a" + s + "c"), "normalize")
-    assert((path.basename("a" + s + "b.txt") == "b.txt"), "basename")
-    assert((path.dirname("a" + s + "b.txt") == "a"), "dirname")
-    assert((path.extname("archive.tar.gz") == ".gz"), "extname")
+   assert((path.join("a", "b") == "a" + s + "b"), "join")
+   assert((path.normalize("a/./b/../c") == "a" + s + "c"), "normalize")
+   assert((path.basename("a" + s + "b.txt") == "b.txt"), "basename")
+   assert((path.dirname("a" + s + "b.txt") == "a"), "dirname")
+   assert((path.extname("archive.tar.gz") == ".gz"), "extname")
 
-    def parts = path.splitext("archive.tar.gz")
-    assert((get(parts, 0) == "archive.tar"), "splitext root")
-    assert((get(parts, 1) == ".gz"), "splitext ext")
+   def parts = path.splitext("archive.tar.gz")
+   assert((get(parts, 0) == "archive.tar"), "splitext root")
+   assert((get(parts, 1) == ".gz"), "splitext ext")
 
-    print("✓ std.text.path tests passed")
+   print("✓ std.str.path tests passed")
 }

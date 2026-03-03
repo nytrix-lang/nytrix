@@ -5,14 +5,22 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-static char **g_parse_diag_tbl = NULL;
+typedef struct {
+  char *key;
+  int count;
+} parse_diag_entry_t;
+
+static parse_diag_entry_t *g_parse_diag_tbl = NULL;
 static size_t g_parse_diag_cap = 0;
 static size_t g_parse_diag_len = 0;
+
+static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
+
 static char *g_parse_cached_file = NULL;
 static char *g_parse_cached_src = NULL;
 
-__attribute__((unused))
-static const char *parse_load_source(const char *filename) {
+__attribute__((unused)) static const char *
+parse_load_source(const char *filename) {
   if (!filename || filename[0] == '<')
     return NULL;
   if (g_parse_cached_file && strcmp(g_parse_cached_file, filename) == 0)
@@ -31,13 +39,56 @@ static void parse_print_snippet(parser_t *p, int real_line, int col,
   ny_print_snippet(p->src, real_line, col, len, NY_CLR_RED);
 }
 
-static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
+static bool parse_diag_grow(void) {
+  size_t old_cap = g_parse_diag_cap;
+  parse_diag_entry_t *old_tbl = g_parse_diag_tbl;
+  g_parse_diag_cap = g_parse_diag_cap ? g_parse_diag_cap * 2 : 1024;
+  g_parse_diag_tbl = calloc(g_parse_diag_cap, sizeof(parse_diag_entry_t));
+  if (!g_parse_diag_tbl)
+    return false;
+  size_t mask = g_parse_diag_cap - 1;
+  for (size_t i = 0; i < old_cap; ++i) {
+    if (!old_tbl[i].key)
+      continue;
+    uint64_t h = parse_diag_hash(old_tbl[i].key);
+    size_t idx = (size_t)h & mask;
+    while (g_parse_diag_tbl[idx].key)
+      idx = (idx + 1) & mask;
+    g_parse_diag_tbl[idx] = old_tbl[i];
+  }
+  free(old_tbl);
+  return true;
+}
+
+static bool parser_diag_should_emit(const char *filename, int line, int col,
+                                    const char *msg, const char *got) {
+  char key[1024];
+  snprintf(key, sizeof(key), "%s|%d|%d|%s|%s", filename ? filename : "<input>",
+           line, col, msg ? msg : "", got ? got : "");
+  if (g_parse_diag_cap == 0 ||
+      (g_parse_diag_len + 1) * 3 >= g_parse_diag_cap * 2) {
+    if (!parse_diag_grow())
+      return true;
+  }
+  size_t mask = g_parse_diag_cap - 1;
+  size_t idx = (size_t)parse_diag_hash(key) & mask;
+  while (g_parse_diag_tbl[idx].key) {
+    if (strcmp(g_parse_diag_tbl[idx].key, key) == 0) {
+      g_parse_diag_tbl[idx].count++;
+      return g_parse_diag_tbl[idx].count <= 3;
+    }
+    idx = (idx + 1) & mask;
+  }
+  g_parse_diag_tbl[idx].key = ny_strdup(key);
+  g_parse_diag_tbl[idx].count = 1;
+  g_parse_diag_len++;
+  return true;
+}
 
 static bool parser_intern_grow(parser_t *p) {
   size_t new_cap = p->intern_cap ? p->intern_cap * 2 : 1024;
-  parser_intern_entry *new_tbl =
-      (parser_intern_entry *)arena_alloc(p->arena,
-                                         new_cap * sizeof(parser_intern_entry));
+  parser_intern_entry *new_tbl = (parser_intern_entry *)arena_alloc(
+      p->arena, new_cap * sizeof(parser_intern_entry));
   if (!new_tbl)
     return false;
   memset(new_tbl, 0, new_cap * sizeof(parser_intern_entry));
@@ -83,48 +134,6 @@ const char *parser_intern_hash(parser_t *p, const char *s, size_t len,
       (parser_intern_entry){.hash = hash, .len = (uint32_t)len, .str = dup};
   p->intern_len++;
   return dup;
-}
-
-static bool parse_diag_grow(void) {
-  size_t new_cap = g_parse_diag_cap ? g_parse_diag_cap * 2 : 512;
-  char **new_tbl = calloc(new_cap, sizeof(char *));
-  if (!new_tbl)
-    return false;
-  for (size_t i = 0; i < g_parse_diag_cap; ++i) {
-    char *entry = g_parse_diag_tbl[i];
-    if (!entry)
-      continue;
-    size_t mask = new_cap - 1;
-    size_t idx = (size_t)parse_diag_hash(entry) & mask;
-    while (new_tbl[idx])
-      idx = (idx + 1) & mask;
-    new_tbl[idx] = entry;
-  }
-  free(g_parse_diag_tbl);
-  g_parse_diag_tbl = new_tbl;
-  g_parse_diag_cap = new_cap;
-  return true;
-}
-
-static bool parser_diag_should_emit(const char *filename, int line, int col,
-                                    const char *msg, const char *got) {
-  char key[1024];
-  snprintf(key, sizeof(key), "%s|%d|%d|%s|%s", filename ? filename : "<input>",
-           line, col, msg ? msg : "", got ? got : "");
-  if (g_parse_diag_cap == 0 && !parse_diag_grow())
-    return true;
-  if ((g_parse_diag_len + 1) * 3 >= g_parse_diag_cap * 2 && !parse_diag_grow())
-    return true;
-  size_t mask = g_parse_diag_cap - 1;
-  size_t idx = (size_t)parse_diag_hash(key) & mask;
-  while (g_parse_diag_tbl[idx]) {
-    if (strcmp(g_parse_diag_tbl[idx], key) == 0)
-      return false;
-    idx = (idx + 1) & mask;
-  }
-  g_parse_diag_tbl[idx] = ny_strdup(key);
-  g_parse_diag_len++;
-  return true;
 }
 
 const char *parser_token_name(token_kind k) {
@@ -255,26 +264,12 @@ const char *parser_token_name(token_kind k) {
     return "]";
   case NY_T_COMMA:
     return ",";
+  case NY_T_DOT:
+    return ".";
   case NY_T_COLON:
     return ":";
   case NY_T_SEMI:
     return ";";
-  case NY_T_DOT:
-    return ".";
-  case NY_T_BITOR:
-    return "|";
-  case NY_T_BITAND:
-    return "&";
-  case NY_T_BITXOR:
-    return "^";
-  case NY_T_LSHIFT:
-    return "<<";
-  case NY_T_RSHIFT:
-    return ">>";
-  case NY_T_BITNOT:
-    return "~";
-  case NY_T_ELLIPSIS:
-    return "...";
   case NY_T_QUESTION:
     return "?";
   case NY_T_AT:
@@ -284,9 +279,9 @@ const char *parser_token_name(token_kind k) {
   }
 }
 
-static void print_error_line(parser_t *p, const char *filename, int line, int real_line,
-                             int col, const char *msg, const char *got,
-                             const char *hint) {
+static void print_error_line(parser_t *p, const char *filename, int line,
+                             int real_line, int col, const char *msg,
+                             const char *got, const char *hint) {
   const char *out_file =
       filename ? filename : (p->filename ? p->filename : "<input>");
   if (!parser_diag_should_emit(out_file, line, col, msg, got))
@@ -329,41 +324,13 @@ static const char *token_desc(token_t tok, char *buf, size_t cap) {
   return kind;
 }
 
-static const char *expect_hint(token_kind expected, token_t got) {
-  if (expected == NY_T_SEMI && got.kind == NY_T_RBRACE)
-    return "did you forget a ';' before '}'?";
-  if (expected == NY_T_RPAREN && got.kind == NY_T_RBRACE)
-    return "did you forget a ')' before '}'?";
-  if (expected == NY_T_RBRACE && got.kind == NY_T_EOF)
-    return "missing '}' before end of file";
-  if (expected == NY_T_RPAREN && got.kind == NY_T_EOF)
-    return "missing ')' before end of file";
-  if (expected == NY_T_RBRACK && got.kind == NY_T_EOF)
-    return "missing ']' before end of file";
-  if (expected == NY_T_COLON && got.kind == NY_T_IDENT)
-    return "use ':' after 'case'/'default' or for slices";
-  if (expected == NY_T_LBRACE &&
-      (got.kind == NY_T_ARROW || got.kind == NY_T_COLON))
-    return "return type belongs before the opening '{'";
-  if (expected == NY_T_RPAREN && got.lexeme && strcmp(got.lexeme, "->") == 0)
-    return "did you forget to close the parameter list ')' before '->'?";
-  if (expected == NY_T_LBRACE && got.kind == NY_T_IDENT)
-    return "did you forget the '{' before the function body?";
-  if (expected == NY_T_FN && got.kind == NY_T_IDENT && got.len == 4 && memcmp(got.lexeme, "func", 4) == 0)
-    return "use 'fn' instead of 'func'";
-  if (expected == NY_T_DEF && (got.kind == NY_T_IDENT && ((got.len == 3 && memcmp(got.lexeme, "let", 3) == 0) || (got.len == 3 && memcmp(got.lexeme, "var", 3) == 0))))
-    return "use 'def' for immutable or 'mut' for mutable variables";
-  if (got.kind == NY_T_COLON && (expected == NY_T_LBRACE || expected == NY_T_LPAREN))
-    return "Nytrix does not use ':' after if/while/fn headers, use '{' for the body";
-  return NULL;
-}
-
 void parser_error(parser_t *p, token_t tok, const char *msg, const char *hint) {
   if (!hint && tok.kind == NY_T_EOF)
     hint = "check for missing ';' or unmatched brace";
   char buf[64];
   const char *got = token_desc(tok, buf, sizeof(buf));
-  print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col, msg, got, hint);
+  print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col, msg, got,
+                   hint);
 }
 
 void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
@@ -375,12 +342,14 @@ void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
   if (!msg) {
     char def_msg[128];
     snprintf(def_msg, sizeof(def_msg), "expected %s", parser_token_name(kind));
-    if (!hint)
-      hint = expect_hint(kind, p->cur);
+    if (!hint) {
+      // Just a simple hint for now
+      hint = "check syntax";
+    }
     char buf[64];
     const char *got_desc = token_desc(p->cur, buf, sizeof(buf));
-    print_error_line(p, p->cur.filename, p->cur.line, p->cur.real_line, p->cur.col, def_msg,
-                     got_desc, hint);
+    print_error_line(p, p->cur.filename, p->cur.line, p->cur.real_line,
+                     p->cur.col, def_msg, got_desc, hint);
   } else {
     parser_error(p, p->cur, msg, hint);
   }
@@ -413,24 +382,35 @@ char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
       case 'r':
         out[oi++] = '\r';
         break;
-      case '\\':
-        out[oi++] = '\\';
+      case 'v':
+        out[oi++] = '\v';
         break;
-      case '\'':
-        out[oi++] = '\'';
+      case 'f':
+        out[oi++] = '\f';
+        break;
+      case 'a':
+        out[oi++] = '\a';
+        break;
+      case 'b':
+        out[oi++] = '\b';
+        break;
+      case 'e':
+        out[oi++] = '\x1b';
         break;
       case '"':
         out[oi++] = '"';
         break;
+      case '\'':
+        out[oi++] = '\'';
+        break;
+      case '\\':
+        out[oi++] = '\\';
+        break;
       case 'x': {
-        if (cur + 2 < end && isxdigit((unsigned char)cur[1]) &&
-            isxdigit((unsigned char)cur[2])) {
+        if (cur + 2 < end) {
           char hex[3] = {cur[1], cur[2], 0};
           out[oi++] = (char)strtol(hex, NULL, 16);
           cur += 2;
-        } else {
-          out[oi++] = '\\';
-          out[oi++] = 'x';
         }
         break;
       }
@@ -442,12 +422,14 @@ char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
       case '5':
       case '6':
       case '7': {
-        int oct = 0;
-        int count = 0;
-        while (count < 3 && cur < end && *cur >= '0' && *cur <= '7') {
-          oct = oct * 8 + (*cur - '0');
-          cur++;
-          count++;
+        char oct_s[4] = {0};
+        int oct_len = 0;
+        while (oct_len < 3 && cur < end && *cur >= '0' && *cur <= '7') {
+          oct_s[oct_len++] = *cur++;
+        }
+        int oct = (int)strtol(oct_s, NULL, 8);
+        if (oct > 255) {
+          // NY_LOG_WARN("octal escape sequence out of range: %s", oct_s);
         }
         out[oi++] = (char)oct;
         cur--;
@@ -498,18 +480,11 @@ void parser_init_with_arena(parser_t *p, const char *src, const char *filename,
   p->last_error_line = 0;
   p->last_error_col = 0;
   p->last_error_msg[0] = '\0';
-  p->current_module = NULL;
   p->block_depth = 0;
   p->loop_depth = 0;
   parser_advance(p);
 }
 
 void parser_init(parser_t *p, const char *src, const char *filename) {
-  arena_t *arena = (arena_t *)malloc(sizeof(arena_t));
-  if (!arena) {
-    fprintf(stderr, "oom\n");
-    exit(1);
-  }
-  memset(arena, 0, sizeof(arena_t));
-  parser_init_with_arena(p, src, filename, arena);
+  parser_init_with_arena(p, src, filename, NULL);
 }

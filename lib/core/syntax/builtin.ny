@@ -92,25 +92,25 @@ fn register_defaults(reg){
 
 if(comptime{__main()}){
 
-    mut reg = syntax_impl.new_registry(8)
-    reg = register_defaults(reg)
-    assert(syntax_impl.is_attr_registered(reg, "extern"), "register extern")
-    assert(syntax_impl.is_attr_registered(reg, "effects"), "register effects")
+   mut reg = syntax_impl.new_registry(8)
+   reg = register_defaults(reg)
+   assert(syntax_impl.is_attr_registered(reg, "extern"), "register extern")
+   assert(syntax_impl.is_attr_registered(reg, "effects"), "register effects")
 
-    def ex = attr_extern(dict(2), ["puts"])
-    assert(dict_get(ex, "is_extern", false), "attr_extern flag")
-    assert(dict_get(ex, "link_name", "") == "puts", "attr_extern link name")
+   def ex = attr_extern(dict(2), ["puts"])
+   assert(dict_get(ex, "is_extern", false), "attr_extern flag")
+   assert(dict_get(ex, "link_name", "") == "puts", "attr_extern link name")
 
-    def pure = attr_pure(dict(2), list(0))
-    assert(dict_get(pure, "attr_pure", false), "attr_pure flag")
+   def pure = attr_pure(dict(2), list(0))
+   assert(dict_get(pure, "attr_pure", false), "attr_pure flag")
 
-    def fx = attr_effects(dict(2), ["io"])
-    assert(dict_get(fx, "effect_contract_known", false), "attr_effects known")
-    def contract = dict_get(fx, "effect_contract", list(0))
-    assert(is_list(contract), "attr_effects list")
-    assert(len(contract) == 1, "attr_effects len")
+   def fx = attr_effects(dict(2), ["io"])
+   assert(dict_get(fx, "effect_contract_known", false), "attr_effects known")
+   def contract = dict_get(fx, "effect_contract", list(0))
+   assert(is_list(contract), "attr_effects list")
+   assert(len(contract) == 1, "attr_effects len")
 
-    def ll = attr_llvm(dict(2), ["alwaysinline", 1])
-    assert(dict_get(ll, "llvm_attr", "") == "alwaysinline", "attr_llvm name")
-    assert(dict_get(ll, "llvm_value", 0) == 1, "attr_llvm value")
+   def ll = attr_llvm(dict(2), ["alwaysinline", 1])
+   assert(dict_get(ll, "llvm_attr", "") == "alwaysinline", "attr_llvm name")
+   assert(dict_get(ll, "llvm_value", 0) == 1, "attr_llvm value")
 }

@@ -3,8 +3,6 @@
 
 > Status: work in progress. Expect breaking changes.
 
-Nytrix is a multiplatform systems language focused on static typing, native execution, and a small standard library surface.
-
 * Statically typed, compiled language
 * Performance
 * Simplicity

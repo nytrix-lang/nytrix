@@ -72,26 +72,31 @@ static void print_last_trace(void) {
 }
 
 static void handle_segv(int sig) {
-  const char *name = (sig == SIGSEGV) ? "Segmentation Fault" :
-                     (sig == SIGABRT) ? "Abort" :
-                     (sig == SIGFPE)  ? "Arithmetic Exception" :
-                     (sig == SIGILL)  ? "Illegal Instruction" : "Signal";
+  const char *name = (sig == SIGSEGV)   ? "Segmentation Fault"
+                     : (sig == SIGABRT) ? "Abort"
+                     : (sig == SIGFPE)  ? "Arithmetic Exception"
+                     : (sig == SIGILL)  ? "Illegal Instruction"
+                                        : "Signal";
 
-  fprintf(stderr, "\n%s%s CRASH: %s (%d) %s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RED), name, sig, clr(NY_CLR_RESET));
-  
+  fprintf(stderr, "\n%s%s CRASH: %s (%d) %s\n", clr(NY_CLR_BOLD),
+          clr(NY_CLR_RED), name, sig, clr(NY_CLR_RESET));
+
 #ifndef _WIN32
-  fprintf(stderr, "%s--- System Backtrace ---%s\n", clr(NY_CLR_GRAY), clr(NY_CLR_RESET));
+  fprintf(stderr, "%s--- System Backtrace ---%s\n", clr(NY_CLR_GRAY),
+          clr(NY_CLR_RESET));
   void *bt[64];
   int n = backtrace(bt, 64);
   backtrace_symbols_fd(bt, n, STDERR_FILENO);
 #endif
 
   print_last_trace();
-  
-  fprintf(stderr, "\n%s--- Nytrix Trace Ring ---%s\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+
+  fprintf(stderr, "\n%s--- Nytrix Trace Ring ---%s\n", clr(NY_CLR_CYAN),
+          clr(NY_CLR_RESET));
   __trace_dump(((int64_t)16 << 1) | 1);
 
-  fprintf(stderr, "\n%sPotential Causes:%s\n", clr(NY_CLR_YELLOW), clr(NY_CLR_RESET));
+  fprintf(stderr, "\n%sPotential Causes:%s\n", clr(NY_CLR_YELLOW),
+          clr(NY_CLR_RESET));
   if (sig == SIGSEGV) {
     fprintf(stderr, "  - Null pointer dereference (nil access)\n");
     fprintf(stderr, "  - Out of bounds memory access\n");
@@ -101,10 +106,14 @@ static void handle_segv(int sig) {
     fprintf(stderr, "  - Float-to-int overflow\n");
   }
 
-  fprintf(stderr, "\n%sDebug Suggestion:%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
-  fprintf(stderr, "  Run with %s-trace -v%s to see all transitions.\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
-  fprintf(stderr, "  Add %s--dump-on-error%s to save IR/ASM of the failing module.\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
-  
+  fprintf(stderr, "\n%sDebug Suggestion:%s\n", clr(NY_CLR_BOLD),
+          clr(NY_CLR_RESET));
+  fprintf(stderr, "  Run with %s-trace -v%s to see all transitions.\n",
+          clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  fprintf(stderr,
+          "  Add %s--dump-on-error%s to save IR/ASM of the failing module.\n",
+          clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+
   fprintf(stderr, "\n");
   exit(128 + sig);
 }
@@ -179,12 +188,13 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
 }
 
 int main(int argc, char **argv, char **envp) {
-/*
-  signal(SIGSEGV, handle_segv);
-  signal(SIGABRT, handle_segv);
-  signal(SIGFPE, handle_segv);
-  signal(SIGILL, handle_segv);
-*/
+  ny_jit_init_native_once();
+  /*
+    signal(SIGSEGV, handle_segv);
+    signal(SIGABRT, handle_segv);
+    signal(SIGFPE, handle_segv);
+    signal(SIGILL, handle_segv);
+  */
   ny_options opt;
   ny_options_init(&opt);
   ny_options_parse(&opt, argc, argv);

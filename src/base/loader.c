@@ -19,7 +19,7 @@
 #include <io.h>
 #define access _access
 #include <stdlib.h>
-#define realpath(N,R) _fullpath((R),(N),_MAX_PATH)
+#define realpath(N, R) _fullpath((R), (N), _MAX_PATH)
 #endif
 
 typedef struct ny_std_mod {
@@ -157,9 +157,8 @@ static void add_module_from_path(const char *root, const char *full_path) {
   strcpy(fallback_name, prefix);
   strcat(fallback_name, final_name);
   char *declared_name = read_declared_module_name(full_path);
-  const char *module_name = (declared_name && declared_name[0])
-                                ? declared_name
-                                : fallback_name;
+  const char *module_name =
+      (declared_name && declared_name[0]) ? declared_name : fallback_name;
   const char *dot = strchr(module_name, '.');
   char *pkg = dot ? ny_strndup(module_name, (size_t)(dot - module_name))
                   : ny_loader_xstrdup(module_name);
@@ -496,29 +495,6 @@ static void append_text(char **buf, size_t *len, size_t *cap, const char *txt) {
   (*buf)[*len] = '\0';
 }
 
-static void append_fn_proto(stmt_t *s, char **hdr, size_t *len, size_t *capv) {
-  if (!s)
-    return;
-  if (s->kind == NY_S_FUNC) {
-    char buf[512];
-    int n = snprintf(buf, sizeof(buf), "fn %s(", s->as.fn.name);
-    for (size_t j = 0; j < s->as.fn.params.len; ++j) {
-      const char *sep = (j + 1 < s->as.fn.params.len) ? ", " : "";
-      int written = snprintf(buf + n, sizeof(buf) - (size_t)n, "%s%s",
-                             s->as.fn.params.data[j].name, sep);
-      if (written > 0)
-        n += written;
-    }
-    snprintf(buf + n, sizeof(buf) - (size_t)n, ");");
-    append_text(hdr, len, capv, buf);
-    return;
-  }
-  if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      append_fn_proto(s->as.module.body.data[i], hdr, len, capv);
-    }
-  }
-}
 static const char *last_sep(const char *path) {
   const char *a = strrchr(path, '/');
   const char *b = strrchr(path, '\\');
@@ -667,15 +643,28 @@ typedef struct {
 static int mod_priority(const char *path) {
   if (!path)
     return 100;
-  if (strstr(path, "core/base.ny"))
-    return 0;
-  if (strstr(path, "core/mod.ny"))
+  if (strstr(path, "os/sys.ny"))
     return 1;
-  if (strstr(path, "core/primitives.ny"))
-    return 1;
-  if (strstr(path, "core/reflect.ny"))
+  if (strstr(path, "str/mod.ny"))
     return 2;
-  return 100;
+  if (strstr(path, "str/io.ny"))
+    return 3;
+  if (strstr(path, "core/reflect.ny"))
+    return 4;
+  if (strstr(path, "core/error.ny"))
+    return 5;
+  if (strstr(path, "core/list.ny"))
+    return 6;
+  if (strstr(path, "core/dict.ny"))
+    return 7;
+  if (strstr(path, "core/set.ny"))
+    return 8;
+  if (strstr(path, "core/mod.ny"))
+    return 10;
+  if (strstr(path, "/mod.ny") ||
+      (strlen(path) >= 6 && strcmp(path + strlen(path) - 6, "mod.ny") == 0))
+    return 20;
+  return 30;
 }
 
 static int mod_entry_path_cmp(const void *a, const void *b) {
@@ -769,11 +758,13 @@ static char *ny_build_module_chunk(const char *path, const char *name,
         p++;
       continue;
     }
-    if (strncmp(p, "module", 6) == 0 && (isspace((unsigned char)p[6]) || p[6] == '\0')) {
+    if (strncmp(p, "module", 6) == 0 &&
+        (isspace((unsigned char)p[6]) || p[6] == '\0')) {
       has_decl = true;
       break;
     }
-    if (strncmp(p, "use", 3) == 0 && (isspace((unsigned char)p[3]) || p[3] == '\0')) {
+    if (strncmp(p, "use", 3) == 0 &&
+        (isspace((unsigned char)p[3]) || p[3] == '\0')) {
       while (*p && *p != '\n')
         p++;
       continue;
@@ -784,15 +775,14 @@ static char *ny_build_module_chunk(const char *path, const char *name,
     append_text(&bundle, &total, &cap, txt);
     append_text(&bundle, &total, &cap, "\n");
   } else {
-    char *wrapped = malloc(strlen(txt) + strlen(name) + 64);
-    if (wrapped) {
-      sprintf(wrapped, "module %s * {\n%s\n}", name, txt);
-      append_text(&bundle, &total, &cap, wrapped);
-      free(wrapped);
-    }
+    char header[512];
+    snprintf(header, sizeof(header), "module %s *", name);
+    append_text(&bundle, &total, &cap, header);
+    append_text(&bundle, &total, &cap, txt);
+    append_text(&bundle, &total, &cap, "\n");
   }
   char use_stmt[512];
-  sprintf(use_stmt, "use %s *", name);
+  snprintf(use_stmt, sizeof(use_stmt), "use %s *", name);
   append_text(&bundle, &total, &cap, use_stmt);
   append_text(&bundle, &total, &cap, "\n");
   free(txt);
@@ -852,21 +842,27 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   int depth = 0;
   for (;;) {
     token_t t = lexer_next(&lx);
-    if (t.kind == NY_T_EOF) break;
+    if (t.kind == NY_T_EOF)
+      break;
 
-process_tok:
-    if (t.kind == NY_T_LBRACE || t.kind == NY_T_LPAREN || t.kind == NY_T_LBRACK) {
+  process_tok:
+    if (t.kind == NY_T_LBRACE || t.kind == NY_T_LPAREN ||
+        t.kind == NY_T_LBRACK) {
       depth++;
-    } else if (t.kind == NY_T_RBRACE || t.kind == NY_T_RPAREN || t.kind == NY_T_RBRACK) {
-      if (depth > 0) depth--;
+    } else if (t.kind == NY_T_RBRACE || t.kind == NY_T_RPAREN ||
+               t.kind == NY_T_RBRACK) {
+      if (depth > 0)
+        depth--;
     } else if (depth == 0) {
       if (t.kind == NY_T_MODULE) {
         // Skip module name (could be multiple tokens like std.core.set)
         for (;;) {
           t = lexer_next(&lx);
-          if (t.kind != NY_T_IDENT && t.kind != NY_T_DOT) break;
+          if (t.kind != NY_T_IDENT && t.kind != NY_T_DOT)
+            break;
         }
-        if (t.kind != NY_T_EOF) goto process_tok;
+        if (t.kind != NY_T_EOF)
+          goto process_tok;
       } else if (t.kind == NY_T_USE) {
         token_t mod_tok = lexer_next(&lx);
         if (mod_tok.kind == NY_T_IDENT || mod_tok.kind == NY_T_STRING) {
@@ -874,19 +870,22 @@ process_tok:
           char *raw = parse_use_name(&lx, &mod_tok, &next_tok);
           if (raw) {
             bool is_std = false;
-            char *path = resolve_module_path(raw, base_dir, prefer_local, &is_std);
+            char *path =
+                resolve_module_path(raw, base_dir, prefer_local, &is_std);
             if (path) {
               if (!(list->skip_std && is_std)) {
                 char *mname = is_std ? (char *)raw : ny_modname_from_path(path);
                 mod_list_add(list, path, mname, is_std);
-                if (!is_std) free(mname);
+                if (!is_std)
+                  free(mname);
               }
               free(path);
             }
             free(raw);
           }
           t = next_tok;
-          if (t.kind != NY_T_EOF) goto process_tok;
+          if (t.kind != NY_T_EOF)
+            goto process_tok;
         }
       }
     }
@@ -931,7 +930,8 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     if (seed_count == 0 && mode != STD_MODE_NONE) {
       int core_idx = ny_std_find_module_by_name("std.core");
       if (core_idx >= 0) {
-        mod_list_add(&mods, ny_std_mods[core_idx].path, ny_std_mods[core_idx].name, true);
+        mod_list_add(&mods, ny_std_mods[core_idx].path,
+                     ny_std_mods[core_idx].name, true);
       } else {
         // Fallback to all if core not found
         for (size_t j = 0; j < ny_std_mods_len; ++j) {
@@ -1081,34 +1081,65 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
   return bundle;
 }
 
-char *ny_std_generate_header(std_mode_t mode) {
+static void append_c_symbol(stmt_t *s, const char *pkg, char **hdr, size_t *len,
+                            size_t *capv) {
+  if (!s)
+    return;
+  if (s->kind == NY_S_FUNC) {
+    const char *name = s->as.fn.name;
+    if (name[0] == '_' && name[1] != '_')
+      return;
+    char buf[512];
+    snprintf(buf, sizeof(buf), "    {\"%s.%s\", \"%s\"},", pkg, name, pkg);
+    append_text(hdr, len, capv, buf);
+    return;
+  }
+  if (s->kind == NY_S_VAR) {
+    for (size_t i = 0; i < s->as.var.names.len; ++i) {
+      const char *name = s->as.var.names.data[i];
+      if (name[0] == '_' && name[1] != '_')
+        continue;
+      char buf[512];
+      snprintf(buf, sizeof(buf), "    {\"%s.%s\", \"%s\"},", pkg, name, pkg);
+      append_text(hdr, len, capv, buf);
+    }
+    return;
+  }
+  if (s->kind == NY_S_MODULE) {
+    const char *mod_pkg = s->as.module.name;
+    for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      append_c_symbol(s->as.module.body.data[i], mod_pkg, hdr, len, capv);
+    }
+  }
+}
+
+char *ny_std_generate_c_symbols_header(std_mode_t mode) {
   char *bundle = ny_build_std_bundle(NULL, 0, mode, 0, NULL);
   if (!bundle)
     return NULL;
   parser_t parser;
   parser_init(&parser, bundle, "<std_bundle>");
   program_t prog = parse_program(&parser);
-  size_t total = 0, cap = 4096;
+  size_t total = 0, cap = 8192;
   char *header = malloc(cap);
   if (!header) {
     free(bundle);
     return NULL;
   }
   header[0] = '\0';
+  append_text(&header, &total, &cap, "#pragma once");
+  append_text(&header, &total, &cap,
+              "typedef struct { const char *sym; const char *mod; } "
+              "nt_std_symbol;");
+  append_text(&header, &total, &cap,
+              "static const nt_std_symbol nt_std_symbols[] = {");
   for (size_t i = 0; i < prog.body.len; ++i) {
-    append_fn_proto(prog.body.data[i], &header, &total, &cap);
+    append_c_symbol(prog.body.data[i], "std", &header, &total, &cap);
   }
+  append_text(&header, &total, &cap, "    {0, 0}");
+  append_text(&header, &total, &cap, "};");
+
   program_free(&prog, parser.arena);
   free(bundle);
-  if (getenv("NYTRIX_DUMP_HEADER")) {
-    char dump_path[4096];
-    ny_join_path(dump_path, sizeof(dump_path), ny_get_temp_dir(),
-                 "nytrix_std_header.ny");
-    FILE *df = fopen(dump_path, "w");
-    if (df) {
-      fputs(header, df);
-      fclose(df);
-    }
-  }
   return header;
 }

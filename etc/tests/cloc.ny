@@ -3,10 +3,10 @@
 
 use std.core *
 use std.core.error *
-use std.text *
-use std.text.glob *
-use std.text.io *
-use std.text.bytes *
+use std.str *
+use std.str.glob *
+use std.str.io *
+use std.str.bytes *
 use std.os *
 use std.os.fs *
 use std.os.args *
@@ -35,7 +35,7 @@ fn count_lines(path){
          def c0 = load8(src, k)
          def c1 = (k + 1 < i) ? load8(src, k + 1) : 0
          if(!((c0 == 59 && c1 == 59) || (c0 == 47 && c1 == 47))){
-            lc += 1
+         lc += 1
          }
       }
       if(i < n && load8(src, i) == 10){ i += 1 }
@@ -88,12 +88,12 @@ fn collect_files(root, pattern){
          if(should_skip_name(name)){ i += 1 continue }
          def p = ospath.join(dir, name)
          if(is_dir(p)){
-            stack = append(stack, p)
+         stack = append(stack, p)
          } elif(is_file(p)){
-            def np = replace_all(p, "\\", "/")
-            if(path_matches(pattern, np, name)){
+         def np = replace_all(p, "\\", "/")
+         if(path_matches(pattern, np, name)){
                out = append(out, p)
-            }
+         }
          }
          i += 1
       }
@@ -143,11 +143,11 @@ fn print_top(paths, counts, top_n){
       mut i = 0
       while(i < len(counts)){
          if(bytes_get(used, i) == 0){
-            def lc = get(counts, i, 0)
-            if(lc > best_lc){
+         def lc = get(counts, i, 0)
+         if(lc > best_lc){
                best_lc = lc
                best_i = i
-            }
+         }
          }
          i += 1
       }
@@ -210,7 +210,7 @@ if(len(targets) > 0){
    for(root in SOURCE_ROOTS){
       if(is_dir(root)){
          for(pat in SOURCE_EXTS){
-            files = extend(files, collect_files(root, pat))
+         files = extend(files, collect_files(root, pat))
          }
       }
    }

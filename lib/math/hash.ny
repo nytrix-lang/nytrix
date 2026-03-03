@@ -8,7 +8,7 @@ module std.math.hash (
 )
 use std.core *
 use std.core.mem (zalloc, memcpy)
-use std.text as str
+use std.str as str
 
 fn _rotr64(x, n){
    "Internal: performs a 64-bit bitwise right rotation of `x` by `n` bits."
@@ -162,319 +162,319 @@ fn sha512(msg){
 
 ;; Helper for bitwise sanity
 fn _bit(v){
-    "Internal: Ensures a value is treated as a 64-bit integer internally for bitwise operations."
-    from_int(to_int(v))
+   "Internal: Ensures a value is treated as a 64-bit integer internally for bitwise operations."
+   from_int(to_int(v))
 }
 
 fn _u32(x){
-    "Internal: Truncates a number to its 32-bit unsigned representation."
-    return x & 4294967295
+   "Internal: Truncates a number to its 32-bit unsigned representation."
+   return x & 4294967295
 }
 
 fn _lshr32(x, n){
-    "Internal: Logical shift right for 32-bit integers."
-    if(n <= 0){ return _u32(x) }
-    _u32(x) >> n
+   "Internal: Logical shift right for 32-bit integers."
+   if(n <= 0){ return _u32(x) }
+   _u32(x) >> n
 }
 
 fn _rotl32(x, n){
-    "Internal: Rotates a 32-bit integer left by `n` bits."
-    def v = _u32(x)
-    _u32(((v << n) | _lshr32(v, (32 - n))))
+   "Internal: Rotates a 32-bit integer left by `n` bits."
+   def v = _u32(x)
+   _u32(((v << n) | _lshr32(v, (32 - n))))
 }
 
 fn _norm_span(s, start, len){
-    "Internal: Normalizes start and length for string/buffer operations."
-    if(!is_int(start)){ start = 0 }
-    if(start < 0){ start = 0 }
-    def n = str.len(s)
-    if(start > n){ start = n }
-    if(!is_int(len) || len <= 0){ len = n - start }
-    if(start + len > n){ len = n - start }
-    [start, len]
+   "Internal: Normalizes start and length for string/buffer operations."
+   if(!is_int(start)){ start = 0 }
+   if(start < 0){ start = 0 }
+   def n = str.len(s)
+   if(start > n){ start = n }
+   if(!is_int(len) || len <= 0){ len = n - start }
+   if(start + len > n){ len = n - start }
+   [start, len]
 }
 
 fn crc32(s, start=0, len=0){
-    "Calculates the CRC32 (Cyclic Redundancy Check) checksum of a string or buffer."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    mut c = 4294967295
-    mut i = 0
-    while(i < slen){
-        c = (c ^ load8(s, start + i))
-        mut j = 0
-        while(j < 8){
-            if((c & 1) != 0){
-                c = (_lshr32(c, 1) ^ 3988292384)
-            } else {
-                c = _lshr32(c, 1)
-            }
-            j += 1
-        }
-        i += 1
-    }
-    _u32((c ^ 4294967295))
+   "Calculates the CRC32 (Cyclic Redundancy Check) checksum of a string or buffer."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   mut c = 4294967295
+   mut i = 0
+   while(i < slen){
+      c = (c ^ load8(s, start + i))
+      mut j = 0
+      while(j < 8){
+         if((c & 1) != 0){
+         c = (_lshr32(c, 1) ^ 3988292384)
+         } else {
+         c = _lshr32(c, 1)
+         }
+         j += 1
+      }
+      i += 1
+   }
+   _u32((c ^ 4294967295))
 }
 
 fn adler32(s, start=0, len=0){
-    "Calculates the Adler-32 checksum of a string or buffer."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    mut a = 1
-    mut b = 0
-    mut i = 0
-    while(i < slen){
-        a = (a + _bit(load8(s, start + i))) % 65521
-        b = (b + a) % 65521
-        i += 1
-    }
-    _u32(((b << 16) | a))
+   "Calculates the Adler-32 checksum of a string or buffer."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   mut a = 1
+   mut b = 0
+   mut i = 0
+   while(i < slen){
+      a = (a + _bit(load8(s, start + i))) % 65521
+      b = (b + a) % 65521
+      i += 1
+   }
+   _u32(((b << 16) | a))
 }
 
 fn fnv1a(s, start=0, len=0){
-    "Calculates the 32-bit FNV-1a (Fowler-Noll-Vo) hash of a string or buffer."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    mut h = 2166136261
-    mut i = 0
-    while(i < slen){
-        h = _u32(((h ^ _bit(load8(s, start + i))) * 16777619))
-        i += 1
-    }
-    h
+   "Calculates the 32-bit FNV-1a (Fowler-Noll-Vo) hash of a string or buffer."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   mut h = 2166136261
+   mut i = 0
+   while(i < slen){
+      h = _u32(((h ^ _bit(load8(s, start + i))) * 16777619))
+      i += 1
+   }
+   h
 }
 
 fn xxh32(s, seed=0, start=0, len=0){
-    "Calculates the XXH32 hash, a fast non-cryptographic hash algorithm."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    def P1 = 2654435761
-    def P2 = 2246822519
-    def P3 = 3266489917
-    def P4 = 668265263
-    def P5 = 374761393
-    mut h32 = 0
-    mut p = 0
-    if(slen >= 16){
-        mut v1 = _u32(seed + P1 + P2)
-        mut v2 = _u32(seed + P2)
-        mut v3 = _u32(seed)
-        mut v4 = _u32(seed - P1)
-        while(p + 16 <= slen){
-            v1 = _u32((_rotl32(v1 + _u32((_bit(load32(s, start + p)) * P2)), 13) * P1))
-            v2 = _u32((_rotl32(v2 + _u32((_bit(load32(s, start + p + 4)) * P2)), 13) * P1))
-            v3 = _u32((_rotl32(v3 + _u32((_bit(load32(s, start + p + 8)) * P2)), 13) * P1))
-            v4 = _u32((_rotl32(v4 + _u32((_bit(load32(s, start + p + 12)) * P2)), 13) * P1))
-            p += 16
-        }
-        h32 = _u32(_rotl32(v1, 1) + _rotl32(v2, 7) + _rotl32(v3, 12) + _rotl32(v4, 18))
-    } else {
-        h32 = _u32(seed + P5)
-    }
-    h32 = _u32(h32 + slen)
-    while(p + 4 <= slen){
-        h32 = _u32((_rotl32(_u32(h32 + _u32((_bit(load32(s, start + p)) * P3))), 17) * P4))
-        p = p + 4
-    }
-    while(p < slen){
-        h32 = _u32((_rotl32(_u32(h32 + _u32((_bit(load8(s, start + p)) * P5))), 11) * P1))
-        p += 1
-    }
-    h32 = (h32 ^ _lshr32(h32, 15))
-    h32 = _u32((h32 * P2))
-    h32 = (h32 ^ _lshr32(h32, 13))
-    h32 = _u32((h32 * P3))
-    h32 = (h32 ^ _lshr32(h32, 16))
-    h32
+   "Calculates the XXH32 hash, a fast non-cryptographic hash algorithm."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   def P1 = 2654435761
+   def P2 = 2246822519
+   def P3 = 3266489917
+   def P4 = 668265263
+   def P5 = 374761393
+   mut h32 = 0
+   mut p = 0
+   if(slen >= 16){
+      mut v1 = _u32(seed + P1 + P2)
+      mut v2 = _u32(seed + P2)
+      mut v3 = _u32(seed)
+      mut v4 = _u32(seed - P1)
+      while(p + 16 <= slen){
+         v1 = _u32((_rotl32(v1 + _u32((_bit(load32(s, start + p)) * P2)), 13) * P1))
+         v2 = _u32((_rotl32(v2 + _u32((_bit(load32(s, start + p + 4)) * P2)), 13) * P1))
+         v3 = _u32((_rotl32(v3 + _u32((_bit(load32(s, start + p + 8)) * P2)), 13) * P1))
+         v4 = _u32((_rotl32(v4 + _u32((_bit(load32(s, start + p + 12)) * P2)), 13) * P1))
+         p += 16
+      }
+      h32 = _u32(_rotl32(v1, 1) + _rotl32(v2, 7) + _rotl32(v3, 12) + _rotl32(v4, 18))
+   } else {
+      h32 = _u32(seed + P5)
+   }
+   h32 = _u32(h32 + slen)
+   while(p + 4 <= slen){
+      h32 = _u32((_rotl32(_u32(h32 + _u32((_bit(load32(s, start + p)) * P3))), 17) * P4))
+      p = p + 4
+   }
+   while(p < slen){
+      h32 = _u32((_rotl32(_u32(h32 + _u32((_bit(load8(s, start + p)) * P5))), 11) * P1))
+      p += 1
+   }
+   h32 = (h32 ^ _lshr32(h32, 15))
+   h32 = _u32((h32 * P2))
+   h32 = (h32 ^ _lshr32(h32, 13))
+   h32 = _u32((h32 * P3))
+   h32 = (h32 ^ _lshr32(h32, 16))
+   h32
 }
 
 fn sha1(s, start=0, len=0){
-    "Calculates the SHA-1 hash of a string or buffer. Returns the result as a 40-character hexadecimal string."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    mut h0 = 1732584193
-    mut h1 = 4023233417
-    mut h2 = 2562383102
-    mut h3 = 271733878
-    mut h4 = 3285377520
-    def p_len = ((slen + 8) / 64 + 1) * 64
-    mut m = zalloc(p_len)
-    ; Use loop to copy string bytes correctly
-    mut cpi = 0
-    while(cpi < slen){
-        store8(m, load8(s, start + cpi), cpi)
-        cpi += 1
-    }
-    store8(m, 128, slen)
-    def bitlen = slen * 8
-    store8(m, ((bitlen >> 56) & 255), p_len - 8)
-    store8(m, ((bitlen >> 48) & 255), p_len - 7)
-    store8(m, ((bitlen >> 40) & 255), p_len - 6)
-    store8(m, ((bitlen >> 32) & 255), p_len - 5)
-    store8(m, ((bitlen >> 24) & 255), p_len - 4)
-    store8(m, ((bitlen >> 16) & 255), p_len - 3)
-    store8(m, ((bitlen >> 8) & 255), p_len - 2)
-    store8(m, (bitlen & 255), p_len - 1)
-    mut w = malloc(320)
-    mut off = 0
-    while(off < p_len){
-        mut t = 0
-        while(t < 16){
-            def base_idx = off + t * 4
-            def val = ((bor((_bit(load8(m, base_idx)) << 24), (_bit(load8(m, base_idx + 1)) << 16)) | (_bit(load8(m, base_idx + 2)) << 8)) | _bit(load8(m, base_idx + 3)))
-            store32(w, to_int(_u32(val)), t * 4)
-            t += 1
-        }
-        while(t < 80){
-            def v = ((bxor(_bit(load32(w, (t - 3) * 4)), _bit(load32(w, (t - 8) * 4))) ^ _bit(load32(w, (t - 14) * 4))) ^ _bit(load32(w, (t - 16) * 4)))
-            store32(w, to_int(_rotl32(v, 1)), t * 4)
-            t += 1
-        }
-        mut ha = h0
-        mut hb = h1
-        mut hc = h2
-        mut hd = h3
-        mut he = h4
-        mut i = 0
-        while(i < 80){
-            mut f = 0
-            mut k = 0
-            if(i < 20){
-                f = ((hb & hc) | ((hb ^ 4294967295) & hd))
-                k = 1518500249
-            } else if(i < 40){
-                f = ((hb ^ hc) ^ hd)
-                k = 1859775393
-            } else if(i < 60){
-                f = (((hb & hc) | (hb & hd)) | (hc & hd))
-                k = 2400959708
-            } else {
-                f = ((hb ^ hc) ^ hd)
-                k = 3395469782
-            }
-            def temp = _u32(_rotl32(ha, 5) + f + he + k + _bit(load32(w, i * 4)))
-            he = hd
-            hd = hc
-            hc = _rotl32(hb, 30)
-            hb = ha
-            ha = temp
-            i += 1
-        }
-        h0 = _u32(h0 + ha)
-        h1 = _u32(h1 + hb)
-        h2 = _u32(h2 + hc)
-        h3 = _u32(h3 + hd)
-        h4 = _u32(h4 + he)
-        off = off + 64
-    }
-    free(m)
-    free(w)
-    return str.to_hex(h0, 8) + str.to_hex(h1, 8) + str.to_hex(h2, 8) + str.to_hex(h3, 8) + str.to_hex(h4, 8)
+   "Calculates the SHA-1 hash of a string or buffer. Returns the result as a 40-character hexadecimal string."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   mut h0 = 1732584193
+   mut h1 = 4023233417
+   mut h2 = 2562383102
+   mut h3 = 271733878
+   mut h4 = 3285377520
+   def p_len = ((slen + 8) / 64 + 1) * 64
+   mut m = zalloc(p_len)
+   ; Use loop to copy string bytes correctly
+   mut cpi = 0
+   while(cpi < slen){
+      store8(m, load8(s, start + cpi), cpi)
+      cpi += 1
+   }
+   store8(m, 128, slen)
+   def bitlen = slen * 8
+   store8(m, ((bitlen >> 56) & 255), p_len - 8)
+   store8(m, ((bitlen >> 48) & 255), p_len - 7)
+   store8(m, ((bitlen >> 40) & 255), p_len - 6)
+   store8(m, ((bitlen >> 32) & 255), p_len - 5)
+   store8(m, ((bitlen >> 24) & 255), p_len - 4)
+   store8(m, ((bitlen >> 16) & 255), p_len - 3)
+   store8(m, ((bitlen >> 8) & 255), p_len - 2)
+   store8(m, (bitlen & 255), p_len - 1)
+   mut w = malloc(320)
+   mut off = 0
+   while(off < p_len){
+      mut t = 0
+      while(t < 16){
+         def base_idx = off + t * 4
+         def val = ((bor((_bit(load8(m, base_idx)) << 24), (_bit(load8(m, base_idx + 1)) << 16)) | (_bit(load8(m, base_idx + 2)) << 8)) | _bit(load8(m, base_idx + 3)))
+         store32(w, to_int(_u32(val)), t * 4)
+         t += 1
+      }
+      while(t < 80){
+         def v = ((bxor(_bit(load32(w, (t - 3) * 4)), _bit(load32(w, (t - 8) * 4))) ^ _bit(load32(w, (t - 14) * 4))) ^ _bit(load32(w, (t - 16) * 4)))
+         store32(w, to_int(_rotl32(v, 1)), t * 4)
+         t += 1
+      }
+      mut ha = h0
+      mut hb = h1
+      mut hc = h2
+      mut hd = h3
+      mut he = h4
+      mut i = 0
+      while(i < 80){
+         mut f = 0
+         mut k = 0
+         if(i < 20){
+         f = ((hb & hc) | ((hb ^ 4294967295) & hd))
+         k = 1518500249
+         } else if(i < 40){
+         f = ((hb ^ hc) ^ hd)
+         k = 1859775393
+         } else if(i < 60){
+         f = (((hb & hc) | (hb & hd)) | (hc & hd))
+         k = 2400959708
+         } else {
+         f = ((hb ^ hc) ^ hd)
+         k = 3395469782
+         }
+         def temp = _u32(_rotl32(ha, 5) + f + he + k + _bit(load32(w, i * 4)))
+         he = hd
+         hd = hc
+         hc = _rotl32(hb, 30)
+         hb = ha
+         ha = temp
+         i += 1
+      }
+      h0 = _u32(h0 + ha)
+      h1 = _u32(h1 + hb)
+      h2 = _u32(h2 + hc)
+      h3 = _u32(h3 + hd)
+      h4 = _u32(h4 + he)
+      off = off + 64
+   }
+   free(m)
+   free(w)
+   return str.to_hex(h0, 8) + str.to_hex(h1, 8) + str.to_hex(h2, 8) + str.to_hex(h3, 8) + str.to_hex(h4, 8)
 }
 
 fn md5(s, start=0, len=0){
-    "Calculates the MD5 (Message-Digest Algorithm 5) hash of a string or buffer. Returns the result as a 32-character hexadecimal string."
-    def span = _norm_span(s, start, len)
-    start = get(span, 0)
-    def slen = get(span, 1)
-    mut h0 = 1732584193
-    mut h1 = 4023233417
-    mut h2 = 2562383102
-    mut h3 = 271733878
-    def p_len = ((slen + 8) / 64 + 1) * 64
-    mut m = zalloc(p_len)
-    mut cpi = 0
-    while(cpi < slen){
-        store8(m, load8(s, start + cpi), cpi)
-        cpi += 1
-    }
-    store8(m, 128, slen)
-    def bitlen = slen * 8
-    store8(m, (bitlen & 255), p_len - 8)
-    store8(m, ((bitlen >> 8) & 255), p_len - 7)
-    store8(m, ((bitlen >> 16) & 255), p_len - 6)
-    store8(m, ((bitlen >> 24) & 255), p_len - 5)
-    store8(m, ((bitlen >> 32) & 255), p_len - 4)
-    store8(m, ((bitlen >> 40) & 255), p_len - 3)
-    store8(m, ((bitlen >> 48) & 255), p_len - 2)
-    store8(m, ((bitlen >> 56) & 255), p_len - 1)
-    def K = [3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080426, 2821735955, 4249261313, 1770035416, 2336552879, 4294925233, 2304563134, 1804603682, 4254626195, 2792965006, 1236535329, 4129170786, 3225465664, 643717713, 3921069994, 3593408605, 38016083, 3634488961, 3889429448, 568446438, 3275163606, 4107603335, 1163531501, 2850285829, 4243563512, 1735328473, 2368359562, 4294588738, 2272392833, 1839030562, 4259657740, 2763975236, 1272893353, 4139469664, 3200236656, 681279174, 3936430074, 3572445317, 76029189, 3654602809, 3873151461, 530742520, 3299628645, 4096336452, 1126891415, 2878612391, 4237533241, 1700485571, 2399980690, 4293915773, 2240044497, 1873313359, 4264355552, 2734768916, 1309151649, 4149444226, 3174756917, 718787259, 3951481745]
-    def S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
-    mut off = 0
-    while(off < p_len){
-        mut a = h0
-        mut b = h1
-        mut c = h2
-        mut d = h3
-        mut i = 0
-        while(i < 64){
-            mut f = 0
-            mut g = 0
-            if(i < 16){
-                f = ((b & c) | ((b ^ 4294967295) & d))
-                g = i
-            } else if(i < 32){
-                f = ((d & b) | ((d ^ 4294967295) & c))
-                g = (5 * i + 1) % 16
-            } else if(i < 48){
-                f = ((b ^ c) ^ d)
-                g = (3 * i + 5) % 16
-            } else {
-                f = (c ^ (b | (d ^ 4294967295)))
-                g = (7 * i) % 16
-            }
-            def base_idx = off + g * 4
-            def M_g = ((bor(load8(m, base_idx), (load8(m, base_idx + 1) << 8)) | (load8(m, base_idx + 2) << 16)) | (load8(m, base_idx + 3) << 24))
-            def temp = _u32(b + _rotl32(_u32(a + f + get(K, i) + M_g), get(S, i)))
-            a = d
-            d = c
-            c = b
-            b = temp
-            i += 1
-        }
-        h0 = _u32(h0 + a)
-        h1 = _u32(h1 + b)
-        h2 = _u32(h2 + c)
-        h3 = _u32(h3 + d)
-        off = off + 64
-    }
-    free(m)
-    return str.to_hex((h0 & 255), 2) + str.to_hex((_lshr32(h0, 8) & 255), 2) + str.to_hex((_lshr32(h0, 16) & 255), 2) + str.to_hex((_lshr32(h0, 24) & 255), 2) + str.to_hex((h1 & 255), 2) + str.to_hex((_lshr32(h1, 8) & 255), 2) + str.to_hex((_lshr32(h1, 16) & 255), 2) + str.to_hex((_lshr32(h1, 24) & 255), 2) + str.to_hex((h2 & 255), 2) + str.to_hex((_lshr32(h2, 8) & 255), 2) + str.to_hex((_lshr32(h2, 16) & 255), 2) + str.to_hex((_lshr32(h2, 24) & 255), 2) + str.to_hex((h3 & 255), 2) + str.to_hex((_lshr32(h3, 8) & 255), 2) + str.to_hex((_lshr32(h3, 16) & 255), 2) + str.to_hex((_lshr32(h3, 24) & 255), 2)
+   "Calculates the MD5 (Message-Digest Algorithm 5) hash of a string or buffer. Returns the result as a 32-character hexadecimal string."
+   def span = _norm_span(s, start, len)
+   start = get(span, 0)
+   def slen = get(span, 1)
+   mut h0 = 1732584193
+   mut h1 = 4023233417
+   mut h2 = 2562383102
+   mut h3 = 271733878
+   def p_len = ((slen + 8) / 64 + 1) * 64
+   mut m = zalloc(p_len)
+   mut cpi = 0
+   while(cpi < slen){
+      store8(m, load8(s, start + cpi), cpi)
+      cpi += 1
+   }
+   store8(m, 128, slen)
+   def bitlen = slen * 8
+   store8(m, (bitlen & 255), p_len - 8)
+   store8(m, ((bitlen >> 8) & 255), p_len - 7)
+   store8(m, ((bitlen >> 16) & 255), p_len - 6)
+   store8(m, ((bitlen >> 24) & 255), p_len - 5)
+   store8(m, ((bitlen >> 32) & 255), p_len - 4)
+   store8(m, ((bitlen >> 40) & 255), p_len - 3)
+   store8(m, ((bitlen >> 48) & 255), p_len - 2)
+   store8(m, ((bitlen >> 56) & 255), p_len - 1)
+   def K = [3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080426, 2821735955, 4249261313, 1770035416, 2336552879, 4294925233, 2304563134, 1804603682, 4254626195, 2792965006, 1236535329, 4129170786, 3225465664, 643717713, 3921069994, 3593408605, 38016083, 3634488961, 3889429448, 568446438, 3275163606, 4107603335, 1163531501, 2850285829, 4243563512, 1735328473, 2368359562, 4294588738, 2272392833, 1839030562, 4259657740, 2763975236, 1272893353, 4139469664, 3200236656, 681279174, 3936430074, 3572445317, 76029189, 3654602809, 3873151461, 530742520, 3299628645, 4096336452, 1126891415, 2878612391, 4237533241, 1700485571, 2399980690, 4293915773, 2240044497, 1873313359, 4264355552, 2734768916, 1309151649, 4149444226, 3174756917, 718787259, 3951481745]
+   def S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
+   mut off = 0
+   while(off < p_len){
+      mut a = h0
+      mut b = h1
+      mut c = h2
+      mut d = h3
+      mut i = 0
+      while(i < 64){
+         mut f = 0
+         mut g = 0
+         if(i < 16){
+         f = ((b & c) | ((b ^ 4294967295) & d))
+         g = i
+         } else if(i < 32){
+         f = ((d & b) | ((d ^ 4294967295) & c))
+         g = (5 * i + 1) % 16
+         } else if(i < 48){
+         f = ((b ^ c) ^ d)
+         g = (3 * i + 5) % 16
+         } else {
+         f = (c ^ (b | (d ^ 4294967295)))
+         g = (7 * i) % 16
+         }
+         def base_idx = off + g * 4
+         def M_g = ((bor(load8(m, base_idx), (load8(m, base_idx + 1) << 8)) | (load8(m, base_idx + 2) << 16)) | (load8(m, base_idx + 3) << 24))
+         def temp = _u32(b + _rotl32(_u32(a + f + get(K, i) + M_g), get(S, i)))
+         a = d
+         d = c
+         c = b
+         b = temp
+         i += 1
+      }
+      h0 = _u32(h0 + a)
+      h1 = _u32(h1 + b)
+      h2 = _u32(h2 + c)
+      h3 = _u32(h3 + d)
+      off = off + 64
+   }
+   free(m)
+   return str.to_hex((h0 & 255), 2) + str.to_hex((_lshr32(h0, 8) & 255), 2) + str.to_hex((_lshr32(h0, 16) & 255), 2) + str.to_hex((_lshr32(h0, 24) & 255), 2) + str.to_hex((h1 & 255), 2) + str.to_hex((_lshr32(h1, 8) & 255), 2) + str.to_hex((_lshr32(h1, 16) & 255), 2) + str.to_hex((_lshr32(h1, 24) & 255), 2) + str.to_hex((h2 & 255), 2) + str.to_hex((_lshr32(h2, 8) & 255), 2) + str.to_hex((_lshr32(h2, 16) & 255), 2) + str.to_hex((_lshr32(h2, 24) & 255), 2) + str.to_hex((h3 & 255), 2) + str.to_hex((_lshr32(h3, 8) & 255), 2) + str.to_hex((_lshr32(h3, 16) & 255), 2) + str.to_hex((_lshr32(h3, 24) & 255), 2)
 }
 
 if(comptime{__main()}){
-    print("Testing std.math.hash...")
-    use std.text *
+   print("Testing std.math.hash...")
+   use std.str *
 
-    def s = "123456789"
+   def s = "123456789"
 
-    ; CRC32: 0xCBF43926 -> 3421780262
-    def c = crc32(s, 0, 0)
-    assert(c == 3421780262, "crc32")
+   ; CRC32: 0xCBF43926 -> 3421780262
+   def c = crc32(s, 0, 0)
+   assert(c == 3421780262, "crc32")
 
-    ; Adler32: 152961502
-    def a = adler32(s, 0, 0)
-    assert(a == 152961502, "adler32")
+   ; Adler32: 152961502
+   def a = adler32(s, 0, 0)
+   assert(a == 152961502, "adler32")
 
-    ; XXH32: 2474356071
-    def x = xxh32(s, 0, 0, 0)
-    assert(x == 2474356071, "xxh32")
+   ; XXH32: 2474356071
+   def x = xxh32(s, 0, 0, 0)
+   assert(x == 2474356071, "xxh32")
 
-    ; MD5('123456789'): 25f9e794323b453885f5181f1b624d0b
-    def m = md5(s, 0, 0)
-    assert((m == "25f9e794323b453885f5181f1b624d0b"), "md5")
+   ; MD5('123456789'): 25f9e794323b453885f5181f1b624d0b
+   def m = md5(s, 0, 0)
+   assert((m == "25f9e794323b453885f5181f1b624d0b"), "md5")
 
-    ; SHA1('123456789'): d2032181892c6c0a4597019109faaaf6224f771d
-    def s1 = sha1(s, 0, 0)
-    assert((s1 == "d2032181892c6c0a4597019109faaaf6224f771d"), "sha1")
+   ; SHA1('123456789'): d2032181892c6c0a4597019109faaaf6224f771d
+   def s1 = sha1(s, 0, 0)
+   assert((s1 == "d2032181892c6c0a4597019109faaaf6224f771d"), "sha1")
 
-    ; SHA512('123456789'): 10e060933ee72c9a99738ce1f0a17387431e6792ed715ecb72e01dfdcc9abd94fa9157ea8069502b4d9136ca024f2b1c41b80c3e72620780447196695273ae84
-    ;; sha512 skipped: tagged integer overflow on 64-bit constants
-
-    print("✓ std.math.hash tests passed")
+   ; SHA512('123456789'): 10e060933ee72c9a99738ce1f0a17387431e6792ed715ecb72e01dfdcc9abd94fa9157ea8069502b4d9136ca024f2b1c41b80c3e72620780447196695273ae84
+   def s2 = sha512(s, 0, 0)
+   assert((s2 == "10e060933ee72c9a99738ce1f0a17387431e6792ed715ecb72e01dfdcc9abd94fa9157ea8069502b4d9136ca024f2b1c41b80c3e72620780447196695273ae84"), "sha512")
+   print("✓ std.math.hash tests passed")
 }

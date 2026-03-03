@@ -7,7 +7,7 @@ module std.os.time (
 )
 use std.core *
 use std.os.sys *
-use std.text *
+use std.str *
 
 fn _is_leap(y){
    "Return true when `y` is a leap year."
@@ -120,33 +120,33 @@ fn ticks(){
 }
 
 if(comptime{__main()}){
-    use std.os.time *
-    use std.core.error *
+   use std.os.time *
+   use std.core.error *
 
-    print("Testing std.os.time...")
+   print("Testing std.os.time...")
 
-    def t1 = time()
-    assert(t1 > 0, "time > 0")
+   def t1 = time()
+   assert(t1 > 0, "time > 0")
 
-    def start = ticks()
-    msleep(120)
-    def end = ticks()
+   def start = ticks()
+   msleep(120)
+   def end = ticks()
 
-    if(start > 0 && end > 0){
+   if(start > 0 && end > 0){
      if(end < start){
       print("Warning: ticks went backwards")
      }
-    } else {
+   } else {
      print("Warning: ticks unavailable")
-    }
+   }
 
-    ticks()
+   ticks()
 
-    def fmt = format_time(0)
-    assert((fmt == "1970-01-01 00:00:00"), "epoch")
+   def fmt = format_time(0)
+   assert((fmt == "1970-01-01 00:00:00"), "epoch")
 
-    def fmt2 = format_time(1672531200)
-    assert((fmt2 == "2023-01-01 00:00:00"), "2023")
+   def fmt2 = format_time(1672531200)
+   assert((fmt2 == "2023-01-01 00:00:00"), "2023")
 
-    print("✓ std.os.time tests passed")
+   print("✓ std.os.time tests passed")
 }

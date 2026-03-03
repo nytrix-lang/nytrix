@@ -5,7 +5,7 @@ module std.os.dirs (
    home_dir, temp_dir, config_dir, data_dir, cache_dir
 )
 use std.core *
-use std.text *
+use std.str *
 use std.os *
 use std.os.path as ospath
 use std.os.platform as platform
@@ -135,33 +135,33 @@ fn cache_dir(){
 }
 
 if(comptime{__main()}){
-    use std.os.dirs *
-    use std.core *
-    use std.text *
-    use std.text.io *
+   use std.os.dirs *
+   use std.core *
+   use std.str *
+   use std.str.io *
 
-    def h = home_dir()
-    assert(is_str(h), "home_dir string")
-    assert(str_len(h) > 0, "home_dir non-empty")
+   def h = home_dir()
+   assert(is_str(h), "home_dir string")
+   assert(str_len(h) > 0, "home_dir non-empty")
 
-    def t = temp_dir()
-    assert(is_str(t), "temp_dir string")
-    assert(str_len(t) > 0, "temp_dir non-empty")
+   def t = temp_dir()
+   assert(is_str(t), "temp_dir string")
+   assert(str_len(t) > 0, "temp_dir non-empty")
 
-    mut c = config_dir()
-    assert(is_str(c), "config_dir string")
-    if(str_len(c) == 0){ c = temp_dir() }
-    assert(str_len(c) > 0, "config_dir non-empty")
+   mut c = config_dir()
+   assert(is_str(c), "config_dir string")
+   if(str_len(c) == 0){ c = temp_dir() }
+   assert(str_len(c) > 0, "config_dir non-empty")
 
-    mut d = data_dir()
-    assert(is_str(d), "data_dir string")
-    if(str_len(d) == 0){ d = c }
-    assert(str_len(d) > 0, "data_dir non-empty")
+   mut d = data_dir()
+   assert(is_str(d), "data_dir string")
+   if(str_len(d) == 0){ d = c }
+   assert(str_len(d) > 0, "data_dir non-empty")
 
-    mut ch = cache_dir()
-    assert(is_str(ch), "cache_dir string")
-    if(str_len(ch) == 0){ ch = temp_dir() }
-    assert(str_len(ch) > 0, "cache_dir non-empty")
+   mut ch = cache_dir()
+   assert(is_str(ch), "cache_dir string")
+   if(str_len(ch) == 0){ ch = temp_dir() }
+   assert(str_len(ch) > 0, "cache_dir non-empty")
 
-    print("✓ std.os.dirs tests passed")
+   print("✓ std.os.dirs tests passed")
 }

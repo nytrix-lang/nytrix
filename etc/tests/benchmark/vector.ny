@@ -1,5 +1,5 @@
 use std.core *
-use std.text.io *
+use std.str.io *
 use std.os *
 use std.os.time *
 use std.math.vector as v

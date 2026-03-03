@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 
 ;; std.str.naming (Test)
 ;; Parser naming edge cases (kebab-case, arrows, predicates).
@@ -13,11 +13,11 @@ use std.text *
 ;; fn kebab-case() {
 ;; return 1
 ;; }
-;; 
+;;
 ;; fn do->predicate() {
 ;; return 1
 ;; }
-;; 
+;;
 ;; fn predicate?() {
 ;; return 1
 ;; }

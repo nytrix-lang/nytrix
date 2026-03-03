@@ -56,7 +56,7 @@ TARGET_CONFIGS = {
 
 def cross_compile(target, action="build", jobs=1, unknown=None):
     if target in ("win", "mingw"): target = "windows"
-    
+
     if target not in TARGET_CONFIGS:
         err(f"Unsupported cross-compilation target: {target}")
         return False
@@ -71,7 +71,7 @@ def cross_compile(target, action="build", jobs=1, unknown=None):
     if build_dir.exists():
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
-    
+
     from detect import detect_host_flags
     tc_cflags, tc_ldflags = detect_host_flags(target)
 
@@ -94,15 +94,15 @@ def cross_compile(target, action="build", jobs=1, unknown=None):
     try:
         run(cmake_args)
         run(["cmake", "--build", str(build_dir), "-j", str(jobs)])
-        
+
         if action == "build":
             log_ok(f"Cross-build for {target} finished.")
             return True
-        
+
         if action == "test":
             exe = "ny" + cfg.get("ext", "")
             bin_path = build_dir / exe
-            
+
             if bin_path.exists():
                 log("TARGET", f"Using target-native compiler: {bin_path}")
             else:
@@ -116,11 +116,11 @@ def cross_compile(target, action="build", jobs=1, unknown=None):
                     err("No Nytrix compiler binary found. Build host first.")
                     return False
 
-            test_cmd = [sys.executable, str(ROOT / "etc" / "tools" / "test.py"), 
-                        "--bin", str(bin_path), 
+            test_cmd = [sys.executable, str(ROOT / "etc" / "tools" / "test.py"),
+                        "--bin", str(bin_path),
                         "--std", str(build_dir / "std.ny"),
                         "--triple", cfg["triple"]]
-            
+
             emu = cfg.get("emu")
             if emu:
                 if shutil.which(emu):
