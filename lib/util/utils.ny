@@ -32,7 +32,7 @@ if(comptime{__main()}){
     use std.util.utils *
     use std.core *
     use std.core.error *
-    use std.core.dict *
+    use std.core.dict_mod *
 
     print("Testing std.util.utils...")
 

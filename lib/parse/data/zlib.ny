@@ -10,7 +10,7 @@ module std.enc.zlib (
    compress, compress_zlib
 )
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.math.hash as hash
 use std.os *
 use std.os.ffi *
@@ -369,7 +369,7 @@ fn compress(s, level=6){
 if(comptime{__main()}){
     use std.enc.zlib as z
     use std.core *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core.error *
     use std.text *
 

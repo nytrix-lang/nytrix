@@ -913,191 +913,6 @@ static void ny_log_opt_skipped_if_diag(bool opt_diag, const char *profile_name,
           (unsigned long long)stats->phis);
 }
 
-static void run_optimization_if_needed(const ny_options *opt,
-                                       LLVMModuleRef module) {
-  int eff_opt_level = opt->opt_level;
-  const char *opt_profile = getenv("NYTRIX_OPT_PROFILE");
-  const char *emit_pre_ir = getenv("NYTRIX_EMIT_IR_PREOPT_PATH");
-  const char *emit_post_ir = getenv("NYTRIX_EMIT_IR_POSTOPT_PATH");
-  const char *profile_name = "default";
-  bool opt_diag = ny_env_enabled_strict("NYTRIX_OPT_DIAG");
-  ny_ir_stats_t before_stats;
-  ny_ir_stats_t after_stats;
-  memset(&before_stats, 0, sizeof(before_stats));
-  memset(&after_stats, 0, sizeof(after_stats));
-  ny_opt_profile_kind_t profile_kind =
-      ny_opt_profile_kind_from_name(opt_profile);
-  bool profile_size = false;
-  bool profile_compile = false;
-  bool profile_none = false;
-  bool profile_balanced = false;
-  bool profile_speed = false;
-  profile_name = ny_opt_profile_name(profile_kind, opt_profile);
-  switch (profile_kind) {
-  case NY_OPT_PROFILE_SPEED:
-    profile_speed = true;
-    eff_opt_level = 3;
-    break;
-  case NY_OPT_PROFILE_BALANCED:
-    profile_balanced = true;
-    eff_opt_level = 2;
-    break;
-  case NY_OPT_PROFILE_COMPILE:
-    profile_compile = true;
-    eff_opt_level = 0;
-    break;
-  case NY_OPT_PROFILE_NONE:
-    profile_none = true;
-    eff_opt_level = 0;
-    break;
-  case NY_OPT_PROFILE_SIZE:
-    profile_size = true;
-    eff_opt_level = 2;
-    break;
-  default:
-    break;
-  }
-  bool autotune_enabled =
-      (opt->opt_autotune == 1) ||
-      (opt->opt_autotune == -1 && !ny_env_enabled("NYTRIX_JIT_NO_AUTOTUNE"));
-  if (opt->opt_autotune == 0)
-    autotune_enabled = false;
-  if (autotune_enabled && opt->run_jit && opt->mode != NY_MODE_REPL &&
-      !opt_profile &&
-      opt->opt_level == 2) {
-    ny_ir_stats_t size_check;
-    ny_collect_ir_stats(module, &size_check);
-    if (size_check.insts < 1000 && !ny_env_enabled("NYTRIX_JIT_NO_AUTOTUNE")) {
-      eff_opt_level = 1;
-      if (opt_diag) {
-        fprintf(stderr,
-                "[opt] auto-tune: JIT small workload, using O1 "
-                "(inst=%llu)\n",
-                (unsigned long long)size_check.insts);
-      }
-    }
-  }
-  if (opt_diag) {
-    ny_collect_ir_stats(module, &before_stats);
-  }
-  ny_dump_ir_if_requested(module, emit_pre_ir, "pre-opt");
-  if (!opt->opt_pipeline && profile_none) {
-    ny_dump_ir_if_requested(module, emit_post_ir, "post-opt");
-    ny_log_opt_skipped_if_diag(opt_diag, profile_name, eff_opt_level,
-                               &before_stats);
-    return;
-  }
-  const char *passes = opt->opt_pipeline;
-  char buf[96];
-  if (!passes) {
-    bool with_attributor = (profile_speed || eff_opt_level >= 3);
-    const char *with_attr_env = getenv("NYTRIX_WITH_ATTRIBUTOR");
-    if (with_attr_env && *with_attr_env)
-      with_attributor = ny_env_enabled("NYTRIX_WITH_ATTRIBUTOR");
-    if (ny_env_enabled("NYTRIX_NO_ATTRIBUTOR"))
-      with_attributor = false;
-    if (profile_compile || profile_none)
-      with_attributor = false;
-    const char *core_pipeline = NULL;
-    char core_buf[32];
-    if (profile_size) {
-      core_pipeline = "default<Os>";
-    } else if (profile_compile) {
-      core_pipeline = "default<O1>";
-    } else if (profile_balanced) {
-      core_pipeline = "default<O2>";
-    } else if (profile_speed) {
-      core_pipeline = "default<O3>";
-    } else {
-      snprintf(core_buf, sizeof(core_buf), "default<O%d>", eff_opt_level);
-      core_pipeline = core_buf;
-    }
-    if (with_attributor) {
-      snprintf(buf, sizeof(buf), "%s,attributor-cgscc", core_pipeline);
-    } else {
-      snprintf(buf, sizeof(buf), "%s", core_pipeline);
-    }
-    passes = buf;
-  }
-  if (opt_diag) {
-    fprintf(stderr, "[opt] profile=%s O=%d passes=%s\n", profile_name,
-            eff_opt_level, passes);
-  }
-  NY_LOG_V3("Running passes: %s\n", passes);
-  LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
-  int inline_thr = ny_guided_inline_threshold(profile_kind, eff_opt_level);
-#if defined(LLVM_VERSION_MAJOR) && (LLVM_VERSION_MAJOR >= 17)
-  if (inline_thr >= 0) {
-    LLVMPassBuilderOptionsSetInlinerThreshold(popt, inline_thr);
-  }
-#endif
-  bool enable_loop_opts =
-      (opt->opt_loops == 1) ||
-      (opt->opt_loops == -1 && ny_env_enabled_default_on("NYTRIX_OPT_LOOPS"));
-  if (opt->opt_loops == 0)
-    enable_loop_opts = false;
-  if (enable_loop_opts && !profile_compile && !profile_size) {
-    LLVMPassBuilderOptionsSetLoopInterleaving(popt, 1);
-    LLVMPassBuilderOptionsSetLoopVectorization(popt, 1);
-    LLVMPassBuilderOptionsSetSLPVectorization(popt, 1);
-    LLVMPassBuilderOptionsSetLoopUnrolling(popt, 1);
-  }
-  if (profile_compile) {
-    LLVMPassBuilderOptionsSetLoopInterleaving(popt, 0);
-    LLVMPassBuilderOptionsSetLoopVectorization(popt, 0);
-    LLVMPassBuilderOptionsSetSLPVectorization(popt, 0);
-    LLVMPassBuilderOptionsSetLoopUnrolling(popt, 0);
-  } else if (profile_size) {
-    LLVMPassBuilderOptionsSetLoopVectorization(popt, 0);
-    LLVMPassBuilderOptionsSetSLPVectorization(popt, 0);
-  }
-  if (opt_diag && inline_thr >= 0) {
-#if defined(LLVM_VERSION_MAJOR) && (LLVM_VERSION_MAJOR >= 17)
-    fprintf(stderr, "[opt] inline-threshold=%d\n", inline_thr);
-#else
-    fprintf(stderr,
-            "[opt] inline-threshold=%d (ignored: requires LLVM >= 17)\n",
-            inline_thr);
-#endif
-  }
-  LLVMErrorRef perr = LLVMRunPasses(module, passes, NULL, popt);
-  if (perr) {
-    char *msg = LLVMGetErrorMessage(perr);
-    NY_LOG_WARN("LLVM pass pipeline error: %s\n", msg ? msg : "<unknown>");
-    if (msg)
-      LLVMDisposeErrorMessage(msg);
-  } else if (ny_env_enabled_strict("NYTRIX_OPT_EXTRA_CSE")) {
-    const char *extra = "function(early-cse,gvn,instcombine,simplifycfg)";
-    if (opt_diag) {
-      fprintf(stderr, "[opt] extra-passes=%s\n", extra);
-    }
-    LLVMErrorRef xerr = LLVMRunPasses(module, extra, NULL, popt);
-    if (xerr) {
-      char *msg = LLVMGetErrorMessage(xerr);
-      NY_LOG_WARN("LLVM extra CSE pipeline error: %s\n",
-                  msg ? msg : "<unknown>");
-      if (msg)
-        LLVMDisposeErrorMessage(msg);
-    }
-  }
-  LLVMDisposePassBuilderOptions(popt);
-  ny_dump_ir_if_requested(module, emit_post_ir, "post-opt");
-  if (opt_diag) {
-    ny_collect_ir_stats(module, &after_stats);
-    fprintf(stderr,
-            "[opt] ir: fn=%llu bb=%llu inst=%llu->%llu alloca=%llu->%llu "
-            "phi=%llu->%llu\n",
-            (unsigned long long)before_stats.funcs,
-            (unsigned long long)before_stats.blocks,
-            (unsigned long long)before_stats.insts,
-            (unsigned long long)after_stats.insts,
-            (unsigned long long)before_stats.allocas,
-            (unsigned long long)after_stats.allocas,
-            (unsigned long long)before_stats.phis,
-            (unsigned long long)after_stats.phis);
-  }
-}
-
 static bool ny_is_llvm_special_global(const char *name) {
   return name && strncmp(name, "llvm.", 5) == 0;
 }
@@ -1466,6 +1281,13 @@ int ny_pipeline_run(ny_options *opt) {
     codegen_debug_init(&cg, parse_name);
   cg.source_string = source;
   cg.prog_owned = false;
+  NY_LOG_V2("Preparing codegen (analysis & links)...\n");
+  codegen_prepare(&cg);
+  if (cg.had_error) {
+    NY_LOG_ERR("Codegen prepare failed\n");
+    exit_code = 1;
+    goto exit_success;
+  }
   NY_LOG_V2("Emitting IR...\n");
   codegen_emit(&cg);
   if (cg.had_error) {
@@ -1502,7 +1324,7 @@ int ny_pipeline_run(ny_options *opt) {
             (double)(clock() - t_ver) / CLOCKS_PER_SEC);
   clock_t t_opt = clock();
   run_dead_strip_if_needed(opt, cg.module);
-  run_optimization_if_needed(opt, cg.module);
+  ny_llvm_optimize_module(cg.module, opt->opt_level);
   if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
     fprintf(stderr, "Optimization: %.4fs\n",
             (double)(clock() - t_opt) / CLOCKS_PER_SEC);
@@ -1518,6 +1340,8 @@ int ny_pipeline_run(ny_options *opt) {
 skip_compilation:
   if (jit_cache_file)
     free(jit_cache_file);
+  if (loaded_from_cache)
+    codegen_prepare(&cg);
   ny_llvm_apply_host_attrs(cg.module);
   if (opt->emit_ir_path) {
     LLVMModuleRef dump_mod = ny_prepare_ir_dump_module(opt, cg.module);

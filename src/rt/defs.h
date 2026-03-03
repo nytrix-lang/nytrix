@@ -141,6 +141,22 @@ RT_DEF("__xor", __xor, 2, "fn __xor(a, b)", "Bitwise XOR.")
 RT_DEF("__shl", __shl, 2, "fn __shl(a, b)", "Bitwise shift left.")
 RT_DEF("__shr", __shr, 2, "fn __shr(a, b)", "Bitwise shift right.")
 RT_DEF("__not", __not, 1, "fn __not(a)", "Bitwise NOT.")
+RT_DEF("__mat4_mul", __mat4_mul, 3, "fn __mat4_mul(dst, a, b)",
+       "Multiplies two 4x4 Nytrix matrices into a raw float buffer.")
+RT_DEF("__vkr_push_vertex", __vkr_push_vertex, 7, "fn __vkr_push_vertex(off, x, y, z, u, v, c)",
+       "Native vertex push.")
+RT_DEF("__vkr_push_rect", __vkr_push_rect, 6, "fn __vkr_push_rect(ptr, x, y, w, h, c)",
+       "Native rect push.")
+RT_DEF("__vkr_push_rect_tex", __vkr_push_rect_tex, 10, "fn __vkr_push_rect_tex(...)",
+       "Native textured rect push.")
+RT_DEF("__vkr_push_line", __vkr_push_line, 7, "fn __vkr_push_line(ptr, x1, y1, x2, y2, th, c)",
+       "Native line push.")
+RT_DEF("__vkr_draw_text", __vkr_draw_text, 9, "fn __vkr_draw_text(...)",
+       "Native text layout and batching.")
+RT_DEF("__vkr_pack_color", __vkr_pack_color, 4, "fn __vkr_pack_color(r, g, b, a)",
+       "Packs color into a uint32.")
+RT_DEF("__cam_compute_vectors", __cam_compute_vectors, 3, "fn __cam_compute_vectors(y, p, out)",
+       "Computes forward vectors for camera.")
 
 RT_DEF("__eq", __eq, 2, "fn __eq(a, b)", "Integer equality.")
 RT_DEF("__lt", __lt, 2, "fn __lt(a, b)", "Integer less than.")

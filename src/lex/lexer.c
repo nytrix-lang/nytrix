@@ -108,49 +108,56 @@ static void skip_whitespace(lexer_t *lx) {
       size_t start_pos = lx->pos;
       bool bol = (start_pos == 0 || lx->src[start_pos - 1] == '\n');
       if (bol) {
-        advance(lx); // consume '#'
-        const char *p = lx->src + lx->pos;
+        // Peek ahead to see if it's a line directive or shebang
+        const char *p = lx->src + lx->pos + 1;
         while (*p == ' ' || *p == '\t') p++;
-        if (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t')) {
-          p += 4;
+        bool is_line_dir = (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) || isdigit(*p);
+        bool is_shebang = (start_pos == 0 && *p == '!');
+        
+        if (is_line_dir) {
+          advance(lx); // consume '#'
+          p = lx->src + lx->pos;
           while (*p == ' ' || *p == '\t') p++;
-        }
-        if (isdigit(*p)) {
-          char *end;
-          int line_val = (int)strtoll(p, &end, 10);
-          p = end;
-          while (*p == ' ' || *p == '\t') p++;
-          if (*p == '"') {
-            p++;
-            const char *f = p;
-            while (*p && *p != '"' && *p != '\n') p++;
+          if (strncmp(p, "line", 4) == 0 && (p[4] == ' ' || p[4] == '\t')) {
+            p += 4;
+            while (*p == ' ' || *p == '\t') p++;
+          }
+          if (isdigit(*p)) {
+            char *end;
+            int line_val = (int)strtoll(p, &end, 10);
+            p = end;
+            while (*p == ' ' || *p == '\t') p++;
             if (*p == '"') {
-              size_t flen = (size_t)(p - f);
-              char *nf = malloc(flen + 1);
-              memcpy(nf, f, flen);
-              nf[flen] = '\0';
-              lx->filename = nf;
               p++;
+              const char *f = p;
+              while (*p && *p != '"' && *p != '\n') p++;
+              if (*p == '"') {
+                size_t flen = (size_t)(p - f);
+                char *nf = malloc(flen + 1);
+                memcpy(nf, f, flen);
+                nf[flen] = '\0';
+                lx->filename = nf;
+                p++;
+              }
             }
+            lx->line = line_val;
+            lx->pos = (size_t)(p - lx->src);
+            lx->col = 1;
+            while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
+            if (peek(lx) == '\n') {
+              advance(lx);
+              lx->line--;
+              lx->real_line--;
+            }
+            continue;
           }
-          lx->line = line_val;
-          lx->pos = (size_t)(p - lx->src);
-          lx->col = 1; // It's a directive, reset col for the next char
+        } else if (is_shebang) {
           while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
-          if (peek(lx) == '\n') {
-            advance(lx); // consume the newline of the directive
-            lx->line--;   // so the NEXT line starts at line_val
-            lx->real_line--;
-          }
           continue;
-        } else {
-          // treat as shebang or comment
-          while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
         }
-      } else {
-        // treat as comment (not at bol)
-        while (peek(lx) != '\n' && peek(lx) != '\0') advance(lx);
       }
+      // If it's not a processed directive, let it be a token (like #link)
+      break;
     }
  else {
       break;
@@ -623,6 +630,8 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_BITNOT, start);
   case ':':
     return make_token(lx, NY_T_COLON, start);
+  case '#':
+    return make_token(lx, NY_T_HASH, start);
   case '?':
     return make_token(lx, NY_T_QUESTION, start);
   case '@':

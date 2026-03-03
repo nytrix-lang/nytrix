@@ -8,7 +8,7 @@ module std.image.format.png (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.math as math
 use std.enc.zlib as zlib
 

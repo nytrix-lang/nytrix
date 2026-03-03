@@ -18,7 +18,7 @@ module std.core.syntax.syntax (
    apply_attribute
 )
 use std.core *
-use std.core.dict *
+use std.core.dict_impl *
 use std.core.reflect as core_ref
 
 fn _ensure_registry(reg){

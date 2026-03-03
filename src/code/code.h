@@ -242,8 +242,11 @@ typedef struct codegen_t {
   VEC(enum_def_t *) enums;
   VEC(layout_def_t *) layouts;
   int64_t current_enum_val;
+  VEC(char *) links;
   struct codegen_t *parent;
   bool skip_stdlib;
+  bool is_preparing;
+  bool owned_metadata;
   void *sym_state;
 } codegen_t;
 
@@ -252,6 +255,7 @@ void codegen_init(codegen_t *cg, program_t *prog, arena_t *arena,
 void codegen_init_with_context(codegen_t *cg, program_t *prog, arena_t *arena,
                                LLVMModuleRef mod, LLVMContextRef ctx,
                                LLVMBuilderRef builder);
+void codegen_prepare(codegen_t *cg);
 void codegen_emit(codegen_t *cg);
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
 void codegen_dispose(codegen_t *cg);

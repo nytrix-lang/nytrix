@@ -12,7 +12,7 @@ module std.os.accel (
    PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK
 )
 
-use std.os (
+use std.os.gpu (
    gpu_mode as _os_gpu_mode,
    gpu_backend as _os_gpu_backend,
    gpu_offload as _os_gpu_offload,
@@ -29,7 +29,9 @@ use std.os (
    accel_binary_kind as _os_accel_binary_kind,
    accel_binary_ext as _os_accel_binary_ext,
    accel_target_status as _os_accel_target_status,
-   accel_compile_plan as _os_accel_compile_plan,
+   accel_compile_plan as _os_accel_compile_plan
+)
+use std.os.parallel (
    parallel_mode as _os_parallel_mode,
    parallel_threads as _os_parallel_threads,
    parallel_min_work as _os_parallel_min_work,
@@ -163,7 +165,7 @@ def PARALLEL_MIN_WORK = parallel_min_work()
 if(comptime{__main()}){
     use std.os.accel *
     use std.core.error *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core *
     use std.text *
 

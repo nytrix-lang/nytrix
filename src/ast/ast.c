@@ -368,6 +368,9 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
     dump_expr(s->as.ret.value, buf, len, cap);
     append(buf, len, cap, "}");
     break;
+  case NY_S_LINK:
+    append(buf, len, cap, "{\"type\":\"link\",\"lib\":\"%s\"}", s->as.link.lib);
+    break;
   case NY_S_LABEL:
     append(buf, len, cap, "{\"type\":\"label\",\"name\":\"%s\"}",
            s->as.label.name);

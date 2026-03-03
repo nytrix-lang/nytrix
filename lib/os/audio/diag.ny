@@ -5,7 +5,7 @@ module std.os.audio.diag (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os *
 use std.os.audio.backend as backend
 

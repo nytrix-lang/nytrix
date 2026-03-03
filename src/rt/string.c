@@ -12,25 +12,15 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
   } else if (is_int(v)) {
     *out_len = snprintf(buf, bsize, "%" PRId64, (int64_t)(v >> 1));
     *out_s = buf;
-  } else if (v == 2) {
-    *out_s = "true";
-    *out_len = 4;
-  } else if (v == 4) {
-    *out_s = "false";
-    *out_len = 5;
-  } else if (v == 0) {
-    *out_s = "none";
-    *out_len = 4;
   } else if (is_ptr(v)) {
-    if (is_heap_ptr(v)) {
+    if (is_v_flt(v)) {
+      double d;
+      memcpy(&d, (void *)(uintptr_t)v, 8);
+      *out_len = snprintf(buf, bsize, "%g", d);
+      *out_s = buf;
+      return;
+    } else if (is_heap_ptr(v)) {
       int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-      if (tag == TAG_FLOAT) {
-        double d;
-        memcpy(&d, (void *)(uintptr_t)v, 8);
-        *out_len = snprintf(buf, bsize, "%g", d);
-        *out_s = buf;
-        return;
-      }
       *out_len = snprintf(buf, bsize, "<ptr 0x%lx tag=%ld>", (unsigned long)v,
                           (long)tag);
       *out_s = buf;
@@ -73,9 +63,23 @@ int64_t __str_concat(int64_t a, int64_t b) {
   return res;
 }
 
+static struct {
+  uint64_t len_tag;
+  uint64_t type_tag;
+  char s[8];
+} _str_none = {((4ULL << 1) | 1), TAG_STR_CONST, "none"},
+  _str_true = {((4ULL << 1) | 1), TAG_STR_CONST, "true"},
+  _str_false = {((5ULL << 1) | 1), TAG_STR_CONST, "false"};
+
 int64_t __to_str(int64_t v) {
   if (is_v_str(v))
     return v;
+  if (v == 0)
+    return (int64_t)(uintptr_t)_str_none.s;
+  if (v == 2)
+    return (int64_t)(uintptr_t)_str_true.s;
+  if (v == 4)
+    return (int64_t)(uintptr_t)_str_false.s;
   char buf[128];
   const char *s;
   int len;

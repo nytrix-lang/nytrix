@@ -146,6 +146,8 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_RETURN:
       ny_visit_expr(v, s->as.ret.value);
       break;
+    case NY_S_LINK:
+      break;
     case NY_S_IF:
       ny_visit_expr(v, s->as.iff.test);
       ny_visit_stmt(v, s->as.iff.conseq);

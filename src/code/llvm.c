@@ -262,6 +262,62 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
+#include <llvm-c/Target.h>
+#include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level) {
+  if (opt_level == 0) return;
+
+  char *raw_triple = LLVMGetDefaultTargetTriple();
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(raw_triple, &target, &err) != 0) {
+    LLVMDisposeMessage(raw_triple);
+    return;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  
+  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
+  if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
+      target, raw_triple, cpu_buf, feat_buf, cgo,
+      LLVMRelocPIC, host_code_model());
+
+  if (!tm) {
+    LLVMDisposeMessage(raw_triple);
+    return;
+  }
+
+  LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
+  LLVMPassBuilderOptionsSetLoopVectorization(opts, true);
+  LLVMPassBuilderOptionsSetSLPVectorization(opts, true);
+  if (opt_level >= 2) {
+    LLVMPassBuilderOptionsSetInlinerThreshold(opts, 1000);
+  }
+
+  const char *passes = "default<O3>";
+  if (opt_level == 1) passes = "default<O1>";
+  else if (opt_level == 2) passes = "default<O2>";
+
+  LLVMErrorRef error = LLVMRunPasses(module, passes, tm, opts);
+  if (error) {
+    char *msg = LLVMGetErrorMessage(error);
+    NY_LOG_ERR("LLVM optimization failed: %s\n", msg);
+    LLVMDisposeErrorMessage(msg);
+  }
+
+  LLVMDisposePassBuilderOptions(opts);
+  LLVMDisposeTargetMachine(tm);
+  LLVMDisposeMessage(raw_triple);
+}
+
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
   if (!ny_llvm_init_native())
     return;

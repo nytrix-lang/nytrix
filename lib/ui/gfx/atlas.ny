@@ -11,14 +11,13 @@ use std.core *
 use std.ui.gfx.vk_renderer as vkr
 use std.math *
 
-;; Atlas object: { texture_id, width, height, current_x, current_y, max_row_h, items }
+;; Atlas object: { tex_id, width, height, cx, cy, max_row_h, items }
 
 fn atlas_create(w=2048, h=2048){
    "Creates a new texture atlas of the specified dimensions."
-   def pixels = malloc(w * h * 4)
-   memset(pixels, 0, w * h * 4)
-
-   def tex_id = vkr.create_texture(w, h, pixels)
+   def pixels = malloc(w * h) ;; R8 is 1bpp
+   memset(pixels, 0, w * h)
+   def tex_id = vkr.create_texture_ex(w, h, pixels, 9) ; 9 = R8_UNORM
    free(pixels)
 
    mut a = dict(8)
@@ -32,9 +31,8 @@ fn atlas_create(w=2048, h=2048){
    a
 }
 
-fn atlas_destroy(a){
+fn atlas_destroy(_a){
    "Destroys the atlas and its underlying texture."
-   ; texture_destroy not implemented in vkr yet?
    ; vkr.shutdown handles all textures for now.
 }
 
@@ -84,4 +82,20 @@ fn atlas_add(a, key, w, h, pixels){
    uv
 }
 
+fn atlas_get(a, key){
+   "Retrieves UV coordinates for a packed item."
+   def items = dict_get(a, "items")
+   dict_get(items, key, 0)
+}
+
 fn atlas_texture_id(a){ dict_get(a, "tex_id", -1) }
+
+fn atlas_uv_rect(a, key){
+   "Alias for atlas_get."
+   atlas_get(a, key)
+}
+
+fn atlas_bind(a){
+   "Binds the atlas texture for drawing."
+   vkr.bind_texture(atlas_texture_id(a))
+}

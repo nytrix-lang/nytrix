@@ -6,7 +6,7 @@ module std.enc.json (
     json_decode, json_try_decode, json_last_error, json_encode
 )
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.text as str
 use std.math.float as f
 
@@ -477,7 +477,7 @@ if(comptime{__main()}){
     use std.core *
     use std.enc.json *
     use std.text *
-    use std.core.dict *
+    use std.core.dict_mod *
 
     def n = json_decode("123")
     assert(n == 123, "json number")

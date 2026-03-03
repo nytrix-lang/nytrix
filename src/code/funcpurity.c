@@ -745,6 +745,7 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
   case NY_S_STRUCT:
   case NY_S_ENUM:
   case NY_S_MACRO:
+  case NY_S_LINK:
     return false;
   case NY_S_BREAK:
   case NY_S_CONTINUE:
@@ -2086,7 +2087,6 @@ static void ny_run_infer_fixed_point(codegen_t *cg, int max_iters,
 void infer_pure_functions(codegen_t *cg) {
   if (!cg || !cg->auto_purity_infer)
     return;
-  bool run_effect_infer = true;
   bool has_functions = false;
   NY_FOREACH_FUNC_SIG(cg, sig) {
     sig->is_recursive = false;
