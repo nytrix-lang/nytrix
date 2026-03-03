@@ -7,6 +7,7 @@ module std.math.float (
    round, abs, nan, inf, is_nan, is_inf
 )
 use std.core *
+use std.text as txt
 
 fn _box(bits){
    "Internal: box raw float bits into a Nytrix float object."
@@ -17,9 +18,12 @@ fn _box(bits){
 }
 
 fn float(x){
-   "Converts `x` (integer or box) to a boxed Nytrix float (double-precision)."
+   "Converts `x` (integer, string, or box) to a boxed Nytrix float (double-precision)."
    if(is_ptr(x)){
       if(is_float(x)){ return x }
+      if(is_str(x)){
+         return txt.atof(x)
+      }
    }
    if(is_int(x)){
       return __flt_box_val(__flt_unbox_val(x))

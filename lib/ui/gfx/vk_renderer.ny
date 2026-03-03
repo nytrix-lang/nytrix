@@ -11,7 +11,8 @@ module std.ui.gfx.vk_renderer (
    _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_vertices, draw_lines_raw,
    set_mvp, set_ortho, _pack_color, _flush, _update_default_mvp,
    renderer_config, _get_local_vertex_map, _get_vertex_offset, _advance_vertex_offset,
-   __vkr_push_vertex, _mvp_matrix
+   __vkr_push_vertex, _mvp_matrix, VERTEX_STRIDE, set_unlit,
+   _vkr_glyph_present
 )
 
 use std.core *
@@ -25,13 +26,17 @@ use std.os.process as proc
 use std.text as text
 use std.util.common as common
 
-def _VKR_VERT_STRIDE = 24
+def VERTEX_STRIDE = 36
+def _VKR_VERT_STRIDE = 36
 def _VKR_OFF_X = 0
 def _VKR_OFF_Y = 4
 def _VKR_OFF_Z = 8
 def _VKR_OFF_U = 12
 def _VKR_OFF_V = 16
 def _VKR_OFF_C = 20
+def _VKR_OFF_NX = 24
+def _VKR_OFF_NY = 28
+def _VKR_OFF_NZ = 32
 
 def _VKR_GLYPH_STRIDE = 48
 def _VKR_G_ADV = 0
@@ -61,7 +66,7 @@ fn __vkr_pack_color(r, g, b, a){
    (a8 << 24) | (b8 << 16) | (g8 << 8) | r8
 }
 
-fn _vkr_store_vertex(base, idx, x, y, z, u, v, color){
+fn _vkr_store_vertex(base, idx, x, y, z, u, v, color, nx=0.0, ny=0.0, nz=1.0){
    "Internal: stores vertex `idx` into packed vertex buffer `base`."
    def off = base + idx * _VKR_VERT_STRIDE
    store32_f32(off, float(x), _VKR_OFF_X)
@@ -70,12 +75,15 @@ fn _vkr_store_vertex(base, idx, x, y, z, u, v, color){
    store32_f32(off, float(u), _VKR_OFF_U)
    store32_f32(off, float(v), _VKR_OFF_V)
    store32(off, _vkr_color_u32(color), _VKR_OFF_C)
+   store32_f32(off, float(nx), _VKR_OFF_NX)
+   store32_f32(off, float(ny), _VKR_OFF_NY)
+   store32_f32(off, float(nz), _VKR_OFF_NZ)
 }
 
-fn __vkr_push_vertex(ptr, x, y, z, u, v, color){
+fn __vkr_push_vertex(ptr, x, y, z, u, v, color, nx=0.0, ny=0.0, nz=1.0){
    "Writes one packed vertex to `ptr`."
    if(!ptr){ return }
-   _vkr_store_vertex(ptr, 0, x, y, z, u, v, color)
+   _vkr_store_vertex(ptr, 0, x, y, z, u, v, color, nx, ny, nz)
 }
 
 fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color){
@@ -83,12 +91,12 @@ fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color){
    if(!ptr){ return 0 }
    def x2 = float(x) + float(w)
    def y2 = float(y) + float(h)
-   _vkr_store_vertex(ptr, 0, x,  y,  0.0, u1, v1, color)
-   _vkr_store_vertex(ptr, 1, x,  y2, 0.0, u1, v2, color)
-   _vkr_store_vertex(ptr, 2, x2, y2, 0.0, u2, v2, color)
-   _vkr_store_vertex(ptr, 3, x2, y2, 0.0, u2, v2, color)
-   _vkr_store_vertex(ptr, 4, x2, y,  0.0, u2, v1, color)
-   _vkr_store_vertex(ptr, 5, x,  y,  0.0, u1, v1, color)
+   _vkr_store_vertex(ptr, 0, x,  y,  0.0, u1, v1, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 1, x,  y2, 0.0, u1, v2, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 2, x2, y2, 0.0, u2, v2, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 3, x2, y2, 0.0, u2, v2, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 4, x2, y,  0.0, u2, v1, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 5, x,  y,  0.0, u1, v1, color, 0.0, 0.0, 1.0)
    0
 }
 
@@ -107,12 +115,12 @@ fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color){
    def th = float(thickness) * 0.5
    def nx = -dy / l * th
    def ny =  dx / l * th
-   _vkr_store_vertex(ptr, 0, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color)
-   _vkr_store_vertex(ptr, 1, float(x1) - nx, float(y1) - ny, 0.0, 0.0, 0.0, color)
-   _vkr_store_vertex(ptr, 2, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color)
-   _vkr_store_vertex(ptr, 3, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color)
-   _vkr_store_vertex(ptr, 4, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color)
-   _vkr_store_vertex(ptr, 5, float(x2) + nx, float(y2) + ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 0, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 1, float(x1) - nx, float(y1) - ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 2, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 3, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 4, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
+   _vkr_store_vertex(ptr, 5, float(x2) + nx, float(y2) + ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
 }
 
 fn _vkr_glyph_present(glyphs_ptr, cp){
@@ -179,15 +187,21 @@ fn __vkr_draw_text(vbo_ptr, text, x, y, color, glyphs_ptr, ascent, line_h, out_i
       if(tex_id >= 0){ last_tex = tex_id }
 
       if(bw > 0.0 && bh > 0.0){
+         if(last_tex >= 0 && last_tex != _current_texture_id){
+            bind_texture(last_tex)
+         }
          def gx = pen_x + xoff
          def gy = pen_y - yoff
-         _vkr_store_vertex(vbo_ptr, vert_idx + 0, gx,      gy,       0.0, u1, v1, c)
-         _vkr_store_vertex(vbo_ptr, vert_idx + 1, gx,      gy + bh,  0.0, u1, v2, c)
-         _vkr_store_vertex(vbo_ptr, vert_idx + 2, gx + bw, gy + bh,  0.0, u2, v2, c)
-         _vkr_store_vertex(vbo_ptr, vert_idx + 3, gx + bw, gy + bh,  0.0, u2, v2, c)
-         _vkr_store_vertex(vbo_ptr, vert_idx + 4, gx + bw, gy,       0.0, u2, v1, c)
-         _vkr_store_vertex(vbo_ptr, vert_idx + 5, gx,      gy,       0.0, u1, v1, c)
+         def base_idx = _vertex_offset / 36
+         _vkr_store_vertex(_local_vertex_map, base_idx + 0, gx,      gy,       0.0, u1, v1, c)
+         _vkr_store_vertex(_local_vertex_map, base_idx + 1, gx,      gy + bh,  0.0, u1, v2, c)
+         _vkr_store_vertex(_local_vertex_map, base_idx + 2, gx + bw, gy + bh,  0.0, u2, v2, c)
+         _vkr_store_vertex(_local_vertex_map, base_idx + 3, gx + bw, gy + bh,  0.0, u2, v2, c)
+         _vkr_store_vertex(_local_vertex_map, base_idx + 4, gx + bw, gy,       0.0, u2, v1, c)
+         _vkr_store_vertex(_local_vertex_map, base_idx + 5, gx,      gy,       0.0, u1, v1, c)
+         
          vert_idx += 6
+         _vertex_offset += 216 ;; 6 * 36
       }
       pen_x = pen_x + adv
    }
@@ -314,6 +328,8 @@ mut _texture_ds_cache = []
 mut _texture_fmt_cache = []
 
 mut _current_texture_id = -1
+mut _current_is_unlit = 0
+mut _last_is_unlit = 0
 
 mut _image_available_semaphores = []
 mut _render_finished_semaphores = []
@@ -324,6 +340,7 @@ mut _image_index = 0
 mut _total_frames = 0
 mut _pc_buffer = 0 ;; Pre-allocated push constant buffer
 mut _current_mvp = 0
+mut _current_model = 0
 mut _frame_open = false
 mut _window_ref = 0
 mut _upload_cb = 0
@@ -402,8 +419,9 @@ fn init(win){
    if(_debug_gfx_enabled){ print("Vulkan: Default texture OK") }
 
     _current_mvp = sys_malloc(64)
-    _pc_buffer   = sys_malloc(80)
-    memset(_pc_buffer, 0, 80)
+    _current_model = sys_malloc(64)
+    _pc_buffer   = sys_malloc(144)
+    memset(_pc_buffer, 0, 144)
     
     _ptr_fence = sys_malloc(8)
     _ptr_img_idx = sys_malloc(4)
@@ -820,6 +838,7 @@ fn _create_default_texture(){
 }
 
 mut _mvp_dirty = true
+mut _model_dirty = true
 
 fn _mvp_matrix(){
    "Returns the current internal MVP matrix, as set by begin_mode_3d."
@@ -828,11 +847,21 @@ fn _mvp_matrix(){
    return m
 }
 
+fn set_model_matrix(mat){
+   "Updates the Model matrix for subsequent 3D draw calls."
+   if(_current_model && is_list(mat)){
+      if(_vertex_offset != _last_flush_offset){ _flush() }
+      mat4_to_buffer(mat, _current_model)
+      _model_dirty = true
+      _pc_dirty = true
+   }
+}
+
 fn set_mvp(mat){
-   "Updates the Model-View-Projection matrix for the renderer."
+   "Updates the View-Projection matrix for the renderer."
    if(_current_mvp && is_list(mat)){
-      if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: set_mvp frames={_total_frames}") } }
-      if(_vertex_offset != _last_flush_offset){ _flush() } ; Only flush if there's pending data
+      if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: set_vp frames={_total_frames}") } }
+      if(_vertex_offset != _last_flush_offset){ _flush() }
       mat4_to_buffer(mat, _current_mvp)
       _mvp_dirty = true
       _pc_dirty = true
@@ -1911,15 +1940,15 @@ fn _ensure_shader_binaries(){
    if(is_str(_cfg_vert_spv) && file_exists(_cfg_vert_spv)){
       proc.run("cp", ["cp", _cfg_vert_spv, vert_spv])
      } else {
-        def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(push_constant) uniform PC { mat4 mvp; int isMask; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nvoid main(){\n  gl_Position = pc.mvp * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n}\n"
-        def _res1 = file_write("/build/cache/ny_shader.vert", vert_src)
+        def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(location=3) in vec3 inNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nlayout(location=2) out vec3 vNormal;\nvoid main(){\n  gl_Position = pc.vp * pc.model * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n  vNormal = mat3(pc.model) * inNormal;\n}\n"
+        unwrap(file_write("/build/cache/ny_shader.vert", vert_src))
         if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
      }
     if(is_str(_cfg_frag_spv) && file_exists(_cfg_frag_spv)){
        proc.run("cp", ["cp", _cfg_frag_spv, frag_spv])
     } else {
-       def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(push_constant) uniform PC { mat4 mvp; int isMask; } pc;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec4 tex = texture(texSampler, vUV);\n  if(pc.isMask != 0) {\n     outColor = vec4(vColor.rgb, vColor.a * tex.r);\n  } else {\n     outColor = tex * vColor;\n  }\n}\n"
-       def _res2 = file_write("/build/cache/ny_shader.frag", frag_src)
+       def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(location=2) in vec3 vNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec4 tex = texture(texSampler, vUV);\n  vec3 normal = normalize(vNormal);\n  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));\n  float diff = max(dot(normal, lightDir), 0.0);\n  vec3 diffuse = diff * vColor.rgb;\n  vec3 ambient = 0.2 * vColor.rgb;\n  if(pc.isMask != 0) {\n     outColor = vec4(vColor.rgb, vColor.a * tex.r);\n  } else if(pc.isUnlit != 0) {\n     outColor = vColor * tex;\n  } else {\n     outColor = vec4(ambient + diffuse, vColor.a) * tex;\n  }\n}\n"
+       unwrap(file_write("/build/cache/ny_shader.frag", frag_src))
        if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
     }
    file_exists(vert_spv) && file_exists(frag_spv)
@@ -1949,7 +1978,7 @@ fn _create_graphics_pipeline(){
    mut pc_range = sys_malloc(12)
    store32(pc_range, 1 | 16, 0) ; STAGE_VERTEX | STAGE_FRAGMENT
    store32(pc_range, 0, 4)
-   store32(pc_range, 80, 8)      ; size 80 (aligned)
+   store32(pc_range, 144, 8)     ; size 144 (aligned)
    mut dsl_arr = sys_malloc(8)
    store64_raw(dsl_arr, _descriptor_set_layout, 0)
 
@@ -1965,18 +1994,20 @@ fn _create_graphics_pipeline(){
    ; Vertex Input State
    mut binding_desc = sys_malloc(12)
    store32(binding_desc, 0, 0) ; binding
-   store32(binding_desc, 24, 4) ; stride (3*4 + 2*4 + 4 = 24)
+   store32(binding_desc, 36, 4) ; stride (36)
    store32(binding_desc, 0, 8) ; inputRate VERTEX
  
-   mut attr_desc = sys_malloc(48) ; 3 attributes
+   mut attr_desc = sys_malloc(64) ; 4 attributes
    ; 0: Position (vec3) offset 0
    store32(attr_desc, 0, 0) store32(attr_desc, 0, 4) store32(attr_desc, 106, 8) store32(attr_desc, 0, 12)
    ; 1: UV (vec2) offset 12
    store32(attr_desc, 1, 16) store32(attr_desc, 0, 20) store32(attr_desc, 103, 24) store32(attr_desc, 12, 28)
    ; 2: Color (R8G8B8A8_UNORM) offset 20
    store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 37, 40) store32(attr_desc, 20, 44)
+   ; 3: Normal (vec3) offset 24
+   store32(attr_desc, 3, 48) store32(attr_desc, 0, 52) store32(attr_desc, 106, 56) store32(attr_desc, 24, 60)
  
-   def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 3, attr_desc)
+   def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 4, attr_desc)
 
    ; Common States
    def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
@@ -1995,6 +2026,7 @@ fn _create_graphics_pipeline(){
    ; Pipeline
     mut main_str = sys_malloc(8)
     strcpy(main_str, "main")
+
    def s1 = VkPipelineShaderStageCreateInfo(1, _vert_module, main_str)
    def s2 = VkPipelineShaderStageCreateInfo(16, _frag_module, main_str)
    ; Pack two stage structs contiguously (48 bytes each)
@@ -2167,18 +2199,35 @@ fn begin_frame(){
     cmd_set_scissor(cb, 0, 1, _ptr_sci)
     
     memcpy(_pc_buffer, _current_mvp, 64)
-    store32(_pc_buffer, 0, 64)
+    mut ident = mat4_identity()
+    mat4_to_buffer(ident, _current_model)
+    memcpy(_pc_buffer + 64, _current_model, 64)
+    store32(_pc_buffer, 0, 128)
+    store32(_pc_buffer, _current_is_unlit, 132)
     _mvp_dirty = false
-    _pc_dirty = false
+    _model_dirty = false
+    _pc_dirty = true ;; Force push on first draw of frame
+    _last_is_mask = 0
+    _last_is_unlit = _current_is_unlit
     true
+}
+
+fn set_unlit(unlit){
+   "Toggles lighting for subsequent draw calls."
+   def val = unlit ? 1 : 0
+   if(val != _current_is_unlit){
+      if(_vertex_offset != _last_flush_offset){ _flush() }
+      _current_is_unlit = val
+      _pc_dirty = true
+   }
 }
 
 fn _flush(){
    "Records a draw call for current pending triangle batch."
    if(_vertex_offset == _last_flush_offset){ return }
    
-   def count = (_vertex_offset - _last_flush_offset) / 24
-   def first_vert = _last_flush_offset / 24
+   def count = (_vertex_offset - _last_flush_offset) / 36
+   def first_vert = _last_flush_offset / 36
    
    def cb = get(_command_buffers, _current_frame)
    
@@ -2204,11 +2253,15 @@ fn _flush(){
       if(new_mask != _last_is_mask){ _last_is_mask = new_mask _pc_dirty = true }
    }
 
-   ; Push constants only when matrix or mask changed
+   ; Push constants only when matrix, model, mask, or unlit changed
    if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false _pc_dirty = true }
+   if(_model_dirty){ memcpy(_pc_buffer + 64, _current_model, 64) _model_dirty = false _pc_dirty = true }
+   if(_current_is_unlit != _last_is_unlit){ _last_is_unlit = _current_is_unlit _pc_dirty = true }
+   
    if(_pc_dirty){
-      store32(_pc_buffer, _last_is_mask, 64)
-      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 80, _pc_buffer)
+      store32(_pc_buffer, _last_is_mask, 128)
+      store32(_pc_buffer, _last_is_unlit, 132)
+      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 144, _pc_buffer)
       _pc_dirty = false
    }
 
@@ -2235,7 +2288,7 @@ fn _pack_color(r, g, b, a){
 }
 
 fn _push_vertex(x, y, z, u, v, r, g, b, a){
-   "Appends a single vertex (24 bytes) to the current batch."
+   "Appends a single vertex (36 bytes) to the current batch."
    def off = _local_vertex_map + _vertex_offset
    ; Ensure we use raw floats to avoid object tagging artifacts in the buffer.
    store32_f32(off, float(x), 0)
@@ -2244,7 +2297,10 @@ fn _push_vertex(x, y, z, u, v, r, g, b, a){
    store32_f32(off, float(u), 12)
    store32_f32(off, float(v), 16)
    store32(off, _pack_color(r, g, b, a), 20)
-   _vertex_offset += 24
+   store32_f32(off, 0.0, 24) ;; NX
+   store32_f32(off, 0.0, 28) ;; NY
+   store32_f32(off, 1.0, 32) ;; NZ
+   _vertex_offset += 36
 }
 
 fn end_frame(){
@@ -2364,7 +2420,7 @@ fn draw_rect(x, y, w, h, r, g, b, a){
    "Batches a colored rectangle (6-vertex CW triangle list) — optimized path."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
-   _check_flush(144) ;; 6 * 24 bytes
+   _check_flush(216) ;; 6 * 36 bytes
    def c = _pack_color(r, g, b, a)
    _push_rect_packed(x, y, w, h, c)
 }
@@ -2373,7 +2429,7 @@ fn draw_rectangle_fast(x, y, w, h, color_packed){
    "Submits a rectangle using a pre-packed color value."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
-   _check_flush(144)
+   _check_flush(216)
    _push_rect_packed(x, y, w, h, color_packed)
 }
 
@@ -2381,16 +2437,16 @@ fn _push_rect_packed(x, y, w, h, c){
    "Unrolled 6-vertex quad submission for minimal interpreter overhead."
    def off = _local_vertex_map + _vertex_offset
    __vkr_push_rect(off, x, y, w, h, c)
-   _vertex_offset += 144
+   _vertex_offset += 216
 }
 
 fn _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, c){
    "Internal: batches a textured quad using packed color `c`."
    if(!_frame_open){ return 0 }
    bind_texture(tex_id)
-   _check_flush(144)
+   _check_flush(216)
    __vkr_push_rect_tex(_local_vertex_map + _vertex_offset, x, y, w, h, u1, v1, u2, v2, c)
-   _vertex_offset += 144
+   _vertex_offset += 216
 }
 
 fn draw_rect_tex(x, y, w, h, tex_id, r, g, b, a){
@@ -2412,14 +2468,14 @@ fn _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c){
    "Fully unrolled textured 6-vertex quad submission."
    def off = _local_vertex_map + _vertex_offset
    __vkr_push_rect_tex(off, x, y, w, h, u1, v1, u2, v2, c)
-   _vertex_offset += 144
+   _vertex_offset += 216
 }
 
 fn draw_vertices(ptr, count, tex_id){
-   "Bulk-uploads raw vertex data (24-byte stride) to the local mapping."
+   "Bulk-uploads raw vertex data (36-byte stride) to the local mapping."
    if(!_frame_open || count <= 0 || !ptr){ return 0 }
    bind_texture(tex_id)
-   def bytes = count * 24
+   def bytes = count * _VKR_VERT_STRIDE
    _check_flush(bytes)
    memcpy(_local_vertex_map + _vertex_offset, ptr, bytes)
    _vertex_offset += bytes
@@ -2432,7 +2488,7 @@ fn draw_lines_raw(ptr, line_count, _line_width){
    _flush() ; flush pending triangles first
    
    def cb = get(_command_buffers, _current_frame)
-   _check_flush(line_count * 2 * 24)
+   _check_flush(line_count * 2 * _VKR_VERT_STRIDE)
    
    ; Switch to line pipeline
    if(_last_bound_pipe != _line_pipeline){
@@ -2453,9 +2509,11 @@ fn draw_lines_raw(ptr, line_count, _line_width){
 
    ; Push constants if needed
    if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false _pc_dirty = true }
+   if(_model_dirty){ memcpy(_pc_buffer + 64, _current_model, 64) _model_dirty = false _pc_dirty = true }
    if(_pc_dirty){
-      store32(_pc_buffer, 0, 64) ; lines are never masks
-      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 80, _pc_buffer)
+      store32(_pc_buffer, 0, 128) ; lines are never masks
+      store32(_pc_buffer, 1, 132) ; lines are always unlit
+      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 144, _pc_buffer)
       _pc_dirty = false
    }
 
@@ -2464,8 +2522,8 @@ fn draw_lines_raw(ptr, line_count, _line_width){
    ; The parameter is reserved for future typed-extern support.
 
    ; Copy vertices
-   def bytes = line_count * 2 * 24
-   def first_vert = _vertex_offset / 24
+   def bytes = line_count * 2 * _VKR_VERT_STRIDE
+   def first_vert = _vertex_offset / _VKR_VERT_STRIDE
    memcpy(_local_vertex_map + _vertex_offset, ptr, bytes)
    
    ; Draw using firstVertex within the existing slice VBO binding (no rebind needed)
@@ -2486,60 +2544,59 @@ fn _draw_triangle_2d(x1, y1, x2, y2, x3, y3, r, g, b, a){
    "Batches a colored 2D triangle."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
-   _check_flush(72)
+   _check_flush(108)
    def c = _pack_color(r, g, b, a)
    def base = _local_vertex_map + _vertex_offset
    _vkr_store_vertex(base, 0, x1, y1, 0.0, 0.0, 0.0, c)
    _vkr_store_vertex(base, 1, x2, y2, 0.0, 0.0, 0.0, c)
    _vkr_store_vertex(base, 2, x3, y3, 0.0, 0.0, 0.0, c)
-   _vertex_offset += 72
+   _vertex_offset += 108
 }
 
 fn draw_line(x1, y1, x2, y2, thickness, r, g, b, a){
    "Batches a thick line using a 6-vertex triangle quad."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
-   _check_flush(144)
+   _check_flush(216)
    def c = _pack_color(r, g, b, a)
    __vkr_push_line(_local_vertex_map + _vertex_offset, x1, y1, x2, y2, thickness, c)
-   _vertex_offset += 144
+   _vertex_offset += 216
 }
 
 fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
    "Batches a single colored 3D triangle (zero-alloc)."
    if(!_frame_open){ return }
    bind_texture(_default_texture)
-   _check_flush(72)
+   _check_flush(108)
    def c = _pack_color(r, g, b, a)
    def base = _local_vertex_map + _vertex_offset
    _vkr_store_vertex(base, 0, x1, y1, z1, 0.0, 0.0, c)
    _vkr_store_vertex(base, 1, x2, y2, z2, 0.0, 0.0, c)
    _vkr_store_vertex(base, 2, x3, y3, z3, 0.0, 0.0, c)
-   _vertex_offset += 72
+   _vertex_offset += 108
 }
 
 fn draw_quad_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, r, g, b, a){
    "Batches a single colored 3D quad (zero-alloc)."
    if(!_frame_open){ return }
    bind_texture(_default_texture)
-   _check_flush(144)
+   _check_flush(216)
    def c = _pack_color(r, g, b, a)
-   def off = _local_vertex_map + _vertex_offset
-   store32_f32(off, float(x1), 0) store32_f32(off, float(y1), 4) store32_f32(off, float(z1), 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20)
-   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, float(z2), 32) store32_f32(off, 0, 36) store32_f32(off, 0, 40) store32(off, c, 44)
-   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, float(z3), 56) store32_f32(off, 0, 60) store32_f32(off, 0, 64) store32(off, c, 68)
-   
-   store32_f32(off, float(x1), 72) store32_f32(off, float(y1), 76) store32_f32(off, float(z1), 80) store32_f32(off, 0, 84) store32_f32(off, 0, 88) store32(off, c, 92)
-   store32_f32(off, float(x3), 96) store32_f32(off, float(y3), 100) store32_f32(off, float(z3), 104) store32_f32(off, 0, 108) store32_f32(off, 0, 112) store32(off, c, 116)
-   store32_f32(off, float(x4), 120) store32_f32(off, float(y4), 124) store32_f32(off, float(z4), 128) store32_f32(off, 0, 132) store32_f32(off, 0, 136) store32(off, c, 140)
-   _vertex_offset += 144
+   def base_idx = _vertex_offset / 36
+   _vkr_store_vertex(_local_vertex_map, base_idx + 0, x1, y1, z1, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 1, x2, y2, z2, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 2, x3, y3, z3, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 3, x1, y1, z1, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 4, x3, y3, z3, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 5, x4, y4, z4, 0.0, 0.0, c)
+   _vertex_offset += 216
 }
 
 fn draw_line_3d(x1, y1, z1, x2, y2, z2, thickness, r, g, b, a){
    "Batches a 3D line as a quad (parallel to Y if needed, or billboarded)."
    if(!_frame_open){ return }
    bind_texture(_default_texture)
-   _check_flush(144)
+   _check_flush(216)
    def dx = float(x2) - float(x1) def dy = float(y2) - float(y1) def dz = float(z2) - float(z1)
    def l = sqrt(dx*dx + dy*dy + dz*dz)
    if(l == 0.0){ return }
@@ -2548,22 +2605,16 @@ fn draw_line_3d(x1, y1, z1, x2, y2, z2, thickness, r, g, b, a){
    mut nz =  dx / l * (float(thickness) * 0.5)
    if(abs(dx) < 0.001 && abs(dz) < 0.001){ nx = float(thickness)*0.5 nz = 0.0 }
    def c = _pack_color(r, g, b, a)
-   def off = _local_vertex_map + _vertex_offset
    def f1x = float(x1) def f1y = float(y1) def f1z = float(z1)
    def f2x = float(x2) def f2y = float(y2) def f2z = float(z2)
-   store32_f32(off, f1x+nx, 0)  store32_f32(off, f1y+ny, 4)  store32_f32(off, f1z+nz, 8)
-   store32_f32(off, 0.0, 12) store32_f32(off, 0.0, 16) store32(off, c, 20)
-   store32_f32(off, f1x-nx, 24) store32_f32(off, f1y-ny, 28) store32_f32(off, f1z-nz, 32)
-   store32_f32(off, 0.0, 36) store32_f32(off, 0.0, 40) store32(off, c, 44)
-   store32_f32(off, f2x-nx, 48) store32_f32(off, f2y-ny, 52) store32_f32(off, f2z-nz, 56)
-   store32_f32(off, 0.0, 60) store32_f32(off, 0.0, 64) store32(off, c, 68)
-   store32_f32(off, f1x+nx, 72) store32_f32(off, f1y+ny, 76) store32_f32(off, f1z+nz, 80)
-   store32_f32(off, 0.0, 84) store32_f32(off, 0.0, 88) store32(off, c, 92)
-   store32_f32(off, f2x-nx, 96) store32_f32(off, f2y-ny, 100) store32_f32(off, f2z-nz, 104)
-   store32_f32(off, 0.0, 108) store32_f32(off, 0.0, 112) store32(off, c, 116)
-   store32_f32(off, f2x+nx, 120) store32_f32(off, f2y+ny, 124) store32_f32(off, f2z+nz, 128)
-   store32_f32(off, 0.0, 132) store32_f32(off, 0.0, 136) store32(off, c, 140)
-   _vertex_offset += 144
+   def base_idx = _vertex_offset / 36
+   _vkr_store_vertex(_local_vertex_map, base_idx + 0, f1x+nx, f1y+ny, f1z+nz, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 1, f1x-nx, f1y-ny, f1z-nz, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 2, f2x-nx, f2y-ny, f2z-nz, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 3, f1x+nx, f1y+ny, f1z+nz, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 4, f2x-nx, f2y-ny, f2z-nz, 0.0, 0.0, c)
+   _vkr_store_vertex(_local_vertex_map, base_idx + 5, f2x+nx, f2y+ny, f2z+nz, 0.0, 0.0, c)
+   _vertex_offset += 216
 }
 
 fn draw_grid_3d(size, step){

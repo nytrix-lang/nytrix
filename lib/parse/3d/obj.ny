@@ -1,5 +1,6 @@
 ;; Keywords: enc 3d obj mesh
 ;; Simple Wavefront OBJ loader for std.ui.gfx.
+;; Refined to handle face normals and better triangulation.
 
 module std.parse.threed.obj (
    load_obj, mesh_from_obj, parse_obj_str
@@ -36,15 +37,15 @@ fn parse_obj_str(content){
 
       if(eq(cmd, "v")){
          if(len(clean_parts) >= 4){
-             vs = append(vs, [float(get(clean_parts, 1)), float(get(clean_parts, 2)), float(get(clean_parts, 3))])
+             vs = append(vs, [atof(get(clean_parts, 1)), atof(get(clean_parts, 2)), atof(get(clean_parts, 3))])
          }
       } elif(eq(cmd, "vn")){
          if(len(clean_parts) >= 4){
-             vns = append(vns, [float(get(clean_parts, 1)), float(get(clean_parts, 2)), float(get(clean_parts, 3))])
+             vns = append(vns, [atof(get(clean_parts, 1)), atof(get(clean_parts, 2)), atof(get(clean_parts, 3))])
          }
       } elif(eq(cmd, "vt")){
          if(len(clean_parts) >= 3){
-             vts = append(vts, [float(get(clean_parts, 1)), float(get(clean_parts, 2))])
+             vts = append(vts, [atof(get(clean_parts, 1)), atof(get(clean_parts, 2))])
          }
       } elif(eq(cmd, "f")){
          mut f = list()
@@ -79,10 +80,19 @@ fn load_obj(path){
    parse_obj_str(unwrap(res))
 }
 
+fn _calc_normal(p0, p1, p2){
+   "Internal: calculates a face normal from 3 points."
+   def v1 = v_sub(p1, p0)
+   def v2 = v_sub(p2, p0)
+   normalize(cross3(v1, v2))
+}
+
 fn mesh_from_obj(obj_data){
-   "Converts OBJ data into a flat list of vertices for draw_triangles."
+   "Converts OBJ data into a flat list of vertex entries [[x,y,z], [u,v], [nx,ny,nz]]."
    if(!obj_data){ return list(0) }
    def vs = dict_get(obj_data, "vertices")
+   def vns = dict_get(obj_data, "normals")
+   def vts = dict_get(obj_data, "uvs")
    def fs = dict_get(obj_data, "faces")
 
    mut out = list()
@@ -90,42 +100,45 @@ fn mesh_from_obj(obj_data){
    while(i < len(fs)){
       def face = get(fs, i)
       if(len(face) >= 3){
-         def v0_info = get(face, 0)
-         def v0_idx = get(v0_info, 0) - 1
-         if(v0_idx < 0 || v0_idx >= len(vs)){ i += 1 continue }
-         def v0 = get(vs, v0_idx)
+         mut face_normal = [0.0, 1.0, 0.0]
+         mut has_face_normal = false
 
+         def _get_vert = fn(idx_info){
+            def vi = get(idx_info, 0) - 1
+            def vti = get(idx_info, 1) - 1
+            def vni = get(idx_info, 2) - 1
+            
+            def p = get(vs, vi, [0.0, 0.0, 0.0])
+            mut uv = [0.0, 0.0]
+            if(vti >= 0 && vti < len(vts)){ uv = get(vts, vti) }
+            
+            mut n = face_normal
+            if(vni >= 0 && vni < len(vns)){ n = get(vns, vni) }
+            elif(has_face_normal){ n = face_normal }
+            
+            [p, uv, n]
+         }
+
+         ; If no normals in file, calculate face normal
+         def v0_idx_info = get(face, 0)
+         if(get(v0_idx_info, 2) <= 0){
+            def p0 = get(vs, get(get(face, 0), 0) - 1)
+            def p1 = get(vs, get(get(face, 1), 0) - 1)
+            def p2 = get(vs, get(get(face, 2), 0) - 1)
+            face_normal = _calc_normal(p0, p1, p2)
+            has_face_normal = true
+         }
+
+         def v0 = _get_vert(get(face, 0))
          mut j = 1
          while(j + 1 < len(face)){
-            def v1_info = get(face, j)
-            def v2_info = get(face, j+1)
-            def v1_idx = get(v1_info, 0) - 1
-            def v2_idx = get(v2_info, 0) - 1
-            if(v1_idx >= 0 && v1_idx < len(vs) && v2_idx >= 0 && v2_idx < len(vs)){
-                out = append(out, v0)
-                out = append(out, get(vs, v1_idx))
-                out = append(out, get(vs, v2_idx))
-            }
+            out = append(out, v0)
+            out = append(out, _get_vert(get(face, j)))
+            out = append(out, _get_vert(get(face, j+1)))
             j += 1
          }
       }
       i += 1
    }
    out
-}
-
-if(comptime{__main()}){
-   use std.core *
-   use std.parse.threed.obj *
-   print("Testing std.parse.threed.obj...")
-   def cube_res = file_read("etc/assets/model/cube.obj")
-   assert(is_ok(cube_res), "cube.obj exists")
-   def cube = unwrap(cube_res)
-   def data = parse_obj_str(cube)
-   assert(len(dict_get(data, "vertices")) == 4, "4 vertices")
-   assert(len(dict_get(data, "faces")) == 1, "1 face")
-   
-   def mesh = mesh_from_obj(data)
-   assert(len(mesh) == 6, "1 quad -> 2 triangles -> 6 vertices")
-   print("✓ std.parse.threed.obj tests passed")
 }

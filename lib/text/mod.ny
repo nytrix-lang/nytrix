@@ -2,7 +2,7 @@
 ;; Text and String module.
 
 module std.text (
-   str_len, len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, split, strip,
+   str_len, len, find, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, atof, split, strip,
    str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, chr, repeat, ord,
    utf8_valid, utf8_len, ord_at, str_slice, utf8_slice,
    _utf8_seq_len, _utf8_decode_at, _substr
@@ -134,6 +134,67 @@ fn atoi(s){
    }
    if(sign < 0){ val = 0 - val }
    val
+}
+
+fn atof(s){
+   "Parses a float from string `s`."
+   if(!is_str(s)){ return 0.0 }
+   mut n = str_len(s)
+   if(n == 0){ return 0.0 }
+   mut i = 0
+   mut sign = 1.0
+   if(load8(s, 0) == 45){ ;; '-'
+      sign = -1.0
+      i = 1
+   } elif(load8(s, 0) == 43){ ;; '+'
+      i = 1
+   }
+   
+   mut val = 0.0
+   while(i < n){
+      mut c = load8(s, i)
+      if(c < 48 || c > 57){ break }
+      val = val * 10.0 + __flt_box_val(__flt_from_int(c - 48))
+      i += 1
+   }
+   
+   if(i < n && load8(s, i) == 46){ ;; '.'
+      i += 1
+      mut frac = 0.1
+      while(i < n){
+         mut c = load8(s, i)
+         if(c < 48 || c > 57){ break }
+         val = val + __flt_box_val(__flt_from_int(c - 48)) * frac
+         frac = frac * 0.1
+         i += 1
+      }
+   }
+   
+   if(i < n && (load8(s, i) == 101 || load8(s, i) == 69)){ ;; 'e' or 'E'
+      i += 1
+      mut esign = 1
+      if(i < n && load8(s, i) == 45){ esign = -1 i += 1 }
+      elif(i < n && load8(s, i) == 43){ i += 1 }
+      
+      mut eval = 0
+      while(i < n){
+         mut c = load8(s, i)
+         if(c < 48 || c > 57){ break }
+         eval = eval * 10 + (c - 48)
+         i += 1
+      }
+      
+      mut e = 0
+      mut epow = 1.0
+      while(e < eval){
+         epow = epow * 10.0
+         e += 1
+      }
+      if(esign > 0){ val = val * epow }
+      else { val = val / epow }
+   }
+   
+   sign * val
 }
 
 fn _list_append(lst, v){
