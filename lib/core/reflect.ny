@@ -13,7 +13,7 @@ use std.text.str *
 use std.text.bytes *
 use std.math.bigint *
 use std.core.primitives *
-use std.core.dict *
+use std.core.dict_mod *
 use std.core *
 use std.text.io *
 

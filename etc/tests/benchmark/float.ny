@@ -15,7 +15,7 @@ def start = ticks()
 mut x = 1.0
 def y = 1.000001
 def iters = 500000
-for(i in range(0, iters)){
+for(_ in range(0, iters)){
    x = x * y
 }
 

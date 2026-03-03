@@ -148,7 +148,7 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
   return (size_t)val;
 }
 
-static stmt_t *parse_func(parser_t *p) {
+static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
   char *name = parse_qualified_name(p);
@@ -197,7 +197,24 @@ static stmt_t *parse_func(parser_t *p) {
       fn_stmt->as.fn.return_type = parse_type_ref(p, "expected return type");
     }
   }
-  if (parser_match(p, NY_T_SEMI)) {
+  bool is_ext = false;
+  const char *link_name = NULL;
+  for (size_t i = 0; i < attrs.len; i++) {
+    if (strcmp(attrs.data[i].name, "extern") == 0) {
+      is_ext = true;
+      if (attrs.data[i].args.len >= 1) {
+        expr_t *arg = attrs.data[i].args.data[0];
+        if (arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_STR) {
+          link_name = arena_strndup(p->arena, arg->as.literal.as.s.data,
+                                    arg->as.literal.as.s.len);
+        }
+      }
+      break;
+    }
+  }
+  fn_stmt->as.fn.is_extern = is_ext;
+  fn_stmt->as.fn.link_name = link_name;
+  if (parser_match(p, NY_T_SEMI) || (is_ext && p->cur.kind != NY_T_LBRACE)) {
     stmt_t *s = fn_stmt;
     s->as.fn.name = name;
     s->as.fn.params = params;
@@ -595,7 +612,7 @@ static stmt_t *parse_module(parser_t *p) {
 }
 
 static attribute_t parse_attr(parser_t *p) {
-  if (p->cur.kind != NY_T_IDENT) {
+  if (p->cur.kind < NY_T_IDENT || p->cur.kind > NY_T_ENUM) {
     parser_error(p, p->cur, "expected identifier after '@'", NULL);
     return (attribute_t){0};
   }
@@ -664,7 +681,24 @@ stmt_t *p_parse_stmt(parser_t *p) {
   case NY_T_EXTERN:
     return parse_extern(p);
   case NY_T_FN:
-    return parse_func(p);
+    return parse_func(p, (ny_attribute_list){0});
+  case NY_T_HASH: {
+    token_t tok = p->cur;
+    parser_advance(p);
+    if (p->cur.kind != NY_T_IDENT || strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
+       parser_error(p, p->cur, "expected 'link' after '#'", NULL);
+       return NULL;
+    }
+    parser_advance(p);
+    if (p->cur.kind != NY_T_STRING) {
+       parser_error(p, p->cur, "expected library name string after '#link'", NULL);
+       return NULL;
+    }
+    stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
+    s->as.link.lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+    parser_advance(p);
+    return s;
+  }
   case NY_T_AT: {
     ny_attribute_list attrs = {0};
     while (p->cur.kind == NY_T_AT) {
@@ -681,7 +715,7 @@ stmt_t *p_parse_stmt(parser_t *p) {
                    NULL);
       return NULL;
     }
-    stmt_t *func = parse_func(p);
+    stmt_t *func = parse_func(p, attrs);
     if (func && func->kind == NY_S_FUNC) {
       func->attributes = attrs;
     }
@@ -758,9 +792,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
         bool mangled = false;
         if (p->block_depth == 0 && p->current_module) {
           size_t mlen = strlen(p->current_module);
-          char *prefixed = malloc(mlen + 1 + nlen + 1);
-          sprintf(prefixed, "%s.%.*s", p->current_module, (int)nlen,
-                  ident.lexeme);
+          size_t total = mlen + 1 + nlen + 1;
+          char *prefixed = malloc(total);
+          snprintf(prefixed, total, "%s.%.*s", p->current_module, (int)nlen,
+                   ident.lexeme);
           final_name = prefixed;
           nlen = strlen(prefixed);
           mangled = true;

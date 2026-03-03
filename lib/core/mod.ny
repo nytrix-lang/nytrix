@@ -2,8 +2,8 @@
 ;; Core module.
 
 module std.core (
-   bool, init_str, load8, load16, load32, load64, load32_f32,
-   store8, store16, store32, store64, store32_f32,
+   bool, init_str, load8, load16, load32, load64, load32_f32, load64_f64,
+   store8, store16, store32, store64, store32_f32, store64_f64,
    memcpy, memset, memcmp, memchr,
    ptr_add, ptr_sub,
    malloc, free, realloc, zalloc, list, is_ptr, is_int, is_nytrix_obj, is_list, is_dict,
@@ -21,8 +21,8 @@ module std.core (
 )
 use std.core.primitives *
 use std.core.reflect as core_ref
-use std.core.dict as core_dict
-use std.core.set as core_set
+use std.core.dict_mod *
+use std.core.set_mod *
 use std.core.mem as core_mem
 
 fn is_truthy(x){
@@ -137,6 +137,15 @@ fn store32_f32(p, v, i=0){
   __store32_idx(p, i, __flt_unbox_val32(v))
 }
 
+fn load64_f64(p, i=0){
+  "Loads a 64-bit float (double) from address `p + i` and boxes it."
+  __flt_box_val(__load64_idx(p, i))
+}
+fn store64_f64(p, v, i=0){
+  "Unboxes float `v` and stores it as a 64-bit float (double) at address `p + i`."
+  __store64_idx(p, i, __flt_unbox_val(v))
+}
+
 fn memcpy(dst, src, n){
   "Copies `n` bytes from `src` to `dst`."
   __memcpy(dst, src, n)
@@ -191,56 +200,6 @@ fn list(cap=8){
   store64(p, 0, 0)
   store64(p, cap, 8)
   p
-}
-
-fn set(cap=8){
-  "Creates a new empty set."
-  core_set.set(cap)
-}
-fn dict(cap=8){
-  "Creates a new empty dictionary."
-  core_dict.dict(cap)
-}
-
-fn dict_len(d){
-  "Returns the number of entries in dictionary `d`."
-  core_dict.dict_len(d)
-}
-fn dict_get(d, k, default=0){
-  "Returns the value for key `k` in dictionary `d`, or `default` if not found."
-  core_dict.dict_get(d, k, default)
-}
-fn dict_has(d, k){
-  "Returns **true** if key `k` exists in dictionary `d`."
-  core_dict.dict_has(d, k)
-}
-fn dict_set(d, k, v){
-  "Sets the value for key `k` in dictionary `d` to `v`."
-  core_dict.dict_set(d, k, v)
-}
-fn dict_del(d, k){
-  "Removes key `k` from dictionary `d`."
-  core_dict.dict_del(d, k)
-}
-fn dict_clone(d){
-  "Returns a shallow clone of dictionary `d`."
-  core_dict.dict_clone(d)
-}
-fn dict_merge(d1, d2){
-  "Merges all entries from `d2` into `d1`."
-  core_dict.dict_merge(d1, d2)
-}
-fn dict_items(d){
-  "Returns a list of `[key, value]` pairs from dictionary `d`."
-  core_dict.dict_items(d)
-}
-fn dict_keys(d){
-  "Returns a list of keys from dictionary `d`."
-  core_dict.dict_keys(d)
-}
-fn dict_values(d){
-  "Returns a list of values from dictionary `d`."
-  core_dict.dict_values(d)
 }
 
 fn is_nytrix_obj(x){

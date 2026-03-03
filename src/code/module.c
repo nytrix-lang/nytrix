@@ -69,13 +69,6 @@ stmt_t *find_module_stmt(stmt_t *s, const char *name) {
       strcmp(s->as.module.name, name) == 0) {
     return s;
   }
-  if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      stmt_t *found = find_module_stmt(s->as.module.body.data[i], name);
-      if (found)
-        return found;
-    }
-  }
   return NULL;
 }
 
@@ -251,6 +244,22 @@ void process_use_imports(codegen_t *cg, stmt_t *s) {
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       process_use_imports(cg, s->as.module.body.data[i]);
+  } else if (s->kind == NY_S_IF) {
+    bool truthy = false;
+    if (ny_eval_comptime_if(cg, s, &truthy)) {
+      if (truthy) {
+        process_use_imports(cg, s->as.iff.conseq);
+      } else if (s->as.iff.alt) {
+        process_use_imports(cg, s->as.iff.alt);
+      }
+    } else {
+      process_use_imports(cg, s->as.iff.conseq);
+      if (s->as.iff.alt)
+        process_use_imports(cg, s->as.iff.alt);
+    }
+  } else if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      process_use_imports(cg, s->as.block.body.data[i]);
   }
 }
 
@@ -272,6 +281,22 @@ void collect_use_aliases(codegen_t *cg, stmt_t *s) {
   } else if (s->kind == NY_S_MODULE) {
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       collect_use_aliases(cg, s->as.module.body.data[i]);
+  } else if (s->kind == NY_S_IF) {
+    bool truthy = false;
+    if (ny_eval_comptime_if(cg, s, &truthy)) {
+      if (truthy) {
+        collect_use_aliases(cg, s->as.iff.conseq);
+      } else if (s->as.iff.alt) {
+        collect_use_aliases(cg, s->as.iff.alt);
+      }
+    } else {
+      collect_use_aliases(cg, s->as.iff.conseq);
+      if (s->as.iff.alt)
+        collect_use_aliases(cg, s->as.iff.alt);
+    }
+  } else if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      collect_use_aliases(cg, s->as.block.body.data[i]);
   }
 }
 
@@ -294,6 +319,22 @@ static void collect_use_modules_inner(codegen_t *cg, stmt_t *s,
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       collect_use_modules_inner(cg, s->as.module.body.data[i],
                                 in_std_mod || is_std);
+  } else if (s->kind == NY_S_IF) {
+    bool truthy = false;
+    if (ny_eval_comptime_if(cg, s, &truthy)) {
+      if (truthy) {
+        collect_use_modules_inner(cg, s->as.iff.conseq, in_std_mod);
+      } else if (s->as.iff.alt) {
+        collect_use_modules_inner(cg, s->as.iff.alt, in_std_mod);
+      }
+    } else {
+      collect_use_modules_inner(cg, s->as.iff.conseq, in_std_mod);
+      if (s->as.iff.alt)
+        collect_use_modules_inner(cg, s->as.iff.alt, in_std_mod);
+    }
+  } else if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      collect_use_modules_inner(cg, s->as.block.body.data[i], in_std_mod);
   }
 }
 
@@ -328,6 +369,32 @@ static void ny_export_aliased_symbol(codegen_t *cg, const char *mod_name,
   }
 }
 
+static void process_exports_inner(codegen_t *cg, const char *mod_name, stmt_t *child) {
+  if (child->kind == NY_S_EXPORT) {
+    for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
+      ny_export_aliased_symbol(cg, mod_name, child->as.exprt.names.data[j]);
+    }
+  } else if (child->kind == NY_S_MODULE) {
+    process_exports(cg, child);
+  } else if (child->kind == NY_S_IF) {
+    bool truthy = false;
+    if (ny_eval_comptime_if(cg, child, &truthy)) {
+      if (truthy) {
+        process_exports_inner(cg, mod_name, child->as.iff.conseq);
+      } else if (child->as.iff.alt) {
+        process_exports_inner(cg, mod_name, child->as.iff.alt);
+      }
+    } else {
+      process_exports_inner(cg, mod_name, child->as.iff.conseq);
+      if (child->as.iff.alt)
+        process_exports_inner(cg, mod_name, child->as.iff.alt);
+    }
+  } else if (child->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < child->as.block.body.len; ++i)
+      process_exports_inner(cg, mod_name, child->as.block.body.data[i]);
+  }
+}
+
 void process_exports(codegen_t *cg, stmt_t *s) {
   if (s->kind != NY_S_MODULE)
     return;
@@ -335,14 +402,7 @@ void process_exports(codegen_t *cg, stmt_t *s) {
   cg->current_module_name = s->as.module.name;
   const char *mod_name = s->as.module.name;
   for (size_t i = 0; i < s->as.module.body.len; ++i) {
-    stmt_t *child = s->as.module.body.data[i];
-    if (child->kind == NY_S_EXPORT) {
-      for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
-        ny_export_aliased_symbol(cg, mod_name, child->as.exprt.names.data[j]);
-      }
-    } else if (child->kind == NY_S_MODULE) {
-      process_exports(cg, child);
-    }
+    process_exports_inner(cg, mod_name, s->as.module.body.data[i]);
   }
   cg->current_module_name = prev_mod;
 }

@@ -81,9 +81,9 @@ typedef enum token_kind {
   NY_T_ELLIPSIS,
   NY_T_QUESTION,
   NY_T_AT,
+  NY_T_HASH,
   NY_T_ERROR,
 } token_kind;
-
 typedef struct token_t {
   token_kind kind;
   const char *lexeme;

@@ -7,7 +7,7 @@ module std.os.audio.backend.winmm (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os *
 use std.os.time *
 use std.os.ffi *

@@ -54,6 +54,8 @@ LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...);
 LLVMValueRef ny_is_tagged_int(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef ny_untag_int(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v);
 
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
@@ -64,6 +66,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          ny_param_list params, stmt_t *body, bool is_variadic,
                          const char *return_type, const char *name_hint);
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
+bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy);
 LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                            expr_t *e);
 
@@ -87,6 +90,7 @@ void process_use_imports(codegen_t *cg, stmt_t *s);
 void collect_use_aliases(codegen_t *cg, stmt_t *s);
 void collect_use_modules(codegen_t *cg, stmt_t *s);
 void process_exports(codegen_t *cg, stmt_t *s);
+bool ny_is_module_active(codegen_t *cg, const char *name);
 
 void ny_sym_state_free(codegen_t *cg);
 

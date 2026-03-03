@@ -14,7 +14,7 @@ module std.ui.font.truetype (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os.ffi *
 use std.os *
 
@@ -119,7 +119,7 @@ fn load(data, index=0){
    if(ascender > 32767){   ascender   = ascender - 65536 }
    if(descender > 32767){  descender  = descender - 65536 }
    if(face_height > 32767){ face_height = face_height - 65536 }
-   def num_glyphs = load64(face, _FT_FACE_NUM_GLYPHS)
+   def num_glyphs = load32(face, _FT_FACE_NUM_GLYPHS)
    mut info = dict(10)
    info = dict_set(info, "face",         face)   ; FT_Face opaque ptr
    info = dict_set(info, "data",         data)   ; keep reference so GC doesn't free buffer
@@ -222,10 +222,10 @@ fn get_hmetrics(info, gi){
    if(!_load_glyph(info, gi, FT_LOAD_DEFAULT)){ return [0, 0] }
    def gs = load64(face, _FT_FACE_GLYPH)
    if(!gs){ return [0, 0] }
-   def adv = load64(gs, _GS_METRICS_ADV)    ; in 26.6
-   def brx = load64(gs, _GS_METRICS_BRX)
-   ; sign-extend: if bit63 set, it's negative → negate via two's complement pattern
-   ; FT 26.6 values are small (< 2^32), so just check high bit
+   ;; FT_Pos is i64 (26.6 fixed-point) but values fit in i32 for normal glyphs.
+   ;; load32 returns a tagged integer; load64 returns raw (untagged) which breaks arithmetic.
+   def adv = load32(gs, _GS_METRICS_ADV)
+   def brx = load32(gs, _GS_METRICS_BRX)
    mut adv_s = adv
    mut brx_s = brx
    if(adv_s > 2147483647){ adv_s = -(4294967296 - adv_s) }
@@ -272,12 +272,12 @@ fn get_kern(info, g1, g2){
    store64(vec, 0, 0)
    store64(vec, 0, 8)
    def rc = call5(_FT_Get_Kerning, face, g1, g2, 0, vec)
-   def kx = load64(vec, 0)
+   def kx = load32(vec, 0)
    free(vec)
    if(rc != 0){ return 0 }
    mut kx_s = kx
    if(kx_s > 2147483647){ kx_s = -(4294967296 - kx_s) }
-   kx_s / 64   ; 26.6 → pixels
+   kx_s / 64
 }
 
 ;; Glyph bitmap rasterization
@@ -324,13 +324,7 @@ fn get_glyph_bitmap(info, _scale_x, scale_y, gi){
    memset(bmp, 0, bsize)
    mut y = 0
    while(y < rows){
-      def src_row = src + y * pitch_s
-      def dst_row = y * width
-      mut x = 0
-      while(x < width){
-         store8(bmp, load8(src_row, x), dst_row + x)
-         x += 1
-      }
+      memcpy(bmp + (y * width), src + (y * pitch_s), width)
       y += 1
    }
    mut res = dict(5)

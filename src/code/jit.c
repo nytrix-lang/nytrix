@@ -12,6 +12,7 @@
 #include <llvm-c/Support.h>
 #include <stdint.h>
 #include <string.h>
+#include "priv.h"
 
 void ny_jit_init_native_once(void) {
   static int initialized = 0;
@@ -20,15 +21,33 @@ void ny_jit_init_native_once(void) {
   LLVMLinkInMCJIT();
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
+  LLVMInitializeNativeAsmParser();
   initialized = 1;
+}
+
+void *ny_jit_load_library(const char *path) {
+  if (!path || !*path)
+    return NULL;
+#ifdef _WIN32
+  HMODULE h = LoadLibraryA(path);
+  return (void *)h;
+#else
+  void *h = dlopen(path, RTLD_GLOBAL | RTLD_LAZY);
+  if (!h) {
+    // Try with .so suffix if missing
+    if (!strchr(path, '.')) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "lib%s.so", path);
+      h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
+    }
+  }
+  return h;
+#endif
 }
 
 void *ny_jit_resolve_symbol(const char *symbol) {
   if (!symbol || !*symbol)
     return NULL;
-  if (getenv("NYTRIX_DEBUG_FFI")) {
-    fprintf(stderr, "JIT: resolve_symbol('%s')\n", symbol);
-  }
   void *ptr = LLVMSearchForAddressOfSymbol(symbol);
   if (ptr)
     return ptr;
@@ -102,29 +121,53 @@ void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
   }
 }
 
-static void register_extern_symbols(LLVMExecutionEngineRef ee, codegen_t *cg) {
-  if (!cg)
+static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
+                                    codegen_t *cg) {
+  if (!cg || !mod)
     return;
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
     fun_sig *sig = &cg->fun_sigs.data[i];
     if (!sig->is_extern)
       continue;
+
     const char *symbol = sig->link_name;
     if (!symbol) {
       const char *dot = strrchr(sig->name, '.');
       symbol = dot ? dot + 1 : sig->name;
     }
+
+    /* Look up the function in the current module.
+       The function might be named by its qualified name or its link name. */
+    LLVMValueRef val = LLVMGetNamedFunction(mod, symbol);
+    if (!val) {
+      val = LLVMGetNamedFunction(mod, sig->name);
+    }
+    if (!val)
+      continue;
+
     void *ptr = resolve_symbol_with_fallback(symbol);
     if (!ptr) {
       NY_LOG_WARN("extern symbol '%s' not found for %s", symbol, sig->name);
       continue;
     }
-    LLVMAddGlobalMapping(ee, sig->value, ptr);
+
+    LLVMAddGlobalMapping(ee, val, ptr);
   }
+}
+
+void register_jit_sigs(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
+                       codegen_t *cg) {
+  (void)ee; (void)mod; (void)cg;
+  // For non-extern functions, they are defined within the JIT.
 }
 
 void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
                           codegen_t *cg) {
+  if (cg) {
+    for (size_t i = 0; i < cg->links.len; i++) {
+      ny_jit_load_library(cg->links.data[i]);
+    }
+  }
 #define MAP(name, fn_ptr)                                                      \
   do {                                                                         \
     LLVMAddSymbol(name, (void *)(uintptr_t)(fn_ptr));                          \
@@ -153,5 +196,6 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
 #undef RT_GV
 #undef MAP
 #undef MAP_GV
-  register_extern_symbols(ee, cg);
+  register_extern_symbols(ee, mod, cg);
+  register_jit_sigs(ee, mod, cg);
 }

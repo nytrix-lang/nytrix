@@ -1,7 +1,7 @@
 ;; Keywords: core dict
 ;; Core Dict module.
 
-module std.core.dict (
+module std.core.dict_mod (
    dict, dict_len, dict_get, dict_has, dict_set, dict_del, dict_clone, dict_merge,
    dict_items, dict_keys, dict_values
 )
@@ -266,7 +266,7 @@ fn dict_values(d){
 
 if(comptime{__main()}){
     use std.core *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core.test *
 
     mut d = dict(4)

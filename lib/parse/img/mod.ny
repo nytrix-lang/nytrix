@@ -8,7 +8,7 @@ module std.image (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 use std.os *
 use std.text as str
 use std.image.format.bmp as bmp
@@ -79,15 +79,11 @@ fn decode(data, ext=""){
 
 fn load(path, _req_comp=FORMAT_AUTO){
    "Loads and decodes an image file from `path`."
-   def data = file_read(path)
-   match data {
-      err(_e) -> {
-         return 0
-      }
-      ok(buf) -> {
-         return decode(buf)
-      }
+   def res = file_read(path)
+   if(is_ok(res)){
+      return decode(unwrap(res), path)
    }
+   0
 }
 
 fn encode(img, format="bmp"){

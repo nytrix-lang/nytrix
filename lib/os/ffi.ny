@@ -16,7 +16,7 @@ module std.os.ffi (
 
 use std.core *
 use std.core as core
-use std.core.dict as _d
+use std.core.dict_mod as _d
 use std.text *
 use std.os *
 use std.os.path as ospath

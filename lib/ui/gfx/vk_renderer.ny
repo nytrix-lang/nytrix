@@ -4,10 +4,14 @@
 module std.ui.gfx.vk_renderer (
    init, shutdown,
    begin_frame, end_frame,
-   clear, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line,
-   create_texture, update_texture_rect, bind_texture, texture_size, destroy_texture, read_framebuffer,
-   _draw_triangle_2d, draw_triangle_3d,
-   set_mvp
+   clear, clear_depth,
+   draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line, draw_glyph,
+   draw_rectangle_fast, draw_glyph_fast,
+   create_texture, update_texture_rect, bind_texture, texture_size, texture_format, texture_descriptor, destroy_texture, read_framebuffer,
+   _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_vertices, draw_lines_raw,
+   set_mvp, set_ortho, _pack_color, _flush, _update_default_mvp,
+   renderer_config, _get_local_vertex_map, _get_vertex_offset, _advance_vertex_offset,
+   __vkr_push_vertex
 )
 
 use std.core *
@@ -19,25 +23,76 @@ use std.ui.glfw as ui_glfw
 use std.os *
 use std.os.process as proc
 use std.os.ffi *
+use std.text as text
 
-fn _is_debug(){
-   "Returns true if high-level graphics debugging is enabled."
-   def d = env("NYTRIX_DEBUG_GFX")
-   if(d){ return true }
-   false
+@extern("__vkr_push_rect")
+fn __vkr_push_rect(ptr, x, y, w, h, color);
+
+@extern("__vkr_push_rect_tex")
+fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color);
+
+@extern("__vkr_pack_color")
+fn __vkr_pack_color(r, g, b, a);
+
+@extern("__vkr_draw_text")
+fn __vkr_draw_text(vbo_ptr, text, x, y, color, glyphs_ptr, ascent, line_h, out_info);
+
+@extern("__vkr_push_line")
+fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color);
+
+@extern("__vkr_push_vertex")
+fn __vkr_push_vertex(ptr, x, y, z, u, v, color);
+
+mut _cfg_vsync = false
+mut _cfg_filter = 0 ; 0=NEAREST, 1=LINEAR
+mut _cfg_vert_spv = ""
+mut _cfg_frag_spv = ""
+
+mut _debug_gfx_enabled = false
+fn _check_debug_env(){
+   def v = env("NYTRIX_DEBUG_GFX")
+   if(v && (eq(v, "1") || eq(v, "true"))){ _debug_gfx_enabled = true }
+   else {
+      def v2 = env("NY_UI_DEBUG")
+      if(v2 && (eq(v2, "1") || eq(v2, "true"))){ _debug_gfx_enabled = true }
+   }
+}
+fn _dbg_handle(label, h){ if(_debug_gfx_enabled){ print(f"Vulkan: {label} h={h}") } 0 }
+
+mut _cfg_msaa = 1
+fn _get_vertex_offset(){ _vertex_offset }
+fn _get_local_vertex_map(){ _local_vertex_map }
+fn _advance_vertex_offset(bytes){
+   _vertex_offset += bytes
 }
 
-fn _touch(..._args){
-   "Internal helper to mark arguments as used."
-   0
+fn renderer_config(vsync, filter, vert_spv_path, frag_spv_path, msaa){
+   "Configures the renderer. Must be called BEFORE init_window().
+    vsync: true/false (default false)
+    filter: 0 for NEAREST, 1 for LINEAR (default 0)
+    vert_spv_path: path to custom vertex shader .spv or empty for default
+    frag_spv_path: path to custom fragment shader .spv or empty for default
+    msaa: number of MSAA samples (1, 2, 4, 8) (default 1)"
+   if(vsync){ _cfg_vsync = true } else { _cfg_vsync = false }
+   if(filter){ _cfg_filter = 1 } else { _cfg_filter = 0 }
+   _cfg_vert_spv = vert_spv_path
+   _cfg_frag_spv = frag_spv_path
+   _cfg_msaa = msaa
 }
 
-fn _dbg_handle(label, h){
-   "Prints a debug message for a Vulkan handle if debugging is enabled."
-   if(!_is_debug()){ return 0 }
-   print(f"Vulkan: {label} h={h}")
-   0
+fn _touch(..._args){ 0 }
+
+fn _strcpy(dst, src){
+   "Simple C-style string copy for raw buffers."
+   mut i = 0
+   while(true){
+      def c = load8(src, i)
+      store8(dst, c, i)
+      if(c == 0){ break }
+      i += 1
+   }
 }
+
 
 mut _instance = 0
 mut _physical_device = 0
@@ -60,30 +115,43 @@ mut _depth_image = 0
 mut _depth_memory = 0
 mut _depth_view = 0
 
+mut _msaa_color_image = 0
+mut _msaa_color_memory = 0
+mut _msaa_color_view = 0
+
 mut _command_pool = 0
 mut _command_buffers = []
 
 mut _descriptor_set_layout = 0
 mut _pipeline_layout = 0
 mut _pipeline = 0
+mut _line_pipeline = 0
 mut _vert_module = 0
 mut _frag_module = 0
 
+mut _vertex_capacity = 33554432 ; 32MB per frame slice (huge headroom)
+mut _current_frame_vertex_offset = 0
+mut _last_bound_ds = 0
+mut _last_bound_pipe = 0
 mut _vertex_buffer = 0
 mut _vertex_memory = 0
 mut _vertex_map = 0
+mut _local_vertex_map = 0 ;; Faster locally-allocated CPU buffer
 mut _vertex_offset = 0
-def _vertex_capacity = 2359296 ; 64k * 36 bytes
+mut _last_flush_offset = 0
+mut _vertex_limit_hit = false
 
 mut _staging_buffer = 0
 mut _staging_memory = 0
 mut _staging_map = 0
-def _staging_capacity = 16777216 ; 16MB
+mut _staging_capacity = 8388608  ; 8MB staging
 
 mut _default_texture = 0
 mut _default_sampler = 0
 mut _descriptor_pool = 0
 mut _textures = [] ; list of { image, view, memory, descriptor_set, width, height }
+mut _texture_ds_cache = []
+mut _texture_fmt_cache = []
 
 mut _current_texture_id = -1
 
@@ -93,68 +161,121 @@ mut _in_flight_fences = []
 
 mut _current_frame = 0
 mut _image_index = 0
+mut _total_frames = 0
+mut _pc_buffer = 0 ;; Pre-allocated push constant buffer
+mut _current_mvp = 0
 mut _frame_open = false
 mut _window_ref = 0
-mut _current_mvp = 0
-mut _total_frames = 0
+mut _upload_cb = 0
+mut _upload_alloc = 0
+mut _upload_bi = 0
+mut _upload_bar1 = 0
+mut _upload_bar2 = 0
+mut _upload_region = 0
+mut _upload_si = 0
+mut _upload_cb_arr = 0
+mut _upload_cb_ptr = 0
+mut _flush_off = 0
+mut _flush_buf = 0
+mut _last_bound_tex_id = -1
+mut _last_bound_ds = 0
+mut _last_bound_pipe = 0
+mut _pc_dirty = false
+mut _last_is_mask = 0
+mut _clear_ca = 0
+mut _clear_rect = 0
+mut _upload_fence = 0
+mut _upload_fence_ptr = 0
+
+;; Pre-allocated frame pointers
+mut _ptr_fence = 0
+mut _ptr_img_idx = 0
+mut _ptr_bi = 0
+mut _ptr_clear = 0
+mut _ptr_ri = 0
+mut _ptr_vp = 0
+mut _ptr_sci = 0
+mut _ptr_dsl = 0
+mut _ptr_ds = 0
+mut _ptr_sub = 0
+mut _ptr_wait_sems = 0
+mut _ptr_sig_sems = 0
+mut _ptr_stages = 0
+mut _clear_r = 0.05
+mut _clear_g = 0.05
+mut _clear_b = 0.1
+mut _clear_a = 1.0
 def MAX_FRAMES_IN_FLIGHT = 2
+
+mut _fps_last_time = 0.0
+mut _fps_count = 0
+mut _fps_curr = 0
 
 fn init(win){
    "Initializes the Vulkan renderer for the given window."
-   if(_is_debug()){ print("Vulkan: Initializing renderer...") }
    _window_ref = win
-   if(!vk_init()){
-      if(_is_debug()){ print("Vulkan: vk_init failed") }
-      return false
-   }
-   if(!_create_instance()){
-      if(_is_debug()){ print("Vulkan: _create_instance failed") }
-      return false
-   }
-   if(!_create_surface(win)){
-      if(_is_debug()){ print("Vulkan: _create_surface failed") }
-      return false
-   }
-   if(!_pick_physical_device()){
-      if(_is_debug()){ print("Vulkan: _pick_physical_device failed") }
-      return false
-   }
-   if(!_create_logical_device()){
-      if(_is_debug()){ print("Vulkan: _create_logical_device failed") }
-      return false
-   }
-   if(!_create_swapchain(win)){
-      if(_is_debug()){ print("Vulkan: _create_swapchain failed") }
-      return false
-   }
-   if(_is_debug()){ print("Vulkan: init stage -> image views") }
-   if(!_create_image_views()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> depth resources") }
-   if(!_create_depth_resources()){ return false }
-    if(_is_debug()){ print("Vulkan: init stage -> render pass") }
-   if(!_create_render_pass()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> framebuffers") }
-   if(!_create_framebuffers()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> sync objects") }
-   if(!_create_sync_objects()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> command pool") }
-   if(!_create_command_pool()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> command buffers") }
+   _check_debug_env()
+
+   if(!vk_init()){ return false }
+   if(!_create_instance()){ return false }
+   if(!_create_surface(win)){ return false }
+   if(!_pick_physical_device()){ return false }
+   if(!_create_logical_device()){ return false }
+   if(!_create_swapchain(win)){ return false }
+   _create_swapchain_image_views()
+   _create_depth_resources()
+   _create_render_pass()
+   _create_graphics_pipeline()
+   _create_framebuffers()
+   _create_sync_objects()
+   _create_command_pool()
    if(!_create_command_buffers()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> graphics pipeline") }
-   if(!_create_graphics_pipeline()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> vertex buffer") }
    if(!_create_vertex_buffer()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> staging buffer") }
    if(!_create_staging_buffer()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> descriptor pool") }
    if(!_create_descriptor_pool()){ return false }
-   if(_is_debug()){ print("Vulkan: init stage -> default texture") }
    if(!_create_default_texture()){ return false }
-   _current_mvp = sys_malloc(64)
-   _update_default_mvp(win)
-   if(_is_debug()){ print("Vulkan: Renderer initialized successfully") }
-   true
+
+    _current_mvp = sys_malloc(64)
+    _pc_buffer   = sys_malloc(80)
+    memset(_pc_buffer, 0, 80)
+    
+    _ptr_fence = sys_malloc(8)
+    _ptr_img_idx = sys_malloc(4)
+    _ptr_bi = sys_malloc(64)
+    _ptr_clear = sys_malloc(96)  ; 3 * 32 bytes max for MSAA clear values
+    _ptr_ri = sys_malloc(128)
+    _ptr_vp = sys_malloc(32)
+    _ptr_sci = sys_malloc(32)
+    _ptr_dsl = sys_malloc(8)
+    _ptr_ds = sys_malloc(8)
+    _ptr_sub = sys_malloc(128)
+    _ptr_wait_sems = sys_malloc(32)
+    _ptr_sig_sems = sys_malloc(32)
+    _ptr_stages = sys_malloc(128)
+
+    ;; Pre-allocate upload buffers for update_texture_rect
+    _upload_alloc = sys_malloc(32)
+    _upload_bi = sys_malloc(32)
+    _upload_bar1 = sys_malloc(72)
+    _upload_bar2 = sys_malloc(72)
+    _upload_region = sys_malloc(56)
+    _upload_si = sys_malloc(72)
+    _upload_cb_arr = sys_malloc(8)
+    _upload_cb_ptr = sys_malloc(8)
+    _flush_off = sys_malloc(8)
+    _flush_buf = sys_malloc(8)
+    ;; Upload fence for texture rect updates
+    mut fence_ci = sys_malloc(16)
+    memset(fence_ci, 0, 16)
+    store32(fence_ci, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
+    _upload_fence_ptr = sys_malloc(8)
+    create_fence(_device, fence_ci, 0, _upload_fence_ptr)
+    _upload_fence = load64(_upload_fence_ptr, 0)
+    sys_free(fence_ci)
+
+    _upload_cb_ptr = sys_malloc(8)
+    _update_default_mvp(_window_ref)
+    true
 }
 
 fn _create_staging_buffer(){
@@ -175,22 +296,8 @@ fn _create_staging_buffer(){
    def size = load64(mem_req, 0)
    def type_bits = load32(mem_req, 16)
 
-   mut mem_props = sys_malloc(520)
-   get_physical_device_memory_properties(_physical_device, mem_props)
-   def mem_type_count = load32(mem_props, 0)
-   mut mem_type_index = -1
-   mut i = 0
-   while(i < mem_type_count){
-      if((type_bits & (1 << i)) != 0){
-         def flags = load32(mem_props, 4 + i * 8)
-         if((flags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
-            mem_type_index = i
-            break
-         }
-      }
-      i += 1
-   }
-   if(mem_type_index == -1){ return false }
+    def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    if(mem_type_index == -1){ return false }
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
@@ -238,91 +345,29 @@ fn _find_memory_type(type_filter, properties){
    while(i < count){
       if((type_filter & (1 << i)) != 0){
          def flags = load32(mem_props, 4 + i * 8)
-         if((flags & properties) == properties){ return i }
+         if((flags & properties) == properties){ 
+            sys_free(mem_props)
+            return i 
+         }
       }
       i += 1
    }
+   sys_free(mem_props)
    -1
 }
 
-fn update_texture_rect(tex_id, x, y, w, h, pixels){
-   "Partially updates a texture's pixel data."
-   if(tex_id < 0 || tex_id >= len(_textures)){ return false }
-   def tex_obj = get(_textures, tex_id)
-   def image = dict_get(tex_obj, "image")
-
-   def img_size = w * h * 4
-   if(img_size > _staging_capacity){ return false }
-
-   memcpy(_staging_map, pixels, img_size)
-
-   ; 1. Transition Image: Shader Read Only -> Transfer Dst
-   ; 2. Copy Staging -> Image
-   ; 3. Transition Image: Transfer Dst -> Shader Read Only
-
-   mut alloc_info = sys_malloc(32)
-   memset(alloc_info, 0, 32)
-   store32(alloc_info, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO), 0)
-   store64_raw(alloc_info, _command_pool, 16)
-   store32(alloc_info, 0, 24) ; PRIMARY
-   store32(alloc_info, 1, 28)
-   mut cb_ptr = sys_malloc(8)
-   if(allocate_command_buffers(_device, alloc_info, cb_ptr) != 0){ return false }
-   def cb = load64(cb_ptr, 0)
-
-   mut bi = sys_malloc(32)
-   memset(bi, 0, 32)
-   store32(bi, to_int(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO), 0)
-   store32(bi, 1, 16) ; ONE_TIME_SUBMIT
-   begin_command_buffer(cb, bi)
-
-   mut region = sys_malloc(56)
-   memset(region, 0, 56)
-   store32(region, to_int(VK_IMAGE_ASPECT_COLOR_BIT), 16)
-   store32(region, 0, 20) ; mipLevel
-   store32(region, 0, 24) ; baseArrayLayer
-   store32(region, 1, 28) ; layerCount
-   store32(region, x, 32) ; offset.x
-   store32(region, y, 36) ; offset.y
-   store32(region, 0, 40) ; offset.z
-   store32(region, w, 44) ; extent.width
-   store32(region, h, 48) ; extent.height
-   store32(region, 1, 52) ; extent.depth
-
-   cmd_copy_buffer_to_image(cb, to_int(_staging_buffer), to_int(image), to_int(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL), 1, region)
-
-   end_command_buffer(cb)
-
-   mut submit_info = sys_malloc(72)
-   memset(submit_info, 0, 72)
-   store32(submit_info, to_int(VK_STRUCTURE_TYPE_SUBMIT_INFO), 0)
-   store32(submit_info, 1, 40) ; commandBufferCount
-   mut cb_ptr_arr = sys_malloc(8)
-   store64_raw(cb_ptr_arr, cb, 0)
-   store64_raw(submit_info, cb_ptr_arr, 48)
-
-   queue_submit(to_int(_graphics_queue), 1, submit_info, 0)
-   device_wait_idle(_device)
-
-   free_command_buffers(_device, _command_pool, 1, cb_ptr)
-   sys_free(alloc_info)
-   sys_free(cb_ptr)
-   sys_free(bi)
-   sys_free(region)
-   sys_free(submit_info)
-   sys_free(cb_ptr_arr)
-   true
-}
-
-fn create_texture(width, height, pixels){
-   "Creates a GPU texture from raw pixel data."
+fn create_texture_ex(width, height, pixels, format=37){
+   "Creates a GPU texture. Format 37=RGBA8, 9=R8."
+   mut bpp = 4
+   if(format == 9){ bpp = 1 }
+   
    ; 1. Create Image
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
    store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
    store32(img_ci, 0, 16) ; flags
    store32(img_ci, 1, 20) ; imageType = 2D
-   store32(img_ci, 37, 24) ; format R8G8B8A8_UNORM
+   store32(img_ci, format, 24)
    store32(img_ci, width, 28)
    store32(img_ci, height, 32)
    store32(img_ci, 1, 36) ; depth
@@ -332,29 +377,29 @@ fn create_texture(width, height, pixels){
    store32(img_ci, 0, 52) ; tiling = OPTIMAL
    store32(img_ci, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 56)
    store32(img_ci, VK_SHARING_MODE_EXCLUSIVE, 60)
-   store32(img_ci, 0, 64) ; queueCount
    store32(img_ci, 0, 80) ; initialLayout = UNDEFINED
 
    mut img_ptr = sys_malloc(8)
-   if(create_image(_device, img_ci, 0, img_ptr) != 0){ return 0 }
+   def r1 = create_image(_device, img_ci, 0, img_ptr)
+   if(r1 != 0){ return -1 }
    def image = load64(img_ptr, 0)
 
    ; 2. Allocate Memory
    mut mem_req = sys_malloc(24)
    get_image_memory_requirements(_device, image, mem_req)
    def size = load64(mem_req, 0)
-   def _align = load64(mem_req, 8)
    def type_bits = load32(mem_req, 16)
-   def mem_type = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+   _touch(type_bits)
+   def mem_idx = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
    store64_raw(alloc_info, size, 16)
-   store32(alloc_info, mem_type, 24)
+   store32(alloc_info, mem_idx, 24)
 
    mut mem_ptr = sys_malloc(8)
-   if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ return 0 }
+   if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ return -1 }
    def memory = load64(mem_ptr, 0)
    bind_image_memory(_device, image, memory, 0)
 
@@ -363,155 +408,221 @@ fn create_texture(width, height, pixels){
    memset(view_ci, 0, 80)
    store32(view_ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
    store64_raw(view_ci, image, 24)
-   store32(view_ci, 1, 32) ; viewType 2D
-   store32(view_ci, 37, 36) ; format R8G8B8A8
+   store32(view_ci, 1, 32) ; 2D
+   store32(view_ci, format, 36)
    store32(view_ci, VK_IMAGE_ASPECT_COLOR_BIT, 56)
-   store32(view_ci, 1, 64) ; levelCount
-   store32(view_ci, 1, 72) ; layerCount
+   store32(view_ci, 1, 64)
+   store32(view_ci, 1, 72)
 
    mut view_ptr = sys_malloc(8)
-   if(create_image_view(_device, view_ci, 0, view_ptr) != 0){ return 0 }
+   def r3 = create_image_view(_device, view_ci, 0, view_ptr)
+   if(r3 != 0){ return -1 }
    def view = load64(view_ptr, 0)
 
-   ; 4. Upload Pixels (via Staging)
-   def img_size = width * height * 4
-   if(_staging_map && pixels){
-      mut i = 0
-      while(i < img_size){
-         store8(_staging_map, load8(pixels, i), i)
-         i += 1
-      }
-
-      ; Upload pixels using a one-time command buffer
-      mut alloc_info_cb = sys_malloc(32)
-      memset(alloc_info_cb, 0, 32)
-      store32(alloc_info_cb, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
-      store64_raw(alloc_info_cb, _command_pool, 16)
-      store32(alloc_info_cb, 0, 24) ; PRIMARY
-      store32(alloc_info_cb, 1, 28)
+   ; 4. Upload Initial Pixels
+   def img_size = width * height * bpp
+   if(pixels && _staging_map){
+      memcpy(_staging_map, pixels, img_size)
+      
+      mut alloc_cb = sys_malloc(32)
+      memset(alloc_cb, 0, 32)
+      store32(alloc_cb, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
+      store64_raw(alloc_cb, _command_pool, 16)
+      store32(alloc_cb, 0, 24)
+      store32(alloc_cb, 1, 28)
       mut cb_ptr = sys_malloc(8)
-      if(allocate_command_buffers(_device, alloc_info_cb, cb_ptr) == 0){
-         def cb = load64(cb_ptr, 0)
-         mut bi = sys_malloc(32)
-         memset(bi, 0, 32)
-         store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
-         store32(bi, 1, 16) ; ONE_TIME_SUBMIT
-         begin_command_buffer(cb, bi)
+      def rcb = allocate_command_buffers(_device, alloc_cb, cb_ptr)
+      if(rcb != 0){ return -1 }
+      def cb = load64(cb_ptr, 0)
 
-         ; Transition: UNDEFINED -> TRANSFER_DST_OPTIMAL
-         mut bar1 = sys_malloc(72)
-         memset(bar1, 0, 72)
-         store32(bar1, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
-         store32(bar1, 0, 16) ; srcAccess
-         store32(bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 20) ; dstAccess
-         store32(bar1, VK_IMAGE_LAYOUT_UNDEFINED, 24)
-         store32(bar1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 28)
-         store32(bar1, -1, 32) ; srcQueueFamilyIndex (IGNORED)
-         store32(bar1, -1, 36) ; dstQueueFamilyIndex (IGNORED)
-         store64_raw(bar1, image, 40)
-         store32(bar1, VK_IMAGE_ASPECT_COLOR_BIT, 48)
-         store32(bar1, 0, 52) store32(bar1, 1, 56) ; mip
-         store32(bar1, 0, 60) store32(bar1, 1, 64) ; layers
-         cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, bar1)
+      mut bi = sys_malloc(32)
+      memset(bi, 0, 32)
+      store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+      store32(bi, 1, 16)
+      begin_command_buffer(cb, bi)
 
-         mut region = sys_malloc(56)
-         memset(region, 0, 56)
-         store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 16)
-         store32(region, 0, 20) ; mipLevel
-         store32(region, 0, 24) ; baseArrayLayer
-         store32(region, 1, 28) ; layerCount
-         store32(region, 0, 32) ; offset.x
-         store32(region, 0, 36) ; offset.y
-         store32(region, 0, 40) ; offset.z
-         store32(region, width, 44) ; extent.width
-         store32(region, height, 48) ; extent.height
-         store32(region, 1, 52) ; extent.depth
+      ; Transition UNDEFINED -> DST
+      mut bar1 = sys_malloc(72)
+      memset(bar1, 0, 72)
+      store32(bar1, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
+      store32(bar1, 0, 16)
+      store32(bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 20)
+      store32(bar1, 0, 24) ; UNDEFINED
+      store32(bar1, 7, 28) ; TRANSFER_DST
+      store32(bar1, -1, 32) store32(bar1, -1, 36)
+      store64_raw(bar1, image, 40)
+      store32(bar1, 1, 48) ; COLOR
+      store32(bar1, 0, 52) store32(bar1, 1, 56)
+      store32(bar1, 0, 60) store32(bar1, 1, 64)
+      cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, bar1)
 
-         cmd_copy_buffer_to_image(cb, _staging_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, region)
+      mut region = sys_malloc(56)
+      memset(region, 0, 56)
+      store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 16)
+      store32(region, 0, 20) ; mip
+      store32(region, 0, 24) ; baseLayer
+      store32(region, 1, 28) ; layerCount
+      store32(region, width, 44)
+      store32(region, height, 48)
+      store32(region, 1, 52)
+      cmd_copy_buffer_to_image(cb, _staging_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, region)
 
-         ; Transition: TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-         mut bar2 = sys_malloc(72)
-         memset(bar2, 0, 72)
-         store32(bar2, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
-         store32(bar2, VK_ACCESS_TRANSFER_WRITE_BIT, 16)
-         store32(bar2, VK_ACCESS_SHADER_READ_BIT, 20)
-         store32(bar2, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 24)
-         store32(bar2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 28)
-         store32(bar2, -1, 32)
-         store32(bar2, -1, 36)
-         store64_raw(bar2, image, 40)
-         store32(bar2, VK_IMAGE_ASPECT_COLOR_BIT, 48)
-         store32(bar2, 0, 52) store32(bar2, 1, 56)
-         store32(bar2, 0, 60) store32(bar2, 1, 64)
-         cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, bar2)
+      ; Transition DST -> SHADER_READ
+      store32(bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 16)
+      store32(bar1, VK_ACCESS_SHADER_READ_BIT, 20)
+      store32(bar1, 7, 24) ; DST
+      store32(bar1, 5, 28) ; SHADER_READ
+      cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, bar1)
 
-         end_command_buffer(cb)
-
-         mut submit_info = sys_malloc(72)
-         memset(submit_info, 0, 72)
-         store32(submit_info, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-         store32(submit_info, 1, 40) ; commandBufferCount
-         mut cb_ptr_arr = sys_malloc(8)
-         store64_raw(cb_ptr_arr, cb, 0)
-         store64_raw(submit_info, cb_ptr_arr, 48)
-
-         queue_submit(_graphics_queue, 1, submit_info, 0)
-         device_wait_idle(_device)
-
-         free_command_buffers(_device, _command_pool, 1, cb_ptr)
-         sys_free(bi)
-         sys_free(bar1)
-         sys_free(region)
-         sys_free(bar2)
-         sys_free(submit_info)
-         sys_free(cb_ptr_arr)
-      }
-      sys_free(alloc_info_cb)
-      sys_free(cb_ptr)
+      end_command_buffer(cb)
+      
+      mut si = sys_malloc(72)
+      memset(si, 0, 72)
+      store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+      store32(si, 1, 40)
+      store64_raw(si, cb_ptr, 48)
+      queue_submit(_graphics_queue, 1, si, 0)
+      device_wait_idle(_device)
+      
+      free_command_buffers(_device, _command_pool, 1, cb_ptr)
+      sys_free(alloc_cb) sys_free(cb_ptr) sys_free(bi) sys_free(bar1) sys_free(region) sys_free(si)
    }
 
-   ; 5. Create Descriptor Set
-   mut alloc_info_ds = sys_malloc(40)
-   memset(alloc_info_ds, 0, 40)
-   store32(alloc_info_ds, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info_ds, _descriptor_pool, 16)
-   store32(alloc_info_ds, 1, 24)
-   mut layout_ptr = sys_malloc(8)
-   store64_raw(layout_ptr, _descriptor_set_layout, 0)
-   store64_raw(alloc_info_ds, layout_ptr, 32)
-
+   ; 5. Descriptor Set
+   mut dsl_ptr = sys_malloc(8)
+   store64_raw(dsl_ptr, _descriptor_set_layout, 0)
+   mut alloc_ds = sys_malloc(40)
+   memset(alloc_ds, 0, 40)
+   store32(alloc_ds, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0)
+   store64_raw(alloc_ds, _descriptor_pool, 16)
+   store32(alloc_ds, 1, 24)
+   store64_raw(alloc_ds, dsl_ptr, 32)
    mut ds_ptr = sys_malloc(8)
-   if(allocate_descriptor_sets(_device, alloc_info_ds, ds_ptr) != 0){ return 0 }
-   def ds = load64(ds_ptr, 0)
+   def dres = allocate_descriptor_sets(_device, alloc_ds, ds_ptr)
+    mut ds = 0
+    if(dres == 0){ ds = load64(ds_ptr, 0) }
 
-   ; 6. Update Descriptor Set
-   mut image_info = sys_malloc(24)
-   store64_raw(image_info, _default_sampler, 0)
-   store64_raw(image_info, view, 8)
-   store32(image_info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 16)
+   if(ds){
+      mut im_info = sys_malloc(24)
+      store64_raw(im_info, _default_sampler, 0)
+      store64_raw(im_info, view, 8)
+      store32(im_info, 5, 16) ; SHADER_READ_ONLY_OPTIMAL
+      
+      mut write = sys_malloc(64)
+      memset(write, 0, 64)
+      store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
+      store64_raw(write, ds, 16)
+      store32(write, 0, 24) ; binding
+      store32(write, 1, 32) ; count
+      store32(write, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
+      store64_raw(write, im_info, 40)
+      update_descriptor_sets(_device, 1, write, 0, 0)
+      sys_free(im_info) sys_free(write)
+   }
 
-   mut write_ds = sys_malloc(64)
-   memset(write_ds, 0, 64)
-   store32(write_ds, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
-   store64_raw(write_ds, ds, 16)
-   store32(write_ds, 0, 24) ; dstBinding
-   store32(write_ds, 0, 28) ; dstArrayElement
-   store32(write_ds, 1, 32) ; descriptorCount
-   store32(write_ds, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
-   store64_raw(write_ds, image_info, 40)
-
-   update_descriptor_sets(_device, 1, write_ds, 0, 0)
-
-   mut tex = dict(6)
+   mut tex = dict(8)
    tex = dict_set(tex, "image", image)
    tex = dict_set(tex, "view", view)
    tex = dict_set(tex, "memory", memory)
    tex = dict_set(tex, "ds", ds)
    tex = dict_set(tex, "width", width)
    tex = dict_set(tex, "height", height)
+   tex = dict_set(tex, "format", format)
+   tex = dict_set(tex, "bpp", bpp)
 
+   def tex_id = len(_textures)
    _textures = append(_textures, tex)
-   len(_textures) - 1
+   _texture_ds_cache = append(_texture_ds_cache, ds)
+   _texture_fmt_cache = append(_texture_fmt_cache, format)
+   
+   sys_free(img_ci) sys_free(img_ptr) sys_free(mem_req) sys_free(alloc_info) sys_free(mem_ptr)
+   sys_free(view_ci) sys_free(view_ptr) sys_free(dsl_ptr) sys_free(alloc_ds) sys_free(ds_ptr)
+   
+   tex_id
+}
+
+fn update_texture_rect(tex_id, x, y, w, h, pixels){
+   "Partially updates a texture's pixel data. Uses pre-allocated buffers."
+   if(tex_id < 0 || tex_id >= len(_textures)){ return false }
+   def tex_obj = get(_textures, tex_id)
+   def image = dict_get(tex_obj, "image")
+   def bpp = dict_get(tex_obj, "bpp", 4)
+   def img_size = w * h * bpp
+   if(img_size > _staging_capacity){ return false }
+
+   memcpy(_staging_map, pixels, img_size)
+
+   memset(_upload_alloc, 0, 32)
+   store32(_upload_alloc, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
+   store64_raw(_upload_alloc, _command_pool, 16)
+   store32(_upload_alloc, 0, 24)
+   store32(_upload_alloc, 1, 28)
+   if(allocate_command_buffers(_device, _upload_alloc, _upload_cb_ptr) != 0){ return false }
+   def cb = load64(_upload_cb_ptr, 0)
+
+   memset(_upload_bi, 0, 32)
+   store32(_upload_bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+   store32(_upload_bi, 1, 16)
+   begin_command_buffer(cb, _upload_bi)
+
+   memset(_upload_bar1, 0, 72)
+   store32(_upload_bar1, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
+   store32(_upload_bar1, VK_ACCESS_SHADER_READ_BIT, 16)
+   store32(_upload_bar1, VK_ACCESS_TRANSFER_WRITE_BIT, 20)
+   store32(_upload_bar1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 24)
+   store32(_upload_bar1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 28)
+   store32(_upload_bar1, -1, 32)
+   store32(_upload_bar1, -1, 36)
+   store64_raw(_upload_bar1, image, 40)
+   store32(_upload_bar1, VK_IMAGE_ASPECT_COLOR_BIT, 48)
+   store32(_upload_bar1, 0, 52) store32(_upload_bar1, 1, 56)
+   store32(_upload_bar1, 0, 60) store32(_upload_bar1, 1, 64)
+   cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, _upload_bar1)
+
+   memset(_upload_region, 0, 56)
+   store32(_upload_region, VK_IMAGE_ASPECT_COLOR_BIT, 16)
+   store32(_upload_region, 0, 20)
+   store32(_upload_region, 0, 24)
+   store32(_upload_region, 1, 28)
+   store32(_upload_region, x, 32)
+   store32(_upload_region, y, 36)
+   store32(_upload_region, 0, 40)
+   store32(_upload_region, w, 44)
+   store32(_upload_region, h, 48)
+   store32(_upload_region, 1, 52)
+   cmd_copy_buffer_to_image(cb, _staging_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, _upload_region)
+
+   memset(_upload_bar2, 0, 72)
+   store32(_upload_bar2, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
+   store32(_upload_bar2, VK_ACCESS_TRANSFER_WRITE_BIT, 16)
+   store32(_upload_bar2, VK_ACCESS_SHADER_READ_BIT, 20)
+   store32(_upload_bar2, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 24)
+   store32(_upload_bar2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 28)
+   store32(_upload_bar2, -1, 32)
+   store32(_upload_bar2, -1, 36)
+   store64_raw(_upload_bar2, image, 40)
+   store32(_upload_bar2, VK_IMAGE_ASPECT_COLOR_BIT, 48)
+   store32(_upload_bar2, 0, 52) store32(_upload_bar2, 1, 56)
+   store32(_upload_bar2, 0, 60) store32(_upload_bar2, 1, 64)
+   cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, _upload_bar2)
+
+   end_command_buffer(cb)
+
+   memset(_upload_si, 0, 72)
+   store32(_upload_si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store32(_upload_si, 1, 40)
+   store64_raw(_upload_cb_arr, cb, 0)
+   store64_raw(_upload_si, _upload_cb_arr, 48)
+   reset_fences(_device, 1, _upload_fence_ptr)
+   queue_submit(_graphics_queue, 1, _upload_si, _upload_fence)
+   wait_for_fences(_device, 1, _upload_fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
+   free_command_buffers(_device, _command_pool, 1, _upload_cb_ptr)
+   true
+}
+
+fn create_texture(width, height, pixels){
+   "Creates a GPU texture from raw pixel data (RGBA8)."
+   create_texture_ex(width, height, pixels, 37)
 }
 
 fn _create_default_texture(){
@@ -521,9 +632,9 @@ fn _create_default_texture(){
    memset(sampler_ci, 0, 80)
    store32(sampler_ci, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, 0)
    store32(sampler_ci, 0, 16) ; flags
-   store32(sampler_ci, 1, 20) ; magFilter = LINEAR
-   store32(sampler_ci, 1, 24) ; minFilter = LINEAR
-   store32(sampler_ci, 0, 28) ; mipmapMode = NEAREST
+   store32(sampler_ci, _cfg_filter, 20) ; magFilter
+   store32(sampler_ci, _cfg_filter, 24) ; minFilter
+   store32(sampler_ci, 0, 28) ; mipmapMode
    store32(sampler_ci, 2, 32) ; addressModeU = CLAMP_TO_EDGE
    store32(sampler_ci, 2, 36) ; addressModeV
    store32(sampler_ci, 2, 40) ; addressModeW
@@ -542,11 +653,22 @@ fn _create_default_texture(){
    true
 }
 
+mut _mvp_dirty = true
+
 fn set_mvp(mat){
    "Updates the Model-View-Projection matrix for the renderer."
    if(_current_mvp && is_list(mat)){
+      if(_vertex_offset != _last_flush_offset){ _flush() } ; Only flush if there's pending data
       mat4_to_buffer(mat, _current_mvp)
+      _mvp_dirty = true
+      _pc_dirty = true
    }
+}
+
+fn set_ortho(l, r, b, t, n, f){
+   "Sets the MVP matrix to an orthographic projection."
+   def mat = mat4_ortho(l, r, b, t, n, f)
+   set_mvp(mat)
 }
 
 fn bind_texture(tex_id){
@@ -562,6 +684,20 @@ fn texture_size(tex_id){
    def tex = get(_textures, tex_id, 0)
    if(!tex || !is_dict(tex)){ return 0 }
    [dict_get(tex, "width", 0), dict_get(tex, "height", 0)]
+}
+
+fn texture_format(tex_id){
+   "Returns the format of a texture."
+   if(tex_id < 0 || tex_id >= len(_textures)){ return 37 } ; Default RGBA8
+   def tex_obj = get(_textures, tex_id)
+   dict_get(tex_obj, "format", 37)
+}
+
+fn texture_descriptor(tex_id){
+   "Returns the descriptor set for a texture."
+   if(tex_id < 0 || tex_id >= len(_textures)){ return 0 }
+   def tex_obj = get(_textures, tex_id)
+   dict_get(tex_obj, "ds", 0)
 }
 
 fn destroy_texture(tex_id){
@@ -584,167 +720,158 @@ fn read_framebuffer(){
    def h = _swapchain_extent_h
    if(w <= 0 || h <= 0){ return 0 }
    def size = w * h * 4
+
    ; Create a host-visible buffer for readback
    mut buf_ci = sys_malloc(56)
    memset(buf_ci, 0, 56)
    store32(buf_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(buf_ci, size, 16)
-   store32(buf_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 24)
-   store32(buf_ci, VK_SHARING_MODE_EXCLUSIVE, 28)
+   store64_raw(buf_ci, size, 24)
+   store32(buf_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 32)
    mut buf_ptr = sys_malloc(8)
-   if(create_buffer(_device, buf_ci, 0, buf_ptr) != 0){ sys_free(buf_ci) sys_free(buf_ptr) return 0 }
+   if(create_buffer(_device, buf_ci, 0, buf_ptr) != 0){ return 0 }
    def readback_buf = load64(buf_ptr, 0)
-   ; Allocate host-visible memory
+
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, readback_buf, mem_req)
-   def req_size = load64(mem_req, 0)
-   def type_bits = load32(mem_req, 16)
-   def mem_idx = get_memory_type_index(_physical_device, type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-   if(mem_idx < 0){ destroy_buffer(_device, readback_buf, 0) return 0 }
+   def mem_idx = _find_memory_type(load32(mem_req, 16), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+   
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, req_size, 16)
+   store64_raw(alloc_info, load64(mem_req, 0), 16)
    store32(alloc_info, mem_idx, 24)
    mut mem_ptr = sys_malloc(8)
-   if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ destroy_buffer(_device, readback_buf, 0) return 0 }
+   allocate_memory(_device, alloc_info, 0, mem_ptr)
    def readback_mem = load64(mem_ptr, 0)
    bind_buffer_memory(_device, readback_buf, readback_mem, 0)
-   ; Record copy command
-   def src_image = get(_swapchain_images, _image_index, 0)
-   if(!src_image){ destroy_buffer(_device, readback_buf, 0) free_memory(_device, readback_mem, 0) return 0 }
-   mut cb_ai = sys_malloc(32)
-   memset(cb_ai, 0, 32)
-   store32(cb_ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
-   store64_raw(cb_ai, _command_pool, 8)
-   store32(cb_ai, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 16)
-   store32(cb_ai, 1, 20)
+
+   ; Record copy commands
+   mut ai = sys_malloc(32)
+   memset(ai, 0, 32)
+   store32(ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
+   store64_raw(ai, _command_pool, 16)
+   store32(ai, 1, 28)
    mut cb_p = sys_malloc(8)
-   allocate_command_buffers(_device, cb_ai, cb_p)
+   allocate_command_buffers(_device, ai, cb_p)
    def cb = load64(cb_p, 0)
-   mut bi = sys_malloc(64)
-   memset(bi, 0, 64)
+
+   mut bi = sys_malloc(32)
+   memset(bi, 0, 32)
    store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
    store32(bi, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, 16)
    begin_command_buffer(cb, bi)
-   ; Transition image: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
+
+   def src_image = get(_swapchain_images, _image_index)
    mut barrier = sys_malloc(72)
    memset(barrier, 0, 72)
    store32(barrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
-   store32(barrier, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 16)
-   store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 20)
-   store32(barrier, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 24)
+   store32(barrier, 0, 16) ; srcAccess
+   store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 20) ; dstAccess
+   
+   mut old_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+   if(!_surface){ old_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
+   store32(barrier, old_layout, 24)
    store32(barrier, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 28)
    store64_raw(barrier, src_image, 40)
    store32(barrier, VK_IMAGE_ASPECT_COLOR_BIT, 48)
-   store32(barrier, 1, 56) ; levelCount
-   store32(barrier, 1, 64) ; layerCount
+   store32(barrier, 1, 56)
+   store32(barrier, 1, 64)
    cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, barrier)
-   ; Copy image to buffer
+
    mut region = sys_malloc(56)
    memset(region, 0, 56)
-   store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 0) ; aspectMask
-   store32(region, w, 20) ; imageExtent.width
-   store32(region, h, 24) ; imageExtent.height
-   store32(region, 1, 28) ; imageExtent.depth
+   store32(region, VK_IMAGE_ASPECT_COLOR_BIT, 16)
+   store32(region, 0, 20)
+   store32(region, 0, 24)
+   store32(region, 1, 28)
+   store32(region, w, 44)
+   store32(region, h, 48)
+   store32(region, 1, 52)
    cmd_copy_image_to_buffer(cb, src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback_buf, 1, region)
-   ; Transition back: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
+
    store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 16)
-   store32(barrier, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 20)
+   store32(barrier, 0, 20)
    store32(barrier, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 24)
-   store32(barrier, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 28)
+   store32(barrier, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 28)
    cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0, 0, 0, 1, barrier)
    end_command_buffer(cb)
-   ; Submit and wait
-   mut si = sys_malloc(72)
-   memset(si, 0, 72)
-   store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-   store32(si, 1, 24)
-   store64_raw(si, cb_p, 32)
-   queue_submit(_graphics_queue, 1, si, 0)
-   queue_wait_idle(_graphics_queue)
-   free_command_buffers(_device, _command_pool, 1, cb_p)
-   ; Map and copy pixels
-   mut map_p = sys_malloc(8)
-   map_memory(_device, readback_mem, 0, size, 0, map_p)
-   def mapped = load64(map_p, 0)
+
+   mut s_info = sys_malloc(72)
+   memset(s_info, 0, 72)
+   store32(s_info, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store32(s_info, 1, 40)
+   store64_raw(s_info, cb_p, 48)
+   queue_submit(_graphics_queue, 1, s_info, 0)
+   device_wait_idle(_device)
+
+   mut map_ptr = sys_malloc(8)
+   map_memory(_device, readback_mem, 0, size, 0, map_ptr)
+   def mapped_data = load64(map_ptr, 0)
+
+   ; Copy to Nytrix heap so we can free GPU resources
    def pixels = malloc(size)
-   ; Swapchain format is B8G8R8A8 — convert to RGBA
-   mut px = 0
-   while(px < size){
-      store8(pixels, load8(mapped, px + 2), px)     ; R <- B
-      store8(pixels, load8(mapped, px + 1), px + 1) ; G
-      store8(pixels, load8(mapped, px + 0), px + 2) ; B <- R
-      store8(pixels, load8(mapped, px + 3), px + 3) ; A
-      px += 4
-   }
+   memcpy(pixels, mapped_data, size)
+   
    unmap_memory(_device, readback_mem)
    destroy_buffer(_device, readback_buf, 0)
    free_memory(_device, readback_mem, 0)
-   mut result = dict(4)
-   result = dict_set(result, "data", pixels)
-   result = dict_set(result, "width", w)
-   result = dict_set(result, "height", h)
-   result = dict_set(result, "channels", 4)
-   result
+   free_command_buffers(_device, _command_pool, 1, cb_p)
+
+   ; Handle BGR swap for standard BGRA swapchains
+   if(_swapchain_format == 44 || _swapchain_format == 50){
+      mut b = 0
+      while(b < size){
+         def blue = load8(pixels, b)
+         def red  = load8(pixels, b + 2)
+         store8(pixels, red, b)
+         store8(pixels, blue, b + 2)
+         b += 4
+      }
+   }
+
+   mut res = dict(4)
+   res = dict_set(res, "data",   pixels)
+   res = dict_set(res, "width",  w)
+   res = dict_set(res, "height", h)
+   res = dict_set(res, "bpp",    4)
+   res
 }
 
 fn _update_default_mvp(win){
-   "Recalculates the default orthographic projection matrix for the window."
-   def w = float(dict_get(win, "w", 800))
-   def h = float(dict_get(win, "h", 600))
-   def proj = mat4_ortho(0.0, float(w), 0.0, float(h), -1.0, 1.0)
-   set_mvp(proj)
+   "Recalculates the default orthographic projection matrix for the window/swapchain."
+   mut w = float(_swapchain_extent_w)
+   mut h = float(_swapchain_extent_h)
+   if(win){
+      w = float(dict_get(win, "w", w))
+      h = float(dict_get(win, "h", h))
+   }
+   ; Standard 2D coordinate system: (0,0) is top-left, (w,h) is bottom-right.
+   set_ortho(0.0, w, 0.0, h, -1.0, 1.0)
 }
 
 fn _create_vertex_buffer(){
    "Creates the GPU vertex buffer for batch rendering."
-   mut ci = sys_malloc(56) ; VkBufferCreateInfo
+   mut ci = sys_malloc(56)
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store32(ci, 0, 16) ; flags
-   store64_raw(ci, _vertex_capacity, 24) ; size
-   store32(ci, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32) ; usage
-   store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36) ; sharingMode
+   store64_raw(ci, _vertex_capacity * MAX_FRAMES_IN_FLIGHT, 24) ; 16MB total
+   store32(ci, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32)
+   store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36)
    mut buf_ptr = sys_malloc(8)
    def res = create_buffer(_device, ci, 0, buf_ptr)
    if(res != 0){
-      if(_is_debug()){ print(f"Vulkan: Vertex buffer creation failed {res}") }
       return false
    }
    _vertex_buffer = load64(buf_ptr, 0)
-   if(_is_debug()){ print(f"Vulkan: vertex_buffer h={_vertex_buffer}") }
 
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, _vertex_buffer, mem_req)
    def size = load64(mem_req, 0)
-   def align = load64(mem_req, 8)
    def type_bits = load32(mem_req, 16)
-   if(_is_debug()){ print(f"Vulkan: vtx mem_req size={size} align={align} type_bits={type_bits}") }
+   _touch(type_bits)
 
-   ; Find memory type (Host Visible | Host Coherent)
-   mut mem_props = sys_malloc(520) ; VkPhysicalDeviceMemoryProperties (roughly)
-   get_physical_device_memory_properties(_physical_device, mem_props)
-   def mem_type_count = load32(mem_props, 0)
-   if(_is_debug()){ print(f"Vulkan: mem_type_count={mem_type_count}") }
-   mut mem_type_index = -1
-   mut i = 0
-   while(i < mem_type_count){
-      if((type_bits & (1 << i)) != 0){
-         def flags = load32(mem_props, 4 + i * 8) ; propertyFlags
-         if(_is_debug()){ print(f"Vulkan: mem_type[{i}] flags={flags}") }
-         if((flags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)){
-            mem_type_index = i
-            break
-         }
-      }
-      i += 1
-   }
-   if(mem_type_index == -1){
-      if(_is_debug()){ print("Vulkan: Could not find suitable memory for vertex buffer") }
-      return false
-   }
-   if(_is_debug()){ print(f"Vulkan: selected mem_type_index={mem_type_index}") }
+    def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    if(mem_type_index == -1){ return false }
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
@@ -754,22 +881,24 @@ fn _create_vertex_buffer(){
 
    mut mem_ptr = sys_malloc(8)
    def alloc_res = allocate_memory(_device, alloc_info, 0, mem_ptr)
-   if(_is_debug()){ print(f"Vulkan: allocate_memory res={alloc_res}") }
    if(alloc_res != 0){
-      if(_is_debug()){ print(f"Vulkan: Vertex memory allocation failed {alloc_res}") }
       return false
    }
    _vertex_memory = load64(mem_ptr, 0)
-   if(_is_debug()){ print(f"Vulkan: vertex_memory h={_vertex_memory}") }
 
-   if(_is_debug()){ print(f"Vulkan: binding buffer={_vertex_buffer} mem={_vertex_memory}") }
    bind_buffer_memory(_device, _vertex_buffer, _vertex_memory, 0)
 
-   mut map_ptr = sys_malloc(8)
-   map_memory(_device, _vertex_memory, 0, size, 0, map_ptr)
-   _vertex_map = load64(map_ptr, 0)
-
-   true
+    mut map_ptr = sys_malloc(8)
+    def map_res = map_memory(_device, _vertex_memory, 0, size, 0, map_ptr)
+    if(map_res == 0){
+       _vertex_map = load64(map_ptr, 0)
+    } else {
+       _vertex_map = 0
+    }
+    
+    ; Create CPU-side local buffer with enough room for all slices
+    _local_vertex_map = sys_malloc(_vertex_capacity * MAX_FRAMES_IN_FLIGHT)
+    true
 }
 
 fn _create_instance(){
@@ -795,24 +924,24 @@ fn _create_instance(){
    store64_raw(create_info, ext_ptrs, 56)
    mut inst_ptr = sys_malloc(8)
    store32(inst_ptr, 0, 0) store32(inst_ptr, 0, 4)
-   if(_is_debug()){
+
+   if(_debug_gfx_enabled){
       print("Vulkan: Creating instance with wrapper...")
-      print("Vulkan: resolve vk_create_instance = " + to_str(vk_create_instance))
+      ; print("Vulkan: resolve vk_create_instance = " + to_str(vk_create_instance)) ; Removed debug print
    }
+
    def res = vk_create_instance(create_info, 0, inst_ptr)
-   if(_is_debug()){
+
+   if(_debug_gfx_enabled){
       print("Vulkan: create_instance returned " + to_str(res))
-      print("Vulkan: inst_ptr[0] = " + to_str(load64(inst_ptr, 0)))
+      ; print("Vulkan: inst_ptr[0] = " + to_str(load64(inst_ptr, 0))) ; Removed debug print
    }
+
    if(res != 0){
-      if(_is_debug()){ print(f"Vulkan: Instance creation failed with code {res}") }
       return false
    }
-   if(_is_debug()){
-      _dbg_handle("instance.out.raw", load64(inst_ptr, 0))
-   }
    _instance = load64(inst_ptr, 0)
-   if(_is_debug()){
+   if(_debug_gfx_enabled){
       print("Vulkan: Instance created OK.")
       _dbg_handle("instance", _instance)
    }
@@ -823,24 +952,16 @@ fn _create_surface(win){
    "Creates the native window surface (WSI)."
    def window = dict_get(win, "handle", 0)
    if(!window){
-      if(_is_debug()){ print("Vulkan: No window handle") }
       return false
    }
    mut surf_ptr = sys_malloc(8)
    store32(surf_ptr, 0, 0); store32(surf_ptr, 0, 4)
    def res = ui_glfw.create_surface(_instance, window, 0, surf_ptr)
    if(res != 0){
-      if(_is_debug()){ print(f"Vulkan: Surface creation failed with code {res}") }
       return false
    }
-   if(_is_debug()){
-      _dbg_handle("surface.out.raw", load64(surf_ptr, 0))
-   }
    _surface = load64(surf_ptr, 0)
-   if(_is_debug()){
-      print(f"Vulkan: Surface created OK")
-      _dbg_handle("surface", _surface)
-   }
+   if(_debug_gfx_enabled){ _dbg_handle("surface", _surface) }
    true
 }
 
@@ -850,19 +971,22 @@ fn _pick_physical_device(){
    store32(count_ptr, 0, 0)
    def _res1 = enumerate_physical_devices(_instance, count_ptr, 0)
    def count = load32(count_ptr, 0)
-   if(_is_debug()){ print(f"Vulkan: Physical devices found: {count}") }
    if(count == 0){ return false }
+   def _res2 = enumerate_physical_devices(_instance, count_ptr, 0) ; Added _res2 to avoid warning
    mut devices_ptr = sys_malloc(count * 8)
    enumerate_physical_devices(_instance, count_ptr, devices_ptr)
-   ; Just pick the first device
-   if(_is_debug()){
-      _dbg_handle("physical.out.raw", load64(devices_ptr, 0))
-   }
    _physical_device = load64(devices_ptr, 0)
-   if(_is_debug()){
-      print(f"Vulkan: Selected physical device")
+
+   mut props = sys_malloc(1024)
+   memset(props, 0, 1024)
+   get_physical_device_properties(_physical_device, props)
+   def device_name = text.cstr_to_str(props, 20)
+   if(_debug_gfx_enabled){
+      print("Vulkan: Selected GPU:", device_name)
       _dbg_handle("physical", _physical_device)
    }
+   sys_free(devices_ptr)
+   sys_free(props)
    true
 }
 
@@ -887,7 +1011,6 @@ fn _create_logical_device(){
       i += 1
    }
    if(graphics_family == -1){
-      if(_is_debug()){ print("Vulkan: No graphics queue family found") }
       return false
    }
    _graphics_family_index = graphics_family
@@ -902,7 +1025,6 @@ fn _create_logical_device(){
    store32(queue_create_info, 1, 24)               ; queueCount
    store64_raw(queue_create_info, priorities, 32) ; pQueuePriorities
    mut ext1 = sys_malloc(32)
-   memset(ext1, 0, 32)
    _strcpy(ext1, "VK_KHR_swapchain")
    mut ext_ptrs = sys_malloc(8)
    store64_raw(ext_ptrs, ext1, 0)
@@ -916,58 +1038,137 @@ fn _create_logical_device(){
    store32(create_info, 0, 40) store32(create_info, 0, 44)                 ; ppEnabledLayerNames
    store32(create_info, 1, 48)                         ; enabledExtensionCount
    store64_raw(create_info, ext_ptrs, 56)          ; ppEnabledExtensionNames
-   store32(create_info, 0, 64) store32(create_info, 0, 68)                 ; pEnabledFeatures
+   store32(create_info, 0, 64) store32(create_info, 0, 68)                 ; pEnabledFeatures (set below)
+   ; Enable wideLines for thick line rendering (VkPhysicalDeviceFeatures.wideLines = field 32 = offset 128)
+   mut dev_features = sys_malloc(232)
+   memset(dev_features, 0, 232)
+   store32(dev_features, 1, 60) ; wideLines = VK_TRUE (field 15, byte offset 60)
+   store64_raw(create_info, dev_features, 64)
    mut dev_ptr = sys_malloc(8)
    store32(dev_ptr, 0, 0) store32(dev_ptr, 0, 4)
-   if(_is_debug()){
-      _dbg_handle("device.out.pre", load64(dev_ptr, 0))
-   }
    def res = create_device(_physical_device, create_info, 0, dev_ptr)
    if(res != 0){
-      if(_is_debug()){ print(f"Vulkan: Logical device creation failed with code {res}") }
+      if(_debug_gfx_enabled){ print(f"Vulkan: create_device failed with {res}") }
       return false
    }
-   if(_is_debug()){
-      _dbg_handle("device.out.post", load64(dev_ptr, 0))
-   }
    _device = load64(dev_ptr, 0)
-   if(_is_debug()){
+   if(_debug_gfx_enabled){
       print(f"Vulkan: Logical device created OK")
       _dbg_handle("device", _device)
    }
    mut q_ptr = sys_malloc(8)
    store32(q_ptr, 0, 0) store32(q_ptr, 0, 4)
    get_device_queue(_device, graphics_family, 0, q_ptr)
-   if(_is_debug()){
-      _dbg_handle("queue.out.post", load64(q_ptr, 0))
-   }
    _graphics_queue = load64(q_ptr, 0)
-   if(_is_debug()){
-      _dbg_handle("queue", _graphics_queue)
-   }
+   if(_debug_gfx_enabled){ _dbg_handle("queue", _graphics_queue) }
    ; Use same queue for presenting for now (most GPUs support this)
    _present_queue = _graphics_queue
    true
 }
 
 fn _choose_composite_alpha(flags){
-   "Heuristic to choose supported composite alpha mode for swapchain."
-   if((flags & 0x1) != 0){ return 0x1 } ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-   if((flags & 0x2) != 0){ return 0x2 } ; PRE_MULTIPLIED
-   if((flags & 0x4) != 0){ return 0x4 } ; POST_MULTIPLIED
-   if((flags & 0x8) != 0){ return 0x8 } ; INHERIT
-   0x1
+   "Selects a supported composite alpha mode. Forcing OPAQUE to avoid transparency issues."
+   if(band(flags, 1)){ return 1 } ; OPAQUE
+   if(band(flags, 2)){ return 2 } ; PRE_MULTIPLIED
+   if(band(flags, 4)){ return 4 } ; POST_MULTIPLIED
+   if(band(flags, 8)){ return 8 } ; INHERIT
+   1
+}
+
+fn _choose_present_mode(){
+   "Chooses the fastest present mode available (MAILBOX > IMMEDIATE > FIFO)."
+   mut count_ptr = sys_malloc(4)
+   get_physical_device_surface_present_modes_khr(_physical_device, _surface, count_ptr, 0)
+   def count = load32(count_ptr, 0)
+   mut modes_ptr = sys_malloc(count * 4)
+   get_physical_device_surface_present_modes_khr(_physical_device, _surface, count_ptr, modes_ptr)
+   
+   mut mailbox_supported = false
+   mut immediate_supported = false
+   mut i = 0
+   while(i < count){
+      def mode = load32(modes_ptr, i * 4)
+      if(mode == VK_PRESENT_MODE_MAILBOX_KHR){ mailbox_supported = true }
+      if(mode == VK_PRESENT_MODE_IMMEDIATE_KHR){ immediate_supported = true }
+      i += 1
+   }
+   sys_free(count_ptr)
+   sys_free(modes_ptr)
+
+   if(_cfg_vsync){
+      return VK_PRESENT_MODE_FIFO_KHR
+   } else {
+      if(immediate_supported){ return VK_PRESENT_MODE_IMMEDIATE_KHR }
+      if(mailbox_supported){ return VK_PRESENT_MODE_MAILBOX_KHR }
+      return VK_PRESENT_MODE_FIFO_KHR
+   }
+}
+
+fn _create_headless_image(w, h){
+   mut img_ci = sys_malloc(88)
+   memset(img_ci, 0, 88)
+   store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
+   store32(img_ci, 1, 20) ; 2D
+   store32(img_ci, 37, 24) ; RGBA8
+   store32(img_ci, w, 28)
+   store32(img_ci, h, 32)
+   store32(img_ci, 1, 36) ; depth
+   store32(img_ci, 1, 40) ; mip
+   store32(img_ci, 1, 44) ; layers
+   store32(img_ci, 1, 48) ; samples
+   store32(img_ci, 0, 52) ; tiling optimal
+   store32(img_ci, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 56)
+   store32(img_ci, 0, 60) ; sharing exclusive
+   store32(img_ci, 0, 80) ; layout undefined
+   
+   mut p = sys_malloc(8)
+   create_image(_device, img_ci, 0, p)
+   def img = load64(p, 0)
+   
+   mut req = sys_malloc(24)
+   get_image_memory_requirements(_device, img, req)
+   def mem_type = _find_memory_type(load32(req, 16), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+   
+   mut ai = sys_malloc(64)
+   memset(ai, 0, 64)
+   store32(ai, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
+   store64_raw(ai, load64(req, 0), 16)
+   store32(ai, mem_type, 24)
+   allocate_memory(_device, ai, 0, p)
+   def mem = load64(p, 0)
+   bind_image_memory(_device, img, mem, 0)
+   img
 }
 
 fn _create_swapchain(win){
-   "Initializes the Vulkan swapchain for the given window."
-   mut caps = sys_malloc(128) ; VkSurfaceCapabilitiesKHR
+   "Initializes the Vulkan swapchain or simulated images for headless mode."
+   if(!_surface){
+      ; Headless: Create 3 simulated images
+      _swapchain_extent_w = 400
+      _swapchain_extent_h = 300
+      if(win){
+         _swapchain_extent_w = dict_get(win, "w", 400)
+         _swapchain_extent_h = dict_get(win, "h", 300)
+      }
+      _swapchain_format = 37 ; RGBA8
+      _swapchain_image_count = 3
+      _swapchain_images = []
+      mut i = 0
+      while(i < 3){
+         _swapchain_images = push(_swapchain_images, _create_headless_image(_swapchain_extent_w, _swapchain_extent_h))
+         i += 1
+      }
+      return true
+   }
+   mut caps = sys_malloc(128)
    memset(caps, 0, 128)
    get_physical_device_surface_capabilities_khr(_physical_device, _surface, caps)
-   mut req_w = int(get(win, 5, 1))
-   mut req_h = int(get(win, 6, 1))
-   if(req_w < 1){ req_w = 1 }
-   if(req_h < 1){ req_h = 1 }
+   mut req_w = 400
+   mut req_h = 300
+   if(win){
+      req_w = int(dict_get(win, "w", 400))
+      req_h = int(dict_get(win, "h", 300))
+   }
    def cur_w = load32(caps, 8)
    def cur_h = load32(caps, 12)
    def min_w = load32(caps, 16)
@@ -987,71 +1188,85 @@ fn _create_swapchain(win){
    }
    _swapchain_extent_w = w
    _swapchain_extent_h = h
-   ; Min image count + 1 for smoother frame pacing when possible.
    mut min_imgs = load32(caps, 0)
    mut max_imgs = load32(caps, 4)
    mut count = min_imgs + 1
    if(max_imgs > 0 && count > max_imgs){ count = max_imgs }
-   def pre_transform = load32(caps, 40) ; currentTransform
-   def composite_alpha = _choose_composite_alpha(load32(caps, 44)) ; supportedCompositeAlpha
+   def pre_transform = load32(caps, 40)
+   def composite_alpha = _choose_composite_alpha(load32(caps, 44))
+   
    mut create_info = sys_malloc(128)
    memset(create_info, 0, 128)
    store32(create_info, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, 0)
-   store32(create_info, 0, 8) store32(create_info, 0, 12)   ; pNext
-   store32(create_info, 0, 16)         ; flags
    store64_raw(create_info, _surface, 24)
    store32(create_info, count, 32)
-   _swapchain_format = VK_FORMAT_B8G8R8A8_UNORM
+   _swapchain_format = 44 ; VK_FORMAT_B8G8R8A8_UNORM
    store32(create_info, _swapchain_format, 36) ; format
    store32(create_info, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, 40) ; colorSpace
-   store32(create_info, w, 44) ; extent.width
-   store32(create_info, h, 48) ; extent.height
-   store32(create_info, 1, 52) ; imageArrayLayers
-   store32(create_info, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, 56)
+   store32(create_info, w, 44) ; width
+   store32(create_info, h, 48) ; height
+   store32(create_info, 1, 52) ; layers
+   store32(create_info, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 56)
    store32(create_info, VK_SHARING_MODE_EXCLUSIVE, 60)
    store32(create_info, 0, 64) ; queueCount
-   store32(create_info, 0, 72) store32(create_info, 0, 76) ; pQueueFamilyIndices
-   store32(create_info, pre_transform, 80) ; preTransform
-   store32(create_info, composite_alpha, 84) ; compositeAlpha
-   store32(create_info, VK_PRESENT_MODE_FIFO_KHR, 88)
+   store32(create_info, 0, 72)
+   store32(create_info, pre_transform, 80)
+   store32(create_info, composite_alpha, 84)
+   store32(create_info, _choose_present_mode(), 88)
    store32(create_info, 1, 92) ; clipped
-   store32(create_info, 0, 96) store32(create_info, 0, 100) ; oldSwapchain
+   store32(create_info, 0, 96) ; oldSwapchain
+
    mut sc_ptr = sys_malloc(8)
-   store32(sc_ptr, 0, 0) store32(sc_ptr, 0, 4)
-   if(_is_debug()){
-      _dbg_handle("swapchain.out.pre", load64(sc_ptr, 0))
-   }
+   store32(sc_ptr, 0, 0)
+   store32(sc_ptr, 0, 4)
    def res = create_swapchain_khr(_device, create_info, 0, sc_ptr)
    if(res != 0){
-      if(_is_debug()){ print(f"Vulkan: Swapchain creation failed with code {res}") }
+      if(_debug_gfx_enabled){ print(f"Vulkan: create_swapchain_khr failed with {res}") }
       return false
    }
-   if(_is_debug()){
-      _dbg_handle("swapchain.out.post", load64(sc_ptr, 0))
-   }
    _swapchain = load64(sc_ptr, 0)
-   if(_is_debug()){ _dbg_handle("swapchain", _swapchain) }
+   if(_debug_gfx_enabled){ _dbg_handle("swapchain", _swapchain) }
    _swapchain_format = VK_FORMAT_B8G8R8A8_UNORM
    ; Get images
    mut img_count_ptr = sys_malloc(4)
-   store32(img_count_ptr, 0, 0)
-   def gi_res = get_swapchain_images_khr(_device, _swapchain, img_count_ptr, 0)
-   if(_is_debug()){ print(f"Vulkan: get_swapchain_images_khr(count) res={gi_res} count={load32(img_count_ptr, 0)}") }
+   get_swapchain_images_khr(_device, _swapchain, img_count_ptr, 0)
    _swapchain_image_count = load32(img_count_ptr, 0)
-   mut imgs_ptr = sys_malloc(_swapchain_image_count * 8)
-   def gi_res2 = get_swapchain_images_khr(_device, _swapchain, img_count_ptr, imgs_ptr)
-   if(_is_debug()){ print(f"Vulkan: get_swapchain_images_khr(images) res={gi_res2}") }
+   mut img_ptrs_raw = sys_malloc(_swapchain_image_count * 8)
+   get_swapchain_images_khr(_device, _swapchain, img_count_ptr, img_ptrs_raw)
    _swapchain_images = []
    mut i = 0
    while(i < _swapchain_image_count){
-      def img = load64(imgs_ptr, i * 8)
-      if(_is_debug()){ _dbg_handle(f"swapchain.image[{i}]", img) }
-      _swapchain_images = append(_swapchain_images, img)
+      _swapchain_images = append(_swapchain_images, load64(img_ptrs_raw, i * 8))
       i += 1
    }
-   if(_is_debug()){ print(f"Vulkan: Swapchain created with {_swapchain_image_count} images") }
+   sys_free(img_count_ptr)
+   sys_free(img_ptrs_raw)
    true
 }
+
+fn _create_swapchain_image_views(){
+   _swapchain_image_views = []
+   mut i = 0
+   while(i < len(_swapchain_images)){
+      mut ci = sys_malloc(80)
+      memset(ci, 0, 80)
+      store32(ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
+      store64_raw(ci, get(_swapchain_images, i), 24)
+      store32(ci, 1, 32) ; 2D
+      store32(ci, _swapchain_format, 36)
+      store32(ci, VK_IMAGE_ASPECT_COLOR_BIT, 56)
+      store32(ci, 1, 64)
+      store32(ci, 1, 72)
+      mut view_ptr = sys_malloc(8)
+      create_image_view(_device, ci, 0, view_ptr)
+      _swapchain_image_views = append(_swapchain_image_views, load64(view_ptr, 0))
+      sys_free(ci)
+      sys_free(view_ptr)
+      i += 1
+   }
+   true
+}
+
 
 fn _destroy_swapchain_objects(){
    "Releases swapchain-dependent resources (framebuffers, views, etc)."
@@ -1082,17 +1297,19 @@ fn _destroy_swapchain_objects(){
 fn _recreate_swapchain(){
    "Rebuilds the swapchain after window resize."
    if(!_window_ref || !_device){ return false }
-   if(_is_debug()){ print("Vulkan: Recreating swapchain for window resize/out-of-date") }
    device_wait_idle(_device)
    _destroy_swapchain_objects()
 
-   ; Fix: Clean up old depth resources
+   ; Clean up old depth + MSAA resources
    if(_depth_image){ destroy_image(_device, _depth_image, 0) _depth_image = 0 }
    if(_depth_view){ destroy_image_view(_device, _depth_view, 0) _depth_view = 0 }
    if(_depth_memory){ free_memory(_device, _depth_memory, 0) _depth_memory = 0 }
+   if(_msaa_color_image){ destroy_image(_device, _msaa_color_image, 0) _msaa_color_image = 0 }
+   if(_msaa_color_view){ destroy_image_view(_device, _msaa_color_view, 0) _msaa_color_view = 0 }
+   if(_msaa_color_memory){ free_memory(_device, _msaa_color_memory, 0) _msaa_color_memory = 0 }
 
    if(!_create_swapchain(_window_ref)){ return false }
-   if(!_create_image_views()){ return false }
+   if(!_create_swapchain_image_views()){ return false }
 
    ; Fix: Rebuild depth resources to match new swapchain size
    if(!_create_depth_resources()){ return false }
@@ -1107,7 +1324,6 @@ fn _create_image_views(){
    mut i = 0
    while(i < _swapchain_image_count){
       def image_handle = get(_swapchain_images, i)
-      if(_is_debug()){ _dbg_handle(f"image_view.image[{i}]", image_handle) }
       mut create_info = sys_malloc(80)
       memset(create_info, 0, 80)
       store32(create_info, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
@@ -1126,11 +1342,9 @@ fn _create_image_views(){
       mut view_ptr = sys_malloc(8)
       def iv_res = create_image_view(_device, create_info, 0, view_ptr)
       if(iv_res != 0){
-         if(_is_debug()){ print(f"Vulkan: vkCreateImageView failed at image[{i}] with code {iv_res}") }
          return false
       }
       def view_h = load64(view_ptr, 0)
-      if(_is_debug()){ _dbg_handle(f"image_view.out[{i}]", view_h) }
       _swapchain_image_views = append(_swapchain_image_views, view_h)
       i += 1
    }
@@ -1138,159 +1352,264 @@ fn _create_image_views(){
 }
 
 fn _create_depth_resources(){
-   "Allocates and initializes the depth buffer for 3D/ordered rendering."
-   ; Format 126 = VK_FORMAT_D32_SFLOAT, 129 = D24_UNORM_S8_UINT
-   ; We will try D32_SFLOAT first
-   def depth_format = 126
+   "Allocates depth buffer and (if MSAA>1) MSAA color buffer for 3D rendering."
+   def depth_format = 126 ; VK_FORMAT_D32_SFLOAT
+   def samples = _cfg_msaa
 
+   ;; --- Depth image (with MSAA samples) ---
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
    store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
-   store32(img_ci, 0, 16) ; flags
-   store32(img_ci, 1, 20) ; imageType 2D
+   store32(img_ci, 0, 16)
+   store32(img_ci, 1, 20)
    store32(img_ci, depth_format, 24)
    store32(img_ci, _swapchain_extent_w, 28)
    store32(img_ci, _swapchain_extent_h, 32)
-   store32(img_ci, 1, 36) ; extent.depth
-   store32(img_ci, 1, 40) ; mipLevels
-   store32(img_ci, 1, 44) ; arrayLayers
-   store32(img_ci, 1, 48) ; samples
-   store32(img_ci, 0, 52) ; tiling OPTIMAL
-   store32(img_ci, 32, 56) ; usage DEPTH_STENCIL_ATTACHMENT
-   store32(img_ci, 0, 60) ; sharing exclusive
-   store32(img_ci, 0, 64) ; queueCount
-   store32(img_ci, 0, 80) ; initialLayout undefined
-
+   store32(img_ci, 1, 36)
+   store32(img_ci, 1, 40)
+   store32(img_ci, 1, 44)
+   store32(img_ci, samples, 48) ; MSAA samples
+   store32(img_ci, 0, 52)
+   store32(img_ci, 32, 56) ; DEPTH_STENCIL_ATTACHMENT
+   store32(img_ci, 0, 60)
+   store32(img_ci, 0, 64)
+   store32(img_ci, 0, 80)
    mut img_ptr = sys_malloc(8)
    if(create_image(_device, img_ci, 0, img_ptr) != 0){ return false }
    _depth_image = load64(img_ptr, 0)
-
    mut mem_req = sys_malloc(24)
    get_image_memory_requirements(_device, _depth_image, mem_req)
-   def size = load64(mem_req, 0)
-   def type_bits = load32(mem_req, 16)
-   def mem_type = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-
+   def d_size = load64(mem_req, 0)
+   def d_bits = load32(mem_req, 16)
+   def d_mtype = _find_memory_type(d_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, size, 16)
-   store32(alloc_info, mem_type, 24)
+   store64_raw(alloc_info, d_size, 16)
+   store32(alloc_info, d_mtype, 24)
    mut mem_ptr = sys_malloc(8)
    if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ return false }
    _depth_memory = load64(mem_ptr, 0)
    bind_image_memory(_device, _depth_image, _depth_memory, 0)
-
    mut view_ci = sys_malloc(80)
    memset(view_ci, 0, 80)
    store32(view_ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
    store64_raw(view_ci, _depth_image, 24)
    store32(view_ci, 1, 32)
    store32(view_ci, depth_format, 36)
-   store32(view_ci, 0x00000002, 56) ; ASPECT_DEPTH
+   store32(view_ci, 0x00000002, 56)
    store32(view_ci, 1, 64)
    store32(view_ci, 1, 72)
    mut view_ptr = sys_malloc(8)
    if(create_image_view(_device, view_ci, 0, view_ptr) != 0){ return false }
    _depth_view = load64(view_ptr, 0)
+
+   ;; --- MSAA color image (only when samples > 1) ---
+   if(samples > 1){
+      mut ci2 = sys_malloc(88)
+      memset(ci2, 0, 88)
+      store32(ci2, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
+      store32(ci2, 0, 16)
+      store32(ci2, 1, 20)
+      store32(ci2, _swapchain_format, 24) ; same format as swapchain
+      store32(ci2, _swapchain_extent_w, 28)
+      store32(ci2, _swapchain_extent_h, 32)
+      store32(ci2, 1, 36)
+      store32(ci2, 1, 40)
+      store32(ci2, 1, 44)
+      store32(ci2, samples, 48)
+      store32(ci2, 0, 52) ; Tiling OPTIMAL
+      store32(ci2, 0x00000010, 56) ; COLOR_ATTACHMENT_BIT (not TRANSIENT_ATTACHMENT_BIT for RADV stability)
+      store32(ci2, 0, 60)
+      store32(ci2, 0, 64)
+      store32(ci2, 0, 80)
+      mut ip2 = sys_malloc(8)
+      if(create_image(_device, ci2, 0, ip2) != 0){ return false }
+      _msaa_color_image = load64(ip2, 0)
+      mut mr2 = sys_malloc(24)
+      get_image_memory_requirements(_device, _msaa_color_image, mr2)
+      def c_size = load64(mr2, 0)
+      def c_bits = load32(mr2, 16)
+      def c_mtype = _find_memory_type(c_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+      mut ai2 = sys_malloc(64)
+      memset(ai2, 0, 64)
+      store32(ai2, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
+      store64_raw(ai2, c_size, 16)
+      store32(ai2, c_mtype, 24)
+      mut mp2 = sys_malloc(8)
+      if(allocate_memory(_device, ai2, 0, mp2) != 0){ return false }
+      _msaa_color_memory = load64(mp2, 0)
+      bind_image_memory(_device, _msaa_color_image, _msaa_color_memory, 0)
+      mut vc2 = sys_malloc(80)
+      memset(vc2, 0, 80)
+      store32(vc2, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
+      store64_raw(vc2, _msaa_color_image, 24)
+      store32(vc2, 1, 32)
+      store32(vc2, _swapchain_format, 36)
+      store32(vc2, 0x00000001, 56) ; ASPECT_COLOR
+      store32(vc2, 1, 64)
+      store32(vc2, 1, 72)
+      mut vp2 = sys_malloc(8)
+      if(create_image_view(_device, vc2, 0, vp2) != 0){ return false }
+      _msaa_color_view = load64(vp2, 0)
+   }
    true
 }
 
 fn _create_render_pass(){
-   "Defines the Vulkan render pass (color + depth attachments)."
-   ; attachments: 0=color, 1=depth
-   mut atts = sys_malloc(72)
-   ; Color Attachment
-   store32(atts, _swapchain_format, 4)
-   store32(atts, 1, 8)
-   store32(atts, 0, 12) ; loadOp CLEAR (0=LOAD, 1=CLEAR in my simplified mapping? Wait, checking earlier code...)
-   ; Wait, check `vulkan.ny` or previous `vk_renderer.ny`
-   ; In `_create_render_pass`: loadOp (2 = CLEAR)
-   store32(atts, 1, 12) ; loadOp CLEAR
-   store32(atts, 1, 16) ; storeOp STORE
-   store32(atts, 0, 20) ; stencilLoad
-   store32(atts, 0, 24) ; stencilStore
-   store32(atts, 0, 28) ; initialLayout UNDEFINED
-   store32(atts, 1000001002, 32) ; finalLayout PRESENT_SRC
+   "Defines the Vulkan render pass. Uses 3 attachments (MSAA color + depth + resolve) when MSAA>1, or 2 (color + depth) otherwise."
+   def samples = _cfg_msaa
+   def msaa = samples > 1
 
-   ; Depth Attachment (offset 36)
-   store32(atts, 126, 36+4) ; format D32_SFLOAT
-   store32(atts, 1, 36+8) ; samples 1
-   store32(atts, 1, 36+12) ; loadOp CLEAR
-   store32(atts, 0, 36+16) ; storeOp DONT_CARE
-   store32(atts, 0, 36+20) ; stencilLoad DONT_CARE
-   store32(atts, 0, 36+24) ; stencilStore DONT_CARE
-   store32(atts, 0, 36+28) ; initialLayout UNDEFINED
-   store32(atts, 3, 36+32) ; finalLayout DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+   if(msaa){
+      ;; === 3-attachment MSAA render pass ===
+      ;; att 0: MSAA color (multisample, DONT_CARE store, COLOR_ATTACHMENT_OPTIMAL final)
+      ;; att 1: depth (multisample)
+      ;; att 2: resolve (1-sample, STORE, PRESENT_SRC_KHR)
+      mut atts = sys_malloc(108) ; 3 * 36 bytes
+      memset(atts, 0, 108)
+      ; att 0 - MSAA color
+      store32(atts, _swapchain_format, 4)
+      store32(atts, samples, 8)
+      store32(atts, 1, 12) ; loadOp CLEAR
+      store32(atts, 2, 16) ; storeOp DONT_CARE (MSAA image doesn't need to be stored)
+      store32(atts, 2, 20)
+      store32(atts, 2, 24)
+      store32(atts, 0, 28)  ; initialLayout UNDEFINED
+      store32(atts, 2, 32)  ; finalLayout COLOR_ATTACHMENT_OPTIMAL
+      ; att 1 - depth
+      store32(atts, 126, 36+4)
+      store32(atts, samples, 36+8)
+      store32(atts, 2, 36+12)
+      store32(atts, 2, 36+16)
+      store32(atts, 2, 36+20)
+      store32(atts, 2, 36+24)
+      store32(atts, 0, 36+28)
+      store32(atts, 3, 36+32) ; DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      ; att 2 - resolve (1 sample, swapchain)
+      store32(atts, _swapchain_format, 72+4)
+      store32(atts, 1, 72+8)
+      store32(atts, 2, 72+12) ; loadOp DONT_CARE
+      store32(atts, 0, 72+16) ; storeOp STORE
+      store32(atts, 2, 72+20)
+      store32(atts, 2, 72+24)
+      store32(atts, 0, 72+28)  ; UNDEFINED
+      store32(atts, 1000001002, 72+32) ; PRESENT_SRC_KHR
 
-   ; Refs
-   mut car = sys_malloc(8)
-   store32(car, 0, 0)
-   store32(car, 2, 4) ; layout COLOR_ATTACHMENT
+      mut car = sys_malloc(8) store32(car, 0, 0) store32(car, 2, 4) ; att0 COLOR_ATTACHMENT_OPTIMAL
+      mut dar = sys_malloc(8) store32(dar, 1, 0) store32(dar, 3, 4) ; att1 DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      mut rar = sys_malloc(8) store32(rar, 2, 0) store32(rar, 2, 4) ; att2 COLOR_ATTACHMENT_OPTIMAL (resolve)
 
-   mut dar = sys_malloc(8)
-   store32(dar, 1, 0)
-   store32(dar, 3, 4) ; layout DEPTH_STENCIL_ATTACHMENT
+      mut sd = sys_malloc(72)
+      memset(sd, 0, 72)
+      store32(sd, 0, 4)         ; pipelineBindPoint = GRAPHICS
+      store32(sd, 1, 24)        ; colorAttachmentCount = 1
+      store64_raw(sd, car, 32)  ; pColorAttachments (offset 32)
+      store64_raw(sd, rar, 40)  ; pResolveAttachments (offset 40) — resolves MSAA to swapchain
+      store64_raw(sd, dar, 48)  ; pDepthStencilAttachment (offset 48)
 
-   ; Subpass
-   mut sd = sys_malloc(72)
-   memset(sd, 0, 72)
-   store32(sd, 0, 4) ; BIND_POINT_GRAPHICS
-   store32(sd, 1, 24) ; colorCount
-   store64_raw(sd, car, 32)
-   store64_raw(sd, dar, 48) ; pDepthStencilAttachment
+      mut dep = sys_malloc(28)
+      store32(dep, -1, 0)
+      store32(dep, 0, 4)
+      store32(dep, 0x00000400, 8)
+      store32(dep, 0x00000400, 12)
+      store32(dep, 0, 16)
+      store32(dep, 0x00000100 | 0x00000010, 20)
+      store32(dep, 0, 24)
 
-   ; Dependency
-   mut dep = sys_malloc(28)
-   store32(dep, -1, 0) ; srcSubpass EXTERNAL
-   store32(dep, 0, 4) ; dstSubpass
-   store32(dep, 0x00000400, 8) ; srcStageMask COLOR_ATTACHMENT_OUTPUT
-   store32(dep, 0x00000400, 12) ; dstStageMask COLOR_ATTACHMENT_OUTPUT
-   store32(dep, 0, 16) ; srcAccessMask
-   store32(dep, 0x00000100 | 0x00000010, 20) ; dstAccessMask COLOR_WRITE | DEPTH_WRITE
-   store32(dep, 0, 24) ; dependencyFlags
+      mut create_info = sys_malloc(64)
+      memset(create_info, 0, 64)
+      store32(create_info, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, 0)
+      store32(create_info, 3, 20) ; 3 attachments
+      store64_raw(create_info, atts, 24)
+      store32(create_info, 1, 32)
+      store64_raw(create_info, sd, 40)
+      store32(create_info, 1, 48)
+      store64_raw(create_info, dep, 56)
 
-   mut create_info = sys_malloc(64)
-   memset(create_info, 0, 64)
-   store32(create_info, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, 0)
-   store32(create_info, 2, 20) ; attachmentCount
-   store64_raw(create_info, atts, 24)
-   store32(create_info, 1, 32) ; subpassCount
-   store64_raw(create_info, sd, 40)
-   store32(create_info, 1, 48) ; depCount
-   store64_raw(create_info, dep, 56)
+      mut pass_ptr = sys_malloc(8)
+      if(create_render_pass(_device, create_info, 0, pass_ptr) != 0){ return false }
+      _render_pass = load64(pass_ptr, 0)
+   } else {
+      ;; === 2-attachment non-MSAA render pass ===
+      mut atts = sys_malloc(72)
+      memset(atts, 0, 72)
+      store32(atts, _swapchain_format, 4)
+      store32(atts, 1, 8)
+      store32(atts, 1, 12)  ; CLEAR
+      store32(atts, 0, 16)  ; STORE
+      store32(atts, 2, 20) store32(atts, 2, 24)
+      store32(atts, 0, 28) store32(atts, 1000001002, 32) ; PRESENT_SRC_KHR
+      store32(atts, 126, 36+4)
+      store32(atts, 1, 36+8)
+      store32(atts, 2, 36+12) store32(atts, 2, 36+16)
+      store32(atts, 2, 36+20) store32(atts, 2, 36+24)
+      store32(atts, 0, 36+28) store32(atts, 3, 36+32)
 
-   mut pass_ptr = sys_malloc(8)
-   def rp_res = create_render_pass(_device, create_info, 0, pass_ptr)
-   if(rp_res != 0){
-      if(_is_debug()){ print(f"Vulkan: vkCreateRenderPass failed with code {rp_res}") }
-      return false
+      mut car = sys_malloc(8) store32(car, 0, 0) store32(car, 2, 4)
+      mut dar = sys_malloc(8) store32(dar, 1, 0) store32(dar, 3, 4)
+
+      mut sd = sys_malloc(72)
+      memset(sd, 0, 72)
+      store32(sd, 0, 4)
+      store32(sd, 1, 24)
+      store64_raw(sd, car, 32)
+      store64_raw(sd, dar, 48)
+
+      mut dep = sys_malloc(28)
+      store32(dep, -1, 0) store32(dep, 0, 4)
+      store32(dep, 0x00000400, 8) store32(dep, 0x00000400, 12)
+      store32(dep, 0, 16) store32(dep, 0x00000100 | 0x00000010, 20)
+      store32(dep, 0, 24)
+
+      mut create_info = sys_malloc(64)
+      memset(create_info, 0, 64)
+      store32(create_info, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, 0)
+      store32(create_info, 2, 20)
+      store64_raw(create_info, atts, 24)
+      store32(create_info, 1, 32)
+      store64_raw(create_info, sd, 40)
+      store32(create_info, 1, 48)
+      store64_raw(create_info, dep, 56)
+
+      mut pass_ptr = sys_malloc(8)
+      if(create_render_pass(_device, create_info, 0, pass_ptr) != 0){ return false }
+      _render_pass = load64(pass_ptr, 0)
    }
-   _render_pass = load64(pass_ptr, 0)
-   if(_is_debug()){ _dbg_handle("render_pass", _render_pass) }
    true
 }
 
 fn _create_framebuffers(){
-   "Creates Vulkan framebuffers for each swapchain image."
+   "Creates Vulkan framebuffers. When MSAA>1: [msaa_color, depth, resolve(swapchain)]. Otherwise: [swapchain, depth]."
    _framebuffers = []
+   def msaa = _cfg_msaa > 1
    mut i = 0
    while(i < _swapchain_image_count){
-      mut attach_ptr = sys_malloc(16)
-      store64_raw(attach_ptr, to_int(get(_swapchain_image_views, i)), 0)
-      store64_raw(attach_ptr, _depth_view, 8)
+      mut attach_ptr = 0
+      mut att_count = 0
+      if(msaa){
+         attach_ptr = sys_malloc(24)
+         store64_raw(attach_ptr, _msaa_color_view, 0)       ; att0 MSAA color
+         store64_raw(attach_ptr, _depth_view, 8)             ; att1 depth
+         store64_raw(attach_ptr, get(_swapchain_image_views, i), 16) ; att2 resolve
+         att_count = 3
+      } else {
+         attach_ptr = sys_malloc(16)
+         store64_raw(attach_ptr, get(_swapchain_image_views, i), 0)
+         store64_raw(attach_ptr, _depth_view, 8)
+         att_count = 2
+      }
       mut create_info = sys_malloc(64)
       memset(create_info, 0, 64)
       store32(create_info, VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, 0)
       store64_raw(create_info, _render_pass, 24)
-      store32(create_info, 2, 32) ; attachmentCount
+      store32(create_info, att_count, 32)
       store64_raw(create_info, attach_ptr, 40)
       store32(create_info, _swapchain_extent_w, 48)
       store32(create_info, _swapchain_extent_h, 52)
-      store32(create_info, 1, 56) ; layers
+      store32(create_info, 1, 56)
       mut fb_ptr = sys_malloc(8)
-      def fb_res = create_framebuffer(_device, create_info, 0, fb_ptr)
-      if(fb_res != 0){ return false }
+      if(create_framebuffer(_device, create_info, 0, fb_ptr) != 0){ return false }
       _framebuffers = append(_framebuffers, load64(fb_ptr, 0))
       i += 1
    }
@@ -1312,14 +1631,12 @@ fn _create_sync_objects(){
       mut sem1 = sys_malloc(8)
       def s1_res = create_semaphore(_device, si, 0, sem1)
       if(s1_res != 0){
-         if(_is_debug()){ print(f"Vulkan: vkCreateSemaphore(imageAvailable) failed at {i} with code {s1_res}") }
          return false
       }
       _image_available_semaphores = append(_image_available_semaphores, load64(sem1, 0))
       mut sem2 = sys_malloc(8)
       def s2_res = create_semaphore(_device, si, 0, sem2)
       if(s2_res != 0){
-         if(_is_debug()){ print(f"Vulkan: vkCreateSemaphore(renderFinished) failed at {i} with code {s2_res}") }
          return false
       }
       _render_finished_semaphores = append(_render_finished_semaphores, load64(sem2, 0))
@@ -1331,7 +1648,6 @@ fn _create_sync_objects(){
       mut fence = sys_malloc(8)
       def f_res = create_fence(_device, fi, 0, fence)
       if(f_res != 0){
-         if(_is_debug()){ print(f"Vulkan: vkCreateFence failed at {i} with code {f_res}") }
          return false
       }
       _in_flight_fences = append(_in_flight_fences, load64(fence, 0))
@@ -1350,11 +1666,9 @@ fn _create_command_pool(){
    mut pool_ptr = sys_malloc(8)
    def cp_res = create_command_pool(_device, create_info, 0, pool_ptr)
    if(cp_res != 0){
-      if(_is_debug()){ print(f"Vulkan: vkCreateCommandPool failed with code {cp_res}") }
       return false
    }
    _command_pool = load64(pool_ptr, 0)
-    if(_is_debug()){ _dbg_handle("command_pool", _command_pool) }
    true
 }
 
@@ -1369,7 +1683,6 @@ fn _create_command_buffers(){
    mut bufs_ptr = sys_malloc(MAX_FRAMES_IN_FLIGHT * 8)
    def cb_res = allocate_command_buffers(_device, ai, bufs_ptr)
    if(cb_res != 0){
-      if(_is_debug()){ print(f"Vulkan: vkAllocateCommandBuffers failed with code {cb_res}") }
       return false
    }
    _command_buffers = []
@@ -1385,7 +1698,6 @@ fn _create_shader_module(path){
    "Loads a SPIR-V shader file and creates a Vulkan shader module handle."
    def res = file_read(path)
    if(is_err(res)){
-      if(_is_debug()){ print(f"Vulkan: Failed to read shader {path}") }
       return 0
    }
    def code = unwrap(res)
@@ -1400,7 +1712,6 @@ fn _create_shader_module(path){
    mut mod_ptr = sys_malloc(8)
    def vk_res = create_shader_module(_device, ci, 0, mod_ptr)
    if(vk_res != 0){
-      if(_is_debug()){ print(f"Vulkan: Failed to create shader module for {path}, code {vk_res}") }
       return 0
    }
    load64(mod_ptr, 0)
@@ -1410,20 +1721,26 @@ fn _ensure_shader_binaries(){
    "Internal helper to compile default shader sources via glslc."
    def vert_spv = "/build/cache/ny_shader.vert.spv"
    def frag_spv = "/build/cache/ny_shader.frag.spv"
-   if(_is_debug()){ print("Vulkan: Generating shader binaries with glslc...") }
-   def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(push_constant) uniform PC { mat4 mvp; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nvoid main(){\n  gl_Position = pc.mvp * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n}\n"
-   def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  outColor = texture(texSampler, vUV) * vColor;\n}\n"
-   if(is_err(file_write("/build/cache/ny_shader.vert", vert_src))){ return false }
-   if(is_err(file_write("/build/cache/ny_shader.frag", frag_src))){ return false }
-   if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
-   if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
+   if(is_str(_cfg_vert_spv) && file_exists(_cfg_vert_spv)){
+      proc.run("cp", ["cp", _cfg_vert_spv, vert_spv])
+     } else {
+        def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(push_constant) uniform PC { mat4 mvp; int isMask; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nvoid main(){\n  gl_Position = pc.mvp * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n}\n"
+        def _res1 = file_write("/build/cache/ny_shader.vert", vert_src)
+        if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
+     }
+    if(is_str(_cfg_frag_spv) && file_exists(_cfg_frag_spv)){
+       proc.run("cp", ["cp", _cfg_frag_spv, frag_spv])
+    } else {
+       def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(push_constant) uniform PC { mat4 mvp; int isMask; } pc;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec4 tex = texture(texSampler, vUV);\n  if(pc.isMask != 0) {\n     outColor = vec4(vColor.rgb, vColor.a * tex.r);\n  } else {\n     outColor = tex * vColor;\n  }\n}\n"
+       def _res2 = file_write("/build/cache/ny_shader.frag", frag_src)
+       if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
+    }
    file_exists(vert_spv) && file_exists(frag_spv)
 }
 
 fn _create_graphics_pipeline(){
    "Configures and creates the graphics pipeline (shaders, vertex input, blending)."
    if(!_ensure_shader_binaries()){
-      if(_is_debug()){ print("Vulkan: Could not prepare shader binaries") }
       return false
    }
    _vert_module = _create_shader_module("/build/cache/ny_shader.vert.spv")
@@ -1437,16 +1754,15 @@ fn _create_graphics_pipeline(){
    mut dsl_ptr = sys_malloc(8)
    def dsl_res = create_descriptor_set_layout(_device, dsl_ci, 0, dsl_ptr)
    if(dsl_res != 0){
-      if(_is_debug()){ print(f"Vulkan: create_descriptor_set_layout failed {dsl_res}") }
       return false
    }
    _descriptor_set_layout = load64(dsl_ptr, 0)
 
    ; Pipeline Layout
    mut pc_range = sys_malloc(12)
-   store32(pc_range, 1, 0) ; STAGE_VERTEX
+   store32(pc_range, 1 | 16, 0) ; STAGE_VERTEX | STAGE_FRAGMENT
    store32(pc_range, 0, 4)
-   store32(pc_range, 64, 8)
+   store32(pc_range, 80, 8)      ; size 80 (aligned)
    mut dsl_arr = sys_malloc(8)
    store64_raw(dsl_arr, _descriptor_set_layout, 0)
 
@@ -1455,7 +1771,6 @@ fn _create_graphics_pipeline(){
    mut layout_ptr = sys_malloc(8)
    def pl_res = create_pipeline_layout(_device, layout_ci, 0, layout_ptr)
    if(pl_res != 0){
-      if(_is_debug()){ print(f"Vulkan: vkCreatePipelineLayout failed with code {pl_res}") }
       return false
    }
    _pipeline_layout = load64(layout_ptr, 0)
@@ -1463,25 +1778,29 @@ fn _create_graphics_pipeline(){
    ; Vertex Input State
    mut binding_desc = sys_malloc(12)
    store32(binding_desc, 0, 0) ; binding
-   store32(binding_desc, 36, 4) ; stride
+   store32(binding_desc, 24, 4) ; stride (3*4 + 2*4 + 4 = 24)
    store32(binding_desc, 0, 8) ; inputRate VERTEX
-
+ 
    mut attr_desc = sys_malloc(48) ; 3 attributes
    ; 0: Position (vec3) offset 0
    store32(attr_desc, 0, 0) store32(attr_desc, 0, 4) store32(attr_desc, 106, 8) store32(attr_desc, 0, 12)
    ; 1: UV (vec2) offset 12
    store32(attr_desc, 1, 16) store32(attr_desc, 0, 20) store32(attr_desc, 103, 24) store32(attr_desc, 12, 28)
-   ; 2: Color (vec4) offset 20
-   store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 109, 40) store32(attr_desc, 20, 44)
-
+   ; 2: Color (R8G8B8A8_UNORM) offset 20
+   store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 37, 40) store32(attr_desc, 20, 44)
+ 
    def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 3, attr_desc)
 
    ; Common States
    def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
-   def rs = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0)
-   def ms = VkPipelineMultisampleStateCreateInfo(1, 0, 0.0, 0, 0, 0)
-   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15)
-   def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
+   def rs = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0) ; cull=NONE, front=CCW, fill=0
+   def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
+    def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) ; blend=1, srcC=SRC_ALPHA(6), dstC=ONE_MINUS_SRC_ALPHA(7), srcA=ONE(1), dstA=ONE_MINUS_SRC_ALPHA(7)
+    def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
+    
+    ; Depth Stencil State (Enabled for 3D)
+    def ds_state = VkPipelineDepthStencilStateCreateInfo(1, 1, 3, 0, 0, 0, 0, 0.0, 1.0)
+    _touch(ds_state)
 
    mut dyn_states = sys_malloc(8)
    store32(dyn_states, 0, 0)
@@ -1489,12 +1808,8 @@ fn _create_graphics_pipeline(){
    def ds = VkPipelineDynamicStateCreateInfo(2, dyn_states)
 
    ; Pipeline
-   mut main_str = sys_malloc(8)
-   store8(main_str, 109, 0) ; m
-   store8(main_str, 97, 1)  ; a
-   store8(main_str, 105, 2) ; i
-   store8(main_str, 110, 3) ; n
-   store8(main_str, 0, 4)
+    mut main_str = sys_malloc(8)
+    _strcpy(main_str, "main")
    def s1 = VkPipelineShaderStageCreateInfo(1, _vert_module, main_str)
    def s2 = VkPipelineShaderStageCreateInfo(16, _frag_module, main_str)
    ; Pack two stage structs contiguously (48 bytes each)
@@ -1502,263 +1817,316 @@ fn _create_graphics_pipeline(){
    memcpy(stages, s1, 48)
    memcpy(stages + 48, s2, 48)
    def ia = VkPipelineInputAssemblyStateCreateInfo(3, 0)
-   def dss = VkPipelineDepthStencilStateCreateInfo(1, 1, 1, 0, 0, 0, 0, 0.0, 0.0)
+   ; Enable robust Depth Testing & Writing for 3D Mesh culling
+   def dss = VkPipelineDepthStencilStateCreateInfo(1, 1, 3, 0, 0, 0, 0, 0.0, 1.0)
    def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
-    mut pipe_ptr = sys_malloc(8)
-    store64(pipe_ptr, 0xDEADC0DEBEEFCAFE)
-    if(_is_debug()){
-       print(f"Vulkan: Creating graphics pipeline with device={_device} layout={_pipeline_layout} pass={_render_pass}")
-    }
-    def res = create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr)
-    if(_is_debug()){
-       print(f"Vulkan: create_graphics_pipelines res={res}")
-       def low = load32(pipe_ptr, 0)
-       def high = load32(pipe_ptr, 4)
-       print(f"Vulkan: pipe_ptr raw output: low={low} high={high}")
-    }
-    if(res != 0){
-       if(_is_debug()){ print(f"Vulkan: create_graphics_pipelines failed with code {res}") }
-       return false
-    }
-    _pipeline = load64(pipe_ptr, 0)
-    if(_is_debug()){
-       _dbg_handle("pipeline", _pipeline)
-    }
+   mut pipe_ptr = sys_malloc(8)
+   store32(pipe_ptr, 0, 0) store32(pipe_ptr, 0, 4)
+   if(_debug_gfx_enabled){
+      print(f"Vulkan: Creating graphics pipeline with device={_device} layout={_pipeline_layout} pass={_render_pass}")
+   }
+   def res = create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr)
+   if(_debug_gfx_enabled){
+      print(f"Vulkan: create_graphics_pipelines res={res}")
+      def low = load32(pipe_ptr, 0) def high = load32(pipe_ptr, 4)
+      print(f"Vulkan: pipe_ptr raw output: low={low} high={high}")
+   }
+   if(res != 0){ return false }
+   _pipeline = load64(pipe_ptr, 0)
+
+   ;; Create a second pipeline for LINE_LIST rendering with dynamic line width
+   def ia_line = VkPipelineInputAssemblyStateCreateInfo(1, 0) ; topology=LINE_LIST
+   def rs_line = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0) ; lineWidth dynamic
+   mut dyn_line = sys_malloc(12) ; 3 dynamic states: VIEWPORT, SCISSOR, LINE_WIDTH
+   store32(dyn_line, 0, 0) store32(dyn_line, 1, 4) store32(dyn_line, 2, 8) ; 0=VIEWPORT,1=SCISSOR,2=LINE_WIDTH
+   def ds_line = VkPipelineDynamicStateCreateInfo(3, dyn_line)
+   def ci_line = VkGraphicsPipelineCreateInfo(2, stages, vi, ia_line, 0, viewport_state, rs_line, ms, dss, cb, ds_line, _pipeline_layout, _render_pass, 0, 0, -1)
+   mut lpipe_ptr = sys_malloc(8)
+   store32(lpipe_ptr, 0, 0) store32(lpipe_ptr, 0, 4)
+   if(create_graphics_pipelines(_device, 0, 1, ci_line, 0, lpipe_ptr) == 0){
+      _line_pipeline = load64(lpipe_ptr, 0)
+   }
    true
 }
 
 fn begin_frame(){
    "Prepares the renderer for a new frame (sync, acquire image, begin recording)."
    if(!_device){ return false }
-   _frame_open = false
-   ; Wait for previous frame's fence
-   def fence = get(_in_flight_fences, _current_frame)
-   mut fence_ptr = sys_malloc(8)
-   store64_raw(fence_ptr, fence, 0)
-   def wf = wait_for_fences(_device, 1, fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
-   if(wf != 0){
-      sys_free(fence_ptr)
-      return false
-   }
-   def rf = reset_fences(_device, 1, fence_ptr)
-   if(rf != 0){
-      sys_free(fence_ptr)
-      return false
-   }
-   ; Acquire next image
-   mut img_idx_ptr = sys_malloc(4)
-   def sem = get(_image_available_semaphores, _current_frame)
-   def acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, img_idx_ptr)
-   if(acq == 3294966292 || acq == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
-      sys_free(fence_ptr)
-      sys_free(img_idx_ptr)
-      _recreate_swapchain()
-      return false
-   }
-   if(acq != 0 && acq != 1000001003){ ; VK_SUBOPTIMAL_KHR is non-fatal
-      if(_is_debug()){ print(f"Vulkan: vkAcquireNextImageKHR failed with code {acq}") }
-      sys_free(fence_ptr)
-      sys_free(img_idx_ptr)
-      return false
-   }
-   _image_index = load32(img_idx_ptr, 0)
-   ; Begin recording
-   def cb = get(_command_buffers, _current_frame)
-   mut bi = sys_malloc(32)
-   memset(bi, 0, 32)
-   store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
-   def bcb = begin_command_buffer(cb, bi)
-   if(bcb != 0){
-      if(_is_debug()){ print(f"Vulkan: vkBeginCommandBuffer failed with code {bcb}") }
-      sys_free(fence_ptr)
-      sys_free(img_idx_ptr)
-      sys_free(bi)
-      return false
-   }
-   ; Begin Render Pass
-   mut clear_values = sys_malloc(32)
-   store32(clear_values, 0x3f800000, 0) store32(clear_values, 0, 4) store32(clear_values, 0, 8) store32(clear_values, 0x3f800000, 12) ; Color (Red)
-   store32_f32(clear_values, 1.0, 16) store32(clear_values, 0, 20) ; Depth
-
-   mut ri = sys_malloc(64)
-   memset(ri, 0, 64)
-   store32(ri, VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 0)
-   store64_raw(ri, _render_pass, 16)
-   store64_raw(ri, to_int(get(_framebuffers, _image_index)), 24)
-   store32(ri, _swapchain_extent_w, 40); store32(ri, _swapchain_extent_h, 44)
-   store32(ri, 2, 48) ; clearValueCount
-   store64_raw(ri, clear_values, 56)
-   cmd_begin_render_pass(cb, ri, 0)
-
-   ; Set dynamic viewport/scissor
-   mut vp = sys_malloc(24)
-   store32_f32(vp, 0.0, 0) store32_f32(vp, 0.0, 4)
-   store32_f32(vp, float(_swapchain_extent_w), 8) store32_f32(vp, float(_swapchain_extent_h), 12)
-   store32_f32(vp, 0.0, 16) store32_f32(vp, 1.0, 20)
-   cmd_set_viewport(cb, 0, 1, vp)
-
-   mut sci = sys_malloc(16)
-   store32(sci, 0, 0) store32(sci, 0, 4)
-   store32(sci, _swapchain_extent_w, 8) store32(sci, _swapchain_extent_h, 12)
-   cmd_set_scissor(cb, 0, 1, sci)
-
-   sys_free(vp) sys_free(sci)
-
-   _frame_open = true
-   _vertex_offset = 0
-   _total_frames += 1
+   
    if(_window_ref){
-      _update_default_mvp(_window_ref)
-      if(_total_frames % 60 == 0 && _is_debug()){
-         def w = dict_get(_window_ref, "w", 800)
-         def h = dict_get(_window_ref, "h", 600)
-         print(f"Vulkan Frame {_total_frames}: Window {w}x{h}, Extent {_swapchain_extent_w}x{_swapchain_extent_h}")
+      def cur_ww = int(dict_get(_window_ref, "w", _swapchain_extent_w))
+      def cur_wh = int(dict_get(_window_ref, "h", _swapchain_extent_h))
+      if(cur_ww > 0 && cur_wh > 0 && (cur_ww != _swapchain_extent_w || cur_wh != _swapchain_extent_h)){
+         if(!_recreate_swapchain()){ return false }
       }
    }
-   sys_free(fence_ptr)
-   sys_free(img_idx_ptr)
-   sys_free(bi)
-   sys_free(clear_values)
-   sys_free(ri)
-   true
+
+   _frame_open = false
+
+    ; Wait for previous frame's fence
+    def fence = get(_in_flight_fences, _current_frame)
+    store64_raw(_ptr_fence, fence, 0)
+    def wf = wait_for_fences(_device, 1, _ptr_fence, 1, 0xFFFFFFFFFFFFFFFF)
+    if(wf != 0){ return false }
+    ; Reset the fence BEFORE recording starts to avoid driver race
+    reset_fences(_device, 1, _ptr_fence)
+
+    ; Capture current image index
+    mut acq = 0
+    def sem = get(_image_available_semaphores, _current_frame)
+    if(_surface){
+       acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, _ptr_img_idx)
+       if(acq == 0xC460C464 || acq == -1000001004){
+          _recreate_swapchain()
+          return false
+       }
+       if(acq != 0 && acq != 1000001003){ return false }
+       _image_index = load32(_ptr_img_idx, 0)
+    } else {
+       _image_index = (_image_index + 1) % _swapchain_image_count
+    }
+
+    ; Reset + begin recording command buffer
+    def cb = get(_command_buffers, _current_frame)
+    memset(_ptr_bi, 0, 32)
+    store32(_ptr_bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+    if(begin_command_buffer(cb, _ptr_bi) != 0){ return false }
+
+   ; Begin Render Pass
+   ; Set clear values: color + depth (+ resolve slot if MSAA)
+   ; VkClearValue is 16 bytes each: clear[0]=color@0, clear[1]=depth@16, clear[2]=resolve@32
+   memset(_ptr_clear, 0, 96)
+   store32_f32(_ptr_clear, _clear_r, 0)   ; clear[0].color.r
+   store32_f32(_ptr_clear, _clear_g, 4)   ; clear[0].color.g
+   store32_f32(_ptr_clear, _clear_b, 8)   ; clear[0].color.b
+   store32_f32(_ptr_clear, _clear_a, 12)  ; clear[0].color.a
+   store32_f32(_ptr_clear, 1.0, 16)       ; clear[1].depthStencil.depth = 1.0
+   store32(_ptr_clear, 0, 20)             ; clear[1].depthStencil.stencil = 0
+
+   def clear_count = (_cfg_msaa > 1) ? 3 : 2
+
+   memset(_ptr_ri, 0, 64)
+   store32(_ptr_ri, VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 0)
+   store64_raw(_ptr_ri, _render_pass, 16)
+   store64_raw(_ptr_ri, get(_framebuffers, _image_index), 24)
+   store32(_ptr_ri, _swapchain_extent_w, 40)
+   store32(_ptr_ri, _swapchain_extent_h, 44)
+   store32(_ptr_ri, clear_count, 48)
+   store64_raw(_ptr_ri, _ptr_clear, 56)
+   cmd_begin_render_pass(cb, _ptr_ri, 0)
+
+    ; Set dynamic viewport/scissor (pre-allocated)
+     ; Regular viewport (Y-down achieved via ortho matrix mapping)
+     store32_f32(_ptr_vp, 0.0, 0)
+     store32_f32(_ptr_vp, 0.0, 4)
+     store32_f32(_ptr_vp, float(_swapchain_extent_w), 8)
+     store32_f32(_ptr_vp, float(_swapchain_extent_h), 12)
+     store32_f32(_ptr_vp, 0.0, 16)
+     store32_f32(_ptr_vp, 1.0, 20)
+     cmd_set_viewport(cb, 0, 1, _ptr_vp)
+
+    store32(_ptr_sci, 0, 0)
+    store32(_ptr_sci, 0, 4)
+    store32(_ptr_sci, _swapchain_extent_w, 8)
+    store32(_ptr_sci, _swapchain_extent_h, 12)
+    cmd_set_scissor(cb, 0, 1, _ptr_sci)
+
+    _frame_open = true
+    _vertex_offset = 0
+    _last_flush_offset = 0
+    _total_frames += 1
+    _fps_count += 1
+    def now_t = get_time()
+    if(now_t - _fps_last_time >= 1.0){
+       _fps_curr = _fps_count
+       _fps_count = 0
+       _fps_last_time = now_t
+    }
+
+    _update_default_mvp(_window_ref)
+    
+    ; Reset per-frame vertex and state tracking
+    _vertex_offset = 0
+    _last_flush_offset = 0
+    _vertex_limit_hit = false
+    _current_frame_vertex_offset = _current_frame * _vertex_capacity
+    
+    ; MUST reset these so bind_texture and _flush re-issue commands to the NEW command buffer
+    _last_bound_ds = 0
+    _last_bound_tex_id = -1
+    _last_bound_pipe = 0
+    _current_texture_id = -1 ; Force next bind_texture to actually do work
+    _mvp_dirty = true
+    _pc_dirty = true
+    _last_is_mask = -1 ; force is_mask re-check on first draw
+    
+    ; Initial pipeline and common state
+    cmd_bind_pipeline(cb, 0, _pipeline)
+    _last_bound_pipe = _pipeline
+    
+    ; Bind vertex buffer ONCE for this frame's slice — not again until draw_lines_raw
+    store64_raw(_flush_off, _current_frame_vertex_offset, 0)
+    store64_raw(_flush_buf, _vertex_buffer, 0)
+    cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
+    
+    ; Set initial dynamic state
+    cmd_set_viewport(cb, 0, 1, _ptr_vp)
+    cmd_set_scissor(cb, 0, 1, _ptr_sci)
+    
+    memcpy(_pc_buffer, _current_mvp, 64)
+    store32(_pc_buffer, 0, 64)
+    _mvp_dirty = false
+    _pc_dirty = false
+    true
 }
 
 fn _flush(){
-   "Submits pending vertex data to the GPU and executes a draw call."
-   if(_vertex_offset == 0){ return }
+   "Records a draw call for current pending triangle batch."
+   if(_vertex_offset == _last_flush_offset){ return }
+   
+   def count = (_vertex_offset - _last_flush_offset) / 24
+   def first_vert = _last_flush_offset / 24
+   
    def cb = get(_command_buffers, _current_frame)
-   cmd_bind_pipeline(cb, 0, _pipeline)
-
-   ; Bind Texture
-   mut tid = _current_texture_id
-   if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
-   def tex = get(_textures, tid)
-   def ds = dict_get(tex, "ds", 0)
-   if(ds){
-      mut ds_ptr = sys_malloc(8)
-      store64_raw(ds_ptr, ds, 0)
-      cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 1, ds_ptr, 0, 0)
-      sys_free(ds_ptr)
+   
+   ; Switch back to triangle pipeline if needed
+   if(_last_bound_pipe != _pipeline){
+      cmd_bind_pipeline(cb, 0, _pipeline)
+      _last_bound_pipe = _pipeline
+      _pc_dirty = true ; Pipeline switch may need PC re-issue
    }
 
-   mut off = sys_malloc(8)
-   store32(off, 0, 0) store32(off, 0, 4)
-   mut buf_ptr = sys_malloc(8)
-   store64_raw(buf_ptr, _vertex_buffer, 0)
-   cmd_bind_vertex_buffers(cb, 0, 1, buf_ptr, off)
-   sys_free(off)
-   sys_free(buf_ptr)
+   ; Bind Texture / Descriptor Set only when changed
+   mut tid = _current_texture_id
+   if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
+   
+   def ds = texture_descriptor(tid)
+   if(ds && (ds != _last_bound_ds || tid != _last_bound_tex_id)){
+      store64_raw(_ptr_ds, ds, 0)
+      cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 1, _ptr_ds, 0, 0)
+      _last_bound_ds = ds
+      _last_bound_tex_id = tid
+      ; Also mark PC dirty because is_mask may have changed
+      def new_mask = (texture_format(tid) == 9) ? 1 : 0
+      if(new_mask != _last_is_mask){ _last_is_mask = new_mask _pc_dirty = true }
+   }
 
-   cmd_push_constants(cb, _pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, _current_mvp)
+   ; Push constants only when matrix or mask changed
+   if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false _pc_dirty = true }
+   if(_pc_dirty){
+      store32(_pc_buffer, _last_is_mask, 64)
+      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 80, _pc_buffer)
+      _pc_dirty = false
+   }
 
-   def count = to_int(_vertex_offset / 36)
-   cmd_draw(cb, count, 1, 0, 0)
-
-   _vertex_offset = 0
+   ; VBO is already bound in begin_frame — just draw using first_vert index
+   if(count > 0){ cmd_draw(cb, count, 1, first_vert, 0) }
+   _last_flush_offset = _vertex_offset
 }
 
 fn _check_flush(bytes){
-   "Internal helper to flush the buffer if it cannot accommodate more data."
+   "Ensures enough space in the current frame buffer slice."
+   if(_vertex_limit_hit){ return }
    if(_vertex_offset + bytes > _vertex_capacity){
       _flush()
+      if(_vertex_offset + bytes > _vertex_capacity){
+          if(_debug_gfx_enabled){ print("Vulkan: VERTEX BUFFER FULL for current frame!") }
+          _vertex_limit_hit = true
+      }
    }
 }
 
+fn _pack_color(r, g, b, a){
+   "Packs RGBA floats [0,1] into a uint32 (R8G8B8A8 for UNORM attribute)."
+   (int(r * 255.0) & 0xFF) | ((int(g * 255.0) & 0xFF) << 8) | ((int(b * 255.0) & 0xFF) << 16) | ((int(a * 255.0) & 0xFF) << 24)
+}
+
 fn _push_vertex(x, y, z, u, v, r, g, b, a){
-   "Appends a single vertex to the mapped vertex buffer."
-   def off = _vertex_map + _vertex_offset
-   store32_f32(off, x, 0)
-   store32_f32(off, y, 4)
-   store32_f32(off, z, 8)
-   store32_f32(off, u, 12)
-   store32_f32(off, v, 16)
-   store32_f32(off, r, 20)
-   store32_f32(off, g, 24)
-   store32_f32(off, b, 28)
-   store32_f32(off, a, 32)
-   _vertex_offset += 36
+   "Appends a single vertex (24 bytes) to the current batch."
+   def off = _local_vertex_map + _vertex_offset
+   ; Ensure we use raw floats to avoid object tagging artifacts in the buffer.
+   store32_f32(off, float(x), 0)
+   store32_f32(off, float(y), 4)
+   store32_f32(off, float(z), 8)
+   store32_f32(off, float(u), 12)
+   store32_f32(off, float(v), 16)
+   store32(off, _pack_color(r, g, b, a), 20)
+   _vertex_offset += 24
 }
 
 fn end_frame(){
-   "Finalizes the frame (flush, end recording, submit to queue, present)."
+   "Finalizes rendering and presents the frame to the swapchain image."
+   _end_frame_internal(true)
+}
+
+fn _end_frame_internal(present){
+   "Finalizes command recording and triggers vertex upload."
    if(!_frame_open){ return false }
    _flush()
+   
+   ; SINGLE VERTEX UPLOAD: Copy entire frame's vertex data to the GPU.
+   if(_vertex_offset > 0){
+      def sz = (_vertex_offset < _vertex_capacity) ? _vertex_offset : _vertex_capacity
+      memcpy(_vertex_map + _current_frame_vertex_offset, _local_vertex_map, sz)
+   }
    def cb = get(_command_buffers, _current_frame)
    cmd_end_render_pass(cb)
    def ecb = end_command_buffer(cb)
    if(ecb != 0){
-      if(_is_debug()){ print(f"Vulkan: vkEndCommandBuffer failed with code {ecb}") }
       return false
    }
-   mut wait_sems = sys_malloc(8) store64_raw(wait_sems, to_int(get(_image_available_semaphores, _current_frame)), 0)
-   mut signal_sems = sys_malloc(8) store64_raw(signal_sems, to_int(get(_render_finished_semaphores, _current_frame)), 0)
-   mut wait_stages = sys_malloc(4) store32(wait_stages, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0)
-   mut cb_ptr = sys_malloc(8) store64_raw(cb_ptr, cb, 0)
-   mut si = sys_malloc(128)
-   memset(si, 0, 128)
-   store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
-   store32(si, 1, 16) ; waitSemaphoreCount
-   store64_raw(si, wait_sems, 24)
-   store64_raw(si, wait_stages, 32)
-   store32(si, 1, 40) ; commandBufferCount
-   store64_raw(si, cb_ptr, 48)
-   store32(si, 1, 56) ; signalSemaphoreCount
-   store64_raw(si, signal_sems, 64)
+
+   def sem_avail = get(_image_available_semaphores, _current_frame)
+   def sem_finish = get(_render_finished_semaphores, _current_frame)
+   
+   store64_raw(_ptr_wait_sems, sem_avail, 0)
+   store64_raw(_ptr_sig_sems, sem_finish, 0)
+   store32(_ptr_stages, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0)
+   
+   memset(_ptr_sub, 0, 128)
+   store32(_ptr_sub, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store32(_ptr_sub, 1, 16) ; waitSemaphoreCount
+   store64_raw(_ptr_sub, _ptr_wait_sems, 24)
+   store64_raw(_ptr_sub, _ptr_stages, 32)
+   store32(_ptr_sub, 1, 40) ; commandBufferCount
+   mut cb_ptr = _ptr_sub + 80 ;; Reuse end of buffer for cb array
+   store64_raw(cb_ptr, cb, 0)
+   store64_raw(_ptr_sub, cb_ptr, 48)
+   store32(_ptr_sub, 1, 56) ; signalSemaphoreCount
+   store64_raw(_ptr_sub, _ptr_sig_sems, 64)
+
    def fence = get(_in_flight_fences, _current_frame)
-   def sub_res = queue_submit(_graphics_queue, 1, si, fence)
+   def sub_res = queue_submit(_graphics_queue, 1, _ptr_sub, fence)
    if(sub_res != 0){
-      if(_is_debug()){ print(f"Vulkan: vkQueueSubmit failed with code {sub_res}") }
-      sys_free(wait_sems)
-      sys_free(signal_sems)
-      sys_free(wait_stages)
-      sys_free(cb_ptr)
-      sys_free(si)
       return false
    }
-   mut scs = sys_malloc(8) store64_raw(scs, _swapchain, 0)
-   mut idxs = sys_malloc(4) store32(idxs, _image_index, 0)
-   mut pi = sys_malloc(64)
-   memset(pi, 0, 64)
-   store32(pi, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, 0)
-   store32(pi, 1, 16) ; waitSemaphoreCount
-   store64_raw(pi, signal_sems, 24)
-   store32(pi, 1, 32) ; swapchainCount
-   store64_raw(pi, scs, 40)
-   store64_raw(pi, idxs, 48)
-   def pr = queue_present_khr(_present_queue, pi)
-   if(pr == 3294966292 || pr == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
-      _frame_open = false
-      sys_free(wait_sems)
-      sys_free(signal_sems)
-      sys_free(wait_stages)
-      sys_free(cb_ptr)
-      sys_free(si)
-      sys_free(scs)
-      sys_free(idxs)
-      sys_free(pi)
-      _recreate_swapchain()
-      return false
+
+   if(present){
+      def sc = _swapchain
+      def img_idx = _image_index
+      
+      mut scs = _ptr_ri ;; Reuse ri buffer for swapchain array
+      store64_raw(scs, sc, 0)
+      mut idxs = scs + 8
+      store32(idxs, img_idx, 0)
+
+      mut pi = _ptr_ri + 32 ;; Reuse ri buffer for present info
+      memset(pi, 0, 64)
+      store32(pi, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, 0)
+      store32(pi, 1, 16) ; waitSemaphoreCount
+      store64_raw(pi, _ptr_sig_sems, 24)
+      store32(pi, 1, 32) ; swapchainCount
+      store64_raw(pi, scs, 40)
+      store64_raw(pi, idxs, 48)
+
+      def pr = queue_present_khr(_present_queue, pi)
+      if(pr == 0xC460C464 || pr == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
+         _frame_open = false
+         _recreate_swapchain()
+         return false
+      }
    }
-   if(pr != 0 && pr != 1000001003){ ; VK_SUBOPTIMAL_KHR is non-fatal
-      if(_is_debug()){ print(f"Vulkan: vkQueuePresentKHR failed with code {pr}") }
-      sys_free(wait_sems)
-      sys_free(signal_sems)
-      sys_free(wait_stages)
-      sys_free(cb_ptr)
-      sys_free(si)
-      sys_free(scs)
-      sys_free(idxs)
-      sys_free(pi)
-      return false
-   }
-   sys_free(wait_sems)
-   sys_free(signal_sems)
-   sys_free(wait_stages)
-   sys_free(cb_ptr)
-   sys_free(si)
-   sys_free(scs)
-   sys_free(idxs)
-   sys_free(pi)
+
    _frame_open = false
    _current_frame = (_current_frame + 1) % MAX_FRAMES_IN_FLIGHT
    true
@@ -1767,98 +2135,423 @@ fn end_frame(){
 fn clear(r, g, b, a){
    "Commands the GPU to clear the current color attachment."
    if(!_frame_open){ return 0 }
+   if(!_clear_ca){ _clear_ca = sys_malloc(24) _clear_rect = sys_malloc(24) }
    def cb = get(_command_buffers, _current_frame)
-   mut ca = sys_malloc(24)
-   memset(ca, 0, 24)
-   store32(ca, VK_IMAGE_ASPECT_COLOR_BIT, 0)
-   store32(ca, 0, 4) ; colorAttachment
-   store32_f32(ca, r, 8)
-   store32_f32(ca, g, 12)
-   store32_f32(ca, b, 16)
-   store32_f32(ca, a, 20)
-   mut rect = sys_malloc(24)
-   memset(rect, 0, 24)
-   store32(rect, 0, 0) store32(rect, 0, 4) ; offset
-   store32(rect, _swapchain_extent_w, 8) store32(rect, _swapchain_extent_h, 12) ; extent
-   store32(rect, 0, 16) ; baseArrayLayer
-   store32(rect, 1, 20) ; layerCount
-   cmd_clear_attachments(cb, 1, ca, 1, rect)
-   sys_free(ca)
-   sys_free(rect)
+   store32(_clear_ca, VK_IMAGE_ASPECT_COLOR_BIT, 0)
+   store32(_clear_ca, 0, 4)
+   store32_f32(_clear_ca, r, 8)
+   store32_f32(_clear_ca, g, 12)
+   store32_f32(_clear_ca, b, 16)
+   store32_f32(_clear_ca, a, 20)
+   store32(_clear_rect, 0, 0) store32(_clear_rect, 0, 4)
+   store32(_clear_rect, _swapchain_extent_w, 8) store32(_clear_rect, _swapchain_extent_h, 12)
+   store32(_clear_rect, 0, 16)
+   store32(_clear_rect, 1, 20)
+   cmd_clear_attachments(cb, 1, _clear_ca, 1, _clear_rect)
+}
+
+fn clear_depth(){
+   "Clears the depth buffer, ensuring subsequent depth passes render correctly over past layers."
+   if(!_frame_open){ return 0 }
+   _flush() ; Flush pending vertex geometry to ensure it writes before clear
+   if(!_clear_ca){ _clear_ca = sys_malloc(24) _clear_rect = sys_malloc(24) }
+   def cb = get(_command_buffers, _current_frame)
+   store32(_clear_ca, 2, 0) ; VK_IMAGE_ASPECT_DEPTH_BIT
+   store32(_clear_ca, 0, 4) ; colorAttachment ignored
+   store32_f32(_clear_ca, 1.0, 8) ; depth
+   store32(_clear_ca, 0, 12) ; stencil
+   store32(_clear_rect, 0, 0) store32(_clear_rect, 0, 4)
+   store32(_clear_rect, _swapchain_extent_w, 8) store32(_clear_rect, _swapchain_extent_h, 12)
+   store32(_clear_rect, 0, 16)
+   store32(_clear_rect, 1, 20)
+   cmd_clear_attachments(cb, 1, _clear_ca, 1, _clear_rect)
 }
 
 fn draw_rect(x, y, w, h, r, g, b, a){
-   "Batches a colored rectangle for rendering."
-   ; Optimized to use textured path with default white texture
-   draw_rect_tex(x, y, w, h, _default_texture, r, g, b, a)
+   "Batches a colored rectangle (6-vertex CW triangle list) — optimized path."
+   if(!_frame_open){ return 0 }
+   bind_texture(_default_texture)
+   _check_flush(144) ;; 6 * 24 bytes
+   def c = _pack_color(r, g, b, a)
+   _push_rect_packed(x, y, w, h, c)
+}
+
+fn draw_rectangle_fast(x, y, w, h, color_packed){
+   "Submits a rectangle using a pre-packed color value."
+   if(!_frame_open){ return 0 }
+   bind_texture(_default_texture)
+   _check_flush(144)
+   _push_rect_packed(x, y, w, h, color_packed)
+}
+
+fn _push_rect_packed(x, y, w, h, c){
+   "Unrolled 6-vertex quad submission for minimal interpreter overhead."
+   def off = _local_vertex_map + _vertex_offset
+   def fx = float(x) def fy = float(y) def fw = float(w) def fh = float(h)
+   def fz = 0.0
+
+   ;; Tri 1 (TL, BL, BR)
+   store32_f32(off, fx,    0) store32_f32(off, fy,      4) store32_f32(off, fz,  8)
+   store32_f32(off, 0.0,  12) store32_f32(off, 0.0,    16) store32(off, c, 20)
+
+   store32_f32(off, fx,   24) store32_f32(off, fy+fh,  28) store32_f32(off, fz, 32)
+   store32_f32(off, 0.0,  36) store32_f32(off, 1.0,    40) store32(off, c, 44)
+
+   store32_f32(off, fx+fw, 48) store32_f32(off, fy+fh, 52) store32_f32(off, fz, 56)
+   store32_f32(off, 1.0,  60) store32_f32(off, 1.0,    64) store32(off, c, 68)
+
+   ;; Tri 2 (BR, TR, TL)
+   store32_f32(off, fx+fw, 72) store32_f32(off, fy+fh, 76) store32_f32(off, fz, 80)
+   store32_f32(off, 1.0,  84) store32_f32(off, 1.0,    88) store32(off, c, 92)
+
+   store32_f32(off, fx+fw, 96) store32_f32(off, fy,   100) store32_f32(off, fz, 104)
+   store32_f32(off, 1.0, 108) store32_f32(off, 0.0,   112) store32(off, c, 116)
+
+   store32_f32(off, fx,  120) store32_f32(off, fy,    124) store32_f32(off, fz, 128)
+   store32_f32(off, 0.0, 132) store32_f32(off, 0.0,   136) store32(off, c, 140)
+
+   _vertex_offset += 144
 }
 
 fn draw_rect_tex(x, y, w, h, tex_id, r, g, b, a){
-   "Batches a textured rectangle for rendering."
+   "Batches a textured rectangle (6-vertex triangle list) — optimized."
    if(!_frame_open){ return 0 }
    bind_texture(tex_id)
-   _check_flush(6 * 36)
-   _push_vertex(x, y, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x, y + h, 0.0, 0.0, 1.0, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, 1.0, 1.0, r, g, b, a)
-   _push_vertex(x, y, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, 1.0, 1.0, r, g, b, a)
-   _push_vertex(x + w, y, 0.0, 1.0, 0.0, r, g, b, a)
+   _check_flush(144)
+   def c = _pack_color(r, g, b, a)
+   _push_rect_tex_packed(x, y, w, h, 0.0, 0.0, 1.0, 1.0, c)
+}
+
+fn draw_glyph(x, y, w, h, u1, v1, u2, v2, tex_id, r, g, b, a){
+   "Submits a glyph quad for text rendering."
+   if(!_frame_open){ return 0 }
+   bind_texture(tex_id)
+   _check_flush(144)
+   def c = _pack_color(r, g, b, a)
+   _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c)
 }
 
 fn draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a){
-   "Batches a textured rectangle with explicit UV coordinates."
    if(!_frame_open){ return 0 }
    bind_texture(tex_id)
-   _check_flush(6 * 36)
-   _push_vertex(x, y, 0.0, u1, v1, r, g, b, a)
-   _push_vertex(x, y + h, 0.0, u1, v2, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, u2, v2, r, g, b, a)
-   _push_vertex(x, y, 0.0, u1, v1, r, g, b, a)
-   _push_vertex(x + w, y + h, 0.0, u2, v2, r, g, b, a)
-   _push_vertex(x + w, y, 0.0, u2, v1, r, g, b, a)
+   _check_flush(144)
+   def c = _pack_color(r, g, b, a)
+   _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c)
 }
 
-fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
-   "Batches a colored 3D triangle for rendering."
-   if(!_frame_open){ return 0 }
-   bind_texture(_default_texture)
-   _check_flush(3 * 36)
-   _push_vertex(x1, y1, z1, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x2, y2, z2, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x3, y3, z3, 0.0, 0.0, r, g, b, a)
+fn _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c){
+   "Fully unrolled textured 6-vertex quad submission."
+   def off = _local_vertex_map + _vertex_offset
+   def fx = float(x) def fy = float(y) def fw = float(w) def fh = float(h)
+   def fz = 0.0
+
+   ;; Tri 1 (TL, BL, BR)
+   store32_f32(off, fx,    0) store32_f32(off, fy,      4) store32_f32(off, fz,  8)
+   store32_f32(off, u1,   12) store32_f32(off, v1,     16) store32(off, c, 20)
+
+   store32_f32(off, fx,   24) store32_f32(off, fy+fh,  28) store32_f32(off, fz, 32)
+   store32_f32(off, u1,   36) store32_f32(off, v2,     40) store32(off, c, 44)
+
+   store32_f32(off, fx+fw, 48) store32_f32(off, fy+fh, 52) store32_f32(off, fz, 56)
+   store32_f32(off, u2,   60) store32_f32(off, v2,     64) store32(off, c, 68)
+
+   ;; Tri 2 (BR, TR, TL)
+   store32_f32(off, fx+fw, 72) store32_f32(off, fy+fh, 76) store32_f32(off, fz, 80)
+   store32_f32(off, u2,   84) store32_f32(off, v2,     88) store32(off, c, 92)
+
+   store32_f32(off, fx+fw, 96) store32_f32(off, fy,   100) store32_f32(off, fz, 104)
+   store32_f32(off, u2,  108) store32_f32(off, v1,    112) store32(off, c, 116)
+
+   store32_f32(off, fx,  120) store32_f32(off, fy,    124) store32_f32(off, fz, 128)
+   store32_f32(off, u1,  132) store32_f32(off, v1,    136) store32(off, c, 140)
+
+   _vertex_offset += 144
 }
+
+fn _store_v(off, x, y, z, u, v, c){
+   store32_f32(off, x, 0) store32_f32(off, y, 4) store32_f32(off, z, 8)
+   store32_f32(off, u, 12) store32_f32(off, v, 16) store32(off, c, 20)
+}
+
+fn draw_vertices(ptr, count, tex_id){
+   "Bulk-uploads raw vertex data (24-byte stride) to the local mapping."
+   if(!_frame_open || count <= 0 || !ptr){ return 0 }
+   bind_texture(tex_id)
+   def bytes = count * 24
+   _check_flush(bytes)
+   memcpy(_local_vertex_map + _vertex_offset, ptr, bytes)
+   _vertex_offset += bytes
+   true
+}
+
+fn draw_lines_raw(ptr, line_count, _line_width){
+   "Draws lines using pre-baked raw vertex buffer. thickness controls GPU line thickness."
+   if(!_frame_open || line_count <= 0 || !ptr || !_line_pipeline){ return 0 }
+   _flush() ; flush pending triangles first
+   
+   def cb = get(_command_buffers, _current_frame)
+   _check_flush(line_count * 2 * 24)
+   
+   ; Switch to line pipeline
+   if(_last_bound_pipe != _line_pipeline){
+      cmd_bind_pipeline(cb, 0, _line_pipeline)
+      _last_bound_pipe = _line_pipeline
+      _pc_dirty = true
+   }
+   
+   ; Ensure descriptor set is bound (crucial for RADV)
+   mut tid = _current_texture_id
+   if(tid < 0){ tid = _default_texture }
+   def ds = texture_descriptor(tid)
+   if(ds && (ds != _last_bound_ds || tid != _last_bound_tex_id)){
+      store64_raw(_ptr_ds, ds, 0)
+      cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 1, _ptr_ds, 0, 0)
+      _last_bound_ds = ds _last_bound_tex_id = tid
+   }
+
+   ; Push constants if needed
+   if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false _pc_dirty = true }
+   if(_pc_dirty){
+      store32(_pc_buffer, 0, 64) ; lines are never masks
+      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 80, _pc_buffer)
+      _pc_dirty = false
+   }
+
+   ; NOTE: vkCmdSetLineWidth requires float in xmm0 (x86-64 ABI) which Nytrix FFI
+   ; cannot pass correctly via ffi_call. Line width stays at the static pipeline value (1.0).
+   ; The parameter is reserved for future typed-extern support.
+
+   ; Copy vertices
+   def bytes = line_count * 2 * 24
+   def first_vert = _vertex_offset / 24
+   memcpy(_local_vertex_map + _vertex_offset, ptr, bytes)
+   
+   ; Draw using firstVertex within the existing slice VBO binding (no rebind needed)
+   cmd_draw(cb, line_count * 2, 1, first_vert, 0)
+   
+   _vertex_offset += bytes
+   _last_flush_offset = _vertex_offset
+   
+   ; Rebind VBO back to slice start so subsequent triangle _flush calls work
+   store64_raw(_flush_off, _current_frame_vertex_offset, 0)
+   cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
+   true
+}
+
+
 
 fn _draw_triangle_2d(x1, y1, x2, y2, x3, y3, r, g, b, a){
-   "Batches a colored triangle for rendering."
+   "Batches a colored 2D triangle."
    if(!_frame_open){ return 0 }
-   _check_flush(3 * 36)
-   _push_vertex(x1, y1, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x2, y2, 0.0, 0.0, 0.0, r, g, b, a)
-   _push_vertex(x3, y3, 0.0, 0.0, 0.0, r, g, b, a)
+   bind_texture(_default_texture)
+   _check_flush(72)
+   def c = _pack_color(r, g, b, a)
+   def off = _local_vertex_map + _vertex_offset
+   store32_f32(off, float(x1),  0) store32_f32(off, float(y1),  4) store32_f32(off, 0.0,  8)
+   store32_f32(off, 0.0,       12) store32_f32(off, 0.0,       16) store32(off, c, 20)
+   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, 0.0, 32)
+   store32_f32(off, 0.0,       36) store32_f32(off, 0.0,       40) store32(off, c, 44)
+   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, 0.0, 56)
+   store32_f32(off, 0.0,       60) store32_f32(off, 0.0,       64) store32(off, c, 68)
+   _vertex_offset += 72
 }
 
 fn draw_line(x1, y1, x2, y2, thickness, r, g, b, a){
-   "Batches a colored line for rendering by expanding it into two triangles."
-   def dx = x2 - x1
-   def dy = y2 - y1
-   def len = sqrt(dx * dx + dy * dy)
-   if(len <= 0.00001){ return 0 }
-   def inv = 1.0 / len
-   def nx = -dy * inv
-   def ny = dx * inv
-   if(thickness <= 0.0){ thickness = 1.0 }
-   def half_t = thickness * 0.5
-   def ax = x1 + nx * half_t
-   def ay = y1 + ny * half_t
-   def bx = x2 + nx * half_t
-   def by = y2 + ny * half_t
-   def cx = x2 - nx * half_t
-   def cy = y2 - ny * half_t
-   def dx2 = x1 - nx * half_t
-   def dy2 = y1 - ny * half_t
-   _draw_triangle_2d(ax, ay, bx, by, cx, cy, r, g, b, a)
-   _draw_triangle_2d(ax, ay, cx, cy, dx2, dy2, r, g, b, a)
+   "Batches a thick line using a 6-vertex triangle quad."
+   if(!_frame_open){ return 0 }
+   bind_texture(_default_texture)
+   _check_flush(144)
+   def dx = float(x2) - float(x1)
+   def dy = float(y2) - float(y1)
+   def l = sqrt(dx*dx + dy*dy)
+   if(l == 0.0){ return 0 }
+   def nx = -dy / l * (float(thickness) * 0.5)
+   def ny =  dx / l * (float(thickness) * 0.5)
+   def c = _pack_color(r, g, b, a)
+   def off = _local_vertex_map + _vertex_offset
+   def ax = float(x1) def ay = float(y1)
+   def bx = float(x2) def by = float(y2)
+   def fz = 0.0
+   ;; Tri 1 (A+n, A-n, B-n)
+   store32_f32(off, ax+nx,  0) store32_f32(off, ay+ny,  4) store32_f32(off, fz,  8)
+   store32_f32(off, 0.0,   12) store32_f32(off, 0.0,   16) store32(off, c, 20)
+   store32_f32(off, ax-nx, 24) store32_f32(off, ay-ny, 28) store32_f32(off, fz, 32)
+   store32_f32(off, 0.0,   36) store32_f32(off, 0.0,   40) store32(off, c, 44)
+   store32_f32(off, bx-nx, 48) store32_f32(off, by-ny, 52) store32_f32(off, fz, 56)
+   store32_f32(off, 0.0,   60) store32_f32(off, 0.0,   64) store32(off, c, 68)
+   ;; Tri 2 (A+n, B-n, B+n)
+   store32_f32(off, ax+nx, 72) store32_f32(off, ay+ny, 76) store32_f32(off, fz, 80)
+   store32_f32(off, 0.0,   84) store32_f32(off, 0.0,   88) store32(off, c, 92)
+   store32_f32(off, bx-nx, 96) store32_f32(off, by-ny,100) store32_f32(off, fz,104)
+   store32_f32(off, 0.0,  108) store32_f32(off, 0.0,  112) store32(off, c, 116)
+   store32_f32(off, bx+nx,120) store32_f32(off, by+ny,124) store32_f32(off, fz,128)
+   store32_f32(off, 0.0,  132) store32_f32(off, 0.0,  136) store32(off, c, 140)
+   _vertex_offset += 144
+}
+
+fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
+   "Batches a single colored 3D triangle (zero-alloc)."
+   if(!_frame_open){ return }
+   bind_texture(_default_texture)
+   _check_flush(72)
+   def c = _pack_color(r, g, b, a)
+   def off = _local_vertex_map + _vertex_offset
+   store32_f32(off, float(x1), 0) store32_f32(off, float(y1), 4) store32_f32(off, float(z1), 8)
+   store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20)
+   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, float(z2), 32)
+   store32_f32(off, 0, 36) store32_f32(off, 0, 40) store32(off, c, 44)
+   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, float(z3), 56)
+   store32_f32(off, 0, 60) store32_f32(off, 0, 64) store32(off, c, 68)
+   _vertex_offset += 72
+}
+
+fn draw_quad_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, r, g, b, a){
+   "Batches a single colored 3D quad (zero-alloc)."
+   if(!_frame_open){ return }
+   bind_texture(_default_texture)
+   _check_flush(144)
+   def c = _pack_color(r, g, b, a)
+   def off = _local_vertex_map + _vertex_offset
+   store32_f32(off, float(x1), 0) store32_f32(off, float(y1), 4) store32_f32(off, float(z1), 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20)
+   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, float(z2), 32) store32_f32(off, 0, 36) store32_f32(off, 0, 40) store32(off, c, 44)
+   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, float(z3), 56) store32_f32(off, 0, 60) store32_f32(off, 0, 64) store32(off, c, 68)
+   
+   store32_f32(off, float(x1), 72) store32_f32(off, float(y1), 76) store32_f32(off, float(z1), 80) store32_f32(off, 0, 84) store32_f32(off, 0, 88) store32(off, c, 92)
+   store32_f32(off, float(x3), 96) store32_f32(off, float(y3), 100) store32_f32(off, float(z3), 104) store32_f32(off, 0, 108) store32_f32(off, 0, 112) store32(off, c, 116)
+   store32_f32(off, float(x4), 120) store32_f32(off, float(y4), 124) store32_f32(off, float(z4), 128) store32_f32(off, 0, 132) store32_f32(off, 0, 136) store32(off, c, 140)
+   _vertex_offset += 144
+}
+
+fn draw_line_3d(x1, y1, z1, x2, y2, z2, thickness, r, g, b, a){
+   "Batches a 3D line as a quad (parallel to Y if needed, or billboarded)."
+   if(!_frame_open){ return }
+   bind_texture(_default_texture)
+   _check_flush(144)
+   def dx = float(x2) - float(x1) def dy = float(y2) - float(y1) def dz = float(z2) - float(z1)
+   def l = sqrt(dx*dx + dy*dy + dz*dz)
+   if(l == 0.0){ return }
+   mut nx = -dz / l * (float(thickness) * 0.5)
+   mut ny = 0.0
+   mut nz =  dx / l * (float(thickness) * 0.5)
+   if(abs(dx) < 0.001 && abs(dz) < 0.001){ nx = float(thickness)*0.5 nz = 0.0 }
+   def c = _pack_color(r, g, b, a)
+   def off = _local_vertex_map + _vertex_offset
+   def f1x = float(x1) def f1y = float(y1) def f1z = float(z1)
+   def f2x = float(x2) def f2y = float(y2) def f2z = float(z2)
+   store32_f32(off, f1x+nx, 0)  store32_f32(off, f1y+ny, 4)  store32_f32(off, f1z+nz, 8)
+   store32_f32(off, 0.0, 12) store32_f32(off, 0.0, 16) store32(off, c, 20)
+   store32_f32(off, f1x-nx, 24) store32_f32(off, f1y-ny, 28) store32_f32(off, f1z-nz, 32)
+   store32_f32(off, 0.0, 36) store32_f32(off, 0.0, 40) store32(off, c, 44)
+   store32_f32(off, f2x-nx, 48) store32_f32(off, f2y-ny, 52) store32_f32(off, f2z-nz, 56)
+   store32_f32(off, 0.0, 60) store32_f32(off, 0.0, 64) store32(off, c, 68)
+   store32_f32(off, f1x+nx, 72) store32_f32(off, f1y+ny, 76) store32_f32(off, f1z+nz, 80)
+   store32_f32(off, 0.0, 84) store32_f32(off, 0.0, 88) store32(off, c, 92)
+   store32_f32(off, f2x-nx, 96) store32_f32(off, f2y-ny, 100) store32_f32(off, f2z-nz, 104)
+   store32_f32(off, 0.0, 108) store32_f32(off, 0.0, 112) store32(off, c, 116)
+   store32_f32(off, f2x+nx, 120) store32_f32(off, f2y+ny, 124) store32_f32(off, f2z+nz, 128)
+   store32_f32(off, 0.0, 132) store32_f32(off, 0.0, 136) store32(off, c, 140)
+   _vertex_offset += 144
+}
+
+fn draw_grid_3d(size, step){
+   "Draws an infinite-style 3D grid on the XZ plane."
+   def s = float(size)
+   mut gx = -s
+   while(gx <= s){
+      draw_line_3d(gx, 0, -s, gx, 0, s, 0.03, 0.2, 0.2, 0.4, 0.5)
+      draw_line_3d(-s, 0, gx, s, 0, gx, 0.03, 0.2, 0.2, 0.4, 0.5)
+      gx += float(step)
+   }
+}
+
+fn draw_axes_3d(size){
+   "Draws RGB axis lines with arrowheads."
+   def s = float(size)
+   draw_line_3d(0,0,0, s,0,0, 0.15, 1,0,0,1)
+   draw_line_3d(0,0,0, 0,s,0, 0.15, 0,1,0,1)
+   draw_line_3d(0,0,0, 0,0,s, 0.15, 0,0,1,1)
+   
+   ;; Basic Arrowheads (Triangles)
+   def ts = 0.4
+   ;; X
+   draw_triangle_3d(s, 0, 0, s-ts, ts, 0, s-ts,-ts, 0, 1, 0, 0, 1)
+   ;; Y
+   draw_triangle_3d(0, s, 0, ts, s-ts, 0,-ts, s-ts, 0, 0, 1, 0, 1)
+   ;; Z
+   draw_triangle_3d(0, 0, s, ts, 0, s-ts,-ts, 0, s-ts, 0, 0, 1, 1)
+}
+
+fn draw_cube_3d(x, y, z, size, r, g, b, a, tex_id){
+   "Batches a colored 3D cube directly with direct submission."
+   if(!_frame_open){ return }
+   bind_texture(tex_id)
+   _check_flush(36 * 24)
+   def s = float(size) * 0.5
+   def fx = float(x) def fy = float(y) def fz = float(z)
+   def c = _pack_color(r, g, b, a)
+   mut cur = _local_vertex_map + _vertex_offset
+   
+   ;; Vertex layout helper (inline-like)
+   def _v = fn(px, py, pz, u, v){
+      store32_f32(cur, px, 0) store32_f32(cur, py, 4) store32_f32(cur, pz, 8)
+      store32_f32(cur, u, 12) store32_f32(cur, v, 16) store32(cur, c, 20)
+      cur += 24
+   }
+
+   ;; Front (+Z)
+   _v(fx-s, fy-s, fz+s, 0,0) _v(fx+s, fy-s, fz+s, 1,0) _v(fx+s, fy+s, fz+s, 1,1)
+   _v(fx-s, fy-s, fz+s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx-s, fy+s, fz+s, 0,1)
+   ;; Back (-Z)
+   _v(fx-s, fy-s, fz-s, 1,0) _v(fx-s, fy+s, fz-s, 1,1) _v(fx+s, fy+s, fz-s, 0,1)
+   _v(fx-s, fy-s, fz-s, 1,0) _v(fx+s, fy+s, fz-s, 0,1) _v(fx+s, fy-s, fz-s, 0,0)
+   ;; Top (+Y)
+   _v(fx-s, fy+s, fz-s, 0,0) _v(fx-s, fy+s, fz+s, 0,1) _v(fx+s, fy+s, fz+s, 1,1)
+   _v(fx-s, fy+s, fz-s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx+s, fy+s, fz-s, 1,0)
+   ;; Bottom (-Y)
+   _v(fx-s, fy-s, fz-s, 0,0) _v(fx+s, fy-s, fz-s, 1,0) _v(fx+s, fy-s, fz+s, 1,1)
+   _v(fx-s, fy-s, fz-s, 0,0) _v(fx+s, fy-s, fz+s, 1,1) _v(fx-s, fy-s, fz+s, 0,1)
+   ;; Right (+X)
+   _v(fx+s, fy-s, fz-s, 0,0) _v(fx+s, fy+s, fz-s, 0,1) _v(fx+s, fy+s, fz+s, 1,1)
+   _v(fx+s, fy-s, fz-s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx+s, fy-s, fz+s, 1,0)
+   ;; Left (-X)
+   _v(fx-s, fy-s, fz-s, 0,0) _v(fx-s, fy-s, fz+s, 1,0) _v(fx-s, fy+s, fz+s, 1,1)
+   _v(fx-s, fy-s, fz-s, 0,0) _v(fx-s, fy+s, fz+s, 1,1) _v(fx-s, fy+s, fz-s, 0,1)
+
+   _vertex_offset = cur - _local_vertex_map
+}
+
+fn draw_line_strip_2d(x, y, w, h, history, scale, r, g, b, a){
+   "Batches a UI line strip from a history list."
+   if(!_frame_open){ return }
+   bind_texture(_default_texture)
+   def count = len(history)
+   if(count < 2){ return }
+   _check_flush((count-1) * 144)
+   def c = _pack_color(r, g, b, a)
+   def dcount = float(count - 1)
+   def step = float(w) / dcount
+   def fh = float(h) def fx = float(x) def fy = float(y)
+   def fs = float(scale)
+   mut off = _local_vertex_map + _vertex_offset
+   mut i = 0
+   while(i < count - 1){
+      mut v1 = float(get(history, i, 0)) * fs
+      mut v2 = float(get(history, i + 1, 0)) * fs
+      if(v1 > 1.0){ v1 = 1.0 } if(v2 > 1.0){ v2 = 1.0 }
+      def px1 = fx + float(i) * step
+      def py1 = fy + fh * (1.0 - v1)
+      def px2 = fx + float(i+1) * step
+      def py2 = fy + fh * (1.0 - v2)
+      def th = 1.0
+      store32_f32(off, px1, 0) store32_f32(off, py1-th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      store32_f32(off, px1, 0) store32_f32(off, py1+th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      store32_f32(off, px2, 0) store32_f32(off, py2+th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      store32_f32(off, px1, 0) store32_f32(off, py1-th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      store32_f32(off, px2, 0) store32_f32(off, py2+th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      store32_f32(off, px2, 0) store32_f32(off, py2-th, 4) store32_f32(off, 0, 8) store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20) off += 24
+      i += 1
+   }
+   _vertex_offset = off - _local_vertex_map
 }
 
 fn _strcpy(dst, src){

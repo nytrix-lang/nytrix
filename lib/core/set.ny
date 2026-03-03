@@ -1,7 +1,7 @@
 ;; Keywords: core set
 ;; Core Set module.
 
-module std.core.set (
+module std.core.set_mod (
    set, set_new, set_add, set_contains
 )
 use std.core *
@@ -168,7 +168,7 @@ fn set_contains(s, key){
 
 if(comptime{__main()}){
     use std.core *
-    use std.core.set *
+    use std.core.set_mod *
 
     mut s = set(8)
     assert(is_set(s), "is_set(s)")
@@ -231,5 +231,5 @@ if(comptime{__main()}){
     s_realloc = set_add(s_realloc, "r1")
     assert(s_realloc == s_curr, "set ptr stable on existing key")
 
-    print("✓ std.core.set tests passed")
+    print("✓ std.core.set_mod tests passed")
 }

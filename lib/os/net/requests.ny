@@ -104,7 +104,7 @@ fn requests_parse_response(raw){
 if(comptime{__main()}){
     use std.net.requests *
     use std.core *
-    use std.core.dict *
+    use std.core.dict_mod *
     use std.core.error *
     use std.text.io *
 

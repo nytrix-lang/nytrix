@@ -44,8 +44,8 @@ fn uuid(){
 if(comptime{__main()}){
     use std.util.general *
     use std.core *
-    use std.core.dict *
-    use std.core.set *
+    use std.core.dict_mod *
+    use std.core.set_mod *
     use std.core.reflect *
     use std.core.test *
     use std.text *

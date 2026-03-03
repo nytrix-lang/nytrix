@@ -1269,7 +1269,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
                                       ny_lookup_fun_recurse, hash ? &hash : NULL);
   if (res)
     goto end;
-  // Check aliases if name has dot
+
   const char *dot = qualified ? strchr(name, '.') : NULL;
   if (dot) {
     size_t prefix_len = dot - name;
@@ -1279,12 +1279,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       size_t alias_len = (size_t)ny_binding_name_len(al);
       if (alias_len == prefix_len && strncmp(name, alias, prefix_len) == 0) {
         const char *real_mod_name = (const char *)al->stmt_t;
-        // Avoid infinite recursion if alias matches itself
         if (strncmp(name, real_mod_name, prefix_len) == 0 &&
             real_mod_name[prefix_len] == '\0') {
           continue;
         }
-        // Construct resolved name: real_mod_name + dot + suffix
         size_t mod_len = strlen(real_mod_name);
         size_t dot_len = strlen(dot);
         size_t full_len = mod_len + dot_len;
@@ -1318,6 +1316,7 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       }
     }
   }
+
   if (!res && !qualified && cg->current_module_name) {
     char mod_buf[256];
     snprintf(mod_buf, sizeof(mod_buf), "%s.%s", cg->current_module_name, name);
@@ -1418,6 +1417,41 @@ binding *lookup_global(codegen_t *cg, const char *name) {
                                       ny_lookup_global_recurse, NULL);
   if (res)
     goto end;
+
+  const char *dot = qualified ? strchr(name, '.') : NULL;
+  if (dot) {
+    size_t prefix_len = dot - name;
+    for (size_t i = 0; i < cg->aliases.len; ++i) {
+      binding *al = &cg->aliases.data[i];
+      const char *alias = al->name;
+      size_t alias_len = (size_t)ny_binding_name_len(al);
+      if (alias_len == prefix_len && strncmp(name, alias, prefix_len) == 0) {
+        const char *real_mod_name = (const char *)al->stmt_t;
+        if (strncmp(name, real_mod_name, prefix_len) == 0 &&
+            real_mod_name[prefix_len] == '\0') {
+          continue;
+        }
+        size_t mod_len = strlen(real_mod_name);
+        size_t dot_len = strlen(dot);
+        size_t full_len = mod_len + dot_len;
+        char stack_buf[256];
+        char *resolved =
+            full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+        if (!resolved)
+          continue;
+        memcpy(resolved, real_mod_name, mod_len);
+        memcpy(resolved + mod_len, dot, dot_len + 1);
+        binding *recursive_res = lookup_global(cg, resolved);
+        if (resolved != stack_buf)
+          free(resolved);
+        if (recursive_res) {
+          res = recursive_res;
+          goto end;
+        }
+      }
+    }
+  }
+
   if (!qualified) {
     res = ny_global_tail_find(cg, name);
     if (res)
@@ -1451,6 +1485,41 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
                                        ny_lookup_overload_recurse, &ov_ctx);
   if (best)
     goto end;
+
+  const char *dot = qualified ? strchr(name, '.') : NULL;
+  if (dot) {
+    size_t prefix_len = dot - name;
+    for (size_t i = 0; i < cg->aliases.len; ++i) {
+      binding *al = &cg->aliases.data[i];
+      const char *alias = al->name;
+      size_t alias_len = (size_t)ny_binding_name_len(al);
+      if (alias_len == prefix_len && strncmp(name, alias, prefix_len) == 0) {
+        const char *real_mod_name = (const char *)al->stmt_t;
+        if (strncmp(name, real_mod_name, prefix_len) == 0 &&
+            real_mod_name[prefix_len] == '\0') {
+          continue;
+        }
+        size_t mod_len = strlen(real_mod_name);
+        size_t dot_len = strlen(dot);
+        size_t full_len = mod_len + dot_len;
+        char stack_buf[256];
+        char *resolved =
+            full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+        if (!resolved)
+          continue;
+        memcpy(resolved, real_mod_name, mod_len);
+        memcpy(resolved + mod_len, dot, dot_len + 1);
+        fun_sig *recursive_res = resolve_overload(cg, resolved, argc, 0);
+        if (resolved != stack_buf)
+          free(resolved);
+        if (recursive_res) {
+          best = recursive_res;
+          goto end;
+        }
+      }
+    }
+  }
+
   {
     int best_score = -1;
     size_t name_len = strlen(name);
@@ -1480,6 +1549,8 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
         }
         if ((int)argc < fs->arity)
           score = 80;
+        else
+          score = 40;
       } else {
         int fixed = fs->arity - 1;
         if ((int)argc >= fixed)
@@ -1491,9 +1562,25 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
       }
     }
   }
-  if (!best && !qualified) {
+
+  if (!best) {
     best = ny_fun_tail_find(cg, name);
+    /* If tail_find found something with arity mismatch, try a full search for a better one! */
+    if (best && !best->is_variadic && best->arity != (int)argc) {
+      for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+        fun_sig *fs = &cg->fun_sigs.data[i];
+        const char *dot_ptr = strrchr(fs->name, '.');
+        const char *tail = dot_ptr ? dot_ptr + 1 : fs->name;
+        if (strcmp(tail, name) == 0) {
+          if (fs->arity == (int)argc || (fs->is_variadic && (int)argc >= fs->arity - 1)) {
+            best = fs;
+            break;
+          }
+        }
+      }
+    }
   }
+
   if (!best && cg->parent) {
     best = resolve_overload(cg->parent, name, argc, hash);
   }

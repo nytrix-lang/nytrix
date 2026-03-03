@@ -7,7 +7,7 @@ module std.image.format.gif (
 )
 
 use std.core *
-use std.core.dict *
+use std.core.dict_mod *
 
 ;; Decoder
 
