@@ -7,6 +7,7 @@ sys.dont_write_bytecode = True
 
 import argparse
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, List

@@ -46,7 +46,11 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   uintptr_t mask = (uintptr_t)ps - 1;
   uintptr_t start = p & ~mask;
   uintptr_t end = (p + n - 1) & ~mask;
+#ifdef __APPLE__
+  char vec = 0;
+#else
   unsigned char vec = 0;
+#endif
   for (uintptr_t cur = start; cur <= end; cur += (uintptr_t)ps) {
     if (mincore((void *)cur, (size_t)ps, &vec) != 0) return 0;
   }
@@ -148,7 +152,7 @@ static inline int is_ny_obj(int64_t v) {
   }
   if (rt_addr_readable((uintptr_t)v - 8, 8)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    return tag == TAG_STR_CONST;
+    return (tag == TAG_STR || tag == TAG_STR_CONST);
   }
   return 0;
 }
@@ -161,7 +165,7 @@ static inline int is_v_str(int64_t v) {
   }
   if (rt_addr_readable((uintptr_t)v - 8, 8)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-    return tag == TAG_STR || tag == TAG_STR_CONST;
+    return (tag == TAG_STR || tag == TAG_STR_CONST);
   }
   return 0;
 }

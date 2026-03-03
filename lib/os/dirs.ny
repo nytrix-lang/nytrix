@@ -8,16 +8,7 @@ use std.core *
 use std.text *
 use std.os *
 use std.os.path as ospath
-
-fn _is_windows(){
-   "Internal: returns true if the host operating system is Windows."
-   __os_name() == "windows"
-}
-
-fn _is_macos(){
-   "Internal: returns true if the host operating system is macOS (Darwin)."
-   __os_name() == "macos"
-}
+use std.os.platform as platform
 
 fn _is_non_empty(v){
    "Internal: returns true if `v` is a non-empty string."
@@ -60,6 +51,21 @@ fn _non_empty_or(primary, fallback){
    fallback
 }
 
+fn _user_dir(win_env, win_suffix, mac_suffix, xdg_env, unix_suffix){
+   "Internal: resolves a standard user data/config directory across Windows, macOS, and XDG hosts."
+   if(platform.is_windows()){
+      def win_path = _env_path(win_env)
+      if(str_len(win_path) > 0){ return win_path }
+      return _non_empty_or(_home_join(win_suffix), temp_dir())
+   }
+   if(platform.is_macos()){
+      return _non_empty_or(_home_join(mac_suffix), temp_dir())
+   }
+   def xdg_path = _env_path(xdg_env)
+   if(str_len(xdg_path) > 0){ return xdg_path }
+   _non_empty_or(_home_join(unix_suffix), temp_dir())
+}
+
 fn home_dir(){
    "Returns the path to the current user's home directory, using OS-specific environment variables."
    if(__os_name() == "windows"){
@@ -91,44 +97,36 @@ fn temp_dir(){
 
 fn config_dir(){
    "Returns the path to the current user's configuration directory (e.g., ~/.config on Linux)."
-   if(_is_windows()){
-      def a = _env_path("APPDATA")
-      if(str_len(a) > 0){ return a }
-      return _non_empty_or(_home_join("AppData\\Roaming"), temp_dir())
-   }
-   if(_is_macos()){
-      return _non_empty_or(_home_join("Library/Application Support"), temp_dir())
-   }
-   def x = _env_path("XDG_CONFIG_HOME")
-   if(str_len(x) > 0){ return x }
-   _non_empty_or(_home_join(".config"), temp_dir())
+   _user_dir(
+      "APPDATA",
+      "AppData\\Roaming",
+      "Library/Application Support",
+      "XDG_CONFIG_HOME",
+      ".config"
+   )
 }
 
 fn data_dir(){
    "Returns the path to the current user's persistent data directory (e.g., ~/.local/share on Linux)."
-   if(_is_windows()){
-      def a = _env_path("LOCALAPPDATA")
-      if(str_len(a) > 0){ return a }
-      return _non_empty_or(_home_join("AppData\\Local"), temp_dir())
-   }
-   if(_is_macos()){
-      return _non_empty_or(_home_join("Library/Application Support"), temp_dir())
-   }
-   def x = _env_path("XDG_DATA_HOME")
-   if(str_len(x) > 0){ return x }
-   _non_empty_or(_home_join(".local/share"), temp_dir())
+   _user_dir(
+      "LOCALAPPDATA",
+      "AppData\\Local",
+      "Library/Application Support",
+      "XDG_DATA_HOME",
+      ".local/share"
+   )
 }
 
 fn cache_dir(){
    "Returns the path to the current user's cache directory (e.g., ~/.cache on Linux)."
-   if(_is_windows()){
+   if(platform.is_windows()){
       def a = _env_path("LOCALAPPDATA")
       if(str_len(a) > 0){ return ospath.normalize(ospath.join(a, "Temp")) }
       def t = temp_dir()
       if(str_len(t) > 0){ return t }
       return ospath.normalize("C:\\Temp")
    }
-   if(_is_macos()){
+   if(platform.is_macos()){
       return _non_empty_or(_home_join("Library/Caches"), temp_dir())
    }
    def x = _env_path("XDG_CACHE_HOME")

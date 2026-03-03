@@ -6,6 +6,7 @@ import sys
 sys.dont_write_bytecode = True
 import argparse
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import shutil
 from pathlib import Path
 

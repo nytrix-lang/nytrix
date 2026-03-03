@@ -2,7 +2,8 @@
 ;; Core Mem module.
 
 module std.core.mem (
-   memchr, memcpy, memset, memcmp
+   memchr, memcpy, memset, memcmp,
+   strcpy, cstr, cstr_dup
 )
 use std.core *
 
@@ -11,9 +12,6 @@ fn memchr(ptr, val, n){
    mut i = 0
    while(i < n){
       def b = load8(ptr, i)
-      if(val == 100){
-          print(f"DEBUG: memchr i={i} val={val} b={b} tag={__tagof(ptr)}")
-      }
       if(b == val){ return ptr + i  }
       i += 1
    }
@@ -75,6 +73,47 @@ fn memcmp(p1, p2, n){
       i += 1
    }
    return 0
+}
+
+fn strcpy(dst, src){
+   "Copies a NUL-terminated byte string from `src` into `dst` and returns `dst`."
+   mut i = 0
+   while(true){
+      def ch = load8(src, i)
+      store8(dst, ch, i)
+      if(ch == 0){ return dst }
+      i += 1
+   }
+}
+
+fn cstr(s, fallback=""){
+   "Returns a NUL-terminated string suitable for native interop."
+   if(!is_str(s)){ s = to_str(s) }
+   if(!is_str(s)){ s = fallback }
+   if(!is_str(s)){ return "\x00" }
+   def n = len(s)
+   if(n == 0){ return "\x00" }
+   if(load8(s, n - 1) == 0){ return s }
+   s + "\x00"
+}
+
+fn cstr_dup(s, fallback=""){
+   "Allocates and returns a NUL-terminated copy of `s` for native APIs that retain the pointer."
+   def src = cstr(s, fallback)
+   if(!src){ return 0 }
+   def n = len(src)
+   if(n == 0){
+      def empty = malloc(1)
+      if(empty){ store8(empty, 0, 0) }
+      return empty
+   }
+   def has_nul = load8(src, n - 1) == 0
+   def bytes = has_nul ? n : (n + 1)
+   def dst = malloc(bytes)
+   if(!dst){ return 0 }
+   memcpy(dst, src, n)
+   if(!has_nul){ store8(dst, 0, n) }
+   dst
 }
 
 if(comptime{__main()}){

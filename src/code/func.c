@@ -747,7 +747,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
     return;
   }
   LLVMBasicBlockRef cur = LLVMGetInsertBlock(cg->builder);
-  LLVMBasicBlockRef entry_bb = LLVMAppendBasicBlock(f, "entry");
+  LLVMBasicBlockRef entry_bb = ny_llvm_append_block(f, "entry");
   LLVMPositionBuilderAtEnd(cg->builder, entry_bb);
 
   // Entry block has no predecessors — seal it immediately so Braun SSA never
@@ -969,8 +969,26 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       bool found = lookup_global_exact(cg, final_name) != NULL;
       if (!found) {
         LLVMValueRef g = LLVMAddGlobal(cg->module, cg->type_i64, final_name);
-        if (!(cg->skip_stdlib && ny_is_stdlib_tok(s->tok)))
-          LLVMSetInitializer(g, LLVMConstInt(cg->type_i64, 0, false));
+        bool define_here = true;
+        if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok)) {
+          define_here = false;
+        }
+        if (cg->emit_module_decls_only) {
+          if (cg->emit_module_name && cg->emit_module_name[0]) {
+            define_here =
+                (cg->current_module_name &&
+                 strcmp(cg->current_module_name, cg->emit_module_name) == 0);
+          } else {
+            define_here = (!cg->current_module_name ||
+                           !*cg->current_module_name);
+          }
+        }
+        if (define_here) {
+          if (!(cg->skip_stdlib && ny_is_stdlib_tok(s->tok)))
+            LLVMSetInitializer(g, LLVMConstInt(cg->type_i64, 0, false));
+        } else {
+          LLVMSetLinkage(g, LLVMExternalLinkage);
+        }
         const char *type_name = NULL;
         if (s->as.var.types.len > j)
           type_name = s->as.var.types.data[j];

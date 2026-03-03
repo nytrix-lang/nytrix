@@ -11,7 +11,7 @@ module std.ui.gfx.vk_renderer (
    _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_vertices, draw_lines_raw,
    set_mvp, set_ortho, _pack_color, _flush, _update_default_mvp,
    renderer_config, _get_local_vertex_map, _get_vertex_offset, _advance_vertex_offset,
-   __vkr_push_vertex
+   __vkr_push_vertex, _mvp_matrix
 )
 
 use std.core *
@@ -22,26 +22,181 @@ use std.ui.gfx.vulkan *
 use std.ui.glfw as ui_glfw
 use std.os *
 use std.os.process as proc
-use std.os.ffi *
 use std.text as text
+use std.util.common as common
 
-@extern("__vkr_push_rect")
-fn __vkr_push_rect(ptr, x, y, w, h, color);
+def _VKR_VERT_STRIDE = 24
+def _VKR_OFF_X = 0
+def _VKR_OFF_Y = 4
+def _VKR_OFF_Z = 8
+def _VKR_OFF_U = 12
+def _VKR_OFF_V = 16
+def _VKR_OFF_C = 20
 
-@extern("__vkr_push_rect_tex")
-fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color);
+def _VKR_GLYPH_STRIDE = 48
+def _VKR_G_ADV = 0
+def _VKR_G_XOFF = 4
+def _VKR_G_YOFF = 8
+def _VKR_G_BW = 12
+def _VKR_G_BH = 16
+def _VKR_G_U1 = 20
+def _VKR_G_V1 = 24
+def _VKR_G_U2 = 28
+def _VKR_G_V2 = 32
+def _VKR_G_TEX = 36
+def _VKR_G_PRESENT = 40
 
-@extern("__vkr_pack_color")
-fn __vkr_pack_color(r, g, b, a);
+fn _vkr_color_u32(c){
+   "Internal: normalizes a color value to packed 32-bit form."
+   if(is_float(c)){ return __flt_to_int(c) }
+   c
+}
 
-@extern("__vkr_draw_text")
-fn __vkr_draw_text(vbo_ptr, text, x, y, color, glyphs_ptr, ascent, line_h, out_info);
+fn __vkr_pack_color(r, g, b, a){
+   "Internal: packs RGBA float components into the renderer's native color format."
+   def r8 = __flt_to_int(float(r) * 255.0) & 255
+   def g8 = __flt_to_int(float(g) * 255.0) & 255
+   def b8 = __flt_to_int(float(b) * 255.0) & 255
+   def a8 = __flt_to_int(float(a) * 255.0) & 255
+   (a8 << 24) | (b8 << 16) | (g8 << 8) | r8
+}
 
-@extern("__vkr_push_line")
-fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color);
+fn _vkr_store_vertex(base, idx, x, y, z, u, v, color){
+   "Internal: stores vertex `idx` into packed vertex buffer `base`."
+   def off = base + idx * _VKR_VERT_STRIDE
+   store32_f32(off, float(x), _VKR_OFF_X)
+   store32_f32(off, float(y), _VKR_OFF_Y)
+   store32_f32(off, float(z), _VKR_OFF_Z)
+   store32_f32(off, float(u), _VKR_OFF_U)
+   store32_f32(off, float(v), _VKR_OFF_V)
+   store32(off, _vkr_color_u32(color), _VKR_OFF_C)
+}
 
-@extern("__vkr_push_vertex")
-fn __vkr_push_vertex(ptr, x, y, z, u, v, color);
+fn __vkr_push_vertex(ptr, x, y, z, u, v, color){
+   "Writes one packed vertex to `ptr`."
+   if(!ptr){ return }
+   _vkr_store_vertex(ptr, 0, x, y, z, u, v, color)
+}
+
+fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color){
+   "Writes a six-vertex textured quad to `ptr`."
+   if(!ptr){ return 0 }
+   def x2 = float(x) + float(w)
+   def y2 = float(y) + float(h)
+   _vkr_store_vertex(ptr, 0, x,  y,  0.0, u1, v1, color)
+   _vkr_store_vertex(ptr, 1, x,  y2, 0.0, u1, v2, color)
+   _vkr_store_vertex(ptr, 2, x2, y2, 0.0, u2, v2, color)
+   _vkr_store_vertex(ptr, 3, x2, y2, 0.0, u2, v2, color)
+   _vkr_store_vertex(ptr, 4, x2, y,  0.0, u2, v1, color)
+   _vkr_store_vertex(ptr, 5, x,  y,  0.0, u1, v1, color)
+   0
+}
+
+fn __vkr_push_rect(ptr, x, y, w, h, color){
+   "Writes a six-vertex solid-color quad to `ptr`."
+   __vkr_push_rect_tex(ptr, x, y, w, h, 0.0, 0.0, 0.0, 0.0, color)
+}
+
+fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color){
+   "Writes a six-vertex thick 2D line quad to `ptr`."
+   if(!ptr){ return }
+   def dx = float(x2) - float(x1)
+   def dy = float(y2) - float(y1)
+   def l = sqrt(dx*dx + dy*dy)
+   if(l == 0.0){ return }
+   def th = float(thickness) * 0.5
+   def nx = -dy / l * th
+   def ny =  dx / l * th
+   _vkr_store_vertex(ptr, 0, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 1, float(x1) - nx, float(y1) - ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 2, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 3, float(x1) + nx, float(y1) + ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 4, float(x2) - nx, float(y2) - ny, 0.0, 0.0, 0.0, color)
+   _vkr_store_vertex(ptr, 5, float(x2) + nx, float(y2) + ny, 0.0, 0.0, 0.0, color)
+}
+
+fn _vkr_glyph_present(glyphs_ptr, cp){
+   "Internal: returns whether codepoint `cp` exists in the glyph table."
+   if(cp < 0 || cp >= 256){ return false }
+   load32(glyphs_ptr + cp * _VKR_GLYPH_STRIDE, _VKR_G_PRESENT) != 0
+}
+
+fn __vkr_draw_text(vbo_ptr, text, x, y, color, glyphs_ptr, ascent, line_h, out_info){
+   "Builds packed glyph vertices for `text` into `vbo_ptr` and stores draw metadata in `out_info`."
+   if(!vbo_ptr || !glyphs_ptr || !is_str(text)){ return }
+   def n = str_len(text)
+   def pen_x0 = float(x)
+   mut pen_x = pen_x0
+   mut pen_y = float(y) + float(ascent)
+   def line_h_f = float(line_h)
+   def c = _vkr_color_u32(color)
+   mut vert_idx = 0
+   mut last_tex = -1
+
+   mut i = 0
+   while(i < n){
+      def c1 = load8(text, i)
+      mut cp = 0
+      mut step = 1
+      if(c1 < 0x80){ cp = c1 }
+      elif((c1 & 0xE0) == 0xC0 && i + 1 < n){
+         cp = ((c1 & 0x1F) << 6) | (load8(text, i + 1) & 0x3F)
+         step = 2
+      } elif((c1 & 0xF0) == 0xE0 && i + 2 < n){
+         cp = ((c1 & 0x0F) << 12) | ((load8(text, i + 1) & 0x3F) << 6) | (load8(text, i + 2) & 0x3F)
+         step = 3
+      } elif((c1 & 0xF8) == 0xF0 && i + 3 < n){
+         cp = ((c1 & 0x07) << 18) | ((load8(text, i + 1) & 0x3F) << 12) | ((load8(text, i + 2) & 0x3F) << 6) | (load8(text, i + 3) & 0x3F)
+         step = 4
+      }
+      i += step
+
+      if(cp == 13){ continue }
+      if(cp == 10){ pen_x = pen_x0 pen_y = pen_y + line_h_f continue }
+      if(cp == 9){
+         if(_vkr_glyph_present(glyphs_ptr, 32)){
+            def adv = load32_f32(glyphs_ptr + 32 * _VKR_GLYPH_STRIDE, _VKR_G_ADV)
+            pen_x = pen_x + adv * 4.0
+         }
+         continue
+      }
+
+      if(cp >= 256 || !_vkr_glyph_present(glyphs_ptr, cp)){
+         if(_vkr_glyph_present(glyphs_ptr, 63)){ cp = 63 } else { continue }
+      }
+
+      def g_off = glyphs_ptr + cp * _VKR_GLYPH_STRIDE
+      def adv = load32_f32(g_off, _VKR_G_ADV)
+      def xoff = load32_f32(g_off, _VKR_G_XOFF)
+      def yoff = load32_f32(g_off, _VKR_G_YOFF)
+      def bw = load32_f32(g_off, _VKR_G_BW)
+      def bh = load32_f32(g_off, _VKR_G_BH)
+      def u1 = load32_f32(g_off, _VKR_G_U1)
+      def v1 = load32_f32(g_off, _VKR_G_V1)
+      def u2 = load32_f32(g_off, _VKR_G_U2)
+      def v2 = load32_f32(g_off, _VKR_G_V2)
+      def tex_id = load32(g_off, _VKR_G_TEX)
+      if(tex_id >= 0){ last_tex = tex_id }
+
+      if(bw > 0.0 && bh > 0.0){
+         def gx = pen_x + xoff
+         def gy = pen_y - yoff
+         _vkr_store_vertex(vbo_ptr, vert_idx + 0, gx,      gy,       0.0, u1, v1, c)
+         _vkr_store_vertex(vbo_ptr, vert_idx + 1, gx,      gy + bh,  0.0, u1, v2, c)
+         _vkr_store_vertex(vbo_ptr, vert_idx + 2, gx + bw, gy + bh,  0.0, u2, v2, c)
+         _vkr_store_vertex(vbo_ptr, vert_idx + 3, gx + bw, gy + bh,  0.0, u2, v2, c)
+         _vkr_store_vertex(vbo_ptr, vert_idx + 4, gx + bw, gy,       0.0, u2, v1, c)
+         _vkr_store_vertex(vbo_ptr, vert_idx + 5, gx,      gy,       0.0, u1, v1, c)
+         vert_idx += 6
+      }
+      pen_x = pen_x + adv
+   }
+
+   if(out_info){
+      store64(out_info, vert_idx, 0)
+      store64(out_info, last_tex, 8)
+   }
+}
 
 mut _cfg_vsync = false
 mut _cfg_filter = 0 ; 0=NEAREST, 1=LINEAR
@@ -50,6 +205,7 @@ mut _cfg_frag_spv = ""
 
 mut _debug_gfx_enabled = false
 fn _check_debug_env(){
+   "Internal: loads Vulkan debug flags from environment variables."
    def v = env("NYTRIX_DEBUG_GFX")
    if(v && (eq(v, "1") || eq(v, "true"))){ _debug_gfx_enabled = true }
    else {
@@ -57,12 +213,30 @@ fn _check_debug_env(){
       if(v2 && (eq(v2, "1") || eq(v2, "true"))){ _debug_gfx_enabled = true }
    }
 }
-fn _dbg_handle(label, h){ if(_debug_gfx_enabled){ print(f"Vulkan: {label} h={h}") } 0 }
+fn _dbg_handle(label, h){
+   "Internal: prints a labeled Vulkan handle when debug logging is enabled."
+   if(_debug_gfx_enabled){ print(f"Vulkan: {label} h={h}") }
+   0
+}
+
+fn _load64_raw(p, i=0){
+   "Internal: safely loads a 64-bit handle from two 32-bit parts."
+   def low = load32(p, i)
+   def high = load32(p, i + 4)
+   (high * 4294967296) + (low & 0xFFFFFFFF)
+}
 
 mut _cfg_msaa = 1
-fn _get_vertex_offset(){ _vertex_offset }
-fn _get_local_vertex_map(){ _local_vertex_map }
+fn _get_vertex_offset(){
+   "Returns the current packed-vertex write offset in bytes."
+   _vertex_offset
+}
+fn _get_local_vertex_map(){
+   "Returns the current CPU-visible vertex buffer mapping."
+   _local_vertex_map
+}
 fn _advance_vertex_offset(bytes){
+   "Advances the packed-vertex write offset by `bytes` and returns the new value."
    _vertex_offset += bytes
 }
 
@@ -79,20 +253,6 @@ fn renderer_config(vsync, filter, vert_spv_path, frag_spv_path, msaa){
    _cfg_frag_spv = frag_spv_path
    _cfg_msaa = msaa
 }
-
-fn _touch(..._args){ 0 }
-
-fn _strcpy(dst, src){
-   "Simple C-style string copy for raw buffers."
-   mut i = 0
-   while(true){
-      def c = load8(src, i)
-      store8(dst, c, i)
-      if(c == 0){ break }
-      i += 1
-   }
-}
-
 
 mut _instance = 0
 mut _physical_device = 0
@@ -227,13 +387,19 @@ fn init(win){
    _create_render_pass()
    _create_graphics_pipeline()
    _create_framebuffers()
-   _create_sync_objects()
+   if(!_create_sync_objects()){ if(_debug_gfx_enabled){ print("Vulkan: Sync objects failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Sync objects OK") }
    _create_command_pool()
-   if(!_create_command_buffers()){ return false }
-   if(!_create_vertex_buffer()){ return false }
-   if(!_create_staging_buffer()){ return false }
-   if(!_create_descriptor_pool()){ return false }
-   if(!_create_default_texture()){ return false }
+   if(!_create_command_buffers()){ if(_debug_gfx_enabled){ print("Vulkan: Command buffers failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Command buffers OK") }
+   if(!_create_vertex_buffer()){ if(_debug_gfx_enabled){ print("Vulkan: Vertex buffer failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Vertex buffer OK") }
+   if(!_create_staging_buffer()){ if(_debug_gfx_enabled){ print("Vulkan: Staging buffer failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Staging buffer OK") }
+   if(!_create_descriptor_pool()){ if(_debug_gfx_enabled){ print("Vulkan: Descriptor pool failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Descriptor pool OK") }
+   if(!_create_default_texture()){ if(_debug_gfx_enabled){ print("Vulkan: Default texture failed") } return false }
+   if(_debug_gfx_enabled){ print("Vulkan: Default texture OK") }
 
     _current_mvp = sys_malloc(64)
     _pc_buffer   = sys_malloc(80)
@@ -389,7 +555,7 @@ fn create_texture_ex(width, height, pixels, format=37){
    get_image_memory_requirements(_device, image, mem_req)
    def size = load64(mem_req, 0)
    def type_bits = load32(mem_req, 16)
-   _touch(type_bits)
+   common.touch(type_bits)
    def mem_idx = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
 
    mut alloc_info = sys_malloc(64)
@@ -655,9 +821,17 @@ fn _create_default_texture(){
 
 mut _mvp_dirty = true
 
+fn _mvp_matrix(){
+   "Returns the current internal MVP matrix, as set by begin_mode_3d."
+   mut m = mat4_identity()
+   if(_current_mvp){ mat4_from_buffer(m, _current_mvp) }
+   return m
+}
+
 fn set_mvp(mat){
    "Updates the Model-View-Projection matrix for the renderer."
    if(_current_mvp && is_list(mat)){
+      if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: set_mvp frames={_total_frames}") } }
       if(_vertex_offset != _last_flush_offset){ _flush() } ; Only flush if there's pending data
       mat4_to_buffer(mat, _current_mvp)
       _mvp_dirty = true
@@ -667,6 +841,7 @@ fn set_mvp(mat){
 
 fn set_ortho(l, r, b, t, n, f){
    "Sets the MVP matrix to an orthographic projection."
+   if(b < t){ def tmp = b b = t t = tmp } ; enforce Y-down for UI coords
    def mat = mat4_ortho(l, r, b, t, n, f)
    set_mvp(mat)
 }
@@ -686,18 +861,22 @@ fn texture_size(tex_id){
    [dict_get(tex, "width", 0), dict_get(tex, "height", 0)]
 }
 
+fn _texture_meta(tex_id, key, fallback){
+   "Internal: reads texture metadata field `key` from texture `tex_id`, or returns `fallback`."
+   if(!is_int(tex_id) || tex_id < 0 || tex_id >= len(_textures)){ return fallback }
+   def tex_obj = get(_textures, tex_id, 0)
+   if(!tex_obj || !is_dict(tex_obj)){ return fallback }
+   dict_get(tex_obj, key, fallback)
+}
+
 fn texture_format(tex_id){
    "Returns the format of a texture."
-   if(tex_id < 0 || tex_id >= len(_textures)){ return 37 } ; Default RGBA8
-   def tex_obj = get(_textures, tex_id)
-   dict_get(tex_obj, "format", 37)
+   _texture_meta(tex_id, "format", 37)
 }
 
 fn texture_descriptor(tex_id){
    "Returns the descriptor set for a texture."
-   if(tex_id < 0 || tex_id >= len(_textures)){ return 0 }
-   def tex_obj = get(_textures, tex_id)
-   dict_get(tex_obj, "ds", 0)
+   _texture_meta(tex_id, "ds", 0)
 }
 
 fn destroy_texture(tex_id){
@@ -868,7 +1047,7 @@ fn _create_vertex_buffer(){
    get_buffer_memory_requirements(_device, _vertex_buffer, mem_req)
    def size = load64(mem_req, 0)
    def type_bits = load32(mem_req, 16)
-   _touch(type_bits)
+   common.touch(type_bits)
 
     def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
     if(mem_type_index == -1){ return false }
@@ -1025,7 +1204,7 @@ fn _create_logical_device(){
    store32(queue_create_info, 1, 24)               ; queueCount
    store64_raw(queue_create_info, priorities, 32) ; pQueuePriorities
    mut ext1 = sys_malloc(32)
-   _strcpy(ext1, "VK_KHR_swapchain")
+   strcpy(ext1, "VK_KHR_swapchain")
    mut ext_ptrs = sys_malloc(8)
    store64_raw(ext_ptrs, ext1, 0)
    mut create_info = sys_malloc(72)
@@ -1105,6 +1284,7 @@ fn _choose_present_mode(){
 }
 
 fn _create_headless_image(w, h){
+   "Internal: creates an offscreen color image for headless rendering."
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
    store32(img_ci, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, 0)
@@ -1245,6 +1425,7 @@ fn _create_swapchain(win){
 }
 
 fn _create_swapchain_image_views(){
+   "Internal: creates image views for all swapchain images."
    _swapchain_image_views = []
    mut i = 0
    while(i < len(_swapchain_images)){
@@ -1609,10 +1790,14 @@ fn _create_framebuffers(){
       store32(create_info, _swapchain_extent_h, 52)
       store32(create_info, 1, 56)
       mut fb_ptr = sys_malloc(8)
+      if(_debug_gfx_enabled){ print(f"Vulkan: Creating framebuffer {i}...") }
       if(create_framebuffer(_device, create_info, 0, fb_ptr) != 0){ return false }
-      _framebuffers = append(_framebuffers, load64(fb_ptr, 0))
+      def fb = load64(fb_ptr, 0)
+      if(_debug_gfx_enabled){ _dbg_handle(f"framebuffer {i}", fb) }
+      _framebuffers = append(_framebuffers, fb)
       i += 1
    }
+   if(_debug_gfx_enabled){ print("Vulkan: All framebuffers created.") }
    true
 }
 
@@ -1714,7 +1899,9 @@ fn _create_shader_module(path){
    if(vk_res != 0){
       return 0
    }
-   load64(mod_ptr, 0)
+   def sm_low = load32(mod_ptr, 0)
+   def sm_high = load32(mod_ptr, 4)
+   (sm_high * 4294967296) + (sm_low & 0xFFFFFFFF)
 }
 
 fn _ensure_shader_binaries(){
@@ -1799,8 +1986,6 @@ fn _create_graphics_pipeline(){
     def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
     
     ; Depth Stencil State (Enabled for 3D)
-    def ds_state = VkPipelineDepthStencilStateCreateInfo(1, 1, 3, 0, 0, 0, 0, 0.0, 1.0)
-    _touch(ds_state)
 
    mut dyn_states = sys_malloc(8)
    store32(dyn_states, 0, 0)
@@ -1809,7 +1994,7 @@ fn _create_graphics_pipeline(){
 
    ; Pipeline
     mut main_str = sys_malloc(8)
-    _strcpy(main_str, "main")
+    strcpy(main_str, "main")
    def s1 = VkPipelineShaderStageCreateInfo(1, _vert_module, main_str)
    def s2 = VkPipelineShaderStageCreateInfo(16, _frag_module, main_str)
    ; Pack two stage structs contiguously (48 bytes each)
@@ -1819,6 +2004,7 @@ fn _create_graphics_pipeline(){
    def ia = VkPipelineInputAssemblyStateCreateInfo(3, 0)
    ; Enable robust Depth Testing & Writing for 3D Mesh culling
    def dss = VkPipelineDepthStencilStateCreateInfo(1, 1, 3, 0, 0, 0, 0, 0.0, 1.0)
+   common.touch(dss)
    def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
    mut pipe_ptr = sys_malloc(8)
    store32(pipe_ptr, 0, 0) store32(pipe_ptr, 0, 4)
@@ -1826,13 +2012,12 @@ fn _create_graphics_pipeline(){
       print(f"Vulkan: Creating graphics pipeline with device={_device} layout={_pipeline_layout} pass={_render_pass}")
    }
    def res = create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr)
-   if(_debug_gfx_enabled){
-      print(f"Vulkan: create_graphics_pipelines res={res}")
-      def low = load32(pipe_ptr, 0) def high = load32(pipe_ptr, 4)
-      print(f"Vulkan: pipe_ptr raw output: low={low} high={high}")
-   }
+   if(_debug_gfx_enabled){ print(f"Vulkan: create_graphics_pipelines returned {res}") }
    if(res != 0){ return false }
+
+   if(_debug_gfx_enabled){ print("Vulkan: Loading graphics pipeline handle...") }
    _pipeline = load64(pipe_ptr, 0)
+   if(_debug_gfx_enabled){ _dbg_handle("pipeline", _pipeline) }
 
    ;; Create a second pipeline for LINE_LIST rendering with dynamic line width
    def ia_line = VkPipelineInputAssemblyStateCreateInfo(1, 0) ; topology=LINE_LIST
@@ -1842,21 +2027,28 @@ fn _create_graphics_pipeline(){
    def ds_line = VkPipelineDynamicStateCreateInfo(3, dyn_line)
    def ci_line = VkGraphicsPipelineCreateInfo(2, stages, vi, ia_line, 0, viewport_state, rs_line, ms, dss, cb, ds_line, _pipeline_layout, _render_pass, 0, 0, -1)
    mut lpipe_ptr = sys_malloc(8)
-   store32(lpipe_ptr, 0, 0) store32(lpipe_ptr, 0, 4)
+   if(_debug_gfx_enabled){ print("Vulkan: Creating line pipeline...") }
    if(create_graphics_pipelines(_device, 0, 1, ci_line, 0, lpipe_ptr) == 0){
       _line_pipeline = load64(lpipe_ptr, 0)
+      if(_debug_gfx_enabled){ _dbg_handle("line pipeline", _line_pipeline) }
+   } else {
+      _line_pipeline = _pipeline
    }
+
+   if(_debug_gfx_enabled){ print("Vulkan: Graphics pipeline initialization complete.") }
    true
 }
 
 fn begin_frame(){
    "Prepares the renderer for a new frame (sync, acquire image, begin recording)."
    if(!_device){ return false }
+   if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: Frame {_total_frames}") } }
    
    if(_window_ref){
       def cur_ww = int(dict_get(_window_ref, "w", _swapchain_extent_w))
       def cur_wh = int(dict_get(_window_ref, "h", _swapchain_extent_h))
       if(cur_ww > 0 && cur_wh > 0 && (cur_ww != _swapchain_extent_w || cur_wh != _swapchain_extent_h)){
+         if(_debug_gfx_enabled){ print(f"Vulkan: Window resized {cur_ww}x{cur_wh}") }
          if(!_recreate_swapchain()){ return false }
       }
    }
@@ -1877,6 +2069,7 @@ fn begin_frame(){
     if(_surface){
        acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, _ptr_img_idx)
        if(acq == 0xC460C464 || acq == -1000001004){
+          if(_debug_gfx_enabled){ print("Vulkan: Acquire next image out of date") }
           _recreate_swapchain()
           return false
        }
@@ -1916,11 +2109,11 @@ fn begin_frame(){
    cmd_begin_render_pass(cb, _ptr_ri, 0)
 
     ; Set dynamic viewport/scissor (pre-allocated)
-     ; Regular viewport (Y-down achieved via ortho matrix mapping)
+     ; Vulkan Y-flip via negative viewport height
      store32_f32(_ptr_vp, 0.0, 0)
-     store32_f32(_ptr_vp, 0.0, 4)
+     store32_f32(_ptr_vp, float(_swapchain_extent_h), 4)
      store32_f32(_ptr_vp, float(_swapchain_extent_w), 8)
-     store32_f32(_ptr_vp, float(_swapchain_extent_h), 12)
+     store32_f32(_ptr_vp, -float(_swapchain_extent_h), 12)
      store32_f32(_ptr_vp, 0.0, 16)
      store32_f32(_ptr_vp, 1.0, 20)
      cmd_set_viewport(cb, 0, 1, _ptr_vp)
@@ -2187,90 +2380,39 @@ fn draw_rectangle_fast(x, y, w, h, color_packed){
 fn _push_rect_packed(x, y, w, h, c){
    "Unrolled 6-vertex quad submission for minimal interpreter overhead."
    def off = _local_vertex_map + _vertex_offset
-   def fx = float(x) def fy = float(y) def fw = float(w) def fh = float(h)
-   def fz = 0.0
+   __vkr_push_rect(off, x, y, w, h, c)
+   _vertex_offset += 144
+}
 
-   ;; Tri 1 (TL, BL, BR)
-   store32_f32(off, fx,    0) store32_f32(off, fy,      4) store32_f32(off, fz,  8)
-   store32_f32(off, 0.0,  12) store32_f32(off, 0.0,    16) store32(off, c, 20)
-
-   store32_f32(off, fx,   24) store32_f32(off, fy+fh,  28) store32_f32(off, fz, 32)
-   store32_f32(off, 0.0,  36) store32_f32(off, 1.0,    40) store32(off, c, 44)
-
-   store32_f32(off, fx+fw, 48) store32_f32(off, fy+fh, 52) store32_f32(off, fz, 56)
-   store32_f32(off, 1.0,  60) store32_f32(off, 1.0,    64) store32(off, c, 68)
-
-   ;; Tri 2 (BR, TR, TL)
-   store32_f32(off, fx+fw, 72) store32_f32(off, fy+fh, 76) store32_f32(off, fz, 80)
-   store32_f32(off, 1.0,  84) store32_f32(off, 1.0,    88) store32(off, c, 92)
-
-   store32_f32(off, fx+fw, 96) store32_f32(off, fy,   100) store32_f32(off, fz, 104)
-   store32_f32(off, 1.0, 108) store32_f32(off, 0.0,   112) store32(off, c, 116)
-
-   store32_f32(off, fx,  120) store32_f32(off, fy,    124) store32_f32(off, fz, 128)
-   store32_f32(off, 0.0, 132) store32_f32(off, 0.0,   136) store32(off, c, 140)
-
+fn _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, c){
+   "Internal: batches a textured quad using packed color `c`."
+   if(!_frame_open){ return 0 }
+   bind_texture(tex_id)
+   _check_flush(144)
+   __vkr_push_rect_tex(_local_vertex_map + _vertex_offset, x, y, w, h, u1, v1, u2, v2, c)
    _vertex_offset += 144
 }
 
 fn draw_rect_tex(x, y, w, h, tex_id, r, g, b, a){
    "Batches a textured rectangle (6-vertex triangle list) — optimized."
-   if(!_frame_open){ return 0 }
-   bind_texture(tex_id)
-   _check_flush(144)
-   def c = _pack_color(r, g, b, a)
-   _push_rect_tex_packed(x, y, w, h, 0.0, 0.0, 1.0, 1.0, c)
+   _draw_textured_rect_packed(x, y, w, h, tex_id, 0.0, 0.0, 1.0, 1.0, _pack_color(r, g, b, a))
 }
 
 fn draw_glyph(x, y, w, h, u1, v1, u2, v2, tex_id, r, g, b, a){
    "Submits a glyph quad for text rendering."
-   if(!_frame_open){ return 0 }
-   bind_texture(tex_id)
-   _check_flush(144)
-   def c = _pack_color(r, g, b, a)
-   _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c)
+   _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, _pack_color(r, g, b, a))
 }
 
 fn draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a){
-   if(!_frame_open){ return 0 }
-   bind_texture(tex_id)
-   _check_flush(144)
-   def c = _pack_color(r, g, b, a)
-   _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c)
+   "Batches a textured rectangle with explicit UV coordinates."
+   _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, _pack_color(r, g, b, a))
 }
 
 fn _push_rect_tex_packed(x, y, w, h, u1, v1, u2, v2, c){
    "Fully unrolled textured 6-vertex quad submission."
    def off = _local_vertex_map + _vertex_offset
-   def fx = float(x) def fy = float(y) def fw = float(w) def fh = float(h)
-   def fz = 0.0
-
-   ;; Tri 1 (TL, BL, BR)
-   store32_f32(off, fx,    0) store32_f32(off, fy,      4) store32_f32(off, fz,  8)
-   store32_f32(off, u1,   12) store32_f32(off, v1,     16) store32(off, c, 20)
-
-   store32_f32(off, fx,   24) store32_f32(off, fy+fh,  28) store32_f32(off, fz, 32)
-   store32_f32(off, u1,   36) store32_f32(off, v2,     40) store32(off, c, 44)
-
-   store32_f32(off, fx+fw, 48) store32_f32(off, fy+fh, 52) store32_f32(off, fz, 56)
-   store32_f32(off, u2,   60) store32_f32(off, v2,     64) store32(off, c, 68)
-
-   ;; Tri 2 (BR, TR, TL)
-   store32_f32(off, fx+fw, 72) store32_f32(off, fy+fh, 76) store32_f32(off, fz, 80)
-   store32_f32(off, u2,   84) store32_f32(off, v2,     88) store32(off, c, 92)
-
-   store32_f32(off, fx+fw, 96) store32_f32(off, fy,   100) store32_f32(off, fz, 104)
-   store32_f32(off, u2,  108) store32_f32(off, v1,    112) store32(off, c, 116)
-
-   store32_f32(off, fx,  120) store32_f32(off, fy,    124) store32_f32(off, fz, 128)
-   store32_f32(off, u1,  132) store32_f32(off, v1,    136) store32(off, c, 140)
-
+   __vkr_push_rect_tex(off, x, y, w, h, u1, v1, u2, v2, c)
    _vertex_offset += 144
-}
-
-fn _store_v(off, x, y, z, u, v, c){
-   store32_f32(off, x, 0) store32_f32(off, y, 4) store32_f32(off, z, 8)
-   store32_f32(off, u, 12) store32_f32(off, v, 16) store32(off, c, 20)
 }
 
 fn draw_vertices(ptr, count, tex_id){
@@ -2346,13 +2488,10 @@ fn _draw_triangle_2d(x1, y1, x2, y2, x3, y3, r, g, b, a){
    bind_texture(_default_texture)
    _check_flush(72)
    def c = _pack_color(r, g, b, a)
-   def off = _local_vertex_map + _vertex_offset
-   store32_f32(off, float(x1),  0) store32_f32(off, float(y1),  4) store32_f32(off, 0.0,  8)
-   store32_f32(off, 0.0,       12) store32_f32(off, 0.0,       16) store32(off, c, 20)
-   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, 0.0, 32)
-   store32_f32(off, 0.0,       36) store32_f32(off, 0.0,       40) store32(off, c, 44)
-   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, 0.0, 56)
-   store32_f32(off, 0.0,       60) store32_f32(off, 0.0,       64) store32(off, c, 68)
+   def base = _local_vertex_map + _vertex_offset
+   _vkr_store_vertex(base, 0, x1, y1, 0.0, 0.0, 0.0, c)
+   _vkr_store_vertex(base, 1, x2, y2, 0.0, 0.0, 0.0, c)
+   _vkr_store_vertex(base, 2, x3, y3, 0.0, 0.0, 0.0, c)
    _vertex_offset += 72
 }
 
@@ -2361,31 +2500,8 @@ fn draw_line(x1, y1, x2, y2, thickness, r, g, b, a){
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
    _check_flush(144)
-   def dx = float(x2) - float(x1)
-   def dy = float(y2) - float(y1)
-   def l = sqrt(dx*dx + dy*dy)
-   if(l == 0.0){ return 0 }
-   def nx = -dy / l * (float(thickness) * 0.5)
-   def ny =  dx / l * (float(thickness) * 0.5)
    def c = _pack_color(r, g, b, a)
-   def off = _local_vertex_map + _vertex_offset
-   def ax = float(x1) def ay = float(y1)
-   def bx = float(x2) def by = float(y2)
-   def fz = 0.0
-   ;; Tri 1 (A+n, A-n, B-n)
-   store32_f32(off, ax+nx,  0) store32_f32(off, ay+ny,  4) store32_f32(off, fz,  8)
-   store32_f32(off, 0.0,   12) store32_f32(off, 0.0,   16) store32(off, c, 20)
-   store32_f32(off, ax-nx, 24) store32_f32(off, ay-ny, 28) store32_f32(off, fz, 32)
-   store32_f32(off, 0.0,   36) store32_f32(off, 0.0,   40) store32(off, c, 44)
-   store32_f32(off, bx-nx, 48) store32_f32(off, by-ny, 52) store32_f32(off, fz, 56)
-   store32_f32(off, 0.0,   60) store32_f32(off, 0.0,   64) store32(off, c, 68)
-   ;; Tri 2 (A+n, B-n, B+n)
-   store32_f32(off, ax+nx, 72) store32_f32(off, ay+ny, 76) store32_f32(off, fz, 80)
-   store32_f32(off, 0.0,   84) store32_f32(off, 0.0,   88) store32(off, c, 92)
-   store32_f32(off, bx-nx, 96) store32_f32(off, by-ny,100) store32_f32(off, fz,104)
-   store32_f32(off, 0.0,  108) store32_f32(off, 0.0,  112) store32(off, c, 116)
-   store32_f32(off, bx+nx,120) store32_f32(off, by+ny,124) store32_f32(off, fz,128)
-   store32_f32(off, 0.0,  132) store32_f32(off, 0.0,  136) store32(off, c, 140)
+   __vkr_push_line(_local_vertex_map + _vertex_offset, x1, y1, x2, y2, thickness, c)
    _vertex_offset += 144
 }
 
@@ -2395,13 +2511,10 @@ fn draw_triangle_3d(x1, y1, z1, x2, y2, z2, x3, y3, z3, r, g, b, a){
    bind_texture(_default_texture)
    _check_flush(72)
    def c = _pack_color(r, g, b, a)
-   def off = _local_vertex_map + _vertex_offset
-   store32_f32(off, float(x1), 0) store32_f32(off, float(y1), 4) store32_f32(off, float(z1), 8)
-   store32_f32(off, 0, 12) store32_f32(off, 0, 16) store32(off, c, 20)
-   store32_f32(off, float(x2), 24) store32_f32(off, float(y2), 28) store32_f32(off, float(z2), 32)
-   store32_f32(off, 0, 36) store32_f32(off, 0, 40) store32(off, c, 44)
-   store32_f32(off, float(x3), 48) store32_f32(off, float(y3), 52) store32_f32(off, float(z3), 56)
-   store32_f32(off, 0, 60) store32_f32(off, 0, 64) store32(off, c, 68)
+   def base = _local_vertex_map + _vertex_offset
+   _vkr_store_vertex(base, 0, x1, y1, z1, 0.0, 0.0, c)
+   _vkr_store_vertex(base, 1, x2, y2, z2, 0.0, 0.0, c)
+   _vkr_store_vertex(base, 2, x3, y3, z3, 0.0, 0.0, c)
    _vertex_offset += 72
 }
 
@@ -2552,17 +2665,6 @@ fn draw_line_strip_2d(x, y, w, h, history, scale, r, g, b, a){
       i += 1
    }
    _vertex_offset = off - _local_vertex_map
-}
-
-fn _strcpy(dst, src){
-   "Simple C-style string copy for raw buffers."
-   mut i = 0
-   while(true){
-      def c = load8(src, i)
-      store8(dst, c, i)
-      if(c == 0){ break }
-      i += 1
-   }
 }
 
 fn shutdown(){

@@ -13,21 +13,7 @@ use std.os *
 use std.os.fs *
 use std.os.io *
 use std.os.path *
-
-fn _is_windows(){
-   "Internal: returns true if the host operating system is Windows."
-   eq(__os_name(), "windows")
-}
-
-fn _is_macos(){
-   "Internal: returns true if the host operating system is macOS."
-   eq(__os_name(), "macos")
-}
-
-fn _is_linux(){
-   "Internal: returns true if the host operating system is Linux."
-   eq(__os_name(), "linux")
-}
+use std.os.platform as platform
 
 mut _linux_cpuinfo_loaded = false
 mut _linux_cpuinfo_cache = ""
@@ -58,7 +44,7 @@ mut _system_info_cache = 0
 
 fn _linux_cpuinfo_text(){
    "Internal: retrieves and caches the contents of `/proc/cpuinfo` on Linux."
-   if(!_is_linux()){ return "" }
+   if(!platform.is_linux()){ return "" }
    if(_linux_cpuinfo_loaded){ return _linux_cpuinfo_cache }
    _linux_cpuinfo_cache = _read_text(normalize("/proc/cpuinfo"))
    _linux_cpuinfo_loaded = true
@@ -234,7 +220,7 @@ fn cpu_logical_count(){
    "Returns the detected number of logical CPU cores."
    if(_cpu_logical_count_loaded){ return _cpu_logical_count_cache }
    mut out = 0
-   if(_is_linux()){
+   if(platform.is_linux()){
       def nproc_out = _cmd_out("nproc", [])
       def n0 = _first_number(nproc_out)
       if(n0 > 0){ out = n0 }
@@ -252,7 +238,7 @@ fn cpu_logical_count(){
             if(n > 0){ out = n }
          }
       }
-   } elif(_is_macos()){
+   } elif(platform.is_macos()){
       def sysctl_out = _cmd_out("sysctl", ["-n", "hw.logicalcpu"])
       def n = _first_number(sysctl_out)
       if(n > 0){ out = n }
@@ -261,7 +247,7 @@ fn cpu_logical_count(){
          def n2 = _first_number(ncpu_out)
          if(n2 > 0){ out = n2 }
       }
-   } elif(_is_windows()){
+   } elif(platform.is_windows()){
       def p = env("NUMBER_OF_PROCESSORS")
       def n = _first_number(p)
       if(n > 0){ out = n }
@@ -350,9 +336,9 @@ fn cpu_features_raw(){
    "Returns a raw CPU feature string from OS-specific sources."
    if(_cpu_features_raw_loaded){ return _cpu_features_raw_cache }
    mut out = ""
-   if(_is_linux()){ out = _linux_cpu_features_raw() }
-   elif(_is_macos()){ out = _macos_cpu_features_raw() }
-   elif(_is_windows()){ out = _windows_cpu_features_raw() }
+   if(platform.is_linux()){ out = _linux_cpu_features_raw() }
+   elif(platform.is_macos()){ out = _macos_cpu_features_raw() }
+   elif(platform.is_windows()){ out = _windows_cpu_features_raw() }
    if(!is_str(out)){ out = "" }
    _cpu_features_raw_cache = out
    _cpu_features_raw_loaded = true
@@ -520,12 +506,12 @@ fn has_opencl(){
       if(f == "1" || f == "true" || f == "yes" || f == "on"){ return true }
       if(f == "0" || f == "false" || f == "no" || f == "off"){ return false }
    }
-   if(_is_windows()){
+   if(platform.is_windows()){
       if(file_exists("C:\\Windows\\System32\\OpenCL.dll")){ return true }
       if(file_exists("C:\\Windows\\SysWOW64\\OpenCL.dll")){ return true }
       return false
    }
-   if(_is_macos()){
+   if(platform.is_macos()){
       return file_exists(normalize("/System/Library/Frameworks/OpenCL.framework/OpenCL"))
    }
    if(file_exists(normalize("/etc/OpenCL/vendors"))){ return true }
@@ -541,7 +527,7 @@ fn hostname(){
    "Returns the machine hostname."
    if(_hostname_loaded){ return _hostname_cache }
    mut out = ""
-   if(_is_windows()){
+   if(platform.is_windows()){
       def hn = env("COMPUTERNAME")
       if(is_str(hn) && str_len(strip(hn)) > 0){ out = strip(hn) }
       if(str_len(out) == 0){
@@ -555,14 +541,14 @@ fn hostname(){
    }
    def env_hn = env("HOSTNAME")
    if(is_str(env_hn) && str_len(strip(env_hn)) > 0){ out = strip(env_hn) }
-   if(str_len(out) == 0 && _is_linux()){
+   if(str_len(out) == 0 && platform.is_linux()){
       def proc_hn = _read_text(normalize("/proc/sys/kernel/hostname"))
       if(str_len(proc_hn) > 0){
          def h0 = _first_line(proc_hn)
          if(str_len(h0) > 0){ out = h0 }
       }
    }
-   if(str_len(out) == 0 && _is_macos()){
+   if(str_len(out) == 0 && platform.is_macos()){
       def sys_hn = _cmd_out("sysctl", ["-n", "kern.hostname"])
       if(str_len(sys_hn) > 0){
          def h1 = _first_line(sys_hn)
@@ -576,7 +562,7 @@ fn hostname(){
          if(str_len(h) > 0){ out = h }
       }
    }
-   if(str_len(out) == 0 && !_is_macos()){
+   if(str_len(out) == 0 && !platform.is_macos()){
       def host_out = _cmd_out("hostname", [])
       if(str_len(host_out) > 0){ out = _first_line(host_out) }
    }
@@ -656,7 +642,7 @@ fn ram_short(){
    "Returns a summary string of system RAM usage (e.g., '2048/8192MB').
    Linux uses /proc ; macOS uses sysctl/vm_stat; Windows uses wmic/powershell."
    if(_ram_short_loaded){ return _ram_short_cache }
-   if(_is_linux()){
+   if(platform.is_linux()){
       def mem = _read_text(normalize("/proc/meminfo"))
       if(str_len(mem) > 0){
          def total_v = _find_prefixed_line_value(mem, "MemTotal")
@@ -674,7 +660,7 @@ fn ram_short(){
             return _ram_short_cache
          }
       }
-   } elif(_is_macos()){
+   } elif(platform.is_macos()){
       def total = _cmd_out("sysctl", ["-n", "hw.memsize"])
       mut total_b = _first_number(total)
       if(total_b <= 0){
@@ -715,7 +701,7 @@ fn ram_short(){
          _ram_short_loaded = true
          return _ram_short_cache
       }
-   } elif(_is_windows()){
+   } elif(platform.is_windows()){
       mut out = _cmd_out("wmic", ["OS", "get", "TotalVisibleMemorySize,FreePhysicalMemory", "/value"])
       def wmic_mem = _parse_windows_mem_summary(out)
       if(str_len(wmic_mem) > 0){
@@ -742,7 +728,7 @@ fn gpu_name(){
    if(_gpu_name_loaded){ return _gpu_name_cache }
 
    ; Fast path for macOS to avoid system_profiler unless explicitly requested or needed
-   if(_is_macos()){
+   if(platform.is_macos()){
       ; Check for Apple Silicon GPU via sysctl (fast)
       def soc = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
       if(str_contains(soc, "Apple M")){
@@ -777,7 +763,7 @@ fn gpu_name(){
       return _gpu_name_cache
    }
 
-   if(_is_windows()){
+   if(platform.is_windows()){
       ; Avoid slow wmic/powershell unless deep scan enabled
       if(_gpu_deep_scan_enabled()){
          mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])

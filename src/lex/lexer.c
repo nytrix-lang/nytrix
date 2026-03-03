@@ -20,9 +20,24 @@ static const uint8_t ny_lex_table[256] = {
 #define IS_DIGIT(c) (ny_lex_table[(uint8_t)(c)] & 4)
 #define IS_ALNUM(c) (ny_lex_table[(uint8_t)(c)] & 6)
 
+static inline bool ny_is_alnum8(const unsigned char *p) {
+  return (ny_lex_table[p[0]] & 6) && (ny_lex_table[p[1]] & 6) &&
+         (ny_lex_table[p[2]] & 6) && (ny_lex_table[p[3]] & 6) &&
+         (ny_lex_table[p[4]] & 6) && (ny_lex_table[p[5]] & 6) &&
+         (ny_lex_table[p[6]] & 6) && (ny_lex_table[p[7]] & 6);
+}
+
+static inline bool ny_is_digit8(const unsigned char *p) {
+  return (ny_lex_table[p[0]] & 4) && (ny_lex_table[p[1]] & 4) &&
+         (ny_lex_table[p[2]] & 4) && (ny_lex_table[p[3]] & 4) &&
+         (ny_lex_table[p[4]] & 4) && (ny_lex_table[p[5]] & 4) &&
+         (ny_lex_table[p[6]] & 4) && (ny_lex_table[p[7]] & 4);
+}
+
 void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->src = src;
   lx->filename = filename;
+  lx->len = src ? strlen(src) : 0;
   lx->pos = 0;
   lx->line = 1;
   lx->real_line = 1;
@@ -99,6 +114,23 @@ static void skip_whitespace(lexer_t *lx) {
   for (;;) {
     char c = peek(lx);
     if (IS_SPACE(c)) {
+      if (c != '\n') {
+        const char *src = lx->src;
+        size_t pos = lx->pos;
+        size_t limit = (lx->split_pos > 0 && pos < lx->split_pos)
+                           ? lx->split_pos
+                           : (size_t)-1;
+        while (src[pos] != '\0' && IS_SPACE(src[pos]) && src[pos] != '\n') {
+          if (pos == limit)
+            break;
+          pos++;
+        }
+        if (pos != lx->pos) {
+          lx->col += (int)(pos - lx->pos);
+          lx->pos = pos;
+          continue;
+        }
+      }
       advance(lx);
     } else if (c == ';') {
       advance(lx);
@@ -335,17 +367,30 @@ token_t lexer_next(lexer_t *lx) {
   lx->skipped_newline = false;
   skip_whitespace(lx);
   size_t start = lx->pos;
-  if (lx->src[lx->pos] == '\0') {
+  const char *src = lx->src;
+  size_t pos = lx->pos;
+  int col = lx->col;
+  if (src[pos] == '\0') {
     token_t tok;
     tok.kind = NY_T_EOF;
-    tok.lexeme = lx->src + start;
+    tok.lexeme = src + start;
     tok.len = 0;
     tok.line = lx->line;
     tok.col = lx->col;
     tok.filename = lx->filename;
     return tok;
   }
-  char c = advance(lx);
+  char c;
+  if (lx->split_pos > 0 && pos == lx->split_pos) {
+    c = advance(lx);
+    pos = lx->pos;
+    col = lx->col;
+  } else {
+    c = src[pos++];
+    col++;
+    lx->pos = pos;
+    lx->col = col;
+  }
   if (c == 'f' && (peek(lx) == '"' || peek(lx) == '\'')) {
     char quote = peek(lx);
     advance(lx);
@@ -374,109 +419,100 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_FSTRING, start);
   }
   if (IS_ALPHA(c)) {
-    const char *p = lx->src + lx->pos;
-    uint64_t hash = NY_FNV1A64_OFFSET_BASIS;
-    hash ^= (uint8_t)c;
-    hash *= NY_FNV1A64_PRIME;
+    const unsigned char *p = (const unsigned char *)(src + lx->pos);
+    const unsigned char *end = (const unsigned char *)(src + lx->len);
+    while (p + 8 <= end && ny_is_alnum8(p)) {
+      p += 8;
+    }
     while (IS_ALNUM(*p)) {
-      hash ^= (uint8_t)*p;
-      hash *= NY_FNV1A64_PRIME;
       p++;
     }
-    size_t len = p - (lx->src + lx->pos);
-    lx->pos += len;
+    size_t len = (size_t)((const char *)p - (src + lx->pos));
+    lx->pos = (size_t)((const char *)p - src);
     lx->col += (int)len;
     token_t tok = make_token(lx, NY_T_IDENT, start);
-    tok.hash = hash;
+    tok.hash = ny_hash64(tok.lexeme, tok.len);
     tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
   }
   if (IS_DIGIT(c)) {
-    uint64_t hash = NY_FNV1A64_OFFSET_BASIS;
-    hash ^= (uint8_t)c;
-    hash *= NY_FNV1A64_PRIME;
-    if (c == '0' && (lx->src[lx->pos] == 'x' || lx->src[lx->pos] == 'X')) {
-      hash ^= (uint8_t)lx->src[lx->pos];
-      hash *= NY_FNV1A64_PRIME;
+    if (c == '0' && (src[lx->pos] == 'x' || src[lx->pos] == 'X')) {
       lx->pos++; lx->col++;
-      while (isxdigit(lx->src[lx->pos])) {
-        hash ^= (uint8_t)lx->src[lx->pos];
-        hash *= NY_FNV1A64_PRIME;
+      while (isxdigit(src[lx->pos])) {
         lx->pos++; lx->col++;
       }
-      char s = lx->src[lx->pos];
+      char s = src[lx->pos];
       if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
            s == 'F') &&
-          isdigit(lx->src[lx->pos + 1])) {
-        hash ^= (uint8_t)lx->src[lx->pos];
-        hash *= NY_FNV1A64_PRIME;
+          isdigit(src[lx->pos + 1])) {
         lx->pos++; lx->col++;
-        while (isdigit(lx->src[lx->pos])) {
-          hash ^= (uint8_t)lx->src[lx->pos];
-          hash *= NY_FNV1A64_PRIME;
+        while (isdigit(src[lx->pos])) {
           lx->pos++; lx->col++;
         }
       }
       token_t tok = make_token(lx, NY_T_NUMBER, start);
-      tok.hash = hash;
+      tok.hash = 0;
       return tok;
     }
-    while (IS_DIGIT(lx->src[lx->pos])) {
-      hash ^= (uint8_t)lx->src[lx->pos];
-      hash *= NY_FNV1A64_PRIME;
+    const unsigned char *end = (const unsigned char *)(src + lx->len);
+    while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
+           ny_is_digit8((const unsigned char *)(src + lx->pos))) {
+      lx->pos += 8;
+      lx->col += 8;
+    }
+    while (IS_DIGIT(src[lx->pos])) {
       lx->pos++; lx->col++;
     }
-    if (lx->src[lx->pos] == '.' && IS_DIGIT(lx->src[lx->pos + 1])) {
-      hash ^= (uint8_t)lx->src[lx->pos];
-      hash *= NY_FNV1A64_PRIME;
+    if (src[lx->pos] == '.' && IS_DIGIT(src[lx->pos + 1])) {
       lx->pos++; lx->col++;
-      while (IS_DIGIT(lx->src[lx->pos])) {
-        hash ^= (uint8_t)lx->src[lx->pos];
-        hash *= NY_FNV1A64_PRIME;
+      while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
+             ny_is_digit8((const unsigned char *)(src + lx->pos))) {
+        lx->pos += 8;
+        lx->col += 8;
+      }
+      while (IS_DIGIT(src[lx->pos])) {
         lx->pos++; lx->col++;
       }
     }
-    if (lx->src[lx->pos] == 'e' || lx->src[lx->pos] == 'E') {
+    if (src[lx->pos] == 'e' || src[lx->pos] == 'E') {
       size_t save_pos = lx->pos;
       int save_line = lx->line;
       int save_col = lx->col;
-      uint64_t save_hash = hash;
-      hash ^= (uint8_t)lx->src[lx->pos];
-      hash *= NY_FNV1A64_PRIME;
       lx->pos++; lx->col++;
-      if (lx->src[lx->pos] == '+' || lx->src[lx->pos] == '-') {
-        hash ^= (uint8_t)lx->src[lx->pos];
-        hash *= NY_FNV1A64_PRIME;
+      if (src[lx->pos] == '+' || src[lx->pos] == '-') {
         lx->pos++; lx->col++;
       }
-      if (IS_DIGIT(lx->src[lx->pos])) {
-        while (IS_DIGIT(lx->src[lx->pos])) {
-          hash ^= (uint8_t)lx->src[lx->pos];
-          hash *= NY_FNV1A64_PRIME;
+      if (IS_DIGIT(src[lx->pos])) {
+        while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
+               ny_is_digit8((const unsigned char *)(src + lx->pos))) {
+          lx->pos += 8;
+          lx->col += 8;
+        }
+        while (IS_DIGIT(src[lx->pos])) {
           lx->pos++; lx->col++;
         }
       } else {
         lx->pos = save_pos;
         lx->line = save_line;
         lx->col = save_col;
-        hash = save_hash;
       }
     }
-    char s = lx->src[lx->pos];
+    char s = src[lx->pos];
     if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
          s == 'F') &&
-        IS_DIGIT(lx->src[lx->pos + 1])) {
-      hash ^= (uint8_t)lx->src[lx->pos];
-      hash *= NY_FNV1A64_PRIME;
+        IS_DIGIT(src[lx->pos + 1])) {
       lx->pos++; lx->col++;
-      while (IS_DIGIT(lx->src[lx->pos])) {
-        hash ^= (uint8_t)lx->src[lx->pos];
-        hash *= NY_FNV1A64_PRIME;
+      while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
+             ny_is_digit8((const unsigned char *)(src + lx->pos))) {
+        lx->pos += 8;
+        lx->col += 8;
+      }
+      while (IS_DIGIT(src[lx->pos])) {
         lx->pos++; lx->col++;
       }
     }
     token_t tok = make_token(lx, NY_T_NUMBER, start);
-    tok.hash = hash;
+    tok.hash = 0;
     return tok;
   }
   if (c == '"' || c == '\'') {

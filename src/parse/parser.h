@@ -3,6 +3,13 @@
 
 #include "ast/ast.h"
 #include "lex/lexer.h"
+#include <stdint.h>
+
+typedef struct parser_intern_entry {
+  uint64_t hash;
+  uint32_t len;
+  const char *str;
+} parser_intern_entry;
 
 typedef struct parser_t {
   lexer_t lex;
@@ -12,6 +19,9 @@ typedef struct parser_t {
   const char *src;
   const char *filename;
   char *current_module;
+  struct parser_intern_entry *intern_table;
+  size_t intern_cap;
+  size_t intern_len;
   int error_count;
   int error_limit;
   bool had_error;

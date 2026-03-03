@@ -6,15 +6,12 @@ module std.os.path (
 )
 use std.core *
 use std.text *
-
-fn _is_windows(){
-   "Internal: returns true if the host OS is Windows."
-   eq(__os_name(), "windows")
-}
+use std.os.platform as platform
+use std.util.common as common
 
 fn sep(){
    "Returns the platform-specific path separator ('\\\\' on Windows, '/' otherwise)."
-   if(_is_windows()){ return "\\" }
+   if(platform.is_windows()){ return "\\" }
    "/"
 }
 
@@ -54,7 +51,7 @@ fn is_abs(p){
    def n = str_len(p)
    if(n == 0){ return false }
    def c0 = __load8_idx(p, 0)
-   if(_is_windows()){
+   if(platform.is_windows()){
       if(n >= 2 && __load8_idx(p, 1) == 58){ return true }
       if(n >= 2 && c0 == 92 && __load8_idx(p, 1) == 92){ return true }
       if(n >= 2 && c0 == 47 && __load8_idx(p, 1) == 47){ return true }
@@ -128,7 +125,7 @@ fn normalize(p){
    if(str_len(p) == 0){ return "" }
    def sepch = sep()
    mut s = p
-   if(_is_windows()){
+   if(platform.is_windows()){
       s = replace_all(s, "/", "\\")
    } else {
       s = replace_all(s, "\\", "/")
@@ -137,7 +134,7 @@ fn normalize(p){
    mut prefix = ""
    mut abs = false
    mut rest = s
-   if(_is_windows()){
+   if(platform.is_windows()){
       if(n >= 2 && _is_sep(load8(s, 0)) && _is_sep(load8(s, 1))){
          prefix = "\\\\"
          abs = true
@@ -242,7 +239,7 @@ fn dirname(p){
    if(n == 0){ return "." }
    def s = sep()
    if(npath == s){ return s }
-   if(_is_windows() && _is_drive_prefix(npath) && n == 3 && _is_sep(load8(npath, 2))){
+   if(platform.is_windows() && _is_drive_prefix(npath) && n == 3 && _is_sep(load8(npath, 2))){
       return npath
    }
    mut end = n
@@ -251,21 +248,10 @@ fn dirname(p){
    def j = _last_sep_idx(trimmed)
    if(j < 0){ return "." }
    if(j == 0){ return s }
-   if(_is_windows() && j == 2 && _is_drive_prefix(trimmed)){
+   if(platform.is_windows() && j == 2 && _is_drive_prefix(trimmed)){
       return _substr(trimmed, 0, 3)
    }
    return _substr(trimmed, 0, j)
-}
-
-fn _last_index_byte(s, want){
-   "Internal: returns the last byte index of byte `want` in string `s`."
-   if(!is_str(s)){ return -1 }
-   mut i = str_len(s) - 1
-   while(i >= 0){
-      if(__load8_idx(s, i) == want){ return i }
-      i -= 1
-   }
-   -1
 }
 
 fn extname(p){
@@ -274,7 +260,7 @@ fn extname(p){
    def b = basename(p)
    def n = str_len(b)
    if(n == 0){ return "" }
-   def dot = _last_index_byte(b, 46) ; '.'
+   def dot = common.last_index_byte(b, 46) ; '.'
    if(dot <= 0 || dot == n - 1){ return "" }
    def out = malloc(n - dot + 1)
    if(!out){ return "" }
@@ -302,6 +288,7 @@ if(comptime{__main()}){
     use std.core *
     use std.core.error *
     use std.text *
+    use std.os.platform as platform
 
     def s = sep()
     assert(str_len(s) == 1, "sep is one byte")

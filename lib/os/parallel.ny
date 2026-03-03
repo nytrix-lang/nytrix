@@ -9,16 +9,7 @@ module std.os.parallel (
 use std.core *
 use std.text *
 use std.os.prim *
-
-fn _parse_threads(v){
-   "Internal: parses non-negative values from strings."
-   if(!is_str(v)){ return 0 }
-   def s = strip(v)
-   if(str_len(s) == 0){ return 0 }
-   def n = atoi(s)
-   if(n < 0){ return 0 }
-   n
-}
+use std.util.common as common
 
 fn _normalize_parallel_mode(v){
    "Internal: normalizes parallel mode to `off|auto|threads`."
@@ -30,11 +21,11 @@ fn _normalize_parallel_mode(v){
 
 fn _logical_cpu_guess(){
    "Internal: guesses host logical CPU count from environment hints."
-   def n1 = _parse_threads(env("NYTRIX_LOGICAL_CPUS"))
+   def n1 = common.parse_nonneg_int(env("NYTRIX_LOGICAL_CPUS"))
    if(n1 > 0){ return n1 }
-   def n2 = _parse_threads(env("NUMBER_OF_PROCESSORS"))
+   def n2 = common.parse_nonneg_int(env("NUMBER_OF_PROCESSORS"))
    if(n2 > 0){ return n2 }
-   def n3 = _parse_threads(env("NPROC"))
+   def n3 = common.parse_nonneg_int(env("NPROC"))
    if(n3 > 0){ return n3 }
    2
 }
@@ -74,8 +65,8 @@ fn _effective_parallel_min_work(){
 }
 
 def PARALLEL_MODE = _normalize_parallel_mode(strip(to_str(env("NYTRIX_PARALLEL_MODE"))))
-def PARALLEL_THREADS = _parse_threads(env("NYTRIX_PARALLEL_THREADS"))
-def PARALLEL_MIN_WORK = _parse_threads(env("NYTRIX_PARALLEL_MIN_WORK"))
+def PARALLEL_THREADS = common.parse_nonneg_int(env("NYTRIX_PARALLEL_THREADS"))
+def PARALLEL_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_PARALLEL_MIN_WORK"))
 
 fn parallel_mode(){
    "Returns the configured parallel mode: `off`, `auto`, or `threads`.

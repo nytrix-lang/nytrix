@@ -405,7 +405,19 @@ uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed) {
   const uint8_t *p = (const uint8_t *)data;
   uint64_t h = seed ? seed : NY_FNV1A64_OFFSET_BASIS;
   const uint64_t prime = NY_FNV1A64_PRIME;
-  for (size_t i = 0; i < len; ++i) {
+  size_t i = 0;
+  while (i + 8 <= len) {
+    h ^= p[i + 0]; h *= prime;
+    h ^= p[i + 1]; h *= prime;
+    h ^= p[i + 2]; h *= prime;
+    h ^= p[i + 3]; h *= prime;
+    h ^= p[i + 4]; h *= prime;
+    h ^= p[i + 5]; h *= prime;
+    h ^= p[i + 6]; h *= prime;
+    h ^= p[i + 7]; h *= prime;
+    i += 8;
+  }
+  for (; i < len; ++i) {
     h ^= p[i];
     h *= prime;
   }
@@ -415,7 +427,75 @@ uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed) {
 uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed) {
   if (!s)
     return seed ? seed : NY_FNV1A64_OFFSET_BASIS;
-  return ny_fnv1a64(s, strlen(s), seed);
+  const unsigned char *p = (const unsigned char *)s;
+  uint64_t h = seed ? seed : NY_FNV1A64_OFFSET_BASIS;
+  const uint64_t prime = NY_FNV1A64_PRIME;
+  for (;;) {
+    const unsigned char *z = (const unsigned char *)memchr(p, 0, 8);
+    if (z) {
+      while (p < z) {
+        h ^= *p++;
+        h *= prime;
+      }
+      return h;
+    }
+    h ^= p[0]; h *= prime;
+    h ^= p[1]; h *= prime;
+    h ^= p[2]; h *= prime;
+    h ^= p[3]; h *= prime;
+    h ^= p[4]; h *= prime;
+    h ^= p[5]; h *= prime;
+    h ^= p[6]; h *= prime;
+    h ^= p[7]; h *= prime;
+    p += 8;
+  }
+}
+
+static inline uint64_t ny_fasthash_mix(uint64_t h) {
+  h ^= h >> 23;
+  h *= 0x2127599bf4325c37ULL;
+  h ^= h >> 47;
+  return h;
+}
+
+uint64_t ny_hash64_fast(const void *data, size_t len) {
+  const uint64_t m = 0x880355f21e6d1965ULL;
+  const uint8_t *pos = (const uint8_t *)data;
+  const uint8_t *end = pos + (len & ~((size_t)7));
+  uint64_t h = 0xcbf29ce484222325ULL ^ (len * m);
+  while (pos < end) {
+    uint64_t v;
+    memcpy(&v, pos, sizeof(v));
+    h ^= ny_fasthash_mix(v);
+    h *= m;
+    pos += 8;
+  }
+  uint64_t v = 0;
+  switch (len & 7) {
+  case 7:
+    v ^= (uint64_t)pos[6] << 48;
+  case 6:
+    v ^= (uint64_t)pos[5] << 40;
+  case 5:
+    v ^= (uint64_t)pos[4] << 32;
+  case 4:
+    v ^= (uint64_t)pos[3] << 24;
+  case 3:
+    v ^= (uint64_t)pos[2] << 16;
+  case 2:
+    v ^= (uint64_t)pos[1] << 8;
+  case 1:
+    v ^= (uint64_t)pos[0];
+    h ^= ny_fasthash_mix(v);
+    h *= m;
+  }
+  return ny_fasthash_mix(h);
+}
+
+uint64_t ny_hash64_fast_cstr(const char *s) {
+  if (!s)
+    return 0;
+  return ny_hash64_fast(s, strlen(s));
 }
 
 int ny_levenshtein(const char *s1, const char *s2) {

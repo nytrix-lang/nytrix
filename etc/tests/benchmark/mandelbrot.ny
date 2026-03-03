@@ -5,9 +5,25 @@ use std.core.list *
 use std.core.dict *
 use std.text.io *
 use std.text *
+use std.os *
 use std.os.time *
 
 ;; Mandelbrot Set (Benchmark)
+
+fn _bench_scale_percent(){
+   def raw = env("NYTRIX_BENCH_SCALE")
+   if(is_str(raw) && str_len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+
+fn _bench_scale(val, minv){
+   mut out = (val * _bench_scale_percent()) / 100
+   if(out < minv){ out = minv }
+   out
+}
 
 fn mandelbrot(w, h, max_iter){
    mut count = 0
@@ -48,10 +64,10 @@ fn mandelbrot(w, h, max_iter){
    count
 }
 
-def size = 80
+def size = _bench_scale(80, 20)
 def WIDTH = size
 def HEIGHT = size
-def ITERS = 64
+def ITERS = _bench_scale(64, 8)
 
 print("Mandelbrot:", WIDTH, "x", HEIGHT, "iters:", ITERS)
 

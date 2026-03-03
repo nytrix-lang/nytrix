@@ -5,6 +5,7 @@ Nytrix CMake Integration
 import sys
 sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import shutil
 import shlex
 import subprocess
@@ -307,6 +308,8 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
     lto = os.environ.get("NYTRIX_LTO", "off")
     pgo = os.environ.get("NYTRIX_PGO", "off")
     pgo_prof = os.environ.get("NYTRIX_PGO_PROFILE", "")
+    gprof = os.environ.get("NYTRIX_USE_GPROF", "0").strip().lower()
+    gprof_on = gprof in ("1", "true", "yes", "on", "y")
     rel_dbg = os.environ.get("NYTRIX_RELEASE_DEBUG_INFO", "0").strip().lower()
     rel_dbg_on = rel_dbg in ("1", "true", "yes", "on", "y")
     prefix_default = "C:/nytrix" if host_os() == "windows" else "/usr"
@@ -334,6 +337,8 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
                  if f"NYTRIX_RELEASE_DEBUG_INFO:BOOL={'ON' if rel_dbg_on else 'OFF'}" not in norm_txt:
                      needs_run = True
                  if f"NYTRIX_LTO_MODE:STRING={lto}" not in norm_txt:
+                     needs_run = True
+                 if f"NYTRIX_USE_GPROF:BOOL={'ON' if gprof_on else 'OFF'}" not in norm_txt:
                      needs_run = True
                  if f"NYTRIX_PGO_MODE:STRING={pgo}" not in norm_txt:
                      needs_run = True
@@ -378,6 +383,7 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
         f"-DNYTRIX_LTO_MODE={lto}",
         f"-DNYTRIX_PGO_MODE={pgo}",
         f"-DNYTRIX_PGO_PROFILE={cmake_path(pgo_prof)}",
+        f"-DNYTRIX_USE_GPROF={'ON' if gprof_on else 'OFF'}",
         f"-DNYTRIX_RELEASE_DEBUG_INFO={'ON' if rel_dbg_on else 'OFF'}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DCMAKE_RULE_MESSAGES=OFF",

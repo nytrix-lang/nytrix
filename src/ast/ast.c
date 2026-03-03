@@ -6,10 +6,25 @@ expr_t *expr_new(arena_t *arena, expr_kind_t kind, token_t tok) {
   if (!arena) {
     NY_LOG_DEBUG("expr_new called with NULL arena!\n");
   }
-  expr_t *e = (expr_t *)arena_alloc(arena, sizeof(expr_t));
+  expr_t *e = NULL;
+  if (arena && arena->expr_pool_left) {
+    e = (expr_t *)arena->expr_pool;
+    arena->expr_pool = (char *)arena->expr_pool + sizeof(expr_t);
+    arena->expr_pool_left--;
+  } else if (arena) {
+#ifndef NY_EXPR_POOL_SIZE
+#define NY_EXPR_POOL_SIZE 256
+#endif
+    expr_t *pool =
+        (expr_t *)arena_alloc(arena, sizeof(expr_t) * NY_EXPR_POOL_SIZE);
+    arena->expr_pool = (char *)pool + sizeof(expr_t);
+    arena->expr_pool_left = NY_EXPR_POOL_SIZE - 1;
+    e = pool;
+  } else {
+    e = (expr_t *)arena_alloc(arena, sizeof(expr_t));
+  }
   e->kind = kind;
   e->tok = tok;
-  memset(&e->as, 0, sizeof(e->as));
   return e;
 }
 
@@ -17,8 +32,23 @@ stmt_t *stmt_new(arena_t *arena, stmt_kind_t kind, token_t tok) {
   if (!arena) {
     NY_LOG_DEBUG("stmt_new called with NULL arena!\n");
   }
-  stmt_t *s = (stmt_t *)arena_alloc(arena, sizeof(stmt_t));
-  memset(s, 0, sizeof(stmt_t));
+  stmt_t *s = NULL;
+  if (arena && arena->stmt_pool_left) {
+    s = (stmt_t *)arena->stmt_pool;
+    arena->stmt_pool = (char *)arena->stmt_pool + sizeof(stmt_t);
+    arena->stmt_pool_left--;
+  } else if (arena) {
+#ifndef NY_STMT_POOL_SIZE
+#define NY_STMT_POOL_SIZE 128
+#endif
+    stmt_t *pool =
+        (stmt_t *)arena_alloc(arena, sizeof(stmt_t) * NY_STMT_POOL_SIZE);
+    arena->stmt_pool = (char *)pool + sizeof(stmt_t);
+    arena->stmt_pool_left = NY_STMT_POOL_SIZE - 1;
+    s = pool;
+  } else {
+    s = (stmt_t *)arena_alloc(arena, sizeof(stmt_t));
+  }
   s->kind = kind;
   s->tok = tok;
   return s;

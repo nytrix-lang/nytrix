@@ -200,6 +200,7 @@ typedef struct codegen_t {
   fun_sig *cached_fn_to_str;
   fun_sig *cached_fn_globals;
   fun_sig *cached_fn_kwarg;
+  bool llvm_value_names;
   bool debug_symbols;
   int debug_opt_level;
   const char *debug_opt_pipeline;
@@ -217,6 +218,7 @@ typedef struct codegen_t {
   VEC(binding) user_import_aliases;
   VEC(char *) use_modules;
   VEC(char *) user_use_modules;
+  VEC(char *) link_allowed_modules;
   const char *current_module_name;
   const char *current_fn_ret_type;
   bool current_fn_attr_naked;
@@ -245,6 +247,9 @@ typedef struct codegen_t {
   VEC(char *) links;
   struct codegen_t *parent;
   bool skip_stdlib;
+  const char *emit_module_name;
+  bool emit_module_decls_only;
+  bool emit_script;
   bool is_preparing;
   bool owned_metadata;
   void *sym_state;
@@ -258,6 +263,7 @@ void codegen_init_with_context(codegen_t *cg, program_t *prog, arena_t *arena,
 void codegen_prepare(codegen_t *cg);
 void codegen_emit(codegen_t *cg);
 LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
+void codegen_collect_links(codegen_t *cg, program_t *prog);
 void codegen_dispose(codegen_t *cg);
 char *normalize_module_name(const char *raw);
 void codegen_debug_init(codegen_t *cg, const char *main_file);

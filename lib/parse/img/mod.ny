@@ -138,6 +138,7 @@ if(comptime{__main()}){
    use std.core.error *
 
    fn test_dispatch(name, path){
+      "Loads `path`, decodes it through the unified image dispatcher, and asserts success when present."
       print("Testing " + name + " dispatch: " + path)
       match file_read(path){
          ok(data) -> {

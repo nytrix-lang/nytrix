@@ -10,6 +10,7 @@ use std.core *
 use std.core.dict_mod *
 use std.math *
 use std.math.float as f
+use std.parse.bin as pbin
 
 def _QY = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99]
 def _QC = [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99]
@@ -25,6 +26,7 @@ def _IDCT_T = [0.707107, 0.707107, 0.707107, 0.707107, 0.707107, 0.707107, 1.0, 
 def _ZZ = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]
 
 fn _c_u8(v) {
+   "Internal helper for `c_u8` in JPEG processing."
    if(f.flt(f.float(v), f.float(0.0))) {
       return 0
    }
@@ -35,6 +37,7 @@ fn _c_u8(v) {
 }
 
 fn _r_i(v) {
+   "Internal helper for `r_i` in JPEG processing."
    def fv = f.float(v)
    def half = f.float(0.5)
    if(f.fgt(fv, f.float(0.0))) {
@@ -43,19 +46,10 @@ fn _r_i(v) {
    return f.int(f.fsub(fv, half))
 }
 
-fn _m_z(n) {
-   mut l = list(n)
-   mut iCount = 0
-   while(iCount < n) {
-      l = append(l, 0)
-      iCount += 1
-   }
-   return l
-}
-
 fn _m_hm(b, val_list) {
-   mut cm = _m_z(256)
-   mut sm = _m_z(256)
+   "Internal helper for `m_hm` in JPEG processing."
+   mut cm = pbin.zero_list(256)
+   mut sm = pbin.zero_list(256)
    mut cCount = 0
    mut kCount = 0
    mut lIdx = 1
@@ -77,6 +71,7 @@ fn _m_hm(b, val_list) {
 }
 
 fn _h_new(ctx) {
+   "Internal helper for `h_new` in JPEG processing."
    mut nodeList = get(ctx, 0)
    def idx = len(nodeList)
    mut n = list(4)
@@ -90,6 +85,7 @@ fn _h_new(ctx) {
 }
 
 fn _h_add(ctx, root, code, len_bits, sym) {
+   "Internal helper for `h_add` in JPEG processing."
    mut cur = root
    mut iBit = len_bits
    while(iBit > 0) {
@@ -122,6 +118,7 @@ fn _h_add(ctx, root, code, len_bits, sym) {
 }
 
 fn _h_parse(data, off) {
+   "Internal helper for `h_parse` in JPEG processing."
    mut ctx = list(1)
    ctx = append(ctx, list(512))
    _h_new(ctx)
@@ -150,6 +147,7 @@ fn _h_parse(data, off) {
 }
 
 fn _h_dec(nodes, bs) {
+   "Internal helper for `h_dec` in JPEG processing."
    mut cur = 0
    while(1) {
       mut bl = get(bs, 3)
@@ -193,6 +191,7 @@ fn _h_dec(nodes, bs) {
 }
 
 fn _bs_m(data, start) {
+   "Internal helper for `bs_m` in JPEG processing."
    mut bs = list(5)
    bs = append(bs, data)
    bs = append(bs, start)
@@ -203,6 +202,7 @@ fn _bs_m(data, start) {
 }
 
 fn _bs_gbs(bs, n) {
+   "Internal helper for `bs_gbs` in JPEG processing."
    mut v = 0
    mut iCount = 0
    while(iCount < n) {
@@ -237,6 +237,7 @@ fn _bs_gbs(bs, n) {
 }
 
 fn _d_cf(sz, bits) {
+   "Internal helper for `d_cf` in JPEG processing."
    if(sz == 0) {
       return 0
    }
@@ -247,6 +248,7 @@ fn _d_cf(sz, bits) {
 }
 
 fn _idct(cf, qt, out, off, step, plane_w) {
+   "Internal helper for `idct` in JPEG processing."
    mut cValues = list(64)
    mut kIdx = 0
    while(kIdx < 64) {
@@ -314,6 +316,7 @@ fn _idct(cf, qt, out, off, step, plane_w) {
 }
 
 fn _d_du(bs, dh, ah, qt, pdc, plane, off, step, pw) {
+   "Internal helper for `d_du` in JPEG processing."
    def sz = _h_dec(dh, bs)
    def bits = _bs_gbs(bs, sz)
    def d_val = _d_cf(sz, bits)
@@ -350,6 +353,7 @@ fn _d_du(bs, dh, ah, qt, pdc, plane, off, step, pw) {
 }
 
 fn decode(data) {
+   "Decodes a baseline JPEG byte string into an image dictionary."
    if(!is_str(data) || len(data) < 4) {
       return 0
    }
@@ -361,10 +365,10 @@ fn decode(data) {
    mut ncVal = 0
    mut ssVal = 0
    mut ptr = 2
-   mut qts = _m_z(4)
-   mut hdc = _m_z(4)
-   mut hac = _m_z(4)
-   mut cidMap = _m_z(256)
+   mut qts = pbin.zero_list(4)
+   mut hdc = pbin.zero_list(4)
+   mut hac = pbin.zero_list(4)
+   mut cidMap = pbin.zero_list(256)
    mut cord = list(4)
    mut scan = list(4)
    mut mh = 1
@@ -540,6 +544,7 @@ fn decode(data) {
 }
 
 fn _mgb(v) {
+   "Internal helper for `mgb` in JPEG processing."
    mut xV = (v < 0) ? -v : v
    mut nC = 0
    while(xV > 0) {
@@ -550,6 +555,7 @@ fn _mgb(v) {
 }
 
 fn _apb(v, n) {
+   "Internal helper for `apb` in JPEG processing."
    if(n == 0) {
       return 0
    }
@@ -560,6 +566,7 @@ fn _apb(v, n) {
 }
 
 fn _ebn() {
+   "Internal helper for `ebn` in JPEG processing."
    mut eb = list(3)
    eb = append(eb, 0)
    eb = append(eb, 0)
@@ -568,6 +575,7 @@ fn _ebn() {
 }
 
 fn _eeb(eb, b) {
+   "Internal helper for `eeb` in JPEG processing."
    def bV = b & 255
    mut bL = get(eb, 2)
    bL = append(bL, bV)
@@ -578,6 +586,7 @@ fn _eeb(eb, b) {
 }
 
 fn _epb(eb, b, n) {
+   "Internal helper for `epb` in JPEG processing."
    if(n == 0) {
       return 0
    }
@@ -599,6 +608,7 @@ fn _epb(eb, b, n) {
 }
 
 fn _ebf(eb) {
+   "Internal helper for `ebf` in JPEG processing."
    if(get(eb, 1) > 0) {
       def acc = get(eb, 0)
       def num = get(eb, 1)
@@ -610,7 +620,8 @@ fn _ebf(eb) {
 }
 
 fn _fdct(blk, qn) {
-   mut nat = _m_z(64)
+   "Internal helper for `fdct` in JPEG processing."
+   mut nat = pbin.zero_list(64)
    mut vL = 0
    while(vL < 8) {
       mut uL = 0
@@ -637,7 +648,7 @@ fn _fdct(blk, qn) {
       }
       vL += 1
    }
-   mut zz = _m_z(64)
+   mut zz = pbin.zero_list(64)
    mut kI = 0
    while(kI < 64) {
       store_item(zz, kI, get(nat, get(_ZZ, kI)))
@@ -647,6 +658,7 @@ fn _fdct(blk, qn) {
 }
 
 fn _ebk(eb, zz, pdc, dm, am) {
+   "Internal helper for `ebk` in JPEG processing."
    def dc = get(zz, 0)
    def dff = dc - pdc
    def nb = _mgb(dff)
@@ -680,6 +692,7 @@ fn _ebk(eb, zz, pdc, dm, am) {
 }
 
 fn encode(img, qual=90) {
+   "Encodes an image dictionary into a baseline JPEG byte string."
    def wVal = dict_get(img, "width")
    def hVal = dict_get(img, "height")
    def dataV = dict_get(img, "data")

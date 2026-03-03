@@ -447,9 +447,9 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   }
   LLVMValueRef c = to_bool(cg, val);
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-  LLVMBasicBlockRef tb = LLVMAppendBasicBlock(f, "it"),
-                    eb = s->as.iff.alt ? LLVMAppendBasicBlock(f, "ie") : NULL,
-                    next = LLVMAppendBasicBlock(f, "in");
+  LLVMBasicBlockRef tb = ny_llvm_append_block(f, "it"),
+                    eb = s->as.iff.alt ? ny_llvm_append_block(f, "ie") : NULL,
+                    next = ny_llvm_append_block(f, "in");
   LLVMBasicBlockRef then_end = NULL;
   LLVMBasicBlockRef else_end = NULL;
   bool then_fallthrough = false;
@@ -514,9 +514,9 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-  LLVMBasicBlockRef cb = LLVMAppendBasicBlock(f, "wc"),
-                    bb = LLVMAppendBasicBlock(f, "wb"),
-                    eb = LLVMAppendBasicBlock(f, "we");
+  LLVMBasicBlockRef cb = ny_llvm_append_block(f, "wc"),
+                    bb = ny_llvm_append_block(f, "wb"),
+                    eb = ny_llvm_append_block(f, "we");
   ny_dbg_loc(cg, s->tok);
   LLVMBuildBr(cg->builder, cb);
 
@@ -569,10 +569,10 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMValueRef itv = gen_expr(cg, scopes, *depth, s->as.fr.iterable);
   LLVMBasicBlockRef pre = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef f = LLVMGetBasicBlockParent(pre);
-  LLVMBasicBlockRef cb = LLVMAppendBasicBlock(f, "fc"),
-                    bb = LLVMAppendBasicBlock(f, "fb"),
-                    lb = LLVMAppendBasicBlock(f, "fl"),
-                    eb = LLVMAppendBasicBlock(f, "fe");
+  LLVMBasicBlockRef cb = ny_llvm_append_block(f, "fc"),
+                    bb = ny_llvm_append_block(f, "fb"),
+                    lb = ny_llvm_append_block(f, "fl"),
+                    eb = ny_llvm_append_block(f, "fe");
   fun_sig *ls = NULL, *gs = NULL;
   if (!get_for_iter_helpers(cg, s->tok, &ls, &gs))
     return;
@@ -584,7 +584,7 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMPositionBuilderAtEnd(cg->builder, cb);
 
   LLVMValueRef i_start = LLVMConstInt(cg->type_i64, 1, false);
-  LLVMValueRef i_val = LLVMBuildPhi(cg->builder, cg->type_i64, "for_i");
+  LLVMValueRef i_val = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "for_i"));
   LLVMAddIncoming(i_val, &i_start, &pre, 1);
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder,
@@ -734,12 +734,12 @@ static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
   LLVMValueRef cls_raw =
       LLVMBuildIntToPtr(cg->builder, cls, LLVMPointerType(cg->type_i64, 0), "");
   LLVMValueRef fn_ptr_int =
-      LLVMBuildLoad2(cg->builder, cg->type_i64, cls_raw, "defer_fn");
+      LLVMBuildLoad2(cg->builder, cg->type_i64, cls_raw, NY_LLVM_NAME(cg, "defer_fn"));
   LLVMValueRef env_addr = LLVMBuildGEP2(
       cg->builder, cg->type_i64, cls_raw,
       (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
   LLVMValueRef env =
-      LLVMBuildLoad2(cg->builder, cg->type_i64, env_addr, "defer_env");
+      LLVMBuildLoad2(cg->builder, cg->type_i64, env_addr, NY_LLVM_NAME(cg, "defer_env"));
   fun_sig *push_sig = lookup_fun(cg, "__push_defer", 0);
   if (push_sig) {
     LLVMBuildCall2(cg->builder, push_sig->type, push_sig->value,
@@ -835,7 +835,7 @@ void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth) {
   case NY_S_LABEL: {
     label_binding lb;
     lb.name = ny_strdup(s->as.label.name);
-    lb.bb = LLVMAppendBasicBlock(func, s->as.label.name);
+    lb.bb = ny_llvm_append_block(func, s->as.label.name);
     lb.depth = depth;
     vec_push(&cg->labels, lb);
     break;
@@ -1096,12 +1096,12 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       return;
     LLVMValueRef testv = gen_expr(cg, scopes, *depth, s->as.match.test);
     LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-    LLVMBasicBlockRef end = LLVMAppendBasicBlock(f, "match_end");
+    LLVMBasicBlockRef end = ny_llvm_append_block(f, "match_end");
     LLVMTypeRef i1 = LLVMInt1TypeInContext(cg->ctx);
     for (size_t i = 0; i < s->as.match.arms.len; ++i) {
       match_arm_t *arm = &s->as.match.arms.data[i];
-      LLVMBasicBlockRef arm_bb = LLVMAppendBasicBlock(f, "match_arm");
-      LLVMBasicBlockRef next_bb = LLVMAppendBasicBlock(f, "match_next");
+      LLVMBasicBlockRef arm_bb = ny_llvm_append_block(f, "match_arm");
+      LLVMBasicBlockRef next_bb = ny_llvm_append_block(f, "match_next");
       LLVMValueRef cond = NULL;
       int has_wild = 0;
       scope_enter(scopes, depth, scopes[*depth].break_bb,
@@ -1139,7 +1139,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         LLVMValueRef guard_v = gen_expr(cg, scopes, *depth, arm->guard);
         LLVMValueRef guard_b = to_bool(cg, guard_v);
         LLVMBasicBlockRef guard_pass_bb =
-            LLVMAppendBasicBlock(f, "match_guard_pass");
+            ny_llvm_append_block(f, "match_guard_pass");
         LLVMBuildCondBr(cg->builder, guard_b, guard_pass_bb, next_bb);
 
         LLVMPositionBuilderAtEnd(cg->builder, guard_pass_bb);
@@ -1260,7 +1260,7 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
       LLVMBuildBr(cg->builder, lb->bb);
       LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-      LLVMPositionBuilderAtEnd(cg->builder, LLVMAppendBasicBlock(f, "dead"));
+      LLVMPositionBuilderAtEnd(cg->builder, ny_llvm_append_block(f, "dead"));
       return;
     }
     ny_diag_error(s->tok, "undefined label \033[1;37m'%s'\033[0m",

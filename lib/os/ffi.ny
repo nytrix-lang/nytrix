@@ -2,13 +2,13 @@
 ;; Os Ffi module.
 
 module std.os.ffi (
-   RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlopen_any, dlsym, dlclose, dlerror,
+   RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,
    call0_void, call0_i32, call1_void, call1_u32_void, call2_void, call3_void, call4_f32_void, call0, call1, call1_i64, call1_u32, call2, call3, call4, call5,
    call6, call7, call8, call9, call10, call11, call12, call13, call14, call15, ffi_call,
    bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all,
 
    ; C-FFI Helpers
-   CStruct, CType,
+   CStruct, CType, cstr,
    u8, i8, u16, i16, u32, i32, u64, i64, f32, f64, ptr, handle,
    sizeof_struct, offsetof_struct, malloc, free,
    cstruct_set, cstruct_get, bind_lib
@@ -16,6 +16,7 @@ module std.os.ffi (
 
 use std.core *
 use std.core as core
+use std.core.mem as mem
 use std.core.dict_mod as _d
 use std.text *
 use std.os *
@@ -58,6 +59,7 @@ fn dlerror() {
 }
 
 fn _try(path, flags){
+   "Attempts a direct `dlopen` call and logs the attempt when audio debug mode is enabled."
    if(env("NY_AUDIO_DEBUG")){ print("FFI: trying " + path) }
    def h = __dlopen(path, flags)
    if(h != 0){ 
@@ -65,6 +67,19 @@ fn _try(path, flags){
       return h 
    }
    0
+}
+
+fn dlopen_checked(name, required_symbol, flags=0){
+   "Opens library `name` and verifies that `required_symbol` exists before returning the handle."
+   mut eff_flags = flags
+   if(eff_flags == 0){ eff_flags = RTLD_NOW() | RTLD_GLOBAL() }
+   def h = dlopen_any(name, eff_flags)
+   if(h == 0){ return 0 }
+   if(required_symbol && str_len(required_symbol) > 0 && dlsym(h, required_symbol) == 0){
+      dlclose(h)
+      return 0
+   }
+   h
 }
 
 fn dlopen_any(name, flags=0){
@@ -121,6 +136,13 @@ fn dlopen_any(name, flags=0){
    0
 }
 
+;; C string helper
+
+fn cstr(s){
+   "Ensures `s` is NUL-terminated for C APIs."
+   mem.cstr(s)
+}
+
 ;; Low-level Calls
 
 fn call0(f) { "Low-level FFI call with 0 arguments." __call0(f) }
@@ -140,15 +162,42 @@ fn call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) { "Low-level FFI call with 13 arguments."
 fn call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) { "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
 fn call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) { "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
 
-fn call0_void(f) { __call0(f) }
-fn call0_i32(f) { __call0_i32(f) }
-fn call1_void(f,a) { __call1(f,a) }
-fn call1_u32_void(f,a) { __call1_u32_void(f,a) }
-fn call2_void(f,a,b) { __call2(f,a,b) }
-fn call3_void(f,a,b,c) { __call3(f,a,b,c) }
-fn call4_f32_void(f,a,b,c,d) { __call4_f32_void(f,a,b,c,d) }
-fn call1_u32(f,a) { __call1_u32(f,a) }
-fn call1_i64(f,a) { __call1_i64(f,a) }
+fn call0_void(f){
+   "Calls `f` with no arguments and ignores any return value."
+   __call0(f)
+}
+fn call0_i32(f){
+   "Calls `f` with no arguments and returns a 32-bit integer result."
+   __call0_i32(f)
+}
+fn call1_void(f,a){
+   "Calls `f` with one argument and ignores any return value."
+   __call1(f,a)
+}
+fn call1_u32_void(f,a){
+   "Calls `f` with one unsigned 32-bit argument and ignores any return value."
+   __call1_u32_void(f,a)
+}
+fn call2_void(f,a,b){
+   "Calls `f` with two arguments and ignores any return value."
+   __call2(f,a,b)
+}
+fn call3_void(f,a,b,c){
+   "Calls `f` with three arguments and ignores any return value."
+   __call3(f,a,b,c)
+}
+fn call4_f32_void(f,a,b,c,d){
+   "Calls `f` with four arguments where the fourth is a 32-bit float and ignores any return value."
+   __call4_f32_void(f,a,b,c,d)
+}
+fn call1_u32(f,a){
+   "Calls `f` with one unsigned 32-bit argument and returns the raw result."
+   __call1_u32(f,a)
+}
+fn call1_i64(f,a){
+   "Calls `f` with one argument and returns a 64-bit integer result."
+   __call1_i64(f,a)
+}
 
 fn ffi_call(fptr, args){
    "Calls external function at `fptr` with `args` list. Supports up to 10 arguments."
@@ -184,54 +233,123 @@ fn call_ext(h, name, ...args){
    0
 }
 
-fn bind_all(h, names){
+fn _bind_map(h, names, target=0){
+   "Builds a dictionary of resolvable symbol wrappers, optionally mirroring them into `target`."
    mut res = _d.dict()
    mut i = 0 mut n = core.len(names)
    while(i < n){
       def name = core.get(names, i)
       def b = bind(h, name)
-      if(b != 0){ res = _d.dict_set(res, name, b) }
+      if(b != 0){
+         res = _d.dict_set(res, name, b)
+         if(target != 0){ _d.dict_set(target, name, b) }
+      }
       i += 1
    }
    res
 }
 
-fn bind_linked(names){ bind_all(0, names) }
+fn bind_all(h, names){
+   "Returns a dictionary of callable wrappers for each resolvable symbol in `names`."
+   _bind_map(h, names)
+}
+
+fn bind_linked(names){
+   "Binds `names` from the current process image."
+   bind_all(0, names)
+}
 
 fn import_all(h, names){
-   mut g = __globals()
-   mut i = 0 mut n = core.len(names)
-   while(i < n){
-      def name = core.get(names, i)
-      def b = bind(h, name)
-      if(b != 0){ _d.dict_set(g, name, b) }
-      i += 1
-   }
+   "Imports each resolvable symbol in `names` into the current global scope."
+   _bind_map(h, names, __globals())
    true
 }
 
-fn import_linked(names){ import_all(0, names) }
-fn extern_all(){ 0 }
+fn import_linked(names){
+   "Imports `names` from the current process image into the global scope."
+   import_all(0, names)
+}
+
+fn extern_all(){
+   "Placeholder for compatibility with import-style APIs."
+   0
+}
 
 ;; Memory
 
-fn malloc(n) { if(n<=0){return 0} __malloc(n) }
-fn free(p) { if(p){ __free(p) } 0 }
+fn malloc(n) {
+   "Allocates `n` bytes and returns a raw pointer, or `0` for non-positive sizes."
+   if(n<=0){return 0}
+   __malloc(n)
+}
+
+fn free(p) {
+   "Frees raw pointer `p` when it is non-zero."
+   if(p){ __free(p) }
+   0
+}
 
 ;; C-Type definitions
 
-fn u8() { ["u8", 1, 1] }
-fn i8() { ["i8", 1, 1] }
-fn u16() { ["u16", 2, 2] }
-fn i16() { ["i16", 2, 2] }
-fn u32() { ["u32", 4, 4] }
-fn i32() { ["i32", 4, 4] }
-fn u64() { ["u64", 8, 8] }
-fn i64() { ["i64", 8, 8] }
-fn f32() { ["f32", 4, 4] }
-fn f64() { ["f64", 8, 8] }
-fn ptr() { ["ptr", 8, 8] }
-fn handle() { ["ptr", 8, 8] }
+fn u8() {
+   "Returns the FFI descriptor for an unsigned 8-bit integer."
+   ["u8", 1, 1]
+}
+
+fn i8() {
+   "Returns the FFI descriptor for a signed 8-bit integer."
+   ["i8", 1, 1]
+}
+
+fn u16() {
+   "Returns the FFI descriptor for an unsigned 16-bit integer."
+   ["u16", 2, 2]
+}
+
+fn i16() {
+   "Returns the FFI descriptor for a signed 16-bit integer."
+   ["i16", 2, 2]
+}
+
+fn u32() {
+   "Returns the FFI descriptor for an unsigned 32-bit integer."
+   ["u32", 4, 4]
+}
+
+fn i32() {
+   "Returns the FFI descriptor for a signed 32-bit integer."
+   ["i32", 4, 4]
+}
+
+fn u64() {
+   "Returns the FFI descriptor for an unsigned 64-bit integer."
+   ["u64", 8, 8]
+}
+
+fn i64() {
+   "Returns the FFI descriptor for a signed 64-bit integer."
+   ["i64", 8, 8]
+}
+
+fn f32() {
+   "Returns the FFI descriptor for a 32-bit floating-point value."
+   ["f32", 4, 4]
+}
+
+fn f64() {
+   "Returns the FFI descriptor for a 64-bit floating-point value."
+   ["f64", 8, 8]
+}
+
+fn ptr() {
+   "Returns the FFI descriptor for a raw pointer."
+   ["ptr", 8, 8]
+}
+
+fn handle() {
+   "Returns the canonical pointer-like FFI type descriptor."
+   ptr()
+}
 
 fn _align(offset, alignment){
    "Internal: rounds `offset` up to the next multiple of `alignment`."
@@ -271,11 +389,13 @@ fn CStruct(fields){
 }
 
 fn sizeof_struct(d){
+   "Returns the size in bytes for struct descriptor `d`."
    if(core.is_list(d)){ return core.get(d, 1) }
    _d.dict_get(d, "size", 0)
 }
 
 fn offsetof_struct(d, name){
+   "Returns the byte offset of field `name` within struct descriptor `d`."
    def fs = _d.dict_get(d, "fields", 0)
    def info = _d.dict_get(fs, name, 0)
    _d.dict_get(info, "offset", -1)

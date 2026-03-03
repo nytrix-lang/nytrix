@@ -35,18 +35,20 @@ fn sys_open(path, flags, mode) -> Result {
    return ok(fd)
 }
 
-fn sys_read(fd, buf, n) -> Result {
-   "Wrapper for `read(2)`; returns `ok(bytes_read)` or `err(errno_like_code)`."
-   def res = __sys_read_off(fd, buf, n, 0)
+fn _sys_io_result(res) -> Result {
+   "Internal: normalizes raw syscall-style integer results into `Result`."
    if(res < 0){ return err(res) }
    return ok(res)
 }
 
+fn sys_read(fd, buf, n) -> Result {
+   "Wrapper for `read(2)`; returns `ok(bytes_read)` or `err(errno_like_code)`."
+   return _sys_io_result(__sys_read_off(fd, buf, n, 0))
+}
+
 fn sys_write(fd, buf, n) -> Result {
    "Wrapper for `write(2)`; returns `ok(bytes_written)` or `err(errno_like_code)`."
-   def res = __sys_write_off(fd, buf, n, 0)
-   if(res < 0){ return err(res) }
-   return ok(res)
+   return _sys_io_result(__sys_write_off(fd, buf, n, 0))
 }
 
 fn sys_close(fd) -> Result {

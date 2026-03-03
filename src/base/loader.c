@@ -11,6 +11,10 @@
 #include <dirent.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <unistd.h>
+#endif
 #ifdef _WIN32
 #include <io.h>
 #define access _access
@@ -648,6 +652,9 @@ typedef struct {
   char *name;
   bool processed;
   bool is_std;
+  char *bundle_txt;
+  size_t bundle_len;
+  bool skip_entry;
 } mod_entry;
 
 typedef struct {
@@ -702,8 +709,128 @@ static void mod_list_add(mod_list *list, const char *path, const char *name,
   list->entries[list->len++] = (mod_entry){.path = ny_loader_xstrdup(path),
                                            .name = ny_loader_xstrdup(name),
                                            .processed = false,
-                                           .is_std = is_std};
+                                           .is_std = is_std,
+                                           .bundle_txt = NULL,
+                                           .bundle_len = 0,
+                                           .skip_entry = false};
 }
+
+#ifndef _WIN32
+static int ny_std_load_threads(size_t work_items) {
+  const char *env = getenv("NYTRIX_STD_THREADS");
+  if (env && *env) {
+    int v = atoi(env);
+    return v > 0 ? v : 1;
+  }
+  if (work_items < 4)
+    return 1;
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  int cpu = (ncpu > 0) ? (int)ncpu : 1;
+  int cap = cpu > 8 ? 8 : cpu;
+  return cap < 1 ? 1 : cap;
+}
+#endif
+
+static bool ny_same_path(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  char ra[4096], rb[4096];
+  if (realpath(a, ra) && realpath(b, rb))
+    return strcmp(ra, rb) == 0;
+  return strcmp(a, b) == 0;
+}
+
+static char *ny_build_module_chunk(const char *path, const char *name,
+                                   size_t *out_len) {
+  if (!path || !name)
+    return NULL;
+  char *txt = read_file(path);
+  if (!txt)
+    return NULL;
+  size_t total = 0, cap = strlen(txt) + 256;
+  char *bundle = malloc(cap);
+  if (!bundle) {
+    free(txt);
+    return NULL;
+  }
+  bundle[0] = '\0';
+  char line_buf[1024];
+  snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"", path);
+  append_text(&bundle, &total, &cap, line_buf);
+  bool has_decl = false;
+  const char *p = txt;
+  while (*p) {
+    while (*p && isspace((unsigned char)*p))
+      p++;
+    if (!*p)
+      break;
+    if (*p == ';' || *p == '#') {
+      while (*p && *p != '\n')
+        p++;
+      continue;
+    }
+    if (strncmp(p, "module", 6) == 0 && (isspace((unsigned char)p[6]) || p[6] == '\0')) {
+      has_decl = true;
+      break;
+    }
+    if (strncmp(p, "use", 3) == 0 && (isspace((unsigned char)p[3]) || p[3] == '\0')) {
+      while (*p && *p != '\n')
+        p++;
+      continue;
+    }
+    break;
+  }
+  if (has_decl) {
+    append_text(&bundle, &total, &cap, txt);
+    append_text(&bundle, &total, &cap, "\n");
+  } else {
+    char *wrapped = malloc(strlen(txt) + strlen(name) + 64);
+    if (wrapped) {
+      sprintf(wrapped, "module %s * {\n%s\n}", name, txt);
+      append_text(&bundle, &total, &cap, wrapped);
+      free(wrapped);
+    }
+  }
+  char use_stmt[512];
+  sprintf(use_stmt, "use %s *", name);
+  append_text(&bundle, &total, &cap, use_stmt);
+  append_text(&bundle, &total, &cap, "\n");
+  free(txt);
+  if (out_len)
+    *out_len = total;
+  return bundle;
+}
+
+#ifndef _WIN32
+typedef struct {
+  mod_entry *entries;
+  size_t count;
+  size_t next;
+  const char *entry_path;
+  pthread_mutex_t mu;
+} bundle_ctx;
+
+static void *ny_std_bundle_worker(void *arg) {
+  bundle_ctx *ctx = (bundle_ctx *)arg;
+  for (;;) {
+    size_t idx;
+    pthread_mutex_lock(&ctx->mu);
+    idx = ctx->next++;
+    pthread_mutex_unlock(&ctx->mu);
+    if (idx >= ctx->count)
+      break;
+    mod_entry *e = &ctx->entries[idx];
+    if (!e->path || e->bundle_txt)
+      continue;
+    if (ctx->entry_path && ny_same_path(e->path, ctx->entry_path)) {
+      e->skip_entry = true;
+      continue;
+    }
+    e->bundle_txt = ny_build_module_chunk(e->path, e->name, &e->bundle_len);
+  }
+  return NULL;
+}
+#endif
 
 static void scan_dependencies(mod_list *list, size_t idx) {
   if (list->entries[idx].processed)
@@ -870,6 +997,51 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
       free(mods.entries);
     return NULL;
   }
+#ifndef _WIN32
+  if (mods.len > 0) {
+    int threads = ny_std_load_threads(mods.len);
+    if (threads > 1) {
+      bundle_ctx ctx = {.entries = mods.entries,
+                        .count = mods.len,
+                        .next = 0,
+                        .entry_path = entry_path};
+      pthread_mutex_init(&ctx.mu, NULL);
+      pthread_t *tids = ny_loader_xmalloc(sizeof(pthread_t) * (size_t)threads);
+      for (int i = 0; i < threads; i++) {
+        pthread_create(&tids[i], NULL, ny_std_bundle_worker, &ctx);
+      }
+      for (int i = 0; i < threads; i++) {
+        pthread_join(tids[i], NULL);
+      }
+      pthread_mutex_destroy(&ctx.mu);
+      free(tids);
+    } else {
+      for (size_t i = 0; i < mods.len; ++i) {
+        if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
+          mods.entries[i].skip_entry = true;
+          continue;
+        }
+        if (!mods.entries[i].bundle_txt) {
+          mods.entries[i].bundle_txt =
+              ny_build_module_chunk(mods.entries[i].path, mods.entries[i].name,
+                                    &mods.entries[i].bundle_len);
+        }
+      }
+    }
+  }
+#else
+  for (size_t i = 0; i < mods.len; ++i) {
+    if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
+      mods.entries[i].skip_entry = true;
+      continue;
+    }
+    if (!mods.entries[i].bundle_txt) {
+      mods.entries[i].bundle_txt =
+          ny_build_module_chunk(mods.entries[i].path, mods.entries[i].name,
+                                &mods.entries[i].bundle_len);
+    }
+  }
+#endif
   size_t total = 0, cap = 4096;
   if (prebuilt_src)
     cap += strlen(prebuilt_src);
@@ -883,64 +1055,23 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
     free(prebuilt_src);
   }
   for (size_t i = 0; i < mods.len; ++i) {
-    if (entry_path && mods.entries[i].path) {
-      char abs_entry[4096], abs_mod[4096];
-      if (realpath(entry_path, abs_entry) && realpath(mods.entries[i].path, abs_mod)) {
-        if (strcmp(abs_entry, abs_mod) == 0) continue;
-      } else if (strcmp(mods.entries[i].path, entry_path) == 0) {
-        continue;
-      }
-    }
+    if (mods.entries[i].skip_entry)
+      continue;
     if (verbose)
       printf("Including module: %s (%s)\n", mods.entries[i].name,
              mods.entries[i].path);
-    char *txt = read_file(mods.entries[i].path);
-    if (txt) {
-      char line_buf[1024];
-      snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", mods.entries[i].path);
-      append_text(&bundle, &total, &cap, line_buf);
-      bool has_decl = false;
-      const char *p = txt;
-      while (*p) {
-        while (*p && isspace(*p))
-          p++;
-        if (!*p)
-          break;
-        if (*p == ';' || *p == '#') {
-          while (*p && *p != '\n')
-            p++;
-          continue;
-        }
-        if (strncmp(p, "module", 6) == 0 && (isspace(p[6]) || p[6] == '\0')) {
-          has_decl = true;
-          break;
-        }
-        if (strncmp(p, "use", 3) == 0 && (isspace(p[3]) || p[3] == '\0')) {
-          while (*p && *p != '\n')
-            p++;
-          continue;
-        }
-        break;
-      }
-      if (has_decl) {
-        append_text(&bundle, &total, &cap, txt);
-        append_text(&bundle, &total, &cap, "\n");
-      } else {
-        char *wrapped = malloc(strlen(txt) + strlen(mods.entries[i].name) + 64);
-        sprintf(wrapped, "module %s * {\n%s\n}", mods.entries[i].name, txt);
-        append_text(&bundle, &total, &cap, wrapped);
-        free(wrapped);
-      }
-      char use_stmt[512];
-      sprintf(use_stmt, "use %s *", mods.entries[i].name);
-      append_text(&bundle, &total, &cap, use_stmt);
-      append_text(&bundle, &total, &cap, "\n");
-      free(txt);
+    char *chunk = mods.entries[i].bundle_txt;
+    if (chunk) {
+      append_text(&bundle, &total, &cap, chunk);
+      free(chunk);
+      mods.entries[i].bundle_txt = NULL;
     }
   }
   for (size_t i = 0; i < mods.len; ++i) {
     free(mods.entries[i].path);
     free(mods.entries[i].name);
+    if (mods.entries[i].bundle_txt)
+      free(mods.entries[i].bundle_txt);
   }
   if (mods.entries)
     free(mods.entries);
