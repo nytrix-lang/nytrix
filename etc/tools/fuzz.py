@@ -7,6 +7,7 @@ sys.dont_write_bytecode = True
 import argparse
 import concurrent.futures
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import random
 import subprocess
 import time

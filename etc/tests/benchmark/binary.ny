@@ -5,9 +5,25 @@ use std.core.dict *
 use std.text.io *
 use std.text.io *
 use std.text *
+use std.os *
 use std.os.time *
 
 ;; Binary Trees (Benchmark)
+
+fn _bench_scale_percent(){
+   def raw = env("NYTRIX_BENCH_SCALE")
+   if(is_str(raw) && str_len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+
+fn _bench_scale(val, minv){
+   mut out = (val * _bench_scale_percent()) / 100
+   if(out < minv){ out = minv }
+   out
+}
 
 fn make_tree(depth){
    if(depth == 0){ return 0 }
@@ -21,7 +37,8 @@ fn check(t){
 }
 
 def min_depth = 4
-def max_depth = 10
+mut max_depth = _bench_scale(10, 6)
+if(max_depth < min_depth){ max_depth = min_depth }
 
 print("Benchmarking Binary Trees (fast mode, max depth ", max_depth, ")")
 

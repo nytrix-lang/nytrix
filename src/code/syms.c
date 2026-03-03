@@ -127,8 +127,19 @@ typedef struct ny_lookup_stamp_cache_t {
   bool ready;
 } ny_lookup_stamp_cache_t;
 
+typedef struct ny_module_used_cache_t {
+  const char *name;
+  size_t len;
+  uint64_t stamp;
+  uint64_t hash;
+  bool user_only;
+  bool value;
+  bool valid;
+} ny_module_used_cache_t;
+
 typedef struct ny_sym_state_t {
   ny_lookup_stamp_cache_t stamp_cache;
+  ny_module_used_cache_t module_used_cache;
 
   ny_fun_lookup_cache_entry_t fun_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
   ny_global_lookup_cache_entry_t global_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
@@ -147,6 +158,10 @@ typedef struct ny_sym_state_t {
 
   uint64_t fun_exact_stamp;
   uint64_t global_exact_stamp;
+  const void *fun_exact_data;
+  size_t fun_exact_len;
+  const void *global_exact_data;
+  size_t global_exact_len;
   uint64_t fun_tail_stamp;
   uint64_t global_tail_stamp;
   uint64_t use_module_stamp;
@@ -188,6 +203,12 @@ void ny_sym_state_free(codegen_t *cg) {
 static inline uint64_t ny_mix64(uint64_t h, uint64_t v) {
   h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
   return h;
+}
+
+static inline uint64_t ny_hash_name_cached(codegen_t *cg, const char *name,
+                                           size_t len) {
+  (void)cg;
+  return ny_hash_name(name, len);
 }
 
 static bool ny_user_ctx_is_non_std(const codegen_t *cg) {
@@ -286,6 +307,70 @@ static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
     fs->name_hash = ny_hash_name(fs->name, ny_fun_name_len(fs));
   }
   return fs->name_hash;
+}
+
+static inline size_t ny_fun_tail_len(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (fs->tail_cached)
+    return fs->tail_len;
+  size_t name_len = (size_t)ny_fun_name_len(fs);
+  if (name_len == 0) {
+    fs->tail_len = 0;
+    fs->tail_hash = 0;
+    fs->tail_cached = true;
+    return 0;
+  }
+  size_t dot = name_len;
+  for (size_t i = name_len; i > 0; --i) {
+    if (fs->name[i - 1] == '.') {
+      dot = i - 1;
+      break;
+    }
+  }
+  if (dot >= name_len - 1) {
+    fs->tail_len = 0;
+    fs->tail_hash = 0;
+    fs->tail_cached = true;
+    return 0;
+  }
+  size_t tail_len = name_len - dot - 1;
+  fs->tail_len = (uint32_t)tail_len;
+  fs->tail_hash = ny_hash_name(fs->name + dot + 1, tail_len);
+  fs->tail_cached = true;
+  return tail_len;
+}
+
+static inline size_t ny_binding_tail_len(binding *b) {
+  if (!b || !b->name)
+    return 0;
+  if (b->tail_cached)
+    return b->tail_len;
+  size_t name_len = (size_t)ny_binding_name_len(b);
+  if (name_len == 0) {
+    b->tail_len = 0;
+    b->tail_hash = 0;
+    b->tail_cached = true;
+    return 0;
+  }
+  size_t dot = name_len;
+  for (size_t i = name_len; i > 0; --i) {
+    if (b->name[i - 1] == '.') {
+      dot = i - 1;
+      break;
+    }
+  }
+  if (dot >= name_len - 1) {
+    b->tail_len = 0;
+    b->tail_hash = 0;
+    b->tail_cached = true;
+    return 0;
+  }
+  size_t tail_len = name_len - dot - 1;
+  b->tail_len = (uint32_t)tail_len;
+  b->tail_hash = ny_hash_name(b->name + dot + 1, tail_len);
+  b->tail_cached = true;
+  return tail_len;
 }
 
 static uint64_t ny_lookup_stamp(const codegen_t *cg) {
@@ -410,12 +495,19 @@ static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
   return recurse(cg, alias_full, ctx);
 }
 
-static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
-                                  const char *mod, size_t mod_len);
+static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
+                                       const char *mod, size_t mod_len,
+                                       uint64_t hash);
 
 static bool module_is_used(codegen_t *cg, const char *mod, size_t mod_len) {
   bool user_only = ny_user_ctx_is_non_std(cg);
-  return ny_module_used_lookup(cg, user_only, mod, mod_len);
+  return ny_module_used_lookup_hash(cg, user_only, mod, mod_len, 0);
+}
+
+static inline bool module_is_used_hash(codegen_t *cg, const char *mod,
+                                       size_t mod_len, uint64_t hash) {
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  return ny_module_used_lookup_hash(cg, user_only, mod, mod_len, hash);
 }
 
 static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
@@ -433,7 +525,7 @@ static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
     if (!used || !*used)
       continue;
     size_t used_len = strlen(used);
-    uint64_t hash = ny_hash_name(used, used_len);
+    uint64_t hash = ny_hash_name_cached(cg, used, used_len);
     size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
     for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
       ny_module_used_index_entry_t *e = &index[pos];
@@ -460,8 +552,9 @@ static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
   }
 }
 
-static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
-                                  const char *mod, size_t mod_len) {
+static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
+                                       const char *mod, size_t mod_len,
+                                       uint64_t hash) {
   if (!mod || !*mod)
     return false;
   uint64_t stamp = ny_module_used_index_version(cg, user_only);
@@ -477,29 +570,99 @@ static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
     s = ny_get_sym_state(cg);
     index = user_only ? s->user_use_module : s->use_module;
   }
-  uint64_t hash = ny_hash_name(mod, mod_len);
+  if (s->module_used_cache.valid && s->module_used_cache.user_only == user_only &&
+      s->module_used_cache.stamp == stamp &&
+      s->module_used_cache.len == mod_len &&
+      s->module_used_cache.name == mod) {
+    return s->module_used_cache.value;
+  }
+
+  if (!hash)
+    hash = ny_hash_name_cached(cg, mod, mod_len);
   size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
     ny_module_used_index_entry_t *e = &index[pos];
     if (!e->state)
-      return false;
+      break;
     if (e->hash == hash && e->len == (uint32_t)mod_len &&
         memcmp(e->name, mod, mod_len) == 0 && e->name[mod_len] == '\0') {
+      s->module_used_cache = (ny_module_used_cache_t){
+          .name = mod,
+          .len = mod_len,
+          .stamp = stamp,
+          .hash = hash,
+          .user_only = user_only,
+          .value = true,
+          .valid = true,
+      };
       return true;
     }
     pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
   }
+  s->module_used_cache = (ny_module_used_cache_t){
+      .name = mod,
+      .len = mod_len,
+      .stamp = stamp,
+      .hash = hash,
+      .user_only = user_only,
+      .value = false,
+      .valid = true,
+  };
   return false;
 }
 
 #define NY_DEFINE_EXACT_INDEX_REBUILD(                                         \
-    fn_name, index_field, stamp_field, ready_field, vec_field,                 \
-    item_type, item_name_expr, item_len_expr, item_hash_expr, entry_type,      \
-    entry_name_field, entry_value_field, item_value_expr)                      \
+    fn_name, index_field, stamp_field, ready_field, data_field, len_field,     \
+    vec_field, item_type, item_name_expr, item_len_expr, item_hash_expr,       \
+    entry_type, entry_name_field, entry_value_field, item_value_expr)          \
   static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
     ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
-    memset(s->index_field, 0, sizeof(s->index_field));                         \
-    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
+    const void *cur_data = (const void *)cg->vec_field.data;                   \
+    size_t cur_len = (size_t)cg->vec_field.len;                                \
+    bool full_rebuild = (!s->ready_field || s->stamp_field != stamp ||         \
+                         s->data_field != cur_data ||                         \
+                         s->len_field > cur_len);                              \
+    if (full_rebuild) {                                                        \
+      memset(s->index_field, 0, sizeof(s->index_field));                       \
+      for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {           \
+        item_type *item = &cg->vec_field.data[i];                              \
+        const char *name = (item_name_expr);                                   \
+        if (!name || !*name)                                                   \
+          continue;                                                            \
+        size_t len = (size_t)(item_len_expr);                                  \
+        uint64_t hash = (item_hash_expr);                                      \
+        size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));      \
+        for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) { \
+          entry_type *e = &s->index_field[pos];                                \
+          if (!e->state) {                                                     \
+            e->state = 1u;                                                     \
+            e->hash = hash;                                                    \
+            e->len = (uint32_t)len;                                            \
+            e->entry_name_field = name;                                        \
+            e->entry_value_field = (item_value_expr);                          \
+            break;                                                             \
+          }                                                                    \
+          if (e->hash == hash && e->len == (uint32_t)len &&                    \
+              memcmp(e->entry_name_field, name, len) == 0 &&                   \
+              e->entry_name_field[len] == '\0') {                              \
+            break;                                                             \
+          }                                                                    \
+          pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);               \
+        }                                                                      \
+      }                                                                        \
+      s->data_field = cur_data;                                                \
+      s->len_field = cur_len;                                                  \
+      s->stamp_field = stamp;                                                  \
+      s->ready_field = true;                                                   \
+      return;                                                                  \
+    }                                                                          \
+    if (s->len_field >= cur_len) {                                             \
+      s->stamp_field = stamp;                                                  \
+      s->ready_field = true;                                                   \
+      return;                                                                  \
+    }                                                                          \
+    size_t start = s->len_field;                                               \
+    for (ssize_t i = (ssize_t)cur_len - 1; i >= (ssize_t)start; --i) {          \
       item_type *item = &cg->vec_field.data[i];                                \
       const char *name = (item_name_expr);                                     \
       if (!name || !*name)                                                     \
@@ -520,25 +683,29 @@ static bool ny_module_used_lookup(codegen_t *cg, bool user_only,
         if (e->hash == hash && e->len == (uint32_t)len &&                      \
             memcmp(e->entry_name_field, name, len) == 0 &&                     \
             e->entry_name_field[len] == '\0') {                                \
+          e->entry_name_field = name;                                          \
+          e->entry_value_field = (item_value_expr);                            \
           break;                                                               \
         }                                                                      \
         pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
       }                                                                        \
     }                                                                          \
+    s->data_field = cur_data;                                                  \
+    s->len_field = cur_len;                                                    \
     s->stamp_field = stamp;                                                    \
     s->ready_field = true;                                                     \
   }
 
 NY_DEFINE_EXACT_INDEX_REBUILD(ny_fun_exact_index_rebuild, fun_exact,
-                              fun_exact_stamp, fun_exact_ready, fun_sigs,
-                              fun_sig, item->name, ny_fun_name_len(item),
-                              ny_fun_name_hash(item),
+                              fun_exact_stamp, fun_exact_ready, fun_exact_data,
+                              fun_exact_len, fun_sigs, fun_sig, item->name,
+                              ny_fun_name_len(item), ny_fun_name_hash(item),
                               ny_fun_exact_index_entry_t, name, value, item)
 
 NY_DEFINE_EXACT_INDEX_REBUILD(ny_global_exact_index_rebuild, global_exact,
                               global_exact_stamp, global_exact_ready,
-                              global_vars, binding, item->name,
-                              ny_binding_name_len(item),
+                              global_exact_data, global_exact_len, global_vars,
+                              binding, item->name, ny_binding_name_len(item),
                               ny_binding_name_hash(item),
                               ny_global_exact_index_entry_t, name, value, item)
 
@@ -559,7 +726,7 @@ retry:
     ny_fun_exact_index_rebuild(cg, stamp);
     s = ny_get_sym_state(cg);
   }
-  hash = ny_hash_name(name, len);
+  hash = ny_hash_name_cached(cg, name, len);
   pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
     ny_fun_exact_index_entry_t *e = &s->fun_exact[pos];
@@ -592,7 +759,7 @@ binding *lookup_global_exact(codegen_t *cg, const char *name) {
     ny_global_exact_index_rebuild(cg, stamp);
     s = ny_get_sym_state(cg);
   }
-  uint64_t hash = ny_hash_name(name, len);
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
   size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
     ny_global_exact_index_entry_t *e = &s->global_exact[pos];
@@ -625,9 +792,10 @@ static bool ny_cacheable_name(const char *name, size_t *out_len) {
   return true;
 }
 
-static inline uint64_t ny_overload_cache_hash(const char *name, size_t len,
-                                              size_t argc) {
-  return ny_hash_name(name, len) ^ ((uint64_t)argc * 11400714819323198485ULL);
+static inline uint64_t ny_overload_cache_hash(codegen_t *cg, const char *name,
+                                              size_t len, size_t argc) {
+  return ny_hash_name_cached(cg, name, len) ^
+         ((uint64_t)argc * 11400714819323198485ULL);
 }
 
 #define NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name)                    \
@@ -653,7 +821,7 @@ static int ny_fun_cache_get(codegen_t *cg, const char *name, uint64_t hash,
   if (!ny_cacheable_name(name, &len))
     return -1;
   if (!hash)
-    hash = ny_hash_name(name, len);
+    hash = ny_hash_name_cached(cg, name, len);
   uint64_t stamp = ny_lookup_stamp(cg);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_fun_lookup_cache_entry_t *e =
@@ -678,7 +846,7 @@ static void ny_fun_cache_put(codegen_t *cg, const char *name, uint64_t hash,
   if (!ny_cacheable_name(name, &len))
     return;
   if (!hash)
-    hash = ny_hash_name(name, len);
+    hash = ny_hash_name_cached(cg, name, len);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_fun_lookup_cache_entry_t *e =
       &s->fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
@@ -690,11 +858,13 @@ static void ny_fun_cache_put(codegen_t *cg, const char *name, uint64_t hash,
   NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
 }
 
-static int ny_global_cache_get(codegen_t *cg, const char *name, binding **out) {
+static int ny_global_cache_get(codegen_t *cg, const char *name, uint64_t hash,
+                               binding **out) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return -1;
-  uint64_t hash = ny_hash_name(name, len);
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
   uint64_t stamp = ny_lookup_stamp(cg);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_global_lookup_cache_entry_t *e =
@@ -713,12 +883,13 @@ static int ny_global_cache_get(codegen_t *cg, const char *name, binding **out) {
   return 0;
 }
 
-static void ny_global_cache_put(codegen_t *cg, const char *name,
+static void ny_global_cache_put(codegen_t *cg, const char *name, uint64_t hash,
                                 binding *value) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return;
-  uint64_t hash = ny_hash_name(name, len);
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_global_lookup_cache_entry_t *e =
       &s->global_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
@@ -735,7 +906,7 @@ static int ny_alias_cache_get(codegen_t *cg, const char *name,
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return -1;
-  uint64_t hash = ny_hash_name(name, len);
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
   uint64_t stamp = ny_lookup_stamp(cg);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_alias_lookup_cache_entry_t *e =
@@ -754,7 +925,7 @@ static void ny_alias_cache_put(codegen_t *cg, const char *name,
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return;
-  uint64_t hash = ny_hash_name(name, len);
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_alias_lookup_cache_entry_t *e =
       &s->alias_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
@@ -767,7 +938,7 @@ static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
   if (!ny_cacheable_name(name, &len))
     return -1;
   if (!hash)
-    hash = ny_overload_cache_hash(name, len, argc);
+    hash = ny_overload_cache_hash(cg, name, len, argc);
   else
     hash ^= ((uint64_t)argc * 11400714819323198485ULL);
   uint64_t stamp = ny_lookup_stamp(cg);
@@ -795,7 +966,7 @@ static void ny_overload_cache_put(codegen_t *cg, const char *name, size_t argc,
   if (!ny_cacheable_name(name, &len))
     return;
   if (!hash)
-    hash = ny_overload_cache_hash(name, len, argc);
+    hash = ny_overload_cache_hash(cg, name, len, argc);
   else
     hash ^= ((uint64_t)argc * 11400714819323198485ULL);
   ny_sym_state_t *s = ny_get_sym_state(cg);
@@ -862,14 +1033,16 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
 
 #define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
     fn_name, index_field, stamp_field, ready_field, vec_field,                 \
-    item_type, item_name_expr, item_name_len, entry_type, entry_tail_field,    \
-    entry_value_field, item_value_expr)                                        \
+    item_type, item_name_expr, item_name_len, item_tail_len_expr,              \
+    item_tail_hash_expr, entry_type, entry_tail_field, entry_value_field,      \
+    item_value_expr)                                                           \
   static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
     ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
     memset(s->index_field, 0, sizeof(s->index_field));                         \
     const char *last_mod = NULL;                                               \
     size_t last_mod_len = 0;                                                   \
     bool last_mod_used = false;                                                \
+    bool last_mod_user_used = false;                                           \
     for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {            \
       item_type *item = &cg->vec_field.data[i];                                \
       const char *sig_name = (item_name_expr);                                 \
@@ -880,14 +1053,21 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
         continue;                                                              \
       size_t mod_len = (size_t)(dot - sig_name);                               \
       bool mod_used = false;                                                   \
+      bool mod_user_used = false;                                              \
+      uint64_t mod_hash = 0;                                                   \
       if (last_mod && last_mod_len == mod_len &&                               \
           memcmp(last_mod, sig_name, mod_len) == 0) {                          \
         mod_used = last_mod_used;                                              \
+        mod_user_used = last_mod_user_used;                                    \
       } else {                                                                 \
-        mod_used = module_is_used(cg, sig_name, mod_len);                      \
+        mod_hash = ny_hash_name(sig_name, mod_len);                            \
+        mod_used = module_is_used_hash(cg, sig_name, mod_len, mod_hash);       \
+        mod_user_used = ny_module_used_lookup_hash(cg, true, sig_name,         \
+                                                    mod_len, mod_hash);        \
         last_mod = sig_name;                                                   \
         last_mod_len = mod_len;                                                \
         last_mod_used = mod_used;                                              \
+        last_mod_user_used = mod_user_used;                                    \
       }                                                                        \
       if (!mod_used)                                                           \
         continue;                                                              \
@@ -896,11 +1076,16 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
         continue;                                                              \
       size_t sig_len = (size_t)(item_name_len);                                \
       size_t len = sig_len - mod_len - 1u;                                     \
-      uint64_t hash = ny_hash_name(tail, len);                                 \
+      size_t tail_len = (size_t)(item_tail_len_expr);                          \
+      uint64_t hash = (uint64_t)(item_tail_hash_expr);                         \
+      if (tail_len != len || !hash) {                                          \
+        tail_len = len;                                                        \
+        hash = ny_hash_name_cached(cg, tail, len);                             \
+      }                                                                        \
       size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
       for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
         entry_type *e = &s->index_field[pos];                                  \
-        uint8_t new_state = ny_module_used_lookup(cg, true, sig_name, mod_len) ? 3u : 1u; \
+        uint8_t new_state = mod_user_used ? 3u : 1u;                           \
         if (cg->current_module_name && strlen(cg->current_module_name) == mod_len && \
             memcmp(cg->current_module_name, sig_name, mod_len) == 0) new_state = 10u; \
         else if (mod_len >= 8 && memcmp(sig_name, "std.core", 8) == 0 && (sig_name[8] == '.' || sig_name[8] == '\0')) new_state = 5u; \
@@ -937,11 +1122,13 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
 NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, fun_tail,
                              fun_tail_stamp, fun_tail_ready, fun_sigs,
                              fun_sig, item->name, ny_fun_name_len(item),
+                             ny_fun_tail_len(item), item->tail_hash,
                              ny_fun_tail_index_entry_t, tail_name, value, item)
 
 NY_DEFINE_TAIL_INDEX_REBUILD(ny_global_tail_index_rebuild, global_tail,
                              global_tail_stamp, global_tail_ready, global_vars,
                              binding, item->name, ny_binding_name_len(item),
+                             ny_binding_tail_len(item), item->tail_hash,
                              ny_global_tail_index_entry_t, tail_name, value,
                              item)
 
@@ -962,7 +1149,7 @@ retry:
     ny_fun_tail_index_rebuild(cg, stamp);
     s = ny_get_sym_state(cg);
   }
-  hash = ny_hash_name(tail, len);
+  hash = ny_hash_name_cached(cg, tail, len);
   pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
     ny_fun_tail_index_entry_t *e = &s->fun_tail[pos];
@@ -995,7 +1182,7 @@ static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
     ny_global_tail_index_rebuild(cg, stamp);
     s = ny_get_sym_state(cg);
   }
-  uint64_t hash = ny_hash_name(tail, len);
+  uint64_t hash = ny_hash_name_cached(cg, tail, len);
   size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
   for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
     ny_global_tail_index_entry_t *e = &s->global_tail[pos];
@@ -1389,11 +1576,11 @@ const char *resolve_import_alias(codegen_t *cg, const char *name) {
   return res;
 }
 
-binding *lookup_global(codegen_t *cg, const char *name) {
+binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
   if (!name || !*name)
     return NULL;
   binding *cached = NULL;
-  int cache_state = ny_global_cache_get(cg, name, &cached);
+  int cache_state = ny_global_cache_get(cg, name, hash, &cached);
   if (cache_state == 1) {
     cached->is_used = true;
     return cached;
@@ -1441,7 +1628,8 @@ binding *lookup_global(codegen_t *cg, const char *name) {
           continue;
         memcpy(resolved, real_mod_name, mod_len);
         memcpy(resolved + mod_len, dot, dot_len + 1);
-        binding *recursive_res = lookup_global(cg, resolved);
+        binding *recursive_res =
+            lookup_global_hash(cg, resolved, ny_hash64(resolved, full_len));
         if (resolved != stack_buf)
           free(resolved);
         if (recursive_res) {
@@ -1462,8 +1650,12 @@ binding *lookup_global(codegen_t *cg, const char *name) {
 end:
   if (res)
     res->is_used = true;
-  ny_global_cache_put(cg, name, res);
+  ny_global_cache_put(cg, name, hash, res);
   return res;
+}
+
+binding *lookup_global(codegen_t *cg, const char *name) {
+  return lookup_global_hash(cg, name, 0);
 }
 
 fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
@@ -1523,7 +1715,7 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
   {
     int best_score = -1;
     size_t name_len = strlen(name);
-    uint64_t want_hash = hash ? hash : ny_hash_name(name, name_len);
+    uint64_t want_hash = hash ? hash : ny_hash_name_cached(cg, name, name_len);
     int32_t idx = ny_overload_name_bucket_head(cg, want_hash);
     ny_sym_state_t *s = ny_get_sym_state(cg);
     while (idx >= 0) {

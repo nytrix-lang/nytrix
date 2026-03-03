@@ -22,6 +22,7 @@ use std.os.sys *
 use std.text.io *
 use std.os.path as ospath
 use std.os.clipboard as cb
+use std.os.platform as platform
 
 fn set_clipboard_text(text){
    "Sets the system clipboard text."
@@ -38,14 +39,9 @@ use std.os.dirs *
 use std.os.gpu *
 use std.os.parallel *
 
-fn _is_windows(){
-   "Internal: returns true on Windows hosts."
-   __os_name() == "windows"
-}
-
 fn _is_transient_file_error(code){
    "Internal: returns true for transient Windows file operation errors."
-   _is_windows() && (code == -22 || code == -13 || code == -5)
+   platform.is_windows() && (code == -22 || code == -13 || code == -5)
 }
 
 fn _open_with_retry(path, flags, mode) -> Result {
@@ -63,6 +59,17 @@ fn _open_with_retry(path, flags, mode) -> Result {
       return last
    }
    last
+}
+
+fn _file_write_impl(path, content, flags) -> Result {
+   "Internal: opens `path` with `flags` and writes the full contents of `content`."
+   def p = ospath.normalize(path)
+   def open_res = _open_with_retry(p, flags, 420)
+   if(is_err(open_res)){ return open_res }
+   def fd = unwrap(open_res)
+   defer { unwrap(sys_close(fd)) }
+   def n = str_len(content)
+   return sys_write(fd, content, n)
 }
 
 fn getcwd(){
@@ -123,13 +130,7 @@ fn file_read(path) -> Result {
 
 fn file_write(path, content) -> Result {
    "Writes `content` to `path` (truncate/create); returns `ok(bytes_written)` or `err(errno_like_code)`."
-   def p = ospath.normalize(path)
-   def open_res = _open_with_retry(p, 577, 420) ; WRONLY|CREAT|TRUNC, 0644
-   if(is_err(open_res)){ return open_res }
-   def fd = unwrap(open_res)
-   defer { unwrap(sys_close(fd)) }
-   def n = str_len(content)
-   return sys_write(fd, content, n)
+   return _file_write_impl(path, content, 577) ; WRONLY|CREAT|TRUNC, 0644
 }
 
 fn file_exists(path){
@@ -141,13 +142,7 @@ fn file_exists(path){
 
 fn file_append(path, content) -> Result {
    "Appends `content` to `path` (create if missing); returns `ok(bytes_written)` or `err(errno_like_code)`."
-   def p = ospath.normalize(path)
-   def open_res = _open_with_retry(p, 1089, 420) ; WRONLY|CREAT|APPEND, 0644
-   if(is_err(open_res)){ return open_res }
-   def fd = unwrap(open_res)
-   defer { unwrap(sys_close(fd)) }
-   def n = str_len(content)
-   return sys_write(fd, content, n)
+   return _file_write_impl(path, content, 1089) ; WRONLY|CREAT|APPEND, 0644
 }
 
 fn file_remove(path) -> Result {

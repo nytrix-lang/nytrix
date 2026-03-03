@@ -5,6 +5,8 @@
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/IRReader.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Analysis.h>
+#include <llvm/Config/llvm-config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +27,46 @@ static unsigned long ny_hash_string(const char *str) {
   while ((c = *str++))
     hash = ((hash << 5) + hash) + c;
   return hash;
+}
+
+static bool ny_write_text_file_atomic(const char *path, const char *content,
+                                      size_t len) {
+  if (!path || !*path || !content)
+    return false;
+  char tmp_path[1024];
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+  FILE *f = fopen(tmp_path, "wb");
+  if (!f)
+    return false;
+  bool wrote = fwrite(content, 1, len, f) == len;
+  bool closed = fclose(f) == 0;
+  if (!wrote || !closed) {
+    remove(tmp_path);
+    return false;
+  }
+  if (rename(tmp_path, path) != 0) {
+    remove(tmp_path);
+    return false;
+  }
+  return true;
+}
+
+static bool ny_cache_path_is_ir(const char *cache_path) {
+  if (!cache_path)
+    return false;
+  const char *ext = strrchr(cache_path, '.');
+  if (!ext)
+    return false;
+  return strcmp(ext, ".ll") == 0 || strcmp(ext, ".ir") == 0 ||
+         strcmp(ext, ".llvm") == 0;
+}
+
+static bool ny_jit_cache_use_ir(void) {
+  const char *env = getenv("NYTRIX_JIT_CACHE_FORMAT");
+  if (!env || !*env)
+    return true;
+  return strcmp(env, "ir") == 0 || strcmp(env, "ll") == 0 ||
+         strcmp(env, "text") == 0 || strcmp(env, "llvm") == 0;
 }
 
 static char *ny_get_cache_dir(void) {
@@ -55,15 +97,13 @@ static void ny_ensure_dir_recursive(const char *path) {
 }
 
 bool ny_jit_cache_enabled(void) {
-  const char *env = getenv("NYTRIX_JIT_CACHE");
-  if (env && (strcmp(env, "0") == 0 || strcmp(env, "off") == 0 ||
-              strcmp(env, "false") == 0)) {
-    return false;
-  }
-  return true;
+  return ny_env_enabled_default_on("NYTRIX_JIT_CACHE");
 }
 
-char *ny_jit_cache_path(const char *source, const char *stdlib_path) {
+enum { NY_JIT_CACHE_VERSION = 6 };
+
+char *ny_jit_cache_path(const char *source, const char *stdlib_path,
+                        unsigned long std_src_hash) {
   if (!source)
     return NULL;
   char *dir = ny_get_cache_dir();
@@ -73,15 +113,28 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path) {
   unsigned long src_hash = ny_hash_string(source);
   unsigned long std_hash = 0;
   if (stdlib_path) {
-    struct stat st;
-    if (stat(stdlib_path, &st) == 0) {
-      std_hash = (unsigned long)st.st_mtime;
+    if (std_src_hash) {
+      std_hash = std_src_hash;
+    } else {
+      struct stat st;
+      if (stat(stdlib_path, &st) == 0) {
+        std_hash = (unsigned long)st.st_mtime;
+      }
     }
     std_hash ^= ny_hash_string(stdlib_path);
   }
+#ifdef LLVM_VERSION_STRING
+  std_hash ^= ny_hash_string(LLVM_VERSION_STRING);
+#endif
+  std_hash ^= (unsigned long)NY_JIT_CACHE_VERSION;
   static char path[1024];
-  snprintf(path, sizeof(path), "%s/%lx_%lx.ll", dir, src_hash, std_hash);
+  const char *ext = ny_jit_cache_use_ir() ? "ll" : "bc";
+  snprintf(path, sizeof(path), "%s/%lx_%lx.%s", dir, src_hash, std_hash, ext);
   return strdup(path);
+}
+
+static bool ny_jit_cache_verify_enabled(void) {
+  return ny_env_enabled("NYTRIX_JIT_CACHE_VERIFY");
 }
 
 bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
@@ -89,15 +142,36 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
   if (!cache_path || !ctx || !out_module)
     return false;
   LLVMMemoryBufferRef buf = NULL;
-  char *msg = NULL;
   if (access(cache_path, R_OK) != 0) return false;
-  if (LLVMCreateMemoryBufferWithContentsOfFile(cache_path, &buf, &msg) != 0) {
-    if (msg) LLVMDisposeMessage(msg);
+  if (LLVMCreateMemoryBufferWithContentsOfFile(cache_path, &buf, NULL) != 0) {
+    remove(cache_path);
     return false;
   }
-  if (LLVMParseIRInContext(ctx, buf, out_module, &msg) != 0) {
-    if (msg) LLVMDisposeMessage(msg);
+  bool parsed = false;
+  bool buf_owned_by_module = false;
+  if (ny_cache_path_is_ir(cache_path)) {
+    parsed = LLVMParseIRInContext(ctx, buf, out_module, NULL) == 0;
+    buf_owned_by_module = parsed;
+  } else {
+    parsed = LLVMParseBitcodeInContext2(ctx, buf, out_module) == 0;
+  }
+  if (!parsed || !buf_owned_by_module) {
+    LLVMDisposeMemoryBuffer(buf);
+  }
+  if (!parsed) {
+    remove(cache_path);
     return false;
+  }
+  /* Validate cached module only when explicitly requested */
+  if (ny_jit_cache_verify_enabled()) {
+    char *vmsg = NULL;
+    if (LLVMVerifyModule(*out_module, LLVMReturnStatusAction, &vmsg) != 0) {
+      if (vmsg) LLVMDisposeMessage(vmsg);
+      LLVMDisposeModule(*out_module);
+      *out_module = NULL;
+      remove(cache_path);
+      return false;
+    }
   }
   return true;
 }
@@ -105,9 +179,20 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
 bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
   if (!cache_path || !module)
     return false;
-  char *err = NULL;
-  if (LLVMPrintModuleToFile(module, cache_path, &err) != 0) {
-    if (err) LLVMDisposeMessage(err);
+  if (ny_cache_path_is_ir(cache_path)) {
+    char *ir = LLVMPrintModuleToString(module);
+    if (!ir)
+      return false;
+    bool ok = ny_write_text_file_atomic(cache_path, ir, strlen(ir));
+    LLVMDisposeMessage(ir);
+    return ok;
+  }
+  char tmp_path[1024];
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", cache_path);
+  if (LLVMWriteBitcodeToFile(module, tmp_path) != 0)
+    return false;
+  if (rename(tmp_path, cache_path) != 0) {
+    remove(tmp_path);
     return false;
   }
   return true;

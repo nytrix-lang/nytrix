@@ -12,6 +12,7 @@ use std.os *
 use std.os.thread *
 use std.os.time *
 use std.text *
+use std.util.common as common
 use std.os.audio.backend.io (
    create, connect, disconnect,
    get_output_device_count, get_output_device, get_default_output_device_index,
@@ -36,34 +37,20 @@ mut _out_format = FORMAT_S16LE
 mut _prime_periods = -1
 mut _idle_sleep_ms = 0
 
-fn _touch(...args){
-   "Internal helper for `touch`."
-   len(args)
-}
-
 fn _is_debug(){
-   if(_debug == -1){
-      def v = env("NY_AUDIO_DEBUG")
-      _debug = (v && (str_len(v) > 0)) ? 1 : 0
-   }
+   "Internal: caches whether general audio debug logging is enabled."
+   _debug = common.cached_env_present(_debug, "NY_AUDIO_DEBUG")
    _debug
 }
 
 fn _is_mix_debug(){
-   if(_debug_mix == -1){
-      def v = env("NY_AUDIO_DEBUG_MIX")
-      _debug_mix = (v && (str_len(v) > 0)) ? 1 : 0
-   }
+   "Internal: caches whether mixer debug logging is enabled."
+   _debug_mix = common.cached_env_present(_debug_mix, "NY_AUDIO_DEBUG_MIX")
    _debug_mix
 }
 
-fn _env_enabled(name){
-   def v = env(name)
-   if(!v){ return false }
-   str_len(v) > 0
-}
-
 fn _is_async_mode(){
+   "Internal: resolves whether the audio mixer should use the background streaming thread."
    if(_async_mode == -1){
       def v = env("NY_AUDIO_ASYNC")
       if(!v){
@@ -313,7 +300,7 @@ fn shutdown(){
 
 fn _audio_thread(arg){
    "Internal helper for `audio_thread`."
-   _touch(arg)
+   common.touch(arg)
    def period_frames = _get_period_frames()
    def buf_size = period_frames * _frame_bytes()
    def out_rate = _get_output_rate()

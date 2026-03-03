@@ -30,11 +30,13 @@ void ny_str_list_free(char **list, size_t count);
 
 uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed);
 uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed);
+uint64_t ny_hash64_fast(const void *data, size_t len);
+uint64_t ny_hash64_fast_cstr(const char *s);
 static inline uint64_t ny_hash64(const void *data, size_t len) {
-  return ny_fnv1a64(data, len, NY_FNV1A64_OFFSET_BASIS);
+  return ny_hash64_fast(data, len);
 }
 static inline uint64_t ny_hash64_cstr(const char *s) {
-  return ny_fnv1a64_cstr(s, NY_FNV1A64_OFFSET_BASIS);
+  return ny_hash64_fast_cstr(s);
 }
 static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   return ny_fnv1a64(&v, sizeof(v), seed ? seed : NY_FNV1A64_OFFSET_BASIS);

@@ -27,20 +27,26 @@ use std.core *
 use std.core.dict_mod *
 use std.ui.consts *
 use std.ui.event as ev
+use std.ui.key as ui_key
 use std.os *
 use std.os.time *
 use std.text as str
+use std.util.common as common
 use std.ui.glfw as ui_backend
 
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
 
 ;; Key sequence helpers
 
-fn _seq_equal(a, b) {
-   "Internal: Checks if two key sequences are identical."
-   if(len(a) != len(b)){ return false }
+fn _seq_match(a, b, allow_prefix=false) {
+   "Internal: Compares key sequences for exact or prefix matches."
+   if(allow_prefix){
+      if(len(a) >= len(b)){ return false }
+   } elif(len(a) != len(b)){
+      return false
+   }
    mut i = 0
-   while(i < len(a)) {
+   while(i < len(a)){
       def sa = get(a, i)
       def sb = get(b, i)
       if(get(sa, 0) != get(sb, 0) || (get(sa, 1) & _MOD_MASK) != (get(sb, 1) & _MOD_MASK)){ return false }
@@ -49,182 +55,21 @@ fn _seq_equal(a, b) {
    true
 }
 
+fn _seq_equal(a, b) {
+   "Internal: Checks if two key sequences are identical."
+   _seq_match(a, b)
+}
+
 fn _seq_is_prefix(pref, full) {
    "Internal: Checks if one key sequence is a prefix of another."
-   if(len(pref) >= len(full)){ return false }
-   mut i = 0
-   while(i < len(pref)) {
-      def sa = get(pref, i)
-      def sb = get(full, i)
-      if(get(sa, 0) != get(sb, 0) || (get(sa, 1) & _MOD_MASK) != (get(sb, 1) & _MOD_MASK)){ return false }
-      i += 1
-   }
-   true
+   _seq_match(pref, full, true)
 }
 
-;; Key parsing helpers
-
-fn _str_slice(s, start) {
-   "Internal: Returns a slice of a string starting from the given offset."
-   def slen = str.str_len(s)
-   if(start >= slen){ return "" }
-   mut out = malloc(slen - start + 1)
-   init_str(out, slen - start)
-   mut i = 0
-   while(i < (slen - start)) {
-      store8(out, load8(s, start + i), i)
-      i += 1
-   }
-   store8(out, 0, slen - start)
-   out
-}
-
-fn _normalize_mod(mod) { "Internal: Masks modifiers to the supported set." mod & _MOD_MASK }
-
-fn _normalize_key(key) {
-   "Internal: Normalizes key codes (e.g., lowercase to uppercase, mapping GLFW/X11 codes)."
-   if(key >= 97 && key <= 122){ return key - 32 }
-   if(key == 0xFF1B){ return KEY_ESCAPE }
-   if(key == 0xFF0D){ return 13 }
-   if(key == 0xFF08){ return 8 }
-   if(key == 0xFF09){ return 9 }
-   if(key == 0xFF51){ return 1000 }
-   if(key == 0xFF52){ return 1001 }
-   if(key == 0xFF53){ return 1002 }
-   if(key == 0xFF54){ return 1003 }
-   key
-}
-
-fn _mod_bit_for_key(key) {
-   "Internal: Returns the modifier bit associated with a specific modifier key."
-   if(key == 0xFFE1 || key == 0xFFE2 || key == 16){ return MOD_SHIFT }
-   if(key == 0xFFE3 || key == 0xFFE4 || key == 17){ return MOD_CONTROL }
-   if(key == 0xFFE9 || key == 0xFFEA || key == 18){ return MOD_ALT }
-   if(key == 0xFFEB || key == 0xFFEC || key == 91 || key == 92){ return MOD_SUPER }
-   if(key == 0xFFE7 || key == 0xFFE8){ return MOD_META }
-   0
-}
-
-fn _mods_from_key_states(ks) {
-   "Internal: Calculates active modifier bits from the current key states dictionary."
-   if(!is_dict(ks)){ return 0 }
-   mut mods = 0
-   if(dict_get(ks, 0xFFE1, false) || dict_get(ks, 0xFFE2, false) || dict_get(ks, 16, false)){
-      mods = mods | MOD_SHIFT
-   }
-   if(dict_get(ks, 0xFFE3, false) || dict_get(ks, 0xFFE4, false) || dict_get(ks, 17, false)){
-      mods = mods | MOD_CONTROL
-   }
-   if(dict_get(ks, 0xFFE9, false) || dict_get(ks, 0xFFEA, false) || dict_get(ks, 18, false)){
-      mods = mods | MOD_ALT
-   }
-   if(dict_get(ks, 0xFFEB, false) || dict_get(ks, 0xFFEC, false) ||
-      dict_get(ks, 91, false) || dict_get(ks, 92, false)){
-      mods = mods | MOD_SUPER
-   }
-   if(dict_get(ks, 0xFFE7, false) || dict_get(ks, 0xFFE8, false)){
-      mods = mods | MOD_META
-   }
-   mods
-}
-
-fn _parse_single_key(tok) {
-   "Internal: Parses a single key notation string (e.g., 'C-S-a') into [key, mods]."
-   mut mods = 0
-   mut p = str.upper(tok)
-   while(true) {
-      if(str.startswith(p, "CONTROL-")){
-         mods = mods | MOD_CONTROL
-         p = _str_slice(p, 8)
-      } elif(str.startswith(p, "CTRL-")){
-         mods = mods | MOD_CONTROL
-         p = _str_slice(p, 5)
-      } elif(str.startswith(p, "C-")){
-         mods = mods | MOD_CONTROL
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "SHIFT-")){
-         mods = mods | MOD_SHIFT
-         p = _str_slice(p, 6)
-      } elif(str.startswith(p, "S-")){
-         mods = mods | MOD_SHIFT
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "OPTION-")){
-         mods = mods | MOD_ALT
-         p = _str_slice(p, 7)
-      } elif(str.startswith(p, "ALT-")){
-         mods = mods | MOD_ALT
-         p = _str_slice(p, 4)
-      } elif(str.startswith(p, "A-")){
-         mods = mods | MOD_ALT
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "M-")){
-         mods = mods | MOD_ALT
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "META-")){
-         mods = mods | MOD_META
-         p = _str_slice(p, 5)
-      } elif(str.startswith(p, "G-")){
-         mods = mods | MOD_META
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "COMMAND-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 8)
-      } elif(str.startswith(p, "CMD-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 4)
-      } elif(str.startswith(p, "WIN-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 4)
-      } elif(str.startswith(p, "SUPER-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 6)
-      } elif(str.startswith(p, "HYPER-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 6)
-      } elif(str.startswith(p, "H-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 2)
-      } elif(str.startswith(p, "D-")){
-         mods = mods | MOD_SUPER
-         p = _str_slice(p, 2)
-      } else { break }
-   }
-   mut key = 0
-   def _pl = str.upper(p) == p ? str.str_len(p) : 0
-   if(str.str_len(p) == 1) {
-      key = load8(p, 0)
-      if(key >= 97 && key <= 122){ key -= 32 }
-   } else {
-      if(p == "ESC"){ key = KEY_ESCAPE }
-      elif(p == "RET" || p == "ENTER"){ key = 13 }
-      elif(p == "TAB"){ key = 9 }
-      elif(p == "SPC" || p == "SPACE"){ key = 32 }
-      elif(p == "SHIFT"){ key = 0xFFE1 }
-      elif(p == "CTRL" || p == "CONTROL"){ key = 0xFFE3 }
-      elif(p == "ALT" || p == "OPTION"){ key = 0xFFE9 }
-      elif(p == "SUPER" || p == "WIN" || p == "CMD" || p == "COMMAND"){ key = 0xFFEB }
-      elif(p == "META"){ key = 0xFFE7 }
-      elif(p == "UP"){ key = 1001 }
-      elif(p == "DOWN"){ key = 1003 }
-      elif(p == "LEFT"){ key = 1000 }
-      elif(p == "RIGHT"){ key = 1002 }
-      elif(p == "DEL" || p == "BACKSPACE"){ key = 8 }
-   }
-   return [key, mods]
-}
-
-fn _parse_notation(notation) {
-   "Internal: Parses a key sequence notation string into a list of [key, mods]."
-   def toks = str.split(notation, " ")
-   mut seq = []
-   mut i = 0
-   while(i < len(toks)) {
-      def t = get(toks, i)
-      if(str.str_len(t) > 0){ seq = append(seq, _parse_single_key(t)) }
-      i += 1
-   }
-   seq
-}
+fn _normalize_mod(mod) { "Internal: Masks modifiers to the supported set." ui_key.normalize_mod(mod) }
+fn _normalize_key(key) { "Internal: Normalizes key codes for stable comparisons." ui_key.normalize_key(key) }
+fn _mod_bit_for_key(key) { "Internal: Returns the modifier bit associated with a specific modifier key." ui_key.mod_bit_for_key(key) }
+fn _mods_from_key_states(ks) { "Internal: Calculates active modifier bits from the current key states dictionary." ui_key.mods_from_key_states(ks) }
+fn _parse_notation(notation) { "Internal: Parses a key sequence notation string into a list of [key, mods]." ui_key.parse_notation(notation) }
 
 ;; Global state
 
@@ -234,10 +79,7 @@ mut _windows = []
 mut _debug = -1
 fn _is_debug() {
    "Internal: Checks if UI debugging is enabled."
-   if(_debug == -1) {
-      def v = env("NY_UI_DEBUG")
-      if(v && (eq(v, "1") || eq(v, "true"))){ _debug = 1 } else { _debug = 0 }
-   }
+   _debug = common.cached_env_truthy(_debug, "NY_UI_DEBUG")
    _debug
 }
 
@@ -316,16 +158,20 @@ fn window_set_title(win, title) {
    true
 }
 
+fn _window_pair(win, first, second) {
+   "Internal: Returns a two-element list from window dictionary fields `first` and `second`."
+   if(!_is_window(win)){ return [0, 0] }
+   [dict_get(win, first, 0), dict_get(win, second, 0)]
+}
+
 fn window_position(win) {
    "Returns the window position as [x, y]."
-   if(!_is_window(win)){ return [0, 0] }
-   [dict_get(win, "x", 0), dict_get(win, "y", 0)]
+   _window_pair(win, "x", "y")
 }
 
 fn window_size(win) {
    "Returns the window dimensions as [width, height]."
-   if(!_is_window(win)){ return [0, 0] }
-   [dict_get(win, "w", 0), dict_get(win, "h", 0)]
+   _window_pair(win, "w", "h")
 }
 
 fn window_move(win, x, y) {
@@ -682,8 +528,7 @@ fn window_key_pressed(win, key) {
 
 fn window_mouse_position(win) {
    "Returns the current mouse cursor position as [x, y]."
-   if(!_is_window(win)){ return [0, 0] }
-   [dict_get(win, "mouse_x", 0), dict_get(win, "mouse_y", 0)]
+   _window_pair(win, "mouse_x", "mouse_y")
 }
 
 fn window_mouse_button_down(win, button) {

@@ -88,9 +88,9 @@ static char *parse_qualified_name(parser_t *p) {
       result_len = clen + 1 + result_len;
     }
   }
-  char *name = arena_strndup(p->arena, owned, result_len);
+  const char *name = parser_intern(p, owned, result_len);
   free(owned);
-  return name;
+  return (char *)name;
 }
 
 static const char *parse_type_ref(parser_t *p, const char *err_msg) {
@@ -986,6 +986,7 @@ stmt_t *p_parse_block(parser_t *p) {
   parser_expect(p, NY_T_LBRACE, "'{'", NULL);
   p->block_depth++;
   stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
+  vec_reserve_arena(p->arena, &blk->as.block.body, 8);
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
     parse_stmt_append_or_sync(p, &blk->as.block.body);
   }
@@ -1003,6 +1004,15 @@ program_t parse_program(parser_t *p) {
   NY_LOG_V2("Source filename: %s\n",
             p->lex.filename ? p->lex.filename : "<unknown>");
   program_t prog = {0};
+  if (p->lex.src) {
+    size_t src_len = strlen(p->lex.src);
+    size_t guess = src_len / 32;
+    if (guess < 8)
+      guess = 8;
+    if (guess > 4096)
+      guess = 4096;
+    vec_reserve_arena(p->arena, &prog.body, guess);
+  }
   while (p->cur.kind != NY_T_EOF) {
     parse_stmt_append_or_sync(p, &prog.body);
   }

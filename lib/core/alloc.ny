@@ -199,6 +199,7 @@ fn new_context(allocator=0){
 mut __context = 0
 
 fn __init_context(){
+   "Initializes the allocator context singleton on first use."
    if(!__context){
       __context = new_context()
    }

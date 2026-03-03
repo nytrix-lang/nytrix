@@ -11,15 +11,11 @@ use std.os *
 use std.text *
 use std.core.reflect *
 use std.os.path as ospath
+use std.os.platform as platform
 
 fn _is_nt_os(){
    "Internal: returns true if the host operating system is Windows (NT)."
    eq(__os_name(), "windows")
-}
-
-fn _is_macos(){
-   "Internal: returns true if the host operating system is macOS."
-   eq(__os_name(), "macos")
 }
 
 fn _resolve_cmd(cmd){
@@ -102,7 +98,7 @@ fn run(path, args){
         free(argv)
         return code
     }
-    if(_is_macos()){
+    if(platform.is_macos()){
         mut offset = 1
         if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
         def argv = malloc((n + offset + 1) * 8)
@@ -149,7 +145,7 @@ fn popen(path, args){
     "Starts `path` with stdin/stdout pipes and returns `[pid, child_stdin_fd, child_stdout_fd]`; returns `0` on setup failure."
     mut rpath = _resolve_cmd(path)
     def n = core.len(args)
-    if(_is_nt_os() || _is_macos()){
+    if(_is_nt_os() || platform.is_macos()){
         def fds = malloc(8)
         if(!fds){ return 0 }
         mut offset = 1

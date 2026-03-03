@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import json
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import platform
 import statistics
 import subprocess

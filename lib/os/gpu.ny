@@ -13,6 +13,7 @@ module std.os.gpu (
 use std.core *
 use std.text *
 use std.os.prim *
+use std.util.common as common
 
 fn _env_str_or(key, fallback){
    "Internal: returns env value as string, or `fallback` when missing."
@@ -30,16 +31,6 @@ fn _parse_bool_or(v, fallback){
    if(s == "1" || s == "true" || s == "yes" || s == "on"){ return true }
    if(s == "0" || s == "false" || s == "no" || s == "off"){ return false }
    fallback
-}
-
-fn _parse_threads(v){
-   "Internal: parses non-negative values from strings."
-   if(!is_str(v)){ return 0 }
-   def s = strip(v)
-   if(str_len(s) == 0){ return 0 }
-   def n = atoi(s)
-   if(n < 0){ return 0 }
-   n
 }
 
 fn _path_exists(path){
@@ -375,7 +366,7 @@ fn _effective_gpu_min_work(){
 def GPU_MODE = _normalize_gpu_mode(_env_str_or("NYTRIX_GPU_MODE", "auto"))
 def GPU_BACKEND = _normalize_gpu_backend(_env_str_or("NYTRIX_GPU_BACKEND", "auto"))
 def GPU_OFFLOAD = _normalize_gpu_offload(_env_str_or("NYTRIX_GPU_OFFLOAD", "auto"))
-def GPU_MIN_WORK = _parse_threads(env("NYTRIX_GPU_MIN_WORK"))
+def GPU_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_GPU_MIN_WORK"))
 def GPU_ASYNC = _parse_bool_or(env("NYTRIX_GPU_ASYNC"), true)
 def GPU_FAST_MATH = _parse_bool_or(env("NYTRIX_GPU_FAST_MATH"), false)
 def GPU_AVAILABLE = _compute_gpu_available()

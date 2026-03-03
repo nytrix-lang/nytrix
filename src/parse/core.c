@@ -11,6 +11,7 @@ static size_t g_parse_diag_len = 0;
 static char *g_parse_cached_file = NULL;
 static char *g_parse_cached_src = NULL;
 
+__attribute__((unused))
 static const char *parse_load_source(const char *filename) {
   if (!filename || filename[0] == '<')
     return NULL;
@@ -31,6 +32,58 @@ static void parse_print_snippet(parser_t *p, int real_line, int col,
 }
 
 static uint64_t parse_diag_hash(const char *s) { return ny_hash64_cstr(s); }
+
+static bool parser_intern_grow(parser_t *p) {
+  size_t new_cap = p->intern_cap ? p->intern_cap * 2 : 1024;
+  parser_intern_entry *new_tbl =
+      (parser_intern_entry *)arena_alloc(p->arena,
+                                         new_cap * sizeof(parser_intern_entry));
+  if (!new_tbl)
+    return false;
+  memset(new_tbl, 0, new_cap * sizeof(parser_intern_entry));
+  for (size_t i = 0; i < p->intern_cap; ++i) {
+    parser_intern_entry *e = &p->intern_table[i];
+    if (!e->str)
+      continue;
+    size_t mask = new_cap - 1;
+    size_t idx = (size_t)e->hash & mask;
+    while (new_tbl[idx].str)
+      idx = (idx + 1) & mask;
+    new_tbl[idx] = *e;
+  }
+  p->intern_table = new_tbl;
+  p->intern_cap = new_cap;
+  return true;
+}
+
+const char *parser_intern_hash(parser_t *p, const char *s, size_t len,
+                               uint64_t hash) {
+  if (!p || !s)
+    return s;
+  if (!p->intern_cap && !parser_intern_grow(p))
+    return arena_strndup(p->arena, s, len);
+  if ((p->intern_len + 1) * 3 >= p->intern_cap * 2) {
+    if (!parser_intern_grow(p))
+      return arena_strndup(p->arena, s, len);
+  }
+  if (!hash)
+    hash = ny_hash64(s, len);
+  size_t mask = p->intern_cap - 1;
+  size_t idx = (size_t)hash & mask;
+  while (p->intern_table[idx].str) {
+    parser_intern_entry *e = &p->intern_table[idx];
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->str, s, len) == 0) {
+      return e->str;
+    }
+    idx = (idx + 1) & mask;
+  }
+  const char *dup = arena_strndup(p->arena, s, len);
+  p->intern_table[idx] =
+      (parser_intern_entry){.hash = hash, .len = (uint32_t)len, .str = dup};
+  p->intern_len++;
+  return dup;
+}
 
 static bool parse_diag_grow(void) {
   size_t new_cap = g_parse_diag_cap ? g_parse_diag_cap * 2 : 512;
@@ -72,20 +125,6 @@ static bool parser_diag_should_emit(const char *filename, int line, int col,
   g_parse_diag_tbl[idx] = ny_strdup(key);
   g_parse_diag_len++;
   return true;
-}
-
-void parser_advance(parser_t *p) {
-  p->prev = p->cur;
-  p->cur = lexer_next(&p->lex);
-  p->skipped_newline = p->lex.skipped_newline;
-}
-
-bool parser_match(parser_t *p, token_kind kind) {
-  if (p->cur.kind == kind) {
-    parser_advance(p);
-    return true;
-  }
-  return false;
 }
 
 const char *parser_token_name(token_kind k) {
@@ -327,8 +366,8 @@ void parser_error(parser_t *p, token_t tok, const char *msg, const char *hint) {
   print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col, msg, got, hint);
 }
 
-void parser_expect(parser_t *p, token_kind kind, const char *msg,
-                   const char *hint) {
+void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
+                        const char *hint) {
   if (p->cur.kind == kind) {
     parser_advance(p);
     return;

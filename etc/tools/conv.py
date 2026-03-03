@@ -5,6 +5,7 @@ Nytrix Info/Md Conversion
 import sys
 sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import re
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))

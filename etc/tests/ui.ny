@@ -14,7 +14,7 @@ use std.math.vector *
 renderer_config(false, 0, "", "", 1)
 if(!init_window(1280, 720, "Nytrix UI")){ exit(1) }
 
-;; Pre-calculate packed colors for fixed-layout submission
+;; Pre-calculate colors
 def PK_WHITE  = vkr._pack_color(1, 1, 1, 1)
 def PK_GREEN  = vkr._pack_color(0.2, 1.0, 0.2, 1.0)
 def PK_YELLOW = vkr._pack_color(1.0, 0.9, 0.1, 1.0)
@@ -32,63 +32,33 @@ def mesh_mdl = mesh_load("etc/assets/models/teapot.obj", [1.0, 0.84, 0.0, 1.0])
 
 def win      = get_active_window()
 def glfw_win = dict_get(win, "handle", 0)
-glfw._call("glfwSetInputMode", [glfw_win, 0x00033001, 0x00034003])
+glfw.set_input_mode(glfw_win, 0x00033001, 0x00034003)
 mut cursor_locked = true
 
 def CLR_BG     = [0.015, 0.015, 0.03, 1.0]
-def CLR_PANEL  = [0.05, 0.05, 0.08, 0.92]
-def CLR_GRAY   = [0.5, 0.5, 0.55, 1.0]
 
-def K_W = load8("W", 0)
-def K_A = load8("A", 0)
-def K_S = load8("S", 0)
-def K_D = load8("D", 0)
-def K_E = load8("E", 0)
-def K_Q = load8("Q", 0)
-def K_SHIFT = 16
+;; --- Camera ---
+mut cam = camera_init([0.0, 5.0, 45.0], 0.0, 0.0)
+mut cam_vel = vec3(0.0, 0.0, 0.0)
+mut yaw = 0.0
+mut pitch = 0.0
+mut target_yaw = 0.0
+mut target_pitch = 0.0
 
-mut pos_x = 0.0   mut pos_y = 12.0  mut pos_z = 35.0
-mut vel_x = 0.0   mut vel_y = 0.0   mut vel_z = 0.0
-mut yaw   = 3.14  mut pitch = -0.2
-mut target_yaw = 3.14  mut target_pitch = -0.2
-
-mut eye_arr  = [0.0, 0.0, 0.0]
-mut look_arr = [0.0, 0.0, 0.0]
-def UP_VEC   = [0.0, 1.0, 0.0]
-def X_AXIS   = [1.0, 0.0, 0.0]
-def Y_AXIS   = [0.0, 1.0, 0.0]
-
-mut proj_m  = mat4_identity()
-mut view_m  = mat4_identity()
-mut world_m = mat4_identity()
 mut T_mat   = mat4_identity()
 mut R_mat   = mat4_identity()
-mut vp_m    = mat4_identity()   ;; Pre-allocated, reused every frame
-mut temp_m  = mat4_identity()   ;; Pre-allocated scratch
+mut world_m = mat4_identity()
+mut temp_m  = mat4_identity()
 
-mut last_win_w = 0.0
-mut last_win_h = 0.0
-mut ww = 1280.0
-mut wh = 720.0
 mut last_mx = 0.0
 mut last_my = 0.0
 mut initialized_mouse = false
 
-;; Pre-cache color arrays to avoid per-frame allocation
-def GREEN  = [0.2, 1.0, 0.2, 1.0]
-def YELLOW = [1.0, 0.9, 0.1, 1.0]
-def RED    = [1.0, 0.2, 0.2, 1.0]
-def CYAN   = [0.0, 0.9, 1.0, 1.0]
-
 ;; Pre-bake cube vertex buffer
 fn build_cube_buffer(_size, _col){
-   def size = _size
-   def col = _col
-   def s = float(size) * 0.5
+   def s = float(_size) * 0.5
    def buf = sys_malloc(36 * 24)
-   def _v = fn(i, px, py, pz, u, v){
-      vkr.__vkr_push_vertex(buf + i * 24, px, py, pz, u, v, col)
-   }
+   def _v = fn(i, px, py, pz, u, v){ vkr.__vkr_push_vertex(buf + i * 24, px, py, pz, u, v, _col) }
    _v(0,-s,-s,s,0,0) _v(1,s,-s,s,1,0) _v(2,s,s,s,1,1) _v(3,-s,-s,s,0,0) _v(4,s,s,s,1,1) _v(5,-s,s,s,0,1)
    _v(6,s,-s,-s,0,0) _v(7,-s,-s,-s,1,0) _v(8,-s,s,-s,1,1) _v(9,s,-s,-s,0,0) _v(10,-s,s,-s,1,1) _v(11,s,s,-s,0,1)
    _v(12,-s,s,-s,0,0) _v(13,-s,s,s,0,1) _v(14,s,s,s,1,1) _v(15,-s,s,-s,0,0) _v(16,s,s,s,1,1) _v(17,s,s,-s,1,0)
@@ -101,47 +71,43 @@ def cube_vbuf = build_cube_buffer(6.0, vkr._pack_color(1,1,1,1))
 def cube_ptr  = get(cube_vbuf, 0)
 def cube_cnt  = get(cube_vbuf, 1)
 
-mut tea_ptr = 0 mut tea_cnt = 0
-if(mesh_mdl){ tea_ptr = dict_get(mesh_mdl, "ptr") tea_cnt = dict_get(mesh_mdl, "count") }
+mut tea_ptr = 0
+mut tea_cnt = 0
+if(mesh_mdl){
+   tea_ptr = dict_get(mesh_mdl, "ptr")
+   tea_cnt = dict_get(mesh_mdl, "count")
+}
 
-;; Pre-bake grid vertex buffer — real LINE_LIST pairs (2 verts per line)
 def GRID_SLICES = 40
 def GRID_SPACING = 2.5
 def grid_extent = float(GRID_SLICES) * GRID_SPACING
-def grid_line_count = (GRID_SLICES * 2 + 1) * 2   ;; X-lines + Z-lines
-def grid_buf = sys_malloc(grid_line_count * 2 * 24) ;; 2 verts * 24 bytes each
+def grid_line_count = (GRID_SLICES * 2 + 1) * 2
+def grid_buf = sys_malloc(grid_line_count * 2 * 24)
 def minor_c = vkr._pack_color(0.28, 0.32, 0.42, 0.55)
 def major_c = vkr._pack_color(0.55, 0.65, 0.85, 1.0)
 mut grid_off = 0
 mut gi = 0 - GRID_SLICES
 while(gi <= GRID_SLICES){
    def d = float(gi) * GRID_SPACING
-   def c = (gi == 0) ? major_c : minor_c
-   ;; Line along X at z=d: endpoints (-extent, 0, d) → (+extent, 0, d)
-   vkr.__vkr_push_vertex(grid_buf + grid_off,      -grid_extent, 0.0, d, 0, 0, c)
-   vkr.__vkr_push_vertex(grid_buf + grid_off + 24,  grid_extent, 0.0, d, 0, 0, c)
-   grid_off += 48
-   ;; Line along Z at x=d: endpoints (d, 0, -extent) → (d, 0, +extent)
-   vkr.__vkr_push_vertex(grid_buf + grid_off,       d, 0.0, -grid_extent, 0, 0, c)
-   vkr.__vkr_push_vertex(grid_buf + grid_off + 24, d, 0.0,  grid_extent, 0, 0, c)
-   grid_off += 48
-   gi += 1
+   mut c = minor_c
+   if(gi == 0){ c = major_c }
+   vkr.__vkr_push_vertex(grid_buf + grid_off, -grid_extent, 0.0, d, 0, 0, c)
+   vkr.__vkr_push_vertex(grid_buf + grid_off + 24, grid_extent, 0.0, d, 0, 0, c)
+   grid_off = grid_off + 48
+   vkr.__vkr_push_vertex(grid_buf + grid_off, d, 0.0, -grid_extent, 0, 0, c)
+   vkr.__vkr_push_vertex(grid_buf + grid_off + 24, d, 0.0, grid_extent, 0, 0, c)
+   grid_off = grid_off + 48
+   gi = gi + 1
 }
-
-;; Pre-bake axes vertex buffer — real LINE_LIST pairs (2 verts per line)
 def axes_buf = sys_malloc(3 * 2 * 24)
 def axes_len = 20.0
 def rc = vkr._pack_color(1,0,0,1)
 def gc = vkr._pack_color(0,1,0,1)
 def bc = vkr._pack_color(0,0,1,1)
-
-;; X axis
-vkr.__vkr_push_vertex(axes_buf,      0.0, 0.01, 0.0, 0, 0, rc)
+vkr.__vkr_push_vertex(axes_buf, 0.0, 0.01, 0.0, 0, 0, rc)
 vkr.__vkr_push_vertex(axes_buf + 24, axes_len, 0.01, 0.0, 0, 0, rc)
-;; Y axis
 vkr.__vkr_push_vertex(axes_buf + 48, 0.0, 0.01, 0.0, 0, 0, gc)
 vkr.__vkr_push_vertex(axes_buf + 72, 0.0, axes_len, 0.0, 0, 0, gc)
-;; Z axis
 vkr.__vkr_push_vertex(axes_buf + 96, 0.0, 0.01, 0.0, 0, 0, bc)
 vkr.__vkr_push_vertex(axes_buf + 120, 0.0, 0.01, axes_len, 0, 0, bc)
 
@@ -152,144 +118,118 @@ mut fps_val = 0
 mut fps_last_report = start_ticks
 
 while(!window_should_close()){
+   if(frame_num == 0){ print("DEBUG: Renderer loop started.") }
    begin_frame()
    clear_background(CLR_BG)
 
    def now_t = ticks()
-   def dt_ns = now_t - last_ticks
-   last_ticks = now_t
-   mut clamped_dt = float(dt_ns) / 1000000000.0
+   mut clamped_dt = float(now_t - last_ticks) / 1000000000.0
    if(clamped_dt > 0.1){ clamped_dt = 0.016 }
+   last_ticks = now_t
    def anim_phase = float(now_t - start_ticks) / 1000000000.0
 
-   ;; Window size (only call FFI if size might have changed)
    def ws = window_size(win)
-   ww = float(get(ws, 0))
-   wh = float(get(ws, 1))
+   def ww = float(get(ws, 0))
+   def wh = float(get(ws, 1))
 
-   ;; Mouse delta via raw GLFW (single FFI call returning a list)
-   def mpos = glfw.get_cursor_pos(glfw_win)
-   def mx = float(get(mpos, 0))
-   def my = float(get(mpos, 1))
-   mut dmx = 0.0 mut dmy = 0.0
-   if(initialized_mouse){ dmx = mx - last_mx dmy = my - last_my }
-   last_mx = mx last_my = my initialized_mouse = true
-
+   ;; Mouse Look
    if(cursor_locked){
-      def sens = 0.0016
-      target_yaw   += dmx * sens
-      target_pitch -= dmy * sens
-      if(target_pitch > 1.48){ target_pitch = 1.48 }
-      if(target_pitch < -1.48){ target_pitch = -1.48 }
+      def mpos = glfw.get_cursor_pos(glfw_win)
+      def mx = float(get(mpos, 0))
+      def my = float(get(mpos, 1))
+      def cx = ww * 0.5
+      def cy = wh * 0.5
+      glfw.set_cursor_pos(glfw_win, cx, cy)
+      
+      def sens = 0.12
+      target_yaw = target_yaw + (mx - cx) * sens
+      target_pitch = target_pitch - (my - cy) * sens
+      if(target_pitch > 89.0){ target_pitch = 89.0 }
+      if(target_pitch < -89.0){ target_pitch = -89.0 }
    }
-
-   ;; Frame-rate independent smoothing
+   
    def look_smooth = 1.0 - 1.0 / (1.0 + 40.0 * clamped_dt)
-   yaw   += (target_yaw - yaw) * look_smooth
-   pitch += (target_pitch - pitch) * look_smooth
+   yaw = yaw + (target_yaw - yaw) * look_smooth
+   pitch = pitch + (target_pitch - pitch) * look_smooth
+   set_idx(cam, 4, yaw)
+   set_idx(cam, 5, pitch)
+   cam = camera_update(cam)
 
-   def cos_p = cos(pitch)
-   def fwd_x = cos(yaw) * cos_p
-   def fwd_y = sin(pitch)
-   def fwd_z = sin(yaw) * cos_p
-   def rgt_x = sin(yaw)
-   def rgt_z = -cos(yaw)
+   ;; Camera Vectors (for movement)
+   def ryaw = yaw * PI / 180.0
+   def rpitch = pitch * PI / 180.0
+   ;; Forward vector: yaw=0 => [0,0,-1]
+   def fwd = vec3(sin(ryaw) * cos(rpitch), sin(rpitch), -cos(ryaw) * cos(rpitch))
+   def rgt = normalize(cross3(fwd, [0.0, 1.0, 0.0]))
 
+   ;; Keyboard Movement
    mut accel_v = 800.0
-   if(window_key_down(win, K_SHIFT)){ accel_v = 2400.0 }
-   mut want_x = 0.0 mut want_y = 0.0 mut want_z = 0.0
-   if(window_key_down(win, K_W)){ want_x += fwd_x want_y += fwd_y want_z += fwd_z }
-   if(window_key_down(win, K_S)){ want_x -= fwd_x want_y -= fwd_y want_z -= fwd_z }
-   if(window_key_down(win, K_A)){ want_x += rgt_x want_z += rgt_z }
-   if(window_key_down(win, K_D)){ want_x -= rgt_x want_z -= rgt_z }
-   if(window_key_down(win, K_E)){ want_y += 1.0 }
-   if(window_key_down(win, K_Q)){ want_y -= 1.0 }
+   if(window_key_down(win, 16)){ accel_v = 2400.0 } ;; SHIFT
+   mut want_move = vec3(0.0, 0.0, 0.0)
+   if(window_key_down(win, 87)){ want_move = add(want_move, fwd) } ;; W
+   if(window_key_down(win, 83)){ want_move = sub(want_move, fwd) } ;; S
+   if(window_key_down(win, 65)){ want_move = sub(want_move, rgt) } ;; A
+   if(window_key_down(win, 68)){ want_move = add(want_move, rgt) } ;; D
+   if(window_key_down(win, 69)){ want_move = add(want_move, vec3(0.0, 1.0, 0.0)) } ;; E
+   if(window_key_down(win, 81)){ want_move = sub(want_move, vec3(0.0, 1.0, 0.0)) } ;; Q
 
-   ;; Normalize
-   def len_sq = want_x * want_x + want_y * want_y + want_z * want_z
-   if(len_sq > 0.0){
-       def inv_len = 1.0 / sqrt(len_sq)
-       want_x *= inv_len want_y *= inv_len want_z *= inv_len
-   }
+   if(len2(want_move) > 0.0){ want_move = normalize(want_move) }
 
-   vel_x += want_x * accel_v * clamped_dt
-   vel_y += want_y * accel_v * clamped_dt
-   vel_z += want_z * accel_v * clamped_dt
+   cam_vel = add(cam_vel, scale(want_move, accel_v * clamped_dt))
    def drag = 1.0 / (1.0 + 15.0 * clamped_dt)
-   vel_x *= drag vel_y *= drag vel_z *= drag
-   pos_x += vel_x * clamped_dt
-   pos_y += vel_y * clamped_dt
-   pos_z += vel_z * clamped_dt
+   cam_vel = scale(cam_vel, drag)
+   
+   def c_pos = get(cam, 0)
+   set_idx(cam, 0, add(c_pos, scale(cam_vel, clamped_dt)))
 
-   if(window_key_pressed(win, KEY_TAB)){
+   if(window_key_pressed(win, 9)){ ;; TAB
       cursor_locked = !cursor_locked
       if(cursor_locked){
-         glfw._call("glfwSetInputMode", [glfw_win, 0x00033001, 0x00034003])
+         glfw.set_input_mode(glfw_win, 0x00033001, 0x00034003)
       } else {
-         glfw._call("glfwSetInputMode", [glfw_win, 0x00033001, 0x00034001])
+         glfw.set_input_mode(glfw_win, 0x00033001, 0x00034001)
       }
    }
 
-   store_item(eye_arr, 0, float(pos_x))
-   store_item(eye_arr, 1, float(pos_y))
-   store_item(eye_arr, 2, float(pos_z))
-   store_item(look_arr, 0, float(pos_x + fwd_x))
-   store_item(look_arr, 1, float(pos_y + fwd_y))
-   store_item(look_arr, 2, float(pos_z + fwd_z))
-   mat4_look_at_into(eye_arr, look_arr, UP_VEC, view_m)
-
-   if(ww != last_win_w || wh != last_win_h){
-      mat4_perspective_into(45.0 * PI / 180.0, ww / wh, 0.1, 5000.0, proj_m)
-      last_win_w = ww last_win_h = wh
-   }
-
-   ;; 3D Rendering
+   ;; --- 3D Rendering ---
    vkr.clear_depth()
+   begin_mode_3d(cam)
    
-   ;; VP Matrix (reuse pre-allocated vp_m)
-   mat4_mul_into(proj_m, view_m, vp_m)
-   vkr.set_mvp(vp_m)
+   vkr.draw_lines_raw(grid_buf, grid_line_count, 1.0)
+   vkr.draw_lines_raw(axes_buf, 3, 3.0)
 
-    ;; Grid + Axes
-    vkr.draw_lines_raw(grid_buf, grid_line_count, 1.0)
-    vkr.draw_lines_raw(axes_buf, 3, 3.0)
-
+   def base_mvp = vkr._mvp_matrix()
+   
    ;; Spinning Cube
-   mat4_rotate_into(float(anim_phase), X_AXIS, R_mat)
-   mat4_mul_into(vp_m, R_mat, temp_m) ; cube at origin, T=identity, skip mat_mul
+   mat4_rotate_x_into(float(anim_phase), R_mat)
+   mat4_mul_into(base_mvp, R_mat, temp_m)
    vkr.set_mvp(temp_m)
    vkr.draw_vertices(cube_ptr, cube_cnt, tex_id)
 
    ;; Golden Teapot
    if(tea_ptr){
-      mat4_rotate_into(float(anim_phase) * 1.25, Y_AXIS, R_mat)
+      mat4_rotate_y_into(float(anim_phase) * 1.25, R_mat)
       mat4_translate_into(20.0, -5.0, 0.0, T_mat)
       mat4_mul_into(T_mat, R_mat, world_m)
-      mat4_mul_into(vp_m, world_m, temp_m)
+      mat4_mul_into(base_mvp, world_m, temp_m)
       vkr.set_mvp(temp_m)
       vkr.draw_vertices(tea_ptr, tea_cnt, -1)
    }
 
-   ;; UI Overlay
+   ;; --- UI Overlay ---
    vkr.clear_depth()
    vkr.set_ortho(0.0, ww, 0.0, wh, -1.0, 1.0)
-
-   ;; Top panel
    vkr.draw_rectangle_fast(0.0, 0.0, ww, 24.0, PK_PANEL)
    draw_text_fast(font_id, " NYTRIX ENGINE | 3D RENDERER ", 10.0, 6.0, PK_CYAN)
    
-   ;; Readouts panel
    vkr.draw_rectangle_fast(0.0, 24.0, 260.0, 110.0, PK_PANEL)
-
-   def yaw_deg = int(yaw * 180.0 / PI)
-   def pitch_deg = int(pitch * 180.0 / PI)
-   
    mut fpk = PK_YELLOW
    if(fps_val > 100){ fpk = PK_GREEN } elif(fps_val < 30) { fpk = PK_RED }
-   
    draw_text_fast(font_id, f"FPS: {fps_val}", 10.0, 32.0, fpk)
-   draw_text_fast(font_id, f"POS: {int(pos_x)} {int(pos_y)} {int(pos_z)}", 10.0, 50.0, PK_GRAY)
-   draw_text_fast(font_id, f"ROT: {yaw_deg} YAW | {pitch_deg} PCH", 10.0, 68.0, PK_GRAY)
+   
+   def final_pos = get(cam, 0)
+   draw_text_fast(font_id, f"POS: {int(get(final_pos,0))} {int(get(final_pos,1))} {int(get(final_pos,2))}", 10.0, 50.0, PK_GRAY)
+   draw_text_fast(font_id, f"ROT: {int(yaw)} YAW | {int(pitch)} PCH", 10.0, 68.0, PK_GRAY)
    
    if(cursor_locked){
       draw_text_fast(font_id, "MODE: FREECAM (TAB to free)", 10.0, 86.0, PK_CYAN)
@@ -298,23 +238,22 @@ while(!window_should_close()){
    }
 
    ;; Crosshair
-   def cx = ww * 0.5 mut cy = wh * 0.5
+   def cx = ww * 0.5
+   def cy = wh * 0.5
    vkr.draw_line(cx - 10.0, cy, cx + 10.0, cy, 1.5, 0, 1, 1, 0.6)
    vkr.draw_line(cx, cy - 10.0, cx, cy + 10.0, 1.5, 0, 1, 1, 0.6)
 
-   frame_num += 1
-   def now_report = ticks()
-   if(now_report - fps_last_report >= 1000000000){
+   frame_num = frame_num + 1
+   if(now_t - fps_last_report >= 1000000000){
       fps_val = frame_num
       frame_num = 0
-      fps_last_report = now_report
-      print(f"FPS: {fps_val}")
+      fps_last_report = now_t
    }
 
-   if(window_key_down(win, KEY_ESCAPE)){ break }
+   if(window_key_down(win, 27)){ break } ;; ESC
    end_frame()
    poll_events()
 }
 
-glfw._call("glfwSetInputMode", [glfw_win, 0x00033001, 0x00034001])
+glfw.set_input_mode(glfw_win, 0x00033001, 0x00034001)
 exit(0)

@@ -4,6 +4,7 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -13,6 +14,15 @@ typedef enum {
   NY_ARM_FLOAT_ABI_SOFTFP = 2,
   NY_ARM_FLOAT_ABI_HARD = 3,
 } ny_arm_float_abi_t;
+
+typedef enum {
+  NY_LLVM_OPT_PROFILE_DEFAULT = 0,
+  NY_LLVM_OPT_PROFILE_SPEED,
+  NY_LLVM_OPT_PROFILE_BALANCED,
+  NY_LLVM_OPT_PROFILE_COMPILE,
+  NY_LLVM_OPT_PROFILE_NONE,
+  NY_LLVM_OPT_PROFILE_SIZE,
+} ny_llvm_opt_profile_t;
 
 static ny_arm_float_abi_t parse_arm_float_abi(const char *abi) {
   if (!abi || !*abi)
@@ -55,6 +65,118 @@ static ny_arm_float_abi_t host_arm_float_abi(void) {
   return NY_ARM_FLOAT_ABI_HARD;
 #endif
   return NY_ARM_FLOAT_ABI_DEFAULT;
+}
+
+static ny_llvm_opt_profile_t ny_llvm_opt_profile_from_env(void) {
+  const char *profile = getenv("NYTRIX_OPT_PROFILE");
+  if (!profile || !*profile)
+    return NY_LLVM_OPT_PROFILE_DEFAULT;
+  if (strcasecmp(profile, "speed") == 0)
+    return NY_LLVM_OPT_PROFILE_SPEED;
+  if (strcasecmp(profile, "balanced") == 0)
+    return NY_LLVM_OPT_PROFILE_BALANCED;
+  if (strcasecmp(profile, "compile") == 0)
+    return NY_LLVM_OPT_PROFILE_COMPILE;
+  if (strcasecmp(profile, "none") == 0)
+    return NY_LLVM_OPT_PROFILE_NONE;
+  if (strcasecmp(profile, "size") == 0)
+    return NY_LLVM_OPT_PROFILE_SIZE;
+  return NY_LLVM_OPT_PROFILE_DEFAULT;
+}
+
+static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return LLVMCodeGenLevelNone;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    return (opt_level <= 0) ? LLVMCodeGenLevelNone : LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    return LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    if (opt_level <= 0)
+      return LLVMCodeGenLevelNone;
+    return (opt_level >= 2) ? LLVMCodeGenLevelAggressive
+                            : LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+  default:
+    break;
+  }
+  if (opt_level <= 0)
+    return LLVMCodeGenLevelNone;
+  if (opt_level == 1)
+    return LLVMCodeGenLevelLess;
+  if (opt_level >= 3)
+    return LLVMCodeGenLevelAggressive;
+  return LLVMCodeGenLevelDefault;
+}
+
+static const char *ny_llvm_default_pass_pipeline(int opt_level) {
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return NULL;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    return (opt_level <= 0) ? NULL : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    return (opt_level <= 0) ? NULL : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    return (opt_level <= 0) ? NULL : "default<O3>";
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    if (opt_level <= 0)
+      return NULL;
+    return (opt_level >= 2) ? "default<O2>" : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+  default:
+    break;
+  }
+  if (opt_level <= 0)
+    return NULL;
+  if (opt_level == 1)
+    return "default<O1>";
+  if (opt_level == 2)
+    return "default<O2>";
+  return "default<O3>";
+}
+
+static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts,
+                                           int opt_level,
+                                           const char *opt_pipeline) {
+  if (!opts)
+    return;
+  bool enable_loop_vectorize = true;
+  bool enable_slp_vectorize = true;
+  int inliner_threshold = -1;
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    enable_loop_vectorize = false;
+    enable_slp_vectorize = false;
+    inliner_threshold = 25;
+    break;
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    enable_loop_vectorize = false;
+    enable_slp_vectorize = false;
+    inliner_threshold = 75;
+    break;
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
+      inliner_threshold = 1000;
+    break;
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
+      inliner_threshold = 300;
+    break;
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+  default:
+    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
+      inliner_threshold = 1000;
+    break;
+  }
+  LLVMPassBuilderOptionsSetLoopVectorization(opts, enable_loop_vectorize);
+  LLVMPassBuilderOptionsSetSLPVectorization(opts, enable_slp_vectorize);
+  if (inliner_threshold >= 0)
+    LLVMPassBuilderOptionsSetInlinerThreshold(opts, inliner_threshold);
 }
 
 static char *normalize_triple(char *triple, bool *needs_free) {
@@ -262,14 +384,13 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
-#include <llvm-c/Target.h>
-#include <llvm-c/TargetMachine.h>
-#include <llvm-c/Transforms/PassBuilder.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level) {
-  if (opt_level == 0) return;
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level,
+                             const char *opt_pipeline) {
+  const char *passes = (opt_pipeline && *opt_pipeline)
+                           ? opt_pipeline
+                           : ny_llvm_default_pass_pipeline(opt_level);
+  if (!passes || !*passes)
+    return;
 
   char *raw_triple = LLVMGetDefaultTargetTriple();
   LLVMTargetRef target;
@@ -283,8 +404,7 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level) {
   char feat_buf[256] = {0};
   derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
   
-  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
-  if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
 
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
       target, raw_triple, cpu_buf, feat_buf, cgo,
@@ -296,15 +416,7 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level) {
   }
 
   LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
-  LLVMPassBuilderOptionsSetLoopVectorization(opts, true);
-  LLVMPassBuilderOptionsSetSLPVectorization(opts, true);
-  if (opt_level >= 2) {
-    LLVMPassBuilderOptionsSetInlinerThreshold(opts, 1000);
-  }
-
-  const char *passes = "default<O3>";
-  if (opt_level == 1) passes = "default<O1>";
-  else if (opt_level == 2) passes = "default<O2>";
+  ny_llvm_configure_pass_options(opts, opt_level, opt_pipeline);
 
   LLVMErrorRef error = LLVMRunPasses(module, passes, tm, opts);
   if (error) {
@@ -349,10 +461,7 @@ void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
     } else if (!feat_buf[0] && arm32) {
       features = "";
     }
-    LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
-    if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
-    else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
-    else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+    LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
 
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
         target, triple, cpu, features ? features : "", cgo,
@@ -469,10 +578,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) 
     features = "";
   }
   apply_target_attrs(module, cpu, features);
-  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
-  if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
-  else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
-  else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
       target, triple, cpu, features ? features : "", cgo,
       LLVMRelocPIC, host_code_model());
@@ -560,10 +666,7 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
     features = "";
   }
   apply_target_attrs(module, cpu, features);
-  LLVMCodeGenOptLevel cgo = LLVMCodeGenLevelDefault;
-  if (opt_level == 0) cgo = LLVMCodeGenLevelNone;
-  else if (opt_level == 1) cgo = LLVMCodeGenLevelLess;
-  else if (opt_level >= 3) cgo = LLVMCodeGenLevelAggressive;
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
       target, triple, cpu, features ? features : "", cgo,
       LLVMRelocPIC, host_code_model());
