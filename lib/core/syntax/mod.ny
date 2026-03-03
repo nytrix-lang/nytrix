@@ -279,55 +279,55 @@ fn apply_attribute_in(reg, name, node, args=0){
 
 if(comptime{__main()}){
 
-    reset_registry()
-    assert(is_attr_registered("extern"), "defaults loaded")
+   reset_registry()
+   assert(is_attr_registered("extern"), "defaults loaded")
 
-    fn macro_id(node){
+   fn macro_id(node){
        "Test helper."
        node
-    }
+   }
 
-    register_macro("id", macro_id)
-    assert(is_macro_registered("id"), "register_macro")
-    assert(contains(list_macros(), "id"), "list_macros")
+   register_macro("id", macro_id)
+   assert(is_macro_registered("id"), "register_macro")
+   assert(contains(list_macros(), "id"), "list_macros")
 
-    def form0 = form("id", [1, 2, 3])
-    def expanded = expand_form(form0)
-    assert(is_form(expanded, "id"), "expand_form")
-    assert(form_head(expanded, "") == "id", "form_head")
-    assert(len(form_tail(expanded)) == 3, "form_tail")
+   def form0 = form("id", [1, 2, 3])
+   def expanded = expand_form(form0)
+   assert(is_form(expanded, "id"), "expand_form")
+   assert(form_head(expanded, "") == "id", "form_head")
+   assert(len(form_tail(expanded)) == 3, "form_tail")
 
-    unregister_macro("id")
-    assert(!is_macro_registered("id"), "unregister_macro")
+   unregister_macro("id")
+   assert(!is_macro_registered("id"), "unregister_macro")
 
-    mut reg = new_registry(8)
-    reg = register_macro_in(reg, "id2", macro_id)
-    assert(is_macro_registered_in(reg, "id2"), "register_macro_in")
-    reg = unregister_macro_in(reg, "id2")
-    assert(!is_macro_registered_in(reg, "id2"), "unregister_macro_in")
+   mut reg = new_registry(8)
+   reg = register_macro_in(reg, "id2", macro_id)
+   assert(is_macro_registered_in(reg, "id2"), "register_macro_in")
+   reg = unregister_macro_in(reg, "id2")
+   assert(!is_macro_registered_in(reg, "id2"), "unregister_macro_in")
 
-    fn attr_tag(node, args){
+   fn attr_tag(node, args){
        "Test helper."
        dict_set(node, "tagged", true)
-    }
+   }
 
-    register_attribute("tag", attr_tag)
-    assert(is_attr_registered("tag"), "register_attribute")
-    def n = apply_attribute("tag", dict(2), list(0))
-    assert(dict_get(n, "tagged", false), "apply_attribute")
-    unregister_attribute("tag")
-    assert(!is_attr_registered("tag"), "unregister_attribute")
+   register_attribute("tag", attr_tag)
+   assert(is_attr_registered("tag"), "register_attribute")
+   def n = apply_attribute("tag", dict(2), list(0))
+   assert(dict_get(n, "tagged", false), "apply_attribute")
+   unregister_attribute("tag")
+   assert(!is_attr_registered("tag"), "unregister_attribute")
 
-    mut rw = new_rewriter(4)
-    fn rw_add1(v){
+   mut rw = new_rewriter(4)
+   fn rw_add1(v){
        "Test helper."
        if(is_int(v)){ return v + 1 }
        v
-    }
-    rw = register_rewrite(rw, "add1", rw_add1)
-    assert(contains(list_rewrites(rw), "add1"), "register_rewrite")
-    assert(rewrite_once(rw, 1) == 2, "rewrite_once")
-    assert(rewrite_fixpoint(rw, 1, 1) == 2, "rewrite_fixpoint")
-    rw = clear_rewriter(rw)
-    assert(len(list_rewrites(rw)) == 0, "clear_rewriter")
+   }
+   rw = register_rewrite(rw, "add1", rw_add1)
+   assert(contains(list_rewrites(rw), "add1"), "register_rewrite")
+   assert(rewrite_once(rw, 1) == 2, "rewrite_once")
+   assert(rewrite_fixpoint(rw, 1, 1) == 2, "rewrite_fixpoint")
+   rw = clear_rewriter(rw)
+   assert(len(list_rewrites(rw)) == 0, "clear_rewriter")
 }

@@ -1,5 +1,5 @@
 ;; Keywords: os io process
-;; Process IO module (pwntools-like).
+;; Process IO module.
 
 module std.os.io (
    spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close
@@ -7,9 +7,9 @@ module std.os.io (
 use std.core *
 use std.os.process *
 use std.os.sys *
-use std.text *
-use std.text.io *
-use std.text.chr
+use std.str *
+use std.str.io *
+use std.str.chr
 
 fn spawn(path, args){
    "Starts `path` with stdin/stdout pipes and returns a process object."
@@ -51,8 +51,8 @@ fn recv(p, n=1024){
    match sys_read(fd, buf, n){
       ok(r) -> {
          if(r <= 0){
-            free(buf)
-            return ""
+         free(buf)
+         return ""
          }
          init_str(buf, r)
          store8(buf, 0, r)
@@ -121,50 +121,50 @@ fn close(p){
 }
 
 if(comptime{__main()}){
-    use std.os.io *
-    use std.core *
-    use std.text *
-    use std.os.sys *
+   use std.os.io *
+   use std.core *
+   use std.str *
+   use std.os.sys *
 
-    ; pwntools-like process IO primitives.
+   ; pwntools-like process IO primitives.
 
-    def osn = os()
-    mut cat_cmd = "/bin/cat"
-    mut cat_args = ["/bin/cat"]
-    mut sh_cmd = "/bin/sh"
-    mut sh_args = ["/bin/sh", "-c", "printf abc"]
-    mut expected_sh_output = "abc"
+   def osn = os()
+   mut cat_cmd = "/bin/cat"
+   mut cat_args = ["/bin/cat"]
+   mut sh_cmd = "/bin/sh"
+   mut sh_args = ["/bin/sh", "-c", "printf abc"]
+   mut expected_sh_output = "abc"
 
-    if(eq(osn, "windows")){
-        cat_cmd = "python"
-        cat_args = ["-c", "import sys; print(sys.stdin.read(), end='', flush=True)"]
-        sh_cmd = "cmd"
-        sh_args = ["cmd", "/c", "echo abc"]
-        expected_sh_output = "abc\r\n"
-    }
+   if(eq(osn, "windows")){
+      cat_cmd = "python"
+      cat_args = ["-c", "import sys; print(sys.stdin.read(), end='', flush=True)"]
+      sh_cmd = "cmd"
+      sh_args = ["cmd", "/c", "echo abc"]
+      expected_sh_output = "abc\r\n"
+   }
 
-    def p = spawn(cat_cmd, cat_args)
-    assert(p != 0, "spawn cat")
+   def p = spawn(cat_cmd, cat_args)
+   assert(p != 0, "spawn cat")
 
-    unwrap(send(p, "hello"))
-    unwrap(sendline(p, " world"))
-    unwrap(shutdown_send(p))
+   unwrap(send(p, "hello"))
+   unwrap(sendline(p, " world"))
+   unwrap(shutdown_send(p))
 
-    def line = recv_line(p)
-    def line_clean = strip(line)
-    assert(eq(line_clean, "hello world"), "recv_line cat")
-    def code1 = close(p)
-    assert(is_ok(code1), "close cat")
+   def line = recv_line(p)
+   def line_clean = strip(line)
+   assert(eq(line_clean, "hello world"), "recv_line cat")
+   def code1 = close(p)
+   assert(is_ok(code1), "close cat")
 
-    def p2 = spawn(sh_cmd, sh_args)
-    assert(p2 != 0, "spawn sh printf")
-    def out = recv_all(p2, 1024)
-    assert(eq(out, expected_sh_output), "recv_all")
-    def code2 = close(p2)
-    assert(is_ok(code2), "close sh printf")
+   def p2 = spawn(sh_cmd, sh_args)
+   assert(p2 != 0, "spawn sh printf")
+   def out = recv_all(p2, 1024)
+   assert(eq(out, expected_sh_output), "recv_all")
+   def code2 = close(p2)
+   assert(is_ok(code2), "close sh printf")
 
-    def bad = spawn(123, ["/bin/cat"])
-    assert(bad == 0, "spawn input validate")
+   def bad = spawn(123, ["/bin/cat"])
+   assert(bad == 0, "spawn input validate")
 
-    print("✓ std.os.io tests passed")
+   print("✓ std.os.io tests passed")
 }

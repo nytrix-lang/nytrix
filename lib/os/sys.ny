@@ -2,7 +2,7 @@
 ;; Os Sys module.
 
 module std.os.sys (
-   syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl
+   syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl, sys_openpty
 )
 use std.core *
 use std.core.error *
@@ -74,28 +74,35 @@ fn sys_ioctl(fd, req, arg) -> Result {
    return ok(res)
 }
 
+fn sys_openpty(fds_ptr) -> Result {
+   "Wrapper for `openpty(3)`; returns `ok(0)` or `err(errno_like_code)`."
+   def res = __openpty(fds_ptr)
+   if(res < 0){ return err(res) }
+   return ok(0)
+}
+
 if(comptime{__main()}){
-    use std.os.sys *
-    use std.core.error *
-    use std.os.fs *
-    use std.os.dirs *
-    use std.os.path *
-    use std.os *
+   use std.os.sys *
+   use std.core.error *
+   use std.os.fs *
+   use std.os.dirs *
+   use std.os.path *
+   use std.os *
 
-    print("Testing sys...")
+   print("Testing sys...")
 
-    def non_existent_file = normalize(temp_dir() + sep() + "non_existent_file_12345.tmp")
-    def r = sys_open(non_existent_file, 0, 0)
-    assert(is_err(r), "sys_open fails")
-    def code = __unwrap(r)
-    assert(code < 0, "errno set in Result")
+   def non_existent_file = normalize(temp_dir() + sep() + "non_existent_file_12345.tmp")
+   def r = sys_open(non_existent_file, 0, 0)
+   assert(is_err(r), "sys_open fails")
+   def code = __unwrap(r)
+   assert(code < 0, "errno set in Result")
 
-    if(eq(os(), "linux")){
+   if(eq(os(), "linux")){
        def pid = syscall(39)
        assert(pid > 0, "syscall getpid")
-    } else {
+   } else {
        print("Skipping raw syscall test: linux-only API")
-    }
+   }
 
-    print("✓ std.os.sys tests passed")
+   print("✓ std.os.sys tests passed")
 }

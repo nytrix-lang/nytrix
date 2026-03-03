@@ -5,7 +5,7 @@
 
 char *ny_build_std_bundle(const char **modules, size_t module_count,
                           std_mode_t mode, int verbose, const char *entry_path);
-char *ny_std_generate_header(std_mode_t mode);
+char *ny_std_generate_c_symbols_header(std_mode_t mode);
 
 size_t ny_std_module_count(void);
 const char *ny_std_module_name(size_t idx);

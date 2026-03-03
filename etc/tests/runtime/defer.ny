@@ -1,5 +1,5 @@
 use std.core *
-use std.text *
+use std.str *
 
 mut log = ""
 
@@ -12,8 +12,8 @@ fn test_unwind(){
      panic("Something went wrong")
      log = log + "X"
      } catch err {
-        print("Caught error:", err)
-        log = log + "C"  }
+      print("Caught error:", err)
+      log = log + "C"  }
   log = log + "4"
 }
 
@@ -25,6 +25,7 @@ test_unwind()
 ;; C: Catch block
 ;; 4: After try/catch
 ;; 2: Outer defer (run on function exit)
+print("LOG:", log)
 assert(log == "1P3C42", "Defer unwind order")
 
 fn test_basic_order(){
@@ -41,8 +42,8 @@ assert(log == "S|E|D2|D1|", "Basic defer execution order")
 fn test_scoping(){
   log = ""
   {
-    defer { log = log + "ID|" }
-    log = log + "IS|"
+   defer { log = log + "ID|" }
+   log = log + "IS|"
   }
   log = log + "OS|"
 }

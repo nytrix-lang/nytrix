@@ -1,11 +1,11 @@
 #include "wire/cache.h"
 #include "base/common.h"
 #include "base/util.h"
+#include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
-#include <llvm-c/IRReader.h>
 #include <llvm-c/Core.h>
-#include <llvm-c/Analysis.h>
+#include <llvm-c/IRReader.h>
 #include <llvm/Config/llvm-config.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,8 +63,8 @@ static bool ny_cache_path_is_ir(const char *cache_path) {
 
 static bool ny_jit_cache_use_ir(void) {
   const char *env = getenv("NYTRIX_JIT_CACHE_FORMAT");
-  if (!env || !*env)
-    return true;
+  if (!env || !*env) // Fallback to bitcode (bc) for speed
+    return false;
   return strcmp(env, "ir") == 0 || strcmp(env, "ll") == 0 ||
          strcmp(env, "text") == 0 || strcmp(env, "llvm") == 0;
 }
@@ -103,7 +103,9 @@ bool ny_jit_cache_enabled(void) {
 enum { NY_JIT_CACHE_VERSION = 6 };
 
 char *ny_jit_cache_path(const char *source, const char *stdlib_path,
-                        unsigned long std_src_hash) {
+                        unsigned long std_src_hash, int opt_level, int opt_dce,
+                        int opt_internalize, bool debug_symbols,
+                        unsigned long std_latest_mtime) {
   if (!source)
     return NULL;
   char *dir = ny_get_cache_dir();
@@ -123,9 +125,17 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path,
     }
     std_hash ^= ny_hash_string(stdlib_path);
   }
+  if (std_latest_mtime) {
+    std_hash ^= std_latest_mtime;
+  }
 #ifdef LLVM_VERSION_STRING
   std_hash ^= ny_hash_string(LLVM_VERSION_STRING);
 #endif
+  std_hash ^= (unsigned long)opt_level;
+  std_hash ^= (unsigned long)opt_dce;
+  std_hash ^= (unsigned long)opt_internalize;
+  if (debug_symbols)
+    std_hash ^= 0xDEADBEEF;
   std_hash ^= (unsigned long)NY_JIT_CACHE_VERSION;
   static char path[1024];
   const char *ext = ny_jit_cache_use_ir() ? "ll" : "bc";
@@ -142,7 +152,8 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
   if (!cache_path || !ctx || !out_module)
     return false;
   LLVMMemoryBufferRef buf = NULL;
-  if (access(cache_path, R_OK) != 0) return false;
+  if (access(cache_path, R_OK) != 0)
+    return false;
   if (LLVMCreateMemoryBufferWithContentsOfFile(cache_path, &buf, NULL) != 0) {
     remove(cache_path);
     return false;
@@ -166,7 +177,8 @@ bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
   if (ny_jit_cache_verify_enabled()) {
     char *vmsg = NULL;
     if (LLVMVerifyModule(*out_module, LLVMReturnStatusAction, &vmsg) != 0) {
-      if (vmsg) LLVMDisposeMessage(vmsg);
+      if (vmsg)
+        LLVMDisposeMessage(vmsg);
       LLVMDisposeModule(*out_module);
       *out_module = NULL;
       remove(cache_path);

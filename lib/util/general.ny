@@ -42,17 +42,17 @@ fn uuid(){
 }
 
 if(comptime{__main()}){
-    use std.util.general *
-    use std.core *
-    use std.core.dict_mod *
-    use std.core.set_mod *
-    use std.core.reflect *
-    use std.core.test *
-    use std.text *
+   use std.util.general *
+   use std.core *
+   use std.core.dict_mod *
+   use std.core.set_mod *
+   use std.core.reflect *
+   use std.core.test *
+   use std.str *
 
-    print("Testing std.util.general (UUID & Extras)...")
+   print("Testing std.util.general (UUID & Extras)...")
 
-    fn test_uuid_properties(){
+   fn test_uuid_properties(){
        "Runs test_uuid_properties test."
        print("Checking UUIDv4 format...")
        def u = uuid()
@@ -67,9 +67,9 @@ if(comptime{__main()}){
        def ok = (y == 56 || y == 57 || y == 97 || y == 98)
        assert(ok, "variant 10xx digit")
        print("UUID format passed")
-    }
+   }
 
-    fn test_uuid_uniqueness(){
+   fn test_uuid_uniqueness(){
        "Runs test_uuid_uniqueness test."
        print("Checking UUID uniqueness (50 samples)...")
        mut s = set()
@@ -84,10 +84,10 @@ if(comptime{__main()}){
           i = i + 1
        }
        print("UUID uniqueness passed")
-    }
+   }
 
-    test_uuid_properties()
-    test_uuid_uniqueness()
+   test_uuid_properties()
+   test_uuid_uniqueness()
 
-    print("✓ std.util.general tests passed")
+   print("✓ std.util.general tests passed")
 }

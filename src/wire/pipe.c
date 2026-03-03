@@ -9,14 +9,15 @@
 #include "parse/parser.h"
 #include "repl/repl.h"
 #include "wire/build.h"
+#include "wire/bundle.h"
 #include "wire/cache.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
-#include <llvm-c/IRReader.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/Error.h>
 #include <llvm-c/ExecutionEngine.h>
+#include <llvm-c/IRReader.h>
 #include <llvm-c/Linker.h>
 #include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
@@ -28,14 +29,15 @@
 #ifndef _WIN32
 #include <sys/wait.h>
 #endif
-#include <time.h>
-#include <fcntl.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <time.h>
 #ifndef _WIN32
 #include <unistd.h>
 #else
 #include <io.h>
 #endif
+#include <ctype.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define NY_UNUSED_FUNC __attribute__((unused))
@@ -204,7 +206,7 @@ static const char *ny_windows_output_path(const char *raw, char *buf,
   if (dot && dot[1] != '\0')
     return raw;
   if (snprintf(buf, buflen, "%s.exe", raw) >= (int)buflen)
-    return raw;
+    return buf;
   return buf;
 }
 #endif
@@ -228,8 +230,8 @@ ny_opt_profile_kind_from_name(const char *profile_name) {
   return NY_OPT_PROFILE_CUSTOM;
 }
 
-static NY_UNUSED_FUNC const char *ny_opt_profile_name(
-    ny_opt_profile_kind_t kind, const char *custom_name) {
+static NY_UNUSED_FUNC const char *
+ny_opt_profile_name(ny_opt_profile_kind_t kind, const char *custom_name) {
   switch (kind) {
   case NY_OPT_PROFILE_SPEED:
     return "speed";
@@ -264,8 +266,9 @@ static int ny_env_int(const char *name, int fallback) {
   return (int)n;
 }
 
-static NY_UNUSED_FUNC int ny_guided_inline_threshold(
-    ny_opt_profile_kind_t profile_kind, int eff_opt_level) {
+static NY_UNUSED_FUNC int
+ny_guided_inline_threshold(ny_opt_profile_kind_t profile_kind,
+                           int eff_opt_level) {
   int explicit_thr = ny_env_int("NYTRIX_INLINE_THRESHOLD", -2);
   if (explicit_thr >= -1)
     return explicit_thr;
@@ -449,9 +452,11 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
   h = ny_fnv1a64_cstr(parse_name ? parse_name : "<inline>", h);
   {
     const unsigned opt_fields[] = {
-        (unsigned)opt->opt_level, (unsigned)opt->debug_symbols,
-        (unsigned)opt->strip_override, (unsigned)opt->std_mode,
-        (unsigned)opt->no_std};
+        (unsigned)opt->opt_level,       (unsigned)opt->debug_symbols,
+        (unsigned)opt->strip_override,  (unsigned)opt->std_mode,
+        (unsigned)opt->no_std,          (unsigned)opt->opt_dce,
+        (unsigned)opt->opt_internalize, (unsigned)opt->opt_loops,
+        (unsigned)opt->opt_autotune};
     h = ny_hash_mix_u32v(h, opt_fields,
                          sizeof(opt_fields) / sizeof(opt_fields[0]));
   }
@@ -602,8 +607,16 @@ static void ny_build_std_cache_path(const ny_options *opt,
     return;
   out[0] = '\0';
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("std-cache-v3", h);
+  h = ny_fnv1a64_cstr("std-cache-v4", h);
   h = ny_hash64_u64(h, (uint64_t)std_mode);
+  if (opt) {
+    const unsigned opt_fields[] = {
+        (unsigned)opt->opt_level, (unsigned)opt->opt_dce,
+        (unsigned)opt->opt_internalize, (unsigned)opt->no_std,
+        (unsigned)opt->debug_symbols};
+    h = ny_hash_mix_u32v(h, opt_fields,
+                         sizeof(opt_fields) / sizeof(opt_fields[0]));
+  }
   h = ny_hash_mix_cstrv(h, uses, use_count);
   h = ny_fnv1a64_cstr(prebuilt_path, h);
   h = ny_hash64_u64(h, (uint64_t)ny_std_latest_mtime());
@@ -775,13 +788,13 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
   char emit_bc_arg[1100];
   char emit_mod_arg[1100];
   snprintf(emit_bc_arg, sizeof(emit_bc_arg), "--emit-bc=%s", bc_path);
-  snprintf(emit_mod_arg, sizeof(emit_mod_arg), "--emit-module=%s",
-           module_name);
+  snprintf(emit_mod_arg, sizeof(emit_mod_arg), "--emit-module=%s", module_name);
 
   char std_path_arg[1100];
   const char *std_path = NULL;
   if (opt->std_path) {
-    snprintf(std_path_arg, sizeof(std_path_arg), "--std-path=%s", opt->std_path);
+    snprintf(std_path_arg, sizeof(std_path_arg), "--std-path=%s",
+             opt->std_path);
     std_path = std_path_arg;
   }
 
@@ -916,7 +929,8 @@ static bool ny_verify_bitcode(LLVMContextRef ctx, const char *bc_path) {
   return ok;
 }
 
-static bool ny_reemit_bitcode_via_ir(LLVMModuleRef module, const char *bc_path) {
+static bool ny_reemit_bitcode_via_ir(LLVMModuleRef module,
+                                     const char *bc_path) {
   if (!module || !bc_path)
     return false;
   char *ir = LLVMPrintModuleToString(module);
@@ -950,7 +964,7 @@ static bool ny_reemit_bitcode_via_ir(LLVMModuleRef module, const char *bc_path) 
   return ok;
 }
 
-static char **collect_use_modules(const char *src, size_t *out_count) {
+static char **ny_collect_import_names(const char *src, size_t *out_count) {
   lexer_t lx;
   lexer_init(&lx, src, "<collect_use>");
   int depth = 0;
@@ -1092,6 +1106,10 @@ static bool handle_non_compile_modes(const ny_options *opt, int *exit_code) {
     *exit_code = 0;
     return true;
   }
+  if (opt->mode == NY_MODE_BUNDLE) {
+    *exit_code = ny_bundle_save(opt);
+    return true;
+  }
   if (opt->mode == NY_MODE_HELP) {
     if (opt->help_env)
       ny_options_usage_env(opt->argv0 ? opt->argv0 : "ny");
@@ -1175,7 +1193,7 @@ static bool ny_ir_is_std_symbol(const char *name) {
 }
 
 static void ny_ir_externalize_std_definitions(const ny_options *opt,
-                                               LLVMModuleRef module) {
+                                              LLVMModuleRef module) {
   if (!module)
     return;
   for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;) {
@@ -1234,10 +1252,9 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
   return dump_mod;
 }
 
-static NY_UNUSED_FUNC void ny_log_opt_skipped_if_diag(bool opt_diag,
-                                                      const char *profile_name,
-                                                      int eff_opt_level,
-                                                      const ny_ir_stats_t *stats) {
+static NY_UNUSED_FUNC void
+ny_log_opt_skipped_if_diag(bool opt_diag, const char *profile_name,
+                           int eff_opt_level, const ny_ir_stats_t *stats) {
   if (!opt_diag || !stats)
     return;
   fprintf(stderr, "[opt] profile=%s O=%d passes=skipped\n", profile_name,
@@ -1252,10 +1269,50 @@ static bool ny_is_llvm_special_global(const char *name) {
   return name && strncmp(name, "llvm.", 5) == 0;
 }
 
-static bool ny_should_preserve_aot_symbol(const char *name) {
+static bool ny_should_preserve_symbol(const codegen_t *cg, const char *name,
+                                      bool is_jit) {
+  if (is_jit)
+    return true;
   if (!name || !*name)
     return false;
-  return strcmp(name, "main") == 0 || strcmp(name, "__script_top") == 0;
+  if (strcmp(name, "main") == 0 || strcmp(name, "__script_top") == 0)
+    return true;
+  if (strncmp(name, "__std_init", 10) == 0)
+    return true;
+  if (name[0] == '.')
+    return true; // Protect string interns and compiler-generated globals
+  // In AOT mode, std/lib symbols can be internalized if they are not in the
+  // allowed list.
+
+  const char *dot = strchr(name, '.');
+  if (dot) {
+    if (!cg) {
+      if (!is_jit)
+        return true; // safe default for AOT without cg
+      return false;
+    }
+    size_t mod_len = (size_t)(dot - name);
+    for (size_t i = 0; i < cg->link_allowed_modules.len; i++) {
+      const char *use_name = cg->link_allowed_modules.data[i];
+      if (!use_name)
+        continue;
+      if (strncmp(name, use_name, mod_len) == 0 && use_name[mod_len] == '\0') {
+        return true;
+      }
+    }
+    return false;
+  }
+  return false;
+}
+
+static bool ny_should_preserve_aot_symbol(const codegen_t *cg,
+                                          const char *name) {
+  return ny_should_preserve_symbol(cg, name, false);
+}
+
+static bool ny_should_preserve_jit_symbol(const codegen_t *cg,
+                                          const char *name) {
+  return ny_should_preserve_symbol(cg, name, true);
 }
 
 static bool ny_is_externalish_linkage(LLVMLinkage lk) {
@@ -1275,7 +1332,7 @@ static bool ny_is_externalish_linkage(LLVMLinkage lk) {
   }
 }
 
-static void run_dead_strip_if_needed(const ny_options *opt,
+static void run_dead_strip_if_needed(const ny_options *opt, codegen_t *cg,
                                      LLVMModuleRef module) {
   if (!opt || !module)
     return;
@@ -1285,22 +1342,17 @@ static void run_dead_strip_if_needed(const ny_options *opt,
     return;
 
   bool dce_enabled = false;
-  if (is_aot) {
-    dce_enabled = (opt->opt_dce != 0);
-  } else {
-    // For JIT, only enable if explicitly requested via -O1+ or env var.
-    // Default (opt_dce == -1) is OFF for JIT.
-    dce_enabled = (opt->opt_dce == 1) || (ny_env_enabled("NYTRIX_JIT_DCE"));
+  if (is_aot || is_jit) {
+    dce_enabled = (opt->opt_dce != 0) && !ny_env_enabled("NYTRIX_JIT_NO_DCE");
   }
-  
+
   if (!dce_enabled)
     return;
 
   bool internalize_enabled = false;
-  if (is_aot) {
-    internalize_enabled = (opt->opt_internalize != 0);
-  } else {
-    internalize_enabled = (opt->opt_internalize == 1) || (ny_env_enabled("NYTRIX_JIT_INTERNALIZE"));
+  if (is_aot || is_jit) {
+    internalize_enabled =
+        (opt->opt_internalize != 0) && !ny_env_enabled("NYTRIX_JIT_NO_DCE");
   }
 
   if (internalize_enabled) {
@@ -1314,11 +1366,17 @@ static void run_dead_strip_if_needed(const ny_options *opt,
       const char *name = LLVMGetValueName2(fn, &name_len);
       if (!name || name_len == 0)
         continue;
-      if (ny_should_preserve_aot_symbol(name))
+      if ((is_jit ? ny_should_preserve_jit_symbol(cg, name)
+                  : ny_should_preserve_aot_symbol(cg, name))) {
+        if (verbose_enabled >= 3)
+          fprintf(stderr, "DEBUG: Not internalizing (preserved): %s\n", name);
         continue;
+      }
       LLVMLinkage lk = LLVMGetLinkage(fn);
       if (!ny_is_externalish_linkage(lk))
         continue;
+      if (verbose_enabled >= 3)
+        fprintf(stderr, "DEBUG: Internalizing function: %s\n", name);
       LLVMSetLinkage(fn, LLVMInternalLinkage);
       internalized_fns++;
     }
@@ -1332,17 +1390,27 @@ static void run_dead_strip_if_needed(const ny_options *opt,
         continue;
       if (ny_is_llvm_special_global(name))
         continue;
-      if (ny_should_preserve_aot_symbol(name))
+      if ((is_jit ? ny_should_preserve_jit_symbol(cg, name)
+                  : ny_should_preserve_aot_symbol(cg, name))) {
+        if (verbose_enabled >= 3)
+          fprintf(stderr, "DEBUG: Not internalizing global (preserved): %s\n",
+                  name);
         continue;
+      }
       LLVMLinkage lk = LLVMGetLinkage(gv);
       if (!ny_is_externalish_linkage(lk))
         continue;
+      if (verbose_enabled >= 3)
+        fprintf(stderr, "DEBUG: Internalizing global: %s\n", name);
       LLVMSetLinkage(gv, LLVMInternalLinkage);
       internalized_globals++;
     }
     if (verbose_enabled >= 2) {
-      NY_LOG_V2("%s internalize: functions=%zu globals=%zu\n",
-                is_aot ? "AOT" : "JIT", internalized_fns, internalized_globals);
+      if (internalized_fns > 0 || internalized_globals > 0) {
+        NY_LOG_V2("%s internalize: functions=%zu globals=%zu\n",
+                  is_aot ? "AOT" : "JIT", internalized_fns,
+                  internalized_globals);
+      }
     }
   }
   const char *pipeline =
@@ -1397,8 +1465,11 @@ int ny_pipeline_run(ny_options *opt) {
   }
   verbose_enabled = opt->verbose;
   clock_t t_start = 0;
-  if (opt->do_timing)
+  clock_t t0 = 0;
+  if (opt->do_timing) {
     t_start = clock();
+    t0 = clock();
+  }
   char *user_src = NULL;
   char *std_src = NULL;
   char *source = NULL;
@@ -1427,10 +1498,11 @@ int ny_pipeline_run(ny_options *opt) {
       NY_LOG_ERR("Failed to allocate source input\n");
     return 1;
   }
-  maybe_log_phase_time(opt->do_timing, "Read file:", t_start);
-  clock_t t_scan = clock();
-  uses = collect_use_modules(user_src, &use_count);
-  maybe_log_phase_time(opt->do_timing, "Scan imports:", t_scan);
+  maybe_log_phase_time(opt->do_timing, "Read file:", t0);
+  t0 = clock();
+  uses = ny_collect_import_names(user_src, &use_count);
+  maybe_log_phase_time(opt->do_timing, "Scan imports:", t0);
+  t0 = clock();
   std_mode_t std_mode = opt->std_mode;
   const char *prebuilt_path = resolve_std_bundle(
       opt->std_path
@@ -1508,15 +1580,19 @@ int ny_pipeline_run(ny_options *opt) {
   size_t ulen = strlen(user_src);
   if (slen > (SIZE_MAX - ulen - 2)) {
     NY_LOG_ERR("Source code too large to concatenate\n");
-    if (user_src) free(user_src);
-    if (std_src) free(std_src);
-    if (uses) ny_str_list_free(uses, use_count);
+    if (user_src)
+      free(user_src);
+    if (std_src)
+      free(std_src);
+    if (uses)
+      ny_str_list_free(uses, use_count);
     return 1;
   }
   size_t line_directive_len = 0;
   char line_buf[1024];
   if (parse_name && parse_name[0] != '<') {
-    line_directive_len = snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", parse_name);
+    line_directive_len =
+        snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", parse_name);
   }
 
   source = malloc(slen + ulen + line_directive_len + 4);
@@ -1524,14 +1600,15 @@ int ny_pipeline_run(ny_options *opt) {
   if (std_src) {
     memcpy(ptr, std_src, slen);
     ptr += slen;
-    if (ptr > source && ptr[-1] != '\n') *ptr++ = '\n';
+    if (ptr > source && ptr[-1] != '\n')
+      *ptr++ = '\n';
   }
-  
+
   if (line_directive_len > 0) {
     memcpy(ptr, line_buf, line_directive_len);
     ptr += line_directive_len;
   }
-  
+
   memcpy(ptr, user_src, ulen + 1);
   if (ny_should_use_aot_cache(opt)) {
     ny_build_aot_cache_path(opt, source, parse_name, prebuilt_path, output_path,
@@ -1566,55 +1643,6 @@ int ny_pipeline_run(ny_options *opt) {
     }
     goto exit_success;
   }
-  char *jit_cache_file = NULL;
-  bool loaded_from_cache = false;
-  if (!fast_compiler &&
-      (opt->run_jit || opt->output_file ||
-       (opt->emit_only && !opt->output_file && !opt->run_jit)) &&
-      opt->mode != NY_MODE_REPL &&
-      ny_jit_cache_enabled() && !opt->dump_ast && !opt->dump_llvm &&
-      !opt->emit_ir_path && !opt->emit_bc_path) {
-    jit_cache_file = ny_jit_cache_path(source, prebuilt_path, 0);
-    if (jit_cache_file) {
-      codegen_init(&cg, NULL, NULL, "nytrix");
-      if (ny_jit_cache_load(jit_cache_file, cg.ctx, &cg.module)) {
-        if (opt->verbose)
-          fprintf(stderr, "JIT cache hit: %s\n", jit_cache_file);
-        loaded_from_cache = true;
-        script_fn = LLVMGetNamedFunction(cg.module, "__script_top");
-        if (!script_fn) {
-          if (opt->verbose)
-            fprintf(stderr, "JIT cache corrupt (missing entry): %s\n",
-                    jit_cache_file);
-          LLVMDisposeModule(cg.module);
-          cg.module = NULL;
-          loaded_from_cache = false;
-        } else {
-          /* Even on cache hit, parse to collect #link libs for externs. */
-          parser_t tmp_parser;
-          arena_t *tmp_arena = (arena_t *)malloc(sizeof(arena_t));
-          if (tmp_arena) {
-            memset(tmp_arena, 0, sizeof(arena_t));
-            parser_init_with_arena(&tmp_parser, source,
-                                   std_src ? "<stdlib>" : parse_name,
-                                   tmp_arena);
-            if (std_src) {
-              tmp_parser.lex.split_pos = slen + 1;
-              tmp_parser.lex.split_filename = parse_name;
-            }
-            program_t tmp_prog = parse_program(&tmp_parser);
-            codegen_collect_links(&cg, &tmp_prog);
-            arena_free(tmp_arena);
-            free(tmp_arena);
-          }
-          goto skip_compilation;
-        }
-      } else {
-        codegen_dispose(&cg);
-      }
-    }
-  }
-
   clock_t t_parse = clock();
   parser_t parser;
   arena = (arena_t *)malloc(sizeof(arena_t));
@@ -1633,6 +1661,52 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
+
+  clock_t t_codegen = clock();
+  NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
+  codegen_init(&cg, &prog, arena, "nytrix");
+  codegen_collect_links(&cg, &prog);
+  cg.debug_symbols = opt->debug_symbols;
+  cg.debug_opt_level = opt->opt_level;
+  cg.debug_opt_pipeline = opt->opt_pipeline;
+  cg.trace_exec = opt->trace_exec;
+
+  char *jit_cache_file = NULL;
+  bool loaded_from_cache = false;
+  if (!fast_compiler &&
+      (opt->run_jit || opt->output_file ||
+       (opt->emit_only && !opt->output_file && !opt->run_jit)) &&
+      opt->mode != NY_MODE_REPL && ny_jit_cache_enabled() && !opt->dump_ast &&
+      !opt->dump_llvm && !opt->emit_ir_path && !opt->emit_bc_path) {
+    jit_cache_file = ny_jit_cache_path(source, prebuilt_path, 0, opt->opt_level,
+                                       opt->opt_dce, opt->opt_internalize,
+                                       opt->debug_symbols,
+                                       (unsigned long)ny_std_latest_mtime());
+    if (jit_cache_file) {
+      LLVMModuleRef cached_mod = NULL;
+      if (ny_jit_cache_load(jit_cache_file, cg.ctx, &cached_mod)) {
+        if (opt->verbose)
+          fprintf(stderr, "JIT cache hit: %s\n", jit_cache_file);
+        loaded_from_cache = true;
+        LLVMDisposeModule(cg.module);
+        cg.module = cached_mod;
+        script_fn = LLVMGetNamedFunction(cg.module, "__script_top");
+        if (!script_fn) {
+          if (opt->verbose)
+            fprintf(stderr, "JIT cache corrupt (missing entry): %s\n",
+                    jit_cache_file);
+          loaded_from_cache = false;
+          // Re-create a fresh module if cache was bad
+          cg.module = LLVMModuleCreateWithNameInContext("nytrix", cg.ctx);
+          ny_llvm_prepare_module(cg.module, 3);
+        } else {
+          codegen_repopulate_interns(&cg);
+          goto skip_compilation;
+        }
+      }
+    }
+  }
+
   if (opt->dump_ast) {
     for (size_t i = 0; i < prog.body.len; i++) {
       stmt_t *s = prog.body.data[i];
@@ -1648,14 +1722,7 @@ int ny_pipeline_run(ny_options *opt) {
       parallel_modules = true;
   }
 #endif
-  clock_t t_codegen = clock();
-  NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
-  codegen_init(&cg, &prog, arena, "nytrix");
-  codegen_collect_links(&cg, &prog);
-  cg.debug_symbols = opt->debug_symbols;
-  cg.debug_opt_level = opt->opt_level;
-  cg.debug_opt_pipeline = opt->opt_pipeline;
-  cg.trace_exec = opt->trace_exec;
+
   const char *std_bc_cache = getenv("NYTRIX_STD_BC_CACHE");
   bool use_std_bc_cache = false;
   if (!opt->no_std && std_bc_cache && *std_bc_cache &&
@@ -1785,7 +1852,8 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (cg.emit_script) {
     NY_LOG_V2("Emitting script entry point...\n");
-    script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name : "__script_top");
+    script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name
+                                                         : "__script_top");
     if (cg.had_error) {
       NY_LOG_ERR("Codegen script entry failed\n");
       dump_debug_bundle(opt, source, cg.module);
@@ -1834,7 +1902,7 @@ int ny_pipeline_run(ny_options *opt) {
     fprintf(stderr, "Verify:       %.4fs\n",
             (double)(clock() - t_ver) / CLOCKS_PER_SEC);
   clock_t t_opt = clock();
-  run_dead_strip_if_needed(opt, cg.module);
+  run_dead_strip_if_needed(opt, &cg, cg.module);
   if (!fast_compiler) {
     int eff_opt = opt->opt_level;
     if (parallel_modules && !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {
@@ -1895,7 +1963,8 @@ skip_compilation:
     }
   }
   if (opt->emit_asm_path) {
-    if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile, opt->opt_level)) {
+    if (!ny_llvm_emit_file(cg.module, opt->emit_asm_path, LLVMAssemblyFile,
+                           opt->opt_level)) {
       NY_LOG_ERR("Failed to write assembly to %s\n", opt->emit_asm_path);
       exit_code = 1;
       goto exit_success;
@@ -1907,7 +1976,18 @@ skip_compilation:
     snprintf(obj_name, sizeof(obj_name), "ny_tmp_%d.o", getpid());
     ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
     ensure_aot_entry(&cg, script_fn);
-    if (ny_llvm_emit_object(cg.module, obj, opt->opt_level)) {
+    bool is_obj_only =
+        (output_path && strlen(output_path) > 2 &&
+         strcmp(output_path + strlen(output_path) - 2, ".o") == 0);
+    if (is_obj_only) {
+      if (ny_llvm_emit_object(cg.module, output_path, opt->opt_level)) {
+        NY_LOG_SUCCESS("Saved object: %s\n", output_path);
+      } else {
+        NY_LOG_ERR("Failed to emit object file\n");
+        exit_code = 1;
+        goto exit_success;
+      }
+    } else if (ny_llvm_emit_object(cg.module, obj, opt->opt_level)) {
       const char *cc = ny_builder_choose_cc();
       char rto[4096];
       char rto_name[64];
@@ -1942,12 +2022,14 @@ skip_compilation:
         vec_push(&merged_libs, opt->link_libs.data[li]);
       for (size_t li = 0; li < cg.links.len; li++) {
         const char *name = cg.links.data[li];
-        if (!name) continue;
+        if (!name)
+          continue;
         bool dup = false;
         for (size_t lj = 0; lj < merged_libs.len; lj++) {
           const char *e = merged_libs.data[lj];
           if (e && e[0] == '-' && e[1] == 'l' && strcmp(e + 2, name) == 0) {
-            dup = true; break;
+            dup = true;
+            break;
           }
         }
         if (!dup) {
@@ -1998,34 +2080,22 @@ skip_compilation:
     ny_llvm_init_native();
     LLVMExecutionEngineRef ee;
     char *err = NULL;
+    LLVMModuleRef jmod = cg.module;
     struct LLVMMCJITCompilerOptions jopt;
-    LLVMInitializeMCJITCompilerOptions(&jopt, sizeof(jopt));
-    jopt.CodeModel = LLVMCodeModelJITDefault;
+    ny_jit_init_options(&jopt, jmod);
     {
       int jit_level = ny_env_int("NYTRIX_JIT_OPT_LEVEL", -1);
       if (jit_level < 0)
         jit_level = 0;
-      if (jit_level < 0) jit_level = 0;
-      if (jit_level > 3) jit_level = 3;
+      if (jit_level > 3)
+        jit_level = 3;
       jopt.OptLevel = (unsigned)jit_level;
-    }
-    {
-      const char *cm = getenv("NYTRIX_JIT_CODE_MODEL");
-      if (cm && *cm) {
-        if (strcmp(cm, "large") == 0)
-          jopt.CodeModel = LLVMCodeModelLarge;
-        else if (strcmp(cm, "medium") == 0)
-          jopt.CodeModel = LLVMCodeModelMedium;
-        else if (strcmp(cm, "small") == 0)
-          jopt.CodeModel = LLVMCodeModelSmall;
-      }
     }
     {
       /* FastISel speeds compile but can hurt runtime; keep opt-in. */
       if (ny_env_enabled("NYTRIX_JIT_FAST_ISEL"))
         jopt.EnableFastISel = 1;
     }
-    LLVMModuleRef jmod = cg.module;
     if (LLVMCreateMCJITCompilerForModule(&ee, jmod, &jopt, sizeof(jopt),
                                          &err)) {
       NY_LOG_ERR("JIT failed: %s\n", err);
@@ -2046,10 +2116,10 @@ skip_compilation:
               cg.interns.data[i].val != cg.interns.data[i].gv) {
             LLVMAddGlobalMapping(ee, cg.interns.data[i].val,
                                  &cg.interns.data[i].data);
+          }
         }
       }
     }
-  }
     register_jit_symbols(ee, jmod, &cg);
     ny_jit_map_unresolved_symbols(ee, jmod, NULL);
     maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);

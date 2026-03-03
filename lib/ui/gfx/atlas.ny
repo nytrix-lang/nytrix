@@ -14,10 +14,10 @@ use std.math *
 ;; Atlas object: { tex_id, width, height, cx, cy, max_row_h, items }
 
 fn atlas_create(w=2048, h=2048){
-   "Creates a new texture atlas of the specified dimensions."
-   def pixels = malloc(w * h) ;; R8 is 1bpp
-   memset(pixels, 0, w * h)
-   def tex_id = vkr.create_texture_ex(w, h, pixels, 9) ; 9 = R8_UNORM
+   "Creates a new texture atlas of the specified dimensions (RGBA8, 4bpp)."
+   def pixels = malloc(w * h * 4) ;; RGBA8 is 4bpp
+   memset(pixels, 0, w * h * 4)
+   def tex_id = vkr.create_texture_ex(w, h, pixels, 37) ; 37 = RGBA8_UNORM
    free(pixels)
 
    mut a = dict(8)
@@ -58,6 +58,7 @@ fn atlas_add(a, key, w, h, pixels){
 
    if(cy + h + 2 > ah){
       ; Atlas full!
+      print(f"DEBUG: ATLAS FULL! tex_id={dict_get(a, 'tex_id')} w={aw} h={ah} needed={h}")
       return 0
    }
 

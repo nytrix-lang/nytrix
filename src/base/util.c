@@ -170,6 +170,21 @@ int ny_write_file(const char *path, const char *content, size_t len) {
   return (written == len) ? 0 : -1;
 }
 
+bool ny_write_if_changed(const char *path, const char *content, size_t len) {
+  if (!path || !content)
+    return false;
+  char *old = ny_read_file(path);
+  if (old) {
+    size_t old_len = strlen(old);
+    if (old_len == len && memcmp(old, content, len) == 0) {
+      free(old);
+      return false;
+    }
+    free(old);
+  }
+  return ny_write_file(path, content, len) == 0;
+}
+
 int ny_ensure_dir(const char *path) {
   struct stat st = {0};
   if (stat(path, &st) == -1) {
@@ -407,14 +422,22 @@ uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed) {
   const uint64_t prime = NY_FNV1A64_PRIME;
   size_t i = 0;
   while (i + 8 <= len) {
-    h ^= p[i + 0]; h *= prime;
-    h ^= p[i + 1]; h *= prime;
-    h ^= p[i + 2]; h *= prime;
-    h ^= p[i + 3]; h *= prime;
-    h ^= p[i + 4]; h *= prime;
-    h ^= p[i + 5]; h *= prime;
-    h ^= p[i + 6]; h *= prime;
-    h ^= p[i + 7]; h *= prime;
+    h ^= p[i + 0];
+    h *= prime;
+    h ^= p[i + 1];
+    h *= prime;
+    h ^= p[i + 2];
+    h *= prime;
+    h ^= p[i + 3];
+    h *= prime;
+    h ^= p[i + 4];
+    h *= prime;
+    h ^= p[i + 5];
+    h *= prime;
+    h ^= p[i + 6];
+    h *= prime;
+    h ^= p[i + 7];
+    h *= prime;
     i += 8;
   }
   for (; i < len; ++i) {
@@ -439,14 +462,22 @@ uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed) {
       }
       return h;
     }
-    h ^= p[0]; h *= prime;
-    h ^= p[1]; h *= prime;
-    h ^= p[2]; h *= prime;
-    h ^= p[3]; h *= prime;
-    h ^= p[4]; h *= prime;
-    h ^= p[5]; h *= prime;
-    h ^= p[6]; h *= prime;
-    h ^= p[7]; h *= prime;
+    h ^= p[0];
+    h *= prime;
+    h ^= p[1];
+    h *= prime;
+    h ^= p[2];
+    h *= prime;
+    h ^= p[3];
+    h *= prime;
+    h ^= p[4];
+    h *= prime;
+    h ^= p[5];
+    h *= prime;
+    h ^= p[6];
+    h *= prime;
+    h ^= p[7];
+    h *= prime;
     p += 8;
   }
 }
@@ -553,7 +584,59 @@ int ny_levenshtein(const char *s1, const char *s2) {
   return res;
 }
 
-void ny_print_snippet(const char *src, int line, int col, int len, const char *color) {
+typedef struct {
+  uint64_t hash;
+  int count;
+} log_entry_t;
+
+static log_entry_t *g_log_seen = NULL;
+static size_t g_log_seen_cap = 0;
+static size_t g_log_seen_len = 0;
+
+bool ny_log_should_emit(const char *fmt) {
+  if (!fmt)
+    return false;
+  if (g_log_seen_cap == 0) {
+    g_log_seen_cap = 1024;
+    g_log_seen = calloc(g_log_seen_cap, sizeof(log_entry_t));
+  }
+  uint64_t h = ny_hash64_cstr(fmt);
+  size_t mask = g_log_seen_cap - 1;
+  size_t idx = (size_t)h & mask;
+  while (g_log_seen[idx].hash != 0) {
+    if (g_log_seen[idx].hash == h) {
+      g_log_seen[idx].count++;
+      return g_log_seen[idx].count <= 10;
+    }
+    idx = (idx + 1) & mask;
+  }
+  if (g_log_seen_len * 2 >= g_log_seen_cap) {
+    size_t old_cap = g_log_seen_cap;
+    log_entry_t *old_tbl = g_log_seen;
+    g_log_seen_cap *= 2;
+    g_log_seen = calloc(g_log_seen_cap, sizeof(log_entry_t));
+    mask = g_log_seen_cap - 1;
+    for (size_t i = 0; i < old_cap; i++) {
+      if (old_tbl[i].hash != 0) {
+        size_t nidx = (size_t)old_tbl[i].hash & mask;
+        while (g_log_seen[nidx].hash != 0)
+          nidx = (nidx + 1) & mask;
+        g_log_seen[nidx] = old_tbl[i];
+      }
+    }
+    free(old_tbl);
+    idx = (size_t)h & mask;
+    while (g_log_seen[idx].hash != 0)
+      idx = (idx + 1) & mask;
+  }
+  g_log_seen[idx].hash = h;
+  g_log_seen[idx].count = 1;
+  g_log_seen_len++;
+  return true;
+}
+
+void ny_print_snippet(const char *src, int line, int col, int len,
+                      const char *color) {
   if (!src || line <= 0 || col <= 0)
     return;
   const char *line_start = NULL;
@@ -588,7 +671,7 @@ void ny_print_snippet(const char *src, int line, int col, int len, const char *c
     return;
   for (size_t i = 0; i < show_len; i++) {
     char c = line_start[start + i];
-    buf[i] = (c == '	') ? ' ' : c;
+    buf[i] = (c == '\t') ? ' ' : c;
   }
   buf[show_len] = '\0';
   int width = 1;

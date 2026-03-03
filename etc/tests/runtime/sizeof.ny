@@ -1,12 +1,12 @@
 use std.core *
 use std.os *
 
-layout Point {
+layout TestPoint {
    x: i32,
    y: i32
 }
 
-struct Pair {
+struct TestPair {
    a: i64,
    b: u8
 }
@@ -18,9 +18,9 @@ assert(sizeof(u16) == 2, "sizeof u16")
 assert(sizeof(f32) == 4, "sizeof f32")
 assert(sizeof(f64) == 8, "sizeof f64")
 assert(sizeof(f128) == 16, "sizeof f128")
-assert(sizeof(Point) == 8, "sizeof layout Point")
-assert(sizeof(Pair) == 16, "sizeof struct Pair")
-def ptr_sz = sizeof(*Point)
+assert(sizeof(TestPoint) == 8, "sizeof layout TestPoint")
+assert(sizeof(TestPair) == 16, "sizeof struct TestPair")
+def ptr_sz = sizeof(*TestPoint)
 assert(ptr_sz == sizeof(str), "sizeof pointer")
 
 print("✓ all runtime sizeof tests passed")

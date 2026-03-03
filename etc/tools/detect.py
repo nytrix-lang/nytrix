@@ -16,6 +16,46 @@ from pathlib import Path
 from context import host_os, is_arm_riscv_machine
 from utils import run_capture, which, cmake_path, warn, err
 
+def setup_session_env():
+    if host_os() == "macos":
+        # Homebrew paths for Apple Silicon and Intel
+        for base in ("/opt/homebrew", "/usr/local"):
+            if os.path.exists(base):
+                bin_path = f"{base}/bin"
+                lib = f"{base}/lib"
+                inc = f"{base}/include"
+                if os.path.exists(bin_path) and bin_path not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
+                if os.path.exists(lib):
+                    existing = os.environ.get("LIBRARY_PATH", "")
+                    if lib not in existing:
+                        os.environ["LIBRARY_PATH"] = (existing + os.pathsep + lib).strip(os.pathsep)
+                if os.path.exists(inc):
+                    existing = os.environ.get("CPATH", "")
+                    if inc not in existing:
+                        os.environ["CPATH"] = (existing + os.pathsep + inc).strip(os.pathsep)
+
+        # Specific LLVM keg-only path (brew info llvm suggests setting these)
+        if shutil.which("brew"):
+            try:
+                prefix = subprocess.check_output(["brew", "--prefix", "llvm"], text=True).strip()
+                if prefix and os.path.exists(prefix):
+                    bin_path = f"{prefix}/bin"
+                    lib = f"{prefix}/lib"
+                    inc = f"{prefix}/include"
+                    if os.path.exists(bin_path) and bin_path not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
+                    if os.path.exists(lib):
+                        existing = os.environ.get("LIBRARY_PATH", "")
+                        if lib not in existing:
+                            os.environ["LIBRARY_PATH"] = (lib + os.pathsep + existing).strip(os.pathsep)
+                    if os.path.exists(inc):
+                        existing = os.environ.get("CPATH", "")
+                        if inc not in existing:
+                            os.environ["CPATH"] = (inc + os.pathsep + existing).strip(os.pathsep)
+            except:
+                pass
+
 def detect_host_flags(target=None):
     cflags = []
     ldflags = []
@@ -38,6 +78,31 @@ def detect_host_flags(target=None):
                 cflags += ["-march=x86-64"]
             elif arch in ("i386", "i486", "i586", "i686"):
                 cflags += ["-march=i686"]
+        elif host_os() == "macos":
+            # Homebrew paths for Apple Silicon and Intel
+            for base in ("/opt/homebrew", "/usr/local"):
+                if os.path.exists(base):
+                    inc = f"{base}/include"
+                    lib = f"{base}/lib"
+                    if os.path.exists(inc) and f"-I{inc}" not in cflags:
+                        cflags.append(f"-I{inc}")
+                    if os.path.exists(lib) and f"-L{lib}" not in ldflags:
+                        ldflags.append(f"-L{lib}")
+            
+            # Specific LLVM keg-only path if found via brew
+            brew_llvm_prefix = ""
+            if shutil.which("brew"):
+                try:
+                    brew_llvm_prefix = subprocess.check_output(["brew", "--prefix", "llvm"], text=True).strip()
+                except:
+                    pass
+            if brew_llvm_prefix:
+                inc = f"{brew_llvm_prefix}/include"
+                lib = f"{brew_llvm_prefix}/lib"
+                if os.path.exists(inc) and f"-I{inc}" not in cflags:
+                    cflags.insert(0, f"-I{inc}")
+                if os.path.exists(lib) and f"-L{lib}" not in ldflags:
+                    ldflags.insert(0, f"-L{lib}")
     return cflags, ldflags
 
 HOST_CFLAGS, HOST_LDFLAGS = detect_host_flags()
@@ -146,7 +211,7 @@ def find_llvm_config_global(prefer_version=""):
 def find_windows_sdk():
     if host_os() != "windows":
         return ("", "")
-    
+
     sdk_dir = os.environ.get("WindowsSdkDir") or os.environ.get("WindowsSdkDir10") or ""
     sdk_ver = os.environ.get("WindowsSDKVersion") or os.environ.get("WindowsSdkVersion") or ""
     if sdk_dir: sdk_dir = sdk_dir.rstrip("\\/")
@@ -154,12 +219,12 @@ def find_windows_sdk():
     if sdk_dir and sdk_ver:
         if (Path(sdk_dir)/"Include"/sdk_ver/"ucrt"/"stdio.h").exists():
             return (sdk_dir, sdk_ver)
-            
+
     bases = [
         Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))/"Windows Kits"/"10",
         Path(os.environ.get("ProgramFiles", r"C:\Program Files"))/"Windows Kits"/"10",
     ]
-    
+
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Kits\Installed Roots") as k:
@@ -185,7 +250,7 @@ def find_rc():
     path = shutil.which('rc')
     if path: return path
     if host_os() != 'windows': return ''
-    
+
     sdk_root, ver = find_windows_sdk()
     if sdk_root and ver:
         arch = 'x64' if platform.machine().lower() in ('x86_64','amd64') else 'x86'
@@ -242,7 +307,7 @@ def check_windows_toolchain(cc, extra_cflags=None):
     src.write_text("#include <stdio.h>\nint main(void){return 0;}\n", encoding="utf-8")
     is_cl = Path(cc).name.lower().startswith("clang-cl") or cc.lower().endswith("clang-cl.exe")
     flags = list(extra_cflags) if extra_cflags else []
-    
+
     if is_cl:
         conv = []
         i = 0
@@ -262,7 +327,7 @@ def check_windows_toolchain(cc, extra_cflags=None):
                 conv.append(f)
             i += 1
         flags = conv
-    
+
     cmd = [cc] + flags + (["/c"] if is_cl else ["-c"]) + [str(src), "-o", str(obj)]
     res = run_capture(cmd)
     if res.returncode != 0:
@@ -275,9 +340,9 @@ def configure_toolchain():
     host = host_os()
     cc_env = os.environ.get("CC")
     cc = cc_env or "clang"
-    
+
     if host == "linux" and not os.environ.get("NYTRIX_LLVM_VERSION"):
-         pass 
+         pass
 
     llvm_config = os.environ.get("LLVM_CONFIG", "")
     llvm_root = os.environ.get("LLVM_ROOT", "")
@@ -286,7 +351,7 @@ def configure_toolchain():
         parsed_cc = extract_windows_cc_path(cc_env or "")
         if parsed_cc:
             cc = parsed_cc
-    
+
     if host == "macos":
         brew_llvm = ""
         if which("brew"):
@@ -325,7 +390,7 @@ def configure_toolchain():
         bin = Path(llvm_root)/"bin"
         if bin.exists():
             os.environ["PATH"] = str(bin) + os.pathsep + os.environ.get("PATH","")
-            
+
     if host == "windows":
          cc_path = shutil.which(cc) if cc else ""
          if cc_path and "windowsapps" in cc_path.lower():
@@ -345,5 +410,5 @@ def configure_toolchain():
                  if Path(c).exists():
                      cc = c
                      break
-    
+
     return cc, llvm_config, llvm_root

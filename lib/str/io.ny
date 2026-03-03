@@ -1,7 +1,7 @@
 ;; Keywords: str io
 ;; Basic IO helpers.
 
-module std.text.io (
+module std.str.io (
    _print_write, print
 )
 use std.core *
@@ -67,9 +67,9 @@ fn print(...args){
          def k = get_kwarg_key(arg)
          def v = get_kwarg_val(arg)
          if(k == "sep"){
-            sep = is_str(v) ? v : __to_str(v)
+         sep = is_str(v) ? v : __to_str(v)
          } else if(k == "end"){
-            end = is_str(v) ? v : __to_str(v)
+         end = is_str(v) ? v : __to_str(v)
          }
       } else {
          vals += 1
@@ -92,23 +92,23 @@ fn print(...args){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.text.io *
+   use std.core *
+   use std.str.io *
 
-    _print_write("io")
-    print("test")
-    assert(print() == 0, "print with no arguments")
-    assert(print("hello", "world", sep=" ") == 0, "print with sep kwarg")
-    assert(print("hello", "world", end="!\n") == 0, "print with end kwarg")
-    assert(print("hello", "world", sep="-", end="!\n") == 0,
+   _print_write("io")
+   print("test")
+   assert(print() == 0, "print with no arguments")
+   assert(print("hello", "world", sep=" ") == 0, "print with sep kwarg")
+   assert(print("hello", "world", end="!\n") == 0, "print with end kwarg")
+   assert(print("hello", "world", sep="-", end="!\n") == 0,
            "print with sep/end kwargs")
-    assert(print("hello", "world", end="\n", sep="::") == 0,
+   assert(print("hello", "world", end="\n", sep="::") == 0,
            "print with kwargs in reversed order")
-    assert(print("hello", "world", sep=1, end=2) == 0,
+   assert(print("hello", "world", sep=1, end=2) == 0,
            "print coerces non-string sep/end")
-    assert(print("hello", "world", unknown="ignored") == 0,
+   assert(print("hello", "world", unknown="ignored") == 0,
            "print ignores unknown keyword arguments")
-    assert(1 == 1, "io ok")
+   assert(1 == 1, "io ok")
 
-    print("✓ std.text.io tests passed")
+   print("✓ std.str.io tests passed")
 }

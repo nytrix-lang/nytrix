@@ -1,9 +1,9 @@
 ;; Keywords: audio jack linux io
 
 module std.os.audio.backend.jack (
-    is_available, init, shutdown,
-    stream_open, stream_start, stream_stop,
-    write
+   is_available, init, shutdown,
+   stream_open, stream_start, stream_stop,
+   write
 )
 
 use std.core *
@@ -15,27 +15,27 @@ use std.os.audio.backend.shared as backend_shared
 use std.util.common as common
 
 if(comptime{ __os_name() == "linux" }){
-    #link "jack"
-}
+   #link "jack"
 
-extern fn jack_client_open(name: ptr, options: i32, status: ptr, uuid: ptr): ptr as "jack_client_open"
-extern fn jack_client_close(client: ptr): i32 as "jack_client_close"
-extern fn jack_activate(client: ptr): i32 as "jack_activate"
-extern fn jack_deactivate(client: ptr): i32 as "jack_deactivate"
-extern fn jack_set_process_callback(client: ptr, cb: ptr, arg: ptr): i32 as "jack_set_process_callback"
-extern fn jack_get_buffer_size(client: ptr): i32 as "jack_get_buffer_size"
-extern fn jack_port_register(client: ptr, name: ptr, type: ptr, flags: i64, buffer_size: i64): ptr as "jack_port_register"
-extern fn jack_port_get_buffer(port: ptr, nframes: i32): ptr as "jack_port_get_buffer"
-extern fn jack_get_ports(client: ptr, port_name_pattern: ptr, type_name_pattern: ptr, flags: i64): ptr as "jack_get_ports"
-extern fn jack_port_name(port: ptr): ptr as "jack_port_name"
-extern fn jack_connect(client: ptr, src: ptr, dst: ptr): i32 as "jack_connect"
-extern fn jack_free(ptr: ptr): i32 as "jack_free"
-extern fn jack_ringbuffer_create(sz: i64): ptr as "jack_ringbuffer_create"
-extern fn jack_ringbuffer_free(rb: ptr): i32 as "jack_ringbuffer_free"
-extern fn jack_ringbuffer_read(rb: ptr, dest: ptr, cnt: i64): i64 as "jack_ringbuffer_read"
-extern fn jack_ringbuffer_read_space(rb: ptr): i64 as "jack_ringbuffer_read_space"
-extern fn jack_ringbuffer_write(rb: ptr, src: ptr, cnt: i64): i64 as "jack_ringbuffer_write"
-extern fn jack_ringbuffer_write_space(rb: ptr): i64 as "jack_ringbuffer_write_space"
+   extern fn jack_client_open(name: ptr, options: i32, status: ptr, uuid: ptr): ptr as "jack_client_open"
+   extern fn jack_client_close(client: ptr): i32 as "jack_client_close"
+   extern fn jack_activate(client: ptr): i32 as "jack_activate"
+   extern fn jack_deactivate(client: ptr): i32 as "jack_deactivate"
+   extern fn jack_set_process_callback(client: ptr, cb: ptr, arg: ptr): i32 as "jack_set_process_callback"
+   extern fn jack_get_buffer_size(client: ptr): i32 as "jack_get_buffer_size"
+   extern fn jack_port_register(client: ptr, name: ptr, type: ptr, flags: i64, buffer_size: i64): ptr as "jack_port_register"
+   extern fn jack_port_get_buffer(port: ptr, nframes: i32): ptr as "jack_port_get_buffer"
+   extern fn jack_get_ports(client: ptr, port_name_pattern: ptr, type_name_pattern: ptr, flags: i64): ptr as "jack_get_ports"
+   extern fn jack_port_name(port: ptr): ptr as "jack_port_name"
+   extern fn jack_connect(client: ptr, src: ptr, dst: ptr): i32 as "jack_connect"
+   extern fn jack_free(ptr: ptr): i32 as "jack_free"
+   extern fn jack_ringbuffer_create(sz: i64): ptr as "jack_ringbuffer_create"
+   extern fn jack_ringbuffer_free(rb: ptr): i32 as "jack_ringbuffer_free"
+   extern fn jack_ringbuffer_read(rb: ptr, dest: ptr, cnt: i64): i64 as "jack_ringbuffer_read"
+   extern fn jack_ringbuffer_read_space(rb: ptr): i64 as "jack_ringbuffer_read_space"
+   extern fn jack_ringbuffer_write(rb: ptr, src: ptr, cnt: i64): i64 as "jack_ringbuffer_write"
+   extern fn jack_ringbuffer_write_space(rb: ptr): i64 as "jack_ringbuffer_write_space"
+}
 
 def JACK_NO_START_SERVER = 0x01
 def JACK_PORT_IS_INPUT = 0x1
@@ -188,16 +188,16 @@ fn _process_cb(nframes, arg){
       if(port != 0){
          def out = jack_port_get_buffer(port, frames)
          if(out != 0){
-            if(scratch == 0 || read_bytes == 0){
+         if(scratch == 0 || read_bytes == 0){
                memset(out, 0, frames * 4)
-            } else {
+         } else {
                mut f = 0
                while(f < frames){
                   def in_off = ((f * channels) + ch) * 4
                   store32_f32(out, load32_f32(scratch, in_off), f * 4)
                   f += 1
                }
-            }
+         }
          }
       }
       ch += 1
@@ -220,7 +220,8 @@ fn init(ctx){
 
 fn shutdown(ctx){
    "Shuts down JACK backend global state."
-   if(ctx){ 0 }
+   if(ctx){ return 0 }
+   0
 }
 
 fn stream_open(stream){
@@ -246,28 +247,28 @@ fn stream_open(stream){
 
    def st = _state_new(client, channels, format)
    if(st == 0){
-      jack_client_close(client)
-      return false
+       jack_client_close(client)
+       return false
    }
 
    if(jack_set_process_callback(client, fn_ptr(_process_cb), st) != 0){
-      _state_free(st)
-      jack_client_close(client)
-      return false
+       _state_free(st)
+       jack_client_close(client)
+       return false
    }
 
    def ports = load64(st, _ST_PORTS)
    mut i = 0
    while(i < channels){
-      def pname = f"out_{i + 1}"
-      def port = jack_port_register(client, cstr(pname), cstr(JACK_DEFAULT_AUDIO_TYPE), JACK_PORT_IS_OUTPUT, 0)
-      if(port == 0){
-         _state_free(st)
-         jack_client_close(client)
-         return false
-      }
-      store64(ports, port, i * 8)
-      i += 1
+       def pname = f"out_{i + 1}"
+       def port = jack_port_register(client, cstr(pname), cstr(JACK_DEFAULT_AUDIO_TYPE), JACK_PORT_IS_OUTPUT, 0)
+       if(port == 0){
+          _state_free(st)
+          jack_client_close(client)
+          return false
+       }
+       store64(ports, port, i * 8)
+       i += 1
    }
 
    _streams = dict_set(_streams, client, st)
@@ -294,8 +295,8 @@ fn stream_stop(stream){
    jack_deactivate(client)
    def st = dict_get(_streams, client)
    if(st != 0){
-      _streams = dict_del(_streams, client)
-      _state_free(st)
+       _streams = dict_del(_streams, client)
+       _state_free(st)
    }
    jack_client_close(client)
    stream = dict_set(stream, "handle", 0)
@@ -320,42 +321,42 @@ fn write(handle, buf, frames, frame_bytes=4){
    mut done = 0
    mut stalls = 0
    while(done < total_samples){
-      mut writable = jack_ringbuffer_write_space(rb) / 4
-      if(writable <= 0){
-         stalls += 1
-         if(stalls > 5000){ return false }
-         msleep(1)
-         continue
-      }
-      stalls = 0
+       mut writable = jack_ringbuffer_write_space(rb) / 4
+       if(writable <= 0){
+          stalls += 1
+          if(stalls > 5000){ return false }
+          msleep(1)
+          continue
+       }
+       stalls = 0
 
-      mut chunk = total_samples - done
-      if(chunk > writable){ chunk = writable }
-      if(chunk > tmp_samples){ chunk = tmp_samples }
+       mut chunk = total_samples - done
+       if(chunk > writable){ chunk = writable }
+       if(chunk > tmp_samples){ chunk = tmp_samples }
 
-      mut i = 0
-      if(format == FORMAT_FLOAT32LE){
-         while(i < chunk){
-            def x = load32_f32(buf, (done + i) * 4)
-            store32_f32(tmp, x, i * 4)
-            i += 1
-         }
-      } else {
-         while(i < chunk){
-            mut s = load16(buf, (done + i) * 2)
-            if(s > 32767){ s = s - 65536 }
-            store32_f32(tmp, (s + 0.0) / 32768.0, i * 4)
-            i += 1
-         }
-      }
+       mut i = 0
+       if(format == FORMAT_FLOAT32LE){
+          while(i < chunk){
+             def x = load32_f32(buf, (done + i) * 4)
+             store32_f32(tmp, x, i * 4)
+             i += 1
+          }
+       } else {
+          while(i < chunk){
+             mut s = load16(buf, (done + i) * 2)
+             if(s > 32767){ s = s - 65536 }
+             store32_f32(tmp, (s + 0.0) / 32768.0, i * 4)
+             i += 1
+          }
+       }
 
-      def need = chunk * 4
-      def wrote = jack_ringbuffer_write(rb, tmp, need)
-      if(wrote <= 0){
-         msleep(1)
-         continue
-      }
-      done += wrote / 4
+       def need = chunk * 4
+       def wrote = jack_ringbuffer_write(rb, tmp, need)
+       if(wrote <= 0){
+          msleep(1)
+          continue
+       }
+       done += wrote / 4
    }
    true
 }

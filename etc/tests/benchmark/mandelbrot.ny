@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 use std.os *
 use std.os.time *
 
@@ -46,12 +46,12 @@ fn mandelbrot(w, h, max_iter){
          mut i = 0
 
          while(i < max_iter){
-            zr2 = zr * zr
-            zi2 = zi * zi
-            if(zr2 + zi2 > four){ break }
-            zi = (zr + zr) * zi + c_im
-            zr = zr2 - zi2 + c_re
-            i += 1
+         zr2 = zr * zr
+         zi2 = zi * zi
+         if(zr2 + zi2 > four){ break }
+         zi = (zr + zr) * zi + c_im
+         zr = zr2 - zi2 + c_re
+         i += 1
          }
 
          if(i == max_iter){ count += 1 }

@@ -17,9 +17,9 @@ module std.os (
 )
 use std.core *
 use std.core.error *
-use std.text *
+use std.str *
 use std.os.sys *
-use std.text.io *
+use std.str.io *
 use std.os.path as ospath
 use std.os.clipboard as cb
 use std.os.platform as platform
@@ -108,7 +108,7 @@ fn file_read(path) -> Result {
          defer { free(tmp) }
          mut tlen = 0
          while(true){
-            match sys_read(fd, tmp, 4096){
+         match sys_read(fd, tmp, 4096){
                ok(r) -> {
                   if(r <= 0){ break }
                   if(tlen + r >= cap){
@@ -119,7 +119,7 @@ fn file_read(path) -> Result {
                   tlen = tlen + r
                }
                err(e) -> { return err(e) }
-            }
+         }
          }
          store8(buf + 16, 0, tlen)
          return ok(init_str(buf + 16, tlen))
@@ -169,53 +169,53 @@ fn exit(code=0){
 }
 
 if(comptime{__main()}){
-    use std.core *
-    use std.core.error *
-    use std.core.reflect *
-    use std.text *
+   use std.core *
+   use std.core.error *
+   use std.core.reflect *
+   use std.str *
 
-    print("Testing OS Mod...")
+   print("Testing OS Mod...")
 
-    def p = __getpid()
-    assert(p > 0, "pid > 0")
+   def p = __getpid()
+   assert(p > 0, "pid > 0")
 
-    def pp = __getppid()
-    if(eq(os(), "windows")){
-        print("Windows ppid:", pp)
-        assert(pp >= 0, "Windows ppid should be non-negative")
-    } else {
-        assert(pp > 0, "ppid > 0")
-    }
+   def pp = __getppid()
+   if(eq(os(), "windows")){
+      print("Windows ppid:", pp)
+      assert(pp >= 0, "Windows ppid should be non-negative")
+   } else {
+      assert(pp > 0, "ppid > 0")
+   }
 
-    def u = uid()
-    assert(u >= 0, "uid >= 0")
+   def u = uid()
+   assert(u >= 0, "uid >= 0")
 
-    def g = gid()
-    assert(g >= 0, "gid >= 0")
+   def g = gid()
+   assert(g >= 0, "gid >= 0")
 
-    def path = env("PATH")
-    if(path != 0){
+   def path = env("PATH")
+   if(path != 0){
      assert(str_len(path) >= 0, "env PATH len")
-    } else {
+   } else {
      assert(0, "env PATH missing")
-    }
+   }
 
-    def e = environ()
-    assert(type(e) == "list", "environ list")
-    assert(len(e) > 0, "environ len")
+   def e = environ()
+   assert(type(e) == "list", "environ list")
+   assert(len(e) > 0, "environ len")
 
-    ; Platform tests
-    def o = os()
-    assert(is_str(o), "os() is string")
-    assert(len(o) > 0, "os() not empty")
+   ; Platform tests
+   def o = os()
+   assert(is_str(o), "os() is string")
+   assert(len(o) > 0, "os() not empty")
 
-    def a = arch()
-    assert(is_str(a), "arch() is string")
-    assert(len(a) > 0, "arch() not empty")
+   def a = arch()
+   assert(is_str(a), "arch() is string")
+   assert(len(a) > 0, "arch() not empty")
 
-    print("Platform: " + o + " (" + a + ")")
+   print("Platform: " + o + " (" + a + ")")
 
-    ;; File I/O tests skipped in bundled comptime (syscall restrictions)
+   ;; File I/O tests skipped in bundled comptime (syscall restrictions)
 
-    print("✓ std.os.mod tests passed")
+   print("✓ std.os.mod tests passed")
 }

@@ -264,7 +264,8 @@ void scope_pop(scope *scopes, size_t *depth) {
     bool is_stdlib = b->stmt_t->tok.filename &&
                      (strcmp(b->stmt_t->tok.filename, "<stdlib>") == 0 ||
                       strcmp(b->stmt_t->tok.filename, "<repl_std>") == 0);
-    if (!b->is_used && b->name && b->name[0] != '_' &&
+    bool is_param = (b->stmt_t->kind == NY_S_FUNC);
+    if (!b->is_used && b->name && b->name[0] != '_' && !is_param &&
         ny_diag_should_emit("unused_var", b->stmt_t->tok, b->name) &&
         (!is_stdlib || verbose_enabled >= 2)) {
       ny_diag_warning(b->stmt_t->tok, "unused variable \033[1;37m'%s'\033[0m",

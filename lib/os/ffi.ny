@@ -18,53 +18,53 @@ use std.core *
 use std.core as core
 use std.core.mem as mem
 use std.core.dict_mod as _d
-use std.text *
+use std.str *
 use std.os *
 use std.os.path as ospath
 
 ;; Dynamic Loading
 
-fn RTLD_LAZY() { 
+fn RTLD_LAZY(){
    "Returns the RTLD_LAZY flag for `dlopen` (1)."
-   1 
+   1
 }
-fn RTLD_NOW() { 
+fn RTLD_NOW(){
    "Returns the RTLD_NOW flag for `dlopen` (2)."
-   2 
+   2
 }
-fn RTLD_GLOBAL() { 
+fn RTLD_GLOBAL(){
    "Returns the RTLD_GLOBAL flag for `dlopen` (256)."
-   256 
+   256
 }
-fn RTLD_LOCAL() { 
+fn RTLD_LOCAL(){
    "Returns the RTLD_LOCAL flag for `dlopen` (0)."
-   0 
+   0
 }
 
-fn dlopen(path, flags) { 
+fn dlopen(path, flags){
    "Opens a dynamic library at `path` with the given `flags`. Returns a library handle, or 0 on failure."
-   __dlopen(path, flags) 
+   __dlopen(path, flags)
 }
-fn dlsym(h, s) { 
+fn dlsym(h, s){
    "Returns the memory address of the symbol `s` within library handle `h`."
-   __dlsym(h, s) 
+   __dlsym(h, s)
 }
-fn dlclose(h) { 
+fn dlclose(h){
    "Decrements the reference count on the dynamic library handle `h`."
-   __dlclose(h) 
+   __dlclose(h)
 }
-fn dlerror() { 
+fn dlerror(){
    "Returns a human-readable string describing the last error that occurred from an FFI/DL operation."
-   __dlerror() 
+   __dlerror()
 }
 
 fn _try(path, flags){
    "Attempts a direct `dlopen` call and logs the attempt when audio debug mode is enabled."
    if(env("NY_AUDIO_DEBUG")){ print("FFI: trying " + path) }
    def h = __dlopen(path, flags)
-   if(h != 0){ 
+   if(h != 0){
       if(env("NY_AUDIO_DEBUG")){ print("FFI: loaded " + path + " handle=" + to_str(h)) }
-      return h 
+      return h
    }
    0
 }
@@ -145,22 +145,22 @@ fn cstr(s){
 
 ;; Low-level Calls
 
-fn call0(f) { "Low-level FFI call with 0 arguments." __call0(f) }
-fn call1(f,a) { "Low-level FFI call with 1 argument." __call1(f,a) }
-fn call2(f,a,b) { "Low-level FFI call with 2 arguments." __call2(f,a,b) }
-fn call3(f,a,b,c) { "Low-level FFI call with 3 arguments." __call3(f,a,b,c) }
-fn call4(f,a,b,c,d) { "Low-level FFI call with 4 arguments." __call4(f,a,b,c,d) }
-fn call5(f,a,b,c,d,e) { "Low-level FFI call with 5 arguments." __call5(f,a,b,c,d,e) }
-fn call6(f,a,b,c,d,e,g) { "Low-level FFI call with 6 arguments." __call6(f,a,b,c,d,e,g) }
-fn call7(f,a,b,c,d,e,g,h) { "Low-level FFI call with 7 arguments." __call7(f,a,b,c,d,e,g,h) }
-fn call8(f,a,b,c,d,e,g,h,i) { "Low-level FFI call with 8 arguments." __call8(f,a,b,c,d,e,g,h,i) }
-fn call9(f,a,b,c,d,e,g,h,i,j) { "Low-level FFI call with 9 arguments." __call9(f,a,b,c,d,e,g,h,i,j) }
-fn call10(f,a,b,c,d,e,g,h,i,j,k) { "Low-level FFI call with 10 arguments." __call10(f,a,b,c,d,e,g,h,i,j,k) }
-fn call11(f,a,b,c,d,e,g,h,i,j,k,l) { "Low-level FFI call with 11 arguments." __call11(f,a,b,c,d,e,g,h,i,j,k,l) }
-fn call12(f,a,b,c,d,e,g,h,i,j,k,l,m) { "Low-level FFI call with 12 arguments." __call12(f,a,b,c,d,e,g,h,i,j,k,l,m) }
-fn call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) { "Low-level FFI call with 13 arguments." __call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) }
-fn call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) { "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
-fn call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) { "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
+fn call0(f){ "Low-level FFI call with 0 arguments." __call0(f) }
+fn call1(f,a){ "Low-level FFI call with 1 argument." __call1(f,a) }
+fn call2(f,a,b){ "Low-level FFI call with 2 arguments." __call2(f,a,b) }
+fn call3(f,a,b,c){ "Low-level FFI call with 3 arguments." __call3(f,a,b,c) }
+fn call4(f,a,b,c,d){ "Low-level FFI call with 4 arguments." __call4(f,a,b,c,d) }
+fn call5(f,a,b,c,d,e){ "Low-level FFI call with 5 arguments." __call5(f,a,b,c,d,e) }
+fn call6(f,a,b,c,d,e,g){ "Low-level FFI call with 6 arguments." __call6(f,a,b,c,d,e,g) }
+fn call7(f,a,b,c,d,e,g,h){ "Low-level FFI call with 7 arguments." __call7(f,a,b,c,d,e,g,h) }
+fn call8(f,a,b,c,d,e,g,h,i){ "Low-level FFI call with 8 arguments." __call8(f,a,b,c,d,e,g,h,i) }
+fn call9(f,a,b,c,d,e,g,h,i,j){ "Low-level FFI call with 9 arguments." __call9(f,a,b,c,d,e,g,h,i,j) }
+fn call10(f,a,b,c,d,e,g,h,i,j,k){ "Low-level FFI call with 10 arguments." __call10(f,a,b,c,d,e,g,h,i,j,k) }
+fn call11(f,a,b,c,d,e,g,h,i,j,k,l){ "Low-level FFI call with 11 arguments." __call11(f,a,b,c,d,e,g,h,i,j,k,l) }
+fn call12(f,a,b,c,d,e,g,h,i,j,k,l,m){ "Low-level FFI call with 12 arguments." __call12(f,a,b,c,d,e,g,h,i,j,k,l,m) }
+fn call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n){ "Low-level FFI call with 13 arguments." __call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) }
+fn call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o){ "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
+fn call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p){ "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
 
 fn call0_void(f){
    "Calls `f` with no arguments and ignores any return value."
@@ -277,13 +277,13 @@ fn extern_all(){
 
 ;; Memory
 
-fn malloc(n) {
+fn malloc(n){
    "Allocates `n` bytes and returns a raw pointer, or `0` for non-positive sizes."
    if(n<=0){return 0}
    __malloc(n)
 }
 
-fn free(p) {
+fn free(p){
    "Frees raw pointer `p` when it is non-zero."
    if(p){ __free(p) }
    0
@@ -291,62 +291,62 @@ fn free(p) {
 
 ;; C-Type definitions
 
-fn u8() {
+fn u8(){
    "Returns the FFI descriptor for an unsigned 8-bit integer."
    ["u8", 1, 1]
 }
 
-fn i8() {
+fn i8(){
    "Returns the FFI descriptor for a signed 8-bit integer."
    ["i8", 1, 1]
 }
 
-fn u16() {
+fn u16(){
    "Returns the FFI descriptor for an unsigned 16-bit integer."
    ["u16", 2, 2]
 }
 
-fn i16() {
+fn i16(){
    "Returns the FFI descriptor for a signed 16-bit integer."
    ["i16", 2, 2]
 }
 
-fn u32() {
+fn u32(){
    "Returns the FFI descriptor for an unsigned 32-bit integer."
    ["u32", 4, 4]
 }
 
-fn i32() {
+fn i32(){
    "Returns the FFI descriptor for a signed 32-bit integer."
    ["i32", 4, 4]
 }
 
-fn u64() {
+fn u64(){
    "Returns the FFI descriptor for an unsigned 64-bit integer."
    ["u64", 8, 8]
 }
 
-fn i64() {
+fn i64(){
    "Returns the FFI descriptor for a signed 64-bit integer."
    ["i64", 8, 8]
 }
 
-fn f32() {
+fn f32(){
    "Returns the FFI descriptor for a 32-bit floating-point value."
    ["f32", 4, 4]
 }
 
-fn f64() {
+fn f64(){
    "Returns the FFI descriptor for a 64-bit floating-point value."
    ["f64", 8, 8]
 }
 
-fn ptr() {
+fn ptr(){
    "Returns the FFI descriptor for a raw pointer."
    ["ptr", 8, 8]
 }
 
-fn handle() {
+fn handle(){
    "Returns the canonical pointer-like FFI type descriptor."
    ptr()
 }
@@ -454,7 +454,7 @@ fn bind_lib(name_or_h, syms){
          elif(arity == 5){ res = _d.dict_set(res, nm, fn(a, b, c, d, e){ call5(fptr, a, b, c, d, e) }) }
          elif(arity == 6){ res = _d.dict_set(res, nm, fn(a, b, c, d, e, f){ call6(fptr, a, b, c, d, e, f) }) }
          else {
-            res = _d.dict_set(res, nm, fn(...args){ ffi_call(fptr, args) })
+         res = _d.dict_set(res, nm, fn(...args){ ffi_call(fptr, args) })
          }
       }
       i += 1

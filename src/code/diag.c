@@ -7,7 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char **g_diag_seen_tbl = NULL;
+typedef struct {
+  char *key;
+  int count;
+} diag_entry_t;
+
+static diag_entry_t *g_diag_seen_tbl = NULL;
 static size_t g_diag_seen_cap = 0;
 static size_t g_diag_seen_len = 0;
 static bool g_last_primary_emitted = false;
@@ -41,47 +46,46 @@ static void diag_print_snippet(token_t tok, const char *color) {
 static uint64_t diag_hash(const char *s) { return ny_hash64_cstr(s); }
 
 static bool diag_tbl_grow(void) {
-  size_t new_cap = g_diag_seen_cap ? g_diag_seen_cap * 2 : 1024;
-  char **new_tbl = calloc(new_cap, sizeof(char *));
-  if (!new_tbl)
+  size_t old_cap = g_diag_seen_cap;
+  diag_entry_t *old_tbl = g_diag_seen_tbl;
+  g_diag_seen_cap = g_diag_seen_cap ? g_diag_seen_cap * 2 : 1024;
+  g_diag_seen_tbl = calloc(g_diag_seen_cap, sizeof(diag_entry_t));
+  if (!g_diag_seen_tbl)
     return false;
-  for (size_t i = 0; i < g_diag_seen_cap; ++i) {
-    char *entry = g_diag_seen_tbl[i];
-    if (!entry)
+  size_t mask = g_diag_seen_cap - 1;
+  for (size_t i = 0; i < old_cap; ++i) {
+    if (!old_tbl[i].key)
       continue;
-    uint64_t h = diag_hash(entry);
-    size_t mask = new_cap - 1;
+    uint64_t h = diag_hash(old_tbl[i].key);
     size_t idx = (size_t)h & mask;
-    while (new_tbl[idx])
+    while (g_diag_seen_tbl[idx].key)
       idx = (idx + 1) & mask;
-    new_tbl[idx] = entry;
+    g_diag_seen_tbl[idx] = old_tbl[i];
   }
-  free(g_diag_seen_tbl);
-  g_diag_seen_tbl = new_tbl;
-  g_diag_seen_cap = new_cap;
+  free(old_tbl);
   return true;
 }
 
 static bool diag_mark_seen(const char *key) {
   if (!key)
     return false;
-  if (g_diag_seen_cap == 0) {
-    if (!diag_tbl_grow())
-      return true;
-  }
-  if ((g_diag_seen_len + 1) * 3 >= g_diag_seen_cap * 2) {
+  if (g_diag_seen_cap == 0 ||
+      (g_diag_seen_len + 1) * 3 >= g_diag_seen_cap * 2) {
     if (!diag_tbl_grow())
       return true;
   }
   uint64_t h = diag_hash(key);
   size_t mask = g_diag_seen_cap - 1;
   size_t idx = (size_t)h & mask;
-  while (g_diag_seen_tbl[idx]) {
-    if (strcmp(g_diag_seen_tbl[idx], key) == 0)
-      return false;
+  while (g_diag_seen_tbl[idx].key) {
+    if (strcmp(g_diag_seen_tbl[idx].key, key) == 0) {
+      g_diag_seen_tbl[idx].count++;
+      return g_diag_seen_tbl[idx].count <= 3;
+    }
     idx = (idx + 1) & mask;
   }
-  g_diag_seen_tbl[idx] = ny_strdup(key);
+  g_diag_seen_tbl[idx].key = ny_strdup(key);
+  g_diag_seen_tbl[idx].count = 1;
   g_diag_seen_len++;
   return true;
 }
@@ -102,7 +106,8 @@ bool ny_is_stdlib_tok(token_t tok) {
            strcmp(tok.filename, "<repl_std>") == 0;
   }
   if (strncmp(tok.filename, "lib/", 4) == 0 ||
-      strncmp(tok.filename, "lib\\", 4) == 0)
+      strncmp(tok.filename, "lib\\", 4) == 0 ||
+      strstr(tok.filename, "std.ny") != NULL)
     return true;
   return false;
 }

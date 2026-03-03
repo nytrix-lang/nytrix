@@ -6,8 +6,8 @@ module std.core.debug (
 )
 use std.core *
 use std.core.reflect *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 
 fn debug_print_val(val){
    "Prints a detailed debug representation of a single value."
@@ -39,17 +39,17 @@ fn debug_print(...args){
 }
 
 if(comptime{__main()}){
-    use std.core.debug *
-    use std.util.inspect *
-    use std.core.test *
-    use std.core *
+   use std.core.debug *
+   use std.util.inspect *
+   use std.core.test *
+   use std.core *
 
-    print("Testing Debug & Inspect...")
+   print("Testing Debug & Inspect...")
 
-    debug_print("test_val", 123)
-    inspect(123)
-    inspect("hello")
-    inspect([1, 2])
+   debug_print("test_val", 123)
+   inspect(123)
+   inspect("hello")
+   inspect([1, 2])
 
-    print("✓ std.core.debug tests passed")
+   print("✓ std.core.debug tests passed")
 }

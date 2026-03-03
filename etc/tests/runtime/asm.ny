@@ -1,6 +1,6 @@
 use std.core *
 use std.os *
-use std.text *
+use std.str *
 
 ;; Inline ASM (Test)
 ;; Tests basic inline assembly functionality per architecture.
@@ -20,9 +20,9 @@ if(str_contains(arch_name, "x86") || str_contains(arch_name, "X86")){
   print("asm(42) =", x)
   mut x_check = x
   if(!str_contains(arch_name, "aarch64")){
-    ;; ARM32 JIT may leave upper 32 bits of i64 register-pair moves undefined.
-    ;; Validate the semantically relevant low 32-bit payload.
-    x_check = x & 4294967295
+   ;; ARM32 JIT may leave upper 32 bits of i64 register-pair moves undefined.
+   ;; Validate the semantically relevant low 32-bit payload.
+   x_check = x & 4294967295
   }
   assert(x_check == 42, "asm return 42")
   mut s = asm("mov $0, $1", "=r,r", 123)

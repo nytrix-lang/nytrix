@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nytrix Web Tools
+Nytrix Web Tools - Enhanced Documentation Generator
 """
 import os
 import sys
@@ -79,6 +79,9 @@ def sanitize_id(name):
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 def extract_docstring(body_text):
+    """
+    Extracts a leading string literal docstring from a function body.
+    """
     doc_pattern = re.compile(r'^\s*("([^"\\]*(\\.[^"\\]*)*)"|\'([^\'\\]*(\\.[^\'\\]*)*)\')', re.MULTILINE)
     match = doc_pattern.search(body_text)
     if match:
@@ -86,6 +89,26 @@ def extract_docstring(body_text):
         remaining = body_text[match.end():]
         return doc, remaining
     return "", body_text
+
+def get_leading_comments(full_content, start_pos):
+    """
+    Extracts consecutive ;; comments immediately preceding start_pos.
+    """
+    lines = full_content[:start_pos].splitlines()
+    comments = []
+    for line in reversed(lines):
+        line = line.strip()
+        if line.startswith(";;"):
+            comments.append(line[2:].strip())
+        elif not line or line.startswith(";") or line.startswith("#"):
+            if line.startswith(";;"): continue
+            if not line: continue
+            break
+        else:
+            break
+    if not comments:
+        return ""
+    return "\n".join(reversed(comments))
 
 def parse_function_body(chunk, start_pos):
     depth = 0
@@ -170,77 +193,207 @@ def parse_nytrix_docs(bundle_path, docs_dirs=None):
     if not bundle_path or not Path(bundle_path).exists():
         err(f"Error: Bundle file not found: {bundle_path}")
         return []
-        
+
     content = Path(bundle_path).read_text(encoding="utf-8")
+    
+    # Split content by #line markers or ;; Module from markers
+    marker_pattern = re.compile(r"(?:^#line \d+ \"(?P<path1>.*)\"|^;;\s*Module from\s+(?P<path2>.*))", re.MULTILINE)
+    matches = list(marker_pattern.finditer(content))
+    
     modules = []
-    chunks = re.split(r"(;;\s*Module from\s+.*)", content)
-    i = 0
     parsed_count = 0
 
-    while i < len(chunks):
-        chunk = chunks[i]
-        header = ""
-        body = chunk
-        if chunk.strip().startswith(";; Module from"):
-            header = chunk
-            if i + 1 < len(chunks):
-                body = chunks[i + 1]
-                i += 1
-            else:
-                body = ""
-        elif not chunk.strip():
-            i += 1
+    if not matches:
+        chunks = [(0, len(content), "unknown")]
+    else:
+        chunks = []
+        for i in range(len(matches)):
+            m = matches[i]
+            fname = m.group('path1') or m.group('path2') or ""
+            start = m.end()
+            end = matches[i+1].start() if i+1 < len(matches) else len(content)
+            chunks.append((start, end, fname))
+
+    for start, end, orig_file in chunks:
+        body = content[start:end]
+        if not body.strip():
             continue
 
-        mod_match = re.search(r"module\s+([a-zA-Z0-9.]+)\s*\(", body)
+        mod_match = re.search(r"module\s+([a-zA-Z0-9.]+)", body)
         if not mod_match:
-            i += 1
             continue
 
         mod_name = mod_match.group(1)
         path = mod_name.split(".")
 
-        orig_file = ""
-        if header:
-            # Look for module path, handling both with and without .ny extension
-            file_match = re.search(r";;\s*Module from\s+([a-zA-Z0-9_/.]+)", header)
-            if file_match:
-                orig_file = file_match.group(1)
-                if not orig_file.endswith(".ny"):
-                    orig_file += ".ny"
-
-        mod_doc = ""
-        mod_doc_match = re.search(
-            r"module\s+[\w\.]+\s*\([^)]*\)\s*\{\s*(\"([^\"\\]*(\\.[^\"\\]*)*)\"|\'([^\'\\]*(\\.[^\'\\]*)*)\')",
+        mod_doc = get_leading_comments(content, start + mod_match.start())
+        mod_body_doc_match = re.search(
+            r"module\s+[\w\.]+\s*(?:\([^)]*\)\s*)?\{?\s*(\"([^\"\\]*(\\.[^\"\\]*)*)\"|\'([^\'\\]*(\\.[^\'\\]*)*)\')",
             body,
             re.DOTALL,
         )
-        if mod_doc_match:
-            mod_doc = (mod_doc_match.group(2) or mod_doc_match.group(4) or "").strip()
+        if mod_body_doc_match:
+            doc_str = (mod_body_doc_match.group(2) or mod_body_doc_match.group(4) or "").strip()
+            if mod_doc: mod_doc += "\n\n" + doc_str
+            else: mod_doc = doc_str
 
         symbols = []
+        function_ranges = []
+        
+        # 1. Functions: fn name(args) { ... }
         fn_pattern = re.compile(r"fn\s+([a-zA-Z0-9_.:]+)\s*\((.*?)\)\s*\{", re.DOTALL)
         for fn_match in fn_pattern.finditer(body):
             fn_name = fn_match.group(1)
             fn_args = fn_match.group(2).strip()
-            full_name = fn_name + (f"({fn_args})" if fn_args else "")
-            fn_body, _ = parse_function_body(body, fn_match.end() - 1)
-            if fn_body is None:
-                continue
-            doc, code_view = extract_docstring(fn_body)
-            code_view = deident_code(code_view)
+            full_sig = f"fn {fn_name}({fn_args})"
+            
+            fn_body, end_p = parse_function_body(body, fn_match.end() - 1)
+            if fn_body is None: continue
+            
+            function_ranges.append((fn_match.start(), end_p))
+            
+            doc = get_leading_comments(body, fn_match.start())
+            inner_doc, code_after_doc = extract_docstring(fn_body)
+            if inner_doc:
+                if doc: doc += "\n\n" + inner_doc
+                else: doc = inner_doc
+                
+            code_view = deident_code(code_after_doc)
             code_view = clean_code_view(code_view)
             imports = parse_imports(fn_body)
-            symbols.append({"id": sanitize_id(full_name), "name": full_name, "kind": "function", "doc": doc, "code": code_view, "imports": imports})
+            
+            symbols.append({
+                "id": sanitize_id(fn_name), 
+                "name": full_sig, 
+                "kind": "function", 
+                "doc": doc, 
+                "code": code_view, 
+                "imports": imports
+            })
 
-        const_pattern = re.compile(r"def\s+define\s+([a-zA-Z0-9_]+)\s*=", re.MULTILINE)
+        # 1.5. Structs and Layouts
+        struct_pattern = re.compile(r"(?P<kind>struct|layout)\s+([a-zA-Z0-9_]+)\s*(?:\([^)]*\))?\s*\{", re.DOTALL)
+        for st_match in struct_pattern.finditer(body):
+            if any(r[0] <= st_match.start() <= r[1] for r in function_ranges): continue
+            
+            kind = st_match.group("kind")
+            st_name = st_match.group(2)
+            
+            st_body, end_p = parse_function_body(body, st_match.end() - 1)
+            if st_body is None: continue
+            
+            doc = get_leading_comments(body, st_match.start())
+            if not doc: doc = f"{kind.capitalize()} definition."
+            
+            symbols.append({
+                "id": sanitize_id(st_name),
+                "name": f"{kind} {st_name}",
+                "kind": kind,
+                "doc": doc,
+                "code": f"{kind} {st_name} {{\n{deident_code(st_body)}\n}}"
+            })
+
+        # 2. Extern functions
+        extern_pattern = re.compile(r"extern\s+fn\s+([a-zA-Z0-9_]+)\s*\((.*?)\)(?:\s*:\s*([a-zA-Z0-9_]+))?(?:\s+as\s+\"([^\"]*)\")?", re.MULTILINE)
+        for ext_match in extern_pattern.finditer(body):
+            # Check if inside a function (unlikely for extern, but still)
+            if any(r[0] <= ext_match.start() <= r[1] for r in function_ranges): continue
+            
+            fn_name = ext_match.group(1)
+            fn_args = ext_match.group(2).strip()
+            ret_type = ext_match.group(3) or "void"
+            alias = ext_match.group(4)
+            
+            full_sig = f"extern fn {fn_name}({fn_args}): {ret_type}"
+            if alias: full_sig += f' as "{alias}"'
+            
+            doc = get_leading_comments(body, ext_match.start())
+            if not doc: doc = "External function."
+            
+            symbols.append({
+                "id": sanitize_id(fn_name),
+                "name": full_sig,
+                "kind": "extern",
+                "doc": doc,
+                "code": ext_match.group(0).strip()
+            })
+
+        # 3. Constants/Variables: def NAME = VALUE (top-level only)
+        const_pattern = re.compile(r"^([ \t]*)(?P<kind>def|mut)\s+([a-zA-Z0-9_]+)\s*=", re.MULTILINE)
         for const_match in const_pattern.finditer(body):
-            const_name = const_match.group(1)
-            symbols.append({"id": sanitize_id(const_name), "name": const_name, "kind": "constant", "sig": f"def {const_name}", "doc": "Constant definition.", "code": const_match.group(0).strip()})
+            indent = const_match.group(1)
+            if len(indent) > 3: continue # Heuristic for top-level
+            if any(r[0] <= const_match.start() <= r[1] for r in function_ranges): continue
+            
+            const_name = const_match.group(3)
+            if const_name == "define": continue
+            
+            doc = get_leading_comments(body, const_match.start())
+            kind_str = const_match.group('kind')
+            if not doc: doc = f"{kind_str.capitalize()} definition."
+            
+            line_end = body.find("\n", const_match.end())
+            if line_end == -1: line_end = len(body)
+            code_view = body[const_match.start():line_end].strip()
+            
+            symbols.append({
+                "id": sanitize_id(const_name),
+                "name": const_name,
+                "kind": "constant" if kind_str == "def" else "variable",
+                "sig": code_view,
+                "doc": doc,
+                "code": code_view
+            })
 
-        modules.append({"name": mod_name, "module_doc": mod_doc, "symbols": symbols, "path": path, "orig_file": orig_file})
+        # 4. Enums
+        enum_pattern = re.compile(r"enum\s+([a-zA-Z0-9_]+)\s*(?:\([^)]*\))?\s*\{", re.DOTALL)
+        for en_match in enum_pattern.finditer(body):
+            if any(r[0] <= en_match.start() <= r[1] for r in function_ranges): continue
+            
+            en_name = en_match.group(1)
+            en_body, end_p = parse_function_body(body, en_match.end() - 1)
+            if en_body is None: continue
+            
+            doc = get_leading_comments(body, en_match.start())
+            if not doc: doc = "Enum definition."
+            
+            symbols.append({
+                "id": sanitize_id(en_name),
+                "name": f"enum {en_name}",
+                "kind": "enum",
+                "doc": doc,
+                "code": f"enum {en_name} {{\n{deident_code(en_body)}\n}}"
+            })
+
+        # 5. Aliases
+        alias_pattern = re.compile(r"^([ \t]*)alias\s+([a-zA-Z0-9_]+)\s*=", re.MULTILINE)
+        for al_match in alias_pattern.finditer(body):
+            if any(r[0] <= al_match.start() <= r[1] for r in function_ranges): continue
+            
+            al_name = al_match.group(2)
+            doc = get_leading_comments(body, al_match.start())
+            if not doc: doc = "Type alias."
+            
+            line_end = body.find("\n", al_match.end())
+            if line_end == -1: line_end = len(body)
+            code_view = body[al_match.start():line_end].strip()
+            
+            symbols.append({
+                "id": sanitize_id(al_name),
+                "name": f"alias {al_name}",
+                "kind": "alias",
+                "doc": doc,
+                "code": code_view
+            })
+
+        modules.append({
+            "name": mod_name, 
+            "module_doc": mod_doc, 
+            "symbols": symbols, 
+            "path": path, 
+            "orig_file": orig_file
+        })
         parsed_count += 1
-        i += 1
 
     if not docs_dirs:
         docs_dirs = [ROOT / "docs"]
@@ -252,15 +405,21 @@ def parse_nytrix_docs(bundle_path, docs_dirs=None):
                 continue
             markdown_docs.append(doc)
             seen.add(doc["name"])
-            
+
     overview_module = {
         "name": "Overview",
-        "module_doc": "Nytrix Standard Library - Comprehensive documentation for all modules and functions.",
+        "module_doc": "Nytrix Standard Library - Reference documentation.",
         "symbols": [],
         "path": ["Home"],
         "markdown_docs": markdown_docs,
     }
     modules.insert(0, overview_module)
+    
+    # Sort modules by name (except Overview)
+    overview = modules[0]
+    rest = sorted(modules[1:], key=lambda x: x["name"])
+    modules = [overview] + rest
+    
     log_ok(f"Parsed {parsed_count} modules with {sum(len(m.get('symbols', [])) for m in modules)} total symbols")
     return modules
 
@@ -277,7 +436,7 @@ def run_web_gen(bundle_path, output_dir=None, serve=False, port=8000):
     template_path = assets_dir / "web.html"
     js_path = assets_dir / "web.js"
     css_path = assets_dir / "web.css"
-    
+
     if not template_path.exists():
         err(f"Error: web.html not found at {template_path}")
         return 1
@@ -285,29 +444,29 @@ def run_web_gen(bundle_path, output_dir=None, serve=False, port=8000):
     html_tpl = template_path.read_text(encoding="utf-8")
     js_tpl = js_path.read_text(encoding="utf-8") if js_path.exists() else ""
     css_tpl = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
-    
+
     log("WEB", f"Source: {bundle_path}")
     docs_dirs = [ROOT / "docs"]
     extra_dir = os.getenv("NYTRIX_WEBDOC_INFO_DIR", "build/cache/nytrix-info")
     if os.path.isdir(extra_dir):
         docs_dirs.append(Path(extra_dir))
-        
+
     data = parse_nytrix_docs(bundle_path, docs_dirs=docs_dirs)
-    
+
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         html_path = output_dir / "index.html"
-        
+
         final_html = html_tpl.replace("DATA_PLACEHOLDER", json.dumps(data, indent=2))
         final_html = final_html.replace("SCRIPT_PLACEHOLDER", js_tpl)
         final_html = final_html.replace("CSS_PLACEHOLDER", css_tpl)
-        
+
         if write_if_changed(html_path, final_html):
             log_ok(f"Documentation written to: {html_path.relative_to(ROOT)}")
         else:
             log_ok("Documentation up to date")
-            
+
     if serve:
         serve_dir = output_dir if output_dir else Path(bundle_path).parent
         os.chdir(serve_dir)
@@ -321,7 +480,7 @@ def run_web_gen(bundle_path, output_dir=None, serve=False, port=8000):
         except OSError:
             err(f"Error: Port {port} already in use")
             return 1
-            
+
     return 0
 
 if __name__ == "__main__":
@@ -331,9 +490,9 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--serve", action="store_true", help="Serve local HTTP server")
     parser.add_argument("-p", "--port", type=int, default=8000, help="Port (default: 8000)")
     args = parser.parse_args()
-    
+
     if not args.input:
         parser.print_help()
         sys.exit(1)
-        
+
     sys.exit(run_web_gen(args.input, args.output, args.serve, args.port))

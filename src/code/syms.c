@@ -376,8 +376,7 @@ static inline size_t ny_binding_tail_len(binding *b) {
 static uint64_t ny_lookup_stamp(const codegen_t *cg) {
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_lookup_stamp_cache_t *c = &s->stamp_cache;
-  if (c->ready &&
-      c->module == (const void *)cg->module &&
+  if (c->ready && c->module == (const void *)cg->module &&
       c->ctx == (const void *)cg->ctx &&
       c->fun_data == (const void *)cg->fun_sigs.data &&
       c->global_data == (const void *)cg->global_vars.data &&
@@ -386,8 +385,7 @@ static uint64_t ny_lookup_stamp(const codegen_t *cg) {
       c->user_import_alias_data == (const void *)cg->user_import_aliases.data &&
       c->use_modules_data == (const void *)cg->use_modules.data &&
       c->user_use_modules_data == (const void *)cg->user_use_modules.data &&
-      c->fun_len == cg->fun_sigs.len &&
-      c->global_len == cg->global_vars.len &&
+      c->fun_len == cg->fun_sigs.len && c->global_len == cg->global_vars.len &&
       c->alias_len == cg->aliases.len &&
       c->import_alias_len == cg->import_aliases.len &&
       c->user_import_alias_len == cg->user_import_aliases.len &&
@@ -561,8 +559,7 @@ static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
   ny_sym_state_t *s = ny_get_sym_state(cg);
   ny_module_used_index_entry_t *index =
       user_only ? s->user_use_module : s->use_module;
-  bool ready =
-      user_only ? s->user_use_module_ready : s->use_module_ready;
+  bool ready = user_only ? s->user_use_module_ready : s->use_module_ready;
   uint64_t idx_stamp =
       user_only ? s->user_use_module_stamp : s->use_module_stamp;
   if (!ready || idx_stamp != stamp) {
@@ -570,10 +567,10 @@ static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
     s = ny_get_sym_state(cg);
     index = user_only ? s->user_use_module : s->use_module;
   }
-  if (s->module_used_cache.valid && s->module_used_cache.user_only == user_only &&
+  if (s->module_used_cache.valid &&
+      s->module_used_cache.user_only == user_only &&
       s->module_used_cache.stamp == stamp &&
-      s->module_used_cache.len == mod_len &&
-      s->module_used_cache.name == mod) {
+      s->module_used_cache.len == mod_len && s->module_used_cache.name == mod) {
     return s->module_used_cache.value;
   }
 
@@ -620,11 +617,10 @@ static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
     const void *cur_data = (const void *)cg->vec_field.data;                   \
     size_t cur_len = (size_t)cg->vec_field.len;                                \
     bool full_rebuild = (!s->ready_field || s->stamp_field != stamp ||         \
-                         s->data_field != cur_data ||                         \
-                         s->len_field > cur_len);                              \
+                         s->data_field != cur_data || s->len_field > cur_len); \
     if (full_rebuild) {                                                        \
       memset(s->index_field, 0, sizeof(s->index_field));                       \
-      for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {           \
+      for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {          \
         item_type *item = &cg->vec_field.data[i];                              \
         const char *name = (item_name_expr);                                   \
         if (!name || !*name)                                                   \
@@ -662,7 +658,7 @@ static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
       return;                                                                  \
     }                                                                          \
     size_t start = s->len_field;                                               \
-    for (ssize_t i = (ssize_t)cur_len - 1; i >= (ssize_t)start; --i) {          \
+    for (ssize_t i = (ssize_t)cur_len - 1; i >= (ssize_t)start; --i) {         \
       item_type *item = &cg->vec_field.data[i];                                \
       const char *name = (item_name_expr);                                     \
       if (!name || !*name)                                                     \
@@ -902,7 +898,7 @@ static void ny_global_cache_put(codegen_t *cg, const char *name, uint64_t hash,
 }
 
 static int ny_alias_cache_get(codegen_t *cg, const char *name,
-                               const char **out) {
+                              const char **out) {
   size_t len = 0;
   if (!ny_cacheable_name(name, &len))
     return -1;
@@ -1028,14 +1024,14 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
   }
   if (!s->overload_name_ready)
     return -1;
-  return s->overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
+  return s
+      ->overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
 }
 
 #define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
-    fn_name, index_field, stamp_field, ready_field, vec_field,                 \
-    item_type, item_name_expr, item_name_len, item_tail_len_expr,              \
-    item_tail_hash_expr, entry_type, entry_tail_field, entry_value_field,      \
-    item_value_expr)                                                           \
+    fn_name, index_field, stamp_field, ready_field, vec_field, item_type,      \
+    item_name_expr, item_name_len, item_tail_len_expr, item_tail_hash_expr,    \
+    entry_type, entry_tail_field, entry_value_field, item_value_expr)          \
   static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
     ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
     memset(s->index_field, 0, sizeof(s->index_field));                         \
@@ -1062,8 +1058,8 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
       } else {                                                                 \
         mod_hash = ny_hash_name(sig_name, mod_len);                            \
         mod_used = module_is_used_hash(cg, sig_name, mod_len, mod_hash);       \
-        mod_user_used = ny_module_used_lookup_hash(cg, true, sig_name,         \
-                                                    mod_len, mod_hash);        \
+        mod_user_used =                                                        \
+            ny_module_used_lookup_hash(cg, true, sig_name, mod_len, mod_hash); \
         last_mod = sig_name;                                                   \
         last_mod_len = mod_len;                                                \
         last_mod_used = mod_used;                                              \
@@ -1086,9 +1082,13 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
       for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
         entry_type *e = &s->index_field[pos];                                  \
         uint8_t new_state = mod_user_used ? 3u : 1u;                           \
-        if (cg->current_module_name && strlen(cg->current_module_name) == mod_len && \
-            memcmp(cg->current_module_name, sig_name, mod_len) == 0) new_state = 10u; \
-        else if (mod_len >= 8 && memcmp(sig_name, "std.core", 8) == 0 && (sig_name[8] == '.' || sig_name[8] == '\0')) new_state = 5u; \
+        if (cg->current_module_name &&                                         \
+            strlen(cg->current_module_name) == mod_len &&                      \
+            memcmp(cg->current_module_name, sig_name, mod_len) == 0)           \
+          new_state = 10u;                                                     \
+        else if (mod_len >= 8 && memcmp(sig_name, "std.core", 8) == 0 &&       \
+                 (sig_name[8] == '.' || sig_name[8] == '\0'))                  \
+          new_state = 5u;                                                      \
         if (!e->state) {                                                       \
           e->state = new_state;                                                \
           e->hash = hash;                                                      \
@@ -1102,8 +1102,10 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
             memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
             e->entry_tail_field[len] == '\0') {                                \
           bool replace = false;                                                \
-          if (new_state > e->state) replace = true;                            \
-          else if (new_state == e->state && mod_len < (size_t)e->mod_len) replace = true; \
+          if (new_state > e->state)                                            \
+            replace = true;                                                    \
+          else if (new_state == e->state && mod_len < (size_t)e->mod_len)      \
+            replace = true;                                                    \
           if (replace) {                                                       \
             e->entry_tail_field = tail;                                        \
             e->entry_value_field = (item_value_expr);                          \
@@ -1120,8 +1122,8 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
   }
 
 NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, fun_tail,
-                             fun_tail_stamp, fun_tail_ready, fun_sigs,
-                             fun_sig, item->name, ny_fun_name_len(item),
+                             fun_tail_stamp, fun_tail_ready, fun_sigs, fun_sig,
+                             item->name, ny_fun_name_len(item),
                              ny_fun_tail_len(item), item->tail_hash,
                              ny_fun_tail_index_entry_t, tail_name, value, item)
 
@@ -1283,7 +1285,17 @@ void add_builtins(codegen_t *cg) {
     sig_obj->is_stable = true;                                                 \
     sig_obj->owned = false;                                                    \
     vec_push(&cg->fun_sigs, *sig_obj);                                         \
+    ny_apply_base_fn_attrs(cg, f);                                             \
+    if (!strcmp(rt_name, "__panic") || !strcmp(rt_name, "__exit")) {           \
+      unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);       \
+      if (nr_kind != 0) {                                                      \
+        LLVMAttributeRef nr_attr =                                             \
+            LLVMCreateEnumAttribute(cg->ctx, nr_kind, 0);                      \
+        LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, nr_attr);       \
+      }                                                                        \
+    }                                                                          \
   } while (0);
+  ;
 
 #define RT_GV(rt_name, p, t, doc)                                              \
   do {                                                                         \
@@ -1432,6 +1444,9 @@ char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
   return NULL;
 }
 
+static int g_lookup_depth = 0;
+#define MAX_LOOKUP_DEPTH 1024
+
 fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   if (!name || !*name)
     return NULL;
@@ -1441,6 +1456,14 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
     return cached;
   if (cache_state == 0)
     return NULL;
+
+  if (g_lookup_depth > MAX_LOOKUP_DEPTH) {
+    if (verbose_enabled >= 1)
+      fprintf(stderr, "[syms] warning: max lookup depth reached for '%s'\n",
+              name);
+    return NULL;
+  }
+  g_lookup_depth++;
 
   fun_sig *res = NULL;
   bool qualified = strchr(name, '.') != NULL;
@@ -1452,8 +1475,8 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   res = NULL;
 
   // 2. Current module scope + import alias fallback (unqualified names only)
-  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
-                                      ny_lookup_fun_recurse, hash ? &hash : NULL);
+  res = ny_lookup_try_scoped_or_alias(
+      cg, name, qualified, ny_lookup_fun_recurse, hash ? &hash : NULL);
   if (res)
     goto end;
 
@@ -1535,6 +1558,7 @@ end:
   if (res && !ny_sig_in_current_sigs(cg, res) && !cg->parent) {
     res = NULL;
   }
+  g_lookup_depth--;
   ny_fun_cache_put(cg, name, hash, res);
   return res;
 }
@@ -1587,6 +1611,10 @@ binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
   }
   if (cache_state == 0)
     return NULL;
+
+  if (g_lookup_depth > MAX_LOOKUP_DEPTH)
+    return NULL;
+  g_lookup_depth++;
 
   binding *res = NULL;
   bool qualified = strchr(name, '.') != NULL;
@@ -1648,6 +1676,7 @@ binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
   goto end;
 
 end:
+  g_lookup_depth--;
   if (res)
     res->is_used = true;
   ny_global_cache_put(cg, name, hash, res);
@@ -1668,6 +1697,10 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
     return cached;
   if (cache_state == 0)
     return NULL;
+
+  if (g_lookup_depth > MAX_LOOKUP_DEPTH)
+    return NULL;
+  g_lookup_depth++;
 
   fun_sig *best = NULL;
   bool qualified = strchr(name, '.') != NULL;
@@ -1757,14 +1790,16 @@ fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
 
   if (!best) {
     best = ny_fun_tail_find(cg, name);
-    /* If tail_find found something with arity mismatch, try a full search for a better one! */
+    /* If tail_find found something with arity mismatch, try a full search for a
+     * better one! */
     if (best && !best->is_variadic && best->arity != (int)argc) {
       for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
         fun_sig *fs = &cg->fun_sigs.data[i];
         const char *dot_ptr = strrchr(fs->name, '.');
         const char *tail = dot_ptr ? dot_ptr + 1 : fs->name;
         if (strcmp(tail, name) == 0) {
-          if (fs->arity == (int)argc || (fs->is_variadic && (int)argc >= fs->arity - 1)) {
+          if (fs->arity == (int)argc ||
+              (fs->is_variadic && (int)argc >= fs->arity - 1)) {
             best = fs;
             break;
           }
@@ -1781,6 +1816,7 @@ end:
   if (best && !ny_sig_in_current_sigs(cg, best) && !cg->parent) {
     best = NULL;
   }
+  g_lookup_depth--;
   ny_overload_cache_put(cg, name, argc, hash, best);
   return best;
 }

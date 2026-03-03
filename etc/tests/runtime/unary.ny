@@ -1,7 +1,7 @@
 use std.core *
 use std.core.error *
 use std.core.reflect *
-use std.text.io *
+use std.str.io *
 
 ;; Unary Operator Tests
 

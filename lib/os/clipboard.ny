@@ -8,67 +8,98 @@ module std.os.clipboard (
 
 use std.core *
 use std.os *
+use std.ui.window as uiw
+
+;; Tool detection: not cached — called at use time so env vars are available.
+;; Priority: wl (Wayland) → xclip (X11) → xsel (X11 fallback)
+
+fn _detect_tool(){
+   "Returns best available clipboard tool name, preferring xclip for reliability."
+   ;; Try xclip first — it works on both X11 and XWayland, no daemon needed
+   if(file_exists("/usr/bin/xclip") || file_exists("/usr/local/bin/xclip")){ return "xclip" }
+   ;; wl-copy for pure Wayland
+   def wd = env("WAYLAND_DISPLAY")
+   if(is_str(wd) && str_len(wd) > 0){
+      if(file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy")){ return "wl" }
+   }
+   if(file_exists("/usr/bin/xsel")  || file_exists("/usr/local/bin/xsel") ){ return "xsel" }
+   "none"
+}
+
+fn _env_prefix(){
+   "Build env var prefix string so system() child has display vars."
+   mut p = ""
+   def wd = env("WAYLAND_DISPLAY")
+   if(is_str(wd) && str_len(wd) > 0){ p = p + "WAYLAND_DISPLAY=" + wd + " " }
+   def xd = env("DISPLAY")
+   if(is_str(xd) && str_len(xd) > 0){ p = p + "DISPLAY=" + xd + " " }
+   def xa = env("XAUTHORITY")
+   if(is_str(xa) && str_len(xa) > 0){ p = p + "XAUTHORITY=" + xa + " " }
+   p
+}
 
 fn set_text(text){
-   "Copies the provided `text` to the system clipboard. Uses platform-specific tools: xsel/wl-copy/xclip on Linux, pbcopy on macOS, and clip on Windows."
-   if(eq(os(), "linux")){
-      mut tool = ""
-      if(posix_spawn(["which", "xsel"])){ tool = "xsel" }
-      elif(posix_spawn(["which", "wl-copy"])){ tool = "wl-copy" }
-      elif(posix_spawn(["which", "xclip"])){ tool = "xclip" }
-
-      if(tool == "xsel"){ system(cat("echo -n '", text, "' | xsel -ib")) }
-      elif(tool == "wl-copy"){ system(cat("echo -n '", text, "' | wl-copy")) }
-      elif(tool == "xclip"){ system(cat("echo -n '", text, "' | xclip -selection clipboard")) }
-   } elif(eq(os(), "macos")){
-      system(cat("echo -n '", text, "' | pbcopy"))
-   } elif(eq(os(), "windows")){
-      system(cat("echo | set /p=\"", text, "\" | clip"))
+   "Copies text to the system clipboard."
+   ;; FAST PATH: Try active GLFW window first
+   def win = uiw.last()
+   if(win){
+      uiw.set_clipboard(win, text)
+      ;; We still also write to terminal/system clipboards for maximum compatibility
    }
+
+   def tmp = "/build/cache/ny_cb_w.txt"
+   mut _ = file_write(tmp, text)
+   def tool = _detect_tool()
+   def pfx = _env_prefix()
+   if(eq(os(), "linux")){
+      if(tool == "wl"    ){ system(pfx + "wl-copy < " + tmp + " 2>/dev/null") }
+      elif(tool == "xclip"){
+         system(pfx + "xclip -selection clipboard -i " + tmp + " 2>/dev/null")
+         system(pfx + "xclip -selection primary -i " + tmp + " 2>/dev/null")
+      }
+      elif(tool == "xsel" ){ system(pfx + "xsel --clipboard --input < " + tmp + " 2>/dev/null") }
+   } elif(eq(os(), "macos")){
+      system("pbcopy < " + tmp)
+   } elif(eq(os(), "windows")){
+      system("clip < " + tmp)
+   }
+   _ = file_remove(tmp)
 }
 
 fn get_text(){
-   "Retrieves the current text content from the system clipboard. Uses platform-specific tools: xsel/wl-paste/xclip on Linux, pbpaste on macOS, and Powershell on Windows."
-   mut res = ""
-   def tmp = "/build/cache/ny_clipboard_tmp.txt"
-   if(eq(os(), "linux")){
-      mut tool = ""
-      if(posix_spawn(["which", "xsel"])){ tool = "xsel" }
-      elif(posix_spawn(["which", "wl-paste"])){ tool = "wl-paste" }
-      elif(posix_spawn(["which", "xclip"])){ tool = "xclip" }
+   "Retrieves text from the system clipboard."
+   ;; FAST PATH: Try active GLFW window first
+   def win = uiw.last()
+   if(win){
+      def res = uiw.get_clipboard(win)
+      if(str_len(res) > 0){ return res }
+   }
 
-      if(tool == "xsel"){ system("xsel -ob > " + tmp) }
-      elif(tool == "wl-paste"){ system("wl-paste > " + tmp) }
-      elif(tool == "xclip"){ system("xclip -o -selection clipboard > " + tmp) }
+   mut res = ""
+   def tmp = "/build/cache/ny_cb_r.txt"
+   def tool = _detect_tool()
+   def pfx = _env_prefix()
+   if(eq(os(), "linux")){
+      if(tool == "wl"    ){ system(pfx + "wl-paste > " + tmp + " 2>/dev/null") }
+      elif(tool == "xclip"){ system(pfx + "xclip -o -selection clipboard > " + tmp + " 2>/dev/null") }
+      elif(tool == "xsel" ){ system(pfx + "xsel --clipboard --output > " + tmp + " 2>/dev/null") }
    } elif(eq(os(), "macos")){
       system("pbpaste > " + tmp)
    } elif(eq(os(), "windows")){
       system("powershell -command \"Get-Clipboard\" > " + tmp)
    }
-   if(sys_file_exists(tmp)){
-      def res_err = sys_file_read(tmp)
-      if(is_ok(res_err)){
-         res = unwrap(res_err)
-         ; Optionally strip trailing newline if added by tools like powershell
+   if(file_exists(tmp)){
+      def rd = file_read(tmp)
+      if(is_ok(rd)){
+         res = unwrap(rd)
          def n = str_len(res)
-         if(n > 0 && str_slice(res, n - 1, n) == "\n"){
-            res = str_slice(res, 0, n - 1)
-         }
-         if(n > 1 && str_slice(res, n - 2, n) == "\r\n"){
-            res = str_slice(res, 0, n - 2)
-         }
+         if(n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 2) }
+         elif(n >= 1 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 1) }
       }
-      sys_file_remove(tmp)
+      mut _ = file_remove(tmp)
    }
    res
 }
 
-fn set_clipboard_text(text){
-   "Convenience alias for `set_text`."
-   set_text(text)
-}
-
-fn get_clipboard_text(){
-   "Convenience alias for `get_text`."
-   get_text()
-}
+fn set_clipboard_text(text){ set_text(text) }
+fn get_clipboard_text(){ get_text() }

@@ -173,27 +173,30 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if ((kind == NY_BINOP_EQ || kind == NY_BINOP_LE || kind == NY_BINOP_GE) &&
+  } else if ((kind == NY_BINOP_EQ || kind == NY_BINOP_LE ||
+              kind == NY_BINOP_GE) &&
              l == r) {
     fast_value = ny_const_tagged_bool_value(cg, true);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if ((kind == NY_BINOP_LT || kind == NY_BINOP_GT) &&
-             l == r) {
+  } else if ((kind == NY_BINOP_LT || kind == NY_BINOP_GT) && l == r) {
     fast_value = ny_const_tagged_bool_value(cg, false);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (kind == NY_BINOP_ADD || kind == NY_BINOP_SUB || kind == NY_BINOP_MUL) {
+  } else if (kind == NY_BINOP_ADD || kind == NY_BINOP_SUB ||
+             kind == NY_BINOP_MUL) {
     const char *intr_name = entry->overflow_intr;
     LLVMTypeRef intr_ty = NULL;
     LLVMValueRef intr = ny_get_overflow_intrinsic_i64(cg, intr_name, &intr_ty);
     LLVMValueRef packed =
         LLVMBuildCall2(cg->builder, intr_ty, intr, (LLVMValueRef[]){li, ri}, 2,
                        "arith_packed");
-    LLVMValueRef raw = LLVMBuildExtractValue(cg->builder, packed, 0, NY_LLVM_NAME(cg, "arith"));
-    LLVMValueRef ov = LLVMBuildExtractValue(cg->builder, packed, 1, NY_LLVM_NAME(cg, "arith_ov"));
+    LLVMValueRef raw = LLVMBuildExtractValue(cg->builder, packed, 0,
+                                             NY_LLVM_NAME(cg, "arith"));
+    LLVMValueRef ov = LLVMBuildExtractValue(cg->builder, packed, 1,
+                                            NY_LLVM_NAME(cg, "arith_ov"));
     LLVMBasicBlockRef fast_ok_bb = ny_llvm_append_block(fn, "bin.int.fast.ok");
     LLVMBuildCondBr(cg->builder, ov, slow_bb, fast_ok_bb);
 
@@ -208,21 +211,23 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
         LLVMBuildICmp(cg->builder, LLVMIntEQ, ri,
                       LLVMConstInt(cg->type_i64, 0, false), "divmod_zero");
     LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
-    LLVMValueRef safe_divisor =
-        LLVMBuildSelect(cg->builder, is_zero, one, ri, NY_LLVM_NAME(cg, "safe_divisor"));
-    LLVMValueRef raw =
-        (kind == NY_BINOP_DIV)
-            ? LLVMBuildUDiv(cg->builder, li, safe_divisor, NY_LLVM_NAME(cg, "udiv_fast"))
-            : LLVMBuildURem(cg->builder, li, safe_divisor, NY_LLVM_NAME(cg, "urem_fast"));
+    LLVMValueRef safe_divisor = LLVMBuildSelect(
+        cg->builder, is_zero, one, ri, NY_LLVM_NAME(cg, "safe_divisor"));
+    LLVMValueRef raw = (kind == NY_BINOP_DIV)
+                           ? LLVMBuildUDiv(cg->builder, li, safe_divisor,
+                                           NY_LLVM_NAME(cg, "udiv_fast"))
+                           : LLVMBuildURem(cg->builder, li, safe_divisor,
+                                           NY_LLVM_NAME(cg, "urem_fast"));
     LLVMValueRef nonzero_res = ny_tag_int(cg, raw);
-    LLVMValueRef zero_res = LLVMConstInt(
-        cg->type_i64, kind == NY_BINOP_DIV ? 0 : 1, false);
-    fast_value =
-        LLVMBuildSelect(cg->builder, is_zero, zero_res, nonzero_res, NY_LLVM_NAME(cg, "divmod"));
+    LLVMValueRef zero_res =
+        LLVMConstInt(cg->type_i64, kind == NY_BINOP_DIV ? 0 : 1, false);
+    fast_value = LLVMBuildSelect(cg->builder, is_zero, zero_res, nonzero_res,
+                                 NY_LLVM_NAME(cg, "divmod"));
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
     LLVMBuildBr(cg->builder, merge_bb);
-  } else if (kind == NY_BINOP_AND || kind == NY_BINOP_OR || kind == NY_BINOP_XOR) {
+  } else if (kind == NY_BINOP_AND || kind == NY_BINOP_OR ||
+             kind == NY_BINOP_XOR) {
     LLVMValueRef raw = NULL;
     if (kind == NY_BINOP_AND)
       raw = LLVMBuildAnd(cg->builder, li, ri, NY_LLVM_NAME(cg, "and_fast"));
@@ -237,21 +242,22 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
   } else if (kind == NY_BINOP_SHL || kind == NY_BINOP_SHR) {
     LLVMValueRef zero = LLVMConstInt(cg->type_i64, 0, false);
     LLVMValueRef sixty_four = LLVMConstInt(cg->type_i64, 64, false);
-    LLVMValueRef ge_zero =
-        LLVMBuildICmp(cg->builder, LLVMIntSGE, ri, zero, NY_LLVM_NAME(cg, "sh_nonneg"));
-    LLVMValueRef lt_sixty_four =
-        LLVMBuildICmp(cg->builder, LLVMIntSLT, ri, sixty_four, NY_LLVM_NAME(cg, "sh_lt64"));
-    LLVMValueRef in_range =
-        LLVMBuildAnd(cg->builder, ge_zero, lt_sixty_four, NY_LLVM_NAME(cg, "sh_range"));
+    LLVMValueRef ge_zero = LLVMBuildICmp(cg->builder, LLVMIntSGE, ri, zero,
+                                         NY_LLVM_NAME(cg, "sh_nonneg"));
+    LLVMValueRef lt_sixty_four = LLVMBuildICmp(
+        cg->builder, LLVMIntSLT, ri, sixty_four, NY_LLVM_NAME(cg, "sh_lt64"));
+    LLVMValueRef in_range = LLVMBuildAnd(cg->builder, ge_zero, lt_sixty_four,
+                                         NY_LLVM_NAME(cg, "sh_range"));
     LLVMBasicBlockRef fast_shift_bb =
         ny_llvm_append_block(fn, "bin.int.fast.shift");
     LLVMBuildCondBr(cg->builder, in_range, fast_shift_bb, slow_bb);
 
     LLVMPositionBuilderAtEnd(cg->builder, fast_shift_bb);
 
-    LLVMValueRef raw = (kind == NY_BINOP_SHL)
-                           ? LLVMBuildShl(cg->builder, li, ri, NY_LLVM_NAME(cg, "shl_fast"))
-                           : LLVMBuildLShr(cg->builder, li, ri, NY_LLVM_NAME(cg, "shr_fast"));
+    LLVMValueRef raw =
+        (kind == NY_BINOP_SHL)
+            ? LLVMBuildShl(cg->builder, li, ri, NY_LLVM_NAME(cg, "shl_fast"))
+            : LLVMBuildLShr(cg->builder, li, ri, NY_LLVM_NAME(cg, "shr_fast"));
     fast_value = ny_tag_int(cg, raw);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
@@ -266,7 +272,8 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
       pred = LLVMIntSGT;
     else if (kind == NY_BINOP_GE)
       pred = LLVMIntSGE;
-    LLVMValueRef cmp = LLVMBuildICmp(cg->builder, pred, li, ri, NY_LLVM_NAME(cg, "icmp_fast"));
+    LLVMValueRef cmp =
+        LLVMBuildICmp(cg->builder, pred, li, ri, NY_LLVM_NAME(cg, "icmp_fast"));
     fast_value = ny_tag_bool(cg, cmp);
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
@@ -283,7 +290,8 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(codegen_t *cg,
 
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
 
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "bin_result"));
+  LLVMValueRef phi =
+      LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "bin_result"));
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -307,10 +315,11 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg,
 
   LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
-  
+
   LLVMValueRef is_l_flt = ny_is_float(cg, l);
   LLVMValueRef is_r_flt = ny_is_float(cg, r);
-  LLVMValueRef either_flt = LLVMBuildOr(cg->builder, is_l_flt, is_r_flt, NY_LLVM_NAME(cg, "bin.either_flt"));
+  LLVMValueRef either_flt = LLVMBuildOr(cg->builder, is_l_flt, is_r_flt,
+                                        NY_LLVM_NAME(cg, "bin.either_flt"));
 
   LLVMBasicBlockRef fast_bb = ny_llvm_append_block(fn, "bin.flt.fast");
   LLVMBasicBlockRef slow_bb = ny_llvm_append_block(fn, "bin.flt.slow");
@@ -323,29 +332,42 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg,
   LLVMValueRef rf = ny_unbox_float(cg, r);
   LLVMValueRef res_f = NULL;
 
-  if (kind == NY_BINOP_ADD) res_f = LLVMBuildFAdd(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fadd"));
-  else if (kind == NY_BINOP_SUB) res_f = LLVMBuildFSub(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fsub"));
-  else if (kind == NY_BINOP_MUL) res_f = LLVMBuildFMul(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fmul"));
-  else if (kind == NY_BINOP_DIV) res_f = LLVMBuildFDiv(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fdiv"));
+  if (kind == NY_BINOP_ADD)
+    res_f = LLVMBuildFAdd(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fadd"));
+  else if (kind == NY_BINOP_SUB)
+    res_f = LLVMBuildFSub(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fsub"));
+  else if (kind == NY_BINOP_MUL)
+    res_f = LLVMBuildFMul(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fmul"));
+  else if (kind == NY_BINOP_DIV)
+    res_f = LLVMBuildFDiv(cg->builder, lf, rf, NY_LLVM_NAME(cg, "fdiv"));
   else {
     LLVMRealPredicate pred = LLVMRealOEQ;
-    if (kind == NY_BINOP_LT) pred = LLVMRealOLT;
-    else if (kind == NY_BINOP_LE) pred = LLVMRealOLE;
-    else if (kind == NY_BINOP_GT) pred = LLVMRealOGT;
-    else if (kind == NY_BINOP_GE) pred = LLVMRealOGE;
-    LLVMValueRef cmp = LLVMBuildFCmp(cg->builder, pred, lf, rf, NY_LLVM_NAME(cg, "fcmp"));
+    if (kind == NY_BINOP_LT)
+      pred = LLVMRealOLT;
+    else if (kind == NY_BINOP_LE)
+      pred = LLVMRealOLE;
+    else if (kind == NY_BINOP_GT)
+      pred = LLVMRealOGT;
+    else if (kind == NY_BINOP_GE)
+      pred = LLVMRealOGE;
+    LLVMValueRef cmp =
+        LLVMBuildFCmp(cg->builder, pred, lf, rf, NY_LLVM_NAME(cg, "fcmp"));
     LLVMValueRef fast_bool = ny_tag_bool(cg, cmp);
     LLVMBasicBlockRef fast_done_bb = LLVMGetInsertBlock(cg->builder);
     LLVMBuildBr(cg->builder, merge_bb);
-    
+
     LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
-    LLVMValueRef slow_value = LLVMBuildCall2(cg->builder, fallback->type, fallback->value, (LLVMValueRef[]){l, r}, 2, "bin.slow");
+    LLVMValueRef slow_value =
+        LLVMBuildCall2(cg->builder, fallback->type, fallback->value,
+                       (LLVMValueRef[]){l, r}, 2, "bin.slow");
     LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
     LLVMBuildBr(cg->builder, merge_bb);
-    
+
     LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
-    LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "bin_res_bool"));
-    LLVMAddIncoming(phi, (LLVMValueRef[]){fast_bool, slow_value}, (LLVMBasicBlockRef[]){fast_done_bb, slow_done_bb}, 2);
+    LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64,
+                                    NY_LLVM_NAME(cg, "bin_res_bool"));
+    LLVMAddIncoming(phi, (LLVMValueRef[]){fast_bool, slow_value},
+                    (LLVMBasicBlockRef[]){fast_done_bb, slow_done_bb}, 2);
     return phi;
   }
 
@@ -354,7 +376,9 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg,
   LLVMValueRef fast_val = NULL;
   if (box_sig) {
     fast_val = LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
-                              (LLVMValueRef[]){LLVMBuildBitCast(cg->builder, res_f, cg->type_i64, "")}, 1, "box");
+                              (LLVMValueRef[]){LLVMBuildBitCast(
+                                  cg->builder, res_f, cg->type_i64, "")},
+                              1, "box");
   } else {
     fast_val = LLVMConstInt(cg->type_i64, 0, false);
   }
@@ -362,13 +386,17 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg,
   LLVMBuildBr(cg->builder, merge_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
-  LLVMValueRef slow_value = LLVMBuildCall2(cg->builder, fallback->type, fallback->value, (LLVMValueRef[]){l, r}, 2, "bin.slow");
+  LLVMValueRef slow_value =
+      LLVMBuildCall2(cg->builder, fallback->type, fallback->value,
+                     (LLVMValueRef[]){l, r}, 2, "bin.slow");
   LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
   LLVMBuildBr(cg->builder, merge_bb);
 
   LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "bin_res_num"));
-  LLVMAddIncoming(phi, (LLVMValueRef[]){fast_val, slow_value}, (LLVMBasicBlockRef[]){fast_done_bb, slow_done_bb}, 2);
+  LLVMValueRef phi =
+      LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "bin_res_num"));
+  LLVMAddIncoming(phi, (LLVMValueRef[]){fast_val, slow_value},
+                  (LLVMBasicBlockRef[]){fast_done_bb, slow_done_bb}, 2);
   return phi;
 }
 
@@ -414,7 +442,8 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     int64_t li = 0, ri = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri))
       return ny_const_tagged_bool_value(cg, li == ri);
-    fun_sig *s = prefer_builtin_ops ? lookup_fun(cg, "__eq", 0) : ny_helper_eq(cg);
+    fun_sig *s =
+        prefer_builtin_ops ? lookup_fun(cg, "__eq", 0) : ny_helper_eq(cg);
     if (!s)
       return expr_fail(cg, (token_t){0}, "'==' requires 'eq' (or __eq)");
     LLVMValueRef fast = ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
@@ -503,8 +532,7 @@ LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
     fun_sig *s = lookup_fun(cg, builtin_name, 0);
     if (!s)
       return expr_fail(cg, (token_t){0}, "builtin %s missing", builtin_name);
-    LLVMValueRef fast =
-        ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
+    LLVMValueRef fast = ny_try_emit_tagged_int_fast_binary(cg, entry, l, r, s);
     if (fast)
       return fast;
     fast = ny_try_emit_float_fast_binary(cg, entry, l, r, s);

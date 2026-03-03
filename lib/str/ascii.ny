@@ -3,7 +3,7 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc20.html
 
-module std.text.ascii (
+module std.str.ascii (
    lowercase, uppercase, letters,
    digits, hexdigits, octdigits,
    punctuation, whitespace, printable
@@ -23,7 +23,7 @@ def printable   = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY
 
 if(comptime{__main()}){
    use std.core *
-   use std.text.ascii *
+   use std.str.ascii *
 
    assert(lowercase   == "abcdefghijklmnopqrstuvwxyz", "lowercase")
    assert(uppercase   == "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "uppercase")
@@ -31,5 +31,5 @@ if(comptime{__main()}){
    assert(digits      == "0123456789", "digits")
    assert(hexdigits   == "0123456789abcdefABCDEF", "hexdigits")
    assert(octdigits   == "01234567", "octdigits")
-   print("✓ std.text.ascii tests passed")
+   print("✓ std.str.ascii tests passed")
 }

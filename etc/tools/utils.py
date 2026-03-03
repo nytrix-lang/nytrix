@@ -88,7 +88,7 @@ def run(cmd, env=None, shell=False, suppress_contains=None, line_filter=None):
                     raise KeyboardInterrupt()
                 raise
         cmd = shlex.split(cmd)
-    
+
     if (suppress_contains or line_filter) and not shell:
         popen_kwargs = {
             "env": env,
@@ -100,7 +100,7 @@ def run(cmd, env=None, shell=False, suppress_contains=None, line_filter=None):
         if host_os() == "windows":
             popen_kwargs["encoding"] = "utf-8"
             popen_kwargs["errors"] = "replace"
-        
+
         proc = subprocess.Popen(cmd, **popen_kwargs)
         try:
             assert proc.stdout is not None

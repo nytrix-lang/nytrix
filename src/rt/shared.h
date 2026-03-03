@@ -6,10 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -35,56 +35,81 @@
 #define is_ptr(v) (((v) & 1) == 0 && (uintptr_t)(v) > 0x1000)
 
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
-  if (p < 0x1000 || n == 0) return 0;
+  if (p < 0x1000 || n == 0)
+    return 0;
 #ifdef _WIN32
   MEMORY_BASIC_INFORMATION mbi = {0};
-  if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi))) return 0;
-  if (mbi.State != MEM_COMMIT || mbi.Protect == PAGE_NOACCESS || (mbi.Protect & PAGE_GUARD)) return 0;
+  if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)))
+    return 0;
+  if (mbi.State != MEM_COMMIT || mbi.Protect == PAGE_NOACCESS ||
+      (mbi.Protect & PAGE_GUARD))
+    return 0;
   return 1;
 #else
   static long ps = 0;
-  if (ps == 0) ps = sysconf(_SC_PAGESIZE);
-  if (ps <= 0) ps = 4096;
+  if (ps == 0)
+    ps = sysconf(_SC_PAGESIZE);
+  if (ps <= 0)
+    ps = 4096;
   uintptr_t mask = (uintptr_t)ps - 1;
   uintptr_t start = p & ~mask;
   uintptr_t end = (p + n - 1) & ~mask;
   unsigned char vec = 0;
   for (uintptr_t cur = start; cur <= end; cur += (uintptr_t)ps) {
-    if (mincore((void *)cur, (size_t)ps, &vec) != 0) return 0;
+    if (mincore((void *)cur, (size_t)ps, (void *)&vec) != 0)
+      return 0;
   }
   return 1;
 #endif
 }
 
-#define RT_PAGE_CACHE_BITS 12
+#define RT_PAGE_CACHE_BITS 8
 #define RT_PAGE_CACHE_SIZE (1 << RT_PAGE_CACHE_BITS)
 #define RT_PAGE_CACHE_MASK (RT_PAGE_CACHE_SIZE - 1)
 
 static inline int rt_addr_readable(uintptr_t p, size_t n) {
   static __thread uintptr_t last_pg = 0;
   static __thread uintptr_t cache[RT_PAGE_CACHE_SIZE];
-  if (p < 0x1000 || n == 0) return 0;
-  if (p > UINTPTR_MAX - n) return 0;
-  
+  if (p < 0x1000 || n == 0)
+    return 0;
+  if (p > UINTPTR_MAX - n)
+    return 0;
+
   uintptr_t pg1 = p & ~4095ULL;
   if (pg1 == last_pg) {
     uintptr_t pg2 = (p + n - 1) & ~4095ULL;
-    if (pg1 == pg2) return 1;
+    if (pg1 == pg2)
+      return 1;
   }
-  
+
   uintptr_t h1 = (pg1 >> 12) & RT_PAGE_CACHE_MASK;
   if (cache[h1] == pg1) {
     uintptr_t pg2 = (p + n - 1) & ~4095ULL;
-    if (pg1 == pg2) { last_pg = pg1; return 1; }
+    if (pg1 == pg2) {
+      last_pg = pg1;
+      return 1;
+    }
     uintptr_t h2 = (pg2 >> 12) & RT_PAGE_CACHE_MASK;
-    if (cache[h2] == pg2) { last_pg = pg1; return 1; }
+    if (cache[h2] == pg2) {
+      last_pg = pg1;
+      return 1;
+    }
   }
-  
+
+#ifdef _WIN32
+  MEMORY_BASIC_INFORMATION mbi = {0};
+  if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)))
+    return 0;
+  if (mbi.State != MEM_COMMIT || mbi.Protect == PAGE_NOACCESS ||
+      (mbi.Protect & PAGE_GUARD))
+    return 0;
+#else
   // Use a pipe to safely check readability without SEGFAULT on guard pages.
   // This is only called on cache misses.
   static __thread int probe_pipe[2] = {-1, -1};
   if (probe_pipe[0] == -1) {
-    if (pipe(probe_pipe) != 0) return rt_addr_mapped(p, n);
+    if (pipe(probe_pipe) != 0)
+      return rt_addr_mapped(p, n);
     fcntl(probe_pipe[0], F_SETFL, O_NONBLOCK);
     fcntl(probe_pipe[1], F_SETFL, O_NONBLOCK);
   }
@@ -92,10 +117,12 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
   uintptr_t probes[2] = {p, p + n - 1};
   for (int i = 0; i < 2; i++) {
     ssize_t r = write(probe_pipe[1], (void *)probes[i], 1);
-    if (r < 0) return 0;
+    if (r < 0)
+      return 0;
     char dummy;
     (void)read(probe_pipe[0], &dummy, 1);
   }
+#endif
 
   cache[h1] = pg1;
   last_pg = pg1;
@@ -108,9 +135,11 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
 }
 
 static inline bool is_valid_heap_ptr(int64_t v) {
-  if (!(v > 0x1000 && (v & 15) == 0)) return false;
+  if (!(v > 0x1000 && (v & 15) == 0))
+    return false;
   uintptr_t p = (uintptr_t)v;
-  if (!rt_addr_readable(p - 32, 32)) return false;
+  if (!rt_addr_readable(p - 32, 32))
+    return false;
   uint64_t m1 = *(uint64_t *)(p - 32);
   uint64_t m2 = *(uint64_t *)(p - 24);
   return (m1 == NY_MAGIC1 && m2 == NY_MAGIC2);
@@ -119,10 +148,14 @@ static inline bool is_valid_heap_ptr(int64_t v) {
 #define is_heap_ptr(v) is_valid_heap_ptr(v)
 #define is_any_ptr(v) (((v) != 0 && !((v) & 1) && (uintptr_t)(v) > 0x1000))
 
-static inline int64_t rt_tag_v(int64_t v) { return (int64_t)(((uint64_t)v << 1) | 1); }
+static inline int64_t rt_tag_v(int64_t v) {
+  return (int64_t)(((uint64_t)v << 1) | 1);
+}
 static inline int64_t rt_untag_v(int64_t v) {
-  if (v & 1) return (v >> 1);
-  if ((v & 7) == 6) return (v >> 3);
+  if (v & 1)
+    return (v >> 1);
+  if ((v & 7) == 6)
+    return (v >> 3);
   return v;
 }
 
@@ -130,14 +163,19 @@ static inline int64_t rt_untag_v(int64_t v) {
 static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 #define NY_NATIVE_TAG 2
 #define NY_NATIVE_MARK (1ULL << 63)
-#define NY_NATIVE_IS(v) (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) && (((v) & 3) == NY_NATIVE_TAG)))
-#define NY_NATIVE_ENCODE(p) ((int64_t)(NY_NATIVE_MARK | (((uint64_t)(uintptr_t)(p) << 2) | (uint64_t)NY_NATIVE_TAG)))
-#define NY_NATIVE_DECODE(v) ((void *)(uintptr_t)((((uint64_t)(v)) & ~NY_NATIVE_MARK) >> 2))
+#define NY_NATIVE_IS(v)                                                        \
+  (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) && (((v) & 3) == NY_NATIVE_TAG)))
+#define NY_NATIVE_ENCODE(p)                                                    \
+  ((int64_t)(NY_NATIVE_MARK |                                                  \
+             (((uint64_t)(uintptr_t)(p) << 2) | (uint64_t)NY_NATIVE_TAG)))
+#define NY_NATIVE_DECODE(v)                                                    \
+  ((void *)(uintptr_t)((((uint64_t)(v)) & ~NY_NATIVE_MARK) >> 2))
 #else
 static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define NY_NATIVE_TAG 6
 #define NY_NATIVE_IS(v) (((v) & 7) == NY_NATIVE_TAG)
-#define NY_NATIVE_ENCODE(p) ((int64_t)(((uint64_t)(uintptr_t)(p) << 3) | (uint64_t)NY_NATIVE_TAG))
+#define NY_NATIVE_ENCODE(p)                                                    \
+  ((int64_t)(((uint64_t)(uintptr_t)(p) << 3) | (uint64_t)NY_NATIVE_TAG))
 #define NY_NATIVE_DECODE(v) ((void *)(uintptr_t)(((uint64_t)(v)) >> 3))
 #endif
 
@@ -146,24 +184,30 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define TAG_TUPLE 103
 #define TAG_OK 104
 #define TAG_ERR 105
+#define TAG_CLOSURE 106
 #define TAG_FLOAT 110
 #define TAG_STR 120
 #define TAG_STR_CONST 121
 
 static inline int is_v_flt(int64_t v) {
-  if (!is_ptr(v) || (v & 15) != 8) return 0;
-  if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  if (!is_ptr(v) || (v & 15) != 8)
+    return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 8))
+    return 0;
   return (*(int64_t *)((char *)(uintptr_t)v - 8) == TAG_FLOAT);
 }
 
 static inline int is_v_flt_mapped(int64_t v) {
-  if (!is_ptr(v) || (v & 15) != 8) return 0;
-  if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  if (!is_ptr(v) || (v & 15) != 8)
+    return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 8))
+    return 0;
   return (*(int64_t *)((char *)(uintptr_t)v - 8) == TAG_FLOAT);
 }
 
 static inline int is_ny_obj(int64_t v) {
-  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0)
+    return 0;
   if (is_heap_ptr(v)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
     return (tag >= 100 && tag <= 255);
@@ -176,7 +220,8 @@ static inline int is_ny_obj(int64_t v) {
 }
 
 static inline int is_v_str(int64_t v) {
-  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0)
+    return 0;
   if (is_heap_ptr(v)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
     return (tag == TAG_STR || tag == TAG_STR_CONST);
@@ -189,15 +234,19 @@ static inline int is_v_str(int64_t v) {
 }
 
 static inline int is_v_ok(int64_t v) {
-  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
-  if (!is_heap_ptr(v)) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0)
+    return 0;
+  if (!is_heap_ptr(v))
+    return 0;
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return tag == TAG_OK;
 }
 
 static inline int is_v_err(int64_t v) {
-  if (!is_ptr(v) || ((v) & 7) != 0) return 0;
-  if (!is_heap_ptr(v)) return 0;
+  if (!is_ptr(v) || ((v) & 7) != 0)
+    return 0;
+  if (!is_heap_ptr(v))
+    return 0;
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return tag == TAG_ERR;
 }
@@ -218,13 +267,16 @@ static inline int64_t __rt_flt_unbox_val(int64_t v) {
 }
 
 static inline int64_t __rt_load_item_fast(int64_t lst, int64_t i_v) {
-  if (!is_ptr(lst)) return 0;
+  if (!is_ptr(lst))
+    return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
   return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
 }
 
-static inline int64_t __rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
-  if (!is_ptr(lst)) return 0;
+static inline int64_t __rt_store_item_fast(int64_t lst, int64_t i_v,
+                                           int64_t val) {
+  if (!is_ptr(lst))
+    return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
   *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8) = val;
   return val;
@@ -241,21 +293,28 @@ int64_t __trace_last_file(void);
 int64_t __trace_last_line(void);
 int64_t __trace_last_col(void);
 int64_t __trace_last_func(void);
-void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func, const char *prefix);
+void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
+                       const char *prefix);
 
 static inline size_t __get_heap_size(int64_t v) {
-  if (!is_heap_ptr(v)) return (size_t)-1;
+  if (!is_heap_ptr(v))
+    return (size_t)-1;
   int64_t raw = *(int64_t *)((char *)(uintptr_t)v - 16);
-  if (raw & 1) raw >>= 1;
+  if (raw & 1)
+    raw >>= 1;
   return (size_t)raw;
 }
 
-static inline int __check_oob(const char *op, int64_t addr, int64_t idx, size_t access_sz) {
+static inline int __check_oob(const char *op, int64_t addr, int64_t idx,
+                              size_t access_sz) {
   (void)op;
-  if ((intptr_t)idx < 0) return 0;
+  if ((intptr_t)idx < 0)
+    return 0;
   size_t hsz = __get_heap_size(addr);
-  if (hsz == (size_t)-1) return 1;
-  if ((size_t)idx + access_sz > hsz) return 0;
+  if (hsz == (size_t)-1)
+    return 1;
+  if ((size_t)idx + access_sz > hsz)
+    return 0;
   return 1;
 }
 

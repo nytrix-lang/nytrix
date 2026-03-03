@@ -108,7 +108,8 @@ int64_t __dlsym(int64_t handle, int64_t name) {
   void *p = NULL;
   void *h = NY_NATIVE_IS(handle) ? NY_NATIVE_DECODE(handle)
                                  : (void *)(uintptr_t)handle;
-  const char *nm = (!is_int(name)) ? (const char*)name : (const char*)(uintptr_t)(name >> 1);
+  const char *nm = (!is_int(name)) ? (const char *)name
+                                   : (const char *)(uintptr_t)(name >> 1);
 #ifdef _WIN32
   p = (void *)GetProcAddress((HMODULE)h, nm);
 #else
@@ -158,16 +159,20 @@ int64_t __call0(int64_t f) {
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(NY_NATIVE_RET0(NY_NATIVE_DECODE(f)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t))__mask_ptr(code))(env);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t))code)(env);
+    }
   }
-  return ((int64_t (*)(void))__mask_ptr(f))();
+  return ((int64_t (*)(void))f)();
 }
 
 int64_t __call0_i32(int64_t f) {
-  if (!f) return 1;
+  if (!f)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res = ((int32_t (*)(void))NY_NATIVE_DECODE(f))();
     return rt_tag_v((int64_t)res);
@@ -182,12 +187,15 @@ int64_t __call1(int64_t f, int64_t a0) {
     int64_t res_raw = NY_NATIVE_RET1(NY_NATIVE_DECODE(f), rt_untag_v(a0));
     return rt_tag_v(res_raw);
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t))__mask_ptr(code))(env, a0);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t))code)(env, a0);
+    }
   }
-  return ((int64_t (*)(int64_t))__mask_ptr(f))(a0);
+  return ((int64_t (*)(int64_t))f)(a0);
 }
 
 int64_t __call1_i64(int64_t f, int64_t a0) {
@@ -208,7 +216,8 @@ int64_t __call1_i64(int64_t f, int64_t a0) {
 }
 
 int64_t __call1_u32(int64_t f, int64_t a0) {
-  if (!f) return 1;
+  if (!f)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_untag_v(a0);
     uint32_t res = ((uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
@@ -224,13 +233,15 @@ int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
     return rt_tag_v(
         NY_NATIVE_RET2(NY_NATIVE_DECODE(f), rt_untag_v(a0), rt_untag_v(a1)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t))__mask_ptr(code))(env, a0,
-                                                                      a1);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t))code)(env, a0, a1);
+    }
   }
-  return ((int64_t (*)(int64_t, int64_t))__mask_ptr(f))(a0, a1);
+  return ((int64_t (*)(int64_t, int64_t))f)(a0, a1);
 }
 
 int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
@@ -242,13 +253,16 @@ int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
     int64_t v2 = rt_untag_v(a2);
     return rt_tag_v(NY_NATIVE_RET3(NY_NATIVE_DECODE(f), v0, v1, v2));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))code)(env, a0,
+                                                                     a1, a2);
+    }
   }
-  return ((int64_t (*)(int64_t, int64_t, int64_t))__mask_ptr(f))(a0, a1, a2);
+  return ((int64_t (*)(int64_t, int64_t, int64_t))f)(a0, a1, a2);
 }
 
 int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
@@ -259,14 +273,16 @@ int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
                                    rt_untag_v(a1), rt_untag_v(a2),
                                    rt_untag_v(a3)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))code)(
+          env, a0, a1, a2, a3);
+    }
   }
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))__mask_ptr(f))(
-      a0, a1, a2, a3);
+  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))f)(a0, a1, a2, a3);
 }
 
 int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -278,14 +294,17 @@ int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                                    rt_untag_v(a1), rt_untag_v(a2),
                                    rt_untag_v(a3), rt_untag_v(a4)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3, a4);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t))code)(env, a0, a1, a2, a3, a4);
+    }
   }
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))__mask_ptr(
-      f))(a0, a1, a2, a3, a4);
+  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))f)(
+      a0, a1, a2, a3, a4);
 }
 
 int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -297,15 +316,17 @@ int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
         NY_NATIVE_DECODE(f), rt_untag_v(a0), rt_untag_v(a1), rt_untag_v(a2),
         rt_untag_v(a3), rt_untag_v(a4), rt_untag_v(a5)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3, a4,
-                                                    a5);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t))code)(env, a0, a1, a2, a3, a4, a5);
+    }
   }
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5);
+  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f)(
+      a0, a1, a2, a3, a4, a5);
 }
 
 int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -318,15 +339,18 @@ int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
         rt_untag_v(a0), rt_untag_v(a1), rt_untag_v(a2), rt_untag_v(a3),
         rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t))__mask_ptr(code))(env, a0, a1, a2,
-                                                             a3, a4, a5, a6);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t))code)(env, a0, a1, a2, a3, a4, a5,
+                                                   a6);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5, a6);
+                       int64_t))f)(a0, a1, a2, a3, a4, a5, a6);
 }
 
 int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -340,16 +364,18 @@ int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
             rt_untag_v(a0), rt_untag_v(a1), rt_untag_v(a2), rt_untag_v(a3),
             rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6), rt_untag_v(a7)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2, a3, a4, a5, a6, a7);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t))code)(env, a0, a1, a2, a3,
+                                                            a4, a5, a6, a7);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5,
-                                                        a6, a7);
+                       int64_t, int64_t))f)(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
 int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -364,16 +390,19 @@ int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
             rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6), rt_untag_v(a7),
             rt_untag_v(a8)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t))code)(
+          env, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t, int64_t))__mask_ptr(f))(
-      a0, a1, a2, a3, a4, a5, a6, a7, a8);
+                       int64_t, int64_t, int64_t))f)(a0, a1, a2, a3, a4, a5, a6,
+                                                     a7, a8);
 }
 
 int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -389,16 +418,18 @@ int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
             rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6), rt_untag_v(a7),
             rt_untag_v(a8), rt_untag_v(a9)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3, a4, a5,
-                                                    a6, a7, a8, a9);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t))code)(
+          env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t, int64_t, int64_t))__mask_ptr(f))(
+                       int64_t, int64_t, int64_t, int64_t))f)(
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
 
@@ -415,18 +446,20 @@ int64_t __call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
         rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6), rt_untag_v(a7),
         rt_untag_v(a8), rt_untag_v(a9), rt_untag_v(a10)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3, a4, a5,
-                                                    a6, a7, a8, a9, a10);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t))code)(env, a0, a1, a2, a3, a4, a5, a6, a7,
+                                          a8, a9, a10);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t, int64_t, int64_t,
-                       int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5, a6, a7,
-                                               a8, a9, a10);
+                       int64_t, int64_t, int64_t, int64_t, int64_t))f)(
+      a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
 }
 
 int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -442,18 +475,20 @@ int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
         rt_untag_v(a4), rt_untag_v(a5), rt_untag_v(a6), rt_untag_v(a7),
         rt_untag_v(a8), rt_untag_v(a9), rt_untag_v(a10), rt_untag_v(a11)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t))__mask_ptr(code))(env, a0, a1, a2, a3, a4, a5,
-                                                    a6, a7, a8, a9, a10, a11);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t))code)(env, a0, a1, a2, a3, a4, a5, a6, a7,
+                                          a8, a9, a10, a11);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5, a6, a7,
-                                               a8, a9, a10, a11);
+                       int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))f)(
+      a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
 int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -470,18 +505,21 @@ int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
         rt_untag_v(a8), rt_untag_v(a9), rt_untag_v(a10), rt_untag_v(a11),
         rt_untag_v(a12)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t))code)(
+          env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t))__mask_ptr(f))(a0, a1, a2, a3, a4, a5, a6, a7,
-                                               a8, a9, a10, a11, a12);
+                       int64_t))f)(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
+                                   a11, a12);
 }
 
 int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -500,18 +538,21 @@ int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
             rt_untag_v(a8), rt_untag_v(a9), rt_untag_v(a10), rt_untag_v(a11),
             rt_untag_v(a12), rt_untag_v(a13)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t))code)(
+          env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t))__mask_ptr(f))(
-      a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13);
+                       int64_t, int64_t))f)(a0, a1, a2, a3, a4, a5, a6, a7, a8,
+                                            a9, a10, a11, a12, a13);
 }
 
 int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
@@ -530,24 +571,28 @@ int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
             rt_untag_v(a8), rt_untag_v(a9), rt_untag_v(a10), rt_untag_v(a11),
             rt_untag_v(a12), rt_untag_v(a13), rt_untag_v(a14)));
   }
-  if (is_heap_ptr(f) && *(int64_t *)((uintptr_t)f - 8) == 105) {
-    int64_t code = *(int64_t *)f;
-    int64_t env = *(int64_t *)(f + 8);
-    return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                         int64_t, int64_t, int64_t, int64_t))__mask_ptr(code))(
-        env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = *(int64_t *)base;
+      int64_t env = *(int64_t *)(base + 8);
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                           int64_t, int64_t, int64_t, int64_t))code)(
+          env, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+    }
   }
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                        int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                       int64_t, int64_t, int64_t))__mask_ptr(f))(
+                       int64_t, int64_t, int64_t))f)(
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 
 void __call0_void(int64_t f) { __call0(f); }
 void __call1_void(int64_t f, int64_t a0) { __call1(f, a0); }
 void __call1_u32_void(int64_t f, int64_t a0) {
-  if (!f) return;
+  if (!f)
+    return;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_untag_v(a0);
     ((void (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
@@ -600,11 +645,12 @@ void __call4f_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
   memcpy(&db, &bb, 8);
   memcpy(&dc, &bc, 8);
   memcpy(&dd, &bd, 8);
-  ((void (*)(double, double, double, double))__mask_ptr(f))(da, db, dc, dd);
+  ((void (*)(double, double, double, double))f)(da, db, dc, dd);
 }
 
 void __call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
-  if (!f) return;
+  if (!f)
+    return;
   double da, db, dc, dd;
   int64_t ba = __flt_unbox_val(a);
   int64_t bb = __flt_unbox_val(b);
@@ -621,6 +667,6 @@ void __call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
   if (NY_NATIVE_IS(f)) {
     ((void (*)(float, float, float, float))NY_NATIVE_DECODE(f))(fa, fb, fc, fd);
   } else {
-    ((void (*)(float, float, float, float))__mask_ptr(f))(fa, fb, fc, fd);
+    ((void (*)(float, float, float, float))f)(fa, fb, fc, fd);
   }
 }

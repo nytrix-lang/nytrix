@@ -685,14 +685,16 @@ stmt_t *p_parse_stmt(parser_t *p) {
   case NY_T_HASH: {
     token_t tok = p->cur;
     parser_advance(p);
-    if (p->cur.kind != NY_T_IDENT || strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
-       parser_error(p, p->cur, "expected 'link' after '#'", NULL);
-       return NULL;
+    if (p->cur.kind != NY_T_IDENT ||
+        strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
+      parser_error(p, p->cur, "expected 'link' after '#'", NULL);
+      return NULL;
     }
     parser_advance(p);
     if (p->cur.kind != NY_T_STRING) {
-       parser_error(p, p->cur, "expected library name string after '#link'", NULL);
-       return NULL;
+      parser_error(p, p->cur, "expected library name string after '#link'",
+                   NULL);
+      return NULL;
     }
     stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
     s->as.link.lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);

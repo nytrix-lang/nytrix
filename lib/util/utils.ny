@@ -29,23 +29,23 @@ fn most_common(d){
 }
 
 if(comptime{__main()}){
-    use std.util.utils *
-    use std.core *
-    use std.core.error *
-    use std.core.dict_mod *
+   use std.util.utils *
+   use std.core *
+   use std.core.error *
+   use std.core.dict_mod *
 
-    print("Testing std.util.utils...")
+   print("Testing std.util.utils...")
 
-    mut c = counter(["a", "b", "a", "c"])
-    assert(dict_get(c, "a", 0) == 2, "counter a")
-    assert(dict_get(c, "b", 0) == 1, "counter b")
+   mut c = counter(["a", "b", "a", "c"])
+   assert(dict_get(c, "a", 0) == 2, "counter a")
+   assert(dict_get(c, "b", 0) == 1, "counter b")
 
-    c = counter_add(c, "b", 4)
-    assert(dict_get(c, "b", 0) == 5, "counter_add")
+   c = counter_add(c, "b", 4)
+   assert(dict_get(c, "b", 0) == 5, "counter_add")
 
-    def mc = most_common(c)
-    assert(len(mc) >= 2, "most_common len")
-    assert(get(get(mc, 0), 1) >= get(get(mc, 1), 1), "most_common sorted desc")
+   def mc = most_common(c)
+   assert(len(mc) >= 2, "most_common len")
+   assert(get(get(mc, 0), 1) >= get(get(mc, 1), 1), "most_common sorted desc")
 
-    print("✓ std.util.utils tests passed")
+   print("✓ std.util.utils tests passed")
 }

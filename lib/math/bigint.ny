@@ -10,8 +10,8 @@ module std.math.bigint (
 use std.core *
 use std.core as core
 use std.core.error *
-use std.text *
-use std.text.io *
+use std.str *
+use std.str.io *
 
 fn is_bigint(x){
    "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
@@ -32,9 +32,9 @@ fn _big_make(sign, digits){
       sign = 0
    }
    mut out = list(3)
-    out = append(out, 107)
-    out = append(out, sign)
-    out = append(out, actual_digits)
+   out = append(out, 107)
+   out = append(out, sign)
+   out = append(out, actual_digits)
    out
 }
 
@@ -310,7 +310,7 @@ fn _big_add_small(a, v){
 fn _digits_prepend(digits, v){
    "Internal: prepend v to digits list."
    mut out = list(core.len(digits) + 1)
-    out = append(out, v)
+   out = append(out, v)
    mut i = 0
    def n = core.len(digits)
    while(i < n){
@@ -346,10 +346,10 @@ fn _big_divmod_abs(a, b){
          mut prod = _big_mul_small(b, mid)
          def c = _big_abs_cmp(prod, r)
          if(c <= 0){
-            best = mid
-            lo = mid + 1
+         best = mid
+         lo = mid + 1
          } else {
-            hi = mid - 1
+         hi = mid - 1
          }
       }
       if(best > 0){
@@ -406,42 +406,42 @@ fn bigint_eq(a, b){
 }
 
 if(comptime{__main()}){
-    use std.math.bigint *
-    use std.core.error *
-    use std.core.reflect *
+   use std.math.bigint *
+   use std.core.error *
+   use std.core.reflect *
 
-    print("Testing bigint basic...")
-    mut a = bigint_from_str("1")
-    mut b = bigint_from_str("999999999")
-    mut s = bigint_add(a, b)
-    assert((bigint_to_str(s) == "1000000000"), "add simple 1: got " + bigint_to_str(s))
+   print("Testing bigint basic...")
+   mut a = bigint_from_str("1")
+   mut b = bigint_from_str("999999999")
+   mut s = bigint_add(a, b)
+   assert((bigint_to_str(s) == "1000000000"), "add simple 1: got " + bigint_to_str(s))
 
-    a = bigint_from_str("1000000000")
-    b = bigint_from_str("1000000000")
-    s = bigint_add(a, b)
-    assert((bigint_to_str(s) == "2000000000"), "add simple 2")
-    def d = bigint_sub(bigint_from_str("1000000000000000000000000000000"), bigint_from_str("135802467913580246791358024680"))
-    assert((bigint_to_str(d) == "864197532086419753208641975320"), "sub")
-    def m = bigint_mul(bigint_from_str("123456789"), bigint_from_str("987654321"))
-    assert((bigint_to_str(m) == "121932631112635269"), "mul")
-    mut q = bigint_div(bigint_from_str("1000000000000"), bigint_from_str("12345"))
-    mut r = bigint_mod(bigint_from_str("1000000000000"), bigint_from_str("12345"))
-    assert((bigint_to_str(q) == "81004455"), "div")
-    assert((bigint_to_str(r) == "3025"), "mod")
-    print("bigint basic passed")
+   a = bigint_from_str("1000000000")
+   b = bigint_from_str("1000000000")
+   s = bigint_add(a, b)
+   assert((bigint_to_str(s) == "2000000000"), "add simple 2")
+   def d = bigint_sub(bigint_from_str("1000000000000000000000000000000"), bigint_from_str("135802467913580246791358024680"))
+   assert((bigint_to_str(d) == "864197532086419753208641975320"), "sub")
+   def m = bigint_mul(bigint_from_str("123456789"), bigint_from_str("987654321"))
+   assert((bigint_to_str(m) == "121932631112635269"), "mul")
+   mut q = bigint_div(bigint_from_str("1000000000000"), bigint_from_str("12345"))
+   mut r = bigint_mod(bigint_from_str("1000000000000"), bigint_from_str("12345"))
+   assert((bigint_to_str(q) == "81004455"), "div")
+   assert((bigint_to_str(r) == "3025"), "mod")
+   print("bigint basic passed")
 
-    print("Testing bigint sign...")
-    a = bigint_from_str("-999999999999")
-    b = bigint_from_str("2")
-    s = bigint_add(a, b)
-    assert((bigint_to_str(s) == "-999999999997"), "add sign")
-    def p = bigint_mul(a, b)
-    assert((bigint_to_str(p) == "-1999999999998"), "mul sign")
-    q = bigint_div(a, b)
-    assert((bigint_to_str(q) == "-499999999999"), "div sign")
-    r = bigint_mod(a, b)
-    assert((bigint_to_str(r) == "-1"), "mod sign")
-    print("bigint sign passed")
+   print("Testing bigint sign...")
+   a = bigint_from_str("-999999999999")
+   b = bigint_from_str("2")
+   s = bigint_add(a, b)
+   assert((bigint_to_str(s) == "-999999999997"), "add sign")
+   def p = bigint_mul(a, b)
+   assert((bigint_to_str(p) == "-1999999999998"), "mul sign")
+   q = bigint_div(a, b)
+   assert((bigint_to_str(q) == "-499999999999"), "div sign")
+   r = bigint_mod(a, b)
+   assert((bigint_to_str(r) == "-1"), "mod sign")
+   print("bigint sign passed")
 
-    print("✓ std.math.bigint tests passed")
+   print("✓ std.math.bigint tests passed")
 }

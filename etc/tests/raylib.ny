@@ -4,8 +4,8 @@
 
 use std.os.ffi *
 use std.os *
-use std.text *
-use std.text.io *
+use std.str *
+use std.str.io *
 
 ;; '-L/usr/lib -lraylib' also works with extern
 
@@ -38,12 +38,12 @@ if(headless){
          mut frame_count = 0
 
          while(call0(WindowShouldCloseP) == 0){
-            call0_void(BeginDrawingP)
-            call1_void(ClearBackgroundP, 0xFF181818)
-            call0_void(EndDrawingP)
+         call0_void(BeginDrawingP)
+         call1_void(ClearBackgroundP, 0xFF181818)
+         call0_void(EndDrawingP)
 
-            frame_count += 1
-            if(frame_limit > 0 && frame_count >= frame_limit){ break }
+         frame_count += 1
+         if(frame_limit > 0 && frame_count >= frame_limit){ break }
          }
          call0_void(CloseWindowP)
          print("✓ Raylib window closed")

@@ -83,20 +83,20 @@ fn sample(xs, k){
 }
 
 if(comptime{__main()}){
-    use std.math.random *
-    use std.core *
-    use std.core.error *
+   use std.math.random *
+   use std.core *
+   use std.core.error *
 
-    print("Testing random...")
+   print("Testing random...")
 
-    def r = random()
-    assert(is_float(r), "random returns float")
-    assert(r >= 0.0, "random >= 0")
-    assert(r < 1.0, "random < 1")
+   def r = random()
+   assert(is_float(r), "random returns float")
+   assert(r >= 0.0, "random >= 0")
+   assert(r < 1.0, "random < 1")
 
-    def ri = randint(10, 20)
-    assert(ri >= 10, "randint >= 10")
-    assert(ri < 21, "randint < 21")
+   def ri = randint(10, 20)
+   assert(ri >= 10, "randint >= 10")
+   assert(ri < 21, "randint < 21")
 
-    print("✓ std.math.random tests passed")
+   print("✓ std.math.random tests passed")
 }

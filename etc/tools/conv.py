@@ -36,19 +36,19 @@ def convert_man(texi_path, man_name, section="1"):
     m = re.search(r'@settitle\s+(.*)', content)
     if m:
         title = m.group(1).strip()
-        
+
     out = [f'.TH {man_name.upper()} {section} "" "{title}"']
     content = re.sub(r'\\input texinfo.*?\n', '', content)
     content = re.sub(r'@setfilename.*?\n', '', content)
     content = re.sub(r'@settitle.*?\n', '', content)
-    
+
     copying = ""
     m = re.search(r'@copying\n(.*?)\n@end copying', content, re.DOTALL)
     if m:
         copying = m.group(1).strip()
         copying = re.sub(r'@copyright\{\}', '(C)', copying)
         content = re.sub(r'@copying\n.*?\n@end copying', '', content, flags=re.DOTALL)
-        
+
     content = re.sub(r'@node.*?\n', '', content)
     content = re.sub(r'@menu\n.*?\n@end menu', '', content, flags=re.DOTALL)
     content = re.sub(r'@dircategory.*?\n', '', content)
@@ -57,21 +57,21 @@ def convert_man(texi_path, man_name, section="1"):
     content = re.sub(r'@contents\n', '', content)
     content = re.sub(r'@appendix.*?\n', '', content)
     content = re.sub(r'@printindex.*?\n', '', content)
-    
+
     m = re.search(r'@top\s+(.*)', content)
     if m:
         name_desc = m.group(1).strip()
         if ' - ' not in name_desc:
             name_desc = f"{man_name} - {name_desc}"
         content = re.sub(r'@top\s+.*', r'.SH NAME\n' + name_desc, content, count=1)
-        
+
     content = re.sub(r'@chapter\s+(.*)', lambda m: f'.SH {m.group(1).upper()}', content)
     content = re.sub(r'@section\s+(.*)', lambda m: f'.SH {m.group(1).upper()}', content)
     content = re.sub(r'@subsection\s+(.*)', r'.SS \1', content)
     content = re.sub(r'@table\s+(@\w+)\n(.*?)\n@end table', handle_table, content, flags=re.DOTALL)
     content = re.sub(r'@table\s+(@asis)\n(.*?)\n@end table', handle_table, content, flags=re.DOTALL)
     content = re.sub(r'@itemize\s+@bullet\n(.*?)\n@end itemize', handle_itemize, content, flags=re.DOTALL)
-    
+
     content = content.replace('@@', '\x03')
     content = content.replace('@{', '\x01')
     content = content.replace('@}', '\x02')
@@ -82,9 +82,9 @@ def convert_man(texi_path, man_name, section="1"):
     content = re.sub(r'@emph\{(.*?)\}', r'\\fI\1\\fP', content)
     content = re.sub(r'@samp\{(.*?)\}', r'\\fI\1\\fP', content)
     content = re.sub(r'@option\{(.*?)\}', r'\\fB\1\\fP', content)
-    content = re.sub(r'@env\{(.*?)\}', r'\\fB\1\\fP', content)    
+    content = re.sub(r'@env\{(.*?)\}', r'\\fB\1\\fP', content)
     content = re.sub(r'@ref\{(.*?)\}', handle_ref, content)
-    
+
     content = content.replace('\x01', '{')
     content = content.replace('\x02', '}')
     content = content.replace('\x03', '@')
@@ -96,7 +96,7 @@ def convert_man(texi_path, man_name, section="1"):
     content = re.sub(r'^\s*\[Contents\]\s*\[Index\]\s*$', '', content, flags=re.MULTILINE)
     content = re.sub(r'\n{3,}', '\n\n', content)
     out.append(content.strip())
-    
+
     if copying:
         out.append(".SH LICENSE")
         out.append(copying)
@@ -143,7 +143,7 @@ def convert_md(texi_path, title):
     content = re.sub(r'@option\{(.*?)\}', r'`\1`', content)
     content = re.sub(r'@env\{(.*?)\}', r'`\1`', content)
     content = re.sub(r'@ref\{(.*?)\}', r'\1', content)
-    
+
     content = content.replace('\x01', '{')
     content = content.replace('\x02', '}')
     content = content.replace('\x03', '@')

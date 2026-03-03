@@ -21,8 +21,18 @@ extern char **environ;
 int color_mode __attribute__((weak)) = 0;
 int debug_enabled __attribute__((weak)) = 0;
 
-
 int64_t g_globals_ptr = 1;
+
+#ifndef _WIN32
+#define NY_JMP_BUF jmp_buf
+#define NY_SETJMP(env) _setjmp(env)
+#define NY_LONGJMP(env, val) _longjmp(env, val)
+#else
+#define NY_JMP_BUF jmp_buf
+// On Windows, _setjmp takes two arguments.
+#define NY_SETJMP(env) _setjmp(env, NULL)
+#define NY_LONGJMP(env, val) longjmp(env, val)
+#endif
 
 typedef struct {
   int64_t fn;
@@ -30,21 +40,21 @@ typedef struct {
 } defer_t;
 
 typedef VEC(defer_t) defer_vec;
-static defer_vec g_defer_stack = {0};
+defer_vec g_defer_stack = {0};
 
 typedef struct {
-  jmp_buf *env;
+  NY_JMP_BUF *env;
   size_t defer_base;
 } panic_env_t;
 
 typedef VEC(panic_env_t) panic_env_vec;
-static panic_env_vec g_panic_env_stack = {0};
-static int64_t g_panic_value = 0;
+panic_env_vec g_panic_env_stack = {0};
+int64_t g_panic_value = 0;
 static int64_t g_trace_file = 0;
 static int64_t g_trace_line = 1;
 static int64_t g_trace_col = 1;
 static int64_t g_trace_func = 0;
-#define TRACE_RING 256
+#define TRACE_RING 32
 static int64_t g_trace_files[TRACE_RING] = {0};
 static int64_t g_trace_lines[TRACE_RING] = {0};
 static int64_t g_trace_cols[TRACE_RING] = {0};
@@ -148,7 +158,7 @@ int64_t __push_defer(int64_t fn, int64_t env) {
 int64_t __pop_run_defer(void) {
   if (g_defer_stack.len > 0) {
     defer_t d = g_defer_stack.data[--g_defer_stack.len];
-    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))__mask_ptr(d.fn);
+    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))d.fn;
     if (f)
       f(d.env);
   }
@@ -160,15 +170,15 @@ int64_t __run_defers_to(int64_t target_len_v) {
       (size_t)(is_int(target_len_v) ? (target_len_v >> 1) : target_len_v);
   while (g_defer_stack.len > target_len) {
     defer_t d = g_defer_stack.data[--g_defer_stack.len];
-    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))__mask_ptr(d.fn);
+    int64_t (*f)(int64_t) = (int64_t (*)(int64_t))d.fn;
     if (f)
       f(d.env);
   }
   return 0;
 }
 
-int64_t __set_panic_env(int64_t env_ptr) {
-  panic_env_t pe = {(jmp_buf *)(uintptr_t)env_ptr, g_defer_stack.len};
+int64_t __set_panic_env(void *env_ptr) {
+  panic_env_t pe = {(NY_JMP_BUF *)env_ptr, g_defer_stack.len};
   vec_push(&g_panic_env_stack, pe);
   return 0;
 }
@@ -180,7 +190,8 @@ int64_t __clear_panic_env(void) {
   return 0;
 }
 
-int64_t __jmpbuf_size(void) { return (int64_t)sizeof(jmp_buf); }
+int64_t __jmpbuf_size(void) { return (int64_t)sizeof(NY_JMP_BUF); }
+int64_t __jmpbuf_align(void) { return (int64_t)_Alignof(NY_JMP_BUF); }
 int64_t __get_panic_val(void) { return g_panic_value; }
 
 int64_t __trace_loc(int64_t file, int64_t line, int64_t col) {
@@ -225,9 +236,8 @@ static void print_rt_snippet(int64_t file_ptr, int64_t line_ptr,
 
   if (curr == line && fgets(buf, sizeof(buf), f)) {
     size_t blen = strlen(buf);
-    while (blen > 0 &&
-           (buf[blen - 1] == '\n' || buf[blen - 1] == '\r' ||
-            buf[blen - 1] == ' ')) {
+    while (blen > 0 && (buf[blen - 1] == '\n' || buf[blen - 1] == '\r' ||
+                        buf[blen - 1] == ' ')) {
       buf[--blen] = '\0';
     }
 
@@ -254,7 +264,7 @@ int64_t __trace_dump(int64_t count) {
   size_t want = (size_t)(is_int(count) ? rt_untag_v(count) : count);
   if (want == 0 || want > g_trace_len)
     want = g_trace_len;
-  
+
   // Print newest first
   for (size_t i = 0; i < want; i++) {
     size_t idx = (g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING;
@@ -348,18 +358,21 @@ int64_t ny_rt_argv(int64_t i) {
 int64_t __tag(int64_t v) { return rt_tag_v(v); }
 int64_t __untag(int64_t v) { return rt_untag_v(v); }
 int64_t __is_int(int64_t v) { return is_int(v) ? 2 : 4; }
-int64_t __is_ptr(int64_t v) {
-  return is_ptr(v) ? 2 : 4;
-}
+int64_t __is_ptr(int64_t v) { return is_ptr(v) ? 2 : 4; }
 int64_t __is_ny_obj(int64_t v) { return is_ny_obj(v) ? 2 : 4; }
 int64_t __is_str_obj(int64_t v) { return is_v_str(v) ? 2 : 4; }
 int64_t __is_float_obj(int64_t v) { return is_v_flt(v) ? 2 : 4; }
 int64_t __tagof(int64_t v) {
-  if (v == 0) return 0;
-  if (is_int(v)) return rt_tag_v(1);
-  if ((v & 7) == 6) return rt_tag_v(6);
-  if (!is_ptr(v)) return 0;
-  if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  if (v == 0)
+    return 0;
+  if (is_int(v))
+    return rt_tag_v(1);
+  if ((v & 7) == 6)
+    return rt_tag_v(6);
+  if (!is_ptr(v))
+    return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 8))
+    return 0;
   int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
   return rt_tag_v(tag);
 }
@@ -374,6 +387,135 @@ int64_t __copy_mem(int64_t dst, int64_t src, int64_t n) {
     return dst;
   memcpy((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, (size_t)n);
   return dst;
+}
+
+/* __simd_mat4_mul(a, b, out) — column-major 4x4 float matrix multiply.
+ * a, b, out are Nytrix list objects; elements [2..17] are the 16 floats.
+ * Uses SSE2 when available; falls back to portable scalar.
+ * Returns out. */
+#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__SSE2__)
+#include <immintrin.h>
+static void _mat4_mul_simd(const float *A, const float *B, float *O) {
+  /* Each column of B is transformed by the full A */
+  for (int col = 0; col < 4; col++) {
+    __m128 bcol = _mm_loadu_ps(B + col * 4);
+    __m128 r =
+        _mm_mul_ps(_mm_loadu_ps(A + 0), _mm_shuffle_ps(bcol, bcol, 0x00));
+    r = _mm_add_ps(
+        r, _mm_mul_ps(_mm_loadu_ps(A + 4), _mm_shuffle_ps(bcol, bcol, 0x55)));
+    r = _mm_add_ps(
+        r, _mm_mul_ps(_mm_loadu_ps(A + 8), _mm_shuffle_ps(bcol, bcol, 0xAA)));
+    r = _mm_add_ps(
+        r, _mm_mul_ps(_mm_loadu_ps(A + 12), _mm_shuffle_ps(bcol, bcol, 0xFF)));
+    _mm_storeu_ps(O + col * 4, r);
+  }
+}
+#else /* NEON fallback */
+#include <arm_neon.h>
+static void _mat4_mul_simd(const float *A, const float *B, float *O) {
+  for (int col = 0; col < 4; col++) {
+    float32x4_t bcol = vld1q_f32(B + col * 4);
+    float32x4_t r = vmulq_n_f32(vld1q_f32(A + 0), vgetq_lane_f32(bcol, 0));
+    r = vmlaq_n_f32(r, vld1q_f32(A + 4), vgetq_lane_f32(bcol, 1));
+    r = vmlaq_n_f32(r, vld1q_f32(A + 8), vgetq_lane_f32(bcol, 2));
+    r = vmlaq_n_f32(r, vld1q_f32(A + 12), vgetq_lane_f32(bcol, 3));
+    vst1q_f32(O + col * 4, r);
+  }
+}
+#endif
+#define NY_HAS_SIMD_MAT4 1
+#else
+#define NY_HAS_SIMD_MAT4 0
+static void _mat4_mul_simd(const float *A, const float *B, float *O) {
+  for (int c = 0; c < 4; c++) {
+    for (int r = 0; r < 4; r++) {
+      float s = 0.0f;
+      for (int k = 0; k < 4; k++)
+        s += A[k * 4 + r] * B[c * 4 + k];
+      O[c * 4 + r] = s;
+    }
+  }
+}
+#endif
+
+int64_t __simd_mat4_mul_ptr(int64_t a_ptr, int64_t b_ptr, int64_t o_ptr) {
+  if (!is_ptr(a_ptr) || !is_ptr(b_ptr) || !is_ptr(o_ptr))
+    return o_ptr;
+  _mat4_mul_simd((const float *)(uintptr_t)a_ptr,
+                 (const float *)(uintptr_t)b_ptr, (float *)(uintptr_t)o_ptr);
+  return o_ptr;
+}
+
+int64_t __simd_mat4_mul(int64_t a_lst, int64_t b_lst, int64_t o_lst) {
+  if (!is_ptr(a_lst) || !is_ptr(b_lst) || !is_ptr(o_lst))
+    return o_lst;
+  /* Nytrix list layout: header(16b) + len(8b) + cap(8b) + items[2..17] at
+   * +16+(i*8) */
+  float A[16], B[16], Out[16];
+  for (int i = 0; i < 16; i++) {
+    int64_t av = *(int64_t *)((char *)(uintptr_t)a_lst + 16 + (i + 2) * 8);
+    int64_t bv = *(int64_t *)((char *)(uintptr_t)b_lst + 16 + (i + 2) * 8);
+    double da, db;
+    if (is_int(av)) {
+      da = (double)(av >> 1);
+    } else if (is_v_flt(av)) {
+      memcpy(&da, (void *)(uintptr_t)av, 8);
+    } else {
+      da = 0.0;
+    }
+    if (is_int(bv)) {
+      db = (double)(bv >> 1);
+    } else if (is_v_flt(bv)) {
+      memcpy(&db, (void *)(uintptr_t)bv, 8);
+    } else {
+      db = 0.0;
+    }
+    A[i] = (float)da;
+    B[i] = (float)db;
+  }
+  _mat4_mul_simd(A, B, Out);
+  for (int i = 0; i < 16; i++) {
+    double dv = (double)Out[i];
+    int64_t bits;
+    memcpy(&bits, &dv, 8);
+    int64_t boxed = __flt_box_val(bits);
+    *(int64_t *)((char *)(uintptr_t)o_lst + 16 + (i + 2) * 8) = boxed;
+  }
+  return o_lst;
+}
+
+int64_t __mat4_to_buffer(int64_t m_lst, int64_t buf_ptr) {
+  if (!is_ptr(m_lst) || !is_ptr(buf_ptr))
+    return buf_ptr;
+  float *buf = (float *)(uintptr_t)buf_ptr;
+  for (int i = 0; i < 16; i++) {
+    int64_t v = *(int64_t *)((char *)(uintptr_t)m_lst + 16 + (i + 2) * 8);
+    double dv;
+    if (is_int(v)) {
+      dv = (double)(v >> 1);
+    } else if (is_v_flt(v)) {
+      memcpy(&dv, (void *)(uintptr_t)v, 8);
+    } else {
+      dv = 0.0;
+    }
+    buf[i] = (float)dv;
+  }
+  return buf_ptr;
+}
+
+int64_t __mat4_from_buffer(int64_t m_lst, int64_t buf_ptr) {
+  if (!is_ptr(m_lst) || !is_ptr(buf_ptr))
+    return m_lst;
+  const float *buf = (const float *)(uintptr_t)buf_ptr;
+  for (int i = 0; i < 16; i++) {
+    double dv = (double)buf[i];
+    int64_t bits;
+    memcpy(&bits, &dv, 8);
+    int64_t boxed = __flt_box_val(bits);
+    *(int64_t *)((char *)(uintptr_t)m_lst + 16 + (i + 2) * 8) = boxed;
+  }
+  return m_lst;
 }
 
 int64_t __rt_result_alloc(int64_t tag, int64_t v) {
@@ -401,21 +543,27 @@ int64_t __unwrap(int64_t v) {
 }
 int64_t __list_new(int64_t n_v) {
   int64_t n = is_int(n_v) ? (n_v >> 1) : n_v;
-  if (n < 0) n = 0;
+  if (n < 0)
+    n = 0;
   // Standard layout: 16 bytes header (length, capacity) + n * 8 bytes data
   int64_t p = __malloc(16 + n * 8);
-  if (!p) return 0;
+  if (!p)
+    return 0;
   // Standard Nytrix tags are at p-8
   *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_LIST;
-  *(int64_t *)((char *)(uintptr_t)p + 0) = 1; // Length = 0 (tagged: (0<<1)|1 = 1)
-  *(int64_t *)((char *)(uintptr_t)p + 8) = (n << 1) | 1; // Capacity = n (tagged)
+  *(int64_t *)((char *)(uintptr_t)p + 0) =
+      1; // Length = 0 (tagged: (0<<1)|1 = 1)
+  *(int64_t *)((char *)(uintptr_t)p + 8) =
+      (n << 1) | 1; // Capacity = n (tagged)
 
   return p;
 }
 
 int64_t __append(int64_t lst, int64_t val) {
-  if (!is_ptr(lst)) return lst;
-  if (__tagof(lst) != ((TAG_LIST << 1) | 1)) return lst;
+  if (!is_ptr(lst))
+    return lst;
+  if (__tagof(lst) != ((TAG_LIST << 1) | 1))
+    return lst;
   int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
   int64_t n = is_int(len_v) ? (len_v >> 1) : len_v;
   int64_t cap_v = *(int64_t *)((char *)(uintptr_t)lst + 8);
@@ -424,7 +572,8 @@ int64_t __append(int64_t lst, int64_t val) {
   if (n >= cap) {
     int64_t new_cap = cap == 0 ? 8 : (cap * 2);
     int64_t new_p = __malloc(16 + new_cap * 8);
-    if (!new_p) return lst;
+    if (!new_p)
+      return lst;
     *(int64_t *)((char *)(uintptr_t)new_p - 8) = TAG_LIST;
     *(int64_t *)((char *)(uintptr_t)new_p + 0) = len_v;
     *(int64_t *)((char *)(uintptr_t)new_p + 8) = (new_cap << 1) | 1;
@@ -437,14 +586,13 @@ int64_t __append(int64_t lst, int64_t val) {
   return lst;
 }
 
-
-
 int64_t __load_item(int64_t lst, int64_t i_v) {
   return __rt_load_item_fast(lst, i_v);
 }
 
 int64_t __store_item(int64_t lst, int64_t i_v, int64_t val) {
-  if (!is_ptr(lst)) return 0;
+  if (!is_ptr(lst))
+    return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
   *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8) = val;
   return val;
@@ -464,14 +612,16 @@ int64_t __store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
  * raw (untagged) element count.  Avoids the full __load64_idx bounds-check +
  * rt_addr_readable machinery when all we need is the length. */
 int64_t __list_len(int64_t lst) {
-  if (!is_ptr(lst)) return 1; /* tagged 0 */
+  if (!is_ptr(lst))
+    return 1; /* tagged 0 */
   int64_t tagged = *(int64_t *)((char *)(uintptr_t)lst + 0);
   return tagged; /* caller uses tagged value directly in Nytrix arithmetic */
 }
 
 /* Fast list-length write: stores `n` (tagged integer) at lst+0. */
 int64_t __list_set_len(int64_t lst, int64_t n) {
-  if (!is_ptr(lst)) return 0;
+  if (!is_ptr(lst))
+    return 0;
   *(int64_t *)((char *)(uintptr_t)lst + 0) = n;
   return n;
 }
@@ -479,7 +629,7 @@ int64_t __list_set_len(int64_t lst, int64_t n) {
 static void print_panic_msg(int64_t msg_ptr) {
   const char *red = color_mode ? clr(NY_CLR_RED) : "";
   const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
-  
+
   if (is_int(msg_ptr)) {
     fprintf(stderr, "%sPanic (int):%s %" PRId64 "\n", red, rs,
             (int64_t)rt_untag_v(msg_ptr));
@@ -518,29 +668,28 @@ int64_t __get_backtrace(int64_t count_v) {
 }
 
 int64_t __panic(int64_t msg_ptr) {
-  if (g_panic_env_stack.len > 0) {
-    g_panic_value = msg_ptr;
-    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
-    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
-    longjmp(*pe.env, 1);
+  bool has_env = (g_panic_env_stack.len > 0);
+  if (!has_env) {
+    fputc('\n', stderr);
   }
-  
-  fputc('\n', stderr);
   print_panic_msg(msg_ptr);
-
   if (is_v_str(g_trace_file)) {
     print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
                       "  at ");
     print_rt_snippet(g_trace_file, g_trace_line, g_trace_col);
   }
-  
+  if (has_env) {
+    g_panic_value = msg_ptr;
+    panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
+    __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
+    NY_LONGJMP(*pe.env, 1);
+  }
   if (g_trace_len > 0) {
     const char *cyan = color_mode ? clr(NY_CLR_CYAN) : "";
     const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
     fprintf(stderr, "\n%sLast Nytrix frames:%s\n", cyan, rs);
     __trace_dump(((int64_t)10 << 1) | 1); // last 10
   }
-  
   fprintf(stderr, "\n");
   exit(1);
 }

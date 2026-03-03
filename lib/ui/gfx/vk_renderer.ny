@@ -11,8 +11,12 @@ module std.ui.gfx.vk_renderer (
    _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_vertices, draw_lines_raw,
    set_mvp, set_ortho, _pack_color, _flush, _update_default_mvp,
    renderer_config, _get_local_vertex_map, _get_vertex_offset, _advance_vertex_offset,
-   __vkr_push_vertex, _mvp_matrix, VERTEX_STRIDE, set_unlit,
-   _vkr_glyph_present
+   __vkr_push_vertex, __vkr_push_rect_tex, __vkr_draw_text, _vkr_glyph_get_off,
+   get_render_stats, create_static_buffer, draw_static_buffer,
+   _mvp_matrix, VERTEX_STRIDE, set_unlit,
+   _vkr_glyph_present, _prof_flush_avg,
+   draw_rect_fast, draw_text_batch,
+   set_wireframe
 )
 
 use std.core *
@@ -23,9 +27,13 @@ use std.ui.gfx.vulkan *
 use std.ui.glfw as ui_glfw
 use std.os *
 use std.os.process as proc
-use std.text as text
+use std.str as text
 use std.util.common as common
 
+mut _frame_draw_calls = 0
+mut _total_draw_calls = 0
+mut _static_vbo_ptr = 0
+mut _static_off_ptr = 0
 def VERTEX_STRIDE = 36
 def _VKR_VERT_STRIDE = 36
 def _VKR_OFF_X = 0
@@ -50,11 +58,116 @@ def _VKR_G_U2 = 28
 def _VKR_G_V2 = 32
 def _VKR_G_TEX = 36
 def _VKR_G_PRESENT = 40
+def _VKR_G_IS_COLOR = 44
+
+fn draw_rect_fast(x, y, w, h, color_u32){
+   "Submits a rectangle using pre-packed color and fixed vertex layout."
+   bind_texture(_default_texture)
+   _check_flush(216)
+   __vkr_push_rect_tex_fast(_local_vertex_map + _vertex_offset, x, y, w, h, 0, 0, 0, 0, color_u32)
+   _vertex_offset += 216
+}
+
+fn __vkr_push_rect_tex_fast(ptr, x, y, w, h, u1, v1, u2, v2, color_u32){
+   memcpy(ptr, _quad_template, 216)
+   def x2 = float(x) + float(w)
+   def y2 = float(y) + float(h)
+   mut bv = ptr
+   store32_f32(bv, float(x), 0)  store32_f32(bv, float(y), 4)  store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, color_u32, 20)
+   bv += 36
+   store32_f32(bv, float(x), 0)  store32_f32(bv, y2, 4)        store32_f32(bv, u1, 12) store32_f32(bv, v2, 16) store32(bv, color_u32, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, y2, 4)        store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, color_u32, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, y2, 4)        store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, color_u32, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, float(y), 4)  store32_f32(bv, u2, 12) store32_f32(bv, v1, 16) store32(bv, color_u32, 20)
+   bv += 36
+   store32_f32(bv, float(x), 0)  store32_f32(bv, float(y), 4)  store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, color_u32, 20)
+}
+
+fn draw_text_batch(font_id, lines, x, y, spacing, color_u32){
+   "Draws multiple lines of text in a single Nytrix call to minimize interpreter overhead."
+   if(!is_list(lines)){ return }
+   def f = _font_get(font_id)
+   if(!f){ return }
+   def gptr = dict_get(f, "fast_glyphs", 0)
+   def ascent = dict_get(f, "ascent", 0)
+   mut cur_y = float(y)
+   def f_size = float(dict_get(f, "size", 16))
+   mut i = 0 while(i < len(lines)){
+      __vkr_draw_text_fast(get(lines, i), float(x), cur_y + float(ascent), color_u32, gptr, f_size)
+      cur_y += float(spacing)
+      i += 1
+   }
+}
+
+fn __vkr_draw_text_fast(text, x, y, color_u32, glyphs_ptr, line_h_f){
+   if(!glyphs_ptr || !is_str(text)){ return }
+   def n = str_len(text)
+   _check_flush(n * 216)
+   def page0 = load64(glyphs_ptr, 0)
+   mut pen_x = x
+   mut i = 0 while(i < n){
+      def b0 = load8(text, i) & 255
+      mut cp = 0 mut step = 1 mut g_off = 0
+      if(b0 < 128){
+         cp = b0
+         i += 1
+         if(page0){
+         g_off = page0 + cp * _VKR_GLYPH_STRIDE
+         if(load32(g_off, _VKR_G_PRESENT) == 0){ g_off = 0 }
+         }
+      } else {
+         if(((b0 & 224) == 192) && (i + 1 < n)){
+         cp = (((b0 & 31) << 6) | ((load8(text, i + 1) & 255) & 63))
+         step = 2
+         } elif(((b0 & 240) == 224) && (i + 2 < n)){
+         cp = (((((b0 & 15) << 12) | (((load8(text, i + 1) & 255) & 63) << 6)) | ((load8(text, i + 2) & 255) & 63)))
+         step = 3
+         } elif(((b0 & 248) == 240) && (i + 3 < n)){
+         cp = (((((((b0 & 7) << 18) | (((load8(text, i + 1) & 255) & 63) << 12)) | (((load8(text, i + 2) & 255) & 63) << 6)) | ((load8(text, i + 3) & 255) & 63))))
+         step = 4
+         }
+         i += step
+         def page = load64(glyphs_ptr, ((cp >> 8) & 65535) * 8)
+         if(page){
+         g_off = page + (cp & 255) * _VKR_GLYPH_STRIDE
+         if(load32(g_off, _VKR_G_PRESENT) == 0){ g_off = 0 }
+         }
+      }
+      if(cp == 13 || cp == 10 || cp == 9){ continue }
+      if(!g_off){ if(page0){ g_off = page0 + 63 * _VKR_GLYPH_STRIDE } else { continue } }
+
+      def tex_id = load32(g_off, _VKR_G_TEX)
+      if(tex_id != _current_texture_id){ bind_texture(tex_id) }
+
+      def bh_raw = load32_f32(g_off, _VKR_G_BH)
+      def is_color = load32(g_off, _VKR_G_IS_COLOR) != 0
+      mut gs = 1.0
+      if(is_color && bh_raw > 0.0){
+         gs = (line_h_f * 0.88) / bh_raw
+      }
+      def bw = load32_f32(g_off, _VKR_G_BW) * gs
+      def bh = bh_raw * gs
+
+      if(bw > 0.0 && bh > 0.0){
+         def gx = pen_x + load32_f32(g_off, _VKR_G_XOFF) * gs
+         mut gy = y - load32_f32(g_off, _VKR_G_YOFF) * gs
+         if(is_color){ gy += (line_h_f * 0.06) }
+         __vkr_push_rect_tex_fast(_local_vertex_map + _vertex_offset, gx, gy, bw, bh, load32_f32(g_off, _VKR_G_U1), load32_f32(g_off, _VKR_G_V1), load32_f32(g_off, _VKR_G_U2), load32_f32(g_off, _VKR_G_V2), is_color ? 0xFFFFFFFF : color_u32)
+         _vertex_offset += 216
+      }
+      pen_x += load32_f32(g_off, _VKR_G_ADV) * gs
+   }
+}
 
 fn _vkr_color_u32(c){
    "Internal: normalizes a color value to packed 32-bit form."
+   if(is_int(c)){ return c }
    if(is_float(c)){ return __flt_to_int(c) }
-   c
+   if(!is_list(c)){ return 0xFFFFFFFF }
+   __vkr_pack_color(get(c, 0, 1.0), get(c, 1, 1.0), get(c, 2, 1.0), get(c, 3, 1.0))
 }
 
 fn __vkr_pack_color(r, g, b, a){
@@ -86,23 +199,47 @@ fn __vkr_push_vertex(ptr, x, y, z, u, v, color, nx=0.0, ny=0.0, nz=1.0){
    _vkr_store_vertex(ptr, 0, x, y, z, u, v, color, nx, ny, nz)
 }
 
-fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color){
-   "Writes a six-vertex textured quad to `ptr`."
+fn __vkr_push_rect_tex(ptr, x, y, w, h, u1, v1, u2, v2, color, nz=1.0){
+   "Writes a six-vertex textured quad to `ptr` using an optimized template path."
    if(!ptr){ return 0 }
+
+   memcpy(ptr, _quad_template, 216)
+
+   def c = _vkr_color_u32(color)
    def x2 = float(x) + float(w)
    def y2 = float(y) + float(h)
-   _vkr_store_vertex(ptr, 0, x,  y,  0.0, u1, v1, color, 0.0, 0.0, 1.0)
-   _vkr_store_vertex(ptr, 1, x,  y2, 0.0, u1, v2, color, 0.0, 0.0, 1.0)
-   _vkr_store_vertex(ptr, 2, x2, y2, 0.0, u2, v2, color, 0.0, 0.0, 1.0)
-   _vkr_store_vertex(ptr, 3, x2, y2, 0.0, u2, v2, color, 0.0, 0.0, 1.0)
-   _vkr_store_vertex(ptr, 4, x2, y,  0.0, u2, v1, color, 0.0, 0.0, 1.0)
-   _vkr_store_vertex(ptr, 5, x,  y,  0.0, u1, v1, color, 0.0, 0.0, 1.0)
+
+   mut bv = ptr
+   store32_f32(bv, float(x), 0)  store32_f32(bv, float(y), 4)  store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
+   bv += 36
+   store32_f32(bv, float(x), 0)  store32_f32(bv, y2, 4)        store32_f32(bv, u1, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, y2, 4)        store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, y2, 4)        store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+   bv += 36
+   store32_f32(bv, x2, 0)        store32_f32(bv, float(y), 4)  store32_f32(bv, u2, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
+   bv += 36
+   store32_f32(bv, float(x), 0)  store32_f32(bv, float(y), 4)  store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
    0
+}
+
+fn _init_quad_template(){
+   "Pre-fills a 6-vertex quad template with default values (Z=0, Normal=[0,0,1])."
+   if(!_quad_template){ return }
+   mut i = 0 while(i < 6){
+      def off = _quad_template + i * 36
+      store32_f32(off, 0.0, 8) ; Z
+      store32_f32(off, 0.0, 24) ; NX
+      store32_f32(off, 0.0, 28) ; NY
+      store32_f32(off, 1.0, 32) ; NZ
+      i += 1
+   }
 }
 
 fn __vkr_push_rect(ptr, x, y, w, h, color){
    "Writes a six-vertex solid-color quad to `ptr`."
-   __vkr_push_rect_tex(ptr, x, y, w, h, 0.0, 0.0, 0.0, 0.0, color)
+   __vkr_push_rect_tex(ptr, x, y, w, h, 0.0, 0.0, 0.0, 0.0, color, 0.0)
 }
 
 fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color){
@@ -123,92 +260,121 @@ fn __vkr_push_line(ptr, x1, y1, x2, y2, thickness, color){
    _vkr_store_vertex(ptr, 5, float(x2) + nx, float(y2) + ny, 0.0, 0.0, 0.0, color, 0.0, 0.0, 1.0)
 }
 
-fn _vkr_glyph_present(glyphs_ptr, cp){
-   "Internal: returns whether codepoint `cp` exists in the glyph table."
-   if(cp < 0 || cp >= 256){ return false }
-   load32(glyphs_ptr + cp * _VKR_GLYPH_STRIDE, _VKR_G_PRESENT) != 0
+fn _vkr_glyph_get_off(glyphs_ptr, cp){
+   "Internal: returns the address of glyph metadata for `cp` using a paged table."
+   if(cp < 0 || cp >= 1114112){ return 0 }
+   def page_idx = cp >> 8
+   def page_ptr = load64(glyphs_ptr, page_idx * 8)
+   if(!page_ptr){ return 0 }
+   page_ptr + (cp & 255) * _VKR_GLYPH_STRIDE
 }
 
-fn __vkr_draw_text(vbo_ptr, text, x, y, color, glyphs_ptr, ascent, line_h, out_info){
-   "Builds packed glyph vertices for `text` into `vbo_ptr` and stores draw metadata in `out_info`."
-   if(!vbo_ptr || !glyphs_ptr || !is_str(text)){ return }
+fn _vkr_glyph_present(glyphs_ptr, cp){
+   "Internal: returns whether codepoint `cp` exists in the paged glyph table."
+   def off = _vkr_glyph_get_off(glyphs_ptr, cp)
+   if(!off){ return false }
+   load32(off, _VKR_G_PRESENT) != 0
+}
+
+fn __vkr_draw_text(_unused_vbo, text, x, y, color, glyphs_ptr, ascent, line_h, out_info){
+   "Builds packed glyph vertices for `text` directly into the current VBO, handling atlas changes."
+   if(!glyphs_ptr || !is_str(text)){ return }
    def n = str_len(text)
+   _check_flush(n * 216)
    def pen_x0 = float(x)
    mut pen_x = pen_x0
    mut pen_y = float(y) + float(ascent)
    def line_h_f = float(line_h)
-   def c = _vkr_color_u32(color)
-   mut vert_idx = 0
-   mut last_tex = -1
+   def c_text = _vkr_color_u32(color)
+   mut total_verts = 0
+   def page0 = load64(glyphs_ptr, 0)
 
    mut i = 0
    while(i < n){
-      def c1 = load8(text, i)
-      mut cp = 0
-      mut step = 1
-      if(c1 < 0x80){ cp = c1 }
-      elif((c1 & 0xE0) == 0xC0 && i + 1 < n){
-         cp = ((c1 & 0x1F) << 6) | (load8(text, i + 1) & 0x3F)
-         step = 2
-      } elif((c1 & 0xF0) == 0xE0 && i + 2 < n){
-         cp = ((c1 & 0x0F) << 12) | ((load8(text, i + 1) & 0x3F) << 6) | (load8(text, i + 2) & 0x3F)
-         step = 3
-      } elif((c1 & 0xF8) == 0xF0 && i + 3 < n){
-         cp = ((c1 & 0x07) << 18) | ((load8(text, i + 1) & 0x3F) << 12) | ((load8(text, i + 2) & 0x3F) << 6) | (load8(text, i + 3) & 0x3F)
-         step = 4
+      ;; 1. Optimized Decoder & Glyph Lookup
+      def b0 = load8(text, i) & 255
+      mut cp = 0 mut step = 1
+      mut g_off = 0
+
+      if(b0 < 128){
+         cp = b0 i += 1
+         if(page0){
+         g_off = page0 + cp * _VKR_GLYPH_STRIDE
+         if(load32(g_off, _VKR_G_PRESENT) == 0){ g_off = 0 }
+         }
+      } else {
+         if(((b0 & 224) == 192) && (i + 1 < n)){ cp = (((b0 & 31) << 6) | ((load8(text, i + 1) & 255) & 63)) step = 2 }
+         elif(((b0 & 240) == 224) && (i + 2 < n)){ cp = (((((b0 & 15) << 12) | (((load8(text, i + 1) & 255) & 63) << 6)) | ((load8(text, i + 2) & 255) & 63))) step = 3 }
+         elif(((b0 & 248) == 240) && (i + 3 < n)){ cp = (((((((b0 & 7) << 18) | (((load8(text, i + 1) & 255) & 63) << 12)) | (((load8(text, i + 2) & 255) & 63) << 6)) | ((load8(text, i + 3) & 255) & 63)))) step = 4 }
+         i += step
+
+         def page = load64(glyphs_ptr, ((cp >> 8) & 65535) * 8)
+         if(page){
+         g_off = page + (cp & 255) * _VKR_GLYPH_STRIDE
+         if(load32(g_off, _VKR_G_PRESENT) == 0){ g_off = 0 }
+         }
       }
-      i += step
 
       if(cp == 13){ continue }
       if(cp == 10){ pen_x = pen_x0 pen_y = pen_y + line_h_f continue }
-      if(cp == 9){
-         if(_vkr_glyph_present(glyphs_ptr, 32)){
-            def adv = load32_f32(glyphs_ptr + 32 * _VKR_GLYPH_STRIDE, _VKR_G_ADV)
-            pen_x = pen_x + adv * 4.0
-         }
-         continue
+      if(cp == 9){ pen_x = pen_x + line_h_f * 2.0 continue }
+
+      if(!g_off){
+         if(page0){ g_off = page0 + 63 * _VKR_GLYPH_STRIDE } else { continue }
       }
 
-      if(cp >= 256 || !_vkr_glyph_present(glyphs_ptr, cp)){
-         if(_vkr_glyph_present(glyphs_ptr, 63)){ cp = 63 } else { continue }
-      }
-
-      def g_off = glyphs_ptr + cp * _VKR_GLYPH_STRIDE
-      def adv = load32_f32(g_off, _VKR_G_ADV)
-      def xoff = load32_f32(g_off, _VKR_G_XOFF)
-      def yoff = load32_f32(g_off, _VKR_G_YOFF)
-      def bw = load32_f32(g_off, _VKR_G_BW)
-      def bh = load32_f32(g_off, _VKR_G_BH)
-      def u1 = load32_f32(g_off, _VKR_G_U1)
-      def v1 = load32_f32(g_off, _VKR_G_V1)
-      def u2 = load32_f32(g_off, _VKR_G_U2)
-      def v2 = load32_f32(g_off, _VKR_G_V2)
       def tex_id = load32(g_off, _VKR_G_TEX)
-      if(tex_id >= 0){ last_tex = tex_id }
+      if(tex_id != _current_texture_id){ bind_texture(tex_id) }
+
+      def adv_raw = load32_f32(g_off, _VKR_G_ADV)
+      def bh_raw = load32_f32(g_off, _VKR_G_BH)
+      def is_color = load32(g_off, _VKR_G_IS_COLOR) != 0
+
+      mut gs = 1.0
+      if(is_color && bh_raw > 0.0){ gs = line_h_f / bh_raw }
+
+      def bw = load32_f32(g_off, _VKR_G_BW) * gs
+      def bh = bh_raw * gs
+      def adv = adv_raw * gs
 
       if(bw > 0.0 && bh > 0.0){
-         if(last_tex >= 0 && last_tex != _current_texture_id){
-            bind_texture(last_tex)
-         }
-         def gx = pen_x + xoff
-         def gy = pen_y - yoff
-         def base_idx = _vertex_offset / 36
-         _vkr_store_vertex(_local_vertex_map, base_idx + 0, gx,      gy,       0.0, u1, v1, c)
-         _vkr_store_vertex(_local_vertex_map, base_idx + 1, gx,      gy + bh,  0.0, u1, v2, c)
-         _vkr_store_vertex(_local_vertex_map, base_idx + 2, gx + bw, gy + bh,  0.0, u2, v2, c)
-         _vkr_store_vertex(_local_vertex_map, base_idx + 3, gx + bw, gy + bh,  0.0, u2, v2, c)
-         _vkr_store_vertex(_local_vertex_map, base_idx + 4, gx + bw, gy,       0.0, u2, v1, c)
-         _vkr_store_vertex(_local_vertex_map, base_idx + 5, gx,      gy,       0.0, u1, v1, c)
-         
-         vert_idx += 6
-         _vertex_offset += 216 ;; 6 * 36
+          def gx = pen_x + load32_f32(g_off, _VKR_G_XOFF) * gs
+          mut gy = pen_y - load32_f32(g_off, _VKR_G_YOFF) * gs
+          if(is_color){ gy += (line_h_f * 0.06) }
+         def u1 = load32_f32(g_off, _VKR_G_U1)
+         def v1 = load32_f32(g_off, _VKR_G_V1)
+         def u2 = load32_f32(g_off, _VKR_G_U2)
+         def v2 = load32_f32(g_off, _VKR_G_V2)
+         def c = is_color ? 0xFFFFFFFF : c_text
+
+         ;; 3. Fully Inlined Vertex Generation (6 vertices) - Template Optimized
+         mut bv = _local_vertex_map + _vertex_offset
+         memcpy(bv, _quad_template, 216)
+
+         def gx2 = gx + bw
+         def gy2 = gy + bh
+
+         store32_f32(bv, gx, 0)   store32_f32(bv, gy, 4)   store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
+         bv += 36
+         store32_f32(bv, gx, 0)   store32_f32(bv, gy2, 4)  store32_f32(bv, u1, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+         bv += 36
+         store32_f32(bv, gx2, 0)  store32_f32(bv, gy2, 4)  store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+         bv += 36
+         store32_f32(bv, gx2, 0)  store32_f32(bv, gy2, 4)  store32_f32(bv, u2, 12) store32_f32(bv, v2, 16) store32(bv, c, 20)
+         bv += 36
+         store32_f32(bv, gx2, 0)  store32_f32(bv, gy, 4)   store32_f32(bv, u2, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
+         bv += 36
+         store32_f32(bv, gx, 0)   store32_f32(bv, gy, 4)   store32_f32(bv, u1, 12) store32_f32(bv, v1, 16) store32(bv, c, 20)
+
+         _vertex_offset += 216
+         total_verts += 6
       }
       pen_x = pen_x + adv
    }
 
    if(out_info){
-      store64(out_info, vert_idx, 0)
-      store64(out_info, last_tex, 8)
+      store64(out_info, total_verts, 0)
+      store64(out_info, _current_texture_id, 8)
    }
 }
 
@@ -233,13 +399,6 @@ fn _dbg_handle(label, h){
    0
 }
 
-fn _load64_raw(p, i=0){
-   "Internal: safely loads a 64-bit handle from two 32-bit parts."
-   def low = load32(p, i)
-   def high = load32(p, i + 4)
-   (high * 4294967296) + (low & 0xFFFFFFFF)
-}
-
 mut _cfg_msaa = 1
 fn _get_vertex_offset(){
    "Returns the current packed-vertex write offset in bytes."
@@ -256,11 +415,11 @@ fn _advance_vertex_offset(bytes){
 
 fn renderer_config(vsync, filter, vert_spv_path, frag_spv_path, msaa){
    "Configures the renderer. Must be called BEFORE init_window().
-    vsync: true/false (default false)
-    filter: 0 for NEAREST, 1 for LINEAR (default 0)
-    vert_spv_path: path to custom vertex shader .spv or empty for default
-    frag_spv_path: path to custom fragment shader .spv or empty for default
-    msaa: number of MSAA samples (1, 2, 4, 8) (default 1)"
+   vsync: true/false (default false)
+   filter: 0 for NEAREST, 1 for LINEAR (default 0)
+   vert_spv_path: path to custom vertex shader .spv or empty for default
+   frag_spv_path: path to custom fragment shader .spv or empty for default
+   msaa: number of MSAA samples (1, 2, 4, 8) (default 1)"
    if(vsync){ _cfg_vsync = true } else { _cfg_vsync = false }
    if(filter){ _cfg_filter = 1 } else { _cfg_filter = 0 }
    _cfg_vert_spv = vert_spv_path
@@ -299,14 +458,15 @@ mut _command_buffers = []
 mut _descriptor_set_layout = 0
 mut _pipeline_layout = 0
 mut _pipeline = 0
+mut _unlit_pipeline = 0
 mut _line_pipeline = 0
+mut _wire_pipeline = 0
 mut _vert_module = 0
 mut _frag_module = 0
+mut _is_wireframe = false
 
 mut _vertex_capacity = 33554432 ; 32MB per frame slice (huge headroom)
 mut _current_frame_vertex_offset = 0
-mut _last_bound_ds = 0
-mut _last_bound_pipe = 0
 mut _vertex_buffer = 0
 mut _vertex_memory = 0
 mut _vertex_map = 0
@@ -318,7 +478,7 @@ mut _vertex_limit_hit = false
 mut _staging_buffer = 0
 mut _staging_memory = 0
 mut _staging_map = 0
-mut _staging_capacity = 8388608  ; 8MB staging
+mut _staging_capacity = 67108864 ; 64MB staging capacity (can handle 4K RGBA textures)
 
 mut _default_texture = 0
 mut _default_sampler = 0
@@ -356,6 +516,7 @@ mut _flush_off = 0
 mut _flush_buf = 0
 mut _last_bound_tex_id = -1
 mut _last_bound_ds = 0
+mut _target_pipeline = 0
 mut _last_bound_pipe = 0
 mut _pc_dirty = false
 mut _last_is_mask = 0
@@ -363,6 +524,10 @@ mut _clear_ca = 0
 mut _clear_rect = 0
 mut _upload_fence = 0
 mut _upload_fence_ptr = 0
+mut _quad_template = 0
+mut _prof_flush_total = 0.0
+mut _prof_flush_count = 0
+mut _prof_flush_avg = 0.0
 
 ;; Pre-allocated frame pointers
 mut _ptr_fence = 0
@@ -418,48 +583,55 @@ fn init(win){
    if(!_create_default_texture()){ if(_debug_gfx_enabled){ print("Vulkan: Default texture failed") } return false }
    if(_debug_gfx_enabled){ print("Vulkan: Default texture OK") }
 
-    _current_mvp = sys_malloc(64)
-    _current_model = sys_malloc(64)
-    _pc_buffer   = sys_malloc(144)
-    memset(_pc_buffer, 0, 144)
-    
-    _ptr_fence = sys_malloc(8)
-    _ptr_img_idx = sys_malloc(4)
-    _ptr_bi = sys_malloc(64)
-    _ptr_clear = sys_malloc(96)  ; 3 * 32 bytes max for MSAA clear values
-    _ptr_ri = sys_malloc(128)
-    _ptr_vp = sys_malloc(32)
-    _ptr_sci = sys_malloc(32)
-    _ptr_dsl = sys_malloc(8)
-    _ptr_ds = sys_malloc(8)
-    _ptr_sub = sys_malloc(128)
-    _ptr_wait_sems = sys_malloc(32)
-    _ptr_sig_sems = sys_malloc(32)
-    _ptr_stages = sys_malloc(128)
+   _current_mvp = sys_malloc(64)
+   _current_model = sys_malloc(64)
+   _pc_buffer   = sys_malloc(160)
+   memset(_pc_buffer, 0, 160)
 
-    ;; Pre-allocate upload buffers for update_texture_rect
-    _upload_alloc = sys_malloc(32)
-    _upload_bi = sys_malloc(32)
-    _upload_bar1 = sys_malloc(72)
-    _upload_bar2 = sys_malloc(72)
-    _upload_region = sys_malloc(56)
-    _upload_si = sys_malloc(72)
-    _upload_cb_arr = sys_malloc(8)
-    _upload_cb_ptr = sys_malloc(8)
-    _flush_off = sys_malloc(8)
-    _flush_buf = sys_malloc(8)
-    ;; Upload fence for texture rect updates
-    mut fence_ci = sys_malloc(16)
-    memset(fence_ci, 0, 16)
-    store32(fence_ci, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
-    _upload_fence_ptr = sys_malloc(8)
-    create_fence(_device, fence_ci, 0, _upload_fence_ptr)
-    _upload_fence = load64(_upload_fence_ptr, 0)
-    sys_free(fence_ci)
+   _ptr_fence = sys_malloc(8)
+   _ptr_img_idx = sys_malloc(4)
+   _ptr_bi = sys_malloc(64)
+   _ptr_clear = sys_malloc(96) ; 3 * 32 bytes max for MSAA clear values
+   _ptr_ri = sys_malloc(128)
+   _ptr_vp = sys_malloc(32)
+   _ptr_sci = sys_malloc(32)
+   _ptr_dsl = sys_malloc(8)
+   _ptr_ds = sys_malloc(8)
+   _ptr_sub = sys_malloc(128)
+   _ptr_wait_sems = sys_malloc(32)
+   _ptr_sig_sems = sys_malloc(32)
+   _ptr_stages = sys_malloc(128)
 
-    _upload_cb_ptr = sys_malloc(8)
-    _update_default_mvp(_window_ref)
-    true
+   _quad_template = sys_malloc(216)
+   _init_quad_template()
+
+   ;; Pre-allocate upload buffers for update_texture_rect
+   _upload_alloc = sys_malloc(32)
+   _upload_bi = sys_malloc(32)
+   _upload_bar1 = sys_malloc(72)
+   _upload_bar2 = sys_malloc(72)
+   _upload_region = sys_malloc(56)
+   _upload_si = sys_malloc(72)
+   _upload_cb_arr = sys_malloc(8)
+   _upload_cb_ptr = sys_malloc(8)
+   _flush_off = sys_malloc(8)
+   _flush_buf = sys_malloc(8)
+   ;; Upload fence for texture rect updates
+   mut fence_ci = sys_malloc(16)
+   memset(fence_ci, 0, 16)
+   store32(fence_ci, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
+   _upload_fence_ptr = sys_malloc(8)
+   create_fence(_device, fence_ci, 0, _upload_fence_ptr)
+   _upload_fence = load64(_upload_fence_ptr, 0)
+   sys_free(fence_ci)
+
+   _static_vbo_ptr = sys_malloc(8)
+   _static_off_ptr = sys_malloc(8)
+   store64_raw(_static_off_ptr, 0, 0)
+
+   _upload_cb_ptr = sys_malloc(8)
+   _update_default_mvp(_window_ref)
+   true
 }
 
 fn _create_staging_buffer(){
@@ -480,8 +652,8 @@ fn _create_staging_buffer(){
    def size = load64(mem_req, 0)
    def type_bits = load32(mem_req, 16)
 
-    def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    if(mem_type_index == -1){ return false }
+   def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+   if(mem_type_index == -1){ return false }
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
@@ -529,9 +701,9 @@ fn _find_memory_type(type_filter, properties){
    while(i < count){
       if((type_filter & (1 << i)) != 0){
          def flags = load32(mem_props, 4 + i * 8)
-         if((flags & properties) == properties){ 
-            sys_free(mem_props)
-            return i 
+         if((flags & properties) == properties){
+         sys_free(mem_props)
+         return i
          }
       }
       i += 1
@@ -540,11 +712,186 @@ fn _find_memory_type(type_filter, properties){
    -1
 }
 
+fn _copy_buffer(src, dst, size){
+   "Internal: performs a synchronous GPU-to-GPU buffer copy using a transient command buffer."
+   mut bi = sys_malloc(32) memset(bi, 0, 32)
+   store32(bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+   store32(bi, 1, 16) ; ONE_TIME_SUBMIT
+
+   mut ai = sys_malloc(32) memset(ai, 0, 32)
+   store32(ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
+   store64_raw(ai, _command_pool, 16)
+   store32(ai, 0, 24) ; PRIMARY
+   store32(ai, 1, 28) ; 1
+   mut cb_ptr = sys_malloc(8)
+   allocate_command_buffers(_device, ai, cb_ptr)
+   def cb = load64(cb_ptr, 0)
+
+   begin_command_buffer(cb, bi)
+   mut region = sys_malloc(24) memset(region, 0, 24)
+   store64_raw(region, 0, 0) ; srcOffset
+   store64_raw(region, 0, 8) ; dstOffset
+   store64_raw(region, size, 16)
+   cmd_copy_buffer(cb, src, dst, 1, region)
+   end_command_buffer(cb)
+
+   mut si = sys_malloc(72) memset(si, 0, 72)
+   store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
+   store32(si, 1, 40) ; cb count
+   mut cb_arr = sys_malloc(8) store64_raw(cb_arr, cb, 0)
+   store64_raw(si, cb_arr, 48)
+
+   queue_submit(_graphics_queue, 1, si, 0)
+   queue_wait_idle(_graphics_queue)
+
+   free_command_buffers(_device, _command_pool, 1, cb_ptr)
+   sys_free(bi) sys_free(ai) sys_free(cb_ptr) sys_free(region) sys_free(si) sys_free(cb_arr)
+}
+
+fn create_static_buffer(ptr, count){
+   "Creates a device-local GPU vertex buffer and uploads data to it. Returns a buffer descriptor dict."
+   if(!ptr || count <= 0){ return 0 }
+   def size = count * 36
+
+   ;; 1. Staging Buffer
+   mut s_ci = sys_malloc(56) memset(s_ci, 0, 56)
+   store32(s_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
+   store64_raw(s_ci, size, 24)
+   store32(s_ci, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 32)
+   mut s_ptr = sys_malloc(8)
+   if(create_buffer(_device, s_ci, 0, s_ptr) != 0){ return 0 }
+   def s_buf = load64(s_ptr, 0)
+
+   mut s_req = sys_malloc(24)
+   get_buffer_memory_requirements(_device, s_buf, s_req)
+   def s_size = load64(s_req, 0)
+   def s_type = _find_memory_type(load32(s_req, 16), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+
+   mut s_alloc = sys_malloc(64) memset(s_alloc, 0, 64)
+   store32(s_alloc, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
+   store64_raw(s_alloc, s_size, 16)
+   store32(s_alloc, s_type, 24)
+   mut s_mem_ptr = sys_malloc(8)
+   allocate_memory(_device, s_alloc, 0, s_mem_ptr)
+   def s_mem = load64(s_mem_ptr, 0)
+   bind_buffer_memory(_device, s_buf, s_mem, 0)
+
+   mut s_map = sys_malloc(8)
+   map_memory(_device, s_mem, 0, size, 0, s_map)
+   def s_ptr_map = load64(s_map, 0)
+   memcpy(s_ptr_map, ptr, size)
+   unmap_memory(_device, s_mem)
+
+   ;; 2. Final Device-Local Buffer
+   mut d_ci = sys_malloc(56) memset(d_ci, 0, 56)
+   store32(d_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
+   store64_raw(d_ci, size, 24)
+   store32(d_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32)
+   mut d_ptr = sys_malloc(8)
+   create_buffer(_device, d_ci, 0, d_ptr)
+   def d_buf = load64(d_ptr, 0)
+
+   mut d_req = sys_malloc(24)
+   get_buffer_memory_requirements(_device, d_buf, d_req)
+   def d_size = load64(d_req, 0)
+   def d_type = _find_memory_type(load32(d_req, 16), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+
+   mut d_alloc = sys_malloc(64) memset(d_alloc, 0, 64)
+   store32(d_alloc, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
+   store64_raw(d_alloc, d_size, 16)
+   store32(d_alloc, d_type, 24)
+   mut d_mem_ptr = sys_malloc(8)
+   allocate_memory(_device, d_alloc, 0, d_mem_ptr)
+   def d_mem = load64(d_mem_ptr, 0)
+   bind_buffer_memory(_device, d_buf, d_mem, 0)
+
+   ;; 3. Transfer
+   _copy_buffer(s_buf, d_buf, size)
+
+   ;; 4. Cleanup Staging
+   destroy_buffer(_device, s_buf, 0)
+   free_memory(_device, s_mem, 0)
+
+   sys_free(s_ci) sys_free(s_ptr) sys_free(s_req) sys_free(s_alloc) sys_free(s_mem_ptr) sys_free(s_map)
+   sys_free(d_ci) sys_free(d_ptr) sys_free(d_req) sys_free(d_alloc) sys_free(d_mem_ptr)
+
+   mut m = dict()
+   m = dict_set(m, "handle", d_buf)
+   m = dict_set(m, "memory", d_mem)
+   m = dict_set(m, "count", count)
+   m
+}
+
+fn draw_static_buffer(sbuf, is_lines=false){
+   "Records a draw command for a static GPU buffer. Must be called inside a frame."
+   if(!_frame_open || !is_dict(sbuf)){ return false }
+   def buf = dict_get(sbuf, "handle", 0)
+   def count = dict_get(sbuf, "count", 0)
+   if(!buf || count <= 0){ return false }
+
+   _flush() ; Flush pending dynamic geometry
+
+   def cb = get(_command_buffers, _current_frame)
+
+   ; Ensure pipeline is correctly bound for the static mesh
+   mut target = _pipeline
+   if(is_lines && _line_pipeline != 0){
+      target = _line_pipeline
+      if(_last_is_mask != 0){ _last_is_mask = 0 _pc_dirty = true }
+      if(_last_is_unlit != 1){ _last_is_unlit = 1 _pc_dirty = true }
+   } else {
+      mut base_pipe = _pipeline
+      if(_current_is_unlit != 0 && _unlit_pipeline != 0){ base_pipe = _unlit_pipeline }
+      target = _target_pipeline
+      if(target == _pipeline){ target = base_pipe }
+      if(_is_wireframe && _wire_pipeline != 0){
+         if(target == _pipeline || target == _unlit_pipeline){ target = _wire_pipeline }
+      }
+   }
+
+   if(_last_bound_pipe != target){
+       cmd_bind_pipeline(cb, 0, target)
+       _last_bound_pipe = target
+       _pc_dirty = true
+   }
+
+   ; Ensure textures and descriptors are bound
+   mut tid = _current_texture_id
+   if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
+   def ds = texture_descriptor(tid)
+   if(ds && (ds != _last_bound_ds || tid != _last_bound_tex_id)){
+      store64_raw(_ptr_ds, ds, 0)
+      cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 1, _ptr_ds, 0, 0)
+      _last_bound_ds = ds
+      _last_bound_tex_id = tid
+      mut new_mask = 0
+      if(texture_format(tid) == 9){ new_mask = 1 }
+      if(new_mask != _last_is_mask){ _last_is_mask = new_mask _pc_dirty = true }
+   }
+
+   _sync_pc() ; Sync push constants
+
+   store64_raw(_static_vbo_ptr, buf, 0)
+
+   cmd_bind_vertex_buffers(cb, 0, 1, _static_vbo_ptr, _static_off_ptr)
+   cmd_draw(cb, count, 1, 0, 0)
+
+   _total_draw_calls += 1
+   _frame_draw_calls += 1
+
+   ; Rebind dynamic VBO back
+   store64_raw(_static_off_ptr, _current_frame_vertex_offset, 0)
+   store64_raw(_static_vbo_ptr, _vertex_buffer, 0)
+   cmd_bind_vertex_buffers(cb, 0, 1, _static_vbo_ptr, _static_off_ptr)
+   store64_raw(_static_off_ptr, 0, 0)
+   true
+}
+
 fn create_texture_ex(width, height, pixels, format=37){
    "Creates a GPU texture. Format 37=RGBA8, 9=R8."
    mut bpp = 4
    if(format == 9){ bpp = 1 }
-   
+
    ; 1. Create Image
    mut img_ci = sys_malloc(88)
    memset(img_ci, 0, 88)
@@ -606,8 +953,12 @@ fn create_texture_ex(width, height, pixels, format=37){
    ; 4. Upload Initial Pixels
    def img_size = width * height * bpp
    if(pixels && _staging_map){
+      if(img_size > _staging_capacity){
+         if(_debug_gfx_enabled){ print(f"Vulkan: IMAGE TOO LARGE FOR STAGING: {img_size} > {_staging_capacity}") }
+         return -1
+      }
       memcpy(_staging_map, pixels, img_size)
-      
+
       mut alloc_cb = sys_malloc(32)
       memset(alloc_cb, 0, 32)
       store32(alloc_cb, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
@@ -659,7 +1010,7 @@ fn create_texture_ex(width, height, pixels, format=37){
       cmd_pipeline_barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, bar1)
 
       end_command_buffer(cb)
-      
+
       mut si = sys_malloc(72)
       memset(si, 0, 72)
       store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
@@ -667,7 +1018,7 @@ fn create_texture_ex(width, height, pixels, format=37){
       store64_raw(si, cb_ptr, 48)
       queue_submit(_graphics_queue, 1, si, 0)
       device_wait_idle(_device)
-      
+
       free_command_buffers(_device, _command_pool, 1, cb_ptr)
       sys_free(alloc_cb) sys_free(cb_ptr) sys_free(bi) sys_free(bar1) sys_free(region) sys_free(si)
    }
@@ -683,15 +1034,15 @@ fn create_texture_ex(width, height, pixels, format=37){
    store64_raw(alloc_ds, dsl_ptr, 32)
    mut ds_ptr = sys_malloc(8)
    def dres = allocate_descriptor_sets(_device, alloc_ds, ds_ptr)
-    mut ds = 0
-    if(dres == 0){ ds = load64(ds_ptr, 0) }
+   mut ds = 0
+   if(dres == 0){ ds = load64(ds_ptr, 0) }
 
    if(ds){
       mut im_info = sys_malloc(24)
       store64_raw(im_info, _default_sampler, 0)
       store64_raw(im_info, view, 8)
       store32(im_info, 5, 16) ; SHADER_READ_ONLY_OPTIMAL
-      
+
       mut write = sys_malloc(64)
       memset(write, 0, 64)
       store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
@@ -718,10 +1069,10 @@ fn create_texture_ex(width, height, pixels, format=37){
    _textures = append(_textures, tex)
    _texture_ds_cache = append(_texture_ds_cache, ds)
    _texture_fmt_cache = append(_texture_fmt_cache, format)
-   
+
    sys_free(img_ci) sys_free(img_ptr) sys_free(mem_req) sys_free(alloc_info) sys_free(mem_ptr)
    sys_free(view_ci) sys_free(view_ptr) sys_free(dsl_ptr) sys_free(alloc_ds) sys_free(ds_ptr)
-   
+
    tex_id
 }
 
@@ -860,7 +1211,6 @@ fn set_model_matrix(mat){
 fn set_mvp(mat){
    "Updates the View-Projection matrix for the renderer."
    if(_current_mvp && is_list(mat)){
-      if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: set_vp frames={_total_frames}") } }
       if(_vertex_offset != _last_flush_offset){ _flush() }
       mat4_to_buffer(mat, _current_mvp)
       _mvp_dirty = true
@@ -872,6 +1222,12 @@ fn set_ortho(l, r, b, t, n, f){
    "Sets the MVP matrix to an orthographic projection."
    if(b < t){ def tmp = b b = t t = tmp } ; enforce Y-down for UI coords
    def mat = mat4_ortho(l, r, b, t, n, f)
+   set_mvp(mat)
+}
+
+fn set_perspective(fovy, aspect, near, far){
+   "Sets the View-Projection matrix to a perspective projection."
+   def mat = mat4_perspective(fovy, aspect, near, far)
    set_mvp(mat)
 }
 
@@ -942,7 +1298,7 @@ fn read_framebuffer(){
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, readback_buf, mem_req)
    def mem_idx = _find_memory_type(load32(mem_req, 16), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-   
+
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
@@ -975,7 +1331,7 @@ fn read_framebuffer(){
    store32(barrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0)
    store32(barrier, 0, 16) ; srcAccess
    store32(barrier, VK_ACCESS_TRANSFER_READ_BIT, 20) ; dstAccess
-   
+
    mut old_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
    if(!_surface){ old_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
    store32(barrier, old_layout, 24)
@@ -1019,14 +1375,15 @@ fn read_framebuffer(){
    ; Copy to Nytrix heap so we can free GPU resources
    def pixels = malloc(size)
    memcpy(pixels, mapped_data, size)
-   
+
    unmap_memory(_device, readback_mem)
    destroy_buffer(_device, readback_buf, 0)
    free_memory(_device, readback_mem, 0)
    free_command_buffers(_device, _command_pool, 1, cb_p)
 
-   ; Handle BGR swap for standard BGRA swapchains
-   if(_swapchain_format == 44 || _swapchain_format == 50){
+   ; Handle BGR swap for standard formats (44=BGRA8_UNORM, 50=BGRA8_SRGB, etc.)
+   ; Standard BGRA formats: 44, 45, 46, 47, 48, 49, 50, 51, 52
+   if(_swapchain_format >= 44 && _swapchain_format <= 52){
       mut b = 0
       while(b < size){
          def blue = load8(pixels, b)
@@ -1036,6 +1393,7 @@ fn read_framebuffer(){
          b += 4
       }
    }
+   if(_debug_gfx_enabled){ print(f"Vulkan: Captured framebuffer format={_swapchain_format} size={w}x{h}") }
 
    mut res = dict(4)
    res = dict_set(res, "data",   pixels)
@@ -1078,8 +1436,8 @@ fn _create_vertex_buffer(){
    def type_bits = load32(mem_req, 16)
    common.touch(type_bits)
 
-    def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-    if(mem_type_index == -1){ return false }
+   def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+   if(mem_type_index == -1){ return false }
 
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
@@ -1096,17 +1454,17 @@ fn _create_vertex_buffer(){
 
    bind_buffer_memory(_device, _vertex_buffer, _vertex_memory, 0)
 
-    mut map_ptr = sys_malloc(8)
-    def map_res = map_memory(_device, _vertex_memory, 0, size, 0, map_ptr)
-    if(map_res == 0){
+   mut map_ptr = sys_malloc(8)
+   def map_res = map_memory(_device, _vertex_memory, 0, size, 0, map_ptr)
+   if(map_res == 0){
        _vertex_map = load64(map_ptr, 0)
-    } else {
+   } else {
        _vertex_map = 0
-    }
-    
-    ; Create CPU-side local buffer with enough room for all slices
-    _local_vertex_map = sys_malloc(_vertex_capacity * MAX_FRAMES_IN_FLIGHT)
-    true
+   }
+
+   ; Create CPU-side local buffer with enough room for all slices
+   _local_vertex_map = sys_malloc(_vertex_capacity * MAX_FRAMES_IN_FLIGHT)
+   true
 }
 
 fn _create_instance(){
@@ -1128,7 +1486,7 @@ fn _create_instance(){
    memset(create_info, 0, 64)
    store32(create_info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, 0)
    store64_raw(create_info, app_info, 24)
-   store32(create_info, ext_count, 48)         ; extensions
+   store32(create_info, ext_count, 48) ; extensions
    store64_raw(create_info, ext_ptrs, 56)
    mut inst_ptr = sys_malloc(8)
    store32(inst_ptr, 0, 0) store32(inst_ptr, 0, 4)
@@ -1163,7 +1521,7 @@ fn _create_surface(win){
       return false
    }
    mut surf_ptr = sys_malloc(8)
-   store32(surf_ptr, 0, 0); store32(surf_ptr, 0, 4)
+   store32(surf_ptr, 0, 0) ; store32(surf_ptr, 0, 4)
    def res = ui_glfw.create_surface(_instance, window, 0, surf_ptr)
    if(res != 0){
       return false
@@ -1227,10 +1585,10 @@ fn _create_logical_device(){
    store32(priorities, 0x3f800000, 0)
    mut queue_create_info = sys_malloc(40)
    store32(queue_create_info, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, 0)
-   store32(queue_create_info, 0, 8) store32(queue_create_info, 0, 12)   ; pNext
-   store32(queue_create_info, 0, 16)          ; flags
+   store32(queue_create_info, 0, 8) store32(queue_create_info, 0, 12) ; pNext
+   store32(queue_create_info, 0, 16) ; flags
    store32(queue_create_info, graphics_family, 20) ; queueFamilyIndex
-   store32(queue_create_info, 1, 24)               ; queueCount
+   store32(queue_create_info, 1, 24) ; queueCount
    store64_raw(queue_create_info, priorities, 32) ; pQueuePriorities
    mut ext1 = sys_malloc(32)
    strcpy(ext1, "VK_KHR_swapchain")
@@ -1238,19 +1596,20 @@ fn _create_logical_device(){
    store64_raw(ext_ptrs, ext1, 0)
    mut create_info = sys_malloc(72)
    store32(create_info, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, 0)
-   store32(create_info, 0, 8) store32(create_info, 0, 12)                   ; pNext
-   store32(create_info, 0, 16)                         ; flags
-   store32(create_info, 1, 20)                         ; queueCreateInfoCount
+   store32(create_info, 0, 8) store32(create_info, 0, 12) ; pNext
+   store32(create_info, 0, 16) ; flags
+   store32(create_info, 1, 20) ; queueCreateInfoCount
    store64_raw(create_info, queue_create_info, 24) ; pQueueCreateInfos
-   store32(create_info, 0, 32)                         ; enabledLayerCount
-   store32(create_info, 0, 40) store32(create_info, 0, 44)                 ; ppEnabledLayerNames
-   store32(create_info, 1, 48)                         ; enabledExtensionCount
-   store64_raw(create_info, ext_ptrs, 56)          ; ppEnabledExtensionNames
-   store32(create_info, 0, 64) store32(create_info, 0, 68)                 ; pEnabledFeatures (set below)
-   ; Enable wideLines for thick line rendering (VkPhysicalDeviceFeatures.wideLines = field 32 = offset 128)
+   store32(create_info, 0, 32) ; enabledLayerCount
+   store32(create_info, 0, 40) store32(create_info, 0, 44) ; ppEnabledLayerNames
+   store32(create_info, 1, 48) ; enabledExtensionCount
+   store64_raw(create_info, ext_ptrs, 56) ; ppEnabledExtensionNames
+   store32(create_info, 0, 64) store32(create_info, 0, 68) ; pEnabledFeatures (set below)
+   ; Enable wideLines and fillModeNonSolid
    mut dev_features = sys_malloc(232)
    memset(dev_features, 0, 232)
-   store32(dev_features, 1, 60) ; wideLines = VK_TRUE (field 15, byte offset 60)
+   store32(dev_features, 1, 52) ; fillModeNonSolid = VK_TRUE
+   store32(dev_features, 1, 60) ; wideLines = VK_TRUE
    store64_raw(create_info, dev_features, 64)
    mut dev_ptr = sys_malloc(8)
    store32(dev_ptr, 0, 0) store32(dev_ptr, 0, 4)
@@ -1290,7 +1649,7 @@ fn _choose_present_mode(){
    def count = load32(count_ptr, 0)
    mut modes_ptr = sys_malloc(count * 4)
    get_physical_device_surface_present_modes_khr(_physical_device, _surface, count_ptr, modes_ptr)
-   
+
    mut mailbox_supported = false
    mut immediate_supported = false
    mut i = 0
@@ -1329,15 +1688,15 @@ fn _create_headless_image(w, h){
    store32(img_ci, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 56)
    store32(img_ci, 0, 60) ; sharing exclusive
    store32(img_ci, 0, 80) ; layout undefined
-   
+
    mut p = sys_malloc(8)
    create_image(_device, img_ci, 0, p)
    def img = load64(p, 0)
-   
+
    mut req = sys_malloc(24)
    get_image_memory_requirements(_device, img, req)
    def mem_type = _find_memory_type(load32(req, 16), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-   
+
    mut ai = sys_malloc(64)
    memset(ai, 0, 64)
    store32(ai, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
@@ -1403,7 +1762,7 @@ fn _create_swapchain(win){
    if(max_imgs > 0 && count > max_imgs){ count = max_imgs }
    def pre_transform = load32(caps, 40)
    def composite_alpha = _choose_composite_alpha(load32(caps, 44))
-   
+
    mut create_info = sys_malloc(128)
    memset(create_info, 0, 128)
    store32(create_info, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, 0)
@@ -1476,7 +1835,6 @@ fn _create_swapchain_image_views(){
    }
    true
 }
-
 
 fn _destroy_swapchain_objects(){
    "Releases swapchain-dependent resources (framebuffers, views, etc)."
@@ -1685,13 +2043,13 @@ fn _create_render_pass(){
       store32(atts, 2, 16) ; storeOp DONT_CARE (MSAA image doesn't need to be stored)
       store32(atts, 2, 20)
       store32(atts, 2, 24)
-      store32(atts, 0, 28)  ; initialLayout UNDEFINED
-      store32(atts, 2, 32)  ; finalLayout COLOR_ATTACHMENT_OPTIMAL
+      store32(atts, 0, 28) ; initialLayout UNDEFINED
+      store32(atts, 2, 32) ; finalLayout COLOR_ATTACHMENT_OPTIMAL
       ; att 1 - depth
       store32(atts, 126, 36+4)
       store32(atts, samples, 36+8)
-      store32(atts, 2, 36+12)
-      store32(atts, 2, 36+16)
+      store32(atts, 1, 36+12) ; loadOp CLEAR
+      store32(atts, 2, 36+16) ; storeOp DONT_CARE
       store32(atts, 2, 36+20)
       store32(atts, 2, 36+24)
       store32(atts, 0, 36+28)
@@ -1703,7 +2061,7 @@ fn _create_render_pass(){
       store32(atts, 0, 72+16) ; storeOp STORE
       store32(atts, 2, 72+20)
       store32(atts, 2, 72+24)
-      store32(atts, 0, 72+28)  ; UNDEFINED
+      store32(atts, 0, 72+28) ; UNDEFINED
       store32(atts, 1000001002, 72+32) ; PRESENT_SRC_KHR
 
       mut car = sys_malloc(8) store32(car, 0, 0) store32(car, 2, 4) ; att0 COLOR_ATTACHMENT_OPTIMAL
@@ -1712,11 +2070,11 @@ fn _create_render_pass(){
 
       mut sd = sys_malloc(72)
       memset(sd, 0, 72)
-      store32(sd, 0, 4)         ; pipelineBindPoint = GRAPHICS
-      store32(sd, 1, 24)        ; colorAttachmentCount = 1
-      store64_raw(sd, car, 32)  ; pColorAttachments (offset 32)
-      store64_raw(sd, rar, 40)  ; pResolveAttachments (offset 40) — resolves MSAA to swapchain
-      store64_raw(sd, dar, 48)  ; pDepthStencilAttachment (offset 48)
+      store32(sd, 0, 4) ; pipelineBindPoint = GRAPHICS
+      store32(sd, 1, 24) ; colorAttachmentCount = 1
+      store64_raw(sd, car, 32) ; pColorAttachments (offset 32)
+      store64_raw(sd, rar, 40) ; pResolveAttachments (offset 40) — resolves MSAA to swapchain
+      store64_raw(sd, dar, 48) ; pDepthStencilAttachment (offset 48)
 
       mut dep = sys_malloc(28)
       store32(dep, -1, 0)
@@ -1746,13 +2104,14 @@ fn _create_render_pass(){
       memset(atts, 0, 72)
       store32(atts, _swapchain_format, 4)
       store32(atts, 1, 8)
-      store32(atts, 1, 12)  ; CLEAR
-      store32(atts, 0, 16)  ; STORE
+      store32(atts, 1, 12) ; CLEAR
+      store32(atts, 0, 16) ; STORE
       store32(atts, 2, 20) store32(atts, 2, 24)
       store32(atts, 0, 28) store32(atts, 1000001002, 32) ; PRESENT_SRC_KHR
       store32(atts, 126, 36+4)
       store32(atts, 1, 36+8)
-      store32(atts, 2, 36+12) store32(atts, 2, 36+16)
+      store32(atts, 1, 36+12) ; loadOp CLEAR
+      store32(atts, 2, 36+16) ; storeOp DONT_CARE
       store32(atts, 2, 36+20) store32(atts, 2, 36+24)
       store32(atts, 0, 36+28) store32(atts, 3, 36+32)
 
@@ -1799,8 +2158,8 @@ fn _create_framebuffers(){
       mut att_count = 0
       if(msaa){
          attach_ptr = sys_malloc(24)
-         store64_raw(attach_ptr, _msaa_color_view, 0)       ; att0 MSAA color
-         store64_raw(attach_ptr, _depth_view, 8)             ; att1 depth
+         store64_raw(attach_ptr, _msaa_color_view, 0) ; att0 MSAA color
+         store64_raw(attach_ptr, _depth_view, 8) ; att1 depth
          store64_raw(attach_ptr, get(_swapchain_image_views, i), 16) ; att2 resolve
          att_count = 3
       } else {
@@ -1908,6 +2267,119 @@ fn _create_command_buffers(){
    true
 }
 
+fn compile_glsl_to_spirv(source, stage_ext){
+   "Compiles GLSL source string to SPIR-V bytes using glslc."
+   def tmp_src = f"/build/cache/ny_shader_custom.{stage_ext}"
+   def tmp_spv = f"/build/cache/ny_shader_custom.{stage_ext}.spv"
+   unwrap(file_write(tmp_src, source))
+   if(proc.run("glslc", ["glslc", tmp_src, "-o", tmp_spv]) != 0){ return 0 }
+   def res = file_read(tmp_spv)
+   if(is_err(res)){ return 0 }
+   unwrap(res)
+}
+
+fn create_shader_module_from_source(source, stage_ext){
+   "Compiles GLSL source and creates a Vulkan shader module."
+   def spirv = compile_glsl_to_spirv(source, stage_ext)
+   if(!spirv){ return 0 }
+
+   def size = len(spirv)
+   mut ci = sys_malloc(128)
+   memset(ci, 0, 128)
+   store32(ci, 16, 0) ; VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+   store64_raw(ci, size, 24)
+   store64_raw(ci, spirv, 32)
+
+   mut mod_ptr = sys_malloc(8)
+   if(create_shader_module(_device, ci, 0, mod_ptr) != 0){ return 0 }
+   def sm_low = load32(mod_ptr, 0)
+   def sm_high = load32(mod_ptr, 4)
+   (sm_high * 4294967296) + (sm_low & 0xFFFFFFFF)
+}
+
+fn create_pipeline(vert_mod, frag_mod, topology=3, depth_test=1, depth_write=1, cull_mode=0, front_face=0, depth_bias=0, depth_clamp=0){
+   "Creates a custom graphics pipeline. topology: 3=TRI_LIST, 1=LINE_LIST."
+   mut main_str = sys_malloc(8)
+   strcpy(main_str, "main")
+
+   def s1 = VkPipelineShaderStageCreateInfo(1, vert_mod, main_str)
+   def s2 = VkPipelineShaderStageCreateInfo(16, frag_mod, main_str)
+   mut stages = sys_malloc(96)
+   memcpy(stages, s1, 48)
+   memcpy(stages + 48, s2, 48)
+
+   ; Use built-in descriptors and layout for now
+   ; (Could be extended to accept custom layouts)
+   def pipe_layout = _pipeline_layout
+
+   ; Vertex Input (using standard 36-byte stride)
+   mut binding_desc = sys_malloc(12)
+   store32(binding_desc, 0, 0)
+   store32(binding_desc, 36, 4)
+   store32(binding_desc, 0, 8)
+
+   mut attr_desc = sys_malloc(64)
+   store32(attr_desc, 0, 0) store32(attr_desc, 0, 4) store32(attr_desc, 106, 8) store32(attr_desc, 0, 12)
+   store32(attr_desc, 1, 16) store32(attr_desc, 0, 20) store32(attr_desc, 103, 24) store32(attr_desc, 12, 28)
+   store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 37, 40) store32(attr_desc, 20, 44)
+   store32(attr_desc, 3, 48) store32(attr_desc, 0, 52) store32(attr_desc, 106, 56) store32(attr_desc, 24, 60)
+   def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 4, attr_desc)
+
+   def ia = VkPipelineInputAssemblyStateCreateInfo(topology, 0)
+   def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
+   ; 0 is CCW, 1 is CW. We use negative viewport height (Vulkan 1.1+ feature),
+   ; which flips the Y coordinate and thus reverses the winding. Use CW (1) to compensate.
+   ; 0 is CCW, 1 is CW.
+   def rs = VkPipelineRasterizationStateCreateInfo(depth_clamp, 0, 0, cull_mode, front_face, depth_bias, 1.25, 0.0, 1.75, 1.0)
+   def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
+   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15)
+   def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
+   def dss = VkPipelineDepthStencilStateCreateInfo(depth_test, depth_write, 3, 0, 0, 0, 0, 0.0, 1.0)
+
+   mut dyn_states = sys_malloc(12)
+   store32(dyn_states, 0, 0)
+   store32(dyn_states, 1, 4)
+   store32(dyn_states, 2, 8) ; line width
+   def ds = VkPipelineDynamicStateCreateInfo(3, dyn_states)
+
+   def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs, ms, dss, cb, ds, pipe_layout, _render_pass, 0, 0, -1)
+   mut pipe_ptr = sys_malloc(8)
+   if(create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr) != 0){ return 0 }
+   load64(pipe_ptr, 0)
+}
+
+fn bind_pipeline(pipe){
+   "Binds a custom graphics pipeline for subsequent draw calls. Pass 0 to restore default."
+   if(!_frame_open){ return }
+   mut p = pipe
+   if(p == 0){ p = _pipeline }
+   if(p == _last_bound_pipe){ _target_pipeline = p return }
+   _flush()
+   def cb = get(_command_buffers, _current_frame)
+   cmd_bind_pipeline(cb, 0, p)
+   _last_bound_pipe = p
+   _target_pipeline = p
+   _pc_dirty = true ; force push constants for new pipeline
+}
+
+fn push_constants(ptr, size, offset=0){
+   "Pushes raw data to the current pipeline's push constants and caches it for flushes."
+   if(!_frame_open || !ptr || size <= 0){ return }
+   if(offset + size > 160){ return }
+
+   ; Cache in _pc_buffer so automatic _flush doesn't clobber it
+   memcpy(_pc_buffer + offset, ptr, size)
+   _pc_dirty = true
+
+   def cb = get(_command_buffers, _current_frame)
+   cmd_push_constants(cb, _pipeline_layout, 1 | 16, offset, size, ptr)
+}
+
+fn _get_default_pipeline(){
+   "Internal: returns the default triangle pipeline handle."
+   _pipeline
+}
+
 fn _create_shader_module(path){
    "Loads a SPIR-V shader file and creates a Vulkan shader module handle."
    def res = file_read(path)
@@ -1940,17 +2412,37 @@ fn _ensure_shader_binaries(){
    if(is_str(_cfg_vert_spv) && file_exists(_cfg_vert_spv)){
       proc.run("cp", ["cp", _cfg_vert_spv, vert_spv])
      } else {
-        def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(location=3) in vec3 inNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nlayout(location=2) out vec3 vNormal;\nvoid main(){\n  gl_Position = pc.vp * pc.model * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n  vNormal = mat3(pc.model) * inNormal;\n}\n"
-        unwrap(file_write("/build/cache/ny_shader.vert", vert_src))
-        if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
+      def vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(location=3) in vec3 inNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nlayout(location=2) out vec3 vNormal;\nvoid main(){\n  gl_Position = pc.vp * pc.model * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n  vNormal = mat3(pc.model) * inNormal;\n}\n"
+      unwrap(file_write("/build/cache/ny_shader.vert", vert_src))
+      if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
      }
-    if(is_str(_cfg_frag_spv) && file_exists(_cfg_frag_spv)){
+   if(is_str(_cfg_frag_spv) && file_exists(_cfg_frag_spv)){
        proc.run("cp", ["cp", _cfg_frag_spv, frag_spv])
-    } else {
-       def frag_src = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec2 vUV;\nlayout(location=2) in vec3 vNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(binding=0) uniform sampler2D texSampler;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec4 tex = texture(texSampler, vUV);\n  vec3 normal = normalize(vNormal);\n  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));\n  float diff = max(dot(normal, lightDir), 0.0);\n  vec3 diffuse = diff * vColor.rgb;\n  vec3 ambient = 0.2 * vColor.rgb;\n  if(pc.isMask != 0) {\n     outColor = vec4(vColor.rgb, vColor.a * tex.r);\n  } else if(pc.isUnlit != 0) {\n     outColor = vColor * tex;\n  } else {\n     outColor = vec4(ambient + diffuse, vColor.a) * tex;\n  }\n}\n"
+     } else {
+      def frag_src = "#version 450\n" +
+         "layout(location=0) in vec4 vColor;\n" +
+         "layout(location=1) in vec2 vUV;\n" +
+         "layout(location=2) in vec3 vNormal;\n" +
+         "layout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\n" +
+         "layout(binding=0) uniform sampler2D texSampler;\n" +
+         "layout(location=0) out vec4 outColor;\n" +
+         "void main(){\n" +
+         "  vec4 tex = texture(texSampler, vUV);\n" +
+         "  if(pc.isMask != 0){ tex = vec4(1.0, 1.0, 1.0, tex.r); }\n" +
+         "  if(pc.isUnlit != 0){\n" +
+         "     outColor = vColor * tex;\n" +
+             "  } else {\n" +
+             "     vec3 normal = normalize(vNormal + vec3(0.0, 0.0, 0.0001));\n" +
+             "     vec3 l = normalize(vec3(0.5, 1.0, 0.5));\n" +
+             "     float diff = max(dot(normal, l), 0.1);\n" +
+             "     vec3 skyCol = vec3(0.5, 0.7, 1.0); vec3 groundCol = vec3(0.12, 0.12, 0.15);\n" +
+             "     vec3 ambient = mix(groundCol, skyCol, normal.y * 0.5 + 0.5) * 0.4;\n" +
+             "     outColor = vColor * tex * vec4(ambient + diff * 0.7, 1.0);\n" +
+             "  }\n" +
+         "}\n"
        unwrap(file_write("/build/cache/ny_shader.frag", frag_src))
        if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
-    }
+   }
    file_exists(vert_spv) && file_exists(frag_spv)
 }
 
@@ -1978,7 +2470,7 @@ fn _create_graphics_pipeline(){
    mut pc_range = sys_malloc(12)
    store32(pc_range, 1 | 16, 0) ; STAGE_VERTEX | STAGE_FRAGMENT
    store32(pc_range, 0, 4)
-   store32(pc_range, 144, 8)     ; size 144 (aligned)
+   store32(pc_range, 160, 8) ; size 160 (aligned)
    mut dsl_arr = sys_malloc(8)
    store64_raw(dsl_arr, _descriptor_set_layout, 0)
 
@@ -1996,7 +2488,7 @@ fn _create_graphics_pipeline(){
    store32(binding_desc, 0, 0) ; binding
    store32(binding_desc, 36, 4) ; stride (36)
    store32(binding_desc, 0, 8) ; inputRate VERTEX
- 
+
    mut attr_desc = sys_malloc(64) ; 4 attributes
    ; 0: Position (vec3) offset 0
    store32(attr_desc, 0, 0) store32(attr_desc, 0, 4) store32(attr_desc, 106, 8) store32(attr_desc, 0, 12)
@@ -2006,17 +2498,18 @@ fn _create_graphics_pipeline(){
    store32(attr_desc, 2, 32) store32(attr_desc, 0, 36) store32(attr_desc, 37, 40) store32(attr_desc, 20, 44)
    ; 3: Normal (vec3) offset 24
    store32(attr_desc, 3, 48) store32(attr_desc, 0, 52) store32(attr_desc, 106, 56) store32(attr_desc, 24, 60)
- 
+
    def vi = VkPipelineVertexInputStateCreateInfo(1, binding_desc, 4, attr_desc)
 
    ; Common States
    def viewport_state = VkPipelineViewportStateCreateInfo(1, 0, 1, 0)
-   def rs = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0) ; cull=NONE, front=CCW, fill=0
+   def rs_cull = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 2, 0, 0, 0, 0.0, 0.0, 1.0) ; cull=BACK(2), front=CCW(0)
+   def rs_nocull = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 1.0) ; cull=NONE(0), front=CCW(0)
    def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
-    def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) ; blend=1, srcC=SRC_ALPHA(6), dstC=ONE_MINUS_SRC_ALPHA(7), srcA=ONE(1), dstA=ONE_MINUS_SRC_ALPHA(7)
-    def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
-    
-    ; Depth Stencil State (Enabled for 3D)
+   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) ; blend=1, srcC=SRC_ALPHA(6), dstC=ONE_MINUS_SRC_ALPHA(7), srcA=ONE(1), dstA=ONE_MINUS_SRC_ALPHA(7)
+   def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
+
+   ; Depth Stencil State (Enabled for 3D)
 
    mut dyn_states = sys_malloc(8)
    store32(dyn_states, 0, 0)
@@ -2024,8 +2517,8 @@ fn _create_graphics_pipeline(){
    def ds = VkPipelineDynamicStateCreateInfo(2, dyn_states)
 
    ; Pipeline
-    mut main_str = sys_malloc(8)
-    strcpy(main_str, "main")
+   mut main_str = sys_malloc(8)
+   strcpy(main_str, "main")
 
    def s1 = VkPipelineShaderStageCreateInfo(1, _vert_module, main_str)
    def s2 = VkPipelineShaderStageCreateInfo(16, _frag_module, main_str)
@@ -2033,11 +2526,13 @@ fn _create_graphics_pipeline(){
    mut stages = sys_malloc(96)
    memcpy(stages, s1, 48)
    memcpy(stages + 48, s2, 48)
+
+   ; 1. Create Lit Pipeline (with depth test)
    def ia = VkPipelineInputAssemblyStateCreateInfo(3, 0)
    ; Enable robust Depth Testing & Writing for 3D Mesh culling
    def dss = VkPipelineDepthStencilStateCreateInfo(1, 1, 3, 0, 0, 0, 0, 0.0, 1.0)
    common.touch(dss)
-   def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   def ci = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_cull, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
    mut pipe_ptr = sys_malloc(8)
    store32(pipe_ptr, 0, 0) store32(pipe_ptr, 0, 4)
    if(_debug_gfx_enabled){
@@ -2051,20 +2546,25 @@ fn _create_graphics_pipeline(){
    _pipeline = load64(pipe_ptr, 0)
    if(_debug_gfx_enabled){ _dbg_handle("pipeline", _pipeline) }
 
-   ;; Create a second pipeline for LINE_LIST rendering with dynamic line width
+   ; 2. Create Unlit Pipeline (no depth test)
+   def dss_unlit = VkPipelineDepthStencilStateCreateInfo(0, 0, 0, 0, 0, 0, 0, 0.0, 1.0)
+     def ci_unlit = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_nocull, ms, dss_unlit, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   if(create_graphics_pipelines(_device, 0, 1, ci_unlit, 0, pipe_ptr) == 0){
+       _unlit_pipeline = load64(pipe_ptr, 0)
+   }
+
+   ; 3. Create Line Pipeline (for robust line rendering)
    def ia_line = VkPipelineInputAssemblyStateCreateInfo(1, 0) ; topology=LINE_LIST
-   def rs_line = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 1.0) ; lineWidth dynamic
-   mut dyn_line = sys_malloc(12) ; 3 dynamic states: VIEWPORT, SCISSOR, LINE_WIDTH
-   store32(dyn_line, 0, 0) store32(dyn_line, 1, 4) store32(dyn_line, 2, 8) ; 0=VIEWPORT,1=SCISSOR,2=LINE_WIDTH
-   def ds_line = VkPipelineDynamicStateCreateInfo(3, dyn_line)
-   def ci_line = VkGraphicsPipelineCreateInfo(2, stages, vi, ia_line, 0, viewport_state, rs_line, ms, dss, cb, ds_line, _pipeline_layout, _render_pass, 0, 0, -1)
-   mut lpipe_ptr = sys_malloc(8)
-   if(_debug_gfx_enabled){ print("Vulkan: Creating line pipeline...") }
-   if(create_graphics_pipelines(_device, 0, 1, ci_line, 0, lpipe_ptr) == 0){
-      _line_pipeline = load64(lpipe_ptr, 0)
-      if(_debug_gfx_enabled){ _dbg_handle("line pipeline", _line_pipeline) }
-   } else {
-      _line_pipeline = _pipeline
+   def ci_line = VkGraphicsPipelineCreateInfo(2, stages, vi, ia_line, 0, viewport_state, rs_nocull, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   if(create_graphics_pipelines(_device, 0, 1, ci_line, 0, pipe_ptr) == 0){
+       _line_pipeline = load64(pipe_ptr, 0)
+   }
+
+   ; 4. Create Wireframe Pipeline (PolygonMode=LINE=1, Cull=NONE=0)
+   def rs_wire = VkPipelineRasterizationStateCreateInfo(0, 0, 1, 0, 0, 0, 0, 0.0, 0.0, 1.0)
+   def ci_wire = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_wire, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   if(create_graphics_pipelines(_device, 0, 1, ci_wire, 0, pipe_ptr) == 0){
+       _wire_pipeline = load64(pipe_ptr, 0)
    }
 
    if(_debug_gfx_enabled){ print("Vulkan: Graphics pipeline initialization complete.") }
@@ -2074,12 +2574,24 @@ fn _create_graphics_pipeline(){
 fn begin_frame(){
    "Prepares the renderer for a new frame (sync, acquire image, begin recording)."
    if(!_device){ return false }
-   if(_debug_gfx_enabled){ if(_total_frames % 100 == 0){ print(f"Vulkan: Frame {_total_frames}") } }
-   
+
    if(_window_ref){
-      def cur_ww = int(dict_get(_window_ref, "w", _swapchain_extent_w))
-      def cur_wh = int(dict_get(_window_ref, "h", _swapchain_extent_h))
-      if(cur_ww > 0 && cur_wh > 0 && (cur_ww != _swapchain_extent_w || cur_wh != _swapchain_extent_h)){
+      mut cur_ww = int(dict_get(_window_ref, "w", _swapchain_extent_w))
+      mut cur_wh = int(dict_get(_window_ref, "h", _swapchain_extent_h))
+
+      ;; Handle minimization: spin until window is restored
+      if(cur_ww == 0 || cur_wh == 0){
+         while(cur_ww == 0 || cur_wh == 0){
+         if(!_window_ref){ return false }
+         msleep(10) ; yield to OS
+         ;; Note: must poll here if not already doing so on main thread, but assume ui.ny does it.
+         ;; Re-read size from dict (updated by GLFW callback in std.ui.window)
+         cur_ww = int(dict_get(_window_ref, "w", 0))
+         cur_wh = int(dict_get(_window_ref, "h", 0))
+         }
+      }
+
+      if(cur_ww != _swapchain_extent_w || cur_wh != _swapchain_extent_h){
          if(_debug_gfx_enabled){ print(f"Vulkan: Window resized {cur_ww}x{cur_wh}") }
          if(!_recreate_swapchain()){ return false }
       }
@@ -2087,46 +2599,46 @@ fn begin_frame(){
 
    _frame_open = false
 
-    ; Wait for previous frame's fence
-    def fence = get(_in_flight_fences, _current_frame)
-    store64_raw(_ptr_fence, fence, 0)
-    def wf = wait_for_fences(_device, 1, _ptr_fence, 1, 0xFFFFFFFFFFFFFFFF)
-    if(wf != 0){ return false }
-    ; Reset the fence BEFORE recording starts to avoid driver race
-    reset_fences(_device, 1, _ptr_fence)
+   ; Wait for previous frame's fence
+   def fence = get(_in_flight_fences, _current_frame)
+   store64_raw(_ptr_fence, fence, 0)
+   def wf = wait_for_fences(_device, 1, _ptr_fence, 1, 0xFFFFFFFFFFFFFFFF)
+   if(wf != 0){ return false }
+   ; Reset the fence BEFORE recording starts to avoid driver race
+   reset_fences(_device, 1, _ptr_fence)
 
-    ; Capture current image index
-    mut acq = 0
-    def sem = get(_image_available_semaphores, _current_frame)
-    if(_surface){
-       acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, _ptr_img_idx)
-       if(acq == 0xC460C464 || acq == -1000001004){
-          if(_debug_gfx_enabled){ print("Vulkan: Acquire next image out of date") }
-          _recreate_swapchain()
-          return false
-       }
-       if(acq != 0 && acq != 1000001003){ return false }
-       _image_index = load32(_ptr_img_idx, 0)
-    } else {
-       _image_index = (_image_index + 1) % _swapchain_image_count
-    }
+   ; Capture current image index
+   mut acq = 0
+   def sem = get(_image_available_semaphores, _current_frame)
+   if(_surface){
+      acq = acquire_next_image_khr(_device, _swapchain, 0xFFFFFFFFFFFFFFFF, sem, 0, _ptr_img_idx)
+      if(acq == 0xC460C464 || acq == -1000001004){
+         if(_debug_gfx_enabled){ print("Vulkan: Acquire next image out of date") }
+         _recreate_swapchain()
+         return false
+      }
+      if(acq != 0 && acq != 1000001003){ return false }
+      _image_index = load32(_ptr_img_idx, 0)
+   } else {
+      _image_index = (_image_index + 1) % _swapchain_image_count
+   }
 
-    ; Reset + begin recording command buffer
-    def cb = get(_command_buffers, _current_frame)
-    memset(_ptr_bi, 0, 32)
-    store32(_ptr_bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
-    if(begin_command_buffer(cb, _ptr_bi) != 0){ return false }
+   ; Reset + begin recording command buffer
+   def cb = get(_command_buffers, _current_frame)
+   memset(_ptr_bi, 0, 32)
+   store32(_ptr_bi, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, 0)
+   if(begin_command_buffer(cb, _ptr_bi) != 0){ return false }
 
    ; Begin Render Pass
    ; Set clear values: color + depth (+ resolve slot if MSAA)
    ; VkClearValue is 16 bytes each: clear[0]=color@0, clear[1]=depth@16, clear[2]=resolve@32
    memset(_ptr_clear, 0, 96)
-   store32_f32(_ptr_clear, _clear_r, 0)   ; clear[0].color.r
-   store32_f32(_ptr_clear, _clear_g, 4)   ; clear[0].color.g
-   store32_f32(_ptr_clear, _clear_b, 8)   ; clear[0].color.b
-   store32_f32(_ptr_clear, _clear_a, 12)  ; clear[0].color.a
-   store32_f32(_ptr_clear, 1.0, 16)       ; clear[1].depthStencil.depth = 1.0
-   store32(_ptr_clear, 0, 20)             ; clear[1].depthStencil.stencil = 0
+   store32_f32(_ptr_clear, _clear_r, 0) ; clear[0].color.r
+   store32_f32(_ptr_clear, _clear_g, 4) ; clear[0].color.g
+   store32_f32(_ptr_clear, _clear_b, 8) ; clear[0].color.b
+   store32_f32(_ptr_clear, _clear_a, 12) ; clear[0].color.a
+   store32_f32(_ptr_clear, 1.0, 16) ; clear[1].depthStencil.depth = 1.0
+   store32(_ptr_clear, 0, 20) ; clear[1].depthStencil.stencil = 0
 
    def clear_count = (_cfg_msaa > 1) ? 3 : 2
 
@@ -2140,134 +2652,170 @@ fn begin_frame(){
    store64_raw(_ptr_ri, _ptr_clear, 56)
    cmd_begin_render_pass(cb, _ptr_ri, 0)
 
-    ; Set dynamic viewport/scissor (pre-allocated)
-     ; Vulkan Y-flip via negative viewport height
-     store32_f32(_ptr_vp, 0.0, 0)
-     store32_f32(_ptr_vp, float(_swapchain_extent_h), 4)
-     store32_f32(_ptr_vp, float(_swapchain_extent_w), 8)
-     store32_f32(_ptr_vp, -float(_swapchain_extent_h), 12)
-     store32_f32(_ptr_vp, 0.0, 16)
-     store32_f32(_ptr_vp, 1.0, 20)
-     cmd_set_viewport(cb, 0, 1, _ptr_vp)
+   ; Set dynamic viewport/scissor (pre-allocated)
+   ; Vulkan Y-flip via negative viewport height
+   store32_f32(_ptr_vp, 0.0, 0)
+   store32_f32(_ptr_vp, float(_swapchain_extent_h), 4)
+   store32_f32(_ptr_vp, float(_swapchain_extent_w), 8)
+   store32_f32(_ptr_vp, -float(_swapchain_extent_h), 12)
+   store32_f32(_ptr_vp, 0.0, 16)
+   store32_f32(_ptr_vp, 1.0, 20)
+   cmd_set_viewport(cb, 0, 1, _ptr_vp)
 
-    store32(_ptr_sci, 0, 0)
-    store32(_ptr_sci, 0, 4)
-    store32(_ptr_sci, _swapchain_extent_w, 8)
-    store32(_ptr_sci, _swapchain_extent_h, 12)
-    cmd_set_scissor(cb, 0, 1, _ptr_sci)
+   store32(_ptr_sci, 0, 0)
+   store32(_ptr_sci, 0, 4)
+   store32(_ptr_sci, _swapchain_extent_w, 8)
+   store32(_ptr_sci, _swapchain_extent_h, 12)
+   cmd_set_scissor(cb, 0, 1, _ptr_sci)
 
-    _frame_open = true
-    _vertex_offset = 0
-    _last_flush_offset = 0
-    _total_frames += 1
-    _fps_count += 1
-    def now_t = get_time()
-    if(now_t - _fps_last_time >= 1.0){
-       _fps_curr = _fps_count
-       _fps_count = 0
-       _fps_last_time = now_t
-    }
+   _frame_open = true
+   _vertex_offset = 0
+   _last_flush_offset = 0
+   _total_frames += 1
+   _fps_count += 1
+   def now_t = get_time()
+   if(now_t - _fps_last_time >= 1.0){
+      _fps_curr = _fps_count
+      _fps_count = 0
+      _fps_last_time = now_t
+   }
 
-    _update_default_mvp(_window_ref)
-    
-    ; Reset per-frame vertex and state tracking
-    _vertex_offset = 0
-    _last_flush_offset = 0
-    _vertex_limit_hit = false
-    _current_frame_vertex_offset = _current_frame * _vertex_capacity
-    
-    ; MUST reset these so bind_texture and _flush re-issue commands to the NEW command buffer
-    _last_bound_ds = 0
-    _last_bound_tex_id = -1
-    _last_bound_pipe = 0
-    _current_texture_id = -1 ; Force next bind_texture to actually do work
-    _mvp_dirty = true
-    _pc_dirty = true
-    _last_is_mask = -1 ; force is_mask re-check on first draw
-    
-    ; Initial pipeline and common state
-    cmd_bind_pipeline(cb, 0, _pipeline)
-    _last_bound_pipe = _pipeline
-    
-    ; Bind vertex buffer ONCE for this frame's slice — not again until draw_lines_raw
-    store64_raw(_flush_off, _current_frame_vertex_offset, 0)
-    store64_raw(_flush_buf, _vertex_buffer, 0)
-    cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
-    
-    ; Set initial dynamic state
-    cmd_set_viewport(cb, 0, 1, _ptr_vp)
-    cmd_set_scissor(cb, 0, 1, _ptr_sci)
-    
-    memcpy(_pc_buffer, _current_mvp, 64)
-    mut ident = mat4_identity()
-    mat4_to_buffer(ident, _current_model)
-    memcpy(_pc_buffer + 64, _current_model, 64)
-    store32(_pc_buffer, 0, 128)
-    store32(_pc_buffer, _current_is_unlit, 132)
-    _mvp_dirty = false
-    _model_dirty = false
-    _pc_dirty = true ;; Force push on first draw of frame
-    _last_is_mask = 0
-    _last_is_unlit = _current_is_unlit
-    true
+   _update_default_mvp(_window_ref)
+
+   ; Reset per-frame vertex and state tracking
+   _vertex_offset = 0
+   _last_flush_offset = 0
+   _vertex_limit_hit = false
+   _current_frame_vertex_offset = _current_frame * _vertex_capacity
+
+   ; MUST reset these so bind_texture and _flush re-issue commands to the NEW command buffer
+   _last_bound_ds = 0
+   _last_bound_tex_id = -1
+   _last_bound_pipe = 0
+   _target_pipeline = _pipeline ; Default to main pipeline
+   _current_texture_id = -1 ; Force next bind_texture to actually do work
+   _mvp_dirty = true
+   _pc_dirty = true
+   _last_is_mask = -1 ; force is_mask re-check on first draw
+
+   ; Initial pipeline and common state
+   cmd_bind_pipeline(cb, 0, _pipeline)
+   _last_bound_pipe = _pipeline
+
+   ; Bind vertex buffer ONCE for this frame's slice — not again until draw_lines_raw
+   store64_raw(_flush_off, _current_frame_vertex_offset, 0)
+   store64_raw(_flush_buf, _vertex_buffer, 0)
+   cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
+
+   ; Set initial dynamic state
+   cmd_set_viewport(cb, 0, 1, _ptr_vp)
+   cmd_set_scissor(cb, 0, 1, _ptr_sci)
+
+   memcpy(_pc_buffer, _current_mvp, 64)
+   mut ident = mat4_identity()
+   mat4_to_buffer(ident, _current_model)
+   memcpy(_pc_buffer + 64, _current_model, 64)
+   store32(_pc_buffer, 0, 128)
+   store32(_pc_buffer, _current_is_unlit, 132)
+   _mvp_dirty = false
+   _model_dirty = false
+   _pc_dirty = true ;; Force push on first draw of frame
+   _last_is_mask = 0
+   _last_is_unlit = _current_is_unlit
+   true
 }
 
 fn set_unlit(unlit){
    "Toggles lighting for subsequent draw calls."
    def val = unlit ? 1 : 0
    if(val != _current_is_unlit){
-      if(_vertex_offset != _last_flush_offset){ _flush() }
+      _flush()
       _current_is_unlit = val
       _pc_dirty = true
    }
 }
 
+fn _sync_pc(){
+   "Internal: Synchronizes push constants with the GPU if dirty."
+   if(_current_is_unlit != _last_is_unlit){ _last_is_unlit = _current_is_unlit _pc_dirty = true }
+   if(_mvp_dirty || _model_dirty){ _pc_dirty = true }
+   if(!_pc_dirty){ return }
+   def cb = get(_command_buffers, _current_frame)
+   if(!cb || !_pipeline_layout){ return }
+
+   if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false }
+   if(_model_dirty){ memcpy(_pc_buffer + 64, _current_model, 64) _model_dirty = false }
+
+   store32(_pc_buffer, _last_is_mask, 128)
+   store32(_pc_buffer, _last_is_unlit, 132)
+
+   ; Stage flags: 1=VERT, 16=FRAG
+   cmd_push_constants(cb, _pipeline_layout, 17, 0, 144, _pc_buffer)
+   _pc_dirty = false
+}
+
 fn _flush(){
    "Records a draw call for current pending triangle batch."
    if(_vertex_offset == _last_flush_offset){ return }
-   
+   def t0 = ticks()
+
    def count = (_vertex_offset - _last_flush_offset) / 36
    def first_vert = _last_flush_offset / 36
-   
+
    def cb = get(_command_buffers, _current_frame)
-   
-   ; Switch back to triangle pipeline if needed
-   if(_last_bound_pipe != _pipeline){
-      cmd_bind_pipeline(cb, 0, _pipeline)
-      _last_bound_pipe = _pipeline
-      _pc_dirty = true ; Pipeline switch may need PC re-issue
+
+      ; Select appropriate triangle pipeline based on unlit state
+   mut base_pipe = _pipeline
+   if(_current_is_unlit != 0 && _unlit_pipeline != 0){ base_pipe = _unlit_pipeline }
+
+   mut target = _target_pipeline
+   if(target == _pipeline){ target = base_pipe } ; if target is default, use our unlit-aware base
+
+   if(_is_wireframe && _wire_pipeline != 0){
+      if(target == _pipeline || target == _unlit_pipeline){ target = _wire_pipeline }
+   }
+
+   if(_last_bound_pipe != target){
+       cmd_bind_pipeline(cb, 0, target)
+       _last_bound_pipe = target
+       _pc_dirty = true
    }
 
    ; Bind Texture / Descriptor Set only when changed
    mut tid = _current_texture_id
    if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
-   
+
    def ds = texture_descriptor(tid)
    if(ds && (ds != _last_bound_ds || tid != _last_bound_tex_id)){
       store64_raw(_ptr_ds, ds, 0)
       cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 1, _ptr_ds, 0, 0)
       _last_bound_ds = ds
       _last_bound_tex_id = tid
-      ; Also mark PC dirty because is_mask may have changed
-      def new_mask = (texture_format(tid) == 9) ? 1 : 0
-      if(new_mask != _last_is_mask){ _last_is_mask = new_mask _pc_dirty = true }
+       mut new_mask = 0
+       if(texture_format(tid) == 9){ new_mask = 1 }
+       if(new_mask != _last_is_mask){ _last_is_mask = new_mask _pc_dirty = true }
    }
 
    ; Push constants only when matrix, model, mask, or unlit changed
-   if(_mvp_dirty){ memcpy(_pc_buffer, _current_mvp, 64) _mvp_dirty = false _pc_dirty = true }
-   if(_model_dirty){ memcpy(_pc_buffer + 64, _current_model, 64) _model_dirty = false _pc_dirty = true }
-   if(_current_is_unlit != _last_is_unlit){ _last_is_unlit = _current_is_unlit _pc_dirty = true }
-   
-   if(_pc_dirty){
-      store32(_pc_buffer, _last_is_mask, 128)
-      store32(_pc_buffer, _last_is_unlit, 132)
-      cmd_push_constants(cb, _pipeline_layout, 1 | 16, 0, 144, _pc_buffer)
-      _pc_dirty = false
-   }
+   _sync_pc()
+
+   ; Depth state depends on unlit
+   ; Simple way: just clear depth for every flush if unlit? No, too slow.
+   ; Real way: we need a separate pipeline for 2D.
+   ; For now, UI test calls clear_depth() which is fine.
 
    ; VBO is already bound in begin_frame — just draw using first_vert index
-   if(count > 0){ cmd_draw(cb, count, 1, first_vert, 0) }
+   if(count > 0){
+      cmd_draw(cb, count, 1, first_vert, 0)
+      _total_draw_calls += 1
+      _frame_draw_calls += 1
+   }
    _last_flush_offset = _vertex_offset
+
+   def t1 = ticks()
+   _prof_flush_total += float(t1 - t0)
+   _prof_flush_count += 1
+   _prof_flush_avg = _prof_flush_total / float(_prof_flush_count)
 }
 
 fn _check_flush(bytes){
@@ -2312,7 +2860,7 @@ fn _end_frame_internal(present){
    "Finalizes command recording and triggers vertex upload."
    if(!_frame_open){ return false }
    _flush()
-   
+
    ; SINGLE VERTEX UPLOAD: Copy entire frame's vertex data to the GPU.
    if(_vertex_offset > 0){
       def sz = (_vertex_offset < _vertex_capacity) ? _vertex_offset : _vertex_capacity
@@ -2327,11 +2875,11 @@ fn _end_frame_internal(present){
 
    def sem_avail = get(_image_available_semaphores, _current_frame)
    def sem_finish = get(_render_finished_semaphores, _current_frame)
-   
+
    store64_raw(_ptr_wait_sems, sem_avail, 0)
    store64_raw(_ptr_sig_sems, sem_finish, 0)
    store32(_ptr_stages, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0)
-   
+
    memset(_ptr_sub, 0, 128)
    store32(_ptr_sub, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store32(_ptr_sub, 1, 16) ; waitSemaphoreCount
@@ -2353,7 +2901,7 @@ fn _end_frame_internal(present){
    if(present){
       def sc = _swapchain
       def img_idx = _image_index
-      
+
       mut scs = _ptr_ri ;; Reuse ri buffer for swapchain array
       store64_raw(scs, sc, 0)
       mut idxs = scs + 8
@@ -2369,7 +2917,7 @@ fn _end_frame_internal(present){
       store64_raw(pi, idxs, 48)
 
       def pr = queue_present_khr(_present_queue, pi)
-      if(pr == 0xC460C464 || pr == -1000001004){ ; VK_ERROR_OUT_OF_DATE_KHR
+      if(pr == 0xC460C464 || pr == -1000001004 || pr == 1000001003){ ; OUT_OF_DATE or SUBOPTIMAL
          _frame_open = false
          _recreate_swapchain()
          return false
@@ -2486,17 +3034,17 @@ fn draw_lines_raw(ptr, line_count, _line_width){
    "Draws lines using pre-baked raw vertex buffer. thickness controls GPU line thickness."
    if(!_frame_open || line_count <= 0 || !ptr || !_line_pipeline){ return 0 }
    _flush() ; flush pending triangles first
-   
+
    def cb = get(_command_buffers, _current_frame)
    _check_flush(line_count * 2 * _VKR_VERT_STRIDE)
-   
+
    ; Switch to line pipeline
    if(_last_bound_pipe != _line_pipeline){
       cmd_bind_pipeline(cb, 0, _line_pipeline)
       _last_bound_pipe = _line_pipeline
       _pc_dirty = true
    }
-   
+
    ; Ensure descriptor set is bound (crucial for RADV)
    mut tid = _current_texture_id
    if(tid < 0){ tid = _default_texture }
@@ -2525,20 +3073,18 @@ fn draw_lines_raw(ptr, line_count, _line_width){
    def bytes = line_count * 2 * _VKR_VERT_STRIDE
    def first_vert = _vertex_offset / _VKR_VERT_STRIDE
    memcpy(_local_vertex_map + _vertex_offset, ptr, bytes)
-   
+
    ; Draw using firstVertex within the existing slice VBO binding (no rebind needed)
    cmd_draw(cb, line_count * 2, 1, first_vert, 0)
-   
+
    _vertex_offset += bytes
    _last_flush_offset = _vertex_offset
-   
+
    ; Rebind VBO back to slice start so subsequent triangle _flush calls work
    store64_raw(_flush_off, _current_frame_vertex_offset, 0)
    cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
    true
 }
-
-
 
 fn _draw_triangle_2d(x1, y1, x2, y2, x3, y3, r, g, b, a){
    "Batches a colored 2D triangle."
@@ -2634,7 +3180,7 @@ fn draw_axes_3d(size){
    draw_line_3d(0,0,0, s,0,0, 0.15, 1,0,0,1)
    draw_line_3d(0,0,0, 0,s,0, 0.15, 0,1,0,1)
    draw_line_3d(0,0,0, 0,0,s, 0.15, 0,0,1,1)
-   
+
    ;; Basic Arrowheads (Triangles)
    def ts = 0.4
    ;; X
@@ -2646,42 +3192,76 @@ fn draw_axes_3d(size){
 }
 
 fn draw_cube_3d(x, y, z, size, r, g, b, a, tex_id){
-   "Batches a colored 3D cube directly with direct submission."
+   "Batches a colored 3D cube. frontFace=CW, cullMode=BACK (Vulkan Y-down convention)."
    if(!_frame_open){ return }
    bind_texture(tex_id)
-   _check_flush(36 * 24)
+   _check_flush(36 * 36)
    def s = float(size) * 0.5
    def fx = float(x) def fy = float(y) def fz = float(z)
    def c = _pack_color(r, g, b, a)
-   mut cur = _local_vertex_map + _vertex_offset
-   
-   ;; Vertex layout helper (inline-like)
-   def _v = fn(px, py, pz, u, v){
-      store32_f32(cur, px, 0) store32_f32(cur, py, 4) store32_f32(cur, pz, 8)
-      store32_f32(cur, u, 12) store32_f32(cur, v, 16) store32(cur, c, 20)
-      cur += 24
-   }
+   def base = _local_vertex_map + _vertex_offset
 
-   ;; Front (+Z)
-   _v(fx-s, fy-s, fz+s, 0,0) _v(fx+s, fy-s, fz+s, 1,0) _v(fx+s, fy+s, fz+s, 1,1)
-   _v(fx-s, fy-s, fz+s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx-s, fy+s, fz+s, 0,1)
-   ;; Back (-Z)
-   _v(fx-s, fy-s, fz-s, 1,0) _v(fx-s, fy+s, fz-s, 1,1) _v(fx+s, fy+s, fz-s, 0,1)
-   _v(fx-s, fy-s, fz-s, 1,0) _v(fx+s, fy+s, fz-s, 0,1) _v(fx+s, fy-s, fz-s, 0,0)
-   ;; Top (+Y)
-   _v(fx-s, fy+s, fz-s, 0,0) _v(fx-s, fy+s, fz+s, 0,1) _v(fx+s, fy+s, fz+s, 1,1)
-   _v(fx-s, fy+s, fz-s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx+s, fy+s, fz-s, 1,0)
-   ;; Bottom (-Y)
-   _v(fx-s, fy-s, fz-s, 0,0) _v(fx+s, fy-s, fz-s, 1,0) _v(fx+s, fy-s, fz+s, 1,1)
-   _v(fx-s, fy-s, fz-s, 0,0) _v(fx+s, fy-s, fz+s, 1,1) _v(fx-s, fy-s, fz+s, 0,1)
-   ;; Right (+X)
-   _v(fx+s, fy-s, fz-s, 0,0) _v(fx+s, fy+s, fz-s, 0,1) _v(fx+s, fy+s, fz+s, 1,1)
-   _v(fx+s, fy-s, fz-s, 0,0) _v(fx+s, fy+s, fz+s, 1,1) _v(fx+s, fy-s, fz+s, 1,0)
-   ;; Left (-X)
-   _v(fx-s, fy-s, fz-s, 0,0) _v(fx-s, fy-s, fz+s, 1,0) _v(fx-s, fy+s, fz+s, 1,1)
-   _v(fx-s, fy-s, fz-s, 0,0) _v(fx-s, fy+s, fz+s, 1,1) _v(fx-s, fy+s, fz-s, 0,1)
+   ;; Vulkan Y-down: screen Y increases downward.
+   ;; frontFace=CW means a face is front if its verts appear CW on screen.
+   ;; For each face, we name verts as seen on screen from outside:
+   ;;   v0=top-left, v1=top-right, v2=bot-right, v3=bot-left  (screen coords, Y-down)
+   ;; Two CW triangles: (v0,v1,v2) and (v0,v2,v3)
 
-   _vertex_offset = cur - _local_vertex_map
+   ;; Front (+Z): looking at face from +Z. Screen: right=+X, down=+Y.
+   ;;   TL=(-s,-s,+s) TR=(+s,-s,+s) BR=(+s,+s,+s) BL=(-s,+s,+s)
+   _vkr_store_vertex(base,  0, fx-s, fy-s, fz+s, 0,0, c,  0, 0, 1)
+   _vkr_store_vertex(base,  1, fx+s, fy-s, fz+s, 1,0, c,  0, 0, 1)
+   _vkr_store_vertex(base,  2, fx+s, fy+s, fz+s, 1,1, c,  0, 0, 1)
+   _vkr_store_vertex(base,  3, fx-s, fy-s, fz+s, 0,0, c,  0, 0, 1)
+   _vkr_store_vertex(base,  4, fx+s, fy+s, fz+s, 1,1, c,  0, 0, 1)
+   _vkr_store_vertex(base,  5, fx-s, fy+s, fz+s, 0,1, c,  0, 0, 1)
+
+   ;; Back (-Z): looking at face from -Z. Screen: right=-X, down=+Y.
+   ;;   TL=(+s,-s,-s) TR=(-s,-s,-s) BR=(-s,+s,-s) BL=(+s,+s,-s)
+   _vkr_store_vertex(base,  6, fx+s, fy-s, fz-s, 0,0, c,  0, 0,-1)
+   _vkr_store_vertex(base,  7, fx-s, fy-s, fz-s, 1,0, c,  0, 0,-1)
+   _vkr_store_vertex(base,  8, fx-s, fy+s, fz-s, 1,1, c,  0, 0,-1)
+   _vkr_store_vertex(base,  9, fx+s, fy-s, fz-s, 0,0, c,  0, 0,-1)
+   _vkr_store_vertex(base, 10, fx-s, fy+s, fz-s, 1,1, c,  0, 0,-1)
+   _vkr_store_vertex(base, 11, fx+s, fy+s, fz-s, 0,1, c,  0, 0,-1)
+
+   ;; Right (+X): looking from +X. Screen: right=-Z, down=+Y.
+   ;;   TL=(+s,-s,-s) TR=(+s,-s,+s) BR=(+s,+s,+s) BL=(+s,+s,-s)
+   _vkr_store_vertex(base, 12, fx+s, fy-s, fz-s, 0,0, c,  1, 0, 0)
+   _vkr_store_vertex(base, 13, fx+s, fy-s, fz+s, 1,0, c,  1, 0, 0)
+   _vkr_store_vertex(base, 14, fx+s, fy+s, fz+s, 1,1, c,  1, 0, 0)
+   _vkr_store_vertex(base, 15, fx+s, fy-s, fz-s, 0,0, c,  1, 0, 0)
+   _vkr_store_vertex(base, 16, fx+s, fy+s, fz+s, 1,1, c,  1, 0, 0)
+   _vkr_store_vertex(base, 17, fx+s, fy+s, fz-s, 0,1, c,  1, 0, 0)
+
+   ;; Left (-X): looking from -X. Screen: right=+Z, down=+Y.
+   ;;   TL=(-s,-s,+s) TR=(-s,-s,-s) BR=(-s,+s,-s) BL=(-s,+s,+s)
+   _vkr_store_vertex(base, 18, fx-s, fy-s, fz+s, 0,0, c, -1, 0, 0)
+   _vkr_store_vertex(base, 19, fx-s, fy-s, fz-s, 1,0, c, -1, 0, 0)
+   _vkr_store_vertex(base, 20, fx-s, fy+s, fz-s, 1,1, c, -1, 0, 0)
+   _vkr_store_vertex(base, 21, fx-s, fy-s, fz+s, 0,0, c, -1, 0, 0)
+   _vkr_store_vertex(base, 22, fx-s, fy+s, fz-s, 1,1, c, -1, 0, 0)
+   _vkr_store_vertex(base, 23, fx-s, fy+s, fz+s, 0,1, c, -1, 0, 0)
+
+   ;; Top (-Y, world up): looking from -Y (above). Screen: right=+X, down=+Z.
+   ;;   TL=(-s,-s,-s) TR=(+s,-s,-s) BR=(+s,-s,+s) BL=(-s,-s,+s)
+   _vkr_store_vertex(base, 24, fx-s, fy-s, fz-s, 0,0, c,  0,-1, 0)
+   _vkr_store_vertex(base, 25, fx+s, fy-s, fz-s, 1,0, c,  0,-1, 0)
+   _vkr_store_vertex(base, 26, fx+s, fy-s, fz+s, 1,1, c,  0,-1, 0)
+   _vkr_store_vertex(base, 27, fx-s, fy-s, fz-s, 0,0, c,  0,-1, 0)
+   _vkr_store_vertex(base, 28, fx+s, fy-s, fz+s, 1,1, c,  0,-1, 0)
+   _vkr_store_vertex(base, 29, fx-s, fy-s, fz+s, 0,1, c,  0,-1, 0)
+
+   ;; Bottom (+Y, world down): looking from +Y (below). Screen: right=+X, down=-Z.
+   ;;   TL=(-s,+s,+s) TR=(+s,+s,+s) BR=(+s,+s,-s) BL=(-s,+s,-s)
+   _vkr_store_vertex(base, 30, fx-s, fy+s, fz+s, 0,0, c,  0, 1, 0)
+   _vkr_store_vertex(base, 31, fx+s, fy+s, fz+s, 1,0, c,  0, 1, 0)
+   _vkr_store_vertex(base, 32, fx+s, fy+s, fz-s, 1,1, c,  0, 1, 0)
+   _vkr_store_vertex(base, 33, fx-s, fy+s, fz+s, 0,0, c,  0, 1, 0)
+   _vkr_store_vertex(base, 34, fx+s, fy+s, fz-s, 1,1, c,  0, 1, 0)
+   _vkr_store_vertex(base, 35, fx-s, fy+s, fz-s, 0,1, c,  0, 1, 0)
+
+   _vertex_offset += 36 * 36
 }
 
 fn draw_line_strip_2d(x, y, w, h, history, scale, r, g, b, a){
@@ -2718,6 +3298,42 @@ fn draw_line_strip_2d(x, y, w, h, history, scale, r, g, b, a){
    _vertex_offset = off - _local_vertex_map
 }
 
+mut _blit_tex_id = -1
+
+fn blit_buffer(pixels, w, h){
+   "Blits a raw RGBA8 pixel buffer to the full window."
+   if(!_frame_open){ return }
+   if(_blit_tex_id == -1 || texture_size(_blit_tex_id)[0] != w || texture_size(_blit_tex_id)[1] != h){
+      if(_blit_tex_id != -1){ destroy_texture(_blit_tex_id) }
+      _blit_tex_id = create_texture(w, h, pixels)
+   } else {
+      update_texture_rect(_blit_tex_id, 0, 0, w, h, pixels)
+   }
+
+   ; Draw full-screen quad unlit
+   def last_unlit = _current_is_unlit
+   set_unlit(true)
+   def ws_w = float(_swapchain_extent_w)
+   def ws_h = float(_swapchain_extent_h)
+
+   ; Save MVP and set to identity for screen-space draw
+   mut old_mvp = mat4_identity()
+   mat4_from_buffer(old_mvp, _current_mvp)
+   set_ortho(0.0, ws_w, 0.0, ws_h, -1.0, 1.0)
+
+   draw_rect_tex(0.0, 0.0, ws_w, ws_h, _blit_tex_id, 1.0, 1.0, 1.0, 1.0)
+   _flush()
+
+   ; Restore state
+   set_mvp(old_mvp)
+   set_unlit(last_unlit != 0)
+}
+
+fn set_clear_color(r, g, b, a=1.0){
+   "Sets the clear color for the next begin_frame."
+   _clear_r = float(r) _clear_g = float(g) _clear_b = float(b) _clear_a = float(a)
+}
+
 fn shutdown(){
    "Shuts down the Vulkan renderer and releases all associated resources."
    if(!_device){
@@ -2752,4 +3368,10 @@ fn shutdown(){
    if(_device){ destroy_device(_device, 0) }
    if(_surface){ destroy_surface_khr(_instance, _surface, 0) }
    if(_instance){ destroy_instance(_instance, 0) }
+}
+
+fn set_wireframe(enabled){
+   "Enables or disables wireframe rendering globally."
+   _is_wireframe = !!enabled
+   if(_vertex_offset != _last_flush_offset){ _flush() }
 }

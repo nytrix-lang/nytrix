@@ -3,8 +3,8 @@ use std.core.error *
 use std.core.reflect *
 use std.core.list *
 use std.core.dict *
-use std.text.io *
-use std.text *
+use std.str.io *
+use std.str *
 
 ;; comptime (Test)
 
@@ -37,36 +37,36 @@ print("✓ comptime tests passed")
 ;; Test basic integer operations in comptime
 
 ;; Addition
-mut v_add = comptime { return 10 + 20 }
+mut v_add = comptime{ return 10 + 20 }
 assert(v_add == 30, "comptime add")
 
 ;; Subtraction
-mut v_sub = comptime { return 50 - 20 }
+mut v_sub = comptime{ return 50 - 20 }
 assert(v_sub == 30, "comptime sub")
 
 ;; Multiplication
-mut v_mul = comptime { return 6 * 5 }
+mut v_mul = comptime{ return 6 * 5 }
 assert(v_mul == 30, "comptime mul")
 
 ;; Division
-mut v_div = comptime { return 60 / 2 }
+mut v_div = comptime{ return 60 / 2 }
 assert(v_div == 30, "comptime div")
 
 ;; Modulo
-mut v_mod = comptime { return 35 % 32 }
+mut v_mod = comptime{ return 35 % 32 }
 assert(v_mod == 3, "comptime mod")
 
 ;; Comparisons
-mut v_lt = comptime { return 10 < 20 }
+mut v_lt = comptime{ return 10 < 20 }
 assert(v_lt == true, "comptime lt")
 
-mut v_le = comptime { return 20 <= 20 }
+mut v_le = comptime{ return 20 <= 20 }
 assert(v_le == true, "comptime le")
 
-mut v_gt = comptime { return 30 > 20 }
+mut v_gt = comptime{ return 30 > 20 }
 assert(v_gt == true, "comptime gt")
 
-mut v_ge = comptime { return 20 >= 20 }
+mut v_ge = comptime{ return 20 >= 20 }
 assert(v_ge == true, "comptime ge")
 
 ;; Division by zero check (should fail comptime evaluation and fallback to runtime or error if strictly comptime,

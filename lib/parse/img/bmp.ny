@@ -103,38 +103,38 @@ fn decode(data){
       while(x < w){
          def dst = dst_row_offset + x * 4
          if(bpp <= 8){
-            mut idx = 0
-            if(bpp == 8){
+         mut idx = 0
+         if(bpp == 8){
                idx = load8(data, src_row_offset + x)
-            } elif(bpp == 4){
+         } elif(bpp == 4){
                def v = load8(data, src_row_offset + (x / 2))
                idx = ((x & 1) == 0) ? ((v >> 4) & 15) : (v & 15)
-            } else {
+         } else {
                def v = load8(data, src_row_offset + (x / 8))
                idx = (v >> (7 - (x & 7))) & 1
-            }
-            if(idx < 0 || idx >= palette_entries){ idx = 0 }
-            def p = palette_off + idx * 4
-            store8(pixels, load8(data, p + 2), dst)
-            store8(pixels, load8(data, p + 1), dst + 1)
-            store8(pixels, load8(data, p), dst + 2)
-            store8(pixels, 255, dst + 3)
+         }
+         if(idx < 0 || idx >= palette_entries){ idx = 0 }
+         def p = palette_off + idx * 4
+         store8(pixels, load8(data, p + 2), dst)
+         store8(pixels, load8(data, p + 1), dst + 1)
+         store8(pixels, load8(data, p), dst + 2)
+         store8(pixels, 255, dst + 3)
          } elif(bpp == 24){
-            def s = src_row_offset + x * 3
-            store8(pixels, load8(data, s + 2), dst)
-            store8(pixels, load8(data, s + 1), dst + 1)
-            store8(pixels, load8(data, s), dst + 2)
-            store8(pixels, 255, dst + 3)
+         def s = src_row_offset + x * 3
+         store8(pixels, load8(data, s + 2), dst)
+         store8(pixels, load8(data, s + 1), dst + 1)
+         store8(pixels, load8(data, s), dst + 2)
+         store8(pixels, 255, dst + 3)
          } elif(bpp == 32 && compression == 0){
-            def s = src_row_offset + x * 4
-            store8(pixels, load8(data, s + 2), dst)
-            store8(pixels, load8(data, s + 1), dst + 1)
-            store8(pixels, load8(data, s), dst + 2)
-            store8(pixels, load8(data, s + 3), dst + 3)
+         def s = src_row_offset + x * 4
+         store8(pixels, load8(data, s + 2), dst)
+         store8(pixels, load8(data, s + 1), dst + 1)
+         store8(pixels, load8(data, s), dst + 2)
+         store8(pixels, load8(data, s + 3), dst + 3)
          } else {
-            mut px = 0
-            mut rr = 0 mut gg = 0 mut bb = 0 mut aa = 255
-            if(bpp == 16){
+         mut px = 0
+         mut rr = 0 mut gg = 0 mut bb = 0 mut aa = 255
+         if(bpp == 16){
                px = load16(data, src_row_offset + x * 2)
                if(compression == 0){
                   rr = _chan_from_mask(px, 0x7C00)
@@ -146,17 +146,17 @@ fn decode(data){
                   bb = _chan_from_mask(px, b_mask)
                   if(a_mask != 0){ aa = _chan_from_mask(px, a_mask) }
                }
-            } else {
+         } else {
                px = load32(data, src_row_offset + x * 4)
                rr = _chan_from_mask(px, r_mask)
                gg = _chan_from_mask(px, g_mask)
                bb = _chan_from_mask(px, b_mask)
                if(a_mask != 0){ aa = _chan_from_mask(px, a_mask) }
-            }
-            store8(pixels, rr, dst)
-            store8(pixels, gg, dst + 1)
-            store8(pixels, bb, dst + 2)
-            store8(pixels, aa, dst + 3)
+         }
+         store8(pixels, rr, dst)
+         store8(pixels, gg, dst + 1)
+         store8(pixels, bb, dst + 2)
+         store8(pixels, aa, dst + 3)
          }
          x += 1
       }
