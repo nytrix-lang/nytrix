@@ -8,6 +8,8 @@
 #ifndef _WIN32
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -46,11 +48,7 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   uintptr_t mask = (uintptr_t)ps - 1;
   uintptr_t start = p & ~mask;
   uintptr_t end = (p + n - 1) & ~mask;
-#ifdef __APPLE__
-  char vec = 0;
-#else
   unsigned char vec = 0;
-#endif
   for (uintptr_t cur = start; cur <= end; cur += (uintptr_t)ps) {
     if (mincore((void *)cur, (size_t)ps, &vec) != 0) return 0;
   }
@@ -58,7 +56,7 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
 #endif
 }
 
-#define RT_PAGE_CACHE_BITS 10
+#define RT_PAGE_CACHE_BITS 12
 #define RT_PAGE_CACHE_SIZE (1 << RT_PAGE_CACHE_BITS)
 #define RT_PAGE_CACHE_MASK (RT_PAGE_CACHE_SIZE - 1)
 
@@ -82,17 +80,31 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
     if (cache[h2] == pg2) { last_pg = pg1; return 1; }
   }
   
-  if (rt_addr_mapped(p, n)) {
-    cache[h1] = pg1;
-    last_pg = pg1;
-    uintptr_t pg2 = (p + n - 1) & ~4095ULL;
-    if (pg2 != pg1) {
-      uintptr_t h2 = (pg2 >> 12) & RT_PAGE_CACHE_MASK;
-      cache[h2] = pg2;
-    }
-    return 1;
+  // Use a pipe to safely check readability without SEGFAULT on guard pages.
+  // This is only called on cache misses.
+  static __thread int probe_pipe[2] = {-1, -1};
+  if (probe_pipe[0] == -1) {
+    if (pipe(probe_pipe) != 0) return rt_addr_mapped(p, n);
+    fcntl(probe_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(probe_pipe[1], F_SETFL, O_NONBLOCK);
   }
-  return 0;
+
+  uintptr_t probes[2] = {p, p + n - 1};
+  for (int i = 0; i < 2; i++) {
+    ssize_t r = write(probe_pipe[1], (void *)probes[i], 1);
+    if (r < 0) return 0;
+    char dummy;
+    (void)read(probe_pipe[0], &dummy, 1);
+  }
+
+  cache[h1] = pg1;
+  last_pg = pg1;
+  uintptr_t pg2 = (p + n - 1) & ~4095ULL;
+  if (pg2 != pg1) {
+    uintptr_t h2 = (pg2 >> 12) & RT_PAGE_CACHE_MASK;
+    cache[h2] = pg2;
+  }
+  return 1;
 }
 
 static inline bool is_valid_heap_ptr(int64_t v) {
@@ -139,7 +151,13 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define TAG_STR_CONST 121
 
 static inline int is_v_flt(int64_t v) {
-  if (!is_ptr(v) || (v & 7) != 0) return 0;
+  if (!is_ptr(v) || (v & 15) != 8) return 0;
+  if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
+  return (*(int64_t *)((char *)(uintptr_t)v - 8) == TAG_FLOAT);
+}
+
+static inline int is_v_flt_mapped(int64_t v) {
+  if (!is_ptr(v) || (v & 15) != 8) return 0;
   if (!rt_addr_readable((uintptr_t)v - 8, 8)) return 0;
   return (*(int64_t *)((char *)(uintptr_t)v - 8) == TAG_FLOAT);
 }
