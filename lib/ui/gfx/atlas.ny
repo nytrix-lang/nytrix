@@ -88,7 +88,10 @@ fn atlas_get(a, key){
    dict_get(items, key, 0)
 }
 
-fn atlas_texture_id(a){ dict_get(a, "tex_id", -1) }
+fn atlas_texture_id(a){
+   "Returns the texture id stored in atlas `a`."
+   dict_get(a, "tex_id", -1)
+}
 
 fn atlas_uv_rect(a, key){
    "Alias for atlas_get."

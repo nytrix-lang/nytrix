@@ -11,6 +11,31 @@ use std.core.dict_mod *
 use std.os *
 use std.os.time *
 use std.os.ffi *
+use std.os.audio.backend.shared as backend_shared
+use std.util.common as common
+
+if(comptime{ __os_name() == "linux" }){
+    #link "jack"
+}
+
+extern fn jack_client_open(name: ptr, options: i32, status: ptr, uuid: ptr): ptr as "jack_client_open"
+extern fn jack_client_close(client: ptr): i32 as "jack_client_close"
+extern fn jack_activate(client: ptr): i32 as "jack_activate"
+extern fn jack_deactivate(client: ptr): i32 as "jack_deactivate"
+extern fn jack_set_process_callback(client: ptr, cb: ptr, arg: ptr): i32 as "jack_set_process_callback"
+extern fn jack_get_buffer_size(client: ptr): i32 as "jack_get_buffer_size"
+extern fn jack_port_register(client: ptr, name: ptr, type: ptr, flags: i64, buffer_size: i64): ptr as "jack_port_register"
+extern fn jack_port_get_buffer(port: ptr, nframes: i32): ptr as "jack_port_get_buffer"
+extern fn jack_get_ports(client: ptr, port_name_pattern: ptr, type_name_pattern: ptr, flags: i64): ptr as "jack_get_ports"
+extern fn jack_port_name(port: ptr): ptr as "jack_port_name"
+extern fn jack_connect(client: ptr, src: ptr, dst: ptr): i32 as "jack_connect"
+extern fn jack_free(ptr: ptr): i32 as "jack_free"
+extern fn jack_ringbuffer_create(sz: i64): ptr as "jack_ringbuffer_create"
+extern fn jack_ringbuffer_free(rb: ptr): i32 as "jack_ringbuffer_free"
+extern fn jack_ringbuffer_read(rb: ptr, dest: ptr, cnt: i64): i64 as "jack_ringbuffer_read"
+extern fn jack_ringbuffer_read_space(rb: ptr): i64 as "jack_ringbuffer_read_space"
+extern fn jack_ringbuffer_write(rb: ptr, src: ptr, cnt: i64): i64 as "jack_ringbuffer_write"
+extern fn jack_ringbuffer_write_space(rb: ptr): i64 as "jack_ringbuffer_write_space"
 
 def JACK_NO_START_SERVER = 0x01
 def JACK_PORT_IS_INPUT = 0x1
@@ -35,105 +60,15 @@ def _ST_SIZE = 72
 def _WRITE_TMP_SAMPLES = 4096
 def _RB_MIN_BYTES = 16384
 
-mut _lib = 0
-mut _jack_client_open = 0
-mut _jack_client_close = 0
-mut _jack_activate = 0
-mut _jack_deactivate = 0
-mut _jack_set_process_callback = 0
-mut _jack_get_buffer_size = 0
-mut _jack_port_register = 0
-mut _jack_port_get_buffer = 0
-mut _jack_get_ports = 0
-mut _jack_port_name = 0
-mut _jack_connect = 0
-mut _jack_free = 0
-mut _jack_ringbuffer_create = 0
-mut _jack_ringbuffer_free = 0
-mut _jack_ringbuffer_read = 0
-mut _jack_ringbuffer_read_space = 0
-mut _jack_ringbuffer_write = 0
-mut _jack_ringbuffer_write_space = 0
-
 mut _streams = dict(8)
-
-fn _touch(...args){
-   "Consumes arguments intentionally."
-   len(args)
-}
-
-fn _reset_symbols(){
-   "Clears loaded JACK symbol pointers."
-   _jack_client_open = 0
-   _jack_client_close = 0
-   _jack_activate = 0
-   _jack_deactivate = 0
-   _jack_set_process_callback = 0
-   _jack_get_buffer_size = 0
-   _jack_port_register = 0
-   _jack_port_get_buffer = 0
-   _jack_get_ports = 0
-   _jack_port_name = 0
-   _jack_connect = 0
-   _jack_free = 0
-   _jack_ringbuffer_create = 0
-   _jack_ringbuffer_free = 0
-   _jack_ringbuffer_read = 0
-   _jack_ringbuffer_read_space = 0
-   _jack_ringbuffer_write = 0
-   _jack_ringbuffer_write_space = 0
-}
-
-fn _close_lib(){
-   "Closes libjack and clears global pointers."
-   if(_lib != 0){ dlclose(_lib) }
-   _lib = 0
-   _reset_symbols()
-}
-
-fn _load_lib(){
-   "Loads libjack and binds required symbols."
-   if(_lib != 0){ return true }
-   _lib = dlopen_any("jack", RTLD_NOW())
-   if(_lib == 0){ return false }
-   _jack_client_open = dlsym(_lib, "jack_client_open")
-   _jack_client_close = dlsym(_lib, "jack_client_close")
-   _jack_activate = dlsym(_lib, "jack_activate")
-   _jack_deactivate = dlsym(_lib, "jack_deactivate")
-   _jack_set_process_callback = dlsym(_lib, "jack_set_process_callback")
-   _jack_get_buffer_size = dlsym(_lib, "jack_get_buffer_size")
-   _jack_port_register = dlsym(_lib, "jack_port_register")
-   _jack_port_get_buffer = dlsym(_lib, "jack_port_get_buffer")
-   _jack_get_ports = dlsym(_lib, "jack_get_ports")
-   _jack_port_name = dlsym(_lib, "jack_port_name")
-   _jack_connect = dlsym(_lib, "jack_connect")
-   _jack_free = dlsym(_lib, "jack_free")
-   _jack_ringbuffer_create = dlsym(_lib, "jack_ringbuffer_create")
-   _jack_ringbuffer_free = dlsym(_lib, "jack_ringbuffer_free")
-   _jack_ringbuffer_read = dlsym(_lib, "jack_ringbuffer_read")
-   _jack_ringbuffer_read_space = dlsym(_lib, "jack_ringbuffer_read_space")
-   _jack_ringbuffer_write = dlsym(_lib, "jack_ringbuffer_write")
-   _jack_ringbuffer_write_space = dlsym(_lib, "jack_ringbuffer_write_space")
-   if(
-      _jack_client_open == 0 || _jack_client_close == 0 ||
-      _jack_activate == 0 || _jack_deactivate == 0 ||
-      _jack_set_process_callback == 0 || _jack_get_buffer_size == 0 ||
-      _jack_port_register == 0 || _jack_port_get_buffer == 0 ||
-      _jack_ringbuffer_create == 0 || _jack_ringbuffer_free == 0 ||
-      _jack_ringbuffer_read == 0 || _jack_ringbuffer_read_space == 0 ||
-      _jack_ringbuffer_write == 0 || _jack_ringbuffer_write_space == 0
-   ){
-      _close_lib()
-      return false
-   }
-   true
-}
+mut _lib = 0
+mut _avail = -1
 
 fn _state_free(st){
    "Frees all memory owned by a JACK stream state block."
    if(st == 0){ return }
    def rb = load64(st, _ST_RB)
-   if(rb != 0 && _jack_ringbuffer_free != 0){ call1_void(_jack_ringbuffer_free, rb) }
+   if(rb != 0){ jack_ringbuffer_free(rb) }
    def ports = load64(st, _ST_PORTS)
    if(ports != 0){ free(ports) }
    def scratch = load64(st, _ST_SCRATCH)
@@ -160,12 +95,12 @@ fn _state_new(client, channels, format){
    memset(ports, 0, channels * 8)
    store64(st, ports, _ST_PORTS)
 
-   mut period = call1(_jack_get_buffer_size, client)
+   mut period = jack_get_buffer_size(client)
    if(period < 64){ period = 1024 }
 
    mut rb_bytes = period * channels * 4 * 16
    if(rb_bytes < _RB_MIN_BYTES){ rb_bytes = _RB_MIN_BYTES }
-   def rb = call1(_jack_ringbuffer_create, rb_bytes)
+   def rb = jack_ringbuffer_create(rb_bytes)
    if(rb == 0){
       _state_free(st)
       return 0
@@ -194,11 +129,10 @@ fn _state_new(client, channels, format){
 fn _connect_outputs(client, st){
    "Connects client output ports to physical/system inputs."
    if(client == 0 || st == 0){ return }
-   if(_jack_get_ports == 0 || _jack_port_name == 0 || _jack_connect == 0 || _jack_free == 0){ return }
 
-   mut targets = call4(_jack_get_ports, client, 0, 0, JACK_PORT_IS_PHYSICAL | JACK_PORT_IS_INPUT)
+   mut targets = jack_get_ports(client, 0, 0, JACK_PORT_IS_PHYSICAL | JACK_PORT_IS_INPUT)
    if(targets == 0){
-      targets = call4(_jack_get_ports, client, 0, 0, JACK_PORT_IS_INPUT)
+      targets = jack_get_ports(client, 0, 0, JACK_PORT_IS_INPUT)
    }
    if(targets == 0){ return }
 
@@ -210,18 +144,18 @@ fn _connect_outputs(client, st){
       if(dst == 0){ break }
       def port = load64(ports, ch * 8)
       if(port == 0){ break }
-      def src_name = call1(_jack_port_name, port)
+      def src_name = jack_port_name(port)
       if(src_name != 0){
-         call3(_jack_connect, client, src_name, dst)
+         jack_connect(client, src_name, dst)
       }
       ch += 1
    }
-   call1_void(_jack_free, targets)
+   jack_free(targets)
 }
 
 fn _process_cb(nframes, arg){
    "JACK process callback: drains ringbuffer and writes deinterleaved float output."
-   if(arg == 0 || _jack_port_get_buffer == 0){ return 0 }
+   if(arg == 0){ return 0 }
    def st = arg
    def channels = load64(st, _ST_CHANNELS)
    if(channels <= 0){ return 0 }
@@ -238,10 +172,10 @@ fn _process_cb(nframes, arg){
 
    mut read_bytes = 0
    if(rb != 0 && scratch != 0){
-      read_bytes = call1(_jack_ringbuffer_read_space, rb)
+      read_bytes = jack_ringbuffer_read_space(rb)
       if(read_bytes > want_bytes){ read_bytes = want_bytes }
       if(read_bytes > 0){
-         call3(_jack_ringbuffer_read, rb, scratch, read_bytes)
+         jack_ringbuffer_read(rb, scratch, read_bytes)
       }
       if(read_bytes < want_bytes){
          memset(ptr_add(scratch, read_bytes), 0, want_bytes - read_bytes)
@@ -252,7 +186,7 @@ fn _process_cb(nframes, arg){
    while(ch < channels){
       def port = load64(ports, ch * 8)
       if(port != 0){
-         def out = call2(_jack_port_get_buffer, port, frames)
+         def out = jack_port_get_buffer(port, frames)
          if(out != 0){
             if(scratch == 0 || read_bytes == 0){
                memset(out, 0, frames * 4)
@@ -272,39 +206,26 @@ fn _process_cb(nframes, arg){
 }
 
 fn is_available(){
-   "Returns whether JACK shared library is available."
-   def h = dlopen_any("jack", RTLD_NOW())
-   if(h != 0){
-      dlclose(h)
-      return true
-   }
-   false
+   "Returns whether the JACK backend is available on this host."
+   def state = backend_shared.probe_linux_library_once(_avail, _lib, "jack", "jack_client_open")
+   _avail = get(state, 0)
+   _lib = get(state, 1)
+   _avail == 1
 }
 
 fn init(ctx){
    "Initializes JACK backend and appends default JACK device."
-   if(!_load_lib()){ return 0 }
-   mut dev = dict(8)
-   dev = dict_set(dev, "name", "JACK Default")
-   dev = dict_set(dev, "id", "jack")
-   dev = dict_set(dev, "ctx", ctx)
-   mut devices = get(ctx, "devices", list())
-   devices = append(devices, dev)
-   ctx = dict_set(ctx, "devices", devices)
-   ctx
+   backend_shared.init_output_device(ctx, is_available(), "JACK Default", "jack")
 }
-
 
 fn shutdown(ctx){
    "Shuts down JACK backend global state."
    if(ctx){ 0 }
-   _close_lib()
 }
 
 fn stream_open(stream){
    "Opens JACK client, registers output ports, and installs process callback."
-   if(!_load_lib()){ return false }
-
+   if(!is_available()){ return false }
    mut channels = core.get(stream, "channels", 2)
    if(channels <= 0){ channels = 2 }
    if(channels > 8){ channels = 8 }
@@ -319,19 +240,19 @@ fn stream_open(stream){
    def status_ptr = malloc(8)
    if(status_ptr == 0){ return false }
    store32(status_ptr, 0, 0)
-   def client = call4(_jack_client_open, name, JACK_NO_START_SERVER, status_ptr, 0)
+   def client = jack_client_open(cstr(name), JACK_NO_START_SERVER, status_ptr, 0)
    free(status_ptr)
    if(client == 0){ return false }
 
    def st = _state_new(client, channels, format)
    if(st == 0){
-      call1_void(_jack_client_close, client)
+      jack_client_close(client)
       return false
    }
 
-   if(call3(_jack_set_process_callback, client, fn_ptr(_process_cb), st) != 0){
+   if(jack_set_process_callback(client, fn_ptr(_process_cb), st) != 0){
       _state_free(st)
-      call1_void(_jack_client_close, client)
+      jack_client_close(client)
       return false
    }
 
@@ -339,10 +260,10 @@ fn stream_open(stream){
    mut i = 0
    while(i < channels){
       def pname = f"out_{i + 1}"
-      def port = call5(_jack_port_register, client, pname, JACK_DEFAULT_AUDIO_TYPE, JACK_PORT_IS_OUTPUT, 0)
+      def port = jack_port_register(client, cstr(pname), cstr(JACK_DEFAULT_AUDIO_TYPE), JACK_PORT_IS_OUTPUT, 0)
       if(port == 0){
          _state_free(st)
-         call1_void(_jack_client_close, client)
+         jack_client_close(client)
          return false
       }
       store64(ports, port, i * 8)
@@ -360,7 +281,7 @@ fn stream_start(stream){
    "Activates JACK processing and auto-connects output ports."
    def client = get(stream, "handle")
    if(client == 0){ return false }
-   if(call1(_jack_activate, client) != 0){ return false }
+   if(jack_activate(client) != 0){ return false }
    def st = dict_get(_streams, client)
    if(st != 0){ _connect_outputs(client, st) }
    true
@@ -370,19 +291,19 @@ fn stream_stop(stream){
    "Deactivates and closes JACK stream resources."
    def client = get(stream, "handle")
    if(client == 0){ return }
-   if(_jack_deactivate != 0){ call1(_jack_deactivate, client) }
+   jack_deactivate(client)
    def st = dict_get(_streams, client)
    if(st != 0){
       _streams = dict_del(_streams, client)
       _state_free(st)
    }
-   if(_jack_client_close != 0){ call1_void(_jack_client_close, client) }
+   jack_client_close(client)
    stream = dict_set(stream, "handle", 0)
 }
 
 fn write(handle, buf, frames, frame_bytes=4){
    "Converts interleaved S16/F32 frames to float and writes into JACK ringbuffer."
-   _touch(frame_bytes)
+   common.touch(frame_bytes)
    if(handle == 0){ return false }
    if(frames <= 0){ return true }
 
@@ -399,7 +320,7 @@ fn write(handle, buf, frames, frame_bytes=4){
    mut done = 0
    mut stalls = 0
    while(done < total_samples){
-      mut writable = call1(_jack_ringbuffer_write_space, rb) / 4
+      mut writable = jack_ringbuffer_write_space(rb) / 4
       if(writable <= 0){
          stalls += 1
          if(stalls > 5000){ return false }
@@ -429,7 +350,7 @@ fn write(handle, buf, frames, frame_bytes=4){
       }
 
       def need = chunk * 4
-      def wrote = call3(_jack_ringbuffer_write, rb, tmp, need)
+      def wrote = jack_ringbuffer_write(rb, tmp, need)
       if(wrote <= 0){
          msleep(1)
          continue

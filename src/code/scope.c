@@ -92,11 +92,14 @@ static inline scope_lookup_cache_ref_t scope_lookup_cache_ref(scope *sc,
 }
 
 static binding *scope_lookup_impl(scope *scopes, size_t depth, const char *name,
+                                  size_t name_len, uint64_t want_hash,
                                   bool mark_used) {
   if (!name || !*name)
     return NULL;
-  size_t name_len = strlen(name);
-  uint64_t want_hash = ny_hash_name(name, name_len);
+  if (name_len == 0)
+    name_len = strlen(name);
+  if (want_hash == 0)
+    want_hash = ny_hash_name(name, name_len);
   for (ssize_t s = (ssize_t)depth; s >= 0; --s) {
     scope *sc = &scopes[s];
     scope_lookup_cache_ref_t c = scope_lookup_cache_ref(sc, mark_used);
@@ -159,12 +162,17 @@ static binding *scope_lookup_impl(scope *scopes, size_t depth, const char *name,
 }
 
 binding *scope_lookup(scope *scopes, size_t depth, const char *name) {
-  return scope_lookup_impl(scopes, depth, name, true);
+  return scope_lookup_impl(scopes, depth, name, 0, 0, true);
 }
 
 static binding *scope_lookup_no_mark(scope *scopes, size_t depth,
                                      const char *name) {
-  return scope_lookup_impl(scopes, depth, name, false);
+  return scope_lookup_impl(scopes, depth, name, 0, 0, false);
+}
+
+binding *scope_lookup_hash(scope *scopes, size_t depth, const char *name,
+                           size_t name_len, uint64_t hash) {
+  return scope_lookup_impl(scopes, depth, name, name_len, hash, true);
 }
 
 static void scope_cache_clear(scope_lookup_cache_ref_t c) {
@@ -225,8 +233,22 @@ void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
     }
   }
   binding b = {
-      name,      v,         stmt,      is_slot,           is_mut, false, false,
-      false,     type_name, type_name, want_hash, (uint32_t)name_len};
+      .name = name,
+      .value = v,
+      .stmt_t = stmt,
+      .is_slot = is_slot,
+      .is_mut = is_mut,
+      .is_used = false,
+      .owned = false,
+      .is_stable = false,
+      .type_name = type_name,
+      .decl_type_name = type_name,
+      .name_hash = want_hash,
+      .name_len = (uint32_t)name_len,
+      .tail_hash = 0,
+      .tail_len = 0,
+      .tail_cached = false,
+  };
   vec_push(&scopes[depth].vars, b);
   ny_scope_bloom_add(&scopes[depth], want_hash);
   scope_lookup_cache_reset(&scopes[depth]);

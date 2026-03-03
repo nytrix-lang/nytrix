@@ -5,9 +5,25 @@ use std.core.list *
 use std.core.dict *
 use std.text.io *
 use std.text *
+use std.os *
 use std.os.time *
 
 ;; Sieve of Eratosthenes (Benchmark)
+
+fn _bench_scale_percent(){
+   def raw = env("NYTRIX_BENCH_SCALE")
+   if(is_str(raw) && str_len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+
+fn _bench_scale(val, minv){
+   mut out = (val * _bench_scale_percent()) / 100
+   if(out < minv){ out = minv }
+   out
+}
 
 fn sieve(n){
    if(n < 2){ return 0 }
@@ -40,7 +56,7 @@ fn sieve(n){
    return count
 }
 
-def N = 60000
+def N = _bench_scale(60000, 4000)
 print(f"Benchmarking Sieve up to {to_str(N)}")
 
 def t0 = ticks()

@@ -60,8 +60,13 @@ fn tell(src){
 
 fn length(src){
    "Implements `length`."
+   _source_meta(src, "total_frames")
+}
+
+fn _source_meta(src, key){
+   "Internal: returns metadata field `key` from source `src`, or `0` when unavailable."
    if(!is_list(src)){ return 0 }
-   get(get(src, 1), "total_frames")
+   get(get(src, 1), key, 0)
 }
 
 fn format(src){
@@ -82,21 +87,22 @@ fn format(src){
 }
 
 fn source_channels(src){
-   if(!is_list(src)){ return 0 }
-   get(get(src, 1), "channels", 0)
+   "Returns the channel count for `src`."
+   _source_meta(src, "channels")
 }
 
 fn source_rate(src){
-   if(!is_list(src)){ return 0 }
-   get(get(src, 1), "rate", 0)
+   "Returns the sample rate for `src`."
+   _source_meta(src, "rate")
 }
 
 fn source_bits(src){
-   if(!is_list(src)){ return 0 }
-   get(get(src, 1), "bits", 0)
+   "Returns the sample bit depth for `src`."
+   _source_meta(src, "bits")
 }
 
 fn source_length(src){
+   "Returns the total frame count for `src`."
    length(src)
 }
 
@@ -119,7 +125,7 @@ fn sample_format(src){
 }
 
 fn get_item(d, key, default){
-   "Gets item."
+   "Returns `d[key]` or `default` when the dictionary lookup yields 0."
    def v = dict_get(d, key)
    if(v == 0){ return default }
    v
@@ -132,6 +138,7 @@ if(comptime{__main()}){
    print("Running std.os.audio.source tests...")
 
    fn create_test_data(size){
+       "Allocates deterministic byte-pattern test data."
        def ptr = malloc(size)
        mut i = 0
        while(i < size){

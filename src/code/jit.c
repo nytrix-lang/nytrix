@@ -14,6 +14,82 @@
 #include <string.h>
 #include "priv.h"
 
+static int64_t ny_missing_extern_stub0(void) { return 0; }
+static int64_t ny_missing_extern_stub1(int64_t a0) { (void)a0; return 0; }
+static int64_t ny_missing_extern_stub2(int64_t a0, int64_t a1) {
+  (void)a0; (void)a1; return 0;
+}
+static int64_t ny_missing_extern_stub3(int64_t a0, int64_t a1, int64_t a2) {
+  (void)a0; (void)a1; (void)a2; return 0;
+}
+static int64_t ny_missing_extern_stub4(int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+  (void)a0; (void)a1; (void)a2; (void)a3; return 0;
+}
+static int64_t ny_missing_extern_stub5(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                       int64_t a4) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; return 0;
+}
+static int64_t ny_missing_extern_stub6(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                       int64_t a4, int64_t a5) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; return 0;
+}
+static int64_t ny_missing_extern_stub7(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                       int64_t a4, int64_t a5, int64_t a6) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; return 0;
+}
+static int64_t ny_missing_extern_stub8(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                       int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; return 0;
+}
+static int64_t ny_missing_extern_stub9(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                       int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                                       int64_t a8) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; (void)a8; return 0;
+}
+static int64_t ny_missing_extern_stub10(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                        int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                                        int64_t a8, int64_t a9) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; (void)a8; (void)a9; return 0;
+}
+static int64_t ny_missing_extern_stub11(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                        int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                                        int64_t a8, int64_t a9, int64_t a10) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; (void)a8; (void)a9; (void)a10; return 0;
+}
+static int64_t ny_missing_extern_stub12(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                        int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                                        int64_t a8, int64_t a9, int64_t a10, int64_t a11) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; (void)a8; (void)a9; (void)a10; (void)a11; return 0;
+}
+static int64_t ny_missing_extern_stub16(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                                        int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                                        int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                                        int64_t a12, int64_t a13, int64_t a14, int64_t a15) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  (void)a8; (void)a9; (void)a10; (void)a11; (void)a12; (void)a13; (void)a14; (void)a15;
+  return 0;
+}
+
+static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
+  if (variadic) return (void *)(uintptr_t)ny_missing_extern_stub16;
+  switch (arity) {
+  case 0: return (void *)(uintptr_t)ny_missing_extern_stub0;
+  case 1: return (void *)(uintptr_t)ny_missing_extern_stub1;
+  case 2: return (void *)(uintptr_t)ny_missing_extern_stub2;
+  case 3: return (void *)(uintptr_t)ny_missing_extern_stub3;
+  case 4: return (void *)(uintptr_t)ny_missing_extern_stub4;
+  case 5: return (void *)(uintptr_t)ny_missing_extern_stub5;
+  case 6: return (void *)(uintptr_t)ny_missing_extern_stub6;
+  case 7: return (void *)(uintptr_t)ny_missing_extern_stub7;
+  case 8: return (void *)(uintptr_t)ny_missing_extern_stub8;
+  case 9: return (void *)(uintptr_t)ny_missing_extern_stub9;
+  case 10: return (void *)(uintptr_t)ny_missing_extern_stub10;
+  case 11: return (void *)(uintptr_t)ny_missing_extern_stub11;
+  case 12: return (void *)(uintptr_t)ny_missing_extern_stub12;
+  default: return (void *)(uintptr_t)ny_missing_extern_stub16;
+  }
+}
+
 void ny_jit_init_native_once(void) {
   static int initialized = 0;
   if (initialized)
@@ -30,18 +106,55 @@ void *ny_jit_load_library(const char *path) {
     return NULL;
 #ifdef _WIN32
   HMODULE h = LoadLibraryA(path);
-  return (void *)h;
+  if (h)
+    return (void *)h;
+  if (!strchr(path, '.') && !strchr(path, '\\') && !strchr(path, '/')) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%s.dll", path);
+    h = LoadLibraryA(buf);
+    if (h)
+      return (void *)h;
+    snprintf(buf, sizeof(buf), "lib%s.dll", path);
+    h = LoadLibraryA(buf);
+    if (h)
+      return (void *)h;
+  }
+  return NULL;
 #else
   void *h = dlopen(path, RTLD_GLOBAL | RTLD_LAZY);
-  if (!h) {
-    // Try with .so suffix if missing
-    if (!strchr(path, '.')) {
-      char buf[256];
-      snprintf(buf, sizeof(buf), "lib%s.so", path);
+  if (h)
+    return h;
+  const bool has_dot = strchr(path, '.') != NULL;
+  const bool has_sep = strchr(path, '/') != NULL;
+#ifdef __APPLE__
+  if (!has_dot && !has_sep) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "lib%s.dylib", path);
+    h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
+    if (h)
+      return h;
+    snprintf(buf, sizeof(buf), "lib%s.0.dylib", path);
+    h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
+    if (h)
+      return h;
+  }
+#else
+  if (!has_dot && !has_sep) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "lib%s.so", path);
+    h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
+    if (h)
+      return h;
+    const char *vers[] = {"0", "1", "2", "3", "8", "12", "14", "18"};
+    for (size_t i = 0; i < sizeof(vers) / sizeof(vers[0]); i++) {
+      snprintf(buf, sizeof(buf), "lib%s.so.%s", path, vers[i]);
       h = dlopen(buf, RTLD_GLOBAL | RTLD_LAZY);
+      if (h)
+        return h;
     }
   }
-  return h;
+#endif
+  return NULL;
 #endif
 }
 
@@ -125,6 +238,29 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
                                     codegen_t *cg) {
   if (!cg || !mod)
     return;
+  /* Fallback: if cache hit skipped sig collection, map all declarations. */
+  if (cg->fun_sigs.len == 0) {
+    for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+         f = LLVMGetNextFunction(f)) {
+      if (!LLVMIsDeclaration(f))
+        continue;
+      if (!LLVMGetFirstUse(f))
+        continue;
+      const char *name = LLVMGetValueName(f);
+      if (!name || strncmp(name, "llvm.", 5) == 0)
+        continue;
+      LLVMTypeRef fty = LLVMGetElementType(LLVMTypeOf(f));
+      unsigned arity = LLVMCountParamTypes(fty);
+      bool variadic = LLVMIsFunctionVarArg(fty);
+      void *ptr = resolve_symbol_with_fallback(name);
+      if (!ptr) {
+        NY_LOG_WARN("extern symbol '%s' not found (cache fallback)", name);
+        ptr = ny_missing_extern_stub_for_arity((int)arity, variadic);
+      }
+      LLVMAddGlobalMapping(ee, f, ptr);
+    }
+    return;
+  }
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
     fun_sig *sig = &cg->fun_sigs.data[i];
     if (!sig->is_extern)
@@ -144,13 +280,14 @@ static void register_extern_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod
     }
     if (!val)
       continue;
+    if (!LLVMGetFirstUse(val))
+      continue;
 
     void *ptr = resolve_symbol_with_fallback(symbol);
     if (!ptr) {
       NY_LOG_WARN("extern symbol '%s' not found for %s", symbol, sig->name);
-      continue;
+      ptr = ny_missing_extern_stub_for_arity(sig->arity, sig->is_variadic);
     }
-
     LLVMAddGlobalMapping(ee, val, ptr);
   }
 }

@@ -5,6 +5,7 @@ Nytrix Parallel Jobs Management
 import sys
 sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 from context import host_os, is_arm_riscv_machine
 from utils import run_capture
 

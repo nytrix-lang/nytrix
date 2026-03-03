@@ -98,6 +98,7 @@ typedef struct token_t {
 typedef struct lexer_t {
   const char *src;
   const char *filename;
+  size_t len;
   size_t pos;
   int line;
   int real_line;

@@ -5,6 +5,7 @@ Nytrix Code Tidy
 import sys
 sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import re
 import subprocess
 from pathlib import Path

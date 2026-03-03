@@ -34,7 +34,8 @@ static LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
     return v;
   if (LLVMTypeOf(v) == cg->type_i64)
     return v;
-  return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, name ? name : "");
+  return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64,
+                           ny_llvm_name(cg, name));
 }
 
 static LLVMValueRef ny_build_is_ptr_pred(codegen_t *cg, LLVMValueRef v,
@@ -52,7 +53,7 @@ static LLVMValueRef ny_build_is_ptr_pred(codegen_t *cg, LLVMValueRef v,
       cg->builder, LLVMIntUGT, v, LLVMConstInt(cg->type_i64, 0x1000, false),
       "ptr_gt_min");
   return LLVMBuildAnd(cg->builder, nonzero,
-                      LLVMBuildAnd(cg->builder, aligned, gt_min, "ptr_and"),
+                      LLVMBuildAnd(cg->builder, aligned, gt_min, NY_LLVM_NAME(cg, "ptr_and")),
                       "ptr_pred");
 }
 
@@ -150,9 +151,9 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
     LLVMSetThreadLocal(depth_g, 1);
   }
 
-  LLVMBasicBlockRef hit_bb = LLVMAppendBasicBlock(parent_fn, "memo.hit");
-  LLVMBasicBlockRef miss_bb = LLVMAppendBasicBlock(parent_fn, "memo.miss");
-  LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(parent_fn, "memo.join");
+  LLVMBasicBlockRef hit_bb = ny_llvm_append_block(parent_fn, "memo.hit");
+  LLVMBasicBlockRef miss_bb = ny_llvm_append_block(parent_fn, "memo.miss");
+  LLVMBasicBlockRef join_bb = ny_llvm_append_block(parent_fn, "memo.join");
 
   ny_dbg_loc(cg, tok);
   LLVMValueRef valid = LLVMBuildLoad2(cg->builder, cg->type_i1, valid_g, "");
@@ -169,7 +170,7 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
     }
   }
   LLVMValueRef depth_now =
-      LLVMBuildLoad2(cg->builder, cg->type_i64, depth_g, "memo_depth");
+      LLVMBuildLoad2(cg->builder, cg->type_i64, depth_g, NY_LLVM_NAME(cg, "memo_depth"));
   LLVMValueRef memo_depth_ok =
       LLVMBuildICmp(cg->builder, LLVMIntEQ, depth_now,
                     LLVMConstInt(cg->type_i64, 0, false), "");
@@ -274,7 +275,7 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
 
   LLVMPositionBuilderAtEnd(cg->builder, join_bb);
 
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "memo_res");
+  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "memo_res"));
   LLVMAddIncoming(phi, (LLVMValueRef[]){hit_res, miss_res},
                   (LLVMBasicBlockRef[]){hit_end_bb, miss_end_bb}, 2);
   return phi;
@@ -345,7 +346,11 @@ static bool ny_memo_impure_return_allowed(const char *type_name) {
 }
 
 static bool abi_type_is_ptr(const char *type_name) {
-  return type_name && type_name[0] == '*';
+  if (!type_name || !*type_name)
+    return false;
+  if (type_name[0] == '*')
+    return true;
+  return strcmp(type_name, "ptr") == 0 || strcmp(type_name, "handle") == 0;
 }
 
 static bool abi_type_is_float(const char *type_name) {
@@ -401,9 +406,9 @@ static LLVMValueRef abi_untag_int(codegen_t *cg, LLVMValueRef v,
                                   bool is_signed) {
   LLVMValueRef shift = LLVMConstInt(cg->type_i64, 1, false);
   if (is_signed) {
-    return LLVMBuildAShr(cg->builder, v, shift, "untag_i");
+    return LLVMBuildAShr(cg->builder, v, shift, NY_LLVM_NAME(cg, "untag_i"));
   }
-  return LLVMBuildLShr(cg->builder, v, shift, "untag_u");
+  return LLVMBuildLShr(cg->builder, v, shift, NY_LLVM_NAME(cg, "untag_u"));
 }
 
 static LLVMValueRef abi_cast_int(codegen_t *cg, LLVMValueRef v,
@@ -413,13 +418,13 @@ static LLVMValueRef abi_cast_int(codegen_t *cg, LLVMValueRef v,
   unsigned src_w = LLVMGetIntTypeWidth(LLVMTypeOf(v));
   unsigned dst_w = LLVMGetIntTypeWidth(target);
   if (dst_w < src_w) {
-    return LLVMBuildTrunc(cg->builder, v, target, "int_trunc");
+    return LLVMBuildTrunc(cg->builder, v, target, NY_LLVM_NAME(cg, "int_trunc"));
   }
   if (dst_w > src_w) {
-    return is_signed ? LLVMBuildSExt(cg->builder, v, target, "int_sext")
-                     : LLVMBuildZExt(cg->builder, v, target, "int_zext");
+    return is_signed ? LLVMBuildSExt(cg->builder, v, target, NY_LLVM_NAME(cg, "int_sext"))
+                     : LLVMBuildZExt(cg->builder, v, target, NY_LLVM_NAME(cg, "int_zext"));
   }
-  return LLVMBuildBitCast(cg->builder, v, target, "int_cast");
+  return LLVMBuildBitCast(cg->builder, v, target, NY_LLVM_NAME(cg, "int_cast"));
 }
 
 static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
@@ -427,7 +432,16 @@ static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
   if (!type_name || abi_type_is_tagged(type_name))
     return v;
   if (abi_type_is_ptr(type_name)) {
-    return LLVMBuildIntToPtr(cg->builder, v, cg->type_i8ptr, "arg_ptr");
+    LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
+    LLVMValueRef is_int =
+        LLVMBuildICmp(cg->builder, LLVMIntEQ,
+                      LLVMBuildAnd(cg->builder, v, one, ""), one, "ptr_is_int");
+    LLVMValueRef shift = LLVMConstInt(cg->type_i64, 1, false);
+    LLVMValueRef untagged =
+        LLVMBuildAShr(cg->builder, v, shift, NY_LLVM_NAME(cg, "ptr_untag"));
+    LLVMValueRef raw =
+        LLVMBuildSelect(cg->builder, is_int, untagged, v, NY_LLVM_NAME(cg, "ptr_raw"));
+    return LLVMBuildIntToPtr(cg->builder, raw, cg->type_i8ptr, NY_LLVM_NAME(cg, "arg_ptr"));
   }
   if (abi_type_is_float(type_name)) {
     fun_sig *unbox = ny_gencall_flt_unbox(cg);
@@ -439,9 +453,9 @@ static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
     if (strcmp(type_name, "f64") == 0)
       return dbl;
     if (strcmp(type_name, "f32") == 0)
-      return LLVMBuildFPTrunc(cg->builder, dbl, cg->type_f32, "f32_arg");
+      return LLVMBuildFPTrunc(cg->builder, dbl, cg->type_f32, NY_LLVM_NAME(cg, "f32_arg"));
     if (strcmp(type_name, "f128") == 0)
-      return LLVMBuildFPExt(cg->builder, dbl, cg->type_f128, "f128_arg");
+      return LLVMBuildFPExt(cg->builder, dbl, cg->type_f128, NY_LLVM_NAME(cg, "f128_arg"));
     return dbl;
   }
   if (abi_type_is_signed_int(type_name)) {
@@ -464,7 +478,7 @@ static LLVMValueRef box_extern_result(codegen_t *cg, LLVMValueRef v,
   if (strcmp(type_name, "void") == 0)
     return LLVMConstInt(cg->type_i64, 0, false);
   if (abi_type_is_ptr(type_name)) {
-    return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, "ret_ptr");
+    return LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, NY_LLVM_NAME(cg, "ret_ptr"));
   }
   if (abi_type_is_float(type_name)) {
     fun_sig *box = ny_gencall_flt_box(cg);
@@ -472,9 +486,9 @@ static LLVMValueRef box_extern_result(codegen_t *cg, LLVMValueRef v,
       return LLVMConstInt(cg->type_i64, 0, false);
     LLVMValueRef dbl = v;
     if (strcmp(type_name, "f32") == 0) {
-      dbl = LLVMBuildFPExt(cg->builder, v, cg->type_f64, "f32_to_f64");
+      dbl = LLVMBuildFPExt(cg->builder, v, cg->type_f64, NY_LLVM_NAME(cg, "f32_to_f64"));
     } else if (strcmp(type_name, "f128") == 0) {
-      dbl = LLVMBuildFPTrunc(cg->builder, v, cg->type_f64, "f128_to_f64");
+      dbl = LLVMBuildFPTrunc(cg->builder, v, cg->type_f64, NY_LLVM_NAME(cg, "f128_to_f64"));
     }
     LLVMValueRef bits = LLVMBuildBitCast(cg->builder, dbl, cg->type_i64, "");
     return LLVMBuildCall2(cg->builder, box->type, box->value, &bits, 1, "");
@@ -740,10 +754,11 @@ static bool is_problematic_value_struct(const char *type_name) {
 
 LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                            expr_t *e) {
-  if (!cg || !e) {
-    if (cg)
-      cg->had_error = 1;
-    return LLVMConstInt(cg ? cg->type_i64 : LLVMInt64Type(), 0, false);
+  if (!cg)
+    return NULL;
+  if (!e) {
+    cg->had_error = 1;
+    return LLVMConstInt(cg->type_i64, 0, false);
   }
   if (e->kind != NY_E_CALL && e->kind != NY_E_MEMCALL) {
     ny_diag_error(e->tok,
@@ -799,18 +814,18 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                          LLVMConstInt(cg->type_i64, 16, false),
                          "load_item_off");
         LLVMValueRef addr =
-            LLVMBuildAdd(cg->builder, lst_v, byte_off, "load_item_addr");
+            LLVMBuildAdd(cg->builder, lst_v, byte_off, NY_LLVM_NAME(cg, "load_item_addr"));
         LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
                                              LLVMPointerType(cg->type_i64, 0),
                                              "load_item_ptr_i64");
-        return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "load_item_val");
+        return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, NY_LLVM_NAME(cg, "load_item_val"));
       }
       LLVMValueRef is_ptr_pred = ny_build_is_ptr_pred(cg, lst_v, "load_item_ptr");
       LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
       LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
-      LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(fn, "load_item.ok");
-      LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "load_item.fail");
-      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "load_item.join");
+      LLVMBasicBlockRef ok_bb = ny_llvm_append_block(fn, "load_item.ok");
+      LLVMBasicBlockRef fail_bb = ny_llvm_append_block(fn, "load_item.fail");
+      LLVMBasicBlockRef join_bb = ny_llvm_append_block(fn, "load_item.join");
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
@@ -824,12 +839,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           LLVMBuildAdd(cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
                        "load_item_off");
       LLVMValueRef addr =
-          LLVMBuildAdd(cg->builder, lst_v, byte_off, "load_item_addr");
+          LLVMBuildAdd(cg->builder, lst_v, byte_off, NY_LLVM_NAME(cg, "load_item_addr"));
       LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
                                            LLVMPointerType(cg->type_i64, 0),
                                            "load_item_ptr_i64");
       LLVMValueRef ok_val =
-          LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "load_item_val");
+          LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, NY_LLVM_NAME(cg, "load_item_val"));
       LLVMBasicBlockRef ok_end_bb = LLVMGetInsertBlock(cg->builder);
       LLVMBuildBr(cg->builder, join_bb);
 
@@ -841,7 +856,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
 
       LLVMValueRef phi =
-          LLVMBuildPhi(cg->builder, cg->type_i64, "load_item_result");
+          LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "load_item_result"));
       LLVMValueRef incoming_vals[2] = {ok_val, LLVMConstInt(cg->type_i64, 0, false)};
       LLVMBasicBlockRef incoming_bbs[2] = {ok_end_bb, fail_end_bb};
       LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -872,7 +887,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
             "store_item_off");
         LLVMValueRef addr =
-            LLVMBuildAdd(cg->builder, lst_v, byte_off, "store_item_addr");
+            LLVMBuildAdd(cg->builder, lst_v, byte_off, NY_LLVM_NAME(cg, "store_item_addr"));
         LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
                                              LLVMPointerType(cg->type_i64, 0),
                                              "store_item_ptr_i64");
@@ -883,9 +898,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           ny_build_is_ptr_pred(cg, lst_v, "store_item_ptr");
       LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
       LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
-      LLVMBasicBlockRef ok_bb = LLVMAppendBasicBlock(fn, "store_item.ok");
-      LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlock(fn, "store_item.fail");
-      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "store_item.join");
+      LLVMBasicBlockRef ok_bb = ny_llvm_append_block(fn, "store_item.ok");
+      LLVMBasicBlockRef fail_bb = ny_llvm_append_block(fn, "store_item.fail");
+      LLVMBasicBlockRef join_bb = ny_llvm_append_block(fn, "store_item.join");
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ok_bb, fail_bb);
 
       LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
@@ -899,7 +914,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
           "store_item_off");
       LLVMValueRef addr =
-          LLVMBuildAdd(cg->builder, lst_v, byte_off, "store_item_addr");
+          LLVMBuildAdd(cg->builder, lst_v, byte_off, NY_LLVM_NAME(cg, "store_item_addr"));
       LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
                                            LLVMPointerType(cg->type_i64, 0),
                                            "store_item_ptr_i64");
@@ -915,7 +930,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
 
       LLVMValueRef phi =
-          LLVMBuildPhi(cg->builder, cg->type_i64, "store_item_result");
+          LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "store_item_result"));
       LLVMValueRef incoming_vals[2] = {val_v, LLVMConstInt(cg->type_i64, 0, false)};
       LLVMBasicBlockRef incoming_bbs[2] = {ok_end_bb, fail_end_bb};
       LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -950,14 +965,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           "obj_gt_min");
       LLVMValueRef is_ptr_pred =
           LLVMBuildAnd(cg->builder, is_nonzero,
-                       LLVMBuildAnd(cg->builder, align_ok, ptr_min, "obj_ptr_and"),
+                       LLVMBuildAnd(cg->builder, align_ok, ptr_min, NY_LLVM_NAME(cg, "obj_ptr_and")),
                        "obj_is_ptr");
 
       LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
       LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
-      LLVMBasicBlockRef ptr_bb = LLVMAppendBasicBlock(fn, "obj.ptr");
-      LLVMBasicBlockRef not_ptr_bb = LLVMAppendBasicBlock(fn, "obj.not_ptr");
-      LLVMBasicBlockRef join_bb = LLVMAppendBasicBlock(fn, "obj.join");
+      LLVMBasicBlockRef ptr_bb = ny_llvm_append_block(fn, "obj.ptr");
+      LLVMBasicBlockRef not_ptr_bb = ny_llvm_append_block(fn, "obj.not_ptr");
+      LLVMBasicBlockRef join_bb = ny_llvm_append_block(fn, "obj.join");
 
       LLVMBuildCondBr(cg->builder, is_ptr_pred, ptr_bb, not_ptr_bb);
 
@@ -970,7 +985,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           LLVMBuildIntToPtr(cg->builder, tag_addr, LLVMPointerType(cg->type_i64, 0),
                             "obj_tag_ptr");
       LLVMValueRef tag_v =
-          LLVMBuildLoad2(cg->builder, cg->type_i64, tag_ptr, "obj_tag");
+          LLVMBuildLoad2(cg->builder, cg->type_i64, tag_ptr, NY_LLVM_NAME(cg, "obj_tag"));
       LLVMValueRef ptr_result = LLVMConstInt(cg->type_i64, 0, false);
       if (want_is_ny_obj) {
         LLVMValueRef ge_100 =
@@ -980,7 +995,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             LLVMBuildICmp(cg->builder, LLVMIntULE, tag_v,
                           LLVMConstInt(cg->type_i64, 255, false), "obj_le_255");
         LLVMValueRef is_obj =
-            LLVMBuildAnd(cg->builder, ge_100, le_255, "obj_is_ny_obj");
+            LLVMBuildAnd(cg->builder, ge_100, le_255, NY_LLVM_NAME(cg, "obj_is_ny_obj"));
         ptr_result = LLVMBuildSelect(
             cg->builder, is_obj, LLVMConstInt(cg->type_i64, 2, false),
             LLVMConstInt(cg->type_i64, 4, false), "obj_is_ny_obj_v");
@@ -993,7 +1008,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                           LLVMConstInt(cg->type_i64, 121, false),
                           "obj_is_const_str");
         LLVMValueRef is_any_str =
-            LLVMBuildOr(cg->builder, is_str, is_const_str, "obj_is_any_str");
+            LLVMBuildOr(cg->builder, is_str, is_const_str, NY_LLVM_NAME(cg, "obj_is_any_str"));
         ptr_result = LLVMBuildSelect(
             cg->builder, is_any_str, LLVMConstInt(cg->type_i64, 2, false),
             LLVMConstInt(cg->type_i64, 4, false), "obj_is_str_v");
@@ -1018,7 +1033,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
 
       LLVMPositionBuilderAtEnd(cg->builder, join_bb);
 
-      LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "obj_intrinsic_v");
+      LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "obj_intrinsic_v"));
       LLVMValueRef incoming_vals[2] = {ptr_result, not_ptr_result};
       LLVMBasicBlockRef incoming_bbs[2] = {ptr_end_bb, not_ptr_end_bb};
       LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -1033,7 +1048,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
       if (LLVMTypeOf(arg_v) != cg->type_i64) {
         arg_v =
-            LLVMBuildPtrToInt(cg->builder, arg_v, cg->type_i64, "is_int_arg");
+            LLVMBuildPtrToInt(cg->builder, arg_v, cg->type_i64, NY_LLVM_NAME(cg, "is_int_arg"));
       }
       ny_dbg_loc(cg, e->tok);
       LLVMValueRef lsb =
@@ -1211,6 +1226,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     const char *name = (c && c->callee && c->callee->kind == NY_E_IDENT)
                            ? c->callee->as.ident.name
                            : NULL;
+    uint64_t name_hash = (c && c->callee && c->callee->kind == NY_E_IDENT)
+                             ? c->callee->as.ident.hash
+                             : 0;
     if (name) {
       binding *b = scope_lookup(scopes, depth, name);
       if (b) {
@@ -1219,7 +1237,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                      ? LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "")
                      : b->value;
       } else {
-        binding *gb = lookup_global(cg, name);
+        binding *gb = lookup_global_hash(cg, name, name_hash);
         if (gb) {
           gb->is_used = true;
           callee = gb->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_i64,
@@ -1229,14 +1247,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
     }
     if (!callee) {
-      uint64_t hash = (c && c->callee && c->callee->kind == NY_E_IDENT)
-                          ? c->callee->as.ident.hash
-                          : 0;
-      sig_found = name ? resolve_overload(cg, name, c->args.len, hash) : NULL;
+      sig_found =
+          name ? resolve_overload(cg, name, c->args.len, name_hash) : NULL;
       if (!sig_found && name)
         sig_found = lookup_use_module_fun(cg, name, c->args.len);
       if (!sig_found && name)
-        sig_found = lookup_fun(cg, name, hash);
+        sig_found = lookup_fun(cg, name, name_hash);
       if (sig_found && !ny_sig_in_current_sigs(cg, sig_found))
         sig_found = NULL;
       if (sig_found) {
@@ -1583,7 +1599,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     LLVMValueRef fn_val =
         (LLVMTypeOf(callee) == cg->type_i64)
             ? callee
-            : LLVMBuildPtrToInt(cg->builder, callee, cg->type_i64, "thread_fn");
+            : LLVMBuildPtrToInt(cg->builder, callee, cg->type_i64, NY_LLVM_NAME(cg, "thread_fn"));
 
     LLVMValueRef argc_val =
         LLVMConstInt(cg->type_i64, (((uint64_t)final_argc << 1) | 1), false);
@@ -1592,7 +1608,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMTypeRef argv_ty = LLVMArrayType(cg->type_i64, (unsigned)final_argc);
       ny_dbg_loc(cg, e->tok);
       LLVMValueRef argv_stack =
-          LLVMBuildAlloca(cg->builder, argv_ty, "thread_argv");
+          LLVMBuildAlloca(cg->builder, argv_ty, NY_LLVM_NAME(cg, "thread_argv"));
       for (size_t i = 0; i < final_argc; i++) {
         LLVMValueRef idxs[2] = {LLVMConstInt(cg->type_i64, 0, false),
                                 LLVMConstInt(cg->type_i64, (uint64_t)i, false)};

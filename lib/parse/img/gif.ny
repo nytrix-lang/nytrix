@@ -8,38 +8,12 @@ module std.image.format.gif (
 
 use std.core *
 use std.core.dict_mod *
+use std.parse.bin as pbin
 
 ;; Decoder
 
-fn _u16le(s, i) {
-   def b1 = load8(s, i)
-   def b2 = load8(s, i + 1)
-   return b1 | (b2 << 8)
-}
-
-fn _mk_z(n) {
-   mut l = list(n)
-   mut iCount = 0
-   while(iCount < n) {
-      l = append(l, 0)
-      iCount += 1
-   }
-   return l
-}
-
-fn _l2b(xs) {
-   def n = len(xs)
-   def out = init_str(malloc(n + 1 + 16) + 16, n)
-   mut iCount = 0
-   while(iCount < n) {
-      store8(out, get(xs, iCount) & 255, iCount)
-      iCount += 1
-   }
-   store8(out, 0, n)
-   return out
-}
-
 fn _g_sb(data, p) {
+   "Reads a GIF sub-block chain starting at `p`."
    def n = len(data)
    mut q = p
    mut total = 0
@@ -72,14 +46,15 @@ fn _g_sb(data, p) {
 }
 
 fn _g_lzw_dec(comp, mcs, olen) {
+   "Decodes GIF LZW-compressed pixel indices."
    if(!is_str(comp) || olen <= 0) {
       return 0
    }
    def clr = 1 << mcs
    def end_code = clr + 1
-   def pre = _mk_z(4096)
-   def suf = _mk_z(4096)
-   def stk = _mk_z(4096)
+   def pre = pbin.zero_list(4096)
+   def suf = pbin.zero_list(4096)
+   def stk = pbin.zero_list(4096)
    mut bpos = 0
    mut csz = mcs + 1
    mut nextcode = end_code + 1
@@ -156,6 +131,7 @@ fn _g_lzw_dec(comp, mcs, olen) {
 }
 
 fn _g_di(src, w, h) {
+   "Reorders interlaced GIF indices into scanline order."
    def out = init_str(malloc(w * h + 1 + 16) + 16, w * h)
    memset(out, 0, w * h)
    mut p = 0
@@ -182,14 +158,15 @@ fn _g_di(src, w, h) {
 }
 
 fn decode(data) {
+   "Decodes a GIF image into the standard image dictionary shape."
    if(!is_str(data) || len(data) < 13) {
       return 0
    }
    if(load8(data, 0) != 71 || load8(data, 1) != 73 || load8(data, 2) != 70) {
       return 0
    }
-   def w = _u16le(data, 6)
-   def h = _u16le(data, 8)
+   def w = pbin.u16le(data, 6)
+   def h = pbin.u16le(data, 8)
    def flags = load8(data, 10)
    mut p = 13
    mut gaddr = -1
@@ -303,6 +280,7 @@ fn decode(data) {
 ;; Encoder section
 
 fn encode(img) {
+   "Encodes an indexed or RGBA image dictionary as a GIF byte string."
    def w = dict_get(img, "width")
    def h = dict_get(img, "height")
    def d = dict_get(img, "data")
@@ -591,5 +569,5 @@ fn encode(img) {
    res_l = append(res_l, 0)
    res_l = append(res_l, 0x3B)
 
-   return _l2b(res_l)
+   return pbin.from_list(res_l)
 }

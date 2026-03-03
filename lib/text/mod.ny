@@ -196,6 +196,7 @@ fn strip(s){
 }
 
 fn split(s, sep){
+   "Splits string `s` using separator `sep`."
    if(env("NY_TEXT_DEBUG")){ print("Text: split s='" + s + "' sep='" + sep + "'") }
    "Splits string `s` by separator `sep` and returns a list of strings."
    if(!is_str(s)){ return list(0) }

@@ -5,6 +5,7 @@ Nytrix Build Context
 import sys
 sys.dont_write_bytecode = True
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import platform
 import shutil
 from pathlib import Path

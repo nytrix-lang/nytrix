@@ -4,6 +4,8 @@ Nytrix Code Formatter
 """
 import sys
 sys.dont_write_bytecode = True
+import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 import argparse
 import re

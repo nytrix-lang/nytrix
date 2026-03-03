@@ -18,6 +18,7 @@ use std.core *
 use std.core.dict_mod *
 use std.os *
 use std.text *
+use std.util.common as common
 
 use std.os.audio.backend.alsa as audio_alsa
 use std.os.audio.backend.pulse as audio_pulse
@@ -26,11 +27,6 @@ use std.os.audio.backend.winmm as audio_winmm
 
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
-
-fn _touch(...args){
-   "Internal helper for `touch`."
-    len(args)
-}
 
 fn _forced_backend(){
    "Internal helper for `forced_backend`."
@@ -46,56 +42,63 @@ fn _set_backend(ctx, id, name){
     ctx
 }
 
-fn _connect_pulse(ctx){
-    if(audio_pulse.is_available()){
-        def new_ctx = audio_pulse.init(ctx)
-        if(new_ctx){ return _set_backend(new_ctx, 1, "pulse") }
-    }
-    0
-}
-
-
-
-fn _connect_alsa(ctx){
-    if(audio_alsa.is_available()){
-        def new_ctx = audio_alsa.init(ctx)
-        if(new_ctx){ return _set_backend(new_ctx, 2, "alsa") }
-    }
-    0
-}
-
-
-
-fn _connect_jack(ctx){
-   "Internal helper for `connect_jack`."
-    if(audio_jack.is_available()){
-        def new_ctx = audio_jack.init(ctx)
-        if(new_ctx){ return _set_backend(new_ctx, 4, "jack") }
-    }
-    0
-}
-
-
-fn _connect_winmm(ctx){
-   "Internal helper for `connect_winmm`."
-    if(audio_winmm.is_available()){
-        def new_ctx = audio_winmm.init(ctx)
-        if(new_ctx){ return _set_backend(new_ctx, 3, "winmm") }
-    }
-    0
+fn _connect_backend(ctx, backend){
+   "Initializes backend `backend` and records its canonical id and name in `ctx`."
+   mut id = 0
+   mut name = ""
+   mut new_ctx = 0
+   if(eq(backend, "pulse")){
+      id = 1
+      name = "pulse"
+      if(audio_pulse.is_available()){ new_ctx = audio_pulse.init(ctx) }
+   } elif(eq(backend, "alsa")){
+      id = 2
+      name = "alsa"
+      if(audio_alsa.is_available()){ new_ctx = audio_alsa.init(ctx) }
+   } elif(eq(backend, "winmm")){
+      id = 3
+      name = "winmm"
+      if(audio_winmm.is_available()){ new_ctx = audio_winmm.init(ctx) }
+   } elif(eq(backend, "jack")){
+      id = 4
+      name = "jack"
+      if(audio_jack.is_available()){ new_ctx = audio_jack.init(ctx) }
+   }
+   if(new_ctx){ return _set_backend(new_ctx, id, name) }
+   0
 }
 
 
 fn _connect_linux_desktop(ctx, allow_jack=false){
-    mut nctx = _connect_pulse(ctx)
+    "Tries the preferred Linux desktop backends in order: PulseAudio, ALSA, then optional JACK."
+    mut nctx = _connect_backend(ctx, "pulse")
     if(nctx){ return nctx }
-    nctx = _connect_alsa(ctx)
+    nctx = _connect_backend(ctx, "alsa")
     if(nctx){ return nctx }
     if(allow_jack){
-        nctx = _connect_jack(ctx)
+        nctx = _connect_backend(ctx, "jack")
         if(nctx){ return nctx }
     }
     0
+}
+
+fn _stream_backend(stream){
+   "Internal: resolves the backend id for `stream`, or returns `0` when the stream is incomplete."
+    if(!stream){ return 0 }
+    def device = core.get(stream, "device")
+    if(!device){ return 0 }
+    def ctx = core.get(device, "ctx")
+    if(!ctx){ return 0 }
+    core.get(ctx, "backend")
+}
+
+fn _stream_frame_bytes(stream){
+   "Internal: returns bytes per frame for `stream`, defaulting to stereo 16-bit samples."
+    def channels = core.get(stream, "channels")
+    def bps = core.get(stream, "bits_per_sample", 16)
+    mut sample_bytes = bps / 8
+    if(sample_bytes <= 0){ sample_bytes = 2 }
+    channels * sample_bytes
 }
 
 
@@ -113,29 +116,29 @@ fn connect(ctx){
     if(!ctx){ return 0 }
     def forced = _forced_backend()
     if(forced == "pulse"){
-        return _connect_pulse(ctx)
+        return _connect_backend(ctx, "pulse")
     } elif(forced == "alsa"){
-        return _connect_alsa(ctx)
+        return _connect_backend(ctx, "alsa")
     } elif(forced == "jack"){
-        return _connect_jack(ctx)
+        return _connect_backend(ctx, "jack")
     } elif(forced == "winmm"){
-        return _connect_winmm(ctx)
+        return _connect_backend(ctx, "winmm")
     } elif(forced == "portaudio" || forced == "pa" || forced == "miniaudio"){
         def name = os()
         if(eq(name, "linux")){ return _connect_linux_desktop(ctx, true) }
-        if(eq(name, "windows")){ return _connect_winmm(ctx) }
+        if(eq(name, "windows")){ return _connect_backend(ctx, "winmm") }
         return 0
     } elif(forced == "libsoundio" || forced == "soundio"){
         def name = os()
         if(eq(name, "linux")){ return _connect_linux_desktop(ctx, true) }
-        if(eq(name, "windows")){ return _connect_winmm(ctx) }
+        if(eq(name, "windows")){ return _connect_backend(ctx, "winmm") }
         return 0
     }
     def name = os()
     if(eq(name, "linux")){
         return _connect_linux_desktop(ctx)
     } elif(eq(name, "windows")){
-        return _connect_winmm(ctx)
+        return _connect_backend(ctx, "winmm")
     }
     ctx
 }
@@ -175,7 +178,7 @@ fn get_output_device(ctx, index){
 
 fn get_default_output_device_index(ctx){
    "Gets default output device index."
-    _touch(ctx)
+    common.touch(ctx)
     0
 }
 
@@ -231,11 +234,8 @@ fn outstream_open(stream, format, sample_rate, channels, callback){
 fn outstream_start(stream){
    "Implements `outstream_start`."
     if(!stream){ return false }
-    def device = core.get(stream, "device")
-    if(!device){ return false }
-    def ctx = core.get(device, "ctx")
-    if(!ctx){ return false }
-    def b = core.get(ctx, "backend")
+    def b = _stream_backend(stream)
+    if(!b){ return false }
     mut ok = false
     if(b == 1){ ok = audio_pulse.stream_start(stream) }
     elif(b == 2){ ok = audio_alsa.stream_start(stream) }
@@ -248,11 +248,8 @@ fn outstream_start(stream){
 fn outstream_stop(stream){
    "Implements `outstream_stop`."
     if(!stream){ return }
-    def device = core.get(stream, "device")
-    if(!device){ return }
-    def ctx = core.get(device, "ctx")
-    if(!ctx){ return }
-    def b = core.get(ctx, "backend")
+    def b = _stream_backend(stream)
+    if(!b){ return }
     if(b == 1){ audio_pulse.stream_stop(stream) }
     elif(b == 2){ audio_alsa.stream_stop(stream) }
     elif(b == 4){ audio_jack.stream_stop(stream) }
@@ -263,27 +260,20 @@ fn outstream_stop(stream){
 fn outstream_write(stream, buf, bytes){
     "Writes raw bytes to the output stream."
     if(!stream){ return false }
-    def device = core.get(stream, "device")
-    if(!device){ return false }
-    def ctx = core.get(device, "ctx")
-    if(!ctx){ return false }
-    def b = core.get(ctx, "backend")
+    def b = _stream_backend(stream)
+    if(!b){ return false }
     def handle = core.get(stream, "handle")
     if(!handle){ return false }
     def nbytes = bytes
     if(nbytes <= 0){ return true }
     if(b == 1){ return audio_pulse.write(handle, buf, nbytes) }
     elif(b == 2){
-        def channels = core.get(stream, "channels")
-        def bps = core.get(stream, "bits_per_sample", 16)
-        def frame_bytes = (bps / 8) * channels
+        def frame_bytes = _stream_frame_bytes(stream)
         if(frame_bytes <= 0){ return false }
         return audio_alsa.write(handle, buf, nbytes / frame_bytes, frame_bytes)
     }
     elif(b == 4){
-        def channels = core.get(stream, "channels")
-        def bps = core.get(stream, "bits_per_sample", 16)
-        def frame_bytes = (bps / 8) * channels
+        def frame_bytes = _stream_frame_bytes(stream)
         if(frame_bytes <= 0){ return false }
         return audio_jack.write(handle, buf, nbytes / frame_bytes, frame_bytes)
     }
@@ -294,19 +284,13 @@ fn outstream_write(stream, buf, bytes){
 fn outstream_write_frames(stream, buf, frames){
     "Writes frames to the output stream."
     if(!stream){ return false }
-    def device = core.get(stream, "device")
-    if(!device){ return false }
-    def ctx = core.get(device, "ctx")
-    if(!ctx){ return false }
-    def b = core.get(ctx, "backend")
+    def b = _stream_backend(stream)
+    if(!b){ return false }
     def handle = core.get(stream, "handle")
     if(!handle){ return false }
-    def channels = core.get(stream, "channels")
-    def bps = core.get(stream, "bits_per_sample", 16)
-    mut sample_bytes = bps / 8
-    if(sample_bytes <= 0){ sample_bytes = 2 }
-    def frame_bytes = channels * sample_bytes
-    def bytes = frames * channels * sample_bytes
+    def frame_bytes = _stream_frame_bytes(stream)
+    if(frame_bytes <= 0){ return false }
+    def bytes = frames * frame_bytes
     if(b == 1){ return audio_pulse.write(handle, buf, bytes) }
     elif(b == 2){ return audio_alsa.write(handle, buf, frames, frame_bytes) }
     elif(b == 4){ return audio_jack.write(handle, buf, frames, frame_bytes) }

@@ -7,7 +7,8 @@
 
 bool ny_llvm_init_native(void);
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level);
-void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level);
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level,
+                             const char *opt_pipeline);
 void ny_llvm_apply_host_attrs(LLVMModuleRef module);
 bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level);
 bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,

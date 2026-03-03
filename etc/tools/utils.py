@@ -6,6 +6,7 @@ import sys
 sys.dont_write_bytecode = True
 import hashlib
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 import shutil
 import subprocess
 import shlex

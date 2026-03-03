@@ -90,7 +90,8 @@ def run_test(build_dir, test_kind, std_bundle, test_jobs=0, timeout="auto", unkn
     test_bin = resolve_primary_bin(build_dir, test_kind).resolve()
     
     env = os.environ.copy()
-    env["NYTRIX_BUILD_STD_PATH"] = str(std_bundle.resolve())
+    if std_bundle is not None:
+        env["NYTRIX_BUILD_STD_PATH"] = str(std_bundle.resolve())
     env.setdefault("NYTRIX_TEST_CACHE", "1")
     
     if host_os() == "windows":
@@ -121,9 +122,13 @@ def run_fuzz(build_dir, jobs=0, iterations=0, timeout_s=0.0, mode=""):
         fallback = resolve_primary_bin(build_dir, "release")
         warn(f"debug fuzz binary missing; using {Path(fallback).name} fallback")
         bin_debug = fallback
-    jobs = jobs or 24
+    cpu = os.cpu_count() or 8
+    if jobs <= 0:
+        jobs = max(4, min(16, cpu // 2))
+    else:
+        jobs = max(1, min(jobs, max(4, min(16, cpu // 2))))
     iterations = iterations or env_int("NYTRIX_FUZZ_ITERS", default=200, minimum=1)
-    timeout_s = timeout_s if timeout_s and timeout_s > 0 else _parse_env_float("NYTRIX_FUZZ_TIMEOUT", 1.2)
+    timeout_s = timeout_s if timeout_s and timeout_s > 0 else _parse_env_float("NYTRIX_FUZZ_TIMEOUT", 3.0)
     mode = (mode or os.environ.get("NYTRIX_FUZZ_MODE") or "mixed").strip().lower() or "mixed"
     fail_on_panic = env_bool("NYTRIX_FUZZ_FAIL_ON_PANIC", default=False)
 
