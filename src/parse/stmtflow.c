@@ -43,21 +43,73 @@ stmt_t *ny_parse_if_stmt(parser_t *p) {
   return s;
 }
 
+static stmt_t *parse_incrdecr_stmt(parser_t *p) {
+  token_t op_tok = p->cur;
+  bool is_inc = (op_tok.kind == NY_T_PLUS_PLUS);
+  parser_advance(p);
+  if (p->cur.kind != NY_T_IDENT) {
+    parser_error(p, p->cur,
+                 is_inc ? "expected identifier after '++'"
+                        : "expected identifier after '--'",
+                 NULL);
+    return NULL;
+  }
+  token_t id_tok = p->cur;
+  parser_advance(p);
+  expr_t *id_expr = expr_new(p->arena, NY_E_IDENT, id_tok);
+  id_expr->as.ident.name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
+  expr_t *one = expr_new(p->arena, NY_E_LITERAL, op_tok);
+  one->as.literal.kind = NY_LIT_INT;
+  one->as.literal.as.i = 1;
+  token_t bin_tok = {0};
+  expr_t *bin = expr_new(p->arena, NY_E_BINARY, bin_tok);
+  bin->as.binary.op = is_inc ? "+" : "-";
+  bin->as.binary.left = id_expr;
+  bin->as.binary.right = one;
+  stmt_t *s = stmt_new(p->arena, NY_S_VAR, op_tok);
+  vec_push_arena(p->arena, &s->as.var.names, id_expr->as.ident.name);
+  vec_push_arena(p->arena, &s->as.var.exprs, bin);
+  s->as.var.is_decl = false;
+  s->as.var.is_undef = false;
+  return s;
+}
+
 stmt_t *ny_parse_while_stmt(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_WHILE, "'while'", NULL);
+  bool has_paren = (p->cur.kind == NY_T_LPAREN);
+  if (has_paren)
+    parser_advance(p);
+  stmt_t *init = NULL;
+  if (has_paren && (p->cur.kind == NY_T_MUT || p->cur.kind == NY_T_DEF)) {
+    p->block_depth++;
+    init = p_parse_stmt(p);
+    p->block_depth--;
+  }
   expr_t *cond = p_parse_expr(p, 0);
   if (p->cur.kind == NY_T_ASSIGN) {
     parser_error(p, p->cur, "assignment in condition", "did you mean '=='?");
     parser_advance(p);
     p_parse_expr(p, 0);
   }
+  stmt_t *update = NULL;
+  if (has_paren && p->cur.kind != NY_T_RPAREN) {
+    if (p->cur.kind == NY_T_PLUS_PLUS || p->cur.kind == NY_T_MINUS_MINUS) {
+      update = parse_incrdecr_stmt(p);
+    } else {
+      update = p_parse_stmt(p);
+    }
+  }
+  if (has_paren)
+    parser_expect(p, NY_T_RPAREN, "')' after while clause", NULL);
   p->loop_depth++;
   stmt_t *body = ny_parse_stmt_or_block(p);
   p->loop_depth--;
   stmt_t *s = stmt_new(p->arena, NY_S_WHILE, tok);
   s->as.whl.test = cond;
   s->as.whl.body = body;
+  s->as.whl.update = update;
+  s->as.whl.init = init;
   return s;
 }
 

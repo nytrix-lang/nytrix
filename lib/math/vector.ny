@@ -1,5 +1,5 @@
 ;; Keywords: math vector
-;; Vector mathematics module (2D, 3D, 4D).
+;; Vector Mathematics for Nytrix (2D, 3D, and 4D)
 
 module std.math.vector (
    vec2, vec3, vec4,
@@ -12,6 +12,7 @@ use std.core as core
 use std.core *
 use std.math *
 
+@pure @jit
 fn is_vector(v){
    "Returns true if `v` is a list-based vector object."
    is_list(v)
@@ -29,6 +30,7 @@ fn _mk(n, fill=0){
    out
 }
 
+@jit
 fn vec2(x=0, y=0){
    "Creates a new 2D vector [x, y]. Defaults to [0, 0] if no arguments provided."
    def v = list(2)
@@ -38,6 +40,7 @@ fn vec2(x=0, y=0){
    v
 }
 
+@jit
 fn vec3(x=0, y=0, z=0){
    "Creates a new 3D vector [x, y, z]. Defaults to [0, 0, 0] if no arguments provided."
    def v = list(3)
@@ -48,6 +51,7 @@ fn vec3(x=0, y=0, z=0){
    v
 }
 
+@jit
 fn vec4(x=0, y=0, z=0, w=0){
    "Creates a new 4D vector [x, y, z, w]. Defaults to [0, 0, 0, 0] if no arguments provided."
    def v = list(4)
@@ -59,11 +63,13 @@ fn vec4(x=0, y=0, z=0, w=0){
    v
 }
 
+@readonly @jit
 fn dim(v){
    "Returns the dimension (number of elements) of vector `v`."
    len(v)
 }
 
+@readonly @jit
 fn at(v, i, default=0){
    "Returns the element at index `i` of vector `v`, or `default` if not found."
    get(v, i, default)
@@ -82,41 +88,34 @@ fn _zip2(a, b, op){
    def n = (na < nb) ? na : nb
    mut out = list(n)
    mut i = 0
-   if(op == 0){
-      while(i < n){
-         __store_item_fast(out, i, __load_item_fast(a, i) + __load_item_fast(b, i))
-         i += 1
-      }
-   } elif(op == 1){
-      while(i < n){
-         __store_item_fast(out, i, __load_item_fast(a, i) - __load_item_fast(b, i))
-         i += 1
-      }
-   } else {
-      while(i < n){
-         __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i))
-         i += 1
-      }
+   match op {
+      0 -> { while(i < n){ __store_item_fast(out, i, __load_item_fast(a, i) + __load_item_fast(b, i)) i += 1 } }
+      1 -> { while(i < n){ __store_item_fast(out, i, __load_item_fast(a, i) - __load_item_fast(b, i)) i += 1 } }
+      2 -> { while(i < n){ __store_item_fast(out, i, __load_item_fast(a, i) * __load_item_fast(b, i)) i += 1 } }
    }
    __list_set_len(out, n)
    out
 }
 
+@pure @jit
 fn v_add(a, b){
    "Returns the element-wise sum of vectors `a` and `b`."
    _zip2(a, b, 0)
 }
 
+@pure @jit
 fn v_sub(a, b){
    "Returns the element-wise difference of vectors `a` and `b` (a - b)."
    _zip2(a, b, 1)
 }
 
+@pure @jit
 fn hadamard(a, b){
    "Returns the Hadamard (element-wise) product of vectors `a` and `b`."
    _zip2(a, b, 2)
 }
 
+@pure @jit
 fn v_mul(a, b){
    "Returns the product of vector `a` and `b`. If `b` is a scalar, performs scaling. If `b` is a vector, performs element-wise multiplication."
    if(is_int(b) || is_float(b)){ return scale(a, b) }
@@ -124,6 +123,7 @@ fn v_mul(a, b){
    scale(a, b)
 }
 
+@pure @jit
 fn v_div(a, b){
    "Returns the quotient of vector `a` divided by scalar `b`."
    if(is_int(b) || is_float(b)){ return divs(a, b) }
@@ -131,18 +131,21 @@ fn v_div(a, b){
 }
 
 ;; Generic dispatch wrappers
+@pure @jit
 fn add(a, b){
    "Generic addition: supports both numbers and vectors."
    if(is_vector(a) && is_vector(b)){ return v_add(a, b) }
    a + b
 }
 
+@pure @jit
 fn sub(a, b){
    "Generic subtraction: supports both numbers and vectors."
    if(is_vector(a) && is_vector(b)){ return v_sub(a, b) }
    a - b
 }
 
+@pure @jit
 fn mul(a, b){
    "Generic multiplication: supports numbers, scalar-vector, and vector-vector products."
    if(is_vector(a) && is_vector(b)){ return hadamard(a, b) }
@@ -151,38 +154,37 @@ fn mul(a, b){
    a * b
 }
 
+@pure @jit
 fn div(a, b){
    "Generic division: supports numbers and vector-scalar division."
    if(is_vector(a) && (is_int(b) || is_float(b))){ return divs(a, b) }
    a / b
 }
 
+fn _map_s(v, s, op){
+   "Internal: Map scalar application."
+   def n = __list_len(v)
+   mut out = list(n)
+   mut i = 0
+   if(op == 0){ while(i < n){ __store_item_fast(out, i, __load_item_fast(v, i) * s) i += 1 } }
+   else { while(i < n){ __store_item_fast(out, i, __load_item_fast(v, i) / s) i += 1 } }
+   __list_set_len(out, n)
+   out
+}
+
+@pure @jit
 fn scale(v, s){
    "Multiplies vector `v` by scalar `s`."
-   def n = __list_len(v)
-   mut out = list(n)
-   mut i = 0
-   while(i < n){
-      __store_item_fast(out, i, __load_item_fast(v, i) * s)
-      i += 1
-   }
-   __list_set_len(out, n)
-   out
+   _map_s(v, s, 0)
 }
 
+@pure @jit
 fn divs(v, s){
    "Divides vector `v` by scalar `s`."
-   def n = __list_len(v)
-   mut out = list(n)
-   mut i = 0
-   while(i < n){
-      __store_item_fast(out, i, __load_item_fast(v, i) / s)
-      i += 1
-   }
-   __list_set_len(out, n)
-   out
+   _map_s(v, s, 1)
 }
 
+@pure @jit
 fn dot(a, b){
    "Returns the dot product of vectors `a` and `b`."
    def na = __list_len(a)
@@ -197,6 +199,7 @@ fn dot(a, b){
    acc
 }
 
+@pure @jit
 fn cross3(a, b){
    "Returns the vector cross product of two 3D vectors `a` and `b`."
    if(len(a) < 3 || len(b) < 3){ return vec3(0, 0, 0) }
@@ -213,16 +216,19 @@ fn cross3(a, b){
    )
 }
 
+@pure @jit
 fn len2(v){
    "Returns the squared magnitude (Euclidean length) of vector `v`."
    dot(v, v)
 }
 
+@pure @jit
 fn magnitude(v){
    "Returns the magnitude (Euclidean length) of vector `v`."
    sqrt(len2(v))
 }
 
+@pure @jit
 fn normalize(v){
    "Returns a unit-length vector pointing in the same direction as `v`. Returns a copy of `v` if it has zero magnitude."
    def l = magnitude(v)
@@ -230,6 +236,7 @@ fn normalize(v){
    divs(v, l)
 }
 
+@pure @jit
 fn lerp(a, b, t){
    "Linearly interpolates between vectors `a` and `b` using factor `t` (usually in range [0, 1])."
    add(a, scale(sub(b, a), t))

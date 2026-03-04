@@ -1,5 +1,5 @@
 ;; Keywords: ui window
-;; Window/event core
+;; Window and Event Management for Nytrix
 
 module std.ui.window (
    BACKEND_NY, backend, available,
@@ -104,19 +104,23 @@ mut _window_registry = dict(16)
 mut _last_update_t   = 0
 
 mut _debug = -1
-fn _is_debug(){ _debug = common.cached_env_truthy(_debug, "NY_UI_DEBUG") _debug }
+fn _is_debug(){ "Internal: Checks if UI debug logging is enabled via environment variables." _debug = common.cached_env_truthy(_debug, "NY_UI_DEBUG") _debug }
 
-fn backend(){ ui_backend.get_backend_name() }
-fn available(){ true }
+fn backend(){ "Returns the name of the active windowing backend (e.g., 'glfw')." ui_backend.get_backend_name() }
+fn available(){ "Checks if the windowing system is available on the current platform." true }
 
-fn _is_window(win){ is_dict(win) && dict_has(win, "handle") }
+fn _is_window(win){ "Internal: Type check for window dictionary." is_dict(win) && dict_has(win, "handle") }
 
 fn _get_handle(win){
+   "Internal: Returns the raw window handle from a window object or raw pointer."
+   "Internal: Extracts the native window handle from a window dictionary or handle."
    if(is_dict(win)){ return dict_get(win, "handle", 0) }
    win
 }
 
 fn _get_win(win){
+   "Internal: Retrieves the window dictionary from the global registry if a handle is provided."
+   "Internal: Resolves a window handle or dictionary to the authoritative window object in the registry."
    def h = _get_handle(win)
    if(!h){ return win }
    def real = dict_get(_window_registry, h, 0)
@@ -125,6 +129,8 @@ fn _get_win(win){
 }
 
 fn _save_win(win){
+   "Internal: Updates the global window registry with a new window state."
+   "Internal: Updates the window registry with the current state of a window object."
    def h = _get_handle(win)
    if(h){ _window_registry = dict_set(_window_registry, h, win) }
 }
@@ -132,6 +138,8 @@ fn _save_win(win){
 ;; Key sequence helpers
 
 fn _seq_match(a, b, allow_prefix=false){
+   "Internal: Deep sequence comparison for key combos/chords."
+   "Internal: Compares two key sequences for equality or prefix matching."
    if(allow_prefix){ if(len(a) >= len(b)){ return false } }
    elif(len(a) != len(b)){ return false }
    mut i = 0 while(i < len(a)){
@@ -142,23 +150,58 @@ fn _seq_match(a, b, allow_prefix=false){
    true
 }
 
-fn _seq_equal(a, b){ _seq_match(a, b) }
-fn _seq_is_prefix(pref, full){ _seq_match(pref, full, true) }
+fn _seq_equal(a, b){ "Internal: Alias for exact sequence match." _seq_match(a, b) }
+fn _seq_is_prefix(pref, full){ "Internal: Alias for prefix sequence match." _seq_match(pref, full, true) }
 
-fn _normalize_mod(mod){ ui_key.normalize_mod(mod) }
-fn _normalize_key(key){ ui_key.normalize_key(key) }
-fn _mod_bit_for_key(key){ ui_key.mod_bit_for_key(key) }
-fn _mods_from_key_states(ks){ ui_key.mods_from_key_states(ks) }
-fn _parse_notation(notation){ ui_key.parse_notation(notation) }
+fn _normalize_mod(mod){ "Internal: Normalize modifier bits." ui_key.normalize_mod(mod) }
+fn _normalize_key(key){ "Internal: Normalize physical key code." ui_key.normalize_key(key) }
+fn _mod_bit_for_key(key){ "Internal: Returns the modifier bit associated with a physical key." ui_key.mod_bit_for_key(key) }
+fn _mods_from_key_states(ks){ "Internal: Calculates active modifier bits from a key state dictionary." ui_key.mods_from_key_states(ks) }
+fn _parse_notation(notation){ "Internal: Parses a key notation string like 'Ctrl+Shift+A'." ui_key.parse_notation(notation) }
 
-fn _key_cb(h, k, sc, act, mods){
+fn _normalize_glfw_mods(mods){
+   "Internal: Converts GLFW's modifier bitmask to Nytrix standard format."
+   "Internal: Normalizes GLFW modifier bitmasks to Nytrix modifier bitmasks."
+   ;; GLFW mod bits: SHIFT=0x0001 CTRL=0x0002 ALT=0x0004 SUPER=0x0008
+   mut m = 0
+   if((mods & 0x0001) != 0){ m = m | MOD_SHIFT }
+   if((mods & 0x0002) != 0){ m = m | MOD_CONTROL }
+   if((mods & 0x0004) != 0){ m = m | MOD_ALT }
+   if((mods & 0x0008) != 0){ m = m | MOD_SUPER }
+   m
+}
+
+fn _map_glfw_key(glfw_key){
+   "Internal: Maps GLFW key codes to Nytrix virtual key codes."
+   "Maps a GLFW keycode to Nytrix's stable key codes (same as polling path)."
+   mut i = 0
+   while(i < len(_KEY_MAP)){
+      def pair = get(_KEY_MAP, i)
+      if(get(pair, 0) == glfw_key){
+         return get(pair, 1)
+      }
+      i += 1
+   }
+   ;; Fallback: normalize what we can (letters/arrows/modifiers) without
+   ;; hardcoding the full table twice.
+   _normalize_key(glfw_key)
+}
+
+fn _key_cb(h: ptr, k: i32, sc: i32, act: i32, mods: i32){
+   "Internal: Callback for GLFW key events."
    mut win = _get_win(h)
    if(_is_window(win)){
+      ;; Mark that callbacks are actually firing (used to disable polling).
+      if(!dict_get(win, "has_key_cb", false)){
+         win = dict_set(win, "has_key_cb", true)
+      }
       mut data = dict()
-      data = dict_set(data, "key", k)
-      data = dict_set(data, "action", act) ; 1=Press, 2=Repeat, 0=Release
-      data = dict_set(data, "mod", mods)
-      win = dict_set(win, "modifiers", mods)
+      data = dict_set(data, "raw_key", k)
+      data = dict_set(data, "key", _map_glfw_key(k))
+      data = dict_set(data, "action", act)
+      def nm = _normalize_glfw_mods(mods)
+      data = dict_set(data, "mod", nm)
+      win = dict_set(win, "modifiers", nm)
       _save_win(win)
       if(act == 1 || act == 2){ push_event(win, EVENT_KEY_PRESSED, data) }
       elif(act == 0){ push_event(win, EVENT_KEY_RELEASED, data) }
@@ -167,15 +210,28 @@ fn _key_cb(h, k, sc, act, mods){
 
 ;; Callbacks
 
-fn _char_cb(h, c){
+fn _char_cb(h: ptr, c: u32){
+   "Internal: Callback for GLFW character input events."
    mut win = _get_win(h)
    if(_is_window(win)){
-      mut data = dict() data = dict_set(data, "char", c)
+      ;; NOTE: a working char callback does not guarantee that the key callback
+      ;; works (we still need polling fallback for arrows/F-keys until we see a
+      ;; key event).
+      if(!dict_get(win, "has_char_cb", false)){
+         win = dict_set(win, "has_char_cb", true)
+         _save_win(win)
+      }
+      ;; Include current modifiers so higher layers can correctly handle
+      ;; Alt/Control combinations without double-input.
+      mut data = dict()
+      data = dict_set(data, "char", c)
+      data = dict_set(data, "mod", dict_get(win, "modifiers", 0))
       push_event(win, EVENT_KEY_CHAR, data)
    }
 }
 
-fn _size_cb(h, w, h2){
+fn _size_cb(h: ptr, w: i32, h2: i32){
+   "Internal: Callback for GLFW window resize events."
    mut win = _get_win(h)
    if(_is_window(win)){
       win = dict_set(win, "w", w)
@@ -186,7 +242,8 @@ fn _size_cb(h, w, h2){
    }
 }
 
-fn _pos_cb(h, x, y){
+fn _pos_cb(h: ptr, x: i32, y: i32){
+   "Internal: Callback for GLFW window move events."
    mut win = _get_win(h)
    if(_is_window(win)){
       win = dict_set(win, "x", x)
@@ -197,26 +254,27 @@ fn _pos_cb(h, x, y){
    }
 }
 
-fn _scroll_cb(h, xoff, yoff){
-  mut win = _get_win(h)
-  if(_is_window(win)){
-     mut f_xoff = float(xoff) mut f_yoff = float(yoff)
-     win = dict_set(win, "scroll_dx", dict_get(win, "scroll_dx", 0.0) + f_xoff)
-     win = dict_set(win, "scroll_dy", dict_get(win, "scroll_dy", 0.0) + f_yoff)
-     win = dict_set(win, "scroll_x",  dict_get(win, "scroll_x", 0.0) + f_xoff)
-     win = dict_set(win, "scroll_y",  dict_get(win, "scroll_y", 0.0) + f_yoff)
-     _save_win(win)
+fn _scroll_cb(h: ptr, f_xoff: f64, f_yoff: f64){
+   "Internal: Callback for GLFW mouse scroll events."
+   mut win = _get_win(h)
+   if(_is_window(win)){
+      win = dict_set(win, "scroll_dx", dict_get(win, "scroll_dx", 0.0) + f_xoff)
+      win = dict_set(win, "scroll_dy", dict_get(win, "scroll_dy", 0.0) + f_yoff)
+      win = dict_set(win, "scroll_x",  dict_get(win, "scroll_x", 0.0) + f_xoff)
+      win = dict_set(win, "scroll_y",  dict_get(win, "scroll_y", 0.0) + f_yoff)
+      _save_win(win)
 
-     mut data = dict()
-     data = dict_set(data, "dx", f_xoff)
-     data = dict_set(data, "dy", f_yoff)
-     data = dict_set(data, "scrolling", true)
-     data = dict_set(data, "mod", dict_get(win, "modifiers", 0))
-     push_event(win, EVENT_MOUSE_SCROLL, data)
-  }
+      mut data = dict()
+      data = dict_set(data, "dx", f_xoff)
+      data = dict_set(data, "dy", f_yoff)
+      data = dict_set(data, "scrolling", true)
+      data = dict_set(data, "mod", dict_get(win, "modifiers", 0))
+      push_event(win, EVENT_MOUSE_SCROLL, data)
+   }
 }
 
-fn _mouse_btn_cb(h, btn, act, mods){
+fn _mouse_btn_cb(h: ptr, btn: i32, act: i32, mods: i32){
+   "Internal: Callback for GLFW mouse button events."
    mut win = _get_win(h)
    if(_is_window(win)){
       def mx = dict_get(win, "mouse_x", 0)
@@ -233,34 +291,36 @@ fn _mouse_btn_cb(h, btn, act, mods){
    }
 }
 
-fn _cursor_pos_cb(h, x, y){
+fn _cursor_pos_cb(h: ptr, dx: f64, dy: f64){
    mut win = _get_win(h)
    if(_is_window(win)){
       def lx = dict_get(win, "mouse_x", 0)
       def ly = dict_get(win, "mouse_y", 0)
-      def moved = (int(x) != lx) || (int(y) != ly)
+      def moved = (int(dx) != lx) || (int(dy) != ly)
 
-      win = dict_set(win, "mouse_x", int(x))
-      win = dict_set(win, "mouse_y", int(y))
+      win = dict_set(win, "mouse_x", int(dx))
+      win = dict_set(win, "mouse_y", int(dy))
       _save_win(win)
 
       mut data = dict()
-      data = dict_set(data, "x", int(x))
-      data = dict_set(data, "y", int(y))
+      data = dict_set(data, "x", int(dx))
+      data = dict_set(data, "y", int(dy))
+      data = dict_set(data, "dx", int(dx) - lx)
+      data = dict_set(data, "dy", int(dy) - ly)
       data = dict_set(data, "moved", moved)
       push_event(win, EVENT_MOUSE_POS_CHANGED, data)
    }
 }
+
 ;; Window creation
 
 fn open_window(name, x, y, w, h, flags=0){
+   "Creates and opens a new system window."
    if(!is_str(name)){ name = to_str(name) }
    if(w < 1){ w = 1 } if(h < 1){ h = 1 }
-   mut handle = 0
-   if((flags & WINDOW_CPU) == 0){
-      handle = ui_backend.create_window(name, w, h, flags)
-   }
-   if(!handle && (flags & WINDOW_CPU) == 0){ return false }
+   if(common.env_truthy("NY_UI_HEADLESS")){ flags = flags | WINDOW_HIDE | WINDOW_NO_RESIZE }
+   mut handle = ui_backend.create_window(name, w, h, flags)
+   if(!handle){ return false }
 
    mut win = dict(64)
    win = dict_set(win, "handle",         handle)
@@ -285,15 +345,22 @@ fn open_window(name, x, y, w, h, flags=0){
    win = dict_set(win, "chord_time",     0)
    win = dict_set(win, "bindings",       [])
    win = dict_set(win, "modifiers",      0)
+   ;; Key events are delivered by GLFW callbacks. A separate polling path
+   ;; exists for fallback/debug, but emitting both causes double keypresses
+   ;; (e.g. Enter => two newlines, repeated navigation keys, etc).
+   win = dict_set(win, "key_polling",    false)
+   ;; Don't assume callbacks work: enable polling until we see callbacks fire.
+   win = dict_set(win, "has_key_cb",     false)
+   win = dict_set(win, "has_char_cb",    false)
 
    if(handle){
       _window_registry = dict_set(_window_registry, handle, win)
-      ui_backend.set_char_callback(handle, fn_ptr(_char_cb))
-      ui_backend.set_key_callback(handle, fn_ptr(_key_cb))
-      ui_backend.set_window_size_callback(handle, fn_ptr(_size_cb))
-      ui_backend.set_scroll_callback(handle, fn_ptr(_scroll_cb))
-      ui_backend.set_mouse_button_callback(handle, fn_ptr(_mouse_btn_cb))
-      ui_backend.set_cursor_pos_callback(handle, fn_ptr(_cursor_pos_cb))
+      ui_backend.set_char_callback(handle, _char_cb)
+      ui_backend.set_key_callback(handle, _key_cb)
+      ui_backend.set_window_size_callback(handle, _size_cb)
+      ui_backend.set_scroll_callback(handle, _scroll_cb)
+      ui_backend.set_mouse_button_callback(handle, _mouse_btn_cb)
+      ui_backend.set_cursor_pos_callback(handle, _cursor_pos_cb)
    }
 
    _windows = append(_windows, win)
@@ -301,15 +368,16 @@ fn open_window(name, x, y, w, h, flags=0){
    win
 }
 
-fn create_window(name, x, y, w, h, flags=0){ open_window(name, x, y, w, h, flags) }
-fn create(w, h, name, flags=0){ open_window(name, 0, 0, w, h, flags) }
+fn create_window(name, x, y, w, h, flags=0){ "Alias for open_window." open_window(name, x, y, w, h, flags) }
+fn create(w, h, name, flags=0){ "Common shortcut for creating a centered window." open_window(name, 0, 0, w, h, flags) }
 
 ;; Accessors
 
-fn id(win){ if(!_is_window(win)){ return 0 } dict_get(win, "handle", 0) }
-fn title(win){ if(!_is_window(win)){ return "" } dict_get(win, "title", "") }
+fn id(win){ "Returns the low-level platform handle (ID) for the window." if(!_is_window(win)){ return 0 } dict_get(win, "handle", 0) }
+fn title(win){ "Returns the current title of the window." if(!_is_window(win)){ return "" } dict_get(win, "title", "") }
 
 fn set_title(win, t){
+   "Updates the window title."
    win = _get_win(win) if(!_is_window(win)){ return false }
    if(!is_str(t)){ t = to_str(t) }
    win = dict_set(win, "title", t)
@@ -319,18 +387,22 @@ fn set_title(win, t){
    true
 }
 
-fn pos(win){ win = _get_win(win) if(!_is_window(win)){ return [0,0] } [dict_get(win, "x", 0), dict_get(win, "y", 0)] }
-fn size(win){ win = _get_win(win) if(!_is_window(win)){ return [0,0] } [dict_get(win, "w", 0), dict_get(win, "h", 0)] }
+fn pos(win){ "Returns [x, y] screen coordinates of the window." win = _get_win(win) if(!_is_window(win)){ return [0,0] } [dict_get(win, "x", 0), dict_get(win, "y", 0)] }
+fn size(win){ "Returns [width, height] dimensions of the window." win = _get_win(win) if(!_is_window(win)){ return [0,0] } [dict_get(win, "w", 0), dict_get(win, "h", 0)] }
 
 fn move(win, x, y){
+   "Moves the window to [x, y] coordinates."
    win = _get_win(win) if(!_is_window(win)){ return false }
    win = dict_set(win, "x", x) win = dict_set(win, "y", y)
    _save_win(win)
+   def h = dict_get(win, "handle", 0)
+   if(h){ ui_backend.set_pos(h, x, y) }
    mut data = dict() data = dict_set(data, "x", x) data = dict_set(data, "y", y)
    push_event(win, EVENT_WINDOW_MOVED, data)
 }
 
 fn resize(win, w, h){
+   "Resizes the window to [w, h] pixels."
    win = _get_win(win) if(!_is_window(win)){ return false }
    if(w < 1){ w = 1 } if(h < 1){ h = 1 }
    win = dict_set(win, "w", w) win = dict_set(win, "h", h)
@@ -340,11 +412,13 @@ fn resize(win, w, h){
 }
 
 fn should_close(win){
+   "Returns true if the window has been requested to close."
    win = _get_win(win) if(!_is_window(win)){ return true }
    !!dict_get(win, "should_close", false)
 }
 
 fn set_should_close(win, sc=true){
+   "Sets the window's close flag manually."
    win = _get_win(win) if(!_is_window(win)){ return false }
    def old = !!dict_get(win, "should_close", false)
    win = dict_set(win, "should_close", !!sc)
@@ -357,10 +431,10 @@ fn set_should_close(win, sc=true){
    true
 }
 
-fn close(win){ set_should_close(win, true) }
+fn close(win){ "Closes the window." set_should_close(win, true) }
 
-fn exit_key(win){ win = _get_win(win) if(!_is_window(win)){ return KEY_NULL } dict_get(win, "exit_key", KEY_ESCAPE) }
-fn set_exit_key(win, k){ win = _get_win(win) if(_is_window(win)){ win = dict_set(win, "exit_key", k) _save_win(win) true } else { false } }
+fn exit_key(win){ "Returns the current exit (close) key for the window." win = _get_win(win) if(!_is_window(win)){ return KEY_NULL } dict_get(win, "exit_key", KEY_ESCAPE) }
+fn set_exit_key(win, k){ "Changes the exit (close) key for the window." win = _get_win(win) if(_is_window(win)){ win = dict_set(win, "exit_key", k) _save_win(win) true } else { false } }
 
 ;; Event queue
 
@@ -473,6 +547,9 @@ fn _check_native_state(win){
    def nw = get(sz, 0, 0) def nh = get(sz, 1, 0)
    if(nw > 0 && nh > 0 && (nw != dict_get(win, "w", 0) || nh != dict_get(win, "h", 0))){ resize(win, nw, nh) }
 
+   ;; Always poll as a fallback. We dedupe in the terminal layer to avoid
+   ;; double input if callbacks are also firing.
+
    mut ks = dict_get(win, "key_states", 0)
    mut now_ks = dict(64)
    mut i = 0 while(i < len(_KEY_MAP)){
@@ -484,27 +561,40 @@ fn _check_native_state(win){
       i += 1
    }
 
-   if(_is_debug()){
-      ; Scan ALL keys for debug
-      mut k = 32 while(k < 348){
-         if(ui_backend.get_key(handle, k) == 1){
-         print(f"UI: DEBUG: GLFW key {k} is DOWN")
-         }
-         k += 1
+   ;; Skip polling if key callbacks are working (avoids double input).
+   ;; Polling is only a fallback for broken GLFW callback setups.
+   if(dict_get(win, "has_key_cb", false)){
+      ;; Callbacks are working - update modifier state only.
+      mut seen = dict(64)
+      mut changed = false
+      mut j = 0 while(j < len(_KEY_MAP)){
+         def row = get(_KEY_MAP, j)
+         def gk = get(row, 0) def nk = get(row, 1)
+         if(dict_has(seen, nk)){ j += 1 continue }
+         seen = dict_set(seen, nk, true)
+         def real_now = ui_backend.get_key(handle, gk) == 1
+         def was = !!dict_get(ks, nk, false)
+         if(real_now != was){ ks = dict_set(ks, nk, real_now) changed = true }
+         j += 1
       }
-   }
+      if(changed){
+         win = dict_set(win, "key_states", ks)
+         win = dict_set(win, "modifiers", _mods_from_key_states(ks))
+         _save_win(win)
+      }
+   } else {
+      ;; Callbacks not working - use polling as fallback.
+      mut seen = dict(64)
+      mut changed = false
+      mut j = 0 while(j < len(_KEY_MAP)){
+         def row = get(_KEY_MAP, j)
+         def gk = get(row, 0) def nk = get(row, 1)
+         if(dict_has(seen, nk)){ j += 1 continue }
+         seen = dict_set(seen, nk, true)
 
-   mut seen = dict(64)
-   mut changed = false
-   mut j = 0 while(j < len(_KEY_MAP)){
-      def row = get(_KEY_MAP, j)
-      def gk = get(row, 0) def nk = get(row, 1)
-      if(dict_has(seen, nk)){ j += 1 continue }
-      seen = dict_set(seen, nk, true)
-
-      def real_now = ui_backend.get_key(handle, gk) == 1
-      def was = !!dict_get(ks, nk, false)
-      if(real_now != was){
+         def real_now = ui_backend.get_key(handle, gk) == 1
+         def was = !!dict_get(ks, nk, false)
+         if(real_now != was){
          ks = dict_set(ks, nk, real_now)
          changed = true
          mut data = dict() data = dict_set(data, "key", nk) data = dict_set(data, "pressed", real_now)
@@ -515,7 +605,7 @@ fn _check_native_state(win){
          win = dict_set(win, f"rc_{nk}", 0)
          _save_win(win)
          }
-      } elif(real_now){
+         } elif(real_now){
          ;; Software Repeat (660ms delay, 40ms interval)
          def last_t = dict_get(win, f"rt_{nk}", 0)
          def count = dict_get(win, f"rc_{nk}", 0)
@@ -528,50 +618,26 @@ fn _check_native_state(win){
          win = dict_set(win, f"rc_{nk}", count + 1)
          _save_win(win)
          }
-      }
-      j += 1
-   }
-
-   if(changed){
-      win = dict_set(win, "key_states", ks)
-      win = dict_set(win, "modifiers", _mods_from_key_states(ks))
-      _save_win(win)
-   }
-
-   def mpos = ui_backend.get_cursor_pos(handle)
-   def mx = int(get(mpos, 0)) def my = int(get(mpos, 1))
-   if(mx != dict_get(win, "mouse_x", 0) || my != dict_get(win, "mouse_y", 0)){
-      win = dict_set(win, "mouse_x", mx) win = dict_set(win, "mouse_y", my)
-      _save_win(win)
-      mut md = dict() md = dict_set(md, "x", mx) md = dict_set(md, "y", my)
-      push_event(win, EVENT_MOUSE_POS_CHANGED, md)
-   }
-
-   mut mb = dict_get(win, "mouse_buttons", 0)
-   mut bi = 0 while(bi < 3){
-      def bnow = ui_backend.get_mouse_button(handle, bi) == 1
-      def bwas = !!dict_get(mb, bi, false)
-      if(bnow != bwas){
-         mb = dict_set(mb, bi, bnow)
-         if(bnow){
-         def pb = dict_get(win, "pressed_buttons", 0)
-         win = dict_set(win, "pressed_buttons", dict_set(pb, bi, true))
          }
-         win = dict_set(win, "mouse_buttons", mb)
-         _save_win(win)
-         mut bd = dict() bd = dict_set(bd, "button", bi) bd = dict_set(bd, "x", mx) bd = dict_set(bd, "y", my)
-         push_event(win, bnow ? EVENT_MOUSE_BUTTON_PRESSED : EVENT_MOUSE_BUTTON_RELEASED, bd)
+         j += 1
       }
-      bi += 1
+      if(changed){
+         win = dict_set(win, "key_states", ks)
+         win = dict_set(win, "modifiers", _mods_from_key_states(ks))
+         _save_win(win)
+      }
    }
-   win = dict_set(win, "mouse_buttons", mb)
-   _save_win(win)
+
+   ;; Mouse position and button state are delivered exclusively via GLFW callbacks
+   ;; (_cursor_pos_cb, _mouse_btn_cb). Polling them here would cause double-events.
 }
 
+@jit
 fn check_event(win){
+   "Polls for new events and returns the next one from the queue, or 0 if empty."
    if(!_is_window(win)){ return 0 }
    def now = ticks()
-   if(now - _last_update_t > 1000000){ ; 1ms toggle
+   if(true){ ; Always poll for best responsiveness
       mut cw = _get_win(win)
       cw = dict_set(cw, "mouse_last_x",  dict_get(cw, "mouse_x", 0))
       cw = dict_set(cw, "mouse_last_y",  dict_get(cw, "mouse_y", 0))
@@ -604,14 +670,44 @@ fn check_event(win){
    0
 }
 
-fn event_type(e){ ev.event_type(e) }
-fn event_window(e){ ev.event_window(e) }
-fn event_window_id(e){ ev.event_window_id(e) }
-fn event_data(e){ ev.event_data(e) }
+fn event_type(e){
+   "Returns the type ID of event `e`."
+   ev.event_type(e)
+}
+fn event_window(e){
+   "Returns the window handle associated with event `e`."
+   ev.event_window(e)
+}
+fn event_window_id(e){
+   "Returns the numeric window ID for event `e`."
+   ev.event_window_id(e)
+}
+fn event_data(e){
+   "Returns the extra data payload of event `e`."
+   ev.event_data(e)
+}
 
-fn key_down(win, k){ win = _get_win(win) if(!_is_window(win)){ return false } dict_get(dict_get(win, "key_states", 0), _normalize_key(k), false) }
-fn get_modifiers(win){ win = _get_win(win) if(!_is_window(win)){ return 0 } _normalize_mod(dict_get(win, "modifiers", 0)) }
-fn mod_down(win, m){ win = _get_win(win) if(!_is_window(win)){ return false } def nm = _normalize_mod(m) if(nm == 0){ return false } (get_modifiers(win) & nm) == nm }
+@jit
+fn key_down(win, k){
+   "Returns true if key `k` is currently held down in `win`."
+   win = _get_win(win)
+   if(!_is_window(win)){ return false }
+   dict_get(dict_get(win, "key_states", 0), _normalize_key(k), false)
+}
+fn get_modifiers(win){
+   "Returns the bitmask of active modifier keys (Shift, Ctrl, Alt, etc.)."
+   win = _get_win(win)
+   if(!_is_window(win)){ return 0 }
+   _normalize_mod(dict_get(win, "modifiers", 0))
+}
+fn mod_down(win, m){
+   "Returns true if modifier combination `m` is active."
+   win = _get_win(win)
+   if(!_is_window(win)){ return false }
+   def nm = _normalize_mod(m)
+   if(nm == 0){ return false }
+   (get_modifiers(win) & nm) == nm
+}
 
 fn key_pressed(win, k){
    win = _get_win(win) if(!_is_window(win)){ return false }
@@ -620,9 +716,21 @@ fn key_pressed(win, k){
    (!!dict_get(ks, nk, false) && !dict_get(lks, nk, false)) || !!dict_get(pk, nk, false)
 }
 
-fn mouse_pos(win){ win = _get_win(win) if(!_is_window(win)){ return [0,0] } [dict_get(win, "mouse_x", 0), dict_get(win, "mouse_y", 0)] }
-fn mouse_down(win, b){ win = _get_win(win) if(!_is_window(win)){ return false } dict_get(dict_get(win, "mouse_buttons", 0), b, false) }
+@jit
+fn mouse_pos(win){
+   "Returns [x, y] coordinates of the mouse cursor relative to the window."
+   win = _get_win(win)
+   if(!_is_window(win)){ return [0, 0] }
+   [dict_get(win, "mouse_x", 0), dict_get(win, "mouse_y", 0)]
+}
+fn mouse_down(win, b){
+   "Returns true if mouse button `b` is currently held down."
+   win = _get_win(win)
+   if(!_is_window(win)){ return false }
+   dict_get(dict_get(win, "mouse_buttons", 0), b, false)
+}
 fn mouse_pressed(win, b){
+   "Returns true if mouse button `b` was clicked this frame."
    win = _get_win(win) if(!_is_window(win)){ return false }
    def mb = dict_get(win, "mouse_buttons", 0) def lmb = dict_get(win, "last_mouse_buttons", 0) def pb = dict_get(win, "pressed_buttons", 0)
    (!!dict_get(mb, b, false) && !dict_get(lmb, b, false)) || !!dict_get(pb, b, false)
@@ -678,7 +786,7 @@ fn update_input(win){
    _save_win(win)
 }
 
-fn swap_buffers(win){ win = _get_win(win) if(_is_window(win)){ def h = dict_get(win, "handle", 0) if(h){ ui_backend.swap_buffers(h) } } }
+fn swap_buffers(win){ "Swaps front and back buffers (double buffering)." win = _get_win(win) if(_is_window(win)){ def h = dict_get(win, "handle", 0) if(h){ ui_backend.swap_buffers(h) } } }
 fn make_current(_win){ common.touch(_win) }
 
 mut _blit_hook = 0
@@ -686,6 +794,7 @@ fn set_blit_handler(h){ _blit_hook = h }
 fn blit_buffer(win, buf, w, h){ win = _get_win(win) if(_is_window(win) && is_ptr(buf) && _blit_hook){ _blit_hook(buf, w, h) } 0 }
 
 fn poll_events(){
+   "Triggers the system to process window and input events."
    ui_backend.poll_events()
 }
 
@@ -743,6 +852,7 @@ fn set_input_exclusive(win, val){
 }
 
 fn set_clipboard(win, s){
+   "Sets the system clipboard to string `s`."
    win = _get_win(win)
    if(_is_window(win)){
       def h = dict_get(win, "handle", 0)
@@ -751,6 +861,7 @@ fn set_clipboard(win, s){
 }
 
 fn get_clipboard(win){
+   "Retrieves string contents from the system clipboard."
    win = _get_win(win)
    if(_is_window(win)){
       def h = dict_get(win, "handle", 0)

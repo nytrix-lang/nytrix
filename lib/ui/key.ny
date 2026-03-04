@@ -1,5 +1,5 @@
 ;; Keywords: ui key keyboard notation
-;; Shared key normalization and key-chord parsing helpers for std.ui modules.
+;; Shared key normalization and key-chord parsing helpers for std.ui for Nytrixs.
 
 module std.ui.key (
    normalize_key, normalize_mod, mod_bit_for_key, mods_from_key_states,
@@ -20,6 +20,11 @@ fn normalize_mod(mod){
 fn normalize_key(key){
    "Normalizes native key codes for stable comparisons across backends."
    if(key >= 97 && key <= 122){ return key - 32 }
+   ;; GLFW modifier keys (Linux/Wayland/X11)
+   if(key == 340 || key == 344){ return 16 } ; Left/Right Shift
+   if(key == 341 || key == 345){ return 17 } ; Left/Right Control
+   if(key == 342 || key == 346){ return 18 } ; Left/Right Alt
+   if(key == 343 || key == 347){ return 91 } ; Left/Right Super
    if(key == 0xFF0D || key == 257){ return 13 }
    if(key == 0xFF08 || key == 259){ return 8 }
    if(key == 0xFF09 || key == 258){ return 9 }
@@ -33,10 +38,10 @@ fn normalize_key(key){
 
 fn mod_bit_for_key(key){
    "Returns the modifier bit corresponding to the given native key code."
-   if(key == 0xFFE1 || key == 0xFFE2 || key == 16){ return MOD_SHIFT }
-   if(key == 0xFFE3 || key == 0xFFE4 || key == 17){ return MOD_CONTROL }
-   if(key == 0xFFE9 || key == 0xFFEA || key == 18){ return MOD_ALT }
-   if(key == 0xFFEB || key == 0xFFEC || key == 91 || key == 92){ return MOD_SUPER }
+   if(key == 0xFFE1 || key == 0xFFE2 || key == 16 || key == 340 || key == 344){ return MOD_SHIFT }
+   if(key == 0xFFE3 || key == 0xFFE4 || key == 17 || key == 341 || key == 345){ return MOD_CONTROL }
+   if(key == 0xFFE9 || key == 0xFFEA || key == 18 || key == 342 || key == 346){ return MOD_ALT }
+   if(key == 0xFFEB || key == 0xFFEC || key == 91 || key == 92 || key == 343 || key == 347){ return MOD_SUPER }
    if(key == 0xFFE7 || key == 0xFFE8){ return MOD_META }
    0
 }
@@ -45,17 +50,21 @@ fn mods_from_key_states(ks){
    "Reconstructs the active modifier bitset from a key-state dictionary."
    if(!is_dict(ks)){ return 0 }
    mut mods = 0
-   if(dict_get(ks, 0xFFE1, false) || dict_get(ks, 0xFFE2, false) || dict_get(ks, 16, false)){
+   if(dict_get(ks, 0xFFE1, false) || dict_get(ks, 0xFFE2, false) ||
+      dict_get(ks, 16, false) || dict_get(ks, 340, false) || dict_get(ks, 344, false)){
       mods = mods | MOD_SHIFT
    }
-   if(dict_get(ks, 0xFFE3, false) || dict_get(ks, 0xFFE4, false) || dict_get(ks, 17, false)){
+   if(dict_get(ks, 0xFFE3, false) || dict_get(ks, 0xFFE4, false) ||
+      dict_get(ks, 17, false) || dict_get(ks, 341, false) || dict_get(ks, 345, false)){
       mods = mods | MOD_CONTROL
    }
-   if(dict_get(ks, 0xFFE9, false) || dict_get(ks, 0xFFEA, false) || dict_get(ks, 18, false)){
+   if(dict_get(ks, 0xFFE9, false) || dict_get(ks, 0xFFEA, false) ||
+      dict_get(ks, 18, false) || dict_get(ks, 342, false) || dict_get(ks, 346, false)){
       mods = mods | MOD_ALT
    }
    if(dict_get(ks, 0xFFEB, false) || dict_get(ks, 0xFFEC, false) ||
-      dict_get(ks, 91, false) || dict_get(ks, 92, false)){
+      dict_get(ks, 91, false) || dict_get(ks, 92, false) ||
+      dict_get(ks, 343, false) || dict_get(ks, 347, false)){
       mods = mods | MOD_SUPER
    }
    if(dict_get(ks, 0xFFE7, false) || dict_get(ks, 0xFFE8, false)){

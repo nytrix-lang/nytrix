@@ -2,7 +2,8 @@
 ;; Shared utility helpers for small cross-module behaviors.
 
 module std.util.common (
-   touch, yn, env_truthy, env_present, cached_env_truthy, cached_env_present, parse_nonneg_int, last_index_byte
+   touch, yn, env_truthy, env_present, cached_env_truthy, cached_env_present,
+   parse_nonneg_int, last_index_byte, env_hex
 )
 
 use std.core *
@@ -56,6 +57,28 @@ fn parse_nonneg_int(v){
    def n = atoi(s)
    if(n < 0){ return 0 }
    n
+}
+
+fn env_hex(name, def_val){
+   "Parses a hex color from environment variable `name` (e.g. '0xff123456' or '123456')."
+   def v = env(name)
+   if(!v || str_len(v) == 0){ return def_val }
+   mut s = strip(v)
+   if(startswith(s, "0x")){ s = str_slice(s, 2, str_len(s)) }
+   elif(startswith(s, "#")){ s = str_slice(s, 1, str_len(s)) }
+
+   mut res = 0
+   mut i = 0 while(i < str_len(s)){
+      def c = load8(s, i)
+      mut val = 0
+      if(c >= 48 && c <= 57){ val = c - 48 }
+      elif(c >= 65 && c <= 70){ val = c - 55 }
+      elif(c >= 97 && c <= 102){ val = c - 87 }
+      else { break }
+      res = (res << 4) | val
+      i += 1
+   }
+   res
 }
 
 fn last_index_byte(s, want){

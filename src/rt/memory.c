@@ -2,6 +2,9 @@
 #include <inttypes.h>
 #include <stdatomic.h>
 #include <stdlib.h>
+
+extern int64_t __copy_mem(int64_t dst, int64_t src, int64_t n);
+
 #ifdef _WIN32
 #include <malloc.h>
 #endif
@@ -11,7 +14,7 @@ static inline bool mem_trace_enabled(void) {
   if (g_mem_trace >= 0)
     return g_mem_trace != 0;
   const char *env = getenv("NYTRIX_MEM_TRACE");
-  g_mem_trace = (env && *env == '1') ? 1 : 0;
+  g_mem_trace = (env && (*env == '1' || strcmp(env, "true") == 0)) ? 1 : 0;
   return g_mem_trace != 0;
 }
 

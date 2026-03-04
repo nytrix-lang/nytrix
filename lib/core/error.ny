@@ -1,5 +1,5 @@
 ;; Keywords: core error
-;; Core Error module.
+;; Error Handling and Panic Utilities for Nytrix
 
 module std.core.error (
    panic, ok, err, is_ok, is_err, unwrap, unwrap_or,

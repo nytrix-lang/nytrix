@@ -1,5 +1,5 @@
 ;; Keywords: core set
-;; Core Set module.
+;; Hash Set Implementation for Nytrix
 
 module std.core.set_mod (
    set, set_new, set_add, set_contains
@@ -9,7 +9,7 @@ use std.core.error *
 use std.str *
 use std.str.io *
 
-fn _set_str_eq(a, b){
+@inline fn _set_str_eq(a, b){
    "Internal: byte-wise string equality for set keys."
    if(!is_str(a) || !is_str(b)){ return false }
    def n = str_len(a)
@@ -22,7 +22,7 @@ fn _set_str_eq(a, b){
    return true
 }
 
-fn _set_key_eq(a, b){
+@inline fn _set_key_eq(a, b){
    "Internal: key equality with string fast-path."
    if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
    return (a == b)
@@ -64,12 +64,12 @@ fn _set_new(cap){
    p
 }
 
-fn set_new(cap=8){
+@inline fn set_new(cap=8){
    "Creates a new empty set."
    _set_new(cap)
 }
 
-fn set(cap=8){
+@inline fn set(cap=8){
    "Alias for set_new."
    _set_new(cap)
 }
@@ -134,7 +134,7 @@ fn set_add(s, key){
    s
 }
 
-fn set_contains(s, key){
+@inline fn set_contains(s, key){
    "Returns true if `key` is in set `s`."
    if(!is_set(s)){ return false }
    def cap = load64(s, 8)

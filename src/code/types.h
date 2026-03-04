@@ -69,6 +69,11 @@ typedef struct binding {
   bool is_used;
   bool owned;
   bool is_stable;
+  bool is_f64_slot;
+  bool is_int_slot;
+  bool is_f64_direct;
+  bool is_int_direct;
+
   const char *type_name;
   const char *decl_type_name;
   uint64_t name_hash;
@@ -111,6 +116,7 @@ typedef struct fun_sig {
   bool is_recursive;
   const char *link_name;
   const char *return_type;
+  const char *inferred_return_type;
   bool owned;
   uint64_t name_hash;
   uint32_t name_len;

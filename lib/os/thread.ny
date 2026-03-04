@@ -1,5 +1,5 @@
 ;; Keywords: os thread
-;; Os Thread module.
+;; Os Thread for Nytrix
 
 module std.os.thread (
    thread_spawn, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free

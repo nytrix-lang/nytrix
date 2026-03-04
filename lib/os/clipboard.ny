@@ -101,5 +101,5 @@ fn get_text(){
    res
 }
 
-fn set_clipboard_text(text){ set_text(text) }
-fn get_clipboard_text(){ get_text() }
+fn set_clipboard_text(text){ "Updates the system clipboard with the provided text string." set_text(text) }
+fn get_clipboard_text(){ "Retrieves the current text content from the system clipboard." get_text() }

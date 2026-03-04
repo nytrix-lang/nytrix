@@ -16,4 +16,14 @@ bool ny_jit_cache_load_ir(const char *cache_path, LLVMContextRef ctx,
                           LLVMModuleRef *out_module);
 bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module);
 
+#ifndef _WIN32
+bool ny_jit_native_cache_enabled(void);
+char *ny_jit_native_cache_path(const char *bc_path);
+bool ny_jit_native_cache_load(const char *so_path, void **out_handle,
+                              void (**out_entry)(void));
+bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
+                              int opt_level, const char *const *link_libs,
+                              size_t link_count);
+#endif
+
 #endif

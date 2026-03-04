@@ -27,32 +27,31 @@ fn make_event(kind, win, win_id=0, data=0){
    ["std.ui.event", kind, win, win_id, data]
 }
 
+fn _event_get(ev, slot, fallback=0){
+   "Internal: common getter for event list slots with validation."
+   common.touch(ev)
+   if(!is_event(ev)){ return fallback }
+   get(ev, slot, fallback)
+}
+
 fn event_type(ev){
    "Returns event type enum value."
-   common.touch(ev)
-   if(!is_event(ev)){ return EVENT_NONE }
-   get(ev, _E_TYPE, EVENT_NONE)
+   _event_get(ev, _E_TYPE, EVENT_NONE)
 }
 
 fn event_window(ev){
    "Returns the event's associated window object."
-   common.touch(ev)
-   if(!is_event(ev)){ return 0 }
-   get(ev, _E_WINDOW, 0)
+   _event_get(ev, _E_WINDOW, 0)
 }
 
 fn event_window_id(ev){
    "Returns the event's associated window id."
-   common.touch(ev)
-   if(!is_event(ev)){ return 0 }
-   get(ev, _E_WINDOW_ID, 0)
+   _event_get(ev, _E_WINDOW_ID, 0)
 }
 
 fn event_data(ev){
    "Returns event payload data."
-   common.touch(ev)
-   if(!is_event(ev)){ return 0 }
-   get(ev, _E_DATA, 0)
+   _event_get(ev, _E_DATA, 0)
 }
 
 fn queue_push(q, ev){

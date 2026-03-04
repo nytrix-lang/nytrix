@@ -1,5 +1,5 @@
-;; Keywords: core iter
-;; Iter helpers.
+;; Keywords: core iter functional
+;; Iterable Collection and Functional Programming Utilities for Nytrix
 
 module std.core.iter (
    range, range2, enumerate, map_list, filter_list, repeat, take, zip2,

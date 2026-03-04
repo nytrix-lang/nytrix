@@ -1,5 +1,5 @@
 ;; Keywords: math nt
-;; Math Nt module.
+;; Math Nt for Nytrix
 
 module std.math.nt (
    egcd, modinv, pow_mod, is_prime, next_prime

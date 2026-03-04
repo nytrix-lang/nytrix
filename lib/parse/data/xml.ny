@@ -1,6 +1,7 @@
 ;; Keywords: enc xml
-;; Simple XML Parser.
-;; Reference: https://www.rfc-editor.org/rfc/rfc3470.html
+;; Extensible Markup Language (XML) Parser and Generator for Nytrix
+;; Reference:
+;; - https://www.rfc-editor.org/rfc/rfc3470.html
 
 module std.enc.xml (
    parse, encode, Node

@@ -10,8 +10,22 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
     memcpy(&tagged_len, (const void *)lp, sizeof(tagged_len));
     *out_len = (int)(tagged_len >> 1);
   } else if (is_int(v)) {
-    *out_len = snprintf(buf, bsize, "%" PRId64, (int64_t)(v >> 1));
-    *out_s = buf;
+    int64_t val = (int64_t)(v >> 1);
+    char *p = buf + bsize - 1;
+    *p = '\0';
+    int len = 0;
+    uint64_t abs_v = (val < 0) ? (uint64_t)-val : (uint64_t)val;
+    do {
+      *--p = (char)('0' + (abs_v % 10));
+      abs_v /= 10;
+      len++;
+    } while (abs_v);
+    if (val < 0) {
+      *--p = '-';
+      len++;
+    }
+    *out_len = len;
+    *out_s = p;
   } else if (is_ptr(v)) {
     if (is_v_flt(v)) {
       double d;

@@ -39,25 +39,28 @@ fn init(pos=[0,0,0], yaw=0.0, pitch=0.0){
    c
 }
 
-fn update(cam, dt, win, skip_look=false){
+@jit
+fn update(cam, dt, win, skip_look=false, skip_move=false){
    "Updates camera state based on input and physics."
-   common.touch(cam) common.touch(dt) common.touch(win) common.touch(skip_look)
+   common.touch(cam) common.touch(dt) common.touch(win) common.touch(skip_look) common.touch(skip_move)
 
    def ww = get(cam, 20) def wh = get(cam, 21)
    def cx = ww * 0.5 def cy = wh * 0.5
 
    ;; Mouse Look (fast dictionary access to avoid list allocation)
-   def mx = get(win, "mouse_x", cx)
-   def my = get(win, "mouse_y", cy)
-   window.set_cursor_pos(win, cx, cy)
-   def dx = mx - cx
-   def dy = my - cy
-
-   def sens = get(cam, 10)
    if(!skip_look){
+      def mx = get(win, "mouse_x", cx)
+      def my = get(win, "mouse_y", cy)
+      window.set_cursor_pos(win, cx, cy)
+      def dx = mx - cx
+      def dy = my - cy
+
+      def sens = get(cam, 10)
       if(abs(dx) > 0.0001 || abs(dy) > 0.0001){
          def ty = get(cam, 8) + dx * sens
-         def tp = clamp(get(cam, 9) - dy * sens, -89.9, 89.9)
+         mut tp = get(cam, 9) - dy * sens
+         if(tp < -89.9){ tp = -89.9 }
+         if(tp > 89.9){ tp = 89.9 }
          set_idx(cam, 8, ty)
          set_idx(cam, 9, tp)
       }
@@ -79,12 +82,14 @@ fn update(cam, dt, win, skip_look=false){
    def rgt_x = cosr def rgt_z = sinr
 
    mut wx = 0.0 mut wy = 0.0 mut wz = 0.0
-   if(window.key_down(win, input.KEY_W)){ wx += fwd_x wz += fwd_z }
-   if(window.key_down(win, input.KEY_S)){ wx -= fwd_x wz -= fwd_z }
-   if(window.key_down(win, input.KEY_A)){ wx -= rgt_x wz -= rgt_z }
-   if(window.key_down(win, input.KEY_D)){ wx += rgt_x wz += rgt_z }
-   if(window.key_down(win, input.KEY_SPACE)){ wy += 1.0 }
-   if(window.key_down(win, input.KEY_CTRL) || window.mod_down(win, input.MOD_CONTROL)){ wy -= 1.0 }
+   if(!skip_move){
+      if(window.key_down(win, input.KEY_W)){ wx += fwd_x wz += fwd_z }
+      if(window.key_down(win, input.KEY_S)){ wx -= fwd_x wz -= fwd_z }
+      if(window.key_down(win, input.KEY_A)){ wx -= rgt_x wz -= rgt_z }
+      if(window.key_down(win, input.KEY_D)){ wx += rgt_x wz += rgt_z }
+      if(window.key_down(win, input.KEY_SPACE)){ wy += 1.0 }
+      if(window.key_down(win, input.KEY_CTRL) || window.mod_down(win, input.MOD_CONTROL)){ wy -= 1.0 }
+   }
 
    def wlen2 = wx*wx + wy*wy + wz*wz
    if(wlen2 > 0.0001){
@@ -103,7 +108,7 @@ fn update(cam, dt, win, skip_look=false){
    set_idx(cam, 19, cz)
 
    mut speed = get(cam, 11)
-   if(window.key_down(win, input.KEY_SHIFT)){ speed *= get(cam, 15) }
+   if(!skip_move && window.key_down(win, input.KEY_SHIFT)){ speed *= get(cam, 15) }
 
    def drag_f = 1.0 / (1.0 + get(cam, 12) * dt)
    mut vx = get(cam, 3) mut vy = get(cam, 4) mut vz = get(cam, 5)
@@ -115,23 +120,26 @@ fn update(cam, dt, win, skip_look=false){
    set_idx(cam, 0, get(cam, 0) + vx * dt)
    set_idx(cam, 1, get(cam, 1) + vy * dt)
    set_idx(cam, 2, get(cam, 2) + vz * dt)
+   cam
 }
 
+@jit
 fn update_win_size(cam, w, h){
    "Cache window size into camera for fast access in update()."
    set_idx(cam, 20, float(w))
    set_idx(cam, 21, float(h))
 }
 
+@jit
 fn apply(cam, gfx_cam){
    "Applies camera state to a gfx camera object."
    common.touch(cam) common.touch(gfx_cam)
    ;; Mutate existing pos vec3 in gfx_cam[0] to avoid allocation
    mut pos = get(gfx_cam, 0)
    if(is_list(pos) || is_tuple(pos)){
-      pos[0] = get(cam, 0)
-      pos[1] = get(cam, 1)
-      pos[2] = get(cam, 2)
+      set_idx(pos, 0, get(cam, 0))
+      set_idx(pos, 1, get(cam, 1))
+      set_idx(pos, 2, get(cam, 2))
    } else {
       set_idx(gfx_cam, 0, [get(cam,0), get(cam,1), get(cam,2)])
    }
@@ -141,10 +149,26 @@ fn apply(cam, gfx_cam){
    if(fov > 0){ set_idx(gfx_cam, 3, float(fov)) }
 }
 
-fn get_yaw(cam){ get(cam, 6, 0.0) }
-fn get_pitch(cam){ get(cam, 7, 0.0) }
-fn get_pos(cam){ [get(cam,0,0.0), get(cam,1,0.0), get(cam,2,0.0)] }
-fn get_rot(cam){ [get_yaw(cam), get_pitch(cam)] }
+@jit
+fn get_yaw(cam){
+   "Returns the current yaw (horizontal rotation) in degrees."
+   get(cam, 6, 0.0)
+}
+@jit
+fn get_pitch(cam){
+   "Returns the current pitch (vertical rotation) in degrees."
+   get(cam, 7, 0.0)
+}
+@jit
+fn get_pos(cam){
+   "Returns the current camera position as [x, y, z]."
+   [get(cam, 0, 0.0), get(cam, 1, 0.0), get(cam, 2, 0.0)]
+}
+@jit
+fn get_rot(cam){
+   "Returns the current camera rotation as [yaw, pitch]."
+   [get_yaw(cam), get_pitch(cam)]
+}
 
 fn set_fov(cam, fov){
    "Sets the field of view for the camera (degrees)."

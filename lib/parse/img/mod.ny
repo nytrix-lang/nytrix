@@ -1,6 +1,6 @@
 ;; Keywords: image format unified
-;; Unified image decoding module.
-;; Dispatches to format-specific decoders based on signature or file extension.
+;; Unified Image Decoding and Encoding for Nytrix
+;; Dispatches to format-specific handlers based on signature or extension.
 
 module std.image (
    decode, get_info, load, save, encode, free,

@@ -1,5 +1,5 @@
 ;; Keywords: os time
-;; Os Time module.
+;; Os Time for Nytrix
 
 module std.os.time (
    time, sleep, msleep, ticks,
