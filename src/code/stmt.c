@@ -446,6 +446,10 @@ static void gen_stmt_with_null_narrow(codegen_t *cg, scope *scopes,
 
 static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                         size_t func_root, bool is_tail) {
+  if (s->as.iff.init) {
+    scope_enter(scopes, depth, NULL, NULL);
+    gen_stmt(cg, scopes, depth, s->as.iff.init, func_root, false);
+  }
   ny_null_narrow_list_t narrow;
   vec_init(&narrow);
   (void)ny_null_narrow_collect(s->as.iff.test, &narrow);
@@ -461,6 +465,8 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                                 s->as.iff.alt, func_root, is_tail);
     }
     vec_free(&narrow);
+    if (s->as.iff.init)
+      scope_pop(scopes, depth);
     return;
   }
   LLVMValueRef c = to_bool(cg, val);
@@ -497,9 +503,12 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
   if (then_fallthrough)
 
-    if (eb && else_fallthrough)
+    if (eb && else_fallthrough) {
+    }
 
-      vec_free(&narrow);
+  vec_free(&narrow);
+  if (s->as.iff.init)
+    scope_pop(scopes, depth);
 }
 
 static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
@@ -531,8 +540,10 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
 
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
-  if (s->as.whl.init)
+  if (s->as.whl.init) {
+    scope_enter(scopes, depth, NULL, NULL);
     gen_stmt(cg, scopes, depth, s->as.whl.init, func_root, false);
+  }
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
   LLVMBasicBlockRef cb = ny_llvm_append_block(f, "wc"),
                     bb = ny_llvm_append_block(f, "wb"),
@@ -572,6 +583,8 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
   }
 
   LLVMPositionBuilderAtEnd(cg->builder, eb);
+  if (s->as.whl.init)
+    scope_pop(scopes, depth);
 }
 
 static bool get_for_iter_helpers(codegen_t *cg, token_t tok, fun_sig **ls,

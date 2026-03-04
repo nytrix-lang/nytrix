@@ -187,6 +187,10 @@ static int precedence(token_kind kind) {
   case NY_T_LSHIFT:
   case NY_T_RSHIFT:
     return 7;
+  case NY_T_PIPE:
+    return 1; /* Low precedence, same as OR */
+  case NY_T_QUESTION_QUESTION:
+    return 2; /* Between OR and AND */
   default:
     return 0;
   }
@@ -674,6 +678,64 @@ static expr_t *parse_postfix(parser_t *p) {
         m->as.member.name = name;
         expr = m;
       }
+    } else if (p->cur.kind == NY_T_QUESTION_DOT) {
+      /* Optional Chaining Sugar: expr?.name -> if(expr) expr.name else nil */
+      token_t qdot_tok = p->cur;
+      parser_advance(p);
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "optional access expects identifier", NULL);
+        return expr;
+      }
+      token_t id_tok = p->cur;
+      char *name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
+      parser_advance(p);
+
+      expr_t *target = expr;
+      expr_t *access;
+
+      if (p->cur.kind == NY_T_LPAREN) {
+        /* expr?.foo() */
+        parser_advance(p);
+        expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
+        mc->as.memcall.target = target;
+        mc->as.memcall.name = name;
+        while (p->cur.kind != NY_T_RPAREN) {
+          call_arg_t arg = {0};
+          if (p->cur.kind == NY_T_IDENT && parser_peek(p).kind == NY_T_ASSIGN) {
+            arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+            parser_advance(p);
+            parser_advance(p);
+            arg.val = p_parse_expr(p, 0);
+          } else {
+            arg.val = p_parse_expr(p, 0);
+          }
+          vec_push_arena(p->arena, &mc->as.memcall.args, arg);
+          if (!parser_match(p, NY_T_COMMA))
+            break;
+        }
+        parser_expect(p, NY_T_RPAREN, NULL, NULL);
+        access = mc;
+      } else {
+        /* expr?.foo */
+        expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);
+        m->as.member.target = target;
+        m->as.member.name = name;
+        access = m;
+      }
+
+      /* Wrap in ternary: if(expr) access else nil */
+      expr_t *tern = expr_new(p->arena, NY_E_TERNARY, qdot_tok);
+      tern->as.ternary.cond = target;
+      tern->as.ternary.true_expr = access;
+
+      /* nil literal */
+      token_t nil_tok = {.kind = NY_T_NIL, .lexeme = "nil", .len = 3};
+      expr_t *nil_lit = expr_new(p->arena, NY_E_LITERAL, nil_tok);
+      nil_lit->as.literal.kind = NY_LIT_INT;
+      nil_lit->as.literal.as.i = 0;
+
+      tern->as.ternary.false_expr = nil_lit;
+      expr = tern;
     } else if (p->cur.kind == NY_T_LBRACK) {
       if (p->skipped_newline)
         break;
@@ -744,21 +806,96 @@ expr_t *p_parse_expr(parser_t *p, int prec) {
     if (pcur < prec || pcur == 0)
       break;
     token_t op = p->cur;
+
+    if (parser_match(p, NY_T_PIPE)) {
+      token_t pipe_tok = op;
+      if (p->cur.kind == NY_T_LBRACK) {
+        token_t lbrack = p->cur;
+        parser_advance(p);
+        expr_t *idx = p_parse_expr(p, 0);
+        parser_expect(p, NY_T_RBRACK, "']' in piped index", NULL);
+        expr_t *ix = expr_new(p->arena, NY_E_INDEX, lbrack);
+        ix->as.index.target = left;
+        ix->as.index.start = idx;
+        left = ix;
+        continue;
+      }
+      if (p->cur.kind == NY_T_DOT) {
+        parser_advance(p);
+        if (p->cur.kind != NY_T_IDENT) {
+          parser_error(p, p->cur, "expected identifier after '|> .'", NULL);
+          return left;
+        }
+        token_t id_tok = p->cur;
+        char *name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
+        parser_advance(p);
+        if (p->cur.kind == NY_T_LPAREN) {
+          parser_advance(p);
+          expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
+          mc->as.memcall.target = left;
+          mc->as.memcall.name = name;
+          while (p->cur.kind != NY_T_RPAREN) {
+            call_arg_t arg = {0};
+            if (p->cur.kind == NY_T_IDENT &&
+                parser_peek(p).kind == NY_T_ASSIGN) {
+              arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+              parser_advance(p);
+              parser_advance(p);
+              arg.val = p_parse_expr(p, 0);
+            } else {
+              arg.val = p_parse_expr(p, 0);
+            }
+            vec_push_arena(p->arena, &mc->as.memcall.args, arg);
+            if (!parser_match(p, NY_T_COMMA))
+              break;
+          }
+          parser_expect(p, NY_T_RPAREN, "')' in piped member call", NULL);
+          left = mc;
+        } else {
+          expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);
+          m->as.member.target = left;
+          m->as.member.name = name;
+          left = m;
+        }
+        continue;
+      }
+      expr_t *rhs = p_parse_expr(p, pcur + 1);
+      if (rhs->kind == NY_E_CALL) {
+        call_arg_t arg = {.name = NULL, .val = left};
+        vec_insert_arena(p->arena, &rhs->as.call.args, 0, arg);
+        left = rhs;
+      } else {
+        expr_t *call = expr_new(p->arena, NY_E_CALL, pipe_tok);
+        call->as.call.callee = rhs;
+        call_arg_t arg = {.name = NULL, .val = left};
+        vec_push_arena(p->arena, &call->as.call.args, arg);
+        left = call;
+      }
+      continue;
+    }
+
     parser_advance(p);
     expr_t *right = p_parse_expr(p, pcur + 1);
-    expr_t *bin;
-    if (op.kind == NY_T_AND || op.kind == NY_T_OR) {
-      bin = expr_new(p->arena, NY_E_LOGICAL, op);
+
+    if (op.kind == NY_T_QUESTION_QUESTION) {
+      expr_t *tern = expr_new(p->arena, NY_E_TERNARY, op);
+      tern->as.ternary.cond = left;
+      tern->as.ternary.true_expr = left;
+      tern->as.ternary.false_expr = right;
+      left = tern;
+    } else if (op.kind == NY_T_AND || op.kind == NY_T_OR) {
+      expr_t *bin = expr_new(p->arena, NY_E_LOGICAL, op);
       bin->as.logical.op = (op.kind == NY_T_AND) ? "&&" : "||";
       bin->as.logical.left = left;
       bin->as.logical.right = right;
+      left = bin;
     } else {
-      bin = expr_new(p->arena, NY_E_BINARY, op);
+      expr_t *bin = expr_new(p->arena, NY_E_BINARY, op);
       bin->as.binary.op = arena_strndup(p->arena, op.lexeme, op.len);
       bin->as.binary.left = left;
       bin->as.binary.right = right;
+      left = bin;
     }
-    left = bin;
   }
   return left;
 }

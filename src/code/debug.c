@@ -403,11 +403,13 @@ void codegen_debug_init(codegen_t *cg, const char *main_file) {
   cg->di_subroutine_type = LLVMDIBuilderCreateSubroutineType(
       cg->di_builder, cg->di_file, NULL, 0, LLVMDIFlagZero);
   char producer[96];
-#if defined(LLVM_VERSION_MAJOR) && defined(LLVM_VERSION_MINOR)
-  snprintf(producer, sizeof(producer), "nytrix (LLVM %d.%d)",
-           LLVM_VERSION_MAJOR, LLVM_VERSION_MINOR);
+#if defined(LLVM_VERSION_STRING)
+  snprintf(producer, sizeof(producer), "LLVM %s", LLVM_VERSION_STRING);
+#elif defined(LLVM_VERSION_MAJOR) && defined(LLVM_VERSION_MINOR)
+  snprintf(producer, sizeof(producer), "LLVM %d.%d", LLVM_VERSION_MAJOR,
+           LLVM_VERSION_MINOR);
 #else
-  snprintf(producer, sizeof(producer), "nytrix");
+  snprintf(producer, sizeof(producer), "LLVM");
 #endif
   char flags[256];
   ny_debug_compile_flags(cg, flags, sizeof(flags));
@@ -561,18 +563,8 @@ void codegen_debug_pop_block(codegen_t *cg, LLVMMetadataRef prev_scope) {
 }
 
 LLVMMetadataRef codegen_debug_loc_scope(codegen_t *cg, token_t tok) {
+  (void)tok;
   if (!cg || !cg->debug_symbols || !cg->di_builder || !cg->di_scope)
     return NULL;
-  if (!tok.filename || !*tok.filename)
-    return cg->di_scope;
-  if (strcmp(tok.filename, "<stdlib>") != 0 &&
-      strcmp(tok.filename, "<repl_std>") != 0)
-    return cg->di_scope;
-  LLVMMetadataRef file = debug_file_for(cg, tok.filename);
-  if (!file)
-    return cg->di_scope;
-  unsigned line = tok.line > 0 ? (unsigned)tok.line : 1;
-  unsigned col = tok.col > 0 ? (unsigned)tok.col : 1;
-  return LLVMDIBuilderCreateLexicalBlock(cg->di_builder, cg->di_scope, file,
-                                         line, col);
+  return cg->di_scope;
 }

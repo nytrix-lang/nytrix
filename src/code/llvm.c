@@ -129,8 +129,6 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
     break;
   }
   if (opt_level <= 0) {
-    if (ny_env_enabled_default_on("NYTRIX_OPT_DCE"))
-      return "globaldce";
     return NULL;
   }
   if (opt_level == 1)
@@ -141,12 +139,12 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
 }
 
 static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts,
-                                           int opt_level,
+                                           int opt_level, int opt_loops,
                                            const char *opt_pipeline) {
   if (!opts)
     return;
-  bool enable_loop_vectorize = true;
-  bool enable_slp_vectorize = true;
+  bool enable_loop_vectorize = (opt_loops > 0);
+  bool enable_slp_vectorize = (opt_loops > 0);
   int inliner_threshold = -1;
   switch (ny_llvm_opt_profile_from_env()) {
   case NY_LLVM_OPT_PROFILE_NONE:
@@ -386,7 +384,7 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
-void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level,
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
                              const char *opt_pipeline) {
   const char *passes = (opt_pipeline && *opt_pipeline)
                            ? opt_pipeline
@@ -419,8 +417,7 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level,
   }
 
   LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
-  ny_llvm_configure_pass_options(opts, opt_level, opt_pipeline);
-
+  ny_llvm_configure_pass_options(opts, opt_level, opt_loops, opt_pipeline);
   LLVMErrorRef error = LLVMRunPasses(module, passes, tm, opts);
   if (error) {
     char *msg = LLVMGetErrorMessage(error);

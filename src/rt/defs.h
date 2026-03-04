@@ -85,6 +85,8 @@ RT_DEF("__tty_size", __tty_size, 1, "fn __tty_size(out_ptr)",
        "Writes tty cols/rows (int32,int32) to out_ptr; returns 0 on success.")
 RT_DEF("__is_dir", __is_dir, 1, "fn __is_dir(path)",
        "Portable directory check.")
+RT_DEF("__fetch", __fetch, 1, "fn __fetch(url)",
+       "Downloads content from a URL using libcurl.")
 
 RT_DEF("__dir_open", __dir_open, 1, "fn __dir_open(path)",
        "Open directory handle.")

@@ -674,7 +674,8 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
   }
 
   if (!entry) {
-    return expr_fail(cg, (token_t){0}, "undefined operator '%s'", op);
+    token_t tok = le ? le->tok : (re ? re->tok : (token_t){0});
+    return expr_fail(cg, tok, "undefined operator '%s'", op);
   }
 
   const char *generic_name = entry->generic;
@@ -683,8 +684,11 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
 
   if (kind == NY_BINOP_IN) {
     fun_sig *s = ny_helper_contains(cg);
-    if (!s)
-      return expr_fail(cg, (token_t){0}, "'in' requires 'contains'");
+    if (!s) {
+      token_t tok = le ? le->tok : (token_t){0};
+      return expr_fail(cg, tok,
+                       "'in' requires 'contains' (usually in std.core)");
+    }
     return LLVMBuildCall2(cg->builder, s->type, s->value,
                           (LLVMValueRef[]){r, l}, 2, "");
   }
