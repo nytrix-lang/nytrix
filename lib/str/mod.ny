@@ -5,7 +5,8 @@ module std.str (
    str_len, len, find, find_last, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, atof, split, strip,
    str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, to_fixed, chr, repeat, ord,
    utf8_valid, utf8_len, ord_at, str_slice, utf8_slice,
-   _utf8_seq_len, _utf8_decode_at, _utf8_encode_at, _substr
+   _utf8_seq_len, _utf8_decode_at, _utf8_encode_at, _substr,
+   Builder, builder_append, builder_to_str, builder_free
 )
 use std.core *
 use std.core as core
@@ -429,6 +430,8 @@ fn to_hex(n, width=0){
    if(n == 0){ s = "0" }
    else {
       mut val = n
+      ; Check if n is a pointer/raw value (low bits = 0) vs small int (low bit = 1)
+      if((n & 1) == 0){ val = n >> 1 }
       while(val > 0){
          def nibble = (val & 0xF)
          def char_code = load8(hex_chars, nibble)
@@ -823,4 +826,52 @@ if(comptime{__main()}){
    assert(_str_eq(str_slice(s2, 0, 0), ""), "slice empty")
 
    print("✓ std.str tests passed")
+}
+fn Builder(initial_cap=64){
+   "Creates a new StringBuilder with initial capacity."
+   mut cap = initial_cap
+   if(!is_int(cap) || cap < 8){ cap = 64 }
+   [malloc(cap + 1), 0, cap]
+}
+
+fn builder_append(b, s){
+   "Appends string `s` to the builder `b`."
+   if(!is_list(b) || len(b) < 3){ return b }
+   mut buf = b[0]
+   mut l = b[1]
+   mut cap = b[2]
+   if(!is_str(s)){ s = to_str(s) }
+   def slen = str_len(s)
+   if(l + slen >= cap){
+      mut ncap = cap * 2
+      if(ncap < l + slen){ ncap = l + slen + 128 }
+      mut nbuf = realloc(buf, ncap + 1)
+      if(!nbuf){ return b }
+      buf = nbuf
+      cap = ncap
+      b[0] = buf
+      b[2] = cap
+   }
+   memcpy(buf + l, s, slen)
+   b[1] = l + slen
+   b
+}
+
+fn builder_to_str(b){
+   "Returns the content of builder `b` as a Nytrix string."
+   if(!is_list(b) || len(b) < 3){ return "" }
+   def l = b[1]
+   if(l == 0){ return "" }
+   mut out = malloc(l + 1)
+   if(!out){ return "" }
+   init_str(out, l)
+   memcpy(out, b[0], l)
+   store8(out, 0, l)
+   out
+}
+
+fn builder_free(b){
+   "Frees the underlying buffer of builder `b`."
+   if(!is_list(b) || len(b) < 3){ return }
+   if(b[0]){ free(b[0]) b[0] = 0 }
 }

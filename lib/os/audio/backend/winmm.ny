@@ -14,13 +14,8 @@ use std.os.audio.backend.shared as backend_shared
 use std.util.common as common
 
 if(comptime{ __os_name() == "windows" }){
-   #link "winmm"
-   extern fn waveOutOpen(phwo: ptr, uDeviceID: i32, pwfx: ptr, dwCallback: i64, dwInstance: i64, fdwOpen: i32): i32 as "waveOutOpen"
-   extern fn waveOutClose(hwo: ptr): i32 as "waveOutClose"
-   extern fn waveOutPrepareHeader(hwo: ptr, pwh: ptr, cbwh: i32): i32 as "waveOutPrepareHeader"
-   extern fn waveOutUnprepareHeader(hwo: ptr, pwh: ptr, cbwh: i32): i32 as "waveOutUnprepareHeader"
-   extern fn waveOutWrite(hwo: ptr, pwh: ptr, cbwh: i32): i32 as "waveOutWrite"
-   extern fn waveOutReset(hwo: ptr): i32 as "waveOutReset"
+   #include <windows.h>
+   #include <mmsystem.h>
 } else {
    fn waveOutOpen(_phwo, _uDeviceID, _pwfx, _dwCallback, _dwInstance, _fdwOpen){
       "Stubbed non-Windows implementation of `waveOutOpen`."

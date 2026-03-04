@@ -5,7 +5,7 @@
 
 module std.math.float (
    _box, float, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil,
-   round, abs, nan, inf, is_nan, is_inf
+   round, abs, nan_val, inf, is_nan, is_inf
 )
 use std.core *
 use std.str as txt
@@ -136,7 +136,7 @@ fn abs(x){
    else { x }
 }
 
-fn nan(){
+fn nan_val(){
    "Returns a quiet NaN (Not-a-Number) float."
    NAN_VAL
 }
@@ -191,7 +191,7 @@ if(comptime{__main()}){
    assert(floor(fn1_5) == -2, "floor -1.5")
    assert(ceil(fn1_5) == -1, "ceil -1.5")
 
-   assert(is_nan(nan()), "is_nan")
+   assert(is_nan(nan_val()), "is_nan")
    assert(is_inf(inf()), "is_inf")
 
    print("✓ std.math.float tests passed")

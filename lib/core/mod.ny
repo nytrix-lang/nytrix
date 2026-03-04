@@ -18,7 +18,8 @@ module std.core (
    globals, set_globals,
    OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM,
    is_truthy, is_falsy, not_none, panic_if, assert, assert_eq, print, eprint,
-   _pow2
+   _pow2,
+   __big_add_abs, __big_sub_abs, __big_mul_abs
 )
 use std.core.primitives *
 use std.core.reflect as core_ref
@@ -60,7 +61,8 @@ fn hash(x){
    core_ref.hash(x)
 }
 
-@inline fn repr(x){
+@inline
+fn repr(x){
    "Returns the structural string representation of a value (quotes for strings, etc)."
    core_ref.repr(x)
 }
@@ -79,17 +81,20 @@ fn is_truthy(x){
   true
 }
 
-@inline fn is_falsy(x){
+@inline
+fn is_falsy(x){
   "Returns **true** if value `x` is 'falsy' (not truthy)."
   !is_truthy(x)
 }
 
-@inline fn not_none(x, fallback){
+@inline
+fn not_none(x, fallback){
   "Returns `x` if it is not **none**; otherwise returns `fallback`."
   if(x){ return x } fallback
 }
 
-@inline fn panic_if(cond, msg){
+@inline
+fn panic_if(cond, msg){
   "Panics with `msg` if `cond` is truthy."
   if(is_truthy(cond)){ panic(msg) }
 }
@@ -136,13 +141,14 @@ fn eprint(...args){
   0
 }
 
-@pure @jit
-@inline fn bool(x){
+@pure @jit @inline
+fn bool(x){
   "Converts `x` to a primitive boolean value."
   !!x
 }
 
-@inline fn init_str(p, n){
+@inline
+fn init_str(p, n){
   "Initializes a raw memory block `p` of size `n` as a Nytrix string object."
   store8(p, 120, -8)
   store64(p, n, -16)
@@ -159,6 +165,11 @@ fn load64(p, i=0){
   "Loads a 64-bit integer from address `p + i`."
   __load64_idx(p, i)
 }
+@readonly @jit
+fn load64_h(p, i=0){
+  "Loads a 64-bit handle and tags it as a Nytrix integer."
+  __load64_h(p, i)
+}
 @jit
 fn store8(p, v, i=0){
   "Stores byte `v` at address `p + i`."
@@ -169,13 +180,10 @@ fn store64(p, v, i=0){
   "Stores 64-bit integer `v` at address `p + i`."
   __store64_idx(p, i, v)
 }
-
 @jit
-fn store64_raw(p, v, i=0){
-  "Stores a raw integer `v` at address `p + i` as two 32-bit parts."
-  def raw = to_int(v)
-  store32(p, band(raw, 0xFFFFFFFF), i)
-  store32(p, bshr(raw, 32), i + 4)
+fn store64_h(p, v, i=0){
+  "Stores a 64-bit handle or value `v` at address `p + i`, untagging integers."
+  __store64_h(p, i, v)
 }
 
 @readonly @jit
@@ -325,11 +333,13 @@ fn is_float(x){
   __tagof(x) == 110
 }
 
-@inline fn to_int(v){
+@inline
+fn to_int(v){
   "Untags a Nytrix value into a raw integer."
   __untag(v)
 }
-@inline fn from_int(v){
+@inline
+fn from_int(v){
   "Tags a raw integer `v` into a Nytrix value."
   __tag(v)
 }
@@ -396,21 +406,32 @@ fn store_item(lst, i, v){
   store64(lst, v, 16 + i * 8) v
 }
 
+fn _qsort(lst, low, high){
+  if(low < high){
+   mut i = low
+   mut j = high
+   def pivot = load_item(lst, (low + high) / 2)
+   while(i <= j){
+      while(load_item(lst, i) < pivot){ i += 1 }
+      while(load_item(lst, j) > pivot){ j -= 1 }
+      if(i <= j){
+      def tmp = load_item(lst, i)
+      store_item(lst, i, load_item(lst, j))
+      store_item(lst, j, tmp)
+      i += 1
+      j -= 1
+      }
+   }
+   _qsort(lst, low, j)
+   _qsort(lst, i, high)
+  }
+}
+
 fn sort(lst){
-  "Sorts list `lst` in-place using insertion sort."
+  "Sorts list `lst` in-place using Quicksort."
   if(!is_list(lst)){ return lst }
   def n = len(lst)
-  mut i = 1
-  while(i < n){
-     def key = load64(lst, 16 + i * 8)
-     mut j = i - 1
-     while(j >= 0 && load64(lst, 16 + j * 8) > key){
-      store64(lst, load64(lst, 16 + j * 8), 16 + (j + 1) * 8)
-      j -= 1
-     }
-     store64(lst, key, 16 + (j + 1) * 8)
-     i += 1
-  }
+  if(n > 1){ _qsort(lst, 0, n - 1) }
   lst
 }
 

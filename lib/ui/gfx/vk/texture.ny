@@ -20,7 +20,7 @@ fn _ensure_upload_cb(){
    }
    memset(_upload_alloc, 0, 32)
    store32(_upload_alloc, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
-   store64_raw(_upload_alloc, _command_pool, 16)
+   store64_h(_upload_alloc, _command_pool, 16)
    store32(_upload_alloc, 0, 24)
    store32(_upload_alloc, 1, 28)
    if(allocate_command_buffers(_device, _upload_alloc, _upload_cb_ptr) != 0){ return 0 }
@@ -53,7 +53,7 @@ fn _upload_image_region(image, x, y, w, h, old_layout){
    store32(_upload_bar1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 28)
    store32(_upload_bar1, -1, 32)
    store32(_upload_bar1, -1, 36)
-   store64_raw(_upload_bar1, image, 40)
+   store64_h(_upload_bar1, image, 40)
    store32(_upload_bar1, VK_IMAGE_ASPECT_COLOR_BIT, 48)
    store32(_upload_bar1, 0, 52) store32(_upload_bar1, 1, 56)
    store32(_upload_bar1, 0, 60) store32(_upload_bar1, 1, 64)
@@ -80,7 +80,7 @@ fn _upload_image_region(image, x, y, w, h, old_layout){
    store32(_upload_bar2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 28)
    store32(_upload_bar2, -1, 32)
    store32(_upload_bar2, -1, 36)
-   store64_raw(_upload_bar2, image, 40)
+   store64_h(_upload_bar2, image, 40)
    store32(_upload_bar2, VK_IMAGE_ASPECT_COLOR_BIT, 48)
    store32(_upload_bar2, 0, 52) store32(_upload_bar2, 1, 56)
    store32(_upload_bar2, 0, 60) store32(_upload_bar2, 1, 64)
@@ -91,8 +91,8 @@ fn _upload_image_region(image, x, y, w, h, old_layout){
    memset(_upload_si, 0, 72)
    store32(_upload_si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store32(_upload_si, 1, 40)
-   store64_raw(_upload_cb_arr, cb, 0)
-   store64_raw(_upload_si, _upload_cb_arr, 48)
+   store64_h(_upload_cb_arr, cb, 0)
+   store64_h(_upload_si, _upload_cb_arr, 48)
    reset_fences(_device, 1, _upload_fence_ptr)
    queue_submit(_graphics_queue, 1, _upload_si, _upload_fence)
    wait_for_fences(_device, 1, _upload_fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
@@ -129,7 +129,7 @@ fn create_texture_ex(width, height, pixels, format=37){
    ; 2. Allocate Memory
    mut mem_req = sys_malloc(24)
    get_image_memory_requirements(_device, image, mem_req)
-   def size = load64(mem_req, 0)
+   def size = load64_h(mem_req, 0)
    def type_bits = load32(mem_req, 16)
    common.touch(type_bits)
    def mem_idx = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
@@ -137,7 +137,7 @@ fn create_texture_ex(width, height, pixels, format=37){
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, size, 16)
+   store64_h(alloc_info, size, 16)
    store32(alloc_info, mem_idx, 24)
 
    mut mem_ptr = sys_malloc(8)
@@ -149,7 +149,7 @@ fn create_texture_ex(width, height, pixels, format=37){
    mut view_ci = sys_malloc(80)
    memset(view_ci, 0, 80)
    store32(view_ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
-   store64_raw(view_ci, image, 24)
+   store64_h(view_ci, image, 24)
    store32(view_ci, 1, 32) ; 2D
    store32(view_ci, format, 36)
    store32(view_ci, VK_IMAGE_ASPECT_COLOR_BIT, 56)
@@ -176,32 +176,32 @@ fn create_texture_ex(width, height, pixels, format=37){
    mut ds = 0
    if(!_bindless_enabled){
       mut dsl_ptr = sys_malloc(8)
-      store64_raw(dsl_ptr, _descriptor_set_layout, 0)
+      store64_h(dsl_ptr, _descriptor_set_layout, 0)
       mut alloc_ds = sys_malloc(40)
       memset(alloc_ds, 0, 40)
       store32(alloc_ds, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0)
-      store64_raw(alloc_ds, _descriptor_pool, 16)
+      store64_h(alloc_ds, _descriptor_pool, 16)
       store32(alloc_ds, 1, 24)
-      store64_raw(alloc_ds, dsl_ptr, 32)
+      store64_h(alloc_ds, dsl_ptr, 32)
       mut ds_ptr = sys_malloc(8)
       def dres = allocate_descriptor_sets(_device, alloc_ds, ds_ptr)
       if(dres == 0){ ds = load64(ds_ptr, 0) }
 
       if(ds){
          mut im_info = sys_malloc(24)
-         store64_raw(im_info, _default_sampler, 0)
-         store64_raw(im_info, view, 8)
+         store64_h(im_info, _default_sampler, 0)
+         store64_h(im_info, view, 8)
          store32(im_info, 5, 16) ; SHADER_READ_ONLY_OPTIMAL
 
          mut write = sys_malloc(64)
          memset(write, 0, 64)
          store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
-         store64_raw(write, ds, 16)
+         store64_h(write, ds, 16)
          store32(write, 0, 24) ; binding
          store32(write, 0, 28) ; array element
          store32(write, 1, 32) ; count
          store32(write, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
-         store64_raw(write, im_info, 40)
+         store64_h(write, im_info, 40)
          update_descriptor_sets(_device, 1, write, 0, 0)
          sys_free(im_info) sys_free(write)
       }
@@ -234,19 +234,19 @@ fn create_texture_ex(width, height, pixels, format=37){
 
    if(_bindless_enabled && _bindless_ds){
       mut im_info = sys_malloc(24)
-      store64_raw(im_info, _default_sampler, 0)
-      store64_raw(im_info, view, 8)
+      store64_h(im_info, _default_sampler, 0)
+      store64_h(im_info, view, 8)
       store32(im_info, 5, 16)
 
       mut write = sys_malloc(64)
       memset(write, 0, 64)
       store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
-      store64_raw(write, _bindless_ds, 16)
+      store64_h(write, _bindless_ds, 16)
       store32(write, 0, 24) ; binding
       store32(write, tex_id, 28) ; array element
       store32(write, 1, 32) ; count
       store32(write, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
-      store64_raw(write, im_info, 40)
+      store64_h(write, im_info, 40)
       update_descriptor_sets(_device, 1, write, 0, 0)
       sys_free(im_info) sys_free(write)
    }
@@ -279,13 +279,13 @@ fn _init_bindless_descriptor_set(default_view){
    "Initializes the bindless descriptor set with the default texture."
    if(!_bindless_enabled || _bindless_ds){ return true }
    mut dsl_ptr = sys_malloc(8)
-   store64_raw(dsl_ptr, _descriptor_set_layout, 0)
+   store64_h(dsl_ptr, _descriptor_set_layout, 0)
    mut alloc_ds = sys_malloc(40)
    memset(alloc_ds, 0, 40)
    store32(alloc_ds, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, 0)
-   store64_raw(alloc_ds, _descriptor_pool, 16)
+   store64_h(alloc_ds, _descriptor_pool, 16)
    store32(alloc_ds, 1, 24)
-   store64_raw(alloc_ds, dsl_ptr, 32)
+   store64_h(alloc_ds, dsl_ptr, 32)
    mut ds_ptr = sys_malloc(8)
    if(allocate_descriptor_sets(_device, alloc_ds, ds_ptr) != 0){ return false }
    _bindless_ds = load64(ds_ptr, 0)
@@ -294,8 +294,8 @@ fn _init_bindless_descriptor_set(default_view){
    mut i = 0
    while(i < MAX_TEXTURES){
       def off = infos + i * 24
-      store64_raw(off, _default_sampler, 0)
-      store64_raw(off, default_view, 8)
+      store64_h(off, _default_sampler, 0)
+      store64_h(off, default_view, 8)
       store32(off, 5, 16)
       i += 1
    }
@@ -303,12 +303,12 @@ fn _init_bindless_descriptor_set(default_view){
    mut write = sys_malloc(64)
    memset(write, 0, 64)
    store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
-   store64_raw(write, _bindless_ds, 16)
+   store64_h(write, _bindless_ds, 16)
    store32(write, 0, 24) ; binding
    store32(write, 0, 28) ; array element
    store32(write, MAX_TEXTURES, 32) ; count
    store32(write, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
-   store64_raw(write, infos, 40)
+   store64_h(write, infos, 40)
    update_descriptor_sets(_device, 1, write, 0, 0)
 
    sys_free(infos) sys_free(write) sys_free(dsl_ptr) sys_free(alloc_ds) sys_free(ds_ptr)
@@ -424,19 +424,19 @@ fn destroy_texture(tex_id){
       def def_view = dict_get(def_tex, "view", 0)
       if(def_view){
          mut im_info = sys_malloc(24)
-         store64_raw(im_info, _default_sampler, 0)
-         store64_raw(im_info, def_view, 8)
+         store64_h(im_info, _default_sampler, 0)
+         store64_h(im_info, def_view, 8)
          store32(im_info, 5, 16)
 
          mut write = sys_malloc(64)
          memset(write, 0, 64)
          store32(write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 0)
-         store64_raw(write, _bindless_ds, 16)
+         store64_h(write, _bindless_ds, 16)
          store32(write, 0, 24)
          store32(write, tex_id, 28)
          store32(write, 1, 32)
          store32(write, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 36)
-         store64_raw(write, im_info, 40)
+         store64_h(write, im_info, 40)
          update_descriptor_sets(_device, 1, write, 0, 0)
          sys_free(im_info) sys_free(write)
       }
@@ -469,7 +469,7 @@ fn read_framebuffer(){
    mut buf_ci = sys_malloc(56)
    memset(buf_ci, 0, 56)
    store32(buf_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(buf_ci, size, 24)
+   store64_h(buf_ci, size, 24)
    store32(buf_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 32)
    mut buf_ptr = sys_malloc(8)
    if(create_buffer(_device, buf_ci, 0, buf_ptr) != 0){ return 0 }
@@ -482,7 +482,7 @@ fn read_framebuffer(){
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, load64(mem_req, 0), 16)
+   store64_h(alloc_info, load64_h(mem_req, 0), 16)
    store32(alloc_info, mem_idx, 24)
    mut mem_ptr = sys_malloc(8)
    allocate_memory(_device, alloc_info, 0, mem_ptr)
@@ -493,7 +493,7 @@ fn read_framebuffer(){
    mut ai = sys_malloc(32)
    memset(ai, 0, 32)
    store32(ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
-   store64_raw(ai, _command_pool, 16)
+   store64_h(ai, _command_pool, 16)
    store32(ai, 1, 28)
    mut cb_p = sys_malloc(8)
    allocate_command_buffers(_device, ai, cb_p)
@@ -516,7 +516,7 @@ fn read_framebuffer(){
    if(!_surface){ old_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
    store32(barrier, old_layout, 24)
    store32(barrier, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 28)
-   store64_raw(barrier, src_image, 40)
+   store64_h(barrier, src_image, 40)
    store32(barrier, VK_IMAGE_ASPECT_COLOR_BIT, 48)
    store32(barrier, 1, 56)
    store32(barrier, 1, 64)
@@ -544,7 +544,7 @@ fn read_framebuffer(){
    memset(s_info, 0, 72)
    store32(s_info, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store32(s_info, 1, 40)
-   store64_raw(s_info, cb_p, 48)
+   store64_h(s_info, cb_p, 48)
    queue_submit(_graphics_queue, 1, s_info, 0)
    device_wait_idle(_device)
 

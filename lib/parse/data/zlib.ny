@@ -23,26 +23,18 @@ use std.str *
 use std.os.dirs *
 use std.os.path *
 
-if(comptime{ __os_name() == "linux" || __os_name() == "macos" }){
-   #link "z"
-
-   extern fn uncompress(dest: ptr, destLen: ptr, source: ptr, sourceLen: i64): i32 as "uncompress"
-   extern fn compress2(dest: ptr, destLen: ptr, source: ptr, sourceLen: i64, level: i32): i32 as "compress2"
-   extern fn compressBound(sourceLen: i64): i64 as "compressBound"
-   extern fn gzopen(path: ptr, mode: ptr): ptr as "gzopen"
-   extern fn gzread(file: ptr, buf: ptr, len: i32): i32 as "gzread"
-   extern fn gzclose(file: ptr): i32 as "gzclose"
-} else if(comptime{ __os_name() == "windows" }){
-   #link "zlib1"
-
-   extern fn uncompress(dest: ptr, destLen: ptr, source: ptr, sourceLen: i64): i32 as "uncompress"
-   extern fn compress2(dest: ptr, destLen: ptr, source: ptr, sourceLen: i64, level: i32): i32 as "compress2"
-   extern fn compressBound(sourceLen: i64): i64 as "compressBound"
-   extern fn gzopen(path: ptr, mode: ptr): ptr as "gzopen"
-   extern fn gzread(file: ptr, buf: ptr, len: i32): i32 as "gzread"
-   extern fn gzclose(file: ptr): i32 as "gzclose"
+if(comptime{ __os_name() == "linux" }){
+   #link "libz.so"
+   #include <zlib.h>
 }
-
+if(comptime{ __os_name() == "windows" }){
+   #link "zlib.lib"
+   #include <zlib.h>
+}
+if(comptime{ __os_name() == "macos" }){
+   #link "libz.dylib"
+   #include <zlib.h>
+}
 mut _error = ""
 
 fn error(){

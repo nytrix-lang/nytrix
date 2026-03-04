@@ -162,13 +162,9 @@ fn __vkr_push_rect_sdf(ptr, x, y, w, h, c, nx, ny, nz){
 }
 
 fn _check_debug_env(){
-   "Internal: loads Vulkan debug flags from environment variables."
-   def v = env("NYTRIX_DEBUG_GFX")
+   "Internal: enables Vulkan/GFX debug from NY_UI_DEBUG."
+   def v = env("NY_UI_DEBUG")
    if(v && (eq(v, "1") || eq(v, "true"))){ _debug_gfx_enabled = true }
-   else {
-      def v2 = env("NY_UI_DEBUG")
-      if(v2 && (eq(v2, "1") || eq(v2, "true"))){ _debug_gfx_enabled = true }
-   }
    def b = env("NYTRIX_BINDLESS")
    if(b && (eq(b, "1") || eq(b, "true"))){ _bindless_enabled = true }
    if(b && (eq(b, "0") || eq(b, "false"))){ _bindless_enabled = false }
@@ -184,7 +180,7 @@ fn _check_debug_env(){
          _ubo_enabled = true
       } else {
          _ubo_enabled = false
-         if(_debug_gfx_enabled){ print("Vulkan: UBO requested but disabled (use NYTRIX_UBO_FORCE=1 to force)") }
+         if(_debug_gfx_enabled){ print("[gfx:vulkan] UBO requested but disabled (use NYTRIX_UBO_FORCE=1 to force)") }
       }
    }
    if(u && (eq(u, "0") || eq(u, "false"))){ _ubo_enabled = false }
@@ -193,17 +189,17 @@ fn _check_debug_env(){
       def b_env = env("NYTRIX_BINDLESS")
       mut force_bindless = (b_env && (eq(b_env, "1") || eq(b_env, "true")))
       if(force_bindless){
-         if(_debug_gfx_enabled){ print("Vulkan: Bindless FORCED ON under RenderDoc") }
+         if(_debug_gfx_enabled){ print("[gfx:vulkan] Bindless FORCED ON under RenderDoc") }
          _bindless_enabled = true
       } else {
          _bindless_enabled = false
-         if(_debug_gfx_enabled){ print("Vulkan: Bindless auto-disabled for RenderDoc compatibility. (Use NYTRIX_BINDLESS=1 to force)") }
+         if(_debug_gfx_enabled){ print("[gfx:vulkan] Bindless auto-disabled for RenderDoc compatibility. (Use NYTRIX_BINDLESS=1 to force)") }
       }
    }
 }
 fn _dbg_handle(label, h){
    "Internal: prints a labeled Vulkan handle when debug logging is enabled."
-   if(_debug_gfx_enabled){ print(f"Vulkan: {label} h={h}") }
+   if(_debug_gfx_enabled){ print(f"[gfx:vulkan] {label} h={h}") }
    0
 }
 

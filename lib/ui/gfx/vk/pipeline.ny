@@ -32,8 +32,8 @@ fn create_shader_module_from_source(source, stage_ext){
    mut ci = sys_malloc(128)
    memset(ci, 0, 128)
    store32(ci, 16, 0) ; VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
-   store64_raw(ci, size, 24)
-   store64_raw(ci, spirv, 32)
+   store64_h(ci, size, 24)
+   store64_h(ci, spirv, 32)
 
    mut mod_ptr = sys_malloc(8)
    if(create_shader_module(_device, ci, 0, mod_ptr) != 0){ return 0 }
@@ -160,8 +160,8 @@ fn _create_shader_module(path){
    store32(ci, 16, 0) ; VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
    store32(ci, 0, 8) store32(ci, 0, 12)
    store32(ci, 0, 16)
-   store64_raw(ci, size, 24)
-   store64_raw(ci, code, 32) ; pCode
+   store64_h(ci, size, 24)
+   store64_h(ci, code, 32) ; pCode
    mut mod_ptr = sys_malloc(8)
    def vk_res = create_shader_module(_device, ci, 0, mod_ptr)
    if(vk_res != 0){
@@ -187,7 +187,7 @@ fn _ensure_shader_binaries(){
          vert_src = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(location=3) in uint inTexIndex;\nlayout(location=4) in vec3 inNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nlayout(location=2) out vec3 vNormal;\nlayout(location=3) flat out uint vTexIndex;\nvoid main(){\n  gl_Position = pc.vp * pc.model * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n  vNormal = mat3(pc.model) * inNormal;\n  vTexIndex = inTexIndex;\n}\n"
       }
       unwrap(file_write("/build/cache/ny_shader.vert", vert_src))
-      if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0){ return false }
+      if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.vert", "-o", vert_spv]) != 0 && !file_exists(vert_spv)){ return false }
       ; SDF vertex shader
       def vert_src_sdf = "#version 450\nlayout(location=0) in vec3 inPos;\nlayout(location=1) in vec2 inUV;\nlayout(location=2) in vec4 inColor;\nlayout(location=3) in uint inTexIndex;\nlayout(location=4) in vec3 inNormal;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; } pc;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec2 vUV;\nlayout(location=2) out vec3 vNormal;\nlayout(location=3) flat out uint vTexIndex;\nvoid main(){\n  gl_Position = pc.vp * pc.model * vec4(inPos, 1.0);\n  vColor = inColor;\n  vUV = inUV;\n  vNormal = inNormal;\n  vTexIndex = inTexIndex;\n}\n"
       unwrap(file_write("/build/cache/ny_shader_sdf.vert", vert_src_sdf))
@@ -267,16 +267,19 @@ fn _ensure_shader_binaries(){
          "}\n"
       }
       unwrap(file_write("/build/cache/ny_shader.frag", frag_src))
-      if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0){ return false }
+      if(proc.run("glslc", ["glslc", "/build/cache/ny_shader.frag", "-o", frag_spv]) != 0 && !file_exists(frag_spv)){ return false }
    }
    file_exists(vert_spv) && file_exists(frag_spv)
 }
 
 fn _create_graphics_pipeline(){
    "Internal: Main entry point for initializing all standard graphics pipelines (Lit, Unlit, Line, Wireframe)."
+   print("Vulkan step: _ensure_shader_binaries...")
    if(!_ensure_shader_binaries()){
+      print("Vulkan: shader binaries failed")
       return false
    }
+   print("Vulkan: shader binaries OK")
    _vert_module = _create_shader_module("/build/cache/ny_shader.vert.spv")
    _frag_module = _create_shader_module("/build/cache/ny_shader.frag.spv")
    if(!_vert_module || !_frag_module){ return false }
@@ -292,8 +295,8 @@ fn _create_graphics_pipeline(){
       memset(flags_ci, 0, 32)
       store32(flags_ci, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, 0)
       store32(flags_ci, 1, 16)
-      store64_raw(flags_ci, flags, 24)
-      store64_raw(tex_ci, flags_ci, 8)
+      store64_h(flags_ci, flags, 24)
+      store64_h(tex_ci, flags_ci, 8)
    }
 
    mut dsl_ptr = sys_malloc(8)
@@ -310,8 +313,8 @@ fn _create_graphics_pipeline(){
    store32(pc_range, 0, 4)
    store32(pc_range, 160, 8) ; size 160 (aligned)
    mut dsl_arr = sys_malloc(16)
-   store64_raw(dsl_arr, _descriptor_set_layout, 0)
-   store64_raw(dsl_arr, _descriptor_set_layout_ubo, 8)
+   store64_h(dsl_arr, _descriptor_set_layout, 0)
+   store64_h(dsl_arr, _descriptor_set_layout_ubo, 8)
 
    def pc_count = _ubo_enabled ? 0 : 1
    def pc_ptr = _ubo_enabled ? 0 : pc_range
