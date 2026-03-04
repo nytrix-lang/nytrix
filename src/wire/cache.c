@@ -130,6 +130,19 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path,
   if (ny_env_enabled("NYTRIX_ASSUME_INT"))
     std_hash ^= 0xA5A5A5A5;
 
+  unsigned long compiler_hash = 0;
+  char *exe_path = ny_get_executable_path();
+  if (exe_path) {
+    struct stat st;
+    if (stat(exe_path, &st) == 0) {
+      compiler_hash = (unsigned long)st.st_mtime;
+#ifdef NYTRIX_BUILD_HASH
+      compiler_hash ^= (unsigned long)ny_hash_string(NYTRIX_BUILD_HASH);
+#endif
+    }
+  }
+
+  std_hash ^= compiler_hash;
   std_hash ^= (unsigned long)NY_JIT_CACHE_VERSION;
   static char path[1024];
   const char *ext = ny_jit_cache_use_ir() ? "ll" : "bc";

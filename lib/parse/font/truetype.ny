@@ -157,7 +157,9 @@ fn _finish_load(info_in, face, data){
    info = dict_set(info, "descender",    descender)
    info = dict_set(info, "height",       face_height)
    info = dict_set(info, "num_glyphs",   num_glyphs)
-   info = dict_set(info, "pixel_size",   0)
+   def ps_ptr = malloc(8)
+   store32(ps_ptr, 0, 0)
+   info = dict_set(info, "ps_ptr", ps_ptr)
    info = dict_set(info, "is_scalable",  is_scalable)
    info = dict_set(info, "is_color",     (flags & _FT_FACE_FLAG_COLOR) != 0)
    info
@@ -168,6 +170,8 @@ fn unload(info){
    if(!is_dict(info)){ return }
    def face = dict_get(info, "face", 0)
    if(face){ FT_Done_Face(face) }
+   def ps_ptr = dict_get(info, "ps_ptr", 0)
+   if(ps_ptr){ free(ps_ptr) }
 }
 
 ;; Scale helpers
@@ -176,7 +180,9 @@ fn _set_size(info, px){
    "Ensures the face is configured for pixel size `px`."
    def face = dict_get(info, "face", 0)
    if(!face){ return false }
-   def prev = dict_get(info, "pixel_size", 0)
+   def ps_ptr = dict_get(info, "ps_ptr", 0)
+   if(!ps_ptr){ return false }
+   def prev = load32(ps_ptr, 0)
    if(prev == px){ return true }
 
    if(!dict_get(info, "is_scalable", true)){
@@ -195,16 +201,17 @@ fn _set_size(info, px){
        }
        if(best_idx >= 0){ FT_Select_Size(face, best_idx) }
    } else {
-       def rc = FT_Set_Pixel_Sizes(face, 0, px)
-       if(rc != 0){ return false }
+       FT_Set_Pixel_Sizes(face, 0, px)
    }
-   dict_set(info, "pixel_size", px)
+   store32(ps_ptr, px, 0)
    true
 }
 
-fn _px(info){
+fn _px_val(info){
    "Returns the cached pixel size, defaulting to 32."
-   dict_get(info, "pixel_size", 32)
+   def ps_ptr = dict_get(info, "ps_ptr", 0)
+   if(!ps_ptr){ return 32 }
+   load32(ps_ptr, 0)
 }
 
 fn scale_for_pixel_height(info, pixels){
@@ -265,7 +272,7 @@ fn get_hmetrics(info, gi){
    "Returns horizontal glyph metrics for glyph index `gi`."
    def face = dict_get(info, "face", 0)
    if(!face){ return [0, 0] }
-   def px = _px(info)
+   def px = _px_val(info)
    if(px <= 0){ return [0, 0] }
    _set_size(info, px)
    if(!_load_glyph(info, gi, _FT_LOAD_DEFAULT)){ return [0, 0] }
@@ -284,7 +291,7 @@ fn get_glyph_box(info, gi){
    "Returns glyph bounds for glyph index `gi`."
    def face = dict_get(info, "face", 0)
    if(!face){ return 0 }
-   def px = _px(info)
+   def px = _px_val(info)
    if(px <= 0){ return 0 }
    _set_size(info, px)
    if(!_load_glyph(info, gi, _FT_LOAD_DEFAULT)){ return 0 }

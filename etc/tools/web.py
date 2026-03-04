@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nytrix Web Tools - Enhanced Documentation Generator
+Nytrix Web Tools - Documentation Generator
 """
 import os
 import sys

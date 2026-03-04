@@ -359,8 +359,6 @@ fn open_window(name, x, y, w, h, flags=0){
       ui_backend.set_key_callback(handle, _key_cb)
       ui_backend.set_window_size_callback(handle, _size_cb)
       ui_backend.set_scroll_callback(handle, _scroll_cb)
-      ui_backend.set_mouse_button_callback(handle, _mouse_btn_cb)
-      ui_backend.set_cursor_pos_callback(handle, _cursor_pos_cb)
    }
 
    _windows = append(_windows, win)
@@ -628,8 +626,47 @@ fn _check_native_state(win){
       }
    }
 
-   ;; Mouse position and button state are delivered exclusively via GLFW callbacks
-   ;; (_cursor_pos_cb, _mouse_btn_cb). Polling them here would cause double-events.
+   ;; Poll mouse position/buttons directly to avoid fragile GLFW callback paths.
+   def cur = ui_backend.get_cursor_pos(handle)
+   def mx = int(get(cur, 0, 0.0))
+   def my = int(get(cur, 1, 0.0))
+   if(mx != dict_get(win, "mouse_x", 0) || my != dict_get(win, "mouse_y", 0)){
+      mut data = dict()
+      data = dict_set(data, "x", mx)
+      data = dict_set(data, "y", my)
+      data = dict_set(data, "dx", mx - dict_get(win, "mouse_x", 0))
+      data = dict_set(data, "dy", my - dict_get(win, "mouse_y", 0))
+      data = dict_set(data, "moved", true)
+      data = dict_set(data, "native", true)
+      push_event(win, EVENT_MOUSE_POS_CHANGED, data)
+      win = dict_set(win, "mouse_x", mx)
+      win = dict_set(win, "mouse_y", my)
+      _save_win(win)
+   }
+
+   mut mb = dict_get(win, "mouse_buttons", 0)
+   mut mb_changed = false
+   mut b = 0
+   while(b < 8){
+      def real_now = ui_backend.get_mouse_button(handle, b) == 1
+      def was = !!dict_get(mb, b, false)
+      if(real_now != was){
+         mb = dict_set(mb, b, real_now)
+         mb_changed = true
+         mut data = dict()
+         data = dict_set(data, "button", b)
+         data = dict_set(data, "x", dict_get(win, "mouse_x", 0))
+         data = dict_set(data, "y", dict_get(win, "mouse_y", 0))
+         data = dict_set(data, "mod", dict_get(win, "modifiers", 0))
+         data = dict_set(data, "native", true)
+         push_event(win, real_now ? EVENT_MOUSE_BUTTON_PRESSED : EVENT_MOUSE_BUTTON_RELEASED, data)
+      }
+      b += 1
+   }
+   if(mb_changed){
+      win = dict_set(win, "mouse_buttons", mb)
+      _save_win(win)
+   }
 }
 
 @jit

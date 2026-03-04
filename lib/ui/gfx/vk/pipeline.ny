@@ -2,7 +2,7 @@
 
 module std.ui.gfx.vk.pipeline (
    compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants,
-   _get_default_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline
+   _get_default_pipeline, _get_nocull_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline
 )
 
 use std.core *
@@ -72,7 +72,9 @@ fn create_pipeline(vert_mod, frag_mod, topology=3, depth_test=1, depth_write=1, 
    ; Default to CCW (0) and zero bias unless enabled.
    def rs = VkPipelineRasterizationStateCreateInfo(depth_clamp, 0, 0, cull_mode, front_face, depth_bias, 0.0, 0.0, 0.0, float(line_width))
    def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
-   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15)
+   ; blendEnable=1, srcColor=ONE (1), dstColor=ONE_MINUS_SRC_ALPHA (7), colorOp=ADD (0)
+   ; srcAlpha=ONE (1), dstAlpha=ONE_MINUS_SRC_ALPHA (7), alphaOp=ADD (0), mask=(15)
+   def cba = VkPipelineColorBlendAttachmentState(1, 1, 7, 0, 1, 7, 0, 15)
    def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
    def dss = VkPipelineDepthStencilStateCreateInfo(depth_test, depth_write, 3, 0, 0, 0, 0, 0.0, 1.0)
 
@@ -97,7 +99,7 @@ fn bind_pipeline(pipe){
    _flush()
 
    ;; Enable custom push constant mode for non-engine pipelines
-   def is_custom = (p != _pipeline && p != _unlit_pipeline && p != _wire_pipeline && p != 0)
+   def is_custom = (p != _pipeline && p != _nocull_pipeline && p != _unlit_pipeline && p != _wire_pipeline && p != 0)
    if(is_custom){ _use_custom_pc = 1 } else { _use_custom_pc = 0 }
 
    def cb = get(_command_buffers, _current_frame)
@@ -174,6 +176,7 @@ fn _ensure_shader_binaries(){
    "Internal: Ensures default shader SPIR-V files exist by compiling them from source if necessary."
    def vert_spv = "/build/cache/ny_shader.vert.spv"
    def frag_spv = "/build/cache/ny_shader.frag.spv"
+
    if(is_str(_cfg_vert_spv) && file_exists(_cfg_vert_spv)){
       proc.run("cp", ["cp", _cfg_vert_spv, vert_spv])
    } else {
@@ -220,7 +223,8 @@ fn _ensure_shader_binaries(){
          "  vec4 tex = texture(texSamplers[nonuniformEXT(vTexIndex)], vUV);\n" +
          mask_line +
          unlit_line +
-         "     outColor = vColor * tex;\n" +
+         "     vec4 base = vColor * tex;\n" +
+         "     outColor = vec4(base.rgb * base.a, base.a);\n" +
          "  } else {\n" +
          "     vec3 normal = vNormal;\n" +
          "     float nl = length(normal);\n" +
@@ -230,7 +234,8 @@ fn _ensure_shader_binaries(){
          "     float diff = max(dot(normal, l), 0.1);\n" +
          "     vec3 skyCol = vec3(0.5, 0.7, 1.0); vec3 groundCol = vec3(0.12, 0.12, 0.15);\n" +
          "     vec3 ambient = mix(groundCol, skyCol, normal.y * 0.5 + 0.5) * 0.4;\n" +
-         "     outColor = vColor * tex * vec4(ambient + diff * 0.7, 1.0);\n" +
+         "     vec4 lit = vColor * tex * vec4(ambient + diff * 0.7, 1.0);\n" +
+         "     outColor = vec4(lit.rgb * lit.a, lit.a);\n" +
          "  }\n" +
          "}\n"
       } else {
@@ -245,7 +250,8 @@ fn _ensure_shader_binaries(){
          "  vec4 tex = texture(texSampler, vUV);\n" +
          mask_line +
          unlit_line +
-         "     outColor = vColor * tex;\n" +
+         "     vec4 base = vColor * tex;\n" +
+         "     outColor = vec4(base.rgb * base.a, base.a);\n" +
          "  } else {\n" +
          "     vec3 normal = vNormal;\n" +
          "     float nl = length(normal);\n" +
@@ -255,7 +261,8 @@ fn _ensure_shader_binaries(){
          "     float diff = max(dot(normal, l), 0.1);\n" +
          "     vec3 skyCol = vec3(0.5, 0.7, 1.0); vec3 groundCol = vec3(0.12, 0.12, 0.15);\n" +
          "     vec3 ambient = mix(groundCol, skyCol, normal.y * 0.5 + 0.5) * 0.4;\n" +
-         "     outColor = vColor * tex * vec4(ambient + diff * 0.7, 1.0);\n" +
+         "     vec4 lit = vColor * tex * vec4(ambient + diff * 0.7, 1.0);\n" +
+         "     outColor = vec4(lit.rgb * lit.a, lit.a);\n" +
          "  }\n" +
          "}\n"
       }
@@ -338,7 +345,9 @@ fn _create_graphics_pipeline(){
    def rs_cull = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 2, 0, 0, 0, 0.0, 0.0, 1.0) ; cull=BACK(2), front=CCW(0)
    def rs_nocull = VkPipelineRasterizationStateCreateInfo(0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 1.0) ; cull=NONE(0), front=CCW(0)
    def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
-   def cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) ; blend=1, srcC=SRC_ALPHA(6), dstC=ONE_MINUS_SRC_ALPHA(7), srcA=ONE(1), dstA=ONE_MINUS_SRC_ALPHA(7)
+   ;; Use ONE for srcC because we manually pre-multiplied RGB by Alpha in the fragment shader!
+   ;; This prevents double-multiplication while keeping the swapchain exactly pre-multiplied for the Compositor.
+   def cba = VkPipelineColorBlendAttachmentState(1, 1, 7, 0, 1, 7, 0, 15) ; blend=1, srcC=ONE(1), dstC=ONE_MINUS_SRC_ALPHA(7), srcA=ONE(1), dstA=ONE_MINUS_SRC_ALPHA(7)
    def cb = VkPipelineColorBlendStateCreateInfo(0, 0, 1, cba, 0)
 
    ; Depth Stencil State (Enabled for 3D)
@@ -377,28 +386,34 @@ fn _create_graphics_pipeline(){
    _pipeline = load64(pipe_ptr, 0)
    if(_debug_gfx_enabled){ _dbg_handle("pipeline", _pipeline) }
 
-   ; 2. Create Unlit Pipeline (no depth test)
+   ; 2. Create Lit No-Cull Pipeline (depth test on, culling off)
+   def ci_nocull = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_nocull, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   if(create_graphics_pipelines(_device, 0, 1, ci_nocull, 0, pipe_ptr) == 0){
+       _nocull_pipeline = load64(pipe_ptr, 0)
+   }
+
+   ; 3. Create Unlit Pipeline (no depth test)
    def dss_unlit = VkPipelineDepthStencilStateCreateInfo(0, 0, 0, 0, 0, 0, 0, 0.0, 1.0)
-     def ci_unlit = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_nocull, ms, dss_unlit, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
+   def ci_unlit = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_nocull, ms, dss_unlit, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
    if(create_graphics_pipelines(_device, 0, 1, ci_unlit, 0, pipe_ptr) == 0){
        _unlit_pipeline = load64(pipe_ptr, 0)
    }
 
-   ; 3. Create Line Pipeline (for robust line rendering)
+   ; 4. Create Line Pipeline (for robust line rendering)
    def ia_line = VkPipelineInputAssemblyStateCreateInfo(1, 0) ; topology=LINE_LIST
    def ci_line = VkGraphicsPipelineCreateInfo(2, stages, vi, ia_line, 0, viewport_state, rs_nocull, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
    if(create_graphics_pipelines(_device, 0, 1, ci_line, 0, pipe_ptr) == 0){
        _line_pipeline = load64(pipe_ptr, 0)
    }
 
-   ; 4. Create Wireframe Pipeline (PolygonMode=LINE=1, Cull=NONE=0)
+   ; 5. Create Wireframe Pipeline (PolygonMode=LINE=1, Cull=NONE=0)
    def rs_wire = VkPipelineRasterizationStateCreateInfo(0, 0, 1, 0, 0, 0, 0, 0.0, 0.0, 1.0)
    def ci_wire = VkGraphicsPipelineCreateInfo(2, stages, vi, ia, 0, viewport_state, rs_wire, ms, dss, cb, ds, _pipeline_layout, _render_pass, 0, 0, -1)
    if(create_graphics_pipelines(_device, 0, 1, ci_wire, 0, pipe_ptr) == 0){
        _wire_pipeline = load64(pipe_ptr, 0)
    }
 
-   ; 5. Create Circle Pipeline (SDF)
+   ; 6. Create Circle Pipeline (SDF)
    def frag_src_circle = "#version 450\nlayout(location=0) in vec4 vColor; layout(location=1) in vec2 vUV; layout(location=2) in vec3 vNormal; layout(location=3) flat in uint vTexIndex;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec2 uv = vUV * 2.0 - 1.0;\n  float d = length(uv);\n  float alpha = clamp((1.01 - d) / (fwidth(d) + 0.001), 0.0, 1.0);\n  if(alpha <= 0.0) discard;\n  outColor = vec4(vColor.rgb, vColor.a * alpha);\n}\n"
    def frag_circle_mod = create_shader_module_from_source(frag_src_circle, "frag")
    def vert_sdf_mod = _create_shader_module("/build/cache/ny_shader_sdf.vert.spv")
@@ -427,4 +442,9 @@ fn _create_graphics_pipeline(){
 
    if(_debug_gfx_enabled){ print("Vulkan: Graphics pipeline initialization complete.") }
    true
+}
+
+fn _get_nocull_pipeline(){
+   "Returns the default lit no-cull pipeline handle."
+   _nocull_pipeline
 }

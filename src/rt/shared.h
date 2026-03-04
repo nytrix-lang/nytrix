@@ -1,6 +1,7 @@
 #ifndef RT_COMMON_H
 #define RT_COMMON_H
 
+#include <curl/curl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

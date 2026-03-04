@@ -8,12 +8,13 @@ use std.core *
 use std.core.mem *
 use std.ui.gfx.vk.state *
 use std.ui.gfx.vk.utils *
-use std.ui.gfx.vk.renderer (_check_flush)
+use std.ui.gfx.vk.renderer (_check_flush, set_mask)
 use std.ui.gfx.vk.texture (bind_texture)
 
 @jit
 fn draw_text_batch(font_id, lines, x, y, spacing, color_u32){
    "Draws multiple lines of text in a single Nytrix call to minimize interpreter overhead."
+   set_mask(1)
    if(!is_list(lines)){ return }
    def f = _font_get(font_id)
    if(!f){ return }
@@ -106,6 +107,7 @@ fn _vkr_glyph_present(glyphs_ptr, cp){
 @jit
 fn __vkr_draw_text(_unused_vbo, text, x, y, color, glyphs_ptr, ascent, line_h, out_info){
    "Builds packed glyph vertices for `text` directly into the current VBO, handling atlas changes."
+   set_mask(1)
    if(!glyphs_ptr || !is_str(text)){ return }
    def n = str_len(text)
    if(!_check_flush(n * (_VKR_VERT_STRIDE * 6))){ return }

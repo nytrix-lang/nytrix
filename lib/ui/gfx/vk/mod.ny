@@ -12,7 +12,7 @@ module std.ui.gfx.vk (
    set_mvp, set_ortho, _pack_color, _flush, _update_default_mvp,
    renderer_config, _get_local_vertex_map, _get_vertex_offset, _advance_vertex_offset,
    __vkr_push_vertex, __vkr_push_rect_tex, __vkr_draw_text, _vkr_glyph_get_off,
-   create_static_buffer, draw_static_buffer,
+   create_static_buffer, destroy_static_buffer, draw_static_buffer,
    _mvp_matrix, VERTEX_STRIDE, set_unlit,
    draw_circle_sdf, draw_ring_sdf,
    _vkr_glyph_present, _prof_flush_avg,
@@ -20,7 +20,7 @@ module std.ui.gfx.vk (
    set_wireframe,
    set_model_matrix, set_perspective, set_clear_color,
    blit_buffer,
-   compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, _get_default_pipeline
+   compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, _get_default_pipeline, _get_nocull_pipeline
 )
 
 use std.ui.gfx.vk.renderer as vk_renderer
@@ -30,7 +30,8 @@ use std.ui.gfx.vk.texture as vk_texture
 use std.ui.gfx.vk.buffers as vk_buffers
 use std.ui.gfx.vk.utils as vk_utils
 use std.ui.gfx.vk.pipeline as vk_pipeline
-use std.ui.gfx.vk.state (VERTEX_STRIDE, _prof_flush_avg)
+use std.ui.gfx.vk.vulkan (destroy_buffer, free_memory)
+use std.ui.gfx.vk.state (VERTEX_STRIDE, _prof_flush_avg, _device)
 
 fn init(win){ "Initializes the Vulkan backend for the given window." vk_renderer.init(win) }
 fn shutdown(){ "Shuts down the Vulkan backend and releases all resources." vk_renderer.shutdown() }
@@ -82,6 +83,14 @@ fn _vkr_glyph_get_off(glyphs_ptr, cp){ "Internal: returns the glyph entry for a 
 fn _vkr_glyph_present(glyphs_ptr, cp){ "Internal: returns true if a codepoint is loaded in the fast glyph table." vk_font._vkr_glyph_present(glyphs_ptr, cp) }
 
 fn create_static_buffer(ptr, count){ "Creates an immutable GPU buffer from host memory." vk_buffers.create_static_buffer(ptr, count) }
+fn destroy_static_buffer(sbuf){
+   "Releases a static GPU vertex buffer created by `create_static_buffer`."
+   if(!is_dict(sbuf)){ return }
+   def buf = dict_get(sbuf, "handle", 0)
+   def mem = dict_get(sbuf, "memory", 0)
+   if(buf){ destroy_buffer(_device, buf, 0) }
+   if(mem){ free_memory(_device, mem, 0) }
+}
 
 fn _mvp_matrix(){ "Returns the current internal projection matrix." vk_renderer._mvp_matrix() }
 fn set_unlit(unlit){ "Enables or disables simple unlit rendering mode." vk_renderer.set_unlit(unlit) }
@@ -103,5 +112,6 @@ fn push_constants(ptr, size, offset=0){ "Updates push constant data on the curre
 fn use_custom_push_constants(enabled){ "Enables/disables custom push constant mode for custom pipelines." vk_pipeline.use_custom_push_constants(enabled) }
 fn set_custom_push_constants(ptr, size, offset=0){ "Sets custom push constant data (call after bind_pipeline with custom pipeline)." vk_pipeline.set_custom_push_constants(ptr, size, offset) }
 fn _get_default_pipeline(){ "Internal: returns the standard 2D renderer vk_pipeline." vk_pipeline._get_default_pipeline() }
+fn _get_nocull_pipeline(){ "Internal: returns the built-in lit no-cull pipeline." vk_pipeline._get_nocull_pipeline() }
 fn draw_circle_sdf(x, y, radius, r, g, b, a){ vk_draw.draw_circle_sdf(x, y, radius, r, g, b, a) }
 fn draw_ring_sdf(x, y, inner_radius, outer_radius, r, g, b, a){ vk_draw.draw_ring_sdf(x, y, inner_radius, outer_radius, r, g, b, a) }

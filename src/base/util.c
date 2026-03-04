@@ -277,42 +277,45 @@ static bool nytrix_has_sources(const char *root) {
   return access(probe, R_OK) == 0;
 }
 
-char *ny_get_executable_dir(void) {
+char *ny_get_executable_path(void) {
   static char buf[PATH_MAX];
   if (buf[0])
     return buf;
 #ifdef _WIN32
-  char tmp[PATH_MAX];
-  DWORD len = GetModuleFileNameA(NULL, tmp, sizeof(tmp));
-  if (len > 0 && len < sizeof(tmp)) {
-    tmp[len] = '\0';
-    char *slash = strrchr(tmp, '\\');
-    if (!slash)
-      slash = strrchr(tmp, '/');
-    if (slash)
-      *slash = '\0';
-    snprintf(buf, sizeof(buf), "%s", tmp);
+  DWORD len = GetModuleFileNameA(NULL, buf, sizeof(buf));
+  if (len > 0 && len < sizeof(buf)) {
+    buf[len] = '\0';
     return buf;
   }
 #elif defined(__APPLE__)
   uint32_t size = (uint32_t)sizeof(buf);
   if (_NSGetExecutablePath(buf, &size) == 0) {
-    char *slash = strrchr(buf, '/');
-    if (slash)
-      *slash = '\0';
     return buf;
   }
 #else
   ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
   if (len != -1) {
     buf[len] = '\0';
-    char *slash = strrchr(buf, '/');
-    if (slash)
-      *slash = '\0';
     return buf;
   }
 #endif
   return NULL;
+}
+
+char *ny_get_executable_dir(void) {
+  char *path = ny_get_executable_path();
+  if (!path)
+    return NULL;
+  static char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", path);
+  char *slash = strrchr(dir, '/');
+#ifdef _WIN32
+  if (!slash)
+    slash = strrchr(dir, '\\');
+#endif
+  if (slash)
+    *slash = '\0';
+  return dir;
 }
 
 const char *ny_src_root(void) {

@@ -2142,6 +2142,9 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
 
     fun_sig *get_sig = ny_helper_get(cg);
     if (!get_sig) {
+      ny_diag_hint(
+          "the 'std.core' module provides the standard 'get' implementation");
+      ny_diag_fix("add 'use std.core *;' to your script");
       return expr_fail(
           cg, e->tok,
           "Member access on a dynamic object requires the 'get' function.");

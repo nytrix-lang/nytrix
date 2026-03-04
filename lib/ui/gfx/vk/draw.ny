@@ -13,7 +13,7 @@ use std.core.mem *
 use std.math *
 use std.ui.gfx.vk.state *
 use std.ui.gfx.vk.utils *
-use std.ui.gfx.vk.renderer (_check_flush, _flush, _sync_pc)
+use std.ui.gfx.vk.renderer (_check_flush, _flush, _sync_pc, set_mask)
 use std.ui.gfx.vk.texture (bind_texture, texture_descriptor)
 
 fn _bind_descriptors(cb){
@@ -46,6 +46,7 @@ fn draw_rect_fast(x, y, w, h, color_u32){
    "Submits a rectangle using pre-packed color and fixed vertex layout."
    if(!_frame_open){ return 0 }
    if(_current_texture_id != _default_texture){ bind_texture(_default_texture) }
+   set_mask(0)
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    __vkr_push_rect_tex_fast(_local_vertex_map + _vertex_offset, x, y, w, h, 0, 0, 0, 0, color_u32, _current_tex_index)
    _vertex_offset += _VKR_VERT_STRIDE * 6
@@ -56,6 +57,7 @@ fn draw_rect(x, y, w, h, r, g, b, a){
    "Batches a colored rectangle (6-vertex CW triangle list) — optimized path."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
+   set_mask(0)
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    def c = _pack_color(r, g, b, a)
    _push_rect_packed(x, y, w, h, c)
@@ -66,6 +68,7 @@ fn draw_rectangle_fast(x, y, w, h, color_packed){
    "Submits a rectangle using a pre-packed color value."
    if(!_frame_open){ return 0 }
    bind_texture(_default_texture)
+   set_mask(0)
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    _push_rect_packed(x, y, w, h, color_packed)
 }
@@ -84,6 +87,7 @@ fn _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, c){
    if(!_frame_open){ return 0 }
    def tid = (tex_id < 0 || tex_id >= len(_textures)) ? _default_texture : tex_id
    bind_texture(tid)
+   set_mask(0)
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    __vkr_push_rect_tex(_local_vertex_map + _vertex_offset, x, y, w, h, u1, v1, u2, v2, c, _current_tex_index)
    _vertex_offset += _VKR_VERT_STRIDE * 6

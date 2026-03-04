@@ -93,7 +93,7 @@ mut last_fps_t  = 0
 mut last_draw_ms = 0.0
 mut last_flush_ms = 0.0
 mut is_ortho     = false
-mut show_teapot  = false
+mut show_teapot  = true
 mut skip_mouse_frames = 0
 mut total_frames = 0
 mut timeout_ns   = 0
@@ -234,11 +234,11 @@ fn startup(){
    teapot   = mesh_load("etc/assets/models/teapot.obj", [0.8, 0.4, 0.2, 1.0])
    res_cube = build_cube(6.0, WHITE, res_tex)
    res_grid = build_env()
-   res_pc_data = sys_malloc(128)
+   res_pc_data = sys_malloc(160)
 
    cam = camera_init([0.0, 0.0, 0.0], 0.0, 0.0)
    cam3d = camera.init([0.0, 8.0, 45.0], 0.0, 0.0)
-   set_idx(cam3d, 13, 1.25) ; Rot smooth
+   set_idx(cam3d, 13, 85.0) ; Rot smooth
    set_idx(cam3d, 14, 10.0) ; Move smooth
 
    custom_pipe = create_pipeline(compile_shader(CUSTOM_VERT_SRC, "vert"), compile_shader(CUSTOM_FRAG_SRC, "frag"), 3, 1, 1, 0, 0, 0, 0)
@@ -329,7 +329,10 @@ fn update(dt){
       }
       e = window.check_event(win)
    }
-   if(window.key_pressed(win, uin.KEY_ESCAPE)){ window.set_should_close(win, true) }
+   if(window.key_pressed(win, uin.KEY_ESCAPE)){
+      if(env("NYTRIX_AUTO_DUMP")){ snapshot("build/release/fb_dump.tga") }
+      window.set_should_close(win, true)
+   }
 
    if(!terminal.is_open()){
       def skip_look = skip_mouse_frames > 0
@@ -460,13 +463,17 @@ fn draw(phase){
 
       if(custom_pipe && active_shader){
          bind_pipeline(custom_pipe)
-         store32_f32(res_pc_data, phase, 0)
-         store32_f32(res_pc_data, APP_RAINBOW, 4)
-         def p = get(cam, 0)
-         store32_f32(res_pc_data, float(get(p,0)), 8)
-         store32_f32(res_pc_data, float(get(p,1)), 12)
-         store32_f32(res_pc_data, float(get(p,2)), 16)
-         push_constants(res_pc_data, 20, 136)
+         mat4_to_buffer(M_VP, res_pc_data)
+         mat4_to_buffer(M_PW, res_pc_data + 64)
+         store32(res_pc_data, 0, 128) ; mask
+         store32(res_pc_data, 0, 132) ; unlit
+         store32_f32(res_pc_data, phase, 136)
+         store32_f32(res_pc_data, APP_RAINBOW, 140)
+         def cp = camera.get_pos(cam3d)
+         store32_f32(res_pc_data, float(get(cp,0)), 144)
+         store32_f32(res_pc_data, float(get(cp,1)), 148)
+         store32_f32(res_pc_data, float(get(cp,2)), 152)
+         push_constants(res_pc_data, 156, 0)
       } else { set_unlit(false) }
 
       draw_mesh(teapot)
@@ -561,7 +568,9 @@ while(!window.should_close(win)){
    def now = ticks() mut dt = float(now - last_upd_t) / 1e9
    if(dt > 0.1){ dt = 0.016 } if(dt < 0.0001){ dt = 0.0001 } last_upd_t = now
    _elapsed = now - start_t
-   if(timeout_ns > 0 && _elapsed >= timeout_ns){ window.set_should_close(win, true) }
+   if(timeout_ns > 0 && _elapsed >= timeout_ns){
+      window.set_should_close(win, true)
+   }
 
    def tu0 = ticks()
    update(dt)

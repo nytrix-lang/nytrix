@@ -47,6 +47,7 @@ int ny_levenshtein(const char *s1, const char *s2);
 bool ny_log_should_emit(const char *fmt);
 
 const char *ny_src_root(void);
+char *ny_get_executable_path(void);
 char *ny_get_executable_dir(void);
 
 #endif

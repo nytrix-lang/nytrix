@@ -2001,7 +2001,8 @@ int ny_pipeline_run(ny_options *opt) {
       if (jit_level > eff_opt)
         eff_opt = jit_level;
     }
-    ny_llvm_optimize_module(cg.module, eff_opt, opt->opt_pipeline);
+    ny_llvm_optimize_module(cg.module, eff_opt, opt->opt_loops,
+                            opt->opt_pipeline);
     if (opt->do_timing && (opt->opt_level > 0 || opt->opt_pipeline))
       fprintf(stderr, "Optimization: %.4fs\n",
               (double)(clock() - t_opt) / CLOCKS_PER_SEC);

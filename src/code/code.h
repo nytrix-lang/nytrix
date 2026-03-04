@@ -212,6 +212,7 @@ typedef struct codegen_t {
   LLVMMetadataRef di_cu;
   LLVMMetadataRef di_file;
   LLVMMetadataRef di_scope;
+  LLVMMetadataRef di_loc;
   LLVMMetadataRef di_subroutine_type;
   int had_error;
   int lambda_count;

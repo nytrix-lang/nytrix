@@ -914,6 +914,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       }
     }
     argv[idx++] = "ws2_32.lib";
+    argv[idx++] = "libcurl.lib";
     argv[idx] = NULL;
     int rc = ny_exec_spawn(argv);
     for (size_t i = 0; i < dyn_count; i++)
@@ -932,8 +933,10 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     argv[idx++] = "-pg";
 #if !defined(__APPLE__) && !defined(_WIN32)
   if (ny_tool_in_path("mold")) {
+    fprintf(stderr, "[INFO] Using mold linker for faster linking.\\n");
     argv[idx++] = "-fuse-ld=mold";
   } else {
+    fprintf(stderr, "[INFO] mold linker not found, using default linker.\\n");
     const char *lld_env = getenv("NYTRIX_USE_LLD");
     bool use_lld =
         lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
@@ -1018,16 +1021,14 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   argv[idx++] = output_path;
 #ifndef _WIN32
   argv[idx++] = "-lm";
-#endif
-#ifndef _WIN32
   argv[idx++] = "-pthread";
   argv[idx++] = "-lpthread";
-#endif
-#if !defined(__APPLE__) && !defined(_WIN32)
   argv[idx++] = "-ldl";
+  argv[idx++] = "-lcurl";
 #endif
 #ifdef _WIN32
   argv[idx++] = "-lws2_32";
+  argv[idx++] = "-lcurl";
 #endif
   char *shared_buf = NULL;
   const char *shared_env = getenv("NYTRIX_SHARED_LIBS");

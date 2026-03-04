@@ -8,7 +8,7 @@ module std.ui.gfx.vk.state (
    _instance, _physical_device, _device, _graphics_queue, _present_queue, _graphics_family_index, _surface,
    _swapchain, _swapchain_image_count, _swapchain_images, _swapchain_image_views, _swapchain_format, _swapchain_extent_w, _swapchain_extent_h,
    _render_pass, _framebuffers, _depth_image, _depth_memory, _depth_view, _msaa_color_image, _msaa_color_memory, _msaa_color_view,
-   _command_pool, _command_buffers, _descriptor_set_layout, _pipeline_layout, _pipeline, _unlit_pipeline, _line_pipeline, _wire_pipeline,
+   _command_pool, _command_buffers, _descriptor_set_layout, _pipeline_layout, _pipeline, _nocull_pipeline, _unlit_pipeline, _line_pipeline, _wire_pipeline,
    _circle_pipeline, _ring_pipeline,
    _vert_module, _frag_module, _is_wireframe, _descriptor_set_layout_ubo, _bindless_enabled, _bindless_ds, _ubo_enabled,
    _vertex_capacity, _current_frame_vertex_offset, _vertex_buffer, _vertex_memory, _vertex_map, _local_vertex_map, _vertex_offset, _last_flush_offset, _vertex_limit_hit,
@@ -23,11 +23,12 @@ module std.ui.gfx.vk.state (
    _ptr_fence, _ptr_img_idx, _ptr_bi, _ptr_clear, _ptr_ri, _ptr_vp, _ptr_sci, _ptr_dsl, _ptr_ds, _ptr_sub, _ptr_wait_sems, _ptr_sig_sems, _ptr_stages,
    _clear_r, _clear_g, _clear_b, _clear_a, MAX_FRAMES_IN_FLIGHT, MAX_TEXTURES, _UBO_SIZE,
    _fps_last_time, _fps_count, _fps_curr,
-   _mvp_dirty, _model_dirty, _blit_tex_id
+   _mvp_dirty, _model_dirty, _blit_tex_id, _current_window_flags
 )
 
 mut _frame_draw_calls = 0
 mut _total_draw_calls = 0
+mut _current_window_flags = 0
 mut _static_vbo_ptr = 0
 mut _static_off_ptr = 0
 def VERTEX_STRIDE = 40
@@ -106,6 +107,7 @@ mut _command_buffers = []
 mut _descriptor_set_layout = 0
 mut _pipeline_layout = 0
 mut _pipeline = 0
+mut _nocull_pipeline = 0
 mut _unlit_pipeline = 0
 mut _line_pipeline = 0
 mut _wire_pipeline = 0
@@ -209,10 +211,10 @@ mut _ptr_sig_sems = 0
 mut _ptr_stages = 0
 
 ;; Clear + frames
-mut _clear_r = 0.05
-mut _clear_g = 0.05
-mut _clear_b = 0.1
-mut _clear_a = 1.0
+mut _clear_r = 0.0
+mut _clear_g = 0.0
+mut _clear_b = 0.0
+mut _clear_a = 0.0
 def MAX_FRAMES_IN_FLIGHT = 3
 
 mut _fps_last_time = 0.0
