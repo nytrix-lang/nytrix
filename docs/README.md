@@ -44,7 +44,7 @@ ny etc/tests/matrix.ny
 ny -c "print('Hello Ny!')" -o && ./a.out
 ```
 
-If `ny` is not installed system-wide, use `./build/release/ny`.
+If `ny` is not installed system-wide, use `./build/release/ny` after `./make`.
 
 ### Docs
 

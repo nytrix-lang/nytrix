@@ -3,7 +3,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 
-extern int64_t __copy_mem(int64_t dst, int64_t src, int64_t n);
+extern int64_t rt_copy_mem(int64_t dst, int64_t src, int64_t n);
 
 #ifdef _WIN32
 #include <malloc.h>
@@ -23,7 +23,7 @@ static uint64_t g_alloc = 0;
 static uint64_t g_free = 0;
 static uint64_t g_pool_hits = 0;
 
-__attribute__((destructor)) static void __stats(void) {
+__attribute__((destructor)) static void rt_stats(void) {
   const char *env = getenv("NYTRIX_MEM_STATS");
   if (env && *env == '1') {
     fprintf(stderr, "\n━━━ Nytrix Runtime Stats ━━━\n");
@@ -37,10 +37,10 @@ __attribute__((destructor)) static void __stats(void) {
 }
 #endif
 
-#if defined(__SANITIZE_ADDRESS__)
+#if defined(rt_SANITIZE_ADDRESS__)
 #define NY_WITH_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
+#elif defined(rt_has_feature)
+#if rt_has_feature(address_sanitizer)
 #define NY_WITH_ASAN 1
 #endif
 #endif
@@ -162,7 +162,7 @@ __attribute__((destructor)) static void quarantine_drain(void) {
 }
 #endif
 
-int64_t __malloc(int64_t size) {
+int64_t rt_malloc(int64_t size) {
   if (is_int(size))
     size >>= 1;
   if (size < 0)
@@ -189,7 +189,7 @@ int64_t __malloc(int64_t size) {
   return res;
 }
 
-int64_t __free(int64_t ptr) {
+int64_t rt_free(int64_t ptr) {
   if (is_heap_ptr(ptr)) {
     void *base = (char *)(uintptr_t)ptr - 32;
     if (mem_trace_enabled()) {
@@ -202,13 +202,13 @@ int64_t __free(int64_t ptr) {
     ny_aligned_free(base);
   } else if (is_v_flt(ptr)) {
     // Light float object (slab allocated)
-    __flt_free(ptr);
+    rt_flt_free(ptr);
   }
   return 0;
 }
 
-int64_t __runtime_cleanup(void) {
-  __cleanup_args();
+int64_t rt_runtime_cleanup(void) {
+  rt_cleanup_args();
 #if NY_TRACK_LIVE_ALLOCS
   while (1) {
     ny_live_alloc_lock();
@@ -229,20 +229,20 @@ int64_t __runtime_cleanup(void) {
   return 0;
 }
 
-int64_t __realloc(int64_t p_val, int64_t newsz) {
+int64_t rt_realloc(int64_t p_val, int64_t newsz) {
   if (is_int(newsz))
     newsz >>= 1;
   if (newsz < 0)
     newsz = 0;
   if (!is_heap_ptr(p_val))
-    return __malloc(newsz << 1 | 1);
+    return rt_malloc(newsz << 1 | 1);
 
   char *cap_ptr = (char *)(uintptr_t)p_val - 16;
   size_t old_cap = *(uint64_t *)cap_ptr;
   if ((size_t)newsz <= old_cap)
     return p_val;
 
-  int64_t res = __malloc(newsz << 1 | 1);
+  int64_t res = rt_malloc(newsz << 1 | 1);
   if (!res)
     return 0;
 
@@ -251,24 +251,24 @@ int64_t __realloc(int64_t p_val, int64_t newsz) {
   *(int64_t *)((char *)(uintptr_t)res - 8) =
       *(int64_t *)((char *)(uintptr_t)p_val - 8);
 
-  __free(p_val);
+  rt_free(p_val);
   return res;
 }
 
-int64_t __memcpy(int64_t dst, int64_t src, int64_t n) {
+int64_t rt_memcpy(int64_t dst, int64_t src, int64_t n) {
   if (is_int(n))
     n >>= 1;
   if (n <= 0)
     return dst;
-  if (!__check_oob("memcpy_dst", dst, 0, (size_t)n))
+  if (!rt_check_oob("memcpy_dst", dst, 0, (size_t)n))
     return dst;
-  if (!__check_oob("memcpy_src", src, 0, (size_t)n))
+  if (!rt_check_oob("memcpy_src", src, 0, (size_t)n))
     return dst;
-  __copy_mem(dst, src, (n << 1) | 1);
+  rt_copy_mem(dst, src, (n << 1) | 1);
   return dst;
 }
 
-int64_t __memset(int64_t dst, int64_t v, int64_t n) {
+int64_t rt_memset(int64_t dst, int64_t v, int64_t n) {
   if (is_int(v))
     v >>= 1;
   if (is_int(n))
@@ -278,7 +278,7 @@ int64_t __memset(int64_t dst, int64_t v, int64_t n) {
   return dst;
 }
 
-int64_t __memcmp(int64_t a, int64_t b, int64_t n) {
+int64_t rt_memcmp(int64_t a, int64_t b, int64_t n) {
   if (is_int(n))
     n >>= 1;
   if (n <= 0)
@@ -295,7 +295,7 @@ int64_t __memcmp(int64_t a, int64_t b, int64_t n) {
   return (int64_t)(res << 1) | 1;
 }
 
-int64_t __load8_idx(int64_t addr, int64_t idx) {
+int64_t rt_load8_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -304,10 +304,10 @@ int64_t __load8_idx(int64_t addr, int64_t idx) {
     if ((intptr_t)idx < -32)
       return 1;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 1 > sz)
       return 1;
-  } else if (!__check_oob("load8", addr, idx, 1)) {
+  } else if (!rt_check_oob("load8", addr, idx, 1)) {
     return 1;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -319,7 +319,7 @@ int64_t __load8_idx(int64_t addr, int64_t idx) {
   return val;
 }
 
-int64_t __load16_idx(int64_t addr, int64_t idx) {
+int64_t rt_load16_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -328,10 +328,10 @@ int64_t __load16_idx(int64_t addr, int64_t idx) {
     if ((intptr_t)idx < -32)
       return 1;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 2 > sz)
       return 1;
-  } else if (!__check_oob("load16", addr, idx, 2)) {
+  } else if (!rt_check_oob("load16", addr, idx, 2)) {
     return 1;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -348,7 +348,7 @@ int64_t __load16_idx(int64_t addr, int64_t idx) {
   return (((int64_t)v) << 1) | 1;
 }
 
-int64_t __load32_idx(int64_t addr, int64_t idx) {
+int64_t rt_load32_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -357,10 +357,10 @@ int64_t __load32_idx(int64_t addr, int64_t idx) {
     if ((intptr_t)idx < -32)
       return 1;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 4 > sz)
       return 1;
-  } else if (!__check_oob("load32", addr, idx, 4)) {
+  } else if (!rt_check_oob("load32", addr, idx, 4)) {
     return 1;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -377,11 +377,11 @@ int64_t __load32_idx(int64_t addr, int64_t idx) {
   return (((int64_t)v) << 1) | 1;
 }
 
-int64_t __load64_idx(int64_t addr, int64_t idx) {
+int64_t rt_load64_idx(int64_t addr, int64_t idx) {
   if (is_int(idx) && is_heap_ptr(addr)) {
     intptr_t off = (intptr_t)(idx >> 1);
     if (off >= 0) {
-      size_t sz = __get_heap_size(addr);
+      size_t sz = rt_get_heap_size(addr);
       if ((size_t)off + 8 > sz)
         return 0;
     } else if (off < -32) {
@@ -405,10 +405,10 @@ int64_t __load64_idx(int64_t addr, int64_t idx) {
     if ((intptr_t)idx < -32)
       return 0;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 8 > sz)
       return 0;
-  } else if (!__check_oob("load64", addr, idx, 8)) {
+  } else if (!rt_check_oob("load64", addr, idx, 8)) {
     return 0;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -424,7 +424,7 @@ int64_t __load64_idx(int64_t addr, int64_t idx) {
   return v;
 }
 
-int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
+int64_t rt_store8_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -433,10 +433,10 @@ int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
     if ((intptr_t)idx < -32)
       return val;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 1 > sz)
       return val;
-  } else if (!__check_oob("store8", addr, idx, 1)) {
+  } else if (!rt_check_oob("store8", addr, idx, 1)) {
     return val;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -449,7 +449,7 @@ int64_t __store8_idx(int64_t addr, int64_t idx, int64_t val) {
   return val;
 }
 
-int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
+int64_t rt_store16_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -458,10 +458,10 @@ int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
     if ((intptr_t)idx < -32)
       return val;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 2 > sz)
       return val;
-  } else if (!__check_oob("store16", addr, idx, 2)) {
+  } else if (!rt_check_oob("store16", addr, idx, 2)) {
     return val;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -479,7 +479,7 @@ int64_t __store16_idx(int64_t addr, int64_t idx, int64_t val) {
   return val;
 }
 
-int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
+int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx))
     idx >>= 1;
   bool hdr = (idx < 0);
@@ -488,10 +488,10 @@ int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
     if ((intptr_t)idx < -32)
       return val;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 4 > sz)
       return val;
-  } else if (!__check_oob("store32", addr, idx, 4)) {
+  } else if (!rt_check_oob("store32", addr, idx, 4)) {
     return val;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -509,11 +509,11 @@ int64_t __store32_idx(int64_t addr, int64_t idx, int64_t val) {
   return val;
 }
 
-int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
+int64_t rt_store64_idx(int64_t addr, int64_t idx, int64_t val) {
   if (is_int(idx) && is_heap_ptr(addr)) {
     intptr_t off = (intptr_t)(idx >> 1);
     if (off >= 0) {
-      size_t sz = __get_heap_size(addr);
+      size_t sz = rt_get_heap_size(addr);
       if ((size_t)off + 8 > sz)
         return val;
     } else if (off < -32) {
@@ -545,10 +545,10 @@ int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
     if ((intptr_t)idx < -32)
       return val;
   } else if (heap) {
-    size_t sz = __get_heap_size(addr);
+    size_t sz = rt_get_heap_size(addr);
     if ((size_t)idx + 8 > sz)
       return val;
-  } else if (!__check_oob("store64", addr, idx, 8)) {
+  } else if (!rt_check_oob("store64", addr, idx, 8)) {
     return val;
   }
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
@@ -570,4 +570,11 @@ int64_t __store64_idx(int64_t addr, int64_t idx, int64_t val) {
     memcpy((void *)p, &raw, sizeof(raw));
   }
   return val;
+}
+
+int64_t rt_load64_h(int64_t p, int64_t i) { return rt_load64_idx(p, i); }
+
+int64_t rt_store64_h(int64_t p, int64_t i, int64_t v) {
+  int64_t raw = rt_untag_v(v);
+  return rt_store64_idx(p, i, raw);
 }

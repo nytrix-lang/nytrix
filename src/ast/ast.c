@@ -70,9 +70,9 @@ void program_free(program_t *prog, arena_t *arena) {
 #include <stdlib.h>
 #include <string.h>
 
-extern int64_t __malloc(int64_t n);
-extern int64_t __free(int64_t p);
-extern int64_t __realloc(int64_t p, int64_t n);
+extern int64_t rt_malloc(int64_t n);
+extern int64_t rt_free(int64_t p);
+extern int64_t rt_realloc(int64_t p, int64_t n);
 
 static void dump_expr(expr_t *e, char **buf, size_t *len, size_t *cap);
 static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap);
@@ -84,7 +84,7 @@ static void append(char **buf, size_t *len, size_t *cap, const char *fmt, ...) {
   va_end(ap);
   if (*len + n + 1 > *cap) {
     *cap = (*len + n + 1) * 2;
-    *buf = (char *)(uintptr_t)__realloc((int64_t)(uintptr_t)*buf, *cap);
+    *buf = (char *)(uintptr_t)rt_realloc((int64_t)(uintptr_t)*buf, *cap);
   }
   va_start(ap, fmt);
   vsnprintf(*buf + *len, n + 1, fmt, ap);
@@ -439,6 +439,11 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
     dump_stmt(s->as.macro.body, buf, len, cap);
     append(buf, len, cap, "}");
     break;
+  case NY_S_INCLUDE:
+    append(buf, len, cap,
+           "{\"type\":\"include\",\"path\":\"%s\",\"prefix\":\"%s\"}",
+           s->as.inc.path, s->as.inc.prefix ? s->as.inc.prefix : "");
+    break;
   default:
     append(buf, len, cap, "{\"type\":\"unknown_stmt\"}");
     break;
@@ -447,7 +452,7 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
 
 char *ny_ast_to_json(program_t *prog) {
   size_t len = 0, cap = 1024;
-  char *buf = (char *)(uintptr_t)__malloc(cap);
+  char *buf = (char *)(uintptr_t)rt_malloc(cap);
   append(&buf, &len, &cap, "[");
   for (size_t i = 0; i < prog->body.len; ++i) {
     dump_stmt(prog->body.data[i], &buf, &len, &cap);

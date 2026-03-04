@@ -64,11 +64,11 @@
 #endif
 
 #ifdef _WIN32
-static int64_t __make_str_ffi(const char *s) {
+static int64_t rt_make_str_ffi(const char *s) {
   if (!s)
     return 0;
   size_t len = strlen(s);
-  int64_t res = __malloc(((int64_t)len + 1) << 1 | 1);
+  int64_t res = rt_malloc(((int64_t)len + 1) << 1 | 1);
   if (!res)
     return 0;
   *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
@@ -78,7 +78,7 @@ static int64_t __make_str_ffi(const char *s) {
 }
 #endif
 
-int64_t __tag_native(int64_t addr) {
+int64_t rt_tag_native(int64_t addr) {
   if (is_int(addr))
     addr >>= 1;
   if (!addr)
@@ -86,7 +86,7 @@ int64_t __tag_native(int64_t addr) {
   return NY_NATIVE_ENCODE((void *)(uintptr_t)addr);
 }
 
-int64_t __dlopen(int64_t name, int64_t flags) {
+int64_t rt_dlopen(int64_t name, int64_t flags) {
   const char *p = NULL;
   if (name && !is_int(name))
     p = (const char *)name;
@@ -104,7 +104,7 @@ int64_t __dlopen(int64_t name, int64_t flags) {
 #endif
 }
 
-int64_t __dlsym(int64_t handle, int64_t name) {
+int64_t rt_dlsym(int64_t handle, int64_t name) {
   void *p = NULL;
   void *h = NY_NATIVE_IS(handle) ? NY_NATIVE_DECODE(handle)
                                  : (void *)(uintptr_t)handle;
@@ -120,7 +120,7 @@ int64_t __dlsym(int64_t handle, int64_t name) {
   return NY_NATIVE_ENCODE(p);
 }
 
-int64_t __dlerror(void) {
+int64_t rt_dlerror(void) {
 #ifdef _WIN32
   DWORD err = GetLastError();
   if (err == 0)
@@ -130,7 +130,7 @@ int64_t __dlerror(void) {
                 FORMAT_MESSAGE_IGNORE_INSERTS;
   if (!FormatMessageA(flags, NULL, err, 0, (LPSTR)&msg, 0, NULL) || !msg)
     return 0;
-  int64_t s = __make_str_ffi(msg);
+  int64_t s = rt_make_str_ffi(msg);
   LocalFree(msg);
   return s;
 #else
@@ -138,7 +138,7 @@ int64_t __dlerror(void) {
 #endif
 }
 
-int64_t __dlclose(int64_t handle) {
+int64_t rt_dlclose(int64_t handle) {
   void *h = NY_NATIVE_IS(handle) ? NY_NATIVE_DECODE(handle)
                                  : (void *)(uintptr_t)handle;
 #ifdef _WIN32
@@ -149,11 +149,11 @@ int64_t __dlclose(int64_t handle) {
   return dlclose(h);
 #endif
 }
-int64_t __ffi_untag_ptr(int64_t v) { return rt_untag_v(v); }
+int64_t rt_ffi_untag_ptr(int64_t v) { return rt_untag_v(v); }
 
 #define UNTAG(x) rt_untag_v(x)
 
-int64_t __call0(int64_t f) {
+int64_t rt_call0(int64_t f) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -173,7 +173,7 @@ int64_t __call0(int64_t f) {
   return ((int64_t (*)(void))f)();
 }
 
-int64_t __call0_i32(int64_t f) {
+int64_t rt_call0_i32(int64_t f) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -183,10 +183,10 @@ int64_t __call0_i32(int64_t f) {
     int32_t res = ((int32_t (*)(void))NY_NATIVE_DECODE(f))();
     return rt_tag_v((int64_t)res);
   }
-  return __call0(f);
+  return rt_call0(f);
 }
 
-int64_t __call1(int64_t f, int64_t a0) {
+int64_t rt_call1(int64_t f, int64_t a0) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -207,7 +207,7 @@ int64_t __call1(int64_t f, int64_t a0) {
   return ((int64_t (*)(int64_t))f)(a0);
 }
 
-int64_t __call1_i64(int64_t f, int64_t a0) {
+int64_t rt_call1_i64(int64_t f, int64_t a0) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -224,10 +224,10 @@ int64_t __call1_i64(int64_t f, int64_t a0) {
     return rt_tag_v(res_raw);
 #endif
   }
-  return __call1(f, a0);
+  return rt_call1(f, a0);
 }
 
-int64_t __call1_u32(int64_t f, int64_t a0) {
+int64_t rt_call1_u32(int64_t f, int64_t a0) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -238,10 +238,10 @@ int64_t __call1_u32(int64_t f, int64_t a0) {
     uint32_t res = ((uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
     return rt_tag_v((int64_t)res);
   }
-  return __call1(f, a0);
+  return rt_call1(f, a0);
 }
 
-int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
+int64_t rt_call2(int64_t f, int64_t a0, int64_t a1) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -262,7 +262,7 @@ int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
   return ((int64_t (*)(int64_t, int64_t))f)(a0, a1);
 }
 
-int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
+int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -286,7 +286,7 @@ int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   return ((int64_t (*)(int64_t, int64_t, int64_t))f)(a0, a1, a2);
 }
 
-int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
+int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -309,8 +309,8 @@ int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
   return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))f)(a0, a1, a2, a3);
 }
 
-int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4) {
+int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                 int64_t a4) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -334,8 +334,8 @@ int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4);
 }
 
-int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5) {
+int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                 int64_t a4, int64_t a5) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -359,8 +359,8 @@ int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4, a5);
 }
 
-int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6) {
+int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                 int64_t a4, int64_t a5, int64_t a6) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -386,8 +386,8 @@ int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                        int64_t))f)(a0, a1, a2, a3, a4, a5, a6);
 }
 
-int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
+int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                 int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -414,8 +414,8 @@ int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                        int64_t, int64_t))f)(a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
-int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
+int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -444,9 +444,9 @@ int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                                                      a7, a8);
 }
 
-int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9) {
+int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -475,9 +475,9 @@ int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
 
-int64_t __call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10) {
+int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9, int64_t a10) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -507,9 +507,9 @@ int64_t __call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
 }
 
-int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11) {
+int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9, int64_t a10, int64_t a11) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -539,9 +539,9 @@ int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
 }
 
-int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12) {
+int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9, int64_t a10, int64_t a11, int64_t a12) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -573,10 +573,10 @@ int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                                    a11, a12);
 }
 
-int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12,
-                 int64_t a13) {
+int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9, int64_t a10, int64_t a11, int64_t a12,
+                  int64_t a13) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -609,10 +609,10 @@ int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                                             a9, a10, a11, a12, a13);
 }
 
-int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12, int64_t a13,
-                 int64_t a14) {
+int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
+                  int64_t a9, int64_t a10, int64_t a11, int64_t a12,
+                  int64_t a13, int64_t a14) {
   if (!f)
     return 1;
   /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
@@ -645,74 +645,80 @@ int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 
-void __call0_void(int64_t f) { __call0(f); }
-void __call1_void(int64_t f, int64_t a0) { __call1(f, a0); }
-void __call1_u32_void(int64_t f, int64_t a0) {
+int64_t rt_call0_void(int64_t f) { return rt_call0(f); }
+int64_t rt_call1_void(int64_t f, int64_t a0) { return rt_call1(f, a0); }
+int64_t rt_call1_u32_void(int64_t f, int64_t a0) {
   if (!f)
-    return;
+    return 1;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_untag_v(a0);
     ((void (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
-    return;
+    return 1;
   }
-  __call1(f, a0);
+  return rt_call1(f, a0);
 }
-void __call2_void(int64_t f, int64_t a0, int64_t a1) { __call2(f, a0, a1); }
-void __call3_void(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
-  __call3(f, a0, a1, a2);
+int64_t rt_call2_void(int64_t f, int64_t a0, int64_t a1) {
+  return rt_call2(f, a0, a1);
 }
-void __call4_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
-  __call4(f, a0, a1, a2, a3);
+int64_t rt_call3_void(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
+  return rt_call3(f, a0, a1, a2);
 }
-void __call5_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                  int64_t a4) {
-  __call5(f, a0, a1, a2, a3, a4);
+int64_t rt_call4_void(int64_t f, int64_t a0, int64_t a1, int64_t a2,
+                      int64_t a3) {
+  return rt_call4(f, a0, a1, a2, a3);
 }
-void __call6_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                  int64_t a4, int64_t a5) {
-  __call6(f, a0, a1, a2, a3, a4, a5);
+int64_t rt_call5_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                      int64_t a4) {
+  return rt_call5(f, a0, a1, a2, a3, a4);
 }
-void __call7_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                  int64_t a4, int64_t a5, int64_t a6) {
-  __call7(f, a0, a1, a2, a3, a4, a5, a6);
+int64_t rt_call6_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                      int64_t a4, int64_t a5) {
+  return rt_call6(f, a0, a1, a2, a3, a4, a5);
 }
-void __call8_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                  int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
-  __call8(f, a0, a1, a2, a3, a4, a5, a6, a7);
+int64_t rt_call7_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                      int64_t a4, int64_t a5, int64_t a6) {
+  return rt_call7(f, a0, a1, a2, a3, a4, a5, a6);
 }
-void __call9_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
-  __call9(f, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+int64_t rt_call8_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                      int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
+  return rt_call8(f, a0, a1, a2, a3, a4, a5, a6, a7);
 }
-void __call10_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                   int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                   int64_t a9) {
-  __call10(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+int64_t rt_call9_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
+                      int64_t a4, int64_t a5, int64_t a6, int64_t a7,
+                      int64_t a8) {
+  return rt_call9(f, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+}
+int64_t rt_call10_void(int64_t f, int64_t a0, int64_t a1, int64_t a2,
+                       int64_t a3, int64_t a4, int64_t a5, int64_t a6,
+                       int64_t a7, int64_t a8, int64_t a9) {
+  return rt_call10(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
 
-void __call4f_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
+int64_t rt_call4f_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
   if (!f)
-    return;
+    return 1;
   double da, db, dc, dd;
-  int64_t ba = __flt_unbox_val(a);
-  int64_t bb = __flt_unbox_val(b);
-  int64_t bc = __flt_unbox_val(c);
-  int64_t bd = __flt_unbox_val(d);
+  int64_t ba = rt_flt_unbox_val(a);
+  int64_t bb = rt_flt_unbox_val(b);
+  int64_t bc = rt_flt_unbox_val(c);
+  int64_t bd = rt_flt_unbox_val(d);
   memcpy(&da, &ba, 8);
   memcpy(&db, &bb, 8);
   memcpy(&dc, &bc, 8);
   memcpy(&dd, &bd, 8);
   ((void (*)(double, double, double, double))f)(da, db, dc, dd);
+  return 1;
 }
 
-void __call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
+int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c,
+                          int64_t d) {
   if (!f)
-    return;
+    return 1;
   double da, db, dc, dd;
-  int64_t ba = __flt_unbox_val(a);
-  int64_t bb = __flt_unbox_val(b);
-  int64_t bc = __flt_unbox_val(c);
-  int64_t bd = __flt_unbox_val(d);
+  int64_t ba = rt_flt_unbox_val(a);
+  int64_t bb = rt_flt_unbox_val(b);
+  int64_t bc = rt_flt_unbox_val(c);
+  int64_t bd = rt_flt_unbox_val(d);
   memcpy(&da, &ba, 8);
   memcpy(&db, &bb, 8);
   memcpy(&dc, &bc, 8);
@@ -726,4 +732,5 @@ void __call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
   } else {
     ((void (*)(float, float, float, float))f)(fa, fb, fc, fd);
   }
+  return 1;
 }

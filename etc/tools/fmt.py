@@ -352,12 +352,184 @@ def run_analyze(dirs=None):
             print(f"    {f1['path']}:{f1['line']}\n    {f2['path']}:{f2['line']}")
     print()
 
+# ─── Parse-error detector (brace balance + semicolon-swallow) ────────────────
+
+def _ny_tokenize(content):
+    """Yield (kind, value, line, col). kind: open/close/semi/str/nl/char."""
+    n = len(content)
+    i = 0
+    line = 1
+    col = 1
+    while i < n:
+        c_ = content[i]
+        if c_ == '\n':
+            yield ('nl', '\n', line, col)
+            line += 1; col = 1; i += 1; continue
+        if c_ == '"':
+            start_line, start_col = line, col
+            j = i + 1
+            while j < n and content[j] != '\n':
+                if content[j] == '\\' and j+1 < n: j += 2; continue
+                if content[j] == '"': break
+                j += 1
+            end = j+1 if j < n and content[j] == '"' else j
+            val = content[i:end]
+            yield ('str', val, start_line, start_col)
+            col += len(val); i = end; continue
+        if c_ == ';':
+            start_line, start_col = line, col
+            j = i
+            while j < n and content[j] != '\n': j += 1
+            yield ('semi', content[i:j], start_line, start_col)
+            col += (j - i); i = j; continue
+        if c_ == '{': yield ('open', '{', line, col)
+        elif c_ == '}': yield ('close', '}', line, col)
+        else: yield ('char', c_, line, col)
+        col += 1; i += 1
+
+def _count_net_braces_in_text(text):
+    """Count net '}' - '{' in text, skipping string literals."""
+    opens = closes = 0
+    j = 0
+    while j < len(text):
+        ch = text[j]
+        if ch == '"':
+            j += 1
+            while j < len(text) and text[j] != '"':
+                if text[j] == '\\' and j+1 < len(text): j += 1
+                j += 1
+            j += 1; continue
+        if ch == '{': opens += 1
+        elif ch == '}': closes += 1
+        j += 1
+    return closes - opens  # positive = net close
+
+def check_file_braces(path):
+    """Returns (unclosed_opens, extra_closes, swallows, err_str)."""
+    try:
+        content = Path(path).read_text()
+    except Exception as e:
+        return None, None, None, str(e)
+    lines = content.split('\n')
+    stack = []   # (line, col, ctx)
+    extras = []  # (line, col, ctx)
+    swallows = []  # (line, col, ctx, net)
+    in_comment = False
+    for kind, val, ln, col in _ny_tokenize(content):
+        if kind == 'nl': in_comment = False; continue
+        if in_comment: continue
+        if kind == 'semi':
+            in_comment = True
+            net = _count_net_braces_in_text(val[1:])
+            if net > 0:
+                ctx = lines[ln-1].strip()[:90]
+                swallows.append((ln, col, ctx, net))
+            continue
+        if kind == 'open':
+            stack.append((ln, col, lines[ln-1].strip()[:90]))
+        elif kind == 'close':
+            if stack: stack.pop()
+            else: extras.append((ln, col, lines[ln-1].strip()[:90]))
+    return stack, extras, swallows, None
+
+def _fix_swallow_line(line):
+    """Remove the first ';' from a line, un-commenting the rest."""
+    # Find ';' outside of string literals
+    quote = None
+    escaped = False
+    for i, ch in enumerate(line):
+        if quote:
+            if escaped: escaped = False
+            elif ch == '\\': escaped = True
+            elif ch == quote: quote = None
+            continue
+        if ch == '"': quote = ch; continue
+        if ch == ';':
+            return line[:i] + line[i+1:]
+    return line
+
+def run_check(paths=None, verbose=False, fix=False, skip_dirs=None):
+    """Check .ny files for brace balance and semicolon-swallow bugs."""
+    skip_dirs = skip_dirs or []
+    if paths is None:
+        paths = ["lib", "etc/tests"]
+    targets = []
+    for raw in paths:
+        p = ROOT / raw
+        if p.is_file():
+            targets.append(p)
+        elif p.is_dir():
+            for child in sorted(p.rglob("*.ny")):
+                if not any(sd in str(child) for sd in skip_dirs):
+                    targets.append(child)
+    if not targets:
+        warn("check: no .ny files found")
+        return
+    log("CHECK", f"scanning {len(targets)} files for parse bugs...")
+    failed = fixed = 0
+    for path in targets:
+        unclosed, extras, swallows, err = check_file_braces(path)
+        if err:
+            warn(f"  {path.relative_to(ROOT)}: {err}")
+            continue
+        # Swallows are only real bugs if the file is also unbalanced
+        real_swallows = swallows if (unclosed or extras) else []
+        issues = bool(unclosed or extras or real_swallows)
+        if not issues:
+            if verbose:
+                try: rel_str = str(path.relative_to(ROOT))
+                except ValueError: rel_str = str(path)
+                log_ok(f"  ✓ {rel_str}")
+            continue
+        try:
+            rel = path.relative_to(ROOT)
+        except ValueError:
+            rel = path
+        failed += 1
+        print(f"\n{c('31', '✗')} {c('1', str(rel))}")
+        if real_swallows:
+            print(f"  {c('33', f'{len(real_swallows)} semicolon-swallow bug(s)')}  {c('90', '(; comments out })')}:")
+            for ln, col, ctx, net in real_swallows[:6]:
+                print(f"    {c('36', f'line {ln}:{col}')}  (hides {net} '}}')  {ctx}")
+                print(f"    {c('90', 'hint: remove the ; — it starts a comment, the } after it is never seen')}")
+            if len(real_swallows) > 6:
+                print(f"    {c('90', f'... and {len(real_swallows)-6} more')}")
+            if fix:
+                lines = path.read_text().splitlines(keepends=True)
+                for ln, col, ctx, net in real_swallows:
+                    idx = ln - 1
+                    if 0 <= idx < len(lines):
+                        lines[idx] = _fix_swallow_line(lines[idx])
+                path.write_text("".join(lines))
+                fixed += 1
+                print(f"  {c('32', '→ fixed (semicolons removed)')}")
+        if unclosed:
+            print(f"  {c('33', f'{len(unclosed)} unclosed')} '{{' :")
+            for ln, col, ctx in unclosed[:5]:
+                print(f"    {c('36', f'line {ln}:{col}')}  {ctx}")
+        if extras:
+            print(f"  {c('33', f'{len(extras)} extra')} '}}' :")
+            for ln, col, ctx in extras[:5]:
+                print(f"    {c('36', f'line {ln}:{col}')}  {ctx}")
+    print()
+    if failed:
+        msg = f"check: {failed} files with issues"
+        if fix and fixed: msg += f", {fixed} auto-fixed"
+        warn(msg)
+    else:
+        log_ok(f"check: all {len(targets)} files OK")
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*")
     parser.add_argument("--analyze", action="store_true")
+    parser.add_argument("--check", action="store_true", help="Check for parse bugs")
+    parser.add_argument("--fix", action="store_true", help="Auto-fix semicolon-swallow bugs")
+    parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
-    
-    if args.analyze: run_analyze(args.paths or None)
+    if args.check or args.fix:
+        run_check(args.paths or None, verbose=args.verbose, fix=args.fix)
+    elif args.analyze: run_analyze(args.paths or None)
     else: run_fmt(args.paths or None)

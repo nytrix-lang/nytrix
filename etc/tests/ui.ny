@@ -7,16 +7,17 @@ use std.math *
 use std.ui.consts *
 use std.ui.gfx *
 use std.ui.window as window
-use std.ui.input as uin
+use std.ui.window.input as uin
 use std.ui.camera as camera
 use std.ui.gfx.term as terminal
 use std.math.matrix *
 use std.math.vector *
 use std.str as str
-use std.str *
+use std.os.time *
+print("DEBUG: Executing script...")
 use std.util.common as common
 
-def APP_MSAA = 8
+def APP_MSAA = 1
 mut APP_BG   = [0.002, 0.002, 0.005, 1.0]
 mut APP_WIRE = false
 mut APP_STATS= true
@@ -36,7 +37,15 @@ layout(location=4) in vec3 normal ;
 layout(location=0) out vec4 vColor ;
 layout(location=1) out vec3 vNormal ;
 layout(location=2) out vec3 vWorldPos ;
-layout(push_constant) uniform PC { mat4 vp ; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;
+layout(push_constant) uniform PC {
+   mat4 vp ;
+   mat4 model ;
+   int isMask ;
+   int isUnlit ;
+   float time ;
+   float rainbow ;
+   vec3 eyePos ;
+} pc ;
 void main(){
   vec4 worldPos = pc.model * vec4(pos, 1.0) ;
   vWorldPos = worldPos.xyz ;
@@ -49,7 +58,15 @@ def CUSTOM_FRAG_SRC = "#version 450
 layout(location=0) in vec4 vColor ;
 layout(location=1) in vec3 vNormal ;
 layout(location=2) in vec3 vWorldPos ;
-layout(push_constant) uniform PC { mat4 vp ; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;
+layout(push_constant) uniform PC {
+   mat4 vp ;
+   mat4 model ;
+   int isMask ;
+   int isUnlit ;
+   float time ;
+   float rainbow ;
+   vec3 eyePos ;
+} pc ;
 layout(location=0) out vec4 outColor ;
 void main(){
   vec3 n = normalize(vNormal) ;
@@ -200,12 +217,12 @@ fn build_cube(s, color, tex_id=0){
    _v(3, -s,-s, s, 0,0, 0,0, 1) _v(4,  s, s, s, 1,1, 0,0, 1) _v(5, -s, s, s, 0,1, 0,0, 1)
    _v(6,  s,-s,-s, 0,0, 0,0,-1) _v(7, -s,-s,-s, 1,0, 0,0,-1) _v(8, -s, s,-s, 1,1, 0,0,-1)
    _v(9,  s,-s,-s, 0,0, 0,0,-1) _v(10,-s, s,-s, 1,1, 0,0,-1) _v(11, s, s,-s, 0,1, 0,0,-1)
-   _v(12,-s, s, s, 0,0, 0,1,0) _v(13, s, s, s, 1,0, 0,1,0) _v(14, s, s,-s, 1,1, 0,1,0)
-   _v(15,-s, s, s, 0,0, 0,1,0) _v(16, s, s,-s, 1,1, 0,1,0) _v(17,-s, s,-s, 0,1, 0,1,0)
+   _v(12,-s, s, s, 0,0, 0,1,0)  _v(13, s, s, s, 1,0, 0,1,0)  _v(14, s, s,-s, 1,1, 0,1,0)
+   _v(15,-s, s, s, 0,0, 0,1,0)  _v(16, s, s,-s, 1,1, 0,1,0)  _v(17,-s, s,-s, 0,1, 0,1,0)
    _v(18,-s,-s,-s, 0,0, 0,-1,0) _v(19, s,-s,-s, 1,0, 0,-1,0) _v(20, s,-s, s, 1,1, 0,-1,0)
    _v(21,-s,-s,-s, 0,0, 0,-1,0) _v(22, s,-s, s, 1,1, 0,-1,0) _v(23,-s,-s, s, 0,1, 0,-1,0)
-   _v(24, s,-s, s, 0,0, 1,0,0) _v(25, s,-s,-s, 1,0, 1,0,0) _v(26, s, s,-s, 1,1, 1,0,0)
-   _v(27, s,-s, s, 0,0, 1,0,0) _v(28, s, s,-s, 1,1, 1,0,0) _v(29, s, s, s, 0,1, 1,0,0)
+   _v(24, s,-s, s, 0,0, 1,0,0)  _v(25, s,-s,-s, 1,0, 1,0,0)  _v(26, s, s,-s, 1,1, 1,0,0)
+   _v(27, s,-s, s, 0,0, 1,0,0)  _v(28, s, s,-s, 1,1, 1,0,0)  _v(29, s, s, s, 0,1, 1,0,0)
    _v(30,-s,-s,-s, 0,0, -1,0,0) _v(31,-s,-s, s, 1,0, -1,0,0) _v(32,-s, s, s, 1,1, -1,0,0)
    _v(33,-s,-s,-s, 0,0, -1,0,0) _v(34,-s, s, s, 1,1, -1,0,0) _v(35,-s, s,-s, 0,1, -1,0,0)
    mut d = dict() d = dict_set(d, "ptr", buf) d = dict_set(d, "cnt", 36) d
@@ -213,7 +230,10 @@ fn build_cube(s, color, tex_id=0){
 
 fn startup(){
    "Initializes the application state, window, and resources."
+   print("DEBUG: entering startup")
    win = init_window(1280, 720, "Nytrix", 0, false, false, APP_MSAA)
+   print("DEBUG: init_window returned ", win)
+   if(!win){ print("Failed to create window") exit(1) }
 
    def fpaths = [
       "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
@@ -247,7 +267,7 @@ fn startup(){
    start_t = ticks()
    last_upd_t = start_t
    last_fps_t = start_t
-   terminal.log("ターミナル 🫪.")
+   terminal.log("ターミナル 🫪")
 
    _cube_ptr = dict_get(res_cube, "ptr", 0) _cube_cnt = dict_get(res_cube, "cnt", 0)
    _grid_ptr = dict_get(res_grid, "ptr", 0) _grid_cnt = dict_get(res_grid, "cnt", 0)
@@ -535,34 +555,31 @@ mut _render_dt = 0.0
 mut _running = true
 
 fn render_thread_obj(){
-   "Off-thread rendering loop: handles GPU submission and synchronization."
-   while(_running){
-      def phase = _render_phase
-      if(phase < 0.0){ os.time.sleep_ms(0) continue }
+   "Rendering function, called each frame."
+   def phase = _render_phase
+   if(phase < 0.0){ return }
 
-      def tc0 = ticks()
-      begin_frame()
-      _t_clear += ticks() - tc0
+   def tc0 = ticks()
+   begin_frame()
+   _t_clear += ticks() - tc0
 
-      def t0 = ticks()
-      draw(phase)
-      def t1 = ticks()
-      _t_draw += t1 - t0
+   def t0 = ticks()
+   draw(phase)
+   def t1 = ticks()
+   _t_draw += t1 - t0
 
-      end_frame()
-      def t2 = ticks()
-      _t_flush += t2 - t1
-      last_draw_ms = float(t1 - t0) / 1e6 last_flush_ms = float(t2 - t1) / 1e6
-
-      _render_phase = -1.0
-   }
+   end_frame()
+   def t2 = ticks()
+   _t_flush += t2 - t1
+   last_draw_ms = float(t1 - t0) / 1e6 last_flush_ms = float(t2 - t1) / 1e6
 }
 
 mut _t_update = 0 mut _t_clear = 0 mut _t_draw = 0 mut _t_flush = 0
 startup()
 mut _elapsed = 0
 
-def r_thread = thread_spawn(render_thread_obj)
+; def r_thread = thread_spawn(render_thread_obj)
+_render_phase = -1.0
 
 while(!window.should_close(win)){
    def now = ticks() mut dt = float(now - last_upd_t) / 1e9
@@ -576,17 +593,14 @@ while(!window.should_close(win)){
    update(dt)
    _t_update += ticks() - tu0
 
-   while(_render_phase >= 0.0){
-      os.time.sleep_ms(0)
-   }
    _render_dt = dt
    _render_phase = float(_elapsed) / 1e9
+   render_thread_obj()
 
    frame_num += 1 total_frames += 1
    if(now - last_fps_t >= 1e9){ fps = frame_num frame_num = 0 last_fps_t = now }
 }
 _running = false
-thread_join(r_thread)
 if(env("NY_UI_FPS_LOG") && total_frames > 0){
    def elapsed_s = float(ticks() - start_t) / 1e9
    def n = float(total_frames)
@@ -596,4 +610,3 @@ if(env("NY_UI_FPS_LOG") && total_frames > 0){
    print(f"  update: {us(_t_update):.3f}ms/f  clear: {us(_t_clear):.3f}ms/f  draw: {us(_t_draw):.3f}ms/f  flush: {us(_t_flush):.3f}ms/f")
 }
 window.set_cursor_mode(win, window.CURSOR_NORMAL)
-exit(0)

@@ -294,6 +294,10 @@ int64_t __trace_last_file(void);
 int64_t __trace_last_line(void);
 int64_t __trace_last_col(void);
 int64_t __trace_last_func(void);
+int64_t __trace_enter(int64_t func, int64_t file, int64_t line);
+int64_t __trace_exit(void);
+int64_t __trace_get_call_stack(int64_t *funcs, int64_t *files, int64_t *lines,
+                               int max_count);
 void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
                        const char *prefix);
 

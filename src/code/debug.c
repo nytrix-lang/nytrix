@@ -457,6 +457,13 @@ LLVMMetadataRef codegen_debug_subprogram(codegen_t *cg, LLVMValueRef func,
                                          const char *name, token_t tok) {
   if (!cg || !cg->di_builder || !func)
     return NULL;
+  /* Don't attach !dbg to declarations — only definitions may have subprograms.
+     Also skip if the function already has a subprogram (prevents duplicates
+     when the std bundle is loaded and functions are re-encountered). */
+  if (LLVMIsDeclaration(func))
+    return LLVMGetSubprogram(func);
+  if (LLVMGetSubprogram(func))
+    return LLVMGetSubprogram(func);
   if (!name)
     name = "<anon>";
   LLVMMetadataRef file = debug_file_for(cg, tok.filename);

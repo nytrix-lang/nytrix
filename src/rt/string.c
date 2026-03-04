@@ -51,7 +51,7 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
   }
 }
 
-int64_t __str_concat(int64_t a, int64_t b) {
+int64_t rt_str_concat(int64_t a, int64_t b) {
   char buf_a[128], buf_b[128];
   const char *sa, *sb;
   int la, lb;
@@ -67,7 +67,7 @@ int64_t __str_concat(int64_t a, int64_t b) {
   if (lb > (int)sizeof(buf_b) && sb == buf_b)
     lb = sizeof(buf_b);
 
-  int64_t res = __malloc((int64_t)((la + lb + 1) << 1 | 1));
+  int64_t res = rt_malloc((int64_t)((la + lb + 1) << 1 | 1));
   if (!res)
     return 0;
   *(int64_t *)(uintptr_t)((char *)res - 8) = TAG_STR;
@@ -87,7 +87,7 @@ static struct {
   _str_true = {((4ULL << 1) | 1), TAG_STR_CONST, "true"},
   _str_false = {((5ULL << 1) | 1), TAG_STR_CONST, "false"};
 
-int64_t __to_str(int64_t v) {
+int64_t rt_to_str(int64_t v) {
   if (is_v_str(v))
     return v;
   if (v == 0)
@@ -102,5 +102,5 @@ int64_t __to_str(int64_t v) {
   rt_val_to_str_info(v, buf, sizeof(buf), &s, &len);
   if (len > (int)sizeof(buf) && s == buf)
     len = sizeof(buf);
-  return __rt_alloc_string_len(s, len);
+  return rt_alloc_string_len(s, len);
 }
