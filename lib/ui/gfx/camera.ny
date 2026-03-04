@@ -11,7 +11,7 @@ use std.math *
 use std.math.vector *
 use std.math.matrix *
 use std.ui.window *
-use std.ui.glfw as glfw
+use std.ui.window.native as native
 
 fn camera_init(pos, yaw, pitch, fovy=45.0){
    "Initializes a 3D camera object. Returns a dictionary."
@@ -72,10 +72,10 @@ fn camera_free_look(c, win, locked=true){
    def cx = float(get(ws, 0)) * 0.5
    def cy = float(get(ws, 1)) * 0.5
 
-   def mpos = glfw.get_cursor_pos(handle)
+   def mpos = native.get_cursor_pos(handle)
    def mx = float(get(mpos, 0))
    def my = float(get(mpos, 1))
-   glfw.set_cursor_pos(handle, cx, cy)
+   native.set_cursor_pos(handle, cx, cy)
 
    def sens = float(dict_get(c, "sens", 0.15))
    mut yaw = float(dict_get(c, "yaw", 0.0))

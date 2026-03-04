@@ -148,58 +148,13 @@ fn bigint_to_str(b){
 }
 
 fn _big_add_abs(a, b){
-   "Internal: add |a| + |b|."
-   mut da = _big_digits(a)
-   def db = _big_digits(b)
-   mut na = core.len(da)
-   mut nb = core.len(db)
-   mut out = []
-   mut carry = 0
-   mut i = 0
-   while(i < na || i < nb){
-      mut va = 0
-      if(i < na){ va = get(da, i) }
-      mut vb = 0
-      if(i < nb){ vb = get(db, i) }
-      mut sum = va + vb + carry
-      if(sum >= 1000000000){
-         sum -= 1000000000
-         carry = 1
-      } else {
-         carry = 0
-      }
-       out = append(out, sum)
-      i += 1
-   }
-   if(carry > 0){
-       out = append(out, carry)
-   }
-   _big_make(1, out, true)
+   "Internal: add |a| + |b| using native runtime."
+   _big_make(1, core.__big_add_abs(a[1], b[1]))
 }
 
 fn _big_sub_abs(a, b){
-   "Internal: compute |a| - |b| where |a| >= |b|."
-   mut da = _big_digits(a)
-   def db = _big_digits(b)
-   mut na = core.len(da)
-   mut nb = core.len(db)
-   mut out = []
-   mut borrow = 0
-   mut i = 0
-   while(i < na){
-      mut va = get(da, i) - borrow
-      mut vb = 0
-      if(i < nb){ vb = get(db, i) }
-      if(va < vb){
-         va += 1000000000
-         borrow = 1
-      } else {
-         borrow = 0
-      }
-       out = append(out, va - vb)
-      i += 1
-   }
-   _big_make(1, out, true)
+   "Internal: subtract |a| - |b| (assumes |a| >= |b|) using native runtime."
+   _big_make(1, core.__big_sub_abs(a[1], b[1]))
 }
 
 fn bigint_add(a, b){
@@ -234,35 +189,8 @@ fn bigint_sub(a, b){
 }
 
 fn _big_mul_abs(a, b){
-   "Internal: multiply |a| * |b|."
-   mut da = _big_digits(a)
-   def db = _big_digits(b)
-   mut na = core.len(da)
-   mut nb = core.len(db)
-   if(na == 0 || nb == 0){ return _big_make(0, []) }
-   mut out = []
-   mut i = 0
-   while(i < na + nb + 1){  out = append(out, 0)  i += 1 }
-   i = 0
-   while(i < na){
-      mut carry = 0
-      mut j = 0
-      while(j < nb){
-         mut idx = i + j
-         def cur = get(out, idx)
-         mut prod = cur + get(da, i) * get(db, j) + carry
-         carry = prod / 1000000000
-         prod %= 1000000000
-         set_idx(out, idx, prod)
-         j += 1
-      }
-      if(carry > 0){
-         def idx2 = i + nb
-         set_idx(out, idx2, get(out, idx2) + carry)
-      }
-      i += 1
-   }
-   _big_make(1, out, true)
+   "Internal: multiply |a| * |b| using native runtime."
+   _big_make(1, core.__big_mul_abs(a[1], b[1]))
 }
 
 fn bigint_mul(a, b){

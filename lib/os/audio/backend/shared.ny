@@ -7,7 +7,6 @@ module std.os.audio.backend.shared (
 
 use std.core *
 use std.core.dict_mod *
-use std.os.ffi *
 
 fn append_output_device(ctx, name, id){
    "Appends a default output device entry with display `name` and backend `id` to `ctx`."
@@ -29,15 +28,14 @@ fn init_output_device(ctx, ready, name, id){
 }
 
 fn probe_linux_library(name, required_symbol){
-   "Loads Linux shared library `name` and verifies exported `required_symbol`, returning its handle or `0`."
+   "Returns 1 on Linux (library linked via #include), 0 on other platforms."
    if(!comptime{ __os_name() == "linux" }){ return 0 }
-   dlopen_checked(name, required_symbol)
+   1
 }
 
 fn probe_linux_library_once(avail, handle, name, required_symbol){
-   "Returns `[avail, handle]` after probing Linux shared library `name` once."
+   "Returns `[1, 0]` on Linux (library linked via #include), `[0, 0]` otherwise."
    if(avail != -1){ return [avail, handle] }
-   def next = probe_linux_library(name, required_symbol)
-   if(next == 0){ return [0, 0] }
-   [1, next]
+   if(!comptime{ __os_name() == "linux" }){ return [0, 0] }
+   [1, 0]
 }

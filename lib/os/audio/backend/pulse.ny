@@ -11,19 +11,13 @@ use std.core.dict_mod *
 use std.core.mem *
 use std.str *
 use std.util.common as common
-use std.os.ffi *
 use std.os.audio.backend.shared as backend_shared
 
 if(comptime{ __os_name() == "linux" }){
-   #link "pulse-simple"
-   #link "pulse"
-
-   extern fn pa_simple_new(server: ptr, name: ptr, dir: i32, dev: ptr, stream_name: ptr, ss: ptr, map: ptr, attr: ptr, error: ptr): ptr as "pa_simple_new"
-   extern fn pa_simple_free(s: ptr): i32 as "pa_simple_free"
-   extern fn pa_simple_write(s: ptr, data: ptr, bytes: i64, error: ptr): i32 as "pa_simple_write"
-   extern fn pa_simple_drain(s: ptr, error: ptr): i32 as "pa_simple_drain"
-   extern fn pa_simple_flush(s: ptr, error: ptr): i32 as "pa_simple_flush"
-   extern fn pa_strerror(errnum: i32): ptr as "pa_strerror"
+   #link "libpulse-simple.so"
+   #include <pulse/simple.h> as "pa_"
+   #link "libpulse.so"
+   #include <pulse/error.h> as "pa_"
 }
 
 fn _get_latency_ms(){

@@ -11,7 +11,6 @@ use std.core.reflect *
 use std.os *
 use std.os.sys *
 use std.os.path *
-use std.os.ffi *
 use std.os.platform as platform
 
 ;; Socket Constants
