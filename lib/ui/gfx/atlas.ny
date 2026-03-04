@@ -1,11 +1,6 @@
 ;; Keywords: ui gfx atlas texture packing
 ;; Texture Atlas manager for std.ui.gfx.
 ;; Efficiently packs many small images (glyphs, icons) into larger textures.
-;;
-;; BATCHED UPLOAD MODE:
-;;   All glyph data is written directly into a CPU-side pixel buffer during atlas_add.
-;;   Call atlas_flush(a) to do ONE GPU upload of the entire dirty region.
-;;   This reduces font loading from thousands of GPU submissions to 1.
 
 module std.ui.gfx.atlas (
    atlas_create, atlas_destroy, atlas_add, atlas_get, atlas_bind,
@@ -19,51 +14,53 @@ use std.math *
 mut _atlas_scratch = 0
 mut _atlas_scratch_cap = 0
 
-;; Atlas object fields:
-;;   tex_id, width, height, cx, cy, max_row_h, items
-;;   cpu_buf   -- CPU-side pixel buffer (always kept; used for batched uploads)
-;;   dirty     -- bool: cpu_buf has unpushed changes
-;;   dirty_x1/y1/x2/y2 -- bounding box of dirty region for minimal uploads
+;; Atlas object fields (dictionary):
+;;   tex_id, width, height, items, cpu_buf, state_ptr
+;; state_ptr structure (i32):
+;;   0: cx, 4: cy, 8: max_row_h, 12: dirty, 16: dx1, 20: dy1, 24: dx2, 28: dy2
 
 fn atlas_create(w=2048, h=2048){
-   "Creates a new texture atlas of the specified dimensions (RGBA8, 4bpp).
-   All glyph writes go to a CPU buffer ; call atlas_flush() to push to GPU."
+   "Creates a new texture atlas. Uses a native state buffer for mutable metadata."
    def buf_size = w * h * 4
    def cpu_buf = malloc(buf_size)
    memset(cpu_buf, 0, buf_size)
 
-   ;; Create GPU texture with blank data
+   def state_ptr = malloc(64)
+   memset(state_ptr, 0, 64)
+   store32(state_ptr, 2, 0)  ; cx
+   store32(state_ptr, 2, 4)  ; cy
+   store32(state_ptr, 0, 8)  ; mrh
+   store32(state_ptr, 0, 12) ; dirty
+   store32(state_ptr, w, 16) ; dx1
+   store32(state_ptr, h, 20) ; dy1
+   store32(state_ptr, 0, 24) ; dx2
+   store32(state_ptr, 0, 28) ; dy2
+
    def tex_id = vkr.create_texture_ex(w, h, cpu_buf, 37)
 
-   mut a = dict(16)
+   mut a = dict(8)
    a = dict_set(a, "tex_id", tex_id)
    a = dict_set(a, "width", w)
    a = dict_set(a, "height", h)
-   a = dict_set(a, "cx", 2)
-   a = dict_set(a, "cy", 2)
-   a = dict_set(a, "max_row_h", 0)
-   a = dict_set(a, "items", dict(256))
+   a = dict_set(a, "items", dict(512))
    a = dict_set(a, "cpu_buf", cpu_buf)
-   a = dict_set(a, "dirty", false)
-   a = dict_set(a, "dirty_x1", w)
-   a = dict_set(a, "dirty_y1", h)
-   a = dict_set(a, "dirty_x2", 0)
-   a = dict_set(a, "dirty_y2", 0)
+   a = dict_set(a, "state_ptr", state_ptr)
    a
 }
 
 fn atlas_destroy(a){
-   "Destroys the atlas and frees its CPU buffer."
+   "Frees atlas resources including GPU texture and state buffers."
    if(!a){ return }
    def tex_id = dict_get(a, "tex_id", -1)
    if(tex_id >= 0){ vkr.destroy_texture(tex_id) }
    def cpu_buf = dict_get(a, "cpu_buf", 0)
    if(cpu_buf){ free(cpu_buf) }
+   def state_ptr = dict_get(a, "state_ptr", 0)
+   if(state_ptr){ free(state_ptr) }
 }
 
 fn atlas_add(a, key, w, h, pixels){
-   "Packs a new image into the atlas CPU buffer. Returns [u1,v1,u2,v2] or 0.
-   Does NOT upload to GPU -- call atlas_flush() after priming is done."
+   "Packs an image and returns [u1,v1,u2,v2]. Correctly updates packing state."
    if(!a || w <= 0 || h <= 0){ return 0 }
 
    mut items = dict_get(a, "items")
@@ -71,19 +68,21 @@ fn atlas_add(a, key, w, h, pixels){
 
    def aw = dict_get(a, "width")
    def ah = dict_get(a, "height")
-   mut cx = dict_get(a, "cx")
-   mut cy = dict_get(a, "cy")
-   mut mrh = dict_get(a, "max_row_h")
+   def state_ptr = dict_get(a, "state_ptr", 0)
+   if(!state_ptr){ return 0 }
 
-   ;; Shelf packing with 2px padding
+   mut cx = load32(state_ptr, 0)
+   mut cy = load32(state_ptr, 4)
+   mut mrh = load32(state_ptr, 8)
+
+   ;; Shelf packing
    if(cx + w + 2 > aw){
       cx = 2
       cy = cy + mrh + 2
       mrh = 0
    }
-   if(cy + h + 2 > ah){ return 0 } ;; Atlas full
+   if(cy + h + 2 > ah){ return 0 }
 
-   ;; Write glyph pixels directly into CPU buffer (row by row)
    def cpu_buf = dict_get(a, "cpu_buf", 0)
    if(cpu_buf && pixels){
       mut row = 0
@@ -93,107 +92,73 @@ fn atlas_add(a, key, w, h, pixels){
          memcpy(cpu_buf + dst_off, pixels + src_off, w * 4)
          row += 1
       }
-      ;; Expand dirty bounding box
-      mut dx1 = dict_get(a, "dirty_x1") mut dy1 = dict_get(a, "dirty_y1")
-      mut dx2 = dict_get(a, "dirty_x2") mut dy2 = dict_get(a, "dirty_y2")
+      ;; Update dirty box
+      mut dx1 = load32(state_ptr, 16) mut dy1 = load32(state_ptr, 20)
+      mut dx2 = load32(state_ptr, 24) mut dy2 = load32(state_ptr, 28)
       if(cx < dx1){ dx1 = cx }
       if(cy < dy1){ dy1 = cy }
       if(cx + w > dx2){ dx2 = cx + w }
       if(cy + h > dy2){ dy2 = cy + h }
-      dict_set(a, "dirty_x1", dx1) dict_set(a, "dirty_y1", dy1)
-      dict_set(a, "dirty_x2", dx2) dict_set(a, "dirty_y2", dy2)
-      dict_set(a, "dirty", true)
+      store32(state_ptr, dx1, 16) store32(state_ptr, dy1, 20)
+      store32(state_ptr, dx2, 24) store32(state_ptr, dy2, 28)
+      store32(state_ptr, 1, 12) ; dirty = true
    }
 
    if(h > mrh){ mrh = h }
+   
+   ;; Commit new packing cursor
+   store32(state_ptr, cx + w + 2, 0)
+   store32(state_ptr, cy, 4)
+   store32(state_ptr, mrh, 8)
 
    def fw = float(aw) def fh = float(ah)
-   def u1 = float(cx) / fw def v1 = float(cy) / fh
-   def u2 = float(cx + w) / fw def v2 = float(cy + h) / fh
-   def uv = [u1, v1, u2, v2]
-
+   def uv = [float(cx) / fw, float(cy) / fh, float(cx + w) / fw, float(cy + h) / fh]
    dict_set(items, key, uv)
-   dict_set(a, "cx", cx + w + 2)
-   dict_set(a, "cy", cy)
-   dict_set(a, "max_row_h", mrh)
-
    uv
 }
 
 fn atlas_flush(a){
-   "Uploads the dirty region of the CPU atlas buffer to the GPU in one call.
-   Call this once after all atlas_add() calls are done during font priming."
+   "Uploads dirty CPU pixels to GPU. Uses efficient sub-rectangle updates."
    if(!a){ return }
-   if(!dict_get(a, "dirty", false)){ return }
+   def state_ptr = dict_get(a, "state_ptr", 0)
+   if(!state_ptr || load32(state_ptr, 12) == 0){ return }
 
    def cpu_buf = dict_get(a, "cpu_buf", 0)
    def tex_id  = dict_get(a, "tex_id", -1)
-   if(!cpu_buf || tex_id < 0){ return }
-
    def aw = dict_get(a, "width")
-   def dx1 = dict_get(a, "dirty_x1") def dy1 = dict_get(a, "dirty_y1")
-   def dx2 = dict_get(a, "dirty_x2") def dy2 = dict_get(a, "dirty_y2")
+   def ah = dict_get(a, "height")
+   
+   def dx1 = load32(state_ptr, 16) def dy1 = load32(state_ptr, 20)
+   def dx2 = load32(state_ptr, 24) def dy2 = load32(state_ptr, 28)
    if(dx2 <= dx1 || dy2 <= dy1){ return }
 
-   ;; Upload only the dirty sub-rect. Avoid extra copies when possible.
    def rw = dx2 - dx1 def rh = dy2 - dy1
-   def full_w = (dx1 == 0 && dx2 == aw)
-   def full_h = (dy1 == 0 && dy2 == dict_get(a, "height"))
-   def full_area = full_w && full_h
-   def dirty_area = rw * rh
-   def atlas_area = aw * dict_get(a, "height")
-
-   if(full_area){
-      vkr.update_texture_rect(tex_id, 0, 0, aw, dict_get(a, "height"), cpu_buf)
-   } elif(full_w){
-      ;; Dirty span is full width: contiguous in memory, no scratch needed.
-      def src = cpu_buf + (dy1 * aw * 4)
-      vkr.update_texture_rect(tex_id, 0, dy1, aw, rh, src)
-   } elif(dirty_area * 10 >= atlas_area * 6){
-      ;; If most of the atlas changed, a full upload is faster than re-packing.
-      vkr.update_texture_rect(tex_id, 0, 0, aw, dict_get(a, "height"), cpu_buf)
+   if(rw == aw && rh == ah){
+      vkr.update_texture_rect(tex_id, 0, 0, aw, ah, cpu_buf)
+   } elif(rw == aw){
+      vkr.update_texture_rect(tex_id, 0, dy1, aw, rh, cpu_buf + (dy1 * aw * 4))
    } else {
-      def row_bytes = rw * 4
+      ;; Rect upload
       def need = rw * rh * 4
       if(_atlas_scratch_cap < need){
          if(_atlas_scratch){ free(_atlas_scratch) }
          _atlas_scratch = malloc(need)
          _atlas_scratch_cap = need
       }
-      mut row = 0
-      while(row < rh){
-         def src = cpu_buf + ((dy1 + row) * aw + dx1) * 4
-         memcpy(_atlas_scratch + row * row_bytes, src, row_bytes)
-         row += 1
+      mut r = 0 while(r < rh){
+         memcpy(_atlas_scratch + r * rw * 4, cpu_buf + ((dy1 + r) * aw + dx1) * 4, rw * 4)
+         r += 1
       }
       vkr.update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch)
    }
 
    ;; Reset dirty state
-   dict_set(a, "dirty", false)
-   dict_set(a, "dirty_x1", aw)
-   dict_set(a, "dirty_y1", dict_get(a, "height"))
-   dict_set(a, "dirty_x2", 0)
-   dict_set(a, "dirty_y2", 0)
+   store32(state_ptr, 0, 12) ; dirty = false
+   store32(state_ptr, aw, 16) store32(state_ptr, ah, 20)
+   store32(state_ptr, 0, 24) store32(state_ptr, 0, 28)
 }
 
-fn atlas_get(a, key){
-   "Retrieves UV coordinates for a packed item."
-   def items = dict_get(a, "items")
-   dict_get(items, key, 0)
-}
-
-fn atlas_texture_id(a){
-   "Returns the texture id stored in atlas `a`."
-   dict_get(a, "tex_id", -1)
-}
-
-fn atlas_uv_rect(a, key){
-   "Alias for atlas_get."
-   atlas_get(a, key)
-}
-
-fn atlas_bind(a){
-   "Binds the atlas texture for drawing."
-   vkr.bind_texture(atlas_texture_id(a))
-}
+fn atlas_texture_id(a){ dict_get(a, "tex_id", -1) }
+fn atlas_get(a, key){ dict_get(dict_get(a, "items"), key, 0) }
+fn atlas_uv_rect(a, key){ atlas_get(a, key) }
+fn atlas_bind(a){ vkr.bind_texture(atlas_texture_id(a)) }

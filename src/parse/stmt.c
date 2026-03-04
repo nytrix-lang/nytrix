@@ -685,9 +685,18 @@ stmt_t *p_parse_stmt(parser_t *p) {
   case NY_T_HASH: {
     token_t tok = p->cur;
     parser_advance(p);
+    if (p->cur.kind == NY_T_IDENT &&
+        strncmp(p->cur.lexeme, "line", p->cur.len) == 0) {
+      parser_advance(p); // line
+      if (p->cur.kind == NY_T_NUMBER)
+        parser_advance(p); // number
+      if (p->cur.kind == NY_T_STRING)
+        parser_advance(p); // filename
+      return NULL;
+    }
     if (p->cur.kind != NY_T_IDENT ||
         strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
-      parser_error(p, p->cur, "expected 'link' after '#'", NULL);
+      parser_error(p, p->cur, "expected 'link' or 'line' after '#'", NULL);
       return NULL;
     }
     parser_advance(p);

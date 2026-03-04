@@ -159,7 +159,10 @@ fn update_events(win){
    while(e != 0){
       def typ = window.event_type(e)
       if(typ == EVENT_KEY_PRESSED){
-         if(dict_get(window.event_data(e), "key") == KEY_ESCAPE){ window.set_should_close(win, true) }
+         if(dict_get(window.event_data(e), "key") == KEY_ESCAPE){
+         if(env("NYTRIX_AUTO_DUMP")){ snapshot("build/release/fb_dump.tga") }
+         window.set_should_close(win, true)
+         }
       }
       if(typ == EVENT_QUIT){ window.set_should_close(win, true) }
       if(typ == EVENT_WINDOW_RESIZED){
@@ -171,11 +174,21 @@ fn update_events(win){
    }
 }
 
-def win = init_window(1280, 720, "Nytrix Gamepad Dashboard", 0, true, false, 8)
+def win = init_window(1280, 720, "Gamepad", 0, true, false, 8)
 if(!win){ return 0 }
 font = font_load("etc/assets/font/monocraft.ttf", 16)
 
+mut startup_ticks = ticks()
 while(!window.should_close(win)){
+   def now = ticks()
+   def env_t = env("NY_UI_TIMEOUT")
+   if(env_t){
+      def timeout_ns = int(str.atof(env_t) * 1e9)
+      if(now - startup_ticks >= timeout_ns){
+         window.set_should_close(win, true)
+      }
+   }
+
    window.poll_events()
    update_events(win)
    begin_frame()

@@ -24,7 +24,19 @@ stmt_t *ny_parse_if_stmt(parser_t *p) {
     parser_advance(p);
   else
     parser_expect(p, NY_T_IF, "'if' or 'elif'", NULL);
+  bool has_paren = (p->cur.kind == NY_T_LPAREN);
+  if (has_paren)
+    parser_advance(p);
+
+  stmt_t *init = NULL;
+  if (p->cur.kind == NY_T_DEF || p->cur.kind == NY_T_MUT) {
+    init = p_parse_stmt(p);
+  }
+
   expr_t *cond = p_parse_expr(p, 0);
+  if (has_paren)
+    parser_expect(p, NY_T_RPAREN, "')' after if clause", NULL);
+
   stmt_t *block = ny_parse_stmt_or_block(p);
   stmt_t *alt = NULL;
   if (parser_match(p, NY_T_ELSE)) {
@@ -40,6 +52,7 @@ stmt_t *ny_parse_if_stmt(parser_t *p) {
   s->as.iff.test = cond;
   s->as.iff.conseq = block;
   s->as.iff.alt = alt;
+  s->as.iff.init = init;
   return s;
 }
 
@@ -81,17 +94,10 @@ stmt_t *ny_parse_while_stmt(parser_t *p) {
   if (has_paren)
     parser_advance(p);
   stmt_t *init = NULL;
-  if (has_paren && (p->cur.kind == NY_T_MUT || p->cur.kind == NY_T_DEF)) {
-    p->block_depth++;
+  if (p->cur.kind == NY_T_DEF || p->cur.kind == NY_T_MUT) {
     init = p_parse_stmt(p);
-    p->block_depth--;
   }
   expr_t *cond = p_parse_expr(p, 0);
-  if (p->cur.kind == NY_T_ASSIGN) {
-    parser_error(p, p->cur, "assignment in condition", "did you mean '=='?");
-    parser_advance(p);
-    p_parse_expr(p, 0);
-  }
   stmt_t *update = NULL;
   if (has_paren && p->cur.kind != NY_T_RPAREN) {
     if (p->cur.kind == NY_T_PLUS_PLUS || p->cur.kind == NY_T_MINUS_MINUS) {

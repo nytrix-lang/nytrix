@@ -379,6 +379,23 @@ int64_t __trace_dump(int64_t count) {
   return 0;
 }
 
+int64_t __trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn,
+                           int count) {
+  if (g_trace_len == 0)
+    return 0;
+  int want = count;
+  if (want > (int)g_trace_len)
+    want = (int)g_trace_len;
+  for (int i = 0; i < want; i++) {
+    int idx = (int)((g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING);
+    f[i] = g_trace_files[idx];
+    l[i] = g_trace_lines[idx];
+    c[i] = g_trace_cols[idx];
+    fn[i] = g_trace_funcs[idx];
+  }
+  return (int64_t)want;
+}
+
 // Higher level panic logic below primitives
 
 int64_t __argc_val = 1;
@@ -387,6 +404,11 @@ int64_t *__argv_ptr = NULL;
 int64_t *__envp_ptr = NULL;
 
 int64_t __set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
+  static int curl_init = 0;
+  if (!curl_init) {
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl_init = 1;
+  }
   __cleanup_args();
   __argc_val = (argc << 1) | 1;
   __argv_ptr = (int64_t *)(uintptr_t)__malloc(
@@ -773,6 +795,7 @@ int64_t __get_backtrace(int64_t count_v) {
 }
 
 int64_t __panic(int64_t msg_ptr) {
+  __rt_print_flush();
   bool has_env = (g_panic_env_stack.len > 0);
   if (!has_env) {
     fputc('\n', stderr);

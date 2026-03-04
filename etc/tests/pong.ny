@@ -130,6 +130,7 @@ fn update(dt){
 
    if(win != 0){
       if(window.key_down(win, uin.KEY_ESCAPE)){
+         if(env("NYTRIX_AUTO_DUMP")){ snapshot("build/release/fb_dump.tga") }
          window.set_should_close(win, true)
       }
    }
@@ -162,11 +163,22 @@ fn draw(){
 }
 
 startup()
+def startup_ticks = ticks()
 mut last_upd_t = ticks()
 
 while(win != 0){
    if(window.should_close(win)){ break }
    def now = ticks()
+   def _elapsed = now - (startup_ticks if typeof(startup_ticks) != "undefined" else now)
+
+   ;; Auto-timeout for profiling
+   def env_t = env("NY_UI_TIMEOUT")
+   if(env_t){
+      def timeout_ns = int(str.atof(env_t) * 1e9)
+      if(now - startup_ticks >= timeout_ns){
+         window.set_should_close(win, true)
+      }
+   }
 
    mut dt = float(now - last_upd_t) / 1e9
    if(dt > 0.1){ dt = 0.016 }

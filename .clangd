@@ -13,7 +13,7 @@ CompileFlags:
     - -Isrc/rt
     - -Isrc/wire
     - -D_GNU_SOURCE
-    - -DNYTRIX_STD_PATH="/usr/share/nytrix/std_bundle.ny"
+    - -DNYTRIX_STD_PATH="/usr/share/nytrix/std.ny"
 
 Diagnostics:
   Suppress:
