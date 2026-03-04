@@ -745,6 +745,44 @@ static bool check_call_arity_diag(codegen_t *cg, token_t tok,
         ny_diag_fix("call '%s' with %d argument(s)", sig_found->name,
                     sig_arity);
       }
+
+      /* Auto-Chosen Visual Signature Hint */
+      if (sig_found && sig_found->stmt_t &&
+          sig_found->stmt_t->kind == NY_S_FUNC) {
+        ny_param_list *params = &sig_found->stmt_t->as.fn.params;
+        char sig_buf[512] = "(";
+        for (size_t k = 0; k < params->len; k++) {
+          param_t *p = &params->data[k];
+          if (p->name) {
+            strncat(sig_buf, p->name, sizeof(sig_buf) - strlen(sig_buf) - 1);
+            if (p->def)
+              strncat(sig_buf, "?", sizeof(sig_buf) - strlen(sig_buf) - 1);
+          } else {
+            strncat(sig_buf, "_", sizeof(sig_buf) - strlen(sig_buf) - 1);
+          }
+          if (k < params->len - 1) {
+            strncat(sig_buf, ", ", sizeof(sig_buf) - strlen(sig_buf) - 1);
+          }
+        }
+        strncat(sig_buf, ")", sizeof(sig_buf) - strlen(sig_buf) - 1);
+        ny_diag_hint("correct signature for '%s' is %s", sig_found->name,
+                     sig_buf);
+      }
+    }
+    /* Specific Library Hints */
+    if (sig_found && sig_found->name) {
+      if (strcmp(sig_found->name, "std.ui.gfx.draw_text") == 0 ||
+          strcmp(sig_found->name, "draw_text") == 0) {
+        ny_diag_hint("signature is: (font, text, x, y, [color])");
+      } else if (strcmp(sig_found->name, "std.ui.gfx.draw_line") == 0 ||
+                 strcmp(sig_found->name, "draw_line") == 0) {
+        ny_diag_hint("signature is: (start_v2, end_v2, color, [thickness])");
+        ny_diag_hint(
+            "use 'draw_line_2d' for (x1, y1, x2, y2, color, [thickness])");
+      } else if (strcmp(sig_found->name, "std.ui.gfx.font_load") == 0 ||
+                 strcmp(sig_found->name, "font_load") == 0) {
+        ny_diag_hint("signature is: (path, size)");
+      }
     }
     if (strict_err) {
       cg->had_error = 1;

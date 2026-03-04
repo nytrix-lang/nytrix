@@ -91,27 +91,103 @@ static void handle_segv(int sig) {
 
   print_last_trace();
 
-  fprintf(stderr, "\n%s--- Nytrix Trace Ring ---%s\n", clr(NY_CLR_CYAN),
-          clr(NY_CLR_RESET));
-  __trace_dump(((int64_t)16 << 1) | 1);
+  fprintf(stderr, "\n%s--- Nytrix Trace Ring (%d) ---%s\n", clr(NY_CLR_CYAN),
+          (int)16, clr(NY_CLR_RESET));
+  /* Modified trace dump: show snippets for the top 5 frames at least */
+  int64_t files[32], lines[32], cols[32], funcs[32];
+  extern int64_t __trace_get_frames(int64_t *f, int64_t *l, int64_t *c,
+                                    int64_t *fn, int count);
+  int count = __trace_get_frames(files, lines, cols, funcs, 16);
+  for (int i = 0; i < count; i++) {
+    char prefix[32];
+    snprintf(prefix, sizeof(prefix), "  [%d] ", i);
+    print_trace_entry(files[i], lines[i], cols[i], funcs[i], prefix);
+    if (i < 3) { /* Show snippets for top 3 deeper frames */
+      const char *fn = (const char *)(uintptr_t)files[i];
+      print_trace_snippet(fn, (int)rt_untag_v(lines[i]),
+                          (int)rt_untag_v(cols[i]));
+    }
+  }
 
   fprintf(stderr, "\n%sPotential Causes:%s\n", clr(NY_CLR_YELLOW),
           clr(NY_CLR_RESET));
   if (sig == SIGSEGV) {
-    fprintf(stderr, "  - Null pointer dereference (nil access)\n");
-    fprintf(stderr, "  - Out of bounds memory access\n");
-    fprintf(stderr, "  - Stack overflow in recursing function\n");
+    int64_t last_fn = __trace_last_func();
+    if (is_v_str(last_fn)) {
+      const char *fn_name = (const char *)(uintptr_t)last_fn;
+      if (strstr(fn_name, "dict_get") || strstr(fn_name, "get")) {
+        fprintf(
+            stderr,
+            "  - %sAuto-Debug:%s Crash occurred in '%s'. This usually means "
+            "the input list/dict was 'nil' or the key does not exist.\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET), fn_name);
+      } else if (strstr(fn_name, "append")) {
+        fprintf(stderr,
+                "  - %sAuto-Debug:%s Crash in 'append'. The target variable is "
+                "likely 'nil' instead of a list.\n",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+      } else if (strstr(fn_name, "join")) {
+        fprintf(stderr,
+                "  - %sAuto-Debug:%s Crash in 'join'. This usually happens if "
+                "the input is 'nil' or contains non-string elements.\n",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+      } else if (strstr(fn_name, "split")) {
+        fprintf(stderr,
+                "  - %sAuto-Debug:%s Crash in 'split'. The input string or "
+                "delimiter is likely 'nil'.\n",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+      } else if (strstr(fn_name, "to_str")) {
+        fprintf(stderr,
+                "  - %sAuto-Debug:%s Crash in 'to_str'. The value being "
+                "converted might be in an invalid state or nil.\n",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+      } else if (strstr(fn_name, "draw_")) {
+        fprintf(stderr,
+                "  - %sAuto-Debug:%s Crash in graphics function '%s'. Verify "
+                "coordinate values (X, Y, W, H) are finite numbers.\n",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET), fn_name);
+      }
+    }
+    fprintf(stderr,
+            "  - %sNil Pointer Access:%s Attempted to use a 'nil' value. "
+            "(Check for missing dictionary keys or uninitialized variables)\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    fprintf(stderr,
+            "  - %sTag Mismatch:%s Runtime expected a specific type (e.g., "
+            "list) but got another. (Verify function return values)\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    fprintf(stderr,
+            "  - %sGraphics Crash:%s If using Vulkan, check for invalid "
+            "coordinates (Inf/NaN) or non-conformant drivers.\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    fprintf(stderr,
+            "  - %sStack Overflow:%s Unbounded recursion or extremely deep "
+            "call stacks.\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
   } else if (sig == SIGFPE) {
-    fprintf(stderr, "  - Division by zero\n");
-    fprintf(stderr, "  - Float-to-int overflow\n");
+    fprintf(stderr,
+            "  - %sDivision by zero:%s Check denominator values in "
+            "mathematical expressions.\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    fprintf(stderr,
+            "  - %sFloat Overflow:%s Result of a float operation exceeded "
+            "representable limits.\n",
+            clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
   }
 
-  fprintf(stderr, "\n%sDebug Suggestion:%s\n", clr(NY_CLR_BOLD),
+  fprintf(stderr, "\n%sDiagnostic Recommendations:%s\n", clr(NY_CLR_BOLD),
           clr(NY_CLR_RESET));
-  fprintf(stderr, "  Run with %s-trace -v%s to see all transitions.\n",
+  fprintf(stderr,
+          "  1. Run with %s-trace -v%s to see the last executing function "
+          "before the crash.\n",
           clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
   fprintf(stderr,
-          "  Add %s--dump-on-error%s to save IR/ASM of the failing module.\n",
+          "  2. Run with %sNYTRIX_DEBUG_GFX=1%s to enable Vulkan validation if "
+          "the crash is in graphics.\n",
+          clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
+  fprintf(stderr,
+          "  3. Use %s--dump-on-error%s to inspect generated IR for invalid "
+          "logic patterns.\n",
           clr(NY_CLR_CYAN), clr(NY_CLR_RESET));
 
   fprintf(stderr, "\n");
@@ -196,8 +272,8 @@ int main(int argc, char **argv, char **envp) {
   ny_options opt;
   ny_options_init(&opt);
   ny_options_parse(&opt, argc, argv);
-  if (argc < 2 && !opt.command_string && !opt.input_file &&
-      opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&
+  if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_HELP &&
+      opt.mode != NY_MODE_VERSION && opt.mode != NY_MODE_BUNDLE &&
       isatty(STDIN_FILENO)) {
     opt.mode = NY_MODE_REPL;
   }
@@ -317,8 +393,9 @@ int main(int argc, char **argv, char **envp) {
     __set_args((int64_t)argc, (int64_t)(uintptr_t)argv,
                (int64_t)(uintptr_t)runtime_envp);
   }
-  if (argc < 2 && opt.mode != NY_MODE_REPL && !opt.command_string &&
-      !opt.input_file) {
+  if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_REPL &&
+      opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&
+      opt.mode != NY_MODE_BUNDLE) {
     ny_options_usage(argv[0]);
     return 0;
   }

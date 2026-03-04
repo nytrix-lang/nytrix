@@ -305,6 +305,7 @@ typedef struct stmt_if_t {
   expr_t *test;
   stmt_t *conseq;
   stmt_t *alt;
+  stmt_t *init;
 } stmt_if_t;
 
 typedef struct stmt_while_t {

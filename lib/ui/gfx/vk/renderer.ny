@@ -11,7 +11,7 @@ module std.ui.gfx.vk.renderer (
    clear, clear_depth, set_clear_color,
    shutdown, set_wireframe,
    _create_instance, _create_surface, _pick_physical_device, _create_logical_device,
-   _choose_composite_alpha, _choose_present_mode,
+   _choose_composite_alpha, _choose_present_mode, set_mask,
    _create_headless_image, _create_swapchain, _create_swapchain_image_views,
    _destroy_swapchain_objects, _recreate_swapchain, _create_image_views,
    _create_depth_resources, _create_render_pass, _create_framebuffers,
@@ -23,6 +23,7 @@ use std.core.mem *
 use std.math *
 use std.math.matrix *
 use std.ui.glfw as ui_glfw
+use std.ui.consts *
 use std.ui.gfx.vk.state *
 use std.ui.gfx.vk.utils *
 use std.ui.gfx.vk.buffers *
@@ -58,6 +59,24 @@ fn init(win){
    _window_ref = win
    _check_debug_env()
    if(_debug_gfx_enabled){ print("Vulkan: UBO enabled=" + to_str(_ubo_enabled)) }
+   if(win){
+       def flags = int(dict_get(win, "flags", 0))
+       _current_window_flags = flags
+       if(band(flags, 32)){ ;; WINDOW_TRANSPARENT
+          _clear_r = 0.0 _clear_g = 0.0 _clear_b = 0.0 _clear_a = 0.0
+       }
+   }
+
+   def vb_mb = env("NYTRIX_VK_VERTEX_MB")
+   if(vb_mb){
+      def n = text.atoi(vb_mb)
+      if(n >= 8){ _vertex_capacity = n * 1024 * 1024 }
+   }
+   def st_mb = env("NYTRIX_VK_STAGING_MB")
+   if(st_mb){
+      def n = text.atoi(st_mb)
+      if(n >= 16){ _staging_capacity = n * 1024 * 1024 }
+   }
 
    def mk = env("NYTRIX_VK_MARKERS")
    if(mk && (mk == "1" || mk == "true")){ _vk_markers_enabled = true }
@@ -372,6 +391,17 @@ fn set_unlit(unlit){
    if(val != _current_is_unlit){
       _flush()
       _current_is_unlit = val
+      _last_is_unlit = val
+      _pc_dirty = true
+   }
+}
+
+fn set_mask(m){
+   "Toggles mask rendering (alpha-only texture) for subsequent draw calls."
+   def val = m ? 1 : 0
+   if(val != _last_is_mask){
+      _flush()
+      _last_is_mask = val
       _pc_dirty = true
    }
 }
@@ -936,12 +966,10 @@ fn _create_logical_device(){
    true
 }
 
-fn _choose_composite_alpha(flags){
-   "Selects a supported composite alpha mode. Forcing OPAQUE to avoid transparency issues."
-   if(band(flags, 1)){ return 1 } ; OPAQUE
-   if(band(flags, 2)){ return 2 } ; PRE_MULTIPLIED
-   if(band(flags, 4)){ return 4 } ; POST_MULTIPLIED
-   if(band(flags, 8)){ return 8 } ; INHERIT
+fn _choose_composite_alpha(supported_flags){
+   if(band(supported_flags, 2)){ return 2 } ; PRE_MULTIPLIED
+   if(band(supported_flags, 1)){ return 1 } ; OPAQUE
+   if(band(supported_flags, 8)){ return 8 } ; INHERIT
    1
 }
 
@@ -1077,7 +1105,7 @@ fn _create_swapchain(win){
    store32(create_info, w, 44) ; width
    store32(create_info, h, 48) ; height
    store32(create_info, 1, 52) ; layers
-   store32(create_info, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 56)
+   store32(create_info, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 2, 56)
    store32(create_info, VK_SHARING_MODE_EXCLUSIVE, 60)
    store32(create_info, 0, 64) ; queueCount
    store32(create_info, 0, 72)

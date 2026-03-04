@@ -31,7 +31,7 @@ def FONT_REG_CANDIDATES = [
 ]
 
 fn startup(){
-   win = init_window(int(win_w), int(win_h), "Nytrix Terminal", WINDOW_MAXIMIZE | WINDOW_CENTER_CURSOR)
+   win = init_window(int(win_w), int(win_h), "Nytrix Terminal", WINDOW_CENTER | WINDOW_ALLOW_DND | WINDOW_TRANSPARENT | WINDOW_NO_BORDER)
    if(!win){ print("Failed to create window") exit(1) }
    window.set_exit_key(win, KEY_NULL)
    window.set_input_exclusive(win, true)
@@ -45,15 +45,18 @@ fn startup(){
 
    _init_vt()
    window.set_cursor_mode(win, window.CURSOR_NORMAL)
+   _resize_term()
 }
 
 fn _init_vt(){
    def char_sz = measure_text(font, "A")
-   mut cw = get(char_sz, 0) if(cw <= 0.0){ cw = 9.0 }
-   def ch = floor(font_size * 1.25)
+   mut cw = get(char_sz, 0)
+   mut ch = font_size
+   if(cw <= 1.0){ cw = font_size * 0.6 }
+   if(ch <= 1.0){ ch = 20.0 }
 
-   mut cols = int((win_w - 4.0) / cw)
-   mut rows = int((win_h - 4.0) / ch)
+   mut cols = int(win_w / cw)
+   mut rows = int(win_h / ch)
    if(cols <= 0){ cols = 80 } if(rows <= 0){ rows = 24 }
 
    mut fonts = dict()
@@ -63,6 +66,9 @@ fn _init_vt(){
    fonts = dict_set(fonts, "emoji", font_emoji)
 
    vt = vterm.new(cols, rows, fonts)
+   ;; TILING: Force cells to fill every pixel of the window
+   vt = dict_set(vt, "char_w", win_w / float(cols))
+   vt = dict_set(vt, "char_h", win_h / float(rows))
 
    vt = dict_set(vt, "window_id", window.id(win))
    def shell = env("SHELL")
@@ -132,6 +138,13 @@ fn _reload_fonts(){
 }
 
 fn update(dt){
+   def sz = window.size(win)
+   if(get(sz, 0) != int(win_w) || get(sz, 1) != int(win_h)){
+      win_w = float(get(sz, 0))
+      win_h = float(get(sz, 1))
+      _resize_term()
+   }
+
    mut e = window.check_event(win)
    mut event_count = 0
    while(e != 0){
@@ -155,6 +168,7 @@ fn update(dt){
                   if((mode & 2) == 0){
                      def now_ms = int(ticks() / 1000000)
                      if(last_esc_ms != 0 && (now_ms - last_esc_ms) < 400){
+                  if(env("NYTRIX_AUTO_DUMP")){ snapshot("build/release/fb_dump.tga") }
                   window.set_should_close(win, true)
                   e = window.check_event(win)
                   continue
@@ -200,11 +214,18 @@ fn update(dt){
 
 fn _resize_term(){
    def char_sz = measure_text(font, "A")
-   mut cw = get(char_sz, 0) if(cw <= 0.0){ cw = 9.0 }
-   def ch = floor(font_size * 1.25)
-   def cols = int((win_w - 4.0) / cw)
-   def rows = int((win_h - 4.0) / ch)
-   if(cols > 0 && rows > 0){ vt = vterm.resize(vt, cols, rows) }
+   mut cw = get(char_sz, 0)
+   mut ch = font_size
+   if(cw <= 1.0){ cw = font_size * 0.6 }
+   if(ch <= 1.0){ ch = 20.0 }
+   def cols = int(win_w / cw)
+   def rows = int(win_h / ch)
+   if(cols > 0 && rows > 0){
+      vt = vterm.resize(vt, cols, rows)
+      ;; TILING: Perfect window fit
+      vt = dict_set(vt, "char_w", win_w / float(cols))
+      vt = dict_set(vt, "char_h", win_h / float(rows))
+   }
    set_win_size(win_w, win_h)
 }
 
@@ -217,8 +238,16 @@ fn draw(){
 
 startup()
 mut last_t = ticks()
+mut startup_ticks = ticks()
 while(!window.should_close(win)){
    def now = ticks()
+   def env_t = env("NY_UI_TIMEOUT")
+   if(env_t){
+      def timeout_ns = int(str.atof(env_t) * 1e9)
+      if(now - startup_ticks >= timeout_ns){
+         window.set_should_close(win, true)
+      }
+   }
    def dt = float(now - last_t) / 1e9
    last_t = now
    update(dt)

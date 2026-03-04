@@ -273,6 +273,13 @@ def MAXIMIZED                   = 0x00020008
 def CENTER_CURSOR               = 0x00020009
 def TRANSPARENT_FRAMEBUFFER     = 0x0002000A
 def FOCUS_ON_SHOW               = 0x0002000C
+def RED_BITS                    = 0x00021001
+def GREEN_BITS                  = 0x00021002
+def BLUE_BITS                   = 0x00021003
+def ALPHA_BITS                  = 0x00021004
+def DEPTH_BITS                  = 0x00021005
+def STENCIL_BITS                = 0x00021006
+def DOUBLEBUFFER                = 0x00021010
 def SAMPLES                     = 0x0002100D
 
 mut _title_buf = 0
@@ -338,6 +345,7 @@ if(comptime{ __os_name() == "linux" || __os_name() == "macos" }){
    extern fn glfwGetGamepadName(jid: i32): ptr as "glfwGetGamepadName"
    extern fn glfwSetJoystickCallback(cb: ptr): ptr as "glfwSetJoystickCallback"
    extern fn glfwUpdateGamepadMappings(s: ptr): i32 as "glfwUpdateGamepadMappings"
+   extern fn glfwSetWindowOpacity(win: ptr, v: f32) as "glfwSetWindowOpacity"
 } else if(comptime{ __os_name() == "windows" }){
    #link "glfw3"
 
@@ -406,16 +414,16 @@ fn terminate(){
 
 fn apply_hints(flags){
    "Internal: Applies GLFW window hints based on Nytrix window flags."
-   if((flags & WINDOW_TRANSPARENT) != 0){
+   if(band(flags, 32)){ ;; WINDOW_TRANSPARENT
       glfwWindowHint(TRANSPARENT_FRAMEBUFFER, 1)
    } else {
       glfwWindowHint(TRANSPARENT_FRAMEBUFFER, 0)
    }
-   if((flags & WINDOW_NO_BORDER)   != 0){ glfwWindowHint(DECORATED, 0) }
-   if((flags & WINDOW_NO_RESIZE)   != 0){ glfwWindowHint(RESIZABLE, 0) }
-   if((flags & WINDOW_FLOATING)    != 0){ glfwWindowHint(FLOATING, 1) }
-   if((flags & WINDOW_MAXIMIZE)    != 0){ glfwWindowHint(MAXIMIZED, 1) }
-   if((flags & WINDOW_HIDE)        != 0){ glfwWindowHint(VISIBLE, 0) }
+   if(band(flags, 1) || band(flags, 32)){ glfwWindowHint(DECORATED, 0) } ;; FORCE borderless for transparency
+   if(band(flags, 2)){  glfwWindowHint(RESIZABLE, 0) }
+   if(band(flags, 4096)){ glfwWindowHint(FLOATING, 1) }
+   if(band(flags, 1024)){ glfwWindowHint(MAXIMIZED, 1) }
+   if(band(flags, 512)){  glfwWindowHint(VISIBLE, 0) }
 }
 
 fn create_window(title, w, h, flags=0){
@@ -424,7 +432,8 @@ fn create_window(title, w, h, flags=0){
    if(!title){ title = "nytrix" }
    glfwWindowHint(CLIENT_API, NO_API)
    apply_hints(flags)
-   glfwCreateWindow(w, h, _title_cstr(title), 0, 0)
+   mut win = glfwCreateWindow(w, h, cstr(title), 0, 0)
+   win
 }
 
 fn destroy_window(win){
@@ -441,7 +450,7 @@ fn set_should_close(win, v=1){
 }
 fn set_title(win, title){
    "Sets the title of the specified window."
-   glfwSetWindowTitle(win, _title_cstr(title))
+   glfwSetWindowTitle(win, cstr(title))
 }
 fn get_pos(win){
    "Returns the window's screen position as [x, y]."

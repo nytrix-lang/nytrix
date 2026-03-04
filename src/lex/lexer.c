@@ -687,6 +687,8 @@ token_t lexer_next(lexer_t *lx) {
   case '|':
     if (match(lx, '|'))
       return make_token(lx, NY_T_OR, start);
+    if (match(lx, '>'))
+      return make_token(lx, NY_T_PIPE, start);
     return make_token(lx, NY_T_BITOR, start);
   case '^':
     return make_token(lx, NY_T_BITXOR, start);
@@ -697,6 +699,10 @@ token_t lexer_next(lexer_t *lx) {
   case '#':
     return make_token(lx, NY_T_HASH, start);
   case '?':
+    if (match(lx, '?'))
+      return make_token(lx, NY_T_QUESTION_QUESTION, start);
+    if (match(lx, '.'))
+      return make_token(lx, NY_T_QUESTION_DOT, start);
     return make_token(lx, NY_T_QUESTION, start);
   case '@':
     return make_token(lx, NY_T_AT, start);

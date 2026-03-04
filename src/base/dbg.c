@@ -12,8 +12,10 @@ void ny_dbg_loc(codegen_t *cg, token_t tok) {
       scope = cg->di_scope;
     LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(
         cg->ctx, (unsigned)tok.line, (unsigned)tok.col, scope, NULL);
-    if (loc)
+    if (loc) {
+      cg->di_loc = loc;
       LLVMSetCurrentDebugLocation2(cg->builder, loc);
+    }
   }
   if (verbose_enabled >= 2) {
     NY_LOG_DEBUG("DBG_LOC: %s:%d:%d\n",

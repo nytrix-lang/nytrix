@@ -30,8 +30,11 @@ from commands import (
     run_perf,
     run_asan,
     run_ubsan,
+    run_optcheck,
+    run_bin,
+    run_analyze,
+    run_fb,
 )
-from tidy import run_tidy
 
 COMMANDS = (
     "all",
@@ -47,12 +50,31 @@ COMMANDS = (
     "clean",
     "debug",
     "tidy",
+    "perf",
+    "asan",
+    "ubsan",
+    "optcheck",
+    "analyze",
+    "fb",
+    "ny",
 )
 
 ENV_GATES = (
     ("SAN=1|asan|ubsan|all", "run sanitizer gate(s) after tests"),
     ("PERF=1", "run perf gate after tests"),
 )
+
+def _get_git_commit_count():
+    try:
+        import subprocess
+        count = subprocess.check_output(["git", "rev-list", "--count", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        return count
+    except Exception:
+        return "0"
+
+def _get_version():
+    commits = _get_git_commit_count()
+    return f"0.1.{commits}"
 
 def _default_test_cache_root():
     explicit = (os.environ.get("NYTRIX_TEST_CACHE_DIR") or "").strip()
@@ -330,12 +352,36 @@ def _print_profile_summary(timings, total_s):
 
 def main():
     setup_session_env()
-    parser = argparse.ArgumentParser(description="Nytrix Build Tool")
+    
+    # Special handling for 'ny' command to capture all subsequent arguments exactly as they are.
+    # This prevents argparse from eating flags like -v or -h.
+    all_argv = sys.argv[1:]
+    ny_idx = -1
+    for i, arg in enumerate(all_argv):
+        if arg == "ny":
+            ny_idx = i
+            break
+            
+    if ny_idx != -1:
+        # Only parse arguments up to 'ny' as build tool commands/options
+        parse_argv = all_argv[:ny_idx+1]
+        extra_argv = all_argv[ny_idx+1:]
+    else:
+        parse_argv = all_argv
+        extra_argv = []
+
+    parser = argparse.ArgumentParser(description="Nytrix Build Tool", add_help=False)
     parser.add_argument("commands", nargs="*", default=["all"])
     parser.add_argument("-j", "--jobs", type=int, default=0)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
+    parser.add_argument("--version", action="store_true")
     parser.add_argument("--profile", action="store_true", help="print per-phase timing summary")
-    args, unknown = parser.parse_known_args()
+    
+    args, unknown = parser.parse_known_args(parse_argv)
+    # Merge any unknown positional before 'ny' and all arguments after 'ny'
+    unknown = list(unknown) + extra_argv
+    
     profile_enabled = args.profile or _env_on("NYTRIX_PROFILE")
     timings = []
     total_t0 = time.perf_counter()
@@ -345,25 +391,62 @@ def main():
 
         valid = set(COMMANDS)
         valid.add("help")
-        if any(c in ("help", "-h", "--help") for c in args.commands):
-            _print_help()
+        valid.add("debug")
+        valid.add("release")
+        
+        # Determine if we should show 'make' help. 
+        # Show help if explicitly asked and 'ny' is NOT the focus of the help.
+        if args.help or any(c == "help" for c in args.commands):
+            if "ny" not in args.commands or any(c == "help" for c in args.commands):
+                _print_help()
+                return 0
+
+        if args.version:
+            print(f"Nytrix Build Tool {_get_version()}")
             return 0
 
         valid_cmds = []
-        extra_args = list(unknown)
+        extra_args = []
         is_debug_build = "debug" in args.commands
-        for c_cmd in args.commands:
-            if c_cmd in valid:
-                if c_cmd != "debug":
+
+        i = 0
+        perf_mode = "perf" in args.commands
+        while i < len(args.commands):
+            c_cmd = args.commands[i]
+            if c_cmd == "perf":
+                valid_cmds.append("perf")
+            elif c_cmd == "ny":
+                if not perf_mode:
+                    valid_cmds.append("ny")
+                    # Standalone 'ny' - script is at i+1
+                    extra_args.extend(args.commands[i+1:])
+                else:
+                    # 'perf' is also present - keep 'ny' for perf's parser
+                    extra_args.extend(args.commands[i:])
+                break
+            elif c_cmd in valid:
+                if c_cmd not in ("debug", "release"):
                     valid_cmds.append(c_cmd)
             else:
                 extra_args.append(c_cmd)
+            i += 1
 
-        unknown = extra_args
+        # Merge collected extra args and any remaining unknowns
+        final_unknown = []
+        for u in extra_args + list(unknown or []):
+            if u not in final_unknown:
+                final_unknown.append(u)
+        
+        unknown = final_unknown
         args.commands = valid_cmds
+        # Ensure 'fb' is always at the end of the command chain
+        if "fb" in args.commands:
+            args.commands = [c for c in args.commands if c != "fb"] + ["fb"]
 
-        if not args.commands:
+        if not args.commands and not unknown:
             args.commands = ["all"]
+        elif not args.commands and unknown:
+            args.commands = ["ny"]
 
         will_run_tests = any(c in ("test", "all") for c in args.commands)
         if will_run_tests and "NYTRIX_TEST_NATIVE_DEPS" not in os.environ:
@@ -385,14 +468,15 @@ def main():
             "docs": ["ny", "std_bundle"],
             "install": ["ny", "ny-lsp", "std_bundle", *non_windows_runtime],
             "tidy": [],
+            "ny": ["ny"],
         }
 
-        # Auto-tidy logic (skip with NYTRIX_SKIP_TIDY=1)
-        if any(c in ("all", "bin", "std", "test", "tidy") for c in args.commands):
+        # Auto-fmt logic (skip with NYTRIX_SKIP_TIDY=1)
+        if any(c_cmd in ("all", "bin", "std", "test", "tidy", "fmt") for c_cmd in args.commands):
             if os.environ.get("NYTRIX_SKIP_TIDY"):
-                log("TIDY", "skipped (NYTRIX_SKIP_TIDY=1)")
+                log("FMT", "skipped (NYTRIX_SKIP_TIDY=1)")
             else:
-                _timed_call(profile_enabled, timings, "tidy:run", run_tidy)
+                _timed_call(profile_enabled, timings, "fmt:run", run_fmt)
 
         clean_seen = False
         for cmd in args.commands:
@@ -405,13 +489,13 @@ def main():
                 for d in ROOT.rglob("__pycache__"):
                     if d.is_dir():
                         shutil.rmtree(d, ignore_errors=True)
-                        pycache_dirs += 1
+                        pycache_dirs = pycache_dirs + 1
                 for pat in ("*.pyc", "*.pyo"):
                     for f in ROOT.rglob(pat):
                         try:
                             if f.is_file():
                                 f.unlink()
-                                pycache_files += 1
+                                pycache_files = pycache_files + 1
                         except OSError:
                             pass
                 log(
@@ -546,6 +630,34 @@ def main():
                 _timed_call(profile_enabled, timings, "uninstall:run", run_uninstall, BUILD_DIR, kind)
             elif cmd == "tidy":
                 pass # Already run above
+            elif cmd == "ny":
+                _timed_call(
+                    profile_enabled, timings, "ny:run", run_bin, BUILD_DIR, kind, unknown
+                )
+            elif cmd == "perf":
+                _timed_call(
+                    profile_enabled, timings, "perf:run", run_perf, BUILD_DIR, kind, unknown
+                )
+            elif cmd == "asan":
+                _timed_call(
+                    profile_enabled, timings, "asan:run", run_asan, BUILD_DIR, n_jobs, unknown
+                )
+            elif cmd == "ubsan":
+                _timed_call(
+                    profile_enabled, timings, "ubsan:run", run_ubsan, BUILD_DIR, n_jobs, unknown
+                )
+            elif cmd == "optcheck":
+                _timed_call(
+                    profile_enabled, timings, "optcheck:run", run_optcheck, BUILD_DIR
+                )
+            elif cmd == "analyze":
+                _timed_call(
+                    profile_enabled, timings, "analyze:run", run_analyze, unknown
+                )
+            elif cmd == "fb":
+                _timed_call(
+                    profile_enabled, timings, "fb:run", run_fb, unknown
+                )
 
         return 0
     except KeyboardInterrupt:

@@ -13,7 +13,7 @@ module std.os (
    GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE,
    ACCEL_TARGET, ACCEL_OBJECT,
    PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK,
-   set_clipboard_text, get_clipboard_text, exit
+   set_clipboard_text, get_clipboard_text, exit, fetch
 )
 use std.core *
 use std.core.error *
@@ -32,6 +32,11 @@ fn set_clipboard_text(text){
 fn get_clipboard_text(){
    "Retrieves text from the system clipboard."
    cb.get_text()
+}
+
+fn fetch(url){
+   "Downloads content from `url` using curl."
+   __fetch(url)
 }
 
 use std.os.prim *

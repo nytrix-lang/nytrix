@@ -13,7 +13,17 @@ use std.str.str *
 use std.str.bytes *
 use std.core.primitives *
 use std.core.dict_mod *
-use std.core *
+
+@inline fn _is_dict(x){ __tagof(x) == 101 }
+@inline fn _is_list(x){ __tagof(x) == 100 }
+@inline fn _is_set(x){ __tagof(x) == 102 }
+@inline fn _is_tuple(x){ __tagof(x) == 103 }
+@inline fn _is_str(x){
+   if(!x || __is_int(x)){ return false }
+   def t = __tagof(x)
+   t == 120 || t == 121
+}
+@inline fn _is_float(x){ __tagof(x) == 110 }
 
 fn len(x){
    "Returns the number of elements in a collection or the length of a string.
@@ -21,7 +31,7 @@ fn len(x){
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size.
    Returns `0` for other types."
-   if(x == 0){ return 0 }
+   if(!x){ return 0 }
    if(__is_int(x)){ return 0 }
    if(__is_str_obj(x)){ return str_len(x) }
    def kind = __tagof(x)
@@ -92,7 +102,7 @@ fn type(x){
    Return values: `none`, `int`, `float`, `str`, `list`, `dict`, `set`, `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
    if(x == true || x == false){ return "bool" }
    if(__is_int(x)){ return "int" }
-   if(is_str(x)){ return "str" }
+   if(_is_str(x)){ return "str" }
    if(__is_ny_obj(x)){
       def tag = __tagof(x)
       return case tag {
@@ -146,10 +156,10 @@ fn mul(a, b){
          if(_is_list_or_tuple(b) && len(b) == 16){ return _mat4_mul(a, b) }
          if(_is_list_or_tuple(b) && len(b) == 4){ return _mat4_mul_vec4(a, b) }
       }
-      if(__is_int(b) || is_float(b)){ return _list_scale(a, b, 0) }
+      if(__is_int(b) || _is_float(b)){ return _list_scale(a, b, 0) }
       if(_is_list_or_tuple(b)){ return _list_zip2(a, b, 2) }
    }
-   if(_is_list_or_tuple(b) && (__is_int(a) || is_float(a))){ return _list_scale(b, a, 0) }
+   if(_is_list_or_tuple(b) && (__is_int(a) || _is_float(a))){ return _list_scale(b, a, 0) }
    return __mul(a, b)
 }
 
@@ -161,7 +171,7 @@ fn div(a, b){
    if(_is_list_or_tuple(a) && _is_list_or_tuple(b)){
       return _list_zip2(a, b, 3)
    }
-   if(_is_list_or_tuple(a) && (__is_int(b) || is_float(b))){ return _list_scale(a, b, 1) }
+   if(_is_list_or_tuple(a) && (__is_int(b) || _is_float(b))){ return _list_scale(a, b, 1) }
    return __div(a, b)
 }
 
@@ -182,7 +192,7 @@ fn _list_zip2(a, b, op){
    def na = len(a)
    def nb = len(b)
    def n = (na < nb) ? na : nb
-   def out_tag = (is_tuple(a) && is_tuple(b)) ? 103 : 100
+   def out_tag = (_is_tuple(a) && _is_tuple(b)) ? 103 : 100
    mut out = _list_like(n)
    mut i = 0
    while(i < n){
@@ -204,7 +214,7 @@ fn _list_zip2(a, b, op){
 fn _list_scale(a, s, op){
    "Internal: performs element-wise operations between list `a` and scalar `s` (0: multiplication, 1: division)."
    def n = len(a)
-   def out_tag = is_tuple(a) ? 103 : 100
+   def out_tag = _is_tuple(a) ? 103 : 100
    mut out = _list_like(n)
    mut i = 0
    while(i < n){
@@ -349,13 +359,13 @@ fn repr(x){
    if(x == false){ return "false" }
    if(__is_int(x)){ return __to_str(x) }
    if(!x){ return "none" }
-   if(is_str(x)){ return f"\"{x}\"" }
+   if(_is_str(x)){ return f"\"{x}\"" }
    if(!__is_ny_obj(x)){
       return to_str(x)
    }
    def kind = __tagof(x)
    ; Check for bigint first (it's a list with special marker)
-   if(kind == 100 && is_list(x) && len(x) >= 3 && get(x, 0) == 107){
+   if(kind == 100 && _is_list(x) && len(x) >= 3 && get(x, 0) == 107){
       def f = get(globals(), "std.math.bigint.bigint_to_str")
       if(f){ return f(x) }
       return "<bigint>"
@@ -421,7 +431,7 @@ fn repr(x){
 fn hash(x){
    "Returns a **64-bit FNV-1a hash** of value `x`. Currently supports integers and strings."
    if(__is_int(x)){ return x }
-   if(is_str(x)){
+   if(_is_str(x)){
       mut h = 14695981039346656037
       mut i = 0
       def n = str_len(x)
@@ -441,10 +451,10 @@ fn globals(){
 
 fn items(x){
    "Generic item iterator. Returns a list of `[index/key, value]` pairs."
-   if(is_dict(x)){
+   if(_is_dict(x)){
       return dict_items(x)
    }
-   if(is_set(x)){
+   if(_is_set(x)){
       def its = dict_items(x)
       mut out = list(8)
       mut i = 0
@@ -455,7 +465,7 @@ fn items(x){
       }
       return out
    }
-   if(is_list(x) || is_tuple(x) || is_str(x)){
+   if(_is_list(x) || _is_tuple(x) || _is_str(x)){
       mut out = list(8)
       def n = len(x)
       mut i = 0
@@ -470,13 +480,13 @@ fn items(x){
 
 fn keys(x){
    "Generic key iterator. Returns keys or indices for the given collection."
-   if(is_dict(x)){
+   if(_is_dict(x)){
       return dict_keys(x)
    }
-   if(is_set(x)){
+   if(_is_set(x)){
       return items(x)
    }
-   if(is_list(x) || is_tuple(x) || is_str(x)){
+   if(_is_list(x) || _is_tuple(x) || _is_str(x)){
       mut out = list(8)
       def n = len(x)
       mut i = 0
@@ -491,13 +501,13 @@ fn keys(x){
 
 fn values(x){
    "Generic value iterator for all collection types."
-   if(is_dict(x)){
+   if(_is_dict(x)){
       return dict_values(x)
    }
-   if(is_set(x)){
+   if(_is_set(x)){
       return items(x)
    }
-   if(is_list(x) || is_tuple(x) || is_str(x)){
+   if(_is_list(x) || _is_tuple(x) || _is_str(x)){
       mut out = list(8)
       def n = len(x)
       mut i = 0
@@ -551,8 +561,8 @@ fn get(obj, key, default=0){
 
 fn set_idx(obj, key, val){
    "Generic element setter. Supported for dicts and lists. Returns the object or 0 on failure."
-   if(is_dict(obj)){ return dict_set(obj, key, val) }
-   elif(is_list(obj)){
+   if(_is_dict(obj)){ return dict_set(obj, key, val) }
+   elif(_is_list(obj)){
       def n = len(obj)
       if(key < 0){ key = key + n }
       if(key < 0 || key >= n){ return 0 }
@@ -571,10 +581,10 @@ fn set(obj, key, val){
 
 fn slice(obj, start, stop, step=1){
    "Generic **slice** operation for strings and lists."
-   if(is_str(obj)){
+   if(_is_str(obj)){
        return utf8_slice(obj, start, stop, step)
    }
-   elif(is_list(obj)){
+   elif(_is_list(obj)){
        def n = len(obj)
        if(start < 0){ start = n + start }
        if(stop < 0){ stop = n + stop }
@@ -607,7 +617,7 @@ fn slice(obj, start, stop, step=1){
 
 fn append(lst, v){
    "Appends value `v` to the end of list `lst`. Returns the (possibly reallocated) list ptr."
-   if(!is_list(lst)){ return lst }
+   if(!_is_list(lst)){ return lst }
    else {
      mut out = lst
      def n = __load64_idx(out, 0)
@@ -631,7 +641,7 @@ fn append(lst, v){
 
 fn pop(lst){
    "Removes and returns the last element from list `lst`. Returns `0` if empty."
-   if(!is_list(lst)){ return 0 }
+   if(!_is_list(lst)){ return 0 }
    else {
    def n = __load64_idx(lst, 0)
    if(n == 0){ return 0 }
@@ -645,7 +655,7 @@ fn pop(lst){
 
 fn extend(lst, other){
    "Appends all elements from collection `other` to the list `lst`."
-   if(!is_list(lst)){ return lst }
+   if(!_is_list(lst)){ return lst }
    mut i = 0
    def n = len(other)
    while(i < n){
@@ -664,11 +674,11 @@ fn to_str(v){
    if(v == false){ return "false" }
    if(__is_int(v)){ return __to_str(v) }
    if(!v){ return "none" }
-   if(is_str(v)){ return v }
+   if(_is_str(v)){ return v }
    def kind = __tagof(v)
    if(!__is_ny_obj(v)){ return __to_str(v) }
    ; Check for bigint first (it's a list with special marker)
-   if(kind == 100 && is_list(v) && len(v) >= 3 && get(v, 0) == 107){
+   if(kind == 100 && _is_list(v) && len(v) >= 3 && get(v, 0) == 107){
       def f = get(globals(), "std.math.bigint.bigint_to_str")
       if(f){ return f(v) }
       return "<bigint>"

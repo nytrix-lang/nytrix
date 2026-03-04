@@ -1490,6 +1490,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   // creates incomplete PHIs at the function entry.
 
   LLVMMetadataRef prev_scope = cg->di_scope;
+  LLVMMetadataRef prev_loc = cg->di_loc;
   if (cg->debug_symbols && cg->di_builder) {
     LLVMMetadataRef sp = codegen_debug_subprogram(cg, f, name, fn->tok);
     if (sp)
@@ -1709,6 +1710,10 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   vec_free(&assigned_names);
   vec_free(&assigned_hashes);
   cg->di_scope = prev_scope;
+  cg->di_loc = prev_loc;
+  if (cg->debug_symbols && cg->builder) {
+    LLVMSetCurrentDebugLocation2(cg->builder, prev_loc);
+  }
   if (cur)
     LLVMPositionBuilderAtEnd(cg->builder, cur);
 }

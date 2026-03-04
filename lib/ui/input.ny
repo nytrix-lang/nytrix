@@ -7,10 +7,9 @@ module std.ui.input (
    KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE,
    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
    KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END,
-   KEY_W, KEY_S, KEY_A, KEY_D,
-   KEY_E, KEY_Q,
-   KEY_P, KEY_O, KEY_N,
-   KEY_C, KEY_V, KEY_U, KEY_K, KEY_L, KEY_R,
+   KEY_W, KEY_S, KEY_A, KEY_D, KEY_E, KEY_Q, KEY_R, KEY_P, KEY_O, KEY_N, KEY_M,
+   KEY_B, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_T, KEY_X, KEY_Y, KEY_Z,
+   KEY_C, KEY_V, KEY_U, KEY_K, KEY_L,
    KEY_SHIFT,
    KEY_CTRL,
    KEY_ESC,
@@ -65,26 +64,37 @@ def KEY_F9        = 1016
 def KEY_F10       = 1017
 def KEY_F11       = 1018
 def KEY_F12       = 1019
-def KEY_W = 87
-def KEY_S = 83
 def KEY_A = 65
+def KEY_B = 66
+def KEY_C = 67
 def KEY_D = 68
 def KEY_E = 69
-def KEY_Q = 81
-def KEY_P = 80
-def KEY_O = 79
-def KEY_N = 78
-def KEY_C = 67
-def KEY_U = 85
+def KEY_F = 70
+def KEY_G = 71
+def KEY_H = 72
+def KEY_I = 73
+def KEY_J = 74
 def KEY_K = 75
 def KEY_L = 76
+def KEY_M = 77
+def KEY_N = 78
+def KEY_O = 79
+def KEY_P = 80
+def KEY_Q = 81
 def KEY_R = 82
+def KEY_S = 83
+def KEY_T = 84
+def KEY_U = 85
+def KEY_V = 86
+def KEY_W = 87
+def KEY_X = 88
+def KEY_Y = 89
+def KEY_Z = 90
 def KEY_SHIFT = 16
 def KEY_CTRL = 17
 def KEY_ESC = 27
 def KEY_GRAVE = 96
 def KEY_DELETE = 127
-def KEY_V = 86
 def KEY_MINUS = 45
 def KEY_EQUAL = 61
 
