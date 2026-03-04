@@ -12,37 +12,29 @@ module std.os.audio.res (
 use std.core *
 use std.core.error *
 use std.core.dict_mod *
-use std.os *
+use std.os (file_write, file_remove, temp_dir, env)
 use std.os.path as path
 use std.os.fs as fs
 use std.str as str
-use std.os.ffi *
 use std.image as image
 use std.os.audio.source *
 
-if(comptime{ __os_name() == "linux" || __os_name() == "macos" || __os_name() == "windows" }){
-   #link "sndfile"
-
-   extern fn sf_open(path: ptr, mode: i32, sfinfo: ptr): ptr as "sf_open"
-   extern fn sf_close(sndfile: ptr): i32 as "sf_close"
-   extern fn sf_read_short(sndfile: ptr, buf: ptr, items: i64): i64 as "sf_read_short"
-   extern fn sf_strerror(sndfile: ptr): ptr as "sf_strerror"
-   extern fn sf_error(sndfile: ptr): i32 as "sf_error"
+if(comptime{ __os_name() == "linux" }){
+   #link "libsndfile.so"
+   #include <sndfile.h> as "sf_"
+}
+if(comptime{ __os_name() == "windows" }){
+   #link "libsndfile-1.lib"
+   #include <sndfile.h> as "sf_"
+}
+if(comptime{ __os_name() == "macos" }){
+   #link "libsndfile.dylib"
+   #include <sndfile.h> as "sf_"
 }
 
 def SFM_READ = 0x10
 
-mut _sf_avail = -1
-
-fn _sf_available(){
-   "Checks whether libsndfile is available for extended audio decoding."
-   if(_sf_avail != -1){ return _sf_avail == 1 }
-   def h = dlopen_checked("sndfile", "sf_open")
-   if(h == 0){ _sf_avail = 0 return false }
-   dlclose(h)
-   _sf_avail = 1
-   true
-}
+fn _sf_available(){ "Checks whether libsndfile is available (linked via #include)." true }
 
 fn _decode_sf(data){
    "Decodes audio bytes through libsndfile by routing them through a temporary file."

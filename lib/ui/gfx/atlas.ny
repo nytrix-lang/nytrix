@@ -27,9 +27,9 @@ fn atlas_create(w=2048, h=2048){
 
    def state_ptr = malloc(64)
    memset(state_ptr, 0, 64)
-   store32(state_ptr, 2, 0)  ; cx
-   store32(state_ptr, 2, 4)  ; cy
-   store32(state_ptr, 0, 8)  ; mrh
+   store32(state_ptr, 2, 0) ; cx
+   store32(state_ptr, 2, 4) ; cy
+   store32(state_ptr, 0, 8) ; mrh
    store32(state_ptr, 0, 12) ; dirty
    store32(state_ptr, w, 16) ; dx1
    store32(state_ptr, h, 20) ; dy1
@@ -105,7 +105,7 @@ fn atlas_add(a, key, w, h, pixels){
    }
 
    if(h > mrh){ mrh = h }
-   
+
    ;; Commit new packing cursor
    store32(state_ptr, cx + w + 2, 0)
    store32(state_ptr, cy, 4)
@@ -127,7 +127,7 @@ fn atlas_flush(a){
    def tex_id  = dict_get(a, "tex_id", -1)
    def aw = dict_get(a, "width")
    def ah = dict_get(a, "height")
-   
+
    def dx1 = load32(state_ptr, 16) def dy1 = load32(state_ptr, 20)
    def dx2 = load32(state_ptr, 24) def dy2 = load32(state_ptr, 28)
    if(dx2 <= dx1 || dy2 <= dy1){ return }

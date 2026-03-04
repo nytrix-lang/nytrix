@@ -10,7 +10,7 @@ use std.core *
 use std.math *
 use std.math.vector *
 use std.math.matrix *
-use std.ui.input as input
+use std.ui.window.input as input
 use std.ui.window as window
 use std.util.common as common
 

@@ -21,8 +21,8 @@ fn _bind_descriptors(cb){
    def ubo_ds = _current_frame_ubo_ds
    if(_bindless_enabled){
       if(_bindless_ds && (_bindless_ds != _last_bound_ds || ubo_ds != _last_bound_ubo_ds)){
-         store64_raw(_ptr_ds, _bindless_ds, 0)
-         store64_raw(_ptr_ds, ubo_ds, 8)
+         store64_h(_ptr_ds, _bindless_ds, 0)
+         store64_h(_ptr_ds, ubo_ds, 8)
          cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 2, _ptr_ds, 0, 0)
          _last_bound_ds = _bindless_ds
          _last_bound_ubo_ds = ubo_ds
@@ -32,8 +32,8 @@ fn _bind_descriptors(cb){
       if(tid < 0 || tid >= len(_textures)){ tid = _default_texture }
       def ds = texture_descriptor(tid)
       if(ds && (ds != _last_bound_ds || tid != _last_bound_tex_id || ubo_ds != _last_bound_ubo_ds)){
-         store64_raw(_ptr_ds, ds, 0)
-         store64_raw(_ptr_ds, ubo_ds, 8)
+         store64_h(_ptr_ds, ds, 0)
+         store64_h(_ptr_ds, ubo_ds, 8)
          cmd_bind_descriptor_sets(cb, 0, _pipeline_layout, 0, 2, _ptr_ds, 0, 0)
          _last_bound_ds = ds _last_bound_tex_id = tid
          _last_bound_ubo_ds = ubo_ds
@@ -184,7 +184,7 @@ fn draw_lines_raw(ptr, line_count, _line_width){
    _last_flush_offset = _vertex_offset
 
    ; Rebind VBO back to slice start so subsequent triangle _flush calls work
-   store64_raw(_flush_off, _current_frame_vertex_offset, 0)
+   store64_h(_flush_off, _current_frame_vertex_offset, 0)
    cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
    true
 }
@@ -440,7 +440,7 @@ fn draw_static_buffer(sbuf, is_lines=false, width=1.0){
    _bind_descriptors(cb)
    _sync_pc()
 
-   store64_raw(_static_vbo_ptr, buf, 0)
+   store64_h(_static_vbo_ptr, buf, 0)
 
    cmd_bind_vertex_buffers(cb, 0, 1, _static_vbo_ptr, _static_off_ptr)
    cmd_draw(cb, count, 1, 0, 0)
@@ -449,10 +449,10 @@ fn draw_static_buffer(sbuf, is_lines=false, width=1.0){
    _frame_draw_calls += 1
 
    ; Rebind dynamic VBO back
-   store64_raw(_static_off_ptr, _current_frame_vertex_offset, 0)
-   store64_raw(_static_vbo_ptr, _vertex_buffer, 0)
+   store64_h(_static_off_ptr, _current_frame_vertex_offset, 0)
+   store64_h(_static_vbo_ptr, _vertex_buffer, 0)
    cmd_bind_vertex_buffers(cb, 0, 1, _static_vbo_ptr, _static_off_ptr)
-   store64_raw(_static_off_ptr, 0, 0)
+   store64_h(_static_off_ptr, 0, 0)
    true
 }
 

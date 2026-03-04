@@ -14,7 +14,7 @@ use std.ui.gfx.shader as lib_shader
 use std.ui.diag as diag
 use std.ui.gfx.term as terminal
 use std.ui.gfx.vterm as vterm
-use std.ui.gamepad as gamepad
+use std.ui.window.input.gamepad as gamepad
 
 fn shader_transpile(combined_src){
    "Proxy to graphics shader transpiler."

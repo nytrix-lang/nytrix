@@ -11,7 +11,7 @@ module std.os.ffi (
    CStruct, CType, cstr,
    u8, i8, u16, i16, u32, i32, u64, i64, f32, f64, ptr, handle,
    sizeof_struct, offsetof_struct, malloc, free,
-   cstruct_set, cstruct_get, bind_lib
+   cstruct_set, cstruct_get, bind_lib, tag_native
 )
 
 use std.core *
@@ -143,6 +143,11 @@ fn cstr(s){
    mem.cstr(s)
 }
 
+fn tag_native(addr){
+   "Tags a raw address as a native function pointer."
+   __tag_native(addr)
+}
+
 ;; Low-level Calls
 
 fn call0(f){ "Low-level FFI call with 0 arguments." __call0(f) }
@@ -203,17 +208,13 @@ fn ffi_call(fptr, args){
    "Calls external function at `fptr` with `args` list. Supports up to 10 arguments."
    def n = core.len(args)
    if(n==0){ return call0(fptr)  }
-   if(n==1){ return call1(fptr, core.get(args,0))  }
-   if(n==2){ return call2(fptr, core.get(args,0), core.get(args,1))  }
-   if(n==3){ return call3(fptr, core.get(args,0), core.get(args,1), core.get(args,2))  }
-   if(n==4){ return call4(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3))  }
-   if(n==5){ return call5(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4))  }
-   if(n==6){ return call6(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5))  }
-   if(n==7){ return call7(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6))  }
-   if(n==8){ return call8(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7))  }
-   if(n==9){ return call9(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8))  }
-   if(n==10){ return call10(fptr, core.get(args,0), core.get(args,1), core.get(args,2), core.get(args,3), core.get(args,4), core.get(args,5), core.get(args,6), core.get(args,7), core.get(args,8), core.get(args,9))  }
-   if(n>10){ panic("ffi_call supports 0-10 args") }
+   if(n==1){ def a = core.get(args,0) return call1(fptr, a)  }
+   if(n==2){ def a = core.get(args,0) def b = core.get(args,1) return call2(fptr, a, b)  }
+   if(n==3){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) return call3(fptr, a, b, c)  }
+   if(n==4){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) return call4(fptr, a, b, c, d)  }
+   if(n==5){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) def e = core.get(args,4) return call5(fptr, a, b, c, d, e)  }
+   if(n==6){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) def e = core.get(args,4) def f = core.get(args,5) return call6(fptr, a, b, c, d, e, f)  }
+   if(n >= 7){ panic("ffi_call robust mode only supports 0-6 args for now") }
    0
 }
 
@@ -409,7 +410,7 @@ fn cstruct_set(p, d, name, val){
    def off = _d.dict_get(info, "offset")
    def typ = _d.dict_get(info, "type")
    if(eq(typ, "u32") || eq(typ, "i32")){ core.store32(p, val, off) }
-   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ core.store64_raw(p, val, off) }
+   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ core.store64_h(p, val, off) }
    elif(eq(typ, "f32")){ core.store32_f32(p, val, off) }
    elif(eq(typ, "u8") || eq(typ, "i8")){ core.store8(p, val, off) }
    elif(eq(typ, "u16") || eq(typ, "i16")){ core.store16(p, val, off) }
@@ -424,7 +425,7 @@ fn cstruct_get(p, d, name){
    def off = _d.dict_get(info, "offset")
    def typ = _d.dict_get(info, "type")
    if(eq(typ, "u32") || eq(typ, "i32")){ return core.load32(p, off) }
-   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ return core.load64(p, off) }
+   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ return core.load64_h(p, off) }
    elif(eq(typ, "f32")){ return core.load32_f32(p, off) }
    elif(eq(typ, "u8") || eq(typ, "i8")){ return core.load8(p, off) }
    elif(eq(typ, "u16") || eq(typ, "i16")){ return core.load16(p, off) }

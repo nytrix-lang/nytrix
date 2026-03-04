@@ -1,5 +1,5 @@
 ;; Keywords: font truetype ttf opentype freetype bitmap
-;; FreeType wrapper using static extern fn linking via #link.
+;; FreeType wrapper using #include for automatic linking.
 
 module std.ui.font.truetype (
    load, load_path, unload, available,
@@ -10,23 +10,19 @@ module std.ui.font.truetype (
 )
 
 use std.core *
-use std.core.dict_mod *
-use std.os *
+use std.os (file_exists)
 
-if(comptime{ __os_name() == "linux" || __os_name() == "macos" || __os_name() == "windows" }){
-   #link "freetype"
-
-   extern fn FT_Init_FreeType(lib: ptr): i32 as "FT_Init_FreeType"
-   extern fn FT_Done_FreeType(lib: ptr): i32 as "FT_Done_FreeType"
-   extern fn FT_New_Memory_Face(lib: ptr, data: ptr, size: i64, index: i64, face: ptr): i32 as "FT_New_Memory_Face"
-   extern fn FT_New_Face(lib: ptr, path: ptr, index: i64, face: ptr): i32 as "FT_New_Face"
-   extern fn FT_Done_Face(face: ptr): i32 as "FT_Done_Face"
-   extern fn FT_Set_Pixel_Sizes(face: ptr, w: i32, h: i32): i32 as "FT_Set_Pixel_Sizes"
-   extern fn FT_Load_Glyph(face: ptr, index: i32, flags: i32): i32 as "FT_Load_Glyph"
-   extern fn FT_Get_Char_Index(face: ptr, charcode: i64): i32 as "FT_Get_Char_Index"
-   extern fn FT_Get_Kerning(face: ptr, left: i32, right: i32, mode: i32, kern: ptr): i32 as "FT_Get_Kerning"
-   extern fn FT_Render_Glyph(slot: ptr, mode: i32): i32 as "FT_Render_Glyph"
-   extern fn FT_Select_Size(face: ptr, strike_index: i32): i32 as "FT_Select_Size"
+if(comptime{ __os_name() == "linux" }){
+   #link "libfreetype.so"
+   #include <freetype2/freetype/freetype.h> as "FT_"
+}
+if(comptime{ __os_name() == "windows" }){
+   #link "freetype.lib"
+   #include <freetype2/freetype/freetype.h> as "FT_"
+}
+if(comptime{ __os_name() == "macos" }){
+   #link "libfreetype.dylib"
+   #include <freetype2/freetype/freetype.h> as "FT_"
 }
 
 ;; FT struct offsets (64-bit)

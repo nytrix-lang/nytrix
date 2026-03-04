@@ -20,7 +20,8 @@ module std.ui.gfx.vk (
    set_wireframe,
    set_model_matrix, set_perspective, set_clear_color,
    blit_buffer,
-   compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, _get_default_pipeline, _get_nocull_pipeline
+   compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, _get_default_pipeline, _get_nocull_pipeline,
+   notify_window_resize, get_swapchain_size, _get_device
 )
 
 use std.ui.gfx.vk.renderer as vk_renderer
@@ -37,7 +38,10 @@ fn init(win){ "Initializes the Vulkan backend for the given window." vk_renderer
 fn shutdown(){ "Shuts down the Vulkan backend and releases all resources." vk_renderer.shutdown() }
 fn begin_frame(){ "Begins a new Vulkan rendering frame." vk_renderer.begin_frame() }
 fn end_frame(){ "Finalizes and presents the current Vulkan rendering frame." vk_renderer.end_frame() }
+fn notify_window_resize(w, h){ "Notifies the renderer of a WM-driven window resize." vk_renderer.notify_window_resize(w, h) }
+fn get_swapchain_size(){ "Returns [w, h] of the current swapchain extent." vk_renderer.get_swapchain_size() }
 fn clear(r, g, b, a){ "Clears the active framebuffer with the specified color." vk_renderer.clear(r, g, b, a) }
+fn _get_device(){ vk_renderer._get_device() }
 fn clear_depth(){ "Clears the depth buffer." vk_renderer.clear_depth() }
 
 fn draw_rect(x, y, w, h, r, g, b, a){ "Draws a filled rectangle using the current vk_pipeline." vk_draw.draw_rect(x, y, w, h, r, g, b, a) }

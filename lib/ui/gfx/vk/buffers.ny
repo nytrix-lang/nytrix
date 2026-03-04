@@ -17,7 +17,7 @@ fn _create_staging_buffer(){
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
    store32(ci, 0, 16) ; flags
-   store64_raw(ci, _staging_capacity, 24) ; size
+   store64_h(ci, _staging_capacity, 24) ; size
    store32(ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 32)
    store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36)
    mut buf_ptr = sys_malloc(8)
@@ -26,7 +26,7 @@ fn _create_staging_buffer(){
 
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, _staging_buffer, mem_req)
-   def size = load64(mem_req, 0)
+   def size = load64_h(mem_req, 0)
    def type_bits = load32(mem_req, 16)
 
    def mem_type_index = _find_memory_type(type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
@@ -35,7 +35,7 @@ fn _create_staging_buffer(){
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, size, 16)
+   store64_h(alloc_info, size, 16)
    store32(alloc_info, mem_type_index, 24)
    mut mem_ptr = sys_malloc(8)
    if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ return false }
@@ -64,7 +64,7 @@ fn _create_descriptor_pool(){
    store32(pool_ci, _bindless_enabled ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0, 16) ; flags
    store32(pool_ci, (_bindless_enabled ? 1 : 1000) + MAX_FRAMES_IN_FLIGHT, 20) ; maxSets
    store32(pool_ci, 2, 24) ; poolSizeCount
-   store64_raw(pool_ci, pool_sizes, 32)
+   store64_h(pool_ci, pool_sizes, 32)
 
    mut pool_ptr = sys_malloc(8)
    if(create_descriptor_pool(_device, pool_ci, 0, pool_ptr) != 0){ return false }
@@ -81,7 +81,7 @@ fn _create_uniform_buffer(){
    mut ci = sys_malloc(56)
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(ci, total, 24)
+   store64_h(ci, total, 24)
    store32(ci, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 32)
    store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36)
    mut buf_ptr = sys_malloc(8)
@@ -90,7 +90,7 @@ fn _create_uniform_buffer(){
 
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, _ubo_buffer, mem_req)
-   def size = load64(mem_req, 0)
+   def size = load64_h(mem_req, 0)
    def type_bits = load32(mem_req, 16)
    common.touch(type_bits)
 
@@ -100,7 +100,7 @@ fn _create_uniform_buffer(){
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, size, 16)
+   store64_h(alloc_info, size, 16)
    store32(alloc_info, mem_type_index, 24)
 
    mut mem_ptr = sys_malloc(8)
@@ -143,7 +143,7 @@ fn _copy_buffer(src, dst, size){
 
    mut ai = sys_malloc(32) memset(ai, 0, 32)
    store32(ai, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, 0)
-   store64_raw(ai, _command_pool, 16)
+   store64_h(ai, _command_pool, 16)
    store32(ai, 0, 24) ; PRIMARY
    store32(ai, 1, 28) ; 1
    mut cb_ptr = sys_malloc(8)
@@ -152,17 +152,17 @@ fn _copy_buffer(src, dst, size){
 
    begin_command_buffer(cb, bi)
    mut region = sys_malloc(24) memset(region, 0, 24)
-   store64_raw(region, 0, 0) ; srcOffset
-   store64_raw(region, 0, 8) ; dstOffset
-   store64_raw(region, size, 16)
+   store64_h(region, 0, 0) ; srcOffset
+   store64_h(region, 0, 8) ; dstOffset
+   store64_h(region, size, 16)
    cmd_copy_buffer(cb, src, dst, 1, region)
    end_command_buffer(cb)
 
    mut si = sys_malloc(72) memset(si, 0, 72)
    store32(si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store32(si, 1, 40) ; cb count
-   mut cb_arr = sys_malloc(8) store64_raw(cb_arr, cb, 0)
-   store64_raw(si, cb_arr, 48)
+   mut cb_arr = sys_malloc(8) store64_h(cb_arr, cb, 0)
+   store64_h(si, cb_arr, 48)
 
    queue_submit(_graphics_queue, 1, si, 0)
    queue_wait_idle(_graphics_queue)
@@ -179,7 +179,7 @@ fn create_static_buffer(ptr, count){
    ;; 1. Staging Buffer
    mut s_ci = sys_malloc(56) memset(s_ci, 0, 56)
    store32(s_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(s_ci, size, 24)
+   store64_h(s_ci, size, 24)
    store32(s_ci, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 32)
    mut s_ptr = sys_malloc(8)
    if(create_buffer(_device, s_ci, 0, s_ptr) != 0){ return 0 }
@@ -187,12 +187,12 @@ fn create_static_buffer(ptr, count){
 
    mut s_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, s_buf, s_req)
-   def s_size = load64(s_req, 0)
+   def s_size = load64_h(s_req, 0)
    def s_type = _find_memory_type(load32(s_req, 16), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
 
    mut s_alloc = sys_malloc(64) memset(s_alloc, 0, 64)
    store32(s_alloc, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(s_alloc, s_size, 16)
+   store64_h(s_alloc, s_size, 16)
    store32(s_alloc, s_type, 24)
    mut s_mem_ptr = sys_malloc(8)
    allocate_memory(_device, s_alloc, 0, s_mem_ptr)
@@ -208,7 +208,7 @@ fn create_static_buffer(ptr, count){
    ;; 2. Final Device-Local Buffer
    mut d_ci = sys_malloc(56) memset(d_ci, 0, 56)
    store32(d_ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(d_ci, size, 24)
+   store64_h(d_ci, size, 24)
    store32(d_ci, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32)
    mut d_ptr = sys_malloc(8)
    create_buffer(_device, d_ci, 0, d_ptr)
@@ -216,12 +216,12 @@ fn create_static_buffer(ptr, count){
 
    mut d_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, d_buf, d_req)
-   def d_size = load64(d_req, 0)
+   def d_size = load64_h(d_req, 0)
    def d_type = _find_memory_type(load32(d_req, 16), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
 
    mut d_alloc = sys_malloc(64) memset(d_alloc, 0, 64)
    store32(d_alloc, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(d_alloc, d_size, 16)
+   store64_h(d_alloc, d_size, 16)
    store32(d_alloc, d_type, 24)
    mut d_mem_ptr = sys_malloc(8)
    allocate_memory(_device, d_alloc, 0, d_mem_ptr)
@@ -250,7 +250,7 @@ fn _create_vertex_buffer(){
    mut ci = sys_malloc(56)
    memset(ci, 0, 56)
    store32(ci, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, 0)
-   store64_raw(ci, _vertex_capacity * MAX_FRAMES_IN_FLIGHT, 24) ; total bytes across frame slices
+   store64_h(ci, _vertex_capacity * MAX_FRAMES_IN_FLIGHT, 24) ; total bytes across frame slices
    store32(ci, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 32)
    store32(ci, VK_SHARING_MODE_EXCLUSIVE, 36)
    mut buf_ptr = sys_malloc(8)
@@ -262,7 +262,7 @@ fn _create_vertex_buffer(){
 
    mut mem_req = sys_malloc(24)
    get_buffer_memory_requirements(_device, _vertex_buffer, mem_req)
-   def size = load64(mem_req, 0)
+   def size = load64_h(mem_req, 0)
    def type_bits = load32(mem_req, 16)
    common.touch(type_bits)
 
@@ -272,7 +272,7 @@ fn _create_vertex_buffer(){
    mut alloc_info = sys_malloc(64)
    memset(alloc_info, 0, 64)
    store32(alloc_info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, 0)
-   store64_raw(alloc_info, size, 16)
+   store64_h(alloc_info, size, 16)
    store32(alloc_info, mem_type_index, 24)
 
    mut mem_ptr = sys_malloc(8)
