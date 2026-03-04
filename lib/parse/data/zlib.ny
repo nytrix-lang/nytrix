@@ -1,16 +1,20 @@
 ;; Keywords: compression zlib gzip deflate rfc1950 rfc1951 rfc1952
-;; Zlib/gzip helpers using static extern fn linking.
+;; Zlib and Gzip Compression Helpers for Nytrix
+;; Reference:
+;; - https://www.rfc-editor.org/rfc/rfc1950.html
+;; - https://www.rfc-editor.org/rfc/rfc1951.html
+;; - https://www.rfc-editor.org/rfc/rfc1952.html
 
 module std.enc.zlib (
    available, error,
    is_zlib, is_gzip,
    parse_zlib_header, parse_gzip_header,
-   decompress, decompress_zlib, decompress_gzip,
+   decompress, decompress_zlib, decompress_gzip, decompress_zlib_limit,
    compress, compress_zlib
 )
 use std.core *
 use std.core.dict_mod *
-use std.math.hash as hash
+use std.math.hash as math_hash
 use std.parse.bin as pbin
 use std.os *
 use std.os.sys *
@@ -196,6 +200,30 @@ fn _uncompress_zlib_data(s){
    out
 }
 
+fn _uncompress_zlib_data_limit(s, out_cap){
+   "Inflates zlib data into a fixed-size buffer to avoid realloc loops."
+   def n = str_len(s)
+   if(out_cap < 256){ out_cap = 256 }
+   mut out = malloc(out_cap + 1 + 16) + 16
+   if(out == 0){ return _set_error("output alloc failed") }
+   def out_len_p = zalloc(8)
+   if(out_len_p == 0){ free(out) return _set_error("output len alloc failed") }
+   store64(out_len_p, out_cap, 0)
+   def r = _i32(uncompress(out, out_len_p, s, n))
+   if(r != 0){
+      free(out_len_p)
+      free(out)
+      return _set_error("uncompress failed: " + to_str(r))
+   }
+   def out_len = load64(out_len_p, 0)
+   free(out_len_p)
+   if(out_len < 0 || out_len > out_cap){ free(out) return _set_error("invalid uncompressed size") }
+   init_str(out, out_len)
+   store8(out, 0, out_len)
+   _error = ""
+   out
+}
+
 fn decompress_zlib(s){
    "Decompresses a zlib-wrapped payload."
    _error = ""
@@ -209,7 +237,29 @@ fn decompress_zlib(s){
    def n = str_len(s)
    if(n < 6){ free(out) return _set_error("truncated zlib stream") }
    def expect_adler = pbin.u32be(s, n - 4)
-   def got_adler = hash.adler32(out, 0, str_len(out))
+   def got_adler = math_hash.adler32(out, 0, str_len(out))
+   if(got_adler != expect_adler){
+      free(out)
+      return _set_error("zlib adler32 mismatch")
+   }
+   out
+}
+
+fn decompress_zlib_limit(s, out_cap){
+   "Decompresses a zlib payload with a fixed output cap. Returns empty string on overflow/error."
+   _error = ""
+   if(out_cap <= 0){ return _set_error("bad output cap") }
+   def h = parse_zlib_header(s)
+   if(!dict_get(h, "ok", false)){
+      return _set_error(dict_get(h, "message", "invalid zlib header"))
+   }
+   if(dict_get(h, "fdict", false)){ return _set_error("preset dictionary zlib stream unsupported") }
+   def n = str_len(s)
+   if(n < 6){ return _set_error("truncated zlib stream") }
+   def out = _uncompress_zlib_data_limit(s, out_cap)
+   if(str_len(_error) > 0){ return "" }
+   def expect_adler = pbin.u32be(s, n - 4)
+   def got_adler = math_hash.adler32(out, 0, str_len(out))
    if(got_adler != expect_adler){
       free(out)
       return _set_error("zlib adler32 mismatch")
@@ -284,7 +334,7 @@ fn decompress_gzip(s){
    if(n >= 8){
       def expect_crc = pbin.u32le(s, n - 8)
       def expect_isize = pbin.u32le(s, n - 4)
-      def got_crc = hash.crc32(out, 0, str_len(out))
+      def got_crc = math_hash.crc32(out, 0, str_len(out))
       if(got_crc != expect_crc){ return _set_error("gzip crc32 mismatch") }
       if((str_len(out) & 4294967295) != expect_isize){ return _set_error("gzip isize mismatch") }
    }

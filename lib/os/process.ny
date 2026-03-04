@@ -1,5 +1,5 @@
 ;; Keywords: os process
-;; Process module.
+;; Process for Nytrix
 
 module std.os.process (
    run, popen, waitpid

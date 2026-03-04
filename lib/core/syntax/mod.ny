@@ -1,5 +1,5 @@
 ;; Keywords: core syntax
-;; Core Syntax module.
+;; Core Syntax for Nytrix
 
 module std.core.syntax (
    new_registry, registry, reset_registry,

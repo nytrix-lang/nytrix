@@ -1,5 +1,5 @@
 ;; Keywords: os fs
-;; Filesystem helpers.
+;; Filesystem Management for Nytrix
 
 module std.os.fs (
    is_file, is_dir, list_dir, walk

@@ -1,5 +1,5 @@
 ;; Keywords: util inspect
-;; Util Inspect module.
+;; Util Inspect for Nytrix
 
 module std.util.inspect (
    inspect,

@@ -1,4 +1,5 @@
 ;; Keywords: image bmp rfc7854
+;; BitMap (BMP) Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/BMP_file_format
 ;; - https://www.rfc-editor.org/rfc/rfc7854.html

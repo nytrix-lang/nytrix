@@ -310,6 +310,8 @@ typedef struct stmt_if_t {
 typedef struct stmt_while_t {
   expr_t *test;
   stmt_t *body;
+  stmt_t *update;
+  stmt_t *init;
 } stmt_while_t;
 
 typedef struct stmt_for_t {
@@ -337,6 +339,18 @@ typedef struct stmt_func_t {
   bool attr_jit;
   bool attr_thread;
   bool attr_pure;
+  bool attr_inline;
+  bool attr_noinline;
+  bool attr_readnone;
+  bool attr_readonly;
+  bool attr_writeonly;
+  bool attr_argmemonly;
+  bool attr_nounwind;
+  bool attr_mustprogress;
+  bool attr_willreturn;
+  bool attr_cold;
+  bool attr_hot;
+  bool attr_flatten;
   bool is_extern;
   const char *link_name;
   bool attrs_resolved;

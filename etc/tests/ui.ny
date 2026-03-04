@@ -1,5 +1,4 @@
 #!/bin/ny
-;; Nytrix Ui
 
 use std.core *
 use std.os *
@@ -8,17 +7,16 @@ use std.math *
 use std.ui.consts *
 use std.ui.gfx *
 use std.ui.window as window
-use std.ui.glfw as ui_backend
 use std.ui.input as uin
 use std.ui.camera as camera
-use std.ui.terminal as terminal
+use std.ui.gfx.term as terminal
 use std.math.matrix *
 use std.math.vector *
 use std.str as str
 use std.str *
 use std.util.common as common
 
-def APP_MSAA = 2
+def APP_MSAA = 8
 mut APP_BG   = [0.002, 0.002, 0.005, 1.0]
 mut APP_WIRE = false
 mut APP_STATS= true
@@ -29,8 +27,60 @@ def WHITE = [1.0, 1.0, 1.0, 1.0]
 def WHITE_U32 = color_pack(1.0, 1.0, 1.0, 1.0)
 def HUD_BG_U32   = color_pack(0.01, 0.01, 0.02, 0.9)
 
-def CUSTOM_VERT_SRC = "#version 450\nlayout(location=0) in vec3 pos;\nlayout(location=1) in vec2 uv;\nlayout(location=2) in vec4 color;\nlayout(location=3) in vec3 normal;\nlayout(location=0) out vec4 vColor;\nlayout(location=1) out vec3 vNormal;\nlayout(location=2) out vec3 vWorldPos;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;\nvoid main(){\n  vec4 worldPos = pc.model * vec4(pos, 1.0);\n  vWorldPos = worldPos.xyz;\n  vNormal = mat3(pc.model) * normal;\n  vColor = color;\n  gl_Position = pc.vp * worldPos;\n}\n"
-def CUSTOM_FRAG_SRC = "#version 450\nlayout(location=0) in vec4 vColor;\nlayout(location=1) in vec3 vNormal;\nlayout(location=2) in vec3 vWorldPos;\nlayout(push_constant) uniform PC { mat4 vp; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;\nlayout(location=0) out vec4 outColor;\nvoid main(){\n  vec3 n = normalize(vNormal);\n  bool isBack = !gl_FrontFacing;\n  if(isBack) n = -n;\n  \n  vec3 l = normalize(vec3(0.5, 2.0, 0.5));\n  vec3 v = normalize(pc.eyePos - vWorldPos + vec3(0.00001));\n  vec3 r = reflect(-l, n);\n  \n  float diff = max(dot(n, l), 0.0);\n  float rim = pow(1.0 - max(dot(v, n), 0.0), 4.0);\n  float spec = pow(max(dot(r, v), 0.0), 32.0);\n  \n  vec3 skyCol = vec3(0.1, 0.3, 0.7);\n  vec3 groundCol = vec3(0.05, 0.02, 0.01);\n  vec3 ambient = mix(groundCol, skyCol, n.y * 0.5 + 0.5) * 0.2;\n  \n  vec3 rb_col = 0.5 + 0.5 * cos(pc.time * 2.0 + n.xyz * 3.0 + vec3(0,2,4));\n  vec3 base_color = mix(vColor.rgb, rb_col, pc.rainbow);\n  \n  vec3 rim_glow = rb_col * rim * (0.4 + 0.6 * abs(sin(pc.time * 0.8)));\n  \n  vec3 final = base_color * (diff * 0.7 + ambient) + spec * 0.5 + rim_glow * 0.8;\n  \n  if(isBack) final *= 0.15;\n  \n  float ground_occ = smoothstep(-20.0, 60.0, vWorldPos.y);\n  outColor = vec4(clamp(final * ground_occ, 0.0, 1.0), vColor.a);\n}\n"
+def CUSTOM_VERT_SRC = "#version 450
+layout(location=0) in vec3 pos ;
+layout(location=1) in vec2 uv ;
+layout(location=2) in vec4 color ;
+layout(location=3) in uint texIndex ;
+layout(location=4) in vec3 normal ;
+layout(location=0) out vec4 vColor ;
+layout(location=1) out vec3 vNormal ;
+layout(location=2) out vec3 vWorldPos ;
+layout(push_constant) uniform PC { mat4 vp ; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;
+void main(){
+  vec4 worldPos = pc.model * vec4(pos, 1.0) ;
+  vWorldPos = worldPos.xyz ;
+  vNormal = mat3(pc.model) * normal ;
+  vColor = color ;
+  gl_Position = pc.vp * worldPos ;
+}
+"
+def CUSTOM_FRAG_SRC = "#version 450
+layout(location=0) in vec4 vColor ;
+layout(location=1) in vec3 vNormal ;
+layout(location=2) in vec3 vWorldPos ;
+layout(push_constant) uniform PC { mat4 vp ; mat4 model; int isMask; int isUnlit; float time; float rainbow; vec3 eyePos; } pc;
+layout(location=0) out vec4 outColor ;
+void main(){
+  vec3 n = normalize(vNormal) ;
+  bool isBack = !gl_FrontFacing ;
+  if(isBack) n = -n ;
+
+  vec3 l = normalize(vec3(0.5, 2.0, 0.5)) ;
+  vec3 v = normalize(pc.eyePos - vWorldPos + vec3(0.00001)) ;
+  vec3 r = reflect(-l, n) ;
+
+  float diff = max(dot(n, l), 0.0) ;
+  float rim = pow(1.0 - max(dot(v, n), 0.0), 4.0) ;
+  float spec = pow(max(dot(r, v), 0.0), 32.0) ;
+
+  vec3 skyCol = vec3(0.1, 0.3, 0.7) ;
+  vec3 groundCol = vec3(0.05, 0.02, 0.01) ;
+  vec3 ambient = mix(groundCol, skyCol, n.y * 0.5 + 0.5) * 0.2 ;
+
+  vec3 rb_col = 0.5 + 0.5 * cos(pc.time * 2.0 + n.xyz * 3.0 + vec3(0,2,4)) ;
+  vec3 base_color = mix(vColor.rgb, rb_col, pc.rainbow) ;
+
+  vec3 rim_glow = rb_col * rim * (0.4 + 0.6 * abs(sin(pc.time * 0.8))) ;
+
+  vec3 final = base_color * (diff * 0.7 + ambient) + spec * 0.5 + rim_glow * 0.8 ;
+
+  if(isBack) final *= 0.15 ;
+
+  float ground_occ = smoothstep(-20.0, 60.0, vWorldPos.y) ;
+  outColor = vec4(clamp(final * ground_occ, 0.0, 1.0), vColor.a) ;
+}
+"
 
 mut win         = 0
 mut cam         = 0
@@ -50,7 +100,6 @@ mut timeout_ns   = 0
 
 mut _cube_mesh = 0
 mut _grid_mesh = 0
-mut _axes_mesh = 0
 
 mut res_font    = 0
 mut res_tex     = 0
@@ -59,14 +108,13 @@ mut custom_pipe = 0
 mut active_shader = true
 mut res_cube    = 0
 mut res_grid    = 0
-mut res_axes    = 0
 mut res_pc_data = 0
 
 mut _cube_ptr  = 0 mut _cube_cnt = 0
 mut _grid_ptr  = 0 mut _grid_cnt = 0
-mut _axes_ptr  = 0 mut _axes_cnt = 0
 
 mut _win_w = 1280.0 mut _win_h = 720.0
+mut _last_mx = 0.0 mut _last_my = 0.0 mut _mouse_init = 0
 
 mut _cached_fps = -1 mut _cached_fps_str = ""
 mut _diag_texts = [""]
@@ -89,10 +137,10 @@ def M_T  = mat4_identity()
 def M_S  = mat4_identity()
 def M_W  = mat4_identity()
 def M_tmp = mat4_identity()
-def M_PT = mat4_identity()
-def M_PR = mat4_identity()
-def M_PS = mat4_identity()
-def M_PW = mat4_identity()
+def M_PT  = mat4_identity()
+def M_PR  = mat4_identity()
+def M_PS  = mat4_identity()
+def M_PW  = mat4_identity()
 def M_Ptmp = mat4_identity()
 def M_V   = mat4_identity()
 def M_P   = mat4_identity()
@@ -100,6 +148,7 @@ def M_VP  = mat4_identity()
 def M_UP  = [0.0, 1.0, 0.0]
 
 fn exec_cmd(line){
+   "Executes a console command."
    def parts = str.split(line, " ")
    def cmd = get(parts, 0)
    if(eq(cmd, "teapot") || eq(cmd, "tp")){ show_teapot = !show_teapot }
@@ -142,46 +191,29 @@ fn exec_cmd(line){
    elif(eq(cmd, "help")){ terminal.log("CMD: teapot, ortho, persp, clear, snapshot, exit, fov, speed, sens, bg, pos, rot, wireframe, stats, shader, rainbow, prof") }
 }
 
-fn build_cube(s, color){
+fn build_cube(s, color, tex_id=0){
+   "Builds a textured 3D cube mesh."
    def buf = sys_malloc(36 * VERTEX_STRIDE)
    def c = color_pack(get(color,0), get(color,1), get(color,2), get(color,3))
-   def _v = fn(i, x, y, z, u, v, nx, ny, nz){ push_vertex(buf + i * VERTEX_STRIDE, x, y, z, u, v, c, nx, ny, nz) }
-   ; Front face (Z+)
+   def _v = fn(i, x, y, z, u, v, nx, ny, nz){ push_vertex(buf + i * VERTEX_STRIDE, x, y, z, u, v, c, tex_id, nx, ny, nz) }
    _v(0, -s,-s, s, 0,0, 0,0, 1) _v(1,  s,-s, s, 1,0, 0,0, 1) _v(2,  s, s, s, 1,1, 0,0, 1)
    _v(3, -s,-s, s, 0,0, 0,0, 1) _v(4,  s, s, s, 1,1, 0,0, 1) _v(5, -s, s, s, 0,1, 0,0, 1)
-   ; Back face (Z-)
    _v(6,  s,-s,-s, 0,0, 0,0,-1) _v(7, -s,-s,-s, 1,0, 0,0,-1) _v(8, -s, s,-s, 1,1, 0,0,-1)
    _v(9,  s,-s,-s, 0,0, 0,0,-1) _v(10,-s, s,-s, 1,1, 0,0,-1) _v(11, s, s,-s, 0,1, 0,0,-1)
-   ; Top face (Y+)
    _v(12,-s, s, s, 0,0, 0,1,0) _v(13, s, s, s, 1,0, 0,1,0) _v(14, s, s,-s, 1,1, 0,1,0)
    _v(15,-s, s, s, 0,0, 0,1,0) _v(16, s, s,-s, 1,1, 0,1,0) _v(17,-s, s,-s, 0,1, 0,1,0)
-   ; Bottom face (Y-)
    _v(18,-s,-s,-s, 0,0, 0,-1,0) _v(19, s,-s,-s, 1,0, 0,-1,0) _v(20, s,-s, s, 1,1, 0,-1,0)
    _v(21,-s,-s,-s, 0,0, 0,-1,0) _v(22, s,-s, s, 1,1, 0,-1,0) _v(23,-s,-s, s, 0,1, 0,-1,0)
-   ; Right face (X+)
    _v(24, s,-s, s, 0,0, 1,0,0) _v(25, s,-s,-s, 1,0, 1,0,0) _v(26, s, s,-s, 1,1, 1,0,0)
    _v(27, s,-s, s, 0,0, 1,0,0) _v(28, s, s,-s, 1,1, 1,0,0) _v(29, s, s, s, 0,1, 1,0,0)
-   ; Left face (X-)
    _v(30,-s,-s,-s, 0,0, -1,0,0) _v(31,-s,-s, s, 1,0, -1,0,0) _v(32,-s, s, s, 1,1, -1,0,0)
    _v(33,-s,-s,-s, 0,0, -1,0,0) _v(34,-s, s, s, 1,1, -1,0,0) _v(35,-s, s,-s, 0,1, -1,0,0)
    mut d = dict() d = dict_set(d, "ptr", buf) d = dict_set(d, "cnt", 36) d
 }
 
-fn build_axes(){
-   def buf = sys_malloc(6 * VERTEX_STRIDE)
-   push_vertex(buf + 0 * VERTEX_STRIDE, 0,0,0, 0,0, color_pack(1,0,0,1), 1,0,0)
-   push_vertex(buf + 1 * VERTEX_STRIDE, 20,0,0, 0,0, color_pack(1,0,0,1), 1,0,0)
-   push_vertex(buf + 2 * VERTEX_STRIDE, 0,0,0, 0,0, color_pack(0,1,0,1), 0,1,0)
-   push_vertex(buf + 3 * VERTEX_STRIDE, 0,20,0, 0,0, color_pack(0,1,0,1), 0,1,0)
-   push_vertex(buf + 4 * VERTEX_STRIDE, 0,0,0, 0,0, color_pack(0,0,1,1), 0,0,1)
-   push_vertex(buf + 5 * VERTEX_STRIDE, 0,0,20, 0,0, color_pack(0,0,1,1), 0,0,1)
-   mut d = dict() d = dict_set(d, "ptr", buf) d = dict_set(d, "cnt", 6) d
-}
-
 fn startup(){
-   renderer_config(false, false, "", "", APP_MSAA)
-   win = window.create(1280, 720, "Nytrix")
-   render_init(win)
+   "Initializes the application state, window, and resources."
+   win = init_window(1280, 720, "Nytrix", 0, false, false, APP_MSAA)
 
    def fpaths = [
       "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
@@ -200,15 +232,16 @@ fn startup(){
 
    res_tex  = texture_load("etc/assets/images/test.png")
    teapot   = mesh_load("etc/assets/models/teapot.obj", [0.8, 0.4, 0.2, 1.0])
-   res_cube = build_cube(6.0, WHITE)
+   res_cube = build_cube(6.0, WHITE, res_tex)
    res_grid = build_env()
-   res_axes = build_axes()
    res_pc_data = sys_malloc(128)
 
    cam = camera_init([0.0, 0.0, 0.0], 0.0, 0.0)
    cam3d = camera.init([0.0, 8.0, 45.0], 0.0, 0.0)
+   set_idx(cam3d, 13, 1.25) ; Rot smooth
+   set_idx(cam3d, 14, 10.0) ; Move smooth
 
-   custom_pipe = create_pipeline(compile_shader(CUSTOM_VERT_SRC, "vert"), compile_shader(CUSTOM_FRAG_SRC, "frag"), 3, 1, 1, 0, 0, 1, 1)
+   custom_pipe = create_pipeline(compile_shader(CUSTOM_VERT_SRC, "vert"), compile_shader(CUSTOM_FRAG_SRC, "frag"), 3, 1, 1, 0, 0, 0, 0)
 
    terminal.init(res_font, HUD_BG_U32, WHITE_U32)
    start_t = ticks()
@@ -218,10 +251,8 @@ fn startup(){
 
    _cube_ptr = dict_get(res_cube, "ptr", 0) _cube_cnt = dict_get(res_cube, "cnt", 0)
    _grid_ptr = dict_get(res_grid, "ptr", 0) _grid_cnt = dict_get(res_grid, "cnt", 0)
-   _axes_ptr = dict_get(res_axes, "ptr", 0) _axes_cnt = dict_get(res_axes, "cnt", 0)
 
-   _grid_mesh = mesh_create(_grid_ptr, _grid_cnt, true)
-   _axes_mesh = mesh_create(_axes_ptr, _axes_cnt, true)
+   _grid_mesh = mesh_create(_grid_ptr, _grid_cnt, false)
    _cube_mesh = mesh_create(_cube_ptr, _cube_cnt, false)
 
    _color_diag = color_pack(0.5, 0.6, 0.7, 0.8)
@@ -229,7 +260,6 @@ fn startup(){
    _color_fps_w = color_pack(1.0, 0.7, 0.0, 0.9)
    _color_fps_b = color_pack(1.0, 0.2, 0.1, 1.0)
    _color_perf = color_pack(0.7, 0.9, 1.0, 0.7)
-   _color_cross = color_pack(1.0, 1.0, 1.0, 0.3)
 
    def env_t = env("NY_UI_TIMEOUT")
    if(env_t){ timeout_ns = int(str.atof(env_t) * 1e9) }
@@ -239,33 +269,53 @@ fn startup(){
 }
 
 fn build_env(){
-   def buf = sys_malloc(324 * VERTEX_STRIDE)
+   "Builds the infinite grid floor mesh using solid quads to bypass hardware limits."
+   def radius = 200
+   def spacing = 5.0
+   def size = float(radius) * spacing
+   def buf = sys_malloc((radius * 2 + 1) * 12 * VERTEX_STRIDE)
    def c = color_pack(0.12, 0.15, 0.18, 1.0)
-   mut off = 0 mut gi = -40 while(gi <= 40){
-      def v = float(gi) * 2.5
-      push_vertex(buf+off,-100,0,v, 0,0,c) off+=VERTEX_STRIDE
-      push_vertex(buf+off, 100,0,v, 0,0,c) off+=VERTEX_STRIDE
-      push_vertex(buf+off,v,0,-100, 0,0,c) off+=VERTEX_STRIDE
-      push_vertex(buf+off,v,0, 100, 0,0,c) off+=VERTEX_STRIDE
+   def w = 0.04
+   mut off = 0 mut gi = -radius while(gi <= radius){
+      def v = float(gi) * spacing
+      push_vertex(buf+off, -size, 0, v-w, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off,  size, 0, v-w, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, -size, 0, v+w, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off,  size, 0, v-w, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off,  size, 0, v+w, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, -size, 0, v+w, 0,0,c) off+=VERTEX_STRIDE
+
+      push_vertex(buf+off, v-w, 0, -size, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, v+w, 0, -size, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, v-w, 0,  size, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, v+w, 0, -size, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, v+w, 0,  size, 0,0,c) off+=VERTEX_STRIDE
+      push_vertex(buf+off, v-w, 0,  size, 0,0,c) off+=VERTEX_STRIDE
       gi += 1
    }
-   mut d = dict() d = dict_set(d, "ptr", buf) d = dict_set(d, "cnt", 324) d
+   mut d = dict() d = dict_set(d, "ptr", buf) d = dict_set(d, "cnt", (radius * 2 + 1) * 12) d
 }
 
-mut _hwnd = 0
-
 fn update(dt){
+   "Main update loop handle: processes events, camera, and input."
    def t0_up = ticks()
-   if(_hwnd == 0){ _hwnd = window.id(win) }
-
-   ui_backend.poll_events()
 
    mut e = window.check_event(win)
    while(e != 0){
       def typ = window.event_type(e) def data = window.event_data(e)
+
+      if(typ == EVENT_KEY_PRESSED){
+         def k = dict_get(data, "key", 0)
+         if(k == uin.KEY_GRAVE || k == uin.KEY_F1){
+         terminal.toggle(win)
+         skip_mouse_frames = 2
+         }
+      }
+
       mut res = terminal.handle_event(typ, data)
       if(res == 2){ terminal.exec(exec_cmd) }
       if(!res && typ == EVENT_QUIT){ window.set_should_close(win, true) }
+
       if(typ == EVENT_WINDOW_RESIZED){
           _win_w = float(dict_get(data, "w", 1280.0))
           _win_h = float(dict_get(data, "h", 720.0))
@@ -273,33 +323,32 @@ fn update(dt){
       } elif(typ == EVENT_MOUSE_SCROLL){
           def dy = float(dict_get(data, "dy", 0.0))
           if(!terminal.is_open()){
-             def n_fov = clamp(get(cam3d, 16) - dy * 2.0, 10.0, 140.0)
+             def n_fov = clamp(get(cam3d, 16) - dy * 2.5, 15.0, 120.0)
              set_idx(cam3d, 16, n_fov)
           }
       }
       e = window.check_event(win)
    }
-
-   if(window.key_pressed(win, uin.KEY_GRAVE) || window.key_pressed(win, uin.KEY_F1)){
-      terminal.toggle(win)
-      skip_mouse_frames = 2
-   }
-   if(window.key_pressed(win, uin.KEY_ESCAPE)){ snapshot("ui_exit.png") window.set_should_close(win, true) }
+   if(window.key_pressed(win, uin.KEY_ESCAPE)){ window.set_should_close(win, true) }
 
    if(!terminal.is_open()){
       def skip_look = skip_mouse_frames > 0
       if(skip_look){ skip_mouse_frames -= 1 }
 
-      def cx = _win_w * 0.5 def cy = _win_h * 0.5
-      def mpos = ui_backend.get_cursor_pos(_hwnd)
-      def mx = get(mpos, 0) def my = get(mpos, 1)
-      ui_backend.set_cursor_pos(_hwnd, cx, cy)
-      def dx = mx - cx def dy = my - cy
-      def sens = get(cam3d, 10)
+      def mpos = window.cursor_pos(win)
+      mut mx = get(mpos, 0, 0.0) mut my = get(mpos, 1, 0.0)
+
+      if(_mouse_init == 0){ _last_mx = mx _last_my = my _mouse_init = 1 }
+
+      def dx = mx - _last_mx
+      def dy = my - _last_my
+      _last_mx = mx _last_my = my
+
+      def sens = get(cam3d, 10) * 4.25
       if(!skip_look){
          if(abs(dx) > 0.0001 || abs(dy) > 0.0001){
-         set_idx(cam3d, 8, get(cam3d, 8) + dx * sens)
-         set_idx(cam3d, 9, clamp(get(cam3d, 9) - dy * sens, -89.9, 89.9))
+         set_idx(cam3d, 8, get(cam3d, 8) + dx * sens * dt * 60.0) ; Scale by delta time
+         set_idx(cam3d, 9, clamp(get(cam3d, 9) - dy * sens * dt * 60.0, -89.9, 89.9))
          }
       }
       def rs = 1.0 - exp(0.0 - (get(cam3d, 13) * dt))
@@ -314,12 +363,12 @@ fn update(dt){
       def rgt_x = cosr def rgt_z = sinr
 
       mut wx = 0.0 mut wy = 0.0 mut wz = 0.0
-      if(ui_backend.get_key(_hwnd, 87) == 1){ wx += fwd_x wz += fwd_z } ; W
-      if(ui_backend.get_key(_hwnd, 83) == 1){ wx -= fwd_x wz -= fwd_z } ; S
-      if(ui_backend.get_key(_hwnd, 65) == 1){ wx -= rgt_x wz -= rgt_z } ; A
-      if(ui_backend.get_key(_hwnd, 68) == 1){ wx += rgt_x wz += rgt_z } ; D
-      if(ui_backend.get_key(_hwnd, 32) == 1){ wy += 1.0 } ; Space
-      if(ui_backend.get_key(_hwnd, 341) == 1){ wy -= 1.0 } ; Ctrl
+      if(window.key_down(win, uin.KEY_W)){ wx += fwd_x wz += fwd_z }
+      if(window.key_down(win, uin.KEY_S)){ wx -= fwd_x wz -= fwd_z }
+      if(window.key_down(win, uin.KEY_A)){ wx -= rgt_x wz -= rgt_z }
+      if(window.key_down(win, uin.KEY_D)){ wx += rgt_x wz += rgt_z }
+      if(window.key_down(win, uin.KEY_SPACE)){ wy += 1.0 }
+      if(window.key_down(win, uin.KEY_CTRL)){ wy -= 1.0 }
 
       def wlen2 = wx*wx + wy*wy + wz*wz
       if(wlen2 > 0.0001){ def inv = 1.0 / sqrt(wlen2) wx *= inv wy *= inv wz *= inv }
@@ -330,7 +379,7 @@ fn update(dt){
       set_idx(cam3d, 17, cx2) set_idx(cam3d, 18, cy2) set_idx(cam3d, 19, cz)
 
       mut speed = get(cam3d, 11)
-      if(ui_backend.get_key(_hwnd, 340) == 1){ speed *= get(cam3d, 15) } ; Shift
+      if(window.key_down(win, uin.KEY_SHIFT)){ speed *= get(cam3d, 15) }
 
       def drag_f = 1.0 / (1.0 + get(cam3d, 12) * dt)
       mut vx = get(cam3d, 3) mut vy = get(cam3d, 4) mut vz = get(cam3d, 5)
@@ -362,7 +411,7 @@ fn update(dt){
       def sz = 40.0
       mat4_ortho_into(0-sz*aspect, sz*aspect, 0-sz, sz, 0.1, 1000.0, M_P)
    } else {
-      mat4_perspective_into(get(cam3d, 16), aspect, 0.1, 1000.0, M_P)
+      mat4_perspective_into(get(cam3d, 16) * PI / 180.0, aspect, 0.1, 1000.0, M_P)
    }
    mat4_mul_into(M_P, M_V, M_VP)
 
@@ -370,12 +419,24 @@ fn update(dt){
 }
 
 fn draw(phase){
+   "Main draw loop handle: records 3D and 2D rendering commands."
    def t0_dr = ticks()
    set_view_proj(M_VP)
 
-   set_unlit(true) set_model_matrix(M_ID)
-   draw_mesh(_grid_mesh)
-   draw_mesh(_axes_mesh)
+   def snp = 5.0
+   def cam_x = get(cam3d, 0)
+   def cam_z = get(cam3d, 2)
+   def snx = fsub(cam_x, fmod(cam_x, snp))
+   def snz = fsub(cam_z, fmod(cam_z, snp))
+   mat4_translate_into(snx, 0.0, snz, M_tmp)
+
+   set_unlit(true) set_model_matrix(M_tmp)
+   draw_mesh(_grid_mesh, false)
+   set_model_matrix(M_ID)
+
+   draw_line_3d(0, 0, 0, 40, 0, 0, 0.04, 1.0, 0.0, 0.0, 1.0) ; X - Red
+   draw_line_3d(0, 0, 0, 0, 40, 0, 0.04, 0.0, 1.0, 0.0, 1.0) ; Y - Green
+   draw_line_3d(0, 0, 0, 0, 0, 40, 0.04, 0.0, 0.0, 1.0, 1.0) ; Z - Blue
 
    mat4_rotate_x_into(phase * 0.5, M_RX)
    mat4_rotate_y_into(phase * 0.6, M_RY)
@@ -444,8 +505,14 @@ fn draw(phase){
    }
 
    if(!terminal.is_open()){
-      draw_line_2d(ww*0.5-4, wh*0.5, ww*0.5+4, wh*0.5, _color_cross, 1.0)
-      draw_line_2d(ww*0.5, wh*0.5-4, ww*0.5, wh*0.5+4, _color_cross, 1.0)
+      def cx = ww * 0.5 def cy = wh * 0.5
+      mut ix = int(cx) mut iy = int(cy)
+      ix = ix - 1 iy = iy - 1
+      draw_rect(ix,     iy,     2, 2, 1, 1, 1, 0.7) ; Center
+      draw_rect(ix,     iy-8,   2, 4, 1, 1, 1, 0.4) ; Top
+      draw_rect(ix,     iy+6,   2, 4, 1, 1, 1, 0.4) ; Bottom
+      draw_rect(ix-8,   iy,     4, 2, 1, 1, 1, 0.4) ; Left
+      draw_rect(ix+6,   iy,     4, 2, 1, 1, 1, 0.4) ; Right
    }
 
    if(_prof_mode > 0){
@@ -461,6 +528,7 @@ mut _render_dt = 0.0
 mut _running = true
 
 fn render_thread_obj(){
+   "Off-thread rendering loop: handles GPU submission and synchronization."
    while(_running){
       def phase = _render_phase
       if(phase < 0.0){ os.time.sleep_ms(0) continue }
@@ -479,7 +547,7 @@ fn render_thread_obj(){
       _t_flush += t2 - t1
       last_draw_ms = float(t1 - t0) / 1e6 last_flush_ms = float(t2 - t1) / 1e6
 
-      _render_phase = -1.0 ; mark consumed
+      _render_phase = -1.0
    }
 }
 
@@ -500,7 +568,6 @@ while(!window.should_close(win)){
    _t_update += ticks() - tu0
 
    while(_render_phase >= 0.0){
-      ui_backend.poll_events()
       os.time.sleep_ms(0)
    }
    _render_dt = dt

@@ -1,6 +1,7 @@
 ;; Keywords: enc csv rfc4180
-;; CSV Parser and Generator.
-;; Reference: https://www.rfc-editor.org/rfc/rfc4180.html
+;; Comma-Separated Values (CSV) Parser and Generator for Nytrix
+;; Reference:
+;; - https://www.rfc-editor.org/rfc/rfc4180.html
 
 module std.enc.csv (
    decode, encode

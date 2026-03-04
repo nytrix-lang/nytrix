@@ -1,6 +1,7 @@
 ;; Keywords: math float ieee754
-;; Math Float module.
-;; Reference: https://en.wikipedia.org/wiki/IEEE_754
+;; Double-precision Floating Point Mathematics for Nytrix
+;; Reference:
+;; - https://en.wikipedia.org/wiki/IEEE_754
 
 module std.math.float (
    _box, float, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil,

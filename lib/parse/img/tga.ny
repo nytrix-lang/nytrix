@@ -1,4 +1,5 @@
 ;; Keywords: image tga
+;; Truevision TGA Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Truevision_TGA
 

@@ -1286,7 +1286,7 @@ void add_builtins(codegen_t *cg) {
     sig_obj->owned = false;                                                    \
     vec_push(&cg->fun_sigs, *sig_obj);                                         \
     ny_apply_base_fn_attrs(cg, f);                                             \
-    if (!strcmp(rt_name, "__panic") || !strcmp(rt_name, "__exit")) {           \
+    if (!strcmp(rt_name, "__panic")) {                                         \
       unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);       \
       if (nr_kind != 0) {                                                      \
         LLVMAttributeRef nr_attr =                                             \
@@ -1888,7 +1888,7 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
                 {"printf", "Nytrix uses 'print' or 'std.str.fmt'"},
                 {"malloc", "try 'alloc' or 'std.core.mem.alloc'"},
                 {"free", "try 'std.core.mem.free'"},
-                {"VkInstance", "try 'import std.ui.gfx.vulkan'"},
+                {"VkInstance", "try 'import std.ui.gfx.vk.vulkan'"},
                 {"glfwInit", "try 'import std.ui.glfw'"},
                 {"image_load", "try 'import std.image'"},
                 {"AudioSource", "try 'import std.audio'"},

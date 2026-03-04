@@ -1,5 +1,5 @@
-;; Keywords: core alloc
-;; Core Alloc module.
+;; Keywords: core alloc memory
+;; Memory Allocation and Context Management for Nytrix
 
 module std.core.alloc (
    bump_new, bump_alloc, bump_alloc_aligned, bump_reset,
@@ -15,7 +15,7 @@ module std.core.alloc (
 )
 use std.core *
 
-fn _ensure_bump_state(state){
+@inline fn _ensure_bump_state(state){
    "Internal helper. Validates bump allocator state layout."
    if(!is_list(state)){ panic("bump state must be a list") }
    if(len(state) < 3){ panic("bump state must have [buffer, capacity, offset] layout") }
@@ -56,19 +56,19 @@ fn bump_alloc_aligned(state, n, align=8){
    p
 }
 
-fn bump_capacity(state){
+@inline fn bump_capacity(state){
    "Returns total bump allocator capacity."
    state = _ensure_bump_state(state)
    state[1]
 }
 
-fn bump_used(state){
+@inline fn bump_used(state){
    "Returns currently used bytes in bump allocator."
    state = _ensure_bump_state(state)
    state[2]
 }
 
-fn bump_available(state){
+@inline fn bump_available(state){
    "Returns remaining free bytes in bump allocator."
    state = _ensure_bump_state(state)
    def cap = state[1]
@@ -77,7 +77,7 @@ fn bump_available(state){
    cap - off
 }
 
-fn bump_mark(state){
+@inline fn bump_mark(state){
    "Returns the current bump offset marker."
    bump_used(state)
 }
@@ -91,7 +91,7 @@ fn bump_release(state, mark){
    true
 }
 
-fn bump_reset(state){
+@inline fn bump_reset(state){
    "Resets bump allocator offset to zero."
    state = _ensure_bump_state(state)
    set_idx(state, 2, 0)
@@ -136,7 +136,7 @@ fn _bump_ctx_free(state, ptr){
    0
 }
 
-fn _ensure_allocator(allocator){
+@inline fn _ensure_allocator(allocator){
    "Internal helper. Validates allocator descriptor shape."
    if(!is_list(allocator)){ panic("allocator must be a list") }
    if(len(allocator) < 5){ panic("allocator list must have at least 5 slots") }
@@ -144,7 +144,7 @@ fn _ensure_allocator(allocator){
    allocator
 }
 
-fn _ensure_context(ctx){
+@inline fn _ensure_context(ctx){
    "Internal helper. Validates context shape."
    if(!is_list(ctx)){ panic("allocation context must be a list") }
    if(len(ctx) < 1){ panic("allocation context must expose allocator slot") }
@@ -160,13 +160,13 @@ fn new_allocator(alloc_fn, realloc_fn=0, free_fn=0, state=0, name="custom"){
    return res
 }
 
-fn allocator_name(allocator){
+@inline fn allocator_name(allocator){
    "Returns allocator name label."
    allocator = _ensure_allocator(allocator)
    get(allocator, 4, "")
 }
 
-fn allocator_state(allocator){
+@inline fn allocator_state(allocator){
    "Returns allocator state payload."
    allocator = _ensure_allocator(allocator)
    get(allocator, 3, 0)
@@ -206,7 +206,7 @@ fn __init_context(){
    __context
 }
 
-fn context(){
+@inline fn context(){
    "Returns process-wide default allocation context."
    __init_context()
 }
@@ -223,7 +223,7 @@ fn _resolve_context(ctx=0){
    _ensure_context(ctx)
 }
 
-fn context_allocator(ctx=0){
+@inline fn context_allocator(ctx=0){
    "Returns allocator descriptor bound to context `ctx` (or global default when omitted)."
    ctx = _resolve_context(ctx)
    _ensure_allocator(get(ctx, 0, 0))
@@ -280,11 +280,7 @@ fn ctx_zalloc(n, ctx=0){
    "Allocates `n` bytes and zero-fills memory through allocator context `ctx`."
    def p = ctx_alloc(n, ctx)
    if(!p){ return 0 }
-   mut i = 0
-   while(i < n){
-      store8(p, 0, i)
-      i += 1
-   }
+   memset(p, 0, n)
    p
 }
 

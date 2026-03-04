@@ -103,9 +103,12 @@ LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type) {
   LLVMBuilderRef b = cg->alloca_builder;
   if (!b)
     return NULL;
-  LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-  if (!f)
-    return NULL;
+  LLVMValueRef f = cg->current_fn_value;
+  if (!f) {
+    f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+    if (!f)
+      return NULL;
+  }
   LLVMBasicBlockRef entry = LLVMGetEntryBasicBlock(f);
   if (!entry)
     return NULL;
@@ -271,6 +274,10 @@ static void ny_collect_use_modules_stmt(stmt_t *s, str_list *out) {
   } else if (s->kind == NY_S_WHILE) {
     if (s->as.whl.body)
       ny_collect_use_modules_stmt(s->as.whl.body, out);
+    if (s->as.whl.update)
+      ny_collect_use_modules_stmt(s->as.whl.update, out);
+    if (s->as.whl.init)
+      ny_collect_use_modules_stmt(s->as.whl.init, out);
   } else if (s->kind == NY_S_FOR) {
     if (s->as.fr.body)
       ny_collect_use_modules_stmt(s->as.fr.body, out);
@@ -311,6 +318,10 @@ static void ny_collect_module_names_stmt(stmt_t *s, str_list *out) {
   } else if (s->kind == NY_S_WHILE) {
     if (s->as.whl.body)
       ny_collect_module_names_stmt(s->as.whl.body, out);
+    if (s->as.whl.update)
+      ny_collect_module_names_stmt(s->as.whl.update, out);
+    if (s->as.whl.init)
+      ny_collect_module_names_stmt(s->as.whl.init, out);
   } else if (s->kind == NY_S_FOR) {
     if (s->as.fr.body)
       ny_collect_module_names_stmt(s->as.fr.body, out);
@@ -481,6 +492,10 @@ static void process_links(codegen_t *cg, stmt_t *s, const char *cur_mod) {
   } else if (s->kind == NY_S_WHILE) {
     if (s->as.whl.body)
       process_links(cg, s->as.whl.body, cur_mod);
+    if (s->as.whl.update)
+      process_links(cg, s->as.whl.update, cur_mod);
+    if (s->as.whl.init)
+      process_links(cg, s->as.whl.init, cur_mod);
   } else if (s->kind == NY_S_FOR) {
     if (s->as.fr.body)
       process_links(cg, s->as.fr.body, cur_mod);

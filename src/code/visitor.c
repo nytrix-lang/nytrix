@@ -156,6 +156,10 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_WHILE:
       ny_visit_expr(v, s->as.whl.test);
       ny_visit_stmt(v, s->as.whl.body);
+      if (s->as.whl.update)
+        ny_visit_stmt(v, s->as.whl.update);
+      if (s->as.whl.init)
+        ny_visit_stmt(v, s->as.whl.init);
       break;
     case NY_S_FOR:
       ny_visit_expr(v, s->as.fr.iterable);

@@ -363,6 +363,14 @@ static void dump_stmt(stmt_t *s, char **buf, size_t *len, size_t *cap) {
     dump_expr(s->as.whl.test, buf, len, cap);
     append(buf, len, cap, ",\"body\":");
     dump_stmt(s->as.whl.body, buf, len, cap);
+    if (s->as.whl.update) {
+      append(buf, len, cap, ",\"update\":");
+      dump_stmt(s->as.whl.update, buf, len, cap);
+    }
+    if (s->as.whl.init) {
+      append(buf, len, cap, ",\"init\":");
+      dump_stmt(s->as.whl.init, buf, len, cap);
+    }
     append(buf, len, cap, "}");
     break;
   case NY_S_FOR:

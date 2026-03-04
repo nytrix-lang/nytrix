@@ -58,15 +58,33 @@ static void stmt_var_setup_local_binding(
     *bind_direct = true;
     return;
   }
+  bool use_f64_slot = false;
+  bool use_int_slot = false;
   LLVMTypeRef var_type = cg->type_i64;
+
   if (sema && sema->resolved_types.len > idx) {
     var_type = sema->resolved_types.data[idx];
   } else if (decl_type) {
-    var_type = resolve_type_name(cg, decl_type, var_stmt->tok);
+    if (strcmp(decl_type, "f64") == 0 || strcmp(decl_type, "f32") == 0) {
+      var_type = cg->type_f64;
+      use_f64_slot = true;
+    } else if (strcmp(decl_type, "int") == 0) {
+      use_int_slot = true;
+    } else {
+      var_type = resolve_type_name(cg, decl_type, var_stmt->tok);
+    }
   }
   *slot = build_alloca(cg, name, var_type);
   scope_bind(cg, scopes, depth, name, *slot, var_stmt, var_stmt->as.var.is_mut,
              decl_type, true);
+  if (use_f64_slot || use_int_slot) {
+    size_t nlen = strlen(name);
+    binding *b = scope_lookup_hash(scopes, depth, name, nlen, 0);
+    if (b) {
+      b->is_f64_slot = use_f64_slot;
+      b->is_int_slot = use_int_slot;
+    }
+  }
 }
 
 static binding *stmt_var_lookup_existing(codegen_t *cg, scope *scopes,
@@ -513,35 +531,45 @@ static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
 
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
+  if (s->as.whl.init)
+    gen_stmt(cg, scopes, depth, s->as.whl.init, func_root, false);
   LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
   LLVMBasicBlockRef cb = ny_llvm_append_block(f, "wc"),
                     bb = ny_llvm_append_block(f, "wb"),
                     eb = ny_llvm_append_block(f, "we");
+  LLVMBasicBlockRef ub = NULL;
+  if (s->as.whl.update)
+    ub = ny_llvm_append_block(f, "wu");
+  LLVMBasicBlockRef cont_bb = ub ? ub : cb;
   ny_dbg_loc(cg, s->tok);
   LLVMBuildBr(cg->builder, cb);
 
   LLVMPositionBuilderAtEnd(cg->builder, cb);
-
   ny_dbg_loc(cg, s->tok);
   LLVMBuildCondBr(cg->builder,
                   to_bool(cg, gen_expr(cg, scopes, *depth, s->as.whl.test)), bb,
                   eb);
 
   LLVMPositionBuilderAtEnd(cg->builder, bb);
-
   LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
-  scope_enter(scopes, depth, eb, cb);
+  scope_enter(scopes, depth, eb, cont_bb);
   gen_stmt(cg, scopes, depth, s->as.whl.body, func_root, false);
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
     emit_defers(cg, scopes, *depth, *depth);
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
       ny_dbg_loc(cg, s->tok);
-
-      LLVMBuildBr(cg->builder, cb);
+      LLVMBuildBr(cg->builder, cont_bb);
     }
   }
   scope_pop(scopes, depth);
   codegen_debug_pop_block(cg, dbg_scope);
+
+  if (ub) {
+    LLVMPositionBuilderAtEnd(cg->builder, ub);
+    gen_stmt(cg, scopes, depth, s->as.whl.update, func_root, false);
+    if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+      LLVMBuildBr(cg->builder, cb);
+  }
 
   LLVMPositionBuilderAtEnd(cg->builder, eb);
 }
@@ -982,7 +1010,25 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                   "add an explicit declaration to avoid implicit globals");
           }
         }
-      } else {
+      }
+      LLVMValueRef target_val = NULL;
+      expr_t *expr_for_check = NULL;
+      if (parallel) {
+        expr_for_check = s->as.var.exprs.data[i];
+      } else if (!dest) {
+        if (s->as.var.exprs.len > 0)
+          expr_for_check = s->as.var.exprs.data[0];
+      }
+
+      if (!decl_type && expr_for_check) {
+        const char *inf = infer_expr_type(cg, scopes, *depth, expr_for_check);
+        if (inf && (strcmp(inf, "int") == 0 || strcmp(inf, "f64") == 0 ||
+                    strcmp(inf, "f32") == 0 || strcmp(inf, "bool") == 0 ||
+                    strcmp(inf, "str") == 0))
+          decl_type = inf;
+      }
+
+      if (*depth > 0) {
         if (s->as.var.is_decl) {
           stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
                                        decl_type, prefer_direct_locals,
@@ -1012,15 +1058,59 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
             }
           } else {
             stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
-                                         NULL, prefer_direct_locals,
+                                         decl_type, prefer_direct_locals,
                                          &bind_direct, &slot);
           }
         }
       }
-      LLVMValueRef target_val = NULL;
-      expr_t *expr_for_check = NULL;
+
+      bool target_is_f64_slot = false;
+      if (resolved_local) {
+        if (resolved_local->is_f64_slot)
+          target_is_f64_slot = true;
+      } else if (!resolved_global && slot) {
+        size_t nlen = strlen(n);
+        binding *nb = scope_lookup_hash(scopes, *depth, n, nlen, 0);
+        if (nb && nb->is_f64_slot)
+          target_is_f64_slot = true;
+      }
+
+      if (target_is_f64_slot && slot && expr_for_check && !parallel && !dest) {
+        const char *et = infer_expr_type(cg, scopes, *depth, expr_for_check);
+        bool rhs_is_f64 =
+            et && (strcmp(et, "f64") == 0 || strcmp(et, "f32") == 0);
+        if (rhs_is_f64) {
+          LLVMValueRef fv = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
+          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_F64"))
+            LLVMBuildStore(cg->builder, fv, slot);
+          continue;
+        }
+        bool rhs_is_int = et && strcmp(et, "int") == 0;
+        if (rhs_is_int) {
+          LLVMValueRef iv = gen_expr(cg, scopes, *depth, expr_for_check);
+          LLVMValueRef fv = LLVMBuildSIToFP(
+              cg->builder,
+              LLVMBuildAShr(cg->builder, iv,
+                            LLVMConstInt(cg->type_i64, 1, false), ""),
+              cg->type_f64, "i2f");
+          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_F64"))
+            LLVMBuildStore(cg->builder, fv, slot);
+          continue;
+        }
+        // Unknown type: gen_expr then unbox via pointer (assumes float)
+        {
+          LLVMValueRef v = gen_expr(cg, scopes, *depth, expr_for_check);
+          LLVMValueRef ptr = LLVMBuildIntToPtr(
+              cg->builder, v, LLVMPointerType(cg->type_f64, 0), "");
+          LLVMValueRef fv =
+              LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64_unbox");
+          if (ensure_store_ready(cg, s->tok, fv, slot, "NY_S_VAR_F64"))
+            LLVMBuildStore(cg->builder, fv, slot);
+          continue;
+        }
+      }
+
       if (parallel) {
-        expr_for_check = s->as.var.exprs.data[i];
         target_val = gen_expr(cg, scopes, *depth, expr_for_check);
       } else if (dest) {
         uint64_t tagged_idx = ((uint64_t)i << 1) | 1;
@@ -1029,8 +1119,6 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
             LLVMBuildCall2(cg->builder, gs->type, gs->value,
                            (LLVMValueRef[]){first_val, idx_val}, 2, "");
       } else {
-        if (s->as.var.exprs.len > 0)
-          expr_for_check = s->as.var.exprs.data[0];
         target_val = first_val;
       }
       if (!s->as.var.is_destructure) {
@@ -1047,8 +1135,22 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                                       expr_for_check->tok, "assignment");
       }
       if (bind_direct) {
+        bool is_f64_direct = false;
+        if (decl_type &&
+            (strcmp(decl_type, "f64") == 0 || strcmp(decl_type, "f32") == 0) &&
+            !parallel && !dest && expr_for_check) {
+          target_val = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
+          is_f64_direct = true;
+        }
+
         scope_bind(cg, scopes, *depth, n, target_val, s, s->as.var.is_mut,
                    decl_type, false);
+        if (is_f64_direct) {
+          size_t nlen = strlen(n);
+          binding *b = scope_lookup_hash(scopes, *depth, n, nlen, 0);
+          if (b)
+            b->is_f64_slot = true;
+        }
 
         continue;
       }
@@ -1058,7 +1160,16 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         continue;
       }
       if (ensure_store_ready(cg, s->tok, target_val, slot, "NY_S_VAR")) {
-        LLVMBuildStore(cg->builder, target_val, slot);
+        if (target_is_f64_slot) {
+          LLVMValueRef ptr = LLVMBuildIntToPtr(
+              cg->builder, target_val, LLVMPointerType(cg->type_f64, 0), "");
+          LLVMValueRef fv =
+              LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64_unbox");
+          LLVMBuildStore(cg->builder, fv, slot);
+
+        } else {
+          LLVMBuildStore(cg->builder, target_val, slot);
+        }
       }
     }
     break;
@@ -1143,7 +1254,8 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
             match_pattern_result_cond(cg, scopes, *depth, s, testv, pat);
         if (!pat_cond) {
           LLVMValueRef pv = gen_expr(cg, scopes, *depth, pat);
-          LLVMValueRef eq = gen_binary(cg, "==", testv, pv);
+          LLVMValueRef eq =
+              gen_binary(cg, scopes, *depth, "==", testv, pv, NULL, pat);
           pat_cond = to_bool(cg, eq);
         }
         cond = cond ? LLVMBuildOr(cg->builder, cond, pat_cond, "") : pat_cond;
@@ -1220,6 +1332,8 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     LLVMValueRef v = s->as.ret.value
                          ? gen_expr(cg, scopes, *depth, s->as.ret.value)
                          : LLVMConstInt(cg->type_i64, 1, false);
+    if (cg->current_fn_ret_type && !ny_type_is_tagged(cg->current_fn_ret_type))
+      v = ny_coerce_to_abi(cg, v, cg->current_fn_ret_type);
     emit_defers(cg, scopes, *depth, func_root);
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
       LLVMBuildRet(cg->builder, v);

@@ -128,8 +128,11 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
   default:
     break;
   }
-  if (opt_level <= 0)
+  if (opt_level <= 0) {
+    if (ny_env_enabled_default_on("NYTRIX_OPT_DCE"))
+      return "globaldce";
     return NULL;
+  }
   if (opt_level == 1)
     return "default<O1>";
   if (opt_level == 2)

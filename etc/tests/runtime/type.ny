@@ -43,10 +43,16 @@ fn test_primitives(){
    def h: u64 = 80
    def i: char = 'A'
    def j: bool = true
-   def k: void = 0
 
    assert(a == 10, "i8 failed")
+   assert(b == 20, "i16 failed")
+   assert(c == 30, "i32 failed")
+   assert(d == 40, "i64 failed")
+   assert(e == 50, "u8 failed")
+   assert(f == 60, "u16 failed")
+   assert(g == 70, "u32 failed")
    assert(h == 80, "u64 failed")
+   assert(i == 'A', "char failed")
    assert(j == true, "bool failed")
 }
 
@@ -145,6 +151,7 @@ fn test_flow_null_narrowing(){
    }
 }
 
+print("test_add(10, 20) =", test_add(10, 20))
 assert(test_add(10, 20) == 30, "add failed")
 assert(get_name() == "John", "get_name failed")
 assert(process("hello") == "hello", "process failed")

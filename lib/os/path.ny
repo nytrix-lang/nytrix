@@ -1,5 +1,5 @@
 ;; Keywords: os path
-;; Path helpers.
+;; Path Manipulation for Nytrix
 
 module std.os.path (
    sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext

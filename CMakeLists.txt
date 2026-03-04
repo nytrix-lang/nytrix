@@ -203,9 +203,16 @@ set(STD_BUNDLE "${CMAKE_BINARY_DIR}/std.ny")
 set(STD_SYMBOLS "${CMAKE_BINARY_DIR}/std_symbols.h")
 file(GLOB_RECURSE STD_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/lib/*.ny")
 
+option(NYTRIX_STD_BUNDLE_VERBOSE "Verbose std bundling output" OFF)
+if(NYTRIX_STD_BUNDLE_VERBOSE)
+  set(_NYTRIX_STD_BUNDLE_VERBOSE_LEVEL 1)
+else()
+  set(_NYTRIX_STD_BUNDLE_VERBOSE_LEVEL 0)
+endif()
+
 add_custom_command(
   OUTPUT "${STD_BUNDLE}" "${STD_SYMBOLS}"
-  COMMAND $<TARGET_FILE:ny> --bundle-std="${STD_BUNDLE}" --bundle-symbols="${STD_SYMBOLS}" --verbose=1
+  COMMAND $<TARGET_FILE:ny> --bundle-std="${STD_BUNDLE}" --bundle-symbols="${STD_SYMBOLS}" --verbose=${_NYTRIX_STD_BUNDLE_VERBOSE_LEVEL}
   WORKING_DIRECTORY "${NYTRIX_ROOT}"
   DEPENDS ny ${STD_SOURCES}
   COMMENT "Bundling std natively"

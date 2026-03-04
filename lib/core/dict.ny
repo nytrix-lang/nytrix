@@ -1,5 +1,5 @@
 ;; Keywords: core dict
-;; Core Dict module.
+;; Hash Dictionary Implementation for Nytrix
 
 module std.core.dict_mod (
    dict, dict_len, dict_get, dict_has, dict_set, dict_del, dict_clone, dict_merge,
@@ -10,20 +10,15 @@ use std.core.error *
 use std.str *
 use std.str.io *
 
-fn _dict_str_eq(a, b){
-   "Internal: byte-wise string equality for dictionary keys."
+@inline fn _dict_str_eq(a, b){
+   "Internal: byte-wise string equality for dictionary keys using memcmp."
    if(!is_str(a) || !is_str(b)){ return false }
    def n = str_len(a)
-   if(!(n == str_len(b))){ return false }
-   mut i = 0
-   while(i < n){
-      if(load8(a, i) != load8(b, i)){ return false }
-      i += 1
-   }
-   return true
+   if(n != str_len(b)){ return false }
+   return memcmp(a, b, n) == 0
 }
 
-fn _dict_key_eq(a, b){
+@inline fn _dict_key_eq(a, b){
    "Internal: key equality with string fast-path."
    if(is_str(a) && is_str(b)){
       return _dict_str_eq(a, b)
@@ -69,7 +64,7 @@ fn dict(cap=8){
    _dict_new(_pow2(cap))
 }
 
-fn dict_len(d){
+@inline fn dict_len(d){
    "Returns the number of entries in dictionary `d`."
    if(!is_dict(d)){ return 0 }
    load64(d, 0)
@@ -139,7 +134,7 @@ fn dict_set(d, key, val){
    d
 }
 
-fn dict_get(d, key, default=0){
+@inline fn dict_get(d, key, default=0){
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
    if(!is_dict(d)){ return default }
    def off = _dict_find_off(d, key)
@@ -147,7 +142,7 @@ fn dict_get(d, key, default=0){
    load64(d, off + 8)
 }
 
-fn dict_has(d, key){
+@inline fn dict_has(d, key){
    "Returns **true** if `key` exists in dictionary `d`."
    if(!is_dict(d)){ return false }
    def off = _dict_find_off(d, key)
@@ -155,7 +150,7 @@ fn dict_has(d, key){
    true
 }
 
-fn dict_del(d, key){
+@inline fn dict_del(d, key){
    "Removes `key` from dictionary `d`. Returns the dictionary."
    if(!is_dict(d)){ return d }
    def off = _dict_find_off(d, key)
@@ -201,7 +196,7 @@ fn dict_merge(dst, src){
    dst
 }
 
-fn _dict_pair(a, b){
+@inline fn _dict_pair(a, b){
    "Internal: packs `(a, b)` into a two-element list."
    mut p = list(2)
    append(p, a)

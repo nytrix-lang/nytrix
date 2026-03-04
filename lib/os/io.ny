@@ -1,5 +1,5 @@
 ;; Keywords: os io process
-;; Process IO module.
+;; Process IO for Nytrix
 
 module std.os.io (
    spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close

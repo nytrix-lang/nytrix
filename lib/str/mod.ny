@@ -1,9 +1,9 @@
 ;; Keywords: text str
-;; Text and String module.
+;; Text and String Manipulation Library for Nytrix
 
 module std.str (
    str_len, len, find, find_last, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, atof, split, strip,
-   str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, chr, repeat, ord,
+   str_add, upper, lower, str_contains, join, str_replace, replace_all, to_hex, to_fixed, chr, repeat, ord,
    utf8_valid, utf8_len, ord_at, str_slice, utf8_slice,
    _utf8_seq_len, _utf8_decode_at, _utf8_encode_at, _substr
 )
@@ -119,7 +119,7 @@ fn pad_start(s, width, pad=" "){
    out
 }
 
-fn startswith(s, prefix){
+@inline fn startswith(s, prefix){
    "Returns true if string `s` starts with `prefix`."
    if(!is_str(s) || !is_str(prefix)){ return false }
    mut n = str_len(prefix)
@@ -152,6 +152,14 @@ fn atoi(s){
    }
    if(sign < 0){ val = 0 - val }
    val
+}
+
+fn hex_val(c){
+   "Returns the integer value of a hexadecimal character byte `c`."
+   if(c >= 48 && c <= 57){ return c - 48 }
+   if(c >= 65 && c <= 70){ return c - 55 }
+   if(c >= 97 && c <= 102){ return c - 87 }
+   0
 }
 
 fn atof(s){
@@ -380,7 +388,7 @@ fn endswith(s, suffix){
    return true
 }
 
-fn str_contains(s, sub){
+@inline fn str_contains(s, sub){
    "Returns true if string `s` contains `sub`."
    find(s, sub) != -1
 }
@@ -409,7 +417,7 @@ fn str_replace(s, old, new){
    return join(parts, new)
 }
 
-fn replace_all(s, old, new){
+@inline fn replace_all(s, old, new){
    "Alias for [[std.str::str_replace]]."
    return str_replace(s, old, new)
 }
@@ -444,6 +452,29 @@ fn to_hex(n, width=0){
       }
    }
    return s
+}
+
+fn to_fixed(v, precision=2){
+   "Returns a string representation of float `v` with `precision` decimal places."
+   mut val = v
+   mut s = ""
+   if(val < 0.0){ s = "-" val = 0.0 - val }
+
+   def integral = int(val)
+   s = s + to_str(integral)
+   if(precision > 0){
+      s = s + "."
+      mut frac = val - float(integral)
+      mut i = 0
+      while(i < precision){
+         frac = frac * 10.0
+         def digit = int(frac)
+         s = s + to_str(digit)
+         frac = frac - float(digit)
+         i += 1
+      }
+   }
+   s
 }
 
 fn chr(code){
@@ -637,7 +668,7 @@ fn ord_at(s, idx=0){
    0
 }
 
-fn ord(s){
+@inline fn ord(s){
    "Returns the Unicode code point of the first character in `s`."
    ord_at(s, 0)
 }

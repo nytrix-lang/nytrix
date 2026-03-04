@@ -8,7 +8,7 @@ module std.ui.diag (
 use std.core *
 use std.os *
 use std.ui.window as window
-use std.ui.gfx.vulkan *
+use std.ui.gfx.vk.vulkan *
 use std.util.common as common
 
 fn probe(){

@@ -1,4 +1,5 @@
 ;; Keywords: image png rfc2083
+;; Portable Network Graphics (PNG) Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/PNG
 ;; - https://www.rfc-editor.org/rfc/rfc2083.html
@@ -11,7 +12,7 @@ use std.core *
 use std.core.dict_mod *
 use std.core.mem as core_mem
 use std.math as math
-use std.math.hash as hash
+use std.math.hash as math_hash
 use std.enc.zlib as zlib
 
 fn _png_paeth(a, b, c){
@@ -104,8 +105,6 @@ fn decode(data){
    }
    def idat = _join_chunks(idat_list)
    if(len(idat) == 0){ return _fail("missing IDAT") }
-   def raw = zlib.decompress(idat)
-   if(len(raw) == 0){ return _fail("zlib decompress failed/empty") }
    mut channels = 3
    if(color_type == 6){ channels = 4 }
    elif(color_type == 4){ channels = 2 }
@@ -123,6 +122,11 @@ fn decode(data){
    } else {
       stride = w * channels * bytes_per_sample
    }
+   ;; Raw stream is one filter byte + stride per row.
+   def expect_raw = (stride + 1) * h
+   if(expect_raw <= 0 || expect_raw > 512 * 1024 * 1024){ return _fail("raw size invalid " + to_str(expect_raw)) }
+   def raw = zlib.decompress_zlib_limit(idat, expect_raw)
+   if(len(raw) == 0){ return _fail("zlib decompress failed/empty") }
    def pixels = init_str(malloc(w * h * 4 + 1 + 16) + 16, w * h * 4)
    memset(pixels, 0, w * h * 4)
    mut y = 0
@@ -377,7 +381,7 @@ fn _make_chunk(type, data){
    if(length > 0){
       core_mem.memcpy(to_int(cs) + 4, to_int(data), length)
    }
-   def crc = hash.crc32(cs)
+   def crc = math_hash.crc32(cs)
    free(to_int(cs) - 16)
 
    _s32be(res_p, crc, 8 + length)

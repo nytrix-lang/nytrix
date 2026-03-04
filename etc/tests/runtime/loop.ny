@@ -21,4 +21,10 @@ for(x in list_vals){
 }
 assert(sum == 6, "for strict")
 
+mut loop=0
+while(mut i=0 i<10 ++i){
+   loop = i
+}
+assert(loop == 9, "loop sequence failed")
+
 print("✓ Loop strict syntax tests passed")

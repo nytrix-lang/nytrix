@@ -1,5 +1,5 @@
 ;; Keywords: math noise perlin
-;; Perlin Noise Implementation
+;; Perlin and Fractal Noise Implementation for Nytrix
 ;; Reference:
 ;; - https://github.com/nothings/stb/blob/master/stb_perlin.h
 

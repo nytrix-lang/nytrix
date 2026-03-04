@@ -1,9 +1,10 @@
 ;; Keywords: math
-;; Math module.
+;; Standard Math Library for Nytrix
 
 module std.math ( fmod,
    abs, min, max, pow, mod, clamp, sign, sqrt, gcd, lcm, factorial, lerp,
    sin, cos, tan, asin, acos, atan, atan2,
+   log, log2, log10, exp,
    PI, PHI, E, TAU, LN2, LN10
 )
 use std.core *
@@ -26,9 +27,16 @@ fn max(a,b){
 }
 
 fn pow(a,b){
-   "Return `a` raised to the power of `b` (a^b) using an iterative loop."
-   mut res = 1  mut i = 0
-   while(i < b){ res = res * a  i += 1 }
+   "Return `a` raised to the power of `b` (a^b). Handles both positive and negative exponents."
+   if(b == 0){ return 1.0 }
+   if(b < 0){ return 1.0 / pow(a, -b) }
+   def fa = float(a)
+   mut res = 1.0
+   mut i = 0
+   while(i < b){
+      res = res * fa
+      i += 1
+   }
    return res
 }
 
@@ -222,6 +230,74 @@ fn asin(x){
 fn acos(x){
    "Arc cosine in radians, Nytrix implementation."
    fsub(_HALF_PI, asin(x))
+}
+
+;; --- exp via Taylor series with range reduction ---
+;; exp(x) = e^x. Reduces x = k*ln2 + r, computes exp(r) via Horner, then scales by 2^k.
+fn exp(x){
+   "Returns e^x (the natural exponential). Accurate to ~12 decimal places."
+   x = float(x)
+   if(is_nan(x)){ return nan() }
+   if(is_inf(x)){ return fgt(x, 0.0) ? inf() : 0.0 }
+   ;; Range reduction: exp(x) = 2^k * exp(r), where k = round(x/ln2), r = x - k*ln2
+   def k = int(fadd(fdiv(x, LN2), 0.5))
+   def r = fsub(x, fmul(float(k), LN2))
+   ;; Taylor series for exp(r), r is small (|r| <= ln2/2 ~ 0.347)
+   ;; Terms: 1 + r + r^2/2! + r^3/3! + ... up to r^12/12!
+   mut term = 1.0
+   mut s = 1.0
+   mut i = 1
+   while(i <= 12){
+      term = fdiv(fmul(term, r), float(i))
+      s = fadd(s, term)
+      i += 1
+   }
+   ;; Scale by 2^k
+   if(k >= 0){
+      mut j = 0 while(j < k){ s = fmul(s, 2.0) j += 1 }
+   } else {
+      mut j = k while(j < 0){ s = fdiv(s, 2.0) j += 1 }
+   }
+   s
+}
+
+;; --- log (natural logarithm) via argument reduction + series ---
+fn log(x){
+   "Returns the natural logarithm of `x`. Returns nan for x <= 0."
+   x = float(x)
+   if(is_nan(x) || !fgt(x, 0.0)){ return nan() }
+   if(is_inf(x)){ return inf() }
+   if(feq(x, 1.0)){ return 0.0 }
+   ;; Reduce: find k such that x = m * 2^k, 0.5 <= m < 1
+   ;; Use successive halving/doubling
+   mut m = x mut k = 0
+   while(fgt(m, 2.0)){ m = fdiv(m, 2.0) k += 1 }
+   while(!fgt(m, 0.5)){ m = fmul(m, 2.0) k -= 1 }
+   ;; Now 0.5 < m <= 2, shift to (0, 1) range via m -> (m-1)/(m+1)
+   def t = fdiv(fsub(m, 1.0), fadd(m, 1.0))
+   def t2 = fmul(t, t)
+   ;; Series: 2*(t + t^3/3 + t^5/5 + t^7/7 + t^9/9 + t^11/11)
+   mut term = t
+   mut s = t
+   mut n = 3
+   while(n <= 19){
+      term = fmul(term, t2)
+      s = fadd(s, fdiv(term, float(n)))
+      n += 2
+   }
+   s = fmul(2.0, s)
+   ;; Add back the 2^k contribution: log(x) = log(m) + k*ln2
+   fadd(s, fmul(float(k), LN2))
+}
+
+fn log2(x){
+   "Returns the base-2 logarithm of `x`."
+   fdiv(log(x), LN2)
+}
+
+fn log10(x){
+   "Returns the base-10 logarithm of `x`."
+   fdiv(log(x), LN10)
 }
 
 if(comptime{__main()}){

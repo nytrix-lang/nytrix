@@ -77,6 +77,8 @@ RT_DEF("__enable_vt", __enable_vt, 0, "fn __enable_vt()",
        "Enable VT escape processing on Windows.")
 RT_DEF("__tty_raw", __tty_raw, 1, "fn __tty_raw(enable)",
        "Set stdin terminal raw mode when enable=1; restore cooked mode when 0.")
+RT_DEF("__tty_sane_fd", __tty_sane_fd, 1, "fn __tty_sane_fd(fd)",
+       "Set cooked/sane termios flags on the given fd when possible.")
 RT_DEF("__tty_pending", __tty_pending, 0, "fn __tty_pending()",
        "Returns pending stdin byte count for tty input (0 when none).")
 RT_DEF("__tty_size", __tty_size, 1, "fn __tty_size(out_ptr)",
@@ -364,4 +366,12 @@ RT_GV("std.core.primitives.__errno_val", __errno_val, int64_t,
 RT_GV("std.core.primitives.__globals_ptr", g_globals_ptr, int64_t,
       "Global: globals table pointer.")
 
+RT_DEF("__print_int", __rt_print_int, 1, "fn __print_int(v)",
+       "Fast integer print.")
+RT_DEF("__print_newline", __rt_print_newline, 0, "fn __print_newline()",
+       "Fast newline.")
+RT_DEF("__print_str_raw", __rt_print_str_raw, 1, "fn __print_str_raw(s)",
+       "Fast string print.")
+RT_DEF("__print_flush", __rt_print_flush, 0, "fn __print_flush()",
+       "Flush print buffer.")
 #undef RT_GV

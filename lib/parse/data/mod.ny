@@ -1,5 +1,5 @@
 ;; Keywords: enc encoders decoders
-;; Central module for encoders and decoders.
+;; Central for Nytrix for encoders and decoders.
 
 module std.enc (
    json, zlib, csv, xml

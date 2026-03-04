@@ -1,4 +1,5 @@
 ;; Keywords: image gif lzw
+;; Graphics Interchange Format (GIF) Image Loader for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/GIF
 
