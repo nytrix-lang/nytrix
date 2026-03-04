@@ -396,6 +396,36 @@ int64_t __trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn,
   return (int64_t)want;
 }
 
+int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
+  g_trace_func = func;
+  g_trace_file = file;
+  g_trace_line = line;
+  g_trace_col = 1;
+  trace_record(file, line, 1, func);
+  return 0;
+}
+
+int64_t rt_trace_exit(void) { return 0; }
+
+int64_t rt_trace_get_call_stack(int64_t *funcs, int64_t *files, int64_t *lines,
+                                int max_count) {
+  if (g_trace_len == 0)
+    return 0;
+  int want = max_count;
+  if (want > (int)g_trace_len)
+    want = (int)g_trace_len;
+  for (int i = 0; i < want; i++) {
+    int idx = (int)((g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING);
+    if (files)
+      files[i] = g_trace_files[idx];
+    if (lines)
+      lines[i] = g_trace_lines[idx];
+    if (funcs)
+      funcs[i] = g_trace_funcs[idx];
+  }
+  return (int64_t)want;
+}
+
 // Higher level panic logic below primitives
 
 int64_t __argc_val = 1;
@@ -465,7 +495,7 @@ void __cleanup_args(void) {
   __envc_val = 1;
 }
 
-int64_t ny_rt_argc(void) { return __argc_val; }
+int64_t __argc(void) { return __argc_val; }
 int64_t __envc(void) { return __envc_val; }
 int64_t __envp(void) { return (int64_t)__envp_ptr; }
 int64_t ny_rt_argvp(void) { return (int64_t)__argv_ptr; }

@@ -436,6 +436,12 @@ static LLVMValueRef ny_try_emit_tagged_int_fast_binary(
     fast_done_bb = LLVMGetInsertBlock(cg->builder);
 
     LLVMBuildBr(cg->builder, merge_bb);
+  } else {
+    // Fallback if kind is not handled in fast path (should not happen given
+    // op_map)
+    fast_value = LLVMConstInt(cg->type_i64, 0, false);
+    fast_done_bb = LLVMGetInsertBlock(cg->builder);
+    LLVMBuildBr(cg->builder, merge_bb);
   }
   LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
 

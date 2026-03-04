@@ -91,6 +91,8 @@ typedef struct {
   char **args;
   int argc;
   int file_arg_idx;
+  double timeout;
+  bool pending_command_string;
 } ny_options;
 
 void ny_options_init(ny_options *opt);

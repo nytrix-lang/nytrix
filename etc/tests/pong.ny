@@ -8,7 +8,7 @@ use std.math.random *
 use std.ui.consts *
 use std.ui.gfx *
 use std.ui.window as window
-use std.ui.input as uin
+use std.ui.window.input as uin
 
 def WIN_W = 1280.0
 def WIN_H = 720.0
@@ -169,7 +169,7 @@ mut last_upd_t = ticks()
 while(win != 0){
    if(window.should_close(win)){ break }
    def now = ticks()
-   def _elapsed = now - (startup_ticks if typeof(startup_ticks) != "undefined" else now)
+   def _elapsed = now - (typeof(startup_ticks) != "undefined" ? startup_ticks : now)
 
    ;; Auto-timeout for profiling
    def env_t = env("NY_UI_TIMEOUT")

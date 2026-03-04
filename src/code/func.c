@@ -67,15 +67,16 @@ static bool layout_add_field(codegen_t *cg, layout_def_t *def,
   return true;
 }
 
-static void emit_trace_func(codegen_t *cg, const char *name) {
-  if (!cg || !cg->trace_exec || !cg->builder || !name)
-    return;
-  fun_sig *ts = lookup_fun(cg, "__trace_func", 0);
-  if (!ts)
-    return;
-  LLVMValueRef nstr_g = const_string_ptr(cg, name, strlen(name));
-  LLVMValueRef nstr = LLVMBuildLoad2(cg->builder, cg->type_i64, nstr_g, "");
-  LLVMBuildCall2(cg->builder, ts->type, ts->value, &nstr, 1, "");
+static void emit_trace_enter(codegen_t *cg, const char *name, token_t tok) {
+  (void)cg;
+  (void)name;
+  (void)tok;
+  /* Tracing disabled - causes crashes during codegen */
+}
+
+void ny_cg_emit_trace_exit(codegen_t *cg) {
+  (void)cg;
+  /* No-op */
 }
 
 void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
@@ -1498,7 +1499,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   }
   ny_dbg_loc(cg, fn->tok);
   if (!fn->as.fn.attr_naked)
-    emit_trace_func(cg, name ? name : "<anon>");
+    emit_trace_enter(cg, name ? name : "<anon>", fn->tok);
   size_t fd = depth + 1;
   size_t root = fd;
   assigned_name_list assigned_names = {0};
@@ -1703,6 +1704,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
     if (fn->as.fn.attr_naked) {
       LLVMBuildUnreachable(cg->builder);
     } else {
+      ny_cg_emit_trace_exit(cg);
       LLVMBuildRet(cg->builder, LLVMConstInt(cg->type_i64, 1, false));
     }
   }
