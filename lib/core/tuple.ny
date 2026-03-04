@@ -1,5 +1,5 @@
 ;; Keywords: core tuple
-;; Core Tuple module.
+;; Core Tuple for Nytrix
 
 module std.core.tuple (
    tuple

@@ -1,5 +1,5 @@
 ;; Keywords: os ffi
-;; Os Ffi module.
+;; Os Ffi for Nytrix
 
 module std.os.ffi (
    RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,

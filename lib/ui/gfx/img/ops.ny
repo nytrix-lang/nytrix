@@ -2,7 +2,7 @@
 ;; Reference:
 ;; - https://github.com/nothings/stb/blob/master/stb_image_resize2.h
 
-module std.image.imgops (
+module std.img.ops (
    resize
 )
 

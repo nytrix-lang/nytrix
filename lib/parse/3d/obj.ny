@@ -1,5 +1,8 @@
 ;; Keywords: enc 3d obj mesh
 ;; Simple Wavefront OBJ loader for std.ui.gfx.
+;; Reference:
+;; - https://en.wikipedia.org/wiki/Wavefront_.obj_file
+;; - https://github.com/syoyo/tinyobjloader-c
 
 module std.parse.threed.obj (
    load_obj, mesh_from_obj, parse_obj_str

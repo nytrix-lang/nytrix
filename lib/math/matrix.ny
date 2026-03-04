@@ -1,7 +1,5 @@
 ;; Keywords: math matrix
-;; Column-major 4x4 matrix library.
-;; Storage: [rows, cols, c0r0, c0r1, c0r2, c0r3, c1r0, ...]
-;; mat4 element (row,col) = m[2 + col*4 + row]
+;; Matrix Mathematics and Linear Algebra for Nytrix
 
 module std.math.matrix (
    matrix, rows, cols, at, set,
@@ -26,8 +24,7 @@ module std.math.matrix (
 use std.core *
 use std.math *
 
-;; Generic NxM Matrix
-
+@jit
 fn matrix(r, c){
    "Creates an `r` by `c` zero matrix."
    def n = r * c
@@ -40,15 +37,18 @@ fn matrix(r, c){
    m
 }
 
+@readonly @jit
 fn rows(m){
    "Returns the row count stored in matrix `m`."
    m[0]
 }
+@readonly @jit
 fn cols(m){
    "Returns the column count stored in matrix `m`."
    m[1]
 }
 
+@readonly @jit
 fn at(m, r, c, default=0.0){
    "Returns the matrix element at row `r`, column `c`, or `default` when out of bounds."
    if(r < 0 || r >= m[0] || c < 0 || c >= m[1]){ return default }
@@ -62,6 +62,7 @@ fn set(m, r, c, v){
    m
 }
 
+@pure @jit
 fn transpose(m){
    "Returns the transpose of a generic matrix."
    def r = m[0] def c = m[1]
@@ -76,26 +77,33 @@ fn transpose(m){
    out
 }
 
+@pure @jit
 fn mul(a, b){
    "Returns the matrix product `a * b` for generic matrices."
    def ar = a[0] def ac = a[1] def br = b[0] def bc = b[1]
    if(ac != br){ return 0 }
    mut out = matrix(ar, bc)
-   mut c = 0 while(c < bc){
-      mut r = 0 while(r < ar){
-         mut sum = 0.0
-         mut k = 0 while(k < ac){
-         sum = sum + a[2 + k*ar + r] * b[2 + c*br + k]
-         k = k + 1
-         }
-         out[2 + c*ar + r] = sum
+   mut c = 0
+   while(c < bc){
+      def c_out = 2 + (c * ar)
+      def c_b = 2 + (c * br)
+      mut k = 0
+      while(k < ac){
+         def b_val = b[c_b + k]
+         def k_a = 2 + (k * ar)
+         mut r = 0
+         while(r < ar){
+         out[c_out + r] = out[c_out + r] + (a[k_a + r] * b_val)
          r = r + 1
+         }
+         k = k + 1
       }
       c = c + 1
    }
    out
 }
 
+@pure @jit
 fn add(a, b){
    "Returns the element-wise sum of generic matrices `a` and `b`."
    def r = a[0] def c = a[1]
@@ -105,6 +113,7 @@ fn add(a, b){
    out
 }
 
+@pure @jit
 fn sub(a, b){
    "Returns the element-wise difference of generic matrices `a` and `b`."
    def r = a[0] def c = a[1]
@@ -116,11 +125,13 @@ fn sub(a, b){
 
 ;; mat4 — all direct indexed, zero overhead
 
+@pure @jit
 fn mat4_zero(){
    "Returns a zero-initialized 4x4 matrix."
    matrix(4, 4)
 }
 
+@pure @jit
 fn mat4_identity(){
    "Returns a 4x4 identity matrix."
    mut m = mat4_zero()
@@ -128,13 +139,17 @@ fn mat4_identity(){
    m
 }
 
+@jit
 fn mat4_identity_into(m){
    "Writes the 4x4 identity matrix into `m`."
-   mut i = 0 while(i < 16){ m[2+i] = 0.0 i = i + 1 }
-   m[2] = 1.0 m[7] = 1.0 m[12] = 1.0 m[17] = 1.0
+   m[2]  = 1.0 m[6]  = 0.0 m[10] = 0.0 m[14] = 0.0
+   m[3]  = 0.0 m[7]  = 1.0 m[11] = 0.0 m[15] = 0.0
+   m[4]  = 0.0 m[8]  = 0.0 m[12] = 1.0 m[16] = 0.0
+   m[5]  = 0.0 m[9]  = 0.0 m[13] = 0.0 m[17] = 1.0
    m
 }
 
+@readonly @jit
 fn mat4_get(m, r, c, default=0.0){
    "Returns the 4x4 matrix element at row `r`, column `c`, or `default` when out of bounds."
    if(r < 0 || r >= 4 || c < 0 || c >= 4){ return default }
@@ -146,6 +161,7 @@ fn mat4_set(m, r, c, v){
    m
 }
 
+@pure @jit
 fn mat4_mul(a, b){
    "Returns the 4x4 matrix product `a * b`."
    mut o = mat4_zero()
@@ -153,20 +169,24 @@ fn mat4_mul(a, b){
    o
 }
 
+@jit
 fn mat4_mul_into(a, b, o){
    "Writes the 4x4 matrix product `a * b` into `o` using a SIMD intrinsic when available."
    __simd_mat4_mul(a, b, o)
 }
 
+@jit
 fn mat4_to_buffer(m, buf){
    "Writes 16 float components from matrix `m` into raw buffer `buf` using an optimized intrinsic."
    __mat4_to_buffer(m, buf)
 }
+@jit
 fn mat4_from_buffer(m, buf){
    "Loads 16 float components from raw buffer `buf` into matrix `m` using an optimized intrinsic."
    __mat4_from_buffer(m, buf)
 }
 
+@pure @jit
 fn mat4_mul_vec4(m, v){
    "Multiplies 4x4 matrix `m` by homogeneous vector `v`."
    def vx=v[0] def vy=v[1] def vz=v[2] def vw=v[3]
@@ -176,22 +196,26 @@ fn mat4_mul_vec4(m, v){
      m[5]*vx  + m[9]*vy  + m[13]*vz + m[17]*vw]
 }
 
+@pure @jit
 fn mat4_add(a, b){
    "Returns the element-wise sum of 4x4 matrices `a` and `b`."
    mut o = mat4_zero()
-   mut i = 0 while(i < 16){ o[2+i] = a[2+i] + b[2+i] i = i + 1 }
+   o[2]  = a[2]+b[2]   o[6]  = a[6]+b[6]   o[10] = a[10]+b[10] o[14] = a[14]+b[14]
+   o[3]  = a[3]+b[3]   o[7]  = a[7]+b[7]   o[11] = a[11]+b[11] o[15] = a[15]+b[15]
+   o[4]  = a[4]+b[4]   o[8]  = a[8]+b[8]   o[12] = a[12]+b[12] o[16] = a[16]+b[16]
+   o[5]  = a[5]+b[5]   o[9]  = a[9]+b[9]   o[13] = a[13]+b[13] o[17] = a[17]+b[17]
    o
 }
 
 ;; Transforms
 
+@pure @jit
 fn mat4_translate(tx, ty, tz){
    "Returns a translation matrix for offsets `tx`, `ty`, and `tz`."
-   mut m = mat4_identity()
-   m[14] = float(tx) m[15] = float(ty) m[16] = float(tz)
-   m
+   [4, 4, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, float(tx), float(ty), float(tz), 1.0]
 }
 
+@jit
 fn mat4_translate_into(tx, ty, tz, m){
    "Writes a translation matrix into `m`."
    mat4_identity_into(m)
@@ -199,12 +223,14 @@ fn mat4_translate_into(tx, ty, tz, m){
    m
 }
 
+@pure @jit
 fn mat4_scale(sx, sy, sz){
    "Returns a scaling matrix for factors `sx`, `sy`, and `sz`."
    [4, 4, float(sx), 0.0, 0.0, 0.0, 0.0, float(sy), 0.0, 0.0,
            0.0, 0.0, float(sz), 0.0, 0.0, 0.0, 0.0, 1.0]
 }
 
+@jit
 fn mat4_scale_into(sx, sy, sz, m){
    "Writes a scaling matrix into `m`."
    mat4_identity_into(m)
@@ -212,13 +238,15 @@ fn mat4_scale_into(sx, sy, sz, m){
    m
 }
 
+@pure @jit
 fn mat4_rotate(angle, axis){
-   "Returns an axis-angle rotation matrix."
+   "Creates a 4x4 rotation matrix around a vector axis."
    mut m = mat4_zero()
    mat4_rotate_into(angle, axis, m)
    m
 }
 
+@jit
 fn mat4_rotate_into(angle, axis, m){
    "Writes an axis-angle rotation matrix into `m`."
    mut ax=0.0 mut ay=0.0 mut az=0.0
@@ -242,31 +270,9 @@ fn mat4_rotate_into(angle, axis, m){
    m
 }
 
-fn mat4_rotate_into(angle, axis, m){
-   "Writes an axis-angle rotation matrix into `m`."
-   mut ax=0.0 mut ay=0.0 mut az=0.0
-   if(is_list(axis) || is_tuple(axis)){
-      def n = len(axis)
-      if(n == 5 && is_int(axis[0]) && is_int(axis[1]) && axis[0]==1 && axis[1]==3){
-         ax = axis[2] ay = axis[3] az = axis[4]
-      } else if(n >= 3){
-         ax = axis[0] ay = axis[1] az = axis[2]
-      }
-   }
-   def l = sqrt(ax*ax + ay*ay + az*az)
-   mut x=ax mut y=ay mut z=az
-   if(l > 0.0001){ def il=1.0/l x *= il y *= il z *= il }
-   def s=sin(angle) def c=cos(angle) def oc=1.0-c
-   ;; Right-handed, column-major (standard Rodrigues)
-   m[2]  = x*x*oc + c      m[6]  = x*y*oc + z*s  m[10] = x*z*oc - y*s  m[14] = 0.0
-   m[3]  = y*x*oc - z*s    m[7]  = y*y*oc + c    m[11] = y*z*oc + x*s  m[15] = 0.0
-   m[4]  = z*x*oc + y*s    m[8]  = z*y*oc - x*s  m[12] = z*z*oc + c    m[16] = 0.0
-   m[5]  = 0.0             m[9]  = 0.0           m[13] = 0.0           m[17] = 1.0
-   m
-}
-
+@jit
 fn mat4_rotate_x_into(angle, m){
-   "Writes an X-axis rotation matrix into `m`."
+   "Stores a rotation around the X axis into matrix `m`."
    def s = sin(angle) def c = cos(angle)
    m[2] = 1.0  m[3] = 0.0  m[4] = 0.0  m[5] = 0.0
    m[6] = 0.0  m[7] = c    m[8] = s    m[9] = 0.0
@@ -275,8 +281,9 @@ fn mat4_rotate_x_into(angle, m){
    m
 }
 
+@jit
 fn mat4_rotate_y_into(angle, m){
-   "Writes a Y-axis rotation matrix into `m`."
+   "Stores a rotation around the Y axis into matrix `m`."
    def s = sin(angle) def c = cos(angle)
    m[2] = c    m[3] = 0.0  m[4] = s    m[5] = 0.0
    m[6] = 0.0  m[7] = 1.0  m[8] = 0.0  m[9] = 0.0
@@ -285,8 +292,9 @@ fn mat4_rotate_y_into(angle, m){
    m
 }
 
+@jit
 fn mat4_rotate_z_into(angle, m){
-   "Writes a Z-axis rotation matrix into `m`."
+   "Stores a rotation around the Z axis into matrix `m`."
    def s = sin(angle) def c = cos(angle)
    m[2] = c    m[3] = s    m[4] = 0.0  m[5] = 0.0
    m[6] = -s   m[7] = c    m[8] = 0.0  m[9] = 0.0
@@ -295,63 +303,56 @@ fn mat4_rotate_z_into(angle, m){
    m
 }
 
-;; Projections — Vulkan NDC: Y down (-f for [1,1]), Z [0,1] range
-
+@pure @jit
 fn mat4_perspective(fovy, aspect, near, far){
-   "Returns a perspective projection matrix in Vulkan clip-space conventions."
+   "Creates a 3D perspective projection matrix."
    mut m = mat4_zero()
    mat4_perspective_into(fovy, aspect, near, far, m)
    m
 }
 
+@jit
 fn mat4_perspective_into(fovy, aspect, near, far, m){
    "Writes a perspective projection matrix into `m`."
    def f = 1.0 / tan(float(fovy) / 2.0)
    def nf = float(near) - float(far)
-   mut i = 0 while(i < 16){ m[2+i] = 0.0 i = i + 1 }
-   m[2]  = f / float(aspect) ;; [0,0]
-   m[7]  = f ;; [1,1]
-   ;; Vulkan Z in [0,1]
-   m[12] = float(far) / nf ;; [2,2]
-   m[13] = -1.0 ;; [3,2] = col2,row3
-   m[16] = (float(far) * float(near)) / nf ;; [2,3] = col3,row2
-   m[17] = 0.0
+   m[2]  = f / float(aspect) m[6] = 0.0 m[10]= 0.0             m[14]= 0.0
+   m[3]  = 0.0               m[7] = f   m[11]= 0.0             m[15]= 0.0
+   m[4]  = 0.0               m[8] = 0.0 m[12]= float(far) / nf m[16]= (float(far) * float(near)) / nf
+   m[5]  = 0.0               m[9] = 0.0 m[13]= -1.0            m[17]= 0.0
    m
 }
 
+@pure @jit
 fn mat4_ortho(l, r, b, t, n, f){
-   "Returns an orthographic projection matrix in Vulkan clip-space conventions."
+   "Creates a 3D orthographic projection matrix."
    mut m = mat4_zero()
    mat4_ortho_into(l, r, b, t, n, f, m)
    m
 }
 
+@jit
 fn mat4_ortho_into(l, r, b, t, n, f, m){
    "Writes an orthographic projection matrix into `m`."
    def rl = float(r) - float(l)
    def tb = float(t) - float(b)
    def fn_ = float(f) - float(n)
-   mut i = 0 while(i < 16){ m[2+i] = 0.0 i = i + 1 }
-   m[2]  = 2.0 / rl ;; [0,0]
-   m[7]  = 2.0 / tb ;; [1,1]
-   ;; Vulkan Z in [0,1]
-   m[12] = -1.0 / fn_ ;; [2,2]
-   m[14] = -(float(r) + float(l)) / rl ;; [0,3] = col3,row0
-   m[15] = -(float(t) + float(b)) / tb ;; [1,3] = col3,row1
-   m[16] = -float(n) / fn_ ;; [2,3] = col3,row2
-   m[17] = 1.0 ;; [3,3]
+   m[2]  = 2.0 / rl m[6] = 0.0      m[10] = 0.0        m[14] = -(float(r) + float(l)) / rl
+   m[3]  = 0.0      m[7] = 2.0 / tb m[11] = 0.0        m[15] = -(float(t) + float(b)) / tb
+   m[4]  = 0.0      m[8] = 0.0      m[12] = -1.0 / fn_ m[16] = -float(n) / fn_
+   m[5]  = 0.0      m[9] = 0.0      m[13] = 0.0        m[17] = 1.0
    m
 }
 
-;; View
-
+@pure @jit
 fn mat4_look_at(eye, center, up){
-   "Returns a view matrix looking from `eye` toward `center` with `up` direction."
+   "Creates a view matrix looking from `eye` to `center`."
    mut m = mat4_zero()
    mat4_look_at_into(eye, center, up, m)
    m
 }
 
+@jit
 fn mat4_look_at_into_xyz(ex, ey, ez, cx, cy, cz, ux, uy, uz, m){
    "Writes a view matrix into `m` from explicit eye, center, and up coordinates."
    def fx=cx-ex def fy=cy-ey def fz=cz-ez
@@ -374,6 +375,7 @@ fn mat4_look_at_into_xyz(ex, ey, ez, cx, cy, cz, ux, uy, uz, m){
    m
 }
 
+@jit
 fn mat4_look_at_into(eye, center, up, m){
    "Writes a view matrix into `m` from vector inputs."
    ;; Fast-path for matrix(1,3) vectors to avoid repeated checks
@@ -409,21 +411,20 @@ fn mat4_look_at_into(eye, center, up, m){
 
 ;; Transpose
 
+@pure @jit
 fn mat4_transpose(m){
-   "Returns the transpose of 4x4 matrix `m`."
+   "Returns the transpose of 4x4 matrix `m` with a flipped Y-axis for Vulkan."
    mut o = mat4_zero()
-   mut i = 0 while(i < 4){
-      mut j = 0 while(j < 4){
-         o[2 + j*4 + i] = m[2 + i*4 + j]
-         j = j + 1
-      }
-      i = i + 1
-   }
+   o[2]  = m[2]   o[6]  = m[3]   o[10] = m[4]   o[14] = m[5]
+   o[3]  = -m[6]  o[7]  = -m[7]  o[11] = -m[8]  o[15] = -m[9]
+   o[4]  = m[10]  o[8]  = m[11]  o[12] = m[12]  o[16] = m[13]
+   o[5]  = m[14]  o[9]  = m[15]  o[13] = m[16]  o[17] = m[17]
    o
 }
 
 ;; Inverse (Laplace expansion)
 
+@pure @jit
 fn mat4_inverse(m){
    "Returns the inverse of 4x4 matrix `m`."
    mut o = mat4_zero()
@@ -431,6 +432,7 @@ fn mat4_inverse(m){
    o
 }
 
+@jit
 fn mat4_inverse_into(src, dst){
    "Writes the inverse of `src` into `dst` when it is invertible."
    ;; Column-major: (row,col) at 2+col*4+row

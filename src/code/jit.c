@@ -215,8 +215,8 @@ void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options,
                          LLVMModuleRef mod) {
   LLVMInitializeMCJITCompilerOptions(options, sizeof(*options));
   options->CodeModel = LLVMCodeModelJITDefault;
-  options->OptLevel = 0;
-  options->EnableFastISel = 0; /* Default to off, specific modes may enable */
+  options->OptLevel = 3;
+  options->EnableFastISel = 0;
 
   if (mod) {
     const char *triple = LLVMGetTarget(mod);

@@ -1,5 +1,5 @@
 ;; Keywords: os args
-;; Args helpers.
+;; Args for Nytrix
 
 module std.os.args (
    args, argv

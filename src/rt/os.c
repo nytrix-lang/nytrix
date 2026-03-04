@@ -467,9 +467,12 @@ int64_t __wait4(int64_t pid, int64_t status_ptr, int64_t options) {
   return rt_tag_v((int64_t)r);
 }
 
+extern void __rt_print_flush(void);
+
 int64_t __exit(int64_t code) {
   if (is_int(code))
     code >>= 1;
+  __rt_print_flush();
 #ifdef _WIN32
   ExitProcess((unsigned int)code);
 #else
@@ -613,6 +616,43 @@ int64_t __tty_raw(int64_t enable) {
       tcsetattr(STDIN_FILENO, TCSANOW, &__tty_mode_prev) != 0)
     return rt_tag_v((int64_t)-errno);
   __tty_mode_saved = 0;
+  return rt_tag_v((int64_t)0);
+#endif
+}
+
+int64_t __tty_sane_fd(int64_t fd) {
+  if (is_int(fd))
+    fd >>= 1;
+#ifdef _WIN32
+  (void)fd;
+  return rt_tag_v((int64_t)-1);
+#else
+  if (fd < 0 || !isatty((int)fd))
+    return rt_tag_v((int64_t)-1);
+  struct termios t;
+  if (tcgetattr((int)fd, &t) != 0)
+    return rt_tag_v((int64_t)-errno);
+  t.c_lflag |= (tcflag_t)(ICANON | ECHO | ISIG);
+#ifdef IEXTEN
+  t.c_lflag |= (tcflag_t)IEXTEN;
+#endif
+#ifdef ICRNL
+  t.c_iflag |= (tcflag_t)ICRNL;
+#endif
+#ifdef IXON
+  t.c_iflag |= (tcflag_t)IXON;
+#endif
+#ifdef IUTF8
+  t.c_iflag |= (tcflag_t)IUTF8;
+#endif
+#ifdef OPOST
+  t.c_oflag |= (tcflag_t)OPOST;
+#endif
+#ifdef ONLCR
+  t.c_oflag |= (tcflag_t)ONLCR;
+#endif
+  if (tcsetattr((int)fd, TCSANOW, &t) != 0)
+    return rt_tag_v((int64_t)-errno);
   return rt_tag_v((int64_t)0);
 #endif
 }

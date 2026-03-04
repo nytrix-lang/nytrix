@@ -24,6 +24,7 @@ typedef struct {
   const char *argv0;
   int opt_level;
   const char *opt_pipeline;
+  const char *emit_ir_pre_path;
   const char *emit_ir_path;
   const char *emit_bc_path;
   const char *emit_asm_path;
@@ -31,6 +32,7 @@ typedef struct {
   bool ir_include_std;
   int verbose;
   bool run_jit;
+  bool run_aot;
   bool emit_only;
   bool do_timing;
   bool dump_ast;

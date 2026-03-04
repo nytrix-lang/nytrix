@@ -304,7 +304,6 @@ fn sha1(s, start=0, len=0){
    mut h4 = 3285377520
    def p_len = ((slen + 8) / 64 + 1) * 64
    mut m = zalloc(p_len)
-   ; Use loop to copy string bytes correctly
    mut cpi = 0
    while(cpi < slen){
       store8(m, load8(s, start + cpi), cpi)

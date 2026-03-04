@@ -382,10 +382,16 @@ def cmake_configure(build_dir, kind, cc, llvm_config, llvm_root, llvm_inc_root):
         f"-DNYTRIX_PGO_PROFILE={cmake_path(pgo_prof)}",
         f"-DNYTRIX_USE_GPROF={'ON' if gprof_on else 'OFF'}",
         f"-DNYTRIX_RELEASE_DEBUG_INFO={'ON' if rel_dbg_on else 'OFF'}",
+        "-DNYTRIX_FAST_BUILD=ON",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DCMAKE_RULE_MESSAGES=OFF",
         f"-DCMAKE_COLOR_DIAGNOSTICS={'ON' if COLOR_ON else 'OFF'}",
     ]
+    std_bundle_verbose = os.environ.get("NYTRIX_STD_BUNDLE_VERBOSE", "").strip().lower()
+    if std_bundle_verbose in ("1", "true", "yes", "on"):
+        args.append("-DNYTRIX_STD_BUNDLE_VERBOSE=ON")
+    elif std_bundle_verbose in ("0", "false", "no", "off"):
+        args.append("-DNYTRIX_STD_BUNDLE_VERBOSE=OFF")
     if llvm_inc_root:
         llvm_inc = cmake_path(llvm_inc_root) if host_os()=="windows" else str(llvm_inc_root)
         args.append(f"-DNYTRIX_LLVM_INCLUDE={llvm_inc}")

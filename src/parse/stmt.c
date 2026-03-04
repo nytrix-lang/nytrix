@@ -966,6 +966,39 @@ stmt_t *p_parse_stmt(parser_t *p) {
     parser_match(p, NY_T_SEMI);
     return s;
   }
+  case NY_T_PLUS_PLUS:
+  case NY_T_MINUS_MINUS: {
+    token_t op_tok = p->cur;
+    bool is_inc = (op_tok.kind == NY_T_PLUS_PLUS);
+    parser_advance(p);
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur,
+                   is_inc ? "expected identifier after '++'"
+                          : "expected identifier after '--'",
+                   NULL);
+      return NULL;
+    }
+    token_t ident_tok = p->cur;
+    parser_advance(p);
+    expr_t *ident_expr = expr_new(p->arena, NY_E_IDENT, ident_tok);
+    ident_expr->as.ident.name =
+        arena_strndup(p->arena, ident_tok.lexeme, ident_tok.len);
+    expr_t *one = expr_new(p->arena, NY_E_LITERAL, op_tok);
+    one->as.literal.kind = NY_LIT_INT;
+    one->as.literal.as.i = 1;
+    token_t bin_tok = {0};
+    expr_t *bin = expr_new(p->arena, NY_E_BINARY, bin_tok);
+    bin->as.binary.op = is_inc ? "+" : "-";
+    bin->as.binary.left = ident_expr;
+    bin->as.binary.right = one;
+    stmt_t *s = stmt_new(p->arena, NY_S_VAR, op_tok);
+    vec_push_arena(p->arena, &s->as.var.names, ident_expr->as.ident.name);
+    vec_push_arena(p->arena, &s->as.var.exprs, bin);
+    s->as.var.is_decl = false;
+    s->as.var.is_undef = false;
+    parser_match(p, NY_T_SEMI);
+    return s;
+  }
   case NY_T_LBRACE:
     return p_parse_block(p);
   default: {

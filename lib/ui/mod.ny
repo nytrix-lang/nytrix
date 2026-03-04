@@ -1,8 +1,8 @@
 ;; Keywords: ui
-;; Aggregated std.ui entrypoint.
+;; Standard UI Entrypoint for Nytrix
 
 module std.ui (
-   window, event, consts, gfx, shader_mod, diag, terminal, vterm,
+   window, event, consts, gfx, shader_mod, diag, terminal, vterm, gamepad,
    shader_transpile, probe, probe_text, print_probe
 )
 
@@ -10,14 +10,15 @@ use std.ui.window as window
 use std.ui.event as event
 use std.ui.consts as consts
 use std.ui.gfx as gfx
-use std.ui.gfx.shader as shader_mod
+use std.ui.gfx.shader as lib_shader
 use std.ui.diag as diag
-use std.ui.terminal as terminal
-use std.ui.vterm as vterm
+use std.ui.gfx.term as terminal
+use std.ui.gfx.vterm as vterm
+use std.ui.gamepad as gamepad
 
 fn shader_transpile(combined_src){
    "Proxy to graphics shader transpiler."
-   shader_mod.transpile_shader_source(combined_src)
+   lib_shader.transpile_shader_source(combined_src)
 }
 
 fn probe(){

@@ -1,5 +1,5 @@
 ;; Keywords: math logic
-;; Math Logic module.
+;; Math Logic for Nytrix
 
 module std.math.logic (
    any, all

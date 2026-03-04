@@ -9,47 +9,22 @@ use std.str.io *
 
 ;; '-L/usr/lib -lraylib' also works with extern
 
-def is_linux = eq(__os_name(), "linux")
-def display = env("DISPLAY")
-def wayland = env("WAYLAND_DISPLAY")
-def headless = is_linux && !display && !wayland
+def lib = dlopen_any("raylib", RTLD_NOW())
+if(lib == 0){ print("[raylib] missing") exit(1) }
+fn InitWindow(w, h, t){ call3_void(dlsym(lib, "InitWindow"), w, h, t) }
+fn WindowShouldClose(){ call0(dlsym(lib, "WigpndowShouldClose")) }
+fn BeginDrawing(){ call0_void(dlsym(lib, "BeginDrawing")) }
+fn EndDrawing(){ call0_void(dlsym(lib, "EndDrawing")) }
+fn ClearBackground(c){ call1_void(dlsym(lib, "ClearBackground"), c) }
+fn CloseWindow(){ call0_void(dlsym(lib, "CloseWindow")) }
+fn DrawFPS(x, y){ call2_void(dlsym(lib, "DrawFPS"), x, y) }
 
-if(headless){
-   print("[raylib] headless linux session; skipping window demo")
-} else {
-   def h = dlopen_any("raylib", RTLD_NOW())
-   if(h != 0){
-      def InitWindowP        = dlsym(h, "InitWindow")
-      def WindowShouldCloseP = dlsym(h, "WindowShouldClose")
-      def BeginDrawingP      = dlsym(h, "BeginDrawing")
-      def EndDrawingP        = dlsym(h, "EndDrawing")
-      def ClearBackgroundP   = dlsym(h, "ClearBackground")
-      def CloseWindowP       = dlsym(h, "CloseWindow")
-      def SetTargetFPSP      = dlsym(h, "SetTargetFPS")
-      if(InitWindowP == 0 || WindowShouldCloseP == 0 || BeginDrawingP == 0 ||
-         EndDrawingP == 0 || ClearBackgroundP == 0 || CloseWindowP == 0){
-         print("raylib symbols missing in loaded library")
-      } else {
-         call3_void(InitWindowP, 800, 450, "Nytrix")
-         if(SetTargetFPSP != 0){ call1_void(SetTargetFPSP, 120) }
-
-         mut frame_limit = atoi(env("NYTRIX_RAYLIB_FRAMES"))
-         if(frame_limit < 0){ frame_limit = 0 }
-         mut frame_count = 0
-
-         while(call0(WindowShouldCloseP) == 0){
-         call0_void(BeginDrawingP)
-         call1_void(ClearBackgroundP, 0xFF181818)
-         call0_void(EndDrawingP)
-
-         frame_count += 1
-         if(frame_limit > 0 && frame_count >= frame_limit){ break }
-         }
-         call0_void(CloseWindowP)
-         print("✓ Raylib window closed")
-      }
-      dlclose(h)
-   } else {
-      print("[raylib] library not found")
-   }
+InitWindow(800, 450, "Raylib")
+while(WindowShouldClose() == 0){
+   BeginDrawing()
+   ClearBackground(0x00000000)
+   DrawFPS(0,0)
+   EndDrawing()
 }
+CloseWindow()
+print("✓ Raylib closed")

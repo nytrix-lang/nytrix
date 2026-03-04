@@ -1,5 +1,5 @@
 ;; Keywords: net socket
-;; Net Socket module.
+;; Net Socket for Nytrix
 
 module std.net.socket (
    htons, ipv4_parse, gethostbyname, socket_connect, socket_bind, socket_accept,

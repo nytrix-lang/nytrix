@@ -1,5 +1,5 @@
 ;; Keywords: core reflect
-;; Core Reflect module.
+;; Runtime Reflection and Type Inspection for Nytrix
 
 module std.core.reflect (
    len, contains, type, typeof,
@@ -165,7 +165,7 @@ fn div(a, b){
    return __div(a, b)
 }
 
-fn _is_list_or_tuple(x){
+@inline fn _is_list_or_tuple(x){
    "Internal: returns true if `x` is a collection of type list or tuple."
    def tag = __tagof(x)
    if(!__is_int(tag)){ return false }
@@ -263,7 +263,7 @@ fn _mat4_mul_vec4(m, v){
    return out
 }
 
-fn typeof(x){
+@inline fn typeof(x){
    "Alias for `type`."
    return type(x)
 }

@@ -1,5 +1,5 @@
 ;; Keywords: os sys
-;; Os Sys module.
+;; Os Sys for Nytrix
 
 module std.os.sys (
    syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl, sys_openpty

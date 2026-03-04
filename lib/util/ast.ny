@@ -1,5 +1,5 @@
 ;; Keywords: util ast
-;; Util Ast module.
+;; Util Ast for Nytrix
 
 module std.util.ast (
    parse_ast

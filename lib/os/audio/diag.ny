@@ -7,13 +7,13 @@ module std.os.audio.diag (
 use std.core *
 use std.core.dict_mod *
 use std.os *
-use std.os.audio.backend as backend
+use std.os.audio.backend as audio_backend
 
 fn probe(){
    "Returns a dictionary describing detected sound backend capabilities."
    mut d = dict(8)
    d = dict_set(d, "os", os())
-   d = dict_set(d, "backend", backend.get_backend_name())
+   d = dict_set(d, "backend", audio_backend.get_backend_name())
    d
 }
 

@@ -1,6 +1,7 @@
 ;; Keywords: str json rfc8259
-;; JSON parser and generator.
-;; Reference: https://www.rfc-editor.org/rfc/rfc8259.html
+;; JavaScript Object Notation (JSON) Parser and Generator for Nytrix
+;; Reference:
+;; - https://www.rfc-editor.org/rfc/rfc8259.html
 
 module std.enc.json (
    json_decode, json_try_decode, json_last_error, json_encode
@@ -73,20 +74,12 @@ fn _json_is_digit(c){
    c >= 48 && c <= 57
 }
 
-fn _json_hex(c){
-   "Internal: Converts a hex char code to integer value."
-   if(c >= 48 && c <= 57){ return c - 48 }
-   if(c >= 65 && c <= 70){ return c - 55 }
-   if(c >= 97 && c <= 102){ return c - 87 }
-   -1
-}
-
 fn _json_hex4(s, start){
    "Internal: Decodes 4 hex chars at `start` into integer; -1 on invalid."
    mut cp = 0
    mut k = 0
    while(k < 4){
-      def hv = _json_hex(load8(s, start + k))
+      def hv = str.hex_val(load8(s, start + k))
       if(hv < 0){ return -1 }
       cp = cp * 16 + hv
       k += 1

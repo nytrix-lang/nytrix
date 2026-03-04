@@ -1,5 +1,5 @@
 ;; Keywords: core debug
-;; Core Debug module.
+;; Core Debug for Nytrix
 
 module std.core.debug (
    debug_print_val, debug_print

@@ -52,6 +52,12 @@ void ny_diag_fix(const char *fmt, ...);
 void ny_diag_note_tok(token_t tok, const char *fmt, ...);
 LLVMTypeRef resolve_type_name(codegen_t *cg, const char *name, token_t tok);
 LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *name, token_t tok);
+bool ny_type_is_tagged(const char *name);
+bool ny_is_native_abi_type_name(const char *name);
+LLVMValueRef ny_coerce_to_abi(codegen_t *cg, LLVMValueRef v,
+                              const char *type_name);
+LLVMValueRef ny_box_abi_result(codegen_t *cg, LLVMValueRef v,
+                               const char *type_name);
 const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
                             expr_t *e);
 bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
@@ -72,10 +78,18 @@ LLVMValueRef ny_untag_int(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v);
+bool ny_is_proven_int(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                      LLVMValueRef v);
+bool ny_is_proven_bool(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                       LLVMValueRef v);
 
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
-LLVMValueRef gen_binary(codegen_t *cg, const char *op, LLVMValueRef l,
-                        LLVMValueRef r);
+
+LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
+                             expr_t *e);
+LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
+                        const char *op, LLVMValueRef l, LLVMValueRef r,
+                        expr_t *le, expr_t *re);
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v);
 LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len);
 LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,

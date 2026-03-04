@@ -251,7 +251,7 @@ fn stream_open(stream){
        return false
    }
 
-   if(jack_set_process_callback(client, fn_ptr(_process_cb), st) != 0){
+   if(jack_set_process_callback(client, _process_cb, st) != 0){
        _state_free(st)
        jack_client_close(client)
        return false

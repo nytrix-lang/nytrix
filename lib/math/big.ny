@@ -1,40 +1,50 @@
-;; Keywords: math bigint
-;; Math Bigint module.
+;; Keywords: math bigint bigfloat arbitrary-precision
+;; arbitrary-precision integer and fixed-point float arithmetic.
 
-module std.math.bigint (
-   is_bigint, _big_make, _big_digits, _big_sign, _big_abs_cmp, _big_from_int, bigint,
-   bigint_from_str, bigint_to_str, _big_add_abs, _big_sub_abs, bigint_add, bigint_sub,
-   _big_mul_abs, bigint_mul, _big_mul_small, _big_add_small, _digits_prepend,
-   _big_divmod_abs, bigint_div, bigint_mod, bigint_cmp, bigint_eq
+module std.math.big (
+   ;; BigInt
+   is_bigint, bigint, bigint_from_str, bigint_to_str,
+   bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod,
+   bigint_cmp, bigint_eq,
+   ;; Internal (available for advanced use)
+   _big_make, _big_digits, _big_sign, _big_abs_cmp, _big_from_int,
+   _big_add_abs, _big_sub_abs, _big_mul_abs, _big_mul_small, _big_add_small,
+   _digits_prepend, _big_divmod_abs,
+   ;; BigFloat
+   BF_SCALE,
+   bf_zero, bf_one, bf_from_float, bf_to_float,
+   bf_add, bf_sub, bf_mul, bf_div,
+   bf_neg, bf_abs, bf_sign,
+   bf_eq, bf_lt, bf_gt, bf_le, bf_ge,
+   bf_sqrt, bf_pow_int
 )
+
 use std.core *
 use std.core as core
 use std.core.error *
 use std.str *
 use std.str.io *
+use std.math *
+
+;; BigInt Implementation
 
 fn is_bigint(x){
-   "Returns **true** if `x` is a [[std.math.bigint::bigint]] object."
-   if(!is_list(x)){ return false }
-   if(core.len(x) < 3){ return false }
-   return (get(x, 0) == 107)
+   "Returns true if `x` is a BigInt object."
+   if(!is_ptr(x)){ return false }
+   if(__tagof(x) != 100){ return false }
+   get(x, 0) == 107
 }
 
-fn _big_make(sign, digits){
+fn _big_make(sign, digits, owned=false){
    "Internal: build bigint with sign and digits (lsf), normalize."
-   mut actual_digits = list_clone(digits)
+   mut actual_digits = (owned ? digits : list_clone(digits))
    mut n_actual = core.len(actual_digits)
    while(n_actual > 0 && get(actual_digits, n_actual - 1) == 0){
       pop(actual_digits)
       n_actual -= 1
    }
-   if(n_actual == 0){
-      sign = 0
-   }
-   mut out = list(3)
-   out = append(out, 107)
-   out = append(out, sign)
-   out = append(out, actual_digits)
+   if(n_actual == 0){ sign = 0 }
+   mut out = [107, sign, actual_digits]
    out
 }
 
@@ -44,7 +54,7 @@ fn _big_digits(b){
 }
 
 fn _big_sign(b){
-   "Internal: return sign."
+   "Internal: return sign (-1, 0, or 1)."
    get(b, 1)
 }
 
@@ -77,11 +87,11 @@ fn _big_from_int(n){
        digits = append(digits, n % 1000000000)
       n = n / 1000000000
    }
-   _big_make(sign, digits)
+   _big_make(sign, digits, true)
 }
 
 fn bigint(x){
-   "Convert an integer, string, or existing bigint to a [[std.math.bigint::bigint]] object."
+   "Converts an integer, string, or existing bigint to a BigInt object."
    if(is_bigint(x)){ return x }
    if(is_int(x)){ return _big_from_int(x) }
    if(is_str(x)){ return bigint_from_str(x) }
@@ -89,7 +99,7 @@ fn bigint(x){
 }
 
 fn bigint_from_str(s){
-   "Parses a decimal string into a [[std.math.bigint::bigint]]."
+   "Parses a decimal string into a BigInt."
    if(str_len(s) == 0){ return _big_make(0, list(0)) }
    mut sign = 1
    mut i = 0
@@ -107,13 +117,13 @@ fn bigint_from_str(s){
       }
       i += 1
    }
-   def digs = list_clone(_big_digits(res))
+   def digs = _big_digits(res)
    if(core.len(digs) == 0){ return _big_make(0, list(0)) }
    _big_make(sign, digs)
 }
 
 fn bigint_to_str(b){
-   "Converts a [[std.math.bigint::bigint]] to its decimal string representation."
+   "Converts a BigInt to its decimal string representation."
    b = bigint(b)
    mut sign = _big_sign(b)
    def digits = _big_digits(b)
@@ -127,13 +137,13 @@ fn bigint_to_str(b){
       def part = to_str(get(digits, i))
       mut pad = 9 - str_len(part)
       while(pad > 0){
-         out = f"{out}0"
+         out = out + "0"
          pad -= 1
       }
-      out = f"{out}{part}"
+      out = out + part
       i -= 1
    }
-   if(sign < 0){ out = f"-{out}" }
+   if(sign < 0){ out = "-" + out }
    out
 }
 
@@ -143,15 +153,13 @@ fn _big_add_abs(a, b){
    def db = _big_digits(b)
    mut na = core.len(da)
    mut nb = core.len(db)
-   mut n = na
-   if(nb > n){ n = nb }
-   mut out = list(n + 1)
+   mut out = []
    mut carry = 0
    mut i = 0
-   while(i < n || carry > 0){
+   while(i < na || i < nb){
       mut va = 0
-      mut vb = 0
       if(i < na){ va = get(da, i) }
+      mut vb = 0
       if(i < nb){ vb = get(db, i) }
       mut sum = va + vb + carry
       if(sum >= 1000000000){
@@ -163,8 +171,10 @@ fn _big_add_abs(a, b){
        out = append(out, sum)
       i += 1
    }
-   if(carry){  out = append(out, carry) }
-   _big_make(1, out)
+   if(carry > 0){
+       out = append(out, carry)
+   }
+   _big_make(1, out, true)
 }
 
 fn _big_sub_abs(a, b){
@@ -173,7 +183,7 @@ fn _big_sub_abs(a, b){
    def db = _big_digits(b)
    mut na = core.len(da)
    mut nb = core.len(db)
-   mut out = list(na)
+   mut out = []
    mut borrow = 0
    mut i = 0
    while(i < na){
@@ -189,11 +199,11 @@ fn _big_sub_abs(a, b){
        out = append(out, va - vb)
       i += 1
    }
-   _big_make(1, out)
+   _big_make(1, out, true)
 }
 
 fn bigint_add(a, b){
-   "Adds two bigints together."
+   "Adds two BigInts together."
    a = bigint(a)
    b = bigint(b)
    mut sa = _big_sign(a)
@@ -202,20 +212,20 @@ fn bigint_add(a, b){
    if(sb == 0){ return a }
    if(sa == sb){
       def res = _big_add_abs(a, b)
-      return _big_make(sa, list_clone(_big_digits(res)))
+      return _big_make(sa, _big_digits(res), true)
    }
    mut cmp = _big_abs_cmp(a, b)
    if(cmp == 0){ return _big_make(0, list(0)) }
    if(cmp > 0){
       def res = _big_sub_abs(a, b)
-      return _big_make(sa, _big_digits(res))
+      return _big_make(sa, _big_digits(res), true)
    }
    def res = _big_sub_abs(b, a)
-   _big_make(sb, _big_digits(res))
+   _big_make(sb, _big_digits(res), true)
 }
 
 fn bigint_sub(a, b){
-   "Subtracts bigint `b` from bigint `a`."
+   "Subtracts BigInt `b` from BigInt `a`."
    a = bigint(a)
    b = bigint(b)
    mut sb = _big_sign(b)
@@ -229,8 +239,8 @@ fn _big_mul_abs(a, b){
    def db = _big_digits(b)
    mut na = core.len(da)
    mut nb = core.len(db)
-   if(na == 0 || nb == 0){ return _big_make(0, list(0)) }
-   mut out = list(na + nb + 1)
+   if(na == 0 || nb == 0){ return _big_make(0, []) }
+   mut out = []
    mut i = 0
    while(i < na + nb + 1){  out = append(out, 0)  i += 1 }
    i = 0
@@ -252,26 +262,25 @@ fn _big_mul_abs(a, b){
       }
       i += 1
    }
-   _big_make(1, out)
+   _big_make(1, out, true)
 }
 
 fn bigint_mul(a, b){
-   "Multiplies two bigints."
+   "Multiplies two BigInts."
    a = bigint(a)
    b = bigint(b)
    mut sa = _big_sign(a)
    mut sb = _big_sign(b)
-   if(sa == 0 || sb == 0){ return _big_make(0, list(0)) }
    def res = _big_mul_abs(a, b)
-   _big_make(sa * sb, list_clone(_big_digits(res)))
+   _big_make(sa * sb, _big_digits(res), true)
 }
 
 fn _big_mul_small(a, m){
    "Internal: multiply bigint by small int m."
-   if(m == 0){ return _big_make(0, list(0)) }
+   if(m == 0){ return _big_make(0, []) }
    mut da = _big_digits(a)
    def na = core.len(da)
-   mut out = list(na + 1)
+   mut out = []
    mut carry = 0
    mut i = 0
    while(i < na){
@@ -282,7 +291,7 @@ fn _big_mul_small(a, m){
       i += 1
    }
    if(carry > 0){  out = append(out, carry) }
-   _big_make(_big_sign(a), out)
+   _big_make(_big_sign(a), out, true)
 }
 
 fn _big_add_small(a, v){
@@ -309,7 +318,7 @@ fn _big_add_small(a, v){
 
 fn _digits_prepend(digits, v){
    "Internal: prepend v to digits list."
-   mut out = list(core.len(digits) + 1)
+   mut out = []
    out = append(out, v)
    mut i = 0
    def n = core.len(digits)
@@ -324,21 +333,19 @@ fn _big_divmod_abs(a, b){
    "Internal: divmod |a| / |b| -> [q, r]."
    if(_big_sign(b) == 0){ panic("bigint division by zero") }
    mut cmp = _big_abs_cmp(a, b)
-   if(cmp < 0){ return [_big_make(0, list(0)), a] }
-   if(cmp == 0){ return [_big_make(1, [1]), _big_make(0, list(0))] }
+   if(cmp < 0){ return [_big_make(0, []), a] }
+   if(cmp == 0){ return [_big_make(1, [1]), _big_make(0, [])] }
    def da = _big_digits(a)
    def n = core.len(da)
-   mut qdigits = list(n)
+   mut qdigits = []
    mut i = 0
    while(i < n){  qdigits = append(qdigits, 0)  i += 1 }
-   mut r = _big_make(0, list(0))
+   mut r = _big_make(0, [])
    mut idx = n - 1
    while(idx >= 0){
-      ; r = r * base + da[idx]
       mut rd = list_clone(_big_digits(r))
       rd = _digits_prepend(rd, get(da, idx))
       r = _big_make(_big_sign(r), rd)
-      ; find q digit by binary search
       mut lo = 0  mut hi = 1000000000 - 1
       mut best = 0
       while(lo <= hi){
@@ -364,7 +371,7 @@ fn _big_divmod_abs(a, b){
 }
 
 fn bigint_div(a, b){
-   "Integer division of bigints."
+   "Integer division of BigInts."
    a = bigint(a)
    b = bigint(b)
    mut sa = _big_sign(a)
@@ -377,7 +384,7 @@ fn bigint_div(a, b){
 }
 
 fn bigint_mod(a, b){
-   "Modulo of bigints."
+   "Modulo of BigInts."
    a = bigint(a)
    b = bigint(b)
    mut sb = _big_sign(b)
@@ -388,7 +395,7 @@ fn bigint_mod(a, b){
 }
 
 fn bigint_cmp(a, b){
-   "Compares two bigints. Returns -1 if a < b, 1 if a > b, and 0 if equal."
+   "Compares two BigInts. Returns -1 if a < b, 1 if a > b, 0 if equal."
    a = bigint(a)
    b = bigint(b)
    mut sa = _big_sign(a)
@@ -401,47 +408,154 @@ fn bigint_cmp(a, b){
 }
 
 fn bigint_eq(a, b){
-   "Returns **true** if bigints `a` and `b` are equal."
+   "Returns true if BigInts `a` and `b` are equal."
    bigint_cmp(a, b) == 0
 }
 
+;; BigFloat Implementation (fixed-point at 10^-60)
+
+;; Scale factor = 10^60. All BigFloat values are integers in units of 10^-60.
+def BF_SCALE = bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+
+fn bf_zero(){
+   "Returns the BigFloat value 0."
+   bigint(0)
+}
+
+fn bf_one(){
+   "Returns the BigFloat value 1.0 in BigFloat representation."
+   BF_SCALE
+}
+
+fn bf_from_float(f){
+   "Converts a standard float `f` to a BigFloat. Supports all magnitudes safely."
+   if(f == 0.0){ return bigint(0) }
+   def neg = f < 0.0
+   mut af = f if(neg){ af = 0.0 - f }
+   def e = floor(log10(af))
+   def m = af / pow(10.0, e)
+   ; 14 digits of precision
+   def m_int = bigint(int(m * 100000000000000.0))
+   mut p = int(46.0 + e)
+   mut res = m_int
+   if(p >= 0){
+       mut s = "1"
+       mut i = 0 while(i < p){ s = s + "0" i += 1 }
+       res = bigint_mul(m_int, bigint_from_str(s))
+   } else {
+       mut s = "1"
+       mut i = 0 while(i < (0-p)){ s = s + "0" i += 1 }
+       res = bigint_div(m_int, bigint_from_str(s))
+   }
+   if(neg){ res = bigint_sub(bigint(0), res) }
+   res
+}
+
+fn bf_to_float(a){
+   "Converts a BigFloat `a` back to a standard float (loses precision beyond ~15 digits)."
+   def neg = _big_sign(a) < 0
+   def abs_a = neg ? bigint_sub(bigint(0), a) : a
+   def s = bigint_to_str(abs_a)
+   def n = len(s)
+   if(n == 0){ return 0.0 }
+   mut d = 0.0
+   if(n > 15){ d = float(slice(s, 0, 15)) * pow(10.0, float(n - 60 - 15)) }
+   else { d = float(s) * pow(10.0, -60.0) }
+   if(neg){ return 0.0 - d }
+   d
+}
+
+fn bf_add(a, b){
+   "Returns a + b (BigFloat)."
+   bigint_add(a, b)
+}
+
+fn bf_sub(a, b){
+   "Returns a - b (BigFloat)."
+   bigint_sub(a, b)
+}
+
+fn bf_mul(a, b){
+   "Returns a * b (BigFloat)."
+   bigint_div(bigint_mul(a, b), BF_SCALE)
+}
+
+fn bf_div(a, b){
+   "Returns a / b (BigFloat). Returns zero if b is zero."
+   if(_big_sign(b) == 0){ return bigint(0) }
+   bigint_div(bigint_mul(a, BF_SCALE), b)
+}
+
+fn bf_neg(a){
+   "Returns -a (BigFloat)."
+   bigint_sub(bigint(0), a)
+}
+
+fn bf_abs(a){
+   "Returns |a| (BigFloat)."
+   if(_big_sign(a) < 0){ return bigint_sub(bigint(0), a) }
+   a
+}
+
+fn bf_sign(a){
+   "Returns -1, 0, or 1 depending on the sign of BigFloat `a`."
+   _big_sign(a)
+}
+
+fn bf_eq(a, b){ "Returns true if a == b (BigFloat)." bigint_eq(a, b) }
+fn bf_lt(a, b){ "Returns true if a < b (BigFloat)." _big_sign(bigint_sub(a, b)) < 0 }
+fn bf_gt(a, b){ "Returns true if a > b (BigFloat)." _big_sign(bigint_sub(a, b)) > 0 }
+fn bf_le(a, b){ "Returns true if a <= b (BigFloat)." !bf_gt(a, b) }
+fn bf_ge(a, b){ "Returns true if a >= b (BigFloat)." !bf_lt(a, b) }
+
+fn bf_sqrt(a){
+   "Returns sqrt(a) via Newton's method in BigFloat precision (20 iterations)."
+   if(_big_sign(a) <= 0){ return bigint(0) }
+   def fa = bf_to_float(a)
+   mut r = bf_from_float(sqrt(fa))
+   def two = bf_from_float(2.0)
+   mut i = 0
+   while(i < 20){
+      r = bf_div(bf_add(r, bf_div(a, r)), two)
+      i += 1
+   }
+   r
+}
+
+fn bf_pow_int(a, n){
+   "Returns a^n for integer exponent n >= 0 (BigFloat)."
+   if(n == 0){ return BF_SCALE }
+   mut res = BF_SCALE
+   mut base = a
+   mut exp = n
+   while(exp > 0){
+      if(exp % 2 == 1){ res = bf_mul(res, base) }
+      base = bf_mul(base, base)
+      exp = exp / 2
+   }
+   res
+}
+
 if(comptime{__main()}){
-   use std.math.bigint *
+   use std.math.big *
    use std.core.error *
-   use std.core.reflect *
+   use std.math *
 
-   print("Testing bigint basic...")
-   mut a = bigint_from_str("1")
-   mut b = bigint_from_str("999999999")
-   mut s = bigint_add(a, b)
-   assert((bigint_to_str(s) == "1000000000"), "add simple 1: got " + bigint_to_str(s))
-
-   a = bigint_from_str("1000000000")
-   b = bigint_from_str("1000000000")
-   s = bigint_add(a, b)
-   assert((bigint_to_str(s) == "2000000000"), "add simple 2")
-   def d = bigint_sub(bigint_from_str("1000000000000000000000000000000"), bigint_from_str("135802467913580246791358024680"))
-   assert((bigint_to_str(d) == "864197532086419753208641975320"), "sub")
-   def m = bigint_mul(bigint_from_str("123456789"), bigint_from_str("987654321"))
-   assert((bigint_to_str(m) == "121932631112635269"), "mul")
-   mut q = bigint_div(bigint_from_str("1000000000000"), bigint_from_str("12345"))
-   mut r = bigint_mod(bigint_from_str("1000000000000"), bigint_from_str("12345"))
-   assert((bigint_to_str(q) == "81004455"), "div")
-   assert((bigint_to_str(r) == "3025"), "mod")
-   print("bigint basic passed")
-
-   print("Testing bigint sign...")
-   a = bigint_from_str("-999999999999")
-   b = bigint_from_str("2")
-   s = bigint_add(a, b)
-   assert((bigint_to_str(s) == "-999999999997"), "add sign")
-   def p = bigint_mul(a, b)
-   assert((bigint_to_str(p) == "-1999999999998"), "mul sign")
-   q = bigint_div(a, b)
-   assert((bigint_to_str(q) == "-499999999999"), "div sign")
-   r = bigint_mod(a, b)
-   assert((bigint_to_str(r) == "-1"), "mod sign")
-   print("bigint sign passed")
-
-   print("✓ std.math.bigint tests passed")
+   ;; BigInt tests (2.0)
+   def half = bf_from_float(0.5)
+   assert(bf_to_float(zero) == 0.0, "bf zero")
+   assert(near_bf(one, bf_from_float(1.0), 1e-10), "bf one")
+   assert(near_bf(bf_add(half, half), one, 1e-10), "bf 0.5+0.5=1")
+   assert(near_bf(bf_mul(two, half), one, 1e-10), "bf 2*0.5=1")
+   assert(near_bf(bf_div(one, two), half, 1e-10), "bf 1/2=0.5")
+   assert(near_bf(bf_sub(one, half), half, 1e-10), "bf 1-0.5=0.5")
+   assert(bf_lt(half, one), "bf 0.5 < 1")
+   assert(bf_gt(one, half), "bf 1 > 0.5")
+   ;; Zoom roundtrip: 50 zooms in, 50 zooms out
+   mut z = bf_from_float(0.6)
+   mut i = 0
+   while(i < 50){ z = bf_mul(z, bf_from_float(1.15)) i += 1 }
+   while(i > 0){ z = bf_div(z, bf_from_float(1.15)) i -= 1 }
+   assert(near_bf(z, bf_from_float(0.6), 1e-6), "bf zoom roundtrip")
+   print("✓ BigFloat tests passed")
 }

@@ -1,5 +1,5 @@
 ;; Keywords: os dirs
-;; OS directories helpers.
+;; OS directories for Nytrix
 
 module std.os.dirs (
    home_dir, temp_dir, config_dir, data_dir, cache_dir

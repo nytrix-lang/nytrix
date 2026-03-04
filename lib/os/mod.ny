@@ -1,5 +1,5 @@
 ;; Keywords: os
-;; Os module.
+;; Standard Operating System Library for Nytrix
 
 module std.os (
    pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append,
@@ -86,12 +86,12 @@ fn getcwd(){
    }
 }
 
-fn uid(){
+@inline fn uid(){
    "Returns the **real user ID** of the calling process via **getuid(2)**."
    __getuid()
 }
 
-fn gid(){
+@inline fn gid(){
    "Returns the **real group ID** of the calling process via **getgid(2)**."
    __getgid()
 }
@@ -163,7 +163,7 @@ fn file_remove(path) -> Result {
    return err(res)
 }
 
-fn exit(code=0){
+@inline fn exit(code=0){
    "Terminates the calling process with the given status code."
    __exit(code)
 }

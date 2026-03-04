@@ -4,6 +4,9 @@
 #include <inttypes.h>
 #include <setjmp.h>
 #include <stdlib.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #ifdef __argc
@@ -99,6 +102,108 @@ void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
     fprintf(stderr, " (%sfn %.*s%s)", fnc, (int)fnlen, fn, rs);
   }
   fputc('\n', stderr);
+}
+
+#define RT_PRINT_BUF_SIZE 65536
+static char rt_print_buf[RT_PRINT_BUF_SIZE];
+static uint32_t rt_print_pos = 0;
+static int rt_stdout_is_tty = -1;
+
+void __rt_print_flush(void) {
+  if (rt_print_pos > 0) {
+    fwrite(rt_print_buf, 1, rt_print_pos, stdout);
+    rt_print_pos = 0;
+  }
+}
+
+static inline void rt_maybe_flush_line(void) {
+#ifdef _WIN32
+  if (rt_stdout_is_tty < 0)
+    rt_stdout_is_tty = _isatty(_fileno(stdout));
+#else
+  if (rt_stdout_is_tty < 0)
+    rt_stdout_is_tty = isatty(fileno(stdout));
+#endif
+  if (rt_stdout_is_tty)
+    __rt_print_flush();
+}
+
+static inline void rt_print_put(const char *s, size_t len) {
+  if (rt_print_pos + len > RT_PRINT_BUF_SIZE) {
+    __rt_print_flush();
+    if (len > RT_PRINT_BUF_SIZE) {
+      fwrite(s, 1, len, stdout);
+      return;
+    }
+  }
+  memcpy(rt_print_buf + rt_print_pos, s, len);
+  rt_print_pos += (uint32_t)len;
+}
+
+int64_t __rt_print_str_raw(int64_t v) {
+  if (!v)
+    return 0;
+  const char *s = (const char *)(uintptr_t)v;
+  uintptr_t lp = (uintptr_t)v - 16;
+  int64_t tagged_len = 0;
+  memcpy(&tagged_len, (const void *)lp, sizeof(tagged_len));
+  int64_t len = tagged_len >> 1;
+  rt_print_put(s, (size_t)len);
+  return v;
+}
+
+static const char rt_digit_pairs[] = "00010203040506070809"
+                                     "10111213141516171819"
+                                     "20212223242526272829"
+                                     "30313233343536373839"
+                                     "40414243444546474849"
+                                     "50515253545556575859"
+                                     "60616263646566676869"
+                                     "70717273747576777879"
+                                     "80818283848586878889"
+                                     "90919293949596979899";
+
+int64_t __rt_print_int(int64_t v) {
+  int64_t val = (int64_t)(v >> 1);
+  if (rt_print_pos + 24 >= RT_PRINT_BUF_SIZE)
+    __rt_print_flush();
+
+  if (val == 0) {
+    rt_print_buf[rt_print_pos++] = '0';
+    return v;
+  }
+  char *start = rt_print_buf + rt_print_pos;
+  if (val < 0) {
+    *start++ = '-';
+    val = -val;
+  }
+  char tmp[24];
+  char *p = tmp + sizeof(tmp);
+  uint64_t abs_v = (uint64_t)val;
+  while (abs_v >= 100) {
+    unsigned r = (unsigned)(abs_v % 100);
+    abs_v /= 100;
+    *--p = rt_digit_pairs[r * 2 + 1];
+    *--p = rt_digit_pairs[r * 2];
+  }
+  if (abs_v >= 10) {
+    *--p = rt_digit_pairs[abs_v * 2 + 1];
+    *--p = rt_digit_pairs[abs_v * 2];
+  } else {
+    *--p = (char)('0' + abs_v);
+  }
+  size_t len = (size_t)(tmp + sizeof(tmp) - p);
+  memcpy(start, p, len);
+  rt_print_pos = (uint32_t)(start - rt_print_buf + len);
+  return v;
+}
+
+int64_t __rt_print_newline(void) {
+  if (rt_print_pos >= RT_PRINT_BUF_SIZE)
+    __rt_print_flush();
+  rt_print_buf[rt_print_pos++] = '\n';
+  rt_maybe_flush_line();
+  return 1;
 }
 
 int64_t __rt_alloc_string_len(const char *s, size_t len) {

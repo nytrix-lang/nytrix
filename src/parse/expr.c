@@ -20,12 +20,6 @@ static bool hint_is_float(lit_type_hint_t hint) {
          hint == NY_LIT_HINT_F128;
 }
 
-static lit_type_hint_t infer_int_hint(int64_t val) {
-  if (val >= INT32_MIN && val <= INT32_MAX)
-    return NY_LIT_HINT_I32;
-  return NY_LIT_HINT_I64;
-}
-
 static bool check_int_range(parser_t *p, token_t tok, uint64_t val,
                             lit_type_hint_t hint) {
   switch (hint) {
@@ -341,7 +335,7 @@ static expr_t *parse_primary(parser_t *p) {
       lit->as.literal.kind = NY_LIT_INT;
       lit->as.literal.as.i = (int64_t)uval;
       if (!hint_explicit && !forced_u64)
-        hint = infer_int_hint((int64_t)uval);
+        hint = NY_LIT_HINT_NONE;
       if (hint_explicit && !check_int_range(p, tok, (uint64_t)uval, hint)) {
       }
     }
@@ -734,6 +728,10 @@ static expr_t *parse_unary(parser_t *p) {
     else
       expr->as.unary.op = "~";
     expr->as.unary.right = parse_unary(p);
+    if (!expr->as.unary.right) {
+      parser_error(p, tok, "expected expression after unary operator", NULL);
+      return NULL;
+    }
     return expr;
   }
   return parse_postfix(p);

@@ -285,8 +285,11 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
 static fun_sig *ny_gencall_lookup_helper(codegen_t *cg, fun_sig **cache_slot,
                                          const char *const *names,
                                          size_t names_len) {
-  if (cache_slot && *cache_slot && ny_sig_in_current_sigs(cg, *cache_slot))
-    return *cache_slot;
+  if (cache_slot && *cache_slot) {
+    if (ny_sig_in_current_sigs(cg, *cache_slot))
+      return *cache_slot;
+    *cache_slot = NULL;
+  }
   for (size_t i = 0; i < names_len; ++i) {
     const char *name = names[i];
     if (!name || !*name)
@@ -330,11 +333,19 @@ static bool ny_gencall_is_thread_attr(fun_sig *sig) {
   return sig->stmt_t->as.fn.attr_thread;
 }
 
+static const char *abi_skip_nullable(const char *n) {
+  if (n)
+    while (*n == '?')
+      n++;
+  return n;
+}
+
 static bool abi_type_is_tagged(const char *type_name) {
   if (!type_name || !*type_name)
     return true;
-  return strcmp(type_name, "int") == 0 || strcmp(type_name, "str") == 0 ||
-         strcmp(type_name, "bool") == 0 || strcmp(type_name, "Result") == 0;
+  type_name = abi_skip_nullable(type_name);
+  return strcmp(type_name, "str") == 0 || strcmp(type_name, "bool") == 0 ||
+         strcmp(type_name, "Result") == 0;
 }
 
 static bool ny_memo_impure_return_allowed(const char *type_name) {
@@ -347,34 +358,43 @@ static bool ny_memo_impure_return_allowed(const char *type_name) {
 static bool abi_type_is_ptr(const char *type_name) {
   if (!type_name || !*type_name)
     return false;
+  type_name = abi_skip_nullable(type_name);
   if (type_name[0] == '*')
     return true;
   return strcmp(type_name, "ptr") == 0 || strcmp(type_name, "handle") == 0;
 }
 
 static bool abi_type_is_float(const char *type_name) {
-  return type_name &&
-         (strcmp(type_name, "f32") == 0 || strcmp(type_name, "f64") == 0 ||
-          strcmp(type_name, "f128") == 0);
+  if (!type_name)
+    return false;
+  type_name = abi_skip_nullable(type_name);
+  return strcmp(type_name, "f32") == 0 || strcmp(type_name, "f64") == 0 ||
+         strcmp(type_name, "f128") == 0;
 }
 
 static bool abi_type_is_signed_int(const char *type_name) {
-  return type_name &&
-         (strcmp(type_name, "i8") == 0 || strcmp(type_name, "i16") == 0 ||
-          strcmp(type_name, "i32") == 0 || strcmp(type_name, "i64") == 0 ||
-          strcmp(type_name, "i128") == 0 || strcmp(type_name, "char") == 0);
+  if (!type_name)
+    return false;
+  type_name = abi_skip_nullable(type_name);
+  return strcmp(type_name, "i8") == 0 || strcmp(type_name, "i16") == 0 ||
+         strcmp(type_name, "i32") == 0 || strcmp(type_name, "i64") == 0 ||
+         strcmp(type_name, "i128") == 0 || strcmp(type_name, "char") == 0 ||
+         strcmp(type_name, "int") == 0;
 }
 
 static bool abi_type_is_unsigned_int(const char *type_name) {
-  return type_name &&
-         (strcmp(type_name, "u8") == 0 || strcmp(type_name, "u16") == 0 ||
-          strcmp(type_name, "u32") == 0 || strcmp(type_name, "u64") == 0 ||
-          strcmp(type_name, "u128") == 0);
+  if (!type_name)
+    return false;
+  type_name = abi_skip_nullable(type_name);
+  return strcmp(type_name, "u8") == 0 || strcmp(type_name, "u16") == 0 ||
+         strcmp(type_name, "u32") == 0 || strcmp(type_name, "u64") == 0 ||
+         strcmp(type_name, "u128") == 0;
 }
 
 static LLVMTypeRef abi_type_from_name(codegen_t *cg, const char *type_name) {
   if (!type_name || !*type_name)
     return cg->type_i64;
+  type_name = abi_skip_nullable(type_name);
   if (abi_type_is_ptr(type_name))
     return cg->type_i8ptr;
   if (abi_type_is_tagged(type_name))
@@ -429,20 +449,18 @@ static LLVMValueRef abi_cast_int(codegen_t *cg, LLVMValueRef v,
   return LLVMBuildBitCast(cg->builder, v, target, NY_LLVM_NAME(cg, "int_cast"));
 }
 
-static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
-                                      const char *type_name) {
+LLVMValueRef ny_coerce_to_abi(codegen_t *cg, LLVMValueRef v,
+                              const char *type_name) {
   if (!type_name || abi_type_is_tagged(type_name))
     return v;
+  type_name = abi_skip_nullable(type_name);
   if (abi_type_is_ptr(type_name)) {
-    LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
-    LLVMValueRef is_int =
-        LLVMBuildICmp(cg->builder, LLVMIntEQ,
-                      LLVMBuildAnd(cg->builder, v, one, ""), one, "ptr_is_int");
-    LLVMValueRef shift = LLVMConstInt(cg->type_i64, 1, false);
-    LLVMValueRef untagged =
-        LLVMBuildAShr(cg->builder, v, shift, NY_LLVM_NAME(cg, "ptr_untag"));
-    LLVMValueRef raw = LLVMBuildSelect(cg->builder, is_int, untagged, v,
-                                       NY_LLVM_NAME(cg, "ptr_raw"));
+    // Nytrix tagged pointers are stored as `raw_ptr | 1` (low bit set as tag).
+    // To recover the raw pointer, we clear bit 0 with AND ~1.
+    // Using AShr 1 was wrong: it divided the address by 2.
+    LLVMValueRef mask = LLVMConstInt(cg->type_i64, ~(uint64_t)1, false);
+    LLVMValueRef raw =
+        LLVMBuildAnd(cg->builder, v, mask, NY_LLVM_NAME(cg, "ptr_untag"));
     return LLVMBuildIntToPtr(cg->builder, raw, cg->type_i8ptr,
                              NY_LLVM_NAME(cg, "arg_ptr"));
   }
@@ -476,10 +494,11 @@ static LLVMValueRef coerce_extern_arg(codegen_t *cg, LLVMValueRef v,
   return v;
 }
 
-static LLVMValueRef box_extern_result(codegen_t *cg, LLVMValueRef v,
-                                      const char *type_name) {
+LLVMValueRef ny_box_abi_result(codegen_t *cg, LLVMValueRef v,
+                               const char *type_name) {
   if (!type_name || abi_type_is_tagged(type_name))
     return v;
+  type_name = abi_skip_nullable(type_name);
   if (strcmp(type_name, "void") == 0)
     return LLVMConstInt(cg->type_i64, 0, false);
   if (abi_type_is_ptr(type_name)) {
@@ -947,6 +966,60 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
       return phi;
     }
+    if (strcmp(n, "__load8_idx") == 0 && c->args.len == 2) {
+      LLVMValueRef addr_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
+      if (!addr_v || !idx_v) {
+        ny_diag_error(e->tok, "failed to evaluate arguments for __load8_idx");
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      addr_v = ny_cast_to_i64(cg, addr_v, "ld8_addr");
+      idx_v = ny_cast_to_i64(cg, idx_v, "ld8_idx");
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef idx_raw =
+          ny_build_untagged_or_raw_i64(cg, idx_v, "ld8_idx_raw");
+      LLVMValueRef ptr_i64 =
+          LLVMBuildAdd(cg->builder, addr_v, idx_raw, "ld8_ptr");
+      LLVMValueRef ptr = LLVMBuildIntToPtr(
+          cg->builder, ptr_i64, LLVMPointerType(LLVMInt8Type(), 0), "ld8_p");
+      LLVMValueRef byte_val =
+          LLVMBuildLoad2(cg->builder, LLVMInt8Type(), ptr, "ld8_val");
+      LLVMValueRef ext =
+          LLVMBuildZExt(cg->builder, byte_val, cg->type_i64, "ld8_ext");
+      LLVMValueRef tagged = LLVMBuildOr(
+          cg->builder,
+          LLVMBuildShl(cg->builder, ext, LLVMConstInt(cg->type_i64, 1, false),
+                       "ld8_shl"),
+          LLVMConstInt(cg->type_i64, 1, false), "ld8_tag");
+      return tagged;
+    }
+    if (strcmp(n, "__store8_idx") == 0 && c->args.len == 3) {
+      LLVMValueRef addr_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
+      LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
+      LLVMValueRef val_v = gen_expr(cg, scopes, depth, c->args.data[2].val);
+      if (!addr_v || !idx_v || !val_v) {
+        ny_diag_error(e->tok, "failed to evaluate arguments for __store8_idx");
+        cg->had_error = 1;
+        return LLVMConstInt(cg->type_i64, 0, false);
+      }
+      addr_v = ny_cast_to_i64(cg, addr_v, "st8_addr");
+      idx_v = ny_cast_to_i64(cg, idx_v, "st8_idx");
+      val_v = ny_cast_to_i64(cg, val_v, "st8_val");
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef idx_raw =
+          ny_build_untagged_or_raw_i64(cg, idx_v, "st8_idx_raw");
+      LLVMValueRef val_raw =
+          ny_build_untagged_or_raw_i64(cg, val_v, "st8_val_raw");
+      LLVMValueRef ptr_i64 =
+          LLVMBuildAdd(cg->builder, addr_v, idx_raw, "st8_ptr");
+      LLVMValueRef ptr = LLVMBuildIntToPtr(
+          cg->builder, ptr_i64, LLVMPointerType(LLVMInt8Type(), 0), "st8_p");
+      LLVMValueRef byte_val =
+          LLVMBuildTrunc(cg->builder, val_raw, LLVMInt8Type(), "st8_trunc");
+      LLVMBuildStore(cg->builder, byte_val, ptr);
+      return val_v;
+    }
     bool want_is_ny_obj = (strcmp(n, "__is_ny_obj") == 0);
     bool want_is_str_obj = (strcmp(n, "__is_str_obj") == 0);
     bool want_tagof = (strcmp(n, "__tagof") == 0);
@@ -1072,6 +1145,61 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       return LLVMBuildSelect(cg->builder, pred,
                              LLVMConstInt(cg->type_i64, 2, false),
                              LLVMConstInt(cg->type_i64, 4, false), "is_int_v");
+    }
+    if ((strcmp(n, "print") == 0 || strcmp(n, "println") == 0) &&
+        scope_lookup(scopes, depth, n) == NULL) {
+      fun_sig *p_int = lookup_fun(cg, "__print_int", 0);
+      fun_sig *p_str = lookup_fun(cg, "__print_str_raw", 0);
+      fun_sig *p_nl = lookup_fun(cg, "__print_newline", 0);
+      fun_sig *t_str = lookup_fun(cg, "to_str", 0);
+      if (p_int && p_str && p_nl && t_str) {
+        LLVMValueRef space_v = 0;
+        if (c->args.len > 1) {
+          LLVMValueRef space_global = const_string_ptr(cg, " ", 1);
+          space_v = LLVMBuildLoad2(cg->builder, cg->type_i64, space_global, "");
+        }
+        for (size_t i = 0; i < c->args.len; i++) {
+          if (i > 0 && space_v) {
+            LLVMBuildCall2(cg->builder, p_str->type, p_str->value,
+                           (LLVMValueRef[]){space_v}, 1, "");
+          }
+          LLVMValueRef v = gen_expr(cg, scopes, depth, c->args.data[i].val);
+          if (!v)
+            continue;
+          LLVMValueRef is_int = LLVMBuildICmp(
+              cg->builder, LLVMIntEQ,
+              LLVMBuildAnd(cg->builder, v, LLVMConstInt(cg->type_i64, 1, false),
+                           ""),
+              LLVMConstInt(cg->type_i64, 1, false), "is_int");
+
+          LLVMValueRef cur_fn =
+              LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
+          LLVMBasicBlockRef int_bb = ny_llvm_append_block(cur_fn, "print_int");
+          LLVMBasicBlockRef other_bb =
+              ny_llvm_append_block(cur_fn, "print_other");
+          LLVMBasicBlockRef next_bb =
+              ny_llvm_append_block(cur_fn, "print_next");
+
+          LLVMBuildCondBr(cg->builder, is_int, int_bb, other_bb);
+
+          LLVMPositionBuilderAtEnd(cg->builder, int_bb);
+          LLVMBuildCall2(cg->builder, p_int->type, p_int->value,
+                         (LLVMValueRef[]){v}, 1, "");
+          LLVMBuildBr(cg->builder, next_bb);
+
+          LLVMPositionBuilderAtEnd(cg->builder, other_bb);
+          LLVMValueRef s_v =
+              LLVMBuildCall2(cg->builder, t_str->type, t_str->value,
+                             (LLVMValueRef[]){v}, 1, "to_str_res");
+          LLVMBuildCall2(cg->builder, p_str->type, p_str->value,
+                         (LLVMValueRef[]){s_v}, 1, "");
+          LLVMBuildBr(cg->builder, next_bb);
+
+          LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+        }
+        LLVMBuildCall2(cg->builder, p_nl->type, p_nl->value, NULL, 0, "");
+        return LLVMConstInt(cg->type_i64, 1, false);
+      }
     }
     if (strcmp(n, "extern_all") == 0 || strcmp(n, "__extern_all") == 0) {
       if (handle_extern_all_args(cg, &c->args))
@@ -1528,20 +1656,16 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       }
     }
   }
-  if (has_sig) {
-    /* const char *callee_name = (c && c->callee->kind == NY_E_IDENT) ?
-     * c->callee->as.ident.name : (mc ? mc->name : "ptr"); */
-    /* fprintf(stderr, "DEBUG: Call gen '%s' - is_variadic: %d, sig_arity: %d,
-     * call_argc: %zu\n", callee_name, is_variadic, sig_arity, c ? c->args.len
-     * : mc->args.len); */
-  }
-  if (has_sig && sig_meta && sig_meta->is_extern) {
-    func_params = NULL;
+  if (has_sig && sig_meta) {
+    ny_param_list *call_params = NULL;
     if (sig_meta->stmt_t && sig_meta->stmt_t->kind == NY_S_EXTERN) {
-      func_params = &sig_meta->stmt_t->as.ext.params;
+      call_params = &sig_meta->stmt_t->as.ext.params;
+    } else if (sig_meta->stmt_t && sig_meta->stmt_t->kind == NY_S_FUNC) {
+      call_params = &sig_meta->stmt_t->as.fn.params;
     }
-    if (func_params && func_params->len > 0) {
-      size_t max_conv = func_params->len;
+
+    if (call_params && call_params->len > 0) {
+      size_t max_conv = call_params->len;
       size_t call_limit =
           (has_sig && is_variadic) ? (size_t)sig_arity : final_argc;
       if (max_conv > call_limit)
@@ -1551,7 +1675,8 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           break;
         const char *tname = func_params->data[i].type;
         if (tname && *tname) {
-          if (cg->is_repl && is_problematic_value_struct(tname)) {
+          if (sig_meta->is_extern && cg->is_repl &&
+              is_problematic_value_struct(tname)) {
             ny_diag_error(e->tok,
                           "REPL JIT cannot pass struct '%s' by value for "
                           "function '%s'",
@@ -1564,7 +1689,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
             free(args);
             return LLVMConstInt(cg->type_i64, 0, false);
           }
-          args[i] = coerce_extern_arg(cg, args[i], tname);
+          args[i] = ny_coerce_to_abi(cg, args[i], tname);
         }
       }
     }
@@ -1687,11 +1812,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     res = LLVMBuildCall2(cg->builder, ft, callee, args, call_nargs, "");
   }
   free(args);
-  if (has_sig && sig_meta && sig_meta->is_extern) {
+  if (has_sig && sig_meta) {
     LLVMTypeRef ret_ty = LLVMGetReturnType(ft);
     if (LLVMGetTypeKind(ret_ty) == LLVMVoidTypeKind)
       return LLVMConstInt(cg->type_i64, 0, false);
-    return box_extern_result(cg, res, sig_meta->return_type);
+    if (sig_meta->return_type && *sig_meta->return_type &&
+        !ny_type_is_tagged(sig_meta->return_type)) {
+      return ny_box_abi_result(cg, res, sig_meta->return_type);
+    }
   }
   return res;
 

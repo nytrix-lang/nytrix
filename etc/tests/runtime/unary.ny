@@ -48,3 +48,34 @@ def v_c = ~v_a
 assert(v_c == -11, "var bitwise not")
 
 print("✓ Unary operator tests passed")
+
+;; Increment / Decrement Tests
+mut count = 5
+++count
+assert(count == 6, "++pre-increment")
+--count
+assert(count == 5, "--pre-decrement")
+
+;; Increment in while loop header
+mut loop_i = 0
+mut loop_sum = 0
+mut i=0
+while(i<10 ++i){
+   loop_sum = loop_sum + i
+}
+assert(loop_sum == 45, "loop sequence failed")
+
+;; Compound Assignment Tests
+mut val = 10
+val += 5
+assert(val == 15, "+= failed")
+val -= 3
+assert(val == 12, "-= failed")
+val *= 2
+assert(val == 24, "*= failed")
+val /= 4
+assert(val == 6, "/= failed")
+val %= 4
+assert(val == 2, "%= failed")
+
+print("✓ Comprehensive operator tests passed")
