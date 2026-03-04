@@ -14,9 +14,9 @@
 #include <stdint.h>
 #include <string.h>
 extern int64_t __rt_alloc_string(const char *s);
-extern int64_t __os_name(void);
-extern int64_t __arch_name(void);
-extern int64_t __main(void);
+extern int64_t rt_os_name(void);
+extern int64_t rt_arch_name(void);
+extern int64_t rt_main(void);
 
 static int64_t ny_missing_extern_stub0(void) { return 0; }
 static int64_t ny_missing_extern_stub1(int64_t a0) {

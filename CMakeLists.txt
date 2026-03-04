@@ -245,6 +245,7 @@ file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/rt/*.c")
 file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/rt/*.h")
 list(REMOVE_ITEM RT_SOURCES "${RT_INIT}")
 
+
 # Runtime is compiled via src/rt/init.c (which #includes the other rt/*.c
 # files). Mark all runtime sources/headers as dependencies so Ninja rebuilds
 # ny/ny_debug when any runtime unit changes.
@@ -574,7 +575,7 @@ else()
   endforeach()
 
   # LDFLAGS & LIBS
-  target_link_libraries(ny PRIVATE m pthread CURL::libcurl)
+  target_link_libraries(ny PRIVATE m pthread CURL::libcurl clang)
   set(_all_ldflags ${NYTRIX_LLVM_LDFLAGS_LIST} ${NYTRIX_HOST_LDFLAGS})
   foreach(_flag IN LISTS _all_ldflags)
     if(_flag MATCHES "^-L" OR _flag MATCHES "^-l")
@@ -593,7 +594,7 @@ else()
   target_link_options(ny PRIVATE -rdynamic)
 
   if (NYTRIX_BUILD_LSP)
-    target_link_libraries(ny-lsp PRIVATE m pthread util CURL::libcurl)
+    target_link_libraries(ny-lsp PRIVATE m pthread util CURL::libcurl clang)
     foreach(_flag IN LISTS _all_ldflags)
       if(_flag MATCHES "^-L" OR _flag MATCHES "^-l")
         target_link_options(ny-lsp PRIVATE "${_flag}")
@@ -652,7 +653,7 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32)
   endforeach()
   if (UNIX AND NOT APPLE)
     target_compile_definitions(nytrixrt PRIVATE _GNU_SOURCE)
-    target_link_libraries(nytrixrt PRIVATE dl)
+    target_link_libraries(nytrixrt PRIVATE dl clang)
   endif()
 endif()
 

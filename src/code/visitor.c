@@ -204,6 +204,7 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_EXPORT:
     case NY_S_STRUCT:
     case NY_S_ENUM:
+    case NY_S_INCLUDE:
       break;
     }
   }

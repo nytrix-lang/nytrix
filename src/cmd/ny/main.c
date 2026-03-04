@@ -15,7 +15,7 @@
 
 extern int64_t __trace_dump(int64_t n);
 #ifdef _WIN32
-extern int64_t __enable_vt(void);
+extern int64_t rt_enable_vt(void);
 #endif
 
 #ifndef _WIN32

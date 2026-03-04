@@ -554,6 +554,7 @@ static void add_extern_sig(codegen_t *cg, const char *name, int arity) {
                  .arity = arity,
                  .is_variadic = false,
                  .is_extern = true,
+                 .is_native_abi = true,
                  .effects = NY_FX_ALL,
                  .args_escape = true,
                  .args_mutated = true,
@@ -1008,7 +1009,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMValueRef addr_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
       LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
       if (!addr_v || !idx_v) {
-        ny_diag_error(e->tok, "failed to evaluate arguments for __load8_idx");
+        ny_diag_error(e->tok, "failed to evaluate arguments for rt_load8_idx");
         cg->had_error = 1;
         return LLVMConstInt(cg->type_i64, 0, false);
       }
@@ -1037,7 +1038,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
       LLVMValueRef val_v = gen_expr(cg, scopes, depth, c->args.data[2].val);
       if (!addr_v || !idx_v || !val_v) {
-        ny_diag_error(e->tok, "failed to evaluate arguments for __store8_idx");
+        ny_diag_error(e->tok, "failed to evaluate arguments for rt_store8_idx");
         cg->had_error = 1;
         return LLVMConstInt(cg->type_i64, 0, false);
       }
@@ -1552,9 +1553,18 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     }
   }
 
-  size_t sig_argc = (has_sig && is_variadic)
+  /* For native-ABI variadics (from #include), we pass ALL user args directly
+     to the C function — no Nytrix list packing.  For Nytrix variadics we keep
+     the old sig_arity cap so remaining args get packed into the variadic list.
+   */
+  bool native_variadic =
+      has_sig && is_variadic && sig_meta && sig_meta->is_native_abi;
+  size_t sig_argc = (has_sig && is_variadic && !native_variadic)
                         ? (size_t)sig_arity
                         : (has_sig ? (size_t)sig_arity : call_argc);
+  /* For native variadics, ensure we have room for all user-supplied args */
+  if (native_variadic && call_argc > sig_argc)
+    sig_argc = call_argc;
   size_t final_argc = (sig_argc > call_argc) ? sig_argc : call_argc;
   LLVMValueRef *args = malloc(sizeof(LLVMValueRef) * final_argc);
   if (!args) {
@@ -1590,13 +1600,14 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         cg->had_error = 1;
         goto call_fail;
       }
-    } else if (has_sig && is_variadic && i == (size_t)sig_arity - 1) {
-      /* Variadic packaging: build list in-place. */
+    } else if (has_sig && is_variadic && !native_variadic &&
+               i == (size_t)sig_arity - 1) {
+      /* Nytrix variadic packaging: build list in-place. */
       fun_sig *ls_s = lookup_fun(cg, "__list_new", 0);
       fun_sig *st_s = lookup_fun(cg, "__store64_idx", 0);
       if (!ls_s || !st_s) {
         ny_diag_error(e->tok,
-                      "variadic arguments require __list_new/__store64_idx "
+                      "variadic arguments require __list_new/rt_store64_idx "
                       "helpers");
         cg->had_error = 1;
         goto call_fail;
@@ -1731,6 +1742,74 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         }
       }
     }
+    /* Fallback: #include FFI functions have stmt_t=NULL so call_params is null.
+       Use the LLVM function type's param types to coerce Nytrix tagged values.
+       For native-ABI variadics, also coerce the extra args beyond the fixed
+       param count: treat them as ptr (if the value looks like a pointer) or
+       i64 (untag integers).  This matches what libc ABI expects for variadics
+       like XCreateIC / printf etc.
+     */
+    if (!call_params && ft && sig_meta->is_extern && sig_meta->is_native_abi) {
+      unsigned np = LLVMCountParamTypes(ft);
+      LLVMTypeRef *pts = NULL;
+      if (np > 0) {
+        pts = (LLVMTypeRef *)alloca(sizeof(LLVMTypeRef) * np);
+        LLVMGetParamTypes(ft, pts);
+      }
+      for (size_t i = 0; i < final_argc; i++) {
+        const char *tname = NULL;
+        if (i < (size_t)np) {
+          /* Fixed named parameter — use LLVM type */
+          LLVMTypeKind k = LLVMGetTypeKind(pts[i]);
+          if (k == LLVMPointerTypeKind) {
+            tname = "ptr";
+          } else if (k == LLVMIntegerTypeKind) {
+            switch (LLVMGetIntTypeWidth(pts[i])) {
+            case 8:
+              tname = "i8";
+              break;
+            case 16:
+              tname = "i16";
+              break;
+            case 32:
+              tname = "i32";
+              break;
+            case 64:
+              tname = "i64";
+              break;
+            default:
+              break;
+            }
+          } else if (k == LLVMFloatTypeKind) {
+            tname = "f32";
+          } else if (k == LLVMDoubleTypeKind) {
+            tname = "f64";
+          }
+        } else if (native_variadic) {
+          /* Extra variadic arg — best-effort: strip Nytrix tags.
+             If the value has pointer alignment (low 3 bits clear, val>4096)
+             pass as ptr; otherwise untag as i64. */
+          LLVMValueRef v = args[i];
+          LLVMTypeRef vty = v ? LLVMTypeOf(v) : NULL;
+          if (vty && LLVMGetTypeKind(vty) == LLVMPointerTypeKind) {
+            /* already a native pointer, nothing to do */
+          } else {
+            /* Strip Nytrix int tag: if (v & 1) -> v >> 1, else pass raw */
+            LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
+            LLVMValueRef lsb = LLVMBuildAnd(cg->builder, v, one, "vi_lsb");
+            LLVMValueRef is_tagged =
+                LLVMBuildICmp(cg->builder, LLVMIntEQ, lsb, one, "vi_tagged");
+            LLVMValueRef untagged =
+                LLVMBuildAShr(cg->builder, v, one, "vi_untag");
+            v = LLVMBuildSelect(cg->builder, is_tagged, untagged, v, "vi_val");
+            args[i] = v;
+          }
+          continue; /* skip ny_coerce_to_abi */
+        }
+        if (tname)
+          args[i] = ny_coerce_to_abi(cg, args[i], tname);
+      }
+    }
   }
   if (has_sig && ny_gencall_is_thread_attr(sig_meta)) {
     if (is_variadic || final_argc > 15) {
@@ -1762,9 +1841,9 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         (detach_stmt_call && !launch_sig)) {
       ny_diag_error(e->tok, "missing runtime thread helpers");
       if (detach_stmt_call) {
-        ny_diag_hint("expected __thread_launch_call in runtime symbols");
+        ny_diag_hint("expected rt_thread_launch_call in runtime symbols");
       } else {
-        ny_diag_hint("expected __thread_spawn_call/__thread_join in runtime "
+        ny_diag_hint("expected rt_thread_spawn_call/rt_thread_join in runtime "
                      "symbols");
       }
       cg->had_error = 1;
@@ -1818,8 +1897,13 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     free(args);
     return joined;
   }
+  /* Native-ABI variadics: pass all user-supplied args directly to the C
+     function so XCreateIC / printf-style calls work correctly.  Nytrix-
+     variadic calls keep the old sig_arity cap (the rest is in the list). */
   unsigned call_nargs =
-      (unsigned)(has_sig && is_variadic ? (size_t)sig_arity : final_argc);
+      (unsigned)(native_variadic ? final_argc
+                                 : (has_sig && is_variadic ? (size_t)sig_arity
+                                                           : final_argc));
   if (!ft || !callee) {
     ny_diag_error(e->tok, "invalid call target");
     cg->had_error = 1;

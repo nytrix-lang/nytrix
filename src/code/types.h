@@ -123,6 +123,7 @@ typedef struct fun_sig {
   uint64_t tail_hash;
   uint32_t tail_len;
   bool tail_cached;
+  bool is_native_abi;
 } fun_sig;
 
 typedef struct enum_member_def_t {

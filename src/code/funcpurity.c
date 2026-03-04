@@ -383,7 +383,8 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
         ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0}, &cp);
     return false; // Manually traversed children
   }
-  case NY_S_MACRO: {
+  case NY_S_MACRO:
+  case NY_S_INCLUDE: {
     ctx->result |= NY_FX_ALL;
     return true; // Continue traversal
   }
@@ -754,6 +755,7 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
   case NY_S_ENUM:
   case NY_S_MACRO:
   case NY_S_LINK:
+  case NY_S_INCLUDE:
     return false;
   case NY_S_BREAK:
   case NY_S_CONTINUE:

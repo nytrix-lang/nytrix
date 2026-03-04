@@ -15,6 +15,9 @@ void ny_dbg_loc(codegen_t *cg, token_t tok) {
     if (loc) {
       cg->di_loc = loc;
       LLVMSetCurrentDebugLocation2(cg->builder, loc);
+      if (cg->alloca_builder) {
+        LLVMSetCurrentDebugLocation2(cg->alloca_builder, loc);
+      }
     }
   }
   if (verbose_enabled >= 2) {

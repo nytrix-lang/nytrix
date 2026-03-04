@@ -570,6 +570,16 @@ def run_analyze(unknown=None):
     from fmt import run_analyze as do_analyze
     do_analyze(unknown)
 
+def run_check(unknown=None):
+    import argparse
+    from fmt import run_check as do_check
+    p = argparse.ArgumentParser()
+    p.add_argument("paths", nargs="*")
+    p.add_argument("--fix", action="store_true")
+    p.add_argument("-v", "--verbose", action="store_true")
+    args, _ = p.parse_known_args(unknown or [])
+    do_check(args.paths or None, verbose=args.verbose, fix=args.fix)
+
 def run_sanitizer(build_dir, sanitizer, jobs=0, unknown=None):
     san = (sanitizer or "").strip().lower()
     if san not in ("asan", "ubsan"):

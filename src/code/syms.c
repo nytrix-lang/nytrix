@@ -1320,11 +1320,11 @@ void add_builtins(codegen_t *cg) {
   } while (0);
 
 #ifdef _WIN32
-#ifdef __argc
-#undef __argc
+#ifdef rt_argc
+#undef rt_argc
 #endif
-#ifdef __argv
-#undef __argv
+#ifdef rt_argv
+#undef rt_argv
 #endif
 #endif
 
@@ -1849,6 +1849,32 @@ static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
   }
 }
 
+static int levenshtein(const char *s, const char *t) {
+  int ls = (int)strlen(s), lt = (int)strlen(t);
+  int *d = (int *)alloca(sizeof(int) * (ls + 1) * (lt + 1));
+  for (int i = 0; i <= ls; i++)
+    d[i * (lt + 1)] = i;
+  for (int j = 0; j <= lt; j++)
+    d[j] = j;
+  for (int j = 1; j <= lt; j++) {
+    for (int i = 1; i <= ls; i++) {
+      if (s[i - 1] == t[j - 1])
+        d[i * (lt + 1) + j] = d[(i - 1) * (lt + 1) + (j - 1)];
+      else {
+        int a = d[(i - 1) * (lt + 1) + j] + 1;
+        int b = d[i * (lt + 1) + (j - 1)] + 1;
+        int c = d[(i - 1) * (lt + 1) + (j - 1)] + 1;
+        if (b < a)
+          a = b;
+        if (c < a)
+          a = c;
+        d[i * (lt + 1) + j] = a;
+      }
+    }
+  }
+  return d[ls * (lt + 1) + lt];
+}
+
 void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
   ny_diag_error(tok, "undefined symbol \033[1;37m'%s'\033[0m", name);
   if (verbose_enabled >= 2) {
@@ -1862,16 +1888,26 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
   const char *alt1 = NULL, *alt2 = NULL;
   int alt1_d = 100, alt2_d = 100;
 
-  /* 1. Check for capitalization errors (common mistake) */
+  /* 1. Check for capitalization errors and fuzzy matches */
+  const char *best_f = NULL;
+  int best_fd = 3; /* threshold */
   for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    if (strcasecmp(name, cg->fun_sigs.data[i].name) == 0 ||
-        (strrchr(cg->fun_sigs.data[i].name, '.') &&
-         strcasecmp(name, strrchr(cg->fun_sigs.data[i].name, '.') + 1) == 0)) {
-      ny_diag_hint("did you mean '%s'? (case mismatch)",
-                   cg->fun_sigs.data[i].name);
-      ny_diag_fix("use the exact spelling '%s'", cg->fun_sigs.data[i].name);
+    const char *fn = cg->fun_sigs.data[i].name;
+    const char *dot = strrchr(fn, '.');
+    const char *tail = dot ? dot + 1 : fn;
+    if (strcasecmp(name, tail) == 0) {
+      ny_diag_hint("did you mean '%s'? (case mismatch)", fn);
+      ny_diag_fix("use the exact spelling '%s'", fn);
       return;
     }
+    int d = levenshtein(name, tail);
+    if (d < best_fd) {
+      best_fd = d;
+      best_f = fn;
+    }
+  }
+  if (best_f) {
+    ny_diag_hint("did you mean '%s'?", best_f);
   }
 
   /* 2. Check for missing imports/prefixes for common builtins */
@@ -1890,7 +1926,7 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
       {"malloc", "try 'alloc' or 'std.core.mem.alloc'"},
       {"free", "try 'std.core.mem.free'"},
       {"VkInstance", "try 'import std.ui.gfx.vk.vulkan'"},
-      {"glfwInit", "try 'import std.ui.glfw'"},
+      {"glfwInit", "try 'import std.ui.window.native'"},
       {"image_load", "try 'import std.image'"},
       {"AudioSource", "try 'import std.audio'"},
       {"split", "try 'import std.str' and use '.split()' on a string"},

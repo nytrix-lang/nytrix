@@ -1231,8 +1231,10 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
         LLVMBuildStore(cg->builder, v, cg->result_store_val);
       } else {
         emit_defers(cg, scopes, *depth, func_root);
-        if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+        if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+          ny_cg_emit_trace_exit(cg);
           LLVMBuildRet(cg->builder, v);
+        }
       }
     }
     break;
@@ -1348,8 +1350,10 @@ void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     if (cg->current_fn_ret_type && !ny_type_is_tagged(cg->current_fn_ret_type))
       v = ny_coerce_to_abi(cg, v, cg->current_fn_ret_type);
     emit_defers(cg, scopes, *depth, func_root);
-    if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder)))
+    if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(cg->builder))) {
+      ny_cg_emit_trace_exit(cg);
       LLVMBuildRet(cg->builder, v);
+    }
     break;
   }
   case NY_S_USE: {
