@@ -7,11 +7,11 @@
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 
 #ifdef _WIN32
-#ifdef __argc
-#undef __argc
+#ifdef rt_argc
+#undef rt_argc
 #endif
-#ifdef __argv
-#undef __argv
+#ifdef rt_argv
+#undef rt_argv
 #endif
 #endif
 

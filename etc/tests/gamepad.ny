@@ -4,7 +4,7 @@
 use std.core *
 use std.ui.gfx *
 use std.ui.window as window
-use std.ui.gamepad as gamepad
+use std.ui.window.input.gamepad as gamepad
 use std.str as str
 use std.ui.consts *
 

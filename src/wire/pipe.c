@@ -1049,21 +1049,21 @@ static void ensure_aot_entry(codegen_t *cg, LLVMValueRef script_fn) {
   LLVMValueRef argc_i64 = LLVMBuildSExt(builder, argc, i64, "");
   LLVMValueRef argv_i64 = LLVMBuildPtrToInt(builder, argv, i64, "");
   LLVMValueRef envp_i64 = LLVMBuildPtrToInt(builder, envp, i64, "");
-  LLVMValueRef set_args_fn = LLVMGetNamedFunction(cg->module, "__set_args");
+  LLVMValueRef set_args_fn = LLVMGetNamedFunction(cg->module, "rt_set_args");
   if (!set_args_fn) {
     LLVMTypeRef set_args_ty =
         LLVMFunctionType(i64, (LLVMTypeRef[]){i64, i64, i64}, 3, 0);
-    set_args_fn = LLVMAddFunction(cg->module, "__set_args", set_args_ty);
+    set_args_fn = LLVMAddFunction(cg->module, "rt_set_args", set_args_ty);
   }
   LLVMBuildCall2(builder, LLVMGlobalGetValueType(set_args_fn), set_args_fn,
                  (LLVMValueRef[]){argc_i64, argv_i64, envp_i64}, 3, "");
   LLVMValueRef res_raw = LLVMBuildCall2(
       builder, LLVMGlobalGetValueType(script_fn), script_fn, NULL, 0, "");
   LLVMValueRef cleanup_fn =
-      LLVMGetNamedFunction(cg->module, "__runtime_cleanup");
+      LLVMGetNamedFunction(cg->module, "rt_runtime_cleanup");
   if (!cleanup_fn) {
     LLVMTypeRef cleanup_ty = LLVMFunctionType(i64, NULL, 0, 0);
-    cleanup_fn = LLVMAddFunction(cg->module, "__runtime_cleanup", cleanup_ty);
+    cleanup_fn = LLVMAddFunction(cg->module, "rt_runtime_cleanup", cleanup_ty);
   }
   LLVMBuildCall2(builder, LLVMGlobalGetValueType(cleanup_fn), cleanup_fn, NULL,
                  0, "");
@@ -1255,7 +1255,7 @@ static bool ny_should_preserve_symbol(const codegen_t *cg, const char *name,
                                       bool is_jit) {
   if (!name || !*name)
     return false;
-  if (strcmp(name, "main") == 0 || strcmp(name, "__script_top") == 0)
+  if (strcmp(name, "main") == 0 || strcmp(name, "_ny_top_entry") == 0)
     return true;
   if (strncmp(name, "__std_init", 10) == 0)
     return true;
@@ -1768,7 +1768,7 @@ int ny_pipeline_run(ny_options *opt) {
         loaded_from_cache = true;
         LLVMDisposeModule(cg.module);
         cg.module = cached_mod;
-        script_fn = LLVMGetNamedFunction(cg.module, "__script_top");
+        script_fn = LLVMGetNamedFunction(cg.module, "_ny_top_entry");
         if (!script_fn) {
           if (opt->verbose)
             fprintf(stderr, "JIT cache corrupt (missing entry): %s\n",
@@ -1802,7 +1802,11 @@ int ny_pipeline_run(ny_options *opt) {
 
   const char *std_bc_cache = getenv("NYTRIX_STD_BC_CACHE");
   bool use_std_bc_cache = false;
-  if (!opt->no_std && std_bc_cache && *std_bc_cache &&
+  /* NYTRIX_STD_BC_CACHE only works for JIT: it externalizes std definitions
+     and re-links from a pre-built IR cache. For native ELF output the std
+     definitions must be compiled into the module so the linker can resolve
+     them — skip the BC cache path when writing an output file. */
+  if (!opt->no_std && !opt->output_file && std_bc_cache && *std_bc_cache &&
       access(std_bc_cache, R_OK) == 0) {
     cg.skip_stdlib = true;
     use_std_bc_cache = true;
@@ -1930,7 +1934,7 @@ int ny_pipeline_run(ny_options *opt) {
   if (cg.emit_script) {
     NY_LOG_V2("Emitting script entry point...\n");
     script_fn = codegen_emit_script(&cg, opt->entry_name ? opt->entry_name
-                                                         : "__script_top");
+                                                         : "_ny_top_entry");
     if (cg.had_error) {
       NY_LOG_ERR("Codegen script entry failed\n");
       dump_debug_bundle(opt, source, cg.module);
@@ -1964,6 +1968,12 @@ int ny_pipeline_run(ny_options *opt) {
   maybe_log_phase_time(opt->do_timing, "Codegen:", t_codegen);
 
   if (opt->dump_llvm) {
+    LLVMModuleRef dump_mod = ny_prepare_ir_dump_module(opt, cg.module);
+    LLVMDumpModule(dump_mod ? dump_mod : cg.module);
+    if (dump_mod)
+      LLVMDisposeModule(dump_mod);
+  }
+  if (ny_env_enabled("NY_IR_DUMP")) {
     LLVMModuleRef dump_mod = ny_prepare_ir_dump_module(opt, cg.module);
     LLVMDumpModule(dump_mod ? dump_mod : cg.module);
     if (dump_mod)
@@ -2117,23 +2127,52 @@ skip_compilation:
       /* Merge #link directives from codegen into link_libs */
       VEC(char *) merged_libs;
       vec_init(&merged_libs);
-      for (size_t li = 0; li < opt->link_libs.len; li++)
-        vec_push(&merged_libs, opt->link_libs.data[li]);
+      for (size_t li = 0; li < opt->link_libs.len; li++) {
+        const char *lib = opt->link_libs.data[li];
+        /* Convert libXXX.so -> -lXXX for ELF linker */
+        if (lib && strncmp(lib, "lib", 3) == 0) {
+          const char *base = lib + 3;
+          size_t blen = strlen(base);
+          const char *dot = strstr(base, ".so");
+          if (dot && dot > base)
+            blen = (size_t)(dot - base);
+          if (blen > 0 && blen < 256) {
+            char buf[260];
+            snprintf(buf, sizeof(buf), "-l%.*s", (int)blen, base);
+            vec_push(&merged_libs, ny_strdup(buf));
+            continue;
+          }
+        }
+        vec_push(&merged_libs, ny_strdup(lib));
+      }
       for (size_t li = 0; li < cg.links.len; li++) {
         const char *name = cg.links.data[li];
         if (!name)
           continue;
+        /* Convert libXXX.so[.N] -> XXX for -lXXX format */
+        const char *lib_name = name;
+        size_t lib_len = strlen(name);
+        if (strncmp(name, "lib", 3) == 0) {
+          lib_name = name + 3;
+          lib_len = strlen(lib_name);
+          const char *dot = strstr(lib_name, ".so");
+          if (dot && dot > lib_name)
+            lib_len = (size_t)(dot - lib_name);
+        }
+        /* Check for duplicates */
         bool dup = false;
         for (size_t lj = 0; lj < merged_libs.len; lj++) {
           const char *e = merged_libs.data[lj];
-          if (e && e[0] == '-' && e[1] == 'l' && strcmp(e + 2, name) == 0) {
+          if (e && e[0] == '-' && e[1] == 'l' &&
+              strncmp(e + 2, lib_name, lib_len) == 0 &&
+              e[2 + lib_len] == '\0') {
             dup = true;
             break;
           }
         }
         if (!dup) {
-          char buf[256];
-          snprintf(buf, sizeof(buf), "-l%s", name);
+          char buf[260];
+          snprintf(buf, sizeof(buf), "-l%.*s", (int)lib_len, lib_name);
           vec_push(&merged_libs, ny_strdup(buf));
         }
       }
@@ -2146,12 +2185,12 @@ skip_compilation:
         unlink(rto);
         dump_debug_bundle(opt, source, cg.module);
         exit_code = 1;
-        for (size_t li = opt->link_libs.len; li < merged_libs.len; li++)
+        for (size_t li = 0; li < merged_libs.len; li++)
           free(merged_libs.data[li]);
         vec_free(&merged_libs);
         goto exit_success;
       }
-      for (size_t li = opt->link_libs.len; li < merged_libs.len; li++)
+      for (size_t li = 0; li < merged_libs.len; li++)
         free(merged_libs.data[li]);
       vec_free(&merged_libs);
       unlink(obj);
@@ -2186,8 +2225,8 @@ skip_compilation:
     if (native_cache_entry) {
       clock_t t_run = clock();
       native_cache_entry();
-      extern void __rt_print_flush(void);
-      __rt_print_flush();
+      extern void rt_print_flush(void);
+      rt_print_flush();
       maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
     } else
 #endif
@@ -2198,11 +2237,17 @@ skip_compilation:
       LLVMExecutionEngineRef ee;
       char *err = NULL;
       LLVMModuleRef jmod = cg.module;
+      /* Strip DWARF debug info before handing the module to MCJIT.
+         DwarfDebug::finishEntityDefinitions can crash during MCJIT code
+         emission with certain metadata patterns. MCJIT doesn't use DWARF for
+         execution. */
+      if (opt->debug_symbols)
+        LLVMStripModuleDebugInfo(jmod);
       struct LLVMMCJITCompilerOptions jopt;
       ny_jit_init_options(&jopt, jmod);
       jopt.OptLevel = (unsigned)ny_jit_codegen_opt_level(opt);
       {
-        if (ny_env_enabled("NYTRIX_JIT_FAST_ISEL"))
+        if (ny_env_enabled_default_on("NYTRIX_JIT_FAST_ISEL"))
           jopt.EnableFastISel = 1;
       }
       if (LLVMCreateMCJITCompilerForModule(&ee, jmod, &jopt, sizeof(jopt),
@@ -2231,17 +2276,18 @@ skip_compilation:
       }
       register_jit_symbols(ee, jmod, &cg);
       ny_jit_map_unresolved_symbols(ee, jmod, NULL);
+      ny_jit_write_perf_map(ee, jmod);
       maybe_log_phase_time(opt->do_timing, "JIT Init:", t_jit);
       clock_t t_exec = clock();
-      uint64_t saddr = LLVMGetFunctionAddress(ee, "__script_top");
+      uint64_t saddr = LLVMGetFunctionAddress(ee, "_ny_top_entry");
       maybe_log_phase_time(opt->do_timing, "JIT Compile:", t_exec);
       clock_t t_run = clock();
       if (saddr) {
         if (verbose_enabled >= 3)
           fprintf(stderr, "TRACE: Executing script...\n");
         ((void (*)(void))saddr)();
-        extern void __rt_print_flush(void);
-        __rt_print_flush();
+        extern void rt_print_flush(void);
+        rt_print_flush();
         if (verbose_enabled >= 3)
           fprintf(stderr, "TRACE: Script finished.\n");
       } else {

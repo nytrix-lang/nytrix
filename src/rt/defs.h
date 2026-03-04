@@ -265,6 +265,10 @@ RT_DEF("__trace_loc", __trace_loc, 3, "fn __trace_loc(file, line, col)",
        "Internal: record the last executed source location.")
 RT_DEF("__trace_func", __trace_func, 1, "fn __trace_func(name)",
        "Internal: record the current function name.")
+RT_DEF("__trace_enter", rt_trace_enter, 3, "fn __trace_enter(func, file, line)",
+       "Internal: push function onto call stack and record entry.")
+RT_DEF("__trace_exit", rt_trace_exit, 0, "fn __trace_exit()",
+       "Internal: pop function from call stack.")
 RT_DEF("__trace_dump", __trace_dump, 1, "fn __trace_dump(n)",
        "Internal: dump recent trace entries.")
 RT_DEF("__get_backtrace", __get_backtrace, 1, "fn __get_backtrace(n)",
@@ -277,7 +281,7 @@ RT_DEF("__pop_run_defer", __pop_run_defer, 0, "fn __pop_run_defer()",
 RT_DEF("__run_defers_to", __run_defers_to, 1, "fn __run_defers_to(n)",
        "Internal: run defers.")
 
-RT_DEF("__argc", ny_rt_argc, 0, "fn __argc()",
+RT_DEF("__argc", __argc, 0, "fn __argc()",
        "Returns the number of command-line arguments.")
 RT_DEF("__argvp", ny_rt_argvp, 0, "fn __argvp()",
        "Returns the raw argv pointer.")

@@ -275,6 +275,7 @@ typedef enum stmt_kind_t {
   NY_S_STRUCT,
   NY_S_ENUM,
   NY_S_MACRO,
+  NY_S_INCLUDE,
 } stmt_kind_t;
 
 typedef struct stmt_export_t {
@@ -367,6 +368,13 @@ typedef struct stmt_extern_t {
   bool is_variadic;
 } stmt_extern_t;
 
+typedef struct stmt_include_t {
+  const char *path;
+  const char *prefix;
+  const char *lib; /* optional: library to link/dlopen, e.g. "libSDL2-2.0.so" */
+  bool is_std;
+} stmt_include_t;
+
 typedef struct stmt_return_t {
   expr_t *value;
 } stmt_return_t;
@@ -456,6 +464,7 @@ struct stmt_t {
       ny_expr_list args;
       stmt_t *body;
     } macro;
+    stmt_include_t inc;
   } as;
 };
 

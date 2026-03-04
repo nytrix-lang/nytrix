@@ -33,6 +33,7 @@ from commands import (
     run_optcheck,
     run_bin,
     run_analyze,
+    run_check,
     run_fb,
 )
 
@@ -55,6 +56,7 @@ COMMANDS = (
     "ubsan",
     "optcheck",
     "analyze",
+    "check",
     "fb",
     "ny",
 )
@@ -653,6 +655,10 @@ def main():
             elif cmd == "analyze":
                 _timed_call(
                     profile_enabled, timings, "analyze:run", run_analyze, unknown
+                )
+            elif cmd == "check":
+                _timed_call(
+                    profile_enabled, timings, "check:run", run_check, unknown
                 )
             elif cmd == "fb":
                 _timed_call(

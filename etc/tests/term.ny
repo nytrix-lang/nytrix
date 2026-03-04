@@ -5,6 +5,7 @@ use std.core *
 use std.os *
 use std.ui.consts *
 use std.ui.gfx *
+use std.ui.window.native as native
 use std.ui.window as window
 use std.ui.gfx.vterm as vterm
 use std.str as str
@@ -20,6 +21,9 @@ mut win_h = 720.0
 def START_FONT_SIZE = 18.0
 mut font_size = 18.0
 mut last_esc_ms = 0
+mut _has_framebuffer_transparency = false
+
+def DEFAULT_TERM_BG = 0x88323232
 
 def FONT_REG_DEFAULT = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 def FONT_REG_CANDIDATES = [
@@ -30,9 +34,129 @@ def FONT_REG_CANDIDATES = [
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 
+fn _clamp_byte(v){
+   if(v < 0){ return 0 }
+   if(v > 255){ return 255 }
+   v
+}
+
+fn _with_alpha_abgr(c, a8){
+   ((a8 & 255) << 24) | (c & 0x00ffffff)
+}
+
+fn _opaque_abgr(c){
+   0xff000000 | (c & 0x00ffffff)
+}
+
+fn _rgb_to_abgr(rgb){
+   def r = (rgb >> 16) & 255
+   def g = (rgb >> 8) & 255
+   def b = rgb & 255
+   (255 << 24) | (b << 16) | (g << 8) | r
+}
+
+fn _argb_to_abgr(argb){
+   def a = (argb >> 24) & 255
+   def r = (argb >> 16) & 255
+   def g = (argb >> 8) & 255
+   def b = argb & 255
+   (a << 24) | (b << 16) | (g << 8) | r
+}
+
+fn _parse_term_bg(raw, def_val){
+   if(!raw || !is_str(raw)){ return def_val }
+   mut s = str.strip(raw)
+   if(str.len(s) == 0){ return def_val }
+
+   mut order = ""
+   if(str.startswith(str.lower(s), "argb:")){ order = "argb" s = str.str_slice(s, 5, str.len(s)) }
+   elif(str.startswith(str.lower(s), "abgr:")){ order = "abgr" s = str.str_slice(s, 5, str.len(s)) }
+   if(str.startswith(s, "0x")){ s = str.str_slice(s, 2, str.len(s)) }
+   elif(str.startswith(s, "#")){ s = str.str_slice(s, 1, str.len(s)) }
+
+   mut hex = 0
+   mut n = 0
+   while(n < str.len(s)){
+      def c = load8(s, n)
+      mut v = -1
+      if(c >= 48 && c <= 57){ v = c - 48 }
+      elif(c >= 65 && c <= 70){ v = c - 55 }
+      elif(c >= 97 && c <= 102){ v = c - 87 }
+      else { break }
+      hex = (hex << 4) | v
+      n += 1
+   }
+
+   if(n == 6){
+      return _with_alpha_abgr(_rgb_to_abgr(hex), (DEFAULT_TERM_BG >> 24) & 255)
+   }
+   if(n == 8){
+      if(order == "argb"){ return _argb_to_abgr(hex) }
+      return hex
+   }
+   def_val
+}
+
+fn _default_bg_alpha(){
+   def raw = env("NY_TERM_BG_ALPHA")
+   if(!raw || !is_str(raw) || str.len(str.strip(raw)) == 0){ return (DEFAULT_TERM_BG >> 24) & 255 }
+   def f = str.atof(raw)
+   if(f <= 1.0){ return _clamp_byte(int(f * 255.0 + 0.5)) }
+   _clamp_byte(int(f))
+}
+
+fn _term_bg_color(){
+   def c = _parse_term_bg(env("NY_TERM_BG"), DEFAULT_TERM_BG)
+   if(!_has_framebuffer_transparency){ return _opaque_abgr(c) }
+   _with_alpha_abgr(c, _default_bg_alpha())
+}
+
+fn _window_has_real_transparency(){
+   if(!win){ return false }
+   def has_transparency = native.get_window_attrib(window.id(win), native.TRANSPARENT_FRAMEBUFFER) != 0
+   print("term: TRANSPARENT_FRAMEBUFFER attrib = " + to_str(has_transparency))
+   return has_transparency
+}
+
+fn _fallback_window_opacity(){
+   def raw = env("NY_TERM_WINDOW_OPACITY")
+   if(!raw || !is_str(raw) || str.len(str.strip(raw)) == 0){ return 0.94 }
+   def v = str.atof(raw)
+   if(v < 0.0){ return 0.0 }
+   if(v > 1.0){ return 1.0 }
+   v
+}
+
+fn _allow_window_opacity_fallback(){
+   def raw = env("NY_TERM_ALLOW_WINDOW_OPACITY")
+   if(!raw || !is_str(raw) || str.len(str.strip(raw)) == 0){ return true }
+   str.atof(raw) != 0.0
+}
+
+fn _maybe_report_transparency(){
+   _has_framebuffer_transparency = _window_has_real_transparency()
+   if(_has_framebuffer_transparency){
+      print("term: per-pixel transparency ENABLED")
+      return
+   }
+   print("term: per-pixel transparency check failed")
+   if(_allow_window_opacity_fallback()){
+      def opacity = _fallback_window_opacity()
+      native.set_window_opacity(window.id(win), opacity)
+      print("term: using whole-window opacity fallback: " + to_str(opacity))
+   } else {
+      print("term: per-pixel background transparency unavailable on this platform/compositor; background-only transparency cannot work here")
+      print("term: set NY_TERM_ALLOW_WINDOW_OPACITY=1 to enable opacity fallback, or NY_TERM_WINDOW_OPACITY=0.9 to set custom opacity")
+   }
+}
+
 fn startup(){
-   win = init_window(int(win_w), int(win_h), "Nytrix Terminal", WINDOW_CENTER | WINDOW_ALLOW_DND | WINDOW_TRANSPARENT | WINDOW_NO_BORDER)
+   def flags = WINDOW_CENTER | WINDOW_ALLOW_DND | WINDOW_TRANSPARENT | WINDOW_NO_BORDER
+   print("term: creating window with flags=0x" + to_hex(flags) + " (TRANSPARENT=" + to_hex(WINDOW_TRANSPARENT) + ")")
+   win = init_window(int(win_w), int(win_h), "Nytrix Terminal", flags)
    if(!win){ print("Failed to create window") exit(1) }
+   print("term: window created: 0x" + to_hex(window.id(win)))
+   set_clear_color([0.0, 0.0, 0.0, 0.0])
    window.set_exit_key(win, KEY_NULL)
    window.set_input_exclusive(win, true)
    window.focus(win)
@@ -42,6 +166,7 @@ fn startup(){
    def sz = window.size(win)
    win_w = float(get(sz, 0))
    win_h = float(get(sz, 1))
+   _maybe_report_transparency()
 
    _init_vt()
    window.set_cursor_mode(win, window.CURSOR_NORMAL)
@@ -65,7 +190,7 @@ fn _init_vt(){
    fonts = dict_set(fonts, "italic", font_italic)
    fonts = dict_set(fonts, "emoji", font_emoji)
 
-   vt = vterm.new(cols, rows, fonts)
+   vt = vterm.new(cols, rows, fonts, _term_bg_color())
    ;; TILING: Force cells to fill every pixel of the window
    vt = dict_set(vt, "char_w", win_w / float(cols))
    vt = dict_set(vt, "char_h", win_h / float(rows))

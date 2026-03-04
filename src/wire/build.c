@@ -964,6 +964,13 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   if (runtime_ast_obj)
     argv[idx++] = runtime_ast_obj;
   const char *shared_rt_path = NULL;
+  /* Check runtime_obj for .so path */
+  if (runtime_obj) {
+    const char *dot = strrchr(runtime_obj, '.');
+    if (dot && strcmp(dot, ".so") == 0) {
+      shared_rt_path = runtime_obj;
+    }
+  }
   for (size_t i = 0; i < extra_count; ++i) {
     if (idx + 12 >= NY_MAX_LINK_ARGS)
       break;
@@ -1010,27 +1017,29 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
 #endif
       argv[idx++] = rpath_arg;
-      static char ldir_arg[PATH_MAX + 4];
-      snprintf(ldir_arg, sizeof(ldir_arg), "-L%s", rpath_buf);
-      argv[idx++] = ldir_arg;
-      argv[idx++] = "-lnytrixrt";
     }
 #endif
   }
   argv[idx++] = "-o";
   argv[idx++] = output_path;
 #ifndef _WIN32
-  argv[idx++] = "-lm";
-  argv[idx++] = "-pthread";
-  argv[idx++] = "-lpthread";
-  argv[idx++] = "-ldl";
-  argv[idx++] = "-lcurl";
+  /* Link against runtime library from build directory with rpath */
+  argv[idx++] = "-Wl,-rpath,./build/release";
+  argv[idx++] = "-L./build/release";
+  argv[idx++] = "-lnytrixrt";
+  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env
+   */
 #endif
 #ifdef _WIN32
-  argv[idx++] = "-lws2_32";
-  argv[idx++] = "-lcurl";
+  /* Link against runtime library from build directory */
+  argv[idx++] = "-L./build/release";
+  argv[idx++] = "nytrixrt.lib";
+  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env
+   */
 #endif
   char *shared_buf = NULL;
+  char *shared_lib_copies[16] = {NULL};
+  size_t shared_lib_copy_count = 0;
   const char *shared_env = getenv("NYTRIX_SHARED_LIBS");
   const char *shared_libs[16];
   size_t shared_count = 0;
@@ -1045,14 +1054,40 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     }
   }
   for (size_t i = 0; i < shared_count; ++i) {
-    argv[idx++] = shared_libs[i];
+    const char *lib = shared_libs[i];
+    /* Convert bare names like "m" to "-lm", pass through "-lXXX" as-is */
+    if (lib[0] == '-' && lib[1] == 'l') {
+      argv[idx++] = lib;
+    } else {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "-l%s", lib);
+      char *copy = ny_strdup(buf);
+      argv[idx++] = copy;
+      shared_lib_copies[shared_lib_copy_count++] = copy;
+    }
   }
-  if (shared_buf)
-    free(shared_buf);
+  /* Note: shared_buf is NOT freed here - pointers in shared_libs reference it
+   */
+  /* Convert libXXX.so -> -lXXX for ELF linker */
+  char link_buf_storage[16][64];
+  size_t link_buf_idx = 0;
   for (size_t i = 0; i < link_lib_count; ++i) {
     if (idx + 1 >= NY_MAX_LINK_ARGS)
       break;
-    argv[idx++] = link_libs[i];
+    const char *lib = link_libs[i];
+    if (lib && strncmp(lib, "lib", 3) == 0) {
+      const char *base = lib + 3;
+      size_t blen = strlen(base);
+      const char *dot = strstr(base, ".so");
+      if (dot && dot > base)
+        blen = (size_t)(dot - base);
+      if (blen > 0 && blen < 64 && link_buf_idx < 16) {
+        snprintf(link_buf_storage[link_buf_idx], 64, "-l%.*s", (int)blen, base);
+        argv[idx++] = link_buf_storage[link_buf_idx++];
+        continue;
+      }
+    }
+    argv[idx++] = lib;
   }
 #if !defined(__APPLE__) && !defined(_WIN32)
   argv[idx++] = "-Wl,--as-needed";
@@ -1063,6 +1098,10 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   int rc = spawn_with_host_flags(argv, getenv("NYTRIX_HOST_LDFLAGS"), host_pool,
                                  &pool_len);
   ny_free_host_pool(host_pool, pool_len);
+  for (size_t i = 0; i < shared_lib_copy_count; i++)
+    free(shared_lib_copies[i]);
+  if (shared_buf)
+    free(shared_buf);
   if (rc != 0) {
     NY_LOG_ERR("Linking failed (exit=%d)\n", rc);
     return false;

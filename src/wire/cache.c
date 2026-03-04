@@ -5,6 +5,7 @@
 #include <llvm-c/BitReader.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/DebugInfo.h>
 #include <llvm-c/IRReader.h>
 #include <llvm/Config/llvm-config.h>
 #include <stdio.h>
@@ -314,7 +315,7 @@ bool ny_jit_native_cache_load(const char *so_path, void **out_handle,
       fprintf(stderr, "[cache] native load failed: %s\n", dlerror());
     return false;
   }
-  void (*entry)(void) = (void (*)(void))dlsym(h, "__script_top");
+  void (*entry)(void) = (void (*)(void))dlsym(h, "_ny_top_entry");
   if (!entry) {
     dlclose(h);
     return false;
@@ -333,16 +334,29 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
   snprintf(obj_path, sizeof(obj_path), "%s.o", so_path);
   extern bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
                                   int opt_level);
-  if (!ny_llvm_emit_object(module, obj_path, opt_level)) {
+  /* Clone and strip debug info before emitting — DwarfDebug finalization
+     can crash on certain metadata patterns. The native .so cache doesn't
+     need debug symbols; the original module is left intact for MCJIT. */
+  LLVMModuleRef emit_mod = LLVMCloneModule(module);
+  if (!emit_mod)
+    return false;
+  LLVMStripModuleDebugInfo(emit_mod);
+  bool ok = ny_llvm_emit_object(emit_mod, obj_path, opt_level);
+  LLVMDisposeModule(emit_mod);
+  if (!ok) {
     remove(obj_path);
     return false;
   }
   char tmp_so[1024];
   snprintf(tmp_so, sizeof(tmp_so), "%s.tmp", so_path);
   char cmd[4096];
-  snprintf(cmd, sizeof(cmd),
-           "ld -shared --allow-shlib-undefined -o %s %s 2>/dev/null", tmp_so,
-           obj_path);
+  if (getenv("NYTRIX_VERBOSE") || getenv("NYTRIX_DEBUG"))
+    snprintf(cmd, sizeof(cmd), "ld -shared --allow-shlib-undefined -o %s %s",
+             tmp_so, obj_path);
+  else
+    snprintf(cmd, sizeof(cmd),
+             "ld -shared --allow-shlib-undefined -o %s %s 2>/dev/null", tmp_so,
+             obj_path);
   int rc = system(cmd);
   remove(obj_path);
   if (rc != 0) {

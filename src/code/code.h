@@ -58,6 +58,7 @@ static inline void ny_fun_sig_init(fun_sig *sig, const char *name,
   sig->arity = arity;
   sig->is_variadic = is_variadic;
   sig->is_extern = is_extern;
+  sig->is_native_abi = false;
   sig->effects = NY_FX_ALL;
   sig->args_escape = true;
   sig->args_mutated = true;
@@ -273,6 +274,7 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name);
 void codegen_collect_links(codegen_t *cg, program_t *prog);
 void codegen_dispose(codegen_t *cg);
 char *normalize_module_name(const char *raw);
+void ny_cg_emit_trace_exit(codegen_t *cg);
 void codegen_debug_init(codegen_t *cg, const char *main_file);
 void codegen_debug_finalize(codegen_t *cg);
 LLVMMetadataRef codegen_debug_subprogram(codegen_t *cg, LLVMValueRef func,
