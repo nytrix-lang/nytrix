@@ -1,3 +1,6 @@
+;; Keywords: core test
+;; Unit Testing Framework for Nytrix
+
 module std.core.test (
    test, t_assert, t_assert_eq, fail
 )

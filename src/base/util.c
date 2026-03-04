@@ -197,6 +197,26 @@ int ny_ensure_dir(const char *path) {
   return 0;
 }
 
+void ny_ensure_dir_recursive(const char *path) {
+  if (!path || !*path)
+    return;
+  char tmp[1024];
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  size_t len = strlen(tmp);
+  if (len == 0)
+    return;
+  if (tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  for (char *p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      ny_ensure_dir(tmp);
+      *p = '/';
+    }
+  }
+  ny_ensure_dir(tmp);
+}
+
 int ny_copy_file(const char *src, const char *dst) {
   struct stat src_st;
   int have_src_mode = (stat(src, &src_st) == 0);

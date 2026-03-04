@@ -1,5 +1,5 @@
 ;; Keywords: ui input keyboard mouse
-;; Input management for std.ui.
+;; Input Management for Nytrix
 
 module std.ui.input (
    ; Key Codes
@@ -93,30 +93,46 @@ def MOUSE_LEFT    = 0
 def MOUSE_RIGHT   = 1
 def MOUSE_MIDDLE  = 2
 
-fn normalize_key(key){ uikey.normalize_key(key) }
-fn mod_bit_for_key(key){ uikey.mod_bit_for_key(key) }
-fn mods_from_key_states(ks){ uikey.mods_from_key_states(ks) }
-fn parse_notation(notation){ uikey.parse_notation(notation) }
+fn normalize_key(key){
+   "Converts a key name or code to a standard Nytrix key code."
+   uikey.normalize_key(key)
+}
+fn mod_bit_for_key(key){
+   "Returns the modifier bit mask for a specific modifier key (Shift, Ctrl, etc.)."
+   uikey.mod_bit_for_key(key)
+}
+fn mods_from_key_states(ks){
+   "Calculates combined modifier flags from a map of current key states."
+   uikey.mods_from_key_states(ks)
+}
+fn parse_notation(notation){
+   "Parses a standard key notation string (e.g., 'C-c') into a list of [key, mods] pairs."
+   uikey.parse_notation(notation)
+}
 
 ;; High-level (Proxies to active window in std.ui.window)
 
 fn _active_window(){
+   "Internal: Returns the most recently focused window."
    window.last()
 }
 
 fn key_down(key){
+   "Returns true if the specified key is currently held down in the active window."
    def win = _active_window()
    if(!win){ return false }
    window.key_down(win, key)
 }
 
 fn key_pressed(key){
+   "Returns true if the specified key was pressed this frame in the active window."
    def win = _active_window()
    if(!win){ return false }
    window.key_pressed(win, key)
 }
 
 fn key_chord(notation){
+   "Returns true if a specific key combination (e.g., 'C-x') was triggered this frame."
    def win = _active_window()
    if(!win){ return false }
    def seq = parse_notation(notation)
@@ -129,24 +145,28 @@ fn key_chord(notation){
 }
 
 fn mod_down(mod){
+   "Returns true if the specified modifier flag is set in the active window."
    def win = _active_window()
    if(!win){ return false }
    window.mod_down(win, mod)
 }
 
 fn mouse_pos(){
+   "Returns the current mouse cursor position [x, y] relative to the active window."
    def win = _active_window()
    if(!win){ return [0, 0] }
    window.mouse_pos(win)
 }
 
 fn mouse_button_down(button){
+   "Returns true if the specified mouse button is currently held down."
    def win = _active_window()
    if(!win){ return false }
    window.mouse_down(win, button)
 }
 
 fn mouse_button_pressed(button){
+   "Returns true if the specified mouse button was pressed this frame."
    def win = _active_window()
    if(!win){ return false }
    window.mouse_pressed(win, button)

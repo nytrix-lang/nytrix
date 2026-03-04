@@ -152,3 +152,71 @@ fn llvm_fp_add(a, b){
 }
 assert(llvm_fp_add(8, 9) == 17, "@llvm(name, value) function failed")
 print("✓ @llvm passed")
+print("Testing optimization attributes...")
+@readnone @nounwind @mustprogress @willreturn
+fn pure_math(x, y){
+   return x * x + y * y
+}
+assert(pure_math(3, 4) == 25, "@readnone math failed")
+
+@readonly @nounwind
+fn read_first(lst){
+   return get(lst, 0)
+}
+assert(read_first([10, 20]) == 10, "@readonly access failed")
+
+@writeonly
+fn write_first(lst, val){
+   set(lst, 0, val)
+}
+def write_lst = [0, 0]
+write_first(write_lst, 42)
+assert(write_lst[0] == 42, "@writeonly function failed")
+
+@argmemonly
+fn swap(a, b){
+   def t = get(a, 0)
+   set(a, 0, get(b, 0))
+   set(b, 0, t)
+}
+def s1 = [1] def s2 = [2]
+swap(s1, s2)
+assert(s1[0] == 2 && s2[0] == 1, "@argmemonly function failed")
+
+@hot @jit
+fn hot_loop(n){
+   mut sum = 0
+   mut i = 0
+   while(i < n){
+      sum = sum + i
+      i = i + 1
+   }
+   return sum
+}
+assert(hot_loop(10) == 45, "@hot function failed")
+
+@cold
+fn error_path(){
+   return "error"
+}
+assert(error_path() == "error", "@cold function failed")
+
+@flatten
+fn nested_calc(a, b){
+   @jit
+   fn inner(x){ return x * 2 }
+   return inner(a) + inner(b)
+}
+assert(nested_calc(5, 10) == 30, "@flatten function failed")
+
+print("✓ New optimization attributes passed")
+
+print("Testing ++i and --i...")
+mut counter = 10
+++counter
+assert(counter == 11, "++counter failed")
+--counter
+assert(counter == 10, "--counter failed")
+print("✓ ++/-- passed")
+
+print("✓ ALL attribute tests passed")

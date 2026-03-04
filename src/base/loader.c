@@ -61,6 +61,23 @@ static char *ny_loader_xstrdup(const char *s) {
   return d;
 }
 
+static int ny_std_trace_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached;
+  const char *env = getenv("NYTRIX_STD_TRACE");
+  if (!env || !*env) {
+    cached = 0;
+    return cached;
+  }
+  if (strcmp(env, "0") == 0 || strcmp(env, "false") == 0) {
+    cached = 0;
+    return cached;
+  }
+  cached = 1;
+  return cached;
+}
+
 static void std_push_mod(const char *name, const char *path,
                          const char *package) {
   if (!name || !path || !package)
@@ -172,6 +189,9 @@ static void add_module_from_path(const char *root, const char *full_path) {
 }
 
 static void scan_dir_recursive(const char *root, const char *dir) {
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE dir: %s\n", dir);
+  }
   DIR *d = opendir(dir);
   if (!d) {
     return;
@@ -237,11 +257,17 @@ static void ny_std_init_modules(void) {
   if (init)
     return;
   init = 1;
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE init_modules\n");
+  }
   const char *root = ny_src_root();
   ny_scan_std_or_lib_roots(root, "std");
   ny_scan_std_or_lib_roots(root, "lib");
   if (ny_std_mods_len > 1) {
     qsort(ny_std_mods, ny_std_mods_len, sizeof(ny_std_mod), mod_cmp);
+  }
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE init_modules done: %zu\n", ny_std_mods_len);
   }
 }
 
@@ -733,6 +759,9 @@ static char *ny_build_module_chunk(const char *path, const char *name,
                                    size_t *out_len) {
   if (!path || !name)
     return NULL;
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE chunk: %s\n", path);
+  }
   char *txt = read_file(path);
   if (!txt)
     return NULL;
@@ -788,6 +817,9 @@ static char *ny_build_module_chunk(const char *path, const char *name,
   free(txt);
   if (out_len)
     *out_len = total;
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE done: %s (%zu bytes)\n", path, total);
+  }
   return bundle;
 }
 
@@ -825,6 +857,9 @@ static void *ny_std_bundle_worker(void *arg) {
 static void scan_dependencies(mod_list *list, size_t idx) {
   if (list->entries[idx].processed)
     return;
+  if (ny_std_trace_enabled()) {
+    fprintf(stderr, "STD_TRACE scan: %s\n", list->entries[idx].path);
+  }
   NY_LOG_V2("Scanning dependencies for %s\n", list->entries[idx].path);
   list->entries[idx].processed = true;
   char *txt = read_file(list->entries[idx].path);
@@ -1006,15 +1041,36 @@ char *ny_build_std_bundle(const char **modules, size_t module_count,
                         .next = 0,
                         .entry_path = entry_path};
       pthread_mutex_init(&ctx.mu, NULL);
+      if ((size_t)threads > mods.len)
+        threads = (int)mods.len;
       pthread_t *tids = ny_loader_xmalloc(sizeof(pthread_t) * (size_t)threads);
+      int created = 0;
       for (int i = 0; i < threads; i++) {
-        pthread_create(&tids[i], NULL, ny_std_bundle_worker, &ctx);
+        if (pthread_create(&tids[i], NULL, ny_std_bundle_worker, &ctx) == 0) {
+          created++;
+        } else {
+          NY_LOG_WARN("Failed to spawn std bundler thread; falling back.\n");
+          break;
+        }
       }
-      for (int i = 0; i < threads; i++) {
+      for (int i = 0; i < created; i++) {
         pthread_join(tids[i], NULL);
       }
       pthread_mutex_destroy(&ctx.mu);
       free(tids);
+      if (created == 0) {
+        for (size_t i = 0; i < mods.len; ++i) {
+          if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {
+            mods.entries[i].skip_entry = true;
+            continue;
+          }
+          if (!mods.entries[i].bundle_txt) {
+            mods.entries[i].bundle_txt = ny_build_module_chunk(
+                mods.entries[i].path, mods.entries[i].name,
+                &mods.entries[i].bundle_len);
+          }
+        }
+      }
     } else {
       for (size_t i = 0; i < mods.len; ++i) {
         if (entry_path && ny_same_path(mods.entries[i].path, entry_path)) {

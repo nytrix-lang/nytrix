@@ -137,6 +137,7 @@ fn load_path(path, index=0){
 }
 
 fn _finish_load(info_in, face, data){
+   "Internal: Completes font loading by extracting metrics (ascent, descent, em-size) and initializing the font info dictionary."
    mut info = info_in
    if(!is_dict(info)){ info = dict(16) }
    def units_per_em = load16(face, _FT_FACE_UNITS_PER_EM)

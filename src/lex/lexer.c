@@ -600,22 +600,14 @@ token_t lexer_next(lexer_t *lx) {
       return make_token(lx, NY_T_ARROW, start);
     if (match(lx, '='))
       return make_token(lx, NY_T_MINUS_EQ, start);
-    if (match(lx, '-')) {
-      lexer_error(lx, start,
-                  "decrement operator '--' is not supported in Nytrix",
-                  "use '-= 1' instead");
-      return lexer_next(lx);
-    }
+    if (match(lx, '-'))
+      return make_token(lx, NY_T_MINUS_MINUS, start);
     return make_token(lx, NY_T_MINUS, start);
   case '+':
     if (match(lx, '='))
       return make_token(lx, NY_T_PLUS_EQ, start);
-    if (match(lx, '+')) {
-      lexer_error(lx, start,
-                  "increment operator '++' is not supported in Nytrix",
-                  "use '+= 1' instead");
-      return lexer_next(lx);
-    }
+    if (match(lx, '+'))
+      return make_token(lx, NY_T_PLUS_PLUS, start);
     return make_token(lx, NY_T_PLUS, start);
   case '*':
     if (match(lx, '='))

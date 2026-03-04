@@ -2,7 +2,7 @@
 ;; Reference:
 ;; - https://github.com/nothings/stb/blob/master/stb_rect_pack.h
 
-module std.image.pack (
+module std.imageArrayLayers.pack (
    init, pack, HEURISTIC_BL, HEURISTIC_BF
 )
 

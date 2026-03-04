@@ -156,6 +156,9 @@ int64_t __ffi_untag_ptr(int64_t v) { return rt_untag_v(v); }
 int64_t __call0(int64_t f) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(NY_NATIVE_RET0(NY_NATIVE_DECODE(f)));
   }
@@ -173,6 +176,9 @@ int64_t __call0(int64_t f) {
 int64_t __call0_i32(int64_t f) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res = ((int32_t (*)(void))NY_NATIVE_DECODE(f))();
     return rt_tag_v((int64_t)res);
@@ -182,6 +188,9 @@ int64_t __call0_i32(int64_t f) {
 
 int64_t __call1(int64_t f, int64_t a0) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t res_raw = NY_NATIVE_RET1(NY_NATIVE_DECODE(f), rt_untag_v(a0));
@@ -201,6 +210,9 @@ int64_t __call1(int64_t f, int64_t a0) {
 int64_t __call1_i64(int64_t f, int64_t a0) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
 #if UINTPTR_MAX == 0xffffffff
     long long arg = (long long)rt_untag_v(a0);
@@ -218,6 +230,9 @@ int64_t __call1_i64(int64_t f, int64_t a0) {
 int64_t __call1_u32(int64_t f, int64_t a0) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_untag_v(a0);
     uint32_t res = ((uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
@@ -228,6 +243,9 @@ int64_t __call1_u32(int64_t f, int64_t a0) {
 
 int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(
@@ -246,6 +264,9 @@ int64_t __call2(int64_t f, int64_t a0, int64_t a1) {
 
 int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     int64_t v0 = rt_untag_v(a0);
@@ -268,6 +289,9 @@ int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
 int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(NY_NATIVE_RET4(NY_NATIVE_DECODE(f), rt_untag_v(a0),
                                    rt_untag_v(a1), rt_untag_v(a2),
@@ -288,6 +312,9 @@ int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
 int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                 int64_t a4) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(NY_NATIVE_RET5(NY_NATIVE_DECODE(f), rt_untag_v(a0),
@@ -311,6 +338,9 @@ int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                 int64_t a4, int64_t a5) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(NY_NATIVE_RET6(
         NY_NATIVE_DECODE(f), rt_untag_v(a0), rt_untag_v(a1), rt_untag_v(a2),
@@ -332,6 +362,9 @@ int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
 int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                 int64_t a4, int64_t a5, int64_t a6) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -357,6 +390,9 @@ int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                 int64_t a4, int64_t a5, int64_t a6, int64_t a7) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(
         ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -381,6 +417,9 @@ int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
 int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(
@@ -410,6 +449,9 @@ int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a9) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(
         ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -437,6 +479,9 @@ int64_t __call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
                  int64_t a9, int64_t a10) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -467,6 +512,9 @@ int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a9, int64_t a10, int64_t a11) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -495,6 +543,9 @@ int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
                  int64_t a9, int64_t a10, int64_t a11, int64_t a12) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(((int64_t (*)(
@@ -528,6 +579,9 @@ int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a13) {
   if (!f)
     return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
+    return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(
         ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -560,6 +614,9 @@ int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
                  int64_t a9, int64_t a10, int64_t a11, int64_t a12, int64_t a13,
                  int64_t a14) {
   if (!f)
+    return 1;
+  /* Guard: reject tagged ints / tiny values that are not valid fn ptrs */
+  if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v(

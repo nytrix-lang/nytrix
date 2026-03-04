@@ -1,5 +1,5 @@
 ;; Keywords: util utils
-;; General utility module.
+;; General utility for Nytrix
 
 module std.util.utils (
    parse_ast,

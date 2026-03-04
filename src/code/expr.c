@@ -83,23 +83,31 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
                                   ny_ct_fast_val_t *out) {
   if (!op || !r || !out)
     return false;
-  if (strcmp(op, "!") == 0) {
-    bool t = false;
-    if (!ny_ct_fast_truthy(r, &t))
-      return false;
-    out->kind = NY_CT_FAST_BOOL;
-    out->b = !t;
-    return true;
-  }
-  if (strcmp(op, "-") == 0 && r->kind == NY_CT_FAST_INT) {
-    out->kind = NY_CT_FAST_INT;
-    out->i = -r->i;
-    return true;
-  }
-  if (strcmp(op, "~") == 0 && r->kind == NY_CT_FAST_INT) {
-    out->kind = NY_CT_FAST_INT;
-    out->i = ~r->i;
-    return true;
+  switch (op[0]) {
+  case '!':
+    if (!op[1]) {
+      bool t = false;
+      if (!ny_ct_fast_truthy(r, &t))
+        return false;
+      out->kind = NY_CT_FAST_BOOL;
+      out->b = !t;
+      return true;
+    }
+    break;
+  case '-':
+    if (!op[1] && r->kind == NY_CT_FAST_INT) {
+      out->kind = NY_CT_FAST_INT;
+      out->i = -r->i;
+      return true;
+    }
+    break;
+  case '~':
+    if (!op[1] && r->kind == NY_CT_FAST_INT) {
+      out->kind = NY_CT_FAST_INT;
+      out->i = ~r->i;
+      return true;
+    }
+    break;
   }
   return false;
 }
@@ -129,46 +137,86 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
 
 static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
                               ny_ct_fast_val_t *out) {
-  if (strcmp(op, "+") == 0) {
+  switch (op[0]) {
+  case '+':
     out->kind = NY_CT_FAST_INT;
     out->i = l + r;
     return true;
-  }
-  if (strcmp(op, "-") == 0) {
+  case '-':
     out->kind = NY_CT_FAST_INT;
     out->i = l - r;
     return true;
-  }
-  if (strcmp(op, "*") == 0) {
+  case '*':
     out->kind = NY_CT_FAST_INT;
     out->i = l * r;
     return true;
-  }
-
-  NY_CT_OP_INT_CHECK_ZERO("/", /)
-  NY_CT_OP_INT_CHECK_ZERO("%", %)
-
-  if (strcmp(op, "<") == 0) {
+  case '/':
+    if (r == 0)
+      return false;
+    out->kind = NY_CT_FAST_INT;
+    out->i = l / r;
+    return true;
+  case '%':
+    if (r == 0)
+      return false;
+    out->kind = NY_CT_FAST_INT;
+    out->i = l % r;
+    return true;
+  case '<':
+    if (op[1] == '=') {
+      out->kind = NY_CT_FAST_BOOL;
+      out->b = l <= r;
+      return true;
+    }
+    if (op[1] == '<') {
+      out->kind = NY_CT_FAST_INT;
+      out->i = l << r;
+      return true;
+    }
     out->kind = NY_CT_FAST_BOOL;
     out->b = l < r;
     return true;
-  }
-  if (strcmp(op, "<=") == 0) {
-    out->kind = NY_CT_FAST_BOOL;
-    out->b = l <= r;
-    return true;
-  }
-  if (strcmp(op, ">") == 0) {
+  case '>':
+    if (op[1] == '=') {
+      out->kind = NY_CT_FAST_BOOL;
+      out->b = l >= r;
+      return true;
+    }
+    if (op[1] == '>') {
+      out->kind = NY_CT_FAST_INT;
+      out->i = l >> r;
+      return true;
+    }
     out->kind = NY_CT_FAST_BOOL;
     out->b = l > r;
     return true;
-  }
-  if (strcmp(op, ">=") == 0) {
-    out->kind = NY_CT_FAST_BOOL;
-    out->b = l >= r;
+  case '=':
+    if (op[1] == '=') {
+      out->kind = NY_CT_FAST_BOOL;
+      out->b = l == r;
+      return true;
+    }
+    break;
+  case '!':
+    if (op[1] == '=') {
+      out->kind = NY_CT_FAST_BOOL;
+      out->b = l != r;
+      return true;
+    }
+    break;
+  case '|':
+    out->kind = NY_CT_FAST_INT;
+    out->i = l | r;
+    return true;
+  case '&':
+    out->kind = NY_CT_FAST_INT;
+    out->i = l & r;
+    return true;
+  case '^':
+    out->kind = NY_CT_FAST_INT;
+    out->i = l ^ r;
     return true;
   }
-
   return false;
 }
 
@@ -591,6 +639,13 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
   case NY_S_WHILE: {
     if (!s->as.whl.test || !s->as.whl.body)
       return false;
+    if (s->as.whl.init) {
+      if (!ny_ct_interp_eval_stmt(s->as.whl.init, ctx, ret, did_return,
+                                  depth + 1))
+        return false;
+      if (*did_return)
+        return true;
+    }
     size_t guard = 0;
     while (1) {
       ny_ct_fast_val_t cond = ny_ct_fast_none();
@@ -607,6 +662,13 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
         return false;
       if (*did_return)
         return true;
+      if (s->as.whl.update) {
+        if (!ny_ct_interp_eval_stmt(s->as.whl.update, ctx, ret, did_return,
+                                    depth + 1))
+          return false;
+        if (*did_return)
+          return true;
+      }
     }
     return true;
   }
@@ -891,6 +953,8 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   gen_func(cg, &sfn, name, sc, 0, uses_env ? &captures : NULL);
   free((void *)sfn.as.fn.name);
   LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
+  if (lf)
+    LLVMSetLinkage(lf, LLVMInternalLinkage);
   // Keep callable pointers raw. Ad-hoc low-bit tagging collides with
   // 32-bit runtime native tags (and ARM Thumb pointer semantics).
   LLVMValueRef fn_ptr_raw =
@@ -962,53 +1026,39 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
 }
 
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
-  LLVMValueRef is_none =
-      LLVMBuildICmp(cg->builder, LLVMIntEQ, v,
-                    LLVMConstInt(cg->type_i64, 0, false), "is_none");
-  LLVMValueRef is_false =
-      LLVMBuildICmp(cg->builder, LLVMIntEQ, v,
-                    LLVMConstInt(cg->type_i64, 4, false), "is_false");
-  LLVMValueRef is_zero =
-      LLVMBuildICmp(cg->builder, LLVMIntEQ, v,
-                    LLVMConstInt(cg->type_i64, 1, false), "is_zero");
+  if (v && LLVMTypeOf(v) == LLVMInt1TypeInContext(cg->ctx))
+    return v;
 
-  LLVMValueRef basic_false =
-      LLVMBuildOr(cg->builder, LLVMBuildOr(cg->builder, is_none, is_false, ""),
-                  is_zero, "");
+  if (v && LLVMIsAConstantInt(v)) {
+    int64_t val = LLVMConstIntGetSExtValue(v);
+    if (val == 2)
+      return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false);
+    if (val == 4 || val == 0 || val == 1)
+      return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+  }
 
-  // Also check if it's a float 0.0
-  LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
-  LLVMBasicBlockRef check_flt_bb = ny_llvm_append_block(fn, "bool.check_flt");
-  LLVMBasicBlockRef end_bb = ny_llvm_append_block(fn, "bool.end");
+  // Fold `select i1 %cond, i64 2, i64 4` (tag_bool) back to %cond
+  if (v && LLVMIsASelectInst(v)) {
+    LLVMValueRef tv = LLVMGetOperand(v, 1);
+    LLVMValueRef fv = LLVMGetOperand(v, 2);
+    if (LLVMIsAConstantInt(tv) && LLVMIsAConstantInt(fv) &&
+        LLVMConstIntGetZExtValue(tv) == 2 &&
+        LLVMConstIntGetZExtValue(fv) == 4) {
+      return LLVMGetOperand(v, 0);
+    }
+  }
 
-  LLVMBuildCondBr(cg->builder, basic_false, check_flt_bb, end_bb);
-
-  LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
-  LLVMValueRef is_flt = ny_is_float(cg, v);
-
-  LLVMBasicBlockRef flt_real_check_bb =
-      ny_llvm_append_block(fn, "bool.flt_real_check");
-  LLVMBuildCondBr(cg->builder, is_flt, flt_real_check_bb, end_bb);
-
-  LLVMPositionBuilderAtEnd(cg->builder, flt_real_check_bb);
-  LLVMValueRef fv = ny_unbox_float(cg, v);
-  LLVMValueRef is_f_zero =
-      LLVMBuildFCmp(cg->builder, LLVMRealOEQ, fv,
-                    LLVMConstReal(cg->type_f64, 0.0), "is_f_zero");
-  LLVMBasicBlockRef flt_real_check_end_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMBuildBr(cg->builder, end_bb);
-
-  LLVMPositionBuilderAtEnd(cg->builder, end_bb);
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, LLVMInt1TypeInContext(cg->ctx),
-                                  "is_false_final");
-  LLVMValueRef vals[3] = {
-      LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false),
-      LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false), is_f_zero};
-  LLVMBasicBlockRef bbs[3] = {cur_bb, check_flt_bb, flt_real_check_end_bb};
-  LLVMAddIncoming(phi, vals, bbs, 3);
-
-  return LLVMBuildNot(cg->builder, phi, NY_LLVM_NAME(cg, "to_bool"));
+  // Branchless: truthy = (v != 0 && v != 1 && v != 4)
+  // Falsy: 0 (none/nil), 1 (tagged int 0), 4 (false)
+  LLVMValueRef not_none = LLVMBuildICmp(
+      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 0, false), "");
+  LLVMValueRef not_zero = LLVMBuildICmp(
+      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 1, false), "");
+  LLVMValueRef not_false = LLVMBuildICmp(
+      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 4, false), "");
+  return LLVMBuildAnd(cg->builder,
+                      LLVMBuildAnd(cg->builder, not_none, not_zero, ""),
+                      not_false, NY_LLVM_NAME(cg, "to_bool"));
 }
 
 static void intern_map_resize(codegen_t *cg, size_t new_cap) {
@@ -1229,8 +1279,11 @@ static fun_sig *ny_helper_lookup(codegen_t *cg, fun_sig **cache_slot,
                                  const char *const *names, size_t names_len) {
   if (!cg || !names || names_len == 0)
     return NULL;
-  if (cache_slot && *cache_slot && ny_sig_in_current_sigs(cg, *cache_slot))
-    return *cache_slot;
+  if (cache_slot && *cache_slot) {
+    if (ny_sig_in_current_sigs(cg, *cache_slot))
+      return *cache_slot;
+    *cache_slot = NULL;
+  }
   for (size_t i = 0; i < names_len; ++i) {
     const char *name = names[i];
     if (!name || !*name)
@@ -1497,6 +1550,15 @@ static LLVMValueRef gen_unary_op_common(
 
   LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
+  bool proven = ny_is_proven_int(cg, NULL, 0, e->as.unary.right, r);
+
+  if (proven) {
+    /* Fast path: proven int, no runtime check. */
+    LLVMValueRef raw = ny_untag_int(cg, r);
+    LLVMValueRef res_raw = build_fast(cg->builder, raw, op_name);
+    return ny_tag_int(cg, res_raw);
+  }
+
   LLVMBasicBlockRef fast_bb = ny_llvm_append_block(fn, "un.int.fast");
   LLVMBasicBlockRef slow_bb = ny_llvm_append_block(fn, "un.runtime.slow");
   LLVMBasicBlockRef merge_bb = ny_llvm_append_block(fn, "un.merge");
@@ -1531,6 +1593,9 @@ static LLVMValueRef gen_unary_op_common(
 
 static LLVMValueRef gen_expr_unary(codegen_t *cg, scope *scopes, size_t depth,
                                    expr_t *e) {
+  if (!e->as.unary.right)
+    return expr_fail(cg, e->tok, "missing operand for unary '%s'",
+                     e->as.unary.op);
   LLVMValueRef r = gen_expr(cg, scopes, depth, e->as.unary.right);
   if (!r)
     return expr_fail(cg, e->tok, "failed to evaluate unary operand");
@@ -1731,6 +1796,134 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
   return phi;
 }
 
+static bool ny_is_f64_like(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_IDENT) {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
+                                   e->as.ident.hash);
+    return b && b->is_f64_slot;
+  }
+  if (e->kind == NY_E_BINARY) {
+    return ny_is_f64_like(cg, scopes, depth, e->as.binary.left) ||
+           ny_is_f64_like(cg, scopes, depth, e->as.binary.right);
+  }
+  return false;
+}
+
+static bool ny_is_f64_arith_op(const char *op) {
+  return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
+         strcmp(op, "/") == 0;
+}
+
+static LLVMValueRef ny_emit_f64_op(codegen_t *cg, const char *op,
+                                   LLVMValueRef lf, LLVMValueRef rf) {
+  if (strcmp(op, "+") == 0)
+    return LLVMBuildFAdd(cg->builder, lf, rf, "fadd");
+  if (strcmp(op, "-") == 0)
+    return LLVMBuildFSub(cg->builder, lf, rf, "fsub");
+  if (strcmp(op, "*") == 0)
+    return LLVMBuildFMul(cg->builder, lf, rf, "fmul");
+  if (strcmp(op, "/") == 0)
+    return LLVMBuildFDiv(cg->builder, lf, rf, "fdiv");
+  return NULL;
+}
+
+LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
+                             expr_t *e) {
+  if (!e)
+    return LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), 0.0);
+  LLVMTypeRef f64_ty = LLVMDoubleTypeInContext(cg->ctx);
+
+  switch (e->kind) {
+  case NY_E_LITERAL:
+    if (e->as.literal.kind == NY_LIT_FLOAT) {
+      double d = e->as.literal.as.f;
+      if (e->as.literal.hint == NY_LIT_HINT_F32)
+        d = (double)(float)d;
+      return LLVMConstReal(f64_ty, d);
+    }
+    if (e->as.literal.kind == NY_LIT_INT) {
+      return LLVMConstReal(f64_ty, (double)e->as.literal.as.i);
+    }
+    break;
+  case NY_E_IDENT: {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
+                                   e->as.ident.hash);
+    if (b && b->is_f64_slot) {
+      b->is_used = true;
+      return b->is_slot
+                 ? LLVMBuildLoad2(cg->builder, cg->type_f64, b->value, "f64_ld")
+                 : b->value;
+    }
+
+    if (b && b->type_name && strcmp(b->type_name, "int") == 0) {
+      b->is_used = true;
+      LLVMValueRef tagged =
+          b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "")
+                     : b->value;
+      return LLVMBuildSIToFP(cg->builder, ny_untag_int(cg, tagged), f64_ty,
+                             "i2f");
+    }
+    break;
+  }
+  case NY_E_BINARY: {
+    const char *op = e->as.binary.op;
+    if (!ny_is_f64_arith_op(op))
+      break;
+    // Fast path: Recursively generate operands as f64.
+    // Falls back to gen_expr + unbox if operands are not float-like.
+    LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.left);
+    LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.right);
+    return ny_emit_f64_op(cg, op, lf, rf);
+  }
+  case NY_E_CALL: {
+    if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
+      const char *fn_name = e->as.call.callee->as.ident.name;
+      if (fn_name) {
+        fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
+        if (sig && sig->return_type && strcmp(sig->return_type, "f64") == 0) {
+          LLVMValueRef call_result = gen_call_expr(cg, scopes, depth, e);
+          LLVMValueRef ptr = LLVMBuildIntToPtr(
+              cg->builder, call_result, LLVMPointerType(cg->type_f64, 0), "");
+          return LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64_call");
+        }
+      }
+    }
+    break;
+  }
+  default:
+    break;
+  }
+  // Fallback: generate as i64, then convert to f64
+  LLVMValueRef v = gen_expr(cg, scopes, depth, e);
+  // Shallow check for float type to avoid expensive infer_expr_type in hot
+  // path. identifiers with is_f64_slot are definitely floats.
+  if (e->kind == NY_E_IDENT) {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
+                                   e->as.ident.hash);
+    if (b && b->is_f64_slot) {
+      LLVMValueRef ptr =
+          LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(f64_ty, 0), "");
+      return LLVMBuildLoad2(cg->builder, f64_ty, ptr, "f64_load");
+    }
+  }
+  // Unknown type: safe unbox (handles both int and float, adds branches)
+  return ny_unbox_float(cg, v);
+}
+
 LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
 
   // Check for dead code - don't generate instructions if block is terminated
@@ -1788,11 +1981,24 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
                                    e->as.ident.hash);
     if (b) {
       b->is_used = true;
+      if (b->is_f64_slot || b->is_f64_direct) {
+        LLVMValueRef fv = b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_f64,
+                                                      b->value, "f64_ld")
+                                     : b->value;
+        fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
+        if (box_sig)
+          return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
+                                (LLVMValueRef[]){LLVMBuildBitCast(
+                                    cg->builder, fv, cg->type_i64, "")},
+                                1, "box");
+      }
+
       if (b->is_slot) {
         return LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "");
       }
       return b->value;
     }
+
     binding *gb = lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
     if (gb) {
       gb->is_used = true;
@@ -1828,10 +2034,59 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_expr_unary(cg, scopes, depth, e);
   }
   case NY_E_BINARY: {
-    LLVMValueRef l = gen_expr(cg, scopes, depth, e->as.binary.left);
-    LLVMValueRef r = gen_expr(cg, scopes, depth, e->as.binary.right);
+    const char *op = e->as.binary.op;
+    expr_t *le = e->as.binary.left, *re = e->as.binary.right;
+
+    // Fast path for arithmetic and comparison of known floats.
+    // Avoids boxing of intermediate results in expressions like (x*x + y*y).
+    bool is_arith = ny_is_f64_arith_op(op);
+    bool is_cmp = (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                   strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
+                   strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
+
+    if (is_arith || is_cmp) {
+      if (ny_is_f64_like(cg, scopes, depth, le) ||
+          ny_is_f64_like(cg, scopes, depth, re)) {
+        ny_dbg_loc(cg, e->tok);
+        LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, le);
+        LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
+
+        if (is_arith) {
+          LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf);
+          fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
+          if (box_sig) {
+            return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
+                                  (LLVMValueRef[]){LLVMBuildBitCast(
+                                      cg->builder, res, cg->type_i64, "")},
+                                  1, "box");
+          }
+        } else {
+          LLVMRealPredicate pred = LLVMRealOEQ;
+          if (strcmp(op, "<") == 0)
+            pred = LLVMRealOLT;
+          else if (strcmp(op, "<=") == 0)
+            pred = LLVMRealOLE;
+          else if (strcmp(op, ">") == 0)
+            pred = LLVMRealOGT;
+          else if (strcmp(op, ">=") == 0)
+            pred = LLVMRealOGE;
+          else if (strcmp(op, "==") == 0)
+            pred = LLVMRealOEQ;
+          else if (strcmp(op, "!=") == 0)
+            pred = LLVMRealUNE;
+
+          LLVMValueRef cmp = LLVMBuildFCmp(cg->builder, pred, lf, rf, "fcmp");
+          return LLVMBuildSelect(
+              cg->builder, cmp, LLVMConstInt(cg->type_i64, 2, false),
+              LLVMConstInt(cg->type_i64, 4, false), "tag_bool");
+        }
+      }
+    }
+
+    LLVMValueRef l = gen_expr(cg, scopes, depth, le);
+    LLVMValueRef r = gen_expr(cg, scopes, depth, re);
     ny_dbg_loc(cg, e->tok);
-    return gen_binary(cg, e->as.binary.op, l, r);
+    return gen_binary(cg, scopes, depth, op, l, r, le, re);
   }
   case NY_E_CALL:
   case NY_E_MEMCALL:

@@ -1,5 +1,5 @@
 ;; Keywords: util counter
-;; Util Counter module.
+;; Util Counter for Nytrix
 
 module std.util.counter (
    counter, counter_add, most_common

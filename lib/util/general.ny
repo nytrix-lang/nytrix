@@ -1,5 +1,5 @@
 ;; Keywords: util general
-;; General utility module.
+;; General utility for Nytrix
 
 module std.util.general (
    uuid

@@ -82,6 +82,8 @@ typedef enum token_kind {
   NY_T_QUESTION,
   NY_T_AT,
   NY_T_HASH,
+  NY_T_PLUS_PLUS,
+  NY_T_MINUS_MINUS,
   NY_T_ERROR,
 } token_kind;
 typedef struct token_t {

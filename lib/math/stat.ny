@@ -1,5 +1,5 @@
 ;; Keywords: math stat
-;; Math Stat module.
+;; Math Stat for Nytrix
 
 module std.math.stat (
    sum, mean, median

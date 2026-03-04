@@ -274,6 +274,10 @@ const char *parser_token_name(token_kind k) {
     return "?";
   case NY_T_AT:
     return "@";
+  case NY_T_PLUS_PLUS:
+    return "++";
+  case NY_T_MINUS_MINUS:
+    return "--";
   default:
     return "unknown";
   }

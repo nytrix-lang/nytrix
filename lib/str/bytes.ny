@@ -1,5 +1,5 @@
 ;; Keywords: str bytes
-;; Bytes module.
+;; Bytes for Nytrix
 
 module std.str.bytes (
    bytes, bytes_set, bytes_get, bytes_len

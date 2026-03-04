@@ -267,6 +267,15 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
       mark_simple_flag_attr(cg, fn_stmt, attr, "@pure", &is_pure);
       continue;
     }
+    if (attr_name_eq(attr, "inline")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@inline", &decl->attr_inline);
+      continue;
+    }
+    if (attr_name_eq(attr, "noinline")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@noinline",
+                            &decl->attr_noinline);
+      continue;
+    }
     if (attr_name_eq(attr, "extern")) {
       is_extern = true;
       if (attr->args.len > 0) {
@@ -275,6 +284,53 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
           link_name = arg->as.literal.as.s.data;
         }
       }
+      continue;
+    }
+    if (attr_name_eq(attr, "readnone")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@readnone",
+                            &decl->attr_readnone);
+      continue;
+    }
+    if (attr_name_eq(attr, "readonly")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@readonly",
+                            &decl->attr_readonly);
+      continue;
+    }
+    if (attr_name_eq(attr, "writeonly")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@writeonly",
+                            &decl->attr_writeonly);
+      continue;
+    }
+    if (attr_name_eq(attr, "argmemonly")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@argmemonly",
+                            &decl->attr_argmemonly);
+      continue;
+    }
+    if (attr_name_eq(attr, "nounwind")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@nounwind",
+                            &decl->attr_nounwind);
+      continue;
+    }
+    if (attr_name_eq(attr, "mustprogress")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@mustprogress",
+                            &decl->attr_mustprogress);
+      continue;
+    }
+    if (attr_name_eq(attr, "willreturn")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@willreturn",
+                            &decl->attr_willreturn);
+      continue;
+    }
+    if (attr_name_eq(attr, "cold")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@cold", &decl->attr_cold);
+      continue;
+    }
+    if (attr_name_eq(attr, "hot")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@hot", &decl->attr_hot);
+      continue;
+    }
+    if (attr_name_eq(attr, "flatten")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@flatten", &decl->attr_flatten);
       continue;
     }
     if (attr_name_eq(attr, "effects")) {
@@ -310,10 +366,22 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   if (is_pure) {
     decl->effect_contract_known = true;
     decl->effect_contract_mask = NY_FX_NONE;
+    decl->attr_readnone = true;
+    decl->attr_nounwind = true;
+    decl->attr_willreturn = true;
+    decl->attr_mustprogress = true;
   } else {
     decl->effect_contract_known = has_effect_contract;
     decl->effect_contract_mask =
         has_effect_contract ? effect_contract_mask : NY_FX_ALL;
+  }
+  if (decl->attr_jit) {
+    decl->attr_inline = true;
+    decl->attr_hot = true;
+  }
+  if (decl->attr_thread) {
+    decl->attr_noinline = true;
+    decl->attr_cold = true;
   }
   decl->attrs_resolved = true;
 }
@@ -335,6 +403,36 @@ static void apply_fn_attrs(codegen_t *cg, LLVMValueRef fn,
     add_fn_enum_attr(cg, fn, "noinline", 0);
     add_fn_enum_attr(cg, fn, "cold", 0);
   }
+  if (decl->attr_inline && decl->attr_noinline) {
+    ny_diag_error(fn_stmt->tok,
+                  "conflicting attributes '@inline' and '@noinline'");
+    cg->had_error = 1;
+  } else if (decl->attr_inline) {
+    add_fn_enum_attr(cg, fn, "alwaysinline", 0);
+  } else if (decl->attr_noinline) {
+    add_fn_enum_attr(cg, fn, "noinline", 0);
+  }
+
+  if (decl->attr_readnone)
+    add_fn_enum_attr(cg, fn, "readnone", 0);
+  if (decl->attr_readonly)
+    add_fn_enum_attr(cg, fn, "readonly", 0);
+  if (decl->attr_writeonly)
+    add_fn_enum_attr(cg, fn, "writeonly", 0);
+  if (decl->attr_argmemonly)
+    add_fn_enum_attr(cg, fn, "argmemonly", 0);
+  if (decl->attr_nounwind)
+    add_fn_enum_attr(cg, fn, "nounwind", 0);
+  if (decl->attr_mustprogress)
+    add_fn_enum_attr(cg, fn, "mustprogress", 0);
+  if (decl->attr_willreturn)
+    add_fn_enum_attr(cg, fn, "willreturn", 0);
+  if (decl->attr_cold)
+    add_fn_enum_attr(cg, fn, "cold", 0);
+  if (decl->attr_hot)
+    add_fn_enum_attr(cg, fn, "hot", 0);
+  if (decl->attr_flatten)
+    add_fn_enum_attr(cg, fn, "flatten", 0);
   for (size_t i = 0; i < fn_stmt->attributes.len; i++) {
     const attribute_t *attr = &fn_stmt->attributes.data[i];
     if (!attr_name_eq(attr, "llvm"))
@@ -639,6 +737,12 @@ static void collect_assigned_names_stmt(stmt_t *s,
                                 out_bloom);
     collect_assigned_names_stmt(s->as.whl.body, out_names, out_hashes,
                                 out_bloom);
+    if (s->as.whl.update)
+      collect_assigned_names_stmt(s->as.whl.update, out_names, out_hashes,
+                                  out_bloom);
+    if (s->as.whl.init)
+      collect_assigned_names_stmt(s->as.whl.init, out_names, out_hashes,
+                                  out_bloom);
     break;
   case NY_S_FOR:
     collect_assigned_names_expr(s->as.fr.iterable, out_names, out_hashes,
@@ -681,6 +785,646 @@ static void collect_assigned_names_stmt(stmt_t *s,
   default:
     break;
   }
+}
+
+typedef struct {
+  const char **names;
+  const char **types;
+  int count;
+} type_env_t;
+
+static const char *env_lookup(const type_env_t *env, const char *name) {
+  if (!env || !name)
+    return NULL;
+  for (int i = 0; i < env->count; i++)
+    if (env->names[i] && env->types[i] && strcmp(name, env->names[i]) == 0)
+      return env->types[i];
+  return NULL;
+}
+
+static const char *ast_infer_type(expr_t *e, const type_env_t *env) {
+  if (!e)
+    return NULL;
+  if (e->kind == NY_E_LITERAL) {
+    if (e->as.literal.kind == NY_LIT_FLOAT)
+      return "f64";
+    if (e->as.literal.kind == NY_LIT_INT)
+      return "int";
+    return NULL;
+  }
+  if (e->kind == NY_E_IDENT)
+    return env_lookup(env, e->as.ident.name);
+  if (e->kind == NY_E_UNARY)
+    return ast_infer_type(e->as.unary.right, env);
+  if (e->kind == NY_E_BINARY) {
+    const char *lt = ast_infer_type(e->as.binary.left, env);
+    const char *rt = ast_infer_type(e->as.binary.right, env);
+    bool lf = lt && strcmp(lt, "f64") == 0;
+    bool rf = rt && strcmp(rt, "f64") == 0;
+    if (lf || rf)
+      return "f64";
+    bool li = lt && strcmp(lt, "int") == 0;
+    bool ri = rt && strcmp(rt, "int") == 0;
+    if (li && ri)
+      return "int";
+    return NULL;
+  }
+  return NULL;
+}
+
+static void mark_expr_params(expr_t *e, type_env_t *env,
+                             const char **param_names, const char **param_types,
+                             int nparam) {
+  if (!e)
+    return;
+  if (e->kind == NY_E_BINARY) {
+    const char *lt = ast_infer_type(e->as.binary.left, env);
+    const char *rt = ast_infer_type(e->as.binary.right, env);
+    bool lf = lt && strcmp(lt, "f64") == 0;
+    bool rf = rt && strcmp(rt, "f64") == 0;
+    const char *op = e->as.binary.op;
+    bool is_arith = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                    strcmp(op, "*") == 0 || strcmp(op, "/") == 0;
+    bool li = lt && strcmp(lt, "int") == 0;
+    bool ri = rt && strcmp(rt, "int") == 0;
+    bool is_bitwise = strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+                      strcmp(op, "^") == 0 || strcmp(op, "<<") == 0 ||
+                      strcmp(op, ">>") == 0;
+
+    bool is_cmp = strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                  strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
+                  strcmp(op, "==") == 0 || strcmp(op, "!=") == 0;
+    bool is_mod = strcmp(op, "%") == 0;
+    const char *inferred = NULL;
+    if ((lf || rf) && is_arith)
+      inferred = "f64";
+    else if ((li || ri) && (is_bitwise || is_arith || is_cmp || is_mod) &&
+             !(lf || rf))
+      inferred = "int";
+
+    if (inferred) {
+      for (int side = 0; side < 2; side++) {
+        expr_t *other = side == 0 ? e->as.binary.right : e->as.binary.left;
+        if (other && other->kind == NY_E_IDENT) {
+          const char *oname = other->as.ident.name;
+          for (int i = 0; i < nparam; i++) {
+            if (param_names[i] && strcmp(oname, param_names[i]) == 0) {
+              if (!param_types[i])
+                param_types[i] = inferred;
+              break;
+            }
+          }
+          // Propagate to env (local vars) — both f64 and int are safe
+          bool found = false;
+          for (int k = 0; k < env->count; k++) {
+            if (strcmp(env->names[k], oname) == 0) {
+              if (!env->types[k])
+                env->types[k] = inferred;
+              found = true;
+              break;
+            }
+          }
+          if (!found && env->count < 64) {
+            env->names[env->count] = oname;
+            env->types[env->count] = inferred;
+            env->count++;
+          }
+        }
+      }
+    }
+    mark_expr_params(e->as.binary.left, env, param_names, param_types, nparam);
+    mark_expr_params(e->as.binary.right, env, param_names, param_types, nparam);
+    return;
+  }
+  if (e->kind == NY_E_LOGICAL) {
+    mark_expr_params(e->as.logical.left, env, param_names, param_types, nparam);
+    mark_expr_params(e->as.logical.right, env, param_names, param_types,
+                     nparam);
+    return;
+  }
+  if (e->kind == NY_E_UNARY) {
+    mark_expr_params(e->as.unary.right, env, param_names, param_types, nparam);
+    return;
+  }
+  if (e->kind == NY_E_CALL) {
+    for (size_t i = 0; i < e->as.call.args.len; i++)
+      mark_expr_params(e->as.call.args.data[i].val, env, param_names,
+                       param_types, nparam);
+    return;
+  }
+}
+
+static void scan_body_for_param_types(stmt_t *body, type_env_t *env,
+                                      const char **param_names,
+                                      const char **param_types, int nparam) {
+  if (!body)
+    return;
+  if (body->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < body->as.block.body.len; i++)
+      scan_body_for_param_types(body->as.block.body.data[i], env, param_names,
+                                param_types, nparam);
+    return;
+  }
+  if (body->kind == NY_S_VAR) {
+    for (size_t i = 0; i < body->as.var.names.len; i++) {
+      expr_t *init =
+          (i < body->as.var.exprs.len) ? body->as.var.exprs.data[i] : NULL;
+      if (init) {
+        mark_expr_params(init, env, param_names, param_types, nparam);
+        const char *t = ast_infer_type(init, env);
+
+        // If this is an assignment to a parameter, update its type
+        for (int j = 0; j < nparam; j++) {
+          if (param_names[j] &&
+              strcmp(body->as.var.names.data[i], param_names[j]) == 0) {
+            if (t) {
+              if (strcmp(t, "f64") == 0)
+                param_types[j] = "f64";
+              else if (!param_types[j])
+                param_types[j] = t;
+            }
+          }
+        }
+
+        if (t && env->count < 64) {
+          bool found = false;
+          for (int k = 0; k < env->count; k++) {
+            if (strcmp(env->names[k], body->as.var.names.data[i]) == 0) {
+              env->types[k] = t;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            env->names[env->count] = body->as.var.names.data[i];
+            env->types[env->count] = t;
+            env->count++;
+          }
+        }
+
+        // Reverse propagation: If LHS has a type in env, and RHS is a param,
+        // give param that type.
+        if (init->kind == NY_E_IDENT) {
+          const char *lhs_type = NULL;
+          for (int k = 0; k < env->count; k++) {
+            if (strcmp(env->names[k], body->as.var.names.data[i]) == 0) {
+              lhs_type = env->types[k];
+              break;
+            }
+          }
+          if (lhs_type) {
+            for (int j = 0; j < nparam; j++) {
+              if (param_names[j] &&
+                  strcmp(init->as.ident.name, param_names[j]) == 0) {
+                if (!param_types[j])
+                  param_types[j] = lhs_type;
+              }
+            }
+          }
+        }
+      }
+    }
+    return;
+  }
+  if (body->kind == NY_S_EXPR) {
+    mark_expr_params(body->as.expr.expr, env, param_names, param_types, nparam);
+    return;
+  }
+  if (body->kind == NY_S_WHILE) {
+    mark_expr_params(body->as.whl.test, env, param_names, param_types, nparam);
+    scan_body_for_param_types(body->as.whl.body, env, param_names, param_types,
+                              nparam);
+    if (body->as.whl.update)
+      scan_body_for_param_types(body->as.whl.update, env, param_names,
+                                param_types, nparam);
+    if (body->as.whl.init)
+      scan_body_for_param_types(body->as.whl.init, env, param_names,
+                                param_types, nparam);
+    return;
+  }
+  if (body->kind == NY_S_IF) {
+    mark_expr_params(body->as.iff.test, env, param_names, param_types, nparam);
+    scan_body_for_param_types(body->as.iff.conseq, env, param_names,
+                              param_types, nparam);
+    scan_body_for_param_types(body->as.iff.alt, env, param_names, param_types,
+                              nparam);
+    return;
+  }
+  if (body->kind == NY_S_FOR) {
+    mark_expr_params(body->as.fr.iterable, env, param_names, param_types,
+                     nparam);
+    scan_body_for_param_types(body->as.fr.body, env, param_names, param_types,
+                              nparam);
+    return;
+  }
+  if (body->kind == NY_S_TRY) {
+    scan_body_for_param_types(body->as.tr.body, env, param_names, param_types,
+                              nparam);
+    scan_body_for_param_types(body->as.tr.handler, env, param_names,
+                              param_types, nparam);
+    return;
+  }
+  if (body->kind == NY_S_DEFER) {
+    scan_body_for_param_types(body->as.de.body, env, param_names, param_types,
+                              nparam);
+    return;
+  }
+  if (body->kind == NY_S_MATCH) {
+    mark_expr_params(body->as.match.test, env, param_names, param_types,
+                     nparam);
+    for (size_t i = 0; i < body->as.match.arms.len; i++)
+      scan_body_for_param_types(body->as.match.arms.data[i].conseq, env,
+                                param_names, param_types, nparam);
+    if (body->as.match.default_conseq)
+      scan_body_for_param_types(body->as.match.default_conseq, env, param_names,
+                                param_types, nparam);
+    return;
+  }
+  if (body->kind == NY_S_RETURN) {
+    mark_expr_params(body->as.ret.value, env, param_names, param_types, nparam);
+    return;
+  }
+}
+
+// Check if a param name appears as argument to float(), store32_f32(),
+// or other float-consuming calls.
+static void scan_float_usage_expr(expr_t *e, const char **pnames,
+                                  bool *used_float, int np) {
+  if (!e)
+    return;
+  if (e->kind == NY_E_CALL) {
+    // Check if this is float(param) or store32_f32(..., param, ...)
+    expr_t *callee = e->as.call.callee;
+    bool is_float_fn = false;
+    if (callee && callee->kind == NY_E_IDENT) {
+      const char *fn_name = callee->as.ident.name;
+      is_float_fn =
+          (strcmp(fn_name, "float") == 0 || strcmp(fn_name, "to_float") == 0 ||
+           strcmp(fn_name, "store32_f32") == 0 ||
+           strcmp(fn_name, "store64_f64") == 0 ||
+           strcmp(fn_name, "is_int") == 0 || strcmp(fn_name, "is_float") == 0 ||
+           strcmp(fn_name, "is_str") == 0 || strcmp(fn_name, "is_dict") == 0 ||
+           strcmp(fn_name, "is_list") == 0 || strcmp(fn_name, "type_of") == 0);
+    }
+    if (is_float_fn) {
+      for (size_t a = 0; a < e->as.call.args.len; a++) {
+        expr_t *arg = e->as.call.args.data[a].val;
+        if (arg && arg->kind == NY_E_IDENT) {
+          for (int i = 0; i < np; i++) {
+            if (pnames[i] && strcmp(arg->as.ident.name, pnames[i]) == 0)
+              used_float[i] = true;
+          }
+        }
+      }
+    }
+    for (size_t a = 0; a < e->as.call.args.len; a++)
+      scan_float_usage_expr(e->as.call.args.data[a].val, pnames, used_float,
+                            np);
+    return;
+  }
+  if (e->kind == NY_E_BINARY) {
+    scan_float_usage_expr(e->as.binary.left, pnames, used_float, np);
+    scan_float_usage_expr(e->as.binary.right, pnames, used_float, np);
+    return;
+  }
+  if (e->kind == NY_E_LOGICAL) {
+    scan_float_usage_expr(e->as.logical.left, pnames, used_float, np);
+    scan_float_usage_expr(e->as.logical.right, pnames, used_float, np);
+    return;
+  }
+  if (e->kind == NY_E_UNARY) {
+    scan_float_usage_expr(e->as.unary.right, pnames, used_float, np);
+    return;
+  }
+  if (e->kind == NY_E_TERNARY) {
+    scan_float_usage_expr(e->as.ternary.cond, pnames, used_float, np);
+    scan_float_usage_expr(e->as.ternary.true_expr, pnames, used_float, np);
+    scan_float_usage_expr(e->as.ternary.false_expr, pnames, used_float, np);
+    return;
+  }
+}
+
+static void scan_float_usage(stmt_t *s, const char **pnames, bool *used_float,
+                             int np) {
+  if (!s)
+    return;
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; i++)
+      scan_float_usage(s->as.block.body.data[i], pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_EXPR) {
+    scan_float_usage_expr(s->as.expr.expr, pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_VAR) {
+    for (size_t i = 0; i < s->as.var.exprs.len; i++)
+      scan_float_usage_expr(s->as.var.exprs.data[i], pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_RETURN) {
+    scan_float_usage_expr(s->as.ret.value, pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_IF) {
+    scan_float_usage_expr(s->as.iff.test, pnames, used_float, np);
+    scan_float_usage(s->as.iff.conseq, pnames, used_float, np);
+    scan_float_usage(s->as.iff.alt, pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_WHILE) {
+    scan_float_usage_expr(s->as.whl.test, pnames, used_float, np);
+    scan_float_usage(s->as.whl.body, pnames, used_float, np);
+    if (s->as.whl.update)
+      scan_float_usage(s->as.whl.update, pnames, used_float, np);
+    if (s->as.whl.init)
+      scan_float_usage(s->as.whl.init, pnames, used_float, np);
+    return;
+  }
+  if (s->kind == NY_S_FOR) {
+    scan_float_usage_expr(s->as.fr.iterable, pnames, used_float, np);
+    scan_float_usage(s->as.fr.body, pnames, used_float, np);
+    return;
+  }
+}
+
+static bool is_numeric_fn(const char *fn_name) {
+  if (!fn_name)
+    return false;
+  // Functions that only make sense with numeric args
+  static const char *numeric_fns[] = {"abs",
+                                      "sqrt",
+                                      "sin",
+                                      "cos",
+                                      "tan",
+                                      "floor",
+                                      "ceil",
+                                      "round",
+                                      "min",
+                                      "max",
+                                      "pow",
+                                      "log",
+                                      "log2",
+                                      "log10",
+                                      "exp",
+                                      "float",
+                                      "to_float",
+                                      "int",
+                                      "to_int",
+                                      "clamp",
+                                      "fib_naive",
+                                      "fib_linear",
+                                      "fib_fast_doubling",
+                                      "fib_matrix",
+                                      "fib_fast_squaring",
+                                      NULL};
+  for (const char **p = numeric_fns; *p; p++)
+    if (strcmp(fn_name, *p) == 0)
+      return true;
+  return false;
+}
+
+static void scan_poly_usage_expr(expr_t *e, const char **pnames, bool *poly,
+                                 int np) {
+  if (!e)
+    return;
+  if (e->kind == NY_E_CALL) {
+    expr_t *callee = e->as.call.callee;
+    bool is_numeric = false;
+    if (callee && callee->kind == NY_E_IDENT)
+      is_numeric = is_numeric_fn(callee->as.ident.name);
+    // If calling a non-numeric function with a param directly as arg,
+    // mark param as potentially polymorphic
+    if (!is_numeric && callee) {
+      for (size_t a = 0; a < e->as.call.args.len; a++) {
+        expr_t *arg = e->as.call.args.data[a].val;
+        if (arg && arg->kind == NY_E_IDENT) {
+          for (int i = 0; i < np; i++) {
+            if (pnames[i] && strcmp(arg->as.ident.name, pnames[i]) == 0)
+              poly[i] = true;
+          }
+        }
+      }
+    }
+    for (size_t a = 0; a < e->as.call.args.len; a++)
+      scan_poly_usage_expr(e->as.call.args.data[a].val, pnames, poly, np);
+    return;
+  }
+  if (e->kind == NY_E_BINARY) {
+    scan_poly_usage_expr(e->as.binary.left, pnames, poly, np);
+    scan_poly_usage_expr(e->as.binary.right, pnames, poly, np);
+    return;
+  }
+  if (e->kind == NY_E_LOGICAL) {
+    scan_poly_usage_expr(e->as.logical.left, pnames, poly, np);
+    scan_poly_usage_expr(e->as.logical.right, pnames, poly, np);
+    return;
+  }
+  if (e->kind == NY_E_UNARY) {
+    scan_poly_usage_expr(e->as.unary.right, pnames, poly, np);
+    return;
+  }
+  if (e->kind == NY_E_TERNARY) {
+    scan_poly_usage_expr(e->as.ternary.cond, pnames, poly, np);
+    scan_poly_usage_expr(e->as.ternary.true_expr, pnames, poly, np);
+    scan_poly_usage_expr(e->as.ternary.false_expr, pnames, poly, np);
+    return;
+  }
+  // Index access: param[x] or x[param] indicates non-int usage
+  if (e->kind == NY_E_INDEX) {
+    expr_t *obj = e->as.index.target;
+    if (obj && obj->kind == NY_E_IDENT) {
+      for (int i = 0; i < np; i++) {
+        if (pnames[i] && strcmp(obj->as.ident.name, pnames[i]) == 0)
+          poly[i] = true;
+      }
+    }
+    scan_poly_usage_expr(e->as.index.target, pnames, poly, np);
+    scan_poly_usage_expr(e->as.index.start, pnames, poly, np);
+    return;
+  }
+  if (e->kind == NY_E_MEMBER) {
+    expr_t *obj = e->as.member.target;
+    if (obj && obj->kind == NY_E_IDENT) {
+      for (int i = 0; i < np; i++) {
+        if (pnames[i] && strcmp(obj->as.ident.name, pnames[i]) == 0)
+          poly[i] = true;
+      }
+    }
+    scan_poly_usage_expr(e->as.member.target, pnames, poly, np);
+    return;
+  }
+}
+
+static void scan_poly_usage(stmt_t *s, const char **pnames, bool *poly,
+                            int np) {
+  if (!s)
+    return;
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; i++)
+      scan_poly_usage(s->as.block.body.data[i], pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_EXPR) {
+    scan_poly_usage_expr(s->as.expr.expr, pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_VAR) {
+    for (size_t i = 0; i < s->as.var.exprs.len; i++)
+      scan_poly_usage_expr(s->as.var.exprs.data[i], pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_RETURN) {
+    scan_poly_usage_expr(s->as.ret.value, pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_IF) {
+    scan_poly_usage_expr(s->as.iff.test, pnames, poly, np);
+    scan_poly_usage(s->as.iff.conseq, pnames, poly, np);
+    scan_poly_usage(s->as.iff.alt, pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_WHILE) {
+    scan_poly_usage_expr(s->as.whl.test, pnames, poly, np);
+    scan_poly_usage(s->as.whl.body, pnames, poly, np);
+    if (s->as.whl.update)
+      scan_poly_usage(s->as.whl.update, pnames, poly, np);
+    if (s->as.whl.init)
+      scan_poly_usage(s->as.whl.init, pnames, poly, np);
+    return;
+  }
+  if (s->kind == NY_S_FOR) {
+    scan_poly_usage_expr(s->as.fr.iterable, pnames, poly, np);
+    scan_poly_usage(s->as.fr.body, pnames, poly, np);
+    return;
+  }
+}
+
+static void infer_param_types(stmt_t *fn, const char **param_types) {
+  int nparam = (int)fn->as.fn.params.len;
+  if (nparam == 0 || nparam > 16)
+    return;
+  // Skip int inference for stdlib functions (they're typically polymorphic)
+  bool is_stdlib = ny_is_stdlib_tok(fn->tok);
+  if (!is_stdlib && fn->tok.filename) {
+    is_stdlib = strstr(fn->tok.filename, "nytrix/lib/") != NULL ||
+                strstr(fn->tok.filename, "nytrix\\lib\\") != NULL;
+  }
+  if (is_stdlib) {
+    for (int i = 0; i < nparam; i++)
+      param_types[i] = fn->as.fn.params.data[i].type;
+    return;
+  }
+  const char *param_names[16];
+  for (int i = 0; i < nparam; i++) {
+    param_names[i] = fn->as.fn.params.data[i].name;
+    param_types[i] = fn->as.fn.params.data[i].type;
+  }
+  const char *env_names[64];
+  const char *env_types[64];
+  type_env_t env = {env_names, env_types, 0};
+  for (int i = 0; i < nparam; i++) {
+    if (param_types[i]) {
+      env.names[env.count] = param_names[i];
+      env.types[env.count] = param_types[i];
+      env.count++;
+    }
+  }
+  // Multiple passes: each pass propagates types further (local vars → params)
+  for (int pass = 0; pass < 3; pass++)
+    scan_body_for_param_types(fn->as.fn.body, &env, param_names, param_types,
+                              nparam);
+  // Safety: clear int inference for params used in float or polymorphic
+  // contexts
+  bool param_used_as_float[16] = {0};
+  bool param_used_poly[16] = {0};
+  scan_float_usage(fn->as.fn.body, param_names, param_used_as_float, nparam);
+  scan_poly_usage(fn->as.fn.body, param_names, param_used_poly, nparam);
+  for (int i = 0; i < nparam; i++) {
+    if (param_types[i] && strcmp(param_types[i], "int") == 0 &&
+        !fn->as.fn.params.data[i].type) {
+      if (param_used_as_float[i] || param_used_poly[i])
+        param_types[i] = NULL;
+      expr_t *dv = fn->as.fn.params.data[i].def;
+      if (dv && dv->kind == NY_E_LITERAL && dv->as.literal.kind == NY_LIT_FLOAT)
+        param_types[i] = NULL;
+    }
+  }
+}
+
+static const char *infer_return_type_walk(stmt_t *body, const type_env_t *env,
+                                          const char *cur) {
+  if (!body)
+    return cur;
+  if (body->kind == NY_S_RETURN) {
+    const char *t =
+        body->as.ret.value ? ast_infer_type(body->as.ret.value, env) : NULL;
+    if (!t)
+      return cur;
+    if (!cur)
+      return t;
+    if (strcmp(cur, t) != 0)
+      return "?";
+    return cur;
+  }
+  if (body->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < body->as.block.body.len; i++) {
+      cur = infer_return_type_walk(body->as.block.body.data[i], env, cur);
+      if (cur && cur[0] == '?')
+        return cur;
+    }
+    return cur;
+  }
+  if (body->kind == NY_S_IF) {
+    cur = infer_return_type_walk(body->as.iff.conseq, env, cur);
+    if (cur && cur[0] == '?')
+      return cur;
+    cur = infer_return_type_walk(body->as.iff.alt, env, cur);
+    return cur;
+  }
+  if (body->kind == NY_S_WHILE) {
+    const char *r = infer_return_type_walk(body->as.whl.body, env, cur);
+    if (r)
+      return r;
+    if (body->as.whl.update)
+      r = infer_return_type_walk(body->as.whl.update, env, cur);
+    return r;
+  }
+  if (body->kind == NY_S_FOR) {
+    return infer_return_type_walk(body->as.fr.body, env, cur);
+  }
+  return cur;
+}
+
+static const char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
+  if (fn->as.fn.return_type)
+    return NULL;
+  int nparam = (int)fn->as.fn.params.len;
+  if (nparam > 16)
+    return NULL;
+  bool is_stdlib = ny_is_stdlib_tok(fn->tok);
+  if (!is_stdlib && fn->tok.filename) {
+    is_stdlib = strstr(fn->tok.filename, "nytrix/lib/") != NULL ||
+                strstr(fn->tok.filename, "nytrix\\lib\\") != NULL;
+  }
+  if (is_stdlib)
+    return NULL;
+  const char *env_names[16];
+  const char *env_types[16];
+  type_env_t env = {env_names, env_types, 0};
+  for (int i = 0; i < nparam; i++) {
+    const char *t =
+        param_types[i] ? param_types[i] : fn->as.fn.params.data[i].type;
+    if (t) {
+      env.names[env.count] = fn->as.fn.params.data[i].name;
+      env.types[env.count] = t;
+      env.count++;
+    }
+  }
+  const char *ret = infer_return_type_walk(fn->as.fn.body, &env, NULL);
+  if (ret && ret[0] != '?')
+    return ret;
+  return NULL;
 }
 
 void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
@@ -809,31 +1553,95 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
         scopes[fd].vars.data[scopes[fd].vars.len - 1].is_used = true;
       }
     }
+    const char *inferred_types[16] = {0};
+    if (fn->as.fn.params.len <= 16)
+      infer_param_types(fn, inferred_types);
+    static int debug_infer = -1;
+    if (debug_infer < 0)
+      debug_infer = (getenv("NYTRIX_DEBUG_INFER") != NULL);
+    if (debug_infer) {
+      for (size_t di = 0; di < fn->as.fn.params.len && di < 16; di++) {
+        if (inferred_types[di] && !fn->as.fn.params.data[di].type)
+          fprintf(stderr, "[INFER] %s param[%zu] '%s' -> %s (%s)\n", name, di,
+                  fn->as.fn.params.data[di].name, inferred_types[di],
+                  fn->tok.filename ? fn->tok.filename : "<null>");
+      }
+    }
     unsigned actual_params = LLVMCountParams(f);
     for (size_t i = 0; i < fn->as.fn.params.len; i++) {
       const char *param_name = fn->as.fn.params.data[i].name;
       unsigned param_idx = (unsigned)(i + param_offset);
       LLVMValueRef param_val =
           (param_idx < actual_params) ? LLVMGetParam(f, param_idx) : NULL;
+      if (param_val && fn->as.fn.params.data[i].type != NULL &&
+          !ny_type_is_tagged(fn->as.fn.params.data[i].type)) {
+        LLVMTypeRef pllty = LLVMTypeOf(param_val);
+        LLVMTypeKind pk = LLVMGetTypeKind(pllty);
+        if (pk == LLVMDoubleTypeKind || pk == LLVMFloatTypeKind) {
+          LLVMValueRef f64val = param_val;
+          if (pk == LLVMFloatTypeKind)
+            f64val = LLVMBuildFPExt(cg->builder, param_val, cg->type_f64, "");
+          LLVMValueRef bits =
+              LLVMBuildBitCast(cg->builder, f64val, cg->type_i64, "");
+          fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
+          if (box_sig) {
+            param_val = LLVMBuildCall2(cg->builder, box_sig->type,
+                                       box_sig->value, &bits, 1, "");
+          } else {
+            param_val = bits;
+          }
+        } else if (pk == LLVMPointerTypeKind) {
+          param_val =
+              LLVMBuildPtrToInt(cg->builder, param_val, cg->type_i64, "");
+        } else if (pk == LLVMIntegerTypeKind) {
+          unsigned w = LLVMGetIntTypeWidth(pllty);
+          if (w < 64)
+            param_val = LLVMBuildSExt(cg->builder, param_val, cg->type_i64, "");
+          param_val = ny_tag_int(cg, param_val);
+        }
+      }
+      bool is_inferred_f64 = !fn->as.fn.params.data[i].type && i < 16 &&
+                             inferred_types[i] &&
+                             strcmp(inferred_types[i], "f64") == 0;
+      bool is_inferred_int = !fn->as.fn.params.data[i].type && i < 16 &&
+                             inferred_types[i] &&
+                             strcmp(inferred_types[i], "int") == 0;
       bool needs_slot =
           !use_assigned_prepass ||
           assigned_name_contains(&assigned_names, &assigned_hashes,
                                  assigned_bloom, param_name);
-      if (needs_slot) {
+      if (is_inferred_f64 && param_val) {
+        LLVMValueRef f64v = ny_unbox_float(cg, param_val);
+        if (needs_slot) {
+          LLVMValueRef slot = build_alloca(cg, param_name, cg->type_f64);
+          LLVMBuildStore(cg->builder, f64v, slot);
+          scope_bind(cg, scopes, fd, param_name, slot, fn, true, "f64", true);
+          binding *b = &scopes[fd].vars.data[scopes[fd].vars.len - 1];
+          b->is_f64_slot = true;
+        } else {
+          scope_bind(cg, scopes, fd, param_name, f64v, fn, true, "f64", false);
+          binding *b = &scopes[fd].vars.data[scopes[fd].vars.len - 1];
+          b->is_f64_slot = true;
+        }
+      } else if (needs_slot) {
         LLVMValueRef slot = build_alloca(cg, param_name, cg->type_i64);
         if (slot && param_val) {
           LLVMBuildStore(cg->builder, param_val, slot);
         }
-        scope_bind(cg, scopes, fd, param_name, slot, fn, true,
-                   fn->as.fn.params.data[i].type, true);
+        const char *ptype = fn->as.fn.params.data[i].type;
+        if (!ptype && is_inferred_int)
+          ptype = "int";
+        scope_bind(cg, scopes, fd, param_name, slot, fn, true, ptype, true);
         if (cg->debug_symbols && cg->di_builder && slot) {
           codegen_debug_variable(cg, param_name, slot, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, true);
         }
-
       } else {
-        scope_bind(cg, scopes, fd, param_name, param_val, fn, true,
-                   fn->as.fn.params.data[i].type, false);
+        const char *ptype = fn->as.fn.params.data[i].type;
+        if (!ptype && is_inferred_int)
+          ptype = "int";
+        scope_bind(cg, scopes, fd, param_name, param_val, fn, true, ptype,
+                   false);
         if (cg->debug_symbols && cg->di_builder && param_val) {
           codegen_debug_variable(cg, param_name, param_val, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, false);
@@ -870,11 +1678,14 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   }
   const char *prev_ret = cg->current_fn_ret_type;
   bool prev_naked = cg->current_fn_attr_naked;
+  LLVMValueRef prev_fn_value = cg->current_fn_value;
   cg->current_fn_ret_type = fn->as.fn.return_type;
   cg->current_fn_attr_naked = fn->as.fn.attr_naked;
+  cg->current_fn_value = f;
   gen_stmt(cg, scopes, &fd, fn->as.fn.body, root, true);
   cg->current_fn_ret_type = prev_ret;
   cg->current_fn_attr_naked = prev_naked;
+  cg->current_fn_value = prev_fn_value;
   cg->current_module_name = prev_mod;
   if (temp_mod)
     free(temp_mod);
@@ -909,10 +1720,13 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     sema_func_t *sema_func = arena_alloc(cg->arena, sizeof(sema_func_t));
     memset(sema_func, 0, sizeof(sema_func_t));
     sema_func->resolved_return_type =
-        resolve_type_name(cg, s->as.fn.return_type, s->tok);
+        s->as.fn.return_type
+            ? resolve_abi_type_name(cg, s->as.fn.return_type, s->tok)
+            : cg->type_i64;
     for (size_t j = 0; j < s->as.fn.params.len; j++) {
+      const char *ptype = s->as.fn.params.data[j].type;
       LLVMTypeRef param_ty =
-          resolve_type_name(cg, s->as.fn.params.data[j].type, s->tok);
+          ptype ? resolve_abi_type_name(cg, ptype, s->tok) : cg->type_i64;
       vec_push_arena(cg->arena, &sema_func->resolved_param_types, param_ty);
     }
     s->sema = (void *)sema_func;
@@ -938,6 +1752,17 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     sig.link_name = s->as.fn.link_name ? ny_strdup(s->as.fn.link_name) : NULL;
     sig.return_type =
         s->as.fn.return_type ? ny_strdup(s->as.fn.return_type) : NULL;
+    {
+      const char *inferred_types[16] = {0};
+      if (!sig.return_type && s->as.fn.params.len <= 16) {
+        infer_param_types(s, inferred_types);
+        const char *inferred_ret = infer_fn_return_type(s, inferred_types);
+        sig.inferred_return_type =
+            inferred_ret ? ny_strdup(inferred_ret) : NULL;
+      } else {
+        sig.inferred_return_type = NULL;
+      }
+    }
     vec_push(&cg->fun_sigs, sig);
   } else if (s->kind == NY_S_EXTERN) {
     sema_func_t *sema_func = arena_alloc(cg->arena, sizeof(sema_func_t));

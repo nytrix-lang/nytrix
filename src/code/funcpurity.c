@@ -708,6 +708,12 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s,
   case NY_S_WHILE:
     CHECK_PURE_EXPR(s->as.whl.test);
     CHECK_PURE_STMT(s->as.whl.body);
+    if (s->as.whl.update) {
+      CHECK_PURE_STMT(s->as.whl.update);
+    }
+    if (s->as.whl.init) {
+      CHECK_PURE_STMT(s->as.whl.init);
+    }
     return true;
   case NY_S_FOR: {
     CHECK_PURE_EXPR(s->as.fr.iterable);
@@ -939,7 +945,12 @@ static bool ny_stmt_refs_params(stmt_t *s,
     return ny_expr_refs_params(s->as.whl.test, param_names, param_hashes,
                                param_bloom) ||
            ny_stmt_refs_params(s->as.whl.body, param_names, param_hashes,
-                               param_bloom);
+                               param_bloom) ||
+           (s->as.whl.update &&
+            ny_stmt_refs_params(s->as.whl.update, param_names, param_hashes,
+                                param_bloom)) ||
+           (s->as.whl.init && ny_stmt_refs_params(s->as.whl.init, param_names,
+                                                  param_hashes, param_bloom));
   case NY_S_FOR:
     return ny_expr_refs_params(s->as.fr.iterable, param_names, param_hashes,
                                param_bloom) ||
@@ -1316,6 +1327,14 @@ static void ny_collect_escape_stmt(
     ny_collect_escape_stmt(cg, s->as.whl.body, param_names, param_hashes,
                            param_bloom, local_names, local_hashes, local_bloom,
                            out);
+    if (s->as.whl.update)
+      ny_collect_escape_stmt(cg, s->as.whl.update, param_names, param_hashes,
+                             param_bloom, local_names, local_hashes,
+                             local_bloom, out);
+    if (s->as.whl.init)
+      ny_collect_escape_stmt(cg, s->as.whl.init, param_names, param_hashes,
+                             param_bloom, local_names, local_hashes,
+                             local_bloom, out);
     break;
   case NY_S_FOR: {
     ny_collect_escape_expr(cg, s->as.fr.iterable, param_names, param_hashes,
@@ -1731,6 +1750,12 @@ static void ny_collect_calls_stmt(codegen_t *cg, stmt_t *s,
                           local_bloom, out_calls);
     ny_collect_calls_stmt(cg, s->as.whl.body, local_names, local_hashes,
                           local_bloom, out_calls);
+    if (s->as.whl.update)
+      ny_collect_calls_stmt(cg, s->as.whl.update, local_names, local_hashes,
+                            local_bloom, out_calls);
+    if (s->as.whl.init)
+      ny_collect_calls_stmt(cg, s->as.whl.init, local_names, local_hashes,
+                            local_bloom, out_calls);
     break;
   case NY_S_FOR: {
     ny_collect_calls_expr(cg, s->as.fr.iterable, local_names, local_hashes,

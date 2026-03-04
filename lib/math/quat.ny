@@ -1,5 +1,5 @@
 ;; Keywords: math quaternion quat
-;; Quaternion mathematics module.
+;; Quaternion mathematics for Nytrix
 
 module std.math.quat (
    quat, quat_identity,

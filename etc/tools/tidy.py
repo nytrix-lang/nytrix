@@ -12,9 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from context import ROOT
-from utils import log, log_ok, which
+from utils import log, log_ok, which, warn
 
-import json
+import json, concurrent.futures
 
 EXTS = {".c", ".h", ".ny", ".py", ".md"}
 TAB = b"   "
@@ -253,15 +253,23 @@ def run_tidy(dirs=None):
 
     # Text normalization
     changed = 0
-    for f in eligible_fs:
-        ext = os.path.splitext(f)[1]
-        if ext in EXTS:
-            rt = (ext not in (".c", ".h"))
-            if normalize_file(f, replace_tabs=rt):
-                changed += 1
-                # Update cache info after normalization
-                st = (ROOT / f).stat()
-                new_cache[f] = {"mtime": str(st.st_mtime), "size": st.st_size}
+    if eligible_fs:
+        log("TIDY", f"normalizing {len(eligible_fs)} files...")
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            # Create a list of futures
+            futures = {executor.submit(normalize_file, f, (os.path.splitext(f)[1] not in (".c", ".h"))): f for f in eligible_fs if os.path.splitext(f)[1] in EXTS}
+            
+            # Wait for results and count changes
+            for future in concurrent.futures.as_completed(futures):
+                f = futures[future]
+                try:
+                    if future.result():
+                        changed += 1
+                        # Update cache with new stats after mutation
+                        st = (ROOT / f).stat()
+                        new_cache[f] = {"mtime": str(st.st_mtime), "size": st.st_size}
+                except Exception as e:
+                    warn(f"normalization failed for {f}: {e}")
 
     # Special case for Makefile
     if (ROOT / "Makefile").exists():

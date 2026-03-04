@@ -1,5 +1,5 @@
 ;; Keywords: str io
-;; Basic IO helpers.
+;; Basic String I/O Helpers for Nytrix
 
 module std.str.io (
    _print_write, print
@@ -95,7 +95,7 @@ if(comptime{__main()}){
    use std.core *
    use std.str.io *
 
-   _print_write("io")
+   print_write("io")
    print("test")
    assert(print() == 0, "print with no arguments")
    assert(print("hello", "world", sep=" ") == 0, "print with sep kwarg")

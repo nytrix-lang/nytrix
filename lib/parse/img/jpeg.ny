@@ -1,6 +1,10 @@
 ;; Keywords: image jpeg rfc2035
+;; JPEG Image Loader and Encoder for Nytrix
 ;; Reference:
+;; - https://jpeg.org/jpeg/index.html
 ;; - https://en.wikipedia.org/wiki/JPEG
+;; - https://www.w3.org/Graphics/JPEG/itu-t81.pdf
+;; - https://www.youtube.com/playlist?list=PLzH6n4zXuckoAod3z31QEST1ZaizBuNHh
 
 module std.image.format.jpeg (
    encode, decode
@@ -9,7 +13,7 @@ module std.image.format.jpeg (
 use std.core *
 use std.core.dict_mod *
 use std.math *
-use std.math.float as f
+use std.math.float as math_flt
 use std.parse.bin as pbin
 
 def _QY = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99]
@@ -27,23 +31,23 @@ def _ZZ = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 3
 
 fn _c_u8(v){
    "Internal helper for `c_u8` in JPEG processing."
-   if(f.flt(f.float(v), f.float(0.0))){
+   if(math_flt.flt(math_flt.float(v), math_flt.float(0.0))){
       return 0
    }
-   if(f.fgt(f.float(v), f.float(255.0))){
+   if(math_flt.fgt(math_flt.float(v), math_flt.float(255.0))){
       return 255
    }
-   return f.int(f.float(v))
+   return math_flt.int(math_flt.float(v))
 }
 
 fn _r_i(v){
    "Internal helper for `r_i` in JPEG processing."
-   def fv = f.float(v)
-   def half = f.float(0.5)
-   if(f.fgt(fv, f.float(0.0))){
-      return f.int(f.fadd(fv, half))
+   def fv = math_flt.float(v)
+   def half = math_flt.float(0.5)
+   if(math_flt.fgt(fv, math_flt.float(0.0))){
+      return math_flt.int(math_flt.fadd(fv, half))
    }
-   return f.int(f.fsub(fv, half))
+   return math_flt.int(math_flt.fsub(fv, half))
 }
 
 fn _m_hm(b, val_list){
@@ -252,30 +256,30 @@ fn _idct(cf, qt, out, off, step, plane_w){
    mut cValues = list(64)
    mut kIdx = 0
    while(kIdx < 64){
-      cValues = append(cValues, f.float(0.0))
+      cValues = append(cValues, math_flt.float(0.0))
       kIdx += 1
    }
    kIdx = 0
    while(kIdx < 64){
-      def val = f.fmul(f.float(get(cf, kIdx)), f.float(get(qt, kIdx)))
+      def val = math_flt.fmul(math_flt.float(get(cf, kIdx)), math_flt.float(get(qt, kIdx)))
       store_item(cValues, get(_ZZ, kIdx), val)
       kIdx += 1
    }
    mut tmpValues = list(64)
    mut k2 = 0
    while(k2 < 64){
-      tmpValues = append(tmpValues, f.float(0.0))
+      tmpValues = append(tmpValues, math_flt.float(0.0))
       k2 += 1
    }
    mut vIdx = 0
    while(vIdx < 8){
       mut xIdx = 0
       while(xIdx < 8){
-         mut sV = f.float(0.0)
+         mut sV = math_flt.float(0.0)
          mut uI = 0
          while(uI < 8){
-         def prod = f.fmul(get(cValues, (vIdx * 8 + uI)), f.float(get(_IDCT_T, (uI * 8 + xIdx))))
-         sV = f.fadd(sV, prod)
+         def prod = math_flt.fmul(get(cValues, (vIdx * 8 + uI)), math_flt.float(get(_IDCT_T, (uI * 8 + xIdx))))
+         sV = math_flt.fadd(sV, prod)
          uI += 1
          }
          store_item(tmpValues, (vIdx * 8 + xIdx), sV)
@@ -287,14 +291,14 @@ fn _idct(cf, qt, out, off, step, plane_w){
    while(yL < 8){
       mut xL = 0
       while(xL < 8){
-         mut sumV = f.float(0.0)
+         mut sumV = math_flt.float(0.0)
          mut jI = 0
          while(jI < 8){
-         def prod2 = f.fmul(f.float(get(_IDCT_T, (jI * 8 + yL))), get(tmpValues, (jI * 8 + xL)))
-         sumV = f.fadd(sumV, prod2)
+         def prod2 = math_flt.fmul(math_flt.float(get(_IDCT_T, (jI * 8 + yL))), get(tmpValues, (jI * 8 + xL)))
+         sumV = math_flt.fadd(sumV, prod2)
          jI += 1
          }
-         def resVal = f.fadd(f.fdiv(sumV, f.float(4.0)), f.float(128.0))
+         def resVal = math_flt.fadd(math_flt.fdiv(sumV, math_flt.float(4.0)), math_flt.float(128.0))
          def fv = _c_u8(resVal)
          mut dy = 0
          while(dy < step){
@@ -521,14 +525,14 @@ fn decode(data){
    def pix = init_str(malloc(tpx * 4 + 32) + 16, (tpx * 4))
    mut kL = 0
    while(kL < tpx){
-      def Yf = f.float(load8(cyB, kL))
-      def Cbf = f.float(load8(ccbB, kL))
-      def Crf = f.float(load8(ccrB, kL))
-      def Cr128 = f.fsub(Crf, f.float(128.0))
-      def Cb128 = f.fsub(Cbf, f.float(128.0))
-      def rP = f.fadd(Yf, f.fmul(f.float(1.402), Cr128))
-      def gP = f.fsub(f.fsub(Yf, f.fmul(f.float(0.344136), Cb128)), f.fmul(f.float(0.714136), Cr128))
-      def bP = f.fadd(Yf, f.fmul(f.float(1.772), Cb128))
+      def Yf = math_flt.float(load8(cyB, kL))
+      def Cbf = math_flt.float(load8(ccbB, kL))
+      def Crf = math_flt.float(load8(ccrB, kL))
+      def Cr128 = math_flt.fsub(Crf, math_flt.float(128.0))
+      def Cb128 = math_flt.fsub(Cbf, math_flt.float(128.0))
+      def rP = math_flt.fadd(Yf, math_flt.fmul(math_flt.float(1.402), Cr128))
+      def gP = math_flt.fsub(math_flt.fsub(Yf, math_flt.fmul(math_flt.float(0.344136), Cb128)), math_flt.fmul(math_flt.float(0.714136), Cr128))
+      def bP = math_flt.fadd(Yf, math_flt.fmul(math_flt.float(1.772), Cb128))
       store8(pix, _c_u8(rP), (kL * 4))
       store8(pix, _c_u8(gP), (kL * 4 + 1))
       store8(pix, _c_u8(bP), (kL * 4 + 2))
@@ -626,23 +630,23 @@ fn _fdct(blk, qn){
    while(vL < 8){
       mut uL = 0
       while(uL < 8){
-         mut sA = f.float(0.0)
+         mut sA = math_flt.float(0.0)
          mut yC = 0
          while(yC < 8){
          mut xC = 0
          while(xC < 8){
-               def a1 = f.fdiv(f.fmul(f.fadd(f.fmul(f.float(2.0), f.float(xC)), f.float(1.0)), f.fmul(f.float(uL), f.float(3.141592653589793))), f.float(16.0))
-               def a2 = f.fdiv(f.fmul(f.fadd(f.fmul(f.float(2.0), f.float(yC)), f.float(1.0)), f.fmul(f.float(vL), f.float(3.141592653589793))), f.float(16.0))
+               def a1 = math_flt.fdiv(math_flt.fmul(math_flt.fadd(math_flt.fmul(math_flt.float(2.0), math_flt.float(xC)), math_flt.float(1.0)), math_flt.fmul(math_flt.float(uL), math_flt.float(3.141592653589793))), math_flt.float(16.0))
+               def a2 = math_flt.fdiv(math_flt.fmul(math_flt.fadd(math_flt.fmul(math_flt.float(2.0), math_flt.float(yC)), math_flt.float(1.0)), math_flt.fmul(math_flt.float(vL), math_flt.float(3.141592653589793))), math_flt.float(16.0))
                def pV = get(blk, (yC * 8 + xC))
-               def term = f.fmul(f.float(pV), f.fmul(cos(a1), cos(a2)))
-               sA = f.fadd(sA, term)
+               def term = math_flt.fmul(math_flt.float(pV), math_flt.fmul(cos(a1), cos(a2)))
+               sA = math_flt.fadd(sA, term)
                xC += 1
          }
          yC += 1
          }
          def cu = (uL == 0) ? 0.707106 : 1.0
          def cv = (vL == 0) ? 0.707106 : 1.0
-         def resF = f.fdiv(f.fmul(f.fmul(f.fmul(f.float(0.25), f.float(cu)), f.float(cv)), sA), f.float(get(qn, (vL * 8 + uL))))
+         def resF = math_flt.fdiv(math_flt.fmul(math_flt.fmul(math_flt.fmul(math_flt.float(0.25), math_flt.float(cu)), math_flt.float(cv)), sA), math_flt.float(get(qn, (vL * 8 + uL))))
          store_item(nat, (vL * 8 + uL), _r_i(resF))
          uL += 1
       }
@@ -892,24 +896,24 @@ fn encode(img, qual=90){
                def py = ((by + yI) < hVal) ? (by + yI) : (hVal - 1)
                def po = (py * wVal + px) * chV
                def rR = load8(dataV, po)
-               mut rF = f.float(rR)
+               mut rF = math_flt.float(rR)
                mut gF = rF
                mut bF = rF
                if(chV >= 3){
-                  gF = f.float(load8(dataV, (po + 1)))
-                  bF = f.float(load8(dataV, (po + 2)))
+                  gF = math_flt.float(load8(dataV, (po + 1)))
+                  bF = math_flt.float(load8(dataV, (po + 2)))
                }
                if(chV == 4){
                   def aV_raw = load8(dataV, (po + 3))
-                  def aF = f.fdiv(f.float(aV_raw), f.float(255.0))
-                  def bg = f.fmul(f.float(255.0), f.fsub(f.float(1.0), aF))
-                  rF = f.fadd(f.fmul(rF, aF), bg)
-                  gF = f.fadd(f.fmul(gF, aF), bg)
-                  bF = f.fadd(f.fmul(bF, aF), bg)
+                  def aF = math_flt.fdiv(math_flt.float(aV_raw), math_flt.float(255.0))
+                  def bg = math_flt.fmul(math_flt.float(255.0), math_flt.fsub(math_flt.float(1.0), aF))
+                  rF = math_flt.fadd(math_flt.fmul(rF, aF), bg)
+                  gF = math_flt.fadd(math_flt.fmul(gF, aF), bg)
+                  bF = math_flt.fadd(math_flt.fmul(bF, aF), bg)
                }
-               def yV = f.fsub(f.fadd(f.fadd(f.fmul(f.float(0.299), rF), f.fmul(f.float(0.587), gF)), f.fmul(f.float(0.114), bF)), f.float(128.0))
-               def cbV = f.fadd(f.fmul(f.float(-0.1687), rF), f.fadd(f.fmul(f.float(-0.3313), gF), f.fmul(f.float(0.5), bF)))
-               def crV = f.fadd(f.fmul(f.float(0.5), rF), f.fadd(f.fmul(f.float(-0.4187), gF), f.fmul(f.float(-0.0813), bF)))
+               def yV = math_flt.fsub(math_flt.fadd(math_flt.fadd(math_flt.fmul(math_flt.float(0.299), rF), math_flt.fmul(math_flt.float(0.587), gF)), math_flt.fmul(math_flt.float(0.114), bF)), math_flt.float(128.0))
+               def cbV = math_flt.fadd(math_flt.fmul(math_flt.float(-0.1687), rF), math_flt.fadd(math_flt.fmul(math_flt.float(-0.3313), gF), math_flt.fmul(math_flt.float(0.5), bF)))
+               def crV = math_flt.fadd(math_flt.fmul(math_flt.float(0.5), rF), math_flt.fadd(math_flt.fmul(math_flt.float(-0.4187), gF), math_flt.fmul(math_flt.float(-0.0813), bF)))
                bYData = append(bYData, yV)
                bCbData = append(bCbData, cbV)
                bCrData = append(bCrData, crV)

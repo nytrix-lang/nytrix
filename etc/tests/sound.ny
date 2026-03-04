@@ -1,5 +1,5 @@
 #!/bin/ny
-;; Sound Engine Test
+;; Sound
 
 use std.core *
 use std.str.io *
@@ -10,20 +10,15 @@ use std.os *
 use std.os.path as path
 use std.os.fs as fs
 
-if(env("CI") || env("NYTRIX_TEST_MODE") == "1"){
-   print("Skipping sound test in CI/Test Mode")
-   __exit(0)
-}
-
-print("Sound Engine Test starting...")
+print("Sound starting...")
 if(!init()){
    print("Failed to initialize audio backend")
-   __exit(1)
+   exit(1)
 }
 
 print(f"Using audio backend: {get_backend_name()}")
 
-print("\n--- 1. Procedural Sine Test ---")
+print("\n1. Procedural Sine Test")
 def proc_src = make_sine_source(440.0, 1.0, 48000)
 if(proc_src != 0){
    print("Playing procedural sine wave (440Hz) 1s...")
@@ -39,7 +34,7 @@ if(proc_src != 0){
    print("Failed to create procedural sine source")
 }
 
-print("\n--- 2. Asset Loading & Playback Test ---")
+print("\n2. Asset Loading & Playback Test")
 def asset_dir = "etc/assets/audio"
 def files = [
    "sound.wav",

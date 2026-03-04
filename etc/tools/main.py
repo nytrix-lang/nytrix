@@ -387,9 +387,12 @@ def main():
             "tidy": [],
         }
 
-        # Auto-tidy logic
+        # Auto-tidy logic (skip with NYTRIX_SKIP_TIDY=1)
         if any(c in ("all", "bin", "std", "test", "tidy") for c in args.commands):
-            _timed_call(profile_enabled, timings, "tidy:run", run_tidy)
+            if os.environ.get("NYTRIX_SKIP_TIDY"):
+                log("TIDY", "skipped (NYTRIX_SKIP_TIDY=1)")
+            else:
+                _timed_call(profile_enabled, timings, "tidy:run", run_tidy)
 
         clean_seen = False
         for cmd in args.commands:

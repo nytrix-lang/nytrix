@@ -101,15 +101,24 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
 bool ny_is_stdlib_tok(token_t tok) {
   if (!tok.filename)
     return false;
+  bool res = false;
   if (tok.filename[0] == '<') {
-    return strcmp(tok.filename, "<stdlib>") == 0 ||
-           strcmp(tok.filename, "<repl_std>") == 0;
+    res = strcmp(tok.filename, "<stdlib>") == 0 ||
+          strcmp(tok.filename, "<repl_std>") == 0;
+  } else if (strncmp(tok.filename, "lib/", 4) == 0 ||
+             strncmp(tok.filename, "lib\\", 4) == 0 ||
+             strstr(tok.filename, "std.ny") != NULL ||
+             strstr(tok.filename, "/share/nytrix/") != NULL ||
+             strstr(tok.filename, "/lib/nytrix/std/") != NULL) {
+    res = true;
   }
-  if (strncmp(tok.filename, "lib/", 4) == 0 ||
-      strncmp(tok.filename, "lib\\", 4) == 0 ||
-      strstr(tok.filename, "std.ny") != NULL)
-    return true;
-  return false;
+  static int debug_std = -1;
+  if (debug_std < 0)
+    debug_std = getenv("NYTRIX_DEBUG_STD") != NULL;
+  if (debug_std)
+    fprintf(stderr, "[STD_TOK] '%s' -> %s\n", tok.filename,
+            res ? "true" : "false");
+  return res;
 }
 
 bool ny_strict_error_enabled(codegen_t *cg, token_t tok) {

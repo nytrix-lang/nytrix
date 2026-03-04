@@ -167,6 +167,63 @@ static bool is_str_type_name(const char *name) {
   return classify_builtin_type_tail(name) == NY_BT_STR;
 }
 
+bool ny_type_is_tagged(const char *name) {
+  if (!name || !*name)
+    return true;
+  ny_builtin_type_kind_t k = classify_builtin_type_tail(name);
+  switch (k) {
+  case NY_BT_PTR:
+  case NY_BT_INT:
+  case NY_BT_I8:
+  case NY_BT_I16:
+  case NY_BT_I32:
+  case NY_BT_I64:
+  case NY_BT_I128:
+  case NY_BT_U8:
+  case NY_BT_U16:
+  case NY_BT_U32:
+  case NY_BT_U64:
+  case NY_BT_U128:
+  case NY_BT_F32:
+  case NY_BT_F64:
+  case NY_BT_F128:
+  case NY_BT_CHAR:
+    return false;
+  case NY_BT_STR:
+  case NY_BT_BOOL:
+  case NY_BT_RESULT:
+    return true;
+  default:
+    if (strcmp(name, "any") == 0)
+      return true;
+    return false;
+  }
+}
+
+bool ny_is_native_abi_type_name(const char *name) {
+  if (!name || !*name)
+    return false;
+  ny_builtin_type_kind_t k = classify_builtin_type_tail(name);
+  switch (k) {
+  case NY_BT_I8:
+  case NY_BT_I16:
+  case NY_BT_I32:
+  case NY_BT_I64:
+  case NY_BT_U8:
+  case NY_BT_U16:
+  case NY_BT_U32:
+  case NY_BT_U64:
+  case NY_BT_F32:
+  case NY_BT_F64:
+  case NY_BT_PTR:
+    return true;
+  case NY_BT_INT:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static bool is_char_type_name(const char *name) {
   return classify_builtin_type_tail(name) == NY_BT_CHAR;
 }
@@ -225,7 +282,7 @@ static bool literal_int_fits(int64_t val, const char *want) {
     return val >= 0 && val <= UINT32_MAX;
   case NY_BT_U64:
   case NY_BT_U128:
-    return val >= 0;
+    return true; /* already checked by parser strtoull range */
   default:
     return true;
   }
@@ -244,6 +301,11 @@ static bool type_compatible_non_nullable(const char *want, const char *got) {
     if (type_name_eq(want, "int") || type_name_eq(got, "int"))
       return true;
   }
+  if (is_ptr_type_name(want) && type_name_eq(got, "int"))
+    return true;
+  if (type_name_eq(want, "int") && is_ptr_type_name(got))
+    return true;
+
   if (is_float_type_name(want) && is_float_type_name(got))
     return true;
   if (is_float_type_name(want) && is_int_type_name(got))
@@ -332,8 +394,12 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
       const char *n = e->as.call.callee->as.ident.name;
       uint64_t h = e->as.call.callee->as.ident.hash;
       fun_sig *sig = lookup_fun(cg, n, h);
-      if (sig && sig->return_type)
-        return sig->return_type;
+      if (sig) {
+        if (sig->return_type)
+          return sig->return_type;
+        if (sig->inferred_return_type)
+          return sig->inferred_return_type;
+      }
     }
     return NULL;
   case NY_E_MEMCALL:
@@ -349,6 +415,65 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
   case NY_E_LAMBDA:
   case NY_E_FN:
     return e->as.lambda.return_type;
+  case NY_E_BINARY: {
+    const char *lt = infer_expr_type(cg, scopes, depth, e->as.binary.left);
+    const char *rt = infer_expr_type(cg, scopes, depth, e->as.binary.right);
+    const char *op = e->as.binary.op;
+    bool is_arith = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                    strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
+                    strcmp(op, "%") == 0;
+    bool is_bitwise = strcmp(op, "|") == 0 || strcmp(op, "&") == 0 ||
+                      strcmp(op, "^") == 0 || strcmp(op, "<<") == 0 ||
+                      strcmp(op, ">>") == 0;
+    bool is_cmp = strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                  strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
+                  strcmp(op, "==") == 0 || strcmp(op, "!=") == 0;
+    bool l_int = lt && strcmp(lt, "int") == 0;
+    bool r_int = rt && strcmp(rt, "int") == 0;
+    bool l_flt = lt && (strcmp(lt, "f64") == 0 || strcmp(lt, "f32") == 0);
+    bool r_flt = rt && (strcmp(rt, "f64") == 0 || strcmp(rt, "f32") == 0);
+    if (l_int && r_int) {
+      if (is_arith || is_bitwise)
+        return "int";
+      if (is_cmp)
+        return "bool";
+    }
+    if ((l_flt || r_flt) && (is_arith || is_cmp)) {
+      bool l_ok = l_flt || l_int || !lt;
+      bool r_ok = r_flt || r_int || !rt;
+      if (l_ok && r_ok) {
+        if (is_arith)
+          return "f64";
+        if (is_cmp)
+          return "bool";
+      }
+    }
+    return NULL;
+  }
+  case NY_E_UNARY: {
+    const char *rt = infer_expr_type(cg, scopes, depth, e->as.unary.right);
+    if (!rt)
+      return NULL;
+    const char *op = e->as.unary.op;
+    if (strcmp(op, "!") == 0)
+      return "bool";
+    if ((strcmp(op, "-") == 0 || strcmp(op, "+") == 0 ||
+         strcmp(op, "~") == 0) &&
+        strcmp(rt, "int") == 0)
+      return "int";
+    return NULL;
+  }
+  case NY_E_TERNARY: {
+    const char *tt =
+        infer_expr_type(cg, scopes, depth, e->as.ternary.true_expr);
+    const char *ft =
+        infer_expr_type(cg, scopes, depth, e->as.ternary.false_expr);
+    if (!tt || !ft)
+      return NULL;
+    if (strcmp(tt, ft) == 0)
+      return tt;
+    return NULL;
+  }
   default:
     return NULL;
   }
@@ -619,4 +744,28 @@ type_layout_t resolve_raw_layout(codegen_t *cg, const char *type_name,
   ny_diag_error(tok, "unknown type name '%s' in layout", type_name);
   cg->had_error = 1;
   return invalid;
+}
+
+bool ny_is_proven_int(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                      LLVMValueRef v) {
+  if (v && LLVMIsAConstantInt(v)) {
+    int64_t val = LLVMConstIntGetSExtValue(v);
+    return (val & 1) != 0;
+  }
+  if (!e)
+    return false;
+  const char *t = infer_expr_type(cg, scopes, depth, e);
+  return t && (strcmp(t, "int") == 0);
+}
+
+bool ny_is_proven_bool(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                       LLVMValueRef v) {
+  if (v && LLVMIsAConstantInt(v)) {
+    int64_t val = LLVMConstIntGetSExtValue(v);
+    return (val == 2 || val == 4);
+  }
+  if (!e)
+    return false;
+  const char *t = infer_expr_type(cg, scopes, depth, e);
+  return t && (strcmp(t, "bool") == 0);
 }

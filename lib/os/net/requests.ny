@@ -1,5 +1,5 @@
 ;; Keywords: net requests
-;; Net Requests module.
+;; Net Requests for Nytrix
 
 module std.net.requests (
    requests_get, requests_get_host,

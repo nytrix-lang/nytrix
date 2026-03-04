@@ -13,6 +13,7 @@ bool ny_write_if_changed(const char *path, const char *content, size_t len);
 void ny_write_text_file(const char *path, const char *contents);
 int ny_copy_file(const char *src, const char *dst);
 int ny_ensure_dir(const char *path);
+void ny_ensure_dir_recursive(const char *path);
 const char *ny_get_temp_dir(void);
 void ny_join_path(char *out, size_t out_len, const char *dir, const char *name);
 bool ny_extract_line(const char *src, int line, const char **out_start,

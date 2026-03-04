@@ -73,6 +73,8 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
     free((void *)sig->link_name);
   if (sig->return_type)
     free((void *)sig->return_type);
+  if (sig->inferred_return_type)
+    free((void *)sig->inferred_return_type);
 }
 
 static inline bool
@@ -222,6 +224,7 @@ typedef struct codegen_t {
   const char *current_module_name;
   const char *current_fn_ret_type;
   bool current_fn_attr_naked;
+  LLVMValueRef current_fn_value;
   bool thread_detach_stmt_call;
   const char *source_string;
   bool comptime;
@@ -286,23 +289,23 @@ static inline bool ny_sig_in_current_sigs(const codegen_t *cg,
                                           const fun_sig *sig) {
   if (!sig)
     return false;
-  if (sig->is_stable)
-    return true;
   if (!cg || !cg->fun_sigs.data || cg->fun_sigs.len == 0)
     return false;
   const fun_sig *begin = cg->fun_sigs.data;
   const fun_sig *end = begin + cg->fun_sigs.len;
-  return sig >= begin && sig < end;
+  if (!(sig >= begin && sig < end))
+    return false;
+  return true;
 }
 
 static inline bool ny_binding_is_valid(const codegen_t *cg, const binding *b) {
   if (!b)
     return false;
-  if (b->is_stable)
-    return true;
   if (!cg || !cg->global_vars.data || cg->global_vars.len == 0)
     return false;
   const binding *begin = cg->global_vars.data;
   const binding *end = begin + cg->global_vars.len;
-  return b >= begin && b < end;
+  if (!(b >= begin && b < end))
+    return false;
+  return true;
 }

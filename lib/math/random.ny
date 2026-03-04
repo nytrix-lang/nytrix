@@ -1,5 +1,5 @@
 ;; Keywords: math random
-;; Math Random module.
+;; Math Random for Nytrix
 
 module std.math.random (
    rand, seed, random, uniform, randint, randrange, choice, shuffle, sample
@@ -31,16 +31,22 @@ fn uniform(a, b){
    return fadd(float(a), fmul(random(), fsub(float(b), float(a))))
 }
 
+fn _rand_range(a, b, inclusive){
+   "Internal: common logic for randint and randrange."
+   if(a == b){ return a }
+   def range = b - a + (inclusive ? 1 : 0)
+   if(range == 0){ return a }
+   return a + (rand() % range)
+}
+
 fn randint(a, b){
    "Return a random integer in [a, b]."
-   if(a == b){ return a }
-   return a + (rand() % (b - a + 1))
+   _rand_range(a, b, true)
 }
 
 fn randrange(a, b){
    "Return a random integer in [a, b)."
-   if(a == b){ return a }
-   return a + (rand() % (b - a))
+   _rand_range(a, b, false)
 }
 
 fn choice(xs){

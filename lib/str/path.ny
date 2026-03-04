@@ -1,5 +1,5 @@
 ;; Keywords: str path
-;; Path helpers.
+;; String Path Utilities for Nytrix
 
 module std.str.path (
    sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext
