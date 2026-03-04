@@ -5,6 +5,7 @@ module std.os.sys (
    syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl, sys_openpty
 )
 use std.core *
+print("INIT: std.os.sys")
 use std.core.error *
 
 fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){

@@ -12,15 +12,7 @@ use std.os.ffi *
 use std.os.audio.backend.shared as backend_shared
 
 if(comptime{ __os_name() == "linux" }){
-   #link "asound"
-
-   extern fn snd_pcm_open(pcm: ptr, name: ptr, stream: i32, mode: i32): i32 as "snd_pcm_open"
-   extern fn snd_pcm_set_params(pcm: ptr, format: i32, access: i32, channels: i32, rate: i32, soft_resample: i32, latency: i32): i32 as "snd_pcm_set_params"
-   extern fn snd_pcm_writei(pcm: ptr, buffer: ptr, size: i64): i64 as "snd_pcm_writei"
-   extern fn snd_pcm_close(pcm: ptr): i32 as "snd_pcm_close"
-   extern fn snd_pcm_recover(pcm: ptr, err: i32, silent: i32): i32 as "snd_pcm_recover"
-   extern fn snd_pcm_prepare(pcm: ptr): i32 as "snd_pcm_prepare"
-   extern fn snd_pcm_drain(pcm: ptr): i32 as "snd_pcm_drain"
+   #include <alsa/asoundlib.h>
 }
 
 def SND_PCM_STREAM_PLAYBACK = 0

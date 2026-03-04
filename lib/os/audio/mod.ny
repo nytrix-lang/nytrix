@@ -13,7 +13,6 @@ module std.os.audio (
 )
 
 use std.core *
-use std.os *
 use std.os.audio.backend as snd_backend
 use std.os.audio.res as res
 

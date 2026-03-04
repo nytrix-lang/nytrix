@@ -8,33 +8,15 @@ module std.os.audio.backend.jack (
 
 use std.core *
 use std.core.dict_mod *
-use std.os *
+use std.os (env)
 use std.os.time *
-use std.os.ffi *
 use std.os.audio.backend.shared as backend_shared
 use std.util.common as common
 
 if(comptime{ __os_name() == "linux" }){
-   #link "jack"
-
-   extern fn jack_client_open(name: ptr, options: i32, status: ptr, uuid: ptr): ptr as "jack_client_open"
-   extern fn jack_client_close(client: ptr): i32 as "jack_client_close"
-   extern fn jack_activate(client: ptr): i32 as "jack_activate"
-   extern fn jack_deactivate(client: ptr): i32 as "jack_deactivate"
-   extern fn jack_set_process_callback(client: ptr, cb: ptr, arg: ptr): i32 as "jack_set_process_callback"
-   extern fn jack_get_buffer_size(client: ptr): i32 as "jack_get_buffer_size"
-   extern fn jack_port_register(client: ptr, name: ptr, type: ptr, flags: i64, buffer_size: i64): ptr as "jack_port_register"
-   extern fn jack_port_get_buffer(port: ptr, nframes: i32): ptr as "jack_port_get_buffer"
-   extern fn jack_get_ports(client: ptr, port_name_pattern: ptr, type_name_pattern: ptr, flags: i64): ptr as "jack_get_ports"
-   extern fn jack_port_name(port: ptr): ptr as "jack_port_name"
-   extern fn jack_connect(client: ptr, src: ptr, dst: ptr): i32 as "jack_connect"
-   extern fn jack_free(ptr: ptr): i32 as "jack_free"
-   extern fn jack_ringbuffer_create(sz: i64): ptr as "jack_ringbuffer_create"
-   extern fn jack_ringbuffer_free(rb: ptr): i32 as "jack_ringbuffer_free"
-   extern fn jack_ringbuffer_read(rb: ptr, dest: ptr, cnt: i64): i64 as "jack_ringbuffer_read"
-   extern fn jack_ringbuffer_read_space(rb: ptr): i64 as "jack_ringbuffer_read_space"
-   extern fn jack_ringbuffer_write(rb: ptr, src: ptr, cnt: i64): i64 as "jack_ringbuffer_write"
-   extern fn jack_ringbuffer_write_space(rb: ptr): i64 as "jack_ringbuffer_write_space"
+   #link "libjack.so"
+   #include <jack/jack.h> as "jack_"
+   #include <jack/ringbuffer.h> as "jack_"
 }
 
 def JACK_NO_START_SERVER = 0x01

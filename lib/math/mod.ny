@@ -122,7 +122,7 @@ fn fmod(a, b){
    "Auto-generated docstring: _fmod."
    a = float(a)
    b = float(b)
-   if(feq(b, 0.0) || is_inf(a) || is_nan(a)){ return nan() }
+   if(feq(b, 0.0) || is_inf(a) || is_nan(a)){ return nan_val() }
    def q = floor(fdiv(a, b))
    fsub(a, fmul(b, float(q)))
 }
@@ -144,7 +144,7 @@ fn _sqrt_pos(x){
 fn sin(x){
    "Sine (radians), Nytrix implementation."
    mut fx = float(x)
-   if(is_nan(fx) || is_inf(fx)){ return nan() }
+   if(is_nan(fx) || is_inf(fx)){ return nan_val() }
    fx = fmod(fx, TAU)
    if(flt(fx, 0.0)){ fx = fadd(fx, TAU) }
    mut sgn = float(1)
@@ -172,7 +172,7 @@ fn sin(x){
 fn cos(x){
    "Cosine (radians), Nytrix implementation."
    mut fx = float(x)
-   if(is_nan(fx) || is_inf(fx)){ return nan() }
+   if(is_nan(fx) || is_inf(fx)){ return nan_val() }
    sin(fadd(fx, _HALF_PI))
 }
 
@@ -180,7 +180,7 @@ fn tan(x){
    "Tangent (radians), Nytrix implementation."
    def s = sin(x)
    def c = cos(x)
-   if(is_nan(s) || is_nan(c)){ return nan() }
+   if(is_nan(s) || is_nan(c)){ return nan_val() }
    if(feq(c, 0.0)){
       return fgt(s, 0.0) ? inf() : fsub(0.0, inf())
    }
@@ -195,7 +195,7 @@ fn _atan_unit(x){
 fn atan(x){
    "Arc tangent in radians, Nytrix implementation."
    x = float(x)
-   if(is_nan(x)){ return nan() }
+   if(is_nan(x)){ return nan_val() }
    if(is_inf(x)){ return fgt(x, 0.0) ? _HALF_PI : fsub(0.0, _HALF_PI) }
    if(feq(x, 0.0)){ return 0.0 }
    def ax = abs(x)
@@ -208,7 +208,7 @@ fn atan2(y, x){
    "Arc tangent of y/x with quadrant handling, in radians."
    y = float(y)
    x = float(x)
-   if(is_nan(y) || is_nan(x)){ return nan() }
+   if(is_nan(y) || is_nan(x)){ return nan_val() }
    if(fgt(x, 0.0)){ return atan(fdiv(y, x)) }
    if(flt(x, 0.0) && !flt(y, 0.0)){ return fadd(atan(fdiv(y, x)), PI) }
    if(flt(x, 0.0) && flt(y, 0.0)){ return fsub(atan(fdiv(y, x)), PI) }
@@ -223,7 +223,7 @@ fn atan2(y, x){
 fn asin(x){
    "Arc sine in radians, Nytrix implementation."
    x = clamp(float(x), -1.0, 1.0)
-   if(is_nan(x)){ return nan() }
+   if(is_nan(x)){ return nan_val() }
    atan2(x, _sqrt_pos(fsub(1.0, fmul(x, x))))
 }
 
@@ -237,7 +237,7 @@ fn acos(x){
 fn exp(x){
    "Returns e^x (the natural exponential). Accurate to ~12 decimal places."
    x = float(x)
-   if(is_nan(x)){ return nan() }
+   if(is_nan(x)){ return nan_val() }
    if(is_inf(x)){ return fgt(x, 0.0) ? inf() : 0.0 }
    ;; Range reduction: exp(x) = 2^k * exp(r), where k = round(x/ln2), r = x - k*ln2
    def k = int(fadd(fdiv(x, LN2), 0.5))
@@ -265,7 +265,7 @@ fn exp(x){
 fn log(x){
    "Returns the natural logarithm of `x`. Returns nan for x <= 0."
    x = float(x)
-   if(is_nan(x) || !fgt(x, 0.0)){ return nan() }
+   if(is_nan(x) || !fgt(x, 0.0)){ return nan_val() }
    if(is_inf(x)){ return inf() }
    if(feq(x, 1.0)){ return 0.0 }
    ;; Reduce: find k such that x = m * 2^k, 0.5 <= m < 1
