@@ -2,6 +2,7 @@
 #define NY_LEXER_H
 
 #include "base/common.h"
+#include "base/intern.h"
 
 typedef enum token_kind {
   NY_T_EOF = 0,
@@ -38,7 +39,7 @@ typedef enum token_kind {
   NY_T_DEF,
   NY_T_MUT,
   NY_T_NIL,
-  NY_T_UNDEF,
+  NY_T_DEL,
   NY_T_MODULE,
   NY_T_ENUM,
   NY_T_PLUS,
@@ -64,6 +65,7 @@ typedef enum token_kind {
   NY_T_ARROW,
   NY_T_BITOR,
   NY_T_BITAND,
+  NY_T_POW,
   NY_T_BITXOR,
   NY_T_LSHIFT,
   NY_T_RSHIFT,
@@ -78,6 +80,7 @@ typedef enum token_kind {
   NY_T_COLON,
   NY_T_SEMI,
   NY_T_DOT,
+  NY_T_RANGE,
   NY_T_ELLIPSIS,
   NY_T_QUESTION,
   NY_T_AT,
@@ -89,10 +92,12 @@ typedef enum token_kind {
   NY_T_QUESTION_DOT,
   NY_T_ERROR,
 } token_kind;
+
 typedef struct token_t {
   token_kind kind;
   const char *lexeme;
   size_t len;
+  ny_sym_id sym_id;
   uint64_t hash;
   int line;
   int real_line;
@@ -104,6 +109,7 @@ typedef struct lexer_t {
   const char *src;
   const char *filename;
   size_t len;
+  bool source_has_newline;
   size_t pos;
   int line;
   int real_line;
@@ -111,10 +117,14 @@ typedef struct lexer_t {
   size_t split_pos;
   const char *split_filename;
   bool skipped_newline;
+  bool quiet;
+  bool had_error;
+  int error_count;
 } lexer_t;
 
 void lexer_init(lexer_t *lx, const char *src, const char *filename);
 token_t lexer_next(lexer_t *lx);
+char *dup_token_lexeme(token_t t);
 char *dup_string_token(token_t t);
 char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok);
 

@@ -32,11 +32,26 @@ parse_load_source(const char *filename) {
   return g_parse_cached_src;
 }
 
-static void parse_print_snippet(parser_t *p, int real_line, int col,
-                                size_t len) {
-  if (!p || !p->src || real_line <= 0 || col <= 0)
+static void parse_print_snippet(parser_t *p, const char *filename, int line,
+                                int real_line, int col, size_t len) {
+  if (!p || col <= 0)
     return;
-  ny_print_snippet(p->src, real_line, col, len, NY_CLR_RED);
+  const char *src = NULL;
+  int snippet_line = 0;
+  if (filename && filename[0] != '<') {
+    src = parse_load_source(filename);
+    snippet_line = line;
+  } else if (p->lex.split_pos > 0 && p->lex.split_filename && filename &&
+             strcmp(filename, p->lex.split_filename) == 0) {
+    src = p->src + p->lex.split_pos;
+    snippet_line = line;
+  } else if (p->src && real_line > 0) {
+    src = p->src;
+    snippet_line = real_line;
+  }
+  if (!src || snippet_line <= 0)
+    return;
+  ny_print_snippet(src, snippet_line, col, len, NY_CLR_RED);
 }
 
 static bool parse_diag_grow(void) {
@@ -146,6 +161,8 @@ const char *parser_token_name(token_kind k) {
     return "number";
   case NY_T_STRING:
     return "string";
+  case NY_T_FSTRING:
+    return "f-string";
   case NY_T_FN:
     return "fn";
   case NY_T_RETURN:
@@ -180,10 +197,12 @@ const char *parser_token_name(token_kind k) {
     return "defer";
   case NY_T_DEF:
     return "def";
+  case NY_T_MUT:
+    return "mut";
   case NY_T_NIL:
     return "nil";
-  case NY_T_UNDEF:
-    return "undef";
+  case NY_T_DEL:
+    return "del";
   case NY_T_BREAK:
     return "break";
   case NY_T_CONTINUE:
@@ -202,12 +221,12 @@ const char *parser_token_name(token_kind k) {
     return "sizeof";
   case NY_T_EXTERN:
     return "extern";
-  case NY_T_MUT:
-    return "mut";
   case NY_T_MODULE:
     return "module";
   case NY_T_COMPTIME:
     return "comptime";
+  case NY_T_ENUM:
+    return "enum";
   case NY_T_PLUS:
     return "+";
   case NY_T_MINUS:
@@ -250,6 +269,20 @@ const char *parser_token_name(token_kind k) {
     return "%=";
   case NY_T_ARROW:
     return "->";
+  case NY_T_BITOR:
+    return "|";
+  case NY_T_BITAND:
+    return "&";
+  case NY_T_POW:
+    return "^";
+  case NY_T_BITXOR:
+    return "^^";
+  case NY_T_LSHIFT:
+    return "<<";
+  case NY_T_RSHIFT:
+    return ">>";
+  case NY_T_BITNOT:
+    return "~";
   case NY_T_LPAREN:
     return "(";
   case NY_T_RPAREN:
@@ -266,6 +299,8 @@ const char *parser_token_name(token_kind k) {
     return ",";
   case NY_T_DOT:
     return ".";
+  case NY_T_RANGE:
+    return "..";
   case NY_T_COLON:
     return ":";
   case NY_T_SEMI:
@@ -274,18 +309,31 @@ const char *parser_token_name(token_kind k) {
     return "?";
   case NY_T_AT:
     return "@";
+  case NY_T_HASH:
+    return "#";
+  case NY_T_ELLIPSIS:
+    return "...";
   case NY_T_PLUS_PLUS:
     return "++";
   case NY_T_MINUS_MINUS:
     return "--";
+  case NY_T_PIPE:
+    return "|>";
+  case NY_T_QUESTION_QUESTION:
+    return "??";
+  case NY_T_QUESTION_DOT:
+    return "?.";
+  case NY_T_ERROR:
+    return "error";
   default:
     return "unknown";
   }
 }
 
 static void print_error_line(parser_t *p, const char *filename, int line,
-                             int real_line, int col, const char *msg,
-                             const char *got, const char *hint) {
+                             int real_line, int col, int span_len,
+                             const char *msg, const char *got,
+                             const char *hint) {
   const char *out_file =
       filename ? filename : (p->filename ? p->filename : "<input>");
   if (!parser_diag_should_emit(out_file, line, col, msg, got))
@@ -294,19 +342,28 @@ static void print_error_line(parser_t *p, const char *filename, int line,
   p->error_count++;
   p->last_error_line = line;
   p->last_error_col = col;
+  p->last_error_end_col = col + (span_len > 0 ? span_len : 1);
   snprintf(p->last_error_msg, sizeof(p->last_error_msg), "%s", msg);
-  fprintf(stderr, "%s:%d:%d: %serror:%s %s (got %s)\n", out_file, line, col,
-          clr(NY_CLR_RED), clr(NY_CLR_RESET), msg, got);
-  if (hint) {
-    fprintf(stderr, "%s:%d:%d: %snote:%s %s\n", out_file, line, col,
-            clr(NY_CLR_YELLOW), clr(NY_CLR_RESET), hint);
-    fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN), clr(NY_CLR_RESET),
-            hint);
+  snprintf(p->last_error_hint, sizeof(p->last_error_hint), "%s",
+           hint ? hint : "");
+  if (!p->quiet) {
+    fprintf(stderr, "%s:%d:%d: %s[parse]%s %serror:%s %s (got %s)\n", out_file,
+            line, col, clr(NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_RED),
+            clr(NY_CLR_RESET), msg, got);
+    if (hint) {
+      fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_YELLOW),
+              clr(NY_CLR_RESET), hint);
+    }
+    parse_print_snippet(p, filename, line, real_line, col,
+                        span_len > 0 ? span_len : 1);
   }
-  parse_print_snippet(p, real_line, col, 1);
   if (p->error_limit > 0 && p->error_count >= p->error_limit) {
-    fprintf(stderr, "Too many errors, aborting.\n");
-    exit(1);
+    if (!p->quiet)
+      fprintf(stderr, "Too many errors, aborting.\n");
+    if (p->exit_on_limit)
+      exit(1);
+    p->cur.kind = NY_T_EOF;
+    p->error_limit = 0;
   }
 }
 
@@ -333,8 +390,8 @@ void parser_error(parser_t *p, token_t tok, const char *msg, const char *hint) {
     hint = "check for missing ';' or unmatched brace";
   char buf[64];
   const char *got = token_desc(tok, buf, sizeof(buf));
-  print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col, msg, got,
-                   hint);
+  print_error_line(p, tok.filename, tok.line, tok.real_line, tok.col,
+                   (int)tok.len, msg, got, hint);
 }
 
 void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
@@ -353,7 +410,7 @@ void parser_expect_slow(parser_t *p, token_kind kind, const char *msg,
     char buf[64];
     const char *got_desc = token_desc(p->cur, buf, sizeof(buf));
     print_error_line(p, p->cur.filename, p->cur.line, p->cur.real_line,
-                     p->cur.col, def_msg, got_desc, hint);
+                     p->cur.col, (int)p->cur.len, def_msg, got_desc, hint);
   } else {
     parser_error(p, p->cur, msg, hint);
   }
@@ -470,25 +527,65 @@ const char *parser_decode_string(parser_t *p, token_t tok, size_t *out_len) {
   return parser_unescape_string(p->arena, cur, inner_len, out_len);
 }
 
-void parser_init_with_arena(parser_t *p, const char *src, const char *filename,
-                            arena_t *arena_ptr) {
+static void parser_init_with_arena_opts(parser_t *p, const char *src,
+                                        const char *filename,
+                                        arena_t *arena_ptr, bool quiet) {
   memset(p, 0, sizeof(parser_t));
   p->src = src;
   p->filename = filename ? filename : "<input>";
   lexer_init(&p->lex, src, p->filename);
+  p->lex.quiet = quiet;
   p->arena = arena_ptr;
   p->had_error = false;
   p->error_count = 0;
+  p->lex_error_count_seen = 0;
   p->error_limit = 10;
+  p->quiet = quiet;
+  p->exit_on_limit = true;
   p->error_ctx = NULL;
   p->last_error_line = 0;
   p->last_error_col = 0;
+  p->last_error_end_col = 0;
   p->last_error_msg[0] = '\0';
+  p->last_error_hint[0] = '\0';
   p->block_depth = 0;
   p->loop_depth = 0;
   parser_advance(p);
 }
 
+void parser_init_with_arena(parser_t *p, const char *src, const char *filename,
+                            arena_t *arena_ptr) {
+  parser_init_with_arena_opts(p, src, filename, arena_ptr, false);
+}
+
+void parser_init_with_arena_quiet(parser_t *p, const char *src,
+                                  const char *filename, arena_t *arena_ptr) {
+  parser_init_with_arena_opts(p, src, filename, arena_ptr, true);
+}
+
 void parser_init(parser_t *p, const char *src, const char *filename) {
   parser_init_with_arena(p, src, filename, NULL);
+}
+
+void parser_init_quiet(parser_t *p, const char *src, const char *filename) {
+  parser_init_with_arena_opts(p, src, filename, NULL, true);
+}
+
+void parser_global_cleanup(void) {
+  if (g_parse_diag_tbl) {
+    for (size_t i = 0; i < g_parse_diag_cap; ++i) {
+      free(g_parse_diag_tbl[i].key);
+      g_parse_diag_tbl[i].key = NULL;
+      g_parse_diag_tbl[i].count = 0;
+    }
+    free(g_parse_diag_tbl);
+    g_parse_diag_tbl = NULL;
+  }
+  g_parse_diag_cap = 0;
+  g_parse_diag_len = 0;
+
+  free(g_parse_cached_file);
+  g_parse_cached_file = NULL;
+  free(g_parse_cached_src);
+  g_parse_cached_src = NULL;
 }
