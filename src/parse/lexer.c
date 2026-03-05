@@ -1,4 +1,5 @@
-#include "lex/lexer.h"
+#include "parse/lexer.h"
+#include "base/intern.h"
 #include "base/util.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -34,10 +35,90 @@ static inline bool ny_is_digit8(const unsigned char *p) {
          (ny_lex_table[p[6]] & 4) && (ny_lex_table[p[7]] & 4);
 }
 
+static inline bool ny_digit_sep_before_digit(const char *src, size_t pos) {
+  return src[pos] == '_' && IS_DIGIT(src[pos + 1]);
+}
+
+static inline bool ny_digit_sep_before_xdigit(const char *src, size_t pos) {
+  return src[pos] == '_' && isxdigit((unsigned char)src[pos + 1]);
+}
+
+static inline bool ny_is_bindigit(char c) { return c == '0' || c == '1'; }
+
+static inline bool ny_digit_sep_before_bindigit(const char *src, size_t pos) {
+  return src[pos] == '_' && ny_is_bindigit(src[pos + 1]);
+}
+
+static inline bool ny_is_octdigit(char c) { return c >= '0' && c <= '7'; }
+
+static inline bool ny_digit_sep_before_octdigit(const char *src, size_t pos) {
+  return src[pos] == '_' && ny_is_octdigit(src[pos + 1]);
+}
+
+static void lex_decimal_digits(lexer_t *lx) {
+  const char *src = lx->src;
+  const unsigned char *end = (const unsigned char *)(src + lx->len);
+  while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
+         ny_is_digit8((const unsigned char *)(src + lx->pos))) {
+    lx->pos += 8;
+    lx->col += 8;
+  }
+  while (IS_DIGIT(src[lx->pos]) || ny_digit_sep_before_digit(src, lx->pos)) {
+    lx->pos++;
+    lx->col++;
+  }
+}
+
+static inline bool ny_number_suffix_letter(char c, bool allow_float) {
+  return c == 'i' || c == 'I' || c == 'u' || c == 'U' ||
+         (allow_float && (c == 'f' || c == 'F'));
+}
+
+static void lex_number_suffix_digits(lexer_t *lx,
+                                     bool underscore_allows_float) {
+  const char *src = lx->src;
+  char s = src[lx->pos];
+  if (s == '_' &&
+      ny_number_suffix_letter(src[lx->pos + 1], underscore_allows_float)) {
+    lx->pos++;
+    lx->col++;
+    s = src[lx->pos];
+  }
+  if (ny_number_suffix_letter(s, true) && IS_DIGIT(src[lx->pos + 1])) {
+    lx->pos++;
+    lx->col++;
+    lex_decimal_digits(lx);
+  }
+}
+
+static const unsigned char *scan_template_ident_tail(const unsigned char *p) {
+  while (*p == '$' && p[1] == '{') {
+    const unsigned char *q = p + 2;
+    if (!IS_ALPHA(*q))
+      break;
+    while (IS_ALNUM(*q))
+      q++;
+    if (*q != '}')
+      break;
+    p = q + 1;
+    while (IS_ALNUM(*p))
+      p++;
+  }
+  return p;
+}
+
+static const char *lexer_intern_filename(const char *filename) {
+  if (!filename)
+    return NULL;
+  ny_sym_id id = ny_intern_cstr(filename);
+  return id ? ny_intern_get(id) : filename;
+}
+
 void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->src = src;
-  lx->filename = filename;
+  lx->filename = lexer_intern_filename(filename);
   lx->len = src ? strlen(src) : 0;
+  lx->source_has_newline = (src && memchr(src, '\n', lx->len) != NULL);
   lx->pos = 0;
   lx->line = 1;
   lx->real_line = 1;
@@ -45,6 +126,9 @@ void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->split_pos = 0;
   lx->split_filename = NULL;
   lx->skipped_newline = false;
+  lx->had_error = false;
+  lx->error_count = 0;
+  lx->quiet = false;
 }
 
 static inline char advance(lexer_t *lx) {
@@ -88,6 +172,7 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
   tok.kind = kind;
   tok.lexeme = lx->src + start;
   tok.len = lx->pos - start;
+  tok.sym_id = 0;
   tok.hash = 0;
   tok.line = lx->line;
   tok.real_line = lx->real_line;
@@ -98,17 +183,30 @@ static token_t make_token(lexer_t *lx, token_kind kind, size_t start) {
 
 static void lexer_error(lexer_t *lx, size_t start, const char *msg,
                         const char *hint) {
+  lx->had_error = true;
+  lx->error_count++;
   if (!ny_log_should_emit(msg))
     return;
+  if (lx->quiet)
+    return;
   int col = lx->col - (int)(lx->pos - start);
-  fprintf(stderr, "%s:%d:%d: \033[31merror:\033[0m %s\n",
-          lx->filename ? lx->filename : "<input>", lx->line, col, msg);
+  fprintf(stderr, "%s:%d:%d: %s[lex]%s %serror:%s %s\n",
+          lx->filename ? lx->filename : "<input>", lx->line, col,
+          clr(NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_RED),
+          clr(NY_CLR_RESET), msg);
   if (hint) {
-    fprintf(stderr, "%s:%d:%d: \033[33mnote:\033[0m %s\n",
-            lx->filename ? lx->filename : "<input>", lx->line, col, hint);
+    fprintf(stderr, "       %shint:%s %s\n", clr(NY_CLR_YELLOW),
+            clr(NY_CLR_RESET), hint);
   }
   if (lx->src && lx->real_line > 0) {
-    ny_print_snippet(lx->src, lx->real_line, col, 1, "\033[31m");
+    const char *snippet_src = lx->src;
+    int snippet_line = lx->real_line;
+    if (lx->split_pos > 0 && lx->split_filename &&
+        lx->filename == lx->split_filename) {
+      snippet_src = lx->src + lx->split_pos;
+      snippet_line = lx->line;
+    }
+    ny_print_snippet(snippet_src, snippet_line, col, 1, NY_CLR_RED);
   }
 }
 
@@ -135,9 +233,43 @@ static void skip_whitespace(lexer_t *lx) {
       }
       advance(lx);
     } else if (c == ';') {
+      size_t semi_pos = lx->pos;
       advance(lx);
+      size_t comment_start = lx->pos;
       while (peek(lx) != '\n' && peek(lx) != '\0')
         advance(lx);
+      size_t comment_end = lx->pos;
+      /* Only warn when ';' is used as a statement separator in single-line
+         input (like from -c 'code; more code'). Multi-line files commonly
+         use ';' for inline comments, so we skip the warning for those. */
+      if (comment_end > comment_start) {
+        /* Single-line source only (e.g., -c 'code; more code') */
+        if (!lx->source_has_newline) {
+          /* Single-line source — warn if there's code before and content after
+           */
+          const char *p = lx->src + comment_start;
+          const char *end = lx->src + comment_end;
+          while (p < end && (*p == ' ' || *p == '\t'))
+            p++;
+          if (p < end && *p != ';') {
+            size_t line_start = semi_pos;
+            while (line_start > 0 && lx->src[line_start - 1] != '\n')
+              line_start--;
+            const char *before = lx->src + semi_pos - 1;
+            while (before > lx->src + line_start &&
+                   (*before == ' ' || *before == '\t'))
+              before--;
+            if (before >= lx->src + line_start) {
+              lexer_error(lx, semi_pos,
+                          "';' starts a line comment — all text after it on "
+                          "this line is ignored",
+                          "In Nytrix, use newlines or just spaces to separate "
+                          "statements, not ';' "
+                          "(like Python)");
+            }
+          }
+        }
+      }
     } else if (c == '#') {
       size_t start_pos = lx->pos;
       bool bol = (start_pos == 0 || lx->src[start_pos - 1] == '\n');
@@ -174,10 +306,8 @@ static void skip_whitespace(lexer_t *lx) {
                 p++;
               if (*p == '"') {
                 size_t flen = (size_t)(p - f);
-                char *nf = malloc(flen + 1);
-                memcpy(nf, f, flen);
-                nf[flen] = '\0';
-                lx->filename = nf;
+                ny_sym_id file_id = ny_intern_str(f, flen);
+                lx->filename = ny_intern_get(file_id);
                 p++;
               }
             }
@@ -248,6 +378,8 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
       return NY_T_DEFER;
     if (len == 3 && memcmp(start, "def", 3) == 0)
       return NY_T_DEF;
+    if (len == 3 && memcmp(start, "del", 3) == 0)
+      return NY_T_DEL;
     break;
   case 'e':
     if (len == 4 && memcmp(start, "else", 4) == 0)
@@ -295,6 +427,9 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
                   "'import' is not used in Nytrix", "use 'use' instead");
       return NY_T_IDENT;
     }
+    if (len == 7 && memcmp(start, "include", 7) == 0) {
+      return NY_T_IDENT; /* valid: used after # for #include <header> */
+    }
     break;
   case 'n':
     if (len == 3 && memcmp(start, "nil", 3) == 0) {
@@ -306,9 +441,7 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
     break;
   case 'N':
     if (len == 4 && memcmp(start, "NULL", 4) == 0) {
-      lexer_error(lx, (size_t)(start - lx->src), "'NULL' is not used in Nytrix",
-                  "use '0' or 'none' instead");
-      return NY_T_IDENT;
+      return NY_T_NIL;
     }
     break;
   case 'l':
@@ -364,8 +497,6 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
       return NY_T_TRY;
     break;
   case 'u':
-    if (len == 5 && memcmp(start, "undef", 5) == 0)
-      return NY_T_UNDEF;
     if (len == 3 && memcmp(start, "use", 3) == 0)
       return NY_T_USE;
     break;
@@ -389,6 +520,7 @@ token_t lexer_next(lexer_t *lx) {
     tok.kind = NY_T_EOF;
     tok.lexeme = src + start;
     tok.len = 0;
+    tok.sym_id = 0;
     tok.line = lx->line;
     tok.col = lx->col;
     tok.filename = lx->filename;
@@ -408,6 +540,7 @@ token_t lexer_next(lexer_t *lx) {
   if (c == 'f' && (peek(lx) == '"' || peek(lx) == '\'')) {
     char quote = peek(lx);
     advance(lx);
+    bool terminated = false;
     if (peek(lx) == quote && peek_next(lx) == quote) {
       advance(lx);
       advance(lx);
@@ -417,6 +550,7 @@ token_t lexer_next(lexer_t *lx) {
           advance(lx);
           advance(lx);
           advance(lx);
+          terminated = true;
           break;
         }
         advance(lx);
@@ -427,10 +561,16 @@ token_t lexer_next(lexer_t *lx) {
           advance(lx);
         advance(lx);
       }
-      if (peek(lx) == quote)
+      if (peek(lx) == quote) {
         advance(lx);
+        terminated = true;
+      }
     }
-    return make_token(lx, NY_T_FSTRING, start);
+    if (terminated)
+      return make_token(lx, NY_T_FSTRING, start);
+    lexer_error(lx, start, "unterminated f-string",
+                "check for missing closing quote");
+    return make_token(lx, NY_T_ERROR, start);
   }
   if (IS_ALPHA(c)) {
     const unsigned char *p = (const unsigned char *)(src + lx->pos);
@@ -441,64 +581,94 @@ token_t lexer_next(lexer_t *lx) {
     while (IS_ALNUM(*p)) {
       p++;
     }
+    p = scan_template_ident_tail(p);
     size_t len = (size_t)((const char *)p - (src + lx->pos));
     lx->pos = (size_t)((const char *)p - src);
     lx->col += (int)len;
     token_t tok = make_token(lx, NY_T_IDENT, start);
+    tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
     tok.hash = ny_hash64(tok.lexeme, tok.len);
     tok.kind = identifier_type(lx, tok.lexeme, tok.len);
     return tok;
+  }
+  if (c == '$' && peek(lx) == '{') {
+    const unsigned char *p = (const unsigned char *)(src + start + 2);
+    if (IS_ALPHA(*p)) {
+      while (IS_ALNUM(*p))
+        p++;
+      if (*p == '}') {
+        p++;
+        while (IS_ALNUM(*p))
+          p++;
+        p = scan_template_ident_tail(p);
+        size_t token_len = (size_t)((const char *)p - (src + start));
+        lx->pos = start + token_len;
+        lx->col += (int)token_len - 1;
+        token_t tok = make_token(lx, NY_T_IDENT, start);
+        tok.sym_id = ny_intern_str(tok.lexeme, tok.len);
+        tok.hash = ny_hash64(tok.lexeme, tok.len);
+        tok.kind = identifier_type(lx, tok.lexeme, tok.len);
+        return tok;
+      }
+    }
   }
   if (IS_DIGIT(c)) {
     if (c == '0' && (src[lx->pos] == 'x' || src[lx->pos] == 'X')) {
       lx->pos++;
       lx->col++;
-      while (isxdigit(src[lx->pos])) {
+      while (isxdigit((unsigned char)src[lx->pos]) ||
+             ny_digit_sep_before_xdigit(src, lx->pos)) {
         lx->pos++;
         lx->col++;
       }
-      char s = src[lx->pos];
-      if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
-           s == 'F') &&
-          isdigit(src[lx->pos + 1])) {
-        lx->pos++;
-        lx->col++;
-        while (isdigit(src[lx->pos])) {
-          lx->pos++;
-          lx->col++;
-        }
-      }
+      lex_number_suffix_digits(lx, false);
       token_t tok = make_token(lx, NY_T_NUMBER, start);
       tok.hash = 0;
       return tok;
     }
-    const unsigned char *end = (const unsigned char *)(src + lx->len);
-    while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
-           ny_is_digit8((const unsigned char *)(src + lx->pos))) {
-      lx->pos += 8;
-      lx->col += 8;
-    }
-    while (IS_DIGIT(src[lx->pos])) {
+    if (c == '0' && (src[lx->pos] == 'b' || src[lx->pos] == 'B')) {
       lx->pos++;
       lx->col++;
-    }
-    if (src[lx->pos] == '.' && IS_DIGIT(src[lx->pos + 1])) {
-      lx->pos++;
-      lx->col++;
-      while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
-             ny_is_digit8((const unsigned char *)(src + lx->pos))) {
-        lx->pos += 8;
-        lx->col += 8;
+      if (!ny_is_bindigit(src[lx->pos])) {
+        lexer_error(lx, start, "malformed binary numeric constant",
+                    "binary literals need at least one 0 or 1 digit after 0b");
+        return make_token(lx, NY_T_ERROR, start);
       }
-      while (IS_DIGIT(src[lx->pos])) {
+      while (ny_is_bindigit(src[lx->pos]) ||
+             ny_digit_sep_before_bindigit(src, lx->pos)) {
         lx->pos++;
         lx->col++;
       }
+      lex_number_suffix_digits(lx, false);
+      token_t tok = make_token(lx, NY_T_NUMBER, start);
+      tok.hash = 0;
+      return tok;
+    }
+    if (c == '0' && (src[lx->pos] == 'o' || src[lx->pos] == 'O')) {
+      lx->pos++;
+      lx->col++;
+      if (!ny_is_octdigit(src[lx->pos])) {
+        lexer_error(lx, start, "malformed octal numeric constant",
+                    "octal literals need at least one 0..7 digit after 0o");
+        return make_token(lx, NY_T_ERROR, start);
+      }
+      while (ny_is_octdigit(src[lx->pos]) ||
+             ny_digit_sep_before_octdigit(src, lx->pos)) {
+        lx->pos++;
+        lx->col++;
+      }
+      lex_number_suffix_digits(lx, false);
+      token_t tok = make_token(lx, NY_T_NUMBER, start);
+      tok.hash = 0;
+      return tok;
+    }
+    lex_decimal_digits(lx);
+    if (src[lx->pos] == '.' && IS_DIGIT(src[lx->pos + 1])) {
+      lx->pos++;
+      lx->col++;
+      lex_decimal_digits(lx);
     }
     if (src[lx->pos] == 'e' || src[lx->pos] == 'E') {
-      size_t save_pos = lx->pos;
-      int save_line = lx->line;
-      int save_col = lx->col;
       lx->pos++;
       lx->col++;
       if (src[lx->pos] == '+' || src[lx->pos] == '-') {
@@ -506,54 +676,34 @@ token_t lexer_next(lexer_t *lx) {
         lx->col++;
       }
       if (IS_DIGIT(src[lx->pos])) {
-        while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
-               ny_is_digit8((const unsigned char *)(src + lx->pos))) {
-          lx->pos += 8;
-          lx->col += 8;
-        }
-        while (IS_DIGIT(src[lx->pos])) {
-          lx->pos++;
-          lx->col++;
-        }
+        lex_decimal_digits(lx);
       } else {
-        lx->pos = save_pos;
-        lx->line = save_line;
-        lx->col = save_col;
+        lexer_error(
+            lx, start, "malformed numeric constant",
+            "exponent must be followed by at least one digit (e.g. 1.0e10)");
+        return make_token(lx, NY_T_ERROR, start);
       }
     }
-    char s = src[lx->pos];
-    if ((s == 'i' || s == 'I' || s == 'u' || s == 'U' || s == 'f' ||
-         s == 'F') &&
-        IS_DIGIT(src[lx->pos + 1])) {
-      lx->pos++;
-      lx->col++;
-      while ((const unsigned char *)(src + lx->pos) + 8 <= end &&
-             ny_is_digit8((const unsigned char *)(src + lx->pos))) {
-        lx->pos += 8;
-        lx->col += 8;
-      }
-      while (IS_DIGIT(src[lx->pos])) {
-        lx->pos++;
-        lx->col++;
-      }
-    }
+    lex_number_suffix_digits(lx, true);
     token_t tok = make_token(lx, NY_T_NUMBER, start);
     tok.hash = 0;
     return tok;
   }
   if (c == '"' || c == '\'') {
     char quote = c;
+    bool terminated = false;
     if (peek(lx) == quote && peek_next(lx) == quote) {
       advance(lx);
       advance(lx);
-      while (!(peek(lx) == quote && peek_next(lx) == quote &&
-               lx->src[lx->pos + 2] == quote) &&
-             peek(lx) != '\0') {
-        advance(lx);
-      }
-      if (peek(lx) == quote) {
-        advance(lx);
-        advance(lx);
+      while (peek(lx) != '\0') {
+        if (peek(lx) == quote && peek_next(lx) == quote &&
+            lx->src[lx->pos + 2] == quote) {
+          advance(lx);
+          advance(lx);
+          advance(lx);
+          terminated = true;
+          break;
+        }
         advance(lx);
       }
     } else {
@@ -562,10 +712,16 @@ token_t lexer_next(lexer_t *lx) {
           advance(lx);
         advance(lx);
       }
-      if (peek(lx) == quote)
+      if (peek(lx) == quote) {
         advance(lx);
+        terminated = true;
+      }
     }
-    return make_token(lx, NY_T_STRING, start);
+    if (terminated)
+      return make_token(lx, NY_T_STRING, start);
+    lexer_error(lx, start, "unterminated string literal",
+                "check for missing closing quote");
+    return make_token(lx, NY_T_ERROR, start);
   }
   switch (c) {
   case '(':
@@ -586,8 +742,7 @@ token_t lexer_next(lexer_t *lx) {
     if (match(lx, '.')) {
       if (match(lx, '.'))
         return make_token(lx, NY_T_ELLIPSIS, start);
-      lx->pos--;
-      lx->col--;
+      return make_token(lx, NY_T_RANGE, start);
     }
     return make_token(lx, NY_T_DOT, start);
   case '-':
@@ -599,12 +754,24 @@ token_t lexer_next(lexer_t *lx) {
       return make_token(lx, NY_T_MINUS_MINUS, start);
     return make_token(lx, NY_T_MINUS, start);
   case '+':
+    if (peek(lx) == '%') {
+      advance(lx);
+      lexer_error(lx, start, "wrapping operator '+%' is not supported",
+                  "standard operators wrap on overflow for unsigned types");
+      return lexer_next(lx);
+    }
     if (match(lx, '='))
       return make_token(lx, NY_T_PLUS_EQ, start);
     if (match(lx, '+'))
       return make_token(lx, NY_T_PLUS_PLUS, start);
     return make_token(lx, NY_T_PLUS, start);
   case '*':
+    if (peek(lx) == '%') {
+      advance(lx);
+      lexer_error(lx, start, "wrapping operator '*%' is not supported",
+                  "standard operators wrap on overflow for unsigned types");
+      return lexer_next(lx);
+    }
     if (match(lx, '='))
       return make_token(lx, NY_T_STAR_EQ, start);
     return make_token(lx, NY_T_STAR, start);
@@ -659,7 +826,7 @@ token_t lexer_next(lexer_t *lx) {
     }
     if (match(lx, '>')) {
       lexer_error(lx, start, "fat arrow operator '=>' is not supported",
-                  "use '->' for match cases");
+                  "use '->' for case and match arms");
       return lexer_next(lx);
     }
     return make_token(lx, NY_T_ASSIGN, start);
@@ -686,7 +853,9 @@ token_t lexer_next(lexer_t *lx) {
       return make_token(lx, NY_T_PIPE, start);
     return make_token(lx, NY_T_BITOR, start);
   case '^':
-    return make_token(lx, NY_T_BITXOR, start);
+    if (match(lx, '^'))
+      return make_token(lx, NY_T_BITXOR, start);
+    return make_token(lx, NY_T_POW, start);
   case '~':
     return make_token(lx, NY_T_BITNOT, start);
   case ':':
@@ -710,6 +879,17 @@ token_t lexer_next(lexer_t *lx) {
   return lexer_next(lx);
 }
 
+char *dup_token_lexeme(token_t t) {
+  if (!t.lexeme || t.len == 0)
+    return NULL;
+  char *out = malloc(t.len + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, t.lexeme, t.len);
+  out[t.len] = '\0';
+  return out;
+}
+
 char *dup_string_token(token_t t) {
   if (t.len < 2)
     return NULL;
@@ -720,12 +900,10 @@ char *dup_string_token(token_t t) {
   }
   if (t.len < head + tail)
     return NULL;
-  size_t out_len = t.len - head - tail;
-  char *out = malloc(out_len + 1);
-  if (!out)
-    return NULL;
-  memcpy(out, t.lexeme + head, out_len);
-  out[out_len] = '\0';
+  token_t inner = t;
+  inner.lexeme += head;
+  inner.len -= head + tail;
+  char *out = dup_token_lexeme(inner);
   return out;
 }
 
@@ -737,20 +915,49 @@ char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
       *out_last_tok = lexer_next(lx);
     return name;
   }
-  if (t.kind != NY_T_IDENT)
+  if (t.kind != NY_T_IDENT && t.kind != NY_T_NUMBER) {
+    if (out_last_tok)
+      *out_last_tok = t;
     return NULL;
+  }
   size_t cap = 64, len = 0;
   char *buf = malloc(cap);
-  if (!buf)
+  if (!buf) {
+    if (out_last_tok)
+      *out_last_tok = t;
     return NULL;
+  }
   memcpy(buf, t.lexeme, t.len);
   len += t.len;
+
+  /* Absorb following chars if it was a digit-starting ident (e.g. '3d') */
+  token_t next;
+  while ((next = lexer_next(lx)).kind == NY_T_IDENT &&
+         next.col == (int)(t.col + t.len)) {
+    if (len + next.len + 1 > cap) {
+      cap = (len + next.len + 1) * 2;
+      char *nb = realloc(buf, cap);
+      if (!nb) {
+        free(buf);
+        if (out_last_tok)
+          *out_last_tok = next;
+        return NULL;
+      }
+      buf = nb;
+    }
+    memcpy(buf + len, next.lexeme, next.len);
+    len += next.len;
+    t = next;
+  }
+
+  token_t tok = next;
   for (;;) {
-    token_t tok = lexer_next(lx);
     if (tok.kind == NY_T_DOT) {
       token_t id = lexer_next(lx);
-      if (id.kind != NY_T_IDENT) {
+      if (id.kind != NY_T_IDENT && id.kind != NY_T_NUMBER) {
         free(buf);
+        if (out_last_tok)
+          *out_last_tok = id;
         return NULL;
       }
       if (len + 1 + id.len + 1 > cap) {
@@ -758,6 +965,8 @@ char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
         char *nb = realloc(buf, cap);
         if (!nb) {
           free(buf);
+          if (out_last_tok)
+            *out_last_tok = id;
           return NULL;
         }
         buf = nb;
@@ -765,6 +974,27 @@ char *parse_use_name(lexer_t *lx, token_t *entry_tok, token_t *out_last_tok) {
       buf[len++] = '.';
       memcpy(buf + len, id.lexeme, id.len);
       len += id.len;
+
+      /* Re-absorb for segments like '3d' after dot */
+      t = id;
+      while ((next = lexer_next(lx)).kind == NY_T_IDENT &&
+             next.col == (int)(t.col + t.len)) {
+        if (len + next.len + 1 > cap) {
+          cap = (len + next.len + 1) * 2;
+          char *nb = realloc(buf, cap);
+          if (!nb) {
+            free(buf);
+            if (out_last_tok)
+              *out_last_tok = next;
+            return NULL;
+          }
+          buf = nb;
+        }
+        memcpy(buf + len, next.lexeme, next.len);
+        len += next.len;
+        t = next;
+      }
+      tok = next;
     } else {
       if (out_last_tok)
         *out_last_tok = tok;

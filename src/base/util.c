@@ -5,9 +5,11 @@
 #include "base/util.h"
 #include "base/common.h"
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -30,8 +32,7 @@
 #endif
 
 static int ny_is_sep(char c) { return c == '/' || c == '\\'; }
-static const char *ny_first_nonempty_env(const char *const *names,
-                                         size_t name_count) {
+static const char *ny_first_nonempty_env(const char *const *names, size_t name_count) {
   if (!names)
     return NULL;
   for (size_t i = 0; i < name_count; ++i) {
@@ -57,8 +58,35 @@ static char *ny_last_sep(char *s) {
   return (a > b) ? a : b;
 }
 
-void ny_join_path(char *out, size_t out_len, const char *dir,
-                  const char *name) {
+bool ny_compiler_asserts_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached != 0;
+  cached = ny_env_enabled("NYTRIX_COMPILER_ASSERTS") ? 1 : 0;
+  return cached != 0;
+}
+
+void ny_compiler_assert_fail(const char *file, int line, const char *func, const char *cond,
+                             const char *fmt, ...) {
+  fprintf(stderr, "%sInternal compiler assertion failed:%s %s:%d in %s\n",
+          clr(NY_CLR_RED), clr(NY_CLR_RESET), file ? file : "<unknown>", line,
+          func ? func : "<unknown>");
+  if (cond && *cond)
+    fprintf(stderr, "  condition: %s\n", cond);
+  if (fmt && *fmt) {
+    fprintf(stderr, "  detail: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+  }
+  fprintf(stderr, "  hint: rerun with --dump-on-error or keep NYTRIX_COMPILER_ASSERTS=1 under stress\n");
+  fflush(stderr);
+  abort();
+}
+
+void ny_join_path(char *out, size_t out_len, const char *dir, const char *name) {
   if (!out || out_len == 0)
     return;
   if (!dir || !*dir) {
@@ -75,8 +103,7 @@ void ny_join_path(char *out, size_t out_len, const char *dir,
     snprintf(out, out_len, "%s%s", dir, name ? name : "");
 }
 
-bool ny_extract_line(const char *src, int line, const char **out_start,
-                     size_t *out_len) {
+bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len) {
   if (!src || line <= 0 || !out_start || !out_len)
     return false;
   const char *cur = src;
@@ -119,30 +146,18 @@ const char *ny_get_temp_dir(void) {
     if (t)
       return ny_cache_path(buf, sizeof(buf), t);
   }
-  return ny_cache_path(buf, sizeof(buf), "/tmp");
+#ifdef P_tmpdir
+  return ny_cache_path(buf, sizeof(buf), P_tmpdir);
+#else
+  return ny_cache_path(buf, sizeof(buf), ".");
+#endif
 #endif
 }
 char *ny_read_file(const char *path) {
-  if (!path)
+  size_t read = 0;
+  char *content = ny_read_file_raw(path, &read);
+  if (!content)
     return NULL;
-  FILE *f = fopen(path, "rb");
-  if (!f)
-    return NULL;
-  fseek(f, 0, SEEK_END);
-  long size = ftell(f);
-  if (size < 0) {
-    fclose(f);
-    return NULL;
-  }
-  fseek(f, 0, SEEK_SET);
-  char *content = malloc((size_t)size + 1);
-  if (!content) {
-    fclose(f);
-    return NULL;
-  }
-  size_t read = fread(content, 1, (size_t)size, f);
-  content[read] = '\0';
-  fclose(f);
   if (read >= 2 && content[0] == '#' && content[1] == '!') {
     char *newline = strchr(content, '\n');
     if (newline) {
@@ -274,7 +289,7 @@ void ny_write_text_file(const char *path, const char *contents) {
 static bool nytrix_has_sources(const char *root) {
   char probe[8192];
   snprintf(probe, sizeof(probe), "%s/src/rt/runtime.h", root);
-  return access(probe, R_OK) == 0;
+  return ny_access(probe, R_OK) == 0;
 }
 
 char *ny_get_executable_path(void) {
@@ -342,27 +357,34 @@ const char *ny_src_root(void) {
   }
   char *exe_dir = ny_get_executable_dir();
   if (exe_dir) {
-    char tmp[PATH_MAX];
-    snprintf(tmp, sizeof(tmp), "%s", exe_dir);
-    size_t len = strlen(tmp);
-    if (len >= 6 && ny_is_sep(tmp[len - 6]) &&
-        strcmp(tmp + len - 5, "build") == 0) {
-      tmp[len - 6] = '\0';
+    char cur[PATH_MAX];
+    snprintf(cur, sizeof(cur), "%s", exe_dir);
+    for (;;) {
+      if (nytrix_has_sources(cur)) {
+        return ny_cache_path(buf, sizeof(buf), cur);
+      }
+      char *slash = ny_last_sep(cur);
+      if (!slash || slash == cur)
+        break;
+      *slash = '\0';
     }
-    if (nytrix_has_sources(tmp)) {
-      return ny_cache_path(buf, sizeof(buf), tmp);
-    }
-    snprintf(tmp, sizeof(tmp), "%s/../share/nytrix", exe_dir);
-    if (nytrix_has_sources(tmp)) {
-      return ny_cache_path(buf, sizeof(buf), tmp);
+    {
+      char tmp[PATH_MAX];
+      snprintf(tmp, sizeof(tmp), "%s/../share/nytrix", exe_dir);
+      if (nytrix_has_sources(tmp)) {
+        return ny_cache_path(buf, sizeof(buf), tmp);
+      }
+      snprintf(tmp, sizeof(tmp), "%s/../../share/nytrix", exe_dir);
+      if (nytrix_has_sources(tmp)) {
+        return ny_cache_path(buf, sizeof(buf), tmp);
+      }
     }
   }
 #ifndef _WIN32
   const char *install_paths[] = {"/usr/share/nytrix", "/usr/local/share/nytrix",
-                                 "/opt/nytrix/share",
+                                 "/opt/nytrix/share/nytrix", "/opt/nytrix/share",
                                  "/opt/homebrew/share/nytrix"};
-  for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]);
-       i++) {
+  for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]); i++) {
     if (nytrix_has_sources(install_paths[i])) {
       return ny_cache_path(buf, sizeof(buf), install_paths[i]);
     }
@@ -394,10 +416,9 @@ char *ny_strdup(const char *s) {
 bool ny_env_is_truthy(const char *v) {
   if (!v || !*v)
     return false;
-  if (strcmp(v, "0") == 0 || strcmp(v, "false") == 0 ||
-      strcmp(v, "False") == 0 || strcmp(v, "FALSE") == 0 ||
-      strcmp(v, "off") == 0 || strcmp(v, "OFF") == 0 || strcmp(v, "no") == 0 ||
-      strcmp(v, "NO") == 0) {
+  if (strcmp(v, "0") == 0 || strcmp(v, "false") == 0 || strcmp(v, "False") == 0 ||
+      strcmp(v, "FALSE") == 0 || strcmp(v, "off") == 0 || strcmp(v, "OFF") == 0 ||
+      strcmp(v, "no") == 0 || strcmp(v, "NO") == 0) {
     return false;
   }
   return true;
@@ -415,8 +436,43 @@ bool ny_env_enabled_default_on(const char *name) {
     return true;
   return ny_env_is_truthy(v);
 }
-void ny_str_list_append(char ***list, size_t *len, size_t *cap,
-                        const char *str) {
+
+const char *ny_env_str(const char *name) {
+  if (!name || !*name)
+    return NULL;
+  return getenv(name);
+}
+
+const char *ny_env_str_nonempty(const char *name) {
+  const char *v = ny_env_str(name);
+  return (v && *v) ? v : NULL;
+}
+
+int ny_env_int(const char *name, int fallback) {
+  const char *v = ny_env_str_nonempty(name);
+  if (!v)
+    return fallback;
+  char *end = NULL;
+  long x = strtol(v, &end, 10);
+  if (end == v)
+    return fallback;
+  if (x < INT32_MIN)
+    x = INT32_MIN;
+  if (x > INT32_MAX)
+    x = INT32_MAX;
+  return (int)x;
+}
+
+int ny_env_int_range(const char *name, int fallback, int minv, int maxv) {
+  int v = ny_env_int(name, fallback);
+  if (v < minv)
+    return minv;
+  if (v > maxv)
+    return maxv;
+  return v;
+}
+
+void ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str) {
   if (*len == *cap) {
     size_t new_cap = *cap ? (*cap * 2) : 8;
     char **tmp = realloc(*list, new_cap * sizeof(char *));
@@ -658,8 +714,7 @@ bool ny_log_should_emit(const char *fmt) {
   return true;
 }
 
-void ny_print_snippet(const char *src, int line, int col, int len,
-                      const char *color) {
+void ny_print_snippet(const char *src, int line, int col, int len, const char *color) {
   if (!src || line <= 0 || col <= 0)
     return;
   const char *line_start = NULL;
@@ -703,8 +758,8 @@ void ny_print_snippet(const char *src, int line, int col, int len,
   const char *gray = clr(NY_CLR_GRAY);
   const char *reset = clr(NY_CLR_RESET);
   const char *mark = clr(color);
-  fprintf(stderr, "  %s%*d%s | %s%s%s\n", gray, width, line, reset,
-          prefix ? "..." : "", buf, suffix ? "..." : "");
+  fprintf(stderr, "  %s%*d%s | %s%s%s\n", gray, width, line, reset, prefix ? "..." : "", buf,
+          suffix ? "..." : "");
   size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
   fprintf(stderr, "  %s%*s%s | ", gray, width, "", reset);
   for (size_t i = 0; i < caret_pad; i++)
