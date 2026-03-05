@@ -50,6 +50,12 @@ void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_hint(const char *fmt, ...);
 void ny_diag_fix(const char *fmt, ...);
 void ny_diag_note_tok(token_t tok, const char *fmt, ...);
+/* Enhanced error reporting */
+void ny_diag_error_with_context(token_t tok, const char *primary_msg,
+                                const char *common_cause,
+                                const char *fix_suggestion);
+void ny_diag_type_mismatch(token_t tok, const char *expected, const char *got,
+                           const char *context);
 LLVMTypeRef resolve_type_name(codegen_t *cg, const char *name, token_t tok);
 LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *name, token_t tok);
 bool ny_type_is_tagged(const char *name);

@@ -396,7 +396,7 @@ int64_t __trace_get_frames(int64_t *f, int64_t *l, int64_t *c, int64_t *fn,
   return (int64_t)want;
 }
 
-int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
+int64_t __trace_enter(int64_t func, int64_t file, int64_t line) {
   g_trace_func = func;
   g_trace_file = file;
   g_trace_line = line;
@@ -405,7 +405,7 @@ int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
   return 0;
 }
 
-int64_t rt_trace_exit(void) { return 0; }
+int64_t __trace_exit(void) { return 0; }
 
 int64_t rt_trace_get_call_stack(int64_t *funcs, int64_t *files, int64_t *lines,
                                 int max_count) {
@@ -831,22 +831,66 @@ int64_t __panic(int64_t msg_ptr) {
     fputc('\n', stderr);
   }
   print_panic_msg(msg_ptr);
+
+  /* Print Nytrix Call Stack */
+  if (g_trace_len > 0) {
+    const char *cyan = color_mode ? clr(NY_CLR_CYAN) : "";
+    const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+
+    fprintf(stderr, "\n%s--- Nytrix Call Stack (%zu) ---%s\n", cyan,
+            g_trace_len, rs);
+
+    /* Print from oldest to newest */
+    size_t start = (g_trace_len < TRACE_RING) ? 0 : g_trace_idx;
+    size_t count = g_trace_len;
+    int frame_num = (int)(g_trace_len - 1);
+
+    for (size_t i = 0; i < count; i++) {
+      size_t idx = (start + i) % TRACE_RING;
+      int64_t file = g_trace_files[idx];
+      int64_t line = g_trace_lines[idx];
+      int64_t col = g_trace_cols[idx];
+      int64_t func = g_trace_funcs[idx];
+
+      if (is_v_str(file)) {
+        const char *fname = (const char *)(uintptr_t)file;
+        size_t flen = trace_str_len(file);
+        int64_t l = is_int(line) ? rt_untag_v(line) : line;
+        int64_t c = is_int(col) ? rt_untag_v(col) : col;
+
+        fprintf(stderr, "  %s#%d%s %.*s:%ld:%ld", cyan, frame_num - (int)i, rs,
+                (int)flen, fname, (long)l, (long)c);
+
+        if (is_v_str(func)) {
+          const char *fn = (const char *)(uintptr_t)func;
+          size_t fnlen = trace_str_len(func);
+          fprintf(stderr, " (fn %.*s)", (int)fnlen, fn);
+        }
+        fputc('\n', stderr);
+
+        /* Print snippet for recent frames */
+        if (i >= count - 5 && i < count) {
+          print_rt_snippet(file, line, col);
+        }
+      }
+    }
+  }
+
+  /* Print last location with snippet */
   if (is_v_str(g_trace_file)) {
+    const char *cyan = color_mode ? clr(NY_CLR_CYAN) : "";
+    const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
+    fprintf(stderr, "\n%sLast Nytrix location:%s ", cyan, rs);
     print_trace_entry(g_trace_file, g_trace_line, g_trace_col, g_trace_func,
-                      "  at ");
+                      "");
     print_rt_snippet(g_trace_file, g_trace_line, g_trace_col);
   }
+
   if (has_env) {
     g_panic_value = msg_ptr;
     panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
     __run_defers_to((int64_t)((pe.defer_base << 1) | 1));
     NY_LONGJMP(*pe.env, 1);
-  }
-  if (g_trace_len > 0) {
-    const char *cyan = color_mode ? clr(NY_CLR_CYAN) : "";
-    const char *rs = color_mode ? clr(NY_CLR_RESET) : "";
-    fprintf(stderr, "\n%sLast Nytrix frames:%s\n", cyan, rs);
-    __trace_dump(((int64_t)10 << 1) | 1); // last 10
   }
   fprintf(stderr, "\n");
   exit(1);

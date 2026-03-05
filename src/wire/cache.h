@@ -4,6 +4,9 @@
 #include <llvm-c/Core.h>
 #include <stdbool.h>
 
+/* Cache path utilities */
+bool ny_cache_path_is_ir(const char *cache_path);
+
 bool ny_jit_cache_enabled(void);
 char *ny_jit_cache_path(const char *source, const char *stdlib_path,
                         unsigned long std_src_hash, int opt_level, int opt_dce,
