@@ -1,6 +1,6 @@
 ;; Keywords: sound source memory
 
-module std.os.audio.source.memory (
+module std.os.sound.source.memory (
    make
 )
 

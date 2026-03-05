@@ -1,13 +1,13 @@
 ;; Keywords: sound diagnostics backend
 
-module std.os.audio.diag (
+module std.os.sound.diag (
    probe, probe_text, print_probe
 )
 
 use std.core *
 use std.core.dict_mod *
 use std.os *
-use std.os.audio.backend as audio_backend
+use std.os.sound.backend as audio_backend
 
 fn probe(){
    "Returns a dictionary describing detected sound backend capabilities."
@@ -25,6 +25,6 @@ fn probe_text(){
 }
 
 fn print_probe(){
-   "Prints std.os.audio diagnostics summary."
-   print("std.os.audio.diag:", probe_text())
+   "Prints std.os.sound diagnostics summary."
+   print("std.os.sound.diag:", probe_text())
 }

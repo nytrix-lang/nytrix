@@ -9,7 +9,7 @@ use std.core *
 fn _write_str(s){
    "Internal: writes a raw string to stdout without conversion."
    def n = load64(s, -16)
-   if(n > 0){ __sys_write_off(1, s, n, 0) }
+   if(n > 0){ __write_off(1, s, n, 0) }
 }
 
 fn _print_join3(a, b, c){

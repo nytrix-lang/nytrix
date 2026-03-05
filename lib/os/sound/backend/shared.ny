@@ -1,7 +1,7 @@
-;; Keywords: audio backend shared
-;; Shared helpers for platform audio backends.
+;; Keywords: sound backend shared
+;; Shared helpers for platform sound backends.
 
-module std.os.audio.backend.shared (
+module std.os.sound.backend.shared (
    append_output_device, init_output_device, probe_linux_library, probe_linux_library_once
 )
 

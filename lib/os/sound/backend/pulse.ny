@@ -1,6 +1,6 @@
-;; Keywords: audio pulse linux io
+;; Keywords: sound pulse linux io
 
-module std.os.audio.backend.pulse (
+module std.os.sound.backend.pulse (
    is_available, init, shutdown,
    stream_open, stream_start, stream_stop,
    write
@@ -11,7 +11,7 @@ use std.core.dict_mod *
 use std.core.mem *
 use std.str *
 use std.util.common as common
-use std.os.audio.backend.shared as backend_shared
+use std.os.sound.backend.shared as backend_shared
 
 if(comptime{ __os_name() == "linux" }){
    #link "libpulse-simple.so"
@@ -49,7 +49,7 @@ fn is_available(){
 fn init(ctx){
    "Registers the PulseAudio backend in the shared audio context."
    if(!is_available()){ return 0 }
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: init") }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: Pulse: init") }
    backend_shared.append_output_device(ctx, "PulseAudio Default", "pulse_default")
 }
 
@@ -110,7 +110,7 @@ fn stream_open(stream){
    def stream_name_c = cstr_dup(stream_name)
 
    if(env("NY_AUDIO_DEBUG")){
-      print("Audio: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format))
+      print("Sound: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format))
    }
 
    if(env("NY_AUDIO_DEBUG")){
@@ -118,7 +118,7 @@ fn stream_open(stream){
    }
    def pa = pa_simple_new(0, app_name_c, PA_STREAM_PLAYBACK, out_dev_c, stream_name_c, ss, 0, attr, err_ptr)
    if(env("NY_AUDIO_DEBUG")){
-      print("Audio: Pulse: pa_simple_new returned " + to_str(pa))
+      print("Sound: Pulse: pa_simple_new returned " + to_str(pa))
    }
    if(pa == 0){
       if(env("NY_AUDIO_DEBUG")){
@@ -126,7 +126,7 @@ fn stream_open(stream){
          mut msg = f"pa_simple_new failed (error {errno})"
          def err_msg = pa_strerror(errno)
          if(err_msg != 0){ msg = msg + ": " + cstr_to_str(err_msg) }
-         print("Audio: Pulse: " + msg)
+         print("Sound: Pulse: " + msg)
       }
       if(app_name_c){ free(app_name_c) }
       if(stream_name_c){ free(stream_name_c) }
@@ -137,7 +137,7 @@ fn stream_open(stream){
       return false
    }
 
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: Pulse: Stream opened successfully.") }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: Pulse: Stream opened successfully.") }
 
    if(app_name_c){ free(app_name_c) }
    if(stream_name_c){ free(stream_name_c) }

@@ -7,6 +7,7 @@ module std.ui.gfx.vk.pipeline (
 
 use std.core *
 use std.core.mem *
+use std.os *
 use std.os.process as proc
 use std.ui.gfx.vk.state *
 use std.ui.gfx.vk.vulkan *

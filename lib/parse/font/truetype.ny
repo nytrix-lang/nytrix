@@ -441,9 +441,9 @@ if(comptime{__main()}){
    }
    print("  FreeType library loaded.")
 
-   def font_path = "etc/assets/font/monocraft.ttf"
+   def font_path = "etc/assets/fonts/monocraft.ttf"
    if(!file_exists(font_path)){
-      print("  SKIPPED: etc/assets/font/monocraft.ttf missing")
+      print("  SKIPPED: etc/assets/fonts/monocraft.ttf missing")
       return
    }
 
