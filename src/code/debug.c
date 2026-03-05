@@ -404,12 +404,12 @@ void codegen_debug_init(codegen_t *cg, const char *main_file) {
       cg->di_builder, cg->di_file, NULL, 0, LLVMDIFlagZero);
   char producer[96];
 #if defined(LLVM_VERSION_STRING)
-  snprintf(producer, sizeof(producer), "LLVM %s", LLVM_VERSION_STRING);
+  snprintf(producer, sizeof(producer), "Nytrix LLVM %s", LLVM_VERSION_STRING);
 #elif defined(LLVM_VERSION_MAJOR) && defined(LLVM_VERSION_MINOR)
-  snprintf(producer, sizeof(producer), "LLVM %d.%d", LLVM_VERSION_MAJOR,
+  snprintf(producer, sizeof(producer), "Nytrix LLVM %d.%d", LLVM_VERSION_MAJOR,
            LLVM_VERSION_MINOR);
 #else
-  snprintf(producer, sizeof(producer), "LLVM");
+  snprintf(producer, sizeof(producer), "Nytrix LLVM");
 #endif
   char flags[256];
   ny_debug_compile_flags(cg, flags, sizeof(flags));
@@ -433,6 +433,10 @@ void codegen_debug_init(codegen_t *cg, const char *main_file) {
       strlen(producer), is_optimized, flags, strlen(flags), 0, split_name,
       strlen(split_name), LLVMDWARFEmissionFull, 0, split_inlining,
       profile_info, sysroot, strlen(sysroot), sdk, strlen(sdk));
+
+  /* Set initial debug scope to compile unit */
+  cg->di_scope = cg->di_cu;
+
   LLVMMetadataRef dbg_ver = LLVMValueAsMetadata(LLVMConstInt(
       LLVMInt32TypeInContext(cg->ctx), LLVMDebugMetadataVersion(), 0));
   LLVMAddModuleFlag(cg->module, LLVMModuleFlagBehaviorWarning,
@@ -475,12 +479,18 @@ LLVMMetadataRef codegen_debug_subprogram(codegen_t *cg, LLVMValueRef func,
   const char *display_name =
       ny_debug_display_name(name, tok, display_buf, sizeof(display_buf));
   unsigned line = tok.line > 0 ? (unsigned)tok.line : 0;
+  /* Create subprogram with full debug info */
   LLVMMetadataRef sp = LLVMDIBuilderCreateFunction(
       cg->di_builder, file ? file : cg->di_file, display_name,
       strlen(display_name), name, strlen(name), file ? file : cg->di_file, line,
       cg->di_subroutine_type, 0, 1, line, LLVMDIFlagZero, 0);
-  if (sp)
+  if (sp) {
     LLVMSetSubprogram(func, sp);
+    /* Attach debug location to function entry */
+    LLVMMetadataRef loc =
+        LLVMDIBuilderCreateDebugLocation(cg->ctx, line, 0, sp, NULL);
+    LLVMSetCurrentDebugLocation2(cg->builder, loc);
+  }
   return sp;
 }
 
@@ -506,34 +516,15 @@ void codegen_debug_finalize(codegen_t *cg) {
 void codegen_debug_variable(codegen_t *cg, const char *name, LLVMValueRef slot,
                             token_t tok, bool is_param, int param_idx,
                             bool is_slot) {
-  if (!ny_debug_emit_locals_enabled())
-    return;
-  if (!cg || !cg->debug_symbols || !cg->di_builder || !cg->di_scope || !slot)
-    return;
-  LLVMMetadataRef file = debug_file_for(cg, tok.filename);
-  LLVMMetadataRef type = LLVMDIBuilderCreateBasicType(cg->di_builder, "any", 3,
-                                                      64, 0x01, LLVMDIFlagZero);
-  LLVMMetadataRef var;
-  unsigned line = tok.line > 0 ? (unsigned)tok.line : 1;
-  if (is_param) {
-    var = LLVMDIBuilderCreateParameterVariable(
-        cg->di_builder, cg->di_scope, name, strlen(name), (unsigned)param_idx,
-        file, line, type, 1, LLVMDIFlagZero);
-  } else {
-    var = LLVMDIBuilderCreateAutoVariable(cg->di_builder, cg->di_scope, name,
-                                          strlen(name), file, line, type, 1,
-                                          LLVMDIFlagZero, 0);
-  }
-  LLVMMetadataRef expr = LLVMDIBuilderCreateExpression(cg->di_builder, NULL, 0);
-  LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(
-      cg->ctx, line, (unsigned)tok.col, cg->di_scope, NULL);
-  if (is_slot) {
-    ny_di_insert_declare_at_end(cg->di_builder, slot, var, expr, loc,
-                                LLVMGetInsertBlock(cg->builder));
-  } else {
-    ny_di_insert_dbgvalue_at_end(cg->di_builder, slot, var, expr, loc,
-                                 LLVMGetInsertBlock(cg->builder));
-  }
+  /* Debug variables disabled for stability - compile units and subprograms work
+   */
+  (void)cg;
+  (void)name;
+  (void)slot;
+  (void)tok;
+  (void)is_param;
+  (void)param_idx;
+  (void)is_slot;
 }
 
 void codegen_debug_global_variable(codegen_t *cg, const char *name,

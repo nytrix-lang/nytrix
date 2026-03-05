@@ -31,7 +31,7 @@ typedef struct {
 } ny_autolink_entry_t;
 
 static const ny_autolink_entry_t ny_autolink_table[] = {
-    /* Audio */
+    /* Sound */
     {"alsa/", "alsa", "libasound.so.2"},
     {"sound/", "alsa", "libasound.so.2"},
     {"jack/", "jack", "libjack.so.0"},
@@ -493,7 +493,7 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
   }
 
   if (verbose_enabled >= 1) {
-    fprintf(stderr, "[ffi:clang] extern #include: path=%s prefix=%s lib=%s%s\n",
+    fprintf(stderr, "[ffi:clang] #include: path=%s prefix=%s lib=%s%s\n",
             header_path, prefix ? prefix : "(none)",
             resolved_lib ? resolved_lib : "(none)", auto_lib ? " [auto]" : "");
   }

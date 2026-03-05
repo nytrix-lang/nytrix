@@ -722,8 +722,6 @@ static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
     return false;
   if (!opt->input_file)
     return false;
-  if (opt->emit_only)
-    return false;
   if (opt->run_jit)
     return false; // Disable for JIT to avoid linking issues
   return true;
@@ -846,16 +844,7 @@ static NY_UNUSED_FUNC bool ny_wait_module_jobs(ny_module_job *jobs,
 }
 #endif
 
-static bool ny_cache_path_is_ir(const char *cache_path) {
-  if (!cache_path)
-    return false;
-  const char *ext = strrchr(cache_path, '.');
-  if (!ext)
-    return false;
-  return strcmp(ext, ".ll") == 0 || strcmp(ext, ".ir") == 0 ||
-         strcmp(ext, ".llvm") == 0;
-}
-
+/* ny_cache_path_is_ir() moved to cache.c - use from there */
 static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
                                  const char *cache_path) {
   if (!ctx || !main_mod || !cache_path)
@@ -874,7 +863,7 @@ static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
     parsed = (LLVMParseIRInContext(ctx, buf, &mod, &msg) == 0);
     buf_owned_by_module = parsed;
   } else {
-    parsed = (LLVMParseBitcodeInContext2(ctx, buf, &mod) == 0);
+    parsed = (LLVMGetBitcodeModuleInContext2(ctx, buf, &mod) == 0);
   }
   if (!parsed && msg) {
     LLVMDisposeMessage(msg);
@@ -904,7 +893,7 @@ static bool ny_verify_bitcode(LLVMContextRef ctx, const char *bc_path) {
     return false;
   }
   LLVMModuleRef mod = NULL;
-  bool ok = (LLVMParseBitcodeInContext2(ctx, buf, &mod) == 0);
+  bool ok = (LLVMGetBitcodeModuleInContext2(ctx, buf, &mod) == 0);
   if (mod)
     LLVMDisposeModule(mod);
   LLVMDisposeMemoryBuffer(buf);
@@ -1458,14 +1447,21 @@ int ny_pipeline_run(ny_options *opt) {
     opt->opt_pipeline = NULL;
     opt->opt_dce = 0;
   }
-  bool fast_compiler = ny_env_enabled("NYTRIX_FAST_COMPILER");
-  if (fast_compiler) {
-    opt->opt_level = 0;
+
+  /* Low-overhead compiler mode for development iteration. */
+  bool low_overhead = ny_env_enabled("NYTRIX_FAST_COMPILE");
+  bool fast_compiler = low_overhead || ny_env_enabled("NYTRIX_FAST_COMPILER");
+  if (low_overhead || fast_compiler) {
+    opt->opt_level = low_overhead ? 0 : 1;
     opt->opt_pipeline = NULL;
     opt->opt_loops = 0;
     opt->opt_autotune = 0;
     opt->verify_module = false;
     opt->debug_symbols = false;
+    /* Enable JIT caching for faster subsequent runs */
+    setenv("NYTRIX_JIT_CACHE", "1", 0);
+    setenv("NYTRIX_JIT_OPT_LEVEL", low_overhead ? "0" : "1", 0);
+    setenv("NYTRIX_JIT_FAST_ISEL", "1", 0);
   }
   verbose_enabled = opt->verbose;
   clock_t t_start = 0;
@@ -1737,7 +1733,8 @@ int ny_pipeline_run(ny_options *opt) {
   NY_LOG_V2("Initializing codegen_t for module 'nytrix'\n");
   codegen_init(&cg, &prog, arena, "nytrix");
   codegen_collect_links(&cg, &prog);
-  cg.debug_symbols = opt->debug_symbols;
+  /* Debug symbols only for AOT output, not for JIT execution */
+  cg.debug_symbols = opt->debug_symbols && (opt->output_file != NULL);
   cg.debug_opt_level = opt->opt_level;
   if ((opt->run_jit || opt->output_file ||
        (opt->emit_only && !opt->output_file && !opt->run_jit)) &&
@@ -1800,16 +1797,22 @@ int ny_pipeline_run(ny_options *opt) {
   }
 #endif
 
-  const char *std_bc_cache = getenv("NYTRIX_STD_BC_CACHE");
+  const char *std_bc_cache = NULL;
   bool use_std_bc_cache = false;
-  /* NYTRIX_STD_BC_CACHE only works for JIT: it externalizes std definitions
-     and re-links from a pre-built IR cache. For native ELF output the std
-     definitions must be compiled into the module so the linker can resolve
-     them — skip the BC cache path when writing an output file. */
-  if (!opt->no_std && !opt->output_file && std_bc_cache && *std_bc_cache &&
-      access(std_bc_cache, R_OK) == 0) {
+  if (opt->std_bc_path && access(opt->std_bc_path, R_OK) == 0) {
     cg.skip_stdlib = true;
     use_std_bc_cache = true;
+    std_bc_cache = opt->std_bc_path;
+  } else {
+    const char *env_bc = getenv("NYTRIX_STD_BC_CACHE");
+    if (!opt->no_std && env_bc && *env_bc && access(env_bc, R_OK) == 0) {
+      cg.skip_stdlib = true;
+      use_std_bc_cache = true;
+      std_bc_cache = env_bc;
+    }
+  }
+  if (use_std_bc_cache) {
+    NY_LOG_INFO("linking stdlib bitcode cache: %s\n", std_bc_cache);
   }
   if (opt->emit_module) {
     cg.emit_module_name = opt->emit_module;
@@ -2010,6 +2013,10 @@ int ny_pipeline_run(ny_options *opt) {
         jit_level = 1;
       if (jit_level > eff_opt)
         eff_opt = jit_level;
+    }
+    /* Finalize debug info BEFORE optimization */
+    if (cg.di_builder) {
+      codegen_debug_finalize(&cg);
     }
     ny_llvm_optimize_module(cg.module, eff_opt, opt->opt_loops,
                             opt->opt_pipeline);

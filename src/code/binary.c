@@ -1,5 +1,6 @@
 #include "base/util.h"
 #include "priv.h"
+#include "systems.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -128,6 +129,71 @@ static const op_map_t op_map[] = {
     {"in", NULL, NULL, NY_BINOP_IN, false, NULL},
     {NULL, NULL, NULL, NY_BINOP_UNKNOWN, false, NULL}};
 
+static LLVMValueRef ny_emit_raw_int_binary(codegen_t *cg, const op_map_t *entry,
+                                           LLVMValueRef l, LLVMValueRef r) {
+  /* Complete tag elimination - pure i64 operations, no tagging */
+  if (!entry)
+    return NULL;
+
+  ny_binop_kind_t kind = entry->kind;
+  LLVMValueRef result = NULL;
+
+  switch (kind) {
+  case NY_BINOP_ADD:
+    result = LLVMBuildAdd(cg->builder, l, r, "raw_add");
+    break;
+  case NY_BINOP_SUB:
+    result = LLVMBuildSub(cg->builder, l, r, "raw_sub");
+    break;
+  case NY_BINOP_MUL:
+    result = LLVMBuildMul(cg->builder, l, r, "raw_mul");
+    break;
+  case NY_BINOP_DIV:
+    result = LLVMBuildSDiv(cg->builder, l, r, "raw_div");
+    break;
+  case NY_BINOP_MOD:
+    result = LLVMBuildSRem(cg->builder, l, r, "raw_mod");
+    break;
+  case NY_BINOP_AND:
+    result = LLVMBuildAnd(cg->builder, l, r, "raw_and");
+    break;
+  case NY_BINOP_OR:
+    result = LLVMBuildOr(cg->builder, l, r, "raw_or");
+    break;
+  case NY_BINOP_XOR:
+    result = LLVMBuildXor(cg->builder, l, r, "raw_xor");
+    break;
+  case NY_BINOP_SHL:
+    result = LLVMBuildShl(cg->builder, l, r, "raw_shl");
+    break;
+  case NY_BINOP_SHR:
+    result = LLVMBuildAShr(cg->builder, l, r, "raw_shr");
+    break;
+  case NY_BINOP_LT:
+    result = LLVMBuildICmp(cg->builder, LLVMIntSLT, l, r, "raw_lt");
+    break;
+  case NY_BINOP_LE:
+    result = LLVMBuildICmp(cg->builder, LLVMIntSLE, l, r, "raw_le");
+    break;
+  case NY_BINOP_GT:
+    result = LLVMBuildICmp(cg->builder, LLVMIntSGT, l, r, "raw_gt");
+    break;
+  case NY_BINOP_GE:
+    result = LLVMBuildICmp(cg->builder, LLVMIntSGE, l, r, "raw_ge");
+    break;
+  case NY_BINOP_EQ:
+    result = LLVMBuildICmp(cg->builder, LLVMIntEQ, l, r, "raw_eq");
+    break;
+  case NY_BINOP_NE:
+    result = LLVMBuildICmp(cg->builder, LLVMIntNE, l, r, "raw_ne");
+    break;
+  default:
+    return NULL;
+  }
+
+  return result;
+}
+
 static LLVMValueRef ny_emit_tagged_int_fast_no_slow(codegen_t *cg,
                                                     const op_map_t *entry,
                                                     LLVMValueRef l,
@@ -222,13 +288,41 @@ static LLVMValueRef ny_emit_tagged_int_fast_no_slow(codegen_t *cg,
   return NULL;
 }
 
+/* Note: Complete tag elimination disabled - requires more sophisticated
+   analysis to track untagged values through the program. The existing
+   tagged_int_fast path provides most of the benefit safely. */
+#if 0
+static LLVMValueRef ny_try_emit_raw_int_binary(codegen_t *cg, scope *scopes,
+                                               size_t depth,
+                                               const op_map_t *entry,
+                                               LLVMValueRef l, LLVMValueRef r,
+                                               expr_t *le, expr_t *re) {
+
+  if (!entry || !entry->fast_int_supported)
+    return NULL;
+
+  if (!ny_env_enabled("NYTRIX_COMPLETE_TAG_ELIMINATION"))
+    return NULL;
+
+  bool proven_l = ny_is_proven_int(cg, scopes, depth, le, l);
+  bool proven_r = ny_is_proven_int(cg, scopes, depth, re, r);
+  if (!proven_l || !proven_r)
+    return NULL;
+
+  return ny_emit_raw_int_binary(cg, entry, l, r);
+}
+#endif
+
 static LLVMValueRef ny_try_emit_tagged_int_fast_binary(
     codegen_t *cg, scope *scopes, size_t depth, const op_map_t *entry,
     LLVMValueRef l, LLVMValueRef r, expr_t *le, expr_t *re, fun_sig *fallback) {
 
   if (!fallback || !entry)
     return NULL;
-  if (!ny_env_enabled_default_on("NYTRIX_FAST_INT_BINOPS"))
+  /* Fast int binops now enabled by default - provides major speedup */
+  if (!ny_env_enabled_default_on("NYTRIX_FAST_INT_BINOPS") &&
+      !ny_env_enabled("NYTRIX_ENABLE_TYPEINFER") &&
+      !ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE"))
     return NULL;
 
   if (!entry->fast_int_supported)
@@ -497,6 +591,26 @@ static LLVMValueRef ny_try_emit_float_fast_binary(
   bool proven_l = lt && (strcmp(lt, "f64") == 0 || strcmp(lt, "f32") == 0);
   bool proven_r = rt && (strcmp(rt, "f64") == 0 || strcmp(rt, "f32") == 0);
 
+  /* Also check binding flags directly for cases where infer_expr_type fails */
+  if (!proven_l && le && le->kind == NY_E_IDENT) {
+    size_t name_len = (size_t)le->tok.len;
+    if (name_len == 0)
+      name_len = strlen(le->as.ident.name);
+    binding *b = scope_lookup_hash(scopes, depth, le->as.ident.name, name_len,
+                                   le->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct))
+      proven_l = true;
+  }
+  if (!proven_r && re && re->kind == NY_E_IDENT) {
+    size_t name_len = (size_t)re->tok.len;
+    if (name_len == 0)
+      name_len = strlen(re->as.ident.name);
+    binding *b = scope_lookup_hash(scopes, depth, re->as.ident.name, name_len,
+                                   re->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct))
+      proven_r = true;
+  }
+
   if (proven_l && proven_r) {
     LLVMValueRef lf = ny_direct_unbox_float(cg, l);
     LLVMValueRef rf = ny_direct_unbox_float(cg, r);
@@ -626,6 +740,25 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
 
   if (!l || !r)
     return LLVMConstInt(cg->type_i64, 0, false);
+
+  /* Systems mode: raw operations, NO tags - C-level performance */
+  if (cg->opt_sys_mode) {
+    LLVMValueRef raw = gen_raw_binary(cg, op, l, r);
+    if (raw) {
+      LLVMTypeRef raw_type = LLVMTypeOf(raw);
+      LLVMTypeKind kind = LLVMGetTypeKind(raw_type);
+      if (kind == LLVMIntegerTypeKind) {
+        unsigned width = LLVMGetIntTypeWidth(raw_type);
+        if (width == 1) {
+          /* Comparison result (i1) - extend to i64 (0 or 1) */
+          return LLVMBuildZExt(cg->builder, raw, cg->type_i64, "bool_i64");
+        }
+        /* Raw i64 result - return as-is, no tag */
+        return raw;
+      }
+    }
+  }
+
   bool prefer_builtin_ops = ny_should_prefer_builtin_ops(cg);
 
   const op_map_t *entry = NULL;
@@ -733,6 +866,13 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
   }
 
   if (builtin_name) {
+    /* Note: Complete tag elimination disabled - see ny_try_emit_raw_int_binary
+     */
+    /* LLVMValueRef raw =
+        ny_try_emit_raw_int_binary(cg, scopes, depth, entry, l, r, le, re);
+    if (raw)
+      return raw; */
+
     int64_t li = 0, ri = 0;
     if (ny_const_tagged_int(l, &li) && ny_const_tagged_int(r, &ri)) {
       if (kind == NY_BINOP_ADD)

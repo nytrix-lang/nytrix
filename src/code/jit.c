@@ -6,14 +6,16 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 #include "priv.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/Support.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
-extern int64_t __rt_alloc_string(const char *s);
+extern int64_t rt_alloc_string(const char *s);
 extern int64_t rt_os_name(void);
 extern int64_t rt_arch_name(void);
 extern int64_t rt_main(void);
@@ -214,9 +216,28 @@ static void *ny_missing_extern_stub_for_arity(int arity, bool variadic) {
 void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options,
                          LLVMModuleRef mod) {
   LLVMInitializeMCJITCompilerOptions(options, sizeof(*options));
+
+  /* Fast JIT mode for development - can be overridden */
+  int opt_level = 3;
+  const char *opt_env = getenv("NYTRIX_JIT_OPT_LEVEL");
+  if (opt_env && *opt_env) {
+    opt_level = atoi(opt_env);
+    if (opt_level < 0)
+      opt_level = 0;
+    if (opt_level > 3)
+      opt_level = 3;
+  }
+
+  /* Enable FastISel for faster compilation (less optimized but much faster) */
+  int fast_isel = (opt_level <= 1) ? 1 : 0;
+  const char *fast_isel_env = getenv("NYTRIX_JIT_FAST_ISEL");
+  if (fast_isel_env && *fast_isel_env) {
+    fast_isel = (atoi(fast_isel_env) != 0);
+  }
+
   options->CodeModel = LLVMCodeModelJITDefault;
-  options->OptLevel = 3;
-  options->EnableFastISel = 0;
+  options->OptLevel = (unsigned)opt_level;
+  options->EnableFastISel = fast_isel;
 
   if (mod) {
     const char *triple = LLVMGetTarget(mod);
@@ -523,7 +544,7 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
 #include "rt/defs.h"
 #undef RT_DEF
 #undef RT_GV
-  LLVMAddSymbol("__rt_alloc_string", (void *)(uintptr_t)__rt_alloc_string);
+  LLVMAddSymbol("__alloc_string", (void *)(uintptr_t)rt_alloc_string);
   register_extern_symbols(ee, mod, cg);
   register_jit_sigs(ee, mod, cg);
 
@@ -536,4 +557,103 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
       LLVMAddAttributeAtIndex(panic_fn, LLVMAttributeFunctionIndex, nr_attr);
     }
   }
+}
+
+static int compare_func_info(const void *a, const void *b) {
+  const uint64_t a_addr = ((const struct {
+                            uint64_t addr;
+                            const char *name;
+                          } *)a)
+                              ->addr;
+  const uint64_t b_addr = ((const struct {
+                            uint64_t addr;
+                            const char *name;
+                          } *)b)
+                              ->addr;
+  if (a_addr < b_addr)
+    return -1;
+  if (a_addr > b_addr)
+    return 1;
+  return 0;
+}
+
+/* Write /build/cache/perf-<pid>.map so that perf and GDB can resolve JIT addresses.
+   Format per line: <start_hex> <size_hex> <name>  */
+void ny_jit_write_perf_map(LLVMExecutionEngineRef ee, LLVMModuleRef mod) {
+#ifndef _WIN32
+  const char *env = getenv("NYTRIX_JIT_PERF_MAP");
+  if (env && strcmp(env, "0") == 0)
+    return;
+  char path[64];
+  snprintf(path, sizeof(path), "/build/cache/perf-%d.map", (int)getpid());
+  FILE *f = fopen(path, "a");
+  if (!f)
+    return;
+
+  typedef struct {
+    uint64_t addr;
+    const char *name;
+  } func_info_t;
+
+  func_info_t *funcs = NULL;
+  size_t num_funcs = 0;
+  size_t capacity = 0;
+
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    if (LLVMIsDeclaration(fn))
+      continue;
+    const char *name = LLVMGetValueName(fn);
+    if (!name || !*name)
+      continue;
+    uint64_t addr = LLVMGetFunctionAddress(ee, name);
+    if (!addr)
+      continue;
+
+    if (num_funcs == capacity) {
+      capacity = capacity == 0 ? 16 : capacity * 2;
+      func_info_t *new_funcs =
+          (func_info_t *)realloc(funcs, capacity * sizeof(func_info_t));
+      if (!new_funcs) {
+        free(funcs); // Free any allocated memory before returning
+        fclose(f);
+        return;
+      }
+      funcs = new_funcs;
+    }
+    funcs[num_funcs].addr = addr;
+    funcs[num_funcs].name = name;
+    num_funcs++;
+  }
+
+  // Sort functions by address
+  if (num_funcs > 1) {
+    qsort(funcs, num_funcs, sizeof(func_info_t), compare_func_info);
+  }
+
+  /* Write to perf map, calculating sizes. Open in "w" to avoid
+     accumulating duplicate symbols in long sessions. */
+  fclose(f);
+  f = fopen(path, "w");
+  if (!f) {
+    free(funcs);
+    return;
+  }
+
+  for (size_t i = 0; i < num_funcs; i++) {
+    uint64_t addr = funcs[i].addr;
+    const char *name = funcs[i].name;
+    uintptr_t size = 100; /* default estimation */
+    if (i + 1 < num_funcs) {
+      size = (uintptr_t)(funcs[i + 1].addr - addr);
+    }
+    fprintf(f, "%lx %lx %s\n", (unsigned long)addr, (unsigned long)size, name);
+  }
+
+  free(funcs);
+  fclose(f);
+#else
+  (void)ee;
+  (void)mod;
+#endif
 }

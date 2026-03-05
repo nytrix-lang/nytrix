@@ -3,14 +3,12 @@
 
 > Status: work in progress. Expect breaking changes.
 
-* Statically typed, compiled language
-* Performance
 * Simplicity
 * MacroFree
 * LowLevel
 
 **Dependencies**
-- LLVM 21+
+- LLVM 22+
 - Python 3
 
 **Arch**

@@ -53,7 +53,7 @@ static bool ny_write_text_file_atomic(const char *path, const char *content,
   return true;
 }
 
-static bool ny_cache_path_is_ir(const char *cache_path) {
+bool ny_cache_path_is_ir(const char *cache_path) {
   if (!cache_path)
     return false;
   const char *ext = strrchr(cache_path, '.');

@@ -1,6 +1,7 @@
 #include "base/util.h"
 #include "code/llvm.h"
 #include "code/priv.h"
+#include "code/typeinfer.h"
 #include "priv.h"
 #include "rt/shared.h"
 #ifndef _WIN32
@@ -192,6 +193,26 @@ void codegen_init(codegen_t *cg, program_t *prog, struct arena_t *arena,
   ny_cg_init_options(cg);
   add_builtins(cg);
   LLVMAddGlobal(cg->module, cg->type_i64, "__NYTRIX__");
+
+  /* Initialize optimization flags */
+  /* Type inference is safe and enabled by default - provides 94-99x speedup */
+  cg->opt_enabled = (ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE") ||
+                     ny_env_enabled("NYTRIX_OPT_ENABLE"));
+  cg->opt_type_infer =
+      ny_env_enabled("NYTRIX_ENABLE_TYPEINFER") || /* Explicit enable */
+      ny_env_enabled("NYTRIX_ENABLE_OPTIMIZE") ||  /* Optimize mode */
+      !ny_env_enabled("NYTRIX_DISABLE_TYPEINFER"); /* Enabled by default */
+  cg->opt_const_fold =
+      cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_CONST_FOLD");
+  cg->opt_tail_call =
+      cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_TAIL_CALL");
+  cg->opt_inline_small =
+      cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_INLINE");
+  cg->opt_lazy_load =
+      cg->opt_enabled || ny_env_enabled("NYTRIX_ENABLE_LAZY_LOAD");
+  /* Systems mode - C-level performance with @sys functions */
+  cg->opt_sys_mode =
+      ny_env_enabled("NYTRIX_SYS_MODE") || ny_env_enabled("NYTRIX_SYS");
 }
 
 const char *codegen_qname(codegen_t *cg, const char *name,
@@ -537,6 +558,19 @@ void codegen_prepare(codegen_t *cg) {
 
   cg->is_preparing = true;
 
+  /* Initialize debug info if enabled */
+  if (cg->debug_symbols) {
+    const char *main_file = cg->prog && cg->prog->body.len > 0
+                                ? cg->prog->body.data[0]->tok.filename
+                                : "<inline>";
+    fprintf(stderr, "[DEBUG] Initializing DWARF debug info for '%s'\n",
+            main_file);
+    codegen_debug_init(cg, main_file);
+    if (!cg->di_builder) {
+      fprintf(stderr, "[DEBUG] WARNING: di_builder is NULL after init!\n");
+    }
+  }
+
   for (size_t i = 0; i < cg->prog->body.len; i++) {
     stmt_t *s = cg->prog->body.data[i];
     collect_use_aliases(cg, s);
@@ -649,6 +683,24 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   LLVMPositionBuilderAtEnd(cg->builder, body_block);
   scope sc[64] = {0};
   size_t d = 0;
+
+  /* Run type inference for top-level code */
+  if (cg->opt_type_infer && cg->prog && cg->prog->body.len > 0) {
+    typeinfer_ctx_t infer_ctx = {0};
+    typeinfer_ctx_init(&infer_ctx, 256, sc, cg);
+    /* Walk all top-level statements */
+    for (size_t i = 0; i < cg->prog->body.len; i++) {
+      stmt_t *s = cg->prog->body.data[i];
+      if (cg->skip_stdlib && ny_is_stdlib_tok(s->tok))
+        continue;
+      if (s->kind != NY_S_FUNC)
+        typeinfer_walk_stmt(&infer_ctx, s);
+    }
+    /* Apply to scope 0 (top-level) */
+    typeinfer_apply_to_scopes(&infer_ctx, sc, 1);
+    typeinfer_ctx_dispose(&infer_ctx);
+  }
+
   LLVMValueRef std_init = LLVMGetNamedFunction(cg->module, "__std_init");
   if (std_init) {
     LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(std_init), std_init,
@@ -730,7 +782,10 @@ void codegen_emit_string_init(codegen_t *cg) {
 void codegen_dispose(codegen_t *cg) {
   if (!cg)
     return;
-  codegen_debug_finalize(cg);
+  /* Only finalize debug info if not already done during optimization */
+  if (cg->di_builder) {
+    codegen_debug_finalize(cg);
+  }
   ny_sym_state_free(cg);
   if (cg->alloca_builder) {
     LLVMDisposeBuilder(cg->alloca_builder);

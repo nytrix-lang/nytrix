@@ -295,9 +295,6 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
                   "'import' is not used in Nytrix", "use 'use' instead");
       return NY_T_IDENT;
     }
-    if (len == 7 && memcmp(start, "include", 7) == 0) {
-      return NY_T_IDENT; /* valid: used after # for #include <header> */
-    }
     break;
   case 'n':
     if (len == 3 && memcmp(start, "nil", 3) == 0) {
