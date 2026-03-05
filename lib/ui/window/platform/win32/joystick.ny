@@ -61,22 +61,6 @@ if(comptime{ __os_name() == "windows" }){
    #include <xinput.h>
 }
 
-fn _has_native_support(){
-   comptime{ __os_name() == "windows" }
-}
-
-fn _get_js(jid){
-   dict_get(_joysticks, jid, 0)
-}
-
-fn _put_js(jid, js){
-   _joysticks = dict_set(_joysticks, jid, js)
-}
-
-fn _invoke_callback(jid, event){
-   if(_joystick_callback){ _joystick_callback(jid, event) }
-}
-
 fn _normalize_thumb(v){
    ;; i16 -32768..32767 → float -1..1
    def fv = float(v)
@@ -109,17 +93,6 @@ fn _alloc_js(jid){
    js = dict_set(js, "axis_count", _AXIS_COUNT)
    js = dict_set(js, "button_count", _BUTTON_COUNT)
    js
-}
-
-fn _free_js(jid){
-   def js = _get_js(jid)
-   if(!js){ return false }
-   def ap = dict_get(js, "axes_ptr", 0)
-   def bp = dict_get(js, "buttons_ptr", 0)
-   if(ap){ free(ap) }
-   if(bp){ free(bp) }
-   _put_js(jid, 0)
-   true
 }
 
 fn _update_js_state(jid, xi_state){

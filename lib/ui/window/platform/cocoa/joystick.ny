@@ -66,10 +66,6 @@ mut _key_kIOHIDProductIDKey     = 0
 mut _key_kIOHIDVersionNumberKey = 0
 mut _key_kIOHIDManufacturerKey  = 0
 
-fn _has_native_support(){
-   comptime{ __os_name() == "macos" }
-}
-
 fn _cf_str(s){
    CFStringCreateWithCString(0, cstr(s), kCFStringEncodingUTF8)
 }
@@ -116,50 +112,6 @@ fn _matching_dict_for_usage(usage_page, usage){
    dict
 }
 
-fn _get_js(jid){
-   dict_get(_joysticks, jid, 0)
-}
-
-fn _put_js(jid, js){
-   _joysticks = dict_set(_joysticks, jid, js)
-}
-
-fn _find_free_slot(){
-   mut jid = 0
-   while(jid < MAX_JOYSTICKS){
-      if(!_get_js(jid)){ return jid }
-      jid += 1
-   }
-   -1
-}
-
-fn _find_slot_by_device(dev){
-   mut jid = 0
-   while(jid < MAX_JOYSTICKS){
-      def js = _get_js(jid)
-      if(js && dict_get(js, "device", 0) == dev){ return jid }
-      jid += 1
-   }
-   -1
-}
-
-fn _invoke_callback(jid, event){
-   if(_joystick_callback){ _joystick_callback(jid, event) }
-}
-
-fn _free_js(jid){
-   def js = _get_js(jid)
-   if(!js){ return }
-   def ap = dict_get(js, "axes_ptr", 0)
-   def bp = dict_get(js, "buttons_ptr", 0)
-   def ep = dict_get(js, "elements_ptr", 0)
-   if(ap){ free(ap) }
-   if(bp){ free(bp) }
-   if(ep){ free(ep) }
-   ;; Release CF objects in elements array (element pointers are owned by the device, not us)
-   _put_js(jid, 0)
-}
-
 fn _cf_num_to_int(cf_num){
    if(!cf_num){ return 0 }
    def p = malloc(8)
@@ -167,28 +119,6 @@ fn _cf_num_to_int(cf_num){
    def v = load32(p, 0)
    free(p)
    v
-}
-
-fn _build_guid(vendor, product, version){
-   ;; SDL-style GUID: bus(2) + pad(2) + vendor(2) + pad(2) + product(2) + pad(2) + version(2) + pad(2)
-   ;; For HID on macOS we use bus=0x03 (USB HID)
-   def bus = 3
-   def b0  = (bus & 0xff)
-   def b1  = (bus >> 8) & 0xff
-   def v0  = vendor & 0xff
-   def v1  = (vendor >> 8) & 0xff
-   def p0  = product & 0xff
-   def p1  = (product >> 8) & 0xff
-   def r0  = version & 0xff
-   def r1  = (version >> 8) & 0xff
-   def hex = "0123456789abcdef"
-   fn byte_hex(b){
-      str.chr(load8(hex, (b >> 4) & 0xf)) + str.chr(load8(hex, b & 0xf))
-   }
-   byte_hex(b0) + byte_hex(b1) + "0000" +
-   byte_hex(v0) + byte_hex(v1) + "0000" +
-   byte_hex(p0) + byte_hex(p1) + "0000" +
-   byte_hex(r0) + byte_hex(r1) + "0000"
 }
 
 fn _device_connected(ctx, result, sender, device){

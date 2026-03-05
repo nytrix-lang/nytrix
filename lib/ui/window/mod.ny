@@ -40,7 +40,6 @@ module std.ui.window (
 )
 
 use std.core *
-print("INIT: std.ui.window")
 use std.core.dict_mod *
 use std.ui.consts *
 use std.ui.event as ev

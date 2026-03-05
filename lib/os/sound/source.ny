@@ -1,6 +1,6 @@
 ;; Keywords: sound source
 
-module std.os.audio.source (
+module std.os.sound.source (
    make_memory_source,
    read, seek, tell, length, format, sample_format,
    source_channels, source_rate, source_bits, source_length,
@@ -9,7 +9,7 @@ module std.os.audio.source (
 
 use std.core *
 use std.core.dict_mod *
-use std.os.audio.source.memory as memory
+use std.os.sound.source.memory as memory
 
 def SAMPLE_FMT_S16 = 1
 def SAMPLE_FMT_U8 = 2
@@ -135,7 +135,7 @@ if(comptime{__main()}){
    use std.core.test *
    use std.core.mem *
 
-   print("Running std.os.audio.source tests...")
+   print("Running std.os.sound.source tests...")
 
    fn create_test_data(size){
        "Allocates deterministic byte-pattern test data."
@@ -212,5 +212,5 @@ if(comptime{__main()}){
        free(buf)
    }
 
-   print("✓ std.os.audio.source tests passed")
+   print("✓ std.os.sound.source tests passed")
 }

@@ -23,18 +23,10 @@ use std.str *
 use std.os.dirs *
 use std.os.path *
 
-if(comptime{ __os_name() == "linux" }){
-   #link "libz.so"
-   #include <zlib.h>
+if(comptime{ __os_name() == "linux" || __os_name() == "macos" || __os_name() == "windows" }){
+   #include "zlib.h"
 }
-if(comptime{ __os_name() == "windows" }){
-   #link "zlib.lib"
-   #include <zlib.h>
-}
-if(comptime{ __os_name() == "macos" }){
-   #link "libz.dylib"
-   #include <zlib.h>
-}
+
 mut _error = ""
 
 fn error(){

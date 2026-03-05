@@ -1,6 +1,6 @@
-;; Keywords: sound audio
+;; Keywords: sound
 
-module std.os.audio (
+module std.os.sound (
    init, shutdown,
    load, play, stop, is_playing,
    set_volume, get_volume,
@@ -13,8 +13,8 @@ module std.os.audio (
 )
 
 use std.core *
-use std.os.audio.backend as snd_backend
-use std.os.audio.res as res
+use std.os.sound.backend as snd_backend
+use std.os.sound.res as res
 
 fn init(){
    "Initializes module state."
@@ -110,7 +110,7 @@ fn get_backend_name(){
    return snd_backend.get_backend_name()
 }
 
-use std.os.audio.diag as diag
+use std.os.sound.diag as diag
 
 fn probe(){
    "Implements `probe`."

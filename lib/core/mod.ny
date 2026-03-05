@@ -124,7 +124,7 @@ fn _eprint_raw(s){
    "Internal: writes raw string content to stderr."
    if(!is_str(s)){ return 0 }
    def n = load64(s, -16)
-   if(n > 0){ __sys_write_off(2, s, n, 0) }
+   if(n > 0){ __write_off(2, s, n, 0) }
    0
 }
 
