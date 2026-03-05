@@ -3,8 +3,8 @@
 
 use std.core *
 use std.str.io *
-use std.os.audio *
-use std.os.audio.source.synth *
+use std.os.sound *
+use std.os.sound.source.synth *
 use std.os.time *
 use std.os *
 use std.os.path as path
@@ -35,7 +35,7 @@ if(proc_src != 0){
 }
 
 print("\n2. Asset Loading & Playback Test")
-def asset_dir = "etc/assets/audio"
+def asset_dir = "etc/assets/sounds"
 def files = [
    "sound.wav",
    "sound.ogg",

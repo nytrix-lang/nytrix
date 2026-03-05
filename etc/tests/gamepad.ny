@@ -176,7 +176,7 @@ fn update_events(win){
 
 def win = init_window(1280, 720, "Gamepad", 0, true, false, 8)
 if(!win){ return 0 }
-font = font_load("etc/assets/font/monocraft.ttf", 16)
+font = font_load("etc/assets/fonts/monocraft.ttf", 16)
 
 mut startup_ticks = ticks()
 while(!window.should_close(win)){

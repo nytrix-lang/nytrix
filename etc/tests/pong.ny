@@ -56,7 +56,7 @@ fn startup(){
    win = init_window(1280, 720, "Pong", 0, true, false)
    if(win == 0){ exit(1) }
    set_window_pos(win, 100, 100)
-   res_font = font_load("etc/assets/font/monocraft.ttf", 24)
+   res_font = font_load("etc/assets/fonts/monocraft.ttf", 24)
    set_clear_color(COLOR_BG)
 }
 
