@@ -7,6 +7,7 @@ use std.str.io *
 use std.str *
 use std.os.time *
 
+use benchmark.helpers *
 ;; Dict (Benchmark)
 
 mut d = dict()
