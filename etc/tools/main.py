@@ -42,6 +42,7 @@ COMMANDS = (
     "bin",
     "fmt",
     "std",
+    "std_bc",
     "test",
     "repl",
     "fuzz",
@@ -461,9 +462,10 @@ def main():
 
         non_windows_runtime = [] if host_os() == "windows" else ["nytrixrt"]
         build_targets = {
-            "all": ["ny", "ny-lsp", *non_windows_runtime],
+            "all": ["ny", "ny-lsp", "std_bc", *non_windows_runtime],
             "bin": ["ny"],
-            "std": ["std_bundle"],
+            "std": ["std_bundle", "std_bc"],
+            "std_bc": ["std_bc"],
             "test": ["ny"],
             "repl": ["ny", *non_windows_runtime],
             "fuzz": ["ny"],
@@ -571,6 +573,9 @@ def main():
                 std_bundle = None
                 if _env_on("NYTRIX_TEST_USE_STD_BUNDLE"):
                     std_bundle = BUILD_DIR / kind / "std.ny"
+                std_bc = BUILD_DIR / kind / "std.bc"
+                if not std_bc.exists():
+                    std_bc = None
                 _timed_call(
                     profile_enabled,
                     timings,
@@ -579,7 +584,8 @@ def main():
                     BUILD_DIR,
                     kind,
                     std_bundle,
-                    n_jobs,
+                    std_bc=std_bc,
+                    test_jobs=n_jobs,
                     unknown=unknown,
                 )
                 _timed_call(

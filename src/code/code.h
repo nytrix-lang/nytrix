@@ -236,6 +236,14 @@ typedef struct codegen_t {
   bool auto_memoize_impure;
   uint64_t auto_memo_site_seq;
   bool is_repl;
+  /* Optimization flags */
+  bool opt_enabled;      /* Master optimization switch */
+  bool opt_type_infer;   /* Type inference for tag elision */
+  bool opt_const_fold;   /* Constant folding */
+  bool opt_tail_call;    /* Tail call optimization */
+  bool opt_inline_small; /* Inline small functions */
+  bool opt_lazy_load;    /* Lazy library loading */
+  bool opt_sys_mode;     /* Systems mode (@sys) - raw values, no tags */
   LLVMValueRef result_store_val;
   size_t func_root_idx;
   const char **assigned_names_data;

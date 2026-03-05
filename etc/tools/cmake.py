@@ -240,7 +240,7 @@ def ensure_std_bundle_fresh(build_dir, kind):
     if prev == h:
         return
 
-    for out in (bdir/"std.ny", bdir/"std_symbols.h"):
+    for out in (bdir/"std.ny", bdir/"std_symbols.h", bdir/"std.bc"):
         try:
             out.unlink()
         except OSError:

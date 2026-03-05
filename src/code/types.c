@@ -378,8 +378,15 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
         name_len = strlen(e->as.ident.name);
       binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
                                      e->as.ident.hash);
-      if (b && b->type_name)
-        return b->type_name;
+      if (b) {
+        /* Check type inference flags first */
+        if (b->is_int_slot || b->is_int_direct)
+          return "int";
+        if (b->is_f64_slot || b->is_f64_direct)
+          return "f64";
+        if (b->type_name)
+          return b->type_name;
+      }
     }
     binding *gb = lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
     if (gb && gb->type_name)

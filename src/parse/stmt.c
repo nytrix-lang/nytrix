@@ -250,82 +250,6 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
 static stmt_t *parse_extern(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_EXTERN, "'extern'", NULL);
-  if (p->cur.kind == NY_T_HASH) {
-    parser_advance(p);
-    if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
-      /* extern #link "libname"  ── same as top-level #link "libname" */
-      parser_advance(p);
-      if (p->cur.kind != NY_T_STRING) {
-        parser_error(p, p->cur, "expected library name string after '#link'",
-                     NULL);
-        return NULL;
-      }
-      stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
-      s->as.link.lib =
-          arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-      parser_advance(p);
-      parser_match(p, NY_T_SEMI);
-      return s;
-    }
-    if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "include", p->cur.len) == 0) {
-      parser_advance(p);
-      bool is_std = false;
-      const char *path = NULL;
-      if (p->cur.kind == NY_T_STRING) {
-        size_t len = 0;
-        path = parser_decode_string(p, p->cur, &len);
-        parser_advance(p);
-      } else if (parser_match(p, NY_T_LT)) {
-        is_std = true;
-        token_t start = p->cur;
-        while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF) {
-          parser_advance(p);
-        }
-        path = arena_strndup(p->arena, start.lexeme,
-                             (size_t)(p->cur.lexeme - start.lexeme));
-        parser_expect(p, NY_T_GT, "'>' after system header", NULL);
-      } else {
-        parser_error(p, p->cur,
-                     "expected string or '<header>' after '#include'", NULL);
-        return NULL;
-      }
-      /* optional:  as prefix */
-      const char *prefix = NULL;
-      if (parser_match(p, NY_T_AS)) {
-        if (p->cur.kind == NY_T_STRING) {
-          size_t len = 0;
-          prefix = parser_decode_string(p, p->cur, &len);
-          parser_advance(p);
-        } else if (p->cur.kind == NY_T_IDENT) {
-          prefix = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-          parser_advance(p);
-        }
-      }
-      /* optional:  link "libname" — tells JIT/AOT which .so to load */
-      const char *lib = NULL;
-      if (p->cur.kind == NY_T_IDENT &&
-          strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
-        parser_advance(p);
-        if (p->cur.kind == NY_T_STRING) {
-          lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-          parser_advance(p);
-        }
-      }
-      parser_match(p, NY_T_SEMI);
-      stmt_t *s = stmt_new(p->arena, NY_S_INCLUDE, tok);
-      s->as.inc.path = path;
-      s->as.inc.prefix = prefix;
-      s->as.inc.is_std = is_std;
-      s->as.inc.lib = lib;
-      return s;
-    }
-    /* Fallback */
-    parser_error(p, p->cur, "expected 'include' or 'link' after 'extern #'",
-                 NULL);
-    return NULL;
-  }
   parser_expect(p, NY_T_FN, "'fn'", NULL);
   char *name = parse_qualified_name(p);
   if (!name)
@@ -771,75 +695,51 @@ stmt_t *p_parse_stmt(parser_t *p) {
       return NULL;
     }
     if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "include", p->cur.len) == 0) {
-      /* Top-level  #include <header>  or  #include "header"
-         (C-style, no 'extern' prefix required)                */
+        strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
       parser_advance(p);
-      bool is_std = false;
-      const char *path = NULL;
-      if (p->cur.kind == NY_T_STRING) {
-        size_t slen = 0;
-        path = parser_decode_string(p, p->cur, &slen);
-        parser_advance(p);
-      } else if (parser_match(p, NY_T_LT)) {
-        is_std = true;
-        token_t start = p->cur;
-        while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF)
-          parser_advance(p);
-        path = arena_strndup(p->arena, start.lexeme,
-                             (size_t)(p->cur.lexeme - start.lexeme));
-        parser_expect(p, NY_T_GT, "'>' after system header", NULL);
-      } else {
-        parser_error(p, p->cur,
-                     "expected string or '<header>' after '#include'", NULL);
+      if (p->cur.kind != NY_T_STRING) {
+        parser_error(p, p->cur, "expected library name string after '#link'",
+                     NULL);
         return NULL;
       }
-      /* optional:  as prefix */
-      const char *prefix = NULL;
-      if (parser_match(p, NY_T_AS)) {
-        if (p->cur.kind == NY_T_STRING) {
-          size_t slen = 0;
-          prefix = parser_decode_string(p, p->cur, &slen);
-          parser_advance(p);
-        } else if (p->cur.kind == NY_T_IDENT) {
-          prefix = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-          parser_advance(p);
-        }
-      }
-      /* optional:  link "libname" */
-      const char *lib = NULL;
-      if (p->cur.kind == NY_T_IDENT &&
-          strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
-        parser_advance(p);
-        if (p->cur.kind == NY_T_STRING) {
-          lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-          parser_advance(p);
-        }
-      }
-      parser_match(p, NY_T_SEMI);
-      stmt_t *s = stmt_new(p->arena, NY_S_INCLUDE, tok);
-      s->as.inc.path = path;
-      s->as.inc.prefix = prefix;
-      s->as.inc.is_std = is_std;
-      s->as.inc.lib = lib;
+      stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
+      s->as.link.lib =
+          arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+      parser_advance(p);
       return s;
     }
-    if (p->cur.kind != NY_T_IDENT ||
-        strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
-      parser_error(p, p->cur, "expected 'link', 'include', or 'line' after '#'",
-                   NULL);
-      return NULL;
+    if (p->cur.kind == NY_T_IDENT &&
+        strncmp(p->cur.lexeme, "include", p->cur.len) == 0) {
+      parser_advance(p);
+      bool is_system = false;
+      if (p->cur.kind == NY_T_LT) {
+        is_system = true;
+        parser_advance(p);
+        if (p->cur.kind != NY_T_STRING) {
+          parser_error(p, p->cur,
+                       "expected header path string after '#include <'", NULL);
+          return NULL;
+        }
+      } else if (p->cur.kind != NY_T_STRING) {
+        parser_error(p, p->cur, "expected header path string after '#include'",
+                     NULL);
+        return NULL;
+      }
+      stmt_t *s = stmt_new(p->arena, NY_S_INCLUDE, tok);
+      s->as.inc.path =
+          arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+      s->as.inc.prefix = NULL;
+      s->as.inc.is_std = is_system;
+      s->as.inc.lib = NULL;
+      parser_advance(p);
+      if (is_system && p->cur.kind == NY_T_GT) {
+        parser_advance(p);
+      }
+      return s;
     }
-    parser_advance(p);
-    if (p->cur.kind != NY_T_STRING) {
-      parser_error(p, p->cur, "expected library name string after '#link'",
-                   NULL);
-      return NULL;
-    }
-    stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
-    s->as.link.lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-    parser_advance(p);
-    return s;
+    parser_error(p, p->cur, "expected 'link', 'include', or 'line' after '#'",
+                 NULL);
+    return NULL;
   }
   case NY_T_AT: {
     ny_attribute_list attrs = {0};
