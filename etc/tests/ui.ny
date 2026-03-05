@@ -239,8 +239,8 @@ fn startup(){
       "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
       "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
       "/usr/share/fonts/TTF/FiraCode-Regular.ttf",
-      "etc/assets/font/jetbrains.ttf",
-      "etc/assets/font/monocraft.ttf",
+      "etc/assets/fonts/jetbrains.ttf",
+      "etc/assets/fonts/monocraft.ttf",
       "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
    ]
    mut i = 0 while(i < len(fpaths)){
