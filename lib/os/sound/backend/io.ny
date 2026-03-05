@@ -1,6 +1,6 @@
-;; Keywords: audio io system
+;; Keywords: sound io system
 
-module std.os.audio.backend.io (
+module std.os.sound.backend.io (
    create, connect, disconnect,
    get_output_device_count, get_output_device,
    get_default_output_device_index,
@@ -20,10 +20,10 @@ use std.os *
 use std.str *
 use std.util.common as common
 
-use std.os.audio.backend.alsa as audio_alsa
-use std.os.audio.backend.pulse as audio_pulse
-use std.os.audio.backend.jack as audio_jack
-use std.os.audio.backend.winmm as audio_winmm
+use std.os.sound.backend.alsa as audio_alsa
+use std.os.sound.backend.pulse as audio_pulse
+use std.os.sound.backend.jack as audio_jack
+use std.os.sound.backend.winmm as audio_winmm
 
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
@@ -159,7 +159,7 @@ fn get_output_device_count(ctx){
    def devices = dict_get(ctx, "devices", 0)
    if(devices == 0){ return 0 }
    def n = len(devices)
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: get_output_device_count: count=" + to_str(n)) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: get_output_device_count: count=" + to_str(n)) }
    n
 }
 
@@ -179,7 +179,7 @@ fn get_default_output_device_index(ctx){
 
 fn outstream_create(device){
    "Creates an output stream for a specific device."
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: outstream_create: dev=" + to_str(device)) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: outstream_create: dev=" + to_str(device)) }
    mut stream = dict(16)
    stream = dict_set(stream, "device", device)
    stream = dict_set(stream, "format", FORMAT_S16LE)
@@ -187,15 +187,15 @@ fn outstream_create(device){
    stream = dict_set(stream, "channels", 2)
    stream = dict_set(stream, "callback", 0)
    stream = dict_set(stream, "running", false)
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: outstream_create: stream keys=" + to_str(dict_keys(stream))) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: outstream_create: stream keys=" + to_str(dict_keys(stream))) }
    stream
 }
 
 fn outstream_open(stream, format, sample_rate, channels, callback){
    "Implements `outstream_open`."
    if(env("NY_AUDIO_DEBUG")){
-      print("Audio: Entering outstream_open.")
-      print("Audio: outstream_open: stream keys before set=" + to_str(dict_keys(stream)))
+      print("Sound: Entering outstream_open.")
+      print("Sound: outstream_open: stream keys before set=" + to_str(dict_keys(stream)))
    }
    if(!stream){ return false }
 
@@ -206,15 +206,15 @@ fn outstream_open(stream, format, sample_rate, channels, callback){
    stream = dict_set(stream, "bits_per_sample", (format == FORMAT_FLOAT32LE) ? 32 : 16)
 
    def device = dict_get(stream, "device", 0)
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: outstream_open: device=" + to_str(device)) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: outstream_open: device=" + to_str(device)) }
    if(!device){ return false }
 
    def ctx = dict_get(device, "ctx", 0)
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: outstream_open: ctx=" + to_str(ctx)) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: outstream_open: ctx=" + to_str(ctx)) }
    if(!ctx){ return false }
 
    def backend = dict_get(ctx, "backend", 0)
-   if(env("NY_AUDIO_DEBUG")){ print("Audio: outstream_open: backend=" + to_str(backend)) }
+   if(env("NY_AUDIO_DEBUG")){ print("Sound: outstream_open: backend=" + to_str(backend)) }
 
    if(backend == 1){ if(audio_pulse.stream_open(stream)){ return stream } else { return 0 } }
    if(backend == 2){ if(audio_alsa.stream_open(stream)){ return stream } else { return 0 } }
@@ -327,5 +327,5 @@ if(comptime{__main()}){
       assert(get_output_device_count(ctx) == 0, "audio io no devices when not connected")
    }
 
-   print("✓ std.os.audio.backend.io tests passed")
+   print("✓ std.os.sound.backend.io tests passed")
 }

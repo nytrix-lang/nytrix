@@ -1,6 +1,6 @@
-;; Keywords: audio jack linux io
+;; Keywords: sound jack linux io
 
-module std.os.audio.backend.jack (
+module std.os.sound.backend.jack (
    is_available, init, shutdown,
    stream_open, stream_start, stream_stop,
    write
@@ -10,7 +10,7 @@ use std.core *
 use std.core.dict_mod *
 use std.os (env)
 use std.os.time *
-use std.os.audio.backend.shared as backend_shared
+use std.os.sound.backend.shared as backend_shared
 use std.util.common as common
 
 if(comptime{ __os_name() == "linux" }){

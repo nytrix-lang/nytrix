@@ -1,6 +1,6 @@
-;; Keywords: audio alsa linux io
+;; Keywords: sound alsa linux io
 
-module std.os.audio.backend.alsa (
+module std.os.sound.backend.alsa (
    is_available, init, shutdown,
    stream_open, stream_start, stream_stop,
    write
@@ -8,11 +8,10 @@ module std.os.audio.backend.alsa (
 
 use std.core *
 use std.core.dict_mod *
-use std.os.ffi *
-use std.os.audio.backend.shared as backend_shared
+use std.os.sound.backend.shared as backend_shared
 
 if(comptime{ __os_name() == "linux" }){
-   #include <alsa/asoundlib.h>
+   #include <alsa/asoundlib.h> as "snd_"
 }
 
 def SND_PCM_STREAM_PLAYBACK = 0

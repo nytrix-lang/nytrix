@@ -1,6 +1,6 @@
 ;; Keywords: sound mixer
 
-module std.os.audio.mixer (
+module std.os.sound.mixer (
    mix_sounds, clamp_s16, load16_s
 )
 

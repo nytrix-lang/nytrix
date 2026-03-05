@@ -98,10 +98,6 @@ if(comptime{ __os_name() == "linux" }){
    #include <sys/inotify.h>
 }
 
-fn _has_native_support(){
-   comptime{ __os_name() == "linux" }
-}
-
 fn _is_event_device_name(name){
    if(!name || !is_str(name)){ return false }
    if(!str.startswith(name, "event")){ return false }
@@ -121,15 +117,6 @@ fn _bit_is_set(bits, bit){
    (load8(bits, bit / 8) & (1 << (bit % 8))) != 0
 }
 
-fn _get_js(jid){
-   dict_get(_joysticks, jid, 0)
-}
-
-fn _put_js(jid, js){
-   _joysticks = dict_set(_joysticks, jid, js)
-   js
-}
-
 fn _find_slot_by_path(path){
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
@@ -142,19 +129,6 @@ fn _find_slot_by_path(path){
    -1
 }
 
-fn _find_free_slot(){
-   mut jid = 0
-   while(jid < MAX_JOYSTICKS){
-      if(!_get_js(jid)){ return jid }
-      jid += 1
-   }
-   -1
-}
-
-fn _invoke_callback(jid, event){
-   if(_joystick_callback){ _joystick_callback(jid, event) }
-}
-
 fn _close_fd(fd){
    if(fd >= 0){ unwrap(sys.sys_close(fd)) }
 }
@@ -165,21 +139,6 @@ fn _free_ptr(p){
 
 fn _clear_slot(jid){
    _joysticks = dict_set(_joysticks, jid, 0)
-}
-
-fn _free_js(jid){
-   def js = _get_js(jid)
-   if(!js){ return false }
-   _close_fd(dict_get(js, "fd", -1))
-   _free_ptr(dict_get(js, "axes_ptr", 0))
-   _free_ptr(dict_get(js, "buttons_ptr", 0))
-   _free_ptr(dict_get(js, "hats_ptr", 0))
-   _free_ptr(dict_get(js, "hat_axes_ptr", 0))
-   _free_ptr(dict_get(js, "key_map_ptr", 0))
-   _free_ptr(dict_get(js, "abs_map_ptr", 0))
-   _free_ptr(dict_get(js, "abs_info_ptr", 0))
-   _clear_slot(jid)
-   true
 }
 
 fn _disconnect_js(jid){
@@ -302,27 +261,6 @@ fn _name_byte(name, index){
    def n = str.str_len(name)
    if(index >= 0 && index < n){ return load8(name, index) }
    0
-}
-
-fn _build_guid(id_ptr, name){
-   def bustype = load16(id_ptr, INPUT_ID_BUSTYPE)
-   def vendor = load16(id_ptr, INPUT_ID_VENDOR)
-   def product = load16(id_ptr, INPUT_ID_PRODUCT)
-   def version = load16(id_ptr, INPUT_ID_VERSION)
-   if(vendor && product && version){
-      return _guid16(bustype) + "0000" +
-         _guid16(vendor) + "0000" +
-         _guid16(product) + "0000" +
-         _guid16(version) + "0000"
-   }
-
-   mut guid = _guid16(bustype) + "0000"
-   mut i = 0
-   while(i < 11){
-      guid = guid + str.to_hex(_name_byte(name, i), 2)
-      i += 1
-   }
-   guid + "00"
 }
 
 fn _open_device(path){

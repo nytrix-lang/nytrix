@@ -1,6 +1,6 @@
-;; Keywords: audio backend
+;; Keywords: sound backend
 
-module std.os.audio.backend (
+module std.os.sound.backend (
    init, shutdown,
    play, stop, is_playing,
    set_master_volume, get_master_volume,
@@ -13,13 +13,13 @@ use std.os.thread *
 use std.os.time *
 use std.str *
 use std.util.common as common
-use std.os.audio.backend.io (
+use std.os.sound.backend.io (
    create, connect, disconnect,
    get_output_device_count, get_output_device, get_default_output_device_index,
    outstream_create, outstream_open, outstream_start, outstream_write_frames, outstream_destroy,
    FORMAT_S16LE, FORMAT_FLOAT32LE, get_backend_name as io_backend_name
 )
-use std.os.audio.mixer as mixer
+use std.os.sound.mixer as mixer
 
 mut _ctx = 0
 mut _stream = 0
@@ -195,23 +195,23 @@ fn _cleanup_partial(){
 fn _do_init(force_async=false){
    "Internal helper for module initialization."
    if(_ctx != 0){ return true }
-   if(_is_debug()){ print("Audio: Initializing context...") }
+   if(_is_debug()){ print("Sound: Initializing context...") }
    def ctx = create()
    def nctx = connect(ctx)
    if(!nctx){
-      if(_is_debug()){ print("Audio: Failed to connect to any backend.") }
+      if(_is_debug()){ print("Sound: Failed to connect to any backend.") }
       return false
    }
    _ctx = nctx
    if(_is_debug()){
-       print("Audio: Context connected to backend: " + get_backend_name())
+       print("Sound: Context connected to backend: " + get_backend_name())
    }
 
    def count = get_output_device_count(_ctx)
-   if(_is_debug()){ print("Audio: Found " + to_str(count) + " output devices.") }
+   if(_is_debug()){ print("Sound: Found " + to_str(count) + " output devices.") }
    if(count == 0){
       if(_is_debug()){
-           print("Audio: No output devices found.")
+           print("Sound: No output devices found.")
       }
       disconnect(_ctx)
       _ctx = 0
@@ -226,7 +226,7 @@ fn _do_init(force_async=false){
       out_format = FORMAT_S16LE
       def nstream2 = outstream_open(stream, out_format, out_rate, 2, 0)
       if(!nstream2){
-         if(_is_debug()){ print("Audio: Failed to open output stream.") }
+         if(_is_debug()){ print("Sound: Failed to open output stream.") }
          outstream_destroy(stream)
          disconnect(nctx)
          return false
@@ -237,7 +237,7 @@ fn _do_init(force_async=false){
    }
    _out_format = out_format
    if(!outstream_start(stream)){
-      if(_is_debug()){ print("Audio: Failed to start output stream.") }
+      if(_is_debug()){ print("Sound: Failed to start output stream.") }
       outstream_destroy(stream)
       disconnect(nctx)
       return false
@@ -248,13 +248,13 @@ fn _do_init(force_async=false){
    if(force_async || _is_async_mode()){
       if(!_start_mixer_thread()){
          if(_is_debug()){
-         print("Audio: Failed to spawn mixer thread; falling back to sync mode.")
+         print("Sound: Failed to spawn mixer thread; falling back to sync mode.")
          }
       }
    }
    if(_is_debug()){
       def fmt = (_out_format == FORMAT_FLOAT32LE) ? "f32" : "s16"
-      print(f"Audio: Backend '{io_backend_name(_ctx)}' ready @ {_get_output_rate()}Hz format={fmt} period={_get_period_frames()} prime={_get_prime_periods()}.")
+      print(f"Sound: Backend '{io_backend_name(_ctx)}' ready @ {_get_output_rate()}Hz format={fmt} period={_get_period_frames()} prime={_get_prime_periods()}.")
    }
    true
 }
@@ -279,7 +279,7 @@ fn _make_inst(sound, pitch, vol, looping, pan){
 fn _play_sync(sound, pitch=1.0, vol=1.0, looping=false, pan=0.0){
    "Internal helper for `play_sync`."
    if(looping && _is_debug()){
-      print("Audio: sync mode ignores looping=true")
+      print("Sound: sync mode ignores looping=true")
    }
    def period_frames = _get_period_frames()
    def buf_size = period_frames * _frame_bytes()
@@ -299,7 +299,7 @@ fn _play_sync(sound, pitch=1.0, vol=1.0, looping=false, pan=0.0){
 
 fn shutdown(){
    "Shuts down module state."
-   if(_is_debug()){ print("Audio: Shutting down...") }
+   if(_is_debug()){ print("Sound: Shutting down...") }
    _cleanup_partial()
 }
 
@@ -311,7 +311,7 @@ fn _audio_thread(arg){
    def out_rate = _get_output_rate()
    def idle_sleep = _get_idle_sleep_ms()
    def mix_buf = malloc(buf_size)
-   if(_is_debug()){ print("Audio: Background thread started.") }
+   if(_is_debug()){ print("Sound: Background thread started.") }
    while(_running){
       memset(mix_buf, 0, buf_size)
       mutex_lock(_mtx)
@@ -349,16 +349,16 @@ fn _audio_thread(arg){
          }
          }
          if(peak > 0.0){
-         print(f"Audio: mix probe active={len(actives)} signal={has_signal} peak={peak}")
+         print(f"Sound: mix probe active={len(actives)} signal={has_signal} peak={peak}")
          }
       }
       if(!outstream_write_frames(_stream, mix_buf, period_frames)){
-         if(_is_debug()){ print("Audio: Write error, device might be busy or lost.") }
+         if(_is_debug()){ print("Sound: Write error, device might be busy or lost.") }
          msleep(10)
       }
    }
    free(mix_buf)
-   if(_is_debug()){ print("Audio: Background thread exiting.") }
+   if(_is_debug()){ print("Sound: Background thread exiting.") }
    0
 }
 
@@ -367,14 +367,14 @@ fn play(sound, pitch=1.0, vol=1.0, looping=false, pan=0.0){
    if(!_ctx && !_do_init()){ return 0 }
    if(!_thread && looping){
       if(!_start_mixer_thread() && _is_debug()){
-         print("Audio: looping requested but mixer thread start failed; using sync mode.")
+         print("Sound: looping requested but mixer thread start failed; using sync mode.")
       }
    }
    if(!_thread){ return _play_sync(sound, pitch, vol, looping, pan) }
    mutex_lock(_mtx)
    def inst = _make_inst(sound, pitch, vol, looping, pan)
    _active_sounds = append(_active_sounds, inst)
-   if(_is_debug()){ print("Audio: queued sound") }
+   if(_is_debug()){ print("Sound: queued sound") }
    mutex_unlock(_mtx)
    inst
 }
