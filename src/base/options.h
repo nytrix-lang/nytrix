@@ -10,8 +10,56 @@ typedef enum {
   NY_MODE_BUILD,
   NY_MODE_VERSION,
   NY_MODE_HELP,
-  NY_MODE_BUNDLE
+  NY_MODE_BUNDLE,
+  NY_MODE_CLEAN_CACHE
 } ny_mode;
+
+typedef enum {
+  NY_DUMP_SCOPE_PROGRAM = 0,
+  NY_DUMP_SCOPE_LIB = 1,
+  NY_DUMP_SCOPE_BOTH = 2
+} ny_dump_scope_t;
+
+typedef enum {
+  NY_HEAP_MANUAL = 0,
+  NY_HEAP_RAII = 1,
+  NY_HEAP_RC = 2,
+  NY_HEAP_GC = 3
+} ny_heap_policy_t;
+
+typedef enum {
+  NY_RUNTIME_MODE_DEFAULT = 0,
+  NY_RUNTIME_MODE_SAFE,
+  NY_RUNTIME_MODE_FAST,
+  NY_RUNTIME_MODE_BARE
+} ny_runtime_mode_t;
+
+typedef enum {
+  NY_STOP_AFTER_NONE = 0,
+  NY_STOP_AFTER_PARSE,
+  NY_STOP_AFTER_HM,
+  NY_STOP_AFTER_TRAIT,
+  NY_STOP_AFTER_FLOW,
+  NY_STOP_AFTER_ABI,
+  NY_STOP_AFTER_OPT,
+} ny_stop_after_stage_t;
+
+typedef enum {
+  NY_TYPE_SOLVER_AUTO = 0,
+  NY_TYPE_SOLVER_HM = 1,
+  NY_TYPE_SOLVER_Z3 = 2,
+} ny_type_solver_t;
+
+typedef enum ny_opt_profile_kind_t {
+  NY_OPT_PROFILE_DEFAULT = 0,
+  NY_OPT_PROFILE_SPEED,
+  NY_OPT_PROFILE_PEAK,
+  NY_OPT_PROFILE_BALANCED,
+  NY_OPT_PROFILE_COMPILE,
+  NY_OPT_PROFILE_NONE,
+  NY_OPT_PROFILE_SIZE,
+  NY_OPT_PROFILE_CUSTOM,
+} ny_opt_profile_kind_t;
 
 #include "base/loader.h"
 
@@ -23,6 +71,7 @@ typedef struct {
   const char *entry_name;
   const char *argv0;
   int opt_level;
+  const char *opt_profile;
   const char *opt_pipeline;
   const char *emit_ir_pre_path;
   const char *emit_ir_path;
@@ -35,7 +84,11 @@ typedef struct {
   bool run_aot;
   bool emit_only;
   bool do_timing;
+  bool profiler_mode;
   bool dump_ast;
+  bool expand;
+  bool expand_json;
+  bool meta_trace;
   bool dump_llvm;
   bool dump_tokens;
   bool dump_docs;
@@ -43,9 +96,31 @@ typedef struct {
   bool dump_symbols;
   bool dump_stats;
   bool dump_on_error;
+  bool dump_diagnose;
+  bool diag_compact;
+  int warn_level;
+  int max_errors;
+  const char *dump_dir;
+  const char *expand_only;
+  const char *explain_specialization;
+  const char *emit_artifact_path;
+  bool extract_code;
+  bool extract_json;
+  const char *extract_lang;
+  int extract_line;
+  int extract_col;
+  const char *stop_after_raw;
+  ny_stop_after_stage_t stop_after;
+  const char *type_solver_raw;
+  ny_type_solver_t type_solver;
+  bool collect_errors;
+  bool emit_shapes;
+  ny_dump_scope_t dump_scope;
   bool verify_module;
   bool trace_exec;
   bool safe_mode;
+  bool strict_types;
+  bool strict_types_explicit;
   bool help_env;
   bool debug_symbols;
   bool no_std;
@@ -54,6 +129,7 @@ typedef struct {
   bool alias_require_no_escape;
   int gprof;
   int std_builtin_ops;
+  int compiler_asserts;
   int debug_locals;
   int dwarf_version;
   int dwarf_split_inlining;
@@ -68,6 +144,7 @@ typedef struct {
   const char *std_bc_path;
   std_mode_t std_mode;
   bool std_mode_explicit;
+  bool repl_explicit;
   int strip_override;
   int color_mode;
   int opt_dce;
@@ -94,6 +171,14 @@ typedef struct {
   int file_arg_idx;
   double timeout;
   bool pending_command_string;
+  bool enable_gc;
+  bool ownership;
+  bool ownership_strict;
+  bool heap_policy_explicit;
+  bool gc_flag_seen;
+  ny_heap_policy_t heap_policy;
+  ny_runtime_mode_t runtime_mode;
+  const char *runtime_mode_raw;
 } ny_options;
 
 void ny_options_init(ny_options *opt);
@@ -101,5 +186,10 @@ void ny_options_parse(ny_options *opt, int argc, char **argv);
 void ny_options_free(ny_options *opt);
 void ny_options_usage(const char *argv0);
 void ny_options_usage_env(const char *argv0);
+const char *ny_heap_policy_name(ny_heap_policy_t policy);
+const char *ny_runtime_mode_name(ny_runtime_mode_t mode);
+ny_opt_profile_kind_t ny_opt_profile_kind_from_name(const char *profile_name);
+ny_opt_profile_kind_t ny_opt_profile_kind_from_env(void);
+int ny_opt_profile_name_is_valid(const char *profile_name);
 
 #endif

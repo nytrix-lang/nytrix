@@ -3,7 +3,7 @@
 
 #include "base/common.h"
 #include "code/types.h"
-#include "lex/lexer.h"
+#include "parse/lexer.h"
 
 typedef enum expr_kind_t {
   NY_E_IDENT,
@@ -34,12 +34,7 @@ typedef enum expr_kind_t {
   NY_E_TRY,
 } expr_kind_t;
 
-typedef enum lit_kind_t {
-  NY_LIT_INT,
-  NY_LIT_FLOAT,
-  NY_LIT_BOOL,
-  NY_LIT_STR
-} lit_kind_t;
+typedef enum lit_kind_t { NY_LIT_INT, NY_LIT_FLOAT, NY_LIT_BOOL, NY_LIT_STR } lit_kind_t;
 
 typedef enum lit_type_hint_t {
   NY_LIT_HINT_NONE = 0,
@@ -51,6 +46,8 @@ typedef enum lit_type_hint_t {
   NY_LIT_HINT_U16,
   NY_LIT_HINT_U32,
   NY_LIT_HINT_U64,
+  NY_LIT_HINT_I128,
+  NY_LIT_HINT_U128,
   NY_LIT_HINT_F32,
   NY_LIT_HINT_F64,
   NY_LIT_HINT_F128
@@ -59,10 +56,7 @@ typedef enum lit_type_hint_t {
 typedef struct expr_t expr_t;
 typedef struct stmt_t stmt_t;
 
-typedef enum fstring_part_kind_t {
-  NY_FSP_STR,
-  NY_FSP_EXPR
-} fstring_part_kind_t;
+typedef enum fstring_part_kind_t { NY_FSP_STR, NY_FSP_EXPR } fstring_part_kind_t;
 typedef struct fstring_part_t {
   fstring_part_kind_t kind;
   union {
@@ -177,6 +171,7 @@ struct expr_t {
   union {
     struct {
       const char *name;
+      ny_sym_id sym_id;
       uint64_t hash;
     } ident;
     literal_t literal;
@@ -238,15 +233,25 @@ struct expr_t {
   } as;
 };
 
+typedef struct enum_field_t {
+  const char *name;
+  const char *type_name;
+} enum_field_t;
+
+typedef VEC(enum_field_t) ny_enum_field_list;
+typedef VEC(const char *) ny_type_param_list;
+
 typedef struct stmt_enum_item_t {
   const char *name;
   expr_t *value;
+  ny_enum_field_list fields;
 } stmt_enum_item_t;
 
 typedef VEC(stmt_enum_item_t) ny_stmt_enum_item_list;
 
 typedef struct stmt_enum_t {
   const char *name;
+  ny_type_param_list type_params;
   ny_stmt_enum_item_list items;
 } stmt_enum_t;
 
@@ -256,13 +261,13 @@ typedef enum stmt_kind_t {
   NY_S_VAR,
   NY_S_EXPR,
   NY_S_IF,
+  NY_S_GUARD,
   NY_S_WHILE,
   NY_S_FOR,
   NY_S_TRY,
   NY_S_FUNC,
   NY_S_EXTERN,
   NY_S_LINK,
-  NY_S_INCLUDE,
   NY_S_RETURN,
   NY_S_LABEL,
   NY_S_DEFER,
@@ -276,10 +281,16 @@ typedef enum stmt_kind_t {
   NY_S_STRUCT,
   NY_S_ENUM,
   NY_S_MACRO,
+  NY_S_INCLUDE,
+  NY_S_DEFINE,
+  NY_S_OPERATOR,
+  NY_S_IMPL,
 } stmt_kind_t;
 
 typedef struct stmt_export_t {
   VEC(const char *) names;
+  const char *profile;
+  bool is_internal;
 } stmt_export_t;
 
 typedef struct stmt_defer_t {
@@ -290,6 +301,7 @@ typedef VEC(stmt_t *) ny_stmt_list;
 
 typedef struct stmt_block_t {
   ny_stmt_list body;
+  bool transparent;
 } stmt_block_t;
 
 typedef struct stmt_var_t {
@@ -298,7 +310,7 @@ typedef struct stmt_var_t {
   VEC(const char *) types;
   bool is_decl;
   bool is_mut;
-  bool is_undef;
+  bool is_del;
   bool is_destructure;
 } stmt_var_t;
 
@@ -309,17 +321,36 @@ typedef struct stmt_if_t {
   stmt_t *init;
 } stmt_if_t;
 
+typedef struct stmt_guard_t {
+  const char *type_name;
+  const char *name;
+  expr_t *value;
+  stmt_t *fallback;
+} stmt_guard_t;
+
 typedef struct stmt_while_t {
   expr_t *test;
   stmt_t *body;
   stmt_t *update;
   stmt_t *init;
+  bool attr_unroll;
+  bool attr_vectorize;
+  bool attr_nounroll;
 } stmt_while_t;
 
 typedef struct stmt_for_t {
-  const char *iter_var;
-  expr_t *iterable;
-  stmt_t *body;
+  const char *iter_var; /* iterator-style: loop variable name */
+  const char *iter_index_var; /* optional iterator-style index name */
+  expr_t *iterable;     /* iterator-style: iterable expression */
+  bool iter_by_index;   /* iterator-style: bind index instead of element */
+  stmt_t *body;         /* both styles: loop body */
+  /* C-style fields (NULL for iterator-style): */
+  stmt_t *init;   /* C-style: initialization statement */
+  expr_t *cond;   /* C-style: condition expression */
+  stmt_t *update; /* C-style: update statement (++i, etc.) */
+  bool attr_unroll;
+  bool attr_vectorize;
+  bool attr_nounroll;
 } stmt_for_t;
 
 typedef struct stmt_try_t {
@@ -340,7 +371,9 @@ typedef struct stmt_func_t {
   bool attr_naked;
   bool attr_jit;
   bool attr_thread;
+  bool attr_async_effects;
   bool attr_pure;
+  bool attr_cache;
   bool attr_inline;
   bool attr_noinline;
   bool attr_readnone;
@@ -353,11 +386,28 @@ typedef struct stmt_func_t {
   bool attr_cold;
   bool attr_hot;
   bool attr_flatten;
+  bool attr_tailcall;
+  bool attr_sys;
+  bool attr_nogc;
+  bool attr_consteval;
+  bool attr_constant_time;
+  bool attr_accel;
+  const char *attr_accel_target;
+  bool attr_returns_owned;
+  const char *attr_returns_borrow;
+  ny_str_list attr_borrows;
+  ny_str_list attr_consumes;
+  ny_str_list attr_mutates;
+  ny_str_list attr_releases;
+  ny_str_list attr_forgets;
   bool is_extern;
   const char *link_name;
   bool attrs_resolved;
   bool effect_contract_known;
   uint32_t effect_contract_mask;
+  bool body_summary_known;
+  bool body_has_try;
+  bool body_has_label_or_goto;
 } stmt_func_t;
 
 typedef struct stmt_extern_t {
@@ -367,6 +417,31 @@ typedef struct stmt_extern_t {
   const char *link_name;
   bool is_variadic;
 } stmt_extern_t;
+
+typedef struct stmt_include_t {
+  const char *path;
+  const char *prefix;
+  const char *lib;
+  bool is_std;
+} stmt_include_t;
+
+typedef struct stmt_define_t {
+  const char *name;
+  const char *value;
+} stmt_define_t;
+
+typedef struct stmt_operator_t {
+  const char *op;
+  const char *left_type;
+  const char *right_type;
+  const char *return_type;
+  const char *target;
+} stmt_operator_t;
+
+typedef struct stmt_impl_t {
+  const char *type_name;
+  ny_stmt_list methods;
+} stmt_impl_t;
 
 typedef struct stmt_return_t {
   expr_t *value;
@@ -379,10 +454,20 @@ typedef struct stmt_goto_t {
   const char *name;
 } stmt_goto_t;
 
+typedef enum stmt_sema_kind_t {
+  NY_STMT_SEMA_NONE = 0,
+  NY_STMT_SEMA_LAYOUT,
+  NY_STMT_SEMA_FUNC,
+  NY_STMT_SEMA_VAR,
+  NY_STMT_SEMA_ENUM,
+} stmt_sema_kind_t;
+
 typedef struct layout_field_t {
   const char *name;
   const char *type_name;
   int width;
+  expr_t *default_value;
+  const char *default_src;
 } layout_field_t;
 
 typedef VEC(layout_field_t) ny_layout_field_list;
@@ -390,13 +475,16 @@ typedef VEC(layout_field_t) ny_layout_field_list;
 typedef struct stmt_layout_t {
   const char *name;
   ny_layout_field_list fields;
+  ny_stmt_list methods;
   size_t align_override;
   size_t pack;
+  const char *flavor;
 } stmt_layout_t;
 
 typedef struct stmt_struct_t {
   const char *name;
   ny_layout_field_list fields;
+  ny_stmt_list methods;
   size_t align_override;
   size_t pack;
 } stmt_struct_t;
@@ -412,12 +500,14 @@ struct stmt_t {
   stmt_kind_t kind;
   token_t tok;
   void *sema;
+  stmt_sema_kind_t sema_kind;
   ny_attribute_list attributes;
   union {
     stmt_block_t block;
     struct {
       const char *module;
       const char *alias;
+      const char *profile;
       bool is_local;
       bool import_all;
       ny_use_item_list imports;
@@ -427,6 +517,7 @@ struct stmt_t {
       expr_t *expr;
     } expr;
     stmt_if_t iff;
+    stmt_guard_t guard;
     stmt_while_t whl;
     stmt_for_t fr;
     stmt_try_t tr;
@@ -435,12 +526,6 @@ struct stmt_t {
     struct {
       const char *lib;
     } link;
-    struct {
-      const char *path;
-      const char *prefix;
-      const char *lib;
-      bool is_std;
-    } inc;
     stmt_return_t ret;
     stmt_label_t label;
     stmt_goto_t go;
@@ -463,18 +548,69 @@ struct stmt_t {
       ny_expr_list args;
       stmt_t *body;
     } macro;
+    stmt_include_t inc;
+    stmt_define_t def;
+    stmt_operator_t oper;
+    stmt_impl_t impl;
   } as;
 };
 
+typedef struct ny_diag_rule_t {
+  const char *name;
+  const char *call_name;
+  int arg_index;
+  bool reject_non_literal;
+  const char *message;
+  const char *fix;
+} ny_diag_rule_t;
+typedef VEC(ny_diag_rule_t) ny_diag_rule_list;
+
 typedef struct program_t {
   ny_stmt_list body;
+  ny_diag_rule_list diagnostic_rules;
   const char *doc;
+  const char *raw_src; /* Original source code for -c inline compilation */
+  size_t raw_src_len;
 } program_t;
+
+static inline bool ny_expr_ident_is_name(const expr_t *e, const char *name) {
+  return e && e->kind == NY_E_IDENT && e->as.ident.name && name &&
+         strcmp(e->as.ident.name, name) == 0;
+}
+
+static inline bool ny_expr_is_wildcard_ident(const expr_t *e) {
+  return ny_expr_ident_is_name(e, "_");
+}
+
+static inline bool ny_expr_is_nil_literal(const expr_t *e) {
+  return e && e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+         e->tok.kind == NY_T_NIL;
+}
+
+static inline bool ny_expr_is_zero_arg_call_named(const expr_t *e, const char *name) {
+  return e && e->kind == NY_E_CALL &&
+         ny_expr_ident_is_name(e->as.call.callee, name) &&
+         e->as.call.args.len == 0;
+}
+
+static inline bool ny_program_has_top_zero_arg_call_named(const program_t *prog,
+                                                          const char *name) {
+  if (!prog)
+    return false;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    stmt_t *stmt = prog->body.data[i];
+    if (stmt && stmt->kind == NY_S_EXPR &&
+        ny_expr_is_zero_arg_call_named(stmt->as.expr.expr, name))
+      return true;
+  }
+  return false;
+}
 
 expr_t *expr_new(arena_t *arena_t, expr_kind_t kind, token_t tok);
 stmt_t *stmt_new(arena_t *arena_t, stmt_kind_t kind, token_t tok);
 void expr_free_members(expr_t *e);
 void stmt_free_members(stmt_t *s);
 void program_free(program_t *prog, arena_t *arena_t);
+void ny_ast_verify_program(program_t *prog, const char *phase);
 
 #endif
