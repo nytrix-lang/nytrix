@@ -1,8 +1,8 @@
 ;; Keywords: resource manager
-;; Unified resource loader for audio and image files.
-;; Uses libsndfile for audio.
+;; Unified resource loader for sound and image files.
+;; Uses libsndfile for sound.
 
-module std.os.audio.res (
+module std.os.sound.res (
    init, shutdown,
    load, get_sound_info, get_image_info,
    clear_cache,
@@ -17,7 +17,7 @@ use std.os.path as path
 use std.os.fs as fs
 use std.str as str
 use std.image as image
-use std.os.audio.source *
+use std.os.sound.source *
 
 if(comptime{ __os_name() == "linux" }){
    #link "libsndfile.so"
@@ -37,7 +37,7 @@ def SFM_READ = 0x10
 fn _sf_available(){ "Checks whether libsndfile is available (linked via #include)." true }
 
 fn _decode_sf(data){
-   "Decodes audio bytes through libsndfile by routing them through a temporary file."
+   "Decodes sound bytes through libsndfile by routing them through a temporary file."
    if(!_sf_available()){ return 0 }
    if(!is_str(data) || len(data) < 16){ return 0 }
    def debug = env("NY_AUDIO_DEBUG")
@@ -124,7 +124,7 @@ fn is_cached(filepath){
 }
 
 fn load(filepath){
-   "Loads an audio or image asset from disk, caching successful results by normalized path."
+   "Loads a sound or image asset from disk, caching successful results by normalized path."
    if(_mtx == 0){ init() }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)

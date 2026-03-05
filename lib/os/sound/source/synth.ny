@@ -1,6 +1,6 @@
-;; Keywords: audio source synth
+;; Keywords: sound source synth
 
-module std.os.audio.source.synth (
+module std.os.sound.source.synth (
    make_sine_source,
    make_sine_loop_source,
    make_triangle_source,
@@ -11,7 +11,7 @@ module std.os.audio.source.synth (
 
 use std.core *
 use std.math *
-use std.os.audio.source.memory as memory
+use std.os.sound.source.memory as memory
 
 def WAVE_SINE = 1
 def WAVE_TRIANGLE = 2

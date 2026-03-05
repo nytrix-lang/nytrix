@@ -59,7 +59,7 @@ fn dlerror(){
 }
 
 fn _try(path, flags){
-   "Attempts a direct `dlopen` call and logs the attempt when audio debug mode is enabled."
+   "Attempts a direct `dlopen` call and logs the attempt when sound debug mode is enabled."
    if(env("NY_AUDIO_DEBUG")){ print("FFI: trying " + path) }
    def h = __dlopen(path, flags)
    if(h != 0){

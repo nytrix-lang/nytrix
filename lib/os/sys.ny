@@ -5,7 +5,6 @@ module std.os.sys (
    syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl, sys_openpty
 )
 use std.core *
-print("INIT: std.os.sys")
 use std.core.error *
 
 fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){
@@ -44,12 +43,12 @@ fn _sys_io_result(res) -> Result {
 
 fn sys_read(fd, buf, n) -> Result {
    "Wrapper for `read(2)`; returns `ok(bytes_read)` or `err(errno_like_code)`."
-   return _sys_io_result(__sys_read_off(fd, buf, n, 0))
+   return _sys_io_result(__read_off(fd, buf, n, 0))
 }
 
 fn sys_write(fd, buf, n) -> Result {
    "Wrapper for `write(2)`; returns `ok(bytes_written)` or `err(errno_like_code)`."
-   return _sys_io_result(__sys_write_off(fd, buf, n, 0))
+   return _sys_io_result(__write_off(fd, buf, n, 0))
 }
 
 fn sys_close(fd) -> Result {
