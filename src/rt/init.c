@@ -1,6 +1,8 @@
 #include "ast.c"
 #include "core.c"
 #include "ffi.c"
+#include "ffigates.c"
+#include "gc.c"
 #include "math.c"
 #include "memory.c"
 #include "os.c"

@@ -176,6 +176,43 @@ void ny_diag_warning(token_t tok, const char *fmt, ...) {
   va_end(ap);
 }
 
+/* Enhanced error with context and suggestions */
+void ny_diag_error_context(token_t tok, const char *primary_msg,
+                           const char *context, const char *suggestion) {
+  ny_diag_error(tok, "%s", primary_msg);
+
+  if (context && *context) {
+    fprintf(stderr, "  %scontext:%s %s\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET),
+            context);
+  }
+  if (suggestion && *suggestion) {
+    fprintf(stderr, "  %sfix:%s %s\n", clr(NY_CLR_GREEN), clr(NY_CLR_RESET),
+            suggestion);
+  }
+}
+
+/* Type mismatch error with helpful suggestions */
+void ny_diag_type_mismatch(token_t tok, const char *expected, const char *got,
+                           const char *context) {
+  ny_diag_error(tok, "type mismatch: expected '%s', got '%s'", expected, got);
+  if (context && *context) {
+    fprintf(stderr, "  %scontext:%s %s\n", clr(NY_CLR_CYAN), clr(NY_CLR_RESET),
+            context);
+  }
+  /* Provide helpful suggestions based on types */
+  if (strcmp(expected, "int") == 0 && strcmp(got, "f64") == 0) {
+    ny_diag_fix("Use 'trunc(x)' or 'floor(x)' to convert f64 to int");
+  } else if (strcmp(expected, "f64") == 0 && strcmp(got, "int") == 0) {
+    ny_diag_fix("Use 'f64(x)' to convert int to f64");
+  } else if (strstr(expected, "list") && strstr(got, "dict")) {
+    ny_diag_fix("Use 'list(d.keys())' or 'list(d.values())' to convert");
+  } else if (strstr(expected, "str") && strstr(got, "int")) {
+    ny_diag_fix("Use 'to_str(x)' to convert int to string");
+  } else if (strstr(expected, "int") && strstr(got, "str")) {
+    ny_diag_fix("Use 'atoi(s)' to convert string to int");
+  }
+}
+
 void ny_diag_hint(const char *fmt, ...) {
   if (!g_last_primary_emitted)
     return;
@@ -232,4 +269,17 @@ void ny_diag_note_tok(token_t tok, const char *fmt, ...) {
   fputs(rendered, stderr);
   fputc('\n', stderr);
   g_primary_note_count++;
+}
+
+/* Enhanced error reporting with context and suggestions */
+void ny_diag_error_with_context(token_t tok, const char *primary_msg,
+                                const char *common_cause,
+                                const char *fix_suggestion) {
+  ny_diag_error(tok, "%s", primary_msg);
+  if (common_cause && *common_cause) {
+    ny_diag_hint("Common cause: %s", common_cause);
+  }
+  if (fix_suggestion && *fix_suggestion) {
+    ny_diag_fix("%s", fix_suggestion);
+  }
 }

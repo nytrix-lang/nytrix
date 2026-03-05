@@ -265,9 +265,9 @@ RT_DEF("__trace_loc", __trace_loc, 3, "fn __trace_loc(file, line, col)",
        "Internal: record the last executed source location.")
 RT_DEF("__trace_func", __trace_func, 1, "fn __trace_func(name)",
        "Internal: record the current function name.")
-RT_DEF("__trace_enter", rt_trace_enter, 3, "fn __trace_enter(func, file, line)",
+RT_DEF("__trace_enter", __trace_enter, 3, "fn __trace_enter(func, file, line)",
        "Internal: push function onto call stack and record entry.")
-RT_DEF("__trace_exit", rt_trace_exit, 0, "fn __trace_exit()",
+RT_DEF("__trace_exit", __trace_exit, 0, "fn __trace_exit()",
        "Internal: pop function from call stack.")
 RT_DEF("__trace_dump", __trace_dump, 1, "fn __trace_dump(n)",
        "Internal: dump recent trace entries.")

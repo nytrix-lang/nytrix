@@ -2,6 +2,7 @@
 
 #include "llvm.h"
 #include "priv.h"
+#include "typeinfer.h"
 #ifndef _WIN32
 #include <alloca.h>
 #else
@@ -12,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "fficlang.h"
 
 static size_t align_up_size(size_t value, size_t align) {
   if (align == 0)
@@ -68,15 +71,42 @@ static bool layout_add_field(codegen_t *cg, layout_def_t *def,
 }
 
 static void emit_trace_enter(codegen_t *cg, const char *name, token_t tok) {
-  (void)cg;
-  (void)name;
-  (void)tok;
-  /* Tracing disabled - causes crashes during codegen */
+  if (!cg || !cg->builder || !name)
+    return;
+  /* Always emit enter/exit for crash backtraces; only suppress when
+     explicitly disabled (NYTRIX_NO_TRACE=1) for max-perf scenarios. */
+  static int no_trace = -1;
+  if (no_trace < 0)
+    no_trace = ny_env_enabled("NYTRIX_NO_TRACE");
+  if (no_trace)
+    return;
+  fun_sig *ts = lookup_fun(cg, "__trace_enter", 0);
+  if (!ts)
+    return;
+  LLVMValueRef nstr_g = const_string_ptr(cg, name, strlen(name));
+  LLVMValueRef nstr = LLVMBuildLoad2(cg->builder, cg->type_i64, nstr_g, "");
+  const char *fname = tok.filename ? tok.filename : "<unknown>";
+  LLVMValueRef fstr_g = const_string_ptr(cg, fname, strlen(fname));
+  LLVMValueRef fstr = LLVMBuildLoad2(cg->builder, cg->type_i64, fstr_g, "");
+  int line = tok.line > 0 ? tok.line : 1;
+  LLVMValueRef line_v =
+      LLVMConstInt(cg->type_i64, ((uint64_t)line << 1) | 1, false);
+  LLVMBuildCall2(cg->builder, ts->type, ts->value,
+                 (LLVMValueRef[]){nstr, fstr, line_v}, 3, "");
 }
 
 void ny_cg_emit_trace_exit(codegen_t *cg) {
-  (void)cg;
-  /* No-op */
+  if (!cg || !cg->builder)
+    return;
+  static int no_trace = -1;
+  if (no_trace < 0)
+    no_trace = ny_env_enabled("NYTRIX_NO_TRACE");
+  if (no_trace)
+    return;
+  fun_sig *ts = lookup_fun(cg, "__trace_exit", 0);
+  if (!ts)
+    return;
+  LLVMBuildCall2(cg->builder, ts->type, ts->value, NULL, 0, "");
 }
 
 void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
@@ -387,12 +417,57 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   decl->attrs_resolved = true;
 }
 
+/* Count statements in function body for inlining heuristic */
+static size_t count_stmts_in_body(const stmt_t *body) {
+  if (!body)
+    return 0;
+
+  size_t count = 0;
+
+  if (body->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < body->as.block.body.len; i++) {
+      const stmt_t *s = body->as.block.body.data[i];
+      if (s->kind == NY_S_EXPR || s->kind == NY_S_VAR || s->kind == NY_S_EXPR ||
+          s->kind == NY_S_RETURN) {
+        count++;
+      } else if (s->kind == NY_S_IF) {
+        count += 2; /* if + branches */
+        if (s->as.iff.conseq)
+          count += count_stmts_in_body(s->as.iff.conseq);
+        if (s->as.iff.alt)
+          count += count_stmts_in_body(s->as.iff.alt);
+      } else if (s->kind == NY_S_WHILE || s->kind == NY_S_FOR) {
+        count += 3; /* loops are expensive */
+      }
+    }
+  } else {
+    count = 1;
+  }
+
+  return count;
+}
+
 static void apply_fn_attrs(codegen_t *cg, LLVMValueRef fn,
                            const stmt_t *fn_stmt) {
   if (!cg || !fn || !fn_stmt || fn_stmt->kind != NY_S_FUNC)
     return;
   const stmt_func_t *decl = &fn_stmt->as.fn;
   ny_apply_base_fn_attrs(cg, fn);
+
+  /* Aggressive optimization attributes for performance */
+  add_fn_enum_attr(cg, fn, "hot", 0);
+  add_fn_enum_attr(cg, fn, "willreturn", 0);
+  add_fn_enum_attr(cg, fn, "nounwind", 0);
+
+  /* Enable inlining for small functions (heuristic: < 20 statements) */
+  if (!decl->attr_noinline) {
+    /* Count approximate statements in function body */
+    size_t stmt_count = count_stmts_in_body(decl->body);
+    if (stmt_count < 20 || decl->attr_inline || decl->attr_flatten) {
+      add_fn_enum_attr(cg, fn, "alwaysinline", 0);
+    }
+  }
+
   if (decl->attr_naked) {
     add_fn_enum_attr(cg, fn, "naked", 0);
   }
@@ -1684,6 +1759,18 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   cg->current_fn_ret_type = fn->as.fn.return_type;
   cg->current_fn_attr_naked = fn->as.fn.attr_naked;
   cg->current_fn_value = f;
+
+  /* Phase 2: Static type inference pass for proven i64 types */
+  if (cg->opt_type_infer) {
+    typeinfer_ctx_t infer_ctx = {0};
+    size_t max_infer_vars = 256;
+    typeinfer_ctx_init(&infer_ctx, max_infer_vars, scopes, cg);
+    typeinfer_func_body(&infer_ctx, fn->as.fn.body);
+    /* Apply to fd+1 to include the current function scope */
+    typeinfer_apply_to_scopes(&infer_ctx, scopes, fd + 1);
+    typeinfer_ctx_dispose(&infer_ctx);
+  }
+
   gen_stmt(cg, scopes, &fd, fn->as.fn.body, root, true);
   cg->current_fn_ret_type = prev_ret;
   cg->current_fn_attr_naked = prev_naked;
@@ -1715,6 +1802,9 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   cg->di_loc = prev_loc;
   if (cg->debug_symbols && cg->builder) {
     LLVMSetCurrentDebugLocation2(cg->builder, prev_loc);
+    if (cg->alloca_builder) {
+      LLVMSetCurrentDebugLocation2(cg->alloca_builder, prev_loc);
+    }
   }
   if (cur)
     LLVMPositionBuilderAtEnd(cg->builder, cur);
@@ -1799,6 +1889,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     fun_sig sig;
     ny_fun_sig_init(&sig, final_name, ft, f, s, (int)param_count,
                     s->as.ext.is_variadic, true);
+    sig.is_native_abi = true;
     sig.link_name = s->as.ext.link_name ? ny_strdup(s->as.ext.link_name) : NULL;
     sig.return_type =
         s->as.ext.return_type ? ny_strdup(s->as.ext.return_type) : NULL;
@@ -1936,5 +2027,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       collect_sigs(cg, s->as.block.body.data[i]);
   } else if (s->kind == NY_S_MACRO) {
     collect_sigs(cg, s->as.macro.body);
+  } else if (s->kind == NY_S_INCLUDE) {
+    ny_ffi_clang_import(cg, s->as.inc.path, s->as.inc.prefix, s->as.inc.is_std,
+                        s->as.inc.lib);
   }
 }

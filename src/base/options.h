@@ -65,6 +65,7 @@ typedef struct {
   const char *std_path;
   const char *bundle_std_path;
   const char *bundle_symbols_path;
+  const char *std_bc_path;
   std_mode_t std_mode;
   bool std_mode_explicit;
   int strip_override;

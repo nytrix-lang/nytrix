@@ -1910,6 +1910,26 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     free(args);
     return LLVMConstInt(cg->type_i64, 0, false);
   }
+
+  /* Tail Call Optimization (TCO): Mark calls in tail position (opt-in) */
+  bool is_tail_call = false;
+  LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+  if (cg->opt_tail_call && cur_bb && !sig_meta->is_recursive) {
+    LLVMValueRef parent_fn = LLVMGetBasicBlockParent(cur_bb);
+    if (parent_fn) {
+      /* Check if this is a direct return (tail position) */
+      LLVMBasicBlockRef next_bb = LLVMGetNextBasicBlock(cur_bb);
+      bool is_last_block = (next_bb == NULL);
+
+      /* Only apply TCO for non-variadic, non-extern functions with matching
+       * return type */
+      if (is_last_block && ft && !is_variadic && !sig_meta->is_extern) {
+        LLVMTypeRef fn_ret_ty = LLVMGetReturnType(ft);
+        is_tail_call = (fn_ret_ty == cg->type_i64);
+      }
+    }
+  }
+
   LLVMValueRef res = 0;
   bool memo_alias_safe = has_sig && sig_meta && !sig_meta->args_escape &&
                          !sig_meta->args_mutated && !sig_meta->returns_alias;
@@ -1932,6 +1952,10 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
   } else {
     ny_dbg_loc(cg, e->tok);
     res = LLVMBuildCall2(cg->builder, ft, callee, args, call_nargs, "");
+    /* Apply tail call attribute if eligible */
+    if (is_tail_call && !sig_meta->is_extern && !sig_meta->is_variadic) {
+      LLVMSetTailCall(res, 1);
+    }
   }
   free(args);
   if (has_sig && sig_meta) {

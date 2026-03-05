@@ -404,10 +404,11 @@ static bool ny_try_eval_comptime_fast(stmt_t *body, int64_t *out_tagged) {
       if (!s)
         continue;
       if (s->kind == NY_S_FUNC || s->kind == NY_S_EXTERN ||
-          s->kind == NY_S_LINK || s->kind == NY_S_MODULE ||
-          s->kind == NY_S_STRUCT || s->kind == NY_S_LAYOUT ||
-          s->kind == NY_S_ENUM || s->kind == NY_S_MACRO ||
-          s->kind == NY_S_USE || s->kind == NY_S_EXPORT) {
+          s->kind == NY_S_LINK || s->kind == NY_S_INCLUDE ||
+          s->kind == NY_S_MODULE || s->kind == NY_S_STRUCT ||
+          s->kind == NY_S_LAYOUT || s->kind == NY_S_ENUM ||
+          s->kind == NY_S_MACRO || s->kind == NY_S_USE ||
+          s->kind == NY_S_EXPORT) {
         // Harmless declarations during fast eval
         continue;
       }
@@ -1365,61 +1366,6 @@ static fun_sig *ny_helper_to_str(codegen_t *cg) {
                           sizeof(k_names) / sizeof(k_names[0]));
 }
 
-static size_t ny_count_unterminated_blocks(LLVMModuleRef mod) {
-  size_t count = 0;
-  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
-       f = LLVMGetNextFunction(f)) {
-    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(f); bb;
-         bb = LLVMGetNextBasicBlock(bb)) {
-      if (!LLVMGetBasicBlockTerminator(bb))
-        count++;
-    }
-  }
-  return count;
-}
-
-static LLVMValueRef *ny_seal_unterminated_blocks(LLVMModuleRef mod,
-                                                 LLVMContextRef ctx,
-                                                 size_t *out_count) {
-  size_t count = ny_count_unterminated_blocks(mod);
-  if (out_count)
-    *out_count = count;
-  if (count == 0)
-    return NULL;
-
-  LLVMValueRef *terms = calloc(count, sizeof(*terms));
-  if (!terms) {
-    if (out_count)
-      *out_count = 0;
-    return NULL;
-  }
-
-  LLVMBuilderRef builder = LLVMCreateBuilderInContext(ctx);
-  size_t idx = 0;
-  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
-       f = LLVMGetNextFunction(f)) {
-    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(f); bb;
-         bb = LLVMGetNextBasicBlock(bb)) {
-      if (LLVMGetBasicBlockTerminator(bb))
-        continue;
-      LLVMPositionBuilderAtEnd(builder, bb);
-      terms[idx++] = LLVMBuildUnreachable(builder);
-    }
-  }
-  LLVMDisposeBuilder(builder);
-  return terms;
-}
-
-static void ny_unseal_blocks(LLVMValueRef *terms, size_t count) {
-  if (!terms)
-    return;
-  for (size_t i = 0; i < count; i++) {
-    if (terms[i])
-      LLVMInstructionEraseFromParent(terms[i]);
-  }
-  free(terms);
-}
-
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   int64_t fast_tagged = 0;
   if (ny_try_eval_comptime_fast(body, &fast_tagged)) {
@@ -1431,11 +1377,7 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       cg->builder ? LLVMGetInsertBlock(cg->builder) : NULL;
 
   // 1. Snapshot current module state for isolated comptime evaluation.
-  size_t sealed_count = 0;
-  LLVMValueRef *sealed_terms =
-      ny_seal_unterminated_blocks(cg->module, cg->ctx, &sealed_count);
   LLVMMemoryBufferRef bitcode = LLVMWriteBitcodeToMemoryBuffer(cg->module);
-  ny_unseal_blocks(sealed_terms, sealed_count);
 
   // 2. Parse into an isolated context.
   bool ctm_ctx_owned = true;
@@ -1728,7 +1670,7 @@ static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
   fun_sig *st = lookup_fun(cg, "__store64_idx", 0);
   if (!ls || !st)
     return expr_fail(cg, e->tok,
-                     "list literal requires __list_new/rt_store64_idx helpers");
+                     "list literal requires __list_new/__store64_idx helpers");
   ny_dbg_loc(cg, e->tok);
   size_t item_count = e->as.list_like.len;
   LLVMValueRef vl = LLVMBuildCall2(
@@ -2382,7 +2324,6 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       LLVMBuildStore(cg->builder, res, cg->result_store_val);
     } else {
       emit_defers(cg, scopes, depth, cg->func_root_idx);
-      ny_cg_emit_trace_exit(cg);
       LLVMBuildRet(cg->builder, res);
     }
     // We need a dummy terminator if there are instructions after this try

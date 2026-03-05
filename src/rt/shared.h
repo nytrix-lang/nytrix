@@ -1,7 +1,6 @@
 #ifndef RT_COMMON_H
 #define RT_COMMON_H
 
-#include <curl/curl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -161,7 +160,7 @@ static inline int64_t rt_untag_v(int64_t v) {
 }
 
 #if UINTPTR_MAX == 0xffffffff
-static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
+static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 #define NY_NATIVE_TAG 2
 #define NY_NATIVE_MARK (1ULL << 63)
 #define NY_NATIVE_IS(v)                                                        \
@@ -172,7 +171,7 @@ static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 #define NY_NATIVE_DECODE(v)                                                    \
   ((void *)(uintptr_t)((((uint64_t)(v)) & ~NY_NATIVE_MARK) >> 2))
 #else
-static inline int64_t __mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
+static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~7ULL); }
 #define NY_NATIVE_TAG 6
 #define NY_NATIVE_IS(v) (((v) & 7) == NY_NATIVE_TAG)
 #define NY_NATIVE_ENCODE(p)                                                    \
@@ -252,7 +251,7 @@ static inline int is_v_err(int64_t v) {
   return tag == TAG_ERR;
 }
 
-static inline int64_t __rt_flt_unbox_val(int64_t v) {
+static inline int64_t _rt_flt_unbox_val(int64_t v) {
   if (v & 1) {
     double d = (double)(v >> 1);
     int64_t res;
@@ -267,15 +266,15 @@ static inline int64_t __rt_flt_unbox_val(int64_t v) {
   return 0;
 }
 
-static inline int64_t __rt_load_item_fast(int64_t lst, int64_t i_v) {
+static inline int64_t _rt_load_item_fast(int64_t lst, int64_t i_v) {
   if (!is_ptr(lst))
     return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
   return *(int64_t *)((char *)(uintptr_t)lst + 16 + i * 8);
 }
 
-static inline int64_t __rt_store_item_fast(int64_t lst, int64_t i_v,
-                                           int64_t val) {
+static inline int64_t _rt_store_item_fast(int64_t lst, int64_t i_v,
+                                          int64_t val) {
   if (!is_ptr(lst))
     return 0;
   int64_t i = is_int(i_v) ? (i_v >> 1) : i_v;
@@ -283,25 +282,21 @@ static inline int64_t __rt_store_item_fast(int64_t lst, int64_t i_v,
   return val;
 }
 
-void __cleanup_args(void);
-int64_t __set_args(int64_t argc, int64_t argv, int64_t envp);
-int64_t __malloc(int64_t n);
-int64_t __free(int64_t ptr);
-int64_t __runtime_cleanup(void);
-int64_t __flt_box_val(int64_t bits);
-int64_t __str_concat(int64_t a, int64_t b);
-int64_t __trace_last_file(void);
-int64_t __trace_last_line(void);
-int64_t __trace_last_col(void);
-int64_t __trace_last_func(void);
-int64_t __trace_enter(int64_t func, int64_t file, int64_t line);
-int64_t __trace_exit(void);
-int64_t __trace_get_call_stack(int64_t *funcs, int64_t *files, int64_t *lines,
-                               int max_count);
+void rt_cleanup_args(void);
+int64_t rt_set_args(int64_t argc, int64_t argv, int64_t envp);
+int64_t rt_malloc(int64_t n);
+int64_t rt_free(int64_t ptr);
+int64_t rt_runtime_cleanup(void);
+int64_t rt_flt_box_val(int64_t bits);
+int64_t rt_str_concat(int64_t a, int64_t b);
+int64_t rt_trace_last_file(void);
+int64_t rt_trace_last_line(void);
+int64_t rt_trace_last_col(void);
+int64_t rt_trace_last_func(void);
 void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func,
                        const char *prefix);
 
-static inline size_t __get_heap_size(int64_t v) {
+static inline size_t rt_get_heap_size(int64_t v) {
   if (!is_heap_ptr(v))
     return (size_t)-1;
   int64_t raw = *(int64_t *)((char *)(uintptr_t)v - 16);
@@ -310,12 +305,12 @@ static inline size_t __get_heap_size(int64_t v) {
   return (size_t)raw;
 }
 
-static inline int __check_oob(const char *op, int64_t addr, int64_t idx,
-                              size_t access_sz) {
+static inline int rt_check_oob(const char *op, int64_t addr, int64_t idx,
+                               size_t access_sz) {
   (void)op;
   if ((intptr_t)idx < 0)
     return 0;
-  size_t hsz = __get_heap_size(addr);
+  size_t hsz = rt_get_heap_size(addr);
   if (hsz == (size_t)-1)
     return 1;
   if ((size_t)idx + access_sz > hsz)
@@ -323,13 +318,62 @@ static inline int __check_oob(const char *op, int64_t addr, int64_t idx,
   return 1;
 }
 
-int64_t __rt_alloc_string(const char *s);
-int64_t __rt_alloc_string_len(const char *s, size_t len);
-int64_t __list_len(int64_t lst);
-int64_t __list_set_len(int64_t lst, int64_t n);
-int64_t __load_item(int64_t lst, int64_t i);
-int64_t __load_item_fast(int64_t lst, int64_t i);
-int64_t __flt_unbox_val(int64_t v);
-void __flt_free(int64_t v);
+int64_t rt_alloc_string(const char *s);
+int64_t rt_alloc_string_len(const char *s, size_t len);
+int64_t rt_list_len(int64_t lst);
+int64_t rt_list_set_len(int64_t lst, int64_t n);
+int64_t rt_load_item(int64_t lst, int64_t i);
+int64_t rt_load_item_fast(int64_t lst, int64_t i);
+int64_t rt_flt_unbox_val(int64_t v);
+void rt_flt_free(int64_t v);
+
+/* Phase 4: GC and FFI Gates */
+#include "rt/ffigates.h"
+#include "rt/gc.h"
+
+static inline int64_t rt_gc_alloc(int64_t size) {
+  return nyGcAlloc((size_t)size);
+}
+
+static inline int64_t rt_gc_alloc_fast(int64_t size) {
+  return nyGcAllocFast((size_t)size);
+}
+
+static inline int64_t rt_gc_alloc_slow(int64_t size) {
+  return nyGcAllocSlow((size_t)size);
+}
+
+static inline void rt_gc_collect(void) { nyGcCollect(); }
+
+static inline void rt_gc_trigger_minor(void) { nyGcTriggerMinor(); }
+
+static inline void rt_gc_trigger_major(void) { nyGcTriggerMajor(); }
+
+static inline void rt_gc_write_barrier(int64_t *slot, int64_t value) {
+  nyGcWriteBarrier(slot, value);
+}
+
+static inline int64_t rt_ffi_call(void *fn, int64_t *args, size_t argc) {
+  return nyFfiCallGeneric(fn, args, argc);
+}
+
+static inline int64_t rt_ffi_call_fast_i_i(int64_t fn, int64_t a0) {
+  return nyFfiFastII(fn, a0);
+}
+
+static inline int64_t rt_ffi_call_fast_i_ii(int64_t fn, int64_t a0,
+                                            int64_t a1) {
+  return nyFfiFastIIi(fn, a0, a1);
+}
+
+static inline int64_t rt_ffi_call_fast_i_iii(int64_t fn, int64_t a0, int64_t a1,
+                                             int64_t a2) {
+  return nyFfiFastIIii(fn, a0, a1, a2);
+}
+
+static inline int64_t rt_ffi_call_fast_i_pi(int64_t fn, int64_t ptr,
+                                            int64_t idx) {
+  return nyFfiFastPII(fn, ptr, idx);
+}
 
 #endif

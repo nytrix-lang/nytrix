@@ -1,10 +1,54 @@
 # Nytrix
 
-Nytrix starts here as a small native prototype. The first checkpoint keeps the
-repository buildable while the parser, runtime, REPL, and standard library are
-grown in later commits.
+Language for native code, explicit imports,
+and direct C/ABI interop.
 
-```sh
+> *Status*: Work in progress expect breaking changes.
+
+## Focus
+
+- Simplicity.
+- Low-level.
+- Batteries.
+- C include.
+
+## Requirements
+
+- CMake and a C compiler
+- Python 3 'bootstrap'
+- LLVM 16 through 22
+
+Targets: Linux, macOS, and Windows on x86_64 or arm64.
+
+## Build
+
+```bash
+chmod +x make
 ./make
-./build/release/ny --version
 ```
+
+or `python3 ./make`
+
+## Install
+
+```bash
+./make install
+```
+
+## Use
+
+```bash
+ny -c "print('Hello Ny!')" -o && ./a.out
+```
+
+If `ny` is not installed system-wide, use `./build/release/ny` after `./make`.
+
+## Docs
+
+```bash
+./make docs
+```
+
+## License
+
+See `LICENSE`.

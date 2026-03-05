@@ -148,6 +148,8 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       break;
     case NY_S_LINK:
       break;
+    case NY_S_INCLUDE:
+      break;
     case NY_S_IF:
       ny_visit_expr(v, s->as.iff.test);
       ny_visit_stmt(v, s->as.iff.conseq);
@@ -204,7 +206,6 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_EXPORT:
     case NY_S_STRUCT:
     case NY_S_ENUM:
-    case NY_S_INCLUDE:
       break;
     }
   }

@@ -275,82 +275,13 @@ def _extract_ny_functions(path):
     return funcs
 
 def run_analyze(dirs=None):
-    if not dirs: dirs = ["lib", "src", "etc/tests"]
-    fs = [f for f in _iter_files(dirs) if f.endswith(".ny")]
-    log("ANALYZE", f"auditing {len(fs)} files")
-    
-    # Analysis cache logic
-    cache = {}
-    if ANALYSIS_CACHE_PATH.exists():
-        try: cache = json.loads(ANALYSIS_CACHE_PATH.read_text())
-        except: pass
-    
-    new_cache = {}
-    all_funcs = []
-    
-    for f in fs:
-        p = ROOT / f
-        try: st = p.stat()
-        except: continue
-        mtime, size = str(st.st_mtime), st.st_size
-        
-        if f in cache and cache[f].get("mtime") == mtime and cache[f].get("size") == size:
-            all_funcs.extend(cache[f].get("funcs", []))
-            new_cache[f] = cache[f]
-            continue
-            
-        funcs = _extract_ny_functions(f)
-        all_funcs.extend(funcs)
-        new_cache[f] = {"mtime": mtime, "size": size, "funcs": funcs}
-
-    ANALYSIS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ANALYSIS_CACHE_PATH.write_text(json.dumps(new_cache, indent=2))
-    
-    missing_docs = [f for f in all_funcs if not f["has_doc"]]
-    
-    # Exact duplicates
-    exact_groups = defaultdict(list)
-    for f in all_funcs:
-        if len(f["tokens"]) > 4: exact_groups[f["exact"]].append(f)
-    dupes = sorted([g for g in exact_groups.values() if len(g) > 1], key=lambda x: -len(x))
-    
-    # Near duplicates
-    pairs = []
-    eligible = [f for f in all_funcs if len(f["tokens"]) > 10]
-    # Simple ngram similarity for speed
-    def get_ngrams(tokens, n=5): return {tokens[i:i+n] for i in range(len(tokens)-n+1)}
-    for f1, f2 in itertools.combinations(eligible[:200], 2): # Limit to first 200 for speed
-        if f1["exact"] == f2["exact"]: continue
-        g1, g2 = get_ngrams(f1["tokens"]), get_ngrams(f2["tokens"])
-        if not g1 or not g2: continue
-        sim = len(g1 & g2) / max(len(g1), len(g2))
-        if sim > 0.8: pairs.append((sim, f1, f2))
-    pairs.sort(key=lambda x: -x[0])
-
-    # Print Report
-    print(f"\n{c('1;36', 'NYTRIX SOURCE ANALYSIS')}")
-    print(f"{c('90', '-'*73)}")
-    print(f"{c('32', 'Functions')} : {len(all_funcs)}")
-    print(f"{c('31', 'Missing Doc')} : {len(missing_docs)}")
-    print(f"{c('33', 'Duplicates')}  : {len(dupes)} exact groups, {len(pairs)} near-pairs")
-    
-    if missing_docs:
-        print(f"\n{c('1', 'Missing Docstrings (Top 10):')}")
-        for m in missing_docs[:10]:
-            print(f"  {c('37', m['path'])}:{m['line']} - {c('90', m['signature'])}")
-            
-    if dupes:
-        print(f"\n{c('1', 'Exact Duplicate Bodies (Top 5):')}")
-        for g in dupes[:5]:
-            print(f"  {c('1;33', g[0]['name'])} ({len(g)} copies)")
-            for m in g[:3]: print(f"    {m['path']}:{m['line']}")
-            
-    if pairs:
-        print(f"\n{c('1', 'Near-Duplicate Bodies (Top 5):')}")
-        for sim, f1, f2 in pairs[:5]:
-            print(f"  {c('1;33', f'{sim*100:.1f}%')} match: {f1['name']} <-> {f2['name']}")
-            print(f"    {f1['path']}:{f1['line']}\n    {f2['path']}:{f2['line']}")
-    print()
+    """Run comprehensive source code analysis."""
+    import subprocess
+    analyze_script = ROOT / "etc" / "tools" / "analyze.py"
+    if analyze_script.exists():
+        subprocess.run([sys.executable, str(analyze_script)])
+    else:
+        log("WARN", "analyze.py not found")
 
 # ─── Parse-error detector (brace balance + semicolon-swallow) ────────────────
 

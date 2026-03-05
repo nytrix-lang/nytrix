@@ -1928,7 +1928,7 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
       {"VkInstance", "try 'import std.ui.gfx.vk.vulkan'"},
       {"glfwInit", "try 'import std.ui.window.native'"},
       {"image_load", "try 'import std.image'"},
-      {"AudioSource", "try 'import std.audio'"},
+      {"SoundSource", "try 'import std.sound'"},
       {"split", "try 'import std.str' and use '.split()' on a string"},
       {"join", "try 'import std.str' and use '.join()'"},
       {"replace", "try 'import std.str' and use '.replace()'"},
