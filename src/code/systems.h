@@ -1,5 +1,5 @@
 /*
- * Nytrix Systems Mode - Zero Overhead, C-Level Performance
+ * Nytrix Systems Mode - Performance
  *
  * Usage: @sys fn my_func() { ... }
  *
@@ -42,8 +42,7 @@ bool ny_is_nogc_function(stmt_t *fn);
 LLVMValueRef gen_raw_int(codegen_t *cg, int64_t value);
 
 /* Generate raw binary operation (no tag checks) */
-LLVMValueRef gen_raw_binary(codegen_t *cg, const char *op, LLVMValueRef l,
-                            LLVMValueRef r);
+LLVMValueRef gen_raw_binary(codegen_t *cg, const char *op, LLVMValueRef l, LLVMValueRef r);
 
 /* Stack allocate variable */
 LLVMValueRef alloc_stack_var(codegen_t *cg, const char *name, LLVMTypeRef type);

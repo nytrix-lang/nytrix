@@ -18,11 +18,16 @@ typedef enum {
 typedef enum {
   NY_LLVM_OPT_PROFILE_DEFAULT = 0,
   NY_LLVM_OPT_PROFILE_SPEED,
+  NY_LLVM_OPT_PROFILE_PEAK,
   NY_LLVM_OPT_PROFILE_BALANCED,
   NY_LLVM_OPT_PROFILE_COMPILE,
   NY_LLVM_OPT_PROFILE_NONE,
   NY_LLVM_OPT_PROFILE_SIZE,
 } ny_llvm_opt_profile_t;
+
+static char *g_cached_layout_key = NULL;
+static char *g_cached_target_triple = NULL;
+static char *g_cached_data_layout = NULL;
 
 static ny_arm_float_abi_t parse_arm_float_abi(const char *abi) {
   if (!abi || !*abi)
@@ -54,13 +59,13 @@ static ny_arm_float_abi_t host_arm_float_abi(void) {
   return NY_ARM_FLOAT_ABI_HARD;
 #endif
 #if defined(__arm__) && !defined(__aarch64__)
-  if (access("/lib/arm-linux-gnueabihf", F_OK) == 0)
+  if (ny_access("/lib/arm-linux-gnueabihf", F_OK) == 0)
     return NY_ARM_FLOAT_ABI_HARD;
-  if (access("/usr/lib/arm-linux-gnueabihf", F_OK) == 0)
+  if (ny_access("/usr/lib/arm-linux-gnueabihf", F_OK) == 0)
     return NY_ARM_FLOAT_ABI_HARD;
-  if (access("/lib/ld-linux-armhf.so.3", F_OK) == 0)
+  if (ny_access("/lib/ld-linux-armhf.so.3", F_OK) == 0)
     return NY_ARM_FLOAT_ABI_HARD;
-  if (access("/usr/lib/ld-linux-armhf.so.3", F_OK) == 0)
+  if (ny_access("/usr/lib/ld-linux-armhf.so.3", F_OK) == 0)
     return NY_ARM_FLOAT_ABI_HARD;
   return NY_ARM_FLOAT_ABI_HARD;
 #endif
@@ -73,6 +78,8 @@ static ny_llvm_opt_profile_t ny_llvm_opt_profile_from_env(void) {
     return NY_LLVM_OPT_PROFILE_DEFAULT;
   if (strcasecmp(profile, "speed") == 0)
     return NY_LLVM_OPT_PROFILE_SPEED;
+  if (strcasecmp(profile, "peak") == 0)
+    return NY_LLVM_OPT_PROFILE_PEAK;
   if (strcasecmp(profile, "balanced") == 0)
     return NY_LLVM_OPT_PROFILE_BALANCED;
   if (strcasecmp(profile, "compile") == 0)
@@ -92,12 +99,26 @@ static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
     return (opt_level <= 0) ? LLVMCodeGenLevelNone : LLVMCodeGenLevelLess;
   case NY_LLVM_OPT_PROFILE_SIZE:
     return LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    if (opt_level <= 0)
+      return LLVMCodeGenLevelLess;
+    return LLVMCodeGenLevelAggressive;
   case NY_LLVM_OPT_PROFILE_SPEED:
     if (opt_level <= 0)
       return LLVMCodeGenLevelNone;
-    return (opt_level >= 2) ? LLVMCodeGenLevelAggressive : LLVMCodeGenLevelLess;
-  case NY_LLVM_OPT_PROFILE_BALANCED:
+    if (opt_level >= 3)
+      return LLVMCodeGenLevelAggressive;
+    return (opt_level >= 2) ? LLVMCodeGenLevelDefault : LLVMCodeGenLevelLess;
   case NY_LLVM_OPT_PROFILE_DEFAULT:
+    if (opt_level >= 3)
+      return LLVMCodeGenLevelAggressive;
+    if (opt_level >= 2)
+      return LLVMCodeGenLevelDefault;
+    if (opt_level > 0)
+      return LLVMCodeGenLevelLess;
+    break;
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    break;
   default:
     break;
   }
@@ -118,8 +139,12 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
     return (opt_level <= 0) ? NULL : "default<O1>";
   case NY_LLVM_OPT_PROFILE_SIZE:
     return (opt_level <= 0) ? NULL : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    return (opt_level <= 0) ? "default<O1>" : "default<O3>";
   case NY_LLVM_OPT_PROFILE_SPEED:
-    return (opt_level <= 0) ? NULL : "default<O3>";
+    if (opt_level <= 0)
+      return NULL;
+    return (opt_level >= 3) ? "default<O3>" : "default<O2>";
   case NY_LLVM_OPT_PROFILE_BALANCED:
     if (opt_level <= 0)
       return NULL;
@@ -138,9 +163,42 @@ static const char *ny_llvm_default_pass_pipeline(int opt_level) {
   return "default<O3>";
 }
 
-static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts,
-                                           int opt_level, int opt_loops,
-                                           const char *opt_pipeline) {
+static void ny_llvm_count_defined_functions_and_instructions(LLVMModuleRef module,
+                                                             size_t *out_defined_funcs,
+                                                             size_t *out_instructions) {
+  size_t defined_funcs = 0;
+  size_t instructions = 0;
+  if (!module) {
+    if (out_defined_funcs)
+      *out_defined_funcs = 0;
+    if (out_instructions)
+      *out_instructions = 0;
+    return;
+  }
+  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
+    if (LLVMIsDeclaration(fn))
+      continue;
+    defined_funcs++;
+    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb; bb = LLVMGetNextBasicBlock(bb)) {
+      for (LLVMValueRef inst = LLVMGetFirstInstruction(bb); inst;
+           inst = LLVMGetNextInstruction(inst)) {
+        instructions++;
+      }
+    }
+  }
+  if (out_defined_funcs)
+    *out_defined_funcs = defined_funcs;
+  if (out_instructions)
+    *out_instructions = instructions;
+}
+
+static const char *ny_llvm_peak_default_pass_pipeline(LLVMModuleRef module) {
+  (void)module;
+  return "default<O3>";
+}
+
+static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts, int opt_level,
+                                           int opt_loops, const char *opt_pipeline) {
   if (!opts)
     return;
   bool enable_loop_vectorize = (opt_loops > 0);
@@ -159,9 +217,19 @@ static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts,
     enable_slp_vectorize = false;
     inliner_threshold = 75;
     break;
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    enable_loop_vectorize = true;
+    enable_slp_vectorize = true;
+    if (!opt_pipeline || !*opt_pipeline)
+      inliner_threshold = 900;
+    break;
   case NY_LLVM_OPT_PROFILE_SPEED:
-    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
-      inliner_threshold = 1000;
+    if (!opt_pipeline || !*opt_pipeline) {
+      enable_loop_vectorize = true;
+      enable_slp_vectorize = true;
+      if (opt_level >= 2)
+        inliner_threshold = 600;
+    }
     break;
   case NY_LLVM_OPT_PROFILE_BALANCED:
     if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
@@ -169,8 +237,11 @@ static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts,
     break;
   case NY_LLVM_OPT_PROFILE_DEFAULT:
   default:
-    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
-      inliner_threshold = 1000;
+    if (opt_level >= 1 && (!opt_pipeline || !*opt_pipeline)) {
+      enable_loop_vectorize = true;
+      enable_slp_vectorize = true;
+      inliner_threshold = 300;
+    }
     break;
   }
   LLVMPassBuilderOptionsSetLoopVectorization(opts, enable_loop_vectorize);
@@ -259,8 +330,7 @@ try_gnu: {
 }
 }
 
-static void append_feature(char *buf, size_t *len, size_t cap,
-                           const char *feature) {
+static void append_feature(char *buf, size_t *len, size_t cap, const char *feature) {
   size_t fl = strlen(feature);
   if (*len + fl + 1 >= cap)
     return;
@@ -271,10 +341,10 @@ static void append_feature(char *buf, size_t *len, size_t cap,
   buf[*len] = '\0';
 }
 
-static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap,
-                               char *features, size_t feat_cap) {
-  bool arm32 = triple && strstr(triple, "arm") && !strstr(triple, "aarch64") &&
-               !strstr(triple, "arm64");
+static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap, char *features,
+                               size_t feat_cap) {
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
   const char *env = getenv("NYTRIX_HOST_CFLAGS");
   bool cpu_set = cpu && *cpu != '\0';
   size_t feat_len = 0;
@@ -314,8 +384,7 @@ static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap,
   if (arm32) {
     if (arm_float_abi == NY_ARM_FLOAT_ABI_HARD) {
       float_abi_hard = 1;
-    } else if (arm_float_abi == NY_ARM_FLOAT_ABI_SOFT ||
-               arm_float_abi == NY_ARM_FLOAT_ABI_SOFTFP) {
+    } else if (arm_float_abi == NY_ARM_FLOAT_ABI_SOFT || arm_float_abi == NY_ARM_FLOAT_ABI_SOFTFP) {
       float_abi_soft = 1;
     } else if (triple && strstr(triple, "gnueabihf")) {
       float_abi_hard = 1;
@@ -340,14 +409,12 @@ static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap,
   }
 }
 
-static void apply_target_attrs(LLVMModuleRef module, const char *cpu,
-                               const char *features) {
+static void apply_target_attrs(LLVMModuleRef module, const char *cpu, const char *features) {
   if (!module)
     return;
   if ((!cpu || !*cpu) && (!features || !*features))
     return;
-  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
-       fn = LLVMGetNextFunction(fn)) {
+  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
     if (features && *features)
       LLVMAddTargetDependentFunctionAttr(fn, "target-features", features);
     if (cpu && *cpu)
@@ -374,7 +441,7 @@ bool ny_llvm_init_native(void) {
     return true;
 #if defined(__arm__) && !defined(__aarch64__)
   if (!getenv("NYTRIX_ARM_FLOAT_ABI")) {
-    setenv("NYTRIX_ARM_FLOAT_ABI", "hard", 1);
+    ny_setenv("NYTRIX_ARM_FLOAT_ABI", "hard", 1);
   }
 #endif
   LLVMInitializeNativeTarget();
@@ -384,11 +451,126 @@ bool ny_llvm_init_native(void) {
   return true;
 }
 
+static bool ny_llvm_get_cached_module_target(const char **out_triple, const char **out_layout) {
+  if (out_triple)
+    *out_triple = NULL;
+  if (out_layout)
+    *out_layout = NULL;
+  if (!ny_llvm_init_native())
+    return false;
+
+  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
+  const char *cache_key = (env_triple && *env_triple) ? env_triple : "";
+  if (g_cached_layout_key && strcmp(g_cached_layout_key, cache_key) == 0 &&
+      g_cached_target_triple && g_cached_data_layout) {
+    if (out_triple)
+      *out_triple = g_cached_target_triple;
+    if (out_layout)
+      *out_layout = g_cached_data_layout;
+    return true;
+  }
+
+  char *raw_triple = NULL;
+  if (env_triple && *env_triple)
+    raw_triple = ny_strdup(env_triple);
+  if (!raw_triple)
+    raw_triple = LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+
+  bool triple_needs_free = false;
+  char *triple = normalize_triple(raw_triple, &triple_needs_free);
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err) != 0) {
+    if (err)
+      LLVMDisposeMessage(err);
+    if (env_triple && *env_triple) {
+      if (triple_needs_free)
+        free(triple);
+      free(raw_triple);
+    } else {
+      if (triple_needs_free)
+        free(triple);
+      LLVMDisposeMessage(raw_triple);
+    }
+    return false;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  char *host_features = NULL;
+  const char *cpu = cpu_buf[0] ? cpu_buf : "";
+  const char *features = feat_buf;
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  if (!feat_buf[0] && !arm32) {
+    host_features = LLVMGetHostCPUFeatures();
+    if (host_features)
+      features = host_features;
+  } else if (!feat_buf[0] && arm32) {
+    features = "";
+  }
+
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                              LLVMCodeGenLevelDefault, LLVMRelocPIC, host_code_model());
+  char *layout_copy = NULL;
+  if (tm) {
+    LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+    char *layout = LLVMCopyStringRepOfTargetData(td);
+    if (layout) {
+      layout_copy = ny_strdup(layout);
+      LLVMDisposeMessage(layout);
+    }
+    LLVMDisposeTargetData(td);
+    LLVMDisposeTargetMachine(tm);
+  }
+  if (host_features)
+    LLVMDisposeMessage(host_features);
+
+  char *triple_copy = triple ? ny_strdup(triple) : NULL;
+  if (env_triple && *env_triple) {
+    if (triple_needs_free)
+      free(triple);
+    free(raw_triple);
+  } else {
+    if (triple_needs_free)
+      free(triple);
+    LLVMDisposeMessage(raw_triple);
+  }
+  if (!triple_copy || !layout_copy) {
+    free(triple_copy);
+    free(layout_copy);
+    return false;
+  }
+
+  free(g_cached_layout_key);
+  free(g_cached_target_triple);
+  free(g_cached_data_layout);
+  g_cached_layout_key = ny_strdup(cache_key);
+  g_cached_target_triple = triple_copy;
+  g_cached_data_layout = layout_copy;
+  if (out_triple)
+    *out_triple = g_cached_target_triple;
+  if (out_layout)
+    *out_layout = g_cached_data_layout;
+  return true;
+}
+
 void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
                              const char *opt_pipeline) {
-  const char *passes = (opt_pipeline && *opt_pipeline)
-                           ? opt_pipeline
-                           : ny_llvm_default_pass_pipeline(opt_level);
+  ny_llvm_opt_profile_t profile = ny_llvm_opt_profile_from_env();
+  bool has_custom_pipeline = (opt_pipeline && *opt_pipeline);
+  const char *passes = NULL;
+  if (has_custom_pipeline) {
+    passes = opt_pipeline;
+  } else if (profile == NY_LLVM_OPT_PROFILE_PEAK && opt_level > 0) {
+    passes = ny_llvm_peak_default_pass_pipeline(module);
+  } else {
+    passes = ny_llvm_default_pass_pipeline(opt_level);
+  }
   if (!passes || !*passes)
     return;
 
@@ -402,14 +584,12 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
 
   char cpu_buf[128] = {0};
   char feat_buf[256] = {0};
-  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                     sizeof(feat_buf));
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
 
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
 
-  LLVMTargetMachineRef tm =
-      LLVMCreateTargetMachine(target, raw_triple, cpu_buf, feat_buf, cgo,
-                              LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, raw_triple, cpu_buf, feat_buf, cgo,
+                                                    LLVMRelocPIC, host_code_model());
 
   if (!tm) {
     LLVMDisposeMessage(raw_triple);
@@ -431,63 +611,13 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
 }
 
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
-  if (!ny_llvm_init_native())
+  (void)opt_level;
+  const char *triple = NULL;
+  const char *layout = NULL;
+  if (!ny_llvm_get_cached_module_target(&triple, &layout))
     return;
-  char *raw_triple = NULL;
-  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
-  if (env_triple && *env_triple)
-    raw_triple = ny_strdup(env_triple);
-  if (!raw_triple)
-    raw_triple = LLVMGetDefaultTargetTriple();
-  bool triple_needs_free = false;
-  char *triple = normalize_triple(raw_triple, &triple_needs_free);
   LLVMSetTarget(module, triple);
-  LLVMTargetRef target;
-  char *err = NULL;
-  if (LLVMGetTargetFromTriple(triple, &target, &err) == 0) {
-    char cpu_buf[128] = {0};
-    char feat_buf[256] = {0};
-    derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                       sizeof(feat_buf));
-    char *host_features = NULL;
-    const char *cpu = cpu_buf[0] ? cpu_buf : "";
-    const char *features = feat_buf;
-    bool arm32 = triple && strstr(triple, "arm") &&
-                 !strstr(triple, "aarch64") && !strstr(triple, "arm64");
-    if (!feat_buf[0] && !arm32) {
-      host_features = LLVMGetHostCPUFeatures();
-      if (host_features)
-        features = host_features;
-    } else if (!feat_buf[0] && arm32) {
-      features = "";
-    }
-    LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-
-    LLVMTargetMachineRef tm =
-        LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
-                                cgo, LLVMRelocPIC, host_code_model());
-    if (tm) {
-      LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
-      char *layout = LLVMCopyStringRepOfTargetData(td);
-      if (layout) {
-        LLVMSetDataLayout(module, layout);
-        LLVMDisposeMessage(layout);
-      }
-      LLVMDisposeTargetData(td);
-      LLVMDisposeTargetMachine(tm);
-    }
-    if (host_features)
-      LLVMDisposeMessage(host_features);
-  }
-  if (env_triple && env_triple[0]) {
-    if (triple_needs_free)
-      free(triple);
-    free(raw_triple);
-  } else {
-    if (triple_needs_free)
-      free(triple);
-    LLVMDisposeMessage(raw_triple);
-  }
+  LLVMSetDataLayout(module, layout);
 }
 
 void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
@@ -507,13 +637,12 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   char *triple = normalize_triple(raw_triple, &triple_needs_free);
   char cpu_buf[128] = {0};
   char feat_buf[256] = {0};
-  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                     sizeof(feat_buf));
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
   char *host_features = NULL;
   const char *cpu = cpu_buf[0] ? cpu_buf : "";
   const char *features = feat_buf;
-  bool arm32 = triple && strstr(triple, "arm") && !strstr(triple, "aarch64") &&
-               !strstr(triple, "arm64");
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
   if (!feat_buf[0] && !arm32) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
@@ -535,8 +664,7 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   }
 }
 
-bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
-                         int opt_level) {
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -564,13 +692,12 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
   }
   char cpu_buf[128] = {0};
   char feat_buf[256] = {0};
-  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                     sizeof(feat_buf));
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
   char *host_features = NULL;
   const char *cpu = cpu_buf[0] ? cpu_buf : "";
   const char *features = feat_buf;
-  bool arm32 = triple && strstr(triple, "arm") && !strstr(triple, "aarch64") &&
-               !strstr(triple, "arm64");
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
   if (!feat_buf[0] && !arm32) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
@@ -580,9 +707,8 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
   }
   apply_target_attrs(module, cpu, features);
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-  LLVMTargetMachineRef tm =
-      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
-                              cgo, LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                                                    cgo, LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
@@ -603,8 +729,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
   LLVMDisposeTargetData(td);
   LLVMSetTarget(module, triple);
   char *emit_err = NULL;
-  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path,
-                                        LLVMObjectFile, &emit_err);
+  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path, LLVMObjectFile, &emit_err);
   if (emit_err) {
     NY_LOG_ERR("Object emission failed: %s\n", emit_err);
     LLVMDisposeMessage(emit_err);
@@ -624,8 +749,8 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
   return res == 0;
 }
 
-bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
-                       LLVMCodeGenFileType kind, int opt_level) {
+bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileType kind,
+                       int opt_level) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -653,13 +778,12 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
   }
   char cpu_buf[128] = {0};
   char feat_buf[256] = {0};
-  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                     sizeof(feat_buf));
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
   char *host_features = NULL;
   const char *cpu = cpu_buf[0] ? cpu_buf : "";
   const char *features = feat_buf;
-  bool arm32 = triple && strstr(triple, "arm") && !strstr(triple, "aarch64") &&
-               !strstr(triple, "arm64");
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
   if (!feat_buf[0] && !arm32) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
@@ -669,9 +793,8 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
   }
   apply_target_attrs(module, cpu, features);
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-  LLVMTargetMachineRef tm =
-      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
-                              cgo, LLVMRelocPIC, host_code_model());
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                                                    cgo, LLVMRelocPIC, host_code_model());
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
@@ -683,8 +806,7 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
     return false;
   }
   char *emit_err = NULL;
-  int res =
-      LLVMTargetMachineEmitToFile(tm, module, (char *)path, kind, &emit_err);
+  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path, kind, &emit_err);
   if (emit_err) {
     NY_LOG_ERR("Emission failed: %s\n", emit_err);
     LLVMDisposeMessage(emit_err);
@@ -704,12 +826,10 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
   return res == 0;
 }
 
-LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx) {
-  return LLVMPointerTypeInContext(ctx, 0);
-}
+LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx) { return LLVMPointerTypeInContext(ctx, 0); }
 
-LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base,
-                                LLVMValueRef *indices, unsigned count) {
+LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base, LLVMValueRef *indices,
+                                unsigned count) {
   return LLVMConstGEP2(elem_ty, base, indices, count);
 }
 
