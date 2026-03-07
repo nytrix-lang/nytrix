@@ -11,11 +11,11 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
                              const char *opt_pipeline);
 void ny_llvm_apply_host_attrs(LLVMModuleRef module);
 bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level);
-bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
-                       LLVMCodeGenFileType kind, int opt_level);
+bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileType kind,
+                       int opt_level);
 LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx);
-LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base,
-                                LLVMValueRef *indices, unsigned count);
+LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base, LLVMValueRef *indices,
+                                unsigned count);
 void ny_llvm_clear_function(LLVMValueRef f);
 
 #endif
