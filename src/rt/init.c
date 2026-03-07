@@ -1,9 +1,13 @@
 #include "ast.c"
+/* keep init.c as the single runtime compilation unit */
+#include "bigint.c"
 #include "core.c"
+#include "simmd.c"
 #include "ffi.c"
 #include "ffigates.c"
 #include "gc.c"
 #include "math.c"
+#include "gltf.c"
 #include "memory.c"
 #include "os.c"
 #include "string.c"
