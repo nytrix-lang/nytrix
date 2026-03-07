@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "rt/shared.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <time.h>
@@ -14,11 +15,13 @@
 #else
 #include <dirent.h>
 #include <pthread.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 #ifdef __linux__
@@ -34,41 +37,38 @@ extern char **environ;
 #elif !defined(_WIN32)
 extern char **environ;
 #endif
-int64_t __call0(int64_t f);
-int64_t __call1(int64_t f, int64_t a0);
-int64_t __call2(int64_t f, int64_t a0, int64_t a1);
-int64_t __call3(int64_t f, int64_t a0, int64_t a1, int64_t a2);
-int64_t __call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
-int64_t __call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4);
-int64_t __call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5);
-int64_t __call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6);
-int64_t __call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6, int64_t a7);
-int64_t __call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8);
-int64_t __call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9);
-int64_t __call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10);
-int64_t __call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11);
-int64_t __call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12);
-int64_t __call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12,
-                 int64_t a13);
-int64_t __call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
-                 int64_t a4, int64_t a5, int64_t a6, int64_t a7, int64_t a8,
-                 int64_t a9, int64_t a10, int64_t a11, int64_t a12, int64_t a13,
-                 int64_t a14);
+#ifdef __APPLE__
+extern int openpty(int *amaster, int *aslave, char *name, struct termios *termp,
+                   struct winsize *winp);
+#endif
+int64_t rt_call0(int64_t f);
+int64_t rt_call1(int64_t f, int64_t a0);
+int64_t rt_call2(int64_t f, int64_t a0, int64_t a1);
+int64_t rt_call3(int64_t f, int64_t a0, int64_t a1, int64_t a2);
+int64_t rt_call4(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
+int64_t rt_call5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
+int64_t rt_call6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5);
+int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6);
+int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6, int64_t a7);
+int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                 int64_t a6, int64_t a7, int64_t a8);
+int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9);
+int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10);
+int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11);
+int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12);
+int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12, int64_t a13);
+int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
+                  int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
+                  int64_t a12, int64_t a13, int64_t a14);
 
 static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
   if (needs_free)
@@ -117,9 +117,8 @@ static char **ny_native_envp(intptr_t renvp, bool *needs_free) {
 }
 #endif
 
-#if defined(__linux__) && defined(__x86_64__)
-int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
-                  int64_t e, int64_t f) {
+#if defined(__linux__) && defined(rt_x86_64__)
+int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
   long rn = (n & 1) ? (n >> 1) : n;
   long ra = a;
   long rb = b;
@@ -132,23 +131,19 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
     rb = (b & 1) ? (b >> 1) : b;
     rc = (c & 1) ? (c >> 1) : c;
   }
-  register long _num __asm__("rax") = rn;
-  register long _arg1 __asm__("rdi") = ra;
-  register long _arg2 __asm__("rsi") = rb;
-  register long _arg3 __asm__("rdx") = rc;
-  register long _arg4 __asm__("r10") = rd;
-  register long _arg5 __asm__("r8") = re;
-  register long _arg6 __asm__("r9") = rf;
-  __asm__ __volatile__("syscall\n"
-                       : "+r"(_num)
-                       : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
-                         "r"(_arg5), "r"(_arg6)
-                       : "rcx", "r11", "memory");
+  register long _num rt_asm__("rax") = rn;
+  register long _arg1 rt_asm__("rdi") = ra;
+  register long _arg2 rt_asm__("rsi") = rb;
+  register long _arg3 rt_asm__("rdx") = rc;
+  register long _arg4 rt_asm__("r10") = rd;
+  register long _arg5 rt_asm__("r8") = re;
+  register long _arg6 rt_asm__("r9") = rf;
+  rt_asm__ rt_volatile__("syscall\n" : "+r"(_num) : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
+                         "r"(_arg5), "r"(_arg6) : "rcx", "r11", "memory");
   return (int64_t)(((uint64_t)_num << 1) | 1);
 }
 #else
-int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
-                  int64_t e, int64_t f) {
+int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
 #if defined(_WIN32) || !defined(__linux__)
   (void)n;
   (void)a;
@@ -172,14 +167,14 @@ int64_t __syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d,
 }
 #endif
 
-int64_t __sys_read_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
+int64_t rt_read_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(len))
     len >>= 1;
   if (is_int(off))
     off >>= 1;
-  if (!__check_oob("sys_read", buf, off, (size_t)len))
+  if (!rt_check_oob("sys_read", buf, off, (size_t)len))
     return -1LL;
   char *ptr = (char *)((intptr_t)rt_untag_v(buf) + (intptr_t)off);
 #ifdef _WIN32
@@ -194,14 +189,14 @@ int64_t __sys_read_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __sys_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
+int64_t rt_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(len))
     len >>= 1;
   if (is_int(off))
     off >>= 1;
-  if (!__check_oob("sys_write", buf, off, (size_t)len))
+  if (!rt_check_oob("sys_write", buf, off, (size_t)len))
     return -1LL;
   char *ptr = (char *)((intptr_t)rt_untag_v(buf) + (intptr_t)off);
 #ifdef _WIN32
@@ -216,7 +211,104 @@ int64_t __sys_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __open(int64_t path, int64_t flags, int64_t mode) {
+int64_t rt_save_tga_rgba(int64_t path, int64_t data, int64_t width, int64_t height,
+                         int64_t channels) {
+  const char *path_p = (const char *)(uintptr_t)(is_int(path) ? rt_untag_v(path) : path);
+  const uint8_t *src = (const uint8_t *)(uintptr_t)(is_int(data) ? rt_untag_v(data) : data);
+  int64_t w64 = is_int(width) ? rt_untag_v(width) : width;
+  int64_t h64 = is_int(height) ? rt_untag_v(height) : height;
+  int64_t ch64 = is_int(channels) ? rt_untag_v(channels) : channels;
+  if (!path_p || !src || w64 <= 0 || h64 <= 0 || w64 > 65535 || h64 > 65535 || ch64 <= 0)
+    return rt_tag_v(-22);
+  size_t w = (size_t)w64;
+  size_t h = (size_t)h64;
+  size_t ch = (size_t)ch64;
+  if (ch > 4)
+    ch = 4;
+  if (w > SIZE_MAX / h || w * h > SIZE_MAX / 4 || w * ch > SIZE_MAX / h)
+    return rt_tag_v(-75);
+  size_t src_size = w * h * ch;
+  if (!rt_check_oob("save_tga_rgba", data, 0, src_size))
+    return rt_tag_v(-14);
+
+  FILE *fp = fopen(path_p, "wb");
+  if (!fp)
+    return rt_tag_v((int64_t)-errno);
+
+  uint8_t header[18] = {0};
+  header[2] = 2; /* uncompressed true-color */
+  header[12] = (uint8_t)(w & 255u);
+  header[13] = (uint8_t)((w >> 8) & 255u);
+  header[14] = (uint8_t)(h & 255u);
+  header[15] = (uint8_t)((h >> 8) & 255u);
+  header[16] = 32;
+  header[17] = 40; /* top-left origin + 8 alpha bits */
+  if (fwrite(header, 1, sizeof(header), fp) != sizeof(header)) {
+    int e = errno ? errno : EIO;
+    fclose(fp);
+    return rt_tag_v((int64_t)-e);
+  }
+
+  size_t row_bytes = w * 4u;
+  uint8_t *row = (uint8_t *)malloc(row_bytes);
+  if (!row) {
+    fclose(fp);
+    return rt_tag_v(-12);
+  }
+
+  for (size_t y = 0; y < h; ++y) {
+    const uint8_t *srow = src + y * w * ch;
+    if (ch == 4) {
+      for (size_t x = 0; x < w; ++x) {
+        const uint8_t *s = srow + x * 4u;
+        uint8_t *d = row + x * 4u;
+        d[0] = s[2];
+        d[1] = s[1];
+        d[2] = s[0];
+        d[3] = s[3];
+      }
+    } else if (ch == 3) {
+      for (size_t x = 0; x < w; ++x) {
+        const uint8_t *s = srow + x * 3u;
+        uint8_t *d = row + x * 4u;
+        d[0] = s[2];
+        d[1] = s[1];
+        d[2] = s[0];
+        d[3] = 255u;
+      }
+    } else if (ch == 2) {
+      for (size_t x = 0; x < w; ++x) {
+        const uint8_t *s = srow + x * 2u;
+        uint8_t *d = row + x * 4u;
+        d[0] = s[0];
+        d[1] = s[0];
+        d[2] = s[0];
+        d[3] = s[1];
+      }
+    } else {
+      for (size_t x = 0; x < w; ++x) {
+        uint8_t v = srow[x];
+        uint8_t *d = row + x * 4u;
+        d[0] = v;
+        d[1] = v;
+        d[2] = v;
+        d[3] = 255u;
+      }
+    }
+    if (fwrite(row, 1, row_bytes, fp) != row_bytes) {
+      int e = errno ? errno : EIO;
+      free(row);
+      fclose(fp);
+      return rt_tag_v((int64_t)-e);
+    }
+  }
+  free(row);
+  if (fclose(fp) != 0)
+    return rt_tag_v((int64_t)-(errno ? errno : EIO));
+  return rt_tag_v((int64_t)(18u + w * h * 4u));
+}
+
+int64_t rt_open(int64_t path, int64_t flags, int64_t mode) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
   int64_t rflags = (flags & 1) ? (flags >> 1) : flags;
   int64_t rmode = (mode & 1) ? (mode >> 1) : mode;
@@ -246,7 +338,7 @@ int64_t __open(int64_t path, int64_t flags, int64_t mode) {
   return rt_tag_v((int64_t)fd);
 }
 
-int64_t __close(int64_t fd) {
+int64_t rt_close(int64_t fd) {
   if (is_int(fd))
     fd >>= 1;
 #ifdef _WIN32
@@ -259,7 +351,7 @@ int64_t __close(int64_t fd) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __ioctl(int64_t fd, int64_t req, int64_t arg) {
+int64_t rt_ioctl(int64_t fd, int64_t req, int64_t arg) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(req))
@@ -274,7 +366,7 @@ int64_t __ioctl(int64_t fd, int64_t req, int64_t arg) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __clock_gettime(int64_t clk, int64_t ts_ptr) {
+int64_t rt_clock_gettime(int64_t clk, int64_t ts_ptr) {
   if (is_int(clk))
     clk >>= 1;
   if (is_int(ts_ptr))
@@ -300,8 +392,8 @@ int64_t __clock_gettime(int64_t clk, int64_t ts_ptr) {
     t[1] = (int64_t)nsec;
   } else {
     LARGE_INTEGER freq, counter;
-    if (!QueryPerformanceFrequency(&freq) ||
-        !QueryPerformanceCounter(&counter) || freq.QuadPart == 0) {
+    if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&counter) ||
+        freq.QuadPart == 0) {
       return (int64_t)-1;
     }
     uint64_t sec = (uint64_t)counter.QuadPart / (uint64_t)freq.QuadPart;
@@ -317,7 +409,7 @@ int64_t __clock_gettime(int64_t clk, int64_t ts_ptr) {
 #endif
 }
 
-int64_t __nanosleep(int64_t ts_ptr) {
+int64_t rt_nanosleep(int64_t ts_ptr) {
   if (is_int(ts_ptr))
     ts_ptr >>= 1;
 #ifdef _WIN32
@@ -336,7 +428,86 @@ int64_t __nanosleep(int64_t ts_ptr) {
 #endif
 }
 
-int64_t __getpid(void) {
+int64_t rt_time_seconds(void) {
+#ifdef _WIN32
+  FILETIME ft;
+  ULARGE_INTEGER uli;
+  GetSystemTimeAsFileTime(&ft);
+  uli.LowPart = ft.dwLowDateTime;
+  uli.HighPart = ft.dwHighDateTime;
+  uint64_t t100 = uli.QuadPart;
+  const uint64_t EPOCH = 116444736000000000ULL;
+  if (t100 < EPOCH)
+    t100 = EPOCH;
+  return rt_tag_v((int64_t)((t100 - EPOCH) / 10000000ULL));
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+    return rt_tag_v(0);
+  return rt_tag_v((int64_t)ts.tv_sec);
+#endif
+}
+
+int64_t rt_time_milliseconds(void) {
+#ifdef _WIN32
+  FILETIME ft;
+  ULARGE_INTEGER uli;
+  GetSystemTimeAsFileTime(&ft);
+  uli.LowPart = ft.dwLowDateTime;
+  uli.HighPart = ft.dwHighDateTime;
+  uint64_t t100 = uli.QuadPart;
+  const uint64_t EPOCH = 116444736000000000ULL;
+  if (t100 < EPOCH)
+    t100 = EPOCH;
+  return rt_tag_v((int64_t)((t100 - EPOCH) / 10000ULL));
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+    return rt_tag_v(0);
+  return rt_tag_v((int64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000));
+#endif
+}
+
+int64_t rt_ticks_ns(void) {
+#ifdef _WIN32
+  LARGE_INTEGER freq, counter;
+  if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&counter) ||
+      freq.QuadPart == 0) {
+    return rt_tag_v(0);
+  }
+  uint64_t sec = (uint64_t)counter.QuadPart / (uint64_t)freq.QuadPart;
+  uint64_t rem = (uint64_t)counter.QuadPart % (uint64_t)freq.QuadPart;
+  uint64_t nsec = (rem * 1000000000ULL) / (uint64_t)freq.QuadPart;
+  uint64_t total = sec * 1000000000ULL + nsec;
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    return rt_tag_v(0);
+  uint64_t total = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+  if (total > (uint64_t)INT64_MAX / 2u)
+    total = (uint64_t)INT64_MAX / 2u;
+  return rt_tag_v((int64_t)total);
+}
+
+int64_t rt_msleep_ms(int64_t ms) {
+  if (is_int(ms))
+    ms >>= 1;
+  if (ms < 0)
+    ms = 0;
+#ifdef _WIN32
+  Sleep((DWORD)ms);
+#else
+  struct timespec req;
+  req.tv_sec = (time_t)(ms / 1000);
+  req.tv_nsec = (long)((ms % 1000) * 1000000);
+  while (nanosleep(&req, &req) != 0 && errno == EINTR) {
+  }
+#endif
+  return rt_tag_v(0);
+}
+
+int64_t rt_getpid(void) {
 #ifdef _WIN32
   int pid = _getpid();
 #else
@@ -345,7 +516,7 @@ int64_t __getpid(void) {
   return rt_tag_v((int64_t)pid);
 }
 
-int64_t __getppid(void) {
+int64_t rt_getppid(void) {
 #ifdef _WIN32
   int ppid = 0;
 #else
@@ -354,7 +525,7 @@ int64_t __getppid(void) {
   return rt_tag_v((int64_t)ppid);
 }
 
-int64_t __getuid(void) {
+int64_t rt_getuid(void) {
 #ifdef _WIN32
   int uid = 0;
 #else
@@ -363,7 +534,7 @@ int64_t __getuid(void) {
   return rt_tag_v((int64_t)uid);
 }
 
-int64_t __getgid(void) {
+int64_t rt_getgid(void) {
 #ifdef _WIN32
   int gid = 0;
 #else
@@ -372,7 +543,7 @@ int64_t __getgid(void) {
   return rt_tag_v((int64_t)gid);
 }
 
-int64_t __getcwd(int64_t buf, int64_t size) {
+int64_t rt_getcwd(int64_t buf, int64_t size) {
   if (is_int(buf))
     buf >>= 1;
   if (is_int(size))
@@ -388,18 +559,14 @@ int64_t __getcwd(int64_t buf, int64_t size) {
   return rt_tag_v((int64_t)len);
 }
 
-int64_t __access(int64_t path, int64_t mode) {
+int64_t rt_access(int64_t path, int64_t mode) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
   int64_t rmode = (mode & 1) ? (mode >> 1) : mode;
-#ifdef _WIN32
-  int r = _access((const char *)rpath, (int)rmode);
-#else
-  int r = access((const char *)rpath, (int)rmode);
-#endif
+  int r = ny_access((const char *)rpath, (int)rmode);
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __unlink(int64_t path) {
+int64_t rt_unlink(int64_t path) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
 #ifdef _WIN32
   int r = _unlink((const char *)rpath);
@@ -411,7 +578,7 @@ int64_t __unlink(int64_t path) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __pipe(int64_t fds_ptr) {
+int64_t rt_pipe(int64_t fds_ptr) {
   if (is_int(fds_ptr))
     fds_ptr >>= 1;
 #ifdef _WIN32
@@ -430,7 +597,7 @@ int64_t __pipe(int64_t fds_ptr) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __dup2(int64_t oldfd, int64_t newfd) {
+int64_t rt_dup2(int64_t oldfd, int64_t newfd) {
   if (is_int(oldfd))
     oldfd >>= 1;
   if (is_int(newfd))
@@ -443,7 +610,7 @@ int64_t __dup2(int64_t oldfd, int64_t newfd) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __fork(void) {
+int64_t rt_fork(void) {
 #ifdef _WIN32
   int r = -1;
 #else
@@ -452,7 +619,7 @@ int64_t __fork(void) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __wait4(int64_t pid, int64_t status_ptr, int64_t options) {
+int64_t rt_wait4(int64_t pid, int64_t status_ptr, int64_t options) {
   if (is_int(pid))
     pid >>= 1;
   if (is_int(status_ptr))
@@ -467,12 +634,12 @@ int64_t __wait4(int64_t pid, int64_t status_ptr, int64_t options) {
   return rt_tag_v((int64_t)r);
 }
 
-extern void __rt_print_flush(void);
+extern int64_t rt_print_flush(void);
 
-int64_t __exit(int64_t code) {
+int64_t rt_exit(int64_t code) {
   if (is_int(code))
     code >>= 1;
-  __rt_print_flush();
+  rt_print_flush();
 #ifdef _WIN32
   ExitProcess((unsigned int)code);
 #else
@@ -481,7 +648,7 @@ int64_t __exit(int64_t code) {
   return (int64_t)((0 << 1) | 1);
 }
 
-int64_t __enable_vt(void) {
+int64_t rt_enable_vt(void) {
 #ifdef _WIN32
   int ok = 0;
   HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -511,14 +678,14 @@ int64_t __enable_vt(void) {
 }
 
 #ifdef _WIN32
-static int __tty_mode_saved = 0;
-static DWORD __tty_mode_prev = 0;
+static int rt_tty_mode_saved = 0;
+static DWORD rt_tty_mode_prev = 0;
 #else
-static int __tty_mode_saved = 0;
-static struct termios __tty_mode_prev;
+static int rt_tty_mode_saved = 0;
+static struct termios rt_tty_mode_prev;
 #endif
 
-int64_t __openpty(int64_t fds_ptr) {
+int64_t rt_openpty(int64_t fds_ptr) {
   intptr_t ptr = (intptr_t)rt_untag_v(fds_ptr);
 #if !defined(_WIN32)
   int m, s;
@@ -538,7 +705,7 @@ int64_t __openpty(int64_t fds_ptr) {
 #endif
 }
 
-int64_t __setsid(void) {
+int64_t rt_setsid(void) {
 #ifdef _WIN32
   return rt_tag_v((int64_t)-1);
 #else
@@ -546,7 +713,7 @@ int64_t __setsid(void) {
 #endif
 }
 
-int64_t __tty_raw(int64_t enable) {
+int64_t rt_tty_raw(int64_t enable) {
   if (is_int(enable))
     enable >>= 1;
 #ifdef _WIN32
@@ -557,18 +724,18 @@ int64_t __tty_raw(int64_t enable) {
     DWORD mode = 0;
     if (!GetConsoleMode(hIn, &mode))
       return rt_tag_v((int64_t)-1);
-    if (!__tty_mode_saved) {
-      __tty_mode_prev = mode;
-      __tty_mode_saved = 1;
+    if (!rt_tty_mode_saved) {
+      rt_tty_mode_prev = mode;
+      rt_tty_mode_saved = 1;
     }
     mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
     if (!SetConsoleMode(hIn, mode))
       return rt_tag_v((int64_t)-1);
     return rt_tag_v((int64_t)0);
   }
-  if (__tty_mode_saved && !SetConsoleMode(hIn, __tty_mode_prev))
+  if (rt_tty_mode_saved && !SetConsoleMode(hIn, rt_tty_mode_prev))
     return rt_tag_v((int64_t)-1);
-  __tty_mode_saved = 0;
+  rt_tty_mode_saved = 0;
   return rt_tag_v((int64_t)0);
 #else
   if (enable) {
@@ -577,9 +744,9 @@ int64_t __tty_raw(int64_t enable) {
     struct termios t;
     if (tcgetattr(STDIN_FILENO, &t) != 0)
       return rt_tag_v((int64_t)-errno);
-    if (!__tty_mode_saved) {
-      __tty_mode_prev = t;
-      __tty_mode_saved = 1;
+    if (!rt_tty_mode_saved) {
+      rt_tty_mode_prev = t;
+      rt_tty_mode_saved = 1;
     }
     t.c_lflag &= (tcflag_t) ~(ICANON | ECHO);
 #ifdef IEXTEN
@@ -612,15 +779,14 @@ int64_t __tty_raw(int64_t enable) {
       return rt_tag_v((int64_t)-errno);
     return rt_tag_v((int64_t)0);
   }
-  if (__tty_mode_saved &&
-      tcsetattr(STDIN_FILENO, TCSANOW, &__tty_mode_prev) != 0)
+  if (rt_tty_mode_saved && tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev) != 0)
     return rt_tag_v((int64_t)-errno);
-  __tty_mode_saved = 0;
+  rt_tty_mode_saved = 0;
   return rt_tag_v((int64_t)0);
 #endif
 }
 
-int64_t __tty_sane_fd(int64_t fd) {
+int64_t rt_tty_sane_fd(int64_t fd) {
   if (is_int(fd))
     fd >>= 1;
 #ifdef _WIN32
@@ -664,51 +830,85 @@ int64_t __tty_sane_fd(int64_t fd) {
   */
 #ifndef _WIN32
 #include <signal.h>
-static volatile sig_atomic_t __tty_sig_installed = 0;
-static struct sigaction __tty_old_sigint;
-static struct sigaction __tty_old_sigterm;
+static volatile sig_atomic_t rt_tty_sig_installed = 0;
+static struct sigaction rt_tty_old_sigint;
+static struct sigaction rt_tty_old_sigterm;
+static struct sigaction rt_tty_old_sigquit;
+static struct sigaction rt_tty_old_sighup;
 
-static void __tty_sig_restore(int sig) {
+static struct sigaction *rt_tty_old_sigaction(int sig) {
+  if (sig == SIGINT)
+    return &rt_tty_old_sigint;
+  if (sig == SIGTERM)
+    return &rt_tty_old_sigterm;
+#ifdef SIGQUIT
+  if (sig == SIGQUIT)
+    return &rt_tty_old_sigquit;
+#endif
+#ifdef SIGHUP
+  if (sig == SIGHUP)
+    return &rt_tty_old_sighup;
+#endif
+  return NULL;
+}
+
+static void rt_tty_sig_restore(int sig) {
   /* Restore termios */
-  if (__tty_mode_saved) {
-    tcsetattr(STDIN_FILENO, TCSANOW, &__tty_mode_prev);
-    __tty_mode_saved = 0;
+  if (rt_tty_mode_saved) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev);
+    rt_tty_mode_saved = 0;
   }
   /* Exit alt-screen, reset all SGR attrs, show cursor, enable wrap */
-  const char *cleanup = "\033[0m"     /* reset SGR */
-                        "\033[?25h"   /* show cursor */
-                        "\033[?7h"    /* enable wrap */
-                        "\033[?1049l" /* leave alt screen */
-                        "\033[0m"     /* reset SGR again on main screen */
-                        "\033[?25h"   /* show cursor on main screen */
-                        "\033[?7h";   /* enable wrap on main screen */
-  write(STDOUT_FILENO, cleanup, 38);
+  static const char cleanup[] = "\033[0m"     /* reset SGR */
+                                "\033[?25h"   /* show cursor */
+                                "\033[?7h"    /* enable wrap */
+                                "\033[?1049l" /* leave alt screen */
+                                "\033[?2004l" /* disable bracketed paste */
+                                "\033[?1000l" /* disable mouse tracking */
+                                "\033[?1002l" /* disable mouse drag tracking */
+                                "\033[?1003l" /* disable any-event mouse tracking */
+                                "\033[?1006l" /* disable sgr mouse mode */
+                                "\033[0m"     /* reset SGR again on main screen */
+                                "\033[?25h"   /* show cursor on main screen */
+                                "\033[?7h"    /* enable wrap on main screen */
+                                "\033[2K\r";  /* clear current line and return */
+  write(STDOUT_FILENO, cleanup, sizeof(cleanup) - 1);
   fsync(STDOUT_FILENO);
   /* Re-raise with original handler */
-  struct sigaction *old =
-      (sig == SIGTERM) ? &__tty_old_sigterm : &__tty_old_sigint;
-  sigaction(sig, old, NULL);
+  struct sigaction *old = rt_tty_old_sigaction(sig);
+  if (old)
+    sigaction(sig, old, NULL);
+  else
+    signal(sig, SIG_DFL);
   raise(sig);
 }
 
-int64_t __tty_install_cleanup(void) {
-  if (__tty_sig_installed)
+int64_t rt_tty_install_cleanup(void) {
+  if (rt_tty_sig_installed)
     return 0;
   struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = __tty_sig_restore;
+  unsigned char *_p_sa = (unsigned char *)&sa;
+  for (size_t _i_sa = 0; _i_sa < sizeof(sa); _i_sa++)
+    _p_sa[_i_sa] = 0;
+  sa.sa_handler = rt_tty_sig_restore;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESETHAND;
-  sigaction(SIGINT, &sa, &__tty_old_sigint);
-  sigaction(SIGTERM, &sa, &__tty_old_sigterm);
-  __tty_sig_installed = 1;
+  sigaction(SIGINT, &sa, &rt_tty_old_sigint);
+  sigaction(SIGTERM, &sa, &rt_tty_old_sigterm);
+#ifdef SIGQUIT
+  sigaction(SIGQUIT, &sa, &rt_tty_old_sigquit);
+#endif
+#ifdef SIGHUP
+  sigaction(SIGHUP, &sa, &rt_tty_old_sighup);
+#endif
+  rt_tty_sig_installed = 1;
   return 0;
 }
 #else
-int64_t __tty_install_cleanup(void) { return 0; }
+int64_t rt_tty_install_cleanup(void) { return 0; }
 #endif
 
-int64_t __tty_pending(void) {
+int64_t rt_tty_pending(void) {
 #ifdef _WIN32
   return rt_tag_v((int64_t)(_kbhit() ? 1 : 0));
 #else
@@ -721,7 +921,7 @@ int64_t __tty_pending(void) {
 #endif
 }
 
-int64_t __tty_size(int64_t out_ptr) {
+int64_t rt_tty_size(int64_t out_ptr) {
   if (is_int(out_ptr))
     out_ptr >>= 1;
   if (!out_ptr)
@@ -762,7 +962,7 @@ int64_t __tty_size(int64_t out_ptr) {
 #endif
 }
 
-int64_t __is_dir(int64_t path) {
+int64_t rt_is_dir(int64_t path) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
 #ifdef _WIN32
   DWORD attr = GetFileAttributesA((const char *)rpath);
@@ -785,7 +985,7 @@ typedef struct ny_dir {
 } ny_dir;
 #endif
 
-int64_t __dir_open(int64_t path) {
+int64_t rt_dir_open(int64_t path) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
 #ifdef _WIN32
   ny_dir *d = (ny_dir *)malloc(sizeof(ny_dir));
@@ -794,8 +994,8 @@ int64_t __dir_open(int64_t path) {
   d->first = 1;
   char pattern[MAX_PATH];
   size_t len = strlen((const char *)rpath);
-  if (len > 0 && (((const char *)rpath)[len - 1] == '\\' ||
-                  ((const char *)rpath)[len - 1] == '/')) {
+  if (len > 0 &&
+      (((const char *)rpath)[len - 1] == '\\' || ((const char *)rpath)[len - 1] == '/')) {
     snprintf(pattern, sizeof(pattern), "%s*", (const char *)rpath);
   } else {
     snprintf(pattern, sizeof(pattern), "%s\\*", (const char *)rpath);
@@ -814,7 +1014,7 @@ int64_t __dir_open(int64_t path) {
 #endif
 }
 
-int64_t __dir_read(int64_t handle) {
+int64_t rt_dir_read(int64_t handle) {
   if (is_int(handle))
     handle >>= 1;
 #ifdef _WIN32
@@ -832,7 +1032,7 @@ int64_t __dir_read(int64_t handle) {
     const char *name = data->cFileName;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
       continue;
-    return __rt_alloc_string(name);
+    return rt_alloc_string(name);
   }
 #else
   DIR *dir = (DIR *)(uintptr_t)handle;
@@ -843,13 +1043,13 @@ int64_t __dir_read(int64_t handle) {
     const char *name = ent->d_name;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
       continue;
-    return __rt_alloc_string(name);
+    return rt_alloc_string(name);
   }
   return 0;
 #endif
 }
 
-int64_t __dir_close(int64_t handle) {
+int64_t rt_dir_close(int64_t handle) {
   if (is_int(handle))
     handle >>= 1;
 #ifdef _WIN32
@@ -869,19 +1069,19 @@ int64_t __dir_close(int64_t handle) {
 }
 
 #ifdef _WIN32
-static int __ws_init_done = 0;
-static void __ws_init(void) {
-  if (__ws_init_done)
+static int rt_ws_init_done = 0;
+static void rt_ws_init(void) {
+  if (rt_ws_init_done)
     return;
   WSADATA wsa;
   if (WSAStartup(MAKEWORD(2, 2), &wsa) == 0) {
-    __ws_init_done = 1;
+    rt_ws_init_done = 1;
   }
 }
 #endif
 
 #ifdef _WIN32
-static char *__build_cmdline(char **argv) {
+static char *rt_build_cmdline(char **argv) {
   size_t cap = 1024;
   size_t len = 0;
   char *buf = (char *)malloc(cap);
@@ -920,61 +1120,60 @@ static char *__build_cmdline(char **argv) {
   return buf;
 }
 
-static HANDLE __dup_inheritable(HANDLE src) {
+static HANDLE rt_dup_inheritable(HANDLE src) {
   if (!src || src == INVALID_HANDLE_VALUE)
     return NULL;
   HANDLE out = NULL;
-  if (!DuplicateHandle(GetCurrentProcess(), src, GetCurrentProcess(), &out, 0,
-                       TRUE, DUPLICATE_SAME_ACCESS))
+  if (!DuplicateHandle(GetCurrentProcess(), src, GetCurrentProcess(), &out, 0, TRUE,
+                       DUPLICATE_SAME_ACCESS))
     return NULL;
   return out;
 }
 
-static HANDLE __open_nul_handle(DWORD access) {
+static HANDLE rt_open_nul_handle(DWORD access) {
   SECURITY_ATTRIBUTES sa;
   ZeroMemory(&sa, sizeof(sa));
   sa.nLength = sizeof(sa);
   sa.bInheritHandle = TRUE;
-  return CreateFileA("NUL", access, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
-                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  return CreateFileA("NUL", access, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING,
+                     FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
-typedef struct __proc_handle_node {
+typedef struct rt_proc_handle_node {
   DWORD pid;
   HANDLE h;
-  struct __proc_handle_node *next;
-} __proc_handle_node;
+  struct rt_proc_handle_node *next;
+} rt_proc_handle_node;
 
-static __proc_handle_node *__proc_handles = NULL;
+static rt_proc_handle_node *rt_proc_handles = NULL;
 
-static void __proc_handle_put(DWORD pid, HANDLE h) {
+static void rt_proc_handle_put(DWORD pid, HANDLE h) {
   if (!pid || !h || h == INVALID_HANDLE_VALUE) {
     if (h && h != INVALID_HANDLE_VALUE)
       CloseHandle(h);
     return;
   }
-  __proc_handle_node *n =
-      (__proc_handle_node *)malloc(sizeof(__proc_handle_node));
+  rt_proc_handle_node *n = (rt_proc_handle_node *)malloc(sizeof(rt_proc_handle_node));
   if (!n) {
     CloseHandle(h);
     return;
   }
   n->pid = pid;
   n->h = h;
-  n->next = __proc_handles;
-  __proc_handles = n;
+  n->next = rt_proc_handles;
+  rt_proc_handles = n;
 }
 
-static HANDLE __proc_handle_take(DWORD pid) {
-  __proc_handle_node *prev = NULL;
-  __proc_handle_node *cur = __proc_handles;
+static HANDLE rt_proc_handle_take(DWORD pid) {
+  rt_proc_handle_node *prev = NULL;
+  rt_proc_handle_node *cur = rt_proc_handles;
   while (cur) {
     if (cur->pid == pid) {
       HANDLE h = cur->h;
       if (prev) {
         prev->next = cur->next;
       } else {
-        __proc_handles = cur->next;
+        rt_proc_handles = cur->next;
       }
       free(cur);
       return h;
@@ -986,7 +1185,7 @@ static HANDLE __proc_handle_take(DWORD pid) {
 }
 #endif
 
-int64_t __socket(int64_t domain, int64_t type, int64_t protocol) {
+int64_t rt_socket(int64_t domain, int64_t type, int64_t protocol) {
   if (is_int(domain))
     domain >>= 1;
   if (is_int(type))
@@ -994,7 +1193,7 @@ int64_t __socket(int64_t domain, int64_t type, int64_t protocol) {
   if (is_int(protocol))
     protocol >>= 1;
 #ifdef _WIN32
-  __ws_init();
+  rt_ws_init();
   SOCKET s = socket((int)domain, (int)type, (int)protocol);
   if (s == INVALID_SOCKET)
     return (int64_t)-1;
@@ -1005,7 +1204,7 @@ int64_t __socket(int64_t domain, int64_t type, int64_t protocol) {
 #endif
 }
 
-int64_t __connect(int64_t fd, int64_t addr, int64_t addrlen) {
+int64_t rt_connect(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(addr))
@@ -1013,16 +1212,14 @@ int64_t __connect(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(addrlen))
     addrlen >>= 1;
 #ifdef _WIN32
-  int r = connect((SOCKET)fd, (const struct sockaddr *)(uintptr_t)addr,
-                  (int)addrlen);
+  int r = connect((SOCKET)fd, (const struct sockaddr *)(uintptr_t)addr, (int)addrlen);
 #else
-  int r = connect((int)fd, (const struct sockaddr *)(uintptr_t)addr,
-                  (socklen_t)addrlen);
+  int r = connect((int)fd, (const struct sockaddr *)(uintptr_t)addr, (socklen_t)addrlen);
 #endif
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __bind(int64_t fd, int64_t addr, int64_t addrlen) {
+int64_t rt_bind(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(addr))
@@ -1030,16 +1227,14 @@ int64_t __bind(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(addrlen))
     addrlen >>= 1;
 #ifdef _WIN32
-  int r =
-      bind((SOCKET)fd, (const struct sockaddr *)(uintptr_t)addr, (int)addrlen);
+  int r = bind((SOCKET)fd, (const struct sockaddr *)(uintptr_t)addr, (int)addrlen);
 #else
-  int r = bind((int)fd, (const struct sockaddr *)(uintptr_t)addr,
-               (socklen_t)addrlen);
+  int r = bind((int)fd, (const struct sockaddr *)(uintptr_t)addr, (socklen_t)addrlen);
 #endif
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __listen(int64_t fd, int64_t backlog) {
+int64_t rt_listen(int64_t fd, int64_t backlog) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(backlog))
@@ -1052,7 +1247,7 @@ int64_t __listen(int64_t fd, int64_t backlog) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __accept(int64_t fd, int64_t addr, int64_t addrlen) {
+int64_t rt_accept(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(addr))
@@ -1060,20 +1255,18 @@ int64_t __accept(int64_t fd, int64_t addr, int64_t addrlen) {
   if (is_int(addrlen))
     addrlen >>= 1;
 #ifdef _WIN32
-  SOCKET s = accept((SOCKET)fd, (struct sockaddr *)(uintptr_t)addr,
-                    (int *)(uintptr_t)addrlen);
+  SOCKET s = accept((SOCKET)fd, (struct sockaddr *)(uintptr_t)addr, (int *)(uintptr_t)addrlen);
   if (s == INVALID_SOCKET)
     return (int64_t)-1;
   return rt_tag_v((int64_t)s);
 #else
-  int s = accept((int)fd, (struct sockaddr *)(uintptr_t)addr,
-                 (socklen_t *)(uintptr_t)addrlen);
+  int s = accept((int)fd, (struct sockaddr *)(uintptr_t)addr, (socklen_t *)(uintptr_t)addrlen);
   return rt_tag_v((int64_t)s);
 #endif
 }
 
-int64_t __sendto(int64_t fd, int64_t buf, int64_t len, int64_t flags,
-                 int64_t addr, int64_t addrlen) {
+int64_t rt_sendto(int64_t fd, int64_t buf, int64_t len, int64_t flags, int64_t addr,
+                  int64_t addrlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(buf))
@@ -1090,15 +1283,14 @@ int64_t __sendto(int64_t fd, int64_t buf, int64_t len, int64_t flags,
   int r = sendto((SOCKET)fd, (const char *)(uintptr_t)buf, (int)len, (int)flags,
                  (const struct sockaddr *)(uintptr_t)addr, (int)addrlen);
 #else
-  ssize_t r =
-      sendto((int)fd, (const void *)(uintptr_t)buf, (size_t)len, (int)flags,
-             (const struct sockaddr *)(uintptr_t)addr, (socklen_t)addrlen);
+  ssize_t r = sendto((int)fd, (const void *)(uintptr_t)buf, (size_t)len, (int)flags,
+                     (const struct sockaddr *)(uintptr_t)addr, (socklen_t)addrlen);
 #endif
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __recvfrom(int64_t fd, int64_t buf, int64_t len, int64_t flags,
-                   int64_t addr, int64_t addrlen) {
+int64_t rt_recvfrom(int64_t fd, int64_t buf, int64_t len, int64_t flags, int64_t addr,
+                    int64_t addrlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(buf))
@@ -1123,8 +1315,7 @@ int64_t __recvfrom(int64_t fd, int64_t buf, int64_t len, int64_t flags,
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __setsockopt(int64_t fd, int64_t level, int64_t optname, int64_t optval,
-                     int64_t optlen) {
+int64_t rt_setsockopt(int64_t fd, int64_t level, int64_t optname, int64_t optval, int64_t optlen) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(level))
@@ -1136,16 +1327,16 @@ int64_t __setsockopt(int64_t fd, int64_t level, int64_t optname, int64_t optval,
   if (is_int(optlen))
     optlen >>= 1;
 #ifdef _WIN32
-  int r = setsockopt((SOCKET)fd, (int)level, (int)optname,
-                     (const char *)(uintptr_t)optval, (int)optlen);
+  int r = setsockopt((SOCKET)fd, (int)level, (int)optname, (const char *)(uintptr_t)optval,
+                     (int)optlen);
 #else
-  int r = setsockopt((int)fd, (int)level, (int)optname,
-                     (const void *)(uintptr_t)optval, (socklen_t)optlen);
+  int r = setsockopt((int)fd, (int)level, (int)optname, (const void *)(uintptr_t)optval,
+                     (socklen_t)optlen);
 #endif
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+int64_t rt_recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(buf))
@@ -1162,7 +1353,7 @@ int64_t __recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+int64_t rt_send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
   if (is_int(fd))
     fd >>= 1;
   if (is_int(buf))
@@ -1174,13 +1365,12 @@ int64_t __send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
 #ifdef _WIN32
   int r = send((SOCKET)fd, (const char *)(uintptr_t)buf, (int)len, (int)flags);
 #else
-  ssize_t r =
-      send((int)fd, (const void *)(uintptr_t)buf, (size_t)len, (int)flags);
+  ssize_t r = send((int)fd, (const void *)(uintptr_t)buf, (size_t)len, (int)flags);
 #endif
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __closesocket(int64_t fd) {
+int64_t rt_closesocket(int64_t fd) {
   if (is_int(fd))
     fd >>= 1;
 #ifdef _WIN32
@@ -1191,13 +1381,13 @@ int64_t __closesocket(int64_t fd) {
   return rt_tag_v((int64_t)r);
 }
 
-int64_t __spawn_wait(int64_t path, int64_t argv) {
+int64_t rt_spawn_wait(int64_t path, int64_t argv) {
   intptr_t rpath = (intptr_t)((path & 1) ? (path >> 1) : path);
   intptr_t rargv = (intptr_t)((argv & 1) ? (argv >> 1) : argv);
 #ifdef _WIN32
   bool av_free = false;
   char **av = ny_native_argv(rargv, &av_free);
-  char *cmd = __build_cmdline(av);
+  char *cmd = rt_build_cmdline(av);
   if (!cmd) {
     if (av_free)
       free(av);
@@ -1211,15 +1401,15 @@ int64_t __spawn_wait(int64_t path, int64_t argv) {
   ZeroMemory(&si, sizeof(si));
   ZeroMemory(&pi, sizeof(pi));
   si.cb = sizeof(si);
-  child_stdin = __dup_inheritable(GetStdHandle(STD_INPUT_HANDLE));
+  child_stdin = rt_dup_inheritable(GetStdHandle(STD_INPUT_HANDLE));
   if (!child_stdin || child_stdin == INVALID_HANDLE_VALUE)
-    child_stdin = __open_nul_handle(GENERIC_READ);
-  child_stdout = __dup_inheritable(GetStdHandle(STD_OUTPUT_HANDLE));
+    child_stdin = rt_open_nul_handle(GENERIC_READ);
+  child_stdout = rt_dup_inheritable(GetStdHandle(STD_OUTPUT_HANDLE));
   if (!child_stdout || child_stdout == INVALID_HANDLE_VALUE)
-    child_stdout = __open_nul_handle(GENERIC_WRITE);
-  child_stderr = __dup_inheritable(GetStdHandle(STD_ERROR_HANDLE));
+    child_stdout = rt_open_nul_handle(GENERIC_WRITE);
+  child_stderr = rt_dup_inheritable(GetStdHandle(STD_ERROR_HANDLE));
   if (!child_stderr || child_stderr == INVALID_HANDLE_VALUE)
-    child_stderr = __open_nul_handle(GENERIC_WRITE);
+    child_stderr = rt_open_nul_handle(GENERIC_WRITE);
   if (!child_stdin || child_stdin == INVALID_HANDLE_VALUE || !child_stdout ||
       child_stdout == INVALID_HANDLE_VALUE || !child_stderr ||
       child_stderr == INVALID_HANDLE_VALUE) {
@@ -1247,8 +1437,7 @@ int64_t __spawn_wait(int64_t path, int64_t argv) {
   if (cmd_try) {
     memcpy(cmd_try, cmd, cmd_len + 1);
     if (app) {
-      ok = CreateProcessA(app, cmd_try, NULL, NULL, TRUE, 0, NULL, NULL, &si,
-                          &pi);
+      ok = CreateProcessA(app, cmd_try, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
     }
     free(cmd_try);
   }
@@ -1257,8 +1446,7 @@ int64_t __spawn_wait(int64_t path, int64_t argv) {
     cmd_try = (char *)malloc(cmd_len + 1);
     if (cmd_try) {
       memcpy(cmd_try, cmd, cmd_len + 1);
-      ok = CreateProcessA(NULL, cmd_try, NULL, NULL, TRUE, 0, NULL, NULL, &si,
-                          &pi);
+      ok = CreateProcessA(NULL, cmd_try, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
       free(cmd_try);
     }
   }
@@ -1283,8 +1471,7 @@ int64_t __spawn_wait(int64_t path, int64_t argv) {
   bool av_free = false;
   char **av = ny_native_argv(rargv, &av_free);
   pid_t pid = 0;
-  int r = posix_spawn(&pid, (const char *)rpath, NULL, NULL, (char *const *)av,
-                      environ);
+  int r = posix_spawn(&pid, (const char *)rpath, NULL, NULL, (char *const *)av, environ);
   if (av_free)
     free(av);
   if (r != 0)
@@ -1334,7 +1521,7 @@ int64_t __spawn_wait(int64_t path, int64_t argv) {
 #endif
 }
 
-int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
+int64_t rt_spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   (void)path;
   intptr_t rargv = (intptr_t)((argv & 1) ? (argv >> 1) : argv);
   if (is_int(fds_ptr))
@@ -1354,10 +1541,8 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   }
   HANDLE hIn = (HANDLE)_get_osfhandle(in_fds[0]);
   HANDLE hOut = (HANDLE)_get_osfhandle(out_fds[1]);
-  SetHandleInformation((HANDLE)_get_osfhandle(in_fds[1]), HANDLE_FLAG_INHERIT,
-                       0);
-  SetHandleInformation((HANDLE)_get_osfhandle(out_fds[0]), HANDLE_FLAG_INHERIT,
-                       0);
+  SetHandleInformation((HANDLE)_get_osfhandle(in_fds[1]), HANDLE_FLAG_INHERIT, 0);
+  SetHandleInformation((HANDLE)_get_osfhandle(out_fds[0]), HANDLE_FLAG_INHERIT, 0);
   STARTUPINFOA si;
   PROCESS_INFORMATION pi;
   ZeroMemory(&si, sizeof(si));
@@ -1369,7 +1554,7 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
   bool av_free = false;
   char **av = ny_native_argv(rargv, &av_free);
-  char *cmd = __build_cmdline(av);
+  char *cmd = rt_build_cmdline(av);
   if (!cmd) {
     if (av_free)
       free(av);
@@ -1379,8 +1564,7 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
     _close(out_fds[1]);
     return (int64_t)-1;
   }
-  BOOL ok =
-      CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+  BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
   free(cmd);
   if (av_free)
     free(av);
@@ -1392,7 +1576,7 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
     return (int64_t)-1;
   }
   CloseHandle(pi.hThread);
-  __proc_handle_put(pi.dwProcessId, pi.hProcess);
+  rt_proc_handle_put(pi.dwProcessId, pi.hProcess);
   _close(in_fds[0]);
   _close(out_fds[1]);
   ((int32_t *)(uintptr_t)fds_ptr)[0] = in_fds[1];
@@ -1417,8 +1601,7 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   posix_spawn_file_actions_addclose(&actions, in_fds[1]);
   posix_spawn_file_actions_addclose(&actions, out_fds[0]);
   pid_t pid = 0;
-  int r = posix_spawn(&pid, (const char *)rpath, &actions, NULL,
-                      (char *const *)av, environ);
+  int r = posix_spawn(&pid, (const char *)rpath, &actions, NULL, (char *const *)av, environ);
   posix_spawn_file_actions_destroy(&actions);
   if (av_free)
     free(av);
@@ -1476,13 +1659,13 @@ int64_t __spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
 #endif
 }
 
-int64_t __wait_process(int64_t pid) {
+int64_t rt_wait_process(int64_t pid) {
   if (is_int(pid))
     pid >>= 1;
 #ifdef _WIN32
   if (pid <= 0)
     return (int64_t)-1;
-  HANDLE h = __proc_handle_take((DWORD)pid);
+  HANDLE h = rt_proc_handle_take((DWORD)pid);
   if (!h) {
     h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
   }
@@ -1506,7 +1689,7 @@ int64_t __wait_process(int64_t pid) {
 #endif
 }
 
-int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
+int64_t rt_execve(int64_t path, int64_t argv, int64_t envp) {
   intptr_t rpath = (intptr_t)rt_untag_v(path);
   intptr_t rargv = (intptr_t)rt_untag_v(argv);
   intptr_t renvp = (intptr_t)rt_untag_v(envp);
@@ -1520,8 +1703,7 @@ int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
   bool env_free = false;
   char **av = ny_native_argv(rargv, &av_free);
   char **ev = renvp ? ny_native_envp(renvp, &env_free) : environ;
-  int64_t res =
-      execve((const char *)rpath, (char *const *)av, (char *const *)ev);
+  int64_t res = execve((const char *)rpath, (char *const *)av, (char *const *)ev);
   if (res < 0) {
     perror("execve");
   }
@@ -1533,61 +1715,54 @@ int64_t __execve(int64_t path, int64_t argv, int64_t envp) {
   return (int64_t)(((uint64_t)res << 1) | 1);
 }
 
-static int64_t __thread_call_dispatch(int64_t fn, int64_t argc,
-                                      const int64_t *argv) {
+static int64_t rt_thread_call_dispatch(int64_t fn, int64_t argc, const int64_t *argv) {
   switch (argc) {
   case 0:
-    return __call0(fn);
+    return rt_call0(fn);
   case 1:
-    return __call1(fn, argv[0]);
+    return rt_call1(fn, argv[0]);
   case 2:
-    return __call2(fn, argv[0], argv[1]);
+    return rt_call2(fn, argv[0], argv[1]);
   case 3:
-    return __call3(fn, argv[0], argv[1], argv[2]);
+    return rt_call3(fn, argv[0], argv[1], argv[2]);
   case 4:
-    return __call4(fn, argv[0], argv[1], argv[2], argv[3]);
+    return rt_call4(fn, argv[0], argv[1], argv[2], argv[3]);
   case 5:
-    return __call5(fn, argv[0], argv[1], argv[2], argv[3], argv[4]);
+    return rt_call5(fn, argv[0], argv[1], argv[2], argv[3], argv[4]);
   case 6:
-    return __call6(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5]);
+    return rt_call6(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5]);
   case 7:
-    return __call7(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                   argv[6]);
+    return rt_call7(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6]);
   case 8:
-    return __call8(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                   argv[6], argv[7]);
+    return rt_call8(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
   case 9:
-    return __call9(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                   argv[6], argv[7], argv[8]);
+    return rt_call9(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                    argv[8]);
   case 10:
-    return __call10(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9]);
+    return rt_call10(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9]);
   case 11:
-    return __call11(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9], argv[10]);
+    return rt_call11(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9], argv[10]);
   case 12:
-    return __call12(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11]);
+    return rt_call12(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9], argv[10], argv[11]);
   case 13:
-    return __call13(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11],
-                    argv[12]);
+    return rt_call13(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9], argv[10], argv[11], argv[12]);
   case 14:
-    return __call14(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11],
-                    argv[12], argv[13]);
+    return rt_call14(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9], argv[10], argv[11], argv[12], argv[13]);
   case 15:
-    return __call15(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5],
-                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11],
-                    argv[12], argv[13], argv[14]);
+    return rt_call15(fn, argv[0], argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7],
+                     argv[8], argv[9], argv[10], argv[11], argv[12], argv[13], argv[14]);
   default:
     return 0;
   }
 }
 
-static bool __thread_prepare_call_args(int64_t argc, int64_t argv_ptr,
-                                       int64_t *argc_raw_out,
-                                       int64_t **argv_copy_out) {
+static bool rt_thread_prepare_call_args(int64_t argc, int64_t argv_ptr, int64_t *argc_raw_out,
+                                        int64_t **argv_copy_out) {
   if (!argc_raw_out || !argv_copy_out)
     return false;
   int64_t argc_raw = is_int(argc) ? (argc >> 1) : argc;
@@ -1601,42 +1776,856 @@ static bool __thread_prepare_call_args(int64_t argc, int64_t argv_ptr,
     argv_copy = (int64_t *)malloc((size_t)argc_raw * sizeof(int64_t));
     if (!argv_copy)
       return false;
-    memcpy(argv_copy, (const void *)(uintptr_t)src_ptr,
-           (size_t)argc_raw * sizeof(int64_t));
+    memcpy(argv_copy, (const void *)(uintptr_t)src_ptr, (size_t)argc_raw * sizeof(int64_t));
   }
   *argc_raw_out = argc_raw;
   *argv_copy_out = argv_copy;
   return true;
 }
 
+typedef enum rt_async_state {
+  RT_ASYNC_READY = 0,
+  RT_ASYNC_RUNNING = 1,
+  RT_ASYNC_WAITING = 2,
+  RT_ASYNC_DONE = 3,
+  RT_ASYNC_FAILED = 4,
+  RT_ASYNC_CANCELLED = 5,
+} rt_async_state;
+
+typedef enum rt_async_kind {
+  RT_ASYNC_CALL = 0,
+  RT_ASYNC_TIMER = 1,
+  RT_ASYNC_WAIT_FD = 2,
+  RT_ASYNC_RECV = 3,
+  RT_ASYNC_SEND = 4,
+  RT_ASYNC_ACCEPT = 5,
+  RT_ASYNC_CONNECT = 6,
+  RT_ASYNC_READ_SOCKET = 7,
+  RT_ASYNC_WRITE_ALL = 8,
+  RT_ASYNC_READ_UNTIL = 9,
+} rt_async_kind;
+
+#define RT_ASYNC_MAGIC 0x4e595441534b3031ULL
+#define RT_ASYNC_EV_READ 1
+#define RT_ASYNC_EV_WRITE 2
+
+typedef struct rt_async_task {
+  uint64_t magic;
+  rt_async_state state;
+  rt_async_kind kind;
+  int64_t result;
+  int64_t fn;
+  int64_t argc;
+  int64_t *argv;
+  int64_t fd;
+  int64_t flags;
+  int64_t events;
+  int64_t timeout_ms;
+  int64_t deadline_ms;
+  int64_t buf;
+  int64_t len;
+  int64_t off;
+  int64_t data;
+  int connect_started;
+  int old_flags;
+  unsigned char addr[128];
+  int64_t addrlen;
+  char *heap_buf;
+  int64_t heap_len;
+  int64_t heap_cap;
+  char *needle_buf;
+  int64_t needle_len;
+  struct rt_async_task *next;
+  struct rt_async_task *all_next;
+} rt_async_task;
+
+static rt_async_task *g_async_ready_head = NULL;
+static rt_async_task *g_async_ready_tail = NULL;
+static rt_async_task *g_async_all = NULL;
+
+static void rt_async_complete(rt_async_task *t, int64_t result);
+
+static int64_t rt_async_raw(int64_t v) {
+  if (NY_NATIVE_IS(v))
+    return (int64_t)(uintptr_t)NY_NATIVE_DECODE(v);
+  return is_int(v) ? (v >> 1) : v;
+}
+
+static int64_t rt_async_now_ms(void) {
+  struct timespec ts;
+#if defined(_WIN32)
+  timespec_get(&ts, TIME_UTC);
+#else
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+  return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+}
+
+static void rt_async_ready_push(rt_async_task *t) {
+  if (!t || t->state == RT_ASYNC_DONE || t->state == RT_ASYNC_FAILED ||
+      t->state == RT_ASYNC_CANCELLED)
+    return;
+  t->next = NULL;
+  if (g_async_ready_tail)
+    g_async_ready_tail->next = t;
+  else
+    g_async_ready_head = t;
+  g_async_ready_tail = t;
+  t->state = RT_ASYNC_READY;
+}
+
+static rt_async_task *rt_async_ready_pop(void) {
+  rt_async_task *t = g_async_ready_head;
+  if (!t)
+    return NULL;
+  g_async_ready_head = t->next;
+  if (!g_async_ready_head)
+    g_async_ready_tail = NULL;
+  t->next = NULL;
+  return t;
+}
+
+static void rt_async_all_add(rt_async_task *t) {
+  if (!t)
+    return;
+  t->all_next = g_async_all;
+  g_async_all = t;
+}
+
+static void rt_async_all_remove(rt_async_task *t) {
+  if (!t)
+    return;
+  rt_async_task **pp = &g_async_all;
+  while (*pp) {
+    if (*pp == t) {
+      *pp = t->all_next;
+      t->all_next = NULL;
+      return;
+    }
+    pp = &(*pp)->all_next;
+  }
+}
+
+static rt_async_task *rt_async_find_task(int64_t handle) {
+  uintptr_t raw = (uintptr_t)rt_async_raw(handle);
+  if (!raw)
+    return NULL;
+  for (rt_async_task *t = g_async_all; t; t = t->all_next) {
+    if ((uintptr_t)t == raw && t->magic == RT_ASYNC_MAGIC)
+      return t;
+  }
+  return NULL;
+}
+
+static void rt_async_task_free(rt_async_task *t) {
+  if (!t)
+    return;
+  if (t->argv)
+    free(t->argv);
+  if (t->heap_buf)
+    free(t->heap_buf);
+  if (t->needle_buf)
+    free(t->needle_buf);
+  t->magic = 0;
+  free(t);
+}
+
+static int64_t rt_async_find_bytes(const char *hay, int64_t hay_len, const char *needle,
+                                   int64_t needle_len) {
+  if (needle_len <= 0)
+    return 0;
+  if (!hay || !needle || hay_len < needle_len)
+    return -1;
+  for (int64_t i = 0; i <= hay_len - needle_len; ++i) {
+    if (memcmp(hay + i, needle, (size_t)needle_len) == 0)
+      return i;
+  }
+  return -1;
+}
+
+static bool rt_async_read_until_finish(rt_async_task *t, int64_t out_len) {
+  if (!t)
+    return false;
+  if (out_len < 0)
+    out_len = 0;
+  if (out_len > t->heap_len)
+    out_len = t->heap_len;
+  int64_t s = rt_alloc_string_len(t->heap_buf ? t->heap_buf : "", (size_t)out_len);
+  rt_async_complete(t, s ? s : rt_alloc_string_len("", 0));
+  return true;
+}
+
+static bool rt_async_read_until_append(rt_async_task *t, const char *src, int64_t n) {
+  if (!t || n <= 0)
+    return true;
+  if (t->heap_len + n > t->heap_cap) {
+    int64_t next_cap = t->heap_cap > 0 ? t->heap_cap : 256;
+    while (next_cap < t->heap_len + n)
+      next_cap *= 2;
+    if (next_cap > t->len)
+      next_cap = t->len;
+    if (next_cap < t->heap_len + n)
+      return false;
+    char *next = (char *)realloc(t->heap_buf, (size_t)next_cap);
+    if (!next)
+      return false;
+    t->heap_buf = next;
+    t->heap_cap = next_cap;
+  }
+  memcpy(t->heap_buf + t->heap_len, src, (size_t)n);
+  t->heap_len += n;
+  return true;
+}
+
+static void rt_async_complete(rt_async_task *t, int64_t result) {
+  if (!t)
+    return;
+  t->result = result;
+  t->state = RT_ASYNC_DONE;
+}
+
+static rt_async_task *rt_async_task_alloc(rt_async_kind kind) {
+  rt_async_task *t = (rt_async_task *)calloc(1, sizeof(rt_async_task));
+  if (!t)
+    return NULL;
+  t->magic = RT_ASYNC_MAGIC;
+  t->kind = kind;
+  t->state = RT_ASYNC_WAITING;
+  t->result = 0;
+  t->timeout_ms = -1;
+  t->deadline_ms = -1;
+  rt_async_all_add(t);
+  return t;
+}
+
+static int rt_async_fd_ready(int64_t fd, int64_t events, int timeout_ms) {
+  int rfd = (int)fd;
+  if (rfd < 0)
+    return -1;
 #ifdef _WIN32
-typedef struct __thread_state {
+  fd_set rfds;
+  fd_set wfds;
+  FD_ZERO(&rfds);
+  FD_ZERO(&wfds);
+  if (events & RT_ASYNC_EV_READ)
+    FD_SET((SOCKET)rfd, &rfds);
+  if (events & RT_ASYNC_EV_WRITE)
+    FD_SET((SOCKET)rfd, &wfds);
+  struct timeval tv;
+  tv.tv_sec = timeout_ms < 0 ? 0 : timeout_ms / 1000;
+  tv.tv_usec = timeout_ms < 0 ? 0 : (timeout_ms % 1000) * 1000;
+  int rc = select(0, &rfds, &wfds, NULL, timeout_ms < 0 ? NULL : &tv);
+  if (rc <= 0)
+    return rc;
+  return 1;
+#else
+  struct pollfd pfd;
+  memset(&pfd, 0, sizeof(pfd));
+  pfd.fd = rfd;
+  if (events & RT_ASYNC_EV_READ)
+    pfd.events |= POLLIN;
+  if (events & RT_ASYNC_EV_WRITE)
+    pfd.events |= POLLOUT;
+  int rc;
+  do {
+    rc = poll(&pfd, 1, timeout_ms);
+  } while (rc < 0 && errno == EINTR);
+  if (rc <= 0)
+    return rc;
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+    return 1;
+  return (pfd.revents & pfd.events) ? 1 : 0;
+#endif
+}
+
+static void rt_async_close_fd(int64_t fd) {
+#ifdef _WIN32
+  closesocket((SOCKET)fd);
+#else
+  close((int)fd);
+#endif
+}
+
+static int rt_async_set_nonblock(int64_t fd, int enabled, int *old_flags) {
+#ifdef _WIN32
+  u_long mode = enabled ? 1u : 0u;
+  (void)old_flags;
+  return ioctlsocket((SOCKET)fd, FIONBIO, &mode);
+#else
+  int flags = fcntl((int)fd, F_GETFL, 0);
+  if (flags < 0)
+    return -1;
+  if (old_flags)
+    *old_flags = flags;
+  int next = enabled ? (flags | O_NONBLOCK) : (old_flags ? *old_flags : (flags & ~O_NONBLOCK));
+  return fcntl((int)fd, F_SETFL, next);
+#endif
+}
+
+static void rt_async_restore_blocking(int64_t fd, int old_flags) {
+#ifdef _WIN32
+  u_long mode = 0u;
+  (void)old_flags;
+  ioctlsocket((SOCKET)fd, FIONBIO, &mode);
+#else
+  if (old_flags >= 0)
+    fcntl((int)fd, F_SETFL, old_flags);
+#endif
+}
+
+static bool rt_async_would_block(void) {
+#ifdef _WIN32
+  int e = WSAGetLastError();
+  return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS || e == WSAEALREADY;
+#else
+  return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINPROGRESS || errno == EALREADY;
+#endif
+}
+
+static int rt_async_socket_error(int64_t fd) {
+  int err = 0;
+#ifdef _WIN32
+  int len = sizeof(err);
+  if (getsockopt((SOCKET)fd, SOL_SOCKET, SO_ERROR, (char *)&err, &len) != 0)
+    return WSAGetLastError();
+#else
+  socklen_t len = sizeof(err);
+  if (getsockopt((int)fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0)
+    return errno ? errno : -1;
+#endif
+  return err;
+}
+
+static bool rt_async_deadline_expired(rt_async_task *t, int64_t now) {
+  return t && t->deadline_ms >= 0 && now >= t->deadline_ms;
+}
+
+static bool rt_async_progress_task(rt_async_task *t, int block, int wait_ms) {
+  if (!t || t->magic != RT_ASYNC_MAGIC)
+    return false;
+  if (t->state == RT_ASYNC_RUNNING)
+    return false;
+  if (t->state == RT_ASYNC_DONE || t->state == RT_ASYNC_FAILED || t->state == RT_ASYNC_CANCELLED)
+    return true;
+  int64_t now = rt_async_now_ms();
+  if (rt_async_deadline_expired(t, now) && t->kind != RT_ASYNC_TIMER) {
+    rt_async_complete(t, rt_tag_v(-1));
+    return true;
+  }
+  switch (t->kind) {
+  case RT_ASYNC_CALL:
+    t->state = RT_ASYNC_RUNNING;
+    t->result = rt_thread_call_dispatch(t->fn, t->argc, t->argv);
+    t->state = RT_ASYNC_DONE;
+    return true;
+  case RT_ASYNC_TIMER:
+    if (t->deadline_ms <= now) {
+      rt_async_complete(t, rt_tag_v(0));
+      return true;
+    }
+    if (block) {
+      int64_t delta = t->deadline_ms - now;
+      if (delta > 0) {
+#ifdef _WIN32
+        Sleep((DWORD)delta);
+#else
+        struct timespec req;
+        req.tv_sec = delta / 1000;
+        req.tv_nsec = (delta % 1000) * 1000000;
+        while (nanosleep(&req, &req) != 0 && errno == EINTR) {
+        }
+#endif
+      }
+      rt_async_complete(t, rt_tag_v(0));
+      return true;
+    }
+    return false;
+  case RT_ASYNC_WAIT_FD: {
+    int timeout = block ? wait_ms : 0;
+    int ready = rt_async_fd_ready(t->fd, t->events, timeout);
+    if (ready > 0) {
+      rt_async_complete(t, rt_tag_v(0));
+      return true;
+    }
+    if (ready < 0) {
+      rt_async_complete(t, rt_tag_v(-1));
+      return true;
+    }
+    return false;
+  }
+  case RT_ASYNC_ACCEPT: {
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_READ, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+#ifdef _WIN32
+    SOCKET s = accept((SOCKET)t->fd, NULL, NULL);
+    if (s == INVALID_SOCKET) {
+      if (rt_async_would_block())
+        return false;
+      rt_async_complete(t, rt_tag_v(-1));
+    } else {
+      rt_async_complete(t, rt_tag_v((int64_t)s));
+    }
+#else
+    int s = accept((int)t->fd, NULL, NULL);
+    if (s < 0) {
+      if (rt_async_would_block())
+        return false;
+      rt_async_complete(t, rt_tag_v(-1));
+    } else {
+      rt_async_complete(t, rt_tag_v((int64_t)s));
+    }
+#endif
+    return true;
+  }
+  case RT_ASYNC_CONNECT: {
+    if (!t->connect_started) {
+      t->old_flags = -1;
+      rt_async_set_nonblock(t->fd, 1, &t->old_flags);
+#ifdef _WIN32
+      int rc = connect((SOCKET)t->fd, (const struct sockaddr *)t->addr, (int)t->addrlen);
+#else
+      int rc = connect((int)t->fd, (const struct sockaddr *)t->addr, (socklen_t)t->addrlen);
+#endif
+      t->connect_started = 1;
+      if (rc == 0) {
+        rt_async_restore_blocking(t->fd, t->old_flags);
+        rt_async_complete(t, rt_tag_v(t->fd));
+        return true;
+      }
+      if (!rt_async_would_block()) {
+        rt_async_restore_blocking(t->fd, t->old_flags);
+        rt_async_close_fd(t->fd);
+        rt_async_complete(t, rt_tag_v(-1));
+        return true;
+      }
+    }
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_WRITE, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+    int err = rt_async_socket_error(t->fd);
+    rt_async_restore_blocking(t->fd, t->old_flags);
+    if (err == 0) {
+      rt_async_complete(t, rt_tag_v(t->fd));
+    } else {
+      rt_async_close_fd(t->fd);
+      rt_async_complete(t, rt_tag_v(-1));
+    }
+    return true;
+  }
+  case RT_ASYNC_RECV: {
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_READ, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+#ifdef _WIN32
+    int r = recv((SOCKET)t->fd, (char *)(uintptr_t)t->buf, (int)t->len, (int)t->flags);
+#else
+    ssize_t r = recv((int)t->fd, (void *)(uintptr_t)t->buf, (size_t)t->len, (int)t->flags);
+#endif
+    if (r < 0 && rt_async_would_block())
+      return false;
+    rt_async_complete(t, rt_tag_v((int64_t)r));
+    return true;
+  }
+  case RT_ASYNC_SEND:
+  case RT_ASYNC_WRITE_ALL: {
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_WRITE, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+    const char *base = (const char *)(uintptr_t)t->buf;
+    int64_t remaining = t->len - t->off;
+    if (remaining <= 0) {
+      rt_async_complete(t, rt_tag_v(t->off));
+      return true;
+    }
+#ifdef _WIN32
+    int r = send((SOCKET)t->fd, base + t->off, (int)remaining, (int)t->flags);
+#else
+    ssize_t r = send((int)t->fd, base + t->off, (size_t)remaining, (int)t->flags);
+#endif
+    if (r < 0 && rt_async_would_block())
+      return false;
+    if (r <= 0) {
+      rt_async_complete(t, rt_tag_v(t->off > 0 ? t->off : -1));
+      return true;
+    }
+    t->off += r;
+    if (t->kind == RT_ASYNC_SEND || t->off >= t->len) {
+      rt_async_complete(t, rt_tag_v(t->kind == RT_ASYNC_SEND ? (int64_t)r : t->off));
+      return true;
+    }
+    return false;
+  }
+  case RT_ASYNC_READ_SOCKET: {
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_READ, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+    int64_t max_len = t->len;
+    if (max_len <= 0)
+      max_len = 1;
+    if (max_len > 1048576)
+      max_len = 1048576;
+    char *buf = (char *)malloc((size_t)max_len);
+    if (!buf) {
+      rt_async_complete(t, rt_alloc_string_len("", 0));
+      return true;
+    }
+#ifdef _WIN32
+    int r = recv((SOCKET)t->fd, buf, (int)max_len, 0);
+#else
+    ssize_t r = recv((int)t->fd, buf, (size_t)max_len, 0);
+#endif
+    if (r < 0 && rt_async_would_block()) {
+      free(buf);
+      return false;
+    }
+    if (r <= 0) {
+      free(buf);
+      rt_async_complete(t, rt_alloc_string_len("", 0));
+      return true;
+    }
+    int64_t s = rt_alloc_string_len(buf, (size_t)r);
+    free(buf);
+    rt_async_complete(t, s ? s : rt_alloc_string_len("", 0));
+    return true;
+  }
+  case RT_ASYNC_READ_UNTIL: {
+    if (t->needle_len == 0)
+      return rt_async_read_until_finish(t, 0);
+    int64_t at = rt_async_find_bytes(t->heap_buf, t->heap_len, t->needle_buf, t->needle_len);
+    if (at >= 0)
+      return rt_async_read_until_finish(t, at + t->needle_len);
+    if (t->heap_len >= t->len)
+      return rt_async_read_until_finish(t, t->heap_len);
+    int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_READ, block ? wait_ms : 0);
+    if (ready <= 0)
+      return false;
+    char tmp[4096];
+    int64_t want = t->len - t->heap_len;
+    if (want > (int64_t)sizeof(tmp))
+      want = (int64_t)sizeof(tmp);
+#ifdef _WIN32
+    int r = recv((SOCKET)t->fd, tmp, (int)want, 0);
+#else
+    ssize_t r = recv((int)t->fd, tmp, (size_t)want, 0);
+#endif
+    if (r < 0 && rt_async_would_block())
+      return false;
+    if (r <= 0)
+      return rt_async_read_until_finish(t, t->heap_len);
+    if (!rt_async_read_until_append(t, tmp, (int64_t)r))
+      return rt_async_read_until_finish(t, t->heap_len);
+    at = rt_async_find_bytes(t->heap_buf, t->heap_len, t->needle_buf, t->needle_len);
+    if (at >= 0)
+      return rt_async_read_until_finish(t, at + t->needle_len);
+    if (t->heap_len >= t->len)
+      return rt_async_read_until_finish(t, t->heap_len);
+    return false;
+  }
+  default:
+    rt_async_complete(t, rt_tag_v(-1));
+    return true;
+  }
+}
+
+static int rt_async_compute_wait_ms(void) {
+  int wait_ms = 10;
+  int64_t now = rt_async_now_ms();
+  for (rt_async_task *t = g_async_all; t; t = t->all_next) {
+    if (t->state == RT_ASYNC_RUNNING || t->state == RT_ASYNC_DONE || t->state == RT_ASYNC_FAILED ||
+        t->state == RT_ASYNC_CANCELLED)
+      continue;
+    if (t->kind == RT_ASYNC_TIMER && t->deadline_ms >= 0) {
+      int64_t delta = t->deadline_ms - now;
+      if (delta < 0)
+        return 0;
+      if (delta < wait_ms)
+        wait_ms = (int)delta;
+    } else if (t->deadline_ms >= 0) {
+      int64_t delta = t->deadline_ms - now;
+      if (delta < 0)
+        return 0;
+      if (delta < wait_ms)
+        wait_ms = (int)delta;
+    }
+  }
+  if (wait_ms < 0)
+    wait_ms = 0;
+  return wait_ms;
+}
+
+static int rt_async_scheduler_step(int block) {
+  rt_async_task *ready = rt_async_ready_pop();
+  if (ready) {
+    rt_async_progress_task(ready, 0, 0);
+    return 1;
+  }
+  for (rt_async_task *t = g_async_all; t; t = t->all_next) {
+    if (t->state == RT_ASYNC_RUNNING || t->state == RT_ASYNC_DONE || t->state == RT_ASYNC_FAILED ||
+        t->state == RT_ASYNC_CANCELLED)
+      continue;
+    if (rt_async_progress_task(t, 0, 0))
+      return 1;
+  }
+  if (!block)
+    return 0;
+  int wait_ms = rt_async_compute_wait_ms();
+  for (rt_async_task *t = g_async_all; t; t = t->all_next) {
+    if (t->state == RT_ASYNC_RUNNING || t->state == RT_ASYNC_DONE || t->state == RT_ASYNC_FAILED ||
+        t->state == RT_ASYNC_CANCELLED)
+      continue;
+    if (rt_async_progress_task(t, 1, wait_ms))
+      return 1;
+  }
+  if (wait_ms > 0) {
+#ifdef _WIN32
+    Sleep((DWORD)wait_ms);
+#else
+    struct timespec req;
+    req.tv_sec = wait_ms / 1000;
+    req.tv_nsec = (wait_ms % 1000) * 1000000;
+    while (nanosleep(&req, &req) != 0 && errno == EINTR) {
+    }
+#endif
+  }
+  return 0;
+}
+
+int64_t rt_async_task_new(int64_t fn, int64_t argc, int64_t argv_ptr) {
+  int64_t argc_raw = 0;
+  int64_t *argv_copy = NULL;
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
+    return 0;
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_CALL);
+  if (!t) {
+    free(argv_copy);
+    return 0;
+  }
+  t->fn = fn;
+  t->argc = argc_raw;
+  t->argv = argv_copy;
+  rt_async_ready_push(t);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_value(int64_t value) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_TIMER);
+  if (!t)
+    return 0;
+  rt_async_complete(t, value);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_await_blocking(int64_t handle) {
+  if (!handle)
+    return 0;
+  rt_async_task *t = rt_async_find_task(handle);
+  if (!t)
+    return handle;
+  while (t->state != RT_ASYNC_DONE && t->state != RT_ASYNC_FAILED &&
+         t->state != RT_ASYNC_CANCELLED) {
+    rt_async_scheduler_step(1);
+  }
+  int64_t result = t->result;
+  rt_async_all_remove(t);
+  rt_async_task_free(t);
+  return result;
+}
+
+int64_t rt_async_run(int64_t handle) { return rt_async_await_blocking(handle); }
+
+int64_t rt_async_yield(void) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_TIMER);
+  if (!t)
+    return 0;
+  t->deadline_ms = rt_async_now_ms();
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_sleep_ms(int64_t ms) {
+  int64_t raw = rt_async_raw(ms);
+  if (raw < 0)
+    raw = 0;
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_TIMER);
+  if (!t)
+    return 0;
+  t->deadline_ms = rt_async_now_ms() + raw;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_wait_fd(int64_t fd, int64_t events, int64_t timeout_ms) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_WAIT_FD);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->events = rt_async_raw(events);
+  t->timeout_ms = rt_async_raw(timeout_ms);
+  if (t->timeout_ms >= 0)
+    t->deadline_ms = rt_async_now_ms() + t->timeout_ms;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_recv(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_RECV);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->buf = rt_async_raw(buf);
+  t->len = rt_async_raw(len);
+  t->flags = rt_async_raw(flags);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_send(int64_t fd, int64_t buf, int64_t len, int64_t flags) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_SEND);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->buf = rt_async_raw(buf);
+  t->len = rt_async_raw(len);
+  t->flags = rt_async_raw(flags);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_accept(int64_t fd) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_ACCEPT);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_connect(int64_t fd, int64_t addr, int64_t addrlen) {
+  int64_t raw_len = rt_async_raw(addrlen);
+  int64_t raw_addr = rt_async_raw(addr);
+  if (raw_len <= 0 || raw_len > 128 || !raw_addr)
+    return 0;
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_CONNECT);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->addrlen = raw_len;
+  memcpy(t->addr, (const void *)(uintptr_t)raw_addr, (size_t)raw_len);
+  t->old_flags = -1;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_read_socket(int64_t fd, int64_t max_len) {
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_READ_SOCKET);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->len = rt_async_raw(max_len);
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_write_socket_part(int64_t fd, int64_t data, int64_t off, int64_t size) {
+  int64_t raw_data = rt_async_raw(data);
+  int64_t raw_off = rt_async_raw(off);
+  int64_t raw_size = rt_async_raw(size);
+  if (!raw_data || raw_off < 0)
+    return 0;
+  size_t slen = rt_tagged_str_len(data);
+  if ((size_t)raw_off > slen)
+    raw_off = (int64_t)slen;
+  if (raw_size < 0 || (size_t)(raw_off + raw_size) > slen)
+    raw_size = (int64_t)slen - raw_off;
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_SEND);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->buf = raw_data + raw_off;
+  t->len = raw_size;
+  t->flags = 0;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_write_socket_all(int64_t fd, int64_t data) {
+  int64_t raw_data = rt_async_raw(data);
+  if (!raw_data)
+    return 0;
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_WRITE_ALL);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->buf = raw_data;
+  t->len = (int64_t)rt_tagged_str_len(data);
+  t->flags = 0;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_read_socket_until(int64_t fd, int64_t needle, int64_t max_bytes) {
+  int64_t raw_needle = rt_async_raw(needle);
+  if (!raw_needle)
+    return rt_async_value(rt_alloc_string_len("", 0));
+  int64_t max_len = rt_async_raw(max_bytes);
+  if (max_len <= 0)
+    max_len = 65536;
+  if (max_len > 1048576)
+    max_len = 1048576;
+  size_t nlen = rt_tagged_str_len(needle);
+  rt_async_task *t = rt_async_task_alloc(RT_ASYNC_READ_UNTIL);
+  if (!t)
+    return 0;
+  t->fd = rt_async_raw(fd);
+  t->len = max_len;
+  t->needle_len = (int64_t)nlen;
+  if (nlen > 0) {
+    t->needle_buf = (char *)malloc(nlen);
+    if (!t->needle_buf) {
+      rt_async_complete(t, rt_alloc_string_len("", 0));
+      return (int64_t)(uintptr_t)t;
+    }
+    memcpy(t->needle_buf, (const void *)(uintptr_t)raw_needle, nlen);
+  }
+  int64_t initial_cap = max_len < 256 ? max_len : 256;
+  if (initial_cap < 1)
+    initial_cap = 1;
+  t->heap_buf = (char *)malloc((size_t)initial_cap);
+  if (!t->heap_buf) {
+    rt_async_complete(t, rt_alloc_string_len("", 0));
+    return (int64_t)(uintptr_t)t;
+  }
+  t->heap_cap = initial_cap;
+  return (int64_t)(uintptr_t)t;
+}
+
+int64_t rt_async_state_of(int64_t handle) {
+  if (!handle)
+    return rt_tag_v(-1);
+  rt_async_task *t = rt_async_find_task(handle);
+  if (!t)
+    return rt_tag_v(-1);
+  return rt_tag_v((int64_t)t->state);
+}
+
+#ifdef _WIN32
+typedef struct rt_thread_state {
   HANDLE h;
   int64_t ret;
-} __thread_state;
+} rt_thread_state;
 
-typedef struct __thread_arg {
+typedef struct rt_thread_arg {
   int64_t fn;
   int64_t arg;
   int64_t argc;
   int64_t *argv;
-  __thread_state *st;
-} __thread_arg;
+  rt_thread_state *st;
+} rt_thread_arg;
 
-static DWORD WINAPI __thread_trampoline(LPVOID p) {
-  __thread_arg *ta = (__thread_arg *)p;
-  __thread_state *st = ta->st;
+static DWORD WINAPI rt_thread_trampoline(LPVOID p) {
+  rt_thread_arg *ta = (rt_thread_arg *)p;
+  rt_thread_state *st = ta->st;
   int64_t fn = ta->fn;
   int64_t arg = ta->arg;
   int64_t ret = 0;
   if (ta->argc >= 0) {
-    ret = __thread_call_dispatch(fn, ta->argc, ta->argv);
+    ret = rt_thread_call_dispatch(fn, ta->argc, ta->argv);
   } else {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       ret = rt_tag_v(f(rt_untag_v(arg)));
-    } else if (is_heap_ptr(fn) &&
-               *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
+    } else if (is_heap_ptr(fn) && *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
       int64_t base = rt_untag_v(fn);
       int64_t code = *(int64_t *)base;
       int64_t env = *(int64_t *)(base + 8);
@@ -1653,12 +2642,12 @@ static DWORD WINAPI __thread_trampoline(LPVOID p) {
   return 0;
 }
 
-int64_t __thread_spawn(int64_t fn, int64_t arg) {
-  __thread_state *st = (__thread_state *)malloc(sizeof(__thread_state));
+int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
+  rt_thread_state *st = (rt_thread_state *)malloc(sizeof(rt_thread_state));
   if (!st)
     return -1;
   st->ret = 0;
-  __thread_arg *ta = (__thread_arg *)malloc(sizeof(__thread_arg));
+  rt_thread_arg *ta = (rt_thread_arg *)malloc(sizeof(rt_thread_arg));
   if (!ta) {
     free(st);
     return -1;
@@ -1668,7 +2657,7 @@ int64_t __thread_spawn(int64_t fn, int64_t arg) {
   ta->argc = -1;
   ta->argv = NULL;
   ta->st = st;
-  HANDLE h = CreateThread(NULL, 0, __thread_trampoline, ta, 0, NULL);
+  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
   if (!h) {
     free(ta);
     free(st);
@@ -1678,19 +2667,19 @@ int64_t __thread_spawn(int64_t fn, int64_t arg) {
   return (int64_t)(uintptr_t)st;
 }
 
-int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
+int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
   int64_t *argv_copy = NULL;
-  if (!__thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
     return -1;
-  __thread_state *st = (__thread_state *)malloc(sizeof(__thread_state));
+  rt_thread_state *st = (rt_thread_state *)malloc(sizeof(rt_thread_state));
   if (!st) {
     if (argv_copy)
       free(argv_copy);
     return -1;
   }
   st->ret = 0;
-  __thread_arg *ta = (__thread_arg *)malloc(sizeof(__thread_arg));
+  rt_thread_arg *ta = (rt_thread_arg *)malloc(sizeof(rt_thread_arg));
   if (!ta) {
     free(st);
     if (argv_copy)
@@ -1702,7 +2691,7 @@ int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   ta->argc = argc_raw;
   ta->argv = argv_copy;
   ta->st = st;
-  HANDLE h = CreateThread(NULL, 0, __thread_trampoline, ta, 0, NULL);
+  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
   if (!h) {
     free(ta);
     free(st);
@@ -1714,37 +2703,37 @@ int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   return (int64_t)(uintptr_t)st;
 }
 
-int64_t __thread_launch_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
+int64_t rt_thread_launch_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
   int64_t *argv_copy = NULL;
-  if (!__thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
-    return -1;
-  __thread_arg *ta = (__thread_arg *)malloc(sizeof(__thread_arg));
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
+    return rt_tag_v(-1);
+  rt_thread_arg *ta = (rt_thread_arg *)malloc(sizeof(rt_thread_arg));
   if (!ta) {
     if (argv_copy)
       free(argv_copy);
-    return -1;
+    return rt_tag_v(-1);
   }
   ta->fn = fn;
   ta->arg = 0;
   ta->argc = argc_raw;
   ta->argv = argv_copy;
   ta->st = NULL;
-  HANDLE h = CreateThread(NULL, 0, __thread_trampoline, ta, 0, NULL);
+  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
   if (!h) {
     free(ta);
     if (argv_copy)
       free(argv_copy);
-    return -1;
+    return rt_tag_v(-1);
   }
   CloseHandle(h);
-  return 0;
+  return rt_tag_v(0);
 }
 
-int64_t __thread_join(int64_t tid) {
+int64_t rt_thread_join(int64_t tid) {
   if (!tid)
     return -1;
-  __thread_state *st = (__thread_state *)(uintptr_t)tid;
+  rt_thread_state *st = (rt_thread_state *)(uintptr_t)tid;
   WaitForSingleObject(st->h, INFINITE);
   CloseHandle(st->h);
   int64_t res = st->ret;
@@ -1752,51 +2741,50 @@ int64_t __thread_join(int64_t tid) {
   return res;
 }
 
-int64_t __mutex_new(void) {
+int64_t rt_mutex_new(void) {
   HANDLE h = CreateMutexA(NULL, FALSE, NULL);
   return (int64_t)(uintptr_t)h;
 }
 
-int64_t __mutex_lock64(int64_t m) {
+int64_t rt_mutex_lock64(int64_t m) {
   if (!m)
     return -1;
   DWORD r = WaitForSingleObject((HANDLE)(uintptr_t)m, INFINITE);
   return (r == WAIT_OBJECT_0) ? 0 : -1;
 }
 
-int64_t __mutex_unlock64(int64_t m) {
+int64_t rt_mutex_unlock64(int64_t m) {
   if (!m)
     return -1;
   return ReleaseMutex((HANDLE)(uintptr_t)m) ? 0 : -1;
 }
 
-int64_t __mutex_free(int64_t m) {
+int64_t rt_mutex_free(int64_t m) {
   if (!m)
     return 0;
   CloseHandle((HANDLE)(uintptr_t)m);
   return 0;
 }
 #else
-typedef struct __thread_arg {
+typedef struct rt_thread_arg {
   int64_t fn;
   int64_t arg;
   int64_t argc;
   int64_t *argv;
-} __thread_arg;
+} rt_thread_arg;
 
-static void *__thread_trampoline(void *p) {
-  __thread_arg *ta = (__thread_arg *)p;
+static void *rt_thread_trampoline(void *p) {
+  rt_thread_arg *ta = (rt_thread_arg *)p;
   int64_t fn = ta->fn;
   int64_t arg = ta->arg;
   int64_t res = 0;
   if (ta->argc >= 0) {
-    res = __thread_call_dispatch(fn, ta->argc, ta->argv);
+    res = rt_thread_call_dispatch(fn, ta->argc, ta->argv);
   } else {
     if (NY_NATIVE_IS(fn)) {
       int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       res = rt_tag_v(f(rt_untag_v(arg)));
-    } else if (is_heap_ptr(fn) &&
-               *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
+    } else if (is_heap_ptr(fn) && *(int64_t *)(rt_untag_v(fn) - 8) == TAG_CLOSURE) {
       int64_t base = rt_untag_v(fn);
       int64_t code = *(int64_t *)base;
       int64_t env = *(int64_t *)(base + 8);
@@ -1811,16 +2799,16 @@ static void *__thread_trampoline(void *p) {
   return (void *)(uintptr_t)res;
 }
 
-int64_t __thread_spawn(int64_t fn, int64_t arg) {
+int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
   pthread_t tid;
-  __thread_arg *ta = malloc(sizeof(__thread_arg));
+  rt_thread_arg *ta = malloc(sizeof(rt_thread_arg));
   if (!ta)
     return -1;
   ta->fn = fn;
   ta->arg = arg;
   ta->argc = -1;
   ta->argv = NULL;
-  int r = pthread_create(&tid, NULL, __thread_trampoline, ta);
+  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
   if (r != 0) {
     free(ta);
     return -r;
@@ -1828,13 +2816,13 @@ int64_t __thread_spawn(int64_t fn, int64_t arg) {
   return (int64_t)tid;
 }
 
-int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
+int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
   int64_t *argv_copy = NULL;
-  if (!__thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
     return -1;
   pthread_t tid;
-  __thread_arg *ta = malloc(sizeof(__thread_arg));
+  rt_thread_arg *ta = malloc(sizeof(rt_thread_arg));
   if (!ta) {
     if (argv_copy)
       free(argv_copy);
@@ -1844,7 +2832,7 @@ int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   ta->arg = 0;
   ta->argc = argc_raw;
   ta->argv = argv_copy;
-  int r = pthread_create(&tid, NULL, __thread_trampoline, ta);
+  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
   if (r != 0) {
     if (argv_copy)
       free(argv_copy);
@@ -1854,36 +2842,36 @@ int64_t __thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   return (int64_t)tid;
 }
 
-int64_t __thread_launch_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
+int64_t rt_thread_launch_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
   int64_t *argv_copy = NULL;
-  if (!__thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
-    return -1;
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy))
+    return rt_tag_v(-1);
   pthread_t tid;
-  __thread_arg *ta = malloc(sizeof(__thread_arg));
+  rt_thread_arg *ta = malloc(sizeof(rt_thread_arg));
   if (!ta) {
     if (argv_copy)
       free(argv_copy);
-    return -1;
+    return rt_tag_v(-1);
   }
   ta->fn = fn;
   ta->arg = 0;
   ta->argc = argc_raw;
   ta->argv = argv_copy;
-  int r = pthread_create(&tid, NULL, __thread_trampoline, ta);
+  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
   if (r != 0) {
     if (argv_copy)
       free(argv_copy);
     free(ta);
-    return -r;
+    return rt_tag_v(-r);
   }
   r = pthread_detach(tid);
   if (r != 0)
-    return -r;
-  return 0;
+    return rt_tag_v(-r);
+  return rt_tag_v(0);
 }
 
-int64_t __thread_join(int64_t tid) {
+int64_t rt_thread_join(int64_t tid) {
   void *ret = NULL;
   int r = pthread_join((pthread_t)tid, &ret);
   if (r != 0)
@@ -1891,7 +2879,7 @@ int64_t __thread_join(int64_t tid) {
   return (int64_t)(uintptr_t)ret;
 }
 
-int64_t __mutex_new(void) {
+int64_t rt_mutex_new(void) {
   pthread_mutex_t *m = calloc(1, sizeof(pthread_mutex_t));
   if (!m)
     return 0;
@@ -1902,19 +2890,19 @@ int64_t __mutex_new(void) {
   return (int64_t)(uintptr_t)m;
 }
 
-int64_t __mutex_lock64(int64_t m) {
+int64_t rt_mutex_lock64(int64_t m) {
   if (!m)
     return -1;
   return pthread_mutex_lock((pthread_mutex_t *)(uintptr_t)m);
 }
 
-int64_t __mutex_unlock64(int64_t m) {
+int64_t rt_mutex_unlock64(int64_t m) {
   if (!m)
     return -1;
   return pthread_mutex_unlock((pthread_mutex_t *)(uintptr_t)m);
 }
 
-int64_t __mutex_free(int64_t m) {
+int64_t rt_mutex_free(int64_t m) {
   if (!m)
     return 0;
   pthread_mutex_destroy((pthread_mutex_t *)(uintptr_t)m);
@@ -1923,7 +2911,7 @@ int64_t __mutex_free(int64_t m) {
 }
 #endif
 
-int64_t __os_name(void) {
+int64_t rt_os_name(void) {
   static int64_t cached = 0;
   if (cached)
     return cached;
@@ -1931,18 +2919,18 @@ int64_t __os_name(void) {
   const char *s = "linux";
 #elif defined(__APPLE__)
   const char *s = "macos";
-#elif defined(__FreeBSD__)
+#elif defined(rt_FreeBSD__)
   const char *s = "freebsd";
 #elif defined(_WIN32)
   const char *s = "windows";
 #else
   const char *s = "unknown";
 #endif
-  cached = __rt_alloc_string(s);
+  cached = rt_alloc_string(s);
   return cached;
 }
 
-int64_t __arch_name(void) {
+int64_t rt_arch_name(void) {
   static int64_t cached = 0;
   if (cached)
     return cached;
@@ -1959,8 +2947,10 @@ int64_t __arch_name(void) {
 #else
   const char *s = "unknown";
 #endif
-  cached = __rt_alloc_string(s);
+  cached = rt_alloc_string(s);
   return cached;
 }
 
-int64_t __main(void) { return (getenv("NYTRIX_TEST_MODE") != NULL) ? 2 : 4; }
+int64_t rt_main(void) {
+  return (getenv("NYTRIX_TEST_MODE") != NULL) ? NY_IMM_TRUE : NY_IMM_FALSE;
+}

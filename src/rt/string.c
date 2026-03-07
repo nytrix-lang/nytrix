@@ -1,14 +1,20 @@
 #include "rt/shared.h"
 #include <inttypes.h>
 
-static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
-                               const char **out_s, int *out_len) {
+static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize, const char **out_s,
+                               int *out_len) {
   if (is_v_str(v)) {
     *out_s = (const char *)(uintptr_t)v;
-    uintptr_t lp = (uintptr_t)v - 16;
-    int64_t tagged_len = 0;
-    memcpy(&tagged_len, (const void *)lp, sizeof(tagged_len));
-    *out_len = (int)(tagged_len >> 1);
+    *out_len = (int)rt_tagged_str_len(v);
+  } else if (rt_is_nil_imm(v)) {
+    *out_s = "none";
+    *out_len = 4;
+  } else if (rt_is_true_imm(v)) {
+    *out_s = "true";
+    *out_len = 4;
+  } else if (rt_is_false_imm(v)) {
+    *out_s = "false";
+    *out_len = 5;
   } else if (is_int(v)) {
     int64_t val = (int64_t)(v >> 1);
     char *p = buf + bsize - 1;
@@ -35,8 +41,22 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
       return;
     } else if (is_heap_ptr(v)) {
       int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
-      *out_len = snprintf(buf, bsize, "<ptr 0x%lx tag=%ld>", (unsigned long)v,
-                          (long)tag);
+      if (tag == TAG_COMPLEX) {
+        double re = 0.0, im = 0.0;
+        memcpy(&re, (const void *)(uintptr_t)v, 8);
+        memcpy(&im, (const void *)((uintptr_t)v + 8), 8);
+        *out_len = snprintf(buf, bsize, "%g%+gi", re, im);
+        *out_s = buf;
+        return;
+      }
+      if (tag == TAG_BIGINT) {
+        extern int64_t rt_bigint_to_str(int64_t a);
+        int64_t s_obj = rt_bigint_to_str(v);
+        *out_s = (const char *)(uintptr_t)s_obj;
+        *out_len = (int)rt_tagged_str_len(s_obj);
+        return;
+      }
+      *out_len = snprintf(buf, bsize, "<ptr 0x%lx tag=%ld>", (unsigned long)v, (long)tag);
       *out_s = buf;
     } else if ((v & 3) == 2) {
       *out_len = snprintf(buf, bsize, "<fn 0x%lx>", (unsigned long)(v & ~3ULL));
@@ -67,6 +87,14 @@ int64_t rt_str_concat(int64_t a, int64_t b) {
   if (lb > (int)sizeof(buf_b) && sb == buf_b)
     lb = sizeof(buf_b);
 
+  if (la + lb <= 23) {
+    char small[24];
+    memcpy(small, sa, la);
+    memcpy(small + la, sb, lb);
+    small[la + lb] = '\0';
+    return rt_alloc_string_len(small, (size_t)(la + lb));
+  }
+
   int64_t res = rt_malloc((int64_t)((la + lb + 1) << 1 | 1));
   if (!res)
     return 0;
@@ -77,6 +105,30 @@ int64_t rt_str_concat(int64_t a, int64_t b) {
   memcpy(s + la, sb, lb);
   s[la + lb] = '\0';
   return res;
+}
+
+int64_t rt_str_hash(int64_t v) {
+  if (!is_v_str(v))
+    return rt_tag_v(0);
+  size_t n = rt_tagged_str_len(v);
+  const unsigned char *s = (const unsigned char *)(uintptr_t)v;
+  uint64_t h = 2166136261u;
+  for (size_t i = 0; i < n; i++) {
+    h = ((h ^ (uint64_t)s[i]) * 16777619u) & 2147483647u;
+  }
+  return rt_tag_v((int64_t)h);
+}
+
+int64_t rt_str_eq(int64_t a, int64_t b) {
+  if (a == b)
+    return NY_IMM_TRUE;
+  if (!is_v_str(a) || !is_v_str(b))
+    return NY_IMM_FALSE;
+  size_t n = rt_tagged_str_len(a);
+  if (n != rt_tagged_str_len(b))
+    return NY_IMM_FALSE;
+  return memcmp((const void *)(uintptr_t)a, (const void *)(uintptr_t)b, n) == 0 ? NY_IMM_TRUE
+                                                                                : NY_IMM_FALSE;
 }
 
 static struct {
@@ -90,11 +142,13 @@ static struct {
 int64_t rt_to_str(int64_t v) {
   if (is_v_str(v))
     return v;
-  if (v == 0)
+  if (rt_is_nil_imm(v))
     return (int64_t)(uintptr_t)_str_none.s;
-  if (v == 2)
+  /* Immediate booleans must be checked before is_int() because the current
+     ABI uses even immediates for bool while small ints use odd tags. */
+  if (rt_is_true_imm(v))
     return (int64_t)(uintptr_t)_str_true.s;
-  if (v == 4)
+  if (rt_is_false_imm(v))
     return (int64_t)(uintptr_t)_str_false.s;
   char buf[128];
   const char *s;

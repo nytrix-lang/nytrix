@@ -103,10 +103,8 @@ int64_t nyFfiCallIV(void *fn);
 int64_t nyFfiCallII(void *fn, int64_t a0);
 int64_t nyFfiCallIIi(void *fn, int64_t a0, int64_t a1);
 int64_t nyFfiCallIIii(void *fn, int64_t a0, int64_t a1, int64_t a2);
-int64_t nyFfiCallIIiii(void *fn, int64_t a0, int64_t a1, int64_t a2,
-                       int64_t a3);
-int64_t nyFfiCallIIiiii(void *fn, int64_t a0, int64_t a1, int64_t a2,
-                        int64_t a3, int64_t a4);
+int64_t nyFfiCallIIiii(void *fn, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
+int64_t nyFfiCallIIiiii(void *fn, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4);
 
 void nyFfiCallVI(void *fn, int64_t a0);
 void nyFfiCallVIi(void *fn, int64_t a0, int64_t a1);
@@ -118,23 +116,19 @@ int64_t nyFfiCallPPi(void *fn, int64_t a0, int64_t a1);
 
 int64_t nyFfiCallPII(void *fn, int64_t a0, int64_t a1);
 int64_t nyFfiCallPIIi(void *fn, int64_t a0, int64_t a1, int64_t a2);
-int64_t nyFfiCallPIIii(void *fn, int64_t a0, int64_t a1, int64_t a2,
-                       int64_t a3);
+int64_t nyFfiCallPIIii(void *fn, int64_t a0, int64_t a1, int64_t a2, int64_t a3);
 
 /* Generic fallback */
 int64_t nyFfiCallGeneric(void *fn, int64_t *args, size_t argc);
 
 /* Fast inline calls (for JIT) */
-static inline int64_t nyFfiFastII(int64_t fn, int64_t a0) {
-  return ((int64_t (*)(int64_t))fn)(a0);
-}
+static inline int64_t nyFfiFastII(int64_t fn, int64_t a0) { return ((int64_t (*)(int64_t))fn)(a0); }
 
 static inline int64_t nyFfiFastIIi(int64_t fn, int64_t a0, int64_t a1) {
   return ((int64_t (*)(int64_t, int64_t))fn)(a0, a1);
 }
 
-static inline int64_t nyFfiFastIIii(int64_t fn, int64_t a0, int64_t a1,
-                                    int64_t a2) {
+static inline int64_t nyFfiFastIIii(int64_t fn, int64_t a0, int64_t a1, int64_t a2) {
   return ((int64_t (*)(int64_t, int64_t, int64_t))fn)(a0, a1, a2);
 }
 

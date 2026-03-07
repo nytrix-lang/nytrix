@@ -2,13 +2,19 @@
 #define NYTRIX_RT_GC_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
 
-/* GC Configuration */
-#define NYGC_NURSERY_SIZE (4 * 1024 * 1024)  /* 4 MB nursery */
-#define NYGC_TENURED_SIZE (64 * 1024 * 1024) /* 64 MB tenured */
-#define NYGC_PROMOTION_AGE 3                 /* Promote after 3 collections */
+// Local Gc for the compiler internal list like usage
+// Not for the user program
+
+/* GC Configuration. The collector is opt-in; these are enabled-GC defaults. */
+#define NYGC_NURSERY_SIZE (256 * 1024 * 1024)    /* 256 MB nursery */
+#define NYGC_TENURED_SIZE (1024 * 1024 * 1024)   /* 1 GB tenured */
+#define NYGC_PROMOTION_AGE 3                   /* Promote after 3 collections */
+#define NYGC_DEFAULT_LOS_THRESHOLD (1024 * 1024) /* 1 MB large-object cutoff */
 
 /* Object header flags */
 #define NYGC_MARKED (1 << 0)
@@ -16,6 +22,7 @@
 #define NYGC_TENURED (1 << 2)
 #define NYGC_FINALIZER (1 << 3)
 #define NYGC_WEAK (1 << 4)
+#define NYGC_LARGE (1 << 5)
 
 /* Object header (16 bytes) */
 typedef struct nyGcHeader {
@@ -25,12 +32,25 @@ typedef struct nyGcHeader {
 } nyGcHeader_t;
 
 #define NYGC_HEADER_SIZE sizeof(nyGcHeader_t)
-#define NYGC_OBJECT_DATA_OFFSET NYGC_HEADER_SIZE
+#define NYGC_RUNTIME_PREFIX_SIZE 32
+#define NYGC_OBJECT_DATA_OFFSET (NYGC_HEADER_SIZE + NYGC_RUNTIME_PREFIX_SIZE)
+
+static inline size_t nyGcBodySize(size_t size) { return (size + 15u) & ~15u; }
+static inline size_t nyGcAllocSize(size_t size) {
+  return NYGC_OBJECT_DATA_OFFSET + nyGcBodySize(size);
+}
+static inline nyGcHeader_t *nyGcHeaderFromObject(int64_t obj) {
+  uintptr_t raw = (uintptr_t)obj;
+  assert(raw == 0 || (raw % _Alignof(nyGcHeader_t)) == 0);
+  return (nyGcHeader_t *)((uint8_t *)raw - NYGC_OBJECT_DATA_OFFSET);
+}
 
 /* GC Statistics */
 typedef struct nyGcStats {
   size_t nursery_allocated;
   size_t tenured_allocated;
+  size_t large_allocated;
+  size_t large_freed;
   size_t nursery_collections;
   size_t tenured_collections;
   size_t objects_promoted;
@@ -39,18 +59,31 @@ typedef struct nyGcStats {
   double last_pause_ms;
 } nyGcStats_t;
 
+typedef struct nyGcLargeObject {
+  nyGcHeader_t *header;
+  size_t total_size;
+  struct nyGcLargeObject *next;
+} nyGcLargeObject_t;
+
 /* GC State */
 typedef struct nyGcState {
   /* Nursery space */
   uint8_t *nursery_start;
   uint8_t *nursery_limit;
   uint8_t *nursery_ptr;
+  size_t nursery_capacity;
 
   /* Tenured space */
   uint8_t *tenured_start;
   uint8_t *tenured_limit;
   uint8_t *tenured_scan;
   uint8_t *tenured_free;
+  size_t tenured_capacity;
+
+  /* Large object space */
+  nyGcLargeObject_t *large_objects;
+  size_t large_count;
+  size_t large_threshold;
 
   /* Remembered set (tenured -> nursery refs) */
   int64_t **remembered_set;
@@ -68,7 +101,7 @@ typedef struct nyGcState {
   /* State flags */
   bool initialized;
   bool collecting;
-  bool parallel_enabled;
+  bool enable_nursery;
 } nyGcState_t;
 
 /* Initialize GC */
@@ -78,26 +111,7 @@ void nyGcInit(void);
 void nyGcDispose(void);
 
 /* Allocate from nursery (fast path) */
-static inline int64_t nyGcAllocFast(size_t size) {
-  extern nyGcState_t gNyGc;
-
-  size_t aligned_size = (size + 7) & ~7; /* 8-byte align */
-  uint8_t *new_ptr = gNyGc.nursery_ptr + aligned_size;
-
-  if (new_ptr > gNyGc.nursery_limit) {
-    return 0; /* Nursery overflow, use slow path */
-  }
-
-  nyGcHeader_t *header = (nyGcHeader_t *)gNyGc.nursery_ptr;
-  header->flags = 0;
-  header->age = 0;
-  header->size = size;
-
-  gNyGc.nursery_ptr = new_ptr;
-  gNyGc.stats.nursery_allocated += aligned_size;
-
-  return (int64_t)((uint8_t *)header + NYGC_HEADER_SIZE);
-}
+int64_t nyGcAllocFast(size_t size);
 
 /* Allocate (with fallback to tenured) */
 int64_t nyGcAlloc(size_t size);
