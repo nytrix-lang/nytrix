@@ -26,6 +26,90 @@
 #include <string.h>
 #include <sys/types.h>
 
+typedef struct {
+  uint64_t count;
+  double total_ms;
+  double self_ms;
+} ny_codegen_kind_prof_t;
+
+static ny_codegen_kind_prof_t g_expr_kind_prof[64];
+static double g_expr_kind_child_ms[4096];
+static int g_expr_kind_depth;
+static int g_expr_kind_profile_enabled = -1;
+static int g_expr_kind_profile_registered;
+
+static bool ny_codegen_expr_kind_profile_enabled(void) {
+  if (g_expr_kind_profile_enabled < 0) {
+    const char *env = getenv("NYTRIX_PROFILE_CODEGEN_KINDS");
+    if (!env || !*env)
+      env = getenv("NYTRIX_PROFILE_CODEGEN_EXPR");
+    g_expr_kind_profile_enabled =
+        (env && *env && strcmp(env, "0") != 0 && strcmp(env, "false") != 0 &&
+         strcmp(env, "off") != 0)
+            ? 1
+            : 0;
+  }
+  return g_expr_kind_profile_enabled == 1;
+}
+
+static const char *ny_expr_kind_profile_name(int kind) {
+  switch (kind) {
+  case NY_E_IDENT: return "IDENT";
+  case NY_E_LITERAL: return "LITERAL";
+  case NY_E_UNARY: return "UNARY";
+  case NY_E_BINARY: return "BINARY";
+  case NY_E_LOGICAL: return "LOGICAL";
+  case NY_E_TERNARY: return "TERNARY";
+  case NY_E_CALL: return "CALL";
+  case NY_E_MEMCALL: return "MEMCALL";
+  case NY_E_INDEX: return "INDEX";
+  case NY_E_LAMBDA: return "LAMBDA";
+  case NY_E_FN: return "FN";
+  case NY_E_LIST: return "LIST";
+  case NY_E_TUPLE: return "TUPLE";
+  case NY_E_DICT: return "DICT";
+  case NY_E_SET: return "SET";
+  case NY_E_ASM: return "ASM";
+  case NY_E_COMPTIME: return "COMPTIME";
+  case NY_E_FSTRING: return "FSTRING";
+  case NY_E_INFERRED_MEMBER: return "INFERRED_MEMBER";
+  case NY_E_EMBED: return "EMBED";
+  case NY_E_MATCH: return "MATCH";
+  case NY_E_MEMBER: return "MEMBER";
+  case NY_E_PTR_TYPE: return "PTR_TYPE";
+  case NY_E_DEREF: return "DEREF";
+  case NY_E_SIZEOF: return "SIZEOF";
+  case NY_E_TRY: return "TRY";
+  default: return "UNKNOWN";
+  }
+}
+
+static void ny_codegen_expr_kind_profile_report(void) {
+  if (!ny_codegen_expr_kind_profile_enabled())
+    return;
+  for (int i = 0; i < (int)(sizeof(g_expr_kind_prof) / sizeof(g_expr_kind_prof[0])); ++i) {
+    ny_codegen_kind_prof_t p = g_expr_kind_prof[i];
+    if (p.count == 0)
+      continue;
+    fprintf(stderr,
+            "[codegen-expr-kind] kind=%s count=%" PRIu64
+            " total_ms=%.3f self_ms=%.3f avg_us=%.3f\n",
+            ny_expr_kind_profile_name(i), p.count, p.total_ms, p.self_ms,
+            (p.total_ms * 1000.0) / (double)p.count);
+  }
+}
+
+static void ny_codegen_expr_kind_profile_add(int kind, double total_ms, double child_ms) {
+  if (kind < 0 || kind >= (int)(sizeof(g_expr_kind_prof) / sizeof(g_expr_kind_prof[0])))
+    kind = (int)(sizeof(g_expr_kind_prof) / sizeof(g_expr_kind_prof[0])) - 1;
+  double self_ms = total_ms - child_ms;
+  if (self_ms < 0.0)
+    self_ms = 0.0;
+  g_expr_kind_prof[kind].count++;
+  g_expr_kind_prof[kind].total_ms += total_ms;
+  g_expr_kind_prof[kind].self_ms += self_ms;
+}
+
 LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -34,49 +118,424 @@ LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...) {
   va_end(ap);
   ny_diag_error(tok, "%s", msg);
   cg->had_error = 1;
-  return LLVMConstInt(cg->type_i64, 0, false);
+  return ny_c0(cg);
 }
 
 static inline uint64_t ny_const_str_hash(const char *s, size_t len) {
   return ny_hash64(s, len);
 }
 
-static const char *ny_comptime_host_os_name(void) {
-#if defined(_WIN32)
-  return "windows";
-#elif defined(__APPLE__) && defined(__MACH__)
-  return "macos";
-#elif defined(__linux__)
-  return "linux";
-#elif defined(__FreeBSD__)
-  return "freebsd";
-#elif defined(__NetBSD__)
-  return "netbsd";
-#elif defined(__OpenBSD__)
-  return "openbsd";
-#else
-  return "unknown";
-#endif
+static binding *expr_lookup_binding(codegen_t *cg, scope *scopes, size_t depth,
+                                    const char *name, size_t name_len, uint64_t hash) {
+  return lookup_binding_hash(cg, scopes, depth, name, name_len, hash);
 }
 
-static const char *ny_comptime_host_arch_name(void) {
-#if defined(__x86_64__) || defined(_M_X64)
-  return "x86_64";
-#elif defined(__i386__) || defined(_M_IX86)
-  return "x86";
-#elif defined(__aarch64__) || defined(_M_ARM64)
-  return "aarch64";
-#elif defined(__arm__) || defined(_M_ARM)
-  return "arm";
-#elif defined(__riscv)
-  return "riscv";
-#else
-  return "unknown";
-#endif
+static LLVMValueRef ny_binding_tagged_int_value(codegen_t *cg, binding *b);
+
+static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
+  if (!cg || !b)
+    return ny_c0(cg);
+  b->is_used = true;
+  if (b->is_f64_slot || b->is_f64_direct || b->is_f32_slot || b->is_f32_direct) {
+    LLVMValueRef fv;
+    if (b->is_f64_slot || b->is_f64_direct) {
+      fv = b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_f64, b->value, "f64_ld")
+                      : b->value;
+    } else {
+      fv = b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_f32, b->value, "f32_ld")
+                      : b->value;
+      fv = LLVMBuildFPExt(cg->builder, fv, cg->type_f64, "f2f");
+    }
+    fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
+    if (box_sig)
+      return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
+                            (LLVMValueRef[]){ny_bitcast(cg, fv, cg->type_i64, "")}, 1,
+                            "box");
+  }
+  if (b->is_slot)
+    return ny_load(cg, b->value, "");
+  if (b->is_int_direct && b->is_int_raw_direct)
+    return ny_binding_tagged_int_value(cg, b);
+  return b->value;
 }
 
-static bool ny_comptime_main_enabled(void) {
-  return ny_env_is_truthy(getenv("NYTRIX_TEST_MODE"));
+static const char *expr_member_module_alias_target(codegen_t *cg, scope *scopes,
+                                                   size_t depth, expr_t *e) {
+  if (!cg || !e || e->kind != NY_E_MEMBER || !e->as.member.target ||
+      e->as.member.target->kind != NY_E_IDENT || !e->as.member.target->as.ident.name ||
+      !e->as.member.name)
+    return NULL;
+  expr_t *target = e->as.member.target;
+  const char *target_name = target->as.ident.name;
+  size_t target_len = (size_t)target->tok.len;
+  if (target_len == 0)
+    target_len = strlen(target_name);
+  return ny_lookup_module_alias(cg, scopes, depth, target_name, target_len,
+                                target->as.ident.hash);
+}
+
+static binding *expr_member_module_alias_global(codegen_t *cg, scope *scopes, size_t depth,
+                                                expr_t *e, char *out, size_t out_cap) {
+  const char *module_name = expr_member_module_alias_target(cg, scopes, depth, e);
+  if (!module_name)
+    return NULL;
+  if (!e || !e->as.member.name)
+    return NULL;
+  {
+    char stack_name[512];
+    char *name_buf = out && out_cap > 0 ? out : stack_name;
+    size_t name_cap = out && out_cap > 0 ? out_cap : sizeof(stack_name);
+    int nw = snprintf(name_buf, name_cap, "%s.%s", module_name, e->as.member.name);
+    if (nw <= 0 || (size_t)nw >= name_cap)
+      return NULL;
+    binding *gb = lookup_global(cg, name_buf);
+    if (!gb) {
+      const char *resolved = resolve_import_alias(cg, name_buf);
+      if (resolved && *resolved && strcmp(resolved, name_buf) != 0)
+        gb = lookup_global(cg, resolved);
+    }
+    if (!gb) {
+      const char *resolved = ny_resolve_used_module_export_alias(cg, name_buf);
+      if (resolved && *resolved && strcmp(resolved, name_buf) != 0)
+        gb = lookup_global(cg, resolved);
+    }
+    return gb;
+  }
+}
+
+static LLVMValueRef expr_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                     const char *name) {
+  if (!cg || !v)
+    return v;
+  if (LLVMTypeOf(v) == cg->type_i64)
+    return v;
+  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
+}
+
+static LLVMValueRef expr_build_untagged_or_raw_i64(codegen_t *cg,
+                                                   LLVMValueRef v,
+                                                   const char *name) {
+  LLVMValueRef lsb = ny_and(cg, v, ny_c1(cg), "index_lsb");
+  LLVMValueRef is_tagged = ny_eq(cg, lsb, ny_c1(cg), "index_is_tagged");
+  LLVMValueRef untagged = ny_ashr(cg, v, ny_c1(cg), "index_untag");
+  return ny_select(cg, is_tagged, untagged, v, name ? name : "index_raw");
+}
+
+static bool expr_type_base_is(const char *type_name, const char *want) {
+  if (!type_name || !want)
+    return false;
+  if (*type_name == '?')
+    return false;
+  const char *leaf = ny_type_leaf(type_name);
+  if (!leaf)
+    return false;
+  size_t want_len = strlen(want);
+  if (strncmp(leaf, want, want_len) != 0)
+    return false;
+  return leaf[want_len] == '\0' || leaf[want_len] == '<';
+}
+
+static bool expr_type_is_int_index(const char *type_name) {
+  static const char *const k_int_types[] = {
+      "int", "i8",  "i16", "i32", "i64",
+      "u8",  "u16", "u32", "u64",
+  };
+  for (size_t i = 0; i < sizeof(k_int_types) / sizeof(k_int_types[0]); ++i) {
+    if (expr_type_base_is(type_name, k_int_types[i]))
+      return true;
+  }
+  return false;
+}
+
+static bool expr_index_is_int_key(codegen_t *cg, scope *scopes, size_t depth,
+                                  expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+      e->tok.kind != NY_T_NIL)
+    return true;
+  if (ny_is_proven_int(cg, scopes, depth, e, NULL))
+    return true;
+  return expr_type_is_int_index(infer_expr_type(cg, scopes, depth, e));
+}
+
+static bool expr_target_is_known_list_like(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *target) {
+  if (!target)
+    return false;
+  if (target->kind == NY_E_LIST || target->kind == NY_E_TUPLE)
+    return true;
+  const char *type_name = infer_expr_type(cg, scopes, depth, target);
+  if (expr_type_base_is(type_name, "list") ||
+      expr_type_base_is(type_name, "tuple"))
+    return true;
+  if (target->kind == NY_E_IDENT && target->as.ident.name) {
+    size_t name_len = (size_t)target->tok.len;
+    if (name_len == 0)
+      name_len = strlen(target->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                     name_len, target->as.ident.hash);
+    return b && b->is_list_storage;
+  }
+  return false;
+}
+
+static LLVMValueRef expr_index_raw_i64(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *idx_expr,
+                                       LLVMValueRef idx_v,
+                                       const char *name) {
+  idx_v = expr_cast_to_i64(cg, idx_v, name ? name : "index");
+  int64_t lit = 0;
+  if (ny_expr_literal_i64(idx_expr, &lit))
+    return LLVMConstInt(cg->type_i64, (uint64_t)lit, true);
+  if (idx_expr && idx_expr->kind == NY_E_IDENT && idx_expr->as.ident.name) {
+    size_t name_len = (size_t)idx_expr->tok.len;
+    if (name_len == 0)
+      name_len = strlen(idx_expr->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth,
+                                     idx_expr->as.ident.name, name_len,
+                                     idx_expr->as.ident.hash);
+    if (b && b->raw_int_value && (b->is_int_slot || b->is_int_direct))
+      return b->is_int_slot
+                 ? ny_load(cg, b->raw_int_value, name ? name : "index_raw")
+                 : b->raw_int_value;
+  }
+  if (ny_is_proven_int(cg, scopes, depth, idx_expr, idx_v))
+    return ny_untag_int(cg, idx_v);
+  return expr_build_untagged_or_raw_i64(cg, idx_v, name ? name : "index_raw");
+}
+
+static bool expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e, int64_t *out_min, int64_t *out_max);
+
+static bool expr_list_len_min(codegen_t *cg, scope *scopes, size_t depth,
+                              expr_t *target, int64_t *out_min_len) {
+  if (!target)
+    return false;
+  if (target->kind == NY_E_LIST || target->kind == NY_E_TUPLE) {
+    if (out_min_len)
+      *out_min_len = (int64_t)target->as.list_like.len;
+    return true;
+  }
+  if (target->kind != NY_E_IDENT || !target->as.ident.name)
+    return false;
+  size_t name_len = (size_t)target->tok.len;
+  if (name_len == 0)
+    name_len = strlen(target->as.ident.name);
+  binding *b = expr_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                   name_len, target->as.ident.hash);
+  if (!b || !b->has_list_len_min)
+    return false;
+  if (out_min_len)
+    *out_min_len = b->list_len_min_raw;
+  return true;
+}
+
+static bool expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e, int64_t *out_min, int64_t *out_max) {
+  int64_t lit = 0;
+  if (ny_expr_literal_i64(e, &lit)) {
+    if (out_min)
+      *out_min = lit;
+    if (out_max)
+      *out_max = lit;
+    return true;
+  }
+  if (e && e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name && e->as.call.args.len == 1) {
+    size_t name_len = 0;
+    uint64_t name_hash = 0;
+    const char *name =
+        ny_builtin_surface_name_for_callee(e->as.call.callee, &name_len,
+                                           &name_hash);
+    bool shadowed = ny_builtin_name_shadowed_by_user_symbol(
+        cg, scopes, depth, name, name_len, name_hash);
+    if (name && !shadowed && ny_name_tail_is(name, "len")) {
+      int64_t len = 0;
+      if (expr_list_len_min(cg, scopes, depth, e->as.call.args.data[0].val,
+                            &len)) {
+        if (out_min)
+          *out_min = len;
+        if (out_max)
+          *out_max = len;
+        return true;
+      }
+    }
+  }
+  if (e && e->kind == NY_E_BINARY && e->as.binary.op) {
+    int64_t lmin = 0, lmax = 0, rmin = 0, rmax = 0;
+    if (!expr_int_range(cg, scopes, depth, e->as.binary.left, &lmin, &lmax) ||
+        !expr_int_range(cg, scopes, depth, e->as.binary.right, &rmin, &rmax))
+      return false;
+    const char *op = e->as.binary.op;
+    int64_t lo = 0, hi = 0;
+    if (strcmp(op, "+") == 0) {
+      if (!ny_add_range_ok(lmin, rmin, &lo) ||
+          !ny_add_range_ok(lmax, rmax, &hi))
+        return false;
+    } else if (strcmp(op, "-") == 0) {
+      if (!ny_sub_range_ok(lmin, rmax, &lo) ||
+          !ny_sub_range_ok(lmax, rmin, &hi))
+        return false;
+    } else if (strcmp(op, "*") == 0) {
+      int64_t c[4];
+      if (!ny_mul_range_ok(lmin, rmin, &c[0]) ||
+          !ny_mul_range_ok(lmin, rmax, &c[1]) ||
+          !ny_mul_range_ok(lmax, rmin, &c[2]) ||
+          !ny_mul_range_ok(lmax, rmax, &c[3]))
+        return false;
+      lo = c[0];
+      hi = c[0];
+      for (int i = 1; i < 4; ++i) {
+        if (c[i] < lo)
+          lo = c[i];
+        if (c[i] > hi)
+          hi = c[i];
+      }
+    } else if (strcmp(op, "%") == 0) {
+      if (rmin != rmax || rmax <= 0 || lmin < 0)
+        return false;
+      lo = 0;
+      hi = lmax < rmax ? lmax : rmax - 1;
+    } else if (strcmp(op, "&") == 0) {
+      if (rmin != rmax || rmax < 0 || lmin < 0)
+        return false;
+      lo = 0;
+      hi = rmax;
+    } else {
+      return false;
+    }
+    if (lo > hi)
+      return false;
+    if (out_min)
+      *out_min = lo;
+    if (out_max)
+      *out_max = hi;
+    return true;
+  }
+  if (!e || e->kind != NY_E_IDENT || !e->as.ident.name)
+    return false;
+  size_t name_len = (size_t)e->tok.len;
+  if (name_len == 0)
+    name_len = strlen(e->as.ident.name);
+  binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name,
+                                   name_len, e->as.ident.hash);
+  if (b && b->has_int_range) {
+    if (out_min)
+      *out_min = b->int_min_raw;
+    if (out_max)
+      *out_max = b->int_max_raw;
+    return true;
+  }
+  expr_t *init =
+      b && !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
+  if (ny_expr_literal_i64(init, &lit)) {
+    if (out_min)
+      *out_min = lit;
+    if (out_max)
+      *out_max = lit;
+    return true;
+  }
+  return init && init != e &&
+         expr_int_range(cg, scopes, depth, init, out_min, out_max);
+}
+
+static bool expr_index_is_nonnegative(codegen_t *cg, scope *scopes,
+                                      size_t depth, expr_t *key) {
+  int64_t idx_min = 0, idx_max = 0;
+  if (expr_int_range(cg, scopes, depth, key, &idx_min, &idx_max))
+    return idx_min >= 0;
+  const char *t = infer_expr_type(cg, scopes, depth, key);
+  return t && (expr_type_base_is(t, "u8") || expr_type_base_is(t, "u16") ||
+               expr_type_base_is(t, "u32") || expr_type_base_is(t, "u64"));
+}
+
+static bool expr_index_in_list_len_min(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *target,
+                                       expr_t *key) {
+  int64_t idx_min = 0, idx_max = 0, len_min = 0;
+  if (!expr_int_range(cg, scopes, depth, key, &idx_min, &idx_max) ||
+      idx_min < 0)
+    return false;
+  if (!expr_list_len_min(cg, scopes, depth, target, &len_min))
+    return false;
+  return len_min > 0 && idx_max < len_min;
+}
+
+static bool ny_comptime_main_enabled(codegen_t *cg, token_t tok) {
+  if (cg && cg->source_main_file && *cg->source_main_file && tok.filename &&
+      *tok.filename)
+    return ny_codegen_token_is_source_file(cg, tok);
+  return ny_env_enabled("NYTRIX_TEST_MODE");
+}
+
+static bool ny_lambda_values_need_closure(codegen_t *cg) {
+  return ny_env_enabled("NYTRIX_FORCE_CLOSURE_LAMBDAS") ||
+         ny_module_target_is_apple_arm64(cg ? cg->module : NULL);
+}
+
+static bool ny_ct_platform_ident(const char *name, ny_ct_fast_val_t *out) {
+  if (!name || !out)
+    return false;
+  const char *os = ny_host_os_name();
+  const char *arch = ny_host_arch_name();
+  bool is_windows = strcmp(os, "windows") == 0;
+  bool is_macos = strcmp(os, "macos") == 0;
+  bool is_linux = strcmp(os, "linux") == 0;
+  bool is_unix = !is_windows && strcmp(os, "unknown") != 0;
+  bool is_x86_64 = strcmp(arch, "x86_64") == 0;
+  bool is_x86 = strcmp(arch, "x86") == 0 || is_x86_64;
+  bool is_aarch64 = strcmp(arch, "aarch64") == 0 || strcmp(arch, "arm64") == 0;
+  bool is_arm = strcmp(arch, "arm") == 0 || is_aarch64;
+  bool is_riscv = strcmp(arch, "riscv") == 0;
+
+  if (strcmp(name, "OS") == 0) {
+    out->kind = NY_CT_FAST_STR;
+    out->s = os;
+    return true;
+  }
+  if (strcmp(name, "ARCH") == 0) {
+    out->kind = NY_CT_FAST_STR;
+    out->s = arch;
+    return true;
+  }
+
+#define NY_CT_PLATFORM_BOOL(symbol, value)                                     \
+  if (strcmp(name, symbol) == 0) {                                             \
+    out->kind = NY_CT_FAST_BOOL;                                               \
+    out->b = (value);                                                          \
+    return true;                                                               \
+  }
+
+  NY_CT_PLATFORM_BOOL("linux", is_linux)
+  NY_CT_PLATFORM_BOOL("LINUX", is_linux)
+  NY_CT_PLATFORM_BOOL("IS_LINUX", is_linux)
+  NY_CT_PLATFORM_BOOL("macos", is_macos)
+  NY_CT_PLATFORM_BOOL("mac", is_macos)
+  NY_CT_PLATFORM_BOOL("MACOS", is_macos)
+  NY_CT_PLATFORM_BOOL("IS_MACOS", is_macos)
+  NY_CT_PLATFORM_BOOL("windows", is_windows)
+  NY_CT_PLATFORM_BOOL("IS_WINDOWS", is_windows)
+  NY_CT_PLATFORM_BOOL("unix", is_unix)
+  NY_CT_PLATFORM_BOOL("posix", is_unix)
+  NY_CT_PLATFORM_BOOL("UNIX", is_unix)
+  NY_CT_PLATFORM_BOOL("IS_UNIX", is_unix)
+  NY_CT_PLATFORM_BOOL("x86_64", is_x86_64)
+  NY_CT_PLATFORM_BOOL("x64", is_x86_64)
+  NY_CT_PLATFORM_BOOL("IS_X86_64", is_x86_64)
+  NY_CT_PLATFORM_BOOL("x86", is_x86)
+  NY_CT_PLATFORM_BOOL("IS_X86", is_x86)
+  NY_CT_PLATFORM_BOOL("aarch64", is_aarch64)
+  NY_CT_PLATFORM_BOOL("arm64", is_aarch64)
+  NY_CT_PLATFORM_BOOL("IS_AARCH64", is_aarch64)
+  NY_CT_PLATFORM_BOOL("arm", is_arm)
+  NY_CT_PLATFORM_BOOL("IS_ARM", is_arm)
+  NY_CT_PLATFORM_BOOL("riscv", is_riscv)
+  NY_CT_PLATFORM_BOOL("IS_RISCV", is_riscv)
+
+#undef NY_CT_PLATFORM_BOOL
+  return false;
 }
 
 static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
@@ -96,6 +555,8 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
     break;
   case '-':
     if (!op[1] && r->kind == NY_CT_FAST_INT) {
+      if (r->i == INT64_MIN)
+        return false;
       out->kind = NY_CT_FAST_INT;
       out->i = -r->i;
       return true;
@@ -135,20 +596,45 @@ static bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
     return true;                                                               \
   }
 
+static bool ny_ct_fast_pow_i64(int64_t base, int64_t exp, int64_t *out) {
+  if (!out || exp < 0)
+    return false;
+  int64_t result = 1;
+  int64_t b = base;
+  uint64_t e = (uint64_t)exp;
+  while (e) {
+    if (e & 1) {
+      if (__builtin_mul_overflow(result, b, &result) ||
+          !ny_small_int_fits_i64(result))
+        return false;
+    }
+    e >>= 1;
+    if (e) {
+      if (__builtin_mul_overflow(b, b, &b) || !ny_small_int_fits_i64(b))
+        return false;
+    }
+  }
+  *out = result;
+  return true;
+}
+
 static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
                               ny_ct_fast_val_t *out) {
   switch (op[0]) {
   case '+':
+    if (__builtin_add_overflow(l, r, &out->i) || !ny_small_int_fits_i64(out->i))
+      return false;
     out->kind = NY_CT_FAST_INT;
-    out->i = l + r;
     return true;
   case '-':
+    if (__builtin_sub_overflow(l, r, &out->i) || !ny_small_int_fits_i64(out->i))
+      return false;
     out->kind = NY_CT_FAST_INT;
-    out->i = l - r;
     return true;
   case '*':
+    if (__builtin_mul_overflow(l, r, &out->i) || !ny_small_int_fits_i64(out->i))
+      return false;
     out->kind = NY_CT_FAST_INT;
-    out->i = l * r;
     return true;
   case '/':
     if (r == 0)
@@ -169,6 +655,10 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
       return true;
     }
     if (op[1] == '<') {
+      if (r < 0 || r >= 63)
+        return false;
+      if (!ny_small_int_fits_i64((int64_t)((uint64_t)l << r)))
+        return false;
       out->kind = NY_CT_FAST_INT;
       out->i = l << r;
       return true;
@@ -183,6 +673,8 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
       return true;
     }
     if (op[1] == '>') {
+      if (r < 0 || r >= 63)
+        return false;
       out->kind = NY_CT_FAST_INT;
       out->i = l >> r;
       return true;
@@ -213,9 +705,15 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
     out->i = l & r;
     return true;
   case '^':
-    out->kind = NY_CT_FAST_INT;
-    out->i = l ^ r;
-    return true;
+    if (op[1] == '^') {
+      out->kind = NY_CT_FAST_INT;
+      out->i = l ^ r;
+      return true;
+    }
+    if (!op[1] && ny_ct_fast_pow_i64(l, r, &out->i)) {
+      out->kind = NY_CT_FAST_INT;
+      return true;
+    }
   }
   return false;
 }
@@ -224,6 +722,9 @@ static bool ny_ct_fast_int_op(const char *op, int64_t l, int64_t r,
 #undef NY_CT_OP_INT_CHECK_ZERO
 #undef NY_CT_OP_BOOL
 
+static bool ny_ct_numeric_eq(const ny_ct_fast_val_t *l,
+                             const ny_ct_fast_val_t *r, bool *out);
+
 static bool ny_ct_fast_eval_binary(const char *op, const ny_ct_fast_val_t *l,
                                    const ny_ct_fast_val_t *r,
                                    ny_ct_fast_val_t *out) {
@@ -231,7 +732,9 @@ static bool ny_ct_fast_eval_binary(const char *op, const ny_ct_fast_val_t *l,
     return false;
   if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
     bool eq = false;
-    if (l->kind == NY_CT_FAST_INT && r->kind == NY_CT_FAST_INT) {
+    if (ny_ct_numeric_eq(l, r, &eq)) {
+      /* handled */
+    } else if (l->kind == NY_CT_FAST_INT && r->kind == NY_CT_FAST_INT) {
       eq = (l->i == r->i);
     } else if (l->kind == NY_CT_FAST_BOOL && r->kind == NY_CT_FAST_BOOL) {
       eq = (l->b == r->b);
@@ -269,8 +772,325 @@ static const char *ny_ct_fast_callee_leaf_name(expr_t *callee) {
   return NULL;
 }
 
-static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
-                                           int depth) {
+static bool ny_ct_fast_push_byte(int64_t *acc, int64_t byte);
+
+static char *ny_ct_i64_to_dec(int64_t v) {
+  char buf[64];
+  snprintf(buf, sizeof(buf), "%" PRId64, v);
+  return ny_strdup(buf);
+}
+
+static bool ny_ct_is_space_char(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
+         c == '\v';
+}
+
+static char *ny_ct_canonical_decimal(const char *raw) {
+  if (!raw)
+    return ny_strdup("0");
+  const char *p = raw;
+  while (ny_ct_is_space_char(*p))
+    p++;
+  bool neg = false;
+  if (*p == '+' || *p == '-') {
+    neg = *p == '-';
+    p++;
+  }
+  while (*p == '0')
+    p++;
+  const char *digits = p;
+  while (*p >= '0' && *p <= '9')
+    p++;
+  const char *tail = p;
+  while (ny_ct_is_space_char(*tail))
+    tail++;
+  if (*tail != '\0')
+    return NULL;
+  size_t len = (size_t)(p - digits);
+  if (len == 0)
+    return ny_strdup("0");
+  size_t out_len = len + (neg ? 1u : 0u);
+  char *out = malloc(out_len + 1);
+  if (!out)
+    return NULL;
+  size_t pos = 0;
+  if (neg)
+    out[pos++] = '-';
+  memcpy(out + pos, digits, len);
+  out[out_len] = '\0';
+  return out;
+}
+
+static char *ny_ct_dec_mul_add_byte(const char *dec, int64_t byte) {
+  const char *src = (dec && *dec) ? dec : "0";
+  size_t len = strlen(src);
+  size_t cap = len + 8;
+  char *buf = malloc(cap);
+  if (!buf)
+    return NULL;
+  size_t pos = cap - 1;
+  buf[pos] = '\0';
+  int carry = (int)((uint64_t)byte & 255ULL);
+  for (ssize_t i = (ssize_t)len - 1; i >= 0; --i) {
+    char c = src[i];
+    if (c < '0' || c > '9') {
+      free(buf);
+      return NULL;
+    }
+    int v = (c - '0') * 256 + carry;
+    if (pos == 0) {
+      free(buf);
+      return NULL;
+    }
+    buf[--pos] = (char)('0' + (v % 10));
+    carry = v / 10;
+  }
+  while (carry > 0) {
+    if (pos == 0) {
+      free(buf);
+      return NULL;
+    }
+    buf[--pos] = (char)('0' + (carry % 10));
+    carry /= 10;
+  }
+  while (buf[pos] == '0' && buf[pos + 1] != '\0')
+    pos++;
+  char *out = ny_strdup(buf + pos);
+  free(buf);
+  return out;
+}
+
+static bool ny_ct_long_accum_byte(int64_t *small, bool *small_ok,
+                                  char **big_dec, int64_t byte) {
+  if (!small || !small_ok || !big_dec)
+    return false;
+  if (*small_ok) {
+    int64_t prev = *small;
+    if (ny_ct_fast_push_byte(small, byte))
+      return true;
+    *small_ok = false;
+    *big_dec = ny_ct_i64_to_dec(prev);
+    if (!*big_dec)
+      return false;
+  }
+  char *next = ny_ct_dec_mul_add_byte(*big_dec, byte);
+  if (!next)
+    return false;
+  free(*big_dec);
+  *big_dec = next;
+  return true;
+}
+
+static bool ny_ct_long_finish(int64_t small, bool small_ok, char *big_dec,
+                              ny_ct_fast_val_t *out) {
+  if (!out) {
+    free(big_dec);
+    return false;
+  }
+  if (small_ok) {
+    free(big_dec);
+    out->kind = NY_CT_FAST_INT;
+    out->i = small;
+    return true;
+  }
+  out->kind = NY_CT_FAST_BIGINT;
+  out->s = big_dec ? big_dec : "0";
+  return true;
+}
+
+static bool ny_ct_numeric_eq(const ny_ct_fast_val_t *l,
+                             const ny_ct_fast_val_t *r, bool *out) {
+  if (!l || !r || !out)
+    return false;
+  bool ln = l->kind == NY_CT_FAST_INT || l->kind == NY_CT_FAST_BIGINT;
+  bool rn = r->kind == NY_CT_FAST_INT || r->kind == NY_CT_FAST_BIGINT;
+  if (!ln || !rn)
+    return false;
+  char lbuf[64], rbuf[64];
+  const char *ls = l->s;
+  const char *rs = r->s;
+  if (l->kind == NY_CT_FAST_INT) {
+    snprintf(lbuf, sizeof(lbuf), "%" PRId64, l->i);
+    ls = lbuf;
+  }
+  if (r->kind == NY_CT_FAST_INT) {
+    snprintf(rbuf, sizeof(rbuf), "%" PRId64, r->i);
+    rs = rbuf;
+  }
+  *out = strcmp(ls ? ls : "0", rs ? rs : "0") == 0;
+  return true;
+}
+
+static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
+                                           ny_ct_fast_val_t *out, int depth);
+static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
+                                            ny_ct_fast_val_t *out);
+
+static bool ny_ct_fast_eval_bigint_constructor_arg(const ny_ct_fast_val_t *arg,
+                                                   ny_ct_fast_val_t *out) {
+  if (!arg || !out)
+    return false;
+  char *dec = NULL;
+  if (arg->kind == NY_CT_FAST_INT) {
+    dec = ny_ct_i64_to_dec(arg->i);
+  } else if (arg->kind == NY_CT_FAST_STR || arg->kind == NY_CT_FAST_BIGINT) {
+    dec = ny_ct_canonical_decimal(arg->s ? arg->s : "0");
+  } else {
+    return false;
+  }
+  if (!dec)
+    return false;
+  out->kind = NY_CT_FAST_BIGINT;
+  out->s = dec;
+  return true;
+}
+
+static bool ny_ct_fast_push_byte(int64_t *acc, int64_t byte) {
+  if (!acc)
+    return false;
+  int64_t b = (int64_t)((uint64_t)byte & 255ULL);
+  if (*acc > (INT64_MAX - b) / 256)
+    return false;
+  int64_t next = (*acc * 256) + b;
+  if (!ny_small_int_fits_i64(next))
+    return false;
+  *acc = next;
+  return true;
+}
+
+static bool ny_ct_fast_bytes_long(const char *data, size_t len,
+                                  ny_ct_fast_val_t *out) {
+  if (!out)
+    return false;
+  int64_t small = 0;
+  bool small_ok = true;
+  char *big_dec = NULL;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char byte = data ? (unsigned char)data[i] : 0;
+    if (!ny_ct_long_accum_byte(&small, &small_ok, &big_dec, (int64_t)byte)) {
+      free(big_dec);
+      return false;
+    }
+  }
+  return ny_ct_long_finish(small, small_ok, big_dec, out);
+}
+
+static int ny_ct_fast_hex_nibble(unsigned char c) {
+  if (c >= '0' && c <= '9')
+    return (int)(c - '0');
+  if (c >= 'A' && c <= 'F')
+    return (int)(c - 'A' + 10);
+  if (c >= 'a' && c <= 'f')
+    return (int)(c - 'a' + 10);
+  return 0;
+}
+
+static bool ny_ct_fast_unhex_long(const char *data, size_t len,
+                                  ny_ct_fast_val_t *out) {
+  if (!out)
+    return false;
+  int64_t small = 0;
+  bool small_ok = true;
+  char *big_dec = NULL;
+  size_t i = 0;
+  if ((len & 1u) != 0) {
+    int lo = ny_ct_fast_hex_nibble(data ? (unsigned char)data[0] : 0);
+    if (!ny_ct_long_accum_byte(&small, &small_ok, &big_dec, lo)) {
+      free(big_dec);
+      return false;
+    }
+    i = 1;
+  }
+  while (i < len) {
+    int hi = ny_ct_fast_hex_nibble(data ? (unsigned char)data[i] : 0);
+    int lo = ny_ct_fast_hex_nibble(data ? (unsigned char)data[i + 1] : 0);
+    if (!ny_ct_long_accum_byte(&small, &small_ok, &big_dec,
+                               (hi << 4) | lo)) {
+      free(big_dec);
+      return false;
+    }
+    i += 2;
+  }
+  return ny_ct_long_finish(small, small_ok, big_dec, out);
+}
+
+static bool ny_ct_fast_literal_str_long(expr_t *e, ny_ct_fast_val_t *out) {
+  if (!e || e->kind != NY_E_LITERAL || e->as.literal.kind != NY_LIT_STR)
+    return false;
+  return ny_ct_fast_bytes_long(e->as.literal.as.s.data, e->as.literal.as.s.len,
+                               out);
+}
+
+static bool ny_ct_fast_literal_unhex_long(expr_t *e, ny_ct_fast_val_t *out) {
+  if (!e || e->kind != NY_E_LITERAL || e->as.literal.kind != NY_LIT_STR)
+    return false;
+  return ny_ct_fast_unhex_long(e->as.literal.as.s.data, e->as.literal.as.s.len,
+                               out);
+}
+
+static bool ny_ct_fast_list_long(codegen_t *cg, expr_t *e,
+                                 ny_ct_fast_val_t *out, int depth) {
+  if (!e || !out || (e->kind != NY_E_LIST && e->kind != NY_E_TUPLE))
+    return false;
+  int64_t small = 0;
+  bool small_ok = true;
+  char *big_dec = NULL;
+  for (size_t i = 0; i < e->as.list_like.len; i++) {
+    ny_ct_fast_val_t item = {0};
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.list_like.data[i], &item,
+                                        depth + 1) ||
+        item.kind != NY_CT_FAST_INT) {
+      free(big_dec);
+      return false;
+    }
+    if (!ny_ct_long_accum_byte(&small, &small_ok, &big_dec, item.i)) {
+      free(big_dec);
+      return false;
+    }
+  }
+  return ny_ct_long_finish(small, small_ok, big_dec, out);
+}
+
+static bool ny_ct_fast_eval_long_property(codegen_t *cg, expr_t *target,
+                                          ny_ct_fast_val_t *out, int depth) {
+  if (!target || !out || depth > 64)
+    return false;
+  if (target->kind == NY_E_LITERAL) {
+    if (target->as.literal.kind == NY_LIT_INT) {
+      out->kind = NY_CT_FAST_INT;
+      out->i = target->as.literal.as.i;
+      return true;
+    }
+    if (target->as.literal.kind == NY_LIT_STR)
+      return ny_ct_fast_literal_str_long(target, out);
+  }
+  if (target->kind == NY_E_LIST || target->kind == NY_E_TUPLE)
+    return ny_ct_fast_list_long(cg, target, out, depth + 1);
+  if (target->kind == NY_E_MEMBER && target->as.member.name) {
+    if (strcmp(target->as.member.name, "unhex") == 0)
+      return ny_ct_fast_literal_unhex_long(target->as.member.target, out);
+    if (strcmp(target->as.member.name, "to_bytes") == 0)
+      return ny_ct_fast_eval_long_property(cg, target->as.member.target, out,
+                                           depth + 1);
+  }
+  ny_ct_fast_val_t v = {0};
+  if (!ny_try_eval_comptime_expr_fast(cg, target, &v, depth + 1))
+    return false;
+  if (v.kind == NY_CT_FAST_INT) {
+    *out = v;
+    return true;
+  }
+  if (v.kind == NY_CT_FAST_BIGINT) {
+    *out = v;
+    return true;
+  }
+  if (v.kind == NY_CT_FAST_STR)
+    return ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+  return false;
+}
+
+static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
+                                           ny_ct_fast_val_t *out, int depth) {
   if (!e || !out || depth > 64)
     return false;
 
@@ -293,16 +1113,28 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
     }
     return false;
 
+  case NY_E_IDENT:
+    if (ny_ct_platform_ident(e->as.ident.name, out))
+      return true;
+    if (cg) {
+      binding *b = lookup_global(cg, e->as.ident.name);
+      expr_t *init =
+          b && !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
+      if (init && init != e)
+        return ny_try_eval_comptime_expr_fast(cg, init, out, depth + 1);
+    }
+    return false;
+
   case NY_E_UNARY: {
     ny_ct_fast_val_t r = {0};
-    if (!ny_try_eval_comptime_expr_fast(e->as.unary.right, &r, depth + 1))
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.unary.right, &r, depth + 1))
       return false;
     return ny_ct_fast_eval_unary(e->as.unary.op, &r, out);
   }
 
   case NY_E_LOGICAL: {
     ny_ct_fast_val_t l = {0};
-    if (!ny_try_eval_comptime_expr_fast(e->as.logical.left, &l, depth + 1))
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.left, &l, depth + 1))
       return false;
     bool lt = false;
     if (!ny_ct_fast_truthy(&l, &lt))
@@ -315,7 +1147,7 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
       }
       ny_ct_fast_val_t r = {0};
       bool rt = false;
-      if (!ny_try_eval_comptime_expr_fast(e->as.logical.right, &r, depth + 1) ||
+      if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.right, &r, depth + 1) ||
           !ny_ct_fast_truthy(&r, &rt))
         return false;
       out->kind = NY_CT_FAST_BOOL;
@@ -330,7 +1162,7 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
       }
       ny_ct_fast_val_t r = {0};
       bool rt = false;
-      if (!ny_try_eval_comptime_expr_fast(e->as.logical.right, &r, depth + 1) ||
+      if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.right, &r, depth + 1) ||
           !ny_ct_fast_truthy(&r, &rt))
         return false;
       out->kind = NY_CT_FAST_BOOL;
@@ -342,8 +1174,8 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
 
   case NY_E_BINARY: {
     ny_ct_fast_val_t l = {0}, r = {0};
-    if (!ny_try_eval_comptime_expr_fast(e->as.binary.left, &l, depth + 1) ||
-        !ny_try_eval_comptime_expr_fast(e->as.binary.right, &r, depth + 1))
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.binary.left, &l, depth + 1) ||
+        !ny_try_eval_comptime_expr_fast(cg, e->as.binary.right, &r, depth + 1))
       return false;
     return ny_ct_fast_eval_binary(e->as.binary.op, &l, &r, out);
   }
@@ -351,13 +1183,22 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
   case NY_E_TERNARY: {
     ny_ct_fast_val_t c = {0};
     bool ct = false;
-    if (!ny_try_eval_comptime_expr_fast(e->as.ternary.cond, &c, depth + 1) ||
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.ternary.cond, &c, depth + 1) ||
         !ny_ct_fast_truthy(&c, &ct))
       return false;
-    return ny_try_eval_comptime_expr_fast(ct ? e->as.ternary.true_expr
+    return ny_try_eval_comptime_expr_fast(cg, ct ? e->as.ternary.true_expr
                                              : e->as.ternary.false_expr,
                                           out, depth + 1);
   }
+
+  case NY_E_MEMBER:
+    if (e->as.member.name && strcmp(e->as.member.name, "long") == 0)
+      return ny_ct_fast_eval_long_property(cg, e->as.member.target, out,
+                                           depth + 1);
+    return false;
+
+  case NY_E_COMPTIME:
+    return ny_try_eval_comptime_fast_value(cg, e->as.comptime_expr.body, out);
 
   case NY_E_CALL: {
     if (!e->as.call.callee)
@@ -368,21 +1209,28 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
     bool zero_arg = (e->as.call.args.len == 0);
     bool one_member_arg =
         (e->as.call.args.len == 1 && e->as.call.callee->kind == NY_E_MEMBER);
+    if (strcmp(name, "Z") == 0 && e->as.call.args.len == 1) {
+      ny_ct_fast_val_t arg = {0};
+      if (!ny_try_eval_comptime_expr_fast(cg, e->as.call.args.data[0].val, &arg,
+                                          depth + 1))
+        return false;
+      return ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+    }
     if (strcmp(name, "__main") == 0 && (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_BOOL;
-      out->b = ny_comptime_main_enabled();
+      out->b = ny_comptime_main_enabled(cg, e->tok);
       return true;
     }
     if ((strcmp(name, "__os_name") == 0 || strcmp(name, "os") == 0) &&
         (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_STR;
-      out->s = ny_comptime_host_os_name();
+      out->s = ny_host_os_name();
       return true;
     }
     if ((strcmp(name, "__arch_name") == 0 || strcmp(name, "arch") == 0) &&
         (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_STR;
-      out->s = ny_comptime_host_arch_name();
+      out->s = ny_host_arch_name();
       return true;
     }
     return false;
@@ -393,47 +1241,69 @@ static bool ny_try_eval_comptime_expr_fast(expr_t *e, ny_ct_fast_val_t *out,
   }
 }
 
-static bool ny_try_eval_comptime_fast(stmt_t *body, int64_t *out_tagged) {
-  if (!body || !out_tagged)
+static bool ny_ct_fast_to_tagged(const ny_ct_fast_val_t *v,
+                                 int64_t *out_tagged) {
+  if (!v || !out_tagged)
+    return false;
+  if (v->kind == NY_CT_FAST_BOOL) {
+    *out_tagged = v->b ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return true;
+  }
+  if (v->kind == NY_CT_FAST_INT) {
+    if (!ny_small_int_fits_i64(v->i))
+      return false;
+    *out_tagged = (int64_t)((((uint64_t)v->i) << 1) | 1u);
+    return true;
+  }
+  if (v->kind == NY_CT_FAST_NONE) {
+    *out_tagged = NY_IMM_NIL;
+    return true;
+  }
+  return false;
+}
+
+static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
+                                            ny_ct_fast_val_t *out) {
+  if (!body || !out)
     return false;
 
   if (body->kind == NY_S_BLOCK) {
-    int64_t res = 0; // None by default
+    ny_ct_fast_val_t res = ny_ct_fast_none();
     for (size_t i = 0; i < body->as.block.body.len; ++i) {
       stmt_t *s = body->as.block.body.data[i];
       if (!s)
         continue;
       if (s->kind == NY_S_FUNC || s->kind == NY_S_EXTERN ||
-          s->kind == NY_S_LINK || s->kind == NY_S_INCLUDE ||
-          s->kind == NY_S_MODULE || s->kind == NY_S_STRUCT ||
-          s->kind == NY_S_LAYOUT || s->kind == NY_S_ENUM ||
-          s->kind == NY_S_MACRO || s->kind == NY_S_USE ||
-          s->kind == NY_S_EXPORT) {
+          s->kind == NY_S_LINK || s->kind == NY_S_MODULE ||
+          s->kind == NY_S_STRUCT || s->kind == NY_S_LAYOUT ||
+          s->kind == NY_S_ENUM || s->kind == NY_S_MACRO ||
+          s->kind == NY_S_USE || s->kind == NY_S_EXPORT ||
+          s->kind == NY_S_OPERATOR) {
         // Harmless declarations during fast eval
         continue;
       }
-      if (!ny_try_eval_comptime_fast(s, &res)) {
+      if (!ny_try_eval_comptime_fast_value(cg, s, &res)) {
         return false;
       }
     }
-    *out_tagged = res;
+    *out = res;
     return true;
   }
 
   if (body->kind == NY_S_IF) {
     ny_ct_fast_val_t cond_v = {0};
     bool truthy = false;
-    if (ny_try_eval_comptime_expr_fast(body->as.iff.test, &cond_v, 0) &&
+    if (ny_try_eval_comptime_expr_fast(cg, body->as.iff.test, &cond_v, 0) &&
         ny_ct_fast_truthy(&cond_v, &truthy)) {
       if (truthy) {
         if (body->as.iff.conseq)
-          return ny_try_eval_comptime_fast(body->as.iff.conseq, out_tagged);
-        *out_tagged = 0;
+          return ny_try_eval_comptime_fast_value(cg, body->as.iff.conseq, out);
+        *out = ny_ct_fast_none();
         return true;
       } else {
         if (body->as.iff.alt)
-          return ny_try_eval_comptime_fast(body->as.iff.alt, out_tagged);
-        *out_tagged = 0;
+          return ny_try_eval_comptime_fast_value(cg, body->as.iff.alt, out);
+        *out = ny_ct_fast_none();
         return true;
       }
     }
@@ -450,27 +1320,19 @@ static bool ny_try_eval_comptime_fast(stmt_t *body, int64_t *out_tagged) {
   }
 
   if (!e) {
-    *out_tagged = 0;
+    *out = ny_ct_fast_none();
     return true;
   }
 
-  ny_ct_fast_val_t v = {0};
-  if (!ny_try_eval_comptime_expr_fast(e, &v, 0))
+  return ny_try_eval_comptime_expr_fast(cg, e, out, 0);
+}
+
+static bool ny_try_eval_comptime_fast(codegen_t *cg, stmt_t *body,
+                                      int64_t *out_tagged) {
+  ny_ct_fast_val_t v = ny_ct_fast_none();
+  if (!ny_try_eval_comptime_fast_value(cg, body, &v))
     return false;
-
-  if (v.kind == NY_CT_FAST_BOOL) {
-    *out_tagged = v.b ? 2 : 4;
-    return true;
-  }
-  if (v.kind == NY_CT_FAST_INT) {
-    *out_tagged = (int64_t)((((uint64_t)v.i) << 1) | 1u);
-    return true;
-  }
-  if (v.kind == NY_CT_FAST_NONE) {
-    *out_tagged = 0;
-    return true;
-  }
-  return false;
+  return ny_ct_fast_to_tagged(&v, out_tagged);
 }
 
 typedef struct ny_ct_interp_var_t {
@@ -479,6 +1341,7 @@ typedef struct ny_ct_interp_var_t {
 } ny_ct_interp_var_t;
 
 typedef struct ny_ct_interp_ctx_t {
+  codegen_t *cg;
   ny_ct_interp_var_t *vars;
   size_t len;
   size_t cap;
@@ -508,6 +1371,7 @@ static bool ny_ct_interp_ctx_clone(const ny_ct_interp_ctx_t *src,
   if (!src || !dst)
     return false;
   memset(dst, 0, sizeof(*dst));
+  dst->cg = src->cg;
   dst->max_steps = src->max_steps;
   dst->steps = src->steps;
   if (src->len == 0)
@@ -562,6 +1426,43 @@ static bool ny_ct_interp_set(ny_ct_interp_ctx_t *ctx, const char *name,
 static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                                    ny_ct_fast_val_t *out, int depth);
 
+static bool ny_ct_interp_eval_long_property(expr_t *target,
+                                            ny_ct_interp_ctx_t *ctx,
+                                            ny_ct_fast_val_t *out,
+                                            int depth) {
+  if (!target || !ctx || !out || depth > 256)
+    return false;
+  if (ny_ct_fast_eval_long_property(ctx->cg, target, out, 0))
+    return true;
+  if (target->kind == NY_E_MEMBER && target->as.member.name) {
+    if (strcmp(target->as.member.name, "unhex") == 0) {
+      ny_ct_fast_val_t s = ny_ct_fast_none();
+      if (!ny_ct_interp_eval_expr(target->as.member.target, ctx, &s,
+                                  depth + 1) ||
+          s.kind != NY_CT_FAST_STR)
+        return false;
+      return ny_ct_fast_unhex_long(s.s, s.s ? strlen(s.s) : 0, out);
+    }
+    if (strcmp(target->as.member.name, "to_bytes") == 0)
+      return ny_ct_interp_eval_long_property(target->as.member.target, ctx, out,
+                                             depth + 1);
+  }
+  ny_ct_fast_val_t v = ny_ct_fast_none();
+  if (!ny_ct_interp_eval_expr(target, ctx, &v, depth + 1))
+    return false;
+  if (v.kind == NY_CT_FAST_INT) {
+    *out = v;
+    return true;
+  }
+  if (v.kind == NY_CT_FAST_BIGINT) {
+    *out = v;
+    return true;
+  }
+  if (v.kind == NY_CT_FAST_STR)
+    return ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+  return false;
+}
+
 static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
                                    ny_ct_fast_val_t *ret, bool *did_return,
                                    int depth) {
@@ -603,7 +1504,7 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
       if (!name || !*name)
         return false;
       ny_ct_fast_val_t v = ny_ct_fast_none();
-      if (!s->as.var.is_undef) {
+      if (!s->as.var.is_del) {
         expr_t *rhs = NULL;
         if (s->as.var.exprs.len == s->as.var.names.len &&
             i < s->as.var.exprs.len)
@@ -686,6 +1587,8 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
     return ny_ct_interp_eval_stmt(s->as.macro.body, ctx, ret, did_return,
                                   depth + 1);
   }
+  case NY_S_OPERATOR:
+    return true;
   default:
     return false;
   }
@@ -723,6 +1626,8 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       *out = ny_ct_fast_none();
       return true;
     }
+    if (ny_ct_platform_ident(name, out))
+      return true;
     return ny_ct_interp_get(ctx, name, out);
   }
   case NY_E_UNARY: {
@@ -803,6 +1708,27 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     *out = nested_ret;
     return true;
   }
+  case NY_E_MEMBER:
+    if (e->as.member.name && strcmp(e->as.member.name, "long") == 0)
+      return ny_ct_interp_eval_long_property(e->as.member.target, ctx, out,
+                                             depth + 1);
+    return false;
+  case NY_E_INDEX: {
+    if (!e->as.index.target || !e->as.index.start || e->as.index.stop ||
+        e->as.index.step)
+      return false;
+    expr_t *target = e->as.index.target;
+    if (target->kind != NY_E_LIST && target->kind != NY_E_TUPLE)
+      return false;
+    ny_ct_fast_val_t idx = ny_ct_fast_none();
+    if (!ny_ct_interp_eval_expr(e->as.index.start, ctx, &idx, depth + 1) ||
+        idx.kind != NY_CT_FAST_INT)
+      return false;
+    if (idx.i < 0 || (uint64_t)idx.i >= target->as.list_like.len)
+      return false;
+    return ny_ct_interp_eval_expr(target->as.list_like.data[(size_t)idx.i], ctx, out,
+                                  depth + 1);
+  }
   case NY_E_CALL: {
     if (!e->as.call.callee)
       return false;
@@ -812,21 +1738,28 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     bool zero_arg = (e->as.call.args.len == 0);
     bool one_member_arg =
         (e->as.call.args.len == 1 && e->as.call.callee->kind == NY_E_MEMBER);
+    if (strcmp(name, "Z") == 0 && e->as.call.args.len == 1) {
+      ny_ct_fast_val_t arg = ny_ct_fast_none();
+      if (!ny_ct_interp_eval_expr(e->as.call.args.data[0].val, ctx, &arg,
+                                  depth + 1))
+        return false;
+      return ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+    }
     if (strcmp(name, "__main") == 0 && (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_BOOL;
-      out->b = ny_comptime_main_enabled();
+      out->b = ny_comptime_main_enabled(ctx->cg, e->tok);
       return true;
     }
     if ((strcmp(name, "__os_name") == 0 || strcmp(name, "os") == 0) &&
         (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_STR;
-      out->s = ny_comptime_host_os_name();
+      out->s = ny_host_os_name();
       return true;
     }
     if ((strcmp(name, "__arch_name") == 0 || strcmp(name, "arch") == 0) &&
         (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_STR;
-      out->s = ny_comptime_host_arch_name();
+      out->s = ny_host_arch_name();
       return true;
     }
     return false;
@@ -838,27 +1771,15 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
 
 static bool ny_ct_interp_to_tagged(const ny_ct_fast_val_t *v,
                                    int64_t *out_tagged) {
-  if (!v || !out_tagged)
-    return false;
-  if (v->kind == NY_CT_FAST_NONE) {
-    *out_tagged = 0;
-    return true;
-  }
-  if (v->kind == NY_CT_FAST_BOOL) {
-    *out_tagged = v->b ? 2 : 4;
-    return true;
-  }
-  if (v->kind == NY_CT_FAST_INT) {
-    *out_tagged = (int64_t)((((uint64_t)v->i) << 1) | 1u);
-    return true;
-  }
-  return false;
+  return ny_ct_fast_to_tagged(v, out_tagged);
 }
 
-static bool ny_try_eval_comptime_interp(stmt_t *body, int64_t *out_tagged) {
-  if (!body || !out_tagged)
+static bool ny_try_eval_comptime_interp_value(codegen_t *cg, stmt_t *body,
+                                              ny_ct_fast_val_t *out) {
+  if (!body || !out)
     return false;
   ny_ct_interp_ctx_t ctx = {0};
+  ctx.cg = cg;
   ctx.max_steps = 500000;
   ny_ct_fast_val_t ret = ny_ct_fast_none();
   bool did_return = false;
@@ -868,6 +1789,15 @@ static bool ny_try_eval_comptime_interp(stmt_t *body, int64_t *out_tagged) {
     return false;
   if (!did_return)
     ret = ny_ct_fast_none();
+  *out = ret;
+  return true;
+}
+
+static bool ny_try_eval_comptime_interp(codegen_t *cg, stmt_t *body,
+                                        int64_t *out_tagged) {
+  ny_ct_fast_val_t ret = ny_ct_fast_none();
+  if (!ny_try_eval_comptime_interp_value(cg, body, &ret))
+    return false;
   return ny_ct_interp_to_tagged(&ret, out_tagged);
 }
 
@@ -876,35 +1806,18 @@ static LLVMValueRef ny_try_host_platform_ident(codegen_t *cg,
   if (!cg || !name)
     return NULL;
 
-  const char *os = ny_comptime_host_os_name();
-  const char *arch = ny_comptime_host_arch_name();
-  LLVMValueRef tag_true = LLVMConstInt(cg->type_i64, 2u, false);
-  LLVMValueRef tag_false = LLVMConstInt(cg->type_i64, 4u, false);
+  ny_ct_fast_val_t v = {0};
+  if (!ny_ct_platform_ident(name, &v))
+    return NULL;
+  LLVMValueRef tag_true = ny_ctrue(cg);
+  LLVMValueRef tag_false = ny_cfalse(cg);
 
-  if (strcmp(name, "OS") == 0) {
-    LLVMValueRef g = const_string_ptr(cg, os, strlen(os));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
-                          NY_LLVM_NAME(cg, "host_os"));
+  if (v.kind == NY_CT_FAST_STR) {
+    LLVMValueRef g = const_string_ptr(cg, v.s ? v.s : "", strlen(v.s ? v.s : ""));
+    return ny_load(cg, g, NY_LLVM_NAME(cg, "host_os"));
   }
-  if (strcmp(name, "ARCH") == 0) {
-    LLVMValueRef g = const_string_ptr(cg, arch, strlen(arch));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
-                          NY_LLVM_NAME(cg, "host_arch"));
-  }
-  if (strcmp(name, "IS_LINUX") == 0)
-    return strcmp(os, "linux") == 0 ? tag_true : tag_false;
-  if (strcmp(name, "IS_MACOS") == 0)
-    return strcmp(os, "macos") == 0 ? tag_true : tag_false;
-  if (strcmp(name, "IS_WINDOWS") == 0)
-    return strcmp(os, "windows") == 0 ? tag_true : tag_false;
-  if (strcmp(name, "IS_X86_64") == 0)
-    return strcmp(arch, "x86_64") == 0 ? tag_true : tag_false;
-  if (strcmp(name, "IS_AARCH64") == 0) {
-    bool is_a64 = (strcmp(arch, "aarch64") == 0 || strcmp(arch, "arm64") == 0);
-    return is_a64 ? tag_true : tag_false;
-  }
-  if (strcmp(name, "IS_ARM") == 0)
-    return strcmp(arch, "arm") == 0 ? tag_true : tag_false;
+  if (v.kind == NY_CT_FAST_BOOL)
+    return v.b ? tag_true : tag_false;
   return NULL;
 }
 
@@ -934,32 +1847,48 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     snprintf(name, sizeof(name), "%s_%d", name_hint ? name_hint : "__lambda",
              cg->lambda_count++);
   }
-  stmt_t sfn;
-  memset(&sfn, 0, sizeof(sfn));
-  sfn.kind = NY_S_FUNC;
-  sfn.as.fn.name = strdup(name);
-  sfn.as.fn.params = params;
-  sfn.as.fn.body = body;
-  sfn.as.fn.is_variadic = is_variadic;
-  sfn.as.fn.return_type = return_type;
+  stmt_t *sfn = arena_alloc(cg->arena, sizeof(*sfn));
+  memset(sfn, 0, sizeof(*sfn));
+  ny_param_list callable_params = params;
+  const char *callable_return_type = return_type;
+  bool needs_tagged_adapter_abi = callable_return_type != NULL;
+  for (size_t i = 0; i < params.len; ++i) {
+    if (params.data[i].type) {
+      needs_tagged_adapter_abi = true;
+      break;
+    }
+  }
+  if (needs_tagged_adapter_abi) {
+    memset(&callable_params, 0, sizeof(callable_params));
+    for (size_t i = 0; i < params.len; ++i) {
+      param_t p = params.data[i];
+      p.type = NULL;
+      vec_push_arena(cg->arena, &callable_params, p);
+    }
+    callable_return_type = NULL;
+  }
+  sfn->kind = NY_S_FUNC;
+  sfn->as.fn.name = arena_strndup(cg->arena, name, strlen(name));
+  sfn->as.fn.params = callable_params;
+  sfn->as.fn.body = body;
+  sfn->as.fn.is_variadic = is_variadic;
+  sfn->as.fn.return_type = callable_return_type;
   // Copy location from body if possible
   if (body)
-    sfn.tok = body->tok;
+    sfn->tok = body->tok;
   scope sc[64] = {0};
   // heuristic.
-  bool uses_env = captures.len > 0;
+  bool uses_env = captures.len > 0 || ny_lambda_values_need_closure(cg);
   if (name_hint && strcmp(name_hint, "__defer") == 0)
     uses_env = true;
 
-  gen_func(cg, &sfn, name, sc, 0, uses_env ? &captures : NULL);
-  free((void *)sfn.as.fn.name);
-  LLVMValueRef lf = LLVMGetNamedFunction(cg->module, name);
+  gen_func(cg, sfn, name, sc, 0, uses_env ? &captures : NULL);
+  LLVMValueRef lf = ny_get_named_fn(cg, name);
   if (lf)
     LLVMSetLinkage(lf, LLVMInternalLinkage);
   // Keep callable pointers raw. Ad-hoc low-bit tagging collides with
   // 32-bit runtime native tags (and ARM Thumb pointer semantics).
-  LLVMValueRef fn_ptr_raw =
-      LLVMBuildPtrToInt(cg->builder, lf, cg->type_i64, "");
+  LLVMValueRef fn_ptr_raw = ny_ptr2i64(cg, lf, "");
 
   if (!uses_env) {
     /* No captures: return plain callable pointer */
@@ -967,18 +1896,29 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     return fn_ptr_raw;
   }
   /* Create Env */
+  bool is_defer = (name_hint && strcmp(name_hint, "__defer") == 0);
+  LLVMValueRef env_ptr = NULL;
+
   fun_sig *malloc_sig = lookup_fun(cg, "__malloc", 0);
   if (!malloc_sig) {
     token_t tok = body ? body->tok : (token_t){0};
     return expr_fail(cg, tok, "__malloc required for closures");
   }
-  LLVMValueRef env_alloc_size = LLVMConstInt(
-      cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
-  LLVMValueRef env_ptr =
-      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
-                     (LLVMValueRef[]){env_alloc_size}, 1, "env");
-  LLVMValueRef env_raw = LLVMBuildIntToPtr(
-      cg->builder, env_ptr, LLVMPointerType(cg->type_i64, 0), "env_raw");
+
+  if (is_defer) {
+    LLVMValueRef stack_env = LLVMBuildAlloca(
+        cg->builder, LLVMArrayType(cg->type_i64, captures.len), "defer_env");
+    LLVMSetAlignment(stack_env, 16);
+    env_ptr = LLVMBuildPtrToInt(cg->builder, stack_env, cg->type_i64, "env");
+  } else {
+    LLVMValueRef env_alloc_size = LLVMConstInt(
+        cg->type_i64, (uint64_t)(((uint64_t)captures.len * 8) << 1) | 1, false);
+    env_ptr =
+        LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                       (LLVMValueRef[]){env_alloc_size}, 1, "env");
+  }
+  LLVMValueRef env_raw =
+      LLVMBuildIntToPtr(cg->builder, env_ptr, ny_ptr_i64_ty(cg), "env_raw");
   for (size_t i = 0; i < captures.len; i++) {
     LLVMValueRef slot_val = captures.data[i].is_slot
                                 ? LLVMBuildLoad2(cg->builder, cg->type_i64,
@@ -989,77 +1929,187 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
         (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
         "");
     if (dst && slot_val) {
-      LLVMBuildStore(cg->builder, slot_val, dst);
+      ny_store(cg, dst, slot_val);
     }
   }
-  /* Create Closure Object [Tag=106 (TAG_CLOSURE) | Code | Env] */
+  /* Create Closure Object [Tag=TAG_CLOSURE | Code | Env] */
   LLVMValueRef cls_size =
       LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
   LLVMValueRef cls_ptr =
       LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
                      (LLVMValueRef[]){cls_size}, 1, "closure");
-  LLVMValueRef cls_raw = LLVMBuildIntToPtr(
-      cg->builder, cls_ptr, LLVMPointerType(cg->type_i64, 0), "");
+  LLVMValueRef cls_raw =
+      LLVMBuildIntToPtr(cg->builder, cls_ptr, ny_ptr_i64_ty(cg), "");
   /* Set Tag -8 */
   LLVMValueRef tag_addr = LLVMBuildGEP2(
-      cg->builder, LLVMInt8TypeInContext(cg->ctx),
-      LLVMBuildBitCast(cg->builder, cls_raw,
-                       LLVMPointerType(LLVMInt8TypeInContext(cg->ctx), 0), ""),
+      cg->builder, ny_i8_ty(cg),
+      ny_bitcast(cg, cls_raw, LLVMPointerType(ny_i8_ty(cg), 0), ""),
       (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
   if (tag_addr) {
-    LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, TAG_CLOSURE, false),
-                   LLVMBuildBitCast(cg->builder, tag_addr,
-                                    LLVMPointerType(cg->type_i64, 0), ""));
+    ny_store(cg, ny_bitcast(cg, tag_addr, ny_ptr_i64_ty(cg), ""),
+             LLVMConstInt(cg->type_i64, TAG_CLOSURE, false));
   }
   /* Store Code at 0 */
   if (cls_raw && fn_ptr_raw) {
-    LLVMBuildStore(cg->builder, fn_ptr_raw, cls_raw);
+    ny_store(cg, cls_raw, fn_ptr_raw);
   }
   /* Store Env at 8 */
   LLVMValueRef env_store_addr = LLVMBuildGEP2(
-      cg->builder, cg->type_i64, cls_raw,
-      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, 1, false)}, 1, "");
+      cg->builder, cg->type_i64, cls_raw, (LLVMValueRef[]){ny_c1(cg)}, 1, "");
   if (env_store_addr && env_ptr) {
-    LLVMBuildStore(cg->builder, env_ptr, env_store_addr);
+    ny_store(cg, env_store_addr, env_ptr);
   }
   vec_free(&captures);
   return cls_ptr;
 }
 
+static bool ny_fun_sig_needs_tagged_callable_adapter(fun_sig *sig) {
+  if (!sig || sig->is_extern || sig->is_variadic || sig->arity < 0 ||
+      sig->arity > 15)
+    return false;
+  if (sig->return_type && *sig->return_type)
+    return true;
+  for (int i = 0; i < sig->arity; ++i) {
+    const char *ptype = ny_sig_param_type(sig, (size_t)i);
+    if (ptype && *ptype)
+      return true;
+  }
+  return false;
+}
+
+static LLVMValueRef ny_fun_sig_tagged_callable_adapter(codegen_t *cg,
+                                                       fun_sig *target,
+                                                       token_t tok,
+                                                       bool hidden_env) {
+  if (!cg || !target || !target->name)
+    return NULL;
+  uint64_t h =
+      target->name_hash ? target->name_hash : ny_hash64_cstr(target->name);
+  char adapter_name_buf[96];
+  snprintf(adapter_name_buf, sizeof(adapter_name_buf),
+           hidden_env ? "__ny_callable_adapter_env_%llx_%d"
+                      : "__ny_callable_adapter_%llx_%d",
+           (unsigned long long)h, target->arity);
+  LLVMValueRef existing = ny_get_named_fn(cg, adapter_name_buf);
+  if (existing)
+    return existing;
+
+  stmt_t *wrapper = arena_alloc(cg->arena, sizeof(*wrapper));
+  memset(wrapper, 0, sizeof(*wrapper));
+  wrapper->kind = NY_S_FUNC;
+  wrapper->tok = tok;
+  wrapper->as.fn.name =
+      arena_strndup(cg->arena, adapter_name_buf, strlen(adapter_name_buf));
+
+  expr_t *callee = arena_alloc(cg->arena, sizeof(*callee));
+  memset(callee, 0, sizeof(*callee));
+  callee->kind = NY_E_IDENT;
+  callee->tok = tok;
+  callee->as.ident.name = target->name;
+  callee->as.ident.hash = h;
+
+  expr_t *call = arena_alloc(cg->arena, sizeof(*call));
+  memset(call, 0, sizeof(*call));
+  call->kind = NY_E_CALL;
+  call->tok = tok;
+  call->as.call.callee = callee;
+
+  for (int i = 0; i < target->arity; ++i) {
+    char pname_buf[24];
+    snprintf(pname_buf, sizeof(pname_buf), "__arg%d", i);
+    const char *pname = arena_strndup(cg->arena, pname_buf, strlen(pname_buf));
+    param_t p = {.name = pname};
+    vec_push_arena(cg->arena, &wrapper->as.fn.params, p);
+
+    expr_t *arg_ident = arena_alloc(cg->arena, sizeof(*arg_ident));
+    memset(arg_ident, 0, sizeof(*arg_ident));
+    arg_ident->kind = NY_E_IDENT;
+    arg_ident->tok = tok;
+    arg_ident->as.ident.name = pname;
+    arg_ident->as.ident.hash = ny_hash64_cstr(pname);
+    call_arg_t arg = {.val = arg_ident};
+    vec_push_arena(cg->arena, &call->as.call.args, arg);
+  }
+
+  stmt_t *ret = stmt_new(cg->arena, NY_S_RETURN, tok);
+  ret->as.ret.value = call;
+  stmt_t *body = stmt_new(cg->arena, NY_S_BLOCK, tok);
+  vec_push_arena(cg->arena, &body->as.block.body, ret);
+  wrapper->as.fn.body = body;
+
+  scope sc[64] = {0};
+  binding_list empty_captures = {0};
+  gen_func(cg, wrapper, wrapper->as.fn.name, sc, 0,
+           hidden_env ? &empty_captures : NULL);
+  LLVMValueRef adapter = ny_get_named_fn(cg, wrapper->as.fn.name);
+  if (adapter)
+    LLVMSetLinkage(adapter, LLVMInternalLinkage);
+  return adapter;
+}
+
+static bool ny_named_callable_values_need_closure(codegen_t *cg) {
+  return ny_module_target_is_apple_arm64(cg ? cg->module : NULL);
+}
+
+static LLVMValueRef ny_box_callable_closure(codegen_t *cg, LLVMValueRef fn_ptr_raw,
+                                            token_t tok) {
+  if (!cg || !fn_ptr_raw)
+    return NULL;
+  fun_sig *malloc_sig = lookup_fun(cg, "__malloc", 0);
+  if (!malloc_sig)
+    return expr_fail(cg, tok, "__malloc required for callable closures");
+
+  LLVMValueRef cls_size =
+      LLVMConstInt(cg->type_i64, ((uint64_t)16 << 1) | 1, false);
+  LLVMValueRef cls_ptr =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){cls_size}, 1, "callable_closure");
+  LLVMValueRef cls_raw =
+      LLVMBuildIntToPtr(cg->builder, cls_ptr, ny_ptr_i64_ty(cg), "");
+  LLVMValueRef tag_addr = LLVMBuildGEP2(
+      cg->builder, ny_i8_ty(cg),
+      ny_bitcast(cg, cls_raw, LLVMPointerType(ny_i8_ty(cg), 0), ""),
+      (LLVMValueRef[]){LLVMConstInt(cg->type_i64, -8, true)}, 1, "");
+  if (tag_addr)
+    ny_store(cg, ny_bitcast(cg, tag_addr, ny_ptr_i64_ty(cg), ""),
+             LLVMConstInt(cg->type_i64, TAG_CLOSURE, false));
+  ny_store(cg, cls_raw, fn_ptr_raw);
+  LLVMValueRef env_store_addr = LLVMBuildGEP2(
+      cg->builder, cg->type_i64, cls_raw, (LLVMValueRef[]){ny_c1(cg)}, 1, "");
+  if (env_store_addr)
+    ny_store(cg, env_store_addr, ny_cnil(cg));
+  return cls_ptr;
+}
+
 LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v) {
-  if (v && LLVMTypeOf(v) == LLVMInt1TypeInContext(cg->ctx))
+  if (v && LLVMTypeOf(v) == ny_i1_ty(cg))
     return v;
 
   if (v && LLVMIsAConstantInt(v)) {
     int64_t val = LLVMConstIntGetSExtValue(v);
-    if (val == 2)
-      return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 1, false);
-    if (val == 4 || val == 0 || val == 1)
-      return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+    if (val == NY_IMM_TRUE)
+      return LLVMConstInt(ny_i1_ty(cg), 1, false);
+    if (val == NY_IMM_FALSE || val == NY_IMM_NIL || val == 1)
+      return LLVMConstInt(ny_i1_ty(cg), 0, false);
   }
 
-  // Fold `select i1 %cond, i64 2, i64 4` (tag_bool) back to %cond
+  // Fold `select i1 %cond, i64 true_imm, i64 false_imm` (tag_bool) back to %cond
   if (v && LLVMIsASelectInst(v)) {
     LLVMValueRef tv = LLVMGetOperand(v, 1);
     LLVMValueRef fv = LLVMGetOperand(v, 2);
     if (LLVMIsAConstantInt(tv) && LLVMIsAConstantInt(fv) &&
-        LLVMConstIntGetZExtValue(tv) == 2 &&
-        LLVMConstIntGetZExtValue(fv) == 4) {
+        LLVMConstIntGetZExtValue(tv) == NY_IMM_TRUE &&
+        LLVMConstIntGetZExtValue(fv) == NY_IMM_FALSE) {
       return LLVMGetOperand(v, 0);
     }
   }
 
-  // Branchless: truthy = (v != 0 && v != 1 && v != 4)
-  // Falsy: 0 (none/nil), 1 (tagged int 0), 4 (false)
-  LLVMValueRef not_none = LLVMBuildICmp(
-      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 0, false), "");
-  LLVMValueRef not_zero = LLVMBuildICmp(
-      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 1, false), "");
-  LLVMValueRef not_false = LLVMBuildICmp(
-      cg->builder, LLVMIntNE, v, LLVMConstInt(cg->type_i64, 4, false), "");
-  return LLVMBuildAnd(cg->builder,
-                      LLVMBuildAnd(cg->builder, not_none, not_zero, ""),
-                      not_false, NY_LLVM_NAME(cg, "to_bool"));
+  // Branchless: truthy = (v != nil && v != tagged_int_zero && v != false)
+  LLVMValueRef not_none = ny_ne(cg, v, ny_cnil(cg), "");
+  LLVMValueRef not_zero = ny_ne(cg, v, ny_c1(cg), "");
+  LLVMValueRef not_false = ny_ne(cg, v, ny_cfalse(cg), "");
+  return ny_and(cg, ny_and(cg, not_none, not_zero, ""), not_false,
+                NY_LLVM_NAME(cg, "to_bool"));
 }
 
 static void intern_map_resize(codegen_t *cg, size_t new_cap) {
@@ -1154,10 +2204,9 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   char data_name[128];
   snprintf(data_name, sizeof(data_name), ".str.data.%llx",
            (unsigned long long)key_hash);
-  LLVMValueRef g = LLVMGetNamedGlobal(cg->module, data_name);
+  LLVMValueRef g = ny_get_global(cg, data_name);
   if (!g) {
-    LLVMTypeRef arr_ty =
-        LLVMArrayType(LLVMInt8TypeInContext(cg->ctx), (unsigned)total_len);
+    LLVMTypeRef arr_ty = LLVMArrayType(ny_i8_ty(cg), (unsigned)total_len);
     g = LLVMAddGlobal(cg->module, arr_ty, data_name);
     LLVMSetInitializer(g, LLVMConstStringInContext(cg->ctx, obj_data,
                                                    (unsigned)total_len, true));
@@ -1170,11 +2219,10 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
   char ptr_name[128];
   snprintf(ptr_name, sizeof(ptr_name), ".str.runtime.%llx",
            (unsigned long long)key_hash);
-  LLVMValueRef runtime_ptr_global = LLVMGetNamedGlobal(cg->module, ptr_name);
+  LLVMValueRef runtime_ptr_global = ny_get_global(cg, ptr_name);
   if (!runtime_ptr_global) {
     runtime_ptr_global = LLVMAddGlobal(cg->module, cg->type_i64, ptr_name);
-    LLVMSetInitializer(runtime_ptr_global,
-                       LLVMConstInt(cg->type_i64, 0, false));
+    LLVMSetInitializer(runtime_ptr_global, ny_c0(cg));
     LLVMSetLinkage(runtime_ptr_global, LLVMPrivateLinkage);
   }
 
@@ -1195,84 +2243,158 @@ LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len) {
 
 LLVMValueRef ny_is_tagged_int(codegen_t *cg, LLVMValueRef v) {
   if (!v)
-    return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+    return LLVMConstInt(ny_i1_ty(cg), 0, false);
   LLVMTypeRef ty = LLVMTypeOf(v);
   if (!ty || LLVMGetTypeKind(ty) != LLVMIntegerTypeKind ||
       LLVMGetIntTypeWidth(ty) != 64) {
-    return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+    return LLVMConstInt(ny_i1_ty(cg), 0, false);
   }
-  LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, false);
-  LLVMValueRef lsb =
-      LLVMBuildAnd(cg->builder, v, one, NY_LLVM_NAME(cg, "int_lsb"));
-  return LLVMBuildICmp(cg->builder, LLVMIntEQ, lsb, one,
-                       NY_LLVM_NAME(cg, "is_tagged_int"));
+  LLVMValueRef one = ny_c1(cg);
+  LLVMValueRef lsb = ny_and(cg, v, one, NY_LLVM_NAME(cg, "int_lsb"));
+  return ny_eq(cg, lsb, one, NY_LLVM_NAME(cg, "is_tagged_int"));
 }
 
 LLVMValueRef ny_untag_int(codegen_t *cg, LLVMValueRef v) {
-  return LLVMBuildAShr(cg->builder, v, LLVMConstInt(cg->type_i64, 1, false),
-                       "untag_int");
+  return ny_ashr(cg, v, ny_c1(cg), "untag_int");
 }
 
 LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v) {
-  LLVMValueRef sh =
-      LLVMBuildShl(cg->builder, v, LLVMConstInt(cg->type_i64, 1, false), "");
-  return LLVMBuildOr(cg->builder, sh, LLVMConstInt(cg->type_i64, 1, false),
-                     "tag_int");
+  LLVMValueRef sh = ny_shl(cg, v, ny_c1(cg), "");
+  return ny_or(cg, sh, ny_c1(cg), "tag_int");
+}
+
+static LLVMValueRef ny_binding_tagged_int_value(codegen_t *cg, binding *b) {
+  if (!b)
+    return NULL;
+  if (b->is_int_direct && b->is_int_raw_direct && b->raw_int_value)
+    return ny_tag_int(cg, b->raw_int_value);
+  return b->value;
+}
+
+static fun_sig *ny_lookup_range2(codegen_t *cg) {
+  fun_sig *sig = resolve_overload(cg, "range2", 3, 0);
+  if (!sig)
+    sig = resolve_overload(cg, "std.core.range2", 3, 0);
+  if (!sig)
+    sig = resolve_overload(cg, "std.core.iter.range2", 3, 0);
+  return sig;
+}
+
+static LLVMValueRef gen_range_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  if (!e || !e->as.binary.left || !e->as.binary.right)
+    return ny_c0(cg);
+  fun_sig *sig = ny_lookup_range2(cg);
+  if (!sig) {
+    ny_diag_hint("import std.core or std.core.iter to provide range2");
+    return expr_fail(cg, e->tok, "range expression '..' requires range2(start, stop, step)");
+  }
+  LLVMValueRef start = gen_expr(cg, scopes, depth, e->as.binary.left);
+  LLVMValueRef stop = gen_expr(cg, scopes, depth, e->as.binary.right);
+  LLVMValueRef one = LLVMConstInt(cg->type_i64, ((uint64_t)1 << 1) | 1u, false);
+  LLVMValueRef inclusive_stop = gen_binary(cg, scopes, depth, "+", stop, one,
+                                           e->as.binary.right, NULL);
+  LLVMValueRef args[3] = {
+      sig->is_native_abi ? ny_coerce_to_abi(cg, start, "int") : start,
+      sig->is_native_abi ? ny_coerce_to_abi(cg, inclusive_stop, "int") : inclusive_stop,
+      sig->is_native_abi ? ny_coerce_to_abi(cg, one, "int") : one,
+  };
+  return LLVMBuildCall2(cg->builder, sig->type, sig->value, args, 3,
+                        NY_LLVM_NAME(cg, "range"));
 }
 
 LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v) {
   fun_sig *s = lookup_fun(cg, "__is_float_obj", 0);
   if (!s)
-    return LLVMConstInt(LLVMInt1TypeInContext(cg->ctx), 0, false);
+    return LLVMConstInt(ny_i1_ty(cg), 0, false);
   LLVMValueRef res_tagged = LLVMBuildCall2(cg->builder, s->type, s->value,
                                            (LLVMValueRef[]){v}, 1, "");
-  return LLVMBuildICmp(cg->builder, LLVMIntEQ, res_tagged,
-                       LLVMConstInt(cg->type_i64, 2, false), "is_flt");
+  return ny_eq(cg, res_tagged, ny_ctrue(cg), "is_flt");
 }
 
 LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v) {
-  LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
+  fun_sig *unbox =
+      ny_module_target_is_apple_arm64(cg ? cg->module : NULL) ? lookup_fun(cg, "__flt_unbox_val", 0)
+                                                              : NULL;
+  if (unbox) {
+    LLVMValueRef bits = LLVMBuildCall2(cg->builder, unbox->type, unbox->value, &v, 1, "");
+    return ny_bitcast(cg, bits, cg->type_f64, NY_LLVM_NAME(cg, "unbox_flt"));
+  }
+
+  LLVMBasicBlockRef entry_bb = ny_cur_block(cg);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
-  LLVMBasicBlockRef int_bb = ny_llvm_append_block(fn, "unbox_flt.int");
-  LLVMBasicBlockRef check_flt_bb =
-      ny_llvm_append_block(fn, "unbox_flt.check_flt");
-  LLVMBasicBlockRef flt_bb = ny_llvm_append_block(fn, "unbox_flt.flt");
-  LLVMBasicBlockRef fallback_bb =
-      ny_llvm_append_block(fn, "unbox_flt.fallback");
-  LLVMBasicBlockRef done_bb = ny_llvm_append_block(fn, "unbox_flt.done");
+  LLVMBasicBlockRef int_bb = ny_bb_fn(fn, "unbox_flt.int");
+  LLVMBasicBlockRef check_flt_bb = ny_bb_fn(fn, "unbox_flt.check_flt");
+  LLVMBasicBlockRef flt_bb = ny_bb_fn(fn, "unbox_flt.flt");
+  LLVMBasicBlockRef fallback_bb = ny_bb_fn(fn, "unbox_flt.fallback");
+  LLVMBasicBlockRef done_bb = ny_bb_fn(fn, "unbox_flt.done");
 
-  LLVMBuildCondBr(cg->builder, ny_is_tagged_int(cg, v), int_bb, check_flt_bb);
+  ny_cond_br(cg, ny_is_tagged_int(cg, v), int_bb, check_flt_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, int_bb);
+  ny_pos(cg, int_bb);
   LLVMValueRef raw_int = ny_untag_int(cg, v);
   LLVMValueRef d_from_i = LLVMBuildSIToFP(cg->builder, raw_int, cg->type_f64,
                                           NY_LLVM_NAME(cg, "d_from_i"));
-  LLVMBasicBlockRef int_done_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMBuildBr(cg->builder, done_bb);
+  LLVMBasicBlockRef int_done_bb = ny_cur_block(cg);
+  ny_br(cg, done_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, check_flt_bb);
-  LLVMBuildCondBr(cg->builder, ny_is_float(cg, v), flt_bb, fallback_bb);
+  ny_pos(cg, check_flt_bb);
+  ny_cond_br(cg, ny_is_float(cg, v), flt_bb, fallback_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, flt_bb);
+  ny_pos(cg, flt_bb);
   LLVMValueRef ptr =
       LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(cg->type_f64, 0), "");
   LLVMValueRef d_from_p = LLVMBuildLoad2(cg->builder, cg->type_f64, ptr,
                                          NY_LLVM_NAME(cg, "d_from_p"));
-  LLVMBasicBlockRef flt_done_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMBuildBr(cg->builder, done_bb);
+  LLVMBasicBlockRef flt_done_bb = ny_cur_block(cg);
+  ny_br(cg, done_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, fallback_bb);
+  ny_pos(cg, fallback_bb);
   LLVMValueRef zero = LLVMConstReal(cg->type_f64, 0.0);
-  LLVMBasicBlockRef fallback_done_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMBuildBr(cg->builder, done_bb);
+  LLVMBasicBlockRef fallback_done_bb = ny_cur_block(cg);
+  ny_br(cg, done_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, done_bb);
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_f64,
-                                  NY_LLVM_NAME(cg, "unbox_flt_res"));
+  ny_pos(cg, done_bb);
+  LLVMValueRef phi =
+      ny_phi(cg, cg->type_f64, NY_LLVM_NAME(cg, "unbox_flt_res"));
   LLVMValueRef incoming_vals[3] = {d_from_i, d_from_p, zero};
   LLVMBasicBlockRef incoming_bbs[3] = {int_done_bb, flt_done_bb,
                                        fallback_done_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 3);
+  return phi;
+}
+
+static LLVMValueRef ny_unbox_known_numeric_float(codegen_t *cg, LLVMValueRef v) {
+  if (ny_module_target_is_apple_arm64(cg ? cg->module : NULL))
+    return ny_unbox_float(cg, v);
+
+  LLVMBasicBlockRef entry_bb = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
+  LLVMBasicBlockRef int_bb = ny_bb_fn(fn, "known_flt.int");
+  LLVMBasicBlockRef flt_bb = ny_bb_fn(fn, "known_flt.ptr");
+  LLVMBasicBlockRef done_bb = ny_bb_fn(fn, "known_flt.done");
+
+  ny_cond_br(cg, ny_is_tagged_int(cg, v), int_bb, flt_bb);
+
+  ny_pos(cg, int_bb);
+  LLVMValueRef raw_int = ny_untag_int(cg, v);
+  LLVMValueRef from_int =
+      LLVMBuildSIToFP(cg->builder, raw_int, cg->type_f64, "known_flt_i2f");
+  LLVMBasicBlockRef int_done = ny_cur_block(cg);
+  ny_br(cg, done_bb);
+
+  ny_pos(cg, flt_bb);
+  LLVMValueRef ptr =
+      LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(cg->type_f64, 0),
+                        "known_flt_ptr");
+  LLVMValueRef from_ptr =
+      LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "known_flt_load");
+  LLVMBasicBlockRef flt_done = ny_cur_block(cg);
+  ny_br(cg, done_bb);
+
+  ny_pos(cg, done_bb);
+  LLVMValueRef phi = ny_phi(cg, cg->type_f64, "known_flt");
+  LLVMAddIncoming(phi, (LLVMValueRef[]){from_int, from_ptr},
+                  (LLVMBasicBlockRef[]){int_done, flt_done}, 2);
   return phi;
 }
 
@@ -1318,26 +2440,143 @@ static fun_sig *ny_helper_slice(codegen_t *cg) {
 }
 
 static fun_sig *ny_helper_get(codegen_t *cg) {
-  static const char *const k_names[] = {"get", "std.core.get",
-                                        "std.core.reflect.get", "dict_get"};
+  static const char *const k_names[] = {"std.core.get", "std.core.reflect.get", "get"};
   return ny_helper_lookup(cg, &cg->cached_fn_get, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }
 
+static fun_sig *ny_helper_index_read(codegen_t *cg) {
+  static const char *const k_names[] = {"std.core.index_read", "std.core.reflect.index_read",
+                                        "index_read"};
+  return ny_helper_lookup(cg, &cg->cached_fn_index_read, k_names,
+                          sizeof(k_names) / sizeof(k_names[0]));
+}
+
+static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
+                                             size_t depth, expr_t *e,
+                                             fun_sig *fallback_sig) {
+  if (!cg || !e || !fallback_sig || !e->as.index.target || !e->as.index.start)
+    return NULL;
+  if (ny_env_enabled("NYTRIX_INDEX_READ_PARITY") ||
+      ny_env_enabled("NYTRIX_DISABLE_FAST_INDEX_READ"))
+    return NULL;
+  if (!expr_target_is_known_list_like(cg, scopes, depth, e->as.index.target) ||
+      !expr_index_is_int_key(cg, scopes, depth, e->as.index.start))
+    return NULL;
+
+  LLVMValueRef target_v = gen_expr(cg, scopes, depth, e->as.index.target);
+  LLVMValueRef key_v = gen_expr(cg, scopes, depth, e->as.index.start);
+  if (!target_v || !key_v)
+    return NULL;
+  target_v = expr_cast_to_i64(cg, target_v, "fast_index_target");
+  key_v = expr_cast_to_i64(cg, key_v, "fast_index_key");
+  bool assume_nonnegative =
+      expr_index_is_nonnegative(cg, scopes, depth, e->as.index.start);
+  bool assume_in_bounds =
+      assume_nonnegative &&
+      expr_index_in_list_len_min(cg, scopes, depth, e->as.index.target,
+                                 e->as.index.start);
+
+  ny_dbg_loc(cg, e->tok);
+  LLVMValueRef key_raw =
+      expr_index_raw_i64(cg, scopes, depth, e->as.index.start, key_v,
+                         "fast_index_key_raw");
+  if (assume_in_bounds) {
+    LLVMValueRef scaled =
+        LLVMBuildShl(cg->builder, key_raw, LLVMConstInt(cg->type_i64, 3, false),
+                     "fast_index_inbounds_scaled");
+    LLVMValueRef byte_off =
+        LLVMBuildAdd(cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+                     "fast_index_inbounds_off");
+    LLVMValueRef elem_addr =
+        ny_add(cg, target_v, byte_off, NY_LLVM_NAME(cg, "fast_index_addr"));
+    LLVMValueRef elem_ptr =
+        LLVMBuildIntToPtr(cg->builder, elem_addr, ny_ptr_i64_ty(cg),
+                          "fast_index_elem_ptr_i64");
+    return ny_load(cg, elem_ptr, NY_LLVM_NAME(cg, "fast_index_elem"));
+  }
+
+  LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+  LLVMBasicBlockRef load_bb = ny_bb_fn(fn, "fast_index.load");
+  LLVMBasicBlockRef fallback_bb = ny_bb_fn(fn, "fast_index.fallback");
+  LLVMBasicBlockRef join_bb = ny_bb_fn(fn, "fast_index.join");
+
+  LLVMValueRef target_ptr = LLVMBuildIntToPtr(
+      cg->builder, target_v, ny_ptr_i64_ty(cg), "fast_index_ptr_i64");
+  LLVMValueRef len_tagged =
+      ny_load(cg, target_ptr, NY_LLVM_NAME(cg, "fast_index_len"));
+  LLVMValueRef len_raw = ny_untag_int(cg, len_tagged);
+
+  LLVMValueRef adj_idx = key_raw;
+  LLVMValueRef low_ok = LLVMConstInt(cg->type_i1, 1, false);
+  if (!assume_nonnegative) {
+    LLVMValueRef is_neg =
+        LLVMBuildICmp(cg->builder, LLVMIntSLT, key_raw, ny_c0(cg),
+                      NY_LLVM_NAME(cg, "fast_index_is_neg"));
+    LLVMValueRef wrapped =
+        ny_add(cg, key_raw, len_raw, NY_LLVM_NAME(cg, "fast_index_wrapped"));
+    adj_idx = ny_select(cg, is_neg, wrapped, key_raw,
+                        NY_LLVM_NAME(cg, "fast_index_idx"));
+    low_ok = LLVMBuildICmp(cg->builder, LLVMIntSGE, adj_idx, ny_c0(cg),
+                           NY_LLVM_NAME(cg, "fast_index_low_ok"));
+  }
+  LLVMValueRef high_ok = NULL;
+  if (assume_nonnegative && ny_is_proven_int(cg, scopes, depth,
+                                             e->as.index.start, key_v)) {
+    high_ok = LLVMBuildICmp(cg->builder, LLVMIntSLT, key_v, len_tagged,
+                            NY_LLVM_NAME(cg, "fast_index_high_ok_tagged"));
+  } else {
+    high_ok = LLVMBuildICmp(cg->builder, LLVMIntSLT, adj_idx, len_raw,
+                            NY_LLVM_NAME(cg, "fast_index_high_ok"));
+  }
+  LLVMValueRef in_bounds =
+      ny_and(cg, low_ok, high_ok, NY_LLVM_NAME(cg, "fast_index_in_bounds"));
+  ny_cond_br(cg, in_bounds, load_bb, fallback_bb);
+
+  ny_pos(cg, load_bb);
+  LLVMValueRef scaled =
+      LLVMBuildShl(cg->builder, adj_idx, LLVMConstInt(cg->type_i64, 3, false),
+                   "fast_index_scaled");
+  LLVMValueRef byte_off =
+      LLVMBuildAdd(cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+                   "fast_index_off");
+  LLVMValueRef elem_addr =
+      ny_add(cg, target_v, byte_off, NY_LLVM_NAME(cg, "fast_index_addr"));
+  LLVMValueRef elem_ptr =
+      LLVMBuildIntToPtr(cg->builder, elem_addr, ny_ptr_i64_ty(cg),
+                        "fast_index_elem_ptr_i64");
+  LLVMValueRef elem =
+      ny_load(cg, elem_ptr, NY_LLVM_NAME(cg, "fast_index_elem"));
+  LLVMBasicBlockRef load_end_bb = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, fallback_bb);
+  LLVMValueRef args[2] = {target_v, key_v};
+  LLVMValueRef fallback =
+      LLVMBuildCall2(cg->builder, fallback_sig->type, fallback_sig->value, args,
+                     2, NY_LLVM_NAME(cg, "fast_index_fallback"));
+  LLVMBasicBlockRef fallback_end_bb = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, join_bb);
+  LLVMValueRef phi =
+      ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "fast_index_result"));
+  LLVMValueRef incoming_vals[2] = {elem, fallback};
+  LLVMBasicBlockRef incoming_bbs[2] = {load_end_bb, fallback_end_bb};
+  LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+  return phi;
+}
+
 static fun_sig *ny_helper_dict(codegen_t *cg) {
-  static const char *const k_names[] = {"dict", "std.core.dict"};
+  static const char *const k_names[] = {"dict", "std.core.dict",
+                                        "std.core.dict_mod.dict"};
   return ny_helper_lookup(cg, &cg->cached_fn_dict, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }
 
-static fun_sig *ny_helper_dict_set(codegen_t *cg) {
-  static const char *const k_names[] = {"dict_set", "std.core.dict_set"};
-  return ny_helper_lookup(cg, &cg->cached_fn_dict_set, k_names,
-                          sizeof(k_names) / sizeof(k_names[0]));
-}
-
 static fun_sig *ny_helper_set(codegen_t *cg) {
-  static const char *const k_names[] = {"set", "std.core.set"};
+  static const char *const k_names[] = {"std.core.set", "set"};
   return ny_helper_lookup(cg, &cg->cached_fn_set, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }
@@ -1361,23 +2600,616 @@ static fun_sig *ny_helper_str_concat(codegen_t *cg) {
 }
 
 static fun_sig *ny_helper_to_str(codegen_t *cg) {
-  static const char *const k_names[] = {"__to_str"};
+  static const char *const k_names[] = {"to_str", "std.core.to_str",
+                                        "std.core.reflect.to_str", "__to_str"};
   return ny_helper_lookup(cg, &cg->cached_fn_to_str, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }
 
-LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
-  int64_t fast_tagged = 0;
-  if (ny_try_eval_comptime_fast(body, &fast_tagged)) {
-    return LLVMConstInt(cg->type_i64, (uint64_t)fast_tagged, false);
+static size_t ny_count_unterminated_blocks(LLVMModuleRef mod) {
+  size_t count = 0;
+  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+       f = LLVMGetNextFunction(f)) {
+    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(f); bb;
+         bb = LLVMGetNextBasicBlock(bb)) {
+      if (!LLVMGetBasicBlockTerminator(bb))
+        count++;
+    }
+  }
+  return count;
+}
+
+static LLVMValueRef *ny_seal_unterminated_blocks(LLVMModuleRef mod,
+                                                 LLVMContextRef ctx,
+                                                 size_t *out_count) {
+  size_t count = ny_count_unterminated_blocks(mod);
+  if (out_count)
+    *out_count = count;
+  if (count == 0)
+    return NULL;
+
+  LLVMValueRef *terms = calloc(count, sizeof(*terms));
+  if (!terms) {
+    if (out_count)
+      *out_count = 0;
+    return NULL;
   }
 
+  LLVMBuilderRef builder = LLVMCreateBuilderInContext(ctx);
+  size_t idx = 0;
+  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+       f = LLVMGetNextFunction(f)) {
+    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(f); bb;
+         bb = LLVMGetNextBasicBlock(bb)) {
+      if (LLVMGetBasicBlockTerminator(bb))
+        continue;
+      LLVMPositionBuilderAtEnd(builder, bb);
+      terms[idx++] = LLVMBuildUnreachable(builder);
+    }
+  }
+  LLVMDisposeBuilder(builder);
+  return terms;
+}
+
+static void ny_unseal_blocks(LLVMValueRef *terms, size_t count) {
+  if (!terms)
+    return;
+  for (size_t i = 0; i < count; i++) {
+    if (terms[i])
+      LLVMInstructionEraseFromParent(terms[i]);
+  }
+  free(terms);
+}
+
+static LLVMValueRef ny_ct_fast_to_llvm_value(codegen_t *cg,
+                                             const ny_ct_fast_val_t *v,
+                                             token_t tok) {
+  if (!cg || !v)
+    return NULL;
+  if (v->kind == NY_CT_FAST_NONE)
+    return ny_c0(cg);
+  if (v->kind == NY_CT_FAST_BOOL)
+    return v->b ? ny_ctrue(cg) : ny_cfalse(cg);
+  char int_big_buf[64];
+  const char *int_big_lit = NULL;
+  if (v->kind == NY_CT_FAST_INT) {
+    if (ny_small_int_fits_i64(v->i))
+      return LLVMConstInt(cg->type_i64, (((uint64_t)v->i) << 1) | 1u, true);
+    snprintf(int_big_buf, sizeof(int_big_buf), "%" PRId64, v->i);
+    int_big_lit = int_big_buf;
+  }
+  if (v->kind == NY_CT_FAST_STR) {
+    const char *s = v->s ? v->s : "";
+    LLVMValueRef g = const_string_ptr(cg, s, strlen(s));
+    return ny_load(cg, g, NY_LLVM_NAME(cg, "ct_str"));
+  }
+  if (int_big_lit || v->kind == NY_CT_FAST_BIGINT) {
+    const char *s = int_big_lit ? int_big_lit : (v->s ? v->s : "0");
+    LLVMValueRef str_runtime_global = const_string_ptr(cg, s, strlen(s));
+    LLVMValueRef str_ptr = ny_load(cg, str_runtime_global, "ct_big_lit_str");
+    fun_sig *big_from_str = lookup_fun(cg, "__bigint_from_str", 0);
+    if (!big_from_str)
+      return expr_fail(cg, tok, "builtin __bigint_from_str missing");
+    return LLVMBuildCall2(cg->builder, big_from_str->type,
+                          big_from_str->value, (LLVMValueRef[]){str_ptr}, 1,
+                          "ct_big_lit");
+  }
+  return NULL;
+}
+
+static bool ny_ct_jit_heap_tag(int64_t v, int64_t *tag) {
+  if (!tag)
+    return false;
+  int64_t p = rt_heap_object_ptr(v);
+  if (!p)
+    return false;
+  int64_t raw = 0;
+  if (!rt_try_read_i64((uintptr_t)p - 8, &raw))
+    return false;
+  *tag = raw;
+  return true;
+}
+
+static bool ny_ct_jit_seq_len(int64_t v, int64_t *out_len) {
+  if (!out_len)
+    return false;
+  int64_t p = rt_heap_object_ptr(v);
+  if (!p)
+    return false;
+  int64_t tagged = 0;
+  if (!rt_try_read_i64((uintptr_t)p, &tagged))
+    return false;
+  int64_t n = is_int(tagged) ? (tagged >> 1) : tagged;
+  if (n < 0 || n > 65536)
+    return false;
+  *out_len = n;
+  return true;
+}
+
+static bool ny_ct_jit_seq_item(int64_t v, int64_t idx, int64_t *out) {
+  if (!out || idx < 0)
+    return false;
+  int64_t p = rt_heap_object_ptr(v);
+  if (!p)
+    return false;
+  return rt_try_read_i64((uintptr_t)p + 16 + (uintptr_t)idx * 8, out);
+}
+
+static LLVMValueRef ny_ct_jit_value_to_llvm(codegen_t *cg, int64_t v,
+                                            token_t tok, int depth) {
+  if (!cg || depth > 64)
+    return NULL;
+  if (v == NY_IMM_NIL || v == NY_IMM_FALSE || v == NY_IMM_TRUE || is_int(v))
+    return LLVMConstInt(cg->type_i64, (uint64_t)v, true);
+
+  if (is_v_str(v)) {
+    size_t len = rt_tagged_str_len(v);
+    LLVMValueRef g =
+        const_string_ptr(cg, (const char *)(uintptr_t)v, len);
+    return ny_load(cg, g, NY_LLVM_NAME(cg, "ct_jit_str"));
+  }
+
+  int64_t tag = 0;
+  if (!ny_ct_jit_heap_tag(v, &tag))
+    return NULL;
+
+  if (tag == TAG_LIST || tag == TAG_TUPLE) {
+    int64_t n = 0;
+    if (!ny_ct_jit_seq_len(v, &n))
+      return NULL;
+    fun_sig *list_new = lookup_fun(cg, "__list_new", 0);
+    fun_sig *store_item = lookup_fun(cg, "__store_item_fast", 0);
+    fun_sig *set_len = lookup_fun(cg, "__list_set_len", 0);
+    if (!list_new || !store_item || !set_len)
+      return expr_fail(cg, tok,
+                       "comptime list result requires list runtime helpers");
+    LLVMValueRef out = LLVMBuildCall2(
+        cg->builder, list_new->type, list_new->value,
+        (LLVMValueRef[]){LLVMConstInt(cg->type_i64,
+                                      (((uint64_t)n << 1) | 1u), false)},
+        1, NY_LLVM_NAME(cg, "ct_jit_list"));
+    for (int64_t i = 0; i < n; i++) {
+      int64_t item_raw = 0;
+      if (!ny_ct_jit_seq_item(v, i, &item_raw))
+        return NULL;
+      LLVMValueRef item =
+          ny_ct_jit_value_to_llvm(cg, item_raw, tok, depth + 1);
+      if (!item)
+        return NULL;
+      (void)LLVMBuildCall2(
+          cg->builder, store_item->type, store_item->value,
+          (LLVMValueRef[]){
+              out,
+              LLVMConstInt(cg->type_i64, (((uint64_t)i << 1) | 1u), false),
+              item},
+          3, "");
+    }
+    (void)LLVMBuildCall2(
+        cg->builder, set_len->type, set_len->value,
+        (LLVMValueRef[]){out, LLVMConstInt(cg->type_i64,
+                                           (((uint64_t)n << 1) | 1u), false)},
+        2, "");
+    if (tag == TAG_TUPLE) {
+      fun_sig *as_tuple = lookup_fun(cg, "__list_as_tuple", 0);
+      if (!as_tuple)
+        return expr_fail(cg, tok,
+                         "comptime tuple result requires tuple runtime helper");
+      out = LLVMBuildCall2(cg->builder, as_tuple->type, as_tuple->value,
+                           (LLVMValueRef[]){out}, 1,
+                           NY_LLVM_NAME(cg, "ct_jit_tuple"));
+    }
+    return out;
+  }
+
+  if (tag == TAG_RANGE) {
+    int64_t p = rt_heap_object_ptr(v);
+    int64_t start = 0, stop = 0, step = 0;
+    if (!p || !rt_try_read_i64((uintptr_t)p + 0, &start) ||
+        !rt_try_read_i64((uintptr_t)p + 8, &stop) ||
+        !rt_try_read_i64((uintptr_t)p + 16, &step))
+      return NULL;
+    fun_sig *range_new = lookup_fun(cg, "__range_new", 0);
+    if (!range_new)
+      return expr_fail(cg, tok,
+                       "comptime range result requires range runtime helper");
+    return LLVMBuildCall2(cg->builder, range_new->type, range_new->value,
+                          (LLVMValueRef[]){
+                              LLVMConstInt(cg->type_i64, (uint64_t)start, true),
+                              LLVMConstInt(cg->type_i64, (uint64_t)stop, true),
+                              LLVMConstInt(cg->type_i64, (uint64_t)step, true)},
+                          3, NY_LLVM_NAME(cg, "ct_jit_range"));
+  }
+
+  return NULL;
+}
+
+static LLVMTypeRef ny_ct_parent_global_type(codegen_t *tcg, const binding *b) {
+  if (!tcg || !b)
+    return NULL;
+  if (b->is_f64_slot || (b->type_name &&
+                         (strcmp(b->type_name, "f64") == 0 ||
+                          strcmp(b->type_name, "float") == 0)))
+    return tcg->type_f64;
+  if (b->is_f32_slot || (b->type_name && strcmp(b->type_name, "f32") == 0))
+    return tcg->type_f32;
+  return tcg->type_i64;
+}
+
+static const char *ny_ct_global_module_name(codegen_t *tcg,
+                                            const binding *b) {
+  if (!tcg || !b || !b->name)
+    return NULL;
+  const char *dot = strrchr(b->name, '.');
+  if (!dot || dot == b->name)
+    return NULL;
+  size_t len = (size_t)(dot - b->name);
+  char *out = arena_alloc(tcg->arena, len + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, b->name, len);
+  out[len] = '\0';
+  return out;
+}
+
+static bool ny_ct_seen_stmt(stmt_t **seen, size_t len, stmt_t *s) {
+  if (!s)
+    return true;
+  for (size_t i = 0; i < len; i++) {
+    if (seen[i] == s)
+      return true;
+  }
+  return false;
+}
+
+static const char *ny_ct_parent_stmt_module(codegen_t *parent,
+                                            const fun_sig *src) {
+  const char *best = src ? src->module_name : NULL;
+  size_t best_len = best ? strlen(best) : 0;
+  if (!parent || !src || !src->stmt_t)
+    return best;
+  for (size_t i = 0; i < parent->fun_sigs.len; i++) {
+    fun_sig *other = &parent->fun_sigs.data[i];
+    if (!other || other->stmt_t != src->stmt_t || !other->module_name)
+      continue;
+    size_t len = strlen(other->module_name);
+    if (len > best_len) {
+      best = other->module_name;
+      best_len = len;
+    }
+  }
+  return best;
+}
+
+static const char *ny_ct_parent_stmt_canonical_name(codegen_t *parent,
+                                                    const fun_sig *src,
+                                                    const char *module_name) {
+  if (!parent || !src || !src->stmt_t || !module_name)
+    return NULL;
+  const char *decl_name = NULL;
+  if (src->stmt_t->kind == NY_S_FUNC)
+    decl_name = src->stmt_t->as.fn.name;
+  else if (src->stmt_t->kind == NY_S_EXTERN)
+    decl_name = src->stmt_t->as.ext.name;
+  if (decl_name && *decl_name) {
+    if (src->name && strcmp(src->name, decl_name) == 0)
+      return src->name;
+    for (size_t i = 0; i < parent->fun_sigs.len; i++) {
+      fun_sig *other = &parent->fun_sigs.data[i];
+      if (!other || other->stmt_t != src->stmt_t || !other->name)
+        continue;
+      if (strcmp(other->name, decl_name) == 0)
+        return other->name;
+    }
+  }
+  for (size_t i = 0; i < parent->fun_sigs.len; i++) {
+    fun_sig *other = &parent->fun_sigs.data[i];
+    if (!other || other == src || other->stmt_t != src->stmt_t ||
+        !other->name || !other->module_name)
+      continue;
+    if (strcmp(other->module_name, module_name) == 0)
+      return other->name;
+  }
+  return NULL;
+}
+
+static const fun_sig *ny_ct_parent_fun_sig_by_name(codegen_t *parent,
+                                                   const char *name) {
+  if (!parent || !name || !*name)
+    return NULL;
+  for (size_t i = 0; i < parent->fun_sigs.len; i++) {
+    fun_sig *sig = &parent->fun_sigs.data[i];
+    if (sig && sig->name && strcmp(sig->name, name) == 0)
+      return sig;
+  }
+  return NULL;
+}
+
+static void ny_ct_collect_std_import_surface_stmt(codegen_t *tcg, stmt_t *s) {
+  if (!tcg || !s || !ny_is_stdlib_tok(s->tok))
+    return;
+  if (s->kind == NY_S_MODULE) {
+    process_use_imports(tcg, s);
+    collect_use_aliases(tcg, s);
+    collect_use_modules(tcg, s);
+    return;
+  }
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; i++)
+      ny_ct_collect_std_import_surface_stmt(tcg, s->as.block.body.data[i]);
+  }
+}
+
+static void ny_ct_collect_parent_std_import_surface(codegen_t *tcg,
+                                                    codegen_t *parent) {
+  if (!tcg || !parent)
+    return;
+  if (parent->prog) {
+    for (size_t i = 0; i < parent->prog->body.len; i++)
+      ny_ct_collect_std_import_surface_stmt(tcg, parent->prog->body.data[i]);
+  }
+  for (size_t p = 0; p < parent->extra_progs.len; p++) {
+    program_t *prog = parent->extra_progs.data[p];
+    if (!prog)
+      continue;
+    for (size_t i = 0; i < prog->body.len; i++)
+      ny_ct_collect_std_import_surface_stmt(tcg, prog->body.data[i]);
+  }
+  ny_alias_lookup_cache_clear(tcg);
+}
+
+static void ny_ct_prune_repl_wrapper_aliases(codegen_t *tcg) {
+  if (!tcg)
+    return;
+  for (size_t i = 0; i < tcg->aliases.len; i++) {
+    binding *b = &tcg->aliases.data[i];
+    const char *target = b && b->stmt_t ? (const char *)b->stmt_t : NULL;
+    if (b && b->name && strcmp(b->name, "prim") == 0 && target &&
+        strcmp(target, "std.os.prim") == 0) {
+      b->name = "";
+      b->stmt_t = NULL;
+    }
+  }
+  binding prim = {0};
+  prim.name = ny_strdup("prim");
+  prim.stmt_t = (stmt_t *)ny_strdup("std.core.primitives");
+  prim.owned = true;
+  vec_push(&tcg->aliases, prim);
+  if (tcg->aliases.len > 1) {
+    binding inserted = tcg->aliases.data[tcg->aliases.len - 1];
+    memmove(&tcg->aliases.data[1], &tcg->aliases.data[0],
+            (tcg->aliases.len - 1) * sizeof(tcg->aliases.data[0]));
+    tcg->aliases.data[0] = inserted;
+  }
+  ny_alias_lookup_cache_clear(tcg);
+}
+
+static void ny_ct_ensure_parent_fun_sig(codegen_t *tcg, const fun_sig *src,
+                                        const char *module_name) {
+  if (!tcg || !src || !src->name || !*src->name || !src->stmt_t)
+    return;
+  if (lookup_fun_exact(tcg, src->name))
+    return;
+
+  stmt_t *s = src->stmt_t;
+  ny_param_list *params = NULL;
+  const char *ret_name = NULL;
+  bool is_variadic = src->is_variadic;
+  bool is_extern = src->is_extern;
+  if (s->kind == NY_S_FUNC) {
+    params = &s->as.fn.params;
+    ret_name = s->as.fn.return_type;
+    is_variadic = s->as.fn.is_variadic;
+    is_extern = false;
+  } else if (s->kind == NY_S_EXTERN) {
+    params = &s->as.ext.params;
+    ret_name = s->as.ext.return_type;
+    is_variadic = s->as.ext.is_variadic;
+    is_extern = true;
+  } else {
+    return;
+  }
+
+  size_t param_count = params ? params->len : 0;
+  LLVMTypeRef *pt = param_count ? alloca(sizeof(*pt) * param_count) : NULL;
+  for (size_t i = 0; i < param_count; i++) {
+    const char *ptype = params->data[i].type;
+    pt[i] = (src->is_native_abi && ptype)
+                ? resolve_abi_type_name(tcg, ptype, s->tok)
+                : tcg->type_i64;
+  }
+  LLVMTypeRef rty = (src->is_native_abi && ret_name)
+                        ? resolve_abi_type_name(tcg, ret_name, s->tok)
+                        : tcg->type_i64;
+  LLVMTypeRef ft = LLVMFunctionType(rty, pt, (unsigned)param_count, 0);
+  const char *llvm_name = src->link_name && *src->link_name ? src->link_name
+                                                            : src->name;
+  LLVMValueRef f = ny_get_named_fn(tcg, llvm_name);
+  if (!f)
+    f = LLVMAddFunction(tcg->module, llvm_name, ft);
+
+  fun_sig sig;
+  ny_fun_sig_init(&sig, src->name, ft, f, s, (int)param_count, is_variadic,
+                  is_extern);
+  sig.module_name = module_name ? ny_strdup(module_name) : NULL;
+  if (params)
+    ny_fun_sig_set_params(&sig, params);
+  sig.is_native_abi = src->is_native_abi;
+  sig.tailcall = src->tailcall;
+  sig.link_name = src->link_name ? ny_strdup(src->link_name) : NULL;
+  sig.return_type = ret_name ? ny_strdup(ret_name) : NULL;
+  sig.returns_owned = src->returns_owned;
+  sig.effects = src->effects;
+  sig.args_escape = src->args_escape;
+  sig.args_mutated = src->args_mutated;
+  sig.returns_alias = src->returns_alias;
+  sig.effects_known = src->effects_known;
+  vec_push(&tcg->fun_sigs, sig);
+}
+
+static void ny_ct_import_repl_parent_surface(codegen_t *tcg,
+                                             codegen_t *parent) {
+  if (!tcg || !parent || !parent->is_repl)
+    return;
+
+  for (size_t i = 0; i < parent->aliases.len; i++) {
+    binding b = parent->aliases.data[i];
+    if (!b.name || !strchr(b.name, '.'))
+      continue;
+    b.owned = false;
+    vec_push(&tcg->aliases, b);
+  }
+  for (size_t i = 0; i < parent->import_aliases.len; i++) {
+    binding b = parent->import_aliases.data[i];
+    b.owned = false;
+    vec_push(&tcg->import_aliases, b);
+  }
+  for (size_t i = 0; i < parent->user_import_aliases.len; i++) {
+    binding b = parent->user_import_aliases.data[i];
+    b.owned = false;
+    vec_push(&tcg->user_import_aliases, b);
+  }
+  free(tcg->import_alias_index);
+  tcg->import_alias_index = NULL;
+  tcg->import_alias_index_cap = 0;
+  free(tcg->user_import_alias_index);
+  tcg->user_import_alias_index = NULL;
+  tcg->user_import_alias_index_cap = 0;
+  ny_alias_lookup_cache_clear(tcg);
+  for (size_t i = 0; i < parent->use_modules.len; i++) {
+    if (parent->use_modules.data[i])
+      vec_push(&tcg->use_modules, ny_strdup(parent->use_modules.data[i]));
+  }
+  for (size_t i = 0; i < parent->user_use_modules.len; i++) {
+    if (parent->user_use_modules.data[i])
+      vec_push(&tcg->user_use_modules,
+               ny_strdup(parent->user_use_modules.data[i]));
+  }
+  ny_ct_collect_parent_std_import_surface(tcg, parent);
+  ny_ct_prune_repl_wrapper_aliases(tcg);
+
+  const char *saved_mod = tcg->current_module_name;
+  for (size_t i = 0; i < parent->fun_sigs.len; i++) {
+    fun_sig *sig = &parent->fun_sigs.data[i];
+    if (!sig || !sig->stmt_t || !ny_is_stdlib_tok(sig->stmt_t->tok))
+      continue;
+    const char *sig_mod = ny_ct_parent_stmt_module(parent, sig);
+    const char *canonical = ny_ct_parent_stmt_canonical_name(parent, sig, sig_mod);
+    if (canonical && strcmp(canonical, sig->name) != 0) {
+      add_import_alias(tcg, sig->name, canonical);
+      const fun_sig *target = ny_ct_parent_fun_sig_by_name(parent, canonical);
+      if (target)
+        ny_ct_ensure_parent_fun_sig(
+            tcg, target, ny_ct_parent_stmt_module(parent, target));
+      continue;
+    }
+    tcg->current_module_name = sig_mod;
+    collect_sigs(tcg, sig->stmt_t);
+    ny_ct_ensure_parent_fun_sig(tcg, sig, sig_mod);
+  }
+  tcg->current_module_name = saved_mod;
+
+  for (size_t i = 0; i < parent->global_vars.len; i++) {
+    binding *b = &parent->global_vars.data[i];
+    if (!b || !b->name || !*b->name || !b->stmt_t ||
+        !ny_is_stdlib_tok(b->stmt_t->tok))
+      continue;
+    if (lookup_global_exact(tcg, b->name))
+      continue;
+    LLVMTypeRef ty = ny_ct_parent_global_type(tcg, b);
+    LLVMValueRef g = LLVMGetNamedGlobal(tcg->module, b->name);
+    if (!g) {
+      g = LLVMAddGlobal(tcg->module, ty ? ty : tcg->type_i64, b->name);
+      LLVMSetInitializer(g, LLVMConstNull(ty ? ty : tcg->type_i64));
+    }
+    binding nb = *b;
+    nb.value = g;
+    nb.owned = false;
+    vec_push(&tcg->global_vars, nb);
+  }
+
+  tcg->lazy_emit_stdlib_enabled = true;
+}
+
+static void ny_ct_emit_parent_std_init(codegen_t *tcg, codegen_t *parent,
+                                       scope *scopes, size_t *depth) {
+  if (!tcg || !parent || !parent->is_repl || !scopes || !depth)
+    return;
+  stmt_t **seen =
+      parent->global_vars.len ? calloc(parent->global_vars.len, sizeof(*seen))
+                              : NULL;
+  size_t seen_len = 0;
+  const char *saved_mod = tcg->current_module_name;
+  for (size_t i = 0; i < parent->global_vars.len; i++) {
+    binding *b = &parent->global_vars.data[i];
+    if (!b || !b->stmt_t || !ny_is_stdlib_tok(b->stmt_t->tok) ||
+        b->stmt_t->kind != NY_S_VAR)
+      continue;
+    const char *mod_name = ny_ct_global_module_name(tcg, b);
+    if (tcg->lazy_emit_stdlib_enabled &&
+        !ny_lazy_emit_stdlib_var_needed(tcg, b->stmt_t, mod_name))
+      continue;
+    if (ny_ct_seen_stmt(seen, seen_len, b->stmt_t))
+      continue;
+    if (seen)
+      seen[seen_len++] = b->stmt_t;
+    tcg->current_module_name = mod_name;
+    gen_stmt(tcg, scopes, depth, b->stmt_t, 0, false);
+    if (tcg->had_error)
+      break;
+  }
+  tcg->current_module_name = saved_mod;
+  free(seen);
+}
+
+static void ny_ct_emit_std_init(codegen_t *tcg, codegen_t *parent,
+                                scope *scopes, size_t *depth) {
+  if (!tcg || !tcg->prog || !scopes || !depth)
+    return;
+  for (size_t i = 0; i < tcg->prog->body.len; i++) {
+    stmt_t *s = tcg->prog->body.data[i];
+    if (!s || !ny_is_stdlib_tok(s->tok) || s->kind == NY_S_FUNC)
+      continue;
+    gen_stmt(tcg, scopes, depth, s, 0, false);
+  }
+  for (size_t p = 0; p < tcg->extra_progs.len; p++) {
+    program_t *prog = tcg->extra_progs.data[p];
+    if (!prog)
+      continue;
+    for (size_t i = 0; i < prog->body.len; i++) {
+      stmt_t *s = prog->body.data[i];
+      if (!s || !ny_is_stdlib_tok(s->tok) || s->kind == NY_S_FUNC)
+        continue;
+      gen_stmt(tcg, scopes, depth, s, 0, false);
+    }
+  }
+  ny_ct_emit_parent_std_init(tcg, parent, scopes, depth);
+}
+
+LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
+  ny_ct_fast_val_t fast_value = ny_ct_fast_none();
+  if (ny_try_eval_comptime_fast_value(cg, body, &fast_value)) {
+    LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &fast_value, body->tok);
+    if (v)
+      return v;
+  }
+
+  ny_ct_fast_val_t interp_value = ny_ct_fast_none();
+  if (ny_try_eval_comptime_interp_value(cg, body, &interp_value)) {
+    LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &interp_value, body->tok);
+    if (v)
+      return v;
+  }
+
+  int64_t interp_tagged = 0;
   char *err = NULL;
-  LLVMBasicBlockRef prev_bb =
-      cg->builder ? LLVMGetInsertBlock(cg->builder) : NULL;
+  LLVMBasicBlockRef prev_bb = cg->builder ? ny_cur_block(cg) : NULL;
 
   // 1. Snapshot current module state for isolated comptime evaluation.
+  size_t sealed_count = 0;
+  LLVMValueRef *sealed_terms =
+      ny_seal_unterminated_blocks(cg->module, cg->ctx, &sealed_count);
   LLVMMemoryBufferRef bitcode = LLVMWriteBitcodeToMemoryBuffer(cg->module);
+  ny_unseal_blocks(sealed_terms, sealed_count);
 
   // 2. Parse into an isolated context.
   bool ctm_ctx_owned = true;
@@ -1391,16 +3223,15 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       LLVMDisposeMessage(err);
       err = NULL;
     }
-    int64_t interp_tagged = 0;
-    if (ny_try_eval_comptime_interp(body, &interp_tagged)) {
+    if (ny_try_eval_comptime_interp(cg, body, &interp_tagged)) {
       if (prev_bb)
-        LLVMPositionBuilderAtEnd(cg->builder, prev_bb);
+        ny_pos(cg, prev_bb);
       LLVMDisposeMemoryBuffer(bitcode);
       LLVMContextDispose(ctm_ctx);
       return LLVMConstInt(cg->type_i64, (uint64_t)interp_tagged, true);
     }
     if (prev_bb)
-      LLVMPositionBuilderAtEnd(cg->builder, prev_bb);
+      ny_pos(cg, prev_bb);
     LLVMDisposeMemoryBuffer(bitcode);
     LLVMContextDispose(ctm_ctx);
     return expr_fail(cg, body->tok, "failed to parse bitcode snapshot");
@@ -1475,10 +3306,19 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   tcg.llvm_ctx_owned = false;
   tcg.parent = cg;
   tcg.comptime = true;
+  tcg.strict_diagnostics = cg->strict_diagnostics;
+  tcg.strict_types = cg->strict_types;
+  tcg.ownership_enabled = cg->ownership_enabled;
+  tcg.ownership_strict = cg->ownership_strict;
   tcg.debug_symbols = cg->debug_symbols;
   tcg.di_builder = NULL;
+  tcg.source_main_file = cg->source_main_file;
+  tcg.user_source = cg->user_source;
+  tcg.user_source_len = cg->user_source_len;
 
-  // codegen_prepare(&tcg);
+  codegen_prepare(&tcg);
+  ny_ct_import_repl_parent_surface(&tcg, cg);
+  ny_lazy_emit_prepare_reachable(&tcg);
 
   LLVMValueRef entry_fn = LLVMAddFunction(
       mod, entry_name, LLVMFunctionType(tcg.type_i64, NULL, 0, 0));
@@ -1486,18 +3326,70 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
       bld, LLVMAppendBasicBlockInContext(ctm_ctx, entry_fn, "e"));
 
   codegen_repopulate_interns(&tcg);
-  codegen_emit_string_init(&tcg);
 
-  gen_stmt(&tcg, (scope[64]){0}, (size_t[]){0}, body, 0, false);
+  scope ctm_scopes[64] = {0};
+  size_t ctm_depth = 0;
+  ny_ct_emit_std_init(&tcg, cg, ctm_scopes, &ctm_depth);
+  if (tcg.had_error) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    cg->had_error = 1;
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return ny_c0(cg);
+  }
+  gen_stmt(&tcg, ctm_scopes, &ctm_depth, body, 0, true);
+  if (tcg.had_error) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    cg->had_error = 1;
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return ny_c0(cg);
+  }
   if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(bld))) {
     LLVMBuildRet(bld, LLVMConstInt(tcg.type_i64, 1, false));
+  }
+  ny_lazy_emit_demand_referenced(&tcg, ctm_scopes, ctm_depth, "comptime");
+  if (tcg.had_error) {
+    if (prev_bb)
+      ny_pos(cg, prev_bb);
+    cg->had_error = 1;
+    codegen_dispose(&tcg);
+    if (ctm_ctx_owned)
+      LLVMContextDispose(ctm_ctx);
+    return ny_c0(cg);
+  }
+  LLVMBasicBlockRef ctm_end_bb = LLVMGetInsertBlock(bld);
+  LLVMBasicBlockRef ctm_entry_bb = LLVMGetEntryBasicBlock(entry_fn);
+  LLVMValueRef first_inst = LLVMGetFirstInstruction(ctm_entry_bb);
+  if (first_inst)
+    LLVMPositionBuilderBefore(bld, first_inst);
+  else
+    LLVMPositionBuilderAtEnd(bld, ctm_entry_bb);
+  ny_ct_emit_std_init(&tcg, cg, ctm_scopes, &ctm_depth);
+  codegen_emit_string_init(&tcg);
+  if (ctm_end_bb)
+    LLVMPositionBuilderAtEnd(bld, ctm_end_bb);
+
+  ny_jit_define_runtime_trampolines(mod);
+
+  if (getenv("NYTRIX_COMPTIME_DUMP_IR")) {
+    char *ir = LLVMPrintModuleToString(mod);
+    if (ir) {
+      fprintf(stderr, "%s\n", ir);
+      LLVMDisposeMessage(ir);
+    }
   }
 
   // 7. JIT Execute.
   LLVMExecutionEngineRef ee = NULL;
   struct LLVMMCJITCompilerOptions jit_opts;
+  ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);
-  jit_opts.EnableFastISel = 1;
+  ny_jit_add_runtime_symbols();
   if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
                                        &err) != 0) {
     NY_LOG_ERR("Comptime JIT error: %s\n", err);
@@ -1508,21 +3400,29 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   }
 
   register_jit_symbols(ee, mod, &tcg);
+  ny_jit_map_unresolved_symbols(ee, mod, entry_name);
   uint64_t addr = LLVMGetFunctionAddress(ee, entry_name);
   int64_t res = 1;
   if (addr) {
     res = ((int64_t (*)(void))addr)();
   }
 
+  if (prev_bb)
+    ny_pos(cg, prev_bb);
+
+  LLVMValueRef materialized =
+      ny_ct_jit_value_to_llvm(cg, res, body->tok, 0);
+
   LLVMDisposeExecutionEngine(ee);
   codegen_dispose(&tcg);
   if (ctm_ctx_owned)
     LLVMContextDispose(ctm_ctx);
 
-  if (prev_bb)
-    LLVMPositionBuilderAtEnd(cg->builder, prev_bb);
+  if (materialized)
+    return materialized;
 
-  return LLVMConstInt(cg->type_i64, (uint64_t)res, false);
+  return expr_fail(cg, body->tok,
+                   "comptime result cannot be embedded in runtime code");
 }
 
 bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy) {
@@ -1535,7 +3435,7 @@ bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy) {
   if (val && LLVMIsAConstantInt(val)) {
     uint64_t raw = LLVMConstIntGetZExtValue(val);
     if (truthy)
-      *truthy = (raw != 0 && raw != 4 && raw != 1);
+      *truthy = (raw != NY_IMM_NIL && raw != NY_IMM_FALSE && raw != 1);
     return true;
   }
   return false;
@@ -1549,43 +3449,34 @@ static LLVMValueRef gen_unary_op_common(
   if (!slow_sig || !slow_sig->type || !slow_sig->value)
     return expr_fail(cg, e->tok, "builtin for %s missing", op_name);
 
-  LLVMBasicBlockRef entry_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBasicBlockRef entry_bb = ny_cur_block(cg);
   LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
-  bool proven = ny_is_proven_int(cg, NULL, 0, e->as.unary.right, r);
 
-  if (proven) {
-    /* Fast path: proven int, no runtime check. */
-    LLVMValueRef raw = ny_untag_int(cg, r);
-    LLVMValueRef res_raw = build_fast(cg->builder, raw, op_name);
-    return ny_tag_int(cg, res_raw);
-  }
+  LLVMBasicBlockRef fast_bb = ny_bb_fn(fn, "un.int.fast");
+  LLVMBasicBlockRef slow_bb = ny_bb_fn(fn, "un.runtime.slow");
+  LLVMBasicBlockRef merge_bb = ny_bb_fn(fn, "un.merge");
+  ny_cond_br(cg, ny_is_tagged_int(cg, r), fast_bb, slow_bb);
 
-  LLVMBasicBlockRef fast_bb = ny_llvm_append_block(fn, "un.int.fast");
-  LLVMBasicBlockRef slow_bb = ny_llvm_append_block(fn, "un.runtime.slow");
-  LLVMBasicBlockRef merge_bb = ny_llvm_append_block(fn, "un.merge");
-  LLVMBuildCondBr(cg->builder, ny_is_tagged_int(cg, r), fast_bb, slow_bb);
-
-  LLVMPositionBuilderAtEnd(cg->builder, fast_bb);
+  ny_pos(cg, fast_bb);
 
   LLVMValueRef raw = ny_untag_int(cg, r);
   LLVMValueRef res_raw = build_fast(cg->builder, raw, op_name);
   LLVMValueRef fast_value = ny_tag_int(cg, res_raw);
-  LLVMBasicBlockRef fast_done_bb = LLVMGetInsertBlock(cg->builder);
-  LLVMBuildBr(cg->builder, merge_bb);
+  LLVMBasicBlockRef fast_done_bb = ny_cur_block(cg);
+  ny_br(cg, merge_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, slow_bb);
+  ny_pos(cg, slow_bb);
 
   LLVMValueRef slow_value =
       LLVMBuildCall2(cg->builder, slow_sig->type, slow_sig->value, slow_args,
                      (unsigned)slow_argc, "");
-  LLVMBasicBlockRef slow_done_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMBasicBlockRef slow_done_bb = ny_cur_block(cg);
 
-  LLVMBuildBr(cg->builder, merge_bb);
+  ny_br(cg, merge_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, merge_bb);
+  ny_pos(cg, merge_bb);
 
-  LLVMValueRef phi =
-      LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "un_result"));
+  LLVMValueRef phi = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "un_result"));
   LLVMValueRef incoming_vals[2] = {fast_value, slow_value};
   LLVMBasicBlockRef incoming_bbs[2] = {fast_done_bb, slow_done_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
@@ -1597,20 +3488,113 @@ static LLVMValueRef gen_expr_unary(codegen_t *cg, scope *scopes, size_t depth,
   if (!e->as.unary.right)
     return expr_fail(cg, e->tok, "missing operand for unary '%s'",
                      e->as.unary.op);
+  if (strcmp(e->as.unary.op, "-") == 0 &&
+      e->as.unary.right->kind == NY_E_LITERAL) {
+    expr_t *right = e->as.unary.right;
+    if (right->as.literal.kind == NY_LIT_INT && right->tok.kind != NY_T_NIL) {
+      int64_t raw = right->as.literal.as.i;
+      if (ny_small_int_fits_i64(raw) && raw != INT64_MIN && ny_small_int_fits_i64(-raw))
+        return LLVMConstInt(cg->type_i64, (((uint64_t)(-raw)) << 1) | 1u, true);
+    } else if (right->as.literal.kind == NY_LIT_FLOAT) {
+      fun_sig *box_sig = ny_helper_flt_box(cg);
+      if (!box_sig)
+        return expr_fail(cg, e->tok, "__flt_box_val not found");
+      double d = -right->as.literal.as.f;
+      if (right->as.literal.hint == NY_LIT_HINT_F32)
+        d = (double)(float)d;
+      LLVMValueRef fval = LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), d);
+      return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
+                            (LLVMValueRef[]){ny_bitcast(cg, fval, cg->type_i64, "")},
+                            1, "");
+    }
+  }
+  if (strcmp(e->as.unary.op, "await") == 0) {
+    LLVMValueRef handle = gen_expr(cg, scopes, depth, e->as.unary.right);
+    if (!handle)
+      return expr_fail(cg, e->tok, "failed to evaluate await operand");
+    fun_sig *join_sig = lookup_fun(cg, "__async_await_blocking", 0);
+    if (!join_sig)
+      return expr_fail(cg, e->tok, "builtin __async_await_blocking missing");
+    ny_dbg_loc(cg, e->tok);
+    return LLVMBuildCall2(cg->builder, join_sig->type, join_sig->value,
+                          &handle, 1, "async_await");
+  }
+  if (strcmp(e->as.unary.op, "async") == 0) {
+    expr_t *task = e->as.unary.right;
+    expr_t *callee = task;
+    ny_call_arg_list *call_args = NULL;
+    size_t argc = 0;
+    if (task->kind == NY_E_CALL) {
+      callee = task->as.call.callee;
+      call_args = &task->as.call.args;
+      argc = call_args->len;
+    } else if (task->kind == NY_E_MEMCALL) {
+      return expr_fail(cg, e->tok,
+                       "async member calls should be wrapped in a function or "
+                       "lambda");
+    }
+    if (!callee)
+      return expr_fail(cg, e->tok, "async requires a callable expression");
+    if (argc > 15)
+      return expr_fail(cg, e->tok,
+                       "async calls support up to 15 arguments; pass a packed "
+                       "object for more");
+    LLVMValueRef fn = gen_expr(cg, scopes, depth, callee);
+    if (!fn)
+      return expr_fail(cg, e->tok, "failed to evaluate async callable");
+    LLVMValueRef args[15];
+    for (size_t i = 0; i < argc; i++) {
+      call_arg_t *arg = &call_args->data[i];
+      if (arg->name)
+        return expr_fail(cg, task->tok,
+                         "async call syntax does not support named arguments");
+      args[i] = gen_expr(cg, scopes, depth, arg->val);
+      if (!args[i])
+        return expr_fail(cg, task->tok, "failed to evaluate async argument");
+    }
+    fun_sig *spawn_sig = lookup_fun(cg, "__async_task_new", 0);
+    if (!spawn_sig)
+      return expr_fail(cg, e->tok, "builtin __async_task_new missing");
+    LLVMValueRef fn_val =
+        (LLVMTypeOf(fn) == cg->type_i64)
+            ? fn
+            : ny_ptr2i64(cg, fn, NY_LLVM_NAME(cg, "async_fn"));
+    LLVMValueRef argc_val =
+        LLVMConstInt(cg->type_i64, (((uint64_t)argc << 1) | 1), false);
+    LLVMValueRef argv_ptr = ny_c0(cg);
+    if (argc > 0) {
+      LLVMTypeRef argv_ty = LLVMArrayType(cg->type_i64, (unsigned)argc);
+      ny_dbg_loc(cg, e->tok);
+      LLVMValueRef argv_stack =
+          LLVMBuildAlloca(cg->builder, argv_ty, NY_LLVM_NAME(cg, "async_argv"));
+      LLVMSetAlignment(argv_stack, 16);
+      for (size_t i = 0; i < argc; i++) {
+        LLVMValueRef idxs[2] = {ny_c0(cg),
+                                LLVMConstInt(cg->type_i64, (uint64_t)i, false)};
+        LLVMValueRef slot =
+            LLVMBuildGEP2(cg->builder, argv_ty, argv_stack, idxs, 2, "");
+        ny_store(cg, slot, args[i]);
+      }
+      argv_ptr = ny_ptr2i64(cg, argv_stack, "async_argv_ptr");
+    }
+    ny_dbg_loc(cg, e->tok);
+    return LLVMBuildCall2(cg->builder, spawn_sig->type, spawn_sig->value,
+                          (LLVMValueRef[]){fn_val, argc_val, argv_ptr}, 3,
+                          "async_task");
+  }
   LLVMValueRef r = gen_expr(cg, scopes, depth, e->as.unary.right);
   if (!r)
     return expr_fail(cg, e->tok, "failed to evaluate unary operand");
   ny_dbg_loc(cg, e->tok);
   if (strcmp(e->as.unary.op, "!") == 0)
-    return LLVMBuildSelect(cg->builder, to_bool(cg, r),
-                           LLVMConstInt(cg->type_i64, 4, false),
-                           LLVMConstInt(cg->type_i64, 2, false), "");
+    return ny_select(cg, to_bool(cg, r), ny_cfalse(cg), ny_ctrue(cg), "");
   if (strcmp(e->as.unary.op, "-") == 0) {
     fun_sig *s = ny_helper_sub(cg);
     if (!s)
       return expr_fail(cg, e->tok, "builtin __sub missing");
-    LLVMValueRef args[] = {LLVMConstInt(cg->type_i64, 1, false), r};
-    return gen_unary_op_common(cg, e, r, LLVMBuildNeg, "neg_int", s, args, 2);
+    LLVMValueRef args[] = {ny_c1(cg), r};
+    return LLVMBuildCall2(cg->builder, s->type, s->value, args, 2,
+                          "neg_runtime");
   }
   if (strcmp(e->as.unary.op, "~") == 0) {
     fun_sig *s = ny_helper_not(cg);
@@ -1631,7 +3615,7 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
       return expr_fail(cg, e->tok, "slice operation requires 'slice'");
     LLVMValueRef start = e->as.index.start
                              ? gen_expr(cg, scopes, depth, e->as.index.start)
-                             : LLVMConstInt(cg->type_i64, 1, false); // 0 tagged
+                             : ny_c1(cg); // 0 tagged
     LLVMValueRef stop =
         e->as.index.stop
             ? gen_expr(cg, scopes, depth, e->as.index.stop)
@@ -1646,31 +3630,73 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
                          stop, step},
         4, "");
   }
-  fun_sig *s = ny_helper_get(cg);
+  fun_sig *s = ny_helper_index_read(cg);
   if (!s)
-    return expr_fail(cg, e->tok, "index operation requires 'get'");
+    return expr_fail(cg, e->tok, "index operation requires 'index_read'");
+  LLVMValueRef fast = expr_try_fast_index_read(cg, scopes, depth, e, s);
+  if (fast)
+    return fast;
   ny_dbg_loc(cg, e->tok);
-  LLVMValueRef args[16];
+  LLVMValueRef args[2];
   args[0] = gen_expr(cg, scopes, depth, e->as.index.target);
   args[1] = gen_expr(cg, scopes, depth, e->as.index.start);
-  unsigned arg_count = s->arity;
-  if (arg_count < 2)
-    arg_count = 2;
-  if (arg_count > 16)
-    arg_count = 16;
-  for (unsigned i = 2; i < arg_count; i++) {
-    args[i] = LLVMConstInt(cg->type_i64, 1, false); // Tagged 0 default
+  return LLVMBuildCall2(cg->builder, s->type, s->value, args, 2, "");
+}
+
+LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e) {
+  size_t item_count = e->as.list_like.len;
+  /* Header (16 bytes) + items * 8 bytes. We also need space for the tag at p-8.
+     Actually, standard Nytrix pointers point to (data + 8), and tag is at p-8.
+     Wait, rt_list_new allocates (16 + n*8). The pointer returned is the start of the 16 bytes? 
+     No, rt_list_new:
+     int64_t p = rt_malloc(16 + n * 8);
+     *(int64_t *)(p-8) = TAG_LIST;
+     return p;
+     So p points to the length/capacity header.
+  */
+
+  /* We need 8 (tag) + 16 (header) + n*8 (data). */
+  /* LLVMBuildAlloca takes an LLVM type; allocate enough i64 slots directly. */
+  LLVMValueRef mem_ptr = LLVMBuildAlloca(cg->builder, LLVMArrayType(cg->type_i64, 3 + item_count), "list_stack");
+  LLVMSetAlignment(mem_ptr, 16);
+
+  /* Get pointer to the data part (offset by 1 i64 for the tag) */
+  LLVMValueRef p_idx[2] = { ny_c0(cg), ny_c1(cg) };
+  LLVMValueRef p_addr = LLVMBuildGEP2(cg->builder, LLVMArrayType(cg->type_i64, 3 + item_count), mem_ptr, p_idx, 2, "p_header");
+  LLVMValueRef p = LLVMBuildPtrToInt(cg->builder, p_addr, cg->type_i64, "p_val");
+
+  /* Set tag at p-8 */
+  LLVMValueRef tag_addr = LLVMBuildIntToPtr(cg->builder, ny_sub(cg, p, ny_ci(cg, 8), ""), ny_ptr_i64_ty(cg), "");
+  uint64_t tag = (e->kind == NY_E_LIST) ? TAG_LIST : TAG_TUPLE;
+  ny_store(cg, tag_addr, ny_ci(cg, tag));
+
+  /* Set length at p+0 */
+  LLVMValueRef len_addr = LLVMBuildIntToPtr(cg->builder, p, ny_ptr_i64_ty(cg), "");
+  ny_store(cg, len_addr, ny_ci(cg, (item_count << 1) | 1));
+
+  /* Set capacity at p+8 */
+  LLVMValueRef cap_addr = LLVMBuildIntToPtr(cg->builder, ny_add(cg, p, ny_ci(cg, 8), ""), ny_ptr_i64_ty(cg), "");
+  ny_store(cg, cap_addr, ny_ci(cg, (item_count << 1) | 1));
+
+  /* Store items */
+  for (size_t i = 0; i < item_count; i++) {
+    LLVMValueRef item_val = gen_expr(cg, scopes, depth, e->as.list_like.data[i]);
+    LLVMValueRef item_addr = LLVMBuildIntToPtr(cg->builder, ny_add(cg, p, ny_ci(cg, 16 + i * 8), ""), ny_ptr_i64_ty(cg), "");
+    ny_store(cg, item_addr, item_val);
   }
-  return LLVMBuildCall2(cg->builder, s->type, s->value, args, arg_count, "");
+
+  return p;
 }
 
 static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
-                                       size_t depth, expr_t *e) {
-  fun_sig *ls = lookup_fun(cg, "__list_new", 0);
-  fun_sig *st = lookup_fun(cg, "__store64_idx", 0);
-  if (!ls || !st)
+                                        size_t depth, expr_t *e) {  fun_sig *ls = lookup_fun(cg, "__list_new", 0);
+  fun_sig *st = lookup_fun(cg, "__store_item_fast", 0);
+  fun_sig *set_len = lookup_fun(cg, "__list_set_len", 0);
+  if (!ls || !st || !set_len)
     return expr_fail(cg, e->tok,
-                     "list literal requires __list_new/__store64_idx helpers");
+                     "list literal requires "
+                     "__list_new/__store_item_fast/__list_set_len helpers");
   ny_dbg_loc(cg, e->tok);
   size_t item_count = e->as.list_like.len;
   LLVMValueRef vl = LLVMBuildCall2(
@@ -1680,37 +3706,36 @@ static LLVMValueRef gen_expr_list_like(codegen_t *cg, scope *scopes,
       1, "");
   for (size_t i = 0; i < item_count; i++) {
     if (i > 0 && i % 64 == 0) {
-      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
       LLVMValueRef cur_fn = LLVMGetBasicBlockParent(cur_bb);
-      LLVMBasicBlockRef next_bb = ny_llvm_append_block(cur_fn, "lst_chunk");
-      LLVMBuildBr(cg->builder, next_bb);
-      LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+      LLVMBasicBlockRef next_bb = ny_bb_fn(cur_fn, "lst_chunk");
+      ny_br(cg, next_bb);
+      ny_pos(cg, next_bb);
     }
     LLVMValueRef item = gen_expr(cg, scopes, depth, e->as.list_like.data[i]);
-    uint64_t tagged_off = ((((uint64_t)16 + (uint64_t)i * 8u) << 1) | 1u);
     ny_dbg_loc(cg, e->tok);
     (void)LLVMBuildCall2(
         cg->builder, st->type, st->value,
-        (LLVMValueRef[]){vl, LLVMConstInt(cg->type_i64, tagged_off, false),
-                         item},
+        (LLVMValueRef[]){
+            vl, LLVMConstInt(cg->type_i64, (((uint64_t)i << 1) | 1u), false),
+            item},
         3, "");
   }
-  // Set current length at offset 0 (tagged 1)
   (void)LLVMBuildCall2(
-      cg->builder, st->type, st->value,
-      (LLVMValueRef[]){vl, LLVMConstInt(cg->type_i64, 1, false),
+      cg->builder, set_len->type, set_len->value,
+      (LLVMValueRef[]){vl,
                        LLVMConstInt(cg->type_i64,
                                     (((uint64_t)item_count << 1) | 1u), false)},
-      3, "");
+      2, "");
   return vl;
 }
 
 static LLVMValueRef gen_expr_dict(codegen_t *cg, scope *scopes, size_t depth,
                                   expr_t *e) {
   fun_sig *ds = ny_helper_dict(cg);
-  fun_sig *ss = ny_helper_dict_set(cg);
+  fun_sig *ss = ny_helper_set(cg);
   if (!ds || !ss)
-    return expr_fail(cg, e->tok, "dict literal requires dict/dict_set helpers");
+    return expr_fail(cg, e->tok, "dict literal requires dict/set helpers");
   ny_dbg_loc(cg, e->tok);
   LLVMValueRef dl = LLVMBuildCall2(
       cg->builder, ds->type, ds->value,
@@ -1719,18 +3744,20 @@ static LLVMValueRef gen_expr_dict(codegen_t *cg, scope *scopes, size_t depth,
       1, "");
   for (size_t i = 0; i < e->as.dict.pairs.len; i++) {
     if (i > 0 && i % 64 == 0) {
-      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
       LLVMValueRef cur_fn = LLVMGetBasicBlockParent(cur_bb);
-      LLVMBasicBlockRef next_bb = ny_llvm_append_block(cur_fn, "dct_chunk");
-      LLVMBuildBr(cg->builder, next_bb);
-      LLVMPositionBuilderAtEnd(cg->builder, next_bb);
+      LLVMBasicBlockRef next_bb = ny_bb_fn(cur_fn, "dct_chunk");
+      ny_br(cg, next_bb);
+      ny_pos(cg, next_bb);
     }
-    LLVMBuildCall2(
+    LLVMValueRef next = LLVMBuildCall2(
         cg->builder, ss->type, ss->value,
         (LLVMValueRef[]){
             dl, gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].key),
             gen_expr(cg, scopes, depth, e->as.dict.pairs.data[i].value)},
         3, "");
+    if (next)
+      dl = next;
   }
   return dl;
 }
@@ -1739,8 +3766,12 @@ static LLVMValueRef gen_expr_set(codegen_t *cg, scope *scopes, size_t depth,
                                  expr_t *e) {
   fun_sig *ss = ny_helper_set(cg);
   fun_sig *as = ny_helper_set_add(cg);
-  if (!ss || !as)
+  if (!ss || !as) {
+    if (e->as.list_like.len == 0)
+      return expr_fail(cg, e->tok, "use dict() for empty dict or {'key': val} for dict literal",
+                       "'{}' is not valid syntax; use dict() for an empty dict");
     return expr_fail(cg, e->tok, "set literal requires set/set_add helpers");
+  }
   ny_dbg_loc(cg, e->tok);
   LLVMValueRef sl = LLVMBuildCall2(
       cg->builder, ss->type, ss->value,
@@ -1755,6 +3786,9 @@ static LLVMValueRef gen_expr_set(codegen_t *cg, scope *scopes, size_t depth,
   return sl;
 }
 
+static LLVMValueRef expr_gen_cond_i1(codegen_t *cg, scope *scopes, size_t depth,
+                                     expr_t *e);
+
 static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
                                      expr_t *e) {
   bool and = strcmp(e->as.logical.op, "&&") == 0;
@@ -1762,19 +3796,17 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
   vec_init(&rhs_narrow);
   bool narrow_rhs =
       ny_null_narrow_collect_logical_rhs(e->as.logical.left, and, &rhs_narrow);
-  LLVMValueRef left =
-      to_bool(cg, gen_expr(cg, scopes, depth, e->as.logical.left));
-  LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+  LLVMValueRef left = expr_gen_cond_i1(cg, scopes, depth, e->as.logical.left);
+  LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
   LLVMValueRef f = LLVMGetBasicBlockParent(cur_bb);
-  LLVMBasicBlockRef rhs_bb = ny_llvm_append_block(f, "lrhs"),
-                    end_bb = ny_llvm_append_block(f, "lend");
+  LLVMBasicBlockRef rhs_bb = ny_bb_fn(f, "lrhs"), end_bb = ny_bb_fn(f, "lend");
   ny_dbg_loc(cg, e->tok);
   if (and)
-    LLVMBuildCondBr(cg->builder, left, rhs_bb, end_bb);
+    ny_cond_br(cg, left, rhs_bb, end_bb);
   else
-    LLVMBuildCondBr(cg->builder, left, end_bb, rhs_bb);
+    ny_cond_br(cg, left, end_bb, rhs_bb);
 
-  LLVMPositionBuilderAtEnd(cg->builder, rhs_bb);
+  ny_pos(cg, rhs_bb);
 
   ny_null_narrow_restore_list_t rhs_applied;
   if (narrow_rhs)
@@ -1783,23 +3815,25 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
   if (narrow_rhs)
     ny_null_narrow_restore(&rhs_applied);
   vec_free(&rhs_narrow);
-  LLVMBuildBr(cg->builder, end_bb);
-  LLVMBasicBlockRef rend_bb = LLVMGetInsertBlock(cg->builder);
+  ny_br(cg, end_bb);
+  LLVMBasicBlockRef rend_bb = ny_cur_block(cg);
 
-  LLVMPositionBuilderAtEnd(cg->builder, end_bb);
+  ny_pos(cg, end_bb);
 
-  LLVMValueRef phi = LLVMBuildPhi(cg->builder, cg->type_i64, "");
+  LLVMValueRef phi = ny_phi(cg, cg->type_i64, "");
   LLVMAddIncoming(phi,
-                  (LLVMValueRef[]){and ? LLVMConstInt(cg->type_i64, 4, false)
-                                       : LLVMConstInt(cg->type_i64, 2, false),
+                  (LLVMValueRef[]){and ? ny_cfalse(cg)
+                                       : ny_ctrue(cg),
                                    rv},
                   (LLVMBasicBlockRef[]){cur_bb, rend_bb}, 2);
   return phi;
 }
 
-static bool ny_is_f64_like(codegen_t *cg, scope *scopes, size_t depth,
-                           expr_t *e) {
+static bool ny_is_f64_like_limited(codegen_t *cg, scope *scopes, size_t depth,
+                                   expr_t *e, unsigned budget) {
   if (!e)
+    return false;
+  if (budget == 0)
     return false;
   if (e->kind == NY_E_LITERAL)
     return e->as.literal.kind == NY_LIT_FLOAT;
@@ -1807,20 +3841,358 @@ static bool ny_is_f64_like(codegen_t *cg, scope *scopes, size_t depth,
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
       name_len = strlen(e->as.ident.name);
-    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
-                                   e->as.ident.hash);
-    return b && b->is_f64_slot;
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
+    return b && (b->is_f64_slot || b->is_f64_direct || b->is_f32_slot ||
+                 b->is_f32_direct);
   }
   if (e->kind == NY_E_BINARY) {
-    return ny_is_f64_like(cg, scopes, depth, e->as.binary.left) ||
-           ny_is_f64_like(cg, scopes, depth, e->as.binary.right);
+    return ny_is_f64_like_limited(cg, scopes, depth, e->as.binary.left,
+                                  budget - 1) ||
+           ny_is_f64_like_limited(cg, scopes, depth, e->as.binary.right,
+                                  budget - 1);
+  }
+  if (e->kind == NY_E_INDEX) {
+    const char *t = infer_expr_type(cg, scopes, depth, e);
+    return t && (strcmp(t, "f64") == 0 || strcmp(t, "f32") == 0 ||
+                 strcmp(t, "float") == 0);
+  }
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT) {
+    const char *fn_name = e->as.call.callee->as.ident.name;
+    if (fn_name) {
+      fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
+      return sig && sig->return_type &&
+             (strcmp(sig->return_type, "f64") == 0 ||
+              strcmp(sig->return_type, "f32") == 0 ||
+              strcmp(sig->return_type, "float") == 0);
+    }
   }
   return false;
 }
 
+static bool ny_is_f64_like(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e) {
+  return ny_is_f64_like_limited(cg, scopes, depth, e, 3);
+}
+
+static bool ny_is_f64_arith_op(const char *op);
+
+static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t depth,
+                                            expr_t *e, unsigned budget) {
+  if (!e)
+    return false;
+  if (budget == 0)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_INT ||
+           e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_IDENT) {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
+    return b && (b->is_int_slot || b->is_int_direct || b->is_f64_slot ||
+                 b->is_f64_direct || b->is_f32_slot || b->is_f32_direct ||
+                 (b->type_name &&
+                  (strcmp(b->type_name, "int") == 0 ||
+                   strcmp(b->type_name, "i64") == 0 ||
+                   strcmp(b->type_name, "f32") == 0 ||
+                   strcmp(b->type_name, "f64") == 0)));
+  }
+  if (e->kind == NY_E_BINARY) {
+    const char *op = e->as.binary.op;
+    if (!ny_is_f64_arith_op(op))
+      return false;
+    return ny_is_numeric_expr_like_limited(cg, scopes, depth, e->as.binary.left,
+                                           budget - 1) &&
+           ny_is_numeric_expr_like_limited(cg, scopes, depth, e->as.binary.right,
+                                           budget - 1);
+  }
+  if (e->kind == NY_E_INDEX) {
+    const char *t = infer_expr_type(cg, scopes, depth, e);
+    return t && (strcmp(t, "int") == 0 || strcmp(t, "i64") == 0 ||
+                 strcmp(t, "f32") == 0 || strcmp(t, "f64") == 0 ||
+                 strcmp(t, "float") == 0);
+  }
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT) {
+    const char *fn_name = e->as.call.callee->as.ident.name;
+    if (fn_name) {
+      fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
+      return sig && sig->return_type &&
+             (strcmp(sig->return_type, "int") == 0 ||
+              strcmp(sig->return_type, "i64") == 0 ||
+              strcmp(sig->return_type, "f32") == 0 ||
+              strcmp(sig->return_type, "f64") == 0);
+    }
+  }
+  return false;
+}
+
+static bool ny_is_numeric_expr_like(codegen_t *cg, scope *scopes, size_t depth,
+                                    expr_t *e) {
+  return ny_is_numeric_expr_like_limited(cg, scopes, depth, e, 3);
+}
+
 static bool ny_is_f64_arith_op(const char *op) {
-  return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
-         strcmp(op, "/") == 0;
+   return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
+          strcmp(op, "/") == 0;
+}
+
+static bool expr_is_cmp_op(const char *op) {
+  return op && (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
+                strcmp(op, ">") == 0 || strcmp(op, ">=") == 0 ||
+                strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
+}
+
+static LLVMIntPredicate expr_icmp_pred_for_op(const char *op) {
+  if (strcmp(op, "<") == 0)
+    return LLVMIntSLT;
+  if (strcmp(op, "<=") == 0)
+    return LLVMIntSLE;
+  if (strcmp(op, ">") == 0)
+    return LLVMIntSGT;
+  if (strcmp(op, ">=") == 0)
+    return LLVMIntSGE;
+  if (strcmp(op, "!=") == 0)
+    return LLVMIntNE;
+  return LLVMIntEQ;
+}
+
+static LLVMRealPredicate expr_fcmp_pred_for_op(const char *op) {
+  if (strcmp(op, "<") == 0)
+    return LLVMRealOLT;
+  if (strcmp(op, "<=") == 0)
+    return LLVMRealOLE;
+  if (strcmp(op, ">") == 0)
+    return LLVMRealOGT;
+  if (strcmp(op, ">=") == 0)
+    return LLVMRealOGE;
+  if (strcmp(op, "!=") == 0)
+    return LLVMRealUNE;
+  return LLVMRealOEQ;
+}
+
+static LLVMValueRef expr_gen_cond_i1(codegen_t *cg, scope *scopes, size_t depth,
+                                     expr_t *e) {
+  if (!e)
+    return LLVMConstInt(ny_i1_ty(cg), 0, false);
+
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_BOOL)
+    return LLVMConstInt(ny_i1_ty(cg), e->as.literal.as.b ? 1 : 0, false);
+
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      strcmp(e->as.unary.op, "!") == 0) {
+    LLVMValueRef inner = expr_gen_cond_i1(cg, scopes, depth, e->as.unary.right);
+    return LLVMBuildNot(cg->builder, inner, "expr_cond_not");
+  }
+
+  if (e->kind == NY_E_LOGICAL && e->as.logical.op) {
+    bool and_op = strcmp(e->as.logical.op, "&&") == 0;
+    bool or_op = strcmp(e->as.logical.op, "||") == 0;
+    if (and_op || or_op) {
+      ny_null_narrow_list_t rhs_narrow;
+      vec_init(&rhs_narrow);
+      bool narrow_rhs =
+          ny_null_narrow_collect_logical_rhs(e->as.logical.left, and_op, &rhs_narrow);
+
+      LLVMValueRef left = expr_gen_cond_i1(cg, scopes, depth, e->as.logical.left);
+      LLVMBasicBlockRef left_bb = ny_cur_block(cg);
+      LLVMValueRef fn = LLVMGetBasicBlockParent(left_bb);
+      LLVMBasicBlockRef rhs_bb = ny_bb_fn(fn, "expr_cond_rhs");
+      LLVMBasicBlockRef end_bb = ny_bb_fn(fn, "expr_cond_end");
+      if (and_op)
+        ny_cond_br(cg, left, rhs_bb, end_bb);
+      else
+        ny_cond_br(cg, left, end_bb, rhs_bb);
+
+      ny_pos(cg, rhs_bb);
+      ny_null_narrow_restore_list_t rhs_applied;
+      if (narrow_rhs)
+        ny_null_narrow_apply(cg, scopes, depth, &rhs_narrow, true, &rhs_applied);
+      LLVMValueRef right = expr_gen_cond_i1(cg, scopes, depth, e->as.logical.right);
+      if (narrow_rhs)
+        ny_null_narrow_restore(&rhs_applied);
+      vec_free(&rhs_narrow);
+      LLVMBasicBlockRef rhs_done = ny_cur_block(cg);
+      ny_br(cg, end_bb);
+
+      ny_pos(cg, end_bb);
+      LLVMValueRef phi = ny_phi(cg, ny_i1_ty(cg), "expr_cond_logic");
+      LLVMValueRef short_value =
+          LLVMConstInt(ny_i1_ty(cg), and_op ? 0 : 1, false);
+      LLVMAddIncoming(phi, (LLVMValueRef[]){short_value, right},
+                      (LLVMBasicBlockRef[]){left_bb, rhs_done}, 2);
+      return phi;
+    }
+  }
+
+  if (e->kind == NY_E_BINARY && expr_is_cmp_op(e->as.binary.op)) {
+    const char *op = e->as.binary.op;
+    expr_t *le = e->as.binary.left;
+    expr_t *re = e->as.binary.right;
+    if ((ny_is_f64_like(cg, scopes, depth, le) ||
+         ny_is_f64_like(cg, scopes, depth, re)) &&
+        ny_is_numeric_expr_like(cg, scopes, depth, le) &&
+        ny_is_numeric_expr_like(cg, scopes, depth, re)) {
+      LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, le);
+      LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
+      return LLVMBuildFCmp(cg->builder, expr_fcmp_pred_for_op(op), lf, rf,
+                           "expr_cond_fcmp");
+    }
+
+    if (ny_is_proven_int(cg, scopes, depth, le, NULL) &&
+        ny_is_proven_int(cg, scopes, depth, re, NULL)) {
+      LLVMValueRef l = gen_expr(cg, scopes, depth, le);
+      LLVMValueRef r = gen_expr(cg, scopes, depth, re);
+      return LLVMBuildICmp(cg->builder, expr_icmp_pred_for_op(op), l, r,
+                           "expr_cond_icmp");
+    }
+  }
+
+  return to_bool(cg, gen_expr(cg, scopes, depth, e));
+}
+
+static const char *ny_ownership_helper_name(expr_t *e) {
+  if (!e || e->kind != NY_E_CALL || !e->as.call.callee ||
+      e->as.call.callee->kind != NY_E_IDENT || !e->as.call.callee->as.ident.name ||
+      e->as.call.args.len != 1)
+    return NULL;
+  const char *n = e->as.call.callee->as.ident.name;
+  const char *dot = strrchr(n, '.');
+  n = dot ? dot + 1 : n;
+  if (strcmp(n, "borrow") == 0 || strcmp(n, "own") == 0 || strcmp(n, "release") == 0 ||
+      strcmp(n, "forget") == 0)
+    return n;
+  return NULL;
+}
+
+static LLVMValueRef gen_ownership_helper_expr(codegen_t *cg, scope *scopes, size_t depth,
+                                              expr_t *e, const char *name) {
+  expr_t *arg = e->as.call.args.data[0].val;
+  if (strcmp(name, "borrow") == 0 || strcmp(name, "own") == 0)
+    return gen_expr(cg, scopes, depth, arg);
+  if (strcmp(name, "release") == 0) {
+    LLVMValueRef v = gen_expr(cg, scopes, depth, arg);
+    fun_sig *drop_sig = lookup_fun(cg, "__drop_owned", 0);
+    if (drop_sig)
+      LLVMBuildCall2(cg->builder, drop_sig->type, drop_sig->value, (LLVMValueRef[]){v}, 1,
+                     "own.release");
+    return ny_c0(cg);
+  }
+  return ny_c0(cg);
+}
+
+static bool ny_adt_type_is_param(enum_def_t *owner, const char *type_name) {
+  if (!owner || !type_name)
+    return false;
+  for (size_t i = 0; i < owner->type_params.len; i++) {
+    if (owner->type_params.data[i] && strcmp(owner->type_params.data[i], type_name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static LLVMValueRef gen_adt_constructor_expr(codegen_t *cg, scope *scopes, size_t depth,
+                                             expr_t *e) {
+  char *name = ny_adt_member_call_full_name(cg, e);
+  if (!name)
+    return NULL;
+  enum_def_t *owner = NULL;
+  enum_member_def_t *mem = lookup_enum_member_owner(cg, name, &owner);
+  if (!mem || !owner || !mem->has_payload)
+    return NULL;
+
+  call_arg_t *args = NULL;
+  size_t arg_count = 0;
+  ny_expr_call_args(e, &args, &arg_count);
+  size_t nfields = mem->fields.len ? mem->fields.len : 1;
+  bool *seen_fields = alloca(sizeof(bool) * nfields);
+  expr_t **field_exprs = alloca(sizeof(expr_t *) * nfields);
+  memset(seen_fields, 0, sizeof(bool) * nfields);
+  memset(field_exprs, 0, sizeof(expr_t *) * nfields);
+
+  for (size_t i = 0; i < arg_count; i++) {
+    call_arg_t *arg = &args[i];
+    if (!arg->name) {
+      return expr_fail(cg, e->tok, "ADT constructor '%s.%s' requires named fields",
+                       owner->name, mem->name);
+    }
+    ssize_t idx = ny_enum_member_field_index(mem, arg->name);
+    if (idx < 0) {
+      return expr_fail(cg, e->tok, "unknown field '%s' for ADT variant '%s.%s'", arg->name,
+                       owner->name, mem->name);
+    }
+    if (seen_fields[idx]) {
+      return expr_fail(cg, e->tok, "duplicate field '%s' for ADT variant '%s.%s'", arg->name,
+                       owner->name, mem->name);
+    }
+    seen_fields[idx] = true;
+    field_exprs[idx] = arg->val;
+  }
+
+  for (size_t i = 0; i < mem->fields.len; i++) {
+    if (!seen_fields[i]) {
+      return expr_fail(cg, e->tok, "missing field '%s' for ADT variant '%s.%s'",
+                       mem->fields.data[i].name, owner->name, mem->name);
+    }
+  }
+
+  fun_sig *malloc_sig = lookup_fun(cg, "__malloc", 0);
+  if (!malloc_sig)
+    return expr_fail(cg, e->tok, "__malloc required for ADT constructor");
+
+  size_t bytes = mem->fields.len * sizeof(int64_t);
+  LLVMValueRef p =
+      LLVMBuildCall2(cg->builder, malloc_sig->type, malloc_sig->value,
+                     (LLVMValueRef[]){ny_ci(cg, ((uint64_t)bytes << 1) | 1u)}, 1,
+                     NY_LLVM_NAME(cg, "adt_alloc"));
+  LLVMValueRef tag_addr = LLVMBuildIntToPtr(cg->builder, ny_sub(cg, p, ny_ci(cg, 8), ""),
+                                            ny_ptr_i64_ty(cg), "");
+  ny_store(cg, tag_addr, ny_ci(cg, mem->runtime_tag));
+  LLVMValueRef size_addr = LLVMBuildIntToPtr(cg->builder, ny_sub(cg, p, ny_ci(cg, 16), ""),
+                                             ny_ptr_i64_ty(cg), "");
+  ny_store(cg, size_addr, ny_ci(cg, ((uint64_t)bytes << 1) | 1u));
+
+  for (size_t i = 0; i < mem->fields.len; i++) {
+    enum_field_def_t *field = &mem->fields.data[i];
+    if (field->type_name && strcmp(field->type_name, "any") != 0 &&
+        !ny_adt_type_is_param(owner, field->type_name))
+      ensure_expr_type_compatible(cg, scopes, depth, field->type_name, field_exprs[i],
+                                  field_exprs[i] ? field_exprs[i]->tok : e->tok,
+                                  "ADT constructor");
+    LLVMValueRef val = gen_expr(cg, scopes, depth, field_exprs[i]);
+    LLVMValueRef slot_addr =
+        LLVMBuildIntToPtr(cg->builder, ny_add(cg, p, ny_ci(cg, (uint64_t)i * 8), ""),
+                          ny_ptr_i64_ty(cg), "");
+    ny_store(cg, slot_addr, val);
+  }
+  return p;
+}
+
+static void ny_emit_f64_div_zero_guard(codegen_t *cg, LLVMValueRef rf) {
+  fun_sig *panic_sig = lookup_fun(cg, "__panic", 0);
+  if (!panic_sig)
+    return;
+  LLVMValueRef zero = LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), 0.0);
+  LLVMValueRef is_zero = LLVMBuildFCmp(cg->builder, LLVMRealOEQ, rf, zero, "fdiv_zero");
+  LLVMBasicBlockRef cur = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(cur);
+  LLVMBasicBlockRef panic_bb = ny_bb_fn(fn, "fdiv.zero.panic");
+  LLVMBasicBlockRef ok_bb = ny_bb_fn(fn, "fdiv.zero.ok");
+  ny_cond_br(cg, is_zero, panic_bb, ok_bb);
+
+  ny_pos(cg, panic_bb);
+  const char *msg = "division by zero";
+  LLVMValueRef msg_global = const_string_ptr(cg, msg, strlen(msg));
+  LLVMValueRef msg_ptr = ny_load(cg, msg_global, "fdiv_zero_msg");
+  LLVMBuildCall2(cg->builder, panic_sig->type, panic_sig->value,
+                 (LLVMValueRef[]){msg_ptr}, 1, "");
+  LLVMBuildUnreachable(cg->builder);
+
+  ny_pos(cg, ok_bb);
 }
 
 static LLVMValueRef ny_emit_f64_op(codegen_t *cg, const char *op,
@@ -1831,8 +4203,10 @@ static LLVMValueRef ny_emit_f64_op(codegen_t *cg, const char *op,
     return LLVMBuildFSub(cg->builder, lf, rf, "fsub");
   if (strcmp(op, "*") == 0)
     return LLVMBuildFMul(cg->builder, lf, rf, "fmul");
-  if (strcmp(op, "/") == 0)
+  if (strcmp(op, "/") == 0) {
+    ny_emit_f64_div_zero_guard(cg, rf);
     return LLVMBuildFDiv(cg->builder, lf, rf, "fdiv");
+  }
   return NULL;
 }
 
@@ -1858,22 +4232,30 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
       name_len = strlen(e->as.ident.name);
-    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
-                                   e->as.ident.hash);
-    if (b && b->is_f64_slot) {
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct)) {
       b->is_used = true;
       return b->is_slot
                  ? LLVMBuildLoad2(cg->builder, cg->type_f64, b->value, "f64_ld")
                  : b->value;
     }
+    if (b && (b->is_f32_slot || b->is_f32_direct)) {
+      b->is_used = true;
+      LLVMValueRef f32_val =
+          b->is_slot
+              ? LLVMBuildLoad2(cg->builder, cg->type_f32, b->value, "f32_ld")
+              : b->value;
+      return LLVMBuildFPExt(cg->builder, f32_val, cg->type_f64, "f2f");
+    }
 
     if (b && b->type_name && strcmp(b->type_name, "int") == 0) {
       b->is_used = true;
-      LLVMValueRef tagged =
-          b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "")
-                     : b->value;
-      return LLVMBuildSIToFP(cg->builder, ny_untag_int(cg, tagged), f64_ty,
-                             "i2f");
+      LLVMValueRef raw =
+          (!b->is_slot && b->is_int_raw_direct && b->raw_int_value)
+              ? b->raw_int_value
+              : ny_untag_int(cg, b->is_slot ? ny_load(cg, b->value, "") : b->value);
+      return LLVMBuildSIToFP(cg->builder, raw, f64_ty, "i2f");
     }
     break;
   }
@@ -1881,24 +4263,113 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     const char *op = e->as.binary.op;
     if (!ny_is_f64_arith_op(op))
       break;
+    if (!ny_is_numeric_expr_like(cg, scopes, depth, e->as.binary.left) ||
+        !ny_is_numeric_expr_like(cg, scopes, depth, e->as.binary.right))
+      break;
     // Fast path: Recursively generate operands as f64.
     // Falls back to gen_expr + unbox if operands are not float-like.
     LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.left);
     LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.right);
     return ny_emit_f64_op(cg, op, lf, rf);
   }
+  case NY_E_UNARY:
+    if (e->as.unary.op && e->as.unary.right) {
+      if (strcmp(e->as.unary.op, "+") == 0)
+        return gen_expr_as_f64(cg, scopes, depth, e->as.unary.right);
+      if (strcmp(e->as.unary.op, "-") == 0)
+        return LLVMBuildFNeg(cg->builder,
+                             gen_expr_as_f64(cg, scopes, depth, e->as.unary.right),
+                             "fneg");
+    }
+    break;
+  case NY_E_TERNARY: {
+    LLVMValueRef cond = expr_gen_cond_i1(cg, scopes, depth, e->as.ternary.cond);
+    LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+    LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+    LLVMBasicBlockRef true_bb = ny_bb_fn(fn, "tern_f64_true");
+    LLVMBasicBlockRef false_bb = ny_bb_fn(fn, "tern_f64_false");
+    LLVMBasicBlockRef end_bb = ny_bb_fn(fn, "tern_f64_end");
+    ny_cond_br(cg, cond, true_bb, false_bb);
+
+    ny_pos(cg, true_bb);
+    LLVMValueRef true_val =
+        gen_expr_as_f64(cg, scopes, depth, e->as.ternary.true_expr);
+    ny_br(cg, end_bb);
+    LLVMBasicBlockRef true_end_bb = ny_cur_block(cg);
+
+    ny_pos(cg, false_bb);
+    LLVMValueRef false_val =
+        gen_expr_as_f64(cg, scopes, depth, e->as.ternary.false_expr);
+    ny_br(cg, end_bb);
+    LLVMBasicBlockRef false_end_bb = ny_cur_block(cg);
+
+    ny_pos(cg, end_bb);
+    LLVMValueRef phi = ny_phi(cg, cg->type_f64, "tern_f64");
+    LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
+                    (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
+    return phi;
+  }
   case NY_E_CALL: {
+    LLVMValueRef f64buf_load =
+        ny_try_fast_f64buf_load_as_f64(cg, scopes, depth, e);
+    if (f64buf_load)
+      return f64buf_load;
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
+      size_t surface_len = 0;
+      uint64_t surface_hash = 0;
+      const char *surface = ny_builtin_surface_name_for_callee(
+          e->as.call.callee, &surface_len, &surface_hash);
+      bool builtin_shadowed =
+          !surface || ny_builtin_name_shadowed_by_user_symbol(
+                          cg, scopes, depth, surface, surface_len, surface_hash);
       const char *fn_name = e->as.call.callee->as.ident.name;
       if (fn_name) {
+        const char *leaf = strrchr(fn_name, '.');
+        leaf = leaf ? leaf + 1 : fn_name;
+        const char *surface_leaf = surface ? strrchr(surface, '.') : NULL;
+        surface_leaf = surface_leaf ? surface_leaf + 1 : surface;
+        if (!builtin_shadowed && e->as.call.args.len == 1 &&
+            ((surface_leaf && (strcmp(surface_leaf, "float") == 0 ||
+                               strcmp(surface_leaf, "to_float") == 0)) ||
+             strcmp(leaf, "std.core.float") == 0 ||
+             strcmp(leaf, "std.core.to_float") == 0 ||
+             strcmp(leaf, "float") == 0 || strcmp(leaf, "to_float") == 0)) {
+          expr_t *arg = e->as.call.args.data[0].val;
+          if (!arg)
+            return LLVMConstReal(f64_ty, 0.0);
+          if (ny_is_proven_int(cg, scopes, depth, arg, NULL)) {
+            LLVMValueRef tagged = gen_expr(cg, scopes, depth, arg);
+            LLVMValueRef raw = ny_untag_int(cg, tagged);
+            return LLVMBuildSIToFP(cg->builder, raw, f64_ty, "i2f");
+          }
+          return gen_expr_as_f64(cg, scopes, depth, arg);
+        }
         fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
-        if (sig && sig->return_type && strcmp(sig->return_type, "f64") == 0) {
+        const char *ret_type =
+            sig ? (sig->return_type ? sig->return_type
+                                    : sig->inferred_return_type)
+                : NULL;
+        if (sig && ret_type && strcmp(ret_type, "f64") == 0) {
+          LLVMValueRef native = ny_try_native_call_as_f64(cg, scopes, depth, e);
+          if (native)
+            return native;
           LLVMValueRef call_result = gen_call_expr(cg, scopes, depth, e);
-          LLVMValueRef ptr = LLVMBuildIntToPtr(
-              cg->builder, call_result, LLVMPointerType(cg->type_f64, 0), "");
-          return LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64_call");
+          return ny_unbox_float(cg, call_result);
+        }
+        if (sig && ret_type && strcmp(ret_type, "int") == 0) {
+          LLVMValueRef call_result = gen_call_expr(cg, scopes, depth, e);
+          return LLVMBuildSIToFP(cg->builder, ny_untag_int(cg, call_result),
+                                 f64_ty, "i2f.call");
         }
       }
+    }
+    break;
+  }
+  case NY_E_INDEX: {
+    const char *t = infer_expr_type(cg, scopes, depth, e);
+    if (t && (strcmp(t, "f64") == 0 || strcmp(t, "f32") == 0 ||
+              strcmp(t, "float") == 0)) {
+      return ny_unbox_known_numeric_float(cg, gen_expr(cg, scopes, depth, e));
     }
     break;
   }
@@ -1913,9 +4384,9 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
       name_len = strlen(e->as.ident.name);
-    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
-                                   e->as.ident.hash);
-    if (b && b->is_f64_slot) {
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct)) {
       LLVMValueRef ptr =
           LLVMBuildIntToPtr(cg->builder, v, LLVMPointerType(f64_ty, 0), "");
       return LLVMBuildLoad2(cg->builder, f64_ty, ptr, "f64_load");
@@ -1925,17 +4396,184 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
   return ny_unbox_float(cg, v);
 }
 
-LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+static LLVMValueRef ny_try_emit_mono_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth,
+                                                  expr_t *e) {
+  if (!cg || !e || cg->mono_raw_expr_disabled)
+    return NULL;
+  bool mono_mode = cg->mono_emitting;
+  bool proven_fast =
+      !mono_mode && ny_fast_path_enabled(cg, "NYTRIX_PROVEN_RAW_INT_EXPR_FAST") &&
+      ny_is_proven_int(cg, scopes, depth, e, NULL);
+  if (!mono_mode && !proven_fast)
+    return NULL;
+  LLVMValueRef raw = NULL;
+  LLVMValueRef ok = NULL;
+  if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw || !ok)
+    return NULL;
+
+  if (!mono_mode) {
+    if (!LLVMIsAConstantInt(ok) || LLVMConstIntGetZExtValue(ok) == 0)
+      return NULL;
+    return ny_tag_int(cg, raw);
+  }
+
+  LLVMValueRef cur_fn = ny_cur_fn(cg);
+  if (!cur_fn)
+    return NULL;
+  LLVMBasicBlockRef fast_bb = ny_bb_fn(cur_fn, "mono.raw.fast");
+  LLVMBasicBlockRef slow_bb = ny_bb_fn(cur_fn, "mono.raw.slow");
+  LLVMBasicBlockRef done_bb = ny_bb_fn(cur_fn, "mono.raw.done");
+  ny_cond_br(cg, ok, fast_bb, slow_bb);
+
+  ny_pos(cg, fast_bb);
+  LLVMValueRef fast_value = ny_tag_int(cg, raw);
+  LLVMBasicBlockRef fast_end = ny_cur_block(cg);
+  ny_br(cg, done_bb);
+
+  ny_pos(cg, slow_bb);
+  bool old_disabled = cg->mono_raw_expr_disabled;
+  cg->mono_raw_expr_disabled = true;
+  LLVMValueRef slow_value = gen_expr(cg, scopes, depth, e);
+  cg->mono_raw_expr_disabled = old_disabled;
+  LLVMBasicBlockRef slow_end = ny_cur_block(cg);
+  if (!ny_has_terminator(cg))
+    ny_br(cg, done_bb);
+
+  ny_pos(cg, done_bb);
+  LLVMValueRef phi = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "mono_raw_int"));
+  LLVMAddIncoming(phi, (LLVMValueRef[]){fast_value, slow_value},
+                  (LLVMBasicBlockRef[]){fast_end, slow_end}, 2);
+  return phi;
+}
+
+static size_t ny_int_literal_value_len(token_t tok) {
+  size_t len = (size_t)tok.len;
+  const char *s = tok.lexeme;
+  if (!s || len < 2)
+    return len;
+  size_t i = len;
+  while (i > 0 && isdigit((unsigned char)s[i - 1]))
+    i--;
+  if (i == 0 || i == len)
+    return len;
+  char c = s[i - 1];
+  if (c != 'i' && c != 'I' && c != 'u' && c != 'U')
+    return len;
+  size_t suffix_start = i - 1;
+  if (suffix_start > 0 && s[suffix_start - 1] == '_')
+    return suffix_start - 1;
+  return suffix_start;
+}
+
+static int ny_int_literal_digit_value(char c) {
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return 10 + (c - 'a');
+  if (c >= 'A' && c <= 'F')
+    return 10 + (c - 'A');
+  return -1;
+}
+
+static char *ny_dec_mul_add_small(const char *dec, unsigned base, unsigned digit) {
+  const char *src = (dec && *dec) ? dec : "0";
+  size_t len = strlen(src);
+  size_t cap = len + 16;
+  char *buf = malloc(cap);
+  if (!buf)
+    return NULL;
+  size_t pos = cap - 1;
+  buf[pos] = '\0';
+  unsigned carry = digit;
+  for (ssize_t i = (ssize_t)len - 1; i >= 0; --i) {
+    char c = src[i];
+    if (c < '0' || c > '9') {
+      free(buf);
+      return NULL;
+    }
+    unsigned v = (unsigned)(c - '0') * base + carry;
+    if (pos == 0) {
+      free(buf);
+      return NULL;
+    }
+    buf[--pos] = (char)('0' + (v % 10u));
+    carry = v / 10u;
+  }
+  while (carry > 0) {
+    if (pos == 0) {
+      free(buf);
+      return NULL;
+    }
+    buf[--pos] = (char)('0' + (carry % 10u));
+    carry /= 10u;
+  }
+  while (buf[pos] == '0' && buf[pos + 1] != '\0')
+    pos++;
+  char *out = ny_strdup(buf + pos);
+  free(buf);
+  return out;
+}
+
+static char *ny_int_literal_decimal_from_token(token_t tok, int64_t fallback) {
+  char fallback_buf[64];
+  snprintf(fallback_buf, sizeof(fallback_buf), "%" PRId64, fallback);
+  if (!tok.lexeme || tok.len <= 0)
+    return ny_strdup(fallback_buf);
+
+  size_t len = ny_int_literal_value_len(tok);
+  const char *s = tok.lexeme;
+  unsigned base = 10;
+  size_t i = 0;
+  if (len > 2 && s[0] == '0') {
+    if (s[1] == 'x' || s[1] == 'X') {
+      base = 16;
+      i = 2;
+    } else if (s[1] == 'b' || s[1] == 'B') {
+      base = 2;
+      i = 2;
+    } else if (s[1] == 'o' || s[1] == 'O') {
+      base = 8;
+      i = 2;
+    }
+  }
+
+  char *dec = ny_strdup("0");
+  if (!dec)
+    return NULL;
+  bool saw_digit = false;
+  for (; i < len; i++) {
+    if (s[i] == '_')
+      continue;
+    int digit = ny_int_literal_digit_value(s[i]);
+    if (digit < 0 || (unsigned)digit >= base) {
+      free(dec);
+      return ny_strdup(fallback_buf);
+    }
+    saw_digit = true;
+    char *next = ny_dec_mul_add_small(dec, base, (unsigned)digit);
+    free(dec);
+    if (!next)
+      return NULL;
+    dec = next;
+  }
+  if (!saw_digit) {
+    free(dec);
+    return ny_strdup(fallback_buf);
+  }
+  return dec;
+}
+
+static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
 
   // Check for dead code - don't generate instructions if block is terminated
   if (cg->builder) {
-    LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+    LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
     if (cur_bb && LLVMGetBasicBlockTerminator(cur_bb)) {
       return LLVMGetUndef(cg->type_i64);
     }
   }
   if (!e || cg->had_error)
-    return LLVMConstInt(cg->type_i64, 0, false);
+    return ny_c0(cg);
 
   ny_dbg_loc(cg, e->tok);
 
@@ -1943,18 +4581,30 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_COMPTIME:
     return gen_comptime_eval(cg, e->as.comptime_expr.body);
   case NY_E_LITERAL:
-    if (e->as.literal.kind == NY_LIT_INT)
-      return LLVMConstInt(cg->type_i64, ((uint64_t)e->as.literal.as.i << 1) | 1,
-                          true);
+    if (e->as.literal.kind == NY_LIT_INT) {
+      int64_t raw = e->as.literal.as.i;
+      if (ny_small_int_fits_i64(raw))
+        return LLVMConstInt(cg->type_i64, ((uint64_t)raw << 1) | 1, true);
+      char *dec = ny_int_literal_decimal_from_token(e->tok, raw);
+      const char *lit = dec ? dec : "0";
+      LLVMValueRef str_runtime_global = const_string_ptr(cg, lit, strlen(lit));
+      free(dec);
+      LLVMValueRef str_ptr = ny_load(cg, str_runtime_global, "big_lit_str");
+      fun_sig *big_from_str = lookup_fun(cg, "__bigint_from_str", 0);
+      if (!big_from_str)
+        return expr_fail(cg, e->tok, "builtin __bigint_from_str missing");
+      return LLVMBuildCall2(cg->builder, big_from_str->type,
+                            big_from_str->value, (LLVMValueRef[]){str_ptr}, 1,
+                            "big_lit");
+    }
     if (e->as.literal.kind == NY_LIT_BOOL)
-      return LLVMConstInt(cg->type_i64, e->as.literal.as.b ? 2 : 4, false);
+      return e->as.literal.as.b ? ny_ctrue(cg) : ny_cfalse(cg);
     if (e->as.literal.kind == NY_LIT_STR) {
       // Get the runtime pointer global for this string
       LLVMValueRef str_runtime_global =
           const_string_ptr(cg, e->as.literal.as.s.data, e->as.literal.as.s.len);
       // Load the pointer value (will be initialized by string init function)
-      return LLVMBuildLoad2(cg->builder, cg->type_i64, str_runtime_global,
-                            "str_ptr");
+      return ny_load(cg, str_runtime_global, "str_ptr");
     }
     if (e->as.literal.kind == NY_LIT_FLOAT) {
       fun_sig *box_sig = ny_helper_flt_box(cg);
@@ -1968,54 +4618,53 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       }
       LLVMValueRef fval =
           LLVMConstReal(LLVMDoubleTypeInContext(cg->ctx), fval_d);
-      return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
-                            (LLVMValueRef[]){LLVMBuildBitCast(
-                                cg->builder, fval, cg->type_i64, "")},
-                            1, "");
+      return LLVMBuildCall2(
+          cg->builder, box_sig->type, box_sig->value,
+          (LLVMValueRef[]){ny_bitcast(cg, fval, cg->type_i64, "")}, 1, "");
     }
-    return LLVMConstInt(cg->type_i64, 0, false);
+    return ny_c0(cg);
   case NY_E_IDENT: {
     size_t name_len = (size_t)e->tok.len;
     if (name_len == 0)
       name_len = strlen(e->as.ident.name);
-    binding *b = scope_lookup_hash(scopes, depth, e->as.ident.name, name_len,
-                                   e->as.ident.hash);
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                                     e->as.ident.hash);
     if (b) {
-      b->is_used = true;
-      if (b->is_f64_slot || b->is_f64_direct) {
-        LLVMValueRef fv = b->is_slot ? LLVMBuildLoad2(cg->builder, cg->type_f64,
-                                                      b->value, "f64_ld")
-                                     : b->value;
-        fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
-        if (box_sig)
-          return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
-                                (LLVMValueRef[]){LLVMBuildBitCast(
-                                    cg->builder, fv, cg->type_i64, "")},
-                                1, "box");
+      if (cg->comptime && b->stmt_t && !ny_is_stdlib_tok(b->stmt_t->tok) &&
+          b->value && LLVMIsAGlobalVariable(b->value)) {
+        expr_t *init =
+            !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
+        ny_ct_fast_val_t folded = ny_ct_fast_none();
+        if (init && init != e &&
+            ny_try_eval_comptime_expr_fast(cg, init, &folded, 0)) {
+          LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &folded, e->tok);
+          if (v)
+            return v;
+        }
+        return expr_fail(cg, e->tok,
+                         "comptime cannot capture runtime global '%s'",
+                         e->as.ident.name);
       }
-
-      if (b->is_slot) {
-        return LLVMBuildLoad2(cg->builder, cg->type_i64, b->value, "");
-      }
-      return b->value;
+      return expr_value_from_binding(cg, b);
     }
 
-    binding *gb = lookup_global_hash(cg, e->as.ident.name, e->as.ident.hash);
-    if (gb) {
-      gb->is_used = true;
-      if (gb->is_slot) {
-        return LLVMBuildLoad2(cg->builder, cg->type_i64, gb->value, "");
-      }
-      return gb->value;
-    }
     fun_sig *s = lookup_fun(cg, e->as.ident.name, e->as.ident.hash);
     if (s) {
-      LLVMValueRef sv = s->value;
+      bool boxed_callable =
+          !s->is_extern && ny_named_callable_values_need_closure(cg);
+      LLVMValueRef sv =
+          (boxed_callable || ny_fun_sig_needs_tagged_callable_adapter(s))
+              ? ny_fun_sig_tagged_callable_adapter(cg, s, e->tok, boxed_callable)
+              : s->value;
+      if (boxed_callable) {
+        LLVMValueRef raw = ny_ptr2i64(cg, sv, "");
+        return ny_box_callable_closure(cg, raw, e->tok);
+      }
       // Return raw callable pointer as int. Do not apply ad-hoc low-bit tags:
       // on 32-bit targets, tag `2` collides with NY_NATIVE_TAG and causes
       // __callN/__thread dispatch to treat Nytrix functions as native
       // pointers.
-      return LLVMBuildPtrToInt(cg->builder, sv, cg->type_i64, "");
+      return ny_ptr2i64(cg, sv, "");
     }
 
     // NEW: Try resolving as an unqualified enum member
@@ -2029,7 +4678,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
       return host_ident;
 
     report_undef_symbol(cg, e->as.ident.name, e->tok);
-    return LLVMConstInt(cg->type_i64, 0, false);
+    return ny_c0(cg);
   }
   case NY_E_UNARY: {
     return gen_expr_unary(cg, scopes, depth, e);
@@ -2037,6 +4686,45 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_BINARY: {
     const char *op = e->as.binary.op;
     expr_t *le = e->as.binary.left, *re = e->as.binary.right;
+
+    if (op && strcmp(op, "..") == 0)
+      return gen_range_expr(cg, scopes, depth, e);
+
+    bool is_user_eq = op && (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
+    bool in_std_module = cg->current_module_name &&
+                         (strncmp(cg->current_module_name, "std.", 4) == 0 ||
+                          strncmp(cg->current_module_name, "lib.", 4) == 0);
+    if (is_user_eq && !in_std_module) {
+      ny_ct_fast_val_t folded = {0};
+      if (ny_try_eval_comptime_expr_fast(cg, e, &folded, 0) && folded.kind == NY_CT_FAST_BOOL)
+        return folded.b ? ny_ctrue(cg) : ny_cfalse(cg);
+      if (lookup_fun(cg, "std.core.eq", 0)) {
+        expr_t callee = {0};
+        callee.kind = NY_E_IDENT;
+        callee.tok = e->tok;
+        callee.as.ident.name = "std.core.eq";
+        call_arg_t args[2] = {{.val = le}, {.val = re}};
+        expr_t call = {0};
+        call.kind = NY_E_CALL;
+        call.tok = e->tok;
+        call.as.call.callee = &callee;
+        call.as.call.args.data = args;
+        call.as.call.args.len = 2;
+        call.as.call.args.cap = 2;
+        LLVMValueRef eq_res = gen_call_expr(cg, scopes, depth, &call);
+        if (strcmp(op, "!=") == 0)
+          return ny_select(cg, to_bool(cg, eq_res), ny_cfalse(cg), ny_ctrue(cg),
+                           "ne.user");
+        if (LLVMTypeOf(eq_res) == ny_i1_ty(cg))
+          return ny_select(cg, eq_res, ny_ctrue(cg), ny_cfalse(cg),
+                           "eq.user.tagged");
+        return eq_res;
+      }
+    }
+
+    LLVMValueRef mono_raw_int = ny_try_emit_mono_raw_int_expr(cg, scopes, depth, e);
+    if (mono_raw_int)
+      return mono_raw_int;
 
     // Fast path for arithmetic and comparison of known floats.
     // Avoids boxing of intermediate results in expressions like (x*x + y*y).
@@ -2046,8 +4734,10 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
                    strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
 
     if (is_arith || is_cmp) {
-      if (ny_is_f64_like(cg, scopes, depth, le) ||
-          ny_is_f64_like(cg, scopes, depth, re)) {
+      if ((ny_is_f64_like(cg, scopes, depth, le) ||
+           ny_is_f64_like(cg, scopes, depth, re)) &&
+          ny_is_numeric_expr_like(cg, scopes, depth, le) &&
+          ny_is_numeric_expr_like(cg, scopes, depth, re)) {
         ny_dbg_loc(cg, e->tok);
         LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, le);
         LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
@@ -2056,10 +4746,10 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
           LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf);
           fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
           if (box_sig) {
-            return LLVMBuildCall2(cg->builder, box_sig->type, box_sig->value,
-                                  (LLVMValueRef[]){LLVMBuildBitCast(
-                                      cg->builder, res, cg->type_i64, "")},
-                                  1, "box");
+            return LLVMBuildCall2(
+                cg->builder, box_sig->type, box_sig->value,
+                (LLVMValueRef[]){ny_bitcast(cg, res, cg->type_i64, "")}, 1,
+                "box");
           }
         } else {
           LLVMRealPredicate pred = LLVMRealOEQ;
@@ -2077,9 +4767,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
             pred = LLVMRealUNE;
 
           LLVMValueRef cmp = LLVMBuildFCmp(cg->builder, pred, lf, rf, "fcmp");
-          return LLVMBuildSelect(
-              cg->builder, cmp, LLVMConstInt(cg->type_i64, 2, false),
-              LLVMConstInt(cg->type_i64, 4, false), "tag_bool");
+          return ny_select(cg, cmp, ny_ctrue(cg), ny_cfalse(cg), "tag_bool");
         }
       }
     }
@@ -2090,7 +4778,21 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_binary(cg, scopes, depth, op, l, r, le, re);
   }
   case NY_E_CALL:
+    {
+      LLVMValueRef adt = gen_adt_constructor_expr(cg, scopes, depth, e);
+      if (adt)
+        return adt;
+      const char *own_helper = ny_ownership_helper_name(e);
+      if (own_helper)
+        return gen_ownership_helper_expr(cg, scopes, depth, e, own_helper);
+    }
+    return gen_call_expr(cg, scopes, depth, e);
   case NY_E_MEMCALL:
+    {
+      LLVMValueRef adt = gen_adt_constructor_expr(cg, scopes, depth, e);
+      if (adt)
+        return adt;
+    }
     return gen_call_expr(cg, scopes, depth, e);
   case NY_E_INDEX: {
     return gen_expr_index(cg, scopes, depth, e);
@@ -2106,15 +4808,14 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_expr_set(cg, scopes, depth, e);
   }
   case NY_E_PTR_TYPE:
-    return LLVMConstInt(cg->type_i64, 0, false);
+    return ny_c0(cg);
   case NY_E_DEREF: {
     LLVMValueRef ptr = gen_expr(cg, scopes, depth, e->as.deref.target);
     // Low level: treat ptr as raw address
     ny_dbg_loc(cg, e->tok);
     LLVMValueRef raw_ptr = LLVMBuildIntToPtr(cg->builder, ptr, cg->type_i8ptr,
                                              NY_LLVM_NAME(cg, "raw_ptr"));
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, raw_ptr,
-                          NY_LLVM_NAME(cg, "deref"));
+    return ny_load(cg, raw_ptr, NY_LLVM_NAME(cg, "deref"));
   }
   case NY_E_MEMBER: {
     // First, attempt to resolve as a static enum member or qualified global.
@@ -2125,27 +4826,76 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
         return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
                             true);
       }
-      binding *gb = lookup_global_hash(cg, full_name,
-                                       ny_hash64(full_name, strlen(full_name)));
-      if (gb) {
-        gb->is_used = true;
-        if (gb->is_slot)
-          return LLVMBuildLoad2(cg->builder, cg->type_i64, gb->value, "");
-        return gb->value;
+      if (!emd && cg->current_module_name && *cg->current_module_name) {
+        size_t cur_len = strlen(cg->current_module_name);
+        bool already_scoped =
+            strncmp(full_name, cg->current_module_name, cur_len) == 0 &&
+            full_name[cur_len] == '.';
+        if (already_scoped)
+          goto member_enum_scoped_done;
+        size_t scoped_len = strlen(cg->current_module_name) + 1 +
+                            strlen(full_name) + 1;
+        char *scoped_name = arena_alloc(cg->arena, scoped_len);
+        snprintf(scoped_name, scoped_len, "%s.%s", cg->current_module_name,
+                 full_name);
+        emd = lookup_enum_member(cg, scoped_name);
+        if (emd) {
+          return LLVMConstInt(cg->type_i64, ((uint64_t)emd->value << 1) | 1,
+                              true);
+        }
+      }
+    member_enum_scoped_done:;
+      binding *gb = expr_lookup_binding(cg, NULL, 0, full_name, strlen(full_name),
+                                        ny_hash64(full_name, strlen(full_name)));
+      if (gb)
+        return expr_value_from_binding(cg, gb);
+    }
+    char alias_full_name[512];
+    if (e->as.member.target && e->as.member.name) {
+      char module_path[1024];
+      char resolved_fun[1280];
+      if (ny_resolve_module_expr_path(cg, scopes, depth, e->as.member.target,
+                                      module_path, sizeof(module_path)) &&
+          ny_resolve_module_function_path(cg, module_path, e->as.member.name,
+                                          resolved_fun,
+                                          sizeof(resolved_fun))) {
+        fun_sig *fs = lookup_fun(cg, resolved_fun, 0);
+        if (fs)
+          return ny_ptr2i64(cg, fs->value, "");
       }
     }
+    binding *alias_gb = expr_member_module_alias_global(cg, scopes, depth, e, alias_full_name,
+                                                        sizeof(alias_full_name));
+    if (alias_gb) {
+      alias_gb->is_used = true;
+      return expr_value_from_binding(cg, alias_gb);
+    }
+    const char *alias_module = expr_member_module_alias_target(cg, scopes, depth, e);
+    if (alias_module) {
+      const char *alias_name = e->as.member.target->as.ident.name;
+      ny_diag_error(e->tok, "module '%s' has no exported member '%s'",
+                    alias_module, e->as.member.name);
+      ny_diag_hint("alias '%s' resolves to module '%s'", alias_name, alias_module);
+      ny_diag_fix("export '%s' from '%s' or import the module that defines it",
+                  e->as.member.name, alias_module);
+      cg->had_error = 1;
+      return ny_c0(cg);
+    }
+
+    LLVMValueRef typed_property = ny_try_member_property_expr(cg, scopes, depth, e);
+    if (typed_property)
+      return typed_property;
 
     LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.member.target);
     LLVMValueRef key_str_global =
         const_string_ptr(cg, e->as.member.name, strlen(e->as.member.name));
-    LLVMValueRef key_str =
-        LLVMBuildLoad2(cg->builder, cg->type_i64, key_str_global, "");
+    LLVMValueRef key_str = ny_load(cg, key_str_global, "");
 
     fun_sig *get_sig = ny_helper_get(cg);
     if (!get_sig) {
       ny_diag_hint(
           "the 'std.core' module provides the standard 'get' implementation");
-      ny_diag_fix("add 'use std.core *;' to your script");
+      ny_diag_fix("add 'use std.core' to your script");
       return expr_fail(
           cg, e->tok,
           "Member access on a dynamic object requires the 'get' function.");
@@ -2161,7 +4911,7 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     if (arg_count > 16)
       arg_count = 16;
     for (unsigned i = 2; i < arg_count; i++) {
-      args[i] = LLVMConstInt(cg->type_i64, 1, false); // Tagged 0 default
+      args[i] = ny_c1(cg); // Tagged 0 default
     }
     ny_dbg_loc(cg, e->tok);
     return LLVMBuildCall2(cg->builder, get_sig->type, get_sig->value, args,
@@ -2178,12 +4928,12 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     if (!type_name) {
       ny_diag_error(e->tok, "sizeof expects a type name");
       cg->had_error = 1;
-      return LLVMConstInt(cg->type_i64, 1, false);
+      return ny_c1(cg);
     }
     type_layout_t tl = resolve_raw_layout(cg, type_name, e->tok);
     if (!tl.is_valid) {
       cg->had_error = 1;
-      return LLVMConstInt(cg->type_i64, 1, false);
+      return ny_c1(cg);
     }
     uint64_t sz = (uint64_t)tl.size;
     return LLVMConstInt(cg->type_i64, (sz << 1) | 1ULL, false);
@@ -2192,35 +4942,33 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     return gen_expr_logical(cg, scopes, depth, e);
   }
   case NY_E_TERNARY: {
-    LLVMValueRef cond =
-        to_bool(cg, gen_expr(cg, scopes, depth, e->as.ternary.cond));
-    LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+    LLVMValueRef cond = expr_gen_cond_i1(cg, scopes, depth, e->as.ternary.cond);
+    LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
     LLVMValueRef f = LLVMGetBasicBlockParent(cur_bb);
-    LLVMBasicBlockRef true_bb = ny_llvm_append_block(f, "tern_true");
-    LLVMBasicBlockRef false_bb = ny_llvm_append_block(f, "tern_false");
-    LLVMBasicBlockRef end_bb = ny_llvm_append_block(f, "tern_end");
+    LLVMBasicBlockRef true_bb = ny_bb_fn(f, "tern_true");
+    LLVMBasicBlockRef false_bb = ny_bb_fn(f, "tern_false");
+    LLVMBasicBlockRef end_bb = ny_bb_fn(f, "tern_end");
     ny_dbg_loc(cg, e->tok);
-    LLVMBuildCondBr(cg->builder, cond, true_bb, false_bb);
+    ny_cond_br(cg, cond, true_bb, false_bb);
 
-    LLVMPositionBuilderAtEnd(cg->builder, true_bb);
+    ny_pos(cg, true_bb);
 
     LLVMValueRef true_val =
         gen_expr(cg, scopes, depth, e->as.ternary.true_expr);
-    LLVMBuildBr(cg->builder, end_bb);
-    LLVMBasicBlockRef true_end_bb = LLVMGetInsertBlock(cg->builder);
+    ny_br(cg, end_bb);
+    LLVMBasicBlockRef true_end_bb = ny_cur_block(cg);
 
-    LLVMPositionBuilderAtEnd(cg->builder, false_bb);
+    ny_pos(cg, false_bb);
 
     LLVMValueRef false_val =
         gen_expr(cg, scopes, depth, e->as.ternary.false_expr);
-    LLVMBuildBr(cg->builder, end_bb);
-    LLVMBasicBlockRef false_end_bb = LLVMGetInsertBlock(cg->builder);
+    ny_br(cg, end_bb);
+    LLVMBasicBlockRef false_end_bb = ny_cur_block(cg);
 
-    LLVMPositionBuilderAtEnd(cg->builder, end_bb);
+    ny_pos(cg, end_bb);
 
     ny_dbg_loc(cg, e->tok);
-    LLVMValueRef phi =
-        LLVMBuildPhi(cg->builder, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
+    LLVMValueRef phi = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "tern"));
     LLVMAddIncoming(phi, (LLVMValueRef[]){true_val, false_val},
                     (LLVMBasicBlockRef[]){true_end_bb, false_end_bb}, 2);
     return phi;
@@ -2244,17 +4992,20 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_FSTRING: {
     // Empty string init
     LLVMValueRef empty_runtime_global = const_string_ptr(cg, "", 0);
-    LLVMValueRef res =
-        LLVMBuildLoad2(cg->builder, cg->type_i64, empty_runtime_global, "");
+    LLVMValueRef res = ny_load(cg, empty_runtime_global, "");
     fun_sig *cs = ny_helper_str_concat(cg), *ts = ny_helper_to_str(cg);
+    if (!cs || !cs->type || !cs->value)
+      return expr_fail(cg, e->tok, "__str_concat not found for f-string lowering");
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
       fstring_part_t p = e->as.fstring.parts.data[i];
       LLVMValueRef pv;
       if (p.kind == NY_FSP_STR) {
         LLVMValueRef part_runtime_global =
             const_string_ptr(cg, p.as.s.data, p.as.s.len);
-        pv = LLVMBuildLoad2(cg->builder, cg->type_i64, part_runtime_global, "");
+        pv = ny_load(cg, part_runtime_global, "");
       } else {
+        if (!ts || !ts->type || !ts->value)
+          return expr_fail(cg, e->tok, "__to_str not found for f-string lowering");
         pv = LLVMBuildCall2(
             cg->builder, ts->type, ts->value,
             (LLVMValueRef[]){gen_expr(cg, scopes, depth, p.as.e)}, 1, "");
@@ -2299,14 +5050,13 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     fclose(f);
     LLVMValueRef g = const_string_ptr(cg, buf, (size_t)size);
     free(buf);
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, g,
-                          NY_LLVM_NAME(cg, "embed_ptr"));
+    return ny_load(cg, g, NY_LLVM_NAME(cg, "embed_ptr"));
   }
   case NY_E_TRY: {
     LLVMValueRef res = gen_expr(cg, scopes, depth, e->as.unary.right);
-    LLVMValueRef f = LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder));
-    LLVMBasicBlockRef ok_bb = ny_llvm_append_block(f, "try_ok");
-    LLVMBasicBlockRef err_bb = ny_llvm_append_block(f, "try_err");
+    LLVMValueRef f = ny_cur_fn(cg);
+    LLVMBasicBlockRef ok_bb = ny_bb_fn(f, "try_ok");
+    LLVMBasicBlockRef err_bb = ny_bb_fn(f, "try_err");
 
     fun_sig *is_ok_sig = lookup_fun(cg, "__is_ok", 0);
     if (!is_ok_sig) {
@@ -2315,20 +5065,22 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
     LLVMValueRef is_ok = LLVMBuildCall2(cg->builder, is_ok_sig->type,
                                         is_ok_sig->value, &res, 1, "");
     ny_dbg_loc(cg, e->tok);
-    LLVMBuildCondBr(cg->builder, to_bool(cg, is_ok), ok_bb, err_bb);
+    ny_cond_br(cg, to_bool(cg, is_ok), ok_bb, err_bb);
 
-    LLVMPositionBuilderAtEnd(cg->builder, err_bb);
+    ny_pos(cg, err_bb);
 
     // return res (which is the error result)
     if (cg->result_store_val) {
-      LLVMBuildStore(cg->builder, res, cg->result_store_val);
+      ny_store(cg, cg->result_store_val, res);
     } else {
       emit_defers(cg, scopes, depth, cg->func_root_idx);
+      ny_cg_emit_trace_return(cg, res, cg->current_fn_ret_type);
+      ny_cg_emit_trace_exit(cg);
       LLVMBuildRet(cg->builder, res);
     }
     // We need a dummy terminator if there are instructions after this try
 
-    LLVMPositionBuilderAtEnd(cg->builder, ok_bb);
+    ny_pos(cg, ok_bb);
 
     // Unwrap value
     fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
@@ -2342,13 +5094,13 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
   case NY_E_MATCH: {
     LLVMValueRef old_store = cg->result_store_val;
     LLVMValueRef slot = build_alloca(cg, "match_res", cg->type_i64);
-    LLVMBuildStore(cg->builder, LLVMConstInt(cg->type_i64, 1, false), slot);
+    ny_store(cg, slot, ny_c1(cg));
     cg->result_store_val = slot;
     stmt_t fake = {.kind = NY_S_MATCH, .as.match = e->as.match, .tok = e->tok};
     size_t d = depth;
     gen_stmt(cg, scopes, &d, &fake, cg->func_root_idx, true);
     cg->result_store_val = old_store;
-    return LLVMBuildLoad2(cg->builder, cg->type_i64, slot, "");
+    return ny_load(cg, slot, "");
   }
   default: {
     return expr_fail(cg, e->tok,
@@ -2356,4 +5108,33 @@ LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
                      e->tok.kind);
   }
   }
+}
+
+LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {
+  if (!ny_codegen_expr_kind_profile_enabled())
+    return gen_expr_inner(cg, scopes, depth, e);
+  if (!g_expr_kind_profile_registered) {
+    atexit(ny_codegen_expr_kind_profile_report);
+    g_expr_kind_profile_registered = 1;
+  }
+  int kind = e ? (int)e->kind : 63;
+  int slot = g_expr_kind_depth;
+  if (slot >= 0 && slot < (int)(sizeof(g_expr_kind_child_ms) / sizeof(g_expr_kind_child_ms[0])))
+    g_expr_kind_child_ms[slot] = 0.0;
+  g_expr_kind_depth++;
+  ny_tick_t start = ny_ticks_now();
+  LLVMValueRef out = gen_expr_inner(cg, scopes, depth, e);
+  double total_ms = ny_ticks_elapsed_ms(start);
+  g_expr_kind_depth--;
+  double child_ms = 0.0;
+  if (slot >= 0 && slot < (int)(sizeof(g_expr_kind_child_ms) / sizeof(g_expr_kind_child_ms[0])))
+    child_ms = g_expr_kind_child_ms[slot];
+  if (g_expr_kind_depth > 0) {
+    int parent = g_expr_kind_depth - 1;
+    if (parent >= 0 &&
+        parent < (int)(sizeof(g_expr_kind_child_ms) / sizeof(g_expr_kind_child_ms[0])))
+      g_expr_kind_child_ms[parent] += total_ms;
+  }
+  ny_codegen_expr_kind_profile_add(kind, total_ms, child_ms);
+  return out;
 }

@@ -148,12 +148,14 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       break;
     case NY_S_LINK:
       break;
-    case NY_S_INCLUDE:
-      break;
     case NY_S_IF:
       ny_visit_expr(v, s->as.iff.test);
       ny_visit_stmt(v, s->as.iff.conseq);
       ny_visit_stmt(v, s->as.iff.alt);
+      break;
+    case NY_S_GUARD:
+      ny_visit_expr(v, s->as.guard.value);
+      ny_visit_stmt(v, s->as.guard.fallback);
       break;
     case NY_S_WHILE:
       ny_visit_expr(v, s->as.whl.test);
@@ -164,8 +166,15 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
         ny_visit_stmt(v, s->as.whl.init);
       break;
     case NY_S_FOR:
-      ny_visit_expr(v, s->as.fr.iterable);
+      if (s->as.fr.init)
+        ny_visit_stmt(v, s->as.fr.init);
+      if (s->as.fr.cond)
+        ny_visit_expr(v, s->as.fr.cond);
+      if (s->as.fr.iterable)
+        ny_visit_expr(v, s->as.fr.iterable);
       ny_visit_stmt(v, s->as.fr.body);
+      if (s->as.fr.update)
+        ny_visit_stmt(v, s->as.fr.update);
       break;
     case NY_S_MATCH:
       ny_visit_expr(v, s->as.match.test);
@@ -195,17 +204,30 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_FUNC:
       ny_visit_stmt(v, s->as.fn.body);
       break;
+    case NY_S_LAYOUT:
+      for (size_t i = 0; i < s->as.layout.methods.len; i++)
+        ny_visit_stmt(v, s->as.layout.methods.data[i]);
+      break;
+    case NY_S_STRUCT:
+      for (size_t i = 0; i < s->as.struc.methods.len; i++)
+        ny_visit_stmt(v, s->as.struc.methods.data[i]);
+      break;
+    case NY_S_IMPL:
+      for (size_t i = 0; i < s->as.impl.methods.len; i++)
+        ny_visit_stmt(v, s->as.impl.methods.data[i]);
+      break;
     case NY_S_USE:
     case NY_S_EXTERN:
     case NY_S_LABEL:
     case NY_S_GOTO:
     case NY_S_BREAK:
     case NY_S_CONTINUE:
-    case NY_S_LAYOUT:
     case NY_S_MODULE:
     case NY_S_EXPORT:
-    case NY_S_STRUCT:
     case NY_S_ENUM:
+    case NY_S_INCLUDE:
+    case NY_S_DEFINE:
+    case NY_S_OPERATOR:
       break;
     }
   }
