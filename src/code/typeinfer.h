@@ -5,22 +5,39 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Type inference context for tracking proven i64 types */
+typedef struct typeinfer_var_slot {
+  const char *name;
+  bool is_i64_proven;
+  bool is_f64_proven;
+  bool is_used_in_dynamic;
+  bool escapes;
+  ny_type_t *type;
+} typeinfer_var_slot_t;
+
+/* Type inference context for tracking proven i64/f64 facts */
 typedef struct typeinfer_ctx {
-  const char **var_names;
+  typeinfer_var_slot_t *vars;
   size_t var_names_cap;
   size_t var_names_len;
-  bool *is_i64_proven;
-  bool *is_f64_proven;
-  bool *is_used_in_dynamic;
+  ny_type_arena_t type_arena;
+  size_t type_unify_errors;
+  int *hash_table;      /* Maps hash to index in var_names */
+  size_t hash_cap;      /* Capacity of the hash table */
+  bool changed;         /* Track if any proofs changed in the current pass */
+  bool formal_hm_enabled;
   scope *scopes;
   size_t func_depth;
   codegen_t *cg;
 } typeinfer_ctx_t;
 
+/* Check if a variable escapes */
+bool typeinfer_escapes(typeinfer_ctx_t *ctx, const char *name);
+
+/* Mark a variable as escaping */
+void typeinfer_mark_escape(typeinfer_ctx_t *ctx, const char *name);
+
 /* Initialize type inference context */
-void typeinfer_ctx_init(typeinfer_ctx_t *ctx, size_t max_vars, scope *scopes,
-                        codegen_t *cg);
+void typeinfer_ctx_init(typeinfer_ctx_t *ctx, size_t max_vars, scope *scopes, codegen_t *cg);
 
 /* Dispose type inference context */
 void typeinfer_ctx_dispose(typeinfer_ctx_t *ctx);
@@ -53,13 +70,15 @@ void typeinfer_func_body(typeinfer_ctx_t *ctx, stmt_t *body);
 void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s);
 
 /* Apply inferred types to scope bindings */
-void typeinfer_apply_to_scopes(typeinfer_ctx_t *ctx, scope *scopes,
-                               size_t depth);
+void typeinfer_apply_to_scopes(typeinfer_ctx_t *ctx, scope *scopes, size_t depth);
 
 /* Quick check: is this expression provably i64? */
 bool typeinfer_expr_is_i64(typeinfer_ctx_t *ctx, expr_t *e);
 
 /* Quick check: is this expression provably f64? */
 bool typeinfer_expr_is_f64(typeinfer_ctx_t *ctx, expr_t *e);
+
+/* Emit a compact JSON summary of the current lightweight type facts. */
+char *typeinfer_program_summary_json(program_t *prog, const char *source_name, bool include_std);
 
 #endif
