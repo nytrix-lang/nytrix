@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ast/ast.h"
+#include "parse/ast.h"
 #include <stdbool.h>
 
 typedef struct ny_visitor_t ny_visitor_t;
