@@ -1,195 +1,156 @@
-;; Keywords: core primitives
-;; Core Primitives for Nytrix
-
-module std.core.primitives (
-   add, sub, mul, div, mod,
-   band, bor, bxor, bshl, bshr, bnot,
-   and, or,
-   eq, lt, le, gt, ge,
-   argv, errno,
-   is_int, is_ptr, is_none,
-   globals, set_globals, argc, envc, envp,
-   __big_add_abs, __big_sub_abs, __big_mul_abs
-)
-
-@inline
-fn __big_add_abs(a, b){
-   return __big_add_abs(a, b)
+;; Keywords: primitives
+;; Primitive platform constants, low-level numeric types, and built-in runtime bindings.
+module std.core.primitives(add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot, and, or, eq, lt, le, gt, ge, argv, errno, is_int, is_ptr, is_none, globals, set_globals, argc, envc, envp, __big_add_abs, __big_sub_abs, __big_mul_abs, runtime_tag_raw, init_str_raw, bytes_new_raw, kwarg_new_raw, range_new_raw, list_as_tuple_raw)
+comptime template _prim_bin(name, intr, doc){
+   @jit
+   @inline
+   fn name(a, b){
+      doc
+      return intr(a, b)
+   }
 }
 
-@inline
-fn __big_sub_abs(a, b){
-   return __big_sub_abs(a, b)
+comptime template _prim_bin_bool(name, intr, doc){
+   @jit
+   @inline
+   fn name(a, b): bool {
+      doc
+      return intr(a, b)
+   }
 }
 
-@inline
-fn __big_mul_abs(a, b){
-   return __big_mul_abs(a, b)
+comptime template _prim_un(name, intr, doc){
+   @jit
+   @inline
+   fn name(x){
+      doc
+      return intr(x)
+   }
 }
 
-@inline
-fn add(a, b){
-   "Returns the sum of `a` and `b` (untagged)."
-   return __add(a, b)
+comptime template _prim_un_bool(name, intr, doc){
+   @jit
+   @inline
+   fn name(x): bool {
+      doc
+      return intr(x)
+   }
 }
 
-@inline
-fn sub(a, b){
-   "Returns the difference of `a` and `b` (untagged)."
-   return __sub(a, b)
+comptime template _prim_zero(name, Ret, intr, doc){
+   @jit
+   @inline
+   fn name(): Ret {
+      doc
+      return intr()
+   }
 }
 
-@inline
-fn mul(a, b){
-   "Returns the product of `a` and `b` (untagged)."
-   return __mul(a, b)
+comptime template _prim_bigbin(name, intr, doc){
+   @jit
+   @inline
+   fn name(a, b){
+      doc
+      return intr(a, b)
+   }
 }
 
-@inline
-fn div(a, b){
-   "Returns the quotient of `a` and `b` (untagged)."
-   return __div(a, b)
+comptime template _prim_untyped_un(name, intr, doc){
+   @jit
+   @inline
+   fn name(x){
+      doc
+      return intr(x)
+   }
 }
 
-@inline
-fn mod(a, b){
-   "Returns the remainder of `a` divided by `b` (untagged)."
-   return __mod(a, b)
+comptime template _prim_untyped_bin(name, intr, doc){
+   @jit
+   @inline
+   fn name(a, b){
+      doc
+      return intr(a, b)
+   }
 }
 
-@inline
-fn band(a, b){
-   "Performs bitwise AND on `a` and `b`."
-   return __and(a, b)
+comptime template _prim_untyped_tri(name, intr, doc){
+   @jit
+   @inline
+   fn name(a, b, c){
+      doc
+      return intr(a, b, c)
+   }
 }
 
-@inline
-fn and(a, b){
-   "Performs logical AND on `a` and `b`."
-   return __and(a, b)
-}
+comptime emit _prim_bigbin(__big_add_abs, __big_add_abs, "Adds the magnitudes of two bigint values.")
+comptime emit _prim_bigbin(__big_sub_abs, __big_sub_abs, "Subtracts bigint magnitudes assuming `a >= b`.")
+comptime emit _prim_bigbin(__big_mul_abs, __big_mul_abs, "Multiplies the magnitudes of two bigint values.")
+comptime emit _prim_untyped_un(runtime_tag_raw, __runtime_tag, "Returns the runtime tag integer for a named built-in type.")
+comptime emit _prim_untyped_bin(init_str_raw, __init_str, "Initializes raw memory as a Nytrix string object.")
+comptime emit _prim_untyped_un(bytes_new_raw, __bytes_new, "Allocates a Nytrix bytes object.")
+comptime emit _prim_untyped_bin(kwarg_new_raw, __kwarg_new, "Allocates a keyword-argument wrapper object.")
+comptime emit _prim_untyped_tri(range_new_raw, __range_new, "Allocates a Nytrix range object.")
+comptime emit _prim_untyped_un(list_as_tuple_raw, __list_as_tuple, "Retags a list object as a tuple object.")
+comptime emit _prim_bin(add, __add, "Returns the sum of `a` and `b` (untagged).")
+comptime emit _prim_bin(sub, __sub, "Returns the difference of `a` and `b` (untagged).")
+comptime emit _prim_bin(mul, __mul, "Returns the product of `a` and `b` (untagged).")
+comptime emit _prim_bin(div, __div, "Returns the quotient of `a` and `b` (untagged).")
+comptime emit _prim_bin(mod, __mod, "Returns the remainder of `a` divided by `b` (untagged).")
+comptime emit _prim_bin(band, __and, "Performs bitwise AND on `a` and `b`.")
+comptime emit _prim_bin(and, __and, "Performs logical AND on `a` and `b`.")
+comptime emit _prim_bin(bor, __or, "Performs bitwise OR on `a` and `b`.")
+comptime emit _prim_bin(or, __or, "Performs logical OR on `a` and `b`.")
+comptime emit _prim_bin(bxor, __xor, "Performs bitwise XOR on `a` and `b`.")
+comptime emit _prim_bin(bshl, __shl, "Performs bitwise shift left on `a` by `b` bits.")
+comptime emit _prim_bin(bshr, __shr, "Performs bitwise shift right on `a` by `b` bits.")
+comptime emit _prim_un(bnot, __not, "Performs bitwise NOT on `x`.")
+comptime emit _prim_bin_bool(eq, __eq, "Returns **true** if `a` and `b` are equal(untagged).")
+comptime emit _prim_bin_bool(lt, __lt, "Returns **true** if `a < b` (untagged).")
+comptime emit _prim_bin_bool(le, __le, "Returns **true** if `a <= b` (untagged).")
+comptime emit _prim_bin_bool(gt, __gt, "Returns **true** if `a > b` (untagged).")
+comptime emit _prim_bin_bool(ge, __ge, "Returns **true** if `a >= b` (untagged).")
+comptime emit _prim_un_bool(is_int, __is_int, "Returns **true** if `x` is a tagged integer.")
 
-@inline
-fn bor(a, b){
-   "Performs bitwise OR on `a` and `b`."
-   return __or(a, b)
-}
+comptime emit _prim_zero(globals, ptr, __globals, "Returns the pointer to the global variable table.")
 
-@inline
-fn or(a, b){
-   "Performs logical OR on `a` and `b`."
-   return __or(a, b)
-}
+comptime emit _prim_zero(argc, int, __argc, "Returns the number of command-line arguments.")
+comptime emit _prim_zero(envc, int, __envc, "Returns the number of environment variables.")
+comptime emit _prim_zero(errno, int, __errno, "Returns the last error number from the system.")
 
+@jit
 @inline
-fn bxor(a, b){
-   "Performs bitwise XOR on `a` and `b`."
-   return __xor(a, b)
-}
-
-@inline
-fn bshl(a, b){
-   "Performs bitwise shift left on `a` by `b` bits."
-   return __shl(a, b)
-}
-
-@inline
-fn bshr(a, b){
-   "Performs bitwise shift right on `a` by `b` bits."
-   return __shr(a, b)
-}
-
-@inline
-fn bnot(a){
-   "Performs bitwise NOT on `a`."
-   return __not(a)
-}
-
-@inline
-fn argv(i){
+fn argv(int: i): str {
    "Returns the command-line argument at index `i`."
    return __argv(i)
 }
 
+@jit
 @inline
-fn globals(){
-   "Returns the pointer to the global variable table."
-   return __globals()
-}
-
-@inline
-fn set_globals(p){
+fn set_globals(ptr: p): ptr {
    "Sets the pointer to the global variable table."
    return __set_globals(p)
 }
 
+@jit
 @inline
-fn argc(){
-   "Returns the number of command-line arguments."
-   return __argc()
-}
-
-@inline
-fn envc(){
-   "Returns the number of environment variables."
-   return __envc()
-}
-
-@inline
-fn envp(i){
-   "Returns the environment variable string at index `i`."
+fn envp(int: i): ptr {
+   "Returns the raw pointer to the environment entry at index `i`."
    return __load64_idx(__envp(), i * 8)
 }
 
+@jit
 @inline
-fn errno(){
-   "Returns the last error number from the system."
-   return __errno()
-}
-
-@inline
-fn eq(a, b){
-   "Returns **true** if `a` and `b` are equal (untagged)."
-   return __eq(a, b)
-}
-
-@inline
-fn lt(a, b){
-   "Returns **true** if `a < b` (untagged)."
-   return __lt(a, b)
-}
-
-@inline
-fn le(a, b){
-   "Returns **true** if `a <= b` (untagged)."
-   return __le(a, b)
-}
-
-@inline
-fn gt(a, b){
-   "Returns **true** if `a > b` (untagged)."
-   return __gt(a, b)
-}
-
-@inline
-fn ge(a, b){
-   "Returns **true** if `a >= b` (untagged)."
-   return __ge(a, b)
-}
-
-fn is_int(x){
-   "Returns **true** if `x` is a tagged integer."
-   return __is_int(x)
-}
-
-fn is_ptr(x){
+fn is_ptr(any: x): bool {
    "Returns **true** if `x` appears to be a valid heap pointer."
    if(!x){ return false }
    if(__is_int(x)){ return false }
-   return (__and(x, 7) == 0)
+   return(__and(x, 7) == 0)
 }
 
-fn is_none(x){
-   "Returns **true** if `x` is **none** (0)."
-   return x == 0
+@jit
+@inline
+fn is_none(any: x): bool {
+   "Returns **true** if `x` is **none**. Integer 0 is not **none**."
+   if(__is_int(x)){ return false }
+   return x == nil
 }
