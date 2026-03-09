@@ -1,15 +1,10 @@
-;; Keywords: core debug
+;; Keywords: debug
 ;; Core Debug for Nytrix
+module std.core.debug(debug_print_val, debug_print, breakpoint)
+use std.core
+use std.core.io
 
-module std.core.debug (
-   debug_print_val, debug_print
-)
-use std.core *
-use std.core.reflect *
-use std.str.io *
-use std.str *
-
-fn debug_print_val(val){
+fn debug_print_val(any: val): any {
    "Prints a detailed debug representation of a single value."
    _print_write("Value(raw: ")
    _print_write(to_str(val))
@@ -22,34 +17,23 @@ fn debug_print_val(val){
    _print_write(")\n")
 }
 
-fn debug_print(...args){
+fn debug_print(...args): any {
    "Prints a detailed debug representation of one or more values."
    mut xs = args
-   if(len(args) == 1){
-      def first = get(args, 0)
-      if(type(first) == "list"){ xs = first }
+   if(args.len == 1){
+      def first = args.get(0)
+      if(is_list(first)){ xs = first }
    }
-   def n = len(xs)
+   def n = xs.len
    mut i = 0
    while(i < n){
-      def v = get(xs, i)
+      def v = xs.get(i)
       debug_print_val(v)
       i += 1
    }
 }
 
-if(comptime{__main()}){
-   use std.core.debug *
-   use std.util.inspect *
-   use std.core.test *
-   use std.core *
-
-   print("Testing Debug & Inspect...")
-
-   debug_print("test_val", 123)
-   inspect(123)
-   inspect("hello")
-   inspect([1, 2])
-
-   print("✓ std.core.debug tests passed")
+fn breakpoint(): any {
+   "Triggers a debugger trap on supported architectures."
+   __breakpoint()
 }
