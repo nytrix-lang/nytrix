@@ -101,13 +101,12 @@ static bool ny_check_path_for_tool(const char *tool) {
   const char delim[2] = ":";
   bool found = false;
   char *save = NULL;
-  for (char *tok = strtok_r(buf, delim, &save); tok;
-       tok = strtok_r(NULL, delim, &save)) {
+  for (char *tok = strtok_r(buf, delim, &save); tok; tok = strtok_r(NULL, delim, &save)) {
     if (!*tok)
       continue;
     char full[PATH_MAX];
     snprintf(full, sizeof(full), "%s/%s", tok, tool);
-    if (access(full, X_OK) == 0 || access(full, F_OK) == 0) {
+    if (ny_access(full, X_OK) == 0 || ny_access(full, F_OK) == 0) {
       found = true;
       break;
     }
@@ -143,6 +142,67 @@ static bool ny_tool_in_path(const char *tool) {
   return false;
 }
 #endif
+
+#ifndef _WIN32
+static const char *normalize_cc_posix(const char *cc) {
+  static char buf[PATH_MAX];
+  if (!cc)
+    return NULL;
+  while (*cc == ' ' || *cc == '\t')
+    cc++;
+  if (!*cc)
+    return NULL;
+  size_t len = strlen(cc);
+  while (len > 0 && isspace((unsigned char)cc[len - 1]))
+    len--;
+  if (len == 0)
+    return NULL;
+  if (len >= sizeof(buf))
+    len = sizeof(buf) - 1;
+  memcpy(buf, cc, len);
+  buf[len] = '\0';
+
+  char *p = buf;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  char *first = p;
+  if (*p == '"' || *p == '\'') {
+    char q = *p++;
+    first = p;
+    while (*p && *p != q)
+      p++;
+    if (*p)
+      *p++ = '\0';
+  } else {
+    while (*p && !isspace((unsigned char)*p))
+      p++;
+    if (*p)
+      *p++ = '\0';
+  }
+  while (*p && isspace((unsigned char)*p))
+    p++;
+  if ((strcmp(first, "ccache") == 0 || strcmp(first, "sccache") == 0) && *p) {
+    if (*p == '"' || *p == '\'') {
+      char q = *p++;
+      char *second = p;
+      while (*p && *p != q)
+        p++;
+      if (*p)
+        *p = '\0';
+      return *second ? second : first;
+    }
+    char *second = p;
+    while (*p && !isspace((unsigned char)*p))
+      p++;
+    *p = '\0';
+    return *second ? second : first;
+  }
+  if (strcmp(first, "ccache") == 0 || strcmp(first, "sccache") == 0)
+    return NULL;
+  return *first ? first : NULL;
+}
+#endif
+
 static time_t ny_runtime_latest_dep_mtime(const char *root) {
   static char cached_root[PATH_MAX];
   static time_t cached_latest = 0;
@@ -150,12 +210,13 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
   if (root && *root && cached_valid && strcmp(cached_root, root) == 0)
     return cached_latest;
   static const char *const deps[] = {
-      "src/rt/init.c",    "src/rt/ast.c",       "src/rt/core.c",
-      "src/rt/ffi.c",     "src/rt/math.c",      "src/rt/memory.c",
-      "src/rt/os.c",      "src/rt/string.c",    "src/rt/shared.h",
-      "src/rt/runtime.h", "src/rt/defs.h",      "src/ast/ast.h",
-      "src/ast/json.h",   "src/parse/parser.h", "src/lex/lexer.h",
-      "src/code/types.h", "src/base/common.h",  "src/base/compat.h",
+      "src/rt/init.c",     "src/rt/ast.c",       "src/rt/bigint.c", "src/rt/core.c",
+      "src/rt/ffi.c",      "src/rt/ffigates.c",  "src/rt/gc.c",     "src/rt/math.c",
+      "src/rt/memory.c",   "src/rt/os.c",        "src/rt/simmd.c",  "src/rt/gltf.c",
+      "src/rt/string.c",
+      "src/rt/shared.h",   "src/rt/runtime.h",   "src/rt/defs.h",   "src/parse/ast.h",
+      "src/parse/json.h",  "src/parse/parser.h", "src/parse/lexer.h", "src/code/types.h",
+      "src/base/common.h", "src/base/compat.h",
   };
   time_t latest = 0;
   char full[PATH_MAX];
@@ -173,41 +234,38 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
   return latest;
 }
 
-static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc,
-                                  const char *root, bool debug,
+static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc, const char *root,
+                                  bool debug, int speed_level, bool native_tune,
                                   const char *llvm_include_arg) {
   const char *tmp = ny_get_temp_dir();
   const char *host_flags = getenv("NYTRIX_HOST_CFLAGS");
   const char *arm_float_abi = getenv("NYTRIX_ARM_FLOAT_ABI");
-  const char *cache_rev = "rtcache-v3";
+  const char *cache_rev = "rtcache-v5";
   char dwarf_key[16];
   if (debug)
     snprintf(dwarf_key, sizeof(dwarf_key), "d%d", ny_builder_dwarf_version());
   else
     snprintf(dwarf_key, sizeof(dwarf_key), "d0");
   char key[PATH_MAX * 2];
-  snprintf(key, sizeof(key), "%s|%s|%d|%s|%s|%s|%s|%s", cc ? cc : "",
-           root ? root : "", debug ? 1 : 0,
-           llvm_include_arg ? llvm_include_arg : "",
-           host_flags ? host_flags : "", arm_float_abi ? arm_float_abi : "",
-           dwarf_key, cache_rev);
+  snprintf(key, sizeof(key), "%s|%s|%d|%d|%d|%s|%s|%s|%s|%s", cc ? cc : "",
+           root ? root : "", debug ? 1 : 0, speed_level, native_tune ? 1 : 0,
+           llvm_include_arg ? llvm_include_arg : "", host_flags ? host_flags : "",
+           arm_float_abi ? arm_float_abi : "", dwarf_key, cache_rev);
   uint64_t h = ny_hash64(key, strlen(key));
 #ifdef _WIN32
-  snprintf(out, out_len, "%s/ny_rt_cache_%016llx_%s.obj", tmp,
-           (unsigned long long)h, debug ? "dbg" : "rel");
+  snprintf(out, out_len, "%s/ny_rt_cache_%016llx_%s.obj", tmp, (unsigned long long)h,
+           debug ? "dbg" : "rel");
 #else
-  snprintf(out, out_len, "%s/ny_rt_cache_%016llx_%s.o", tmp,
-           (unsigned long long)h, debug ? "dbg" : "rel");
+  snprintf(out, out_len, "%s/ny_rt_cache_%016llx_%s.o", tmp, (unsigned long long)h,
+           debug ? "dbg" : "rel");
 #endif
 }
 
-static bool ny_try_restore_runtime_cache(const char *cache_obj,
-                                         const char *out_runtime,
+static bool ny_try_restore_runtime_cache(const char *cache_obj, const char *out_runtime,
                                          const char *root) {
-  if (!cache_obj || !*cache_obj || !out_runtime || !*out_runtime || !root ||
-      !*root)
+  if (!cache_obj || !*cache_obj || !out_runtime || !*out_runtime || !root || !*root)
     return false;
-  if (access(cache_obj, R_OK) != 0)
+  if (ny_access(cache_obj, R_OK) != 0)
     return false;
   time_t cache_mt = 0;
   if (ny_file_mtime(cache_obj, &cache_mt) != 0)
@@ -218,8 +276,7 @@ static bool ny_try_restore_runtime_cache(const char *cache_obj,
   return ny_copy_file(cache_obj, out_runtime) == 0;
 }
 
-static void ny_update_runtime_cache(const char *cache_obj,
-                                    const char *out_runtime) {
+static void ny_update_runtime_cache(const char *cache_obj, const char *out_runtime) {
   if (!cache_obj || !*cache_obj || !out_runtime || !*out_runtime)
     return;
   (void)ny_copy_file(out_runtime, cache_obj);
@@ -235,8 +292,7 @@ static int is_msvc_cc(const char *cc) {
   base = base ? base + 1 : cc;
   if (strcasecmp(base, "cl") == 0 || strcasecmp(base, "cl.exe") == 0)
     return 1;
-  if (strcasecmp(base, "clang-cl") == 0 ||
-      strcasecmp(base, "clang-cl.exe") == 0)
+  if (strcasecmp(base, "clang-cl") == 0 || strcasecmp(base, "clang-cl.exe") == 0)
     return 1;
   return 0;
 }
@@ -266,21 +322,19 @@ static const char *normalize_cc(const char *cc) {
     buf[out] = '\0';
     return out ? buf : NULL;
   }
-  if (access(buf, F_OK) == 0)
+  if (ny_access(buf, F_OK) == 0)
     return buf;
   if ((strchr(buf, '\\') || strchr(buf, '/') ||
        (isalpha((unsigned char)buf[0]) && buf[1] == ':'))) {
     for (size_t j = 0; buf[j]; ++j) {
       if (buf[j] == '.' && tolower((unsigned char)buf[j + 1]) == 'e' &&
-          tolower((unsigned char)buf[j + 2]) == 'x' &&
-          tolower((unsigned char)buf[j + 3]) == 'e') {
+          tolower((unsigned char)buf[j + 2]) == 'x' && tolower((unsigned char)buf[j + 3]) == 'e') {
         size_t end = j + 4;
-        if (buf[end] == '\0' || isspace((unsigned char)buf[end]) ||
-            buf[end] == '"' || buf[end] == '\'' || buf[end] == ';' ||
-            buf[end] == ',') {
+        if (buf[end] == '\0' || isspace((unsigned char)buf[end]) || buf[end] == '"' ||
+            buf[end] == '\'' || buf[end] == ';' || buf[end] == ',') {
           char saved = buf[end];
           buf[end] = '\0';
-          if (access(buf, F_OK) == 0)
+          if (ny_access(buf, F_OK) == 0)
             return buf;
           buf[end] = saved;
         }
@@ -319,11 +373,11 @@ static int has_llvm_c_core(const char *inc) {
     return 0;
   char probe[PATH_MAX];
   snprintf(probe, sizeof(probe), "%s/llvm-c/Core.h", inc);
-  if (access(probe, F_OK) == 0)
+  if (ny_access(probe, F_OK) == 0)
     return 1;
 #ifdef _WIN32
   snprintf(probe, sizeof(probe), "%s\\llvm-c\\Core.h", inc);
-  if (access(probe, F_OK) == 0)
+  if (ny_access(probe, F_OK) == 0)
     return 1;
 #endif
   return 0;
@@ -345,8 +399,7 @@ static const char *find_llvm_include_dir(void) {
   }
   const char *root = ny_src_root();
   if (root && *root) {
-    snprintf(buf, sizeof(buf), "%s/build/third_party/llvm/headers/include",
-             root);
+    snprintf(buf, sizeof(buf), "%s/build/third_party/llvm/headers/include", root);
     if (has_llvm_c_core(buf))
       return buf;
   }
@@ -365,14 +418,13 @@ static const char *find_llvm_include_dir(void) {
   return NULL;
 }
 
-static int spawn_with_host_flags(const char *const base[], const char *env,
-                                 char *pool[], size_t *pool_len) {
+static int spawn_with_host_flags(const char *const base[], const char *env, char *pool[],
+                                 size_t *pool_len) {
   const size_t max = 128;
   const char *argv[128];
   size_t idx = 0;
-  while (base[idx] && idx + 1 < max) {
-    argv[idx] = base[idx];
-    idx++;
+  if (base[0] && idx + 1 < max) {
+    argv[idx++] = base[0];
   }
   if (env && *env && idx + 1 < max) {
     char *copy = ny_strdup(env);
@@ -388,12 +440,16 @@ static int spawn_with_host_flags(const char *const base[], const char *env,
         free(copy);
     }
   }
+  size_t base_idx = 1;
+  while (base[base_idx] && idx + 1 < max) {
+    argv[idx++] = base[base_idx++];
+  }
   argv[idx] = NULL;
   return ny_exec_spawn(argv);
 }
 #else
-static void append_host_flags(const char *env, const char *argv[], size_t *idx,
-                              size_t max, char *pool[], size_t *pool_len) {
+static void append_host_flags(const char *env, const char *argv[], size_t *idx, size_t max,
+                              char *pool[], size_t *pool_len) {
   if (env && *env) {
     char *copy = ny_strdup(env);
     if (copy) {
@@ -423,17 +479,26 @@ static void append_host_flags(const char *env, const char *argv[], size_t *idx,
 #endif
 }
 
-static int spawn_with_host_flags(const char *const base[], const char *env,
-                                 char *pool[], size_t *pool_len) {
+static int spawn_with_host_flags(const char *const base[], const char *env, char *pool[],
+                                 size_t *pool_len) {
   const size_t max = 128;
   const char *argv[128];
   size_t idx = 0;
-  while (base[idx]) {
-    argv[idx] = base[idx];
-    idx++;
+  size_t base_idx = 0;
+  if (base[0] && idx + 1 < max) {
+    argv[idx++] = base[0];
+    base_idx = 1;
+    /* Keep launcher + compiler adjacent (e.g. ccache clang ...), then append host flags. */
+    if ((strcmp(base[0], "ccache") == 0 || strcmp(base[0], "sccache") == 0) && base[1] &&
+        idx + 1 < max) {
+      argv[idx++] = base[1];
+      base_idx = 2;
+    }
   }
-  argv[idx] = NULL;
   append_host_flags(env, argv, &idx, max, pool, pool_len);
+  while (base[base_idx] && idx + 1 < max) {
+    argv[idx++] = base[base_idx++];
+  }
   argv[idx] = NULL;
   return ny_exec_spawn(argv);
 }
@@ -445,15 +510,15 @@ const char *ny_builder_choose_cc(void) {
   if (!cc)
     cc = normalize_cc(getenv("CC"));
 #else
-  const char *cc = getenv("NYTRIX_CC");
+  const char *cc = normalize_cc_posix(getenv("NYTRIX_CC"));
   if (!cc)
-    cc = getenv("CC");
+    cc = normalize_cc_posix(getenv("CC"));
 #endif
   if (cc && *cc) {
 #ifdef _WIN32
     int valid_cc = 0;
     if (!strstr(cc, "WindowsApps") && !strstr(cc, "windowsapps")) {
-      if (!is_path_like(cc) || access(cc, F_OK) == 0)
+      if (!is_path_like(cc) || ny_access(cc, F_OK) == 0)
         valid_cc = 1;
     }
     if (valid_cc)
@@ -479,19 +544,16 @@ const char *ny_builder_choose_cc(void) {
     static char llvm_root_candidates[2][PATH_MAX];
     size_t llvm_root_count = 0;
     if (llvm_root && *llvm_root) {
-      snprintf(llvm_root_candidates[llvm_root_count++], PATH_MAX,
-               "%s\\bin\\clang.exe", llvm_root);
-      snprintf(llvm_root_candidates[llvm_root_count++], PATH_MAX,
-               "%s\\bin\\clang-cl.exe", llvm_root);
+      snprintf(llvm_root_candidates[llvm_root_count++], PATH_MAX, "%s\\bin\\clang.exe", llvm_root);
+      snprintf(llvm_root_candidates[llvm_root_count++], PATH_MAX, "%s\\bin\\clang-cl.exe",
+               llvm_root);
     }
     for (size_t i = 0; i < llvm_root_count; ++i) {
-      if (access(llvm_root_candidates[i], F_OK) == 0)
+      if (ny_access(llvm_root_candidates[i], F_OK) == 0)
         return llvm_root_candidates[i];
     }
-    for (size_t i = 0;
-         i < sizeof(win_clang_candidates) / sizeof(win_clang_candidates[0]);
-         ++i) {
-      if (access(win_clang_candidates[i], F_OK) == 0)
+    for (size_t i = 0; i < sizeof(win_clang_candidates) / sizeof(win_clang_candidates[0]); ++i) {
+      if (ny_access(win_clang_candidates[i], F_OK) == 0)
         return win_clang_candidates[i];
     }
     cc = "clang";
@@ -503,10 +565,36 @@ const char *ny_builder_choose_cc(void) {
 }
 
 int ny_exec_spawn(const char *const argv[]) {
+  if (verbose_enabled >= 2 && argv && argv[0]) {
+    fprintf(stderr, "[cmd]");
+    for (size_t i = 0; argv[i]; ++i) {
+      const char *arg = argv[i];
+      bool needs_quote = false;
+      for (const char *p = arg; *p; ++p) {
+        if (isspace((unsigned char)*p) || *p == '"' || *p == '\'') {
+          needs_quote = true;
+          break;
+        }
+      }
+      fputc(' ', stderr);
+      if (!needs_quote) {
+        fputs(arg, stderr);
+      } else {
+        fputc('"', stderr);
+        for (const char *p = arg; *p; ++p) {
+          if (*p == '"' || *p == '\\')
+            fputc('\\', stderr);
+          fputc(*p, stderr);
+        }
+        fputc('"', stderr);
+      }
+    }
+    fputc('\n', stderr);
+  }
 #ifdef _WIN32
   const char *a0 = argv[0] ? argv[0] : "";
   int rc = -1;
-  if (is_path_like(a0) && access(a0, F_OK) == 0)
+  if (is_path_like(a0) && ny_access(a0, F_OK) == 0)
     rc = _spawnv(_P_WAIT, a0, (const char *const *)argv);
   else
     rc = _spawnvp(_P_WAIT, a0, (const char *const *)argv);
@@ -530,8 +618,7 @@ int ny_exec_spawn(const char *const argv[]) {
     if (ws)
       *ws = '\0';
     if (strcasecmp(name, "clang") == 0 || strcasecmp(name, "clang.exe") == 0 ||
-        strcasecmp(name, "clang-cl") == 0 ||
-        strcasecmp(name, "clang-cl.exe") == 0) {
+        strcasecmp(name, "clang-cl") == 0 || strcasecmp(name, "clang-cl.exe") == 0) {
       static const char *const win_clang_candidates[] = {
           "C:\\PROGRA~1\\LLVM\\bin\\clang.exe",
           "C:\\PROGRA~2\\LLVM\\bin\\clang.exe",
@@ -549,10 +636,8 @@ int ny_exec_spawn(const char *const argv[]) {
         k++;
       }
       argv2[k] = NULL;
-      for (size_t i = 0;
-           i < sizeof(win_clang_candidates) / sizeof(win_clang_candidates[0]);
-           ++i) {
-        if (access(win_clang_candidates[i], F_OK) != 0)
+      for (size_t i = 0; i < sizeof(win_clang_candidates) / sizeof(win_clang_candidates[0]); ++i) {
+        if (ny_access(win_clang_candidates[i], F_OK) != 0)
           continue;
         argv2[0] = win_clang_candidates[i];
         rc = _spawnv(_P_WAIT, argv2[0], (const char *const *)argv2);
@@ -585,16 +670,15 @@ int ny_exec_spawn(const char *const argv[]) {
   if (WIFEXITED(status))
     return WEXITSTATUS(status);
   if (WIFSIGNALED(status)) {
-    fprintf(stderr, "process %s terminated by signal %d\n", argv[0],
-            WTERMSIG(status));
+    fprintf(stderr, "process %s terminated by signal %d\n", argv[0], WTERMSIG(status));
     return -1;
   }
   return status;
 #endif
 }
 
-bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
-                                const char *out_ast, bool debug, bool profile) {
+bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const char *out_ast,
+                                bool debug, bool profile, int speed_level, bool native_tune) {
   const char *root = ny_src_root();
   static char include_arg[PATH_MAX + 12];
   static char llvm_include_arg[PATH_MAX + 12];
@@ -602,6 +686,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   static char ast_src[PATH_MAX];
   char dwarf_flag[16];
   char cache_obj[PATH_MAX];
+  if (speed_level < 0)
+    speed_level = 0;
+  if (speed_level > 3)
+    speed_level = 3;
   snprintf(runtime_src, sizeof(runtime_src), "%s/src/rt/init.c", root);
   snprintf(ast_src, sizeof(ast_src), "%s/src/rt/ast.c", root);
   ny_builder_dwarf_flag(dwarf_flag, sizeof(dwarf_flag), debug);
@@ -620,8 +708,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "/I%s", llvm_inc);
     else
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
-    ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug,
-                          llvm_include_arg);
+    ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug, speed_level,
+                          native_tune, llvm_include_arg);
     if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
       return true;
     static char out_arg[PATH_MAX + 8];
@@ -691,7 +779,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
 #else
   snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
 #endif
-  ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug,
+  ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug, speed_level, native_tune,
                         llvm_include_arg);
   if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
     return true;
@@ -703,12 +791,14 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
     runtime_args[ra_i++] = "ccache";
   runtime_args[ra_i++] = cc;
   runtime_args[ra_i++] = "-std=gnu11";
-  runtime_args[ra_i++] = debug ? "-g3" : "-Os";
+  runtime_args[ra_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
   runtime_args[ra_i++] = dwarf_flag;
-  runtime_args[ra_i++] =
-      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-  runtime_args[ra_i++] =
-      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+#if !defined(_WIN32)
+  if (!debug && native_tune)
+    runtime_args[ra_i++] = "-march=native";
+#endif
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
@@ -739,12 +829,12 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
     runtime_args[ra_i++] = "ccache";
   runtime_args[ra_i++] = cc;
   runtime_args[ra_i++] = "-std=gnu11";
-  runtime_args[ra_i++] = debug ? "-g3" : "-Os";
+  runtime_args[ra_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
   runtime_args[ra_i++] = dwarf_flag;
-  runtime_args[ra_i++] =
-      debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-  runtime_args[ra_i++] =
-      debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  if (!debug && native_tune)
+    runtime_args[ra_i++] = "-march=native";
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
@@ -771,8 +861,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   }
   char *host_pool[16];
   size_t pool_len = 0;
-  int rc = spawn_with_host_flags(runtime_args, getenv("NYTRIX_HOST_CFLAGS"),
-                                 host_pool, &pool_len);
+  int rc = spawn_with_host_flags(runtime_args, getenv("NYTRIX_HOST_CFLAGS"), host_pool, &pool_len);
   ny_free_host_pool(host_pool, pool_len);
   if (rc != 0) {
     NY_LOG_ERR("Runtime compilation failed (exit=%d)\n", rc);
@@ -787,12 +876,12 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
       ast_args[aa_i++] = "ccache";
     ast_args[aa_i++] = cc;
     ast_args[aa_i++] = "-std=gnu11";
-    ast_args[aa_i++] = debug ? "-g3" : "-Os";
+    ast_args[aa_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
     ast_args[aa_i++] = dwarf_flag;
-    ast_args[aa_i++] =
-        debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-    ast_args[aa_i++] =
-        debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+    ast_args[aa_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+    ast_args[aa_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+    if (!debug && native_tune)
+      ast_args[aa_i++] = "-march=native";
 #if defined(__arm__) && !defined(__aarch64__)
     ast_args[aa_i++] = arm_float_abi_flag;
 #endif
@@ -818,8 +907,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
     ast_args[aa_i] = NULL;
     char *ast_pool[16];
     size_t ast_pool_len = 0;
-    rc = spawn_with_host_flags(ast_args, getenv("NYTRIX_HOST_CFLAGS"), ast_pool,
-                               &ast_pool_len);
+    rc = spawn_with_host_flags(ast_args, getenv("NYTRIX_HOST_CFLAGS"), ast_pool, &ast_pool_len);
     ny_free_host_pool(ast_pool, ast_pool_len);
     if (rc != 0) {
       NY_LOG_ERR("Runtime AST compilation failed (exit=%d)\n", rc);
@@ -829,13 +917,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   return true;
 }
 
-bool ny_builder_link(const char *cc, const char *obj_path,
-                     const char *runtime_obj, const char *runtime_ast_obj,
-                     const char *const extra_objs[], size_t extra_count,
-                     const char *const link_dirs[], size_t link_dir_count,
-                     const char *const link_libs[], size_t link_lib_count,
-                     const char *output_path, bool link_strip, bool debug,
-                     bool profile) {
+bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_obj,
+                     const char *runtime_ast_obj, const char *const extra_objs[],
+                     size_t extra_count, const char *const link_dirs[], size_t link_dir_count,
+                     const char *const link_libs[], size_t link_lib_count, const char *output_path,
+                     bool link_strip, bool debug, bool profile) {
 #define NY_MAX_LINK_ARGS 128
   const char *argv[NY_MAX_LINK_ARGS];
   size_t idx = 0;
@@ -901,8 +987,8 @@ bool ny_builder_link(const char *cc, const char *obj_path,
         snprintf(tmp, sizeof(tmp), "%s.lib", lib + 2);
         dyn_args[dyn_count] = ny_strdup(tmp);
         argv[idx++] = dyn_args[dyn_count++];
-      } else if (has_ext(lib, ".lib") || has_ext(lib, ".obj") ||
-                 has_ext(lib, ".dll") || is_path_like(lib)) {
+      } else if (has_ext(lib, ".lib") || has_ext(lib, ".obj") || has_ext(lib, ".dll") ||
+                 is_path_like(lib)) {
         argv[idx++] = lib;
       } else {
         if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
@@ -933,15 +1019,16 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     argv[idx++] = "-pg";
 #if !defined(__APPLE__) && !defined(_WIN32)
   if (ny_tool_in_path("mold")) {
-    fprintf(stderr, "[INFO] Using mold linker for faster linking.\\n");
+    if (verbose_enabled >= 1)
+      NY_LOG_INFO("Using mold linker for faster linking.\n");
     argv[idx++] = "-fuse-ld=mold";
   } else {
-    fprintf(stderr, "[INFO] mold linker not found, using default linker.\\n");
     const char *lld_env = getenv("NYTRIX_USE_LLD");
-    bool use_lld =
-        lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
+    bool use_lld = lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
     if (use_lld)
       argv[idx++] = "-fuse-ld=lld";
+    else if (verbose_enabled >= 2)
+      NY_LOG_V2("mold/lld not selected; using default system linker.\n");
   }
 #endif
 #if defined(__APPLE__)
@@ -990,10 +1077,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   }
 #if !defined(__APPLE__) && !defined(_WIN32)
   argv[idx++] = debug ? "-Wl,--build-id" : "-Wl,--build-id=none";
-  if (!debug)
-    argv[idx++] = "-Wl,--gc-sections";
-  argv[idx++] = "-Wl,-O1";
-  argv[idx++] = "-Wl,--no-as-needed";
+  argv[idx++] = "-Wl,--gc-sections";
   if (link_strip)
     argv[idx++] = "-Wl,--strip-all";
 #elif defined(__APPLE__)
@@ -1023,12 +1107,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   argv[idx++] = "-o";
   argv[idx++] = output_path;
 #ifndef _WIN32
-  /* Link against runtime library from build directory with rpath */
-  argv[idx++] = "-Wl,-rpath,./build/release";
-  argv[idx++] = "-L./build/release";
-  argv[idx++] = "-lnytrixrt";
-  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env
-   */
+  /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env. */
 #endif
 #ifdef _WIN32
   /* Link against runtime library from build directory */
@@ -1057,6 +1136,8 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     const char *lib = shared_libs[i];
     /* Convert bare names like "m" to "-lm", pass through "-lXXX" as-is */
     if (lib[0] == '-' && lib[1] == 'l') {
+      argv[idx++] = lib;
+    } else if (strchr(lib, '/')) {
       argv[idx++] = lib;
     } else {
       char buf[64];
@@ -1089,14 +1170,101 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     }
     argv[idx++] = lib;
   }
-#if !defined(__APPLE__) && !defined(_WIN32)
-  argv[idx++] = "-Wl,--as-needed";
+#if !defined(_WIN32)
+  bool has_gmp = false;
+  bool has_z = false;
+  bool has_m = false;
+  bool has_dl = false;
+  bool has_pthread = false;
+#if !defined(__APPLE__)
+  bool has_util = false;
+#endif
+  for (size_t i = 0; i < link_lib_count; ++i) {
+    const char *lib = link_libs[i];
+    if (!lib)
+      continue;
+    if (strcmp(lib, "-lgmp") == 0 || strcmp(lib, "gmp") == 0 || strstr(lib, "/libgmp.") != NULL)
+      has_gmp = true;
+    else if (strcmp(lib, "-lz") == 0 || strcmp(lib, "z") == 0 || strstr(lib, "/libz.") != NULL)
+      has_z = true;
+    else if (strcmp(lib, "-lm") == 0 || strcmp(lib, "m") == 0 || strstr(lib, "/libm.") != NULL)
+      has_m = true;
+    else if (strcmp(lib, "-ldl") == 0 || strcmp(lib, "dl") == 0 || strstr(lib, "/libdl.") != NULL)
+      has_dl = true;
+    else if (strcmp(lib, "-lpthread") == 0 || strcmp(lib, "pthread") == 0 ||
+             strstr(lib, "/libpthread.") != NULL)
+      has_pthread = true;
+#if !defined(__APPLE__)
+    else if (strcmp(lib, "-lutil") == 0 || strcmp(lib, "util") == 0 ||
+             strstr(lib, "/libutil.") != NULL)
+      has_util = true;
+#endif
+  }
+  /*
+   * The AOT runtime object uses GMP-backed bigint helpers and may also retain
+   * platform support code. Add the small default runtime libs here explicitly.
+   */
+  if (!has_gmp && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lgmp";
+  if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lz";
+  if (!has_m && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lm";
+#if !defined(__APPLE__)
+  if (!has_dl && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-ldl";
+  if (!has_util && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lutil";
+#endif
+  if (!has_pthread && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lpthread";
+  if (ny_env_enabled("NYTRIX_LINK_UI_DEFAULTS")) {
+    bool has_x11 = false;
+    bool has_wayland_client = false;
+    bool has_wayland_cursor = false;
+    bool has_xkbcommon = false;
+    bool has_xrandr = false;
+    bool has_xi = false;
+    bool has_xext = false;
+    for (size_t i = 0; i < link_lib_count; ++i) {
+      const char *lib = link_libs[i];
+      if (!lib)
+        continue;
+      if (strstr(lib, "X11") != NULL || strcmp(lib, "-lX11") == 0)
+        has_x11 = true;
+      if (strstr(lib, "wayland-client") != NULL)
+        has_wayland_client = true;
+      if (strstr(lib, "wayland-cursor") != NULL)
+        has_wayland_cursor = true;
+      if (strstr(lib, "xkbcommon") != NULL)
+        has_xkbcommon = true;
+      if (strstr(lib, "Xrandr") != NULL || strcmp(lib, "-lXrandr") == 0)
+        has_xrandr = true;
+      if (strstr(lib, "Xi") != NULL || strcmp(lib, "-lXi") == 0)
+        has_xi = true;
+      if (strstr(lib, "Xext") != NULL || strcmp(lib, "-lXext") == 0)
+        has_xext = true;
+    }
+    if (!has_x11 && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lX11";
+    if (!has_wayland_client && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lwayland-client";
+    if (!has_wayland_cursor && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lwayland-cursor";
+    if (!has_xkbcommon && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lxkbcommon";
+    if (!has_xrandr && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lXrandr";
+    if (!has_xi && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lXi";
+    if (!has_xext && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lXext";
+  }
 #endif
   argv[idx] = NULL;
   char *host_pool[16];
   size_t pool_len = 0;
-  int rc = spawn_with_host_flags(argv, getenv("NYTRIX_HOST_LDFLAGS"), host_pool,
-                                 &pool_len);
+  int rc = spawn_with_host_flags(argv, getenv("NYTRIX_HOST_LDFLAGS"), host_pool, &pool_len);
   ny_free_host_pool(host_pool, pool_len);
   for (size_t i = 0; i < shared_lib_copy_count; i++)
     free(shared_lib_copies[i]);
