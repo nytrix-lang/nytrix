@@ -14,14 +14,14 @@ int ny_bundle_save(const ny_options *opt) {
     mode = STD_MODE_FULL;
 
   if (opt->bundle_std_path) {
-    char *bundle = ny_build_std_bundle(NULL, 0, mode, opt->verbose, NULL);
+    char *bundle = ny_build_std_source_ex(NULL, 0, mode, opt->verbose, NULL, false);
     if (!bundle) {
-      NY_LOG_ERR("Failed to build std bundle\n");
+      NY_LOG_ERR("Failed to generate std.ny\n");
       return 1;
     }
     if (ny_write_if_changed(opt->bundle_std_path, bundle, strlen(bundle))) {
       if (opt->verbose)
-        NY_LOG_SUCCESS("Bundled std -> %s\n", opt->bundle_std_path);
+        NY_LOG_SUCCESS("Generated std.ny -> %s\n", opt->bundle_std_path);
     }
     free(bundle);
   }
