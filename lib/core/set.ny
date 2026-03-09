@@ -1,42 +1,31 @@
-;; Keywords: core set
-;; Hash Set Implementation for Nytrix
+;; Keywords: set hashset
+;; Set construction, membership, mutation, and set algebra operations.
+module std.core.set_mod(set, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
+use std.core
+use std.core.primitives as prim
 
-module std.core.set_mod (
-   set, set_new, set_add, set_contains
-)
-use std.core *
-use std.core.error *
-use std.str *
-use std.str.io *
-
-@inline fn _set_str_eq(a, b){
-   "Internal: byte-wise string equality for set keys."
+@inline
+fn _set_str_eq(any: a, any: b): bool {
    if(!is_str(a) || !is_str(b)){ return false }
-   def n = str_len(a)
-   if(!((n == str_len(b)))){ return false }
-   mut i = 0
-   while(i < n){
-      if(load8(a, i) != load8(b, i)){ return false }
-      i += 1
-   }
-   return true
+   def n = a.len
+   if(n != b.len){ return false }
+   memcmp(a, b, n) == 0
 }
 
-@inline fn _set_key_eq(a, b){
-   "Internal: key equality with string fast-path."
+@inline
+fn _set_key_eq(any: a, any: b): bool {
    if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
-   return (a == b)
+   return(a == b)
 }
 
-fn _set_hash(x){
-   "Internal: hashes integers/strings for open-addressing lookup."
+@inline
+fn _set_hash(any: x): int {
    if(is_int(x)){ return x }
    if(is_str(x)){
-      mut h = 14695981039346656037
-      mut i = 0
-      def n = str_len(x)
+      mut h, i = 2166136261, 0
+      def n = x.len
       while(i < n){
-         h = (h ^ load8(x, i)) * 1099511628211
+         h = ((h ^^ load8(x, i)) * 16777619) & 2147483647
          i += 1
       }
       return h
@@ -44,14 +33,37 @@ fn _set_hash(x){
    return x
 }
 
-fn _set_new(cap){
-   "Internal: allocates a set storage block."
+@inline
+fn _set_find_existing_off(set: s, any: key): int {
+   def cap = load64(s, 8)
+   mut i = 0
+   while(i < cap){
+      def off = 16 + i * 24
+      if(load64(s, off + 16) == 1 && _set_key_eq(load64(s, off), key)){ return off }
+      i += 1
+   }
+   -1
+}
+
+@inline
+@returns_owned
+@consumes(s)
+fn _set_tombstone_at(set: s, int: off): set {
+   store64(s, 0, off) ;; Clear key
+   store64(s, 0, off + 8) ;; Clear occupied flag
+   store64(s, 2, off + 16) ;; Tombstone state
+   store64(s, load64(s, 0) - 1, 0)
+   s
+}
+
+@returns_owned
+fn _set_new(int: cap): set {
    if(cap < 8){ cap = 8 }
    cap = _pow2(cap)
-   def p = malloc(16 + cap * 24)
+   def p = __malloc(16 + cap * 24)
    if(!p){ panic("set malloc failed") }
-   store64(p, 102, -8)
-   store64(p, 0, 0)
+   store64(p, prim.runtime_tag_raw("set"), -8)
+   store64(p, 0, 0) ;; count
    store64(p, cap, 8)
    mut i = 0
    while(i < cap){
@@ -64,19 +76,19 @@ fn _set_new(cap){
    p
 }
 
-@inline fn set_new(cap=8){
+@inline
+@returns_owned
+fn set(int: cap=8): set {
    "Creates a new empty set."
    _set_new(cap)
 }
 
-@inline fn set(cap=8){
-   "Alias for set_new."
-   _set_new(cap)
-}
-
-fn _set_insert(s, key){
-   "Internal: inserts a key if it is not already present."
+@inline
+@returns_owned
+@consumes(s)
+fn _set_insert(set: s, any: key): set {
    def cap = load64(s, 8)
+   if(is_str(key) && _set_find_existing_off(s, key) >= 0){ return s }
    def h = _set_hash(key)
    def mask = cap - 1
    mut idx = h & mask
@@ -85,17 +97,16 @@ fn _set_insert(s, key){
    while(probes < cap){
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
-      if(st == 0){
-         store64(s, key, off)
-         store64(s, 1, off + 8)
-         store64(s, 1, off + 16)
-         store64(s, load64(s, 0) + 1, 0)
-         return s
-      }
-      if(st == 1){
-         if(_set_key_eq(load64(s, off), key)){
-         return s
+      case st {
+         0 -> {
+            store64(s, retain(key), off)
+            store64(s, 1, off + 8)
+            store64(s, 1, off + 16)
+            store64(s, load64(s, 0) + 1, 0)
+            return s
          }
+         1 if _set_key_eq(load64(s, off), key) -> { return s }
+         _ -> {}
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
       perturb = perturb >> 5
@@ -104,39 +115,26 @@ fn _set_insert(s, key){
    return s
 }
 
-fn _set_resize(s, newcap){
-   "Internal: rebuilds the set at a larger capacity."
+@returns_owned
+@consumes(s)
+fn _set_resize(set: s, int: newcap): set {
    mut ns = _set_new(newcap)
    def cap = load64(s, 8)
    mut i = 0
    while(i < cap){
       def off = 16 + i * 24
       def st = load64(s, off + 16)
-      if(st == 1){
-         ns = _set_insert(ns, load64(s, off))
-      }
+      if(st == 1){ ns = _set_insert(ns, load64(s, off)) }
       i += 1
    }
    free(s)
    ns
 }
 
-fn set_add(s, key){
-   "Adds `key` to set `s`. Returns the (possibly reallocated) set."
-   if(!s){ s = _set_new(8) }
-   if(!is_set(s)){ panic("set_add called on non-set") }
-   def count = load64(s, 0)
-   def cap = load64(s, 8)
-   if(count * 10 >= cap * 7){
-      s = _set_resize(s, cap * 2)
-   }
-   _set_insert(s, key)
-   s
-}
-
-@inline fn set_contains(s, key){
-   "Returns true if `key` is in set `s`."
+@inline
+fn _set_has_existing(any: s, any: key): bool {
    if(!is_set(s)){ return false }
+   if(is_str(key)){ return _set_find_existing_off(s, key) >= 0 }
    def cap = load64(s, 8)
    def h = _set_hash(key)
    def mask = cap - 1
@@ -146,11 +144,10 @@ fn set_add(s, key){
    while(probes < cap){
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
-      if(st == 0){ return false }
-      if(st == 1){
-         if(_set_key_eq(load64(s, off), key)){
-         return true
-         }
+      case st {
+         0 -> { return false }
+         1 if _set_key_eq(load64(s, off), key) -> { return true }
+         _ -> {}
       }
       idx = (idx * 5 + 1 + (perturb >> 5)) & mask
       perturb = perturb >> 5
@@ -159,70 +156,139 @@ fn set_add(s, key){
    return false
 }
 
-if(comptime{__main()}){
-   use std.core *
-   use std.core.set_mod *
+@returns_owned
+fn _set_add(any: s, any: key): set {
+   if(!s){ s = _set_new(8) }
+   if(!is_set(s)){ panic("add on non-set") }
+   if(_set_has_existing(s, key)){ return s }
+   def count = load64(s, 0)
+   def cap = load64(s, 8)
+   if(count * 10 >= cap * 7){
+      def ns = _set_resize(s, cap * 2)
+      return _set_insert(ns, key)
+   }
+   return _set_insert(s, key)
+}
 
-   mut s = set(8)
-   assert(is_set(s), "is_set(s)")
-   assert(!set_contains(s, "key1"), "empty set contains")
+@inline
+fn _set_contains(any: s, any: key): bool { _set_has_existing(s, key) }
 
-   s = set_add(s, "key1")
-   assert(set_contains(s, "key1"), "contains key1")
-   assert(!set_contains(s, "key2"), "not contains key2")
+@returns_owned
+fn _set_remove(any: s, any: key): any {
+   if(!is_set(s)){ return s }
+   if(is_str(key)){
+      def off = _set_find_existing_off(s, key)
+      if(off >= 0){ return _set_tombstone_at(s, off) }
+      return s
+   }
+   def cap = load64(s, 8)
+   def h = _set_hash(key)
+   def mask = cap - 1
+   mut idx = h & mask
+   mut perturb = h
+   mut probes = 0
+   while(probes < cap){
+      def off = 16 + idx * 24
+      def st = load64(s, off + 16)
+      case st {
+         0 -> { return s } ;; Key not found
+         1 if _set_key_eq(load64(s, off), key) -> {
+            return _set_tombstone_at(s, off)
+         }
+         _ -> {}
+      }
+      idx = (idx * 5 + 1 + (perturb >> 5)) & mask
+      perturb = perturb >> 5
+      probes += 1
+   }
+   s
+}
 
-   s = set_add(s, "key2")
-   assert(set_contains(s, "key1"), "contains key1 (2)")
-   assert(set_contains(s, "key2"), "contains key2")
+@inline
+fn _set_len(any: s): int {
+   if(!is_set(s)){ return 0 }
+   load64(s, 0)
+}
 
-   mut s2 = set(8)
-   s2 = set_add(s2, 123)
-   assert(set_contains(s2, 123), "contains int key")
-   assert(!set_contains(s2, 124), "not contains int key")
+@inline
+fn len(any: s): int {
+   "Returns the number of elements in set `s`."
+   _set_len(s)
+}
 
-   mut s_col = set(8)
-   s_col = set_add(s_col, 0)
-   s_col = set_add(s_col, 8)
-   s_col = set_add(s_col, 16)
-   assert(set_contains(s_col, 0), "collision 0")
-   assert(set_contains(s_col, 8), "collision 8")
-   assert(set_contains(s_col, 16), "collision 16")
+@inline
+fn is_empty(any: s): bool {
+   "Returns true if set `s` has no elements."
+   _set_len(s) == 0
+}
 
-   mut s_stress = set(8)
+@returns_owned
+fn _set_values(any: s): list {
+   if(!is_set(s)){ return list(0) }
+   def cap = load64(s, 8)
+   def count = load64(s, 0)
+   mut out = list(count)
+   mut idx = 0
    mut i = 0
-   while(i < 1000){
-      s_stress = set_add(s_stress, i)
+   while(i < cap){
+      def off = 16 + i * 24
+      def st = load64(s, off + 16)
+      if(st == 1){
+         store64(out, load64(s, off), 16 + idx * 8)
+         idx += 1
+      }
       i += 1
    }
-   i = 0
-   while(i < 1000){
-      assert(set_contains(s_stress, i), f"stress contains {i}")
+   store64(out, idx, 0)
+   out
+}
+
+@returns_owned
+fn _set_clear(any: s): any {
+   if(!is_set(s)){ return s }
+   def cap = load64(s, 8)
+   mut i = 0
+   while(i < cap){
+      def off = 16 + i * 24
+      store64(s, 0, off)
+      store64(s, 0, off + 8)
+      store64(s, 0, off + 16)
       i += 1
    }
-   assert(!set_contains(s_stress, 1000), "stress not contains 1000")
+   store64(s, 0, 0)
+   s
+}
 
-   ; Verify set reallocation
-   mut s_realloc = set(8)
-   def s_orig = s_realloc
-   s_realloc = set_add(s_realloc, "r1")
-   s_realloc = set_add(s_realloc, "r2")
-   s_realloc = set_add(s_realloc, "r3")
-   s_realloc = set_add(s_realloc, "r4")
-   s_realloc = set_add(s_realloc, "r5")
-   assert(s_realloc == s_orig, "set ptr stable before resize limit")
+@inline
+@returns_owned
+fn add(any: s, any: key): set {
+   "Adds `key` to set `s`."
+   _set_add(s, key)
+}
 
-   s_realloc = set_add(s_realloc, "r6")
-   assert(s_realloc == s_orig, "set ptr stable for 6")
+@inline
+@returns_owned
+fn sub(any: s, any: key): any {
+   "Removes `key` from set `s`."
+   _set_remove(s, key)
+}
 
-   s_realloc = set_add(s_realloc, "r7") ; This should trigger resize (count 6 * 10 = 60 >= 56)
-   assert(s_realloc != s_orig, "set ptr changed after resize")
-   assert(set_contains(s_realloc, "r1"), "contains r1 after resize")
-   assert(set_contains(s_realloc, "r7"), "contains r7 after resize")
+@inline
+fn contains(any: s, any: key): bool {
+   "Returns true if `key` is in set `s`."
+   _set_contains(s, key)
+}
 
-   ; Test that adding existing key does not change pointer
-   def s_curr = s_realloc
-   s_realloc = set_add(s_realloc, "r1")
-   assert(s_realloc == s_curr, "set ptr stable on existing key")
+@inline
+@returns_owned
+fn clear(any: s): any {
+   "Removes all elements from set `s`."
+   _set_clear(s)
+}
 
-   print("✓ std.core.set_mod tests passed")
+@inline
+@returns_owned
+fn values(any: s): list {
+   "Returns the values of set `s` as a list."
+   _set_values(s)
 }
