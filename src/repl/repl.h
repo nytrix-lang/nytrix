@@ -8,5 +8,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                  int batch_mode);
 void ny_repl_set_std_mode(std_mode_t mode);
 void ny_repl_set_plain(int plain);
+void ny_repl_set_max_errors(int max_errors);
 
 #endif
