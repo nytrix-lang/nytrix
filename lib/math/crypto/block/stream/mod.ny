@@ -1,0 +1,3 @@
+;; Keywords: stream-cipher ctr otp rc4 keystream xor hamming-distance english-score crib-drag
+;; Stream-cipher facade for CTR helpers, OTP, RC4, keystream scoring, and bytewise XOR workflows.
+module std.math.crypto.block.stream(core, otp, rc4, ctr_xor_plaintexts, ctr_recover_keystream, ctr_bit_flip_byte, ctr_bit_flipping, ctr_score_english_byte, ctr_recover_periodic_keystream_english, ctr_apply_periodic_keystream, mtp_xor_all, mtp_guess_key_byte, mtp_crib_drag, otp_reuse_attack, otp_decrypt_known_plaintext, otp_hamming_distance, otp_guess_key_sizes, otp_score_english, otp_recover_reused_key, otp_apply_key, rc4_ksa, rc4_prga, rc4_decrypt_known_key, otp_timestamp_sha256_key, otp_timestamp_sha256_xor, otp_timestamp_sha256_bruteforce)
