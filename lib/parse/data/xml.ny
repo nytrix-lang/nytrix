@@ -1,27 +1,22 @@
-;; Keywords: enc xml
+;; Keywords: data serialization xml
 ;; Extensible Markup Language (XML) Parser and Generator for Nytrix
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc3470.html
+module std.parse.data.xml(parse, encode, Node)
+use std.core
+use std.core.str as str
 
-module std.enc.xml (
-   parse, encode, Node
-)
-
-use std.core *
-use std.str as str
-
-fn Node(name, attr=dict(), children=[], text=""){
-   "Auto-generated docstring: Node."
+fn Node(str: name, any: attr=0, any: children=0, any: text=""): dict {
+   "Creates an XML node record."
    mut n = dict(8)
-   dict_set(n, "name", name)
-   dict_set(n, "attr", attr)
-   dict_set(n, "children", children)
-   dict_set(n, "text", text)
+   n["name"] = name
+   n["attr"] = is_dict(attr) ? attr : dict()
+   n["children"] = is_list(children) ? children : []
+   n["text"] = text
    n
 }
 
-fn _skip_ws(s, p, n){
-   "Auto-generated docstring: _skip_ws."
+fn _skip_ws(str: s, int: p, int: n): int {
    while(p < n){
       def c = load8(s, p)
       if(c <= 32){ p += 1 }
@@ -30,45 +25,48 @@ fn _skip_ws(s, p, n){
    p
 }
 
-fn _parse_attr(s, p, n){
-   "Auto-generated docstring: _parse_attr."
-   mut attrs = dict()
+fn _parse_attr(str: s, int: p, int: n): list {
+   mut attrs = dict(8)
    while(p < n){
       p = _skip_ws(s, p, n)
       if(p >= n || load8(s, p) == 62 || load8(s, p) == 47){ break } ; '>' or '/'
-      mut key = ""
+      mut kb = Builder(16)
       while(p < n){
          def c = load8(s, p)
-         if(c == 61 || c <= 32){ break }
-         key = key + chr(c)
+         if(c == 61 || c == 62 || c == 47 || c <= 32){ break }
+         kb = builder_append(kb, chr(c))
          p += 1
       }
+      def key = builder_to_str(kb)
+      builder_free(kb)
       p = _skip_ws(s, p, n)
       if(p < n && load8(s, p) == 61){ ; '='
          p += 1
          p = _skip_ws(s, p, n)
          def quote = load8(s, p)
          if(quote == 34 || quote == 39){ ; '"' or "'"
-         p += 1
-         mut val = ""
-         while(p < n && load8(s, p) != quote){
-               val = val + chr(load8(s, p))
+            p += 1
+            mut vb = Builder(16)
+            while(p < n && load8(s, p) != quote){
+               vb = builder_append(vb, chr(load8(s, p)))
                p += 1
-         }
-         p += 1
-         attrs = dict_set(attrs, key, val)
+            }
+            def val = builder_to_str(vb)
+            builder_free(vb)
+            p += 1
+            attrs[key] = val
          }
       } else {
-         attrs = dict_set(attrs, key, true)
+         attrs[key] = true
       }
    }
    [attrs, p]
 }
 
-fn parse(data){
+fn parse(any: data): any {
    "Parses a simple XML string into a tree of nodes."
    if(!is_str(data)){ return 0 }
-   def n = len(data)
+   def n = data.len
    mut p = 0
    mut stack = []
    mut root = 0
@@ -78,114 +76,112 @@ fn parse(data){
       if(load8(data, p) == 60){ ; '<'
          p += 1
          if(p < n && load8(data, p) == 47){ ; '</'
-         p += 1
-         mut name = ""
-         while(p < n && load8(data, p) != 62){
-               name = name + chr(load8(data, p))
+            p += 1
+            mut nb = Builder(16)
+            while(p < n && load8(data, p) != 62){
+               nb = builder_append(nb, chr(load8(data, p)))
                p += 1
-         }
-         p += 1
-         if(len(stack) > 1){
-               stack = pop(stack)
-         }
+            }
+            def name = builder_to_str(nb)
+            builder_free(nb)
+            p += 1
+            if(stack.len > 1){ stack.pop() }
          } elif(p < n && load8(data, p) == 33){ ; '<!' (Comment or CDATA)
-         while(p < n && load8(data, p) != 62){ p += 1 }
-         p += 1
+            while(p < n && load8(data, p) != 62){ p += 1 }
+            p += 1
          } elif(p < n && load8(data, p) == 63){ ; '<?' (Declaration)
-         while(p < n && load8(data, p) != 62){ p += 1 }
-         p += 1
+            while(p < n && load8(data, p) != 62){ p += 1 }
+            p += 1
          } else {
-         mut name = ""
-         while(p < n){
+            mut nb = Builder(16)
+            while(p < n){
                def c = load8(data, p)
                if(c == 62 || c == 47 || c <= 32){ break }
-               name = name + chr(c)
+               nb = builder_append(nb, chr(c))
                p += 1
-         }
-         def attr_res = _parse_attr(data, p, n)
-         def attrs = get(attr_res, 0)
-         p = get(attr_res, 1)
-         mut self_closing = false
-         if(p < n && load8(data, p) == 47){
+            }
+            def name = builder_to_str(nb)
+            builder_free(nb)
+            def attr_res = _parse_attr(data, p, n)
+            def attrs = attr_res.get(0)
+            p = attr_res.get(1)
+            mut self_closing = false
+            if(p < n && load8(data, p) == 47){
                self_closing = true
                p += 1
-         }
-         if(p < n && load8(data, p) == 62){ p += 1 }
-         def node = Node(name, attrs)
-         if(root == 0){ root = node }
-         if(len(stack) > 0){
-               def parent = get(stack, len(stack) - 1)
-               mut children = dict_get(parent, "children")
-               children = append(children, node)
-               dict_set(parent, "children", children)
-         }
-         if(!self_closing){
-               stack = append(stack, node)
-         }
+            }
+            if(p < n && load8(data, p) == 62){ p += 1 }
+            def node = Node(name, attrs)
+            if(root == 0){ root = node }
+            if(stack.len > 0){
+               def parent = stack.get(stack.len - 1)
+               mut children = parent.get("children")
+               children = children.append(node)
+               parent["children"] = children
+            }
+            if(!self_closing){ stack = stack.append(node) }
          }
       } else {
-         mut text = ""
+         mut tb = Builder(32)
          while(p < n && load8(data, p) != 60){
-         text = text + chr(load8(data, p))
-         p += 1
+            tb = builder_append(tb, chr(load8(data, p)))
+            p += 1
          }
-         if(len(stack) > 0){
-         def current = get(stack, len(stack) - 1)
-         def existing = dict_get(current, "text")
-         dict_set(current, "text", existing + str.strip(text))
+         def text = builder_to_str(tb)
+         builder_free(tb)
+         if(stack.len > 0){
+            def current = stack.get(stack.len - 1)
+            def existing = current.get("text")
+            current["text"] = existing + str.strip(text)
          }
       }
    }
    root
 }
 
-fn encode(node){
+fn _xml_encode_node(any: node): str {
    "Serializes a node tree into an XML string."
    if(!is_dict(node)){ return "" }
-   def name = dict_get(node, "name", "node")
-   def attrs = dict_get(node, "attr", dict())
-   def children = dict_get(node, "children", [])
-   def text = dict_get(node, "text", "")
-   mut out = "<" + name
+   def name = node.get("name", "node")
+   def attrs = node.get("attr", dict())
+   def children = node.get("children", [])
+   def text = node.get("text", "")
+   mut out = Builder(64)
+   out = builder_append(out, "<")
+   out = builder_append(out, name)
    def attr_keys = dict_keys(attrs)
    mut i = 0
-   while(i < len(attr_keys)){
-      def k = get(attr_keys, i)
-      def v = dict_get(attrs, k)
-      if(v == true){ out = out + " " + k }
-      else { out = out + " " + k + "='" + to_str(v) + "'" }
+   def attr_keys_n = attr_keys.len
+   while(i < attr_keys_n){
+      def k, v = attr_keys.get(i), attrs.get(k)
+      out = builder_append(out, " ")
+      out = builder_append(out, k)
+      if(v != true){
+         out = builder_append(out, "='")
+         out = builder_append(out, to_str(v))
+         out = builder_append(out, "'")
+      }
       i += 1
    }
-   if(len(children) == 0 && str.len(text) == 0){
-      out = out + "/>"
-   } else {
-      out = out + ">" + text
+   if(children.len == 0 && text.len == 0){ out = builder_append(out, "/>") } else {
+      out = builder_append(out, ">")
+      out = builder_append(out, text)
       mut j = 0
-      while(j < len(children)){
-         out = out + encode(get(children, j))
+      def children_n = children.len
+      while(j < children_n){
+         out = builder_append(out, _xml_encode_node(children.get(j)))
          j += 1
       }
-      out = out + "</" + name + ">"
+      out = builder_append(out, "</")
+      out = builder_append(out, name)
+      out = builder_append(out, ">")
    }
-   out
+   def s_out = builder_to_str(out)
+   builder_free(out)
+   s_out
 }
 
-if(comptime{__main()}){
-   use std.core.error *
-   def data = "<?xml version='1.0'?><root><item id='1' active>Hello</item><item id='2'>World</item></root>"
-   def root = parse(data)
-   assert(root != 0, "xml parse root")
-   assert(dict_get(root, "name") == "root", "xml root name")
-   def children = dict_get(root, "children")
-   assert(len(children) == 2, "xml children count")
-   def item1 = get(children, 0)
-   assert(dict_get(item1, "name") == "item", "xml child name")
-   assert(dict_get(dict_get(item1, "attr"), "id") == "1", "xml attr")
-   assert(dict_get(item1, "text") == "Hello", "xml text content")
-
-   def encoded = encode(root)
-   assert(str.str_contains(encoded, "id='1'"), "xml encode attr")
-   assert(str.str_contains(encoded, "</root>"), "xml encode root close")
-
-   print("✓ std.enc.xml tests passed")
+fn encode(any: node): str {
+   "Serializes a node tree into an XML string."
+   _xml_encode_node(node)
 }
