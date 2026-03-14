@@ -2,82 +2,118 @@
 ;; Truevision TGA Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Truevision_TGA
+module std.parse.img.tga(decode, encode, save)
+use std.core
+use std.core.dict_mod
+use std.math.bin as pbin
 
-module std.image.format.tga (
-   decode, encode
-)
-
-use std.core *
-use std.core.dict_mod *
-use std.parse.bin as pbin
-
-fn decode(data){
+fn decode(str: data): any {
    "Decodes an uncompressed 24-bit or 32-bit TGA image."
-   if(!is_str(data) || len(data) < 18)
-   {
-      return 0
-   }
+   if(data.len < 18){ return 0 }
    def id_len = load8(data, 0)
    def color_map_type = load8(data, 1)
    load8(data, 2) ; image_type
-   def w = pbin.u16le(data, 12)
-   def h = pbin.u16le(data, 14)
+   def w, h = pbin.u16le(data, 12), pbin.u16le(data, 14)
    def bpp = load8(data, 16)
    def desc = load8(data, 17)
    def flip_x = (desc >> 4) & 1
    def flip_y = (desc >> 5) & 1
    mut p = 18 + id_len
-   if(color_map_type == 1)
-   {
+   if(color_map_type == 1){
       def map_len = pbin.u16le(data, 5)
       def map_entry_size = load8(data, 7)
       p += map_len * (map_entry_size / 8)
    }
    def tpx = w * h
-   def pix = init_str(malloc(tpx * 4 + 1 + 16) + 16, tpx * 4)
-   mut y = 0
-   while(y < h)
-   {
-      mut x = 0
-      while(x < w)
-      {
-         def ry = flip_y ? y : (h - 1 - y)
-         def rx = flip_x ? (w - 1 - x) : x
-         def src_off = p + (y * w + x) * (bpp / 8)
-         def dst_off = (ry * w + rx) * 4
-         if(bpp == 24)
-         {
-         store8(pix, load8(data, src_off + 2), dst_off)
-         store8(pix, load8(data, src_off + 1), dst_off + 1)
-         store8(pix, load8(data, src_off), dst_off + 2)
-         store8(pix, 255, dst_off + 3)
+   def pix = init_str(malloc(tpx * 4 + 1), tpx * 4)
+   if(!pix){ return 0 }
+   if(bpp == 24 && !flip_x && !flip_y){
+      mut y = 0
+      while(y < h){
+         mut x = 0
+         while(x + 4 <= w){
+            def src = p + (y * w + x) * 3
+            def dst = (y * w + x) * 4
+            def b0 = load8(data, src)
+            def g0 = load8(data, src+1)
+            def r0 = load8(data, src+2)
+            def b1 = load8(data, src+3)
+            def g1 = load8(data, src+4)
+            def r1 = load8(data, src+5)
+            def b2 = load8(data, src+6)
+            def g2 = load8(data, src+7)
+            def r2 = load8(data, src+8)
+            def b3 = load8(data, src+9)
+            def g3 = load8(data, src+10)
+            def r3 = load8(data, src+11)
+            store32(pix, r0|(g0<<8)|(b0<<16)|(255<<24), dst)
+            store32(pix, r1|(g1<<8)|(b1<<16)|(255<<24), dst+4)
+            store32(pix, r2|(g2<<8)|(b2<<16)|(255<<24), dst+8)
+            store32(pix, r3|(g3<<8)|(b3<<16)|(255<<24), dst+12)
+            x += 4
          }
-         elif(bpp == 32)
-         {
-         store8(pix, load8(data, src_off + 2), dst_off)
-         store8(pix, load8(data, src_off + 1), dst_off + 1)
-         store8(pix, load8(data, src_off), dst_off + 2)
-         store8(pix, load8(data, src_off + 3), dst_off + 3)
+         while(x < w){
+            def src = p + (y * w + x) * 3
+            def dst = (y * w + x) * 4
+            store32(pix, load8(data, src+2)|(load8(data, src+1)<<8)|(load8(data, src)<<16)|(255<<24), dst)
+            x += 1
          }
-         x += 1
+         y += 1
       }
-      y += 1
+   } elif(bpp == 32 && !flip_x && !flip_y){
+      mut y = 0
+      while(y < h){
+         mut x = 0
+         while(x < w){
+            def src = p + (y * w + x) * 4
+            def dst = (y * w + x) * 4
+            store32(pix, load8(data, src+2)|(load8(data, src+1)<<8)|(load8(data, src)<<16)|(load8(data, src+3)<<24), dst)
+            x += 1
+         }
+         y += 1
+      }
+   } else {
+      mut y = 0
+      while(y < h){
+         mut x = 0
+         while(x < w){
+            mut ry = h - 1 - y
+            if(flip_y){ ry = y }
+            mut rx = x
+            if(flip_x){ rx = w - 1 - x }
+            def src_off = p + (y * w + x) * (bpp / 8)
+            def dst_off = (ry * w + rx) * 4
+            if(bpp == 24){
+               store8(pix, load8(data, src_off + 2), dst_off)
+               store8(pix, load8(data, src_off + 1), dst_off + 1)
+               store8(pix, load8(data, src_off), dst_off + 2)
+               store8(pix, 255, dst_off + 3)
+            }
+            elif(bpp == 32){
+               store8(pix, load8(data, src_off + 2), dst_off)
+               store8(pix, load8(data, src_off + 1), dst_off + 1)
+               store8(pix, load8(data, src_off), dst_off + 2)
+               store8(pix, load8(data, src_off + 3), dst_off + 3)
+            }
+            x += 1
+         }
+         y += 1
+      }
    }
    mut res_d = dict(4)
-   dict_set(res_d, "data", pix)
-   dict_set(res_d, "width", w)
-   dict_set(res_d, "height", h)
-   dict_set(res_d, "channels", 4)
+   res_d["data"] = pix
+   res_d["width"] = w
+   res_d["height"] = h
+   res_d["channels"] = 4
    res_d
 }
 
-fn encode(img){
+fn encode(dict: img): str {
    "Encodes an image dictionary as a 32-bit BGRA TGA byte string."
-   def w = dict_get(img, "width")
-   def h = dict_get(img, "height")
-   def d = dict_get(img, "data")
-   def ch = dict_get(img, "channels", 4)
-   def hdr = init_str(malloc(19 + 16) + 16, 18)
+   def w, h = img.get("width"), img.get("height")
+   def d = img.get("data")
+   def ch = img.get("channels", 4)
+   def hdr = init_str(malloc(19), 18)
    memset(hdr, 0, 18)
    store8(hdr, 2, 2)
    store8(hdr, w & 255, 12)
@@ -86,29 +122,18 @@ fn encode(img){
    store8(hdr, h >> 8, 15)
    store8(hdr, 32, 16) ; 32 bpp
    store8(hdr, 40, 17) ; Origin top-left (bit 5 = 32) + 8 bits alpha
-   def out = init_str(malloc(w * h * 4 + 19 + 16) + 16, w * h * 4 + 18)
+   def out = init_str(malloc(w * h * 4 + 19), w * h * 4 + 18)
    __copy_mem(out, hdr, 18)
    mut y = 0
-   while(y < h)
-   {
+   while(y < h){
       mut x = 0
-      while(x < w)
-      {
+      while(x < w){
          def src_off = (y * w + x) * ch
          def dst_off = 18 + (y * w + x) * 4
-         mut r = load8(d, src_off)
-         mut g = r
-         mut b = r
-         mut a = 255
-         if(ch >= 3)
-         {
-         g = load8(d, src_off + 1)
-         b = load8(d, src_off + 2)
-         }
-         if(ch == 4)
-         {
-         a = load8(d, src_off + 3)
-         }
+         mut r, g = load8(d, src_off), r
+         mut b, a = r, 255
+         if(ch >= 3){ g, b = load8(d, src_off + 1), load8(d, src_off + 2) }
+         if(ch == 4){ a = load8(d, src_off + 3) }
          store8(out, b, dst_off)
          store8(out, g, dst_off + 1)
          store8(out, r, dst_off + 2)
@@ -118,4 +143,16 @@ fn encode(img){
       y += 1
    }
    out
+}
+
+fn save(dict: img, str: path): Result {
+   "Writes a 32-bit top-left TGA through the native snapshot fast path."
+   def w = int(img.get("width", 0))
+   def h = int(img.get("height", 0))
+   def d = img.get("data", 0)
+   def ch = int(img.get("channels", img.get("bpp", 4)))
+   if(!d || w <= 0 || h <= 0 || ch <= 0){ return err(-22) }
+   def n = __save_tga_rgba(path, d, w, h, ch)
+   if(n >= 0){ return ok(n) }
+   err(n)
 }
