@@ -1,29 +1,25 @@
-;; Keywords: os primitives
+;; Keywords: prim primitives syscalls
 ;; Core OS primitives used by other os submodules.
+module std.os.prim(pid, ppid, env, environ, os, arch, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM)
+use std.core
+use std.core.str as core_str
 
-module std.os.prim (
-   pid, ppid, env, environ, os, arch,
-   OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM
-)
-
-use std.core *
-
-fn pid(){
+fn pid(): int {
    "Returns the process ID."
    __getpid()
 }
 
-fn ppid(){
+fn ppid(): int {
    "Returns the parent process ID."
    __getppid()
 }
 
-fn env(key){
+fn env(str: key): any {
    "Returns the value of environment variable `key`."
    def ep = __envp()
    if(!ep){ return 0 }
    else {
-      def key_len = str_len(key)
+      def key_len = key.len
       mut i = 0
       mut res = 0
       while(load64(ep, i*8)){
@@ -31,15 +27,15 @@ fn env(key){
          mut matches = 1
          mut j = 0
          while(j < key_len){
-         if(load8(env_entry, j) != load8(key, j)){
+            if(load8(env_entry, j) != load8(key, j)){
                matches = 0
                break
-         }
-         j += 1
+            }
+            j += 1
          }
          if(matches && load8(env_entry, key_len) == 61){
-         res = cstr_to_str(env_entry, key_len + 1)
-         break
+            res = core_str.cstr_to_str(env_entry, key_len + 1)
+            break
          }
          i += 1
       }
@@ -47,7 +43,7 @@ fn env(key){
    }
 }
 
-fn environ(){
+fn environ(): list {
    "Returns a list of environment entries."
    def ep = __envp()
    if(!ep){ return list(8) }
@@ -58,21 +54,21 @@ fn environ(){
          mut xs = list(8)
          mut i = 0
          while(i < n && load64(ep, i*8)){
-         def s_raw = load64(ep, i*8)
-         xs = append(xs, cstr_to_str(s_raw))
-         i += 1
+            def s_raw = load64(ep, i*8)
+            xs = xs.append(core_str.cstr_to_str(s_raw))
+            i += 1
          }
          xs
       }
    }
 }
 
-fn os(){
+fn os(): str {
    "Returns the operating system name."
    __os_name()
 }
 
-fn arch(){
+fn arch(): str {
    "Returns the architecture name."
    __arch_name()
 }

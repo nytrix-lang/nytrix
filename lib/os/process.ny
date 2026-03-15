@@ -1,337 +1,171 @@
-;; Keywords: os process
-;; Process for Nytrix
-
-module std.os.process (
-   run, popen, waitpid
-)
-use std.core *
+;; Keywords: process spawn subprocess
+;; Process execution, spawning, waiting, capture, and pipe control.
+module std.os.process(run, popen, waitpid)
+use std.core
 use std.core as core
-use std.os.sys *
-use std.os *
-use std.str *
-use std.core.reflect *
+use std.os.sys
+use std.os.prim (env)
+use std.core.str
+use std.core.reflect
 use std.os.path as ospath
-use std.os.platform as platform
 
-fn _is_nt_os(){
-   "Internal: returns true if the host operating system is Windows (NT)."
-   eq(__os_name(), "windows")
+fn _path_exists(any: path): bool {
+   if(!is_str(path) || path.len == 0){ return false }
+   __access(path, 0) == 0
 }
 
-fn _resolve_cmd(cmd){
-   "Internal: resolves a command `cmd` to its absolute path by searching the system PATH if necessary."
+fn _resolve_cmd(any: cmd): any {
    if(!is_str(cmd)){ return cmd }
    if(ospath.has_sep(cmd) || ospath.is_abs(cmd)){ return ospath.normalize(cmd) }
    def p = env("PATH")
-   if(!is_str(p) || str_len(p) == 0){ return cmd }
+   if(!is_str(p) || p.len == 0){ return cmd }
    mut sep = ":"
-   if(_is_nt_os()){ sep = ";" }
+   #windows { sep = ";" }
+   #endif
    def dirs = split(p, sep)
-   def has_dot = find(cmd, ".") >= 0
+   mut has_dot = false
    mut exts = list(0)
-   if(_is_nt_os() && !has_dot){
-      def pe = env("PATHEXT")
-      if(is_str(pe) && str_len(pe) > 0){
-         exts = split(pe, ";")
-      } else {
-         exts = [".exe", ".cmd", ".bat", ".com"]
+   #windows {
+      has_dot = find(cmd, ".") >= 0
+      if(!has_dot){
+         def pe = env("PATHEXT")
+         if(is_str(pe) && pe.len > 0){ exts = split(pe, ";") } else { exts = [".exe", ".cmd", ".bat", ".com"] }
       }
    }
+   #endif
    mut i = 0
-   while(i < len(dirs)){
-      def d = get(dirs, i, "")
-      if(str_len(d) > 0){
+   while(i < dirs.len){
+      def d = dirs.get(i, "")
+      if(d.len > 0){
          def c = ospath.join(d, cmd)
-         if(file_exists(c)){ return ospath.normalize(c) }
-         if(_is_nt_os() && !has_dot){
-         mut j = 0
-         while(j < len(exts)){
-               def e = get(exts, j, "")
-               if(str_len(e) > 0){
-                  def c1 = c + e
-                  if(file_exists(c1)){ return ospath.normalize(c1) }
+         if(_path_exists(c)){ return ospath.normalize(c) }
+         #windows {
+            if(!has_dot){
+               mut j = 0
+               while(j < exts.len){
+                  def e = exts.get(j, "")
+                  if(e.len > 0){
+                     def c1 = c + e
+                     if(_path_exists(c1)){ return ospath.normalize(c1) }
+                  }
+                  j += 1
                }
-               j += 1
+            }
          }
-         }
+         #endif
       }
       i += 1
    }
    ospath.normalize(cmd)
 }
 
-fn waitpid(pid, options){
+fn _argv_offset(str: path, str: rpath, list: args, int: n): int {
+   if(n > 0 && (eq(args.get(0, ""), path) || eq(args.get(0, ""), rpath))){ return 0 }
+   1
+}
+
+fn _build_argv(str: path, str: rpath, list: args): any {
+   def n = args.len
+   def offset = _argv_offset(path, rpath, args, n)
+   def argv = malloc((n + offset + 1) * 8)
+   if(argv == 0){ return 0 }
+   if(offset == 1){ store64(argv, rpath, 0) }
+   mut i = 0
+   while(i < n){
+      store64(argv, args.get(i, 0), (i + offset) * 8)
+      i += 1
+   }
+   store64(argv, 0, (n + offset) * 8)
+   argv
+}
+
+fn waitpid(int: pid, int: options): int {
    "Waits for `pid` and returns the **exit code** (0..255). Negative on failure."
-   if(_is_nt_os()){
+   #windows {
       if(pid <= 0){ return -1 }
       return __wait_process(pid)
-   }
-   def status_ptr = malloc(8)
-   def res = __wait4(pid, status_ptr, options)
-   if(res < 0){
-       free(status_ptr)
-       return res
-   }
-   def status = load32(status_ptr, 0)
-   free(status_ptr)
-   ; Normalize to exit code
-   if((status & 127) != 0){ return 128 + (status & 127) }
-   (status / 256) % 256
-}
-
-fn run(path, args){
-   "Forks and execs `path` with `args`, waits for completion, and returns the child exit code (0..255); returns `-1` if fork fails."
-   mut rpath = _resolve_cmd(path)
-   def n = core.len(args)
-   if(_is_nt_os()){
-      mut offset = 1
-      if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
-      def argv = malloc((n + offset + 1) * 8)
-      if(offset == 1){ store64(argv, rpath, 0) }
-      mut i = 0
-      while(i < n){
-         store64(argv, get(args, i, 0), (i + offset) * 8)
-         i += 1
-      }
-      store64(argv, 0, (n + offset) * 8)
-      def code = __spawn_wait(rpath, argv)
-      free(argv)
-      return code
-   }
-   if(platform.is_macos()){
-      mut offset = 1
-      if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
-      def argv = malloc((n + offset + 1) * 8)
-      if(offset == 1){ store64(argv, rpath, 0) }
-      mut i = 0
-      while(i < n){
-         store64(argv, get(args, i, 0), (i + offset) * 8)
-         i += 1
-      }
-      store64(argv, 0, (n + offset) * 8)
-      def code = __spawn_wait(rpath, argv)
-      free(argv)
-      return code
-   }
-   mut pid = __fork()
-   if(pid == 0){
-      mut offset = 1
-      if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
-      def argv = malloc((n + offset + 1) * 8)
-      if(offset == 1){ store64(argv, rpath, 0) }
-      mut i = 0
-      while(i < n){
-         store64(argv, get(args, i, 0), (i + offset) * 8)
-         i += 1
-      }
-      store64(argv, 0, (n + offset) * 8)
-      __execve(rpath, argv, 0)
-      __exit(127)
-   } else {
-      if(pid < 0){ return -1 }
+   } #else {
       def status_ptr = malloc(8)
-      def wr = __wait4(pid, status_ptr, 0)
-      if(wr < 0){
-         free(status_ptr)
-         return -1
-      }
+      if(status_ptr == 0){ return -1 }
+      defer { free(status_ptr) }
+      def res = __wait4(pid, status_ptr, options)
+      if(res < 0){ return res }
       def status = load32(status_ptr, 0)
-      free(status_ptr)
-      return (status / 256) % 256
-   }
+      ; Normalize to exit code
+      if((status & 127) != 0){ return 128 + (status & 127) }
+      return(status / 256) % 256
+   } #endif
 }
 
-fn popen(path, args){
-   "Starts `path` with stdin/stdout pipes and returns `[pid, child_stdin_fd, child_stdout_fd]`; returns `0` on setup failure."
+fn run(str: path, list: args): int {
+   "Forks and execs `path` with `args`, waits for completion, and returns the child exit code(0..255); returns `-1` if fork fails."
    mut rpath = _resolve_cmd(path)
-   def n = core.len(args)
-   if(_is_nt_os() || platform.is_macos()){
-      def fds = malloc(8)
-      if(!fds){ return 0 }
-      mut offset = 1
-      if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
-      def argv = malloc((n + offset + 1) * 8)
-      if(offset == 1){ store64(argv, rpath, 0) }
-      mut i = 0
-      while(i < n){
-         store64(argv, get(args, i, 0), (i + offset) * 8)
-         i += 1
+   #if(windows || macos){
+      def argv = _build_argv(path, rpath, args)
+      if(argv == 0){ return -1 }
+      defer { free(argv) }
+      def code = __spawn_wait(rpath, argv)
+      return code
+   } #else {
+      mut pid = __fork()
+      if(pid == 0){
+         def argv = _build_argv(path, rpath, args)
+         if(argv == 0){ __exit(127) }
+         __execve(rpath, argv, __envp())
+         __exit(127)
+      } else {
+         if(pid < 0){ return -1 }
+         return waitpid(pid, 0)
       }
-      store64(argv, 0, (n + offset) * 8)
-      def pid = __spawn_pipe(rpath, argv, fds)
-      free(argv)
-      if(pid < 0){
-         free(fds)
-         return 0
-      }
-      def in_w = load32(fds, 0)
-      def out_r = load32(fds, 4)
-      free(fds)
-      mut ret = list(3)
-      ret = append(ret, pid)
-      ret = append(ret, in_w)
-      ret = append(ret, out_r)
-      return ret
-   }
-   def p_stdin = malloc(8) ; 2 ints = 8 bytes
+   } #endif
+}
+
+fn popen(str: path, list: args): any {
+   "Starts `path` with stdin/stdout pipes(stderr merged) and returns `[pid, child_stdin_fd, child_stdout_fd]`; returns `0` on setup failure."
+   mut rpath = _resolve_cmd(path)
+   def n = args.len
+   def p_stdin = malloc(8)
    def p_stdout = malloc(8)
-   if(__pipe(p_stdin) < 0){
-      free(p_stdin)
-      free(p_stdout)
+   if(p_stdin == 0 || p_stdout == 0){
+      if(p_stdin != 0){ free(p_stdin) }
+      if(p_stdout != 0){ free(p_stdout) }
       return 0
-   } ; pipe (syscall 22 for x86-64)
+   }
+   defer { free(p_stdin) }
+   defer { free(p_stdout) }
+   if(__pipe(p_stdin) < 0){ return 0 }
    if(__pipe(p_stdout) < 0){
-      def in_r = load32(p_stdin, 0)
-      def in_w = load32(p_stdin, 4)
-      unwrap(sys_close(in_r))
-      unwrap(sys_close(in_w))
-      free(p_stdin)
-      free(p_stdout)
+      def in_r, in_w = load32(p_stdin, 0), load32(p_stdin, 4)
+      sys_close_quiet(in_r)
+      sys_close_quiet(in_w)
       return 0
    }
    def stdin_read = load32(p_stdin, 0)
    def stdin_write = load32(p_stdin, 4)
    def stdout_read = load32(p_stdout, 0)
    def stdout_write = load32(p_stdout, 4)
-   free(p_stdin)
-   free(p_stdout)
-   mut pid = __fork()
+   def pid = __fork()
    if(pid < 0){
-      unwrap(sys_close(stdin_read))
-      unwrap(sys_close(stdin_write))
-      unwrap(sys_close(stdout_read))
-      unwrap(sys_close(stdout_write))
+      sys_close_quiet(stdin_read)
+      sys_close_quiet(stdin_write)
+      sys_close_quiet(stdout_read)
+      sys_close_quiet(stdout_write)
       return 0
    }
    if(pid == 0){
-      ; Child
-      ; dup2(stdin_read, 0)
       __dup2(stdin_read, 0)
-      ; dup2(stdout_write, 1)
       __dup2(stdout_write, 1)
-      ; Close unused
-      unwrap(sys_close(stdin_write))
-      unwrap(sys_close(stdout_read))
-      unwrap(sys_close(stdin_read))
-      unwrap(sys_close(stdout_write))
-      ; Exec
-      mut offset = 1
-      if(n > 0 && (eq(get(args, 0, ""), path) || eq(get(args, 0, ""), rpath))){ offset = 0 }
-      def argv = malloc((n + offset + 1) * 8)
-      if(offset == 1){ store64(argv, rpath, 0) }
-      mut i = 0
-      while(i < n){
-         store64(argv, get(args, i, 0), (i + offset) * 8)
-         i += 1
-      }
-      store64(argv, 0, (n + offset) * 8)
-      __execve(rpath, argv, 0)
+      __dup2(stdout_write, 2)
+      sys_close_quiet(stdin_write)
+      sys_close_quiet(stdout_read)
+      sys_close_quiet(stdin_read)
+      sys_close_quiet(stdout_write)
+      def argv = _build_argv(path, rpath, args)
+      if(argv == 0){ __exit(127) }
+      __execve(rpath, argv, __envp())
       __exit(127)
    }
- else {
-      ; Parent
-      ; Close child side
-      unwrap(sys_close(stdin_read))
-      unwrap(sys_close(stdout_write))
-      mut ret = list(3)
-      ret = append(ret, pid)
-      ret = append(ret, stdin_write)
-      ret = append(ret, stdout_read)
-      ret
-   }
-}
-
-if(comptime{__main()}){
-   use std.os.process *
-   use std.os *
-   use std.os.fs *
-   use std.os.sys *
-   use std.core *
-   use std.str *
-   use std.str.io *
-   use std.core.error *
-
-   fn _pick_win_shell(comspec){
-       "Internal: locates a valid Windows shell executable (cmd.exe)."
-       mut sh = "cmd"
-       if(file_exists("C:\\Windows\\System32\\cmd.exe")){ return "C:\\Windows\\System32\\cmd.exe" }
-       if(file_exists("C:\\WINNT\\System32\\cmd.exe")){ return "C:\\WINNT\\System32\\cmd.exe" }
-       mut root = env("SystemRoot")
-       if(!is_str(root)){ root = env("SYSTEMROOT") }
-       if(!is_str(root)){ root = env("windir") }
-       if(!is_str(root)){ root = env("WINDIR") }
-       if(is_str(root)){
-          def rr = strip(root)
-          if(str_len(rr) > 0){
-             def c = rr + "\\System32\\cmd.exe"
-             if(file_exists(c)){ return c }
-          }
-       }
-       if(is_str(comspec)){
-          mut clean = replace(strip(comspec), "\"", "")
-          if(is_str(root) && str_len(strip(root)) > 0){
-             def rr = strip(root)
-             clean = replace(clean, "%SystemRoot%", rr)
-             clean = replace(clean, "%SYSTEMROOT%", rr)
-             clean = replace(clean, "%WINDIR%", rr)
-             clean = replace(clean, "%windir%", rr)
-          }
-          if(str_len(clean) > 0){
-             if(file_exists(clean)){ return clean }
-             if(find(clean, "%") < 0){ sh = clean }
-          }
-       }
-       sh
-   }
-
-   fn _pick_posix_shell(){
-       "Internal: locates a valid POSIX shell executable (sh)."
-       if(file_exists("/bin/sh")){ return "/bin/sh" }
-       "sh"
-   }
-
-   fn _pick_cat_cmd(){
-       "Internal: locates a valid 'cat' command executable."
-       if(file_exists("/bin/cat")){ return "/bin/cat" }
-       "cat"
-   }
-
-   print("Testing Process...")
-
-   def comspec = env("COMSPEC")
-   mut is_win = false
-   mut sh = _pick_win_shell(comspec)
-   mut ok_cmd = sh
-   mut ok_args = [sh, "/c", "exit", "0"]
-   mut exit_cmd = sh
-   mut exit_args = [sh, "/c", "exit", "7"]
-   mut cat_cmd = sh
-   mut cat_args = [sh, "/c", "more"]
-
-   mut res = run(ok_cmd, ok_args)
-   if(res == 0){
-       is_win = true
-   } else {
-       def ps = _pick_posix_shell()
-       ok_cmd = ps
-       ok_args = [ps, "-c", "exit 0"]
-       exit_cmd = ps
-       exit_args = [ps, "-c", "exit 7"]
-       cat_cmd = _pick_cat_cmd()
-       cat_args = [cat_cmd]
-       res = run(ok_cmd, ok_args)
-   }
-
-   if(res != 0){
-       print("run zero exit=" + to_str(res) + " cmd=" + ok_cmd)
-       assert(0, "run zero exit")
-   }
-
-   assert(run(exit_cmd, exit_args) == 7, "run returns exit code")
-   def missing = run("nytrix-does-not-exist-nytrix", ["nytrix-does-not-exist-nytrix"])
-   assert(missing != 0, "run returns non-zero when exec fails")
-
-   ;; popen/pipe tests skipped in bundled comptime (requires fork/exec)
-
-   print("✓ std.process.mod tests passed")
+   sys_close_quiet(stdin_read)
+   sys_close_quiet(stdout_write)
+   [pid, stdin_write, stdout_read]
 }

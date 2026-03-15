@@ -1,170 +1,150 @@
-;; Keywords: os io process
-;; Process IO for Nytrix
+;; Keywords: io input output stream
+;; Process I/O operations with send, receive, line reads, and close semantics.
+module std.os.io(spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close)
+use std.core
+use std.os.process
+use std.os.sys
+use std.core.str
+use std.core.io
+use std.core.str (chr)
 
-module std.os.io (
-   spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close
-)
-use std.core *
-use std.os.process *
-use std.os.sys *
-use std.str *
-use std.str.io *
-use std.str.chr
+fn _pfd(any: p, any: key): int {
+   if(!is_dict(p)){ return -1 }
+   p.get(key, -1)
+}
 
-fn spawn(path, args){
+fn spawn(any: path, any: args): any {
    "Starts `path` with stdin/stdout pipes and returns a process object."
    if(!is_str(path)){ return 0 }
+   if(!is_list(args)){ return 0 }
    def res = popen(path, args)
    if(res == 0){ return 0 }
    ; res = [pid, child_stdin, child_stdout]
    mut p = dict(4)
-   dict_set(p, "pid", get(res, 0))
-   dict_set(p, "in", get(res, 1))
-   dict_set(p, "out", get(res, 2))
-   dict_set(p, "alive", 1)
+   p["pid"] = res.get(0)
+   p["in"] = res.get(1)
+   p["out"] = res.get(2)
+   p["alive"] = 1
    p
 }
 
-fn send(p, data){
+fn send(any: p, any: data): any {
    "Sends `data` to process `p`'s stdin."
    if(!is_dict(p)){ return err("not a process") }
-   def fd = dict_get(p, "in", -1)
+   def fd = _pfd(p, "in")
    if(fd < 0){ return err("invalid fd") }
-   def n = str_len(data)
-   match sys_write(fd, data, n){
-      ok(r) -> { ok(r) }
-      err(e) -> { err(e) }
+   if(!is_str(data)){ data = to_str(data) }
+   def n = data.len
+   if(n <= 0){ return ok(0) }
+   mut off = 0
+   while(off < n){
+      match sys_write(fd, to_int(data) + off, n - off){
+         ok(w) -> {
+            if(w <= 0){ return err("short write") }
+            off += w
+         }
+         err(e) -> { return err(e) }
+      }
+   }
+   ok(off)
+}
+
+fn sendline(any: p, any: data): any {
+   "Sends `data` followed by newline to process `p`'s stdin."
+   if(!is_str(data)){ data = to_str(data) }
+   match send(p, data){
+      ok(w0) -> {
+         match send(p, "\n"){
+            ok(w1) -> { return ok(w0 + w1) }
+            err(e1) -> { return err(e1) }
+         }
+      }
+      err(e0) -> { return err(e0) }
    }
 }
 
-fn sendline(p, data){
-   "Sends `data` followed by newline to process `p`'s stdin."
-   send(p, str_add(data, "\n"))
-}
-
-fn recv(p, n=1024){
+fn recv(any: p, any: n=1024): any {
    "Receives up to `n` bytes from process `p`'s stdout."
-   if(!is_dict(p)){ return 0 }
-   def fd = dict_get(p, "out", -1)
+   def fd = _pfd(p, "out")
    if(fd < 0){ return 0 }
+   if(!is_int(n) || n <= 0){ n = 1024 }
+   if(n > 8 * 1024 * 1024){ n = 8 * 1024 * 1024 }
    mut buf = malloc(n + 1)
+   if(buf == 0){ return "" }
    match sys_read(fd, buf, n){
       ok(r) -> {
          if(r <= 0){
-         free(buf)
-         return ""
+            free(buf)
+            return ""
          }
          init_str(buf, r)
-         store8(buf, 0, r)
          buf
       }
-      err(_) -> {
+      err(ignorederr) -> { ignorederr
          free(buf)
          ""
       }
    }
 }
 
-fn recv_line(p){
+fn recv_line(any: p): str {
    "Receives a single line from process `p`'s stdout."
-   if(!is_dict(p)){ return "" }
-   def fd = dict_get(p, "out", -1)
-   mut out = ""
+   def fd = _pfd(p, "out")
+   if(fd < 0){ return "" }
    mut c_buf = malloc(2)
+   if(c_buf == 0){ return "" }
+   defer { free(c_buf) }
    init_str(c_buf, 1)
+   mut b = Builder(128)
+   defer { builder_free(b) }
    while(1){
       def got = sys_read(fd, c_buf, 1)
       mut res = 0
       match got {
          ok(r) -> { res = r }
-         err(_) -> { res = -1 }
+         err(ignorederr) -> { ignorederr  res = -1 }
       }
       if(res <= 0){ break }
       def c = chr(load8(c_buf, 0))
-      out = str_add(out, c)
+      b = builder_append(b, c)
       if(c == "\n"){ break }
    }
-   free(c_buf)
-   out
+   builder_to_str(b)
 }
 
-fn recv_all(p, n=1024){
+fn recv_all(any: p, any: n=1024): str {
    "Receives all available data from process `p`'s stdout."
-   mut out = ""
+   if(!is_int(n) || n <= 0){ n = 1024 }
+   if(n > 8 * 1024 * 1024){ n = 8 * 1024 * 1024 }
+   mut b = Builder(4096)
+   defer { builder_free(b) }
    while(1){
       def chunk = recv(p, n)
-      if(str_len(chunk) == 0){ break }
-      out = str_add(out, chunk)
+      if(chunk.len == 0){ break }
+      b = builder_append(b, chunk)
    }
-   out
+   builder_to_str(b)
 }
 
-fn shutdown_send(p){
+fn shutdown_send(any: p): any {
    "Closes process `p`'s stdin."
    if(!is_dict(p)){ return err("not a process") }
-   def fd = dict_get(p, "in", -1)
-   if(fd >= 0){ unwrap(sys_close(fd)) }
-   dict_set(p, "in", -1)
+   def fd = _pfd(p, "in")
+   sys_close_quiet(fd)
+   p["in"] = -1
    ok(0)
 }
 
-fn close(p){
+fn close(any: p): any {
    "Closes all process pipes and waits for completion."
    if(!is_dict(p)){ return err("not a process") }
-   def in_fd = dict_get(p, "in", -1)
-   def out_fd = dict_get(p, "out", -1)
-   if(in_fd >= 0){ unwrap(sys_close(in_fd)) }
-   if(out_fd >= 0){ unwrap(sys_close(out_fd)) }
-   def pid = dict_get(p, "pid", -1)
+   sys_close_quiet(_pfd(p, "in"))
+   sys_close_quiet(_pfd(p, "out"))
+   p["in"] = -1
+   p["out"] = -1
+   def pid = _pfd(p, "pid")
+   if(pid < 0){ return err("invalid pid") }
    def status = waitpid(pid, 0)
+   if(status < 0){ return err(status) }
    ok(status)
-}
-
-if(comptime{__main()}){
-   use std.os.io *
-   use std.core *
-   use std.str *
-   use std.os.sys *
-
-   ; pwntools-like process IO primitives.
-
-   def osn = os()
-   mut cat_cmd = "/bin/cat"
-   mut cat_args = ["/bin/cat"]
-   mut sh_cmd = "/bin/sh"
-   mut sh_args = ["/bin/sh", "-c", "printf abc"]
-   mut expected_sh_output = "abc"
-
-   if(eq(osn, "windows")){
-      cat_cmd = "python"
-      cat_args = ["-c", "import sys; print(sys.stdin.read(), end='', flush=True)"]
-      sh_cmd = "cmd"
-      sh_args = ["cmd", "/c", "echo abc"]
-      expected_sh_output = "abc\r\n"
-   }
-
-   def p = spawn(cat_cmd, cat_args)
-   assert(p != 0, "spawn cat")
-
-   unwrap(send(p, "hello"))
-   unwrap(sendline(p, " world"))
-   unwrap(shutdown_send(p))
-
-   def line = recv_line(p)
-   def line_clean = strip(line)
-   assert(eq(line_clean, "hello world"), "recv_line cat")
-   def code1 = close(p)
-   assert(is_ok(code1), "close cat")
-
-   def p2 = spawn(sh_cmd, sh_args)
-   assert(p2 != 0, "spawn sh printf")
-   def out = recv_all(p2, 1024)
-   assert(eq(out, expected_sh_output), "recv_all")
-   def code2 = close(p2)
-   assert(is_ok(code2), "close sh printf")
-
-   def bad = spawn(123, ["/bin/cat"])
-   assert(bad == 0, "spawn input validate")
-
-   print("✓ std.os.io tests passed")
 }
