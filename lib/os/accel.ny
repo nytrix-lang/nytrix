@@ -1,246 +1,323 @@
-;; Keywords: os accel gpu parallel
+;; Keywords: accel acceleration offload
 ;; Accelerator policy facade.
-
-module std.os.accel (
-   gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math,
-   gpu_available, gpu_should_offload, gpu_offload_status,
-   accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind,
-   accel_binary_ext, accel_target_status, accel_compile_plan,
-   parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status,
-   GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE,
-   ACCEL_TARGET, ACCEL_OBJECT,
-   PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK
-)
-
+module std.os.accel(gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_target_status, accel_compile_plan, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK)
 use std.os.gpu (
-   gpu_mode as _os_gpu_mode,
-   gpu_backend as _os_gpu_backend,
-   gpu_offload as _os_gpu_offload,
-   gpu_min_work as _os_gpu_min_work,
-   gpu_async as _os_gpu_async,
-   gpu_fast_math as _os_gpu_fast_math,
-   gpu_available as _os_gpu_available,
-   gpu_should_offload as _os_gpu_should_offload,
-   gpu_offload_status as _os_gpu_offload_status,
-   accel_target as _os_accel_target,
-   accel_targets as _os_accel_targets,
-   accel_target_available as _os_accel_target_available,
-   accel_target_triple as _os_accel_target_triple,
-   accel_binary_kind as _os_accel_binary_kind,
-   accel_binary_ext as _os_accel_binary_ext,
-   accel_target_status as _os_accel_target_status,
-   accel_compile_plan as _os_accel_compile_plan
-)
-use std.os.parallel (
-   parallel_mode as _os_parallel_mode,
-   parallel_threads as _os_parallel_threads,
-   parallel_min_work as _os_parallel_min_work,
-   parallel_should_threads as _os_parallel_should_threads,
-   parallel_status as _os_parallel_status
+   gpu_mode as _os_gpu_mode, gpu_backend as _os_gpu_backend, gpu_offload as _os_gpu_offload,
+   gpu_min_work as _os_gpu_min_work, gpu_async as _os_gpu_async, gpu_fast_math as _os_gpu_fast_math,
+   gpu_available as _os_gpu_available, gpu_should_offload as _os_gpu_should_offload,
+   gpu_offload_status as _os_gpu_offload_status, accel_target as _os_accel_target,
+   accel_targets as _os_accel_targets, accel_target_available as _os_accel_target_available,
+   accel_target_triple as _os_accel_target_triple, accel_binary_kind as _os_accel_binary_kind,
+   accel_binary_ext as _os_accel_binary_ext, accel_target_status as _os_accel_target_status,
+   accel_compile_plan as _os_accel_compile_plan, opencl_available as _os_opencl_available,
+   opencl_toolchain_available as _os_opencl_toolchain_available, opencl_async as _os_opencl_async,
+   opencl_fast_math as _os_opencl_fast_math, opencl_should_offload as _os_opencl_should_offload,
+   opencl_status as _os_opencl_status, opencl_device_policy as _os_opencl_device_policy,
+   opencl_compile_plan as _os_opencl_compile_plan, opencl_kernel_plan as _os_opencl_kernel_plan,
+   opencl_cpu_fallback_plan as _os_opencl_cpu_fallback_plan, opencl_dispatch_plan as _os_opencl_dispatch_plan,
+   opencl_work_groups as _os_opencl_work_groups,
 )
 
-fn gpu_mode(){
+use std.os.parallel (
+   parallel_mode as _os_parallel_mode, parallel_threads as _os_parallel_threads,
+   parallel_min_work as _os_parallel_min_work, parallel_should_threads as _os_parallel_should_threads,
+   parallel_status as _os_parallel_status,
+)
+
+use std.os.gpu as osgpu
+use std.core
+use std.core.str
+use std.core.common as common
+use std.os.prim (env)
+
+fn _accel_env_str_or(str: key, str: fallback): str {
+   def v = env(key)
+   if(is_str(v)){
+      def s = strip(v)
+      if(s.len > 0){ return s }
+   }
+   fallback
+}
+
+fn _accel_bool_or(any: v, bool: fallback): bool {
+   if(!is_str(v)){ return fallback }
+   def s = lower(strip(v))
+   if(eq(s, "1") || eq(s, "true") || eq(s, "yes") || eq(s, "on")){ return true }
+   if(eq(s, "0") || eq(s, "false") || eq(s, "no") || eq(s, "off")){ return false }
+   fallback
+}
+
+fn _accel_gpu_mode(str: v): str {
+   def s = lower(strip(v))
+   if(eq(s, "off") || eq(s, "auto") || eq(s, "opencl")){ return s }
+   "auto"
+}
+
+fn _accel_gpu_backend(str: v): str {
+   mut s = lower(strip(v))
+   if(eq(s, "off")){ s = "none" }
+   if(eq(s, "none") || eq(s, "auto") || eq(s, "opencl") || eq(s, "cuda") || eq(s, "hip") || eq(s, "metal")){ return s }
+   "auto"
+}
+
+fn _accel_gpu_offload(str: v): str {
+   mut s = lower(strip(v))
+   if(eq(s, "true") || eq(s, "yes")){ s = "on" }
+   if(eq(s, "false") || eq(s, "no")){ s = "off" }
+   if(eq(s, "off") || eq(s, "auto") || eq(s, "on") || eq(s, "force")){ return s }
+   "auto"
+}
+
+fn _accel_target_const(str: v): str {
+   mut s = lower(strip(v))
+   if(eq(s, "off")){ s = "none" }
+   if(eq(s, "cuda") || eq(s, "ptx")){ s = "nvptx" } elif(eq(s, "hip") || eq(s, "rocm") || eq(s, "gcn") || eq(s, "rdna")){ s = "amdgpu" } elif(eq(s, "opencl") || eq(s, "vulkan") || eq(s, "spv")){ s = "spirv" } elif(eq(s, "hsa") || eq(s, "hsa_code_object") || eq(s, "hsa-code-object") || eq(s, "rocm_hsa")){ s = "hsaco" }
+   if(eq(s, "none") || eq(s, "auto") || eq(s, "nvptx") || eq(s, "amdgpu") || eq(s, "spirv") || eq(s, "hsaco")){ return s }
+   "auto"
+}
+
+fn _accel_object_const(str: v): str {
+   mut s = lower(strip(v))
+   if(eq(s, "obj")){ s = "o" }
+   if(eq(s, "cubin")){ s = "ptx" }
+   if(eq(s, "none") || eq(s, "auto") || eq(s, "ptx") || eq(s, "o") || eq(s, "spv") || eq(s, "hsaco")){ return s }
+   "auto"
+}
+
+fn _accel_parallel_mode(str: v): str {
+   def s = lower(strip(v))
+   if(eq(s, "off") || eq(s, "auto") || eq(s, "threads")){ return s }
+   "auto"
+}
+
+fn _accel_path_exists(str: path): bool { __access(path, 0) == 0 }
+
+fn _accel_has_cuda_runtime(): bool {
+   def vis = _accel_env_str_or("CUDA_VISIBLE_DEVICES", "")
+   if(eq(vis, "-1")){ return false }
+   if(_accel_env_str_or("CUDA_PATH", "").len > 0){ return true }
+   #windows {
+      if(_accel_path_exists("C:\\Windows\\System32\\nvcuda.dll")){ return true }
+   } #else {
+      if(_accel_path_exists("/dev/nvidiactl")){ return true }
+      if(_accel_path_exists("/proc/driver/nvidia/version")){ return true }
+      if(_accel_path_exists("/usr/local/cuda/bin/ptxas")){ return true }
+      if(_accel_path_exists("/usr/local/cuda/bin/nvcc")){ return true }
+   } #endif
+   false
+}
+
+fn _accel_has_hip_runtime(): bool {
+   def vis = _accel_env_str_or("HIP_VISIBLE_DEVICES", "")
+   if(eq(vis, "-1")){ return false }
+   if(_accel_env_str_or("ROCM_PATH", "").len > 0){ return true }
+   if(_accel_env_str_or("HIP_PATH", "").len > 0){ return true }
+   #linux {
+      if(_accel_path_exists("/dev/kfd")){ return true }
+      if(_accel_path_exists("/opt/rocm/bin/amdclang")){ return true }
+      if(_accel_path_exists("/opt/rocm/bin/clang")){ return true }
+   } #endif
+   false
+}
+
+fn _accel_gpu_available_const(): bool {
+   def raw = _accel_env_str_or("NYTRIX_GPU_AVAILABLE", "")
+   if(raw.len > 0){ return _accel_bool_or(raw, false) }
+   if(eq(GPU_BACKEND, "none")){ return false }
+   if(eq(GPU_BACKEND, "cuda")){ return _accel_has_cuda_runtime() }
+   if(eq(GPU_BACKEND, "hip")){ return _accel_has_hip_runtime() }
+   if(eq(GPU_BACKEND, "opencl")){ return osgpu.opencl_available() }
+   if(eq(GPU_BACKEND, "metal")){ #macos { return true } #else { return false } #endif }
+   if(eq(GPU_BACKEND, "auto")){
+      if(_accel_has_cuda_runtime()){ return true }
+      if(_accel_has_hip_runtime()){ return true }
+      if(osgpu.opencl_available()){ return true }
+      #macos { return true } #endif
+   }
+   false
+}
+
+fn gpu_mode(): str {
    "Returns the configured GPU mode: `off`, `auto`, or `opencl`."
    _os_gpu_mode()
 }
 
-fn gpu_backend(){
+fn gpu_backend(): str {
    "Returns configured GPU backend: `none`, `auto`, `opencl`, `cuda`, `hip`, or `metal`."
    _os_gpu_backend()
 }
 
-fn gpu_offload(){
+fn gpu_offload(): str {
    "Returns GPU offload policy: `off`, `auto`, `on`, or `force`."
    _os_gpu_offload()
 }
 
-fn gpu_min_work(){
+fn gpu_min_work(): int {
    "Returns minimum work threshold before trying GPU offload; `0` means auto/default."
    _os_gpu_min_work()
 }
 
-fn gpu_async(){
+fn gpu_async(): bool {
    "Returns true when async GPU dispatch is enabled."
    _os_gpu_async()
 }
 
-fn gpu_fast_math(){
+fn gpu_fast_math(): bool {
    "Returns true when relaxed GPU math optimizations are enabled."
    _os_gpu_fast_math()
 }
 
-fn gpu_available(){
+fn gpu_available(): bool {
    "Returns true when the selected GPU backend appears available on this host."
    _os_gpu_available()
 }
 
-fn gpu_offload_status(work_items=0){
+fn gpu_offload_status(int: work_items=0): dict {
    "Returns an offload decision map for `work_items`."
    _os_gpu_offload_status(work_items)
 }
 
-fn gpu_should_offload(work_items=0){
+fn gpu_should_offload(int: work_items=0): bool {
    "Returns true when offload policy selects GPU for `work_items`."
    _os_gpu_should_offload(work_items)
 }
 
-fn accel_target(){
+fn accel_target(): str {
    "Returns the selected accelerator target: `none|nvptx|amdgpu|spirv|hsaco`."
    _os_accel_target()
 }
 
-fn accel_targets(){
+fn accel_targets(): list {
    "Returns canonical accelerator targets ordered by host preference."
    _os_accel_targets()
 }
 
-fn accel_target_available(target=""){
+fn accel_target_available(str: target=""): bool {
    "Returns true when runtime or toolchain for target appears available."
    _os_accel_target_available(target)
 }
 
-fn accel_target_triple(target=""){
+fn accel_target_triple(str: target=""): str {
    "Returns LLVM-style triple for selected accelerator target."
    _os_accel_target_triple(target)
 }
 
-fn accel_binary_kind(target=""){
+fn accel_binary_kind(str: target=""): str {
    "Returns emitted device artifact kind: `ptx|o|spv|hsaco|none`."
    _os_accel_binary_kind(target)
 }
 
-fn accel_binary_ext(target=""){
+fn accel_binary_ext(str: target=""): str {
    "Returns suggested file extension for emitted device artifact."
    _os_accel_binary_ext(target)
 }
 
-fn accel_target_status(target=""){
+fn accel_target_status(str: target=""): dict {
    "Returns accelerator target status map."
    _os_accel_target_status(target)
 }
 
-fn accel_compile_plan(input_path, output_path="", target=""){
+fn accel_compile_plan(str: input_path, str: output_path="", str: target=""): dict {
    "Returns best-effort device compilation command plan for chosen target."
    _os_accel_compile_plan(input_path, output_path, target)
 }
 
-fn parallel_mode(){
+fn opencl_available(): bool {
+   "Returns true when an OpenCL runtime appears available."
+   _os_opencl_available()
+}
+
+fn opencl_toolchain_available(): bool {
+   "Returns true when a SPIR-V/OpenCL-capable toolchain appears available."
+   _os_opencl_toolchain_available()
+}
+
+fn opencl_async(): bool {
+   "Returns the configured async GPU dispatch preference."
+   _os_opencl_async()
+}
+
+fn opencl_fast_math(): bool {
+   "Returns the configured relaxed math preference for accelerator code."
+   _os_opencl_fast_math()
+}
+
+fn opencl_status(int: work_items=0): dict {
+   "Returns OpenCL policy, availability, and CPU fallback metadata."
+   _os_opencl_status(work_items)
+}
+
+fn opencl_device_policy(int: work_items=0): dict {
+   "Alias for opencl_status; useful at call sites that choose CPU/GPU plans."
+   _os_opencl_device_policy(work_items)
+}
+
+fn opencl_compile_plan(str: input_path, str: output_path=""): dict {
+   "Returns a SPIR-V compile command plan for an LLVM IR input."
+   _os_opencl_compile_plan(input_path, output_path)
+}
+
+fn opencl_kernel_plan(str: name, int: global_size, int: local_size=0): dict {
+   "Returns normalized launch-shape metadata for an OpenCL-style kernel."
+   _os_opencl_kernel_plan(name, global_size, local_size)
+}
+
+fn opencl_cpu_fallback_plan(int: work_items=0, int: item_cost=1): dict {
+   "Returns the CPU plan used when OpenCL is unavailable or not selected."
+   _os_opencl_cpu_fallback_plan(work_items, item_cost)
+}
+
+fn opencl_dispatch_plan(str: name, int: global_size, int: local_size=0): dict {
+   "Returns the full OpenCL kernel plan plus the CPU fallback plan."
+   _os_opencl_dispatch_plan(name, global_size, local_size)
+}
+
+fn opencl_work_groups(int: global_size, int: local_size=0): int {
+   "Returns the number of work groups for `global_size` and optional `local_size`."
+   _os_opencl_work_groups(global_size, local_size)
+}
+
+fn opencl_should_offload(int: work_items=0): bool {
+   "Returns true when OpenCL policy selects device execution."
+   _os_opencl_should_offload(work_items)
+}
+
+fn parallel_mode(): str {
    "Returns the configured parallel mode: `off`, `auto`, or `threads`."
    _os_parallel_mode()
 }
 
-fn parallel_threads(){
+fn parallel_threads(): int {
    "Returns configured thread budget; `0` means runtime/default auto sizing."
    _os_parallel_threads()
 }
 
-fn parallel_min_work(){
+fn parallel_min_work(): int {
    "Returns minimum work threshold before selecting threaded parallel execution."
    _os_parallel_min_work()
 }
 
-fn parallel_status(work_items=0){
+fn parallel_status(int: work_items=0): dict {
    "Returns a threading decision map for `work_items`."
    _os_parallel_status(work_items)
 }
 
-fn parallel_should_threads(work_items=0){
+fn parallel_should_threads(int: work_items=0): bool {
    "Returns true when thread-parallel policy selects threaded execution."
    _os_parallel_should_threads(work_items)
 }
 
-def GPU_MODE = gpu_mode()
-def GPU_BACKEND = gpu_backend()
-def GPU_OFFLOAD = gpu_offload()
-def GPU_MIN_WORK = gpu_min_work()
-def GPU_ASYNC = gpu_async()
-def GPU_FAST_MATH = gpu_fast_math()
-def GPU_AVAILABLE = gpu_available()
-def ACCEL_TARGET = accel_target()
-def ACCEL_OBJECT = accel_binary_kind(ACCEL_TARGET)
-def PARALLEL_MODE = parallel_mode()
-def PARALLEL_THREADS = parallel_threads()
-def PARALLEL_MIN_WORK = parallel_min_work()
-
-if(comptime{__main()}){
-   use std.os.accel *
-   use std.core.error *
-   use std.core.dict_mod *
-   use std.core *
-   use std.str *
-
-   print("Testing std.os.accel...")
-
-   def gm = gpu_mode()
-   def gb = gpu_backend()
-   def go = gpu_offload()
-   def gw = gpu_min_work()
-   def ga = gpu_async()
-   def gfm = gpu_fast_math()
-   def gav = gpu_available()
-   def at = accel_target()
-   def ats = accel_targets()
-   def atav = accel_target_available()
-   def atr = accel_target_triple()
-   def abk = accel_binary_kind()
-   def abe = accel_binary_ext()
-   def atst = accel_target_status()
-   def apl = accel_compile_plan("kernel.ll")
-   def pm = parallel_mode()
-   def tn = parallel_threads()
-   def pmin = parallel_min_work()
-   def st_small = gpu_offload_status(64)
-   def st_big = gpu_offload_status(1000000)
-   def pst_small = parallel_status(64)
-   def pst_big = parallel_status(1000000)
-
-   assert((eq(gm, "off") || eq(gm, "auto") || eq(gm, "opencl")), "gpu_mode value")
-   assert((eq(gb, "none") || eq(gb, "auto") || eq(gb, "opencl") || eq(gb, "cuda") || eq(gb, "hip") || eq(gb, "metal")), "gpu_backend value")
-   assert((eq(go, "off") || eq(go, "auto") || eq(go, "on") || eq(go, "force")), "gpu_offload value")
-   assert(gw >= 0, "gpu_min_work non-negative")
-   assert((ga == true || ga == false), "gpu_async bool")
-   assert((gfm == true || gfm == false), "gpu_fast_math bool")
-   assert((gav == true || gav == false), "gpu_available bool")
-   assert((eq(at, "none") || eq(at, "nvptx") || eq(at, "amdgpu") || eq(at, "spirv") || eq(at, "hsaco")), "accel_target value")
-   assert(is_list(ats), "accel_targets list")
-   assert(len(ats) >= 4, "accel_targets size")
-   assert(contains(ats, "nvptx"), "accel_targets has nvptx")
-   assert(contains(ats, "amdgpu"), "accel_targets has amdgpu")
-   assert(contains(ats, "spirv"), "accel_targets has spirv")
-   assert(contains(ats, "hsaco"), "accel_targets has hsaco")
-   assert((atav == true || atav == false), "accel_target_available bool")
-   assert((eq(atr, "none") || eq(atr, "nvptx64-nvidia-cuda") || eq(atr, "amdgcn-amd-amdhsa") || eq(atr, "spirv64-unknown-unknown")), "accel_target triple value")
-   assert((eq(abk, "none") || eq(abk, "ptx") || eq(abk, "o") || eq(abk, "spv") || eq(abk, "hsaco")), "accel_binary_kind value")
-   assert((eq(abe, "") || eq(abe, ".ptx") || eq(abe, ".o") || eq(abe, ".spv") || eq(abe, ".hsaco")), "accel_binary_ext value")
-   assert(is_dict(atst), "accel_target_status dict")
-   assert(str_len(dict_get(atst, "selected_target", "")) > 0, "accel_target_status selected_target")
-   assert((dict_get(atst, "available", false) == true || dict_get(atst, "available", false) == false), "accel_target_status available")
-   assert(str_len(dict_get(atst, "reason", "")) > 0, "accel_target_status reason")
-   assert(is_dict(apl), "accel_compile_plan dict")
-   assert((dict_get(apl, "target", "") == at), "accel_compile_plan target")
-   assert((dict_get(apl, "object_kind", "") == abk), "accel_compile_plan object_kind")
-   def apc = dict_get(apl, "command", list(1))
-   assert(is_list(apc), "accel_compile_plan command list")
-   if(at != "none"){ assert(len(apc) >= 6, "accel_compile_plan command non-empty for active target") }
-   assert((eq(pm, "off") || eq(pm, "auto") || eq(pm, "threads")), "parallel_mode value")
-   assert(tn >= 0, "parallel_threads non-negative")
-   assert(pmin >= 0, "parallel_min_work non-negative")
-   assert(is_dict(st_small), "gpu_offload_status small dict")
-   assert(is_dict(st_big), "gpu_offload_status big dict")
-   assert((dict_get(st_small, "available", false) == true || dict_get(st_small, "available", false) == false), "gpu_offload_status available bool")
-   assert((dict_get(st_small, "policy_selected", false) == true || dict_get(st_small, "policy_selected", false) == false), "gpu_offload_status policy bool")
-   assert((dict_get(st_small, "active", false) == true || dict_get(st_small, "active", false) == false), "gpu_offload_status active bool")
-   assert(str_len(dict_get(st_small, "reason", "")) > 0, "gpu_offload_status reason")
-   assert(str_len(dict_get(st_small, "active_reason", "")) > 0, "gpu_offload_status active reason")
-   assert((gpu_should_offload(64) == true || gpu_should_offload(64) == false), "gpu_should_offload bool")
-   assert((gpu_should_offload(1000000) == true || gpu_should_offload(1000000) == false), "gpu_should_offload bool big")
-   assert(is_dict(pst_small), "parallel_status small dict")
-   assert(is_dict(pst_big), "parallel_status big dict")
-   assert((dict_get(pst_small, "selected", false) == true || dict_get(pst_small, "selected", false) == false), "parallel_status selected bool")
-   assert(str_len(dict_get(pst_small, "reason", "")) > 0, "parallel_status reason")
-   assert(dict_get(pst_small, "effective_threads", 0) >= 1, "parallel_status effective_threads")
-   assert((parallel_should_threads(64) == true || parallel_should_threads(64) == false), "parallel_should_threads bool")
-   assert((parallel_should_threads(1000000) == true || parallel_should_threads(1000000) == false), "parallel_should_threads bool big")
-
-   print("✓ std.os.accel tests passed")
-}
+def GPU_MODE = _accel_gpu_mode(_accel_env_str_or("NYTRIX_GPU_MODE", "auto"))
+def GPU_BACKEND = _accel_gpu_backend(_accel_env_str_or("NYTRIX_GPU_BACKEND", "auto"))
+def GPU_OFFLOAD = _accel_gpu_offload(_accel_env_str_or("NYTRIX_GPU_OFFLOAD", "auto"))
+def GPU_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_GPU_MIN_WORK"))
+def GPU_ASYNC = _accel_bool_or(env("NYTRIX_GPU_ASYNC"), true)
+def GPU_FAST_MATH = _accel_bool_or(env("NYTRIX_GPU_FAST_MATH"), false)
+def GPU_AVAILABLE = _accel_gpu_available_const()
+def ACCEL_TARGET = _accel_target_const(_accel_env_str_or("NYTRIX_ACCEL_TARGET", "auto"))
+def ACCEL_OBJECT = _accel_object_const(_accel_env_str_or("NYTRIX_ACCEL_OBJECT", "auto"))
+def OPENCL_AVAILABLE = osgpu.opencl_available()
+def OPENCL_TOOLCHAIN_AVAILABLE = osgpu.opencl_toolchain_available()
+def PARALLEL_MODE = _accel_parallel_mode(_accel_env_str_or("NYTRIX_PARALLEL_MODE", "auto"))
+def PARALLEL_THREADS = common.parse_nonneg_int(env("NYTRIX_PARALLEL_THREADS"))
+def PARALLEL_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_PARALLEL_MIN_WORK"))
