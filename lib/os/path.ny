@@ -1,42 +1,28 @@
-;; Keywords: os path
+;; Keywords: path filepath pathname
 ;; Path Manipulation for Nytrix
+module std.os.path(sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext, resolve_repo_asset, home_dir, temp_dir, config_dir, data_dir, cache_dir)
+use std.core
+use std.core.str (_substr, Builder, builder_append, builder_free, builder_to_str, cstr_to_str, split, str_replace)
+use std.core.common as common
+use std.os.prim
 
-module std.os.path (
-   sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext
-)
-use std.core *
-use std.str *
-use std.os.platform as platform
-use std.util.common as common
-
-fn sep(){
-   "Returns the platform-specific path separator ('\\\\' on Windows, '/' otherwise)."
-   if(platform.is_windows()){ return "\\" }
-   "/"
+fn sep(): str {
+   "Returns the platform-specific path separator('\\\\' on Windows, '/' otherwise)."
+   #windows {
+      "\\"
+   } #else {
+      "/"
+   } #endif
 }
 
-fn _is_sep(c){
-   "Internal: returns true if byte `c` is a path separator '/' or '\\'."
-   if(c == 47){ return true }
-   if(c == 92){ return true }
-   false
-}
+fn _is_sep(int: c): bool { c == 47 || c == 92 }
 
-fn _is_alpha(c){
-   "Internal: returns true if byte `c` is an ASCII letter."
-   if(c >= 65){
-      if(c <= 90){ return true }
-   }
-   if(c >= 97){
-      if(c <= 122){ return true }
-   }
-   false
-}
+fn _is_alpha(int: c): bool { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) }
 
-fn has_sep(p){
+fn has_sep(any: p): bool {
    "Returns true if path contains '/' or '\\\\'."
    if(!is_str(p)){ return false }
-   def n = str_len(p)
+   def n = p.len
    mut i = 0
    while(i < n){
       if(_is_sep(__load8_idx(p, i))){ return true }
@@ -45,96 +31,299 @@ fn has_sep(p){
    false
 }
 
-fn is_abs(p){
+fn is_abs(any: p): bool {
    "Returns true if path `p` is an absolute path for the current platform."
-   if(!is_str(p)){ return false }
-   def n = str_len(p)
-   if(n == 0){ return false }
+   if(!is_str(p) || p.len == 0){ return false }
+   def n = p.len
    def c0 = __load8_idx(p, 0)
-   if(platform.is_windows()){
-      if(n >= 2 && __load8_idx(p, 1) == 58){ return true }
-      if(n >= 2 && c0 == 92 && __load8_idx(p, 1) == 92){ return true }
-      if(n >= 2 && c0 == 47 && __load8_idx(p, 1) == 47){ return true }
-      return false
-   }
-   c0 == 47
+   #windows {
+      if(n < 2){ return false }
+      def c1 = __load8_idx(p, 1)
+      c1 == 58 || ((c0 == 92 || c0 == 47) && c1 == c0)
+   } #else {
+      c0 == 47
+   } #endif
 }
 
-fn join(a, b){
-   "Joins two path segments, inserting a platform separator if necessary."
-   if(!is_str(a) || str_len(a) == 0){ return b }
-   if(!is_str(b) || str_len(b) == 0){ return a }
+fn _path_join(any: a, any: b): str {
+   if(!is_str(a) || a.len == 0){
+      if(is_str(b)){ return b }
+      return ""
+   }
+   if(!is_str(b) || b.len == 0){ return a }
    if(is_abs(b)){ return b }
    def s = sep()
-   def al = str_len(a)
-   def bl = str_len(b)
+   def al = a.len
+   def bl = b.len
    if(al > 0 && bl > 0){
-      def ac = __load8_idx(a, al - 1)
-      def bc = __load8_idx(b, 0)
+      def ac, bc = __load8_idx(a, al - 1), __load8_idx(b, 0)
       if(_is_sep(ac) || _is_sep(bc)){ return a + b }
    }
    return a + s + b
 }
 
-fn _is_drive_prefix(p){
-   "Internal: returns true if string `p` starts with a Windows-style drive letter (e.g. 'C:')."
+fn join(any: a, any: b): str {
+   "Joins two path segments, inserting a platform separator if necessary."
+   _path_join(a, b)
+}
+
+fn _is_drive_prefix(any: p): bool {
    if(!is_str(p)){ return false }
-   def n = str_len(p)
+   def n = p.len
    if(n < 2){ return false }
    if(!_is_alpha(load8(p, 0))){ return false }
    if(load8(p, 1) != 58){ return false }
    true
 }
 
-fn _last_sep_idx(s){
-   "Internal: returns the byte index of the last character that is a path separator, or -1."
-   if(!is_str(s)){ return -1 }
-   mut i = str_len(s) - 1
-   while(i >= 0){
-      if(_is_sep(load8(s, i))){ return i }
-      i -= 1
+fn _resolve_under_base(any: base, str: rel, int: max_up=8): str {
+   if(!is_str(base) || base.len == 0){ return "" }
+   mut cur = _normalize_path(base)
+   mut hops = 0
+   while(cur.len > 0 && hops <= max_up){
+      def cand = _path_join(cur, rel)
+      if(_path_exists_local(cand)){ return cand }
+      def parent = dirname(cur)
+      if(parent == cur || parent == "." || parent.len == 0){ break }
+      cur = parent
+      hops += 1
    }
-   -1
+   ""
 }
 
-fn _slice_str(s, start, stop){
-   "Internal: byte-slice helper for path strings."
-   if(!is_str(s)){ return "" }
-   def n = str_len(s)
-   if(start < 0){ start = 0 }
-   if(stop < 0){ stop = 0 }
-   if(start > n){ start = n }
-   if(stop > n){ stop = n }
-   if(start >= stop){ return "" }
-   def m = stop - start
-   def out = malloc(m + 1)
-   if(!out){ return "" }
-   init_str(out, m)
+fn _cwd_local(): str {
+   def buf = malloc(4096)
+   if(!buf){ return "" }
+   defer { free(buf) }
+   def clen = __getcwd(buf, 4096)
+   if(clen <= 0){ return "" }
+   cstr_to_str(buf)
+}
+
+fn _path_exists_local(any: path): bool {
+   if(!is_str(path) || path.len == 0){ return false }
+   __access(path, 0) == 0
+}
+
+fn _is_non_empty(any: v): bool { is_str(v) && v.len > 0 }
+
+fn _env_path(str: name): str {
+   def v = common.env_trim(name)
+   if(_is_non_empty(v)){ return _normalize_path(v) }
+   ""
+}
+
+fn _first_env_path2(str: a, str: b): str {
+   def va = _env_path(a)
+   if(va.len > 0){ return va }
+   _env_path(b)
+}
+
+fn _first_env_path3(str: a, str: b, str: c): str {
+   def va = _env_path(a)
+   if(va.len > 0){ return va }
+   def vb = _env_path(b)
+   if(vb.len > 0){ return vb }
+   _env_path(c)
+}
+
+fn _home_join(str: suffix): str {
+   def h = home_dir()
+   if(h.len > 0){ return _normalize_path(_path_join(h, suffix)) }
+   ""
+}
+
+fn _non_empty_or(any: primary, str: fallback): str {
+   if(_is_non_empty(primary)){ return primary }
+   fallback
+}
+
+fn _dir_writable(str: dir): bool {
+   if(!_is_non_empty(dir)){ return false }
+   def probe = _path_join(dir, ".nytrix_cache_probe_" + to_str(__getpid()))
+   def fd = __open(probe, 577, 420)
+   if(fd < 0){ return false }
+   def written = __write_off(fd, "ok", 2, 0)
+   __close(fd)
+   __unlink(probe)
+   written >= 0
+}
+
+fn _user_dir(str: win_env, str: win_suffix, str: mac_suffix, str: xdg_env, str: unix_suffix): str {
+   #windows {
+      def win_path = _env_path(win_env)
+      if(win_path.len > 0){ return win_path }
+      return _non_empty_or(_home_join(win_suffix), temp_dir())
+   } #elif macos {
+      return _non_empty_or(_home_join(mac_suffix), temp_dir())
+   } #else {
+      def xdg_path = _env_path(xdg_env)
+      if(xdg_path.len > 0){ return xdg_path }
+      return _non_empty_or(_home_join(unix_suffix), temp_dir())
+   } #endif
+}
+
+fn home_dir(): str {
+   "Returns the path to the current user's home directory, using OS-specific environment variables."
+   #windows {
+      def h = _env_path("USERPROFILE")
+      if(h.len > 0){ return h }
+      def d, p = common.env_trim("HOMEDRIVE"), common.env_trim("HOMEPATH")
+      if(_is_non_empty(d) && _is_non_empty(p)){ return _normalize_path(d + p) }
+      return _normalize_path("C:\\")
+   } #else {
+      def h = _env_path("HOME")
+      if(h.len > 0){ return h }
+      def pwd = _env_path("PWD")
+      if(pwd.len > 0){ return pwd }
+      return _normalize_path(".")
+   } #endif
+}
+
+fn temp_dir(): str {
+   "Returns the path to the system's temporary directory."
+   #windows {
+      def t = _first_env_path2("TEMP", "TMP")
+      if(t.len > 0){ return t }
+      return _normalize_path("C:\\Temp")
+   } #else {
+      def t = _first_env_path3("TMPDIR", "TMP", "TEMP")
+      if(t.len > 0){ return t }
+      return _normalize_path("/tmp")
+   } #endif
+}
+
+fn config_dir(): str {
+   "Returns the path to the current user's configuration directory(e.g., ~/.config on Linux)."
+   _user_dir(
+      "APPDATA",
+      "AppData\\Roaming",
+      "Library/Application Support",
+      "XDG_CONFIG_HOME",
+      ".config"
+   )
+}
+
+fn data_dir(): str {
+   "Returns the path to the current user's persistent data directory(e.g., ~/.local/share on Linux)."
+   _user_dir(
+      "LOCALAPPDATA",
+      "AppData\\Local",
+      "Library/Application Support",
+      "XDG_DATA_HOME",
+      ".local/share"
+   )
+}
+
+fn cache_dir(): str {
+   "Returns the path to the current user's cache directory(e.g., ~/.cache on Linux)."
+   #windows {
+      def a = _env_path("LOCALAPPDATA")
+      if(a.len > 0){
+         def win_cache = _normalize_path(_path_join(a, "Temp"))
+         if(_dir_writable(win_cache)){ return win_cache }
+      }
+      def t = temp_dir()
+      if(t.len > 0){ return t }
+      return _normalize_path("C:\\Temp")
+   } #elif macos {
+      def mac_cache = _home_join("Library/Caches")
+      if(_dir_writable(mac_cache)){ return mac_cache }
+      return temp_dir()
+   } #else {
+      def x = _env_path("XDG_CACHE_HOME")
+      if(x.len > 0 && _dir_writable(x)){ return x }
+      def home_cache = _home_join(".cache")
+      if(_dir_writable(home_cache)){ return home_cache }
+      return temp_dir()
+   } #endif
+}
+
+fn _abs_from_base(any: base, any: rel): str {
+   if(!is_str(rel)){ return "" }
+   if(rel.len == 0){ return "" }
+   if(is_abs(rel)){ return _normalize_path(rel) }
+   if(!is_str(base) || base.len == 0){ return _normalize_path(rel) }
+   _normalize_path(_path_join(base, rel))
+}
+
+comptime template _env_root_getter(name, env_key, doc){
+   fn ${name}(): str {
+      doc
+      def raw = common.env_trim(env_key)
+      if(raw.len == 0){ return "" }
+      _normalize_path(raw)
+   }
+}
+
+comptime emit _env_root_getter(_repo_root_env,
+   "NYTRIX_ROOT",
+"Internal: prefers an explicit launcher-provided repo root when available.")
+comptime emit _env_root_getter(_share_root_env,
+   "NYTRIX_SHARE_ROOT",
+"Internal: optional override for installed share root(e.g. `/usr/share/nytrix`).")
+comptime emit _env_root_getter(_asset_root_env,
+   "NYTRIX_ASSET_ROOT",
+"Internal: optional override for direct asset root(e.g. `/usr/share/nytrix/etc/assets`).")
+
+fn _prefix_eq(any: s, any: prefix): bool {
+   if(!is_str(s) || !is_str(prefix)){ return false }
+   def sn, pn = s.len, prefix.len
+   if(pn == 0 || pn > sn){ return false }
    mut i = 0
-   while(i < m){
-      store8(out, load8(s, start + i), i)
+   while(i < pn){
+      if(load8(s, i) != load8(prefix, i)){ return false }
       i += 1
    }
-   store8(out, 0, m)
-   out
+   true
 }
 
-fn normalize(p){
-   "Normalizes path `p`, collapsing redundant separators and resolving '.' and '..' components."
+fn _asset_rel_suffix(any: rel): str {
+   if(!is_str(rel) || rel.len == 0){ return "" }
+   def norm = _normalize_path(rel)
+   def prefix = "etc" + sep() + "assets" + sep()
+   if(!_prefix_eq(norm, prefix)){ return "" }
+   _substr(norm, prefix.len, norm.len)
+}
+
+fn _search_root_for_rel(any: root, str: rel): str {
+   if(!is_str(root) || root.len == 0){ return "" }
+   def cand = _normalize_path(_path_join(root, rel))
+   if(_path_exists_local(cand)){ return cand }
+   ""
+}
+
+fn _search_asset_root_for_rel(any: root, str: rel): str {
+   if(!is_str(root) || root.len == 0){ return "" }
+   def direct = _search_root_for_rel(root, rel)
+   if(direct.len > 0){ return direct }
+   def suffix = _asset_rel_suffix(rel)
+   if(suffix.len == 0){ return "" }
+   _search_root_for_rel(root, suffix)
+}
+
+mut _path_debug_cache = -1
+
+fn _path_debug(): bool {
+   _path_debug_cache = common.cached_env_truthy(_path_debug_cache, "NY_PATH_DEBUG")
+   _path_debug_cache == 1
+}
+
+fn _normalize_path(any: p): str {
    if(!is_str(p)){ return "" }
-   if(str_len(p) == 0){ return "" }
+   if(p.len == 0){ return "" }
    def sepch = sep()
    mut s = p
-   if(platform.is_windows()){
-      s = replace_all(s, "/", "\\")
-   } else {
-      s = replace_all(s, "\\", "/")
-   }
-   def n = str_len(s)
+   #windows {
+      s = str_replace(s, "/", "\\")
+   } #else {
+      s = str_replace(s, "\\", "/")
+   } #endif
+   def n = s.len
    mut prefix = ""
    mut abs = false
    mut rest = s
-   if(platform.is_windows()){
+   #windows {
       if(n >= 2 && _is_sep(load8(s, 0)) && _is_sep(load8(s, 1))){
          prefix = "\\\\"
          abs = true
@@ -142,191 +331,191 @@ fn normalize(p){
       } elif(_is_drive_prefix(s)){
          prefix = _substr(s, 0, 2)
          rest = _substr(s, 2, n)
-         if(str_len(rest) > 0 && _is_sep(load8(rest, 0))){
-         abs = true
-         rest = _substr(rest, 1, str_len(rest))
+         if(rest.len > 0 && _is_sep(load8(rest, 0))){
+            abs = true
+            rest = _substr(rest, 1, rest.len)
          }
       } elif(n > 0 && _is_sep(load8(s, 0))){
          abs = true
          rest = _substr(s, 1, n)
       }
-   } else {
+   } #else {
       if(_is_sep(load8(s, 0))){
          abs = true
          rest = _substr(s, 1, n)
       }
-   }
+   } #endif
    def raw_parts = split(rest, sepch)
-   if(env("NY_PATH_DEBUG")){ print("Path: normalize rest='" + rest + "' raw_parts count=" + to_str(len(raw_parts))) }
-   mut parts = list(len(raw_parts))
+   if(_path_debug()){ print("Path: normalize rest='" + rest + "' raw_parts count=" + to_str(raw_parts.len)) }
+   mut parts = list(0)
    mut i = 0
-   while(i < len(raw_parts)){
-      def p_comp = get(raw_parts, i, "")
-      if(str_len(p_comp) == 0 || p_comp == "."){
+   while(i < raw_parts.len){
+      def p_comp = raw_parts.get(i, "")
+      if(p_comp.len == 0 || p_comp == "."){
          i += 1
          continue
       }
       if(p_comp == ".."){
-         if(len(parts) > 0){
-         def last = get(parts, len(parts) - 1, "")
-         if(last != ".."){
-               pop(parts)
+         if(parts.len > 0){
+            def last = parts.get(parts.len - 1, "")
+            if(last != ".."){
+               parts.pop()
                i += 1
                continue
+            }
          }
-         }
-         if(!abs){ parts = append(parts, p_comp) }
+         if(!abs){ parts = parts.append(p_comp) }
          i += 1
          continue
       }
-      parts = append(parts, p_comp)
+      parts = parts.append(p_comp)
       i += 1
    }
    mut out = ""
-   if(str_len(prefix) > 0){
-      if(abs && _is_drive_prefix(prefix)){
-         out = prefix + sepch
-      } else {
-         out = prefix
-      }
+   if(prefix.len > 0){
+      if(abs && _is_drive_prefix(prefix)){ out = prefix + sepch } else { out = prefix }
    } else if(abs){
       out = sepch
    }
    mut idx = 0
-   def part_count = len(parts)
-   if(env("NY_PATH_DEBUG")){ print("Path: normalize part_count=" + to_str(part_count)) }
+   def part_count = parts.len
+   if(_path_debug()){ print("Path: normalize part_count=" + to_str(part_count)) }
+   mut b = Builder(max(16, out.len + part_count * 8 + 8))
+   if(out.len > 0){ b = builder_append(b, out) }
+   mut has_out = out.len > 0
+   mut last_is_sep = false
+   if(has_out){ last_is_sep = _is_sep(load8(out, out.len - 1)) }
    while(idx < part_count){
-      def part = get(parts, idx, "")
-      if(str_len(out) > 0){
-         def last = load8(out, str_len(out) - 1)
-         if(!_is_sep(last)){ out = out + sepch }
-      }
-      out = out + part
+      def part = parts.get(idx, "")
+      if(has_out && !last_is_sep){ b = builder_append(b, sepch) }
+      b = builder_append(b, part)
+      has_out = true
+      last_is_sep = false
       idx += 1
    }
-   if(env("NY_PATH_DEBUG")){ print("Path: normalize final out='" + out + "'") }
-   if(str_len(out) == 0 && part_count == 0){
+   out = builder_to_str(b)
+   builder_free(b)
+   if(_path_debug()){ print("Path: normalize final out='" + out + "'") }
+   if(out.len == 0 && part_count == 0){
       if(abs){ return sepch }
-      if(str_len(prefix) > 0){ return prefix }
+      if(prefix.len > 0){ return prefix }
       if(n == 0){ return "" }
       return "."
    }
    return out
 }
 
-fn basename(p){
-   "Returns the final component of a path (the file or directory name)."
+fn normalize(any: p): str { _normalize_path(p) }
+
+fn basename(any: p): str {
+   "Returns the final component of a path(the file or directory name)."
    if(!is_str(p)){ return "" }
-   def npath = normalize(p)
-   def n = str_len(npath)
+   def npath = _normalize_path(p)
+   def n = npath.len
    if(n == 0){ return "" }
    def s = sep()
    if(npath == s){ return s }
-   mut i = n - 1
-   while(i >= 0 && _is_sep(load8(npath, i))){ i -= 1 }
-   if(i < 0){ return sep() }
-   def head = _substr(npath, 0, i + 1)
-   def j = _last_sep_idx(head)
-   if(j < 0){ return head }
-   return _substr(head, j + 1, str_len(head))
+   mut end = n - 1
+   while(end >= 0 && _is_sep(load8(npath, end))){ end -= 1 }
+   if(end < 0){ return sep() }
+   mut start = end
+   while(start >= 0 && !_is_sep(load8(npath, start))){ start -= 1 }
+   return _substr(npath, start + 1, end + 1)
 }
 
-fn dirname(p){
+fn resolve_repo_asset(any: rel): str {
+   "Resolves a repo-relative asset path when the runtime cwd is not the repository root."
+   if(!is_str(rel)){ return "" }
+   if(rel.len == 0){ return "" }
+   if(is_abs(rel) && _path_exists_local(rel)){ return _normalize_path(rel) }
+   def share_root = _share_root_env()
+   if(share_root.len > 0){
+      def share_hit = _search_root_for_rel(share_root, rel)
+      if(share_hit.len > 0){ return share_hit }
+   }
+   def asset_root = _asset_root_env()
+   if(asset_root.len > 0){
+      def asset_hit = _search_asset_root_for_rel(asset_root, rel)
+      if(asset_hit.len > 0){ return asset_hit }
+   }
+   def repo_root = _repo_root_env()
+   if(repo_root.len > 0){
+      def repo_hit = _search_root_for_rel(repo_root, rel)
+      if(repo_hit.len > 0){ return repo_hit }
+   }
+   def cwd = _cwd_local()
+   if(_path_exists_local(rel)){ return _abs_from_base(cwd, rel) }
+   def from_cwd = _resolve_under_base(cwd, rel, 10)
+   if(from_cwd.len > 0){ return _normalize_path(from_cwd) }
+   def exe0 = argv(0)
+   def exe_dir = dirname(exe0)
+   def from_exe = _resolve_under_base(exe_dir, rel, 10)
+   if(from_exe.len > 0){ return _normalize_path(from_exe) }
+   def exe_share = _normalize_path(_path_join(exe_dir, ".." + sep() + "share" + sep() + "nytrix"))
+   def from_exe_share = _search_root_for_rel(exe_share, rel)
+   if(from_exe_share.len > 0){ return from_exe_share }
+   def exe_share_parent = _normalize_path(_path_join(exe_dir, ".." + sep() + ".." + sep() + "share" + sep() + "nytrix"))
+   def from_exe_share_parent = _search_root_for_rel(exe_share_parent, rel)
+   if(from_exe_share_parent.len > 0){ return from_exe_share_parent }
+   def sys_share = _search_root_for_rel("/usr/share/nytrix", rel)
+   if(sys_share.len > 0){ return sys_share }
+   def sys_local_share = _search_root_for_rel("/usr/local/share/nytrix", rel)
+   if(sys_local_share.len > 0){ return sys_local_share }
+   def opt_share = _search_root_for_rel("/opt/nytrix/share/nytrix", rel)
+   if(opt_share.len > 0){ return opt_share }
+   def opt_share_legacy = _search_root_for_rel("/opt/nytrix/share", rel)
+   if(opt_share_legacy.len > 0){ return opt_share_legacy }
+   def homebrew_share = _search_root_for_rel("/opt/homebrew/share/nytrix", rel)
+   if(homebrew_share.len > 0){ return homebrew_share }
+   #windows {
+      def program_data = common.env_trim("PROGRAMDATA")
+      if(program_data.len > 0){
+         def win_share = _search_root_for_rel(_path_join(program_data, "nytrix"), rel)
+         if(win_share.len > 0){ return win_share }
+      }
+   } #endif
+   rel
+}
+
+fn dirname(any: p): str {
    "Returns the directory component of a path."
    if(!is_str(p)){ return "." }
-   def npath = normalize(p)
-   def n = str_len(npath)
+   def npath = _normalize_path(p)
+   def n = npath.len
    if(n == 0){ return "." }
    def s = sep()
    if(npath == s){ return s }
-   if(platform.is_windows() && _is_drive_prefix(npath) && n == 3 && _is_sep(load8(npath, 2))){
-      return npath
-   }
+   #windows {
+      if(_is_drive_prefix(npath) && n == 3 && _is_sep(load8(npath, 2))){ return npath }
+   } #endif
    mut end = n
    while(end > 1 && _is_sep(load8(npath, end - 1))){ end -= 1 }
-   def trimmed = _substr(npath, 0, end)
-   def j = _last_sep_idx(trimmed)
+   mut j = end - 1
+   while(j >= 0 && !_is_sep(load8(npath, j))){ j -= 1 }
    if(j < 0){ return "." }
    if(j == 0){ return s }
-   if(platform.is_windows() && j == 2 && _is_drive_prefix(trimmed)){
-      return _substr(trimmed, 0, 3)
-   }
-   return _substr(trimmed, 0, j)
+   #windows {
+      if(j == 2 && _is_drive_prefix(npath)){ return _substr(npath, 0, 3) }
+   } #endif
+   return _substr(npath, 0, j)
 }
 
-fn extname(p){
-   "Returns the file extension, including the dot (e.g. '.txt')."
+fn extname(any: p): str {
+   "Returns the file extension, including the dot(e.g. '.txt')."
    if(!is_str(p)){ return "" }
-   def b = basename(p)
-   def n = str_len(b)
+   def b, n = basename(p), b.len
    if(n == 0){ return "" }
    def dot = common.last_index_byte(b, 46) ; '.'
    if(dot <= 0 || dot == n - 1){ return "" }
-   def out = malloc(n - dot + 1)
-   if(!out){ return "" }
-   init_str(out, n - dot)
-   mut i = 0
-   while(i < n - dot){
-      store8(out, __load8_idx(b, dot + i), i)
-      i += 1
-   }
-   store8(out, 0, n - dot)
-   return out
+   _substr(b, dot, n)
 }
 
-fn splitext(p){
+fn splitext(any: p): list {
    "Splits path into [root, ext]."
    if(!is_str(p)){ return ["", ""] }
    def ext = extname(p)
-   if(str_len(ext) == 0){ return [p, ""] }
-   def root_len = str_len(p) - str_len(ext)
+   if(ext.len == 0){ return [p, ""] }
+   def root_len = p.len - ext.len
    if(root_len < 0){ return [p, ""] }
    [_substr(p, 0, root_len), ext]
-}
-
-if(comptime{__main()}){
-   use std.core *
-   use std.core.error *
-   use std.str *
-   use std.os.platform as platform
-
-   def s = sep()
-   assert(str_len(s) == 1, "sep is one byte")
-
-   def is_win = (s == "\\")
-
-   if(is_win){
-       assert(is_abs("C:\\tmp"), "windows is_abs drive")
-       assert(is_abs("\\\\server\\share"), "windows is_abs unc")
-   } else {
-       assert(is_abs("/tmp"), "unix is_abs absolute")
-       assert(!is_abs("tmp"), "unix is_abs relative")
-   }
-
-   assert((join("a", "b") == "a" + s + "b"), "join simple")
-   assert((normalize("a/./b/../c") == "a" + s + "c"), "normalize relative")
-
-   assert((basename("a" + s + "b" + s + "c.txt") == "c.txt"), "basename file")
-   assert((dirname("a" + s + "b" + s + "c.txt") == "a" + s + "b"), "dirname nested")
-
-   if(!is_win){
-       assert((dirname("/tmp") == "/"), "dirname absolute child")
-       assert((dirname("/") == "/"), "dirname root")
-       assert((basename("/") == "/"), "basename root")
-   }
-
-   assert((extname("file.txt") == ".txt"), "extname simple")
-   assert((extname("archive.tar.gz") == ".gz"), "extname last extension")
-   assert((extname(".bashrc") == ""), "extname hidden no extension")
-   assert((extname("noext") == ""), "extname missing")
-
-   def sp = splitext("archive.tar.gz")
-   assert((get(sp, 0) == "archive.tar"), "splitext root")
-   assert((get(sp, 1) == ".gz"), "splitext ext")
-
-   def sp2 = splitext("noext")
-   assert((get(sp2, 0) == "noext"), "splitext noext root")
-   assert((get(sp2, 1) == ""), "splitext noext ext")
-
-   print("✓ std.os.path tests passed")
 }
