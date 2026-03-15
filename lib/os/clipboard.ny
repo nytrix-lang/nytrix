@@ -1,105 +1,146 @@
-;; Keywords: os clipboard
-;; Clipboard access for Nytrix.
+;; Keywords: clipboard copy paste
+;; Clipboard access utilities with backend/tool fallbacks.
+module std.os.clipboard(set_text, get_text, set_clipboard_text, get_clipboard_text)
+use std.core
+use std.os
+use std.os.path as ospath
+use std.os.io as pio
+use std.os.sys (sys_close_quiet)
+use std.os.subprocess as subprocess
+use std.core.str as str
 
-module std.os.clipboard (
-   set_text, get_text,
-   set_clipboard_text, get_clipboard_text
-)
-
-use std.core *
-use std.os *
-use std.ui.window as uiw
-
-;; Tool detection: not cached — called at use time so env vars are available.
-;; Priority: wl (Wayland) → xclip (X11) → xsel (X11 fallback)
-
-fn _detect_tool(){
-   "Returns best available clipboard tool name, preferring xclip for reliability."
-   ;; Try xclip first — it works on both X11 and XWayland, no daemon needed
-   if(file_exists("/usr/bin/xclip") || file_exists("/usr/local/bin/xclip")){ return "xclip" }
-   ;; wl-copy for pure Wayland
+fn _detect_tool(): str {
    def wd = env("WAYLAND_DISPLAY")
-   if(is_str(wd) && str_len(wd) > 0){
-      if(file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy")){ return "wl" }
+   if(is_str(wd) && wd.len > 0){ if(file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy")){ return "wl" } }
+   def xd = env("DISPLAY")
+   if(is_str(xd) && xd.len > 0){
+      if(file_exists("/usr/bin/xclip") || file_exists("/usr/local/bin/xclip")){ return "xclip" }
+      if(file_exists("/usr/bin/xsel")  || file_exists("/usr/local/bin/xsel") ){ return "xsel" }
    }
-   if(file_exists("/usr/bin/xsel")  || file_exists("/usr/local/bin/xsel") ){ return "xsel" }
    "none"
 }
 
-fn _env_prefix(){
-   "Build env var prefix string so system() child has display vars."
+fn _env_prefix(): str {
    mut p = ""
    def wd = env("WAYLAND_DISPLAY")
-   if(is_str(wd) && str_len(wd) > 0){ p = p + "WAYLAND_DISPLAY=" + wd + " " }
+   if(is_str(wd) && wd.len > 0){ p = p + "WAYLAND_DISPLAY=" + wd + " " }
    def xd = env("DISPLAY")
-   if(is_str(xd) && str_len(xd) > 0){ p = p + "DISPLAY=" + xd + " " }
+   if(is_str(xd) && xd.len > 0){ p = p + "DISPLAY=" + xd + " " }
    def xa = env("XAUTHORITY")
-   if(is_str(xa) && str_len(xa) > 0){ p = p + "XAUTHORITY=" + xa + " " }
+   if(is_str(xa) && xa.len > 0){ p = p + "XAUTHORITY=" + xa + " " }
    p
 }
 
-fn set_text(text){
-   "Copies text to the system clipboard."
-   ;; FAST PATH: Try active GLFW window first
-   def win = uiw.last()
-   if(win){
-      uiw.set_clipboard(win, text)
-      ;; We still also write to terminal/system clipboards for maximum compatibility
-   }
-
-   def tmp = "/build/cache/ny_cb_w.txt"
-   mut _ = file_write(tmp, text)
-   def tool = _detect_tool()
-   def pfx = _env_prefix()
-   if(eq(os(), "linux")){
-      if(tool == "wl"    ){ system(pfx + "wl-copy < " + tmp + " 2>/dev/null") }
-      elif(tool == "xclip"){
-         system(pfx + "xclip -selection clipboard -i " + tmp + " 2>/dev/null")
-         system(pfx + "xclip -selection primary -i " + tmp + " 2>/dev/null")
-      }
-      elif(tool == "xsel" ){ system(pfx + "xsel --clipboard --input < " + tmp + " 2>/dev/null") }
-   } elif(eq(os(), "macos")){
-      system("pbcopy < " + tmp)
-   } elif(eq(os(), "windows")){
-      system("clip < " + tmp)
-   }
-   _ = file_remove(tmp)
+fn _tmp_base_dir(): str {
+   #windows {
+      mut d = env("TEMP")
+      if(!is_str(d) || str.strip(d).len == 0){ d = env("TMP") }
+      if(!is_str(d) || str.strip(d).len == 0){ return "." }
+      return d
+   } #else {
+      return ospath.temp_dir()
+   } #endif
 }
 
-fn get_text(){
-   "Retrieves text from the system clipboard."
-   ;; FAST PATH: Try active GLFW window first
-   def win = uiw.last()
-   if(win){
-      def res = uiw.get_clipboard(win)
-      if(str_len(res) > 0){ return res }
-   }
+fn _tmp_file(str: tag): str {
+   def base = _tmp_base_dir()
+   #windows {
+      return base + "\\ny_cb_" + tag + "_" + to_str(pid()) + "_" + to_str(ticks()) + ".txt"
+   } #else {
+      return base + "/ny_cb_" + tag + "_" + to_str(pid()) + "_" + to_str(ticks()) + ".txt"
+   } #endif
+}
 
-   mut res = ""
-   def tmp = "/build/cache/ny_cb_r.txt"
-   def tool = _detect_tool()
-   def pfx = _env_prefix()
-   if(eq(os(), "linux")){
-      if(tool == "wl"    ){ system(pfx + "wl-paste > " + tmp + " 2>/dev/null") }
-      elif(tool == "xclip"){ system(pfx + "xclip -o -selection clipboard > " + tmp + " 2>/dev/null") }
-      elif(tool == "xsel" ){ system(pfx + "xsel --clipboard --output > " + tmp + " 2>/dev/null") }
-   } elif(eq(os(), "macos")){
-      system("pbpaste > " + tmp)
-   } elif(eq(os(), "windows")){
-      system("powershell -command \"Get-Clipboard\" > " + tmp)
+fn _timeout_prefix(): str {
+   #linux {
+      if(file_exists("/usr/bin/timeout")){ return "timeout 1 " }
+      if(file_exists("/bin/timeout")){ return "timeout 1 " }
+   } #endif
+   ""
+}
+
+fn _feed_clipboard_writer(str: path, list: args, any: text): bool {
+   def p = pio.spawn(path, args)
+   if(!p){ return false }
+   match pio.send(p, text){
+      ok(ignored) -> { ignored }
+      err(ignorederr) -> { ignorederr }
    }
+   match pio.shutdown_send(p){
+      ok(ignored) -> { ignored }
+      err(ignorederr) -> { ignorederr }
+   }
+   sys_close_quiet(p.get("out", -1))
+   true
+}
+
+fn set_text(any: text): bool {
+   "Copies text to the system clipboard."
+   def tmp = _tmp_file("w")
+   def qtmp = "\"" + tmp + "\""
+   match file_write(tmp, text){
+      ok(ignoredok) -> { ignoredok }
+      err(ignorederr) -> { ignorederr }
+   }
+   defer {
+      match file_remove(tmp){
+         ok(ignoredok) -> { ignoredok }
+         err(ignorederr) -> { ignorederr }
+      }
+   }
+   #linux {
+      def tool = _detect_tool()
+      if(tool == "wl"    ){ _feed_clipboard_writer("wl-copy", ["wl-copy"], text) }
+      elif(tool == "xclip"){
+         _feed_clipboard_writer("xclip", ["xclip", "-selection", "clipboard", "-i"], text)
+         _feed_clipboard_writer("xclip", ["xclip", "-selection", "primary", "-i"], text)
+      }
+      elif(tool == "xsel" ){ _feed_clipboard_writer("xsel", ["xsel", "--clipboard", "--input"], text) }
+   } #elif macos {
+      subprocess.shell("pbcopy < " + qtmp, false, false)
+   } #elif windows {
+      subprocess.shell("clip < " + qtmp, false, false)
+   } #endif
+   true
+}
+
+fn get_text(): str {
+   "Retrieves text from the system clipboard."
+   mut res = ""
+   def tmp = _tmp_file("r")
+   def qtmp = "\"" + tmp + "\""
+   defer {
+      if(file_exists(tmp)){
+         match file_remove(tmp){
+            ok(ignoredok) -> { ignoredok }
+            err(ignorederr) -> { ignorederr }
+         }
+      }
+   }
+   #linux {
+      def tool = _detect_tool()
+      def pfx = _env_prefix()
+      def timeout = _timeout_prefix()
+      if(tool == "wl"    ){ subprocess.shell(pfx + timeout + "wl-paste > " + qtmp + " 2>/dev/null", false, false) }
+      elif(tool == "xclip"){ subprocess.shell(pfx + timeout + "xclip -o -selection clipboard > " + qtmp + " 2>/dev/null", false, false) }
+      elif(tool == "xsel" ){ subprocess.shell(pfx + timeout + "xsel --clipboard --output > " + qtmp + " 2>/dev/null", false, false) }
+   } #elif macos {
+      subprocess.shell("pbpaste > " + qtmp, false, false)
+   } #elif windows {
+      subprocess.shell("powershell -command \"Get-Clipboard\" > " + qtmp, false, false)
+   } #endif
    if(file_exists(tmp)){
       def rd = file_read(tmp)
       if(is_ok(rd)){
          res = unwrap(rd)
-         def n = str_len(res)
-         if(n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 2) }
-         elif(n >= 1 && load8(res, n - 1) == 10){ res = str_slice(res, 0, n - 1) }
+         def n = res.len
+         if(n >= 2 && load8(res, n - 2) == 13 && load8(res, n - 1) == 10){ res = str.str_slice(res, 0, n - 2) }
+         elif(n >= 1 && load8(res, n - 1) == 10){ res = str.str_slice(res, 0, n - 1) }
       }
-      mut _ = file_remove(tmp)
    }
    res
 }
 
-fn set_clipboard_text(text){ "Updates the system clipboard with the provided text string." set_text(text) }
-fn get_clipboard_text(){ "Retrieves the current text content from the system clipboard." get_text() }
+fn set_clipboard_text(any: text): bool { "Updates the system clipboard with the provided text string." set_text(text) }
+
+fn get_clipboard_text(): str { "Retrieves the current text content from the system clipboard." get_text() }

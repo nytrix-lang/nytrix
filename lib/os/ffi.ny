@@ -1,97 +1,114 @@
-;; Keywords: os ffi
+;; Keywords: ffi foreign-function-interface interop
 ;; Os Ffi for Nytrix
+module std.os.ffi(RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL,
+   dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,
+   call0_void, call0_i32, call1_void, call1_u32_void, call2_void,
+   call3_void, call4_f32_void,
+   call0, call1, call1_i64, call1_u32, call2, call3, call4, call5,
+   call0_ptr, call1_ptr, call2_ptr, call3_ptr, call4_ptr, call5_ptr,
+   call2_ptr_u32, call3_ptr_u64_ptr, call3_ptr_u32_ptr,
+   call3_ptr_ptr_u32, call4_ptr_ptr_ptr_ptr_void,
+   call6, call7, call8, call9, call10, call11, call12, call13, call14, call15,
+   ffi_call, bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all,
+   __call0, __call0_ptr, __call1, __call1_ptr, __call2, __call2_ptr,
+   __call3, __call3_ptr, __call4, __call4_ptr, __call5, __call5_ptr,
+   __call6, __call7, __call8, __call9, __call10, __call11, __call12,
+   __call13, __call14, __call15,
+   __call2_ptr_u32, __call3_ptr_u64_ptr, __call3_ptr_u32_ptr,
+   __call3_ptr_ptr_u32, __call3_ptr_u64_ptr_i32,
+   __call4_ptr_ptr_ptr_ptr_i32, __call4_ptr_ptr_ptr_u64_i32,
+   __call4_ptr_u32_u64_ptr_i32, __call4_ptr_u64_ptr_ptr_i32,
+   __call5_ptr_ptr_ptr_u64_i32_i32, __call4_ptr_ptr_ptr_ptr_void,
+   CStruct, CType, cstr, cptr, u8, i8, u16, i16, u32, i32, u64, i64,
+   f32, f64, ptr, handle, sizeof_struct, offsetof_struct, malloc, free,
+cstruct_set, cstruct_get, bind_lib, tag_native)
 
-module std.os.ffi (
-   RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL, dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,
-   call0_void, call0_i32, call1_void, call1_u32_void, call2_void, call3_void, call4_f32_void, call0, call1, call1_i64, call1_u32, call2, call3, call4, call5,
-   call6, call7, call8, call9, call10, call11, call12, call13, call14, call15, ffi_call,
-   bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all,
-
-   ; C-FFI Helpers
-   CStruct, CType, cstr,
-   u8, i8, u16, i16, u32, i32, u64, i64, f32, f64, ptr, handle,
-   sizeof_struct, offsetof_struct, malloc, free,
-   cstruct_set, cstruct_get, bind_lib, tag_native
-)
-
-use std.core *
-use std.core as core
+use std.core
 use std.core.mem as mem
 use std.core.dict_mod as _d
-use std.str *
-use std.os *
+use std.core.str
+use std.os.prim
 use std.os.path as ospath
 
-;; Dynamic Loading
+fn _ffi_debug(): bool {
+   def v = env("NY_FFI_DEBUG")
+   if(!is_str(v)){ return false }
+   def s = lower(strip(v))
+   s == "1" || s == "true" || s == "yes" || s == "on"
+}
 
-fn RTLD_LAZY(){
+fn RTLD_LAZY(): int {
    "Returns the RTLD_LAZY flag for `dlopen` (1)."
    1
 }
-fn RTLD_NOW(){
+
+fn RTLD_NOW(): int {
    "Returns the RTLD_NOW flag for `dlopen` (2)."
    2
 }
-fn RTLD_GLOBAL(){
+
+fn RTLD_GLOBAL(): int {
    "Returns the RTLD_GLOBAL flag for `dlopen` (256)."
    256
 }
-fn RTLD_LOCAL(){
+
+fn RTLD_LOCAL(): int {
    "Returns the RTLD_LOCAL flag for `dlopen` (0)."
    0
 }
 
-fn dlopen(path, flags){
+fn dlopen(str: path, int: flags): any {
    "Opens a dynamic library at `path` with the given `flags`. Returns a library handle, or 0 on failure."
    __dlopen(path, flags)
 }
-fn dlsym(h, s){
+
+fn dlsym(any: h, any: s): any {
    "Returns the memory address of the symbol `s` within library handle `h`."
-   __dlsym(h, s)
+   if(is_str(s)){ return __dlsym(h, s) }
+   0
 }
-fn dlclose(h){
+
+fn dlclose(any: h): any {
    "Decrements the reference count on the dynamic library handle `h`."
    __dlclose(h)
 }
-fn dlerror(){
+
+fn dlerror(): str {
    "Returns a human-readable string describing the last error that occurred from an FFI/DL operation."
    __dlerror()
 }
 
-fn _try(path, flags){
-   "Attempts a direct `dlopen` call and logs the attempt when sound debug mode is enabled."
-   if(env("NY_AUDIO_DEBUG")){ print("FFI: trying " + path) }
+fn _try(str: path, int: flags): any {
+   if(_ffi_debug()){ print("FFI: trying " + path) }
    def h = __dlopen(path, flags)
    if(h != 0){
-      if(env("NY_AUDIO_DEBUG")){ print("FFI: loaded " + path + " handle=" + to_str(h)) }
+      if(_ffi_debug()){ print("FFI: loaded " + path + " handle=" + to_str(h)) }
       return h
    }
    0
 }
 
-fn dlopen_checked(name, required_symbol, flags=0){
+fn dlopen_checked(any: name, any: required_symbol, int: flags=0): any {
    "Opens library `name` and verifies that `required_symbol` exists before returning the handle."
    mut eff_flags = flags
    if(eff_flags == 0){ eff_flags = RTLD_NOW() | RTLD_GLOBAL() }
    def h = dlopen_any(name, eff_flags)
    if(h == 0){ return 0 }
-   if(required_symbol && str_len(required_symbol) > 0 && dlsym(h, required_symbol) == 0){
+   if(required_symbol && required_symbol.len > 0 && dlsym(h, required_symbol) == 0){
       dlclose(h)
       return 0
    }
    h
 }
 
-fn dlopen_any(name, flags=0){
+fn dlopen_any(any: name, int: flags=0): any {
    "Attempts to open a dynamic library by searching for several platform-specific name variations and versions."
-   if(!core.is_str(name) || str_len(name) == 0){ return 0 }
-   def n = str_len(name)
-   if(n >= 4){
-      if(endswith(name, ".so") || endswith(name, ".dylib") || endswith(name, ".dll")){ return _try(name, flags) }
-   }
+   if(!is_str(name) || name.len == 0){ return 0 }
+   if(flags == 0){ flags = RTLD_NOW() | RTLD_GLOBAL() }
+   def n = name.len
+   if(n >= 4){ if(endswith(name, ".so") || endswith(name, ".dylib") || endswith(name, ".dll")){ return _try(name, flags) } }
    def has_sep = ospath.has_sep(name)
-   def osn = __os_name()
-   if(osn == "windows"){
+   #windows {
       def h0 = _try(name, flags)
       if(h0){ return h0 }
       def h1 = _try(name + ".dll", flags)
@@ -102,7 +119,7 @@ fn dlopen_any(name, flags=0){
       }
       return 0
    }
-   if(osn == "macos"){
+   #elif macos {
       def h0 = _try(name, flags)
       if(h0){ return h0 }
       def h1 = _try(name + ".dylib", flags)
@@ -115,6 +132,7 @@ fn dlopen_any(name, flags=0){
       }
       return 0
    }
+   #endif
    ; linux/other
    def h0 = _try(name, flags)
    if(h0){ return h0 }
@@ -127,8 +145,8 @@ fn dlopen_any(name, flags=0){
       if(h3){ return h3 }
       def versions = ["0", "1", "2", "3", "8", "12", "14", "18"]
       mut i = 0
-      while(i < core.len(versions)){
-         def h4 = _try("lib" + name + ".so." + core.get(versions, i), flags)
+      while(i < versions.len){
+         def h4 = _try("lib" + name + ".so." + versions.get(i), flags)
          if(h4){ return h4 }
          i += 1
       }
@@ -136,326 +154,356 @@ fn dlopen_any(name, flags=0){
    0
 }
 
-;; C string helper
-
-fn cstr(s){
+fn cstr(any: s): ptr {
    "Ensures `s` is NUL-terminated for C APIs."
    mem.cstr(s)
 }
 
-fn tag_native(addr){
+fn cptr(any: s): ptr {
+   "Returns a C-compatible pointer view of `s` for typed FFI pointer parameters."
+   cstr(s)
+}
+
+fn tag_native(any: addr): any {
    "Tags a raw address as a native function pointer."
    __tag_native(addr)
 }
 
-;; Low-level Calls
+fn call0(any: f): any { "Low-level FFI call with 0 arguments." __call0(f) }
 
-fn call0(f){ "Low-level FFI call with 0 arguments." __call0(f) }
-fn call1(f,a){ "Low-level FFI call with 1 argument." __call1(f,a) }
-fn call2(f,a,b){ "Low-level FFI call with 2 arguments." __call2(f,a,b) }
-fn call3(f,a,b,c){ "Low-level FFI call with 3 arguments." __call3(f,a,b,c) }
-fn call4(f,a,b,c,d){ "Low-level FFI call with 4 arguments." __call4(f,a,b,c,d) }
-fn call5(f,a,b,c,d,e){ "Low-level FFI call with 5 arguments." __call5(f,a,b,c,d,e) }
-fn call6(f,a,b,c,d,e,g){ "Low-level FFI call with 6 arguments." __call6(f,a,b,c,d,e,g) }
-fn call7(f,a,b,c,d,e,g,h){ "Low-level FFI call with 7 arguments." __call7(f,a,b,c,d,e,g,h) }
-fn call8(f,a,b,c,d,e,g,h,i){ "Low-level FFI call with 8 arguments." __call8(f,a,b,c,d,e,g,h,i) }
-fn call9(f,a,b,c,d,e,g,h,i,j){ "Low-level FFI call with 9 arguments." __call9(f,a,b,c,d,e,g,h,i,j) }
-fn call10(f,a,b,c,d,e,g,h,i,j,k){ "Low-level FFI call with 10 arguments." __call10(f,a,b,c,d,e,g,h,i,j,k) }
-fn call11(f,a,b,c,d,e,g,h,i,j,k,l){ "Low-level FFI call with 11 arguments." __call11(f,a,b,c,d,e,g,h,i,j,k,l) }
-fn call12(f,a,b,c,d,e,g,h,i,j,k,l,m){ "Low-level FFI call with 12 arguments." __call12(f,a,b,c,d,e,g,h,i,j,k,l,m) }
-fn call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n){ "Low-level FFI call with 13 arguments." __call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) }
-fn call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o){ "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
-fn call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p){ "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
+fn call0_ptr(any: f): any { "Low-level FFI call with 0 arguments and pointer return." __call0_ptr(f) }
 
-fn call0_void(f){
+fn call1(any: f, any: a): any { "Low-level FFI call with 1 argument." __call1(f,a) }
+
+fn call1_ptr(any: f, any: a): any { "Low-level FFI call with 1 argument and pointer return." __call1_ptr(f,a) }
+
+fn call2(any: f, any: a, any: b): any { "Low-level FFI call with 2 arguments." __call2(f,a,b) }
+
+fn call2_ptr(any: f, any: a, any: b): any { "Low-level FFI call with 2 arguments and pointer return." __call2_ptr(f,a,b) }
+
+fn call2_ptr_u32(any: f, any: a, any: b): any { "Low-level FFI call f(ptr,u32)->ptr." __call2_ptr_u32(f,a,b) }
+
+fn call3(any: f, any: a, any: b, any: c): any { "Low-level FFI call with 3 arguments." __call3(f,a,b,c) }
+
+fn call3_ptr(any: f, any: a, any: b, any: c): any { "Low-level FFI call with 3 arguments and pointer return." __call3_ptr(f,a,b,c) }
+
+fn call3_ptr_u64_ptr(any: f, any: a, any: b, any: c): any { "Low-level FFI call f(ptr,u64,ptr)->ptr." __call3_ptr_u64_ptr(f,a,b,c) }
+
+fn call3_ptr_u32_ptr(any: f, any: a, any: b, any: c): any { "Low-level FFI call f(ptr,u32,ptr)->ptr." __call3_ptr_u32_ptr(f,a,b,c) }
+
+fn call3_ptr_ptr_u32(any: f, any: a, any: b, any: c): any { "Low-level FFI call f(ptr,ptr,u32)->ptr." __call3_ptr_ptr_u32(f,a,b,c) }
+
+fn call4(any: f, any: a, any: b, any: c, any: d): any { "Low-level FFI call with 4 arguments." __call4(f,a,b,c,d) }
+
+fn call4_ptr(any: f, any: a, any: b, any: c, any: d): any { "Low-level FFI call with 4 arguments and pointer return." __call4_ptr(f,a,b,c,d) }
+
+fn call5(any: f, any: a, any: b, any: c, any: d, any: e): any { "Low-level FFI call with 5 arguments." __call5(f,a,b,c,d,e) }
+
+fn call5_ptr(any: f, any: a, any: b, any: c, any: d, any: e): any { "Low-level FFI call with 5 arguments and pointer return." __call5_ptr(f,a,b,c,d,e) }
+
+fn call6(any: f, any: a, any: b, any: c, any: d, any: e, any: g): any { "Low-level FFI call with 6 arguments." __call6(f,a,b,c,d,e,g) }
+
+fn call7(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h): any { "Low-level FFI call with 7 arguments." __call7(f,a,b,c,d,e,g,h) }
+
+fn call8(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i): any { "Low-level FFI call with 8 arguments." __call8(f,a,b,c,d,e,g,h,i) }
+
+fn call9(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j): any { "Low-level FFI call with 9 arguments." __call9(f,a,b,c,d,e,g,h,i,j) }
+
+fn call10(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k): any { "Low-level FFI call with 10 arguments." __call10(f,a,b,c,d,e,g,h,i,j,k) }
+
+fn call11(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k, any: l): any { "Low-level FFI call with 11 arguments." __call11(f,a,b,c,d,e,g,h,i,j,k,l) }
+
+fn call12(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k, any: l, any: m): any { "Low-level FFI call with 12 arguments." __call12(f,a,b,c,d,e,g,h,i,j,k,l,m) }
+
+fn call13(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k, any: l, any: m, any: n): any { "Low-level FFI call with 13 arguments." __call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) }
+
+fn call14(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k, any: l, any: m, any: n, any: o): any { "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
+
+fn call15(any: f, any: a, any: b, any: c, any: d, any: e, any: g, any: h, any: i, any: j, any: k, any: l, any: m, any: n, any: o, any: p): any { "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
+
+fn call0_void(any: f): any {
    "Calls `f` with no arguments and ignores any return value."
    __call0(f)
 }
-fn call0_i32(f){
+
+fn call0_i32(any: f): int {
    "Calls `f` with no arguments and returns a 32-bit integer result."
    __call0_i32(f)
 }
-fn call1_void(f,a){
+
+fn call1_void(any: f, any: a): any {
    "Calls `f` with one argument and ignores any return value."
    __call1(f,a)
 }
-fn call1_u32_void(f,a){
+
+fn call1_u32_void(any: f, any: a): any {
    "Calls `f` with one unsigned 32-bit argument and ignores any return value."
    __call1_u32_void(f,a)
 }
-fn call2_void(f,a,b){
+
+fn call2_void(any: f, any: a, any: b): any {
    "Calls `f` with two arguments and ignores any return value."
    __call2(f,a,b)
 }
-fn call3_void(f,a,b,c){
+
+fn call3_void(any: f, any: a, any: b, any: c): any {
    "Calls `f` with three arguments and ignores any return value."
    __call3(f,a,b,c)
 }
-fn call4_f32_void(f,a,b,c,d){
+
+fn call4_f32_void(any: f, any: a, any: b, any: c, any: d): any {
    "Calls `f` with four arguments where the fourth is a 32-bit float and ignores any return value."
    __call4_f32_void(f,a,b,c,d)
 }
-fn call1_u32(f,a){
+
+fn call4_ptr_ptr_ptr_ptr_void(any: f, any: a, any: b, any: c, any: d): any {
+   "Calls `f(ptr, ptr, ptr, ptr)` and ignores any return value."
+   __call4_ptr_ptr_ptr_ptr_void(f,a,b,c,d)
+}
+
+fn call4_ptr_ptr_ptr_u64_i32(any: f, any: a, any: b, any: c, any: d): any {
+   "Calls `f` with three pointers and a 64-bit length, returning an i32 result."
+   __call4_ptr_ptr_ptr_u64_i32(f,a,b,c,d)
+}
+
+fn call5_ptr_ptr_ptr_u64_i32_i32(any: f, any: a, any: b, any: c, any: d, any: e): any {
+   "Calls `f` with three pointers, a 64-bit length, and a 32-bit level, returning an i32 result."
+   __call5_ptr_ptr_ptr_u64_i32_i32(f,a,b,c,d,e)
+}
+
+fn call1_u32(any: f, any: a): any {
    "Calls `f` with one unsigned 32-bit argument and returns the raw result."
    __call1_u32(f,a)
 }
-fn call1_i64(f,a){
+
+fn call1_i64(any: f, any: a): any {
    "Calls `f` with one argument and returns a 64-bit integer result."
    __call1_i64(f,a)
 }
 
-fn ffi_call(fptr, args){
-   "Calls external function at `fptr` with `args` list. Supports up to 10 arguments."
-   def n = core.len(args)
+fn ffi_call(any: fptr, list: args): any {
+   "Dynamic FFI fallback: calls external function at `fptr` with `args` list. Supports 0-15 arguments; use extern/#include for native ABI calls and wider signatures."
+   def n = args.len
    if(n==0){ return call0(fptr)  }
-   if(n==1){ def a = core.get(args,0) return call1(fptr, a)  }
-   if(n==2){ def a = core.get(args,0) def b = core.get(args,1) return call2(fptr, a, b)  }
-   if(n==3){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) return call3(fptr, a, b, c)  }
-   if(n==4){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) return call4(fptr, a, b, c, d)  }
-   if(n==5){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) def e = core.get(args,4) return call5(fptr, a, b, c, d, e)  }
-   if(n==6){ def a = core.get(args,0) def b = core.get(args,1) def c = core.get(args,2) def d = core.get(args,3) def e = core.get(args,4) def f = core.get(args,5) return call6(fptr, a, b, c, d, e, f)  }
-   if(n >= 7){ panic("ffi_call robust mode only supports 0-6 args for now") }
+   if(n==1){ def a = args.get(0) return call1(fptr, a)  }
+   if(n==2){ def a = args.get(0) def b = args.get(1) return call2(fptr, a, b)  }
+   if(n==3){ def a = args.get(0) def b = args.get(1) def c = args.get(2) return call3(fptr, a, b, c)  }
+   if(n==4){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) return call4(fptr, a, b, c, d)  }
+   if(n==5){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) return call5(fptr, a, b, c, d, e)  }
+   if(n==6){ def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) def f = args.get(5) return call6(fptr, a, b, c, d, e, f)  }
+   if(n==7){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) return call7(fptr,a,b,c,d,e,f,g) }
+   if(n==8){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) return call8(fptr,a,b,c,d,e,f,g,h) }
+   if(n==9){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) return call9(fptr,a,b,c,d,e,f,g,h,i) }
+   if(n==10){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) return call10(fptr,a,b,c,d,e,f,g,h,i,j) }
+   if(n==11){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) return call11(fptr,a,b,c,d,e,f,g,h,i,j,k) }
+   if(n==12){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) return call12(fptr,a,b,c,d,e,f,g,h,i,j,k,l) }
+   if(n==13){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) return call13(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m) }
+   if(n==14){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) return call14(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o) }
+   if(n==15){ def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) def p=args.get(14) return call15(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p) }
+   panic("ffi_call supports 0-15 args")
    0
 }
 
-;; Binding
-
-fn bind(h, name){
+fn bind(any: h, str: name): any {
    "Returns a Nytrix function binding to external symbol `name` in library `h`."
    def fptr = dlsym(h, name)
    if(fptr != 0){ return fn(...args){ ffi_call(fptr, args) } }
    0
 }
 
-fn call_ext(h, name, ...args){
+fn call_ext(any: h, str: name, ...args): any {
    "Calls external symbol `name` in library `h` with provided arguments."
    def fptr = dlsym(h, name)
    if(fptr != 0){ return ffi_call(fptr, args) }
    0
 }
 
-fn _bind_map(h, names, target=0){
-   "Builds a dictionary of resolvable symbol wrappers, optionally mirroring them into `target`."
-   mut res = _d.dict()
-   mut i = 0 mut n = core.len(names)
+fn _bind_map(any: h, list: names, any: target=0): dict {
+   mut res = _d.dict(8)
+   mut i, n = 0, names.len
    while(i < n){
-      def name = core.get(names, i)
+      def name = names.get(i)
       def b = bind(h, name)
       if(b != 0){
-         res = _d.dict_set(res, name, b)
-         if(target != 0){ _d.dict_set(target, name, b) }
+         res = res.set(name, b)
+         if(target != 0){ target.set(name, b) }
       }
       i += 1
    }
    res
 }
 
-fn bind_all(h, names){
+fn bind_all(any: h, list: names): dict {
    "Returns a dictionary of callable wrappers for each resolvable symbol in `names`."
    _bind_map(h, names)
 }
 
-fn bind_linked(names){
+fn bind_linked(list: names): dict {
    "Binds `names` from the current process image."
    bind_all(0, names)
 }
 
-fn import_all(h, names){
+fn import_all(any: h, list: names): bool {
    "Imports each resolvable symbol in `names` into the current global scope."
    _bind_map(h, names, __globals())
    true
 }
 
-fn import_linked(names){
+fn import_linked(list: names): bool {
    "Imports `names` from the current process image into the global scope."
    import_all(0, names)
 }
 
-fn extern_all(){
+fn extern_all(): int {
    "Placeholder for compatibility with import-style APIs."
    0
 }
 
-;; Memory
-
-fn malloc(n){
+fn malloc(int: n): ptr {
    "Allocates `n` bytes and returns a raw pointer, or `0` for non-positive sizes."
    if(n<=0){return 0}
    __malloc(n)
 }
 
-fn free(p){
+fn free(any: p): int {
    "Frees raw pointer `p` when it is non-zero."
    if(p){ __free(p) }
    0
 }
 
-;; C-Type definitions
-
-fn u8(){
-   "Returns the FFI descriptor for an unsigned 8-bit integer."
-   ["u8", 1, 1]
+comptime template _ffi_ctype(name, tag, size, align){
+   fn name(): list {
+      "Returns an FFI scalar type descriptor."
+      [tag, size, align]
+   }
 }
 
-fn i8(){
-   "Returns the FFI descriptor for a signed 8-bit integer."
-   ["i8", 1, 1]
+comptime emit _ffi_ctype(u8,  "u8",  1, 1)
+comptime emit _ffi_ctype(i8,  "i8",  1, 1)
+comptime emit _ffi_ctype(u16, "u16", 2, 2)
+comptime emit _ffi_ctype(i16, "i16", 2, 2)
+comptime emit _ffi_ctype(u32, "u32", 4, 4)
+comptime emit _ffi_ctype(i32, "i32", 4, 4)
+comptime emit _ffi_ctype(u64, "u64", 8, 8)
+comptime emit _ffi_ctype(i64, "i64", 8, 8)
+comptime emit _ffi_ctype(f32, "f32", 4, 4)
+comptime emit _ffi_ctype(f64, "f64", 8, 8)
+comptime emit _ffi_ctype(ptr, "ptr", 8, 8)
+
+fn CType(any: tag, int: size, int: align=0): list {
+   "Returns an FFI scalar type descriptor `[tag, size, align]`."
+   if(align <= 0){ align = size }
+   [tag, size, align]
 }
 
-fn u16(){
-   "Returns the FFI descriptor for an unsigned 16-bit integer."
-   ["u16", 2, 2]
-}
-
-fn i16(){
-   "Returns the FFI descriptor for a signed 16-bit integer."
-   ["i16", 2, 2]
-}
-
-fn u32(){
-   "Returns the FFI descriptor for an unsigned 32-bit integer."
-   ["u32", 4, 4]
-}
-
-fn i32(){
-   "Returns the FFI descriptor for a signed 32-bit integer."
-   ["i32", 4, 4]
-}
-
-fn u64(){
-   "Returns the FFI descriptor for an unsigned 64-bit integer."
-   ["u64", 8, 8]
-}
-
-fn i64(){
-   "Returns the FFI descriptor for a signed 64-bit integer."
-   ["i64", 8, 8]
-}
-
-fn f32(){
-   "Returns the FFI descriptor for a 32-bit floating-point value."
-   ["f32", 4, 4]
-}
-
-fn f64(){
-   "Returns the FFI descriptor for a 64-bit floating-point value."
-   ["f64", 8, 8]
-}
-
-fn ptr(){
-   "Returns the FFI descriptor for a raw pointer."
-   ["ptr", 8, 8]
-}
-
-fn handle(){
+fn handle(): list {
    "Returns the canonical pointer-like FFI type descriptor."
    ptr()
 }
 
-fn _align(offset, alignment){
-   "Internal: rounds `offset` up to the next multiple of `alignment`."
+fn _align(int: offset, int: alignment): int {
    def rem = offset % alignment
    if(rem == 0){ return offset }
    offset + (alignment - rem)
 }
 
-fn CStruct(fields){
-   "Defines a C-style structure layout from field definitions. Handles automatic alignment."
-   mut d_lyt = core.dict()
+fn CStruct(list: fields): dict {
+   "Defines a dynamic C-style structure descriptor. Good for REPL/probes; use `layout` for compiled ABI field access."
+   mut d_lyt = dict(8)
    mut curr_off = 0
    mut m_align = 1
    mut i = 0
-   while(i < core.len(fields)){
-      def fld = core.get(fields, i)
-      def typ = core.get(fld, 0)
-      def nm = core.get(fld, 1)
-      def sz = core.get(typ, 1)
-      def al = core.get(typ, 2)
+   while(i < fields.len){
+      def fld = fields.get(i)
+      def typ = fld.get(0)
+      def nm = fld.get(1)
+      def sz = typ.get(1)
+      def al = typ.get(2)
       curr_off = _align(curr_off, al)
-      mut info = core.dict()
-      info = _d.dict_set(info, "offset", curr_off)
-      info = _d.dict_set(info, "type", core.get(typ, 0))
-      info = _d.dict_set(info, "size", sz)
-      d_lyt = _d.dict_set(d_lyt, nm, info)
+      mut info = dict(8)
+      info = info.set("offset", curr_off)
+      info = info.set("type", typ.get(0))
+      info = info.set("size", sz)
+      d_lyt = d_lyt.set(nm, info)
       if(al > m_align){ m_align = al }
       curr_off += sz
       i += 1
    }
    def t_size = _align(curr_off, m_align)
-   mut sd = core.dict()
-   sd = _d.dict_set(sd, "fields", d_lyt)
-   sd = _d.dict_set(sd, "size", t_size)
-   sd = _d.dict_set(sd, "align", m_align)
+   mut sd = dict(8)
+   sd = sd.set("fields", d_lyt)
+   sd = sd.set("size", t_size)
+   sd = sd.set("align", m_align)
    sd
 }
 
-fn sizeof_struct(d){
+fn sizeof_struct(any: d): int {
    "Returns the size in bytes for struct descriptor `d`."
-   if(core.is_list(d)){ return core.get(d, 1) }
-   _d.dict_get(d, "size", 0)
+   if(is_list(d)){ return d.get(1) }
+   d.get("size", 0)
 }
 
-fn offsetof_struct(d, name){
+fn offsetof_struct(any: d, any: name): int {
    "Returns the byte offset of field `name` within struct descriptor `d`."
-   def fs = _d.dict_get(d, "fields", 0)
-   def info = _d.dict_get(fs, name, 0)
-   _d.dict_get(info, "offset", -1)
+   def fs = d.get("fields", 0)
+   def info = fs.get(name, 0)
+   info.get("offset", -1)
 }
 
-fn cstruct_set(p, d, name, val){
-   "Sets field `name` in structure at memory address `p` with definition `d` to `val`."
-   def fs = _d.dict_get(d, "fields", 0)
-   def info = _d.dict_get(fs, name, 0)
+fn cstruct_set(any: p, any: d, any: name, any: val): bool {
+   "Sets field `name` through a dynamic CStruct descriptor."
+   def fs = d.get("fields", 0)
+   def info = fs.get(name, 0)
    if(!info){ return false }
-   def off = _d.dict_get(info, "offset")
-   def typ = _d.dict_get(info, "type")
-   if(eq(typ, "u32") || eq(typ, "i32")){ core.store32(p, val, off) }
-   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ core.store64_h(p, val, off) }
-   elif(eq(typ, "f32")){ core.store32_f32(p, val, off) }
-   elif(eq(typ, "u8") || eq(typ, "i8")){ core.store8(p, val, off) }
-   elif(eq(typ, "u16") || eq(typ, "i16")){ core.store16(p, val, off) }
+   def off = info.get("offset")
+   def typ = info.get("type")
+   if(eq(typ, "u32") || eq(typ, "i32")){ store32(p, val, off) }
+   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ store64_h(p, val, off) }
+   elif(eq(typ, "f32")){ store32_f32(p, val, off) }
+   elif(eq(typ, "u8") || eq(typ, "i8")){ store8(p, val, off) }
+   elif(eq(typ, "u16") || eq(typ, "i16")){ store16(p, val, off) }
    true
 }
 
-fn cstruct_get(p, d, name){
-   "Gets field `name` from structure at memory address `p` using definition `d`."
-   def fs = _d.dict_get(d, "fields", 0)
-   def info = _d.dict_get(fs, name, 0)
+fn cstruct_get(any: p, any: d, any: name): any {
+   "Gets field `name` through a dynamic CStruct descriptor."
+   def fs = d.get("fields", 0)
+   def info = fs.get(name, 0)
    if(!info){ return 0 }
-   def off = _d.dict_get(info, "offset")
-   def typ = _d.dict_get(info, "type")
-   if(eq(typ, "u32") || eq(typ, "i32")){ return core.load32(p, off) }
-   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ return core.load64_h(p, off) }
-   elif(eq(typ, "f32")){ return core.load32_f32(p, off) }
-   elif(eq(typ, "u8") || eq(typ, "i8")){ return core.load8(p, off) }
-   elif(eq(typ, "u16") || eq(typ, "i16")){ return core.load16(p, off) }
+   def off = info.get("offset")
+   def typ = info.get("type")
+   if(eq(typ, "u32") || eq(typ, "i32")){ return load32(p, off) }
+   elif(eq(typ, "u64") || eq(typ, "i64") || eq(typ, "ptr")){ return load64_h(p, off) }
+   elif(eq(typ, "f32")){ return load32_f32(p, off) }
+   elif(eq(typ, "u8") || eq(typ, "i8")){ return load8(p, off) }
+   elif(eq(typ, "u16") || eq(typ, "i16")){ return load16(p, off) }
    0
 }
 
-fn bind_lib(name_or_h, syms){
-   "Binds a list of symbols from a library (by name or handle) into a dictionary."
+fn bind_lib(any: name_or_h, list: syms): any {
+   "Binds a list of symbols from a library(by name or handle) into a dictionary."
    mut lib = 0
-   if(core.is_str(name_or_h)){ lib = dlopen_any(name_or_h, RTLD_NOW()) }
+   if(is_str(name_or_h)){ lib = dlopen_any(name_or_h, RTLD_NOW()) }
    else { lib = name_or_h }
    if(!lib){ return 0 }
-   mut res = _d.dict()
+   mut res = _d.dict(8)
    mut i = 0
-   while(i < core.len(syms)){
-      def s = core.get(syms, i)
-      mut nm = "" mut arity = -1
-      if(core.is_list(s)){ nm = core.get(s, 0) arity = core.get(s, 1) }
+   while(i < syms.len){
+      def s = syms.get(i)
+      mut nm, arity = "", -1
+      if(is_list(s)){ nm = s.get(0) arity = s.get(1) }
       else { nm = s }
       def fptr = dlsym(lib, nm)
       if(fptr){
-         if(arity == 0){ res = _d.dict_set(res, nm, fn(){ call0(fptr) }) }
-         elif(arity == 1){ res = _d.dict_set(res, nm, fn(a){ call1(fptr, a) }) }
-         elif(arity == 2){ res = _d.dict_set(res, nm, fn(a, b){ call2(fptr, a, b) }) }
-         elif(arity == 3){ res = _d.dict_set(res, nm, fn(a, b, c){ call3(fptr, a, b, c) }) }
-         elif(arity == 4){ res = _d.dict_set(res, nm, fn(a, b, c, d){ call4(fptr, a, b, c, d) }) }
-         elif(arity == 5){ res = _d.dict_set(res, nm, fn(a, b, c, d, e){ call5(fptr, a, b, c, d, e) }) }
-         elif(arity == 6){ res = _d.dict_set(res, nm, fn(a, b, c, d, e, f){ call6(fptr, a, b, c, d, e, f) }) }
+         if(arity == 0){ res = res.set(nm, fn(){ call0(fptr) }) }
+         elif(arity == 1){ res = res.set(nm, fn(a){ call1(fptr, a) }) }
+         elif(arity == 2){ res = res.set(nm, fn(a, b){ call2(fptr, a, b) }) }
+         elif(arity == 3){ res = res.set(nm, fn(a, b, c){ call3(fptr, a, b, c) }) }
+         elif(arity == 4){ res = res.set(nm, fn(a, b, c, d){ call4(fptr, a, b, c, d) }) }
+         elif(arity == 5){ res = res.set(nm, fn(a, b, c, d, e){ call5(fptr, a, b, c, d, e) }) }
+         elif(arity == 6){ res = res.set(nm, fn(a, b, c, d, e, f){ call6(fptr, a, b, c, d, e, f) }) }
          else {
-         res = _d.dict_set(res, nm, fn(...args){ ffi_call(fptr, args) })
+            res = res.set(nm, fn(...args){ ffi_call(fptr, args) })
          }
       }
       i += 1
