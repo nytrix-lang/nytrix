@@ -1,23 +1,34 @@
-;; Keywords: os platform
+;; Keywords: platform backend
 ;; Shared host platform predicates.
+module std.os.platform(is_windows, is_macos, is_linux)
+use std.core
 
-module std.os.platform (
-   is_windows, is_macos, is_linux
-)
-
-use std.core *
-
-fn is_windows(){
+@inline
+fn is_windows(): bool {
    "Returns whether the host operating system is Windows."
-   __os_name() == "windows"
+   #windows {
+      true
+   } #else {
+      false
+   } #endif
 }
 
-fn is_macos(){
+@inline
+fn is_macos(): bool {
    "Returns whether the host operating system is macOS."
-   __os_name() == "macos"
+   #macos {
+      true
+   } #else {
+      false
+   } #endif
 }
 
-fn is_linux(){
+@inline
+fn is_linux(): bool {
    "Returns whether the host operating system is Linux."
-   __os_name() == "linux"
+   #linux {
+      true
+   } #else {
+      false
+   } #endif
 }
