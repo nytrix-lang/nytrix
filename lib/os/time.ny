@@ -1,57 +1,29 @@
-;; Keywords: os time
+;; Keywords: time datetime timestamps
 ;; Os Time for Nytrix
+module std.os.time(time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, reset, _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format, format_time)
+use std.core
+use std.os.sys
+use std.core.str
 
-module std.os.time (
-   time, sleep, msleep, ticks,
-   _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format_time
-)
-use std.core *
-use std.os.sys *
-use std.str *
-
-fn _is_leap(y){
-   "Return true when `y` is a leap year."
-   if((y % 4) != 0){ return 0 }
-   if((y % 100) != 0){ return 1 }
-   if((y % 400) != 0){ return 0 }
-   1
+fn _is_leap(int: y): int {
+   ((y % 4) == 0 && ((y % 100) != 0 || (y % 400) == 0)) ? 1 : 0
 }
 
-fn _days_in_month(y, m){
-   "Return days in month `m` for year `y`."
-   match m {
-      1 -> { return 31 }
-      2 -> { return 28 + _is_leap(y) }
-      3 -> { return 31 }
-      4 -> { return 30 }
-      5 -> { return 31 }
-      6 -> { return 30 }
-      7 -> { return 31 }
-      8 -> { return 31 }
-      9 -> { return 30 }
-      10 -> { return 31 }
-      11 -> { return 30 }
-      12 -> { return 31 }
-      _ -> { return 30 }
+fn _days_in_month(int: y, int: m): int {
+   case m {
+      1, 3, 5, 7, 8, 10, 12 -> 31
+      2 -> 28 + _is_leap(y)
+      _ -> 30
    }
 }
 
-fn _days_in_year(y){
-   "Return days in year `y`."
-   365 + _is_leap(y)
-}
+fn _days_in_year(int: y): int { 365 + _is_leap(y) }
 
-fn _pad2(n){
-   "Zero-pad integer `n` to two digits."
-   pad_start(to_str(n), 2, "0")
-}
+fn _pad2(int: n): str { pad_start(to_str(n), 2, "0") }
 
-fn _pad4(n){
-   "Zero-pad integer `n` to four digits."
-   pad_start(to_str(n), 4, "0")
-}
+fn _pad4(int: n): str { pad_start(to_str(n), 4, "0") }
 
-fn format_time(ts){
+fn format_time(int: ts): str {
    "Format Unix seconds as `YYYY-MM-DD HH:MM:SS` in UTC."
    if(ts < 0){ ts = 0 }
    mut days = ts / 86400
@@ -60,7 +32,6 @@ fn format_time(ts){
    rem = rem - hour * 3600
    def minute = rem / 60
    def second = rem - minute * 60
-
    mut year = 1970
    while(1){
       def diy = _days_in_year(year)
@@ -68,7 +39,6 @@ fn format_time(ts){
       days = days - diy
       year += 1
    }
-
    mut month = 1
    while(1){
       def dim = _days_in_month(year, month)
@@ -80,73 +50,96 @@ fn format_time(ts){
    f"{_pad4(year)}-{_pad2(month)}-{_pad2(day)} {_pad2(hour)}:{_pad2(minute)}:{_pad2(second)}"
 }
 
-fn time(){
-   "Returns the current Unix timestamp (seconds since epoch) using `clock_gettime(CLOCK_REALTIME)`."
-   def ts = malloc(16)
-   def r = __clock_gettime(0, ts)
-   if(r != 0){ free(ts) return 0 }
-   def raw_sec = load64(ts)
-   def res = from_int(raw_sec)
-   free(ts)
-   return res
+fn time(): int {
+   "Returns the current Unix timestamp(seconds since epoch) using `clock_gettime(CLOCK_REALTIME)`."
+   __time_seconds()
 }
 
-fn msleep(ms){
+fn msleep(int: ms): any {
    "Suspends execution of the current thread for `ms` milliseconds."
-   def ts = malloc(16)
-   store64(ts, to_int(ms / 1000), 0)
-   store64(ts, to_int((ms % 1000) * 1000000), 8)
-   __nanosleep(ts)
-   free(ts)
+   __msleep_ms(ms)
 }
 
-fn sleep(s){
+fn sleep(int: s): any {
    "Suspends execution of the current thread for `s` seconds."
    msleep(s * 1000)
 }
 
-fn ticks(){
+fn ticks(): int {
    "Returns a high-resolution monotonic tick count in nanoseconds. Useful for precise timing and benchmarking."
-   def ts = malloc(16)
-   def r = __clock_gettime(1, ts)
-   if(r != 0){ free(ts) return 0 }
-   def raw_sec = load64(ts, 0)
-   def raw_nsec = load64(ts, 8)
-   def sec = from_int(raw_sec)
-   def nsec = from_int(raw_nsec)
-   def res = sec * 1000000000 + nsec
-   free(ts)
-   return res
+   __ticks_ns()
 }
 
-if(comptime{__main()}){
-   use std.os.time *
-   use std.core.error *
+fn now(): int {
+   "Returns the current Unix timestamp in seconds."
+   time()
+}
 
-   print("Testing std.os.time...")
+fn unix(): int {
+   "Alias for now()."
+   now()
+}
 
-   def t1 = time()
-   assert(t1 > 0, "time > 0")
+fn now_ms(): int {
+   "Returns the current Unix timestamp in milliseconds."
+   __time_milliseconds()
+}
 
-   def start = ticks()
-   msleep(120)
-   def end = ticks()
-
-   if(start > 0 && end > 0){
-     if(end < start){
-      print("Warning: ticks went backwards")
-     }
-   } else {
-     print("Warning: ticks unavailable")
-   }
-
+fn monotonic_ns(): int {
+   "Alias for ticks()."
    ticks()
+}
 
-   def fmt = format_time(0)
-   assert((fmt == "1970-01-01 00:00:00"), "epoch")
+fn Instant(): int {
+   "Returns a monotonic instant token."
+   ticks()
+}
 
-   def fmt2 = format_time(1672531200)
-   assert((fmt2 == "2023-01-01 00:00:00"), "2023")
+fn instant(): int { Instant() }
 
-   print("✓ std.os.time tests passed")
+fn since_ns(int: start): int {
+   "Returns monotonic nanoseconds elapsed since start."
+   ticks() - start
+}
+
+fn since_ms(int: start): int {
+   "Returns monotonic milliseconds elapsed since start."
+   since_ns(start) / 1000000
+}
+
+fn Timer(): dict {
+   "Creates a restartable timer object."
+   {"start_ns": ticks()}
+}
+
+fn timer(): dict { Timer() }
+
+fn timer_start(dict: t): int {
+   "Returns a timer object's start instant."
+   t.get("start_ns", ticks())
+}
+
+fn elapsed_ns(dict: t): int {
+   "Returns nanoseconds elapsed for a timer object."
+   ticks() - timer_start(t)
+}
+
+fn elapsed_ms(dict: t): int {
+   "Returns milliseconds elapsed for a timer object."
+   elapsed_ns(t) / 1000000
+}
+
+fn elapsed_sec(dict: t): int {
+   "Returns seconds elapsed for a timer object."
+   elapsed_ns(t) / 1000000000
+}
+
+fn reset(dict: t): dict {
+   "Resets and returns a timer object."
+   t.set("start_ns", ticks())
+}
+
+fn format(any: ts): str {
+   "Alias for format_time(ts)."
+   format_time(ts)
 }

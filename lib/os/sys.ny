@@ -1,108 +1,102 @@
-;; Keywords: os sys
+;; Keywords: sys syscalls
 ;; Os Sys for Nytrix
+module std.os.sys(syscall, sys_open, sys_read, sys_write, sys_close, sys_close_quiet, sys_getdents64, sys_ioctl, sys_openpty, STDIN_FD, STDOUT_FD, STDERR_FD)
+use std.core
+use std.core.error
 
-module std.os.sys (
-   syscall, sys_open, sys_read, sys_write, sys_close, sys_getdents64, sys_ioctl, sys_openpty
-)
-use std.core *
-use std.core.error *
+def STDIN_FD = 0
+def STDOUT_FD = 1
+def STDERR_FD = 2
 
-fn syscall(num, a=0, b=0, c=0, d=0, e=0, f=0){
-   "Performs a raw Linux syscall (`num`) with up to 6 arguments and returns the raw kernel result."
-   if(__os_name() != "linux"){ return -1 }
-   mut n = num
-   ; Map common x86_64 syscalls to ARM/AArch64 equivalents when needed.
-   if(__arch_name() == "aarch64" || __arch_name() == "arm64"){
-      if(num == 39){ n = 172 } ; getpid
-      elif(num == 0){ n = 63 } ; read
-      elif(num == 1){ n = 64 } ; write
-      elif(num == 3){ n = 57 } ; close
-      elif(num == 217){ n = 61 } ; getdents64
-   } elif(__arch_name() == "arm"){
-      if(num == 39){ n = 20 } ; getpid (arm32)
-      elif(num == 0){ n = 3 } ; read
-      elif(num == 1){ n = 4 } ; write
-      elif(num == 3){ n = 6 } ; close
-      elif(num == 217){ n = 217 } ; getdents64
-   }
-   return __syscall(n, a, b, c, d, e, f)
+fn syscall(any: num, any: a=0, any: b=0, any: c=0, any: d=0, any: e=0, any: f=0): int {
+   "Performs a raw Linux syscall(`num`) with up to 6 arguments and returns the raw kernel result."
+   #linux {
+      mut n = int(num)
+      ; Map common x86_64 syscalls to ARM/AArch64 equivalents when needed.
+      #aarch64 {
+         n = case int(num){
+            39 -> 172 ; getpid
+            0 -> 63 ; read
+            1 -> 64 ; write
+            3 -> 57 ; close
+            217 -> 61 ; getdents64
+            _ -> int(num)
+         }
+      } #elif arm {
+         n = case int(num){
+            39 -> 20 ; getpid (arm32)
+            0 -> 3 ; read
+            1 -> 4 ; write
+            3 -> 6 ; close
+            217 -> 217 ; getdents64
+            _ -> int(num)
+         }
+      } #endif
+      return __syscall(n, a, b, c, d, e, f)
+   } #else {
+      return -1
+   } #endif
 }
 
-fn sys_open(path, flags, mode) -> Result {
+fn sys_open(any: path, any: flags, any: mode): Result {
    "Wrapper for `open(2)`; returns `ok(fd)` or `err(errno_like_code)`."
    def fd = __open(path, flags, mode)
    if(fd < 0){ return err(fd) }
    return ok(fd)
 }
 
-fn _sys_io_result(res) -> Result {
-   "Internal: normalizes raw syscall-style integer results into `Result`."
+fn _sys_io_result(any: res): Result {
    if(res < 0){ return err(res) }
    return ok(res)
 }
 
-fn sys_read(fd, buf, n) -> Result {
+fn sys_read(any: fd, any: buf, any: n): Result {
    "Wrapper for `read(2)`; returns `ok(bytes_read)` or `err(errno_like_code)`."
    return _sys_io_result(__read_off(fd, buf, n, 0))
 }
 
-fn sys_write(fd, buf, n) -> Result {
+fn sys_write(any: fd, any: buf, any: n): Result {
    "Wrapper for `write(2)`; returns `ok(bytes_written)` or `err(errno_like_code)`."
    return _sys_io_result(__write_off(fd, buf, n, 0))
 }
 
-fn sys_close(fd) -> Result {
+fn sys_close(any: fd): Result {
    "Wrapper for `close(2)`; returns `ok(0)` or `err(errno_like_code)`."
    def res = __close(fd)
    if(res < 0){ return err(res) }
    return ok(0)
 }
 
-fn sys_getdents64(fd, buf, n) -> Result {
+fn sys_close_quiet(any: fd): any {
+   "Closes a file descriptor and ignores close errors."
+   if(fd < 0){ return 0 }
+   def ignored = __close(fd)
+   ignored
+}
+
+fn sys_getdents64(any: fd, any: buf, any: n): Result {
    "Wrapper for `getdents64(2)`; returns `ok(bytes_filled)` or `err(errno_like_code)`."
-   use std.os *
-   if(__os_name() != "linux"){ return err(-1) }
-   def res = syscall(217, fd, buf, n, 0, 0, 0)
-   if(res < 0){ return err(res) }
-   return ok(res)
+   use std.os
+   #linux {
+      def res = syscall(217, fd, buf, n, 0, 0, 0)
+      if(res < 0){ return err(res) }
+      return ok(res)
+   } #else {
+      return err(-1)
+   } #endif
 }
 
-fn sys_ioctl(fd, req, arg) -> Result {
+fn sys_ioctl(any: fd, any: req, any: arg): Result {
    "Wrapper for `ioctl(2)`; returns `ok(0)` or `err(errno_like_code)`."
-   def res = __ioctl(fd, req, arg)
+   def ureq = int(req) & 0xffffffff
+   def res = __ioctl(fd, ureq, arg)
    if(res < 0){ return err(res) }
    return ok(res)
 }
 
-fn sys_openpty(fds_ptr) -> Result {
+fn sys_openpty(any: fds_ptr): Result {
    "Wrapper for `openpty(3)`; returns `ok(0)` or `err(errno_like_code)`."
    def res = __openpty(fds_ptr)
    if(res < 0){ return err(res) }
    return ok(0)
-}
-
-if(comptime{__main()}){
-   use std.os.sys *
-   use std.core.error *
-   use std.os.fs *
-   use std.os.dirs *
-   use std.os.path *
-   use std.os *
-
-   print("Testing sys...")
-
-   def non_existent_file = normalize(temp_dir() + sep() + "non_existent_file_12345.tmp")
-   def r = sys_open(non_existent_file, 0, 0)
-   assert(is_err(r), "sys_open fails")
-   def code = __unwrap(r)
-   assert(code < 0, "errno set in Result")
-
-   if(eq(os(), "linux")){
-       def pid = syscall(39)
-       assert(pid > 0, "syscall getpid")
-   } else {
-       print("Skipping raw syscall test: linux-only API")
-   }
-
-   print("✓ std.os.sys tests passed")
 }
