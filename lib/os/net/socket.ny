@@ -1,93 +1,166 @@
-;; Keywords: net socket
+;; Keywords: net socket tcp udp
 ;; Net Socket for Nytrix
+module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
+use std.core
+use std.core.str
+use std.core.reflect
+use std.os
+use std.os.sys
+use std.os.path
+use std.os.path as ospath
+use std.core.mem as mem
 
-module std.net.socket (
-   htons, ipv4_parse, gethostbyname, socket_connect, socket_bind, socket_accept,
-   read_socket, write_socket, close_socket
-)
-use std.core *
-use std.str *
-use std.core.reflect *
-use std.os *
-use std.os.sys *
-use std.os.path *
-use std.os.platform as platform
-
-;; Socket Constants
+#windows {
+   #link "ws2_32.lib"
+   extern "" {
+      fn _c_wsa_startup(u16: version, ptr: data): i32 as "WSAStartup"
+      fn _c_socket(i32: domain, i32: typ, i32: protocol): i64 as "socket"
+      fn _c_connect(i64: fd, ptr: addr, i32: addrlen): i32 as "connect"
+      fn _c_bind(i64: fd, ptr: addr, i32: addrlen): i32 as "bind"
+      fn _c_listen(i64: fd, i32: backlog): i32 as "listen"
+      fn _c_accept(i64: fd, ptr: addr, ptr: addrlen): i64 as "accept"
+      fn _c_send(i64: fd, ptr: buf, i32: len, i32: flags): i32 as "send"
+      fn _c_recv(i64: fd, ptr: buf, i32: len, i32: flags): i32 as "recv"
+      fn _c_sendto(i64: fd, ptr: buf, i32: len, i32: flags, ptr: addr, i32: addrlen): i32 as "sendto"
+      fn _c_recvfrom(i64: fd, ptr: buf, i32: len, i32: flags, ptr: addr, ptr: addrlen): i32 as "recvfrom"
+      fn _c_setsockopt(i64: fd, i32: level, i32: optname, ptr: optval, i32: optlen): i32 as "setsockopt"
+      fn _c_close_socket(i64: fd): i32 as "closesocket"
+      fn _c_gethostbyname(ptr: name): ptr as "gethostbyname"
+   }
+} #else {
+   extern "" {
+      fn _c_socket(i32: domain, i32: typ, i32: protocol): i32 as "socket"
+      fn _c_connect(i32: fd, ptr: addr, u32: addrlen): i32 as "connect"
+      fn _c_bind(i32: fd, ptr: addr, u32: addrlen): i32 as "bind"
+      fn _c_listen(i32: fd, i32: backlog): i32 as "listen"
+      fn _c_accept(i32: fd, ptr: addr, ptr: addrlen): i32 as "accept"
+      fn _c_send(i32: fd, ptr: buf, u64: len, i32: flags): i64 as "send"
+      fn _c_recv(i32: fd, ptr: buf, u64: len, i32: flags): i64 as "recv"
+      fn _c_sendto(i32: fd, ptr: buf, u64: len, i32: flags, ptr: addr, u32: addrlen): i64 as "sendto"
+      fn _c_recvfrom(i32: fd, ptr: buf, u64: len, i32: flags, ptr: addr, ptr: addrlen): i64 as "recvfrom"
+      fn _c_setsockopt(i32: fd, i32: level, i32: optname, ptr: optval, u32: optlen): i32 as "setsockopt"
+      fn _c_close_socket(i32: fd): i32 as "close"
+      fn _c_gethostbyname(ptr: name): ptr as "gethostbyname"
+   }
+} #endif
 def AF_INET     = 2
 def SOCK_STREAM = 1
-def SOCK_DGRAM  = 2
+#if(windows || macos){
+   def SOL_SOCKET = 65535
+   def SO_REUSEADDR = 4
+   def SO_SNDTIMEO = 0x1005
+   def SO_RCVTIMEO = 0x1006
+} #else {
+   def SOL_SOCKET = 1
+   def SO_REUSEADDR = 2
+   def SO_RCVTIMEO = 20
+   def SO_SNDTIMEO = 21
+} #endif
+mut _hosts_cache_loaded = false
+mut _hosts_cache_txt = ""
+mut _net_ready_done = false
 
-def SOL_SOCKET = (platform.is_windows() || platform.is_macos()) ? 65535 : 1
-def SO_REUSEADDR = (platform.is_windows() || platform.is_macos()) ? 4 : 2
+fn _cptr(any: s): any { to_int(mem.cstr(s)) }
 
-fn htons(x){
-   "Convert a 16-bit integer from host byte order to network byte order (big-endian)."
+fn _net_ready(): bool {
+   #windows {
+      if(_net_ready_done){ return true }
+      def data = malloc(512)
+      if(!data){ return false }
+      def ok = _c_wsa_startup(0x0202, data) == 0
+      free(data)
+      _net_ready_done = ok
+      return ok
+   } #else {
+      return true
+   } #endif
+}
+
+fn _net_socket(int: domain, int: typ, int: protocol): int {
+   if(!_net_ready()){ return -1 }
+   def fd = _c_socket(domain, typ, protocol)
+   #windows { if(fd == -1){ return -1 } } #endif
+   return fd
+}
+
+fn _net_close(int: fd): int {
+   if(fd < 0){ return -1 }
+   return _c_close_socket(fd)
+}
+
+fn htons(int: x): int {
+   "Convert a 16-bit integer from host byte order to network byte order(big-endian)."
    def lo = x % 256
    def hi = (x / 256) % 256
    return lo*256 + hi
 }
 
-fn ipv4_parse(s){
-   "Parses an IPv4 address string (e.g., '127.0.0.1') into a 32-bit integer (little-endian)."
-   mut p = 0  mut val=0  mut oct=0  mut shift=0
-   mut done = 0
-   while(done==0){
-      mut c = load8(s, p)
+fn ipv4_parse(str: s): int {
+   "Parses an IPv4 address string(e.g., '127.0.0.1') into a 32-bit integer(little-endian)."
+   mut p, val, oct, shift, parts, digits = 0, 0, 0, 0, 0, 0
+   while(p <= s.len){
+      mut c = (p < s.len) ? load8(s, p) : 0
       if(c==0 || c==46){
-         if(oct > 255){ return 0 }
-         val = val + oct * case shift {
-         0  -> 1
-         8  -> 256
-         16 -> 65536
-         24 -> 16777216
-         _  -> 0
-         }
-         if(c == 0){ return val }
+         if(digits == 0 || oct > 255 || parts >= 4){ return 0 }
+         mut scale = 0
+         if(shift == 0){ scale = 1 }
+         elif(shift == 8){ scale = 256 }
+         elif(shift == 16){ scale = 65536 }
+         elif(shift == 24){ scale = 16777216 }
+         else { return 0 }
+         val = val + oct * scale
+         parts += 1
+         if(c == 0){ return(parts == 4) ? val : 0 }
          oct = 0
+         digits = 0
          shift = shift + 8
          p += 1
       } else {
          if(c < 48 || c > 57){ return 0 }
          oct = oct * 10 + (c - 48)
+         digits += 1
          p += 1
       }
    }
-   return val
+   return 0
 }
 
-fn _hosts_file_path(){
-   "Internal helper."
-   if(__os_name() == "windows"){
+fn ipv4_format(int: ip): str {
+   "Formats an IPv4 address integer returned by Ny socket helpers."
+   def a = ip % 256
+   def b = (ip / 256) % 256
+   def c = (ip / 65536) % 256
+   def d = (ip / 16777216) % 256
+   to_str(a) + "." + to_str(b) + "." + to_str(c) + "." + to_str(d)
+}
+
+fn _hosts_file_path(): str {
+   #windows {
       mut root = env("SystemRoot")
-      if(!is_str(root) || str_len(root) == 0){ root = env("SYSTEMROOT") }
-      if(is_str(root) && str_len(root) > 0){
-         return normalize(root + "\\System32\\drivers\\etc\\hosts")
-      }
-      return normalize("C:\\Windows\\System32\\drivers\\etc\\hosts")
-   }
-   normalize("/etc/hosts")
+      if(!is_str(root) || root.len == 0){ root = env("SYSTEMROOT") }
+      if(is_str(root) && root.len > 0){ return ospath.normalize(root + "\\System32\\drivers\\etc\\hosts") }
+      return ospath.normalize("C:\\Windows\\System32\\drivers\\etc\\hosts")
+   } #else {
+      return ospath.normalize("/etc/hosts")
+   } #endif
 }
 
-fn _lookup_hosts(name, hosts){
-   "Internal helper."
-   if(!is_str(hosts) || len(hosts) == 0){ return 0 }
+fn _lookup_hosts(str: name, any: hosts): int {
+   if(!is_str(hosts) || hosts.len == 0){ return 0 }
    def lines = split(hosts, "\n")
    mut i = 0
-   while(i < len(lines)){
-      def line = strip(get(lines, i))
-      if(len(line) > 0 && load8(line, 0) != 35){ ; '#'
+   while(i < lines.len){
+      def line = strip(lines.get(i))
+      if(line.len > 0 && load8(line, 0) != 35){
          def parts = split(line, " ")
-         if(len(parts) >= 2){
-         def ip_str = strip(get(parts, 0))
-         mut j = 1
-         while(j < len(parts)){
-               def host_alias = strip(get(parts, j))
-               if(len(host_alias) > 0 && host_alias == name){
-                  return ipv4_parse(ip_str)
-               }
+         if(parts.len >= 2){
+            def ip_str = strip(parts.get(0))
+            mut j = 1
+            while(j < parts.len){
+               def host_alias = strip(parts.get(j))
+               if(host_alias.len > 0 && host_alias == name){ return ipv4_parse(ip_str) }
                j += 1
-         }
+            }
          }
       }
       i += 1
@@ -95,321 +168,336 @@ fn _lookup_hosts(name, hosts){
    0
 }
 
-fn gethostbyname(name){
-   "Resolves a hostname to an IPv4 address integer. No libc used."
+fn gethostbyname(any: name): int {
+   "Resolves a hostname to an IPv4 address integer using hosts plus the OS resolver."
+   if(!is_str(name) || name.len == 0){ return 0 }
+   def direct = ipv4_parse(name)
+   if(direct != 0){ return direct }
    match name {
       "localhost" -> { return ipv4_parse("127.0.0.1") }
       "127.0.0.1" -> { return ipv4_parse("127.0.0.1") }
       _ -> {}
    }
-   ; Try hosts file first
    def hosts_path = _hosts_file_path()
-   mut hosts = ""
-   match file_read(hosts_path){
-      ok(s) -> { hosts = s }
-      err(_) -> { hosts = "" }
-   }
-   def host_ip = _lookup_hosts(name, hosts)
-   if(host_ip != 0){ return host_ip }
-   ; Fallback to DNS Query (Google Public DNS)
-   return dns_query(name, "8.8.8.8")
-}
-
-fn dns_query(name, server){
-   "Performs a basic DNS A-record query via UDP. No libc dependency."
-   use std.str.bytes *
-   def buf = bytes(512)
-   ; Header: ID=0x1234, Flags=0x0100 (Recursive Query), QDCOUNT=1
-   bytes_set(buf, 0, 0x12) bytes_set(buf, 1, 0x34)
-   bytes_set(buf, 2, 0x01) bytes_set(buf, 3, 0x00)
-   bytes_set(buf, 4, 0x00) bytes_set(buf, 5, 0x01)
-   mut pos = 12
-   def labels = split(name, ".")
-   mut l_idx = 0
-   while(l_idx < len(labels)){
-      def l = get(labels, l_idx)
-      bytes_set(buf, pos, len(l)) pos += 1
-      mut ch_idx = 0
-      while(ch_idx < len(l)){
-         bytes_set(buf, pos, load8(l, ch_idx)) pos += 1
-         ch_idx += 1
+   if(!_hosts_cache_loaded){
+      match file_read(hosts_path){
+         ok(s) -> { _hosts_cache_txt = s }
+         err(ignorederr) -> { ignorederr  _hosts_cache_txt = "" }
       }
-      l_idx += 1
+      _hosts_cache_loaded = true
    }
-   bytes_set(buf, pos, 0) pos += 1
-   ; TYPE A (1), CLASS IN (1)
-   bytes_set(buf, pos, 0) bytes_set(buf, pos + 1, 1) pos = pos + 2
-   bytes_set(buf, pos, 0) bytes_set(buf, pos + 1, 1) pos = pos + 2
-   def fd = __socket(AF_INET, SOCK_DGRAM, 0)
-   if(fd < 0){ return 0 }
-   def sa = malloc(16)
-   store16(sa, AF_INET, 0)
-   store16(sa, htons(53), 2)
-   store32(sa, ipv4_parse(server), 4)
-   __sendto(fd, buf + 8, pos, 0, sa, 16)
-   free(sa)
-   def rb = bytes(512)
-   mut n = __recvfrom(fd, rb + 8, 512, 0, 0, 0) ; recvfrom
-   __closesocket(fd)
-   if(n < 12){ return 0 }
-   ; Simple Answer Parser
-   mut rpos = 12
-   while(bytes_get(rb, rpos) != 0){ rpos = rpos + bytes_get(rb, rpos) + 1 }
-   rpos = rpos + 5 ; skip null, type(2), class(2)
-   if(rpos + 12 > n){ return 0 }
-   mut a_count = (bytes_get(rb, 6) << 8) | bytes_get(rb, 7)
-   if(a_count == 0){ return 0 }
-   ; Handle potential Pointer Compression in Name (0xC0XX)
-   if((bytes_get(rb, rpos) & 192) == 192){ rpos = rpos + 2 }
-   else { while(bytes_get(rb, rpos) != 0){ rpos = rpos + bytes_get(rb, rpos) + 1 } rpos += 1 }
-   mut a_type = (bytes_get(rb, rpos) << 8) | bytes_get(rb, rpos + 1)
-   mut a_rdlen = (bytes_get(rb, rpos + 8) << 8) | bytes_get(rb, rpos + 9)
-   rpos += 10
-   if(a_type == 1 && a_rdlen == 4){
-      ; Return IP in 32-bit integer (little-endian as expected by socket_connect)
-      return (bytes_get(rb, rpos) << 0) | (bytes_get(rb, rpos + 1) << 8) | (bytes_get(rb, rpos + 2) << 16) | (bytes_get(rb, rpos + 3) << 24)
-   }
-   return 0
+   def host_ip = _lookup_hosts(name, _hosts_cache_txt)
+   if(host_ip != 0){ return host_ip }
+   if(!_net_ready()){ return 0 }
+   def h = _c_gethostbyname(_cptr(name))
+   if(!h){ return 0 }
+   def listp = load64(h, 24)
+   if(!listp){ return 0 }
+   def addrp = load64(listp, 0)
+   if(!addrp){ return 0 }
+   def ip = load32(addrp, 0)
+   ip
 }
 
-fn _resolve_host(host){
-   "Internal: resolve host string to IPv4 integer."
+fn _resolve_host(str: host): int {
    mut ip = ipv4_parse(host)
    if(ip == 0){ ip = gethostbyname(host) }
    return ip
 }
 
-fn _make_sockaddr(ip, port){
-   "Internal helper."
-   def sa = malloc(16)
-   if(sa == 0){ return 0 }
-   store16(sa, AF_INET, 0)
-   store16(sa, htons(port), 2)
-   store32(sa, ip, 4)
-   store64(sa, 0, 8)
-   sa
+fn _resolve_bind_host(str: host): int {
+   if(host.len == 0 || host == "*" || host == "0.0.0.0"){ return 0 }
+   _resolve_host(host)
 }
 
-fn socket_connect(host, port){
-   "Connect to host:port (TCP). Returns fd or -1."
+#macos {
+   fn _make_sockaddr(int: ip, int: port): any {
+      def sa = malloc(16)
+      if(sa == 0){ return 0 }
+      store8(sa, 16, 0)
+      store8(sa, AF_INET, 1)
+      store16(sa, htons(port), 2)
+      store32(sa, ip, 4)
+      store64(sa, 0, 8)
+      return sa
+   }
+} #else {
+   fn _make_sockaddr(int: ip, int: port): any {
+      def sa = malloc(16)
+      if(sa == 0){ return 0 }
+      store16(sa, AF_INET, 0)
+      store16(sa, htons(port), 2)
+      store32(sa, ip, 4)
+      store64(sa, 0, 8)
+      return sa
+   }
+} #endif
+
+fn socket_connect(str: host, int: port): int {
+   "Connect to host:port(TCP). Returns fd or -1."
    def ip = _resolve_host(host)
    if(ip == 0){ return -1 }
-   def fd = __socket(AF_INET, SOCK_STREAM, 0)
+   def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if(fd < 0){ return -1 }
    def sa = _make_sockaddr(ip, port)
    if(sa == 0){
-      __closesocket(fd)
+      _net_close(fd)
       return -1
    }
-   if(__connect(fd, sa, 16) < 0){
-      free(sa)
-      __closesocket(fd)
-      return -1
-   }
+   def rc = _c_connect(fd, sa, 16)
    free(sa)
+   if(rc < 0){
+      _net_close(fd)
+      return -1
+   }
    return fd
 }
 
-fn socket_bind(host, port){
-   "Create a TCP socket, binds it to the specified host and port, and starts listening. Returns the file descriptor or -1 on error."
+fn socket_connect_async(str: host, int: port): any {
+   "Starts a non-blocking TCP connect task. Await it for fd or -1."
    def ip = _resolve_host(host)
-   if(ip == 0){ return -1 }
-   def fd = __socket(AF_INET, SOCK_STREAM, 0)
+   if(ip == 0){ return __async_value(-1) }
+   def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
+   if(fd < 0){ return __async_value(-1) }
+   def sa = _make_sockaddr(ip, port)
+   if(sa == 0){
+      _net_close(fd)
+      return __async_value(-1)
+   }
+   def h = __async_connect(fd, sa, 16)
+   free(sa)
+   h
+}
+
+fn socket_bind(str: host, int: port): int {
+   "Create a TCP socket, binds it to the specified host and port, and starts listening. Returns the file descriptor or -1 on error."
+   def ip = _resolve_bind_host(host)
+   if(ip == 0 && !(host.len == 0 || host == "*" || host == "0.0.0.0")){ return -1 }
+   def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if(fd < 0){
       print("Socket create failed, errno:", errno())
       return -1
    }
-   ; Allow port reuse
    def opt = malloc(4)
+   if(opt == 0){
+      print("Socket bind setup failed, errno:", errno())
+      _net_close(fd)
+      return -1
+   }
    store32(opt, 1)
-   __setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, opt, 4)
+   _c_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, opt, 4)
+   free(opt)
    def sa = _make_sockaddr(ip, port)
    if(sa == 0){
-      free(opt)
-      __closesocket(fd)
+      _net_close(fd)
       return -1
    }
-   if(__bind(fd, sa, 16) < 0){
-      free(sa)
-      free(opt)
-      __closesocket(fd)
-      print("Socket bind failed, errno:", errno())
-      return -1
-   }
+   def br = _c_bind(fd, sa, 16)
    free(sa)
-   free(opt)
-   def lr = __listen(fd, 128)
+   if(br < 0){
+      print("Socket bind failed, errno:", errno())
+      _net_close(fd)
+      return -1
+   }
+   def lr = _c_listen(fd, 128)
    if(lr < 0){
-      __closesocket(fd)
       print("Socket listen failed, errno:", errno())
+      _net_close(fd)
       return -1
    }
    return fd
 }
 
-fn socket_accept(server_fd){
+fn socket_accept(int: server_fd): int {
    "Accepts an incoming connection on a listening socket. Returns the client file descriptor."
-   def addr = malloc(16)
-   def len = malloc(4)
-   store32(len, 16)
-   def res = __accept(server_fd, addr, len) ; "accept"
-   free(addr)
-   free(len)
-   return res
+   socket_accept_info(server_fd).get("fd", -1)
 }
 
-fn read_socket(fd, max_len){
+fn socket_accept_info(int: server_fd): dict {
+   "Accepts an incoming connection and returns fd plus peer IPv4 metadata."
+   def addr = malloc(16)
+   def len = malloc(4)
+   if(addr == 0 || len == 0){
+      if(addr != 0){ free(addr) }
+      if(len != 0){ free(len) }
+      return {"ok": false, "fd": -1, "host": "", "ip": 0, "port": 0, "addr": ""}
+   }
+   defer { free(addr) }
+   defer { free(len) }
+   store32(len, 16)
+   def res = _c_accept(server_fd, addr, len)
+   if(res < 0){ return {"ok": false, "fd": -1, "host": "", "ip": 0, "port": 0, "addr": ""} }
+   def ip = load32(addr, 4)
+   def port = htons(load16(addr, 2))
+   def host = ipv4_format(ip)
+   return {"ok": true, "fd": res, "host": host, "ip": ip, "port": port, "addr": host + ":" + to_str(port)}
+}
+
+fn socket_accept_async(int: server_fd): any {
+   "Starts an accept task. Await it for the accepted client fd or -1."
+   __async_accept(server_fd)
+}
+
+fn _socket_set_timeval_opt(int: fd, int: optname, int: timeout_ms): int {
+   if(fd < 0){ return -1 }
+   if(timeout_ms < 0){ timeout_ms = 0 }
+   #windows {
+      def opt = malloc(4)
+      if(opt == 0){ return -1 }
+      store32(opt, timeout_ms)
+      def rc = _c_setsockopt(fd, SOL_SOCKET, optname, opt, 4)
+      free(opt)
+      return rc
+   } #else {
+      def tv = malloc(16)
+      if(tv == 0){ return -1 }
+      store64(tv, timeout_ms / 1000, 0)
+      store64(tv, (timeout_ms % 1000) * 1000, 8)
+      def rc = _c_setsockopt(fd, SOL_SOCKET, optname, tv, 16)
+      free(tv)
+      return rc
+   } #endif
+}
+
+fn socket_set_recv_timeout_ms(int: fd, int: timeout_ms): int {
+   "Sets socket receive timeout in milliseconds. `0` asks the OS for blocking/default behavior."
+   return _socket_set_timeval_opt(fd, SO_RCVTIMEO, timeout_ms)
+}
+
+fn socket_set_send_timeout_ms(int: fd, int: timeout_ms): int {
+   "Sets socket send timeout in milliseconds. `0` asks the OS for blocking/default behavior."
+   return _socket_set_timeval_opt(fd, SO_SNDTIMEO, timeout_ms)
+}
+
+fn socket_set_timeout_ms(int: fd, int: timeout_ms): int {
+   "Sets both receive and send socket timeouts in milliseconds."
+   def r1, r2 = socket_set_recv_timeout_ms(fd, timeout_ms), socket_set_send_timeout_ms(fd, timeout_ms)
+   (r1 < 0 || r2 < 0) ? -1 : 0
+}
+
+fn read_socket(int: fd, any: max_len): any {
    "Reads up to `max_len` bytes from a socket. Returns the data as a string."
-   def buf = malloc(max_len + 1)
-   mut n = __recv(fd, buf, max_len, 0)
-   if(n < 0){ n = 0 }
-   ; Initialize Nytrix string header
-   store64(buf, n, -16)
-   store64(buf, 120, -8) ; Tag 120 (String)
-   store8(buf, 0, n) ; Null terminator
+   if(!is_int(max_len) || max_len <= 0){ return "" }
+   if(max_len > 1048576){ max_len = 1048576 }
+   def base = malloc(max_len + 17)
+   if(base == 0){ return "" }
+   def buf = base + 16
+   def n = _c_recv(fd, buf, max_len, 0)
+   if(n <= 0){
+      free(base)
+      return ""
+   }
+   store8(buf, 0, n)
+   return init_str(buf, n)
+}
+
+fn read_socket_async(int: fd, any: max_len): any {
+   "Starts a socket read task returning a string when awaited."
+   if(!is_int(max_len) || max_len <= 0){ return __async_value("") }
+   if(max_len > 1048576){ max_len = 1048576 }
+   __async_read_socket(fd, max_len)
+}
+
+fn write_socket(int: fd, any: data): int {
+   "Writes all bytes in `data` to a socket."
+   return write_socket_all(fd, data)
+}
+
+fn read_socket_exact(int: fd, any: want_len): str {
+   "Reads until `want_len` bytes are collected, EOF happens, or the peer stops sending."
+   if(!is_int(want_len) || want_len <= 0){ return "" }
+   if(want_len > 1048576){ want_len = 1048576 }
+   mut b = Builder(want_len + 1)
+   mut total = 0
+   while(total < want_len){
+      def chunk = read_socket(fd, want_len - total)
+      if(chunk.len == 0){ break }
+      b = builder_append(b, chunk)
+      total += chunk.len
+   }
+   def out = builder_to_str(b)
+   builder_free(b)
+   return out
+}
+
+fn write_socket_part(int: fd, any: data, any: off, any: size=-1): int {
+   "Writes a string slice `[off, off+size)` to socket without allocating substrings."
+   if(!is_str(data) || !is_int(off)){ return -1 }
+   def n = data.len
+   if(off < 0){ off = 0 }
+   if(off >= n){ return 0 }
+   mut count = size
+   if(!is_int(count) || count < 0 || off + count > n){ count = n - off }
+   if(count <= 0){ return 0 }
+   return _c_send(fd, to_int(data) + off, count, 0)
+}
+
+fn write_socket_part_async(int: fd, any: data, any: off, any: size=-1): any {
+   "Starts a socket write task for a string slice. Await it for bytes written or -1."
+   if(!is_str(data) || !is_int(off)){ return __async_value(-1) }
+   def n = data.len
+   if(off < 0){ off = 0 }
+   if(off >= n){ return __async_value(0) }
+   mut count = size
+   if(!is_int(count) || count < 0 || off + count > n){ count = n - off }
+   if(count <= 0){ return __async_value(0) }
+   __async_write_socket_part(fd, data, off, count)
+}
+
+fn write_socket_all(int: fd, any: data): int {
+   "Writes all bytes in `data` unless the peer closes or send fails. Returns bytes written, or -1."
+   if(!is_str(data)){ return -1 }
+   mut off = 0
+   def n = data.len
+   while(off < n){
+      def wrote = write_socket_part(fd, data, off, n - off)
+      if(wrote <= 0){ return off == 0 ? -1 : off }
+      off += wrote
+   }
+   return off
+}
+
+fn write_socket_all_async(int: fd, any: data): any {
+   "Starts a socket write task that sends the whole string. Await it for bytes written or -1."
+   if(!is_str(data)){ return __async_value(-1) }
+   __async_write_socket_all(fd, data)
+}
+
+fn write_socket_line(int: fd, any: data): int {
+   "Writes `data` plus a trailing newline."
+   if(!is_str(data)){ return -1 }
+   return write_socket_all(fd, data + "\n")
+}
+
+fn read_socket_until(int: fd, any: needle, any: max_bytes=65536): str {
+   "Reads from socket until `needle` appears, EOF, or `max_bytes` is reached."
+   if(!is_str(needle)){ return "" }
+   if(!is_int(max_bytes) || max_bytes <= 0){ max_bytes = 65536 }
+   mut buf = ""
+   while(buf.len < max_bytes){
+      def at = find(buf, needle)
+      if(needle.len == 0 || at >= 0){
+         def end = at + needle.len
+         return slice(buf, 0, end)
+      }
+      def left = max_bytes - buf.len
+      def want = (left < 4096) ? left : 4096
+      def chunk = read_socket(fd, want)
+      if(!is_str(chunk)){ break }
+      if(chunk.len == 0){ break }
+      buf = buf + chunk
+   }
    return buf
 }
 
-fn write_socket(fd, data){
-   "Writes data to a socket."
-   return __send(fd, data, str_len(data), 0)
+fn read_socket_until_async(int: fd, any: needle, any: max_bytes=65536): any {
+   "Starts a task that reads until `needle`, EOF, or `max_bytes`."
+   if(!is_str(needle)){ return __async_value("") }
+   if(!is_int(max_bytes) || max_bytes <= 0){ max_bytes = 65536 }
+   __async_read_socket_until(fd, needle, max_bytes)
 }
 
-fn close_socket(fd){
+fn close_socket(int: fd): int {
    "Closes a socket file descriptor."
-   return __closesocket(fd)
-}
-
-if(comptime{__main()}){
-   use std.net.socket *
-   use std.os.thread *
-   use std.os.time *
-   use std.core.error *
-
-   def PORT = 54000 + ((ticks() / 1000000) % 2000)
-   def CONNECT_RETRIES = 200
-   def CONNECT_RETRY_MS = 25
-   def SERVER_READY_WAIT_MS = 5000
-   def SERVER_READY_POLL_MS = 10
-
-   fn join_if_valid_thread(handle){
-       "Test helper."
-     if(handle != 0 && handle != -1){
-      return thread_join(handle)
-     }
-     return -1
-   }
-
-   fn server_task(arg){
-       "Test helper."
-     def port = get(arg, 0)
-     def state = get(arg, 1)
-     def s = socket_bind("127.0.0.1", port)
-     if(s < 0){
-      store64(state, -1)
-      print("Server: socket_bind failed, error:", s)
-      return -1
-     }
-     store64(state, 1)
-     def c = socket_accept(s)
-     if(c < 0){
-      store64(state, -2)
-      print("Server: socket_accept failed, error:", c, ", errno:", errno())
-      close_socket(s)
-      return -1
-     }
-     store64(state, 2)
-     def req = read_socket(c, 1024)
-     if(is_err(req)){
-      store64(state, -3)
-      print("Server: read_socket failed, error:", unwrap_err(req))
-      close_socket(c)
-      close_socket(s)
-      return -1
-     }
-     if(unwrap(req) == "ping"){
-      def write_res = write_socket(c, "pong")
-      if(is_err(write_res)){
-         print("Server: write_socket failed, error:", unwrap_err(write_res))
-      }
-     }
-     close_socket(c)
-     close_socket(s)
-     store64(state, 3)
-     return 0
-   }
-
-   def state_ptr = malloc(8)
-   if(state_ptr == 0){
-     print("Skipping socket test: could not allocate shared state.")
-     return 0
-   }
-   store64(state_ptr, 0)
-   mut args = list()
-   args = append(args, PORT)
-   args = append(args, state_ptr)
-   def t = thread_spawn(server_task, args)
-   if(t == 0 || t == -1){
-     print("Skipping socket test: thread_spawn failed, handle:", t)
-     free(state_ptr)
-     return 0
-   }
-
-   mut waited = 0
-   while(load64(state_ptr) == 0 && waited < SERVER_READY_WAIT_MS){
-      msleep(SERVER_READY_POLL_MS)
-      waited += SERVER_READY_POLL_MS
-   }
-   def server_state = load64(state_ptr)
-   if(server_state < 0){
-      print("Skipping socket test: server init failed. state:", server_state)
-      join_if_valid_thread(t)
-      free(state_ptr)
-      return 0
-   }
-
-   mut c = -1
-   mut tries = 0
-   while(c < 0 && tries < CONNECT_RETRIES){
-      c = socket_connect("127.0.0.1", PORT)
-      if(c < 0){ msleep(CONNECT_RETRY_MS) }
-      tries += 1
-   }
-   if(c < 0){
-      print("Skipping socket test: client connect failed after", tries, "tries. Error:", c)
-      ; Best-effort unblock server accept so join does not hang.
-      mut kick = -1
-      mut kick_tries = 0
-      while(kick < 0 && kick_tries < CONNECT_RETRIES){
-      kick = socket_connect("127.0.0.1", PORT)
-      if(kick < 0){ msleep(CONNECT_RETRY_MS) }
-      kick_tries += 1
-      }
-      if(kick >= 0){ close_socket(kick) }
-      join_if_valid_thread(t)
-      free(state_ptr)
-      return 0 ; End test
-   } else {
-      def write_res = write_socket(c, "ping")
-      if(is_err(write_res)){
-      print("Client: write_socket failed, error:", unwrap_err(write_res))
-      close_socket(c)
-      join_if_valid_thread(t)
-      free(state_ptr)
-      panic("Client: write_socket failed")
-      }
-      def res_val = read_socket(c, 1024)
-      if(is_err(res_val)){
-      print("Client: read_socket failed, error:", unwrap_err(res_val))
-      close_socket(c)
-      join_if_valid_thread(t)
-      free(state_ptr)
-      panic("Client: read_socket failed")
-      }
-      assert((unwrap(res_val) == "pong"), "socket ping/pong")
-      close_socket(c)
-      join_if_valid_thread(t)
-      free(state_ptr)
-      print("✓ std.net.socket tests passed")
-   }
+   return _net_close(fd)
 }
