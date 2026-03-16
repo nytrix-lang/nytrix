@@ -1,48 +1,41 @@
-;; Keywords: sound alsa linux io
-
-module std.os.sound.backend.alsa (
-   is_available, init, shutdown,
-   stream_open, stream_start, stream_stop,
-   write
-)
-
-use std.core *
-use std.core.dict_mod *
+;; Keywords: sound backend alsa
+;; ALSA sound backend for Linux audio playback.
+module std.os.sound.backend.alsa(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use std.core
+use std.core.mem (cstr)
+use std.core.dict_mod
+use std.core.common as common
+use std.os.sound.diag as sound_debug
 use std.os.sound.backend.shared as backend_shared
 
-if(comptime{ __os_name() == "linux" }){
+#linux {
    #include <alsa/asoundlib.h> as "snd_"
-}
-
+} #endif
 def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2
 def SND_PCM_FORMAT_FLOAT_LE = 14
 def SND_PCM_ACCESS_RW_INTERLEAVED = 3
-
 mut _lib = 0
 mut _avail = -1
 
-fn is_available(){
+fn is_available(): bool {
    "Returns whether the ALSA backend is available on this host."
    def state = backend_shared.probe_linux_library_once(_avail, _lib, "asound", "snd_pcm_open")
-   _avail = get(state, 0)
-   _lib = get(state, 1)
+   _avail, _lib = state.get(0), state.get(1)
    _avail == 1
 }
 
-fn _push_unique(lst, item){
-   "Appends `item` only if it is a non-empty string not already present in `lst`."
-   if(!is_str(item) || len(item) == 0){ return lst }
+fn _push_unique(list: lst, any: item): list {
+   if(!is_str(item) || item.len == 0){ return lst }
    mut i = 0
-   while(i < len(lst)){
-      if(eq(get(lst, i), item)){ return lst }
+   while(i < lst.len){
+      if(eq(lst.get(i), item)){ return lst }
       i += 1
    }
-   append(lst, item)
+   lst.append(item)
 }
 
-fn _build_candidates(dev_id){
-   "Builds the ordered list of ALSA device names to probe."
+fn _build_candidates(any: dev_id): list {
    mut out = list()
    out = _push_unique(out, dev_id)
    out = _push_unique(out, "pipewire")
@@ -56,104 +49,91 @@ fn _build_candidates(dev_id){
    out
 }
 
-fn _latency_us(){
-   "Returns the configured ALSA target latency in microseconds."
-   mut us = 120000
-   def v = env("NY_AUDIO_ALSA_LATENCY_MS")
-   if(v){
-      def ms = atoi(v)
-      if(ms >= 20 && ms <= 2000){ us = ms * 1000 }
-   }
-   us
-}
+fn _latency_us(): int { common.env_int_clamped("NY_AUDIO_ALSA_LATENCY_MS", 120, 20, 2000) * 1000 }
 
-fn init(ctx){
+fn init(any: ctx): any {
    "Registers the ALSA backend in the shared audio context."
    backend_shared.init_output_device(ctx, is_available(), "ALSA Default", "default")
 }
 
-fn shutdown(ctx){
+fn shutdown(any: ctx): any {
    "Shuts down ALSA backend state stored in `ctx`."
    if(ctx){ return ctx }
    0
 }
 
-fn stream_open(stream){
+fn stream_open(any: stream): any {
    "Opens an ALSA playback stream for the provided stream dictionary."
    if(!is_available()){ return false }
-   def device = core.get(stream, "device")
-   mut dev_id = env("NY_AUDIO_ALSA_DEVICE")
-   if(!dev_id || len(dev_id) == 0){
-      dev_id = core.get(device, "id", "")
-      if(!is_str(dev_id) || len(dev_id) == 0 || eq(dev_id, "default")){
-         dev_id = ""
-      }
+   def device = stream.get("device")
+   mut dev_id = common.env_trim("NY_AUDIO_ALSA_DEVICE")
+   if(dev_id.len == 0){
+      dev_id = is_dict(device) ? device.get("id", "") : ""
+      if(!is_str(dev_id) || dev_id.len == 0 || eq(dev_id, "default")){ dev_id = "" }
    }
-   def format = core.get(stream, "format", 1)
+   def format = stream.get("format", 1)
    mut alsa_fmt = SND_PCM_FORMAT_S16_LE
    mut bits = 16
    if(format != 1){
       alsa_fmt = SND_PCM_FORMAT_FLOAT_LE
       bits = 32
    }
-   def rate = core.get(stream, "sample_rate")
-   def channels = core.get(stream, "channels")
+   def rate = stream.get("sample_rate")
+   def channels = stream.get("channels")
    def pcm_ptr = malloc(8)
    mut opened = 0
    mut chosen = ""
    mut tries = _build_candidates(dev_id)
    mut i = 0
-   while(i < len(tries) && opened == 0){
-      def cand = get(tries, i)
+   while(i < tries.len && opened == 0){
+      def cand = tries.get(i)
       def cand_c = cstr(cand)
-      if(env("NY_AUDIO_DEBUG")){ print(f"ALSA: trying device '{cand}' (ptr={pcm_ptr})") }
+      if(sound_debug.enabled()){ print(f"ALSA: trying device '{cand}' (ptr={pcm_ptr})") }
       def rc = snd_pcm_open(pcm_ptr, cand_c, SND_PCM_STREAM_PLAYBACK, 0)
-      if(env("NY_AUDIO_DEBUG")){ print(f"ALSA: snd_pcm_open returned {rc}") }
+      if(sound_debug.enabled()){ print(f"ALSA: snd_pcm_open returned {rc}") }
       if(rc >= 0){
          def pcm = load64(pcm_ptr, 0)
-         if(env("NY_AUDIO_DEBUG")){ print(f"ALSA: pcm handle = {pcm}") }
+         if(sound_debug.enabled()){ print(f"ALSA: pcm handle = {pcm}") }
          if(pcm != 0){
-         def serr = snd_pcm_set_params(pcm, alsa_fmt, SND_PCM_ACCESS_RW_INTERLEAVED, channels, rate, 1, _latency_us())
-         if(serr >= 0){
+            def serr = snd_pcm_set_params(pcm, alsa_fmt, SND_PCM_ACCESS_RW_INTERLEAVED, channels, rate, 1, _latency_us())
+            if(serr >= 0){
                opened = pcm
                chosen = cand
-         } else {
-               if(env("NY_AUDIO_DEBUG")){ print(f"ALSA: snd_pcm_set_params failed for '{cand}': {serr}") }
+            } else {
+               if(sound_debug.enabled()){ print(f"ALSA: snd_pcm_set_params failed for '{cand}': {serr}") }
                snd_pcm_close(pcm)
-         }
+            }
          }
       } else {
-         if(env("NY_AUDIO_DEBUG")){ print(f"ALSA: snd_pcm_open failed for '{cand}': {rc}") }
+         if(sound_debug.enabled()){ print(f"ALSA: snd_pcm_open failed for '{cand}': {rc}") }
       }
       i += 1
    }
    free(pcm_ptr)
    if(opened == 0){ return false }
-   if(env("NY_AUDIO_DEBUG")){
-      print(f"ALSA: opened '{chosen}' @ {rate}Hz ch={channels}")
-   }
-   stream = dict_set(stream, "handle", opened)
-   stream = dict_set(stream, "alsa_device", chosen)
-   stream = dict_set(stream, "bits_per_sample", bits)
+   if(sound_debug.enabled()){ print(f"ALSA: opened '{chosen}' @ {rate}Hz ch={channels}") }
+   stream = stream.set("handle", opened)
+   stream = stream.set("alsa_device", chosen)
+   stream = stream.set("bits_per_sample", bits)
    stream
 }
 
-fn stream_start(stream){
+fn stream_start(any: stream): bool {
    "Prepares an ALSA playback stream for writes."
-   def pcm = get(stream, "handle")
+   def pcm = stream.get("handle")
    if(!pcm){ return false }
    snd_pcm_prepare(pcm) >= 0
 }
 
-fn stream_stop(stream){
+fn stream_stop(any: stream): any {
    "Drains and closes an ALSA playback stream."
-   def pcm = get(stream, "handle")
+   def pcm = stream.get("handle")
    if(pcm){ snd_pcm_drain(pcm) }
    if(pcm){ snd_pcm_close(pcm) }
-   stream = dict_set(stream, "handle", 0)
+   stream = stream.set("handle", 0)
 }
 
-fn write(pcm, buf, frames, frame_bytes=4){
+fn write(any: pcm, any: buf, int: frames, int: frame_bytes=4): bool {
    "Writes interleaved audio frames to ALSA, recovering transient write errors when possible."
    if(!pcm){ return false }
    mut ptr = buf
@@ -163,15 +143,13 @@ fn write(pcm, buf, frames, frame_bytes=4){
    while(left > 0){
       def written = snd_pcm_writei(pcm, ptr, left)
       if(written < 0){
-         def rec = snd_pcm_recover(pcm, written, 0)
+         def rec = snd_pcm_recover(pcm, int(written), 0)
          if(rec < 0){ return false }
          continue
       }
       if(written == 0){ return false }
       left = left - written
-      if(left > 0){
-         ptr = ptr_add(ptr, written * fb)
-      }
+      if(left > 0){ ptr = ptr_add(ptr, written * fb) }
    }
    true
 }

@@ -1,75 +1,68 @@
-;; Keywords: sound winmm windows io
-
-module std.os.sound.backend.winmm (
-   is_available, init, shutdown,
-   stream_open, stream_start, stream_stop,
-   write
-)
-
-use std.core *
-use std.core.dict_mod *
-use std.os *
-use std.os.time *
+;; Keywords: sound backend winmm
+;; WinMM sound backend for Windows audio playback.
+module std.os.sound.backend.winmm(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use std.core
+use std.core.dict_mod
+use std.os
+use std.os.time
 use std.os.sound.backend.shared as backend_shared
-use std.util.common as common
 
-if(comptime{ __os_name() == "windows" }){
+#windows {
    #include <windows.h>
    #include <mmsystem.h>
-} else {
-   fn waveOutOpen(_phwo, _uDeviceID, _pwfx, _dwCallback, _dwInstance, _fdwOpen){
+} #else {
+   fn waveOutOpen(any: _phwo, any: _uDeviceID, any: _pwfx, any: _dwCallback, any: _dwInstance, any: _fdwOpen): int {
       "Stubbed non-Windows implementation of `waveOutOpen`."
       0
    }
-   fn waveOutClose(_hwo){
+   fn waveOutClose(any: _hwo): int {
       "Stubbed non-Windows implementation of `waveOutClose`."
       0
    }
-   fn waveOutPrepareHeader(_hwo, _pwh, _cbwh){
+   fn waveOutPrepareHeader(any: _hwo, any: _pwh, any: _cbwh): int {
       "Stubbed non-Windows implementation of `waveOutPrepareHeader`."
       0
    }
-   fn waveOutUnprepareHeader(_hwo, _pwh, _cbwh){
+   fn waveOutUnprepareHeader(any: _hwo, any: _pwh, any: _cbwh): int {
       "Stubbed non-Windows implementation of `waveOutUnprepareHeader`."
       0
    }
-   fn waveOutWrite(_hwo, _pwh, _cbwh){
+   fn waveOutWrite(any: _hwo, any: _pwh, any: _cbwh): int {
       "Stubbed non-Windows implementation of `waveOutWrite`."
       0
    }
-   fn waveOutReset(_hwo){
+   fn waveOutReset(any: _hwo): int {
       "Stubbed non-Windows implementation of `waveOutReset`."
       0
    }
-}
-
+} #endif
 def WAVE_FORMAT_PCM = 1
-
 def MMSYSERR_NOERROR = 0
 def CALLBACK_NULL = 0
 
-fn is_available(){
+fn is_available(): bool {
    "Returns whether the WinMM backend is available on this host."
-   eq(os(), "windows")
+   #windows {
+      true
+   } #else {
+      false
+   } #endif
 }
 
-fn init(ctx){
+fn init(any: ctx): any {
    "Registers the WinMM backend in the shared audio context."
    backend_shared.init_output_device(ctx, is_available(), "Windows Multimedia", "winmm")
 }
 
-fn shutdown(ctx){
-   "Shuts down WinMM backend state stored in `ctx`."
-   common.touch(ctx)
-}
+fn shutdown(any: ctx): any { "Shuts down WinMM backend state stored in `ctx`." }
 
-fn stream_open(stream){
+fn stream_open(any: stream): any {
    "Opens a WinMM playback stream for the provided stream dictionary."
    def hWaveOut = malloc(8)
    def wfx = malloc(18)
-   def format = core.get(stream, "format")
-   def sample_rate = core.get(stream, "sample_rate")
-   def channels = core.get(stream, "channels")
+   def format = stream.get("format")
+   def sample_rate = stream.get("sample_rate")
+   def channels = stream.get("channels")
    def bits_per_sample = (format == 2) ? 32 : 16
    store16(wfx, WAVE_FORMAT_PCM, 0)
    store16(wfx, channels, 2)
@@ -86,49 +79,46 @@ fn stream_open(stream){
    }
    def handle = load64(hWaveOut, 0)
    free(hWaveOut)
-   stream = dict_set(stream, "handle", handle)
-   stream = dict_set(stream, "bits_per_sample", bits_per_sample)
+   stream = stream.set("handle", handle)
+   stream = stream.set("bits_per_sample", bits_per_sample)
    stream
 }
 
-fn stream_start(stream){
+fn stream_start(any: stream): bool {
    "WinMM streams begin playback immediately after the first write."
-   common.touch(stream)
    true
 }
 
-fn stream_stop(stream){
+fn stream_stop(any: stream): bool {
    "Stops and closes a WinMM playback stream."
-   def handle = get(stream, "handle")
+   def handle = stream.get("handle")
    if(handle){
       waveOutReset(handle)
       waveOutClose(handle)
    }
-   stream = dict_set(stream, "handle", 0)
+   stream = stream.set("handle", 0)
    true
 }
 
-fn write(handle, buf, bytes){
+fn write(any: h, any: buf, int: bytes): bool {
    "Writes `bytes` of PCM data to a WinMM output stream."
-   if(!handle){ return false }
+   if(!h){ return false }
    def hdr_size = 32
    def hdr = malloc(hdr_size)
    memset(hdr, 0, hdr_size)
-   store_ptr(hdr, 0, buf)
+   store64(hdr, buf, 0)
    store32(hdr, bytes, 8)
-   if(waveOutPrepareHeader(handle, hdr, hdr_size) != MMSYSERR_NOERROR){
+   if(waveOutPrepareHeader(h, hdr, hdr_size) != MMSYSERR_NOERROR){
       free(hdr)
       return false
    }
-   if(waveOutWrite(handle, hdr, hdr_size) != MMSYSERR_NOERROR){
-      waveOutUnprepareHeader(handle, hdr, hdr_size)
+   if(waveOutWrite(h, hdr, hdr_size) != MMSYSERR_NOERROR){
+      waveOutUnprepareHeader(h, hdr, hdr_size)
       free(hdr)
       return false
    }
-   while((load32(hdr, 24) & 1) == 0){
-      msleep(1)
-   }
-   waveOutUnprepareHeader(handle, hdr, hdr_size)
+   while((load32(hdr, 24) & 1) == 0){ msleep(1) }
+   waveOutUnprepareHeader(h, hdr, hdr_size)
    free(hdr)
    true
 }
