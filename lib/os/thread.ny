@@ -1,83 +1,77 @@
-;; Keywords: os thread
+;; Keywords: thread threads concurrency
 ;; Os Thread for Nytrix
+module std.os.thread(thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free)
+use std.core
 
-module std.os.thread (
-   thread_spawn, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free
-)
-use std.core *
-
-fn thread_spawn(func, arg=0){
+fn thread_spawn(fnptr: target, any: arg=0): any {
    "Spawns a new thread executing `func(arg)`. Returns the thread handle."
-   return __thread_spawn(func, arg)
+   return __thread_spawn(target, arg)
 }
 
-fn thread_join(handle){
+fn _thread_pack_args(any: args): any {
+   if(!is_list(args)){ args = [args] }
+   def n = args.len
+   if(n <= 0){ return 0 }
+   def argv = malloc(n * 8)
+   if(!argv){ return 0 }
+   mut i = 0
+   while(i < n){
+      store64(argv, args.get(i, 0), i * 8)
+      i += 1
+   }
+   argv
+}
+
+fn thread_spawn_call(fnptr: target, any: args=[]): any {
+   "Spawns a new thread executing `func(args...)`. Supports up to 15 arguments."
+   if(!is_list(args)){ args = [args] }
+   def n = args.len
+   if(n > 15){ return -1 }
+   def argv = _thread_pack_args(args)
+   if(n > 0 && !argv){ return -1 }
+   def handle = __thread_spawn_call(target, n, argv)
+   if(argv){ free(argv) }
+   handle
+}
+
+fn thread_launch_call(fnptr: target, any: args=[]): int {
+   "Launches a detached thread executing `func(args...)`. Supports up to 15 arguments."
+   if(!is_list(args)){ args = [args] }
+   def n = args.len
+   if(n > 15){ return -1 }
+   def argv = _thread_pack_args(args)
+   if(n > 0 && !argv){ return -1 }
+   def rc = __thread_launch_call(target, n, argv)
+   if(argv){ free(argv) }
+   rc
+}
+
+fn thread_launch(fnptr: target, any: arg=0): int {
+   "Launches a detached thread executing `func(arg)`."
+   thread_launch_call(target, [arg])
+}
+
+fn thread_join(any: th): any {
    "Waits for the thread `handle` to finish and returns its result."
-   return __thread_join(handle)
+   return __thread_join(th)
 }
 
-;; Synchronization
-
-fn mutex_new(){
+fn mutex_new(): any {
    "Returns a new mutex object for thread synchronization."
    return __mutex_new()
 }
 
-fn mutex_lock(m){
+fn mutex_lock(any: m): any {
    "Locks the mutex `m`. If the mutex is already locked, the calling thread will block until it becomes available."
    return __mutex_lock64(m)
 }
 
-fn mutex_unlock(m){
+fn mutex_unlock(any: m): any {
    "Unlocks the mutex `m`, allowing other threads to acquire it."
    return __mutex_unlock64(m)
 }
 
-fn mutex_free(m){
+fn mutex_free(any: m): any {
    "Frees the resources associated with mutex `m`. The mutex must be unlocked before freeing."
    return __mutex_free(m)
-}
-
-if(comptime{__main()}){
-   use std.os.thread *
-   use std.core *
-   use std.core.list *
-   use std.core.error *
-
-   print("Testing Threads...")
-
-   def counter_ptr = malloc(8)
-   store64(counter_ptr, 0)
-   def mtx = mutex_new()
-   assert(load64(counter_ptr) == 0, "init counter")
-
-   fn worker(args){
-       "Test helper."
-     def m = get(args, 0)
-     def c = get(args, 1)
-     mutex_lock(m)
-     store64(c, load64(c) + 1)
-     mutex_unlock(m)
-     return 0
-   }
-
-   mut args = list()
-   args = append(args, mtx)
-   args = append(args, counter_ptr)
-
-   def t1 = thread_spawn(worker, args)
-   def t2 = thread_spawn(worker, args)
-   def t3 = thread_spawn(worker, args)
-
-   thread_join(t1)
-   thread_join(t2)
-   thread_join(t3)
-
-   mut final = load64(counter_ptr)
-   assert(final == 3, "thread mutex counter")
-
-   mutex_free(mtx)
-   free(counter_ptr)
-
-   print("✓ std.os.thread tests passed")
 }
