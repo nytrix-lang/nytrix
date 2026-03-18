@@ -1,8 +1,10 @@
 ;; Benchmark Helpers - Shared utilities for benchmarks
+use std.core
+use std.os.prim (env)
 
 fn _bench_scale_percent(){
    def raw = env("NYTRIX_BENCH_SCALE")
-   if(is_str(raw) && str_len(raw) > 0){
+   if(is_str(raw) && len(raw) > 0){
       def v = atoi(raw)
       if(v > 0){ return v }
    }
