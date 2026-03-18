@@ -1,16 +1,8 @@
-use std.core *
-use std.core.error *
-use std.core.reflect *
-use std.core.list *
-use std.core.dict *
-use std.str.io *
-use std.str *
-use std.os *
-use std.os.time *
-use benchmark.helpers *
+use std.core
+use std.os.time
+use benchmark.helpers
 
 ;; Sieve of Eratosthenes (Benchmark)
-
 fn sieve(n){
    if(n < 2){ return 0 }
    def size = (n >> 1) + 1
@@ -27,8 +19,8 @@ fn sieve(n){
          def sq = p * p
          mut mul = sq
          while(mul <= n){
-         store8(flags, 0, mul >> 1)
-         mul += p * 2
+            store8(flags, 0, mul >> 1)
+            mul += p * 2
          }
       }
       p += 2
@@ -44,10 +36,8 @@ fn sieve(n){
 
 def N = _bench_scale(60000, 4000)
 print(f"Benchmarking Sieve up to {to_str(N)}")
-
 def t0 = ticks()
 def r = sieve(N)
 def t1 = ticks()
-
 print(f"Primes: {to_str(r)}")
 print(f"Time: {to_str((t1 - t0) / 1000000)} ms")
