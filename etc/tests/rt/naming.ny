@@ -1,15 +1,13 @@
-use std.core *
-use std.core.error *
-use std.core.reflect *
-use std.core.list *
-use std.core.dict *
-use std.str.io *
-use std.str *
+use std.core
+use std.core.error
+use std.core.reflect
+use std.core.dict
+use std.core.io
+use std.core.str
 
-;; std.str.naming (Test)
+;; std.core.str.naming (Test)
 ;; Parser naming edge cases (kebab-case, arrows, predicates).
 ;; Actual definitions are parser-dependent and still not implemented.
-
 ;; fn kebab-case() {
 ;; return 1
 ;; }
@@ -21,8 +19,7 @@ use std.str *
 ;; fn predicate?() {
 ;; return 1
 ;; }
-
 ;; assert(kebab-case() == 1)
 ;; assert(do->predicate() == 1)
 ;; assert(predicate?() == 1)
-print("✓ std.str.naming tests passed")
+print("✓ std.core.str.naming tests passed")
