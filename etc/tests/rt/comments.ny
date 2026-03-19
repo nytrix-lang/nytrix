@@ -1,13 +1,11 @@
-use std.core *
-use std.core.error *
-use std.core.reflect *
-use std.core.list *
-use std.core.dict *
-use std.str.io *
-use std.str *
+use std.core
+use std.core.error
+use std.core.reflect
+use std.core.dict
+use std.core.io
+use std.core.str
 
 ;; Comments parsing (Test)
-
 ;; Single line comment at start
 mut x = 1 ;; inline
 
@@ -33,12 +31,12 @@ if x == 1 {
 mut i = 0
 while i < 5 {
    ;; inside loop
-   i = i + 1
+   i += 1
 }
+
 assert(i == 5, "loop with comments")
 
 ;; Empty lines and comments
-
 def a = 10
 def b = 20
 mut c = a + b ;; inline math
@@ -59,6 +57,5 @@ fn test(){
 
 ;; @#$%^&*()_+-=[]{}|;':",.<>?/
 ;; 言 🫪
-;; very long comment very long comment very long comment very long comment very kinda usless
-
+;; very long comment used to exercise comment scanning
 print("✓ comments tests passed")
