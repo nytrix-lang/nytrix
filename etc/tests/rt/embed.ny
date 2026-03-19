@@ -1,14 +1,14 @@
-use std.str *
-use std.core.reflect *
+use std.core.str
+use std.core.reflect
 
 ;; Perform the embed on itself to avoid external fixture dependencies
-def RES = embed("etc/tests/runtime/embed.ny")
+def RES = embed("etc/tests/rt/embed.ny")
 
-if(len(RES) > 0 && str_contains(RES, "embed test passed")){
+if(RES.len > 0 && RES.contains("embed test passed")){
    print("✓ embed test passed")
 } else {
    print("✗ embed test failed")
-   if(len(RES) == 0){
+   if(RES.len == 0){
       print("  Error: RES is empty")
    } else {
       print("  Error: 'embed test passed' not found in RES")

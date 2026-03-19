@@ -1,6 +1,6 @@
-use std.core *
-use std.os *
-use std.str *
+use std.core
+use std.os
+use std.core.str
 
 if(comptime{ arch() == "x86_64" && os() == "windows" }){
    @naked
@@ -32,6 +32,7 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
 ;; Test @naked attribute
 def run_naked = env("NYTRIX_TEST_NAKED")
 print("Testing @naked...")
+
 if(run_naked == "1"){
    if(comptime{ arch() == "x86_64" }){
       print("Testing @naked for x86_64...")
@@ -47,11 +48,12 @@ if(run_naked == "1"){
       print("✓ @naked ARM passed")
    }
 } else {
-   print("Skipping @naked execution (set NYTRIX_TEST_NAKED=1 to enable)")
+   print("Skipping @naked execution(set NYTRIX_TEST_NAKED=1 to enable)")
 }
 
 ;; Test Multi-Input ASM
 print("Testing Multi-Input ASM...")
+
 if(comptime{ arch() == "x86_64" }){
    def a = 100
    def b = 50
@@ -65,24 +67,27 @@ if(comptime{ arch() == "x86_64" }){
    print("asm_add(100, 50) =", c)
    assert(c == 150, "multi-input asm failed")
 }
-print("✓ Multi-Input ASM passed")
 
+print("✓ Multi-Input ASM passed")
 print("Testing @jit attribute...")
+
 @jit
 fn fast_add(x, y){
    return x + y
 }
+
 assert(fast_add(10, 20) == 30, "@jit function call failed")
 def fast_ref = fast_add
 assert(fast_ref(7, 8) == 15, "@jit function pointer call failed")
 print("✓ @jit passed")
-
 print("Testing @thread attribute...")
+
 @thread
 fn worker_fn(base=41){
    print("  Worker running with base =", base)
    return base + 1
 }
+
 assert(worker_fn() == 42, "@thread default-arg call failed")
 assert(worker_fn(99) == 100, "@thread one-arg call failed")
 
@@ -90,6 +95,7 @@ assert(worker_fn(99) == 100, "@thread one-arg call failed")
 fn worker_sum(a, b, c=0){
    return a + b + c
 }
+
 assert(worker_sum(10, 20) == 30, "@thread multi-arg call failed")
 assert(worker_sum(10, 20, 3) == 33, "@thread multi-arg default/explicit failed")
 
@@ -107,18 +113,20 @@ assert(detach_ms < 120, "@thread statement call should be non-blocking")
 assert(worker_sleep(20) == 20, "@thread value call should still join/return value")
 msleep(220)
 print("✓ @thread passed")
-
 print("Testing @pure and @effects attributes...")
+
 @pure
 fn pure_inc(x){
    return x + 1
 }
+
 assert(pure_inc(9) == 10, "@pure function failed")
 
 @effects(none)
 fn pure_mix(a, b, c=0){
    return a * b + c
 }
+
 assert(pure_mix(6, 7) == 42, "@effects(none) function failed")
 assert(pure_mix(6, 7, 2) == 44, "@effects(none) default/explicit failed")
 
@@ -126,8 +134,9 @@ assert(pure_mix(6, 7, 2) == 44, "@effects(none) default/explicit failed")
 fn make_pair_list(a, b){
    return [a, b]
 }
+
 def pair = make_pair_list(3, 4)
-assert(len(pair) == 2, "@effects(alloc) list length failed")
+assert(pair.len == 2, "@effects(alloc) list length failed")
 assert(pair[0] == 3, "@effects(alloc) list item[0] failed")
 assert(pair[1] == 4, "@effects(alloc) list item[1] failed")
 
@@ -136,69 +145,90 @@ fn echo_once(x){
    print("echo_once:", x)
    return x
 }
+
 assert(echo_once(77) == 77, "@effects(...) function failed")
 print("✓ @pure/@effects passed")
-
 print("Testing @llvm attribute...")
+
 @llvm(noinline)
 fn llvm_noinline_add(a, b){
    return a + b
 }
+
 assert(llvm_noinline_add(5, 7) == 12, "@llvm(noinline) function failed")
 
 @llvm("frame-pointer", "all")
 fn llvm_fp_add(a, b){
    return a + b
 }
+
 assert(llvm_fp_add(8, 9) == 17, "@llvm(name, value) function failed")
+assert(llvm("llvm.ctpop.i64", 0xf0f0) == 8, "llvm(...) ctpop intrinsic failed")
+assert(llvm("ctpop.i64", 0xf0f0) == 8, "llvm(...) shorthand intrinsic failed")
+assert(llvm("llvm.cttz.i64", 8, false) == 3, "llvm(...) cttz intrinsic failed")
+assert(llvm("llvm.ctlz.i64", 1, false) == 63, "llvm(...) ctlz intrinsic failed")
+assert(llvm("llvm.bswap.i32", 0x01020304) == 0x04030201, "llvm(...) bswap intrinsic failed")
+assert(llvm("llvm.fshl.i64", 1, 1, 4) == 16, "llvm(...) fshl intrinsic failed")
 print("✓ @llvm passed")
 print("Testing optimization attributes...")
-@readnone @nounwind @mustprogress @willreturn
+
+@readnone
+@nounwind
+@mustprogress
+@willreturn
 fn pure_math(x, y){
    return x * x + y * y
 }
+
 assert(pure_math(3, 4) == 25, "@readnone math failed")
 
-@readonly @nounwind
+@readonly
+@nounwind
 fn read_first(lst){
-   return get(lst, 0)
+   return lst.get(0)
 }
+
 assert(read_first([10, 20]) == 10, "@readonly access failed")
 
 @writeonly
 fn write_first(lst, val){
    set(lst, 0, val)
 }
+
 def write_lst = [0, 0]
 write_first(write_lst, 42)
 assert(write_lst[0] == 42, "@writeonly function failed")
 
 @argmemonly
 fn swap(a, b){
-   def t = get(a, 0)
-   set(a, 0, get(b, 0))
+   def t = a.get(0)
+   set(a, 0, b.get(0))
    set(b, 0, t)
 }
+
 def s1 = [1] def s2 = [2]
 swap(s1, s2)
 assert(s1[0] == 2 && s2[0] == 1, "@argmemonly function failed")
 
-@hot @jit
+@hot
+@jit
 fn hot_loop(n){
    mut sum = 0
    mut i = 0
    while(i < n){
       sum = sum + i
-      i = i + 1
+      i += 1
    }
    return sum
 }
+
 assert(hot_loop(10) == 45, "@hot function failed")
 
 @cold
 fn error_path(){
    return "error"
 }
+
 assert(error_path() == "error", "@cold function failed")
 
 @flatten
@@ -207,10 +237,9 @@ fn nested_calc(a, b){
    fn inner(x){ return x * 2 }
    return inner(a) + inner(b)
 }
+
 assert(nested_calc(5, 10) == 30, "@flatten function failed")
-
 print("✓ New optimization attributes passed")
-
 print("Testing ++i and --i...")
 mut counter = 10
 ++counter
@@ -218,5 +247,4 @@ assert(counter == 11, "++counter failed")
 --counter
 assert(counter == 10, "--counter failed")
 print("✓ ++/-- passed")
-
 print("✓ ALL attribute tests passed")
