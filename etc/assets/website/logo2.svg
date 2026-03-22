@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+  <defs>
+    <path id="n-path" d="M 20,20 H 36 V 52 L 64,20 H 80 V 80 H 64 V 48 L 36,80 H 20 Z"/>
+
+    <clipPath id="inside-n-clip">
+      <use href="#n-path" />
+    </clipPath>
+
+    <clipPath id="center-intersection-clip">
+      <rect x="36" y="20" width="28" height="60" />
+    </clipPath>
+  </defs>
+
+  <g transform="translate(100 0) scale(-1 1)">
+    <rect width="100" height="100" fill="#000000" rx="16"/>
+
+    <g clip-path="url(#inside-n-clip)">
+      <line id="purple-line" x1="20" y1="20" x2="80" y2="80" stroke="#B8B0FF" stroke-width="12" stroke-linecap="square"/>
+    </g>
+
+    <use href="#n-path" fill="#F0F0FF" />
+
+    <g clip-path="url(#center-intersection-clip)">
+      <use href="#purple-line" />
+    </g>
+  </g>
+</svg>

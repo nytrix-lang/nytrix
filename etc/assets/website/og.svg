@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Nytrix Manual">
+  <defs>
+    <path id="n-path" d="M 20,20 H 36 V 52 L 64,20 H 80 V 80 H 64 V 48 L 36,80 H 20 Z"/>
+    <clipPath id="inside-n-clip">
+      <use href="#n-path"/>
+    </clipPath>
+    <clipPath id="center-intersection-clip">
+      <rect x="36" y="20" width="28" height="60"/>
+    </clipPath>
+    <linearGradient id="panel-fill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08090d"/>
+      <stop offset="1" stop-color="#020204"/>
+    </linearGradient>
+    <linearGradient id="rule-fill" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8ccfff"/>
+      <stop offset="0.48" stop-color="#b8b0ff"/>
+      <stop offset="1" stop-color="#8bdc9a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#030305"/>
+  <path d="M0 0h1200v630H0z" fill="#030305"/>
+  <g opacity="0.26" stroke="#151821" stroke-width="1">
+    <path d="M72 0v630M238 0v630M404 0v630M570 0v630M736 0v630M902 0v630M1068 0v630"/>
+    <path d="M0 72h1200M0 184h1200M0 296h1200M0 408h1200M0 520h1200"/>
+  </g>
+  <path d="M76 258h650" stroke="url(#rule-fill)" stroke-width="3"/>
+  <path d="M770 258h354M76 548h1048" stroke="#272b38" stroke-width="1.5"/>
+
+  <g transform="translate(76 76) scale(1.32)">
+    <g transform="translate(100 0) scale(-1 1)">
+      <rect width="100" height="100" fill="#000000" rx="16"/>
+      <rect x="1" y="1" width="98" height="98" rx="15" fill="none" stroke="#2a2c3a" stroke-width="2"/>
+      <g clip-path="url(#inside-n-clip)">
+        <line id="purple-line" x1="20" y1="20" x2="80" y2="80" stroke="#B8B0FF" stroke-width="12" stroke-linecap="square"/>
+      </g>
+      <use href="#n-path" fill="#F0F0FF"/>
+      <g clip-path="url(#center-intersection-clip)">
+        <use href="#purple-line"/>
+      </g>
+    </g>
+  </g>
+
+  <g font-family="Inter, DejaVu Sans, Arial, sans-serif">
+    <text x="238" y="112" fill="#8d92a0" font-size="22" font-weight="800" letter-spacing="3">LANGUAGE DOCS</text>
+    <text x="238" y="190" fill="#f6f7fb" font-size="72" font-weight="850">Nytrix Manual</text>
+    <text x="76" y="286" fill="#f0f1f5" font-size="32" font-weight="750">Quick start, spec, examples, and APIs</text>
+    <text x="76" y="326" fill="#b9bdc8" font-size="23" font-weight="450">A searchable manual for writing, running, and shipping Nytrix programs.</text>
+  </g>
+
+  <g font-family="JetBrains Mono, DejaVu Sans Mono, Consolas, monospace">
+    <rect x="76" y="360" width="580" height="156" rx="3" fill="url(#panel-fill)" stroke="#272b38"/>
+    <g font-size="22" font-weight="700" dominant-baseline="hanging" xml:space="preserve">
+      <text x="106" y="378"><tspan fill="#b8b0ff">use</tspan><tspan fill="#f5f6fa"> </tspan><tspan fill="#8ccfff">std.core</tspan></text>
+      <text x="106" y="412"><tspan fill="#b8b0ff">fn</tspan><tspan fill="#f5f6fa"> </tspan><tspan fill="#d1c2ff">main</tspan><tspan fill="#858a96">(): </tspan><tspan fill="#bcaaff">int</tspan><tspan fill="#f5f6fa"> {</tspan></text>
+      <text x="142" y="446"><tspan fill="#d1c2ff">print</tspan><tspan fill="#858a96">(</tspan><tspan fill="#8bdc9a">"hello from nytrix"</tspan><tspan fill="#858a96">)</tspan></text>
+      <text x="106" y="480" fill="#f5f6fa">}</text>
+    </g>
+
+    <rect x="690" y="360" width="434" height="156" rx="3" fill="#050609" stroke="#272b38"/>
+    <g font-size="22" font-weight="800" dominant-baseline="hanging">
+      <text x="720" y="390" fill="#b8b0ff">./make</text>
+      <text x="720" y="428" fill="#8ccfff">ny hello.ny</text>
+      <text x="720" y="466" fill="#8bdc9a">ny doc -o site</text>
+    </g>
+  </g>
+
+  <g font-family="Inter, DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="750">
+    <text x="76" y="584" fill="#858a96">github.com/nytrix-lang/nytrix</text>
+    <text x="790" y="584" fill="#858a96">learn / spec / changelog / API</text>
+  </g>
+</svg>
