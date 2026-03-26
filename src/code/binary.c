@@ -2076,8 +2076,10 @@ static LLVMValueRef ny_try_emit_scoped_operator(codegen_t *cg, scope *scopes, si
     };
     LLVMValueRef raw =
         LLVMBuildCall2(cg->builder, target->type, target->value, args, 2, "op.scoped");
-    return (target->is_native_abi && target->return_type)
-               ? ny_box_abi_result(cg, raw, target->return_type)
+    const char *target_ret =
+        target->abi_return_type ? target->abi_return_type : target->return_type;
+    return (target->is_native_abi && target_ret)
+               ? ny_box_abi_result(cg, raw, target_ret)
                : raw;
   }
   return NULL;

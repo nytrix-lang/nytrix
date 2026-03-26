@@ -667,6 +667,7 @@ int64_t rt_trace_last_file(void);
 int64_t rt_trace_last_line(void);
 int64_t rt_trace_last_col(void);
 int64_t rt_trace_last_func(void);
+void rt_trace_refresh_env(void);
 void print_trace_entry(int64_t file, int64_t line, int64_t col, int64_t func, const char *prefix);
 
 static inline size_t rt_get_heap_size_known(int64_t v) {

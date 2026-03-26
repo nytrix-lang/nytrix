@@ -16,7 +16,17 @@ fn _path_exists(any: path): bool {
 
 fn _resolve_cmd(any: cmd): any {
    if(!is_str(cmd)){ return cmd }
-   if(ospath.has_sep(cmd) || ospath.is_abs(cmd)){ return ospath.normalize(cmd) }
+   if(ospath.has_sep(cmd) || ospath.is_abs(cmd)){
+      def norm = ospath.normalize(cmd)
+      #windows {
+         if(ospath.extname(norm) == ""){
+            def exe = norm + ".exe"
+            if(_path_exists(exe)){ return exe }
+         }
+      }
+      #endif
+      return norm
+   }
    def p = env("PATH")
    if(!is_str(p) || p.len == 0){ return cmd }
    mut sep = ":"

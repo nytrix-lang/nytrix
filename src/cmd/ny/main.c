@@ -1192,6 +1192,7 @@ int main(int argc, char **argv, char **envp) {
   if (trace_requested) {
     ny_setenv_force("NYTRIX_TRACE", "1");
     g_trace_requested = 1;
+    rt_trace_refresh_env();
   }
   ny_intern_init();
   atexit(ny_global_cleanup);
@@ -1205,6 +1206,7 @@ int main(int argc, char **argv, char **envp) {
   } else {
     ny_unsetenv_force("NYTRIX_TRACE");
   }
+  rt_trace_refresh_env();
 
   ny_options opt;
   ny_options_init(&opt);
@@ -1228,6 +1230,7 @@ int main(int argc, char **argv, char **envp) {
   ny_clear_policy_env_overrides();
   ny_env_config_t cli_env = {0};
   ny_apply_cli_env_config(&cli_env, &opt, trace_requested);
+  rt_trace_refresh_env();
 #ifdef _WIN32
   if (opt.color_mode != 0)
     (void)rt_enable_vt();
