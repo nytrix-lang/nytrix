@@ -5,7 +5,7 @@
 @copying
 ny - Nytrix language compiler and interpreter tool.
 Copyright @copyright{} 2026 Nytrix Developers.
-GNU General Public License v3.0
+MIT License
 @end copying
 
 @dircategory Programming
@@ -29,11 +29,129 @@ GNU General Public License v3.0
 The @command{ny} command is the primary tool for Nytrix. It supports JIT execution, AOT compilation, and an interactive REPL.
 
 @menu
+* Subcommands::        Subcommand reference (new, pkg, fmt, doc, test, perf, make).
 * Options::            Command line arguments.
 * Environment::        Supported environment variables.
 * Examples::           Common usage patterns.
 * See Also::           Related documentation.
 @end menu
+
+@node Subcommands
+@chapter Subcommands
+
+The @command{ny} binary dispatches to several built-in tools via subcommands.
+
+@table @code
+@item ny new [@var{dir}] [@var{options}]
+Create a fresh project scaffold. Generates @file{ny.pkg.json},
+@file{src/main.ny}, README, and @file{.gitignore}. Options:
+@code{--name}, @code{--author}, @code{--version}, @code{--description},
+@code{--license}, @code{--repository}, @code{--force}.
+
+@item ny pkg @var{command} [@var{args}]
+Package manager subcommand. See below for commands.
+
+@item ny fmt [@var{paths}...] [@var{options}]
+Format Nytrix source files and audit for optimization candidates.
+Options include @code{--check}, @code{--specialize}, @code{--metaprog},
+@code{--trim}, and @code{--json}.
+
+@item ny doc [@var{args}]
+Search and generate documentation. @code{ny doc search <topic>}
+looks up docs, module names, symbols, docstrings, and keyword tags.
+@code{ny doc get <query>} prints the closest reference entry.
+@code{ny doc -o docs} generates the full HTML reference.
+
+@item ny test [@var{paths}...] [@var{options}]
+Run test suites (runtime, error, and pattern-selected tests).
+
+@item ny perf [@var{args}]
+Run benchmark gates, profiling, and comparison workflows.
+
+@item ny make [@var{target}]
+Native build wrapper. Targets: @code{bin}, @code{test}, @code{std},
+@code{docs}, @code{perf}, @code{install}.
+@end table
+
+@menu
+* ny pkg::              Package manager details.
+@end menu
+
+@node ny pkg
+@section ny pkg
+
+@table @code
+@item ny pkg init [@var{name}]
+Create a @file{ny.pkg.json} manifest.
+
+@item ny pkg add @var{name} @var{source}
+Add, fetch, and lock a package dependency. Source forms:
+local dir/file path, @code{git+} URL, @code{git@@} SSH,
+@code{.git} suffix, archive (@code{.tar}, @code{.tar.gz}, @code{.tgz},
+@code{.tar.xz}, @code{.txz}, @code{.tar.bz2}, @code{.tbz}, @code{.zip}),
+or @code{archive+} prefix. URL downloads use @code{curl} or @code{wget}.
+
+@item ny pkg get @var{name} [@var{source}]
+Alias for add; source may come from registry lookup.
+
+@item ny pkg install [@var{name} [@var{source}]]
+Install manifest dependencies or a single dep.
+
+@item ny pkg sync
+Reinstall all manifest dependencies.
+
+@item ny pkg uninstall @var{name}
+Remove local install and manifest entry.
+
+@item ny pkg update [@var{name}]
+Refresh git packages and lockfile.
+
+@item ny pkg list
+List manifest dependencies.
+
+@item ny pkg search [@var{query}]
+Fuzzy-search direct registry entries and registered package repositories. Use
+@code{--interactive} for the built-in picker.
+
+@item ny pkg info [@var{name}]
+Print package metadata and deps.
+
+@item ny pkg path [@var{name}]
+Print install root or specific package path.
+
+@item ny pkg venv
+Create or print @file{.nytrix/venv/lib} path.
+
+@item ny pkg registry [@var{name}]
+Show registry source files or look up a package.
+@end table
+
+Install scopes:
+
+@table @code
+@item --inplace (default)
+Install into @file{./ny_modules}.
+@item --vendor
+Install into @file{./vendor/ny_modules} for repository vendoring.
+@item --venv
+Install into @file{./.nytrix/venv/lib}.
+@item --user, --global
+Install into @code{$NYTRIX_PKG_HOME} or @file{~/.nytrix/pkg}.
+@item --system, --syswide
+Install into @code{$NYTRIX_SYSTEM_PKG_HOME} or
+@file{/usr/local/share/nytrix/pkg}.
+@item --root @var{DIR}
+Custom install root override.
+@end table
+
+Lockfile is written as @file{ny.pkg.json.lock} with per-package source,
+ref, path, and git commit. Recursive dependency install walks child
+package manifests up to depth 16.
+
+Manifest metadata fields are @code{name}, @code{version}, @code{description},
+@code{author}, @code{license}, @code{repository}, and direct
+@code{dependencies}. @command{ny new} and @command{ny pkg init} accept matching
+metadata options.
 
 @node Options
 @chapter Options
@@ -43,7 +161,24 @@ The @command{ny} command is the primary tool for Nytrix. It supports JIT executi
 @item --color=@var{WHEN}
 Set color output: @code{auto}, @code{always}, or @code{never}.
 @item -safe-mode, --safe-mode, --safe
-Enable strict safety/effect/alias checks.
+Enable the full safety profile: strict types, ownership/borrow checks, RC/RAII
+cleanup, strict effect/alias policy, and safe raw-memory diagnostics.
+@item --mode=@var{MODE}
+Select a runtime memory preset: @code{safe}, @code{fast}, or @code{bare}.
+@item --strict-types
+Reject dynamic type cliffs at compile time.
+@item --no-strict-types
+Allow dynamic type cliffs even under safe mode.
+@item --strict
+Enable strict types plus ownership/borrow diagnostics.
+@item --ownership
+Enable ownership tracking through the RAII heap policy.
+@item --ownership-strict
+Enable strict ownership diagnostics.
+@item --borrow-check
+Alias for @code{--ownership-strict}.
+@item --max-errors=@var{N}
+Stop parsing after @var{N} errors. Use @code{0} to disable the cap.
 @item --effect-require-known
 Require known effects for user functions (default on).
 @item --no-effect-require-known
@@ -56,14 +191,33 @@ Allow unknown alias/escape facts.
 Require no argument escape / return alias.
 @end table
 
-Typed contracts are non-null by default: @code{nil} is accepted only for nullable types (for example @code{?int}) and pointer-like types (for example @code{*int}).
+Declared @code{@@pure} and @code{@@effects(...)} contracts are always checked
+for the annotated function. The effect policy options tighten unannotated code
+and unknown summaries.
+@code{@@async_effects} reuses the inferred @code{io} effect as a lowering hint:
+after the source effect contract passes, eligible functions lower through the
+stackless async path. @code{NYTRIX_EFFECT_ASYNC_LOWERING=1} turns on the same
+lowering for eligible user functions globally.
+
+Typed contracts are non-null by default: @code{nil} is accepted only for
+nullable types (for example @code{?int}) and pointer-like types (for example
+@code{*int}). Native OS/Vulkan/FFI handles use @code{handle}; use
+@code{?handle} when a missing handle is valid.
 
 @section Optimization
 @table @code
 @item -O0, -O1, -O2, -O3, -O
-Set optimization level (default @code{-O2}; @code{-O} aliases @code{-O2}).
+Set optimization level. Native emission defaults to @code{-O2}; JIT and REPL
+runs default to @code{-O0} for edit latency. @code{-O} aliases @code{-O2}.
+@item --profile=@var{MODE}
+Select an optimization profile: @code{speed}, @code{balanced},
+@code{compile}, @code{size}, @code{none}, or @code{peak}. The profile is
+propagated into LLVM, runtime compilation, JIT/AOT cache keys, and codegen
+fast paths. @code{peak} turns on heavier typed-loop and arithmetic lowering
+for peak native benchmark runs.
 @item --fast
-Convenience mode: keeps optimization high, disables verify, prefers stripped output.
+Convenience mode: keeps optimization high, disables verify, and emits stripped
+output by default.
 @item -passes=@var{PIPE}
 Custom LLVM pass pipeline (for example @code{default<O2>}).
 @item --opt-dce, --dce, --no-opt-dce, --no-dce
@@ -76,6 +230,10 @@ Enable/disable loop optimization override.
 Enable/disable adaptive optimization-level tuning override.
 @end table
 
+The expression form @code{llvm("ctpop.i64", x)} directly splices LLVM
+intrinsics for scalar/native ABI values. The @code{llvm.} prefix is optional;
+use the fully typed LLVM intrinsic spelling for overloaded intrinsics.
+
 @section Parallelism
 @table @code
 @item --gpu=@var{MODE}, --gpu @var{MODE}
@@ -87,7 +245,7 @@ Offload policy: @code{off}, @code{auto}, @code{on}, @code{force}.
 @item --gpu-min-work=@var{N}, --gpu-min-work @var{N}
 Minimum work-items before GPU offload.
 @item --gpu-async, --no-gpu-async
-Enable/disable async GPU dispatch preference.
+Enable or disable async GPU dispatch.
 @item --gpu-fast-math, --no-gpu-fast-math
 Enable/disable relaxed GPU math.
 @item --accel-target=@var{T}, --accel-target @var{T}
@@ -97,11 +255,21 @@ Device artifact kind: @code{auto}, @code{none}, @code{ptx}, @code{o}, @code{spv}
 @item --gpu-target=@var{T}, --gpu-target @var{T}
 Compatibility alias; maps target to backend/accelerator.
 @item --parallel=@var{MODE}, --parallel @var{MODE}
-Parallel mode: @code{off}, @code{auto}, @code{threads}.
+Parallel mode: @code{off}, @code{auto}, @code{threads}, @code{modules}.
 @item --threads=@var{N}, --threads @var{N}
 Thread budget for parallel work.
 @item --parallel-min-work=@var{N}, --parallel-min-work @var{N}
 Minimum work-items before threaded parallel execution.
+@end table
+
+The standard library exposes @code{std.os.parallel.scheduler_status} and
+@code{work_stealing_plan} for @code{@@thread} runner policy, including the
+@code{NYTRIX_THREAD_SCHEDULER=auto|direct|work-stealing} environment override.
+
+@section Cache
+@table @code
+@item --clean-cache
+Remove Nytrix JIT, std bitcode/source, tiny-AOT, and AOT run-cache artifacts.
 @end table
 
 @section Build Tuning
@@ -117,7 +285,7 @@ Extra host linker flags.
 @item --gprof, --no-gprof, -pg, --profile
 Enable/disable @code{-pg} in native build path.
 @item --std-builtin-ops, --no-std-builtin-ops
-Enable/disable std builtin-op lowering preference.
+Enable or disable std builtin-op lowering.
 @item --debug-locals, --no-debug-locals
 Enable/disable local/global debug records.
 @item --dwarf-version=@var{N}
@@ -131,13 +299,18 @@ Enable/disable profiling-friendly location info.
 @section Execution
 @table @code
 @item -run
-JIT execute @code{main()} after compilation.
+Build a temporary native executable and run it.
+@item --jit, --run=jit
+Run through MCJIT. This is the default for @command{ny file.ny} and
+@command{ny -c '...'}.
+@item --run=auto, --run=aot
+Alias the AOT run path used by @code{-run}.
 @item -emit-only
-Only emit output, do not execute (default).
+Only emit output, do not execute.
 @item -o [@var{PATH}], --output [@var{PATH}], --output=@var{PATH}
 Emit native binary at @var{PATH}; implies @code{-emit-only}. If omitted, uses default output name.
 @item -strip, --strip, -no-strip, --no-strip
-Create stripped or unstripped binary (default stripped).
+Create stripped or unstripped binary (default unstripped).
 @item -c @var{CODE}, -e @var{CODE}, --eval @var{CODE}
 Execute inline Nytrix code.
 @item --
@@ -151,7 +324,7 @@ Stdlib inclusion mode: @code{none}, @code{minimal}, @code{full} (default @code{m
 @item -no-std
 Disable stdlib loading.
 @item --std-path=@var{PATH}
-Use custom @file{std_bundle.ny}.
+Use custom @file{std.ny}.
 @item --full-mod
 Alias for @code{-std full}.
 @end table
@@ -171,8 +344,13 @@ Interactive REPL.
 @item -repl
 Read source from stdin (one-shot).
 @item --plain-repl
-Force plain REPL mode without advanced line UI.
+Force plain REPL mode without line-editing UI.
 @end table
+
+Inside the REPL, @code{:snapshot [snapfile] [-o executable]} writes the current
+persistent session as a source-backed image and can immediately AOT-export it.
+@code{:load snapfile} restores snapshot images while ordinary file loading keeps
+its existing source-load behavior.
 
 @section Debugging
 @table @code
@@ -228,31 +406,45 @@ Show version information.
 @chapter Environment Variables
 
 Policy env overrides are disabled by default. Use CLI flags for
-GPU/parallel/effect/debug behavior.
+GPU/parallel/effect/debug behavior. Common environment variables include:
 
 @table @code
 @item NYTRIX_STD_PATH
-Override @code{std_bundle.ny} lookup path.
+Override @code{std.ny} lookup path.
 @item NYTRIX_STD_PREBUILT
 Use prebuilt stdlib source.
 @item NYTRIX_BUILD_STD_PATH
-Override bundled std path.
+Override generated @file{std.ny} path.
 @item NYTRIX_HOST_TRIPLE, NYTRIX_ARM_FLOAT_ABI
 Host-target build tuning.
 @item NYTRIX_HOST_CFLAGS, NYTRIX_HOST_LDFLAGS
 Host compiler/linker tuning.
+@item NYTRIX_TRACE_COMPTIME_MACRO
+Trace native compile-time macro expansion.
 @end table
 
 @node Examples
 @chapter Examples
 @itemize @bullet
-@item @code{ny etc/tests/benchmark/sieve.ny}
-Compile only (default mode).
-@item @code{ny -O2 -run etc/tests/benchmark/sieve.ny}
-Compile and run optimized.
-@item @code{ny --gpu-backend=cuda --gpu-offload=force --threads=8 etc/tests/benchmark/vector.ny}
+@item @code{ny new myapp}
+Create a new project scaffold.
+@item @code{ny myapp/src/main.ny}
+JIT compile and run.
+@item @code{ny -run myapp/src/main.ny}
+AOT compile and run native executable.
+@item @code{ny fmt --check lib}
+Check formatting of lib directory.
+@item @code{ny pkg add foo ../foo}
+Add local directory as dependency.
+@item @code{ny pkg add bar git+https://example.com/bar.git#main}
+Add git dependency with ref.
+@item @code{ny etc/tests/bench/sieve.ny}
+Compile and run through the default JIT path.
+@item @code{ny -O2 -run etc/tests/bench/sieve.ny}
+Build an optimized native executable and run it.
+@item @code{ny --gpu-backend=cuda --gpu-offload=force --threads=8 etc/tests/bench/vector.ny}
 Run with explicit accelerator/thread policy.
-@item @code{ny --host-cflags='-march=native' --dwarf-version=5 -g -o app etc/tests/runtime/control.ny}
+@item @code{ny --host-cflags='-march=native' --dwarf-version=5 -g -o app etc/tests/rt/control.ny}
 AOT build with explicit host/debug tuning.
 @item @code{ny -c 'print("hello")'}
 Execute inline code.
@@ -262,6 +454,25 @@ Start REPL.
 
 @node See Also
 @chapter See Also
-Nytrix Language Reference (see the @code{nytrix} manual).
+See the @code{nytrix} manual for the language/runtime overview.
+
+Start a new project with @command{ny new mydir}.
+
+Use @command{ny fmt --specialize} to audit Nytrix source for branches and
+@code{case} dispatch that can move to @code{comptime}. Use
+@command{ny fmt --metaprog} to audit function families, typed boundaries,
+resource blocks, derives, diagnostics, and generated backend/table surfaces.
+@command{ny fmt --trim} includes both.
+
+Canonical markdown docs in the repository:
+
+@itemize @bullet
+@item @file{docs/spec/language.md} for the language and runtime surface.
+@item @file{docs/spec/syntax.md} for syntax forms and source spellings.
+@item @file{docs/learn/tooling.md} for command families and diagnostics.
+@item @file{docs/learn/library.md} for the standard-library domain map.
+@item @file{docs/learn/packages.md} for package manifests, roots, sources, and publishing shape.
+@item @file{docs/README.md} for top-level build/doc pointers.
+@end itemize
 
 @bye
