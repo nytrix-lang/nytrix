@@ -45,6 +45,13 @@ int64_t rt_globals_ptr = 1;
 /* Robust trace control: only print trace frames when -trace was used */
 int g_trace_requested = 0;
 int g_trace_suspended = 0;
+static int g_trace_env_ready = 0;
+static bool g_trace_env_trace = false;
+static bool g_trace_env_calls = false;
+static bool g_trace_env_values = false;
+static bool g_trace_env_verbose = false;
+static bool g_trace_env_index_read = false;
+static const char *g_trace_env_filter = NULL;
 
 #ifndef _WIN32
 #define NY_JMP_BUF jmp_buf
@@ -375,9 +382,40 @@ static void trace_record(int64_t file, int64_t line, int64_t col, int64_t func) 
     g_trace_len++;
 }
 
-static bool trace_env_enabled(const char *name) {
+static bool trace_env_enabled_uncached(const char *name) {
   const char *env = getenv(name);
   return env && *env && strcmp(env, "0") != 0;
+}
+
+void rt_trace_refresh_env(void) {
+  g_trace_env_trace = trace_env_enabled_uncached("NYTRIX_TRACE");
+  g_trace_env_calls = trace_env_enabled_uncached("NYTRIX_TRACE_CALLS");
+  g_trace_env_values = trace_env_enabled_uncached("NYTRIX_TRACE_VALUES");
+  g_trace_env_verbose = trace_env_enabled_uncached("NYTRIX_TRACE_VERBOSE");
+  g_trace_env_index_read = trace_env_enabled_uncached("NYTRIX_INDEX_READ_PARITY");
+  g_trace_env_filter = getenv("NYTRIX_TRACE_FILTER");
+  g_trace_env_ready = 1;
+  g_index_read_probe_mode = g_trace_env_index_read ? 1 : 0;
+}
+
+static void trace_env_ensure(void) {
+  if (!g_trace_env_ready)
+    rt_trace_refresh_env();
+}
+
+static bool trace_env_enabled(const char *name) {
+  trace_env_ensure();
+  if (strcmp(name, "NYTRIX_TRACE") == 0)
+    return g_trace_env_trace;
+  if (strcmp(name, "NYTRIX_TRACE_CALLS") == 0)
+    return g_trace_env_calls;
+  if (strcmp(name, "NYTRIX_TRACE_VALUES") == 0)
+    return g_trace_env_values;
+  if (strcmp(name, "NYTRIX_TRACE_VERBOSE") == 0)
+    return g_trace_env_verbose;
+  if (strcmp(name, "NYTRIX_INDEX_READ_PARITY") == 0)
+    return g_trace_env_index_read;
+  return trace_env_enabled_uncached(name);
 }
 
 static bool index_read_probe_enabled_raw(void) {
@@ -430,7 +468,8 @@ static bool trace_filter_matches_token(const char *func, size_t fnlen, const cha
 }
 
 static bool trace_filter_allows(int64_t func) {
-  const char *filter = getenv("NYTRIX_TRACE_FILTER");
+  trace_env_ensure();
+  const char *filter = g_trace_env_filter;
   if (!filter || !*filter)
     return true;
   if (!is_v_str(func))

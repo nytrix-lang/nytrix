@@ -38,7 +38,9 @@ fn _rand_range(int: a, int: b, bool: inclusive): int {
    def range = b - a + (inclusive ? 1 : 0)
    if(range <= 0){ return a }
    def int: r = rand()
-   return a + (r - (r / range) * range)
+   def int: q = r / range
+   def int: rem = r - (q * range)
+   return a + rem
 }
 
 fn randint(int: a, int: b): int {
@@ -56,7 +58,9 @@ fn choice(seq: xs): any {
    mut n = xs.len
    if(n == 0){ return 0 }
    def int: r = rand()
-   return xs.get(r - (r / n) * n)
+   def int: q = r / n
+   def int: rem = r - (q * n)
+   return xs.get(rem)
 }
 
 fn shuffle(list: xs): list {
@@ -66,7 +70,9 @@ fn shuffle(list: xs): list {
    mut i = n - 1
    while(i > 0){
       def int: r = rand()
-      def j = r - (r / (i + 1)) * (i + 1)
+      def int: span = i + 1
+      def int: q = r / span
+      def int: j = r - (q * span)
       def tmp = xs.get(i)
       xs.set(i, xs.get(j))
       xs.set(j, tmp)
