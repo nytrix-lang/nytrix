@@ -46,6 +46,12 @@ fn _is_range(any: x): bool { _has_tag(x, _TAG_RANGE) }
 fn _is_bytes(any: x): bool { _has_tag(x, _TAG_BYTES) }
 
 @inline
+fn _is_raw_ptr_like(any: x): bool {
+   def tag = __tagof(x)
+   __eq(tag, _TAG_PTR) || __eq(tag, _TAG_FFI_PTR)
+}
+
+@inline
 fn _is_seq_tag(any: tag): bool {
    if(!__is_int(tag)){ return false }
    __eq(tag, _TAG_LIST) || __eq(tag, _TAG_TUPLE) || __eq(tag, _TAG_RANGE)
@@ -1229,11 +1235,13 @@ fn get(any: obj, any: key, any: default=0): any {
       }
    }
    if(obj == globals()){ return default }
+   if(!obj || _is_raw_ptr_like(obj)){ return default }
    _type_error("get", "a string, bytes, list, tuple, dict, range, or vector", obj)
 }
 
 fn set_idx(any: obj, any: key, any: val): any {
    "Generic element setter. Supported for dicts and lists. Returns the object or 0 on failure."
+   if(!obj || _is_raw_ptr_like(obj)){ return 0 }
    if(_is_vecdict(obj)){
       if(__is_int(key)){ return _vec_set(obj, key, val) }
       if(_is_bigint(key)){ return _vec_set(obj, __bigint_to_int(key), val) }
@@ -1272,6 +1280,7 @@ fn set_idx(any: obj, any: key, any: val): any {
 
 fn set(any: obj, any: key, any: val): any {
    "Generic setter for dicts and lists. Returns the mutated object for method chaining."
+   if(!obj || _is_raw_ptr_like(obj)){ return 0 }
    if(_is_vecdict(obj)){
       if(__is_int(key)){ return _vec_set(obj, key, val) }
       if(_is_bigint(key)){ return _vec_set(obj, __bigint_to_int(key), val) }

@@ -600,9 +600,12 @@ static bool ny_ffi_record_type_name(CXType type, char *buf, size_t cap) {
 static const char *map_clang_type(CXType type);
 
 static bool ny_ffi_type_is_char_pointer(CXType type) {
-  if (type.kind != CXType_Pointer)
+  CXType probe = type;
+  if (probe.kind != CXType_Pointer)
+    probe = clang_getCanonicalType(type);
+  if (probe.kind != CXType_Pointer)
     return false;
-  CXType pointee = clang_getPointeeType(type);
+  CXType pointee = clang_getPointeeType(probe);
   CXType canon = clang_getCanonicalType(pointee);
   switch (canon.kind) {
   case CXType_Char_S:

@@ -921,6 +921,104 @@ static bool ny_ct_numeric_eq(const ny_ct_fast_val_t *l,
   return true;
 }
 
+static bool ny_ct_range_len_raw(int64_t start, int64_t stop, int64_t step,
+                                int64_t *out) {
+  if (!out || step == 0)
+    return false;
+  *out = 0;
+  if (step > 0) {
+    if (start >= stop)
+      return true;
+    int64_t span = 0;
+    if (__builtin_sub_overflow(stop, start, &span) || span <= 0)
+      return false;
+    *out = ((span - 1) / step) + 1;
+    return true;
+  }
+  if (start <= stop)
+    return true;
+  int64_t span = 0;
+  if (__builtin_sub_overflow(start, stop, &span) || span <= 0)
+    return false;
+  *out = ((span - 1) / -step) + 1;
+  return true;
+}
+
+static bool ny_ct_make_range(int64_t start, int64_t stop, int64_t step,
+                             ny_ct_fast_val_t *out) {
+  if (!out)
+    return false;
+  if (step == 0)
+    step = 1;
+  int64_t len = 0;
+  if (!ny_ct_range_len_raw(start, stop, step, &len) || len < 0 ||
+      len > 65536)
+    return false;
+  out->kind = NY_CT_FAST_RANGE;
+  out->range_start = start;
+  out->range_stop = stop;
+  out->range_step = step;
+  out->len = (size_t)len;
+  out->items = NULL;
+  return true;
+}
+
+static bool ny_ct_seq_len(const ny_ct_fast_val_t *v, int64_t *out) {
+  if (!v || !out)
+    return false;
+  if (v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE ||
+      v->kind == NY_CT_FAST_RANGE) {
+    if (v->len > (size_t)INT64_MAX)
+      return false;
+    *out = (int64_t)v->len;
+    return true;
+  }
+  return false;
+}
+
+static bool ny_ct_seq_item(const ny_ct_fast_val_t *v, int64_t idx,
+                           ny_ct_fast_val_t *out) {
+  if (!v || !out || idx < 0)
+    return false;
+  int64_t len = 0;
+  if (!ny_ct_seq_len(v, &len) || idx >= len)
+    return false;
+  if (v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE) {
+    if (!v->items)
+      return false;
+    *out = v->items[idx];
+    return true;
+  }
+  if (v->kind == NY_CT_FAST_RANGE) {
+    int64_t scaled = 0, item = 0;
+    if (__builtin_mul_overflow(idx, v->range_step, &scaled) ||
+        __builtin_add_overflow(v->range_start, scaled, &item) ||
+        !ny_small_int_fits_i64(item))
+      return false;
+    out->kind = NY_CT_FAST_INT;
+    out->i = item;
+    return true;
+  }
+  return false;
+}
+
+static bool ny_ct_make_seq(ny_ct_fast_kind_t kind, size_t len,
+                           ny_ct_fast_val_t *out) {
+  if (!out || (kind != NY_CT_FAST_LIST && kind != NY_CT_FAST_TUPLE) ||
+      len > 65536)
+    return false;
+  ny_ct_fast_val_t *items = NULL;
+  if (len > 0) {
+    items = calloc(len, sizeof(*items));
+    if (!items)
+      return false;
+  }
+  out->kind = kind;
+  out->len = len;
+  out->items = items;
+  return true;
+}
+
 static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
                                            ny_ct_fast_val_t *out, int depth);
 static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
@@ -1425,6 +1523,9 @@ static bool ny_ct_interp_set(ny_ct_interp_ctx_t *ctx, const char *name,
 
 static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                                    ny_ct_fast_val_t *out, int depth);
+static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
+                                   ny_ct_fast_val_t *ret, bool *did_return,
+                                   int depth);
 
 static bool ny_ct_interp_eval_long_property(expr_t *target,
                                             ny_ct_interp_ctx_t *ctx,
@@ -1463,6 +1564,59 @@ static bool ny_ct_interp_eval_long_property(expr_t *target,
   return false;
 }
 
+static bool ny_ct_interp_eval_lambda1(expr_t *fn, ny_ct_interp_ctx_t *ctx,
+                                      ny_ct_fast_val_t arg,
+                                      ny_ct_fast_val_t *out, int depth) {
+  if (!fn || !ctx || !out ||
+      (fn->kind != NY_E_LAMBDA && fn->kind != NY_E_FN) ||
+      fn->as.lambda.params.len != 1 || !fn->as.lambda.body)
+    return false;
+  const char *param = fn->as.lambda.params.data[0].name;
+  if (!param || !*param)
+    return false;
+  ny_ct_interp_ctx_t nested = {0};
+  if (!ny_ct_interp_ctx_clone(ctx, &nested))
+    return false;
+  bool ok = ny_ct_interp_set(&nested, param, arg);
+  ny_ct_fast_val_t ret = ny_ct_fast_none();
+  bool did_return = false;
+  if (ok)
+    ok = ny_ct_interp_eval_stmt(fn->as.lambda.body, &nested, &ret,
+                                &did_return, depth + 1);
+  ctx->steps = nested.steps;
+  ny_ct_interp_ctx_free(&nested);
+  if (!ok)
+    return false;
+  *out = ret;
+  return true;
+}
+
+static bool ny_ct_interp_eval_map(expr_t *target, expr_t *fn,
+                                  ny_ct_interp_ctx_t *ctx,
+                                  ny_ct_fast_val_t *out, int depth) {
+  if (!target || !fn || !ctx || !out)
+    return false;
+  ny_ct_fast_val_t seq = ny_ct_fast_none();
+  int64_t len = 0;
+  if (!ny_ct_interp_eval_expr(target, ctx, &seq, depth + 1) ||
+      !ny_ct_seq_len(&seq, &len) || len < 0 || len > 65536)
+    return false;
+
+  ny_ct_fast_kind_t out_kind =
+      seq.kind == NY_CT_FAST_TUPLE ? NY_CT_FAST_TUPLE : NY_CT_FAST_LIST;
+  if (!ny_ct_make_seq(out_kind, (size_t)len, out))
+    return false;
+  for (int64_t i = 0; i < len; i++) {
+    ny_ct_fast_val_t item = ny_ct_fast_none();
+    ny_ct_fast_val_t mapped = ny_ct_fast_none();
+    if (!ny_ct_seq_item(&seq, i, &item) ||
+        !ny_ct_interp_eval_lambda1(fn, ctx, item, &mapped, depth + 1))
+      return false;
+    out->items[i] = mapped;
+  }
+  return true;
+}
+
 static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
                                    ny_ct_fast_val_t *ret, bool *did_return,
                                    int depth) {
@@ -1494,7 +1648,10 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
     ny_ct_fast_val_t tmp = ny_ct_fast_none();
     if (!s->as.expr.expr)
       return false;
-    return ny_ct_interp_eval_expr(s->as.expr.expr, ctx, &tmp, depth + 1);
+    if (!ny_ct_interp_eval_expr(s->as.expr.expr, ctx, &tmp, depth + 1))
+      return false;
+    *ret = tmp;
+    return true;
   }
   case NY_S_VAR: {
     if (s->as.var.is_destructure)
@@ -1628,7 +1785,15 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     }
     if (ny_ct_platform_ident(name, out))
       return true;
-    return ny_ct_interp_get(ctx, name, out);
+    if (ny_ct_interp_get(ctx, name, out))
+      return true;
+    if (ctx->cg) {
+      binding *b = lookup_global(ctx->cg, name);
+      expr_t *init = b && !b->is_mut ? ny_binding_var_init_expr(b, name) : NULL;
+      if (init && init != e)
+        return ny_ct_interp_eval_expr(init, ctx, out, depth + 1);
+    }
+    return false;
   }
   case NY_E_UNARY: {
     ny_ct_fast_val_t r = ny_ct_fast_none();
@@ -1691,6 +1856,19 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                                      : e->as.ternary.false_expr,
                                   ctx, out, depth + 1);
   }
+  case NY_E_LIST:
+  case NY_E_TUPLE: {
+    ny_ct_fast_kind_t kind =
+        e->kind == NY_E_TUPLE ? NY_CT_FAST_TUPLE : NY_CT_FAST_LIST;
+    if (!ny_ct_make_seq(kind, e->as.list_like.len, out))
+      return false;
+    for (size_t i = 0; i < e->as.list_like.len; i++) {
+      if (!ny_ct_interp_eval_expr(e->as.list_like.data[i], ctx, &out->items[i],
+                                  depth + 1))
+        return false;
+    }
+    return true;
+  }
   case NY_E_COMPTIME: {
     ny_ct_interp_ctx_t nested = {0};
     ny_ct_fast_val_t nested_ret = ny_ct_fast_none();
@@ -1703,8 +1881,6 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     ny_ct_interp_ctx_free(&nested);
     if (!ok)
       return false;
-    if (!did_return)
-      nested_ret = ny_ct_fast_none();
     *out = nested_ret;
     return true;
   }
@@ -1712,22 +1888,35 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     if (e->as.member.name && strcmp(e->as.member.name, "long") == 0)
       return ny_ct_interp_eval_long_property(e->as.member.target, ctx, out,
                                              depth + 1);
+    if (e->as.member.name && strcmp(e->as.member.name, "len") == 0) {
+      ny_ct_fast_val_t target = ny_ct_fast_none();
+      int64_t len = 0;
+      if (!ny_ct_interp_eval_expr(e->as.member.target, ctx, &target,
+                                  depth + 1) ||
+          !ny_ct_seq_len(&target, &len))
+        return false;
+      out->kind = NY_CT_FAST_INT;
+      out->i = len;
+      return true;
+    }
     return false;
   case NY_E_INDEX: {
     if (!e->as.index.target || !e->as.index.start || e->as.index.stop ||
         e->as.index.step)
       return false;
-    expr_t *target = e->as.index.target;
-    if (target->kind != NY_E_LIST && target->kind != NY_E_TUPLE)
-      return false;
+    ny_ct_fast_val_t target = ny_ct_fast_none();
     ny_ct_fast_val_t idx = ny_ct_fast_none();
-    if (!ny_ct_interp_eval_expr(e->as.index.start, ctx, &idx, depth + 1) ||
+    if (!ny_ct_interp_eval_expr(e->as.index.target, ctx, &target, depth + 1) ||
+        !ny_ct_interp_eval_expr(e->as.index.start, ctx, &idx, depth + 1) ||
         idx.kind != NY_CT_FAST_INT)
       return false;
-    if (idx.i < 0 || (uint64_t)idx.i >= target->as.list_like.len)
+    int64_t len = 0;
+    if (!ny_ct_seq_len(&target, &len))
       return false;
-    return ny_ct_interp_eval_expr(target->as.list_like.data[(size_t)idx.i], ctx, out,
-                                  depth + 1);
+    int64_t resolved = idx.i;
+    if (resolved < 0)
+      resolved += len;
+    return ny_ct_seq_item(&target, resolved, out);
   }
   case NY_E_CALL: {
     if (!e->as.call.callee)
@@ -1738,6 +1927,35 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     bool zero_arg = (e->as.call.args.len == 0);
     bool one_member_arg =
         (e->as.call.args.len == 1 && e->as.call.callee->kind == NY_E_MEMBER);
+    if (strcmp(name, "range") == 0 && e->as.call.args.len >= 1 &&
+        e->as.call.args.len <= 3) {
+      ny_ct_fast_val_t vals[3] = {ny_ct_fast_none(), ny_ct_fast_none(),
+                                  ny_ct_fast_none()};
+      for (size_t i = 0; i < e->as.call.args.len; i++) {
+        if (!ny_ct_interp_eval_expr(e->as.call.args.data[i].val, ctx, &vals[i],
+                                    depth + 1) ||
+            vals[i].kind != NY_CT_FAST_INT)
+          return false;
+      }
+      if (e->as.call.args.len == 1)
+        return ny_ct_make_range(0, vals[0].i, 1, out);
+      if (e->as.call.args.len == 2)
+        return ny_ct_make_range(vals[0].i, vals[1].i, 1, out);
+      return ny_ct_make_range(vals[0].i, vals[1].i, vals[2].i, out);
+    }
+    if (strcmp(name, "range2") == 0 && e->as.call.args.len >= 2 &&
+        e->as.call.args.len <= 3) {
+      ny_ct_fast_val_t vals[3] = {ny_ct_fast_none(), ny_ct_fast_none(),
+                                  ny_ct_fast_none()};
+      for (size_t i = 0; i < e->as.call.args.len; i++) {
+        if (!ny_ct_interp_eval_expr(e->as.call.args.data[i].val, ctx, &vals[i],
+                                    depth + 1) ||
+            vals[i].kind != NY_CT_FAST_INT)
+          return false;
+      }
+      return ny_ct_make_range(vals[0].i, vals[1].i,
+                              e->as.call.args.len == 3 ? vals[2].i : 1, out);
+    }
     if (strcmp(name, "Z") == 0 && e->as.call.args.len == 1) {
       ny_ct_fast_val_t arg = ny_ct_fast_none();
       if (!ny_ct_interp_eval_expr(e->as.call.args.data[0].val, ctx, &arg,
@@ -1764,6 +1982,15 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     }
     return false;
   }
+  case NY_E_MEMCALL: {
+    if (e->as.memcall.name && strcmp(e->as.memcall.name, "map") == 0 &&
+        e->as.memcall.args.len == 1) {
+      expr_t *fn = e->as.memcall.args.data[0].val;
+      return ny_ct_interp_eval_map(e->as.memcall.target, fn, ctx, out,
+                                   depth + 1);
+    }
+    return false;
+  }
   default:
     return false;
   }
@@ -1787,8 +2014,6 @@ static bool ny_try_eval_comptime_interp_value(codegen_t *cg, stmt_t *body,
   ny_ct_interp_ctx_free(&ctx);
   if (!ok)
     return false;
-  if (!did_return)
-    ret = ny_ct_fast_none();
   *out = ret;
   return true;
 }
@@ -2694,6 +2919,67 @@ static LLVMValueRef ny_ct_fast_to_llvm_value(codegen_t *cg,
                           big_from_str->value, (LLVMValueRef[]){str_ptr}, 1,
                           "ct_big_lit");
   }
+  if (v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE) {
+    fun_sig *list_new = lookup_fun(cg, "__list_new", 0);
+    fun_sig *store_item = lookup_fun(cg, "__store_item_fast", 0);
+    fun_sig *set_len = lookup_fun(cg, "__list_set_len", 0);
+    if (!list_new || !store_item || !set_len)
+      return expr_fail(cg, tok,
+                       "comptime list result requires list runtime helpers");
+    LLVMValueRef tagged_len =
+        LLVMConstInt(cg->type_i64, (((uint64_t)v->len << 1) | 1u), false);
+    LLVMValueRef out =
+        LLVMBuildCall2(cg->builder, list_new->type, list_new->value,
+                       (LLVMValueRef[]){tagged_len}, 1,
+                       NY_LLVM_NAME(cg, "ct_interp_list"));
+    for (size_t i = 0; i < v->len; i++) {
+      LLVMValueRef item =
+          ny_ct_fast_to_llvm_value(cg, &v->items[i], tok);
+      if (!item)
+        return NULL;
+      (void)LLVMBuildCall2(
+          cg->builder, store_item->type, store_item->value,
+          (LLVMValueRef[]){
+              out,
+              LLVMConstInt(cg->type_i64, (((uint64_t)i << 1) | 1u), false),
+              item},
+          3, "");
+    }
+    (void)LLVMBuildCall2(cg->builder, set_len->type, set_len->value,
+                         (LLVMValueRef[]){out, tagged_len}, 2, "");
+    if (v->kind == NY_CT_FAST_TUPLE) {
+      fun_sig *as_tuple = lookup_fun(cg, "__list_as_tuple", 0);
+      if (!as_tuple)
+        return expr_fail(cg, tok,
+                         "comptime tuple result requires tuple runtime helper");
+      out = LLVMBuildCall2(cg->builder, as_tuple->type, as_tuple->value,
+                           (LLVMValueRef[]){out}, 1,
+                           NY_LLVM_NAME(cg, "ct_interp_tuple"));
+    }
+    return out;
+  }
+  if (v->kind == NY_CT_FAST_RANGE) {
+    if (!ny_small_int_fits_i64(v->range_start) ||
+        !ny_small_int_fits_i64(v->range_stop) ||
+        !ny_small_int_fits_i64(v->range_step))
+      return expr_fail(cg, tok, "comptime range bounds are out of range");
+    fun_sig *range_new = lookup_fun(cg, "__range_new", 0);
+    if (!range_new)
+      return expr_fail(cg, tok,
+                       "comptime range result requires range runtime helper");
+    LLVMValueRef start =
+        LLVMConstInt(cg->type_i64, (((uint64_t)v->range_start << 1) | 1u),
+                     true);
+    LLVMValueRef stop =
+        LLVMConstInt(cg->type_i64, (((uint64_t)v->range_stop << 1) | 1u),
+                     true);
+    LLVMValueRef step =
+        LLVMConstInt(cg->type_i64, (((uint64_t)v->range_step << 1) | 1u),
+                     true);
+    return LLVMBuildCall2(cg->builder, range_new->type, range_new->value,
+                          (LLVMValueRef[]){start, stop, step}, 3,
+                          NY_LLVM_NAME(cg, "ct_interp_range"));
+  }
   return NULL;
 }
 
@@ -3389,6 +3675,8 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   struct LLVMMCJITCompilerOptions jit_opts;
   ny_jit_init_native_once();
   ny_jit_init_options(&jit_opts, mod);
+  if (ny_module_target_is_apple_arm64(mod))
+    jit_opts.EnableFastISel = 0;
   ny_jit_add_runtime_symbols();
   if (LLVMCreateMCJITCompilerForModule(&ee, mod, &jit_opts, sizeof(jit_opts),
                                        &err) != 0) {
@@ -3401,9 +3689,13 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
 
   register_jit_symbols(ee, mod, &tcg);
   ny_jit_map_unresolved_symbols(ee, mod, entry_name);
-  uint64_t addr = LLVMGetFunctionAddress(ee, entry_name);
+  LLVMValueRef entry_val = LLVMGetNamedFunction(mod, entry_name);
+  uint64_t addr = entry_val ? (uint64_t)LLVMGetPointerToGlobal(ee, entry_val) : 0;
+  if (!addr)
+    addr = LLVMGetFunctionAddress(ee, entry_name);
   int64_t res = 1;
   if (addr) {
+    ny_jit_prepare_execution();
     res = ((int64_t (*)(void))addr)();
   }
 

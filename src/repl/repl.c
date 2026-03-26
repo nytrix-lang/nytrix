@@ -448,6 +448,7 @@ static void repl_apply_exec_trace_env(void) {
     repl_unsetenv_force("NYTRIX_TRACE_FILTER");
     g_trace_requested = 0;
   }
+  rt_trace_refresh_env();
 }
 
 static void repl_print_trace_status(void) {
@@ -1789,6 +1790,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
         repl_unsetenv_force("NYTRIX_TRACE_FILTER");
         g_trace_requested = 0;
         g_trace_suspended = 1;
+        rt_trace_refresh_env();
         ((int64_t (*)(void))init_addr)();
         if (saved_trace)
           repl_setenv_force("NYTRIX_TRACE", saved_trace);
@@ -1812,6 +1814,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
           repl_unsetenv_force("NYTRIX_TRACE_FILTER");
         g_trace_requested = saved_trace_requested;
         g_trace_suspended = saved_trace_suspended;
+        rt_trace_refresh_env();
         free(saved_trace);
         free(saved_calls);
         free(saved_values);

@@ -1,13 +1,28 @@
 # Changelog
 
 Nytrix uses dated development milestones. The compiler reports a
-Git-derived build version through the canonical `VERSION` define in
-`common.h`, surfaced by `ny --version`.
+Git-derived build version through the generated `NYTRIX_VERSION` define in
+`nytrix_version.h`, surfaced by `ny --version`.
 
 ## Open maintenance checks
 
 - [ ] Stabilize cross-platform window-system checks on Windows and macOS.
 - [ ] Stabilize REPL and terminal UI checks on Windows and macOS.
+
+## [0.4.2] - 2026-05-31
+
+### Changed
+- Kept `0.4.x` as the active development line while Git-derived build metadata
+  continues to identify exact build snapshots.
+- Made development builds report the release version with Git build metadata,
+  preferring the tracked remote ref from `.git` before falling back to `HEAD`.
+
+### Fixed
+- Fixed macOS arm64 comptime evaluation for small immutable list, tuple, and
+  range values so compile-time sequence helpers do not fall back to transient
+  JIT execution.
+- Fixed interpreted comptime blocks so expression-only blocks and single-expression
+  lambdas preserve their result value.
 
 ## [0.4.1] - 2026-05-31
 

@@ -5498,6 +5498,7 @@ skip_compilation:
       maybe_log_phase_time(opt->do_timing, "JIT Compile:", t_exec);
       ny_tick_t t_run = opt->do_timing ? ny_ticks_now() : 0;
       if (saddr) {
+        ny_jit_prepare_execution();
         if (verbose_enabled >= 3)
           fprintf(stderr, "TRACE: Executing script...\n");
         ((void (*)(void))saddr)();
