@@ -25,7 +25,10 @@ typedef enum ny_ct_fast_kind_t {
   NY_CT_FAST_INT,
   NY_CT_FAST_BOOL,
   NY_CT_FAST_STR,
-  NY_CT_FAST_BIGINT
+  NY_CT_FAST_BIGINT,
+  NY_CT_FAST_LIST,
+  NY_CT_FAST_TUPLE,
+  NY_CT_FAST_RANGE
 } ny_ct_fast_kind_t;
 
 typedef struct ny_ct_fast_val_t {
@@ -33,11 +36,23 @@ typedef struct ny_ct_fast_val_t {
   int64_t i;
   bool b;
   const char *s;
+  size_t len;
+  struct ny_ct_fast_val_t *items;
+  int64_t range_start;
+  int64_t range_stop;
+  int64_t range_step;
 } ny_ct_fast_val_t;
 
 static inline ny_ct_fast_val_t ny_ct_fast_none(void) {
-  return (ny_ct_fast_val_t){
-      .kind = NY_CT_FAST_NONE, .i = 0, .b = false, .s = NULL};
+  return (ny_ct_fast_val_t){.kind = NY_CT_FAST_NONE,
+                            .i = 0,
+                            .b = false,
+                            .s = NULL,
+                            .len = 0,
+                            .items = NULL,
+                            .range_start = 0,
+                            .range_stop = 0,
+                            .range_step = 1};
 }
 
 static inline bool ny_ct_fast_truthy(const ny_ct_fast_val_t *v, bool *out) {
@@ -53,6 +68,9 @@ static inline bool ny_ct_fast_truthy(const ny_ct_fast_val_t *v, bool *out) {
     *out = (v->s && *v->s);
   } else if (v->kind == NY_CT_FAST_BIGINT) {
     *out = (v->s && strcmp(v->s, "0") != 0 && strcmp(v->s, "-0") != 0);
+  } else if (v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE ||
+             v->kind == NY_CT_FAST_RANGE) {
+    *out = v->len > 0;
   } else {
     *out = true;
   }

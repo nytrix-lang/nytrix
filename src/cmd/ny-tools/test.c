@@ -302,7 +302,42 @@ static char *ny_test_build_cmdline(char *const argv[]) {
   return cmd ? cmd : strdup("");
 }
 
+#ifdef _WIN32
+static int ny_test_path_has_sep(const char *path) {
+  return path && (strchr(path, '/') || strchr(path, '\\'));
+}
+
+static int ny_test_file_exists(const char *path) {
+  DWORD attr = GetFileAttributesA(path);
+  return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static const char *ny_test_resolve_app(char *arg0, char *buf, size_t buf_sz) {
+  if (!arg0 || !*arg0 || !ny_test_path_has_sep(arg0))
+    return NULL;
+  snprintf(buf, buf_sz, "%s", arg0);
+  if (ny_test_file_exists(buf))
+    return buf;
+  const char *slash = strrchr(arg0, '/');
+  const char *backslash = strrchr(arg0, '\\');
+  const char *base = slash;
+  if (!base || (backslash && backslash > base))
+    base = backslash;
+  base = base ? base + 1 : arg0;
+  if (!strchr(base, '.')) {
+    snprintf(buf, buf_sz, "%s.exe", arg0);
+    if (ny_test_file_exists(buf))
+      return buf;
+  }
+  return NULL;
+}
+#endif
+
 static ny_test_proc_t ny_test_spawn_argv(char *const argv[], const char *output_path, int quiet) {
+#ifdef _WIN32
+  char app_buf[PATH_MAX];
+  const char *app = ny_test_resolve_app(argv ? argv[0] : NULL, app_buf, sizeof(app_buf));
+#endif
   char *cmd = ny_test_build_cmdline(argv);
   if (!cmd)
     return NY_TEST_PROC_INVALID;
@@ -337,7 +372,7 @@ static ny_test_proc_t ny_test_spawn_argv(char *const argv[], const char *output_
     }
   }
   apply_test_child_env();
-  BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, inherit, 0, NULL, NULL, &si, &pi);
+  BOOL ok = CreateProcessA(app, cmd, NULL, NULL, inherit, 0, NULL, NULL, &si, &pi);
   free(cmd);
   if (out)
     CloseHandle(out);

@@ -9,6 +9,7 @@ use std.core
    #include <sys/types.h> as ""
    #include <unistd.h> as "get"
    #include <sys/time.h> as ""
+   #include <string.h> as ""
 } #endif
 print("Testing FFI include resolution...")
 assert(NYTRIX_FFI_CONST_HEX == 42, "FFI exposes object-like integer macros")
