@@ -13,6 +13,6 @@ fn main(): int {
       str_seen = str_seen.append(f"{x} iter is {i}")
    }
    assert(str_seen == ["t iter is 0", "e iter is 1", "s iter is 2", "t iter is 3"], "REPL indexed string for")
-   print("REPL_INDEXED_FOR_OK")
+   print("REPL_INDEXED_" + "FOR_OK")
    return 0
 }

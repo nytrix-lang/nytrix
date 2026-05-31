@@ -6778,6 +6778,10 @@ LLVMValueRef ny_try_native_call_as_f64(codegen_t *cg, scope *scopes,
       sig->return_type ? sig->return_type : sig->inferred_return_type;
   if (!ret_type || !(ny_type_is(ret_type, "f64") || ny_type_is(ret_type, "float")))
     return NULL;
+  const char *abi_ret_type = sig->abi_return_type ? sig->abi_return_type : ret_type;
+  if (!abi_ret_type ||
+      !(ny_type_is(abi_ret_type, "f64") || ny_type_is(abi_ret_type, "float")))
+    return NULL;
   LLVMTypeRef ret_ty = LLVMGetReturnType(sig->type);
   if (LLVMGetTypeKind(ret_ty) != LLVMDoubleTypeKind)
     return NULL;
