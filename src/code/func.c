@@ -211,6 +211,12 @@ static bool trace_ret_type_is_unsigned(const char *type_name) {
   return strcmp(leaf, "usize") == 0 || (leaf[0] == 'u' && isdigit((unsigned char)leaf[1]));
 }
 
+static bool trace_ret_type_is_complex(const char *type_name) {
+  const char *leaf = ny_type_leaf(type_name);
+  return leaf && (strcmp(leaf, "complex") == 0 || strcmp(leaf, "c64") == 0 ||
+                  strcmp(leaf, "c128") == 0);
+}
+
 static LLVMValueRef trace_i64_arg(codegen_t *cg, LLVMValueRef v, bool is_unsigned) {
   if (!cg || !v)
     return v;
@@ -274,6 +280,15 @@ void ny_cg_emit_trace_return(codegen_t *cg, LLVMValueRef v, const char *ret_type
       return;
     LLVMValueRef arg = trace_i64_arg(cg, v, true);
     LLVMBuildCall2(cg->builder, ts->type, ts->value, &arg, 1, "");
+    return;
+  }
+
+  if (trace_ret_type_is_complex(ret_type)) {
+    fun_sig *ts = lookup_fun(cg, "__trace_ret_tagged", 0);
+    if (!ts)
+      return;
+    LLVMValueRef boxed = ny_box_abi_result(cg, v, ret_type);
+    LLVMBuildCall2(cg->builder, ts->type, ts->value, &boxed, 1, "");
     return;
   }
 

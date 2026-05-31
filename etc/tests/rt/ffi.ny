@@ -3,13 +3,13 @@ use std.core
 #include "etc/tests/rt/ffi/fficonsts.h" as ""
 #include "etc/tests/rt/ffi/transitive.h" as ""
 #include <stdlib.h> as "getenv"
+#include <math.h> as "cos"
 #windows {
    #include <windows.h> as "GetCurrentProcess"
 } #else {
    #include <sys/types.h> as ""
    #include <unistd.h> as "get"
    #include <sys/time.h> as ""
-   #include <string.h> as ""
 } #endif
 print("Testing FFI include resolution...")
 assert(NYTRIX_FFI_CONST_HEX == 42, "FFI exposes object-like integer macros")
@@ -22,6 +22,8 @@ assert(__layout_size("NytrixFfiColor") == 4, "FFI imports typedef struct layouts
 assert(__layout_size("NytrixFfiImage") >= 20, "FFI imports pointer-bearing structs")
 def path_env = getenv("PATH")
 assert(type(path_env) == "str" && path_env.len > 0, "FFI converts C string returns into Ny strings")
+def c = cos(0.0)
+assert(type(c) == "float" && c == 1.0, "FFI preserves native floating-point return values")
 def ffi_color = NytrixFfiColor(1, 2, 3, 4)
 assert(load_layout(ffi_color, "NytrixFfiColor", "g") == 2, "FFI layout fields are loadable")
 free(ffi_color)
@@ -31,6 +33,10 @@ free(ffi_color)
 } #else {
    def pid = getpid()
    assert(pid > 0, "posix standard header import exposes getpid")
+   def login_name = getlogin()
+   if(login_name){
+      assert(type(login_name) == "str" && login_name.len > 0, "posix getlogin returns a Ny string")
+   }
    mut timeval: tv = timeval(0, 0)
    assert(gettimeofday(&tv, NULL) == 0, "posix header import accepts NULL and timeval out pointer")
 } #endif
