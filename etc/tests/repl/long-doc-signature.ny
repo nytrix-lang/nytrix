@@ -30,5 +30,5 @@ fn main(): any {
          48, 49, 50, 51, 52, 53,
          54, 55, 56, 57, 58, 59
    ) == 1, "long REPL doc signature survives paste")
-   print("REPL_LONG_DOC_SIGNATURE_OK")
+   print("REPL_LONG_DOC_" + "SIGNATURE_OK")
 }

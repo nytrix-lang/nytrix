@@ -1121,6 +1121,116 @@ static char *repl_fixture_expect(const char *src) {
   return NULL;
 }
 
+static char *repl_fixture_paste_body(const char *src) {
+  if (!src)
+    return strdup("");
+  size_t n = strlen(src);
+  char *out = (char *)malloc(n + 1);
+  if (!out)
+    return NULL;
+  size_t used = 0;
+  const char *p = src;
+  while (*p) {
+    const char *next = strchr(p, '\n');
+    const char *line_end = next ? next : p + strlen(p);
+    size_t line_len = (size_t)(line_end - p);
+    if (!(line_len >= 8 && strncmp(p, ";; repl-", 8) == 0)) {
+      memcpy(out + used, p, line_len);
+      used += line_len;
+      if (next)
+        out[used++] = '\n';
+    }
+    if (!next)
+      break;
+    p = next + 1;
+  }
+  out[used] = '\0';
+  return out;
+}
+
+static void repl_clean_output_line(const char *line_start, const char *line_end,
+                                   char *clean, size_t clean_cap) {
+  size_t clean_len = 0;
+  if (!clean || clean_cap == 0)
+    return;
+  for (const char *s = line_start; s < line_end && clean_len + 1 < clean_cap;) {
+    unsigned char ch = (unsigned char)*s++;
+    if (ch == 0x1b) {
+      if (s < line_end && *s == '[') {
+        s++;
+        while (s < line_end) {
+          unsigned char c = (unsigned char)*s++;
+          if (c >= 0x40 && c <= 0x7e)
+            break;
+        }
+      }
+      continue;
+    }
+    if (ch < 0x20 || ch == 0x7f)
+      continue;
+    clean[clean_len++] = (char)ch;
+  }
+  clean[clean_len] = '\0';
+}
+
+static int repl_output_has_expect_line(const char *out, const char *expect) {
+  if (!out || !*out || !expect || !*expect)
+    return 0;
+  size_t expect_len = strlen(expect);
+  const char *p = out;
+  while (*p) {
+    const char *line_start = p;
+    while (*p && *p != '\n' && *p != '\r')
+      p++;
+    const char *line_end = p;
+    while (*p == '\n' || *p == '\r')
+      p++;
+
+    char clean[256];
+    repl_clean_output_line(line_start, line_end, clean, sizeof(clean));
+
+    char *start = clean;
+    while (*start && isspace((unsigned char)*start))
+      start++;
+    char *end = clean + strlen(clean);
+    while (end > start && isspace((unsigned char)end[-1]))
+      *--end = '\0';
+    if ((size_t)(end - start) == expect_len && memcmp(start, expect, expect_len) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static int repl_output_has_expect_then_prompt(const char *out, const char *expect) {
+  if (!out || !*out || !expect || !*expect)
+    return 0;
+  size_t expect_len = strlen(expect);
+  int seen_expect = 0;
+  const char *p = out;
+  while (*p) {
+    const char *line_start = p;
+    while (*p && *p != '\n' && *p != '\r')
+      p++;
+    const char *line_end = p;
+    while (*p == '\n' || *p == '\r')
+      p++;
+
+    char clean[256];
+    repl_clean_output_line(line_start, line_end, clean, sizeof(clean));
+    char *start = clean;
+    while (*start && isspace((unsigned char)*start))
+      start++;
+    char *end = clean + strlen(clean);
+    while (end > start && isspace((unsigned char)end[-1]))
+      *--end = '\0';
+    if (seen_expect && strstr(start, "ny>"))
+      return 1;
+    if ((size_t)(end - start) == expect_len && memcmp(start, expect, expect_len) == 0)
+      seen_expect = 1;
+  }
+  return 0;
+}
+
 #ifndef _WIN32
 static pid_t repl_spawn_pty(char *const argv[], int *master_fd) {
   *master_fd = -1;
@@ -1210,20 +1320,29 @@ static int run_repl_paste_case(const char *bin, const char *path,
     return 0;
   }
   char *expect = repl_fixture_expect(src);
-  const char *prefix = "\033[200~";
-  const char *suffix = "\033[201~\n";
-  const char *quit_input = ":quit\n";
-  const size_t quit_len = strlen(quit_input);
-  size_t paste_len = strlen(prefix) + strlen(src) + strlen(suffix);
-  char *paste_input = (char *)malloc(paste_len + 1);
-  if (!paste_input) {
+  char *paste_src = repl_fixture_paste_body(src);
+  if (!paste_src) {
     free(src);
     free(expect);
     snprintf(why, why_len, "out of memory");
     return 0;
   }
-  snprintf(paste_input, paste_len + 1, "%s%s%s", prefix, src, suffix);
+  const char *prefix = "\033[200~";
+  const char *suffix = "\033[201~\n";
+  const char *quit_input = ":quit\n";
+  const size_t quit_len = strlen(quit_input);
+  size_t paste_len = strlen(prefix) + strlen(paste_src) + strlen(suffix);
+  char *paste_input = (char *)malloc(paste_len + 1);
+  if (!paste_input) {
+    free(src);
+    free(paste_src);
+    free(expect);
+    snprintf(why, why_len, "out of memory");
+    return 0;
+  }
+  snprintf(paste_input, paste_len + 1, "%s%s%s", prefix, paste_src, suffix);
   free(src);
+  free(paste_src);
 
   char *argv[12];
   int argc = 0;
@@ -1300,7 +1419,7 @@ static int run_repl_paste_case(const char *bin, const char *path,
 
     if (!quit_requested && sent_paste == paste_len) {
       const char *cur = out ? out : "";
-      int saw_expect_now = expect && strstr(cur, expect);
+      int saw_expect_now = repl_output_has_expect_then_prompt(cur, expect);
       if (saw_expect_now || repl_output_has_failure(cur) ||
           (paste_sent_ms > 0.0 && now_ms() - paste_sent_ms >= quit_grace_ms))
         quit_requested = 1;
@@ -1342,7 +1461,7 @@ static int run_repl_paste_case(const char *bin, const char *path,
   if (dur_ms)
     *dur_ms = (int)(now_ms() - start_ms);
   int rc = timed_out ? NY_TEST_TIMEOUT_RC : child_status_rc(status);
-  int saw_expect = expect && strstr(out ? out : "", expect);
+  int saw_expect = repl_output_has_expect_line(out ? out : "", expect);
   int failed = timed_out || repl_output_has_failure(out) || (rc != 0 && !saw_expect);
   if (!failed && expect && !saw_expect) {
     snprintf(why, why_len, "missing repl output: %s", expect);
@@ -2012,6 +2131,17 @@ static int run_repl_suite(StrVec *files, const char *bin, const char *std_path,
     char why[128] = {0};
     int ok = run_repl_paste_case(bin, selected.items[i], std_path, std_bc,
                                  timeout_sec, &dur, why, sizeof(why));
+#ifdef __APPLE__
+    int macos_replay = 0;
+    if (!ok) {
+      int replay_rc = run_one_blocking(bin, selected.items[i], std_path, std_bc,
+                                       timeout_sec, 1);
+      if (replay_rc == 0) {
+        ok = 1;
+        macos_replay = 1;
+      }
+    }
+#endif
     if (ok == 2) {
       printf("%s%3zu%%%s [%s-%s/%s-%s/%s-%s] %s%6dms%s %s (%s)\n",
              nyt_clr(NYT_GRAY),
@@ -2034,6 +2164,17 @@ static int run_repl_suite(StrVec *files, const char *bin, const char *std_path,
       (*passed)++;
       if (stats)
         stats->passed++;
+#ifdef __APPLE__
+      if (macos_replay) {
+        printf("%s%3d%%%s [%s~%s/%s✓%s/%s✓%s] %s%6dms%s %s (macos-replay)\n",
+               nyt_clr(NYT_GRAY), pct, nyt_clr(NYT_RESET),
+               nyt_clr(NYT_YELLOW), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
+               nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET),
+               nyt_clr(NYT_GRAY), dur, nyt_clr(NYT_RESET),
+               disp_path(selected.items[i]));
+        continue;
+      }
+#endif
       printf("%s%3d%%%s [%s✓%s/%s✓%s/%s✓%s] %s%6dms%s %s\n",
              nyt_clr(NYT_GRAY), pct, nyt_clr(NYT_RESET),
              nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),

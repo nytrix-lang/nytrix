@@ -177,19 +177,16 @@ fn set(any: obj=8, any: key=nil, any: val=nil): any {
    "Creates a set with set()/set(cap), or stores val with obj.set(key, val)."
    if(key == nil && val == nil && is_int(obj)){ return core_set.set(obj) }
    core_ref.set(obj, key, val)
-   return obj
 }
 
 fn put(any: obj, any: key, any: val): any {
    "Stores `val` at `key` in a dict or sequence-like container."
    core_ref.set_idx(obj, key, val)
-   return obj
 }
 
 fn set_idx(any: obj, any: key, any: val): any {
    "Stores `val` at `key` in a dict or sequence-like container."
    core_ref.set_idx(obj, key, val)
-   return obj
 }
 
 fn delete(any: obj, any: key): any {

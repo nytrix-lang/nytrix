@@ -1826,25 +1826,38 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
 }
 
 static void repl_shutdown_engine(void) {
-  if (g_repl_ee) {
-    LLVMDisposeExecutionEngine(g_repl_ee);
-    g_repl_ee = NULL;
-    g_repl_cg.module = NULL;
-  } else if (g_repl_cg.module) {
-    LLVMDisposeModule(g_repl_cg.module);
-    g_repl_cg.module = NULL;
-  }
-  if (g_repl_builder) {
-    LLVMDisposeBuilder(g_repl_builder);
-    g_repl_builder = NULL;
-    g_repl_cg.builder = NULL;
-  }
-  if (g_repl_ctx) {
-    LLVMContextDispose(g_repl_ctx);
-    g_repl_ctx = NULL;
-    g_repl_cg.ctx = NULL;
-  }
+  LLVMExecutionEngineRef ee = g_repl_ee;
+  LLVMModuleRef module = g_repl_cg.module;
+  LLVMContextRef ctx = g_repl_ctx;
+
+  g_repl_ee = NULL;
+  g_repl_builder = NULL;
+  g_repl_ctx = NULL;
+  g_repl_cg.ee = NULL;
+  g_repl_cg.llvm_ctx_owned = false;
   codegen_dispose(&g_repl_cg);
+  memset(&g_repl_cg, 0, sizeof(codegen_t));
+
+  if (ee) {
+    LLVMDisposeExecutionEngine(ee);
+  } else if (module) {
+    LLVMDisposeModule(module);
+  }
+  if (ctx) {
+    LLVMContextDispose(ctx);
+  }
+  g_eval_count = 0;
+  if (g_std_src_cached_persistent) {
+    free(g_std_src_cached_persistent);
+    g_std_src_cached_persistent = NULL;
+  }
+  vec_free(&g_repl_loading_modules);
+}
+
+static void repl_drop_engine_refs_on_exit(void) {
+  g_repl_ee = NULL;
+  g_repl_builder = NULL;
+  g_repl_ctx = NULL;
   memset(&g_repl_cg, 0, sizeof(codegen_t));
   g_eval_count = 0;
   if (g_std_src_cached_persistent) {
@@ -3471,11 +3484,23 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     }
     free(init_lines);
   }
-  if (!fast_batch_exit)
+  if (!fast_batch_exit) {
+#ifdef __APPLE__
     repl_shutdown_engine();
+#else
+    repl_drop_engine_refs_on_exit();
+#endif
+  }
 #ifdef _WIN32
   signal(SIGINT, prev_sigint);
 #else
   sigaction(SIGINT, &prev_sigint, NULL);
+#endif
+#ifdef __APPLE__
+  if (!fast_batch_exit) {
+    repl_restore_terminal_state();
+    fflush(NULL);
+    _Exit(0);
+  }
 #endif
 }

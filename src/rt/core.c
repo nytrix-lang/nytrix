@@ -51,6 +51,7 @@ static bool g_trace_env_calls = false;
 static bool g_trace_env_values = false;
 static bool g_trace_env_verbose = false;
 static bool g_trace_env_index_read = false;
+static char g_trace_env_filter_buf[256] = {0};
 static const char *g_trace_env_filter = NULL;
 
 #ifndef _WIN32
@@ -393,7 +394,14 @@ void rt_trace_refresh_env(void) {
   g_trace_env_values = trace_env_enabled_uncached("NYTRIX_TRACE_VALUES");
   g_trace_env_verbose = trace_env_enabled_uncached("NYTRIX_TRACE_VERBOSE");
   g_trace_env_index_read = trace_env_enabled_uncached("NYTRIX_INDEX_READ_PARITY");
-  g_trace_env_filter = getenv("NYTRIX_TRACE_FILTER");
+  const char *filter = getenv("NYTRIX_TRACE_FILTER");
+  if (filter && *filter) {
+    snprintf(g_trace_env_filter_buf, sizeof(g_trace_env_filter_buf), "%s", filter);
+    g_trace_env_filter = g_trace_env_filter_buf;
+  } else {
+    g_trace_env_filter_buf[0] = '\0';
+    g_trace_env_filter = NULL;
+  }
   g_trace_env_ready = 1;
   g_index_read_probe_mode = g_trace_env_index_read ? 1 : 0;
 }

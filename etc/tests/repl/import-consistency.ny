@@ -13,6 +13,6 @@ fn main(): int {
    assert(digest == "a9993e364706816aba3e25717850c26c9cd0d89d", "hash import survives pasted imports")
    assert(digest_bytes.len == 20, "bin alias survives pasted imports")
    assert(shared == Z(6), "nt import survives pasted imports")
-   print("REPL_IMPORT_CONSISTENCY_OK")
+   print("REPL_IMPORT_" + "CONSISTENCY_OK")
    return 0
 }

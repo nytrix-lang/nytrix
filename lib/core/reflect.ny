@@ -48,7 +48,7 @@ fn _is_bytes(any: x): bool { _has_tag(x, _TAG_BYTES) }
 @inline
 fn _is_raw_ptr_like(any: x): bool {
    def tag = __tagof(x)
-   __eq(tag, _TAG_PTR) || __eq(tag, _TAG_FFI_PTR)
+   __eq(tag, _TAG_PTR) || __eq(tag, _TAG_FFI_PTR) || (tag == 0 && prim.is_ptr(x))
 }
 
 @inline

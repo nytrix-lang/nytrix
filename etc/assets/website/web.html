@@ -121,16 +121,12 @@ SEO_PLACEHOLDER
                     <div class="docs-hero-aside">
                         <pre class="docs-example"><code>use std
 def scale = comptime { 2^5 }
-fn norm(p) {
-   def x,y = p[0], p[1]
-   int(sqrt(x*x + y*y))
-}
 fn tag(n) case n {
    0..31 -&gt; "small"
    32..63 -&gt; "mid"
    _ -&gt; "big"
 }
-def lens = [[3,4], [6,8], [5,12], [8,15]].map(norm)
+def lens = [[3,4],[6,8],[5,12],[8,15]].map(fn(p){ int(sqrt(p[0]*p[0] + p[1]*p[1])) })
 def sum = lens.reduce(0, fn(a,n){ a + n })
 print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")</code></pre>
                     </div>
