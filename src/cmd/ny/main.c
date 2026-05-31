@@ -176,6 +176,9 @@ static void handle_segv(int sig) {
   const char *name = (sig == SIGSEGV)   ? "SegmentationFault"
                      : (sig == SIGABRT) ? "AbortError"
                      : (sig == SIGFPE)  ? "FloatingPointError"
+#ifdef SIGBUS
+                     : (sig == SIGBUS)  ? "BusError"
+#endif
                      : (sig == SIGILL)  ? "IllegalInstructionError"
                                         : "SignalError";
 
@@ -235,6 +238,9 @@ static void ny_install_signal_handlers(void) {
   (void)sigaction(SIGSEGV, &sa, NULL);
   (void)sigaction(SIGABRT, &sa, NULL);
   (void)sigaction(SIGFPE, &sa, NULL);
+#ifdef SIGBUS
+  (void)sigaction(SIGBUS, &sa, NULL);
+#endif
   (void)sigaction(SIGILL, &sa, NULL);
   (void)signal(SIGALRM, handle_timeout);
 #else

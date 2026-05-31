@@ -13,6 +13,6 @@ fn main(): int {
    assert(std.os.file_exists("/tmp") == true, "lazy std root accepts full std os completions")
    assert(nt.is_prime(17) == true, "lazy std root imports nested module aliases")
    assert(std.math.nt.is_prime(19) == true, "lazy std root accepts full nested std completions")
-   print("REPL_LAZY_STD_NAMESPACE_OK")
+   print("REPL_LAZY_STD_" + "NAMESPACE_OK")
    return 0
 }

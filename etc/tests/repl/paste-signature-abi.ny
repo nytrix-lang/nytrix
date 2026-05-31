@@ -34,5 +34,5 @@ fn main(){
    repl_default_get()
    assert(repl_lerp(1, 3, 0.5) == 2, "numeric param types survive paste")
    assert(NYTRIX_FFI_CONST_MASK == (42 | 32), "FFI constants survive pasted include")
-   print("REPL_MAIN_OK")
+   print("REPL_MAIN_" + "OK")
 }
