@@ -1569,6 +1569,7 @@ void add_builtins(codegen_t *cg) {
     b.value = g;                                                               \
     b.is_slot = true;                                                          \
     b.is_stable = true;                                                        \
+    b.owned = true;                                                            \
     vec_push(&cg->global_vars, b);                                             \
   } while (0);
 
@@ -1682,16 +1683,25 @@ char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
   if (e->kind == NY_E_IDENT) {
     const char *resolved_alias = resolve_import_alias(cg, e->as.ident.name);
     if (resolved_alias)
-      return arena_strndup(a, resolved_alias, strlen(resolved_alias));
-    return arena_strndup(a, e->as.ident.name, strlen(e->as.ident.name));
+      return a ? arena_strndup(a, resolved_alias, strlen(resolved_alias))
+               : ny_strndup(resolved_alias, strlen(resolved_alias));
+    return a ? arena_strndup(a, e->as.ident.name, strlen(e->as.ident.name))
+             : ny_strndup(e->as.ident.name, strlen(e->as.ident.name));
   }
   if (e->kind == NY_E_MEMBER) {
     char *target_name = codegen_full_name(cg, e->as.member.target, a);
     if (!target_name)
       return NULL;
     size_t len = strlen(target_name) + 1 + strlen(e->as.member.name);
-    char *full_name = arena_alloc(a, len + 1);
+    char *full_name = a ? arena_alloc(a, len + 1) : malloc(len + 1);
+    if (!full_name) {
+      if (!a)
+        free(target_name);
+      return NULL;
+    }
     snprintf(full_name, len + 1, "%s.%s", target_name, e->as.member.name);
+    if (!a)
+      free(target_name);
     return full_name;
   }
   return NULL;

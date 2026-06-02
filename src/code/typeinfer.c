@@ -296,7 +296,7 @@ void typeinfer_ctx_dispose(typeinfer_ctx_t *ctx) {
   if (!ctx)
     return;
   free(ctx->vars);
-  ny_type_arena_reset(&ctx->type_arena);
+  arena_free(&ctx->type_arena.arena);
   memset(ctx, 0, sizeof(*ctx));
 }
 
@@ -893,20 +893,33 @@ void typeinfer_apply_to_scopes(typeinfer_ctx_t *ctx, scope *scopes, size_t depth
           b->is_f64_direct = !b->is_slot;
         }
 
-        if (b->stmt_t && b->stmt_t->kind == NY_S_VAR &&
-            b->stmt_t->sema_kind == NY_STMT_SEMA_VAR && b->stmt_t->sema) {
-          sema_var_t *sv = (sema_var_t *)b->stmt_t->sema;
-          for (size_t k = 0; k < b->stmt_t->as.var.names.len; k++) {
-            if (strcmp(b->stmt_t->as.var.names.data[k], b->name) == 0) {
-              while (sv->is_int_proven.len <= k)
-                vec_push(&sv->is_int_proven, false);
-              while (sv->is_f64_proven.len <= k)
-                vec_push(&sv->is_f64_proven, false);
-              while (sv->escapes.len <= k)
-                vec_push(&sv->escapes, false);
-              sv->is_int_proven.data[k] = bit_i64 && !bit_dyn;
-              sv->is_f64_proven.data[k] = bit_f64 && !bit_dyn;
-              sv->escapes.data[k] = bit_esc;
+	    if (b->stmt_t && b->stmt_t->kind == NY_S_VAR &&
+	        b->stmt_t->sema_kind == NY_STMT_SEMA_VAR && b->stmt_t->sema) {
+	      sema_var_t *sv = (sema_var_t *)b->stmt_t->sema;
+	      arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
+	      for (size_t k = 0; k < b->stmt_t->as.var.names.len; k++) {
+	        if (strcmp(b->stmt_t->as.var.names.data[k], b->name) == 0) {
+	          while (sv->is_int_proven.len <= k) {
+	            if (sema_arena)
+	              vec_push_arena(sema_arena, &sv->is_int_proven, false);
+	            else
+	              vec_push(&sv->is_int_proven, false);
+	          }
+	          while (sv->is_f64_proven.len <= k) {
+	            if (sema_arena)
+	              vec_push_arena(sema_arena, &sv->is_f64_proven, false);
+	            else
+	              vec_push(&sv->is_f64_proven, false);
+	          }
+	          while (sv->escapes.len <= k) {
+	            if (sema_arena)
+	              vec_push_arena(sema_arena, &sv->escapes, false);
+	            else
+	              vec_push(&sv->escapes, false);
+	          }
+	          sv->is_int_proven.data[k] = bit_i64 && !bit_dyn;
+	          sv->is_f64_proven.data[k] = bit_f64 && !bit_dyn;
+	          sv->escapes.data[k] = bit_esc;
               break;
             }
           }

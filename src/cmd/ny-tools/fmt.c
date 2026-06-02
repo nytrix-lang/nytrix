@@ -7436,6 +7436,37 @@ static int cmp_cloc_row_desc(const void *a, const void *b) {
   return strcmp(ra->path ? ra->path : "", rb->path ? rb->path : "");
 }
 
+static int cloc_row_churn(const ClocRow *r) {
+  if (!r)
+    return 0;
+  return r->add + r->del;
+}
+
+static int cloc_row_abs_net(const ClocRow *r) {
+  if (!r)
+    return 0;
+  int net = r->add - r->del;
+  return net < 0 ? -net : net;
+}
+
+static int cmp_cloc_row_churn_desc(const void *a, const void *b) {
+  const ClocRow *ra = (const ClocRow *)a;
+  const ClocRow *rb = (const ClocRow *)b;
+  int ca = cloc_row_churn(ra);
+  int cb = cloc_row_churn(rb);
+  if ((ca > 0) != (cb > 0))
+    return cb - ca;
+  if (ca != cb)
+    return cb - ca;
+  int na = cloc_row_abs_net(ra);
+  int nb = cloc_row_abs_net(rb);
+  if (na != nb)
+    return nb - na;
+  if (ra->loc != rb->loc)
+    return rb->loc - ra->loc;
+  return strcmp(ra->path ? ra->path : "", rb->path ? rb->path : "");
+}
+
 static void cloc_fmt_int(int value, char *out, size_t out_sz) {
   if (!out || out_sz == 0)
     return;
@@ -7742,10 +7773,13 @@ static int run_cloc_mode(const FmtOpts *o) {
   for (size_t i = 0; i < files.len; i++)
     top[i] = rows[i];
 
-  qsort(top, files.len, sizeof(ClocRow), cmp_cloc_row_desc);
+  qsort(top, files.len, sizeof(ClocRow),
+        stats.diff_files > 0 ? cmp_cloc_row_churn_desc : cmp_cloc_row_desc);
   int top_n = o->cloc_top > 0 ? o->cloc_top : 20;
   if ((size_t)top_n > files.len)
     top_n = (int)files.len;
+  if (stats.diff_files > 0 && top_n > stats.diff_files)
+    top_n = stats.diff_files;
 
   if (o->json) {
     print_cloc_json(&stats, top, files.len, top_n, o->cloc_full);
@@ -7791,7 +7825,8 @@ static int run_cloc_mode(const FmtOpts *o) {
     printf("%sext%s    %sny%s %s/%s  %snyt%s %s/%s  %sc%s %s/%s  %sh%s %s/%s\n", gray, rs, cyan, rs, ny_files_s,
            ny_loc_s, cyan, rs, nyt_files_s, nyt_loc_s, cyan, rs, c_files_s, c_loc_s, cyan, rs, h_files_s, h_loc_s);
     fputc('\n', stdout);
-    printf("%sTop %d by LOC%s\n", bold, top_n, rs);
+    printf("%sTop %d %s%s\n", bold, top_n,
+           stats.diff_files > 0 ? "changed files" : "by LOC", rs);
     printf(" %s#%s  %s%9s%s %s%9s%s %s%9s%s %s%9s%s  %sPATH%s\n", gray, rs, cyan, "LOC", rs, green, "+ADD", rs, red,
            "-DEL", rs, mag, "NET", rs, gray, rs);
     for (int i = 0; i < top_n; i++) {

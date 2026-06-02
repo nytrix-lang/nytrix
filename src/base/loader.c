@@ -848,13 +848,17 @@ int ny_std_find_module_by_name(const char *name) {
   if (!name || !*name)
     return -1;
   ny_std_init_modules();
-  const char *tries[4] = {name, NULL, NULL, NULL};
-  char buf_mod[256], buf_core[256];
+  const char *tries[5] = {name, NULL, NULL, NULL, NULL};
+  char buf_mod[256], buf_core[256], buf_compat_mod[256];
   snprintf(buf_mod, sizeof(buf_mod), "%s.mod", name);
   snprintf(buf_core, sizeof(buf_core), "%s.core", name);
+  size_t name_len = strlen(name);
+  if (!(name_len >= 4 && strcmp(name + name_len - 4, "_mod") == 0))
+    snprintf(buf_compat_mod, sizeof(buf_compat_mod), "%s_mod", name);
   tries[1] = buf_mod;
   tries[2] = buf_core;
-  for (int t = 0; t < 3; t++) {
+  tries[3] = buf_compat_mod[0] ? buf_compat_mod : NULL;
+  for (int t = 0; t < 4; t++) {
     const char *curr = tries[t];
     if (!curr)
       continue;

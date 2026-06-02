@@ -426,6 +426,7 @@ static void trim_inplace(char *s);
 static void error_meta_free(char *flags, char *expect);
 static void read_error_meta(const char *path, char **flags_out, char **expect_out);
 static int split_words(char *s, char **out, int max);
+static char *read_small_file(const char *path);
 
 static ny_test_proc_t run_one_start(const char *bin, const char *path, const char *std_path,
                                     const char *std_bc) {
@@ -515,6 +516,45 @@ static int retry_trace_enabled(void) {
   if (test_env_truthy("NYTRIX_TEST_RETRY_TRACE"))
     return 1;
   return 1;
+}
+
+static int show_pass_output_enabled(void) {
+  return test_env_truthy("NYTRIX_TEST_SHOW_PASS_OUTPUT");
+}
+
+static int make_test_capture_tmp(char *tmp, size_t tmp_len, const char *prefix) {
+  if (!tmp || tmp_len == 0)
+    return -1;
+#ifdef _WIN32
+  char tmp_dir[PATH_MAX];
+  DWORD tmp_dir_len = GetTempPathA((DWORD)sizeof(tmp_dir), tmp_dir);
+  if (tmp_dir_len == 0 || tmp_dir_len >= sizeof(tmp_dir))
+    snprintf(tmp_dir, sizeof(tmp_dir), ".\\");
+  snprintf(tmp, tmp_len, "%sny-%s-%lu-%lu.log", tmp_dir, prefix ? prefix : "test",
+           (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+  return 0;
+#else
+  snprintf(tmp, tmp_len, "%s/ny-%s-%ld-XXXXXX", nyt_temp_dir(), prefix ? prefix : "test",
+           (long)getpid());
+  return mkstemp(tmp);
+#endif
+}
+
+static void print_captured_test_output(const char *label, const char *path, const char *tmp) {
+  if (!tmp || !*tmp)
+    return;
+  char *out = read_small_file(tmp);
+  if (!out || !*out) {
+    free(out);
+    return;
+  }
+  printf("%s[%s]%s %s\n", nyt_clr(NYT_GRAY), label ? label : "test output",
+         nyt_clr(NYT_RESET), disp_path(path));
+  fputs(out, stdout);
+  size_t n = strlen(out);
+  if (n == 0 || out[n - 1] != '\n')
+    putchar('\n');
+  free(out);
 }
 
 static void apply_test_child_env(void) {
@@ -613,54 +653,76 @@ static int run_one_blocking(const char *bin, const char *path, const char *std_p
     argv[argc++] = flagv[i];
   argv[argc++] = (char *)path;
   argv[argc] = NULL;
-#ifdef _WIN32
-  ny_test_proc_t pid = ny_test_spawn_argv(argv, NULL, 0);
-  if (!ny_test_proc_valid(pid)) {
+
+  char tmp[PATH_MAX];
+  tmp[0] = '\0';
+  int capture_fd = make_test_capture_tmp(tmp, sizeof(tmp), trace_exec ? "replay" : "retry");
+  if (capture_fd < 0) {
     error_meta_free(flags, expect);
     return 127;
   }
+
+  int rc = 127;
   int timed_out = 0;
-  int rc = ny_test_wait_rc(pid, timeout_sec, &timed_out);
+#ifdef _WIN32
+  ny_test_proc_t pid = ny_test_spawn_argv(argv, tmp, 0);
+  if (!ny_test_proc_valid(pid)) {
+    remove(tmp);
+    error_meta_free(flags, expect);
+    return 127;
+  }
+  rc = ny_test_wait_rc(pid, timeout_sec, &timed_out);
   ny_test_proc_close(pid);
-  error_meta_free(flags, expect);
-  return timed_out ? NY_TEST_TIMEOUT_RC : rc;
 #else
   ny_test_proc_t pid = fork();
   if (pid == 0) {
     apply_test_child_env();
+    dup2(capture_fd, STDOUT_FILENO);
+    dup2(capture_fd, STDERR_FILENO);
+    close(capture_fd);
     execv(bin, argv);
     _exit(127);
   }
   if (pid <= 0) {
+    close(capture_fd);
+    remove(tmp);
     error_meta_free(flags, expect);
     return 127;
   }
+  close(capture_fd);
   int status = 0;
   double start_ms = now_ms();
   double timeout_ms = (double)timeout_sec * 1000.0;
   for (;;) {
     pid_t r = waitpid(pid, &status, WNOHANG);
     if (r == pid) {
-      int rc = child_status_rc(status);
-      error_meta_free(flags, expect);
-      return rc;
+      rc = child_status_rc(status);
+      break;
     }
     if (r < 0) {
       if (errno == EINTR)
         continue;
-      error_meta_free(flags, expect);
-      return 127;
+      rc = 127;
+      break;
     }
     if (now_ms() - start_ms >= timeout_ms) {
       kill(pid, SIGKILL);
       while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
       }
-      error_meta_free(flags, expect);
-      return NY_TEST_TIMEOUT_RC;
+      timed_out = 1;
+      rc = NY_TEST_TIMEOUT_RC;
+      break;
     }
     poll_sleep();
   }
 #endif
+  if (timed_out)
+    rc = NY_TEST_TIMEOUT_RC;
+  if (rc != 0 || show_pass_output_enabled())
+    print_captured_test_output(trace_exec ? "replay output" : "retry output", path, tmp);
+  remove(tmp);
+  error_meta_free(flags, expect);
+  return rc;
 }
 
 static void trim_inplace(char *s) {
@@ -2166,7 +2228,7 @@ static int run_repl_suite(StrVec *files, const char *bin, const char *std_path,
         stats->passed++;
 #ifdef __APPLE__
       if (macos_replay) {
-        printf("%s%3d%%%s [%s~%s/%s✓%s/%s✓%s] %s%6dms%s %s (macos-replay)\n",
+        printf("%s%3d%%%s [%s~%s/%s✓%s/%s✓%s] %s%6dms%s %s\n",
                nyt_clr(NYT_GRAY), pct, nyt_clr(NYT_RESET),
                nyt_clr(NYT_YELLOW), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
                nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET),
@@ -2375,7 +2437,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
         if (row_stats)
           row_stats->passed++;
         if (retried) {
-          printf("%s%3d%%%s [%s~%s/%s✓%s/%s✓%s] %s%6dms%s %s (retry-pass)\n",
+          printf("%s%3d%%%s [%s~%s/%s✓%s/%s✓%s] %s%6dms%s %s\n",
                  nyt_clr(NYT_GRAY), pct, nyt_clr(NYT_RESET), nyt_clr(NYT_YELLOW), nyt_clr(NYT_RESET),
                  nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET),
                  nyt_clr(NYT_GRAY), dur, nyt_clr(NYT_RESET), disp_path(run[i].path));

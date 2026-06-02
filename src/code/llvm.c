@@ -113,7 +113,7 @@ static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
     if (opt_level >= 3)
       return LLVMCodeGenLevelAggressive;
     if (opt_level >= 2)
-      return LLVMCodeGenLevelDefault;
+      return LLVMCodeGenLevelLess;
     if (opt_level > 0)
       return LLVMCodeGenLevelLess;
     break;

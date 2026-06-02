@@ -9,7 +9,7 @@
   } while (0)
 
 #include "rt/ffigates.h"
-#include "base/util.h"
+#include "rt/shared.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -130,7 +130,7 @@ void nyFfiGates_init(void) {
   nyFfiRegisterGate(NY_FFI_SIG_P_PP, "p_pp", (void *)stub_p_pp);
   nyFfiRegisterGate(NY_FFI_SIG_P_PI, "p_pi", (void *)stub_p_pi);
   gNyFfi.initialized = true;
-  gNyFfi.fast_calls_enabled = ny_env_enabled("NYTRIX_FFIG_FAST_CALLS");
+  gNyFfi.fast_calls_enabled = rt_env_enabled("NYTRIX_FFIG_FAST_CALLS");
 }
 
 void nyFfiGates_dispose(void) {

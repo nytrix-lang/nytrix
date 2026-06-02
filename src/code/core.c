@@ -2236,17 +2236,30 @@ static void ny_apply_top_level_typeinfer_to_sema(typeinfer_ctx_t *ctx,
   case NY_S_VAR: {
     if (s->sema_kind != NY_STMT_SEMA_VAR)
       return;
-    sema_var_t *sv = (sema_var_t *)s->sema;
-    if (!sv)
-      return;
-    for (size_t i = 0; i < s->as.var.names.len; ++i) {
-      const char *name = s->as.var.names.data[i];
-      while (sv->is_int_proven.len <= i)
-        vec_push(&sv->is_int_proven, false);
-      while (sv->is_f64_proven.len <= i)
-        vec_push(&sv->is_f64_proven, false);
-      while (sv->escapes.len <= i)
-        vec_push(&sv->escapes, false);
+	    sema_var_t *sv = (sema_var_t *)s->sema;
+	    if (!sv)
+	      return;
+	    arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
+	    for (size_t i = 0; i < s->as.var.names.len; ++i) {
+	      const char *name = s->as.var.names.data[i];
+	      while (sv->is_int_proven.len <= i) {
+	        if (sema_arena)
+	          vec_push_arena(sema_arena, &sv->is_int_proven, false);
+	        else
+	          vec_push(&sv->is_int_proven, false);
+	      }
+	      while (sv->is_f64_proven.len <= i) {
+	        if (sema_arena)
+	          vec_push_arena(sema_arena, &sv->is_f64_proven, false);
+	        else
+	          vec_push(&sv->is_f64_proven, false);
+	      }
+	      while (sv->escapes.len <= i) {
+	        if (sema_arena)
+	          vec_push_arena(sema_arena, &sv->escapes, false);
+	        else
+	          vec_push(&sv->escapes, false);
+	      }
       bool proven_i64 = name && typeinfer_is_i64(ctx, name) &&
                         !typeinfer_needs_dynamic(ctx, name);
       bool proven_f64 = name && typeinfer_is_f64(ctx, name) &&
@@ -2370,18 +2383,24 @@ LLVMValueRef codegen_emit_script(codegen_t *cg, const char *name) {
   }
 
   if (cg->prog && cg->prog->body.len > 0) {
-    const char *root_file = NULL;
+    const char *root_file =
+        (cg->debug_main_file && *cg->debug_main_file) ? cg->debug_main_file
+                                                      : NULL;
+    if (!root_file && cg->source_main_file && *cg->source_main_file)
+      root_file = cg->source_main_file;
     bool has_user_top_funcs = false;
-    for (size_t i = 0; i < cg->prog->body.len; i++) {
-      stmt_t *s = cg->prog->body.data[i];
-      if (!s || ny_is_stdlib_tok(s->tok))
-        continue;
-      if (s->tok.filename && *s->tok.filename) {
-        root_file = s->tok.filename;
-        break;
+    if (!root_file) {
+      for (size_t i = 0; i < cg->prog->body.len; i++) {
+        stmt_t *s = cg->prog->body.data[i];
+        if (!s || ny_is_stdlib_tok(s->tok))
+          continue;
+        if (s->tok.filename && *s->tok.filename) {
+          root_file = s->tok.filename;
+          break;
+        }
+        if (ny_stmt_contains_top_function(s))
+          has_user_top_funcs = true;
       }
-      if (ny_stmt_contains_top_function(s))
-        has_user_top_funcs = true;
     }
     for (size_t i = 0; i < cg->prog->body.len; i++) {
       stmt_t *s = cg->prog->body.data[i];
@@ -2673,6 +2692,40 @@ void codegen_emit_string_init(codegen_t *cg) {
   }
 }
 
+static void codegen_free_owned_binding_name(binding *b) {
+  if (!b || !b->owned || !b->name)
+    return;
+  if (!ny_intern_contains_ptr(b->name))
+    free((void *)b->name);
+  b->name = NULL;
+}
+
+static void codegen_free_owned_alias_binding(binding *b) {
+  if (!b || !b->owned)
+    return;
+  codegen_free_owned_binding_name(b);
+  free((void *)b->stmt_t);
+  b->stmt_t = NULL;
+}
+
+static void codegen_free_layout_def(layout_def_t *def) {
+  if (!def)
+    return;
+  bool owns_field_strings = def->stmt == NULL;
+  if (def->name && !ny_intern_contains_ptr(def->name))
+    free((void *)def->name);
+  def->name = NULL;
+  for (size_t i = 0; i < def->fields.len; i++) {
+    if (owns_field_strings) {
+      free((void *)def->fields.data[i].name);
+      free((void *)def->fields.data[i].type_name);
+    }
+  }
+  vec_free(&def->fields);
+  if (def->heap_allocated)
+    free(def);
+}
+
 void codegen_dispose(codegen_t *cg) {
   if (!cg)
     return;
@@ -2703,8 +2756,26 @@ void codegen_dispose(codegen_t *cg) {
       cg->ctx = NULL;
     }
   }
+  for (size_t i = 0; i < cg->fun_sigs.len; i++)
+    ny_fun_sig_free_members(&cg->fun_sigs.data[i]);
   vec_free(&cg->fun_sigs);
+  for (size_t i = 0; i < cg->global_vars.len; i++)
+    codegen_free_owned_binding_name(&cg->global_vars.data[i]);
   vec_free(&cg->global_vars);
+  for (size_t i = 0; i < cg->interns.len; i++) {
+    void *alloc = cg->interns.data[i].alloc;
+    if (!alloc)
+      continue;
+    bool seen = false;
+    for (size_t j = 0; j < i; j++) {
+      if (cg->interns.data[j].alloc == alloc) {
+        seen = true;
+        break;
+      }
+    }
+    if (!seen)
+      free(alloc);
+  }
   vec_free(&cg->interns);
   if (cg->intern_map) {
     free(cg->intern_map);
@@ -2712,8 +2783,18 @@ void codegen_dispose(codegen_t *cg) {
   }
   free(cg->builtin_shadow_cache);
   cg->builtin_shadow_cache = NULL;
+  for (size_t i = 0; i < cg->aliases.len; i++)
+    codegen_free_owned_alias_binding(&cg->aliases.data[i]);
   vec_free(&cg->aliases);
+  free(cg->module_alias_index);
+  cg->module_alias_index = NULL;
+  cg->module_alias_index_cap = 0;
+  cg->module_alias_index_len = 0;
+  for (size_t i = 0; i < cg->import_aliases.len; i++)
+    codegen_free_owned_alias_binding(&cg->import_aliases.data[i]);
   vec_free(&cg->import_aliases);
+  for (size_t i = 0; i < cg->user_import_aliases.len; i++)
+    codegen_free_owned_alias_binding(&cg->user_import_aliases.data[i]);
   vec_free(&cg->user_import_aliases);
   vec_free(&cg->import_alias_hashes);
   vec_free(&cg->user_import_alias_hashes);
@@ -2744,12 +2825,21 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->labels);
   vec_free(&cg->operators);
   vec_free(&cg->enums);
+  for (size_t i = 0; i < cg->layouts.len; i++)
+    codegen_free_layout_def(cg->layouts.data[i]);
   vec_free(&cg->layouts);
   vec_free(&cg->mono_specs);
+  for (size_t i = 0; i < cg->links.len; i++)
+    free(cg->links.data[i]);
   vec_free(&cg->links);
   for (size_t i = 0; i < cg->ffi.defines.len; i++)
     free(cg->ffi.defines.data[i]);
   vec_free(&cg->ffi.defines);
+  for (size_t i = 0; i < cg->ffi.includes_len; i++) {
+    free((void *)cg->ffi.includes[i].path);
+    free((void *)cg->ffi.includes[i].prefix);
+    free((void *)cg->ffi.includes[i].lib);
+  }
   free(cg->ffi.includes);
   for (size_t i = 0; i < cg->extra_progs.len; i++) {
     program_t *prog = cg->extra_progs.data[i];

@@ -167,6 +167,79 @@ int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_
 }
 #endif
 
+#ifdef _WIN32
+static int64_t rt_write_console_utf8_fd(int fd, const char *ptr, size_t len) {
+  if (!ptr)
+    return -1;
+  if (len == 0)
+    return 0;
+  intptr_t raw = _get_osfhandle(fd);
+  if (raw == -1)
+    return -1;
+  HANDLE h = (HANDLE)raw;
+  DWORD mode = 0;
+  if (!GetConsoleMode(h, &mode))
+    return -1;
+  SetConsoleOutputCP(CP_UTF8);
+  int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ptr, (int)len,
+                                 NULL, 0);
+  if (wlen <= 0)
+    return -1;
+  WCHAR *wide = (WCHAR *)malloc(sizeof(WCHAR) * (size_t)wlen);
+  if (!wide)
+    return -1;
+  int got = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ptr, (int)len,
+                                wide, wlen);
+  if (got != wlen) {
+    free(wide);
+    return -1;
+  }
+
+  size_t extra = 0;
+  for (int i = 0; i < wlen; ++i) {
+    if (wide[i] == L'\n' && (i == 0 || wide[i - 1] != L'\r'))
+      extra++;
+  }
+  WCHAR *out = wide;
+  size_t out_len = (size_t)wlen;
+  if (extra > 0) {
+    out = (WCHAR *)malloc(sizeof(WCHAR) * ((size_t)wlen + extra));
+    if (!out) {
+      free(wide);
+      return -1;
+    }
+    size_t j = 0;
+    for (int i = 0; i < wlen; ++i) {
+      if (wide[i] == L'\n' && (i == 0 || wide[i - 1] != L'\r'))
+        out[j++] = L'\r';
+      out[j++] = wide[i];
+    }
+    out_len = j;
+  }
+
+  size_t done = 0;
+  while (done < out_len) {
+    DWORD chunk = (DWORD)((out_len - done) > 32768 ? 32768 : (out_len - done));
+    DWORD written = 0;
+    if (!WriteConsoleW(h, out + done, chunk, &written, NULL) || written == 0) {
+      if (out != wide)
+        free(out);
+      free(wide);
+      return -1;
+    }
+    done += written;
+  }
+  if (out != wide)
+    free(out);
+  free(wide);
+  return (int64_t)len;
+}
+
+int64_t rt_write_stdout_console(const char *ptr, size_t len) {
+  return rt_write_console_utf8_fd(1, ptr, len);
+}
+#endif
+
 int64_t rt_read_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   if (is_int(fd))
     fd >>= 1;
@@ -196,11 +269,18 @@ int64_t rt_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
     len >>= 1;
   if (is_int(off))
     off >>= 1;
+  if (fd == 1) {
+    extern int64_t rt_print_flush(void);
+    rt_print_flush();
+  }
   if (!rt_check_oob("sys_write", buf, off, (size_t)len))
     return -1LL;
   char *ptr = (char *)((intptr_t)rt_untag_v(buf) + (intptr_t)off);
 #ifdef _WIN32
-  ssize_t r = _write((int)fd, ptr, (unsigned int)len);
+  int64_t cr = (fd == 1 || fd == 2)
+                   ? rt_write_console_utf8_fd((int)fd, ptr, (size_t)len)
+                   : -1;
+  ssize_t r = cr >= 0 ? (ssize_t)cr : _write((int)fd, ptr, (unsigned int)len);
   if (r < 0)
     r = -errno;
 #else
@@ -1541,6 +1621,8 @@ int64_t rt_spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   }
   HANDLE hIn = (HANDLE)_get_osfhandle(in_fds[0]);
   HANDLE hOut = (HANDLE)_get_osfhandle(out_fds[1]);
+  SetHandleInformation(hIn, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+  SetHandleInformation(hOut, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
   SetHandleInformation((HANDLE)_get_osfhandle(in_fds[1]), HANDLE_FLAG_INHERIT, 0);
   SetHandleInformation((HANDLE)_get_osfhandle(out_fds[0]), HANDLE_FLAG_INHERIT, 0);
   STARTUPINFOA si;
@@ -1551,7 +1633,7 @@ int64_t rt_spawn_pipe(int64_t path, int64_t argv, int64_t fds_ptr) {
   si.dwFlags = STARTF_USESTDHANDLES;
   si.hStdInput = hIn;
   si.hStdOutput = hOut;
-  si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  si.hStdError = hOut;
   bool av_free = false;
   char **av = ny_native_argv(rargv, &av_free);
   char *cmd = rt_build_cmdline(av);

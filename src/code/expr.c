@@ -280,6 +280,41 @@ static bool expr_target_is_known_list_like(codegen_t *cg, scope *scopes,
   return false;
 }
 
+static binding *expr_f64_list_target_binding(codegen_t *cg, scope *scopes,
+                                             size_t depth, expr_t *target) {
+  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
+    return NULL;
+  size_t name_len = (size_t)target->tok.len;
+  if (name_len == 0)
+    name_len = strlen(target->as.ident.name);
+  binding *b = expr_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                   name_len, target->as.ident.hash);
+  return (b && b->is_list_storage && b->is_f64_list_storage) ? b : NULL;
+}
+
+static bool expr_is_f64_default_value(codegen_t *cg, scope *scopes, size_t depth,
+                                      expr_t *e) {
+  if (!e)
+    return true;
+  if (ny_is_proven_int(cg, scopes, depth, e, NULL))
+    return true;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_IDENT && e->as.ident.name) {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth, e->as.ident.name,
+                                     name_len, e->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct || b->is_f32_slot ||
+              b->is_f32_direct))
+      return true;
+  }
+  const char *t = infer_expr_type(cg, scopes, depth, e);
+  return t && (strcmp(t, "f64") == 0 || strcmp(t, "float") == 0 ||
+               strcmp(t, "f32") == 0);
+}
+
 static LLVMValueRef expr_index_raw_i64(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *idx_expr,
                                        LLVMValueRef idx_v,
@@ -295,10 +330,11 @@ static LLVMValueRef expr_index_raw_i64(codegen_t *cg, scope *scopes,
     binding *b = expr_lookup_binding(cg, scopes, depth,
                                      idx_expr->as.ident.name, name_len,
                                      idx_expr->as.ident.hash);
-    if (b && b->raw_int_value && (b->is_int_slot || b->is_int_direct))
-      return b->is_int_slot
-                 ? ny_load(cg, b->raw_int_value, name ? name : "index_raw")
-                 : b->raw_int_value;
+    if (b && b->raw_int_value && b->is_int_direct)
+      return b->raw_int_value;
+    if (ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST") && b &&
+        b->raw_int_value && b->is_int_slot && !ny_binding_is_valid(cg, b))
+      return ny_load(cg, b->raw_int_value, name ? name : "index_raw");
   }
   if (ny_is_proven_int(cg, scopes, depth, idx_expr, idx_v))
     return ny_untag_int(cg, idx_v);
@@ -403,6 +439,12 @@ static bool expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
         return false;
       lo = 0;
       hi = rmax;
+    } else if (strcmp(op, ">>") == 0) {
+      if (rmin != rmax || rmin < 0 || rmin >= 64 || lmin < 0)
+        return false;
+      unsigned shift = (unsigned)rmin;
+      lo = (int64_t)((uint64_t)lmin >> shift);
+      hi = (int64_t)((uint64_t)lmax >> shift);
     } else {
       return false;
     }
@@ -773,6 +815,9 @@ static const char *ny_ct_fast_callee_leaf_name(expr_t *callee) {
 }
 
 static bool ny_ct_fast_push_byte(int64_t *acc, int64_t byte);
+static void ny_ct_fast_val_free(ny_ct_fast_val_t *v);
+static bool ny_ct_fast_val_clone(const ny_ct_fast_val_t *src,
+                                 ny_ct_fast_val_t *dst);
 
 static char *ny_ct_i64_to_dec(int64_t v) {
   char buf[64];
@@ -894,7 +939,12 @@ static bool ny_ct_long_finish(int64_t small, bool small_ok, char *big_dec,
     return true;
   }
   out->kind = NY_CT_FAST_BIGINT;
-  out->s = big_dec ? big_dec : "0";
+  if (!big_dec) {
+    big_dec = ny_strdup("0");
+    if (!big_dec)
+      return false;
+  }
+  out->s = big_dec;
   return true;
 }
 
@@ -986,8 +1036,7 @@ static bool ny_ct_seq_item(const ny_ct_fast_val_t *v, int64_t idx,
   if (v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE) {
     if (!v->items)
       return false;
-    *out = v->items[idx];
-    return true;
+    return ny_ct_fast_val_clone(&v->items[idx], out);
   }
   if (v->kind == NY_CT_FAST_RANGE) {
     int64_t scaled = 0, item = 0;
@@ -1019,10 +1068,127 @@ static bool ny_ct_make_seq(ny_ct_fast_kind_t kind, size_t len,
   return true;
 }
 
+typedef struct ny_ct_ptr_seen_t {
+  void **items;
+  size_t len;
+  size_t cap;
+} ny_ct_ptr_seen_t;
+
+static bool ny_ct_seen_add(ny_ct_ptr_seen_t *seen, const void *ptr) {
+  if (!seen || !ptr)
+    return false;
+  for (size_t i = 0; i < seen->len; i++) {
+    if (seen->items[i] == ptr)
+      return false;
+  }
+  if (seen->len == seen->cap) {
+    size_t next_cap = seen->cap ? seen->cap * 2 : 16;
+    void **grown = realloc(seen->items, next_cap * sizeof(*seen->items));
+    if (!grown)
+      return false;
+    seen->items = grown;
+    seen->cap = next_cap;
+  }
+  seen->items[seen->len++] = (void *)ptr;
+  return true;
+}
+
+static void ny_ct_fast_val_free_seen(ny_ct_fast_val_t *v,
+                                     ny_ct_ptr_seen_t *seen) {
+  if (!v)
+    return;
+  if (v->kind == NY_CT_FAST_BIGINT && v->s && ny_ct_seen_add(seen, v->s))
+    free((void *)v->s);
+  if ((v->kind == NY_CT_FAST_LIST || v->kind == NY_CT_FAST_TUPLE) &&
+      v->items) {
+    ny_ct_fast_val_t *items = v->items;
+    size_t len = v->len;
+    if (ny_ct_seen_add(seen, items)) {
+      for (size_t i = 0; i < len; i++)
+        ny_ct_fast_val_free_seen(&items[i], seen);
+      free(items);
+    }
+  }
+  *v = ny_ct_fast_none();
+}
+
+static void ny_ct_fast_val_free(ny_ct_fast_val_t *v) {
+  ny_ct_ptr_seen_t seen = {0};
+  ny_ct_fast_val_free_seen(v, &seen);
+  free(seen.items);
+}
+
+static void ny_ct_fast_val_move(ny_ct_fast_val_t *dst,
+                                ny_ct_fast_val_t *src) {
+  if (!dst || !src || dst == src)
+    return;
+  ny_ct_fast_val_free(dst);
+  *dst = *src;
+  *src = ny_ct_fast_none();
+}
+
+static bool ny_ct_fast_val_clone(const ny_ct_fast_val_t *src,
+                                 ny_ct_fast_val_t *dst) {
+  if (!src || !dst)
+    return false;
+  ny_ct_fast_val_t out = *src;
+  out.s = src->s;
+  out.items = NULL;
+  if (src->kind == NY_CT_FAST_BIGINT) {
+    out.s = ny_strdup(src->s ? src->s : "0");
+    if (!out.s)
+      return false;
+  } else if (src->kind == NY_CT_FAST_LIST ||
+             src->kind == NY_CT_FAST_TUPLE) {
+    if (src->len > 0 && !src->items)
+      return false;
+    if (!ny_ct_make_seq(src->kind, src->len, &out))
+      return false;
+    for (size_t i = 0; i < src->len; i++) {
+      if (!ny_ct_fast_val_clone(&src->items[i], &out.items[i])) {
+        ny_ct_fast_val_free(&out);
+        return false;
+      }
+    }
+  }
+  *dst = out;
+  return true;
+}
+
 static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
                                            ny_ct_fast_val_t *out, int depth);
 static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
                                             ny_ct_fast_val_t *out);
+
+static expr_t *ny_binding_var_init_expr_any(binding *b, const char *name) {
+  if (!b || !name || !b->stmt_t || b->stmt_t->kind != NY_S_VAR)
+    return NULL;
+  stmt_var_t *var = &b->stmt_t->as.var;
+  for (size_t i = 0; i < var->names.len && i < var->exprs.len; ++i) {
+    const char *n = var->names.data[i];
+    if (n && strcmp(n, name) == 0)
+      return var->exprs.data[i];
+  }
+  return NULL;
+}
+
+static bool ny_try_eval_binding_comptime_const(codegen_t *cg, binding *b,
+                                               const char *name,
+                                               ny_ct_fast_val_t *out,
+                                               int depth) {
+  if (!b || b->is_mut || !name || !out || depth > 64)
+    return false;
+
+  expr_t *init = ny_binding_var_init_expr(b, name);
+  if (init)
+    return ny_try_eval_comptime_expr_fast(cg, init, out, depth + 1);
+
+  init = ny_binding_var_init_expr_any(b, name);
+  if (init && init->kind == NY_E_COMPTIME && init->as.comptime_expr.body)
+    return ny_try_eval_comptime_fast_value(cg, init->as.comptime_expr.body,
+                                           out);
+  return false;
+}
 
 static bool ny_ct_fast_eval_bigint_constructor_arg(const ny_ct_fast_val_t *arg,
                                                    ny_ct_fast_val_t *out) {
@@ -1139,12 +1305,15 @@ static bool ny_ct_fast_list_long(codegen_t *cg, expr_t *e,
                                         depth + 1) ||
         item.kind != NY_CT_FAST_INT) {
       free(big_dec);
+      ny_ct_fast_val_free(&item);
       return false;
     }
     if (!ny_ct_long_accum_byte(&small, &small_ok, &big_dec, item.i)) {
       free(big_dec);
+      ny_ct_fast_val_free(&item);
       return false;
     }
+    ny_ct_fast_val_free(&item);
   }
   return ny_ct_long_finish(small, small_ok, big_dec, out);
 }
@@ -1175,15 +1344,19 @@ static bool ny_ct_fast_eval_long_property(codegen_t *cg, expr_t *target,
   if (!ny_try_eval_comptime_expr_fast(cg, target, &v, depth + 1))
     return false;
   if (v.kind == NY_CT_FAST_INT) {
-    *out = v;
+    ny_ct_fast_val_move(out, &v);
     return true;
   }
   if (v.kind == NY_CT_FAST_BIGINT) {
-    *out = v;
+    ny_ct_fast_val_move(out, &v);
     return true;
   }
-  if (v.kind == NY_CT_FAST_STR)
-    return ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+  if (v.kind == NY_CT_FAST_STR) {
+    bool ok = ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+    ny_ct_fast_val_free(&v);
+    return ok;
+  }
+  ny_ct_fast_val_free(&v);
   return false;
 }
 
@@ -1216,10 +1389,9 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
       return true;
     if (cg) {
       binding *b = lookup_global(cg, e->as.ident.name);
-      expr_t *init =
-          b && !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
-      if (init && init != e)
-        return ny_try_eval_comptime_expr_fast(cg, init, out, depth + 1);
+      if (ny_try_eval_binding_comptime_const(cg, b, e->as.ident.name, out,
+                                             depth + 1))
+        return true;
     }
     return false;
 
@@ -1227,7 +1399,9 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
     ny_ct_fast_val_t r = {0};
     if (!ny_try_eval_comptime_expr_fast(cg, e->as.unary.right, &r, depth + 1))
       return false;
-    return ny_ct_fast_eval_unary(e->as.unary.op, &r, out);
+    bool ok = ny_ct_fast_eval_unary(e->as.unary.op, &r, out);
+    ny_ct_fast_val_free(&r);
+    return ok;
   }
 
   case NY_E_LOGICAL: {
@@ -1235,9 +1409,12 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
     if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.left, &l, depth + 1))
       return false;
     bool lt = false;
-    if (!ny_ct_fast_truthy(&l, &lt))
+    if (!ny_ct_fast_truthy(&l, &lt)) {
+      ny_ct_fast_val_free(&l);
       return false;
+    }
     if (strcmp(e->as.logical.op, "&&") == 0) {
+      ny_ct_fast_val_free(&l);
       if (!lt) {
         out->kind = NY_CT_FAST_BOOL;
         out->b = false;
@@ -1246,13 +1423,17 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
       ny_ct_fast_val_t r = {0};
       bool rt = false;
       if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.right, &r, depth + 1) ||
-          !ny_ct_fast_truthy(&r, &rt))
+          !ny_ct_fast_truthy(&r, &rt)) {
+        ny_ct_fast_val_free(&r);
         return false;
+      }
       out->kind = NY_CT_FAST_BOOL;
       out->b = rt;
+      ny_ct_fast_val_free(&r);
       return true;
     }
     if (strcmp(e->as.logical.op, "||") == 0) {
+      ny_ct_fast_val_free(&l);
       if (lt) {
         out->kind = NY_CT_FAST_BOOL;
         out->b = true;
@@ -1261,29 +1442,42 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
       ny_ct_fast_val_t r = {0};
       bool rt = false;
       if (!ny_try_eval_comptime_expr_fast(cg, e->as.logical.right, &r, depth + 1) ||
-          !ny_ct_fast_truthy(&r, &rt))
+          !ny_ct_fast_truthy(&r, &rt)) {
+        ny_ct_fast_val_free(&r);
         return false;
+      }
       out->kind = NY_CT_FAST_BOOL;
       out->b = rt;
+      ny_ct_fast_val_free(&r);
       return true;
     }
+    ny_ct_fast_val_free(&l);
     return false;
   }
 
   case NY_E_BINARY: {
     ny_ct_fast_val_t l = {0}, r = {0};
-    if (!ny_try_eval_comptime_expr_fast(cg, e->as.binary.left, &l, depth + 1) ||
-        !ny_try_eval_comptime_expr_fast(cg, e->as.binary.right, &r, depth + 1))
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.binary.left, &l, depth + 1))
       return false;
-    return ny_ct_fast_eval_binary(e->as.binary.op, &l, &r, out);
+    if (!ny_try_eval_comptime_expr_fast(cg, e->as.binary.right, &r, depth + 1)) {
+      ny_ct_fast_val_free(&l);
+      return false;
+    }
+    bool ok = ny_ct_fast_eval_binary(e->as.binary.op, &l, &r, out);
+    ny_ct_fast_val_free(&l);
+    ny_ct_fast_val_free(&r);
+    return ok;
   }
 
   case NY_E_TERNARY: {
     ny_ct_fast_val_t c = {0};
     bool ct = false;
     if (!ny_try_eval_comptime_expr_fast(cg, e->as.ternary.cond, &c, depth + 1) ||
-        !ny_ct_fast_truthy(&c, &ct))
+        !ny_ct_fast_truthy(&c, &ct)) {
+      ny_ct_fast_val_free(&c);
       return false;
+    }
+    ny_ct_fast_val_free(&c);
     return ny_try_eval_comptime_expr_fast(cg, ct ? e->as.ternary.true_expr
                                              : e->as.ternary.false_expr,
                                           out, depth + 1);
@@ -1312,7 +1506,9 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
       if (!ny_try_eval_comptime_expr_fast(cg, e->as.call.args.data[0].val, &arg,
                                           depth + 1))
         return false;
-      return ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+      bool ok = ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+      ny_ct_fast_val_free(&arg);
+      return ok;
     }
     if (strcmp(name, "__main") == 0 && (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_BOOL;
@@ -1380,11 +1576,14 @@ static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
         // Harmless declarations during fast eval
         continue;
       }
-      if (!ny_try_eval_comptime_fast_value(cg, s, &res)) {
+      ny_ct_fast_val_t next = ny_ct_fast_none();
+      if (!ny_try_eval_comptime_fast_value(cg, s, &next)) {
+        ny_ct_fast_val_free(&res);
         return false;
       }
+      ny_ct_fast_val_move(&res, &next);
     }
-    *out = res;
+    ny_ct_fast_val_move(out, &res);
     return true;
   }
 
@@ -1393,18 +1592,22 @@ static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
     bool truthy = false;
     if (ny_try_eval_comptime_expr_fast(cg, body->as.iff.test, &cond_v, 0) &&
         ny_ct_fast_truthy(&cond_v, &truthy)) {
+      ny_ct_fast_val_free(&cond_v);
       if (truthy) {
         if (body->as.iff.conseq)
           return ny_try_eval_comptime_fast_value(cg, body->as.iff.conseq, out);
+        ny_ct_fast_val_free(out);
         *out = ny_ct_fast_none();
         return true;
       } else {
         if (body->as.iff.alt)
           return ny_try_eval_comptime_fast_value(cg, body->as.iff.alt, out);
+        ny_ct_fast_val_free(out);
         *out = ny_ct_fast_none();
         return true;
       }
     }
+    ny_ct_fast_val_free(&cond_v);
     return false;
   }
 
@@ -1418,6 +1621,7 @@ static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
   }
 
   if (!e) {
+    ny_ct_fast_val_free(out);
     *out = ny_ct_fast_none();
     return true;
   }
@@ -1430,7 +1634,9 @@ static bool ny_try_eval_comptime_fast(codegen_t *cg, stmt_t *body,
   ny_ct_fast_val_t v = ny_ct_fast_none();
   if (!ny_try_eval_comptime_fast_value(cg, body, &v))
     return false;
-  return ny_ct_fast_to_tagged(&v, out_tagged);
+  bool ok = ny_ct_fast_to_tagged(&v, out_tagged);
+  ny_ct_fast_val_free(&v);
+  return ok;
 }
 
 typedef struct ny_ct_interp_var_t {
@@ -1458,6 +1664,8 @@ static bool ny_ct_interp_step(ny_ct_interp_ctx_t *ctx) {
 static void ny_ct_interp_ctx_free(ny_ct_interp_ctx_t *ctx) {
   if (!ctx)
     return;
+  for (size_t i = 0; i < ctx->len; i++)
+    ny_ct_fast_val_free(&ctx->vars[i].value);
   free(ctx->vars);
   ctx->vars = NULL;
   ctx->len = 0;
@@ -1474,12 +1682,19 @@ static bool ny_ct_interp_ctx_clone(const ny_ct_interp_ctx_t *src,
   dst->steps = src->steps;
   if (src->len == 0)
     return true;
-  dst->vars = malloc(sizeof(*dst->vars) * src->len);
+  dst->vars = calloc(src->len, sizeof(*dst->vars));
   if (!dst->vars)
     return false;
-  memcpy(dst->vars, src->vars, sizeof(*dst->vars) * src->len);
-  dst->len = src->len;
   dst->cap = src->len;
+  for (size_t i = 0; i < src->len; i++) {
+    dst->vars[i].name = src->vars[i].name;
+    if (!ny_ct_fast_val_clone(&src->vars[i].value, &dst->vars[i].value)) {
+      dst->len = i;
+      ny_ct_interp_ctx_free(dst);
+      return false;
+    }
+    dst->len++;
+  }
   return true;
 }
 
@@ -1490,8 +1705,7 @@ static bool ny_ct_interp_get(ny_ct_interp_ctx_t *ctx, const char *name,
   for (size_t i = ctx->len; i > 0; --i) {
     ny_ct_interp_var_t *v = &ctx->vars[i - 1];
     if (v->name && strcmp(v->name, name) == 0) {
-      *out = v->value;
-      return true;
+      return ny_ct_fast_val_clone(&v->value, out);
     }
   }
   return false;
@@ -1501,10 +1715,14 @@ static bool ny_ct_interp_set(ny_ct_interp_ctx_t *ctx, const char *name,
                              ny_ct_fast_val_t value) {
   if (!ctx || !name || !*name)
     return false;
+  ny_ct_fast_val_t copy = ny_ct_fast_none();
+  if (!ny_ct_fast_val_clone(&value, &copy))
+    return false;
   for (size_t i = ctx->len; i > 0; --i) {
     ny_ct_interp_var_t *v = &ctx->vars[i - 1];
     if (v->name && strcmp(v->name, name) == 0) {
-      v->value = value;
+      ny_ct_fast_val_free(&v->value);
+      v->value = copy;
       return true;
     }
   }
@@ -1512,12 +1730,14 @@ static bool ny_ct_interp_set(ny_ct_interp_ctx_t *ctx, const char *name,
     size_t next_cap = ctx->cap ? (ctx->cap * 2) : 16;
     ny_ct_interp_var_t *grown =
         realloc(ctx->vars, sizeof(*ctx->vars) * next_cap);
-    if (!grown)
+    if (!grown) {
+      ny_ct_fast_val_free(&copy);
       return false;
+    }
     ctx->vars = grown;
     ctx->cap = next_cap;
   }
-  ctx->vars[ctx->len++] = (ny_ct_interp_var_t){.name = name, .value = value};
+  ctx->vars[ctx->len++] = (ny_ct_interp_var_t){.name = name, .value = copy};
   return true;
 }
 
@@ -1540,9 +1760,13 @@ static bool ny_ct_interp_eval_long_property(expr_t *target,
       ny_ct_fast_val_t s = ny_ct_fast_none();
       if (!ny_ct_interp_eval_expr(target->as.member.target, ctx, &s,
                                   depth + 1) ||
-          s.kind != NY_CT_FAST_STR)
+          s.kind != NY_CT_FAST_STR) {
+        ny_ct_fast_val_free(&s);
         return false;
-      return ny_ct_fast_unhex_long(s.s, s.s ? strlen(s.s) : 0, out);
+      }
+      bool ok = ny_ct_fast_unhex_long(s.s, s.s ? strlen(s.s) : 0, out);
+      ny_ct_fast_val_free(&s);
+      return ok;
     }
     if (strcmp(target->as.member.name, "to_bytes") == 0)
       return ny_ct_interp_eval_long_property(target->as.member.target, ctx, out,
@@ -1552,15 +1776,19 @@ static bool ny_ct_interp_eval_long_property(expr_t *target,
   if (!ny_ct_interp_eval_expr(target, ctx, &v, depth + 1))
     return false;
   if (v.kind == NY_CT_FAST_INT) {
-    *out = v;
+    ny_ct_fast_val_move(out, &v);
     return true;
   }
   if (v.kind == NY_CT_FAST_BIGINT) {
-    *out = v;
+    ny_ct_fast_val_move(out, &v);
     return true;
   }
-  if (v.kind == NY_CT_FAST_STR)
-    return ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+  if (v.kind == NY_CT_FAST_STR) {
+    bool ok = ny_ct_fast_bytes_long(v.s, v.s ? strlen(v.s) : 0, out);
+    ny_ct_fast_val_free(&v);
+    return ok;
+  }
+  ny_ct_fast_val_free(&v);
   return false;
 }
 
@@ -1585,9 +1813,11 @@ static bool ny_ct_interp_eval_lambda1(expr_t *fn, ny_ct_interp_ctx_t *ctx,
                                 &did_return, depth + 1);
   ctx->steps = nested.steps;
   ny_ct_interp_ctx_free(&nested);
-  if (!ok)
+  if (!ok) {
+    ny_ct_fast_val_free(&ret);
     return false;
-  *out = ret;
+  }
+  ny_ct_fast_val_move(out, &ret);
   return true;
 }
 
@@ -1599,21 +1829,32 @@ static bool ny_ct_interp_eval_map(expr_t *target, expr_t *fn,
   ny_ct_fast_val_t seq = ny_ct_fast_none();
   int64_t len = 0;
   if (!ny_ct_interp_eval_expr(target, ctx, &seq, depth + 1) ||
-      !ny_ct_seq_len(&seq, &len) || len < 0 || len > 65536)
+      !ny_ct_seq_len(&seq, &len) || len < 0 || len > 65536) {
+    ny_ct_fast_val_free(&seq);
     return false;
+  }
 
   ny_ct_fast_kind_t out_kind =
       seq.kind == NY_CT_FAST_TUPLE ? NY_CT_FAST_TUPLE : NY_CT_FAST_LIST;
-  if (!ny_ct_make_seq(out_kind, (size_t)len, out))
+  if (!ny_ct_make_seq(out_kind, (size_t)len, out)) {
+    ny_ct_fast_val_free(&seq);
     return false;
+  }
   for (int64_t i = 0; i < len; i++) {
     ny_ct_fast_val_t item = ny_ct_fast_none();
     ny_ct_fast_val_t mapped = ny_ct_fast_none();
     if (!ny_ct_seq_item(&seq, i, &item) ||
-        !ny_ct_interp_eval_lambda1(fn, ctx, item, &mapped, depth + 1))
+        !ny_ct_interp_eval_lambda1(fn, ctx, item, &mapped, depth + 1)) {
+      ny_ct_fast_val_free(&item);
+      ny_ct_fast_val_free(&mapped);
+      ny_ct_fast_val_free(out);
+      ny_ct_fast_val_free(&seq);
       return false;
-    out->items[i] = mapped;
+    }
+    ny_ct_fast_val_free(&item);
+    ny_ct_fast_val_move(&out->items[i], &mapped);
   }
+  ny_ct_fast_val_free(&seq);
   return true;
 }
 
@@ -1637,9 +1878,13 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
   }
   case NY_S_RETURN: {
     if (!s->as.ret.value) {
+      ny_ct_fast_val_free(ret);
       *ret = ny_ct_fast_none();
-    } else if (!ny_ct_interp_eval_expr(s->as.ret.value, ctx, ret, depth + 1)) {
-      return false;
+    } else {
+      ny_ct_fast_val_t tmp = ny_ct_fast_none();
+      if (!ny_ct_interp_eval_expr(s->as.ret.value, ctx, &tmp, depth + 1))
+        return false;
+      ny_ct_fast_val_move(ret, &tmp);
     }
     *did_return = true;
     return true;
@@ -1650,7 +1895,7 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
       return false;
     if (!ny_ct_interp_eval_expr(s->as.expr.expr, ctx, &tmp, depth + 1))
       return false;
-    *ret = tmp;
+    ny_ct_fast_val_move(ret, &tmp);
     return true;
   }
   case NY_S_VAR: {
@@ -1668,11 +1913,16 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
           rhs = s->as.var.exprs.data[i];
         else if (s->as.var.exprs.len > 0)
           rhs = s->as.var.exprs.data[0];
-        if (rhs && !ny_ct_interp_eval_expr(rhs, ctx, &v, depth + 1))
+        if (rhs && !ny_ct_interp_eval_expr(rhs, ctx, &v, depth + 1)) {
+          ny_ct_fast_val_free(&v);
           return false;
+        }
       }
-      if (!ny_ct_interp_set(ctx, name, v))
+      if (!ny_ct_interp_set(ctx, name, v)) {
+        ny_ct_fast_val_free(&v);
         return false;
+      }
+      ny_ct_fast_val_free(&v);
     }
     return true;
   }
@@ -1682,8 +1932,11 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
     ny_ct_fast_val_t cond = ny_ct_fast_none();
     bool truthy = false;
     if (!ny_ct_interp_eval_expr(s->as.iff.test, ctx, &cond, depth + 1) ||
-        !ny_ct_fast_truthy(&cond, &truthy))
+        !ny_ct_fast_truthy(&cond, &truthy)) {
+      ny_ct_fast_val_free(&cond);
       return false;
+    }
+    ny_ct_fast_val_free(&cond);
     if (truthy) {
       if (s->as.iff.conseq)
         return ny_ct_interp_eval_stmt(s->as.iff.conseq, ctx, ret, did_return,
@@ -1710,8 +1963,11 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
       ny_ct_fast_val_t cond = ny_ct_fast_none();
       bool truthy = false;
       if (!ny_ct_interp_eval_expr(s->as.whl.test, ctx, &cond, depth + 1) ||
-          !ny_ct_fast_truthy(&cond, &truthy))
+          !ny_ct_fast_truthy(&cond, &truthy)) {
+        ny_ct_fast_val_free(&cond);
         return false;
+      }
+      ny_ct_fast_val_free(&cond);
       if (!truthy)
         break;
       if (++guard > 100000)
@@ -1736,8 +1992,10 @@ static bool ny_ct_interp_eval_stmt(stmt_t *s, ny_ct_interp_ctx_t *ctx,
       ny_ct_fast_val_t arg = ny_ct_fast_none();
       if (!ny_ct_interp_eval_expr(s->as.macro.args.data[i], ctx, &arg,
                                   depth + 1)) {
+        ny_ct_fast_val_free(&arg);
         return false;
       }
+      ny_ct_fast_val_free(&arg);
     }
     if (!s->as.macro.body)
       return true;
@@ -1792,6 +2050,9 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       expr_t *init = b && !b->is_mut ? ny_binding_var_init_expr(b, name) : NULL;
       if (init && init != e)
         return ny_ct_interp_eval_expr(init, ctx, out, depth + 1);
+      if (ny_try_eval_binding_comptime_const(ctx->cg, b, name, out,
+                                             depth + 1))
+        return true;
     }
     return false;
   }
@@ -1799,15 +2060,20 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     ny_ct_fast_val_t r = ny_ct_fast_none();
     if (!ny_ct_interp_eval_expr(e->as.unary.right, ctx, &r, depth + 1))
       return false;
-    return ny_ct_fast_eval_unary(e->as.unary.op, &r, out);
+    bool ok = ny_ct_fast_eval_unary(e->as.unary.op, &r, out);
+    ny_ct_fast_val_free(&r);
+    return ok;
   }
   case NY_E_LOGICAL: {
     ny_ct_fast_val_t l = ny_ct_fast_none();
     bool lt = false;
     if (!ny_ct_interp_eval_expr(e->as.logical.left, ctx, &l, depth + 1) ||
-        !ny_ct_fast_truthy(&l, &lt))
+        !ny_ct_fast_truthy(&l, &lt)) {
+      ny_ct_fast_val_free(&l);
       return false;
+    }
     if (strcmp(e->as.logical.op, "&&") == 0) {
+      ny_ct_fast_val_free(&l);
       if (!lt) {
         out->kind = NY_CT_FAST_BOOL;
         out->b = false;
@@ -1816,13 +2082,17 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       ny_ct_fast_val_t r = ny_ct_fast_none();
       bool rt = false;
       if (!ny_ct_interp_eval_expr(e->as.logical.right, ctx, &r, depth + 1) ||
-          !ny_ct_fast_truthy(&r, &rt))
+          !ny_ct_fast_truthy(&r, &rt)) {
+        ny_ct_fast_val_free(&r);
         return false;
+      }
       out->kind = NY_CT_FAST_BOOL;
       out->b = rt;
+      ny_ct_fast_val_free(&r);
       return true;
     }
     if (strcmp(e->as.logical.op, "||") == 0) {
+      ny_ct_fast_val_free(&l);
       if (lt) {
         out->kind = NY_CT_FAST_BOOL;
         out->b = true;
@@ -1831,27 +2101,40 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       ny_ct_fast_val_t r = ny_ct_fast_none();
       bool rt = false;
       if (!ny_ct_interp_eval_expr(e->as.logical.right, ctx, &r, depth + 1) ||
-          !ny_ct_fast_truthy(&r, &rt))
+          !ny_ct_fast_truthy(&r, &rt)) {
+        ny_ct_fast_val_free(&r);
         return false;
+      }
       out->kind = NY_CT_FAST_BOOL;
       out->b = rt;
+      ny_ct_fast_val_free(&r);
       return true;
     }
+    ny_ct_fast_val_free(&l);
     return false;
   }
   case NY_E_BINARY: {
     ny_ct_fast_val_t l = ny_ct_fast_none(), r = ny_ct_fast_none();
-    if (!ny_ct_interp_eval_expr(e->as.binary.left, ctx, &l, depth + 1) ||
-        !ny_ct_interp_eval_expr(e->as.binary.right, ctx, &r, depth + 1))
+    if (!ny_ct_interp_eval_expr(e->as.binary.left, ctx, &l, depth + 1))
       return false;
-    return ny_ct_fast_eval_binary(e->as.binary.op, &l, &r, out);
+    if (!ny_ct_interp_eval_expr(e->as.binary.right, ctx, &r, depth + 1)) {
+      ny_ct_fast_val_free(&l);
+      return false;
+    }
+    bool ok = ny_ct_fast_eval_binary(e->as.binary.op, &l, &r, out);
+    ny_ct_fast_val_free(&l);
+    ny_ct_fast_val_free(&r);
+    return ok;
   }
   case NY_E_TERNARY: {
     ny_ct_fast_val_t c = ny_ct_fast_none();
     bool ct = false;
     if (!ny_ct_interp_eval_expr(e->as.ternary.cond, ctx, &c, depth + 1) ||
-        !ny_ct_fast_truthy(&c, &ct))
+        !ny_ct_fast_truthy(&c, &ct)) {
+      ny_ct_fast_val_free(&c);
       return false;
+    }
+    ny_ct_fast_val_free(&c);
     return ny_ct_interp_eval_expr(ct ? e->as.ternary.true_expr
                                      : e->as.ternary.false_expr,
                                   ctx, out, depth + 1);
@@ -1864,8 +2147,10 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       return false;
     for (size_t i = 0; i < e->as.list_like.len; i++) {
       if (!ny_ct_interp_eval_expr(e->as.list_like.data[i], ctx, &out->items[i],
-                                  depth + 1))
+                                  depth + 1)) {
+        ny_ct_fast_val_free(out);
         return false;
+      }
     }
     return true;
   }
@@ -1879,9 +2164,11 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                                      &nested_ret, &did_return, depth + 1);
     ctx->steps = nested.steps;
     ny_ct_interp_ctx_free(&nested);
-    if (!ok)
+    if (!ok) {
+      ny_ct_fast_val_free(&nested_ret);
       return false;
-    *out = nested_ret;
+    }
+    ny_ct_fast_val_move(out, &nested_ret);
     return true;
   }
   case NY_E_MEMBER:
@@ -1893,10 +2180,13 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       int64_t len = 0;
       if (!ny_ct_interp_eval_expr(e->as.member.target, ctx, &target,
                                   depth + 1) ||
-          !ny_ct_seq_len(&target, &len))
+          !ny_ct_seq_len(&target, &len)) {
+        ny_ct_fast_val_free(&target);
         return false;
+      }
       out->kind = NY_CT_FAST_INT;
       out->i = len;
+      ny_ct_fast_val_free(&target);
       return true;
     }
     return false;
@@ -1906,17 +2196,27 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       return false;
     ny_ct_fast_val_t target = ny_ct_fast_none();
     ny_ct_fast_val_t idx = ny_ct_fast_none();
-    if (!ny_ct_interp_eval_expr(e->as.index.target, ctx, &target, depth + 1) ||
-        !ny_ct_interp_eval_expr(e->as.index.start, ctx, &idx, depth + 1) ||
-        idx.kind != NY_CT_FAST_INT)
+    if (!ny_ct_interp_eval_expr(e->as.index.target, ctx, &target, depth + 1))
       return false;
+    if (!ny_ct_interp_eval_expr(e->as.index.start, ctx, &idx, depth + 1) ||
+        idx.kind != NY_CT_FAST_INT) {
+      ny_ct_fast_val_free(&target);
+      ny_ct_fast_val_free(&idx);
+      return false;
+    }
     int64_t len = 0;
-    if (!ny_ct_seq_len(&target, &len))
+    if (!ny_ct_seq_len(&target, &len)) {
+      ny_ct_fast_val_free(&target);
+      ny_ct_fast_val_free(&idx);
       return false;
+    }
     int64_t resolved = idx.i;
     if (resolved < 0)
       resolved += len;
-    return ny_ct_seq_item(&target, resolved, out);
+    bool ok = ny_ct_seq_item(&target, resolved, out);
+    ny_ct_fast_val_free(&target);
+    ny_ct_fast_val_free(&idx);
+    return ok;
   }
   case NY_E_CALL: {
     if (!e->as.call.callee)
@@ -1934,14 +2234,22 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       for (size_t i = 0; i < e->as.call.args.len; i++) {
         if (!ny_ct_interp_eval_expr(e->as.call.args.data[i].val, ctx, &vals[i],
                                     depth + 1) ||
-            vals[i].kind != NY_CT_FAST_INT)
+            vals[i].kind != NY_CT_FAST_INT) {
+          for (size_t j = 0; j <= i && j < 3; j++)
+            ny_ct_fast_val_free(&vals[j]);
           return false;
+        }
       }
+      bool ok = false;
       if (e->as.call.args.len == 1)
-        return ny_ct_make_range(0, vals[0].i, 1, out);
-      if (e->as.call.args.len == 2)
-        return ny_ct_make_range(vals[0].i, vals[1].i, 1, out);
-      return ny_ct_make_range(vals[0].i, vals[1].i, vals[2].i, out);
+        ok = ny_ct_make_range(0, vals[0].i, 1, out);
+      else if (e->as.call.args.len == 2)
+        ok = ny_ct_make_range(vals[0].i, vals[1].i, 1, out);
+      else
+        ok = ny_ct_make_range(vals[0].i, vals[1].i, vals[2].i, out);
+      for (size_t j = 0; j < 3; j++)
+        ny_ct_fast_val_free(&vals[j]);
+      return ok;
     }
     if (strcmp(name, "range2") == 0 && e->as.call.args.len >= 2 &&
         e->as.call.args.len <= 3) {
@@ -1950,18 +2258,27 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       for (size_t i = 0; i < e->as.call.args.len; i++) {
         if (!ny_ct_interp_eval_expr(e->as.call.args.data[i].val, ctx, &vals[i],
                                     depth + 1) ||
-            vals[i].kind != NY_CT_FAST_INT)
+            vals[i].kind != NY_CT_FAST_INT) {
+          for (size_t j = 0; j <= i && j < 3; j++)
+            ny_ct_fast_val_free(&vals[j]);
           return false;
+        }
       }
-      return ny_ct_make_range(vals[0].i, vals[1].i,
-                              e->as.call.args.len == 3 ? vals[2].i : 1, out);
+      bool ok = ny_ct_make_range(vals[0].i, vals[1].i,
+                                 e->as.call.args.len == 3 ? vals[2].i : 1,
+                                 out);
+      for (size_t j = 0; j < 3; j++)
+        ny_ct_fast_val_free(&vals[j]);
+      return ok;
     }
     if (strcmp(name, "Z") == 0 && e->as.call.args.len == 1) {
       ny_ct_fast_val_t arg = ny_ct_fast_none();
       if (!ny_ct_interp_eval_expr(e->as.call.args.data[0].val, ctx, &arg,
                                   depth + 1))
         return false;
-      return ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+      bool ok = ny_ct_fast_eval_bigint_constructor_arg(&arg, out);
+      ny_ct_fast_val_free(&arg);
+      return ok;
     }
     if (strcmp(name, "__main") == 0 && (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_BOOL;
@@ -2012,9 +2329,11 @@ static bool ny_try_eval_comptime_interp_value(codegen_t *cg, stmt_t *body,
   bool did_return = false;
   bool ok = ny_ct_interp_eval_stmt(body, &ctx, &ret, &did_return, 0);
   ny_ct_interp_ctx_free(&ctx);
-  if (!ok)
+  if (!ok) {
+    ny_ct_fast_val_free(&ret);
     return false;
-  *out = ret;
+  }
+  ny_ct_fast_val_move(out, &ret);
   return true;
 }
 
@@ -2023,7 +2342,9 @@ static bool ny_try_eval_comptime_interp(codegen_t *cg, stmt_t *body,
   ny_ct_fast_val_t ret = ny_ct_fast_none();
   if (!ny_try_eval_comptime_interp_value(cg, body, &ret))
     return false;
-  return ny_ct_interp_to_tagged(&ret, out_tagged);
+  bool ok = ny_ct_interp_to_tagged(&ret, out_tagged);
+  ny_ct_fast_val_free(&ret);
+  return ok;
 }
 
 static LLVMValueRef ny_try_host_platform_ident(codegen_t *cg,
@@ -2046,19 +2367,304 @@ static LLVMValueRef ny_try_host_platform_ident(codegen_t *cg,
   return NULL;
 }
 
+static bool closure_param_list_shadows_name(const ny_param_list *params,
+                                            const char *name) {
+  if (!params || !name)
+    return false;
+  for (size_t i = 0; i < params->len; ++i) {
+    if (params->data[i].name && strcmp(params->data[i].name, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool closure_stmt_contains_ident_name(stmt_t *s, const char *name);
+
+static bool closure_expr_contains_ident_name(expr_t *e, const char *name) {
+  if (!e || !name)
+    return false;
+  switch (e->kind) {
+  case NY_E_IDENT:
+    return ny_expr_ident_is_name(e, name);
+  case NY_E_UNARY:
+    return closure_expr_contains_ident_name(e->as.unary.right, name);
+  case NY_E_BINARY:
+    return closure_expr_contains_ident_name(e->as.binary.left, name) ||
+           closure_expr_contains_ident_name(e->as.binary.right, name);
+  case NY_E_LOGICAL:
+    return closure_expr_contains_ident_name(e->as.logical.left, name) ||
+           closure_expr_contains_ident_name(e->as.logical.right, name);
+  case NY_E_TERNARY:
+    return closure_expr_contains_ident_name(e->as.ternary.cond, name) ||
+           closure_expr_contains_ident_name(e->as.ternary.true_expr, name) ||
+           closure_expr_contains_ident_name(e->as.ternary.false_expr, name);
+  case NY_E_CALL:
+    if (closure_expr_contains_ident_name(e->as.call.callee, name))
+      return true;
+    for (size_t i = 0; i < e->as.call.args.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.call.args.data[i].val, name))
+        return true;
+    }
+    return false;
+  case NY_E_MEMCALL:
+    if (closure_expr_contains_ident_name(e->as.memcall.target, name))
+      return true;
+    for (size_t i = 0; i < e->as.memcall.args.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.memcall.args.data[i].val,
+                                           name))
+        return true;
+    }
+    return false;
+  case NY_E_INDEX:
+    return closure_expr_contains_ident_name(e->as.index.target, name) ||
+           closure_expr_contains_ident_name(e->as.index.start, name) ||
+           closure_expr_contains_ident_name(e->as.index.stop, name) ||
+           closure_expr_contains_ident_name(e->as.index.step, name);
+  case NY_E_MEMBER:
+    return closure_expr_contains_ident_name(e->as.member.target, name);
+  case NY_E_PTR_TYPE:
+    return closure_expr_contains_ident_name(e->as.ptr_type.target, name);
+  case NY_E_DEREF:
+    return closure_expr_contains_ident_name(e->as.deref.target, name);
+  case NY_E_SIZEOF:
+    return !e->as.szof.is_type &&
+           closure_expr_contains_ident_name(e->as.szof.target, name);
+  case NY_E_TRY:
+    return closure_expr_contains_ident_name(e->as.try_expr.target, name);
+  case NY_E_LAMBDA:
+  case NY_E_FN:
+    for (size_t i = 0; i < e->as.lambda.params.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.lambda.params.data[i].def,
+                                           name))
+        return true;
+    }
+    if (closure_param_list_shadows_name(&e->as.lambda.params, name))
+      return false;
+    return closure_stmt_contains_ident_name(e->as.lambda.body, name);
+  case NY_E_ASM:
+    for (size_t i = 0; i < e->as.as_asm.args.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.as_asm.args.data[i], name))
+        return true;
+    }
+    return false;
+  case NY_E_COMPTIME:
+    return closure_stmt_contains_ident_name(e->as.comptime_expr.body, name);
+  case NY_E_FSTRING:
+    for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
+      fstring_part_t *part = &e->as.fstring.parts.data[i];
+      if (part->kind == NY_FSP_EXPR &&
+          closure_expr_contains_ident_name(part->as.e, name))
+        return true;
+    }
+    return false;
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET:
+    for (size_t i = 0; i < e->as.list_like.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.list_like.data[i], name))
+        return true;
+    }
+    return false;
+  case NY_E_DICT:
+    for (size_t i = 0; i < e->as.dict.pairs.len; ++i) {
+      if (closure_expr_contains_ident_name(e->as.dict.pairs.data[i].key,
+                                           name) ||
+          closure_expr_contains_ident_name(e->as.dict.pairs.data[i].value,
+                                           name))
+        return true;
+    }
+    return false;
+  case NY_E_MATCH:
+    if (closure_expr_contains_ident_name(e->as.match.test, name))
+      return true;
+    for (size_t i = 0; i < e->as.match.arms.len; ++i) {
+      match_arm_t *arm = &e->as.match.arms.data[i];
+      for (size_t p = 0; p < arm->patterns.len; ++p) {
+        if (closure_expr_contains_ident_name(arm->patterns.data[p], name))
+          return true;
+      }
+      if (closure_expr_contains_ident_name(arm->guard, name) ||
+          closure_stmt_contains_ident_name(arm->conseq, name))
+        return true;
+    }
+    return closure_stmt_contains_ident_name(e->as.match.default_conseq, name);
+  default:
+    return false;
+  }
+}
+
+static bool closure_params_contain_ident_name(const ny_param_list *params,
+                                              const char *name) {
+  if (!params || !name)
+    return false;
+  for (size_t i = 0; i < params->len; ++i) {
+    if (closure_expr_contains_ident_name(params->data[i].def, name))
+      return true;
+  }
+  return false;
+}
+
+static bool closure_stmt_list_contains_ident_name(ny_stmt_list *list,
+                                                  const char *name) {
+  if (!list || !name)
+    return false;
+  for (size_t i = 0; i < list->len; ++i) {
+    if (closure_stmt_contains_ident_name(list->data[i], name))
+      return true;
+  }
+  return false;
+}
+
+static bool
+closure_layout_fields_contain_ident_name(ny_layout_field_list *fields,
+                                         const char *name) {
+  if (!fields || !name)
+    return false;
+  for (size_t i = 0; i < fields->len; ++i) {
+    if (closure_expr_contains_ident_name(fields->data[i].default_value, name))
+      return true;
+  }
+  return false;
+}
+
+static bool closure_stmt_contains_ident_name(stmt_t *s, const char *name) {
+  if (!s || !name)
+    return false;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    return closure_stmt_list_contains_ident_name(&s->as.block.body, name);
+  case NY_S_MODULE:
+    return closure_stmt_list_contains_ident_name(&s->as.module.body, name);
+  case NY_S_VAR:
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i) {
+      if (closure_expr_contains_ident_name(s->as.var.exprs.data[i], name))
+        return true;
+    }
+    return false;
+  case NY_S_EXPR:
+    return closure_expr_contains_ident_name(s->as.expr.expr, name);
+  case NY_S_IF:
+    return closure_stmt_contains_ident_name(s->as.iff.init, name) ||
+           closure_expr_contains_ident_name(s->as.iff.test, name) ||
+           closure_stmt_contains_ident_name(s->as.iff.conseq, name) ||
+           closure_stmt_contains_ident_name(s->as.iff.alt, name);
+  case NY_S_GUARD:
+    if (closure_expr_contains_ident_name(s->as.guard.value, name))
+      return true;
+    if (s->as.guard.name && strcmp(s->as.guard.name, name) == 0)
+      return false;
+    return closure_stmt_contains_ident_name(s->as.guard.fallback, name);
+  case NY_S_WHILE:
+    return closure_stmt_contains_ident_name(s->as.whl.init, name) ||
+           closure_expr_contains_ident_name(s->as.whl.test, name) ||
+           closure_stmt_contains_ident_name(s->as.whl.body, name) ||
+           closure_stmt_contains_ident_name(s->as.whl.update, name);
+  case NY_S_FOR: {
+    if (closure_stmt_contains_ident_name(s->as.fr.init, name) ||
+        closure_expr_contains_ident_name(s->as.fr.cond, name) ||
+        closure_expr_contains_ident_name(s->as.fr.iterable, name) ||
+        closure_stmt_contains_ident_name(s->as.fr.update, name))
+      return true;
+    bool iter_shadows =
+        (s->as.fr.iter_var && strcmp(s->as.fr.iter_var, name) == 0) ||
+        (s->as.fr.iter_index_var &&
+         strcmp(s->as.fr.iter_index_var, name) == 0);
+    return !iter_shadows &&
+           closure_stmt_contains_ident_name(s->as.fr.body, name);
+  }
+  case NY_S_TRY:
+    if (closure_stmt_contains_ident_name(s->as.tr.body, name))
+      return true;
+    if (s->as.tr.err && strcmp(s->as.tr.err, name) == 0)
+      return false;
+    return closure_stmt_contains_ident_name(s->as.tr.handler, name);
+  case NY_S_RETURN:
+    return closure_expr_contains_ident_name(s->as.ret.value, name);
+  case NY_S_DEFER:
+    return closure_stmt_contains_ident_name(s->as.de.body, name);
+  case NY_S_MATCH:
+    if (closure_expr_contains_ident_name(s->as.match.test, name))
+      return true;
+    for (size_t i = 0; i < s->as.match.arms.len; ++i) {
+      match_arm_t *arm = &s->as.match.arms.data[i];
+      for (size_t p = 0; p < arm->patterns.len; ++p) {
+        if (closure_expr_contains_ident_name(arm->patterns.data[p], name))
+          return true;
+      }
+      if (closure_expr_contains_ident_name(arm->guard, name) ||
+          closure_stmt_contains_ident_name(arm->conseq, name))
+        return true;
+    }
+    return closure_stmt_contains_ident_name(s->as.match.default_conseq, name);
+  case NY_S_FUNC:
+    if (closure_params_contain_ident_name(&s->as.fn.params, name))
+      return true;
+    if (closure_param_list_shadows_name(&s->as.fn.params, name))
+      return false;
+    return closure_stmt_contains_ident_name(s->as.fn.body, name);
+  case NY_S_LAYOUT:
+    return closure_layout_fields_contain_ident_name(&s->as.layout.fields,
+                                                    name) ||
+           closure_stmt_list_contains_ident_name(&s->as.layout.methods, name);
+  case NY_S_STRUCT:
+    return closure_layout_fields_contain_ident_name(&s->as.struc.fields,
+                                                    name) ||
+           closure_stmt_list_contains_ident_name(&s->as.struc.methods, name);
+  case NY_S_ENUM:
+    for (size_t i = 0; i < s->as.enu.items.len; ++i) {
+      if (closure_expr_contains_ident_name(s->as.enu.items.data[i].value,
+                                           name))
+        return true;
+    }
+    return false;
+  case NY_S_MACRO:
+    for (size_t i = 0; i < s->as.macro.args.len; ++i) {
+      if (closure_expr_contains_ident_name(s->as.macro.args.data[i], name))
+        return true;
+    }
+    return closure_stmt_contains_ident_name(s->as.macro.body, name);
+  case NY_S_IMPL:
+    return closure_stmt_list_contains_ident_name(&s->as.impl.methods, name);
+  default:
+    return false;
+  }
+}
+
+static bool closure_seen_name(const str_list *seen, const char *name) {
+  if (!seen || !name)
+    return false;
+  for (size_t i = 0; i < seen->len; ++i) {
+    if (seen->data[i] && strcmp(seen->data[i], name) == 0)
+      return true;
+  }
+  return false;
+}
+
 LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          ny_param_list params, stmt_t *body, bool is_variadic,
                          const char *return_type, const char *name_hint) {
-  /* Capture All Visible Variables (scopes[1..depth]) */
+  if (cg)
+    cg->last_lambda_sig = NULL;
   binding_list captures;
   vec_init(&captures);
-  for (ssize_t i = 1; i <= (ssize_t)depth; i++) {
+  str_list seen_names;
+  vec_init(&seen_names);
+  for (ssize_t i = (ssize_t)depth; i >= 1; i--) {
     for (size_t j = 0; j < scopes[i].vars.len; j++) {
-      vec_push(&captures, scopes[i].vars.data[j]);
-      // Mark the original variable as used since it's being captured
-      scopes[i].vars.data[j].is_used = true;
+      binding *candidate = &scopes[i].vars.data[j];
+      if (!candidate->name || closure_seen_name(&seen_names, candidate->name))
+        continue;
+      vec_push(&seen_names, (char *)candidate->name);
+      if (closure_param_list_shadows_name(&params, candidate->name))
+        continue;
+      if (!closure_params_contain_ident_name(&params, candidate->name) &&
+          !closure_stmt_contains_ident_name(body, candidate->name))
+        continue;
+      vec_push(&captures, *candidate);
+      candidate->is_used = true;
     }
   }
+  vec_free(&seen_names);
   token_t closure_tok = body ? body->tok : (token_t){0};
   char name[64];
   if (name_hint && strncmp(name_hint, "__lambda", 8) == 0) {
@@ -2111,6 +2717,8 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   LLVMValueRef lf = ny_get_named_fn(cg, name);
   if (lf)
     LLVMSetLinkage(lf, LLVMInternalLinkage);
+  fun_sig *lambda_sig = lookup_fun(cg, name, 0);
+  cg->last_lambda_sig = (!uses_env && lambda_sig) ? lambda_sig : NULL;
   // Keep callable pointers raw. Ad-hoc low-bit tagging collides with
   // 32-bit runtime native tags (and ARM Thumb pointer semantics).
   LLVMValueRef fn_ptr_raw = ny_ptr2i64(cg, lf, "");
@@ -2620,6 +3228,131 @@ static LLVMValueRef ny_unbox_known_numeric_float(codegen_t *cg, LLVMValueRef v) 
   LLVMValueRef phi = ny_phi(cg, cg->type_f64, "known_flt");
   LLVMAddIncoming(phi, (LLVMValueRef[]){from_int, from_ptr},
                   (LLVMBasicBlockRef[]){int_done, flt_done}, 2);
+  return phi;
+}
+
+static LLVMValueRef ny_try_emit_f64_list_get_as_f64(codegen_t *cg,
+                                                    scope *scopes,
+                                                    size_t depth, expr_t *e) {
+  if (!cg || !e || e->kind != NY_E_MEMCALL || !e->as.memcall.name ||
+      !ny_name_tail_is(e->as.memcall.name, "get") ||
+      !e->as.memcall.target ||
+      (e->as.memcall.args.len != 1 && e->as.memcall.args.len != 2))
+    return NULL;
+  if (!expr_f64_list_target_binding(cg, scopes, depth, e->as.memcall.target))
+    return NULL;
+  expr_t *key = e->as.memcall.args.data[0].val;
+  expr_t *default_expr =
+      e->as.memcall.args.len == 2 ? e->as.memcall.args.data[1].val : NULL;
+  if (!expr_index_is_int_key(cg, scopes, depth, key) ||
+      !expr_is_f64_default_value(cg, scopes, depth, default_expr))
+    return NULL;
+
+  LLVMValueRef target_v = expr_cast_to_i64(
+      cg, gen_expr(cg, scopes, depth, e->as.memcall.target),
+      "f64_list_get_target");
+  LLVMValueRef key_v =
+      expr_cast_to_i64(cg, gen_expr(cg, scopes, depth, key),
+                       "f64_list_get_key");
+  if (!target_v || !key_v)
+    return NULL;
+  LLVMValueRef default_v =
+      default_expr ? gen_expr_as_f64(cg, scopes, depth, default_expr)
+                   : LLVMConstReal(cg->type_f64, 0.0);
+
+  LLVMValueRef target_ptr =
+      LLVMBuildIntToPtr(cg->builder, target_v, ny_ptr_i64_ty(cg),
+                        "f64_list_get_ptr_i64");
+  LLVMValueRef len_tagged = ny_load(cg, target_ptr, "f64_list_get_len");
+  LLVMValueRef len_raw =
+      expr_build_untagged_or_raw_i64(cg, len_tagged, "f64_list_get_len_raw");
+  LLVMValueRef key_raw =
+      expr_index_raw_i64(cg, scopes, depth, key, key_v, "f64_list_get_key_raw");
+
+  int64_t key_min = 0, key_max = 0;
+  bool key_range = expr_int_range(cg, scopes, depth, key, &key_min, &key_max);
+  bool assume_nonnegative = key_range && key_min >= 0;
+  LLVMValueRef adj_key = key_raw;
+  if (!assume_nonnegative) {
+    LLVMValueRef is_neg =
+        LLVMBuildICmp(cg->builder, LLVMIntSLT, key_raw, ny_c0(cg),
+                      "f64_list_get_is_neg");
+    LLVMValueRef wrapped =
+        ny_add(cg, key_raw, len_raw, "f64_list_get_wrapped_idx");
+    adj_key = ny_select(cg, is_neg, wrapped, key_raw, "f64_list_get_adj_idx");
+  }
+
+  bool assume_in_bounds = false;
+  int64_t len_min = 0;
+  if (key_range && key_min >= 0 &&
+      expr_list_len_min(cg, scopes, depth, e->as.memcall.target, &len_min) &&
+      key_max < len_min)
+    assume_in_bounds = true;
+
+  LLVMValueRef elem_addr = NULL;
+  LLVMValueRef elem_ptr = NULL;
+  LLVMValueRef boxed = NULL;
+  if (assume_in_bounds) {
+    LLVMValueRef scaled =
+        LLVMBuildShl(cg->builder, adj_key, LLVMConstInt(cg->type_i64, 3, false),
+                     "f64_list_get_scaled");
+    LLVMValueRef byte_off =
+        ny_add(cg, LLVMConstInt(cg->type_i64, 16, false), scaled,
+               "f64_list_get_off");
+    elem_addr = ny_add(cg, target_v, byte_off, "f64_list_get_addr");
+    elem_ptr = LLVMBuildIntToPtr(cg->builder, elem_addr, ny_ptr_i64_ty(cg),
+                                 "f64_list_get_elem_ptr_i64");
+    boxed = ny_load(cg, elem_ptr, "f64_list_get_elem");
+    LLVMValueRef ptr = LLVMBuildIntToPtr(
+        cg->builder, boxed, LLVMPointerType(cg->type_f64, 0),
+        "f64_list_get_fptr");
+    return LLVMBuildLoad2(cg->builder, cg->type_f64, ptr,
+                          "f64_list_get_f64");
+  }
+
+  LLVMBasicBlockRef entry_bb = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(entry_bb);
+  LLVMBasicBlockRef load_bb = ny_bb_fn(fn, "f64_list_get.load");
+  LLVMBasicBlockRef default_bb = ny_bb_fn(fn, "f64_list_get.default");
+  LLVMBasicBlockRef join_bb = ny_bb_fn(fn, "f64_list_get.join");
+
+  LLVMValueRef low_ok =
+      LLVMBuildICmp(cg->builder, LLVMIntSGE, adj_key, ny_c0(cg),
+                    "f64_list_get_low_ok");
+  LLVMValueRef high_ok =
+      LLVMBuildICmp(cg->builder, LLVMIntSLT, adj_key, len_raw,
+                    "f64_list_get_hi_ok");
+  LLVMValueRef in_bounds =
+      ny_and(cg, low_ok, high_ok, "f64_list_get_in_bounds");
+  ny_cond_br(cg, in_bounds, load_bb, default_bb);
+
+  ny_pos(cg, load_bb);
+  LLVMValueRef scaled =
+      LLVMBuildShl(cg->builder, adj_key, LLVMConstInt(cg->type_i64, 3, false),
+                   "f64_list_get_scaled");
+  LLVMValueRef byte_off =
+      ny_add(cg, LLVMConstInt(cg->type_i64, 16, false), scaled,
+             "f64_list_get_off");
+  elem_addr = ny_add(cg, target_v, byte_off, "f64_list_get_addr");
+  elem_ptr = LLVMBuildIntToPtr(cg->builder, elem_addr, ny_ptr_i64_ty(cg),
+                               "f64_list_get_elem_ptr_i64");
+  boxed = ny_load(cg, elem_ptr, "f64_list_get_elem");
+  LLVMValueRef ptr =
+      LLVMBuildIntToPtr(cg->builder, boxed, LLVMPointerType(cg->type_f64, 0),
+                        "f64_list_get_fptr");
+  LLVMValueRef loaded =
+      LLVMBuildLoad2(cg->builder, cg->type_f64, ptr, "f64_list_get_f64");
+  LLVMBasicBlockRef load_done = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, default_bb);
+  LLVMBasicBlockRef default_done = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, join_bb);
+  LLVMValueRef phi = ny_phi(cg, cg->type_f64, "f64_list_get_result");
+  LLVMAddIncoming(phi, (LLVMValueRef[]){loaded, default_v},
+                  (LLVMBasicBlockRef[]){load_done, default_done}, 2);
   return phi;
 }
 
@@ -3475,16 +4208,20 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
   ny_ct_fast_val_t fast_value = ny_ct_fast_none();
   if (ny_try_eval_comptime_fast_value(cg, body, &fast_value)) {
     LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &fast_value, body->tok);
+    ny_ct_fast_val_free(&fast_value);
     if (v)
       return v;
   }
+  ny_ct_fast_val_free(&fast_value);
 
   ny_ct_fast_val_t interp_value = ny_ct_fast_none();
   if (ny_try_eval_comptime_interp_value(cg, body, &interp_value)) {
     LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &interp_value, body->tok);
+    ny_ct_fast_val_free(&interp_value);
     if (v)
       return v;
   }
+  ny_ct_fast_val_free(&interp_value);
 
   int64_t interp_tagged = 0;
   char *err = NULL;
@@ -4121,6 +4858,33 @@ static LLVMValueRef gen_expr_logical(codegen_t *cg, scope *scopes, size_t depth,
   return phi;
 }
 
+static bool ny_name_leaf_is_f64_cast(const char *name) {
+  if (!name)
+    return false;
+  const char *leaf = strrchr(name, '.');
+  leaf = leaf ? leaf + 1 : name;
+  return strcmp(leaf, "float") == 0 || strcmp(leaf, "to_float") == 0 ||
+         strcmp(leaf, "f64") == 0;
+}
+
+static bool ny_call_expr_is_f64_cast(codegen_t *cg, scope *scopes, size_t depth,
+                                     expr_t *e) {
+  if (!e || e->kind != NY_E_CALL || !e->as.call.callee ||
+      e->as.call.callee->kind != NY_E_IDENT || e->as.call.args.len != 1)
+    return false;
+  size_t surface_len = 0;
+  uint64_t surface_hash = 0;
+  const char *surface =
+      ny_builtin_surface_name_for_callee(e->as.call.callee, &surface_len,
+                                         &surface_hash);
+  if (surface) {
+    bool shadowed = ny_builtin_name_shadowed_by_user_symbol(
+        cg, scopes, depth, surface, surface_len, surface_hash);
+    return !shadowed && ny_name_leaf_is_f64_cast(surface);
+  }
+  return ny_name_tail_is(e->as.call.callee->as.ident.name, "f64");
+}
+
 static bool ny_is_f64_like_limited(codegen_t *cg, scope *scopes, size_t depth,
                                    expr_t *e, unsigned budget) {
   if (!e)
@@ -4151,13 +4915,18 @@ static bool ny_is_f64_like_limited(codegen_t *cg, scope *scopes, size_t depth,
   }
   if (e->kind == NY_E_CALL && e->as.call.callee &&
       e->as.call.callee->kind == NY_E_IDENT) {
+    if (ny_call_expr_is_f64_cast(cg, scopes, depth, e))
+      return true;
     const char *fn_name = e->as.call.callee->as.ident.name;
     if (fn_name) {
       fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
-      return sig && sig->return_type &&
-             (strcmp(sig->return_type, "f64") == 0 ||
-              strcmp(sig->return_type, "f32") == 0 ||
-              strcmp(sig->return_type, "float") == 0);
+      const char *ret_type =
+          sig ? (sig->return_type ? sig->return_type
+                                  : sig->inferred_return_type)
+              : NULL;
+      return ret_type && (strcmp(ret_type, "f64") == 0 ||
+                          strcmp(ret_type, "f32") == 0 ||
+                          strcmp(ret_type, "float") == 0);
     }
   }
   return false;
@@ -4194,6 +4963,8 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
                    strcmp(b->type_name, "f64") == 0)));
   }
   if (e->kind == NY_E_BINARY) {
+    if (expr_int_range(cg, scopes, depth, e, NULL, NULL))
+      return true;
     const char *op = e->as.binary.op;
     if (!ny_is_f64_arith_op(op))
       return false;
@@ -4210,15 +4981,31 @@ static bool ny_is_numeric_expr_like_limited(codegen_t *cg, scope *scopes, size_t
   }
   if (e->kind == NY_E_CALL && e->as.call.callee &&
       e->as.call.callee->kind == NY_E_IDENT) {
+    if (ny_call_expr_is_f64_cast(cg, scopes, depth, e))
+      return true;
     const char *fn_name = e->as.call.callee->as.ident.name;
     if (fn_name) {
       fun_sig *sig = resolve_overload(cg, fn_name, e->as.call.args.len, 0);
-      return sig && sig->return_type &&
-             (strcmp(sig->return_type, "int") == 0 ||
-              strcmp(sig->return_type, "i64") == 0 ||
-              strcmp(sig->return_type, "f32") == 0 ||
-              strcmp(sig->return_type, "f64") == 0);
+      const char *ret_type =
+          sig ? (sig->return_type ? sig->return_type
+                                  : sig->inferred_return_type)
+              : NULL;
+      return ret_type && (strcmp(ret_type, "int") == 0 ||
+                          strcmp(ret_type, "i64") == 0 ||
+                          strcmp(ret_type, "f32") == 0 ||
+                          strcmp(ret_type, "f64") == 0 ||
+                          strcmp(ret_type, "float") == 0);
     }
+  }
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      strcmp(e->as.memcall.name, "get") == 0 &&
+      (e->as.memcall.args.len == 1 || e->as.memcall.args.len == 2)) {
+    const char *target_type =
+        infer_expr_type(cg, scopes, depth, e->as.memcall.target);
+    return target_type && (strcmp(target_type, "list") == 0 ||
+                           strcmp(target_type, "tuple") == 0 ||
+                           strncmp(target_type, "list<", 5) == 0 ||
+                           strncmp(target_type, "tuple<", 6) == 0);
   }
   return false;
 }
@@ -4487,8 +5274,25 @@ static void ny_emit_f64_div_zero_guard(codegen_t *cg, LLVMValueRef rf) {
   ny_pos(cg, ok_bb);
 }
 
+static bool ny_f64_expr_proven_nonzero(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL) {
+    if (e->as.literal.kind == NY_LIT_INT)
+      return e->as.literal.as.i != 0;
+    if (e->as.literal.kind == NY_LIT_FLOAT)
+      return e->as.literal.as.f != 0.0;
+  }
+  int64_t min_raw = 0, max_raw = 0;
+  if (expr_int_range(cg, scopes, depth, e, &min_raw, &max_raw))
+    return min_raw > 0 || max_raw < 0;
+  return false;
+}
+
 static LLVMValueRef ny_emit_f64_op(codegen_t *cg, const char *op,
-                                   LLVMValueRef lf, LLVMValueRef rf) {
+                                   LLVMValueRef lf, LLVMValueRef rf,
+                                   bool divisor_nonzero) {
   if (strcmp(op, "+") == 0)
     return LLVMBuildFAdd(cg->builder, lf, rf, "fadd");
   if (strcmp(op, "-") == 0)
@@ -4496,10 +5300,317 @@ static LLVMValueRef ny_emit_f64_op(codegen_t *cg, const char *op,
   if (strcmp(op, "*") == 0)
     return LLVMBuildFMul(cg->builder, lf, rf, "fmul");
   if (strcmp(op, "/") == 0) {
-    ny_emit_f64_div_zero_guard(cg, rf);
+    if (!divisor_nonzero)
+      ny_emit_f64_div_zero_guard(cg, rf);
     return LLVMBuildFDiv(cg->builder, lf, rf, "fdiv");
   }
   return NULL;
+}
+
+static bool ny_f64_raw_int_expr_shape_supported(expr_t *e, unsigned budget) {
+  if (!e || budget == 0)
+    return false;
+  switch (e->kind) {
+  case NY_E_LITERAL:
+    return e->as.literal.kind == NY_LIT_INT;
+  case NY_E_IDENT:
+    return true;
+  case NY_E_BINARY: {
+    const char *op = e->as.binary.op;
+    if (!op)
+      return false;
+    if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+        strcmp(op, "*") == 0 || strcmp(op, "&") == 0) {
+      return ny_f64_raw_int_expr_shape_supported(e->as.binary.left,
+                                                 budget - 1) &&
+             ny_f64_raw_int_expr_shape_supported(e->as.binary.right,
+                                                 budget - 1);
+    }
+    if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0 ||
+        strcmp(op, ">>") == 0) {
+      int64_t rhs_lit = 0;
+      if (!ny_expr_literal_i64(e->as.binary.right, &rhs_lit))
+        return false;
+      if ((strcmp(op, "/") == 0 || strcmp(op, "%") == 0) && rhs_lit <= 0)
+        return false;
+      if (strcmp(op, ">>") == 0 && (rhs_lit < 0 || rhs_lit >= 64))
+        return false;
+      return ny_f64_raw_int_expr_shape_supported(e->as.binary.left,
+                                                 budget - 1);
+    }
+    return false;
+  }
+  default:
+    return false;
+  }
+}
+
+static bool ny_f64_inline_try_raw_int_value(codegen_t *cg, scope *scopes,
+                                            size_t depth, expr_t *e,
+                                            LLVMValueRef *raw_out,
+                                            int64_t *min_out,
+                                            int64_t *max_out) {
+  if (raw_out)
+    *raw_out = NULL;
+  if (!cg || !e || !ny_f64_raw_int_expr_shape_supported(e, 24))
+    return false;
+  int64_t min_raw = 0, max_raw = 0;
+  if (!expr_int_range(cg, scopes, depth, e, &min_raw, &max_raw))
+    return false;
+  LLVMValueRef raw = NULL;
+  LLVMValueRef ok = NULL;
+  if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw ||
+      !ok || !LLVMIsAConstantInt(ok) || LLVMConstIntGetZExtValue(ok) == 0)
+    return false;
+  if (raw_out)
+    *raw_out = raw;
+  if (min_out)
+    *min_out = min_raw;
+  if (max_out)
+    *max_out = max_raw;
+  return true;
+}
+
+static LLVMValueRef ny_try_raw_int_expr_as_f64(codegen_t *cg, scope *scopes,
+                                               size_t depth, expr_t *e) {
+  if (!cg || !e || ny_env_enabled("NYTRIX_DISABLE_F64_RAW_INT_EXPR"))
+    return NULL;
+  if (!ny_f64_raw_int_expr_shape_supported(e, 24))
+    return NULL;
+  int64_t min_raw = 0, max_raw = 0;
+  if (!expr_int_range(cg, scopes, depth, e, &min_raw, &max_raw))
+    return NULL;
+  LLVMValueRef raw = NULL;
+  LLVMValueRef ok = NULL;
+  if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw ||
+      !ok || !LLVMIsAConstantInt(ok) || LLVMConstIntGetZExtValue(ok) == 0)
+    return NULL;
+  (void)min_raw;
+  (void)max_raw;
+  return LLVMBuildSIToFP(cg->builder, raw, cg->type_f64,
+                         NY_LLVM_NAME(cg, "raw_int_i2f"));
+}
+
+static bool ny_f64_inline_body_supported(stmt_t *body) {
+  if (!body)
+    return false;
+  if (body->kind == NY_S_RETURN || body->kind == NY_S_EXPR)
+    return true;
+  if (body->kind != NY_S_BLOCK || body->as.block.body.len == 0)
+    return false;
+  for (size_t i = 0; i < body->as.block.body.len; ++i) {
+    stmt_t *s = body->as.block.body.data[i];
+    if (i + 1 == body->as.block.body.len)
+      return ny_f64_inline_body_supported(s);
+    if (!s || s->kind != NY_S_VAR || s->as.var.is_mut ||
+        s->as.var.is_del || s->as.var.is_destructure ||
+        s->as.var.names.len != s->as.var.exprs.len)
+      return false;
+  }
+  return false;
+}
+
+static void ny_f64_inline_bind_raw_int(codegen_t *cg, scope *scopes,
+                                       size_t depth, const char *name,
+                                       LLVMValueRef raw, const char *explicit_type,
+                                       int64_t min_raw, int64_t max_raw) {
+  if (!cg || !name || !raw)
+    return;
+  LLVMValueRef tagged = ny_tag_int(cg, raw);
+  scope_bind(cg, scopes, depth, name, tagged, NULL, false,
+             explicit_type ? explicit_type : "int", false);
+  binding *b = &scopes[depth].vars.data[scopes[depth].vars.len - 1];
+  b->is_int_direct = true;
+  b->is_int_raw_direct = true;
+  b->raw_int_value = raw;
+  b->has_int_range = true;
+  b->int_min_raw = min_raw;
+  b->int_max_raw = max_raw;
+}
+
+static void ny_f64_inline_bind_value(codegen_t *cg, scope *scopes,
+                                     size_t depth, const char *name,
+                                     LLVMValueRef value, const char *explicit_type,
+                                     expr_t *source_expr) {
+  if (!name || !value)
+    return;
+  const char *inferred_type =
+      explicit_type ? explicit_type : infer_expr_type(cg, scopes, depth, source_expr);
+  if (LLVMTypeOf(value) == cg->type_f64 || LLVMTypeOf(value) == cg->type_f32) {
+    const char *bind_type =
+        explicit_type ? explicit_type
+                      : (LLVMTypeOf(value) == cg->type_f32 ? "f32" : "f64");
+    scope_bind(cg, scopes, depth, name, value, NULL, false, bind_type, false);
+    binding *b = &scopes[depth].vars.data[scopes[depth].vars.len - 1];
+    if (LLVMTypeOf(value) == cg->type_f32)
+      b->is_f32_direct = true;
+    else
+      b->is_f64_direct = true;
+    return;
+  }
+  value = expr_cast_to_i64(cg, value, "inline_f64_value");
+  bool proven_int = ny_type_is(inferred_type, "int") ||
+                    ny_type_is(inferred_type, "i64") ||
+                    ny_is_proven_int(cg, scopes, depth, source_expr, value);
+  bool proven_f64 = ny_type_is(inferred_type, "f64") ||
+                    ny_type_is(inferred_type, "f32") ||
+                    ny_type_is(inferred_type, "float") ||
+                    ny_is_f64_like(cg, scopes, depth, source_expr);
+  int64_t min_raw = 0, max_raw = 0;
+  bool has_int_range =
+      proven_int && expr_int_range(cg, scopes, depth, source_expr, &min_raw,
+                                   &max_raw);
+  const char *bind_type =
+      explicit_type ? explicit_type : (proven_int ? "int" : (proven_f64 ? "f64" : NULL));
+  scope_bind(cg, scopes, depth, name, value, NULL, false, bind_type, false);
+  binding *b = &scopes[depth].vars.data[scopes[depth].vars.len - 1];
+  if (proven_int) {
+    b->is_int_direct = true;
+    b->is_int_raw_direct = true;
+    b->raw_int_value = ny_untag_int(cg, value);
+    if (has_int_range) {
+      b->has_int_range = true;
+      b->int_min_raw = min_raw;
+      b->int_max_raw = max_raw;
+    }
+  } else if (proven_f64) {
+    b->is_f64_direct = true;
+  }
+}
+
+static LLVMValueRef ny_emit_inline_f64_body(codegen_t *cg, scope *scopes,
+                                            size_t depth, stmt_t *body) {
+  if (!body)
+    return NULL;
+  if (body->kind == NY_S_RETURN)
+    return gen_expr_as_f64(cg, scopes, depth, body->as.ret.value);
+  if (body->kind == NY_S_EXPR)
+    return gen_expr_as_f64(cg, scopes, depth, body->as.expr.expr);
+  if (body->kind != NY_S_BLOCK)
+    return NULL;
+  for (size_t i = 0; i < body->as.block.body.len; ++i) {
+    stmt_t *s = body->as.block.body.data[i];
+    if (i + 1 == body->as.block.body.len)
+      return ny_emit_inline_f64_body(cg, scopes, depth, s);
+    if (!s || s->kind != NY_S_VAR)
+      return NULL;
+    stmt_var_t *var = &s->as.var;
+    for (size_t k = 0; k < var->names.len; ++k) {
+      expr_t *init = var->exprs.data[k];
+      const char *decl_type = k < var->types.len ? var->types.data[k] : NULL;
+      LLVMValueRef raw = NULL;
+      int64_t min_raw = 0, max_raw = 0;
+      if (ny_f64_inline_try_raw_int_value(cg, scopes, depth, init, &raw,
+                                          &min_raw, &max_raw)) {
+        ny_f64_inline_bind_raw_int(cg, scopes, depth, var->names.data[k], raw,
+                                   decl_type, min_raw, max_raw);
+        continue;
+      }
+      LLVMValueRef v = gen_expr(cg, scopes, depth, init);
+      ny_f64_inline_bind_value(cg, scopes, depth, var->names.data[k], v,
+                               decl_type, init);
+    }
+  }
+  return NULL;
+}
+
+static LLVMValueRef ny_try_inline_call_as_f64(codegen_t *cg, scope *scopes,
+                                              size_t depth, expr_t *call_expr,
+                                              fun_sig *sig) {
+  if (!cg || !scopes || !call_expr || call_expr->kind != NY_E_CALL || !sig ||
+      sig->is_variadic || sig->is_extern || sig->is_recursive || !sig->stmt_t ||
+      sig->stmt_t->kind != NY_S_FUNC || !sig->stmt_t->as.fn.body)
+    return NULL;
+  if (!ny_codegen_speed_profile_enabled(cg) &&
+      !ny_env_enabled("NYTRIX_INLINE_F64_HELPERS"))
+    return NULL;
+  if (ny_is_stdlib_tok(sig->stmt_t->tok))
+    return NULL;
+  expr_call_t *call = &call_expr->as.call;
+  ny_param_list *params = &sig->stmt_t->as.fn.params;
+  if (call->args.len != params->len || params->len > 8)
+    return NULL;
+  for (size_t i = 0; i < call->args.len; ++i)
+    if (call->args.data[i].name)
+      return NULL;
+  if (!ny_f64_inline_body_supported(sig->stmt_t->as.fn.body))
+    return NULL;
+
+  LLVMValueRef arg_values[8] = {0};
+  const char *arg_types[8] = {0};
+  bool arg_is_int[8] = {0};
+  bool arg_is_f64[8] = {0};
+  bool arg_has_range[8] = {0};
+  LLVMValueRef arg_raw_values[8] = {0};
+  int64_t arg_min_raw[8] = {0};
+  int64_t arg_max_raw[8] = {0};
+  for (size_t i = 0; i < call->args.len; ++i) {
+    expr_t *arg = call->args.data[i].val;
+    if (!arg)
+      return NULL;
+    const char *arg_type = infer_expr_type(cg, scopes, depth, arg);
+    bool proven_int = ny_type_is(arg_type, "int") ||
+                      ny_type_is(arg_type, "i64") ||
+                      ny_is_proven_int(cg, scopes, depth, arg, NULL);
+    bool proven_f64 = ny_type_is(arg_type, "f64") ||
+                      ny_type_is(arg_type, "f32") ||
+                      ny_type_is(arg_type, "float") ||
+                      ny_is_f64_like(cg, scopes, depth, arg);
+    LLVMValueRef raw = NULL;
+    bool raw_arg = proven_int &&
+                   ny_f64_inline_try_raw_int_value(cg, scopes, depth, arg,
+                                                   &raw, &arg_min_raw[i],
+                                                   &arg_max_raw[i]);
+    LLVMValueRef v = raw_arg ? ny_tag_int(cg, raw)
+                             : ((proven_f64 && !proven_int)
+                                    ? gen_expr_as_f64(cg, scopes, depth, arg)
+                                    : gen_expr(cg, scopes, depth, arg));
+    if (!v)
+      return NULL;
+    if (!(proven_f64 && !proven_int))
+      v = expr_cast_to_i64(cg, v, "inline_f64_arg");
+    arg_values[i] = v;
+    arg_raw_values[i] = raw_arg ? raw : NULL;
+    arg_is_int[i] = proven_int;
+    arg_is_f64[i] = proven_f64 && !proven_int;
+    arg_has_range[i] =
+        raw_arg ||
+        (proven_int &&
+         expr_int_range(cg, scopes, depth, arg, &arg_min_raw[i],
+                        &arg_max_raw[i]));
+    arg_types[i] = proven_int ? "int" : (proven_f64 ? "f64" : NULL);
+  }
+
+  size_t inline_depth = depth + 1;
+  memset(&scopes[inline_depth], 0, sizeof(scopes[inline_depth]));
+  for (size_t i = 0; i < params->len; ++i) {
+    param_t *p = &params->data[i];
+    if (!p->name || !arg_values[i])
+      continue;
+    const char *ptype = p->type ? p->type : arg_types[i];
+    scope_bind(cg, scopes, inline_depth, p->name, arg_values[i], NULL, false,
+               ptype, false);
+    binding *b =
+        &scopes[inline_depth].vars.data[scopes[inline_depth].vars.len - 1];
+    if (arg_is_int[i]) {
+      b->is_int_direct = true;
+      b->is_int_raw_direct = true;
+      b->raw_int_value = arg_raw_values[i] ? arg_raw_values[i]
+                                           : ny_untag_int(cg, arg_values[i]);
+      if (arg_has_range[i]) {
+        b->has_int_range = true;
+        b->int_min_raw = arg_min_raw[i];
+        b->int_max_raw = arg_max_raw[i];
+      }
+    } else if (arg_is_f64[i]) {
+      b->is_f64_direct = true;
+    }
+  }
+
+  LLVMValueRef out =
+      ny_emit_inline_f64_body(cg, scopes, inline_depth, sig->stmt_t->as.fn.body);
+  scope_pop(scopes, &inline_depth);
+  return out;
 }
 
 LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
@@ -4552,6 +5663,9 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     break;
   }
   case NY_E_BINARY: {
+    LLVMValueRef raw_int_f64 = ny_try_raw_int_expr_as_f64(cg, scopes, depth, e);
+    if (raw_int_f64)
+      return raw_int_f64;
     const char *op = e->as.binary.op;
     if (!ny_is_f64_arith_op(op))
       break;
@@ -4562,7 +5676,10 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
     // Falls back to gen_expr + unbox if operands are not float-like.
     LLVMValueRef lf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.left);
     LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, e->as.binary.right);
-    return ny_emit_f64_op(cg, op, lf, rf);
+    bool divisor_nonzero =
+        strcmp(op, "/") == 0 &&
+        ny_f64_expr_proven_nonzero(cg, scopes, depth, e->as.binary.right);
+    return ny_emit_f64_op(cg, op, lf, rf, divisor_nonzero);
   }
   case NY_E_UNARY:
     if (e->as.unary.op && e->as.unary.right) {
@@ -4622,10 +5739,13 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
         surface_leaf = surface_leaf ? surface_leaf + 1 : surface;
         if (!builtin_shadowed && e->as.call.args.len == 1 &&
             ((surface_leaf && (strcmp(surface_leaf, "float") == 0 ||
-                               strcmp(surface_leaf, "to_float") == 0)) ||
+                               strcmp(surface_leaf, "to_float") == 0 ||
+                               strcmp(surface_leaf, "f64") == 0)) ||
              strcmp(leaf, "std.core.float") == 0 ||
              strcmp(leaf, "std.core.to_float") == 0 ||
-             strcmp(leaf, "float") == 0 || strcmp(leaf, "to_float") == 0)) {
+             strcmp(leaf, "std.core.f64") == 0 ||
+             strcmp(leaf, "float") == 0 || strcmp(leaf, "to_float") == 0 ||
+             strcmp(leaf, "f64") == 0)) {
           expr_t *arg = e->as.call.args.data[0].val;
           if (!arg)
             return LLVMConstReal(f64_ty, 0.0);
@@ -4641,7 +5761,15 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
             sig ? (sig->return_type ? sig->return_type
                                     : sig->inferred_return_type)
                 : NULL;
-        if (sig && ret_type && strcmp(ret_type, "f64") == 0) {
+        if (!ret_type)
+          ret_type = infer_expr_type(cg, scopes, depth, e);
+        if (sig && ret_type &&
+            (strcmp(ret_type, "f64") == 0 || strcmp(ret_type, "f32") == 0 ||
+             strcmp(ret_type, "float") == 0)) {
+          LLVMValueRef inlined =
+              ny_try_inline_call_as_f64(cg, scopes, depth, e, sig);
+          if (inlined)
+            return inlined;
           LLVMValueRef native = ny_try_native_call_as_f64(cg, scopes, depth, e);
           if (native)
             return native;
@@ -4655,6 +5783,12 @@ LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
         }
       }
     }
+    break;
+  }
+  case NY_E_MEMCALL: {
+    LLVMValueRef f64_get = ny_try_emit_f64_list_get_as_f64(cg, scopes, depth, e);
+    if (f64_get)
+      return f64_get;
     break;
   }
   case NY_E_INDEX: {
@@ -4698,6 +5832,22 @@ static LLVMValueRef ny_try_emit_mono_raw_int_expr(codegen_t *cg, scope *scopes, 
       ny_is_proven_int(cg, scopes, depth, e, NULL);
   if (!mono_mode && !proven_fast)
     return NULL;
+  if (!mono_mode && e->kind == NY_E_BINARY && e->as.binary.op &&
+      (strcmp(e->as.binary.op, "+") == 0 ||
+       strcmp(e->as.binary.op, "-") == 0) &&
+      ((e->as.binary.left && e->as.binary.left->kind == NY_E_LITERAL &&
+        e->as.binary.left->as.literal.kind == NY_LIT_INT) ||
+       (e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
+        e->as.binary.right->as.literal.kind == NY_LIT_INT))) {
+    return NULL;
+  }
+  if (!mono_mode && e->kind == NY_E_BINARY && e->as.binary.op &&
+      strcmp(e->as.binary.op, "%") == 0 && e->as.binary.right &&
+      e->as.binary.right->kind == NY_E_LITERAL &&
+      e->as.binary.right->as.literal.kind == NY_LIT_INT &&
+      e->as.binary.right->as.literal.as.i > 0) {
+    return NULL;
+  }
   LLVMValueRef raw = NULL;
   LLVMValueRef ok = NULL;
   if (!ny_build_mono_raw_int_expr(cg, scopes, depth, e, &raw, &ok) || !raw || !ok)
@@ -4924,15 +6074,15 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
     if (b) {
       if (cg->comptime && b->stmt_t && !ny_is_stdlib_tok(b->stmt_t->tok) &&
           b->value && LLVMIsAGlobalVariable(b->value)) {
-        expr_t *init =
-            !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
         ny_ct_fast_val_t folded = ny_ct_fast_none();
-        if (init && init != e &&
-            ny_try_eval_comptime_expr_fast(cg, init, &folded, 0)) {
+        if (ny_try_eval_binding_comptime_const(cg, b, e->as.ident.name,
+                                               &folded, 0)) {
           LLVMValueRef v = ny_ct_fast_to_llvm_value(cg, &folded, e->tok);
+          ny_ct_fast_val_free(&folded);
           if (v)
             return v;
         }
+        ny_ct_fast_val_free(&folded);
         return expr_fail(cg, e->tok,
                          "comptime cannot capture runtime global '%s'",
                          e->as.ident.name);
@@ -4988,8 +6138,12 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
                           strncmp(cg->current_module_name, "lib.", 4) == 0);
     if (is_user_eq && !in_std_module) {
       ny_ct_fast_val_t folded = {0};
-      if (ny_try_eval_comptime_expr_fast(cg, e, &folded, 0) && folded.kind == NY_CT_FAST_BOOL)
-        return folded.b ? ny_ctrue(cg) : ny_cfalse(cg);
+      if (ny_try_eval_comptime_expr_fast(cg, e, &folded, 0) && folded.kind == NY_CT_FAST_BOOL) {
+        bool folded_bool = folded.b;
+        ny_ct_fast_val_free(&folded);
+        return folded_bool ? ny_ctrue(cg) : ny_cfalse(cg);
+      }
+      ny_ct_fast_val_free(&folded);
       if (lookup_fun(cg, "std.core.eq", 0)) {
         expr_t callee = {0};
         callee.kind = NY_E_IDENT;
@@ -5035,7 +6189,10 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
         LLVMValueRef rf = gen_expr_as_f64(cg, scopes, depth, re);
 
         if (is_arith) {
-          LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf);
+          bool divisor_nonzero =
+              strcmp(op, "/") == 0 &&
+              ny_f64_expr_proven_nonzero(cg, scopes, depth, re);
+          LLVMValueRef res = ny_emit_f64_op(cg, op, lf, rf, divisor_nonzero);
           fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
           if (box_sig) {
             return LLVMBuildCall2(
@@ -5077,6 +6234,32 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
       const char *own_helper = ny_ownership_helper_name(e);
       if (own_helper)
         return gen_ownership_helper_expr(cg, scopes, depth, e, own_helper);
+      if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
+        const char *fn_name = e->as.call.callee->as.ident.name;
+        fun_sig *sig = fn_name ? resolve_overload(cg, fn_name,
+                                                  e->as.call.args.len, 0)
+                               : NULL;
+        const char *ret_type =
+            sig ? (sig->return_type ? sig->return_type
+                                    : sig->inferred_return_type)
+                : NULL;
+        if (!ret_type)
+          ret_type = infer_expr_type(cg, scopes, depth, e);
+        if (ret_type &&
+            (strcmp(ret_type, "f64") == 0 || strcmp(ret_type, "f32") == 0 ||
+             strcmp(ret_type, "float") == 0)) {
+          LLVMValueRef f64v = ny_try_inline_call_as_f64(cg, scopes, depth, e, sig);
+          if (f64v) {
+            fun_sig *box_sig = ny_helper_flt_box(cg);
+            if (!box_sig)
+              return expr_fail(cg, e->tok, "__flt_box_val not found");
+            return LLVMBuildCall2(
+                cg->builder, box_sig->type, box_sig->value,
+                (LLVMValueRef[]){ny_bitcast(cg, f64v, cg->type_i64, "")}, 1,
+                "inline_f64_box");
+          }
+        }
+      }
     }
     return gen_call_expr(cg, scopes, depth, e);
   case NY_E_MEMCALL:

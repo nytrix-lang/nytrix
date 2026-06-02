@@ -1,5 +1,6 @@
 #include "rt/shared.h"
 #include <inttypes.h>
+#include <stdlib.h>
 
 static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize, const char **out_s,
                                int *out_len) {
@@ -105,6 +106,87 @@ int64_t rt_str_concat(int64_t a, int64_t b) {
   memcpy(s + la, sb, lb);
   s[la + lb] = '\0';
   return res;
+}
+
+typedef struct rt_string_builder_t {
+  char *buf;
+  size_t len;
+  size_t cap;
+} rt_string_builder_t;
+
+int64_t rt_str_builder_new(int64_t cap_v) {
+  int64_t cap_i = is_int(cap_v) ? (cap_v >> 1) : cap_v;
+  if (cap_i < 64)
+    cap_i = 64;
+  rt_string_builder_t *b = (rt_string_builder_t *)calloc(1, sizeof(*b));
+  if (!b)
+    return 0;
+  b->buf = (char *)malloc((size_t)cap_i + 1);
+  if (!b->buf) {
+    free(b);
+    return 0;
+  }
+  b->cap = (size_t)cap_i;
+  b->buf[0] = '\0';
+  return (int64_t)(uintptr_t)b;
+}
+
+static int rt_str_builder_reserve(rt_string_builder_t *b, size_t need) {
+  if (!b)
+    return 0;
+  if (need + 1 <= b->cap)
+    return 1;
+  size_t next = b->cap ? b->cap : 64;
+  while (need + 1 > next) {
+    size_t grown = next * 2;
+    if (grown <= next) {
+      next = need + 1;
+      break;
+    }
+    next = grown;
+  }
+  char *nbuf = (char *)realloc(b->buf, next + 1);
+  if (!nbuf)
+    return 0;
+  b->buf = nbuf;
+  b->cap = next;
+  return 1;
+}
+
+int64_t rt_str_builder_append(int64_t builder_v, int64_t value) {
+  rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
+  if (!b)
+    return 0;
+  char tmp[128];
+  const char *s = NULL;
+  int len = 0;
+  rt_val_to_str_info(value, tmp, sizeof(tmp), &s, &len);
+  if (!s || len <= 0)
+    return builder_v;
+  size_t slen = (size_t)len;
+  size_t need = b->len + slen;
+  if (!rt_str_builder_reserve(b, need))
+    return builder_v;
+  memcpy(b->buf + b->len, s, slen);
+  b->len = need;
+  b->buf[b->len] = '\0';
+  return builder_v;
+}
+
+int64_t rt_str_builder_to_str(int64_t builder_v) {
+  rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
+  if (!b || !b->buf || b->len == 0)
+    return rt_alloc_string_len("", 0);
+  return rt_alloc_string_len(b->buf, b->len);
+}
+
+int64_t rt_str_builder_free(int64_t builder_v) {
+  rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
+  if (!b)
+    return 0;
+  free(b->buf);
+  free(b);
+  return 0;
 }
 
 int64_t rt_str_hash(int64_t v) {

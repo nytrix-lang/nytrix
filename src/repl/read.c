@@ -80,6 +80,20 @@ static int repl_reserve_buf(char **pbuf, int *cap, int needed_len, int extra) {
   return 1;
 }
 
+static int repl_insert_bytes(char **pbuf, int *cap, int *len, int *pos,
+                             const char *data, int data_len, int extra) {
+  if (!pbuf || !*pbuf || !cap || !len || !pos || !data || data_len <= 0)
+    return 0;
+  if (!repl_reserve_buf(pbuf, cap, *len + data_len, extra))
+    return 0;
+  char *buf = *pbuf;
+  memmove(buf + *pos + data_len, buf + *pos, (size_t)(*len - *pos) + 1u);
+  memcpy(buf + *pos, data, (size_t)data_len);
+  *len += data_len;
+  *pos += data_len;
+  return 1;
+}
+
 static int repl_set_buffer_text(char **pbuf, int *cap, int *len, int *pos,
                                 const char *src, int extra) {
   if (!pbuf || !cap || !len || !pos)
@@ -605,6 +619,7 @@ static int read_key_posix(char *out_chr) {
 static unsigned char g_win_pending[8];
 static int g_win_pending_head = 0;
 static int g_win_pending_tail = 0;
+static int g_win_skip_lf_after_cr = 0;
 
 static void win_queue_byte(unsigned char b) {
   g_win_pending[g_win_pending_tail & 7] = b;
@@ -641,75 +656,200 @@ static int win_read_char_ms(HANDLE hIn, int ms) {
   }
 }
 
+static int win_key_from_csi_final(int final, int mod) {
+  int shifted = mod == 2 || mod == 4 || mod == 6 || mod == 8;
+  int alt = mod == 3 || mod == 4 || mod == 7 || mod == 8;
+  int ctrl = mod == 5 || mod == 6 || mod == 7 || mod == 8;
+  switch (final) {
+  case 'A':
+    return ctrl && shifted ? K_CTRL_SHIFT_UP
+           : alt && shifted ? K_ALT_SHIFT_UP
+           : shifted        ? K_SHIFT_UP
+           : alt            ? K_ALT_UP
+                            : K_UP;
+  case 'B':
+    return ctrl && shifted ? K_CTRL_SHIFT_DOWN
+           : alt && shifted ? K_ALT_SHIFT_DOWN
+           : shifted        ? K_SHIFT_DOWN
+           : alt            ? K_ALT_DOWN
+                            : K_DOWN;
+  case 'C':
+    return ctrl && shifted ? K_CTRL_SHIFT_RIGHT
+           : alt && shifted ? K_ALT_SHIFT_RIGHT
+           : ctrl           ? K_CTRL_RIGHT
+           : shifted        ? K_SHIFT_RIGHT
+           : alt            ? K_ALT_RIGHT
+                            : K_RIGHT;
+  case 'D':
+    return ctrl && shifted ? K_CTRL_SHIFT_LEFT
+           : alt && shifted ? K_ALT_SHIFT_LEFT
+           : ctrl           ? K_CTRL_LEFT
+           : shifted        ? K_SHIFT_LEFT
+           : alt            ? K_ALT_LEFT
+                            : K_LEFT;
+  case 'H':
+    return alt && shifted ? K_ALT_SHIFT_HOME
+           : shifted      ? K_SHIFT_HOME
+                          : K_HOME;
+  case 'F':
+    return alt && shifted ? K_ALT_SHIFT_END
+           : shifted      ? K_SHIFT_END
+                          : K_END;
+  default:
+    return K_UNKNOWN;
+  }
+}
+
+static int win_key_from_csi_tilde(int code, int mod) {
+  switch (code) {
+  case 1:
+  case 7:
+    if (mod == 2)
+      return K_SHIFT_HOME;
+    if (mod == 4)
+      return K_ALT_SHIFT_HOME;
+    return K_HOME;
+  case 2:
+    return K_UNKNOWN;
+  case 3:
+    return mod == 5 ? K_CTRL_DEL : K_DEL;
+  case 4:
+  case 8:
+    if (mod == 2)
+      return K_SHIFT_END;
+    if (mod == 4)
+      return K_ALT_SHIFT_END;
+    return K_END;
+  case 5:
+    return K_PAGE_UP;
+  case 6:
+    return K_PAGE_DOWN;
+  case 13:
+    return K_ALT_ENTER;
+  case 200:
+    return K_PASTE_START;
+  case 201:
+    return K_PASTE_END;
+  default:
+    return K_UNKNOWN;
+  }
+}
+
+static int win_parse_csi_params(const char *seq, int len, int *params,
+                                int max_params) {
+  int count = 0;
+  int value = 0;
+  int seen = 0;
+  for (int i = 0; i < len; ++i) {
+    unsigned char c = (unsigned char)seq[i];
+    if (c >= '0' && c <= '9') {
+      seen = 1;
+      if (value < 100000)
+        value = value * 10 + (c - '0');
+      continue;
+    }
+    if (c == ';') {
+      if (count < max_params)
+        params[count++] = seen ? value : 0;
+      value = 0;
+      seen = 0;
+      continue;
+    }
+    if (c == '?' || c == '<')
+      continue;
+    break;
+  }
+  if (seen || count > 0) {
+    if (count < max_params)
+      params[count++] = seen ? value : 0;
+  }
+  return count;
+}
+
+static int win_parse_sgr_mouse_seq(const char *seq, int len) {
+  if (!seq || len < 2 || seq[0] != '<')
+    return K_UNKNOWN;
+  int button = 0;
+  int seen = 0;
+  for (int i = 1; i < len; ++i) {
+    unsigned char c = (unsigned char)seq[i];
+    if (c >= '0' && c <= '9') {
+      seen = 1;
+      if (button < 100000)
+        button = button * 10 + (c - '0');
+      continue;
+    }
+    break;
+  }
+  if (!seen)
+    return K_UNKNOWN;
+  int wheel = button & 0x43;
+  if (wheel == 0x40)
+    return K_MOUSE_WHEEL_UP;
+  if (wheel == 0x41)
+    return K_MOUSE_WHEEL_DOWN;
+  return K_UNKNOWN;
+}
+
+static int win_parse_csi_seq(const char *seq, int len) {
+  if (!seq || len <= 0)
+    return K_UNKNOWN;
+  int final = (unsigned char)seq[len - 1];
+  int body_len = len - 1;
+  if (final == 'Z')
+    return K_SHIFT_TAB;
+  if (seq[0] == '<' && (final == 'M' || final == 'm'))
+    return win_parse_sgr_mouse_seq(seq, len);
+  if (body_len == 0 && (final == 'A' || final == 'B' || final == 'C' ||
+                        final == 'D' || final == 'H' || final == 'F'))
+    return win_key_from_csi_final(final, 0);
+  int params[4] = {0, 0, 0, 0};
+  int count = win_parse_csi_params(seq, body_len, params, 4);
+  int mod = count >= 2 ? params[1] : 0;
+  if (final == 'A' || final == 'B' || final == 'C' || final == 'D' ||
+      final == 'H' || final == 'F')
+    return win_key_from_csi_final(final, mod);
+  if (final == '~' && count >= 1)
+    return win_key_from_csi_tilde(params[0], mod);
+  return K_UNKNOWN;
+}
+
 static int win_parse_esc(HANDLE hIn, int ms) {
   int s1 = win_read_char_ms(hIn, ms);
   if (s1 < 0)
-    return K_UNKNOWN;
+    return '\x1b';
+  if (s1 == 127 || s1 == 8)
+    return K_CTRL_BACKSPACE;
+  if (s1 == 'f')
+    return K_ALT_RIGHT;
+  if (s1 == 'b')
+    return K_ALT_LEFT;
+  if (s1 == '\r' || s1 == '\n')
+    return K_ALT_ENTER;
   if (s1 == '[') {
-    int s2 = win_read_char_ms(hIn, ms);
-    if (s2 < 0)
-      return K_UNKNOWN;
-    if (s2 == '2') {
-      int s3 = win_read_char_ms(hIn, ms);
-      if (s3 == '0') {
-        int s4 = win_read_char_ms(hIn, ms);
-        if (s4 == '0') {
-          int s5 = win_read_char_ms(hIn, ms);
-          if (s5 == '~')
-            return K_PASTE_START;
-        } else if (s4 == '1') {
-          int s5 = win_read_char_ms(hIn, ms);
-          if (s5 == '~')
-            return K_PASTE_END;
-        }
-      }
-      return K_UNKNOWN;
-    }
-    if (s2 == 'A')
-      return K_UP;
-    if (s2 == 'B')
-      return K_DOWN;
-    if (s2 == 'C')
-      return K_RIGHT;
-    if (s2 == 'D')
-      return K_LEFT;
-    if (s2 == 'H')
-      return K_HOME;
-    if (s2 == 'F')
-      return K_END;
-    if (s2 == 'Z')
-      return K_SHIFT_TAB;
-    if (s2 >= '1' && s2 <= '9') {
-      int s3 = win_read_char_ms(hIn, ms);
-      if (s3 == '~') {
-        if (s2 == '1' || s2 == '7')
-          return K_HOME;
-        if (s2 == '4' || s2 == '8')
-          return K_END;
-        if (s2 == '3')
-          return K_DEL;
-        if (s2 == '5')
-          return K_UP;
-        if (s2 == '6')
-          return K_DOWN;
-      }
+    char seq[32];
+    int len = 0;
+    while (len < (int)sizeof(seq)) {
+      int c = win_read_char_ms(hIn, ms);
+      if (c < 0)
+        return K_UNKNOWN;
+      seq[len++] = (char)c;
+      if (csi_is_final(c))
+        return win_parse_csi_seq(seq, len);
     }
     return K_UNKNOWN;
   }
   if (s1 == 'O') {
-    int s2 = win_read_char_ms(hIn, ms);
-    if (s2 == 'A')
-      return K_UP;
-    if (s2 == 'B')
-      return K_DOWN;
-    if (s2 == 'C')
-      return K_RIGHT;
-    if (s2 == 'D')
-      return K_LEFT;
-    if (s2 == 'H')
-      return K_HOME;
-    if (s2 == 'F')
-      return K_END;
+    char seq[16];
+    int len = 0;
+    while (len < (int)sizeof(seq)) {
+      int c = win_read_char_ms(hIn, ms);
+      if (c < 0)
+        return K_UNKNOWN;
+      seq[len++] = (char)c;
+      if (csi_is_final(c))
+        return win_parse_csi_seq(seq, len);
+    }
     return K_UNKNOWN;
   }
   return K_UNKNOWN;
@@ -737,14 +877,29 @@ static int read_key_win(char *out_chr) {
     char ch = (wch >= 1 && wch < 128) ? (char)(unsigned char)wch : 0;
     int ctrl = (k.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
     int alt = (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+    if (g_win_skip_lf_after_cr) {
+      if (wch == L'\r')
+        continue;
+      if (wch == L'\n') {
+        g_win_skip_lf_after_cr = 0;
+        continue;
+      }
+      if (wch != 0)
+        g_win_skip_lf_after_cr = 0;
+    }
     if (wch == 0x1B || vk == VK_ESCAPE) {
       int r = win_parse_esc(hIn, 60);
-      if (r == K_UNKNOWN)
-        continue;
       return r;
     }
-    if (vk == VK_RETURN)
+    if (vk == VK_RETURN) {
+      if (wch == L'\r')
+        g_win_skip_lf_after_cr = 1;
       return K_ENTER;
+    }
+    if (ch == 8 || ch == 127)
+      return ctrl ? K_CTRL_BACKSPACE : K_BACKSPACE;
+    if (ch == '\t')
+      return K_TAB;
     if (vk == VK_UP)
       return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED))  ? K_CTRL_SHIFT_UP
              : (alt && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_ALT_SHIFT_UP
@@ -791,7 +946,11 @@ static int read_key_win(char *out_chr) {
       return K_PAGE_DOWN;
     if (vk == VK_INSERT)
       continue;
-    if (ch == '\r' || ch == '\n')
+    if (ch == '\r') {
+      g_win_skip_lf_after_cr = 1;
+      return K_ENTER;
+    }
+    if (ch == '\n')
       return K_ENTER;
     if (ch == 4)
       return K_EOF;
@@ -826,11 +985,373 @@ static int read_key_win(char *out_chr) {
     (void)alt;
   }
 }
+
+static int win_text_event_utf8(const KEY_EVENT_RECORD *k, char out[4]) {
+  if (!k || !k->bKeyDown)
+    return 0;
+  int ctrl = (k->dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+  int alt = (k->dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+  if (ctrl || alt)
+    return 0;
+  WCHAR wch = k->uChar.UnicodeChar;
+  if (wch == L'\r' || wch == L'\n') {
+    out[0] = '\n';
+    return 1;
+  }
+  if (wch == L'\t') {
+    out[0] = '\t';
+    return 1;
+  }
+  if (wch < 32 || wch == 127 || (wch >= 0xD800 && wch <= 0xDFFF))
+    return 0;
+  if (wch < 0x80) {
+    out[0] = (char)wch;
+    return 1;
+  }
+  if (wch < 0x800) {
+    out[0] = (char)(0xC0 | (wch >> 6));
+    out[1] = (char)(0x80 | (wch & 0x3F));
+    return 2;
+  }
+  out[0] = (char)(0xE0 | (wch >> 12));
+  out[1] = (char)(0x80 | ((wch >> 6) & 0x3F));
+  out[2] = (char)(0x80 | (wch & 0x3F));
+  return 3;
+}
+
+static int win_append_bytes(char **buf, int *len, int *cap,
+                            const char *data, int data_len) {
+  if (!buf || !len || !cap || !data || data_len <= 0)
+    return 0;
+  if (*len + data_len + 1 > *cap) {
+    int new_cap = *cap > 0 ? *cap : 4096;
+    while (new_cap < *len + data_len + 1) {
+      if (new_cap > INT_MAX / 2) {
+        new_cap = *len + data_len + 1;
+        break;
+      }
+      new_cap *= 2;
+    }
+    char *grown = realloc(*buf, (size_t)new_cap);
+    if (!grown)
+      return 0;
+    *buf = grown;
+    *cap = new_cap;
+  }
+  memcpy(*buf + *len, data, (size_t)data_len);
+  *len += data_len;
+  (*buf)[*len] = '\0';
+  return 1;
+}
+
+static int win_drain_queued_text(char **pbuf, int *cap, int *len, int *pos,
+                                 int prev_was_cr) {
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  char *text = NULL;
+  int text_cap = 0;
+  int text_len = 0;
+  int drained = 0;
+  DWORD idle_start = 0;
+
+  while (drained < 1048576) {
+    DWORD count = 0;
+    if (!GetNumberOfConsoleInputEvents(hIn, &count) || count == 0) {
+      if (drained > 0) {
+        DWORD wait_ms = drained > 4096 ? 2 : 1;
+        DWORD max_idle_ms = drained > 4096 ? 32 : 16;
+        DWORD now = GetTickCount();
+        if (idle_start == 0)
+          idle_start = now;
+        if ((DWORD)(now - idle_start) < max_idle_ms) {
+          if (WaitForSingleObject(hIn, wait_ms) == WAIT_OBJECT_0)
+            continue;
+        }
+      }
+      break;
+    }
+    idle_start = 0;
+
+    INPUT_RECORD rec;
+    DWORD got = 0;
+    if (!PeekConsoleInputW(hIn, &rec, 1, &got) || got == 0)
+      break;
+    if (rec.EventType != KEY_EVENT || !rec.Event.KeyEvent.bKeyDown) {
+      ReadConsoleInputW(hIn, &rec, 1, &got);
+      continue;
+    }
+
+    char bytes[4] = {0};
+    WCHAR wch = rec.Event.KeyEvent.uChar.UnicodeChar;
+    if (wch == L'\r' && prev_was_cr) {
+      if (!ReadConsoleInputW(hIn, &rec, 1, &got) || got == 0)
+        break;
+      drained++;
+      idle_start = 0;
+      continue;
+    }
+    if (wch == L'\n' && prev_was_cr) {
+      if (!ReadConsoleInputW(hIn, &rec, 1, &got) || got == 0)
+        break;
+      prev_was_cr = 0;
+      drained++;
+      idle_start = 0;
+      continue;
+    }
+    int n = win_text_event_utf8(&rec.Event.KeyEvent, bytes);
+    if (n <= 0)
+      break;
+    if (!ReadConsoleInputW(hIn, &rec, 1, &got) || got == 0)
+      break;
+    if (!win_append_bytes(&text, &text_len, &text_cap, bytes, n))
+      break;
+    prev_was_cr = (wch == L'\r');
+    drained++;
+    idle_start = 0;
+  }
+
+  int ok = 1;
+  if (text_len > 0)
+    ok = repl_insert_bytes(pbuf, cap, len, pos, text, text_len, text_len + 256);
+  free(text);
+  return ok ? drained : 0;
+}
+
+static int win_has_queued_text_event(void) {
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD count = 0;
+  if (!GetNumberOfConsoleInputEvents(hIn, &count) || count == 0)
+    return 0;
+  if (count > 256)
+    count = 256;
+  INPUT_RECORD recs[256];
+  DWORD got = 0;
+  if (!PeekConsoleInputW(hIn, recs, count, &got) || got == 0)
+    return 0;
+  for (DWORD i = 0; i < got; ++i) {
+    if (recs[i].EventType != KEY_EVENT || !recs[i].Event.KeyEvent.bKeyDown)
+      continue;
+    char bytes[4] = {0};
+    if (win_text_event_utf8(&recs[i].Event.KeyEvent, bytes) > 0)
+      return 1;
+  }
+  return 0;
+}
+
+static int win_pasted_buffer_should_submit(const char *buf, int len, int pos) {
+  if (!buf || len <= 0 || pos != len)
+    return 0;
+  int i = len - 1;
+  while (i >= 0 && (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '\r'))
+    i--;
+  if (i < 0 || buf[i] != '\n')
+    return 0;
+  int newline_count = 0;
+  for (int n = 0; n <= i; ++n)
+    if (buf[n] == '\n')
+      newline_count++;
+  if (newline_count > 1) {
+    int j = i - 1;
+    while (j >= 0 && (buf[j] == ' ' || buf[j] == '\t' || buf[j] == '\r'))
+      j--;
+    if (j < 0 || buf[j] != '\n')
+      return 0;
+  }
+  return is_input_complete(buf);
+}
+#endif
+
+#ifdef _WIN32
+static int win_append_utf16_as_utf8(char **buf, int *len, int *cap,
+                                    const WCHAR *text, int text_len) {
+  if (!buf || !len || !cap || !text || text_len <= 0)
+    return 1;
+  int bytes = WideCharToMultiByte(CP_UTF8, 0, text, text_len, NULL, 0, NULL,
+                                  NULL);
+  if (bytes <= 0)
+    return 0;
+  if (*len + bytes + 1 > *cap) {
+    int new_cap = *cap > 0 ? *cap : 256;
+    while (new_cap < *len + bytes + 1) {
+      if (new_cap > INT_MAX / 2) {
+        new_cap = *len + bytes + 1;
+        break;
+      }
+      new_cap *= 2;
+    }
+    char *grown = realloc(*buf, (size_t)new_cap);
+    if (!grown)
+      return 0;
+    *buf = grown;
+    *cap = new_cap;
+  }
+  int written =
+      WideCharToMultiByte(CP_UTF8, 0, text, text_len, *buf + *len,
+                          *cap - *len, NULL, NULL);
+  if (written != bytes)
+    return 0;
+  *len += written;
+  (*buf)[*len] = '\0';
+  return 1;
+}
+
+static char *win_readline_stdio(const char *prompt) {
+  if (prompt && *prompt)
+    fputs(prompt, stdout);
+  fflush(stdout);
+  int cap = 256;
+  int len = 0;
+  char *buf = malloc((size_t)cap);
+  if (!buf)
+    return NULL;
+  int ch = 0;
+  while ((ch = fgetc(stdin)) != EOF) {
+    if (ch == '\n')
+      break;
+    if (len + 2 > cap) {
+      int new_cap = cap * 2;
+      char *grown = realloc(buf, (size_t)new_cap);
+      if (!grown) {
+        free(buf);
+        return NULL;
+      }
+      buf = grown;
+      cap = new_cap;
+    }
+    buf[len++] = (char)ch;
+  }
+  if (len == 0 && ch == EOF) {
+    free(buf);
+    return NULL;
+  }
+  while (len > 0 && (buf[len - 1] == '\r' || buf[len - 1] == '\n'))
+    len--;
+  buf[len] = '\0';
+  return buf;
+}
+
+static char *win_readline_cooked(const char *prompt) {
+  ny_readline_prepare_console();
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD old_mode = 0;
+  if (!GetConsoleMode(hIn, &old_mode))
+    return win_readline_stdio(prompt);
+
+  if (prompt && *prompt)
+    fputs(prompt, stdout);
+  fflush(stdout);
+
+  DWORD cooked = old_mode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
+                 ENABLE_PROCESSED_INPUT;
+#ifdef ENABLE_VIRTUAL_TERMINAL_INPUT
+  cooked &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
+#endif
+  SetConsoleMode(hIn, cooked);
+
+  char *buf = NULL;
+  int len = 0;
+  int cap = 0;
+  int saw_input = 0;
+  WCHAR wbuf[1024];
+  for (;;) {
+    DWORD got = 0;
+    if (!ReadConsoleW(hIn, wbuf, (DWORD)(sizeof(wbuf) / sizeof(wbuf[0])), &got,
+                      NULL) ||
+        got == 0) {
+      break;
+    }
+    saw_input = 1;
+    if (!win_append_utf16_as_utf8(&buf, &len, &cap, wbuf, (int)got)) {
+      free(buf);
+      buf = NULL;
+      break;
+    }
+    int done = 0;
+    for (DWORD i = 0; i < got; i++) {
+      if (wbuf[i] == L'\n' || wbuf[i] == L'\r') {
+        done = 1;
+        break;
+      }
+    }
+    if (done)
+      break;
+  }
+  SetConsoleMode(hIn, old_mode);
+
+  if (!saw_input) {
+    free(buf);
+    return NULL;
+  }
+  if (!buf) {
+    buf = ny_strdup("");
+    if (!buf)
+      return NULL;
+    len = 0;
+  }
+  while (len > 0 && (buf[len - 1] == '\r' || buf[len - 1] == '\n'))
+    buf[--len] = '\0';
+  if (len == 1 && buf[0] == 26) {
+    free(buf);
+    return NULL;
+  }
+  return buf;
+}
+#endif
+
+#ifdef _WIN32
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#ifndef DISABLE_NEWLINE_AUTO_RETURN
+#define DISABLE_NEWLINE_AUTO_RETURN 0x0008
+#endif
 #endif
 
 static int g_vt_output_ok = 1;
 
 int ny_readline_vt_output_ok(void) { return g_vt_output_ok; }
+
+void ny_readline_prepare_console(void) {
+#ifdef _WIN32
+  static int prepared = 0;
+  if (prepared)
+    return;
+  prepared = 1;
+
+  HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+  DWORD mode = 0;
+  int have_console = 0;
+  int vt_ok = 0;
+
+  if (GetConsoleMode(hIn, &mode)) {
+    have_console = 1;
+    SetConsoleCP(CP_UTF8);
+  }
+  if (GetConsoleMode(hOut, &mode)) {
+    have_console = 1;
+    if (SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                                 DISABLE_NEWLINE_AUTO_RETURN)) {
+      vt_ok = 1;
+    } else if (SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+      vt_ok = 1;
+    }
+    SetConsoleOutputCP(CP_UTF8);
+  }
+  if (GetConsoleMode(hErr, &mode)) {
+    have_console = 1;
+    SetConsoleMode(hErr, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    SetConsoleOutputCP(CP_UTF8);
+  }
+  if (have_console) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    g_vt_output_ok = vt_ok;
+  }
+#else
+  (void)g_vt_output_ok;
+#endif
+}
 
 static int is_break_char(char c) {
   return isspace((unsigned char)c) || strchr("()[]{}\"'.@$><=;|&", c) != NULL;
@@ -1419,26 +1940,16 @@ static void repl_completion_query_from_span(const char *buf, int start, int pos,
 
 static char *repl_completion_probe_line(const char *buf, int len, int start, int pos,
                                         int *out_cursor) {
-  if (buf && start == 0 && pos > 0 && buf[0] == ':') {
-    char *probe = malloc((size_t)(len - pos) + 2);
-    if (!probe)
-      return NULL;
-    probe[0] = ':';
-    memcpy(probe + 1, buf + pos, (size_t)(len - pos) + 1);
-    if (out_cursor)
-      *out_cursor = 1;
-    return probe;
-  }
-  int remove = pos - start;
-  if (remove < 0)
-    remove = 0;
-  char *probe = malloc((size_t)(len - remove) + 1);
+  (void)start;
+  if (!buf || len < 0)
+    return NULL;
+  char *probe = malloc((size_t)len + 1);
   if (!probe)
     return NULL;
-  memcpy(probe, buf, (size_t)start);
-  memcpy(probe + start, buf + pos, (size_t)(len - pos) + 1);
+  memcpy(probe, buf, (size_t)len);
+  probe[len] = '\0';
   if (out_cursor)
-    *out_cursor = start;
+    *out_cursor = pos;
   return probe;
 }
 
@@ -2059,11 +2570,28 @@ static int repl_completion_item_cmp(const void *a, const void *b) {
   return strcasecmp(sa, sb);
 }
 
+static int repl_completion_boundary_bonus(char prev) {
+  if (prev == '\0')
+    return 35;
+  if (prev == '.' || prev == '_' || prev == '-' || prev == '/' || prev == '\\')
+    return 28;
+  if (isspace((unsigned char)prev) || prev == ':' || prev == '(' || prev == '[')
+    return 18;
+  return 0;
+}
+
 static int repl_completion_fuzzy_score(const char *candidate, const char *query) {
   if (!candidate)
     return 0;
   if (!query || !*query)
     return 1;
+  if (strcmp(candidate, query) == 0)
+    return 2000;
+  if (strcasecmp(candidate, query) == 0)
+    return 1900;
+  size_t qlen = strlen(query);
+  if (strncasecmp(candidate, query, qlen) == 0)
+    return 1600 - (int)(strlen(candidate) > 120 ? 120 : strlen(candidate));
   int score = 0;
   int last = -1;
   int first = -1;
@@ -2083,20 +2611,21 @@ static int repl_completion_fuzzy_score(const char *candidate, const char *query)
       return 0;
     if (first < 0)
       first = found;
-    score += 20;
+    score += 35;
     if (last >= 0 && found == last + 1)
-      score += 35;
+      score += 55;
     if (found == qi)
       score += 25;
-    if (found == 0)
-      score += 15;
-    score -= found > 80 ? 80 : found;
+    score += repl_completion_boundary_bonus(found > 0 ? candidate[found - 1] : '\0');
+    score -= found > 120 ? 120 : found;
     last = found;
   }
   if (starts_with_ci(candidate, query))
     score += 500;
   if (first == 0)
-    score += 80;
+    score += 120;
+  size_t clen = strlen(candidate);
+  score -= clen > 160 ? 160 : (int)(clen / 2);
   return score > 0 ? score : 1;
 }
 
@@ -2493,6 +3022,15 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
 }
 
 char *ny_readline(const char *prompt) {
+#ifdef _WIN32
+  HANDLE initial_hin = GetStdHandle(STD_INPUT_HANDLE);
+  DWORD initial_mode = 0;
+  if (!GetConsoleMode(initial_hin, &initial_mode))
+    return win_readline_stdio(prompt);
+  const char *win_raw_env = getenv("NYTRIX_REPL_WIN_RAW");
+  if (win_raw_env && !ny_env_truthy(win_raw_env))
+    return win_readline_cooked(prompt);
+#endif
   int prompt_cols = visible_len(prompt);
   int cap = 256;
   char *buf = malloc(cap);
@@ -2520,22 +3058,27 @@ char *ny_readline(const char *prompt) {
 #define ENABLE_PROCESSED_INPUT 0x0001
 #endif
   g_win_pending_head = g_win_pending_tail = 0;
+  g_win_skip_lf_after_cr = 0;
+  ny_readline_prepare_console();
   HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
   DWORD oldMode = 0;
   GetConsoleMode(hIn, &oldMode);
-  SetConsoleMode(hIn,
-                 (oldMode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)) |
-                     ENABLE_VIRTUAL_TERMINAL_INPUT);
+  DWORD rawMode =
+      oldMode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+#ifdef ENABLE_VIRTUAL_TERMINAL_INPUT
+  if (!SetConsoleMode(hIn, rawMode | ENABLE_VIRTUAL_TERMINAL_INPUT))
+    SetConsoleMode(hIn, rawMode);
+#else
+  SetConsoleMode(hIn, rawMode);
+#endif
   HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-  DWORD oldOutMode = 0;
-  int vt_out_ok = 0;
-  if (GetConsoleMode(hOut, &oldOutMode)) {
-    vt_out_ok = (SetConsoleMode(hOut, oldOutMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0);
+  DWORD outMode = 0;
+  int vt_out_ok = ny_readline_vt_output_ok();
+  if (GetConsoleMode(hOut, &outMode)) {
+    vt_out_ok =
+        SetConsoleMode(hOut, outMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+    SetConsoleOutputCP(CP_UTF8);
   }
-  UINT oldInCP = GetConsoleCP();
-  UINT oldOutCP = GetConsoleOutputCP();
-  SetConsoleCP(CP_UTF8);
-  SetConsoleOutputCP(CP_UTF8);
 #else
   struct termios old_t, new_t;
   int is_tty = isatty(STDIN_FILENO);
@@ -2666,7 +3209,7 @@ char *ny_readline(const char *prompt) {
             k_h++;
           }
           display_h[k_h] = '\0';
-          printf(" \x1b[90m» %s\x1b[0m", display_h);
+          printf(" \x1b[90m> %s\x1b[0m", display_h);
         }
         fflush(stdout);
         char sq_ch = 0;
@@ -2762,6 +3305,39 @@ char *ny_readline(const char *prompt) {
       continue;
     }
     if (k == K_ENTER || k == K_ALT_ENTER) {
+#ifdef _WIN32
+      if (k == K_ENTER && !pasting && win_has_queued_text_event()) {
+        if (!repl_reserve_buf(&buf, &cap, len + 1, 256))
+          continue;
+        memmove(buf + pos + 1, buf + pos, len - pos + 1);
+        buf[pos++] = '\n';
+        len++;
+        buf[len] = '\0';
+        win_drain_queued_text(&buf, &cap, &len, &pos, 1);
+        if (win_pasted_buffer_should_submit(buf, len, pos)) {
+          while (len > 0 && isspace((unsigned char)buf[len - 1]))
+            len--;
+          buf[len] = '\0';
+          pos = len;
+          if (!g_vt_output_ok) {
+            printf("\n");
+          } else {
+            draw_line(prompt, buf, len, pos, prompt_cols);
+            int last_r, last_c, t_cols, t_rows;
+            get_term_size(&t_cols, &t_rows);
+            calc_cursor(buf, len, t_cols, prompt_cols, &last_r, &last_c);
+            if (last_r > prev_lines)
+              printf("\x1b[%dB", last_r - prev_lines);
+            printf("\n");
+          }
+          fflush(stdout);
+          break;
+        }
+        if (!repl_is_input_pending())
+          draw_line(prompt, buf, len, pos, prompt_cols);
+        continue;
+      }
+#endif
       if (pasting) {
         if (!repl_reserve_buf(&buf, &cap, len + 1, 256))
           continue;
@@ -3096,12 +3672,8 @@ char *ny_readline(const char *prompt) {
       if (kill_ring) {
         int klen = (int)strlen(kill_ring);
         repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode);
-        if (!repl_reserve_buf(&buf, &cap, len + klen, 128))
+        if (!repl_insert_bytes(&buf, &cap, &len, &pos, kill_ring, klen, 128))
           continue;
-        memmove(buf + pos + klen, buf + pos, len - pos + 1);
-        memcpy(buf + pos, kill_ring, klen);
-        len += klen;
-        pos += klen;
       }
     } else if (k == K_CTRL_U) {
       if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode)) {
@@ -3137,13 +3709,12 @@ char *ny_readline(const char *prompt) {
       }
     } else if (k < 1000 && k > 0) {
       repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode);
-      if (!repl_reserve_buf(&buf, &cap, len + 1, 256))
+      char byte = (char)k;
+      if (!repl_insert_bytes(&buf, &cap, &len, &pos, &byte, 1, 256))
         continue;
-      memmove(buf + pos + 1, buf + pos, len - pos + 1);
-      buf[pos] = (char)k;
-      len++;
-      pos++;
-      buf[len] = '\0';
+#ifdef _WIN32
+      win_drain_queued_text(&buf, &cap, &len, &pos, 0);
+#endif
     }
     if (moved_cursor) {
       if (extend_sel) {
@@ -3172,9 +3743,6 @@ char *ny_readline(const char *prompt) {
   }
 #ifdef _WIN32
   SetConsoleMode(hIn, oldMode);
-  SetConsoleMode(hOut, oldOutMode);
-  SetConsoleCP(oldInCP);
-  SetConsoleOutputCP(oldOutCP);
 #else
   if (is_tty)
     tcsetattr(STDIN_FILENO, TCSANOW, &old_t);

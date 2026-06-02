@@ -389,7 +389,7 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     case NY_OPT_PROFILE_DEFAULT:
     default:
       if (native_emit)
-        opt->opt_level = 0;
+        opt->opt_level = 2;
       break;
     }
   }
@@ -398,8 +398,12 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     ny_setenv("NYTRIX_SIMPLE_RAW_INT_CALL_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_BRANCH_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_MOD_FAST", "1", 0);
+    ny_setenv("NYTRIX_PRINT_PROVEN_INT_FAST", "1", 0);
+    ny_setenv("NYTRIX_PRINT_PROVEN_STR_FAST", "1", 0);
     ny_setenv("NYTRIX_RAW_INT_EXPR_FAST", "1", 0);
-    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,mod", 0);
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,div,mod", 0);
+    ny_setenv("NYTRIX_MONO_LIST_ARGS", "1", 0);
+    ny_setenv("NYTRIX_MONO_IMPERATIVE", "1", 0);
   }
   if (profile == NY_OPT_PROFILE_SPEED || profile == NY_OPT_PROFILE_PEAK) {
     ny_setenv("NYTRIX_SIMPLE_RAW_INT_CALL_FAST", "1", 0);
@@ -411,7 +415,8 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     ny_setenv("NYTRIX_MONO_IMPERATIVE", "1", 0);
     ny_setenv("NYTRIX_PROVEN_RAW_INT_EXPR_FAST", "1", 0);
     ny_setenv("NYTRIX_RAW_INT_EXPR_FAST", "1", 0);
-    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,mod", 0);
+    ny_setenv("NYTRIX_RAW_INT_SLOT_EXPR_FAST", "1", 0);
+    ny_setenv("NYTRIX_RAW_INT_EXPR_FAST_OPS", "add,sub,mul,div,mod", 0);
   }
 }
 
@@ -1070,7 +1075,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   ny_usage_section("OPTIMIZATION");
   ny_usage_items((const ny_usage_entry_t[]){
       {NY_CLR_GREEN, "-O1/-O2/-O3",
-       "Optimization level (native/JIT/REPL default: -O0)"},
+       "Optimization level (native emit default: -O2; JIT/REPL default: -O0)"},
       {NY_CLR_GREEN, "--profile=MODE",
        "Optimization profile: speed | balanced | compile | size | none | "
        "peak"},
