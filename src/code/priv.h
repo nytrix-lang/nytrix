@@ -4,6 +4,7 @@
 #include "code/code.h"
 #include "rt/shared.h"
 #include <llvm-c/Core.h>
+#include <llvm-c/DebugInfo.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -190,13 +191,56 @@ static inline bool ny_expr_call_args(expr_t *e, call_arg_t **args, size_t *len) 
   }
   return false;
 }
+static inline bool ny_expr_init_replay_safe_depth(expr_t *e, unsigned depth) {
+  if (!e || depth > 32)
+    return false;
+  switch (e->kind) {
+  case NY_E_LITERAL:
+    return true;
+  case NY_E_COMPTIME:
+    return true;
+  case NY_E_UNARY:
+    return ny_expr_init_replay_safe_depth(e->as.unary.right, depth + 1);
+  case NY_E_BINARY:
+    return ny_expr_init_replay_safe_depth(e->as.binary.left, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.binary.right, depth + 1);
+  case NY_E_LOGICAL:
+    return ny_expr_init_replay_safe_depth(e->as.logical.left, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.logical.right, depth + 1);
+  case NY_E_TERNARY:
+    return ny_expr_init_replay_safe_depth(e->as.ternary.cond, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.ternary.true_expr, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.ternary.false_expr, depth + 1);
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET:
+    for (size_t i = 0; i < e->as.list_like.len; ++i) {
+      if (!ny_expr_init_replay_safe_depth(e->as.list_like.data[i], depth + 1))
+        return false;
+    }
+    return true;
+  case NY_E_DICT:
+    for (size_t i = 0; i < e->as.dict.pairs.len; ++i) {
+      if (!ny_expr_init_replay_safe_depth(e->as.dict.pairs.data[i].key,
+                                          depth + 1) ||
+          !ny_expr_init_replay_safe_depth(e->as.dict.pairs.data[i].value,
+                                          depth + 1))
+        return false;
+    }
+    return true;
+  default:
+    return false;
+  }
+}
+
 static inline expr_t *ny_binding_var_init_expr(binding *b, const char *name) {
   if (!b || !name || !b->stmt_t || b->stmt_t->kind != NY_S_VAR)
     return NULL;
   stmt_var_t *var = &b->stmt_t->as.var;
   for (size_t i = 0; i < var->names.len && i < var->exprs.len; ++i) {
     const char *n = var->names.data[i];
-    if (n && strcmp(n, name) == 0)
+    if (n && strcmp(n, name) == 0 &&
+        ny_expr_init_replay_safe_depth(var->exprs.data[i], 0))
       return var->exprs.data[i];
   }
   return NULL;
@@ -659,31 +703,57 @@ static inline LLVMBasicBlockRef ny_bb_fn(LLVMValueRef fn, const char *name) {
 
 /* ── Metadata (LLVM 21+ API) ────────────────────────────────── */
 
+static inline void ny_loop_metadata_set(codegen_t *cg, LLVMValueRef branch,
+                                        LLVMMetadataRef *attrs,
+                                        size_t attr_count) {
+  if (!cg || !branch || !attrs || attr_count == 0)
+    return;
+  LLVMContextRef ctx = cg->ctx;
+  LLVMMetadataRef tmp = LLVMTemporaryMDNode(ctx, NULL, 0);
+  LLVMMetadataRef *ops =
+      (LLVMMetadataRef *)alloca(sizeof(LLVMMetadataRef) * (attr_count + 1));
+  ops[0] = tmp;
+  for (size_t i = 0; i < attr_count; ++i)
+    ops[i + 1] = attrs[i];
+  LLVMMetadataRef md = LLVMMDNodeInContext2(ctx, ops, attr_count + 1);
+  LLVMMetadataReplaceAllUsesWith(tmp, md);
+  unsigned kind = LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
+  LLVMSetMetadata(branch, kind, LLVMMetadataAsValue(ctx, md));
+  /* Do not dispose tmp here: LLVM may still reference the RAUW placeholder
+     while finalizing cyclic loop metadata through the C API. */
+}
+
+static inline LLVMMetadataRef ny_loop_flag_attr(LLVMContextRef ctx,
+                                                const char *name) {
+  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, name, strlen(name));
+  return LLVMMDNodeInContext2(ctx, &s, 1);
+}
+
+static inline LLVMMetadataRef ny_loop_bool_attr(codegen_t *cg,
+                                                const char *name, bool value) {
+  LLVMContextRef ctx = cg->ctx;
+  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, name, strlen(name));
+  LLVMMetadataRef v = LLVMValueAsMetadata(ny_cbool(cg, value ? 1 : 0));
+  LLVMMetadataRef ops[2] = {s, v};
+  return LLVMMDNodeInContext2(ctx, ops, 2);
+}
+
 static inline void ny_loop_unroll_hint(codegen_t *cg, LLVMValueRef branch) {
   LLVMContextRef ctx = cg->ctx;
-  unsigned kind = LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
-  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, "llvm.loop.unroll.full", 21);
-  LLVMMetadataRef md = LLVMMDNodeInContext2(ctx, &s, 1);
-  LLVMSetMetadata(branch, kind, LLVMMetadataAsValue(ctx, md));
+  LLVMMetadataRef attr = ny_loop_flag_attr(ctx, "llvm.loop.unroll.full");
+  ny_loop_metadata_set(cg, branch, &attr, 1);
 }
 
 static inline void ny_loop_nounroll_hint(codegen_t *cg, LLVMValueRef branch) {
   LLVMContextRef ctx = cg->ctx;
-  unsigned kind = LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
-  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, "llvm.loop.unroll.disable", 24);
-  LLVMMetadataRef md = LLVMMDNodeInContext2(ctx, &s, 1);
-  LLVMSetMetadata(branch, kind, LLVMMetadataAsValue(ctx, md));
+  LLVMMetadataRef attr = ny_loop_flag_attr(ctx, "llvm.loop.unroll.disable");
+  ny_loop_metadata_set(cg, branch, &attr, 1);
 }
 
 static inline void ny_loop_vectorize_hint(codegen_t *cg, LLVMValueRef branch) {
-  LLVMContextRef ctx = cg->ctx;
-  unsigned kind = LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
-  LLVMMetadataRef s = LLVMMDStringInContext2(ctx, "llvm.loop.vectorize.enable",
-                                             sizeof("llvm.loop.vectorize.enable") - 1);
-  LLVMMetadataRef v = LLVMValueAsMetadata(ny_cbool(cg, 1));
-  LLVMMetadataRef ops[2] = {s, v};
-  LLVMMetadataRef md = LLVMMDNodeInContext2(ctx, ops, 2);
-  LLVMSetMetadata(branch, kind, LLVMMetadataAsValue(ctx, md));
+  LLVMMetadataRef attr =
+      ny_loop_bool_attr(cg, "llvm.loop.vectorize.enable", true);
+  ny_loop_metadata_set(cg, branch, &attr, 1);
 }
 
 #endif /* CODEGEN_INTERNAL_H */

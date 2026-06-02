@@ -88,6 +88,109 @@ static void ny_alias_index_rebuild(codegen_t *cg, bool user_only,
   *cap_ptr = cap;
 }
 
+static void ny_module_alias_index_insert_existing(import_alias_slot *slots,
+                                                  size_t cap, binding *data,
+                                                  size_t idx,
+                                                  uint64_t hash) {
+  if (!slots || cap == 0 || !data || idx == (size_t)-1 || !data[idx].name)
+    return;
+  size_t mask = cap - 1u;
+  size_t pos = hash & mask;
+  for (;;) {
+    import_alias_slot *slot = &slots[pos];
+    if (!slot->occupied) {
+      slot->occupied = true;
+      slot->hash = hash;
+      slot->index = idx;
+      return;
+    }
+    if (slot->hash == hash && data[slot->index].name &&
+        strcmp(data[slot->index].name, data[idx].name) == 0) {
+      return;
+    }
+    pos = (pos + 1u) & mask;
+  }
+}
+
+static void ny_module_alias_index_rebuild(codegen_t *cg) {
+  if (!cg)
+    return;
+  size_t len = cg->aliases.len;
+  size_t cap = ny_alias_index_min_cap(len + 1u);
+  import_alias_slot *slots = calloc(cap, sizeof(import_alias_slot));
+  if (!slots)
+    return;
+  for (size_t i = len; i > 0; --i) {
+    size_t idx = i - 1u;
+    binding *b = &cg->aliases.data[idx];
+    if (!b->name)
+      continue;
+    size_t n = b->name_len ? b->name_len : strlen(b->name);
+    uint64_t hash = b->name_hash ? b->name_hash : ny_hash_name(b->name, n);
+    b->name_len = (uint32_t)n;
+    b->name_hash = hash;
+    ny_module_alias_index_insert_existing(slots, cap, cg->aliases.data, idx,
+                                          hash);
+  }
+  free(cg->module_alias_index);
+  cg->module_alias_index = slots;
+  cg->module_alias_index_cap = cap;
+  cg->module_alias_index_len = len;
+}
+
+static const char *ny_lookup_module_alias_linear(codegen_t *cg,
+                                                 const char *name,
+                                                 size_t name_len) {
+  if (!cg || !name || !*name)
+    return NULL;
+  for (size_t i = cg->aliases.len; i > 0; --i) {
+    binding *al = &cg->aliases.data[i - 1];
+    if (!al->name)
+      continue;
+    size_t alias_len = al->name_len ? al->name_len : strlen(al->name);
+    if (alias_len == name_len && strncmp(al->name, name, name_len) == 0)
+      return (const char *)al->stmt_t;
+  }
+  return NULL;
+}
+
+static const char *ny_lookup_module_alias_indexed(codegen_t *cg,
+                                                  const char *name,
+                                                  size_t name_len,
+                                                  uint64_t name_hash) {
+  if (!cg || !name || !*name)
+    return NULL;
+  if (name_len == 0)
+    name_len = strlen(name);
+  if (!name_hash)
+    name_hash = ny_hash_name(name, name_len);
+  if (!cg->module_alias_index ||
+      cg->module_alias_index_len != cg->aliases.len) {
+    ny_module_alias_index_rebuild(cg);
+  }
+  import_alias_slot *slots = cg->module_alias_index;
+  size_t cap = cg->module_alias_index_cap;
+  if (!slots || cap == 0)
+    return ny_lookup_module_alias_linear(cg, name, name_len);
+
+  size_t mask = cap - 1u;
+  size_t pos = name_hash & mask;
+  for (;;) {
+    import_alias_slot *slot = &slots[pos];
+    if (!slot->occupied)
+      return NULL;
+    if (slot->hash == name_hash && slot->index < cg->aliases.len) {
+      binding *al = &cg->aliases.data[slot->index];
+      if (al->name) {
+        size_t alias_len = al->name_len ? al->name_len : strlen(al->name);
+        if (alias_len == name_len && strncmp(al->name, name, name_len) == 0)
+          return (const char *)al->stmt_t;
+      }
+    }
+    pos = (pos + 1u) & mask;
+  }
+}
+
 static long ny_alias_index_find(codegen_t *cg, bool user_only,
                                 const char *alias, size_t alias_len,
                                 uint64_t alias_hash) {
@@ -1540,6 +1643,8 @@ const char *ny_lookup_module_alias(codegen_t *cg, scope *scopes, size_t depth,
     return NULL;
   if (name_len == 0)
     name_len = strlen(name);
+  if (!name_hash)
+    name_hash = ny_hash_name(name, name_len);
   if (scope_lookup_hash(scopes, depth, name, name_len, name_hash))
     return NULL;
 
@@ -1548,23 +1653,14 @@ const char *ny_lookup_module_alias(codegen_t *cg, scope *scopes, size_t depth,
     int nw = snprintf(scoped, sizeof(scoped), "%s.%.*s",
                       cg->current_module_name, (int)name_len, name);
     if (nw > 0 && (size_t)nw < sizeof(scoped)) {
-      for (size_t i = cg->aliases.len; i > 0; --i) {
-        binding *al = &cg->aliases.data[i - 1];
-        if (al->name && strcmp(al->name, scoped) == 0)
-          return (const char *)al->stmt_t;
-      }
+      const char *scoped_target = ny_lookup_module_alias_indexed(
+          cg, scoped, (size_t)nw, ny_hash_name(scoped, (size_t)nw));
+      if (scoped_target)
+        return scoped_target;
     }
   }
 
-  for (size_t i = cg->aliases.len; i > 0; --i) {
-    binding *al = &cg->aliases.data[i - 1];
-    if (!al->name)
-      continue;
-    size_t alias_len = strlen(al->name);
-    if (alias_len == name_len && strncmp(al->name, name, name_len) == 0)
-      return (const char *)al->stmt_t;
-  }
-  return NULL;
+  return ny_lookup_module_alias_indexed(cg, name, name_len, name_hash);
 }
 
 static void collect_use_modules_inner(codegen_t *cg, stmt_t *s,
@@ -2169,6 +2265,10 @@ static bool ny_copy_exported_fun_sig(codegen_t *cg, const char *alias,
   if (fs) {
     fun_sig new_sig = *fs;
     new_sig.name = ny_strdup(alias);
+    new_sig.module_name =
+        fs->module_name ? ny_strdup(fs->module_name) : NULL;
+    new_sig.source_file =
+        fs->source_file ? ny_strdup(fs->source_file) : NULL;
     new_sig.link_name = fs->link_name ? ny_strdup(fs->link_name) : NULL;
     new_sig.return_type = fs->return_type ? ny_strdup(fs->return_type) : NULL;
     new_sig.abi_return_type =
@@ -2240,6 +2340,7 @@ static void ny_export_aliased_symbol(codegen_t *cg, stmt_t *mod,
 
   char scoped[512];
   char local_source[1024];
+  char default_fun[1280];
   const char *source = NULL;
   if (!strchr(target, '.')) {
     int sw = snprintf(scoped, sizeof(scoped), "%s.%s", mod_name, target);
@@ -2252,7 +2353,6 @@ static void ny_export_aliased_symbol(codegen_t *cg, stmt_t *mod,
           snprintf(child_path, sizeof(child_path), "%s.%s", mod_name, target);
       if (cw > 0 && (size_t)cw < sizeof(child_path) &&
           find_module_stmt_any(cg, child_path)) {
-        char default_fun[1280];
         int dw = snprintf(default_fun, sizeof(default_fun), "%s.%s", child_path,
                           target);
         if (dw > 0 && (size_t)dw < sizeof(default_fun) &&

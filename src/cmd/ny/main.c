@@ -226,6 +226,7 @@ static void ny_install_signal_handlers(void) {
 #ifndef _WIN32
   /* Use a dedicated alternate signal stack so the handler can run even when
    * the main stack or heap is corrupted. */
+  (void)signal(SIGPIPE, SIG_IGN);
   static char g_sigstack[65536];
   stack_t ss = {.ss_sp = g_sigstack, .ss_size = sizeof(g_sigstack), .ss_flags = 0};
   (void)sigaltstack(&ss, NULL);
@@ -1003,6 +1004,7 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
     ny_env_config_set(env, "NYTRIX_JIT_CODEGEN_OPT", "aggressive");
     ny_env_config_set(env, "NYTRIX_OPT_DCE", "1");
     ny_env_config_set(env, "NYTRIX_UNSAFE_FIXNUM", "1");
+    ny_env_config_set(env, "NYTRIX_RAW_INT_SLOT_EXPR_FAST", "1");
     ny_env_config_set(env, "NYTRIX_AUTO_VECTORIZE_LOOPS", "1");
   }
   if (opt->profiler_mode) {

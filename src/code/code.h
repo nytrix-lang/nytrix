@@ -159,6 +159,8 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
     free((void *)sig->name);
   if (sig->module_name)
     free((void *)sig->module_name);
+  if (sig->source_file)
+    free((void *)sig->source_file);
   if (sig->link_name)
     free((void *)sig->link_name);
   if (sig->return_type)
@@ -187,6 +189,7 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
   for (size_t i = 0; i < sig->forgets.len; i++)
     free(sig->forgets.data[i]);
   vec_free(&sig->forgets);
+  memset(sig, 0, sizeof(*sig));
 }
 
 static inline bool
@@ -351,6 +354,10 @@ typedef struct codegen_symbols_t {
   fun_sig *cached_fn_to_str;
   fun_sig *cached_fn_globals;
   fun_sig *cached_fn_kwarg;
+  fun_sig *last_lambda_sig;
+  const char *active_str_append_name;
+  LLVMValueRef active_str_append_builder;
+  bool active_str_append_used;
   int lambda_count;
   int static_int_list_count;
 } codegen_symbols_t;
@@ -402,6 +409,9 @@ typedef struct codegen_imports_t {
   assigned_hash_list user_import_alias_hashes;
   uint64_t import_alias_bloom[NY_ALIAS_BLOOM_WORDS];
   uint64_t user_import_alias_bloom[NY_ALIAS_BLOOM_WORDS];
+  import_alias_slot *module_alias_index;
+  size_t module_alias_index_cap;
+  size_t module_alias_index_len;
   import_alias_slot *import_alias_index;
   size_t import_alias_index_cap;
   import_alias_slot *user_import_alias_index;
@@ -569,6 +579,10 @@ struct codegen_t {
       fun_sig *cached_fn_to_str;
       fun_sig *cached_fn_globals;
       fun_sig *cached_fn_kwarg;
+      fun_sig *last_lambda_sig;
+      const char *active_str_append_name;
+      LLVMValueRef active_str_append_builder;
+      bool active_str_append_used;
       int lambda_count;
       int static_int_list_count;
     };
@@ -647,6 +661,9 @@ struct codegen_t {
       assigned_hash_list user_import_alias_hashes;
       uint64_t import_alias_bloom[NY_ALIAS_BLOOM_WORDS];
       uint64_t user_import_alias_bloom[NY_ALIAS_BLOOM_WORDS];
+      import_alias_slot *module_alias_index;
+      size_t module_alias_index_cap;
+      size_t module_alias_index_len;
       import_alias_slot *import_alias_index;
       size_t import_alias_index_cap;
       import_alias_slot *user_import_alias_index;

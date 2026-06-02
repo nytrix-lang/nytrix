@@ -21,6 +21,9 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
+#ifdef _WIN32
+#include <io.h>
+#endif
 
 #ifdef _WIN32
 #ifdef rt_argc
@@ -226,11 +229,23 @@ static char rt_print_buf[RT_PRINT_BUF_SIZE];
 static uint32_t rt_print_pos = 0;
 static int rt_stdout_is_tty = -1;
 
+#ifdef _WIN32
+extern int64_t rt_write_stdout_console(const char *ptr, size_t len);
+#endif
+
 int64_t rt_print_flush(void) {
   if (rt_print_pos > 0) {
+#ifdef _WIN32
+    if (rt_write_stdout_console(rt_print_buf, (size_t)rt_print_pos) >= 0) {
+      rt_print_pos = 0;
+      fflush(stdout);
+      return 1;
+    }
+#endif
     fwrite(rt_print_buf, 1, (size_t)rt_print_pos, stdout);
     rt_print_pos = 0;
   }
+  fflush(stdout);
   return 1;
 }
 
@@ -242,15 +257,22 @@ static inline void rt_maybe_flush_line(void) {
   if (rt_stdout_is_tty < 0)
     rt_stdout_is_tty = isatty(fileno(stdout));
 #endif
-  if (rt_stdout_is_tty)
-    rt_print_flush();
+  (void)rt_stdout_is_tty;
+  rt_print_flush();
 }
 
 static inline void rt_print_put(const char *s, size_t len) {
   if (rt_print_pos + len > RT_PRINT_BUF_SIZE) {
     rt_print_flush();
     if (len > RT_PRINT_BUF_SIZE) {
+#ifdef _WIN32
+      if (rt_write_stdout_console(s, len) >= 0) {
+        fflush(stdout);
+        return;
+      }
+#endif
       fwrite(s, 1, len, stdout);
+      fflush(stdout);
       return;
     }
   }
@@ -1090,47 +1112,7 @@ int64_t rt_is_ny_obj(int64_t v) { return is_ny_obj(v) ? NY_IMM_TRUE : NY_IMM_FAL
 int64_t rt_is_str_obj(int64_t v) { return is_v_str(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 int64_t rt_is_float_obj(int64_t v) { return is_v_flt(v) ? NY_IMM_TRUE : NY_IMM_FALSE; }
 static int64_t rt_runtime_tag_raw(const char *s, size_t n) {
-  if (!s)
-    return 0;
-  if (n == 3 && memcmp(s, "nil", 3) == 0)
-    return 0;
-  if (n == 3 && memcmp(s, "int", 3) == 0)
-    return 1;
-  if (n == 7 && memcmp(s, "ffi_ptr", 7) == 0)
-    return 6;
-  if (n == 4 && memcmp(s, "list", 4) == 0)
-    return TAG_LIST;
-  if (n == 4 && memcmp(s, "dict", 4) == 0)
-    return TAG_DICT;
-  if (n == 3 && memcmp(s, "set", 3) == 0)
-    return TAG_SET;
-  if (n == 5 && memcmp(s, "tuple", 5) == 0)
-    return TAG_TUPLE;
-  if (n == 2 && memcmp(s, "ok", 2) == 0)
-    return TAG_OK;
-  if (n == 3 && memcmp(s, "err", 3) == 0)
-    return TAG_ERR;
-  if (n == 5 && memcmp(s, "range", 5) == 0)
-    return TAG_RANGE;
-  if (n == 7 && memcmp(s, "closure", 7) == 0)
-    return TAG_CLOSURE;
-  if (n == 3 && memcmp(s, "ptr", 3) == 0)
-    return TAG_CLOSURE;
-  if (n == 5 && memcmp(s, "float", 5) == 0)
-    return TAG_FLOAT;
-  if (n == 7 && memcmp(s, "complex", 7) == 0)
-    return TAG_COMPLEX;
-  if (n == 3 && memcmp(s, "str", 3) == 0)
-    return TAG_STR;
-  if (n == 9 && memcmp(s, "str_const", 9) == 0)
-    return TAG_STR_CONST;
-  if (n == 5 && memcmp(s, "bytes", 5) == 0)
-    return TAG_BYTES;
-  if (n == 6 && memcmp(s, "bigint", 6) == 0)
-    return TAG_BIGINT;
-  if (n == 5 && memcmp(s, "kwarg", 5) == 0)
-    return TAG_KWARG;
-  return 0;
+  return rt_runtime_tag_raw_name(s, n);
 }
 
 int64_t rt_runtime_tag(int64_t name) {
@@ -1339,7 +1321,7 @@ int64_t rt_list_new(int64_t n_v) {
   if (n < 0)
     n = 0;
   // Standard layout: 16 bytes header (length, capacity) + n * 8 bytes data
-  int64_t p = rt_malloc(16 + n * 8);
+  int64_t p = rt_malloc_uninit(16 + n * 8);
   if (!p)
     return 0;
   // Standard Nytrix tags are at p-8
@@ -1371,7 +1353,7 @@ int64_t rt_append(int64_t lst, int64_t val) {
 
   if (n >= cap) {
     int64_t new_cap = cap == 0 ? 8 : (cap * 2);
-    int64_t new_p = rt_malloc(16 + new_cap * 8);
+    int64_t new_p = rt_malloc_uninit(16 + new_cap * 8);
     if (!new_p)
       return lst;
     *(int64_t *)((char *)(uintptr_t)new_p - 8) = TAG_LIST;
@@ -1384,6 +1366,235 @@ int64_t rt_append(int64_t lst, int64_t val) {
   *(int64_t *)((char *)(uintptr_t)lst + 16 + n * 8) = val;
   *(int64_t *)((char *)(uintptr_t)lst + 0) = ((n + 1) << 1) | 1;
   return lst;
+}
+
+int64_t rt_list_reserve(int64_t lst, int64_t cap_v) {
+  if (!is_ptr(lst))
+    return lst;
+  if (rt_tagof(lst) != ((TAG_LIST << 1) | 1))
+    return lst;
+  int64_t want = is_int(cap_v) ? (cap_v >> 1) : cap_v;
+  if (want <= 0)
+    return lst;
+  int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
+  int64_t n = is_int(len_v) ? (len_v >> 1) : len_v;
+  int64_t cap_v0 = *(int64_t *)((char *)(uintptr_t)lst + 8);
+  int64_t cap = is_int(cap_v0) ? (cap_v0 >> 1) : cap_v0;
+  if (cap >= want)
+    return lst;
+  int64_t new_p = rt_malloc_uninit(16 + want * 8);
+  if (!new_p)
+    return lst;
+  *(int64_t *)((char *)(uintptr_t)new_p - 8) = TAG_LIST;
+  *(int64_t *)((char *)(uintptr_t)new_p + 0) = len_v;
+  *(int64_t *)((char *)(uintptr_t)new_p + 8) = rt_tag_v(want);
+  if (n > 0)
+    memcpy((char *)(uintptr_t)new_p + 16, (char *)(uintptr_t)lst + 16,
+           (size_t)n * 8);
+  return new_p;
+}
+
+int64_t rt_list_sum_int_range(int64_t lst, int64_t start_v, int64_t stop_v) {
+  if (!is_ptr(lst) || !is_heap_ptr(lst))
+    return rt_tag_v(0);
+  int64_t tag = *(int64_t *)((char *)(uintptr_t)lst - 8);
+  if (tag != TAG_LIST && tag != TAG_TUPLE)
+    return rt_tag_v(0);
+
+  int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
+  int64_t len = rt_untag_v(len_v);
+  int64_t start = rt_untag_v(start_v);
+  int64_t stop = rt_untag_v(stop_v);
+  if (start < 0)
+    start = 0;
+  if (stop > len)
+    stop = len;
+  if (stop <= start)
+    return rt_tag_v(0);
+
+  int64_t sum = 0;
+  int64_t *items = (int64_t *)((char *)(uintptr_t)lst + 16);
+  for (int64_t i = start; i < stop; ++i) {
+    int64_t v = items[i];
+    if (is_int(v)) {
+      sum += v >> NY_VALUE_INT_SHIFT;
+    } else if (is_v_flt(v)) {
+      extern int64_t rt_flt_to_int(int64_t v);
+      sum += rt_untag_v(rt_flt_to_int(v));
+    } else if (is_ptr(v) && is_heap_ptr(v) &&
+               *(int64_t *)((char *)(uintptr_t)v - 8) == TAG_BIGINT) {
+      extern int64_t rt_bigint_to_int(int64_t v);
+      sum += rt_untag_v(rt_bigint_to_int(v));
+    } else if (NY_NATIVE_IS(v)) {
+      sum += rt_untag_v(v);
+    }
+  }
+  return rt_tag_v(sum);
+}
+
+static inline int64_t rt_dict_raw_i64(int64_t v) { return is_int(v) ? (v >> 1) : v; }
+
+static uint64_t rt_dict_hash_raw(int64_t key) {
+  if (is_int(key))
+    return (uint64_t)(key >> 1);
+  if (!key || key == NY_IMM_FALSE)
+    return 0;
+  if (is_v_str(key)) {
+    size_t n = rt_tagged_str_len(key);
+    const unsigned char *s = (const unsigned char *)(uintptr_t)key;
+    uint64_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+      h = ((h ^ (uint64_t)s[i]) * 16777619u) & 2147483647u;
+    return h;
+  }
+  if (is_ptr(key))
+    return (((uint64_t)key) >> 3) & 2147483647u;
+  return 0;
+}
+
+static inline int rt_dict_key_eq_fast(int64_t a, int64_t b) {
+  return a == b || rt_eq(a, b) == NY_IMM_TRUE;
+}
+
+static int64_t rt_dict_new_raw_cap(int64_t cap) {
+  if (cap < 1)
+    cap = 1;
+  int64_t p = rt_malloc(16 + cap * 24);
+  if (!p)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_DICT;
+  *(int64_t *)((char *)(uintptr_t)p + 0) = rt_tag_v(0);
+  *(int64_t *)((char *)(uintptr_t)p + 8) = rt_tag_v(cap);
+  return p;
+}
+
+static int64_t rt_dict_find_off_fast(int64_t d, int64_t cap, int64_t key) {
+  if (cap <= 0)
+    return -1;
+  uint64_t mask = (uint64_t)(cap - 1);
+  uint64_t idx = rt_dict_hash_raw(key) & mask;
+  int64_t first_tomb = -1;
+  for (int64_t i = 0; i < cap; i++) {
+    int64_t off = 16 + (int64_t)idx * 24;
+    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    if (!state)
+      return first_tomb >= 0 ? first_tomb : off;
+    if (state == rt_tag_v(1)) {
+      int64_t slot_key = *(int64_t *)((char *)(uintptr_t)d + off);
+      if (rt_dict_key_eq_fast(slot_key, key))
+        return off;
+    } else if (state == rt_tag_v(2) && first_tomb < 0) {
+      first_tomb = off;
+    }
+    idx = (idx + 1) & mask;
+  }
+  return first_tomb;
+}
+
+static int64_t rt_dict_insert_no_resize_fast(int64_t d, int64_t key, int64_t value) {
+  int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+  int64_t off = rt_dict_find_off_fast(d, cap, key);
+  if (off < 0)
+    return d;
+  int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+  if (state != rt_tag_v(1)) {
+    int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
+    *(int64_t *)((char *)(uintptr_t)d + off) = key;
+    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
+    *(int64_t *)((char *)(uintptr_t)d + off + 16) = rt_tag_v(1);
+    *(int64_t *)((char *)(uintptr_t)d + 0) = rt_tag_v(count + 1);
+  } else {
+    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
+  }
+  return d;
+}
+
+static int64_t rt_dict_resize_fast(int64_t d, int64_t old_cap) {
+  int64_t new_cap = old_cap < 8 ? 8 : old_cap * 2;
+  int64_t nd = rt_dict_new_raw_cap(new_cap);
+  if (!nd)
+    return d;
+  for (int64_t i = 0; i < old_cap; i++) {
+    int64_t off = 16 + i * 24;
+    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    if (state == rt_tag_v(1)) {
+      int64_t key = *(int64_t *)((char *)(uintptr_t)d + off);
+      int64_t value = *(int64_t *)((char *)(uintptr_t)d + off + 8);
+      rt_dict_insert_no_resize_fast(nd, key, value);
+    }
+  }
+  return nd;
+}
+
+int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
+  if (!is_ptr(d) || !is_heap_ptr(d))
+    return d;
+  if (*(int64_t *)((char *)(uintptr_t)d - 8) != TAG_DICT)
+    return d;
+  int64_t additional = is_int(additional_v) ? (additional_v >> 1) : additional_v;
+  if (additional <= 0)
+    return d;
+  int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
+  int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+  int64_t want_count = count + additional;
+  if (want_count < count)
+    return d;
+  int64_t min_cap = want_count > (INT64_MAX / 2) ? INT64_MAX : want_count * 2;
+  int64_t want_cap = 8;
+  while (want_cap > 0 && want_cap < min_cap && want_cap <= (INT64_MAX / 2))
+    want_cap *= 2;
+  if (want_cap <= 0 || cap >= want_cap)
+    return d;
+  int64_t nd = rt_dict_new_raw_cap(want_cap);
+  if (!nd)
+    return d;
+  for (int64_t i = 0; i < cap; i++) {
+    int64_t off = 16 + i * 24;
+    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    if (state == rt_tag_v(1)) {
+      int64_t key = *(int64_t *)((char *)(uintptr_t)d + off);
+      int64_t value = *(int64_t *)((char *)(uintptr_t)d + off + 8);
+      rt_dict_insert_no_resize_fast(nd, key, value);
+    }
+  }
+  return nd;
+}
+
+int64_t rt_dict_write_fast(int64_t d, int64_t key, int64_t value) {
+  if (!is_ptr(d) || !is_heap_ptr(d))
+    return d;
+  if (*(int64_t *)((char *)(uintptr_t)d - 8) != TAG_DICT)
+    return d;
+
+  int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+  int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
+  if (cap <= 0)
+    return d;
+  if ((count + 1) * 2 > cap) {
+    d = rt_dict_resize_fast(d, cap);
+    cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+  }
+
+  int64_t off = rt_dict_find_off_fast(d, cap, key);
+  if (off < 0) {
+    d = rt_dict_resize_fast(d, cap);
+    cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+    off = rt_dict_find_off_fast(d, cap, key);
+    if (off < 0)
+      return d;
+  }
+
+  int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+  if (state != rt_tag_v(1)) {
+    count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
+    *(int64_t *)((char *)(uintptr_t)d + off) = key;
+    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
+    *(int64_t *)((char *)(uintptr_t)d + off + 16) = rt_tag_v(1);
+    *(int64_t *)((char *)(uintptr_t)d + 0) = rt_tag_v(count + 1);
+  } else {
+    *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
+  }
+  return d;
 }
 
 int64_t rt_load_item(int64_t lst, int64_t i_v) { return rt_load_item_fast(lst, i_v); }

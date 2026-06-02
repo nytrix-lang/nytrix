@@ -255,6 +255,56 @@ static const char *type_sig_return_name(fun_sig *sig) {
   return sig->inferred_return_type;
 }
 
+static fun_sig *type_lookup_static_call_sig_by_name(codegen_t *cg,
+                                                    const char *name,
+                                                    size_t argc,
+                                                    uint64_t hash) {
+  if (!cg || !name || !*name)
+    return NULL;
+  fun_sig *sig = resolve_overload(cg, name, argc, hash);
+  if (!sig)
+    sig = lookup_use_module_fun(cg, name, argc);
+  if (!sig)
+    sig = lookup_fun(cg, name, hash);
+  if (sig && !ny_sig_in_current_sigs(cg, sig))
+    return NULL;
+  return sig;
+}
+
+static fun_sig *type_lookup_static_call_sig(codegen_t *cg, scope *scopes,
+                                            size_t depth, expr_t *callee,
+                                            size_t argc) {
+  if (!cg || !callee)
+    return NULL;
+  if (callee->kind == NY_E_IDENT) {
+    const char *name = callee->as.ident.name;
+    fun_sig *sig = type_lookup_static_call_sig_by_name(
+        cg, name, argc, callee->as.ident.hash);
+    if (sig)
+      return sig;
+  }
+  if (callee->kind == NY_E_MEMBER && callee->as.member.target &&
+      callee->as.member.name) {
+    char module_path[1024];
+    if (ny_resolve_module_expr_path(cg, scopes, depth, callee->as.member.target,
+                                    module_path, sizeof(module_path))) {
+      char resolved_fun[1280];
+      if (ny_resolve_module_function_path(cg, module_path,
+                                          callee->as.member.name,
+                                          resolved_fun, sizeof(resolved_fun))) {
+        fun_sig *sig =
+            type_lookup_static_call_sig_by_name(cg, resolved_fun, argc, 0);
+        if (sig)
+          return sig;
+      }
+    }
+  }
+  char *full = codegen_full_name(cg, callee, cg->arena);
+  if (!full)
+    return NULL;
+  return type_lookup_static_call_sig_by_name(cg, full, argc, 0);
+}
+
 static ssize_t ny_enum_type_param_index(enum_def_t *owner, const char *name) {
   if (!owner || !name)
     return -1;
@@ -1626,7 +1676,8 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
           (call_name_tail_is(n, "type") || call_name_tail_is(n, "type_name")))
         return "str";
       if (!builtin_shadowed &&
-          (call_name_tail_is(n, "float") || call_name_tail_is(n, "to_float")))
+          (call_name_tail_is(n, "float") || call_name_tail_is(n, "to_float") ||
+           call_name_tail_is(n, "f64")))
         return "f64";
       if (!builtin_shadowed && call_name_tail_is(n, "f64buf_load"))
         return "f64";
@@ -1712,8 +1763,29 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
       if (e->as.call.args.len == 1 && ny_lookup_tagged_type(cg, n))
         return n;
     }
+    if (e->as.call.callee && e->as.call.callee->kind != NY_E_IDENT) {
+      fun_sig *sig =
+          type_lookup_static_call_sig(cg, scopes, depth, e->as.call.callee,
+                                      e->as.call.args.len);
+      const char *ret = type_sig_return_name(sig);
+      if (ret)
+        return ret;
+    }
     return NULL;
   case NY_E_INDEX: {
+    if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
+        e->as.index.target->as.ident.name && e->as.index.start &&
+        ny_is_proven_int(cg, scopes, depth, e->as.index.start, NULL)) {
+      expr_t *target = e->as.index.target;
+      size_t name_len = (size_t)target->tok.len;
+      if (name_len == 0)
+        name_len = strlen(target->as.ident.name);
+      binding *b = type_lookup_binding(cg, scopes, depth,
+                                        target->as.ident.name, name_len,
+                                        target->as.ident.hash);
+      if (b && b->is_int_list_storage)
+        return "int";
+    }
     const char *target_type =
         infer_expr_type(cg, scopes, depth, e->as.index.target);
     const char *elem_from_type =
@@ -2363,21 +2435,22 @@ static bool type_expr_proven_int_with_params(codegen_t *cg, scope *scopes,
                                              size_t depth, expr_t *e,
                                              const ny_type_param_int_t *params,
                                              size_t param_count, int recursion);
+static bool type_stmt_returns_proven_int_with_params(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *s,
+    const ny_type_param_int_t *params, size_t param_count, int recursion);
 
 static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
                                          size_t depth, expr_t *call,
                                          const ny_type_param_int_t *params,
                                          size_t param_count, int recursion) {
   if (!cg || !call || call->kind != NY_E_CALL || !call->as.call.callee ||
-      call->as.call.callee->kind != NY_E_IDENT || recursion > 24)
+      recursion > 24)
     return false;
   if (call->as.call.args.len > 16)
     return false;
-  const char *name = call->as.call.callee->as.ident.name;
-  if (!name)
-    return false;
-  fun_sig *sig = resolve_overload(cg, name, call->as.call.args.len,
-                                  call->as.call.callee->as.ident.hash);
+  fun_sig *sig = type_lookup_static_call_sig(cg, scopes, depth,
+                                             call->as.call.callee,
+                                             call->as.call.args.len);
   if (!sig || sig->is_extern || sig->is_variadic || sig->is_recursive ||
       !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
     return false;
@@ -2386,10 +2459,6 @@ static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
     return true;
   if (sig->stmt_t->as.fn.params.len < call->as.call.args.len)
     return false;
-  expr_t *ret = type_single_return_expr(sig->stmt_t->as.fn.body);
-  if (!ret)
-    return false;
-
   ny_type_param_int_t local_params[16] = {0};
   for (size_t i = 0; i < call->as.call.args.len; ++i) {
     local_params[i].name = sig->stmt_t->as.fn.params.data[i].name;
@@ -2399,9 +2468,25 @@ static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
                                           params, param_count, recursion + 1))
       return false;
   }
+  if (type_stmt_returns_proven_int_with_params(
+          cg, scopes, depth, sig->stmt_t->as.fn.body, local_params,
+          call->as.call.args.len, recursion + 1))
+    return true;
+  expr_t *ret = type_single_return_expr(sig->stmt_t->as.fn.body);
+  if (!ret)
+    return false;
   return type_expr_proven_int_with_params(cg, scopes, depth, ret, local_params,
                                           call->as.call.args.len,
                                           recursion + 1);
+}
+
+static bool type_get_default_is_proven_int(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *default_expr,
+                                           int recursion) {
+  if (!default_expr)
+    return true; /* get(...): implicit default is 0 */
+  return type_expr_proven_int_with_params(cg, scopes, depth, default_expr, NULL,
+                                          0, recursion + 1);
 }
 
 static bool type_expr_proven_int_with_params(codegen_t *cg, scope *scopes,
@@ -2454,6 +2539,128 @@ static bool type_expr_proven_int_with_params(codegen_t *cg, scope *scopes,
   default:
     return false;
   }
+}
+
+static bool type_param_int_contains(const ny_type_param_int_t *params,
+                                    size_t param_count, const char *name) {
+  if (!params || !name)
+    return false;
+  for (size_t i = 0; i < param_count; ++i)
+    if (params[i].name && strcmp(params[i].name, name) == 0)
+      return true;
+  return false;
+}
+
+static bool type_param_int_add(ny_type_param_int_t *params,
+                               size_t *param_count, size_t cap,
+                               const char *name) {
+  if (!params || !param_count || !name)
+    return false;
+  if (type_param_int_contains(params, *param_count, name))
+    return true;
+  if (*param_count >= cap)
+    return false;
+  params[*param_count].name = name;
+  (*param_count)++;
+  return true;
+}
+
+static bool type_stmt_preserves_int_locals_with_params(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *s,
+    ny_type_param_int_t *params, size_t *param_count, size_t cap,
+    int recursion) {
+  if (!s || recursion > 32)
+    return false;
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      if (!type_stmt_preserves_int_locals_with_params(
+              cg, scopes, depth, s->as.block.body.data[i], params,
+              param_count, cap, recursion + 1))
+        return false;
+    }
+    return true;
+  }
+  if (s->kind == NY_S_VAR) {
+    stmt_var_t *var = &s->as.var;
+    if (var->is_del || var->is_destructure || var->names.len != var->exprs.len)
+      return false;
+    for (size_t i = 0; i < var->names.len; ++i) {
+      bool rhs_int = type_expr_proven_int_with_params(
+          cg, scopes, depth, var->exprs.data[i], params, *param_count,
+          recursion + 1);
+      if (!rhs_int) {
+        if (type_param_int_contains(params, *param_count, var->names.data[i]))
+          return false;
+        continue;
+      }
+      if (!type_param_int_add(params, param_count, cap, var->names.data[i]))
+        return false;
+    }
+    return true;
+  }
+  if (s->kind == NY_S_RETURN)
+    return type_expr_proven_int_with_params(cg, scopes, depth, s->as.ret.value,
+                                            params, *param_count,
+                                            recursion + 1);
+  if (s->kind == NY_S_IF) {
+    if (s->as.iff.init &&
+        !type_stmt_preserves_int_locals_with_params(
+            cg, scopes, depth, s->as.iff.init, params, param_count, cap,
+            recursion + 1))
+      return false;
+    ny_type_param_int_t conseq_params[32] = {0};
+    ny_type_param_int_t alt_params[32] = {0};
+    if (*param_count > 32)
+      return false;
+    memcpy(conseq_params, params, *param_count * sizeof(*params));
+    memcpy(alt_params, params, *param_count * sizeof(*params));
+    size_t conseq_count = *param_count;
+    size_t alt_count = *param_count;
+    if (s->as.iff.conseq &&
+        !type_stmt_preserves_int_locals_with_params(
+            cg, scopes, depth, s->as.iff.conseq, conseq_params,
+            &conseq_count, 32, recursion + 1))
+      return false;
+    if (s->as.iff.alt &&
+        !type_stmt_preserves_int_locals_with_params(
+            cg, scopes, depth, s->as.iff.alt, alt_params, &alt_count, 32,
+            recursion + 1))
+      return false;
+    return true;
+  }
+  return false;
+}
+
+static bool type_stmt_returns_proven_int_with_params(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *s,
+    const ny_type_param_int_t *params, size_t param_count, int recursion) {
+  if (!s || recursion > 32)
+    return false;
+  if (s->kind == NY_S_RETURN)
+    return type_expr_proven_int_with_params(cg, scopes, depth, s->as.ret.value,
+                                            params, param_count,
+                                            recursion + 1);
+  if (s->kind == NY_S_EXPR)
+    return type_expr_proven_int_with_params(cg, scopes, depth, s->as.expr.expr,
+                                            params, param_count,
+                                            recursion + 1);
+  if (s->kind != NY_S_BLOCK || s->as.block.body.len == 0 || param_count > 32)
+    return false;
+
+  ny_type_param_int_t local_params[32] = {0};
+  memcpy(local_params, params, param_count * sizeof(*params));
+  size_t local_count = param_count;
+  for (size_t i = 0; i < s->as.block.body.len; ++i) {
+    stmt_t *child = s->as.block.body.data[i];
+    if (i + 1 == s->as.block.body.len)
+      return type_stmt_returns_proven_int_with_params(
+          cg, scopes, depth, child, local_params, local_count, recursion + 1);
+    if (!type_stmt_preserves_int_locals_with_params(
+            cg, scopes, depth, child, local_params, &local_count, 32,
+            recursion + 1))
+      return false;
+  }
+  return false;
 }
 
 static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
@@ -2509,6 +2716,10 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
            strcmp(n, "std.core.reflect.get") == 0 ||
            call_name_tail_is(n, "get"));
       if (want_builtin_get) {
+        expr_t *default_expr =
+            e->as.call.args.len >= 3 ? e->as.call.args.data[2].val : NULL;
+        if (!type_get_default_is_proven_int(cg, scopes, depth, default_expr, 0))
+          return false;
         expr_t *target = e->as.call.args.data[0].val;
         if (target && target->kind == NY_E_IDENT && target->as.ident.name) {
           size_t name_len = (size_t)target->tok.len;
@@ -2555,9 +2766,23 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
         return false;
       fun_sig *sig = resolve_overload(cg, n, e->as.call.args.len,
                                       e->as.call.callee->as.ident.hash);
-      if (sig && sig->return_type &&
-          (strcmp(sig->return_type, "int") == 0 ||
-           strcmp(sig->return_type, "i64") == 0))
+      const char *ret_type =
+          sig ? (sig->return_type ? sig->return_type
+                                  : sig->inferred_return_type)
+              : NULL;
+      if (ret_type && (strcmp(ret_type, "int") == 0 ||
+                       strcmp(ret_type, "i64") == 0))
+        return true;
+      if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0))
+        return true;
+    }
+    if (e->as.call.callee && e->as.call.callee->kind != NY_E_IDENT) {
+      fun_sig *sig =
+          type_lookup_static_call_sig(cg, scopes, depth, e->as.call.callee,
+                                      e->as.call.args.len);
+      const char *ret_type = type_sig_return_name(sig);
+      if (ret_type && (strcmp(ret_type, "int") == 0 ||
+                       strcmp(ret_type, "i64") == 0))
         return true;
       if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0))
         return true;
@@ -2565,6 +2790,19 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
     return false;
   }
   case NY_E_INDEX: {
+    if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
+        e->as.index.target->as.ident.name && e->as.index.start &&
+        ny_is_proven_int(cg, scopes, depth, e->as.index.start, NULL)) {
+      expr_t *target = e->as.index.target;
+      size_t name_len = (size_t)target->tok.len;
+      if (name_len == 0)
+        name_len = strlen(target->as.ident.name);
+      binding *b = type_lookup_binding(cg, scopes, depth,
+                                        target->as.ident.name, name_len,
+                                        target->as.ident.hash);
+      if (b && b->is_int_list_storage)
+        return true;
+    }
     const char *t = infer_expr_type(cg, scopes, depth, e);
     return t && (strcmp(t, "int") == 0 || strcmp(t, "i64") == 0 ||
                  strcmp(t, "i32") == 0 || strcmp(t, "i16") == 0 ||
@@ -2572,6 +2810,31 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
                  strcmp(t, "u32") == 0 || strcmp(t, "u16") == 0 ||
                  strcmp(t, "u8") == 0);
   }
+  case NY_E_MEMCALL:
+    if (e->as.memcall.name && call_name_tail_is(e->as.memcall.name, "get") &&
+        e->as.memcall.target && e->as.memcall.target->kind == NY_E_IDENT &&
+        e->as.memcall.target->as.ident.name) {
+      expr_t *default_expr =
+          e->as.memcall.args.len >= 2 ? e->as.memcall.args.data[1].val : NULL;
+      if (!type_get_default_is_proven_int(cg, scopes, depth, default_expr, 0))
+        return false;
+      expr_t *target = e->as.memcall.target;
+      size_t name_len = (size_t)target->tok.len;
+      if (name_len == 0)
+        name_len = strlen(target->as.ident.name);
+      binding *b = type_lookup_binding(cg, scopes, depth,
+                                        target->as.ident.name, name_len,
+                                        target->as.ident.hash);
+      if (b && (b->is_int_dict_storage || b->is_int_list_storage))
+        return true;
+      expr_t *init = ny_typeinfer_static_indexable_init(cg, scopes, depth,
+                                                        target);
+      const char *elem_type = NULL;
+      if (init)
+        elem_type = ny_static_indexable_elem_type(scopes, depth, init);
+      return elem_type && strcmp(elem_type, "int") == 0;
+    }
+    return false;
   case NY_E_BINARY: {
     const char *op = e->as.binary.op;
     expr_t *le = e->as.binary.left;

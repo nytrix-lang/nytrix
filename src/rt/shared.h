@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <string.h>
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -70,6 +71,27 @@
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
 #define is_ptr(v)                                                                                    \
   (((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR)
+
+static inline bool rt_env_is_truthy(const char *v) {
+  if (!v || !*v)
+    return false;
+  return strcmp(v, "0") != 0 && strcmp(v, "false") != 0 && strcmp(v, "False") != 0 &&
+         strcmp(v, "FALSE") != 0 && strcmp(v, "off") != 0 && strcmp(v, "OFF") != 0 &&
+         strcmp(v, "no") != 0 && strcmp(v, "NO") != 0;
+}
+
+static inline bool rt_env_enabled(const char *name) {
+  if (!name || !*name)
+    return false;
+  return rt_env_is_truthy(getenv(name));
+}
+
+static inline bool rt_env_enabled_default_on(const char *name) {
+  const char *v = getenv(name);
+  if (!v || !*v)
+    return true;
+  return rt_env_is_truthy(v);
+}
 
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
@@ -479,6 +501,50 @@ static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)((uint64_t)v & ~N
 #define TAG_BIGINT 130
 #define TAG_KWARG 150
 
+static inline int64_t rt_runtime_tag_raw_name(const char *s, size_t n) {
+  if (!s)
+    return 0;
+  if (n == 3 && memcmp(s, "nil", 3) == 0)
+    return 0;
+  if (n == 3 && memcmp(s, "int", 3) == 0)
+    return 1;
+  if (n == 7 && memcmp(s, "ffi_ptr", 7) == 0)
+    return 6;
+  if (n == 4 && memcmp(s, "list", 4) == 0)
+    return TAG_LIST;
+  if (n == 4 && memcmp(s, "dict", 4) == 0)
+    return TAG_DICT;
+  if (n == 3 && memcmp(s, "set", 3) == 0)
+    return TAG_SET;
+  if (n == 5 && memcmp(s, "tuple", 5) == 0)
+    return TAG_TUPLE;
+  if (n == 2 && memcmp(s, "ok", 2) == 0)
+    return TAG_OK;
+  if (n == 3 && memcmp(s, "err", 3) == 0)
+    return TAG_ERR;
+  if (n == 5 && memcmp(s, "range", 5) == 0)
+    return TAG_RANGE;
+  if (n == 7 && memcmp(s, "closure", 7) == 0)
+    return TAG_CLOSURE;
+  if (n == 3 && memcmp(s, "ptr", 3) == 0)
+    return TAG_CLOSURE;
+  if (n == 5 && memcmp(s, "float", 5) == 0)
+    return TAG_FLOAT;
+  if (n == 7 && memcmp(s, "complex", 7) == 0)
+    return TAG_COMPLEX;
+  if (n == 3 && memcmp(s, "str", 3) == 0)
+    return TAG_STR;
+  if (n == 9 && memcmp(s, "str_const", 9) == 0)
+    return TAG_STR_CONST;
+  if (n == 5 && memcmp(s, "bytes", 5) == 0)
+    return TAG_BYTES;
+  if (n == 6 && memcmp(s, "bigint", 6) == 0)
+    return TAG_BIGINT;
+  if (n == 5 && memcmp(s, "kwarg", 5) == 0)
+    return TAG_KWARG;
+  return 0;
+}
+
 static inline int64_t rt_heap_object_ptr(int64_t v) {
   if (v == 0 || NY_NATIVE_IS(v))
     return 0;
@@ -649,6 +715,7 @@ void rt_cleanup_small_strings(void);
 int64_t rt_set_args(int64_t argc, int64_t argv, int64_t envp);
 int _ny_aot_set_args(int argc, char **argv, char **envp);
 int64_t rt_malloc(int64_t n);
+int64_t rt_malloc_uninit(int64_t n);
 int64_t rt_free(int64_t ptr);
 int64_t rt_ptr_key(int64_t ptr);
 int64_t rt_atomic_load64(int64_t addr, int64_t idx);
@@ -663,6 +730,13 @@ int64_t rt_runtime_cleanup(void);
 int64_t rt_fix_fn_ptr(int64_t fn);
 int64_t rt_flt_box_val(int64_t bits);
 int64_t rt_str_concat(int64_t a, int64_t b);
+int64_t rt_str_builder_new(int64_t cap_v);
+int64_t rt_str_builder_append(int64_t builder_v, int64_t value);
+int64_t rt_str_builder_to_str(int64_t builder_v);
+int64_t rt_str_builder_free(int64_t builder_v);
+int64_t rt_dict_reserve(int64_t d, int64_t additional);
+int64_t rt_dict_write_fast(int64_t d, int64_t key, int64_t value);
+int64_t rt_eq(int64_t a, int64_t b);
 int64_t rt_trace_last_file(void);
 int64_t rt_trace_last_line(void);
 int64_t rt_trace_last_col(void);
@@ -715,6 +789,8 @@ int64_t rt_bytes_new(int64_t n);
 int64_t rt_kwarg_new(int64_t key, int64_t value);
 int64_t rt_range_new(int64_t start, int64_t stop, int64_t step);
 int64_t rt_list_as_tuple(int64_t lst);
+int64_t rt_list_reserve(int64_t lst, int64_t cap);
+int64_t rt_list_sum_int_range(int64_t lst, int64_t start, int64_t stop);
 int64_t rt_list_len(int64_t lst);
 int64_t rt_list_set_len(int64_t lst, int64_t n);
 int64_t rt_load_item(int64_t lst, int64_t i);

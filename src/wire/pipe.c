@@ -2421,6 +2421,7 @@ static void ny_build_aot_cache_path(const ny_options *opt, const char *source,
         "NYTRIX_FAST_ALL_PROFILES",
         "NYTRIX_PROVEN_RAW_INT_EXPR_FAST",
         "NYTRIX_RAW_INT_EXPR_FAST",
+        "NYTRIX_RAW_INT_SLOT_EXPR_FAST",
         "NYTRIX_RAW_INT_EXPR_FAST_OPS",
         "NYTRIX_RAW_INT_EXPR_ADDSUB_FAST",
         "NYTRIX_RAW_INT_EXPR_MUL_FAST",
@@ -5169,8 +5170,10 @@ int ny_pipeline_run(ny_options *opt) {
     }
   }
 skip_compilation:
-  if (jit_cache_file)
+  if (jit_cache_file) {
     free(jit_cache_file);
+    jit_cache_file = NULL;
+  }
   if (!auto_std_bc_cache_saved && !use_std_bc_cache && auto_std_bc_cache &&
       cg.module &&
       !loaded_from_cache && !opt->emit_module && std_mode != STD_MODE_NONE &&
@@ -5188,6 +5191,7 @@ skip_compilation:
     }
   }
   free(auto_std_bc_cache);
+  auto_std_bc_cache = NULL;
   if (loaded_from_cache && cg.module)
     codegen_prepare(&cg);
   ny_clear_origin_sections(cg.module);
@@ -5332,11 +5336,16 @@ skip_compilation:
       vec_init(&merged_libs);
       for (size_t li = 0; li < opt->link_libs.len; li++) {
         const char *lib = opt->link_libs.data[li];
-        /* Convert libXXX.so -> -lXXX for ELF linker */
+        /* Convert libXXX.so / libXXX.dylib -> -lXXX for native linkers. */
         if (lib && strncmp(lib, "lib", 3) == 0) {
           const char *base = lib + 3;
           size_t blen = strlen(base);
           const char *dot = strstr(base, ".so");
+#ifdef __APPLE__
+          const char *dylib = strstr(base, ".dylib");
+          if (dylib && dylib > base && (!dot || dylib < dot))
+            dot = dylib;
+#endif
           if (dot && dot > base)
             blen = (size_t)(dot - base);
           if (blen > 0 && blen < 256) {
@@ -5352,13 +5361,31 @@ skip_compilation:
         const char *name = cg.links.data[li];
         if (!name)
           continue;
-        /* Convert libXXX.so[.N] -> XXX for -lXXX format */
+        if (name[0] == '-' || strchr(name, '/') || strchr(name, '\\')) {
+          bool dup = false;
+          for (size_t lj = 0; lj < merged_libs.len; lj++) {
+            const char *e = merged_libs.data[lj];
+            if (e && strcmp(e, name) == 0) {
+              dup = true;
+              break;
+            }
+          }
+          if (!dup)
+            vec_push(&merged_libs, ny_strdup(name));
+          continue;
+        }
+        /* Convert libXXX.so[.N] / libXXX.dylib -> XXX for -lXXX format. */
         const char *lib_name = name;
         size_t lib_len = strlen(name);
         if (strncmp(name, "lib", 3) == 0) {
           lib_name = name + 3;
           lib_len = strlen(lib_name);
           const char *dot = strstr(lib_name, ".so");
+#ifdef __APPLE__
+          const char *dylib = strstr(lib_name, ".dylib");
+          if (dylib && dylib > lib_name && (!dot || dylib < dot))
+            dot = dylib;
+#endif
           if (dot && dot > lib_name)
             lib_len = (size_t)(dot - lib_name);
         }
@@ -5540,6 +5567,8 @@ exit_success:
     free(type_errors_json);
   if (uses)
     ny_str_list_free(uses, use_count);
+  free(jit_cache_file);
+  free(auto_std_bc_cache);
   codegen_dispose(&cg);
   program_free(&prog, arena);
   ny_lookup_prof_note_pipeline_ms(ny_ticks_elapsed_ms(pipeline_prof_t0));

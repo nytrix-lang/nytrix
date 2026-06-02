@@ -454,6 +454,12 @@ static ny_int_range_t ny_binary_small_int_range(const char *op, ny_int_range_t l
   if (strcmp(op, "&") == 0 && r.min_raw == r.max_raw && r.max_raw >= 0 &&
       l.min_raw >= 0)
     return ny_checked_int_range(0, r.max_raw);
+  if (strcmp(op, ">>") == 0 && r.min_raw == r.max_raw &&
+      r.min_raw >= 0 && r.min_raw < 64 && l.min_raw >= 0) {
+    unsigned shift = (unsigned)r.min_raw;
+    return ny_checked_int_range((int64_t)((uint64_t)l.min_raw >> shift),
+                                (int64_t)((uint64_t)l.max_raw >> shift));
+  }
   return fail;
 }
 
@@ -526,10 +532,19 @@ static ny_int_range_t ny_call_return_small_int_range(codegen_t *cg, scope *scope
   if (!sig || sig->is_extern || sig->is_variadic || sig->is_recursive ||
       !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
     return fail;
+  if (ny_name_tail_is(name, "now_ms") && ny_is_stdlib_tok(sig->stmt_t->tok))
+    return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
   stmt_t *body = sig->stmt_t->as.fn.body;
   expr_t *ret = ny_single_return_expr(body);
   if (!ret || sig->stmt_t->as.fn.params.len < call->as.call.args.len)
     return fail;
+  if (ret->kind == NY_E_CALL && ret->as.call.callee &&
+      ret->as.call.callee->kind == NY_E_IDENT &&
+      ret->as.call.callee->as.ident.name &&
+      ny_name_tail_is(ret->as.call.callee->as.ident.name,
+                      "__time_milliseconds") &&
+      ret->as.call.args.len == 0)
+    return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
   ny_param_int_range_t params[16] = {0};
   for (size_t i = 0; i < call->as.call.args.len; ++i) {
     params[i].name = sig->stmt_t->as.fn.params.data[i].name;
@@ -606,6 +621,9 @@ static ny_int_range_t ny_expr_proven_small_int_range(codegen_t *cg, scope *scope
     bool builtin_shadowed =
         ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, n, n_len,
                                                 n_hash);
+    if (!builtin_shadowed && n && ny_name_tail_is(n, "__time_milliseconds") &&
+        e->as.call.args.len == 0)
+      return (ny_int_range_t){true, 0, NY_SMALL_INT_MAX};
     if (!builtin_shadowed && n && ny_name_tail_is(n, "len") &&
         e->as.call.args.len == 1) {
       int64_t len = 0;
@@ -658,6 +676,29 @@ static ny_int_range_t ny_expr_proven_small_int_range(codegen_t *cg, scope *scope
       return (ny_int_range_t){true, min_v, max_v};
     return fail;
   }
+  case NY_E_MEMCALL: {
+    if (!e->as.memcall.name || !ny_name_tail_is(e->as.memcall.name, "get") ||
+        !e->as.memcall.target)
+      return fail;
+    expr_t *target = e->as.memcall.target;
+    if (target->kind == NY_E_IDENT && target->as.ident.name) {
+      size_t name_len = (size_t)target->tok.len;
+      if (name_len == 0)
+        name_len = strlen(target->as.ident.name);
+      binding *b = ny_binary_lookup_binding(cg, scopes, depth,
+                                            target->as.ident.name, name_len,
+                                            target->as.ident.hash);
+      if (b && b->is_int_list_storage && b->has_list_int_range)
+        return (ny_int_range_t){true, b->list_int_min_raw, b->list_int_max_raw};
+      if (b && b->is_int_dict_storage && b->has_dict_int_range)
+        return (ny_int_range_t){true, b->dict_int_min_raw, b->dict_int_max_raw};
+    }
+    int64_t min_v = 0, max_v = 0;
+    if (ny_static_indexable_int_bounds(cg, scopes, depth, target, &min_v,
+                                       &max_v))
+      return (ny_int_range_t){true, min_v, max_v};
+    return fail;
+  }
   case NY_E_BINARY: {
     const char *op = e->as.binary.op;
     if (op && strcmp(op, "&") == 0) {
@@ -703,11 +744,22 @@ static bool ny_can_lower_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth
   case NY_E_BINARY: {
     const char *op = e->as.binary.op;
     if (strcmp(op, "+") != 0 && strcmp(op, "-") != 0 && strcmp(op, "*") != 0 &&
-        strcmp(op, "%") != 0 && strcmp(op, "/") != 0 && strcmp(op, "&") != 0)
+        strcmp(op, "%") != 0 && strcmp(op, "/") != 0 && strcmp(op, "&") != 0 &&
+        strcmp(op, ">>") != 0)
       return false;
     if (strcmp(op, "%") == 0 || strcmp(op, "/") == 0) {
       int64_t rhs_lit = 0;
       if (!ny_expr_literal_i64(e->as.binary.right, &rhs_lit) || rhs_lit <= 0)
+        return false;
+      return ny_can_lower_raw_int_expr(cg, scopes, depth, e->as.binary.left);
+    }
+    if (strcmp(op, ">>") == 0) {
+      int64_t rhs_lit = 0;
+      ny_int_range_t lhs_range =
+          ny_expr_proven_small_int_range(cg, scopes, depth, e->as.binary.left);
+      if (!ny_expr_literal_i64(e->as.binary.right, &rhs_lit) ||
+          rhs_lit < 0 || rhs_lit >= 64 || !lhs_range.known ||
+          lhs_range.min_raw < 0)
         return false;
       return ny_can_lower_raw_int_expr(cg, scopes, depth, e->as.binary.left);
     }
@@ -764,9 +816,13 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
       name_len = strlen(e->as.ident.name);
     binding *b =
         ny_binary_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len, e->as.ident.hash);
-    if (b && b->raw_int_value && (b->is_int_slot || b->is_int_direct)) {
-      LLVMValueRef raw =
-          b->is_int_slot ? ny_load(cg, b->raw_int_value, "rawi.ident") : b->raw_int_value;
+    if (b && b->raw_int_value && b->is_int_direct) {
+      LLVMValueRef raw = b->raw_int_value;
+      return (ny_raw_int_expr_t){raw, LLVMConstInt(cg->type_i1, 1, false)};
+    }
+    if (ny_env_enabled("NYTRIX_RAW_INT_SLOT_EXPR_FAST") && b &&
+        b->raw_int_value && b->is_int_slot && !ny_binding_is_valid(cg, b)) {
+      LLVMValueRef raw = ny_load(cg, b->raw_int_value, NY_LLVM_NAME(cg, "rawi.slot"));
       return (ny_raw_int_expr_t){raw, LLVMConstInt(cg->type_i1, 1, false)};
     }
     expr_t *init = b && !b->is_mut ? ny_binding_var_init_expr(b, e->as.ident.name) : NULL;
@@ -804,24 +860,59 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
       return (ny_raw_int_expr_t){raw, lhs.ok};
     }
     if (strcmp(op, "+") != 0 && strcmp(op, "-") != 0 && strcmp(op, "*") != 0 &&
-        strcmp(op, "%") != 0 && strcmp(op, "/") != 0 && strcmp(op, "&") != 0)
+        strcmp(op, "%") != 0 && strcmp(op, "/") != 0 && strcmp(op, "&") != 0 &&
+        strcmp(op, ">>") != 0)
       return fail;
 
     if (strcmp(op, "%") == 0 || strcmp(op, "/") == 0) {
       int64_t rhs_lit = 0;
       if (!ny_expr_literal_i64(e->as.binary.right, &rhs_lit) || rhs_lit <= 0)
         return fail;
+      ny_int_range_t lhs_range =
+          ny_raw_int_expr_range_with_params(cg, scopes, depth, e->as.binary.left, params,
+                                            param_count);
       ny_raw_int_expr_t lhs =
           ny_lower_raw_int_expr_with_params(cg, scopes, depth, e->as.binary.left, params,
                                             param_count, recursion + 1);
       if (!lhs.raw)
         return fail;
-      LLVMValueRef rhs = LLVMConstInt(cg->type_i64, (uint64_t)rhs_lit, true);
-      LLVMValueRef raw = strcmp(op, "%") == 0
-                             ? LLVMBuildSRem(cg->builder, lhs.raw, rhs,
-                                             NY_LLVM_NAME(cg, "rawi_rem"))
-                             : LLVMBuildSDiv(cg->builder, lhs.raw, rhs,
-                                             NY_LLVM_NAME(cg, "rawi_div"));
+      bool lhs_nonnegative = lhs_range.known && lhs_range.min_raw >= 0;
+      LLVMValueRef rhs = LLVMConstInt(cg->type_i64, (uint64_t)rhs_lit,
+                                      !lhs_nonnegative);
+      LLVMValueRef raw =
+          strcmp(op, "%") == 0
+              ? (lhs_nonnegative
+                     ? LLVMBuildURem(cg->builder, lhs.raw, rhs,
+                                     NY_LLVM_NAME(cg, "rawi_urem"))
+                     : LLVMBuildSRem(cg->builder, lhs.raw, rhs,
+                                     NY_LLVM_NAME(cg, "rawi_rem")))
+              : (lhs_nonnegative
+                     ? LLVMBuildUDiv(cg->builder, lhs.raw, rhs,
+                                     NY_LLVM_NAME(cg, "rawi_udiv"))
+                     : LLVMBuildSDiv(cg->builder, lhs.raw, rhs,
+                                     NY_LLVM_NAME(cg, "rawi_div")));
+      return (ny_raw_int_expr_t){raw, lhs.ok};
+    }
+
+    if (strcmp(op, ">>") == 0) {
+      int64_t rhs_lit = 0;
+      if (!ny_expr_literal_i64(e->as.binary.right, &rhs_lit) ||
+          rhs_lit < 0 || rhs_lit >= 64)
+        return fail;
+      ny_int_range_t lhs_range =
+          ny_raw_int_expr_range_with_params(cg, scopes, depth, e->as.binary.left, params,
+                                            param_count);
+      if (!lhs_range.known || lhs_range.min_raw < 0)
+        return fail;
+      ny_raw_int_expr_t lhs =
+          ny_lower_raw_int_expr_with_params(cg, scopes, depth, e->as.binary.left, params,
+                                            param_count, recursion + 1);
+      if (!lhs.raw)
+        return fail;
+      LLVMValueRef raw =
+          LLVMBuildLShr(cg->builder, lhs.raw,
+                        LLVMConstInt(cg->type_i64, (uint64_t)rhs_lit, false),
+                        NY_LLVM_NAME(cg, "rawi_shr"));
       return (ny_raw_int_expr_t){raw, lhs.ok};
     }
 
@@ -979,7 +1070,15 @@ static LLVMValueRef ny_try_emit_proven_int_modexpr_fast(codegen_t *cg, scope *sc
 
   ny_pos(cg, fast_ok_bb);
   LLVMValueRef divisor = LLVMConstInt(cg->type_i64, (uint64_t)mod_raw, true);
-  LLVMValueRef raw = LLVMBuildSRem(cg->builder, lhs.raw, divisor, NY_LLVM_NAME(cg, "modexpr"));
+  ny_int_range_t lhs_range = ny_expr_proven_small_int_range(cg, scopes, depth, le);
+  bool lhs_nonnegative = lhs_range.known && lhs_range.min_raw >= 0;
+  LLVMValueRef raw =
+      lhs_nonnegative
+          ? LLVMBuildURem(cg->builder, lhs.raw,
+                          LLVMConstInt(cg->type_i64, (uint64_t)mod_raw, false),
+                          NY_LLVM_NAME(cg, "modexpr_urem"))
+          : LLVMBuildSRem(cg->builder, lhs.raw, divisor,
+                          NY_LLVM_NAME(cg, "modexpr"));
   fast_value = ny_tag_int(cg, raw);
   fast_done_bb = ny_cur_block(cg);
   ny_br(cg, merge_bb);
@@ -1014,7 +1113,14 @@ static LLVMValueRef ny_try_emit_proven_int_mod_fast(codegen_t *cg, scope *scopes
 
   LLVMValueRef li = ny_untag_int(cg, l);
   LLVMValueRef ri = ny_untag_int(cg, r);
-  LLVMValueRef raw = LLVMBuildSRem(cg->builder, li, ri, NY_LLVM_NAME(cg, "proven_int_mod"));
+  ny_int_range_t range_l = ny_expr_proven_small_int_range(cg, scopes, depth, le);
+  bool lhs_nonnegative = range_l.known && range_l.min_raw >= 0;
+  LLVMValueRef raw =
+      lhs_nonnegative
+          ? LLVMBuildURem(cg->builder, li, ri,
+                          NY_LLVM_NAME(cg, "proven_int_umod"))
+          : LLVMBuildSRem(cg->builder, li, ri,
+                          NY_LLVM_NAME(cg, "proven_int_mod"));
   return ny_tag_int(cg, raw);
 }
 
@@ -1358,6 +1464,8 @@ static void ny_note_raw_int_expr_fast(codegen_t *cg, ny_binop_kind_t kind) {
     name = "raw_int_expr_fast_sub";
   else if (kind == NY_BINOP_MUL)
     name = "raw_int_expr_fast_mul";
+  else if (kind == NY_BINOP_DIV)
+    name = "raw_int_expr_fast_div";
   else if (kind == NY_BINOP_MOD)
     name = "raw_int_expr_fast_mod";
   LLVMMetadataRef s = LLVMMDStringInContext2(cg->ctx, name, strlen(name));
@@ -1398,6 +1506,8 @@ static bool ny_raw_int_expr_fast_op_enabled(ny_binop_kind_t kind) {
     needle = "sub";
   else if (kind == NY_BINOP_MUL)
     needle = "mul";
+  else if (kind == NY_BINOP_DIV)
+    needle = "div";
   else if (kind == NY_BINOP_MOD)
     needle = "mod";
   if (!needle)
@@ -1468,6 +1578,8 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
       }
       ok = ny_small_int_fits_i64(lo) && ny_small_int_fits_i64(hi);
     }
+  } else if (kind == NY_BINOP_DIV) {
+    ok = range_r.known && range_r.min_raw > 0;
   } else if (kind == NY_BINOP_MOD) {
     ok = range_r.known && range_r.min_raw > 0;
     /* Constant divisors already have a tighter tagged-int path below, including
@@ -1500,6 +1612,8 @@ static LLVMValueRef ny_try_emit_raw_int_expr_fast_binary(codegen_t *cg, scope *s
     raw = ny_sub(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_sub"));
   else if (kind == NY_BINOP_MUL)
     raw = ny_mul(cg, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_mul"));
+  else if (kind == NY_BINOP_DIV)
+    raw = LLVMBuildSDiv(cg->builder, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_div"));
   else if (kind == NY_BINOP_MOD)
     raw = LLVMBuildSRem(cg->builder, lhs, rhs, NY_LLVM_NAME(cg, "raw_int_expr_fast_mod"));
   if (raw)
@@ -1891,6 +2005,48 @@ static bool ny_bin_type_is_core_scalar(const char *type_name) {
          strcmp(t, "handle") == 0 || strcmp(t, "nil") == 0 || strcmp(t, "none") == 0;
 }
 
+static bool ny_bin_type_is_str(const char *type_name) {
+  const char *t = ny_type_leaf(type_name);
+  return t && strcmp(t, "str") == 0;
+}
+
+static bool ny_bin_expr_is_stringish(codegen_t *cg, scope *scopes, size_t depth,
+                                     expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_STR)
+    return true;
+  if (ny_bin_type_is_str(infer_expr_type(cg, scopes, depth, e)))
+    return true;
+  if (e->kind != NY_E_IDENT || !e->as.ident.name)
+    return false;
+  size_t name_len = (size_t)e->tok.len;
+  if (name_len == 0)
+    name_len = strlen(e->as.ident.name);
+  binding *b =
+      ny_binary_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len,
+                               e->as.ident.hash);
+  return b &&
+         (ny_bin_type_is_str(b->type_name) || ny_bin_type_is_str(b->decl_type_name));
+}
+
+static LLVMValueRef ny_try_emit_direct_str_concat(codegen_t *cg, scope *scopes,
+                                                  size_t depth, ny_binop_kind_t kind,
+                                                  LLVMValueRef l, LLVMValueRef r,
+                                                  expr_t *le, expr_t *re) {
+  if (kind != NY_BINOP_ADD)
+    return NULL;
+  if (!ny_bin_expr_is_stringish(cg, scopes, depth, le) ||
+      !ny_bin_expr_is_stringish(cg, scopes, depth, re))
+    return NULL;
+  fun_sig *s = lookup_fun(cg, "__str_concat", 0);
+  if (!s || !s->type || !s->value)
+    return NULL;
+  return LLVMBuildCall2(cg->builder, s->type, s->value,
+                        (LLVMValueRef[]){l, r}, 2,
+                        NY_LLVM_NAME(cg, "str_concat_direct"));
+}
+
 static bool ny_bin_type_is_fixnum_like(const char *type_name) {
   const char *t = ny_type_leaf(type_name);
   if (!t)
@@ -2203,8 +2359,6 @@ static LLVMValueRef ny_try_emit_float_fast_binary(codegen_t *cg, const op_map_t 
     return NULL;
 
   ny_binop_kind_t kind = entry->kind;
-  if (kind == NY_BINOP_DIV)
-    return NULL;
   if (kind == NY_BINOP_AND || kind == NY_BINOP_OR || kind == NY_BINOP_XOR || kind == NY_BINOP_SHL ||
       kind == NY_BINOP_SHR || kind == NY_BINOP_MOD)
     return NULL;
@@ -2439,6 +2593,11 @@ LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth, const char *
   LLVMValueRef scoped_operator = ny_try_emit_scoped_operator(cg, scopes, depth, op, l, r, le, re);
   if (scoped_operator)
     return scoped_operator;
+
+  LLVMValueRef direct_str_concat =
+      ny_try_emit_direct_str_concat(cg, scopes, depth, kind, l, r, le, re);
+  if (direct_str_concat)
+    return direct_str_concat;
 
   if (kind == NY_BINOP_POW) {
     int64_t li = 0, ri = 0, out = 0;
