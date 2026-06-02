@@ -15,6 +15,25 @@ use std.os.sound.backend.shared as backend_shared
    extern "jack" {
       fn _ny_jack_set_process_callback(ptr: client, fnptr: cb, ptr: arg): i32 as "jack_set_process_callback"
    }
+} #else {
+   fn _ny_jack_set_process_callback(..._args): i32 { -1 }
+   fn jack_ringbuffer_free(any: _rb): any { 0 }
+   fn jack_get_buffer_size(any: _client): int { 0 }
+   fn jack_ringbuffer_create(any: _bytes): any { 0 }
+   fn jack_get_ports(..._args): any { 0 }
+   fn jack_port_name(any: _port): any { 0 }
+   fn jack_connect(..._args): int { -1 }
+   fn jack_free(any: _ptr): any { 0 }
+   fn jack_ringbuffer_read_space(any: _rb): int { 0 }
+   fn jack_ringbuffer_read(..._args): int { 0 }
+   fn jack_port_get_buffer(..._args): any { 0 }
+   fn jack_client_open(..._args): any { 0 }
+   fn jack_client_close(any: _client): int { 0 }
+   fn jack_port_register(..._args): any { 0 }
+   fn jack_activate(any: _client): int { -1 }
+   fn jack_deactivate(any: _client): int { 0 }
+   fn jack_ringbuffer_write_space(any: _rb): int { 0 }
+   fn jack_ringbuffer_write(..._args): int { 0 }
 } #endif
 def JACK_NO_START_SERVER = 0x01
 def JACK_PORT_IS_INPUT = 0x1

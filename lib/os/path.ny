@@ -217,6 +217,18 @@ fn data_dir(): str {
 
 fn cache_dir(): str {
    "Returns the path to the current user's cache directory(e.g., ~/.cache on Linux)."
+   def override = _env_path("NYTRIX_CACHE_DIR")
+   if(override.len > 0 && _dir_writable(override)){ return override }
+   def repo_root = _repo_root_env()
+   if(repo_root.len > 0){
+      def repo_cache = _normalize_path(_path_join(repo_root, "build" + sep() + "cache"))
+      if(_dir_writable(repo_cache)){ return repo_cache }
+   }
+   def cwd = _cwd_local()
+   if(cwd.len > 0){
+      def cwd_cache = _normalize_path(_path_join(cwd, "build" + sep() + "cache"))
+      if(_dir_writable(cwd_cache)){ return cwd_cache }
+   }
    #windows {
       def a = _env_path("LOCALAPPDATA")
       if(a.len > 0){

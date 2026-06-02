@@ -266,46 +266,63 @@ fn _multipart_body(any: fields, any: files, str: boundary): str {
    out
 }
 
-fn _apply_auth(dict: spec, dict: headers, dict: curl_opts): int {
+fn _apply_auth(dict: spec, dict: headers, dict: curl_opts): list {
    def bearer = _str_opt(spec, "bearer", _str_opt(spec, "token", ""))
    if(bearer.len > 0){
-      _header_set_default(headers, "Authorization", "Bearer " + bearer)
+      headers = _header_set_default(headers, "Authorization", "Bearer " + bearer)
       curl_opts["auth_type"] = "bearer"
-      return 0
+      return [headers, curl_opts]
    }
-   def auth = spec.get("auth", nil)
-   if(auth == nil){ return 0 }
-   mut typ = "basic"
-   mut user = ""
-   mut password = ""
-   if(is_dict(auth)){
-      typ = lower(_str_opt(auth, "type", typ))
-      user = _str_opt(auth, "username", _str_opt(auth, "user", ""))
-      password = _str_opt(auth, "password", _str_opt(auth, "pass", ""))
-      def token = _str_opt(auth, "token", "")
+   def auth_spec = spec.get("auth", nil)
+   if(auth_spec == nil){ return [headers, curl_opts] }
+   if(is_dict(auth_spec)){
+      def typ = lower(_str_opt(auth_spec, "type", "basic"))
+      def user = _str_opt(auth_spec, "username", _str_opt(auth_spec, "user", ""))
+      def password = _str_opt(auth_spec, "password", _str_opt(auth_spec, "pass", ""))
+      def token = _str_opt(auth_spec, "token", "")
       if(token.len > 0){
-         _header_set_default(headers, "Authorization", "Bearer " + token)
+         headers = _header_set_default(headers, "Authorization", "Bearer " + token)
          curl_opts["auth_type"] = "bearer"
-         return 0
+         return [headers, curl_opts]
       }
-   } elif(is_list(auth) || is_tuple(auth)){
-      if(auth.len >= 1){ user = to_str(auth.get(0)) }
-      if(auth.len >= 2){ password = to_str(auth.get(1)) }
-   } elif(is_str(auth)){
-      user = auth
-      def c = find(auth, ":")
+      if(user.len > 0 || password.len > 0){
+         curl_opts["username"] = user
+         curl_opts["password"] = password
+         curl_opts["auth_type"] = typ
+         if(typ == "basic"){ headers = _header_set_default(headers, "Authorization", "Basic " + _b64(user + ":" + password)) }
+      }
+      return [headers, curl_opts]
+   }
+   if(is_list(auth_spec) || is_tuple(auth_spec)){
+      mut user = ""
+      mut password = ""
+      if(auth_spec.len >= 1){ user = to_str(auth_spec.get(0)) }
+      if(auth_spec.len >= 2){ password = to_str(auth_spec.get(1)) }
+      if(user.len > 0 || password.len > 0){
+         curl_opts["username"] = user
+         curl_opts["password"] = password
+         curl_opts["auth_type"] = "basic"
+         headers = _header_set_default(headers, "Authorization", "Basic " + _b64(user + ":" + password))
+      }
+      return [headers, curl_opts]
+   }
+   if(is_str(auth_spec)){
+      mut user = auth_spec
+      mut password = ""
+      def c = find(auth_spec, ":")
       if(c >= 0){
-         user = slice(auth, 0, c)
-         password = slice(auth, c + 1, auth.len)
+         user = slice(auth_spec, 0, c)
+         password = slice(auth_spec, c + 1, auth_spec.len)
       }
+      if(user.len > 0 || password.len > 0){
+         curl_opts["username"] = user
+         curl_opts["password"] = password
+         curl_opts["auth_type"] = "basic"
+         headers = _header_set_default(headers, "Authorization", "Basic " + _b64(user + ":" + password))
+      }
+      return [headers, curl_opts]
    }
-   if(user.len > 0 || password.len > 0){
-      curl_opts["username"] = user
-      curl_opts["password"] = password
-      curl_opts["auth_type"] = typ
-      if(typ == "basic"){ _header_set_default(headers, "Authorization", "Basic " + _b64(user + ":" + password)) }
-   }
-   0
+   [headers, curl_opts]
 }
 
 fn prepare_request(any: method, any: url=0, any: data=0, any: headers=0, any: options=0): dict {
@@ -363,8 +380,30 @@ fn prepare_request(any: method, any: url=0, any: data=0, any: headers=0, any: op
       _header_set_default(out_headers, "Cookie", cookie)
       spec["cookie"] = cookie
    }
+   def auth_raw = spec.get("auth", nil)
+   if(is_list(auth_raw) || is_tuple(auth_raw)){
+      mut auth_norm = _d.dict(4)
+      auth_norm["type"] = "basic"
+      if(auth_raw.len >= 1){ auth_norm["username"] = to_str(auth_raw.get(0)) }
+      if(auth_raw.len >= 2){ auth_norm["password"] = to_str(auth_raw.get(1)) }
+      spec["auth"] = auth_norm
+   } elif(is_str(auth_raw)){
+      mut auth_norm = _d.dict(4)
+      auth_norm["type"] = "basic"
+      def c = find(auth_raw, ":")
+      if(c >= 0){
+         auth_norm["username"] = slice(auth_raw, 0, c)
+         auth_norm["password"] = slice(auth_raw, c + 1, auth_raw.len)
+      } else {
+         auth_norm["username"] = auth_raw
+         auth_norm["password"] = ""
+      }
+      spec["auth"] = auth_norm
+   }
    mut curl_opts = _d.dict_clone(spec)
-   _apply_auth(spec, out_headers, curl_opts)
+   def auth_state = _apply_auth(spec, out_headers, curl_opts)
+   out_headers = auth_state.get(0, out_headers)
+   curl_opts = auth_state.get(1, curl_opts)
    if(!_has(curl_opts, "log_level")){ curl_opts["log_level"] = ctx.get("log_level", "quiet") }
    if(!_has(curl_opts, "color")){ curl_opts["color"] = ctx.get("color", true) }
    if(!_has(curl_opts, "curl_log")){ curl_opts["curl_log"] = false }
