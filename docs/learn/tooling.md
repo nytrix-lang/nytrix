@@ -28,6 +28,15 @@ chmod +x make
 ny --version
 ```
 
+From Windows `cmd.exe` or PowerShell:
+
+```bat
+py -3 -B .\make all
+```
+
+The Windows wrapper can use plain `cmd.exe`: it finds or installs MSYS2, installs
+the UCRT64 build packages with `pacman`, and points CMake at that toolchain.
+
 Without installing, run commands through the produced `ny` binary from the
 build output.
 

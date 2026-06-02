@@ -6,8 +6,20 @@ Git-derived build version through the generated `NYTRIX_VERSION` define in
 
 ## Open maintenance checks
 
-- [ ] Stabilize cross-platform window-system checks on Windows and macOS.
-- [ ] Stabilize REPL and terminal UI checks on Windows and macOS.
+- [ ] Fix windows gamepad support.
+
+## [0.4.3] - 2026-06-02
+
+### Added
+- Added much broader cross-platform window/input coverage: Win32 raw input,
+  Cocoa AppKit windows/cursors/monitors, and Linux X11/Wayland/Vulkan plumbing.
+- Added the rounded-rectangle UI shader, expanded gamepad/demo probes, a parser
+  error fixture, and the new `lib/core/regex.ny` module.
+
+### Changed
+- Reworked `./make` bootstrap/dependency discovery.
+- Reworked REPL input, paste, Unicode, delete, especially for Windows `cmd`.
+- Reworked compiler/runtime/Vulkan internals around raw ints..
 
 ## [0.4.2] - 2026-05-31
 
