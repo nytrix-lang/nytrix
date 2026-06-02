@@ -14,6 +14,13 @@ use std.os.sound.backend.shared as backend_shared
    #include <pulse/simple.h> as "pa_"
    #link "libpulse.so"
    #include <pulse/error.h> as "pa_"
+} #else {
+   fn pa_simple_new(..._args): any { 0 }
+   fn pa_strerror(any: _err): any { 0 }
+   fn pa_simple_drain(..._args): int { -1 }
+   fn pa_simple_flush(..._args): int { -1 }
+   fn pa_simple_free(any: _pa): any { 0 }
+   fn pa_simple_write(..._args): int { -1 }
 } #endif
 
 fn _get_latency_ms(): int { common.env_int_clamped("NY_AUDIO_LATENCY_MS", 40, 10, 500) }

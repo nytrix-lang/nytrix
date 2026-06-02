@@ -113,7 +113,7 @@ fn _dict_find_off(dict: d, any: key): int {
 @returns_owned
 fn _dict_resize(dict: d): dict {
    def old_cap = __load64_idx(d, 8)
-   def new_cap = old_cap * 2
+   def new_cap = old_cap < 8 ? 8 : old_cap * 2
    mut nd = _dict_new(new_cap)
    mut i = 0
    while(i < old_cap){
@@ -129,7 +129,7 @@ fn dict_write(dict: d, any: key, any: val): dict {
    if(!is_dict(d)){ return d }
    def tc = __load64_idx(d, 0)
    def tca = __load64_idx(d, 8)
-   if(tc * 3 > tca * 2){
+   if((tc + 1) * 2 > tca){
       mut nd = _dict_resize(d)
       return dict_write(nd, key, val)
    }

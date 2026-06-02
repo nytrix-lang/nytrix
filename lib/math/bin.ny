@@ -286,63 +286,24 @@ fn _pow2_32(int: n): int {
 }
 
 fn _u32(int: x): int {
-   def m = 4294967296
-   mut v = x % m
-   if(v < 0){ v += m }
-   v
+   x & 4294967295
 }
 
 fn _and32(int: a, int: b): int {
-   mut aa = _u32(a)
-   mut bb = _u32(b)
-   mut bit = 1
-   mut out = 0
-   mut i = 0
-   while(i < 32){
-      if((aa % 2) == 1 && (bb % 2) == 1){ out += bit }
-      aa /= 2
-      bb /= 2
-      bit *= 2
-      i += 1
-   }
-   out
+   (a & 4294967295) & (b & 4294967295)
 }
 
 fn _or32(int: a, int: b): int {
-   mut aa = _u32(a)
-   mut bb = _u32(b)
-   mut bit = 1
-   mut out = 0
-   mut i = 0
-   while(i < 32){
-      if((aa % 2) == 1 || (bb % 2) == 1){ out += bit }
-      aa /= 2
-      bb /= 2
-      bit *= 2
-      i += 1
-   }
-   out
+   (a & 4294967295) | (b & 4294967295)
 }
 
 fn _xor32(int: a, int: b): int {
-   mut aa = _u32(a)
-   mut bb = _u32(b)
-   mut bit = 1
-   mut out = 0
-   mut i = 0
-   while(i < 32){
-      if((aa % 2) != (bb % 2)){ out += bit }
-      aa /= 2
-      bb /= 2
-      bit *= 2
-      i += 1
-   }
-   out
+   (a & 4294967295) ^^ (b & 4294967295)
 }
 
-fn _not32(int: x): int { 4294967295 - _u32(x) }
+fn _not32(int: x): int { 4294967295 - (x & 4294967295) }
 
-fn _add32(int: a, int: b): int { _u32(a + b) }
+fn _add32(int: a, int: b): int { (a + b) & 4294967295 }
 
 fn _lshr32(int: x, int: n): int {
    if(n <= 0){ return _u32(x) }

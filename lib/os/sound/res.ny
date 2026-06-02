@@ -18,16 +18,19 @@ use std.os.sound.source
 #linux {
    #link "libsndfile.so"
    #include <sndfile.h> as "sf_"
-} #elif windows {
-   #link "libsndfile-1.lib"
-   #include <sndfile.h> as "sf_"
-} #elif macos {
-   #link "libsndfile.dylib"
-   #include <sndfile.h> as "sf_"
+} #else {
+   fn sf_open(any: _path, int: _mode, any: _info): any { 0 }
+   fn sf_error(any: _sf): int { 0 }
+   fn sf_error_number(int: _errnum): any { 0 }
+   fn sf_close(any: _sf): int { 0 }
+   fn sf_read_short(any: _sf, any: _ptr, int: _items): int { 0 }
 } #endif
 def SFM_READ = 0x10
 
-fn _sf_available(): bool { "Checks whether libsndfile is available(linked via #include)." true }
+fn _sf_available(): bool {
+   "Checks whether libsndfile is available(linked via #include)."
+   #linux { true } #else { false } #endif
+}
 
 fn _decode_sf(any: data): any {
    if(!_sf_available()){ return 0 }
