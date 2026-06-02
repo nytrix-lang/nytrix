@@ -173,7 +173,6 @@ fn _term_print_startup_failure(int: flags): any {
    if(requested.len > 0){ _term_diag("NY_UI_BACKEND", requested) }
    def x11_surface = common.env_trim("NY_UI_X11_VK_SURFACE")
    if(x11_surface.len > 0){ _term_diag("NY_UI_X11_VK_SURFACE", x11_surface) }
-   eprint(_term_color("90", "  hint: try NY_UI_BACKEND=x11 or NY_UI_X11_VK_SURFACE=xlib if your compositor rejects the first surface path."))
    0
 }
 
