@@ -131,7 +131,7 @@ fn test_remote_fetch(){
    def n = text.len
    print(f"Fetched URL: {url}, length: {n}")
    if(n < 10){
-      print(f"DEBUG: fetch returned: '{text}'")
+      print(f"fetch returned: '{text}'")
       panic(f"Failed to fetch {url} or content too short.")
    }
    print("Fetched content preview:")

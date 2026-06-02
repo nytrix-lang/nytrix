@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -398,6 +399,25 @@ def run_capture(cmd: list[str] | str, *, shell: bool = False) -> subprocess.Comp
 def which(name: str) -> str:
     return shutil.which(name) or ""
 
+def configure_macos_tool_path() -> None:
+    if host_os() != "macos":
+        return
+    current = os.environ.get("PATH", "")
+    seen = {p for p in current.split(os.pathsep) if p}
+    extra: list[str] = []
+    for path in (
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        Path("/opt/homebrew/sbin"),
+        Path("/usr/local/sbin"),
+    ):
+        s = str(path)
+        if path.exists() and s not in seen:
+            extra.append(s)
+            seen.add(s)
+    if extra:
+        os.environ["PATH"] = os.pathsep.join([*extra, current] if current else extra)
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = (os.environ.get(name) or "").strip().lower()
     if not raw:
@@ -417,10 +437,6 @@ def _pkg_exists(name: str) -> bool:
 def _optional_dep_exists(name: str) -> bool:
     if _pkg_exists(name):
         return True
-    if name == "fplll":
-        return bool(which("fplll"))
-    if name == "pari":
-        return bool(which("gp"))
     if name == "z3":
         return bool(which("z3"))
     return False
@@ -429,7 +445,7 @@ def _gmp_available() -> bool:
     env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
     env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
     if host_os() == "windows":
-        if env_inc and env_lib and (Path(env_inc) / "gmp.h").exists() and Path(env_lib).exists():
+        if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
             return True
         if _windows_find_vcpkg_gmp(_windows_vcpkg_root()) or _windows_find_msys2_gmp():
             return True
@@ -534,9 +550,6 @@ def _optional_std_dep_checks() -> list[tuple[str, str]]:
         ("wayland-cursor", "Wayland cursor"),
         ("xkbcommon", "keyboard handling"),
         ("vulkan", "Vulkan renderer"),
-        ("fplll", "fplll / std.math.crypto.lattice native CLI backend"),
-        ("flint", "FLINT / std.math.backends algebra backend"),
-        ("pari", "PARI/GP / std.math.backends number theory backend"),
         ("z3", "Z3 / std.math.smt backend"),
     ]
 
@@ -571,11 +584,6 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
             "libwayland-dev",
             "libxkbcommon-dev",
             "libvulkan-dev",
-            "fplll-tools",
-            "libfplll-dev",
-            "libflint-dev",
-            "pari-gp",
-            "libpari-dev",
             "libz3-dev",
         ]
     if distro in ("arch", "manjaro") or "arch" in like:
@@ -601,9 +609,6 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
             "wayland",
             "libxkbcommon",
             "vulkan-headers",
-            "fplll",
-            "flint",
-            "pari",
             "z3",
         ]
     if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
@@ -629,9 +634,6 @@ def _linux_optional_std_packages(distro: str, like: str) -> list[str]:
             "wayland-devel",
             "libxkbcommon-devel",
             "vulkan-loader-devel",
-            "fplll-devel",
-            "flint-devel",
-            "pari-devel",
             "z3-devel",
         ]
     return []
@@ -699,9 +701,6 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
                 "libsndfile",
                 "jack",
                 "molten-vk",
-                "fplll",
-                "flint",
-                "pari",
                 "z3",
             ]
         )
@@ -739,10 +738,235 @@ def _windows_run_install(cmdline: str) -> None:
         return
     raise SystemExit(f"Dependency install failed: {cmdline}")
 
+def _windows_deps_provider() -> str:
+    raw = (os.environ.get("NYTRIX_WINDOWS_DEPS_PROVIDER") or "msys2").strip().lower()
+    if raw in ("native", "system", "choco", "winget"):
+        return "native"
+    return "msys2"
+
+def _windows_env_path(raw: str) -> Path:
+    raw = (raw or "").strip().strip('"')
+    if not raw:
+        return Path()
+    if platform.system() == "Windows" and raw.startswith("/") and not raw.startswith("//"):
+        cands = [which("cygpath"), r"C:\msys64\usr\bin\cygpath.exe", r"C:\tools\msys64\usr\bin\cygpath.exe"]
+        for cand in cands:
+            if not cand or not Path(cand).exists():
+                continue
+            res = run_capture([cand, "-w", raw])
+            if res.returncode == 0 and res.stdout.strip():
+                return Path(res.stdout.strip().splitlines()[0])
+        parts = raw.strip("/").split("/", 1)
+        if parts and parts[0].lower() in ("ucrt64", "clang64", "mingw64", "clangarm64"):
+            p = Path(r"C:\msys64") / parts[0]
+            if len(parts) > 1:
+                p = p / parts[1]
+            return p
+    return Path(raw)
+
+def _prepend_env_path(name: str, value: Path) -> None:
+    if not value:
+        return
+    text = _windows_cmake_path(value) if name in ("CMAKE_PREFIX_PATH", "PKG_CONFIG_PATH") else str(value)
+    os.environ[name] = prepend_path_value(os.environ.get(name, ""), text)
+
+def _windows_cmake_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+def _windows_tool_path(bin_dir: Path, name: str) -> Path | None:
+    names = [name] if name.endswith(".exe") else [f"{name}.exe", name]
+    for item in names:
+        p = bin_dir / item
+        if p.exists():
+            return p
+    return None
+
+def _windows_is_msys2_shell() -> bool:
+    return bool((os.environ.get("MSYSTEM") or os.environ.get("MSYSTEM_PREFIX") or os.environ.get("MINGW_PREFIX") or "").strip())
+
+def _windows_msys2_system() -> str:
+    raw = (os.environ.get("NYTRIX_MSYS2_SYSTEM") or os.environ.get("MSYSTEM") or "").strip().upper()
+    valid = {"UCRT64", "CLANG64", "MINGW64", "CLANGARM64"}
+    if raw in valid:
+        return raw
+    machine = platform.machine().lower()
+    return "CLANGARM64" if machine in ("arm64", "aarch64") else "UCRT64"
+
+def _windows_msys2_layout() -> tuple[str, str]:
+    system = _windows_msys2_system()
+    layouts = {
+        "UCRT64": ("ucrt64", "mingw-w64-ucrt-x86_64"),
+        "CLANG64": ("clang64", "mingw-w64-clang-x86_64"),
+        "MINGW64": ("mingw64", "mingw-w64-x86_64"),
+        "CLANGARM64": ("clangarm64", "mingw-w64-clang-aarch64"),
+    }
+    return layouts.get(system, layouts["UCRT64"])
+
+def _windows_msys2_root_candidates() -> list[Path]:
+    raw: list[str] = []
+    for key in ("NYTRIX_MSYS2_ROOT", "MSYS2_ROOT"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            raw.append(value)
+    for key in ("MSYSTEM_PREFIX", "MINGW_PREFIX"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            prefix = _windows_env_path(value)
+            if prefix.name.lower() in ("ucrt64", "clang64", "mingw64", "clangarm64"):
+                raw.append(str(prefix.parent))
+    raw.extend([r"C:\msys64", r"C:\tools\msys64"])
+    out: list[Path] = []
+    seen: set[str] = set()
+    for item in raw:
+        p = _windows_env_path(item)
+        if not p:
+            continue
+        key = str(p).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+def _windows_find_msys2_root() -> Path | None:
+    for root in _windows_msys2_root_candidates():
+        if (root / "usr" / "bin" / "bash.exe").exists() or (root / "usr" / "bin" / "bash").exists():
+            return root
+    return None
+
+def _windows_bash_has_pacman(bash: Path) -> bool:
+    probe = (
+        "command -v pacman >/dev/null 2>&1 && "
+        "{ [ -n \"${MSYSTEM:-}\" ] || uname -o 2>/dev/null | grep -Eiq 'msys|mingw|cygwin'; }"
+    )
+    return run_capture([str(bash), "-lc", probe]).returncode == 0
+
+def _windows_is_wsl_bash(path: Path) -> bool:
+    p = str(path).replace("/", "\\").lower()
+    return p.endswith("\\windows\\system32\\bash.exe") or p.endswith("\\windows\\sysnative\\bash.exe")
+
+def _windows_find_msys2_bash() -> Path | None:
+    cands: list[Path] = []
+    for root in _windows_msys2_root_candidates():
+        cands.append(root / "usr" / "bin" / "bash.exe")
+        cands.append(root / "usr" / "bin" / "bash")
+    path_bash = which("bash")
+    if path_bash:
+        bash = Path(path_bash)
+        if not _windows_is_wsl_bash(bash):
+            cands.append(bash)
+    seen: set[str] = set()
+    for bash in cands:
+        key = str(bash).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if not bash.exists():
+            continue
+        if _windows_bash_has_pacman(bash):
+            return bash
+    return None
+
+def _windows_install_msys2_base() -> None:
+    if _windows_find_msys2_bash():
+        return
+    if _windows_is_msys2_shell():
+        raise SystemExit("MSYS2 shell detected, but pacman was not found. Reinstall MSYS2 or run from a UCRT64/CLANG64 shell.")
+    attempted: list[str] = []
+    if _windows_cmd_exists("winget") or which("winget"):
+        cmd = (
+            "winget install -e --id MSYS2.MSYS2 --accept-source-agreements "
+            "--accept-package-agreements --disable-interactivity"
+        )
+        attempted.append(cmd)
+        try:
+            step("deps: winget install MSYS2")
+            _windows_run_install(cmd)
+        except SystemExit:
+            pass
+    if not _windows_find_msys2_bash() and (_windows_cmd_exists("choco") or which("choco")):
+        cmd = "choco install msys2 -y --no-progress --accept-license"
+        attempted.append(cmd)
+        try:
+            step("deps: choco install MSYS2")
+            _windows_run_install(cmd)
+        except SystemExit:
+            pass
+    if not _windows_find_msys2_bash():
+        hint = "; ".join(attempted) if attempted else "winget or choco was not found"
+        raise SystemExit(f"MSYS2 was not found and could not be installed automatically ({hint}). Install MSYS2 or set NYTRIX_MSYS2_ROOT.")
+
+def _windows_msys2_target_prefix() -> Path | None:
+    for key in ("MINGW_PREFIX", "MSYSTEM_PREFIX"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            prefix = _windows_env_path(value)
+            if (prefix / "bin").exists():
+                return prefix
+    subdir, _pkg_prefix = _windows_msys2_layout()
+    root = _windows_find_msys2_root()
+    if root:
+        return root / subdir
+    return None
+
+def _windows_configure_msys2_env(prefix: Path) -> None:
+    bin_dir = prefix / "bin"
+    if not bin_dir.exists():
+        return
+    os.environ["MSYSTEM_PREFIX"] = _windows_cmake_path(prefix)
+    os.environ["MINGW_PREFIX"] = _windows_cmake_path(prefix)
+    _prepend_env_path("PATH", bin_dir)
+    _prepend_env_path("CMAKE_PREFIX_PATH", prefix)
+    _prepend_env_path("PKG_CONFIG_PATH", prefix / "lib" / "pkgconfig")
+    _prepend_env_path("PKG_CONFIG_PATH", prefix / "share" / "pkgconfig")
+    os.environ.setdefault("ZLIB_ROOT", _windows_cmake_path(prefix))
+    cc = _windows_tool_path(bin_dir, "clang")
+    cxx = _windows_tool_path(bin_dir, "clang++")
+    if cc:
+        os.environ.setdefault("CC", str(cc))
+    if cxx:
+        os.environ.setdefault("CXX", str(cxx))
+    pkg_config = _windows_tool_path(bin_dir, "pkg-config") or _windows_tool_path(bin_dir, "pkgconf")
+    if pkg_config:
+        os.environ.setdefault("PKG_CONFIG", str(pkg_config))
+
+def _windows_msys2_packages_for(missing: list[str]) -> list[str]:
+    _subdir, pkg_prefix = _windows_msys2_layout()
+    m = set(missing)
+    pkgs: list[str] = []
+    if "llvm" in m or "clang" in m:
+        pkgs += [f"{pkg_prefix}-clang", f"{pkg_prefix}-llvm", f"{pkg_prefix}-zlib"]
+    if "cmake" in m:
+        pkgs.append(f"{pkg_prefix}-cmake")
+    if "ninja" in m:
+        pkgs.append(f"{pkg_prefix}-ninja")
+    if "pkg-config" in m:
+        pkgs.append(f"{pkg_prefix}-pkgconf")
+    if "gmp" in m:
+        pkgs.append(f"{pkg_prefix}-gmp")
+    if "git" in m:
+        pkgs.append("git")
+    return _dedupe(pkgs)
+
+def _windows_install_msys2_deps(missing: list[str]) -> None:
+    pkgs = _windows_msys2_packages_for(missing)
+    if not pkgs:
+        return
+    _windows_install_msys2_base()
+    bash = _windows_find_msys2_bash()
+    if not bash:
+        raise SystemExit("MSYS2 is installed, but pacman could not be launched.")
+    step("deps: msys2 pacman install")
+    pkg_args = " ".join(shlex.quote(p) for p in pkgs)
+    run([str(bash), "-lc", f"pacman -Sy --needed --noconfirm {pkg_args}"])
+    prefix = _windows_msys2_target_prefix()
+    if prefix:
+        _windows_configure_msys2_env(prefix)
+
 def _windows_install_cmds(missing: list[str]) -> list[str]:
     out: list[str] = []
     m = set(missing)
-    if "llvm" in m:
+    if "llvm" in m or "clang" in m:
         out.append(
             '(where clang >nul 2>nul || where clang-cl >nul 2>nul) || '
             '(choco install llvm -y --no-progress --accept-license || '
@@ -784,12 +1008,16 @@ def _windows_configure_llvm_env(llvm_root: Path) -> None:
         raise SystemExit(f"LLVM root is incomplete: {llvm_root} is missing llvm-c/Core.h or clang-c/Index.h")
     bin_dir = llvm_root / "bin"
     include_dir = llvm_root / "include"
-    os.environ["PATH"] = prepend_path_value(os.environ.get("PATH", ""), str(bin_dir))
+    if llvm_root.name.lower() in ("ucrt64", "clang64", "mingw64", "clangarm64"):
+        _windows_configure_msys2_env(llvm_root)
+    else:
+        _prepend_env_path("PATH", bin_dir)
+        _prepend_env_path("CMAKE_PREFIX_PATH", llvm_root)
     os.environ["LLVM_ROOT"] = str(llvm_root)
     os.environ["NYTRIX_LLVM_INCLUDE"] = str(include_dir)
     os.environ["NYTRIX_LLVM_HEADERS"] = str(include_dir)
-    cfg = bin_dir / "llvm-config.exe"
-    if cfg.exists():
+    cfg = _windows_tool_path(bin_dir, "llvm-config")
+    if cfg:
         os.environ["LLVM_CONFIG"] = str(cfg)
 
 def _windows_find_msys2_llvm() -> Path | None:
@@ -803,14 +1031,14 @@ def _windows_find_msys2_llvm() -> Path | None:
 def _windows_llvm_root_from_config(config: str) -> Path | None:
     if not config:
         return None
-    cfg = Path(config)
+    cfg = _windows_env_path(config)
     if cfg.name.lower().startswith("llvm-config") and cfg.parent.name.lower() == "bin":
         root = cfg.parent.parent
         if _windows_has_llvm_headers(root):
             return root
-    res = run_capture([config, "--prefix"])
+    res = run_capture([str(cfg), "--prefix"])
     if res.returncode == 0 and res.stdout.strip():
-        root = Path(res.stdout.strip().splitlines()[0])
+        root = _windows_env_path(res.stdout.strip().splitlines()[0])
         if _windows_has_llvm_headers(root):
             return root
     return None
@@ -819,7 +1047,14 @@ def _windows_ensure_llvm() -> None:
     if host_os() != "windows":
         return
     env_include = (os.environ.get("NYTRIX_LLVM_INCLUDE") or os.environ.get("NYTRIX_LLVM_HEADERS") or "").strip()
-    if env_include and (Path(env_include) / "llvm-c" / "Core.h").exists() and (Path(env_include) / "clang-c" / "Index.h").exists():
+    if env_include:
+        include_dir = _windows_env_path(env_include)
+        if (include_dir / "llvm-c" / "Core.h").exists() and (include_dir / "clang-c" / "Index.h").exists():
+            _windows_configure_llvm_env(include_dir.parent)
+            return
+    prefix = _windows_msys2_target_prefix()
+    if prefix and _windows_has_llvm_headers(prefix):
+        _windows_configure_llvm_env(prefix)
         return
     env_config = (os.environ.get("LLVM_CONFIG") or "").strip()
     root = _windows_llvm_root_from_config(env_config)
@@ -836,13 +1071,19 @@ def _windows_ensure_llvm() -> None:
         _windows_configure_llvm_env(root)
         return
     env_root = (os.environ.get("LLVM_ROOT") or "").strip()
-    if env_root and _windows_has_llvm_install(Path(env_root)):
-        _windows_configure_llvm_env(Path(env_root))
+    if env_root and _windows_has_llvm_install(_windows_env_path(env_root)):
+        _windows_configure_llvm_env(_windows_env_path(env_root))
         return
     program_files = Path(r"C:\Program Files\LLVM")
     if _windows_has_llvm_install(program_files):
         _windows_configure_llvm_env(program_files)
         return
+    if _env_flag("NYTRIX_AUTO_DEPS", True) and _windows_deps_provider() == "msys2":
+        _windows_install_msys2_deps(["llvm", "clang", "cmake", "ninja", "pkg-config", "gmp"])
+        root = _windows_find_msys2_llvm()
+        if root:
+            _windows_configure_llvm_env(root)
+            return
     if _windows_bootstrap_llvm_from_source():
         return
     raise SystemExit(
@@ -854,7 +1095,7 @@ def _windows_ensure_llvm() -> None:
 def _windows_vcpkg_root() -> Path:
     raw = (os.environ.get("VCPKG_ROOT") or "").strip()
     if raw:
-        return Path(raw)
+        return _windows_env_path(raw)
     return Path(r"C:\vcpkg")
 
 def _windows_find_vcpkg_gmp(vcpkg_root: Path) -> tuple[Path, Path] | None:
@@ -876,18 +1117,14 @@ def _windows_msys_prefixes() -> list[Path]:
         value = (os.environ.get(key) or "").strip()
         if value:
             raw.append(value)
-    raw.extend(
-        [
-            r"C:\msys64\ucrt64",
-            r"C:\msys64\clang64",
-            r"C:\msys64\mingw64",
-            r"C:\msys64\clangarm64",
-        ]
-    )
+    subdir, _pkg_prefix = _windows_msys2_layout()
+    for root in _windows_msys2_root_candidates():
+        raw.append(str(root / subdir))
+        raw.extend(str(root / d) for d in ("ucrt64", "clang64", "mingw64", "clangarm64"))
     out: list[Path] = []
     seen: set[str] = set()
     for item in raw:
-        p = Path(item)
+        p = _windows_env_path(item)
         key = str(p).lower()
         if key in seen:
             continue
@@ -913,6 +1150,11 @@ def _windows_find_msys2_gmp() -> tuple[Path, Path] | None:
         lib_dir = root / "lib"
         names = ["gmp.lib", "libgmp.lib"]
         if gnu_ok:
+            names.extend(["libgmp.dll.a", "libgmp.a"])
+        else:
+            # Plain cmd.exe still commonly uses the MSYS2/UCRT LLVM toolchain.
+            # Accept its GMP import/static libraries so users do not need to
+            # start inside an MSYS2 shell just to configure the build.
             names.extend(["libgmp.dll.a", "libgmp.a"])
         for lib_name in names:
             lib_path = lib_dir / lib_name
@@ -947,9 +1189,14 @@ def _windows_ensure_gmp() -> None:
         return
     env_inc = (os.environ.get("NYTRIX_GMP_INCLUDE") or os.environ.get("GMP_INCLUDE_DIR") or "").strip()
     env_lib = (os.environ.get("NYTRIX_GMP_LIBRARY") or os.environ.get("GMP_LIBRARY") or "").strip()
-    if env_inc and env_lib and (Path(env_inc) / "gmp.h").exists() and Path(env_lib).exists():
-        _windows_configure_gmp_env(Path(env_inc), Path(env_lib))
+    if env_inc and env_lib and (_windows_env_path(env_inc) / "gmp.h").exists() and _windows_env_path(env_lib).exists():
+        _windows_configure_gmp_env(_windows_env_path(env_inc), _windows_env_path(env_lib))
         return
+    if _windows_prefers_gnu_toolchain():
+        found = _windows_find_msys2_gmp()
+        if found:
+            _windows_configure_gmp_env(*found)
+            return
     vcpkg_root = _windows_vcpkg_root()
     found = _windows_find_vcpkg_gmp(vcpkg_root)
     if found:
@@ -1084,6 +1331,10 @@ def _windows_bootstrap_llvm_from_source() -> bool:
 def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) -> None:
     if host_os() == "macos":
         configure_macos_llvm_env()
+    if host_os() == "windows":
+        prefix = _windows_msys2_target_prefix()
+        if prefix:
+            _windows_configure_msys2_env(prefix)
     missing: list[str] = []
     for t in ("cmake", "clang"):
         if not which(t):
@@ -1105,6 +1356,7 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
             missing.append("git")
     if not _gmp_available():
         missing.append("gmp")
+    missing = _dedupe(missing)
 
     if not missing:
         _windows_ensure_llvm()
@@ -1169,11 +1421,16 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
         _install_optional_std_deps(force_optional_prompt)
         return
     if os_name == "windows":
-        cmds = _windows_install_cmds(missing)
-        if cmds:
-            log("DEPS", "installing Windows dependencies")
-            for cmd in cmds:
-                _windows_run_install(cmd)
+        if _windows_deps_provider() == "msys2":
+            if missing:
+                log("DEPS", "installing Windows dependencies with MSYS2/UCRT64")
+                _windows_install_msys2_deps(missing)
+        else:
+            cmds = _windows_install_cmds(missing)
+            if cmds:
+                log("DEPS", "installing Windows dependencies")
+                for cmd in cmds:
+                    _windows_run_install(cmd)
         _windows_ensure_llvm()
         _windows_ensure_gmp()
         _install_optional_std_deps(force_optional_prompt)
@@ -1270,6 +1527,7 @@ def resolve_test_jobs(cli_jobs: int) -> int:
 def configure_macos_llvm_env() -> None:
     if host_os() != "macos":
         return
+    configure_macos_tool_path()
     if os.environ.get("LLVM_CONFIG"):
         return
     prefixes = [
@@ -1298,27 +1556,99 @@ def configure_macos_llvm_env() -> None:
         return
 
 def cmake_build_dir(build_root: Path, kind: str) -> Path:
-    return build_root / ("debug" if kind == "debug" else "release")
+    if kind == "debug":
+        return build_root / "debug"
+    if kind == "release":
+        return build_root / "release"
+    return build_root / kind
+
+def cmake_flag_list(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if ";" in raw:
+        return raw
+    return ";".join(shlex.split(raw))
+
+def cmake_configure_complete(bdir: Path) -> bool:
+    return (
+        (bdir / "build.ninja").exists()
+        or (bdir / "Makefile").exists()
+        or any(bdir.glob("*.sln"))
+    )
 
 def cmake_configure(build_root: Path, kind: str) -> Path:
     configure_macos_llvm_env()
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     cache = bdir / "CMakeCache.txt"
+    host_cflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_CFLAGS") or "")
+    host_ldflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_LDFLAGS") or "")
+    cache_matches_flags = True
     if cache.exists():
+        cache_matches_flags = (
+            cmake_cache_value(bdir, "NYTRIX_HOST_CFLAGS", "") == host_cflags and
+            cmake_cache_value(bdir, "NYTRIX_HOST_LDFLAGS", "") == host_ldflags
+        )
+    if cache.exists() and cmake_configure_complete(bdir) and cache_matches_flags:
         boot_ok(f"cmake ({kind}) up to date (unchanged)")
         return bdir
+    if cache.exists() and not cmake_configure_complete(bdir):
+        cache.unlink(missing_ok=True)
+        shutil.rmtree(bdir / "CMakeFiles", ignore_errors=True)
     boot_step(f"cmake configure ({kind})")
-    cfg = "Debug" if kind == "debug" else "Release"
-    cmd = ["cmake", "-S", str(ROOT), "-B", str(bdir), f"-DCMAKE_BUILD_TYPE={cfg}", "-DNYTRIX_FAST_BUILD=ON"]
+    cfg = "Debug" if kind in ("debug", "asan", "ubsan") else "Release"
+    cmd = [
+        "cmake", "-S", str(ROOT), "-B", str(bdir),
+        f"-DCMAKE_BUILD_TYPE={cfg}", "-DNYTRIX_FAST_BUILD=ON",
+        f"-DNYTRIX_HOST_CFLAGS={host_cflags}",
+        f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
+    ]
+    if host_os() == "windows":
+        cc = (os.environ.get("CC") or "").strip()
+        cxx = (os.environ.get("CXX") or "").strip()
+        if cc:
+            cmd.append(f"-DCMAKE_C_COMPILER={cc}")
+        if cxx:
+            cmd.append(f"-DCMAKE_CXX_COMPILER={cxx}")
     if which("ninja"):
         cmd += ["-G", "Ninja"]
     run(cmd, quiet=QUIET_BOOTSTRAP)
     boot_ok(f"cmake ({kind}) configured")
     return bdir
 
+def windows_stop_locked_build_targets(bdir: Path, targets: list[str]) -> None:
+    if host_os() != "windows":
+        return
+    exes: list[Path] = []
+    for target in targets:
+        if target in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+            path = bdir / f"{target}.exe"
+            if path.exists():
+                exes.append(path.resolve())
+    if not exes:
+        return
+    quoted = []
+    for path in exes:
+        s = str(path).replace("'", "''")
+        quoted.append(f"'{s}'")
+    paths = "@(" + ",".join(quoted) + ")"
+    script = (
+        f"$paths = {paths}; "
+        "Get-Process -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.Path -and ($paths -contains $_.Path) } | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=str(ROOT),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
 def cmake_build(build_root: Path, kind: str, targets: list[str], jobs: int) -> Path:
     bdir = cmake_configure(build_root, kind)
+    windows_stop_locked_build_targets(bdir, targets)
     boot_step(f"build {kind}: {', '.join(targets)}")
     run(["cmake", "--build", str(bdir), "--target", *targets, "-j", str(max(1, jobs))], quiet=QUIET_BOOTSTRAP)
     boot_ok(f"build {kind}: {', '.join(targets)} complete")
@@ -1368,6 +1698,8 @@ def resolve_tool_bin(build_root: Path, kind: str, name: str) -> Path:
         cmake_build_dir(build_root, kind) / f"{name}{exe}",
         cmake_build_dir(build_root, "release") / f"{name}{exe}",
     ]
+    if name == "ny" and kind in ("debug", "asan", "ubsan"):
+        cands.insert(0, cmake_build_dir(build_root, kind) / f"ny_debug{exe}")
     for p in cands:
         if p.exists() and os.access(str(p), os.X_OK):
             return p
@@ -1408,7 +1740,7 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str]) -> int:
         env.setdefault("NYTRIX_STD_CACHE", "1")
         env.setdefault("NYTRIX_STD_BC_CACHE_AUTO", "1")
         env.setdefault("NYTRIX_JIT_CACHE", "1")
-        if not interactive_repl and _env_flag("NYTRIX_MAKE_EXEC_TOOL", True):
+        if host_os() != "windows" and not interactive_repl and _env_flag("NYTRIX_MAKE_EXEC_TOOL", True):
             try:
                 os.chdir(str(ROOT))
                 os.execvpe(launch, [launch, *args], env)
@@ -1589,6 +1921,57 @@ def print_help() -> None:
     ):
         print(f"  {c('32', opt)}{' ' * max(1, 34 - len(opt))}{desc}")
 
+def _set_env_value(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+def _append_flags(base: str | None, extra: str) -> str:
+    return ((base or "") + " " + extra).strip()
+
+def configure_command_environment(
+    cmd: str,
+    base_kind: str,
+    base_host_cflags: str | None,
+    base_host_ldflags: str | None,
+    base_skip_optional_gates: str | None,
+    base_test_cache: str | None,
+    base_test_cold: str | None,
+) -> str:
+    _set_env_value("NYTRIX_HOST_CFLAGS", base_host_cflags)
+    _set_env_value("NYTRIX_HOST_LDFLAGS", base_host_ldflags)
+    _set_env_value("NYTRIX_SKIP_OPTIONAL_GATES", base_skip_optional_gates)
+    _set_env_value("NYTRIX_TEST_CACHE", base_test_cache)
+    _set_env_value("NYTRIX_TEST_COLD", base_test_cold)
+    if cmd == "asan":
+        _set_env_value(
+            "NYTRIX_HOST_CFLAGS",
+            _append_flags(base_host_cflags, "-fsanitize=address -fno-omit-frame-pointer -g3"),
+        )
+        _set_env_value(
+            "NYTRIX_HOST_LDFLAGS",
+            _append_flags(base_host_ldflags, "-fsanitize=address"),
+        )
+        os.environ["NYTRIX_SKIP_OPTIONAL_GATES"] = "1"
+        os.environ["NYTRIX_TEST_CACHE"] = "0"
+        os.environ["NYTRIX_TEST_COLD"] = "1"
+        return "asan"
+    if cmd == "ubsan":
+        _set_env_value(
+            "NYTRIX_HOST_CFLAGS",
+            _append_flags(base_host_cflags, "-fsanitize=undefined -fno-omit-frame-pointer -g3 -fno-sanitize-recover=undefined"),
+        )
+        _set_env_value(
+            "NYTRIX_HOST_LDFLAGS",
+            _append_flags(base_host_ldflags, "-fsanitize=undefined"),
+        )
+        os.environ["NYTRIX_SKIP_OPTIONAL_GATES"] = "1"
+        os.environ["NYTRIX_TEST_CACHE"] = "0"
+        os.environ["NYTRIX_TEST_COLD"] = "1"
+        return "ubsan"
+    return base_kind
+
 def main() -> int:
     global COLOR, QUIET_BOOTSTRAP
     cmds, extra, requested_jobs, verbose, want_help, want_version, debug_kind, cli_color_mode, cli_bootstrap_logs = parse(sys.argv[1:])
@@ -1625,8 +2008,17 @@ def main() -> int:
 
     jobs, jobs_note = resolve_jobs(requested_jobs)
     boot_log("HOST", jobs_note)
+    base_host_cflags = os.environ.get("NYTRIX_HOST_CFLAGS")
+    base_host_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS")
+    base_skip_optional_gates = os.environ.get("NYTRIX_SKIP_OPTIONAL_GATES")
+    base_test_cache = os.environ.get("NYTRIX_TEST_CACHE")
+    base_test_cold = os.environ.get("NYTRIX_TEST_COLD")
 
     for cmd in cmds:
+        active_kind = configure_command_environment(
+            cmd, kind, base_host_cflags, base_host_ldflags,
+            base_skip_optional_gates, base_test_cache, base_test_cold,
+        )
         if cmd == "clean":
             shutil.rmtree(build_root, ignore_errors=True)
             log("CLEAN", f"removed {build_root}")
@@ -1654,7 +2046,7 @@ def main() -> int:
         elif cmd == "perf":
             targets = ["ny", "ny-perf"]
         if cmd not in ("uninstall",):
-            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, kind, targets):
+            if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
                 pass
             else:
                 repl_build_visible = cmd in ("ny", "repl")
@@ -1663,7 +2055,7 @@ def main() -> int:
                     QUIET_BOOTSTRAP = False
                     boot_notice("ny binary missing: compiling before launch")
                 try:
-                    cmake_build(build_root, kind, targets, jobs)
+                    cmake_build(build_root, active_kind, targets, jobs)
                     if repl_build_visible:
                         boot_notice("ny compiled; launching")
                 finally:
@@ -1673,25 +2065,25 @@ def main() -> int:
         if cmd in ("all", "bin", "std", "std_bc"):
             continue
         if cmd == "test":
-            rc = run_test(build_root, kind, requested_jobs, extra)
+            rc = run_test(build_root, active_kind, requested_jobs, extra)
         elif cmd == "fmt":
-            rc = run_tool(build_root, kind, "ny-fmt", extra)
+            rc = run_tool(build_root, active_kind, "ny-fmt", extra)
         elif cmd == "analyze":
-            rc = run_tool(build_root, kind, "ny-fmt", ["--analyze", *extra])
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--analyze", *extra])
         elif cmd == "check":
-            rc = run_tool(build_root, kind, "ny-fmt", ["--check", *extra])
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--check", *extra])
         elif cmd == "tidy":
-            rc = run_tool(build_root, kind, "ny-fmt", ["--tidy", *extra])
+            rc = run_tool(build_root, active_kind, "ny-fmt", ["--tidy", *extra])
         elif cmd == "perf":
-            rc = run_tool(build_root, kind, "ny-perf", extra)
+            rc = run_tool(build_root, active_kind, "ny-perf", extra)
         elif cmd == "docs":
-            std_file = str(cmake_build_dir(build_root, kind) / "std.ny")
+            std_file = str(cmake_build_dir(build_root, active_kind) / "std.ny")
             out_dir = str(build_root / "docs")
-            rc = run_tool(build_root, kind, "ny-doc", [std_file, "-o", out_dir, *extra])
+            rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
         elif cmd == "install":
-            rc = cmake_install(build_root, kind)
+            rc = cmake_install(build_root, active_kind)
         elif cmd == "uninstall":
-            manifest = cmake_build_dir(build_root, kind) / "install_manifest.txt"
+            manifest = cmake_build_dir(build_root, active_kind) / "install_manifest.txt"
             if not manifest.exists():
                 raise SystemExit(f"make: install manifest not found: {manifest}")
             failed = 0
@@ -1711,25 +2103,17 @@ def main() -> int:
             ok(f"uninstalled ({removed} removed, {failed} failed)")
             rc = 1 if failed else 0
         elif cmd == "repl":
-            rc = run_tool(build_root, kind, "ny", ["-i", *extra])
+            rc = run_tool(build_root, active_kind, "ny", ["-i", *extra])
         elif cmd == "ny":
-            rc = run_tool(build_root, kind, "ny", extra if extra else ["-i"])
+            rc = run_tool(build_root, active_kind, "ny", extra if extra else ["-i"])
         elif cmd == "gprof":
-            rc = run_tool(build_root, kind, "ny-perf", ["profile", *extra])
+            rc = run_tool(build_root, active_kind, "ny-perf", ["profile", *extra])
         elif cmd == "asan":
-            os.environ["NYTRIX_HOST_CFLAGS"] = ((os.environ.get("NYTRIX_HOST_CFLAGS", "") + " -fsanitize=address -fno-omit-frame-pointer -g3").strip())
-            os.environ["NYTRIX_HOST_LDFLAGS"] = ((os.environ.get("NYTRIX_HOST_LDFLAGS", "") + " -fsanitize=address").strip())
-            os.environ["NYTRIX_SKIP_OPTIONAL_GATES"] = "1"
-            os.environ["NYTRIX_TEST_CACHE"] = "0"
-            rc = run_test(build_root, kind, requested_jobs, extra)
+            rc = run_test(build_root, active_kind, requested_jobs, extra)
         elif cmd == "ubsan":
-            os.environ["NYTRIX_HOST_CFLAGS"] = ((os.environ.get("NYTRIX_HOST_CFLAGS", "") + " -fsanitize=undefined -fno-omit-frame-pointer -g3 -fno-sanitize-recover=undefined").strip())
-            os.environ["NYTRIX_HOST_LDFLAGS"] = ((os.environ.get("NYTRIX_HOST_LDFLAGS", "") + " -fsanitize=undefined").strip())
-            os.environ["NYTRIX_SKIP_OPTIONAL_GATES"] = "1"
-            os.environ["NYTRIX_TEST_CACHE"] = "0"
-            rc = run_test(build_root, kind, requested_jobs, extra)
+            rc = run_test(build_root, active_kind, requested_jobs, extra)
         elif cmd == "fuzz":
-            rc = run_tool(build_root, kind, "ny-test", ["--smoke"])
+            rc = run_tool(build_root, active_kind, "ny-test", ["--smoke"])
         elif cmd in ("optcheck", "fb"):
             raise SystemExit(f"make: command '{cmd}' is not yet ported to native C path")
         else:
