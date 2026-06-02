@@ -21,6 +21,7 @@
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
 #include <llvm-c/ExecutionEngine.h>
+#include <llvm-c/Support.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
@@ -66,6 +67,7 @@ extern _rpev g_panic_env_stack;
 
 const doc_list_t *g_repl_docs = NULL;
 static VEC(char *) g_repl_loading_modules = {0};
+static VEC(char *) g_repl_persistent_sources = {0};
 
 static std_mode_t g_repl_std_override = STD_MODE_DEFAULT;
 static int g_repl_has_std_override = 0;
@@ -128,6 +130,30 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                              int from_init);
 static int repl_print_namespace_help(doc_list_t *docs, const char *query);
 
+static void repl_free_persistent_sources(void) {
+  for (size_t i = 0; i < g_repl_persistent_sources.len; ++i)
+    free(g_repl_persistent_sources.data[i]);
+  vec_free(&g_repl_persistent_sources);
+}
+
+static void repl_debug_stage(const char *stage) {
+  if (!getenv("NYTRIX_REPL_DEBUG_STAGE"))
+    return;
+  fprintf(stderr, "[repl-stage] %s\n", stage ? stage : "?");
+  fflush(stderr);
+}
+
+static void repl_debug_ir(LLVMModuleRef mod) {
+  if (!mod || !getenv("NYTRIX_REPL_DEBUG_IR"))
+    return;
+  char *ir = LLVMPrintModuleToString(mod);
+  if (!ir)
+    return;
+  fprintf(stderr, "%s\n", ir);
+  fflush(stderr);
+  LLVMDisposeMessage(ir);
+}
+
 typedef struct {
   const char *name;
   const char *module;
@@ -150,16 +176,10 @@ static const repl_lazy_std_hint_t k_repl_lazy_std_hints[] = {
     {"is_prime", "std.math.nt"},   {"next_prime", "std.math.nt"},
     {"prev_prime", "std.math.nt"}, {NULL, NULL}};
 
-static const char *const k_repl_lazy_root_boot_modules[] = {
-    "std.core",
-    "std.os.prim",
-    NULL,
-};
-
 static void repl_enable_lazy_std_root(std_mode_t std_mode, doc_list_t *docs) {
+  (void)std_mode;
+  (void)docs;
   g_repl_std_root_lazy = 1;
-  for (int i = 0; k_repl_lazy_root_boot_modules[i]; ++i)
-    repl_ensure_module(k_repl_lazy_root_boot_modules[i], std_mode, docs);
 }
 
 static void repl_normalize_doc_query(const char *raw, char *out,
@@ -491,6 +511,233 @@ static int repl_rebuild_engine_from_persistent(std_mode_t std_mode,
   }
   free(saved);
   return 0;
+}
+
+static void repl_copy_str_list(ny_str_list *dst, const ny_str_list *src) {
+  if (!dst || !src)
+    return;
+  memset(dst, 0, sizeof(*dst));
+  for (size_t i = 0; i < src->len; i++)
+    vec_push(dst, src->data[i] ? ny_strdup(src->data[i]) : NULL);
+}
+
+static fun_sig repl_owned_fun_sig_copy(const fun_sig *src) {
+  fun_sig dst = *src;
+  dst.name = src->name ? ny_strdup(src->name) : NULL;
+  dst.module_name = src->module_name ? ny_strdup(src->module_name) : NULL;
+  dst.source_file = src->source_file ? ny_strdup(src->source_file) : NULL;
+  dst.link_name = src->link_name ? ny_strdup(src->link_name) : NULL;
+  dst.return_type = src->return_type ? ny_strdup(src->return_type) : NULL;
+  dst.abi_return_type =
+      src->abi_return_type ? ny_strdup(src->abi_return_type) : NULL;
+  dst.inferred_return_type =
+      src->inferred_return_type ? ny_strdup(src->inferred_return_type) : NULL;
+  repl_copy_str_list(&dst.param_types, &src->param_types);
+  dst.returns_borrow =
+      src->returns_borrow ? ny_strdup(src->returns_borrow) : NULL;
+  repl_copy_str_list(&dst.borrows, &src->borrows);
+  repl_copy_str_list(&dst.consumes, &src->consumes);
+  repl_copy_str_list(&dst.mutates, &src->mutates);
+  repl_copy_str_list(&dst.releases, &src->releases);
+  repl_copy_str_list(&dst.forgets, &src->forgets);
+  dst.stmt_t = NULL;
+  dst.owned = true;
+  return dst;
+}
+
+static layout_def_t *repl_owned_layout_copy(const layout_def_t *src) {
+  if (!src)
+    return NULL;
+  layout_def_t *dst = malloc(sizeof(*dst));
+  if (!dst)
+    return NULL;
+  *dst = *src;
+  dst->name = src->name ? ny_strdup(src->name) : NULL;
+  memset(&dst->fields, 0, sizeof(dst->fields));
+  for (size_t i = 0; i < src->fields.len; i++) {
+    layout_field_info_t field = src->fields.data[i];
+    field.name = field.name ? ny_strdup(field.name) : NULL;
+    field.type_name = field.type_name ? ny_strdup(field.type_name) : NULL;
+    vec_push(&dst->fields, field);
+  }
+  dst->stmt = NULL;
+  dst->heap_allocated = true;
+  return dst;
+}
+
+static void repl_rebind_persistent_symbols(codegen_t *cg) {
+  if (!cg || !cg->module)
+    return;
+  for (size_t i = 0; i < cg->fun_sigs.len; i++) {
+    fun_sig *sig = &cg->fun_sigs.data[i];
+    if (!sig->type || !sig->name || !*sig->name)
+      continue;
+    const char *link_name =
+        (sig->link_name && *sig->link_name) ? sig->link_name : sig->name;
+    LLVMValueRef fn = LLVMGetNamedFunction(cg->module, link_name);
+    if (!fn)
+      fn = LLVMAddFunction(cg->module, link_name, sig->type);
+    sig->value = fn;
+  }
+  for (size_t i = 0; i < cg->global_vars.len; i++) {
+    binding *b = &cg->global_vars.data[i];
+    if (!b->name || !*b->name)
+      continue;
+    LLVMTypeRef ty = cg->type_i64;
+    if (b->is_f64_slot)
+      ty = cg->type_f64;
+    else if (b->is_f32_slot)
+      ty = cg->type_f32;
+    LLVMValueRef gv = LLVMGetNamedGlobal(cg->module, b->name);
+    if (!gv) {
+      gv = LLVMAddGlobal(cg->module, ty, b->name);
+      LLVMSetLinkage(gv, LLVMExternalLinkage);
+    }
+    b->value = gv;
+  }
+}
+
+typedef struct repl_pending_fn_mapping_t {
+  LLVMValueRef fn;
+  uint64_t addr;
+  bool trampoline_defined;
+} repl_pending_fn_mapping_t;
+
+static repl_pending_fn_mapping_t *
+repl_collect_existing_jit_function_mappings(LLVMExecutionEngineRef ee,
+                                            LLVMModuleRef mod,
+                                            codegen_t *cg,
+                                            size_t *out_len) {
+  if (out_len)
+    *out_len = 0;
+  if (!ee || !mod || !out_len)
+    return NULL;
+  repl_pending_fn_mapping_t *items = NULL;
+  size_t len = 0;
+  size_t cap = 0;
+  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+       f = LLVMGetNextFunction(f)) {
+    if (!LLVMIsDeclaration(f))
+      continue;
+    const char *name = LLVMGetValueName(f);
+    if (!name || !*name || strncmp(name, "llvm.", 5) == 0)
+      continue;
+    bool std_decl = strncmp(name, "std.", 4) == 0;
+    if (!std_decl && !LLVMGetFirstUse(f))
+      continue;
+    const char *tail = strrchr(name, '.');
+    if (ny_jit_resolve_symbol(name) ||
+        (!std_decl && tail && tail[1] && ny_jit_resolve_symbol(tail + 1)) ||
+        strncmp(name, "__", 2) == 0 || strncmp(name, "rt_", 3) == 0 ||
+        strncmp(name, "ny_", 3) == 0 || strcmp(name, "_setjmp") == 0)
+      continue;
+    if (getenv("NYTRIX_REPL_DEBUG_STAGE")) {
+      fprintf(stderr, "[repl-stage] collect-fn %s\n", name);
+      fflush(stderr);
+    }
+    uint64_t addr = LLVMGetFunctionAddress(ee, name);
+    if (!addr && cg) {
+      const char *resolved = ny_resolve_used_module_export_alias(cg, name);
+      if (!resolved || !*resolved || strcmp(resolved, name) == 0)
+        resolved = resolve_import_alias(cg, name);
+      if (resolved && *resolved && strcmp(resolved, name) != 0) {
+        addr = LLVMGetFunctionAddress(ee, resolved);
+        if (addr && getenv("NYTRIX_REPL_DEBUG_STAGE")) {
+          fprintf(stderr, "[repl-stage] map-fn-alias %s -> %s\n", name,
+                  resolved);
+          fflush(stderr);
+        }
+      }
+    }
+    if (!addr)
+      continue;
+    LLVMAddSymbol(name, (void *)(uintptr_t)addr);
+    if (getenv("NYTRIX_REPL_DEBUG_STAGE")) {
+      fprintf(stderr, "[repl-stage] map-fn %s=0x%llx\n", name,
+              (unsigned long long)addr);
+      fflush(stderr);
+    }
+    if (len == cap) {
+      size_t next_cap = cap ? cap * 2 : 16;
+      repl_pending_fn_mapping_t *next =
+          realloc(items, next_cap * sizeof(*items));
+      if (!next) {
+        free(items);
+        *out_len = 0;
+        return NULL;
+      }
+      items = next;
+      cap = next_cap;
+    }
+    items[len++] = (repl_pending_fn_mapping_t){.fn = f, .addr = addr};
+  }
+  *out_len = len;
+  return items;
+}
+
+static bool repl_define_jit_function_trampoline(LLVMValueRef fn,
+                                                uint64_t addr) {
+  if (!fn || !addr || !LLVMIsDeclaration(fn))
+    return false;
+  LLVMModuleRef mod = LLVMGetGlobalParent(fn);
+  if (!mod)
+    return false;
+  LLVMTypeRef fty = LLVMGlobalGetValueType(fn);
+  if (!fty || LLVMGetTypeKind(fty) != LLVMFunctionTypeKind)
+    return false;
+  unsigned argc = LLVMCountParams(fn);
+  if (argc > 64)
+    return false;
+  LLVMContextRef ctx = LLVMGetModuleContext(mod);
+  LLVMBuilderRef b = LLVMCreateBuilderInContext(ctx);
+  LLVMBasicBlockRef bb =
+      LLVMAppendBasicBlockInContext(ctx, fn, "repl_jit_trampoline");
+  LLVMPositionBuilderAtEnd(b, bb);
+  LLVMValueRef args[64];
+  for (unsigned i = 0; i < argc; ++i)
+    args[i] = LLVMGetParam(fn, i);
+  LLVMValueRef raw =
+      LLVMConstInt(LLVMInt64TypeInContext(ctx), addr, false);
+  LLVMValueRef callee =
+      LLVMBuildIntToPtr(b, raw, LLVMTypeOf(fn), "repl_jit_target");
+  LLVMValueRef ret =
+      LLVMBuildCall2(b, fty, callee, args, argc, "repl_jit_result");
+  LLVMTypeRef ret_ty = LLVMGetReturnType(fty);
+  if (LLVMGetTypeKind(ret_ty) == LLVMVoidTypeKind)
+    LLVMBuildRetVoid(b);
+  else
+    LLVMBuildRet(b, ret);
+  LLVMDisposeBuilder(b);
+  return true;
+}
+
+static void repl_define_existing_jit_function_trampolines(
+    repl_pending_fn_mapping_t *items, size_t len) {
+#ifdef __APPLE__
+  if (!items)
+    return;
+  for (size_t i = 0; i < len; ++i) {
+    if (items[i].fn && items[i].addr)
+      items[i].trampoline_defined =
+          repl_define_jit_function_trampoline(items[i].fn, items[i].addr);
+  }
+#else
+  (void)items;
+  (void)len;
+#endif
+}
+
+static void repl_apply_existing_jit_function_mappings(
+    LLVMExecutionEngineRef ee, repl_pending_fn_mapping_t *items, size_t len) {
+  if (!ee || !items)
+    return;
+  for (size_t i = 0; i < len; i++) {
+    if (items[i].trampoline_defined)
+      continue;
+    if (items[i].fn && items[i].addr)
+      LLVMAddGlobalMapping(ee, items[i].fn,
+                           (void *)(uintptr_t)items[i].addr);
+  }
 }
 
 static int repl_print_help_query(doc_list_t *docs, const char *query) {
@@ -1080,12 +1327,68 @@ static int repl_source_has_bare_std_use_text(const char *src) {
   return 0;
 }
 
+static bool repl_program_is_stdlib_only(program_t *prog) {
+  if (!prog || prog->body.len == 0)
+    return false;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    stmt_t *s = prog->body.data[i];
+    if (!s || !ny_is_stdlib_tok(s->tok))
+      return false;
+  }
+  return true;
+}
+
+static void repl_push_user_use_module_unique(const char *module) {
+  if (!module || !*module)
+    return;
+  for (size_t i = 0; i < g_repl_cg.user_use_modules.len; ++i) {
+    if (g_repl_cg.user_use_modules.data[i] &&
+        strcmp(g_repl_cg.user_use_modules.data[i], module) == 0)
+      return;
+  }
+  vec_push(&g_repl_cg.user_use_modules, ny_strdup(module));
+}
+
+static void repl_preload_lazy_imports(const char *imports,
+                                      std_mode_t std_mode,
+                                      doc_list_t *docs) {
+  if (!imports || !*imports || std_mode == STD_MODE_NONE)
+    return;
+  const char *p = imports;
+  while (*p) {
+    while (*p && isspace((unsigned char)*p))
+      p++;
+    if (strncmp(p, "use", 3) != 0 ||
+        (p[3] && !isspace((unsigned char)p[3]))) {
+      while (*p && *p != '\n')
+        p++;
+      continue;
+    }
+    p += 3;
+    while (*p && isspace((unsigned char)*p))
+      p++;
+    const char *start = p;
+    while (*p && !isspace((unsigned char)*p) && *p != ';')
+      p++;
+    if (p > start) {
+      char *module = ny_strndup(start, (size_t)(p - start));
+      if (module) {
+        repl_ensure_module(module, std_mode, docs);
+        repl_push_user_use_module_unique(module);
+        free(module);
+      }
+    }
+    while (*p && *p != '\n')
+      p++;
+  }
+}
+
 static int repl_lazy_import_std_for_source(const char *src, std_mode_t std_mode,
                                            doc_list_t *docs,
                                            char **out_imports) {
   if (out_imports)
     *out_imports = NULL;
-  if (std_mode == STD_MODE_NONE || !docs || !src || !*src ||
+  if (std_mode == STD_MODE_NONE || std_mode == STD_MODE_FULL || !docs || !src || !*src ||
       !g_repl_std_root_lazy)
     return 0;
   char seen[128][64];
@@ -1661,6 +1964,29 @@ static void map_rt_syms_persistent(LLVMModuleRef mod,
           LLVMAddFunction(mod, syms[i].n, LLVMFunctionType(_i64_2, _p2, 3, 0)),
           syms[i].p);
     }
+    for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+         f = LLVMGetNextFunction(f)) {
+      if (!LLVMIsDeclaration(f))
+        continue;
+      const char *fn = LLVMGetValueName(f);
+      const char *tail = fn ? strrchr(fn, '.') : NULL;
+      if (tail && strcmp(tail + 1, syms[i].n) == 0)
+        LLVMAddGlobalMapping(ee, f, syms[i].p);
+    }
+  }
+  for (LLVMValueRef f = LLVMGetFirstFunction(mod); f;
+       f = LLVMGetNextFunction(f)) {
+    if (!LLVMIsDeclaration(f) || !LLVMGetFirstUse(f))
+      continue;
+    const char *name = LLVMGetValueName(f);
+    if (!name || !*name || strncmp(name, "llvm.", 5) == 0)
+      continue;
+    void *ptr = ny_jit_resolve_symbol(name);
+    const char *tail = strrchr(name, '.');
+    if (!ptr && tail && tail[1])
+      ptr = ny_jit_resolve_symbol(tail + 1);
+    if (ptr)
+      LLVMAddGlobalMapping(ee, f, ptr);
   }
 }
 
@@ -1835,14 +2161,25 @@ static void repl_shutdown_engine(void) {
   g_repl_ctx = NULL;
   g_repl_cg.ee = NULL;
   g_repl_cg.llvm_ctx_owned = false;
+  if (g_repl_cg.alloca_builder) {
+    LLVMDisposeBuilder(g_repl_cg.alloca_builder);
+    g_repl_cg.alloca_builder = NULL;
+  }
+  if (g_repl_cg.builder) {
+    LLVMDisposeBuilder(g_repl_cg.builder);
+    g_repl_cg.builder = NULL;
+  }
+  if (ee) {
+    LLVMDisposeExecutionEngine(ee);
+    module = NULL;
+    g_repl_cg.module = NULL;
+  } else if (module) {
+    LLVMDisposeModule(module);
+    g_repl_cg.module = NULL;
+  }
   codegen_dispose(&g_repl_cg);
   memset(&g_repl_cg, 0, sizeof(codegen_t));
 
-  if (ee) {
-    LLVMDisposeExecutionEngine(ee);
-  } else if (module) {
-    LLVMDisposeModule(module);
-  }
   if (ctx) {
     LLVMContextDispose(ctx);
   }
@@ -1852,6 +2189,7 @@ static void repl_shutdown_engine(void) {
     g_std_src_cached_persistent = NULL;
   }
   vec_free(&g_repl_loading_modules);
+  repl_free_persistent_sources();
 }
 
 static void repl_drop_engine_refs_on_exit(void) {
@@ -1865,6 +2203,7 @@ static void repl_drop_engine_refs_on_exit(void) {
     g_std_src_cached_persistent = NULL;
   }
   vec_free(&g_repl_loading_modules);
+  repl_free_persistent_sources();
 }
 
 static bool repl_stmt_defines_zero_arg_main(stmt_t *stmt) {
@@ -1983,9 +2322,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   }
   const char *use_inspect =
       (std_mode != STD_MODE_NONE && tty_in) ? "use std.core.inspect\n" : "";
-  const char *use_core = (std_mode != STD_MODE_NONE) ? "use std.core\n" : "";
-  const char *use_os_prim =
-      (std_mode != STD_MODE_NONE) ? "use std.os.prim\n" : "";
+  const char *use_core = "";
+  const char *use_os_prim = "";
   if (std_mode != STD_MODE_NONE &&
       repl_source_has_bare_std_use_text(eval_input))
     g_repl_std_root_lazy = 1;
@@ -2006,9 +2344,17 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       compile_input_owned = stripped;
       compile_input = compile_input_owned;
     }
+    if (repl_source_has_bare_std_use_text(eval_input) &&
+        *ltrim((char *)compile_input) == '\0') {
+      repl_enable_lazy_std_root(std_mode, docs);
+      free(compile_input_owned);
+      free(eval_input_owned);
+      return 0;
+    }
   }
   char *lazy_imports = NULL;
   repl_lazy_import_std_for_source(compile_input, std_mode, docs, &lazy_imports);
+  repl_preload_lazy_imports(lazy_imports, std_mode, docs);
   const char *use_lazy = lazy_imports ? lazy_imports : "";
   if (!from_init && g_repl_exec_trace_compile)
     repl_expand_source(eval_input, "<repl:trace>", g_repl_exec_trace_filter, 1,
@@ -2066,6 +2412,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   bool persistent = false;
   bool rebuild_persistent = false;
   if (!ps.had_error) {
+    repl_debug_stage("parsed");
     if (repl_program_has_bare_std_use(pr))
       g_repl_std_root_lazy = 1;
     if (std_mode != STD_MODE_NONE && tty_in && !show_an && pr->body.len > 0) {
@@ -2088,9 +2435,11 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     for (size_t i = 0; i < pr->body.len; ++i) {
       stmt_t *s = pr->body.data[i];
       if (s->kind == NY_S_USE && s->as.use.module) {
+        repl_debug_stage("preload-use");
         repl_ensure_module(s->as.use.module, std_mode, docs);
       }
     }
+    repl_debug_stage("preload-done");
     ny_tick_t t_preload1 = ny_ticks_now();
     LLVMModuleRef eval_mod =
         LLVMModuleCreateWithNameInContext("repl_eval", g_repl_ctx);
@@ -2101,6 +2450,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                               eval_builder);
     cg.is_repl = true;
     cg.auto_purity_infer = false;
+    bool embed_repl_std = false;
+#ifdef __APPLE__
+    embed_repl_std = (std_mode != STD_MODE_NONE && g_repl_cg.prog != NULL);
+#endif
+    cg.skip_stdlib = (std_mode != STD_MODE_NONE && !embed_repl_std);
+    if (embed_repl_std)
+      vec_push(&cg.extra_progs, g_repl_cg.prog);
     for (size_t i = 0; i < g_repl_cg.fun_sigs.len; i++) {
       fun_sig s = g_repl_cg.fun_sigs.data[i];
       s.owned = false;
@@ -2136,8 +2492,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       if (layout)
         vec_push(&cg.layouts, layout);
     }
-    for (size_t i = 0; i < g_repl_cg.use_modules.len; i++)
-      vec_push(&cg.use_modules, ny_strdup(g_repl_cg.use_modules.data[i]));
+    if (std_mode == STD_MODE_NONE) {
+      for (size_t i = 0; i < g_repl_cg.use_modules.len; i++)
+        vec_push(&cg.use_modules, ny_strdup(g_repl_cg.use_modules.data[i]));
+    }
     for (size_t i = 0; i < g_repl_cg.user_use_modules.len; i++) {
       vec_push(&cg.user_use_modules,
                ny_strdup(g_repl_cg.user_use_modules.data[i]));
@@ -2145,14 +2503,19 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     for (size_t i = 0; i < g_repl_cg.links.len; i++) {
       vec_push(&cg.links, ny_strdup(g_repl_cg.links.data[i]));
     }
+    repl_rebind_persistent_symbols(&cg);
     ny_tick_t t_codegen0 = ny_ticks_now();
+    repl_debug_stage("codegen-prepare");
     codegen_prepare(&cg);
+    repl_debug_stage("codegen-emit");
     codegen_emit(&cg);
     char fn_name[64];
     snprintf(fn_name, sizeof(fn_name), "__eval_%d", g_eval_count++);
+    repl_debug_stage("codegen-script");
     LLVMValueRef eval_fn = codegen_emit_script(&cg, fn_name);
     (void)eval_fn;
     ny_llvm_apply_host_attrs(eval_mod);
+    repl_debug_stage("codegen-done");
     if (!from_init && g_repl_exec_trace_compile && !cg.had_error &&
         g_repl_exec_trace_ir) {
       char *module_ir = LLVMPrintModuleToString(eval_mod);
@@ -2166,8 +2529,25 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       last_status = 1;
     } else if (g_repl_ee) {
       ny_tick_t t_jit0 = ny_ticks_now();
+      size_t existing_map_len = 0;
+      repl_pending_fn_mapping_t *existing_maps =
+          repl_collect_existing_jit_function_mappings(g_repl_ee, eval_mod,
+                                                      &cg, &existing_map_len);
+      repl_define_existing_jit_function_trampolines(existing_maps,
+                                                    existing_map_len);
+      repl_debug_ir(eval_mod);
+      repl_debug_stage("jit-apply-maps-pre");
+      repl_apply_existing_jit_function_mappings(g_repl_ee, existing_maps,
+                                                existing_map_len);
+      repl_debug_stage("jit-add-module");
       LLVMAddModule(g_repl_ee, eval_mod);
+      repl_debug_stage("jit-apply-maps");
+      repl_apply_existing_jit_function_mappings(g_repl_ee, existing_maps,
+                                                existing_map_len);
+      free(existing_maps);
+      repl_debug_stage("jit-map-rt");
       map_rt_syms_persistent(eval_mod, g_repl_ee);
+      repl_debug_stage("jit-register-symbols");
       register_jit_symbols(g_repl_ee, eval_mod, &cg);
       for (size_t i = 0; i < cg.interns.len; i++) {
         if (cg.interns.data[i].gv)
@@ -2178,8 +2558,10 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                                &cg.interns.data[i].data);
       }
       (void)cg.global_vars; /* skip GlobalValueAddress - MCJIT crash */
+      repl_debug_stage("jit-get-address");
       uint64_t addr = LLVMGetFunctionAddress(g_repl_ee, fn_name);
       if (addr) {
+        repl_debug_stage("jit-call");
         int interrupted = 0;
 #ifndef _WIN32
         int panicked = 0;
@@ -2204,6 +2586,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
           if (_setjmp(_pb2) == 0) {
             rt_trace_func(0);
             ((void (*)(void))addr)();
+            repl_debug_stage("jit-return");
           } else {
             panicked = 1;
           }
@@ -2253,20 +2636,15 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
             repl_update_docs(docs, eval_input);
           for (size_t i = 0; i < cg.fun_sigs.len; i++) {
             if (i >= g_repl_cg.fun_sigs.len) {
-              fun_sig s = cg.fun_sigs.data[i];
-              s.name = ny_strdup(s.name);
-              if (s.link_name)
-                s.link_name = ny_strdup(s.link_name);
-              if (s.return_type)
-                s.return_type = ny_strdup(s.return_type);
-              s.stmt_t = NULL;
-              s.owned = true;
+              fun_sig s = repl_owned_fun_sig_copy(&cg.fun_sigs.data[i]);
               vec_push(&g_repl_cg.fun_sigs, s);
             }
           }
           for (size_t i = 0; i < cg.global_vars.len; i++) {
             if (i >= g_repl_cg.global_vars.len) {
               binding b = cg.global_vars.data[i];
+              if (b.value)
+                LLVMSetLinkage(b.value, LLVMExternalLinkage);
               b.name = ny_strdup(b.name);
               b.owned = true;
               vec_push(&g_repl_cg.global_vars, b);
@@ -2351,8 +2729,11 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                 break;
               }
             }
-            if (!exists)
-              vec_push(&g_repl_cg.layouts, src);
+            if (!exists) {
+              layout_def_t *copy = repl_owned_layout_copy(src);
+              if (copy)
+                vec_push(&g_repl_cg.layouts, copy);
+            }
           }
           for (size_t i = 0; i < cg.use_modules.len; i++) {
             int exists = 0;
@@ -2415,10 +2796,14 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     cg.user_import_aliases.len = 0;
     cg.enums.len = 0;
     cg.layouts.len = 0;
+    cg.extra_progs.len = 0;
+    cg.extra_arenas.len = 0;
     cg.use_modules.len = 0;
     cg.user_use_modules.len = 0;
     cg.links.len = 0;
+    repl_debug_stage("cleanup-codegen");
     codegen_dispose(&cg);
+    repl_debug_stage("cleanup-codegen-done");
   } else {
     repl_print_error_snippet(eval_input, ps.cur.line, ps.cur.col);
     if (!from_init)
@@ -2431,9 +2816,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   if (persistent) {
     vec_push(&g_repl_cg.extra_progs, pr);
     vec_push(&g_repl_cg.extra_arenas, ps.arena);
+    vec_push(&g_repl_persistent_sources, body);
+    body = NULL;
   } else {
+    repl_debug_stage("cleanup-program");
     program_free(pr, ps.arena);
     free(pr);
+    repl_debug_stage("cleanup-program-done");
   }
   free(body);
   free(compile_input_owned);
@@ -2535,10 +2924,17 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (g_repl_opt_level > 3)
     g_repl_opt_level = 3;
   (void)opt_pipeline;
+#ifdef _WIN32
+  ny_readline_prepare_console();
+#endif
   const char *plain = getenv("NYTRIX_REPL_PLAIN");
   if (g_repl_plain || (plain && plain[0] != '0') || !isatty(STDOUT_FILENO)) {
     color_mode = 0;
   }
+#ifdef _WIN32
+  if (!ny_readline_vt_output_ok())
+    color_mode = 0;
+#endif
   std_mode_t std_mode =
       g_repl_has_std_override ? g_repl_std_override : STD_MODE_DEFAULT;
   if (!g_repl_has_std_override) {
@@ -2552,6 +2948,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   if (getenv("NYTRIX_REPL_NO_STD"))
     std_mode = STD_MODE_NONE;
+#ifdef __APPLE__
+  if (!g_repl_has_std_override && std_mode == STD_MODE_DEFAULT)
+    std_mode = STD_MODE_FULL;
+#endif
   g_repl_effective_mode = std_mode;
   doc_list_t docs = {0};
   doc_list_t *p_docs = NULL;
@@ -2612,6 +3012,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     printf("%sNytrix REPL%s %s(%s)%s - Type :help for commands\n",
            clr(NY_CLR_BOLD NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_GRAY),
            repl_std_mode_name(std_mode), clr(NY_CLR_RESET));
+    fflush(stdout);
   }
   char history_path[PATH_MAX] = {0};
   const char *home = getenv("HOME");

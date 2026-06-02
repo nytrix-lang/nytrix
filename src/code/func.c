@@ -479,6 +479,18 @@ static bool fn_has_param_named(const stmt_t *fn_stmt, const char *name, size_t l
   return false;
 }
 
+static char *codegen_strndup(codegen_t *cg, const char *s, size_t len) {
+  if (!s)
+    s = "";
+  if (cg && cg->arena)
+    return arena_strndup(cg->arena, s, len);
+  return ny_strndup(s, len);
+}
+
+static char *codegen_strdup(codegen_t *cg, const char *s) {
+  return codegen_strndup(cg, s ? s : "", s ? strlen(s) : 0);
+}
+
 static char *parse_single_param_contract_attr(codegen_t *cg, const stmt_t *fn_stmt,
                                               const attribute_t *attr, const char *spelling) {
   if (!cg || !fn_stmt || !attr)
@@ -502,7 +514,7 @@ static char *parse_single_param_contract_attr(codegen_t *cg, const stmt_t *fn_st
     cg->had_error = 1;
     return NULL;
   }
-  return ny_strndup(name, len);
+  return codegen_strndup(cg, name, len);
 }
 
 static void parse_param_contract_list_attr(codegen_t *cg, const stmt_t *fn_stmt,
@@ -530,7 +542,10 @@ static void parse_param_contract_list_attr(codegen_t *cg, const stmt_t *fn_stmt,
       cg->had_error = 1;
       continue;
     }
-    vec_push(out, ny_strndup(name, len));
+    if (cg && cg->arena)
+      vec_push_arena(cg->arena, out, codegen_strndup(cg, name, len));
+    else
+      vec_push(out, codegen_strndup(cg, name, len));
   }
 }
 
@@ -693,8 +708,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
           ny_diag_hint("supported accelerator targets: auto, nvptx, spirv, amdgpu, hsaco");
           cg->had_error = 1;
         } else {
-          free((void *)decl->attr_accel_target);
-          decl->attr_accel_target = ny_strndup(target, target_len);
+          decl->attr_accel_target = codegen_strndup(cg, target, target_len);
         }
       }
       decl->attr_accel = true;
@@ -815,7 +829,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   decl->attr_pure = is_pure;
   decl->attr_cache = is_cache;
   decl->is_extern = is_extern;
-  decl->link_name = link_name ? ny_strdup(link_name) : NULL;
+  decl->link_name = link_name ? codegen_strdup(cg, link_name) : NULL;
   if (is_pure) {
     decl->effect_contract_known = true;
     decl->effect_contract_mask = NY_FX_NONE;
@@ -854,7 +868,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     decl->attr_hot = true;
     if (!decl->attr_accel_target) {
       const char *env_target = getenv("NYTRIX_ACCEL_TARGET");
-      decl->attr_accel_target = ny_strdup((env_target && *env_target) ? env_target : "auto");
+      decl->attr_accel_target = codegen_strdup(cg, (env_target && *env_target) ? env_target : "auto");
     }
   }
   if (decl->attr_tailcall)
@@ -1422,13 +1436,53 @@ static void collect_assigned_names_stmt(stmt_t *s, assigned_name_list *out_names
   }
 }
 
+typedef struct type_scratch_t {
+  char **owned;
+  size_t len;
+  size_t cap;
+} type_scratch_t;
+
 typedef struct {
   const char **names;
   const char **types;
   int count;
+  type_scratch_t *scratch;
 } type_env_t;
 
 #define NY_FUNC_TYPE_ENV_MAX 64
+
+static const char *type_scratch_take(type_env_t *env, char *s) {
+  if (!s)
+    return NULL;
+  if (!env || !env->scratch) {
+    free(s);
+    return NULL;
+  }
+  type_scratch_t *scratch = env->scratch;
+  if (scratch->len == scratch->cap) {
+    size_t next_cap = scratch->cap ? scratch->cap * 2 : 16;
+    char **grown = realloc(scratch->owned, next_cap * sizeof(*scratch->owned));
+    if (!grown) {
+      free(s);
+      return NULL;
+    }
+    scratch->owned = grown;
+    scratch->cap = next_cap;
+  }
+  scratch->owned[scratch->len++] = s;
+  return s;
+}
+
+static void type_scratch_free(type_scratch_t *scratch) {
+  if (!scratch)
+    return;
+  for (size_t i = 0; i < scratch->len; i++)
+    free(scratch->owned[i]);
+  free(scratch->owned);
+  scratch->owned = NULL;
+  scratch->len = 0;
+  scratch->cap = 0;
+}
 
 static const char *env_lookup(const type_env_t *env, const char *name) {
   if (!env || !name)
@@ -1455,7 +1509,8 @@ static void env_push_type(type_env_t *env, const char *name, const char *type) {
   env->count++;
 }
 
-static char *func_type_make_result(const char *ok, const char *err) {
+static const char *func_type_make_result(type_env_t *env, const char *ok,
+                                         const char *err) {
   if (!ok || !*ok)
     ok = "any";
   if (!err || !*err)
@@ -1464,9 +1519,9 @@ static char *func_type_make_result(const char *ok, const char *err) {
   size_t err_len = strlen(err);
   char *out = malloc(ok_len + err_len + 11);
   if (!out)
-    return ny_strdup("Result");
+    return "Result";
   snprintf(out, ok_len + err_len + 11, "Result<%s, %s>", ok, err);
-  return out;
+  return type_scratch_take(env, out);
 }
 
 static const char *func_type_merge_result_arg(const char *a, const char *b) {
@@ -1518,19 +1573,19 @@ static const char *ast_infer_type(expr_t *e, const type_env_t *env) {
     if (leaf && e->as.call.args.len == 1 &&
         (strcmp(leaf, "ok") == 0 || strcmp(leaf, "__result_ok") == 0)) {
       const char *ok = ast_infer_type(e->as.call.args.data[0].val, env);
-      return func_type_make_result(ok ? ok : "any", "any");
+      return func_type_make_result((type_env_t *)env, ok ? ok : "any", "any");
     }
     if (leaf && e->as.call.args.len == 1 &&
         (strcmp(leaf, "err") == 0 || strcmp(leaf, "__result_err") == 0)) {
       const char *err = ast_infer_type(e->as.call.args.data[0].val, env);
-      return func_type_make_result("any", err ? err : "any");
+      return func_type_make_result((type_env_t *)env, "any", err ? err : "any");
     }
     if (leaf && e->as.call.args.len == 1 &&
         (strcmp(leaf, "unwrap") == 0 || strcmp(leaf, "__unwrap") == 0)) {
       const char *result = ast_infer_type(e->as.call.args.data[0].val, env);
       if (ny_generic_type_base_is(result, "Result")) {
         char *ok = ny_generic_type_arg_owned(result, 0);
-        return ok ? ok : "any";
+        return ok ? type_scratch_take((type_env_t *)env, ok) : "any";
       }
     }
   }
@@ -2019,7 +2074,7 @@ static void infer_param_types(stmt_t *fn, const char **param_types) {
   }
   const char *env_names[64];
   const char *env_types[64];
-  type_env_t env = {env_names, env_types, 0};
+  type_env_t env = {env_names, env_types, 0, NULL};
   for (int i = 0; i < nparam; i++) {
     if (param_types[i]) {
       env.names[env.count] = param_names[i];
@@ -2047,7 +2102,8 @@ static void infer_param_types(stmt_t *fn, const char **param_types) {
   }
 }
 
-static const char *infer_return_type_merge(const char *cur, const char *next);
+static const char *infer_return_type_merge(type_env_t *env, const char *cur,
+                                           const char *next);
 
 static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const char *cur,
                                           bool tail_position) {
@@ -2057,7 +2113,7 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
     const char *t = body->as.ret.value ? ast_infer_type(body->as.ret.value, env) : NULL;
     if (!t)
       return cur;
-    return infer_return_type_merge(cur, t);
+    return infer_return_type_merge(env, cur, t);
   }
   if (body->kind == NY_S_EXPR) {
     if (!tail_position)
@@ -2065,7 +2121,7 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
     const char *t = ast_infer_type(body->as.expr.expr, env);
     if (!ny_generic_type_base_is(t, "Result"))
       return cur;
-    return infer_return_type_merge(cur, t);
+    return infer_return_type_merge(env, cur, t);
   }
   if (body->kind == NY_S_VAR) {
     for (size_t i = 0; i < body->as.var.names.len; ++i) {
@@ -2098,7 +2154,7 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
   if (body->kind == NY_S_WHILE) {
     type_env_t body_env = *env;
     const char *r = infer_return_type_walk(body->as.whl.body, &body_env, NULL, false);
-    cur = infer_return_type_merge(cur, r);
+    cur = infer_return_type_merge(env, cur, r);
     if (cur && cur[0] == '?')
       return cur;
     if (body->as.whl.update)
@@ -2110,7 +2166,7 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
       cur = infer_return_type_walk(body->as.fr.init, env, cur, false);
     type_env_t body_env = *env;
     const char *r = infer_return_type_walk(body->as.fr.body, &body_env, NULL, false);
-    cur = infer_return_type_merge(cur, r);
+    cur = infer_return_type_merge(env, cur, r);
     if (cur && cur[0] == '?')
       return cur;
     if (body->as.fr.update)
@@ -2127,7 +2183,8 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
       if (ptr_type) {
         ptr_type[0] = '*';
         memcpy(ptr_type + 1, body->as.guard.type_name, n + 1);
-        env_push_type(env, body->as.guard.name, ptr_type);
+        env_push_type(env, body->as.guard.name,
+                      type_scratch_take(env, ptr_type));
       }
     }
     return cur;
@@ -2135,7 +2192,8 @@ static const char *infer_return_type_walk(stmt_t *body, type_env_t *env, const c
   return cur;
 }
 
-static const char *infer_return_type_merge(const char *cur, const char *next) {
+static const char *infer_return_type_merge(type_env_t *env, const char *cur,
+                                           const char *next) {
   if (!next)
     return cur;
   if (!cur)
@@ -2147,7 +2205,7 @@ static const char *infer_return_type_merge(const char *cur, const char *next) {
     char *next_err = ny_generic_type_arg_owned(next, 1);
     const char *ok = func_type_merge_result_arg(cur_ok, next_ok);
     const char *err = func_type_merge_result_arg(cur_err, next_err);
-    char *out = func_type_make_result(ok, err);
+    const char *out = func_type_make_result(env, ok, err);
     free(cur_ok);
     free(cur_err);
     free(next_ok);
@@ -2159,7 +2217,7 @@ static const char *infer_return_type_merge(const char *cur, const char *next) {
   return cur;
 }
 
-static const char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
+static char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
   if (fn->as.fn.return_type)
     return NULL;
   int nparam = (int)fn->as.fn.params.len;
@@ -2174,15 +2232,16 @@ static const char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
     return NULL;
   const char *env_names[NY_FUNC_TYPE_ENV_MAX];
   const char *env_types[NY_FUNC_TYPE_ENV_MAX];
-  type_env_t env = {env_names, env_types, 0};
+  type_scratch_t scratch = {0};
+  type_env_t env = {env_names, env_types, 0, &scratch};
   for (int i = 0; i < nparam; i++) {
     const char *t = param_types[i] ? param_types[i] : fn->as.fn.params.data[i].type;
     env_push_type(&env, fn->as.fn.params.data[i].name, t);
   }
   const char *ret = infer_return_type_walk(fn->as.fn.body, &env, NULL, true);
-  if (ret && ret[0] != '?')
-    return ret;
-  return NULL;
+  char *out = (ret && ret[0] != '?') ? ny_strdup(ret) : NULL;
+  type_scratch_free(&scratch);
+  return out;
 }
 
 static bool fn_is_tiny_int_helper(const stmt_t *fn, const char *name) {
@@ -2260,7 +2319,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
       rty = sema->resolved_return_type;
     LLVMTypeRef ft = LLVMFunctionType(rty, pt, (unsigned)total_args, 0);
     f = LLVMAddFunction(cg->module, name, ft);
-    LLVMSetSection(f, origin_section);
+    if (!cg->is_repl)
+      LLVMSetSection(f, origin_section);
     fun_sig sig = {.name = ny_strdup(name),
                    .module_name = cg->current_module_name ? ny_strdup(cg->current_module_name) : NULL,
                    .type = ft,
@@ -2293,7 +2353,11 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
     /* Keep the original section tag if present; otherwise tag based on origin. */
     const char *sec = LLVMGetSection(f);
 #ifdef __APPLE__
-    if (sec && strcmp(sec, "ny.std") == 0)
+    if (cg->is_repl) {
+      /* REPL MCJIT snippets on Mach-O can fault when calling between custom
+         sections. Let LLVM place interactive functions in the default text
+         section; normal builds still keep std/user origin tags. */
+    } else if (sec && strcmp(sec, "ny.std") == 0)
       LLVMSetSection(f, "__TEXT,ny_std");
     else if (sec && strcmp(sec, "ny.user") == 0)
       LLVMSetSection(f, "__TEXT,ny_user");
@@ -2353,9 +2417,6 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   memset(&scopes[fd], 0, sizeof(scopes[fd]));
   size_t param_offset = 0;
   if (!fn->as.fn.attr_naked) {
-    bool raw_typed_helper_params =
-        ny_fast_path_enabled(cg, "NYTRIX_RAW_INT_HELPERS") &&
-        fn_is_tiny_int_helper(fn, name);
     if (captures) {
       param_offset = 1;
       unsigned actual_params = LLVMCountParams(f);
@@ -2542,14 +2603,29 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
         const char *ptype = fn->as.fn.params.data[i].type;
         if (!ptype && is_inferred_int)
           ptype = "int";
+        sema_func_t *param_sema =
+            (fn->sema_kind == NY_STMT_SEMA_FUNC) ? (sema_func_t *)fn->sema : NULL;
+        uint8_t mono_kind = (param_sema && i < NY_MONO_MAX_ARITY)
+                                ? param_sema->mono_param_kinds[i]
+                                : 0;
+        bool mono_list_param = mono_kind == NY_MONO_TYPE_LIST ||
+                               mono_kind == NY_MONO_TYPE_F64_LIST;
         scope_bind(cg, scopes, fd, param_name, slot, fn, true, ptype, true);
         binding *b = &scopes[fd].vars.data[scopes[fd].vars.len - 1];
         if (ptype && strcmp(ptype, "int") == 0) {
           b->is_int_slot = true;
-          if (ny_env_enabled("NYTRIX_FAST_INT_PARAMS") || raw_typed_helper_params) {
-            b->raw_int_value = build_alloca(cg, "raw.param.int", cg->type_i64);
-            if (b->raw_int_value && param_val)
-              ny_store(cg, b->raw_int_value, ny_untag_int(cg, param_val));
+          b->raw_int_value = build_alloca(cg, "raw.param.int", cg->type_i64);
+          if (b->raw_int_value && param_val)
+            ny_store(cg, b->raw_int_value, ny_untag_int(cg, param_val));
+        }
+        if ((ptype && ny_type_is(ptype, "list")) || mono_list_param) {
+          b->is_list_storage = true;
+          b->is_f64_list_storage = mono_kind == NY_MONO_TYPE_F64_LIST;
+          if (param_sema && i < NY_MONO_MAX_ARITY &&
+              param_sema->mono_param_list_len_min_known[i]) {
+            b->has_list_len_min = true;
+            b->list_len_min_raw =
+                param_sema->mono_param_list_len_min_raw[i];
           }
         }
         if (cg->debug_symbols && cg->di_builder && slot) {
@@ -2560,6 +2636,13 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
         const char *ptype = fn->as.fn.params.data[i].type;
         if (!ptype && is_inferred_int)
           ptype = "int";
+        sema_func_t *param_sema =
+            (fn->sema_kind == NY_STMT_SEMA_FUNC) ? (sema_func_t *)fn->sema : NULL;
+        uint8_t mono_kind = (param_sema && i < NY_MONO_MAX_ARITY)
+                                ? param_sema->mono_param_kinds[i]
+                                : 0;
+        bool mono_list_param = mono_kind == NY_MONO_TYPE_LIST ||
+                               mono_kind == NY_MONO_TYPE_F64_LIST;
         scope_bind(cg, scopes, fd, param_name, param_val, fn, true, ptype, false);
         binding *b = &scopes[fd].vars.data[scopes[fd].vars.len - 1];
         if (ptype && strcmp(ptype, "int") == 0)
@@ -2570,6 +2653,16 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
           b->raw_int_value = raw_int_param_val ? raw_int_param_val : ny_untag_int(cg, param_val);
         else if (ptype && strcmp(ptype, "int") == 0 && raw_int_param_val)
           b->raw_int_value = raw_int_param_val;
+        if ((ptype && ny_type_is(ptype, "list")) || mono_list_param) {
+          b->is_list_storage = true;
+          b->is_f64_list_storage = mono_kind == NY_MONO_TYPE_F64_LIST;
+          if (param_sema && i < NY_MONO_MAX_ARITY &&
+              param_sema->mono_param_list_len_min_known[i]) {
+            b->has_list_len_min = true;
+            b->list_len_min_raw =
+                param_sema->mono_param_list_len_min_raw[i];
+          }
+        }
         if (cg->debug_symbols && cg->di_builder && param_val) {
           codegen_debug_variable(cg, param_name, ptype, param_val, fn->tok, true,
                                  (int)i + 1 + (int)param_offset, false);
@@ -2808,8 +2901,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       const char *inferred_types[16] = {0};
       if (!sig.return_type && s->as.fn.params.len <= 16) {
         infer_param_types(s, inferred_types);
-        const char *inferred_ret = infer_fn_return_type(s, inferred_types);
-        sig.inferred_return_type = inferred_ret ? ny_strdup(inferred_ret) : NULL;
+        char *inferred_ret = infer_fn_return_type(s, inferred_types);
+        sig.inferred_return_type = inferred_ret;
       } else {
         sig.inferred_return_type = NULL;
       }
@@ -2915,11 +3008,12 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
   } else if (s->kind == NY_S_ENUM) {
     enum_def_t *enu = arena_alloc(cg->arena, sizeof(enum_def_t));
     memset(enu, 0, sizeof(enum_def_t));
-    enu->name = ny_strdup(s->as.enu.name);
+    enu->name = codegen_strdup(cg, s->as.enu.name);
     enu->stmt = s;
     enu->adt_tag_base = 200000 + (int64_t)cg->enums.len * 1024;
     for (size_t i = 0; i < s->as.enu.type_params.len; i++)
-      vec_push(&enu->type_params, ny_strdup(s->as.enu.type_params.data[i]));
+      vec_push_arena(cg->arena, &enu->type_params,
+                     codegen_strdup(cg, s->as.enu.type_params.data[i]));
     cg->current_enum_val = 0;
     for (size_t i = 0; i < cg->enums.len; i++) {
       if (strcmp(cg->enums.data[i]->name, enu->name) == 0) {
@@ -2929,14 +3023,14 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     for (size_t i = 0; i < s->as.enu.items.len; i++) {
       stmt_enum_item_t *item = &s->as.enu.items.data[i];
       enum_member_def_t member = {0};
-      member.name = ny_strdup(item->name);
+      member.name = codegen_strdup(cg, item->name);
       member.has_payload = item->fields.len > 0;
       if (member.has_payload)
         enu->has_payload = true;
       for (size_t j = 0; j < item->fields.len; j++) {
         enum_field_def_t field = {
-            .name = ny_strdup(item->fields.data[j].name),
-            .type_name = ny_strdup(item->fields.data[j].type_name),
+            .name = codegen_strdup(cg, item->fields.data[j].name),
+            .type_name = codegen_strdup(cg, item->fields.data[j].type_name),
         };
         for (size_t k = 0; k < member.fields.len; k++) {
           if (strcmp(member.fields.data[k].name, field.name) == 0) {
@@ -2945,7 +3039,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
             cg->had_error = 1;
           }
         }
-        vec_push(&member.fields, field);
+        vec_push_arena(cg->arena, &member.fields, field);
       }
       for (size_t j = 0; j < enu->members.len; j++) {
         if (strcmp(enu->members.data[j].name, member.name) == 0) {
@@ -2968,7 +3062,7 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
         member.value = cg->current_enum_val++;
       }
       member.runtime_tag = member.has_payload ? enu->adt_tag_base + (int64_t)i : member.value;
-      vec_push(&enu->members, member);
+      vec_push_arena(cg->arena, &enu->members, member);
     next_enum_member:;
     }
     if (enu->has_payload)

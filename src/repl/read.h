@@ -7,6 +7,7 @@ void ny_readline_init(void);
 int ny_readline_read_history(const char *path);
 int ny_readline_write_history(const char *path);
 void ny_readline_stifle_history(int max);
+void ny_readline_prepare_console(void);
 int ny_readline_vt_output_ok(void);
 
 #endif

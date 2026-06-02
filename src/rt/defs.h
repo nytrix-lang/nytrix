@@ -325,6 +325,14 @@ RT_DEF("__sort_any", rt_sort_any, 1, "fn __sort_any(xs)",
 RT_DEF("__sorted_any", rt_sorted_any, 1, "fn __sorted_any(xs)",
        "Returns a sorted copy for supported sequence values.")
 RT_DEF("__append", rt_append, 2, "fn __append(lst, v)", "Appends v to list lst.")
+RT_DEF("__list_reserve", rt_list_reserve, 2, "fn __list_reserve(lst, cap)",
+       "Ensures list capacity is at least cap without changing length.")
+RT_DEF("__list_sum_int_range", rt_list_sum_int_range, 3, "fn __list_sum_int_range(lst, start, stop)",
+       "Sums integer-like list elements over a tagged index range.")
+RT_DEF("__dict_reserve", rt_dict_reserve, 2, "fn __dict_reserve(d, additional)",
+       "Ensures dictionary capacity for additional expected inserts.")
+RT_DEF("__dict_write_fast", rt_dict_write_fast, 3, "fn __dict_write_fast(d, k, v)",
+       "Hot dictionary write helper for compiler-lowered dict.set.")
 RT_DEF("__list_len", rt_list_len, 1, "fn __list_len(lst)",
        "Fast read of the element count (tagged) from a list header.")
 RT_DEF("__list_set_len", rt_list_set_len, 2, "fn __list_set_len(lst, n)",
@@ -551,6 +559,14 @@ RT_DEF("__to_str", rt_to_str, 1, "fn __to_str(v)", "Converts primitive to string
 RT_DEF("__cstr_to_str", rt_cstr_to_str, 1, "fn __cstr_to_str(p)",
        "Copies a native NUL-terminated C string into a Nytrix string.")
 RT_DEF("__str_concat", rt_str_concat, 2, "fn __str_concat(a, b)", "Concatenates two strings.")
+RT_DEF("__str_builder_new", rt_str_builder_new, 1, "fn __str_builder_new(cap)",
+       "Creates an internal string builder.")
+RT_DEF("__str_builder_append", rt_str_builder_append, 2, "fn __str_builder_append(builder, value)",
+       "Appends a value to an internal string builder.")
+RT_DEF("__str_builder_to_str", rt_str_builder_to_str, 1, "fn __str_builder_to_str(builder)",
+       "Finishes an internal string builder as a string.")
+RT_DEF("__str_builder_free", rt_str_builder_free, 1, "fn __str_builder_free(builder)",
+       "Frees an internal string builder.")
 RT_DEF("__str_hash", rt_str_hash, 1, "fn __str_hash(s)", "Hashes a Nytrix string for dictionaries.")
 RT_DEF("__str_eq", rt_str_eq, 2, "fn __str_eq(a, b)", "Compares two Nytrix strings byte-wise.")
 RT_DEF("__memcpy", rt_memcpy, 3, "fn __memcpy(d, s, n)", "Copies n bytes from s to d.")

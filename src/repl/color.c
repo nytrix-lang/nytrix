@@ -160,7 +160,11 @@ static int is_keyword(const char *s, size_t len) {
       return 1;
     break;
   case 'c':
+    if (len == 4 && !memcmp(s, "case", 4))
+      return 1;
     if (len == 5 && !memcmp(s, "catch", 5))
+      return 1;
+    if (len == 5 && !memcmp(s, "class", 5))
       return 1;
     if (len == 8 && !memcmp(s, "continue", 8))
       return 1;
@@ -173,8 +177,6 @@ static int is_keyword(const char *s, size_t len) {
     if (len == 5 && !memcmp(s, "defer", 5))
       return 1;
     if (len == 3 && !memcmp(s, "del", 3))
-      return 1;
-    if (len == 5 && !memcmp(s, "class", 5))
       return 1;
     break;
   case 'e':
@@ -200,11 +202,15 @@ static int is_keyword(const char *s, size_t len) {
       return 1;
     break;
   case 'g':
+    if (len == 5 && !memcmp(s, "guard", 5))
+      return 1;
     if (len == 4 && !memcmp(s, "goto", 4))
       return 1;
     break;
   case 'i':
     if (len == 2 && !memcmp(s, "if", 2))
+      return 1;
+    if (len == 4 && !memcmp(s, "impl", 4))
       return 1;
     if (len == 2 && !memcmp(s, "in", 2))
       return 1;
@@ -227,11 +233,19 @@ static int is_keyword(const char *s, size_t len) {
     if (len == 3 && !memcmp(s, "nil", 3))
       return 1;
     break;
+  case 'o':
+    if (len == 8 && !memcmp(s, "operator", 8))
+      return 1;
+    if (len == 5 && !memcmp(s, "owned", 5))
+      return 1;
+    break;
   case 'r':
     if (len == 6 && !memcmp(s, "return", 6))
       return 1;
     break;
   case 't':
+    if (len == 5 && !memcmp(s, "trait", 5))
+      return 1;
     if (len == 3 && !memcmp(s, "try", 3))
       return 1;
     if (len == 4 && !memcmp(s, "true", 4))
@@ -251,6 +265,31 @@ static int is_keyword(const char *s, size_t len) {
     break;
   }
   return 0;
+}
+
+static int is_builtin_type_name(const char *s, size_t len) {
+  switch (s[0]) {
+  case 'b':
+    return (len == 4 && !memcmp(s, "bool", 4)) ||
+           (len == 6 && !memcmp(s, "bigint", 6)) ||
+           (len == 5 && !memcmp(s, "bytes", 5));
+  case 'd':
+    return len == 4 && !memcmp(s, "dict", 4);
+  case 'f':
+    return len == 5 && !memcmp(s, "float", 5);
+  case 'i':
+    return (len == 3 && !memcmp(s, "int", 3)) ||
+           (len == 3 && !memcmp(s, "i64", 3));
+  case 'l':
+    return len == 4 && !memcmp(s, "list", 4);
+  case 's':
+    return (len == 3 && !memcmp(s, "str", 3)) ||
+           (len == 3 && !memcmp(s, "set", 3));
+  case 't':
+    return len == 5 && !memcmp(s, "tuple", 5);
+  default:
+    return 0;
+  }
 }
 
 enum {
@@ -388,6 +427,8 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
       int kind = 0;
       if (is_keyword(line + start, len))
         style = ST_KEYWORD;
+      else if (is_builtin_type_name(line + start, len))
+        style = ST_TYPE;
       else if (is_fn_call(line, i))
         style = ST_FUNCTION;
       else if (is_known_name(line + start, len, &kind)) {

@@ -3076,14 +3076,17 @@ static char *hm_pattern_call_name(ny_hm_state_t *hm, expr_t *pat) {
       return NULL;
     size_t a = strlen(target);
     size_t b = strlen(pat->as.memcall.name);
-    char *out = malloc(a + b + 2);
-    if (!out)
-      return NULL;
-    memcpy(out, target, a);
-    out[a] = '.';
-    memcpy(out + a + 1, pat->as.memcall.name, b + 1);
-    return out;
-  }
+	    char *out = malloc(a + b + 2);
+	    if (!out) {
+	      free(target);
+	      return NULL;
+	    }
+	    memcpy(out, target, a);
+	    out[a] = '.';
+	    memcpy(out + a + 1, pat->as.memcall.name, b + 1);
+	    free(target);
+	    return out;
+	  }
   return NULL;
 }
 
@@ -5946,15 +5949,26 @@ char *ny_type_pipeline_lowered_json(program_t *prog, codegen_t *cg,
               spec->raw_return_proven ? "true" : "false");
     tp_json_str(&j, spec->return_kind == NY_MONO_TYPE_INT
                         ? "int"
-                        : (spec->return_kind == NY_MONO_TYPE_F64 ? "f64" : ""));
+                        : (spec->return_kind == NY_MONO_TYPE_F64
+                               ? "f64"
+                               : (spec->return_kind == NY_MONO_TYPE_LIST
+                                      ? "list"
+                                      : (spec->return_kind == NY_MONO_TYPE_F64_LIST
+                                             ? "list<f64>"
+                                             : ""))));
     tp_append(&j, ",\"arg_types\":[");
     for (int k = 0; k < spec->arity && k < NY_MONO_MAX_ARITY; ++k) {
       if (k)
         tp_append(&j, ",");
-      tp_json_str(
-          &j, spec->types[k] == NY_MONO_TYPE_INT
-                  ? "int"
-                  : (spec->types[k] == NY_MONO_TYPE_F64 ? "f64" : "dynamic"));
+      tp_json_str(&j, spec->types[k] == NY_MONO_TYPE_INT
+                          ? "int"
+                          : (spec->types[k] == NY_MONO_TYPE_F64
+                                 ? "f64"
+                                 : (spec->types[k] == NY_MONO_TYPE_LIST
+                                        ? "list"
+                                        : (spec->types[k] == NY_MONO_TYPE_F64_LIST
+                                               ? "list<f64>"
+                                               : "dynamic"))));
     }
     tp_append(&j, "],\"raw_return_active\":%s,\"inline_body_eligible\":%s}",
               spec->raw_return_active ? "true" : "false",

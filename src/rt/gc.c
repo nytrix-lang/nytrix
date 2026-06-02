@@ -1,6 +1,5 @@
 #include "rt/gc.h"
 #include "base/common.h"
-#include "base/util.h"
 #include "rt/shared.h"
 
 #include <ctype.h>
@@ -282,8 +281,8 @@ static void nyGcValidateSpace(const char *phase, const char *name,
     nyGcHeader_t *header = (nyGcHeader_t *)p;
     size_t total = nyGcAllocSize(header->size);
     if (total < NYGC_OBJECT_DATA_OFFSET || p + total > ptr) {
-      fprintf(stderr, "GC validate failed (%s): invalid %s object size %zu\n",
-              phase, name, header->size);
+      fprintf(stderr, "GC validate failed (%s): invalid %s object size %llu\n",
+              phase, name, (unsigned long long)header->size);
       abort();
     }
     uint8_t *obj = nyGcObjPtr(header);
@@ -292,9 +291,10 @@ static void nyGcValidateSpace(const char *phase, const char *name,
     if (magic != NY_MAGIC1 || ((size_slot >> 1) < header->size)) {
       fprintf(stderr,
               "GC validate failed (%s): invalid %s runtime prefix header=%p obj=%p "
-              "magic=0x%llx size_slot=0x%llx header_size=%zu\n",
+              "magic=0x%llx size_slot=0x%llx header_size=%llu\n",
               phase, name, (void *)header, (void *)obj,
-              (unsigned long long)magic, (unsigned long long)size_slot, header->size);
+              (unsigned long long)magic, (unsigned long long)size_slot,
+              (unsigned long long)header->size);
       abort();
     }
     p += total;
@@ -306,7 +306,7 @@ static void nyGcValidateSpace(const char *phase, const char *name,
 }
 
 static void nyGcValidateUnlocked(const char *phase) {
-  if (!gNyGc.initialized || !ny_env_enabled("NYTRIX_GC_VALIDATE"))
+  if (!gNyGc.initialized || !rt_env_enabled("NYTRIX_GC_VALIDATE"))
     return;
   nyGcValidateSpace(phase, "nursery", gNyGc.nursery_start, gNyGc.nursery_ptr, gNyGc.nursery_limit);
   nyGcValidateSpace(phase, "tenured", gNyGc.tenured_start, gNyGc.tenured_free, gNyGc.tenured_limit);
@@ -401,7 +401,7 @@ void nyGcInit(void) {
   }
 
   memset(&gNyGc, 0, sizeof(gNyGc));
-  gNyGc.enable_nursery = ny_env_enabled("NYTRIX_GC");
+  gNyGc.enable_nursery = rt_env_enabled("NYTRIX_GC");
   gNyGc.large_threshold = nyGcLargeThresholdFromEnv();
   gNyGc.initialized = true;
 

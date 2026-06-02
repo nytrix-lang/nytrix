@@ -9,6 +9,8 @@ typedef struct ny_null_narrow_info_t {
   const char *name;
   bool true_nonnull;
   bool false_nonnull;
+  const char *true_type;
+  const char *false_type;
 } ny_null_narrow_info_t;
 
 typedef VEC(ny_null_narrow_info_t) ny_null_narrow_list_t;

@@ -143,6 +143,137 @@ static bool ny_tool_in_path(const char *tool) {
 }
 #endif
 
+#ifdef _WIN32
+static bool ny_win_file_exists(const char *path) {
+  if (!path || !*path)
+    return false;
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return false;
+  fclose(f);
+  return true;
+}
+
+static bool ny_win_join_exists(const char *dir, const char *name) {
+  if (!dir || !*dir || !name || !*name)
+    return false;
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/%s", dir, name);
+  return ny_win_file_exists(path);
+}
+
+static const char *ny_win_find_gmp_include_dir(void) {
+  static char result[PATH_MAX];
+  const char *env = getenv("NYTRIX_GMP_INCLUDE");
+  if (!env || !*env)
+    env = getenv("GMP_INCLUDE_DIR");
+  if (env && *env && ny_win_join_exists(env, "gmp.h")) {
+    snprintf(result, sizeof(result), "%s", env);
+    return result;
+  }
+  static const char *const candidates[] = {
+      "C:/msys64/ucrt64/include",
+      "C:/msys64/clang64/include",
+      "C:/msys64/mingw64/include",
+      "C:/tools/msys64/ucrt64/include",
+      "C:/tools/msys64/clang64/include",
+      "C:/tools/msys64/mingw64/include",
+      "C:/vcpkg/installed/x64-windows/include",
+      NULL,
+  };
+  for (size_t i = 0; candidates[i]; ++i) {
+    if (ny_win_join_exists(candidates[i], "gmp.h")) {
+      snprintf(result, sizeof(result), "%s", candidates[i]);
+      return result;
+    }
+  }
+  return NULL;
+}
+
+static bool ny_win_path_dirname(const char *path, char *out, size_t out_len) {
+  if (!path || !*path || !out || out_len == 0)
+    return false;
+  const char *slash = strrchr(path, '/');
+  const char *backslash = strrchr(path, '\\');
+  const char *sep = slash > backslash ? slash : backslash;
+  if (!sep || sep == path)
+    return false;
+  size_t len = (size_t)(sep - path);
+  if (len >= out_len)
+    len = out_len - 1;
+  memcpy(out, path, len);
+  out[len] = '\0';
+  return true;
+}
+
+static const char *ny_win_find_gmp_lib_dir(void) {
+  static char result[PATH_MAX];
+  const char *env = getenv("NYTRIX_GMP_LIBRARY");
+  if (!env || !*env)
+    env = getenv("GMP_LIBRARY");
+  if (env && *env) {
+    if (ny_win_join_exists(env, "libgmp.dll.a") ||
+        ny_win_join_exists(env, "libgmp.a") ||
+        ny_win_join_exists(env, "gmp.lib") ||
+        ny_win_join_exists(env, "libgmp.lib")) {
+      snprintf(result, sizeof(result), "%s", env);
+      return result;
+    }
+    if (ny_win_file_exists(env) &&
+        ny_win_path_dirname(env, result, sizeof(result)))
+      return result;
+  }
+  static const char *const candidates[] = {
+      "C:/msys64/ucrt64/lib",
+      "C:/msys64/clang64/lib",
+      "C:/msys64/mingw64/lib",
+      "C:/tools/msys64/ucrt64/lib",
+      "C:/tools/msys64/clang64/lib",
+      "C:/tools/msys64/mingw64/lib",
+      "C:/vcpkg/installed/x64-windows/lib",
+      NULL,
+  };
+  for (size_t i = 0; candidates[i]; ++i) {
+    if (ny_win_join_exists(candidates[i], "libgmp.dll.a") ||
+        ny_win_join_exists(candidates[i], "libgmp.a") ||
+        ny_win_join_exists(candidates[i], "gmp.lib") ||
+        ny_win_join_exists(candidates[i], "libgmp.lib")) {
+      snprintf(result, sizeof(result), "%s", candidates[i]);
+      return result;
+    }
+  }
+  return NULL;
+}
+
+static void ny_win_copy_aot_runtime_dlls(const char *output_path) {
+  if (!output_path || !*output_path)
+    return;
+  char out_dir[PATH_MAX];
+  if (!ny_win_path_dirname(output_path, out_dir, sizeof(out_dir)))
+    snprintf(out_dir, sizeof(out_dir), ".");
+  const char *root = ny_src_root();
+  if (!root || !*root)
+    return;
+  static const char *const dlls[] = {
+      "libgmp-10.dll",
+      "zlib1.dll",
+      "libwinpthread-1.dll",
+      "libgcc_s_seh-1.dll",
+      NULL,
+  };
+  for (size_t i = 0; dlls[i]; ++i) {
+    char src[PATH_MAX];
+    char dst[PATH_MAX];
+    snprintf(src, sizeof(src), "%s/build/release/%s", root, dlls[i]);
+    if (!ny_win_file_exists(src))
+      continue;
+    snprintf(dst, sizeof(dst), "%s/%s", out_dir, dlls[i]);
+    if (strcmp(src, dst) != 0)
+      (void)ny_copy_file(src, dst);
+  }
+}
+#endif
+
 #ifndef _WIN32
 static const char *normalize_cc_posix(const char *cc) {
   static char buf[PATH_MAX];
@@ -295,6 +426,28 @@ static int is_msvc_cc(const char *cc) {
   if (strcasecmp(base, "clang-cl") == 0 || strcasecmp(base, "clang-cl.exe") == 0)
     return 1;
   return 0;
+}
+
+static int is_clang_cc(const char *cc) {
+  if (!cc || !*cc)
+    return 0;
+  const char *base = strrchr(cc, '/');
+  if (!base)
+    base = strrchr(cc, '\\');
+  base = base ? base + 1 : cc;
+  return strcasecmp(base, "clang") == 0 ||
+         strcasecmp(base, "clang.exe") == 0;
+}
+
+static const char *ny_win_clang_target_arg(const char *cc) {
+  static char buf[128];
+  if (!is_clang_cc(cc))
+    return NULL;
+  const char *triple = getenv("NYTRIX_HOST_TRIPLE");
+  if (!triple || !*triple)
+    triple = "x86_64-w64-windows-gnu";
+  snprintf(buf, sizeof(buf), "--target=%s", triple);
+  return buf;
 }
 
 static const char *normalize_cc(const char *cc) {
@@ -504,6 +657,30 @@ static int spawn_with_host_flags(const char *const base[], const char *env, char
 }
 #endif
 
+static void append_link_arg_preserving_custom(const char *arg, const char *argv[], size_t *idx,
+                                              size_t max, char *pool[], size_t *pool_len,
+                                              size_t pool_max) {
+  if (!arg || !*arg || *idx + 1 >= max)
+    return;
+  if (arg[0] == '-' && strpbrk(arg, " \t") != NULL) {
+    char *copy = ny_strdup(arg);
+    if (!copy)
+      return;
+    char *tok = strtok(copy, " \t");
+    while (tok && *idx + 1 < max) {
+      argv[(*idx)++] = tok;
+      tok = strtok(NULL, " \t");
+    }
+    if (*pool_len < pool_max) {
+      pool[(*pool_len)++] = copy;
+    } else {
+      free(copy);
+    }
+    return;
+  }
+  argv[(*idx)++] = arg;
+}
+
 const char *ny_builder_choose_cc(void) {
 #ifdef _WIN32
   const char *cc = normalize_cc(getenv("NYTRIX_CC"));
@@ -531,6 +708,12 @@ const char *ny_builder_choose_cc(void) {
   if (!cc) {
 #ifdef _WIN32
     static const char *const win_clang_candidates[] = {
+        "C:\\msys64\\ucrt64\\bin\\clang.exe",
+        "C:\\msys64\\clang64\\bin\\clang.exe",
+        "C:\\msys64\\mingw64\\bin\\clang.exe",
+        "C:\\tools\\msys64\\ucrt64\\bin\\clang.exe",
+        "C:\\tools\\msys64\\clang64\\bin\\clang.exe",
+        "C:\\tools\\msys64\\mingw64\\bin\\clang.exe",
         "C:\\PROGRA~1\\LLVM\\bin\\clang.exe",
         "C:\\PROGRA~2\\LLVM\\bin\\clang.exe",
         "C:\\PROGRA~1\\LLVM\\bin\\clang-cl.exe",
@@ -620,6 +803,12 @@ int ny_exec_spawn(const char *const argv[]) {
     if (strcasecmp(name, "clang") == 0 || strcasecmp(name, "clang.exe") == 0 ||
         strcasecmp(name, "clang-cl") == 0 || strcasecmp(name, "clang-cl.exe") == 0) {
       static const char *const win_clang_candidates[] = {
+          "C:\\msys64\\ucrt64\\bin\\clang.exe",
+          "C:\\msys64\\clang64\\bin\\clang.exe",
+          "C:\\msys64\\mingw64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\ucrt64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\clang64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\mingw64\\bin\\clang.exe",
           "C:\\PROGRA~1\\LLVM\\bin\\clang.exe",
           "C:\\PROGRA~2\\LLVM\\bin\\clang.exe",
           "C:\\PROGRA~1\\LLVM\\bin\\clang-cl.exe",
@@ -682,6 +871,9 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   const char *root = ny_src_root();
   static char include_arg[PATH_MAX + 12];
   static char llvm_include_arg[PATH_MAX + 12];
+#ifdef _WIN32
+  static char gmp_include_arg[PATH_MAX + 12];
+#endif
   static char runtime_src[PATH_MAX];
   static char ast_src[PATH_MAX];
   char dwarf_flag[16];
@@ -698,6 +890,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
 #endif
 #ifdef _WIN32
   bool msvc = is_msvc_cc(cc);
+  const char *clang_target_arg = ny_win_clang_target_arg(cc);
   if (msvc) {
     // ccache not typically used with MSVC/cl.exe via direct invocation in this
     // context or requires specific configuration (sccache). Skipping for MSVC
@@ -708,6 +901,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "/I%s", llvm_inc);
     else
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
+    const char *gmp_inc = ny_win_find_gmp_include_dir();
+    if (gmp_inc && *gmp_inc)
+      snprintf(gmp_include_arg, sizeof(gmp_include_arg), "/I%s", gmp_inc);
+    else
+      snprintf(gmp_include_arg, sizeof(gmp_include_arg), "%s", include_arg);
     ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug, speed_level,
                           native_tune, llvm_include_arg);
     if (!out_ast && ny_try_restore_runtime_cache(cache_obj, out_runtime, root))
@@ -724,6 +922,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
                                         "/DNYTRIX_RUNTIME_ONLY",
                                         include_arg,
                                         llvm_include_arg,
+                                        gmp_include_arg,
                                         "/c",
                                         runtime_src,
                                         out_arg,
@@ -754,6 +953,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
                                       "/D_CRT_NONSTDC_NO_WARNINGS",
                                       include_arg,
                                       llvm_include_arg,
+                                      gmp_include_arg,
                                       "/c",
                                       ast_src,
                                       out_ast_arg,
@@ -775,6 +975,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "-I%s", llvm_inc);
     else
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
+    const char *gmp_inc = ny_win_find_gmp_include_dir();
+    if (gmp_inc && *gmp_inc)
+      snprintf(gmp_include_arg, sizeof(gmp_include_arg), "-I%s", gmp_inc);
+    else
+      snprintf(gmp_include_arg, sizeof(gmp_include_arg), "%s", include_arg);
   }
 #else
   snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
@@ -790,6 +995,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   if (has_ccache)
     runtime_args[ra_i++] = "ccache";
   runtime_args[ra_i++] = cc;
+#ifdef _WIN32
+  if (clang_target_arg)
+    runtime_args[ra_i++] = clang_target_arg;
+#endif
   runtime_args[ra_i++] = "-std=gnu11";
   runtime_args[ra_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
   runtime_args[ra_i++] = dwarf_flag;
@@ -815,6 +1024,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   runtime_args[ra_i++] = "-DNYTRIX_RUNTIME_ONLY";
   runtime_args[ra_i++] = include_arg;
   runtime_args[ra_i++] = llvm_include_arg;
+#ifdef _WIN32
+  if (gmp_include_arg[0])
+    runtime_args[ra_i++] = gmp_include_arg;
+#endif
   runtime_args[ra_i++] = "-c";
   runtime_args[ra_i++] = runtime_src;
   runtime_args[ra_i++] = "-o";
@@ -875,6 +1088,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
     if (has_ccache)
       ast_args[aa_i++] = "ccache";
     ast_args[aa_i++] = cc;
+#ifdef _WIN32
+    if (clang_target_arg)
+      ast_args[aa_i++] = clang_target_arg;
+#endif
     ast_args[aa_i++] = "-std=gnu11";
     ast_args[aa_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
     ast_args[aa_i++] = dwarf_flag;
@@ -900,6 +1117,10 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
 #endif
     ast_args[aa_i++] = include_arg;
     ast_args[aa_i++] = llvm_include_arg;
+#ifdef _WIN32
+    if (gmp_include_arg[0])
+      ast_args[aa_i++] = gmp_include_arg;
+#endif
     ast_args[aa_i++] = "-c";
     ast_args[aa_i++] = ast_src;
     ast_args[aa_i++] = "-o";
@@ -980,6 +1201,8 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
         continue;
       if (strncmp(lib, "/DEFAULTLIB:", 12) == 0) {
         argv[idx++] = lib;
+      } else if (lib[0] == '-' && lib[1] != 'l') {
+        argv[idx++] = lib;
       } else if (lib[0] == '-' && lib[1] == 'l') {
         if (dyn_count >= sizeof(dyn_args) / sizeof(dyn_args[0]))
           break;
@@ -1013,6 +1236,11 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   }
 #endif
   argv[idx++] = cc;
+#ifdef _WIN32
+  const char *clang_target_arg = ny_win_clang_target_arg(cc);
+  if (clang_target_arg && idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = clang_target_arg;
+#endif
   if (debug)
     argv[idx++] = "-g3";
   if (profile)
@@ -1110,15 +1338,20 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env. */
 #endif
 #ifdef _WIN32
-  /* Link against runtime library from build directory */
-  argv[idx++] = "-L./build/release";
-  argv[idx++] = "nytrixrt.lib";
+  static char win_gmp_lib_arg[PATH_MAX + 4];
+  const char *win_gmp_lib_dir = ny_win_find_gmp_lib_dir();
+  if (win_gmp_lib_dir && *win_gmp_lib_dir && idx + 1 < NY_MAX_LINK_ARGS) {
+    snprintf(win_gmp_lib_arg, sizeof(win_gmp_lib_arg), "-L%s", win_gmp_lib_dir);
+    argv[idx++] = win_gmp_lib_arg;
+  }
   /* Libraries can also be added via #link directive or NYTRIX_SHARED_LIBS env
    */
 #endif
   char *shared_buf = NULL;
   char *shared_lib_copies[16] = {NULL};
   size_t shared_lib_copy_count = 0;
+  char *custom_link_arg_copies[16] = {NULL};
+  size_t custom_link_arg_copy_count = 0;
   const char *shared_env = getenv("NYTRIX_SHARED_LIBS");
   const char *shared_libs[16];
   size_t shared_count = 0;
@@ -1149,17 +1382,29 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   }
   /* Note: shared_buf is NOT freed here - pointers in shared_libs reference it
    */
-  /* Convert libXXX.so -> -lXXX for ELF linker */
+  /* Convert libXXX.so / libXXX.dylib -> -lXXX for native linkers. */
   char link_buf_storage[16][64];
   size_t link_buf_idx = 0;
   for (size_t i = 0; i < link_lib_count; ++i) {
     if (idx + 1 >= NY_MAX_LINK_ARGS)
       break;
     const char *lib = link_libs[i];
+    if (lib && lib[0] == '-' && strpbrk(lib, " \t") != NULL) {
+      append_link_arg_preserving_custom(lib, argv, &idx, NY_MAX_LINK_ARGS,
+                                        custom_link_arg_copies, &custom_link_arg_copy_count,
+                                        sizeof(custom_link_arg_copies) /
+                                            sizeof(custom_link_arg_copies[0]));
+      continue;
+    }
     if (lib && strncmp(lib, "lib", 3) == 0) {
       const char *base = lib + 3;
       size_t blen = strlen(base);
       const char *dot = strstr(base, ".so");
+#ifdef __APPLE__
+      const char *dylib = strstr(base, ".dylib");
+      if (dylib && dylib > base && (!dot || dylib < dot))
+        dot = dylib;
+#endif
       if (dot && dot > base)
         blen = (size_t)(dot - base);
       if (blen > 0 && blen < 64 && link_buf_idx < 16) {
@@ -1168,13 +1413,25 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
         continue;
       }
     }
-    argv[idx++] = lib;
+    append_link_arg_preserving_custom(lib, argv, &idx, NY_MAX_LINK_ARGS,
+                                      custom_link_arg_copies, &custom_link_arg_copy_count,
+                                      sizeof(custom_link_arg_copies) /
+                                          sizeof(custom_link_arg_copies[0]));
+  }
+  bool has_gmp = false;
+  for (size_t i = 0; i < link_lib_count; ++i) {
+    const char *lib = link_libs[i];
+    if (lib && (strcmp(lib, "-lgmp") == 0 || strcmp(lib, "gmp") == 0 ||
+                strstr(lib, "/libgmp.") != NULL ||
+                strstr(lib, "\\libgmp.") != NULL))
+      has_gmp = true;
   }
 #if !defined(_WIN32)
-  bool has_gmp = false;
   bool has_z = false;
   bool has_m = false;
+#if !defined(__APPLE__)
   bool has_dl = false;
+#endif
   bool has_pthread = false;
 #if !defined(__APPLE__)
   bool has_util = false;
@@ -1183,14 +1440,15 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     const char *lib = link_libs[i];
     if (!lib)
       continue;
-    if (strcmp(lib, "-lgmp") == 0 || strcmp(lib, "gmp") == 0 || strstr(lib, "/libgmp.") != NULL)
-      has_gmp = true;
-    else if (strcmp(lib, "-lz") == 0 || strcmp(lib, "z") == 0 || strstr(lib, "/libz.") != NULL)
+    if (strcmp(lib, "-lz") == 0 || strcmp(lib, "z") == 0 || strstr(lib, "/libz.") != NULL)
       has_z = true;
     else if (strcmp(lib, "-lm") == 0 || strcmp(lib, "m") == 0 || strstr(lib, "/libm.") != NULL)
       has_m = true;
-    else if (strcmp(lib, "-ldl") == 0 || strcmp(lib, "dl") == 0 || strstr(lib, "/libdl.") != NULL)
+    else if (strcmp(lib, "-ldl") == 0 || strcmp(lib, "dl") == 0 || strstr(lib, "/libdl.") != NULL) {
+#if !defined(__APPLE__)
       has_dl = true;
+#endif
+    }
     else if (strcmp(lib, "-lpthread") == 0 || strcmp(lib, "pthread") == 0 ||
              strstr(lib, "/libpthread.") != NULL)
       has_pthread = true;
@@ -1200,12 +1458,20 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
       has_util = true;
 #endif
   }
+#endif
   /*
    * The AOT runtime object uses GMP-backed bigint helpers and may also retain
    * platform support code. Add the small default runtime libs here explicitly.
    */
   if (!has_gmp && idx + 1 < NY_MAX_LINK_ARGS)
     argv[idx++] = "-lgmp";
+#if defined(_WIN32)
+  if (idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lz";
+  if (idx + 1 < NY_MAX_LINK_ARGS)
+    argv[idx++] = "-lws2_32";
+#endif
+#if !defined(_WIN32)
   if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
     argv[idx++] = "-lz";
   if (!has_m && idx + 1 < NY_MAX_LINK_ARGS)
@@ -1268,12 +1534,17 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   ny_free_host_pool(host_pool, pool_len);
   for (size_t i = 0; i < shared_lib_copy_count; i++)
     free(shared_lib_copies[i]);
+  for (size_t i = 0; i < custom_link_arg_copy_count; i++)
+    free(custom_link_arg_copies[i]);
   if (shared_buf)
     free(shared_buf);
   if (rc != 0) {
     NY_LOG_ERR("Linking failed (exit=%d)\n", rc);
     return false;
   }
+#ifdef _WIN32
+  ny_win_copy_aot_runtime_dlls(output_path);
+#endif
   return true;
 }
 

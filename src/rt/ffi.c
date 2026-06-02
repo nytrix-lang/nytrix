@@ -59,10 +59,10 @@ static int64_t rt_make_str_ffi(const char *s) {
 #endif
 
 int64_t rt_tag_native(int64_t addr) {
-  if (is_int(addr))
-    addr >>= 1;
   if (!addr)
     return 0;
+  if (NY_NATIVE_IS(addr))
+    return addr;
   return NY_NATIVE_ENCODE((void *)(uintptr_t)addr);
 }
 

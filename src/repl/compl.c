@@ -297,16 +297,66 @@ static void extract_command_arg(const char *line, int cursor, char *out, size_t 
   out[len] = '\0';
 }
 
+static int fuzzy_boundary_bonus(char prev) {
+  if (prev == '\0')
+    return 35;
+  if (prev == '.' || prev == '_' || prev == '-' || prev == '/' || prev == '\\')
+    return 28;
+  if (isspace((unsigned char)prev) || prev == ':' || prev == '(' || prev == '[')
+    return 18;
+  return 0;
+}
+
 static int fuzzy_score(const char *cand, const char *text) {
+  if (!cand)
+    return 0;
   if (!text || !*text)
     return 1;
   if (strcmp(cand, text) == 0)
-    return 100;
-  if (strncmp(cand, text, strlen(text)) == 0)
-    return 50;
-  if (strcasestr_impl(cand, text))
-    return 10;
-  return 0;
+    return 2000;
+  if (strcasecmp(cand, text) == 0)
+    return 1900;
+  size_t text_len = strlen(text);
+  if (strncasecmp(cand, text, text_len) == 0)
+    return 1600 - (int)(strlen(cand) > 120 ? 120 : strlen(cand));
+  const char *sub = strcasestr_impl(cand, text);
+  int score = 0;
+  if (sub) {
+    int offset = (int)(sub - cand);
+    score = 900 - (offset > 120 ? 120 : offset);
+    score += fuzzy_boundary_bonus(offset > 0 ? cand[offset - 1] : '\0');
+  }
+  int ci = 0;
+  int last = -1;
+  int first = -1;
+  int fuzzy = 0;
+  for (int qi = 0; text[qi]; ++qi) {
+    unsigned char q = (unsigned char)tolower((unsigned char)text[qi]);
+    int found = -1;
+    while (cand[ci]) {
+      unsigned char c = (unsigned char)tolower((unsigned char)cand[ci]);
+      if (c == q) {
+        found = ci++;
+        break;
+      }
+      ci++;
+    }
+    if (found < 0)
+      return score;
+    if (first < 0)
+      first = found;
+    fuzzy += 35;
+    if (last >= 0 && found == last + 1)
+      fuzzy += 55;
+    fuzzy += fuzzy_boundary_bonus(found > 0 ? cand[found - 1] : '\0');
+    fuzzy -= found > 120 ? 120 : found;
+    last = found;
+  }
+  if (first == 0)
+    fuzzy += 120;
+  size_t clen = strlen(cand);
+  fuzzy -= clen > 160 ? 160 : (int)(clen / 2);
+  return fuzzy > score ? fuzzy : score;
 }
 
 static void add_list_completions(const char *const *items, const char *text) {
@@ -997,7 +1047,7 @@ static void add_member_completions(const char *line, int cursor) {
       const char *base = last_segment(name);
       if (!completion_allows_private(tail) && base[0] == '_')
         continue;
-      if (!tail[0] || starts_with_ci(base, tail))
+      if (!tail[0] || fuzzy_score(base, tail) > 0)
         add_match(base);
     }
   }

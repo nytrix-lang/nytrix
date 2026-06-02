@@ -940,10 +940,84 @@ static bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
   return true;
 }
 
+static bool stmt_expr_is_f64_value(codegen_t *cg, scope *scopes, size_t depth,
+                                   expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_FLOAT;
+  if (e->kind == NY_E_IDENT && e->as.ident.name) {
+    size_t name_len = (size_t)e->tok.len;
+    if (name_len == 0)
+      name_len = strlen(e->as.ident.name);
+    binding *b = stmt_lookup_binding(cg, scopes, depth, e->as.ident.name,
+                                     name_len, e->as.ident.hash);
+    if (b && (b->is_f64_slot || b->is_f64_direct || b->is_f32_slot ||
+              b->is_f32_direct))
+      return true;
+  }
+  const char *t = infer_expr_type(cg, scopes, depth, e);
+  return t && (strcmp(t, "f64") == 0 || strcmp(t, "float") == 0 ||
+               strcmp(t, "f32") == 0);
+}
+
+static bool stmt_expr_is_f64_list_literal(codegen_t *cg, scope *scopes,
+                                          size_t depth, expr_t *e) {
+  if (!e || e->kind != NY_E_LIST)
+    return false;
+  for (size_t i = 0; i < e->as.list_like.len; ++i) {
+    if (!stmt_expr_is_f64_value(cg, scopes, depth, e->as.list_like.data[i]))
+      return false;
+  }
+  return true;
+}
+
+static bool stmt_iterable_yields_int(codegen_t *cg, scope *scopes, size_t depth,
+                                     expr_t *iterable) {
+  if (!iterable)
+    return false;
+  if (iterable->kind == NY_E_BINARY && iterable->as.binary.op &&
+      strcmp(iterable->as.binary.op, "..") == 0)
+    return true;
+  if (iterable->kind == NY_E_CALL && iterable->as.call.callee &&
+      iterable->as.call.callee->kind == NY_E_IDENT &&
+      iterable->as.call.callee->as.ident.name &&
+      (ny_name_tail_is(iterable->as.call.callee->as.ident.name, "range") ||
+       ny_name_tail_is(iterable->as.call.callee->as.ident.name, "range2")))
+    return true;
+  const char *iter_type = infer_expr_type(cg, scopes, depth, iterable);
+  if (ny_type_is(iter_type, "range"))
+    return true;
+  if (stmt_expr_is_int_list_literal(cg, scopes, depth, iterable))
+    return true;
+  if (iterable->kind == NY_E_IDENT && iterable->as.ident.name) {
+    size_t name_len = (size_t)iterable->tok.len;
+    if (name_len == 0)
+      name_len = strlen(iterable->as.ident.name);
+    binding *b = stmt_lookup_binding(cg, scopes, depth, iterable->as.ident.name,
+                                     name_len, iterable->as.ident.hash);
+    return b && b->is_int_list_storage;
+  }
+  return false;
+}
+
 static bool stmt_expr_is_static_list_builtin_target(expr_t *e,
                                                     const char *name) {
   return ny_expr_ident_is_name(e, name);
 }
+
+static bool stmt_param_list_shadows_name(const ny_param_list *params,
+                                         const char *name) {
+  if (!params || !name)
+    return false;
+  for (size_t i = 0; i < params->len; ++i) {
+    if (params->data[i].name && strcmp(params->data[i].name, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool stmt_contains_ident_name(stmt_t *s, const char *name);
 
 static bool stmt_expr_is_int_index_expr(codegen_t *cg, scope *scopes,
                                         size_t depth, expr_t *e) {
@@ -1007,6 +1081,31 @@ static bool stmt_expr_contains_ident_name(expr_t *e, const char *name) {
            stmt_expr_contains_ident_name(e->as.szof.target, name);
   case NY_E_TRY:
     return stmt_expr_contains_ident_name(e->as.try_expr.target, name);
+  case NY_E_LAMBDA:
+  case NY_E_FN:
+    for (size_t i = 0; i < e->as.lambda.params.len; ++i) {
+      if (stmt_expr_contains_ident_name(e->as.lambda.params.data[i].def, name))
+        return true;
+    }
+    if (stmt_param_list_shadows_name(&e->as.lambda.params, name))
+      return false;
+    return stmt_contains_ident_name(e->as.lambda.body, name);
+  case NY_E_ASM:
+    for (size_t i = 0; i < e->as.as_asm.args.len; ++i) {
+      if (stmt_expr_contains_ident_name(e->as.as_asm.args.data[i], name))
+        return true;
+    }
+    return false;
+  case NY_E_COMPTIME:
+    return stmt_contains_ident_name(e->as.comptime_expr.body, name);
+  case NY_E_FSTRING:
+    for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
+      fstring_part_t *part = &e->as.fstring.parts.data[i];
+      if (part->kind == NY_FSP_EXPR &&
+          stmt_expr_contains_ident_name(part->as.e, name))
+        return true;
+    }
+    return false;
   case NY_E_LIST:
   case NY_E_TUPLE:
   case NY_E_SET:
@@ -1033,8 +1132,130 @@ static bool stmt_expr_contains_ident_name(expr_t *e, const char *name) {
       }
       if (stmt_expr_contains_ident_name(e->as.match.arms.data[i].guard, name))
         return true;
+      if (stmt_contains_ident_name(e->as.match.arms.data[i].conseq, name))
+        return true;
+    }
+    return stmt_contains_ident_name(e->as.match.default_conseq, name);
+  default:
+    return false;
+  }
+}
+
+static bool stmt_params_contain_ident_name(const ny_param_list *params,
+                                           const char *name) {
+  if (!params || !name)
+    return false;
+  for (size_t i = 0; i < params->len; ++i) {
+    if (stmt_expr_contains_ident_name(params->data[i].def, name))
+      return true;
+  }
+  return false;
+}
+
+static bool stmt_list_contains_ident_name(ny_stmt_list *list,
+                                          const char *name) {
+  if (!list || !name)
+    return false;
+  for (size_t i = 0; i < list->len; ++i) {
+    if (stmt_contains_ident_name(list->data[i], name))
+      return true;
+  }
+  return false;
+}
+
+static bool stmt_layout_fields_contain_ident_name(ny_layout_field_list *fields,
+                                                  const char *name) {
+  if (!fields || !name)
+    return false;
+  for (size_t i = 0; i < fields->len; ++i) {
+    if (stmt_expr_contains_ident_name(fields->data[i].default_value, name))
+      return true;
+  }
+  return false;
+}
+
+static bool stmt_contains_ident_name(stmt_t *s, const char *name) {
+  if (!s || !name)
+    return false;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    return stmt_list_contains_ident_name(&s->as.block.body, name);
+  case NY_S_MODULE:
+    return stmt_list_contains_ident_name(&s->as.module.body, name);
+  case NY_S_VAR:
+    for (size_t i = 0; i < s->as.var.exprs.len; ++i) {
+      if (stmt_expr_contains_ident_name(s->as.var.exprs.data[i], name))
+        return true;
     }
     return false;
+  case NY_S_EXPR:
+    return stmt_expr_contains_ident_name(s->as.expr.expr, name);
+  case NY_S_IF:
+    return stmt_contains_ident_name(s->as.iff.init, name) ||
+           stmt_expr_contains_ident_name(s->as.iff.test, name) ||
+           stmt_contains_ident_name(s->as.iff.conseq, name) ||
+           stmt_contains_ident_name(s->as.iff.alt, name);
+  case NY_S_GUARD:
+    return stmt_expr_contains_ident_name(s->as.guard.value, name) ||
+           stmt_contains_ident_name(s->as.guard.fallback, name);
+  case NY_S_WHILE:
+    return stmt_contains_ident_name(s->as.whl.init, name) ||
+           stmt_expr_contains_ident_name(s->as.whl.test, name) ||
+           stmt_contains_ident_name(s->as.whl.body, name) ||
+           stmt_contains_ident_name(s->as.whl.update, name);
+  case NY_S_FOR:
+    return stmt_contains_ident_name(s->as.fr.init, name) ||
+           stmt_expr_contains_ident_name(s->as.fr.cond, name) ||
+           stmt_expr_contains_ident_name(s->as.fr.iterable, name) ||
+           stmt_contains_ident_name(s->as.fr.body, name) ||
+           stmt_contains_ident_name(s->as.fr.update, name);
+  case NY_S_TRY:
+    return stmt_contains_ident_name(s->as.tr.body, name) ||
+           stmt_contains_ident_name(s->as.tr.handler, name);
+  case NY_S_RETURN:
+    return stmt_expr_contains_ident_name(s->as.ret.value, name);
+  case NY_S_DEFER:
+    return stmt_contains_ident_name(s->as.de.body, name);
+  case NY_S_MATCH:
+    if (stmt_expr_contains_ident_name(s->as.match.test, name))
+      return true;
+    for (size_t i = 0; i < s->as.match.arms.len; ++i) {
+      match_arm_t *arm = &s->as.match.arms.data[i];
+      for (size_t p = 0; p < arm->patterns.len; ++p) {
+        if (stmt_expr_contains_ident_name(arm->patterns.data[p], name))
+          return true;
+      }
+      if (stmt_expr_contains_ident_name(arm->guard, name) ||
+          stmt_contains_ident_name(arm->conseq, name))
+        return true;
+    }
+    return stmt_contains_ident_name(s->as.match.default_conseq, name);
+  case NY_S_FUNC:
+    if (stmt_params_contain_ident_name(&s->as.fn.params, name))
+      return true;
+    if (stmt_param_list_shadows_name(&s->as.fn.params, name))
+      return false;
+    return stmt_contains_ident_name(s->as.fn.body, name);
+  case NY_S_LAYOUT:
+    return stmt_layout_fields_contain_ident_name(&s->as.layout.fields, name) ||
+           stmt_list_contains_ident_name(&s->as.layout.methods, name);
+  case NY_S_STRUCT:
+    return stmt_layout_fields_contain_ident_name(&s->as.struc.fields, name) ||
+           stmt_list_contains_ident_name(&s->as.struc.methods, name);
+  case NY_S_ENUM:
+    for (size_t i = 0; i < s->as.enu.items.len; ++i) {
+      if (stmt_expr_contains_ident_name(s->as.enu.items.data[i].value, name))
+        return true;
+    }
+    return false;
+  case NY_S_MACRO:
+    for (size_t i = 0; i < s->as.macro.args.len; ++i) {
+      if (stmt_expr_contains_ident_name(s->as.macro.args.data[i], name))
+        return true;
+    }
+    return stmt_contains_ident_name(s->as.macro.body, name);
+  case NY_S_IMPL:
+    return stmt_list_contains_ident_name(&s->as.impl.methods, name);
   default:
     return false;
   }
@@ -1065,8 +1286,53 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
 static bool stmt_static_list_only_uses(codegen_t *cg, scope *scopes,
                                        size_t depth, stmt_t *s,
                                        stmt_t *decl_stmt, const char *name);
+static const char *stmt_expr_list_fastpath_bail_reason(codegen_t *cg,
+                                                       scope *scopes,
+                                                       size_t depth, expr_t *e,
+                                                       const char *name,
+                                                       bool allow_set_idx);
+static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
+                                                  size_t depth, stmt_t *s,
+                                                  stmt_t *decl_stmt,
+                                                  const char *name,
+                                                  bool allow_set_idx);
 static bool stmt_expr_is_set_idx_to_name(expr_t *e, const char *name,
                                          expr_t **out_value);
+
+static bool stmt_static_list_same_file_or_unknown(stmt_t *decl_stmt,
+                                                  stmt_t *s) {
+  const char *decl_file =
+      decl_stmt && decl_stmt->tok.filename ? decl_stmt->tok.filename : NULL;
+  const char *stmt_file = s && s->tok.filename ? s->tok.filename : NULL;
+  return !decl_file || !*decl_file || !stmt_file || !*stmt_file ||
+         strcmp(decl_file, stmt_file) == 0;
+}
+
+static bool stmt_static_list_is_decl_stmt(stmt_t *s, stmt_t *decl_stmt,
+                                          const char *name) {
+  if (s == decl_stmt)
+    return true;
+  if (!s || !decl_stmt || s->kind != NY_S_VAR || decl_stmt->kind != NY_S_VAR)
+    return false;
+  if (!stmt_static_list_same_file_or_unknown(decl_stmt, s))
+    return false;
+  if (s->tok.line > 0 && decl_stmt->tok.line > 0 &&
+      s->tok.line == decl_stmt->tok.line && s->tok.col == decl_stmt->tok.col)
+    return true;
+  if (!name || s->as.var.names.len != decl_stmt->as.var.names.len ||
+      s->as.var.exprs.len != decl_stmt->as.var.exprs.len)
+    return false;
+  for (size_t i = 0; i < s->as.var.names.len; ++i) {
+    if (!s->as.var.names.data[i] || !decl_stmt->as.var.names.data[i] ||
+        strcmp(s->as.var.names.data[i], decl_stmt->as.var.names.data[i]) != 0)
+      return false;
+  }
+  return s->as.var.names.len == 1 && strcmp(s->as.var.names.data[0], name) == 0;
+}
+
+static bool stmt_static_list_should_scan_stmt(stmt_t *decl_stmt, stmt_t *s) {
+  return stmt_static_list_same_file_or_unknown(decl_stmt, s);
+}
 
 static bool stmt_call_args_static_list_only_uses(codegen_t *cg, scope *scopes,
                                                  size_t depth,
@@ -1078,6 +1344,20 @@ static bool stmt_call_args_static_list_only_uses(codegen_t *cg, scope *scopes,
   for (size_t i = start; i < args->len; ++i) {
     if (!stmt_expr_static_list_only_uses(cg, scopes, depth, args->data[i].val,
                                          name))
+      return false;
+  }
+  return true;
+}
+
+static bool stmt_params_static_list_only_uses(codegen_t *cg, scope *scopes,
+                                              size_t depth,
+                                              const ny_param_list *params,
+                                              const char *name) {
+  if (!params)
+    return true;
+  for (size_t i = 0; i < params->len; ++i) {
+    if (!stmt_expr_static_list_only_uses(cg, scopes, depth,
+                                         params->data[i].def, name))
       return false;
   }
   return true;
@@ -1142,6 +1422,14 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
                                                 &e->as.call.args, 0, name);
   }
   case NY_E_MEMCALL:
+    if (e->as.memcall.name &&
+        stmt_expr_is_static_list_builtin_target(e->as.memcall.target, name) &&
+        ny_name_tail_is(e->as.memcall.name, "get") &&
+        (e->as.memcall.args.len == 1 || e->as.memcall.args.len == 2)) {
+      return stmt_call_args_static_list_only_uses(cg, scopes, depth,
+                                                  &e->as.memcall.args, 0,
+                                                  name);
+    }
     return stmt_expr_static_list_only_uses(cg, scopes, depth,
                                            e->as.memcall.target, name) &&
            stmt_call_args_static_list_only_uses(cg, scopes, depth,
@@ -1156,6 +1444,9 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
            stmt_expr_static_list_only_uses(cg, scopes, depth, e->as.index.step,
                                            name);
   case NY_E_MEMBER:
+    if (e->as.member.name && strcmp(e->as.member.name, "len") == 0 &&
+        stmt_expr_is_static_list_builtin_target(e->as.member.target, name))
+      return true;
     return stmt_expr_static_list_only_uses(cg, scopes, depth,
                                            e->as.member.target, name);
   case NY_E_PTR_TYPE:
@@ -1171,6 +1462,35 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
   case NY_E_TRY:
     return stmt_expr_static_list_only_uses(cg, scopes, depth,
                                            e->as.try_expr.target, name);
+  case NY_E_LAMBDA:
+  case NY_E_FN:
+    if (!stmt_params_static_list_only_uses(cg, scopes, depth,
+                                           &e->as.lambda.params, name))
+      return false;
+    if (stmt_params_contain_ident_name(&e->as.lambda.params, name))
+      return false;
+    if (stmt_param_list_shadows_name(&e->as.lambda.params, name))
+      return true;
+    return !stmt_contains_ident_name(e->as.lambda.body, name);
+  case NY_E_ASM:
+    for (size_t i = 0; i < e->as.as_asm.args.len; ++i) {
+      if (!stmt_expr_static_list_only_uses(cg, scopes, depth,
+                                           e->as.as_asm.args.data[i], name))
+        return false;
+    }
+    return true;
+  case NY_E_COMPTIME:
+    return stmt_static_list_only_uses(cg, scopes, depth,
+                                      e->as.comptime_expr.body, NULL, name);
+  case NY_E_FSTRING:
+    for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
+      fstring_part_t *part = &e->as.fstring.parts.data[i];
+      if (part->kind == NY_FSP_EXPR &&
+          !stmt_expr_static_list_only_uses(cg, scopes, depth, part->as.e,
+                                           name))
+        return false;
+    }
+    return true;
   case NY_E_LIST:
   case NY_E_TUPLE:
   case NY_E_SET:
@@ -1209,7 +1529,7 @@ static bool stmt_expr_static_list_only_uses(codegen_t *cg, scope *scopes,
     return stmt_static_list_only_uses(cg, scopes, depth,
                                       e->as.match.default_conseq, NULL, name);
   default:
-    return false;
+    return !stmt_expr_contains_ident_name(e, name);
   }
 }
 
@@ -1221,6 +1541,8 @@ static bool stmt_static_list_only_uses(codegen_t *cg, scope *scopes,
   switch (s->kind) {
   case NY_S_BLOCK:
     for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt, s->as.block.body.data[i]))
+        continue;
       if (!stmt_static_list_only_uses(
               cg, scopes, depth, s->as.block.body.data[i], decl_stmt, name))
         return false;
@@ -1228,13 +1550,16 @@ static bool stmt_static_list_only_uses(codegen_t *cg, scope *scopes,
     return true;
   case NY_S_MODULE:
     for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt,
+                                             s->as.module.body.data[i]))
+        continue;
       if (!stmt_static_list_only_uses(
               cg, scopes, depth, s->as.module.body.data[i], decl_stmt, name))
         return false;
     }
     return true;
   case NY_S_VAR:
-    if (s != decl_stmt) {
+    if (!stmt_static_list_is_decl_stmt(s, decl_stmt, name)) {
       for (size_t i = 0; i < s->as.var.names.len; ++i) {
         if (s->as.var.names.data[i] &&
             strcmp(s->as.var.names.data[i], name) == 0)
@@ -1320,8 +1645,17 @@ static bool stmt_static_list_only_uses(codegen_t *cg, scope *scopes,
     return stmt_static_list_only_uses(
         cg, scopes, depth, s->as.match.default_conseq, decl_stmt, name);
   case NY_S_FUNC:
+    if (!stmt_params_static_list_only_uses(cg, scopes, depth, &s->as.fn.params,
+                                           name))
+      return false;
+    if (stmt_params_contain_ident_name(&s->as.fn.params, name))
+      return false;
+    if (stmt_param_list_shadows_name(&s->as.fn.params, name))
+      return true;
+    return !stmt_contains_ident_name(s->as.fn.body, name);
   case NY_S_MACRO:
-    return false;
+    return stmt_static_list_only_uses(cg, scopes, depth, s->as.macro.body,
+                                      decl_stmt, name);
   default:
     return true;
   }
@@ -1341,6 +1675,20 @@ static const char *stmt_call_args_list_fastpath_bail_reason(
   for (size_t i = start; i < args->len; ++i) {
     const char *reason = stmt_expr_list_fastpath_bail_reason(
         cg, scopes, depth, args->data[i].val, name, allow_set_idx);
+    if (reason)
+      return reason;
+  }
+  return NULL;
+}
+
+static const char *stmt_params_list_fastpath_bail_reason(
+    codegen_t *cg, scope *scopes, size_t depth, const ny_param_list *params,
+    const char *name, bool allow_set_idx) {
+  if (!params)
+    return NULL;
+  for (size_t i = 0; i < params->len; ++i) {
+    const char *reason = stmt_expr_list_fastpath_bail_reason(
+        cg, scopes, depth, params->data[i].def, name, allow_set_idx);
     if (reason)
       return reason;
   }
@@ -1429,6 +1777,14 @@ static const char *stmt_expr_list_fastpath_bail_reason(codegen_t *cg,
     return NULL;
   }
   case NY_E_MEMCALL:
+    if (e->as.memcall.name &&
+        stmt_expr_is_static_list_builtin_target(e->as.memcall.target, name) &&
+        ny_name_tail_is(e->as.memcall.name, "get")) {
+      if (e->as.memcall.args.len != 1 && e->as.memcall.args.len != 2)
+        return "unsupported-get-arity";
+      return stmt_call_args_list_fastpath_bail_reason(
+          cg, scopes, depth, &e->as.memcall.args, 0, name, allow_set_idx);
+    }
     if (stmt_expr_contains_ident_name(e, name))
       return "unknown-call";
     return NULL;
@@ -1448,6 +1804,9 @@ static const char *stmt_expr_list_fastpath_bail_reason(codegen_t *cg,
                                                           name, allow_set_idx);
     }
   case NY_E_MEMBER:
+    if (e->as.member.name && strcmp(e->as.member.name, "len") == 0 &&
+        stmt_expr_is_static_list_builtin_target(e->as.member.target, name))
+      return NULL;
     return stmt_expr_contains_ident_name(e->as.member.target, name)
                ? "value-use"
                : NULL;
@@ -1465,6 +1824,43 @@ static const char *stmt_expr_list_fastpath_bail_reason(codegen_t *cg,
   case NY_E_TRY:
     return stmt_expr_list_fastpath_bail_reason(
         cg, scopes, depth, e->as.try_expr.target, name, allow_set_idx);
+  case NY_E_LAMBDA:
+  case NY_E_FN: {
+    const char *reason = stmt_params_list_fastpath_bail_reason(
+        cg, scopes, depth, &e->as.lambda.params, name, allow_set_idx);
+    if (reason)
+      return reason;
+    if (stmt_params_contain_ident_name(&e->as.lambda.params, name))
+      return "function-capture";
+    if (stmt_param_list_shadows_name(&e->as.lambda.params, name))
+      return NULL;
+    return stmt_contains_ident_name(e->as.lambda.body, name)
+               ? "function-capture"
+               : NULL;
+  }
+  case NY_E_ASM:
+    for (size_t i = 0; i < e->as.as_asm.args.len; ++i) {
+      const char *reason = stmt_expr_list_fastpath_bail_reason(
+          cg, scopes, depth, e->as.as_asm.args.data[i], name, allow_set_idx);
+      if (reason)
+        return reason;
+    }
+    return NULL;
+  case NY_E_COMPTIME:
+    return stmt_list_fastpath_bail_reason(cg, scopes, depth,
+                                          e->as.comptime_expr.body, NULL, name,
+                                          allow_set_idx);
+  case NY_E_FSTRING:
+    for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
+      fstring_part_t *part = &e->as.fstring.parts.data[i];
+      if (part->kind != NY_FSP_EXPR)
+        continue;
+      const char *reason = stmt_expr_list_fastpath_bail_reason(
+          cg, scopes, depth, part->as.e, name, allow_set_idx);
+      if (reason)
+        return reason;
+    }
+    return NULL;
   case NY_E_LIST:
   case NY_E_TUPLE:
   case NY_E_SET:
@@ -1503,6 +1899,8 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
   switch (s->kind) {
   case NY_S_BLOCK:
     for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt, s->as.block.body.data[i]))
+        continue;
       const char *reason = stmt_list_fastpath_bail_reason(
           cg, scopes, depth, s->as.block.body.data[i], decl_stmt, name,
           allow_set_idx);
@@ -1512,6 +1910,9 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
     return NULL;
   case NY_S_MODULE:
     for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      if (!stmt_static_list_should_scan_stmt(decl_stmt,
+                                             s->as.module.body.data[i]))
+        continue;
       const char *reason = stmt_list_fastpath_bail_reason(
           cg, scopes, depth, s->as.module.body.data[i], decl_stmt, name,
           allow_set_idx);
@@ -1520,7 +1921,7 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
     }
     return NULL;
   case NY_S_VAR:
-    if (s != decl_stmt) {
+    if (!stmt_static_list_is_decl_stmt(s, decl_stmt, name)) {
       for (size_t i = 0; i < s->as.var.names.len; ++i) {
         if (s->as.var.names.data[i] &&
             strcmp(s->as.var.names.data[i], name) == 0)
@@ -1616,9 +2017,21 @@ static const char *stmt_list_fastpath_bail_reason(codegen_t *cg, scope *scopes,
   case NY_S_DEFER:
     return stmt_list_fastpath_bail_reason(cg, scopes, depth, s->as.de.body,
                                           decl_stmt, name, allow_set_idx);
-  case NY_S_FUNC:
+  case NY_S_FUNC: {
+    const char *reason = stmt_params_list_fastpath_bail_reason(
+        cg, scopes, depth, &s->as.fn.params, name, allow_set_idx);
+    if (reason)
+      return reason;
+    if (stmt_params_contain_ident_name(&s->as.fn.params, name))
+      return "function-capture";
+    if (stmt_param_list_shadows_name(&s->as.fn.params, name))
+      return NULL;
+    return stmt_contains_ident_name(s->as.fn.body, name) ? "function-capture"
+                                                         : NULL;
+  }
   case NY_S_MACRO:
-    return "nested-function";
+    return stmt_list_fastpath_bail_reason(cg, scopes, depth, s->as.macro.body,
+                                          decl_stmt, name, allow_set_idx);
   default:
     return NULL;
   }
@@ -1646,12 +2059,19 @@ static bool stmt_can_elide_static_int_list_object(
       *bail_reason = "mixed-type";
     return false;
   }
-  if (!cg->current_fn_body) {
+  stmt_t top_level_root = {0};
+  stmt_t *root = cg->current_fn_body;
+  if (!root && cg->prog) {
+    top_level_root.kind = NY_S_BLOCK;
+    top_level_root.tok = decl_stmt->tok;
+    top_level_root.as.block.body = cg->prog->body;
+    root = &top_level_root;
+  }
+  if (!root) {
     if (bail_reason)
       *bail_reason = "module-scope";
     return false;
   }
-  stmt_t *root = cg->current_fn_body ? cg->current_fn_body : decl_stmt;
   if (!stmt_static_list_only_uses(cg, scopes, depth, root, decl_stmt, name)) {
     if (bail_reason)
       *bail_reason = stmt_list_fastpath_bail_reason(cg, scopes, depth, root,
@@ -2103,16 +2523,21 @@ static void stmt_init_raw_int_list_storage(codegen_t *cg, scope *scopes,
 }
 
 static void stmt_update_list_binding_proof(binding *b, bool is_list_storage,
-                                           bool is_int_list_storage) {
+                                           bool is_int_list_storage,
+                                           bool is_f64_list_storage) {
   if (!b)
     return;
   NY_COMPILER_ASSERT(!is_int_list_storage || is_list_storage,
                      "int-list proof requires list storage proof");
+  NY_COMPILER_ASSERT(!is_f64_list_storage || is_list_storage,
+                     "f64-list proof requires list storage proof");
   b->is_list_storage = is_list_storage;
   b->is_int_list_storage = is_list_storage && is_int_list_storage;
+  b->is_f64_list_storage = is_list_storage && is_f64_list_storage;
   if (!b->is_list_storage) {
     b->has_list_len_min = false;
     b->has_list_int_range = false;
+    b->is_f64_list_storage = false;
     b->raw_int_list_ptr = NULL;
     b->raw_int_list_len = 0;
     b->raw_int_list_mutation = false;
@@ -2172,6 +2597,18 @@ static void stmt_update_list_binding_len_min(binding *b, bool has_len_min,
   }
   b->has_list_len_min = true;
   b->list_len_min_raw = len_min_raw;
+}
+
+static void stmt_update_direct_callable_binding(codegen_t *cg, binding *b,
+                                                expr_t *rhs) {
+  if (!b)
+    return;
+  b->direct_callable_sig = NULL;
+  if (!cg || !rhs || b->is_mut)
+    return;
+  if ((rhs->kind == NY_E_LAMBDA || rhs->kind == NY_E_FN) &&
+      cg->last_lambda_sig && ny_sig_in_current_sigs(cg, cg->last_lambda_sig))
+    b->direct_callable_sig = cg->last_lambda_sig;
 }
 
 static void stmt_invalidate_static_indexable(binding *b) {
@@ -2307,11 +2744,24 @@ static void stmt_restore_binding_int_proof(stmt_binding_int_snapshot_t snap) {
   snap.b->int_max_raw = snap.int_max_raw;
 }
 
+static void
+stmt_restore_binding_int_proof_if_still_int(stmt_binding_int_snapshot_t snap) {
+  if (!snap.active || !snap.b)
+    return;
+  if ((snap.is_int_slot || snap.is_int_direct) &&
+      !(snap.b->is_int_slot || snap.b->is_int_direct))
+    return;
+  stmt_restore_binding_int_proof(snap);
+}
+
 static binding *stmt_while_lhs_binding(codegen_t *cg, scope *scopes,
                                        size_t depth, stmt_t *s) {
   if (!cg || !scopes || !s || s->kind != NY_S_WHILE || !s->as.whl.test)
     return NULL;
   expr_t *test = s->as.whl.test;
+  while (test && test->kind == NY_E_LOGICAL && test->as.logical.op &&
+         strcmp(test->as.logical.op, "&&") == 0)
+    test = test->as.logical.left;
   if (test->kind != NY_E_BINARY || !test->as.binary.op)
     return NULL;
   if (strcmp(test->as.binary.op, "<") != 0 &&
@@ -2393,44 +2843,67 @@ static bool stmt_expr_is_append_to_name(expr_t *e, const char *name,
                                         expr_t **out_value) {
   if (out_value)
     *out_value = NULL;
-  if (!e || e->kind != NY_E_CALL || !e->as.call.callee ||
-      e->as.call.callee->kind != NY_E_IDENT ||
-      !e->as.call.callee->as.ident.name || !name)
+  if (!e || !name)
     return false;
-  const char *callee = e->as.call.callee->as.ident.name;
-  if (!ny_name_tail_is(callee, "append"))
-    return false;
-  if (e->as.call.args.len < 2)
-    return false;
-  expr_t *target = e->as.call.args.data[0].val;
-  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name ||
-      strcmp(target->as.ident.name, name) != 0)
-    return false;
-  if (out_value)
-    *out_value = e->as.call.args.data[1].val;
-  return true;
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name) {
+    const char *callee = e->as.call.callee->as.ident.name;
+    if (!ny_name_tail_is(callee, "append") || e->as.call.args.len < 2)
+      return false;
+    expr_t *target = e->as.call.args.data[0].val;
+    if (!target || target->kind != NY_E_IDENT || !target->as.ident.name ||
+        strcmp(target->as.ident.name, name) != 0)
+      return false;
+    if (out_value)
+      *out_value = e->as.call.args.data[1].val;
+    return true;
+  }
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      ny_name_tail_is(e->as.memcall.name, "append") &&
+      e->as.memcall.target && e->as.memcall.target->kind == NY_E_IDENT &&
+      e->as.memcall.target->as.ident.name &&
+      strcmp(e->as.memcall.target->as.ident.name, name) == 0 &&
+      e->as.memcall.args.len >= 1) {
+    if (out_value)
+      *out_value = e->as.memcall.args.data[0].val;
+    return true;
+  }
+  return false;
 }
 
 static bool stmt_expr_is_set_idx_to_name(expr_t *e, const char *name,
                                          expr_t **out_value) {
   if (out_value)
     *out_value = NULL;
-  if (!e || e->kind != NY_E_CALL || !e->as.call.callee ||
-      e->as.call.callee->kind != NY_E_IDENT ||
-      !e->as.call.callee->as.ident.name || !name)
+  if (!e || !name)
     return false;
-  const char *callee = e->as.call.callee->as.ident.name;
-  if (!ny_name_tail_is(callee, "set_idx"))
-    return false;
-  if (e->as.call.args.len < 3)
-    return false;
-  expr_t *target = e->as.call.args.data[0].val;
-  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name ||
-      strcmp(target->as.ident.name, name) != 0)
-    return false;
-  if (out_value)
-    *out_value = e->as.call.args.data[2].val;
-  return true;
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name) {
+    const char *callee = e->as.call.callee->as.ident.name;
+    if (!ny_name_tail_is(callee, "set_idx") || e->as.call.args.len < 3)
+      return false;
+    expr_t *target = e->as.call.args.data[0].val;
+    if (!target || target->kind != NY_E_IDENT || !target->as.ident.name ||
+        strcmp(target->as.ident.name, name) != 0)
+      return false;
+    if (out_value)
+      *out_value = e->as.call.args.data[2].val;
+    return true;
+  }
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      (ny_name_tail_is(e->as.memcall.name, "set_idx") ||
+       ny_name_tail_is(e->as.memcall.name, "set")) &&
+      e->as.memcall.target && e->as.memcall.target->kind == NY_E_IDENT &&
+      e->as.memcall.target->as.ident.name &&
+      strcmp(e->as.memcall.target->as.ident.name, name) == 0 &&
+      e->as.memcall.args.len >= 2) {
+    if (out_value)
+      *out_value = e->as.memcall.args.data[1].val;
+    return true;
+  }
+  return false;
 }
 
 static bool stmt_find_loop_step_in_stmt(stmt_t *s, const char *name,
@@ -2459,6 +2932,79 @@ static bool stmt_find_loop_step_in_stmt(stmt_t *s, const char *name,
                                            delta_out);
     }
     return false;
+  default:
+    return false;
+  }
+}
+
+static bool stmt_loop_assigns_name_unproven_int(codegen_t *cg, scope *scopes,
+                                                size_t depth, stmt_t *s,
+                                                const char *name) {
+  if (!s || !name)
+    return false;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      if (stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                              s->as.block.body.data[i], name))
+        return true;
+    return false;
+  case NY_S_VAR:
+    if (s->as.var.is_decl)
+      return false;
+    for (size_t i = 0; i < s->as.var.names.len; ++i) {
+      const char *n = s->as.var.names.data[i];
+      if (!n || strcmp(n, name) != 0)
+        continue;
+      if (s->as.var.is_del || s->as.var.is_destructure ||
+          i >= s->as.var.exprs.len)
+        return true;
+      int64_t delta = 0;
+      if (stmt_find_loop_step_in_stmt(s, name, &delta))
+        continue;
+      if (!ny_is_proven_int(cg, scopes, depth, s->as.var.exprs.data[i], NULL))
+        return true;
+    }
+    return false;
+  case NY_S_IF:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.iff.init, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.iff.conseq, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.iff.alt, name);
+  case NY_S_GUARD:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.guard.fallback, name);
+  case NY_S_WHILE:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.whl.init, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.whl.body, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.whl.update, name);
+  case NY_S_FOR:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.fr.init, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.fr.body, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.fr.update, name);
+  case NY_S_TRY:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.tr.body, name) ||
+           stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.tr.handler, name);
+  case NY_S_DEFER:
+    return stmt_loop_assigns_name_unproven_int(cg, scopes, depth,
+                                               s->as.de.body, name);
+  case NY_S_MATCH:
+    for (size_t i = 0; i < s->as.match.arms.len; ++i)
+      if (stmt_loop_assigns_name_unproven_int(
+              cg, scopes, depth, s->as.match.arms.data[i].conseq, name))
+        return true;
+    return stmt_loop_assigns_name_unproven_int(
+        cg, scopes, depth, s->as.match.default_conseq, name);
   default:
     return false;
   }
@@ -2521,7 +3067,8 @@ static bool ensure_mutable_binding_for_assign(codegen_t *cg, token_t tok,
 static void stmt_var_setup_local_binding(
     codegen_t *cg, scope *scopes, size_t depth, stmt_t *var_stmt,
     sema_var_t *sema, size_t idx, const char *name, const char *decl_type,
-    bool prefer_direct_locals, bool *bind_direct, LLVMValueRef *slot) {
+    bool decl_type_explicit, bool prefer_direct_locals, bool *bind_direct,
+    LLVMValueRef *slot) {
   if (!cg || !scopes || !var_stmt || !name || !bind_direct || !slot)
     return;
   if (prefer_direct_locals ||
@@ -2571,6 +3118,8 @@ static void stmt_var_setup_local_binding(
     size_t nlen = strlen(name);
     binding *b = stmt_lookup_binding_no_mark(scopes, depth, name, nlen, 0);
     if (b) {
+      if (!decl_type_explicit)
+        b->decl_type_name = NULL;
       b->is_f64_slot = use_f64_slot;
       b->is_f32_slot = use_f32_slot;
       b->is_int_slot = use_int_slot;
@@ -2600,13 +3149,25 @@ static binding *stmt_var_lookup_existing(codegen_t *cg, scope *scopes,
 static bool stmt_top_entry_can_hoist_var(codegen_t *cg, const char *name) {
   if (!cg || !cg->top_entry_local_hoist_enabled || !name || !*name)
     return false;
-  binding *global = lookup_global(cg, name);
-  if (global && global->is_slot && global->stmt_t &&
-      global->stmt_t->kind == NY_S_VAR) {
+  if (cg->emit_module_decls_only ||
+      (cg->emit_module_name && *cg->emit_module_name))
     return false;
+  if (cg->source_main_file && *cg->source_main_file) {
+    const char *base = strrchr(cg->source_main_file, '/');
+    base = base ? base + 1 : cg->source_main_file;
+    if (strcmp(base, "std.ny") == 0)
+      return false;
   }
   if (cg->current_module_name && *cg->current_module_name)
     return false;
+  binding *global = lookup_global(cg, name);
+  if (global && global->is_slot && global->stmt_t &&
+      global->stmt_t->kind == NY_S_VAR) {
+    if (!global->name || strcmp(global->name, name) != 0 ||
+        strchr(global->name, '.') || ny_is_stdlib_tok(global->stmt_t->tok) ||
+        !ny_codegen_stmt_is_source_file(cg, global->stmt_t))
+      return false;
+  }
   uint64_t hash = ny_hash64_cstr(name);
   bool blocked = ny_name_set_has_hash(
       cg->top_entry_blocked_names_data, cg->top_entry_blocked_names_len,
@@ -4039,7 +4600,7 @@ static const char *binding_assign_type(const binding *b) {
     return NULL;
   if (b->decl_type_name && *b->decl_type_name)
     return b->decl_type_name;
-  return b->type_name;
+  return NULL;
 }
 
 static bool stmt_bindable_inferred_type(const char *type_name) {
@@ -4259,6 +4820,36 @@ static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
     }
     return false;
   }
+  case NY_E_MEMBER: {
+    if (!e->as.member.name || strcmp(e->as.member.name, "len") != 0)
+      return false;
+    expr_t *target = e->as.member.target;
+    expr_t *init = NULL;
+    if (target && (target->kind == NY_E_LITERAL || target->kind == NY_E_LIST ||
+                   target->kind == NY_E_TUPLE)) {
+      init = target;
+    } else if (target && target->kind == NY_E_IDENT && target->as.ident.name) {
+      size_t name_len = (size_t)target->tok.len;
+      if (name_len == 0)
+        name_len = strlen(target->as.ident.name);
+      binding *b = stmt_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                       name_len, target->as.ident.hash);
+      init = ny_binding_var_init_expr(b, target->as.ident.name);
+    }
+    int64_t len = -1;
+    if (init && init->kind == NY_E_LITERAL &&
+        init->as.literal.kind == NY_LIT_STR)
+      len = (int64_t)init->as.literal.as.s.len;
+    else if (init && (init->kind == NY_E_LIST || init->kind == NY_E_TUPLE))
+      len = (int64_t)init->as.list_like.len;
+    if (len < 0)
+      return false;
+    if (out_min)
+      *out_min = len;
+    if (out_max)
+      *out_max = len;
+    return true;
+  }
   case NY_E_CALL: {
     if (!e->as.call.callee || e->as.call.callee->kind != NY_E_IDENT)
       return false;
@@ -4344,6 +4935,34 @@ static bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth,
     if (!want_builtin_get)
       return false;
     expr_t *target = e->as.call.args.data[0].val;
+    if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
+      return false;
+    size_t name_len = (size_t)target->tok.len;
+    if (name_len == 0)
+      name_len = strlen(target->as.ident.name);
+    binding *b = stmt_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                     name_len, target->as.ident.hash);
+    if (b && b->is_int_list_storage && b->has_list_int_range) {
+      if (out_min)
+        *out_min = b->list_int_min_raw;
+      if (out_max)
+        *out_max = b->list_int_max_raw;
+      return true;
+    }
+    if (b && b->is_int_dict_storage && b->has_dict_int_range) {
+      if (out_min)
+        *out_min = b->dict_int_min_raw;
+      if (out_max)
+        *out_max = b->dict_int_max_raw;
+      return true;
+    }
+    return false;
+  }
+  case NY_E_MEMCALL: {
+    if (!e->as.memcall.name || !ny_name_tail_is(e->as.memcall.name, "get") ||
+        !e->as.memcall.target)
+      return false;
+    expr_t *target = e->as.memcall.target;
     if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
       return false;
     size_t name_len = (size_t)target->tok.len;
@@ -4539,6 +5158,73 @@ static bool stmt_try_while_trip_upper_bound(codegen_t *cg, scope *scopes,
   return true;
 }
 
+static bool stmt_expr_is_stable_dynamic_trip_bound(expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT)
+    return true;
+  return e->kind == NY_E_IDENT && e->as.ident.name;
+}
+
+static LLVMValueRef stmt_try_dynamic_while_trip_count_raw(codegen_t *cg,
+                                                          scope *scopes,
+                                                          size_t depth,
+                                                          stmt_t *s) {
+  if (!cg || !s || s->kind != NY_S_WHILE || !s->as.whl.test)
+    return NULL;
+  expr_t *test = s->as.whl.test;
+  if (test->kind != NY_E_BINARY || !test->as.binary.op)
+    return NULL;
+  bool strict_lt = strcmp(test->as.binary.op, "<") == 0;
+  bool strict_le = strcmp(test->as.binary.op, "<=") == 0;
+  if (!strict_lt && !strict_le)
+    return NULL;
+  expr_t *lhs = test->as.binary.left;
+  expr_t *rhs = test->as.binary.right;
+  if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name ||
+      !stmt_expr_is_stable_dynamic_trip_bound(rhs))
+    return NULL;
+
+  int64_t start_lo = 0, start_hi = 0, step = 0;
+  if (!stmt_expr_int_range(cg, scopes, depth, lhs, &start_lo, &start_hi) ||
+      start_lo != start_hi)
+    return NULL;
+  if (s->as.whl.update)
+    (void)stmt_find_loop_step_in_stmt(s->as.whl.update, lhs->as.ident.name,
+                                      &step);
+  if (step <= 0 &&
+      !stmt_find_loop_step_in_stmt(s->as.whl.body, lhs->as.ident.name, &step))
+    return NULL;
+  if (step <= 0)
+    return NULL;
+
+  LLVMValueRef rhs_v = gen_expr(cg, scopes, depth, rhs);
+  if (!rhs_v)
+    return NULL;
+  if (LLVMTypeOf(rhs_v) != cg->type_i64)
+    rhs_v = ny_ptr2i64(cg, rhs_v, NY_LLVM_NAME(cg, "dynamic_trip_bound"));
+  LLVMValueRef rhs_raw = ny_untag_int(cg, rhs_v);
+  LLVMValueRef span = ny_sub(
+      cg, rhs_raw, LLVMConstInt(cg->type_i64, (uint64_t)start_lo, true),
+      NY_LLVM_NAME(cg, "dynamic_trip_span"));
+  if (strict_le)
+    span = ny_add(cg, span, LLVMConstInt(cg->type_i64, 1, true),
+                  NY_LLVM_NAME(cg, "dynamic_trip_span_le"));
+  LLVMValueRef positive =
+      LLVMBuildICmp(cg->builder, LLVMIntSGT, span, ny_c0(cg),
+                    NY_LLVM_NAME(cg, "dynamic_trip_positive"));
+  LLVMValueRef nonneg_span =
+      ny_select(cg, positive, span, ny_c0(cg), "dynamic_trip_nonneg_span");
+  if (step == 1)
+    return nonneg_span;
+  LLVMValueRef numerator =
+      ny_add(cg, nonneg_span, LLVMConstInt(cg->type_i64, (uint64_t)(step - 1), true),
+             NY_LLVM_NAME(cg, "dynamic_trip_num"));
+  return LLVMBuildSDiv(cg->builder, numerator,
+                       LLVMConstInt(cg->type_i64, (uint64_t)step, true),
+                       NY_LLVM_NAME(cg, "dynamic_trip_raw"));
+}
+
 static void stmt_try_preseed_accumulator_assign(codegen_t *cg, scope *scopes,
                                                 size_t depth, stmt_t *s,
                                                 int64_t trip_count,
@@ -4635,6 +5321,9 @@ static const char *stmt_while_lhs_name(stmt_t *s) {
   if (!s || s->kind != NY_S_WHILE || !s->as.whl.test)
     return NULL;
   expr_t *test = s->as.whl.test;
+  while (test && test->kind == NY_E_LOGICAL && test->as.logical.op &&
+         strcmp(test->as.logical.op, "&&") == 0)
+    test = test->as.logical.left;
   if (test->kind != NY_E_BINARY || !test->as.binary.op)
     return NULL;
   if (strcmp(test->as.binary.op, "<") != 0 &&
@@ -4794,12 +5483,262 @@ static bool stmt_loop_body_has_control_exit(stmt_t *s) {
   }
 }
 
+typedef struct stmt_str_append_loop_t {
+  const char *name;
+  LLVMValueRef builder;
+  LLVMValueRef slot;
+  binding *binding;
+  bool active;
+} stmt_str_append_loop_t;
+
+static bool stmt_expr_is_stringish(codegen_t *cg, scope *scopes, size_t depth,
+                                   expr_t *e) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_STR)
+    return true;
+  return ny_type_is(infer_expr_type(cg, scopes, depth, e), "str");
+}
+
+static bool stmt_expr_is_self_str_concat(codegen_t *cg, scope *scopes,
+                                         size_t depth, expr_t *e,
+                                         const char *name,
+                                         expr_t **piece_out) {
+  if (piece_out)
+    *piece_out = NULL;
+  if (!e || !name || e->kind != NY_E_BINARY || !e->as.binary.op ||
+      strcmp(e->as.binary.op, "+") != 0 || !e->as.binary.left ||
+      !e->as.binary.right)
+    return false;
+  if (!ny_expr_ident_is_name(e->as.binary.left, name))
+    return false;
+  if (stmt_expr_contains_ident_name(e->as.binary.right, name))
+    return false;
+  if (!stmt_expr_is_stringish(cg, scopes, depth, e->as.binary.right))
+    return false;
+  if (piece_out)
+    *piece_out = e->as.binary.right;
+  return true;
+}
+
+static void stmt_collect_str_append_candidate(codegen_t *cg, scope *scopes,
+                                              size_t depth, stmt_t *s,
+                                              const char **name_out,
+                                              bool *ambiguous) {
+  if (!s || !name_out || !ambiguous || *ambiguous)
+    return;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      stmt_collect_str_append_candidate(cg, scopes, depth,
+                                        s->as.block.body.data[i], name_out,
+                                        ambiguous);
+    return;
+  case NY_S_VAR:
+    if (!s->as.var.is_decl && s->as.var.names.len == 1 &&
+        s->as.var.exprs.len == 1 && s->as.var.names.data[0] &&
+        stmt_expr_is_self_str_concat(cg, scopes, depth,
+                                     s->as.var.exprs.data[0],
+                                     s->as.var.names.data[0], NULL)) {
+      const char *name = s->as.var.names.data[0];
+      if (*name_out && strcmp(*name_out, name) != 0)
+        *ambiguous = true;
+      else
+        *name_out = name;
+    }
+    return;
+  case NY_S_IF:
+    stmt_collect_str_append_candidate(cg, scopes, depth, s->as.iff.conseq,
+                                      name_out, ambiguous);
+    stmt_collect_str_append_candidate(cg, scopes, depth, s->as.iff.alt,
+                                      name_out, ambiguous);
+    return;
+  case NY_S_MATCH:
+    for (size_t i = 0; i < s->as.match.arms.len; ++i)
+      stmt_collect_str_append_candidate(cg, scopes, depth,
+                                        s->as.match.arms.data[i].conseq,
+                                        name_out, ambiguous);
+    stmt_collect_str_append_candidate(cg, scopes, depth,
+                                      s->as.match.default_conseq, name_out,
+                                      ambiguous);
+    return;
+  default:
+    return;
+  }
+}
+
+static bool stmt_str_append_body_only_uses(codegen_t *cg, scope *scopes,
+                                           size_t depth, stmt_t *s,
+                                           const char *name) {
+  if (!s || !name)
+    return true;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      if (!stmt_str_append_body_only_uses(cg, scopes, depth,
+                                          s->as.block.body.data[i], name))
+        return false;
+    }
+    return true;
+  case NY_S_VAR:
+    if (!s->as.var.is_decl && s->as.var.names.len == 1 &&
+        s->as.var.exprs.len == 1 && s->as.var.names.data[0] &&
+        strcmp(s->as.var.names.data[0], name) == 0) {
+      return stmt_expr_is_self_str_concat(cg, scopes, depth,
+                                          s->as.var.exprs.data[0], name, NULL);
+    }
+    for (size_t i = 0; i < s->as.var.names.len; ++i) {
+      if (s->as.var.names.data[i] &&
+          strcmp(s->as.var.names.data[i], name) == 0)
+        return false;
+    }
+    return !stmt_contains_ident_name(s, name);
+  case NY_S_IF:
+    return !stmt_contains_ident_name(s->as.iff.init, name) &&
+           !stmt_expr_contains_ident_name(s->as.iff.test, name) &&
+           stmt_str_append_body_only_uses(cg, scopes, depth,
+                                          s->as.iff.conseq, name) &&
+           stmt_str_append_body_only_uses(cg, scopes, depth, s->as.iff.alt,
+                                          name);
+  case NY_S_MATCH:
+    if (stmt_expr_contains_ident_name(s->as.match.test, name))
+      return false;
+    for (size_t i = 0; i < s->as.match.arms.len; ++i) {
+      match_arm_t *arm = &s->as.match.arms.data[i];
+      for (size_t p = 0; p < arm->patterns.len; ++p) {
+        if (stmt_expr_contains_ident_name(arm->patterns.data[p], name))
+          return false;
+      }
+      if (stmt_expr_contains_ident_name(arm->guard, name))
+        return false;
+      if (!stmt_str_append_body_only_uses(cg, scopes, depth, arm->conseq,
+                                          name))
+        return false;
+    }
+    return stmt_str_append_body_only_uses(cg, scopes, depth,
+                                          s->as.match.default_conseq, name);
+  default:
+    return !stmt_contains_ident_name(s, name);
+  }
+}
+
+static bool stmt_prepare_str_append_loop(codegen_t *cg, scope *scopes,
+                                         size_t depth, stmt_t *s,
+                                         stmt_str_append_loop_t *out) {
+  if (out)
+    *out = (stmt_str_append_loop_t){0};
+  if (!out || !ny_env_enabled_default_on("NYTRIX_STRING_APPEND_LOOP_BUILDER") ||
+      !s || s->kind != NY_S_WHILE || stmt_loop_body_has_control_exit(s->as.whl.body))
+    return false;
+  const char *name = NULL;
+  bool ambiguous = false;
+  stmt_collect_str_append_candidate(cg, scopes, depth, s->as.whl.body, &name,
+                                    &ambiguous);
+  if (!name || ambiguous)
+    return false;
+  if (stmt_expr_contains_ident_name(s->as.whl.test, name) ||
+      stmt_contains_ident_name(s->as.whl.init, name) ||
+      stmt_contains_ident_name(s->as.whl.update, name))
+    return false;
+  if (!stmt_str_append_body_only_uses(cg, scopes, depth, s->as.whl.body, name))
+    return false;
+  binding *b = stmt_lookup_binding_no_mark(scopes, depth, name, strlen(name), 0);
+  if (!b || !b->is_mut || !b->is_slot || !b->value)
+    return false;
+  const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
+  if (!ny_type_is(bt, "str"))
+    return false;
+  out->name = name;
+  out->slot = b->value;
+  out->binding = b;
+  return true;
+}
+
+static bool stmt_begin_str_append_loop(codegen_t *cg,
+                                       stmt_str_append_loop_t *loop) {
+  if (!cg || !loop || !loop->name || !loop->slot)
+    return false;
+  fun_sig *new_sig = lookup_fun(cg, "__str_builder_new", 0);
+  fun_sig *append_sig = lookup_fun(cg, "__str_builder_append", 0);
+  if (!new_sig || !append_sig || !new_sig->type || !append_sig->type)
+    return false;
+  LLVMValueRef cap = LLVMConstInt(cg->type_i64, (64u << 1) | 1u, false);
+  LLVMValueRef builder =
+      LLVMBuildCall2(cg->builder, new_sig->type, new_sig->value,
+                     (LLVMValueRef[]){cap}, 1,
+                     NY_LLVM_NAME(cg, "str_loop_builder"));
+  LLVMValueRef current =
+      ny_load(cg, loop->slot, NY_LLVM_NAME(cg, "str_loop_initial"));
+  LLVMBuildCall2(cg->builder, append_sig->type, append_sig->value,
+                 (LLVMValueRef[]){builder, current}, 2,
+                 NY_LLVM_NAME(cg, "str_loop_seed"));
+  loop->builder = builder;
+  loop->active = true;
+  return true;
+}
+
+static void stmt_finish_str_append_loop(codegen_t *cg,
+                                        stmt_str_append_loop_t *loop) {
+  if (!cg || !loop || !loop->active || !loop->builder || !loop->slot)
+    return;
+  fun_sig *to_str_sig = lookup_fun(cg, "__str_builder_to_str", 0);
+  fun_sig *free_sig = lookup_fun(cg, "__str_builder_free", 0);
+  if (!to_str_sig || !to_str_sig->type)
+    return;
+  LLVMValueRef out =
+      LLVMBuildCall2(cg->builder, to_str_sig->type, to_str_sig->value,
+                     (LLVMValueRef[]){loop->builder}, 1,
+                     NY_LLVM_NAME(cg, "str_loop_result"));
+  ny_store(cg, loop->slot, out);
+  if (loop->binding) {
+    loop->binding->type_name = "str";
+    if (!loop->binding->decl_type_name)
+      loop->binding->decl_type_name = "str";
+  }
+  if (free_sig && free_sig->type)
+    LLVMBuildCall2(cg->builder, free_sig->type, free_sig->value,
+                   (LLVMValueRef[]){loop->builder}, 1,
+                   NY_LLVM_NAME(cg, "str_loop_free"));
+}
+
+static bool stmt_try_emit_active_str_append_assignment(codegen_t *cg,
+                                                       scope *scopes,
+                                                       size_t depth,
+                                                       const char *name,
+                                                       expr_t *rhs) {
+  if (!cg || !cg->active_str_append_name || !cg->active_str_append_builder ||
+      !name || strcmp(cg->active_str_append_name, name) != 0)
+    return false;
+  expr_t *piece = NULL;
+  if (!stmt_expr_is_self_str_concat(cg, scopes, depth, rhs, name, &piece))
+    return false;
+  fun_sig *append_sig = lookup_fun(cg, "__str_builder_append", 0);
+  if (!append_sig || !append_sig->type || !append_sig->value) {
+    ny_diag_error(rhs ? rhs->tok : (token_t){0},
+                  "internal string append loop lowering requires __str_builder_append");
+    cg->had_error = 1;
+    return true;
+  }
+  LLVMValueRef value = gen_expr(cg, scopes, depth, piece);
+  LLVMBuildCall2(cg->builder, append_sig->type, append_sig->value,
+                 (LLVMValueRef[]){cg->active_str_append_builder, value}, 2,
+                 NY_LLVM_NAME(cg, "str_loop_append"));
+  cg->active_str_append_used = true;
+  return true;
+}
+
 typedef struct stmt_loop_append_len_snapshot_t {
   binding *b;
   bool active;
   int64_t before_len_min;
   int64_t appends_per_iter;
 } stmt_loop_append_len_snapshot_t;
+
+typedef struct stmt_loop_dict_set_snapshot_t {
+  binding *b;
+  bool active;
+  int64_t sets_per_iter;
+} stmt_loop_dict_set_snapshot_t;
 
 static stmt_loop_append_len_snapshot_t *
 stmt_find_append_len_snapshot(stmt_loop_append_len_snapshot_t *snaps,
@@ -4866,6 +5805,86 @@ static void stmt_collect_loop_append_len_snapshots(
   }
 }
 
+static bool stmt_expr_is_dict_set_to_name(expr_t *e, const char *name) {
+  if (!e || !name)
+    return false;
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      ny_name_tail_is(e->as.memcall.name, "set") &&
+      e->as.memcall.args.len == 2)
+    return ny_expr_ident_is_name(e->as.memcall.target, name);
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name &&
+      ny_name_tail_is(e->as.call.callee->as.ident.name, "set") &&
+      e->as.call.args.len == 3)
+    return ny_expr_ident_is_name(e->as.call.args.data[0].val, name);
+  return false;
+}
+
+static stmt_loop_dict_set_snapshot_t *
+stmt_find_dict_set_snapshot(stmt_loop_dict_set_snapshot_t *snaps,
+                            size_t count, binding *b) {
+  if (!snaps || !b)
+    return NULL;
+  for (size_t i = 0; i < count; ++i) {
+    if (snaps[i].active && snaps[i].b == b)
+      return &snaps[i];
+  }
+  return NULL;
+}
+
+static void
+stmt_record_loop_dict_set_snapshot(stmt_loop_dict_set_snapshot_t *snaps,
+                                   size_t *count, size_t cap, binding *b) {
+  const char *bt = b ? (b->decl_type_name ? b->decl_type_name : b->type_name) : NULL;
+  if (!snaps || !count || *count >= cap || !b ||
+      (!b->is_dict_storage && !ny_type_is(bt, "dict")))
+    return;
+  stmt_loop_dict_set_snapshot_t *snap =
+      stmt_find_dict_set_snapshot(snaps, *count, b);
+  if (snap) {
+    if (snap->sets_per_iter < INT64_MAX)
+      snap->sets_per_iter++;
+    return;
+  }
+  snaps[*count] = (stmt_loop_dict_set_snapshot_t){
+      .b = b,
+      .active = true,
+      .sets_per_iter = 1,
+  };
+  (*count)++;
+}
+
+static void stmt_collect_loop_dict_set_snapshots(
+    codegen_t *cg, scope *scopes, size_t depth, stmt_t *s,
+    stmt_loop_dict_set_snapshot_t *snaps, size_t *count, size_t cap) {
+  if (!s || !snaps || !count || *count >= cap)
+    return;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len && *count < cap; ++i)
+      stmt_collect_loop_dict_set_snapshots(
+          cg, scopes, depth, s->as.block.body.data[i], snaps, count, cap);
+    return;
+  case NY_S_VAR:
+    if (s->as.var.is_decl || s->as.var.is_del)
+      return;
+    for (size_t i = 0;
+         i < s->as.var.names.len && i < s->as.var.exprs.len && *count < cap;
+         ++i) {
+      const char *name = s->as.var.names.data[i];
+      if (!name || !stmt_expr_is_dict_set_to_name(s->as.var.exprs.data[i], name))
+        continue;
+      binding *b =
+          stmt_lookup_binding(cg, scopes, depth, name, strlen(name), 0);
+      stmt_record_loop_dict_set_snapshot(snaps, count, cap, b);
+    }
+    return;
+  default:
+    return;
+  }
+}
+
 static void
 stmt_apply_loop_append_len_snapshots(stmt_loop_append_len_snapshot_t *snaps,
                                      size_t count, int64_t trip_count) {
@@ -4894,6 +5913,453 @@ stmt_apply_loop_append_len_snapshots(stmt_loop_append_len_snapshot_t *snaps,
     if (!b->has_list_len_min || b->list_len_min_raw < desired)
       stmt_update_list_binding_len_min(b, true, desired);
   }
+}
+
+static void stmt_reserve_loop_dict_sets(codegen_t *cg,
+                                        stmt_loop_dict_set_snapshot_t *snaps,
+                                        size_t count, int64_t trip_count) {
+  if (!cg || !snaps || trip_count <= 0 ||
+      !ny_env_enabled_default_on("NYTRIX_LOOP_DICT_RESERVE"))
+    return;
+  fun_sig *reserve_sig = lookup_fun(cg, "__dict_reserve", 0);
+  if (!reserve_sig || !reserve_sig->type || !reserve_sig->value)
+    return;
+  for (size_t i = 0; i < count; ++i) {
+    stmt_loop_dict_set_snapshot_t *snap = &snaps[i];
+    binding *b = snap->b;
+    const char *bt = b ? (b->decl_type_name ? b->decl_type_name : b->type_name) : NULL;
+    if (!snap->active || !b ||
+        (!b->is_dict_storage && !ny_type_is(bt, "dict")) || !b->is_slot ||
+        !b->value || !snap->sets_per_iter)
+      continue;
+    int64_t additional = 0;
+    if (!ny_mul_range_ok(snap->sets_per_iter, trip_count, &additional) ||
+        additional <= 0 || additional > NY_SMALL_INT_MAX)
+      continue;
+    LLVMValueRef cur = ny_load(cg, b->value, NY_LLVM_NAME(cg, "dict_reserve_cur"));
+    LLVMValueRef add =
+        LLVMConstInt(cg->type_i64, ((uint64_t)additional << 1) | 1u, false);
+    LLVMValueRef out =
+        LLVMBuildCall2(cg->builder, reserve_sig->type, reserve_sig->value,
+                       (LLVMValueRef[]){cur, add}, 2,
+                       NY_LLVM_NAME(cg, "dict_reserve"));
+    ny_store(cg, b->value, out);
+  }
+}
+
+static void stmt_reserve_loop_dict_sets_dynamic(
+    codegen_t *cg, stmt_loop_dict_set_snapshot_t *snaps, size_t count,
+    LLVMValueRef trip_count_raw) {
+  if (!cg || !snaps || !trip_count_raw ||
+      !ny_env_enabled_default_on("NYTRIX_LOOP_DICT_RESERVE"))
+    return;
+  fun_sig *reserve_sig = lookup_fun(cg, "__dict_reserve", 0);
+  if (!reserve_sig || !reserve_sig->type || !reserve_sig->value)
+    return;
+  for (size_t i = 0; i < count; ++i) {
+    stmt_loop_dict_set_snapshot_t *snap = &snaps[i];
+    binding *b = snap->b;
+    const char *bt = b ? (b->decl_type_name ? b->decl_type_name : b->type_name) : NULL;
+    if (!snap->active || !b ||
+        (!b->is_dict_storage && !ny_type_is(bt, "dict")) || !b->is_slot ||
+        !b->value || !snap->sets_per_iter)
+      continue;
+    LLVMValueRef additional = trip_count_raw;
+    if (snap->sets_per_iter != 1)
+      additional =
+          LLVMBuildMul(cg->builder, additional,
+                       LLVMConstInt(cg->type_i64,
+                                    (uint64_t)snap->sets_per_iter, false),
+                       NY_LLVM_NAME(cg, "dict_reserve_additional_raw"));
+    LLVMValueRef tagged =
+        ny_or(cg, ny_shl(cg, additional, ny_c1(cg),
+                         NY_LLVM_NAME(cg, "dict_reserve_additional_shl")),
+              ny_c1(cg), NY_LLVM_NAME(cg, "dict_reserve_additional"));
+    LLVMValueRef cur = ny_load(cg, b->value, NY_LLVM_NAME(cg, "dict_reserve_cur"));
+    LLVMValueRef out =
+        LLVMBuildCall2(cg->builder, reserve_sig->type, reserve_sig->value,
+                       (LLVMValueRef[]){cur, tagged}, 2,
+                       NY_LLVM_NAME(cg, "dict_reserve_dynamic"));
+    ny_store(cg, b->value, out);
+  }
+}
+
+static void stmt_reserve_loop_append_lists(codegen_t *cg,
+                                           stmt_loop_append_len_snapshot_t *snaps,
+                                           size_t count, int64_t trip_count) {
+  if (!cg || !snaps || trip_count <= 0 ||
+      !ny_env_enabled("NYTRIX_LOOP_LIST_RESERVE"))
+    return;
+  fun_sig *reserve_sig = lookup_fun(cg, "__list_reserve", 0);
+  if (!reserve_sig || !reserve_sig->type || !reserve_sig->value)
+    return;
+  for (size_t i = 0; i < count; ++i) {
+    stmt_loop_append_len_snapshot_t *snap = &snaps[i];
+    binding *b = snap->b;
+    if (!snap->active || !b || !b->is_list_storage || !b->is_slot ||
+        !b->value || !snap->appends_per_iter)
+      continue;
+    int64_t total_delta = 0, desired = 0;
+    if (!ny_mul_range_ok(snap->appends_per_iter, trip_count, &total_delta) ||
+        !ny_add_range_ok(snap->before_len_min, total_delta, &desired) ||
+        desired <= snap->before_len_min || desired <= 0 ||
+        desired > NY_SMALL_INT_MAX)
+      continue;
+    LLVMValueRef cur = ny_load(cg, b->value, NY_LLVM_NAME(cg, "list_reserve_cur"));
+    LLVMValueRef cap =
+        LLVMConstInt(cg->type_i64, ((uint64_t)desired << 1) | 1u, false);
+    LLVMValueRef out =
+        LLVMBuildCall2(cg->builder, reserve_sig->type, reserve_sig->value,
+                       (LLVMValueRef[]){cur, cap}, 2,
+                       NY_LLVM_NAME(cg, "list_reserve"));
+    ny_store(cg, b->value, out);
+  }
+}
+
+typedef struct stmt_list_sum_loop_t {
+  const char *acc_name;
+  const char *index_name;
+  const char *list_name;
+  binding *acc_binding;
+  binding *index_binding;
+  binding *list_binding;
+  bool requires_int_list_proof;
+} stmt_list_sum_loop_t;
+
+static bool stmt_expr_is_len_of_ident(codegen_t *cg, scope *scopes,
+                                      size_t depth, expr_t *e,
+                                      const char **name_out) {
+  if (name_out)
+    *name_out = NULL;
+  if (!e)
+    return false;
+  expr_t *target = NULL;
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      ny_name_tail_is(e->as.memcall.name, "len") &&
+      e->as.memcall.args.len == 0) {
+    target = e->as.memcall.target;
+  } else if (e->kind == NY_E_MEMBER && e->as.member.name &&
+             ny_name_tail_is(e->as.member.name, "len")) {
+    target = e->as.member.target;
+  } else if (e->kind == NY_E_CALL && e->as.call.callee &&
+             e->as.call.callee->kind == NY_E_IDENT &&
+             e->as.call.callee->as.ident.name &&
+             e->as.call.args.len == 1) {
+    if (stmt_call_builtin_name_shadowed(cg, scopes, depth, e->as.call.callee) ||
+        !ny_name_tail_is(e->as.call.callee->as.ident.name, "len"))
+      return false;
+    target = e->as.call.args.data[0].val;
+  }
+  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
+    return false;
+  if (name_out)
+    *name_out = target->as.ident.name;
+  return true;
+}
+
+static bool stmt_expr_is_index_of_ident(expr_t *e, const char *list_name,
+                                        const char *index_name) {
+  if (!e || e->kind != NY_E_INDEX || !list_name || !index_name)
+    return false;
+  if (e->as.index.stop || e->as.index.step || !e->as.index.target ||
+      !e->as.index.start)
+    return false;
+  expr_t *target = e->as.index.target;
+  expr_t *idx = e->as.index.start;
+  return target->kind == NY_E_IDENT && target->as.ident.name &&
+         strcmp(target->as.ident.name, list_name) == 0 &&
+         idx->kind == NY_E_IDENT && idx->as.ident.name &&
+         strcmp(idx->as.ident.name, index_name) == 0;
+}
+
+static bool stmt_expr_is_int_list_item(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e,
+                                       const char *list_name,
+                                       const char *index_name,
+                                       bool *requires_int_list_proof) {
+  if (requires_int_list_proof)
+    *requires_int_list_proof = false;
+  if (!e)
+    return false;
+  if (stmt_expr_is_index_of_ident(e, list_name, index_name)) {
+    if (requires_int_list_proof)
+      *requires_int_list_proof = true;
+    return true;
+  }
+  if (e->kind != NY_E_CALL || !e->as.call.callee ||
+      e->as.call.callee->kind != NY_E_IDENT ||
+      !e->as.call.callee->as.ident.name || e->as.call.args.len != 1)
+    return false;
+  const char *name = e->as.call.callee->as.ident.name;
+  if ((strcmp(name, "int") != 0 && !ny_name_tail_is(name, "to_int")) ||
+      stmt_call_builtin_name_shadowed(cg, scopes, depth, e->as.call.callee))
+    return false;
+  return stmt_expr_is_index_of_ident(e->as.call.args.data[0].val, list_name,
+                                     index_name);
+}
+
+static bool stmt_expr_is_sum_update(codegen_t *cg, scope *scopes, size_t depth,
+                                    expr_t *e, const char *acc_name,
+                                    const char *list_name,
+                                    const char *index_name,
+                                    bool *requires_int_list_proof) {
+  if (requires_int_list_proof)
+    *requires_int_list_proof = false;
+  if (!e || e->kind != NY_E_BINARY || !e->as.binary.op ||
+      strcmp(e->as.binary.op, "+") != 0)
+    return false;
+  expr_t *lhs = e->as.binary.left;
+  expr_t *rhs = e->as.binary.right;
+  bool lhs_acc = lhs && lhs->kind == NY_E_IDENT && lhs->as.ident.name &&
+                 strcmp(lhs->as.ident.name, acc_name) == 0;
+  bool rhs_acc = rhs && rhs->kind == NY_E_IDENT && rhs->as.ident.name &&
+                 strcmp(rhs->as.ident.name, acc_name) == 0;
+  bool item_needs_int_list = false;
+  bool ok = false;
+  if (lhs_acc)
+    ok = stmt_expr_is_int_list_item(cg, scopes, depth, rhs, list_name,
+                                    index_name, &item_needs_int_list);
+  if (!ok && rhs_acc)
+    ok = stmt_expr_is_int_list_item(cg, scopes, depth, lhs, list_name,
+                                    index_name, &item_needs_int_list);
+  if (ok && requires_int_list_proof)
+    *requires_int_list_proof = item_needs_int_list;
+  return ok;
+}
+
+static bool stmt_is_simple_step_assignment(stmt_t *s, const char *index_name) {
+  if (!s || !index_name || s->kind != NY_S_VAR || s->as.var.is_decl ||
+      s->as.var.is_del || s->as.var.is_destructure ||
+      s->as.var.names.len != 1 || s->as.var.exprs.len != 1)
+    return false;
+  const char *name = s->as.var.names.data[0];
+  if (!name || strcmp(name, index_name) != 0)
+    return false;
+  int64_t delta = 0;
+  return stmt_expr_is_ident_plus_const(s->as.var.exprs.data[0], index_name,
+                                       &delta) &&
+         delta == 1;
+}
+
+static bool stmt_is_simple_sum_assignment(codegen_t *cg, scope *scopes,
+                                          size_t depth, stmt_t *s,
+                                          const char *list_name,
+                                          const char *index_name,
+                                          const char **acc_name_out,
+                                          bool *requires_int_list_proof) {
+  if (acc_name_out)
+    *acc_name_out = NULL;
+  if (requires_int_list_proof)
+    *requires_int_list_proof = false;
+  if (!s || s->kind != NY_S_VAR || s->as.var.is_decl || s->as.var.is_del ||
+      s->as.var.is_destructure || s->as.var.names.len != 1 ||
+      s->as.var.exprs.len != 1)
+    return false;
+  const char *acc_name = s->as.var.names.data[0];
+  if (!acc_name || strcmp(acc_name, index_name) == 0 ||
+      strcmp(acc_name, list_name) == 0)
+    return false;
+  if (!stmt_expr_is_sum_update(cg, scopes, depth, s->as.var.exprs.data[0],
+                               acc_name, list_name, index_name,
+                               requires_int_list_proof))
+    return false;
+  if (acc_name_out)
+    *acc_name_out = acc_name;
+  return true;
+}
+
+static bool stmt_extract_list_sum_body(codegen_t *cg, scope *scopes,
+                                       size_t depth, stmt_t *body,
+                                       stmt_t *update,
+                                       const char *list_name,
+                                       const char *index_name,
+                                       const char **acc_name_out,
+                                       bool *requires_int_list_proof) {
+  if (requires_int_list_proof)
+    *requires_int_list_proof = false;
+  if (!body || !list_name || !index_name)
+    return false;
+  if (update) {
+    if (!stmt_is_simple_step_assignment(update, index_name))
+      return false;
+    if (body->kind == NY_S_BLOCK) {
+      if (body->as.block.body.len != 1)
+        return false;
+      body = body->as.block.body.data[0];
+    }
+    return stmt_is_simple_sum_assignment(cg, scopes, depth, body, list_name,
+                                         index_name, acc_name_out,
+                                         requires_int_list_proof);
+  }
+
+  if (body->kind != NY_S_BLOCK || body->as.block.body.len != 2)
+    return false;
+  stmt_t *a = body->as.block.body.data[0];
+  stmt_t *b = body->as.block.body.data[1];
+  const char *acc_name = NULL;
+  bool needs_int_list = false;
+  if (stmt_is_simple_step_assignment(a, index_name) &&
+      stmt_is_simple_sum_assignment(cg, scopes, depth, b, list_name, index_name,
+                                    &acc_name, &needs_int_list)) {
+    if (acc_name_out)
+      *acc_name_out = acc_name;
+    if (requires_int_list_proof)
+      *requires_int_list_proof = needs_int_list;
+    return true;
+  }
+  if (stmt_is_simple_sum_assignment(cg, scopes, depth, a, list_name, index_name,
+                                    &acc_name, &needs_int_list) &&
+      stmt_is_simple_step_assignment(b, index_name)) {
+    if (acc_name_out)
+      *acc_name_out = acc_name;
+    if (requires_int_list_proof)
+      *requires_int_list_proof = needs_int_list;
+    return true;
+  }
+  return false;
+}
+
+static bool stmt_match_list_sum_loop(codegen_t *cg, scope *scopes,
+                                     size_t depth, stmt_t *s,
+                                     stmt_list_sum_loop_t *out) {
+  if (out)
+    memset(out, 0, sizeof(*out));
+  if (!cg || !s || s->kind != NY_S_WHILE || !s->as.whl.test ||
+      stmt_loop_body_has_control_exit(s->as.whl.body))
+    return false;
+  expr_t *test = s->as.whl.test;
+  if (test->kind != NY_E_BINARY || !test->as.binary.op ||
+      strcmp(test->as.binary.op, "<") != 0)
+    return false;
+  expr_t *lhs = test->as.binary.left;
+  expr_t *rhs = test->as.binary.right;
+  if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name || !rhs)
+    return false;
+  const char *list_name = NULL;
+  if (!stmt_expr_is_len_of_ident(cg, scopes, depth, rhs, &list_name) ||
+      !list_name)
+    return false;
+
+  int64_t idx_min = 0, idx_max = 0;
+  if (!stmt_expr_int_range(cg, scopes, depth, lhs, &idx_min, &idx_max) ||
+      idx_min < 0)
+    return false;
+
+  const char *acc_name = NULL;
+  bool requires_int_list_proof = false;
+  if (!stmt_extract_list_sum_body(cg, scopes, depth, s->as.whl.body,
+                                  s->as.whl.update, list_name,
+                                  lhs->as.ident.name, &acc_name,
+                                  &requires_int_list_proof) ||
+      !acc_name)
+    return false;
+
+  if (strcmp(acc_name, lhs->as.ident.name) == 0 ||
+      strcmp(acc_name, list_name) == 0 ||
+      strcmp(lhs->as.ident.name, list_name) == 0)
+    return false;
+
+  binding *list_b =
+      stmt_lookup_binding(cg, scopes, depth, list_name, strlen(list_name), 0);
+  binding *idx_b = stmt_lookup_binding(cg, scopes, depth, lhs->as.ident.name,
+                                       strlen(lhs->as.ident.name), 0);
+  binding *acc_b =
+      stmt_lookup_binding(cg, scopes, depth, acc_name, strlen(acc_name), 0);
+  const char *list_type =
+      list_b ? (list_b->decl_type_name ? list_b->decl_type_name
+                                       : list_b->type_name)
+             : NULL;
+  bool list_ok =
+      list_b && (list_b->is_int_list_storage ||
+                 (!requires_int_list_proof &&
+                  (list_b->is_list_storage || ny_type_is(list_type, "list") ||
+                   ny_type_is(list_type, "tuple"))));
+  if (!list_b || !idx_b || !acc_b || !idx_b->is_slot || !acc_b->is_slot ||
+      !list_b->value || !idx_b->value || !acc_b->value || !list_ok ||
+      !idx_b->is_int_slot ||
+      !acc_b->is_int_slot)
+    return false;
+
+  if (out) {
+    out->acc_name = acc_name;
+    out->index_name = lhs->as.ident.name;
+    out->list_name = list_name;
+    out->acc_binding = acc_b;
+    out->index_binding = idx_b;
+    out->list_binding = list_b;
+    out->requires_int_list_proof = requires_int_list_proof;
+  }
+  return true;
+}
+
+static bool stmt_try_emit_list_sum_loop(codegen_t *cg, scope *scopes,
+                                        size_t depth, stmt_t *s) {
+  if (!ny_env_enabled_default_on("NYTRIX_FAST_LIST_SUM"))
+    return false;
+  stmt_list_sum_loop_t loop = {0};
+  if (!stmt_match_list_sum_loop(cg, scopes, depth, s, &loop))
+    return false;
+  fun_sig *sum_sig = lookup_fun(cg, "__list_sum_int_range", 0);
+  if (!sum_sig || !sum_sig->type || !sum_sig->value)
+    return false;
+
+  ny_dbg_loc(cg, s->tok);
+  LLVMValueRef list_v =
+      loop.list_binding->is_slot
+          ? ny_load(cg, loop.list_binding->value,
+                    NY_LLVM_NAME(cg, "list_sum_list"))
+          : loop.list_binding->value;
+  if (LLVMTypeOf(list_v) != cg->type_i64)
+    list_v = ny_ptr2i64(cg, list_v, "list_sum_list_i64");
+  LLVMValueRef idx_v =
+      ny_load(cg, loop.index_binding->value, NY_LLVM_NAME(cg, "list_sum_idx"));
+  LLVMValueRef idx_raw =
+      loop.index_binding->raw_int_value
+          ? ny_load(cg, loop.index_binding->raw_int_value,
+                    NY_LLVM_NAME(cg, "list_sum_idx_raw"))
+          : ny_untag_int(cg, idx_v);
+  LLVMValueRef list_ptr =
+      LLVMBuildIntToPtr(cg->builder, list_v, ny_ptr_i64_ty(cg),
+                        NY_LLVM_NAME(cg, "list_sum_ptr"));
+  LLVMValueRef len_v =
+      ny_load(cg, list_ptr, NY_LLVM_NAME(cg, "list_sum_len"));
+  LLVMValueRef len_raw = ny_untag_int(cg, len_v);
+  LLVMValueRef should_run =
+      ny_slt(cg, idx_raw, len_raw, NY_LLVM_NAME(cg, "list_sum_has_items"));
+
+  LLVMValueRef fn = ny_cur_fn(cg);
+  LLVMBasicBlockRef sum_bb = ny_bb_fn(fn, "list.sum");
+  LLVMBasicBlockRef done_bb = ny_bb_fn(fn, "list.sum.done");
+  ny_cond_br(cg, should_run, sum_bb, done_bb);
+
+  ny_pos(cg, sum_bb);
+  LLVMValueRef sum_v =
+      LLVMBuildCall2(cg->builder, sum_sig->type, sum_sig->value,
+                     (LLVMValueRef[]){list_v, idx_v, len_v}, 3,
+                     NY_LLVM_NAME(cg, "list_sum_range"));
+  LLVMValueRef acc_v =
+      ny_load(cg, loop.acc_binding->value, NY_LLVM_NAME(cg, "list_sum_acc"));
+  LLVMValueRef acc_raw =
+      loop.acc_binding->raw_int_value
+          ? ny_load(cg, loop.acc_binding->raw_int_value,
+                    NY_LLVM_NAME(cg, "list_sum_acc_raw"))
+          : ny_untag_int(cg, acc_v);
+  LLVMValueRef new_raw =
+      ny_add(cg, acc_raw, ny_untag_int(cg, sum_v),
+             NY_LLVM_NAME(cg, "list_sum_acc_new_raw"));
+  LLVMValueRef new_acc = ny_tag_int(cg, new_raw);
+  ny_store(cg, loop.acc_binding->value, new_acc);
+  if (loop.acc_binding->raw_int_value)
+    ny_store(cg, loop.acc_binding->raw_int_value, new_raw);
+  ny_store(cg, loop.index_binding->value, len_v);
+  if (loop.index_binding->raw_int_value)
+    ny_store(cg, loop.index_binding->raw_int_value, len_raw);
+  stmt_update_int_binding_range(loop.acc_binding, false, 0, 0);
+  stmt_update_int_binding_range(loop.index_binding, false, 0, 0);
+  ny_br(cg, done_bb);
+
+  ny_pos(cg, done_bb);
+  return true;
 }
 
 static void stmt_try_widen_loop_accumulator_binding(codegen_t *cg,
@@ -5399,13 +6865,13 @@ static void gen_stmt_if(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     scope_pop(scopes, depth);
 }
 
-static char *stmt_guard_from_name(const char *type_name) {
+static char *stmt_guard_from_name(codegen_t *cg, const char *type_name) {
   if (!type_name)
     type_name = "";
   while (*type_name == '?' || *type_name == '*')
     type_name++;
   size_t len = strlen(type_name);
-  char *out = malloc(len + 6);
+  char *out = arena_alloc(cg ? cg->arena : NULL, len + 6);
   if (!out) {
     fprintf(stderr, "oom\n");
     exit(1);
@@ -5432,62 +6898,65 @@ static const char *stmt_guard_binding_type(codegen_t *cg,
 
 static void gen_stmt_guard(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root) {
-  char *from_name = stmt_guard_from_name(s->as.guard.type_name);
-  expr_t callee = {0};
-  callee.kind = NY_E_IDENT;
-  callee.tok = s->tok;
-  callee.tok.lexeme = from_name;
-  callee.tok.len = (int)strlen(from_name);
-  callee.as.ident.name = from_name;
-  callee.as.ident.hash = ny_hash64_cstr(from_name);
+  char *from_name = stmt_guard_from_name(cg, s->as.guard.type_name);
+  expr_t *callee = arena_alloc(cg ? cg->arena : NULL, sizeof(*callee));
+  callee->kind = NY_E_IDENT;
+  callee->tok = s->tok;
+  callee->tok.lexeme = from_name;
+  callee->tok.len = (int)strlen(from_name);
+  callee->as.ident.name = from_name;
+  callee->as.ident.hash = ny_hash64_cstr(from_name);
 
-  call_arg_t arg_data[1] = {{NULL, s->as.guard.value}};
-  expr_t call = {0};
-  call.kind = NY_E_CALL;
-  call.tok = s->tok;
-  call.as.call.callee = &callee;
-  call.as.call.args.data = arg_data;
-  call.as.call.args.len = 1;
-  call.as.call.args.cap = 1;
+  call_arg_t *arg_data = arena_alloc(cg ? cg->arena : NULL, sizeof(*arg_data));
+  arg_data[0] = (call_arg_t){NULL, s->as.guard.value};
+  expr_t *call = arena_alloc(cg ? cg->arena : NULL, sizeof(*call));
+  call->kind = NY_E_CALL;
+  call->tok = s->tok;
+  call->as.call.callee = callee;
+  call->as.call.args.data = arg_data;
+  call->as.call.args.len = 1;
+  call->as.call.args.cap = 1;
 
-  const char *name_data[1] = {s->as.guard.name};
+  const char **name_data = arena_alloc(cg ? cg->arena : NULL, sizeof(*name_data));
+  name_data[0] = s->as.guard.name;
   const char *guard_type = stmt_guard_binding_type(cg, s->as.guard.type_name);
-  const char *type_data[1] = {guard_type};
-  expr_t *expr_data[1] = {&call};
-  stmt_t decl = {0};
-  decl.kind = NY_S_VAR;
-  decl.tok = s->tok;
-  decl.as.var.names.data = (const char **)name_data;
-  decl.as.var.names.len = 1;
-  decl.as.var.names.cap = 1;
-  decl.as.var.types.data = (const char **)type_data;
-  decl.as.var.types.len = 1;
-  decl.as.var.types.cap = 1;
-  decl.as.var.exprs.data = expr_data;
-  decl.as.var.exprs.len = 1;
-  decl.as.var.exprs.cap = 1;
-  decl.as.var.is_decl = true;
-  gen_stmt(cg, scopes, depth, &decl, func_root, false);
+  const char **type_data = arena_alloc(cg ? cg->arena : NULL, sizeof(*type_data));
+  type_data[0] = guard_type;
+  expr_t **expr_data = arena_alloc(cg ? cg->arena : NULL, sizeof(*expr_data));
+  expr_data[0] = call;
+  stmt_t *decl = arena_alloc(cg ? cg->arena : NULL, sizeof(*decl));
+  decl->kind = NY_S_VAR;
+  decl->tok = s->tok;
+  decl->as.var.names.data = (const char **)name_data;
+  decl->as.var.names.len = 1;
+  decl->as.var.names.cap = 1;
+  decl->as.var.types.data = (const char **)type_data;
+  decl->as.var.types.len = 1;
+  decl->as.var.types.cap = 1;
+  decl->as.var.exprs.data = expr_data;
+  decl->as.var.exprs.len = 1;
+  decl->as.var.exprs.cap = 1;
+  decl->as.var.is_decl = true;
+  gen_stmt(cg, scopes, depth, decl, func_root, false);
 
-  expr_t ident = {0};
-  ident.kind = NY_E_IDENT;
-  ident.tok = s->tok;
-  ident.tok.lexeme = s->as.guard.name;
-  ident.tok.len = (int)strlen(s->as.guard.name);
-  ident.as.ident.name = s->as.guard.name;
-  ident.as.ident.hash = ny_hash64_cstr(s->as.guard.name);
-  expr_t not_ident = {0};
-  not_ident.kind = NY_E_UNARY;
-  not_ident.tok = s->tok;
-  not_ident.as.unary.op = "!";
-  not_ident.as.unary.right = &ident;
-  stmt_t iff = {0};
-  iff.kind = NY_S_IF;
-  iff.tok = s->tok;
-  iff.as.iff.test = &not_ident;
-  iff.as.iff.conseq = s->as.guard.fallback;
-  gen_stmt_if(cg, scopes, depth, &iff, func_root, false);
-  free(from_name);
+  expr_t *ident = arena_alloc(cg ? cg->arena : NULL, sizeof(*ident));
+  ident->kind = NY_E_IDENT;
+  ident->tok = s->tok;
+  ident->tok.lexeme = s->as.guard.name;
+  ident->tok.len = (int)strlen(s->as.guard.name);
+  ident->as.ident.name = s->as.guard.name;
+  ident->as.ident.hash = ny_hash64_cstr(s->as.guard.name);
+  expr_t *not_ident = arena_alloc(cg ? cg->arena : NULL, sizeof(*not_ident));
+  not_ident->kind = NY_E_UNARY;
+  not_ident->tok = s->tok;
+  not_ident->as.unary.op = "!";
+  not_ident->as.unary.right = ident;
+  stmt_t *iff = arena_alloc(cg ? cg->arena : NULL, sizeof(*iff));
+  iff->kind = NY_S_IF;
+  iff->tok = s->tok;
+  iff->as.iff.test = not_ident;
+  iff->as.iff.conseq = s->as.guard.fallback;
+  gen_stmt_if(cg, scopes, depth, iff, func_root, false);
 }
 
 static void gen_stmt_block(codegen_t *cg, scope *scopes, size_t *depth,
@@ -5769,12 +7238,12 @@ static bool stmt_auto_simd_loop_shape(codegen_t *cg, scope *scopes,
 static void apply_loop_metadata(codegen_t *cg, LLVMValueRef branch,
                                 bool attr_unroll, bool attr_nounroll,
                                 bool attr_vectorize, bool inferred_vectorize) {
+  (void)inferred_vectorize;
   if (attr_unroll)
     ny_loop_unroll_hint(cg, branch);
   else if (attr_nounroll)
     ny_loop_nounroll_hint(cg, branch);
-  if (attr_vectorize || inferred_vectorize ||
-      ny_env_enabled("NYTRIX_AUTO_VECTORIZE_LOOPS"))
+  if (attr_vectorize || ny_env_enabled("NYTRIX_AUTO_VECTORIZE_LOOPS"))
     ny_loop_vectorize_hint(cg, branch);
 }
 
@@ -5795,6 +7264,47 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
     scope_enter(scopes, depth, NULL, NULL);
     gen_stmt(cg, scopes, depth, s->as.whl.init, func_root, false);
   }
+  if (stmt_try_emit_list_sum_loop(cg, scopes, *depth, s)) {
+    if (s->as.whl.init)
+      scope_pop(scopes, depth);
+    return;
+  }
+  stmt_str_append_loop_t str_append_loop = {0};
+  bool use_str_append_loop =
+      stmt_prepare_str_append_loop(cg, scopes, *depth, s, &str_append_loop) &&
+      stmt_begin_str_append_loop(cg, &str_append_loop);
+  int64_t trip_count_hint = 0;
+  bool has_trip_count_hint =
+      stmt_try_while_trip_upper_bound(cg, scopes, *depth, s, &trip_count_hint) &&
+      trip_count_hint > 0;
+  LLVMValueRef dynamic_trip_count_raw =
+      has_trip_count_hint ? NULL
+                          : stmt_try_dynamic_while_trip_count_raw(
+                                cg, scopes, *depth, s);
+  stmt_loop_append_len_snapshot_t append_len_snaps[64] = {0};
+  size_t append_len_snap_count = 0;
+  stmt_loop_dict_set_snapshot_t dict_set_snaps[64] = {0};
+  size_t dict_set_snap_count = 0;
+  if ((has_trip_count_hint || dynamic_trip_count_raw) &&
+      !stmt_loop_body_has_control_exit(s->as.whl.body)) {
+    stmt_collect_loop_append_len_snapshots(
+        cg, scopes, *depth, s->as.whl.body, append_len_snaps,
+        &append_len_snap_count,
+        sizeof(append_len_snaps) / sizeof(append_len_snaps[0]));
+    stmt_collect_loop_dict_set_snapshots(
+        cg, scopes, *depth, s->as.whl.body, dict_set_snaps,
+        &dict_set_snap_count,
+        sizeof(dict_set_snaps) / sizeof(dict_set_snaps[0]));
+    stmt_reserve_loop_append_lists(cg, append_len_snaps,
+                                   append_len_snap_count, trip_count_hint);
+    if (has_trip_count_hint)
+      stmt_reserve_loop_dict_sets(cg, dict_set_snaps, dict_set_snap_count,
+                                  trip_count_hint);
+    else
+      stmt_reserve_loop_dict_sets_dynamic(cg, dict_set_snaps,
+                                          dict_set_snap_count,
+                                          dynamic_trip_count_raw);
+  }
   LLVMValueRef f = ny_cur_fn(cg);
   LLVMBasicBlockRef cb = ny_bb_fn(f, "wc"), bb = ny_bb_fn(f, "wb"),
                     eb = ny_bb_fn(f, "we");
@@ -5807,19 +7317,27 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
 
   ny_pos(cg, cb);
   ny_dbg_loc(cg, s->tok);
+  const char *while_lhs_name = stmt_while_lhs_name(s);
+  binding *while_lhs_binding =
+      stmt_while_lhs_binding(cg, scopes, *depth, s);
+  bool suppress_cond_int_proof =
+      while_lhs_name && while_lhs_binding &&
+      (while_lhs_binding->is_int_slot || while_lhs_binding->is_int_direct) &&
+      (stmt_loop_assigns_name_unproven_int(cg, scopes, *depth, s->as.whl.body,
+                                           while_lhs_name) ||
+       stmt_loop_assigns_name_unproven_int(cg, scopes, *depth,
+                                           s->as.whl.update, while_lhs_name));
+  if (suppress_cond_int_proof) {
+    while_lhs_binding->is_int_slot = false;
+    while_lhs_binding->is_int_direct = false;
+    while_lhs_binding->is_int_raw_direct = false;
+    while_lhs_binding->has_int_range = false;
+  }
   bool inferred_vectorize = stmt_auto_simd_loop_shape(cg, scopes, *depth, s);
-  if (stmt_try_emit_direct_cmp_cond_branch(cg, scopes, *depth, s->as.whl.test,
-                                           bb, eb)) {
-    LLVMValueRef last_br = LLVMGetBasicBlockTerminator(ny_cur_block(cg));
-    apply_loop_metadata(cg, last_br, s->as.whl.attr_unroll,
-                        s->as.whl.attr_nounroll, s->as.whl.attr_vectorize,
-                        inferred_vectorize);
-  } else {
-    LLVMValueRef cond_br = ny_cond_br(
-        cg, stmt_gen_cond_i1(cg, scopes, *depth, s->as.whl.test), bb, eb);
-    apply_loop_metadata(cg, cond_br, s->as.whl.attr_unroll,
-                        s->as.whl.attr_nounroll, s->as.whl.attr_vectorize,
-                        inferred_vectorize);
+  if (!stmt_try_emit_direct_cmp_cond_branch(cg, scopes, *depth, s->as.whl.test,
+                                            bb, eb)) {
+    ny_cond_br(cg, stmt_gen_cond_i1(cg, scopes, *depth, s->as.whl.test), bb,
+               eb);
   }
 
   ny_pos(cg, bb);
@@ -5828,13 +7346,7 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
   stmt_binding_int_snapshot_t loop_index_snapshot =
       stmt_snapshot_binding_int_proof(
           stmt_while_lhs_binding(cg, scopes, *depth, s));
-  int64_t trip_count_hint = 0;
-  bool has_trip_count_hint = stmt_try_while_trip_upper_bound(
-                                 cg, scopes, *depth - 1, s, &trip_count_hint) &&
-                             trip_count_hint > 0;
   stmt_preseed_while_condition_index_range(cg, scopes, *depth, s);
-  stmt_loop_append_len_snapshot_t append_len_snaps[64] = {0};
-  size_t append_len_snap_count = 0;
   if (has_trip_count_hint) {
     int64_t parent_hint = scopes[*depth].loop_trip_hint;
     if (parent_hint > 0) {
@@ -5851,29 +7363,56 @@ static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
                                          stmt_while_lhs_name(s));
     stmt_preseed_loop_index_ranges(cg, scopes, *depth, s->as.whl.body,
                                    trip_count_hint);
-    if (!stmt_loop_body_has_control_exit(s->as.whl.body))
+    if (!append_len_snap_count && !stmt_loop_body_has_control_exit(s->as.whl.body))
       stmt_collect_loop_append_len_snapshots(
           cg, scopes, *depth, s->as.whl.body, append_len_snaps,
           &append_len_snap_count,
           sizeof(append_len_snaps) / sizeof(append_len_snaps[0]));
   }
+  const char *prev_str_append_name = cg->active_str_append_name;
+  LLVMValueRef prev_str_append_builder = cg->active_str_append_builder;
+  bool prev_str_append_used = cg->active_str_append_used;
+  if (use_str_append_loop) {
+    cg->active_str_append_name = str_append_loop.name;
+    cg->active_str_append_builder = str_append_loop.builder;
+    cg->active_str_append_used = false;
+  }
   gen_stmt(cg, scopes, depth, s->as.whl.body, func_root, false);
-  emit_defers_and_br(cg, scopes, *depth, cont_bb, s->tok);
+  if (use_str_append_loop) {
+    cg->active_str_append_name = prev_str_append_name;
+    cg->active_str_append_builder = prev_str_append_builder;
+    cg->active_str_append_used = prev_str_append_used;
+  }
+  emit_defers(cg, scopes, *depth, *depth);
+  if (!ny_has_terminator(cg)) {
+    ny_dbg_loc(cg, s->tok);
+    LLVMValueRef latch_br = ny_br(cg, cont_bb);
+    if (!ub)
+      apply_loop_metadata(cg, latch_br, s->as.whl.attr_unroll,
+                          s->as.whl.attr_nounroll, s->as.whl.attr_vectorize,
+                          inferred_vectorize);
+  }
 
   if (ub) {
     ny_pos(cg, ub);
     gen_stmt(cg, scopes, depth, s->as.whl.update, func_root, false);
-    if (!ny_has_terminator(cg))
-      ny_br(cg, cb);
+    if (!ny_has_terminator(cg)) {
+      LLVMValueRef latch_br = ny_br(cg, cb);
+      apply_loop_metadata(cg, latch_br, s->as.whl.attr_unroll,
+                          s->as.whl.attr_nounroll, s->as.whl.attr_vectorize,
+                          inferred_vectorize);
+    }
   }
 
   scope_pop(scopes, depth);
-  stmt_restore_binding_int_proof(loop_index_snapshot);
+  stmt_restore_binding_int_proof_if_still_int(loop_index_snapshot);
   stmt_apply_loop_append_len_snapshots(append_len_snaps, append_len_snap_count,
                                        trip_count_hint);
   codegen_debug_pop_block(cg, dbg_scope);
 
   ny_pos(cg, eb);
+  if (use_str_append_loop)
+    stmt_finish_str_append_loop(cg, &str_append_loop);
   if (s->as.whl.init)
     scope_pop(scopes, depth);
 }
@@ -5895,6 +7434,180 @@ static bool get_for_iter_helpers(codegen_t *cg, token_t tok, fun_sig **ls,
   return false;
 }
 
+static bool stmt_expr_is_minus_one(expr_t *e, expr_t **base_out) {
+  if (base_out)
+    *base_out = NULL;
+  if (!e || e->kind != NY_E_BINARY || !e->as.binary.op ||
+      strcmp(e->as.binary.op, "-") != 0 || !e->as.binary.left ||
+      !e->as.binary.right)
+    return false;
+  int64_t rhs = 0;
+  if (!ny_expr_literal_i64(e->as.binary.right, &rhs) || rhs != 1)
+    return false;
+  if (base_out)
+    *base_out = e->as.binary.left;
+  return true;
+}
+
+static LLVMValueRef stmt_emit_raw_int_expr(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *e,
+                                           const char *name) {
+  (void)name;
+  if (!ny_is_proven_int(cg, scopes, depth, e, NULL))
+    return NULL;
+  LLVMValueRef tagged = gen_expr(cg, scopes, depth, e);
+  if (!tagged)
+    return NULL;
+  return ny_untag_int(cg, tagged);
+}
+
+static bool stmt_fast_range_bounds_supported(codegen_t *cg, scope *scopes,
+                                             size_t depth, expr_t *iterable,
+                                             expr_t **start_out,
+                                             expr_t **stop_excl_out,
+                                             bool *stop_is_inclusive_out) {
+  if (start_out)
+    *start_out = NULL;
+  if (stop_excl_out)
+    *stop_excl_out = NULL;
+  if (stop_is_inclusive_out)
+    *stop_is_inclusive_out = false;
+  if (!iterable || iterable->kind != NY_E_BINARY || !iterable->as.binary.op ||
+      strcmp(iterable->as.binary.op, "..") != 0 || !iterable->as.binary.left ||
+      !iterable->as.binary.right)
+    return false;
+
+  expr_t *start = iterable->as.binary.left;
+  expr_t *right = iterable->as.binary.right;
+  if (!ny_is_proven_int(cg, scopes, depth, start, NULL))
+    return false;
+
+  expr_t *minus_one_base = NULL;
+  if (stmt_expr_is_minus_one(right, &minus_one_base)) {
+    if (!ny_is_proven_int(cg, scopes, depth, minus_one_base, NULL))
+      return false;
+    if (start_out)
+      *start_out = start;
+    if (stop_excl_out)
+      *stop_excl_out = minus_one_base;
+    if (stop_is_inclusive_out)
+      *stop_is_inclusive_out = false;
+    return true;
+  }
+
+  if (!ny_is_proven_int(cg, scopes, depth, right, NULL))
+    return false;
+  int64_t min_raw = 0, max_raw = 0;
+  if (!stmt_expr_int_range(cg, scopes, depth, right, &min_raw, &max_raw) ||
+      max_raw == INT64_MAX)
+    return false;
+  (void)min_raw;
+
+  if (start_out)
+    *start_out = start;
+  if (stop_excl_out)
+    *stop_excl_out = right;
+  if (stop_is_inclusive_out)
+    *stop_is_inclusive_out = true;
+  return true;
+}
+
+static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
+                                         size_t *depth, stmt_t *s,
+                                         size_t func_root) {
+  expr_t *start_expr = NULL;
+  expr_t *stop_expr = NULL;
+  bool stop_is_inclusive = false;
+  if (!s || !s->as.fr.iterable ||
+      !stmt_fast_range_bounds_supported(cg, scopes, *depth, s->as.fr.iterable,
+                                        &start_expr, &stop_expr,
+                                        &stop_is_inclusive))
+    return false;
+
+  LLVMValueRef start_raw =
+      stmt_emit_raw_int_expr(cg, scopes, *depth, start_expr, "for_range_start");
+  LLVMValueRef stop_raw =
+      stmt_emit_raw_int_expr(cg, scopes, *depth, stop_expr, "for_range_stop");
+  if (!start_raw || !stop_raw)
+    return false;
+  if (stop_is_inclusive) {
+    stop_raw = ny_add(cg, stop_raw, LLVMConstInt(cg->type_i64, 1, true),
+                      NY_LLVM_NAME(cg, "for_range_stop_excl"));
+  }
+
+  LLVMBasicBlockRef pre = ny_cur_block(cg);
+  LLVMValueRef f = LLVMGetBasicBlockParent(pre);
+  LLVMBasicBlockRef cb = ny_bb_fn(f, "frc"), bb = ny_bb_fn(f, "frb"),
+                    lb = ny_bb_fn(f, "frl"), eb = ny_bb_fn(f, "fre");
+
+  ny_dbg_loc(cg, s->tok);
+  ny_br(cg, cb);
+
+  ny_pos(cg, cb);
+  LLVMValueRef cur_raw = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "for_range_cur"));
+  LLVMValueRef idx_raw = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "for_range_idx"));
+  LLVMAddIncoming(cur_raw, &start_raw, &pre, 1);
+  LLVMValueRef zero = LLVMConstInt(cg->type_i64, 0, true);
+  LLVMAddIncoming(idx_raw, &zero, &pre, 1);
+  ny_dbg_loc(cg, s->tok);
+  ny_cond_br(cg, ny_slt(cg, cur_raw, stop_raw, NY_LLVM_NAME(cg, "for_range_cond")), bb,
+             eb);
+
+  ny_pos(cg, bb);
+  LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
+  scope_enter(scopes, depth, eb, lb);
+
+  LLVMValueRef iter_raw = s->as.fr.iter_by_index ? idx_raw : cur_raw;
+  LLVMValueRef iter_binding = ny_tag_int(cg, iter_raw);
+  scope_bind(cg, scopes, *depth, s->as.fr.iter_var, iter_binding, s, false,
+             "int", false);
+  if (scopes[*depth].vars.len > 0) {
+    binding *iter_b = &scopes[*depth].vars.data[scopes[*depth].vars.len - 1];
+    iter_b->is_int_direct = true;
+    iter_b->is_int_raw_direct = true;
+    iter_b->raw_int_value = iter_raw;
+  }
+  if (s->as.fr.iter_index_var) {
+    LLVMValueRef index_binding = ny_tag_int(cg, idx_raw);
+    scope_bind(cg, scopes, *depth, s->as.fr.iter_index_var, index_binding, s,
+               false, "int", false);
+    if (scopes[*depth].vars.len > 0) {
+      binding *index_b = &scopes[*depth].vars.data[scopes[*depth].vars.len - 1];
+      index_b->is_int_direct = true;
+      index_b->is_int_raw_direct = true;
+      index_b->raw_int_value = idx_raw;
+    }
+  }
+
+  gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
+  if (!ny_has_terminator(cg)) {
+    emit_defers(cg, scopes, *depth, *depth);
+    if (!ny_has_terminator(cg)) {
+      ny_dbg_loc(cg, s->tok);
+      ny_br(cg, lb);
+    }
+  }
+  scope_pop(scopes, depth);
+  codegen_debug_pop_block(cg, dbg_scope);
+
+  ny_pos(cg, lb);
+  LLVMValueRef one = LLVMConstInt(cg->type_i64, 1, true);
+  LLVMValueRef next_cur =
+      ny_add(cg, cur_raw, one, NY_LLVM_NAME(cg, "for_range_next"));
+  LLVMValueRef next_idx =
+      ny_add(cg, idx_raw, one, NY_LLVM_NAME(cg, "for_range_next_idx"));
+  ny_dbg_loc(cg, s->tok);
+  LLVMValueRef latch_br = ny_br(cg, cb);
+  apply_loop_metadata(cg, latch_br, s->as.fr.attr_unroll,
+                      s->as.fr.attr_nounroll, s->as.fr.attr_vectorize,
+                      stmt_auto_simd_body_safe(cg, scopes, *depth, s->as.fr.body));
+  LLVMAddIncoming(cur_raw, &next_cur, &lb, 1);
+  LLVMAddIncoming(idx_raw, &next_idx, &lb, 1);
+
+  ny_pos(cg, eb);
+  return true;
+}
+
 static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
                          size_t func_root) {
   /* C-style for loop: for(init; cond; update) */
@@ -5913,15 +7626,12 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
 
     /* Cond */
     ny_pos(cg, cb);
+    bool inferred_vectorize =
+        stmt_auto_simd_loop_shape(cg, scopes, *depth, s);
     if (s->as.fr.cond) {
       ny_dbg_loc(cg, s->tok);
-      LLVMValueRef cond_br = ny_cond_br(
-          cg, stmt_gen_cond_i1(cg, scopes, *depth, s->as.fr.cond), bb, eb);
-      bool inferred_vectorize =
-          stmt_auto_simd_loop_shape(cg, scopes, *depth, s);
-      apply_loop_metadata(cg, cond_br, s->as.fr.attr_unroll,
-                          s->as.fr.attr_nounroll, s->as.fr.attr_vectorize,
-                          inferred_vectorize);
+      ny_cond_br(cg, stmt_gen_cond_i1(cg, scopes, *depth, s->as.fr.cond), bb,
+                 eb);
     } else {
       ny_br(cg, bb);
     }
@@ -5946,7 +7656,10 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     if (s->as.fr.update)
       gen_stmt(cg, scopes, depth, s->as.fr.update, func_root, false);
     ny_dbg_loc(cg, s->tok);
-    ny_br(cg, cb);
+    LLVMValueRef latch_br = ny_br(cg, cb);
+    apply_loop_metadata(cg, latch_br, s->as.fr.attr_unroll,
+                        s->as.fr.attr_nounroll, s->as.fr.attr_vectorize,
+                        inferred_vectorize);
 
     /* Exit */
     ny_pos(cg, eb);
@@ -5954,6 +7667,9 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   }
 
   /* Iterator-style for loop: for x in iterable */
+  if (stmt_try_emit_fast_range_for(cg, scopes, depth, s, func_root))
+    return;
+
   LLVMValueRef itv = gen_expr(cg, scopes, *depth, s->as.fr.iterable);
   LLVMBasicBlockRef pre = ny_cur_block(cg);
   LLVMValueRef f = LLVMGetBasicBlockParent(pre);
@@ -5976,9 +7692,7 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMValueRef i_val = ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "for_i"));
   LLVMAddIncoming(i_val, &i_start, &pre, 1);
   ny_dbg_loc(cg, s->tok);
-  LLVMValueRef cond_br = ny_cond_br(cg, ny_slt(cg, i_val, n_val, ""), bb, eb);
-  apply_loop_metadata(cg, cond_br, s->as.fr.attr_unroll, s->as.fr.attr_nounroll,
-                      s->as.fr.attr_vectorize, false);
+  ny_cond_br(cg, ny_slt(cg, i_val, n_val, ""), bb, eb);
 
   ny_pos(cg, bb);
 
@@ -5991,13 +7705,28 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     item = ny_box_abi_result(cg, item, gs->return_type);
   }
   LLVMValueRef iter_binding = s->as.fr.iter_by_index ? i_val : item;
+  bool iter_binding_is_int =
+      s->as.fr.iter_by_index ||
+      stmt_iterable_yields_int(cg, scopes, *depth, s->as.fr.iterable);
   LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
   scope_enter(scopes, depth, eb, lb);
   scope_bind(cg, scopes, *depth, s->as.fr.iter_var, iter_binding, s, false,
-             NULL, false);
+             iter_binding_is_int ? "int" : NULL, false);
+  if (iter_binding_is_int && scopes[*depth].vars.len > 0) {
+    binding *iter_b = &scopes[*depth].vars.data[scopes[*depth].vars.len - 1];
+    iter_b->is_int_direct = true;
+    iter_b->is_int_raw_direct = true;
+    iter_b->raw_int_value = ny_untag_int(cg, iter_binding);
+  }
   if (s->as.fr.iter_index_var) {
     scope_bind(cg, scopes, *depth, s->as.fr.iter_index_var, i_val, s, false,
-               NULL, false);
+               "int", false);
+    if (scopes[*depth].vars.len > 0) {
+      binding *index_b = &scopes[*depth].vars.data[scopes[*depth].vars.len - 1];
+      index_b->is_int_direct = true;
+      index_b->is_int_raw_direct = true;
+      index_b->raw_int_value = ny_untag_int(cg, i_val);
+    }
   }
   gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
   if (!ny_has_terminator(cg)) {
@@ -6016,7 +7745,9 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       ny_add(cg, i_val, LLVMConstInt(cg->type_i64, 2, false), "");
   ny_dbg_loc(cg, s->tok);
 
-  ny_br(cg, cb);
+  LLVMValueRef latch_br = ny_br(cg, cb);
+  apply_loop_metadata(cg, latch_br, s->as.fr.attr_unroll,
+                      s->as.fr.attr_nounroll, s->as.fr.attr_vectorize, false);
   LLVMAddIncoming(i_val, &i_next, &lb, 1);
 
   ny_pos(cg, eb);
@@ -6180,6 +7911,7 @@ static void gen_stmt_struct(codegen_t *cg, stmt_t *s) {
   def->name = ny_strdup(name);
   def->llvm_type = st;
   def->is_layout = (s->kind == NY_S_LAYOUT);
+  def->heap_allocated = true;
   def->stmt = s;
   vec_push(&cg->layouts, def);
   size_t count = s->as.struc.fields.len;
@@ -6423,8 +8155,10 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       bool top_level_existing_global = false;
       expr_t *expr_for_check = NULL;
       const char *decl_type = NULL;
+      bool decl_type_explicit = false;
       if (s->as.var.types.len > i)
         decl_type = s->as.var.types.data[i];
+      decl_type_explicit = decl_type && *decl_type;
       if (parallel) {
         expr_for_check = s->as.var.exprs.data[i];
       } else if (!dest) {
@@ -6472,6 +8206,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         eb->is_f32_direct = false;
         eb->is_list_storage = false;
         eb->is_int_list_storage = false;
+        eb->is_f64_list_storage = false;
         eb->is_dict_storage = false;
         eb->is_int_dict_storage = false;
         eb->has_int_range = false;
@@ -6529,7 +8264,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           b.is_mut = s->as.var.is_mut ? true : false;
           b.owned = true;
           b.type_name = type_name;
-          b.decl_type_name = type_name;
+          b.decl_type_name = decl_type_explicit ? type_name : NULL;
           b.is_f64_slot = global_is_f64;
           b.is_f32_slot = global_is_f32;
           vec_push(&cg->global_vars, b);
@@ -6555,7 +8290,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         binding *gb = resolved_global ? resolved_global : lookup_global(cg, n);
         if (gb && decl_type && !gb->type_name) {
           gb->type_name = decl_type;
-          gb->decl_type_name = decl_type;
+          if (decl_type_explicit)
+            gb->decl_type_name = decl_type;
         }
       }
       if (*depth == 0 && !top_entry_local_path && s->as.var.is_decl &&
@@ -6574,7 +8310,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                           : infer_expr_type(cg, scopes, *depth, expr_for_check);
             if (!gb->type_name)
               gb->type_name = init_type;
-            if (!gb->decl_type_name)
+            if (decl_type_explicit && !gb->decl_type_name)
               gb->decl_type_name = init_type;
           }
           continue;
@@ -6584,7 +8320,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       if (*depth > 0 || top_entry_local_path) {
         if (s->as.var.is_decl) {
           stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
-                                       decl_type, prefer_direct_locals,
+                                       decl_type, decl_type_explicit,
+                                       prefer_direct_locals,
                                        &bind_direct, &slot);
         } else {
           bool target_is_global = false;
@@ -6611,7 +8348,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
             }
           } else {
             stmt_var_setup_local_binding(cg, scopes, *depth, s, sema, i, n,
-                                         decl_type, prefer_direct_locals,
+                                         decl_type, decl_type_explicit,
+                                         prefer_direct_locals,
                                          &bind_direct, &slot);
           }
         }
@@ -6638,6 +8376,13 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           if (nb->is_f32_slot)
             target_is_f32_slot = true;
         }
+      }
+
+      if (!s->as.var.is_decl && !dest && s->as.var.names.len == 1 &&
+          s->as.var.exprs.len == 1 &&
+          stmt_try_emit_active_str_append_assignment(cg, scopes, *depth, n,
+                                                     expr_for_check)) {
+        continue;
       }
 
       if (expr_for_check && scopes[*depth].loop_trip_hint > 0) {
@@ -6702,6 +8447,27 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           !dest && expr_for_check &&
           (!parallel || s->as.var.names.len == 1);
 
+      binding *rhs_self_dest = resolved_local ? resolved_local : resolved_global;
+      if (!rhs_self_dest && slot) {
+        size_t nlen = strlen(n);
+        rhs_self_dest =
+            stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
+      }
+      bool rhs_pre_proven_int =
+          expr_for_check && ny_is_proven_int(cg, scopes, *depth,
+                                             expr_for_check, NULL);
+      bool suppress_self_raw_int =
+          rhs_self_dest && rhs_self_dest->is_int_slot && expr_for_check &&
+          stmt_expr_contains_ident_name(expr_for_check, n) &&
+          !rhs_pre_proven_int;
+      stmt_binding_int_snapshot_t self_raw_snap = {0};
+      if (suppress_self_raw_int) {
+        self_raw_snap = stmt_snapshot_binding_int_proof(rhs_self_dest);
+        rhs_self_dest->is_int_slot = false;
+        rhs_self_dest->is_int_direct = false;
+        rhs_self_dest->is_int_raw_direct = false;
+        rhs_self_dest->has_int_range = false;
+      }
       if (direct_native_float_candidate) {
         target_val = NULL;
       } else if (parallel) {
@@ -6717,6 +8483,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       } else {
         target_val = first_val;
       }
+      stmt_restore_binding_int_proof(self_raw_snap);
       if (!s->as.var.is_destructure) {
         const char *want = decl_type;
         if (!s->as.var.is_decl) {
@@ -6737,6 +8504,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       int64_t rhs_int_max_raw = 0;
       bool rhs_list_storage = false;
       bool rhs_int_list_storage = false;
+      bool rhs_f64_list_storage = false;
       bool rhs_dict_storage = false;
       bool rhs_int_dict_storage = false;
       bool rhs_has_list_int_range = false;
@@ -6766,6 +8534,9 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           rhs_int_list_storage =
               stmt_expr_is_list_ctor(expr_for_check) ||
               stmt_expr_is_int_list_literal(cg, scopes, *depth, expr_for_check);
+          rhs_f64_list_storage =
+              stmt_expr_is_list_ctor(expr_for_check) ||
+              stmt_expr_is_f64_list_literal(cg, scopes, *depth, expr_for_check);
           rhs_has_list_len_min = true;
           rhs_list_len_min_raw = ny_expr_is_list_or_tuple_lit(expr_for_check)
                                      ? (int64_t)expr_for_check->as.list_like.len
@@ -6792,6 +8563,9 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
               rhs_int_list_storage =
                   src->is_int_list_storage &&
                   ny_is_proven_int(cg, scopes, *depth, append_value, NULL);
+              rhs_f64_list_storage =
+                  src->is_f64_list_storage &&
+                  stmt_expr_is_f64_value(cg, scopes, *depth, append_value);
               if (src->has_list_len_min && src->list_len_min_raw < INT64_MAX) {
                 rhs_has_list_len_min = true;
                 rhs_list_len_min_raw = src->list_len_min_raw + 1;
@@ -6827,6 +8601,9 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
               rhs_int_list_storage =
                   src->is_int_list_storage &&
                   ny_is_proven_int(cg, scopes, *depth, set_value, NULL);
+              rhs_f64_list_storage =
+                  src->is_f64_list_storage &&
+                  stmt_expr_is_f64_value(cg, scopes, *depth, set_value);
               if (src->has_list_len_min) {
                 rhs_has_list_len_min = true;
                 rhs_list_len_min_raw = src->list_len_min_raw;
@@ -6898,12 +8675,15 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         size_t nlen = strlen(n);
         binding *b = stmt_lookup_binding_no_mark(scopes, *depth, n, nlen, 0);
         if (b) {
+          if (!decl_type_explicit)
+            b->decl_type_name = NULL;
           stmt_update_numeric_binding_proof(cg, b, is_int_direct,
                                             is_f64_direct);
           stmt_update_int_binding_range(b, rhs_has_int_range, rhs_int_min_raw,
                                         rhs_int_max_raw);
           stmt_update_list_binding_proof(b, rhs_list_storage,
-                                         rhs_int_list_storage);
+                                         rhs_int_list_storage,
+                                         rhs_f64_list_storage);
           stmt_update_dict_binding_proof(b, rhs_dict_storage,
                                          rhs_int_dict_storage);
           stmt_update_list_binding_range(b, rhs_has_list_int_range,
@@ -6912,6 +8692,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                                            rhs_list_len_min_raw);
           stmt_update_dict_binding_range(b, rhs_has_dict_int_range,
                                          rhs_dict_min_raw, rhs_dict_max_raw);
+          stmt_update_direct_callable_binding(cg, b, expr_for_check);
           if (first_static_list_object_elided && i == 0)
             b->static_indexable_object_elided = true;
           if (first_static_list_elide_candidate && i == 0)
@@ -6938,7 +8719,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
                                       rhs_int_min_raw, rhs_int_max_raw);
         stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
-                                       rhs_int_list_storage);
+                                       rhs_int_list_storage,
+                                       rhs_f64_list_storage);
         stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
                                        rhs_int_dict_storage);
         stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
@@ -6947,6 +8729,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                                          rhs_list_len_min_raw);
         stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
                                        rhs_dict_min_raw, rhs_dict_max_raw);
+        stmt_update_direct_callable_binding(cg, resolved_local,
+                                            expr_for_check);
         if (first_static_list_object_elided && i == 0)
           resolved_local->static_indexable_object_elided = true;
         if (first_static_list_elide_candidate && i == 0)
@@ -6972,7 +8756,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         stmt_update_int_binding_range(resolved_local, rhs_has_int_range,
                                       rhs_int_min_raw, rhs_int_max_raw);
         stmt_update_list_binding_proof(resolved_local, rhs_list_storage,
-                                       rhs_int_list_storage);
+                                       rhs_int_list_storage,
+                                       rhs_f64_list_storage);
         stmt_update_dict_binding_proof(resolved_local, rhs_dict_storage,
                                        rhs_int_dict_storage);
         stmt_update_list_binding_range(resolved_local, rhs_has_list_int_range,
@@ -6981,6 +8766,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                                          rhs_list_len_min_raw);
         stmt_update_dict_binding_range(resolved_local, rhs_has_dict_int_range,
                                        rhs_dict_min_raw, rhs_dict_max_raw);
+        stmt_update_direct_callable_binding(cg, resolved_local,
+                                            expr_for_check);
         if (first_static_list_object_elided && i == 0)
           resolved_local->static_indexable_object_elided = true;
         if (first_static_list_elide_candidate && i == 0)
@@ -7000,7 +8787,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         stmt_update_int_binding_range(resolved_global, rhs_has_int_range,
                                       rhs_int_min_raw, rhs_int_max_raw);
         stmt_update_list_binding_proof(resolved_global, rhs_list_storage,
-                                       rhs_int_list_storage);
+                                       rhs_int_list_storage,
+                                       rhs_f64_list_storage);
         stmt_update_dict_binding_proof(resolved_global, rhs_dict_storage,
                                        rhs_int_dict_storage);
         stmt_update_list_binding_range(resolved_global, rhs_has_list_int_range,
@@ -7009,6 +8797,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                                          rhs_list_len_min_raw);
         stmt_update_dict_binding_range(resolved_global, rhs_has_dict_int_range,
                                        rhs_dict_min_raw, rhs_dict_max_raw);
+        stmt_update_direct_callable_binding(cg, resolved_global,
+                                            expr_for_check);
         if (first_static_list_object_elided && i == 0)
           resolved_global->static_indexable_object_elided = true;
         if (first_static_list_elide_candidate && i == 0)
@@ -7031,7 +8821,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           stmt_update_int_binding_range(created, rhs_has_int_range,
                                         rhs_int_min_raw, rhs_int_max_raw);
           stmt_update_list_binding_proof(created, rhs_list_storage,
-                                         rhs_int_list_storage);
+                                         rhs_int_list_storage,
+                                         rhs_f64_list_storage);
           stmt_update_dict_binding_proof(created, rhs_dict_storage,
                                          rhs_int_dict_storage);
           stmt_update_list_binding_range(created, rhs_has_list_int_range,
@@ -7040,6 +8831,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                                            rhs_list_len_min_raw);
           stmt_update_dict_binding_range(created, rhs_has_dict_int_range,
                                          rhs_dict_min_raw, rhs_dict_max_raw);
+          stmt_update_direct_callable_binding(cg, created, expr_for_check);
           if (first_static_list_object_elided && i == 0)
             created->static_indexable_object_elided = true;
           if (first_static_list_elide_candidate && i == 0)
@@ -7231,8 +9023,11 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           stmt_invalidate_static_indexable(b);
           bool val_is_int =
               ny_is_proven_int(cg, scopes, *depth, stored_value, NULL);
-          stmt_update_list_binding_proof(b, true,
-                                         b->is_int_list_storage && val_is_int);
+          bool val_is_f64 =
+              stmt_expr_is_f64_value(cg, scopes, *depth, stored_value);
+          stmt_update_list_binding_proof(
+              b, true, b->is_int_list_storage && val_is_int,
+              b->is_f64_list_storage && val_is_f64);
           if (b->is_int_list_storage) {
             int64_t val_min = 0, val_max = 0;
             bool val_has_range = stmt_expr_int_range(
