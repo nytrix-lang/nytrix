@@ -10,6 +10,14 @@ use std.os.sound.backend.shared as backend_shared
 
 #linux {
    #include <alsa/asoundlib.h> as "snd_"
+} #else {
+   fn snd_pcm_open(..._args): int { -1 }
+   fn snd_pcm_set_params(..._args): int { -1 }
+   fn snd_pcm_close(any: _pcm): int { 0 }
+   fn snd_pcm_prepare(any: _pcm): int { -1 }
+   fn snd_pcm_drain(any: _pcm): int { 0 }
+   fn snd_pcm_writei(..._args): int { -1 }
+   fn snd_pcm_recover(..._args): int { -1 }
 } #endif
 def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2

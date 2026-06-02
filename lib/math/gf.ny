@@ -191,7 +191,7 @@ fn gfp_discrete_log_bsgs(any: g, any: h, any: p): int {
       def found_j = table.get(to_str(giant), 0) - 1
       if(found_j >= 0){
          def x = i * m + found_j
-         if(x < n){ return x }
+         if(x < n){ return bigint_to_int(x) }
       }
       giant = gfp_mul(giant, gm_inv, p)
       i += 1

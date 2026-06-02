@@ -11,6 +11,7 @@ extern "" {
    fn _ft_init(ptr: lib_p): i32 as "FT_Init_FreeType"
    fn _ft_new_memory_face(ptr: lib, ptr: data, i64: size, i64: index, ptr: face_p): i32 as "FT_New_Memory_Face"
    fn _ft_new_face(ptr: lib, ptr: path, i64: index, ptr: face_p): i32 as "FT_New_Face"
+   fn _ft_done_face(ptr: face): i32 as "FT_Done_Face"
    fn _ft_select_size(ptr: face, i32: strike_index): i32 as "FT_Select_Size"
    fn _ft_set_pixel_sizes(ptr: face, u32: pixel_width, u32: pixel_height): i32 as "FT_Set_Pixel_Sizes"
    fn _ft_get_char_index(ptr: face, u64: cp): u32 as "FT_Get_Char_Index"
@@ -80,6 +81,9 @@ fn _load_dyn(): bool {
    } elif(comptime{ __os_name() == "windows" }){
       lib = dlopen_checked("freetype.dll", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL())
       if(!lib){ lib = dlopen_checked("freetype", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
+      if(!lib){ lib = dlopen_checked("libfreetype-6.dll", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
+      if(!lib){ lib = dlopen_checked("freetype-6.dll", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
+      if(!lib){ lib = dlopen_checked("libfreetype.dll", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL()) }
    } else {
       lib = dlopen_checked("libfreetype.dylib", "FT_Init_FreeType", RTLD_NOW() | RTLD_GLOBAL())
    }
@@ -100,7 +104,10 @@ fn _load_dyn(): bool {
 }
 
 fn _init(): bool {
-   if(_FT_library || !_load_dyn()){ return _FT_library != 0 }
+   if(_FT_library){ return true }
+   if(!_load_dyn()){
+      if(comptime{ __os_name() != "windows" }){ return false }
+   }
    def lib_ptr = malloc(8)
    if(!lib_ptr){ return false }
    store64_h(lib_ptr, 0, 0)
@@ -199,7 +206,10 @@ fn unload(any: info): any {
    "Releases a loaded font face."
    if(!is_dict(info)){ return 0 }
    def face = info.get("face", 0)
-   if(face){ call1(_FT_ptr_done_face, _raw_ptr(face)) }
+   if(face){
+      if(_FT_ptr_done_face){ call1(_FT_ptr_done_face, _raw_ptr(face)) }
+      else { _ft_done_face(_raw_ptr(face)) }
+   }
    def ps_ptr = info.get("ps_ptr", 0)
    if(ps_ptr){ free(ps_ptr) }
    0

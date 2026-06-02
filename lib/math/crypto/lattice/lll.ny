@@ -153,7 +153,7 @@ fn gram_schmidt(any: basis): list {
    while(i < n){
       mut v, j = _lll_float_row_scaled(basis_data[i], scale_digits), 0
       while(j < i){
-         def bj = b_star[j]
+         def list: bj = b_star.get(j)
          def den = dot_product(bj, bj)
          def den_zero = den == Z(0) || den == 0 || _lll_float(den) == 0.0
          def mu_ij = den_zero ? 0.0 : _lll_float(dot_product(v, bj)) / _lll_float(den)
@@ -213,7 +213,8 @@ fn gso_profile(any: basis): dict {
    mut max_norm = 0
    mut i = 0
    while(i < n){
-      def norm = dot_product(b_star[i], b_star[i])
+      def list: row = b_star[i]
+      def norm = dot_product(row, row)
       def zero_norm = norm == 0 || norm == Z(0) || _lll_float(norm) == 0.0
       norms = norms.append(norm)
       zero_rows += zero_norm ? 1 : 0
@@ -445,8 +446,8 @@ fn _lll_transform_row_sub_scaled(any: m, int: k, int: j, any: q): any {
 fn _lll_lovasz_holds_gso(any: gs_res, int: k, any: delta): bool {
    def b_star = gs_res[0]
    def mu = gs_res[1]
-   def b_k_star = b_star[k]
-   def b_k_minus_1_star = b_star[k-1]
+   def list: b_k_star = b_star[k]
+   def list: b_k_minus_1_star = b_star[k-1]
    def mu_k_k_minus_1 = _lll_get(mu, k, k-1)
    def lhs = dot_product(b_k_star, b_k_star)
    def rhs = (delta - mu_k_k_minus_1 * mu_k_k_minus_1) * dot_product(b_k_minus_1_star, b_k_minus_1_star)
@@ -2230,7 +2231,7 @@ fn _lll_xf_sub_scaled(list: a, list: b, any: s, any: scale): list {
 
 fn _lll_xf_gram_schmidt(any: basis, any: scale): list {
    def n = _lll_rows(basis)
-   mut b_star = []
+   mut b_star = list(0)
    mut mu = matrix_zero(n, n)
    mut norms = []
    def basis_data = _lll_data(basis)
@@ -2239,7 +2240,7 @@ fn _lll_xf_gram_schmidt(any: basis, any: scale): list {
       mut v = _lll_xf_row(basis_data[i], scale)
       mut j = 0
       while(j < i){
-         def bj = b_star[j]
+         def list: bj = b_star.get(j)
          def den = norms[j]
          def mu_ij = den == Z(0) ? Z(0) : _lll_xf_div(_lll_xf_dot(v, bj, scale), den, scale)
          mu = _lll_set(mu, i, j, mu_ij)
