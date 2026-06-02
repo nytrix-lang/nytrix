@@ -9,7 +9,7 @@ module std.os.ui.window.platform(
    get_framebuffer_size, set_size, set_window_size, get_window_attrib, set_window_attrib, set_window_opacity,
    post_empty_event, poll_events, poll_events_for_window, pump_window_events, uses_native_events,
    supports_state_polling, swap_buffers, swap_interval, get_key, get_mouse_button, get_cursor_pos,
-   get_key_name, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor,
+   cursor_visible, get_key_name, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor,
    set_key_callback, set_mouse_button_callback, set_scroll_callback, set_cursor_pos_callback,
    set_cursor_enter_callback, set_drop_callback, set_joystick_callback, set_window_size_callback,
    set_close_callback, set_char_callback, set_input_mode, get_input_mode, raw_mouse_motion_supported,
@@ -230,7 +230,7 @@ fn _default_window_hints(): dict {
    hints[api.STEREO] = api.FALSE
    hints[api.SAMPLES] = 0
    hints[api.SRGB_CAPABLE] = api.FALSE
-   hints[api.CLIENT_API] = api.OPENGL_API
+   hints[api.CLIENT_API] = api.NO_API
    hints[api.CONTEXT_VERSION_MAJOR] = 1
    hints[api.CONTEXT_VERSION_MINOR] = 0
    hints[api.CONTEXT_DEBUG] = api.FALSE
@@ -258,14 +258,32 @@ fn _select_backend_name(): str {
    def requested = common.env_lower("NY_UI_BACKEND")
    mut name = ""
    if(requested == "none"){ name = "none" }
-   elif(requested == "x11" && x11_backend.available()){ name = "x11" }
-   elif(requested == "wayland" && wayland_backend.available()){ name = "wayland" }
    else {
-      if(x11_backend.available()){ name = "x11" }
-      elif(wayland_backend.available()){ name = "wayland" }
-      else { name = "none" }
+      #macos {
+         if((requested == "" || requested == "auto" || requested == "cocoa" || requested == "macos") && cocoa_impl.available()){ name = "cocoa" }
+         else { name = "none" }
+      } #elif windows {
+         if((requested == "" || requested == "auto" || requested == "win32" || requested == "windows") && win32_impl.available()){ name = "win32" }
+         else { name = "none" }
+      } #else {
+         if(requested == "x11" && x11_backend.available()){ name = "x11" }
+         elif(requested == "wayland" && wayland_backend.available()){ name = "wayland" }
+         elif(x11_backend.available()){ name = "x11" }
+         elif(wayland_backend.available()){ name = "wayland" }
+         else { name = "none" }
+      } #endif
    }
-   if(ui_profile.debug_enabled()){ ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' x11=" + to_str(x11_backend.available()) + " wayland=" + to_str(wayland_backend.available()) + " -> " + name) }
+   if(ui_profile.debug_enabled()){
+      #linux {
+         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' x11=" + to_str(x11_backend.available()) + " wayland=" + to_str(wayland_backend.available()) + " -> " + name)
+      } #elif macos {
+         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' cocoa=" + to_str(cocoa_impl.available()) + " -> " + name)
+      } #elif windows {
+         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' win32=" + to_str(win32_impl.available()) + " -> " + name)
+      } #else {
+         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' -> " + name)
+      } #endif
+   }
    _set_platform_val("backend_name", name)
    name
 }
@@ -312,7 +330,9 @@ fn get_version_string(): str {
    def b = _select_backend_name()
    if(b == "x11"){ "3.5.0 X11 EGL OSMesa dynamically-linked" }
    elif(b == "wayland"){ "3.5.0 Wayland EGL OSMesa dynamically-linked" }
-   else { "3.5.0 Null OSMesa dynamically-linked" }
+   elif(b == "win32"){ "3.5.0 Win32 Vulkan native" }
+   elif(b == "cocoa"){ "3.5.0 Cocoa Vulkan native" }
+   else { "3.5.0 Null native" }
 }
 
 fn get_platform(): int {
@@ -320,6 +340,8 @@ fn get_platform(): int {
    def b = _select_backend_name()
    if(b == "x11"){ PLATFORM_X11 }
    elif(b == "wayland"){ PLATFORM_WAYLAND }
+   elif(b == "win32"){ PLATFORM_WIN32 }
+   elif(b == "cocoa"){ PLATFORM_COCOA }
    else { PLATFORM_NULL }
 }
 
@@ -328,6 +350,8 @@ fn init_hint(any: hint, any: value): any {
    if(hint == PLATFORM){
       if(value == PLATFORM_X11){ _set_platform_val("backend_name", "x11") }
       elif(value == PLATFORM_WAYLAND){ _set_platform_val("backend_name", "wayland") }
+      elif(value == PLATFORM_WIN32){ _set_platform_val("backend_name", "win32") }
+      elif(value == PLATFORM_COCOA){ _set_platform_val("backend_name", "cocoa") }
       elif(value == PLATFORM_NULL){ _set_platform_val("backend_name", "none") }
    }
    mut hints = _get_platform_val("init_hints", dict(8))
@@ -404,6 +428,18 @@ fn init(): bool {
       _set_platform_val("initialized", true)
       return globals != 0
    }
+   if(b == "win32"){
+      win32_impl.init_dpi_awareness()
+      win32_impl.init_timer()
+      _set_platform_val("initialized", true)
+      return true
+   }
+   if(b == "cocoa"){
+      cocoa_impl.set_activation_policy_regular()
+      cocoa_impl.finish_launching()
+      _set_platform_val("initialized", true)
+      return true
+   }
    _set_platform_val("initialized", true)
    true
 }
@@ -437,7 +473,7 @@ fn create_window(str: name, int: x, int: y, int: w, int: h, int: flags): any {
    if(x11_class.len == 0){ x11_class = hints.get(api.X11_CLASS_NAME, "Nytrix") }
    if(x11_inst.len == 0){ x11_inst = hints.get(api.X11_INSTANCE_NAME, "nytrix") }
    if(wl_app_id.len == 0){ wl_app_id = hints.get(api.WAYLAND_APP_ID, "nytrix") }
-   def client_api = band(flags, 0x80000) ? api.NO_API : hints.get(api.CLIENT_API, api.OPENGL_API)
+   def client_api = band(flags, 0x80000) ? api.NO_API : hints.get(api.CLIENT_API, api.NO_API)
    mut visual = 0
    mut depth = 0
    if(b == "x11" && client_api != api.NO_API){
@@ -453,6 +489,10 @@ fn create_window(str: name, int: x, int: y, int: w, int: h, int: flags): any {
    elif(b == "wayland"){
       def wayland_globals = _get_platform_val("platform", dict(8)).get("wayland_globals", 0)
       native = wayland_backend.create_basic_window(wayland_globals, name, w, h, wl_app_id)
+   } elif(b == "win32"){
+      native = win32_impl.create_basic_window(name, w, h, x, y, flags)
+   } elif(b == "cocoa"){
+      native = cocoa_impl.create_basic_window(name, w, h, x, y, flags)
    } elif(b == "none"){
       def native_windows = _get_platform_val("native_windows", dict(8))
       def handle = len(dict_keys(native_windows)) + 1
@@ -480,7 +520,7 @@ fn create_window(str: name, int: x, int: y, int: w, int: h, int: flags): any {
       mut should_close_flags = _get_platform_val("should_close_flags", dict(8))
       should_close_flags[handle] = false
       _set_platform_val("should_close_flags", should_close_flags)
-      if(b != "none" && client_api != api.NO_API){
+      if((b == "x11" || b == "wayland") && client_api != api.NO_API){
          def ctx = opengl_backend.create_context(native, hints)
          if(ctx){
             mut window_contexts = _get_platform_val("window_contexts", dict(8))
@@ -514,6 +554,8 @@ fn destroy_window(any: win): any {
    def b = _select_backend_name()
    if(b == "x11"){ x11_backend.destroy_basic_window(native) }
    elif(b == "wayland"){ wayland_backend.destroy_basic_window(native) }
+   elif(b == "win32"){ win32_impl.destroy_basic_window(native) }
+   elif(b == "cocoa"){ cocoa_impl.destroy_basic_window(native) }
    _set_platform_val("native_windows", _get_platform_val("native_windows", dict(8)).delete(handle))
    _set_platform_val("should_close_flags", _get_platform_val("should_close_flags", dict(8)).delete(handle))
    _set_platform_val("window_attribs", _get_platform_val("window_attribs", dict(8)).delete(handle))
@@ -587,6 +629,14 @@ fn get_window_attrib(any: win, any: attrib): any {
       def res = wayland_backend.get_window_attrib(native, attrib)
       _dbg_attrib(handle, attrib, res)
       return res
+   } elif(b == "win32"){
+      def res = win32_impl.get_window_attrib(native, attrib)
+      _dbg_attrib(handle, attrib, res)
+      return res
+   } elif(b == "cocoa"){
+      def res = cocoa_impl.get_window_attrib(native, attrib)
+      _dbg_attrib(handle, attrib, res)
+      return res
    }
    def window_hints = _get_platform_val("window_hints", dict(8))
    def hint_val = window_hints.get(attrib, 0)
@@ -611,6 +661,14 @@ fn set_window_attrib(any: win, any: attrib, any: value): any {
       if(attrib == api.FLOATING){ x11_backend.set_window_floating(native, value != 0) }
       if(attrib == api.MOUSE_PASSTHROUGH){ x11_backend.set_window_mouse_passthrough(native, value != 0) }
    } elif(b == "wayland"){
+   } elif(b == "win32"){
+      if(attrib == api.DECORATED){ win32_impl.set_window_decorated(native, value != 0) }
+      if(attrib == api.RESIZABLE){ win32_impl.set_window_resizable(native, value != 0) }
+      if(attrib == api.FLOATING){ win32_impl.set_window_floating(native, value != 0) }
+   } elif(b == "cocoa"){
+      if(attrib == api.DECORATED){ cocoa_impl.set_window_decorated(native, value != 0) }
+      if(attrib == api.RESIZABLE){ cocoa_impl.set_window_resizable(native, value != 0) }
+      if(attrib == api.FLOATING){ cocoa_impl.set_window_floating(native, value != 0) }
    }
 }
 
@@ -638,6 +696,12 @@ fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max
       def result = wayland_backend.set_window_size_limits(native, min_w, min_h, max_w, max_h)
       if(!result){ _dbg_err("set_window_size_limits: wayland_backend returned false") }
       _dbg_v("set_window_size_limits: Wayland limits set")
+   } elif(b == "win32"){
+      def result = win32_impl.set_window_size_limits(native, min_w, min_h, max_w, max_h)
+      if(!result){ _dbg_err("set_window_size_limits: win32_impl returned false") }
+      _dbg_v("set_window_size_limits: Win32 limits set")
+   } elif(b == "cocoa"){
+      _dbg_v("set_window_size_limits: Cocoa limits tracked")
    } else {
       _dbg_warn("set_window_size_limits: unknown backend '" + b + "'")
    }
@@ -662,6 +726,8 @@ fn get_window_frame_size(any: win): list {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.get_window_frame_size(native) }
    elif(b == "wayland"){ wayland_backend.get_window_frame_size(native) }
+   elif(b == "cocoa"){ [0, 0, 0, 0] }
+   elif(b == "win32"){ [0, 0, 0, 0] }
    else { [0, 0, 0, 0] }
 }
 
@@ -671,6 +737,11 @@ fn get_window_content_scale(any: win): list {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.get_window_content_scale(native) }
    elif(b == "wayland"){ wayland_backend.get_window_content_scale(native) }
+   elif(b == "cocoa"){
+      def s = cocoa_impl.get_window_content_scale(native)
+      [s, s]
+   }
+   elif(b == "win32"){ [1.0, 1.0] }
    else { [1.0, 1.0] }
 }
 
@@ -680,6 +751,7 @@ fn get_window_opacity(any: win): f64 {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.get_window_opacity(native) }
    elif(b == "wayland"){ wayland_backend.get_window_opacity(native) }
+   elif(b == "win32"){ win32_impl.get_window_opacity(native) }
    else { 1.0 }
 }
 
@@ -780,6 +852,48 @@ fn poll_events(): any {
       def display = get_wayland_display()
       if(display){ wayland_backend.wait_events(display, 0) }
    }
+   if(b == "win32"){
+      mut i = 0
+      def windows_n = windows.len
+      while(i < windows_n){
+         def win = windows.get(i)
+         if(is_dict(win)){
+            def handle = win.get("handle", 0)
+            def result = win32_impl.poll_window_events(win)
+            def updated_win = result.get(0, win)
+            def evs = result.get(1, [])
+            mut current_native_windows = _get_platform_val("native_windows", native_windows)
+            if(handle && is_dict(updated_win)){
+               current_native_windows[handle] = updated_win
+               _set_platform_val("native_windows", current_native_windows)
+            }
+            def _ignored_win32_events = _queue_native_events(evs, handle, have_window_callbacks)
+         }
+         i += 1
+      }
+      return 0
+   }
+   if(b == "cocoa"){
+      mut i = 0
+      def windows_n = windows.len
+      while(i < windows_n){
+         def win = windows.get(i)
+         if(is_dict(win)){
+            def handle = win.get("handle", 0)
+            def result = cocoa_impl.poll_window_events(win)
+            def updated_win = result.get(0, win)
+            def evs = result.get(1, [])
+            mut current_native_windows = _get_platform_val("native_windows", native_windows)
+            if(handle && is_dict(updated_win)){
+               current_native_windows[handle] = updated_win
+               _set_platform_val("native_windows", current_native_windows)
+            }
+            def _ignored_cocoa_events = _queue_native_events(evs, handle, have_window_callbacks)
+         }
+         i += 1
+      }
+      return 0
+   }
    mut i = 0
    def windows_n = windows.len
    while(i < windows_n){
@@ -845,6 +959,54 @@ fn poll_events_for_window(any: win): list {
          return out
       }
    }
+   if(b == "win32"){
+      _poll_joysticks_if_needed()
+      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native = native_windows.get(handle, 0)
+      def result = win32_impl.poll_window_events(native)
+      def updated = result.get(0, native)
+      def raw = result.get(1, [])
+      if(is_dict(updated)){
+         native_windows[handle] = updated
+         _set_platform_val("native_windows", native_windows)
+      }
+      if(!is_list(raw) || raw.len == 0){ return [] }
+      def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
+      mut out = []
+      mut i = 0
+      def raw_n = raw.len
+      while(i < raw_n){
+         def ne = _normalize_native_event(raw.get(i))
+         out = out.append(ne)
+         if(have_window_callbacks){ _dispatch_event_callbacks(ne) }
+         i += 1
+      }
+      return out
+   }
+   if(b == "cocoa"){
+      _poll_joysticks_if_needed()
+      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native = native_windows.get(handle, 0)
+      def result = cocoa_impl.poll_window_events(native)
+      def updated = result.get(0, native)
+      def raw = result.get(1, [])
+      if(is_dict(updated)){
+         native_windows[handle] = updated
+         _set_platform_val("native_windows", native_windows)
+      }
+      if(!is_list(raw) || raw.len == 0){ return [] }
+      def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
+      mut out = []
+      mut i = 0
+      def raw_n = raw.len
+      while(i < raw_n){
+         def ne = _normalize_native_event(raw.get(i))
+         out = out.append(ne)
+         if(have_window_callbacks){ _dispatch_event_callbacks(ne) }
+         i += 1
+      }
+      return out
+   }
    _poll_joysticks_if_needed()
    poll_events()
    pump_window_events(handle)
@@ -867,7 +1029,7 @@ fn swap_buffers(any: win): any {
    _dbg_v("swap_buffers: backend=" + b + " win=0x" + to_hex(handle))
    def window_contexts = _get_platform_val("window_contexts", dict(8))
    def ctx = window_contexts.get(handle, 0)
-   if(ctx){ opengl_backend.swap_buffers(ctx) }
+   if(ctx && (b == "x11" || b == "wayland")){ opengl_backend.swap_buffers(ctx) }
    if(b == "x11"){ x11_backend.flush(get_x11_display()) }
 }
 
@@ -881,26 +1043,31 @@ fn blit_software(any: win, any: buf, int: w, int: h): any {
    }
 }
 
-fn get_proc_address(any: name): any { opengl_backend.get_proc_address(name) }
+fn get_proc_address(any: name): any {
+   def b = _select_backend_name()
+   if(b == "x11" || b == "wayland"){ return opengl_backend.get_proc_address(name) }
+   0
+}
 
 fn get_instance_proc_address(any: instance, any: name): any {
    "Returns a Vulkan instance procedure address for the active backend."
    def b = _select_backend_name()
-   if(b == "x11" || b == "wayland"){ return vk_get_instance_proc_addr(instance, name) }
+   if(b == "x11" || b == "wayland" || b == "win32" || b == "cocoa"){ return vk_get_instance_proc_addr(instance, name) }
    0
 }
 
 fn make_context_current(any: win): bool {
    "Makes a window OpenGL context current, or releases it when win is false."
+   def b = _select_backend_name()
    if(!win){
-      opengl_backend.release_context_current()
+      if(b == "x11" || b == "wayland"){ opengl_backend.release_context_current() }
       _set_platform_val("current_win_context", 0)
       return true
    }
    def window_contexts = _get_platform_val("window_contexts", dict(8))
    def ctx = window_contexts.get(win, 0)
    if(!ctx){ return false }
-   if(opengl_backend.make_context_current(ctx)){
+   if((b == "x11" || b == "wayland") && opengl_backend.make_context_current(ctx)){
       _set_platform_val("current_win_context", win)
       return true
    }
@@ -911,17 +1078,9 @@ fn get_current_context(): any { _get_platform_val("current_win_context", 0) }
 #linux {
    #link "libGL.so"
    #include <GL/gl.h>
-}
-
-#windows {
-   #link "opengl32.lib"
-   #include <GL/gl.h>
-}
-
-#macos {
-   #link "-framework OpenGL"
-   #include <OpenGL/gl.h>
-}
+} #else {
+   fn glGetString(any: _name): any { 0 }
+} #endif
 
 fn extension_supported(str: name): bool {
    "Checks if the specified OpenGL extension is supported."
@@ -939,6 +1098,8 @@ fn vulkan_supported(): bool {
    mut ok = false
    if(b == "x11"){ ok = x11_backend.vulkan_supported() }
    elif(b == "wayland"){ ok = wayland_backend.vulkan_supported() }
+   elif(b == "win32"){ ok = win32_impl.vulkan_supported() }
+   elif(b == "cocoa"){ ok = cocoa_impl.vulkan_supported() }
    _dbg("vulkan_supported: backend=" + b + " supported=" + to_str(ok))
    ok
 }
@@ -949,6 +1110,8 @@ fn required_extensions(): list {
    mut exts = []
    if(b == "x11"){ exts = x11_backend.vulkan_required_extensions() }
    elif(b == "wayland"){ exts = wayland_backend.vulkan_required_extensions() }
+   elif(b == "win32"){ exts = win32_impl.vulkan_required_extensions() }
+   elif(b == "cocoa"){ exts = cocoa_impl.vulkan_required_extensions() }
    exts
 }
 
@@ -959,46 +1122,61 @@ fn create_surface(any: instance, any: win, any: allocator, any: surface_out): in
    mut res = 1
    if(b == "x11"){ res = x11_backend.create_surface(instance, native, allocator, surface_out) }
    elif(b == "wayland"){ res = wayland_backend.create_surface(instance, native, allocator, surface_out) }
+   elif(b == "win32"){ res = win32_impl.create_surface(instance, native, allocator, surface_out) }
+   elif(b == "cocoa"){ res = cocoa_impl.create_surface(instance, native, allocator, surface_out) }
    res
 }
 
-comptime template _dispatch_native_get0_list(name, x11_fn, wayland_fn){
+comptime template _dispatch_native_get0_list(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win): list {
       def b = _select_backend_name()
       def any: native = _native_window(win)
       if(!is_dict(native)){ return [0, 0] }
       if(b == "x11"){ x11_fn(native) }
       elif(b == "wayland"){ wayland_fn(native) }
+      elif(b == "win32"){ win32_fn(native) }
+      elif(b == "cocoa"){ cocoa_fn(native) }
       else { [0, 0] }
    }
 }
 
-comptime template _dispatch_native_get1_int(name, x11_fn, wayland_fn){
+comptime template _dispatch_native_get1_int(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win, any: arg0): int {
       def b = _select_backend_name()
       def any: native = _native_window(win)
       if(!is_dict(native)){ return 0 }
       if(b == "x11"){ x11_fn(native, arg0) }
       elif(b == "wayland"){ wayland_fn(native, arg0) }
+      elif(b == "win32"){ win32_fn(native, arg0) }
+      elif(b == "cocoa"){ cocoa_fn(native, arg0) }
       else { 0 }
    }
 }
 
-comptime template _dispatch_native_set2(name, x11_fn, wayland_fn){
+comptime template _dispatch_native_set2(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win, any: arg0, any: arg1): bool {
       def b = _select_backend_name()
       def any: native = _native_window(win)
       if(!is_dict(native)){ return false }
       if(b == "x11"){ x11_fn(native, arg0, arg1) }
       elif(b == "wayland"){ wayland_fn(native, arg0, arg1) }
+      elif(b == "win32"){ win32_fn(native, arg0, arg1) }
+      elif(b == "cocoa"){ cocoa_fn(native, arg0, arg1) }
       else { false }
    }
 }
 
-comptime emit _dispatch_native_get1_int(get_key, x11_backend.get_key_state, wayland_backend.get_key_state)
-comptime emit _dispatch_native_get1_int(get_mouse_button, x11_backend.get_mouse_button_state, wayland_backend.get_mouse_button_state)
-comptime emit _dispatch_native_get0_list(get_cursor_pos, x11_backend.get_cursor_pos, wayland_backend.get_cursor_pos)
-comptime emit _dispatch_native_set2(set_cursor_pos, x11_backend.set_cursor_pos, wayland_backend.set_cursor_pos)
+comptime emit _dispatch_native_get1_int(get_key, x11_backend.get_key_state, wayland_backend.get_key_state, win32_impl.get_key_state, cocoa_impl.get_key_state)
+comptime emit _dispatch_native_get1_int(get_mouse_button, x11_backend.get_mouse_button_state, wayland_backend.get_mouse_button_state, win32_impl.get_mouse_button_state, cocoa_impl.get_mouse_button_state)
+comptime emit _dispatch_native_get0_list(get_cursor_pos, x11_backend.get_cursor_pos, wayland_backend.get_cursor_pos, win32_impl.get_cursor_pos, cocoa_impl.get_cursor_pos)
+comptime emit _dispatch_native_set2(set_cursor_pos, x11_backend.set_cursor_pos, wayland_backend.set_cursor_pos, win32_impl.set_cursor_pos, cocoa_impl.set_cursor_pos)
+
+fn cursor_visible(): bool {
+   "Returns false only when a backend can prove the system cursor is hidden."
+   def b = _select_backend_name()
+   if(b == "win32"){ return win32_impl.cursor_visible() }
+   true
+}
 
 fn _store_updated_native_window(any: updated): bool {
    if(!is_dict(updated)){ return false }
@@ -1019,6 +1197,11 @@ fn set_input_mode(any: win, int: mode, int: value): any {
       return 0
    }
    if(b == "wayland"){ _store_updated_native_window(wayland_backend.set_input_mode(native, mode, value)) }
+   if(b == "win32"){ _store_updated_native_window(win32_impl.set_input_mode(native, mode, value)) }
+   if(b == "cocoa"){
+      cocoa_impl.set_input_mode(native, mode, value)
+      _store_updated_native_window(native)
+   }
 }
 
 fn raw_mouse_motion_supported(): bool {
@@ -1026,10 +1209,24 @@ fn raw_mouse_motion_supported(): bool {
    def b = _select_backend_name()
    if(b == "x11"){ return true } ;; Assume XInput2 is checked by backend internally
    if(b == "wayland"){ return true } ;; Relative pointer protocol
+   if(b == "win32"){ return true }
+   if(b == "cocoa"){ return true }
    false
 }
 
-comptime emit _dispatch_native_get1_int(get_input_mode, x11_backend.get_input_mode, wayland_backend.get_input_mode)
+fn get_input_mode(any: win, any: mode): int {
+   "Returns a cached input mode for backends without a native getter."
+   def b = _select_backend_name()
+   def native = _native_window(win)
+   if(!is_dict(native)){ return 0 }
+   if(b == "x11"){ return x11_backend.get_input_mode(native, mode) }
+   if(b == "wayland"){ return wayland_backend.get_input_mode(native, mode) }
+   if(mode == api.CURSOR){ return int(native.get("cursor_mode", api.CURSOR_NORMAL)) }
+   if(mode == api.RAW_MOUSE_MOTION){ return native.get("raw_mouse_motion", false) ? 1 : 0 }
+   if(mode == api.STICKY_KEYS){ return native.get("sticky_keys", false) ? 1 : 0 }
+   if(mode == api.STICKY_MOUSE_BUTTONS){ return native.get("sticky_mouse", false) ? 1 : 0 }
+   0
+}
 
 fn set_title(any: win, str: title): any {
    "Sets the native window title."
@@ -1037,6 +1234,8 @@ fn set_title(any: win, str: title): any {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.set_title(native, title) }
    elif(b == "wayland"){ wayland_backend.set_title(native, title) }
+   elif(b == "win32"){ win32_impl.set_title(native, title) }
+   elif(b == "cocoa"){ cocoa_impl.set_title(native, title) }
 }
 
 fn set_window_title(any: win, str: title): any { set_title(win, title) }
@@ -1048,7 +1247,7 @@ fn get_window_title(any: win): str {
    native.get("title", "Untitled")
 }
 
-comptime emit _dispatch_native_get0_list(get_size, x11_backend.get_size, wayland_backend.get_size)
+comptime emit _dispatch_native_get0_list(get_size, x11_backend.get_size, wayland_backend.get_size, win32_impl.get_size, cocoa_impl.get_size)
 
 fn get_window_size(any: win): list { get_size(win) }
 
@@ -1065,6 +1264,8 @@ fn set_size(any: win, int: w, int: h): any {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.set_size(native, w, h) }
    elif(b == "wayland"){ wayland_backend.set_size(native, w, h) }
+   elif(b == "win32"){ win32_impl.set_size(native, w, h) }
+   elif(b == "cocoa"){ cocoa_impl.set_size(native, w, h) }
 }
 
 fn set_window_size(any: win, int: w, int: h): any { set_size(win, w, h) }
@@ -1085,6 +1286,8 @@ fn focus_window(any: win): any {
          }
       }
    }
+   elif(b == "win32"){ win32_impl.focus_window(native) }
+   elif(b == "cocoa"){ cocoa_impl.focus_window(native) }
 }
 
 fn apply_hints(any: hints): any {
@@ -1100,6 +1303,7 @@ fn post_empty_event(any: win=0): any {
    def native = _native_window(win)
    if(b == "x11"){ x11_backend.post_empty_event(common.value_or(native, win)) }
    elif(b == "wayland"){ wayland_backend.flush(0) }
+   elif(b == "cocoa"){ cocoa_impl.post_event(0) }
 }
 
 fn get_key_name(int: key, int: scancode): str {
@@ -1111,6 +1315,8 @@ fn get_key_name(int: key, int: scancode): str {
    def win = windows.get(0)
    if(b == "x11"){ x11_backend.get_key_name(win, key, scancode) }
    elif(b == "wayland"){ wayland_backend.get_key_name(win, key, scancode) }
+   elif(b == "win32"){ win32_impl.get_key_name(win, key, scancode) }
+   elif(b == "cocoa"){ cocoa_impl.get_key_name(win, key, scancode) }
    else { "" }
 }
 
@@ -1122,58 +1328,71 @@ fn get_key_scancode(int: key): int {
    if(windows.len == 0){ return -1 }
    def win = windows.get(0)
    if(b == "x11"){ x11_backend.get_key_scancode(win, key) }
+   elif(b == "cocoa"){ key }
    else { -1 }
 }
 
-comptime template _dispatch_backend_ret0(name, fallback, x11_fn, wayland_fn){
+comptime template _dispatch_backend_ret0(name, fallback, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(): any {
       def b = _select_backend_name()
       if(b == "x11"){ x11_fn() }
       elif(b == "wayland"){ wayland_fn() }
+      elif(b == "win32"){ win32_fn() }
+      elif(b == "cocoa"){ cocoa_fn() }
       else { fallback }
    }
 }
 
-comptime template _dispatch_backend_ret1(name, fallback, x11_fn, wayland_fn){
+comptime template _dispatch_backend_ret1(name, fallback, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: arg0): any {
       def b = _select_backend_name()
       if(b == "x11"){ x11_fn(arg0) }
       elif(b == "wayland"){ wayland_fn(arg0) }
+      elif(b == "win32"){ win32_fn(arg0) }
+      elif(b == "cocoa"){ cocoa_fn(arg0) }
       else { fallback }
    }
 }
 
-comptime template _dispatch_backend_ret3(name, fallback, x11_fn, wayland_fn){
+comptime template _dispatch_backend_ret3(name, fallback, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: arg0, any: arg1, any: arg2): any {
       def b = _select_backend_name()
       if(b == "x11"){ x11_fn(arg0, arg1, arg2) }
       elif(b == "wayland"){ wayland_fn(arg0, arg1, arg2) }
+      elif(b == "win32"){ win32_fn(arg0, arg1, arg2) }
+      elif(b == "cocoa"){ cocoa_fn(arg0, arg1, arg2) }
       else { fallback }
    }
 }
 
-comptime template _dispatch_backend_void1(name, x11_fn, wayland_fn){
+comptime template _dispatch_backend_void1(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: arg0): any {
       def b = _select_backend_name()
       if(b == "x11"){ x11_fn(arg0) }
       elif(b == "wayland"){ wayland_fn(arg0) }
+      elif(b == "win32"){ win32_fn(arg0) }
+      elif(b == "cocoa"){ cocoa_fn(arg0) }
    }
 }
 
-comptime template _dispatch_backend_void2(name, x11_fn, wayland_fn){
+comptime template _dispatch_backend_void2(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: arg0, any: arg1): any {
       def b = _select_backend_name()
       if(b == "x11"){ x11_fn(arg0, arg1) }
       elif(b == "wayland"){ wayland_fn(arg0, arg1) }
+      elif(b == "win32"){ win32_fn(arg0, arg1) }
+      elif(b == "cocoa"){ cocoa_fn(arg0, arg1) }
    }
 }
 
-comptime template _dispatch_native_void2(name, x11_fn, wayland_fn){
+comptime template _dispatch_native_void2(name, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win, any: arg0): any {
       def b = _select_backend_name()
       def native = _native_window(win)
       if(b == "x11"){ x11_fn(native, arg0) }
       elif(b == "wayland"){ wayland_fn(native, arg0) }
+      elif(b == "win32"){ win32_fn(native, arg0) }
+      elif(b == "cocoa"){ cocoa_fn(native, arg0) }
    }
 }
 
@@ -1182,13 +1401,13 @@ def _FB_ZERO = 0
 def _FB_POS2 = [0, 0]
 def _FB_RECT4 = [0, 0, 0, 0]
 def _FB_SCALE2 = [1.0, 1.0]
-comptime emit _dispatch_backend_ret0(get_monitors, _FB_EMPTY_LIST, x11_backend.get_monitors, wayland_backend.get_monitors)
-comptime emit _dispatch_backend_ret0(get_primary_monitor, 0, x11_backend.get_primary_monitor, wayland_backend.get_primary_monitor)
-comptime emit _dispatch_backend_ret1(get_monitor_pos, _FB_POS2, x11_backend.get_monitor_pos, wayland_backend.get_monitor_pos)
-comptime emit _dispatch_backend_ret1(get_monitor_workarea, _FB_RECT4, x11_backend.get_monitor_workarea, wayland_backend.get_monitor_workarea)
-comptime emit _dispatch_backend_ret1(get_monitor_physical_size, _FB_POS2, x11_backend.get_monitor_physical_size, wayland_backend.get_monitor_physical_size)
-comptime emit _dispatch_backend_ret1(get_monitor_content_scale, _FB_SCALE2, x11_backend.get_monitor_content_scale, wayland_backend.get_monitor_content_scale)
-comptime emit _dispatch_backend_ret1(get_monitor_name, "unknown", x11_backend.get_monitor_name, wayland_backend.get_monitor_name)
+comptime emit _dispatch_backend_ret0(get_monitors, _FB_EMPTY_LIST, x11_backend.get_monitors, wayland_backend.get_monitors, win32_impl.get_monitors, cocoa_impl.get_monitors)
+comptime emit _dispatch_backend_ret0(get_primary_monitor, 0, x11_backend.get_primary_monitor, wayland_backend.get_primary_monitor, win32_impl.get_primary_monitor, cocoa_impl.get_primary_monitor)
+comptime emit _dispatch_backend_ret1(get_monitor_pos, _FB_POS2, x11_backend.get_monitor_pos, wayland_backend.get_monitor_pos, win32_impl.get_monitor_pos, cocoa_impl.get_monitor_pos)
+comptime emit _dispatch_backend_ret1(get_monitor_workarea, _FB_RECT4, x11_backend.get_monitor_workarea, wayland_backend.get_monitor_workarea, win32_impl.get_monitor_workarea, cocoa_impl.get_monitor_workarea)
+comptime emit _dispatch_backend_ret1(get_monitor_physical_size, _FB_POS2, x11_backend.get_monitor_physical_size, wayland_backend.get_monitor_physical_size, win32_impl.get_monitor_physical_size, cocoa_impl.get_monitor_physical_size)
+comptime emit _dispatch_backend_ret1(get_monitor_content_scale, _FB_SCALE2, x11_backend.get_monitor_content_scale, wayland_backend.get_monitor_content_scale, win32_impl.get_monitor_content_scale, cocoa_impl.get_monitor_content_scale)
+comptime emit _dispatch_backend_ret1(get_monitor_name, "unknown", x11_backend.get_monitor_name, wayland_backend.get_monitor_name, win32_impl.get_monitor_name, cocoa_impl.get_monitor_name)
 
 fn get_x11_monitor(any: mon): any { x11_backend.get_x11_monitor(mon) }
 
@@ -1203,14 +1422,14 @@ fn set_monitor_callback(any: cb): any {
    old
 }
 
-comptime emit _dispatch_backend_ret1(get_video_mode, 0, x11_backend.get_video_mode, x11_backend.get_video_mode)
-comptime emit _dispatch_backend_ret1(get_video_modes, _FB_EMPTY_LIST, x11_backend.get_video_modes, x11_backend.get_video_modes)
-comptime emit _dispatch_backend_ret3(create_cursor, 0, x11_backend.create_cursor, wayland_backend.create_cursor)
-comptime emit _dispatch_backend_ret1(create_standard_cursor, 0, x11_backend.create_standard_cursor, wayland_backend.create_standard_cursor)
-comptime emit _dispatch_backend_void1(destroy_cursor, x11_backend.destroy_cursor, wayland_backend.destroy_cursor)
-comptime emit _dispatch_native_void2(set_cursor, x11_backend.set_cursor, wayland_backend.set_cursor)
-comptime emit _dispatch_backend_ret1(get_gamma_ramp, _FB_ZERO, x11_backend.get_gamma_ramp, x11_backend.get_gamma_ramp)
-comptime emit _dispatch_backend_void2(set_gamma_ramp, x11_backend.set_gamma_ramp, wayland_backend.set_gamma_ramp)
+comptime emit _dispatch_backend_ret1(get_video_mode, 0, x11_backend.get_video_mode, wayland_backend.get_video_mode, win32_impl.get_video_mode, cocoa_impl.get_video_mode)
+comptime emit _dispatch_backend_ret1(get_video_modes, _FB_EMPTY_LIST, x11_backend.get_video_modes, wayland_backend.get_video_modes, win32_impl.get_video_modes, cocoa_impl.get_video_modes)
+comptime emit _dispatch_backend_ret3(create_cursor, 0, x11_backend.create_cursor, wayland_backend.create_cursor, win32_impl.create_cursor, cocoa_impl.create_cursor)
+comptime emit _dispatch_backend_ret1(create_standard_cursor, 0, x11_backend.create_standard_cursor, wayland_backend.create_standard_cursor, win32_impl.create_standard_cursor, cocoa_impl.create_standard_cursor)
+comptime emit _dispatch_backend_void1(destroy_cursor, x11_backend.destroy_cursor, wayland_backend.destroy_cursor, win32_impl.destroy_cursor, cocoa_impl.destroy_cursor)
+comptime emit _dispatch_native_void2(set_cursor, x11_backend.set_cursor, wayland_backend.set_cursor, win32_impl.set_cursor, cocoa_impl.set_cursor)
+comptime emit _dispatch_backend_ret1(get_gamma_ramp, _FB_ZERO, x11_backend.get_gamma_ramp, wayland_backend.get_gamma_ramp, win32_impl.get_gamma_ramp, cocoa_impl.get_gamma_ramp)
+comptime emit _dispatch_backend_void2(set_gamma_ramp, x11_backend.set_gamma_ramp, wayland_backend.set_gamma_ramp, win32_impl.set_gamma_ramp, cocoa_impl.set_gamma_ramp)
 
 fn set_gamma(any: mon, f64: gamma): any {
    "Builds and applies a gamma ramp for a monitor."
@@ -1227,6 +1446,7 @@ fn set_gamma(any: mon, f64: gamma): any {
 
 fn get_x11_display(): any {
    "Returns the cached X11 display, opening it on first use."
+   if(_select_backend_name() != "x11"){ return 0 }
    def p = _get_platform_val("platform", dict(8))
    mut dpy = p.get("x11_display", 0)
    if(dpy == 0){
@@ -1237,9 +1457,13 @@ fn get_x11_display(): any {
    dpy
 }
 
-fn swap_interval(int: interval): any { opengl_backend.swap_interval(interval) }
+fn swap_interval(int: interval): any {
+   def b = _select_backend_name()
+   if(b == "x11" || b == "wayland"){ return opengl_backend.swap_interval(interval) }
+   0
+}
 
-fn get_x11_window(any: win): any { _native_handle(_native_window(win)) }
+fn get_x11_window(any: win): any { _select_backend_name() == "x11" ? _native_handle(_native_window(win)) : 0 }
 
 fn get_x11_selection_string(any: win): str {
    "Returns the X11 primary selection text for a window."
@@ -1254,59 +1478,71 @@ fn set_x11_selection_string(any: win, str: s): any {
    if(b == "x11"){ x11_backend.set_primary_selection(_native_window(win), s) }
 }
 
-comptime template _x11_only_set1(name, call_fn){
+comptime template _native_set1_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win, any: arg0): any {
       def b = _select_backend_name()
-      if(b == "x11"){ call_fn(win, arg0) }
+      def native = _native_window(win)
+      if(b == "x11"){ x11_fn(native, arg0) }
+      elif(b == "win32"){ win32_fn(native, arg0) }
+      elif(b == "cocoa"){ cocoa_fn(native, arg0) }
    }
 }
 
-comptime template _x11_only_get_str(name, call_fn){
+comptime template _native_get_str_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win): str {
       def b = _select_backend_name()
-      if(b == "x11"){ return call_fn(win) }
+      def native = _native_window(win)
+      if(b == "x11"){ return x11_fn(native) }
+      elif(b == "win32"){ return win32_fn(native) }
+      elif(b == "cocoa"){ return cocoa_fn(native) }
       ""
    }
 }
 
-comptime template _x11_native_get_list2(name, call_fn){
+comptime template _native_get_list2_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win): list {
       def b = _select_backend_name()
       def native = _native_window(win)
-      if(b == "x11"){ return call_fn(native) }
+      if(b == "x11"){ return x11_fn(native) }
+      elif(b == "win32"){ return win32_fn(native) }
+      elif(b == "cocoa"){ return cocoa_fn(native) }
       [0, 0]
    }
 }
 
-comptime template _x11_native_get_zero(name, call_fn){
+comptime template _native_get_zero_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win): any {
       def b = _select_backend_name()
       def native = _native_window(win)
-      if(b == "x11"){ return call_fn(native) }
+      if(b == "x11"){ return x11_fn(native) }
+      elif(b == "win32"){ return win32_fn(native) }
+      elif(b == "cocoa"){ return cocoa_fn(native) }
       0
    }
 }
 
-comptime template _x11_native_set2(name, call_fn){
+comptime template _native_set2_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win, int: x, int: y): any {
       def b = _select_backend_name()
       def native = _native_window(win)
-      if(b == "x11"){ call_fn(native, x, y) }
+      if(b == "x11"){ x11_fn(native, x, y) }
+      elif(b == "win32"){ win32_fn(native, x, y) }
+      elif(b == "cocoa"){ cocoa_fn(native, x, y) }
    }
 }
 
-comptime emit _x11_only_set1(set_window_decorated, x11_backend.set_window_decorated)
-comptime emit _x11_only_set1(set_window_floating, x11_backend.set_window_floating)
-comptime emit _x11_only_set1(set_window_resizable, x11_backend.set_window_resizable)
-comptime emit _x11_only_get_str(get_clipboard, x11_backend.get_clipboard)
-comptime emit _x11_only_set1(set_clipboard, x11_backend.set_clipboard)
-comptime emit _x11_native_get_list2(get_pos, x11_backend.get_pos)
+comptime emit _native_set1_all(set_window_decorated, x11_backend.set_window_decorated, win32_impl.set_window_decorated, cocoa_impl.set_window_decorated)
+comptime emit _native_set1_all(set_window_floating, x11_backend.set_window_floating, win32_impl.set_window_floating, cocoa_impl.set_window_floating)
+comptime emit _native_set1_all(set_window_resizable, x11_backend.set_window_resizable, win32_impl.set_window_resizable, cocoa_impl.set_window_resizable)
+comptime emit _native_get_str_all(get_clipboard, x11_backend.get_clipboard, win32_impl.get_clipboard, cocoa_impl.get_clipboard)
+comptime emit _native_set1_all(set_clipboard, x11_backend.set_clipboard, win32_impl.set_clipboard, cocoa_impl.set_clipboard)
+comptime emit _native_get_list2_all(get_pos, x11_backend.get_pos, win32_impl.get_pos, cocoa_impl.get_pos)
 
 fn get_window_pos(any: win): list { get_pos(win) }
-comptime emit _x11_native_set2(set_pos, x11_backend.set_pos)
+comptime emit _native_set2_all(set_pos, x11_backend.set_pos, win32_impl.set_pos, cocoa_impl.set_pos)
 
 fn set_window_pos(any: win, int: x, int: y): any { set_pos(win, x, y) }
-comptime emit _x11_native_get_zero(get_window_monitor, x11_backend.get_window_monitor)
+comptime emit _native_get_zero_all(get_window_monitor, x11_backend.get_window_monitor, win32_impl.get_window_monitor, cocoa_impl.get_window_monitor)
 
 fn set_window_monitor(any: win, any: mon, int: x, int: y, int: w, int: h, int: refresh_rate): any {
    "Moves a window to a monitor or restores windowed placement."
@@ -1314,6 +1550,16 @@ fn set_window_monitor(any: win, any: mon, int: x, int: y, int: w, int: h, int: r
    def native = _native_window(win)
    if(b == "x11"){
       def updated = x11_backend.set_window_monitor(native, mon, x, y, w, h, refresh_rate)
+      _store_updated_native_window(updated)
+      return updated
+   }
+   if(b == "win32"){
+      def updated = win32_impl.set_window_monitor(native, mon, x, y, w, h, refresh_rate)
+      _store_updated_native_window(updated)
+      return updated
+   }
+   if(b == "cocoa"){
+      def updated = cocoa_impl.set_window_monitor(native, mon, x, y, w, h, refresh_rate)
       _store_updated_native_window(updated)
       return updated
    }
@@ -1597,7 +1843,10 @@ fn _dispatch_event_callbacks(any: ev): any {
 
 fn request_window_attention(any: win): any {
    def b = _select_backend_name()
-   if(b == "x11"){ x11_backend.request_window_attention(win) }
+   def native = _native_window(win)
+   if(b == "x11"){ x11_backend.request_window_attention(native) }
+   elif(b == "win32"){ win32_impl.request_window_attention(native) }
+   elif(b == "cocoa"){ cocoa_impl.request_user_attention() }
 }
 
 fn get_window_user_pointer(any: win): any {
@@ -1647,23 +1896,27 @@ fn set_window_opacity(any: win, f64: op): any {
    _dbg("set_window_opacity: backend=" + b + " win=0x" + to_hex(_native_handle(win)) + " opacity=" + to_str(op))
    if(b == "x11"){ x11_backend.set_window_opacity(native, op) }
    elif(b == "wayland"){ wayland_backend.set_window_opacity(native, op) }
+   elif(b == "win32"){ win32_impl.set_window_opacity(native, op) }
+   elif(b == "cocoa"){ cocoa_impl.set_window_opacity(native, op) }
 }
 
-comptime template _dispatch_native_window_action(name, label, x11_fn, wayland_fn){
+comptime template _dispatch_native_window_action(name, label, x11_fn, wayland_fn, win32_fn, cocoa_fn){
    fn ${name}(any: win): any {
       def b = _select_backend_name()
       def native = _native_window(win)
       _dbg(label + ": backend=" + b + " win=0x" + to_hex(_native_handle(win)))
       if(b == "x11"){ x11_fn(native) }
       elif(b == "wayland"){ wayland_fn(native) }
+      elif(b == "win32"){ win32_fn(native) }
+      elif(b == "cocoa"){ cocoa_fn(native) }
    }
 }
 
-comptime emit _dispatch_native_window_action(show_window, "show_window", x11_backend.show_window, wayland_backend.show_window)
-comptime emit _dispatch_native_window_action(hide_window, "hide_window", x11_backend.hide_window, wayland_backend.hide_window)
-comptime emit _dispatch_native_window_action(iconify_window, "iconify_window", x11_backend.iconify_window, wayland_backend.iconify_window)
-comptime emit _dispatch_native_window_action(restore_window, "restore_window", x11_backend.restore_window, wayland_backend.restore_window)
-comptime emit _dispatch_native_window_action(maximize_window, "maximize_window", x11_backend.maximize_window, wayland_backend.maximize_window)
+comptime emit _dispatch_native_window_action(show_window, "show_window", x11_backend.show_window, wayland_backend.show_window, win32_impl.show_window, cocoa_impl.show_window)
+comptime emit _dispatch_native_window_action(hide_window, "hide_window", x11_backend.hide_window, wayland_backend.hide_window, win32_impl.hide_window, cocoa_impl.hide_window)
+comptime emit _dispatch_native_window_action(iconify_window, "iconify_window", x11_backend.iconify_window, wayland_backend.iconify_window, win32_impl.iconify_window, cocoa_impl.iconify_window)
+comptime emit _dispatch_native_window_action(restore_window, "restore_window", x11_backend.restore_window, wayland_backend.restore_window, win32_impl.restore_window, cocoa_impl.restore_window)
+comptime emit _dispatch_native_window_action(maximize_window, "maximize_window", x11_backend.maximize_window, wayland_backend.maximize_window, win32_impl.maximize_window, cocoa_impl.maximize_window)
 
 fn _platform_vulkan_get_surface_capabilities(any: phys, any: surf, any: caps): int {
    "Queries Vulkan surface capabilities for the active backend."
@@ -1675,8 +1928,11 @@ fn _platform_vulkan_get_surface_capabilities(any: phys, any: surf, any: caps): i
 fn set_window_icon(any: win, any: images): any {
    "Sets native window icon images when supported."
    def b = _select_backend_name()
-   if(b == "x11"){ x11_backend.set_window_icon(win, images) }
-   elif(b == "wayland"){ wayland_backend.set_window_icon(win, images) }
+   def native = _native_window(win)
+   if(b == "x11"){ x11_backend.set_window_icon(native, images) }
+   elif(b == "wayland"){ wayland_backend.set_window_icon(native, images) }
+   elif(b == "win32"){ win32_impl.set_window_icon(native, images) }
+   elif(b == "cocoa"){ cocoa_impl.set_window_icon(native, images) }
 }
 
 fn get_surface_capabilities(any: phys, any: surf, any: caps): int { "Alias for Vulkan surface capability queries." _platform_vulkan_get_surface_capabilities(phys, surf, caps) }
@@ -1727,6 +1983,7 @@ fn get_joystick_buttons(int: jid, any: count_out): any {
 fn get_joystick_hats(int: jid, any: count_out): any {
    "Returns joystick hats and writes the hat count when supported."
    #linux { return linux_joystick.get_joystick_hats(jid, count_out) }
+   #windows { return win32_joystick.get_joystick_hats(jid, count_out) }
    if(count_out){ store32(count_out, 0, 0) }
    0
 }

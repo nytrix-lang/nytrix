@@ -200,7 +200,6 @@ fn _remove_win(any: win): bool {
 fn _sync_live_size(any: win): any {
    win = _get_win(win)
    if(!_is_window(win)){ return win }
-   if(ui_backend.uses_native_events()){ return win }
    def h = _get_handle(win)
    if(!h){ return win }
    def sz = ui_backend.get_size(h)
@@ -210,6 +209,23 @@ fn _sync_live_size(any: win): any {
       (nw != win.get("w", 0) || nh != win.get("h", 0))){
       win["w"] = nw
       win["h"] = nh
+      _save_win(win)
+   }
+   win
+}
+
+fn _sync_live_pos(any: win): any {
+   win = _get_win(win)
+   if(!_is_window(win)){ return win }
+   if(ui_backend.get_backend_name() == "wayland"){ return win }
+   def h = _get_handle(win)
+   if(!h){ return win }
+   def pos = ui_backend.get_pos(h)
+   def nx = int(pos.get(0, win.get("x", 0)))
+   def ny = int(pos.get(1, win.get("y", 0)))
+   if(nx != win.get("x", 0) || ny != win.get("y", 0)){
+      win["x"] = nx
+      win["y"] = ny
       _save_win(win)
    }
    win
@@ -638,6 +654,8 @@ fn open_window(str: name, int: x, int: y, int: w, int: h, int: flags=0): any {
          ui_backend.set_cursor_pos_callback(handle, _cursor_pos_cb)
       }
    }
+   win = _sync_live_size(win)
+   win = _sync_live_pos(win)
    _windows = _ensure_windows().append(win)
    win
 }
@@ -686,6 +704,11 @@ fn show(any: win): bool {
    if(h){
       _dbg_win(h, "show")
       ui_backend.show_window(h)
+      if(ui_backend.get_backend_name() == "win32" && band(int(win.get("flags", 0)), WINDOW_FOCUS_ON_SHOW)){
+         ui_backend.focus_window(h)
+      }
+      win["visible"] = true
+      _save_win(win)
    }
    true
 }
@@ -771,7 +794,12 @@ fn set_cursor(any: win, any: cursor): any {
    ui_backend.set_cursor(h, cursor)
 }
 
-fn pos(any: win): list { "Returns [x, y] screen coordinates of the window." win = _get_win(win) if(!_is_window(win)){ return [0,0] } [win.get("x", 0), win.get("y", 0)] }
+fn pos(any: win): list {
+   "Returns [x, y] screen coordinates of the live window."
+   win = _sync_live_pos(win)
+   if(!_is_window(win)){ return [0,0] }
+   [win.get("x", 0), win.get("y", 0)]
+}
 
 fn size(any: win): list {
    "Returns [width, height] dimensions of the live client area."
@@ -799,8 +827,9 @@ fn move(any: win, int: x, int: y): bool {
    if(h){
       _dbg_win(h, "move pos=" + to_str(x) + "," + to_str(y))
       ui_backend.set_pos(h, x, y)
+      win = _sync_live_pos(win)
    }
-   push_event(win, EVENT_WINDOW_MOVED, {"x": x, "y": y})
+   push_event(win, EVENT_WINDOW_MOVED, {"x": win.get("x", x), "y": win.get("y", y)})
 }
 
 fn resize(any: win, int: w, int: h): bool {
@@ -814,8 +843,9 @@ fn resize(any: win, int: w, int: h): bool {
    if(hh){
       _dbg_win(hh, "resize size=" + to_str(w) + "x" + to_str(h))
       ui_backend.set_size(hh, w, h)
+      win = _sync_live_size(win)
    }
-   push_event(win, EVENT_WINDOW_RESIZED, {"w": w, "h": h})
+   push_event(win, EVENT_WINDOW_RESIZED, {"w": win.get("w", w), "h": win.get("h", h)})
 }
 
 fn should_close(any: win): bool {

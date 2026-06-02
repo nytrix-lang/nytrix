@@ -1,6 +1,6 @@
 ;; Keywords: render vulkan gpu draw
 ;; Vulkan draw submission for renderer primitives, batches, meshes, grids, and SDF shapes.
-module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, mesh_build_axes_3d)
+module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, mesh_build_axes_3d)
 use std.core
 use std.core.mem
 use std.math
@@ -14,6 +14,7 @@ use std.os.ui.profile as ui_profile
 use std.os.ui.render.vk.utils
 use std.os.ui.render.vk.pipeline (_ensure_circle_pipeline,
    _ensure_ring_pipeline,
+   _ensure_rounded_rect_pipeline,
    _ensure_line_pipeline,
    _ensure_point_pipeline,
    _get_nocull_pipeline,
@@ -265,6 +266,7 @@ fn _select_static_draw_pipeline(any: cb, bool: is_lines, f64: width, any: pipe_o
             || target == _pipeline
             || target == _circle_pipeline
             || target == _ring_pipeline
+            || target == _rounded_rect_pipeline
             || target == _skybox_pipeline
             || target == _flip_pipeline
             || target == _flip_unlit_pipeline
@@ -1473,6 +1475,26 @@ fn draw_ring_sdf(f64: x, f64: y, f64: inner_radius, f64: outer_radius, f64: r, f
       x - outer_radius, y - outer_radius,
       outer_radius * 2.0, outer_radius * 2.0,
       c, ratio, 0, 1.0
+   )
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   true
+}
+
+fn draw_rounded_rect_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, f64: r, f64: g, f64: b, f64: a): bool {
+   "Draws a smooth rounded rectangle using the SDF pipeline."
+   if(w <= 0.0 || h <= 0.0){ return false }
+   if(radius <= 0.0){
+      draw_rect(x, y, w, h, r, g, b, a)
+      return true
+   }
+   if(!_rounded_rect_pipeline && !_ensure_rounded_rect_pipeline()){ return false }
+   if(!_prepare_sdf_draw(_rounded_rect_pipeline)){ return false }
+   def c = _pack_color(r, g, b, a)
+   def rr = min(radius, min(w, h) * 0.5)
+   __vkr_push_rect_sdf(
+      _local_vertex_map + _vertex_offset,
+      x, y, w, h,
+      c, w, h, rr
    )
    _vertex_offset += _VKR_VERT_STRIDE * 6
    true

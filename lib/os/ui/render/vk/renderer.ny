@@ -5,7 +5,7 @@ use std.core
 use std.core.mem
 use std.math
 use std.math.matrix
-use std.os.ui.render.matrix (mat4_identity, mat4_from_buffer)
+use std.os.ui.render.matrix (mat4_identity)
 use std.os.ui.window.native as native
 use std.os.ui.window as lib_uiw
 use std.os.ui.consts
@@ -26,7 +26,7 @@ use std.core.str as text
 use std.core.str (to_hex)
 use std.core.common as common
 
-fn _renderer_alloc(any: size): any {
+fn _renderer_alloc(int: size): any {
    def p = zalloc(size)
    if(!p){ panic("vulkan renderer allocation failed") }
    p
@@ -149,7 +149,7 @@ mut _vk_markers_enabled, _ident_mat = false, 0
 mut _logged_suboptimal_acquire, _logged_suboptimal_present = false, false
 mut _logged_waiting_acquire, _suboptimal_recreate_attempted = false, false
 mut _verbose_last_report_frame, _deep_last_report_frame = -1, -1
-mut _old_swapchain_hint, _backend_is_wayland_cached = 0, -1
+mut _old_swapchain_hint, _backend_is_wayland_cached, _backend_is_win32_cached = 0, -1, -1
 mut _vk_deep_debug, _vk_deep_emit_frame = -1, 0
 mut _vk_deep_begin_recreate_ms, _vk_deep_begin_acquire_ms = 0.0, 0.0
 mut _vk_deep_begin_wait_ms, _vk_deep_begin_reset_fence_ms = 0.0, 0.0
@@ -181,6 +181,44 @@ def VK_FORMAT_FEATURE_BLIT_SRC_BIT, VK_FORMAT_FEATURE_BLIT_DST_BIT = 0x00000400,
 fn _backend_is_wayland_fast(): bool {
    if(_backend_is_wayland_cached < 0){ _backend_is_wayland_cached = (lib_uiw.backend() == "wayland") ? 1 : 0 }
    _backend_is_wayland_cached == 1
+}
+
+@inline
+fn _backend_is_win32_fast(): bool {
+   if(_backend_is_win32_cached < 0){ _backend_is_win32_cached = (lib_uiw.backend() == "win32") ? 1 : 0 }
+   _backend_is_win32_cached == 1
+}
+
+fn _surface_wait_timeout_ns(): int {
+   #windows { return _WAYLAND_ACQUIRE_TIMEOUT_NS }
+   #else { return _WAYLAND_ACQUIRE_TIMEOUT_NS }
+   #endif
+}
+
+fn _pump_host_messages_if_needed(): any {
+   #windows { lib_uiw.poll_events() }
+   #endif
+}
+
+fn _wait_for_fence_with_host_pump(any: fence, int: timeout_ns): int {
+   store64_h(_ptr_fence, fence, 0)
+   if(!_backend_is_win32_fast()){
+      return wait_for_fences(_device, 1, _ptr_fence, 1, timeout_ns)
+   }
+   mut elapsed = 0
+   mut slice = 1000000 ;; 1ms
+   if(timeout_ns >= 0 && timeout_ns < slice){ slice = timeout_ns }
+   while(true){
+      _pump_host_messages_if_needed()
+      def res = wait_for_fences(_device, 1, _ptr_fence, 1, slice)
+      _pump_host_messages_if_needed()
+      if(!_same_int_value(res, VK_NOT_READY) && !_same_int_value(res, VK_TIMEOUT)){ return res }
+      if(timeout_ns < 0){ return res }
+      elapsed += slice
+      if(elapsed >= timeout_ns){ return res }
+      msleep(0)
+   }
+   VK_TIMEOUT
 }
 
 fn _vk_profile_every(): int {
@@ -465,6 +503,7 @@ fn _vk_init_trace_enabled(): bool {
 }
 
 fn _vk_init_trace(str: stage, any: t0): any {
+   _pump_host_messages_if_needed()
    if(!_vk_init_trace_enabled()){ return 0.0 }
    def ms = ui_profile.elapsed_ms(t0)
    ui_profile.print_text("[vk:init] " + stage + "=" + to_str(ms) + "ms")
@@ -524,7 +563,7 @@ fn _begin_load_render_pass(): bool {
    if(!_frame_open){ return false }
    if(!_handle_ok(_render_pass_load)){ return false }
    if(!_vk_handle_slab_ready(_framebuffers_slab, _framebuffers_count, _image_index)){ return false }
-   def fb = load64_h(_framebuffers_slab, _image_index * 8)
+   def fb = load64(_framebuffers_slab, _image_index * 8)
    if(!_handle_ok(fb)){ return false }
    store32(_ptr_ri, VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 0)
    store64_h(_ptr_ri, 0, 8)
@@ -878,7 +917,15 @@ fn _vk_check_descriptor_pool(): bool { _descriptor_pool && _descriptor_pool != 0
 
 fn _vk_check_uniform_buffer(): bool { _ubo_buffer != 0 }
 
-fn _vk_check_ubo_descriptor_sets(): bool { _ubo_descriptor_sets && _ubo_descriptor_sets.len >= 1 }
+fn _vk_check_ubo_descriptor_sets(): bool {
+   if(!_ubo_ds_slab){ return false }
+   mut i = 0
+   while(i < _frames_in_flight()){
+      if(load64(_ubo_ds_slab, i * 8) == 0){ return false }
+      i += 1
+   }
+   true
+}
 
 comptime template _vk_init_run_checked(name, stage_fn, stage_label, check_fn, fail_msg){
    fn ${name}(): bool {
@@ -917,6 +964,7 @@ fn init(any: win): bool {
    _window_ref = win
    _check_debug_env()
    _backend_is_wayland_cached = (lib_uiw.backend() == "wayland") ? 1 : 0
+   _backend_is_win32_cached = (lib_uiw.backend() == "win32") ? 1 : 0
    _vk_deep_debug, _vk_debug_basic, _vk_debug_verbose = ui_profile.debug_deep_enabled() ? 1 : 0, ui_profile.gfx_frame_trace_enabled() ? 1 : 0, ui_profile.debug_verbose_enabled() ? 1 : 0
    def light_trace_raw = ui_profile.env_lower_cached("NY_UI_LIGHT_TRACE")
    _trace_light_bind, _trace_light_detail = light_trace_raw == "bind", light_trace_raw == "1"
@@ -1021,7 +1069,7 @@ fn init(any: win): bool {
    store32(fence_ci, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
    _upload_fence_ptr = _renderer_alloc(8)
    create_fence(_device, fence_ci, 0, _upload_fence_ptr)
-   _upload_fence = load64_h(_upload_fence_ptr, 0)
+   _upload_fence = load64(_upload_fence_ptr, 0)
    free(fence_ci)
    def _mat_slab_bytes = 128 + shader_pc_bytes() * 2
    _mat_slab = _renderer_alloc(_mat_slab_bytes)
@@ -1099,7 +1147,7 @@ fn _update_default_mvp(any: win): any {
 
 fn _mvp_matrix(): list {
    mut m = mat4_identity()
-   if(_handle_ok(_current_mvp)){ mat4_from_buffer(m, _current_mvp) }
+   if(_current_mvp){ memcpy(m + 16, _current_mvp, 128) }
    return m
 }
 
@@ -1282,10 +1330,10 @@ fn _sync_flat_part_shading(?ptr: base, bool: sync_tex=true, bool: sync_mat=true,
 }
 
 fn _draw_flat_part_buffers(?ptr: base): int{
-   def sbuf = load64_h(base, 16)
+   def sbuf = load64(base, 16)
    if(!sbuf){ return 0 }
    def soff = load64_h(base, 24)
-   def ibuf = load64_h(base, 32)
+   def ibuf = load64(base, 32)
    def ioff = load64_h(base, 40)
    def idx_count = load32_h(base, 48)
    def draw_count = load32_h(base, 52)
@@ -1293,7 +1341,7 @@ fn _draw_flat_part_buffers(?ptr: base): int{
    def topo = load32_h(base, 60)
    def is_lines = topo == 1
    def is_points = topo == 2
-   def pipe = load64_h(base, 8)
+   def pipe = load64(base, 8)
    mut use_pipe = 0
    if(pipe){ use_pipe = pipe }
    if(topo == 0 && use_pipe && _draw_static_mesh_part_fast(sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, use_pipe)){
@@ -1483,10 +1531,10 @@ fn _draw_parts_flat_range_impl(
       )
       last_tex, last_unlit = shade_state.get(0, last_tex), shade_state.get(1, last_unlit)
       last_mat_ptr, last_mat_key = shade_state.get(2, last_mat_ptr), shade_state.get(3, last_mat_key)
-      def sbuf = load64_h(base, 16)
+      def sbuf = load64(base, 16)
       if(!sbuf){ i += 1 continue }
       def soff = load64_h(base, 24)
-      def ibuf = load64_h(base, 32)
+      def ibuf = load64(base, 32)
       def ioff = load64_h(base, 40)
       def idx_count = load32_h(base, 48)
       def draw_count = load32_h(base, 52)
@@ -1539,6 +1587,7 @@ fn begin_frame(): bool{
    }
    def has_surface = _has_valid_surface_fast()
    def backend_is_wayland = has_surface && _backend_is_wayland_fast()
+   def backend_is_win32 = has_surface && _backend_is_win32_fast()
    if(_swapchain_image_count < 1){ ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count") return false }
    if(_framebuffers_count < 1){ ui_profile.print_text("[begin_frame] FAIL: no framebuffers allocated") return false }
    if(_command_buffers_count < 1){ ui_profile.print_text("[begin_frame] FAIL: no command buffers allocated") return false }
@@ -1640,16 +1689,15 @@ fn begin_frame(): bool{
    _vk_stage("begin.fence.slab")
    if(!_vk_handle_slab_ready(_fences_slab, _in_flight_fences_count, _current_frame)){ return _vk_begin_false("fence_slab_not_ready") }
    _vk_stage("begin.fence.load")
-   def fence = load64_h(_fences_slab, _current_frame * 8)
+   def fence = load64(_fences_slab, _current_frame * 8)
    if(!_handle_ok(fence)){ ui_profile.print_text("[begin_frame] FAIL: null fence at frame=" + to_str(_current_frame)) return false }
-   store64_h(_ptr_fence, fence, 0)
    def _t_wait = _deep_on ? ticks() : 0
    mut fence_wait_timeout = -1
-   if(has_surface && backend_is_wayland){
-      fence_wait_timeout = _WAYLAND_ACQUIRE_TIMEOUT_NS
+   if(has_surface && (backend_is_wayland || backend_is_win32)){
+      fence_wait_timeout = _surface_wait_timeout_ns()
    }
    _vk_stage("begin.fence.wait")
-   def wf = wait_for_fences(_device, 1, _ptr_fence, 1, fence_wait_timeout)
+   def wf = _wait_for_fence_with_host_pump(fence, fence_wait_timeout)
    _vk_stage("begin.fence.waited")
    if(_deep_on){ _vk_deep_begin_wait_ms = ui_profile.elapsed_ms(_t_wait) }
    if(_same_int_value(wf, VK_NOT_READY) || _same_int_value(wf, VK_TIMEOUT)){ return _vk_begin_false("fence_wait_timeout") }
@@ -1666,11 +1714,11 @@ fn begin_frame(): bool{
    if(has_surface){
       _vk_stage("begin.acquire.surface")
       if(!_vk_handle_slab_ready(_sem_avail_slab, _image_available_semaphores_count, _current_frame)){ return _vk_begin_false("sem_avail_not_ready") }
-      def sem = load64_h(_sem_avail_slab, _current_frame * 8)
+      def sem = load64(_sem_avail_slab, _current_frame * 8)
       def _t_acquire = _deep_on ? ticks() : 0
       mut acquire_timeout = -1
-      if(backend_is_wayland){
-         acquire_timeout = _WAYLAND_ACQUIRE_TIMEOUT_NS
+      if(backend_is_wayland || backend_is_win32){
+         acquire_timeout = _surface_wait_timeout_ns()
       }
       if(_vk_debug_basic == 1){
          def backend_name = lib_uiw.backend()
@@ -1678,7 +1726,9 @@ fn begin_frame(): bool{
             " extent=" + to_str(_swapchain_extent_w) + "x" + to_str(_swapchain_extent_h) +
          " timeout_ns=" + to_str(acquire_timeout))
       }
+      if(backend_is_win32){ _pump_host_messages_if_needed() }
       acq = acquire_next_image_khr(_device, _swapchain, acquire_timeout, sem, 0, _ptr_img_idx)
+      if(backend_is_win32){ _pump_host_messages_if_needed() }
       if(_vk_debug_basic == 1){ ui_profile.print_text("[gfx:vulkan] begin_frame after acquire result=" + to_str(acq)) }
       if(_same_int_value(acq, VK_NOT_READY) || _same_int_value(acq, VK_TIMEOUT)){
          if(_vk_debug_basic == 1 && !_logged_waiting_acquire){
@@ -1727,7 +1777,7 @@ fn begin_frame(): bool{
    }
    if(!_vk_handle_slab_ready(_framebuffers_slab, _framebuffers_count, _image_index)){ return _vk_begin_false("framebuffer_slab_not_ready") }
    _vk_stage("begin.image.framebuffer")
-   def fb = load64_h(_framebuffers_slab, _image_index * 8)
+   def fb = load64(_framebuffers_slab, _image_index * 8)
    if(!_handle_ok(fb)){ ui_profile.print_text("[begin_frame] FAIL: null or zero framebuffer at index=" + to_str(_image_index)) return false }
    def use_load_color_pass = _next_begin_load_color && _handle_ok(_render_pass_load_color_clear_depth)
    _next_begin_load_color = false
@@ -1735,7 +1785,7 @@ fn begin_frame(): bool{
    ; Reset + begin recording command buffer
    _vk_stage("begin.command.slab")
    if(!_vk_handle_slab_ready(_cmd_bufs_slab, _command_buffers_count, _current_frame)){ return _vk_begin_false("cmd_slab_not_ready") }
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    if(!_handle_ok(cb)){ ui_profile.print_text("[begin_frame] FAIL: null or zero command buffer") return false }
    def _t_begin_cmd = _deep_on ? ticks() : 0
    _vk_stage("begin.command.reset")
@@ -1814,7 +1864,7 @@ fn begin_frame(): bool{
    if(_deep_on){ _vk_deep_begin_vp_ms = ui_profile.elapsed_ms(_t_vp) }
    _frame_open = true
    _current_frame_cb = cb
-   _current_frame_ubo_ds = load64_h(_ubo_ds_slab, _current_frame * 8)
+   _current_frame_ubo_ds = load64(_ubo_ds_slab, _current_frame * 8)
    _total_frames += 1
    _fps_count += 1
    if((_total_frames % 60) == 0){
@@ -2995,12 +3045,13 @@ fn _end_frame_internal(bool: present): bool {
    def _t_end_deep = _deep_on ? ticks() : 0
    if(!_frame_open){ return false }
    def has_surface = _has_valid_surface_fast()
+   def backend_is_win32 = has_surface && _backend_is_win32_fast()
    if(!_vk_frame_targets_ready(has_surface)){ return false }
    def _t_flush = _deep_on ? ticks() : 0
    _flush()
    if(_deep_on){ _vk_deep_end_flush_ms = ui_profile.elapsed_ms(_t_flush) }
    ; Vertex data is written directly into the persistently-mapped GPU buffer.
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    ; cmd_end_render_pass(cb)
    cmd_end_render_pass(cb)
    if(_offscreen_draw_enabled() && !_record_draw_image_to_swapchain(cb, has_surface)){ return false }
@@ -3037,8 +3088,8 @@ fn _end_frame_internal(bool: present): bool {
    if(_deep_on){ _vk_deep_end_cmd_ms = ui_profile.elapsed_ms(_t_end_cmd) }
    if(ecb != 0){ return false }
    if(has_surface){
-      def sem_avail = load64_h(_sem_avail_slab, _current_frame * 8)
-      def sem_finish = load64_h(_sem_finish_slab, _current_frame * 8)
+      def sem_avail = load64(_sem_avail_slab, _current_frame * 8)
+      def sem_finish = load64(_sem_finish_slab, _current_frame * 8)
       store64_h(_ptr_wait_sems, sem_avail, 0)
       store64_h(_ptr_sig_sems, sem_finish, 0)
       store32(_ptr_stages,
@@ -3067,14 +3118,16 @@ fn _end_frame_internal(bool: present): bool {
       store32(_ptr_sub, 0, 56)
       store64_h(_ptr_sub, 0, 64)
    }
-   def fence = load64_h(_fences_slab, _current_frame * 8)
+   def fence = load64(_fences_slab, _current_frame * 8)
    ; def sub_res = queue_submit(_graphics_queue, 1, _ptr_sub, fence)
    if(_vk_debug_basic == 1){
       ui_profile.print_text("[gfx:vulkan] end_frame before submit frame=" + to_str(_current_frame) +
       " image=" + to_str(_image_index))
    }
    def _t_submit = _deep_on ? ticks() : 0
+   if(backend_is_win32){ _pump_host_messages_if_needed() }
    def sub_res = queue_submit(_graphics_queue, 1, _ptr_sub, fence)
+   if(backend_is_win32){ _pump_host_messages_if_needed() }
    if(_deep_on){ _vk_deep_end_submit_ms = ui_profile.elapsed_ms(_t_submit) }
    if(_vk_debug_basic == 1){ ui_profile.print_text("[gfx:vulkan] end_frame after submit result=" + to_str(sub_res)) }
    if(sub_res != 0){ return false }
@@ -3153,7 +3206,9 @@ fn _end_frame_internal(bool: present): bool {
       }
       ; def pr = queue_present_khr(_present_queue, pi)
       def _t_present = _deep_on ? ticks() : 0
+      if(backend_is_win32){ _pump_host_messages_if_needed() }
       def pr = queue_present_khr(_present_queue, pi)
+      if(backend_is_win32){ _pump_host_messages_if_needed() }
       if(_deep_on){ _vk_deep_end_present_ms = ui_profile.elapsed_ms(_t_present) }
       if(_vk_debug_basic == 1){ ui_profile.print_text("[gfx:vulkan] end_frame after present result=" + to_str(pr)) }
       if(pr == 0xC460C464 || pr == -1000001004){ ; OUT_OF_DATE
@@ -3166,6 +3221,11 @@ fn _end_frame_internal(bool: present): bool {
             ui_profile.print_text("[gfx:vulkan] present suboptimal continuing=true")
             _logged_suboptimal_present = true
          }
+      }
+      if(backend_is_win32){
+         _pump_host_messages_if_needed()
+         msleep(1)
+         _pump_host_messages_if_needed()
       }
    }
    _last_frame_draw_calls = _frame_draw_calls
@@ -3296,7 +3356,7 @@ fn clear(any: r, any: g, any: b, any: a): any {
    "Commands the GPU to clear the current color attachment."
    if(!_frame_open){ return 0 }
    if(_clear_ca == 0){ _clear_ca = _renderer_alloc(24) _clear_rect = _renderer_alloc(24) }
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    store32(_clear_ca, VK_IMAGE_ASPECT_COLOR_BIT, 0)
    store32(_clear_ca, 0, 4)
    store32_f32(_clear_ca, _clear_color_channel(r), 8)
@@ -3316,7 +3376,7 @@ fn clear_depth(): any {
    if(!_frame_open){ return 0 }
    _flush() ; Flush pending vertex geometry to ensure it writes before clear
    if(_clear_ca == 0){ _clear_ca = _renderer_alloc(24) _clear_rect = _renderer_alloc(24) }
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    store32(_clear_ca, 2, 0) ; VK_IMAGE_ASPECT_DEPTH_BIT
    store32(_clear_ca, 0, 4) ; colorAttachment ignored
    store32_f32(_clear_ca, 1.0, 8) ; depth
@@ -3551,6 +3611,7 @@ fn shutdown(): any {
    _wire_pipeline = 0
    _circle_pipeline = 0
    _ring_pipeline = 0
+   _rounded_rect_pipeline = 0
    _vert_module = 0
    _frag_module = 0
    _frag_fast_module = 0
@@ -3707,6 +3768,8 @@ fn _create_instance(): bool {
    }
    ; Check if VK_EXT_debug_utils is available before enabling
    mut debug_utils_ok = false
+   mut portability_enum_ok = false
+   mut properties2_ok = false
    mut ext_count_ptr = _renderer_alloc(4)
    store32(ext_count_ptr, 0, 0)
    if(enumerate_instance_extension_properties(0, ext_count_ptr, 0) == 0){
@@ -3717,7 +3780,9 @@ fn _create_instance(): bool {
             mut i = 0
             while(i < ext_count){
                def name = text.cstr_to_str(ext_props + i * 260)
-               if(name && eq(name, "VK_EXT_debug_utils")){ debug_utils_ok = true break }
+               if(name && eq(name, "VK_EXT_debug_utils")){ debug_utils_ok = true }
+               elif(name && eq(name, "VK_KHR_portability_enumeration")){ portability_enum_ok = true }
+               elif(name && eq(name, "VK_KHR_get_physical_device_properties2")){ properties2_ok = true }
                i += 1
             }
          }
@@ -3725,7 +3790,10 @@ fn _create_instance(): bool {
       }
    }
    free(ext_count_ptr)
-   mut extra_exts = debug_utils_ok ? 1 : 0
+   mut extra_exts = 0
+   if(debug_utils_ok){ extra_exts += 1 }
+   if(portability_enum_ok){ extra_exts += 1 }
+   if(properties2_ok){ extra_exts += 1 }
    mut all_ext_ptrs = 0
    if(e_count + extra_exts > 0){ all_ext_ptrs = _renderer_alloc((e_count + extra_exts) * 8) }
    mut i = 0 while(i < e_count){
@@ -3738,6 +3806,16 @@ fn _create_instance(): bool {
       e_count += 1
    } else {
       if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] ext VK_EXT_debug_utils unavailable") }
+   }
+   if(portability_enum_ok){
+      mut portability_ext_name = _renderer_alloc(48) strcpy(portability_ext_name, "VK_KHR_portability_enumeration")
+      store64_h(all_ext_ptrs, portability_ext_name, e_count * 8)
+      e_count += 1
+   }
+   if(properties2_ok){
+      mut properties2_ext_name = _renderer_alloc(56) strcpy(properties2_ext_name, "VK_KHR_get_physical_device_properties2")
+      store64_h(all_ext_ptrs, properties2_ext_name, e_count * 8)
+      e_count += 1
    }
    ; Do not auto-inject third-party capture layers here.
    ; External tools can enable their own layers through VK_INSTANCE_LAYERS.
@@ -3800,6 +3878,7 @@ fn _create_instance(): bool {
       store32(app_info, api_version, 44) ; apiVersion
       mut create_info = _renderer_alloc(64)
       store32(create_info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, 0)
+      store32(create_info, portability_enum_ok ? 1 : 0, 16)
       mut validation_features = 0
       mut disabled_validation_features = 0
       if(vk_state._debug_gfx_enabled && layer_count > 0){
@@ -3820,8 +3899,8 @@ fn _create_instance(): bool {
       mut inst_ptr = _renderer_alloc(8)
       store32(inst_ptr, 0, 0) store32(inst_ptr, 0, 4)
       def res_tagged = vk_create_instance(create_info, 0, inst_ptr)
-      def res_code = (res_tagged & 1) ? (res_tagged >> 1) : res_tagged
-      def inst_after = load64_h(inst_ptr, 0)
+      def res_code = vk_result_code(res_tagged)
+      def inst_after = load64(inst_ptr, 0)
       if(res_code == 0 && inst_after != 0){
          instance = inst_after
          free(inst_ptr)
@@ -3853,7 +3932,7 @@ fn _create_instance(): bool {
       tried_compat_retry = true
       v_i += 1
    }
-   if(vk_state._debug_gfx_enabled && last_res_code == -9){ ui_profile.print_text("[gfx:vulkan] no compatible ICD driver force_software_hint=NY_UI_FORCE_SOFTWARE") }
+   if(vk_state._debug_gfx_enabled && last_res_code == -9){ ui_profile.print_text("[gfx:vulkan] no compatible Vulkan ICD driver") }
    false
 }
 
@@ -3875,7 +3954,7 @@ fn _create_surface(any: win): bool {
    _surface = _renderer_alloc(8)
    store64(_surface, 0, 0)
    def res = native.create_surface(_instance, win, 0, _surface)
-   if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] native.create_surface res=" + to_str(res) + " raw=0x" + to_hex(load64(_surface, 0))) }
+   if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] native.create_surface res=" + to_str(res) + " raw=0x" + to_hex(int(load64(_surface, 0)))) }
    if(res != 0){
       ui_profile.print_text("[gfx:vulkan] create_surface failed res=" + to_str(res))
       free(_surface)
@@ -3884,13 +3963,13 @@ fn _create_surface(any: win): bool {
    }
    def raw_surface = load64(_surface, 0)
    if(raw_surface == 0 || raw_surface == 0x8000000000){
-      ui_profile.print_text("[gfx:vulkan] create_surface returned invalid handle=0x" + to_hex(raw_surface))
+      ui_profile.print_text("[gfx:vulkan] create_surface returned invalid handle=0x" + to_hex(int(raw_surface)))
       free(_surface)
       _surface = 0
       _surface_handle = 0
       return false
    }
-   _surface_handle = load64_h(_surface, 0)
+   _surface_handle = load64(_surface, 0)
    if(vk_state._debug_gfx_enabled){ _dbg_handle("surface", _surface_handle) }
    true
 }
@@ -3900,7 +3979,7 @@ fn _raw_surface_handle(): any {
    if(_surface != 0){
       def raw = load64(_surface, 0)
       if(raw == 0 || raw == 0x8000000000){ return raw }
-      if(raw){ return load64_h(_surface, 0) }
+      if(raw){ return load64(_surface, 0) }
    }
    _surface_handle
 }
@@ -3937,7 +4016,7 @@ fn _pick_physical_device(): bool {
       free(c_ptr, p_ptr)
       return false
    }
-   _physical_device = load64_h(p_ptr, 0)
+   _physical_device = load64(p_ptr, 0)
    mut props = _renderer_alloc(1024)
    get_physical_device_properties(_physical_device, props)
    def device_name = text.cstr_to_str(props, 20)
@@ -4040,7 +4119,23 @@ fn _create_logical_device(): bool {
    mut create_info = _renderer_alloc(72)
    mut dev_features = _renderer_alloc(232)
    mut di_feat = _renderer_alloc(104)
+   mut supported_features2 = _renderer_alloc(256)
+   mut supported_di_feat = _renderer_alloc(104)
    mut bda_feat = 0
+   memset(supported_features2, 0, 256)
+   memset(supported_di_feat, 0, 104)
+   store32(supported_features2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, 0)
+   store32(supported_di_feat, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, 0)
+   store64_h(supported_features2, supported_di_feat, 8)
+   get_physical_device_features2(_physical_device, supported_features2)
+   def supported_core = supported_features2 + 16
+   def bindless_feature_supported =
+      load32(supported_di_feat, 32) != 0 &&
+      load32(supported_di_feat, 60) != 0 &&
+      load32(supported_di_feat, 80) != 0 &&
+      load32(supported_di_feat, 84) != 0 &&
+      load32(supported_di_feat, 92) != 0
+   def enable_bindless_features = bindless_feature_supported && !common.env_truthy("NY_VK_BINDLESS_OFF")
    def want_bda = _physical_device_bda_supported()
    if(want_bda){ bda_feat = _renderer_alloc(32) }
    store64_h(ext_ptrs, ext1, 0)
@@ -4054,31 +4149,35 @@ fn _create_logical_device(): bool {
    store64_h(create_info, queue_create_info, 24) ; pQueueCreateInfos
    store32(create_info, 0, 32) ; enabledLayerCount
    store32(create_info, 0, 40) store32(create_info, 0, 44) ; ppEnabledLayerNames
-   store32(create_info, 3, 48) ; enabledExtensionCount
+   store32(create_info, enable_bindless_features ? 3 : 1, 48) ; enabledExtensionCount
    store64_h(create_info, ext_ptrs, 56) ; ppEnabledExtensionNames
    store32(create_info, 0, 64) store32(create_info, 0, 68) ; pEnabledFeatures (set below)
-   ; Enable wideLines, fillModeNonSolid, shaderFloat64, and shaderInt64
+   ; Enable only core features actually reported by the selected device.
    memset(dev_features, 0, 232)
-   store32(dev_features, 1, 52) ; fillModeNonSolid = VK_TRUE
-   store32(dev_features, 1, 60) ; wideLines = VK_TRUE
-   store32(dev_features, 1, 156) ; shaderFloat64 = VK_TRUE
-   store32(dev_features, 1, 160) ; shaderInt64 = VK_TRUE
+   if(load32(supported_core, 52) != 0){ store32(dev_features, 1, 52) } ; fillModeNonSolid
+   if(load32(supported_core, 60) != 0){ store32(dev_features, 1, 60) } ; wideLines
+   if(load32(supported_core, 136) != 0){ store32(dev_features, 1, 136) } ; shaderSampledImageArrayDynamicIndexing
+   if(load32(supported_core, 156) != 0){ store32(dev_features, 1, 156) } ; shaderFloat64
+   if(load32(supported_core, 160) != 0){ store32(dev_features, 1, 160) } ; shaderInt64
    store64_h(create_info, dev_features, 64)
    ; Descriptor indexing features (bindless)
    memset(di_feat, 0, 104)
    store32(di_feat, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, 0)
-   store32(di_feat, 1, 32) ; shaderSampledImageArrayNonUniformIndexing
-   store32(di_feat, 1, 48) ; descriptorBindingSampledImageUpdateAfterBind
-   store32(di_feat, 1, 68) ; descriptorBindingUpdateUnusedWhilePending
-   store32(di_feat, 1, 72) ; descriptorBindingPartiallyBound
-   store32(di_feat, 1, 92) ; runtimeDescriptorArray
-   if(bda_feat){
+   if(enable_bindless_features){
+      store32(di_feat, 1, 32) ; shaderSampledImageArrayNonUniformIndexing
+      store32(di_feat, 1, 60) ; descriptorBindingSampledImageUpdateAfterBind
+      store32(di_feat, 1, 80) ; descriptorBindingUpdateUnusedWhilePending
+      store32(di_feat, 1, 84) ; descriptorBindingPartiallyBound
+      store32(di_feat, 1, 92) ; runtimeDescriptorArray
+   }
+   if(bda_feat && enable_bindless_features){
       memset(bda_feat, 0, 32)
       store32(bda_feat, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, 0)
       store32(bda_feat, 1, 16) ; bufferDeviceAddress
       store64_h(di_feat, bda_feat, 8)
    }
-   store64_h(create_info, di_feat, 8)
+   if(enable_bindless_features){ store64_h(create_info, di_feat, 8) }
+   elif(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] descriptor indexing unavailable; creating basic swapchain device") }
    store32(dev_ptr, 0, 0) store32(dev_ptr, 0, 4)
    _bda_enabled = false
    res = create_device(_physical_device, create_info, 0, dev_ptr)
@@ -4087,24 +4186,24 @@ fn _create_logical_device(): bool {
       store64_h(di_feat, 0, 8)
       store32(dev_ptr, 0, 0) store32(dev_ptr, 0, 4)
       res = create_device(_physical_device, create_info, 0, dev_ptr)
-   } elif(res == 0 && bda_feat){
+   } elif(res == 0 && bda_feat && enable_bindless_features){
       _bda_enabled = true
    }
    if(res != 0){
       if(vk_state._debug_gfx_enabled){ ui_profile.print_text(f"[gfx:vulkan] bindless create_device failed code={res}") }
       return false
    }
-   _device = load64_h(dev_ptr, 0)
+   _device = load64(dev_ptr, 0)
    if(vk_state._debug_gfx_enabled){ _dbg_handle("device", _device) }
    mut q_ptr = _renderer_alloc(8)
    store32(q_ptr, 0, 0) store32(q_ptr, 0, 4)
    get_device_queue(_device, graphics_family, 0, q_ptr)
-   _graphics_queue = load64_h(q_ptr, 0)
+   _graphics_queue = load64(q_ptr, 0)
    if(vk_state._debug_gfx_enabled){ _dbg_handle("queue", _graphics_queue) }
    if(present_family == graphics_family){ _present_queue = _graphics_queue } else {
       store32(q_ptr, 0, 0) store32(q_ptr, 0, 4)
       get_device_queue(_device, present_family, 0, q_ptr)
-      _present_queue = load64_h(q_ptr, 0)
+      _present_queue = load64(q_ptr, 0)
    }
    true
 }
@@ -4191,6 +4290,15 @@ fn _choose_present_mode(): int {
    if(lib_uiw.backend() == "wayland"){
       return VK_PRESENT_MODE_FIFO_KHR
    }
+   if(lib_uiw.backend() == "win32"){
+      ;; FIFO present can block the single UI/render thread long enough for
+      ;; Windows to mark the app "not responding" while focus/click messages
+      ;; are queued. Prefer nonblocking modes when the driver exposes them;
+      ;; users can still force FIFO with NY_VK_PRESENT_MODE=fifo.
+      if(mailbox_supported){ return VK_PRESENT_MODE_MAILBOX_KHR }
+      if(immediate_supported){ return VK_PRESENT_MODE_IMMEDIATE_KHR }
+      return VK_PRESENT_MODE_FIFO_KHR
+   }
    if(common.env_truthy("NYTRIX_FAST")){
       if(immediate_supported){ return VK_PRESENT_MODE_IMMEDIATE_KHR }
       if(mailbox_supported){ return VK_PRESENT_MODE_MAILBOX_KHR }
@@ -4222,7 +4330,7 @@ fn _create_headless_image(int: w, int: h): any {
    store32(img_ci, 0, 80) ; layout undefined
    mut p = _renderer_alloc(8)
    if(create_image(_device, img_ci, 0, p) != 0){ return 0 }
-   def img = load64_h(p, 0)
+   def img = load64(p, 0)
    if(img == 0){ return 0 }
    mut req = _renderer_alloc(24)
    get_image_memory_requirements(_device, img, req)
@@ -4232,7 +4340,7 @@ fn _create_headless_image(int: w, int: h): any {
    store64_h(ai, load64_h(req, 0), 16)
    store32(ai, mem_type, 24)
    if(allocate_memory(_device, ai, 0, p) != 0){ return 0 }
-   def mem = load64_h(p, 0)
+   def mem = load64(p, 0)
    if(mem == 0){ return 0 }
    if(bind_image_memory(_device, img, mem, 0) != 0){ return 0 }
    img
@@ -4244,6 +4352,76 @@ fn _create_swapchain_with_old(any: win, any: old_sc): bool {
    def ok = _create_swapchain(win)
    _old_swapchain_hint = 0
    ok
+}
+
+fn _surface_caps_need_windows_retry(any: win, int: cur_w, int: cur_h, int: min_w, int: min_h, int: max_w, int: max_h): bool {
+   #windows {
+      if(!win){ return false }
+      if(cur_w == 0xFFFFFFFF && cur_h == 0xFFFFFFFF){ return false }
+      if(cur_w <= 1 || cur_h <= 1){ return true }
+      if(min_w <= 1 || min_h <= 1){ return true }
+      if(max_w <= 1 || max_h <= 1){ return true }
+      if(cur_w > 32768 || cur_h > 32768){ return true }
+   }
+   #endif
+   false
+}
+
+fn _surface_extent_usable(int: w, int: h): bool {
+   if(w <= 1 || h <= 1){ return false }
+   #windows {
+      if(w > 32768 || h > 32768){ return false }
+   }
+   #endif
+   true
+}
+
+fn _surface_bound_usable(int: w, int: h): bool {
+   if(w <= 1 || h <= 1){ return false }
+   #windows {
+      if(w > 32768 || h > 32768){ return false }
+   }
+   #endif
+   true
+}
+
+fn _swapchain_create_retry_limit(): int {
+   #windows { return 8 }
+   #else { return 1 }
+   #endif
+}
+
+fn _settle_window_for_swapchain(any: win, int: attempt): any {
+   #windows {
+      if(win){ lib_uiw.show(win) }
+      lib_uiw.poll_events()
+      msleep(16 + attempt * 8)
+   }
+   #endif
+   0
+}
+
+fn _window_swapchain_extent(any: win, int: fallback_w, int: fallback_h): list {
+   mut w, h = fallback_w, fallback_h
+   if(win && is_dict(win)){
+      w = int(win.get("w", w))
+      h = int(win.get("h", h))
+   }
+   if(win){
+      def fb = lib_uiw.get_framebuffer_size(win)
+      if(is_list(fb) && fb.len >= 2){
+         def fw, fh = int(fb.get(0, 0)), int(fb.get(1, 0))
+         if(fw > 1 && fh > 1){ return [fw, fh] }
+      }
+      def sz = lib_uiw.size(win)
+      if(is_list(sz) && sz.len >= 2){
+         def sw, sh = int(sz.get(0, 0)), int(sz.get(1, 0))
+         if(sw > 1 && sh > 1){ return [sw, sh] }
+      }
+   }
+   if(w <= 1){ w = fallback_w }
+   if(h <= 1){ h = fallback_h }
+   [w, h]
 }
 
 fn _create_swapchain(any: win): bool {
@@ -4282,24 +4460,45 @@ fn _create_swapchain(any: win): bool {
       if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] invalid surface handle before swapchain creation") }
       return false
    }
-   def caps_res = get_physical_device_surface_capabilities_khr(_instance, _physical_device, surf, caps)
-   if(caps_res != 0){
-      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_surface_capabilities failed code=" + to_str(caps_res)) }
-      return false
+   mut caps_res = 0
+   mut caps_attempt = 0
+   mut cur_w, cur_h = 0, 0
+   mut min_w, min_h = 0, 0
+   mut max_w, max_h = 0, 0
+   while(true){
+      caps_res = get_physical_device_surface_capabilities_khr(_instance, _physical_device, surf, caps)
+      if(caps_res != 0){
+         if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_surface_capabilities failed code=" + to_str(caps_res)) }
+         return false
+      }
+      cur_w, cur_h = load32(caps, 8), load32(caps, 12)
+      min_w, min_h = load32(caps, 16), load32(caps, 20)
+      max_w, max_h = load32(caps, 24), load32(caps, 28)
+      if(!_surface_caps_need_windows_retry(win, cur_w, cur_h, min_w, min_h, max_w, max_h)){ break }
+      caps_attempt += 1
+      if(caps_attempt >= 20){ break }
+      if(caps_attempt == 1){ lib_uiw.show(win) }
+      lib_uiw.poll_events()
+      msleep(16)
    }
-   mut req_w, req_h = 400, 300
-   if(win){ req_w, req_h = int(win.get("w", 400)), int(win.get("h", 300)) }
-   def cur_w, cur_h = load32(caps, 8), load32(caps, 12)
-   def min_w, min_h = load32(caps, 16), load32(caps, 20)
-   def max_w, max_h = load32(caps, 24), load32(caps, 28)
+   def req_extent = _window_swapchain_extent(win, 400, 300)
+   mut req_w, req_h = int(req_extent.get(0, 400)), int(req_extent.get(1, 300))
    mut w, h = req_w, req_h
-   if(cur_w != 0xFFFFFFFF && cur_h != 0xFFFFFFFF && cur_w > 0 && cur_h > 0){
+   if(cur_w != 0xFFFFFFFF && cur_h != 0xFFFFFFFF && _surface_extent_usable(cur_w, cur_h)){
       w, h = cur_w, cur_h
    } else {
-      if(w < min_w){ w = min_w }
-      if(h < min_h){ h = min_h }
-      if(max_w > 0 && w > max_w){ w = max_w }
-      if(max_h > 0 && h > max_h){ h = max_h }
+      if(_surface_bound_usable(min_w, min_h)){
+         if(w < min_w){ w = min_w }
+         if(h < min_h){ h = min_h }
+      }
+      if(_surface_bound_usable(max_w, max_h)){
+         if(w > max_w){ w = max_w }
+         if(h > max_h){ h = max_h }
+      }
+   }
+   if(w <= 1 || h <= 1){
+      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] swapchain extent invalid after caps retry cur=" + to_str(cur_w) + "x" + to_str(cur_h) + " min=" + to_str(min_w) + "x" + to_str(min_h) + " max=" + to_str(max_w) + "x" + to_str(max_h) + " choose=" + to_str(w) + "x" + to_str(h)) }
+      return false
    }
    _swapchain_extent_w, _swapchain_extent_h = w, h
    mut min_imgs = load32(caps, 0)
@@ -4365,14 +4564,35 @@ fn _create_swapchain(any: win): bool {
    store32(sc_ptr, 0, 0)
    store32(sc_ptr, 0, 4)
    _vk_stage("swapchain.create_call")
-   def res = create_swapchain_khr(_device, create_info, 0, sc_ptr)
+   mut res = -1
+   mut create_attempt = 0
+   def retry_limit = _swapchain_create_retry_limit()
+   while(create_attempt < retry_limit){
+      store32(sc_ptr, 0, 0)
+      store32(sc_ptr, 0, 4)
+      res = create_swapchain_khr(_device, create_info, 0, sc_ptr)
+      if(res == 0){ break }
+      if(vk_state._debug_gfx_enabled){
+         ui_profile.print_text("[gfx:vulkan] vkCreateSwapchainKHR failed attempt=" +
+            to_str(create_attempt + 1) + "/" + to_str(retry_limit) +
+            " code=" + to_str(res) +
+            " extent=" + to_str(w) + "x" + to_str(h))
+      }
+      create_attempt += 1
+      if(create_attempt < retry_limit){ _settle_window_for_swapchain(win, create_attempt) }
+   }
    if(res != 0){
-      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] vkCreateSwapchainKHR failed code=" + to_str(res)) }
+      ui_profile.print_text("[gfx:vulkan] vkCreateSwapchainKHR failed code=" + to_str(res) +
+         " attempts=" + to_str(create_attempt) +
+         " extent=" + to_str(w) + "x" + to_str(h) +
+         " min=" + to_str(min_w) + "x" + to_str(min_h) +
+         " max=" + to_str(max_w) + "x" + to_str(max_h) +
+         " present=" + to_str(present_mode))
       return false
    }
-   _swapchain = load64_h(sc_ptr, 0)
+   _swapchain = load64(sc_ptr, 0)
    if(_swapchain == 0 || _swapchain == 0x8000000000 || _swapchain == 0xc000000000){
-      ui_profile.print_text("[gfx:vulkan] invalid swapchain handle=0x" + to_hex(_swapchain))
+      ui_profile.print_text("[gfx:vulkan] invalid swapchain handle=0x" + to_hex(int(_swapchain)))
       return false
    }
    if(vk_state._debug_gfx_enabled){ _dbg_handle("swapchain", _swapchain) }
@@ -4381,7 +4601,7 @@ fn _create_swapchain(any: win): bool {
    mut img_count_ptr = _renderer_alloc(4)
    def rc_img_count = get_swapchain_images_khr(_device, _swapchain, img_count_ptr, 0)
    if(rc_img_count != 0){
-      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_swapchain_images(count) failed code=" + to_str(rc_img_count) + " swapchain=0x" + to_hex(_swapchain)) }
+      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_swapchain_images(count) failed code=" + to_str(rc_img_count) + " swapchain=0x" + to_hex(int(_swapchain))) }
       return false
    }
    def allocated_count = load32(img_count_ptr, 0)
@@ -4396,7 +4616,7 @@ fn _create_swapchain(any: win): bool {
    mut img_ptrs_raw = _renderer_alloc(allocated_count * 8)
    def rc_imgs = get_swapchain_images_khr(_device, _swapchain, img_count_ptr2, img_ptrs_raw)
    if(rc_imgs != 0){
-      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_swapchain_images(list) failed code=" + to_str(rc_imgs) + " swapchain=0x" + to_hex(_swapchain)) }
+      if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] get_swapchain_images(list) failed code=" + to_str(rc_imgs) + " swapchain=0x" + to_hex(int(_swapchain))) }
       free(img_count_ptr) free(img_count_ptr2) free(img_ptrs_raw)
       return false
    }
@@ -4405,7 +4625,7 @@ fn _create_swapchain(any: win): bool {
    _swapchain_images = []
    mut i = 0
    while(i < _swapchain_image_count){
-      def img_h = load64_h(img_ptrs_raw, i * 8)
+      def img_h = load64(img_ptrs_raw, i * 8)
       if(!img_h || img_h == 0){
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] null swapchain image at index=" + to_str(i)) }
          free(img_count_ptr) free(img_count_ptr2) free(img_ptrs_raw)
@@ -4446,7 +4666,7 @@ fn _create_swapchain_image_views(): bool {
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create_image_view failed code=" + to_str(iv_res) + " index=" + to_str(i)) }
          free(ci) free(view_ptr) return false
       }
-      def view_h = load64_h(view_ptr, 0)
+      def view_h = load64(view_ptr, 0)
       if(!_handle_ok(view_h)){
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create_image_view returned null index=" + to_str(i)) }
          free(ci) free(view_ptr) return false
@@ -4565,7 +4785,7 @@ fn _create_image_views(): bool {
       mut view_ptr = _renderer_alloc(8)
       def iv_res = create_image_view(_device, create_info, 0, view_ptr)
       if(iv_res != 0){ return false }
-      def view_h = load64_h(view_ptr, 0)
+      def view_h = load64(view_ptr, 0)
       _swapchain_image_views = _swapchain_image_views.append(view_h)
       i += 1
    }
@@ -4615,7 +4835,7 @@ fn _create_draw_image_one(int: width, int: height, int: format): any {
       free(img_ci) free(img_ptr)
       return 0
    }
-   def image = load64_h(img_ptr, 0)
+   def image = load64(img_ptr, 0)
    if(!image){
       free(img_ci) free(img_ptr)
       return 0
@@ -4636,7 +4856,7 @@ fn _create_draw_image_one(int: width, int: height, int: format): any {
       free(img_ci) free(img_ptr) free(mem_req) free(alloc_info) free(mem_ptr)
       return 0
    }
-   def memory = load64_h(mem_ptr, 0)
+   def memory = load64(mem_ptr, 0)
    if(!memory || bind_image_memory(_device, image, memory, 0) != 0){
       if(memory){ free_memory(_device, memory, 0) }
       destroy_image(_device, image, 0)
@@ -4659,7 +4879,7 @@ fn _create_draw_image_one(int: width, int: height, int: format): any {
       free(img_ci) free(img_ptr) free(mem_req) free(alloc_info) free(mem_ptr) free(view_ci) free(view_ptr)
       return 0
    }
-   def view = load64_h(view_ptr, 0)
+   def view = load64(view_ptr, 0)
    free(img_ci) free(img_ptr) free(mem_req) free(alloc_info) free(mem_ptr) free(view_ci) free(view_ptr)
    if(!view){
       free_memory(_device, memory, 0)
@@ -4716,7 +4936,7 @@ fn _create_depth_resources(): bool {
    store32(img_ci, 0, 80)
    mut img_ptr = _renderer_alloc(8)
    if(create_image(_device, img_ci, 0, img_ptr) != 0){ return false }
-   _depth_image = load64_h(img_ptr, 0)
+   _depth_image = load64(img_ptr, 0)
    mut mem_req = _renderer_alloc(24)
    get_image_memory_requirements(_device, _depth_image, mem_req)
    def d_size = load64_h(mem_req, 0)
@@ -4728,7 +4948,7 @@ fn _create_depth_resources(): bool {
    store32(alloc_info, d_mtype, 24)
    mut mem_ptr = _renderer_alloc(8)
    if(allocate_memory(_device, alloc_info, 0, mem_ptr) != 0){ return false }
-   _depth_memory = load64_h(mem_ptr, 0)
+   _depth_memory = load64(mem_ptr, 0)
    bind_image_memory(_device, _depth_image, _depth_memory, 0)
    mut view_ci = _renderer_alloc(80)
    store32(view_ci, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
@@ -4740,7 +4960,7 @@ fn _create_depth_resources(): bool {
    store32(view_ci, 1, 72)
    mut view_ptr = _renderer_alloc(8)
    if(create_image_view(_device, view_ci, 0, view_ptr) != 0){ return false }
-   _depth_view = load64_h(view_ptr, 0)
+   _depth_view = load64(view_ptr, 0)
    if(samples > 1){
       def color_format = _render_color_format()
       mut ci2 = _renderer_alloc(88)
@@ -4761,7 +4981,7 @@ fn _create_depth_resources(): bool {
       store32(ci2, 0, 80)
       mut ip2 = _renderer_alloc(8)
       if(create_image(_device, ci2, 0, ip2) != 0){ return false }
-      _msaa_color_image = load64_h(ip2, 0)
+      _msaa_color_image = load64(ip2, 0)
       mut mr2 = _renderer_alloc(24)
       get_image_memory_requirements(_device, _msaa_color_image, mr2)
       def c_size = load64_h(mr2, 0)
@@ -4773,7 +4993,7 @@ fn _create_depth_resources(): bool {
       store32(ai2, c_mtype, 24)
       mut mp2 = _renderer_alloc(8)
       if(allocate_memory(_device, ai2, 0, mp2) != 0){ return false }
-      _msaa_color_memory = load64_h(mp2, 0)
+      _msaa_color_memory = load64(mp2, 0)
       bind_image_memory(_device, _msaa_color_image, _msaa_color_memory, 0)
       mut vc2 = _renderer_alloc(80)
       store32(vc2, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, 0)
@@ -4785,7 +5005,7 @@ fn _create_depth_resources(): bool {
       store32(vc2, 1, 72)
       mut vp2 = _renderer_alloc(8)
       if(create_image_view(_device, vc2, 0, vp2) != 0){ return false }
-      _msaa_color_view = load64_h(vp2, 0)
+      _msaa_color_view = load64(vp2, 0)
    }
    true
 }
@@ -4870,7 +5090,7 @@ fn _create_framebuffers(): bool {
       if(!fb_ptr){ free(attach_ptr) free(create_info) return false }
       memset(fb_ptr, 0, 8)
       def fb_res = create_framebuffer(_device, create_info, 0, fb_ptr)
-      def fb = load64_h(fb_ptr, 0)
+      def fb = load64(fb_ptr, 0)
       free(attach_ptr, create_info, fb_ptr)
       if(fb_res != 0 || !fb || fb == 0){
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create_framebuffer failed i=" + to_str(i) + " res=" + to_str(fb_res) + " h=0x" + to_hex(fb)) }
@@ -4917,7 +5137,7 @@ fn _create_sync_objects(): bool {
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create semaphore image_available failed res=" + to_str(s1_res) + " stype=" + to_str(load32(si, 0))) }
          return false
       }
-      def sem1_h = load64_h(sem1, 0)
+      def sem1_h = load64(sem1, 0)
       _image_available_semaphores = _image_available_semaphores.append(sem1_h)
       _image_available_semaphores_count = _image_available_semaphores.len
       store64_h(_sem_avail_slab, sem1_h, i * 8)
@@ -4927,7 +5147,7 @@ fn _create_sync_objects(): bool {
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create semaphore render_finished failed res=" + to_str(s2_res) + " stype=" + to_str(load32(si, 0))) }
          return false
       }
-      def sem2_h = load64_h(sem2, 0)
+      def sem2_h = load64(sem2, 0)
       _render_finished_semaphores = _render_finished_semaphores.append(sem2_h)
       _render_finished_semaphores_count = _render_finished_semaphores.len
       store64_h(_sem_finish_slab, sem2_h, i * 8)
@@ -4941,7 +5161,7 @@ fn _create_sync_objects(): bool {
          if(vk_state._debug_gfx_enabled){ ui_profile.print_text("[gfx:vulkan] create fence failed res=" + to_str(f_res) + " stype=" + to_str(load32(fi, 0))) }
          return false
       }
-      def fence_h = load64_h(fence, 0)
+      def fence_h = load64(fence, 0)
       _in_flight_fences = _in_flight_fences.append(fence_h)
       _in_flight_fences_count = _in_flight_fences.len
       store64_h(_fences_slab, fence_h, i * 8)
@@ -4958,7 +5178,7 @@ fn _create_command_pool(): bool {
    mut pool_ptr = _renderer_alloc(8)
    def cp_res = create_command_pool(_device, create_info, 0, pool_ptr)
    if(cp_res != 0){ return false }
-   _command_pool = load64_h(pool_ptr, 0)
+   _command_pool = load64(pool_ptr, 0)
    true
 }
 
@@ -4976,7 +5196,7 @@ fn _create_command_buffers(): bool {
    if(!_cmd_bufs_slab){ return false }
    mut i = 0
    while(i < _frames_in_flight()){
-      def cb_h = load64_h(bufs_ptr, i * 8)
+      def cb_h = load64(bufs_ptr, i * 8)
       _command_buffers = _command_buffers.append(cb_h)
       store64_h(_cmd_bufs_slab, cb_h, i * 8)
       i += 1
@@ -5001,7 +5221,7 @@ fn _create_ubo_descriptor_sets(): bool {
       store64_h(alloc_ds, dsl_ptr, 32)
       mut ds_ptr = _renderer_alloc(8)
       if(allocate_descriptor_sets(_device, alloc_ds, ds_ptr) != 0){ return false }
-      def ds = load64_h(ds_ptr, 0)
+      def ds = load64(ds_ptr, 0)
       mut buf_info = _renderer_alloc(24)
       store64_h(buf_info, _ubo_buffer, 0)
       store64_h(buf_info, 0, 8)
@@ -5014,23 +5234,13 @@ fn _create_ubo_descriptor_sets(): bool {
       store32(write, 1, 32) ; count
       store32(write, _vk_descriptor_uniform_buffer(), 36)
       store64_h(write, buf_info, 48) ; pBufferInfo
-      if(vk_state._debug_gfx_enabled){
-         ui_profile.eprint_text("[gfx:vulkan] ubo descriptor update frame=" + to_str(i)
-            + " pool=0x" + to_hex(_descriptor_pool)
-            + " layout=0x" + to_hex(_descriptor_set_layout_ubo)
-            + " ds=0x" + to_hex(ds)
-            + " buffer=0x" + to_hex(_ubo_buffer)
-            + " range=" + to_str(_ubo_size_value())
-            + " dtype=" + to_str(_vk_descriptor_uniform_buffer())
-         + " stype=" + to_str(_vk_stype_write_descriptor_set()))
-      }
       update_descriptor_sets(_device, 1, write, 0, 0)
-      _ubo_descriptor_sets = _ubo_descriptor_sets.append(ds)
       store64_h(_ubo_ds_slab, ds, i * 8)
       free(dsl_ptr) free(alloc_ds) free(ds_ptr)
       free(buf_info) free(write)
       i += 1
    }
+   _ubo_descriptor_sets = [1]
    true
 }
 
