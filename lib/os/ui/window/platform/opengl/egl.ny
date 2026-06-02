@@ -9,6 +9,36 @@ use std.os.ui.window.platform.api as backend_api
    #link "libEGL.so"
    #include <EGL/egl.h>
 } #endif
+#windows {
+   fn eglGetDisplay(any: _native_display): any { 0 }
+   fn eglInitialize(any: _display, any: _major, any: _minor): int { 0 }
+   fn eglChooseConfig(any: _display, any: _attrs, any: _configs, int: _config_size, any: _num_configs): int { 0 }
+   fn eglBindAPI(any: _api): int { 0 }
+   fn eglCreateContext(any: _display, any: _config, any: _share, any: _attrs): any { 0 }
+   fn eglCreateWindowSurface(any: _display, any: _config, any: _native_window, any: _attrs): any { 0 }
+   fn eglDestroySurface(any: _display, any: _surface): int { 0 }
+   fn eglGetConfigAttrib(any: _display, any: _config, any: _attrib, any: _value): int { 0 }
+   fn eglDestroyContext(any: _display, any: _ctx): int { 0 }
+   fn eglMakeCurrent(any: _display, any: _draw, any: _read, any: _ctx): int { 0 }
+   fn eglSwapBuffers(any: _display, any: _surface): int { 0 }
+   fn eglSwapInterval(any: _display, any: _interval): int { 0 }
+   fn eglGetProcAddress(any: _name): any { 0 }
+} #endif
+#macos {
+   fn eglGetDisplay(any: _native_display): any { 0 }
+   fn eglInitialize(any: _display, any: _major, any: _minor): int { 0 }
+   fn eglChooseConfig(any: _display, any: _attrs, any: _configs, int: _config_size, any: _num_configs): int { 0 }
+   fn eglBindAPI(any: _api): int { 0 }
+   fn eglCreateContext(any: _display, any: _config, any: _share, any: _attrs): any { 0 }
+   fn eglCreateWindowSurface(any: _display, any: _config, any: _native_window, any: _attrs): any { 0 }
+   fn eglDestroySurface(any: _display, any: _surface): int { 0 }
+   fn eglGetConfigAttrib(any: _display, any: _config, any: _attrib, any: _value): int { 0 }
+   fn eglDestroyContext(any: _display, any: _ctx): int { 0 }
+   fn eglMakeCurrent(any: _display, any: _draw, any: _read, any: _ctx): int { 0 }
+   fn eglSwapBuffers(any: _display, any: _surface): int { 0 }
+   fn eglSwapInterval(any: _display, any: _interval): int { 0 }
+   fn eglGetProcAddress(any: _name): any { 0 }
+} #endif
 
 fn init_display(any: native_display): any {
    def dpy = eglGetDisplay(native_display)

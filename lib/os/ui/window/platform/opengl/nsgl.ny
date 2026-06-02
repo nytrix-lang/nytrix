@@ -4,10 +4,6 @@ module std.os.ui.window.platform.opengl.nsgl(create_context, destroy_context, ma
 use std.core
 use std.os.ui.window.platform.cocoa as cocoa
 
-#macos {
-   #include <OpenGL/OpenGL.h>
-} #endif
-
 fn create_context(any: share=0): any {
    "Creates a native NSOpenGLContext for Cocoa."
    def fmt_cls = cocoa.get_class("NSOpenGLPixelFormat")

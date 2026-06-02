@@ -32,8 +32,41 @@ def kCFTypeArrayCallBacks    = 0
 def kCFTypeDictionaryKeyCallBacks   = 0
 def kCFTypeDictionaryValueCallBacks = 0
 #macos {
+   #link "-framework CoreFoundation"
+   #link "-framework IOKit"
    #include <IOKit/IOKitLib.h>
+   #include <IOKit/hid/IOHIDLib.h>
    #include <CoreFoundation/CoreFoundation.h>
+   extern "" {
+      fn CFArrayCreate(any: alloc, any: values, int: count, any: callbacks): any
+      fn CFArrayGetCount(any: arr): int
+      fn CFArrayGetValueAtIndex(any: arr, int: idx): any
+      fn CFDictionaryCreateMutable(any: alloc, int: cap, any: keys, any: values): any
+      fn CFDictionarySetValue(any: dict, any: key, any: value): any
+      fn CFNumberCreate(any: alloc, int: typ, any: value): any
+      fn CFNumberGetValue(any: num, int: typ, any: out): int
+      fn CFRelease(any: obj): any
+      fn CFRunLoopGetCurrent(): any
+      fn CFRunLoopRunInMode(any: mode, f64: seconds, int: return_after_source): int
+      fn CFStringCreateWithCString(any: alloc, any: s, int: enc): any
+      fn CFStringGetCString(any: s, any: buf, int: cap, int: enc): int
+      fn IOHIDDeviceCopyMatchingElements(any: device, any: matching, int: options): any
+      fn IOHIDDeviceGetProperty(any: device, any: key): any
+      fn IOHIDDeviceGetValue(any: device, any: element, any: out): int
+      fn IOHIDElementGetLogicalMax(any: elem): int
+      fn IOHIDElementGetLogicalMin(any: elem): int
+      fn IOHIDElementGetUsage(any: elem): int
+      fn IOHIDElementGetUsagePage(any: elem): int
+      fn IOHIDManagerClose(any: mgr, int: options): int
+      fn IOHIDManagerCreate(any: alloc, int: options): any
+      fn IOHIDManagerOpen(any: mgr, int: options): int
+      fn IOHIDManagerRegisterDeviceMatchingCallback(any: mgr, any: cb, any: ctx): any
+      fn IOHIDManagerRegisterDeviceRemovalCallback(any: mgr, any: cb, any: ctx): any
+      fn IOHIDManagerScheduleWithRunLoop(any: mgr, any: loop, any: mode): any
+      fn IOHIDManagerSetDeviceMatchingMultiple(any: mgr, any: arr): any
+      fn IOHIDManagerUnscheduleFromRunLoop(any: mgr, any: loop, any: mode): any
+      fn IOHIDValueGetIntegerValue(any: value): int
+   }
 } #else {
    fn CFArrayCreate(any: _alloc, any: _values, int: _count, any: _callbacks): any { 0 }
    fn CFArrayGetCount(any: _arr): int { 0 }
@@ -299,6 +332,7 @@ fn _device_connected(any: ctx, any: result, any: sender, any: device): any {
       "connected": true,
       "name": name,
       "guid": guid,
+      "platform": "Mac OS X",
       "axes_ptr": axes_ptr,
       "buttons_ptr": buttons_ptr,
       "axis_count": axis_count,

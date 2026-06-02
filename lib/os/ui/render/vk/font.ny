@@ -467,6 +467,10 @@ fn __vkr_draw_text(int: font_id, any: text, any: x, any: y, any: color, any: gly
    def n = text.len
    def line_h_f = float(line_h)
    def c_text = _vkr_color_u32(color)
+   if(!out_info){
+      _vkr_draw_text_fast_inner(text, float(x), float(y) + float(ascent), c_text, glyphs_ptr, line_h_f, 0)
+      return 0
+   }
    if(!_check_flush(n * (_VKR_VERT_STRIDE * 6))){ return 0 }
    def pen_x0 = float(x)
    mut pen_x, pen_y = pen_x0, float(y) + float(ascent)

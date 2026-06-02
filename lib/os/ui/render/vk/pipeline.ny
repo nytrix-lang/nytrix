@@ -1,6 +1,6 @@
 ;; Keywords: render vulkan gpu pipeline
 ;; Vulkan pipeline creation, binding, cache, and shader-stage setup.
-module std.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_skybox_pipeline)
+module std.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
 use std.core
 use std.core.mem
 use std.os
@@ -154,6 +154,7 @@ comptime emit _shader_cache_path_getter(_shader_sky_vert_spv, "nytrix_sky.vert.s
 comptime emit _shader_cache_path_getter(_shader_sky_frag_spv, "nytrix_sky.frag.spv")
 comptime emit _shader_cache_path_getter(_shader_circle_spv, "nytrix_circle.frag.spv")
 comptime emit _shader_cache_path_getter(_shader_ring_spv, "nytrix_ring.frag.spv")
+comptime emit _shader_cache_path_getter(_shader_rounded_rect_spv, "nytrix_rounded_rect.frag.spv")
 
 fn _compile_shader_spv(str: source, str: stage_ext, str: out_spv): bool {
    def tmp_src = ospath.join(ospath.temp_dir(), f"ny_shader_auto_{to_str(ticks())}_{stage_ext}.{stage_ext}")
@@ -247,7 +248,7 @@ fn create_shader_module_from_source(str: source, str: stage_ext): any {
    store64_h(ci, spirv, 32)
    mut mod_ptr = _pipe_alloc(8)
    if(create_shader_module(_device, ci, 0, mod_ptr) != 0){ return 0 }
-   load64_h(mod_ptr, 0)
+   load64(mod_ptr, 0)
 }
 
 fn _create_pipeline_ex(any: vert_mod, any: frag_mod, int: topology=3, int: depth_test=1, int: depth_write=1, int: cull_mode=0, int: front_face=0, int: depth_bias=0, int: depth_clamp=0, f64: line_width=1.0, int: blend_enable=1, int: polygon_mode=0): any {
@@ -317,7 +318,7 @@ fn _create_pipeline_ex(any: vert_mod, any: frag_mod, int: topology=3, int: depth
       " dyn=" + to_str(load32(ds, 0)))
    }
    if(create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr) != 0){ return 0 }
-   load64_h(pipe_ptr, 0)
+   load64(pipe_ptr, 0)
 }
 
 fn create_pipeline(any: vert_mod, any: frag_mod, int: topology=3, int: depth_test=1, int: depth_write=1, int: cull_mode=0, int: front_face=0, int: depth_bias=0, int: depth_clamp=0, f64: line_width=1.0): any {
@@ -403,6 +404,7 @@ fn _engine_pipeline_handle(any: p): bool {
    _pipe_eq(p, _wire_pipeline) ||
    _pipe_eq(p, _circle_pipeline) ||
    _pipe_eq(p, _ring_pipeline) ||
+   _pipe_eq(p, _rounded_rect_pipeline) ||
    _pipe_eq(p, _skybox_pipeline) ||
    _pipe_eq(p, _mesh_opaque_pipeline) ||
    _pipe_eq(p, _mesh_opaque_nocull_pipeline) ||
@@ -451,7 +453,7 @@ fn push_constants(any: data_ptr, int: size, int: offset=0): any {
    def pc_ptr = _use_custom_pc ? _pc_buffer_custom : _pc_buffer
    memcpy(pc_ptr + offset, data_ptr, size)
    _pc_dirty = true
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    cmd_push_constants(cb, _pipeline_layout, 1 | 16, offset, size, data_ptr)
 }
 
@@ -466,7 +468,7 @@ fn set_custom_push_constants(any: data_ptr, int: size, int: offset=0): any {
    if(offset + size > shader_pc_bytes()){ return 0 }
    memcpy(_pc_buffer_custom + offset, data_ptr, size)
    _pc_dirty = true
-   def cb = load64_h(_cmd_bufs_slab, _current_frame * 8)
+   def cb = load64(_cmd_bufs_slab, _current_frame * 8)
    cmd_push_constants(cb, _pipeline_layout, 1 | 16, offset, size, data_ptr)
 }
 
@@ -484,7 +486,7 @@ fn _create_shader_module(str: path): any {
    mut mod_ptr = _pipe_alloc(8)
    def vk_res = create_shader_module(_device, ci, 0, mod_ptr)
    if(vk_res != 0){ return 0 }
-   def mod = load64_h(mod_ptr, 0)
+   def mod = load64(mod_ptr, 0)
    if(_shader_trace_enabled()){
       ui_profile.print_line("vk:shader", "module path=" + path + " size=" + to_str(size) + " handle=" + to_str(mod))
    }
@@ -656,6 +658,22 @@ fn _ensure_ring_pipeline(): bool {
    _ring_pipeline != 0
 }
 
+fn _ensure_rounded_rect_pipeline(): bool {
+   if(_rounded_rect_pipeline){ return _rounded_rect_pipeline != 0 }
+   if(!_device || !_pipeline_layout || !_render_pass){ return false }
+   if(!_ensure_sdf_shader_binary()){ return false }
+   def _t0 = _pipe_deep_trace_enabled() ? ticks() : 0
+   def frag_src = _shader_ui_source_text("rounded_rect.frag.glsl")
+   if(frag_src.len <= 0){ return false }
+   if(!_shader_compile_cached(frag_src, "frag", _shader_rounded_rect_spv())){ return false }
+   def vert_sdf_mod = _create_shader_module(_shader_sdf_spv())
+   def frag_mod = _create_shader_module(_shader_rounded_rect_spv())
+   if(!vert_sdf_mod || !frag_mod){ return false }
+   _rounded_rect_pipeline = create_pipeline(vert_sdf_mod, frag_mod, 3, 1, 1, 0, 0, 0, 0)
+   _pipe_log_ms("ensure_rounded_rect_pipeline", _t0)
+   _rounded_rect_pipeline != 0
+}
+
 fn _ensure_skybox_pipeline(): bool {
    if(_skybox_pipeline){ return _skybox_pipeline != 0 }
    if(!_device || !_pipeline_layout || !_render_pass){ return false }
@@ -687,7 +705,7 @@ fn _create_graphics_layouts(): bool {
       " tex_count=" + to_str(load32(tex_binding, 8)))
    }
    if(create_descriptor_set_layout(_device, tex_ci, 0, dsl_ptr) != 0){ free(scratch) return false }
-   _descriptor_set_layout = load64_h(dsl_ptr, 0)
+   _descriptor_set_layout = load64(dsl_ptr, 0)
    def ubo_binding = VkDescriptorSetLayoutBinding(0,
       _vk_descriptor_uniform_buffer(),
       1,
@@ -700,7 +718,7 @@ fn _create_graphics_layouts(): bool {
       " ubo_stages=" + to_str(load32(ubo_binding, 12)))
    }
    if(create_descriptor_set_layout(_device, ubo_ci, 0, ubo_ptr) != 0){ free(scratch) return false }
-   _descriptor_set_layout_ubo = load64_h(ubo_ptr, 0)
+   _descriptor_set_layout_ubo = load64(ubo_ptr, 0)
    store32(pc_range, 1 | 16, 0) ; STAGE_VERTEX | STAGE_FRAGMENT
    store32(pc_range, 0, 4)
    store32(pc_range, shader_pc_bytes(), 8) ; push-constant bytes
@@ -715,7 +733,7 @@ fn _create_graphics_layouts(): bool {
    }
    def pl_res = create_pipeline_layout(_device, layout_ci, 0, layout_ptr)
    if(pl_res != 0){ free(scratch) return false }
-   _pipeline_layout = load64_h(layout_ptr, 0)
+   _pipeline_layout = load64(layout_ptr, 0)
    free(scratch)
    true
 }
