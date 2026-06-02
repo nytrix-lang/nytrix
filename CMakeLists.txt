@@ -287,7 +287,11 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
                        llvm-config-18 llvm-config-17 llvm-config-16 llvm-config
                  PATHS "$ENV{MSYSTEM_PREFIX}/bin" "$ENV{MINGW_PREFIX}/bin"
                        "C:/msys64/ucrt64/bin" "C:/msys64/clang64/bin"
-                       "C:/msys64/mingw64/bin" "C:/Program Files/LLVM/bin"
+                       "C:/msys64/mingw64/bin" "C:/msys64/clangarm64/bin"
+                       "C:/tools/msys64/ucrt64/bin"
+                       "C:/tools/msys64/clang64/bin" "C:/tools/msys64/mingw64/bin"
+                       "C:/tools/msys64/clangarm64/bin"
+                       "C:/Program Files/LLVM/bin"
                        "C:/tools/llvm/bin" "/opt/homebrew/opt/llvm@20/bin"
                        "/usr/local/opt/llvm@20/bin" "/opt/homebrew/opt/llvm/bin"
                        "/usr/local/opt/llvm/bin")
@@ -332,6 +336,11 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
        "C:/msys64/ucrt64/include"
        "C:/msys64/clang64/include"
        "C:/msys64/mingw64/include"
+       "C:/msys64/clangarm64/include"
+       "C:/tools/msys64/ucrt64/include"
+       "C:/tools/msys64/clang64/include"
+       "C:/tools/msys64/mingw64/include"
+       "C:/tools/msys64/clangarm64/include"
        "$ENV{MSYSTEM_PREFIX}/include"
        "$ENV{MINGW_PREFIX}/include"
        "C:/tools/llvm/include"
@@ -401,6 +410,11 @@ list(APPEND _nytrix_llvm_lib_paths
   "C:/msys64/ucrt64/lib"
   "C:/msys64/clang64/lib"
   "C:/msys64/mingw64/lib"
+  "C:/msys64/clangarm64/lib"
+  "C:/tools/msys64/ucrt64/lib"
+  "C:/tools/msys64/clang64/lib"
+  "C:/tools/msys64/mingw64/lib"
+  "C:/tools/msys64/clangarm64/lib"
   "C:/Program Files/LLVM/lib"
   "$ENV{MSYSTEM_PREFIX}/lib"
   "$ENV{MINGW_PREFIX}/lib"
@@ -459,6 +473,10 @@ find_path(NYTRIX_GMP_INCLUDE_DIR
     "C:/msys64/clang64/include"
     "C:/msys64/mingw64/include"
     "C:/msys64/clangarm64/include"
+    "C:/tools/msys64/ucrt64/include"
+    "C:/tools/msys64/clang64/include"
+    "C:/tools/msys64/mingw64/include"
+    "C:/tools/msys64/clangarm64/include"
     "$ENV{MSYSTEM_PREFIX}/include"
     "$ENV{MINGW_PREFIX}/include"
 )
@@ -476,6 +494,10 @@ else()
       "C:/msys64/clang64/lib"
       "C:/msys64/mingw64/lib"
       "C:/msys64/clangarm64/lib"
+      "C:/tools/msys64/ucrt64/lib"
+      "C:/tools/msys64/clang64/lib"
+      "C:/tools/msys64/mingw64/lib"
+      "C:/tools/msys64/clangarm64/lib"
       "$ENV{MSYSTEM_PREFIX}/lib"
       "$ENV{MINGW_PREFIX}/lib"
   )
@@ -1056,8 +1078,108 @@ if (NYTRIX_BUILD_LSP)
   endif()
 endif()
 
-
 if (WIN32)
+  set(NYTRIX_WINDOWS_RUNTIME_DEPS_SCRIPT "${CMAKE_BINARY_DIR}/nytrix_copy_runtime_deps.cmake")
+  file(WRITE "${NYTRIX_WINDOWS_RUNTIME_DEPS_SCRIPT}" [=[
+if(POLICY CMP0207)
+  cmake_policy(SET CMP0207 NEW)
+endif()
+if(NOT DEFINED NYTRIX_RUNTIME_EXE OR NOT EXISTS "${NYTRIX_RUNTIME_EXE}")
+  return()
+endif()
+if(NOT DEFINED NYTRIX_RUNTIME_OUT)
+  get_filename_component(NYTRIX_RUNTIME_OUT "${NYTRIX_RUNTIME_EXE}" DIRECTORY)
+endif()
+set(_nytrix_runtime_dirs)
+foreach(_dir IN LISTS NYTRIX_RUNTIME_DIRS)
+  if(IS_DIRECTORY "${_dir}")
+    list(APPEND _nytrix_runtime_dirs "${_dir}")
+  endif()
+endforeach()
+file(GET_RUNTIME_DEPENDENCIES
+  EXECUTABLES "${NYTRIX_RUNTIME_EXE}"
+  DIRECTORIES ${_nytrix_runtime_dirs}
+  RESOLVED_DEPENDENCIES_VAR _nytrix_runtime_deps
+  UNRESOLVED_DEPENDENCIES_VAR _nytrix_runtime_unresolved
+  PRE_EXCLUDE_REGEXES
+    "api-ms-.*"
+    "ext-ms-.*"
+  POST_EXCLUDE_REGEXES
+    "[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss]ystem32[/\\\\].*"
+    "[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss]ysWOW64[/\\\\].*"
+)
+foreach(_dep IN LISTS _nytrix_runtime_deps)
+  get_filename_component(_name "${_dep}" NAME)
+  file(COPY_FILE "${_dep}" "${NYTRIX_RUNTIME_OUT}/${_name}" ONLY_IF_DIFFERENT)
+endforeach()
+if(_nytrix_runtime_unresolved)
+  message(STATUS "Nytrix unresolved runtime deps for ${NYTRIX_RUNTIME_EXE}: ${_nytrix_runtime_unresolved}")
+endif()
+]=])
+
+  function(nytrix_stage_windows_runtime_deps target_name)
+    if(NOT TARGET ${target_name})
+      return()
+    endif()
+    set(_runtime_dirs)
+    foreach(_dir IN ITEMS
+        "$ENV{MSYSTEM_PREFIX}/bin"
+        "$ENV{MINGW_PREFIX}/bin"
+        "C:/msys64/ucrt64/bin"
+        "C:/msys64/clang64/bin"
+        "C:/msys64/mingw64/bin"
+        "C:/tools/msys64/ucrt64/bin"
+        "C:/tools/msys64/clang64/bin"
+        "C:/tools/msys64/mingw64/bin"
+        "C:/Program Files/LLVM/bin")
+      if(IS_DIRECTORY "${_dir}")
+        list(APPEND _runtime_dirs "${_dir}")
+      endif()
+    endforeach()
+    foreach(_path IN ITEMS
+        "${CMAKE_C_COMPILER}"
+        "${CMAKE_CXX_COMPILER}"
+        "${NYTRIX_CLANG_LIBRARY_FOUND}"
+        "${NYTRIX_GMP_LIBRARY_FOUND}"
+        "${NYTRIX_Z3_LIBRARY}")
+      if(_path)
+        get_filename_component(_dir "${_path}" DIRECTORY)
+        if(IS_DIRECTORY "${_dir}")
+          list(APPEND _runtime_dirs "${_dir}")
+        endif()
+        get_filename_component(_parent "${_dir}" DIRECTORY)
+        if(IS_DIRECTORY "${_parent}/bin")
+          list(APPEND _runtime_dirs "${_parent}/bin")
+        endif()
+      endif()
+    endforeach()
+    if(TARGET ZLIB::ZLIB)
+      get_target_property(_zlib_loc ZLIB::ZLIB IMPORTED_LOCATION)
+      get_target_property(_zlib_implib ZLIB::ZLIB IMPORTED_IMPLIB)
+      foreach(_path IN ITEMS "${_zlib_loc}" "${_zlib_implib}")
+        if(_path)
+          get_filename_component(_dir "${_path}" DIRECTORY)
+          get_filename_component(_parent "${_dir}" DIRECTORY)
+          if(IS_DIRECTORY "${_dir}")
+            list(APPEND _runtime_dirs "${_dir}")
+          endif()
+          if(IS_DIRECTORY "${_parent}/bin")
+            list(APPEND _runtime_dirs "${_parent}/bin")
+          endif()
+        endif()
+      endforeach()
+    endif()
+    list(REMOVE_DUPLICATES _runtime_dirs)
+    add_custom_command(TARGET ${target_name} POST_BUILD
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNYTRIX_RUNTIME_EXE=$<TARGET_FILE:${target_name}>"
+        "-DNYTRIX_RUNTIME_OUT=$<TARGET_FILE_DIR:${target_name}>"
+        "-DNYTRIX_RUNTIME_DIRS=${_runtime_dirs}"
+        -P "${NYTRIX_WINDOWS_RUNTIME_DEPS_SCRIPT}"
+      VERBATIM
+    )
+  endfunction()
+
   target_compile_definitions(ny PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS PATH_MAX=4096)
   if (NYTRIX_BUILD_LSP)
     target_compile_definitions(ny-lsp PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS PATH_MAX=4096)
@@ -1099,6 +1221,9 @@ if (WIN32)
       target_link_libraries(ny-lsp PRIVATE "${_lib}")
     endforeach()
   endif()
+  foreach(_target IN ITEMS ny ny-fmt ny-perf ny-test ny-doc ny-make ny-lsp)
+    nytrix_stage_windows_runtime_deps(${_target})
+  endforeach()
 else()
   # CFLAGS
   set(_all_cflags ${NYTRIX_LLVM_CFLAGS_LIST} ${NYTRIX_HOST_CFLAGS})
