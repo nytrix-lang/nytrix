@@ -8,7 +8,7 @@ use std.os.prim
 use std.os.time
 use std.core.str as str
 use std.core.str (to_hex)
-use std.os.ui.render.vk.vulkan (vk_create_xcb_surface_khr, vk_create_xlib_surface_khr)
+use std.os.ui.render.vk.vulkan (vk_create_xcb_surface_khr, vk_create_xlib_surface_khr, vkGetPhysicalDeviceSurfaceCapabilitiesKHR, vkGetPhysicalDeviceSurfaceSupportKHR)
 use std.os.ui.window.consts
 use std.os.ui.window.event as ui_event
 use std.os.ui.window.platform.api
@@ -325,6 +325,121 @@ fn _next_cursor_id(): int {
       fn _c_xkeysym_to_keycode(ptr: display, u64: keysym): u32 as "XKeysymToKeycode"
       fn _c_xkeysym_to_string(u64: keysym): ptr as "XKeysymToString"
    }
+} #else {
+   fn _c_xset_locale_modifiers(..._args): any { 0 }
+   fn _c_xopenim(..._args): any { 0 }
+   fn _c_xcloseim(..._args): any { 0 }
+   fn _c_xcreateic(..._args): any { 0 }
+   fn _c_xdestroyic(..._args): any { 0 }
+   fn _c_xseticfocus(..._args): any { 0 }
+   fn _c_xunseticfocus(..._args): any { 0 }
+   fn _c_xutf8_lookup_string(..._args): any { 0 }
+   fn _c_xset_error_handler(..._args): any { 0 }
+   fn _c_xgetxcbconnection(..._args): any { 0 }
+   fn _c_xkb_keycode_to_keysym(..._args): any { 0 }
+   fn _c_xkeysym_to_keycode(..._args): any { 0 }
+   fn _c_xkeysym_to_string(..._args): any { 0 }
+   fn XAllocClassHint(..._args): any { 0 }
+   fn XAllocSizeHints(..._args): any { 0 }
+   fn XAllocWMHints(..._args): any { 0 }
+   fn XChangeProperty(..._args): any { 0 }
+   fn XChangeWindowAttributes(..._args): any { 0 }
+   fn XCheckTypedWindowEvent(..._args): any { 0 }
+   fn XCloseDisplay(..._args): any { 0 }
+   fn XConvertSelection(..._args): any { 0 }
+   fn XCreateColormap(..._args): any { 0 }
+   fn XCreateFontCursor(..._args): any { 0 }
+   fn XCreateGC(..._args): any { 0 }
+   fn XCreateImage(..._args): any { 0 }
+   fn XCreateWindow(..._args): any { 0 }
+   fn XcursorGetDefaultSize(..._args): any { 0 }
+   fn XcursorGetTheme(..._args): any { 0 }
+   fn XcursorImageCreate(..._args): any { 0 }
+   fn XcursorImageDestroy(..._args): any { 0 }
+   fn XcursorImageLoadCursor(..._args): any { 0 }
+   fn XcursorLibraryLoadImage(..._args): any { 0 }
+   fn XDefaultDepth(..._args): any { 0 }
+   fn XDefaultScreen(..._args): any { 0 }
+   fn XDefaultVisual(..._args): any { 0 }
+   fn XDefineCursor(..._args): any { 0 }
+   fn XDeleteProperty(..._args): any { 0 }
+   fn XDestroyWindow(..._args): any { 0 }
+   fn XDisplayHeight(..._args): any { 0 }
+   fn XDisplayKeycodes(..._args): any { 0 }
+   fn XDisplayWidth(..._args): any { 0 }
+   fn XEventsQueued(..._args): any { 0 }
+   fn XFilterEvent(..._args): any { 0 }
+   fn XFixesHideCursor(..._args): any { 0 }
+   fn XFixesShowCursor(..._args): any { 0 }
+   fn XFlush(..._args): any { 0 }
+   fn XFree(..._args): any { 0 }
+   fn XFreeColormap(..._args): any { 0 }
+   fn XFreeCursor(..._args): any { 0 }
+   fn XFreeEventData(..._args): any { 0 }
+   fn XFreeGC(..._args): any { 0 }
+   fn XGetEventData(..._args): any { 0 }
+   fn XGetInputFocus(..._args): any { 0 }
+   fn XGetKeyboardMapping(..._args): any { 0 }
+   fn XGetSelectionOwner(..._args): any { 0 }
+   fn XGetVisualInfo(..._args): any { 0 }
+   fn XGetWindowAttributes(..._args): any { 0 }
+   fn XGetWindowProperty(..._args): any { 0 }
+   fn XGetWMNormalHints(..._args): any { 0 }
+   fn XGrabPointer(..._args): any { 0 }
+   fn XIconifyWindow(..._args): any { 0 }
+   fn XInitThreads(..._args): any { 0 }
+   fn XInternAtom(..._args): any { 0 }
+   fn XIQueryVersion(..._args): any { 0 }
+   fn XISelectEvents(..._args): any { 0 }
+   fn XkbQueryExtension(..._args): any { 0 }
+   fn XkbSetDetectableAutoRepeat(..._args): any { 0 }
+   fn XKeysymToKeycode(..._args): any { 0 }
+   fn XLookupString(..._args): any { 0 }
+   fn XMapRaised(..._args): any { 0 }
+   fn XMapWindow(..._args): any { 0 }
+   fn XMoveWindow(..._args): any { 0 }
+   fn XNextEvent(..._args): any { 0 }
+   fn XOpenDisplay(..._args): any { 0 }
+   fn XPeekEvent(..._args): any { 0 }
+   fn XPending(..._args): any { 0 }
+   fn XPutImage(..._args): any { 0 }
+   fn XQueryExtension(..._args): any { 0 }
+   fn XQueryKeymap(..._args): any { 0 }
+   fn XQueryPointer(..._args): any { 0 }
+   fn XRaiseWindow(..._args): any { 0 }
+   fn XResizeWindow(..._args): any { 0 }
+   fn XrmInitialize(..._args): any { 0 }
+   fn XRootWindow(..._args): any { 0 }
+   fn XRRAllocGamma(..._args): any { 0 }
+   fn XRRFreeCrtcInfo(..._args): any { 0 }
+   fn XRRFreeGamma(..._args): any { 0 }
+   fn XRRFreeOutputInfo(..._args): any { 0 }
+   fn XRRFreeScreenResources(..._args): any { 0 }
+   fn XRRGetCrtcGamma(..._args): any { 0 }
+   fn XRRGetCrtcGammaSize(..._args): any { 0 }
+   fn XRRGetCrtcInfo(..._args): any { 0 }
+   fn XRRGetOutputInfo(..._args): any { 0 }
+   fn XRRGetOutputPrimary(..._args): any { 0 }
+   fn XRRGetScreenResourcesCurrent(..._args): any { 0 }
+   fn XRRSetCrtcConfig(..._args): any { 0 }
+   fn XRRSetCrtcGamma(..._args): any { 0 }
+   fn XRRUpdateConfiguration(..._args): any { 0 }
+   fn XSelectInput(..._args): any { 0 }
+   fn XSendEvent(..._args): any { 0 }
+   fn XSetClassHint(..._args): any { 0 }
+   fn XSetInputFocus(..._args): any { 0 }
+   fn XSetSelectionOwner(..._args): any { 0 }
+   fn XSetWMHints(..._args): any { 0 }
+   fn XSetWMNormalHints(..._args): any { 0 }
+   fn XSetWMProtocols(..._args): any { 0 }
+   fn XShapeCombineRectangles(..._args): any { 0 }
+   fn XStoreName(..._args): any { 0 }
+   fn XSync(..._args): any { 0 }
+   fn XTranslateCoordinates(..._args): any { 0 }
+   fn XUndefineCursor(..._args): any { 0 }
+   fn XUngrabPointer(..._args): any { 0 }
+   fn XUnmapWindow(..._args): any { 0 }
+   fn XWarpPointer(..._args): any { 0 }
 } #endif
 
 fn _ensure_x11_connected(): bool {

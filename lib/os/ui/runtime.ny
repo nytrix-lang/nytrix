@@ -172,10 +172,16 @@ fn open_fullscreen(any: title, int: msaa=4, bool: raw=true, bool: cpu=false): an
    open_windowed(title, 1280, 720, WINDOW_FULLSCREEN | WINDOW_FOCUS_ON_SHOW, raw, cpu, msaa)
 }
 
+fn _focus_immediately_after_open(): bool {
+   #windows { return false }
+   #else { return true }
+   #endif
+}
+
 fn open_windowed(any: title, int: w, int: h, int: flags=0, bool: raw=true, bool: cpu=false, int: msaa=0): any {
    "Opens an example window and focuses it when successful."
    def win = init_window(w, h, title, flags, raw, cpu, msaa)
-   if(win && !_headless_enabled()){ window.focus(win) }
+   if(win && !_headless_enabled() && _focus_immediately_after_open()){ window.focus(win) }
    win
 }
 

@@ -12,6 +12,7 @@ module std.os.ui.render(
    draw_rectangle_lines, draw_rect_rounded, draw_rect_sharp, draw_line, draw_line_2d,
    draw_line_fast, draw_circle, draw_circle_lines, draw_ring, draw_polygon,
    draw_ellipse, draw_ellipse_lines, draw_arc, draw_sector, draw_rounded_rectangle,
+   draw_rounded_rectangle_sdf,
    draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube,
    draw_rect_tex, draw_rect_tex_uv, get_frame_time, get_time, load_shader,
    load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
@@ -50,6 +51,7 @@ use std.os.ui.consts as ui_consts
 use std.os.ui.profile as ui_profile
 use std.os.ui.window
 use std.os.ui.window as lib_uiw
+use std.os.ui.window.platform as ui_backend
 use std.os.ui.render.vk as lib_vkr
 use std.os.ui.render.vk.texture as vk_texture
 use std.os.ui.render.vk.utils as vk_utils
@@ -144,7 +146,7 @@ fn color_alpha(any: c, f64: a): vec4 {
    [_color_at(c, 0, 1.0), _color_at(c, 1, 1.0), _color_at(c, 2, 1.0), a]
 }
 
-mut _active_win = nil
+mut any: _active_win = nil
 mut _active_scene_group = 0
 mut _active_scene_gpu_slab = 0
 mut _active_scene_render_parts = 0
@@ -210,6 +212,7 @@ mut _font_gpu_ready = dict(8) ;; font_id -> atlases already have GPU texture slo
 mut _font_fast_text_enabled = -1
 mut _font_vk_legacy_fallback_enabled = -1
 mut _font_defer_flush_enabled = -1
+mut _builtin_font_cache = dict(8)
 mut _auto_show_pending = false
 mut _text_batch_info = 0 ;; lazy-allocated 16-byte scratch buffer for _draw_text_ttf_fast
 mut _grid_cache = dict(16)
@@ -1663,6 +1666,12 @@ fn _ensure_default_font(int: size=16): int {
       }
       i += 1
    }
+   def builtin_id = _font_builtin_create(size)
+   if(builtin_id){
+      _default_font_fail_sizes = _default_font_fail_sizes.delete(size)
+      _default_font_id = builtin_id
+      return builtin_id
+   }
    _default_font_fail_sizes[size] = true
    0
 }
@@ -2082,6 +2091,207 @@ fn _builtin_glyph_bits(int: c): int {
    comptime match BuiltinGlyphBits(c, 33874822719)
 }
 
+@jit
+fn _builtin_text_rect_capacity(str: text): int {
+   if(!is_str(text)){ return 0 }
+   text.len * 21
+}
+
+@jit
+fn _builtin_text_rects_append(any: rects, int: count, int: cap, str: text, f64: x, f64: y, int: packed): int {
+   mut cx, cy = x, y
+   def px = 1.45
+   def cw = px * 6.0
+   def ch = px * 8.0
+   mut i = 0
+   while(i < text.len){
+      def c = load8(text, i)
+      i += 1
+      if(c == 13){ continue }
+      if(c == 10){
+         cx = x
+         cy += ch + 2.0
+         continue
+      }
+      if(c == 32){
+         cx += cw
+         continue
+      }
+      def glyph_bits = _builtin_glyph_bits(c)
+      mut gy = 0
+      while(gy < 7){
+         def bits = int((glyph_bits >> ((6 - gy) * 5)) & 31)
+         mut gx = 0
+         while(gx < 5){
+            while(gx < 5 && (bits & (1 << (4 - gx))) == 0){ gx += 1 }
+            if(gx >= 5){ break }
+            def start = gx
+            while(gx < 5 && (bits & (1 << (4 - gx))) != 0){ gx += 1 }
+            if(count < cap){
+               def rec = rects + count * 20
+               store32_f32(rec, float(cx + float(start) * px), 0)
+               store32_f32(rec, float(cy + float(gy) * px), 4)
+               store32_f32(rec, float(float(gx - start) * px), 8)
+               store32_f32(rec, float(px), 12)
+               store32(rec, packed, 16)
+               count += 1
+            }
+         }
+         gy += 1
+      }
+      cx += cw
+   }
+   count
+}
+
+@jit
+fn _draw_text_builtin_runs_flat_color_batched(list: runs): bool {
+   def n = is_list(runs) ? runs.len : 0
+   if(n < 4){ return false }
+   mut cap = 0
+   mut i = 0
+   while(i + 3 < n){
+      def text = runs[i]
+      if(is_str(text)){ cap += _builtin_text_rect_capacity(text) }
+      i += 4
+   }
+   if(cap <= 0){ return true }
+   def rects = malloc(cap * 20)
+   if(!rects){
+      _draw_text_runs_flat_color_list(0, runs)
+      return true
+   }
+   defer { free(rects) }
+   mut count = 0
+   i = 0
+   while(i + 3 < n){
+      def text = runs[i]
+      if(is_str(text)){
+         count = _builtin_text_rects_append(
+            rects, count, cap, text, float(runs[i + 1]), float(runs[i + 2]), int(runs[i + 3])
+         )
+      }
+      i += 4
+   }
+   draw_rects_fast_ptr(rects, count, 20)
+   true
+}
+
+fn _font_builtin_make_pixels(int: bits, int: scale, int: w, int: h): any {
+   def pixels = zalloc(w * h * 4)
+   if(!pixels){ return 0 }
+   mut gy = 0
+   while(gy < 7){
+      def row_bits = int((bits >> ((6 - gy) * 5)) & 31)
+      mut gx = 0
+      while(gx < 5){
+         if((row_bits & (1 << (4 - gx))) != 0){
+            mut sy = 0
+            while(sy < scale){
+               mut sx = 0
+               while(sx < scale){
+                  def px = gx * scale + sx
+                  def py = gy * scale + sy
+                  def off = (py * w + px) * 4
+                  store8(pixels, 255, off)
+                  store8(pixels, 255, off + 1)
+                  store8(pixels, 255, off + 2)
+                  store8(pixels, 255, off + 3)
+                  sx += 1
+               }
+               sy += 1
+            }
+         }
+         gx += 1
+      }
+      gy += 1
+   }
+   pixels
+}
+
+fn _font_builtin_store_glyph(any: page0, int: cp, f64: adv, f64: bw, f64: bh, list: uv, int: tex_id): bool {
+   def off = ptr_add(page0, (cp & 255) * 48)
+   store32_f32(off, adv, 0)
+   store32_f32(off, 0.0, 4)
+   store32_f32(off, 0.0, 8)
+   store32_f32(off, bw, 12)
+   store32_f32(off, bh, 16)
+   store32_f32(off, _list_num_safe(uv, 0, 0.0), 20)
+   store32_f32(off, _list_num_safe(uv, 1, 0.0), 24)
+   store32_f32(off, _list_num_safe(uv, 2, 0.0), 28)
+   store32_f32(off, _list_num_safe(uv, 3, 0.0), 32)
+   store32(off, tex_id, 36)
+   store32(off, 1, 40)
+   store32(off, 0, 44)
+   true
+}
+
+fn _font_builtin_create(int: size): int {
+   if(size < 4){ size = 4 }
+   def key = to_str(size)
+   def cached = _builtin_font_cache.get(key, 0)
+   if(cached && _font_get(cached)){ return cached }
+   def scale = max(1, int((size + 7) / 8))
+   def gw = 5 * scale
+   def gh = 7 * scale
+   def adv = float(6 * scale)
+   def line_h = float(max(size, 8 * scale + 2))
+   def atlas_w = 512
+   def atlas_h = 128
+   def a = lib_atlas.atlas_create(atlas_w, atlas_h, FONT_FILTER_NEAREST, false)
+   if(!a){ return 0 }
+   def root = malloc(4352 * 8)
+   if(!root){
+      lib_atlas.atlas_destroy(a)
+      return 0
+   }
+   memset(root, 0, 4352 * 8)
+   def page0 = malloc(256 * 48)
+   if(!page0){
+      free(root)
+      lib_atlas.atlas_destroy(a)
+      return 0
+   }
+   memset(page0, 0, 256 * 48)
+   store64_h(root, page0, 0)
+   mut cp = 32
+   while(cp <= 126){
+      if(cp == 32){
+         _font_builtin_store_glyph(page0, cp, adv, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0], -1)
+      } else {
+         def pixels = _font_builtin_make_pixels(_builtin_glyph_bits(cp), scale, gw, gh)
+         if(pixels){
+            def uv = lib_atlas.atlas_add(a, cp, gw, gh, pixels)
+            free(pixels)
+            def tex_id = lib_atlas.atlas_texture_id(a)
+            if(is_list(uv)){ _font_builtin_store_glyph(page0, cp, adv, float(gw), float(gh), uv, tex_id) }
+         }
+      }
+      cp += 1
+   }
+   lib_atlas.atlas_flush(a)
+   def tex_id_final = lib_atlas.atlas_texture_id(a)
+   if(tex_id_final >= 0){
+      cp = 33
+      while(cp <= 126){
+         def off = ptr_add(page0, (cp & 255) * 48)
+         if(load32(off, 40) != 0){ store32(off, tex_id_final, 36) }
+         cp += 1
+      }
+   }
+   def font_obj = {
+      "_kind": "builtin", "path": "<builtin>", "size": size, "data": 0, "info": 0,
+      "scale": float(scale), "ascent": 0.0, "descent": 0.0, "line_height": line_h,
+      "glyphs": dict(0), "filter": FONT_FILTER_NEAREST,
+      "atlas": a, "atlas_chain": [a], "atlas_size": atlas_w,
+      "fast_glyphs": root, "fallback_paths": [], "fallback_built": true, "fallback_chain": []
+   }
+   def id = _font_register(font_obj)
+   _builtin_font_cache[key] = id
+   if(tex_id_final >= 0){ _font_gpu_ready[id] = true }
+   id
+}
+
 fn _draw_text_builtin(str: text, f64: x, f64: y, any: color): bool {
    mut cx, cy = x, y
    def px = 1.45
@@ -2181,6 +2391,7 @@ fn get_active_window(): any {
 fn get_active_backend_name(): str {
    "Returns a human-readable name for the active backend."
    if(_backend == BACKEND_VK){ return "vulkan" }
+   if(_backend == BACKEND_MOCK){ return "mock" }
    return "none"
 }
 
@@ -2191,7 +2402,7 @@ fn vk_available(): bool {
 
 fn backend_capabilities(): dict {
    "Returns a dictionary of supported features for the active backend."
-   {"vulkan": vk_available(), "software": false, "active": get_active_backend_name()}
+   {"vulkan": vk_available(), "software": _backend == BACKEND_MOCK, "active": get_active_backend_name()}
 }
 
 fn load_shader_agnostic(any: _defs): int {
@@ -2285,8 +2496,41 @@ fn renderer_config(bool: vsync, bool: filter, str: vert="", str: frag="", int: m
    true
 }
 
+fn _visible_vulkan_boot_required(): bool {
+   #windows { return false }
+   #else { return false }
+   #endif
+}
+
+fn _prepare_visible_vulkan_boot(any: win, bool: explicit_hide, bool: headless): any {
+   #windows {
+      if(_visible_vulkan_boot_required() && win && !explicit_hide && !headless){
+         lib_uiw.show(win)
+         lib_uiw.poll_events()
+         msleep(16)
+         lib_uiw.poll_events()
+      }
+   }
+   #endif
+   0
+}
+
+fn _show_pending_after_first_frame(): any {
+   if(_backend != BACKEND_MOCK && _auto_show_pending && _active_win){
+      if(_is_frame_debug()){ ui_profile.print_text("[gfx] end_frame auto_show start") }
+      lib_uiw.show(_active_win)
+      lib_uiw.poll_events()
+      def shown = lib_uiw.get_win(_active_win)
+      if(shown){ _active_win = shown }
+      _auto_show_pending = false
+      if(_is_frame_debug()){ ui_profile.print_text("[gfx] end_frame auto_show done") }
+   }
+   0
+}
+
 fn init_window(int: width, int: height, str: title, int: flags=0, bool: vsync=false, bool: filter=false, int: msaa=1): any {
    "Initializes a window with renderer config and graphics context. Returns window dict or false."
+   if(_backend_pref == BACKEND_MOCK){ return init_mock_surface(width, height) }
    renderer_config(vsync, filter, "", "", msaa)
    mut int: f = flags
    mut int: x = 100
@@ -2301,10 +2545,11 @@ fn init_window(int: width, int: height, str: title, int: flags=0, bool: vsync=fa
       f = f | 0x0200
       if(_is_debug()){ ui_profile.print_text("[gfx] Applying headless mode(HIDDEN | NO_RESIZE)") }
    }
-   def auto_hide_boot = !headless && !explicit_hide
+   def auto_hide_boot = !headless && !explicit_hide && !_visible_vulkan_boot_required()
    if(auto_hide_boot){ f = f | 0x0200 }
    def win = lib_uiw.open_window(title, x, y, width, height, f)
    if(!win){ return false }
+   _prepare_visible_vulkan_boot(win, explicit_hide, headless)
    if(!_init_with_window(win, true)){
       lib_uiw.close(win)
       return false
@@ -2355,21 +2600,28 @@ fn window_should_close(any: win=0): bool {
    lib_uiw.should_close(_active_win)
 }
 
+fn _sync_win32_native_cursor(): bool {
+   #windows {
+      if(!_active_win || lib_uiw.backend() != "win32"){ return false }
+      def win = lib_uiw.get_win(_active_win)
+      if(!win){ return false }
+      def mode = win.get("cursor_mode", lib_uiw.CURSOR_NORMAL)
+      if(mode == lib_uiw.CURSOR_HIDDEN || mode == lib_uiw.CURSOR_DISABLED){ return false }
+      lib_uiw.sync_cursor(win, mode)
+   }
+   #else {
+      return false
+   }
+   #endif
+}
+
 fn begin_drawing(): bool {
    "Begins a new drawing frame, clearing states."
    if(!_active_win){ return false }
+   _sync_win32_native_cursor()
    _shape_scratch_used = 0
    _ensure_scissor_stack()
    if(_scissor_stack.len > 0){ _scissor_stack = [] }
-   if(_backend != BACKEND_MOCK && _auto_show_pending){
-      if(_is_frame_debug()){ ui_profile.print_text("[gfx] begin_drawing auto_show start") }
-      lib_uiw.show(_active_win)
-      lib_uiw.poll_events()
-      def shown = lib_uiw.get_win(_active_win)
-      if(shown){ _active_win = shown }
-      _auto_show_pending = false
-      if(_is_frame_debug()){ ui_profile.print_text("[gfx] begin_drawing auto_show done") }
-   }
    ; Only close on ESC when explicitly enabled. This prevents ESC from
    ; stealing input from TUI/terminal applications.
    if(_backend != BACKEND_MOCK && ui_profile.env_present_cached("NY_GFX_ESC_CLOSE")){ if(lib_uiw.key_down(_active_win, ui_consts.KEY_ESCAPE) || lib_uiw.key_down(_active_win, 0xFF1B)){ lib_uiw.set_should_close(_active_win, true) } }
@@ -2433,15 +2685,44 @@ fn end_frame(): bool {
    return end_drawing()
 }
 
+fn _draw_win32_software_cursor(): bool {
+   #windows {
+      if(!_active_win || !ui_profile.env_truthy_cached("NY_WIN_SOFTWARE_CURSOR")){ return false }
+      if(lib_uiw.backend() != "win32"){ return false }
+      def win = lib_uiw.get_win(_active_win)
+      if(!win){ return false }
+      def mode = win.get("cursor_mode", lib_uiw.CURSOR_NORMAL)
+      if(mode == lib_uiw.CURSOR_HIDDEN || mode == lib_uiw.CURSOR_DISABLED){ return false }
+      lib_uiw.sync_cursor(win, mode)
+      def pos = ui_backend.get_cursor_pos(win)
+      def x = float(pos.get(0, 0.0))
+      def y = float(pos.get(1, 0.0))
+      def sz = lib_uiw.size(win)
+      if(x < 0.0 || y < 0.0 || x > float(sz.get(0, 0)) || y > float(sz.get(1, 0))){ return false }
+      draw_triangle([x, y, 0.0], [x, y + 22.0, 0.0], [x + 14.0, y + 14.0, 0.0], BLACK)
+      draw_triangle([x + 2.0, y + 3.0, 0.0], [x + 2.0, y + 17.0, 0.0], [x + 10.0, y + 13.0, 0.0], WHITE)
+      draw_line_2d(x + 8.0, y + 13.0, x + 14.0, y + 23.0, BLACK, 4.0)
+      draw_line_2d(x + 8.0, y + 13.0, x + 14.0, y + 23.0, WHITE, 2.0)
+      return true
+   }
+   #else {
+      return false
+   }
+   #endif
+}
+
 fn end_drawing(): bool {
    "Finalizes a drawing frame and swaps buffers."
    if(!_active_win){ return false }
    if(_backend == BACKEND_VK){
+      _draw_win32_software_cursor()
       if(_is_frame_debug()){ ui_profile.print_text("[gfx] end_drawing vk enter") }
       def ok = lib_vkr.end_frame()
       if(_is_frame_debug()){ ui_profile.print_text("[gfx] end_drawing vk exit ok=" + to_str(ok)) }
+      if(ok){ _show_pending_after_first_frame() }
       return ok
    }
+   _show_pending_after_first_frame()
    true
 }
 
@@ -3157,7 +3438,7 @@ fn draw_rect_sharp(f64: x, f64: y, f64: w, f64: h, any: color, f64: r=4.0): bool
    true
 }
 
-fn draw_rect_rounded(f64: x, f64: y, f64: w, f64: h, f64: r, any: color, int: segments=256): bool {
+fn draw_rect_rounded(f64: x, f64: y, f64: w, f64: h, f64: r, any: color, int: segments=24): bool {
    "Draws a rounded rectangle using proper quarter-corner sectors."
    draw_rounded_rectangle(x, y, w, h, r, color, segments)
 }
@@ -3428,6 +3709,20 @@ fn draw_rounded_rectangle(f64: x, f64: y, f64: w, f64: h, f64: radius, any: colo
    draw_sector(x + w - radius, y + h - radius, 0.0, radius, 0.0, 90.0, color, cs)
    draw_sector(x+radius, y + h - radius, 0.0, radius, 90.0, 180.0, color, cs)
    true
+}
+
+fn draw_rounded_rectangle_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, any: color): bool {
+   "Draws a smooth filled rectangle with rounded corners."
+   if(w <= 0 || h <= 0){ return false }
+   if(radius <= 0){ return draw_rect(x, y, w, h, color) }
+   def max_r = min(w, h) / 2.0
+   if(radius > max_r){ radius = max_r }
+   if(_backend == BACKEND_VK){
+      def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+      def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+      return lib_vkr.draw_rounded_rect_sdf(x, y, w, h, radius, r, g, b, a)
+   }
+   draw_rounded_rectangle(x, y, w, h, radius, color, 48)
 }
 
 fn draw_star(f64: cx, f64: cy, f64: inner_radius, f64: outer_radius, int: pts, any: color, f64: rotation_deg=0.0): bool {
@@ -5365,7 +5660,7 @@ fn draw_text_runs_flat_colors(int: font, list: runs): bool {
    def n = is_list(runs) ? runs.len : 0
    if(n < 4){ return false }
    if(!_font_can_use_fast_vk_text()){
-      _draw_text_runs_flat_color_list(font_id, runs)
+      _draw_text_builtin_runs_flat_color_batched(runs)
       return true
    }
    _prime_text_runs_flat_color_list(font_id, runs)
@@ -5376,7 +5671,7 @@ fn draw_text_runs_flat_colors(int: font, list: runs): bool {
       lib_vkr.draw_text_runs_flat_color_ptr(font_id, runs, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)))
       return true
    }
-   _draw_text_runs_flat_color_list(font_id, runs)
+   _draw_text_builtin_runs_flat_color_batched(runs)
    true
 }
 

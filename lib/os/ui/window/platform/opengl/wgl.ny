@@ -4,18 +4,13 @@ module std.os.ui.window.platform.opengl.wgl(create_context, destroy_context, mak
 use std.core
 use std.core.mem (cstr)
 
-#windows {
-   #include <windows.h>
-   #include <GL/gl.h>
-} #else {
-   fn ChoosePixelFormat(any: _dc, any: _pfd): int { 0 }
-   fn SetPixelFormat(any: _dc, any: _pf, any: _pfd): int { 0 }
-   fn wglCreateContext(any: _dc): any { 0 }
-   fn wglDeleteContext(any: _ctx): int { 0 }
-   fn wglMakeCurrent(any: _dc, any: _ctx): int { 0 }
-   fn SwapBuffers(any: _dc): int { 0 }
-   fn wglGetProcAddress(any: _name): any { 0 }
-} #endif
+fn ChoosePixelFormat(any: _dc, any: _pfd): int { 0 }
+fn SetPixelFormat(any: _dc, any: _pf, any: _pfd): int { 0 }
+fn wglCreateContext(any: _dc): any { 0 }
+fn wglDeleteContext(any: _ctx): int { 0 }
+fn wglMakeCurrent(any: _dc, any: _ctx): int { 0 }
+fn SwapBuffers(any: _dc): int { 0 }
+fn wglGetProcAddress(any: _name): any { 0 }
 
 fn choose_pixel_format(any: dc): int {
    if(!dc){ return 0 }

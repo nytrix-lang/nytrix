@@ -5,6 +5,7 @@ use std.core
 use std.core.mem (__copy_mem)
 use std.os
 use std.os.sys as sys
+use std.os.process as osproc
 use std.os.thread
 use std.os.clipboard as clipboard
 use std.core.str as str
@@ -716,12 +717,23 @@ fn _kg_reserve_move_enabled(): bool{ _env_bool_cached("NY_KG_RESERVE_MOVE", true
 
 fn default_shell_args(bool: login=false): list{
    "Returns default interactive shell args, disabling login mode in timeout/CI test runs."
+   #windows { return ["/Q"] }
+   #endif
    if(login && !(common.env_present("NY_UI_TIMEOUT") || common.env_present("CI") || common.env_truthy("NYTRIX_TEST_MODE"))){ return ["@login", "-i"] }
    ["-i"]
 }
 
 fn default_shell_path(): str{
    "Returns the preferred shell executable path."
+   #windows {
+      def comspec = common.env_trim("COMSPEC")
+      if(comspec.len > 0 && file_exists(comspec)){ return comspec }
+      def comspec_l = common.env_trim("ComSpec")
+      if(comspec_l.len > 0 && file_exists(comspec_l)){ return comspec_l }
+      if(file_exists("C:\\Windows\\System32\\cmd.exe")){ return "C:\\Windows\\System32\\cmd.exe" }
+      return "cmd.exe"
+   }
+   #endif
    def shell = common.env_trim("SHELL")
    if(shell.len > 0 && file_exists(shell)){ return shell }
    if(file_exists("/bin/sh")){ return "/bin/sh" }
@@ -789,12 +801,37 @@ fn _vterm_close_child_fds(): any{
    0
 }
 
+fn _open_pipe(dict: vt, str: cmd, list: args): any{
+   def p = osproc.popen(cmd, args)
+   if(!p || !is_list(p) || p.len < 3){ return err("pipe spawn failed") }
+   def pid = p.get(0, -1)
+   def in_fd = p.get(1, -1)
+   def out_fd = p.get(2, -1)
+   if(pid <= 0 || in_fd < 0 || out_fd < 0){ return err("pipe spawn failed") }
+   mut nvt = vt.set("master_fd", in_fd)
+   nvt = nvt.set("read_fd", out_fd)
+   nvt = nvt.set("pid", pid)
+   nvt = nvt.set("shell_path", cmd)
+   nvt = nvt.set("shell_args", args)
+   nvt = nvt.set("pty_mode", "pipe")
+   def sh = nvt.get("shared")
+   store64(sh, 1, 32)
+   store64(sh, out_fd, 40)
+   thread_spawn(_vterm_reader_thread, sh)
+   ok(nvt)
+}
+
 fn open(dict: vt, str: cmd="/bin/sh", list: args=[]): any{
    "Opens a new PTY and spawns a shell process, connecting it to the virtual terminal."
    mut fds = malloc(8)
    if(!fds){ return err("openpty fds alloc failed") }
    def res = sys.sys_openpty(fds)
-   if(is_err(res)){ free(fds) return res }
+   if(is_err(res)){
+      free(fds)
+      #windows { return _open_pipe(vt, cmd, args) }
+      #endif
+      return res
+   }
    def m = load32(fds, 0) def s = load32(fds, 4) free(fds)
    def _pxw, _pxh = vt.get("px_w", 0), vt.get("px_h", 0)
    _resize_pty(m, vt.get("cols"), vt.get("rows"), _pxw, _pxh)
@@ -884,6 +921,8 @@ fn close(any: vt): any{
       }
    }
    def m = vt.get("master_fd") if(m >= 0){ __close(m) }
+   def rfd = vt.get("read_fd", -1)
+   if(rfd >= 0 && rfd != m){ __close(rfd) }
    def drain = vt.get("drain_buf", 0)
    if(drain){ free(drain) }
    0

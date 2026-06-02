@@ -156,6 +156,10 @@ fn _invoke_callback(int: jid, int: event): any {
 
 #linux {
    #include <sys/inotify.h>
+} #else {
+   fn inotify_init1(any: _flags): int { -1 }
+   fn inotify_add_watch(any: _fd, any: _path, any: _mask): int { -1 }
+   fn inotify_rm_watch(any: _fd, any: _wd): int { 0 }
 } #endif
 
 fn _is_event_device_name(any: name): bool {
@@ -186,6 +190,20 @@ fn _looks_like_aux_input(any: name): bool {
    if(str.find(lname, "consumer control") != -1){ return true }
    if(str.find(lname, "headset") != -1){ return true }
    false
+}
+
+fn _is_controller_aux_input(any: name): bool {
+   def lname = str.lower(to_str(name))
+   def controller =
+      str.find(lname, "controller") != -1 ||
+      str.find(lname, "gamepad") != -1 ||
+      str.find(lname, "dualsense") != -1 ||
+      str.find(lname, "dualshock") != -1 ||
+      str.find(lname, "xbox") != -1
+   if(!controller){ return false }
+   str.find(lname, "motion sensor") != -1 ||
+      str.find(lname, "motion sensors") != -1 ||
+      str.find(lname, "touchpad") != -1
 }
 
 fn _linux_input_supported(): bool { return osfs.is_dir("/dev/input") }
@@ -429,8 +447,8 @@ fn _handle_abs_event(int: jid, any: js, int: code, any: value): any {
       return js
    }
    def info_off = code * INPUT_ABSINFO_SIZE
-   def minimum = load32(abs_info_ptr, info_off + ABSINFO_MINIMUM)
-   def maximum = load32(abs_info_ptr, info_off + ABSINFO_MAXIMUM)
+   def minimum = _signed32(load32(abs_info_ptr, info_off + ABSINFO_MINIMUM))
+   def maximum = _signed32(load32(abs_info_ptr, info_off + ABSINFO_MAXIMUM))
    def svalue = _signed32(value)
    mut normalized = float(svalue)
    def range = maximum - minimum
@@ -625,6 +643,7 @@ fn _open_device(str: path): bool {
    }
    memset(name_ptr, 0, 256)
    def name = (_ioctl(fd, EVIOCGNAME_256, name_ptr) < 0) ? "Unknown" : str.cstr_to_str(name_ptr)
+   def controller_aux = _is_controller_aux_input(name)
    mut guid = _build_linux_guid(id_ptr, name)
    def fallback_guid = _zero_guid_fallback(name)
    if(fallback_guid != "" && (guid == "00000000000000000000000000000000" || guid == "0000000000000000" || guid.len < 32)){ guid = fallback_guid }
@@ -644,7 +663,8 @@ fn _open_device(str: path): bool {
    mut hat_count = 0
    mut code = BTN_MISC
    while(code < KEY_CNT){
-      if(code >= BTN_JOYSTICK && code < BTN_DIGI && _bit_is_set(key_bits, code)){
+      if(_bit_is_set(key_bits, code) &&
+         ((code >= BTN_JOYSTICK && code < BTN_DIGI) || controller_aux)){
          store32(key_map_ptr, raw_button_count, (code - BTN_MISC) * 4)
          raw_button_count += 1
       }
@@ -694,10 +714,12 @@ fn _open_device(str: path): bool {
       "path": path,
       "name": name,
       "guid": guid,
+      "platform": "Linux",
       "axis_count": axis_count,
       "raw_button_count": raw_button_count,
       "button_count": button_count,
       "hat_count": hat_count,
+      "controller_aux": controller_aux,
       "use_js": use_js,
       "axes_ptr": axes_ptr,
       "buttons_ptr": buttons_ptr,
@@ -709,11 +731,11 @@ fn _open_device(str: path): bool {
       "last_js_open_ticks": js_fd >= 0 ? ticks() : 0
    }
    def mapped = gamepad_map.joystick_is_gamepad(js)
-   if(!mapped && raw_button_count <= 0 && hat_count <= 0){
+   if(!mapped && !controller_aux && raw_button_count <= 0 && hat_count <= 0){
       _dbg("reject path='" + to_str(path) + "' no joystick/gamepad buttons")
       return _reject_open_device(fd, js_fd, ev_bits, key_bits, abs_bits, id_ptr, name_ptr, key_map_ptr, abs_map_ptr, abs_info_ptr)
    }
-   if(!mapped && _looks_like_aux_input(name)){
+   if(!mapped && !controller_aux && _looks_like_aux_input(name)){
       _dbg("reject path='" + to_str(path) + "' auxiliary input name='" + to_str(name) + "'")
       return _reject_open_device(fd, js_fd, ev_bits, key_bits, abs_bits, id_ptr, name_ptr, key_map_ptr, abs_map_ptr, abs_info_ptr)
    }
@@ -1016,6 +1038,7 @@ fn _fill_raw_gamepad_state(int: jid, any: state_ptr): bool {
 fn joystick_is_gamepad(int: jid): bool {
    if(!joystick_present(jid)){ return false }
    def js = _get_js(jid)
+   if(js.get("controller_aux", false)){ return false }
    if(gamepad_map.joystick_is_gamepad(js)){ return true }
    int(js.get("axis_count", 0)) >= 2 && int(js.get("button_count", 0)) >= 4
 }

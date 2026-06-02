@@ -13,7 +13,7 @@ use std.os.ui.render.vk.buffers (_find_memory_type,
 
 create_static_buffer)
 
-use std.os.ui.render.matrix (mat4_identity, mat4_from_buffer)
+use std.os.ui.render.matrix (mat4_identity)
 use std.os.ui.render.vk.draw (draw_static_buffer_raw, draw_rect_tex)
 use std.os.ui.render.vk.pipeline (bind_pipeline, _ensure_skybox_pipeline)
 use std.os.ui.render.vk.renderer (_sync_pc, _flush, set_unlit, set_ortho, set_mvp)
@@ -304,7 +304,7 @@ fn _ensure_sampler(any: filter, any: wrap_s=10497, any: wrap_t=10497): any {
       free(sampler_ci) free(sampler_ptr)
       return 0
    }
-   def sampler = load64_h(sampler_ptr, 0)
+   def sampler = load64(sampler_ptr, 0)
    if(uw == 0 && vw == 0){
       if(norm){ _linear_sampler = sampler }
       else { _nearest_sampler = sampler }
@@ -549,7 +549,7 @@ fn create_texture_ex(int: width,
       _tex_debug("[gfx:vulkan] create_texture_ex create_image failed res=" + to_str(r1) + " w=" + to_str(width) + " h=" + to_str(height) + " fmt=" + to_str(format))
       return -1
    }
-   def image = load64_h(img_ptr, 0)
+   def image = load64(img_ptr, 0)
    ; 2. Allocate Memory
    mut mem_req = malloc(24)
    if(!mem_req){ return -1 }
@@ -584,7 +584,7 @@ fn create_texture_ex(int: width,
       _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
       return -1
    }
-   def memory = load64_h(mem_ptr, 0)
+   def memory = load64(mem_ptr, 0)
    def bind_res = bind_image_memory(_device, image, memory, 0)
    if(bind_res != 0){
       _tex_debug("[gfx:vulkan] create_texture_ex bind_image_memory failed res=" + to_str(int(bind_res)))
@@ -607,7 +607,7 @@ fn create_texture_ex(int: width,
       _tex_debug("[gfx:vulkan] create_texture_ex image_view failed res=" + to_str(r3))
       return -1
    }
-   def view = load64_h(view_ptr, 0)
+   def view = load64(view_ptr, 0)
    ; 4. Upload Initial Pixels
    def img_size = width * height * bpp
    mut mip_pixels = 0
@@ -791,7 +791,7 @@ fn _init_bindless_descriptor_set(any: default_view): bool {
       free(dsl_ptr, alloc_ds, ds_ptr)
       return false
    }
-   _bindless_ds = load64_h(ds_ptr, 0)
+   _bindless_ds = load64(ds_ptr, 0)
    mut infos = _tex_alloc(24 * _max_textures_value())
    mut i = 0
    while(i < _max_textures_value()){
@@ -1038,7 +1038,7 @@ fn read_framebuffer(): any {
    store32(ai, 1, 28)
    memset(cb_p, 0, 8)
    if(allocate_command_buffers(_device, ai, cb_p) != 0){ return 0 }
-   cb = load64_h(cb_p, 0)
+   cb = load64(cb_p, 0)
    if(!cb){
       free_command_buffers(_device, _command_pool, 1, cb_p)
       return 0
@@ -1114,7 +1114,7 @@ fn blit_buffer(any: pixels, int: w, int: h): any {
    def ws_w, ws_h = float(_swapchain_extent_w), float(_swapchain_extent_h)
    ; Save MVP and set to identity for screen-space draw
    mut old_mvp = mat4_identity()
-   mat4_from_buffer(old_mvp, _current_mvp)
+   if(_current_mvp){ memcpy(old_mvp + 16, _current_mvp, 128) }
    set_ortho(0.0, ws_w, 0.0, ws_h, -1.0, 1.0)
    draw_rect_tex(0.0, 0.0, ws_w, ws_h, _blit_tex_id, 1.0, 1.0, 1.0, 1.0)
    _flush()
@@ -1142,7 +1142,7 @@ fn _upload_cubemap_face_dedicated(any: image, int: face_size, any: pixels, int: 
       free(buf_ci, staging_buf_ptr)
       return false
    }
-   def staging_buf = load64_h(staging_buf_ptr, 0)
+   def staging_buf = load64(staging_buf_ptr, 0)
    mut mem_req = _tex_alloc(24)
    get_buffer_memory_requirements(_device, staging_buf, mem_req)
    def mem_sz = load64_h(mem_req, 0)
@@ -1158,7 +1158,7 @@ fn _upload_cubemap_face_dedicated(any: image, int: face_size, any: pixels, int: 
       free(buf_ci, staging_buf_ptr, mem_req, alloc_info, mem_ptr)
       return false
    }
-   def staging_mem = load64_h(mem_ptr, 0)
+   def staging_mem = load64(mem_ptr, 0)
    bind_buffer_memory(_device, staging_buf, staging_mem, 0)
    mut mapped = _tex_alloc(8)
    if(map_memory(_device, staging_mem, 0, face_sz, 0, mapped) != 0){
@@ -1175,7 +1175,7 @@ fn _upload_cubemap_face_dedicated(any: image, int: face_size, any: pixels, int: 
    store32(cb_alloc, 1, 28)
    mut cb_ptr = _tex_alloc(8)
    allocate_command_buffers(_device, cb_alloc, cb_ptr)
-   def cb = load64_h(cb_ptr, 0)
+   def cb = load64(cb_ptr, 0)
    mut begin_info = _tex_alloc(32)
    store32(begin_info, _vk_stype_command_buffer_begin_info(), 0)
    store32(begin_info, 1, 16)
@@ -1229,7 +1229,7 @@ fn _upload_cubemap_face_dedicated(any: image, int: face_size, any: pixels, int: 
    store32(fence_ci, _vk_stype_fence_create_info(), 0)
    mut fence_ptr = _tex_alloc(8)
    create_fence(_device, fence_ci, 0, fence_ptr)
-   def fence = load64_h(fence_ptr, 0)
+   def fence = load64(fence_ptr, 0)
    queue_submit(_graphics_queue, 1, submit_info, fence)
    wait_for_fences(_device, 1, fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
    destroy_fence(_device, fence, 0)
@@ -1276,7 +1276,7 @@ fn create_cubemap(int: face_size, list: face_pixels_list): int {
       _free_image_create_allocs(img_ci, img_ptr)
       return -1
    }
-   def image = load64_h(img_ptr, 0)
+   def image = load64(img_ptr, 0)
    mut mem_req = _tex_alloc(24)
    get_image_memory_requirements(_device, image, mem_req)
    def mem_sz = load64_h(mem_req, 0)
@@ -1291,7 +1291,7 @@ fn create_cubemap(int: face_size, list: face_pixels_list): int {
       _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr)
       return -1
    }
-   def memory = load64_h(mem_ptr, 0)
+   def memory = load64(mem_ptr, 0)
    bind_image_memory(_device, image, memory, 0)
    mut face_i = 0
    while(face_i < 6){
@@ -1320,7 +1320,7 @@ fn create_cubemap(int: face_size, list: face_pixels_list): int {
       _free_image_create_allocs(img_ci, img_ptr, mem_req, alloc_info, mem_ptr, view_ci, view_ptr)
       return -1
    }
-   def view = load64_h(view_ptr, 0)
+   def view = load64(view_ptr, 0)
    def tex_filter = _normalize_filter(1)
    def tex_sampler = _texture_sampler(tex_filter)
    mut ds = 0
