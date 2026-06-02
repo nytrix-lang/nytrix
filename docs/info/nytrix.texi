@@ -196,7 +196,7 @@ boundary-unpack, load, store, and zero helpers. Shape boundaries use
 @item Arithmetic: @code{+ - * / %}
 @item Comparison: @code{== != < <= > >=}
 @item Logical: @code{&& || !}
-@item Bitwise/integer: @code{& | ^ << >> ~}
+@item Bitwise/integer: @code{& | ^^ << >> ~}
 @item Ternary: @code{cond ? a : b}
 @end itemize
 
