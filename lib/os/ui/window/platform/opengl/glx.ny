@@ -8,6 +8,28 @@ use std.core.mem (cstr)
    #link "libGL.so"
    #include <GL/glx.h>
 } #endif
+#windows {
+   fn glXChooseFBConfig(any: _display, int: _screen, any: _attrs, any: _count): any { 0 }
+   fn glXGetVisualFromFBConfig(any: _display, any: _fbconfig): any { 0 }
+   fn glXGetFBConfigAttrib(any: _display, any: _config, any: _attr, any: _value): int { 0 }
+   fn glXCreateNewContext(any: _display, any: _fbconfig, int: _type, any: _share, int: _direct): any { 0 }
+   fn glXDestroyContext(any: _display, any: _ctx): any { 0 }
+   fn glXMakeCurrent(any: _display, any: _win, any: _ctx): int { 0 }
+   fn glXSwapBuffers(any: _display, any: _win): any { 0 }
+   fn glXGetProcAddress(any: _name): any { 0 }
+   fn glXGetProcAddressARB(any: _name): any { 0 }
+} #endif
+#macos {
+   fn glXChooseFBConfig(any: _display, int: _screen, any: _attrs, any: _count): any { 0 }
+   fn glXGetVisualFromFBConfig(any: _display, any: _fbconfig): any { 0 }
+   fn glXGetFBConfigAttrib(any: _display, any: _config, any: _attr, any: _value): int { 0 }
+   fn glXCreateNewContext(any: _display, any: _fbconfig, int: _type, any: _share, int: _direct): any { 0 }
+   fn glXDestroyContext(any: _display, any: _ctx): any { 0 }
+   fn glXMakeCurrent(any: _display, any: _win, any: _ctx): int { 0 }
+   fn glXSwapBuffers(any: _display, any: _win): any { 0 }
+   fn glXGetProcAddress(any: _name): any { 0 }
+   fn glXGetProcAddressARB(any: _name): any { 0 }
+} #endif
 
 fn choose_fb_config(any: display, any: screen, any: attrs=0): any {
    if(!display){ return 0 }

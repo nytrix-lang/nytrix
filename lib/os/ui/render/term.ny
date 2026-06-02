@@ -99,9 +99,15 @@ fn font_cell_size(any: font, any: font_size): list {
 fn framebuffer_size(any: win): list {
    "Returns [width, height] of the window framebuffer, falling back to logical size."
    mut fw, fh = 0.0, 0.0
+   #windows {
+      def active_fb = get_framebuffer_size()
+      fw, fh = float(active_fb.get(0, 0)), float(active_fb.get(1, 0))
+   }
    if(win){
-      def fb = nativewin.get_framebuffer_size(window.id(win))
-      fw, fh = float(fb.get(0, 0)), float(fb.get(1, 0))
+      if(fw <= 0.0 || fh <= 0.0){
+         def fb = nativewin.get_framebuffer_size(window.id(win))
+         fw, fh = float(fb.get(0, 0)), float(fb.get(1, 0))
+      }
    }
    if(fw <= 0.0 || fh <= 0.0){
       def sz = window.size(win)

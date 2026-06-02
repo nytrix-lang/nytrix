@@ -1,7 +1,7 @@
 ;; Keywords: render vulkan gpu
 ;; Vulkan bindings for Nytrix
 module std.os.ui.render.vk.vulkan(
-   VkImageMemoryBarrierColor, vk_get_instance_proc_addr, vk_create_instance, destroy_instance,
+   VkImageMemoryBarrierColor, vk_get_instance_proc_addr, vk_create_instance, destroy_instance, vk_result_code,
    enumerate_instance_extension_properties, enumerate_instance_layer_properties, enumerate_physical_devices,
    get_physical_device_properties, get_physical_device_memory_properties,
    get_physical_device_queue_family_properties, get_physical_device_format_properties,
@@ -147,21 +147,126 @@ fn VkImageMemoryBarrierColor(any: bar, any: image, int: src_access, int: dst_acc
    #define VK_USE_PLATFORM_XCB_KHR 1
    #define VK_USE_PLATFORM_XLIB_KHR 1
    #define VK_USE_PLATFORM_WAYLAND_KHR 1
-   #include <vulkan/vulkan.h>
-   #include <vulkan/vulkan_xcb.h>
-   #include <vulkan/vulkan_xlib.h>
-   #include <vulkan/vulkan_wayland.h>
+   #include <vulkan/vulkan.h> as ""
+   #include <vulkan/vulkan_xcb.h> as ""
+   #include <vulkan/vulkan_xlib.h> as ""
+   #include <vulkan/vulkan_wayland.h> as ""
 } #elif windows {
-   #link "vulkan-1.lib"
+   #link "vulkan-1.dll"
    #define VK_USE_PLATFORM_WIN32_KHR 1
-   #include <vulkan/vulkan.h>
-   #include <vulkan/vulkan_win32.h>
+   #include <vulkan/vulkan.h> as ""
+   #include <vulkan/vulkan_win32.h> as ""
 } #elif macos {
-   #link "libvulkan.dylib"
+   #link "libMoltenVK.dylib"
    #define VK_USE_PLATFORM_METAL_EXT 1
-   #include <vulkan/vulkan.h>
-   #include <vulkan/vulkan_metal.h>
+   #include <vulkan/vulkan.h> as ""
+   #include <vulkan/vulkan_metal.h> as ""
 } #endif
+extern "" {
+   fn vkGetInstanceProcAddr(ptr: inst, ptr: name): ptr
+   fn vkCreateInstance(ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyInstance(ptr: inst, ptr: al)
+   fn vkEnumerateInstanceExtensionProperties(ptr: layer, ptr: c, ptr: p): i32
+   fn vkEnumerateInstanceLayerProperties(ptr: c, ptr: p): i32
+   fn vkEnumeratePhysicalDevices(ptr: inst, ptr: c, ptr: p): i32
+   fn vkGetPhysicalDeviceProperties(ptr: pd, ptr: p)
+   fn vkGetPhysicalDeviceMemoryProperties(ptr: pd, ptr: p)
+   fn vkGetPhysicalDeviceQueueFamilyProperties(ptr: pd, ptr: c, ptr: p)
+   fn vkGetPhysicalDeviceFormatProperties(ptr: pd, i32: fmt, ptr: p)
+   fn vkGetPhysicalDeviceFeatures2(ptr: pd, ptr: p)
+   fn vkCreateDevice(ptr: pd, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyDevice(ptr: dev, ptr: al)
+   fn vkGetDeviceQueue(ptr: dev, u32: f, u32: idx, ptr: p)
+   fn vkGetBufferDeviceAddress(ptr: dev, ptr: info): u64
+   fn vkCreateSwapchainKHR(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroySwapchainKHR(ptr: dev, ptr: sc, ptr: al)
+   fn vkGetSwapchainImagesKHR(ptr: dev, ptr: sc, ptr: c, ptr: p): i32
+   fn vkAcquireNextImageKHR(ptr: dev, ptr: sc, u64: timeout, ptr: sem, ptr: fence, ptr: p): i32
+   fn vkQueuePresentKHR(ptr: q, ptr: p): i32
+   fn vkCreateImageView(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyImageView(ptr: dev, ptr: iv, ptr: al)
+   fn vkCreateImage(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyImage(ptr: dev, ptr: img, ptr: al)
+   fn vkCreateBuffer(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyBuffer(ptr: dev, ptr: buf, ptr: al)
+   fn vkGetBufferMemoryRequirements(ptr: dev, ptr: buf, ptr: p)
+   fn vkBindBufferMemory(ptr: dev, ptr: buf, ptr: mem, u64: off): i32
+   fn vkMapMemory(ptr: dev, ptr: mem, u64: off, u64: sz, u32: flags, ptr: p): i32
+   fn vkUnmapMemory(ptr: dev, ptr: mem)
+   fn vkCreateCommandPool(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyCommandPool(ptr: dev, ptr: cp, ptr: al)
+   fn vkAllocateCommandBuffers(ptr: dev, ptr: ai, ptr: p): i32
+   fn vkBeginCommandBuffer(ptr: cb, ptr: bi): i32
+   fn vkEndCommandBuffer(ptr: cb): i32
+   fn vkCmdBeginRenderPass(ptr: cb, ptr: bi, i32: contents)
+   fn vkCmdEndRenderPass(ptr: cb)
+   fn vkCmdBindPipeline(ptr: cb, i32: bp, ptr: pipe)
+   fn vkCmdDraw(ptr: cb, u32: vc, u32: ic, u32: fv, u32: fi)
+   fn vkCmdDrawIndexed(ptr: cb, u32: ic, u32: instc, u32: fi, i32: vo, u32: insto)
+   fn vkCmdDrawIndirect(ptr: cb, ptr: buf, u64: off, u32: count, u32: stride)
+   fn vkCmdDrawIndexedIndirect(ptr: cb, ptr: buf, u64: off, u32: count, u32: stride)
+   fn vkCmdDispatch(ptr: cb, u32: x, u32: y, u32: z)
+   fn vkCmdDispatchIndirect(ptr: cb, ptr: buf, u64: off)
+   fn vkCmdBindVertexBuffers(ptr: cb, u32: first, u32: count, ptr: p_buf, ptr: p_off)
+   fn vkCmdBindIndexBuffer(ptr: cb, ptr: buf, u64: off, i32: idx_type)
+   fn vkCmdPipelineBarrier(ptr: cb, u32: src, u32: dst, u32: dep, u32: mb_c, ptr: mb, u32: bb_c, ptr: bb, u32: ib_c, ptr: ib)
+   fn vkCmdCopyBuffer(ptr: cb, ptr: src, ptr: dst, u32: r_count, ptr: p_regions)
+   fn vkCmdCopyBufferToImage(ptr: cb, ptr: src, ptr: dst, i32: lyt, u32: r_count, ptr: p_regions)
+   fn vkCmdCopyImage(ptr: cb, ptr: src_img, i32: src_lyt, ptr: dst_img, i32: dst_lyt, u32: r_count, ptr: p_regions)
+   fn vkCmdBlitImage(ptr: cb, ptr: src_img, i32: src_lyt, ptr: dst_img, i32: dst_lyt, u32: r_count, ptr: p_regions, i32: filter)
+   fn vkCreateSemaphore(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkCreateFence(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroySemaphore(ptr: dev, ptr: sem, ptr: al)
+   fn vkDestroyFence(ptr: dev, ptr: f, ptr: al)
+   fn vkWaitForFences(ptr: dev, u32: c, ptr: p, u32: wait_all, u64: timeout): i32
+   fn vkResetFences(ptr: dev, u32: c, ptr: p): i32
+   fn vkQueueSubmit(ptr: q, u32: c, ptr: p, ptr: f): i32
+   fn vkCreateRenderPass(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyRenderPass(ptr: dev, ptr: rp, ptr: al)
+   fn vkCreateFramebuffer(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyFramebuffer(ptr: dev, ptr: fb, ptr: al)
+   fn vkCreateDescriptorSetLayout(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyDescriptorSetLayout(ptr: dev, ptr: dsl, ptr: al)
+   fn vkCreateDescriptorPool(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyDescriptorPool(ptr: dev, ptr: dp, ptr: al)
+   fn vkAllocateDescriptorSets(ptr: dev, ptr: ai, ptr: p): i32
+   fn vkUpdateDescriptorSets(ptr: dev, u32: wc, ptr: wp, u32: cc, ptr: cp)
+   fn vkCmdBindDescriptorSets(ptr: cb, i32: bp, ptr: lay, u32: f, u32: c, ptr: p_sets, u32: od_count, ptr: p_od)
+   fn vkCreatePipelineLayout(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyPipelineLayout(ptr: dev, ptr: pl, ptr: al)
+   fn vkCreateGraphicsPipelines(ptr: dev, ptr: cache, u32: c, ptr: p_ci, ptr: al, ptr: p): i32
+   fn vkCreateComputePipelines(ptr: dev, ptr: cache, u32: c, ptr: p_ci, ptr: al, ptr: p): i32
+   fn vkDestroyPipeline(ptr: dev, ptr: p, ptr: al)
+   fn vkCreateShaderModule(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroyShaderModule(ptr: dev, ptr: sm, ptr: al)
+   fn vkDestroySurfaceKHR(ptr: inst, ptr: surf, ptr: al)
+   fn vkAllocateMemory(ptr: dev, ptr: ai, ptr: al, ptr: p): i32
+   fn vkFreeMemory(ptr: dev, ptr: mem, ptr: al)
+   fn vkBindImageMemory(ptr: dev, ptr: img, ptr: mem, u64: off): i32
+   fn vkGetImageMemoryRequirements(ptr: dev, ptr: img, ptr: p)
+   fn vkDeviceWaitIdle(ptr: dev): i32
+   fn vkFreeCommandBuffers(ptr: dev, ptr: pool, u32: count, ptr: p)
+   fn vkCreateSampler(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
+   fn vkDestroySampler(ptr: dev, ptr: sampler, ptr: al)
+   fn vkCmdSetViewport(ptr: cb, u32: first, u32: count, ptr: p)
+   fn vkCmdSetScissor(ptr: cb, u32: first, u32: count, ptr: p)
+   fn vkCmdSetLineWidth(ptr: cb, f32: width)
+   fn vkCmdPushConstants(ptr: cb, ptr: lay, u32: stages, u32: off, u32: sz, ptr: values)
+   fn vkCmdClearAttachments(ptr: cb, u32: count, ptr: attachments, u32: rect_count, ptr: rects)
+   fn vkCmdCopyImageToBuffer(ptr: cb, ptr: img, i32: lay, ptr: buf, u32: r_count, ptr: p_regions)
+   fn vkQueueWaitIdle(ptr: q): i32
+   fn vkResetCommandBuffer(ptr: cb, u32: flags): i32
+   fn vkCreateXcbSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
+   fn vkCreateXlibSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
+   fn vkCreateWin32SurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
+   fn vkCreateWaylandSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
+   fn vkCreateMetalSurfaceEXT(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
+   fn vkGetPhysicalDeviceSurfaceSupportKHR(ptr: pd, u32: fam, ptr: surf, ptr: p): i32
+   fn vkGetPhysicalDeviceSurfaceFormatsKHR(ptr: pd, ptr: surf, ptr: c, ptr: p): i32
+   fn vkGetPhysicalDeviceSurfacePresentModesKHR(ptr: pd, ptr: surf, ptr: c, ptr: p): i32
+   fn vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ptr: pd, ptr: surf, ptr: p): i32
+   fn vkGetPhysicalDeviceWaylandPresentationSupportKHR(ptr: pd, u32: fam, ptr: dpy): i32
+}
 mut _pfn_vkCreateXcbSurfaceKHR = 0
 mut _pfn_vkCreateXlibSurfaceKHR = 0
 mut _pfn_vkCreateWin32SurfaceKHR = 0
@@ -394,11 +499,18 @@ fn _vk_instance_proc_cached(any: inst, str: slot_name, str: name): any {
    0
 }
 
+fn vk_result_code(any: res): int {
+   if(res >= -13 && res <= 7){ return int(res) }
+   if(res <= -1000000000){ return int(res) }
+   if((res & 1) != 0){ return int(res >> 1) }
+   int(res)
+}
+
 fn _vk_create_surface4(any: inst, any: ci, any: al, any: s, str: name, int: missing=-1): int {
    def f = _vk_instance_proc_cached(inst, name, name)
    if(!f){ return missing }
    def res = __call4_ptr_ptr_ptr_ptr_i32(f, inst, ci, al, s)
-   (res & 1) ? (res >> 1) : res
+   vk_result_code(res)
 }
 
 fn _vk_surface_call4(any: inst, str: name, any: a, any: b, any: c, any: d): int {
@@ -410,7 +522,7 @@ fn _vk_surface_call4(any: inst, str: name, any: a, any: b, any: c, any: d): int 
    } else {
       res = __call4_ptr_u64_ptr_ptr_i32(f, a, b, c, d)
    }
-   (res & 1) ? (res >> 1) : res
+   vk_result_code(res)
 }
 
 fn vk_create_xcb_surface_khr(any: inst, any: ci, any: al, any: s): int {
@@ -499,7 +611,7 @@ fn get_physical_device_surface_capabilities_khr(any: inst, any: pd, any: surf, a
    def f = _vk_instance_proc_cached(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
    if(!f){ return -1 }
    def res = __call3_ptr_u64_ptr_i32(f, pd, surf, p)
-   (res & 1) ? (res >> 1) : res
+   vk_result_code(res)
 }
 
 fn destroy_surface_khr(any: inst, any: surf, any: al): any { vkDestroySurfaceKHR(inst, surf, al) }

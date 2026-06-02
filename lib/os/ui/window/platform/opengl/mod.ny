@@ -1,22 +1,16 @@
-;; Keywords: platform window backend opengl wgl nsgl glx egl
-;; OpenGL context facade for EGL, GLX, NSGL, and WGL platform backends.
+;; Keywords: platform window backend opengl nsgl glx egl
+;; OpenGL context facade for EGL, GLX, and NSGL platform backends.
 module std.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval)
 use std.core
 use std.core.common as common
 use std.os.ui.window.platform.api as api
 use std.os.ui.window.platform.opengl.glx as glx
 use std.os.ui.window.platform.opengl.egl as egl
-use std.os.ui.window.platform.opengl.wgl as wgl
 use std.os.ui.window.platform.opengl.nsgl as nsgl
-
-#windows {
-   #include <windows.h>
-} #else {
-   fn ReleaseDC(any: _hwnd, any: _dc): int { 0 }
-   fn DestroyWindow(any: _hwnd): int { 0 }
-} #endif
 #macos {
-   #include <GL/osmesa.h>
+   fn OSMesaCreateContext(any: _format, any: _share): any { 0 }
+   fn OSMesaDestroyContext(any: _ctx): any { 0 }
+   fn OSMesaMakeCurrent(any: _ctx, any: _buffer, any: _type, any: _w, any: _h): int { 0 }
 } #endif
 mut _current_context = 0
 
@@ -33,7 +27,7 @@ fn _get_backend_name(): str {
 fn get_proc_address(any: name): any {
    "Returns the address of the specified OpenGL core or extension function."
    def proc_name = to_str(name)
-   if(!startswith(proc_name, "gl") && !startswith(proc_name, "egl") && !startswith(proc_name, "wgl")){ return 0 }
+   if(!startswith(proc_name, "gl") && !startswith(proc_name, "egl")){ return 0 }
    def b = _get_backend_name()
    #linux {
       if(b == "x11"){
@@ -43,7 +37,7 @@ fn get_proc_address(any: name): any {
       }
       if(b == "wayland"){ return egl.get_proc_address(proc_name) }
    } #elif windows {
-      if(b == "win32"){ return wgl.get_proc_address(proc_name) }
+      return 0
    } #elif macos {
       if(b == "cocoa"){ return nsgl.get_proc_address(proc_name) }
    } #endif
@@ -71,34 +65,6 @@ fn create_offscreen_context(int: width=1, int: height=1, any: share_context=0): 
       }
       return create_osmesa_context(width, height)
    } #elif windows {
-      if(b == "win32"){
-         def cls_name = malloc(14)
-         if(!cls_name){ return 0 }
-         memset(cls_name, 0, 14)
-         store16(cls_name, 83, 0)
-         store16(cls_name, 84, 2)
-         store16(cls_name, 65, 4)
-         store16(cls_name, 84, 6)
-         store16(cls_name, 73, 8)
-         store16(cls_name, 67, 10)
-         def hwnd = CreateWindowExW(0, cls_name, cls_name, 0x80000000, 0, 0, 1, 1, 0, 0, 0, 0)
-         free(cls_name)
-         if(!hwnd){ return 0 }
-         def dc = GetDC(hwnd)
-         if(!dc){
-            DestroyWindow(hwnd)
-            return 0
-         }
-         wgl.choose_pixel_format(dc)
-         def ctx = wgl.create_context(dc)
-         if(!ctx){
-            ReleaseDC(hwnd, dc)
-            DestroyWindow(hwnd)
-            return 0
-         }
-         if(share_context){ wglShareLists(share_context, ctx) }
-         return {"type": "wgl_offscreen", "hwnd": hwnd, "dc": dc, "context": ctx}
-      }
       return 0
    } #elif macos {
       if(b == "cocoa"){
@@ -124,15 +90,6 @@ fn destroy_offscreen_context(any: ctx): bool {
    if(typ == "glx_offscreen"){
       def gl_ctx = ctx.get("context", 0)
       if(gl_ctx){ glx.destroy_context(0, gl_ctx) }
-      return true
-   }
-   if(typ == "wgl_offscreen"){
-      def gl_ctx = ctx.get("context", 0)
-      def dc = ctx.get("dc", 0)
-      def hwnd = ctx.get("hwnd", 0)
-      if(gl_ctx){ wgl.destroy_context(gl_ctx) }
-      if(dc && hwnd){ ReleaseDC(hwnd, dc) }
-      if(hwnd){ DestroyWindow(hwnd) }
       return true
    }
    if(typ == "nsgl_offscreen"){
@@ -166,11 +123,6 @@ fn make_context_current(any: ctx): bool {
       def gl_ctx = ctx.get("context", 0)
       if(gl_ctx){ return glx.make_current(0, 0, gl_ctx) }
    }
-   if(typ == "wgl_offscreen"){
-      def dc = ctx.get("dc", 0)
-      def gl_ctx = ctx.get("context", 0)
-      if(dc && gl_ctx){ return wgl.make_current(dc, gl_ctx) }
-   }
    if(typ == "nsgl_offscreen"){
       def gl_ctx = ctx.get("context", 0)
       if(gl_ctx){ return nsgl.make_current(gl_ctx) }
@@ -199,7 +151,7 @@ fn release_context_current(): bool {
       if(b == "wayland"){ return egl.make_current(0, 0, 0, 0) }
       if(b == "x11"){ return glx.make_current(0, 0, 0) }
    } #elif windows {
-      if(b == "win32"){ return wgl.make_current(0, 0) }
+      return true
    } #elif macos {
       if(b == "cocoa"){ return nsgl.make_current(0) }
    } #endif

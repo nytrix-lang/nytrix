@@ -5,7 +5,7 @@ use std.core
 use std.core.mem (cstr)
 use std.core.str as str
 use std.core.str (to_hex)
-use std.os.ui.render.vk.vulkan (vk_create_wayland_surface_khr)
+use std.os.ui.render.vk.vulkan (vk_create_wayland_surface_khr, vk_get_physical_device_wayland_presentation_support_khr)
 use std.os.ui.window.consts
 use std.os.ui.window.event as ui_event
 use std.os.ui.window.platform.api
@@ -26,6 +26,55 @@ use std.os.ffi as ffi
    #link "libvulkan.so"
    #include <vulkan/vulkan_wayland.h>
    #include <poll.h>
+} #else {
+   fn wl_proxy_marshal_flags(..._args): any { 0 }
+   fn wl_proxy_destroy(..._args): any { 0 }
+   fn wl_proxy_add_listener(..._args): any { 0 }
+   fn wl_display_connect(..._args): any { 0 }
+   fn wl_display_disconnect(..._args): any { 0 }
+   fn wl_display_flush(..._args): any { 0 }
+   fn wl_display_roundtrip(..._args): any { 0 }
+   fn wl_display_get_fd(..._args): any { 0 }
+   fn wl_display_dispatch_pending(..._args): any { 0 }
+   fn wl_display_dispatch(..._args): any { 0 }
+   fn wl_display_prepare_read(..._args): any { 0 }
+   fn wl_display_read_events(..._args): any { 0 }
+   fn wl_display_create_queue(..._args): any { 0 }
+   fn wl_display_cancel_read(..._args): any { 0 }
+   fn wl_display_prepare_read_queue(..._args): any { 0 }
+   fn wl_display_dispatch_queue_pending(..._args): any { 0 }
+   fn wl_event_queue_destroy(..._args): any { 0 }
+   fn wl_proxy_create_wrapper(..._args): any { 0 }
+   fn wl_proxy_get_user_data(..._args): any { 0 }
+   fn wl_proxy_get_version(..._args): any { 0 }
+   fn wl_proxy_set_queue(..._args): any { 0 }
+   fn wl_proxy_set_user_data(..._args): any { 0 }
+   fn wl_proxy_wrapper_destroy(..._args): any { 0 }
+   fn wl_cursor_theme_load(..._args): any { 0 }
+   fn wl_cursor_theme_get_cursor(..._args): any { 0 }
+   fn wl_cursor_theme_destroy(..._args): any { 0 }
+   fn wl_cursor_image_get_buffer(..._args): any { 0 }
+   fn xkb_context_new(..._args): any { 0 }
+   fn xkb_context_unref(..._args): any { 0 }
+   fn xkb_keymap_new_from_string(..._args): any { 0 }
+   fn xkb_keymap_mod_get_index(..._args): any { 0 }
+   fn xkb_keymap_unref(..._args): any { 0 }
+   fn xkb_keysym_get_name(..._args): any { 0 }
+   fn xkb_keysym_to_utf32(..._args): any { 0 }
+   fn xkb_state_key_get_one_sym(..._args): any { 0 }
+   fn xkb_state_key_get_utf8(..._args): any { 0 }
+   fn xkb_state_mod_index_is_active(..._args): any { 0 }
+   fn xkb_state_new(..._args): any { 0 }
+   fn xkb_state_unref(..._args): any { 0 }
+   fn xkb_state_update_mask(..._args): any { 0 }
+   fn close(..._args): any { 0 }
+   fn mmap(..._args): any { -1 }
+   fn munmap(..._args): any { 0 }
+   fn pipe(..._args): any { -1 }
+   fn poll(..._args): any { 0 }
+   fn read(..._args): any { 0 }
+   fn strdup(..._args): any { 0 }
+   fn write(..._args): any { 0 }
 }
 
 fn _is_debug(): bool { ui_profile.debug_enabled() }
@@ -3079,9 +3128,7 @@ fn vulkan_required_extensions(): list {
 
 fn vulkan_get_presentation_support(any: device, int: queuefamily, any: display): bool {
    "Returns true when the queue family can present to Wayland."
-   vkGetPhysicalDeviceWaylandPresentationSupportKHR(
-      device, queuefamily, display,
-   ) != 0
+   vk_get_physical_device_wayland_presentation_support_khr(device, queuefamily, display) != 0
 }
 
 fn create_surface(any: instance, any: win, any: allocator, any: surface_out): int {

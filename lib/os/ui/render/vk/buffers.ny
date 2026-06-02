@@ -104,6 +104,15 @@ fn _destroy_bound_buffer(?handle: buf, ?handle: mem): int {
    0
 }
 
+fn _bound_buffer_result(?ptr: buf_ptr, ?ptr: mem_ptr, handle: alloc_size): ?ptr {
+   def out = zalloc(24)
+   if(!out){ return 0 }
+   __copy_mem(out, buf_ptr, 8)
+   __copy_mem(out + 8, mem_ptr, 8)
+   store64_h(out, alloc_size, 16)
+   out
+}
+
 fn _create_bound_buffer(int: size, int: usage, int: properties): any {
    if(size <= 0){
       _buf_trace("create_bound_buffer invalid size=" + to_str(size))
@@ -126,7 +135,7 @@ fn _create_bound_buffer(int: size, int: usage, int: properties): any {
       _buf_trace("create_buffer failed code=" + to_str(create_res) + " size=" + to_str(size) + " usage=0x" + to_hex(usage))
       return 0
    }
-   def buf = load64_h(buf_ptr, 0)
+   def buf = load64(buf_ptr, 0)
    if(!buf){
       _buf_trace("create_buffer returned null handle size=" + to_str(size))
       return 0
@@ -181,7 +190,7 @@ fn _create_bound_buffer(int: size, int: usage, int: properties): any {
       destroy_buffer(_device, buf, 0)
       return 0
    }
-   def mem = load64_h(mem_ptr, 0)
+   def mem = load64(mem_ptr, 0)
    if(!mem){
       _buf_trace("allocate_memory returned null size=" + to_str(size) + " alloc=" + to_str(alloc_size) + " type=" + to_str(mem_type))
       destroy_buffer(_device, buf, 0)
@@ -194,7 +203,12 @@ fn _create_bound_buffer(int: size, int: usage, int: properties): any {
       return 0
    }
    _buf_trace("created size=" + to_str(size) + " alloc=" + to_str(alloc_size) + " type=" + to_str(mem_type) + " usage=0x" + to_hex(usage) + " props=0x" + to_hex(properties))
-   [buf, mem, alloc_size]
+   def out = _bound_buffer_result(buf_ptr, mem_ptr, alloc_size)
+   if(!out){
+      _destroy_bound_buffer(buf, mem)
+      return 0
+   }
+   out
 }
 
 fn _map_memory_ptr(?handle: mem, handle: size): ?ptr {
@@ -260,8 +274,10 @@ fn _create_staging_buffer(): bool {
    _staging_capacity = staging_cap
    def b = _create_bound_buffer(staging_cap, _vk_usage_transfer_dst() | _vk_usage_transfer_src(), _vk_memory_host_visible_coherent())
    if(!b){ return false }
-   _staging_buffer, _staging_memory = b.get(0, 0), b.get(1, 0)
-   _staging_map = _map_memory_ptr(_staging_memory, b.get(2, staging_cap))
+   _staging_buffer, _staging_memory = load64(b, 0), load64(b, 8)
+   def map_size = load64_h(b, 16)
+   free(b)
+   _staging_map = _map_memory_ptr(_staging_memory, map_size)
    if(_staging_map){ return true }
    _destroy_bound_buffer(_staging_buffer, _staging_memory)
    _staging_buffer = 0
@@ -291,7 +307,7 @@ fn _create_descriptor_pool(): bool {
    if(!pool_ptr){ return false }
    defer { free(pool_ptr) }
    if(create_descriptor_pool(_device, pool_ci, 0, pool_ptr) != 0){ return false }
-   _descriptor_pool = load64_h(pool_ptr, 0)
+   _descriptor_pool = load64(pool_ptr, 0)
    _descriptor_pool != 0
 }
 
@@ -306,8 +322,9 @@ fn _create_uniform_buffer(): bool {
       _buf_trace("uniform create_bound_buffer failed total=" + to_str(total))
       return false
    }
-   _ubo_buffer, _ubo_memory = b.get(0, 0), b.get(1, 0)
-   def size = b.get(2, total)
+   _ubo_buffer, _ubo_memory = load64(b, 0), load64(b, 8)
+   def size = load64_h(b, 16)
+   free(b)
    _ubo_map = _map_memory_ptr(_ubo_memory, size)
    if(!_ubo_map){
       _buf_trace("uniform map failed size=" + to_str(size) + " mem=0x" + to_hex(int(_ubo_memory)))
@@ -346,7 +363,7 @@ fn _find_memory_type(int: type_filter, int: properties): int {
 
 fn _copy_buffer(?handle: src, ?handle: dst, int: size): bool { _copy_buffer_region(src, dst, 0, 0, size) }
 
-fn _ensure_upload_cb(): ?handle {
+fn _ensure_upload_cb(): any {
    if(_upload_cb != 0){
       reset_command_buffer(_upload_cb, 0)
       return _upload_cb
@@ -357,11 +374,11 @@ fn _ensure_upload_cb(): ?handle {
    store32(_upload_alloc, 0, 24)
    store32(_upload_alloc, 1, 28)
    if(allocate_command_buffers(_device, _upload_alloc, _upload_cb_ptr) != 0){ return 0 }
-   _upload_cb = load64_h(_upload_cb_ptr, 0)
+   _upload_cb = load64(_upload_cb_ptr, 0)
    _upload_cb
 }
 
-fn _begin_upload_cb(?handle: cb): bool {
+fn _begin_upload_cb(any: cb): bool {
    if(!cb || !_upload_bi){ return false }
    memset(_upload_bi, 0, 32)
    store32(_upload_bi, _vk_command_buffer_begin_info_type(), 0)
@@ -370,12 +387,12 @@ fn _begin_upload_cb(?handle: cb): bool {
    true
 }
 
-fn _submit_upload_cb(?handle: cb): bool {
-   if(!cb || !_upload_si || !_upload_cb_arr || !_upload_fence_ptr){ return false }
+fn _submit_upload_cb(any: cb): bool {
+   if(!cb || !_upload_si || !_upload_cb_arr || !_upload_cb_ptr || !_upload_fence_ptr){ return false }
    memset(_upload_si, 0, 72)
    store32(_upload_si, VK_STRUCTURE_TYPE_SUBMIT_INFO, 0)
    store32(_upload_si, 1, 40)
-   store64_h(_upload_cb_arr, cb, 0)
+   store64(_upload_cb_arr, load64(_upload_cb_ptr, 0), 0)
    store64_h(_upload_si, _upload_cb_arr, 48)
    reset_fences(_device, 1, _upload_fence_ptr)
    queue_submit(_graphics_queue, 1, _upload_si, _upload_fence)
@@ -418,9 +435,7 @@ fn _align_up(int: v, int: a): int {
 fn _create_device_local_buffer(int: size, int: usage): any {
    mut final_usage = usage | _vk_usage_transfer_dst()
    if(_bda_enabled){ final_usage = final_usage | _vk_usage_shader_device_address() | _vk_usage_storage() }
-   def b = _create_bound_buffer(size, final_usage, _vk_memory_device_local())
-   if(!b){ return 0 }
-   [b.get(0, 0), b.get(1, 0)]
+   _create_bound_buffer(size, final_usage, _vk_memory_device_local())
 }
 
 fn _ensure_static_mega_buffers(int: v_need=0, int: i_need=0): bool {
@@ -429,14 +444,16 @@ fn _ensure_static_mega_buffers(int: v_need=0, int: i_need=0): bool {
       _static_mega_capacity = static_cap
       def vb = _create_device_local_buffer(static_cap, _vk_usage_vertex())
       if(!vb){ return false }
-      _static_mega_buffer, _static_mega_memory = vb.get(0, 0), vb.get(1, 0)
+      _static_mega_buffer, _static_mega_memory = load64(vb, 0), load64(vb, 8)
+      free(vb)
    }
    if(i_need > 0 && !_static_mega_index_buffer){
       def static_index_cap = _static_mega_index_capacity_value()
       _static_mega_index_capacity = static_index_cap
       def ib = _create_device_local_buffer(static_index_cap, _vk_usage_index())
       if(!ib){ return false }
-      _static_mega_index_buffer, _static_mega_index_memory = ib.get(0, 0), ib.get(1, 0)
+      _static_mega_index_buffer, _static_mega_index_memory = load64(ib, 0), load64(ib, 8)
+      free(ib)
    }
    true
 }
@@ -453,8 +470,9 @@ fn create_static_buffer(?ptr: src_ptr, int: count): any {
    }
    def db = _create_device_local_buffer(size, _vk_usage_vertex())
    if(!db){ return 0 }
-   def d_buf = db.get(0, 0)
-   def d_mem = db.get(1, 0)
+   def d_buf = load64(db, 0)
+   def d_mem = load64(db, 8)
+   free(db)
    if(!_upload_host_to_buffer(src_ptr, d_buf, size)){
       _destroy_bound_buffer(d_buf, d_mem)
       return 0
@@ -480,8 +498,9 @@ fn create_static_indexed_buffer(?ptr: vert_ptr, int: count, ?ptr: idx_ptr, int: 
    }
    def db = _create_device_local_buffer(vsize, _vk_usage_vertex())
    if(!db){ return 0 }
-   def d_buf = db.get(0, 0)
-   def d_mem = db.get(1, 0)
+   def d_buf = load64(db, 0)
+   def d_mem = load64(db, 8)
+   free(db)
    if(!_upload_host_to_buffer(vert_ptr, d_buf, vsize)){
       _destroy_bound_buffer(d_buf, d_mem)
       return 0
@@ -491,8 +510,9 @@ fn create_static_indexed_buffer(?ptr: vert_ptr, int: count, ?ptr: idx_ptr, int: 
       _destroy_bound_buffer(d_buf, d_mem)
       return 0
    }
-   def di_buf = ib.get(0, 0)
-   def di_mem = ib.get(1, 0)
+   def di_buf = load64(ib, 0)
+   def di_mem = load64(ib, 8)
+   free(ib)
    if(!_upload_host_to_buffer(idx_ptr, di_buf, isize)){
       _destroy_bound_buffer(di_buf, di_mem)
       _destroy_bound_buffer(d_buf, d_mem)
@@ -507,8 +527,9 @@ fn create_gpu_storage_buffer(?ptr: src_ptr, int: size, int: usage=0): any {
    def storage_usage = _vk_usage_storage() | usage
    def db = _create_device_local_buffer(size, storage_usage)
    if(!db){ return 0 }
-   def d_buf = db.get(0, 0)
-   def d_mem = db.get(1, 0)
+   def d_buf = load64(db, 0)
+   def d_mem = load64(db, 8)
+   free(db)
    if(src_ptr && !_upload_host_to_buffer(src_ptr, d_buf, size)){
       _destroy_bound_buffer(d_buf, d_mem)
       return 0
@@ -539,11 +560,16 @@ fn _create_vertex_buffer(): bool {
    def total = vertex_cap * _frames_in_flight()
    def b = _create_bound_buffer(total, _vk_usage_vertex(), _vk_memory_host_visible_coherent())
    if(!b){ return false }
-   _vertex_buffer, _vertex_memory = b.get(0, 0), b.get(1, 0)
-   _vertex_map = _map_memory_ptr(_vertex_memory, b.get(2, total))
+   _vertex_buffer, _vertex_memory = load64(b, 0), load64(b, 8)
+   if(!_vertex_buffer_raw){ _vertex_buffer_raw = zalloc(8) }
+   if(_vertex_buffer_raw){ __copy_mem(_vertex_buffer_raw, b, 8) }
+   def map_size = load64_h(b, 16)
+   free(b)
+   _vertex_map = _map_memory_ptr(_vertex_memory, map_size)
    if(!_vertex_map){
       _destroy_bound_buffer(_vertex_buffer, _vertex_memory)
       _vertex_buffer = 0
+      if(_vertex_buffer_raw){ store64(_vertex_buffer_raw, 0, 0) }
       _vertex_memory = 0
       return false
    }

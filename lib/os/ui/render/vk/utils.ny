@@ -990,7 +990,8 @@ fn _advance_vertex_offset(any: bytes): any { _vertex_offset += bytes }
 fn _vkr_bind_dynamic_vertex_buffer(any: cb): any {
    if(!_dynamic_vbo_bound){
       store64_h(_flush_off, _current_frame_vertex_offset, 0)
-      store64_h(_flush_buf, _vertex_buffer, 0)
+      if(_vertex_buffer_raw){ __copy_mem(_flush_buf, _vertex_buffer_raw, 8) }
+      else { store64(_flush_buf, _vertex_buffer, 0) }
       cmd_bind_vertex_buffers(cb, 0, 1, _flush_buf, _flush_off)
       _dynamic_vbo_bound = true
    }
