@@ -19,6 +19,7 @@ typedef struct stmt_t stmt_t;
 typedef struct token_t token_t;
 typedef struct expr_t expr_t;
 typedef struct program_t program_t;
+typedef struct fun_sig fun_sig;
 
 typedef enum ny_ct_fast_kind_t {
   NY_CT_FAST_NONE,
@@ -122,6 +123,7 @@ typedef struct binding {
   bool escapes;
   bool is_list_storage;
   bool is_int_list_storage;
+  bool is_f64_list_storage;
   bool is_dict_storage;
   bool is_int_dict_storage;
   bool has_int_range;
@@ -145,6 +147,7 @@ typedef struct binding {
   bool raw_int_list_mutation;
   bool raw_int_list_untagged;
   const char *raw_int_list_bail_reason;
+  fun_sig *direct_callable_sig;
   bool has_dict_int_range;
   int64_t dict_int_min_raw;
   int64_t dict_int_max_raw;
@@ -231,7 +234,7 @@ bool ny_type_unify(ny_type_t *a, ny_type_t *b);
 const char *ny_type_kind_name(ny_type_kind_t kind);
 char *ny_type_to_string(ny_type_t *type);
 
-typedef struct fun_sig {
+struct fun_sig {
   const char *name;
   const char *module_name;
   LLVMTypeRef type;
@@ -274,7 +277,7 @@ typedef struct fun_sig {
   uint64_t tail_hash;
   uint32_t tail_len;
   bool tail_cached;
-} fun_sig;
+};
 
 #define NY_MONO_MAX_ARITY 16
 
@@ -282,6 +285,8 @@ typedef enum ny_mono_type_kind_t {
   NY_MONO_TYPE_NONE = 0,
   NY_MONO_TYPE_INT = 1,
   NY_MONO_TYPE_F64 = 2,
+  NY_MONO_TYPE_LIST = 3,
+  NY_MONO_TYPE_F64_LIST = 4,
 } ny_mono_type_kind_t;
 
 typedef struct ny_mono_specialization_t {
@@ -301,6 +306,8 @@ typedef struct ny_mono_specialization_t {
   bool arg_range_known[NY_MONO_MAX_ARITY];
   int64_t arg_min_raw[NY_MONO_MAX_ARITY];
   int64_t arg_max_raw[NY_MONO_MAX_ARITY];
+  bool arg_list_len_min_known[NY_MONO_MAX_ARITY];
+  int64_t arg_list_len_min_raw[NY_MONO_MAX_ARITY];
   uint8_t types[NY_MONO_MAX_ARITY];
 } ny_mono_specialization_t;
 
@@ -373,6 +380,7 @@ typedef struct layout_def_t {
   size_t pack;
   stmt_t *stmt;
   bool is_layout;
+  bool heap_allocated;
   LLVMTypeRef llvm_type;
 } layout_def_t;
 
@@ -393,6 +401,9 @@ typedef struct sema_func_t {
   bool mono_param_range_known[NY_MONO_MAX_ARITY];
   int64_t mono_param_min_raw[NY_MONO_MAX_ARITY];
   int64_t mono_param_max_raw[NY_MONO_MAX_ARITY];
+  bool mono_param_list_len_min_known[NY_MONO_MAX_ARITY];
+  int64_t mono_param_list_len_min_raw[NY_MONO_MAX_ARITY];
+  uint8_t mono_param_kinds[NY_MONO_MAX_ARITY];
 } sema_func_t;
 
 typedef struct sema_var_t {

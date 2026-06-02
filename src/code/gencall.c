@@ -89,10 +89,8 @@ static LLVMValueRef ny_gencall_index_raw_i64(codegen_t *cg, scope *scopes,
     binding *b =
         ny_gencall_lookup_binding(cg, scopes, depth, idx_expr->as.ident.name,
                                   name_len, idx_expr->as.ident.hash);
-    if (b && b->raw_int_value && (b->is_int_slot || b->is_int_direct))
-      return b->is_int_slot
-                 ? ny_load(cg, b->raw_int_value, name ? name : "idx_raw")
-                 : b->raw_int_value;
+    if (b && b->raw_int_value && b->is_int_direct)
+      return b->raw_int_value;
   }
   if (ny_is_proven_int(cg, scopes, depth, idx_expr, idx_v))
     return ny_untag_int(cg, idx_v);
@@ -402,6 +400,32 @@ static bool ny_gencall_builtin_name_is(const char *name, const char *tail,
   if (strcmp(name, qname) == 0)
     return true;
   return false;
+}
+
+static bool ny_gencall_const_str_bytes(expr_t *e, const char **out,
+                                       size_t *out_len) {
+  if (!e || e->kind != NY_E_LITERAL || e->as.literal.kind != NY_LIT_STR)
+    return false;
+  if (out)
+    *out = e->as.literal.as.s.data ? e->as.literal.as.s.data : "";
+  if (out_len)
+    *out_len = e->as.literal.as.s.len;
+  return true;
+}
+
+static LLVMValueRef ny_try_const_runtime_tag_builtin(
+    codegen_t *cg, const char *name, bool shadowed, expr_call_t *c) {
+  if (!cg || !c || shadowed || c->args.len != 1 || !name)
+    return NULL;
+  if (strcmp(name, "__runtime_tag") != 0 &&
+      !ny_gencall_builtin_name_is(name, "runtime_tag_raw", shadowed))
+    return NULL;
+  const char *s = NULL;
+  size_t n = 0;
+  if (!ny_gencall_const_str_bytes(c->args.data[0].val, &s, &n))
+    return NULL;
+  int64_t raw = rt_runtime_tag_raw_name(s, n);
+  return ny_ci(cg, (((uint64_t)raw) << 1) | 1u);
 }
 
 static bool ny_gencall_expr_is_int_index(codegen_t *cg, scope *scopes,
@@ -1210,7 +1234,8 @@ static LLVMValueRef ny_try_fast_numeric_builtin(codegen_t *cg, scope *scopes,
   if (!arg_expr)
     return 0;
 
-  if (strcmp(name, "float") == 0 || strcmp(name, "to_float") == 0) {
+  if (strcmp(name, "float") == 0 || strcmp(name, "to_float") == 0 ||
+      strcmp(name, "f64") == 0) {
     fun_sig *box = ny_gencall_flt_box(cg);
     if (!box)
       return 0;
@@ -2901,6 +2926,48 @@ static LLVMValueRef abi_decode_native_fnptr(codegen_t *cg, LLVMValueRef v) {
   return ny_select(cg, is_native, decoded, v, NY_LLVM_NAME(cg, "fnptr_raw"));
 }
 
+static LLVMValueRef abi_raw_value_to_i64(codegen_t *cg, LLVMValueRef v,
+                                         const char *name) {
+  if (!v)
+    return v;
+  LLVMTypeRef ty = LLVMTypeOf(v);
+  if (ty == cg->type_i64)
+    return v;
+  if (LLVMGetTypeKind(ty) == LLVMPointerTypeKind)
+    return ny_ptr2i64(cg, v, NY_LLVM_NAME(cg, name));
+  if (LLVMGetTypeKind(ty) == LLVMIntegerTypeKind) {
+    unsigned bits = LLVMGetIntTypeWidth(ty);
+    if (bits < 64)
+      return LLVMBuildZExt(cg->builder, v, cg->type_i64,
+                           NY_LLVM_NAME(cg, name));
+    if (bits > 64)
+      return LLVMBuildTrunc(cg->builder, v, cg->type_i64,
+                            NY_LLVM_NAME(cg, name));
+    return v;
+  }
+  return ny_cast_to_i64(cg, v, name);
+}
+
+static LLVMValueRef abi_encode_native_i64(codegen_t *cg, LLVMValueRef raw,
+                                          const char *name) {
+  raw = abi_raw_value_to_i64(cg, raw, "native_raw");
+  LLVMValueRef is_null =
+      ny_eq(cg, raw, ny_c0(cg), NY_LLVM_NAME(cg, "native_null"));
+  LLVMValueRef shifted = LLVMBuildShl(
+      cg->builder, raw, LLVMConstInt(cg->type_i64, NY_NATIVE_SHIFT, false),
+      NY_LLVM_NAME(cg, "native_shift"));
+  LLVMValueRef tagged =
+      ny_or(cg, shifted, LLVMConstInt(cg->type_i64, NY_NATIVE_TAG, false),
+            NY_LLVM_NAME(cg, "native_tagged"));
+#if UINTPTR_MAX == 0xffffffff
+  tagged =
+      ny_or(cg, tagged, LLVMConstInt(cg->type_i64, NY_NATIVE_MARK, false),
+            NY_LLVM_NAME(cg, "native_marked"));
+#endif
+  return ny_select(cg, is_null, ny_c0(cg), tagged,
+                   NY_LLVM_NAME(cg, name ? name : "native"));
+}
+
 static bool abi_type_is_float(const char *type_name) {
   if (!type_name)
     return false;
@@ -2961,6 +3028,9 @@ static layout_def_t *abi_layout_from_name(codegen_t *cg,
 static bool abi_type_needs_native_coerce(codegen_t *cg, const char *type_name) {
   if (!type_name || !*type_name)
     return false;
+  type_name = abi_skip_nullable(type_name);
+  if (abi_type_is_fnptr(type_name))
+    return true;
   if (abi_layout_from_name(cg, type_name))
     return true;
   return ny_is_native_abi_type_name(type_name) && !ny_type_is_tagged(type_name);
@@ -3129,8 +3199,10 @@ static LLVMValueRef ny_try_emit_direct_list_append(codegen_t *cg, scope *scopes,
                                                    expr_t *value, token_t tok) {
   if (!cg || !target || !value)
     return NULL;
-  if (!ny_expr_is_direct_list_storage(cg, scopes, depth, target) &&
-      !ny_expr_has_known_list_type(cg, scopes, depth, target))
+  bool target_is_direct = ny_expr_is_direct_list_storage(cg, scopes, depth, target);
+  bool target_is_known_list =
+      target_is_direct || ny_expr_has_known_list_type(cg, scopes, depth, target);
+  if (!target_is_known_list)
     return NULL;
   fun_sig *append_sig = lookup_fun(cg, "__append", 0);
   if (!append_sig || !append_sig->type || !append_sig->value)
@@ -3146,8 +3218,102 @@ static LLVMValueRef ny_try_emit_direct_list_append(codegen_t *cg, scope *scopes,
   args[0] = ny_cast_to_i64(cg, args[0], "append_list");
   args[1] = ny_cast_to_i64(cg, args[1], "append_value");
   ny_dbg_loc(cg, tok);
-  return LLVMBuildCall2(cg->builder, append_sig->type, append_sig->value, args,
-                        2, NY_LLVM_NAME(cg, "append_direct"));
+  if (!ny_env_enabled_default_on("NYTRIX_FAST_LIST_APPEND"))
+    return LLVMBuildCall2(cg->builder, append_sig->type, append_sig->value,
+                          args, 2, NY_LLVM_NAME(cg, "append_direct"));
+
+  LLVMBasicBlockRef cur_bb = ny_cur_block(cg);
+  LLVMValueRef fn = LLVMGetBasicBlockParent(cur_bb);
+  LLVMBasicBlockRef bounds_bb = NULL;
+  LLVMBasicBlockRef fast_bb = ny_bb_fn(fn, "append.fast");
+  LLVMBasicBlockRef slow_bb = ny_bb_fn(fn, "append.slow");
+  LLVMBasicBlockRef join_bb = ny_bb_fn(fn, "append.join");
+
+  if (target_is_direct) {
+    bounds_bb = cur_bb;
+  } else {
+    LLVMBasicBlockRef tag_bb = ny_bb_fn(fn, "append.tag");
+    bounds_bb = ny_bb_fn(fn, "append.bounds");
+    LLVMValueRef is_ptr = ny_build_is_ptr_pred(cg, args[0], "append_is_ptr");
+    ny_cond_br(cg, is_ptr, tag_bb, slow_bb);
+
+    ny_pos(cg, tag_bb);
+    LLVMValueRef tag_addr =
+        ny_sub(cg, args[0], LLVMConstInt(cg->type_i64, 8, false),
+               "append_tag_addr");
+    LLVMValueRef tag_ptr =
+        LLVMBuildIntToPtr(cg->builder, tag_addr, ny_ptr_i64_ty(cg),
+                          "append_tag_ptr");
+    LLVMValueRef tag_v = ny_load(cg, tag_ptr, NY_LLVM_NAME(cg, "append_tag"));
+    LLVMValueRef is_list =
+        LLVMBuildICmp(cg->builder, LLVMIntEQ, tag_v,
+                      LLVMConstInt(cg->type_i64, 100, false),
+                      NY_LLVM_NAME(cg, "append_is_list"));
+    ny_cond_br(cg, is_list, bounds_bb, slow_bb);
+    ny_pos(cg, bounds_bb);
+  }
+
+  LLVMValueRef target_ptr =
+      LLVMBuildIntToPtr(cg->builder, args[0], ny_ptr_i64_ty(cg),
+                        "append_ptr_i64");
+  LLVMValueRef len_tagged =
+      ny_load(cg, target_ptr, NY_LLVM_NAME(cg, "append_len"));
+  LLVMValueRef len_raw =
+      ny_build_untagged_or_raw_i64(cg, len_tagged, "append_len_raw");
+  LLVMValueRef cap_addr =
+      ny_add(cg, args[0], LLVMConstInt(cg->type_i64, 8, false),
+             "append_cap_addr");
+  LLVMValueRef cap_ptr =
+      LLVMBuildIntToPtr(cg->builder, cap_addr, ny_ptr_i64_ty(cg),
+                        "append_cap_ptr_i64");
+  LLVMValueRef cap_tagged =
+      ny_load(cg, cap_ptr, NY_LLVM_NAME(cg, "append_cap"));
+  LLVMValueRef cap_raw =
+      ny_build_untagged_or_raw_i64(cg, cap_tagged, "append_cap_raw");
+  LLVMValueRef has_cap =
+      LLVMBuildICmp(cg->builder, LLVMIntSLT, len_raw, cap_raw,
+                    NY_LLVM_NAME(cg, "append_has_cap"));
+  ny_cond_br(cg, has_cap, fast_bb, slow_bb);
+
+  ny_pos(cg, fast_bb);
+  LLVMValueRef scaled =
+      LLVMBuildShl(cg->builder, len_raw, LLVMConstInt(cg->type_i64, 3, false),
+                   "append_scaled");
+  LLVMValueRef byte_off =
+      LLVMBuildAdd(cg->builder, scaled, LLVMConstInt(cg->type_i64, 16, false),
+                   "append_off");
+  LLVMValueRef elem_addr =
+      ny_add(cg, args[0], byte_off, NY_LLVM_NAME(cg, "append_addr"));
+  LLVMValueRef elem_ptr =
+      LLVMBuildIntToPtr(cg->builder, elem_addr, ny_ptr_i64_ty(cg),
+                        "append_elem_ptr_i64");
+  ny_store(cg, elem_ptr, args[1]);
+  LLVMValueRef next_len =
+      ny_add(cg, len_raw, LLVMConstInt(cg->type_i64, 1, false),
+             NY_LLVM_NAME(cg, "append_next_len"));
+  LLVMValueRef next_len_tagged =
+      ny_or(cg,
+            ny_shl(cg, next_len, ny_c1(cg),
+                   NY_LLVM_NAME(cg, "append_next_len_shl")),
+            ny_c1(cg), NY_LLVM_NAME(cg, "append_next_len_tagged"));
+  ny_store(cg, target_ptr, next_len_tagged);
+  LLVMBasicBlockRef fast_end = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, slow_bb);
+  LLVMValueRef slow_res =
+      LLVMBuildCall2(cg->builder, append_sig->type, append_sig->value, args, 2,
+                     NY_LLVM_NAME(cg, "append_fallback"));
+  LLVMBasicBlockRef slow_end = ny_cur_block(cg);
+  ny_br(cg, join_bb);
+
+  ny_pos(cg, join_bb);
+  LLVMValueRef phi =
+      ny_phi(cg, cg->type_i64, NY_LLVM_NAME(cg, "append_result"));
+  LLVMValueRef incoming_vals[2] = {args[0], slow_res};
+  LLVMBasicBlockRef incoming_bbs[2] = {fast_end, slow_end};
+  LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
+  return phi;
 }
 
 static LLVMValueRef ny_try_emit_direct_list_ctor(codegen_t *cg, scope *scopes,
@@ -3259,7 +3425,11 @@ static LLVMValueRef ny_static_int_list_global(codegen_t *cg, binding *b,
   LLVMSetLinkage(g, LLVMPrivateLinkage);
   LLVMSetUnnamedAddr(g, true);
   if (ny_static_int_list_in_std_origin(cg))
+#ifdef __APPLE__
+    LLVMSetSection(g, "__DATA,ny_std");
+#else
     LLVMSetSection(g, "ny.std");
+#endif
   b->static_int_list_global = g;
   b->static_int_list_len = len;
   b->static_int_list_untagged = untagged;
@@ -3367,6 +3537,19 @@ static binding *ny_raw_int_list_target_binding(codegen_t *cg, scope *scopes,
           b->raw_int_list_len > 0)
              ? b
              : NULL;
+}
+
+static binding *ny_f64_list_target_binding(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *target) {
+  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
+    return NULL;
+  size_t name_len = (size_t)target->tok.len;
+  if (name_len == 0)
+    name_len = strlen(target->as.ident.name);
+  binding *b =
+      ny_gencall_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                name_len, target->as.ident.hash);
+  return (b && b->is_f64_list_storage) ? b : NULL;
 }
 
 static LLVMValueRef
@@ -4034,6 +4217,92 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
                                     default_expr, e->tok, assume_nonnegative);
 }
 
+static LLVMValueRef ny_try_emit_fast_receiver_set(codegen_t *cg, scope *scopes,
+                                                  size_t depth, expr_t *e,
+                                                  expr_t *target,
+                                                  ny_call_arg_list *args) {
+  if (!cg || !e || !target || !args || args->len != 2)
+    return NULL;
+  if (ny_env_enabled("NYTRIX_DISABLE_FAST_RECEIVER_SET"))
+    return NULL;
+
+  expr_t *key = args->data[0].val;
+  expr_t *value = args->data[1].val;
+  if (!key || !value)
+    return NULL;
+
+  if (ny_expr_has_known_dict_type(cg, scopes, depth, target)) {
+    fun_sig *dict_set_sig = NULL;
+    if (ny_env_enabled_default_on("NYTRIX_FAST_DICT_WRITE") &&
+        !ny_env_enabled("NYTRIX_DISABLE_FAST_DICT_WRITE"))
+      dict_set_sig = lookup_fun(cg, "__dict_write_fast", 0);
+    if (!dict_set_sig)
+      dict_set_sig = lookup_fun(cg, "std.core.dict_mod.dict_write", 0);
+    if (!dict_set_sig)
+      return NULL;
+    LLVMValueRef call_args[3];
+    call_args[0] =
+        ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, target), "dict_set_target");
+    call_args[1] =
+        ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, key), "dict_set_key");
+    call_args[2] =
+        ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, value), "dict_set_value");
+    if (!call_args[0] || !call_args[1] || !call_args[2]) {
+      ny_diag_error(e->tok, "failed to evaluate dict set(...) arguments");
+      cg->had_error = 1;
+      return ny_c0(cg);
+    }
+    ny_dbg_loc(cg, e->tok);
+    return LLVMBuildCall2(cg->builder, dict_set_sig->type,
+                          dict_set_sig->value, call_args, 3,
+                          NY_LLVM_NAME(cg, "dict_set_receiver_direct"));
+  }
+
+  if (!ny_gencall_expr_is_int_index(cg, scopes, depth, key))
+    return NULL;
+  bool target_is_direct_list =
+      ny_expr_is_direct_list_storage(cg, scopes, depth, target);
+  if (!target_is_direct_list &&
+      !ny_expr_has_known_list_type(cg, scopes, depth, target))
+    return NULL;
+
+  fun_sig *set_sig = lookup_fun(cg, "std.core.reflect.set", 0);
+  if (!set_sig)
+    set_sig = lookup_fun(cg, "std.core.set", 0);
+  if (!set_sig)
+    set_sig = lookup_fun(cg, "set", 0);
+
+  bool key_is_safe_fast_index =
+      ny_gencall_expr_is_safe_fast_set_index(cg, scopes, depth, key);
+  bool key_is_existing_index =
+      key_is_safe_fast_index &&
+      ny_gencall_expr_in_list_len_min(cg, scopes, depth, target, key);
+  bool target_is_trusted_f64_list =
+      key_is_existing_index &&
+      ny_f64_list_target_binding(cg, scopes, depth, target) != NULL;
+
+  LLVMValueRef raw_int_list_set = ny_try_emit_raw_int_list_set(
+      cg, scopes, depth, target, key, value, e->tok, key_is_safe_fast_index,
+      key_is_existing_index);
+  if (raw_int_list_set)
+    return raw_int_list_set;
+  if (ny_raw_int_list_target_binding(cg, scopes, depth, target)) {
+    ny_diag_error(e->tok, "internal raw int-list proof failed for set(...)");
+    cg->had_error = 1;
+    return ny_c0(cg);
+  }
+
+  if ((target_is_direct_list || target_is_trusted_f64_list) &&
+      !ny_env_enabled("NYTRIX_GUARDED_FAST_SET") &&
+      ny_env_enabled_default_on("NYTRIX_TRUSTED_FAST_SET")) {
+    return ny_emit_trusted_fast_list_set(
+        cg, scopes, depth, target, key, value, e->tok, set_sig,
+        key_is_safe_fast_index, key_is_existing_index);
+  }
+  return ny_emit_fast_list_set(cg, scopes, depth, target, key, value, e->tok,
+                               set_sig, key_is_safe_fast_index);
+}
+
 static LLVMValueRef
 ny_emit_fast_indexable_get(codegen_t *cg, scope *scopes, size_t depth,
                            expr_t *target, expr_t *key, expr_t *default_expr,
@@ -4393,6 +4662,12 @@ static LLVMValueRef ny_try_fast_len_builtin(codegen_t *cg, scope *scopes,
     return LLVMConstInt(cg->type_i64, (literal_collection_len << 1) | 1u,
                         false);
   expr_t *static_init = ny_gencall_static_init_expr(cg, scopes, depth, target);
+  if (static_init && static_init->kind == NY_E_LITERAL &&
+      static_init->as.literal.kind == NY_LIT_STR) {
+    return LLVMConstInt(
+        cg->type_i64, ((uint64_t)static_init->as.literal.as.s.len << 1) | 1u,
+        false);
+  }
   if (static_init &&
       (static_init->kind == NY_E_LIST || static_init->kind == NY_E_TUPLE))
     return LLVMConstInt(cg->type_i64,
@@ -4937,9 +5212,6 @@ LLVMValueRef ny_coerce_to_abi_proven_int(codegen_t *cg, LLVMValueRef v,
                              NY_LLVM_NAME(cg, "arg_fnptr"));
   }
   if (abi_type_is_ptr(type_name)) {
-    // Nytrix tagged pointers are stored as `raw_ptr | 1` (low bit set as tag).
-    // To recover the raw pointer, we clear bit 0 with AND ~1.
-    // Using AShr 1 was wrong: it divided the address by 2.
     LLVMValueRef mask = LLVMConstInt(cg->type_i64, ~(uint64_t)1, false);
     LLVMValueRef raw = ny_and(cg, v, mask, NY_LLVM_NAME(cg, "ptr_untag"));
     return LLVMBuildIntToPtr(cg->builder, raw, cg->type_i8ptr,
@@ -5038,20 +5310,16 @@ LLVMValueRef ny_box_abi_result(codegen_t *cg, LLVMValueRef v,
     return ptr_i64;
   }
   if (abi_type_is_fnptr(type_name)) {
-    fun_sig *tag_native = lookup_fun(cg, "__tag_native", 0);
-    LLVMValueRef raw = ny_ptr2i64(cg, v, NY_LLVM_NAME(cg, "ret_fnptr"));
-    if (tag_native) {
-      return LLVMBuildCall2(cg->builder, tag_native->type, tag_native->value,
-                            &raw, 1, NY_LLVM_NAME(cg, "tag_fnptr"));
-    }
-    return raw;
+    LLVMValueRef raw = abi_raw_value_to_i64(cg, v, "ret_fnptr");
+    return abi_encode_native_i64(cg, raw, "tag_fnptr");
   }
   if (strcmp(type_name, "cstr") == 0) {
     fun_sig *box = lookup_fun(cg, "__cstr_to_str", 0);
     if (!box)
       return ny_c0(cg);
     LLVMValueRef raw = ny_ptr2i64(cg, v, NY_LLVM_NAME(cg, "ret_cstr"));
-    return LLVMBuildCall2(cg->builder, box->type, box->value, &raw, 1,
+    LLVMValueRef native = abi_encode_native_i64(cg, raw, "ret_cstr_native");
+    return LLVMBuildCall2(cg->builder, box->type, box->value, &native, 1,
                           NY_LLVM_NAME(cg, "cstr_to_str"));
   }
   if (abi_type_is_ptr(type_name)) {
@@ -5783,6 +6051,8 @@ static bool ny_mono_enabled(codegen_t *cg) {
   if (ny_env_enabled("NYTRIX_DISABLE_MONO_TYPES") ||
       ny_env_enabled("NYTRIX_DISABLE_MONOMORPHIZATION"))
     return false;
+  if (ny_env_enabled("NYTRIX_MONO_LIST_ARGS"))
+    return true;
   return ny_codegen_speed_profile_enabled(cg);
 }
 
@@ -5819,9 +6089,17 @@ static const char *ny_mono_type_name(uint8_t kind) {
     return "int";
   case NY_MONO_TYPE_F64:
     return "f64";
+  case NY_MONO_TYPE_LIST:
+    return "list";
+  case NY_MONO_TYPE_F64_LIST:
+    return "list";
   default:
     return NULL;
   }
+}
+
+static bool ny_mono_type_is_raw_scalar(uint8_t kind) {
+  return kind == NY_MONO_TYPE_INT || kind == NY_MONO_TYPE_F64;
 }
 
 static char ny_mono_type_suffix(uint8_t kind) {
@@ -5830,6 +6108,10 @@ static char ny_mono_type_suffix(uint8_t kind) {
     return 'i';
   case NY_MONO_TYPE_F64:
     return 'd';
+  case NY_MONO_TYPE_LIST:
+    return 'l';
+  case NY_MONO_TYPE_F64_LIST:
+    return 'q';
   default:
     return 'x';
   }
@@ -5846,6 +6128,18 @@ static ny_mono_type_kind_t ny_mono_expr_kind(codegen_t *cg, scope *scopes,
   const char *ty = infer_expr_type(cg, scopes, depth, expr);
   if (ny_type_is(ty, "f64"))
     return NY_MONO_TYPE_F64;
+  if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
+    size_t name_len = (size_t)expr->tok.len;
+    if (name_len == 0)
+      name_len = strlen(expr->as.ident.name);
+    binding *b = ny_gencall_lookup_binding(
+        cg, scopes, depth, expr->as.ident.name, name_len, expr->as.ident.hash);
+    if (b && b->is_f64_list_storage)
+      return NY_MONO_TYPE_F64_LIST;
+  }
+  if (ny_type_is(ty, "list") ||
+      ny_expr_is_direct_list_storage(cg, scopes, depth, expr))
+    return NY_MONO_TYPE_LIST;
   if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
     size_t name_len = (size_t)expr->tok.len;
     if (name_len == 0)
@@ -6170,8 +6464,47 @@ static bool ny_mono_types_equal(const uint8_t *a, const uint8_t *b, int arity) {
   return true;
 }
 
+static uint64_t ny_mono_key_hash_with_list_lens(
+    uint64_t h, const bool *list_len_known, const int64_t *list_len_raw,
+    int arity) {
+  bool any_known = false;
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    if (list_len_known && list_len_known[i]) {
+      any_known = true;
+      break;
+    }
+  }
+  if (!any_known)
+    return h;
+  h = ny_hash64_u64(h, UINT64_C(0x4e594d4f4e4f4c4c));
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    h = ny_hash64_u64(h, (uint64_t)(list_len_known && list_len_known[i]));
+    if (list_len_known && list_len_known[i] && list_len_raw)
+      h = ny_hash64_u64(h, (uint64_t)list_len_raw[i]);
+  }
+  return h;
+}
+
+static bool ny_mono_list_lens_equal(const ny_mono_specialization_t *spec,
+                                    const bool *list_len_known,
+                                    const int64_t *list_len_raw, int arity) {
+  if (!spec)
+    return false;
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    bool known = list_len_known && list_len_known[i];
+    if (spec->arg_list_len_min_known[i] != known)
+      return false;
+    if (known && list_len_raw &&
+        spec->arg_list_len_min_raw[i] != list_len_raw[i])
+      return false;
+  }
+  return true;
+}
+
 static fun_sig *ny_mono_lookup_existing(codegen_t *cg, stmt_t *base_stmt,
                                         uint64_t key_hash, const uint8_t *types,
+                                        const bool *list_len_known,
+                                        const int64_t *list_len_raw,
                                         int arity) {
   if (!cg || !base_stmt)
     return NULL;
@@ -6179,7 +6512,8 @@ static fun_sig *ny_mono_lookup_existing(codegen_t *cg, stmt_t *base_stmt,
     ny_mono_specialization_t *spec = &cg->mono_specs.data[i];
     if (spec->base_stmt == base_stmt && spec->key_hash == key_hash &&
         spec->arity == arity &&
-        ny_mono_types_equal(spec->types, types, arity)) {
+        ny_mono_types_equal(spec->types, types, arity) &&
+        ny_mono_list_lens_equal(spec, list_len_known, list_len_raw, arity)) {
       return lookup_fun_exact(cg, spec->specialized_name);
     }
   }
@@ -6421,6 +6755,8 @@ static stmt_t *ny_mono_clone_func_stmt(codegen_t *cg, fun_sig *base_sig,
     LLVMTypeRef pty =
         ptype ? resolve_abi_type_name(cg, ptype, clone->tok) : cg->type_i64;
     vec_push_arena(cg->arena, &sema->resolved_param_types, pty);
+    if (i < NY_MONO_MAX_ARITY)
+      sema->mono_param_kinds[i] = (i < (size_t)arity) ? types[i] : 0;
   }
   if (base->sema_kind == NY_STMT_SEMA_FUNC && base->sema) {
     sema_func_t *base_sema = (sema_func_t *)base->sema;
@@ -6439,6 +6775,27 @@ static stmt_t *ny_mono_clone_func_stmt(codegen_t *cg, fun_sig *base_sig,
   clone->sema = sema;
   clone->sema_kind = NY_STMT_SEMA_FUNC;
   return clone;
+}
+
+static expr_t *ny_mono_call_arg_for_param(expr_call_t *c, expr_memcall_t *mc,
+                                          bool skip_target,
+                                          size_t param_idx) {
+  call_arg_t *user_args = c ? c->args.data : (mc ? mc->args.data : NULL);
+  size_t user_args_len = c ? c->args.len : (mc ? mc->args.len : 0);
+  if (mc && !skip_target && param_idx == 0)
+    return mc->target;
+  size_t user_idx = (mc && !skip_target) ? param_idx - 1u : param_idx;
+  return user_idx < user_args_len ? user_args[user_idx].val : NULL;
+}
+
+static bool ny_mono_param_can_carry_list_len(stmt_t *fn, int idx,
+                                             uint8_t kind) {
+  if (kind == NY_MONO_TYPE_LIST || kind == NY_MONO_TYPE_F64_LIST)
+    return true;
+  if (!fn || idx < 0 || (size_t)idx >= fn->as.fn.params.len)
+    return false;
+  const char *ptype = fn->as.fn.params.data[idx].type;
+  return ptype && ny_type_is(ptype, "list");
 }
 
 static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
@@ -6478,6 +6835,8 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
     return NULL;
 
   uint8_t types[NY_MONO_MAX_ARITY] = {0};
+  bool arg_list_len_min_known[NY_MONO_MAX_ARITY] = {0};
+  int64_t arg_list_len_min_raw[NY_MONO_MAX_ARITY] = {0};
   bool useful = false;
   bool has_keyword = false;
   call_arg_t *user_args = c ? c->args.data : (mc ? mc->args.data : NULL);
@@ -6491,30 +6850,50 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   if (has_keyword)
     return NULL;
   for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
-    if (fn->as.fn.params.data[i].type)
-      continue;
-    expr_t *arg_expr = NULL;
-    if (mc && !skip_target && i == 0) {
-      arg_expr = mc->target;
-    } else {
-      size_t user_idx = (mc && !skip_target) ? (size_t)i - 1u : (size_t)i;
-      if (user_idx < user_args_len)
-        arg_expr = user_args[user_idx].val;
+    expr_t *arg_expr = ny_mono_call_arg_for_param(c, mc, skip_target, (size_t)i);
+    if (!fn->as.fn.params.data[i].type) {
+      ny_mono_type_kind_t kind =
+          ny_mono_expr_kind(cg, scopes, depth, arg_expr);
+      if (kind != NY_MONO_TYPE_NONE) {
+        types[i] = (uint8_t)kind;
+        useful = true;
+      }
     }
-    ny_mono_type_kind_t kind = ny_mono_expr_kind(cg, scopes, depth, arg_expr);
-    if (kind == NY_MONO_TYPE_NONE)
-      continue;
-    types[i] = (uint8_t)kind;
-    useful = true;
+    int64_t len_min = 0;
+    if (ny_mono_param_can_carry_list_len(fn, i, types[i]) &&
+        ny_gencall_list_len_min(cg, scopes, depth, arg_expr, &len_min)) {
+      arg_list_len_min_known[i] = true;
+      arg_list_len_min_raw[i] = len_min;
+    }
   }
   if (!useful)
     return NULL;
+  bool list_args_only =
+      ny_env_enabled("NYTRIX_MONO_LIST_ARGS") &&
+      !ny_codegen_speed_profile_enabled(cg) &&
+      !ny_env_enabled("NYTRIX_MONO_TYPES") &&
+      !ny_env_enabled("NYTRIX_ENABLE_MONOMORPHIZATION");
+  if (list_args_only) {
+    bool has_list_arg = false;
+    for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
+      if (types[i] == NY_MONO_TYPE_LIST || types[i] == NY_MONO_TYPE_F64_LIST) {
+        has_list_arg = true;
+        break;
+      }
+    }
+    if (!has_list_arg)
+      return NULL;
+  }
 
   int max_global = ny_mono_env_int("NYTRIX_MONO_MAX_GLOBAL", 128);
   int max_per_fn = ny_mono_env_int("NYTRIX_MONO_MAX_PER_FN", 4);
   uint64_t key_hash = ny_mono_key_hash(sig->name, types, sig->arity);
+  key_hash = ny_mono_key_hash_with_list_lens(
+      key_hash, arg_list_len_min_known, arg_list_len_min_raw, sig->arity);
   fun_sig *existing =
-      ny_mono_lookup_existing(cg, fn, key_hash, types, sig->arity);
+      ny_mono_lookup_existing(cg, fn, key_hash, types,
+                              arg_list_len_min_known, arg_list_len_min_raw,
+                              sig->arity);
   if (existing)
     return existing;
   if (max_global > 0 && cg->mono_specs.len >= (size_t)max_global)
@@ -6532,6 +6911,15 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
       ny_mono_clone_func_stmt(cg, sig, mono_name, types, sig->arity);
   if (!clone)
     return NULL;
+  if (clone->sema_kind == NY_STMT_SEMA_FUNC && clone->sema) {
+    sema_func_t *clone_sema = (sema_func_t *)clone->sema;
+    for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
+      if (!arg_list_len_min_known[i])
+        continue;
+      clone_sema->mono_param_list_len_min_known[i] = true;
+      clone_sema->mono_param_list_len_min_raw[i] = arg_list_len_min_raw[i];
+    }
+  }
   ny_mono_specialization_t spec = {0};
   spec.base_name = sig->name;
   spec.specialized_name = mono_name;
@@ -6541,7 +6929,7 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   spec.body_cost = body_cost;
   spec.arity = sig->arity;
   spec.return_kind = (uint8_t)return_kind;
-  spec.raw_return_proven = spec.return_kind != NY_MONO_TYPE_NONE;
+  spec.raw_return_proven = ny_mono_type_is_raw_scalar(spec.return_kind);
   spec.raw_return_active = false;
   spec.inline_body_eligible =
       spec.raw_return_proven && ny_mono_is_single_return_shape(fn->as.fn.body);
@@ -6558,6 +6946,10 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
           : (spec.raw_return_proven ? "raw-return-proof-inactive"
                                     : "tagged-return");
   memcpy(spec.types, types, sizeof(spec.types));
+  memcpy(spec.arg_list_len_min_known, arg_list_len_min_known,
+         sizeof(spec.arg_list_len_min_known));
+  memcpy(spec.arg_list_len_min_raw, arg_list_len_min_raw,
+         sizeof(spec.arg_list_len_min_raw));
   vec_push(&cg->mono_specs, spec);
 
   bool old_emitting = cg->mono_emitting;
@@ -7055,6 +7447,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     if (fast_append)
       return fast_append;
   }
+  if (mc && mc->name && strcmp(mc->name, "len") == 0 && mc->args.len == 0) {
+    LLVMValueRef fast_len =
+        ny_try_fast_len_builtin(cg, scopes, depth, mc->target, e->tok);
+    if (fast_len)
+      return fast_len;
+  }
   if (mc && mc->name && strcmp(mc->name, "get") == 0 &&
       (mc->args.len == 1 || mc->args.len == 2)) {
     LLVMValueRef fast_get =
@@ -7062,6 +7460,15 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                                       &mc->args);
     if (fast_get)
       return fast_get;
+  }
+  if (mc && mc->name &&
+      (strcmp(mc->name, "set") == 0 || strcmp(mc->name, "set_idx") == 0) &&
+      mc->args.len == 2) {
+    LLVMValueRef fast_set =
+        ny_try_emit_fast_receiver_set(cg, scopes, depth, e, mc->target,
+                                      &mc->args);
+    if (fast_set)
+      return fast_set;
   }
 
   if (c && c->callee && c->callee->kind == NY_E_IDENT &&
@@ -7088,6 +7495,10 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       return ny_codegen_token_is_source_file(cg, e->tok) ? ny_ctrue(cg)
                                                          : ny_cfalse(cg);
     }
+    LLVMValueRef const_runtime_tag = ny_try_const_runtime_tag_builtin(
+        cg, builtin_name, builtin_name_shadowed, c);
+    if (const_runtime_tag)
+      return const_runtime_tag;
     LLVMValueRef direct_llvm = ny_try_direct_llvm_intrinsic(
         cg, scopes, depth, e, builtin_name, builtin_name_shadowed, c);
     if (direct_llvm)
@@ -7180,8 +7591,11 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         return ny_load(cg, g, NY_LLVM_NAME(cg, "type_fast"));
       }
     }
-    bool want_builtin_to_str = ny_gencall_builtin_name_is(
-        builtin_name, "to_str", builtin_name_shadowed);
+    bool want_builtin_to_str =
+        ny_gencall_builtin_name_is(builtin_name, "to_str",
+                                   builtin_name_shadowed) ||
+        ny_gencall_builtin_name_is(builtin_name, "str",
+                                   builtin_name_shadowed);
     if (want_builtin_to_str && c->args.len == 1) {
       fun_sig *raw_to_str = lookup_fun(cg, "__to_str", 0);
       const char *arg_type =
@@ -7353,8 +7767,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                                          ? "std.core.reflect.set_idx"
                                          : "std.core.reflect.set";
       if (ny_expr_has_known_dict_type(cg, scopes, depth, c->args.data[0].val)) {
-        fun_sig *dict_set_sig =
-            lookup_fun(cg, "std.core.dict_mod.dict_write", 0);
+        fun_sig *dict_set_sig = NULL;
+        if (ny_env_enabled_default_on("NYTRIX_FAST_DICT_WRITE") &&
+            !ny_env_enabled("NYTRIX_DISABLE_FAST_DICT_WRITE"))
+          dict_set_sig = lookup_fun(cg, "__dict_write_fast", 0);
+        if (!dict_set_sig)
+          dict_set_sig = lookup_fun(cg, "std.core.dict_mod.dict_write", 0);
         if (dict_set_sig) {
           LLVMValueRef args[3];
           for (size_t i = 0; i < 3; ++i) {
@@ -7387,6 +7805,10 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
               cg, scopes, depth, c->args.data[0].val, c->args.data[1].val);
       bool set_target_is_direct_list = ny_expr_is_direct_list_storage(
           cg, scopes, depth, c->args.data[0].val);
+      bool set_target_is_trusted_f64_list =
+          key_is_existing_index &&
+          ny_f64_list_target_binding(cg, scopes, depth,
+                                     c->args.data[0].val) != NULL;
       LLVMValueRef raw_int_list_set = ny_try_emit_raw_int_list_set(
           cg, scopes, depth, c->args.data[0].val, c->args.data[1].val,
           c->args.data[2].val, e->tok, key_is_safe_fast_index,
@@ -7405,7 +7827,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           (set_target_is_direct_list ||
            ny_expr_has_known_list_type(cg, scopes, depth,
                                        c->args.data[0].val))) {
-        if (set_target_is_direct_list &&
+        if ((set_target_is_direct_list || set_target_is_trusted_f64_list) &&
             !ny_env_enabled("NYTRIX_GUARDED_FAST_SET") &&
             ny_env_enabled_default_on("NYTRIX_TRUSTED_FAST_SET")) {
           return ny_emit_trusted_fast_list_set(
@@ -8042,7 +8464,18 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                                              strlen(name), name_hash);
       if (b) {
         b->is_used = true;
-        callee = b->is_slot ? ny_load(cg, b->value, "") : b->value;
+        if (b->direct_callable_sig &&
+            ny_sig_in_current_sigs(cg, b->direct_callable_sig)) {
+          sig_found = b->direct_callable_sig;
+          ft = sig_found->type;
+          fv = sig_found->value;
+          sig_arity = sig_found->arity;
+          is_variadic = sig_found->is_variadic;
+          has_sig = true;
+          callee = fv;
+        } else {
+          callee = b->is_slot ? ny_load(cg, b->value, "") : b->value;
+        }
       }
     }
     if (!callee) {

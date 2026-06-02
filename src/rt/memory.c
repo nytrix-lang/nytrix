@@ -311,6 +311,39 @@ int64_t rt_malloc(int64_t size) {
   return res;
 }
 
+int64_t rt_malloc_uninit(int64_t size) {
+  int64_t n = is_int(size) ? (size >> 1) : size;
+  if (n < 0)
+    return 0;
+  size_t body = (size_t)n;
+  body = (body + 15) & ~15ULL;
+  size_t total = body + 32;
+
+  int slot = ny_mem_pool_slot(total);
+  void *p = NULL;
+  if (slot >= 0 && g_mem_pools[slot]) {
+    p = g_mem_pools[slot];
+    g_mem_pools[slot] = g_mem_pools[slot]->next;
+  } else {
+    p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+  }
+
+  if (__builtin_expect(!p, 0))
+    return 0;
+
+  *(uint64_t *)p = NY_MAGIC1;
+  *(uint64_t *)((char *)p + 8) = (uint64_t)((body << 1) | 1);
+
+  int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
+  rt_heap_ptr_cache_store((uintptr_t)res);
+  rt_rc_adopt_new(res);
+  if (mem_trace_enabled() && total > 1024 * 1024) {
+    fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n", (void *)(uintptr_t)res, body,
+            total);
+  }
+  return res;
+}
+
 int64_t rt_malloc_raw(int64_t size) {
   int64_t n = is_int(size) ? (size >> 1) : size;
   if (n <= 0)
@@ -541,7 +574,7 @@ int64_t rt_memcmp(int64_t a, int64_t b, int64_t n) {
       break;
     }
   }
-  return (int64_t)(res << 1) | 1;
+  return rt_tag_v((int64_t)res);
 }
 
 static inline int rt_try_load8_str(int64_t addr, int64_t idx, int64_t *out) {

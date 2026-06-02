@@ -19,6 +19,12 @@
 #endif
 #endif
 
+#ifdef _WIN32
+#define NY_FFI_NULL_DEVICE "NUL"
+#else
+#define NY_FFI_NULL_DEVICE "/dev/null"
+#endif
+
 static void ffi_buf_append(char **buf, size_t *len, size_t *cap,
                            const char *s) {
   if (!buf || !len || !cap || !s)
@@ -100,7 +106,8 @@ static void ny_pkgconfig_append_cflags(const char *pkg, char ***args,
     }
   }
   char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>/dev/null", pkg);
+  snprintf(cmd, sizeof(cmd), "pkg-config --cflags %s 2>%s", pkg,
+           NY_FFI_NULL_DEVICE);
   FILE *f = popen(cmd, "r");
   if (!f)
     return;
@@ -271,7 +278,8 @@ static char *ny_pkgconfig_lib(const char *pkg) {
   }
   /* "pkg-config --libs-only-l <pkg>" returns e.g. "-lasound\n" */
   char cmd[256];
-  snprintf(cmd, sizeof(cmd), "pkg-config --libs-only-l %s 2>/dev/null", pkg);
+  snprintf(cmd, sizeof(cmd), "pkg-config --libs-only-l %s 2>%s", pkg,
+           NY_FFI_NULL_DEVICE);
   FILE *f = popen(cmd, "r");
   if (!f)
     return NULL;
@@ -346,6 +354,10 @@ static char *ny_autolink_resolve(const char *header_path) {
   const ny_autolink_entry_t *e = ny_ffi_header_entry(header_path);
   if (!e)
     return NULL;
+#ifdef __APPLE__
+  if (e->fallback_lib && strcmp(e->fallback_lib, "libvulkan.so.1") == 0)
+    return strdup("libMoltenVK.dylib");
+#endif
   char *lib = ny_pkgconfig_lib(e->pkg_config);
   if (lib)
     return lib;
@@ -862,6 +874,7 @@ static void ny_ffi_register_int_constant(ffi_context *ctx, const char *name,
   b.value = tagged;
   b.raw_int_value = raw;
   b.is_stable = true;
+  b.owned = true;
   b.is_int_direct = true;
   b.is_int_raw_direct = true;
   b.type_name = "int";
@@ -1284,6 +1297,7 @@ static bool ny_ffi_register_layout_type(ffi_context *ctx, const char *name,
   def->name = ny_strdup(name);
   def->llvm_type = st;
   def->is_layout = true;
+  def->heap_allocated = true;
   def->size = (size_t)c_size;
   def->align = (size_t)c_align;
   vec_push(&ctx->cg->layouts, def);

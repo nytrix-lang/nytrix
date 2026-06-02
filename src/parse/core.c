@@ -563,12 +563,22 @@ void parser_init_with_arena_quiet(parser_t *p, const char *src,
   parser_init_with_arena_opts(p, src, filename, arena_ptr, true);
 }
 
+static arena_t *parser_new_owned_arena(void) {
+  arena_t *arena = (arena_t *)malloc(sizeof(*arena));
+  if (!arena) {
+    fprintf(stderr, "oom\n");
+    exit(1);
+  }
+  memset(arena, 0, sizeof(*arena));
+  return arena;
+}
+
 void parser_init(parser_t *p, const char *src, const char *filename) {
-  parser_init_with_arena(p, src, filename, NULL);
+  parser_init_with_arena(p, src, filename, parser_new_owned_arena());
 }
 
 void parser_init_quiet(parser_t *p, const char *src, const char *filename) {
-  parser_init_with_arena_opts(p, src, filename, NULL, true);
+  parser_init_with_arena_opts(p, src, filename, parser_new_owned_arena(), true);
 }
 
 void parser_global_cleanup(void) {

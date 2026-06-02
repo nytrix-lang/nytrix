@@ -164,6 +164,27 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
 }
 
 /* ── stdlib token check ────────────────────────────────────────────── */
+static void ny_diag_norm_path(char *dst, size_t dst_len, const char *src) {
+  if (!dst || dst_len == 0)
+    return;
+  dst[0] = '\0';
+  if (!src)
+    return;
+  size_t i = 0;
+  for (; src[i] && i + 1 < dst_len; ++i)
+    dst[i] = src[i] == '\\' ? '/' : src[i];
+  dst[i] = '\0';
+}
+
+static bool ny_diag_path_has_prefix(const char *path, const char *prefix) {
+  if (!path || !prefix || !*prefix)
+    return false;
+  size_t n = strlen(prefix);
+  if (strncmp(path, prefix, n) != 0)
+    return false;
+  return path[n] == '\0' || path[n] == '/';
+}
+
 bool ny_is_stdlib_tok(token_t tok) {
   const char *filename = diag_token_filename(tok);
   if (!filename)
@@ -173,11 +194,22 @@ bool ny_is_stdlib_tok(token_t tok) {
     res = strcmp(filename, "<stdlib>") == 0 || strcmp(filename, "<repl_std>") == 0;
   } else {
     char norm[4096];
-    size_t i = 0;
-    for (; filename[i] && i + 1 < sizeof(norm); ++i)
-      norm[i] = filename[i] == '\\' ? '/' : filename[i];
-    norm[i] = '\0';
+    ny_diag_norm_path(norm, sizeof(norm), filename);
+    char root_lib[4096];
+    const char *root = ny_src_root();
+    if (root && *root) {
+      char norm_root[4096];
+      ny_diag_norm_path(norm_root, sizeof(norm_root), root);
+      snprintf(root_lib, sizeof(root_lib), "%s/lib", norm_root);
+    } else {
+      root_lib[0] = '\0';
+    }
     if (strncmp(norm, "lib/", 4) == 0 ||
+        (root_lib[0] && ny_diag_path_has_prefix(norm, root_lib)) ||
+        strstr(norm, "/lib/core/") != NULL ||
+        strstr(norm, "/lib/math/") != NULL ||
+        strstr(norm, "/lib/os/") != NULL ||
+        strstr(norm, "/lib/parse/") != NULL ||
         strstr(norm, "/nytrix/lib/") != NULL ||
         strstr(norm, "/nytrix/nytrix/lib/") != NULL ||
         strstr(norm, "std.ny") != NULL ||

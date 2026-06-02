@@ -6,6 +6,17 @@
 #include <string.h>
 #if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
 #include <immintrin.h>
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__has_include)
+#if __has_include(<cpuid.h>)
+#include <cpuid.h>
+#define NY_SIMMD_HAS_CPUID_H 1
+#endif
+#else
+#include <cpuid.h>
+#define NY_SIMMD_HAS_CPUID_H 1
+#endif
+#endif
 #endif
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include <arm_acle.h>
@@ -26,6 +37,39 @@ static uint64_t rt_simmd_u64(int64_t v) {
 
 static int64_t rt_simmd_tag_u64(uint64_t v) {
   return rt_tag_v((int64_t)v);
+}
+
+static int rt_simmd_x86_cpuid(unsigned leaf, unsigned subleaf, unsigned *eax, unsigned *ebx,
+                              unsigned *ecx, unsigned *edx) {
+#if defined(NY_SIMMD_HAS_CPUID_H)
+  unsigned sig = 0;
+  unsigned base = leaf & UINT32_C(0x80000000);
+  if (__get_cpuid_max(base, &sig) < leaf)
+    return 0;
+  (void)sig;
+  __cpuid_count(leaf, subleaf, *eax, *ebx, *ecx, *edx);
+  return 1;
+#else
+  (void)leaf;
+  (void)subleaf;
+  (void)eax;
+  (void)ebx;
+  (void)ecx;
+  (void)edx;
+  return 0;
+#endif
+}
+
+static int rt_simmd_x86_has_lzcnt(void) {
+  unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+  return rt_simmd_x86_cpuid(UINT32_C(0x80000001), 0, &eax, &ebx, &ecx, &edx) &&
+         ((ecx & (UINT32_C(1) << 5)) != 0);
+}
+
+static int rt_simmd_x86_has_sha(void) {
+  unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+  return rt_simmd_x86_cpuid(7, 0, &eax, &ebx, &ecx, &edx) &&
+         ((ebx & (UINT32_C(1) << 29)) != 0);
 }
 
 int64_t rt_simmd_has_feature(int64_t name_v) {
@@ -59,7 +103,7 @@ int64_t rt_simmd_has_feature(int64_t name_v) {
   if (rt_simmd_str_eq_lit(name_v, "bmi2"))
     return __builtin_cpu_supports("bmi2") ? NY_IMM_TRUE : NY_IMM_FALSE;
   if (rt_simmd_str_eq_lit(name_v, "lzcnt"))
-    return __builtin_cpu_supports("lzcnt") ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return rt_simmd_x86_has_lzcnt() ? NY_IMM_TRUE : NY_IMM_FALSE;
   if (rt_simmd_str_eq_lit(name_v, "fma"))
     return __builtin_cpu_supports("fma") ? NY_IMM_TRUE : NY_IMM_FALSE;
   if (rt_simmd_str_eq_lit(name_v, "popcnt"))
@@ -69,7 +113,7 @@ int64_t rt_simmd_has_feature(int64_t name_v) {
   if (rt_simmd_str_eq_lit(name_v, "pclmul") || rt_simmd_str_eq_lit(name_v, "pclmulqdq"))
     return __builtin_cpu_supports("pclmul") ? NY_IMM_TRUE : NY_IMM_FALSE;
   if (rt_simmd_str_eq_lit(name_v, "sha"))
-    return __builtin_cpu_supports("sha") ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return rt_simmd_x86_has_sha() ? NY_IMM_TRUE : NY_IMM_FALSE;
 #else
   if (rt_simmd_str_eq_lit(name_v, "sse2"))
     return NY_IMM_TRUE;

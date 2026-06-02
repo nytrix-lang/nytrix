@@ -860,6 +860,13 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     body = p_parse_block(p);
   } else {
     /* Braceless single-expression body: fn f(x) expr */
+    if (p->cur.kind == NY_T_EOF || p->cur.line > p->prev.line) {
+      parser_error(p, p->cur, "expected function body",
+                   "use '{ ... }', '= expr', or ';' for declarations");
+      vec_free(&params);
+      stmt_free_members(fn_stmt);
+      return NULL;
+    }
     token_t body_tok = p->cur;
     expr_t *e = p_parse_expr(p, 0);
     stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, body_tok);
