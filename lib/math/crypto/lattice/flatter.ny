@@ -5239,7 +5239,8 @@ fn _qr_q_matrix(list<list<f64>>: q_cols, int: rows, int: cols): any {
       __list_set_len(row, cols)
       mut j = 0
       while(j < cols){
-         row[j] = q_cols[j][i]
+         def list<f64>: q_col = q_cols.get(j)
+         row[j] = q_col[i]
          j += 1
       }
       q_rows[i] = row
@@ -5281,11 +5282,12 @@ fn _qr_orthogonality_error(list<list<f64>>: q_cols): f64 {
    mut f64: worst = 0.0
    mut int: i = 0
    while(i < q_cols.len){
-      def list<f64>: qi = q_cols[i]
+      def list<f64>: qi = q_cols.get(i)
       mut int: j = i
       while(j < q_cols.len){
          def f64: target = i == j ? 1.0 : 0.0
-         def f64: e = abs(_qr_dot(qi, q_cols[j]) - target)
+         def list<f64>: qj = q_cols.get(j)
+         def f64: e = abs(_qr_dot(qi, qj) - target)
          if(e > worst){ worst = e }
          j += 1
       }
@@ -5449,7 +5451,7 @@ fn qr_factor_report(any: basis): dict {
       mut v = _qr_col(a, k)
       mut int: j = 0
       while(j < k){
-         def list<f64>: qj = q_cols[j]
+         def list<f64>: qj = q_cols.get(j)
          def f64: rjk = _qr_dot(qj, v)
          def list<f64>: rr = r_rows[j]
          rr[k] = rjk
@@ -5504,7 +5506,7 @@ fn qr_reorthogonalized_factor_report(any: basis, int: passes=2): dict {
       while(pass < active_passes){
          mut int: j = 0
          while(j < k){
-            def list<f64>: qj = q_cols[j]
+            def list<f64>: qj = q_cols.get(j)
             def f64: rjk = _qr_dot(qj, v)
             def list<f64>: rr = r_rows[j]
             rr[k] = rr[k] + rjk

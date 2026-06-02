@@ -591,7 +591,7 @@ impl int {
    operator ^^ bigint: bigint = xor_bigint
 }
 
-def BF_SCALE = bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+def BF_SCALE = __bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
 
 fn bf_zero(): bigint {
    "Returns the BigFloat value 0."

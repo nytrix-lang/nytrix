@@ -6190,7 +6190,8 @@ fn _gf2_independent_basis_report(list: candidates, int: width=0): dict {
          mut p = _gf2_vec_pivot(red)
          while(p >= 0 && p < pivot_index.len && int(pivot_index[p]) >= 0){
             def idx = int(pivot_index[p])
-            _gf2_xor_vec_into(red, reduced_rows[idx], w)
+            def list: reduced_row = reduced_rows.get(idx)
+            _gf2_xor_vec_into(red, reduced_row, w)
             reduction_xors += 1
             p = _gf2_vec_pivot(red)
          }

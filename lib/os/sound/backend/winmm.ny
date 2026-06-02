@@ -8,8 +8,17 @@ use std.os.time
 use std.os.sound.backend.shared as backend_shared
 
 #windows {
+   #link "winmm"
    #include <windows.h>
    #include <mmsystem.h>
+   extern "" {
+      fn waveOutOpen(ptr: _phwo, u32: _uDeviceID, ptr: _pwfx, ptr: _dwCallback, ptr: _dwInstance, u32: _fdwOpen): u32
+      fn waveOutClose(ptr: _hwo): u32
+      fn waveOutPrepareHeader(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
+      fn waveOutUnprepareHeader(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
+      fn waveOutWrite(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
+      fn waveOutReset(ptr: _hwo): u32
+   }
 } #else {
    fn waveOutOpen(any: _phwo, any: _uDeviceID, any: _pwfx, any: _dwCallback, any: _dwInstance, any: _fdwOpen): int {
       "Stubbed non-Windows implementation of `waveOutOpen`."

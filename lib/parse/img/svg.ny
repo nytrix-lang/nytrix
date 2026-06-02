@@ -3,7 +3,7 @@
 module std.parse.img.svg(decode, load_path, available, last_error, backend_name)
 use std.core
 use std.core.mem
-use std.core.dict_mod (dict_write)
+use std.core.dict_mod as dict_mod
 use std.os (env, file_exists)
 use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call1, call1_void, call2, call2_void, call3)
 use std.core.str as str
@@ -13,6 +13,23 @@ if(comptime{ __os_name() == "linux" || __os_name() == "macos" }){
    #include <librsvg-2.0/librsvg/rsvg.h> as "rsvg_"
    #include <cairo/cairo.h> as "cairo_"
 }
+
+#windows {
+   fn rsvg_handle_new_from_data(..._args): any { 0 }
+   fn rsvg_handle_new_from_file(..._args): any { 0 }
+   fn rsvg_handle_get_dimensions(..._args): any { 0 }
+   fn rsvg_handle_render_cairo(..._args): int { 0 }
+   fn cairo_image_surface_create(..._args): any { 0 }
+   fn cairo_image_surface_get_stride(any: _surface): int { 0 }
+   fn cairo_image_surface_get_data(any: _surface): any { 0 }
+   fn cairo_surface_flush(any: _surface): any { 0 }
+   fn cairo_surface_destroy(any: _surface): any { 0 }
+   fn cairo_create(any: _surface): any { 0 }
+   fn cairo_destroy(any: _cr): any { 0 }
+   fn cairo_set_operator(any: _cr, any: _op): any { 0 }
+   fn cairo_paint(any: _cr): any { 0 }
+   fn cairo_scale(any: _cr, any: _sx, any: _sy): any { 0 }
+} #endif
 
 def _CAIRO_FORMAT_ARGB32 = 0
 def _CAIRO_OPERATOR_CLEAR = 0
@@ -227,10 +244,10 @@ fn _svg_decode_surface(any: surface, any: svg_handle, any: out_w, any: out_h, an
    _svg_g_object_unref(svg_handle)
    def rgba = init_str(out_ptr, out_len)
    mut out = dict(4)
-   out = dict_write(out, "data", rgba)
-   out = dict_write(out, "width", w)
-   out = dict_write(out, "height", h)
-   out = dict_write(out, "channels", 4)
+   out = dict_mod.dict_write(out, "data", rgba)
+   out = dict_mod.dict_write(out, "width", w)
+   out = dict_mod.dict_write(out, "height", h)
+   out = dict_mod.dict_write(out, "channels", 4)
    _svg_last_error = ""
    out
 }

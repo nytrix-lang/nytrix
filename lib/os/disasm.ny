@@ -395,7 +395,7 @@ fn arithmetic_operator(str: mnemonic): str {
    if(startswith(m, "add")){ return "+" }
    if(startswith(m, "sub")){ return "-" }
    if(startswith(m, "imul") || startswith(m, "mul")){ return "*" }
-   if(startswith(m, "xor") || startswith(m, "eor")){ return "^" }
+   if(startswith(m, "xor") || startswith(m, "eor")){ return "^^" }
    if(startswith(m, "and")){ return "&" }
    if(startswith(m, "or") || startswith(m, "orr")){ return "|" }
    if(startswith(m, "neg")){ return "neg" }

@@ -598,7 +598,7 @@ fn _cvp_gso_mu_profile(list: basis): dict {
 
 fn _cvp_gso_mu_profile_prefix(list: basis, int: limit): dict {
    def n = min(basis.len, max(0, limit + 1))
-   mut bstar = []
+   mut bstar = list(0)
    mut mu = []
    mut i = 0
    while(i < n){
@@ -606,7 +606,7 @@ fn _cvp_gso_mu_profile_prefix(list: basis, int: limit): dict {
       mut mu_row = []
       mut j = 0
       while(j < i){
-         def bj = bstar[j]
+         def list<f64>: bj = bstar.get(j)
          def den = _cvp_f64_dot(bj, bj)
          def den_zero = den == 0.0
          def muij = den_zero ? 0.0 : _cvp_f64_dot(v, bj) / den
@@ -621,7 +621,8 @@ fn _cvp_gso_mu_profile_prefix(list: basis, int: limit): dict {
    mut norms = []
    i = 0
    while(i < bstar.len){
-      norms = norms.append(_cvp_f64_dot(bstar[i], bstar[i]))
+      def list<f64>: row = bstar.get(i)
+      norms = norms.append(_cvp_f64_dot(row, row))
       i += 1
    }
    {

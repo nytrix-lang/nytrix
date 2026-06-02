@@ -133,6 +133,25 @@ fn run(str: path, list: args): int {
 fn popen(str: path, list: args): any {
    "Starts `path` with stdin/stdout pipes(stderr merged) and returns `[pid, child_stdin_fd, child_stdout_fd]`; returns `0` on setup failure."
    mut rpath = _resolve_cmd(path)
+   #windows {
+      def argv = _build_argv(path, rpath, args)
+      if(argv == 0){ return 0 }
+      defer { free(argv) }
+      def fds = malloc(8)
+      if(fds == 0){ return 0 }
+      defer { free(fds) }
+      def pid = __spawn_pipe(rpath, argv, fds)
+      if(pid <= 0){ return 0 }
+      def stdin_write = load32(fds, 0)
+      def stdout_read = load32(fds, 4)
+      if(stdin_write < 0 || stdout_read < 0){
+         sys_close_quiet(stdin_write)
+         sys_close_quiet(stdout_read)
+         return 0
+      }
+      return [pid, stdin_write, stdout_read]
+   }
+   #endif
    def n = args.len
    def p_stdin = malloc(8)
    def p_stdout = malloc(8)
