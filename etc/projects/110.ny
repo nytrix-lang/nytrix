@@ -3,6 +3,7 @@
 ;; Rule 110 - https://en.wikipedia.org/wiki/Rule_110
 use std.core
 use std.core.term
+use std.os.time
 use std.math.crypto.encoding.bytes
 
 def CHAR_FULL = "█"
@@ -39,7 +40,7 @@ def prefix_len  = 7
 mut w = (tW - prefix_len) / (SX * 2)
 
 if(w < 1){ w = 1 }
-mut batch_output = f"Terminal Size: {tW}x{tH} | Displaying: {target_gens} Generations\n"
+write_str(f"Terminal Size: {tW}x{tH} | Displaying: {target_gens} Generations\n")
 mut u = bytes(w)
 bytes_set(u, w - 1, 1)
 def block = "██"
@@ -64,9 +65,8 @@ while(gen < target_gens){
       else { line = line + space }
       i2 -= 1
    }
-   batch_output = batch_output + line + "\n"
+   write_str(line + "\n")
+   msleep(100)
    u = step(u, w)
    gen += 1
 }
-
-write_str(batch_output)

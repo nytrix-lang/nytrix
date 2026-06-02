@@ -172,12 +172,10 @@ assert(empty.len == 0, "empty string")
 if(__main()){
    def s = "   "
    def stripped = strip(s)
-   print(f"DEBUG: strip('   ') len = {stripped.len}")
    assert(stripped.len == 0, "strip whitespace")
 }
 
 mut l = list(0)
-print(f"DEBUG: empty list len = {l.len}")
 assert(l.len == 0, "empty list")
 mut i = 0
 while(i < 100){
