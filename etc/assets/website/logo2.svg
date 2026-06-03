@@ -1,27 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Nytrix logo</title>
+  <desc id="desc">A minimal monochrome purple citrus slice.</desc>
   <defs>
-    <path id="n-path" d="M 20,20 H 36 V 52 L 64,20 H 80 V 80 H 64 V 48 L 36,80 H 20 Z"/>
-
-    <clipPath id="inside-n-clip">
-      <use href="#n-path" />
-    </clipPath>
-
-    <clipPath id="center-intersection-clip">
-      <rect x="36" y="20" width="28" height="60" />
-    </clipPath>
+    <style>
+      :root { color: #7f77dd; }
+      .pulp {
+        fill: #17142a;
+      }
+      .line {
+        fill: none;
+        stroke: #6f68cf;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .outline {
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .spoke {
+        fill: none;
+        stroke: #6f68cf;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .bubble {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 3;
+      }
+      .bubble-small {
+        fill: currentColor;
+      }
+      .bubble-glint {
+        fill: currentColor;
+      }
+    </style>
   </defs>
 
-  <g transform="translate(100 0) scale(-1 1)">
-    <rect width="100" height="100" fill="#000000" rx="16"/>
+  <g class="bubbles">
+    <circle class="bubble-small" cx="248" cy="142" r="2.4" />
+    <circle class="bubble" cx="306" cy="88" r="4.7" />
+    <circle class="bubble-small" cx="326" cy="221" r="3" />
+    <circle class="bubble" cx="362" cy="158" r="5.8" />
+    <circle class="bubble-small" cx="384" cy="58" r="2.6" />
+    <circle class="bubble" cx="416" cy="134" r="10.8" />
+    <circle class="bubble-glint" cx="411" cy="129" r="2" />
+    <circle class="bubble-small" cx="442" cy="210" r="3.1" />
+    <circle class="bubble" cx="456" cy="88" r="5" />
+  </g>
 
-    <g clip-path="url(#inside-n-clip)">
-      <line id="purple-line" x1="20" y1="20" x2="80" y2="80" stroke="#B8B0FF" stroke-width="12" stroke-linecap="square"/>
-    </g>
+  <g transform="translate(256 256) scale(1.58) translate(-256 -256)">
+    <g transform="translate(512 0) scale(-1 1) rotate(-34 256 264)">
+      <path
+        class="pulp"
+        d="M110 228
+           H402
+           A146 146 0 0 1 110 228
+           Z" />
 
-    <use href="#n-path" fill="#F0F0FF" />
+      <g class="spoke" stroke-width="4.1">
+        <path d="M256 229 L141 259" />
+        <path d="M256 229 L172 313" />
+        <path d="M256 229 L256 347" />
+        <path d="M256 229 L340 313" />
+        <path d="M256 229 L371 259" />
+      </g>
 
-    <g clip-path="url(#center-intersection-clip)">
-      <use href="#purple-line" />
+      <path
+        class="line"
+        stroke-width="5.2"
+        d="M137 228
+           A119 119 0 0 0 375 228" />
+
+      <circle class="pulp" cx="256" cy="229" r="4.4" />
+
+      <path
+        class="outline"
+        stroke-width="10.8"
+        d="M110 228
+           H402
+           A146 146 0 0 1 110 228
+           Z" />
     </g>
   </g>
 </svg>

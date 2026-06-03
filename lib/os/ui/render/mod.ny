@@ -2673,6 +2673,7 @@ fn begin_frame(): bool {
 
 fn begin_frame_clear(any: color=BLACK): bool {
    "Begins a new frame and clears the background with the specified color."
+   set_clear_color(color)
    if(begin_drawing()){
       clear_background(color)
       return true

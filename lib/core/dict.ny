@@ -129,21 +129,19 @@ fn dict_write(dict: d, any: key, any: val): dict {
    if(!is_dict(d)){ return d }
    def tc = __load64_idx(d, 0)
    def tca = __load64_idx(d, 8)
-   if((tc + 1) * 2 > tca){
+   mut off = _dict_find_off(d, key)
+   if(off >= 0 && __load64_idx(d, off + 16) == 1){
+      __store64_idx(d, off + 8, val)
+      return d
+   }
+   if(off < 0 || (tc + 1) * 2 > tca){
       mut nd = _dict_resize(d)
       return dict_write(nd, key, val)
    }
-   def off = _dict_find_off(d, key)
-   if(off < 0){ panic("Dictionary overflow") }
-   def state = __load64_idx(d, off + 16)
-   if(state != 1){
-      __store64_idx(d, off, key)
-      __store64_idx(d, off + 8, val)
-      __store64_idx(d, off + 16, 1)
-      __store64_idx(d, 0, tc + 1) ; Increment tagged count
-   } else {
-      __store64_idx(d, off + 8, val)
-   }
+   __store64_idx(d, off, key)
+   __store64_idx(d, off + 8, val)
+   __store64_idx(d, off + 16, 1)
+   __store64_idx(d, 0, tc + 1) ; Increment tagged count
    d
 }
 

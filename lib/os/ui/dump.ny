@@ -4,6 +4,7 @@ module std.os.ui.dump(safe_name, root_dir, path_named, snapshot_path, parse_skip
 use std.core
 use std.core.str as str
 use std.core.common as common
+use std.os.path as path
 
 fn safe_name(any: name): str {
    mut out = str.str_replace(to_str(name), "/", "_")
@@ -16,7 +17,7 @@ fn root_dir(any: cli_dump_dir=""): str {
    def cli = to_str(cli_dump_dir)
    if(cli.len > 0){ return cli }
    def env_dir = common.env_trim("NY_UI_DUMP_DIR")
-   env_dir.len > 0 ? env_dir : "build/cache/probe/fb"
+   env_dir.len > 0 ? env_dir : path.join(path.cache_dir(), "probe/fb")
 }
 
 fn path_named(any: name, any: cli_dump_dir=""): str { root_dir(cli_dump_dir) + "/" + safe_name(name) }

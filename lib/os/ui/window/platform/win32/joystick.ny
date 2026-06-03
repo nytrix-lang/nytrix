@@ -56,7 +56,7 @@ def _DINPUT_DIJOYSTATE_SIZE = 80
 def _DINPUT_DIDEVCAPS_SIZE = 44
 def _DINPUT_DIPROPDWORD_SIZE = 20
 def _DINPUT_DIPROPRANGE_SIZE = 24
-def _DINPUT_DIDFT_ABSAXIS = 0x00000002
+def _DINPUT_DIDF_ABSAXIS = 0x00000001
 def _DINPUT_DIDFT_AXIS = 0x00000003
 def _DINPUT_DIDFT_BUTTON = 0x0000000c
 def _DINPUT_DIDFT_POV = 0x00000010
@@ -122,7 +122,6 @@ def HAT_LEFT_DOWN = 12
 def JOYSTICK_POLL_COALESCE_NS = 8000000
 def WINMM_RESCAN_INTERVAL_NS = 250000000
 mut _initialized = false
-mut _windows_mappings_loaded = false
 mut _joysticks = dict(8)
 mut _joystick_callback = 0
 mut _last_poll_ticks = 0
@@ -148,12 +147,6 @@ mut _dinput_enum_axis_count = 0
 mut _dinput_enum_slider_count = 0
 mut _dinput_enum_button_count = 0
 mut _dinput_enum_pov_count = 0
-
-def _WINDOWS_DINPUT_MAPPING_FIXUPS =
-   "030000004c050000e60c000000000000,PS5 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:b6,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:b7,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,\n" +
-   "030000004c050000e60c000011810000,PS5 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:b6,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:b7,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,\n" +
-   "050000004c050000e60c000000810000,PS5 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:b6,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:b7,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,\n" +
-   "030000004c050000cc09000011810000,PS4 Controller,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:b6,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:b7,rightx:a2,righty:a5,start:b9,x:b0,y:b3,platform:Windows,\n"
 
 fn _has_native_support(): bool {
    #windows { return true }
@@ -197,10 +190,6 @@ fn _invoke_callback(int: jid, int: event): any {
 
 fn _ensure_windows_mappings(): bool {
    gamepad_map.init_default_windows_mappings()
-   if(!_windows_mappings_loaded){
-      gamepad_map.update_mappings(_WINDOWS_DINPUT_MAPPING_FIXUPS, "Windows")
-      _windows_mappings_loaded = true
-   }
    true
 }
 
@@ -303,7 +292,7 @@ fn _dinput_build_data_format(): bool {
    }
    store32(_dinput_data_format, _DINPUT_DIDATAFORMAT_SIZE, 0)
    store32(_dinput_data_format, _DINPUT_DIOBJECTDATAFORMAT_SIZE, 4)
-   store32(_dinput_data_format, _DINPUT_DIDFT_ABSAXIS, 8)
+   store32(_dinput_data_format, _DINPUT_DIDF_ABSAXIS, 8)
    store32(_dinput_data_format, _DINPUT_DIJOYSTATE_SIZE, 12)
    store32(_dinput_data_format, _DINPUT_MAX_OBJECT_FORMATS, 16)
    store64_h(_dinput_data_format, _dinput_object_formats, 24)
@@ -441,6 +430,22 @@ fn _normalize_dinput_axis(any: v): f64 {
    if(out < -1.0){ out = -1.0 }
    if(out > 1.0){ out = 1.0 }
    out
+}
+
+fn _normalize_dinput_axis_unsigned(any: v): f64 {
+   mut raw = int(v) & 0xffffffff
+   if(raw > 65535){ raw = 65535 }
+   mut out = float(raw) / 32767.5 - 1.0
+   if(out < -1.0){ out = -1.0 }
+   if(out > 1.0){ out = 1.0 }
+   out
+}
+
+fn _normalize_dinput_axis_for_js(any: js, any: v): f64 {
+   if(js && js.get("dinput_unsigned_axes", false)){
+      return _normalize_dinput_axis_unsigned(v)
+   }
+   _normalize_dinput_axis(v)
 }
 
 fn _hex_nibble(any: n): str {
@@ -612,28 +617,6 @@ fn _dinput_guid_instance_seen(any: guid): bool {
    false
 }
 
-fn _dinput_is_dualsense(any: js): bool {
-   if(!js){ return false }
-   def guid = str.lower(to_str(js.get("guid", "")))
-   def name = str.lower(to_str(js.get("name", "")))
-   str.find(guid, "4c050000e60c") >= 0 ||
-      str.find(name, "dualsense") >= 0 ||
-      str.find(name, "ps5") >= 0 ||
-      str.find(name, "wireless controller") >= 0
-}
-
-fn _first_present_winmm_jid(): int {
-   def info = _scratch_winmm_info()
-   if(!info){ return -1 }
-   def count = int(joyGetNumDevs())
-   mut native_jid = 0
-   while(native_jid < count && native_jid < _WINMM_MAX_SLOTS){
-      if(_read_winmm_state(native_jid, info)){ return native_jid }
-      native_jid += 1
-   }
-   -1
-}
-
 fn _dinput_connected_count(): int {
    mut n = 0
    mut jid = _DINPUT_BASE_JID
@@ -681,9 +664,7 @@ fn _dinput_sort_objects(list: objs): list {
 fn _dinput_axis_offset(any: guid): int {
    def data1 = load32(guid, 0) & 0xffffffff
    if(data1 == 0xa36d02e4){
-      def off = _DINPUT_DIJOFS_SLIDER0 + _dinput_enum_slider_count * 4
-      _dinput_enum_slider_count += 1
-      return off
+      return _DINPUT_DIJOFS_SLIDER0 + _dinput_enum_slider_count * 4
    }
    if(data1 == 0xa36d02e0){ return _DINPUT_DIJOFS_X }
    if(data1 == 0xa36d02e1){ return _DINPUT_DIJOFS_Y }
@@ -753,10 +734,11 @@ fn _dinput_object_cb(ptr: doi, ptr: user): i32 {
       def guid = doi + 4
       def offset = _dinput_axis_offset(guid)
       if(offset < 0){ return _DINPUT_DIENUM_CONTINUE }
-      _dinput_set_axis_range(_dinput_enum_device, raw_type)
+      if(!_dinput_set_axis_range(_dinput_enum_device, raw_type)){ return _DINPUT_DIENUM_CONTINUE }
       def obj_type = (offset == _DINPUT_DIJOFS_SLIDER0 || offset == _DINPUT_DIJOFS_SLIDER0 + 4) ?
          _DINPUT_TYPE_SLIDER : _DINPUT_TYPE_AXIS
       if(obj_type == _DINPUT_TYPE_AXIS){ _dinput_enum_axis_count += 1 }
+      else { _dinput_enum_slider_count += 1 }
       _dinput_append_object(obj_type, offset)
    } elif((typ & _DINPUT_DIDFT_BUTTON) != 0){
       _dinput_append_object(_DINPUT_TYPE_BUTTON, _DINPUT_DIJOFS_BUTTON0 + _dinput_enum_button_count)
@@ -795,20 +777,6 @@ fn _alloc_dinput_js(int: jid, any: dev, any: di, any: objects): any {
    memcpy(guid_ptr, di + 4, _DINPUT_GUID_SIZE)
    def name_raw = _utf16_name(di, 40, 260)
    def name = name_raw.len > 0 ? name_raw : "DirectInput Controller"
-   mut winmm_shadow_jid = -1
-   mut info_ptr = 0
-   if(str.find(str.lower(name), "dualsense") >= 0 ||
-      str.find(str.lower(name), "wireless controller") >= 0){
-      winmm_shadow_jid = _first_present_winmm_jid()
-      if(winmm_shadow_jid >= 0){
-         info_ptr = malloc(_WINMM_JOYINFOEX_SIZE)
-         if(info_ptr && !_read_winmm_state(winmm_shadow_jid, info_ptr)){
-            free(info_ptr)
-            info_ptr = 0
-            winmm_shadow_jid = -1
-         }
-      }
-   }
    {
       "connected": true,
       "jid": jid,
@@ -825,12 +793,8 @@ fn _alloc_dinput_js(int: jid, any: dev, any: di, any: objects): any {
       "kind": "dinput",
       "platform": "Windows",
       "device": dev,
-      "info_ptr": info_ptr,
-      "winmm_shadow_jid": winmm_shadow_jid,
-      "winmm_samples": 0,
       "objects": objects,
-      "object_count": objects.len,
-      "warmup": 4
+      "object_count": objects.len
    }
 }
 
@@ -923,64 +887,31 @@ fn _dinput_device_state(any: dev, any: state): int {
    int(ffi.call3(_dinput_method(dev, 9), dev, _DINPUT_DIJOYSTATE_SIZE, state))
 }
 
-fn _dinput_mapping_axis_element(any: js, int: slot): any {
-   def mapping = gamepad_map.find_valid_mapping(js)
-   if(!mapping){ return 0 }
-   def axes = mapping.get("axes", 0)
-   if(!axes){ return 0 }
-   def e = axes.get(slot, 0)
-   if(!e || !is_list(e) || e.len < 4){ return 0 }
-   if(e[0] != 1 || e[2] != 1.0 || e[3] != 0.0){ return 0 }
-   e
-}
-
-fn _dinput_calibrate_centered_trigger_axis(any: js, int: slot): any {
-   def e = _dinput_mapping_axis_element(js, slot)
-   if(!e){ return nil }
-   def idx = int(e[1])
-   def axes_ptr = js.get("axes_ptr", 0)
-   def axis_count = int(js.get("axis_count", 0))
-   if(!axes_ptr || idx < 0 || idx >= axis_count){ return nil }
-   def v = load32_f32(axes_ptr, idx * 4)
-   def key = "centered_trigger_axis_" + to_str(idx)
-   def count_key = key + "_samples"
-   if(v < -0.45){
-      js[key] = false
-      js[count_key] = 0
-      return nil
-   }
-   if(v > -0.15 && v < 0.15){
-      def samples = int(js.get(count_key, 0)) + 1
-      js[count_key] = samples
-      if(samples >= 3){ js[key] = true }
-   }
-}
-
-fn _dinput_calibrate_centered_triggers(any: js): any {
-   _dinput_calibrate_centered_trigger_axis(js, 4)
-   _dinput_calibrate_centered_trigger_axis(js, 5)
-}
-
-fn _dinput_state_is_startup_min_glitch(any: state, any: objects): bool {
-   if(!state || !objects){ return false }
+fn _dinput_detect_unsigned_axes(any: js, any: state, any: objects): any {
+   if(!js || !state || !objects || js.get("dinput_axis_mode_known", false)){ return nil }
    mut axes = 0
-   mut all_min = true
+   mut negative = 0
+   mut centerish = 0
    mut i = 0
    while(i < objects.len){
       def obj = objects[i]
       def typ = int(obj.get("type", 0))
-      def offset = int(obj.get("offset", 0))
       if(typ == _DINPUT_TYPE_AXIS || typ == _DINPUT_TYPE_SLIDER){
+         def raw = int(load32(state, int(obj.get("offset", 0)))) & 0xffffffff
          axes += 1
-         if(_normalize_dinput_axis(load32(state, offset)) > -0.95){ all_min = false }
-      } elif(typ == _DINPUT_TYPE_BUTTON){
-         if((load8(state, offset) & 0x80) != 0){ return false }
-      } elif(typ == _DINPUT_TYPE_POV){
-         if(_dinput_pov_to_hat(load32(state, offset)) != HAT_CENTERED){ return false }
+         if(raw > 65535 && _signed32(raw) < -1024){ negative += 1 }
+         if(raw >= 20000 && raw <= 45000){ centerish += 1 }
       }
       i += 1
    }
-   axes > 0 && all_min
+   if(axes <= 0){ return nil }
+   if(negative > 0){
+      js["dinput_axis_mode_known"] = true
+      js["dinput_unsigned_axes"] = false
+   } elif(centerish >= 2){
+      js["dinput_axis_mode_known"] = true
+      js["dinput_unsigned_axes"] = true
+   }
 }
 
 fn _update_dinput_js_state(int: jid): any {
@@ -1001,12 +932,7 @@ fn _update_dinput_js_state(int: jid): any {
       return nil
    }
    def objects = js.get("objects", [])
-   def warmup = int(js.get("warmup", 0))
-   if(warmup > 0){
-      js["warmup"] = warmup - 1
-      return nil
-   }
-   if(_dinput_state_is_startup_min_glitch(state, objects)){ return nil }
+   _dinput_detect_unsigned_axes(js, state, objects)
    def ap = js.get("axes_ptr", 0)
    def bp = js.get("buttons_ptr", 0)
    def hp = js.get("hats_ptr", 0)
@@ -1020,7 +946,7 @@ fn _update_dinput_js_state(int: jid): any {
       def offset = int(obj.get("offset", 0))
       if(typ == _DINPUT_TYPE_AXIS || typ == _DINPUT_TYPE_SLIDER){
          if(ap && ai < int(js.get("axis_count", 0))){
-            store32_f32(ap, _normalize_dinput_axis(load32(state, offset)), ai * 4)
+            store32_f32(ap, _normalize_dinput_axis_for_js(js, load32(state, offset)), ai * 4)
          }
          ai += 1
       } elif(typ == _DINPUT_TYPE_BUTTON){
@@ -1037,25 +963,6 @@ fn _update_dinput_js_state(int: jid): any {
       }
       i += 1
    }
-   _dinput_calibrate_centered_triggers(js)
-}
-
-fn _dinput_refresh_winmm_shadow_axes(any: js): bool {
-   if(!js){ return false }
-   def native_jid = int(js.get("winmm_shadow_jid", -1))
-   def info = js.get("info_ptr", 0)
-   def ap = js.get("axes_ptr", 0)
-   if(native_jid < 0 || !info || !ap){ return false }
-   if(!_read_winmm_state(native_jid, info)){ return false }
-   if(int(js.get("axis_count", 0)) < 6){ return false }
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_X)), 0)
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_Y)), 4)
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_Z)), 8)
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_R)), 12)
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_U)), 16)
-   store32_f32(ap, _normalize_winmm_axis(load32(info, _WINMM_JI_V)), 20)
-   js["winmm_samples"] = int(js.get("winmm_samples", 0)) + 1
-   true
 }
 
 fn _pov_to_hat(any: pov): int {
@@ -1393,13 +1300,6 @@ fn _raw_axis(any: axes_ptr, int: axis_count, int: idx): f64 {
    (axes_ptr && idx >= 0 && idx < axis_count) ? load32_f32(axes_ptr, idx * 4) : 0.0
 }
 
-fn _clamp_gamepad_axis(any: v): f64 {
-   def f = float(v)
-   if(f < -1.0){ return -1.0 }
-   if(f > 1.0){ return 1.0 }
-   f
-}
-
 fn _store_standard_button(any: state_ptr, int: dst, any: buttons_ptr, int: button_count, int: src): any {
    store8(state_ptr, _raw_button(buttons_ptr, button_count, src), dst)
 }
@@ -1489,63 +1389,6 @@ fn _apply_standard_hat_buttons(any: js, any: state_ptr): any {
    store8(state_ptr, (hat & HAT_LEFT) != 0 ? 1 : 0, 14)
 }
 
-fn _mapping_trigger_uses_axis(any: js, int: slot): bool {
-   def mapping = gamepad_map.find_valid_mapping(js)
-   if(!mapping){ return false }
-   def axes = mapping.get("axes", 0)
-   if(!axes){ return false }
-   def e = axes.get(slot, 0)
-   e && is_list(e) && e.len >= 2 && int(e[0]) == 1
-}
-
-fn _apply_dinput_button_triggers(any: js, any: state_ptr): any {
-   if(!js || !state_ptr || js.get("kind", "") != "dinput"){ return nil }
-   def buttons_ptr = js.get("buttons_ptr", 0)
-   def button_count = int(js.get("button_count", 0))
-   if(!buttons_ptr || button_count <= 7){ return nil }
-   if(_mapping_trigger_uses_axis(js, 4) &&
-      load32_f32(state_ptr, 32) < -0.75 &&
-      _raw_button(buttons_ptr, button_count, 6) != 0){
-      store32_f32(state_ptr, 1.0, 32)
-   }
-   if(_mapping_trigger_uses_axis(js, 5) &&
-      load32_f32(state_ptr, 36) < -0.75 &&
-      _raw_button(buttons_ptr, button_count, 7) != 0){
-      store32_f32(state_ptr, 1.0, 36)
-   }
-}
-
-fn _centered_trigger_to_gamepad(any: v): f64 {
-   def f = _clamp_gamepad_axis(v)
-   if(f <= -0.25){ return f }
-   _clamp_gamepad_axis(f * 2.0 - 1.0)
-}
-
-fn _apply_dinput_dualsense_axes(any: js, any: state_ptr): any {
-   if(!js || !state_ptr || js.get("kind", "") != "dinput"){ return nil }
-   if(!_dinput_is_dualsense(js)){ return nil }
-   _dinput_refresh_winmm_shadow_axes(js)
-   def axes_ptr = js.get("axes_ptr", 0)
-   def axis_count = int(js.get("axis_count", 0))
-   if(!axes_ptr || axis_count < 6){ return nil }
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 0), 16)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 1), 20)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 2), 24)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 5), 28)
-   store32_f32(state_ptr, _centered_trigger_to_gamepad(_raw_axis(axes_ptr, axis_count, 3)), 32)
-   store32_f32(state_ptr, _centered_trigger_to_gamepad(_raw_axis(axes_ptr, axis_count, 4)), 36)
-   def buttons_ptr = js.get("buttons_ptr", 0)
-   def button_count = int(js.get("button_count", 0))
-   if(buttons_ptr && button_count > 7){
-      if(_raw_button(buttons_ptr, button_count, 6) != 0 && load32_f32(state_ptr, 32) < -0.75){
-         store32_f32(state_ptr, 1.0, 32)
-      }
-      if(_raw_button(buttons_ptr, button_count, 7) != 0 && load32_f32(state_ptr, 36) < -0.75){
-         store32_f32(state_ptr, 1.0, 36)
-      }
-   }
-}
-
 fn get_gamepad_state(int: jid, any: state_ptr): bool {
    if(!joystick_present(jid)){
       if(state_ptr){ memset(state_ptr, 0, 64) }
@@ -1560,8 +1403,6 @@ fn get_gamepad_state(int: jid, any: state_ptr): bool {
       def ok = gamepad_map.get_gamepad_state(js, state_ptr)
       if(ok){
          _apply_standard_hat_buttons(js, state_ptr)
-         _apply_dinput_dualsense_axes(js, state_ptr)
-         _apply_dinput_button_triggers(js, state_ptr)
       }
       return ok
    }

@@ -1506,6 +1506,7 @@ comptime template _native_get_list2_all(name, x11_fn, win32_fn, cocoa_fn){
       if(b == "x11"){ return x11_fn(native) }
       elif(b == "win32"){ return win32_fn(native) }
       elif(b == "cocoa"){ return cocoa_fn(native) }
+      elif(b == "none" && is_dict(native)){ return [native.get("x", 0), native.get("y", 0)] }
       [0, 0]
    }
 }
@@ -1528,6 +1529,12 @@ comptime template _native_set2_all(name, x11_fn, win32_fn, cocoa_fn){
       if(b == "x11"){ x11_fn(native, x, y) }
       elif(b == "win32"){ win32_fn(native, x, y) }
       elif(b == "cocoa"){ cocoa_fn(native, x, y) }
+      elif(b == "none" && is_dict(native)){
+         native["x"] = x
+         native["y"] = y
+         _store_updated_native_window(native)
+         true
+      } else { false }
    }
 }
 
