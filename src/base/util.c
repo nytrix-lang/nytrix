@@ -402,6 +402,36 @@ const char *ny_src_root(void) {
   return ny_cache_path(buf, sizeof(buf), ".");
 }
 
+const char *ny_default_cache_root_dir(void) {
+  static char path[PATH_MAX];
+  const char *override = getenv("NYTRIX_CACHE_DIR");
+  if (override && *override)
+    return ny_cache_path(path, sizeof(path), override);
+
+  const char *src = ny_src_root();
+  const char *xdg = getenv("XDG_CACHE_HOME");
+  if (xdg && *xdg) {
+    ny_join_path(path, sizeof(path), xdg, "nytrix");
+    return path;
+  }
+
+  const char *home = getenv("HOME");
+  if (!home)
+    home = getenv("USERPROFILE");
+  if (home && *home) {
+    ny_join_path(path, sizeof(path), home, ".cache/nytrix");
+    return path;
+  }
+
+  if (src && *src) {
+    ny_join_path(path, sizeof(path), src, "build/cache/nytrix");
+    return path;
+  }
+
+  ny_join_path(path, sizeof(path), ny_get_temp_dir(), "nytrix");
+  return path;
+}
+
 char *ny_strdup(const char *s) {
   if (!s)
     return NULL;

@@ -430,25 +430,11 @@ static time_t ny_std_compute_latest_source_mtime(void) {
 }
 
 static char *ny_std_get_cache_path(void) {
-  const char *override = getenv("NYTRIX_CACHE_DIR");
-  if (override && *override) {
-    static char override_path[1024];
-    snprintf(override_path, sizeof(override_path), "%s/loader.idx", override);
-    return override_path;
-  }
-  const char *root = ny_src_root();
-  if (root && *root) {
-    static char repo_path[1024];
-    snprintf(repo_path, sizeof(repo_path), "%s/build/cache/nytrix/loader.idx", root);
-    return repo_path;
-  }
-  const char *home = getenv("HOME");
-  if (!home)
-    home = getenv("USERPROFILE");
-  if (!home)
-    return NULL;
   static char path[1024];
-  snprintf(path, sizeof(path), "%s/.cache/nytrix/loader.idx", home);
+  const char *root = ny_default_cache_root_dir();
+  if (!root || !*root)
+    return NULL;
+  snprintf(path, sizeof(path), "%s/loader.idx", root);
   return path;
 }
 
@@ -1300,22 +1286,9 @@ static char *resolve_remote_module(const char *url) {
 
   uint64_t h = ny_hash64_cstr(url);
   char cache_dir[1024];
-  const char *override = getenv("NYTRIX_CACHE_DIR");
-  const char *root = ny_src_root();
-  if (override && *override) {
-    snprintf(cache_dir, sizeof(cache_dir), "%s/remote", override);
-  } else if (root && *root) {
-    snprintf(cache_dir, sizeof(cache_dir), "%s/build/cache/nytrix/remote", root);
-  } else {
-    const char *home = getenv("HOME");
-#ifdef _WIN32
-    if (!home)
-      home = getenv("USERPROFILE");
-#endif
-    if (!home)
-      home = ny_get_temp_dir();
-    snprintf(cache_dir, sizeof(cache_dir), "%s/.cache/nytrix/remote", home);
-  }
+  const char *root = ny_default_cache_root_dir();
+  snprintf(cache_dir, sizeof(cache_dir), "%s/remote",
+           root && *root ? root : ny_get_temp_dir());
   ny_ensure_dir_recursive(cache_dir);
 
   char cache_path[1024];

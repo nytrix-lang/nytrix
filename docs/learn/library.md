@@ -28,7 +28,7 @@ Choose the facade that owns the operation:
 | Assertions, strings, containers, terminal output | `std.core` |
 | Files, paths, time, processes, threads | `std.os` |
 | HTTP, sockets, process tubes, transcripts | `std.os.net` |
-| Windows, input, drawing, textures, scenes | `std.os.ui.render` and `std.os.ui.window` |
+| Windows, drawing, input, gamepads, textures, scenes | `std.os.ui.render` and `std.os.ui.window` |
 | JSON, YAML, TOML, CSV, XML, SQL | `std.parse.data` |
 | Images, glTF, meshes | `std.parse.img` and `std.parse.3d` |
 | Number theory, algebra, matrices, SIMD | `std.math` |
@@ -44,7 +44,7 @@ alias if the call sites would otherwise be unclear.
 | Core runtime | `std.core` | primitives, containers, strings, assertions, reflection, terminal APIs, queues, channels |
 | Operating system | `std.os` | files, paths, processes, environment, time, threads, async, platform features |
 | Networking | `std.os.net` | HTTP clients, HTTP servers, sockets, TLS transport, tubes, transcripts |
-| UI and rendering | `std.os.ui`, `std.os.ui.window`, `std.os.ui.render` | windows, frame loops, input, drawing, text, textures, meshes, snapshots |
+| UI and rendering | `std.os.ui`, `std.os.ui.window`, `std.os.ui.render` | windows, resize-safe frame loops, keyboard, mouse, gamepads, drawing, text, textures, meshes, snapshots |
 | Data formats | `std.parse.data` | JSON, YAML, TOML, CSV, XML, SQL, zlib |
 | Syntax parsers | `std.parse.syntax` | tokenizers for Nytrix and common source formats |
 | Images and assets | `std.parse.img`, `std.parse.3d` | image codecs, 3D asset loading, glTF workflows |
@@ -167,10 +167,10 @@ does not collect worker return values.
 | Module | Scope |
 | --- | --- |
 | `std.os.ui` | UI facade for windowing, rendering, camera, scene, assets, profiling, and probes. |
-| `std.os.ui.window` | Window creation, lifecycle, monitors, keyboard, mouse, gamepads, events, clipboard, backend hooks. |
+| `std.os.ui.window` | Window lifecycle, monitors, keyboard, mouse, gamepads, events, clipboard, backend hooks. |
 | `std.os.ui.consts` | Key codes, event IDs, window flags, modifier masks. |
 | `std.os.ui.window.input` | Mouse-button names, key notation parsing, chord checks. |
-| `std.os.ui.render` | Frame loop, draw calls, colors, fonts, textures, cameras, meshes, capture, renderer stats. |
+| `std.os.ui.render` | Frame loops, resize-aware layout, draw calls, colors, fonts, textures, cameras, meshes, capture, renderer stats. |
 | `std.os.ui.render.vk` | Vulkan backend operations and lower-level renderer controls. |
 | `std.os.ui.app` | Application lifecycle setup for larger UI programs. |
 | `std.os.ui.camera` | Camera state and movement. |

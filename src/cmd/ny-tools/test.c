@@ -2703,7 +2703,8 @@ int ny_test_main(int argc, char **argv) {
   StrVec benchmark = {0}, runtime = {0}, repl = {0}, probe = {0}, error_tests = {0}, std = {0};
   SuiteStats sb = {0}, sr = {0}, srepl = {0}, sp = {0}, se = {0}, ss = {0};
   char cache_path[PATH_MAX];
-  snprintf(cache_path, sizeof(cache_path), "build/cache/test-results.tsv");
+  nyt_path_join(cache_path, sizeof(cache_path), nyt_default_cache_root_dir(),
+                "test-results.tsv");
   if (use_cache)
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {

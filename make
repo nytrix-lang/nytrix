@@ -781,6 +781,17 @@ def _windows_tool_path(bin_dir: Path, name: str) -> Path | None:
             return p
     return None
 
+def _windows_cmake_tool(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    path_like = any(sep in raw for sep in ("/", "\\")) or bool(re.match(r"^[A-Za-z]:", raw))
+    if not path_like:
+        return raw
+    path = _windows_env_path(raw)
+    tool = _windows_tool_path(path.parent, path.name) if path.name else None
+    return _windows_cmake_path(tool or path)
+
 def _windows_is_msys2_shell() -> bool:
     return bool((os.environ.get("MSYSTEM") or os.environ.get("MSYSTEM_PREFIX") or os.environ.get("MINGW_PREFIX") or "").strip())
 
@@ -1605,8 +1616,8 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
         f"-DNYTRIX_HOST_LDFLAGS={host_ldflags}",
     ]
     if host_os() == "windows":
-        cc = (os.environ.get("CC") or "").strip()
-        cxx = (os.environ.get("CXX") or "").strip()
+        cc = _windows_cmake_tool(os.environ.get("CC") or "")
+        cxx = _windows_cmake_tool(os.environ.get("CXX") or "")
         if cc:
             cmd.append(f"-DCMAKE_C_COMPILER={cc}")
         if cxx:

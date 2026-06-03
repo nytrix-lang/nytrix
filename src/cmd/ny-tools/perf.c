@@ -70,12 +70,6 @@ typedef struct {
 } PerfCompareRow;
 
 typedef struct {
-  char case_name[128];
-  int ok;
-  double ratio;
-} PerfCCompareRow;
-
-typedef struct {
   char label[128];
   char path[PATH_MAX];
 } PerfExecTarget;
@@ -241,13 +235,6 @@ static int perf_command_available(const char *cmd) {
   }
   free(copy);
   return ok;
-}
-
-static int perf_resolve_nynth_bin(char *out, size_t out_sz) {
-  const char *env = getenv("NYTRIX_NYNTH_BIN");
-  const char *cmd = (env && *env) ? env : "nynth";
-  nyt_path_copy(out, out_sz, cmd);
-  return perf_command_available(out);
 }
 
 static const char *last_substr(const char *haystack, const char *needle) {
@@ -574,7 +561,12 @@ static int run_one_gate(const char *bin, const char *path, const char *profile, 
 }
 
 static int write_baseline(const char *path, PerfResult *res, int n) {
-  if (!mkdir_p("build/cache"))
+  char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", path ? path : "");
+  char *slash = strrchr(dir, '/');
+  if (slash)
+    *slash = '\0';
+  if (slash && !mkdir_p(dir))
     return 1;
   FILE *f = fopen(path, "w");
   if (!f)
@@ -870,12 +862,12 @@ static int run_profile_exec_mode(const char *exec_path, int freq, const char *ou
 }
 
 static int run_gate_mode(const char *repo, const char *bin, int write_bl) {
+  (void)repo;
   printf("%s%sNytrix Performance Gate%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   int cold_mode = nyt_env_truthy("NYTRIX_PERF_COLD");
+  const char *build_cache = nyt_default_cache_root_dir();
   char gate_cache_root[PATH_MAX] = {0};
   if (!cold_mode) {
-    char build_cache[PATH_MAX];
-    nyt_path_join(build_cache, sizeof(build_cache), repo, "build/cache");
     if (!mkdir_p(build_cache)) {
       nyt_err("ny-perf", "could not create %s", build_cache);
       return 1;
@@ -942,9 +934,11 @@ static int run_gate_mode(const char *repo, const char *bin, int write_bl) {
 
   char baseline[PATH_MAX];
   if (cold_mode)
-    nyt_path_join(baseline, sizeof(baseline), repo, "build/cache/perf_gate_baseline.cold.json");
+    nyt_path_join(baseline, sizeof(baseline), build_cache,
+                  "perf_gate_baseline.cold.json");
   else
-    nyt_path_join(baseline, sizeof(baseline), repo, "build/cache/perf_gate_baseline.warm.json");
+    nyt_path_join(baseline, sizeof(baseline), build_cache,
+                  "perf_gate_baseline.warm.json");
 
   if (write_bl) {
     if (write_baseline(baseline, results, PERF_CASE_COUNT) != 0) {
@@ -998,14 +992,6 @@ static int cmp_compare_wall_desc(const void *a, const void *b) {
   return (bv > av) - (bv < av);
 }
 
-static int cmp_c_ratio_desc(const void *a, const void *b) {
-  const PerfCCompareRow *ra = *(const PerfCCompareRow *const *)a;
-  const PerfCCompareRow *rb = *(const PerfCCompareRow *const *)b;
-  double av = ra ? ra->ratio : 0.0;
-  double bv = rb ? rb->ratio : 0.0;
-  return (bv > av) - (bv < av);
-}
-
 static int cmp_exec_wall_asc(const void *a, const void *b) {
   const PerfExecRow *ra = *(const PerfExecRow *const *)a;
   const PerfExecRow *rb = *(const PerfExecRow *const *)b;
@@ -1018,133 +1004,7 @@ static int cmp_exec_wall_asc(const void *a, const void *b) {
   return (av > bv) - (av < bv);
 }
 
-static const char *bounded_strstr(const char *start, const char *end, const char *needle) {
-  if (!start || !end || !needle || !*needle || end <= start)
-    return NULL;
-  size_t n = strlen(needle);
-  for (const char *p = start; p + n <= end; p++) {
-    if (memcmp(p, needle, n) == 0)
-      return p;
-  }
-  return NULL;
-}
-
-static int json_string_field_between(const char *start, const char *end, const char *field,
-                                     char *out, size_t out_sz) {
-  if (!out || out_sz == 0)
-    return 0;
-  out[0] = '\0';
-  char pat[96];
-  snprintf(pat, sizeof(pat), "\"%s\"", field);
-  const char *p = bounded_strstr(start, end, pat);
-  if (!p)
-    return 0;
-  p = bounded_strstr(p + strlen(pat), end, ":");
-  if (!p)
-    return 0;
-  p++;
-  while (p < end && isspace((unsigned char)*p))
-    p++;
-  if (p >= end || *p != '"')
-    return 0;
-  p++;
-  size_t n = 0;
-  while (p < end && *p && *p != '"') {
-    if (*p == '\\' && p + 1 < end)
-      p++;
-    if (n + 1 < out_sz)
-      out[n++] = *p;
-    p++;
-  }
-  out[n] = '\0';
-  return n > 0;
-}
-
-static int json_number_field_between(const char *start, const char *end, const char *field,
-                                     double *out) {
-  char pat[128];
-  snprintf(pat, sizeof(pat), "\"%s\"", field);
-  const char *p = bounded_strstr(start, end, pat);
-  if (!p)
-    return 0;
-  p = bounded_strstr(p + strlen(pat), end, ":");
-  if (!p)
-    return 0;
-  int ok = 0;
-  double v = parse_number_after(p + 1, &ok);
-  if (!ok)
-    return 0;
-  if (out)
-    *out = v;
-  return 1;
-}
-
-static int json_bool_true_between(const char *start, const char *end, const char *field) {
-  char pat[96];
-  snprintf(pat, sizeof(pat), "\"%s\"", field);
-  const char *p = bounded_strstr(start, end, pat);
-  if (!p)
-    return 0;
-  p = bounded_strstr(p + strlen(pat), end, ":");
-  if (!p)
-    return 0;
-  p++;
-  while (p < end && isspace((unsigned char)*p))
-    p++;
-  return p + 4 <= end && memcmp(p, "true", 4) == 0;
-}
-
-static int collect_nynth_c_rows(const char *json_path, PerfCCompareRow *rows, int max_rows) {
-  size_t len = 0;
-  char *text = ny_read_file_raw(json_path, &len);
-  if (!text)
-    return 0;
-  const char *end_all = text + len;
-  const char *p = text;
-  int count = 0;
-  while (count < max_rows && (p = bounded_strstr(p, end_all, "\"case\"")) != NULL) {
-    const char *next = bounded_strstr(p + 6, end_all, "\"case\"");
-    const char *end = next ? next : end_all;
-    PerfCCompareRow row;
-    memset(&row, 0, sizeof(row));
-    if (json_string_field_between(p, end, "case", row.case_name, sizeof(row.case_name))) {
-      row.ok = json_bool_true_between(p, end, "ok");
-      if (!json_number_field_between(p, end, "ny_o3_vs_c_o3_run", &row.ratio))
-        if (!json_number_field_between(p, end, "ny_vs_c_elapsed_ns", &row.ratio))
-          (void)json_number_field_between(p, end, "ratio", &row.ratio);
-      if (row.ratio > 0.0)
-        rows[count++] = row;
-    }
-    p = end > p ? end : p + 1;
-  }
-  free(text);
-  return count;
-}
-
-static int dedupe_c_rows_by_case(PerfCCompareRow *rows, int count) {
-  int out = 0;
-  for (int i = 0; i < count; i++) {
-    int found = -1;
-    for (int j = 0; j < out; j++) {
-      if (strcmp(rows[j].case_name, rows[i].case_name) == 0) {
-        found = j;
-        break;
-      }
-    }
-    if (found >= 0) {
-      if (rows[i].ratio > rows[found].ratio)
-        rows[found].ratio = rows[i].ratio;
-      rows[found].ok = rows[found].ok && rows[i].ok;
-    } else {
-      rows[out++] = rows[i];
-    }
-  }
-  return out;
-}
-
 static int write_compare_reports(const char *out_root, const PerfCompareRow *rows, int row_count,
-                                 const PerfCCompareRow *c_rows, int c_row_count,
-                                 const char *nynth_json, const char *nynth_triage_json,
                                  int samples, int scale_percent) {
   char csv_path[PATH_MAX], json_path[PATH_MAX], md_path[PATH_MAX];
   nyt_path_join(csv_path, sizeof(csv_path), out_root, "summary.csv");
@@ -1180,16 +1040,6 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
   json_string(js, csv_path);
   fprintf(js, ", \"markdown\": ");
   json_string(js, md_path);
-  fprintf(js, ", \"nynth_bench_real\": ");
-  if (nynth_json && *nynth_json)
-    json_string(js, nynth_json);
-  else
-    fputs("null", js);
-  fprintf(js, ", \"nynth_perf_triage\": ");
-  if (nynth_triage_json && *nynth_triage_json)
-    json_string(js, nynth_triage_json);
-  else
-    fputs("null", js);
   fprintf(js, "},\n  \"ny_rows\": [\n");
   for (int i = 0; i < row_count; i++) {
     fprintf(js, "    {\"case\": ");
@@ -1207,35 +1057,21 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
     json_string(js, rows[i].suspect);
     fprintf(js, "}%s\n", (i + 1 < row_count) ? "," : "");
   }
-  fprintf(js, "  ],\n  \"c_compare_rows\": [\n");
-  for (int i = 0; i < c_row_count; i++) {
-    fprintf(js, "    {\"case\": ");
-    json_string(js, c_rows[i].case_name);
-    fprintf(js, ", \"ok\": %s, \"ny_over_c_ratio\": %.4f}%s\n",
-            c_rows[i].ok ? "true" : "false", c_rows[i].ratio,
-            (i + 1 < c_row_count) ? "," : "");
-  }
   fprintf(js, "  ]\n}\n");
   fclose(js);
 
   PerfCompareRow **ranked = (PerfCompareRow **)calloc((size_t)row_count, sizeof(PerfCompareRow *));
-  PerfCCompareRow **c_ranked = (PerfCCompareRow **)calloc((size_t)c_row_count, sizeof(PerfCCompareRow *));
-  if (!ranked || (!c_ranked && c_row_count > 0)) {
+  if (!ranked) {
     free(ranked);
-    free(c_ranked);
     return 1;
   }
   for (int i = 0; i < row_count; i++)
     ranked[i] = (PerfCompareRow *)&rows[i];
-  for (int i = 0; i < c_row_count; i++)
-    c_ranked[i] = (PerfCCompareRow *)&c_rows[i];
   qsort(ranked, (size_t)row_count, sizeof(PerfCompareRow *), cmp_compare_wall_desc);
-  qsort(c_ranked, (size_t)c_row_count, sizeof(PerfCCompareRow *), cmp_c_ratio_desc);
 
   FILE *md = fopen(md_path, "w");
   if (!md) {
     free(ranked);
-    free(c_ranked);
     return 1;
   }
   fprintf(md, "# Nytrix Benchmark Matrix Report\n\n");
@@ -1269,30 +1105,11 @@ static int write_compare_reports(const char *out_root, const PerfCompareRow *row
             best->case_name, best->variant, best->wall_ms, best->total_ms,
             best->codegen_ms, best->opt_ms, best->jit_compile_ms, best->bench_ms);
   }
-  fprintf(md, "\n## Generated C Comparison Ratios\n\n");
-  if (c_row_count == 0) {
-    fprintf(md, "No generated C comparison rows were collected.\n\n");
-  } else {
-    fprintf(md, "| rank | case | Ny/C runtime ratio | ok |\n");
-    fprintf(md, "| ---: | --- | ---: | --- |\n");
-    int ctop = c_row_count < 20 ? c_row_count : 20;
-    for (int i = 0; i < ctop; i++) {
-      const PerfCCompareRow *r = c_ranked[i];
-      fprintf(md, "| %d | `%s` | %.4f | %s |\n", i + 1, r->case_name, r->ratio,
-              r->ok ? "true" : "false");
-    }
-    fprintf(md, "\nRatios above 1.0 mean the generated Ny case ran slower than generated C.\n\n");
-  }
   fprintf(md, "## Artifacts\n\n");
   fprintf(md, "- CSV: `%s`\n", csv_path);
   fprintf(md, "- JSON: `%s`\n", json_path);
-  if (nynth_json && *nynth_json)
-    fprintf(md, "- Nynth bench real: `%s`\n", nynth_json);
-  if (nynth_triage_json && *nynth_triage_json)
-    fprintf(md, "- Nynth perf triage: `%s`\n", nynth_triage_json);
   fclose(md);
   free(ranked);
-  free(c_ranked);
 
   nyt_msg("SAVED", NYT_GREEN, "compare report: %s", md_path);
   nyt_msg("SAVED", NYT_GREEN, "compare json: %s", json_path);
@@ -1509,9 +1326,7 @@ static int run_exec_compare_mode(const char *out_root, const PerfExecTarget *tar
 }
 
 static int run_compare_mode(const char *bin, const char *out_root,
-                            int samples, int scale_percent, int limit, int timeout_sec,
-                            int use_nynth, int nynth_triage, int nynth_limit,
-                            int nynth_runs, int nynth_warmup) {
+                            int samples, int scale_percent, int limit, int timeout_sec) {
   if (!mkdir_p(out_root)) {
     nyt_err("ny-perf", "could not create output dir: %s", out_root);
     return 1;
@@ -1639,62 +1454,7 @@ static int run_compare_mode(const char *bin, const char *out_root,
     }
   }
 
-  PerfCCompareRow c_rows[128];
-  memset(c_rows, 0, sizeof(c_rows));
-  int c_row_count = 0;
-  char nynth_json[PATH_MAX] = {0};
-  char nynth_triage_json[PATH_MAX] = {0};
-  if (use_nynth) {
-    char nynth_bin[PATH_MAX];
-    if (!perf_resolve_nynth_bin(nynth_bin, sizeof(nynth_bin))) {
-      nyt_warn("ny-perf", "Nynth binary not found, skipping generated C comparison; set NYTRIX_NYNTH_BIN or put nynth on PATH");
-    } else {
-      char nynth_out[PATH_MAX], nynth_err[PATH_MAX], limit_buf[32], runs_buf[32], warmup_buf[32], timeout_buf[32];
-      nyt_path_join(nynth_json, sizeof(nynth_json), out_root, "nynth-bench-real.json");
-      nyt_path_join(nynth_out, sizeof(nynth_out), raw_dir, "nynth-bench-real.out");
-      nyt_path_join(nynth_err, sizeof(nynth_err), raw_dir, "nynth-bench-real.err");
-      snprintf(limit_buf, sizeof(limit_buf), "%d", nynth_limit);
-      snprintf(runs_buf, sizeof(runs_buf), "%d", nynth_runs);
-      snprintf(warmup_buf, sizeof(warmup_buf), "%d", nynth_warmup);
-      snprintf(timeout_buf, sizeof(timeout_buf), "%d", timeout_sec);
-      char *bench_argv[] = {nynth_bin, "bench", "real", "--fast", "--limit", limit_buf,
-                            "--runs", runs_buf, "--warmup", warmup_buf, "--timeout-s", timeout_buf,
-                            "--json", nynth_json, NULL};
-      double elapsed = 0.0;
-      nyt_msg("NYNTH", NYT_CYAN, "running generated C benchmark comparison");
-      int rc = run_cmd_timeout(bench_argv, nynth_out, nynth_err, timeout_sec * (nynth_limit > 0 ? nynth_limit : 1), &elapsed);
-      if (rc != 0) {
-        failures++;
-        nyt_warn("ny-perf", "Nynth bench real failed rc=%d", rc);
-      } else {
-        c_row_count = collect_nynth_c_rows(nynth_json, c_rows, (int)(sizeof(c_rows) / sizeof(c_rows[0])));
-        nyt_msg("NYNTH", NYT_GREEN, "collected %d generated C comparison rows", c_row_count);
-      }
-      if (nynth_triage) {
-        char triage_out[PATH_MAX], triage_err[PATH_MAX];
-        nyt_path_join(nynth_triage_json, sizeof(nynth_triage_json), out_root, "nynth-perf-triage.json");
-        nyt_path_join(triage_out, sizeof(triage_out), raw_dir, "nynth-perf-triage.out");
-        nyt_path_join(triage_err, sizeof(triage_err), raw_dir, "nynth-perf-triage.err");
-        char *triage_argv[] = {nynth_bin, "perf", "triage", "--fast", "--limit", limit_buf,
-                               "--runs", runs_buf, "--warmup", warmup_buf, "--timeout-s", timeout_buf,
-                               "--json", nynth_triage_json, NULL};
-        nyt_msg("NYNTH", NYT_CYAN, "running generated perf triage");
-        rc = run_cmd_timeout(triage_argv, triage_out, triage_err, timeout_sec * (nynth_limit > 0 ? nynth_limit : 1), &elapsed);
-        if (rc != 0) {
-          failures++;
-          nyt_warn("ny-perf", "Nynth perf triage failed rc=%d", rc);
-        } else {
-          int room = (int)(sizeof(c_rows) / sizeof(c_rows[0])) - c_row_count;
-          if (room > 0)
-            c_row_count += collect_nynth_c_rows(nynth_triage_json, c_rows + c_row_count, room);
-        }
-      }
-    }
-  }
-
-  c_row_count = dedupe_c_rows_by_case(c_rows, c_row_count);
-  int wr = write_compare_reports(out_root, rows, row_count, c_rows, c_row_count,
-                                 nynth_json, nynth_triage_json, samples, scale_percent);
+  int wr = write_compare_reports(out_root, rows, row_count, samples, scale_percent);
   free(rows);
   if (wr != 0)
     return wr;
@@ -1719,8 +1479,7 @@ static void usage(void) {
   printf("%soptions:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %s--bin BIN --write-baseline --freq HZ --out DIR%s\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--samples N --scale PCT --limit N --timeout SEC%s\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  %s--exec ELF --elf ELF --target NAME=ELF --color MODE --no-color%s\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  %s--nynth --no-nynth --nynth-triage --nynth-limit N -- args...%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--exec ELF --elf ELF --target NAME=ELF --color MODE --no-color -- args...%s\n\n", nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("%sexamples:%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
   printf("  %sny perf gate --bin build/release/ny%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sNYTRIX_PERF_COLD=1 ny perf gate%s\n", nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
@@ -1744,7 +1503,8 @@ int ny_perf_main(int argc, char **argv) {
   char bin[PATH_MAX];
   nyt_path_join(bin, sizeof(bin), repo, "build/release/ny");
   char out_dir[PATH_MAX];
-  nyt_path_join(out_dir, sizeof(out_dir), repo, "build/cache/profiles");
+  nyt_path_join(out_dir, sizeof(out_dir), nyt_default_cache_root_dir(),
+                "profiles");
   const char *script = NULL;
   char profile_exec[PATH_MAX] = {0};
   PerfExecTarget exec_targets[PERF_MAX_EXEC_TARGETS];
@@ -1756,11 +1516,6 @@ int ny_perf_main(int argc, char **argv) {
   int scale_percent = 100;
   int limit = 0;
   int timeout_sec = 120;
-  int use_nynth = 0;
-  int nynth_triage = 0;
-  int nynth_limit = 6;
-  int nynth_runs = 1;
-  int nynth_warmup = 0;
   int out_set = 0;
   StrVec script_args = {0};
   int pass_through = 0;
@@ -1877,43 +1632,6 @@ int ny_perf_main(int argc, char **argv) {
       mode = "compare";
       continue;
     }
-    if (strcmp(a, "--no-nynth") == 0) {
-      use_nynth = 0;
-      continue;
-    }
-    if (strcmp(a, "--nynth") == 0) {
-      use_nynth = 1;
-      continue;
-    }
-    if (strcmp(a, "--nynth-triage") == 0) {
-      use_nynth = 1;
-      nynth_triage = 1;
-      continue;
-    }
-    if (ny_arg_match_with_value(a, "--nynth-limit")) {
-      if (!ny_arg_take_int(a, &i, argc, argv, 1, 32, &nynth_limit, "nynth-limit", err, sizeof(err))) {
-        nyt_err("ny-perf", "%s", err);
-        sv_free(&script_args);
-        return 2;
-      }
-      continue;
-    }
-    if (ny_arg_match_with_value(a, "--nynth-runs")) {
-      if (!ny_arg_take_int(a, &i, argc, argv, 1, 100, &nynth_runs, "nynth-runs", err, sizeof(err))) {
-        nyt_err("ny-perf", "%s", err);
-        sv_free(&script_args);
-        return 2;
-      }
-      continue;
-    }
-    if (ny_arg_match_with_value(a, "--nynth-warmup")) {
-      if (!ny_arg_take_int(a, &i, argc, argv, 0, 100, &nynth_warmup, "nynth-warmup", err, sizeof(err))) {
-        nyt_err("ny-perf", "%s", err);
-        sv_free(&script_args);
-        return 2;
-      }
-      continue;
-    }
     if (strcmp(a, "--write-baseline") == 0) {
       write_bl = 1;
       continue;
@@ -1993,8 +1711,7 @@ int ny_perf_main(int argc, char **argv) {
       sv_free(&script_args);
       return rc;
     }
-    int rc = run_compare_mode(bin, out_dir, samples, scale_percent, limit, timeout_sec,
-                              use_nynth, nynth_triage, nynth_limit, nynth_runs, nynth_warmup);
+    int rc = run_compare_mode(bin, out_dir, samples, scale_percent, limit, timeout_sec);
     sv_free(&script_args);
     return rc;
   }

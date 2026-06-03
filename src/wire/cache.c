@@ -294,63 +294,14 @@ static bool ny_jit_cache_use_ir(void) {
 
 static char *ny_get_cache_dir(void) {
   static char path[1024];
-  const char *override = ny_env_str_nonempty("NYTRIX_CACHE_DIR");
-  if (override && *override) {
-    snprintf(path, sizeof(path), "%s", override);
-    if (ny_cache_dir_ready(path))
-      return path;
-  }
-  const char *src = ny_src_root();
-  if (src && *src) {
-    snprintf(path, sizeof(path), "%s/build/cache/nytrix/jit", src);
-    if (ny_cache_dir_ready(path))
-      return path;
-  }
-  const char *xdg = ny_env_str_nonempty("XDG_CACHE_HOME");
-  if (xdg && *xdg) {
-    snprintf(path, sizeof(path), "%s/nytrix/jit", xdg);
-    if (ny_cache_dir_ready(path))
-      return path;
-  }
-  const char *home = ny_env_str_nonempty("HOME");
-  if (!home)
-    home = ny_env_str_nonempty("USERPROFILE");
-  if (home && *home) {
-    snprintf(path, sizeof(path), "%s/.cache/nytrix/jit", home);
-    if (ny_cache_dir_ready(path))
-      return path;
-  }
-  snprintf(path, sizeof(path), "%s/nytrix/jit", ny_get_temp_dir());
+  const char *root = ny_default_cache_root_dir();
+  snprintf(path, sizeof(path), "%s/jit", root && *root ? root : ny_get_temp_dir());
   ny_cache_dir_ready(path);
   return path;
 }
 
 const char *ny_cache_root_dir(void) {
-  static char path[1024];
-  const char *override = ny_env_str_nonempty("NYTRIX_CACHE_DIR");
-  if (override && *override) {
-    snprintf(path, sizeof(path), "%s", override);
-    return path;
-  }
-  const char *src = ny_src_root();
-  if (src && *src) {
-    snprintf(path, sizeof(path), "%s/build/cache/nytrix", src);
-    return path;
-  }
-  const char *xdg = ny_env_str_nonempty("XDG_CACHE_HOME");
-  if (xdg && *xdg) {
-    snprintf(path, sizeof(path), "%s/nytrix", xdg);
-    return path;
-  }
-  const char *home = ny_env_str_nonempty("HOME");
-  if (!home)
-    home = ny_env_str_nonempty("USERPROFILE");
-  if (home && *home) {
-    snprintf(path, sizeof(path), "%s/.cache/nytrix", home);
-    return path;
-  }
-  snprintf(path, sizeof(path), "%s/nytrix", ny_get_temp_dir());
-  return path;
+  return ny_default_cache_root_dir();
 }
 
 static int ny_cache_remove_tree(const char *path) {
@@ -415,10 +366,10 @@ int ny_cache_clean(void) {
       rc = -1;
   }
 
-  const char *src = ny_src_root();
+  const char *src = ny_cache_root_dir();
   if (src && *src) {
     char tiny[PATH_MAX];
-    snprintf(tiny, sizeof(tiny), "%s/build/cache/tiny-aot", src);
+    snprintf(tiny, sizeof(tiny), "%s/tiny-aot", src);
     if (ny_cache_remove_tree(tiny) != 0)
       rc = -1;
   }
@@ -583,26 +534,8 @@ char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses, siz
                            int std_mode, bool debug_symbols, unsigned long std_latest_mtime,
                            const char *argv0) {
   char dir[1024];
-  const char *override = ny_env_str_nonempty("NYTRIX_CACHE_DIR");
-  if (override && *override) {
-    snprintf(dir, sizeof(dir), "%s/std", override);
-  } else {
-    const char *src = ny_src_root();
-    const char *xdg = ny_env_str_nonempty("XDG_CACHE_HOME");
-    if (src && *src) {
-      snprintf(dir, sizeof(dir), "%s/build/cache/nytrix/std", src);
-    } else if (xdg && *xdg) {
-      snprintf(dir, sizeof(dir), "%s/nytrix/std", xdg);
-    } else {
-      const char *home = ny_env_str_nonempty("HOME");
-      if (!home)
-        home = ny_env_str_nonempty("USERPROFILE");
-      if (home && *home)
-        snprintf(dir, sizeof(dir), "%s/.cache/nytrix/std", home);
-      else
-        snprintf(dir, sizeof(dir), "%s/nytrix/std", ny_get_temp_dir());
-    }
-  }
+  const char *root = ny_default_cache_root_dir();
+  snprintf(dir, sizeof(dir), "%s/std", root && *root ? root : ny_get_temp_dir());
   ny_cache_dir_ready(dir);
 
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;

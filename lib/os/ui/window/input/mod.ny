@@ -16,13 +16,19 @@ module std.os.ui.window.input(
    KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y,
    KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, MOUSE_LEFT,
    MOUSE_RIGHT, MOUSE_MIDDLE, normalize_key, parse_notation, mod_bit_for_key, mods_from_key_states,
-   key_down, key_pressed, key_chord, mod_down, mouse_pos, mouse_button_down, mouse_button_pressed
+   key_down, key_pressed, key_chord, mod_down, mouse_pos, mouse_button_down, mouse_button_pressed,
+   gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis,
+   gamepad_button, gamepad_axis_count, gamepad_button_count, is_gamepad_connected, is_mapped,
+   get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks,
+   get_joysticks, add_gamepad_mapping, get_gamepad_axis_count, get_gamepad_button_count,
+   GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP
 )
 
 use std.core
 use std.core.str
 use std.os.ui.consts
 use std.os.ui.window.input.key as uikey
+use std.os.ui.window.input.gamepad
 
 use std.os.ui.window as window
 

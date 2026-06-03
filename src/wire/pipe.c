@@ -466,7 +466,7 @@ static bool ny_tiny_aot_cache_path(const ny_options *opt, bool object_only,
                                    char *out, size_t out_len) {
   if (!opt || !out || out_len == 0)
     return false;
-  const char *root = ny_src_root();
+  const char *root = ny_cache_root_dir();
   if (!root || !*root)
     return false;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
@@ -476,7 +476,7 @@ static bool ny_tiny_aot_cache_path(const ny_options *opt, bool object_only,
   h = ny_fnv1a64(&object_only, sizeof(object_only), h);
   h = ny_fnv1a64(&opt->strip_override, sizeof(opt->strip_override), h);
   char dir[4096];
-  snprintf(dir, sizeof(dir), "%s/build/cache/tiny-aot", root);
+  snprintf(dir, sizeof(dir), "%s/tiny-aot", root);
   ny_ensure_dir_recursive(dir);
   snprintf(out, out_len, "%s/tiny_%016" PRIx64 "%s", dir, h,
            object_only ? ".o" : ".bin");
@@ -3647,7 +3647,7 @@ static bool ny_md_extract_lang_matches(const char *langs, const char *lang,
   if (!lang || lang_len == 0)
     return false;
   if (!langs || !*langs)
-    langs = "ny,nytrix,nynth";
+    langs = "ny,nytrix";
   const char *p = langs;
   while (*p) {
     while (*p == ',' || *p == ';' || isspace((unsigned char)*p))

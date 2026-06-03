@@ -74,6 +74,41 @@ static inline void nyt_path_join(char *out, size_t out_sz, const char *a, const 
   out[n + bl] = '\0';
 }
 
+static inline const char *nyt_default_cache_root_dir(void) {
+  static char out[PATH_MAX];
+  const char *override = getenv("NYTRIX_CACHE_DIR");
+  if (override && *override) {
+    nyt_path_copy(out, sizeof(out), override);
+    return out;
+  }
+  const char *root = getenv("NYTRIX_ROOT");
+  const char *xdg = getenv("XDG_CACHE_HOME");
+  if (xdg && *xdg) {
+    nyt_path_join(out, sizeof(out), xdg, "nytrix");
+    return out;
+  }
+  const char *home = getenv("HOME");
+  if (!home)
+    home = getenv("USERPROFILE");
+  if (home && *home) {
+    nyt_path_join(out, sizeof(out), home, ".cache/nytrix");
+    return out;
+  }
+  if (root && *root) {
+    nyt_path_join(out, sizeof(out), root, "build/cache/nytrix");
+    return out;
+  }
+  const char *tmp = getenv("TMPDIR");
+  if (!tmp || !*tmp)
+    tmp = getenv("TMP");
+  if (!tmp || !*tmp)
+    tmp = getenv("TEMP");
+  if (!tmp || !*tmp)
+    tmp = "/tmp";
+  nyt_path_join(out, sizeof(out), tmp, "nytrix");
+  return out;
+}
+
 static inline int nyt_ensure_repo_root_by_marker(char *out, size_t out_sz, const char *marker_file) {
   const char *env = getenv("NYTRIX_ROOT");
   if (env && *env) {

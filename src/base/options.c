@@ -971,7 +971,7 @@ void ny_options_init(ny_options *opt) {
   opt->stop_after = NY_STOP_AFTER_NONE;
   opt->type_solver = NY_TYPE_SOLVER_AUTO;
   opt->type_solver_raw = "auto";
-  opt->extract_lang = "ny,nytrix,nynth";
+  opt->extract_lang = "ny,nytrix";
   opt->strict_types = ny_env_enabled("NYTRIX_STRICT_TYPES");
   opt->strict_types_explicit = false;
   opt->parallel_mode = "auto";
@@ -1210,7 +1210,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "--extract-at=L[:C]",
        "Select the fenced code block containing a source line"},
       {NY_CLR_BLUE, "--extract-lang=LIST",
-       "Fence languages for --extract-code (default ny,nytrix,nynth)"},
+       "Fence languages for --extract-code (default ny,nytrix)"},
       {NY_CLR_BLUE, "-dump-docs", "Extract and print function docstrings"},
       {NY_CLR_BLUE, "-dump-funcs", "List all compiled functions"},
       {NY_CLR_BLUE, "-dump-symbols", "Show runtime symbol table"},

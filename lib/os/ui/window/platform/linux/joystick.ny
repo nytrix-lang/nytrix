@@ -646,7 +646,13 @@ fn _open_device(str: path): bool {
    def controller_aux = _is_controller_aux_input(name)
    mut guid = _build_linux_guid(id_ptr, name)
    def fallback_guid = _zero_guid_fallback(name)
-   if(fallback_guid != "" && (guid == "00000000000000000000000000000000" || guid == "0000000000000000" || guid.len < 32)){ guid = fallback_guid }
+   if(fallback_guid != ""){
+      if(guid == "00000000000000000000000000000000" || guid == "0000000000000000" || guid.len < 32){
+         guid = fallback_guid
+      } elif(!gamepad_map.find_mapping(guid, "Linux")){
+         guid = fallback_guid
+      }
+   }
    def key_map_bytes = (KEY_CNT - BTN_MISC) * 4
    def abs_map_bytes = ABS_CNT * 4
    def key_map_ptr = malloc(key_map_bytes)
@@ -985,68 +991,19 @@ fn get_joystick_hats(int: jid, any: count_ptr): any {
    _js_hats.get(jid, 0)
 }
 
-fn _raw_button(any: buttons_ptr, int: button_count, int: idx): int {
-   (buttons_ptr && idx >= 0 && idx < button_count) ? load8(buttons_ptr, idx) : 0
-}
-
-fn _raw_axis(any: axes_ptr, int: axis_count, int: idx): f64 {
-   (axes_ptr && idx >= 0 && idx < axis_count) ? load32_f32(axes_ptr, idx * 4) : 0.0
-}
-
-fn _store_standard_button(any: state_ptr, int: dst, any: buttons_ptr, int: button_count, int: src): any {
-   store8(state_ptr, _raw_button(buttons_ptr, button_count, src), dst)
-}
-
-fn _fill_raw_gamepad_state(int: jid, any: state_ptr): bool {
-   if(!state_ptr || jid < 0 || jid >= MAX_JOYSTICKS){ return false }
-   memset(state_ptr, 0, 64)
-   def js = _get_js(jid)
-   if(!js){ return false }
-   def axes_ptr = _js_axes.get(jid, 0)
-   def buttons_ptr = _js_buttons.get(jid, 0)
-   def hats_ptr = _js_hats.get(jid, 0)
-   def axis_count = int(js.get("axis_count", 0))
-   def button_count = int(js.get("button_count", 0))
-   def hat_count = int(js.get("hat_count", 0))
-   _store_standard_button(state_ptr, 0, buttons_ptr, button_count, 0)
-   _store_standard_button(state_ptr, 1, buttons_ptr, button_count, 1)
-   _store_standard_button(state_ptr, 2, buttons_ptr, button_count, 3)
-   _store_standard_button(state_ptr, 3, buttons_ptr, button_count, 2)
-   _store_standard_button(state_ptr, 4, buttons_ptr, button_count, 4)
-   _store_standard_button(state_ptr, 5, buttons_ptr, button_count, 5)
-   _store_standard_button(state_ptr, 6, buttons_ptr, button_count, 8)
-   _store_standard_button(state_ptr, 7, buttons_ptr, button_count, 9)
-   _store_standard_button(state_ptr, 8, buttons_ptr, button_count, 10)
-   _store_standard_button(state_ptr, 9, buttons_ptr, button_count, 11)
-   _store_standard_button(state_ptr, 10, buttons_ptr, button_count, 12)
-   if(hats_ptr && hat_count > 0){
-      def hat = load8(hats_ptr, 0)
-      store8(state_ptr, (hat & HAT_UP) != 0 ? 1 : load8(state_ptr, 11), 11)
-      store8(state_ptr, (hat & HAT_RIGHT) != 0 ? 1 : load8(state_ptr, 12), 12)
-      store8(state_ptr, (hat & HAT_DOWN) != 0 ? 1 : load8(state_ptr, 13), 13)
-      store8(state_ptr, (hat & HAT_LEFT) != 0 ? 1 : load8(state_ptr, 14), 14)
-   }
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 0), 16)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 1), 20)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 3), 24)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 4), 28)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 2), 32)
-   store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 5), 36)
-   true
-}
-
 fn joystick_is_gamepad(int: jid): bool {
    if(!joystick_present(jid)){ return false }
    def js = _get_js(jid)
    if(js.get("controller_aux", false)){ return false }
-   if(gamepad_map.joystick_is_gamepad(js)){ return true }
-   int(js.get("axis_count", 0)) >= 2 && int(js.get("button_count", 0)) >= 4
+   gamepad_map.joystick_is_gamepad(js)
 }
 
 fn get_gamepad_state(int: jid, any: state_ptr): bool {
    if(!joystick_present(jid)){ if(state_ptr){ memset(state_ptr, 0, 64) } return false }
    _poll_slot(jid)
-   _fill_raw_gamepad_state(jid, state_ptr)
+   def js = _get_js(jid)
+   if(!js || js.get("controller_aux", false)){ if(state_ptr){ memset(state_ptr, 0, 64) } return false }
+   gamepad_map.get_gamepad_state(js, state_ptr)
 }
 
 fn get_gamepad_name(int: jid): str {
