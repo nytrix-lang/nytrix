@@ -652,7 +652,8 @@ static int run_test_tool(const char *root, const char *kind, int jobs, const cha
   }
 
   char trace_dir[PATH_MAX];
-  nyt_path_join(trace_dir, sizeof(trace_dir), root, "build/cache/test-trace");
+  nyt_path_join(trace_dir, sizeof(trace_dir), nyt_default_cache_root_dir(),
+                "test-trace");
   (void)rm_rf(trace_dir);
   (void)mkdir_p(trace_dir);
   char profile_json[PATH_MAX];

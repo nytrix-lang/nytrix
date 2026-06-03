@@ -5,6 +5,7 @@
 #include "web.h"
 #include "args.h"
 #include "base/util.h"
+#include "repo.h"
 #include "tool.h"
 
 #include <ctype.h>
@@ -4690,7 +4691,8 @@ int ny_web_main(int argc, char **argv) {
   char index_path[PATH_MAX];
   snprintf(index_path, sizeof(index_path), "%s/index.html", out_dir);
   char cache_docs_dir[PATH_MAX];
-  snprintf(cache_docs_dir, sizeof(cache_docs_dir), "build/cache/docs");
+  nyt_path_join(cache_docs_dir, sizeof(cache_docs_dir),
+                nyt_default_cache_root_dir(), "docs");
   if (!mkdir_p(cache_docs_dir)) {
     free(bundle);
     nyt_err("ny-doc", "failed to create cache dir: %s", cache_docs_dir);

@@ -1570,13 +1570,17 @@ int64_t rt_dict_write_fast(int64_t d, int64_t key, int64_t value) {
   int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
   if (cap <= 0)
     return d;
-  if ((count + 1) * 2 > cap) {
-    d = rt_dict_resize_fast(d, cap);
-    cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
-  }
 
   int64_t off = rt_dict_find_off_fast(d, cap, key);
-  if (off < 0) {
+  if (off >= 0) {
+    int64_t state = *(int64_t *)((char *)(uintptr_t)d + off + 16);
+    if (state == rt_tag_v(1)) {
+      *(int64_t *)((char *)(uintptr_t)d + off + 8) = value;
+      return d;
+    }
+  }
+
+  if (off < 0 || (count + 1) * 2 > cap) {
     d = rt_dict_resize_fast(d, cap);
     cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
     off = rt_dict_find_off_fast(d, cap, key);

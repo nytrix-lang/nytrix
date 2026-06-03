@@ -2421,6 +2421,49 @@ typedef struct {
   const char *name;
 } ny_type_param_int_t;
 
+enum { NY_TYPE_PROVEN_INT_CALL_STACK_MAX = 64 };
+
+static _Thread_local const fun_sig
+    *g_type_proven_int_call_stack[NY_TYPE_PROVEN_INT_CALL_STACK_MAX];
+static _Thread_local size_t g_type_proven_int_call_stack_len;
+
+static bool type_proven_int_call_active(const fun_sig *sig) {
+  if (!sig)
+    return false;
+  for (size_t i = 0; i < g_type_proven_int_call_stack_len; ++i)
+    if (g_type_proven_int_call_stack[i] == sig)
+      return true;
+  return false;
+}
+
+static bool type_proven_int_call_push(const fun_sig *sig) {
+  if (!sig || type_proven_int_call_active(sig) ||
+      g_type_proven_int_call_stack_len >= NY_TYPE_PROVEN_INT_CALL_STACK_MAX)
+    return false;
+  g_type_proven_int_call_stack[g_type_proven_int_call_stack_len++] = sig;
+  return true;
+}
+
+static void type_proven_int_call_pop(const fun_sig *sig) {
+  if (g_type_proven_int_call_stack_len == 0)
+    return;
+  if (g_type_proven_int_call_stack[g_type_proven_int_call_stack_len - 1] ==
+      sig) {
+    g_type_proven_int_call_stack_len--;
+    return;
+  }
+  for (size_t i = g_type_proven_int_call_stack_len; i > 0; --i) {
+    if (g_type_proven_int_call_stack[i - 1] == sig) {
+      memmove(&g_type_proven_int_call_stack[i - 1],
+              &g_type_proven_int_call_stack[i],
+              (g_type_proven_int_call_stack_len - i) *
+                  sizeof(g_type_proven_int_call_stack[0]));
+      g_type_proven_int_call_stack_len--;
+      return;
+    }
+  }
+}
+
 static expr_t *type_single_return_expr(stmt_t *s) {
   if (!s)
     return NULL;
@@ -2442,7 +2485,10 @@ static bool type_stmt_returns_proven_int_with_params(
 static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
                                          size_t depth, expr_t *call,
                                          const ny_type_param_int_t *params,
-                                         size_t param_count, int recursion) {
+                                         size_t param_count, int recursion,
+                                         bool *out_static_user_call) {
+  if (out_static_user_call)
+    *out_static_user_call = false;
   if (!cg || !call || call->kind != NY_E_CALL || !call->as.call.callee ||
       recursion > 24)
     return false;
@@ -2454,6 +2500,8 @@ static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
   if (!sig || sig->is_extern || sig->is_variadic || sig->is_recursive ||
       !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
     return false;
+  if (out_static_user_call)
+    *out_static_user_call = true;
   if (sig->return_type && (strcmp(sig->return_type, "int") == 0 ||
                            strcmp(sig->return_type, "i64") == 0))
     return true;
@@ -2468,16 +2516,25 @@ static bool type_call_returns_proven_int(codegen_t *cg, scope *scopes,
                                           params, param_count, recursion + 1))
       return false;
   }
+  if (!type_proven_int_call_push(sig))
+    return false;
+  bool proven = false;
   if (type_stmt_returns_proven_int_with_params(
           cg, scopes, depth, sig->stmt_t->as.fn.body, local_params,
-          call->as.call.args.len, recursion + 1))
-    return true;
+          call->as.call.args.len, recursion + 1)) {
+    proven = true;
+    goto done;
+  }
   expr_t *ret = type_single_return_expr(sig->stmt_t->as.fn.body);
   if (!ret)
-    return false;
-  return type_expr_proven_int_with_params(cg, scopes, depth, ret, local_params,
-                                          call->as.call.args.len,
-                                          recursion + 1);
+    goto done;
+  proven = type_expr_proven_int_with_params(cg, scopes, depth, ret,
+                                            local_params,
+                                            call->as.call.args.len,
+                                            recursion + 1);
+done:
+  type_proven_int_call_pop(sig);
+  return proven;
 }
 
 static bool type_get_default_is_proven_int(codegen_t *cg, scope *scopes,
@@ -2531,9 +2588,15 @@ static bool type_expr_proven_int_with_params(codegen_t *cg, scope *scopes,
     return false;
   }
   case NY_E_CALL:
-    return type_call_returns_proven_int(cg, scopes, depth, e, params,
-                                        param_count, recursion + 1) ||
-           ny_is_proven_int(cg, scopes, depth, e, NULL);
+    {
+      bool static_user_call = false;
+      bool proven = type_call_returns_proven_int(
+          cg, scopes, depth, e, params, param_count, recursion + 1,
+          &static_user_call);
+      if (proven || static_user_call)
+        return proven;
+      return ny_is_proven_int(cg, scopes, depth, e, NULL);
+    }
   case NY_E_MEMBER:
     return e->as.member.name && strcmp(e->as.member.name, "len") == 0;
   default:
@@ -2773,8 +2836,12 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
       if (ret_type && (strcmp(ret_type, "int") == 0 ||
                        strcmp(ret_type, "i64") == 0))
         return true;
-      if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0))
+      bool static_user_call = false;
+      if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0,
+                                       &static_user_call))
         return true;
+      if (static_user_call)
+        return false;
     }
     if (e->as.call.callee && e->as.call.callee->kind != NY_E_IDENT) {
       fun_sig *sig =
@@ -2784,8 +2851,12 @@ static bool ny_is_proven_int_inner(codegen_t *cg, scope *scopes, size_t depth,
       if (ret_type && (strcmp(ret_type, "int") == 0 ||
                        strcmp(ret_type, "i64") == 0))
         return true;
-      if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0))
+      bool static_user_call = false;
+      if (type_call_returns_proven_int(cg, scopes, depth, e, NULL, 0, 0,
+                                       &static_user_call))
         return true;
+      if (static_user_call)
+        return false;
     }
     return false;
   }

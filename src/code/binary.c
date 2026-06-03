@@ -375,6 +375,47 @@ typedef struct {
   ny_int_range_t range;
 } ny_raw_int_param_t;
 
+enum { NY_RAW_INT_CALL_STACK_MAX = 64 };
+
+static _Thread_local const fun_sig
+    *g_raw_int_call_stack[NY_RAW_INT_CALL_STACK_MAX];
+static _Thread_local size_t g_raw_int_call_stack_len;
+
+static bool ny_raw_int_call_active(const fun_sig *sig) {
+  if (!sig)
+    return false;
+  for (size_t i = 0; i < g_raw_int_call_stack_len; ++i)
+    if (g_raw_int_call_stack[i] == sig)
+      return true;
+  return false;
+}
+
+static bool ny_raw_int_call_push(const fun_sig *sig) {
+  if (!sig || ny_raw_int_call_active(sig) ||
+      g_raw_int_call_stack_len >= NY_RAW_INT_CALL_STACK_MAX)
+    return false;
+  g_raw_int_call_stack[g_raw_int_call_stack_len++] = sig;
+  return true;
+}
+
+static void ny_raw_int_call_pop(const fun_sig *sig) {
+  if (g_raw_int_call_stack_len == 0)
+    return;
+  if (g_raw_int_call_stack[g_raw_int_call_stack_len - 1] == sig) {
+    g_raw_int_call_stack_len--;
+    return;
+  }
+  for (size_t i = g_raw_int_call_stack_len; i > 0; --i) {
+    if (g_raw_int_call_stack[i - 1] == sig) {
+      memmove(&g_raw_int_call_stack[i - 1], &g_raw_int_call_stack[i],
+              (g_raw_int_call_stack_len - i) *
+                  sizeof(g_raw_int_call_stack[0]));
+      g_raw_int_call_stack_len--;
+      return;
+    }
+  }
+}
+
 static expr_t *ny_single_return_expr(stmt_t *s) {
   if (!s)
     return NULL;
@@ -1005,8 +1046,13 @@ static ny_raw_int_expr_t ny_lower_raw_int_expr_with_params(codegen_t *cg, scope 
       if (!call_params[i].name)
         return fail;
     }
-    return ny_lower_raw_int_expr_with_params(cg, scopes, depth, ret, call_params,
-                                             e->as.call.args.len, recursion + 1);
+    if (!ny_raw_int_call_push(sig))
+      return fail;
+    ny_raw_int_expr_t lowered =
+        ny_lower_raw_int_expr_with_params(cg, scopes, depth, ret, call_params,
+                                          e->as.call.args.len, recursion + 1);
+    ny_raw_int_call_pop(sig);
+    return lowered;
   }
   default:
     return fail;
