@@ -30,18 +30,15 @@ diagnostic meanings.
 | How do native/FFI boundaries work? | [learn/native.md](learn/native.md) | [spec/native.md](spec/native.md) |
 | How do I measure performance? | [learn/performance.md](learn/performance.md) | `ny perf compare` |
 
-## Language model
+## Language
 
-Nytrix source files are executable by default. A file can also declare a
-`module` and export names for other files. Imports are explicit. Standard
-library APIs live under their owning modules; `ny doc` confirms the exact
-module or symbol name.
+Nytrix source files run directly. A file can also declare a `module` and export
+names for other files. Imports are explicit. Standard-library APIs live under
+their owning modules; `ny doc` confirms exact names and signatures.
 
-The language supports typed bindings, ADTs and generics, async tasks,
-compile-time tables/templates/proofs, native layouts and FFI header imports,
-syntax-extension registries, embedded files, inline assembly, and optional
-safety profiles for strict types, ownership/borrow checking, and raw-memory
-diagnostics.
+Core surface: native binaries, typed bindings, ADTs/generics, async tasks,
+comptime tables/templates/checks, native layouts, C header imports, inline
+assembly, and optional strict type/ownership/raw-memory diagnostics.
 
 ## Learn guides
 
@@ -51,7 +48,7 @@ diagnostics.
 | [programs.md](learn/programs.md) | Scripts, modules, imports, entrypoints, exported names. |
 | [repl.md](learn/repl.md) | Interactive probes, paste behavior, completion, REPL-to-file handoff. |
 | [examples.md](learn/examples.md) | Small complete programs worth copying into a scratch file. |
-| [ui.md](learn/ui.md) | Windows, frame loops, drawing primitives, text, textures, input, 3D start. |
+| [ui.md](learn/ui.md) | Windows, resize-safe frame loops, drawing, text, textures, input, 3D start. |
 | [library.md](learn/library.md) | Facades and domain choice before opening generated API pages. |
 | [tooling.md](learn/tooling.md) | Command forms, docs generation, formatting, tests, audits. |
 | [networking.md](learn/networking.md) | Requests, local servers, sockets, tubes, transport logs. |

@@ -504,8 +504,47 @@ fn _pad_axis(st, axis){
 
 fn _btn_color(st, button){ _pad_button(st, button) ? C_ACCENT : C_IDLE }
 
-fn _trigger_axis(st, mapped_axis, raw_axis){
-   st.get("mapped", false) ? _pad_axis(st, mapped_axis) : _pad_axis(st, raw_axis)
+fn _axis_has_signal(v): bool {
+   _axis_i100(v) != 0
+}
+
+fn _is_sony_pad(st): bool {
+   def lname = str.lower(to_str(st.get("name", "")))
+   str.find(lname, "dualsense") != -1 ||
+      str.find(lname, "dualshock") != -1 ||
+      str.find(lname, "ps5") != -1 ||
+      str.find(lname, "ps4") != -1 ||
+      str.find(lname, "sony") != -1
+}
+
+fn _display_axis_slot(st, axis){
+   if(st.get("mapped", false)){ return _pad_axis(st, axis) }
+   #windows {
+      if(_is_sony_pad(st)){
+         if(axis == win_native.GAMEPAD_AXIS_LEFT_X){ return _pad_axis(st, 0) }
+         if(axis == win_native.GAMEPAD_AXIS_LEFT_Y){ return _pad_axis(st, 1) }
+         if(axis == win_native.GAMEPAD_AXIS_RIGHT_X){ return _pad_axis(st, 2) }
+         if(axis == win_native.GAMEPAD_AXIS_RIGHT_Y){ return _pad_axis(st, 5) }
+         if(axis == win_native.GAMEPAD_AXIS_LEFT_TRIGGER){ return _pad_axis(st, 3) }
+         if(axis == win_native.GAMEPAD_AXIS_RIGHT_TRIGGER){ return _pad_axis(st, 4) }
+      }
+      if(axis == win_native.GAMEPAD_AXIS_LEFT_X){ return _pad_axis(st, 0) }
+      if(axis == win_native.GAMEPAD_AXIS_LEFT_Y){ return _pad_axis(st, 1) }
+      if(axis == win_native.GAMEPAD_AXIS_RIGHT_X){ return _pad_axis(st, 2) }
+      if(axis == win_native.GAMEPAD_AXIS_RIGHT_Y){ return _pad_axis(st, 3) }
+      if(axis == win_native.GAMEPAD_AXIS_LEFT_TRIGGER){ return _pad_axis(st, 5) }
+      if(axis == win_native.GAMEPAD_AXIS_RIGHT_TRIGGER){ return _pad_axis(st, 4) }
+   }
+   #else {
+   if(axis == win_native.GAMEPAD_AXIS_LEFT_X){ return _pad_axis(st, 0) }
+   if(axis == win_native.GAMEPAD_AXIS_LEFT_Y){ return _pad_axis(st, 1) }
+   if(axis == win_native.GAMEPAD_AXIS_RIGHT_X){ return _pad_axis(st, 3) }
+   if(axis == win_native.GAMEPAD_AXIS_RIGHT_Y){ return _pad_axis(st, 4) }
+   if(axis == win_native.GAMEPAD_AXIS_LEFT_TRIGGER){ return _pad_axis(st, 2) }
+   if(axis == win_native.GAMEPAD_AXIS_RIGHT_TRIGGER){ return _pad_axis(st, 5) }
+   }
+   #endif
+   _pad_axis(st, axis)
 }
 
 fn _demo_rows(){
@@ -590,12 +629,27 @@ fn _draw_pad_shell(f64: off_x, f64: off_y, f64: s, any: st, f64: lt, f64: rt): i
    _round_rect(_gx(off_x, s, 175), _gy(off_y, s, 110), _gs(s, 460), _gs(s, 220), _gs(s, 33), C_PANEL)
    _round_rect(_gx(off_x, s, 215), _gy(off_y, s, 98), _gs(s, 100), _gs(s, 10), _gs(s, 5), _btn_color(st, win_native.GAMEPAD_BUTTON_LEFT_BUMPER))
    _round_rect(_gx(off_x, s, 495), _gy(off_y, s, 98), _gs(s, 100), _gs(s, 10), _gs(s, 5), _btn_color(st, win_native.GAMEPAD_BUTTON_RIGHT_BUMPER))
-   _round_rect(_gx(off_x, s, 151), _gy(off_y, s, 110), _gs(s, 15), _gs(s, 70), _gs(s, 5), C_IDLE)
-   _round_rect(_gx(off_x, s, 644), _gy(off_y, s, 110), _gs(s, 15), _gs(s, 70), _gs(s, 5), C_IDLE)
-   def lt_h = ((1.0 + lt) * 0.5) * _gs(s, 70)
-   def rt_h = ((1.0 + rt) * 0.5) * _gs(s, 70)
-   if(lt_h > _gs(s, 10)){ _round_rect(_gx(off_x, s, 151), _gy(off_y, s, 110), _gs(s, 15), lt_h, _gs(s, 5), C_ACCENT) }
-   if(rt_h > _gs(s, 10)){ _round_rect(_gx(off_x, s, 644), _gy(off_y, s, 110), _gs(s, 15), rt_h, _gs(s, 5), C_ACCENT) }
+   def tx_l = _gx(off_x, s, 151)
+   def tx_r = _gx(off_x, s, 644)
+   def ty = _gy(off_y, s, 110)
+   def tw = _gs(s, 15)
+   def th = _gs(s, 70)
+   _round_rect(tx_l, ty, tw, th, _gs(s, 5), C_IDLE)
+   _round_rect(tx_r, ty, tw, th, _gs(s, 5), C_IDLE)
+   def lt_t = _clampf((1.0 + lt) * 0.5, 0.0, 1.0)
+   def rt_t = _clampf((1.0 + rt) * 0.5, 0.0, 1.0)
+   def lt_h = th * lt_t
+   def rt_h = th * rt_t
+   if(lt_t > 0.01){
+      def fill = lt_h < _gs(s, 4) ? _gs(s, 4) : lt_h
+      _round_rect(tx_l, ty + th - fill, tw, fill, _gs(s, 5), C_ACCENT)
+   }
+   if(rt_t > 0.01){
+      def fill = rt_h < _gs(s, 4) ? _gs(s, 4) : rt_h
+      _round_rect(tx_r, ty + th - fill, tw, fill, _gs(s, 5), C_ACCENT)
+   }
+   _rect(tx_l - _gs(s, 2), ty + th - lt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_TEXT)
+   _rect(tx_r - _gs(s, 2), ty + th - rt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_TEXT)
    return 0
 }
 
@@ -654,10 +708,24 @@ fn _draw_dpad(f64: off_x, f64: off_y, f64: s, any: st): int {
 }
 
 fn _draw_stick(f64: off_x, f64: off_y, f64: s, any: st, f64: cx, f64: cy, f64: ax, f64: ay, int: button): int {
+   def sx = _clampf(ax, -1.0, 1.0)
+   def sy = _clampf(ay, -1.0, 1.0)
+   def center_x = _gx(off_x, s, cx)
+   def center_y = _gy(off_y, s, cy)
+   def travel = _gs(s, 30)
+   def knob_x = center_x + sx * travel
+   def knob_y = center_y + sy * travel
    def knob = _pad_button(st, button) ? C_ACCENT : C_STICK
-   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 40), C_BLACK)
-   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 35), C_IDLE)
-   _disc(_gx(off_x, s, cx) + (ax * _gs(s, 20)), _gy(off_y, s, cy) + (ay * _gs(s, 20)), _gs(s, 25), knob)
+   _disc(center_x, center_y, _gs(s, 42), C_BLACK)
+   _disc(center_x, center_y, _gs(s, 36), C_IDLE)
+   _rect(center_x - travel, center_y - max(1.0, _gs(s, 1)), travel * 2.0, max(1.0, _gs(s, 2)), C_MID)
+   _rect(center_x - max(1.0, _gs(s, 1)), center_y - travel, max(1.0, _gs(s, 2)), travel * 2.0, C_MID)
+   if(_axis_has_signal(sx) || _axis_has_signal(sy)){
+      def dx = knob_x >= center_x ? knob_x - center_x : center_x - knob_x
+      def dy = knob_y >= center_y ? knob_y - center_y : center_y - knob_y
+      _rect(min(center_x, knob_x), min(center_y, knob_y), max(2.0, dx), max(2.0, dy), C_ACCENT_SOFT)
+   }
+   _disc(knob_x, knob_y, _gs(s, 25), knob)
    return 0
 }
 
@@ -676,12 +744,12 @@ fn _draw_simple_dashboard(any: st, f64: x, f64: y, f64: w, f64: h): int {
    def s = fit_s * CONTROLLER_DRAW_SCALE
    def off_x = zone_x + (zone_w - ref_w * s) * 0.5 - ref_min_x * s
    def off_y = zone_y + (zone_h - ref_h * s) * 0.5 - ref_min_y * s
-   def lx = _pad_axis(st, win_native.GAMEPAD_AXIS_LEFT_X)
-   def ly = _pad_axis(st, win_native.GAMEPAD_AXIS_LEFT_Y)
-   def rx = _pad_axis(st, win_native.GAMEPAD_AXIS_RIGHT_X)
-   def ry = _pad_axis(st, win_native.GAMEPAD_AXIS_RIGHT_Y)
-   def lt = _trigger_axis(st, win_native.GAMEPAD_AXIS_LEFT_TRIGGER, 2)
-   def rt = _trigger_axis(st, win_native.GAMEPAD_AXIS_RIGHT_TRIGGER, 5)
+   def lx = _display_axis_slot(st, win_native.GAMEPAD_AXIS_LEFT_X)
+   def ly = _display_axis_slot(st, win_native.GAMEPAD_AXIS_LEFT_Y)
+   def rx = _display_axis_slot(st, win_native.GAMEPAD_AXIS_RIGHT_X)
+   def ry = _display_axis_slot(st, win_native.GAMEPAD_AXIS_RIGHT_Y)
+   def lt = _display_axis_slot(st, win_native.GAMEPAD_AXIS_LEFT_TRIGGER)
+   def rt = _display_axis_slot(st, win_native.GAMEPAD_AXIS_RIGHT_TRIGGER)
    _draw_pad_shell(off_x, off_y, s, st, lt, rt)
    _draw_menu_cluster(off_x, off_y, s, st)
    _draw_face_cluster(off_x, off_y, s, st)
@@ -727,7 +795,7 @@ fn _probe_axes_text(any: st, int: max_axes): str {
    def shown = axis_count < max_axes ? axis_count : max_axes
    mut i = 0
    while(i < shown){
-      out = out + " " + _axis_label(i) + "=" + _fixed2(_pad_axis(st, i))
+      out = out + " " + _axis_label(i) + "=" + _fixed2(_display_axis_slot(st, i))
       i += 1
    }
    if(axis_count > shown){ out = out + " +" + to_str(axis_count - shown) }
@@ -891,7 +959,7 @@ fn _probe_signature(any: st): str {
    out = out + " mapped_axes"
    mut i = 0
    while(i < st.get("axis_count", 0) && i < 6){
-      out = out + " " + _axis_label(i) + "=" + to_str(_axis_i100(_pad_axis(st, i)))
+      out = out + " " + _axis_label(i) + "=" + to_str(_axis_i100(_display_axis_slot(st, i)))
       i += 1
    }
    out = out + " raw_axes"
@@ -1023,7 +1091,7 @@ fn _draw_axis_block(st, x, y, w, line_h){
    mut i = 0
    while(i < axis_count){
       def label = _axis_label(i)
-      def val_s = _fixed2(_pad_axis(st, i))
+      def val_s = _fixed2(_display_axis_slot(st, i))
       _queue_text(label, x, row_y, C_TEXT)
       _queue_text(val_s, x + w - _text_w(val_s), row_y, C_MUTED)
       row_y += line_h

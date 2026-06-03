@@ -469,7 +469,7 @@ static char *ny_commas_to_pipes(const char *raw) {
 }
 
 static char *ny_ui_default_gui_dump_path(const char *shot) {
-  const char *prefix = "build/cache/fb/ui_gui_";
+  const char *prefix = "fb/ui_gui_";
   const char *suffix = ".png";
   if (!shot || !*shot)
     shot = "shot";
@@ -486,7 +486,9 @@ static char *ny_ui_default_gui_dump_path(const char *shot) {
   }
   memcpy(out + np + ns, suffix, nx);
   out[np + ns + nx] = '\0';
-  return out;
+  char *path = ny_join_path_file(ny_default_cache_root_dir(), out);
+  free(out);
+  return path;
 }
 
 static char *ny_ui_default_profile_dir(void) {
@@ -496,13 +498,8 @@ static char *ny_ui_default_profile_dir(void) {
 #else
   int pid = (int)getpid();
 #endif
-  snprintf(buf, sizeof(buf), "build/cache/profiles/native_%d", pid);
-  size_t n = strlen(buf);
-  char *out = (char *)malloc(n + 1);
-  if (!out)
-    return NULL;
-  memcpy(out, buf, n + 1);
-  return out;
+  snprintf(buf, sizeof(buf), "profiles/native_%d", pid);
+  return ny_join_path_file(ny_default_cache_root_dir(), buf);
 }
 
 static int ny_mkdir_one(const char *path) {
@@ -651,6 +648,7 @@ typedef struct {
   bool post_autofit;
   bool post_lookat;
   char *default_dump_path;
+  char *default_dump_dir;
   char *default_profile_dir;
 } ny_ui_bridge_state_t;
 
@@ -847,16 +845,23 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
 
 static void ny_ui_bridge_resolve_defaults(ny_ui_bridge_state_t *st) {
   if ((!st->dump_path || !*st->dump_path) && st->frame_hash) {
-    st->dump_path = "build/cache/fb_hash/frame.png";
+    st->default_dump_path = ny_join_path_file(ny_default_cache_root_dir(), "fb_hash/frame.png");
+    if (st->default_dump_path)
+      st->dump_path = st->default_dump_path;
   } else if ((!st->dump_path || !*st->dump_path) && st->gui_shot && *st->gui_shot) {
     st->default_dump_path = ny_ui_default_gui_dump_path(st->gui_shot);
     if (st->default_dump_path)
       st->dump_path = st->default_dump_path;
   } else if ((!st->dump_path || !*st->dump_path) && st->want_dump) {
-    st->dump_path = "build/cache/fb/fb_dump.png";
+    st->default_dump_path = ny_join_path_file(ny_default_cache_root_dir(), "fb/fb_dump.png");
+    if (st->default_dump_path)
+      st->dump_path = st->default_dump_path;
   }
-  if ((!st->dump_dir || !*st->dump_dir) && st->dump_all)
-    st->dump_dir = "build/cache/fb";
+  if ((!st->dump_dir || !*st->dump_dir) && st->dump_all) {
+    st->default_dump_dir = ny_join_path_file(ny_default_cache_root_dir(), "fb");
+    if (st->default_dump_dir)
+      st->dump_dir = st->default_dump_dir;
+  }
   if ((st->ms_profile || st->render_trace || st->nosurface_profile) &&
       (!st->profile_dir || !*st->profile_dir)) {
     st->default_profile_dir = ny_ui_default_profile_dir();
@@ -955,6 +960,7 @@ static int ny_bridge_ui_script_args_to_env(const ny_options *opt, int argc, char
   ny_ui_bridge_resolve_defaults(&st);
   ny_ui_bridge_apply_env(&st);
   free(st.default_dump_path);
+  free(st.default_dump_dir);
   free(st.default_profile_dir);
   return 0;
 }

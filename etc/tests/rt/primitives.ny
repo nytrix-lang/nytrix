@@ -106,6 +106,18 @@ d = d.set("b", 11)
 clear(d)
 assert(!d.contains("b"), "clear dict")
 assert(keys(d) == [], "clear dict keys")
+mut half_full = dict(20)
+mut fill_i = 0
+while(fill_i < 16){
+   half_full = half_full.set("k" + to_str(fill_i), fill_i)
+   fill_i += 1
+}
+fn update_half_full_dict(any: x): int {
+   x.set("k0", 99)
+   0
+}
+update_half_full_dict(half_full)
+assert(half_full.get("k0", 0) == 99, "dict update at resize threshold mutates existing key")
 mut s = set()
 s = add(s, "x")
 s = add(s, "y")

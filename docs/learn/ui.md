@@ -20,13 +20,21 @@ def win = gfx.init_window(960, 540, "Nytrix UI")
 if(!win){ panic("window init failed") }
 
 def font = gfx.font_load_first(["etc/assets/fonts/jetbrains.ttf"], 22)
+def bg = gfx.color_rgb(0.07, 0.08, 0.10)
 
 while(!gfx.window_should_close()){
-   def ui = gfx.begin_frame_layout(gfx.color_rgb(0.07, 0.08, 0.10), 960.0, 540.0)
+   def ui = gfx.begin_frame_layout(bg, 960.0, 540.0)
    if(!ui){
       continue
    }
 
+   gfx.draw_rect(
+      float(ui.get("view_x", 0.0)),
+      float(ui.get("view_y", 0.0)),
+      float(ui.get("view_w", 960.0)),
+      float(ui.get("view_h", 540.0)),
+      bg
+   )
    gfx.draw_rect(48.0, 48.0, 260.0, 120.0, gfx.color_rgb(0.10, 0.32, 0.72))
    gfx.draw_rectangle_lines(48.0, 48.0, 260.0, 120.0, gfx.WHITE, 2.0)
    gfx.draw_circle(420.0, 108.0, 54.0, gfx.ORANGE)
@@ -44,8 +52,8 @@ gfx.close_window()
 | Step | API | Notes |
 | --- | --- | --- |
 | Create context | `gfx.init_window(width, height, title, flags=0, vsync=false, filter=false, msaa=1)` | Returns a window dict or `false`. |
-| Start frame | `gfx.begin_frame_clear(color)`, `gfx.begin_frame_layout(color, base_w, base_h)` | Starts drawing and clears the framebuffer; `begin_frame_layout` also syncs a resize-aware 2D layout. |
-| Draw | `gfx.draw_*` | Coordinates are pixel-like by default; after `begin_frame_layout` they are in the chosen design size. Colors are `[r, g, b, a]` floats or packed colors where supported. |
+| Start frame | `gfx.begin_frame_clear(color)`, `gfx.begin_frame_layout(color, base_w, base_h)` | Starts drawing and clears the whole live framebuffer; `begin_frame_layout` also syncs a resize-aware 2D projection. |
+| Draw | `gfx.draw_*` | Coordinates are pixel-like by default; after `begin_frame_layout` they are in design space plus any extra visible area from resize. Colors are `[r, g, b, a]` floats or packed colors where supported. |
 | Present | `gfx.end_frame()` | Submits the frame. |
 | Close check | `gfx.window_should_close()` | Polls events and returns true after close/escape/OS quit. |
 | Shutdown | `gfx.close_window()` | Releases renderer state and closes the active window. |
@@ -63,6 +71,10 @@ gfx.close_window()
 | Projection | `set_ortho_2d`, `set_ortho`, `set_perspective`, `set_model_matrix`, `set_view`, `set_projection` |
 | Responsive layout | `begin_frame_layout`, `layout_fit`, `layout_x`, `layout_y`, `layout_size`, `layout_rect`, `framebuffer_size_f64` |
 | Timing and capture | `get_frame_time`, `get_time`, `renderer_frame_stats`, `snapshot`, `request_frame_capture`, `get_pixel` |
+
+`begin_frame_layout` returns `view_x`, `view_y`, `view_w`, and `view_h`.
+Draw a background over that rect when the content should fill every resized
+edge instead of only the original design rectangle.
 
 ## Input
 
@@ -107,6 +119,21 @@ while(e){
       window.set_should_close(win, true)
    }
    e = window.check_event(win)
+}
+```
+
+Gamepads use the same window facade for mapped controls and raw fallback.
+
+```ny
+use std.os.ui.window as window
+
+def pads = window.gamepads()
+if(pads.len > 0){
+   def jid = pads[0]
+   def name = window.gamepad_name(jid)
+   def left_x = window.gamepad_axis(jid, "LEFTX")
+   def jump = window.gamepad_button(jid, "A")
+   print(name, left_x, jump)
 }
 ```
 

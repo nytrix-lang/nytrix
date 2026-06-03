@@ -1,6 +1,6 @@
 ;; Keywords: window input keyboard mouse gamepad joystick controller
 ;; Gamepad input normalization, button labels, axes, hats, and mapping state.
-module std.os.ui.window.input.gamepad(is_gamepad_connected, is_mapped, get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks, get_joysticks, add_gamepad_mapping, get_gamepad_axis_count, get_gamepad_button_count, GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP)
+module std.os.ui.window.input.gamepad(gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, is_gamepad_connected, is_mapped, get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks, get_joysticks, add_gamepad_mapping, get_gamepad_axis_count, get_gamepad_button_count, GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP)
 use std.core
 use std.math.float as fmath
 use std.os.ui.window.platform as ui_backend
@@ -189,6 +189,56 @@ fn get_gamepad_axis(i32: jid, any: axis): f64 {
    def ptr = _mapped_state_ptr(jid)
    if(ptr && _in_bounds(idx, _GAMEPAD_AXIS_COUNT)){ return _sanitize_axis(load32_f32(ptr, 16 + idx * 4)) }
    _raw_axis_value(jid, idx)
+}
+
+fn gamepad_count(): i32 {
+   "Returns the number of connected joysticks."
+   load_joysticks()
+}
+
+fn gamepads(): list {
+   "Returns connected joystick IDs."
+   get_joysticks()
+}
+
+fn gamepad_connected(i32: jid): bool {
+   "Returns true when joystick `jid` is connected and mapped as a gamepad."
+   is_gamepad_connected(jid)
+}
+
+fn gamepad_mapped(i32: jid): bool {
+   "Returns true when joystick `jid` has a gamepad mapping."
+   is_mapped(jid)
+}
+
+fn gamepad_name(i32: jid): str {
+   "Returns mapped gamepad name when available, else raw joystick name."
+   get_gamepad_name(jid)
+}
+
+fn gamepad_guid(i32: jid): str {
+   "Returns the SDL-style GUID for joystick `jid`."
+   get_gamepad_guid(jid)
+}
+
+fn gamepad_axis(i32: jid, any: axis): f64 {
+   "Returns mapped axis value in [-1, 1], with raw fallback."
+   get_gamepad_axis(jid, axis)
+}
+
+fn gamepad_button(i32: jid, any: button): bool {
+   "Returns mapped button state, with raw fallback."
+   get_gamepad_button(jid, button)
+}
+
+fn gamepad_axis_count(i32: jid): i32 {
+   "Returns mapped axis count or raw joystick axis count."
+   get_gamepad_axis_count(jid)
+}
+
+fn gamepad_button_count(i32: jid): i32 {
+   "Returns mapped button count or raw joystick button count."
+   get_gamepad_button_count(jid)
 }
 
 def GAMEPAD_BUTTONS = [

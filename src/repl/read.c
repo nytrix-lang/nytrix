@@ -3155,8 +3155,15 @@ char *ny_readline(const char *prompt) {
       len = 0;
       pos = 0;
       buf[0] = '\0';
+      pasting = 0;
+      paste_start = -1;
       repl_reset_selection_state(&sel_anchor, &sel_mode);
-      printf("\n");
+      if (vt_out_ok) {
+        draw_line(prompt, buf, len, pos, prompt_cols);
+        printf("^C\n");
+      } else {
+        printf("^C\n");
+      }
       prev_lines = 0;
       prev_total_rows = 0;
       draw_line(prompt, buf, len, pos, prompt_cols);
@@ -3169,7 +3176,7 @@ char *ny_readline(const char *prompt) {
       if (k == -2)
         continue;
     }
-    if (k == K_CTRL_C || k == K_CTRL_G) {
+    if (k == K_CTRL_G) {
       printf("^C\n");
       buf[0] = '\0';
       len = 0;
@@ -3738,7 +3745,7 @@ char *ny_readline(const char *prompt) {
     }
   }
   if (vt_out_ok) {
-    printf("\x1b[?2004l");
+    printf("\x1b[0m\x1b[?25h\x1b[?2004l");
     fflush(stdout);
   }
 #ifdef _WIN32
