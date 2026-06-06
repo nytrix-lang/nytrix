@@ -1,5 +1,9 @@
-;; Keywords: platform window backend cocoa macos joystick
+;; Keywords: platform window backend cocoa macos joystick os ui input
 ;; Cocoa native window backend for macOS windows, input, monitors, and clipboard.
+;; References:
+;; - std.os.ui.window.platform
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
 use std.core
 use std.core.mem (cstr)
@@ -10,7 +14,7 @@ use std.os.ui.window.consts
 use std.os.ui.window.platform.api as backend_api
 use std.os.ui.render.vk.vulkan (vk_create_metal_surface_ext)
 
-fn _handle_from(any: v): any {
+fn _handle_from(any v) any {
    if(is_dict(v)){ return v.get("handle", 0) }
    v
 }
@@ -35,13 +39,19 @@ def NSFloatingWindowLevel = 3
 def NSMainMenuWindowLevel = 24
 def NSBitmapFormatAlphaNonpremultiplied = 2
 
-fn available(): bool { #macos { return true } #else { return false } #endif }
+fn available() bool {
+   "Runs the available operation."
+   #macos { return true } #else { return false } #endif
+}
 
-fn get_backend_name(): str { return "cocoa" }
+fn get_backend_name() str {
+   "Returns get backend name."
+   return "cocoa"
+}
 
 mut _cocoa_frameworks_loaded = false
 
-fn _load_cocoa_frameworks(): bool {
+fn _load_cocoa_frameworks() bool {
    if(_cocoa_frameworks_loaded){ return true }
    #macos {
       def flags = ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()
@@ -64,177 +74,247 @@ fn _load_cocoa_frameworks(): bool {
    #include <AppKit/AppKit.h>
    #include <ApplicationServices/ApplicationServices.h>
    extern "" {
-      fn _objc_msgSend(ptr: target, fnptr: op): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr(ptr: target, fnptr: op, ptr: arg): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_ptr(ptr: target, fnptr: op, ptr: a1, ptr: a2): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_ptr_ptr(ptr: target, fnptr: op, ptr: a1, ptr: a2, ptr: a3): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_u64_ptr_ptr_i64(ptr: target, fnptr: op, u64: a1, ptr: a2, ptr: a3, i64: a4): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_i64(ptr: target, fnptr: op, i64: a1, i64: a2): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_i64_arg(ptr: target, fnptr: op, i64: arg): ptr as "objc_msgSend"
-      fn _objc_msgSend_sel(ptr: target, fnptr: op, fnptr: arg): ptr as "objc_msgSend"
-      fn _objc_msgSend_f64(ptr: target, fnptr: op): f64 as "objc_msgSend"
-      fn _objc_msgSend_arg_f64(ptr: target, fnptr: op, f64: arg): ptr as "objc_msgSend"
-      fn _objc_msgSend_size(ptr: target, fnptr: op, f64: w, f64: h): ptr as "objc_msgSend"
-      fn _objc_msgSend_ptr_point(ptr: target, fnptr: op, ptr: arg, f64: x, f64: y): ptr as "objc_msgSend"
-      fn _objc_msgSend_bitmap_init(ptr: target, fnptr: op, ptr: planes, i64: pixels_wide, i64: pixels_high, i64: bits_per_sample, i64: samples_per_pixel, i8: has_alpha, i8: is_planar, ptr: color_space_name, u64: bitmap_format, i64: bytes_per_row, i64: bits_per_pixel): ptr as "objc_msgSend"
-      fn _objc_msgSend_rect_u64_i64_i8(ptr: target, fnptr: op, f64: x, f64: y, f64: w, f64: h, u64: style, i64: backing, i8: do_defer): ptr as "objc_msgSend"
-      fn _objc_msgSend_i64(ptr: target, fnptr: op): i64 as "objc_msgSend"
-      fn _objc_msgSend_i64_arg(ptr: target, fnptr: op, i64: arg): i64 as "objc_msgSend"
-      fn _objc_msgSend_i64_sel(ptr: target, fnptr: op, fnptr: arg): i64 as "objc_msgSend"
-      fn _ny_objc_getClass(ptr: name): ptr as "objc_getClass"
-      fn _ny_sel_registerName(ptr: name): fnptr as "sel_registerName"
-      fn _ny_objc_allocateClassPair(ptr: superclass, ptr: name, u64: extra_bytes): ptr as "objc_allocateClassPair"
-      fn _ny_class_addMethod(ptr: cls, fnptr: name, fnptr: imp, ptr: types): bool as "class_addMethod"
-      fn _ny_objc_registerClassPair(ptr: cls): any as "objc_registerClassPair"
-      fn CGAssociateMouseAndMouseCursorPosition(any: connected): any
-      fn CGDisplayCopyAllDisplayModes(any: display_id, any: options): any
-      fn CGDisplayCopyDisplayMode(any: display_id): any
-      fn CGDisplayGammaTableCapacity(any: display_id): int
-      fn CGDisplayModeGetHeight(any: mode): int
-      fn CGDisplayModeGetRefreshRate(any: mode): int
-      fn CGDisplayModeGetWidth(any: mode): int
-      fn CGDisplayModeRelease(any: mode): any
-      fn CGDisplaySetDisplayMode(any: display_id, any: mode, any: options): int
-      fn CGDisplayUnitNumber(any: display_id): int
-      fn CGGetActiveDisplayList(u32: max_displays, ptr: ids, ptr: count): int
-      fn CGGetDisplayTransferByTable(any: display_id, any: capacity, any: red, any: green, any: blue, any: count): int
-      fn CGSetDisplayTransferByTable(any: display_id, any: size, any: red, any: green, any: blue): int
-      fn CGWarpMouseCursorPosition(any: x, any: y): any
-      fn CFArrayGetCount(any: arr): int
-      fn CFArrayGetValueAtIndex(any: arr, int: index): any
-      fn CFRelease(any: obj): any
+      fn _objc_msgSend(ptr target, fnptr op) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr(ptr target, fnptr op, ptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_ptr(ptr target, fnptr op, ptr a1, ptr a2) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_ptr_ptr(ptr target, fnptr op, ptr a1, ptr a2, ptr a3) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_u64_ptr_ptr_i64(ptr target, fnptr op, u64 a1, ptr a2, ptr a3, i64 a4) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_i64(ptr target, fnptr op, i64 a1, i64 a2) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_i64_arg(ptr target, fnptr op, i64 arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_sel(ptr target, fnptr op, fnptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_f64(ptr target, fnptr op) f64 as "objc_msgSend"
+      fn _objc_msgSend_arg_f64(ptr target, fnptr op, f64 arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_size(ptr target, fnptr op, f64 w, f64 h) ptr as "objc_msgSend"
+      fn _objc_msgSend_ptr_point(ptr target, fnptr op, ptr arg, f64 x, f64 y) ptr as "objc_msgSend"
+      fn _objc_msgSend_bitmap_init(ptr target, fnptr op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_u64_i64_i8(ptr target, fnptr op, f64 x, f64 y, f64 w, f64 h, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
+      fn _objc_msgSend_i64(ptr target, fnptr op) i64 as "objc_msgSend"
+      fn _objc_msgSend_i64_arg(ptr target, fnptr op, i64 arg) i64 as "objc_msgSend"
+      fn _objc_msgSend_i64_sel(ptr target, fnptr op, fnptr arg) i64 as "objc_msgSend"
+      fn _ny_objc_getClass(ptr name) ptr as "objc_getClass"
+      fn _ny_sel_registerName(ptr name) fnptr as "sel_registerName"
+      fn _ny_objc_allocateClassPair(ptr superclass, ptr name, u64 extra_bytes) ptr as "objc_allocateClassPair"
+      fn _ny_class_addMethod(ptr cls, fnptr name, fnptr imp, ptr types) bool as "class_addMethod"
+      fn _ny_objc_registerClassPair(ptr cls) any as "objc_registerClassPair"
+      fn CGAssociateMouseAndMouseCursorPosition(any connected) any
+      fn CGDisplayCopyAllDisplayModes(any display_id, any options) any
+      fn CGDisplayCopyDisplayMode(any display_id) any
+      fn CGDisplayGammaTableCapacity(any display_id) int
+      fn CGDisplayModeGetHeight(any mode) int
+      fn CGDisplayModeGetRefreshRate(any mode) int
+      fn CGDisplayModeGetWidth(any mode) int
+      fn CGDisplayModeRelease(any mode) any
+      fn CGDisplaySetDisplayMode(any display_id, any mode, any options) int
+      fn CGDisplayUnitNumber(any display_id) int
+      fn CGGetActiveDisplayList(u32 max_displays, ptr ids, ptr count) int
+      fn CGGetDisplayTransferByTable(any display_id, any capacity, any red, any green, any blue, any count) int
+      fn CGSetDisplayTransferByTable(any display_id, any size, any red, any green, any blue) int
+      fn CGWarpMouseCursorPosition(any x, any y) any
+      fn CFArrayGetCount(any arr) int
+      fn CFArrayGetValueAtIndex(any arr, int index) any
+      fn CFRelease(any obj) any
    }
 } #else {
-   fn _ny_objc_getClass(ptr: _name): ptr { 0 }
-   fn _ny_sel_registerName(ptr: _name): fnptr { return fn(){ 0 } }
-   fn _ny_objc_allocateClassPair(ptr: _superclass, ptr: _name, u64: _extra_bytes): ptr { 0 }
-   fn _ny_class_addMethod(ptr: _cls, fnptr: _name, fnptr: _imp, ptr: _types): bool { false }
-   fn _ny_objc_registerClassPair(ptr: _cls): any { 0 }
-   fn CGAssociateMouseAndMouseCursorPosition(any: _connected): any { 0 }
-   fn CGDisplayCopyAllDisplayModes(any: _display_id, any: _options): any { 0 }
-   fn CGDisplayCopyDisplayMode(any: _display_id): any { 0 }
-   fn CGDisplayGammaTableCapacity(any: _display_id): int { 0 }
-   fn CGDisplayModeGetHeight(any: _mode): int { 0 }
-   fn CGDisplayModeGetRefreshRate(any: _mode): int { 0 }
-   fn CGDisplayModeGetWidth(any: _mode): int { 0 }
-   fn CGDisplayModeRelease(any: _mode): any { 0 }
-   fn CGDisplaySetDisplayMode(any: _display_id, any: _mode, any: _options): int { 1 }
-   fn CGDisplayUnitNumber(any: _display_id): int { 0 }
-   fn CGGetActiveDisplayList(u32: _max_displays, ptr: _ids, ptr: _count): int { 1 }
-   fn CGGetDisplayTransferByTable(any: _display_id, any: _capacity, any: _red, any: _green, any: _blue, any: _count): int { 1 }
-   fn CGSetDisplayTransferByTable(any: _display_id, any: _size, any: _red, any: _green, any: _blue): int { 1 }
-   fn CGWarpMouseCursorPosition(any: _x, any: _y): any { 0 }
-   fn CFArrayGetCount(any: _arr): int { 0 }
-   fn CFArrayGetValueAtIndex(any: _arr, int: _index): any { 0 }
-   fn CFRelease(any: _obj): any { 0 }
+   "Runs the CFRelease operation."
+   fn _ny_objc_getClass(ptr _name) ptr { 0 }
+   fn _ny_sel_registerName(ptr _name) fnptr { return fn() { 0 } }
+   fn _ny_objc_allocateClassPair(ptr _superclass, ptr _name, u64 _extra_bytes) ptr { 0 }
+   fn _ny_class_addMethod(ptr _cls, fnptr _name, fnptr _imp, ptr _types) bool { false }
+   fn _ny_objc_registerClassPair(ptr _cls) any { 0 }
+   fn CGAssociateMouseAndMouseCursorPosition(any _connected) any {
+      "Runs the CGAssociateMouseAndMouseCursorPosition operation."
+      0
+   }
+   fn CGDisplayCopyAllDisplayModes(any _display_id, any _options) any {
+      "Runs the CGDisplayCopyAllDisplayModes operation."
+      0
+   }
+   fn CGDisplayCopyDisplayMode(any _display_id) any {
+      "Runs the CGDisplayCopyDisplayMode operation."
+      0
+   }
+   fn CGDisplayGammaTableCapacity(any _display_id) int {
+      "Runs the CGDisplayGammaTableCapacity operation."
+      0
+   }
+   fn CGDisplayModeGetHeight(any _mode) int {
+      "Runs the CGDisplayModeGetHeight operation."
+      0
+   }
+   fn CGDisplayModeGetRefreshRate(any _mode) int {
+      "Runs the CGDisplayModeGetRefreshRate operation."
+      0
+   }
+   fn CGDisplayModeGetWidth(any _mode) int {
+      "Runs the CGDisplayModeGetWidth operation."
+      0
+   }
+   fn CGDisplayModeRelease(any _mode) any {
+      "Runs the CGDisplayModeRelease operation."
+      0
+   }
+   fn CGDisplaySetDisplayMode(any _display_id, any _mode, any _options) int {
+      "Runs the CGDisplaySetDisplayMode operation."
+      1
+   }
+   fn CGDisplayUnitNumber(any _display_id) int {
+      "Runs the CGDisplayUnitNumber operation."
+      0
+   }
+   fn CGGetActiveDisplayList(u32 _max_displays, ptr _ids, ptr _count) int {
+      "Runs the CGGetActiveDisplayList operation."
+      1
+   }
+   fn CGGetDisplayTransferByTable(any _display_id, any _capacity, any _red, any _green, any _blue, any _count) int {
+      "Runs the CGGetDisplayTransferByTable operation."
+      1
+   }
+   fn CGSetDisplayTransferByTable(any _display_id, any _size, any _red, any _green, any _blue) int {
+      "Runs the CGSetDisplayTransferByTable operation."
+      1
+   }
+   fn CGWarpMouseCursorPosition(any _x, any _y) any {
+      "Runs the CGWarpMouseCursorPosition operation."
+      0
+   }
+   fn CFArrayGetCount(any _arr) int {
+      "Runs the CFArrayGetCount operation."
+      0
+   }
+   fn CFArrayGetValueAtIndex(any _arr, int _index) any {
+      "Runs the CFArrayGetValueAtIndex operation."
+      0
+   }
+   fn CFRelease(any _obj) any {
+      "Runs the CFRelease operation."
+      0
+   }
 } #endif
 
-fn objc_msgSend(any: target, any: op): any {
+fn objc_msgSend(any target, any op) any {
+   "Runs the objc msgSend operation."
    #macos { return _objc_msgSend(target, op) }
    0
 }
 
-fn objc_msgSend_ptr(any: target, any: op, ptr: arg=0): any {
+fn objc_msgSend_ptr(any target, any op, ptr arg=0) any {
+   "Runs the objc msgSend ptr operation."
    #macos { return _objc_msgSend_ptr(target, op, arg) }
    0
 }
 
-fn objc_msgSend_ptr_ptr(any: target, any: op, ptr: a1=0, ptr: a2=0): any {
+fn objc_msgSend_ptr_ptr(any target, any op, ptr a1=0, ptr a2=0) any {
+   "Runs the objc msgSend ptr ptr operation."
    #macos { return _objc_msgSend_ptr_ptr(target, op, a1, a2) }
    0
 }
 
-fn objc_msgSend_ptr_ptr_ptr(any: target, any: op, ptr: a1=0, ptr: a2=0, ptr: a3=0): any {
+fn objc_msgSend_ptr_ptr_ptr(any target, any op, ptr a1=0, ptr a2=0, ptr a3=0) any {
+   "Runs the objc msgSend ptr ptr ptr operation."
    #macos { return _objc_msgSend_ptr_ptr_ptr(target, op, a1, a2, a3) }
    0
 }
 
-fn objc_msgSend_ptr_u64_ptr_ptr_i64(any: target, any: op, u64: a1=0, ptr: a2=0, ptr: a3=0, i64: a4=0): any {
+fn objc_msgSend_ptr_u64_ptr_ptr_i64(any target, any op, u64 a1=0, ptr a2=0, ptr a3=0, i64 a4=0) any {
+   "Runs the objc msgSend ptr u64 ptr ptr i64 operation."
    #macos { return _objc_msgSend_ptr_u64_ptr_ptr_i64(target, op, a1, a2, a3, a4) }
    0
 }
 
-fn objc_msgSend_ptr_i64(any: target, any: op, i64: a1=0, i64: a2=0): any {
+fn objc_msgSend_ptr_i64(any target, any op, i64 a1=0, i64 a2=0) any {
+   "Runs the objc msgSend ptr i64 operation."
    #macos { return _objc_msgSend_ptr_i64(target, op, a1, a2) }
    0
 }
 
-fn objc_msgSend_ptr_i64_arg(any: target, any: op, i64: arg=0): any {
+fn objc_msgSend_ptr_i64_arg(any target, any op, i64 arg=0) any {
+   "Runs the objc msgSend ptr i64 arg operation."
    #macos { return _objc_msgSend_ptr_i64_arg(target, op, arg) }
    0
 }
 
-fn objc_msgSend_sel(any: target, any: op, any: arg): any {
+fn objc_msgSend_sel(any target, any op, any arg) any {
+   "Runs the objc msgSend sel operation."
    #macos { return _objc_msgSend_sel(target, op, arg) }
    0
 }
 
-fn objc_msgSend_f64(any: target, any: op): f64 {
+fn objc_msgSend_f64(any target, any op) f64 {
+   "Runs the objc msgSend f64 operation."
    #macos { return _objc_msgSend_f64(target, op) }
    0.0
 }
 
-fn objc_msgSend_arg_f64(any: target, any: op, f64: arg): any {
+fn objc_msgSend_arg_f64(any target, any op, f64 arg) any {
+   "Runs the objc msgSend arg f64 operation."
    #macos { return _objc_msgSend_arg_f64(target, op, arg) }
    0
 }
 
-fn objc_msgSend_ptr_f64(any: target, any: op, any: arg): any {
+fn objc_msgSend_ptr_f64(any target, any op, any arg) any {
+   "Runs the objc msgSend ptr f64 operation."
    #macos { return _objc_msgSend_arg_f64(target, op, float(arg)) }
    0
 }
 
-fn objc_msgSend_size(any: target, any: op, any: w, any: h): any {
+fn objc_msgSend_size(any target, any op, any w, any h) any {
+   "Runs the objc msgSend size operation."
    #macos { return _objc_msgSend_size(target, op, float(w), float(h)) }
    0
 }
 
-fn objc_msgSend_ptr_point(any: target, any: op, ptr: arg=0, any: x=0, any: y=0): any {
+fn objc_msgSend_ptr_point(any target, any op, ptr arg=0, any x=0, any y=0) any {
+   "Runs the objc msgSend ptr point operation."
    #macos { return _objc_msgSend_ptr_point(target, op, arg, float(x), float(y)) }
    0
 }
 
-fn objc_msgSend_bitmap_init(any: target, any: op, ptr: planes, i64: pixels_wide, i64: pixels_high, i64: bits_per_sample, i64: samples_per_pixel, i8: has_alpha, i8: is_planar, ptr: color_space_name, u64: bitmap_format, i64: bytes_per_row, i64: bits_per_pixel): any {
+fn objc_msgSend_bitmap_init(any target, any op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) any {
+   "Runs the objc msgSend bitmap init operation."
    #macos { return _objc_msgSend_bitmap_init(target, op, planes, pixels_wide, pixels_high, bits_per_sample, samples_per_pixel, has_alpha, is_planar, color_space_name, bitmap_format, bytes_per_row, bits_per_pixel) }
    0
 }
 
-fn objc_msgSend_rect_u64_i64_i8(any: target, any: op, any: x, any: y, any: w, any: h, u64: style, i64: backing, i8: do_defer): any {
+fn objc_msgSend_rect_u64_i64_i8(any target, any op, any x, any y, any w, any h, u64 style, i64 backing, i8 do_defer) any {
+   "Runs the objc msgSend rect u64 i64 i8 operation."
    #macos { return _objc_msgSend_rect_u64_i64_i8(target, op, x, y, w, h, style, backing, do_defer) }
    0
 }
 
-fn objc_msgSend_i64(any: target, any: op): int {
+fn objc_msgSend_i64(any target, any op) int {
+   "Runs the objc msgSend i64 operation."
    #macos { return _objc_msgSend_i64(target, op) }
    0
 }
 
-fn objc_msgSend_u64(any: target, any: op): int { objc_msgSend_i64(target, op) }
+fn objc_msgSend_u64(any target, any op) int { objc_msgSend_i64(target, op) }
 
-fn objc_msgSend_i64_arg(any: target, any: op, i64: arg): int {
+fn objc_msgSend_i64_arg(any target, any op, i64 arg) int {
+   "Runs the objc msgSend i64 arg operation."
    #macos { return _objc_msgSend_i64_arg(target, op, arg) }
    0
 }
 
-fn objc_msgSend_i64_sel(any: target, any: op, any: arg): int {
+fn objc_msgSend_i64_sel(any target, any op, any arg) int {
+   "Runs the objc msgSend i64 sel operation."
    #macos { return _objc_msgSend_i64_sel(target, op, arg) }
    0
 }
 
-fn get_class(str: name): any {
+fn get_class(str name) any {
    "Looks up an Objective-C class by name."
    _load_cocoa_frameworks()
    #macos { return _ny_objc_getClass(cstr(name)) }
    0
 }
 
-fn get_selector(str: name): any {
+fn get_selector(str name) any {
    "Looks up an Objective-C selector by name."
    #macos { return _ny_sel_registerName(cstr(name)) }
    0
 }
 
-fn shared_application(): any {
+fn shared_application() any {
    "Returns `[NSApplication sharedApplication]` when AppKit is available."
    if(!available()){ return 0 }
    def cls = get_class("NSApplication")
@@ -242,7 +322,7 @@ fn shared_application(): any {
    objc_msgSend(cls, get_selector("sharedApplication"))
 }
 
-fn create_autorelease_pool(): any {
+fn create_autorelease_pool() any {
    "Creates a local `NSAutoreleasePool` for native Cocoa work."
    if(!available()){ return 0 }
    def cls = get_class("NSAutoreleasePool")
@@ -252,14 +332,14 @@ fn create_autorelease_pool(): any {
    objc_msgSend(pool, get_selector("init"))
 }
 
-fn drain_autorelease_pool(any: pool): bool {
+fn drain_autorelease_pool(any pool) bool {
    "Drains a previously created `NSAutoreleasePool`."
    if(!available() || !pool){ return false }
    objc_msgSend(pool, get_selector("drain"))
    true
 }
 
-fn set_activation_policy_regular(): bool {
+fn set_activation_policy_regular() bool {
    "Sets the app activation policy to regular AppKit-window behavior."
    if(!available()){ return false }
    def app = shared_application()
@@ -267,7 +347,7 @@ fn set_activation_policy_regular(): bool {
    objc_msgSend_i64_arg(app, get_selector("setActivationPolicy:"), NSApplicationActivationPolicyRegular) != 0
 }
 
-fn _app_delegate_should_terminate(any: self, any: sel, any: sender): int {
+fn _app_delegate_should_terminate(any self, any sel, any sender) int {
    "NSApplicationDelegate applicationShouldTerminate: — broadcasts QUIT to all windows."
    def keys = dict_keys(_windows)
    mut i = 0
@@ -277,10 +357,10 @@ fn _app_delegate_should_terminate(any: self, any: sel, any: sender): int {
       if(is_dict(w)){ _push_event(w, 15, 0) }
       i += 1
    }
-   1 ;; NSTerminateNow
+   1
 }
 
-fn _app_delegate_did_finish_launching(any: self, any: sel, any: notification): any {
+fn _app_delegate_did_finish_launching(any self, any sel, any notification) any {
    "NSApplicationDelegate applicationDidFinishLaunching: — activates the application."
    def app = shared_application()
    if(app){ objc_msgSend_i64_arg(app, get_selector("activateIgnoringOtherApps:"), 1) }
@@ -288,7 +368,7 @@ fn _app_delegate_did_finish_launching(any: self, any: sel, any: notification): a
 
 mut _app_delegate_class = 0
 
-fn _create_app_delegate(): any {
+fn _create_app_delegate() any {
    "Creates and registers a dynamic NytrixAppDelegate NSApplicationDelegate class."
    if(_app_delegate_class){ return _app_delegate_class }
    if(!available()){ return 0 }
@@ -303,7 +383,7 @@ fn _create_app_delegate(): any {
    cls
 }
 
-fn install_app_delegate(): bool {
+fn install_app_delegate() bool {
    "Installs a NytrixAppDelegate as the NSApplication delegate if not already set."
    if(!available()){ return false }
    def app = shared_application()
@@ -318,7 +398,7 @@ fn install_app_delegate(): bool {
    true
 }
 
-fn finish_launching(): bool {
+fn finish_launching() bool {
    "Finishes AppKit startup on the shared application."
    if(!available()){ return false }
    def app = shared_application()
@@ -328,7 +408,7 @@ fn finish_launching(): bool {
    true
 }
 
-fn activate_ignoring_other_apps(bool: v=true): bool {
+fn activate_ignoring_other_apps(bool v=true) bool {
    "Activate the current app for Cocoa window presentation."
    if(!available()){ return false }
    def app = shared_application()
@@ -337,7 +417,7 @@ fn activate_ignoring_other_apps(bool: v=true): bool {
    true
 }
 
-fn get_screens(): any {
+fn get_screens() any {
    "Returns the `NSScreen` array."
    if(!available()){ return 0 }
    def cls = get_class("NSScreen")
@@ -345,21 +425,21 @@ fn get_screens(): any {
    objc_msgSend(cls, get_selector("screens"))
 }
 
-fn get_screen_count(any: screens=0): int {
+fn get_screen_count(any screens=0) int {
    "Returns the number of active Cocoa screens."
    def arr = common.value_or(screens, get_screens())
    if(!arr){ return 0 }
    int(objc_msgSend_i64(arr, get_selector("count")))
 }
 
-fn get_screen_at(int: index, any: screens=0): any {
+fn get_screen_at(int index, any screens=0) any {
    "Returns the screen object at `index`."
    def arr = common.value_or(screens, get_screens())
    if(!arr || index < 0){ return 0 }
    objc_msgSend_ptr_i64_arg(arr, get_selector("objectAtIndex:"), index)
 }
 
-fn get_screen_name(any: screen): str {
+fn get_screen_name(any screen) str {
    "Returns an `NSScreen` localized name when available."
    if(!available() || !screen){ return "" }
    def name_obj = objc_msgSend(screen, get_selector("localizedName"))
@@ -369,7 +449,7 @@ fn get_screen_name(any: screen): str {
    to_str(utf8)
 }
 
-fn get_screen_display_id(any: screen): int {
+fn get_screen_display_id(any screen) int {
    "Returns the CoreGraphics display id for the given `NSScreen`."
    if(!available() || !screen){ return 0 }
    def key = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSScreenNumber"))
@@ -381,7 +461,7 @@ fn get_screen_display_id(any: screen): int {
    int(objc_msgSend_i64(number, get_selector("unsignedIntValue")))
 }
 
-fn get_screen_for_display_id(int: display_id, any: screens=0): any {
+fn get_screen_for_display_id(int display_id, any screens=0) any {
    "Returns the `NSScreen` matching the given CoreGraphics display id."
    def arr = common.value_or(screens, get_screens())
    if(!arr){ return 0 }
@@ -395,13 +475,13 @@ fn get_screen_for_display_id(int: display_id, any: screens=0): any {
    0
 }
 
-fn get_display_unit_number(int: display_id): int {
+fn get_display_unit_number(int display_id) int {
    "Returns the CoreGraphics unit number for a display id."
    if(!available() || !display_id){ return 0 }
    int(CGDisplayUnitNumber(display_id))
 }
 
-fn get_screen_for_unit_number(int: unit_number, any: screens=0): any {
+fn get_screen_for_unit_number(int unit_number, any screens=0) any {
    "Returns the `NSScreen` matching the given CoreGraphics unit number."
    def arr = common.value_or(screens, get_screens())
    if(!arr){ return 0 }
@@ -418,7 +498,7 @@ fn get_screen_for_unit_number(int: unit_number, any: screens=0): any {
    0
 }
 
-fn _rect_dict_from_string(str: s): any {
+fn _rect_dict_from_string(str s) any {
    if(!s || s.len == 0){ return false }
    def s_n = s.len
    mut vals = []
@@ -449,7 +529,7 @@ fn _rect_dict_from_string(str: s): any {
    }
 }
 
-fn _screen_rect_for_key(any: screen, str: key_name): any {
+fn _screen_rect_for_key(any screen, str key_name) any {
    if(!available() || !screen){ return false }
    def key = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(key_name))
    if(!key){ return false }
@@ -462,24 +542,24 @@ fn _screen_rect_for_key(any: screen, str: key_name): any {
    _rect_dict_from_string(to_str(utf8))
 }
 
-fn get_screen_frame(any: screen): any {
+fn get_screen_frame(any screen) any {
    "Returns the Cocoa screen frame as `{x,y,width,height}` when available."
    _screen_rect_for_key(screen, "frame")
 }
 
-fn get_screen_visible_frame(any: screen): any {
+fn get_screen_visible_frame(any screen) any {
    "Returns the Cocoa visible frame/workarea as `{x,y,width,height}` when available."
    _screen_rect_for_key(screen, "visibleFrame")
 }
 
-fn get_screen_scale(any: screen): f64 {
+fn get_screen_scale(any screen) f64 {
    "Returns the AppKit backing scale factor for an `NSScreen`."
    if(!available() || !screen){ return 1.0 }
    def scale = objc_msgSend_f64(screen, get_selector("backingScaleFactor"))
    scale > 0.0 ? scale : 1.0
 }
 
-fn get_monitors(): list {
+fn get_monitors() list {
    "Returns a list of dictionaries representing active Cocoa monitors."
    def ids = get_active_display_ids()
    mut out = []
@@ -497,13 +577,13 @@ fn get_monitors(): list {
    out
 }
 
-fn get_primary_monitor(): any {
+fn get_primary_monitor() any {
    "Returns the first available Cocoa monitor."
    def ms = get_monitors()
    ms.len > 0 ? ms.get(0) : 0
 }
 
-fn get_monitor_name(any: monitor): str {
+fn get_monitor_name(any monitor) str {
    "Returns the localized name for a Cocoa monitor handle."
    if(!monitor){ return "Unknown Monitor" }
    def display_id = _handle_from(monitor)
@@ -511,7 +591,7 @@ fn get_monitor_name(any: monitor): str {
    screen ? get_screen_name(screen) : "Display " + to_str(display_id)
 }
 
-fn get_monitor_pos(any: monitor): list {
+fn get_monitor_pos(any monitor) list {
    "Returns the screen position [x, y] of a Cocoa monitor."
    if(!monitor){ return [0, 0] }
    def display_id = _handle_from(monitor)
@@ -520,7 +600,7 @@ fn get_monitor_pos(any: monitor): list {
    frame ? [frame.get("x", 0), frame.get("y", 0)] : [0, 0]
 }
 
-fn get_monitor_workarea(any: monitor): list {
+fn get_monitor_workarea(any monitor) list {
    "Returns the visible workarea [x, y, w, h] of a Cocoa monitor."
    if(!monitor){ return [0, 0, 0, 0] }
    def display_id = _handle_from(monitor)
@@ -529,7 +609,7 @@ fn get_monitor_workarea(any: monitor): list {
    frame ? [frame.get("x", 0), frame.get("y", 0), frame.get("width", 0), frame.get("height", 0)] : [0, 0, 0, 0]
 }
 
-fn get_monitor_physical_size(any: monitor): list {
+fn get_monitor_physical_size(any monitor) list {
    "Returns the approximate physical size [mm_w, mm_h] of a Cocoa monitor."
    if(!monitor){ return [0, 0] }
    def mode = get_video_mode(monitor)
@@ -538,10 +618,10 @@ fn get_monitor_physical_size(any: monitor): list {
    def dpi = 96.0 * float(scale.get(0, 1.0))
    if(dpi <= 0.0){ return [0, 0] }
    [int(float(mode.get("width", 0)) * 25.4 / dpi),
-    int(float(mode.get("height", 0)) * 25.4 / dpi)]
+   int(float(mode.get("height", 0)) * 25.4 / dpi)]
 }
 
-fn get_monitor_content_scale(any: monitor): list {
+fn get_monitor_content_scale(any monitor) list {
    "Returns the backing scale factor(Retina scale) for a Cocoa monitor."
    if(!monitor){ return [1.0, 1.0] }
    def display_id = _handle_from(monitor)
@@ -550,21 +630,21 @@ fn get_monitor_content_scale(any: monitor): list {
    [s, s]
 }
 
-fn get_video_mode(any: monitor): any {
+fn get_video_mode(any monitor) any {
    "Returns the current video mode for a Cocoa monitor."
    if(!monitor){ return false }
    def display_id = _handle_from(monitor)
    get_current_video_mode(display_id)
 }
 
-fn get_video_modes(any: monitor): list {
+fn get_video_modes(any monitor) list {
    "Returns available video modes for a Cocoa monitor."
    if(!monitor){ return [] }
    def display_id = _handle_from(monitor)
    get_video_modes_native(display_id)
 }
 
-fn get_gamma_ramp(any: monitor): any {
+fn get_gamma_ramp(any monitor) any {
    "Returns the CoreGraphics gamma ramp for the given monitor."
    if(!available() || !is_dict(monitor)){ return false }
    def display_id = monitor.get("handle", 0)
@@ -575,11 +655,11 @@ fn get_gamma_ramp(any: monitor): any {
    def green_buf = zalloc(capacity * 4)
    def blue_buf  = zalloc(capacity * 4)
    def count_ptr = zalloc(4)
-   if(!red_buf || !green_buf || !blue_buf || !count_ptr){ free(red_buf) free(green_buf) free(blue_buf) free(count_ptr) return false }
+   if(!red_buf || !green_buf || !blue_buf || !count_ptr){ free(red_buf, green_buf, blue_buf, count_ptr) return false }
    def ok = CGGetDisplayTransferByTable(display_id, capacity, red_buf, green_buf, blue_buf, count_ptr)
    def actual = load32(count_ptr, 0)
    free(count_ptr)
-   if(ok != 0 || actual <= 0){ free(red_buf) free(green_buf) free(blue_buf) return false }
+   if(ok != 0 || actual <= 0){ free(red_buf, green_buf, blue_buf) return false }
    mut red, green, blue = [], [], []
    mut i = 0 while(i < actual){
       def scale = 65535.0
@@ -588,11 +668,11 @@ fn get_gamma_ramp(any: monitor): any {
       blue  = blue.append(int(load32_f32(blue_buf,  i * 4) * scale + 0.5))
       i += 1
    }
-   free(red_buf) free(green_buf) free(blue_buf)
+   free(red_buf, green_buf, blue_buf)
    return {"size": actual, "red": red, "green": green, "blue": blue}
 }
 
-fn set_gamma_ramp(any: monitor, any: ramp): bool {
+fn set_gamma_ramp(any monitor, any ramp) bool {
    "Applies a gamma ramp to the given monitor via CoreGraphics."
    if(!available() || !is_dict(monitor) || !is_dict(ramp)){ return false }
    def display_id = monitor.get("handle", 0)
@@ -606,7 +686,7 @@ fn set_gamma_ramp(any: monitor, any: ramp): bool {
    def red_buf   = zalloc(size * 4)
    def green_buf = zalloc(size * 4)
    def blue_buf  = zalloc(size * 4)
-   if(!red_buf || !green_buf || !blue_buf){ free(red_buf) free(green_buf) free(blue_buf) return false }
+   if(!red_buf || !green_buf || !blue_buf){ free(red_buf, green_buf, blue_buf) return false }
    def scale = 1.0 / 65535.0
    mut i = 0 while(i < size){
       store32_f32(red_buf,   red.get(i) * scale, i * 4)
@@ -615,13 +695,16 @@ fn set_gamma_ramp(any: monitor, any: ramp): bool {
       i += 1
    }
    def ok = CGSetDisplayTransferByTable(display_id, size, red_buf, green_buf, blue_buf) == 0
-   free(red_buf) free(green_buf) free(blue_buf)
+   free(red_buf, green_buf, blue_buf)
    ok
 }
 
-fn focus_window(any: win): bool { true }
+fn focus_window(any win) bool {
+   "Runs the focus window operation."
+   true
+}
 
-fn set_clipboard(any: win, any: s): bool {
+fn set_clipboard(any win, any s) bool {
    "Sets the Cocoa system clipboard to string `s`."
    if(!available()){ return false }
    def pool = create_autorelease_pool()
@@ -634,7 +717,7 @@ fn set_clipboard(any: win, any: s): bool {
    true
 }
 
-fn get_clipboard(any: win): str {
+fn get_clipboard(any win) str {
    "Retrieves string contents from the Cocoa system clipboard."
    if(!available()){ return "" }
    def pool = create_autorelease_pool()
@@ -654,7 +737,7 @@ fn get_clipboard(any: win): str {
    out
 }
 
-fn set_input_mode(any: win, int: mode, int: value): bool {
+fn set_input_mode(any win, int mode, int value) bool {
    "Sets input modes for a Cocoa window(cursor, sticky keys, etc.)."
    if(!available() || !win || !is_dict(win)){ return false }
    mut next_win = win
@@ -682,7 +765,7 @@ fn set_input_mode(any: win, int: mode, int: value): bool {
    true
 }
 
-fn create_surface(any: instance, any: win, any: allocator, any: surface_out): int {
+fn create_surface(any instance, any win, any allocator, any surface_out) int {
    "Creates a native Vulkan Metal surface for the Cocoa window."
    if(!available()){ return -1 }
    def hwnd = win.get("handle", 0)
@@ -705,7 +788,7 @@ fn create_surface(any: instance, any: win, any: allocator, any: surface_out): in
    res
 }
 
-fn get_active_display_ids(): list {
+fn get_active_display_ids() list {
    "Returns the active CoreGraphics display ids."
    if(!available()){ return [] }
    def count_ptr = zalloc(4)
@@ -738,7 +821,7 @@ fn get_active_display_ids(): list {
    out
 }
 
-fn _cg_mode_to_dict(any: mode): any {
+fn _cg_mode_to_dict(any mode) any {
    "Converts a `CGDisplayModeRef` to a Ny video-mode dictionary."
    if(!mode){ return false }
    return {
@@ -748,7 +831,7 @@ fn _cg_mode_to_dict(any: mode): any {
    }
 }
 
-fn get_current_video_mode(any: display_id): any {
+fn get_current_video_mode(any display_id) any {
    "Returns the current video mode for a CoreGraphics display id."
    if(!available() || !display_id){ return false }
    def mode = CGDisplayCopyDisplayMode(display_id)
@@ -758,7 +841,7 @@ fn get_current_video_mode(any: display_id): any {
    out
 }
 
-fn get_video_modes_native(any: display_id): list {
+fn get_video_modes_native(any display_id) list {
    "Returns the advertised video modes for a CoreGraphics display id."
    if(!available() || !display_id){ return [] }
    def modes = CGDisplayCopyAllDisplayModes(display_id, 0)
@@ -776,7 +859,7 @@ fn get_video_modes_native(any: display_id): list {
    out
 }
 
-fn _find_display_mode(any: display_id, int: width, int: height, int: refresh_rate=0): any {
+fn _find_display_mode(any display_id, int width, int height, int refresh_rate=0) any {
    if(!available() || !display_id || width <= 0 || height <= 0){ return 0 }
    def modes = CGDisplayCopyAllDisplayModes(display_id, 0)
    if(!modes){ return 0 }
@@ -799,7 +882,7 @@ fn _find_display_mode(any: display_id, int: width, int: height, int: refresh_rat
    keep ? {"modes": modes, "mode": keep} : 0
 }
 
-fn _set_display_mode(any: display_id, int: width, int: height, int: refresh_rate=0): any {
+fn _set_display_mode(any display_id, int width, int height, int refresh_rate=0) any {
    if(!available() || !display_id || width <= 0 || height <= 0){ return 0 }
    def mode_match = _find_display_mode(display_id, width, height, refresh_rate)
    if(!mode_match){ return 0 }
@@ -813,7 +896,7 @@ fn _set_display_mode(any: display_id, int: width, int: height, int: refresh_rate
    0
 }
 
-fn _restore_display_mode(any: win): any {
+fn _restore_display_mode(any win) any {
    if(!available() || !is_dict(win)){ return win }
    def previous = win.get("previous_mode", 0)
    def display_id = win.get("monitor_display_id", 0)
@@ -825,7 +908,7 @@ fn _restore_display_mode(any: win): any {
    win
 }
 
-fn create_menu(str: title=""): any {
+fn create_menu(str title="") any {
    "Creates and initializes an `NSMenu`."
    if(!available()){ return 0 }
    def cls = get_class("NSMenu")
@@ -837,7 +920,7 @@ fn create_menu(str: title=""): any {
    menu
 }
 
-fn create_menu_item(str: title, any: action=0, str: key_equivalent=""): any {
+fn create_menu_item(str title, any action=0, str key_equivalent="") any {
    "Creates and initializes an `NSMenuItem`."
    if(!available()){ return 0 }
    def cls = get_class("NSMenuItem")
@@ -849,21 +932,21 @@ fn create_menu_item(str: title, any: action=0, str: key_equivalent=""): any {
    objc_msgSend_ptr_ptr_ptr(item, get_selector("initWithTitle:action:keyEquivalent:"), title_obj, action, key_obj)
 }
 
-fn add_menu_item(any: menu, any: item): bool {
+fn add_menu_item(any menu, any item) bool {
    "Adds an item to an `NSMenu`."
    if(!available() || !menu || !item){ return false }
    objc_msgSend_ptr(menu, get_selector("addItem:"), item)
    true
 }
 
-fn set_submenu(any: menu, any: submenu, any: item): bool {
+fn set_submenu(any menu, any submenu, any item) bool {
    "Assigns a submenu to a parent menu item."
    if(!available() || !menu || !submenu || !item){ return false }
    objc_msgSend_ptr_ptr(menu, get_selector("setSubmenu:forItem:"), submenu, item)
    true
 }
 
-fn set_main_menu(any: menu): bool {
+fn set_main_menu(any menu) bool {
    "Sets the shared application's main menu."
    if(!available() || !menu){ return false }
    def app = shared_application()
@@ -872,7 +955,7 @@ fn set_main_menu(any: menu): bool {
    true
 }
 
-fn install_default_menu_bar(str: app_name="Nytrix"): bool {
+fn install_default_menu_bar(str app_name="Nytrix") bool {
    "Installs a minimal Cocoa menu bar with a Quit item."
    if(!available()){ return false }
    def main_menu = create_menu()
@@ -890,7 +973,7 @@ fn install_default_menu_bar(str: app_name="Nytrix"): bool {
    set_main_menu(main_menu)
 }
 
-fn next_event(any: timeout=0): any {
+fn next_event(any timeout=0) any {
    "Pops the next event from the AppKit queue if available."
    if(!available()){ return 0 }
    def app = shared_application()
@@ -903,13 +986,13 @@ fn next_event(any: timeout=0): any {
    0
 }
 
-fn wait_events(int: timeout_ms=-1): any {
+fn wait_events(int timeout_ms=-1) any {
    "Blocks until an event arrives or the timeout expires."
    def timeout = (timeout_ms < 0) ? 1000000.0 : float(timeout_ms) / 1000.0
    next_event(timeout)
 }
 
-fn current_event(): any {
+fn current_event() any {
    "Returns the current `NSEvent*` from the shared application."
    if(!available()){ return 0 }
    def app = shared_application()
@@ -917,7 +1000,7 @@ fn current_event(): any {
    objc_msgSend(app, get_selector("currentEvent"))
 }
 
-fn send_event(any: event): bool {
+fn send_event(any event) bool {
    "Forwards an AppKit event to `NSApplication`."
    if(!available() || !event){ return false }
    def app = shared_application()
@@ -926,7 +1009,7 @@ fn send_event(any: event): bool {
    true
 }
 
-fn update_windows(): bool {
+fn update_windows() bool {
    "Runs `-[NSApplication updateWindows]`."
    if(!available()){ return false }
    def app = shared_application()
@@ -935,7 +1018,7 @@ fn update_windows(): bool {
    true
 }
 
-fn run_app(): bool {
+fn run_app() bool {
    "Runs the shared AppKit application event loop."
    if(!available()){ return false }
    def app = shared_application()
@@ -944,7 +1027,7 @@ fn run_app(): bool {
    true
 }
 
-fn stop_app(any: sender=0): bool {
+fn stop_app(any sender=0) bool {
    "Stops the shared AppKit application event loop."
    if(!available()){ return false }
    def app = shared_application()
@@ -953,7 +1036,7 @@ fn stop_app(any: sender=0): bool {
    true
 }
 
-fn request_user_attention(int: kind=10): int {
+fn request_user_attention(int kind=10) int {
    "Requests user attention via AppKit."
    if(!available()){ return 0 }
    def app = shared_application()
@@ -961,7 +1044,7 @@ fn request_user_attention(int: kind=10): int {
    int(objc_msgSend_i64_arg(app, get_selector("requestUserAttention:"), kind))
 }
 
-fn post_event(any: event, bool: at_start=true): bool {
+fn post_event(any event, bool at_start=true) bool {
    "Posts an `NSEvent*` back into the AppKit queue."
    if(!available() || !event){ return false }
    def app = shared_application()
@@ -975,7 +1058,7 @@ mut _pending_events = []
 mut _known_display_ids = []
 mut _displays_initialized = false
 
-fn _push_event(any: win, int: typ, any: data=0): any {
+fn _push_event(any win, int typ, any data=0) any {
    if(!win){ return 0 }
    _pending_events = _pending_events.append([typ, win, win.get("handle", 0), data])
 }
@@ -983,7 +1066,7 @@ fn _push_event(any: win, int: typ, any: data=0): any {
 def _COCOA_KEY_MAP = [[0x00, backend_api.KEY_A], [0x01, backend_api.KEY_S], [0x02, backend_api.KEY_D], [0x03, backend_api.KEY_F], [0x04, backend_api.KEY_H], [0x05, backend_api.KEY_G], [0x06, backend_api.KEY_Z], [0x07, backend_api.KEY_X], [0x08, backend_api.KEY_C], [0x09, backend_api.KEY_V], [0x0A, backend_api.KEY_WORLD_1], [0x0B, backend_api.KEY_B], [0x0C, backend_api.KEY_Q], [0x0D, backend_api.KEY_W], [0x0E, backend_api.KEY_E], [0x0F, backend_api.KEY_R], [0x10, backend_api.KEY_Y], [0x11, backend_api.KEY_T], [0x12, backend_api.KEY_1], [0x13, backend_api.KEY_2], [0x14, backend_api.KEY_3], [0x15, backend_api.KEY_4], [0x16, backend_api.KEY_6], [0x17, backend_api.KEY_5], [0x18, backend_api.KEY_EQUAL], [0x19, backend_api.KEY_9], [0x1A, backend_api.KEY_7], [0x1B, backend_api.KEY_MINUS], [0x1C, backend_api.KEY_8], [0x1D, backend_api.KEY_0], [0x1E, backend_api.KEY_RIGHT_BRACKET], [0x1F, backend_api.KEY_O], [0x20, backend_api.KEY_U], [0x21, backend_api.KEY_LEFT_BRACKET], [0x22, backend_api.KEY_I], [0x23, backend_api.KEY_P], [0x24, backend_api.KEY_ENTER], [0x25, backend_api.KEY_L], [0x26, backend_api.KEY_J], [0x27, backend_api.KEY_APOSTROPHE], [0x28, backend_api.KEY_K], [0x29, backend_api.KEY_SEMICOLON], [0x2A, backend_api.KEY_BACKSLASH], [0x2B, backend_api.KEY_COMMA], [0x2C, backend_api.KEY_SLASH], [0x2D, backend_api.KEY_N], [0x2E, backend_api.KEY_M], [0x2F, backend_api.KEY_PERIOD], [0x30, backend_api.KEY_TAB], [0x31, backend_api.KEY_SPACE], [0x32, backend_api.KEY_GRAVE_ACCENT], [0x33, backend_api.KEY_BACKSPACE], [0x35, backend_api.KEY_ESCAPE], [0x36, backend_api.KEY_RIGHT_SUPER], [0x37, backend_api.KEY_LEFT_SUPER], [0x38, backend_api.KEY_LEFT_SHIFT], [0x39, backend_api.KEY_CAPS_LOCK], [0x3A, backend_api.KEY_LEFT_ALT], [0x3B, backend_api.KEY_LEFT_CONTROL], [0x3C, backend_api.KEY_RIGHT_SHIFT], [0x3D, backend_api.KEY_RIGHT_ALT], [0x3E, backend_api.KEY_RIGHT_CONTROL], [0x3F, backend_api.KEY_LEFT_SUPER], [0x40, backend_api.KEY_F17], [0x41, backend_api.KEY_KP_DECIMAL], [0x43, backend_api.KEY_KP_MULTIPLY], [0x45, backend_api.KEY_KP_ADD], [0x47, backend_api.KEY_NUM_LOCK], [0x4B, backend_api.KEY_KP_DIVIDE], [0x4C, backend_api.KEY_KP_ENTER], [0x4E, backend_api.KEY_KP_SUBTRACT], [0x4F, backend_api.KEY_F18], [0x50, backend_api.KEY_F19], [0x51, backend_api.KEY_KP_EQUAL], [0x52, backend_api.KEY_KP_0], [0x53, backend_api.KEY_KP_1], [0x54, backend_api.KEY_KP_2], [0x55, backend_api.KEY_KP_3], [0x56, backend_api.KEY_KP_4], [0x57, backend_api.KEY_KP_5], [0x58, backend_api.KEY_KP_6], [0x59, backend_api.KEY_KP_7], [0x5A, backend_api.KEY_F20], [0x5B, backend_api.KEY_KP_8], [0x5C, backend_api.KEY_KP_9], [0x60, backend_api.KEY_F5], [0x61, backend_api.KEY_F6], [0x62, backend_api.KEY_F7], [0x63, backend_api.KEY_F3], [0x64, backend_api.KEY_F8], [0x65, backend_api.KEY_F9], [0x67, backend_api.KEY_F11], [0x69, backend_api.KEY_PRINT_SCREEN], [0x6A, backend_api.KEY_F16], [0x6B, backend_api.KEY_F14], [0x6D, backend_api.KEY_F10], [0x6E, backend_api.KEY_MENU], [0x6F, backend_api.KEY_F12], [0x71, backend_api.KEY_F15], [0x72, backend_api.KEY_INSERT], [0x73, backend_api.KEY_HOME], [0x74, backend_api.KEY_PAGE_UP], [0x75, backend_api.KEY_DELETE], [0x76, backend_api.KEY_F4], [0x77, backend_api.KEY_END], [0x78, backend_api.KEY_F2], [0x79, backend_api.KEY_PAGE_DOWN], [0x7A, backend_api.KEY_F1], [0x7B, backend_api.KEY_LEFT], [0x7C, backend_api.KEY_RIGHT], [0x7D, backend_api.KEY_DOWN], [0x7E, backend_api.KEY_UP]]
 mut _cocoa_key_dict = 0
 
-fn _cocoa_key_dict_get(): dict {
+fn _cocoa_key_dict_get() dict {
    if(is_dict(_cocoa_key_dict)){ return _cocoa_key_dict }
    mut d, i = dict(128), 0
    def key_map_n = _COCOA_KEY_MAP.len
@@ -996,14 +1079,14 @@ fn _cocoa_key_dict_get(): dict {
    d
 }
 
-fn _cocoa_translate_keycode(any: code): int {
+fn _cocoa_translate_keycode(any code) int {
    def key = _cocoa_key_dict_get().get(int(code), 0)
    if(key){ return key }
    if(code >= 0 && code <= 9){ return backend_api.KEY_0 + int(code) }
    0
 }
 
-fn _mods_from_flags(any: flags): int {
+fn _mods_from_flags(any flags) int {
    mut mods = 0
    if(band(flags, NSEventModifierFlagShift) != 0){ mods = bor(mods, backend_api.MOD_SHIFT) }
    if(band(flags, NSEventModifierFlagControl) != 0){ mods = bor(mods, backend_api.MOD_CONTROL) }
@@ -1013,7 +1096,7 @@ fn _mods_from_flags(any: flags): int {
    mods
 }
 
-fn _push_utf8_char_events(any: win, any: utf8, int: mods=0): any {
+fn _push_utf8_char_events(any win, any utf8, int mods=0) any {
    if(!utf8){ return 0 }
    mut i = 0
    while(true){
@@ -1045,7 +1128,7 @@ fn _push_utf8_char_events(any: win, any: utf8, int: mods=0): any {
    }
 }
 
-fn _translate_event(any: event): any {
+fn _translate_event(any event) any {
    "Translates a native Cocoa `NSEvent` into a Nytrix event dict."
    if(!available() || !event){ return 0 }
    def type = int(objc_msgSend_i64(event, get_selector("type")))
@@ -1053,19 +1136,19 @@ fn _translate_event(any: event): any {
    def win = _windows.get(hwnd, 0)
    if(!win){ return 0 }
    match type {
-      1, 3, 25 -> { ;; NSEventTypeLeftMouseDown, RightMouseDown, OtherMouseDown
+      1, 3, 25 -> {
          def btn = (type == 1) ? 0 : (type == 3) ? 1 : int(objc_msgSend_i64(event, get_selector("buttonNumber")))
          mut next_win = win.set(f"mouse_button_{btn}", true)
          _windows = _windows.set(hwnd, next_win)
          return [EVENT_MOUSE_BUTTON_PRESSED, next_win, 0, btn]
       }
-      2, 4, 26 -> { ;; NSEventTypeLeftMouseUp, RightMouseUp, OtherMouseUp
+      2, 4, 26 -> {
          def btn = (type == 2) ? 0 : (type == 4) ? 1 : int(objc_msgSend_i64(event, get_selector("buttonNumber")))
          mut next_win = win.set(f"mouse_button_{btn}", false)
          _windows = _windows.set(hwnd, next_win)
          return [EVENT_MOUSE_BUTTON_RELEASED, next_win, 0, btn]
       }
-      5, 6, 7, 27 -> { ;; NSEventTypeMouseMoved, LeftMouseDragged, RightMouseDragged, OtherMouseDragged
+      5, 6, 7, 27 -> {
          def dx, dy = objc_msgSend_f64(event, get_selector("deltaX")), objc_msgSend_f64(event, get_selector("deltaY"))
          mut mx, my = float(win.get("mouse_x", 0)) + dx, float(win.get("mouse_y", 0)) + dy
          mut next_win = win.set("mouse_x", int(mx))
@@ -1073,7 +1156,7 @@ fn _translate_event(any: event): any {
          _windows = _windows.set(hwnd, next_win)
          return [EVENT_MOUSE_POS_CHANGED, next_win, 0, [mx, my]]
       }
-      10 -> { ;; NSEventTypeKeyDown
+      10 -> {
          def code = objc_msgSend_i64(event, get_selector("keyCode"))
          def key = _cocoa_translate_keycode(int(code))
          def flags = objc_msgSend_i64(event, get_selector("modifierFlags"))
@@ -1095,7 +1178,7 @@ fn _translate_event(any: event): any {
          }
          return [EVENT_KEY_PRESSED, next_win, 0, data]
       }
-      11 -> { ;; NSEventTypeKeyUp
+      11 -> {
          def code = objc_msgSend_i64(event, get_selector("keyCode"))
          def key = _cocoa_translate_keycode(int(code))
          def flags = objc_msgSend_i64(event, get_selector("modifierFlags"))
@@ -1111,7 +1194,7 @@ fn _translate_event(any: event): any {
          }
          return [EVENT_KEY_RELEASED, next_win, 0, data]
       }
-      12 -> { ;; NSEventTypeFlagsChanged — modifier key press/release
+      12 -> {
          def code = objc_msgSend_i64(event, get_selector("keyCode"))
          def key = _cocoa_translate_keycode(int(code))
          if(!key){ return 0 }
@@ -1136,7 +1219,7 @@ fn _translate_event(any: event): any {
          _windows = _windows.set(hwnd, next_win)
          return [kind, next_win, 0, data]
       }
-      22 -> { ;; NSEventTypeScrollWheel
+      22 -> {
          def dx = objc_msgSend_f64(event, get_selector("scrollingDeltaX"))
          def dy = objc_msgSend_f64(event, get_selector("scrollingDeltaY"))
          def precise = objc_msgSend_i64(event, get_selector("hasPreciseScrollingDeltas"))
@@ -1148,20 +1231,20 @@ fn _translate_event(any: event): any {
    }
 }
 
-fn _find_window_by_handle(any: hwnd): any {
+fn _find_window_by_handle(any hwnd) any {
    "Looks up a tracked window by its native NSWindow handle."
    if(!hwnd){ return 0 }
    _windows.get(hwnd, 0)
 }
 
-fn _window_delegate_should_close(any: self, any: sel, any: win_obj): bool {
+fn _window_delegate_should_close(any self, any sel, any win_obj) bool {
    "NSWindowDelegate windowShouldClose: callback."
    def win = _find_window_by_handle(win_obj)
    if(win){ _push_event(win, 15, 0) }
    true
 }
 
-fn _window_delegate_did_resize(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_resize(any self, any sel, any notification) any {
    "NSWindowDelegate windowDidResize: callback."
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
@@ -1170,31 +1253,31 @@ fn _window_delegate_did_resize(any: self, any: sel, any: notification): any {
    _push_event(win, EVENT_WINDOW_RESIZED, size)
 }
 
-fn _window_delegate_did_miniaturize(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_miniaturize(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
    if(win){ _push_event(win, EVENT_WINDOW_MINIMIZED, 0) }
 }
 
-fn _window_delegate_did_deminiaturize(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_deminiaturize(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
    if(win){ _push_event(win, EVENT_WINDOW_RESTORED, 0) }
 }
 
-fn _window_delegate_did_become_key(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_become_key(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
    if(win){ _push_event(win, EVENT_FOCUS_IN, 0) }
 }
 
-fn _window_delegate_did_resign_key(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_resign_key(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
    if(win){ _push_event(win, EVENT_FOCUS_OUT, 0) }
 }
 
-fn _window_delegate_did_change_backing(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_change_backing(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
    if(win){
@@ -1203,7 +1286,7 @@ fn _window_delegate_did_change_backing(any: self, any: sel, any: notification): 
    }
 }
 
-fn _window_delegate_did_move(any: self, any: sel, any: notification): any {
+fn _window_delegate_did_move(any self, any sel, any notification) any {
    "NSWindowDelegate windowDidMove: callback — updates win[x/y] and emits EVENT_WINDOW_MOVED."
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
@@ -1217,7 +1300,7 @@ fn _window_delegate_did_move(any: self, any: sel, any: notification): any {
    _push_event(next_win, EVENT_WINDOW_MOVED, [nx, ny])
 }
 
-fn _ime_insert_text(any: self, any: sel, any: string_obj, any: replacement_range): any {
+fn _ime_insert_text(any self, any sel, any string_obj, any replacement_range) any {
    "NSTextInputClient insertText:replacementRange: — pushes EVENT_KEY_CHAR for each codepoint."
    if(!string_obj){ return 0 }
    def cs = objc_msgSend_ptr(string_obj, get_selector("UTF8String"))
@@ -1227,24 +1310,24 @@ fn _ime_insert_text(any: self, any: sel, any: string_obj, any: replacement_range
    if(win){ _push_utf8_char_events(win, cs) }
 }
 
-fn _last_key_window(): any {
+fn _last_key_window() any {
    "Returns the NSWindow that currently has keyboard focus."
    def app = shared_application()
    if(!app){ return 0 }
    objc_msgSend_ptr(app, get_selector("keyWindow"))
 }
 
-fn _drag_enter(any: self, any: sel, any: sender): int {
+fn _drag_enter(any self, any sel, any sender) int {
    "NSDraggingDestination draggingEntered: — accept copy operation."
    1
 }
 
-fn _drag_updated(any: self, any: sel, any: sender): int {
+fn _drag_updated(any self, any sel, any sender) int {
    "NSDraggingDestination draggingUpdated: — keep accepting copy."
    1
 }
 
-fn _drag_performed(any: self, any: sel, any: sender): bool {
+fn _drag_performed(any self, any sel, any sender) bool {
    "NSDraggingDestination performDragOperation: — reads pasteboard, pushes EVENT_DROP."
    if(!sender){ return false }
    def pb = objc_msgSend_ptr(sender, get_selector("draggingPasteboard"))
@@ -1276,7 +1359,7 @@ fn _drag_performed(any: self, any: sel, any: sender): bool {
 
 mut _delegate_class = 0
 
-fn create_window_delegate(): any {
+fn create_window_delegate() any {
    "Creates and registers a dynamic `NytrixWindowDelegate` class."
    if(_delegate_class){ return _delegate_class }
    def base = get_class("NSObject")
@@ -1300,7 +1383,7 @@ fn create_window_delegate(): any {
    cls
 }
 
-fn get_window_content_scale(any: win): f64 {
+fn get_window_content_scale(any win) f64 {
    "Returns the backing scale factor for a Cocoa window."
    if(!available() || !win || !is_dict(win)){ return 1.0 }
    def hwnd = win.get("handle", 0)
@@ -1308,7 +1391,7 @@ fn get_window_content_scale(any: win): f64 {
    float(objc_msgSend_f64(hwnd, get_selector("backingScaleFactor")))
 }
 
-fn get_window_monitor(any: win): any {
+fn get_window_monitor(any win) any {
    "Returns the monitor dictionary that the Cocoa window is currently on."
    if(!available() || !win || !is_dict(win)){ return 0 }
    def hwnd = win.get("handle", 0)
@@ -1328,32 +1411,32 @@ fn get_window_monitor(any: win): any {
    0
 }
 
-fn _cocoa_window_style(bool: decorated, bool: resizable, bool: fullscreen=false, bool: transparent=false): int {
+fn _cocoa_window_style(bool decorated, bool resizable, bool fullscreen=false, bool transparent=false) int {
    mut style = NSWindowStyleMaskBorderless
    if(!fullscreen && decorated){
       style = bor(style, bor(NSWindowStyleMaskTitled,
-         bor(NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable)))
+      bor(NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable)))
    }
    if(!fullscreen && resizable){ style = bor(style, NSWindowStyleMaskResizable) }
    if(transparent){ style = bor(style, NSWindowStyleMaskFullSizeContentView) }
    style
 }
 
-fn _cocoa_window_style_from_flags(int: flags): int {
+fn _cocoa_window_style_from_flags(int flags) int {
    _cocoa_window_style(!band(flags, WINDOW_NO_BORDER),
       !band(flags, WINDOW_NO_RESIZE),
       !!band(flags, WINDOW_FULLSCREEN),
-      !!band(flags, WINDOW_TRANSPARENT))
+   !!band(flags, WINDOW_TRANSPARENT))
 }
 
-fn _cocoa_set_frame(any: hwnd, any: x, any: y, any: w, any: h): bool {
+fn _cocoa_set_frame(any hwnd, any x, any y, any w, any h) bool {
    if(!available() || !hwnd){ return false }
    objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"),
-      float(x), float(y), float(w), float(h), 1, 1, 0)
+   float(x), float(y), float(w), float(h), 1, 1, 0)
    true
 }
 
-fn _cocoa_apply_style(any: hwnd, int: style): bool {
+fn _cocoa_apply_style(any hwnd, int style) bool {
    if(!available() || !hwnd){ return false }
    objc_msgSend_i64_arg(hwnd, get_selector("setStyleMask:"), style)
    def view = objc_msgSend(hwnd, get_selector("contentView"))
@@ -1361,38 +1444,38 @@ fn _cocoa_apply_style(any: hwnd, int: style): bool {
    true
 }
 
-fn _icon_image_width(any: image): int {
+fn _icon_image_width(any image) int {
    if(!is_dict(image)){ return 0 }
    int(image.get("width", image.get("w", 0)))
 }
 
-fn _icon_image_height(any: image): int {
+fn _icon_image_height(any image) int {
    if(!is_dict(image)){ return 0 }
    int(image.get("height", image.get("h", 0)))
 }
 
-fn _icon_image_pixels(any: image): any {
+fn _icon_image_pixels(any image) any {
    if(!is_dict(image)){ return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
    image.get("data", 0)))
 }
 
-fn _icon_pixel_source_len(any: pixels): int {
+fn _icon_pixel_source_len(any pixels) int {
    if(is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels)){ return pixels.len }
    if(is_ptr(pixels)){ return -1 }
    0
 }
 
-fn _icon_pixel_byte(any: pixels, int: index): int {
+fn _icon_pixel_byte(any pixels, int index) int {
    if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){ return load8(pixels, index) }
    if(is_list(pixels) || is_tuple(pixels)){ return pixels.get(index, 0) }
    0
 }
 
-fn _abs_int(int: x): int { x < 0 ? 0 - x : x }
+fn _abs_int(int x) int { x < 0 ? 0 - x : x }
 
-fn _choose_icon_image(any: images, int: wanted_w=128, int: wanted_h=128): any {
+fn _choose_icon_image(any images, int wanted_w=128, int wanted_h=128) any {
    if(is_dict(images)){ return images }
    if(!is_list(images) && !is_tuple(images)){ return false }
    mut best = false
@@ -1415,7 +1498,7 @@ fn _choose_icon_image(any: images, int: wanted_w=128, int: wanted_h=128): any {
    best
 }
 
-fn _copy_rgba_pixels(any: dst, any: pixels, int: bytes): bool {
+fn _copy_rgba_pixels(any dst, any pixels, int bytes) bool {
    if(!dst || !pixels || bytes <= 0){ return false }
    if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){
       memcpy(dst, pixels, bytes)
@@ -1430,7 +1513,7 @@ fn _copy_rgba_pixels(any: dst, any: pixels, int: bytes): bool {
    true
 }
 
-fn _cocoa_nsimage_from_rgba(any: image): any {
+fn _cocoa_nsimage_from_rgba(any image) any {
    if(!available() || !is_dict(image)){ return 0 }
    def width = _icon_image_width(image)
    def height = _icon_image_height(image)
@@ -1442,11 +1525,11 @@ fn _cocoa_nsimage_from_rgba(any: image): any {
    def img_cls = get_class("NSImage")
    if(!rep_cls || !img_cls){ return 0 }
    def color_space = objc_msgSend_ptr(get_class("NSString"),
-      get_selector("stringWithUTF8String:"), cstr("NSCalibratedRGBColorSpace"))
+   get_selector("stringWithUTF8String:"), cstr("NSCalibratedRGBColorSpace"))
    def rep = objc_msgSend_bitmap_init(objc_msgSend(rep_cls, get_selector("alloc")),
       get_selector("initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bitmapFormat:bytesPerRow:bitsPerPixel:"),
       0, width, height, 8, 4, 1, 0, color_space,
-      NSBitmapFormatAlphaNonpremultiplied, width * 4, 32)
+   NSBitmapFormatAlphaNonpremultiplied, width * 4, 32)
    if(!rep){ return 0 }
    def data = objc_msgSend(rep, get_selector("bitmapData"))
    if(!data || !_copy_rgba_pixels(data, pixels, bytes)){
@@ -1454,7 +1537,7 @@ fn _cocoa_nsimage_from_rgba(any: image): any {
       return 0
    }
    def native = objc_msgSend_size(objc_msgSend(img_cls, get_selector("alloc")),
-      get_selector("initWithSize:"), width, height)
+   get_selector("initWithSize:"), width, height)
    if(!native){
       objc_msgSend(rep, get_selector("release"))
       return 0
@@ -1464,7 +1547,7 @@ fn _cocoa_nsimage_from_rgba(any: image): any {
    native
 }
 
-fn set_window_monitor(any: win, any: monitor, int: xpos, int: ypos, int: width, int: height, int: refresh_rate=0): any {
+fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int height, int refresh_rate=0) any {
    "Moves a Cocoa window into borderless monitor mode or restores windowed placement."
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
@@ -1532,7 +1615,7 @@ fn set_window_monitor(any: win, any: monitor, int: xpos, int: ypos, int: width, 
    win
 }
 
-fn get_key_name(any: win, int: key, int: scancode): str {
+fn get_key_name(any win, int key, int scancode) str {
    "Returns the keyboard-layout key name via the _COCOA_KEY_MAP reverse lookup."
    if(key >= 32 && key <= 126){ return str.chr(key) }
    mut i = 0
@@ -1548,7 +1631,7 @@ fn get_key_name(any: win, int: key, int: scancode): str {
    ""
 }
 
-fn set_window_icon(any: win, any: images): bool {
+fn set_window_icon(any win, any images) bool {
    "Applies a best-effort AppKit application icon from Ny RGBA image dictionaries."
    if(!available()){ return false }
    def pool = create_autorelease_pool()
@@ -1578,25 +1661,25 @@ fn set_window_icon(any: win, any: images): bool {
    ok
 }
 
-fn get_key_state(any: win, int: key): int {
+fn get_key_state(any win, int key) int {
    "Returns the Cocoa key state from the local dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get(f"key_{key}", 0)
 }
 
-fn get_mouse_button_state(any: win, int: btn): int {
+fn get_mouse_button_state(any win, int btn) int {
    "Returns the Cocoa mouse button state from the local dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get(f"mouse_button_{btn}", 0)
 }
 
-fn get_cursor_pos(any: win): list {
+fn get_cursor_pos(any win) list {
    "Returns the current cursor position relative to the Cocoa window."
    if(!available() || !win || !is_dict(win)){ return [0.0, 0.0] }
    [float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))]
 }
 
-fn set_cursor_pos(any: win, any: x, any: y): bool {
+fn set_cursor_pos(any win, any x, any y) bool {
    "Warps the cursor to(x, y) in window-local coordinates using CGWarpMouseCursorPosition."
    if(!available() || !win || !is_dict(win)){ return false }
    def win_x, win_y = float(win.get("x", 0)), float(win.get("y", 0))
@@ -1606,7 +1689,7 @@ fn set_cursor_pos(any: win, any: x, any: y): bool {
    true
 }
 
-fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
+fn create_cursor(any image, int xhot=0, int yhot=0) any {
    "Creates an AppKit NSCursor from a Ny RGBA8 image dictionary."
    if(!available()){ return 0 }
    def pool = create_autorelease_pool()
@@ -1619,7 +1702,7 @@ fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
    mut handle = 0
    if(cls){
       handle = objc_msgSend_ptr_point(objc_msgSend(cls, get_selector("alloc")),
-         get_selector("initWithImage:hotSpot:"), native, xhot, yhot)
+      get_selector("initWithImage:hotSpot:"), native, xhot, yhot)
    }
    objc_msgSend(native, get_selector("release"))
    drain_autorelease_pool(pool)
@@ -1633,7 +1716,7 @@ fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
    c
 }
 
-fn create_standard_cursor(int: shape): any {
+fn create_standard_cursor(int shape) any {
    "Creates an AppKit-backed standard cursor object."
    if(!available()){ return 0 }
    def cls = get_class("NSCursor")
@@ -1678,7 +1761,7 @@ fn create_standard_cursor(int: shape): any {
    c
 }
 
-fn destroy_cursor(any: cursor): bool {
+fn destroy_cursor(any cursor) bool {
    "Destroys a Cocoa cursor object when it owns native resources."
    if(!cursor || !is_dict(cursor)){ return true }
    if(!cursor.get("shared", false)){
@@ -1688,7 +1771,7 @@ fn destroy_cursor(any: cursor): bool {
    true
 }
 
-fn set_cursor(any: win, any: cursor): bool {
+fn set_cursor(any win, any cursor) bool {
    "Applies an AppKit cursor."
    if(!available()){ return false }
    def handle = _handle_from(cursor)
@@ -1698,7 +1781,7 @@ fn set_cursor(any: win, any: cursor): bool {
    } else { false }
 }
 
-fn show_window(any: win): bool {
+fn show_window(any win) bool {
    "Show a native Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1712,7 +1795,7 @@ fn show_window(any: win): bool {
    true
 }
 
-fn hide_window(any: win): bool {
+fn hide_window(any win) bool {
    "Hide a native Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1724,7 +1807,7 @@ fn hide_window(any: win): bool {
    true
 }
 
-fn iconify_window(any: win): bool {
+fn iconify_window(any win) bool {
    "Iconify a native Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1735,7 +1818,7 @@ fn iconify_window(any: win): bool {
    true
 }
 
-fn maximize_window(any: win): bool {
+fn maximize_window(any win) bool {
    "Maximize a native Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1746,7 +1829,7 @@ fn maximize_window(any: win): bool {
    true
 }
 
-fn restore_window(any: win): bool {
+fn restore_window(any win) bool {
    "Restore a native Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1757,7 +1840,7 @@ fn restore_window(any: win): bool {
    true
 }
 
-fn set_title(any: win, str: title): bool {
+fn set_title(any win, str title) bool {
    "Updates the Cocoa native window title."
    if(!available() || !win || !is_dict(win) || !title){ return false }
    def hwnd = win.get("handle", 0)
@@ -1769,9 +1852,9 @@ fn set_title(any: win, str: title): bool {
    true
 }
 
-fn set_window_title(any: win, str: title): bool { set_title(win, title) }
+fn set_window_title(any win, str title) bool { set_title(win, title) }
 
-fn get_window_attrib(any: win, int: attrib): int {
+fn get_window_attrib(any win, int attrib) int {
    "Returns the value of the specified window attribute."
    if(!available() || !win || !is_dict(win)){ return 0 }
    def hwnd = win.get("handle", 0)
@@ -1796,7 +1879,7 @@ fn get_window_attrib(any: win, int: attrib): int {
    }
 }
 
-fn set_window_opacity(any: win, f64: opacity): bool {
+fn set_window_opacity(any win, f64 opacity) bool {
    "Sets the whole-window alpha value for a Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1805,7 +1888,7 @@ fn set_window_opacity(any: win, f64: opacity): bool {
    true
 }
 
-fn set_window_resizable(any: win, bool: enabled): bool {
+fn set_window_resizable(any win, bool enabled) bool {
    "Toggles the Cocoa window's resizable style mask bit."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1818,7 +1901,7 @@ fn set_window_resizable(any: win, bool: enabled): bool {
    true
 }
 
-fn set_window_decorated(any: win, bool: enabled): bool {
+fn set_window_decorated(any win, bool enabled) bool {
    "Toggles window decorations for a Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1838,7 +1921,7 @@ fn set_window_decorated(any: win, bool: enabled): bool {
    true
 }
 
-fn set_window_floating(any: win, bool: enabled): bool {
+fn set_window_floating(any win, bool enabled) bool {
    "Toggles the always-on-top state of a Cocoa window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1849,7 +1932,7 @@ fn set_window_floating(any: win, bool: enabled): bool {
    true
 }
 
-fn _get_nswindow_rect(any: win, str: key_name): list {
+fn _get_nswindow_rect(any win, str key_name) list {
    if(!available() || !win){ return [0, 0, 0, 0] }
    def hwnd = _handle_from(win)
    if(!hwnd){ return [0, 0, 0, 0] }
@@ -1868,7 +1951,7 @@ fn _get_nswindow_rect(any: win, str: key_name): list {
    [res.get("x", 0), res.get("y", 0), res.get("width", 0), res.get("height", 0)]
 }
 
-fn get_pos(any: win): list {
+fn get_pos(any win) list {
    "Returns the bottom-left Cocoa screen coordinates [x, y] of a window's client area."
    def rect = _get_nswindow_rect(win, "contentLayoutRect")
    def x = rect.get(0)
@@ -1877,7 +1960,7 @@ fn get_pos(any: win): list {
    [x, y]
 }
 
-fn set_pos(any: win, int: x, int: y): bool {
+fn set_pos(any win, int x, int y) bool {
    "Moves a Cocoa window so its client area starts at screen coordinates [x, y]."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1889,7 +1972,7 @@ fn set_pos(any: win, int: x, int: y): bool {
    true
 }
 
-fn get_size(any: win): list {
+fn get_size(any win) list {
    "Returns the pixel size [width, height] of a Cocoa window's client area."
    def rect = _get_nswindow_rect(win, "contentLayoutRect")
    def w = rect.get(2)
@@ -1898,7 +1981,7 @@ fn get_size(any: win): list {
    [w, h]
 }
 
-fn set_size(any: win, int: w, int: h): bool {
+fn set_size(any win, int w, int h) bool {
    "Resizes a Cocoa window so its client area has width `w` and height `h`."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1910,14 +1993,14 @@ fn set_size(any: win, int: w, int: h): bool {
    true
 }
 
-fn get_framebuffer_size(any: win): list {
+fn get_framebuffer_size(any win) list {
    "Returns the backing pixel size of the Cocoa window's content view."
    def size = get_size(win)
    def scale = get_window_content_scale(win)
    [int(float(size.get(0)) * scale), int(float(size.get(1)) * scale)]
 }
 
-fn create_basic_window(str: title, int: width, int: height, int: x=0, int: y=0, int: flags=0): any {
+fn create_basic_window(str title, int width, int height, int x=0, int y=0, int flags=0) any {
    "Create a native `NSWindow` through AppKit."
    if(!available()){ return 0 }
    def pool = create_autorelease_pool()
@@ -1968,7 +2051,7 @@ fn create_basic_window(str: title, int: width, int: height, int: x=0, int: y=0, 
    win
 }
 
-fn destroy_basic_window(any: win): bool {
+fn destroy_basic_window(any win) bool {
    "Closes and releases a native `NSWindow`."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -1983,7 +2066,7 @@ fn destroy_basic_window(any: win): bool {
    true
 }
 
-fn _check_monitor_changes(): any {
+fn _check_monitor_changes() any {
    "Diffs current display IDs against known list; emits CONNECTED/DISCONNECTED to all windows."
    def ids = get_active_display_ids()
    if(!_displays_initialized){
@@ -2042,7 +2125,7 @@ fn _check_monitor_changes(): any {
    _known_display_ids = ids
 }
 
-fn poll_window_events(any: win, int: max_events=64): list {
+fn poll_window_events(any win, int max_events=64) list {
    "Drains Cocoa AppKit events for the given window and returns translated Nytrix events."
    if(!available()){ return [win, []] }
    _check_monitor_changes()
@@ -2080,12 +2163,12 @@ fn poll_window_events(any: win, int: max_events=64): list {
    [next_win, out]
 }
 
-fn vulkan_supported(): bool {
+fn vulkan_supported() bool {
    "Returns true if the Cocoa backend supports Vulkan(requires MoltenVK)."
    true
 }
 
-fn vulkan_required_extensions(): list {
+fn vulkan_required_extensions() list {
    "Returns the Vulkan instance extensions required for a macOS surface."
    if(!_cocoa_vk_ext_ptrs){
       _cocoa_vk_ext_surface = cstr("VK_KHR_surface")
@@ -2103,19 +2186,53 @@ mut _cocoa_vk_ext_ptrs = 0
 mut _cocoa_vk_ext_surface = 0
 mut _cocoa_vk_ext_metal = 0
 
-fn get_cocoa_window(any: win): any {
+fn get_cocoa_window(any win) any {
    "Returns the native NSWindow pointer for the given window dict."
    if(is_dict(win)){ win.get("handle", 0) } else { win }
 }
 
-fn get_cocoa_monitor(any: mon): any {
+fn get_cocoa_monitor(any mon) any {
    "Returns the CGDirectDisplayID for the given monitor dict."
    if(is_dict(mon)){ mon.get("handle", 0) } else { 0 }
 }
 
-fn get_cocoa_view(any: win): any {
+fn get_cocoa_view(any win) any {
    "Returns the NSView(content view) for the given window."
    def hwnd = _handle_from(win)
    if(!hwnd){ return 0 }
    objc_msgSend_ptr(hwnd, get_selector("contentView"))
+}
+
+#main {
+   assert(get_backend_name() == "cocoa", "cocoa backend name")
+   if(!available()){
+      assert(get_class("NSApplication") == 0 && get_selector("sharedApplication") == 0, "cocoa objc fallback")
+      assert(shared_application() == 0 && create_autorelease_pool() == 0 && !drain_autorelease_pool(0), "cocoa app fallback")
+      assert(!set_activation_policy_regular() && !finish_launching() && !activate_ignoring_other_apps(), "cocoa launch fallback")
+      assert(!install_app_delegate() && get_monitors() == [] && get_primary_monitor() == 0, "cocoa delegate fallback")
+      assert(get_monitor_name(0) == "Unknown Monitor" && get_monitor_pos(0) == [0, 0], "cocoa monitor fallback")
+      assert(get_monitor_workarea(0) == [0, 0, 0, 0] && get_monitor_physical_size(0) == [0, 0], "cocoa monitor geometry fallback")
+      assert(get_monitor_content_scale(0) == [1.0, 1.0] && !get_video_mode(0) && get_video_modes(0) == [], "cocoa video fallback")
+      assert(!get_gamma_ramp({"handle": 0}) && !set_gamma_ramp({"handle": 0}, {"size": 0}), "cocoa gamma fallback")
+      assert(!set_clipboard(0, "probe") && get_clipboard(0) == "", "cocoa clipboard fallback")
+      assert(next_event() == 0 && wait_events(0) == 0 && current_event() == 0, "cocoa event fallback")
+      assert(!send_event(0) && !update_windows() && !run_app() && !stop_app(), "cocoa run fallback")
+      assert(request_user_attention() == 0 && !post_event(0), "cocoa attention fallback")
+      def win = {"handle": 0, "key_" + to_str(backend_api.KEY_A): 1, "mouse_button_0": 1, "mouse_x": 2, "mouse_y": 3, "x": 4, "y": 5, "w": 10, "h": 20}
+      assert(get_key_name(win, backend_api.KEY_A, 0) == "A" && get_key_state(win, backend_api.KEY_A) == 1, "cocoa key fallback")
+      assert(get_mouse_button_state(win, 0) == 1 && get_cursor_pos(win) == [0.0, 0.0] && !set_cursor_pos(win, 1, 2), "cocoa cursor fallback")
+      assert(create_cursor(0, 1, 2) == 0 && create_standard_cursor(backend_api.ARROW_CURSOR) == 0 && destroy_cursor(0), "cocoa cursor create fallback")
+      assert(!set_cursor(win, 0) && !show_window(win) && !hide_window(win), "cocoa visibility fallback")
+      assert(!iconify_window(win) && !maximize_window(win) && !restore_window(win) && !set_title(win, "probe"), "cocoa window action fallback")
+      assert(get_window_attrib(win, backend_api.FOCUSED) == 0 && !set_window_opacity(win, 0.5), "cocoa attrib fallback")
+      assert(!set_window_resizable(win, true) && !set_window_decorated(win, true) && !set_window_floating(win, true), "cocoa style fallback")
+      assert(get_pos(win) == [4, 5] && !set_pos(win, 1, 2) && get_size(win) == [10, 20] && !set_size(win, 3, 4), "cocoa geometry fallback")
+      assert(get_framebuffer_size(win) == [10, 20] && create_basic_window("probe", 32, 24) == 0 && !destroy_basic_window(win), "cocoa framebuffer fallback")
+      assert(poll_window_events(win) == [win, []] && vulkan_supported(), "cocoa poll fallback")
+      assert(vulkan_required_extensions().get(0, 0) == 2 && create_surface(0, win, 0, 0) == -1, "cocoa vulkan fallback")
+      assert(get_window_content_scale(win) == 1.0 && get_window_monitor(win) == 0, "cocoa window monitor fallback")
+      assert(set_window_monitor(win, {"handle": 123}, 0, 0, 10, 10) == win, "cocoa set monitor fallback")
+      assert(get_cocoa_window(win) == 0 && get_cocoa_monitor({"handle": 123}) == 123 && get_cocoa_view(win) == 0, "cocoa raw handles")
+   }
+   print("✓ std.os.ui.window.platform.cocoa self-test passed")
 }

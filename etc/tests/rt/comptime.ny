@@ -36,10 +36,10 @@ assert_eq(to_str(ct_words), "[a, b]", "comptime string list materializes")
 def ct_range = comptime{ range(4) }
 assert_eq(type(ct_range), "range", "comptime imported range type")
 assert_eq(ct_range.len, 4, "comptime imported range length")
-def ct_mapped = comptime{ range(4).map(fn(i){ i + 1 }) }
+def ct_mapped = comptime{ range(4).map(fn(i) { i + 1 }) }
 assert_eq(to_str(ct_mapped), "[1, 2, 3, 4]", "comptime imports std range map")
 def ct_base = comptime{ 2^5 }
-def ct_shifted = comptime{ range(4).map(fn(i){ i + ct_base }) }
+def ct_shifted = comptime{ range(4).map(fn(i) { i + ct_base }) }
 assert_eq(to_str(ct_shifted), "[32, 33, 34, 35]", "comptime folds prior immutable constant")
 print("✓ comptime tests passed")
 
@@ -112,7 +112,7 @@ assert_compile(index_proven(ct_range_values, ct_range_idx), "index_proven static
 assert_compile_range(ct_range_idx + 1, 2, 2, "assert_compile_range expression")
 assert_compile_index(ct_range_values, ct_range_idx, "assert_compile_index static list")
 
-fn static_range_sum(): int {
+fn static_range_sum() int {
    def xs = [1, 2, 3, 4]
    mut int: i = 0
    mut int: acc = 0
@@ -133,7 +133,7 @@ comptime diagnostic rule bad_layout_store {
    fix "use store_layout(dst, \"LayoutName\", ...)"
 }
 
-fn static_branch_select(): int{
+fn static_branch_select() int {
    if(comptime{ return true }){
       return 11
    } else {
@@ -143,7 +143,7 @@ fn static_branch_select(): int{
 
 assert(static_branch_select() == 11, "comptime if prunes dead branch")
 
-fn static_case_select(): int{
+fn static_case_select() int {
    case comptime{ return 2 } {
       1 -> { return missing_static_case_symbol() }
       2 -> { return 22 }
@@ -153,7 +153,7 @@ fn static_case_select(): int{
 
 assert(static_case_select() == 22, "comptime case emits selected arm only")
 
-fn static_case_range_select(): int{
+fn static_case_range_select() int {
    case comptime{ return 0xffc1 } {
       0x30..0x39 -> { return missing_static_range_digit() }
       0xffbe..0xffc9 -> { return 33 }
@@ -187,8 +187,8 @@ assert(reflect_field_index_sum == 3, "comptime fields index sum")
 assert(reflect_field_type_hits == 3, "comptime fields type names")
 
 module CtReflectExports(alpha, beta){
-   fn alpha(): int { return 1 }
-   fn beta(): int { return 2 }
+   fn alpha() int { return 1 }
+   fn beta() int { return 2 }
 }
 
 mut reflect_export_count = 0
@@ -204,7 +204,7 @@ assert(reflect_export_count == 2, "comptime exports count")
 assert(reflect_export_seen == 11, "comptime exports names")
 
 comptime template make_axis_family(axis){
-   fn ct_axis_${axis}(){
+   fn ct_axis_${axis}() {
       "Generated comptime axis family test."
       return axis
    }
@@ -219,7 +219,7 @@ assert(ct_axis_y() == "y", "comptime function family string splice y")
 assert(ct_axis_z() == "z", "comptime function family string splice z")
 
 comptime template make_mul_family(n){
-   fn ct_mul_${n}(int: v): int {
+   fn ct_mul_${n}(int v) int {
       "Generated comptime multiply family test."
       return v * n
    }
@@ -234,7 +234,7 @@ assert(ct_mul_3(7) == 21, "comptime function family int splice 3")
 assert(ct_mul_5(7) == 35, "comptime function family int splice 5")
 
 comptime template clamp_num(T, name){
-   fn name(T: v, T: lo, T: hi): T {
+   fn name(T v, T lo, T hi) T {
       if(v < lo){ return lo }
       if(v > hi){ return hi }
       return v
@@ -250,7 +250,7 @@ assert(ct_clamp_f64(-1.5, 0.25, 2.0) == 0.25, "comptime template f64 type lower 
 assert(ct_clamp_f64(1.5, 0.25, 2.0) == 1.5, "comptime template f64 type inside")
 
 comptime template make_named_suffix(T, name){
-   fn ${name}_twice(T: v): T {
+   fn ${name}_twice(T v) T {
       return v + v
    }
 }
@@ -259,10 +259,10 @@ comptime emit make_named_suffix(int, ct_named)
 assert(ct_named_twice(6) == 12, "comptime template spliced suffix fn name")
 
 comptime template backend_contract_impl(Contract){
-   fn gen_${native_prefix}_backend_name(){
+   fn gen_${native_prefix}_backend_name() {
       return native_prefix
    }
-   fn gen_${native_prefix}_${Contract}_score(): int {
+   fn gen_${native_prefix}_${Contract}_score() int {
       return event_table + key_table
    }
 }
@@ -272,7 +272,7 @@ module CtGeneratedBackend generated from CtBackendSpec {
    native_prefix = "ctgen"
    event_table = 40
    key_table = 2
-   fn manual_backend_code(): int {
+   fn manual_backend_code() int {
       7
    }
    emit backend_contract_impl(CtWindowContract)

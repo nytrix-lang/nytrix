@@ -539,7 +539,7 @@ char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses, siz
   ny_cache_dir_ready(dir);
 
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("std-bc-cache-v3", h);
+  h = ny_fnv1a64_cstr("std-bc-cache-v5", h);
   h = ny_hash64_u64(h, (uint64_t)(unsigned)std_mode);
   h = ny_hash_cstrv(h, uses, use_count);
   h = ny_fnv1a64_cstr(stdlib_path, h);

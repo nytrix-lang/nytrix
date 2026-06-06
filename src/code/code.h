@@ -419,6 +419,9 @@ typedef struct codegen_imports_t {
   module_stmt_slot *module_stmt_index;
   size_t module_stmt_index_cap;
   size_t module_stmt_index_len;
+  void *module_stmt_lookup_cache;
+  void *module_public_target_cache;
+  void *use_alias_lookup_cache;
   VEC(char *) use_modules;
   VEC(char *) user_use_modules;
   VEC(char *) link_allowed_modules;
@@ -671,6 +674,9 @@ struct codegen_t {
       module_stmt_slot *module_stmt_index;
       size_t module_stmt_index_cap;
       size_t module_stmt_index_len;
+      void *module_stmt_lookup_cache;
+      void *module_public_target_cache;
+      void *use_alias_lookup_cache;
       VEC(char *) use_modules;
       VEC(char *) user_use_modules;
       VEC(char *) link_allowed_modules;

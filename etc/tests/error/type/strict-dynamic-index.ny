@@ -2,7 +2,7 @@
 ;; expect: hm-strict-dynamic-index
 use std.core
 
-fn read_index(any: x){
+fn read_index(any x) {
    x[0]
 }
 

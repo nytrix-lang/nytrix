@@ -5,8 +5,10 @@
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef enum {
   NY_ARM_FLOAT_ABI_DEFAULT = 0,
@@ -96,7 +98,7 @@ static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
   case NY_LLVM_OPT_PROFILE_NONE:
     return LLVMCodeGenLevelNone;
   case NY_LLVM_OPT_PROFILE_COMPILE:
-    return (opt_level <= 0) ? LLVMCodeGenLevelNone : LLVMCodeGenLevelLess;
+    return LLVMCodeGenLevelNone;
   case NY_LLVM_OPT_PROFILE_SIZE:
     return LLVMCodeGenLevelLess;
   case NY_LLVM_OPT_PROFILE_PEAK:
@@ -129,6 +131,19 @@ static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
   if (opt_level >= 3)
     return LLVMCodeGenLevelAggressive;
   return LLVMCodeGenLevelDefault;
+}
+
+static void ny_llvm_configure_emit_target_machine(LLVMTargetMachineRef tm,
+                                                  LLVMCodeGenOptLevel cgo) {
+  if (!tm)
+    return;
+  const char *fast_isel = getenv("NYTRIX_AOT_FAST_ISEL");
+  if (fast_isel && *fast_isel) {
+    LLVMSetTargetMachineFastISel(tm, ny_env_truthy(fast_isel) ? 1 : 0);
+    return;
+  }
+  if (cgo == LLVMCodeGenLevelNone)
+    LLVMSetTargetMachineFastISel(tm, 0);
 }
 
 static const char *ny_llvm_default_pass_pipeline(int opt_level) {
@@ -330,6 +345,45 @@ try_gnu: {
 }
 }
 
+static void triple_arch_token(const char *triple, char *out, size_t out_cap) {
+  if (!out || out_cap == 0)
+    return;
+  out[0] = '\0';
+  if (!triple)
+    return;
+  size_t i = 0;
+  while (triple[i] && triple[i] != '-' && i + 1 < out_cap) {
+    out[i] = (char)tolower((unsigned char)triple[i]);
+    i++;
+  }
+  out[i] = '\0';
+}
+
+static bool triple_arch_alias_eq(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  if (strcmp(a, b) == 0)
+    return true;
+  if ((strcmp(a, "x86_64") == 0 && strcmp(b, "amd64") == 0) ||
+      (strcmp(a, "amd64") == 0 && strcmp(b, "x86_64") == 0))
+    return true;
+  if ((strcmp(a, "aarch64") == 0 && strcmp(b, "arm64") == 0) ||
+      (strcmp(a, "arm64") == 0 && strcmp(b, "aarch64") == 0))
+    return true;
+  return false;
+}
+
+static bool target_matches_host_arch(const char *triple) {
+  char target_arch[32];
+  char host_arch[32];
+  triple_arch_token(triple, target_arch, sizeof(target_arch));
+  char *host_triple = LLVMGetDefaultTargetTriple();
+  triple_arch_token(host_triple, host_arch, sizeof(host_arch));
+  if (host_triple)
+    LLVMDisposeMessage(host_triple);
+  return triple_arch_alias_eq(target_arch, host_arch);
+}
+
 static void append_feature(char *buf, size_t *len, size_t cap, const char *feature) {
   size_t fl = strlen(feature);
   if (*len + fl + 1 >= cap)
@@ -399,7 +453,7 @@ static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap, ch
       append_feature(features, &feat_len, feat_cap, "+soft-float");
     }
   }
-  if (cpu && !cpu_set && !arm32) {
+  if (cpu && !cpu_set && !arm32 && target_matches_host_arch(triple)) {
     char *host_cpu = LLVMGetHostCPUName();
     if (host_cpu) {
       strncpy(cpu, host_cpu, cpu_cap - 1);
@@ -447,6 +501,11 @@ bool ny_llvm_init_native(void) {
   LLVMInitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
+  LLVMInitializeAllTargetInfos();
+  LLVMInitializeAllTargets();
+  LLVMInitializeAllTargetMCs();
+  LLVMInitializeAllAsmPrinters();
+  LLVMInitializeAllAsmParsers();
   initialized = true;
   return true;
 }
@@ -505,7 +564,7 @@ static bool ny_llvm_get_cached_module_target(const char **out_triple, const char
   const char *features = feat_buf;
   bool arm32 =
       triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
-  if (!feat_buf[0] && !arm32) {
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
       features = host_features;
@@ -574,11 +633,21 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
   if (!passes || !*passes)
     return;
 
-  char *raw_triple = LLVMGetDefaultTargetTriple();
+  const char *module_triple = module ? LLVMGetTarget(module) : NULL;
+  char *raw_triple = (module_triple && *module_triple)
+                         ? ny_strdup(module_triple)
+                         : LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return;
   LLVMTargetRef target;
   char *err = NULL;
   if (LLVMGetTargetFromTriple(raw_triple, &target, &err) != 0) {
-    LLVMDisposeMessage(raw_triple);
+    if (err)
+      LLVMDisposeMessage(err);
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
     return;
   }
 
@@ -592,7 +661,10 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
                                                     LLVMRelocPIC, host_code_model());
 
   if (!tm) {
-    LLVMDisposeMessage(raw_triple);
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
     return;
   }
 
@@ -607,7 +679,10 @@ void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
 
   LLVMDisposePassBuilderOptions(opts);
   LLVMDisposeTargetMachine(tm);
-  LLVMDisposeMessage(raw_triple);
+  if (module_triple && *module_triple)
+    free(raw_triple);
+  else
+    LLVMDisposeMessage(raw_triple);
 }
 
 void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
@@ -643,7 +718,7 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   const char *features = feat_buf;
   bool arm32 =
       triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
-  if (!feat_buf[0] && !arm32) {
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
       features = host_features;
@@ -698,7 +773,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) 
   const char *features = feat_buf;
   bool arm32 =
       triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
-  if (!feat_buf[0] && !arm32) {
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
       features = host_features;
@@ -709,6 +784,7 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) 
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
                                                     cgo, LLVMRelocPIC, host_code_model());
+  ny_llvm_configure_emit_target_machine(tm, cgo);
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)
@@ -784,7 +860,7 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileTy
   const char *features = feat_buf;
   bool arm32 =
       triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
-  if (!feat_buf[0] && !arm32) {
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
     host_features = LLVMGetHostCPUFeatures();
     if (host_features)
       features = host_features;
@@ -795,6 +871,7 @@ bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileTy
   LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
   LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
                                                     cgo, LLVMRelocPIC, host_code_model());
+  ny_llvm_configure_emit_target_machine(tm, cgo);
   if (!tm) {
     NY_LOG_ERR("%s", "Failed to create target machine\n");
     if (triple_needs_free)

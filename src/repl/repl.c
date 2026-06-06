@@ -1327,17 +1327,6 @@ static int repl_source_has_bare_std_use_text(const char *src) {
   return 0;
 }
 
-static bool repl_program_is_stdlib_only(program_t *prog) {
-  if (!prog || prog->body.len == 0)
-    return false;
-  for (size_t i = 0; i < prog->body.len; ++i) {
-    stmt_t *s = prog->body.data[i];
-    if (!s || !ny_is_stdlib_tok(s->tok))
-      return false;
-  }
-  return true;
-}
-
 static void repl_push_user_use_module_unique(const char *module) {
   if (!module || !*module)
     return;
@@ -2931,6 +2920,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (g_repl_plain || (plain && plain[0] != '0') || !isatty(STDOUT_FILENO)) {
     color_mode = 0;
   }
+  bool quiet_repl = ny_env_enabled("NYTRIX_REPL_QUIET");
+  bool banner_off = quiet_repl || ny_env_enabled("NYTRIX_REPL_NO_BANNER");
 #ifdef _WIN32
   if (!ny_readline_vt_output_ok())
     color_mode = 0;
@@ -3008,7 +2999,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       init_lines = repl_split_lines(init_code, &init_lines_len);
     }
   }
-  if (!init_code && isatty(STDOUT_FILENO)) {
+  if (!banner_off && !init_code && isatty(STDOUT_FILENO)) {
     printf("%sNytrix REPL%s %s(%s)%s - Type :help for commands\n",
            clr(NY_CLR_BOLD NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_GRAY),
            repl_std_mode_name(std_mode), clr(NY_CLR_RESET));
@@ -3075,7 +3066,11 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     repl_reset_redisplay();
     char prompt_buf[512];
     const char *prompt;
-    if (input_buffer) {
+    if (quiet_repl) {
+      prompt = "";
+      if (input_buffer)
+        repl_indent_next = repl_calc_indent(input_buffer);
+    } else if (input_buffer) {
       snprintf(prompt_buf, sizeof(prompt_buf), "%s..|%s", clr(NY_CLR_YELLOW),
                clr(NY_CLR_RESET));
       prompt = prompt_buf;
@@ -3728,10 +3723,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                    clr(NY_CLR_RESET));
             printf("  %-30s %s\n", "def/mut name = val",
                    "Declare variable (not 'let')");
-            printf("  %-30s %s\n", "fn name(params): Ret { }",
+            printf("  %-30s %s\n", "fn name(params) Ret { }",
                    "Function with return type");
-            printf("  %-30s %s\n", "Type: name",
-                   "Parameter/field is type-first");
+            printf("  %-30s %s\n", "Type name / Type: field",
+                   "Function param / typed field");
             printf("  %-30s %s\n", ";", "Line comment (not '//')");
             printf("  %-30s %s\n", "dict() / []", "Empty dict / list literal");
             printf("  %-30s %s\n", "{key: val} / {a, b, c}",

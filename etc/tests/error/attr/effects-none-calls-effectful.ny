@@ -2,7 +2,7 @@
 use std.core
 
 @effects(none)
-fn bad(){
+fn bad() {
    print("effect")
    1
 }

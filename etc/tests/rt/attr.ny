@@ -4,7 +4,7 @@ use std.core.str
 
 if(comptime{ arch() == "x86_64" && os() == "windows" }){
    @naked
-   fn naked_add_x86(a, b){
+   fn naked_add_x86(a, b) {
       asm("
          lea -1(%rcx, %rdx), %rax
          ret
@@ -12,7 +12,7 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
    }
 } elif(comptime{ arch() == "x86_64" }){
    @naked
-   fn naked_add_x86(a, b){
+   fn naked_add_x86(a, b) {
       asm("
          lea -1(%rdi, %rsi), %rax
          ret
@@ -20,7 +20,7 @@ if(comptime{ arch() == "x86_64" && os() == "windows" }){
    }
 } elif(comptime{ arch() == "aarch64" || arch() == "arm64" }){
    @naked
-   fn naked_add_arm64(a, b){
+   fn naked_add_arm64(a, b) {
       asm("
          add x0, x0, x1
          sub x0, x0, #1
@@ -72,7 +72,7 @@ print("✓ Multi-Input ASM passed")
 print("Testing @jit attribute...")
 
 @jit
-fn fast_add(x, y){
+fn fast_add(x, y) {
    return x + y
 }
 
@@ -83,7 +83,7 @@ print("✓ @jit passed")
 print("Testing @thread attribute...")
 
 @thread
-fn worker_fn(base=41){
+fn worker_fn(base=41) {
    print("  Worker running with base =", base)
    return base + 1
 }
@@ -92,7 +92,7 @@ assert(worker_fn() == 42, "@thread default-arg call failed")
 assert(worker_fn(99) == 100, "@thread one-arg call failed")
 
 @thread
-fn worker_sum(a, b, c=0){
+fn worker_sum(a, b, c=0) {
    return a + b + c
 }
 
@@ -100,7 +100,7 @@ assert(worker_sum(10, 20) == 30, "@thread multi-arg call failed")
 assert(worker_sum(10, 20, 3) == 33, "@thread multi-arg default/explicit failed")
 
 @thread
-fn worker_sleep(ms=200){
+fn worker_sleep(ms=200) {
    msleep(ms)
    return ms
 }
@@ -116,14 +116,14 @@ print("✓ @thread passed")
 print("Testing @pure and @effects attributes...")
 
 @pure
-fn pure_inc(x){
+fn pure_inc(x) {
    return x + 1
 }
 
 assert(pure_inc(9) == 10, "@pure function failed")
 
 @effects(none)
-fn pure_mix(a, b, c=0){
+fn pure_mix(a, b, c=0) {
    return a * b + c
 }
 
@@ -131,7 +131,7 @@ assert(pure_mix(6, 7) == 42, "@effects(none) function failed")
 assert(pure_mix(6, 7, 2) == 44, "@effects(none) default/explicit failed")
 
 @effects(alloc)
-fn make_pair_list(a, b){
+fn make_pair_list(a, b) {
    return [a, b]
 }
 
@@ -141,7 +141,7 @@ assert(pair[0] == 3, "@effects(alloc) list item[0] failed")
 assert(pair[1] == 4, "@effects(alloc) list item[1] failed")
 
 @effects(io, alloc, ffi, thread)
-fn echo_once(x){
+fn echo_once(x) {
    print("echo_once:", x)
    return x
 }
@@ -151,14 +151,14 @@ print("✓ @pure/@effects passed")
 print("Testing @llvm attribute...")
 
 @llvm(noinline)
-fn llvm_noinline_add(a, b){
+fn llvm_noinline_add(a, b) {
    return a + b
 }
 
 assert(llvm_noinline_add(5, 7) == 12, "@llvm(noinline) function failed")
 
 @llvm("frame-pointer", "all")
-fn llvm_fp_add(a, b){
+fn llvm_fp_add(a, b) {
    return a + b
 }
 
@@ -176,7 +176,7 @@ print("Testing optimization attributes...")
 @nounwind
 @mustprogress
 @willreturn
-fn pure_math(x, y){
+fn pure_math(x, y) {
    return x * x + y * y
 }
 
@@ -184,14 +184,14 @@ assert(pure_math(3, 4) == 25, "@readnone math failed")
 
 @readonly
 @nounwind
-fn read_first(lst){
+fn read_first(lst) {
    return lst.get(0)
 }
 
 assert(read_first([10, 20]) == 10, "@readonly access failed")
 
 @writeonly
-fn write_first(lst, val){
+fn write_first(lst, val) {
    set(lst, 0, val)
 }
 
@@ -200,7 +200,7 @@ write_first(write_lst, 42)
 assert(write_lst[0] == 42, "@writeonly function failed")
 
 @argmemonly
-fn swap(a, b){
+fn swap(a, b) {
    def t = a.get(0)
    set(a, 0, b.get(0))
    set(b, 0, t)
@@ -212,7 +212,7 @@ assert(s1[0] == 2 && s2[0] == 1, "@argmemonly function failed")
 
 @hot
 @jit
-fn hot_loop(n){
+fn hot_loop(n) {
    mut sum = 0
    mut i = 0
    while(i < n){
@@ -225,16 +225,16 @@ fn hot_loop(n){
 assert(hot_loop(10) == 45, "@hot function failed")
 
 @cold
-fn error_path(){
+fn error_path() {
    return "error"
 }
 
 assert(error_path() == "error", "@cold function failed")
 
 @flatten
-fn nested_calc(a, b){
+fn nested_calc(a, b) {
    @jit
-   fn inner(x){ return x * 2 }
+   fn inner(x) { return x * 2 }
    return inner(a) + inner(b)
 }
 

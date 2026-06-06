@@ -1,4 +1,5 @@
 ;; expect: expected function body
-use core *
+use core
+
 fn main()
 main()

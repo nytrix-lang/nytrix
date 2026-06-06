@@ -1,5 +1,9 @@
-;; Keywords: platform window backend cocoa macos joystick
+;; Keywords: platform window backend cocoa macos joystick os ui input
 ;; Native macOS IOKit/HID joystick backend for Nytrix.
+;; References:
+;; - std.os.ui.window.platform.cocoa
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.cocoa.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
 use std.core
 use std.core.mem
@@ -38,64 +42,149 @@ def kCFTypeDictionaryValueCallBacks = 0
    #include <IOKit/hid/IOHIDLib.h>
    #include <CoreFoundation/CoreFoundation.h>
    extern "" {
-      fn CFArrayCreate(any: alloc, any: values, int: count, any: callbacks): any
-      fn CFArrayGetCount(any: arr): int
-      fn CFArrayGetValueAtIndex(any: arr, int: idx): any
-      fn CFDictionaryCreateMutable(any: alloc, int: cap, any: keys, any: values): any
-      fn CFDictionarySetValue(any: dict, any: key, any: value): any
-      fn CFNumberCreate(any: alloc, int: typ, any: value): any
-      fn CFNumberGetValue(any: num, int: typ, any: out): int
-      fn CFRelease(any: obj): any
-      fn CFRunLoopGetCurrent(): any
-      fn CFRunLoopRunInMode(any: mode, f64: seconds, int: return_after_source): int
-      fn CFStringCreateWithCString(any: alloc, any: s, int: enc): any
-      fn CFStringGetCString(any: s, any: buf, int: cap, int: enc): int
-      fn IOHIDDeviceCopyMatchingElements(any: device, any: matching, int: options): any
-      fn IOHIDDeviceGetProperty(any: device, any: key): any
-      fn IOHIDDeviceGetValue(any: device, any: element, any: out): int
-      fn IOHIDElementGetLogicalMax(any: elem): int
-      fn IOHIDElementGetLogicalMin(any: elem): int
-      fn IOHIDElementGetUsage(any: elem): int
-      fn IOHIDElementGetUsagePage(any: elem): int
-      fn IOHIDManagerClose(any: mgr, int: options): int
-      fn IOHIDManagerCreate(any: alloc, int: options): any
-      fn IOHIDManagerOpen(any: mgr, int: options): int
-      fn IOHIDManagerRegisterDeviceMatchingCallback(any: mgr, any: cb, any: ctx): any
-      fn IOHIDManagerRegisterDeviceRemovalCallback(any: mgr, any: cb, any: ctx): any
-      fn IOHIDManagerScheduleWithRunLoop(any: mgr, any: loop, any: mode): any
-      fn IOHIDManagerSetDeviceMatchingMultiple(any: mgr, any: arr): any
-      fn IOHIDManagerUnscheduleFromRunLoop(any: mgr, any: loop, any: mode): any
-      fn IOHIDValueGetIntegerValue(any: value): int
+      fn CFArrayCreate(any alloc, any values, int count, any callbacks) any
+      fn CFArrayGetCount(any arr) int
+      fn CFArrayGetValueAtIndex(any arr, int idx) any
+      fn CFDictionaryCreateMutable(any alloc, int cap, any keys, any values) any
+      fn CFDictionarySetValue(any dict, any key, any value) any
+      fn CFNumberCreate(any alloc, int typ, any value) any
+      fn CFNumberGetValue(any num, int typ, any out) int
+      fn CFRelease(any obj) any
+      fn CFRunLoopGetCurrent() any
+      fn CFRunLoopRunInMode(any mode, f64 seconds, int return_after_source) int
+      fn CFStringCreateWithCString(any alloc, any s, int enc) any
+      fn CFStringGetCString(any s, any buf, int cap, int enc) int
+      fn IOHIDDeviceCopyMatchingElements(any device, any matching, int options) any
+      fn IOHIDDeviceGetProperty(any device, any key) any
+      fn IOHIDDeviceGetValue(any device, any element, any out) int
+      fn IOHIDElementGetLogicalMax(any elem) int
+      fn IOHIDElementGetLogicalMin(any elem) int
+      fn IOHIDElementGetUsage(any elem) int
+      fn IOHIDElementGetUsagePage(any elem) int
+      fn IOHIDManagerClose(any mgr, int options) int
+      fn IOHIDManagerCreate(any alloc, int options) any
+      fn IOHIDManagerOpen(any mgr, int options) int
+      fn IOHIDManagerRegisterDeviceMatchingCallback(any mgr, any cb, any ctx) any
+      fn IOHIDManagerRegisterDeviceRemovalCallback(any mgr, any cb, any ctx) any
+      fn IOHIDManagerScheduleWithRunLoop(any mgr, any loop, any mode) any
+      fn IOHIDManagerSetDeviceMatchingMultiple(any mgr, any arr) any
+      fn IOHIDManagerUnscheduleFromRunLoop(any mgr, any loop, any mode) any
+      fn IOHIDValueGetIntegerValue(any value) int
    }
 } #else {
-   fn CFArrayCreate(any: _alloc, any: _values, int: _count, any: _callbacks): any { 0 }
-   fn CFArrayGetCount(any: _arr): int { 0 }
-   fn CFArrayGetValueAtIndex(any: _arr, int: _idx): any { 0 }
-   fn CFDictionaryCreateMutable(any: _alloc, int: _cap, any: _keys, any: _values): any { 0 }
-   fn CFDictionarySetValue(any: _dict, any: _key, any: _value): any { 0 }
-   fn CFNumberCreate(any: _alloc, int: _typ, any: _value): any { 0 }
-   fn CFNumberGetValue(any: _num, int: _typ, any: _out): int { 0 }
-   fn CFRelease(any: _obj): any { 0 }
-   fn CFRunLoopGetCurrent(): any { 0 }
-   fn CFRunLoopRunInMode(any: _mode, f64: _seconds, int: _return_after_source): int { kCFRunLoopRunTimedOut }
-   fn CFStringCreateWithCString(any: _alloc, any: _s, int: _enc): any { 0 }
-   fn CFStringGetCString(any: _s, any: _buf, int: _cap, int: _enc): int { 0 }
-   fn IOHIDDeviceCopyMatchingElements(any: _device, any: _matching, int: _options): any { 0 }
-   fn IOHIDDeviceGetProperty(any: _device, any: _key): any { 0 }
-   fn IOHIDDeviceGetValue(any: _device, any: _element, any: _out): int { -1 }
-   fn IOHIDElementGetLogicalMax(any: _elem): int { 0 }
-   fn IOHIDElementGetLogicalMin(any: _elem): int { 0 }
-   fn IOHIDElementGetUsage(any: _elem): int { 0 }
-   fn IOHIDElementGetUsagePage(any: _elem): int { 0 }
-   fn IOHIDManagerClose(any: _mgr, int: _options): int { 0 }
-   fn IOHIDManagerCreate(any: _alloc, int: _options): any { 0 }
-   fn IOHIDManagerOpen(any: _mgr, int: _options): int { -1 }
-   fn IOHIDManagerRegisterDeviceMatchingCallback(any: _mgr, any: _cb, any: _ctx): any { 0 }
-   fn IOHIDManagerRegisterDeviceRemovalCallback(any: _mgr, any: _cb, any: _ctx): any { 0 }
-   fn IOHIDManagerScheduleWithRunLoop(any: _mgr, any: _loop, any: _mode): any { 0 }
-   fn IOHIDManagerSetDeviceMatchingMultiple(any: _mgr, any: _arr): any { 0 }
-   fn IOHIDManagerUnscheduleFromRunLoop(any: _mgr, any: _loop, any: _mode): any { 0 }
-   fn IOHIDValueGetIntegerValue(any: _value): int { 0 }
+   "Runs the IOHIDValueGetIntegerValue operation."
+   fn CFArrayCreate(any _alloc, any _values, int _count, any _callbacks) any {
+      "Runs the CFArrayCreate operation."
+      0
+   }
+   fn CFArrayGetCount(any _arr) int {
+      "Runs the CFArrayGetCount operation."
+      0
+   }
+   fn CFArrayGetValueAtIndex(any _arr, int _idx) any {
+      "Runs the CFArrayGetValueAtIndex operation."
+      0
+   }
+   fn CFDictionaryCreateMutable(any _alloc, int _cap, any _keys, any _values) any {
+      "Runs the CFDictionaryCreateMutable operation."
+      0
+   }
+   fn CFDictionarySetValue(any _dict, any _key, any _value) any {
+      "Runs the CFDictionarySetValue operation."
+      0
+   }
+   fn CFNumberCreate(any _alloc, int _typ, any _value) any {
+      "Runs the CFNumberCreate operation."
+      0
+   }
+   fn CFNumberGetValue(any _num, int _typ, any _out) int {
+      "Runs the CFNumberGetValue operation."
+      0
+   }
+   fn CFRelease(any _obj) any {
+      "Runs the CFRelease operation."
+      0
+   }
+   fn CFRunLoopGetCurrent() any {
+      "Runs the CFRunLoopGetCurrent operation."
+      0
+   }
+   fn CFRunLoopRunInMode(any _mode, f64 _seconds, int _return_after_source) int {
+      "Runs the CFRunLoopRunInMode operation."
+      kCFRunLoopRunTimedOut
+   }
+   fn CFStringCreateWithCString(any _alloc, any _s, int _enc) any {
+      "Runs the CFStringCreateWithCString operation."
+      0
+   }
+   fn CFStringGetCString(any _s, any _buf, int _cap, int _enc) int {
+      "Runs the CFStringGetCString operation."
+      0
+   }
+   fn IOHIDDeviceCopyMatchingElements(any _device, any _matching, int _options) any {
+      "Runs the IOHIDDeviceCopyMatchingElements operation."
+      0
+   }
+   fn IOHIDDeviceGetProperty(any _device, any _key) any {
+      "Runs the IOHIDDeviceGetProperty operation."
+      0
+   }
+   fn IOHIDDeviceGetValue(any _device, any _element, any _out) int {
+      "Runs the IOHIDDeviceGetValue operation."
+      -1
+   }
+   fn IOHIDElementGetLogicalMax(any _elem) int {
+      "Runs the IOHIDElementGetLogicalMax operation."
+      0
+   }
+   fn IOHIDElementGetLogicalMin(any _elem) int {
+      "Runs the IOHIDElementGetLogicalMin operation."
+      0
+   }
+   fn IOHIDElementGetUsage(any _elem) int {
+      "Runs the IOHIDElementGetUsage operation."
+      0
+   }
+   fn IOHIDElementGetUsagePage(any _elem) int {
+      "Runs the IOHIDElementGetUsagePage operation."
+      0
+   }
+   fn IOHIDManagerClose(any _mgr, int _options) int {
+      "Runs the IOHIDManagerClose operation."
+      0
+   }
+   fn IOHIDManagerCreate(any _alloc, int _options) any {
+      "Runs the IOHIDManagerCreate operation."
+      0
+   }
+   fn IOHIDManagerOpen(any _mgr, int _options) int {
+      "Runs the IOHIDManagerOpen operation."
+      -1
+   }
+   fn IOHIDManagerRegisterDeviceMatchingCallback(any _mgr, any _cb, any _ctx) any {
+      "Runs the IOHIDManagerRegisterDeviceMatchingCallback operation."
+      0
+   }
+   fn IOHIDManagerRegisterDeviceRemovalCallback(any _mgr, any _cb, any _ctx) any {
+      "Runs the IOHIDManagerRegisterDeviceRemovalCallback operation."
+      0
+   }
+   fn IOHIDManagerScheduleWithRunLoop(any _mgr, any _loop, any _mode) any {
+      "Runs the IOHIDManagerScheduleWithRunLoop operation."
+      0
+   }
+   fn IOHIDManagerSetDeviceMatchingMultiple(any _mgr, any _arr) any {
+      "Runs the IOHIDManagerSetDeviceMatchingMultiple operation."
+      0
+   }
+   fn IOHIDManagerUnscheduleFromRunLoop(any _mgr, any _loop, any _mode) any {
+      "Runs the IOHIDManagerUnscheduleFromRunLoop operation."
+      0
+   }
+   fn IOHIDValueGetIntegerValue(any _value) int {
+      "Runs the IOHIDValueGetIntegerValue operation."
+      0
+   }
 }
 
 mut _initialized = false
@@ -110,19 +199,19 @@ mut _key_kIOHIDProductIDKey     = 0
 mut _key_kIOHIDVersionNumberKey = 0
 mut _key_kIOHIDManufacturerKey  = 0
 
-fn _has_native_support(): bool {
+fn _has_native_support() bool {
    #macos { return true }
    false
 }
 
-fn _get_js(int: jid): any { _joysticks.get(jid, 0) }
+fn _get_js(int jid) any { _joysticks.get(jid, 0) }
 
-fn _put_js(int: jid, any: js): any {
+fn _put_js(int jid, any js) any {
    _joysticks = _joysticks.set(jid, js)
    js
 }
 
-fn _free_js(int: jid): bool {
+fn _free_js(int jid) bool {
    def js = _get_js(jid)
    if(!js){ return false }
    def ap, bp = js.get("axes_ptr", 0), js.get("buttons_ptr", 0)
@@ -134,7 +223,7 @@ fn _free_js(int: jid): bool {
    true
 }
 
-fn _find_free_slot(): int {
+fn _find_free_slot() int {
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
       if(!_get_js(jid)){ return jid }
@@ -143,7 +232,7 @@ fn _find_free_slot(): int {
    -1
 }
 
-fn _find_slot_by_device(any: device): int {
+fn _find_slot_by_device(any device) int {
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
       def js = _get_js(jid)
@@ -153,18 +242,18 @@ fn _find_slot_by_device(any: device): int {
    -1
 }
 
-fn _hex_nibble_c(any: n): str {
+fn _hex_nibble_c(any n) str {
    def x = int(n) & 0xf
    if(x < 10){ return chr(48 + x) }
    chr(97 + x - 10)
 }
 
-fn _hex_byte_c(any: v): str {
+fn _hex_byte_c(any v) str {
    def x = int(v) & 0xff
    _hex_nibble_c(x >> 4) + _hex_nibble_c(x)
 }
 
-fn _build_guid(any: vid, any: pid, any: ver): str {
+fn _build_guid(any vid, any pid, any ver) str {
    def bus = 3
    _hex_byte_c(bus & 0xff) + _hex_byte_c((bus >> 8) & 0xff) + "0000" +
    _hex_byte_c(vid & 0xff) + _hex_byte_c((vid >> 8) & 0xff) + "0000" +
@@ -172,14 +261,14 @@ fn _build_guid(any: vid, any: pid, any: ver): str {
    _hex_byte_c(ver & 0xff) + _hex_byte_c((ver >> 8) & 0xff) + "0000"
 }
 
-fn _invoke_callback(int: jid, int: event): any {
+fn _invoke_callback(int jid, int event) any {
    def cb = _joystick_callback
    if(cb){ cb(jid, event) }
 }
 
-fn _cf_str(str: s): any { CFStringCreateWithCString(0, cstr(s), kCFStringEncodingUTF8) }
+fn _cf_str(str s) any { CFStringCreateWithCString(0, cstr(s), kCFStringEncodingUTF8) }
 
-fn _cf_int(any: v): any {
+fn _cf_int(any v) any {
    def p = malloc(8)
    if(!p){ return 0 }
    store64_h(p, v, 0)
@@ -188,7 +277,7 @@ fn _cf_int(any: v): any {
    n
 }
 
-fn _cf_str_to_str(any: cf): str {
+fn _cf_str_to_str(any cf) str {
    if(!cf){ return "" }
    def buf = malloc(512)
    if(!buf){ return "" }
@@ -198,7 +287,7 @@ fn _cf_str_to_str(any: cf): str {
    s
 }
 
-fn _init_keys(): any {
+fn _init_keys() any {
    if(_key_kIOHIDProductKey){ return nil }
    _key_kIOHIDProductKey       = _cf_str("Product")
    _key_kIOHIDVendorIDKey      = _cf_str("VendorID")
@@ -207,7 +296,7 @@ fn _init_keys(): any {
    _key_kIOHIDManufacturerKey  = _cf_str("Manufacturer")
 }
 
-fn _matching_dict_for_usage(int: usage_page, int: usage): any {
+fn _matching_dict_for_usage(int usage_page, int usage) any {
    def dict = CFDictionaryCreateMutable(0, 0, 0, 0)
    if(!dict){ return 0 }
    def page_num = _cf_int(usage_page)
@@ -223,7 +312,7 @@ fn _matching_dict_for_usage(int: usage_page, int: usage): any {
    dict
 }
 
-fn _cf_num_to_int(any: cf_num): int {
+fn _cf_num_to_int(any cf_num) int {
    if(!cf_num){ return 0 }
    def p = malloc(8)
    if(!p){ return 0 }
@@ -233,7 +322,7 @@ fn _cf_num_to_int(any: cf_num): int {
    v
 }
 
-fn _device_connected(any: ctx, any: result, any: sender, any: device): any {
+fn _device_connected(any ctx, any result, any sender, any device) any {
    if(!device){ return nil }
    def jid = _find_free_slot()
    if(jid < 0){ return nil }
@@ -301,18 +390,18 @@ fn _device_connected(any: ctx, any: result, any: sender, any: device): any {
       def is_btn  = (page == kHIDPage_Button)
       if(is_axis){
          def off = axis_idx * 24
-         store64_h(elem_arr, elem,    off) ;; ptr
-         store32(elem_arr, 1,           off + 8) ;; type=axis
-         store32(elem_arr, axis_idx,    off + 12) ;; index
-         store64_h(elem_arr, lmin,    off + 16) ;; lmin
-         store32(elem_arr, int(lmax),   off + 16) ;; overwrite — store i32 lmin, lmax
+         store64_h(elem_arr, elem,    off)
+         store32(elem_arr, 1,           off + 8)
+         store32(elem_arr, axis_idx,    off + 12)
+         store64_h(elem_arr, lmin,    off + 16)
+         store32(elem_arr, int(lmax),   off + 16)
          store32(elem_arr, int(lmin),   off + 12)
          store32(elem_arr, int(lmax),   off + 16)
          axis_idx += 1
       } elif(is_hat){
          def hat_off = (axis_count + button_count + hat_idx) * 24
          store64_h(elem_arr, elem,    hat_off)
-         store32(elem_arr, 3,           hat_off + 8) ;; type=hat
+         store32(elem_arr, 3,           hat_off + 8)
          store32(elem_arr, hat_idx,     hat_off + 12)
          store32(elem_arr, int(lmin),   hat_off + 16)
          store32(elem_arr, int(lmax),   hat_off + 20)
@@ -320,7 +409,7 @@ fn _device_connected(any: ctx, any: result, any: sender, any: device): any {
       } elif(is_btn){
          def off = (axis_count + button_idx) * 24
          store64_h(elem_arr, elem,    off)
-         store32(elem_arr, 2,           off + 8) ;; type=button
+         store32(elem_arr, 2,           off + 8)
          store32(elem_arr, button_idx,  off + 12)
          button_idx += 1
       }
@@ -346,14 +435,14 @@ fn _device_connected(any: ctx, any: result, any: sender, any: device): any {
    _invoke_callback(jid, backend_api.CONNECTED)
 }
 
-fn _device_removed(any: ctx, any: result, any: sender, any: device): any {
+fn _device_removed(any ctx, any result, any sender, any device) any {
    def jid = _find_slot_by_device(device)
    if(jid < 0){ return nil }
    _invoke_callback(jid, backend_api.DISCONNECTED)
    _free_js(jid)
 }
 
-fn _hat_buttons(any: value, any: lmin, any: lmax): int {
+fn _hat_buttons(any value, any lmin, any lmax) int {
    def range = lmax - lmin
    if(range == 0){ return 0 }
    def v = int(value) - int(lmin)
@@ -365,7 +454,7 @@ fn _hat_buttons(any: value, any: lmin, any: lmax): int {
    up | (right << 1) | (down << 2) | (left << 3)
 }
 
-fn _poll_js(int: jid): any {
+fn _poll_js(int jid) any {
    def js = _get_js(jid)
    if(!js){ return nil }
    def device = js.get("device", 0)
@@ -402,10 +491,10 @@ fn _poll_js(int: jid): any {
          } elif(etype == 3){
             def bits = _hat_buttons(raw, lmin, lmax)
             def base = btn_count + eidx * 4
-            store8(btns_ptr, band(bits, 1) ? 1 : 0, base + 0) ;; up
-            store8(btns_ptr, band(bits, 2) ? 1 : 0, base + 1) ;; right
-            store8(btns_ptr, band(bits, 4) ? 1 : 0, base + 2) ;; down
-            store8(btns_ptr, band(bits, 8) ? 1 : 0, base + 3) ;; left
+            store8(btns_ptr, band(bits, 1) ? 1 : 0, base + 0)
+            store8(btns_ptr, band(bits, 2) ? 1 : 0, base + 1)
+            store8(btns_ptr, band(bits, 4) ? 1 : 0, base + 2)
+            store8(btns_ptr, band(bits, 8) ? 1 : 0, base + 3)
          }
       }
       i += 1
@@ -413,7 +502,8 @@ fn _poll_js(int: jid): any {
    free(val_ptr)
 }
 
-fn init(): bool {
+fn init() bool {
+   "Initializes init."
    if(_initialized){ return _initialized }
    if(!_has_native_support()){ return false }
    gamepad_map.init_default_macos_mappings()
@@ -456,7 +546,8 @@ fn init(): bool {
    true
 }
 
-fn terminate(): bool {
+fn terminate() bool {
+   "Runs the terminate operation."
    if(!_initialized){ return true }
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
@@ -477,7 +568,8 @@ fn terminate(): bool {
    true
 }
 
-fn poll_joysticks(): bool {
+fn poll_joysticks() bool {
+   "Polls poll joysticks."
    if(!_has_native_support()){ return false }
    if(!_initialized){ return false }
    if(_run_loop_mode){ CFRunLoopRunInMode(_run_loop_mode, 0.0, 0) }
@@ -489,24 +581,28 @@ fn poll_joysticks(): bool {
    true
 }
 
-fn joystick_present(int: jid): bool {
+fn joystick_present(int jid) bool {
+   "Runs the joystick present operation."
    if(!_has_native_support() || jid < 0 || jid >= MAX_JOYSTICKS){ return false }
    poll_joysticks()
    def js = _get_js(jid)
    !!js.get("connected", false)
 }
 
-fn get_joystick_name(int: jid): str {
+fn get_joystick_name(int jid) str {
+   "Returns get joystick name."
    if(!joystick_present(jid)){ return "Unknown" }
    _get_js(jid).get("name", "Unknown")
 }
 
-fn get_joystick_guid(int: jid): str {
+fn get_joystick_guid(int jid) str {
+   "Returns get joystick guid."
    if(!joystick_present(jid)){ return "00000000000000000000000000000000" }
    _get_js(jid).get("guid", "00000000000000000000000000000000")
 }
 
-fn get_joystick_axes(int: jid, any: count_ptr): any {
+fn get_joystick_axes(int jid, any count_ptr) any {
+   "Returns get joystick axes."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    def js = _get_js(jid)
@@ -514,7 +610,8 @@ fn get_joystick_axes(int: jid, any: count_ptr): any {
    js.get("axes_ptr", 0)
 }
 
-fn get_joystick_buttons(int: jid, any: count_ptr): any {
+fn get_joystick_buttons(int jid, any count_ptr) any {
+   "Returns get joystick buttons."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    def js = _get_js(jid)
@@ -522,27 +619,31 @@ fn get_joystick_buttons(int: jid, any: count_ptr): any {
    js.get("buttons_ptr", 0)
 }
 
-fn joystick_is_gamepad(int: jid): bool {
+fn joystick_is_gamepad(int jid) bool {
+   "Runs the joystick is gamepad operation."
    if(!joystick_present(jid)){ return false }
    gamepad_map.joystick_is_gamepad(_get_js(jid))
 }
 
-fn get_gamepad_state(int: jid, any: state_ptr): bool {
+fn get_gamepad_state(int jid, any state_ptr) bool {
+   "Returns get gamepad state."
    if(!joystick_present(jid)){ if(state_ptr){ memset(state_ptr, 0, 64) } return false }
    gamepad_map.get_gamepad_state(_get_js(jid), state_ptr)
 }
 
-fn get_gamepad_name(int: jid): str {
+fn get_gamepad_name(int jid) str {
+   "Returns get gamepad name."
    if(!joystick_present(jid)){ return "Unknown" }
    def name = gamepad_map.get_gamepad_name(_get_js(jid))
    if(name && name.len > 0){ return name }
    get_joystick_name(jid)
 }
 
-fn set_joystick_callback(any: cb): any {
+fn set_joystick_callback(any cb) any {
+   "Sets set joystick callback."
    def prev = _joystick_callback
    _joystick_callback = cb
    prev
 }
 
-fn update_gamepad_mappings(str: s): int { gamepad_map.update_mappings(s, "Mac OS X") }
+fn update_gamepad_mappings(str s) int { gamepad_map.update_mappings(s, "Mac OS X") }

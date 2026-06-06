@@ -370,18 +370,20 @@ static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc, con
                                   const char *llvm_include_arg) {
   const char *tmp = ny_get_temp_dir();
   const char *host_flags = getenv("NYTRIX_HOST_CFLAGS");
+  const char *host_triple = getenv("NYTRIX_HOST_TRIPLE");
   const char *arm_float_abi = getenv("NYTRIX_ARM_FLOAT_ABI");
-  const char *cache_rev = "rtcache-v5";
+  const char *cache_rev = "rtcache-v6";
   char dwarf_key[16];
   if (debug)
     snprintf(dwarf_key, sizeof(dwarf_key), "d%d", ny_builder_dwarf_version());
   else
     snprintf(dwarf_key, sizeof(dwarf_key), "d0");
   char key[PATH_MAX * 2];
-  snprintf(key, sizeof(key), "%s|%s|%d|%d|%d|%s|%s|%s|%s|%s", cc ? cc : "",
+  snprintf(key, sizeof(key), "%s|%s|%d|%d|%d|%s|%s|%s|%s|%s|%s", cc ? cc : "",
            root ? root : "", debug ? 1 : 0, speed_level, native_tune ? 1 : 0,
            llvm_include_arg ? llvm_include_arg : "", host_flags ? host_flags : "",
-           arm_float_abi ? arm_float_abi : "", dwarf_key, cache_rev);
+           host_triple ? host_triple : "", arm_float_abi ? arm_float_abi : "", dwarf_key,
+           cache_rev);
   uint64_t h = ny_hash64(key, strlen(key));
 #ifdef _WIN32
   snprintf(out, out_len, "%s/ny_rt_cache_%016llx_%s.obj", tmp, (unsigned long long)h,
@@ -657,6 +659,13 @@ static int spawn_with_host_flags(const char *const base[], const char *env, char
 }
 #endif
 
+static bool ny_builder_target_is_windows(void) {
+  const char *triple = getenv("NYTRIX_HOST_TRIPLE");
+  if (!triple || !*triple)
+    return false;
+  return strstr(triple, "windows") || strstr(triple, "mingw") || strstr(triple, "w64");
+}
+
 static void append_link_arg_preserving_custom(const char *arg, const char *argv[], size_t *idx,
                                               size_t max, char *pool[], size_t *pool_len,
                                               size_t pool_max) {
@@ -878,6 +887,7 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   static char ast_src[PATH_MAX];
   char dwarf_flag[16];
   char cache_obj[PATH_MAX];
+  bool target_windows = ny_builder_target_is_windows();
   if (speed_level < 0)
     speed_level = 0;
   if (speed_level > 3)
@@ -1005,14 +1015,15 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
   runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
 #if !defined(_WIN32)
-  if (!debug && native_tune)
+  if (!debug && native_tune && !target_windows)
     runtime_args[ra_i++] = "-march=native";
 #endif
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
 #if !defined(_WIN32)
-  runtime_args[ra_i++] = "-fPIC";
+  if (!target_windows)
+    runtime_args[ra_i++] = "-fPIC";
 #endif
   runtime_args[ra_i++] = "-fvisibility=hidden";
   runtime_args[ra_i++] = "-ffunction-sections";
@@ -1046,12 +1057,13 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
   runtime_args[ra_i++] = dwarf_flag;
   runtime_args[ra_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
   runtime_args[ra_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
-  if (!debug && native_tune)
+  if (!debug && native_tune && !target_windows)
     runtime_args[ra_i++] = "-march=native";
 #if defined(__arm__) && !defined(__aarch64__)
   runtime_args[ra_i++] = arm_float_abi_flag;
 #endif
-  runtime_args[ra_i++] = "-fno-pie";
+  if (!target_windows)
+    runtime_args[ra_i++] = "-fno-pie";
   runtime_args[ra_i++] = "-fvisibility=hidden";
   runtime_args[ra_i++] = "-ffunction-sections";
   runtime_args[ra_i++] = "-fdata-sections";
@@ -1097,16 +1109,18 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime, const c
     ast_args[aa_i++] = dwarf_flag;
     ast_args[aa_i++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
     ast_args[aa_i++] = debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
-    if (!debug && native_tune)
+    if (!debug && native_tune && !target_windows)
       ast_args[aa_i++] = "-march=native";
 #if defined(__arm__) && !defined(__aarch64__)
     ast_args[aa_i++] = arm_float_abi_flag;
 #endif
 #if !defined(_WIN32)
-    ast_args[aa_i++] = "-fPIC";
+    if (!target_windows)
+      ast_args[aa_i++] = "-fPIC";
 #endif
 #if !defined(__APPLE__) && !defined(_WIN32)
-    ast_args[aa_i++] = "-fno-pie";
+    if (!target_windows)
+      ast_args[aa_i++] = "-fno-pie";
 #endif
     ast_args[aa_i++] = "-fvisibility=hidden";
     ast_args[aa_i++] = "-ffunction-sections";
@@ -1146,6 +1160,7 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
 #define NY_MAX_LINK_ARGS 128
   const char *argv[NY_MAX_LINK_ARGS];
   size_t idx = 0;
+  bool target_windows = ny_builder_target_is_windows();
 #if defined(__arm__) && !defined(__aarch64__)
   const char *arm_float_abi_flag = ny_builder_arm_float_abi_flag();
 #endif
@@ -1246,11 +1261,11 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   if (profile)
     argv[idx++] = "-pg";
 #if !defined(__APPLE__) && !defined(_WIN32)
-  if (ny_tool_in_path("mold")) {
+  if (!target_windows && ny_tool_in_path("mold")) {
     if (verbose_enabled >= 1)
       NY_LOG_INFO("Using mold linker for faster linking.\n");
     argv[idx++] = "-fuse-ld=mold";
-  } else {
+  } else if (!target_windows) {
     const char *lld_env = getenv("NYTRIX_USE_LLD");
     bool use_lld = lld_env ? ny_env_is_truthy(lld_env) : ny_tool_in_path("ld.lld");
     if (use_lld)
@@ -1267,7 +1282,8 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
   }
 #else
 #if !defined(_WIN32)
-  argv[idx++] = "-no-pie";
+  if (!target_windows)
+    argv[idx++] = "-no-pie";
 #endif
 #endif
   argv[idx++] = obj_path;
@@ -1304,31 +1320,35 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     argv[idx++] = link_dirs[i];
   }
 #if !defined(__APPLE__) && !defined(_WIN32)
-  argv[idx++] = debug ? "-Wl,--build-id" : "-Wl,--build-id=none";
-  argv[idx++] = "-Wl,--gc-sections";
-  if (link_strip)
-    argv[idx++] = "-Wl,--strip-all";
+  if (!target_windows) {
+    argv[idx++] = debug ? "-Wl,--build-id" : "-Wl,--build-id=none";
+    argv[idx++] = "-Wl,--gc-sections";
+    if (link_strip)
+      argv[idx++] = "-Wl,--strip-all";
+  }
 #elif defined(__APPLE__)
   if (link_strip)
     argv[idx++] = "-Wl,-dead_strip";
 #endif
   if (shared_rt_path) {
 #ifndef _WIN32
-    static char rpath_buf[PATH_MAX];
-    const char *slash = strrchr(shared_rt_path, '/');
-    if (slash) {
-      size_t len = (size_t)(slash - shared_rt_path);
-      if (len >= sizeof(rpath_buf))
-        len = sizeof(rpath_buf) - 1;
-      memcpy(rpath_buf, shared_rt_path, len);
-      rpath_buf[len] = '\0';
-      static char rpath_arg[PATH_MAX + 16];
+    if (!target_windows) {
+      static char rpath_buf[PATH_MAX];
+      const char *slash = strrchr(shared_rt_path, '/');
+      if (slash) {
+        size_t len = (size_t)(slash - shared_rt_path);
+        if (len >= sizeof(rpath_buf))
+          len = sizeof(rpath_buf) - 1;
+        memcpy(rpath_buf, shared_rt_path, len);
+        rpath_buf[len] = '\0';
+        static char rpath_arg[PATH_MAX + 16];
 #ifdef __APPLE__
-      snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
+        snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
 #else
-      snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
+        snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", rpath_buf);
 #endif
-      argv[idx++] = rpath_arg;
+        argv[idx++] = rpath_arg;
+      }
     }
 #endif
   }
@@ -1472,19 +1492,26 @@ bool ny_builder_link(const char *cc, const char *obj_path, const char *runtime_o
     argv[idx++] = "-lws2_32";
 #endif
 #if !defined(_WIN32)
-  if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-lz";
-  if (!has_m && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-lm";
+  if (target_windows) {
+    if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lz";
+    if (idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lws2_32";
+  } else {
+    if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lz";
+    if (!has_m && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lm";
 #if !defined(__APPLE__)
-  if (!has_dl && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-ldl";
-  if (!has_util && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-lutil";
+    if (!has_dl && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-ldl";
+    if (!has_util && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lutil";
 #endif
-  if (!has_pthread && idx + 1 < NY_MAX_LINK_ARGS)
-    argv[idx++] = "-lpthread";
-  if (ny_env_enabled("NYTRIX_LINK_UI_DEFAULTS")) {
+    if (!has_pthread && idx + 1 < NY_MAX_LINK_ARGS)
+      argv[idx++] = "-lpthread";
+  }
+  if (!target_windows && ny_env_enabled("NYTRIX_LINK_UI_DEFAULTS")) {
     bool has_x11 = false;
     bool has_wayland_client = false;
     bool has_wayland_cursor = false;

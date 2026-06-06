@@ -25,7 +25,15 @@
 #ifndef NOMINMAX
 #define NOMINMAX 1
 #endif
+#if defined(__has_include)
+#if __has_include(<basetsd.h>)
+#include <basetsd.h>
+#else
 #include <BaseTsd.h>
+#endif
+#else
+#include <basetsd.h>
+#endif
 #include <direct.h>
 #include <io.h>
 #include <process.h>

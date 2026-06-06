@@ -2,7 +2,7 @@ use std.core
 use std.core.syntax as syntax
 use std.core.test as test
 
-fn __list_has(xs, want){
+fn __list_has(xs, want) {
    mut i = 0
    while(i < xs.len){
       if(xs.get(i, 0) == want){ return true }
@@ -11,7 +11,7 @@ fn __list_has(xs, want){
    false
 }
 
-fn __macro_double(node){
+fn __macro_double(node) {
    def args = node.get("args", list(0))
    if(args.len != 1){ return 0 }
    def x = args.get(0, 0)
@@ -19,7 +19,7 @@ fn __macro_double(node){
    x + x
 }
 
-fn __macro_double_plus1(node){
+fn __macro_double_plus1(node) {
    def args = node.get("args", list(0))
    if(args.len != 1){ return 0 }
    def x = args.get(0, 0)
@@ -27,7 +27,7 @@ fn __macro_double_plus1(node){
    (x + x) + 1
 }
 
-fn __macro_add2(node){
+fn __macro_add2(node) {
    def args = node.get("args", list(0))
    if(args.len != 2){ return 0 }
    def a = args.get(0, 0)
@@ -36,22 +36,22 @@ fn __macro_add2(node){
    a + b
 }
 
-fn __macro_to_double_form(node){
+fn __macro_to_double_form(node) {
    def args = node.get("args", list(0))
    syntax.form("double", args)
 }
 
-fn __macro_ping(node){
+fn __macro_ping(node) {
    def args = node.get("args", list(0))
    syntax.form("pong", args)
 }
 
-fn __macro_pong(node){
+fn __macro_pong(node) {
    def args = node.get("args", list(0))
    syntax.form("ping", args)
 }
 
-fn __attr_mark(node, args){
+fn __attr_mark(node, args) {
    if(!is_dict(node)){ return node }
    mut out = node
    out = out.set("marked", true)
@@ -59,24 +59,24 @@ fn __attr_mark(node, args){
    out
 }
 
-fn __rw_add1(value){
+fn __rw_add1(value) {
    if(!is_int(value)){ return value }
    value + 1
 }
 
-fn __rw_mul2(value){
+fn __rw_mul2(value) {
    if(!is_int(value)){ return value }
    value * 2
 }
 
-fn __rw_shift(value){
+fn __rw_shift(value) {
    if(!syntax.is_form(value, "shift")){ return value }
    def tail = syntax.form_tail(value)
    if(tail.len != 1){ return value }
    syntax.form("inc1", tail)
 }
 
-fn __rw_eval_inc1(value){
+fn __rw_eval_inc1(value) {
    if(!syntax.is_form(value, "inc1")){ return value }
    def tail = syntax.form_tail(value)
    if(tail.len != 1){ return value }
@@ -85,7 +85,7 @@ fn __rw_eval_inc1(value){
    x + 1
 }
 
-fn test_defaults_and_surface(){
+fn test_defaults_and_surface() {
    syntax.reset_registry()
    def reg = syntax.registry()
    assert(is_dict(reg), "registry should be dict")
@@ -106,7 +106,7 @@ fn test_defaults_and_surface(){
    "form_tail on non-form should return empty list")
 }
 
-fn test_registry_local_ops(){
+fn test_registry_local_ops() {
    mut reg = syntax.new_registry()
    assert(!syntax.is_macro_registered_in(reg, "double"),
    "fresh registry should not contain custom macro")
@@ -146,7 +146,7 @@ fn test_registry_local_ops(){
    "unregister_attribute_in should update deterministic order")
 }
 
-fn test_registry_global_ops(){
+fn test_registry_global_ops() {
    syntax.reset_registry()
    syntax.register_macro("double", __macro_double)
    syntax.register_attribute("mark", __attr_mark)
@@ -174,7 +174,7 @@ fn test_registry_global_ops(){
    "reset should re-register builtin attributes")
 }
 
-fn test_registry_clone_merge_ops(){
+fn test_registry_clone_merge_ops() {
    mut base = syntax.new_registry()
    base = syntax.register_macro_in(base, "double", __macro_double)
    base = syntax.register_attribute_in(base, "mark", __attr_mark)
@@ -223,7 +223,7 @@ fn test_registry_clone_merge_ops(){
    syntax.reset_registry()
 }
 
-fn test_form_expansion_surface(){
+fn test_form_expansion_surface() {
    mut reg = syntax.new_registry()
    reg = syntax.register_macro_in(reg, "double", __macro_double)
    reg = syntax.register_macro_in(reg, "double_form", __macro_to_double_form)
@@ -268,7 +268,7 @@ fn test_form_expansion_surface(){
    "fixpoint max_steps should stop deterministically")
 }
 
-fn test_attribute_surface_and_fallback(){
+fn test_attribute_surface_and_fallback() {
    mut reg = syntax.new_registry()
    reg = syntax.register_attribute_in(reg, "mark", __attr_mark)
    mut node = dict(2)
@@ -301,7 +301,7 @@ fn test_attribute_surface_and_fallback(){
    "builtin @extern should set link name")
 }
 
-fn test_rewriter_surface(){
+fn test_rewriter_surface() {
    mut rw = syntax.new_rewriter()
    rw = syntax.register_rewrite(rw, "add1", __rw_add1)
    rw = syntax.register_rewrite(rw, "mul2", __rw_mul2)
@@ -321,7 +321,7 @@ fn test_rewriter_surface(){
    "rewrite_fixpoint should stabilize chained rewrites")
 }
 
-fn test_error_paths(){
+fn test_error_paths() {
    mut caught = false
    try {
       syntax.register_macro("", __macro_double)

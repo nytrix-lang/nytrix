@@ -167,7 +167,7 @@ static void ny_pkg_usage(void) {
   ny_pkg_usage_section("options", options, sizeof(options) / sizeof(options[0]), NYT_GREEN);
   printf("\n%sSources:%s local dir/file, git+URL, git@host:path, URL.git, archive tar/zip, archive+PATH\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
-  printf("%sRepos:%s ny pkg repo add core git+https://host/pkgs.git; ny get pkgname\n",
+  printf("%sRepos:%s ny pkg repo add core git+https://host/pkgs.git; ny pkg repo list; ny get pkgname\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
 }
 
@@ -983,19 +983,21 @@ static int ny_pkg_copy_local(const char *source, const char *dest, bool force, b
   int rc = cmd[0] ? ny_pkg_run(cmd, verbose) : 0;
   if (rc == 0)
     ny_ensure_dir_recursive(dest);
-  if (rc == 0 && ny_pkg_is_dir(source)) {
-    snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qsrc, qdst);
-    rc = ny_pkg_run(cmd, verbose);
-  } else if (rc == 0) {
-    char mod_path[4096];
-    ny_pkg_join(mod_path, sizeof(mod_path), dest, "mod.ny");
-    char *qmod = ny_pkg_shell_quote(mod_path);
-    if (!qmod) {
-      rc = 1;
-    } else {
-      snprintf(cmd, sizeof(cmd), "cp %s %s", qsrc, qmod);
+  if (rc == 0) {
+    if (ny_pkg_is_dir(source)) {
+      snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qsrc, qdst);
       rc = ny_pkg_run(cmd, verbose);
-      free(qmod);
+    } else {
+      char mod_path[4096];
+      ny_pkg_join(mod_path, sizeof(mod_path), dest, "mod.ny");
+      char *qmod = ny_pkg_shell_quote(mod_path);
+      if (!qmod) {
+        rc = 1;
+      } else {
+        snprintf(cmd, sizeof(cmd), "cp %s %s", qsrc, qmod);
+        rc = ny_pkg_run(cmd, verbose);
+        free(qmod);
+      }
     }
   }
   free(qsrc);
@@ -1076,16 +1078,17 @@ static int ny_pkg_install_archive(const char *source, const char *dest, bool for
     }
     rc = ny_pkg_run(cmd, verbose);
   }
-  if (rc == 0 && strip_single_root) {
-    snprintf(cmd, sizeof(cmd),
-             "count=$(find %s -mindepth 1 -maxdepth 1 -print | wc -l); "
-             "first=$(find %s -mindepth 1 -maxdepth 1 -print | sed -n '1p'); "
-             "if [ \"$count\" = 1 ] && [ -d \"$first\" ]; then cp -R \"$first\"/. %s/; "
-             "else cp -R %s/. %s/; fi",
-             qtmp, qtmp, qdst, qtmp, qdst);
-    rc = ny_pkg_run(cmd, verbose);
-  } else if (rc == 0) {
-    snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qtmp, qdst);
+  if (rc == 0) {
+    if (strip_single_root) {
+      snprintf(cmd, sizeof(cmd),
+               "count=$(find %s -mindepth 1 -maxdepth 1 -print | wc -l); "
+               "first=$(find %s -mindepth 1 -maxdepth 1 -print | sed -n '1p'); "
+               "if [ \"$count\" = 1 ] && [ -d \"$first\" ]; then cp -R \"$first\"/. %s/; "
+               "else cp -R %s/. %s/; fi",
+               qtmp, qtmp, qdst, qtmp, qdst);
+    } else {
+      snprintf(cmd, sizeof(cmd), "cp -R %s/. %s/", qtmp, qdst);
+    }
     rc = ny_pkg_run(cmd, verbose);
   }
   if (downloaded)
@@ -1119,19 +1122,21 @@ static int ny_pkg_install_git(const char *source, const char *ref, const char *d
   if (force && ny_pkg_path_exists(dest)) {
     rc = ny_pkg_remove_path(dest, verbose);
   }
-  if (rc == 0 && ny_pkg_is_dir(git_dir)) {
-    snprintf(cmd, sizeof(cmd), "git -C %s remote set-url origin %s", qdst, qsrc);
-    rc = ny_pkg_run(cmd, verbose);
-  }
-  if (rc == 0 && ny_pkg_is_dir(git_dir)) {
-    snprintf(cmd, sizeof(cmd), "git -C %s fetch --all --tags --prune", qdst);
-    rc = ny_pkg_run(cmd, verbose);
-  } else if (rc == 0 && ny_pkg_path_exists(dest)) {
-    nyt_err("ny pkg", "%s exists and is not a git checkout (use --force)", dest);
-    rc = 1;
-  } else if (rc == 0 && !ny_pkg_path_exists(dest)) {
-    snprintf(cmd, sizeof(cmd), "git clone %s %s", qsrc, qdst);
-    rc = ny_pkg_run(cmd, verbose);
+  if (rc == 0) {
+    if (ny_pkg_is_dir(git_dir)) {
+      snprintf(cmd, sizeof(cmd), "git -C %s remote set-url origin %s", qdst, qsrc);
+      rc = ny_pkg_run(cmd, verbose);
+      if (rc == 0) {
+        snprintf(cmd, sizeof(cmd), "git -C %s fetch --all --tags --prune", qdst);
+        rc = ny_pkg_run(cmd, verbose);
+      }
+    } else if (ny_pkg_path_exists(dest)) {
+      nyt_err("ny pkg", "%s exists and is not a git checkout (use --force)", dest);
+      rc = 1;
+    } else {
+      snprintf(cmd, sizeof(cmd), "git clone %s %s", qsrc, qdst);
+      rc = ny_pkg_run(cmd, verbose);
+    }
   }
   if (rc == 0 && qref) {
     snprintf(cmd, sizeof(cmd), "git -C %s -c advice.detachedHead=false checkout %s", qdst, qref);
@@ -1161,6 +1166,63 @@ static char *ny_pkg_git_commit(const char *dest) {
   return out;
 }
 
+static void ny_pkg_config_home(char *out, size_t out_len) {
+  const char *xdg = getenv("XDG_CONFIG_HOME");
+  if (xdg && *xdg) {
+    snprintf(out, out_len, "%s", xdg);
+    return;
+  }
+#ifdef _WIN32
+  const char *home = getenv("USERPROFILE");
+  if (!home || !*home)
+    home = getenv("APPDATA");
+#else
+  const char *home = getenv("HOME");
+#endif
+  if (home && *home)
+    ny_pkg_join(out, out_len, home, ".config");
+  else if (out_len > 0)
+    out[0] = '\0';
+}
+
+static void ny_pkg_config_path(size_t idx, char *out, size_t out_len) {
+  if (out_len == 0)
+    return;
+  out[0] = '\0';
+  if (idx == 0) {
+    const char *explicit_path = getenv("NYTRIX_CONFIG");
+    if (!explicit_path || !*explicit_path)
+      explicit_path = getenv("NY_CONFIG");
+    snprintf(out, out_len, "%s", explicit_path && *explicit_path ? explicit_path : "");
+    return;
+  }
+  if (idx == 1) {
+    char dir[4096];
+    ny_pkg_join(dir, sizeof(dir), ".nytrix", "config");
+    snprintf(out, out_len, "%s", dir);
+    return;
+  }
+  if (idx == 2) {
+    snprintf(out, out_len, "%s", "nytrix.config");
+    return;
+  }
+  char base[4096];
+  ny_pkg_config_home(base, sizeof(base));
+  if (!base[0])
+    return;
+  if (idx == 3) {
+    char dir[4096];
+    ny_pkg_join(dir, sizeof(dir), base, "nytrix");
+    ny_pkg_join(out, out_len, dir, "config");
+  } else if (idx == 4) {
+    char dir[4096];
+    ny_pkg_join(dir, sizeof(dir), base, "ny");
+    ny_pkg_join(out, out_len, dir, "config");
+  }
+}
+
+static size_t ny_pkg_registry_path_count(void) { return 9; }
+
 static void ny_pkg_registry_path(size_t idx, char *out, size_t out_len) {
   if (idx == 0) {
     const char *env = getenv("NYTRIX_PKG_REGISTRY");
@@ -1173,6 +1235,10 @@ static void ny_pkg_registry_path(size_t idx, char *out, size_t out_len) {
   }
   if (idx == 2) {
     snprintf(out, out_len, "%s", "ny.registry");
+    return;
+  }
+  if (idx >= 3 && idx < 8) {
+    ny_pkg_config_path(idx - 3, out, out_len);
     return;
   }
   char home_root[4096];
@@ -1252,7 +1318,7 @@ static bool ny_pkg_parse_registry_pair(const char *line, const char *prefix, cha
 static char *ny_pkg_registry_direct_lookup(const char *name) {
   if (!name || !*name)
     return NULL;
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     if (!path[0])
@@ -1289,7 +1355,7 @@ static char *ny_pkg_registry_direct_lookup(const char *name) {
 static char *ny_pkg_registry_repo_lookup(const char *repo_name) {
   if (!repo_name || !*repo_name)
     return NULL;
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     if (!path[0])
@@ -1402,7 +1468,7 @@ static char *ny_pkg_repo_materialize(const char *repo_name, const char *repo_sou
 static char *ny_pkg_registry_repo_pkg_lookup(const char *pkg_name, const ny_pkg_opts_t *opts) {
   if (!pkg_name || !*pkg_name)
     return NULL;
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     if (!path[0])
@@ -1919,7 +1985,7 @@ static int ny_pkg_cmd_repo(int argc, char **argv, ny_pkg_opts_t *opts) {
   if (strcmp(cmd, "sync") == 0) {
     const char *only = argc > 1 ? argv[1] : NULL;
     int rc = 0;
-    for (size_t idx = 0; idx < 4; ++idx) {
+    for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
       char path[4096];
       ny_pkg_registry_path(idx, path, sizeof(path));
       char *txt = path[0] ? ny_read_file(path) : NULL;
@@ -1964,7 +2030,8 @@ static int ny_pkg_cmd_repo(int argc, char **argv, ny_pkg_opts_t *opts) {
     nyt_err("ny pkg", "unknown repo command '%s'", cmd);
     return 2;
   }
-  for (size_t idx = 0; idx < 4; ++idx) {
+  printf("%-18s %-72s %s\n", "name", "source", "cache");
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     char *txt = path[0] ? ny_read_file(path) : NULL;
@@ -1982,8 +2049,11 @@ static int ny_pkg_cmd_repo(int argc, char **argv, ny_pkg_opts_t *opts) {
       char *repo_name = NULL;
       char *repo_source = NULL;
       bool is_repo = tmp && ny_pkg_parse_registry_pair(tmp, "repo", &repo_name, &repo_source);
-      if (is_repo)
-        printf("%s %s\n", repo_name, repo_source);
+      if (is_repo) {
+        char cache[4096];
+        ny_pkg_repo_cache_path(repo_name, cache, sizeof(cache));
+        printf("%-18s %-72s %s\n", repo_name, repo_source, cache);
+      }
       free(tmp);
       free(repo_name);
       free(repo_source);
@@ -2002,7 +2072,7 @@ static int ny_pkg_cmd_registry(int argc, char **argv, ny_pkg_opts_t *opts) {
     free(source);
     return 0;
   }
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     if (path[0] && ny_pkg_path_exists(path))
@@ -2117,7 +2187,7 @@ static int ny_pkg_search_cmp(const void *a, const void *b) {
 }
 
 static void ny_pkg_search_collect_registry(ny_pkg_search_list_t *out) {
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     char *txt = path[0] ? ny_read_file(path) : NULL;
@@ -2195,7 +2265,7 @@ static void ny_pkg_search_collect_repo_packages(ny_pkg_search_list_t *out, const
 }
 
 static void ny_pkg_search_collect_repos(ny_pkg_search_list_t *out, const ny_pkg_opts_t *opts) {
-  for (size_t idx = 0; idx < 4; ++idx) {
+  for (size_t idx = 0; idx < ny_pkg_registry_path_count(); ++idx) {
     char path[4096];
     ny_pkg_registry_path(idx, path, sizeof(path));
     char *txt = path[0] ? ny_read_file(path) : NULL;
@@ -2684,9 +2754,11 @@ int ny_new_main(int argc, char **argv) {
 
   char main_text[1024];
   snprintf(main_text, sizeof(main_text),
-           "fn main(): int {\n"
-           "  print(\"hello from %s\")\n"
-           "  0\n"
+           "use std.core\n\n"
+           "fn main() int {\n"
+           "   print(\"hello from %s\")\n"
+           "   print(\"argc=\" + to_str(argc()))\n"
+           "   0\n"
            "}\n",
            name);
   if (rc == 0)
@@ -2698,15 +2770,17 @@ int ny_new_main(int argc, char **argv) {
            "Nytrix app created with `ny new`.\n\n"
            "## Quickstart\n\n"
            "```bash\n"
-           "ny src/main.ny          # JIT (default)\n"
-           "ny -run src/main.ny     # AOT native binary\n"
+           "ny src/main.ny              # JIT/default run\n"
+           "ny -run src/main.ny         # build and run native\n"
+           "ny -emit-only -o app src/main.ny\n"
+           "./app\n"
            "```\n\n"
            "## Tooling\n\n"
            "```bash\n"
            "ny fmt                  # format source\n"
            "ny fmt --check          # check formatting\n"
            "ny test                 # run tests\n"
-           "ny doc search <topic>   # search stdlib docs\n"
+           "ny doc search imports   # search docs and stdlib APIs\n"
            "```\n\n"
            "## Dependencies\n\n"
            "```bash\n"

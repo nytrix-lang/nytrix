@@ -69,6 +69,7 @@ int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
 int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
                   int64_t a6, int64_t a7, int64_t a8, int64_t a9, int64_t a10, int64_t a11,
                   int64_t a12, int64_t a13, int64_t a14);
+int64_t rt_tty_install_cleanup(void);
 
 static char **ny_native_argv(intptr_t rargv, bool *needs_free) {
   if (needs_free)
@@ -658,6 +659,19 @@ int64_t rt_unlink(int64_t path) {
   return rt_tag_v((int64_t)r);
 }
 
+int64_t rt_rename(int64_t old_path, int64_t new_path) {
+  intptr_t rold = (intptr_t)((old_path & 1) ? (old_path >> 1) : old_path);
+  intptr_t rnew = (intptr_t)((new_path & 1) ? (new_path >> 1) : new_path);
+#ifdef _WIN32
+  int r = MoveFileExA((const char *)rold, (const char *)rnew, MOVEFILE_REPLACE_EXISTING) ? 0 : -((int)GetLastError());
+#else
+  int r = rename((const char *)rold, (const char *)rnew);
+  if (r < 0)
+    r = -errno;
+#endif
+  return rt_tag_v((int64_t)r);
+}
+
 int64_t rt_pipe(int64_t fds_ptr) {
   if (is_int(fds_ptr))
     fds_ptr >>= 1;
@@ -811,6 +825,7 @@ int64_t rt_tty_raw(int64_t enable) {
     mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
     if (!SetConsoleMode(hIn, mode))
       return rt_tag_v((int64_t)-1);
+    (void)rt_tty_install_cleanup();
     return rt_tag_v((int64_t)0);
   }
   if (rt_tty_mode_saved && !SetConsoleMode(hIn, rt_tty_mode_prev))
@@ -857,6 +872,7 @@ int64_t rt_tty_raw(int64_t enable) {
     t.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0)
       return rt_tag_v((int64_t)-errno);
+    (void)rt_tty_install_cleanup();
     return rt_tag_v((int64_t)0);
   }
   if (rt_tty_mode_saved && tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev) != 0)

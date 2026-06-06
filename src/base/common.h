@@ -29,14 +29,14 @@ static inline const char *ny_tail_name(const char *name) {
 #ifdef NYTRIX_VERSION
 #define VERSION NYTRIX_VERSION
 #else
-#define VERSION "0.4.3+source"
+#define VERSION "0.5.0+source"
 #endif
 #endif
 #ifndef NYTRIX_VERSION
 #define NYTRIX_VERSION VERSION
 #define NYTRIX_VERSION_MAJOR 0
-#define NYTRIX_VERSION_MINOR 4
-#define NYTRIX_VERSION_PATCH 3
+#define NYTRIX_VERSION_MINOR 5
+#define NYTRIX_VERSION_PATCH 0
 #define NYTRIX_VERSION_BUILD 0
 #define NYTRIX_VERSION_COMMIT "source"
 #define NYTRIX_VERSION_SOURCE "source"

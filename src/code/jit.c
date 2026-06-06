@@ -647,6 +647,10 @@ void ny_jit_map_unresolved_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
 }
 
 void ny_jit_add_runtime_symbols(void) {
+  static bool registered = false;
+  if (registered)
+    return;
+  registered = true;
 #define RT_DEF(name, p, args, sig, doc)                                                            \
   do {                                                                                             \
     (void)(args);                                                                                  \
@@ -788,16 +792,22 @@ void register_jit_sigs(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *
 }
 
 void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_t *cg) {
+  ny_jit_add_runtime_symbols();
   if (cg) {
     for (size_t i = 0; i < cg->links.len; i++) {
       ny_jit_load_library(cg->links.data[i]);
     }
   }
+  bool auto_declare_runtime = cg && ny_env_enabled("NYTRIX_JIT_AUTODECL_RT");
+  if (!auto_declare_runtime) {
+    register_extern_symbols(ee, mod, cg);
+    register_jit_sigs(ee, mod, cg);
+    goto apply_runtime_attrs;
+  }
 #define MAP_FULL(name, fn_ptr, args)                                                               \
   do {                                                                                             \
-    LLVMAddSymbol(name, (void *)(uintptr_t)(fn_ptr));                                              \
     LLVMValueRef val = LLVMGetNamedFunction(mod, name);                                            \
-    if (!val && cg) {                                                                              \
+    if (!val && auto_declare_runtime) {                                                            \
       LLVMTypeRef param_types[16];                                                                 \
       int n_params = (args < 0) ? 0 : (args > 16 ? 16 : args);                                     \
       for (int i = 0; i < n_params; i++)                                                           \
@@ -816,7 +826,6 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_
 
 #define MAP_GV(name, ptr)                                                                          \
   do {                                                                                             \
-    LLVMAddSymbol(name, (void *)(ptr));                                                            \
     LLVMValueRef val = LLVMGetNamedGlobal(mod, name);                                              \
     if (val) {                                                                                     \
       LLVMAddGlobalMapping(ee, val, (void *)ptr);                                                  \
@@ -837,10 +846,10 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod, codegen_
 #undef RT_GV
   MAP_FULL("rt_simmd_byte_class_reduce_raw", rt_simmd_byte_class_reduce_raw, 7);
   MAP_FULL("rt_simmd_i32_sqlscan_sum_raw", rt_simmd_i32_sqlscan_sum_raw, 6);
-  LLVMAddSymbol("__alloc_string", (void *)(uintptr_t)rt_alloc_string);
   register_extern_symbols(ee, mod, cg);
   register_jit_sigs(ee, mod, cg);
 
+apply_runtime_attrs:
   // Apply critical attributes to runtime symbols
   LLVMValueRef panic_fn = LLVMGetNamedFunction(mod, "__panic");
   if (panic_fn) {

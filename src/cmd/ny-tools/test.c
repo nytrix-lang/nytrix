@@ -510,6 +510,11 @@ static int test_env_falsey(const char *name) {
          strcmp(v, "no") == 0;
 }
 
+static void test_setenv_default(const char *name, const char *value) {
+  if (!getenv(name))
+    ny_setenv(name, value, 0);
+}
+
 static int retry_trace_enabled(void) {
   if (test_env_falsey("NYTRIX_TEST_RETRY_TRACE"))
     return 0;
@@ -585,21 +590,15 @@ static void push_test_warn_arg(char **argv, int *argc, int max) {
 
 static void configure_test_cache_defaults(void) {
   if (test_env_truthy("NYTRIX_TEST_EXEC_CACHE")) {
-    if (!getenv("NYTRIX_TEST_NO_NATIVE_CACHE"))
-      ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", "0", 0);
-    if (!getenv("NYTRIX_JIT_CACHE"))
-      ny_setenv("NYTRIX_JIT_CACHE", "1", 0);
-    if (!getenv("NYTRIX_AOT_CACHE"))
-      ny_setenv("NYTRIX_AOT_CACHE", "1", 0);
+    test_setenv_default("NYTRIX_TEST_NO_NATIVE_CACHE", "0");
+    test_setenv_default("NYTRIX_JIT_CACHE", "1");
+    test_setenv_default("NYTRIX_AOT_CACHE", "1");
     return;
   }
 
-  if (!getenv("NYTRIX_TEST_NO_NATIVE_CACHE"))
-    ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", "1", 0);
-  if (!getenv("NYTRIX_JIT_CACHE"))
-    ny_setenv("NYTRIX_JIT_CACHE", "0", 0);
-  if (!getenv("NYTRIX_AOT_CACHE"))
-    ny_setenv("NYTRIX_AOT_CACHE", "0", 0);
+  test_setenv_default("NYTRIX_TEST_NO_NATIVE_CACHE", "1");
+  test_setenv_default("NYTRIX_JIT_CACHE", "0");
+  test_setenv_default("NYTRIX_AOT_CACHE", "0");
 }
 
 static void enable_core_dumps(void) {

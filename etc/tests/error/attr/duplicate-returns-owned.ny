@@ -3,5 +3,5 @@ use std.core
 
 @returns_owned
 @returns_owned
-fn f(){ [1] }
+fn f() { [1] }
 print(f())

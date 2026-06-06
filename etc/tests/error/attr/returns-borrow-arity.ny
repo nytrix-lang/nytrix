@@ -2,5 +2,5 @@
 use std.core
 
 @returns_borrow(x, y)
-fn f(x, y){ x }
+fn f(x, y) { x }
 print(f(1, 2))

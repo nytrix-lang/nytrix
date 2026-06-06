@@ -3,7 +3,7 @@ use std.os.time
 use benchmark.helpers
 
 ;; Fibonacci (Benchmark)
-fn fib(n){
+fn fib(n) {
    mut a = 0
    mut b = 1
    mut i = 2

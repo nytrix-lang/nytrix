@@ -815,6 +815,31 @@ static int cmd_needs_build(const char *cmd) {
   return strcmp(cmd, "clean") != 0 && strcmp(cmd, "uninstall") != 0;
 }
 
+static int run_sanitizer_tests(const char *root, const char *kind, const char *name,
+                               const char *cflags, const char *ldflags, int jobs,
+                               const char **unknown, int unknown_count) {
+  append_env_flag("NYTRIX_HOST_CFLAGS", cflags);
+  append_env_flag("NYTRIX_HOST_LDFLAGS", ldflags);
+  ny_setenv("NYTRIX_SKIP_OPTIONAL_GATES", "1", 1);
+  ny_setenv("NYTRIX_TEST_CACHE", "0", 1);
+  char bdir[PATH_MAX];
+  char build_name[64];
+  snprintf(build_name, sizeof(build_name), "build/%s", name);
+  nyt_path_join(bdir, sizeof(bdir), root, build_name);
+  ny_setenv("BUILD_DIR", bdir, 1);
+  return run_self_subcommand(root, kind, "test", jobs, unknown, unknown_count);
+}
+
+static const char *fmt_flag_for_cmd(const char *cmd) {
+  if (strcmp(cmd, "analyze") == 0)
+    return "--analyze";
+  if (strcmp(cmd, "check") == 0)
+    return "--check";
+  if (strcmp(cmd, "tidy") == 0)
+    return "--tidy";
+  return NULL;
+}
+
 static void build_targets_for_cmd(const char *cmd, const char ***targets, int *target_count) {
   static const char *all[] = {"ny",      "std",    "ny-fmt", "ny-perf",
                               "ny-test", "ny-doc", "ny-make"};
@@ -929,20 +954,10 @@ int ny_make_main(int argc, char **argv) {
       int rc = run_test_tool(root, kind, test_jobs, a.unknown, a.unknown_count);
       if (rc != 0)
         return rc;
-    } else if (strcmp(cmd, "fmt") == 0) {
-      int rc = run_ny_tool(root, kind, "ny-fmt", NULL, a.unknown, a.unknown_count);
-      if (rc != 0)
-        return rc;
-    } else if (strcmp(cmd, "analyze") == 0) {
-      int rc = run_ny_tool(root, kind, "ny-fmt", "--analyze", a.unknown, a.unknown_count);
-      if (rc != 0)
-        return rc;
-    } else if (strcmp(cmd, "check") == 0) {
-      int rc = run_ny_tool(root, kind, "ny-fmt", "--check", a.unknown, a.unknown_count);
-      if (rc != 0)
-        return rc;
-    } else if (strcmp(cmd, "tidy") == 0) {
-      int rc = run_ny_tool(root, kind, "ny-fmt", "--tidy", a.unknown, a.unknown_count);
+    } else if (strcmp(cmd, "fmt") == 0 || strcmp(cmd, "analyze") == 0 ||
+               strcmp(cmd, "check") == 0 || strcmp(cmd, "tidy") == 0) {
+      int rc = run_ny_tool(root, kind, "ny-fmt", fmt_flag_for_cmd(cmd), a.unknown,
+                           a.unknown_count);
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "perf") == 0) {
@@ -1003,26 +1018,16 @@ int ny_make_main(int argc, char **argv) {
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "asan") == 0) {
-      append_env_flag("NYTRIX_HOST_CFLAGS", "-fsanitize=address -fno-omit-frame-pointer -g3");
-      append_env_flag("NYTRIX_HOST_LDFLAGS", "-fsanitize=address");
-      ny_setenv("NYTRIX_SKIP_OPTIONAL_GATES", "1", 1);
-      ny_setenv("NYTRIX_TEST_CACHE", "0", 1);
-      char bdir[PATH_MAX];
-      nyt_path_join(bdir, sizeof(bdir), root, "build/asan");
-      ny_setenv("BUILD_DIR", bdir, 1);
-      int rc = run_self_subcommand(root, kind, "test", jobs, a.unknown, a.unknown_count);
+      int rc = run_sanitizer_tests(root, kind, "asan",
+                                   "-fsanitize=address -fno-omit-frame-pointer -g3",
+                                   "-fsanitize=address", jobs, a.unknown, a.unknown_count);
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "ubsan") == 0) {
-      append_env_flag("NYTRIX_HOST_CFLAGS",
-                      "-fsanitize=undefined -fno-omit-frame-pointer -g3 -fno-sanitize-recover=undefined");
-      append_env_flag("NYTRIX_HOST_LDFLAGS", "-fsanitize=undefined");
-      ny_setenv("NYTRIX_SKIP_OPTIONAL_GATES", "1", 1);
-      ny_setenv("NYTRIX_TEST_CACHE", "0", 1);
-      char bdir[PATH_MAX];
-      nyt_path_join(bdir, sizeof(bdir), root, "build/ubsan");
-      ny_setenv("BUILD_DIR", bdir, 1);
-      int rc = run_self_subcommand(root, kind, "test", jobs, a.unknown, a.unknown_count);
+      int rc = run_sanitizer_tests(
+          root, kind, "ubsan",
+          "-fsanitize=undefined -fno-omit-frame-pointer -g3 -fno-sanitize-recover=undefined",
+          "-fsanitize=undefined", jobs, a.unknown, a.unknown_count);
       if (rc != 0)
         return rc;
     } else if (strcmp(cmd, "fuzz") == 0) {
