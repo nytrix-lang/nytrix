@@ -43,7 +43,7 @@ myapp/
 
 Imports use package names:
 
-```text
+```ny
 use package_name
 ```
 
@@ -89,10 +89,29 @@ Registry entries map names to sources:
 ```text
 foo = ./deps/foo
 bar = git+https://example.com/bar.git#main
+repo core = git+https://github.com/owner/ny-packages.git
 ```
 
 Registry lookup checks local registry files, configured registry environment,
 and the user registry.
+
+The shared Nytrix config files can also hold package repository entries:
+
+```text
+~/.config/nytrix/config
+./.nytrix/config
+```
+
+Use the same line form:
+
+```text
+repo core = git+https://github.com/owner/ny-packages.git
+NYTRIX_PKG_HOME=~/.local/share/nytrix/pkg
+NYTRIX_PKG_PATH=./ny_modules:./vendor/ny_modules
+```
+
+Environment variables override config defaults. Repository lines are read by
+`ny pkg repo list`, `ny pkg search`, and `ny get`.
 
 ## Package repositories
 
@@ -108,6 +127,7 @@ Repository commands:
 
 ```bash
 ny pkg repo add local ./packages
+ny pkg repo add core git+https://github.com/owner/ny-packages.git
 ny pkg repo list
 ny pkg repo sync
 ny pkg repo path local
@@ -115,6 +135,11 @@ ny pkg repo remove local
 ny get bigint
 ny pkg search [--interactive] query
 ```
+
+`repo list` prints the configured repository name, source URL/path, and local
+cache path. Repository sources can be local paths, `git+https://...`, SSH Git
+URLs, or archives. Config-file repository entries are listed with registry
+entries.
 
 `ny get <name>` checks direct registry entries first, then registered
 repositories for `<name>/mod.ny` or `<name>.ny`.

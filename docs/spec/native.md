@@ -5,7 +5,7 @@ ownership, and ABI behavior.
 
 ## Layouts
 
-```text
+```ny
 layout Name {
    Type: field,
    Type: field2
@@ -17,19 +17,19 @@ native boundary. Reordering fields changes the ABI.
 
 ## Extern blocks
 
-```text
+```ny
 extern "library" {
-   fn symbol(Type: arg): Type
+   fn symbol(Type arg) Type
 }
 
-extern "" {
-   fn process_symbol(Type: arg): Type
+extern {
+   fn process_symbol(Type arg) Type
 }
 ```
 
 An extern block declares native symbols. The library string selects the linked
-or loaded library surface. An empty string names symbols available from the
-current process/runtime boundary.
+or loaded library. A bare extern block names symbols already available from the
+current process; `extern ""` is accepted as the older spelling.
 
 ## Header imports
 
@@ -84,7 +84,7 @@ function documented by the owning API.
 
 Runtime layout helpers expose ABI metadata and field access:
 
-```text
+```ny
 __layout_size("Name")
 __layout_align("Name")
 __layout_offset("Name", "field")
@@ -101,7 +101,7 @@ and slower than `layout`; compiled layout access resolves offsets directly.
 
 ## Inline assembly and intrinsics
 
-```text
+```ny
 asm("mov $1, $0", "=r,r", value)
 llvm("ctpop.i64", value)
 llvm("llvm.cttz.i64", value, false)
@@ -138,7 +138,7 @@ fn make_buffer(){ malloc(64) }
 
 @consumes(p)
 @releases(p)
-fn free_buffer(p): int {
+fn free_buffer(p) int {
    free(p)
    0
 }

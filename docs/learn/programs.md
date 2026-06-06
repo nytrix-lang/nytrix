@@ -41,7 +41,7 @@ use std.core
 
 module stats(mean)
 
-fn mean(list: xs): number {
+fn mean(list xs) number {
    mut total = 0
    for x in xs { total += x }
    total / xs.len
@@ -50,36 +50,42 @@ fn mean(list: xs): number {
 
 Imports use the module or package name:
 
-```text
+```ny
 use stats (mean)
 ```
 
 ## Script and module together
 
-A file can export functions and also contain top-level checks. Imported users
-see only the exports. Direct execution runs the checks.
+A file can export functions and also contain direct-run checks. Imported users
+see only the exports. Direct execution runs the `#main` block.
 
 ```ny
 module mathx(double)
 
-fn double(int: x): int { x * 2 }
+fn double(int x) int { x * 2 }
 
-assert_eq(double(21), 42, "double")
+#main {
+   assert_eq(double(21), 42, "double")
+}
 ```
 
 ## Entrypoint shape
 
-Small tools can use top-level statements. Larger files can put startup work in
-`main`. Direct execution should run `main` automatically.
+Small tools can use top-level statements. Files that export reusable helpers can
+put only direct startup work in `#main`. Imports see the helpers and skip the
+startup block.
 
 ```ny
 use std.core
 use std.os.args as args
 
-fn main(): int {
+fn greet(str name) str {
+   "hello, " + name
+}
+
+#main {
    def name = args.positionals().get(0, "ny")
-   print("hello, " + name)
-   0
+   print(greet(name))
 }
 ```
 
@@ -102,14 +108,14 @@ site and in diagnostics.
 Public functions use explicit names and types when the type is part of the API.
 
 ```ny
-fn parse_port(str: raw): int {
+fn parse_port(str raw) int {
    int(raw)
 }
 ```
 
 Grouped modules can publish profiles:
 
-```text
+```ny
 module local {
    export core(run)
    export debug(dump_state)
@@ -132,7 +138,7 @@ enum Parse<T> {
    Err(str: message)
 }
 
-fn parse_flag(str: raw): Parse<bool> {
+fn parse_flag(str raw) Parse<bool> {
    if(raw == "yes"){ Parse.Ok(value: true) }
    else { Parse.Err(message: "expected yes") }
 }
@@ -149,6 +155,78 @@ Typed containers use angle brackets: `list<int>`, `dict<str, int>`,
 Use explicit public types when the type is part of the API contract. Inside a
 script, inference is valid until a diagnostic or performance profile requires a
 narrower type.
+
+## Complete project examples
+
+Project examples live under `etc/projects`. They are complete files, not API
+fragments. GitHub shows source links; the generated website embeds selected
+project files below.
+
+Keep project files for complete workflows and richer demos. Tiny one-function
+snippets belong in learn pages or self-tests instead.
+
+### Rule 110
+
+[Open the source](../../etc/projects/cli/110.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/cli/110.ny -->
+
+### Langton's Ant
+
+[Open the source](../../etc/projects/cli/ant.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/cli/ant.ny -->
+
+### Conway's Game of Life
+
+[Open the source](../../etc/projects/cli/conway.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/cli/conway.ny -->
+
+### Matrix Rain
+
+[Open the source](../../etc/projects/cli/matrix.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/cli/matrix.ny -->
+
+### FFI
+
+[Open the source](../../etc/projects/os/ffi.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/os/ffi.ny -->
+
+### Args
+
+[Open the source](../../etc/projects/os/args.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/os/args.ny -->
+
+### Local Server
+
+[Open the source](../../etc/projects/os/server.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/os/server.ny -->
+
+Run:
+
+```bash
+ny etc/projects/os/server.ny
+```
+
+### Sound
+
+[Open the source](../../etc/projects/os/sound.ny).
+
+<!-- ny-doc-include-code: ny etc/projects/os/sound.ny -->
+
+### UI Projects
+
+[ui.md](ui.md) covers the engine viewer and focused UI input/project files.
+
+- [ui/engine.ny](../../etc/projects/ui/engine.ny)
+- [ui/input.ny](../../etc/projects/ui/input.ny)
+- [ui/monitor.ny](../../etc/projects/ui/monitor.ny)
+- [ui/term.ny](../../etc/projects/ui/term.ny)
 
 ## Related
 

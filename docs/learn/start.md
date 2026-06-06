@@ -8,17 +8,24 @@ standard library, and assertions with no extra setup beyond a working `ny`.
 
 ```bash
 ny --version
-ny -c '1 + 1'
+ny -c 'print(1 + 1)'
 ```
+
+The inline check prints `2`.
 
 From a source checkout, build and install only when `ny` is missing or stale:
 
 ```bash
 chmod +x make
+./make doctor
 ./make all
 ./make install
 ny --version
 ```
+
+`./make doctor` is read-only. It reports missing build tools, unwritable cache
+directories, optional qemu/wine runners, and UI display state before a build or
+runtime command hides the real cause.
 
 ## First file
 
@@ -27,7 +34,7 @@ Put this in `hello.ny`:
 ```ny
 use std.core
 
-fn greet(str: name): str {
+fn greet(str name) str {
    "hello, " + name
 }
 
@@ -77,17 +84,41 @@ ny --strict-types hello.ny
 ny --borrow-check --ownership-strict hello.ny
 ```
 
-`fmt --check` verifies source layout. `--strict-types` catches dynamic type
-cliffs before they become runtime surprises. `--strict` enables strict types
-and ownership diagnostics together. Borrow checking is most useful once a file
-owns resources, returns references, or wraps native handles.
+`fmt --check` verifies source layout. Compile-time type checks are on by
+default for typed code, generics, layouts, and native boundaries.
+`--strict-types` turns suspicious dynamic fallbacks into errors for files that
+should stay fully statically explainable. `--strict` keeps type checks on and
+adds ownership diagnostics. Borrow checking is most useful once a file owns
+resources, returns references, or wraps native handles.
+
+## Native Output And Cross Targets
+
+Build a native executable with `-o`:
+
+```bash
+ny -o hello hello.ny
+./hello
+```
+
+From a checkout, `./make cross` gives the same compiler a target triple and the
+matching C/linker flags:
+
+```bash
+./make targets
+./make cross linux-arm64 hello.ny
+./make cross-run linux-arm64 hello.ny
+```
+
+`cross-run` uses qemu or wine when present and otherwise leaves the compiled
+artifact in `build/cache/cross/`. See [tooling.md](tooling.md) for sysroot,
+qemu, and custom target flags.
 
 ## Next
 
 | If you need | Go to |
 | --- | --- |
 | A script, module, or import shape | [programs.md](programs.md) |
-| Copyable examples | [examples.md](examples.md) |
+| Copyable examples | [programs.md](programs.md#complete-project-examples) |
 | Standard-library APIs and parsers | [library.md](library.md) |
 | Command reference | [tooling.md](tooling.md) |
 | Windows or drawing | [ui.md](ui.md) |

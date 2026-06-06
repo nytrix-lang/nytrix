@@ -11,13 +11,13 @@ use std.core
 
 module stats(mean, median)
 
-fn mean(list<number>: xs): number {
+fn mean(list<number> xs) number {
    mut number: total = 0
    for x in xs { total += x }
    total / xs.len
 }
 
-fn median(xs): number {
+fn median(xs) number {
    xs.get(xs.len / 2)
 }
 ```
@@ -33,8 +33,8 @@ export list are not public API.
 ```ny
 module stats(mean, median)
 
-fn mean(xs): number { 0 }
-fn median(xs): number { 0 }
+fn mean(xs) number { 0 }
+fn median(xs) number { 0 }
 ```
 
 Only exported names are part of the module surface. Helper names can remain
@@ -76,7 +76,7 @@ They fit larger files where a single flat export list is hard to scan.
 `core` is the default export profile. Named profiles are imported with
 `use module.path:profile`:
 
-```text
+```ny
 use pkg.name:debug
 ```
 
@@ -90,9 +90,9 @@ not a substitute for an export list:
 ```ny
 module text(clean)
 
-fn _trim_edges(s): str { s }
+fn _trim_edges(s) str { s }
 
-fn clean(s): str {
+fn clean(s) str {
    _trim_edges(s)
 }
 ```
@@ -104,40 +104,32 @@ input shape before calling them.
 
 ## Script checks
 
-Top-level checks can live beside module declarations:
+Direct-run checks can live beside module declarations:
 
 ```ny
 module math_extra(double)
 
-fn double(int: x): int {
+fn double(int x) int {
    x * 2
 }
 
-assert(double(4) == 8, "double")
-```
-
-When imported, `double` is visible. When run directly, the assertion also
-executes.
-
-Use `__main()` when checks or startup code must run only for direct execution:
-
-```text
-if(__main()){
+#main {
    assert(double(4) == 8, "double")
 }
 ```
 
-Use script checks for small invariants. Move larger behavior checks into the
-test suite when setup, fixtures, or timing affect the result.
+When imported, `double` is visible. When run directly, the `#main` block also
+executes.
 
-Script checks exclude external services, timing assumptions, and private files.
-If a check needs a fixture, put that requirement in the test or example.
+Use module self-checks for cheap invariants that protect public APIs. Keep
+external services, timing assumptions, private files, and large fixtures in
+focused tests or examples.
 
 ## Generated modules
 
 Compile-time generation can emit module declarations:
 
-```text
+```ny
 module generated.api generated from Spec {
    emit make_api(Spec)
 }

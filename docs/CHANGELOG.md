@@ -1,59 +1,46 @@
 # Changelog
 
-Nytrix uses dated development milestones. The compiler reports a
-Git-derived build version through the generated `NYTRIX_VERSION` define in
-`nytrix_version.h`, surfaced by `ny --version`.
+Nytrix uses dated development milestones. Exact build snapshots still come from
+the generated `NYTRIX_VERSION` Git metadata surfaced by `ny --version`.
 
-## Open maintenance checks
+## [0.5.0] - 2026-06-05
 
-## [0.4.3] - 2026-06-02
+### Added
+- Added the editor/engine viewer surface under `std.os.ui.render.viewer`,
+  including asset browsing, hierarchy, inspector, panel chrome, color picker,
+  profile/view controls, transform tools, gizmos, runtime bootstrap, and input
+  helpers.
+- Added native editor icons, prototype textures, shared environment assets, and
+  renderer shader resources under `etc/assets`.
+
+### Changed
+- Reworked the UI renderer and viewer modules around the `render/viewer` split,
+  compact editor panels, file-like asset browsing, tiled hierarchy/inspector
+  layouts, and F1 editor toggling.
+- Optimized dynamic indexed glTF meshes by keeping GPU index buffers for
+  CPU-updated meshes, reducing per-frame vertex expansion on animated/skinned
+  models.
+- Changed syntax from `fn foo(typ: arg): type` to `fn foo(typ arg) type`.
+- Tightened cross-platform polish around window resizing, cursor/input behavior,
+  Windows/MSYS2 build setup, and runtime dependency copy.
+- Moved cheap module checks behind `#main` self-tests where they protect public
+  APIs without bloating the external test tree.
+- Shortened release notes and documentation wording so changes are easier to
+  scan.
+- Removed dead helpers and tightened module boundaries.
+
+### Fixed
+- Hardened cached Vulkan UI meshes and icon-button text handling to avoid
+  static-buffer/text-fit crashes during first-frame UI startup.
+- Fixed renderer/editor asset loading, model reload, texture reuse, editor focus,
+  and panel state handling regressions found while exercising the glTF viewer.
+
+## [0.4.0] - 2026-05-30
 
 ### Added
 - Added much broader cross-platform window/input coverage: Win32 raw input,
   Cocoa AppKit windows/cursors/monitors, and Linux X11/Wayland/Vulkan plumbing.
 - Added the new module `lib/core/regex.ny`.
-
-### Changed
-- Reworked `./make` bootstrap/dependency discovery.
-- Reworked REPL input, paste, Unicode, delete, especially for Windows `cmd`.
-- Reworked compiler/runtime/Vulkan internals around raw ints..
-
-### Fixed
-- Fixed emit-only compiler hang caused by self-recursive raw-int fast-path calls.
-
-## [0.4.2] - 2026-05-31
-
-### Changed
-- Kept `0.4.x` as the active development line while Git-derived build metadata
-  continues to identify exact build snapshots.
-- Made development builds report the release version with Git build metadata,
-  preferring the tracked remote ref from `.git` before falling back to `HEAD`.
-
-### Fixed
-- Fixed macOS arm64 comptime evaluation for small immutable list, tuple, and
-  range values so compile-time sequence helpers do not fall back to transient
-  JIT execution.
-- Fixed interpreted comptime blocks so expression-only blocks and single-expression
-  lambdas preserve their result value.
-
-## [0.4.1] - 2026-05-31
-
-### Changed
-- Kept the repository focused on source, docs, assets, tests, and release
-  metadata while leaving generated and local-only material out of version
-  control.
-- Kept shared assets under `etc/assets` so public runtime examples can resolve
-  fonts, dictionaries, website files, and renderer shaders through stable paths.
-
-### Fixed
-- Fixed lazy stdlib closure emission so nested closure bodies are emitted when
-  reached through deferred standard-library loading.
-- Kept the public branch layout focused on `main` after consolidating the
-  private development snapshots.
-
-## [0.4.0] - 2026-05-30
-
-### Added
 - Added the typed compiler pipeline: typed AST metadata, HM inference for
   function values and lambdas, nested list/dict inference, nullable branch
   merging, and monomorphic call specialization.
@@ -65,27 +52,52 @@ Git-derived build version through the generated `NYTRIX_VERSION` define in
   `handle`, `fnptr`, and `seq`.
 - Added typed layout records, layout shapes, layout guards, native layout ABI
   arguments/returns, and compile-time layout reflection.
-- Added `--safe-mode` as a real safety profile covering strict types,
-  ownership checks, RC/RAII cleanup, strict effect/alias policy, and
-  compiler-tracked raw-memory range diagnostics.
+- Added `--safe-mode` as a real safety profile covering strict types, ownership
+  checks, RC/RAII cleanup, strict effect/alias policy, and compiler-tracked
+  raw-memory range diagnostics.
 - Added unified `ny` subcommands for tooling: `ny fmt`, `ny test`, `ny doc`,
   `ny perf`, `ny make`, `ny pkg`, and `ny new`.
 - Added docs for ADTs, generic types, async/await, ownership contracts,
   `#include` FFI, compile-time proofs, package flows, and the unified CLI.
 
 ### Changed
-- Reworked parsing, type metadata, lowering, call emission, diagnostics,
-  module loading, and tool integration around the typed compiler pipeline.
-- Made CLI optimization profiles drive the same LLVM/runtime/codegen fast
-  paths as `NYTRIX_OPT_PROFILE`.
+- Kept `0.4.x` as the active development line while Git-derived build metadata
+  continues to identify exact build snapshots.
+- Made development builds report the release version with Git build metadata,
+  preferring the tracked remote ref from `.git` before falling back to `HEAD`.
+- Reworked `./make` bootstrap/dependency discovery.
+- Reworked REPL input, paste, Unicode, and delete behavior, especially for
+  Windows `cmd`.
+- Reworked compiler/runtime/Vulkan internals around raw ints.
+- Reworked parsing, type metadata, lowering, call emission, diagnostics, module
+  loading, and tool integration around the typed compiler pipeline.
+- Made CLI optimization profiles drive the same LLVM/runtime/codegen fast paths
+  as `NYTRIX_OPT_PROFILE`.
 - Made default native emission match the documented `-O2` baseline while
   keeping `-O3` explicit.
 - Reorganized generated/source modules around stable compiler-visible package
   categories and shorter import paths.
 - Ported most project tooling into native C commands while keeping `./make` as
   a small compatibility entrypoint.
+- Kept the repository focused on source, docs, assets, tests, and release
+  metadata while leaving generated and local-only material out of version
+  control.
+- Kept shared assets under `etc/assets` so public runtime examples can resolve
+  fonts, dictionaries, website files, and renderer shaders through stable
+  paths.
 
 ### Fixed
+- Fixed emit-only compiler hangs caused by self-recursive raw-int fast-path
+  calls.
+- Fixed macOS arm64 comptime evaluation for small immutable list, tuple, and
+  range values so compile-time sequence helpers do not fall back to transient
+  JIT execution.
+- Fixed interpreted comptime blocks so expression-only blocks and
+  single-expression lambdas preserve their result value.
+- Fixed lazy stdlib closure emission so nested closure bodies are emitted when
+  reached through deferred standard-library loading.
+- Kept the public branch layout focused on `main` after consolidating private
+  development snapshots.
 - Fixed unprefixed FFI header imports so colliding C functions no longer block
   wrappers such as `atoi` and `atof`.
 - Fixed strict ownership diagnostics for returning owned tracked values without
@@ -105,63 +117,31 @@ Git-derived build version through the generated `NYTRIX_VERSION` define in
 
 ## [0.3.0] - 2026-04-13
 
-### Added
-- Added glTF, Meshopt, image, and font parsing.
-- Added lit, sky, ring, circle, and SDF shader paths.
-- Added Vulkan buffer, pipeline, texture, renderer-state, and frame-dump paths.
-- Added render math, environment textures, model scene integration, and broader
-  native window/graphics/asset-loading boundaries.
-- Added public fonts, dictionaries, website assets, and renderer shader assets
-  under `etc/assets`.
+- Added the first large graphics stack: glTF, Meshopt, image/font parsing,
+  Vulkan buffers/pipelines/textures, scene integration, frame dumps, sky/SDF
+  shader paths, and renderer-facing math.
+- Added public fonts, dictionaries, website files, renderer shaders, and broader
+  native window/asset-loading boundaries.
+- Tightened cache, bigint, FFI, lowering, call emission, shader generation, and
+  profile artifacts for larger native graphics workloads.
 
-### Changed
-- Tightened cache, bigint, FFI, lowering, and call emission for large native
-  graphics workloads.
-- Routed generated shader and profile artifacts through cache-aware output
-  paths.
-- Refined render-facing math and codegen interactions without changing the
-  language syntax.
+## [0.2.0] - 2026-03-09
 
-## [0.2.0] - 2026-03-09 to 2026-03-27
+- Added major language/runtime surface: enums, suffixes, structs, packed
+  layouts, `sizeof`, pointer dereference, `try`, reflection operators, effects,
+  JIT metadata, and hot stdlib attributes.
+- Expanded the stdlib across IO, JSON, fuzzing hooks, math/crypto/protocol
+  modules, process/audio/window/input/GPU/OpenCL/Vulkan/network probes, and
+  cross-platform LLVM/vcpkg build paths.
+- Moved stdlib code under `lib/`, removed prelude coupling, adopted compact
+  `#main { ... }` execution gates, and reorganized crypto/math modules.
 
-### Added
-- Added enums, numeric suffixes, structs, packed layouts, `sizeof`, pointer
-  dereference, `try`, generic reflection operators, and effect attributes.
-- Added standard-library JIT metadata and compiler attributes for hot stdlib
-  functions, matching the March backup work around `@jit` and purity analysis.
-- Added `std.os.io`, JSON support, fuzzing hooks, and broader FFI call
-  capacity.
-- Added number theory, matrices, finite fields, NTT, binary helpers, RSA, ECC,
-  DLP, HNP, lattice, PRNG, hash, and protocol modules.
-- Added process, audio, window, input, GPU, OpenCL, Vulkan, hardware-facing ABI,
-  and network-facing FFI probes.
-- Added multiline REPL editing, UI demos, fonts, render examples, and broader
-  runtime coverage.
-- Added cross-platform LLVM/vcpkg, Linux ARM, macOS, and Windows build paths.
+## [0.1.0] - 2025-12-24
 
-### Changed
-- Moved stdlib code under `lib/`, dropped prelude coupling, and enforced
-  compact `if(comptime{__main()}){...}` gates.
-- Reorganized crypto into encoding, protocol, number, lattice, RSA, ECC, DLP,
-  PRNG, hash, and analysis groups.
-- Expanded stdlib coverage while tightening compiler checks around inference,
-  FFI boundaries, and runtime behavior.
-- Iterated on Vulkan/UI modules, matrix/vector math, and stdlib optimization
-  hooks through the March backup series.
-
-## [0.1.0] - 2025-12-24 to 2026-01-31
-
-### Added
-- Added lexer, parser, AST, runtime model, core intrinsics, JIT mapping, REPL,
-  and `ny-lsp` foundations.
-- Added top-level script execution and `main` process exit behavior.
-- Added `mut`, `defer`, destructuring, consistent runtime primitives,
-  arena-backed compiler memory, and stdlib core organization.
-- Added sanitizer flows, Texinfo docs, web docs, CLI tooling, diagnostics,
+- Built the foundations: lexer, parser, AST, runtime model, core intrinsics,
+  JIT mapping, REPL, `ny-lsp`, top-level scripts, and process exit behavior.
+- Added `mut`, `defer`, destructuring, runtime primitives, arena-backed
+  compiler memory, sanitizer flows, docs, web docs, CLI tooling, diagnostics,
   fuzzy symbol suggestions, and immutability checks.
-
-### Changed
-- Established the C/LLVM build layout, runtime ABI boundary, source loading,
-  module lookup, and initial test fixtures.
-- Split the early compiler work into parser, module loading, diagnostics,
-  lowering, runtime, REPL, wire/cache, and core-library milestones.
+- Established the C/LLVM layout, runtime ABI boundary, source/module loading,
+  diagnostics, lowering, wire/cache, and initial tests.

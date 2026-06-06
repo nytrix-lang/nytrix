@@ -5,7 +5,7 @@ coalescing, indexing, calls, and member access.
 
 ## Arithmetic
 
-```text
+```ny
 a + b
 a - b
 a * b
@@ -27,7 +27,7 @@ at the value/type boundary.
 
 ## Comparison
 
-```text
+```ny
 a == b
 a != b
 a < b
@@ -41,7 +41,7 @@ such as numeric and comparable text-like values supported by the runtime/API.
 
 ## Logic
 
-```text
+```ny
 cond && other
 cond || other
 !cond
@@ -52,7 +52,7 @@ or numeric boundary needs an exact integer value.
 
 ## Bitwise and shifts
 
-```text
+```ny
 x & mask
 x | mask
 x ^^ mask
@@ -71,7 +71,7 @@ to `borrow(value)`. See [runtime.md](runtime.md) for ownership checks.
 
 ## Ternary
 
-```text
+```ny
 cond ? when_true : when_false
 ```
 
@@ -80,7 +80,7 @@ need multiple statements or cleanup.
 
 ## Coalescing and pipeline
 
-```text
+```ny
 value ?? fallback
 value |> fn_call
 value |> [index]
@@ -93,7 +93,7 @@ the parser and compiler surface.
 
 ## Optional chaining
 
-```text
+```ny
 value?.member
 value?.member ?? fallback
 ```
@@ -103,7 +103,7 @@ performs the normal member lookup.
 
 ## Calls, indexing, and members
 
-```text
+```ny
 fn_name(arg)
 value[index]
 value.member
@@ -119,7 +119,7 @@ shape.
 
 Custom operators are declared on a type with an `impl` block:
 
-```text
+```ny
 impl Meter {
    operator + self: self = add
    operator ^ int: self = pow
@@ -135,7 +135,7 @@ operator token to that function for the owner type.
 
 Parentheses define grouping explicitly:
 
-```text
+```ny
 (a + b) * c
 (flags & mask) != 0
 cond ? a : (b ?? fallback)

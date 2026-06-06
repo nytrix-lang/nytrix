@@ -382,6 +382,7 @@ const ICONS = {
   hash: `<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/>`,
   math: `<path d="M3 4h18"/><path d="M6 8l4 4-4 4"/><path d="M14 16h5"/><path d="M14 12h5"/>`,
   network: `<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v8"/>`,
+  new: `<path d="m16.5 9.4-9-5.2"/><path d="M21 13.5V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l2.1-1.2"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/><path d="M18 16v6"/><path d="M15 19h6"/>`,
   package: `<path d="m16.5 9.4-9-5.2"/><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`,
   play: `<circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4Z"/>`,
   route: `<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M6 16v-4a4 4 0 0 1 4-4h4"/>`,
@@ -549,12 +550,12 @@ function renderImports(imports) {
 }
 
 const NY_KEYWORDS = new Set(
-  "fn def mut if else elif while for return use import export module case break continue asm struct layout enum match type defer in as and or not try catch throw finally lambda comptime nil true false self".split(
+  "def mut del fn use as if elif else while for in match case return break continue assert print struct layout module import comptime template emit table with defer try catch true false nil not and or enum type impl operator extern static resource self is from generated export internal asm lambda throw finally".split(
     " ",
   ),
 );
 const NY_TYPES = new Set(
-  "bool int i8 i16 i32 i64 u8 u16 u32 u64 f16 f32 f64 f128 str ptr void any list dict set tuple char byte size_t usize isize".split(
+  "any bool int i8 i16 i32 i64 u8 u16 u32 u64 char float f16 f32 f64 f128 number str dict list set tuple bytes range seq ptr handle fnptr void Result Option Error byte size_t usize isize".split(
     " ",
   ),
 );
@@ -616,6 +617,11 @@ function highlight(code) {
   let out = "";
   let i = 0;
   const n = code.length;
+  let expectFnName = false;
+  let expectFnLparen = false;
+  let fnSigDepth = 0;
+  let fnSigDefault = false;
+  let expectReturnType = false;
   const nextNonWs = (p) => {
     while (p < n && /\s/.test(code[p])) p++;
     return code[p] || "";
@@ -625,6 +631,29 @@ function highlight(code) {
     while (p >= 0 && /\s/.test(code[p])) p--;
     return p >= 0 ? code[p] : "";
   };
+  const skipTypeSuffix = (p) => {
+    let j = p;
+    while (/\s/.test(code[j] || "")) j++;
+    while (code[j] === "<") {
+      let depth = 0;
+      while (j < n) {
+        if (code[j] === "<") depth++;
+        else if (code[j] === ">") {
+          depth--;
+          j++;
+          if (depth <= 0) break;
+          continue;
+        }
+        j++;
+      }
+      while (/\s/.test(code[j] || "")) j++;
+    }
+    return j;
+  };
+  const hasParamNameAfterType = (p) =>
+    /[A-Za-z_]/.test(code[skipTypeSuffix(p)] || "");
+  const sigWordIsType = (start, end, word) =>
+    NY_TYPES.has(word) || hasParamNameAfterType(end) || prevNonWs(start) === "<";
 
   while (i < n) {
     const c = code[i];
@@ -713,7 +742,28 @@ function highlight(code) {
       const start = i++;
       while (i < n && /[A-Za-z0-9_.]/.test(code[i])) i++;
       const word = code.slice(start, i);
-      out += span(classifyIdent(word, nextNonWs(i), prevNonWs(start)), word);
+      let cls;
+      const next = nextNonWs(i);
+      if (expectFnName) {
+        cls = "syn-call";
+        expectFnName = false;
+        expectFnLparen = next === "(";
+      } else if (expectReturnType && (word === "case" || word === "as")) {
+        cls = "syn-kw";
+        expectReturnType = false;
+      } else if (expectReturnType && !NY_KEYWORDS.has(word)) {
+        cls = "syn-type";
+      } else if (fnSigDepth > 0 && !fnSigDefault && !NY_KEYWORDS.has(word)) {
+        cls = sigWordIsType(start, i, word) ? "syn-type" : "syn-ident";
+      } else {
+        cls = classifyIdent(word, next, prevNonWs(start));
+        if (word === "fn") {
+          expectFnName = true;
+          expectFnLparen = false;
+          expectReturnType = false;
+        }
+      }
+      out += span(cls, word);
       continue;
     }
     const three = code.slice(i, i + 3),
@@ -730,10 +780,29 @@ function highlight(code) {
     }
     if (/[+\-*\/%=&|^!~<>?:]/.test(c)) {
       out += span("syn-op", c);
+      if (c === "=" && fnSigDepth === 1) fnSigDefault = true;
       i++;
       continue;
     }
     if (/[()[\]{},.]/.test(c)) {
+      if (c === "(" && (expectFnName || expectFnLparen)) {
+        expectFnName = false;
+        expectFnLparen = false;
+        fnSigDepth = 1;
+        fnSigDefault = false;
+      } else if (c === "(" && fnSigDepth > 0) {
+        fnSigDepth++;
+      } else if (c === ")" && fnSigDepth > 0) {
+        fnSigDepth--;
+        if (fnSigDepth === 0) {
+          fnSigDefault = false;
+          expectReturnType = true;
+        }
+      } else if (c === "," && fnSigDepth === 1) {
+        fnSigDefault = false;
+      } else if (c === "{") {
+        expectReturnType = false;
+      }
       out += span("syn-punc", c);
       i++;
       continue;
@@ -1789,11 +1858,7 @@ function renderNav() {
 }
 
 function header(title, desc, stats) {
-  const glyph =
-    title === "Nytrix Manual"
-      ? `<img src="logo.svg" alt="" onerror="this.remove()" />`
-      : icon(pageIconName(title), "ico ico-lg");
-  return `<div class="header"><div class="header-top"><div class="title-icon">${glyph}</div><div class="header-copy"><div class="mod-label">${icon("book", "ico ico-xs")}<span>MANUAL</span></div><div class="title">${esc(title)}</div><div class="desc">${esc(desc || "Language manual and API reference.")}</div><div class="stats">${esc(stats)}</div></div></div></div>`;
+  return `<div class="header"><div class="header-top"><div class="header-copy"><div class="mod-label">${icon("book", "ico ico-xs")}<span>MANUAL</span></div><div class="title">${esc(title)}</div><div class="desc">${esc(desc || "Language manual and API reference.")}</div><div class="stats">${esc(stats)}</div></div></div></div>`;
 }
 
 function renderDocCard(doc, tone = "") {
@@ -1855,6 +1920,7 @@ function renderDocsHome(overviewMod) {
     ["terminal", "REPL", "ny"],
     ["check", "Fmt", "ny fmt file.ny"],
     ["search", "Symbols", "ny doc search --symbols print"],
+    ["new", "New", "ny new app"],
   ];
   const sampleProgram = `use std
 def scale = comptime { 2^5 }
@@ -1872,7 +1938,7 @@ print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")`;
     "Manual · API · source",
   );
   html += `<div class="docs-home">`;
-  html += `<section class="docs-hero"><div class="docs-hero-copy"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><h1>A language for native systems.</h1><p>platform-agnostic, batteries included, and native with seamless interoperability.</p><div class="hero-actions"><a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a></div><div class="quick-start-list">${quickStart.map(([name, label, command]) => `<div><b>${icon(name, "ico ico-xs")}<span>${esc(label)}</span></b><code>${esc(command)}</code></div>`).join("")}</div></div><div class="docs-hero-aside"><pre class="docs-example"><code>${highlight(sampleProgram)}</code></pre></div></section>`;
+  html += `<section class="docs-hero"><div class="docs-hero-copy"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><h1>Think freely.</h1><p>Native. Explicit. Comptime. Cross-platform.</p><div class="hero-actions"><a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a></div><div class="quick-start-list">${quickStart.map(([name, label, command]) => `<div><b>${icon(name, "ico ico-xs")}<span>${esc(label)}</span></b><code>${esc(command)}</code></div>`).join("")}</div></div><div class="docs-hero-aside"><pre class="docs-example"><code class="language-ny">${highlight(sampleProgram)}</code></pre></div></section>`;
   html += renderDocGroup(
     "Learn",
     learnDocs,
@@ -1888,6 +1954,16 @@ print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")`;
     projectDocs,
     "Repository notes.",
   );
+  const apiCards = [
+    ["std.core", "std.core", "Core language helpers and runtime primitives.", "module"],
+    ["std.os", "std.os", "Operating-system APIs, process utilities, and platform support.", "namespace"],
+    ["std.parse", "std.parse", "Data, syntax, images, and asset parsers.", "namespace"],
+  ]
+    .map(([route, title, summary, meta]) =>
+      renderApiCard(route, title, summary, meta),
+    )
+    .join("");
+  html += `<section class="docs-section"><div class="docs-section-head"><div><h2>Reference</h2><p>Source-linked library entry points.</p></div><span>API</span></div><div class="api-card-grid">${apiCards}</div></section>`;
   html += `</div>`;
   setHTML("content", html);
 }
@@ -1928,13 +2004,13 @@ function normalizeCodeBlock(code) {
 
 function codeBox(code) {
   const s = normalizeCodeBlock(code);
-  return `<div class="codebox collapsed"><div class="codehd"><button class="code-toggle" data-code-toggle aria-expanded="false">${icon("code", "ico ico-xs")}<span>SHOW CODE</span></button><button class="copy" data-copy="${esc(s)}">${icon("copy", "ico ico-xs")}<span>COPY</span></button></div><pre><code>${highlight(s)}</code></pre></div>`;
+  return `<div class="codebox collapsed"><div class="codehd"><button class="code-toggle" data-code-toggle aria-expanded="false">${icon("code", "ico ico-xs")}<span>SHOW CODE</span></button><button class="copy" data-copy="${esc(s)}">${icon("copy", "ico ico-xs")}<span>COPY</span></button></div><pre><code class="language-ny">${highlight(s)}</code></pre></div>`;
 }
 
 function sourceBox(mod) {
   const source = String((mod && mod.source) || "");
   if (!source.trim()) return "";
-  return `<div class="codebox sourcebox expanded" id="${SOURCE_SYMBOL_ID}" data-module-source><div class="codehd"><span class="source-label">${icon("file", "ico ico-xs")}<span>SOURCE</span></span><button class="copy" data-copy-source>${icon("copy", "ico ico-xs")}<span>COPY SOURCE</span></button></div><pre><code>${highlight(source)}</code></pre></div>`;
+  return `<div class="codebox sourcebox expanded" id="${SOURCE_SYMBOL_ID}" data-module-source><div class="codehd"><span class="source-label">${icon("file", "ico ico-xs")}<span>SOURCE</span></span><button class="copy" data-copy-source>${icon("copy", "ico ico-xs")}<span>COPY SOURCE</span></button></div><pre><code class="language-ny">${highlight(source)}</code></pre></div>`;
 }
 
 function setCodeBoxOpen(box, open) {
