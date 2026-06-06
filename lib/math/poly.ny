@@ -1,8 +1,10 @@
-;; Keywords: poly polynomial
+;; Keywords: poly polynomial math crypto
 ;; Polynomial arithmetic, evaluation, modular reduction, interpolation, and roots.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto
 module std.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_small_roots, poly_gcd,
    poly_set_at, poly_derivative_mod, poly_mod_eval,
    poly_mod_gcd, poly_mod_div, poly_mod_mul, poly_mod_pow, poly_factor_cz,
@@ -16,7 +18,7 @@ use std.math.nt
 use std.math.crypto.ntt as ntt
 use std.math.matrix
 
-fn poly_set_at(list: poly, int: idx, any: val): list {
+fn poly_set_at(list poly, int idx, any val) list {
    "Internal: Set polynomial coefficient at index idx to val. Returns modified polynomial."
    if(!is_list(poly)){ return poly }
    if(idx < 0 || idx >= poly.len){ return poly }
@@ -24,7 +26,7 @@ fn poly_set_at(list: poly, int: idx, any: val): list {
    poly
 }
 
-fn poly_add(list: a, list: b): list {
+fn poly_add(list a, list b) list {
    "Add two polynomials coefficient-wise, returning new polynomial result."
    def na, nb = a.len, b.len
    mut n = (na > nb) ? na : nb
@@ -38,7 +40,7 @@ fn poly_add(list: a, list: b): list {
    result
 }
 
-fn poly_mod_add(list: a, list: b, any: p): list {
+fn poly_mod_add(list a, list b, any p) list {
    "Add two polynomials modulo p."
    def na, nb = a.len, b.len
    mut n = (na > nb) ? na : nb
@@ -52,7 +54,7 @@ fn poly_mod_add(list: a, list: b, any: p): list {
    result
 }
 
-fn poly_mul(list: a, list: b): list {
+fn poly_mul(list a, list b) list {
    "Multiply two polynomials using convolution, returning new polynomial result."
    def na, nb = a.len, b.len
    if(na == 0 || nb == 0){ return [] }
@@ -75,7 +77,7 @@ fn poly_mul(list: a, list: b): list {
    result
 }
 
-fn poly_eval(list: poly, any: x): any {
+fn poly_eval(list poly, any x) any {
    "Evaluate polynomial at point x using Horner's method. Returns the computed value."
    mut n = poly.len
    if(n == 0){ return 0 }
@@ -88,7 +90,7 @@ fn poly_eval(list: poly, any: x): any {
    result
 }
 
-fn poly_mod_eval(list: poly, any: x, any: modulus): any {
+fn poly_mod_eval(list poly, any x, any modulus) any {
    "Evaluate polynomial at x modulo modulus using Horner's method with modular reduction at each step."
    mut n = poly.len
    if(n == 0){ return 0 }
@@ -101,7 +103,7 @@ fn poly_mod_eval(list: poly, any: x, any: modulus): any {
    result
 }
 
-fn poly_small_roots(list: poly, int: bound): list {
+fn poly_small_roots(list poly, int bound) list {
    "Find all integer roots of poly with absolute value <= bound by brute force search."
    mut roots = list(0)
    mut x = 0 - bound
@@ -113,7 +115,7 @@ fn poly_small_roots(list: poly, int: bound): list {
    roots
 }
 
-fn poly_derivative(list: poly): list {
+fn poly_derivative(list poly) list {
    "Compute formal derivative of polynomial. Returns derivative as coefficient list."
    mut n = poly.len
    if(n <= 1){ return [0] }
@@ -126,7 +128,7 @@ fn poly_derivative(list: poly): list {
    result
 }
 
-fn poly_derivative_mod(list: poly, any: modulus): list {
+fn poly_derivative_mod(list poly, any modulus) list {
    "Compute formal derivative of polynomial with coefficients reduced modulo modulus."
    mut n = poly.len
    if(n <= 1){ return [0] }
@@ -139,7 +141,7 @@ fn poly_derivative_mod(list: poly, any: modulus): list {
    result
 }
 
-fn poly_modulus(list: a, list: b): list {
+fn poly_modulus(list a, list b) list {
    "Polynomial remainder a mod b over the ambient coefficient ring."
    if(b.len == 0){ return clone(a) }
    mut r = clone(a)
@@ -160,7 +162,7 @@ fn poly_modulus(list: a, list: b): list {
    r
 }
 
-fn poly_gcd(list: a, list: b): list {
+fn poly_gcd(list a, list b) list {
    "Compute GCD of two polynomials using Euclidean algorithm. Returns the GCD polynomial."
    while(b.len > 0){
       mut r = poly_modulus(a, b)
@@ -169,7 +171,7 @@ fn poly_gcd(list: a, list: b): list {
    a
 }
 
-fn poly_mod_gcd(list: a, list: b, any: p): list {
+fn poly_mod_gcd(list a, list b, any p) list {
    "GCD of polynomials a, b modulo p."
    mut u, v = clone(a), clone(b)
    while(v.len > 1 || (v.len == 1 && v[0] != 0)){
@@ -188,7 +190,7 @@ fn poly_mod_gcd(list: a, list: b, any: p): list {
    res
 }
 
-fn poly_mod_div(list: a, list: b, any: p): list {
+fn poly_mod_div(list a, list b, any p) list {
    "Polynomial division with remainder modulo p. Returns [q, r]."
    def na, nb = a.len, b.len
    if(nb == 0){ panic("poly_mod_div: division by zero") }
@@ -217,9 +219,10 @@ fn poly_mod_div(list: a, list: b, any: p): list {
    [q, r]
 }
 
-fn poly_mod_divmod(list: a, list: b, any: p): list { poly_mod_div(a, b, p) }
+fn poly_mod_divmod(list a, list b, any p) list { poly_mod_div(a, b, p) }
 
-fn poly_neg(list: a, any: p): list {
+fn poly_neg(list a, any p) list {
+   "Runs the poly neg operation."
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -229,7 +232,7 @@ fn poly_neg(list: a, any: p): list {
    out
 }
 
-fn poly_mod_mul(list: a, list: b, any: p): list {
+fn poly_mod_mul(list a, list b, any p) list {
    "Polynomial multiplication modulo p."
    def res = poly_mul(a, b)
    mut i = 0
@@ -240,7 +243,7 @@ fn poly_mod_mul(list: a, list: b, any: p): list {
    res
 }
 
-fn poly_mod_pow(list: a, int: e, list: f, any: p): list {
+fn poly_mod_pow(list a, int e, list f, any p) list {
    "Polynomial exponentiation a^e mod f(x) over GF(p)."
    mut res = [1]
    mut base = a
@@ -253,7 +256,7 @@ fn poly_mod_pow(list: a, int: e, list: f, any: p): list {
    res
 }
 
-fn poly_factor_cz(list: f, any: p): list {
+fn poly_factor_cz(list f, any p) list {
    "Cantor-Zassenhaus factorization of monic square-free polynomial f over GF(p).
    p must be an odd prime. Returns a list of irreducible factors."
    def n = f.len - 1
@@ -313,7 +316,7 @@ fn poly_factor_cz(list: f, any: p): list {
    factors
 }
 
-fn poly_mod_roots(list: f, any: p): list {
+fn poly_mod_roots(list f, any p) list {
    "Find all roots of polynomial f over GF(p) using Cantor-Zassenhaus factorization."
    def factors = poly_factor_cz(f, p)
    mut roots = []
@@ -329,7 +332,7 @@ fn poly_mod_roots(list: f, any: p): list {
    roots
 }
 
-fn poly_subproduct_tree(list: points, any: p): list {
+fn poly_subproduct_tree(list points, any p) list {
    "Build a subproduct tree for the given points modulo p.
    Returns a list of lists representing the tree levels."
    def n = points.len
@@ -355,7 +358,7 @@ fn poly_subproduct_tree(list: points, any: p): list {
    tree
 }
 
-fn poly_multipoint_eval(list: poly, list: points, any: p): list {
+fn poly_multipoint_eval(list poly, list points, any p) list {
    "Fast multipoint evaluation of poly at given points modulo p.
    Runs in O(M(n) log n) using subproduct tree and remainders."
    def tree = poly_subproduct_tree(points, p)
@@ -385,7 +388,7 @@ fn poly_multipoint_eval(list: poly, list: points, any: p): list {
    results
 }
 
-fn poly_interpolate(list: points, list: values, any: p): list {
+fn poly_interpolate(list points, list values, any p) list {
    "Fast polynomial interpolation over GF(p).
    Finds the unique polynomial of degree < points.len passing through(points, values).
    Runs in O(M(n) log n) using subproduct tree."
@@ -404,7 +407,7 @@ fn poly_interpolate(list: points, list: values, any: p): list {
    _poly_interpolate_upward(tree, 0, 0, b.len, b, p)
 }
 
-fn _poly_interpolate_upward(list: tree, int: level_idx, int: start, int: length, list: b, any: p): list {
+fn _poly_interpolate_upward(list tree, int level_idx, int start, int length, list b, any p) list {
    "Internal recursive upward pass for fast interpolation.
    Combines L and R segments: Res = L * M_right + R * M_left."
    if(length == 1){ return [b.get(start)] }
@@ -416,7 +419,7 @@ fn _poly_interpolate_upward(list: tree, int: level_idx, int: start, int: length,
    poly_mod_add(poly_mod_mul(L, M_right, p), poly_mod_mul(R, M_left, p), p)
 }
 
-fn poly_hgcd(list: a, list: b, any: p): list {
+fn poly_hgcd(list a, list b, any p) list {
    "Half-GCD algorithm: compute a transformation matrix M such that M * [a, b]^T = [a', b'] with deg(b') < n/2."
    def n, m = a.len, n / 2
    if(b.len <= m || n < 32){ return [[1], [0], [0], [1]] }
@@ -436,7 +439,7 @@ fn poly_hgcd(list: a, list: b, any: p): list {
    _poly_mat_mat_mul(R2, [[0], [1], [1], poly_neg(q, p)], R1, p)
 }
 
-fn poly_mod_gcd_fast(list: a, list: b, any: p): list {
+fn poly_mod_gcd_fast(list a, list b, any p) list {
    "Subquadratic GCD using Half-GCD recursive reduction."
    mut u, v = a, b
    while(v.len > 32){
@@ -451,7 +454,7 @@ fn poly_mod_gcd_fast(list: a, list: b, any: p): list {
    poly_mod_gcd(u, v, p)
 }
 
-fn _poly_mat_mul_vec(list: M, list: a, list: b, any: p): list {
+fn _poly_mat_mul_vec(list M, list a, list b, any p) list {
    def m11 = M.get(0) def m12 = M.get(1)
    def m21 = M.get(2) def m22 = M.get(3)
    def r1 = poly_mod_add(poly_mod_mul(m11, a, p), poly_mod_mul(m12, b, p), p)
@@ -459,7 +462,7 @@ fn _poly_mat_mul_vec(list: M, list: a, list: b, any: p): list {
    [r1, r2]
 }
 
-fn _poly_mat_mat_mul(list: A, list: B, list: C, any: p): list {
+fn _poly_mat_mat_mul(list A, list B, list C, any p) list {
    def a11 = A.get(0) def a12 = A.get(1) def a21 = A.get(2) def a22 = A.get(3)
    def b11 = B.get(0) def b12 = B.get(1) def b21 = B.get(2) def b22 = B.get(3)
    def r11 = poly_mod_add(poly_mod_mul(a11, b11, p), poly_mod_mul(a12, b21, p), p)
@@ -474,13 +477,13 @@ fn _poly_mat_mat_mul(list: A, list: B, list: C, any: p): list {
    [f11, f12, f21, f22]
 }
 
-fn poly_div_x(list: a, int: k): list {
+fn poly_div_x(list a, int k) list {
    "Returns a / x^k(removes first k coefficients)."
    if(a.len <= k){ return [] }
    a.slice(k, a.len)
 }
 
-fn poly_sylvester_matrix(list: a, list: b): list {
+fn poly_sylvester_matrix(list a, list b) list {
    "Construct the Sylvester matrix of polynomials a and b."
    def na, nb = a.len - 1, b.len - 1
    def n = na + nb
@@ -506,13 +509,13 @@ fn poly_sylvester_matrix(list: a, list: b): list {
    [n, n, matrix]
 }
 
-fn poly_resultant(list: a, list: b): any {
+fn poly_resultant(list a, list b) any {
    "Compute the resultant of polynomials a and b via Sylvester determinant."
    def S = poly_sylvester_matrix(a, b)
    matrix_det(S)
 }
 
-fn poly_resultant_mod(list: a, list: b, any: modn): any {
+fn poly_resultant_mod(list a, list b, any modn) any {
    "Compute the resultant of polynomials a and b modulo `modn`.
    This is much faster than `poly_resultant` when you only need the resultant
    in Z/modnZ(common in Coppersmith/resultant attacks). If the modular
@@ -524,7 +527,7 @@ fn poly_resultant_mod(list: a, list: b, any: modn): any {
    mod(matrix_det(S), modn)
 }
 
-fn _poly_trim_mod_local(list: p, any: modn): list {
+fn _poly_trim_mod_local(list p, any modn) list {
    mut out = []
    mut i = 0
    while(i < len(p)){
@@ -535,7 +538,7 @@ fn _poly_trim_mod_local(list: p, any: modn): list {
    out
 }
 
-fn _poly_mod_add_local(list: a, list: b, any: modn): list {
+fn _poly_mod_add_local(list a, list b, any modn) list {
    def na, nb = len(a), len(b)
    def n = (na > nb) ? na : nb
    mut out = []
@@ -548,7 +551,7 @@ fn _poly_mod_add_local(list: a, list: b, any: modn): list {
    _poly_trim_mod_local(out, modn)
 }
 
-fn _poly_mod_scale_local(list: a, any: s, any: modn): list {
+fn _poly_mod_scale_local(list a, any s, any modn) list {
    mut out = []
    mut i = 0
    while(i < len(a)){
@@ -558,7 +561,7 @@ fn _poly_mod_scale_local(list: a, any: s, any: modn): list {
    _poly_trim_mod_local(out, modn)
 }
 
-fn _poly_mod_mul_local(list: a, list: b, any: modn): list {
+fn _poly_mod_mul_local(list a, list b, any modn) list {
    if(len(a) == 0 || len(b) == 0){ return [Z(0)] }
    mut out = []
    mut i = 0
@@ -579,7 +582,7 @@ fn _poly_mod_mul_local(list: a, list: b, any: modn): list {
    _poly_trim_mod_local(out, modn)
 }
 
-fn _poly_small_nonnegative_int(any: x, str: name): int {
+fn _poly_small_nonnegative_int(any x, str name) int {
    if(is_int(x)){
       if(x < 0){ panic("PolynomialExponentError: " + name + " must be non-negative") }
       return x
@@ -591,7 +594,7 @@ fn _poly_small_nonnegative_int(any: x, str: name): int {
    panic("PolynomialTypeError: " + name + " must be an int or bigint")
 }
 
-fn _poly_mod_pow_local(list: a, any: e, any: modn): list {
+fn _poly_mod_pow_local(list a, any e, any modn) list {
    mut res = [Z(1)]
    mut base = _poly_trim_mod_local(a, modn)
    mut exp = _poly_small_nonnegative_int(e, "exponent")
@@ -603,7 +606,7 @@ fn _poly_mod_pow_local(list: a, any: e, any: modn): list {
    res
 }
 
-fn poly_resultant_quadratic_xn_minus_const_mod(list: a2, list: a1, list: a0, any: exponent, any: c, any: modn): list {
+fn poly_resultant_quadratic_xn_minus_const_mod(list a2, list a1, list a0, any exponent, any c, any modn) list {
    "Return Res_y(a2(x)*y^2 + a1(x)*y + a0(x), y^exponent - c) mod modn as a polynomial in x.
    Uses the symmetric recurrence T_0=2, T_1=-a1, T_k=-a1*T_{k-1}-a0*a2*T_{k-2}.
    This avoids a Sylvester determinant when eliminating a quadratic against a power polynomial."
@@ -633,7 +636,7 @@ fn poly_resultant_quadratic_xn_minus_const_mod(list: a2, list: a1, list: a0, any
    _poly_mod_add_local(_poly_mod_add_local(a0e, mid, modn), tail, modn)
 }
 
-fn _poly2_coeff(list: p, int: i, int: j): any {
+fn _poly2_coeff(list p, int i, int j) any {
    if(i < 0 || j < 0){ return 0 }
    def rows = _matrix_rows(p)
    def cols = _matrix_cols(p)
@@ -641,14 +644,14 @@ fn _poly2_coeff(list: p, int: i, int: j): any {
    mat_get(p, i, j)
 }
 
-fn poly2_new(int: rows, int: cols): list {
+fn poly2_new(int rows, int cols) list {
    "Create a new bivariate polynomial matrix(rows/cols are max degrees)."
    def rr = (rows < 0) ? 0 : rows
    def cc = (cols < 0) ? 0 : cols
    mat_new(rr + 1, cc + 1, 0)
 }
 
-fn poly2_add(list: a, list: b): list {
+fn poly2_add(list a, list b) list {
    "Add bivariate polynomials with support for different matrix sizes."
    def ra, ca = _matrix_rows(a), _matrix_cols(a)
    def rb, cb = _matrix_rows(b), _matrix_cols(b)
@@ -666,7 +669,7 @@ fn poly2_add(list: a, list: b): list {
    res
 }
 
-fn poly2_mul(list: a, list: b): list {
+fn poly2_mul(list a, list b) list {
    "Multiply bivariate polynomials via 2D convolution."
    def ra, ca = _matrix_rows(a), _matrix_cols(a)
    def rb, cb = _matrix_rows(b), _matrix_cols(b)
@@ -700,7 +703,7 @@ fn poly2_mul(list: a, list: b): list {
    res
 }
 
-fn poly2_to_univariate_x(list: p, any: y_val): list {
+fn poly2_to_univariate_x(list p, any y_val) list {
    "Fix y = y_val and return univariate polynomial in x."
    def rows = _matrix_rows(p)
    def cols = _matrix_cols(p)
@@ -719,7 +722,7 @@ fn poly2_to_univariate_x(list: p, any: y_val): list {
    res
 }
 
-fn poly2_to_univariate_y(list: p, any: x_val): list {
+fn poly2_to_univariate_y(list p, any x_val) list {
    "Fix x = x_val and return univariate polynomial in y."
    def rows = _matrix_rows(p)
    def cols = _matrix_cols(p)
@@ -738,13 +741,13 @@ fn poly2_to_univariate_y(list: p, any: x_val): list {
    res
 }
 
-fn poly2_eval(list: p, any: x, any: y): any {
+fn poly2_eval(list p, any x, any y) any {
    "Evaluate f(x, y) at(x, y)."
    def ux = poly2_to_univariate_x(p, y)
    poly_eval(ux, x)
 }
 
-fn poly2_resultant_x(list: p1, list: p2): list {
+fn poly2_resultant_x(list p1, list p2) list {
    "Compute resultant with respect to x using evaluation/interpolation over y."
    def d1, d2 = _matrix_rows(p1), _matrix_rows(p2)
    def d_res = d1 * d2

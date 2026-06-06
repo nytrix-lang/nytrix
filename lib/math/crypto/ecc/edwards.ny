@@ -1,22 +1,25 @@
-;; Keywords: ecc edwards
+;; Keywords: ecc edwards math crypto public-key
 ;; Elliptic-curve routines for Edwards-curve arithmetic.
 ;; Complete addition formulas for Edwards: x^2 + y^2 = 1 + d*x^2*y^2
 ;; and Twisted Edwards: a*x^2 + y^2 = 1 + d*x^2*y^2
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.edwards(edwards_point_add, edwards_scalar_mult, edwards_is_on_curve, twisted_edwards_add, twisted_edwards_scalar_mult)
 use std.math.nt
 use std.math.crypto.ecc
 
-fn edwards_is_on_curve(any: x, any: y, any: d, any: p): bool {
+fn edwards_is_on_curve(any x, any y, any d, any p) bool {
    "Check whether(x,y) lies on Edwards curve x^2 + y^2 = 1 + d*x^2*y^2 over F_p."
    def x2, y2 = (x * x) % p, (y * y) % p
    def lhs, rhs = (x2 + y2) % p, (1 + d * x2 % p * y2 % p) % p
    lhs == rhs
 }
 
-fn edwards_point_add(any: P, any: Q, any: d, any: p): any {
+fn edwards_point_add(any P, any Q, any d, any p) any {
    "Add points P and Q on Edwards curve x^2 + y^2 = 1 + d*x^2*y^2 over F_p " +
    "using complete addition. Returns [x3,y3] or nil."
    if(P == nil){ return Q }
@@ -36,7 +39,7 @@ fn edwards_point_add(any: P, any: Q, any: d, any: p): any {
    [x3, y3]
 }
 
-fn edwards_scalar_mult(any: k, any: P, any: d, any: p): any {
+fn edwards_scalar_mult(any k, any P, any d, any p) any {
    "Multiply Edwards point P by scalar k via double-and-add on x^2 + y^2 = 1 + d*x^2*y^2."
    if(k == 0){ return nil }
    if(P == nil){ return nil }
@@ -50,7 +53,7 @@ fn edwards_scalar_mult(any: k, any: P, any: d, any: p): any {
    Q
 }
 
-fn twisted_edwards_add(any: P, any: Q, any: a, any: d, any: p): any {
+fn twisted_edwards_add(any P, any Q, any a, any d, any p) any {
    "Add points P and Q on Twisted Edwards a*x^2 + y^2 = 1 + d*x^2*y^2 over F_p. " +
    "Returns [x3,y3] or nil."
    if(P == nil){ return Q }
@@ -72,7 +75,7 @@ fn twisted_edwards_add(any: P, any: Q, any: a, any: d, any: p): any {
    [x3, y3]
 }
 
-fn twisted_edwards_scalar_mult(any: k, any: P, any: a, any: d, any: p): any {
+fn twisted_edwards_scalar_mult(any k, any P, any a, any d, any p) any {
    "Multiply Twisted Edwards point P by scalar k via double-and-add on " +
    "a*x^2 + y^2 = 1 + d*x^2*y^2."
    if(k == 0){ return nil }

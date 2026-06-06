@@ -1,21 +1,24 @@
-;; Keywords: dlp discrete-log group-theory clock
+;; Keywords: dlp discrete-log group-theory clock math crypto
 ;; Discrete-log routines for clock-group discrete-log problems.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
+;; References:
+;; - std.math.crypto.dlp
+;; - std.math.crypto
 module std.math.crypto.dlp.clock(clock_identity, clock_add, clock_sub, clock_neg, clock_scalar_mult, clock_on_curve, clock_recover_modulus, clock_baby_step_giant_step, clock_pohlig_hellman)
 use std.core
 use std.math.nt
 
-fn clock_identity(): list {
+fn clock_identity() list {
    "Identity point for the clock group."
    [Z(0), Z(1)]
 }
 
-fn _clock_point_key(list: P): str {
+fn _clock_point_key(list P) str {
    bigint_to_str(P[0]) + ":" + bigint_to_str(P[1])
 }
 
-fn _clock_order_from_factors(list: factors): any {
+fn _clock_order_from_factors(list factors) any {
    mut order = Z(1)
    mut i = 0
    while(i < factors.len){
@@ -26,7 +29,7 @@ fn _clock_order_from_factors(list: factors): any {
    order
 }
 
-fn clock_add(list: P, list: Q, any: p): list {
+fn clock_add(list P, list Q, any p) list {
    "Add two clock-group points modulo p."
    def pp = Z(p)
    def x1, y1 = Z(P[0]), Z(P[1])
@@ -34,17 +37,17 @@ fn clock_add(list: P, list: Q, any: p): list {
    [mod(x1 * y2 + y1 * x2, pp), mod(y1 * y2 - x1 * x2, pp)]
 }
 
-fn clock_neg(list: P, any: p): list {
+fn clock_neg(list P, any p) list {
    "Inverse a clock-group point modulo p."
    [mod(-Z(P[0]), p), mod(P[1], p)]
 }
 
-fn clock_sub(list: P, list: Q, any: p): list {
+fn clock_sub(list P, list Q, any p) list {
    "Subtract Q from P in the clock group."
    clock_add(P, clock_neg(Q, p), p)
 }
 
-fn clock_scalar_mult(any: k, list: P, any: p, any: order=nil): list {
+fn clock_scalar_mult(any k, list P, any p, any order=nil) list {
    "Double-and-add scalar multiplication for clock-group points."
    def pp = Z(p)
    mut kk = Z(k)
@@ -63,12 +66,12 @@ fn clock_scalar_mult(any: k, list: P, any: p, any: order=nil): list {
    acc
 }
 
-fn clock_on_curve(list: P, any: p): bool {
+fn clock_on_curve(list P, any p) bool {
    "Check x^2 + y^2 = 1 modulo p."
    mod(Z(P[0]) * Z(P[0]) + Z(P[1]) * Z(P[1]) - Z(1), p) == Z(0)
 }
 
-fn clock_recover_modulus(list: points): any {
+fn clock_recover_modulus(list points) any {
    "Recover a hidden modulus from points known to satisfy x^2 + y^2 = 1 mod p."
    mut acc = Z(0)
    mut i = 0
@@ -81,7 +84,7 @@ fn clock_recover_modulus(list: points): any {
    acc
 }
 
-fn clock_baby_step_giant_step(list: P, list: Q, any: p, any: order): any {
+fn clock_baby_step_giant_step(list P, list Q, any p, any order) any {
    "Solve Q = xP in a clock subgroup using baby-step giant-step."
    def n = Z(order)
    if(_clock_point_key(Q) == _clock_point_key(clock_identity())){ return Z(0) }
@@ -106,7 +109,7 @@ fn clock_baby_step_giant_step(list: P, list: Q, any: p, any: order): any {
    -1
 }
 
-fn clock_pohlig_hellman(list: P, list: Q, any: p, list: order_factors): any {
+fn clock_pohlig_hellman(list P, list Q, any p, list order_factors) any {
    "Solve Q = xP in a smooth-order clock group with Pohlig-Hellman.
    order_factors is a list of [prime, exponent] pairs for the point order."
    def order = _clock_order_from_factors(order_factors)

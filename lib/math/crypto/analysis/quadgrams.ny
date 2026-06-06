@@ -1,10 +1,13 @@
-;; Keywords: analysis frequency-analysis language-model quadgrams
+;; Keywords: analysis frequency-analysis language-model quadgrams math crypto
 ;; Cryptanalysis scoring and recovery routines for quadgram language scoring.
 ;;
 ;; Provides a fast scoring function for classical-cipher cracking (hillclimb,
 ;; substitution, Vigenere key search, etc.). Prefers the repo-local asset profile
 ;; and falls back to a cached copy of:
 ;; https://raw.githubusercontent.com/gibsjose/statistical-attack/master/english-quadgrams.txt
+;; References:
+;; - std.math.crypto.analysis
+;; - std.math.crypto
 module std.math.crypto.analysis.quadgrams(quadgrams_default_cache_path, quadgrams_load, quadgrams_score, quadgrams_score_upper_ascii)
 use std.core
 use std.math.scalar (log)
@@ -20,14 +23,14 @@ mut _quad_logp = 0
 mut _quad_logp_packed = 0
 mut _quad_floor = 0.0
 
-fn quadgrams_default_cache_path(): str {
+fn quadgrams_default_cache_path() str {
    "Default on-disk cache location for the quadgram model."
    def cd = cache_dir()
    if(cd.len == 0){ return ospath.join(ospath.temp_dir(), "nytrix_crypto_english_quadgrams.txt") }
    ospath.join(cd, "nytrix_crypto_english_quadgrams.txt")
 }
 
-fn _quadgrams_ensure_text(str: path): str {
+fn _quadgrams_ensure_text(str path) str {
    def p = ospath.normalize(path)
    if(file_exists(p)){ return unwrap(file_read(p)) }
    def repo_p = worldfreq.worldfreq_profile_paths("english").get("quadgrams_path", "")
@@ -39,17 +42,17 @@ fn _quadgrams_ensure_text(str: path): str {
    body
 }
 
-fn _quad_pack4(str: s, int: i): int {
+fn _quad_pack4(str s, int i) int {
    (((load8(s, i) - 65) * 26 + load8(s, i + 1) - 65) * 26 + load8(s, i + 2) - 65) * 26 + load8(s, i + 3) - 65
 }
 
-fn _quad_alpha_value(int: c): int {
+fn _quad_alpha_value(int c) int {
    if(c >= 65 && c <= 90){ return c - 65 }
    if(c >= 97 && c <= 122){ return c - 97 }
    -1
 }
 
-fn _quad_filled_table(f64: value): list {
+fn _quad_filled_table(f64 value) list {
    mut xs = list(_QUAD_PACKED_SIZE)
    mut i = 0
    while(i < _QUAD_PACKED_SIZE){
@@ -60,13 +63,13 @@ fn _quad_filled_table(f64: value): list {
    xs
 }
 
-fn _quadgrams_model_path(any: path=0): str {
+fn _quadgrams_model_path(any path=0) str {
    mut model_path = path
    if(!is_str(model_path) || model_path.len == 0){ model_path = quadgrams_default_cache_path() }
    model_path
 }
 
-fn _quadgrams_load_packed(any: path=0): bool {
+fn _quadgrams_load_packed(any path=0) bool {
    if(_quad_packed_loaded){ return true }
    def txt = _quadgrams_ensure_text(_quadgrams_model_path(path))
    mut counts = list(_QUAD_PACKED_SIZE)
@@ -113,7 +116,7 @@ fn _quadgrams_load_packed(any: path=0): bool {
    true
 }
 
-fn quadgrams_load(any: path=0): list {
+fn quadgrams_load(any path=0) list {
    "Loads quadgram frequencies into an internal dict of log-probabilities.
    Returns [dict, floor_logp]."
    if(_quad_loaded){ return [dict_clone(_quad_logp), _quad_floor] }
@@ -169,7 +172,7 @@ fn quadgrams_load(any: path=0): list {
    [dict_clone(_quad_logp), _quad_floor]
 }
 
-fn quadgrams_score(str: s): f64 {
+fn quadgrams_score(str s) f64 {
    "Scores s using the quadgram model. Higher is better.
    Assumes s already consists of uppercase A-Z letters."
    if(!_quad_packed_loaded){ _quadgrams_load_packed() }
@@ -186,7 +189,7 @@ fn quadgrams_score(str: s): f64 {
    score
 }
 
-fn quadgrams_score_upper_ascii(str: s): f64 {
+fn quadgrams_score_upper_ascii(str s) f64 {
    "Convenience: uppercases and strips non A-Z before scoring."
    if(!_quad_packed_loaded){ _quadgrams_load_packed() }
    def m = _quad_logp_packed

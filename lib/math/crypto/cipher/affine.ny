@@ -1,15 +1,19 @@
-;; Keywords: cipher affine
+;; Keywords: cipher affine math crypto
 ;; Affine cipher encryption, decryption, and recovery routines.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.affine(affine_encrypt, affine_decrypt, affine_decrypt_bytes, affine_crack_bytes_contains, affine_crack_bytes_known_substring, affine_encrypt_alphabet, affine_decrypt_alphabet, affine_decrypt_block_pairs_alphabet, affine_cbc_decrypt_alphabet, affine_score_ngrams, affine_cbc_crack_alphabet, affine_crack_block_pairs_alphabet, affine_cbc_crack_known_prefix_alphabet, affine_crack_block_pairs_known_prefix_alphabet, affine_crack_known_pt_alphabet, affine_crack_known_pt)
 use std.core
 use std.math.nt
 use std.core.str
 use std.math.crypto.error
+use std.math.crypto.support.tools as support
 
-fn affine_mod_inverse(number: a, number: m): number {
+fn affine_mod_inverse(number a, number m) number {
    "Compute the modular multiplicative inverse of a mod m. Returns the inverse or 0 if it does not exist."
    def eg = extended_gcd(a, m)
    def g = eg[0]
@@ -19,11 +23,11 @@ fn affine_mod_inverse(number: a, number: m): number {
    result
 }
 
-fn _affine_index(str: alphabet, str: ch): int {
+fn _affine_index(str alphabet, str ch) int {
    find(alphabet, ch)
 }
 
-fn _affine_pair_value(str: alphabet, str: s, int: i): int {
+fn _affine_pair_value(str alphabet, str s, int i) int {
    def m = alphabet.len
    def x0 = _affine_index(alphabet, utf8_slice(s, i, i + 1, 1))
    def x1 = _affine_index(alphabet, utf8_slice(s, i + 1, i + 2, 1))
@@ -31,18 +35,18 @@ fn _affine_pair_value(str: alphabet, str: s, int: i): int {
    x0 * m + x1
 }
 
-fn _affine_builder_take(list: b): str {
+fn _affine_builder_take(list b) str {
    def out = builder_to_str(b)
    builder_free(b)
    out
 }
 
-fn _affine_map_value(number: value, number: a, number: b, number: m, bool: decrypt): number {
+fn _affine_map_value(number value, number a, number b, number m, bool decrypt) number {
    if(decrypt){ return(a * ((value - b + m) % m)) % m }
    (a * value + b) % m
 }
 
-fn _affine_map_ascii_upper(str: text, number: a, number: b, number: m, bool: decrypt): str {
+fn _affine_map_ascii_upper(str text, number a, number b, number m, bool decrypt) str {
    mut result = Builder(text.len + 8)
    mut i = 0
    while(i < text.len){
@@ -56,7 +60,7 @@ fn _affine_map_ascii_upper(str: text, number: a, number: b, number: m, bool: dec
    _affine_builder_take(result)
 }
 
-fn _affine_map_alphabet(str: text, number: a, number: b, str: alphabet, bool: decrypt): str {
+fn _affine_map_alphabet(str text, number a, number b, str alphabet, bool decrypt) str {
    def m = alphabet.len
    mut result = Builder(text.len + 8)
    mut i = 0
@@ -74,7 +78,7 @@ fn _affine_map_alphabet(str: text, number: a, number: b, str: alphabet, bool: de
    _affine_builder_take(result)
 }
 
-fn affine_encrypt(str: msg, number: a, number: b, number: m=26): str {
+fn affine_encrypt(str msg, number a, number b, number m=26) str {
    "Encrypt a message using the Affine cipher: y = (a * x + b) mod m for each letter.
    msg: uppercase alphabetic string to encrypt
    a: multiplicative key(must be coprime with m)
@@ -84,14 +88,14 @@ fn affine_encrypt(str: msg, number: a, number: b, number: m=26): str {
    _affine_map_ascii_upper(msg, a, b, m, false)
 }
 
-fn affine_encrypt_alphabet(str: msg, number: a, number: b, str: alphabet): str {
+fn affine_encrypt_alphabet(str msg, number a, number b, str alphabet) str {
    "Encrypt using an affine map over a custom alphabet string."
    crypto_require(msg != nil, "cipher.affine_encrypt_alphabet", "msg is nil")
    crypto_require_nonempty(alphabet, "cipher.affine_encrypt_alphabet", "alphabet")
    _affine_map_alphabet(msg, a, b, alphabet, false)
 }
 
-fn affine_decrypt(str: ct, number: a, number: b, number: m=26): any {
+fn affine_decrypt(str ct, number a, number b, number m=26) any {
    "Decrypt a ciphertext encrypted with the Affine cipher using x = a_inv * (y - b) mod m.
    ct: uppercase alphabetic string to decrypt
    a: multiplicative key used during encryption
@@ -102,7 +106,7 @@ fn affine_decrypt(str: ct, number: a, number: b, number: m=26): any {
    a_inv == 0 ? nil : _affine_map_ascii_upper(ct, a_inv, b, m, true)
 }
 
-fn affine_decrypt_bytes(list: ct, number: a, number: b, number: m=256): ?list {
+fn affine_decrypt_bytes(list ct, number a, number b, number m=256) ?list {
    "Decrypt byte-list affine ciphertext using x = a^-1*(y-b) mod m."
    def a_inv = affine_mod_inverse(a, m)
    if(a_inv == 0){ return nil }
@@ -116,7 +120,7 @@ fn affine_decrypt_bytes(list: ct, number: a, number: b, number: m=256): ?list {
    result
 }
 
-fn affine_crack_bytes_contains(list: ct, list: needle, number: m=256): any {
+fn affine_crack_bytes_contains(list ct, list needle, number m=256) any {
    "Brute-force byte affine keys and return [a, b, plaintext_bytes] when plaintext contains needle."
    mut a = 1
    while(a < m){
@@ -124,7 +128,7 @@ fn affine_crack_bytes_contains(list: ct, list: needle, number: m=256): any {
          mut b = 0
          while(b < m){
             def pt = affine_decrypt_bytes(ct, a, b, m)
-            if(pt != nil && _affine_bytes_contains(pt, needle)){ return [a, b, pt] }
+            if(pt != nil && support.bytes_contains(pt, needle)){ return [a, b, pt] }
             b += 1
          }
       }
@@ -133,7 +137,7 @@ fn affine_crack_bytes_contains(list: ct, list: needle, number: m=256): any {
    nil
 }
 
-fn affine_crack_bytes_known_substring(list: ct, list: needle, number: m=256): any {
+fn affine_crack_bytes_known_substring(list ct, list needle, number m=256) any {
    "Recover byte-affine keys by sliding a known plaintext substring over ciphertext. Returns [a, b, offset, plaintext_bytes]."
    if(needle.len < 2 || needle.len > ct.len){ return nil }
    def x0, x1 = needle[0], needle[1]
@@ -162,24 +166,7 @@ fn affine_crack_bytes_known_substring(list: ct, list: needle, number: m=256): an
    nil
 }
 
-fn _affine_bytes_contains(list: haystack, list: needle): bool {
-   if(needle.len == 0){ return true }
-   if(needle.len > haystack.len){ return false }
-   mut i = 0
-   while(i <= haystack.len - needle.len){
-      mut ok = true
-      mut j = 0
-      while(j < needle.len){
-         if(haystack[i + j] != needle[j]){ ok = false }
-         j += 1
-      }
-      if(ok){ return true }
-      i += 1
-   }
-   false
-}
-
-fn affine_decrypt_alphabet(str: ct, number: a, number: b, str: alphabet): any {
+fn affine_decrypt_alphabet(str ct, number a, number b, str alphabet) any {
    "Decrypt an affine ciphertext over a custom alphabet string."
    crypto_require(ct != nil, "cipher.affine_decrypt_alphabet", "ct is nil")
    crypto_require_nonempty(alphabet, "cipher.affine_decrypt_alphabet", "alphabet")
@@ -189,7 +176,7 @@ fn affine_decrypt_alphabet(str: ct, number: a, number: b, str: alphabet): any {
    _affine_map_alphabet(ct, a_inv, b, alphabet, true)
 }
 
-fn affine_decrypt_block_pairs_alphabet(str: ct, number: a, number: b, str: alphabet): any {
+fn affine_decrypt_block_pairs_alphabet(str ct, number a, number b, str alphabet) any {
    "Decrypt affine ciphertext encoded over pairs of symbols from a custom alphabet.
    Each ciphertext digraph is treated as a value in base-|alphabet| and inverted mod |alphabet|^2."
    crypto_require(ct != nil, "cipher.affine_decrypt_block_pairs_alphabet", "ct is nil")
@@ -213,7 +200,7 @@ fn affine_decrypt_block_pairs_alphabet(str: ct, number: a, number: b, str: alpha
    result
 }
 
-fn affine_cbc_decrypt_alphabet(str: ct, number: a, number: b, str: iv_char, str: alphabet): any {
+fn affine_cbc_decrypt_alphabet(str ct, number a, number b, str iv_char, str alphabet) any {
    "Decrypt affine-CBC over a custom alphabet.
    The affine inverse is applied first, then the previous ciphertext symbol is removed mod alphabet size."
    crypto_require(ct != nil, "cipher.affine_cbc_decrypt_alphabet", "ct is nil")
@@ -242,12 +229,12 @@ fn affine_cbc_decrypt_alphabet(str: ct, number: a, number: b, str: iv_char, str:
    result
 }
 
-fn _affine_has_at(str: s, str: needle, int: pos): bool {
+fn _affine_has_at(str s, str needle, int pos) bool {
    if(pos < 0 || pos + needle.len > s.len){ return false }
    utf8_slice(s, pos, pos + needle.len, 1) == needle
 }
 
-fn _affine_count_sub(str: s, str: needle): int {
+fn _affine_count_sub(str s, str needle) int {
    mut hits = 0
    mut i = 0
    while(i + needle.len <= s.len){
@@ -257,7 +244,7 @@ fn _affine_count_sub(str: s, str: needle): int {
    hits
 }
 
-fn _affine_rows_match(list: xs, list: ys, number: a, number: b, number: m, int: n): bool {
+fn _affine_rows_match(list xs, list ys, number a, number b, number m, int n) bool {
    mut k = 0
    while(k < n){
       if((a * xs[k] + b) % m != ys[k]){ return false }
@@ -266,7 +253,7 @@ fn _affine_rows_match(list: xs, list: ys, number: a, number: b, number: m, int: 
    true
 }
 
-fn _affine_solve_linear_rows(list: xs, list: ys, number: m): any {
+fn _affine_solve_linear_rows(list xs, list ys, number m) any {
    def n = min(xs.len, ys.len)
    mut r = 0
    while(r < n){
@@ -285,7 +272,7 @@ fn _affine_solve_linear_rows(list: xs, list: ys, number: m): any {
    nil
 }
 
-fn affine_score_ngrams(str: s, list: ngrams): int {
+fn affine_score_ngrams(str s, list ngrams) int {
    "Score text by counting expected substrings. Longer substrings receive slightly more weight."
    crypto_require(s != nil, "cipher.affine_score_ngrams", "s is nil")
    crypto_require(ngrams != nil, "cipher.affine_score_ngrams", "ngrams is nil")
@@ -299,7 +286,29 @@ fn affine_score_ngrams(str: s, list: ngrams): int {
    score
 }
 
-fn affine_cbc_crack_alphabet(str: ct, str: alphabet, list: ngrams, int: min_score=1, int: prefix_len=180, any: stop_score=nil): any {
+fn _affine_should_stop(int score, any stop_score) bool {
+   stop_score != nil && score >= stop_score
+}
+
+fn _affine_cbc_scored_candidate(str ct, str prefix, number a, number b, str iv_char, str alphabet, list ngrams, int min_score) any {
+   def head = affine_cbc_decrypt_alphabet(prefix, a, b, iv_char, alphabet)
+   if(head == nil || affine_score_ngrams(head, ngrams) < min_score){ return nil }
+   def pt = affine_cbc_decrypt_alphabet(ct, a, b, iv_char, alphabet)
+   if(pt == nil){ return nil }
+   def score = affine_score_ngrams(pt, ngrams)
+   [a, b, iv_char, pt, score]
+}
+
+fn _affine_pair_scored_candidate(str ct, str prefix, number a, number b, str alphabet, list ngrams, int min_score) any {
+   def head = affine_decrypt_block_pairs_alphabet(prefix, a, b, alphabet)
+   if(head == nil || affine_score_ngrams(head, ngrams) < min_score){ return nil }
+   def pt = affine_decrypt_block_pairs_alphabet(ct, a, b, alphabet)
+   if(pt == nil){ return nil }
+   def score = affine_score_ngrams(pt, ngrams)
+   [a, b, pt, score]
+}
+
+fn affine_cbc_crack_alphabet(str ct, str alphabet, list ngrams, int min_score=1, int prefix_len=180, any stop_score=nil) any {
    "Brute-force affine-CBC parameters over a custom alphabet using substring scoring.
    Returns [a, b, iv_char, plaintext, score], or nil when no candidate reaches min_score."
    crypto_require_nonempty(ct, "cipher.affine_cbc_crack_alphabet", "ct")
@@ -316,14 +325,13 @@ fn affine_cbc_crack_alphabet(str: ct, str: alphabet, list: ngrams, int: min_scor
             mut iv = 0
             while(iv < m){
                def iv_char = utf8_slice(alphabet, iv, iv + 1, 1)
-               def head = affine_cbc_decrypt_alphabet(prefix, a, b, iv_char, alphabet)
-               if(head != nil && affine_score_ngrams(head, ngrams) >= min_score){
-                  def pt = affine_cbc_decrypt_alphabet(ct, a, b, iv_char, alphabet)
-                  def score = affine_score_ngrams(pt, ngrams)
+               def cand = _affine_cbc_scored_candidate(ct, prefix, a, b, iv_char, alphabet, ngrams, min_score)
+               if(cand != nil){
+                  def score = cand.get(4)
                   if(score > best_score){
                      best_score = score
-                     best = [a, b, iv_char, pt, score]
-                     if(stop_score != nil && score >= stop_score){ return best }
+                     best = cand
+                     if(_affine_should_stop(score, stop_score)){ return best }
                   }
                }
                iv += 1
@@ -336,7 +344,7 @@ fn affine_cbc_crack_alphabet(str: ct, str: alphabet, list: ngrams, int: min_scor
    best
 }
 
-fn affine_crack_block_pairs_alphabet(str: ct, str: alphabet, list: ngrams, int: min_score=1, int: prefix_len=160, any: stop_score=nil): any {
+fn affine_crack_block_pairs_alphabet(str ct, str alphabet, list ngrams, int min_score=1, int prefix_len=160, any stop_score=nil) any {
    "Brute-force affine parameters for pair/block alphabet encoding.
    Returns [a, b, plaintext, score], or nil when no candidate reaches min_score."
    crypto_require_nonempty(ct, "cipher.affine_crack_block_pairs_alphabet", "ct")
@@ -351,16 +359,13 @@ fn affine_crack_block_pairs_alphabet(str: ct, str: alphabet, list: ngrams, int: 
       if(gcd(a, mod) == 1){
          mut b = 0
          while(b < mod){
-            def head = affine_decrypt_block_pairs_alphabet(prefix, a, b, alphabet)
-            if(head != nil && affine_score_ngrams(head, ngrams) >= min_score){
-               def pt = affine_decrypt_block_pairs_alphabet(ct, a, b, alphabet)
-               if(pt != nil){
-                  def score = affine_score_ngrams(pt, ngrams)
-                  if(score > best_score){
-                     best_score = score
-                     best = [a, b, pt, score]
-                     if(stop_score != nil && score >= stop_score){ return best }
-                  }
+            def cand = _affine_pair_scored_candidate(ct, prefix, a, b, alphabet, ngrams, min_score)
+            if(cand != nil){
+               def score = cand.get(3)
+               if(score > best_score){
+                  best_score = score
+                  best = cand
+                  if(_affine_should_stop(score, stop_score)){ return best }
                }
             }
             b += 1
@@ -371,7 +376,7 @@ fn affine_crack_block_pairs_alphabet(str: ct, str: alphabet, list: ngrams, int: 
    best
 }
 
-fn _affine_cbc_prefix_rows(str: ct, str: pt_prefix, str: alphabet, int: iv, int: n, int: m): any {
+fn _affine_cbc_prefix_rows(str ct, str pt_prefix, str alphabet, int iv, int n, int m) any {
    mut xs, ys = [], []
    mut prev = iv
    mut i = 0
@@ -386,7 +391,7 @@ fn _affine_cbc_prefix_rows(str: ct, str: pt_prefix, str: alphabet, int: iv, int:
    [xs, ys]
 }
 
-fn affine_cbc_crack_known_prefix_alphabet(str: ct, str: pt_prefix, str: alphabet): any {
+fn affine_cbc_crack_known_prefix_alphabet(str ct, str pt_prefix, str alphabet) any {
    "Recover affine-CBC parameters from a known plaintext prefix.
    Returns [a, b, iv_char, plaintext], or nil when the prefix is inconsistent."
    crypto_require_nonempty(ct, "cipher.affine_cbc_crack_known_prefix_alphabet", "ct")
@@ -410,7 +415,7 @@ fn affine_cbc_crack_known_prefix_alphabet(str: ct, str: pt_prefix, str: alphabet
    nil
 }
 
-fn affine_crack_block_pairs_known_prefix_alphabet(str: ct, str: pt_prefix, str: alphabet): any {
+fn affine_crack_block_pairs_known_prefix_alphabet(str ct, str pt_prefix, str alphabet) any {
    "Recover affine pair/block parameters from a known plaintext prefix.
    Returns [a, b, plaintext], or nil when the prefix is inconsistent."
    crypto_require_nonempty(ct, "cipher.affine_crack_block_pairs_known_prefix_alphabet", "ct")
@@ -437,7 +442,7 @@ fn affine_crack_block_pairs_known_prefix_alphabet(str: ct, str: pt_prefix, str: 
    nil
 }
 
-fn affine_crack_known_pt_alphabet(str: ct, str: pt, str: alphabet): any {
+fn affine_crack_known_pt_alphabet(str ct, str pt, str alphabet) any {
    "Recover affine keys [a,b] for a custom alphabet from a known plaintext prefix/pair."
    crypto_require_nonempty(ct, "cipher.affine_crack_known_pt_alphabet", "ct")
    crypto_require_nonempty(pt, "cipher.affine_crack_known_pt_alphabet", "pt")
@@ -466,7 +471,7 @@ fn affine_crack_known_pt_alphabet(str: ct, str: pt, str: alphabet): any {
    nil
 }
 
-fn affine_crack_known_pt(str: ct, str: pt, number: m=26): any {
+fn affine_crack_known_pt(str ct, str pt, number m=26) any {
    "Recover the Affine cipher keys(a, b) from a known plaintext-ciphertext pair.
    ct: ciphertext string(must be at least 2 characters)
    pt: corresponding plaintext string(must be at least 2 characters)

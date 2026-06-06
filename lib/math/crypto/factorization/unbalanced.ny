@@ -1,14 +1,18 @@
-;; Keywords: factorization unbalanced
+;; Keywords: factorization unbalanced math crypto number-theory
 ;; Integer-factorization routines for factorization of unbalanced semiprimes.
 ;; Unbalanced: one prime is much smaller than the other.
 ;; Trial division and Fermat methods are effective here.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.unbalanced(unbalanced_factor, unbalanced_factor_fermat, factor_unbalanced, factor_unbalanced_wheels, detect_unbalanced, estimate_small_factor_bits, factor_three_unbalanced)
+use std.core
 use std.math.nt
 
-fn unbalanced_factor(any: n): any {
+fn unbalanced_factor(any n) any {
    "Factor n = p * q where p and q are significantly different in size.
    First tries trial division up to n^(1/4), then falls back to Fermat.
    Returns [p, q] with p <= q, or nil."
@@ -42,7 +46,7 @@ fn unbalanced_factor(any: n): any {
    fermat
 }
 
-fn unbalanced_factor_fermat(any: n): any {
+fn unbalanced_factor_fermat(any n) any {
    "Factor n using Fermat method, effective when one factor
    is much smaller(a will be close to sqrt(n)).
    Returns [p, q] or nil."
@@ -65,7 +69,7 @@ fn unbalanced_factor_fermat(any: n): any {
    nil
 }
 
-fn factor_unbalanced(any: n, any: small_bound): any {
+fn factor_unbalanced(any n, any small_bound) any {
    "Factor n assuming the smaller prime p < small_bound.
    Uses trial division up to small_bound.
    Returns [p, q] with p <= q, or nil if no small factor found."
@@ -96,7 +100,7 @@ fn factor_unbalanced(any: n, any: small_bound): any {
    nil
 }
 
-fn factor_unbalanced_wheels(any: n, any: small_bound): any {
+fn factor_unbalanced_wheels(any n, any small_bound) any {
    "Optimized trial division using wheel factorization.
    Skips multiples of 2, 3, 5 for faster small-factor search.
    Returns [p, q] or nil."
@@ -135,7 +139,7 @@ fn factor_unbalanced_wheels(any: n, any: small_bound): any {
    nil
 }
 
-fn detect_unbalanced(any: n): bool {
+fn detect_unbalanced(any n) bool {
    "Detect if n has an unbalanced factorization.
    Returns true if the smallest factor is much smaller than sqrt(n).
    Uses a threshold of sqrt(n)/100."
@@ -146,7 +150,7 @@ fn detect_unbalanced(any: n): bool {
    result != nil
 }
 
-fn estimate_small_factor_bits(any: n): int {
+fn estimate_small_factor_bits(any n) int {
    "Estimate the bit length of the smaller factor.
    Returns approximate bit count of the smaller prime,
    or -1 if n appears balanced."
@@ -173,7 +177,7 @@ fn estimate_small_factor_bits(any: n): int {
    -1
 }
 
-fn factor_three_unbalanced(any: n, any: bound1, any: bound2): any {
+fn factor_three_unbalanced(any n, any bound1, any bound2) any {
    "Factor n = p * q * r where p < q < r and p < bound1, q < bound2.
    Finds the smallest factor first, then factors the quotient.
    Returns [p, q, r] or nil."
@@ -185,4 +189,13 @@ fn factor_three_unbalanced(any: n, any: bound1, any: bound2): any {
    if(q_result == nil){ return nil }
    mut q, r = q_result.get(0), q_result.get(1)
    [p, q, r]
+}
+
+#main {
+   def p, q = 17, 999983
+   def n = p * q
+   assert(unbalanced_factor(n) == [p, q] && factor_unbalanced(n, 100) == [p, q] && factor_unbalanced_wheels(n, 100) == [p, q], "unbalanced semiprime")
+   assert(detect_unbalanced(n) && !detect_unbalanced(997 * 1009) && estimate_small_factor_bits(n) > 0, "unbalanced detection")
+   assert(factor_three_unbalanced(3 * 5 * 997, 10, 20) == [3, 5, 997], "three unbalanced factors")
+   print("✓ std.math.crypto.factorization.unbalanced self-test passed")
 }

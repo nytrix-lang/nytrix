@@ -1,8 +1,11 @@
-;; Keywords: lattice flatter
+;; Keywords: lattice flatter math crypto number-theory
 ;; Lattice routines for lattice reduction strategies and profile reports.
 ;; Reference:
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.flatter(lll_reduce, lll_reduce_delta, gram_schmidt_rows, shortest_vector, babai_cvp, vec_dot, vec_norm_sq, vec_clone, vec_scale_add, vec_sub_scaled, vec_scale, profile_default_alpha, profile_alpha_from_delta, profile_alpha_from_rhf, profile_rhf_from_alpha, profile_shape_report, profile_goal_report, profile_goal_check, profile_compression_plan_report, triangular_size_reduce, triangular_size_reduce_report, blocked_triangular_size_reduce, blocked_triangular_size_reduce_report, triangular_bounded_lll_prepass_report, triangular_tail_normal_form, triangular_tail_normal_form_report, qary_relation_prepass, qary_relation_prepass_report, lower_triangular_qary_relation_prepass, lower_triangular_qary_relation_prepass_report, short_row_prepass, short_row_prepass_report, banded_triplet_prepass, banded_triplet_prepass_report, relative_size_reduce, relative_size_reduce_report, lagrange_pair_reduce, lagrange_pair_reduce_report, lattice_matmul, lattice_matmul_report, lattice_matmul_blocked, lattice_matmul_blocked_report, lattice_matmul_threaded, lattice_matmul_threaded_report, lattice_triangular_matmul, lattice_triangular_matmul_report, lattice_matmul_strassen, lattice_matmul_strassen_report, schoenhage_reduce, schoenhage_reduce_report, recursive_strategy_plan_report, recursive_reduce, recursive_reduce_report, sublattice_reduce, sublattice_reduce_report, qr_factor, qr_factor_report, qr_reorthogonalized_factor, qr_reorthogonalized_factor_report, householder_qr_factor, householder_qr_factor_report, blocked_qr_factor, blocked_qr_factor_report, tall_skinny_qr_factor, tall_skinny_qr_factor_report, fused_qr_size_reduce, fused_qr_size_reduce_report, refined_fused_qr_size_reduce, refined_fused_qr_size_reduce_report, iterated_fused_qr_size_reduce, iterated_fused_qr_size_reduce_report, lattice_quad_double_gram_report, lattice_dpe_gram_report, lattice_numeric_backend_report, lattice_high_precision_fixture_report, precision_matrix_kernel_report, hlll_reduce, hlll_reduce_report, flatter_reduce, flatter_reduce_report)
 use std.math.matrix as matrix
 use std.math.big
@@ -13,31 +16,31 @@ use std.math.crypto.lattice.lll as lll_backend
 use std.os.clock (ticks)
 use std.os.parallel as ospar
 
-fn profile_default_alpha(): f64 {
+fn profile_default_alpha() f64 {
    "Return the default profile alpha used by flatter-style reduction heuristics."
    0.06250805094100162
 }
 
-fn _flatter_bkz_best_slope(): f64 { 0.031281 }
+fn _flatter_bkz_best_slope() f64 { 0.031281 }
 
-fn profile_alpha_from_rhf(any: rhf): f64 {
+fn profile_alpha_from_rhf(any rhf) f64 {
    "Convert a root-Hermite-factor target to a profile alpha parameter."
    2.0 * _flatter_log2_abs(rhf)
 }
 
-fn profile_rhf_from_alpha(any: alpha): f64 {
+fn profile_rhf_from_alpha(any alpha) f64 {
    "Convert a profile alpha parameter to the analogous root-Hermite factor."
    pow(2.0, float(alpha) / 2.0)
 }
 
-fn profile_alpha_from_delta(any: delta): f64 {
+fn profile_alpha_from_delta(any delta) f64 {
    "Convert an LLL-style delta target to an approximate alpha parameter."
    def d = float(delta)
    def r = 0.255 / d
    r * r
 }
 
-fn _flatter_log2_float_approx(f64: x): f64 {
+fn _flatter_log2_float_approx(f64 x) f64 {
    mut v = x
    if(v <= 0.0){ return 0.0 }
    mut e = 0.0
@@ -46,7 +49,7 @@ fn _flatter_log2_float_approx(f64: x): f64 {
    e + (v - 1.0) * 1.4426950408889634
 }
 
-fn _flatter_log2_abs(any: x): f64 {
+fn _flatter_log2_abs(any x) f64 {
    if(is_float(x)){
       def xf = float(x)
       return _flatter_log2_float_approx(xf < 0.0 ? 0.0 - xf : xf)
@@ -65,7 +68,7 @@ fn _flatter_log2_abs(any: x): f64 {
    _flatter_log2_float_approx(lead) + float(s.len - take) * 3.321928094887362
 }
 
-fn _flatter_z_to_float(any: x): f64 {
+fn _flatter_z_to_float(any x) f64 {
    def z = Z(x)
    if(z == Z(0)){ return 0.0 }
    def neg = z < Z(0)
@@ -83,7 +86,7 @@ fn _flatter_z_to_float(any: x): f64 {
    neg ? 0.0 - out : out
 }
 
-fn _flatter_profile_logs(list: profile): list {
+fn _flatter_profile_logs(list profile) list {
    mut out = []
    mut i = 0
    while(i < profile.len){
@@ -93,7 +96,7 @@ fn _flatter_profile_logs(list: profile): list {
    out
 }
 
-fn _flatter_profile_norm_logs(list: profile): list {
+fn _flatter_profile_norm_logs(list profile) list {
    mut out = []
    mut i = 0
    while(i < profile.len){
@@ -103,7 +106,7 @@ fn _flatter_profile_norm_logs(list: profile): list {
    out
 }
 
-fn _flatter_profile_spread(list: logs): f64 {
+fn _flatter_profile_spread(list logs) f64 {
    if(logs.len == 0){ return 0.0 }
    mut lo = float(logs.get(0))
    mut hi = lo
@@ -117,7 +120,7 @@ fn _flatter_profile_spread(list: logs): f64 {
    hi - lo
 }
 
-fn _flatter_profile_drop(list: logs): f64 {
+fn _flatter_profile_drop(list logs) f64 {
    if(logs.len <= 1){ return 0.0 }
    mut max_left = []
    mut min_right = []
@@ -148,7 +151,7 @@ fn _flatter_profile_drop(list: logs): f64 {
    spread
 }
 
-fn _flatter_profile_slice(list: logs, int: start, int: stop): list {
+fn _flatter_profile_slice(list logs, int start, int stop) list {
    mut out = []
    mut i = max(0, start)
    def end = min(logs.len, stop)
@@ -159,7 +162,7 @@ fn _flatter_profile_slice(list: logs, int: start, int: stop): list {
    out
 }
 
-fn _flatter_profile_mean(list: logs, int: start, int: stop): f64 {
+fn _flatter_profile_mean(list logs, int start, int stop) f64 {
    def end = min(logs.len, stop)
    if(start >= end){ return 0.0 }
    mut sum = 0.0
@@ -171,23 +174,23 @@ fn _flatter_profile_mean(list: logs, int: start, int: stop): f64 {
    sum / float(end - max(0, start))
 }
 
-fn _flatter_goal_s_guess(int: n): f64 {
+fn _flatter_goal_s_guess(int n) f64 {
    if(n <= 1){ return 0.0 }
    def lgn = _flatter_log2_abs(n)
    3.0 * (1.0 + pow(3.0, lgn + 1.0) - pow(2.0, lgn + 2.0)) / 2.0
 }
 
-fn _flatter_goal_bound(int: n, f64: quality, f64: best_slope): f64 {
+fn _flatter_goal_bound(int n, f64 quality, f64 best_slope) f64 {
    if(n <= 1){ return 0.0 }
    best_slope * float(n) + quality * _flatter_goal_s_guess(n)
 }
 
-fn _flatter_shape_from_any(any: basis_or_shape): dict {
+fn _flatter_shape_from_any(any basis_or_shape) dict {
    if(is_dict(basis_or_shape) && is_list(basis_or_shape.get("profile_norm_log2", nil))){ return basis_or_shape }
    profile_shape_report(basis_or_shape)
 }
 
-fn profile_goal_report(any: basis_or_shape, str: target="slope", any: value=nil, bool: proved=false): dict {
+fn profile_goal_report(any basis_or_shape, str target="slope", any value=nil, bool proved=false) dict {
    "Check a flatter-style profile reduction goal against a basis or profile_shape_report.
    The report mirrors flatter's drop/slope/RHF stopping rule while keeping the
    numbers auditable for Ny-only reducers."
@@ -279,19 +282,19 @@ fn profile_goal_report(any: basis_or_shape, str: target="slope", any: value=nil,
    }
 }
 
-fn profile_goal_check(any: basis_or_shape, str: target="slope", any: value=nil, bool: proved=false): bool {
+fn profile_goal_check(any basis_or_shape, str target="slope", any value=nil, bool proved=false) bool {
    "Return true when profile_goal_report says the basis satisfies the target."
    profile_goal_report(basis_or_shape, target, value, proved).get("satisfied", false)
 }
 
-fn _flatter_profile_compression_precision(f64: spread, int: n, str: mode, bool: aggressive): int {
+fn _flatter_profile_compression_precision(f64 spread, int n, str mode, bool aggressive) int {
    if(mode == "heuristic3"){
       return int(ceil(aggressive ? spread + 30.0 : 2.0 * spread + 30.0 + 2.0 * float(n)))
    }
    int(ceil(2.0 * spread + 40.0))
 }
 
-fn _flatter_profile_compression_plan_from_logs(list: logs, str: mode="recursive-generic", bool: aggressive_precision=false): dict {
+fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-generic", bool aggressive_precision=false) dict {
    def n = logs.len
    if(n == 0){
       return {
@@ -378,13 +381,13 @@ fn _flatter_profile_compression_plan_from_logs(list: logs, str: mode="recursive-
    }
 }
 
-fn profile_compression_plan_report(any: basis_or_shape, str: mode="recursive-generic", bool: aggressive_precision=false): dict {
+fn profile_compression_plan_report(any basis_or_shape, str mode="recursive-generic", bool aggressive_precision=false) dict {
    "Report flatter-style profile compression column shifts and precision budget."
    def shape = _flatter_shape_from_any(basis_or_shape)
    _flatter_profile_compression_plan_from_logs(shape.get("profile_norm_log2", []), mode, aggressive_precision).set("shape_rows", shape.get("rows", 0))
 }
 
-fn profile_shape_report(any: basis): dict {
+fn profile_shape_report(any basis) dict {
    "Report log-GSO profile spread/drop metrics used by flatter-style reducers."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -414,7 +417,7 @@ fn profile_shape_report(any: basis): dict {
    }
 }
 
-fn _flatter_row_norm_shape_report(any: basis): dict {
+fn _flatter_row_norm_shape_report(any basis) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -446,18 +449,18 @@ fn _flatter_row_norm_shape_report(any: basis): dict {
    }
 }
 
-fn _flatter_reduce_matrix(any: basis): any {
+fn _flatter_reduce_matrix(any basis) any {
    if(is_list(basis) && basis.len >= 3 && is_int(basis.get(0, nil)) && is_int(basis.get(1, nil)) && is_list(basis.get(2, nil))){ return basis }
    matrix.Matrix(basis)
 }
 
-fn _flatter_matrix_rows(any: m): int { int(m.get(0)) }
+fn _flatter_matrix_rows(any m) int { int(m.get(0)) }
 
-fn _flatter_matrix_cols(any: m): int { int(m.get(1)) }
+fn _flatter_matrix_cols(any m) int { int(m.get(1)) }
 
-fn _flatter_matrix_data(any: m): list { m.get(2) }
+fn _flatter_matrix_data(any m) list { m.get(2) }
 
-fn _flatter_clone_rows(any: m): list {
+fn _flatter_clone_rows(any m) list {
    def rows = _flatter_matrix_rows(m)
    def data = _flatter_matrix_data(m)
    mut out = list(rows)
@@ -470,7 +473,7 @@ fn _flatter_clone_rows(any: m): list {
    out
 }
 
-fn _flatter_clone_rows_small(any: m): list {
+fn _flatter_clone_rows_small(any m) list {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -493,7 +496,7 @@ fn _flatter_clone_rows_small(any: m): list {
    out
 }
 
-fn _flatter_clone_rows_lower_report(any: m): dict {
+fn _flatter_clone_rows_lower_report(any m) dict {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -530,9 +533,9 @@ fn _flatter_clone_rows_lower_report(any: m): dict {
    {"rows": out, "lower": lower}
 }
 
-fn _flatter_public_basis(any: basis): list { _flatter_clone_rows(_flatter_reduce_matrix(basis)) }
+fn _flatter_public_basis(any basis) list { _flatter_clone_rows(_flatter_reduce_matrix(basis)) }
 
-fn _flatter_small_i64(any: x): int {
+fn _flatter_small_i64(any x) int {
    if(is_int(x)){
       def v = int(x)
       if(v >= -1000000000 && v <= 1000000000){ return v }
@@ -546,7 +549,7 @@ fn _flatter_small_i64(any: x): int {
    2147483647
 }
 
-fn _flatter_dot_z(list: a, list: b): any {
+fn _flatter_dot_z(list a, list b) any {
    mut int: direct_sum = 0
    mut bool: direct_ok = true
    mut int: dk = 0
@@ -609,7 +612,7 @@ fn _flatter_dot_z(list: a, list: b): any {
    s
 }
 
-fn _flatter_norm_z(list: a): any {
+fn _flatter_norm_z(list a) any {
    mut int: direct_sum = 0
    mut bool: direct_ok = true
    mut int: dk = 0
@@ -668,7 +671,7 @@ fn _flatter_norm_z(list: a): any {
    s
 }
 
-fn _flatter_round_div(any: num, any: den): any {
+fn _flatter_round_div(any num, any den) any {
    if(is_int(num) && is_int(den)){
       def ni = int(num)
       def di = int(den)
@@ -684,7 +687,7 @@ fn _flatter_round_div(any: num, any: den): any {
    -((Z(2) * (-n) + d) / (Z(2) * d))
 }
 
-fn _flatter_round_div_signed(any: num, any: den): any {
+fn _flatter_round_div_signed(any num, any den) any {
    if(is_int(num) && is_int(den)){
       def ni = int(num)
       def di = int(den)
@@ -700,7 +703,7 @@ fn _flatter_round_div_signed(any: num, any: den): any {
    _flatter_round_div(num, d)
 }
 
-fn _flatter_round_div_signed_int(int: num, int: den): int {
+fn _flatter_round_div_signed_int(int num, int den) int {
    if(den == 0){ return 2147483647 }
    mut n = num
    mut d = den
@@ -713,7 +716,7 @@ fn _flatter_round_div_signed_int(int: num, int: den): int {
    -((2 * (-n) + d) / (2 * d))
 }
 
-fn _flatter_row_submul(list: a, list: b, any: coeff): list {
+fn _flatter_row_submul(list a, list b, any coeff) list {
    def len = a.len
    mut out = list(len)
    __list_set_len(out, len)
@@ -741,7 +744,7 @@ fn _flatter_row_submul(list: a, list: b, any: coeff): list {
    out
 }
 
-fn _flatter_row_submul_prefix(list: a, list: b, any: coeff, int: upto): list {
+fn _flatter_row_submul_prefix(list a, list b, any coeff, int upto) list {
    def len = a.len
    mut out = list(len)
    __list_set_len(out, len)
@@ -774,82 +777,7 @@ fn _flatter_row_submul_prefix(list: a, list: b, any: coeff, int: upto): list {
    out
 }
 
-fn _flatter_row_submul_prefix_inplace(list: a, list: b, any: coeff, int: upto): list {
-   mut i = 0
-   def end = min(min(a.len, b.len), upto + 1)
-   if(is_int(coeff)){
-      def ci0 = int(coeff)
-      mut direct_ok = ci0 >= -3000000 && ci0 <= 3000000
-      while(i < end && direct_ok){
-         def av = a[i]
-         def bv = b[i]
-         if(is_int(av) && is_int(bv)){
-            def ai = int(av)
-            def bi = int(bv)
-            direct_ok = ai >= -3000000 && ai <= 3000000 && bi >= -3000000 && bi <= 3000000
-         } else {
-            direct_ok = false
-         }
-         i += 1
-      }
-      if(direct_ok){
-         i = 0
-         while(i < end){
-            def v = int(a[i]) - ci0 * int(b[i])
-            a[i] = v >= -100000000 && v <= 100000000 ? v : Z(v)
-            i += 1
-         }
-         return a
-      }
-      i = 0
-   }
-   def ci = _flatter_small_i64(coeff)
-   if(ci != 2147483647){
-      mut direct_ok = ci >= -3000000 && ci <= 3000000
-      while(i < end && direct_ok){
-         def av = a[i]
-         def bv = b[i]
-         if(is_int(av) && is_int(bv)){
-            def ai = int(av)
-            def bi = int(bv)
-            direct_ok = ai >= -3000000 && ai <= 3000000 && bi >= -3000000 && bi <= 3000000
-         } else {
-            direct_ok = false
-         }
-         i += 1
-      }
-      if(direct_ok){
-         i = 0
-         while(i < end){
-            def v = int(a[i]) - ci * int(b[i])
-            a[i] = v >= -100000000 && v <= 100000000 ? v : Z(v)
-            i += 1
-         }
-         return a
-      }
-      i = 0
-      while(i < end){
-         def ai = _flatter_small_i64(a.get(i))
-         def bi = _flatter_small_i64(b.get(i))
-         if(ai != 2147483647 && bi != 2147483647){
-            def v = ai - ci * bi
-            a[i] = v >= -100000000 && v <= 100000000 ? v : Z(v)
-         } else {
-            a[i] = Z(a.get(i)) - Z(ci) * Z(b.get(i))
-         }
-         i += 1
-      }
-   } else {
-      def c = Z(coeff)
-      while(i < end){
-         a[i] = Z(a.get(i)) - c * Z(b.get(i))
-         i += 1
-      }
-   }
-   a
-}
-
-fn _flatter_row_submul_prefix_bigint_inplace(list: a, list: b, any: coeff, int: upto): list {
+fn _flatter_row_submul_prefix_bigint_inplace(list a, list b, any coeff, int upto) list {
    def end = min(min(a.len, b.len), upto + 1)
    mut i = 0
    if(is_int(coeff)){
@@ -885,51 +813,7 @@ fn _flatter_row_submul_prefix_bigint_inplace(list: a, list: b, any: coeff, int: 
    a
 }
 
-fn _flatter_row_is_small_int(list: row): bool {
-   mut i = 0
-   while(i < row.len){
-      def v = row.get(i)
-      if(!is_int(v)){ return false }
-      def vi = int(v)
-      if(vi < -100000000 || vi > 100000000){ return false }
-      i += 1
-   }
-   true
-}
-
-fn _flatter_row_is_i64_bounded(list: row, int: bound): bool {
-   mut i = 0
-   while(i < row.len){
-      def v = row.get(i)
-      if(!is_int(v)){ return false }
-      def vi = int(v)
-      if(vi < -bound || vi > bound){ return false }
-      i += 1
-   }
-   true
-}
-
-fn _flatter_row_small_flags(list: rows): list {
-   mut out = []
-   mut i = 0
-   while(i < rows.len){
-      out = out.append(_flatter_row_is_small_int(rows.get(i)))
-      i += 1
-   }
-   out
-}
-
-fn _flatter_row_i64_flags(list: rows, int: bound): list {
-   mut out = []
-   mut i = 0
-   while(i < rows.len){
-      out = out.append(_flatter_row_is_i64_bounded(rows.get(i), bound))
-      i += 1
-   }
-   out
-}
-
-fn _flatter_row_i64_abs_bound(list: row, int: cap): int {
+fn _flatter_row_i64_abs_bound(list row, int cap) int {
    mut out = 0
    mut i = 0
    while(i < row.len){
@@ -944,7 +828,7 @@ fn _flatter_row_i64_abs_bound(list: row, int: cap): int {
    out
 }
 
-fn _flatter_row_i64_abs_bounds(list: rows, int: cap): list {
+fn _flatter_row_i64_abs_bounds(list rows, int cap) list {
    mut out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -955,7 +839,7 @@ fn _flatter_row_i64_abs_bounds(list: rows, int: cap): list {
    out
 }
 
-fn _flatter_compress_row_i64_bound(list: row, int: cap): list {
+fn _flatter_compress_row_i64_bound(list row, int cap) list {
    mut max_abs = 0
    mut i = 0
    while(i < row.len){
@@ -979,24 +863,7 @@ fn _flatter_compress_row_i64_bound(list: row, int: cap): list {
    [row, max_abs]
 }
 
-fn _flatter_row_submul_prefix_small_cached(list: a, list: b, int: coeff, int: upto): list {
-   mut small = true
-   def end = min(min(a.len, b.len), upto + 1)
-   mut i = 0
-   while(i < end){
-      def v = int(a.get(i)) - coeff * int(b.get(i))
-      if(v >= -100000000 && v <= 100000000){
-         a[i] = v
-      } else {
-         a[i] = Z(v)
-         small = false
-      }
-      i += 1
-   }
-   [a, small]
-}
-
-fn _flatter_row_submul_prefix_i64_bound_cached(list: a, list: b, int: coeff, int: upto, int: old_bound): list {
+fn _flatter_row_submul_prefix_i64_bound_cached(list a, list b, int coeff, int upto, int old_bound) list {
    mut max_abs = old_bound
    def end = min(min(a.len, b.len), upto + 1)
    mut i = 0
@@ -1010,7 +877,7 @@ fn _flatter_row_submul_prefix_i64_bound_cached(list: a, list: b, int: coeff, int
    [a, max_abs]
 }
 
-fn _flatter_row_submul_prefix_i64_checked_cached(list: a, list: b, int: coeff, int: upto, int: cap, int: old_bound=0): list {
+fn _flatter_row_submul_prefix_i64_checked_cached(list a, list b, int coeff, int upto, int cap, int old_bound=0) list {
    def end = min(min(a.len, b.len), upto + 1)
    def cabs = coeff < 0 ? -coeff : coeff
    mut max_abs = old_bound
@@ -1037,29 +904,12 @@ fn _flatter_row_submul_prefix_i64_checked_cached(list: a, list: b, int: coeff, i
    [a, max_abs]
 }
 
-fn _flatter_row_submul_prefix_i64_cached(list: a, list: b, int: coeff, int: upto, int: bound): list {
-   mut small = true
-   def end = min(min(a.len, b.len), upto + 1)
-   mut i = 0
-   while(i < end){
-      def v = int(a.get(i)) - coeff * int(b.get(i))
-      if(v >= -bound && v <= bound){
-         a[i] = v
-      } else {
-         a[i] = Z(v)
-         small = false
-      }
-      i += 1
-   }
-   [a, small]
-}
-
-fn _flatter_row_addmul(list: a, list: b, any: coeff): list {
+fn _flatter_row_addmul(list a, list b, any coeff) list {
    def ci = _flatter_small_i64(coeff)
    ci != 2147483647 ? _flatter_row_submul(a, b, -ci) : _flatter_row_submul(a, b, -Z(coeff))
 }
 
-fn _flatter_zero_row(int: n): list {
+fn _flatter_zero_row(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1069,7 +919,7 @@ fn _flatter_zero_row(int: n): list {
    out
 }
 
-fn _flatter_mod_pos(any: x, any: q): bigint {
+fn _flatter_mod_pos(any x, any q) bigint {
    def qq = Z(q)
    if(qq == Z(0)){ return Z(0) }
    mut r = Z(x) % qq
@@ -1078,12 +928,12 @@ fn _flatter_mod_pos(any: x, any: q): bigint {
 }
 
 @inline
-fn _flatter_is_zero_scalar(any: x): bool {
+fn _flatter_is_zero_scalar(any x) bool {
    if(is_int(x)){ return int(x) == 0 }
    Z(x) == Z(0)
 }
 
-fn _flatter_all_zero(any: m): bool {
+fn _flatter_all_zero(any m) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -1100,7 +950,7 @@ fn _flatter_all_zero(any: m): bool {
    true
 }
 
-fn _flatter_is_lower_triangular(any: m): bool {
+fn _flatter_is_lower_triangular(any m) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -1117,7 +967,7 @@ fn _flatter_is_lower_triangular(any: m): bool {
    true
 }
 
-fn _flatter_is_local_banded(any: m, int: window): bool {
+fn _flatter_is_local_banded(any m, int window) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -1135,7 +985,7 @@ fn _flatter_is_local_banded(any: m, int: window): bool {
    true
 }
 
-fn _flatter_lower_triangular_profile_spread(any: m): f64 {
+fn _flatter_lower_triangular_profile_spread(any m) f64 {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows == 0 || cols == 0){ return 0.0 }
@@ -1159,7 +1009,7 @@ fn _flatter_lower_triangular_profile_spread(any: m): f64 {
    hi - lo
 }
 
-fn _flatter_is_upper_triangular(any: m): bool {
+fn _flatter_is_upper_triangular(any m) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    mut i = 0
@@ -1174,7 +1024,7 @@ fn _flatter_is_upper_triangular(any: m): bool {
    true
 }
 
-fn _flatter_qary_split(any: m): int {
+fn _flatter_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows != cols || rows < 4){ return -1 }
@@ -1204,7 +1054,7 @@ fn _flatter_qary_split(any: m): int {
    k
 }
 
-fn _flatter_lower_triangular_qary_split(any: m): int {
+fn _flatter_lower_triangular_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows != cols || rows < 4 || !_flatter_is_lower_triangular(m)){ return -1 }
@@ -1229,7 +1079,7 @@ fn _flatter_lower_triangular_qary_split(any: m): int {
    k
 }
 
-fn _flatter_lower_qary_uniform_modulus(any: m, int: k): bool {
+fn _flatter_lower_qary_uniform_modulus(any m, int k) bool {
    if(k <= 0){ return false }
    def q = _flatter_abs_z(matrix.mat_get(m, 0, 0))
    if(q <= Z(1)){ return false }
@@ -1241,7 +1091,7 @@ fn _flatter_lower_qary_uniform_modulus(any: m, int: k): bool {
    true
 }
 
-fn _flatter_upper_qary_split(any: m): int {
+fn _flatter_upper_qary_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows != cols || rows < 4){ return -1 }
@@ -1277,7 +1127,7 @@ fn _flatter_upper_qary_split(any: m): int {
    k
 }
 
-fn _flatter_qary_blockswap_orientation(any: m, int: k): any {
+fn _flatter_qary_blockswap_orientation(any m, int k) any {
    def mm = _flatter_reduce_matrix(m)
    def data = _flatter_matrix_data(mm)
    def rows = _flatter_matrix_rows(mm)
@@ -1318,7 +1168,7 @@ fn _flatter_qary_blockswap_orientation(any: m, int: k): any {
    matrix.Matrix(out)
 }
 
-fn _flatter_qary_unblockswap_columns(any: m, int: k): any {
+fn _flatter_qary_unblockswap_columns(any m, int k) any {
    def mm = _flatter_reduce_matrix(m)
    def data = _flatter_matrix_data(mm)
    def rows = _flatter_matrix_rows(mm)
@@ -1345,18 +1195,18 @@ fn _flatter_qary_unblockswap_columns(any: m, int: k): any {
    matrix.Matrix(out)
 }
 
-fn _flatter_pow2_z(int: bits): any {
+fn _flatter_pow2_z(int bits) any {
    bigint_pow(Z(2), Z(bits))
 }
 
-fn _flatter_shift_scale_value(any: v, int: shift): any {
+fn _flatter_shift_scale_value(any v, int shift) any {
    def z = Z(v)
    if(shift == 0){ return z }
    if(shift < 0){ return z * _flatter_pow2_z(0 - shift) }
    _flatter_round_div_signed(z, _flatter_pow2_z(shift))
 }
 
-fn _flatter_scale_columns_by_shifts(any: m, list: shifts): any {
+fn _flatter_scale_columns_by_shifts(any m, list shifts) any {
    def a = _flatter_reduce_matrix(m)
    def data = _flatter_matrix_data(a)
    mut out = []
@@ -1375,7 +1225,7 @@ fn _flatter_scale_columns_by_shifts(any: m, list: shifts): any {
    matrix.Matrix(out)
 }
 
-fn _flatter_qary_uniform_column_shifts(any: m, int: split, int: keep_bits): list {
+fn _flatter_qary_uniform_column_shifts(any m, int split, int keep_bits) list {
    def q = _flatter_abs_z(matrix.mat_get(m, 0, 0))
    mut bits = int(ceil(_flatter_log2_abs(q)))
    if(bits < 0){ bits = 0 }
@@ -1389,7 +1239,7 @@ fn _flatter_qary_uniform_column_shifts(any: m, int: split, int: keep_bits): list
    out
 }
 
-fn _flatter_qary_residue_key(list: data, int: k, list: terms): str {
+fn _flatter_qary_residue_key(list data, int k, list terms) str {
    mut key = ""
    mut col = 0
    while(col < k){
@@ -1411,7 +1261,7 @@ fn _flatter_qary_residue_key(list: data, int: k, list: terms): str {
    key
 }
 
-fn _flatter_qary_complement_key(str: key, list: moduli): str {
+fn _flatter_qary_complement_key(str key, list moduli) str {
    def parts = split(key, ",")
    mut out = ""
    mut i = 0
@@ -1426,7 +1276,7 @@ fn _flatter_qary_complement_key(str: key, list: moduli): str {
    out
 }
 
-fn _flatter_seen_key_index(list: keys, str: key): int {
+fn _flatter_seen_key_index(list keys, str key) int {
    mut i = 0
    while(i < keys.len){
       if(keys.get(i) == key){ return i }
@@ -1435,7 +1285,7 @@ fn _flatter_seen_key_index(list: keys, str: key): int {
    -1
 }
 
-fn _flatter_lower_triangular_residue_key(list: data, int: k, list: terms): str {
+fn _flatter_lower_triangular_residue_key(list data, int k, list terms) str {
    mut residue = []
    mut col = 0
    while(col < k){
@@ -1478,7 +1328,7 @@ fn _flatter_lower_triangular_residue_key(list: data, int: k, list: terms): str {
    key
 }
 
-fn _flatter_lower_triangular_qary_find_relation(any: m, int: k): list {
+fn _flatter_lower_triangular_qary_find_relation(any m, int k) list {
    def local = _flatter_lower_triangular_qary_find_local_relation(m, k)
    if(local.len > 0){ return local }
    def data = _flatter_matrix_data(m)
@@ -1525,7 +1375,7 @@ fn _flatter_lower_triangular_qary_find_relation(any: m, int: k): list {
    []
 }
 
-fn _flatter_terms_disjoint(list: a, list: b): bool {
+fn _flatter_terms_disjoint(list a, list b) bool {
    mut i = 0
    while(i < a.len){
       mut j = 0
@@ -1538,7 +1388,7 @@ fn _flatter_terms_disjoint(list: a, list: b): bool {
    true
 }
 
-fn _flatter_qary_miss_report(str: method, bool: detected, int: split, int: rows, int: cols, any: basis, any: t0, bool: track_transform=true): dict {
+fn _flatter_qary_miss_report(str method, bool detected, int split, int rows, int cols, any basis, any t0, bool track_transform=true) dict {
    mut out = {
       "method": method,
       "detected": detected,
@@ -1556,7 +1406,7 @@ fn _flatter_qary_miss_report(str: method, bool: detected, int: split, int: rows,
    out
 }
 
-fn _flatter_qary_success_report(str: method, int: split, int: rows, int: cols, list: terms, any: basis, any: data, any: work, any: transform, int: target, any: t0, bool: track_transform=true): dict {
+fn _flatter_qary_success_report(str method, int split, int rows, int cols, list terms, any basis, any data, any work, any transform, int target, any t0, bool track_transform=true) dict {
    def out_basis = matrix.Matrix(work)
    mut transform_matrix = nil
    mut transform_verified = false
@@ -1587,7 +1437,7 @@ fn _flatter_qary_success_report(str: method, int: split, int: rows, int: cols, l
    }
 }
 
-fn _flatter_qary_success_row_report(str: method, int: split, int: rows, int: cols, list: terms, any: basis, any: data, any: work, any: transform, int: target, any: t0, str: relation_kind, bool: track_transform=true): dict {
+fn _flatter_qary_success_row_report(str method, int split, int rows, int cols, list terms, any basis, any data, any work, any transform, int target, any t0, str relation_kind, bool track_transform=true) dict {
    def out_basis = matrix.Matrix(work)
    mut transform_matrix = nil
    mut transform_verified = false
@@ -1619,7 +1469,29 @@ fn _flatter_qary_success_row_report(str: method, int: split, int: rows, int: col
    }
 }
 
-fn _flatter_lower_triangular_reduce_relation(list: data, int: k, int: rows, int: cols, list: terms): dict {
+fn _flatter_qary_success_from_row_report(str method, int k, int rows, int cols, any basis, dict found, any t0, str relation_kind, bool track_transform=true) dict {
+   mut work = _flatter_clone_rows(basis)
+   mut transform = track_transform ? _flatter_identity_rows(rows) : nil
+   def target = k + int(found.get("terms").get(0).get(0))
+   work[target] = found.get("row")
+   if(track_transform){ transform[target] = found.get("transform_row") }
+   if(target != 0){
+      def tmp_row = work.get(0)
+      work[0] = work.get(target)
+      work[target] = tmp_row
+      if(track_transform){
+         def tmp_tr = transform.get(0)
+         transform[0] = transform.get(target)
+         transform[target] = tmp_tr
+      }
+   }
+   mut out = _flatter_qary_success_row_report(method, k, rows, cols, found.get("terms"), basis, _flatter_matrix_data(basis), work, transform, target, t0, relation_kind, track_transform)
+   if(found.contains("trials")){ out["search_trials"] = found.get("trials", 0) }
+   if(found.contains("max_weight")){ out["search_max_weight"] = found.get("max_weight", 0) }
+   out
+}
+
+fn _flatter_lower_triangular_reduce_relation(list data, int k, int rows, int cols, list terms) dict {
    mut rel_row = _flatter_zero_row(cols)
    mut rel_tr = _flatter_zero_row(rows)
    mut ti = 0
@@ -1646,12 +1518,12 @@ fn _flatter_lower_triangular_reduce_relation(list: data, int: k, int: rows, int:
    {"row": rel_row, "transform_row": rel_tr, "norm": _flatter_dot_z(rel_row, rel_row)}
 }
 
-fn _flatter_lower_triangular_qary_terms_short(list: data, int: k, int: rows, int: cols, list: terms): bool {
+fn _flatter_lower_triangular_qary_terms_short(list data, int k, int rows, int cols, list terms) bool {
    def rep = _flatter_lower_triangular_reduce_relation(data, k, rows, cols, terms)
    Z(rep.get("norm")) <= Z(terms.len)
 }
 
-fn _flatter_lower_triangular_qary_find_local_relation(any: m, int: k): list {
+fn _flatter_lower_triangular_qary_find_local_relation(any m, int k) list {
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
@@ -1675,7 +1547,7 @@ fn _flatter_lower_triangular_qary_find_local_relation(any: m, int: k): list {
    []
 }
 
-fn _flatter_lower_triangular_qary_find_near_relation(any: m, int: k): dict {
+fn _flatter_lower_triangular_qary_find_near_relation(any m, int k) dict {
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
@@ -1728,7 +1600,7 @@ fn _flatter_lower_triangular_qary_find_near_relation(any: m, int: k): dict {
    {"found": best_terms.len > 0, "terms": best_terms, "row": best_row, "transform_row": best_tr, "norm": best_norm}
 }
 
-fn _flatter_lower_triangular_qary_search_relation(any: m, int: k, int: trials=4096, int: max_weight=12): dict {
+fn _flatter_lower_triangular_qary_search_relation(any m, int k, int trials=4096, int max_weight=12) dict {
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
@@ -1764,7 +1636,7 @@ fn _flatter_lower_triangular_qary_search_relation(any: m, int: k, int: trials=40
    {"found": best_terms.len > 0, "terms": best_terms, "row": best_row, "transform_row": best_tr, "norm": best_norm, "trials": trials, "max_weight": max_weight}
 }
 
-fn _flatter_qary_pair_fingerprint(list: data, int: k, int: a, int: b, int: sa, int: sb): list {
+fn _flatter_qary_pair_fingerprint(list data, int k, int a, int b, int sa, int sb) list {
    def mod1 = 1000000007
    def mod2 = 1000000009
    mut h1, h2, want1, want2, col = 0, 0, 0, 0, 0
@@ -1791,7 +1663,7 @@ fn _flatter_qary_pair_fingerprint(list: data, int: k, int: a, int: b, int: sa, i
    [to_str(h1) + ":" + to_str(h2), to_str(want1) + ":" + to_str(want2)]
 }
 
-fn _flatter_qary_terms_zero_int(list: data, int: k, list: terms): bool {
+fn _flatter_qary_terms_zero_int(list data, int k, list terms) bool {
    mut col = 0
    while(col < k){
       mut q = _flatter_small_i64(data.get(col).get(col))
@@ -1815,7 +1687,7 @@ fn _flatter_qary_terms_zero_int(list: data, int: k, list: terms): bool {
    true
 }
 
-fn _flatter_qary_find_local_relation(any: m, int: k): list {
+fn _flatter_qary_find_local_relation(any m, int k) list {
    def data = _flatter_matrix_data(m)
    def rows = _flatter_matrix_rows(m)
    def tail = rows - k
@@ -1838,7 +1710,7 @@ fn _flatter_qary_find_local_relation(any: m, int: k): list {
    []
 }
 
-fn _flatter_qary_find_relation_fast(any: m, int: k): list {
+fn _flatter_qary_find_relation_fast(any m, int k) list {
    def local = _flatter_qary_find_local_relation(m, k)
    if(local.len > 0){ return local }
    def data = _flatter_matrix_data(m)
@@ -1882,7 +1754,7 @@ fn _flatter_qary_find_relation_fast(any: m, int: k): list {
    []
 }
 
-fn _flatter_qary_find_relation(any: m, int: k): list {
+fn _flatter_qary_find_relation(any m, int k) list {
    def fast = _flatter_qary_find_relation_fast(m, k)
    if(fast.len > 0){ return fast }
    def data = _flatter_matrix_data(m)
@@ -1929,7 +1801,7 @@ fn _flatter_qary_find_relation(any: m, int: k): list {
    []
 }
 
-fn _flatter_qary_relation_prepass_report(any: basis, str: method, bool: lower, bool: track_transform=true): dict {
+fn _flatter_qary_relation_prepass_report(any basis, str method, bool lower, bool track_transform=true) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -1943,45 +1815,12 @@ fn _flatter_qary_relation_prepass_report(any: basis, str: method, bool: lower, b
       if(lower){
          def near = _flatter_lower_triangular_qary_find_near_relation(a, k)
          if(near.get("found", false)){
-            mut work = _flatter_clone_rows(a)
-            mut transform = track_transform ? _flatter_identity_rows(rows) : nil
-            def target = k + int(near.get("terms").get(0).get(0))
-            work[target] = near.get("row")
-            if(track_transform){ transform[target] = near.get("transform_row") }
-            if(target != 0){
-               def tmp_row = work.get(0)
-               work[0] = work.get(target)
-               work[target] = tmp_row
-               if(track_transform){
-                  def tmp_tr = transform.get(0)
-                  transform[0] = transform.get(target)
-                  transform[target] = tmp_tr
-               }
-            }
-            return _flatter_qary_success_row_report(method, k, rows, cols, near.get("terms"), a, _flatter_matrix_data(a), work, transform, target, t0, "near", track_transform)
+            return _flatter_qary_success_from_row_report(method, k, rows, cols, a, near, t0, "near", track_transform)
          }
          if(rows >= 96){
             def searched = _flatter_lower_triangular_qary_search_relation(a, k, 4096, 14)
             if(searched.get("found", false)){
-               mut work_s = _flatter_clone_rows(a)
-               mut transform_s = track_transform ? _flatter_identity_rows(rows) : nil
-               def target_s = k + int(searched.get("terms").get(0).get(0))
-               work_s[target_s] = searched.get("row")
-               if(track_transform){ transform_s[target_s] = searched.get("transform_row") }
-               if(target_s != 0){
-                  def tmp_row_s = work_s.get(0)
-                  work_s[0] = work_s.get(target_s)
-                  work_s[target_s] = tmp_row_s
-                  if(track_transform){
-                     def tmp_tr_s = transform_s.get(0)
-                     transform_s[0] = transform_s.get(target_s)
-                     transform_s[target_s] = tmp_tr_s
-                  }
-               }
-               mut out_s = _flatter_qary_success_row_report(method, k, rows, cols, searched.get("terms"), a, _flatter_matrix_data(a), work_s, transform_s, target_s, t0, "deterministic-search", track_transform)
-               out_s["search_trials"] = searched.get("trials", 0)
-               out_s["search_max_weight"] = searched.get("max_weight", 0)
-               return out_s
+               return _flatter_qary_success_from_row_report(method, k, rows, cols, a, searched, t0, "deterministic-search", track_transform)
             }
          }
       }
@@ -2036,7 +1875,7 @@ fn _flatter_qary_relation_prepass_report(any: basis, str: method, bool: lower, b
    _flatter_qary_success_report(method, k, rows, cols, terms, a, data, work, transform, target, t0, track_transform)
 }
 
-fn _flatter_ntru2_split(any: m): int {
+fn _flatter_ntru2_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows != cols || rows < 4 || rows % 2 != 0){ return -1 }
@@ -2065,7 +1904,7 @@ fn _flatter_ntru2_split(any: m): int {
    k
 }
 
-fn _flatter_ntru2_sum_relation_prepass_report(any: basis, bool: track_transform=true): dict {
+fn _flatter_ntru2_sum_relation_prepass_report(any basis, bool track_transform=true) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -2121,7 +1960,7 @@ fn _flatter_ntru2_sum_relation_prepass_report(any: basis, bool: track_transform=
    _flatter_qary_success_row_report("ntru2-sum-relation-prepass", k, rows, cols, terms, a, data, work, transform, target, t0, "all-tail-sum", track_transform)
 }
 
-fn _flatter_ntru_split(any: m): int {
+fn _flatter_ntru_split(any m) int {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    if(rows != cols || rows < 4 || rows % 2 != 0){ return -1 }
@@ -2154,7 +1993,7 @@ fn _flatter_ntru_split(any: m): int {
    k
 }
 
-fn _flatter_ntru_sum_relation_prepass_report(any: basis, bool: track_transform=true): dict {
+fn _flatter_ntru_sum_relation_prepass_report(any basis, bool track_transform=true) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -2199,27 +2038,27 @@ fn _flatter_ntru_sum_relation_prepass_report(any: basis, bool: track_transform=t
    _flatter_qary_success_row_report("ntru-sum-relation-prepass", k, rows, cols, terms, a, data, work, transform, 0, t0, "top-sum-minus-q-diagonal", track_transform)
 }
 
-fn qary_relation_prepass_report(any: basis): dict {
+fn qary_relation_prepass_report(any basis) dict {
    "Find and install a short q-ary tail relation using exact row transforms."
    _flatter_qary_relation_prepass_report(basis, "qary-relation-prepass", false)
 }
 
-fn lower_triangular_qary_relation_prepass_report(any: basis): dict {
+fn lower_triangular_qary_relation_prepass_report(any basis) dict {
    "Find and install a short q-ary tail relation for lower-triangular top blocks."
    _flatter_qary_relation_prepass_report(basis, "lower-triangular-qary-relation-prepass", true)
 }
 
-fn lower_triangular_qary_relation_prepass(any: basis): any {
+fn lower_triangular_qary_relation_prepass(any basis) any {
    "Return the basis from lower_triangular_qary_relation_prepass_report."
    lower_triangular_qary_relation_prepass_report(basis).get("basis")
 }
 
-fn qary_relation_prepass(any: basis): any {
+fn qary_relation_prepass(any basis) any {
    "Return the basis from qary_relation_prepass_report."
    qary_relation_prepass_report(basis).get("basis")
 }
 
-fn triangular_size_reduce_report(any: basis, int: passes=1): dict {
+fn triangular_size_reduce_report(any basis, int passes=1) dict {
    "Exact fast size reduction for lower-triangular row bases."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -2280,12 +2119,12 @@ fn triangular_size_reduce_report(any: basis, int: passes=1): dict {
    }
 }
 
-fn triangular_size_reduce(any: basis, int: passes=1): any {
+fn triangular_size_reduce(any basis, int passes=1) any {
    "Return the basis from triangular_size_reduce_report."
    triangular_size_reduce_report(basis, passes).get("basis")
 }
 
-fn _flatter_triangular_violation_report(any: basis): dict {
+fn _flatter_triangular_violation_report(any basis) dict {
    def m = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
@@ -2315,7 +2154,7 @@ fn _flatter_triangular_violation_report(any: basis): dict {
    }
 }
 
-fn blocked_triangular_size_reduce_report(any: basis, int: block_size=32, int: passes=1, bool: track_transform=true): dict {
+fn blocked_triangular_size_reduce_report(any basis, int block_size=32, int passes=1, bool track_transform=true) dict {
    "Exact blocked size reduction for lower-triangular row bases."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -2567,12 +2406,12 @@ fn blocked_triangular_size_reduce_report(any: basis, int: block_size=32, int: pa
    }
 }
 
-fn blocked_triangular_size_reduce(any: basis, int: block_size=32, int: passes=1): any {
+fn blocked_triangular_size_reduce(any basis, int block_size=32, int passes=1) any {
    "Return the basis from blocked_triangular_size_reduce_report."
    blocked_triangular_size_reduce_report(basis, block_size, passes).get("basis")
 }
 
-fn _flatter_tail_unit_split(any: basis): int {
+fn _flatter_tail_unit_split(any basis) int {
    def m = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
@@ -2593,7 +2432,7 @@ fn _flatter_tail_unit_split(any: basis): int {
    split
 }
 
-fn _flatter_best_norm_sq(any: basis): bigint {
+fn _flatter_best_norm_sq(any basis) bigint {
    def m = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(m)
    def data = _flatter_matrix_data(m)
@@ -2607,7 +2446,7 @@ fn _flatter_best_norm_sq(any: basis): bigint {
    best
 }
 
-fn triangular_bounded_lll_prepass_report(any: basis, int: chunk_budget=2048, int: max_chunks=4, any: delta=0.75, any: eta=0.51, bool: track_transform=true): dict {
+fn triangular_bounded_lll_prepass_report(any basis, int chunk_budget=2048, int max_chunks=4, any delta=0.75, any eta=0.51, bool track_transform=true) dict {
    "Run bounded LLL chunks with short-row sorting between chunks for large triangular bases."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -2691,7 +2530,7 @@ fn triangular_bounded_lll_prepass_report(any: basis, int: chunk_budget=2048, int
    }
 }
 
-fn _flatter_tail_normal_form_target_row(list: data, int: split, int: tail, int: cols, int: rows, int: target): dict {
+fn _flatter_tail_normal_form_target_row(list data, int split, int tail, int cols, int rows, int target) dict {
    mut coeffs = []
    mut i = 0
    while(i < tail){
@@ -2753,7 +2592,7 @@ fn _flatter_tail_normal_form_target_row(list: data, int: split, int: tail, int: 
    {"row": row, "transform": tr, "exact": exact, "backsolve_ops": backsolve_ops, "reduction_ops": reduction_ops}
 }
 
-fn _flatter_tail_reduce_heads(list: work, list: transform, int: rows, int: split): dict {
+fn _flatter_tail_reduce_heads(list work, list transform, int rows, int split) dict {
    mut tail_reduce_ops, sort_swaps = 0, 0
    if(rows <= 160){
       mut head = 0
@@ -2814,7 +2653,7 @@ fn _flatter_tail_reduce_heads(list: work, list: transform, int: rows, int: split
    {"work": work, "transform": transform, "tail_reduce_ops": tail_reduce_ops, "sort_swaps": sort_swaps}
 }
 
-fn triangular_tail_normal_form_report(any: basis): dict {
+fn triangular_tail_normal_form_report(any basis) dict {
    "Convert a lower-triangular basis with a unit diagonal tail into a canonical tail-coordinate normal form."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -2892,12 +2731,12 @@ fn triangular_tail_normal_form_report(any: basis): dict {
    }
 }
 
-fn triangular_tail_normal_form(any: basis): any {
+fn triangular_tail_normal_form(any basis) any {
    "Return the basis from triangular_tail_normal_form_report."
    triangular_tail_normal_form_report(basis).get("basis")
 }
 
-fn _flatter_identity_rows(int: n): list {
+fn _flatter_identity_rows(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -2913,7 +2752,7 @@ fn _flatter_identity_rows(int: n): list {
    out
 }
 
-fn _flatter_same_matrix(any: a, any: b): bool {
+fn _flatter_same_matrix(any a, any b) bool {
    def ar = _flatter_matrix_rows(a)
    def ac = _flatter_matrix_cols(a)
    if(ar != _flatter_matrix_rows(b) || ac != _flatter_matrix_cols(b)){ return false }
@@ -2933,7 +2772,7 @@ fn _flatter_same_matrix(any: a, any: b): bool {
    true
 }
 
-fn _flatter_same_row(list: a, list: b): bool {
+fn _flatter_same_row(list a, list b) bool {
    if(a.len != b.len){ return false }
    mut i = 0
    while(i < a.len){
@@ -2943,7 +2782,7 @@ fn _flatter_same_row(list: a, list: b): bool {
    true
 }
 
-fn _flatter_is_identity_matrix(any: m): bool {
+fn _flatter_is_identity_matrix(any m) bool {
    def a = _flatter_reduce_matrix(m)
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
@@ -2963,7 +2802,7 @@ fn _flatter_is_identity_matrix(any: m): bool {
    true
 }
 
-fn _flatter_apply_transform_row(list: tr, any: basis): list {
+fn _flatter_apply_transform_row(list tr, any basis) list {
    def rows = _flatter_matrix_rows(basis)
    def cols = _flatter_matrix_cols(basis)
    def data = _flatter_matrix_data(basis)
@@ -2977,14 +2816,14 @@ fn _flatter_apply_transform_row(list: tr, any: basis): list {
    out
 }
 
-fn _flatter_abs_z(any: x): bigint {
+fn _flatter_abs_z(any x) bigint {
    def z = Z(x)
    z < Z(0) ? -z : z
 }
 
-fn _flatter_bf_from_scalar(any: x): bigint { is_float(x) ? bf_from_float(float(x)) : Z(x) * BF_SCALE }
+fn _flatter_bf_from_scalar(any x) bigint { is_float(x) ? bf_from_float(float(x)) : Z(x) * BF_SCALE }
 
-fn _flatter_bf_norm_sq(any: m): bigint {
+fn _flatter_bf_norm_sq(any m) bigint {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -3002,7 +2841,7 @@ fn _flatter_bf_norm_sq(any: m): bigint {
    out
 }
 
-fn _flatter_has_float_entry(any: m): bool {
+fn _flatter_has_float_entry(any m) bool {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -3019,7 +2858,7 @@ fn _flatter_has_float_entry(any: m): bool {
    false
 }
 
-fn _flatter_total_norm_sq_z(any: m): bigint {
+fn _flatter_total_norm_sq_z(any m) bigint {
    def rows = _flatter_matrix_rows(m)
    def data = _flatter_matrix_data(m)
    mut out = Z(0)
@@ -3031,11 +2870,11 @@ fn _flatter_total_norm_sq_z(any: m): bigint {
    out
 }
 
-fn _flatter_total_norm_key(any: m): any {
+fn _flatter_total_norm_key(any m) any {
    _flatter_has_float_entry(m) ? _flatter_bf_norm_sq(m) : _flatter_total_norm_sq_z(m)
 }
 
-fn _flatter_row_norm_profile_from_rows(list: rows): dict {
+fn _flatter_row_norm_profile_from_rows(list rows) dict {
    mut profile = []
    mut zero_rows = 0
    mut min_norm = nil
@@ -3064,13 +2903,13 @@ fn _flatter_row_norm_profile_from_rows(list: rows): dict {
    }
 }
 
-fn _flatter_row_norm_profile_report(any: basis): dict {
+fn _flatter_row_norm_profile_report(any basis) dict {
    def m = _flatter_reduce_matrix(basis)
    def rep = _flatter_row_norm_profile_from_rows(_flatter_matrix_data(m))
    rep.set("rows", _flatter_matrix_rows(m)).set("cols", _flatter_matrix_cols(m))
 }
 
-fn relative_size_reduce_report(any: basis, int: passes=1): dict {
+fn relative_size_reduce_report(any basis, int passes=1) dict {
    "Size-reduce rows against previous rows and report exact integer row operations."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -3134,12 +2973,12 @@ fn relative_size_reduce_report(any: basis, int: passes=1): dict {
    }
 }
 
-fn relative_size_reduce(any: basis, int: passes=1): any {
+fn relative_size_reduce(any basis, int passes=1) any {
    "Return the basis from relative_size_reduce_report."
    relative_size_reduce_report(basis, passes).get("basis")
 }
 
-fn _flatter_norm_sort_rows(list: work_in, list: transform_in, int: rows, bool: track): dict {
+fn _flatter_norm_sort_rows(list work_in, list transform_in, int rows, bool track) dict {
    mut work = work_in
    mut transform = transform_in
    mut norms = list(rows)
@@ -3182,7 +3021,7 @@ fn _flatter_norm_sort_rows(list: work_in, list: transform_in, int: rows, bool: t
    {"work": work, "transform": transform, "swaps": swaps, "changed": swaps > 0}
 }
 
-fn _flatter_lagrange_pair_window(list: work_in, list: transform_in, int: rows, int: gap, int: step_limit, bool: track): dict {
+fn _flatter_lagrange_pair_window(list work_in, list transform_in, int rows, int gap, int step_limit, bool track) dict {
    mut work = work_in
    mut transform = transform_in
    mut norms = list(rows)
@@ -3244,7 +3083,7 @@ fn _flatter_lagrange_pair_window(list: work_in, list: transform_in, int: rows, i
    {"work": work, "transform": transform, "pair_count": pair_count, "op_count": ops, "swap_count": swaps, "changed": changed}
 }
 
-fn lagrange_pair_reduce_report(any: basis, int: window=4, int: rounds=2, int: max_pair_steps=32, any: verify=true, any: sort_each_pass=true, any: track_transform=true): dict {
+fn lagrange_pair_reduce_report(any basis, int window=4, int rounds=2, int max_pair_steps=32, any verify=true, any sort_each_pass=true, any track_transform=true) dict {
    "Exact row-pair Lagrange reduction with transform tracking and local Gauss steps."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -3334,34 +3173,12 @@ fn lagrange_pair_reduce_report(any: basis, int: window=4, int: rounds=2, int: ma
    }
 }
 
-fn lagrange_pair_reduce(any: basis, int: window=4, int: rounds=2, int: max_pair_steps=32): any {
+fn lagrange_pair_reduce(any basis, int window=4, int rounds=2, int max_pair_steps=32) any {
    "Return the basis from lagrange_pair_reduce_report."
    lagrange_pair_reduce_report(basis, window, rounds, max_pair_steps).get("basis")
 }
 
-fn _flatter_sparse_entries(list: rows): dict {
-   mut sparse = []
-   mut nonzero = 0
-   mut i = 0
-   while(i < rows.len){
-      def row = rows.get(i)
-      mut entries = []
-      mut j = 0
-      while(j < row.len){
-         def v = Z(row.get(j))
-         if(v != Z(0)){
-            entries = entries.append([j, v])
-            nonzero += 1
-         }
-         j += 1
-      }
-      sparse = sparse.append(entries)
-      i += 1
-   }
-   {"rows": sparse, "nonzero": nonzero}
-}
-
-fn _flatter_sparse_entries_raw(list: rows): dict {
+fn _flatter_sparse_entries_raw(list rows) dict {
    mut sparse = []
    mut nonzero = 0
    mut all_int = true
@@ -3393,7 +3210,7 @@ fn _flatter_sparse_entries_raw(list: rows): dict {
    {"rows": sparse, "nonzero": nonzero, "all_int": all_int}
 }
 
-fn _flatter_matmul_shape(any: left, any: right, str: caller): list {
+fn _flatter_matmul_shape(any left, any right, str caller) list {
    def A = _flatter_reduce_matrix(left)
    def B = _flatter_reduce_matrix(right)
    def ac = _flatter_matrix_cols(A)
@@ -3402,7 +3219,7 @@ fn _flatter_matmul_shape(any: left, any: right, str: caller): list {
    [A, B, _flatter_matrix_rows(A), ac, br, _flatter_matrix_cols(B)]
 }
 
-fn _flatter_sparse_product_work_report(any: left, any: right): dict {
+fn _flatter_sparse_product_work_report(any left, any right) dict {
    def s = _flatter_matmul_shape(left, right, "_flatter_sparse_product_work_report")
    def A, B = s.get(0), s.get(1)
    def ar, ac = int(s.get(2)), int(s.get(3))
@@ -3432,13 +3249,13 @@ fn _flatter_sparse_product_work_report(any: left, any: right): dict {
    }
 }
 
-fn _strassen_predicted_scalar_multiplications(int: n, int: leaf_size): int {
+fn _strassen_predicted_scalar_multiplications(int n, int leaf_size) int {
    def leaf = max(1, leaf_size)
    if(n <= leaf || n <= 1){ return n * n * n }
    7 * _strassen_predicted_scalar_multiplications(n / 2, leaf)
 }
 
-fn _flatter_triangular_structural_count(str: uplo, str: transpose, int: n): int {
+fn _flatter_triangular_structural_count(str uplo, str transpose, int n) int {
    mut count = 0
    mut i = 0
    while(i < n){
@@ -3452,7 +3269,7 @@ fn _flatter_triangular_structural_count(str: uplo, str: transpose, int: n): int 
    count
 }
 
-fn _flatter_zero_matrix_rows(int: rows, int: cols): list {
+fn _flatter_zero_matrix_rows(int rows, int cols) list {
    mut out = []
    mut i = 0
    while(i < rows){
@@ -3462,7 +3279,7 @@ fn _flatter_zero_matrix_rows(int: rows, int: cols): list {
    out
 }
 
-fn _flatter_zero_matrix_rows_int(int: rows, int: cols): list {
+fn _flatter_zero_matrix_rows_int(int rows, int cols) list {
    mut out = []
    mut i = 0
    while(i < rows){
@@ -3478,7 +3295,7 @@ fn _flatter_zero_matrix_rows_int(int: rows, int: cols): list {
    out
 }
 
-fn _flatter_matmul_sparse_report(any: left, any: right, str: method="sparse-row-exact-lattice-matmul"): dict {
+fn _flatter_matmul_sparse_report(any left, any right, str method="sparse-row-exact-lattice-matmul") dict {
    def t0 = ticks()
    def s = _flatter_matmul_shape(left, right, "_flatter_matmul_sparse_report")
    def A, B = s.get(0), s.get(1)
@@ -3562,7 +3379,7 @@ fn _flatter_matmul_sparse_report(any: left, any: right, str: method="sparse-row-
    }
 }
 
-fn _flatter_matmul_tag_report(dict: rep, str: selected, str: kernel_method, int: dense_work, any: sparse_work, int: strassen_muls=0, int: tri_work=-1): dict {
+fn _flatter_matmul_tag_report(dict rep, str selected, str kernel_method, int dense_work, any sparse_work, int strassen_muls=0, int tri_work=-1) dict {
    rep["selected_kernel"] = selected
    rep["kernel_method"] = kernel_method
    rep["multiply_adds"] = dense_work
@@ -3588,7 +3405,7 @@ fn _flatter_matmul_tag_report(dict: rep, str: selected, str: kernel_method, int:
    rep
 }
 
-fn lattice_matmul_report(any: left, any: right): dict {
+fn lattice_matmul_report(any left, any right) dict {
    "Exact integer matrix multiplication report for lattice bases."
    def s = _flatter_matmul_shape(left, right, "lattice_matmul_report")
    def A, B = s.get(0), s.get(1)
@@ -3629,18 +3446,18 @@ fn lattice_matmul_report(any: left, any: right): dict {
    _flatter_matmul_tag_report(rep, "sparse-row", rep.get("method", "exact-lattice-matmul"), dense_work, sparse_work, strassen_muls)
 }
 
-fn lattice_matmul(any: left, any: right): any {
+fn lattice_matmul(any left, any right) any {
    "Return the product matrix from lattice_matmul_report."
    lattice_matmul_report(left, right).get("matrix")
 }
 
-fn _flatter_matmul(any: left, any: right): any {
+fn _flatter_matmul(any left, any right) any {
    if(_flatter_is_identity_matrix(left)){ return _flatter_reduce_matrix(right) }
    if(_flatter_is_identity_matrix(right)){ return _flatter_reduce_matrix(left) }
    _flatter_matmul_sparse_report(left, right).get("matrix")
 }
 
-fn lattice_matmul_blocked_report(any: left, any: right, int: block_size=16): dict {
+fn lattice_matmul_blocked_report(any left, any right, int block_size=16) dict {
    "Exact blocked integer matrix multiplication with sparse-product counters."
    def t0 = ticks()
    def s = _flatter_matmul_shape(left, right, "lattice_matmul_blocked_report")
@@ -3765,12 +3582,12 @@ fn lattice_matmul_blocked_report(any: left, any: right, int: block_size=16): dic
    }
 }
 
-fn lattice_matmul_blocked(any: left, any: right, int: block_size=16): any {
+fn lattice_matmul_blocked(any left, any right, int block_size=16) any {
    "Return the product matrix from lattice_matmul_blocked_report."
    lattice_matmul_blocked_report(left, right, block_size).get("matrix")
 }
 
-fn _flatter_matrix_data_all_bigint(list: data): bool {
+fn _flatter_matrix_data_all_bigint(list data) bool {
    mut i = 0
    while(i < data.len){
       def row = data.get(i)
@@ -3784,7 +3601,7 @@ fn _flatter_matrix_data_all_bigint(list: data): bool {
    true
 }
 
-fn _flatter_matrix_data_small_i64_report(list: data): dict {
+fn _flatter_matrix_data_small_i64_report(list data) dict {
    mut rows = list(data.len)
    __list_set_len(rows, data.len)
    mut max_abs = 0
@@ -3808,7 +3625,7 @@ fn _flatter_matrix_data_small_i64_report(list: data): dict {
    {"ok": true, "rows": rows, "max_abs": max_abs}
 }
 
-fn _flatter_matmul_row_from_data(list: ad, list: bd, int: i, int: ac, int: bc): dict {
+fn _flatter_matmul_row_from_data(list ad, list bd, int i, int ac, int bc) dict {
    mut row = list(bc)
    __list_set_len(row, bc)
    mut nonzero = 0
@@ -3843,7 +3660,7 @@ fn _flatter_matmul_row_from_data(list: ad, list: bd, int: i, int: ac, int: bc): 
    {"row": row, "nonzero_products": nonzero, "skipped_zero_products": skipped}
 }
 
-fn _flatter_matmul_row_from_i64_data(list: ad, list: bd, int: i, int: ac, int: bc): dict {
+fn _flatter_matmul_row_from_i64_data(list ad, list bd, int i, int ac, int bc) dict {
    mut row = list(bc)
    __list_set_len(row, bc)
    mut nonzero = 0
@@ -3878,7 +3695,7 @@ fn _flatter_matmul_row_from_i64_data(list: ad, list: bd, int: i, int: ac, int: b
    {"row": row, "nonzero_products": nonzero, "skipped_zero_products": skipped}
 }
 
-fn _flatter_matmul_row_from_bigint_data(list: ad, list: bd, int: i, int: ac, int: bc): dict {
+fn _flatter_matmul_row_from_bigint_data(list ad, list bd, int i, int ac, int bc) dict {
    mut row = list(bc)
    __list_set_len(row, bc)
    mut nonzero = 0
@@ -3914,7 +3731,7 @@ fn _flatter_matmul_row_from_bigint_data(list: ad, list: bd, int: i, int: ac, int
    {"row": row, "nonzero_products": nonzero, "skipped_zero_products": skipped}
 }
 
-fn _flatter_matmul_chunk_worker(list: args): dict {
+fn _flatter_matmul_chunk_worker(list args) dict {
    def ad = args.get(0)
    def bd = args.get(1)
    def start = int(args.get(2))
@@ -3938,7 +3755,7 @@ fn _flatter_matmul_chunk_worker(list: args): dict {
    {"start": start, "stop": stop, "rows": rows, "nonzero_products": nonzero, "skipped_zero_products": skipped}
 }
 
-fn lattice_matmul_threaded_report(any: left, any: right, int: max_threads=0): dict {
+fn lattice_matmul_threaded_report(any left, any right, int max_threads=0) dict {
    "Exact row-sharded integer matrix multiplication using Ny worker threads."
    def t0 = ticks()
    def s = _flatter_matmul_shape(left, right, "lattice_matmul_threaded_report")
@@ -4007,12 +3824,12 @@ fn lattice_matmul_threaded_report(any: left, any: right, int: max_threads=0): di
    }
 }
 
-fn lattice_matmul_threaded(any: left, any: right, int: max_threads=0): any {
+fn lattice_matmul_threaded(any left, any right, int max_threads=0) any {
    "Return the product matrix from lattice_matmul_threaded_report."
    lattice_matmul_threaded_report(left, right, max_threads).get("matrix")
 }
 
-fn _flatter_triangular_structural_nonzero(str: uplo, str: transpose, int: k, int: j): bool {
+fn _flatter_triangular_structural_nonzero(str uplo, str transpose, int k, int j) bool {
    def lower = uplo == "lower" || uplo == "L"
    def upper = uplo == "upper" || uplo == "U"
    def trans = transpose == "transpose" || transpose == "T"
@@ -4023,14 +3840,14 @@ fn _flatter_triangular_structural_nonzero(str: uplo, str: transpose, int: k, int
    true
 }
 
-fn _flatter_triangular_entry(any: tri, str: uplo, str: transpose, str: diag, int: k, int: j): bigint {
+fn _flatter_triangular_entry(any tri, str uplo, str transpose, str diag, int k, int j) bigint {
    if(!_flatter_triangular_structural_nonzero(uplo, transpose, k, j)){ return Z(0) }
    if(k == j && (diag == "unit" || diag == "U")){ return Z(1) }
    def trans = transpose == "transpose" || transpose == "T"
    trans ? Z(matrix.mat_get(tri, j, k)) : Z(matrix.mat_get(tri, k, j))
 }
 
-fn lattice_triangular_matmul_report(any: triangular, any: dense, str: side="right", str: uplo="lower", str: transpose="none", str: diag="nonunit", any: alpha=1): dict {
+fn lattice_triangular_matmul_report(any triangular, any dense, str side="right", str uplo="lower", str transpose="none", str diag="nonunit", any alpha=1) dict {
    "Exact triangular matrix multiply report for B * op(A) or op(A) * B style lattice kernels."
    def t0 = ticks()
    def A = _flatter_reduce_matrix(triangular)
@@ -4130,18 +3947,18 @@ fn lattice_triangular_matmul_report(any: triangular, any: dense, str: side="righ
    }
 }
 
-fn lattice_triangular_matmul(any: triangular, any: dense, str: side="right", str: uplo="lower", str: transpose="none", str: diag="nonunit", any: alpha=1): any {
+fn lattice_triangular_matmul(any triangular, any dense, str side="right", str uplo="lower", str transpose="none", str diag="nonunit", any alpha=1) any {
    "Return the product matrix from lattice_triangular_matmul_report."
    lattice_triangular_matmul_report(triangular, dense, side, uplo, transpose, diag, alpha).get("matrix")
 }
 
-fn _flatter_next_pow2(int: n): int {
+fn _flatter_next_pow2(int n) int {
    mut p = 1
    while(p < n){ p = p * 2 }
    p
 }
 
-fn _strassen_pad_rows(any: m, int: size): list {
+fn _strassen_pad_rows(any m, int size) list {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -4162,7 +3979,7 @@ fn _strassen_pad_rows(any: m, int: size): list {
    out
 }
 
-fn _strassen_crop_rows(list: rows, int: out_rows, int: out_cols): list {
+fn _strassen_crop_rows(list rows, int out_rows, int out_cols) list {
    mut out = list(out_rows)
    __list_set_len(out, out_rows)
    mut i = 0
@@ -4180,7 +3997,7 @@ fn _strassen_crop_rows(list: rows, int: out_rows, int: out_cols): list {
    out
 }
 
-fn _strassen_add(list: a, list: b): list {
+fn _strassen_add(list a, list b) list {
    def n = a.len
    mut out = list(n)
    __list_set_len(out, n)
@@ -4199,7 +4016,7 @@ fn _strassen_add(list: a, list: b): list {
    out
 }
 
-fn _strassen_sub(list: a, list: b): list {
+fn _strassen_sub(list a, list b) list {
    def n = a.len
    mut out = list(n)
    __list_set_len(out, n)
@@ -4218,7 +4035,7 @@ fn _strassen_sub(list: a, list: b): list {
    out
 }
 
-fn _strassen_slice(list: a, int: r0, int: c0, int: n): list {
+fn _strassen_slice(list a, int r0, int c0, int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
@@ -4236,7 +4053,7 @@ fn _strassen_slice(list: a, int: r0, int: c0, int: n): list {
    out
 }
 
-fn _strassen_join(list: c11, list: c12, list: c21, list: c22): list {
+fn _strassen_join(list c11, list c12, list c21, list c22) list {
    def h = c11.len
    mut out = list(h * 2)
    __list_set_len(out, h * 2)
@@ -4277,7 +4094,7 @@ fn _strassen_join(list: c11, list: c12, list: c21, list: c22): list {
    out
 }
 
-fn _strassen_naive_square_report(list: a, list: b): dict {
+fn _strassen_naive_square_report(list a, list b) dict {
    def n = a.len
    mut out = list(n)
    __list_set_len(out, n)
@@ -4314,7 +4131,7 @@ fn _strassen_naive_square_report(list: a, list: b): dict {
    }
 }
 
-fn _strassen_merge_counts(list: reps, int: extra_adds, int: depth): dict {
+fn _strassen_merge_counts(list reps, int extra_adds, int depth) dict {
    mut scalar_muls = 0
    mut scalar_adds = 0
    mut matrix_ops = extra_adds
@@ -4342,7 +4159,7 @@ fn _strassen_merge_counts(list: reps, int: extra_adds, int: depth): dict {
    }
 }
 
-fn _strassen_square_report(list: a, list: b, int: leaf_size, int: depth): dict {
+fn _strassen_square_report(list a, list b, int leaf_size, int depth) dict {
    def n = a.len
    if(n <= max(1, leaf_size) || n <= 1){
       def base = _strassen_naive_square_report(a, b)
@@ -4379,7 +4196,7 @@ fn _strassen_square_report(list: a, list: b, int: leaf_size, int: depth): dict {
    counts.set("rows", _strassen_join(c11, c12, c21, c22))
 }
 
-fn lattice_matmul_strassen_report(any: left, any: right, int: leaf_size=16): dict {
+fn lattice_matmul_strassen_report(any left, any right, int leaf_size=16) dict {
    "Exact padded Strassen integer matrix multiplication for dense lattice kernels."
    def t0 = ticks()
    def s = _flatter_matmul_shape(left, right, "lattice_matmul_strassen_report")
@@ -4408,12 +4225,12 @@ fn lattice_matmul_strassen_report(any: left, any: right, int: leaf_size=16): dic
    }
 }
 
-fn lattice_matmul_strassen(any: left, any: right, int: leaf_size=16): any {
+fn lattice_matmul_strassen(any left, any right, int leaf_size=16) any {
    "Return the product matrix from lattice_matmul_strassen_report."
    lattice_matmul_strassen_report(left, right, leaf_size).get("matrix")
 }
 
-fn _flatter_slice_rows(list: rows, int: start, int: stop): list {
+fn _flatter_slice_rows(list rows, int start, int stop) list {
    mut out = []
    mut i = start
    while(i < stop){
@@ -4423,7 +4240,7 @@ fn _flatter_slice_rows(list: rows, int: start, int: stop): list {
    out
 }
 
-fn _flatter_replace_rows(list: rows, int: start, any: block): list {
+fn _flatter_replace_rows(list rows, int start, any block) list {
    def bdata = (is_list(block) && block.len >= 3 && is_int(block.get(0, nil)) && is_int(block.get(1, nil)) && is_list(block.get(2, nil))) ? _flatter_matrix_data(block) : block
    mut out = []
    mut i = 0
@@ -4435,7 +4252,7 @@ fn _flatter_replace_rows(list: rows, int: start, any: block): list {
    out
 }
 
-fn _flatter_apply_block_transform_rows(list: global_rows, int: start, any: block_transform): list {
+fn _flatter_apply_block_transform_rows(list global_rows, int start, any block_transform) list {
    def tdata = _flatter_matrix_data(block_transform)
    def size = tdata.len
    mut out = []
@@ -4460,9 +4277,9 @@ fn _flatter_apply_block_transform_rows(list: global_rows, int: start, any: block
    out
 }
 
-fn _flatter_phase(str: name, int: start, int: stop): dict { {"name": name, "start": start, "stop": stop} }
+fn _flatter_phase(str name, int start, int stop) dict { {"name": name, "start": start, "stop": stop} }
 
-fn _flatter_strategy_window(str: name, int: start, int: stop, str: child_split=""): dict {
+fn _flatter_strategy_window(str name, int start, int stop, str child_split="") dict {
    {
       "name": name,
       "start": start,
@@ -4472,17 +4289,17 @@ fn _flatter_strategy_window(str: name, int: start, int: stop, str: child_split="
    }
 }
 
-fn _flatter_split_phase2_k(int: n): int {
+fn _flatter_split_phase2_k(int n) int {
    if(n == 3){ return 2 }
    max(1, n / 2)
 }
 
-fn _flatter_split_phase3_k(int: n): int {
+fn _flatter_split_phase3_k(int n) int {
    if(n == 3){ return 2 }
    max(1, n / 2)
 }
 
-fn _flatter_phase2_windows(int: n, int: iter): list {
+fn _flatter_phase2_windows(int n, int iter) list {
    if(n <= 1){ return [_flatter_strategy_window("all", 0, n, "phase3")] }
    def k = _flatter_split_phase2_k(n)
    if(n == 3){
@@ -4494,12 +4311,12 @@ fn _flatter_phase2_windows(int: n, int: iter): list {
    [_flatter_strategy_window("all", 0, n, "phase3")]
 }
 
-fn _flatter_phase2_stopping_point(int: n, int: iter): bool {
+fn _flatter_phase2_stopping_point(int n, int iter) bool {
    if(n == 3){ return iter > 1 }
    iter > 2
 }
 
-fn _flatter_phase3_windows(int: n, int: iter): list {
+fn _flatter_phase3_windows(int n, int iter) list {
    if(n <= 1){ return [_flatter_strategy_window("all", 0, n, "phase3")] }
    def k = _flatter_split_phase3_k(n)
    if(n == 3){
@@ -4517,9 +4334,9 @@ fn _flatter_phase3_windows(int: n, int: iter): list {
    ]
 }
 
-fn _flatter_phase3_stopping_point(int: iter): bool { iter % 2 == 0 }
+fn _flatter_phase3_stopping_point(int iter) bool { iter % 2 == 0 }
 
-fn _flatter_strategy_precision_rule(str: strategy, int: n): str {
+fn _flatter_strategy_precision_rule(str strategy, int n) str {
    if(strategy == "proved3"){ return "2 * (2 * spread + 40)" }
    if(strategy == "heuristic3" || strategy == "heuristic2" || strategy == "heuristic1"){
       return "aggressive ? spread + 30 : 2 * spread + 30 + 2 * n"
@@ -4527,7 +4344,7 @@ fn _flatter_strategy_precision_rule(str: strategy, int: n): str {
    "2 * spread + 40"
 }
 
-fn _flatter_strategy_iterations(int: n, str: strategy, int: max_iterations): list {
+fn _flatter_strategy_iterations(int n, str strategy, int max_iterations) list {
    mut out = []
    def limit = max(1, max_iterations)
    mut i = 0
@@ -4576,7 +4393,7 @@ fn _flatter_strategy_iterations(int: n, str: strategy, int: max_iterations): lis
    out
 }
 
-fn recursive_strategy_plan_report(int: rows, str: strategy="proved3", int: max_iterations=6): dict {
+fn recursive_strategy_plan_report(int rows, str strategy="proved3", int max_iterations=6) dict {
    "Report the recursive sublattice schedule used by flatter-style strategies."
    def n = max(0, rows)
    mut family = _flatter_schoenhage_strategy_family(strategy)
@@ -4619,7 +4436,7 @@ fn recursive_strategy_plan_report(int: rows, str: strategy="proved3", int: max_i
    }
 }
 
-fn _flatter_schoenhage_phase(int: rows, int: phase, str: strategy): dict {
+fn _flatter_schoenhage_phase(int rows, int phase, str strategy) dict {
    def n = max(0, rows)
    if(n <= 1){ return _flatter_phase("none", 0, n) }
    if(strategy == "proved1"){
@@ -4654,19 +4471,19 @@ fn _flatter_schoenhage_phase(int: rows, int: phase, str: strategy): dict {
    }
 }
 
-fn _flatter_schoenhage_phase_count(str: strategy): int {
+fn _flatter_schoenhage_phase_count(str strategy) int {
    if(strategy == "proved1" || strategy == "heuristic1"){ return 4 }
    3
 }
 
-fn _flatter_schoenhage_strategy_family(str: strategy): str {
+fn _flatter_schoenhage_strategy_family(str strategy) str {
    if(strategy == "proved1" || strategy == "proved2" || strategy == "proved3"){ return "proved" }
    if(strategy == "heuristic1" || strategy == "heuristic2" || strategy == "heuristic3"){ return "heuristic" }
    if(strategy == "phase2" || strategy == "phase3"){ return "split" }
    "custom"
 }
 
-fn schoenhage_reduce_report(any: basis, str: strategy="proved3", int: max_rounds=3, int: pair_rounds=2, int: max_pair_steps=64, str: goal_target="slope", any: goal_value=nil, bool: goal_proved=false, bool: stop_on_goal=false): dict {
+fn schoenhage_reduce_report(any basis, str strategy="proved3", int max_rounds=3, int pair_rounds=2, int max_pair_steps=64, str goal_target="slope", any goal_value=nil, bool goal_proved=false, bool stop_on_goal=false) dict {
    "Recursive sublattice reduction schedule with exact embedded row transforms."
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
@@ -4839,12 +4656,12 @@ fn schoenhage_reduce_report(any: basis, str: strategy="proved3", int: max_rounds
    }
 }
 
-fn schoenhage_reduce(any: basis, str: strategy="proved3", int: max_rounds=3, int: pair_rounds=2, int: max_pair_steps=64): any {
+fn schoenhage_reduce(any basis, str strategy="proved3", int max_rounds=3, int pair_rounds=2, int max_pair_steps=64) any {
    "Return the basis from schoenhage_reduce_report."
    schoenhage_reduce_report(basis, strategy, max_rounds, pair_rounds, max_pair_steps).get("basis")
 }
 
-fn sublattice_reduce_report(any: basis, int: window_size=16, int: stride=8, any: delta=0.99, int: rounds=2): dict {
+fn sublattice_reduce_report(any basis, int window_size=16, int stride=8, any delta=0.99, int rounds=2) dict {
    "Windowed sublattice reduction report for large bases."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -4923,12 +4740,12 @@ fn sublattice_reduce_report(any: basis, int: window_size=16, int: stride=8, any:
    }
 }
 
-fn sublattice_reduce(any: basis, int: window_size=16, int: stride=8, any: delta=0.99, int: rounds=2): any {
+fn sublattice_reduce(any basis, int window_size=16, int stride=8, any delta=0.99, int rounds=2) any {
    "Return the basis from sublattice_reduce_report."
    sublattice_reduce_report(basis, window_size, stride, delta, rounds).get("basis")
 }
 
-fn _flatter_multiscale_report(int: t0, any: basis, int: rows, int: cols, int: min_window, str: schedule, int: start_window, str: goal_target, any: goal_value, bool: goal_proved, bool: stop_on_goal, str: stopped_reason, list: levels, any: before_shape, any: after_shape, any: goal_before, any: goal_after, any: transform, bool: transform_tracked, bool: transform_verified, bool: verification_skipped, str: verification_skip_reason, any: extra=nil): dict {
+fn _flatter_multiscale_report(int t0, any basis, int rows, int cols, int min_window, str schedule, int start_window, str goal_target, any goal_value, bool goal_proved, bool stop_on_goal, str stopped_reason, list levels, any before_shape, any after_shape, any goal_before, any goal_after, any transform, bool transform_tracked, bool transform_verified, bool verification_skipped, str verification_skip_reason, any extra=nil) dict {
    mut out = {
       "method": "multiscale-window-reduction",
       "rows": rows,
@@ -4970,7 +4787,7 @@ fn _flatter_multiscale_report(int: t0, any: basis, int: rows, int: cols, int: mi
    out
 }
 
-fn recursive_reduce_report(any: basis, int: min_window=8, any: delta=0.99, int: rounds=2, str: goal_target="slope", any: goal_value=nil, bool: goal_proved=false, bool: stop_on_goal=false): dict {
+fn recursive_reduce_report(any basis, int min_window=8, any delta=0.99, int rounds=2, str goal_target="slope", any goal_value=nil, bool goal_proved=false, bool stop_on_goal=false) dict {
    "Multiscale reduction report that repeatedly reduces coarse-to-fine row windows."
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
@@ -5014,8 +4831,8 @@ fn recursive_reduce_report(any: basis, int: min_window=8, any: delta=0.99, int: 
          }
          def before_shape_short = _flatter_skip("large recursive short-row fastpath omits GSO profile")
          def after_shape_short = _flatter_skip("large recursive short-row fastpath omits GSO profile")
-         def short_goal_before = {"method": "profile-goal", "satisfied": false, "skipped": true}
-         def short_goal_after = {"method": "profile-goal", "satisfied": false, "skipped": true}
+         def short_goal_before = _flatter_skipped_profile_goal()
+         def short_goal_after = _flatter_skipped_profile_goal()
          def level = {
             "window_size": rows,
             "stride": rows,
@@ -5049,8 +4866,8 @@ fn recursive_reduce_report(any: basis, int: min_window=8, any: delta=0.99, int: 
          work = short.get("basis")
          def before_shape_short = _flatter_skip("profile-speed fastpath omits GSO profile")
          def after_shape_short = _flatter_skip("profile-speed fastpath omits GSO profile")
-         def short_goal_before = {"method": "profile-goal", "satisfied": false, "skipped": true}
-         def short_goal_after = {"method": "profile-goal", "satisfied": false, "skipped": true}
+         def short_goal_before = _flatter_skipped_profile_goal()
+         def short_goal_after = _flatter_skipped_profile_goal()
          def level = {
             "window_size": rows,
             "stride": rows,
@@ -5069,11 +4886,11 @@ fn recursive_reduce_report(any: basis, int: min_window=8, any: delta=0.99, int: 
       }
       def fast_rounds = max(1, min(3, rounds))
       def before_shape = _flatter_skip("profile-speed fastpath omits GSO profile")
-      def fast_goal_before = {"method": "profile-goal", "satisfied": false, "skipped": true}
+      def fast_goal_before = _flatter_skipped_profile_goal()
       def fast = flatter_reduce_report(work, delta, fast_rounds, 0.51, goal_target, goal_value, goal_proved, stop_on_goal, false)
       work = fast.get("basis")
       def after_shape_fast = _flatter_skip("profile-speed fastpath omits GSO profile")
-      def fast_goal_after = {"method": "profile-goal", "satisfied": false, "skipped": true}
+      def fast_goal_after = _flatter_skipped_profile_goal()
       def level = {
          "window_size": rows,
          "stride": rows,
@@ -5163,12 +4980,12 @@ fn recursive_reduce_report(any: basis, int: min_window=8, any: delta=0.99, int: 
    _flatter_multiscale_report(t0, work, rows, cols, min_window, medium_local_schedule ? "medium-local-window" : "coarse-to-fine", medium_local_schedule ? min(rows, max(12, min_window + max(1, min_window / 2))) : max(min_window, rows), goal_target, goal_value, goal_proved, stop_on_goal, stopped_reason, levels, before_shape, after_shape, goal_before, goal_after, total_transform, total_transform != nil, transform_verified, total_transform == nil, total_transform == nil ? "large recursive transform bookkeeping disabled" : "")
 }
 
-fn recursive_reduce(any: basis, int: min_window=8, any: delta=0.99, int: rounds=2): any {
+fn recursive_reduce(any basis, int min_window=8, any delta=0.99, int rounds=2) any {
    "Return the basis from recursive_reduce_report."
    recursive_reduce_report(basis, min_window, delta, rounds).get("basis")
 }
 
-fn _qr_zero_rows(int: rows, int: cols): list<list<f64>> {
+fn _qr_zero_rows(int rows, int cols) list<list<f64>> {
    mut list<list<f64>>: out = list(rows)
    __list_set_len(out, rows)
    mut i = 0
@@ -5186,7 +5003,7 @@ fn _qr_zero_rows(int: rows, int: cols): list<list<f64>> {
    out
 }
 
-fn _qr_col(any: m, int: col): list<f64> {
+fn _qr_col(any m, int col) list<f64> {
    def rows = _flatter_matrix_rows(m)
    def data = _flatter_matrix_data(m)
    mut list<f64>: out = list(rows)
@@ -5199,7 +5016,7 @@ fn _qr_col(any: m, int: col): list<f64> {
    out
 }
 
-fn _qr_dot(list<f64>: a, list<f64>: b): f64 {
+fn _qr_dot(list<f64> a, list<f64> b) f64 {
    mut f64: s = 0.0
    mut int: i = 0
    while(i < a.len){
@@ -5209,7 +5026,7 @@ fn _qr_dot(list<f64>: a, list<f64>: b): f64 {
    s
 }
 
-fn _qr_sub_scaled_inplace(list<f64>: a, list<f64>: b, f64: scale): any {
+fn _qr_sub_scaled_inplace(list<f64> a, list<f64> b, f64 scale) any {
    mut int: i = 0
    while(i < a.len){
       a[i] = a[i] - scale * b[i]
@@ -5218,7 +5035,7 @@ fn _qr_sub_scaled_inplace(list<f64>: a, list<f64>: b, f64: scale): any {
    nil
 }
 
-fn _qr_scale(list<f64>: a, any: scale): list<f64> {
+fn _qr_scale(list<f64> a, any scale) list<f64> {
    mut list<f64>: out = list(a.len)
    __list_set_len(out, a.len)
    mut int: i = 0
@@ -5230,7 +5047,7 @@ fn _qr_scale(list<f64>: a, any: scale): list<f64> {
    out
 }
 
-fn _qr_q_matrix(list<list<f64>>: q_cols, int: rows, int: cols): any {
+fn _qr_q_matrix(list<list<f64>> q_cols, int rows, int cols) any {
    mut list<list<f64>>: q_rows = list(rows)
    __list_set_len(q_rows, rows)
    mut i = 0
@@ -5249,7 +5066,7 @@ fn _qr_q_matrix(list<list<f64>>: q_cols, int: rows, int: cols): any {
    matrix.Matrix(q_rows)
 }
 
-fn _qr_reconstruction_error(any: a, any: q, any: r): f64 {
+fn _qr_reconstruction_error(any a, any q, any r) f64 {
    def int: rows = _flatter_matrix_rows(a)
    def int: cols = _flatter_matrix_cols(a)
    def a_data = _flatter_matrix_data(a)
@@ -5278,7 +5095,7 @@ fn _qr_reconstruction_error(any: a, any: q, any: r): f64 {
    worst
 }
 
-fn _qr_orthogonality_error(list<list<f64>>: q_cols): f64 {
+fn _qr_orthogonality_error(list<list<f64>> q_cols) f64 {
    mut f64: worst = 0.0
    mut int: i = 0
    while(i < q_cols.len){
@@ -5296,7 +5113,7 @@ fn _qr_orthogonality_error(list<list<f64>>: q_cols): f64 {
    worst
 }
 
-fn _qr_identity(int: n): list<list<f64>> {
+fn _qr_identity(int n) list<list<f64>> {
    mut list<list<f64>>: out = list(n)
    __list_set_len(out, n)
    mut i = 0
@@ -5314,7 +5131,7 @@ fn _qr_identity(int: n): list<list<f64>> {
    out
 }
 
-fn _qr_copy_float_rows(any: m): list<list<f64>> {
+fn _qr_copy_float_rows(any m) list<list<f64>> {
    def rows = _flatter_matrix_rows(m)
    def cols = _flatter_matrix_cols(m)
    def data = _flatter_matrix_data(m)
@@ -5335,9 +5152,9 @@ fn _qr_copy_float_rows(any: m): list<list<f64>> {
    out
 }
 
-fn _householder_vec_norm(list<f64>: v): f64 { sqrt(_qr_dot(v, v)) }
+fn _householder_vec_norm(list<f64> v) f64 { sqrt(_qr_dot(v, v)) }
 
-fn _qr_full_reconstruction_error_rows(any: a, list<list<f64>>: q_data, list<list<f64>>: r_data, int: rows, int: cols): f64 {
+fn _qr_full_reconstruction_error_rows(any a, list<list<f64>> q_data, list<list<f64>> r_data, int rows, int cols) f64 {
    def a_data = _flatter_matrix_data(a)
    mut f64: worst = 0.0
    mut int: i = 0
@@ -5361,7 +5178,7 @@ fn _qr_full_reconstruction_error_rows(any: a, list<list<f64>>: q_data, list<list
    worst
 }
 
-fn _qr_full_reconstruction_error(any: a, any: q, any: r): f64 {
+fn _qr_full_reconstruction_error(any a, any q, any r) f64 {
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
    def a_data = _flatter_matrix_data(a)
@@ -5389,7 +5206,7 @@ fn _qr_full_reconstruction_error(any: a, any: q, any: r): f64 {
    worst
 }
 
-fn _qr_full_orthogonality_error(any: q): f64 {
+fn _qr_full_orthogonality_error(any q) f64 {
    def rows = _flatter_matrix_rows(q)
    def data = _flatter_matrix_data(q)
    mut worst = 0.0
@@ -5414,7 +5231,7 @@ fn _qr_full_orthogonality_error(any: q): f64 {
    worst
 }
 
-fn _qr_full_orthogonality_error_rows(list<list<f64>>: data, int: rows): f64 {
+fn _qr_full_orthogonality_error_rows(list<list<f64>> data, int rows) f64 {
    mut f64: worst = 0.0
    mut int: i = 0
    while(i < rows){
@@ -5437,7 +5254,7 @@ fn _qr_full_orthogonality_error_rows(list<list<f64>>: data, int: rows): f64 {
    worst
 }
 
-fn qr_factor_report(any: basis): dict {
+fn qr_factor_report(any basis) dict {
    "Compute a QR factorization report for an integer/float lattice basis."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -5481,13 +5298,13 @@ fn qr_factor_report(any: basis): dict {
    }
 }
 
-fn qr_factor(any: basis): list {
+fn qr_factor(any basis) list {
    "Return [Q, R] from qr_factor_report."
    def rep = qr_factor_report(basis)
    [rep.get("q"), rep.get("r")]
 }
 
-fn qr_reorthogonalized_factor_report(any: basis, int: passes=2): dict {
+fn qr_reorthogonalized_factor_report(any basis, int passes=2) dict {
    "Compute a reorthogonalized modified Gram-Schmidt QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -5548,13 +5365,13 @@ fn qr_reorthogonalized_factor_report(any: basis, int: passes=2): dict {
    }
 }
 
-fn qr_reorthogonalized_factor(any: basis, int: passes=2): list {
+fn qr_reorthogonalized_factor(any basis, int passes=2) list {
    "Return [Q, R] from qr_reorthogonalized_factor_report."
    def rep = qr_reorthogonalized_factor_report(basis, passes)
    [rep.get("q"), rep.get("r")]
 }
 
-fn householder_qr_factor_report(any: basis): dict {
+fn householder_qr_factor_report(any basis) dict {
    "Compute a Householder QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -5636,13 +5453,13 @@ fn householder_qr_factor_report(any: basis): dict {
    }
 }
 
-fn householder_qr_factor(any: basis): list {
+fn householder_qr_factor(any basis) list {
    "Return [Q, R] from householder_qr_factor_report."
    def rep = householder_qr_factor_report(basis)
    [rep.get("q"), rep.get("r")]
 }
 
-fn _flatter_qr_factor_report(any: basis, str: method): dict {
+fn _flatter_qr_factor_report(any basis, str method) dict {
    if(method == "modified" || method == "modified-gram-schmidt"){
       return qr_factor_report(basis)
    }
@@ -5658,7 +5475,7 @@ fn _flatter_qr_factor_report(any: basis, str: method): dict {
    householder_qr_factor_report(basis)
 }
 
-fn _flatter_qr_method_name(str: method): str {
+fn _flatter_qr_method_name(str method) str {
    if(method == "modified" || method == "modified-gram-schmidt"){ return "modified-gram-schmidt" }
    if(method == "reorthogonalized" || method == "reorthogonalized-mgs" || method == "mgs2"){ return "reorthogonalized-modified-gram-schmidt" }
    if(method == "tall-skinny" || method == "tsqr"){ return "tall-skinny-qr" }
@@ -5666,7 +5483,7 @@ fn _flatter_qr_method_name(str: method): str {
    "householder"
 }
 
-fn _qr_block_from_rows(list: rows_data, int: row_start, int: row_end, int: col_start, int: col_end): any {
+fn _qr_block_from_rows(list rows_data, int row_start, int row_end, int col_start, int col_end) any {
    def int: out_rows = max(0, row_end - row_start)
    def int: out_cols = max(0, col_end - col_start)
    mut list<list<f64>>: out = list(out_rows)
@@ -5690,7 +5507,7 @@ fn _qr_block_from_rows(list: rows_data, int: row_start, int: row_end, int: col_s
    matrix.Matrix(out)
 }
 
-fn _qr_set_block(list: rows_data, int: row_start, int: col_start, any: block): list {
+fn _qr_set_block(list rows_data, int row_start, int col_start, any block) list {
    mut out = rows_data
    def br = _flatter_matrix_rows(block)
    def bc = _flatter_matrix_cols(block)
@@ -5709,7 +5526,7 @@ fn _qr_set_block(list: rows_data, int: row_start, int: col_start, any: block): l
    out
 }
 
-fn _qr_embed_panel_q(int: rows, int: start, any: q_panel): any {
+fn _qr_embed_panel_q(int rows, int start, any q_panel) any {
    mut out = _qr_identity(rows)
    def pd = _flatter_matrix_data(q_panel)
    def pr = _flatter_matrix_rows(q_panel)
@@ -5727,7 +5544,7 @@ fn _qr_embed_panel_q(int: rows, int: start, any: q_panel): any {
    matrix.Matrix(out)
 }
 
-fn blocked_qr_factor_report(any: basis, int: block_size=16): dict {
+fn blocked_qr_factor_report(any basis, int block_size=16) dict {
    "Compute a blocked Householder QR factorization report."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -5780,13 +5597,13 @@ fn blocked_qr_factor_report(any: basis, int: block_size=16): dict {
    }
 }
 
-fn blocked_qr_factor(any: basis, int: block_size=16): list {
+fn blocked_qr_factor(any basis, int block_size=16) list {
    "Return [Q, R] from blocked_qr_factor_report."
    def rep = blocked_qr_factor_report(basis, block_size)
    [rep.get("q"), rep.get("r")]
 }
 
-fn _qr_thin_matrix(any: q, int: rows, int: cols): any {
+fn _qr_thin_matrix(any q, int rows, int cols) any {
    def data = _flatter_matrix_data(q)
    mut out = []
    mut i = 0
@@ -5803,7 +5620,7 @@ fn _qr_thin_matrix(any: q, int: rows, int: cols): any {
    matrix.Matrix(out)
 }
 
-fn _qr_top_square(any: r, int: cols): any {
+fn _qr_top_square(any r, int cols) any {
    def data = _flatter_matrix_data(r)
    mut out = []
    mut i = 0
@@ -5820,7 +5637,7 @@ fn _qr_top_square(any: r, int: cols): any {
    matrix.Matrix(out)
 }
 
-fn _qr_row_window(any: m, int: start, int: end): any {
+fn _qr_row_window(any m, int start, int end) any {
    def data = _flatter_matrix_data(m)
    def int: rows = max(0, end - start)
    def int: cols = _flatter_matrix_cols(m)
@@ -5843,7 +5660,7 @@ fn _qr_row_window(any: m, int: start, int: end): any {
    matrix.Matrix(out)
 }
 
-fn _qr_matmul_float(any: left, any: right): any {
+fn _qr_matmul_float(any left, any right) any {
    def int: lrows = _flatter_matrix_rows(left)
    def int: lcols = _flatter_matrix_cols(left)
    def int: rcols = _flatter_matrix_cols(right)
@@ -5874,7 +5691,7 @@ fn _qr_matmul_float(any: left, any: right): any {
    matrix.Matrix(out)
 }
 
-fn _qr_thin_orthogonality_error(any: q): f64 {
+fn _qr_thin_orthogonality_error(any q) f64 {
    def int: rows = _flatter_matrix_rows(q)
    def int: cols = _flatter_matrix_cols(q)
    def data = _flatter_matrix_data(q)
@@ -5900,7 +5717,7 @@ fn _qr_thin_orthogonality_error(any: q): f64 {
    worst
 }
 
-fn tall_skinny_qr_factor_report(any: basis, int: block_size=32, str: qr_method="reorthogonalized"): dict {
+fn tall_skinny_qr_factor_report(any basis, int block_size=32, str qr_method="reorthogonalized") dict {
    "Compute a pure tall-skinny QR report using local QR panels and a final stacked-R QR."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -5977,13 +5794,13 @@ fn tall_skinny_qr_factor_report(any: basis, int: block_size=32, str: qr_method="
    }
 }
 
-fn tall_skinny_qr_factor(any: basis, int: block_size=32, str: qr_method="reorthogonalized"): list {
+fn tall_skinny_qr_factor(any basis, int block_size=32, str qr_method="reorthogonalized") list {
    "Return [Q, R] from tall_skinny_qr_factor_report."
    def rep = tall_skinny_qr_factor_report(basis, block_size, qr_method)
    [rep.get("q"), rep.get("r")]
 }
 
-fn fused_qr_size_reduce_report(any: basis, int: passes=2, any: eta=0.51, str: qr_method="householder"): dict {
+fn fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_method="householder") dict {
    "Reduce rows using one GSO snapshot per pass and exact integer row operations."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -6076,12 +5893,12 @@ fn fused_qr_size_reduce_report(any: basis, int: passes=2, any: eta=0.51, str: qr
    }
 }
 
-fn fused_qr_size_reduce(any: basis, int: passes=2, any: eta=0.51, str: qr_method="householder"): any {
+fn fused_qr_size_reduce(any basis, int passes=2, any eta=0.51, str qr_method="householder") any {
    "Return the basis from fused_qr_size_reduce_report."
    fused_qr_size_reduce_report(basis, passes, eta, qr_method).get("basis")
 }
 
-fn _flatter_gso_size_reduce_report(any: basis, int: passes=2, any: eta=0.51): dict {
+fn _flatter_gso_size_reduce_report(any basis, int passes=2, any eta=0.51) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -6172,7 +5989,7 @@ fn _flatter_gso_size_reduce_report(any: basis, int: passes=2, any: eta=0.51): di
    }
 }
 
-fn _flatter_gso_size_reduce_compact_report(any: basis, int: passes=2, any: eta=0.51): dict {
+fn _flatter_gso_size_reduce_compact_report(any basis, int passes=2, any eta=0.51) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -6233,7 +6050,7 @@ fn _flatter_gso_size_reduce_compact_report(any: basis, int: passes=2, any: eta=0
    }
 }
 
-fn _flatter_iterated_gso_size_reduce_compact_report(any: basis, int: max_iterations=4, any: eta=0.51): dict {
+fn _flatter_iterated_gso_size_reduce_compact_report(any basis, int max_iterations=4, any eta=0.51) dict {
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(original)
@@ -6293,7 +6110,7 @@ fn _flatter_iterated_gso_size_reduce_compact_report(any: basis, int: max_iterati
    }
 }
 
-fn refined_fused_qr_size_reduce_report(any: basis, int: passes=2, any: eta=0.51, str: qr_method="blocked", int: max_row_repeats=4): dict {
+fn refined_fused_qr_size_reduce_report(any basis, int passes=2, any eta=0.51, str qr_method="blocked", int max_row_repeats=4) dict {
    "Reduce rows with immediate local recomputation after row updates."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -6404,12 +6221,12 @@ fn refined_fused_qr_size_reduce_report(any: basis, int: passes=2, any: eta=0.51,
    }
 }
 
-fn refined_fused_qr_size_reduce(any: basis, int: passes=2, any: eta=0.51, str: qr_method="blocked", int: max_row_repeats=4): any {
+fn refined_fused_qr_size_reduce(any basis, int passes=2, any eta=0.51, str qr_method="blocked", int max_row_repeats=4) any {
    "Return the basis from refined_fused_qr_size_reduce_report."
    refined_fused_qr_size_reduce_report(basis, passes, eta, qr_method, max_row_repeats).get("basis")
 }
 
-fn iterated_fused_qr_size_reduce_report(any: basis, int: max_iterations=4, any: eta=0.51, str: qr_method="householder"): dict {
+fn iterated_fused_qr_size_reduce_report(any basis, int max_iterations=4, any eta=0.51, str qr_method="householder") dict {
    "Iterate fused QR size reduction until the integer transform stabilizes."
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
@@ -6482,12 +6299,12 @@ fn iterated_fused_qr_size_reduce_report(any: basis, int: max_iterations=4, any: 
    }
 }
 
-fn iterated_fused_qr_size_reduce(any: basis, int: max_iterations=4, any: eta=0.51, str: qr_method="householder"): any {
+fn iterated_fused_qr_size_reduce(any basis, int max_iterations=4, any eta=0.51, str qr_method="householder") any {
    "Return the basis from iterated_fused_qr_size_reduce_report."
    iterated_fused_qr_size_reduce_report(basis, max_iterations, eta, qr_method).get("basis")
 }
 
-fn short_row_prepass_report(any: basis, bool: track_transform=true): dict {
+fn short_row_prepass_report(any basis, bool track_transform=true) dict {
    "Find the shortest existing row and move it to the front with one exact row swap."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -6535,12 +6352,12 @@ fn short_row_prepass_report(any: basis, bool: track_transform=true): dict {
    }
 }
 
-fn short_row_prepass(any: basis): any {
+fn short_row_prepass(any basis) any {
    "Return the basis from short_row_prepass_report."
    short_row_prepass_report(basis).get("basis")
 }
 
-fn banded_triplet_prepass_report(any: basis, int: max_gap=8, int: coeff_bound=4): dict {
+fn banded_triplet_prepass_report(any basis, int max_gap=8, int coeff_bound=4) dict {
    "Scan local row triples for a short exact band relation and report the unimodular transform."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -6654,12 +6471,12 @@ fn banded_triplet_prepass_report(any: basis, int: max_gap=8, int: coeff_bound=4)
    }
 }
 
-fn banded_triplet_prepass(any: basis, int: max_gap=8, int: coeff_bound=4): any {
+fn banded_triplet_prepass(any basis, int max_gap=8, int coeff_bound=4) any {
    "Return the basis from banded_triplet_prepass_report."
    banded_triplet_prepass_report(basis, max_gap, coeff_bound).get("basis")
 }
 
-fn _flatter_norm_sort_report(any: basis, bool: track_transform=true): dict {
+fn _flatter_norm_sort_report(any basis, bool track_transform=true) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    mut rows = _flatter_clone_rows(a)
@@ -6719,7 +6536,7 @@ fn _flatter_norm_sort_report(any: basis, bool: track_transform=true): dict {
    }
 }
 
-fn _flatter_fixed_dot(list: a, list: b): bigint {
+fn _flatter_fixed_dot(list a, list b) bigint {
    mut s = bf_zero()
    mut i = 0
    while(i < a.len){
@@ -6729,7 +6546,7 @@ fn _flatter_fixed_dot(list: a, list: b): bigint {
    s
 }
 
-fn _flatter_fixed_gram_report(any: basis, any: exact_gram): dict {
+fn _flatter_fixed_gram_report(any basis, any exact_gram) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -6765,7 +6582,7 @@ fn _flatter_fixed_gram_report(any: basis, any: exact_gram): dict {
    }
 }
 
-fn _flatter_float_dot(list: a, list: b): f64 {
+fn _flatter_float_dot(list a, list b) f64 {
    mut s = 0.0
    mut i = 0
    while(i < a.len){
@@ -6775,7 +6592,7 @@ fn _flatter_float_dot(list: a, list: b): f64 {
    s
 }
 
-fn _flatter_compensated_float_dot(list: a, list: b): list {
+fn _flatter_compensated_float_dot(list a, list b) list {
    mut sum = 0.0
    mut comp = 0.0
    mut i = 0
@@ -6793,7 +6610,7 @@ fn _flatter_compensated_float_dot(list: a, list: b): list {
    [sum + comp, comp]
 }
 
-fn _flatter_float_gram_report(any: basis, any: exact_gram, bool: compensated=false): dict {
+fn _flatter_float_gram_report(any basis, any exact_gram, bool compensated=false) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -6836,25 +6653,25 @@ fn _flatter_float_gram_report(any: basis, any: exact_gram, bool: compensated=fal
    }
 }
 
-fn _flatter_dd_quick_two_sum(f64: a, f64: b): list {
+fn _flatter_dd_quick_two_sum(f64 a, f64 b) list {
    def s = a + b
    [s, b - (s - a)]
 }
 
-fn _flatter_dd_two_sum(f64: a, f64: b): list {
+fn _flatter_dd_two_sum(f64 a, f64 b) list {
    def s = a + b
    def bb = s - a
    [s, (a - (s - bb)) + (b - bb)]
 }
 
-fn _flatter_dd_split(f64: a): list {
+fn _flatter_dd_split(f64 a) list {
    def c = 134217729.0 * a
    def abig = c - a
    def hi = c - abig
    [hi, a - hi]
 }
 
-fn _flatter_dd_two_prod(f64: a, f64: b): list {
+fn _flatter_dd_two_prod(f64 a, f64 b) list {
    def p = a * b
    def asplit = _flatter_dd_split(a)
    def bsplit = _flatter_dd_split(b)
@@ -6865,18 +6682,18 @@ fn _flatter_dd_two_prod(f64: a, f64: b): list {
    [p, ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo]
 }
 
-fn _flatter_dd_renorm(f64: hi, f64: lo): list {
+fn _flatter_dd_renorm(f64 hi, f64 lo) list {
    _flatter_dd_quick_two_sum(hi, lo)
 }
 
-fn _flatter_dd_add(list: a, list: b): list {
+fn _flatter_dd_add(list a, list b) list {
    def s = _flatter_dd_two_sum(float(a.get(0)), float(b.get(0)))
    def t = _flatter_dd_two_sum(float(a.get(1)), float(b.get(1)))
    def u = _flatter_dd_two_sum(float(s.get(0)), float(t.get(0)))
    _flatter_dd_renorm(float(u.get(0)), float(s.get(1)) + float(t.get(1)) + float(u.get(1)))
 }
 
-fn _flatter_double_double_dot(list: a, list: b): list {
+fn _flatter_double_double_dot(list a, list b) list {
    mut acc = [0.0, 0.0]
    mut i = 0
    while(i < a.len){
@@ -6886,7 +6703,7 @@ fn _flatter_double_double_dot(list: a, list: b): list {
    acc
 }
 
-fn _flatter_double_double_gram_report(any: basis, any: exact_gram): dict {
+fn _flatter_double_double_gram_report(any basis, any exact_gram) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -6931,7 +6748,7 @@ fn _flatter_double_double_gram_report(any: basis, any: exact_gram): dict {
    }
 }
 
-fn _flatter_expansion_sum(list: e, f64: x): list {
+fn _flatter_expansion_sum(list e, f64 x) list {
    mut q = x
    mut out = []
    mut i = 0
@@ -6946,7 +6763,7 @@ fn _flatter_expansion_sum(list: e, f64: x): list {
    out
 }
 
-fn _flatter_quad_double_from_expansion(list: e): list {
+fn _flatter_quad_double_from_expansion(list e) list {
    mut out = [0.0, 0.0, 0.0, 0.0]
    mut oi = 0
    mut i = e.len - 1
@@ -6958,7 +6775,7 @@ fn _flatter_quad_double_from_expansion(list: e): list {
    out
 }
 
-fn _flatter_quad_double_dot(list: a, list: b): list {
+fn _flatter_quad_double_dot(list a, list b) list {
    mut exp = []
    mut i = 0
    while(i < a.len){
@@ -6970,7 +6787,7 @@ fn _flatter_quad_double_dot(list: a, list: b): list {
    _flatter_quad_double_from_expansion(exp)
 }
 
-fn _flatter_quad_double_value(list: q): f64 {
+fn _flatter_quad_double_value(list q) f64 {
    mut s = 0.0
    mut i = 0
    while(i < q.len){
@@ -6980,7 +6797,7 @@ fn _flatter_quad_double_value(list: q): f64 {
    s
 }
 
-fn _flatter_quad_double_gram_report(any: basis, any: exact_gram): dict {
+fn _flatter_quad_double_gram_report(any basis, any exact_gram) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -7022,14 +6839,14 @@ fn _flatter_quad_double_gram_report(any: basis, any: exact_gram): dict {
    }
 }
 
-fn lattice_quad_double_gram_report(any: basis): dict {
+fn lattice_quad_double_gram_report(any basis) dict {
    "Report quad-double expansion Gram arithmetic for one lattice basis."
    def a = _flatter_reduce_matrix(basis)
    def exact = lattice_matmul_report(a, matrix.matrix_transpose(a))
    _flatter_quad_double_gram_report(a, exact.get("matrix")).set("exact", exact)
 }
 
-fn _flatter_dpe_from_z(any: x): dict {
+fn _flatter_dpe_from_z(any x) dict {
    def z = Z(x)
    if(z == Z(0)){
       return {"sign": 0, "mantissa": 0.0, "exponent2": 0, "log2_abs": 0.0}
@@ -7045,7 +6862,7 @@ fn _flatter_dpe_from_z(any: x): dict {
    }
 }
 
-fn _flatter_dpe_gram_report(any: exact_gram): dict {
+fn _flatter_dpe_gram_report(any exact_gram) dict {
    def t0 = ticks()
    def g = _flatter_reduce_matrix(exact_gram)
    def rows = _flatter_matrix_rows(g)
@@ -7089,14 +6906,14 @@ fn _flatter_dpe_gram_report(any: exact_gram): dict {
    }
 }
 
-fn lattice_dpe_gram_report(any: basis): dict {
+fn lattice_dpe_gram_report(any basis) dict {
    "Report DPE-style exponent profiles for the exact Gram matrix of one lattice basis."
    def a = _flatter_reduce_matrix(basis)
    def exact = lattice_matmul_report(a, matrix.matrix_transpose(a))
    _flatter_dpe_gram_report(exact.get("matrix")).set("exact", exact)
 }
 
-fn lattice_numeric_backend_report(any: basis, str: qr_method="householder", int: reduce_passes=1): dict {
+fn lattice_numeric_backend_report(any basis, str qr_method="householder", int reduce_passes=1) dict {
    "Report exact, fixed-point, and floating numeric backend behavior on one lattice basis."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -7144,7 +6961,7 @@ fn lattice_numeric_backend_report(any: basis, str: qr_method="householder", int:
    }
 }
 
-fn lattice_high_precision_fixture_report(): dict {
+fn lattice_high_precision_fixture_report() dict {
    "Report high-precision numeric fixture coverage for cancellation, huge exponents, and QR panel kernels."
    def t0 = ticks()
    def cancellation_basis = matrix.Matrix([
@@ -7212,7 +7029,7 @@ fn lattice_high_precision_fixture_report(): dict {
    }
 }
 
-fn precision_matrix_kernel_report(any: basis, str: qr_method="householder", int: reduce_passes=1): dict {
+fn precision_matrix_kernel_report(any basis, str qr_method="householder", int reduce_passes=1) dict {
    "Report fixed-point numeric kernels used by QR, Gram, and size-reduction paths."
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
@@ -7244,7 +7061,7 @@ fn precision_matrix_kernel_report(any: basis, str: qr_method="householder", int:
    }
 }
 
-fn hlll_reduce_report(any: basis, any: delta=0.99, int: max_rounds=2, any: eta=0.51): dict {
+fn hlll_reduce_report(any basis, any delta=0.99, int max_rounds=2, any eta=0.51) dict {
    "Householder-guided LLL report with QR snapshots, exact row transforms, and verification."
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
@@ -7314,18 +7131,20 @@ fn hlll_reduce_report(any: basis, any: delta=0.99, int: max_rounds=2, any: eta=0
    }
 }
 
-fn hlll_reduce(any: basis, any: delta=0.99, int: max_rounds=2, any: eta=0.51): any {
+fn hlll_reduce(any basis, any delta=0.99, int max_rounds=2, any eta=0.51) any {
    "Return the basis from hlll_reduce_report."
    hlll_reduce_report(basis, delta, max_rounds, eta).get("basis")
 }
 
-fn _flatter_skip(str: reason): dict { {"skipped": true, "reason": reason} }
+fn _flatter_skip(str reason) dict { {"skipped": true, "reason": reason} }
 
-fn _flatter_first_norm(any: basis, int: rows): any { rows > 0 ? _flatter_dot_z(_flatter_matrix_data(basis).get(0), _flatter_matrix_data(basis).get(0)) : Z(0) }
+fn _flatter_skipped_profile_goal() dict { {"method": "profile-goal", "satisfied": false, "skipped": true} }
 
-fn _flatter_profile_stub(any: basis, int: rows): dict { {"profile": [_flatter_first_norm(basis, rows)], "profile_slope": 0.0} }
+fn _flatter_first_norm(any basis, int rows) any { rows > 0 ? _flatter_dot_z(_flatter_matrix_data(basis).get(0), _flatter_matrix_data(basis).get(0)) : Z(0) }
 
-fn _flatter_prepass_exit_report(str: compression, str: reason, any: delta, int: max_rounds, any: eta, list: prepass_reports, bool: triangular_prepass, int: op_count, any: transform, bool: transform_verified, any: basis, any: started_at, bool: verification_skipped=false): dict {
+fn _flatter_profile_stub(any basis, int rows) dict { {"profile": [_flatter_first_norm(basis, rows)], "profile_slope": 0.0} }
+
+fn _flatter_prepass_exit_report(str compression, str reason, any delta, int max_rounds, any eta, list prepass_reports, bool triangular_prepass, int op_count, any transform, bool transform_verified, any basis, any started_at, bool verification_skipped=false) dict {
    mut out = {
       "method": "flatter-profile",
       "compression": compression,
@@ -7363,11 +7182,11 @@ fn _flatter_prepass_exit_report(str: compression, str: reason, any: delta, int: 
    out
 }
 
-fn _flatter_chain_prepass_transform(any: current, any: next, bool: has_previous): any {
+fn _flatter_chain_prepass_transform(any current, any next, bool has_previous) any {
    has_previous ? _flatter_matmul(next, current) : next
 }
 
-fn _flatter_basic_prepass_summary(dict: rep, str: default_method, int: op_count, any: first_norm_after): dict {
+fn _flatter_basic_prepass_summary(dict rep, str default_method, int op_count, any first_norm_after) dict {
    {
       "method": rep.get("method", default_method),
       "op_count": op_count,
@@ -7377,7 +7196,7 @@ fn _flatter_basic_prepass_summary(dict: rep, str: default_method, int: op_count,
    }
 }
 
-fn _flatter_pair_prepass_summary(dict: pair, int: pair_ops, any: first_before, any: first_after, bool: include_tracking=false): dict {
+fn _flatter_pair_prepass_summary(dict pair, int pair_ops, any first_before, any first_after, bool include_tracking=false) dict {
    mut out = {
       "method": pair.get("method", "lagrange-row-pair-reduction"),
       "window": pair.get("window", 0),
@@ -7396,7 +7215,7 @@ fn _flatter_pair_prepass_summary(dict: pair, int: pair_ops, any: first_before, a
    out
 }
 
-fn _flatter_triplet_prepass_summary(dict: triplet, int: triplet_ops, any: first_before, any: first_after): dict {
+fn _flatter_triplet_prepass_summary(dict triplet, int triplet_ops, any first_before, any first_after) dict {
    {
       "method": triplet.get("method", "banded-triplet-prepass"),
       "max_gap": triplet.get("max_gap", 0),
@@ -7415,7 +7234,7 @@ fn _flatter_triplet_prepass_summary(dict: triplet, int: triplet_ops, any: first_
    }
 }
 
-fn _flatter_triangular_bounded_prepass_summary(dict: direct, str: method, any: best_before, any: best_after, bool: tracked, bool: verified, bool: skipped): dict {
+fn _flatter_triangular_bounded_prepass_summary(dict direct, str method, any best_before, any best_after, bool tracked, bool verified, bool skipped) dict {
    {
       "method": method,
       "delta": direct.get("delta", 0.0),
@@ -7435,7 +7254,7 @@ fn _flatter_triangular_bounded_prepass_summary(dict: direct, str: method, any: b
    }
 }
 
-fn _flatter_triangular_unit_column_prepass_report(any: a, any: before_best, any: before_first, any: t0): dict {
+fn _flatter_triangular_unit_column_prepass_report(any a, any before_best, any before_first, any t0) dict {
    def rows = _flatter_matrix_rows(a)
    def cols = _flatter_matrix_cols(a)
    def data = _flatter_matrix_data(a)
@@ -7517,7 +7336,7 @@ fn _flatter_triangular_unit_column_prepass_report(any: a, any: before_best, any:
    }
 }
 
-fn _flatter_triangular_column_bounded_prepass_report(any: basis, int: step_budget=80000, any: delta=0.97, any: eta=0.60): dict {
+fn _flatter_triangular_column_bounded_prepass_report(any basis, int step_budget=80000, any delta=0.97, any eta=0.60) dict {
    def t0 = ticks()
    def a = _flatter_reduce_matrix(basis)
    def rows = _flatter_matrix_rows(a)
@@ -7576,7 +7395,7 @@ fn _flatter_triangular_column_bounded_prepass_report(any: basis, int: step_budge
    }
 }
 
-fn _flatter_small_direct_round(str: small_method, any: small_delta, dict: small, any: work, int: rows, any: first_before_sort, bool: track_transform): dict {
+fn _flatter_small_direct_round(str small_method, any small_delta, dict small, any work, int rows, any first_before_sort, bool track_transform) dict {
    {
       "round": 1,
       "compression_method": small_method == "bounded-fast-no-transform" ? "direct-lll-no-transform" : "direct-lll",
@@ -7596,7 +7415,7 @@ fn _flatter_small_direct_round(str: small_method, any: small_delta, dict: small,
    }
 }
 
-fn _flatter_small_direct_report(any: delta, int: max_rounds, any: eta, list: prepass_reports, bool: triangular_prepass, int: total_prepass_ops, str: small_method, any: small_delta, dict: small, dict: small_sort, int: small_sort_ops, any: total_transform, any: work, int: rows, any: first_before_sort, any: t0, bool: track_transform): dict {
+fn _flatter_small_direct_report(any delta, int max_rounds, any eta, list prepass_reports, bool triangular_prepass, int total_prepass_ops, str small_method, any small_delta, dict small, dict small_sort, int small_sort_ops, any total_transform, any work, int rows, any first_before_sort, any t0, bool track_transform) dict {
    def reason = "small direct LLL path"
    {
       "method": "flatter-profile",
@@ -7638,7 +7457,7 @@ fn _flatter_small_direct_report(any: delta, int: max_rounds, any: eta, list: pre
    }
 }
 
-fn _flatter_round_summary(int: round_index, dict: fused, dict: rep, any: round_delta, any: prev_first, any: first, any: round_shape, dict: round_goal): dict {
+fn _flatter_round_summary(int round_index, dict fused, dict rep, any round_delta, any prev_first, any first, any round_shape, dict round_goal) dict {
    {
       "round": round_index,
       "compression_method": fused.get("method", ""),
@@ -7665,7 +7484,7 @@ fn _flatter_round_summary(int: round_index, dict: fused, dict: rep, any: round_d
    }
 }
 
-fn _flatter_round_fused(any: work, any: eta, bool: triangular_round_path, bool: track_transform): dict {
+fn _flatter_round_fused(any work, any eta, bool triangular_round_path, bool track_transform) dict {
    if(triangular_round_path && !track_transform){
       return {
          "method": "triangular-direct-no-fused",
@@ -7680,18 +7499,18 @@ fn _flatter_round_fused(any: work, any: eta, bool: triangular_round_path, bool: 
    triangular_round_path ? _flatter_iterated_gso_size_reduce_compact_report(work, 2, eta) : iterated_fused_qr_size_reduce_report(work, 2, eta, "gso")
 }
 
-fn _flatter_round_delta(any: delta, int: rows, bool: triangular_round_path, bool: triangular_warmup_prepass, bool: track_transform): any {
+fn _flatter_round_delta(any delta, int rows, bool triangular_round_path, bool triangular_warmup_prepass, bool track_transform) any {
    if(triangular_round_path && !track_transform && rows >= 64){ return 0.97 }
    if(!triangular_round_path || float(delta) <= 0.75){ return delta }
    if(!track_transform && rows >= 24 && rows < 64){ return triangular_warmup_prepass ? 0.75 : 0.86076 }
    rows >= 24 ? 0.90 : 0.75
 }
 
-fn _flatter_round_eta(any: eta, int: rows, bool: triangular_round_path, bool: track_transform): any {
+fn _flatter_round_eta(any eta, int rows, bool triangular_round_path, bool track_transform) any {
    triangular_round_path && !track_transform && rows >= 24 ? 0.60 : eta
 }
 
-fn _flatter_round_lll(dict: fused, int: rows, int: cols, any: delta, any: eta, bool: triangular_round_path, bool: triangular_warmup_prepass, bool: track_transform, int: round_index=1): dict {
+fn _flatter_round_lll(dict fused, int rows, int cols, any delta, any eta, bool triangular_round_path, bool triangular_warmup_prepass, bool track_transform, int round_index=1) dict {
    def round_delta = _flatter_round_delta(delta, rows, triangular_round_path, triangular_warmup_prepass, track_transform)
    def round_eta = _flatter_round_eta(eta, rows, triangular_round_path, track_transform)
    def bounded_triangular = triangular_round_path && (rows >= 64 || !track_transform)
@@ -7703,7 +7522,7 @@ fn _flatter_round_lll(dict: fused, int: rows, int: cols, any: delta, any: eta, b
    {"rep": rep, "round_delta": round_delta}
 }
 
-fn _flatter_round_transform(any: total_transform, dict: fused, dict: rep): any {
+fn _flatter_round_transform(any total_transform, dict fused, dict rep) any {
    if(total_transform != nil && rep.get("transform_tracked", false)){
       def round_transform = _flatter_matmul(rep.get("transform"), fused.get("transform"))
       return _flatter_matmul(round_transform, total_transform)
@@ -7711,7 +7530,7 @@ fn _flatter_round_transform(any: total_transform, dict: fused, dict: rep): any {
    rep.get("transform_tracked", false) ? total_transform : nil
 }
 
-fn _flatter_round_sort(any: work, bool: triangular_round_path, bool: track_transform, int: rows): dict {
+fn _flatter_round_sort(any work, bool triangular_round_path, bool track_transform, int rows) dict {
    mut sorted = dict(0)
    mut ops = 0
    if(triangular_round_path && !track_transform && rows >= 64){
@@ -7722,9 +7541,9 @@ fn _flatter_round_sort(any: work, bool: triangular_round_path, bool: track_trans
    {"basis": work, "report": sorted, "op_count": ops}
 }
 
-fn _flatter_round_profile_goal(any: work, str: goal_target, any: goal_value, bool: goal_proved, bool: skip_profile): list {
+fn _flatter_round_profile_goal(any work, str goal_target, any goal_value, bool goal_proved, bool skip_profile) list {
    mut round_shape = _flatter_skip("triangular no-transform fast summary")
-   mut round_goal = {"method": "profile-goal", "satisfied": false, "skipped": true}
+   mut round_goal = _flatter_skipped_profile_goal()
    if(!skip_profile){
       round_shape = profile_shape_report(work)
       round_goal = profile_goal_report(round_shape, goal_target, goal_value, goal_proved)
@@ -7732,7 +7551,7 @@ fn _flatter_round_profile_goal(any: work, str: goal_target, any: goal_value, boo
    [round_shape, round_goal]
 }
 
-fn _flatter_round_next_state(str: stopped_reason, dict: round_goal, dict: rep, dict: fused, any: first, any: prev_first, bool: stop_on_goal, bool: triangular_round_path, bool: track_transform, int: rows): list {
+fn _flatter_round_next_state(str stopped_reason, dict round_goal, dict rep, dict fused, any first, any prev_first, bool stop_on_goal, bool triangular_round_path, bool track_transform, int rows) list {
    if(bool(stop_on_goal) && round_goal.get("satisfied", false)){ return [false, "profile-goal-after-round"] }
    if(!rep.get("reduction_complete", true) && !(triangular_round_path && !track_transform && rows >= 64)){ return [false, "lll-" + rep.get("incomplete_reason", "incomplete")] }
    if(triangular_round_path && !track_transform && rows < 64){ return [false, "triangular-no-transform-one-round"] }
@@ -7740,7 +7559,7 @@ fn _flatter_round_next_state(str: stopped_reason, dict: round_goal, dict: rep, d
    [changed, changed ? stopped_reason : "fixed-point"]
 }
 
-fn _flatter_reduce_round(any: work_in, any: total_transform_in, int: rows, int: cols, any: delta, any: eta, str: goal_target, any: goal_value, bool: goal_proved, bool: stop_on_goal, bool: track_transform, bool: triangular_round_path, bool: triangular_fast_summary, bool: triangular_warmup_prepass, any: prev_first, int: round_index, str: stopped_reason): dict {
+fn _flatter_reduce_round(any work_in, any total_transform_in, int rows, int cols, any delta, any eta, str goal_target, any goal_value, bool goal_proved, bool stop_on_goal, bool track_transform, bool triangular_round_path, bool triangular_fast_summary, bool triangular_warmup_prepass, any prev_first, int round_index, str stopped_reason) dict {
    def fused = _flatter_round_fused(work_in, eta, triangular_round_path, track_transform)
    def lll = _flatter_round_lll(fused, rows, cols, delta, eta, triangular_round_path, triangular_warmup_prepass, track_transform, round_index)
    def rep = lll.get("rep")
@@ -7763,13 +7582,13 @@ fn _flatter_reduce_round(any: work_in, any: total_transform_in, int: rows, int: 
 }
 
 fn _flatter_final_report(
-   any: delta, int: max_rounds, any: eta, str: goal_target, any: goal_value,
-   bool: goal_proved, bool: stop_on_goal, str: stopped_reason, list: rounds,
-   list: prepass_reports, bool: triangular_prepass, bool: triangular_warmup_prepass,
-   int: total_fused_ops, int: total_prepass_ops, dict: final_sort, int: final_sort_ops,
-   int: total_lll_steps, dict: before, dict: after, dict: before_shape, dict: after_shape,
-   dict: goal_before, dict: goal_after, any: total_transform, any: applied, any: work, any: started_at,
-): dict {
+   any delta, int max_rounds, any eta, str goal_target, any goal_value,
+   bool goal_proved, bool stop_on_goal, str stopped_reason, list rounds,
+   list prepass_reports, bool triangular_prepass, bool triangular_warmup_prepass,
+   int total_fused_ops, int total_prepass_ops, dict final_sort, int final_sort_ops,
+   int total_lll_steps, dict before, dict after, dict before_shape, dict after_shape,
+   dict goal_before, dict goal_after, any total_transform, any applied, any work, any started_at,
+) dict {
    {
       "method": "flatter-profile",
       "compression": "iterated-fused-qr",
@@ -7820,7 +7639,7 @@ fn _flatter_final_report(
    }
 }
 
-fn _flatter_small_direct_path(any: delta, int: max_rounds, any: eta, list: prepass_reports, bool: triangular_prepass, int: total_prepass_ops, bool: track_transform, any: work_in, any: total_transform_in, int: rows, any: first_before_sort, any: started_at): dict {
+fn _flatter_small_direct_path(any delta, int max_rounds, any eta, list prepass_reports, bool triangular_prepass, int total_prepass_ops, bool track_transform, any work_in, any total_transform_in, int rows, any first_before_sort, any started_at) dict {
    mut work = work_in
    mut total_transform = total_transform_in
    mut prepass_ops = total_prepass_ops
@@ -7860,7 +7679,7 @@ fn _flatter_small_direct_path(any: delta, int: max_rounds, any: eta, list: prepa
    _flatter_small_direct_report(delta, max_rounds, eta, prepass_reports, triangular_prepass, prepass_ops, small_method, small_delta, small, small_sort, small_sort_ops, total_transform, work, rows, first_before_sort, started_at, track_transform)
 }
 
-fn _flatter_bounded_direct_path(any: delta, int: max_rounds, any: eta, list: prepass_reports, bool: triangular_prepass, int: total_prepass_ops, any: work_in, int: rows, int: budget, any: first_before_sort, any: started_at, str: reason): dict {
+fn _flatter_bounded_direct_path(any delta, int max_rounds, any eta, list prepass_reports, bool triangular_prepass, int total_prepass_ops, any work_in, int rows, int budget, any first_before_sort, any started_at, str reason) dict {
    def direct = lll_backend.lll_reduce_bounded_report(work_in, max(64, budget), delta, "bounded-int-no-transform", eta)
    mut work = direct.get("basis")
    def sorted = short_row_prepass_report(work, false)
@@ -7873,7 +7692,7 @@ fn _flatter_bounded_direct_path(any: delta, int: max_rounds, any: eta, list: pre
    out
 }
 
-fn _flatter_triangular_bounded_direct_path(any: delta, int: max_rounds, any: eta, list: prepass_reports, bool: triangular_prepass, int: total_prepass_ops, any: work_in, int: rows, int: chunk_budget, int: max_chunks, any: first_before_sort, any: started_at, str: reason): dict {
+fn _flatter_triangular_bounded_direct_path(any delta, int max_rounds, any eta, list prepass_reports, bool triangular_prepass, int total_prepass_ops, any work_in, int rows, int chunk_budget, int max_chunks, any first_before_sort, any started_at, str reason) dict {
    def direct = triangular_bounded_lll_prepass_report(work_in, chunk_budget, max_chunks, 0.75, 0.60, false)
    def work = direct.get("basis")
    def best_after = direct.get("best_norm_after", _flatter_best_norm_sq(work))
@@ -7888,7 +7707,7 @@ fn _flatter_triangular_bounded_direct_path(any: delta, int: max_rounds, any: eta
    out
 }
 
-fn _flatter_triangular_prepass_path(any: work_in, any: total_transform_in, int: rows, int: max_rounds, any: eta, bool: track_transform, list: prepass_reports_in, int: total_prepass_ops_in): dict {
+fn _flatter_triangular_prepass_path(any work_in, any total_transform_in, int rows, int max_rounds, any eta, bool track_transform, list prepass_reports_in, int total_prepass_ops_in) dict {
    mut work = work_in
    mut total_transform = total_transform_in
    mut prepass_reports = prepass_reports_in
@@ -7979,11 +7798,11 @@ fn _flatter_triangular_prepass_path(any: work_in, any: total_transform_in, int: 
 }
 
 fn _flatter_reduction_rounds(
-   any: work_in, any: total_transform_in, int: rows, int: cols, any: delta, int: max_rounds, any: eta,
-   str: goal_target, any: goal_value, bool: goal_proved, bool: stop_on_goal, bool: track_transform,
-   bool: triangular_round_path, bool: triangular_fast_summary, bool: triangular_warmup_prepass,
-   dict: goal_before, dict: before, list: prepass_reports,
-): dict {
+   any work_in, any total_transform_in, int rows, int cols, any delta, int max_rounds, any eta,
+   str goal_target, any goal_value, bool goal_proved, bool stop_on_goal, bool track_transform,
+   bool triangular_round_path, bool triangular_fast_summary, bool triangular_warmup_prepass,
+   dict goal_before, dict before, list prepass_reports,
+) dict {
    mut work = work_in
    mut total_transform = total_transform_in
    mut goal_after, rounds = goal_before, []
@@ -8013,11 +7832,11 @@ fn _flatter_reduction_rounds(
 }
 
 fn _flatter_round_path_report(
-   any: original, any: work_in, any: total_transform_in, int: rows, int: cols,
-   any: delta, int: max_rounds, any: eta, str: goal_target, any: goal_value,
-   bool: goal_proved, bool: stop_on_goal, bool: track_transform,
-   list: prepass_reports_in, bool: triangular_prepass_in, int: total_prepass_ops_in, any: t0
-): dict {
+   any original, any work_in, any total_transform_in, int rows, int cols,
+   any delta, int max_rounds, any eta, str goal_target, any goal_value,
+   bool goal_proved, bool stop_on_goal, bool track_transform,
+   list prepass_reports_in, bool triangular_prepass_in, int total_prepass_ops_in, any t0
+) dict {
    mut work = work_in
    mut total_transform = total_transform_in
    mut prepass_reports = prepass_reports_in
@@ -8044,7 +7863,7 @@ fn _flatter_round_path_report(
    def bounded_triangular_stop = track_transform && prepass_reports.len > 0 && prepass_reports.get(prepass_reports.len - 1).get("method", "") == "triangular-bounded-lll-prepass"
    def skip_profile_summary = triangular_fast_summary || bounded_triangular_stop || (triangular_round_path && !stop_on_goal && rows >= 32) || (!track_transform && !stop_on_goal && rows >= 48)
    mut before_shape, before = _flatter_skip("no-transform fast summary"), _flatter_profile_stub(work, rows)
-   mut goal_before = {"method": "profile-goal", "satisfied": false, "skipped": true}
+   mut goal_before = _flatter_skipped_profile_goal()
    if(!skip_profile_summary){
       before_shape = profile_shape_report(work)
       before = before_shape.get("gso")
@@ -8098,14 +7917,14 @@ fn _flatter_round_path_report(
    out
 }
 
-fn _flatter_prepass_state(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: exit=false, any: report=nil, bool: qary_found=false): dict {
+fn _flatter_prepass_state(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool exit=false, any report=nil, bool qary_found=false) dict {
    {
       "work": work, "transform": total_transform, "reports": prepass_reports,
       "op_count": total_prepass_ops, "exit": exit, "report": report, "qary_found": qary_found
    }
 }
 
-fn _flatter_zero_rank_report(any: delta, int: max_rounds, any: eta, int: rows, int: cols, any: started_at): dict {
+fn _flatter_zero_rank_report(any delta, int max_rounds, any eta, int rows, int cols, any started_at) dict {
    {
       "method": "flatter-profile",
       "compression": "zero-rank",
@@ -8147,7 +7966,7 @@ fn _flatter_zero_rank_report(any: delta, int: max_rounds, any: eta, int: rows, i
    }
 }
 
-fn _flatter_upper_qary_scaled_transform_report(any: original, int: split, any: delta, int: max_rounds, any: eta, str: goal_target, any: goal_value, bool: goal_proved, bool: stop_on_goal, any: started_at): dict {
+fn _flatter_upper_qary_scaled_transform_report(any original, int split, any delta, int max_rounds, any eta, str goal_target, any goal_value, bool goal_proved, bool stop_on_goal, any started_at) dict {
    def oriented = _flatter_qary_blockswap_orientation(original, split)
    def first_before = _flatter_best_norm_sq(original)
    def shifts = _flatter_qary_uniform_column_shifts(oriented, split, 74)
@@ -8204,7 +8023,7 @@ fn _flatter_upper_qary_scaled_transform_report(any: original, int: split, any: d
    out
 }
 
-fn _flatter_upper_qary_orientation_report(any: original, int: split, any: delta, int: max_rounds, any: eta, str: goal_target, any: goal_value, bool: goal_proved, bool: stop_on_goal, any: started_at): dict {
+fn _flatter_upper_qary_orientation_report(any original, int split, any delta, int max_rounds, any eta, str goal_target, any goal_value, bool goal_proved, bool stop_on_goal, any started_at) dict {
    def oriented = _flatter_qary_blockswap_orientation(original, split)
    def inner_t0 = ticks()
    def first_before = _flatter_dot_z(_flatter_matrix_data(oriented).get(0), _flatter_matrix_data(oriented).get(0))
@@ -8334,7 +8153,7 @@ fn _flatter_upper_qary_orientation_report(any: original, int: split, any: delta,
    out
 }
 
-fn _flatter_ntru2_prepass(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: triangular_prepass, bool: track_transform, any: delta, int: max_rounds, any: eta, any: t0): dict {
+fn _flatter_ntru2_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
    def classic = _flatter_ntru_sum_relation_prepass_report(work, track_transform)
    if(classic.get("found", false)){
       work = classic.get("basis")
@@ -8356,7 +8175,7 @@ fn _flatter_ntru2_prepass(any: work, any: total_transform, list: prepass_reports
    _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops)
 }
 
-fn _flatter_qary_prepasses(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: triangular_prepass, int: rows, bool: lower_before_initial, bool: skip_general_prepasses, bool: track_transform, any: delta, int: max_rounds, any: eta, any: t0): dict {
+fn _flatter_qary_prepasses(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, int rows, bool lower_before_initial, bool skip_general_prepasses, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
    mut qary = {"found": false}
    if(!skip_general_prepasses){ qary = _flatter_qary_relation_prepass_report(work, "qary-relation-prepass", false, track_transform) }
    if(qary.get("found", false)){
@@ -8387,7 +8206,7 @@ fn _flatter_qary_prepasses(any: work, any: total_transform, list: prepass_report
    _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops, false, nil, qary.get("found", false))
 }
 
-fn _flatter_short_prepass(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: triangular_prepass, int: rows, bool: lower_before, bool: skip_general_prepasses, bool: track_transform, any: first_before_sort, any: delta, int: max_rounds, any: eta, any: t0): dict {
+fn _flatter_short_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, int rows, bool lower_before, bool skip_general_prepasses, bool track_transform, any first_before_sort, any delta, int max_rounds, any eta, any t0) dict {
    mut short = dict(0)
    mut first_after_short = first_before_sort
    mut short_swapped = false
@@ -8415,7 +8234,7 @@ fn _flatter_short_prepass(any: work, any: total_transform, list: prepass_reports
    out
 }
 
-fn _flatter_triplet_pair_prepass(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: triangular_prepass, int: rows, bool: lower_before, any: first_before_sort, any: first_after_short, bool: track_transform, any: delta, int: max_rounds, any: eta, any: t0): dict {
+fn _flatter_triplet_pair_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, int rows, bool lower_before, any first_before_sort, any first_after_short, bool track_transform, any delta, int max_rounds, any eta, any t0) dict {
    if(rows < 24 || lower_before){ return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
    if(rows == 32 || rows == 64 || (rows <= 128 && _flatter_is_local_banded(work, 4))){
       def triplet = banded_triplet_prepass_report(work, rows >= 64 ? 4 : 3, 2)
@@ -8446,7 +8265,7 @@ fn _flatter_triplet_pair_prepass(any: work, any: total_transform, list: prepass_
    _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops)
 }
 
-fn _flatter_norm_sort_prepass(any: work, any: total_transform, list: prepass_reports, int: total_prepass_ops, bool: triangular_prepass, bool: skip_general_prepasses, bool: track_transform, any: first_before_sort, any: delta, int: max_rounds, any: eta, any: t0): dict {
+fn _flatter_norm_sort_prepass(any work, any total_transform, list prepass_reports, int total_prepass_ops, bool triangular_prepass, bool skip_general_prepasses, bool track_transform, any first_before_sort, any delta, int max_rounds, any eta, any t0) dict {
    if(skip_general_prepasses){ return _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops) }
    def sorted = _flatter_norm_sort_report(work, track_transform)
    def first_after_sort = sorted.get("first_norm_after", first_before_sort)
@@ -8461,7 +8280,7 @@ fn _flatter_norm_sort_prepass(any: work, any: total_transform, list: prepass_rep
    _flatter_prepass_state(work, total_transform, prepass_reports, total_prepass_ops)
 }
 
-fn flatter_reduce_report(any: basis, any: delta=0.99, int: max_rounds=3, any: eta=0.51, str: goal_target="slope", any: goal_value=nil, bool: goal_proved=false, bool: stop_on_goal=false, bool: track_transform=true): dict {
+fn flatter_reduce_report(any basis, any delta=0.99, int max_rounds=3, any eta=0.51, str goal_target="slope", any goal_value=nil, bool goal_proved=false, bool stop_on_goal=false, bool track_transform=true) dict {
    "Flatter-style large-basis reduction report with profile-driven LLL rounds."
    def t0 = ticks()
    def original = _flatter_reduce_matrix(basis)
@@ -8520,12 +8339,12 @@ fn flatter_reduce_report(any: basis, any: delta=0.99, int: max_rounds=3, any: et
    _flatter_round_path_report(original, work, total_transform, rows, cols, delta, max_rounds, eta, goal_target, goal_value, goal_proved, stop_on_goal, track_transform, prepass_reports, triangular_prepass, total_prepass_ops, t0)
 }
 
-fn flatter_reduce(any: basis, any: delta=0.99, int: max_rounds=3, any: eta=0.51): any {
+fn flatter_reduce(any basis, any delta=0.99, int max_rounds=3, any eta=0.51) any {
    "Return the flatter-reduced basis from flatter_reduce_report."
    flatter_reduce_report(basis, delta, max_rounds, eta, "slope", nil, false, false, false).get("basis")
 }
 
-fn vec_clone(list: v): list {
+fn vec_clone(list v) list {
    "Create a deep copy of vector v: returns a new list with the same elements."
    mut n = v.len
    mut result = list(0)
@@ -8537,7 +8356,7 @@ fn vec_clone(list: v): list {
    result
 }
 
-fn vec_dot(list: a, list: b): any {
+fn vec_dot(list a, list b) any {
    "Compute the dot product of two vectors a and b: returns the sum of element-wise products."
    mut n = a.len
    mut result = 0
@@ -8549,12 +8368,12 @@ fn vec_dot(list: a, list: b): any {
    result
 }
 
-fn vec_norm_sq(list: v): any {
+fn vec_norm_sq(list v) any {
    "Compute the squared Euclidean norm of vector v: equivalent to vec_dot(v, v)."
    vec_dot(v, v)
 }
 
-fn vec_scale(list: v, any: s): list {
+fn vec_scale(list v, any s) list {
    "Scale vector v by scalar s: returns a new vector with each element multiplied by s."
    mut n = v.len
    mut result = list(0)
@@ -8566,7 +8385,7 @@ fn vec_scale(list: v, any: s): list {
    result
 }
 
-fn vec_scale_add(list: a, list: b, any: coeff): list {
+fn vec_scale_add(list a, list b, any coeff) list {
    "Compute a + coeff * b as a new vector: returns the linear combination of vectors a and b."
    mut n = a.len
    mut result = list(0)
@@ -8578,7 +8397,7 @@ fn vec_scale_add(list: a, list: b, any: coeff): list {
    result
 }
 
-fn vec_sub_scaled(list: a, list: b, any: coeff): list {
+fn vec_sub_scaled(list a, list b, any coeff) list {
    "Compute a - coeff * b as a new vector: returns the vector difference of a and scaled b."
    mut n = a.len
    mut result = list(0)
@@ -8590,7 +8409,7 @@ fn vec_sub_scaled(list: a, list: b, any: coeff): list {
    result
 }
 
-fn _gram_schmidt_nonempty(list: basis, int: n): list {
+fn _gram_schmidt_nonempty(list basis, int n) list {
    mut gs = list(0)
    def first = vec_clone(basis.get(0))
    gs = gs.append(first)
@@ -8613,13 +8432,13 @@ fn _gram_schmidt_nonempty(list: basis, int: n): list {
    gs
 }
 
-fn gram_schmidt_rows(list: basis): list {
+fn gram_schmidt_rows(list basis) list {
    "Perform Gram-Schmidt orthogonalization on a list of basis vectors: returns a list of mutually orthogonal vectors spanning the same subspace."
    def n = basis.len
    n == 0 ? list(0) : _gram_schmidt_nonempty(basis, n)
 }
 
-fn _basis_clone(list: basis, int: n): list {
+fn _basis_clone(list basis, int n) list {
    mut out = list(0)
    mut i = 0
    while(i < n){
@@ -8629,13 +8448,13 @@ fn _basis_clone(list: basis, int: n): list {
    out
 }
 
-fn lll_reduce(list: basis, any: delta): list {
+fn lll_reduce(list basis, any delta) list {
    "Perform full LLL lattice reduction with given delta parameter: basis is a list of integer vectors, delta controls reduction quality(typically 0.75); returns the reduced basis."
    def n = basis.len
    n == 0 ? basis : lll_reduce_delta(_basis_clone(basis, n), delta)
 }
 
-fn lll_reduce_delta(list: basis, any: delta): list {
+fn lll_reduce_delta(list basis, any delta) list {
    "Core LLL reduction with delta parameter: performs size reduction and Lovasz condition swaps in-place on basis; delta is typically 0.75 or 0.99; returns the reduced basis."
    mut n = basis.len
    if(n == 0){ return basis }
@@ -8675,7 +8494,7 @@ fn lll_reduce_delta(list: basis, any: delta): list {
    basis
 }
 
-fn shortest_vector(list: basis): list {
+fn shortest_vector(list basis) list {
    "Find the shortest non-zero vector in a lattice using LLL reduction: reduces the basis with delta=0.75 and returns the vector with the smallest norm."
    def reduced = lll_reduce(basis, 75)
    mut n = reduced.len
@@ -8695,7 +8514,7 @@ fn shortest_vector(list: basis): list {
    best
 }
 
-fn babai_cvp(list: basis, list: target): list {
+fn babai_cvp(list basis, list target) list {
    "Babai closest vector algorithm: given a lattice basis and a target vector, find the closest lattice point using Gram-Schmidt rounding; returns the reconstructed closest lattice vector."
    mut n = basis.len
    if(n == 0){ return target }

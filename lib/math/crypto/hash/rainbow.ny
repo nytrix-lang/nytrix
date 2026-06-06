@@ -1,14 +1,17 @@
-;; Keywords: hash rainbow
+;; Keywords: hash rainbow math crypto
 ;; Hash-analysis routines for rainbow tables and dictionary hash lookup.
 ;; Also includes simple preimage lookup with MD5/SHA1.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+;; References:
+;; - std.math.crypto.hash
+;; - std.math.crypto
 module std.math.crypto.hash.rainbow(rainbow_chain, build_rainbow_table, rainbow_lookup, build_dict_table, dict_crack)
 use std.core
 use std.math.nt
 
-fn rainbow_chain(any: start, fnptr: hash_fn, fnptr: reduce_fn, int: chain_len): list {
+fn rainbow_chain(any start, fnptr hash_fn, fnptr reduce_fn, int chain_len) list {
    "Build one rainbow chain of length chain_len from start.
    hash_fn(plaintext) -> hash. reduce_fn(hash, step) -> plaintext.
    Returns [start, end]."
@@ -21,7 +24,7 @@ fn rainbow_chain(any: start, fnptr: hash_fn, fnptr: reduce_fn, int: chain_len): 
    [start, cur]
 }
 
-fn build_rainbow_table(list: starts, fnptr: hash_fn, fnptr: reduce_fn, int: chain_len): list {
+fn build_rainbow_table(list starts, fnptr hash_fn, fnptr reduce_fn, int chain_len) list {
    "Build a rainbow table from a list of starting plaintexts.
    Returns a list of [start, end] chain entries."
    mut table = []
@@ -33,7 +36,7 @@ fn build_rainbow_table(list: starts, fnptr: hash_fn, fnptr: reduce_fn, int: chai
    table
 }
 
-fn rainbow_lookup(any: target_hash, list: table, fnptr: hash_fn, fnptr: reduce_fn, int: chain_len): any {
+fn rainbow_lookup(any target_hash, list table, fnptr hash_fn, fnptr reduce_fn, int chain_len) any {
    "Search a rainbow table for target_hash.
    For each table entry, walk backwards from the end to find a matching chain.
    Returns the cracked plaintext or nil."
@@ -67,7 +70,7 @@ fn rainbow_lookup(any: target_hash, list: table, fnptr: hash_fn, fnptr: reduce_f
    nil
 }
 
-fn build_dict_table(list: words, fnptr: hash_fn): dict {
+fn build_dict_table(list words, fnptr hash_fn) dict {
    "Build a simple dictionary hash table: {hash -> word}.
    words: list of strings. hash_fn: function(word) -> hash string.
    Returns a dict for fast O(1) lookup."
@@ -81,7 +84,7 @@ fn build_dict_table(list: words, fnptr: hash_fn): dict {
    table
 }
 
-fn dict_crack(any: target_hash, dict: dict_table): any {
+fn dict_crack(any target_hash, dict dict_table) any {
    "Look up a hash in a prebuilt dictionary table. Returns word or nil."
    dict_table.get(target_hash, nil)
 }

@@ -1,20 +1,23 @@
-;; Keywords: block-cipher mode cbc
+;; Keywords: block-cipher mode cbc math crypto
 ;; Block-mode routines for CBC mode attacks and transformations.
 ;; Reference:
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
 ;; - https://iacr.org/archive/eurocrypt2002/23320530/cbc02_e02d.pdf
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.cbc(cbc_bit_flipping, cbc_bit_flip_byte, cbc_padding_oracle_step, cbc_padding_oracle_decrypt, cbc_padding_oracle_decrypt_block, cbc_mac_forge, cbc_mac_length_extension, cbc_and_cbc_mac_forge)
 use std.core
 use std.math.bin
 
-fn _cbc_pair(list: iv, list: ct): list {
+fn _cbc_pair(list iv, list ct) list {
    mut out = []
    out = out.append(iv)
    out = out.append(ct)
    out
 }
 
-fn cbc_bit_flip_byte(list: iv, list: ct, int: block_size, int: pt_block_idx, int: byte_offset, int: old_byte, int: new_byte): list {
+fn cbc_bit_flip_byte(list iv, list ct, int block_size, int pt_block_idx, int byte_offset, int old_byte, int new_byte) list {
    "Flip a single byte in the CBC-decrypted plaintext block pt_block_idx at byte_offset.
    Modifies the preceding ciphertext block(or IV for block 0).
    iv: IV byte list. ct: ciphertext byte list. block_size: e.g. 16.
@@ -32,7 +35,7 @@ fn cbc_bit_flip_byte(list: iv, list: ct, int: block_size, int: pt_block_idx, int
    _cbc_pair(new_iv, new_ct)
 }
 
-fn cbc_bit_flipping(list: iv, list: ct, int: pos, int: old_byte, int: new_byte): list {
+fn cbc_bit_flipping(list iv, list ct, int pos, int old_byte, int new_byte) list {
    "Flip a byte at linear position `pos` in the decrypted CBC plaintext.
    iv: IV bytes. ct: ciphertext bytes. Returns modified ciphertext(IV prepended)."
    def block_size = 16
@@ -55,7 +58,7 @@ fn cbc_bit_flipping(list: iv, list: ct, int: pos, int: old_byte, int: new_byte):
    out
 }
 
-fn cbc_padding_oracle_step(list: prev_block, list: ct_block, int: block_size, list: known_bytes, fnptr: oracle_fn): int {
+fn cbc_padding_oracle_step(list prev_block, list ct_block, int block_size, list known_bytes, fnptr oracle_fn) int {
    "Recover one more byte of CBC plaintext using a padding oracle.
    prev_block: the preceding ciphertext block(or IV) as byte list.
    ct_block: the target ciphertext block.
@@ -90,7 +93,7 @@ fn cbc_padding_oracle_step(list: prev_block, list: ct_block, int: block_size, li
    -1
 }
 
-fn cbc_padding_oracle_decrypt_block(list: prev_block, list: ct_block, int: block_size, fnptr: oracle_fn): list {
+fn cbc_padding_oracle_decrypt_block(list prev_block, list ct_block, int block_size, fnptr oracle_fn) list {
    "Decrypt a single CBC block using a padding oracle.
    Returns the decrypted plaintext block as a byte list."
    mut known = []
@@ -110,7 +113,7 @@ fn cbc_padding_oracle_decrypt_block(list: prev_block, list: ct_block, int: block
    result
 }
 
-fn cbc_padding_oracle_decrypt(list: iv, list: ct, int: block_size, fnptr: oracle_fn): list {
+fn cbc_padding_oracle_decrypt(list iv, list ct, int block_size, fnptr oracle_fn) list {
    "Fully decrypt CBC ciphertext using a padding oracle.
    iv: IV byte list. ct: ciphertext byte list(multiple of block_size).
    oracle_fn(iv_or_prev, ct_block) -> bool: true if padding valid.
@@ -156,7 +159,7 @@ fn cbc_padding_oracle_decrypt(list: iv, list: ct, int: block_size, fnptr: oracle
    plaintext
 }
 
-fn cbc_mac_forge(list: msg1, list: tag1, list: msg2, list: tag2): list {
+fn cbc_mac_forge(list msg1, list tag1, list msg2, list tag2) list {
    "CBC-MAC length extension forgery.
    Given valid(msg1, tag1) and(msg2, tag2) under the same key,
    produce a forged message msg1 || (msg2 XOR tag1) whose MAC is tag2.
@@ -178,7 +181,7 @@ fn cbc_mac_forge(list: msg1, list: tag1, list: msg2, list: tag2): list {
    [forged, tag2]
 }
 
-fn cbc_mac_length_extension(list: msg1, list: tag1, list: msg2, int: block_size): list {
+fn cbc_mac_length_extension(list msg1, list tag1, list msg2, int block_size) list {
    "Extend a CBC-MAC authenticated message by appending msg2.
    Returns [extended_message, tag] where tag is the same as tag1
    and the extended message = msg1 || (msg2 XOR tag1_padded)."
@@ -198,7 +201,7 @@ fn cbc_mac_length_extension(list: msg1, list: tag1, list: msg2, int: block_size)
    [extended, tag1]
 }
 
-fn cbc_and_cbc_mac_forge(list: iv, list: ct, list: tag, list: target_msg): list {
+fn cbc_and_cbc_mac_forge(list iv, list ct, list tag, list target_msg) list {
    "Forgery attack on encrypt-then-MAC where CBC is used for both.
    Returns [new_iv, forged_ct, tag] where forged_ct decrypts to target_msg."
    def block_size = 16

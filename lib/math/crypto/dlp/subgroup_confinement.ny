@@ -1,11 +1,14 @@
-;; Keywords: dlp discrete-log group-theory subgroup-confinement
+;; Keywords: dlp discrete-log group-theory subgroup-confinement math crypto
 ;; Subgroup-confinement attack routines for discrete-log protocols.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
+;; References:
+;; - std.math.crypto.dlp
+;; - std.math.crypto
 module std.math.crypto.dlp.subgroup_confinement(dh_small_subgroup_element, dh_small_subgroup_confinement)
 use std.math.nt
 
-fn _sg_pow_int(any: base, any: exp): any {
+fn _sg_pow_int(any base, any exp) any {
    mut out = Z(1)
    mut b = Z(base)
    mut e = int(exp)
@@ -19,7 +22,7 @@ fn _sg_pow_int(any: base, any: exp): any {
    out
 }
 
-fn dh_small_subgroup_element(any: g, any: p, any: subgroup_order): any {
+fn dh_small_subgroup_element(any g, any p, any subgroup_order) any {
    "Construct an element whose order divides subgroup_order."
    if(subgroup_order == nil || subgroup_order <= 0){ return nil }
    def full_order = Z(p) - Z(1)
@@ -29,7 +32,7 @@ fn dh_small_subgroup_element(any: g, any: p, any: subgroup_order): any {
    h
 }
 
-fn dh_small_subgroup_confinement(fnptr: oracle_fn, any: g, any: p, list: subgroup_factors, any: upper_bound=nil): any {
+fn dh_small_subgroup_confinement(fnptr oracle_fn, any g, any p, list subgroup_factors, any upper_bound=nil) any {
    "Recover a DH secret exponent x modulo the product of chosen subgroup
    orders using a confinement oracle. oracle_fn(h) should return the victim's
    shared secret h^x mod p for the chosen subgroup element h."

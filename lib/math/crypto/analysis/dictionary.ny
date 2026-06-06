@@ -1,4 +1,4 @@
-;; Keywords: analysis dictionary wordlist cracking
+;; Keywords: analysis dictionary wordlist cracking math crypto
 ;; Dictionary and wordlist attack routines for hashes, tokens, and classical-cipher candidates.
 ;; References:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
@@ -23,7 +23,7 @@ mut _wordlist_cache = dict(8)
 mut _analysis_score_cache = dict(4)
 mut _analysis_segment_cache = dict(8)
 
-fn dictionary_attack(str: target_hash, str: wordlist_fn, fnptr: hash_fn): dict {
+fn dictionary_attack(str target_hash, str wordlist_fn, fnptr hash_fn) dict {
    "Try each word from a wordlist against a target hash.
    target_hash: the hash to crack as hex string
    wordlist_fn: filename of wordlist(each line is one candidate password)
@@ -37,17 +37,17 @@ fn dictionary_attack(str: target_hash, str: wordlist_fn, fnptr: hash_fn): dict {
    _dict_result(res[0], res[1], res[2])
 }
 
-fn _dict_result(bool: found, str: password, int: attempts): dict {
+fn _dict_result(bool found, str password, int attempts) dict {
    {"found": found, "password": password, "attempts": attempts}
 }
 
-fn _dict_word_match(str: word, str: target_hash, fnptr: hash_fn, any: salt, int: mode=0): bool {
+fn _dict_word_match(str word, str target_hash, fnptr hash_fn, any salt, int mode=0) bool {
    def wb = word.to_bytes
    if(mode == 1){ return hash_fn(salt, wb) == target_hash }
    hash_fn(wb) == target_hash
 }
 
-fn _dictionary_attack_scan(list: wordlist, str: target_hash, fnptr: hash_fn, any: salt=nil, int: mode=0): list {
+fn _dictionary_attack_scan(list wordlist, str target_hash, fnptr hash_fn, any salt=nil, int mode=0) list {
    mut attempts = 0
    mut found = false
    mut password = ""
@@ -65,23 +65,23 @@ fn _dictionary_attack_scan(list: wordlist, str: target_hash, fnptr: hash_fn, any
    [found, password, attempts]
 }
 
-fn _dict_line_match(str: line, str: target_hash, fnptr: hash_fn, fnptr: pred_fn, int: mode): bool {
+fn _dict_line_match(str line, str target_hash, fnptr hash_fn, fnptr pred_fn, int mode) bool {
    if(mode == 2){ return pred_fn(line) }
    if(mode == 1){ return hash_fn(line) == target_hash }
    hash_fn(line.to_bytes) == target_hash
 }
 
-fn _noop_hash(any: _): str { "" }
+fn _noop_hash(any _) str { "" }
 
-fn _noop_pred(any: _): bool { false }
+fn _noop_pred(any _) bool { false }
 
-fn _stream_line_clean(str: line): str {
+fn _stream_line_clean(str line) str {
    mut out = line
    if(str.endswith(out, "\r")){ out = str.str_slice(out, 0, out.len - 1) }
    str.strip(out)
 }
 
-fn _dictionary_stream_core(str: target_hash, str: wordlist_fn, fnptr: hash_fn, fnptr: pred_fn, int: max_words=0, int: mode=0): dict {
+fn _dictionary_stream_core(str target_hash, str wordlist_fn, fnptr hash_fn, fnptr pred_fn, int max_words=0, int mode=0) dict {
    if(!is_str(wordlist_fn) || wordlist_fn.len == 0){ return dict(3) }
    if(!file_exists(wordlist_fn)){ return dict(3) }
    if(str.endswith(wordlist_fn, ".gz")){ return dict(3) }
@@ -152,26 +152,26 @@ fn _dictionary_stream_core(str: target_hash, str: wordlist_fn, fnptr: hash_fn, f
    }
 }
 
-fn dictionary_attack_stream(str: target_hash, str: wordlist_fn, fnptr: hash_fn, int: max_words=0): dict {
+fn dictionary_attack_stream(str target_hash, str wordlist_fn, fnptr hash_fn, int max_words=0) dict {
    "Streaming variant of dictionary_attack(does not load whole wordlist into memory).
    max_words: 0 means no limit."
    _dictionary_stream_core(target_hash, wordlist_fn, hash_fn, _noop_pred, max_words, 0)
 }
 
-fn dictionary_attack_stream_str(str: target_hash, str: wordlist_fn, fnptr: hash_fn, int: max_words=0): dict {
+fn dictionary_attack_stream_str(str target_hash, str wordlist_fn, fnptr hash_fn, int max_words=0) dict {
    "Streaming dictionary attack where hash_fn takes the candidate as a string.
    This avoids allocating a byte-list for each word and is significantly faster
    for large wordlists."
    _dictionary_stream_core(target_hash, wordlist_fn, hash_fn, _noop_pred, max_words, 1)
 }
 
-fn dictionary_attack_stream_predicate(str: wordlist_fn, fnptr: pred_fn, int: max_words=0): dict {
+fn dictionary_attack_stream_predicate(str wordlist_fn, fnptr pred_fn, int max_words=0) dict {
    "Streaming dictionary scan where pred_fn(candidate_string) -> bool.
    Returns dict with found/password/attempts."
    _dictionary_stream_core("", wordlist_fn, _noop_hash, pred_fn, max_words, 2)
 }
 
-fn analysis_dictionary_attack_predicate(fnptr: pred_fn, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24): dict {
+fn analysis_dictionary_attack_predicate(fnptr pred_fn, int max_words=0, str lang="english", int min_len=1, int max_len=24) dict {
    "Scan repo-local analysis dictionary words with pred_fn(candidate) -> bool."
    def path = analysis_wordlist_path(lang)
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
@@ -186,7 +186,7 @@ fn analysis_dictionary_attack_predicate(fnptr: pred_fn, int: max_words=0, str: l
    _dict_result(false, "", attempts).merge({"wordlist": path})
 }
 
-fn dictionary_attack_salt(str: target_hash, any: salt, str: wordlist_fn, fnptr: hash_fn): dict {
+fn dictionary_attack_salt(str target_hash, any salt, str wordlist_fn, fnptr hash_fn) dict {
    "Try salt+word combinations against a target hash.
    target_hash: the hash to crack as hex string
    salt: salt value as byte list
@@ -201,7 +201,7 @@ fn dictionary_attack_salt(str: target_hash, any: salt, str: wordlist_fn, fnptr: 
    _dict_result(res[0], res[1], res[2])
 }
 
-fn dictionary_attack_default(str: target_hash, fnptr: hash_fn): dict {
+fn dictionary_attack_default(str target_hash, fnptr hash_fn) dict {
    "Try the default local system wordlist.
    RockYou is preferred when present at common Kali/Linux paths."
    def path = rockyou_wordlist_path()
@@ -215,7 +215,7 @@ fn dictionary_attack_default(str: target_hash, fnptr: hash_fn): dict {
    r
 }
 
-fn default_wordlist_paths(): list {
+fn default_wordlist_paths() list {
    "Candidate system wordlists, ordered by preference.
    The first two cover the common Kali and system-dict RockYou locations."
    [
@@ -227,7 +227,7 @@ fn default_wordlist_paths(): list {
    ]
 }
 
-fn rockyou_wordlist_path(): str {
+fn rockyou_wordlist_path() str {
    "Return the first existing RockYou/system wordlist path, or empty string."
    def paths = default_wordlist_paths()
    mut i = 0
@@ -239,7 +239,7 @@ fn rockyou_wordlist_path(): str {
    ""
 }
 
-fn analysis_wordlist_path(str: lang="english"): str {
+fn analysis_wordlist_path(str lang="english") str {
    "Return the repo-local crypto analysis dictionary path for `lang`, or empty string."
    def paths = worldfreq.worldfreq_profile_paths(lang)
    def p = paths.get("common_words_path", "")
@@ -247,12 +247,12 @@ fn analysis_wordlist_path(str: lang="english"): str {
    ""
 }
 
-fn load_wordlist(str: filename): list {
+fn load_wordlist(str filename) list {
    "Load a newline-delimited wordlist into a list of stripped non-empty strings."
    _load_wordlist(filename)
 }
 
-fn load_wordlist_limit(str: filename, int: max_words): list {
+fn load_wordlist_limit(str filename, int max_words) list {
    "Load at most max_words stripped non-empty lines from a plaintext wordlist."
    if(max_words <= 0){ return list(0) }
    if(!is_str(filename) || filename.len == 0){ return list(0) }
@@ -266,9 +266,7 @@ fn load_wordlist_limit(str: filename, int: max_words): list {
          def n = content.len
          while(i <= n && out.len < max_words){
             if(i == n || load8(content, i) == 10){
-               mut line = str.str_slice(content, start, i)
-               if(str.endswith(line, "\r")){ line = str.str_slice(line, 0, line.len - 1) }
-               line = str.strip(line)
+               def line = _stream_line_clean(str.str_slice(content, start, i))
                if(line.len > 0){ out = out.append(line) }
                start = i + 1
             }
@@ -280,32 +278,32 @@ fn load_wordlist_limit(str: filename, int: max_words): list {
    }
 }
 
-fn _ascii_is_alpha(int: c): bool {
+fn _ascii_is_alpha(int c) bool {
    case c {
       65..90, 97..122 -> true
       _ -> false
    }
 }
 
-fn _ascii_lower_byte(int: c): int {
+fn _ascii_lower_byte(int c) int {
    case c {
       65..90 -> c + 32
       _ -> c
    }
 }
 
-fn _ascii_upper_byte(int: c): int {
+fn _ascii_upper_byte(int c) int {
    case c {
       97..122 -> c - 32
       _ -> c
    }
 }
 
-fn _ascii_lower_chr(int: c): str {
+fn _ascii_lower_chr(int c) str {
    str.chr(_ascii_lower_byte(c))
 }
 
-fn _analysis_word_from_line(str: text, int: start, int: stop, int: min_len, int: max_len): str {
+fn _analysis_word_from_line(str text, int start, int stop, int min_len, int max_len) str {
    mut i, n = start, 0
    mut b = Builder(max(8, stop - start + 1))
    while(i < stop){
@@ -328,7 +326,7 @@ fn _analysis_word_from_line(str: text, int: start, int: stop, int: min_len, int:
    out
 }
 
-fn load_analysis_words_limit(int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24): list {
+fn load_analysis_words_limit(int max_words=0, str lang="english", int min_len=1, int max_len=24) list {
    "Load lowercase words from the repo-local analysis dictionary.
    The source is `std.math.crypto.analysis.worldfreq`'s weighted word profile, so
    this is reproducible from the repository and does not depend on system
@@ -356,17 +354,17 @@ fn load_analysis_words_limit(int: max_words=0, str: lang="english", int: min_len
    }
 }
 
-fn analysis_word_exists(str: word, str: lang="english", int: min_len=1, int: max_len=24): bool {
+fn analysis_word_exists(str word, str lang="english", int min_len=1, int max_len=24) bool {
    "Return whether `word` exists in the repo-local analysis dictionary."
    analysis_select_words([word], lang, min_len, max_len).len == 1
 }
 
-fn _analysis_norm_token(any: token): str {
+fn _analysis_norm_token(any token) str {
    if(!is_str(token)){ return "" }
    str.lower(str.strip(token))
 }
 
-fn analysis_select_words(list: tokens, str: lang="english", int: min_len=1, int: max_len=24): list {
+fn analysis_select_words(list tokens, str lang="english", int min_len=1, int max_len=24) list {
    "Return the requested tokens that are present in the repo-local analysis dictionary."
    mut wanted = list(0)
    mut wanted_set = dict(tokens.len * 2 + 1)
@@ -413,7 +411,7 @@ fn analysis_select_words(list: tokens, str: lang="english", int: min_len=1, int:
    out
 }
 
-fn analysis_phrase_word(list: tokens, str: sep="", str: lang="english", int: min_len=1, int: max_len=24): str {
+fn analysis_phrase_word(list tokens, str sep="", str lang="english", int min_len=1, int max_len=24) str {
    "Join dictionary-validated tokens into a compact phrase candidate.
    Returns an empty string if any token is missing from the analysis dictionary."
    def selected = analysis_select_words(tokens, lang, min_len, max_len)
@@ -428,7 +426,7 @@ fn analysis_phrase_word(list: tokens, str: sep="", str: lang="english", int: min
    out
 }
 
-fn _load_analysis_word_scores_limit(int: max_words=20000, str: lang="english", int: min_len=1, int: max_len=24): dict {
+fn _load_analysis_word_scores_limit(int max_words=20000, str lang="english", int min_len=1, int max_len=24) dict {
    def cache_key = lang + ":" + to_str(max_words) + ":" + to_str(min_len) + ":" + to_str(max_len)
    if(_analysis_score_cache.contains(cache_key)){ return _analysis_score_cache.get(cache_key, dict(0)) }
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
@@ -443,7 +441,7 @@ fn _load_analysis_word_scores_limit(int: max_words=20000, str: lang="english", i
    scores
 }
 
-fn _analysis_segment_word_ok(str: w): bool {
+fn _analysis_segment_word_ok(str w) bool {
    if(w.len > 2){ return true }
    if(w == "a" || w == "i"){ return true }
    def common_two = [
@@ -454,7 +452,7 @@ fn _analysis_segment_word_ok(str: w): bool {
    common_two.contains(w)
 }
 
-fn _alpha_compact_lower(str: text): str {
+fn _alpha_compact_lower(str text) str {
    mut b, i = Builder(max(8, text.len + 1)), 0
    while(i < text.len){
       def c = load8(text, i)
@@ -466,11 +464,11 @@ fn _alpha_compact_lower(str: text): str {
    out
 }
 
-fn _analysis_segment_cache_key(str: text, int: max_words, str: lang, int: min_len, int: max_len): str {
+fn _analysis_segment_cache_key(str text, int max_words, str lang, int min_len, int max_len) str {
    to_str(max_words) + ":" + lang + ":" + to_str(min_len) + ":" + to_str(max_len) + ":" + text
 }
 
-fn analysis_segment_text(str: text, int: max_words=20000, str: lang="english", int: min_len=1, int: max_len=24): str {
+fn analysis_segment_text(str text, int max_words=20000, str lang="english", int min_len=1, int max_len=24) str {
    "Segment compact alphabetic text into likely dictionary words using repo-local word frequencies."
    def cache_key = _analysis_segment_cache_key(text, max_words, lang, min_len, max_len)
    if(_analysis_segment_cache.contains(cache_key)){ return _analysis_segment_cache.get(cache_key, "") }
@@ -544,14 +542,14 @@ fn analysis_segment_text(str: text, int: max_words=20000, str: lang="english", i
    out
 }
 
-fn leet_rules_apply(str: word): list {
+fn leet_rules_apply(str word) list {
    "Generate leet-speak variants of a word.
    Applies common substitutions: e->3, a->4, o->0, s->5, t->7, i->1, l->1.
    Returns a list of variant strings."
    leet_variants_full(word, 4096)
 }
 
-fn _leet_options_full(int: c): list {
+fn _leet_options_full(int c) list {
    def ch = str.chr(c)
    case c {
       97 -> [ch, "4", "@"]
@@ -566,7 +564,7 @@ fn _leet_options_full(int: c): list {
    }
 }
 
-fn leet_variants_full(str: word, int: max_variants=4096): list {
+fn leet_variants_full(str word, int max_variants=4096) list {
    "Generate full leetspeak combinations for common audit substitutions.
    Includes a->4/@, e->3, i->1, o->0, s->5/$, t->7."
    def lower_word = str.lower(word)
@@ -581,7 +579,7 @@ fn leet_variants_full(str: word, int: max_variants=4096): list {
    _dedup_strings(out)
 }
 
-fn _capitalized_ascii(str: word): str {
+fn _capitalized_ascii(str word) str {
    if(word.len == 0){ return word }
    mut b, i = Builder(word.len + 8), 0
    while(i < word.len){
@@ -595,12 +593,12 @@ fn _capitalized_ascii(str: word): str {
    out
 }
 
-fn case_variants_ascii(str: word): list {
+fn case_variants_ascii(str word) list {
    "Return unique ASCII case variants: original, lower, upper, capitalized."
    _dedup_strings([word, str.lower(word), str.upper(word), _capitalized_ascii(word)])
 }
 
-fn case_variants_ascii_full(str: word, int: max_variants=4096): list {
+fn case_variants_ascii_full(str word, int max_variants=4096) list {
    "Generate all ASCII letter case combinations for short candidate words."
    mut out = [""]
    mut pos = 0
@@ -618,7 +616,7 @@ fn case_variants_ascii_full(str: word, int: max_variants=4096): list {
    _dedup_strings(out)
 }
 
-fn dictionary_candidate_variants(str: word, bool: leet=true, bool: cases=true, int: max_variants=4096): list {
+fn dictionary_candidate_variants(str word, bool leet=true, bool cases=true, int max_variants=4096) list {
    "Generate dictionary password candidates from one base word.
    Starts with a real dictionary word, optionally expands full leet
    combinations, then applies simple ASCII case rules."
@@ -639,7 +637,7 @@ fn dictionary_candidate_variants(str: word, bool: leet=true, bool: cases=true, i
    _dedup_strings(out)
 }
 
-fn dictionary_candidate_variants_full_case(str: word, bool: leet=true, int: max_variants=4096): list {
+fn dictionary_candidate_variants_full_case(str word, bool leet=true, int max_variants=4096) list {
    "Generate dictionary candidates with leet transforms and full ASCII case combinations."
    mut seeds = [word]
    if(leet){ seeds = leet_variants_full(word, max_variants) }
@@ -657,7 +655,7 @@ fn dictionary_candidate_variants_full_case(str: word, bool: leet=true, int: max_
    _dedup_strings(out)
 }
 
-fn _crack_many_done(dict: found, list: targets): bool {
+fn _crack_many_done(dict found, list targets) bool {
    mut i = 0
    while(i < targets.len){
       if(!found.contains(targets[i])){ return false }
@@ -666,7 +664,22 @@ fn _crack_many_done(dict: found, list: targets): bool {
    true
 }
 
-fn _crack_many_result(list: targets, dict: found, int: attempts, int: word_attempts, str: wordlist_path=""): dict {
+fn _crack_try_candidate(dict found, list targets, str candidate, fnptr verify_fn) list {
+   mut out = found
+   mut attempts = 0
+   mut ti = 0
+   while(ti < targets.len){
+      def target = targets[ti]
+      if(!out.contains(target)){
+         attempts += 1
+         if(verify_fn(candidate, target)){ out = out.set(target, candidate) }
+      }
+      ti += 1
+   }
+   [out, attempts]
+}
+
+fn _crack_many_result(list targets, dict found, int attempts, int word_attempts, str wordlist_path="") dict {
    mut passwords = list(0)
    mut found_count = 0
    mut i = 0
@@ -680,7 +693,7 @@ fn _crack_many_result(list: targets, dict: found, int: attempts, int: word_attem
    "attempts": attempts, "word_attempts": word_attempts, "wordlist": wordlist_path}
 }
 
-fn dictionary_crack_many(list: targets, list: words, fnptr: verify_fn, str: wordlist_path=""): dict {
+fn dictionary_crack_many(list targets, list words, fnptr verify_fn, str wordlist_path="") dict {
    "Crack several targets using exact dictionary words.
    `verify_fn(candidate, target) -> bool` decides whether a candidate matches a
    target. Returns a dict with `passwords` in target order, `by_hash`, and
@@ -690,28 +703,22 @@ fn dictionary_crack_many(list: targets, list: words, fnptr: verify_fn, str: word
    mut wi = 0
    while(wi < words.len && !_crack_many_done(found, targets)){
       def candidate = words[wi]
-      mut ti = 0
-      while(ti < targets.len){
-         def target = targets[ti]
-         if(!found.contains(target)){
-            attempts += 1
-            if(verify_fn(candidate, target)){ found = found.set(target, candidate) }
-         }
-         ti += 1
-      }
+      def step = _crack_try_candidate(found, targets, candidate, verify_fn)
+      found = step[0]
+      attempts += int(step[1])
       wi += 1
    }
    _crack_many_result(targets, found, attempts, wi, wordlist_path)
 }
 
-fn analysis_dictionary_crack_many(list: targets, fnptr: verify_fn, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24): dict {
+fn analysis_dictionary_crack_many(list targets, fnptr verify_fn, int max_words=0, str lang="english", int min_len=1, int max_len=24) dict {
    "Crack targets using exact words from the repo-local analysis dictionary."
    def path = analysis_wordlist_path(lang)
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
    dictionary_crack_many(targets, words, verify_fn, path)
 }
 
-fn _pow10(int: digits): int {
+fn _pow10(int digits) int {
    mut out = 1
    mut i = 0
    while(i < digits){
@@ -721,7 +728,7 @@ fn _pow10(int: digits): int {
    out
 }
 
-fn decimal_suffix(int: n, int: width): str {
+fn decimal_suffix(int n, int width) str {
    "Return `n` as zero-padded decimal text of exactly `width` digits."
    if(width <= 0){ return "" }
    mut div = _pow10(width - 1)
@@ -736,12 +743,12 @@ fn decimal_suffix(int: n, int: width): str {
    out
 }
 
-fn _suffix_symbols(any: symbols): list {
+fn _suffix_symbols(any symbols) list {
    if(is_list(symbols) && symbols.len > 0){ return symbols }
    [""]
 }
 
-fn candidate_suffixes(list: symbols=[""], int: min_digits=0, int: max_digits=0, bool: symbol_before_digits=true, bool: digits_before_symbol=true): list {
+fn candidate_suffixes(list symbols=[""], int min_digits=0, int max_digits=0, bool symbol_before_digits=true, bool digits_before_symbol=true) list {
    "Generate reusable suffix strings for dictionary cracking.
    For each digit width this emits decimal text, plus optional symbol+digits and
    digits+symbol forms. Empty symbols produce only the digit text."
@@ -771,7 +778,7 @@ fn candidate_suffixes(list: symbols=[""], int: min_digits=0, int: max_digits=0, 
    _dedup_strings(out)
 }
 
-fn dictionary_crack_suffixes(list: targets, list: words, list: suffixes, fnptr: verify_fn, str: wordlist_path=""): dict {
+fn dictionary_crack_suffixes(list targets, list words, list suffixes, fnptr verify_fn, str wordlist_path="") dict {
    "Crack targets with candidates formed as `word + suffix`."
    mut found = dict(targets.len * 2 + 1)
    mut attempts = 0
@@ -783,15 +790,9 @@ fn dictionary_crack_suffixes(list: targets, list: words, list: suffixes, fnptr: 
       mut si = 0
       while(si < suffixes.len && !_crack_many_done(found, targets)){
          def candidate = base + suffixes[si]
-         mut ti = 0
-         while(ti < targets.len){
-            def target = targets[ti]
-            if(!found.contains(target)){
-               attempts += 1
-               if(verify_fn(candidate, target)){ found = found.set(target, candidate) }
-            }
-            ti += 1
-         }
+         def step = _crack_try_candidate(found, targets, candidate, verify_fn)
+         found = step[0]
+         attempts += int(step[1])
          si += 1
       }
       wi += 1
@@ -799,7 +800,7 @@ fn dictionary_crack_suffixes(list: targets, list: words, list: suffixes, fnptr: 
    _crack_many_result(targets, found, attempts, word_attempts, wordlist_path)
 }
 
-fn dictionary_crack_suffix_digits(list: targets, list: words, fnptr: verify_fn, int: min_digits=1, int: max_digits=2, list: symbols=[""], str: wordlist_path=""): dict {
+fn dictionary_crack_suffix_digits(list targets, list words, fnptr verify_fn, int min_digits=1, int max_digits=2, list symbols=[""], str wordlist_path="") dict {
    "Crack targets with candidates `word + decimal_digits + symbol`.
    Useful for common audit/hashcat-style rules such as `baseNN` or `baseNN!`."
    mut found = dict(targets.len * 2 + 1)
@@ -819,15 +820,9 @@ fn dictionary_crack_suffix_digits(list: targets, list: words, fnptr: verify_fn, 
             mut si = 0
             while(si < suffix_symbols.len && !_crack_many_done(found, targets)){
                def candidate = numbered + suffix_symbols[si]
-               mut ti = 0
-               while(ti < targets.len){
-                  def target = targets[ti]
-                  if(!found.contains(target)){
-                     attempts += 1
-                     if(verify_fn(candidate, target)){ found = found.set(target, candidate) }
-                  }
-                  ti += 1
-               }
+               def step = _crack_try_candidate(found, targets, candidate, verify_fn)
+               found = step[0]
+               attempts += int(step[1])
                si += 1
             }
             n += 1
@@ -839,14 +834,14 @@ fn dictionary_crack_suffix_digits(list: targets, list: words, fnptr: verify_fn, 
    _crack_many_result(targets, found, attempts, word_attempts, wordlist_path)
 }
 
-fn analysis_dictionary_crack_suffix_digits(list: targets, fnptr: verify_fn, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24, int: min_digits=1, int: max_digits=2, list: symbols=[""]): dict {
+fn analysis_dictionary_crack_suffix_digits(list targets, fnptr verify_fn, int max_words=0, str lang="english", int min_len=1, int max_len=24, int min_digits=1, int max_digits=2, list symbols=[""]) dict {
    "Crack targets using repo-local dictionary words plus decimal suffix rules."
    def path = analysis_wordlist_path(lang)
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
    dictionary_crack_suffix_digits(targets, words, verify_fn, min_digits, max_digits, symbols, path)
 }
 
-fn dictionary_crack_many_with_variants(list: targets, list: words, fnptr: verify_fn, int: max_variants=4096): dict {
+fn dictionary_crack_many_with_variants(list targets, list words, fnptr verify_fn, int max_variants=4096) dict {
    "Crack several targets using base words plus generated variants.
    `verify_fn(candidate, target) -> bool` decides whether a candidate matches a
    target. Returns a dict with `passwords` in target order, `by_hash`, and
@@ -860,15 +855,9 @@ fn dictionary_crack_many_with_variants(list: targets, list: words, fnptr: verify
       mut ci = 0
       while(ci < candidates.len && !_crack_many_done(found, targets)){
          def candidate = candidates[ci]
-         mut ti = 0
-         while(ti < targets.len){
-            def target = targets[ti]
-            if(!found.contains(target)){
-               attempts += 1
-               if(verify_fn(candidate, target)){ found = found.set(target, candidate) }
-            }
-            ti += 1
-         }
+         def step = _crack_try_candidate(found, targets, candidate, verify_fn)
+         found = step[0]
+         attempts += int(step[1])
          ci += 1
       }
       wi += 1
@@ -876,7 +865,7 @@ fn dictionary_crack_many_with_variants(list: targets, list: words, fnptr: verify
    _crack_many_result(targets, found, attempts, wi)
 }
 
-fn analysis_dictionary_crack_many_with_variants(list: targets, fnptr: verify_fn, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24, int: max_variants=4096): dict {
+fn analysis_dictionary_crack_many_with_variants(list targets, fnptr verify_fn, int max_words=0, str lang="english", int min_len=1, int max_len=24, int max_variants=4096) dict {
    "Crack targets using the repo-local analysis dictionary plus generated variants."
    def words = load_analysis_words_limit(max_words, lang, min_len, max_len)
    dictionary_crack_many_with_variants(targets, words, verify_fn, max_variants).merge({
@@ -884,12 +873,12 @@ fn analysis_dictionary_crack_many_with_variants(list: targets, fnptr: verify_fn,
    })
 }
 
-fn unix_crypt_available(): bool {
+fn unix_crypt_available() bool {
    "Return true when libc `crypt(3)` is available through Ny FFI."
    #linux { return true } #else { return false } #endif
 }
 
-fn unix_crypt_hash(str: word, str: salt_or_hash): str {
+fn unix_crypt_hash(str word, str salt_or_hash) str {
    "Hash `word` with libc `crypt(3)` using `salt_or_hash` as the salt string.
    Passing a full target hash is valid for classic Unix crypt formats."
    #linux {
@@ -900,9 +889,9 @@ fn unix_crypt_hash(str: word, str: salt_or_hash): str {
    } #endif
 }
 
-fn _unix_crypt_verify(str: candidate, str: target): bool { unix_crypt_hash(candidate, target) == target }
+fn _unix_crypt_verify(str candidate, str target) bool { unix_crypt_hash(candidate, target) == target }
 
-fn analysis_unix_crypt_crack_many(list: targets, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=8, int: max_variants=4096): dict {
+fn analysis_unix_crypt_crack_many(list targets, int max_words=0, str lang="english", int min_len=1, int max_len=8, int max_variants=4096) dict {
    "Crack Unix `crypt(3)` hashes from the repo-local analysis dictionary."
    if(!unix_crypt_available()){ return _crack_many_result(targets, dict(1), 0, 0, analysis_wordlist_path(lang)) }
    analysis_dictionary_crack_many_with_variants(
@@ -910,13 +899,13 @@ fn analysis_unix_crypt_crack_many(list: targets, int: max_words=0, str: lang="en
    )
 }
 
-fn analysis_unix_crypt_crack_many_exact(list: targets, int: max_words=0, str: lang="english", int: min_len=1, int: max_len=24): dict {
+fn analysis_unix_crypt_crack_many_exact(list targets, int max_words=0, str lang="english", int min_len=1, int max_len=24) dict {
    "Crack Unix `crypt(3)` hashes with exact repo-local analysis dictionary words."
    if(!unix_crypt_available()){ return _crack_many_result(targets, dict(1), 0, 0, analysis_wordlist_path(lang)) }
    analysis_dictionary_crack_many(targets, _unix_crypt_verify, max_words, lang, min_len, max_len)
 }
 
-fn _variant_extend(list: prefixes, list: opts): list {
+fn _variant_extend(list prefixes, list opts) list {
    mut next = list(0)
    mut i = 0
    while(i < prefixes.len){
@@ -930,7 +919,7 @@ fn _variant_extend(list: prefixes, list: opts): list {
    next
 }
 
-fn _dedup_strings(list: strings): list {
+fn _dedup_strings(list strings) list {
    def n = strings.len
    if(n == 0){ return list(0) }
    mut result = list(0)
@@ -947,7 +936,7 @@ fn _dedup_strings(list: strings): list {
    result
 }
 
-fn _load_wordlist(str: filename): list {
+fn _load_wordlist(str filename) list {
    if(!is_str(filename) || filename.len == 0){ return list(0) }
    if(!file_exists(filename)){ return list(0) }
    if(str.endswith(filename, ".gz")){
@@ -960,7 +949,7 @@ fn _load_wordlist(str: filename): list {
          mut out = list(0)
          mut i = 0
          while(i < lines.len){
-            def w = str.strip(lines[i])
+            def w = _stream_line_clean(lines[i])
             if(w.len > 0){ out = out.append(w) }
             i += 1
          }

@@ -1,5 +1,7 @@
-;; Keywords: nt number-theory modular
+;; Keywords: nt number-theory modular math
 ;; Number-theory operations for primes, modular arithmetic, CRT, residues, and arithmetic functions.
+;; References:
+;; - std.math
 module std.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_from_int,
    bigint_from_str, bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod,
    bigint_cmp, bigint_eq, bigint_neq, bigint_lt, bigint_le, bigint_gt, bigint_ge,
@@ -40,36 +42,32 @@ def _TAG_BIGINT = __runtime_tag("bigint")
 def _TAG_LIST = __runtime_tag("list")
 mut _factor_ext_cache = dict()
 
-fn is_bigint(any: x): bool {
+fn is_bigint(any x) bool {
    "Check if x is a BigInt(internal type marker 107)."
-   if(__has_tag(x, _TAG_BIGINT)){ return true }
-   if(!is_ptr(x)){ return false }
-   if(__tagof(x) != _TAG_LIST){ return false }
-   x.get(0) == 107
+   __has_tag(x, _TAG_BIGINT) || (is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107)
 }
 
-; BigInt Constructors
-fn Z(any: n): bigint {
+fn Z(any n) bigint {
    "Construct BigInt from int or string. SageMath style: Z(123) or Z('123...')."
    nt_bigint(n)
 }
 
-fn ZZ(any: n): bigint {
+fn ZZ(any n) bigint {
    "Construct BigInt. SageMath notation: ZZ(123)."
    nt_bigint(n)
 }
 
-fn Int(any: n): bigint {
+fn Int(any n) bigint {
    "Construct BigInt. Python style: Int(123)."
    nt_bigint(n)
 }
 
-fn Integer(any: n): bigint {
+fn Integer(any n) bigint {
    "Construct BigInt. Explicit: Integer(123)."
    nt_bigint(n)
 }
 
-fn nt_bigint(any: x): bigint {
+fn nt_bigint(any x) bigint {
    "Convert int, string, or BigInt to BigInt."
    if(is_bigint(x)){ return x }
    if(is_int(x)){ return bigint_from_int(x) }
@@ -82,112 +80,111 @@ fn nt_bigint(any: x): bigint {
    bigint_from_int(0)
 }
 
-; Operator Overloading for BigInt
-fn __add(any: a, any: b): any {
+fn __add(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_add(a, b)
 }
 
-fn __sub(any: a, any: b): any {
+fn __sub(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_sub(a, b)
 }
 
-fn __mul(any: a, any: b): any {
+fn __mul(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_mul(a, b)
 }
 
-fn __div(any: a, any: b): any {
+fn __div(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_div(a, b)
 }
 
-fn __mod(any: a, any: b): any {
+fn __mod(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_mod(a, b)
 }
 
-fn __pow(any: a, any: b): any {
+fn __pow(any a, any b) any {
    if(!is_bigint(a) || !is_bigint(b)){ return nil }
    bigint_pow(a, b)
 }
 
-fn __neg(any: a): any {
+fn __neg(any a) any {
    if(!is_bigint(a)){ return nil }
    bigint_neg(a)
 }
 
-fn __eq(any: a, any: b): bool {
+fn __eq(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return false }
    bigint_eq(a, b)
 }
 
-fn __neq(any: a, any: b): bool {
+fn __neq(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return true }
    !bigint_eq(a, b)
 }
 
-fn __lt(any: a, any: b): bool {
+fn __lt(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return false }
    bigint_lt(a, b)
 }
 
-fn __le(any: a, any: b): bool {
+fn __le(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return false }
    bigint_le(a, b)
 }
 
-fn __gt(any: a, any: b): bool {
+fn __gt(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return false }
    bigint_gt(a, b)
 }
 
-fn __ge(any: a, any: b): bool {
+fn __ge(any a, any b) bool {
    if(!is_bigint(a) || !is_bigint(b)){ return false }
    bigint_ge(a, b)
 }
 
-fn __str(any: a): any {
+fn __str(any a) any {
    if(!is_bigint(a)){ return nil }
    bigint_to_str(a)
 }
 
-fn __len(any: a): int {
+fn __len(any a) int {
    if(!is_bigint(a)){ return 0 }
    bigint_bit_length(a)
 }
 
-fn gcd(any: a, any: b): bigint {
+fn gcd(any a, any b) bigint {
    "Greatest common divisor."
    Z(__bigint_gcd(Z(a), Z(b)))
 }
 
-fn lcm(any: a, any: b): bigint {
+fn lcm(any a, any b) bigint {
    "Least common multiple."
    def a_big, b_big = Z(a), Z(b)
    if(bigint_eq(a_big, Z(0)) || bigint_eq(b_big, Z(0))){ return Z(0) }
    bigint_div(bigint_abs(bigint_mul(a_big, b_big)), gcd(a_big, b_big))
 }
 
-fn xgcd(any: a, any: b): list {
+fn xgcd(any a, any b) list {
    "Extended GCD: returns [g, u, v] where a*u + b*v = g. Uses GMP-backed builtin."
    __bigint_xgcd(Z(a), Z(b))
 }
 
-fn egcd(any: a, any: b): list {
+fn egcd(any a, any b) list {
    "Extended GCD alias."
    xgcd(a, b)
 }
 
-fn mod(any: a, any: b): bigint {
+fn mod(any a, any b) bigint {
    "Modular reduction: a mod b."
    def m, r = Z(b), bigint_mod(Z(a), m)
    if(bigint_lt(r, Z(0))){ return bigint_add(r, m) }
    r
 }
 
-fn power_mod(any: base, any: exp, any: modulus): bigint {
+fn power_mod(any base, any exp, any modulus) bigint {
    "Modular exponentiation: base^exp mod modulus.
    Uses GMP-backed builtin for performance."
    def modulus_big = Z(modulus)
@@ -196,13 +193,13 @@ fn power_mod(any: base, any: exp, any: modulus): bigint {
    Z(__bigint_powmod(Z(base), Z(exp), modulus_big))
 }
 
-fn _bigint_get_bit(any: a, int: bit): bool {
+fn _bigint_get_bit(any a, int bit) bool {
    if(bit < 0){ return false }
    def mask = bigint_lshift(Z(1), bit)
    bigint_mod(bigint_div(Z(a), mask), Z(2)) != Z(0)
 }
 
-fn _mont_window(any: e_big, int: bit, int: window_size): list<int> {
+fn _mont_window(any e_big, int bit, int window_size) list<int> {
    mut last_bit = bit
    mut j = 1
    while(j < window_size && (bit - j) >= 0){
@@ -218,7 +215,7 @@ fn _mont_window(any: e_big, int: bit, int: window_size): list<int> {
    [last_bit, w_val]
 }
 
-fn power_mod_montgomery(any: base, any: exp, any: n, int: window_size=4): bigint {
+fn power_mod_montgomery(any base, any exp, any n, int window_size=4) bigint {
    "Modular exponentiation using Montgomery reduction and sliding window algorithm.
    Uses a path for large BigInt operations where division is expensive."
    def n_big, e_big = Z(n), Z(exp)
@@ -227,7 +224,6 @@ fn power_mod_montgomery(any: base, any: exp, any: n, int: window_size=4): bigint
    if(n_big % Z(2) == Z(0)){ return power_mod(base, exp, n_big) }
    def ctx = _mont_init(n_big)
    def b_bar = _mont_to(Z(base), ctx)
-   ; Precompute powers: b^1, b^3, b^5, ... b^(2^(w-1)-1)
    def num_precomputed = 1 << (window_size - 1)
    mut powers = [b_bar]
    def b2 = _mont_mul(b_bar, b_bar, ctx)
@@ -257,14 +253,14 @@ fn power_mod_montgomery(any: base, any: exp, any: n, int: window_size=4): bigint
    _mont_from(res_bar, ctx)
 }
 
-fn _barrett_init(any: n): any {
+fn _barrett_init(any n) any {
    def n_big = Z(n)
    def k = bigint_bit_length(n_big)
    def mu = bigint_div(bigint_lshift(Z(1), 2 * k), n_big)
    [n_big, k, mu]
 }
 
-fn _barrett_reduce(any: a, any: ctx): bigint {
+fn _barrett_reduce(any a, any ctx) bigint {
    def n, k = ctx.get(0), ctx.get(1)
    def mu = ctx.get(2)
    def a_big = Z(a)
@@ -276,7 +272,7 @@ fn _barrett_reduce(any: a, any: ctx): bigint {
    r
 }
 
-fn mod_ctx_new(any: n, str: backend="auto"): any {
+fn mod_ctx_new(any n, str backend="auto") any {
    "Create a modular arithmetic context for modulus n."
    def n_big = Z(n)
    mut use_backend = backend
@@ -292,7 +288,7 @@ fn mod_ctx_new(any: n, str: backend="auto"): any {
    ["naive", n_big]
 }
 
-fn mod_kernel_mul(any: a, any: b, any: ctx): bigint {
+fn mod_kernel_mul(any a, any b, any ctx) bigint {
    "Unified modular multiplication."
    def type = ctx.get(0)
    if(type == "montgomery"){
@@ -303,36 +299,36 @@ fn mod_kernel_mul(any: a, any: b, any: ctx): bigint {
    bigint_mod(bigint_mul(Z(a), Z(b)), ctx.get(1))
 }
 
-fn mod_kernel_pow(any: base, any: exp, any: ctx): bigint {
+fn mod_kernel_pow(any base, any exp, any ctx) bigint {
    "Unified modular exponentiation."
    def type = ctx.get(0)
    if(type == "montgomery"){ return power_mod_montgomery(base, exp, ctx.get(1)) }
    power_mod(base, exp, ctx.get(1))
 }
 
-fn mod_kernel_inv(any: a, any: ctx): bigint {
+fn mod_kernel_inv(any a, any ctx) bigint {
    "Unified modular inversion."
    inverse_mod(a, ctx.get(1))
 }
 
-fn mod_add(any: a, any: b, any: p): bigint {
+fn mod_add(any a, any b, any p) bigint {
    "a + b mod p(handles large integers)."
    mod(bigint_add(Z(a), Z(b)), Z(p))
 }
 
-fn mod_sub(any: a, any: b, any: p): bigint {
+fn mod_sub(any a, any b, any p) bigint {
    "a - b mod p(handles negative results)."
    def res = bigint_mod(bigint_sub(Z(a), Z(b)), Z(p))
    if(_big_sign(res) < 0){ return bigint_add(res, Z(p)) }
    res
 }
 
-fn mod_mul(any: a, any: b, any: p): bigint {
+fn mod_mul(any a, any b, any p) bigint {
    "a * b mod p."
    bigint_mod(bigint_mul(Z(a), Z(b)), Z(p))
 }
 
-fn mod_nth_roots_prime(any: m, any: exp, any: p): list {
+fn mod_nth_roots_prime(any m, any exp, any p) list {
    "Return a list of roots r such that r^exp = m(mod prime p), for common easy cases.
    Supported fast cases:
    1) gcd(exp, p-1) == 1: unique root r = m^(exp^{-1} mod(p-1))
@@ -380,7 +376,7 @@ fn mod_nth_roots_prime(any: m, any: exp, any: p): list {
    roots
 }
 
-fn inverse_mod(any: a, any: m): bigint {
+fn inverse_mod(any a, any m) bigint {
    "Modular inverse: a^-1 mod m."
    def m_big = Z(m)
    if(bigint_eq(m_big, Z(0))){ return Z(0) }
@@ -402,7 +398,7 @@ fn inverse_mod(any: a, any: m): bigint {
    mod(t, m_big)
 }
 
-fn _mont_init(any: n): any {
+fn _mont_init(any n) any {
    def n_big = Z(n)
    mut bits = bit_length(n_big)
    if(bits <= 0){ bits = 1 }
@@ -415,7 +411,7 @@ fn _mont_init(any: n): any {
    [n_big, bits, R, n_prime]
 }
 
-fn _mont_redc(any: T, any: ctx): bigint {
+fn _mont_redc(any T, any ctx) bigint {
    def n = ctx.get(0)
    def R = ctx.get(2)
    def n_prime = ctx.get(3)
@@ -425,21 +421,21 @@ fn _mont_redc(any: T, any: ctx): bigint {
    t
 }
 
-fn _mont_mul(any: a_bar, any: b_bar, any: ctx): bigint { _mont_redc(bigint_mul(a_bar, b_bar), ctx) }
+fn _mont_mul(any a_bar, any b_bar, any ctx) bigint { _mont_redc(bigint_mul(a_bar, b_bar), ctx) }
 
-fn _mont_to(any: a, any: ctx): bigint {
+fn _mont_to(any a, any ctx) bigint {
    def n, R = ctx.get(0), ctx.get(2)
    mod(bigint_mul(a, R), n)
 }
 
-fn _mont_from(any: a_bar, any: ctx): bigint { _mont_redc(a_bar, ctx) }
+fn _mont_from(any a_bar, any ctx) bigint { _mont_redc(a_bar, ctx) }
 
 @inline
-fn _nt_mul_mod_i31(int: a, int: b, int: m): int {
+fn _nt_mul_mod_i31(int a, int b, int m) int {
    (a * b) % m
 }
 
-fn _nt_pow_mod_i31(int: a, int: e0, int: m): int {
+fn _nt_pow_mod_i31(int a, int e0, int m) int {
    mut base = a % m
    if(base < 0){ base += m }
    mut exp = e0
@@ -452,7 +448,7 @@ fn _nt_pow_mod_i31(int: a, int: e0, int: m): int {
    acc
 }
 
-fn _nt_strong_prp_i31(int: n, int: a): bool {
+fn _nt_strong_prp_i31(int n, int a) bool {
    if(a >= n){ return true }
    mut d = n - 1
    mut s = 0
@@ -472,7 +468,7 @@ fn _nt_strong_prp_i31(int: n, int: a): bool {
    false
 }
 
-fn _nt_is_prime_i31(int: n): bool {
+fn _nt_is_prime_i31(int n) bool {
    if(n < 2){ return false }
    if(n == 2 || n == 3 || n == 5 || n == 7 || n == 11 || n == 13 || n == 17 || n == 19 || n == 23 || n == 29 || n == 31 || n == 37){ return true }
    if((n & 1) == 0 || n % 3 == 0 || n % 5 == 0 || n % 7 == 0 || n % 11 == 0 || n % 13 == 0 || n % 17 == 0 || n % 19 == 0 || n % 23 == 0 || n % 29 == 0 || n % 31 == 0 || n % 37 == 0){ return false }
@@ -481,13 +477,12 @@ fn _nt_is_prime_i31(int: n): bool {
    _nt_strong_prp_i31(n, 61)
 }
 
-fn is_prime(any: n): bool {
+fn is_prime(any n) bool {
    "Check if n is prime using Miller-Rabin over the bigint arithmetic layer."
    if(is_int(n) && int(n) <= 2147483647){ return _nt_is_prime_i31(int(n)) }
    def nn = Z(n)
    if(nn < Z(2)){ return false }
-   if(nn == Z(2)){ return true }
-   if(nn == Z(3)){ return true }
+   if(nn == Z(2) || nn == Z(3)){ return true }
    if(nn % Z(2) == Z(0)){ return false }
    if(bit_length(nn) <= 31){ return _nt_is_prime_i31(bigint_to_int(nn)) }
    mut d, s = nn - Z(1), 0
@@ -528,12 +523,12 @@ fn is_prime(any: n): bool {
    true
 }
 
-fn is_prime_power(any: n): bool {
+fn is_prime_power(any n) bool {
    "Check if n is a prime power."
    is_prime_power(Z(n))
 }
 
-fn next_prime(any: n): bigint {
+fn next_prime(any n) bigint {
    "Next prime after n."
    mut x = Z(n) + Z(1)
    if(x <= Z(2)){ return Z(2) }
@@ -542,7 +537,7 @@ fn next_prime(any: n): bigint {
    x
 }
 
-fn prev_prime(any: n): bigint {
+fn prev_prime(any n) bigint {
    "Previous prime before n."
    mut x = Z(n) - Z(1)
    if(x < Z(2)){ return Z(0) }
@@ -552,7 +547,7 @@ fn prev_prime(any: n): bigint {
    x
 }
 
-fn prime(any: n): bigint {
+fn prime(any n) bigint {
    "The n-th prime(0-indexed)."
    def target = Z(n)
    if(target < Z(0)){ return Z(0) }
@@ -565,7 +560,7 @@ fn prime(any: n): bigint {
    p
 }
 
-fn prime_range(any: start, any: end): list {
+fn prime_range(any start, any end) list {
    "List of primes in [start, end)."
    def start_big = Z(start)
    def end_big = Z(end)
@@ -578,7 +573,7 @@ fn prime_range(any: start, any: end): list {
    primes
 }
 
-fn primes_first_n(any: n): list {
+fn primes_first_n(any n) list {
    "First n primes."
    def n_big = Z(n)
    mut primes = list(0)
@@ -592,7 +587,7 @@ fn primes_first_n(any: n): list {
    primes
 }
 
-fn _factor_pack(list: flat): list {
+fn _factor_pack(list flat) list {
    mut out = []
    mut i = 0
    while(i < flat.len){
@@ -614,7 +609,7 @@ fn _factor_pack(list: flat): list {
    out
 }
 
-fn _factor_product(list: facs): bigint {
+fn _factor_product(list facs) bigint {
    mut prod = Z(1)
    mut i = 0
    while(i < facs.len){
@@ -630,21 +625,21 @@ fn _factor_product(list: facs): bigint {
    prod
 }
 
-fn _factor_cache_key(any: n): str { bigint_to_str(Z(n)) }
+fn _factor_cache_key(any n) str { bigint_to_str(Z(n)) }
 
-fn _factor_cache_get(any: n): any {
+fn _factor_cache_get(any n) any {
    def key = _factor_cache_key(n)
    if(_factor_ext_cache.contains(key)){ return _factor_ext_cache.get(key, nil) }
    nil
 }
 
-fn _factor_cache_set(any: n, list: facs): list {
+fn _factor_cache_set(any n, list facs) list {
    def key = _factor_cache_key(n)
    _factor_ext_cache.set(key, facs)
    facs
 }
 
-fn _factor_parse_factordb_body(str: body, any: n): any {
+fn _factor_parse_factordb_body(str body, any n) any {
    def nn = Z(n)
    if(!is_str(body) || str_mod.find(body, "\"status\":\"FF\"") < 0){ return nil }
    mut pos = str_mod.find(body, "\"factors\":[")
@@ -666,7 +661,7 @@ fn _factor_parse_factordb_body(str: body, any: n): any {
    (_factor_product(facs) == nn) ? _factor_cache_set(nn, facs) : nil
 }
 
-fn _factor_from_factordb(any: n): any {
+fn _factor_from_factordb(any n) any {
    def nn = Z(n)
    if(nn < Z(2)){ return [] }
    def cached = _factor_cache_get(nn)
@@ -707,7 +702,7 @@ fn _factor_from_factordb(any: n): any {
    (_factor_product(facs) == nn) ? _factor_cache_set(nn, facs) : nil
 }
 
-fn factordb_factor(any: n, bool: fallback=false): any {
+fn factordb_factor(any n, bool fallback=false) any {
    "Query FactorDB for a complete prime-power factorization; pass fallback=true to run the built-in schedule when FactorDB is incomplete."
    mut nn = Z(n)
    if(nn < Z(0)){ nn = -nn }
@@ -717,7 +712,7 @@ fn factordb_factor(any: n, bool: fallback=false): any {
    fallback ? _factor_local(nn) : nil
 }
 
-fn _factor_local(any: n): list {
+fn _factor_local(any n) list {
    "Factorization with small-prime trial division and recursive Pollard rho.
    Uses small-prime trial division + recursive Pollard rho.
    Implemented without nested functions to avoid runtime/JIT instability."
@@ -728,11 +723,11 @@ fn _factor_local(any: n): list {
    _factor_pack(flat)
 }
 
-fn _factor_mul_mod(any: a, any: b, any: m): any { (a % m) * (b % m) % m }
+fn _factor_mul_mod(any a, any b, any m) any { (a % m) * (b % m) % m }
 
-fn _factor_rho_f(any: n, any: x, any: c): any { (_factor_mul_mod(x, x, n) + c) % n }
+fn _factor_rho_f(any n, any x, any c) any { (_factor_mul_mod(x, x, n) + c) % n }
 
-fn _factor_pollard_rho(any: n): bigint {
+fn _factor_pollard_rho(any n) bigint {
    if(n % Z(2) == Z(0)){ return Z(2) }
    if(n % Z(3) == Z(0)){ return Z(3) }
    mut c = Z(1)
@@ -752,7 +747,7 @@ fn _factor_pollard_rho(any: n): bigint {
    Z(0)
 }
 
-fn _factor_flat_rec(any: n, list: flat): list {
+fn _factor_flat_rec(any n, list flat) list {
    if(n == Z(1)){ return flat }
    if(is_prime(n)){ return flat.append(n) }
    def small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
@@ -785,7 +780,7 @@ fn _factor_flat_rec(any: n, list: flat): list {
    _factor_flat_rec(nn / f, out)
 }
 
-fn factor(any: n, bool: fdb=false, bool: reserved=false): list {
+fn factor(any n, bool fdb=false, bool reserved=false) list {
    "Factor n into prime powers: [[p1, e1], [p2, e2], ...].
    Uses the built-in schedule ; fdb is accepted for compatibility and does not add a network dependency."
    mut nn = Z(n)
@@ -799,7 +794,7 @@ fn factor(any: n, bool: fdb=false, bool: reserved=false): list {
    _factor_local(nn)
 }
 
-fn factorint(any: n, bool: fdb=false, bool: reserved=false): dict {
+fn factorint(any n, bool fdb=false, bool reserved=false) dict {
    "Factor n as dict {prime: exponent}."
    mut facs = factor(n, fdb, reserved)
    mut d = dict()
@@ -812,7 +807,7 @@ fn factorint(any: n, bool: fdb=false, bool: reserved=false): dict {
    d
 }
 
-fn divisors(any: n, bool: fdb=false, bool: reserved=false): list {
+fn divisors(any n, bool fdb=false, bool reserved=false) list {
    "List of all divisors of n."
    mut facs = factor(n, fdb, reserved)
    mut ds = [Z(1)]
@@ -840,7 +835,7 @@ fn divisors(any: n, bool: fdb=false, bool: reserved=false): list {
    ds
 }
 
-fn euler_phi(any: n): bigint {
+fn euler_phi(any n) bigint {
    "Euler's totient function."
    def nn = Z(n)
    if(nn <= Z(0)){ return Z(0) }
@@ -855,7 +850,7 @@ fn euler_phi(any: n): bigint {
    res
 }
 
-fn carmichael_lambda(any: n): bigint {
+fn carmichael_lambda(any n) bigint {
    "Carmichael lambda function."
    def nn = Z(n)
    if(nn <= Z(0)){ return Z(0) }
@@ -882,7 +877,7 @@ fn carmichael_lambda(any: n): bigint {
    res
 }
 
-fn moebius(any: n): int {
+fn moebius(any n) int {
    "Mobius function."
    def nn = Z(n)
    if(nn == Z(1)){ return 1 }
@@ -895,22 +890,22 @@ fn moebius(any: n): int {
    (facs.len % 2 == 0) ? 1 : -1
 }
 
-fn legendre(any: a, any: p): int {
+fn legendre(any a, any p) int {
    "Legendre symbol(a/p)."
    __bigint_legendre(Z(a), Z(p))
 }
 
-fn jacobi(any: a, any: n): int {
+fn jacobi(any a, any n) int {
    "Jacobi symbol(a/n)."
    __bigint_jacobi(Z(a), Z(n))
 }
 
-fn kronecker(any: a, any: n): int {
+fn kronecker(any a, any n) int {
    "Kronecker symbol(a/n)."
    __bigint_kronecker(Z(a), Z(n))
 }
 
-fn crt(list: rems, list: mods): any {
+fn crt(list rems, list mods) any {
    "Chinese Remainder Theorem. Supports compatible non-coprime moduli."
    if(rems.len != mods.len){ return nil }
    if(rems.len == 0){ return Z(0) }
@@ -934,13 +929,12 @@ fn crt(list: rems, list: mods): any {
    x
 }
 
-fn CRT(list: rems, list: mods): any {
+fn CRT(list rems, list mods) any {
    "CRT alias."
    crt(rems, mods)
 }
 
-; Random
-fn random_prime(any: bits): bigint {
+fn random_prime(any bits) bigint {
    "Random prime with given bit length."
    def b = int(bits)
    if(b <= 1){ return Z(2) }
@@ -955,14 +949,14 @@ fn random_prime(any: bits): bigint {
    x
 }
 
-fn randint(any: a, any: b): bigint {
+fn randint(any a, any b) bigint {
    "Random integer in [a, b]."
    def a_big, b_big = Z(a), Z(b)
    def range_big = bigint_add(bigint_sub(b_big, a_big), Z(1))
    bigint_add(a_big, bigint_mod(bigint_random(range_big), range_big))
 }
 
-fn long_to_bytes(any: n, int: length=0): list<int> {
+fn long_to_bytes(any n, int length=0) list<int> {
    "Convert integer to bytes list(big-endian), left-padding to length when provided."
    def raw = bigint_to_bytes(Z(n))
    if(length <= raw.len){ return raw }
@@ -980,7 +974,7 @@ fn long_to_bytes(any: n, int: length=0): list<int> {
    out
 }
 
-fn bytes_to_long(list: bytes): bigint {
+fn bytes_to_long(list bytes) bigint {
    "Convert bytes list to integer(big-endian)."
    mut out = Z(0)
    mut i = 0
@@ -991,7 +985,7 @@ fn bytes_to_long(list: bytes): bigint {
    out
 }
 
-fn xor_bytes(list: a, list: b): list {
+fn xor_bytes(list a, list b) list {
    "XOR two byte lists."
    def n = a.len < b.len ? a.len : b.len
    mut out = list(n)
@@ -1004,7 +998,7 @@ fn xor_bytes(list: a, list: b): list {
    out
 }
 
-fn str_to_bytes(str: s): list<int> {
+fn str_to_bytes(str s) list<int> {
    "Convert string to bytes list."
    def n = s.len
    mut out = list(n)
@@ -1017,7 +1011,7 @@ fn str_to_bytes(str: s): list<int> {
    out
 }
 
-fn bytes_to_str(list: bytes): str {
+fn bytes_to_str(list bytes) str {
    "Convert bytes list to string."
    def n = bytes.len
    def p = malloc(n)
@@ -1030,7 +1024,7 @@ fn bytes_to_str(list: bytes): str {
    init_str(p, n)
 }
 
-fn isqrt(any: n): bigint {
+fn isqrt(any n) bigint {
    "Integer square root."
    def n_big = Z(n)
    if(bigint_lt(n_big, Z(0))){ return Z(0) }
@@ -1038,36 +1032,31 @@ fn isqrt(any: n): bigint {
    Z(__bigint_isqrt(n_big))
 }
 
-fn nth_root(any: n, any: k): bigint {
+fn nth_root(any n, any k) bigint {
    "Integer k-th root."
    bigint_nth_root(Z(n), k)
 }
 
-fn tonelli_shanks(any: n, any: p): bigint {
+fn tonelli_shanks(any n, any p) bigint {
    "Tonelli-Shanks: compute a square root of n mod p. Returns -1 if n is not a QR mod p."
    def n_big, p_big = mod(Z(n), Z(p)), Z(p)
    def zero = Z(0)
    def one = Z(1)
-   ; Quick checks
    if(bigint_eq(n_big, zero)){ return zero }
    if(legendre(n_big, p_big) != 1){ return bigint_from_int(-1) }
-   ; p ≡ 3 mod 4: easy case
    def p_mod4 = bigint_to_int(bigint_mod(p_big, Z(4)))
    if(p_mod4 == 3){ return power_mod(n_big, bigint_div(bigint_add(p_big, one), Z(4)), p_big) }
-   ; Factor out powers of 2 from p-1: p-1 = Q * 2^S
    mut Q, S = bigint_sub(p_big, one), 0
    while(bigint_to_int(bigint_mod(Q, Z(2))) == 0){
       Q = bigint_div(Q, Z(2))
       S += 1
    }
-   ; Find a non-residue z
    mut z = Z(2)
    while(legendre(z, p_big) != -1){ z = bigint_add(z, one) }
    mut M, c = S, power_mod(z, Q, p_big)
    mut t, R = power_mod(n_big, Q, p_big), power_mod(n_big, bigint_div(bigint_add(Q, one), Z(2)), p_big)
    while(true){
       if(bigint_eq(t, one)){ return R }
-      ; Find least i > 0 such that t^(2^i) ≡ 1 (mod p)
       mut i = 1
       mut tmp = bigint_mul(t, t)
       tmp = bigint_mod(tmp, p_big)
@@ -1076,7 +1065,6 @@ fn tonelli_shanks(any: n, any: p): bigint {
          tmp = bigint_mod(tmp, p_big)
          i += 1
       }
-      ; b = c^(2^(M-i-1))
       mut b, j = c, 0
       while(j < M - i - 1){
          b = bigint_mod(bigint_mul(b, b), p_big)
@@ -1088,7 +1076,7 @@ fn tonelli_shanks(any: n, any: p): bigint {
    bigint_from_int(-1)
 }
 
-fn mod_quadratic_roots_prime(any: a, any: b, any: c, any: p): list {
+fn mod_quadratic_roots_prime(any a, any b, any c, any p) list {
    "Solve a*x^2 + b*x + c = 0 over prime field F_p. Returns distinct roots."
    def pp = Z(p)
    def aa = mod(a, pp)
@@ -1116,14 +1104,13 @@ fn mod_quadratic_roots_prime(any: a, any: b, any: c, any: p): list {
    roots
 }
 
-fn cipolla(any: n, any: p): bigint {
+fn cipolla(any n, any p) bigint {
    "Cipolla's algorithm: compute sqrt(n) mod p. Returns -1 if n is a non-residue."
    def n_big, p_big = mod(Z(n), Z(p)), Z(p)
    def zero = Z(0)
    def one = Z(1)
    if(bigint_eq(n_big, zero)){ return zero }
    if(legendre(n_big, p_big) != 1){ return bigint_from_int(-1) }
-   ; Find a such that a^2 - n is a non-residue
    mut a = one
    mut w2 = zero
    while(true){
@@ -1131,19 +1118,16 @@ fn cipolla(any: n, any: p): bigint {
       if(legendre(w2, p_big) == -1){ break }
       a = bigint_add(a, one)
    }
-   ; Multiply in GF(p^2) = GF(p)[x]/(x^2 - w2): (a + x)^((p+1)/2)
    def exp = bigint_div(bigint_add(p_big, one), Z(2))
    mut r0, r1 = one, zero
    mut b0, b1 = a, one
    mut e = exp
    while(bigint_gt(e, zero)){
       if(bigint_to_int(bigint_mod(e, Z(2))) == 1){
-         ; r = r * b in GF(p^2)
          def new_r0 = mod(bigint_add(bigint_mul(r0, b0), bigint_mul(bigint_mul(r1, b1), w2)), p_big)
          def new_r1 = mod(bigint_add(bigint_mul(r0, b1), bigint_mul(r1, b0)), p_big)
          r0, r1 = new_r0, new_r1
       }
-      ; b = b^2 in GF(p^2)
       def new_b0 = mod(bigint_add(bigint_mul(b0, b0), bigint_mul(bigint_mul(b1, b1), w2)), p_big)
       def new_b1 = mod(bigint_mul(bigint_mul(b0, b1), Z(2)), p_big)
       b0, b1 = new_b0, new_b1
@@ -1152,8 +1136,7 @@ fn cipolla(any: n, any: p): bigint {
    r0
 }
 
-; Continued fractions
-fn continued_fraction(any: p, any: q): list {
+fn continued_fraction(any p, any q) list {
    "Continued fraction expansion of p/q. Returns list of partial quotients [a0, a1, ...]."
    mut num = Z(p)
    mut den = Z(q)
@@ -1169,7 +1152,7 @@ fn continued_fraction(any: p, any: q): list {
    cf
 }
 
-fn cf_convergents(list: cf): list {
+fn cf_convergents(list cf) list {
    "Convergents of a continued fraction. Returns list of [p, q] pairs."
    def n = cf.len
    if(n == 0){ return list(0) }
@@ -1192,8 +1175,7 @@ fn cf_convergents(list: cf): list {
    result
 }
 
-; Rational reconstruction
-fn rational_reconstruction(any: t, any: m): any {
+fn rational_reconstruction(any t, any m) any {
    "Rational reconstruction: find p/q such that p/q ≡ t(mod m) and |p|, q < sqrt(m/2).
    Returns [p, q] or nil if no solution exists."
    def m_big = Z(m)
@@ -1201,7 +1183,6 @@ fn rational_reconstruction(any: t, any: m): any {
    def one = Z(1)
    if(m_big <= zero){ return nil }
    def t_big = mod(Z(t), m_big)
-   ; Extended Euclidean, tracking quotients
    mut r0, r1 = m_big, t_big
    mut s0, s1 = zero, one
    def bound = Z(__bigint_isqrt(bigint_div(m_big, Z(2))))
@@ -1212,11 +1193,9 @@ fn rational_reconstruction(any: t, any: m): any {
       r0, r1 = r1, r2
       s0, s1 = s1, s2
    }
-   ; Check denominator
    if(bigint_eq(s1, zero)){ return nil }
    def denom = bigint_abs(s1)
    if(bigint_gt(denom, bound)){ return nil }
-   ; Adjust sign
    def p_val = (bigint_lt(s1, zero)) ? bigint_neg(r1) : r1
    if(bigint_gt(bigint_abs(p_val), bound)){ return nil }
    if(gcd(p_val, denom) != one){ return nil }
@@ -1227,7 +1206,7 @@ fn rational_reconstruction(any: t, any: m): any {
    [p_val, denom]
 }
 
-fn mqrr_rational_reconstruction(any: u, any: m, any: T): any {
+fn mqrr_rational_reconstruction(any u, any m, any T) any {
    "Maximal quotient rational reconstruction. Returns [n, d] or nil."
    def uu, mm, tt = Z(u), Z(m), Z(T)
    if(uu < Z(0) || mm <= uu || tt <= Z(0)){ return nil }
@@ -1258,8 +1237,7 @@ fn mqrr_rational_reconstruction(any: u, any: m, any: T): any {
    nil
 }
 
-; Smoothness
-fn is_smooth(any: n, any: B): bool {
+fn is_smooth(any n, any B) bool {
    "Returns true if n is B-smooth(all prime factors <= B)."
    def n_big = bigint_abs(Z(n))
    def one = Z(1)
@@ -1275,7 +1253,7 @@ fn is_smooth(any: n, any: B): bool {
    bigint_le(rem, one)
 }
 
-fn smooth_part(any: n, any: B): bigint {
+fn smooth_part(any n, any B) bigint {
    "Returns the B-smooth part of n(product of all prime factors <= B with their full multiplicity)."
    def n_big = bigint_abs(Z(n))
    def one = Z(1)
@@ -1293,7 +1271,7 @@ fn smooth_part(any: n, any: B): bigint {
    smooth
 }
 
-fn bigint_to_bytes(any: a): list<int> {
+fn bigint_to_bytes(any a) list<int> {
    "Convert BigInt to bytes list(big-endian)."
    mut x = bigint_abs(Z(a))
    if(x == Z(0)){ return [0] }
@@ -1309,7 +1287,7 @@ fn bigint_to_bytes(any: a): list<int> {
    out
 }
 
-fn bytes_to_bigint(list: bytes): bigint {
+fn bytes_to_bigint(list bytes) bigint {
    "Convert bytes list to BigInt(big-endian)."
    def b256 = Z(256)
    mut result = Z(0)
@@ -1323,106 +1301,104 @@ fn bytes_to_bigint(list: bytes): bigint {
 
 impl bigint {
    @inline
-   fn mod(bigint: a, any: m): bigint { mod(a, m) }
+   fn mod(bigint a, any m) bigint { mod(a, m) }
    @inline
-   fn powmod(bigint: a, any: exp, any: m): bigint { power_mod(a, exp, m) }
+   fn powmod(bigint a, any exp, any m) bigint { power_mod(a, exp, m) }
    @inline
-   fn invmod(bigint: a, any: m): bigint { inverse_mod(a, m) }
+   fn invmod(bigint a, any m) bigint { inverse_mod(a, m) }
    @inline
-   fn gcd(bigint: a, any: b): bigint { gcd(a, b) }
+   fn gcd(bigint a, any b) bigint { gcd(a, b) }
    @inline
-   fn lcm(bigint: a, any: b): bigint { lcm(a, b) }
+   fn lcm(bigint a, any b) bigint { lcm(a, b) }
    @inline
-   fn xgcd(bigint: a, any: b): list { xgcd(a, b) }
+   fn xgcd(bigint a, any b) list { xgcd(a, b) }
    @inline
-   fn divmod(bigint: a, any: b): list { bigint_divmod(a, b) }
+   fn divmod(bigint a, any b) list { bigint_divmod(a, b) }
    @inline
-   fn sqrt(bigint: a): bigint { isqrt(a) }
+   fn sqrt(bigint a) bigint { isqrt(a) }
    @inline
-   fn sqrt_mod(bigint: a, any: p): bigint { tonelli_shanks(a, p) }
+   fn sqrt_mod(bigint a, any p) bigint { tonelli_shanks(a, p) }
    @inline
-   fn quadratic_roots_mod(bigint: a, any: b, any: c, any: p): list { mod_quadratic_roots_prime(a, b, c, p) }
+   fn quadratic_roots_mod(bigint a, any b, any c, any p) list { mod_quadratic_roots_prime(a, b, c, p) }
    @inline
-   fn root(bigint: a, any: k): bigint { nth_root(a, k) }
+   fn root(bigint a, any k) bigint { nth_root(a, k) }
    @inline
-   fn nth_root(bigint: a, any: k): bigint { nth_root(a, k) }
+   fn nth_root(bigint a, any k) bigint { nth_root(a, k) }
    @inline
-   fn is_square(bigint: a): bool { is_square(a) == 1 }
+   fn is_square(bigint a) bool { is_square(a) == 1 }
    @inline
-   fn is_prime(bigint: a): bool { is_prime(a) }
+   fn is_prime(bigint a) bool { is_prime(a) }
    @inline
-   fn next_prime(bigint: a): bigint { next_prime(a) }
+   fn next_prime(bigint a) bigint { next_prime(a) }
    @inline
-   fn prev_prime(bigint: a): bigint { prev_prime(a) }
+   fn prev_prime(bigint a) bigint { prev_prime(a) }
    @inline
-   fn factor(bigint: a): list { factor(a) }
+   fn factor(bigint a) list { factor(a) }
    @inline
-   fn phi(bigint: a): bigint { euler_phi(a) }
+   fn phi(bigint a) bigint { euler_phi(a) }
    @inline
-   fn carmichael(bigint: a): bigint { carmichael_lambda(a) }
+   fn carmichael(bigint a) bigint { carmichael_lambda(a) }
    @inline
-   fn bytes(bigint: a): list<int> { bigint_to_bytes(a) }
+   fn bytes(bigint a) list<int> { bigint_to_bytes(a) }
    @inline
-   fn hex(bigint: a): str { bigint_to_hex(a) }
+   fn hex(bigint a) str { bigint_to_hex(a) }
    @inline
-   fn as_bytes(bigint: a): list<int> { bigint_to_bytes(a) }
+   fn as_bytes(bigint a) list<int> { bigint_to_bytes(a) }
    @inline
-   fn as_hex(bigint: a): str { bigint_to_hex(a) }
+   fn as_hex(bigint a) str { bigint_to_hex(a) }
    @inline
-   fn bitlen(bigint: a): int { bit_length(a) }
-   fn xor(bigint: a, bigint: b): bigint { bigint_xor(a, b) }
-   fn bxor(bigint: a, bigint: b): bigint { bigint_xor(a, b) }
+   fn bitlen(bigint a) int { bit_length(a) }
+   fn xor(bigint a, bigint b) bigint { bigint_xor(a, b) }
+   fn bxor(bigint a, bigint b) bigint { bigint_xor(a, b) }
 }
 
 impl int {
    @inline
-   fn Z(int: n): bigint { Z(n) }
+   fn Z(int n) bigint { Z(n) }
    @inline
-   fn bigint(int: n): bigint { Z(n) }
+   fn bigint(int n) bigint { Z(n) }
    @inline
-   fn mod(int: a, any: m): bigint { mod(a, m) }
+   fn mod(int a, any m) bigint { mod(a, m) }
    @inline
-   fn powmod(int: a, any: exp, any: m): bigint { power_mod(a, exp, m) }
+   fn powmod(int a, any exp, any m) bigint { power_mod(a, exp, m) }
    @inline
-   fn invmod(int: a, any: m): bigint { inverse_mod(a, m) }
+   fn invmod(int a, any m) bigint { inverse_mod(a, m) }
    @inline
-   fn gcd(int: a, any: b): bigint { gcd(a, b) }
+   fn gcd(int a, any b) bigint { gcd(a, b) }
    @inline
-   fn lcm(int: a, any: b): bigint { lcm(a, b) }
+   fn lcm(int a, any b) bigint { lcm(a, b) }
    @inline
-   fn xgcd(int: a, any: b): list { xgcd(a, b) }
+   fn xgcd(int a, any b) list { xgcd(a, b) }
    @inline
-   fn sqrt_mod(int: a, any: p): bigint { tonelli_shanks(a, p) }
+   fn sqrt_mod(int a, any p) bigint { tonelli_shanks(a, p) }
    @inline
-   fn quadratic_roots_mod(int: a, any: b, any: c, any: p): list { mod_quadratic_roots_prime(a, b, c, p) }
+   fn quadratic_roots_mod(int a, any b, any c, any p) list { mod_quadratic_roots_prime(a, b, c, p) }
    @inline
-   fn is_prime(int: a): bool { is_prime(a) }
+   fn is_prime(int a) bool { is_prime(a) }
    @inline
-   fn next_prime(int: a): bigint { next_prime(a) }
+   fn next_prime(int a) bigint { next_prime(a) }
    @inline
-   fn prev_prime(int: a): bigint { prev_prime(a) }
+   fn prev_prime(int a) bigint { prev_prime(a) }
    @inline
-   fn factor(int: a): list { factor(a) }
+   fn factor(int a) list { factor(a) }
    @inline
-   fn phi(int: a): bigint { euler_phi(a) }
+   fn phi(int a) bigint { euler_phi(a) }
    @inline
-   fn bitlen(int: a): int { bit_length(a) }
+   fn bitlen(int a) int { bit_length(a) }
 }
 
 impl str {
    @inline
-   fn Z(str: s): bigint { Z(s) }
+   fn Z(str s) bigint { Z(s) }
    @inline
-   fn bigint(str: s): bigint { Z(s) }
+   fn bigint(str s) bigint { Z(s) }
    @inline
-   fn hex_int(str: s): int { hex_to_int(s) }
+   fn hex_int(str s) int { hex_to_int(s) }
    @inline
-   fn hex_bigint(str: s): bigint { hex_to_bigint(s) }
+   fn hex_bigint(str s) bigint { hex_to_bigint(s) }
 }
 
-; Plain-integer extended GCD, CRT extras, and bit/hex utilities
-; (consolidated from extended_gcd, crt, utils modules)
-fn extended_gcd(int: a, int: b): list {
+fn extended_gcd(int a, int b) list {
    "Extended Euclidean(plain int). Returns [g, x, y] s.t. a*x + b*y = g = gcd(a,b)."
    if(b == 0){ return [a, 1, 0] }
    def res = extended_gcd(b, a % b)
@@ -1432,13 +1408,13 @@ fn extended_gcd(int: a, int: b): list {
    [g, y1, x1 - (a / b) * y1]
 }
 
-fn bezout_coefficients(int: a, int: b): list {
+fn bezout_coefficients(int a, int b) list {
    "Returns [x, y] such that a*x + b*y = gcd(a, b)."
    def res = extended_gcd(a, b)
    [res[1], res[2]]
 }
 
-fn solve_linear_congruence(int: a, int: b, int: m): list {
+fn solve_linear_congruence(int a, int b, int m) list {
    "Solve a*x = b(mod m). Returns list of solutions mod m, or [] if none."
    def res = extended_gcd(a, m)
    def g = res[0]
@@ -1453,7 +1429,7 @@ fn solve_linear_congruence(int: a, int: b, int: m): list {
    sols
 }
 
-fn crt2(int: a1, int: m1, int: a2, int: m2): int {
+fn crt2(int a1, int m1, int a2, int m2) int {
    "CRT for two congruences x = a1 mod m1, x = a2 mod m2. Returns x mod lcm(m1,m2), or 0 if inconsistent."
    def res = extended_gcd(m1, m2)
    def g = res[0]
@@ -1463,7 +1439,7 @@ fn crt2(int: a1, int: m1, int: a2, int: m2): int {
    ((a1 + m1 * ((a2 - a1) / g % (m2 / g) * p % (m2 / g))) % lcm_val + lcm_val) % lcm_val
 }
 
-fn garner(list: rems, list: mods): any {
+fn garner(list rems, list mods) any {
    "Garner's algorithm for CRT reconstruction(plain int). Returns unique solution mod product(mods)."
    def n = rems.len
    if(n == 0){ return 0 }
@@ -1500,17 +1476,17 @@ fn garner(list: rems, list: mods): any {
    result
 }
 
-fn int_to_bytes(any: n): list<int> {
+fn int_to_bytes(any n) list<int> {
    "Convert non-negative integer to big-endian byte list."
    bigint_to_bytes(Z(n))
 }
 
-fn bytes_to_int(list: bytes): bigint {
+fn bytes_to_int(list bytes) bigint {
    "Convert big-endian byte list to integer."
    bytes.long
 }
 
-fn int_to_hex(int: n): str {
+fn int_to_hex(int n) str {
    "Convert integer to lowercase hex string with '0x' prefix."
    if(n == 0){ return "0x0" }
    def hex_chars = "0123456789abcdef"
@@ -1521,7 +1497,7 @@ fn int_to_hex(int: n): str {
    def out = malloc(total + 1)
    if(!out){ return "" }
    init_str(out, total)
-   store8(out, 48, 0) store8(out, 120, 1) ;; '0x'
+   store8(out, 48, 0) store8(out, 120, 1)
    mut i, v = total - 1, n
    while(v > 0){
       store8(out, load8(hex_chars, v & 15), i)
@@ -1532,7 +1508,7 @@ fn int_to_hex(int: n): str {
    out
 }
 
-fn bigint_to_hex(any: n): str {
+fn bigint_to_hex(any n) str {
    "Convert a non-negative BigInt to lowercase hex without a prefix."
    mut v = Z(n)
    if(v == Z(0)){ return "0" }
@@ -1557,7 +1533,7 @@ fn bigint_to_hex(any: n): str {
    out
 }
 
-fn hex_to_int(str: s): int {
+fn hex_to_int(str s) int {
    "Convert hex string(with or without 0x prefix) to integer."
    def n = s.len
    mut start = 0
@@ -1572,14 +1548,14 @@ fn hex_to_int(str: s): int {
    result
 }
 
-fn _hex_skip_byte(int: c): bool {
+fn _hex_skip_byte(int c) bool {
    case c {
       9, 10, 13, 32, 58, 95 -> true
       _ -> false
    }
 }
 
-fn hex_to_bigint(str: s): bigint {
+fn hex_to_bigint(str s) bigint {
    "Convert hex string(with or without 0x prefix) to BigInt."
    def n = s.len
    mut start = 0
@@ -1599,19 +1575,19 @@ fn hex_to_bigint(str: s): bigint {
    result
 }
 
-fn bit_length(any: n): int {
+fn bit_length(any n) int {
    "Number of bits needed to represent abs(n). Returns 0 for n=0. Uses GMP-backed builtin."
    if(n == 0){ return 0 }
    __bigint_bitlen(Z(n))
 }
 
-fn is_square(any: n): int {
+fn is_square(any n) int {
    "Returns 1 if n is a perfect square, 0 otherwise. Uses GMP-backed builtin."
    if(n < 0){ return 0 }
    __bigint_is_perfect_square(Z(n))
 }
 
-fn is_perfect_square(any: n): bool {
+fn is_perfect_square(any n) bool {
    "Returns true if n is a perfect square."
    is_square(n) == 1
 }

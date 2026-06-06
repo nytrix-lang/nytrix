@@ -1,12 +1,15 @@
-;; Keywords: rsa partial
+;; Keywords: rsa partial math crypto
 ;; RSA partial-integer modeling for known and unknown bit ranges routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.partial(recover_p_from_d_partial, coppersmith_factor_known_bits, partial_key_recovery, partial_bit_length)
 use std.math.nt
 
-fn partial_bit_length(any: n): int {
+fn partial_bit_length(any n) int {
    "Return the number of bits required to represent integer n."
    mut bl = 0
    mut v = n < 0 ? (0 - n) : n
@@ -17,7 +20,7 @@ fn partial_bit_length(any: n): int {
    bl
 }
 
-fn gcd(any: a, any: b): any {
+fn gcd(any a, any b) any {
    "Compute the greatest common divisor of a and b."
    while(b != 0){
       mut t = b
@@ -26,7 +29,7 @@ fn gcd(any: a, any: b): any {
    a
 }
 
-fn _factor_from_phi(any: n, any: phi): any {
+fn _factor_from_phi(any n, any phi) any {
    def sum_pq = n - phi + 1
    def diff_sq = sum_pq * sum_pq - 4 * n
    if(diff_sq < 0){ return 0 }
@@ -36,7 +39,7 @@ fn _factor_from_phi(any: n, any: phi): any {
    (p > 1 && p * q == n) ? p : 0
 }
 
-fn recover_p_from_d_partial(any: e, any: d_partial, any: bit_mask, any: n): any {
+fn recover_p_from_d_partial(any e, any d_partial, any bit_mask, any n) any {
    "Attempt to recover prime factor p of n from partial knowledge of the
    private exponent d.  Returns p or 0 on failure."
    def ed_minus_1 = e * d_partial - 1
@@ -52,7 +55,7 @@ fn recover_p_from_d_partial(any: e, any: d_partial, any: bit_mask, any: n): any 
    0
 }
 
-fn coppersmith_factor_known_bits(any: n, any: partial_p, any: known_mask, any: bits_known, any: total_bits): any {
+fn coppersmith_factor_known_bits(any n, any partial_p, any known_mask, any bits_known, any total_bits) any {
    "Factor n using Coppersmith's method when some bits of a prime factor p are known.
    partial_p holds the known high bits.  Returns the full factor p or 0."
    def shift = total_bits - bits_known
@@ -71,7 +74,7 @@ fn coppersmith_factor_known_bits(any: n, any: partial_p, any: known_mask, any: b
    result
 }
 
-fn partial_key_recovery(any: e, any: n, list: known_d_bits, list: bit_positions): list {
+fn partial_key_recovery(any e, any n, list known_d_bits, list bit_positions) list {
    "Recover RSA keys [p, q, d] from partial bit knowledge of the private exponent d.
    known_d_bits contains known bit values and bit_positions their positions.
    Returns [p, q, d_reconstructed] or [0, 0, 0] on failure."

@@ -1,15 +1,18 @@
-;; Keywords: number-theory crt
+;; Keywords: number-theory crt math crypto
 ;; Chinese-remainder operations for recombining modular residues.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto.number
+;; - std.math.crypto
 module std.math.crypto.number.crt(fast_crt)
 use std.math.nt
 
-fn _crt_z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _crt_z(any x) any { is_bigint(x) ? x : Z(x) }
 
-fn _crt_out(any: a, any: b): list { [a, b] }
+fn _crt_out(any a, any b) list { [a, b] }
 
-fn _crt_pair(any: x0, any: m0, any: x1, any: m1): any {
+fn _crt_pair(any x0, any m0, any x1, any m1) any {
    def mm0, mm1 = _crt_z(m0), _crt_z(m1)
    def xr0, xr1 = mod(_crt_z(x0), mm0), mod(_crt_z(x1), mm1)
    def g = gcd(mm0, mm1)
@@ -23,7 +26,7 @@ fn _crt_pair(any: x0, any: m0, any: x1, any: m1): any {
    _crt_out(mod(xr0 + mm0 * step, modl), modl)
 }
 
-fn fast_crt(list: xs, list: ms, int: segment_size=8): any {
+fn fast_crt(list xs, list ms, int segment_size=8) any {
    "Combines congruences x = xs[i] mod ms[i] using divide-and-conquer CRT."
    if(!is_list(xs) || !is_list(ms) || xs.len != ms.len || xs.len <= 0){ return nil }
    mut xr, mr = clone(xs), clone(ms)

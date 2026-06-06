@@ -1,6 +1,8 @@
-;; Keywords: gf galois-field finite-field
+;; Keywords: gf galois-field finite-field math crypto
 ;; Finite-field arithmetic for prime fields, GF(2), and extension-field elements.
 ;; Reference: HAC Ch.2/11/14 (https://cacr.uwaterloo.ca/hac/about/chap2.pdf)
+;; References:
+;; - std.math.crypto
 module std.math.crypto.gf(gfp_elem, gfp_add, gfp_sub, gfp_neg, gfp_mul, gfp_div, gfp_inv,
    gfp_pow, gfp_sqrt, gfp_is_qr, gfp_legendre, gfp_order, gfp_discrete_log_bsgs,
    gfpk_add, gfpk_sub, gfpk_neg, gfpk_mul,
@@ -20,18 +22,18 @@ use std.math.nt
 use std.math.bin (bit_count)
 
 comptime template _gf_ctor_alias1(alias_name, target_name){
-   fn ${alias_name}(any: arg0): gf2 { ${target_name}(arg0) }
+   fn ${alias_name}(any arg0) gf2 { ${target_name}(arg0) }
 }
 
 comptime template _gfe_ctor_alias2(alias_name, target_name){
-   fn ${alias_name}(any: arg0, any: arg1): gfe { ${target_name}(arg0, arg1) }
+   fn ${alias_name}(any arg0, any arg1) gfe { ${target_name}(arg0, arg1) }
 }
 
 comptime template _gf2e_ctor_alias2(alias_name, target_name){
-   fn ${alias_name}(any: arg0, any: arg1): gf2e { ${target_name}(arg0, arg1) }
+   fn ${alias_name}(any arg0, any arg1) gf2e { ${target_name}(arg0, arg1) }
 }
 
-fn _gf_list_copy(list: lst): list {
+fn _gf_list_copy(list lst) list {
    def n = lst.len
    mut r, i = [], 0
    while(i < n){
@@ -41,33 +43,33 @@ fn _gf_list_copy(list: lst): list {
    r
 }
 
-fn gfp_elem(any: a, any: p): any {
+fn gfp_elem(any a, any p) any {
    "Normalise integer a into [0, p). Handles negative inputs."
    def r = a % p
    (r < 0) ? r + p : r
 }
 
-fn gfp_add(any: a, any: b, any: p): any {
+fn gfp_add(any a, any b, any p) any {
    "Add two GF(p) elements. Returns(a + b) mod p."
    gfp_elem(a + b, p)
 }
 
-fn gfp_sub(any: a, any: b, any: p): any {
+fn gfp_sub(any a, any b, any p) any {
    "Subtract b from a in GF(p). Returns(a - b) mod p."
    gfp_elem(a - b, p)
 }
 
-fn gfp_neg(any: a, any: p): any {
+fn gfp_neg(any a, any p) any {
    "Negate a GF(p) element. Returns(-a) mod p."
    gfp_elem(0 - a, p)
 }
 
-fn gfp_mul(any: a, any: b, any: p): any {
+fn gfp_mul(any a, any b, any p) any {
    "Multiply two GF(p) elements. Returns(a * b) mod p."
    gfp_elem(a * b, p)
 }
 
-fn gfp_inv(any: a, any: p): any {
+fn gfp_inv(any a, any p) any {
    "Compute modular inverse of a in GF(p) via extended Euclidean. Returns 0 if a = 0."
    def aa = gfp_elem(a, p)
    if(aa == 0){ return 0 }
@@ -87,12 +89,12 @@ fn gfp_inv(any: a, any: p): any {
    gfp_elem(old_s, p)
 }
 
-fn gfp_div(any: a, any: b, any: p): any {
+fn gfp_div(any a, any b, any p) any {
    "Divide a by b in GF(p). Returns a * b^-1 mod p."
    gfp_mul(a, gfp_inv(b, p), p)
 }
 
-fn gfp_pow(any: a, any: e, any: p): any {
+fn gfp_pow(any a, any e, any p) any {
    "Compute a^e in GF(p) using binary exponentiation. Handles negative exponents via inverse."
    if(e == 0){ return 1 }
    if(e < 0){ return gfp_pow(gfp_inv(a, p), 0 - e, p) }
@@ -107,7 +109,7 @@ fn gfp_pow(any: a, any: e, any: p): any {
    result
 }
 
-fn gfp_legendre(any: a, any: p): int {
+fn gfp_legendre(any a, any p) int {
    "Legendre symbol(a|p). Returns 0 if p|a, 1 if a is a QR mod p, -1 if a is a QNR mod p."
    def aa = gfp_elem(a, p)
    if(aa == 0){ return 0 }
@@ -116,12 +118,12 @@ fn gfp_legendre(any: a, any: p): int {
    -1
 }
 
-fn gfp_is_qr(any: a, any: p): bool {
+fn gfp_is_qr(any a, any p) bool {
    "Test whether a is a quadratic residue mod p(p odd prime). Returns true/false."
    gfp_legendre(a, p) >= 0
 }
 
-fn gfp_sqrt(any: a, any: p): any {
+fn gfp_sqrt(any a, any p) any {
    "Compute a square root of a in GF(p) using Tonelli-Shanks.
    Returns r with r^2 = a mod p, or -1 if no square root exists.
    p must be an odd prime."
@@ -158,7 +160,7 @@ fn gfp_sqrt(any: a, any: p): any {
    R_ts
 }
 
-fn gfp_order(any: g, any: p): int {
+fn gfp_order(any g, any p) int {
    "Compute the multiplicative order of g in GF(p)^*. Returns smallest k > 0 with g^k = 1 mod p."
    if(gfp_elem(g, p) == 0){ return 0 }
    mut k = 1
@@ -170,7 +172,7 @@ fn gfp_order(any: g, any: p): int {
    k
 }
 
-fn gfp_discrete_log_bsgs(any: g, any: h, any: p): int {
+fn gfp_discrete_log_bsgs(any g, any h, any p) int {
    "Baby-step giant-step discrete log: find x in [0, p-1) with g^x = h mod p.
    Returns x or -1 if not found. Runs in O(sqrt(p)) time and space."
    def n = p
@@ -199,7 +201,7 @@ fn gfp_discrete_log_bsgs(any: g, any: h, any: p): int {
    -1
 }
 
-fn gfpk_degree(list: poly): int {
+fn gfpk_degree(list poly) int {
    "Return degree of polynomial(index of highest non-zero coeff), or -1 for zero poly."
    def n = poly.len
    mut i = n - 1
@@ -210,7 +212,7 @@ fn gfpk_degree(list: poly): int {
    -1
 }
 
-fn _gfpk_trim(list: poly, any: p): list {
+fn _gfpk_trim(list poly, any p) list {
    def n = poly.len
    mut result = []
    mut i = 0
@@ -232,7 +234,7 @@ fn _gfpk_trim(list: poly, any: p): list {
    result
 }
 
-fn gfpk_is_zero(list: a): bool {
+fn gfpk_is_zero(list a) bool {
    "Return true if polynomial a is the zero element."
    def n = a.len
    mut i = 0
@@ -243,7 +245,7 @@ fn gfpk_is_zero(list: a): bool {
    true
 }
 
-fn gfpk_eq(list: a, list: b, any: p): bool {
+fn gfpk_eq(list a, list b, any p) bool {
    "Test equality of two GF(p^k) elements after normalisation."
    def ta, tb = _gfpk_trim(a, p), _gfpk_trim(b, p)
    if(ta.len != tb.len){ return false }
@@ -255,7 +257,7 @@ fn gfpk_eq(list: a, list: b, any: p): bool {
    true
 }
 
-fn gfpk_neg(list: a, any: p): list {
+fn gfpk_neg(list a, any p) list {
    "Negate a GF(p^k) element coefficient-wise."
    mut result = []
    mut i = 0
@@ -266,7 +268,7 @@ fn gfpk_neg(list: a, any: p): list {
    result
 }
 
-fn gfpk_add(list: a, list: b, any: p): list {
+fn gfpk_add(list a, list b, any p) list {
    "Add two GF(p^k) elements. Returns sum."
    def na, nb = a.len, b.len
    def nmax = (na > nb) ? na : nb
@@ -280,12 +282,12 @@ fn gfpk_add(list: a, list: b, any: p): list {
    _gfpk_trim(result, p)
 }
 
-fn gfpk_sub(list: a, list: b, any: p): list {
+fn gfpk_sub(list a, list b, any p) list {
    "Subtract b from a in GF(p^k)."
    gfpk_add(a, gfpk_neg(b, p), p)
 }
 
-fn gfpk_scalar_mul(list: a, any: c, any: p): list {
+fn gfpk_scalar_mul(list a, any c, any p) list {
    "Multiply GF(p^k) element a by scalar c in GF(p)."
    def sc = gfp_elem(c, p)
    mut result = []
@@ -297,7 +299,7 @@ fn gfpk_scalar_mul(list: a, any: c, any: p): list {
    _gfpk_trim(result, p)
 }
 
-fn gfpk_mul(list: a, list: b, any: p): list {
+fn gfpk_mul(list a, list b, any p) list {
    "Multiply two GF(p^k) polynomials(raw, without reduction). Apply gfpk_mod to reduce."
    def na, nb = a.len, b.len
    if(na == 0 || nb == 0){ return [0] }
@@ -326,7 +328,7 @@ fn gfpk_mul(list: a, list: b, any: p): list {
    _gfpk_trim(result, p)
 }
 
-fn gfpk_mod(list: poly, list: irred, any: p): list {
+fn gfpk_mod(list poly, list irred, any p) list {
    "Reduce polynomial poly modulo irreducible polynomial irred in GF(p)[x]."
    mut f = _gfpk_trim(poly, p)
    def deg_m = gfpk_degree(irred)
@@ -350,7 +352,7 @@ fn gfpk_mod(list: poly, list: irred, any: p): list {
    f
 }
 
-fn _gfpk_poly_divmod(list: a, list: b, any: p): list {
+fn _gfpk_poly_divmod(list a, list b, any p) list {
    mut rem = _gfpk_trim(a, p)
    def deg_b = gfpk_degree(b)
    if(deg_b < 0){ return [[0], [0]] }
@@ -386,7 +388,7 @@ fn _gfpk_poly_divmod(list: a, list: b, any: p): list {
    [_gfpk_trim(q, p), rem]
 }
 
-fn gfpk_inv(list: a, list: irred, any: p): list {
+fn gfpk_inv(list a, list irred, any p) list {
    "Compute inverse of a in GF(p)[x] / irred. Returns a^-1 or [0] if not invertible."
    def af = _gfpk_trim(a, p)
    if(gfpk_is_zero(af)){ return [0] }
@@ -408,7 +410,7 @@ fn gfpk_inv(list: a, list: irred, any: p): list {
    gfpk_mod(gfpk_scalar_mul(t0, inv_lead, p), irred, p)
 }
 
-fn gfpk_pow(list: a, any: e, list: irred, any: p): list {
+fn gfpk_pow(list a, any e, list irred, any p) list {
    "Compute a^e in GF(p^k) = GF(p)[x]/irred using square-and-multiply."
    if(e == 0){ return [1] }
    if(e < 0){ return gfpk_pow(gfpk_inv(a, irred, p), 0 - e, irred, p) }
@@ -423,37 +425,37 @@ fn gfpk_pow(list: a, any: e, list: irred, any: p): list {
    result
 }
 
-fn gfpk_frobenius(list: a, list: irred, any: p): list {
+fn gfpk_frobenius(list a, list irred, any p) list {
    "Apply the Frobenius endomorphism: compute a^p in GF(p^k). Returns a^p mod irred."
    gfpk_pow(a, p, irred, p)
 }
 
-fn _gf2_xor(any: a, any: b): any {
+fn _gf2_xor(any a, any b) any {
    if(is_int(a) && is_int(b)){ return a ^^ b }
    bxor(a, b)
 }
 
-fn _gf2_shl(any: a, int: shift): any {
+fn _gf2_shl(any a, int shift) any {
    if(is_int(a) && shift < 62){ return a << shift }
    bshl(a, shift)
 }
 
-fn _gf2_pow2(int: shift): any {
+fn _gf2_pow2(int shift) any {
    if(shift < 62){ return 1 << shift }
    bshl(bigint_from_int(1), shift)
 }
 
-fn gf2_deg(any: a): int {
+fn gf2_deg(any a) int {
    "Degree of GF(2) polynomial encoded as integer(highest set bit). Returns -1 for 0."
    bit_length(a) - 1
 }
 
-fn gf2_add(any: a, any: b): any {
+fn gf2_add(any a, any b) any {
    "Add two GF(2) polynomials encoded as integers."
    _gf2_xor(a, b)
 }
 
-fn gf2_mul(any: a, any: b): any {
+fn gf2_mul(any a, any b) any {
    "Carryless multiply in GF(2): returns a * b."
    mut result = 0
    mut va = a
@@ -465,17 +467,17 @@ fn gf2_mul(any: a, any: b): any {
    result
 }
 
-fn gf2_mul_mod(any: a, any: b, any: m): any {
+fn gf2_mul_mod(any a, any b, any m) any {
    "Carryless multiply reduced modulo m in GF(2)."
    __bigint_gf2_mulmod(a, b, m)
 }
 
-fn gf2_mod(any: a, any: m): any {
+fn gf2_mod(any a, any m) any {
    "Reduce polynomial a modulo m in GF(2). Returns a mod m."
    __bigint_gf2_mod(a, m)
 }
 
-fn gf2_div_q(any: a, any: b): any {
+fn gf2_div_q(any a, any b) any {
    "Quotient of GF(2) polynomial division a / b."
    def deg_b = gf2_deg(b)
    if(deg_b < 0){ return 0 }
@@ -491,7 +493,7 @@ fn gf2_div_q(any: a, any: b): any {
    q
 }
 
-fn gf2_gcd(any: a, any: b): any {
+fn gf2_gcd(any a, any b) any {
    "GCD of two GF(2) polynomials using Euclidean algorithm."
    mut va, vb = a, b
    while(vb != 0){
@@ -501,12 +503,12 @@ fn gf2_gcd(any: a, any: b): any {
    va
 }
 
-fn gf2_inv(any: a, any: m): any {
+fn gf2_inv(any a, any m) any {
    "Modular inverse of polynomial a modulo m in GF(2). Returns inverse or 0 if none."
    __bigint_gf2_inv(a, m)
 }
 
-fn gf2_pow(any: a, any: e, any: m): any {
+fn gf2_pow(any a, any e, any m) any {
    "Compute a^e mod m in GF(2) using square-and-multiply."
    if(e < 0){ return gf2_pow(gf2_inv(a, m), 0 - e, m) }
    mut result = 1
@@ -523,7 +525,7 @@ fn gf2_pow(any: a, any: e, any: m): any {
 impl gf2 {}
 
 impl gf2e {}
-fn GF2(any: modulus): gf2 {
+fn GF2(any modulus) gf2 {
    "Create a GF(2^k) binary field from an irreducible modulus polynomial bit-vector."
    {"__type":"gf2", "modulus":modulus, "degree":gf2_deg(modulus)}
 }
@@ -531,12 +533,12 @@ fn GF2(any: modulus): gf2 {
 comptime emit _gf_ctor_alias1(gf2, GF2)
 comptime emit _gf_ctor_alias1(gf2_field, GF2)
 
-fn _gf2_field_modulus(any: field_or_modulus): any {
+fn _gf2_field_modulus(any field_or_modulus) any {
    if(is_dict(field_or_modulus)){ return field_or_modulus.get("modulus", 0) }
    field_or_modulus
 }
 
-fn GF2Elem(any: field_or_modulus, any: value): gf2e {
+fn GF2Elem(any field_or_modulus, any value) gf2e {
    "Create a typed element in a GF(2^k) binary field."
    def modulus = _gf2_field_modulus(field_or_modulus)
    {"__type":"gf2e", "modulus":modulus, "value":gf2_mod(value, modulus)}
@@ -545,18 +547,18 @@ fn GF2Elem(any: field_or_modulus, any: value): gf2e {
 comptime emit _gf2e_ctor_alias2(gf2e, GF2Elem)
 comptime emit _gf2e_ctor_alias2(gf2_elem, GF2Elem)
 
-fn _gf2e_mod(any: x): any { x.get("modulus", 0) }
+fn _gf2e_mod(any x) any { x.get("modulus", 0) }
 
-fn _gf2e_val(any: x): any { x.get("value", 0) }
+fn _gf2e_val(any x) any { x.get("value", 0) }
 
-fn _gf2e_is_elem(any: x): bool { is_dict(x) && x.get("__type", "") == "gf2e" }
+fn _gf2e_is_elem(any x) bool { is_dict(x) && x.get("__type", "") == "gf2e" }
 
-fn _gf2e_check_same(any: a, any: b): any {
+fn _gf2e_check_same(any a, any b) any {
    if(_gf2e_mod(a) != _gf2e_mod(b)){ panic("GF(2) element modulus mismatch") }
    _gf2e_mod(a)
 }
 
-fn _gf2_value_for(gf2: field, any: x): any {
+fn _gf2_value_for(gf2 field, any x) any {
    if(_gf2e_is_elem(x)){
       def gf2e: e = x
       if(_gf2e_mod(e) != field.modulus){ panic("GF(2) element modulus mismatch") }
@@ -566,36 +568,36 @@ fn _gf2_value_for(gf2: field, any: x): any {
 }
 
 comptime template _gf2e_scalar_overloads(name, helper){
-   fn ${name}_int(gf2e: a, int: b): gf2e { helper(a, b) }
-   fn ${name}_bigint(gf2e: a, bigint: b): gf2e { helper(a, b) }
+   fn ${name}_int(gf2e a, int b) gf2e { helper(a, b) }
+   fn ${name}_bigint(gf2e a, bigint b) gf2e { helper(a, b) }
 }
 
-fn _gf2e_add_scalar(gf2e: a, any: b): gf2e { GF2Elem(_gf2e_mod(a), gf2_add(_gf2e_val(a), b)) }
+fn _gf2e_add_scalar(gf2e a, any b) gf2e { GF2Elem(_gf2e_mod(a), gf2_add(_gf2e_val(a), b)) }
 
-fn _gf2e_mul_scalar(gf2e: a, any: b): gf2e { GF2Elem(_gf2e_mod(a), gf2_mul_mod(_gf2e_val(a), b, _gf2e_mod(a))) }
+fn _gf2e_mul_scalar(gf2e a, any b) gf2e { GF2Elem(_gf2e_mod(a), gf2_mul_mod(_gf2e_val(a), b, _gf2e_mod(a))) }
 
-fn _gf2e_pow_scalar(gf2e: a, any: e): gf2e {
+fn _gf2e_pow_scalar(gf2e a, any e) gf2e {
    if(e < 0){ return _gf2e_pow_scalar(a.inv, 0 - e) }
    GF2Elem(_gf2e_mod(a), gf2_pow(_gf2e_val(a), e, _gf2e_mod(a)))
 }
 
-fn _gf2e_add_values(any: a, any: b, any: _modulus): any { gf2_add(a, b) }
+fn _gf2e_add_values(any a, any b, any _modulus) any { gf2_add(a, b) }
 
-fn _gf2e_mul_values(any: a, any: b, any: modulus): any { gf2_mul_mod(a, b, modulus) }
+fn _gf2e_mul_values(any a, any b, any modulus) any { gf2_mul_mod(a, b, modulus) }
 
-fn _gf2_generic_field(gf2: f): gf { GF(2, f.modulus) }
+fn _gf2_generic_field(gf2 f) gf { GF(2, f.modulus) }
 
-fn _gf2_generic_elem(gf2: f, any: value): gfe { GFElem(_gf2_generic_field(f), value) }
+fn _gf2_generic_elem(gf2 f, any value) gfe { GFElem(_gf2_generic_field(f), value) }
 
-fn _gf2_generic_for(gf2: f, any: x): gfe { _gf2_generic_elem(f, _gf2_value_for(f, x)) }
+fn _gf2_generic_for(gf2 f, any x) gfe { _gf2_generic_elem(f, _gf2_value_for(f, x)) }
 
-fn _gf2e_as_gfe(gf2e: a): gfe { _gf2_generic_elem(a.field, _gf2e_val(a)) }
+fn _gf2e_as_gfe(gf2e a) gfe { _gf2_generic_elem(a.field, _gf2e_val(a)) }
 
-fn _gf2e_from_gfe(gf2: f, gfe: a): gf2e { GF2Elem(f, _gfe_value(a)) }
+fn _gf2e_from_gfe(gf2 f, gfe a) gf2e { GF2Elem(f, _gfe_value(a)) }
 
-fn _gf2_frobenius_value(gf2: f, any: value, int: power=1): any { _gfe_value(gf_frobenius(_gf2_generic_elem(f, value), power)) }
+fn _gf2_frobenius_value(gf2 f, any value, int power=1) any { _gfe_value(gf_frobenius(_gf2_generic_elem(f, value), power)) }
 
-fn _gf2_conjugates(gf2: f, any: value): list {
+fn _gf2_conjugates(gf2 f, any value) list {
    def vals = _gf_conjugate_values(_gf2_generic_elem(f, value), true)
    mut out = []
    mut i = 0
@@ -607,73 +609,73 @@ fn _gf2_conjugates(gf2: f, any: value): list {
 }
 
 comptime template _gf2e_elem_binary_overload(name, helper){
-   fn ${name}(gf2e: a, gf2e: b): gf2e {
+   fn ${name}(gf2e a, gf2e b) gf2e {
       def modulus = _gf2e_check_same(a, b)
       GF2Elem(modulus, helper(_gf2e_val(a), _gf2e_val(b), modulus))
    }
 }
 
 impl gf2 {
-   fn characteristic(gf2: f): int { 2 }
-   fn p(gf2: f): int { 2 }
-   fn modulus(gf2: f): any { f.get("modulus", 0) }
-   fn degree(gf2: f): int { f.get("degree", gf2_deg(f.modulus)) }
-   fn order(gf2: f): any { _gf_plain_pow(2, f.degree) }
-   fn elem(gf2: f, any: value): gf2e { GF2Elem(f, value) }
-   fn zero(gf2: f): gf2e { GF2Elem(f, 0) }
-   fn one(gf2: f): gf2e { GF2Elem(f, 1) }
-   fn add(gf2: f, any: a, any: b): gf2e { GF2Elem(f, gf2_add(_gf2_value_for(f, a), _gf2_value_for(f, b))) }
-   fn mul(gf2: f, any: a, any: b): gf2e { GF2Elem(f, gf2_mul_mod(_gf2_value_for(f, a), _gf2_value_for(f, b), f.modulus)) }
-   fn inv(gf2: f, any: a): gf2e { GF2Elem(f, gf2_inv(_gf2_value_for(f, a), f.modulus)) }
-   fn pow(gf2: f, any: a, any: e): gf2e { GF2Elem(f, gf2_pow(_gf2_value_for(f, a), e, f.modulus)) }
-   fn trace(gf2: f, any: a): any { gf_trace(_gf2_generic_for(f, a)) }
-   fn norm(gf2: f, any: a): any { gf_norm(_gf2_generic_for(f, a)) }
-   fn minpoly(gf2: f, any: a): list { gf_minpoly(_gf2_generic_for(f, a)) }
-   fn conjugates(gf2: f, any: a): list { _gf2_conjugates(f, _gf2_value_for(f, a)) }
-   fn frobenius(gf2: f, any: a, int: power=1): gf2e { GF2Elem(f, _gf2_frobenius_value(f, _gf2_value_for(f, a), power)) }
-   fn primitive_element(gf2: f, any: max_scan=nil): ?gf2e {
+   fn characteristic(gf2 f) int { 2 }
+   fn p(gf2 f) int { 2 }
+   fn modulus(gf2 f) any { f.get("modulus", 0) }
+   fn degree(gf2 f) int { f.get("degree", gf2_deg(f.modulus)) }
+   fn order(gf2 f) any { _gf_plain_pow(2, f.degree) }
+   fn elem(gf2 f, any value) gf2e { GF2Elem(f, value) }
+   fn zero(gf2 f) gf2e { GF2Elem(f, 0) }
+   fn one(gf2 f) gf2e { GF2Elem(f, 1) }
+   fn add(gf2 f, any a, any b) gf2e { GF2Elem(f, gf2_add(_gf2_value_for(f, a), _gf2_value_for(f, b))) }
+   fn mul(gf2 f, any a, any b) gf2e { GF2Elem(f, gf2_mul_mod(_gf2_value_for(f, a), _gf2_value_for(f, b), f.modulus)) }
+   fn inv(gf2 f, any a) gf2e { GF2Elem(f, gf2_inv(_gf2_value_for(f, a), f.modulus)) }
+   fn pow(gf2 f, any a, any e) gf2e { GF2Elem(f, gf2_pow(_gf2_value_for(f, a), e, f.modulus)) }
+   fn trace(gf2 f, any a) any { gf_trace(_gf2_generic_for(f, a)) }
+   fn norm(gf2 f, any a) any { gf_norm(_gf2_generic_for(f, a)) }
+   fn minpoly(gf2 f, any a) list { gf_minpoly(_gf2_generic_for(f, a)) }
+   fn conjugates(gf2 f, any a) list { _gf2_conjugates(f, _gf2_value_for(f, a)) }
+   fn frobenius(gf2 f, any a, int power=1) gf2e { GF2Elem(f, _gf2_frobenius_value(f, _gf2_value_for(f, a), power)) }
+   fn primitive_element(gf2 f, any max_scan=nil) ?gf2e {
       def candidate = gf_primitive_element(_gf2_generic_field(f), max_scan)
       if(candidate == nil){ return nil }
       def gfe: ge = candidate
       _gf2e_from_gfe(f, ge)
    }
-   fn discrete_log(gf2: f, any: base, any: target, any: order=nil): any { gf_discrete_log(_gf2_generic_for(f, base), _gf2_generic_for(f, target), order) }
-   fn log(gf2: f, any: base, any: target, any: order=nil): any { f.discrete_log(base, target, order) }
+   fn discrete_log(gf2 f, any base, any target, any order=nil) any { gf_discrete_log(_gf2_generic_for(f, base), _gf2_generic_for(f, target), order) }
+   fn log(gf2 f, any base, any target, any order=nil) any { f.discrete_log(base, target, order) }
 }
 
 impl gf2e {
-   fn value(gf2e: a): any { _gf2e_val(a) }
-   fn modulus(gf2e: a): any { _gf2e_mod(a) }
-   fn field(gf2e: a): gf2 { GF2(_gf2e_mod(a)) }
-   fn hex(gf2e: a): str { bigint_to_hex(_gf2e_val(a)) }
-   fn str(gf2e: a): str { bigint_to_str(_gf2e_val(a)) }
-   fn add(gf2e: a, gf2e: b): gf2e {
+   fn value(gf2e a) any { _gf2e_val(a) }
+   fn modulus(gf2e a) any { _gf2e_mod(a) }
+   fn field(gf2e a) gf2 { GF2(_gf2e_mod(a)) }
+   fn hex(gf2e a) str { bigint_to_hex(_gf2e_val(a)) }
+   fn str(gf2e a) str { bigint_to_str(_gf2e_val(a)) }
+   fn add(gf2e a, gf2e b) gf2e {
       def modulus = _gf2e_check_same(a, b)
       GF2Elem(modulus, _gf2e_add_values(_gf2e_val(a), _gf2e_val(b), modulus))
    }
-   fn add_int(gf2e: a, int: b): gf2e { _gf2e_add_scalar(a, b) }
-   fn add_bigint(gf2e: a, bigint: b): gf2e { _gf2e_add_scalar(a, b) }
-   fn mul(gf2e: a, gf2e: b): gf2e {
+   fn add_int(gf2e a, int b) gf2e { _gf2e_add_scalar(a, b) }
+   fn add_bigint(gf2e a, bigint b) gf2e { _gf2e_add_scalar(a, b) }
+   fn mul(gf2e a, gf2e b) gf2e {
       def modulus = _gf2e_check_same(a, b)
       GF2Elem(modulus, _gf2e_mul_values(_gf2e_val(a), _gf2e_val(b), modulus))
    }
-   fn mul_int(gf2e: a, int: b): gf2e { _gf2e_mul_scalar(a, b) }
-   fn mul_bigint(gf2e: a, bigint: b): gf2e { _gf2e_mul_scalar(a, b) }
-   fn inv(gf2e: a): gf2e { GF2Elem(_gf2e_mod(a), gf2_inv(_gf2e_val(a), _gf2e_mod(a))) }
-   fn div(gf2e: a, gf2e: b): gf2e { a.mul(b.inv) }
-   fn pow_int(gf2e: a, int: b): gf2e { _gf2e_pow_scalar(a, b) }
-   fn pow_bigint(gf2e: a, bigint: b): gf2e { _gf2e_pow_scalar(a, b) }
-   fn trace(gf2e: a): any { gf_trace(_gf2e_as_gfe(a)) }
-   fn norm(gf2e: a): any { gf_norm(_gf2e_as_gfe(a)) }
-   fn minpoly(gf2e: a): list { gf_minpoly(_gf2e_as_gfe(a)) }
-   fn conjugates(gf2e: a): list { _gf2_conjugates(a.field, _gf2e_val(a)) }
-   fn frobenius(gf2e: a, int: power=1): gf2e { GF2Elem(_gf2e_mod(a), _gf2_frobenius_value(a.field, _gf2e_val(a), power)) }
-   fn multiplicative_order(gf2e: a): any { gf_multiplicative_order(_gf2e_as_gfe(a)) }
-   fn is_primitive(gf2e: a): bool { gf_is_primitive(_gf2e_as_gfe(a)) }
-   fn discrete_log(gf2e: a, gf2e: target, any: order=nil): any { gf_discrete_log(_gf2e_as_gfe(a), _gf2e_as_gfe(target), order) }
-   fn log(gf2e: a, gf2e: target, any: order=nil): any { gf_discrete_log(_gf2e_as_gfe(a), _gf2e_as_gfe(target), order) }
-   fn same(gf2e: a, gf2e: b): bool { _gf2e_mod(a) == _gf2e_mod(b) && _gf2e_val(a) == _gf2e_val(b) }
-   fn different(gf2e: a, gf2e: b): bool { !a.same(b) }
+   fn mul_int(gf2e a, int b) gf2e { _gf2e_mul_scalar(a, b) }
+   fn mul_bigint(gf2e a, bigint b) gf2e { _gf2e_mul_scalar(a, b) }
+   fn inv(gf2e a) gf2e { GF2Elem(_gf2e_mod(a), gf2_inv(_gf2e_val(a), _gf2e_mod(a))) }
+   fn div(gf2e a, gf2e b) gf2e { a.mul(b.inv) }
+   fn pow_int(gf2e a, int b) gf2e { _gf2e_pow_scalar(a, b) }
+   fn pow_bigint(gf2e a, bigint b) gf2e { _gf2e_pow_scalar(a, b) }
+   fn trace(gf2e a) any { gf_trace(_gf2e_as_gfe(a)) }
+   fn norm(gf2e a) any { gf_norm(_gf2e_as_gfe(a)) }
+   fn minpoly(gf2e a) list { gf_minpoly(_gf2e_as_gfe(a)) }
+   fn conjugates(gf2e a) list { _gf2_conjugates(a.field, _gf2e_val(a)) }
+   fn frobenius(gf2e a, int power=1) gf2e { GF2Elem(_gf2e_mod(a), _gf2_frobenius_value(a.field, _gf2e_val(a), power)) }
+   fn multiplicative_order(gf2e a) any { gf_multiplicative_order(_gf2e_as_gfe(a)) }
+   fn is_primitive(gf2e a) bool { gf_is_primitive(_gf2e_as_gfe(a)) }
+   fn discrete_log(gf2e a, gf2e target, any order=nil) any { gf_discrete_log(_gf2e_as_gfe(a), _gf2e_as_gfe(target), order) }
+   fn log(gf2e a, gf2e target, any order=nil) any { gf_discrete_log(_gf2e_as_gfe(a), _gf2e_as_gfe(target), order) }
+   fn same(gf2e a, gf2e b) bool { _gf2e_mod(a) == _gf2e_mod(b) && _gf2e_val(a) == _gf2e_val(b) }
+   fn different(gf2e a, gf2e b) bool { !a.same(b) }
    operator + gf2e: gf2e = add
    operator + int: gf2e = add_int
    operator + bigint: gf2e = add_bigint
@@ -693,30 +695,30 @@ impl gf2e {
 impl gf {}
 
 impl gfe {}
-fn GF(any: p, any: modulus=nil): gf {
+fn GF(any p, any modulus=nil) gf {
    "Create a finite field over GF(p), GF(p^k), or binary GF(2^k)."
    if(modulus == nil){ return {"__type":"gf", "p":p, "kind":"prime", "degree":1} }
    if(p == 2 && !is_list(modulus)){ return {"__type":"gf", "p":p, "kind":"binary", "modulus":modulus, "degree":gf2_deg(modulus)} }
    {"__type":"gf", "p":p, "kind":"poly", "modulus":modulus, "degree":gfpk_degree(modulus)}
 }
 
-fn gf(any: p, any: modulus=nil): gf {
+fn gf(any p, any modulus=nil) gf {
    "Alias for GF."
    GF(p, modulus)
 }
 
-fn gf_field(any: p, any: modulus=nil): gf {
+fn gf_field(any p, any modulus=nil) gf {
    "Alias for GF."
    GF(p, modulus)
 }
 
-fn _gf_kind(any: x): str { x.get("kind", "prime") }
+fn _gf_kind(any x) str { x.get("kind", "prime") }
 
-fn _gf_p(any: x): any { x.get("p", 0) }
+fn _gf_p(any x) any { x.get("p", 0) }
 
-fn _gf_modulus(any: x): any { x.get("modulus", nil) }
+fn _gf_modulus(any x) any { x.get("modulus", nil) }
 
-fn _gf_normalize_value(any: field, any: value): any {
+fn _gf_normalize_value(any field, any value) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_elem(value, _gf_p(field)) }
    if(kind == "binary"){ return gf2_mod(value, _gf_modulus(field)) }
@@ -726,7 +728,7 @@ fn _gf_normalize_value(any: field, any: value): any {
    gfpk_mod([value], irred, p)
 }
 
-fn GFElem(any: field, any: value): gfe {
+fn GFElem(any field, any value) gfe {
    "Create a typed element in a finite field created by `GF(...)`."
    {"__type":"gfe",
       "kind":_gf_kind(field),
@@ -738,28 +740,28 @@ fn GFElem(any: field, any: value): gfe {
 comptime emit _gfe_ctor_alias2(gfe, GFElem)
 comptime emit _gfe_ctor_alias2(gf_elem, GFElem)
 
-fn _gfe_value(any: x): any { x.get("value", 0) }
+fn _gfe_value(any x) any { x.get("value", 0) }
 
-fn _gfe_kind(any: x): str { x.get("kind", "prime") }
+fn _gfe_kind(any x) str { x.get("kind", "prime") }
 
-fn _gfe_p(any: x): any { x.get("p", 0) }
+fn _gfe_p(any x) any { x.get("p", 0) }
 
-fn _gfe_modulus(any: x): any { x.get("modulus", nil) }
+fn _gfe_modulus(any x) any { x.get("modulus", nil) }
 
-fn _gfe_field(any: x): gf {
+fn _gfe_field(any x) gf {
    def kind = _gfe_kind(x)
    if(kind == "prime"){ return GF(_gfe_p(x)) }
    GF(_gfe_p(x), _gfe_modulus(x))
 }
 
-fn _gfe_is_elem(any: x): bool { is_dict(x) && x.get("__type", "") == "gfe" }
+fn _gfe_is_elem(any x) bool { is_dict(x) && x.get("__type", "") == "gfe" }
 
-fn _gfe_check_same(gfe: a, gfe: b): gf {
+fn _gfe_check_same(gfe a, gfe b) gf {
    if(_gfe_kind(a) != _gfe_kind(b) || _gfe_p(a) != _gfe_p(b) || _gfe_modulus(a) != _gfe_modulus(b)){ panic("finite-field element field mismatch") }
    _gfe_field(a)
 }
 
-fn _gf_value_for(gf: field, any: x): any {
+fn _gf_value_for(gf field, any x) any {
    if(_gfe_is_elem(x)){
       def gfe: e = x
       def gf: ef = _gfe_field(e)
@@ -769,42 +771,42 @@ fn _gf_value_for(gf: field, any: x): any {
    _gf_normalize_value(field, x)
 }
 
-fn _gf_add_values(gf: field, any: a, any: b): any {
+fn _gf_add_values(gf field, any a, any b) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_add(a, b, _gf_p(field)) }
    if(kind == "binary"){ return gf2_add(a, b) }
    gfpk_add(a, b, _gf_p(field))
 }
 
-fn _gf_sub_values(gf: field, any: a, any: b): any {
+fn _gf_sub_values(gf field, any a, any b) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_sub(a, b, _gf_p(field)) }
    if(kind == "binary"){ return gf2_add(a, b) }
    gfpk_sub(a, b, _gf_p(field))
 }
 
-fn _gf_neg_value(gf: field, any: a): any {
+fn _gf_neg_value(gf field, any a) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_neg(a, _gf_p(field)) }
    if(kind == "binary"){ return a }
    gfpk_neg(a, _gf_p(field))
 }
 
-fn _gf_mul_values(gf: field, any: a, any: b): any {
+fn _gf_mul_values(gf field, any a, any b) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_mul(a, b, _gf_p(field)) }
    if(kind == "binary"){ return gf2_mul_mod(a, b, _gf_modulus(field)) }
    gfpk_mod(gfpk_mul(a, b, _gf_p(field)), _gf_modulus(field), _gf_p(field))
 }
 
-fn _gf_inv_value(gf: field, any: a): any {
+fn _gf_inv_value(gf field, any a) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_inv(a, _gf_p(field)) }
    if(kind == "binary"){ return gf2_inv(a, _gf_modulus(field)) }
    gfpk_inv(a, _gf_modulus(field), _gf_p(field))
 }
 
-fn _gf_pow_value(gf: field, any: a, any: e): any {
+fn _gf_pow_value(gf field, any a, any e) any {
    if(e < 0){ return _gf_pow_value(field, _gf_inv_value(field, a), 0 - e) }
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_pow(a, e, _gf_p(field)) }
@@ -812,7 +814,7 @@ fn _gf_pow_value(gf: field, any: a, any: e): any {
    gfpk_pow(a, e, _gf_modulus(field), _gf_p(field))
 }
 
-fn _gf_plain_pow(any: base, any: exp): any {
+fn _gf_plain_pow(any base, any exp) any {
    mut result = 1
    mut b = base
    mut e = exp
@@ -825,19 +827,19 @@ fn _gf_plain_pow(any: base, any: exp): any {
 }
 
 comptime template _gfe_scalar_overloads(name, helper){
-   fn ${name}_int(gfe: a, int: b): gfe { helper(a, b) }
-   fn ${name}_bigint(gfe: a, bigint: b): gfe { helper(a, b) }
+   fn ${name}_int(gfe a, int b) gfe { helper(a, b) }
+   fn ${name}_bigint(gfe a, bigint b) gfe { helper(a, b) }
 }
 
-fn _gf_div_values(gf: field, any: a, any: b): any { _gf_mul_values(field, a, _gf_inv_value(field, b)) }
+fn _gf_div_values(gf field, any a, any b) any { _gf_mul_values(field, a, _gf_inv_value(field, b)) }
 
-fn _gf_value_eq(gf: field, any: a, any: b): bool {
+fn _gf_value_eq(gf field, any a, any b) bool {
    def kind = _gf_kind(field)
    if(kind == "poly"){ return gfpk_eq(a, b, _gf_p(field)) }
    a == b
 }
 
-fn _gf_base_scalar(gf: field, any: value): any {
+fn _gf_base_scalar(gf field, any value) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_elem(value, _gf_p(field)) }
    if(kind == "binary"){ return value & 1 }
@@ -845,21 +847,21 @@ fn _gf_base_scalar(gf: field, any: value): any {
    value.len == 0 ? 0 : gfp_elem(value.get(0), _gf_p(field))
 }
 
-fn _gf_zero_value(gf: field): any {
+fn _gf_zero_value(gf field) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return 0 }
    if(kind == "binary"){ return 0 }
    [0]
 }
 
-fn _gf_one_value(gf: field): any {
+fn _gf_one_value(gf field) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return 1 }
    if(kind == "binary"){ return 1 }
    [1]
 }
 
-fn _gf_list_key(any: value): str {
+fn _gf_list_key(any value) str {
    if(!is_list(value)){ return "[" + to_str(value) + "]" }
    mut out = "["
    mut i = 0
@@ -871,13 +873,13 @@ fn _gf_list_key(any: value): str {
    out + "]"
 }
 
-fn _gf_value_key(gf: field, any: value): str {
+fn _gf_value_key(gf field, any value) str {
    def kind = _gf_kind(field)
    if(kind == "poly"){ return _gf_list_key(_gf_normalize_value(field, value)) }
    to_str(value)
 }
 
-fn _gf_value_from_index(gf: field, any: idx): any {
+fn _gf_value_from_index(gf field, any idx) any {
    def kind = _gf_kind(field)
    if(kind == "prime"){ return gfp_elem(idx, _gf_p(field)) }
    if(kind == "binary"){ return gf2_mod(idx, _gf_modulus(field)) }
@@ -894,9 +896,9 @@ fn _gf_value_from_index(gf: field, any: idx): any {
    _gf_normalize_value(field, coeffs)
 }
 
-fn _gf_group_order(gf: field): bigint { Z(field.order) - Z(1) }
+fn _gf_group_order(gf field) bigint { Z(field.order) - Z(1) }
 
-fn _gf_conjugate_values(gfe: a, bool: unique=true): list {
+fn _gf_conjugate_values(gfe a, bool unique=true) list {
    "Return Frobenius conjugate raw values for a finite-field element."
    def gf: f = _gfe_field(a)
    def deg = f.degree
@@ -920,7 +922,7 @@ fn _gf_conjugate_values(gfe: a, bool: unique=true): list {
    out
 }
 
-fn gf_conjugates(gfe: a): list {
+fn gf_conjugates(gfe a) list {
    "Return the distinct Frobenius conjugates of a finite-field element."
    def gf: f = _gfe_field(a)
    def vals = _gf_conjugate_values(a, true)
@@ -933,7 +935,7 @@ fn gf_conjugates(gfe: a): list {
    out
 }
 
-fn gf_frobenius(gfe: a, int: power=1): gfe {
+fn gf_frobenius(gfe a, int power=1) gfe {
    "Apply the Frobenius automorphism `power` times: a -> a^(p^power)."
    def gf: f = _gfe_field(a)
    def deg = f.degree
@@ -951,7 +953,7 @@ fn gf_frobenius(gfe: a, int: power=1): gfe {
    GFElem(f, cur)
 }
 
-fn gf_trace(gfe: a): any {
+fn gf_trace(gfe a) any {
    "Return the field trace down to the prime field as a scalar."
    def gf: f = _gfe_field(a)
    def deg = f.degree
@@ -966,7 +968,7 @@ fn gf_trace(gfe: a): any {
    _gf_base_scalar(f, acc)
 }
 
-fn gf_norm(gfe: a): any {
+fn gf_norm(gfe a) any {
    "Return the field norm down to the prime field as a scalar."
    def gf: f = _gfe_field(a)
    if(f.degree <= 1){ return _gf_base_scalar(f, _gfe_value(a)) }
@@ -975,7 +977,7 @@ fn gf_norm(gfe: a): any {
    _gf_base_scalar(f, _gf_pow_value(f, _gfe_value(a), exp))
 }
 
-fn gf_minpoly(gfe: a): list {
+fn gf_minpoly(gfe a) list {
    "Return the monic minimal polynomial of a over the prime field, low coefficients first."
    def gf: f = _gfe_field(a)
    def vals = _gf_conjugate_values(a, true)
@@ -1008,7 +1010,7 @@ fn gf_minpoly(gfe: a): list {
    out
 }
 
-fn gf_multiplicative_order(gfe: a): bigint {
+fn gf_multiplicative_order(gfe a) bigint {
    "Return the multiplicative order of a finite-field element. Zero has order 0."
    def gf: f = _gfe_field(a)
    def av = _gfe_value(a)
@@ -1031,13 +1033,13 @@ fn gf_multiplicative_order(gfe: a): bigint {
    ord
 }
 
-fn gf_is_primitive(gfe: a): bool {
+fn gf_is_primitive(gfe a) bool {
    "Return true when the element generates the finite field's multiplicative group."
    def gf: f = _gfe_field(a)
    gf_multiplicative_order(a) == _gf_group_order(f)
 }
 
-fn gf_primitive_element(gf: f, any: max_scan=nil): ?gfe {
+fn gf_primitive_element(gf f, any max_scan=nil) ?gfe {
    "Find a generator of the finite field's multiplicative group by scanning field elements.
    Returns nil if no generator is found before max_scan candidates."
    def group_order = _gf_group_order(f)
@@ -1055,7 +1057,7 @@ fn gf_primitive_element(gf: f, any: max_scan=nil): ?gfe {
    nil
 }
 
-fn gf_discrete_log(gfe: base, gfe: target, any: order=nil): any {
+fn gf_discrete_log(gfe base, gfe target, any order=nil) any {
    "Baby-step giant-step discrete log over a finite-field multiplicative group.
    Returns x with base^x = target, or -1 if no log is found."
    def gf: f = _gfe_check_same(base, target)
@@ -1089,16 +1091,16 @@ fn gf_discrete_log(gfe: base, gfe: target, any: order=nil): any {
 }
 
 comptime template _gf_field_binary_overload(name, helper){
-   fn ${name}(gf: f, any: a, any: b): gfe {
+   fn ${name}(gf f, any a, any b) gfe {
       def av, bv = _gf_value_for(f, a), _gf_value_for(f, b)
       GFElem(f, helper(f, av, bv))
    }
 }
 
-fn _gfe_div_values(gf: field, any: a, any: b): any { _gf_mul_values(field, a, _gf_inv_value(field, b)) }
+fn _gfe_div_values(gf field, any a, any b) any { _gf_mul_values(field, a, _gf_inv_value(field, b)) }
 
 comptime template _gfe_elem_binary_overload(name, helper){
-   fn ${name}(gfe: a, gfe: b): gfe {
+   fn ${name}(gfe a, gfe b) gfe {
       def gf: f = _gfe_check_same(a, b)
       def av, bv = _gfe_value(a), _gfe_value(b)
       GFElem(f, helper(f, av, bv))
@@ -1106,7 +1108,7 @@ comptime template _gfe_elem_binary_overload(name, helper){
 }
 
 comptime template _gfe_scalar_binary(name, helper){
-   fn ${name}(gfe: a, any: b): gfe {
+   fn ${name}(gfe a, any b) gfe {
       def gf: f = _gfe_field(a)
       def av, bv = _gfe_value(a), _gf_value_for(f, b)
       GFElem(f, helper(f, av, bv))
@@ -1117,118 +1119,118 @@ comptime emit _gfe_scalar_binary(_gfe_add_scalar, _gf_add_values)
 comptime emit _gfe_scalar_binary(_gfe_sub_scalar, _gf_sub_values)
 comptime emit _gfe_scalar_binary(_gfe_mul_scalar, _gf_mul_values)
 
-fn _gfe_pow_scalar(gfe: a, any: e): gfe {
+fn _gfe_pow_scalar(gfe a, any e) gfe {
    def gf: f = _gfe_field(a)
    GFElem(f, _gf_pow_value(f, _gfe_value(a), e))
 }
 
 impl gf {
-   fn characteristic(gf: f): any { _gf_p(f) }
-   fn p(gf: f): any { _gf_p(f) }
-   fn kind(gf: f): str { _gf_kind(f) }
-   fn modulus(gf: f): any { _gf_modulus(f) }
-   fn degree(gf: f): int { f.get("degree", 1) }
-   fn order(gf: f): any {
+   fn characteristic(gf f) any { _gf_p(f) }
+   fn p(gf f) any { _gf_p(f) }
+   fn kind(gf f) str { _gf_kind(f) }
+   fn modulus(gf f) any { _gf_modulus(f) }
+   fn degree(gf f) int { f.get("degree", 1) }
+   fn order(gf f) any {
       def deg = f.degree
       if(deg <= 1){ return _gf_p(f) }
       _gf_plain_pow(_gf_p(f), deg)
    }
-   fn elem(gf: f, any: value): gfe { GFElem(f, value) }
-   fn zero(gf: f): gfe { GFElem(f, 0) }
-   fn one(gf: f): gfe { GFElem(f, 1) }
-   fn add(gf: f, any: a, any: b): gfe {
+   fn elem(gf f, any value) gfe { GFElem(f, value) }
+   fn zero(gf f) gfe { GFElem(f, 0) }
+   fn one(gf f) gfe { GFElem(f, 1) }
+   fn add(gf f, any a, any b) gfe {
       def av, bv = _gf_value_for(f, a), _gf_value_for(f, b)
       GFElem(f, _gf_add_values(f, av, bv))
    }
-   fn sub(gf: f, any: a, any: b): gfe {
+   fn sub(gf f, any a, any b) gfe {
       def av, bv = _gf_value_for(f, a), _gf_value_for(f, b)
       GFElem(f, _gf_sub_values(f, av, bv))
    }
-   fn neg(gf: f, any: a): gfe {
+   fn neg(gf f, any a) gfe {
       def av, rv = _gf_value_for(f, a), _gf_neg_value(f, av)
       GFElem(f, rv)
    }
-   fn mul(gf: f, any: a, any: b): gfe {
+   fn mul(gf f, any a, any b) gfe {
       def av, bv = _gf_value_for(f, a), _gf_value_for(f, b)
       GFElem(f, _gf_mul_values(f, av, bv))
    }
-   fn inv(gf: f, any: a): gfe {
+   fn inv(gf f, any a) gfe {
       def av, rv = _gf_value_for(f, a), _gf_inv_value(f, av)
       GFElem(f, rv)
    }
-   fn div(gf: f, any: a, any: b): gfe {
+   fn div(gf f, any a, any b) gfe {
       def av, bv = _gf_value_for(f, a), _gf_value_for(f, b)
       GFElem(f, _gf_div_values(f, av, bv))
    }
-   fn pow(gf: f, any: a, any: e): gfe {
+   fn pow(gf f, any a, any e) gfe {
       def av, rv = _gf_value_for(f, a), _gf_pow_value(f, av, e)
       GFElem(f, rv)
    }
-   fn trace(gf: f, any: a): any { gf_trace(GFElem(f, _gf_value_for(f, a))) }
-   fn norm(gf: f, any: a): any { gf_norm(GFElem(f, _gf_value_for(f, a))) }
-   fn minpoly(gf: f, any: a): list { gf_minpoly(GFElem(f, _gf_value_for(f, a))) }
-   fn conjugates(gf: f, any: a): list { gf_conjugates(GFElem(f, _gf_value_for(f, a))) }
-   fn frobenius(gf: f, any: a, int: power=1): gfe { gf_frobenius(GFElem(f, _gf_value_for(f, a)), power) }
-   fn primitive_element(gf: f, any: max_scan=nil): ?gfe { gf_primitive_element(f, max_scan) }
-   fn discrete_log(gf: f, any: base, any: target, any: order=nil): any { gf_discrete_log(GFElem(f, _gf_value_for(f, base)), GFElem(f, _gf_value_for(f, target)), order) }
-   fn log(gf: f, any: base, any: target, any: order=nil): any { f.discrete_log(base, target, order) }
+   fn trace(gf f, any a) any { gf_trace(GFElem(f, _gf_value_for(f, a))) }
+   fn norm(gf f, any a) any { gf_norm(GFElem(f, _gf_value_for(f, a))) }
+   fn minpoly(gf f, any a) list { gf_minpoly(GFElem(f, _gf_value_for(f, a))) }
+   fn conjugates(gf f, any a) list { gf_conjugates(GFElem(f, _gf_value_for(f, a))) }
+   fn frobenius(gf f, any a, int power=1) gfe { gf_frobenius(GFElem(f, _gf_value_for(f, a)), power) }
+   fn primitive_element(gf f, any max_scan=nil) ?gfe { gf_primitive_element(f, max_scan) }
+   fn discrete_log(gf f, any base, any target, any order=nil) any { gf_discrete_log(GFElem(f, _gf_value_for(f, base)), GFElem(f, _gf_value_for(f, target)), order) }
+   fn log(gf f, any base, any target, any order=nil) any { f.discrete_log(base, target, order) }
 }
 
 impl gfe {
-   fn value(gfe: a): any { _gfe_value(a) }
-   fn field(gfe: a): gf { _gfe_field(a) }
-   fn characteristic(gfe: a): any { _gfe_p(a) }
-   fn p(gfe: a): any { _gfe_p(a) }
-   fn modulus(gfe: a): any { _gfe_modulus(a) }
-   fn kind(gfe: a): str { _gfe_kind(a) }
-   fn hex(gfe: a): str {
+   fn value(gfe a) any { _gfe_value(a) }
+   fn field(gfe a) gf { _gfe_field(a) }
+   fn characteristic(gfe a) any { _gfe_p(a) }
+   fn p(gfe a) any { _gfe_p(a) }
+   fn modulus(gfe a) any { _gfe_modulus(a) }
+   fn kind(gfe a) str { _gfe_kind(a) }
+   fn hex(gfe a) str {
       def v = _gfe_value(a)
       is_list(v) ? to_str(v) : bigint_to_hex(v)
    }
-   fn str(gfe: a): str { to_str(_gfe_value(a)) }
-   fn add(gfe: a, gfe: b): gfe {
+   fn str(gfe a) str { to_str(_gfe_value(a)) }
+   fn add(gfe a, gfe b) gfe {
       def gf: f = _gfe_check_same(a, b)
       GFElem(f, _gf_add_values(f, _gfe_value(a), _gfe_value(b)))
    }
-   fn add_int(gfe: a, int: b): gfe { _gfe_add_scalar(a, b) }
-   fn add_bigint(gfe: a, bigint: b): gfe { _gfe_add_scalar(a, b) }
-   fn sub(gfe: a, gfe: b): gfe {
+   fn add_int(gfe a, int b) gfe { _gfe_add_scalar(a, b) }
+   fn add_bigint(gfe a, bigint b) gfe { _gfe_add_scalar(a, b) }
+   fn sub(gfe a, gfe b) gfe {
       def gf: f = _gfe_check_same(a, b)
       GFElem(f, _gf_sub_values(f, _gfe_value(a), _gfe_value(b)))
    }
-   fn sub_int(gfe: a, int: b): gfe { _gfe_sub_scalar(a, b) }
-   fn sub_bigint(gfe: a, bigint: b): gfe { _gfe_sub_scalar(a, b) }
-   fn mul(gfe: a, gfe: b): gfe {
+   fn sub_int(gfe a, int b) gfe { _gfe_sub_scalar(a, b) }
+   fn sub_bigint(gfe a, bigint b) gfe { _gfe_sub_scalar(a, b) }
+   fn mul(gfe a, gfe b) gfe {
       def gf: f = _gfe_check_same(a, b)
       GFElem(f, _gf_mul_values(f, _gfe_value(a), _gfe_value(b)))
    }
-   fn mul_int(gfe: a, int: b): gfe { _gfe_mul_scalar(a, b) }
-   fn mul_bigint(gfe: a, bigint: b): gfe { _gfe_mul_scalar(a, b) }
-   fn div(gfe: a, gfe: b): gfe {
+   fn mul_int(gfe a, int b) gfe { _gfe_mul_scalar(a, b) }
+   fn mul_bigint(gfe a, bigint b) gfe { _gfe_mul_scalar(a, b) }
+   fn div(gfe a, gfe b) gfe {
       def gf: f = _gfe_check_same(a, b)
       GFElem(f, _gfe_div_values(f, _gfe_value(a), _gfe_value(b)))
    }
-   fn inv(gfe: a): gfe {
+   fn inv(gfe a) gfe {
       def gf: f = _gfe_field(a)
       def av, rv = _gfe_value(a), _gf_inv_value(f, av)
       GFElem(f, rv)
    }
-   fn pow_int(gfe: a, int: b): gfe { _gfe_pow_scalar(a, b) }
-   fn pow_bigint(gfe: a, bigint: b): gfe { _gfe_pow_scalar(a, b) }
-   fn trace(gfe: a): any { gf_trace(a) }
-   fn norm(gfe: a): any { gf_norm(a) }
-   fn minpoly(gfe: a): list { gf_minpoly(a) }
-   fn conjugates(gfe: a): list { gf_conjugates(a) }
-   fn frobenius(gfe: a, int: power=1): gfe { gf_frobenius(a, power) }
-   fn multiplicative_order(gfe: a): bigint { gf_multiplicative_order(a) }
-   fn is_primitive(gfe: a): bool { gf_is_primitive(a) }
-   fn discrete_log(gfe: a, gfe: target, any: order=nil): any { gf_discrete_log(a, target, order) }
-   fn log(gfe: a, gfe: target, any: order=nil): any { gf_discrete_log(a, target, order) }
-   fn same(gfe: a, gfe: b): bool {
+   fn pow_int(gfe a, int b) gfe { _gfe_pow_scalar(a, b) }
+   fn pow_bigint(gfe a, bigint b) gfe { _gfe_pow_scalar(a, b) }
+   fn trace(gfe a) any { gf_trace(a) }
+   fn norm(gfe a) any { gf_norm(a) }
+   fn minpoly(gfe a) list { gf_minpoly(a) }
+   fn conjugates(gfe a) list { gf_conjugates(a) }
+   fn frobenius(gfe a, int power=1) gfe { gf_frobenius(a, power) }
+   fn multiplicative_order(gfe a) bigint { gf_multiplicative_order(a) }
+   fn is_primitive(gfe a) bool { gf_is_primitive(a) }
+   fn discrete_log(gfe a, gfe target, any order=nil) any { gf_discrete_log(a, target, order) }
+   fn log(gfe a, gfe target, any order=nil) any { gf_discrete_log(a, target, order) }
+   fn same(gfe a, gfe b) bool {
       _gfe_kind(a) == _gfe_kind(b) && _gfe_p(a) == _gfe_p(b) &&
       _gfe_modulus(a) == _gfe_modulus(b) && _gfe_value(a) == _gfe_value(b)
    }
-   fn different(gfe: a, gfe: b): bool { !a.same(b) }
+   fn different(gfe a, gfe b) bool { !a.same(b) }
    operator + gfe: gfe = add
    operator + int: gfe = add_int
    operator + bigint: gfe = add_bigint
@@ -1245,9 +1247,9 @@ impl gfe {
    operator != gfe: bool = different
 }
 
-fn _clone_list(list: lst): list { _gf_list_copy(lst) }
+fn _clone_list(list lst) list { _gf_list_copy(lst) }
 
-fn num2vec(any: x, int: w): list {
+fn num2vec(any x, int w) list {
    "Convert integer x to binary vector of width w(MSB first)."
    mut result = []
    mut i = w - 1
@@ -1258,7 +1260,7 @@ fn num2vec(any: x, int: w): list {
    result
 }
 
-fn vec2num(list: v): int {
+fn vec2num(list v) int {
    "Convert binary vector to integer(MSB first)."
    mut result = 0
    def n = v.len
@@ -1270,7 +1272,7 @@ fn vec2num(list: v): int {
    result
 }
 
-fn solve_gf2(list: A, list: b): any {
+fn solve_gf2(list A, list b) any {
    "Solve Ax = b over GF(2) via Gaussian elimination. Returns x or nil if inconsistent."
    def nr, nc = A.len, len(A[0])
    mut M, i = [], 0
@@ -1338,9 +1340,9 @@ fn solve_gf2(list: A, list: b): any {
 impl gf2bv_bv {}
 
 impl gf2bv_linear {}
-fn _gf2bv_fail(str: msg): any { panic("std.math.crypto.gf.gf2bv: " + msg) }
+fn _gf2bv_fail(str msg) any { panic("std.math.crypto.gf.gf2bv: " + msg) }
 
-fn GF2BVBitVec(any: bits): gf2bv_bv {
+fn GF2BVBitVec(any bits) gf2bv_bv {
    "Create a symbolic GF(2) bit-vector."
    mut out = []
    if(is_list(bits) || is_tuple(bits)){ out = _clone_list(bits) } elif(is_bytes(bits)){
@@ -1355,17 +1357,17 @@ fn GF2BVBitVec(any: bits): gf2bv_bv {
    {"__type":"gf2bv_bv", "bits":out}
 }
 
-fn gf2bv_bitvec(any: bits): gf2bv_bv {
+fn gf2bv_bitvec(any bits) gf2bv_bv {
    "Alias for GF2BVBitVec."
    GF2BVBitVec(bits)
 }
 
-fn _gf2bv_bits(gf2bv_bv: bv): list {
+fn _gf2bv_bits(gf2bv_bv bv) list {
    if(!is_dict(bv) || bv.get("__type", "") != "gf2bv_bv"){ _gf2bv_fail("invalid bitvec") }
    bv.get("bits", [])
 }
 
-fn _gf2bv_to_bits_le(int: n, any: num): list {
+fn _gf2bv_to_bits_le(int n, any num) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1375,7 +1377,7 @@ fn _gf2bv_to_bits_le(int: n, any: num): list {
    out
 }
 
-fn _gf2bv_fill(int: n, any: v): list {
+fn _gf2bv_fill(int n, any v) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1385,7 +1387,7 @@ fn _gf2bv_fill(int: n, any: v): list {
    out
 }
 
-fn _gf2bv_append_fill(list: xs, int: n, any: v): list {
+fn _gf2bv_append_fill(list xs, int n, any v) list {
    mut out = _clone_list(xs)
    mut i = 0
    while(i < n){
@@ -1395,7 +1397,7 @@ fn _gf2bv_append_fill(list: xs, int: n, any: v): list {
    out
 }
 
-fn _gf2bv_slice_list(list: xs, int: start, int: stop): list {
+fn _gf2bv_slice_list(list xs, int start, int stop) list {
    mut s, e = start, stop
    if(s < 0){ s = 0 }
    if(e < s){ e = s }
@@ -1409,7 +1411,7 @@ fn _gf2bv_slice_list(list: xs, int: start, int: stop): list {
    out
 }
 
-fn _gf2bv_all_ones(list: bits): bool {
+fn _gf2bv_all_ones(list bits) bool {
    mut i = 0
    while(i < bits.len){
       if(!bits.get(i, 0)){ return false }
@@ -1418,7 +1420,7 @@ fn _gf2bv_all_ones(list: bits): bool {
    true
 }
 
-fn _gf2bv_join(list: a, list: b): list {
+fn _gf2bv_join(list a, list b) list {
    mut out = _clone_list(a)
    mut i = 0
    while(i < b.len){
@@ -1428,7 +1430,7 @@ fn _gf2bv_join(list: a, list: b): list {
    out
 }
 
-fn _gf2bv_xor_bits(list: a, list: b): list {
+fn _gf2bv_xor_bits(list a, list b) list {
    if(a.len != b.len){ _gf2bv_fail("cannot xor bit-vectors of different sizes") }
    mut out = []
    mut i = 0
@@ -1439,7 +1441,7 @@ fn _gf2bv_xor_bits(list: a, list: b): list {
    out
 }
 
-fn _gf2bv_tuple_where(list: cond, any: a, any: b): list {
+fn _gf2bv_tuple_where(list cond, any a, any b) list {
    mut out = []
    mut i = 0
    while(i < cond.len){
@@ -1450,7 +1452,7 @@ fn _gf2bv_tuple_where(list: cond, any: a, any: b): list {
    out
 }
 
-fn _gf2bv_pack_solution(list: sizes, any: sol): any {
+fn _gf2bv_pack_solution(list sizes, any sol) any {
    if(sol == nil || !is_list(sol)){ _gf2bv_fail("solution must be a list") }
    if(sol.len != sizes.len){ _gf2bv_fail("solution arity mismatch") }
    mut raw = 0
@@ -1466,7 +1468,7 @@ fn _gf2bv_pack_solution(list: sizes, any: sol): any {
    raw
 }
 
-fn _gf2bv_convert_raw(list: sizes, any: raw): list {
+fn _gf2bv_convert_raw(list sizes, any raw) list {
    mut out = []
    mut s = raw
    mut i = 0
@@ -1480,7 +1482,7 @@ fn _gf2bv_convert_raw(list: sizes, any: raw): list {
    out
 }
 
-fn _gf2bv_parse_zeros(list: zeros): list {
+fn _gf2bv_parse_zeros(list zeros) list {
    mut eqs = []
    mut i = 0
    while(i < zeros.len){
@@ -1501,7 +1503,7 @@ fn _gf2bv_parse_zeros(list: zeros): list {
    eqs
 }
 
-fn _gf2bv_reduce_space(list: eqs, int: cols): any {
+fn _gf2bv_reduce_space(list eqs, int cols) any {
    mut rows = []
    mut i = 0
    while(i < eqs.len){
@@ -1586,9 +1588,9 @@ fn _gf2bv_reduce_space(list: eqs, int: cols): any {
    {"origin": origin, "basis": basis}
 }
 
-fn _gf2bv_eval_mask(any: mask, any: raw_solution): int { (bit_count(mask & ((raw_solution << 1) | 1)) & 1) }
+fn _gf2bv_eval_mask(any mask, any raw_solution) int { (bit_count(mask & ((raw_solution << 1) | 1)) & 1) }
 
-fn GF2BVLinearSystem(list: sizes): gf2bv_linear {
+fn GF2BVLinearSystem(list sizes) gf2bv_linear {
    "Create a symbolic GF(2) linear system for bit-vector variables."
    if(!is_list(sizes)){ _gf2bv_fail("sizes must be a list") }
    mut sizes_copy = _clone_list(sizes)
@@ -1622,21 +1624,21 @@ fn GF2BVLinearSystem(list: sizes): gf2bv_linear {
    {"__type":"gf2bv_linear", "sizes":sizes_copy, "cols":cols, "basis":basis, "vars":vars}
 }
 
-fn gf2bv_linear_system(list: sizes): gf2bv_linear {
+fn gf2bv_linear_system(list sizes) gf2bv_linear {
    "Alias for GF2BVLinearSystem."
    GF2BVLinearSystem(sizes)
 }
 
-fn _gf2bv_linear_sizes(gf2bv_linear: x): list { x.get("sizes", []) }
+fn _gf2bv_linear_sizes(gf2bv_linear x) list { x.get("sizes", []) }
 
-fn _gf2bv_linear_cols(gf2bv_linear: x): int { x.get("cols", 0) }
+fn _gf2bv_linear_cols(gf2bv_linear x) int { x.get("cols", 0) }
 
-fn _gf2bv_linear_vars(gf2bv_linear: x): list { x.get("vars", []) }
+fn _gf2bv_linear_vars(gf2bv_linear x) list { x.get("vars", []) }
 
 impl gf2bv_bv {
-   fn bits(gf2bv_bv: a): list { _gf2bv_bits(a) }
-   fn len(gf2bv_bv: a): int { _gf2bv_bits(a).len }
-   fn slice(gf2bv_bv: a, int: start, any: stop=nil): gf2bv_bv {
+   fn bits(gf2bv_bv a) list { _gf2bv_bits(a) }
+   fn len(gf2bv_bv a) int { _gf2bv_bits(a).len }
+   fn slice(gf2bv_bv a, int start, any stop=nil) gf2bv_bv {
       def bs = _gf2bv_bits(a)
       mut s, e = start, (stop == nil) ? bs.len : stop
       if(s < 0){ s = 0 }
@@ -1644,13 +1646,13 @@ impl gf2bv_bv {
       if(e < s){ e = s }
       GF2BVBitVec(_gf2bv_slice_list(bs, s, e))
    }
-   fn bit(gf2bv_bv: a, int: idx): gf2bv_bv { a.slice(idx, idx + 1) }
-   fn xor(gf2bv_bv: a, gf2bv_bv: b): gf2bv_bv { GF2BVBitVec(_gf2bv_xor_bits(_gf2bv_bits(a), _gf2bv_bits(b))) }
-   fn xor_int(gf2bv_bv: a, int: other): gf2bv_bv {
+   fn bit(gf2bv_bv a, int idx) gf2bv_bv { a.slice(idx, idx + 1) }
+   fn xor(gf2bv_bv a, gf2bv_bv b) gf2bv_bv { GF2BVBitVec(_gf2bv_xor_bits(_gf2bv_bits(a), _gf2bv_bits(b))) }
+   fn xor_int(gf2bv_bv a, int other) gf2bv_bv {
       def bs, os = _gf2bv_bits(a), _gf2bv_to_bits_le(bs.len, other)
       GF2BVBitVec(_gf2bv_xor_bits(bs, os))
    }
-   fn shr(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn shr(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return a }
       def bs = _gf2bv_bits(a)
       if(n >= bs.len){ return GF2BVBitVec(_gf2bv_fill(bs.len, 0)) }
@@ -1658,7 +1660,7 @@ impl gf2bv_bv {
       out = _gf2bv_append_fill(out, n, 0)
       GF2BVBitVec(out)
    }
-   fn shl(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn shl(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return a }
       def bs = _gf2bv_bits(a)
       if(n >= bs.len){ return GF2BVBitVec(_gf2bv_fill(bs.len, 0)) }
@@ -1666,43 +1668,43 @@ impl gf2bv_bv {
       out = _gf2bv_join(out, _gf2bv_slice_list(bs, 0, bs.len - n))
       GF2BVBitVec(out)
    }
-   fn lshift_ext(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn lshift_ext(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return a }
       mut out = _gf2bv_fill(n, 0)
       out = _gf2bv_join(out, _gf2bv_bits(a))
       GF2BVBitVec(out)
    }
-   fn and_mask(gf2bv_bv: a, int: mask): gf2bv_bv {
+   fn and_mask(gf2bv_bv a, int mask) gf2bv_bv {
       def bs, ms = _gf2bv_bits(a), _gf2bv_to_bits_le(bs.len, mask)
       if(ms.len == 0){ return GF2BVBitVec([]) }
       if(_gf2bv_all_ones(ms)){ return a }
       GF2BVBitVec(_gf2bv_tuple_where(ms, bs, 0))
    }
-   fn or_mask(gf2bv_bv: a, int: mask): gf2bv_bv {
+   fn or_mask(gf2bv_bv a, int mask) gf2bv_bv {
       def bs, ms = _gf2bv_bits(a), _gf2bv_to_bits_le(bs.len, mask)
       if(_gf2bv_all_ones(ms)){ return GF2BVBitVec(ms) }
       GF2BVBitVec(_gf2bv_tuple_where(ms, 1, bs))
    }
-   fn mod_pow2(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn mod_pow2(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return GF2BVBitVec([0]) }
       if((n & (n - 1)) != 0){ _gf2bv_fail("modulo non-power-of-2 is not linear") }
       a.and_mask(n - 1)
    }
-   fn rotr(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn rotr(gf2bv_bv a, int n) gf2bv_bv {
       def bs = _gf2bv_bits(a)
       if(bs.len == 0){ return a }
       def k = ((n % bs.len) + bs.len) % bs.len
       if(k == 0){ return a }
       GF2BVBitVec(_gf2bv_join(_gf2bv_slice_list(bs, k, bs.len), _gf2bv_slice_list(bs, 0, k)))
    }
-   fn rotl(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn rotl(gf2bv_bv a, int n) gf2bv_bv {
       def bs = _gf2bv_bits(a)
       if(bs.len == 0){ return a }
       def k = ((n % bs.len) + bs.len) % bs.len
       if(k == 0){ return a }
       GF2BVBitVec(_gf2bv_join(_gf2bv_slice_list(bs, bs.len - k, bs.len), _gf2bv_slice_list(bs, 0, bs.len - k)))
    }
-   fn sum(gf2bv_bv: a): gf2bv_bv {
+   fn sum(gf2bv_bv a) gf2bv_bv {
       def bs = _gf2bv_bits(a)
       mut acc = 0
       mut i = 0
@@ -1712,24 +1714,24 @@ impl gf2bv_bv {
       }
       GF2BVBitVec([acc])
    }
-   fn zeroext(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn zeroext(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return a }
       def bs = _gf2bv_bits(a)
       GF2BVBitVec(_gf2bv_append_fill(bs, n, 0))
    }
-   fn signext(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn signext(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return a }
       def bs = _gf2bv_bits(a)
       if(bs.len == 0){ return GF2BVBitVec([]) }
       def s = bs.get(bs.len - 1, 0)
       GF2BVBitVec(_gf2bv_append_fill(bs, n, s))
    }
-   fn broadcast(gf2bv_bv: a, int: idx, int: n): gf2bv_bv {
+   fn broadcast(gf2bv_bv a, int idx, int n) gf2bv_bv {
       def bs = _gf2bv_bits(a)
       if(idx < 0 || idx >= bs.len){ _gf2bv_fail("broadcast index out of range") }
       GF2BVBitVec(_gf2bv_fill(n, bs.get(idx, 0)))
    }
-   fn dup(gf2bv_bv: a, int: n): gf2bv_bv {
+   fn dup(gf2bv_bv a, int n) gf2bv_bv {
       if(n <= 0){ return GF2BVBitVec([]) }
       def bs = _gf2bv_bits(a)
       mut out = []
@@ -1740,8 +1742,8 @@ impl gf2bv_bv {
       }
       GF2BVBitVec(out)
    }
-   fn concat(gf2bv_bv: a, gf2bv_bv: b): gf2bv_bv { GF2BVBitVec(_gf2bv_join(_gf2bv_bits(a), _gf2bv_bits(b))) }
-   fn evaluate_raw(gf2bv_bv: a, any: raw_solution): int {
+   fn concat(gf2bv_bv a, gf2bv_bv b) gf2bv_bv { GF2BVBitVec(_gf2bv_join(_gf2bv_bits(a), _gf2bv_bits(b))) }
+   fn evaluate_raw(gf2bv_bv a, any raw_solution) int {
       def bs = _gf2bv_bits(a)
       mut out = 0
       mut i = bs.len - 1
@@ -1751,8 +1753,8 @@ impl gf2bv_bv {
       }
       out
    }
-   fn same(gf2bv_bv: a, gf2bv_bv: b): bool { _gf2bv_bits(a) == _gf2bv_bits(b) }
-   fn different(gf2bv_bv: a, gf2bv_bv: b): bool { !a.same(b) }
+   fn same(gf2bv_bv a, gf2bv_bv b) bool { _gf2bv_bits(a) == _gf2bv_bits(b) }
+   fn different(gf2bv_bv a, gf2bv_bv b) bool { !a.same(b) }
    operator ^^ gf2bv_bv: gf2bv_bv = xor
    operator ^^ int: gf2bv_bv = xor_int
    operator >> int: gf2bv_bv = shr
@@ -1765,26 +1767,26 @@ impl gf2bv_bv {
 }
 
 impl gf2bv_linear {
-   fn sizes(gf2bv_linear: l): list { _gf2bv_linear_sizes(l) }
-   fn cols(gf2bv_linear: l): int { _gf2bv_linear_cols(l) }
-   fn gens(gf2bv_linear: l): list { _gf2bv_linear_vars(l) }
-   fn get_eqs(gf2bv_linear: l, list: zeros): list { _gf2bv_parse_zeros(zeros) }
-   fn convert_raw(gf2bv_linear: l, any: raw): list { _gf2bv_convert_raw(l.sizes, raw) }
-   fn solve_raw_space(gf2bv_linear: l, list: zeros): any {
+   fn sizes(gf2bv_linear l) list { _gf2bv_linear_sizes(l) }
+   fn cols(gf2bv_linear l) int { _gf2bv_linear_cols(l) }
+   fn gens(gf2bv_linear l) list { _gf2bv_linear_vars(l) }
+   fn get_eqs(gf2bv_linear l, list zeros) list { _gf2bv_parse_zeros(zeros) }
+   fn convert_raw(gf2bv_linear l, any raw) list { _gf2bv_convert_raw(l.sizes, raw) }
+   fn solve_raw_space(gf2bv_linear l, list zeros) any {
       def eqs = l.get_eqs(zeros)
       _gf2bv_reduce_space(eqs, l.cols)
    }
-   fn solve_raw_one(gf2bv_linear: l, list: zeros): any {
+   fn solve_raw_one(gf2bv_linear l, list zeros) any {
       def space = l.solve_raw_space(zeros)
       if(space == nil){ return nil }
       space.get("origin", 0)
    }
-   fn solve_one(gf2bv_linear: l, list: zeros): any {
+   fn solve_one(gf2bv_linear l, list zeros) any {
       def raw = l.solve_raw_one(zeros)
       if(raw == nil){ return nil }
       l.convert_raw(raw)
    }
-   fn solve_all(gf2bv_linear: l, list: zeros, int: max_dimension=16): list {
+   fn solve_all(gf2bv_linear l, list zeros, int max_dimension=16) list {
       def space = l.solve_raw_space(zeros)
       if(space == nil){ return [] }
       def basis = space.get("basis", [])
@@ -1805,7 +1807,7 @@ impl gf2bv_linear {
       }
       all
    }
-   fn evaluate(gf2bv_linear: l, gf2bv_bv: bv, list: sol): int {
+   fn evaluate(gf2bv_linear l, gf2bv_bv bv, list sol) int {
       def raw = _gf2bv_pack_solution(l.sizes, sol)
       bv.evaluate_raw(raw)
    }

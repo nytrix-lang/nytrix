@@ -1,4 +1,4 @@
-;; Keywords: ecc elliptic-curve ecdsa elgamal edwards montgomery secp curve-arithmetic point-add point-mul public-key
+;; Keywords: ecc elliptic-curve ecdsa elgamal edwards montgomery secp curve-arithmetic point-add point-mul public-key math crypto
 ;; ECC facade for curve arithmetic, ECDSA, Edwards/Montgomery forms, and ElGamal helpers.
 ;; References:
 ;; - https://www.secg.org/sec1-v2.pdf

@@ -1,11 +1,13 @@
-;; Keywords: str text string utf8 ascii
+;; Keywords: str text string utf8 ascii core
 ;; String operations for slicing, splitting, case conversion, parsing, and byte/text boundaries.
+;; References:
+;; - std.core
 module std.core.str(len, find, find_from, find_last, _str_eq, cstr_to_str, pad_start, startswith, endswith, atoi, parse_int, atof, split, strip, str_add, upper, lower, str_contains, join, join_words, str_replace, to_hex, to_fixed, chr, repeat, ord, hex_val, utf8_valid, utf8_len, ord_at, str_slice, utf8_slice, split_words, byte_at, ascii_is_lower, ascii_is_upper, ascii_is_alpha, ascii_is_digit, ascii_is_alnum, ascii_is_space, ascii_is_hex_digit, ascii_is_oct_digit, ascii_is_punctuation, ascii_is_printable, ascii_lower_byte, ascii_upper_byte, ascii_only, ascii_all_alpha, ascii_all_digit, ascii_all_alnum, ascii_all_space, ascii_all_printable, _utf8_seq_len, _utf8_decode_at, _utf8_encode_at, _substr, Builder, builder_append, builder_append_byte, builder_to_str, builder_free)
 use std.core
 use std.core as core
 use std.core.primitives (envc, envp)
 
-fn _env_present(str: key): bool {
+fn _env_present(str key) bool {
    def key_len = key.len
    def n = envc()
    mut i = 0
@@ -29,7 +31,7 @@ fn _env_present(str: key): bool {
 }
 
 @inline
-fn _match_at(str: s, str: sub, int: at): bool {
+fn _match_at(str s, str sub, int at) bool {
    mut j = 0
    while(j < sub.len){
       if(load8(s, at + j) != load8(sub, j)){ return false }
@@ -38,13 +40,31 @@ fn _match_at(str: s, str: sub, int: at): bool {
    true
 }
 
-fn len(any: s): int {
+@inline
+fn _ascii_eq_fold(int a, int b) bool {
+   if(a >= 65 && a <= 90){ a += 32 }
+   if(b >= 65 && b <= 90){ b += 32 }
+   a == b
+}
+
+@inline
+fn _match_at_ascii_ci(str s, str sub, int at) bool {
+   if(at < 0 || at + sub.len > s.len){ return false }
+   mut j = 0
+   while(j < sub.len){
+      if(!_ascii_eq_fold(load8(s, at + j), load8(sub, j))){ return false }
+      j += 1
+   }
+   true
+}
+
+fn len(any s) int {
    "Returns the number of bytes for strings, otherwise forwards to the value length."
    if(__is_str_obj(s)){ return __load64_idx(s, -16) }
    return s.len
 }
 
-fn find(str: s, str: sub): int {
+fn find(str s, str sub) int {
    "Returns the index of the first occurrence of `sub` in `s`, or -1."
    mut n, m = s.len, sub.len
    if(m == 0){ return 0 }
@@ -57,7 +77,7 @@ fn find(str: s, str: sub): int {
    return -1
 }
 
-fn find_from(str: s, str: sub, int: start): int {
+fn find_from(str s, str sub, int start) int {
    "Returns the index of the first occurrence of `sub` in `s` at/after `start`, or -1."
    mut n, m = s.len, sub.len
    if(m == 0){
@@ -75,7 +95,7 @@ fn find_from(str: s, str: sub, int: start): int {
    -1
 }
 
-fn find_last(str: s, str: sub): int {
+fn find_last(str s, str sub) int {
    "Returns the index of the last occurrence of `sub` in `s`, or -1."
    mut n, m = s.len, sub.len
    if(m == 0){ return n }
@@ -88,13 +108,13 @@ fn find_last(str: s, str: sub): int {
    return -1
 }
 
-fn _str_eq(any: a, any: b): bool {
+fn _str_eq(any a, any b) bool {
    if(!is_str(a) || !is_str(b)){ return false }
    return __str_eq(a, b)
 }
 
 @returns_owned
-fn cstr_to_str(any: p, int: offset=0): any {
+fn cstr_to_str(any p, int offset=0) any {
    "Converts a C-string pointer to a Nytrix string. Optional offset skips bytes."
    if(!p){ return 0 }
    if(is_str(p)){
@@ -117,7 +137,7 @@ fn cstr_to_str(any: p, int: offset=0): any {
 }
 
 @returns_owned
-fn pad_start(str: s, int: width, str: pad=" "): str {
+fn pad_start(str s, int width, str pad=" ") str {
    "Left-pads string `s` to `width` using `pad` (default space)."
    mut n = s.len
    if(n >= width){ return _substr(s, 0, n) }
@@ -143,7 +163,7 @@ fn pad_start(str: s, int: width, str: pad=" "): str {
 }
 
 @inline
-fn startswith(any: s, any: prefix): bool {
+fn startswith(any s, any prefix) bool {
    "Returns true if string `s` starts with `prefix`."
    if(!is_str(s) || !is_str(prefix)){ return false }
    mut n = prefix.len
@@ -151,13 +171,13 @@ fn startswith(any: s, any: prefix): bool {
    _match_at(s, prefix, 0)
 }
 
-fn atoi(any: s): int {
+fn atoi(any s) int {
    "Parses a decimal integer from string `s`."
    parse_int(s, 10)
 }
 
 @inline
-fn _ascii_radix_value(int: c): int {
+fn _ascii_radix_value(int c) int {
    case c {
       48..57 -> c - 48
       65..90 -> c - 55
@@ -167,14 +187,14 @@ fn _ascii_radix_value(int: c): int {
 }
 
 @inline
-fn _ascii_decimal_value(int: c): int {
+fn _ascii_decimal_value(int c) int {
    case c {
       48..57 -> c - 48
       _ -> -1
    }
 }
 
-fn parse_int(any: s, int: base=10): int {
+fn parse_int(any s, int base=10) int {
    "Parses an integer from string `s` using base 2..36."
    if(!is_str(s)){ return 0 }
    if(base < 2 || base > 36){ return 0 }
@@ -197,13 +217,13 @@ fn parse_int(any: s, int: base=10): int {
    out * sign
 }
 
-fn hex_val(int: c): int {
+fn hex_val(int c) int {
    "Returns the integer value of a hexadecimal character byte `c`."
    def v = _ascii_radix_value(c)
    (v >= 0 && v < 16) ? v : 0
 }
 
-fn _atof_unsigned_from(str: s, int: i0): f64 {
+fn _atof_unsigned_from(str s, int i0) f64 {
    mut n, i = s.len, i0
    mut val = 0.0
    while(i < n){
@@ -212,7 +232,7 @@ fn _atof_unsigned_from(str: s, int: i0): f64 {
       val = val * 10.0 + __flt_box_val(__flt_from_int(d))
       i += 1
    }
-   if(i < n && load8(s, i) == 46){ ;; '.'
+   if(i < n && load8(s, i) == 46){
       i += 1
       mut frac = 0.1
       while(i < n){
@@ -223,7 +243,7 @@ fn _atof_unsigned_from(str: s, int: i0): f64 {
          i += 1
       }
    }
-   if(i < n && (load8(s, i) == 101 || load8(s, i) == 69)){ ;; 'e' or 'E'
+   if(i < n && (load8(s, i) == 101 || load8(s, i) == 69)){
       i += 1
       mut esign = 1
       if(i < n && load8(s, i) == 45){ esign = -1 i += 1 }
@@ -247,18 +267,31 @@ fn _atof_unsigned_from(str: s, int: i0): f64 {
    val
 }
 
-fn atof(any: s): f64 {
+fn atof(any s) f64 {
    "Parses a float from string `s`."
    if(!is_str(s)){ return 0.0 }
    def n = s.len
    if(n == 0){ return 0.0 }
+   mut sign = 1
+   mut i = 0
    def first = load8(s, 0)
-   if(first == 45){ return 0.0 - _atof_unsigned_from(s, 1) } ;; '-'
-   if(first == 43){ return _atof_unsigned_from(s, 1) } ;; '+'
-   _atof_unsigned_from(s, 0)
+   if(first == 45){ sign = -1 i = 1 }
+   elif(first == 43){ i = 1 }
+   if(i >= n){ return 0.0 }
+   if(i + 3 == n && _match_at_ascii_ci(s, "nan", i)){ return __flt_nan() }
+   if(i + 3 == n && _match_at_ascii_ci(s, "inf", i)){
+      def v = __flt_inf()
+      return sign < 0 ? 0.0 - v : v
+   }
+   if(i + 8 == n && _match_at_ascii_ci(s, "infinity", i)){
+      def v = __flt_inf()
+      return sign < 0 ? 0.0 - v : v
+   }
+   def val = _atof_unsigned_from(s, i)
+   sign < 0 ? 0.0 - val : val
 }
 
-fn _list_push_reserved(list: lst, any: v): int {
+fn _list_push_reserved(list lst, any v) int {
    if(!is_list(lst)){ return 0 }
    def n = load64(lst, 0)
    def cap = load64(lst, 8)
@@ -269,7 +302,7 @@ fn _list_push_reserved(list: lst, any: v): int {
 }
 
 @returns_owned
-fn _substr(str: s, int: start, int: stop): str {
+fn _substr(str s, int start, int stop) str {
    mut n = s.len
    if(start < 0){ start = 0 }
    if(stop > n){ stop = n }
@@ -287,9 +320,9 @@ fn _substr(str: s, int: start, int: stop): str {
    return out
 }
 
-fn _is_ws(int: c): bool { c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13 }
+fn _is_ws(int c) bool { c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13 }
 
-fn strip(any: s): str {
+fn strip(any s) str {
    "Returns `s` without leading/trailing ASCII whitespace."
    if(!is_str(s)){ return "" }
    mut n = s.len
@@ -302,7 +335,7 @@ fn strip(any: s): str {
 }
 
 @returns_owned
-fn split(any: s, any: sep): list {
+fn split(any s, any sep) list {
    "Splits string `s` by separator `sep` and returns a list of strings."
    if(_env_present("NY_TEXT_DEBUG")){ print("Text: split s='" + s + "' sep='" + sep + "'") }
    if(!is_str(s)){ return list(0) }
@@ -338,7 +371,7 @@ fn split(any: s, any: sep): list {
 }
 
 @returns_owned
-fn split_words(any: s): list {
+fn split_words(any s) list {
    "Splits string `s` into words, automatically trimming and ignoring empty segments."
    if(!is_str(s)){ return list(0) }
    def raw = split(strip(s), " ")
@@ -354,7 +387,7 @@ fn split_words(any: s): list {
 }
 
 @returns_owned
-fn str_add(any: a, any: b): str {
+fn str_add(any a, any b) str {
    "Concatenates two strings."
    if(!is_str(a)){ return is_str(b) ? _substr(b, 0, b.len) : to_str(b) }
    if(!is_str(b)){ return _substr(a, 0, a.len) }
@@ -378,7 +411,7 @@ fn str_add(any: a, any: b): str {
 }
 
 @returns_owned
-fn upper(any: s): any {
+fn upper(any s) any {
    "Converts string `s` to uppercase."
    if(!is_str(s)){ return s }
    mut n = s.len
@@ -397,7 +430,7 @@ fn upper(any: s): any {
 }
 
 @returns_owned
-fn lower(any: s): any {
+fn lower(any s) any {
    "Converts string `s` to lowercase."
    if(!is_str(s)){ return s }
    mut n = s.len
@@ -415,7 +448,7 @@ fn lower(any: s): any {
    return out
 }
 
-fn endswith(any: s, any: suffix): bool {
+fn endswith(any s, any suffix) bool {
    "Returns true if string `s` ends with `suffix`."
    if(!is_str(s) || !is_str(suffix)){ return false }
    mut n = s.len
@@ -425,13 +458,13 @@ fn endswith(any: s, any: suffix): bool {
 }
 
 @inline
-fn str_contains(str: s, str: sub): bool {
+fn str_contains(str s, str sub) bool {
    "Returns true if string `s` contains `sub`."
    find(s, sub) != -1
 }
 
 @returns_owned
-fn join(list: items, str: sep=""): str {
+fn join(list items, str sep="") str {
    "Joins a list of strings using separator `sep`."
    if(!is_list(items)){ return "" }
    if(!is_str(sep)){ return "" }
@@ -476,7 +509,7 @@ fn join(list: items, str: sep=""): str {
    out
 }
 
-fn join_words(list: items, str: sep=" ", int: start=0): str {
+fn join_words(list items, str sep=" ", int start=0) str {
    "Join list `items` into a string starting from index `start`, using `sep`."
    if(!is_list(items)){ return "" }
    mut n = items.len
@@ -492,7 +525,7 @@ fn join_words(list: items, str: sep=" ", int: start=0): str {
 }
 
 @returns_owned
-fn str_replace(any: s, any: old, any: new): any {
+fn str_replace(any s, any old, any new) any {
    "Replaces all occurrences of old in s with new."
    if(!is_str(s) || !is_str(old) || !is_str(new)){ return is_str(s) ? _substr(s, 0, s.len) : to_str(s) }
    if(old.len == 0){ return _substr(s, 0, s.len) }
@@ -539,7 +572,7 @@ fn str_replace(any: s, any: old, any: new): any {
 }
 
 @returns_owned
-fn to_hex(int: n, int: width=0): str {
+fn to_hex(int n, int width=0) str {
    "Converts an integer `n` to its hexadecimal string representation."
    def hex_chars = "0123456789abcdef"
    if(n == 0){
@@ -578,7 +611,7 @@ fn to_hex(int: n, int: width=0): str {
 }
 
 @returns_owned
-fn to_fixed(number: v, int: precision=2): str {
+fn to_fixed(number v, int precision=2) str {
    "Returns a string representation of float `v` with `precision` decimal places."
    mut val = v
    mut b = Builder(32)
@@ -603,7 +636,7 @@ fn to_fixed(number: v, int: precision=2): str {
 }
 
 @returns_owned
-fn chr(int: code): str {
+fn chr(int code) str {
    "Returns a single-character string from an integer Unicode code point."
    if(code < 0 || code > 1114111){ return "" }
    with ptr: char_buf = malloc(5){
@@ -634,7 +667,7 @@ fn chr(int: code): str {
 }
 
 @returns_owned
-fn repeat(str: s, int: n): str {
+fn repeat(str s, int n) str {
    "Returns string `s` repeated `n` times."
    if(!is_str(s) || n < 0){ return "" }
    if(n == 0){ return "" }
@@ -656,12 +689,12 @@ fn repeat(str: s, int: n): str {
    return out
 }
 
-fn _is_utf8_cont(int: c): bool {
+fn _is_utf8_cont(int c) bool {
    def cc = c & 255
    cc >= 128 && cc <= 191
 }
 
-fn _utf8_seq_len(str: s, int: i, int: n): int {
+fn _utf8_seq_len(str s, int i, int n) int {
    if(i < 0 || i >= n){ return -1 }
    def b0 = load8(s, i) & 255
    if(b0 < 128){ return 1 }
@@ -675,7 +708,6 @@ fn _utf8_seq_len(str: s, int: i, int: n): int {
       if(i + 2 >= n){ return -1 }
       def b1, b2 = load8(s, i + 1) & 255, load8(s, i + 2) & 255
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2)){ return -1 }
-      ; Reject overlong forms and UTF-16 surrogate range.
       if(b0 == 224 && b1 < 160){ return -1 }
       if(b0 == 237 && b1 >= 160){ return -1 }
       return 3
@@ -685,7 +717,6 @@ fn _utf8_seq_len(str: s, int: i, int: n): int {
       def b1, b2 = load8(s, i + 1) & 255, load8(s, i + 2) & 255
       def b3 = load8(s, i + 3) & 255
       if(!_is_utf8_cont(b1) || !_is_utf8_cont(b2) || !_is_utf8_cont(b3)){ return -1 }
-      ; Reject overlong forms and code points beyond U+10FFFF.
       if(b0 == 240 && b1 < 144){ return -1 }
       if(b0 == 244 && b1 > 143){ return -1 }
       return 4
@@ -693,7 +724,7 @@ fn _utf8_seq_len(str: s, int: i, int: n): int {
    -1
 }
 
-fn _utf8_decode_at(str: s, int: i, int: w): int {
+fn _utf8_decode_at(str s, int i, int w) int {
    def b0 = load8(s, i) & 255
    if(w == 1){ return b0 }
    if(w == 2){
@@ -712,7 +743,7 @@ fn _utf8_decode_at(str: s, int: i, int: w): int {
    0
 }
 
-fn _utf8_encode_at(ptr: p, int: i, int: code): int {
+fn _utf8_encode_at(ptr p, int i, int code) int {
    if(code < 0 || code > 1114111){ return 0 }
    if(code <= 127){
       store8(p, code, i)
@@ -735,7 +766,7 @@ fn _utf8_encode_at(ptr: p, int: i, int: code): int {
    }
 }
 
-fn utf8_valid(any: s): bool {
+fn utf8_valid(any s) bool {
    "Returns true if `s` is valid UTF-8."
    if(!is_str(s)){ return false }
    def n = s.len
@@ -748,7 +779,7 @@ fn utf8_valid(any: s): bool {
    true
 }
 
-fn utf8_len(any: s): int {
+fn utf8_len(any s) int {
    "Returns the number of UTF-8 code points in `s` (invalid bytes count as one)."
    if(!is_str(s)){ return 0 }
    def n = s.len
@@ -763,7 +794,7 @@ fn utf8_len(any: s): int {
    count
 }
 
-fn ord_at(any: s, int: idx=0): int {
+fn ord_at(any s, int idx=0) int {
    "Returns Unicode code point at code-point index `idx` (supports negative indices)."
    if(!is_str(s)){ return 0 }
    if(!is_int(idx)){ idx = 0 }
@@ -787,12 +818,12 @@ fn ord_at(any: s, int: idx=0): int {
 }
 
 @inline
-fn ord(any: s): int {
+fn ord(any s) int {
    "Returns the Unicode code point of the first character in `s`."
    ord_at(s, 0)
 }
 
-fn byte_at(any: s, int: idx=0, any: default=0): int {
+fn byte_at(any s, int idx=0, any default=0) int {
    "Returns raw byte at byte index `idx`, supporting negative indices."
    def n = s.len
    if(idx < 0){ idx = n + idx }
@@ -801,80 +832,80 @@ fn byte_at(any: s, int: idx=0, any: default=0): int {
 }
 
 @inline
-fn ascii_is_lower(int: c): bool {
+fn ascii_is_lower(int c) bool {
    "Returns true for ASCII lowercase bytes."
    c >= 97 && c <= 122
 }
 
 @inline
-fn ascii_is_upper(int: c): bool {
+fn ascii_is_upper(int c) bool {
    "Returns true for ASCII uppercase bytes."
    c >= 65 && c <= 90
 }
 
 @inline
-fn ascii_is_alpha(int: c): bool {
+fn ascii_is_alpha(int c) bool {
    "Returns true for ASCII letters."
    ascii_is_lower(c) || ascii_is_upper(c)
 }
 
 @inline
-fn ascii_is_digit(int: c): bool {
+fn ascii_is_digit(int c) bool {
    "Returns true for ASCII decimal digits."
    c >= 48 && c <= 57
 }
 
 @inline
-fn ascii_is_alnum(int: c): bool {
+fn ascii_is_alnum(int c) bool {
    "Returns true for ASCII letters or digits."
    ascii_is_alpha(c) || ascii_is_digit(c)
 }
 
 @inline
-fn ascii_is_space(int: c): bool {
+fn ascii_is_space(int c) bool {
    "Returns true for ASCII whitespace bytes."
    _is_ws(c)
 }
 
 @inline
-fn ascii_is_hex_digit(int: c): bool {
+fn ascii_is_hex_digit(int c) bool {
    "Returns true for ASCII hexadecimal digits."
    ascii_is_digit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)
 }
 
 @inline
-fn ascii_is_oct_digit(int: c): bool {
+fn ascii_is_oct_digit(int c) bool {
    "Returns true for ASCII octal digits."
    c >= 48 && c <= 55
 }
 
 @inline
-fn ascii_is_punctuation(int: c): bool {
+fn ascii_is_punctuation(int c) bool {
    "Returns true for printable ASCII punctuation."
    (c >= 33 && c <= 47) || (c >= 58 && c <= 64) || (c >= 91 && c <= 96) || (c >= 123 && c <= 126)
 }
 
 @inline
-fn ascii_is_printable(int: c): bool {
+fn ascii_is_printable(int c) bool {
    "Returns true for printable ASCII bytes."
    c >= 32 && c <= 126
 }
 
 @inline
-fn ascii_lower_byte(int: c): int {
+fn ascii_lower_byte(int c) int {
    "Lowercases one ASCII byte when possible."
    if(ascii_is_upper(c)){ return c + 32 }
    c
 }
 
 @inline
-fn ascii_upper_byte(int: c): int {
+fn ascii_upper_byte(int c) int {
    "Uppercases one ASCII byte when possible."
    if(ascii_is_lower(c)){ return c - 32 }
    c
 }
 
-fn ascii_only(str: s): bool {
+fn ascii_only(str s) bool {
    "Returns true when all bytes in `s` are ASCII."
    mut i = 0
    while(i < s.len){
@@ -884,7 +915,7 @@ fn ascii_only(str: s): bool {
    true
 }
 
-fn ascii_all_alpha(str: s): bool {
+fn ascii_all_alpha(str s) bool {
    "Returns true when every byte is an ASCII letter."
    if(s.len == 0){ return false }
    mut i = 0
@@ -895,7 +926,7 @@ fn ascii_all_alpha(str: s): bool {
    true
 }
 
-fn ascii_all_digit(str: s): bool {
+fn ascii_all_digit(str s) bool {
    "Returns true when every byte is an ASCII decimal digit."
    if(s.len == 0){ return false }
    mut i = 0
@@ -906,7 +937,7 @@ fn ascii_all_digit(str: s): bool {
    true
 }
 
-fn ascii_all_alnum(str: s): bool {
+fn ascii_all_alnum(str s) bool {
    "Returns true when every byte is ASCII alphanumeric."
    if(s.len == 0){ return false }
    mut i = 0
@@ -917,7 +948,7 @@ fn ascii_all_alnum(str: s): bool {
    true
 }
 
-fn ascii_all_space(str: s): bool {
+fn ascii_all_space(str s) bool {
    "Returns true when every byte is ASCII whitespace."
    if(s.len == 0){ return false }
    mut i = 0
@@ -928,7 +959,7 @@ fn ascii_all_space(str: s): bool {
    true
 }
 
-fn ascii_all_printable(str: s): bool {
+fn ascii_all_printable(str s) bool {
    "Returns true when every byte is printable ASCII."
    mut i = 0
    while(i < s.len){
@@ -940,94 +971,94 @@ fn ascii_all_printable(str: s): bool {
 
 impl int {
    @inline
-   fn ascii_lower(self: c): int { ascii_lower_byte(c) }
+   fn ascii_lower(self c) int { ascii_lower_byte(c) }
    @inline
-   fn ascii_upper(self: c): int { ascii_upper_byte(c) }
+   fn ascii_upper(self c) int { ascii_upper_byte(c) }
    @inline
-   fn ascii_is_lower(self: c): bool { ascii_is_lower(c) }
+   fn ascii_is_lower(self c) bool { ascii_is_lower(c) }
    @inline
-   fn ascii_is_upper(self: c): bool { ascii_is_upper(c) }
+   fn ascii_is_upper(self c) bool { ascii_is_upper(c) }
    @inline
-   fn ascii_is_alpha(self: c): bool { ascii_is_alpha(c) }
+   fn ascii_is_alpha(self c) bool { ascii_is_alpha(c) }
    @inline
-   fn ascii_is_digit(self: c): bool { ascii_is_digit(c) }
+   fn ascii_is_digit(self c) bool { ascii_is_digit(c) }
    @inline
-   fn ascii_is_alnum(self: c): bool { ascii_is_alnum(c) }
+   fn ascii_is_alnum(self c) bool { ascii_is_alnum(c) }
    @inline
-   fn ascii_is_space(self: c): bool { ascii_is_space(c) }
+   fn ascii_is_space(self c) bool { ascii_is_space(c) }
    @inline
-   fn ascii_is_hex_digit(self: c): bool { ascii_is_hex_digit(c) }
+   fn ascii_is_hex_digit(self c) bool { ascii_is_hex_digit(c) }
    @inline
-   fn ascii_is_oct_digit(self: c): bool { ascii_is_oct_digit(c) }
+   fn ascii_is_oct_digit(self c) bool { ascii_is_oct_digit(c) }
    @inline
-   fn ascii_is_punctuation(self: c): bool { ascii_is_punctuation(c) }
+   fn ascii_is_punctuation(self c) bool { ascii_is_punctuation(c) }
    @inline
-   fn ascii_is_printable(self: c): bool { ascii_is_printable(c) }
+   fn ascii_is_printable(self c) bool { ascii_is_printable(c) }
 }
 
 impl str {
    @inline
-   fn find(self: s, str: sub): int { find(s, sub) }
+   fn find(self s, str sub) int { find(s, sub) }
    @inline
-   fn find_from(self: s, str: sub, int: start): int { find_from(s, sub, start) }
+   fn find_from(self s, str sub, int start) int { find_from(s, sub, start) }
    @inline
-   fn find_last(self: s, str: sub): int { find_last(s, sub) }
+   fn find_last(self s, str sub) int { find_last(s, sub) }
    @inline
-   fn startswith(self: s, str: prefix): bool { startswith(s, prefix) }
+   fn startswith(self s, str prefix) bool { startswith(s, prefix) }
    @inline
-   fn endswith(self: s, str: suffix): bool { endswith(s, suffix) }
+   fn endswith(self s, str suffix) bool { endswith(s, suffix) }
    @inline
-   fn strip(self: s): str { strip(s) }
+   fn strip(self s) str { strip(s) }
    @inline
-   fn split(self: s, str: sep): list { split(s, sep) }
+   fn split(self s, str sep) list { split(s, sep) }
    @inline
-   fn split_words(self: s): list { split_words(s) }
+   fn split_words(self s) list { split_words(s) }
    @inline
-   fn upper(self: s): str { upper(s) }
+   fn upper(self s) str { upper(s) }
    @inline
-   fn lower(self: s): str { lower(s) }
+   fn lower(self s) str { lower(s) }
    @inline
-   fn replace(self: s, str: old, str: new): str { str_replace(s, old, new) }
+   fn replace(self s, str old, str new) str { str_replace(s, old, new) }
    @inline
-   fn pad_start(self: s, int: width, str: pad=" "): str { pad_start(s, width, pad) }
+   fn pad_start(self s, int width, str pad=" ") str { pad_start(s, width, pad) }
    @inline
-   fn repeat(self: s, int: n): str { repeat(s, n) }
+   fn repeat(self s, int n) str { repeat(s, n) }
    @inline
-   fn atoi(self: s): int { atoi(s) }
+   fn atoi(self s) int { atoi(s) }
    @inline
-   fn parse_int(self: s, int: base=10): int { parse_int(s, base) }
+   fn parse_int(self s, int base=10) int { parse_int(s, base) }
    @inline
-   fn atof(self: s): f64 { atof(s) }
+   fn atof(self s) f64 { atof(s) }
    @inline
-   fn ord(self: s): int { ord(s) }
+   fn ord(self s) int { ord(s) }
    @inline
-   fn ord_at(self: s, int: idx=0): int { ord_at(s, idx) }
+   fn ord_at(self s, int idx=0) int { ord_at(s, idx) }
    @inline
-   fn byte_at(self: s, int: idx=0, any: default=0): int { byte_at(s, idx, default) }
+   fn byte_at(self s, int idx=0, any default=0) int { byte_at(s, idx, default) }
    @inline
-   fn utf8_valid(self: s): bool { utf8_valid(s) }
+   fn utf8_valid(self s) bool { utf8_valid(s) }
    @inline
-   fn utf8_len(self: s): int { utf8_len(s) }
+   fn utf8_len(self s) int { utf8_len(s) }
    @inline
-   fn str_slice(self: s, int: start, int: stop, int: step=1): str { str_slice(s, start, stop, step) }
+   fn str_slice(self s, int start, int stop, int step=1) str { str_slice(s, start, stop, step) }
    @inline
-   fn utf8_slice(self: s, int: start, int: stop, int: step=1): str { utf8_slice(s, start, stop, step) }
+   fn utf8_slice(self s, int start, int stop, int step=1) str { utf8_slice(s, start, stop, step) }
    @inline
-   fn ascii_only(self: s): bool { ascii_only(s) }
+   fn ascii_only(self s) bool { ascii_only(s) }
    @inline
-   fn ascii_alpha(self: s): bool { ascii_all_alpha(s) }
+   fn ascii_alpha(self s) bool { ascii_all_alpha(s) }
    @inline
-   fn ascii_digit(self: s): bool { ascii_all_digit(s) }
+   fn ascii_digit(self s) bool { ascii_all_digit(s) }
    @inline
-   fn ascii_alnum(self: s): bool { ascii_all_alnum(s) }
+   fn ascii_alnum(self s) bool { ascii_all_alnum(s) }
    @inline
-   fn ascii_space(self: s): bool { ascii_all_space(s) }
+   fn ascii_space(self s) bool { ascii_all_space(s) }
    @inline
-   fn ascii_printable(self: s): bool { ascii_all_printable(s) }
+   fn ascii_printable(self s) bool { ascii_all_printable(s) }
    operator * int: str = repeat
 }
 
-fn str_slice(str: s, int: start, int: stop, int: step=1): str {
+fn str_slice(str s, int start, int stop, int step=1) str {
    "Returns a slice of string `s` from `start` to `stop` with optional `step`."
    if(!is_str(s)){ return "" }
    if(step == 0){ step = 1 }
@@ -1035,7 +1066,7 @@ fn str_slice(str: s, int: start, int: stop, int: step=1): str {
 }
 
 @returns_owned
-fn utf8_slice(str: s, int: start, int: stop, int: step=1): str {
+fn utf8_slice(str s, int start, int stop, int step=1) str {
    "Returns a UTF-8 code-point slice of string `s`."
    if(!is_str(s)){ return "" }
    if(!is_int(step)){ step = 1 }
@@ -1078,7 +1109,7 @@ fn utf8_slice(str: s, int: start, int: stop, int: step=1): str {
 }
 
 @returns_owned
-fn Builder(int: initial_cap=64): list {
+fn Builder(int initial_cap=64) list {
    "Creates a new StringBuilder with initial capacity."
    mut cap = initial_cap
    if(!is_int(cap) || cap < 8){ cap = 64 }
@@ -1087,7 +1118,7 @@ fn Builder(int: initial_cap=64): list {
 
 @returns_owned
 @consumes(b)
-fn builder_append(list: b, any: s): list {
+fn builder_append(any b, any s) any {
    "Appends string `s` to the builder `b`."
    if(!is_list(b) || b.len < 3){ return b }
    mut buf = b[0]
@@ -1112,7 +1143,7 @@ fn builder_append(list: b, any: s): list {
 
 @returns_owned
 @consumes(b)
-fn builder_append_byte(list: b, int: c): list {
+fn builder_append_byte(any b, int c) any {
    "Appends one raw byte to the builder `b`."
    if(!is_list(b) || b.len < 3){ return b }
    mut buf = b[0]
@@ -1134,7 +1165,7 @@ fn builder_append_byte(list: b, int: c): list {
 }
 
 @returns_owned
-fn builder_to_str(list: b): str {
+fn builder_to_str(any b) str {
    "Returns the content of builder `b` as a Nytrix string."
    if(!is_list(b) || b.len < 3){ return "" }
    def l = b[1]
@@ -1147,9 +1178,16 @@ fn builder_to_str(list: b): str {
    out
 }
 
-fn builder_free(list: b): int {
+fn builder_free(any b) int {
    "Frees the underlying buffer of builder `b`."
    if(!is_list(b) || b.len < 3){ return 0 }
    if(b[0]){ free(b[0]) b[0] = 0 }
    0
+}
+
+#main {
+   assert(__flt_is_nan(atof("nan")) && __flt_is_nan(atof("-NaN")), "str atof nan")
+   assert(__flt_is_inf(atof("inf")) && __flt_is_inf(atof("+Infinity")) && atof("-inf") < 0.0, "str atof infinity")
+   assert(atof("0.5") == 0.5 && atof("-12.25") == -12.25 && atof("1e3") == 1000.0, "str atof decimal")
+   print("✓ std.core.str self-test passed")
 }

@@ -1,14 +1,17 @@
-;; Keywords: rsa non-coprime
+;; Keywords: rsa non-coprime math crypto
 ;; RSA recovery from non-coprime parameters routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.non_coprime(non_coprime_attack, non_coprime_exponent_attack)
 use std.math.nt
 use std.math.crypto.gf
 use std.math.crypto.factorization.known_phi
 
-fn _unique_prime_factors(any: n): list {
+fn _unique_prime_factors(any n) list {
    mut out = []
    mut nn = n
    mut d = 2
@@ -23,7 +26,7 @@ fn _unique_prime_factors(any: n): list {
    out
 }
 
-fn _primitive_root_prime(any: p): any {
+fn _primitive_root_prime(any p) any {
    if(p == 2){ return 1 }
    def phi = p - 1
    def primes = _unique_prime_factors(phi)
@@ -45,7 +48,7 @@ fn _primitive_root_prime(any: p): any {
    0
 }
 
-fn _eth_roots_prime(any: c, any: e, any: p): list {
+fn _eth_roots_prime(any c, any e, any p) list {
    def cc = mod(c, p)
    if(p == 2){ return [cc] }
    if(cc == 0){ return [0] }
@@ -70,7 +73,7 @@ fn _eth_roots_prime(any: c, any: e, any: p): list {
    roots
 }
 
-fn non_coprime_attack(any: n, any: e, any: phi, any: c): any {
+fn non_coprime_attack(any n, any e, any phi, any c) any {
    "Decrypt ciphertext c when public exponent e is not coprime with phi(n).
    Returns a list of candidate plaintexts or nil."
    def factors = factor_from_phi(n, phi)
@@ -94,7 +97,7 @@ fn non_coprime_attack(any: n, any: e, any: phi, any: c): any {
    results
 }
 
-fn non_coprime_exponent_attack(any: n, any: e, any: phi, any: c): any {
+fn non_coprime_exponent_attack(any n, any e, any phi, any c) any {
    "Entry point for RSA with an exponent not coprime to phi(n)."
    non_coprime_attack(n, e, phi, c)
 }

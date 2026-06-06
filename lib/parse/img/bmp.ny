@@ -1,15 +1,18 @@
-;; Keywords: image bmp bitmap
+;; Keywords: image bmp bitmap parse
 ;; BitMap (BMP) Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/BMP_file_format
 ;; - https://www.rfc-editor.org/rfc/rfc7854.html
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.bmp(decode, encode)
 use std.core
 use std.core.dict_mod
 use std.math.simmd as simmd
 use std.os.path as ospath
 
-fn _ctz32(int: x): int {
+fn _ctz32(int x) int {
    if(x == 0){ return 0 }
    mut v, n = x, 0
    while((v & 1) == 0){
@@ -19,7 +22,7 @@ fn _ctz32(int: x): int {
    n
 }
 
-fn _chan_from_mask(int: px, int: mask): int {
+fn _chan_from_mask(int px, int mask) int {
    if(mask == 0){ return 0 }
    def sh = _ctz32(mask)
    def raw = (px & mask) >> sh
@@ -28,11 +31,11 @@ fn _chan_from_mask(int: px, int: mask): int {
    ((raw * 255) + (m / 2)) / m
 }
 
-fn _bgr_to_rgba(int: p): int {
+fn _bgr_to_rgba(int p) int {
    ((p & 0xFF) << 16) | (p & 0xFF00FF00) | ((p >> 16) & 0xFF)
 }
 
-fn _bmp_header(any: data): dict {
+fn _bmp_header(any data) dict {
    if(!is_str(data) || data.len < 54){ return {"ok": false} }
    if(load8(data, 0) != 66 || load8(data, 1) != 77){ return {"ok": false} }
    def offset = load32(data, 10)
@@ -64,7 +67,7 @@ fn _bmp_header(any: data): dict {
    }
 }
 
-fn _bmp_masks(any: data, int: hdr_size, int: offset, int: compression): dict {
+fn _bmp_masks(any data, int hdr_size, int offset, int compression) dict {
    mut r_mask, g_mask = 0, 0
    mut b_mask, a_mask = 0, 0
    if(compression == 3){
@@ -81,7 +84,7 @@ fn _bmp_masks(any: data, int: hdr_size, int: offset, int: compression): dict {
    return {"ok": true, "r": r_mask, "g": g_mask, "b": b_mask, "a": a_mask}
 }
 
-fn _bmp_palette_entries(int: bpp, int: palette_off, int: offset, int: colors_used): int {
+fn _bmp_palette_entries(int bpp, int palette_off, int offset, int colors_used) int {
    if(bpp > 8){ return 0 }
    if(palette_off >= offset){ return -1 }
    def max_entries = (offset - palette_off) / 4
@@ -91,7 +94,7 @@ fn _bmp_palette_entries(int: bpp, int: palette_off, int: offset, int: colors_use
    palette_entries > 0 ? palette_entries : -1
 }
 
-fn _bmp_bgra_shuffle(): any {
+fn _bmp_bgra_shuffle() any {
    def bgra_shuffle = malloc(16)
    if(bgra_shuffle){
       store8(bgra_shuffle, 2, 0) store8(bgra_shuffle, 1, 1) store8(bgra_shuffle, 0, 2) store8(bgra_shuffle, 3, 3)
@@ -102,7 +105,7 @@ fn _bmp_bgra_shuffle(): any {
    bgra_shuffle
 }
 
-fn _bmp_store_row24(any: data, any: pixels, int: src_row, int: dst_row, int: w): bool {
+fn _bmp_store_row24(any data, any pixels, int src_row, int dst_row, int w) bool {
    def n4 = w / 4
    mut xi = 0
    while(xi < n4){
@@ -129,7 +132,7 @@ fn _bmp_store_row24(any: data, any: pixels, int: src_row, int: dst_row, int: w):
    true
 }
 
-fn _bmp_store_row32(any: data, any: pixels, any: bgra_shuffle, int: src_row, int: dst_row, int: w): bool {
+fn _bmp_store_row32(any data, any pixels, any bgra_shuffle, int src_row, int dst_row, int w) bool {
    def n4 = w / 4
    mut xi = 0
    while(xi < n4){
@@ -156,7 +159,7 @@ fn _bmp_store_row32(any: data, any: pixels, any: bgra_shuffle, int: src_row, int
    true
 }
 
-fn _bmp_store_scalar_row(any: data, any: pixels, int: src_row, int: dst_row, int: w, int: bpp, int: compression, int: palette_entries, int: palette_off, int: r_mask, int: g_mask, int: b_mask, int: a_mask): bool {
+fn _bmp_store_scalar_row(any data, any pixels, int src_row, int dst_row, int w, int bpp, int compression, int palette_entries, int palette_off, int r_mask, int g_mask, int b_mask, int a_mask) bool {
    mut x = 0
    while(x < w){
       def dst = dst_row + x * 4
@@ -207,7 +210,7 @@ fn _bmp_store_scalar_row(any: data, any: pixels, int: src_row, int: dst_row, int
    true
 }
 
-fn decode(any: data): any {
+fn decode(any data) any {
    "Decodes a BMP image from a byte string."
    def header = _bmp_header(data)
    if(!bool(header.get("ok", false))){ return 0 }
@@ -257,7 +260,7 @@ fn decode(any: data): any {
    res
 }
 
-fn encode(dict: img): str {
+fn encode(dict img) str {
    "Encodes an image dictionary(width, height, data) into a BMP byte string."
    def w, h = img.get("width"), img.get("height")
    def pixels = img.get("data")

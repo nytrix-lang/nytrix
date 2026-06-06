@@ -1,7 +1,10 @@
-;; Keywords: encoding
+;; Keywords: crypto encoding bytes base conversion math
 ;; Encoding routines for PEM, DER, ASN.1, and public-key encoding.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.encoding(asn1_parse, asn1_decode_length, asn1_to_json, asn1_get_integer, asn1_get_sequence, asn1_integers, pem_decode, hex_encode, hex_decode, base64_encode, base64_decode)
 use std.core
 use std.math.bin as bin
@@ -13,31 +16,31 @@ layout shape Asn1Node derive(load) pack(8){
    int: len = 0
 }
 
-fn base64_encode(list: b): str {
+fn base64_encode(list b) str {
    "Encode bytes list to base64 string."
    b.base64
 }
 
-fn base64_decode(str: s): list {
+fn base64_decode(str s) list {
    "Decode base64 string to bytes list."
    s.base64_decode
 }
 
-fn hex_encode(list: b): str {
+fn hex_encode(list b) str {
    "Encode bytes list to hex string."
    b.hex
 }
 
-fn hex_decode(str: s): list {
+fn hex_decode(str s) list {
    "Decode hex string to bytes list."
    s.unhex
 }
 
-fn _asn1_byte(any: data, int: pos): int {
+fn _asn1_byte(any data, int pos) int {
    is_str(data) ? load8(data, pos) : data[pos]
 }
 
-fn asn1_decode_length(any: data, int: offset): list {
+fn asn1_decode_length(any data, int offset) list {
    "Decode ASN.1 length field. Returns [length, bytes_read]."
    def b = _asn1_byte(data, offset)
    if(b < 128){ return [b, 1] }
@@ -51,7 +54,7 @@ fn asn1_decode_length(any: data, int: offset): list {
    [len_val, 1 + n]
 }
 
-fn asn1_parse(list: data, int: offset=0, any: limit=nil): list {
+fn asn1_parse(list data, int offset=0, any limit=nil) list {
    "Recursively parse DER encoded data. Returns list of {tag, len, val} nodes."
    if(limit == nil){ limit = data.len }
    mut results = []
@@ -71,7 +74,7 @@ fn asn1_parse(list: data, int: offset=0, any: limit=nil): list {
    results
 }
 
-fn _asn1_append_value(list: out, any: v, str: pad, int: indent): list {
+fn _asn1_append_value(list out, any v, str pad, int indent) list {
    if(is_list(v)){ return builder_append(out, asn1_to_json(v, indent + 1)) }
    if(is_str(v) && v.len > 0){
       out = builder_append(out, pad)
@@ -82,7 +85,7 @@ fn _asn1_append_value(list: out, any: v, str: pad, int: indent): list {
    out
 }
 
-fn _asn1_append_node(list: out, *Asn1Node: child, any: value, str: pad, int: indent): list {
+fn _asn1_append_node(list out, *Asn1Node child, any value, str pad, int indent) list {
    out = builder_append(out, pad)
    out = builder_append(out, "tag=0x")
    out = builder_append(out, [child.tag].hex)
@@ -92,7 +95,7 @@ fn _asn1_append_node(list: out, *Asn1Node: child, any: value, str: pad, int: ind
    _asn1_append_value(out, value, pad, indent)
 }
 
-fn asn1_to_json(any: node, int: indent=0): str {
+fn asn1_to_json(any node, int indent=0) str {
    "Pretty-print ASN.1 parse tree as indented text."
    mut out = Builder(128)
    def pad = "  " * indent
@@ -116,19 +119,19 @@ fn asn1_to_json(any: node, int: indent=0): str {
    text
 }
 
-fn asn1_get_integer(dict: node): any {
+fn asn1_get_integer(dict node) any {
    "Extract BigInt from ASN.1 integer node."
    if(node.get("tag") != 0x02){ return nil }
    node.get("val").long
 }
 
-fn asn1_get_sequence(dict: node): any {
+fn asn1_get_sequence(dict node) any {
    "Extract sequence content from ASN.1 sequence node."
    if(node.get("tag") == 0x30){ return node.get("val") }
    nil
 }
 
-fn _asn1_bytes_to_bigint(any: data, int: start, int: stop): bigint {
+fn _asn1_bytes_to_bigint(any data, int start, int stop) bigint {
    mut i = start
    while(i < stop && _asn1_byte(data, i) == 0){ i += 1 }
    mut out = Z(0)
@@ -139,7 +142,7 @@ fn _asn1_bytes_to_bigint(any: data, int: start, int: stop): bigint {
    out
 }
 
-fn _asn1_collect_integers(any: data, int: start, int: stop, list: acc): list {
+fn _asn1_collect_integers(any data, int start, int stop, list acc) list {
    mut out = acc
    mut pos = start
    while(pos + 2 <= stop){
@@ -160,12 +163,12 @@ fn _asn1_collect_integers(any: data, int: start, int: stop, list: acc): list {
    out
 }
 
-fn asn1_integers(any: der): list {
+fn asn1_integers(any der) list {
    "Return every ASN.1 INTEGER in DER order, recursing through SEQUENCE/SET and common public-key BIT STRING wrappers."
    _asn1_collect_integers(der, 0, der.len, [])
 }
 
-fn pem_decode(str: s): list {
+fn pem_decode(str s) list {
    "Extract and decode Base64 from PEM string."
    def lines = split(s, "\n")
    mut b64 = Builder(s.len + 8)

@@ -1,13 +1,16 @@
-;; Keywords: number-theory gf2
+;; Keywords: number-theory gf2 math crypto
 ;; Crypto number-theory routines for GF(2) linear algebra solving.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Gaussian_elimination
+;; References:
+;; - std.math.crypto.number
+;; - std.math.crypto
 module std.math.crypto.number.gf2(gf2_solve, gf2_solve_full_rank)
 use std.math.nt
 
-fn _gf2_parity(any: x): int { bigint_popcount(Z(x)) & 1 }
+fn _gf2_parity(any x) int { bigint_popcount(Z(x)) & 1 }
 
-fn gf2_solve(list: rows, list: rhs, int: ncols): any {
+fn gf2_solve(list rows, list rhs, int ncols) any {
    "Solve rows*x = rhs over GF(2), where each row is a bigint bitmask.
    Returns one bigint solution with free variables set to zero, or nil when
    the system is inconsistent."
@@ -55,7 +58,7 @@ fn gf2_solve(list: rows, list: rhs, int: ncols): any {
    sol
 }
 
-fn gf2_solve_full_rank(list: rows, list: rhs, int: ncols): any {
+fn gf2_solve_full_rank(list rows, list rhs, int ncols) any {
    "Solve rows*x = rhs over GF(2), requiring pivots for every column.
    Returns a bigint whose bit i is x_i, or nil when the system is inconsistent
    or underdetermined."

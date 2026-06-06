@@ -1,12 +1,15 @@
-;; Keywords: rsa known-d
+;; Keywords: rsa known-d math crypto
 ;; RSA recovery from known private exponent routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.known_d(known_d_factorize)
 use std.math.nt
 
-fn _known_d_factor_pair_if_valid(any: n, any: e, any: d, any: p): any {
+fn _known_d_factor_pair_if_valid(any n, any e, any d, any p) any {
    def nn = Z(n)
    def pp = Z(p)
    if(pp <= Z(1) || pp >= nn || nn % pp != Z(0)){ return nil }
@@ -17,7 +20,7 @@ fn _known_d_factor_pair_if_valid(any: n, any: e, any: d, any: p): any {
    (pp < q) ? [pp, q] : [q, pp]
 }
 
-fn known_d_factorize(any: n, any: e, any: d): any {
+fn known_d_factorize(any n, any e, any d) any {
    "Factor modulus n given public exponent e and private exponent d.
    Uses the probabilistic algorithm based on e*d - 1 = k*phi(n).
    Returns [p, q] or nil."

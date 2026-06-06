@@ -1,17 +1,20 @@
-;; Keywords: rsa bleichenbacher
+;; Keywords: rsa bleichenbacher math crypto
 ;; Bleichenbacher RSA padding-oracle attack routines.
 ;; Reference:
 ;; - Bleichenbacher D., "Chosen Ciphertext Attacks Against Protocols Based on the RSA Encryption Standard PKCS #1"
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.bleichenbacher(bleichenbacher_attack, bleichenbacher_signature_suffix_forgery)
 use std.math.nt
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 use std.core.error
 
-fn _floor_div(any: a, any: b): any { a / b }
+fn _floor_div(any a, any b) any { a / b }
 
-fn _ceil_div(any: a, any: b): any { a / b + ((a % b) != 0 ? 1 : 0) }
+fn _ceil_div(any a, any b) any { a / b + ((a % b) != 0 ? 1 : 0) }
 
-fn _insert_interval(list: M, any: a, any: b): list {
+fn _insert_interval(list M, any a, any b) list {
    mut i = 0
    while(i < M.len){
       def cur = M[i]
@@ -26,7 +29,7 @@ fn _insert_interval(list: M, any: a, any: b): list {
    M.append([a, b])
 }
 
-fn _bb_step1(any: padding_oracle, any: n, any: e, any: c): any {
+fn _bb_step1(any padding_oracle, any n, any e, any c) any {
    mut s0, c0 = 1, c
    if(padding_oracle(c0)){ return [s0, c0] }
    mut s = 2
@@ -38,19 +41,19 @@ fn _bb_step1(any: padding_oracle, any: n, any: e, any: c): any {
    nil
 }
 
-fn _bb_step2a(any: padding_oracle, any: n, any: e, any: c0, any: B): any {
+fn _bb_step2a(any padding_oracle, any n, any e, any c0, any B) any {
    mut s = _ceil_div(n, 3 * B)
    while(!padding_oracle(mod(c0 * power_mod(s, e, n), n))){ s += 1 }
    s
 }
 
-fn _bb_step2b(any: padding_oracle, any: n, any: e, any: c0, any: s): any {
+fn _bb_step2b(any padding_oracle, any n, any e, any c0, any s) any {
    mut ss = s + 1
    while(!padding_oracle(mod(c0 * power_mod(ss, e, n), n))){ ss += 1 }
    ss
 }
 
-fn _bb_step2c(any: padding_oracle, any: n, any: e, any: c0, any: B, any: s, any: a, any: b): any {
+fn _bb_step2c(any padding_oracle, any n, any e, any c0, any B, any s, any a, any b) any {
    mut r = _ceil_div(2 * (b * s - 2 * B), n)
    while(true){
       def left = _ceil_div(2 * B + r * n, b)
@@ -65,7 +68,7 @@ fn _bb_step2c(any: padding_oracle, any: n, any: e, any: c0, any: B, any: s, any:
    0
 }
 
-fn _bb_step3(any: n, any: B, any: s, list: M): list {
+fn _bb_step3(any n, any B, any s, list M) list {
    mut M2 = []
    mut mi = 0
    while(mi < M.len){
@@ -85,7 +88,7 @@ fn _bb_step3(any: n, any: B, any: s, list: M): list {
    M2
 }
 
-fn bleichenbacher_attack(any: padding_oracle, any: n, any: e, any: c): any {
+fn bleichenbacher_attack(any padding_oracle, any n, any e, any c) any {
    "Recover plaintext with PKCS#1 v1.5-style oracle returning true when plaintext lies in [2B, 3B)."
    def k, B = _ceil_div(bit_length(n), 8), 1 << (8 * (k - 2))
    def step1 = _bb_step1(padding_oracle, n, e, c)
@@ -106,7 +109,7 @@ fn bleichenbacher_attack(any: padding_oracle, any: n, any: e, any: c): any {
    nil
 }
 
-fn bleichenbacher_signature_suffix_forgery(any: suffix, int: suffix_bit_length): any {
+fn bleichenbacher_signature_suffix_forgery(any suffix, int suffix_bit_length) any {
    "Return s such that s^3 ends with the provided odd suffix.
    suffix_bit_length is the number of low bits that must match."
    assert((suffix % 2) == 1, "target suffix must be odd")

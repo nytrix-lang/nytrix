@@ -1,15 +1,18 @@
-;; Keywords: rsa common-prime
+;; Keywords: rsa common-prime math crypto
 ;; RSA common-prime detection and recovery routines.
 ;; Factor faulty RSA moduli that accidentally reuse a prime.
 ;; Reference:
 ;; - common-prime attack literature and standard batch-GCD observation
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.common_prime(common_prime_factor_pair, common_prime_recover_pair, common_prime_scan, common_prime_scan_fast, common_prime_factor_all, common_factors_attack, common_factors_factor_all)
 use std.math.nt
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 
-fn _z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
-fn _z_moduli(list: moduli): list {
+fn _z_moduli(list moduli) list {
    def n = moduli.len
    mut out = list(n)
    __list_set_len(out, n)
@@ -21,18 +24,17 @@ fn _z_moduli(list: moduli): list {
    out
 }
 
-fn _common_prime_private(any: e, any: p, any: q): any { compute_d(e, compute_phi(p, q)) }
+fn _common_prime_private(any e, any p, any q) any { compute_d(e, compute_phi(p, q)) }
 
-fn common_prime_factor_pair(any: n1, any: n2): any {
+fn common_prime_factor_pair(any n1, any n2) any {
    "Return [p, q1, q2] if n1 and n2 share a non-trivial prime, nil otherwise."
    def p = gcd(n1, n2)
-   if(p <= 1){ return nil }
-   if(p == n1 || p == n2){ return nil }
+   if(p <= 1 || p == n1 || p == n2){ return nil }
    if(n1 % p != 0 || n2 % p != 0){ return nil }
    [p, n1 / p, n2 / p]
 }
 
-fn common_prime_recover_pair(any: n1, any: e1, any: c1, any: n2, any: e2, any: c2): any {
+fn common_prime_recover_pair(any n1, any e1, any c1, any n2, any e2, any c2) any {
    "Recover [m1, m2, p, q1, q2, d1, d2] from two RSA ciphertexts if the moduli share a prime."
    def facs = common_prime_factor_pair(n1, n2)
    if(facs == nil){ return nil }
@@ -46,7 +48,7 @@ fn common_prime_recover_pair(any: n1, any: e1, any: c1, any: n2, any: e2, any: c
    [m1, m2, p, q1, q2, d1, d2]
 }
 
-fn common_prime_scan(list: moduli): list {
+fn common_prime_scan(list moduli) list {
    "Scan a list of moduli and return all shared-prime hits as [i, j, p, qi, qj]."
    mut hits = []
    mut i = 0
@@ -64,7 +66,7 @@ fn common_prime_scan(list: moduli): list {
    hits
 }
 
-fn _prefix_products(list: moduli): list {
+fn _prefix_products(list moduli) list {
    def n = moduli.len
    mut pref = list(n + 1)
    __list_set_len(pref, n + 1)
@@ -77,7 +79,7 @@ fn _prefix_products(list: moduli): list {
    pref
 }
 
-fn _suffix_products(list: moduli): list {
+fn _suffix_products(list moduli) list {
    def n = moduli.len
    mut suf = list(n + 1)
    __list_set_len(suf, n + 1)
@@ -94,7 +96,7 @@ fn _suffix_products(list: moduli): list {
    suf
 }
 
-fn _common_prime_product_tree(list: zmods): list {
+fn _common_prime_product_tree(list zmods) list {
    mut layers = list(4)
    layers = layers.append(zmods)
    mut layer = zmods
@@ -115,7 +117,7 @@ fn _common_prime_product_tree(list: zmods): list {
    layers
 }
 
-fn _common_prime_tree_collect(list: layers, int: level, int: idx, any: rem, list: out): list {
+fn _common_prime_tree_collect(list layers, int level, int idx, any rem, list out) list {
    def prod = layers[level][idx]
    if(level == 0){
       def ni = prod
@@ -140,14 +142,14 @@ fn _common_prime_tree_collect(list: layers, int: level, int: idx, any: rem, list
    out
 }
 
-fn _common_prime_factor_all_tree(list: zmods): list {
+fn _common_prime_factor_all_tree(list zmods) list {
    if(zmods.len == 0){ return [] }
    def layers = _common_prime_product_tree(zmods)
    def top = layers.len - 1
    _common_prime_tree_collect(layers, top, 0, layers[top][0], list(zmods.len))
 }
 
-fn common_prime_factor_all(any: moduli): list {
+fn common_prime_factor_all(any moduli) list {
    "Batch common-factor discovery for many moduli.
    Returns [i, p, q] for entries where n_i = p*q was recovered via shared p."
    if(!is_list(moduli) || moduli.len == 0){ return [] }
@@ -169,7 +171,7 @@ fn common_prime_factor_all(any: moduli): list {
    out
 }
 
-fn common_prime_scan_fast(any: moduli): list {
+fn common_prime_scan_fast(any moduli) list {
    "Fast shared-prime scan using batch-GCD over all moduli.
    Returns pair hits as [i, j, p, qi, qj], like common_prime_scan."
    if(!is_list(moduli) || moduli.len < 2){ return [] }
@@ -196,18 +198,18 @@ fn common_prime_scan_fast(any: moduli): list {
    out
 }
 
-fn common_factors_attack(any: moduli): list {
+fn common_factors_attack(any moduli) list {
    "Multi-key common-factors attack entrypoint.
    Returns pair hits [i, j, p, qi, qj]."
    common_prime_scan_fast(moduli)
 }
 
-fn common_factors_factor_all(any: moduli): list {
+fn common_factors_factor_all(any moduli) list {
    "Return [i, p, q] recovered entries via batch-GCD."
    common_prime_factor_all(moduli)
 }
 
-if(comptime{ return __main() }){
+#main {
    def shared = [101, 103, 107, 109, 113, 127, 131, 137]
    mut mods = list(96)
    mut q = 1009
@@ -228,5 +230,5 @@ if(comptime{ return __main() }){
       i += 1
    }
    assert(common_prime_factor_all(clean).len == 0, "common-prime product-tree clean corpus")
-   print("RSA_COMMON_PRIME_OK")
+   print("✓ std.math.crypto.rsa.common_prime self-test passed")
 }

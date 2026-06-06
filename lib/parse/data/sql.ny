@@ -1,20 +1,26 @@
-;; Keywords: data sql database query ast
+;; Keywords: data sql database query ast parse serialization
 ;; SQL tokenizer and parser for statement inspection, routing, normalization, and query-building tools.
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.sql(tokenize, parse, try_parse, parse_all, normalize, statement_kind)
 use std.core
 use std.core.dict_mod as _d
 use std.core.str
 
-fn _tok(str: kind, any: value, int: pos): dict {
+fn _tok(str kind, any value, int pos) dict {
    return {"kind": kind, "value": value, "pos": pos}
 }
 
-fn _is_ws(int: c): bool { c == 32 || c == 9 || c == 10 || c == 13 || c == 11 || c == 12 }
-fn _is_alpha(int: c): bool { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 }
-fn _is_digit(int: c): bool { c >= 48 && c <= 57 }
-fn _is_ident(int: c): bool { _is_alpha(c) || _is_digit(c) || c == 36 }
+fn _is_ws(int c) bool { c == 32 || c == 9 || c == 10 || c == 13 || c == 11 || c == 12 }
 
-fn _keyword(str: s): bool {
+fn _is_alpha(int c) bool { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 }
+
+fn _is_digit(int c) bool { c >= 48 && c <= 57 }
+
+fn _is_ident(int c) bool { _is_alpha(c) || _is_digit(c) || c == 36 }
+
+fn _keyword(str s) bool {
    def u = upper(s)
    u == "SELECT" || u == "DISTINCT" || u == "ALL" || u == "FROM" || u == "WHERE" ||
    u == "GROUP" || u == "BY" || u == "HAVING" || u == "ORDER" || u == "LIMIT" ||
@@ -29,7 +35,7 @@ fn _keyword(str: s): bool {
    u == "CHECK" || u == "RETURNING" || u == "BEGIN" || u == "COMMIT" || u == "ROLLBACK"
 }
 
-fn _quoted(str: sql, int: pos, int: quote): list {
+fn _quoted(str sql, int pos, int quote) list {
    mut b = Builder(32)
    mut i = pos + 1
    while(i < sql.len){
@@ -52,7 +58,7 @@ fn _quoted(str: sql, int: pos, int: quote): list {
    [out, i]
 }
 
-fn _bracket_ident(str: sql, int: pos): list {
+fn _bracket_ident(str sql, int pos) list {
    mut b = Builder(32)
    mut i = pos + 1
    while(i < sql.len){
@@ -70,7 +76,7 @@ fn _bracket_ident(str: sql, int: pos): list {
    [out, i]
 }
 
-fn tokenize(any: sql): list {
+fn tokenize(any sql) list {
    "Tokenizes SQL into `{kind, value, pos}` dictionaries. Comments and whitespace are skipped."
    if(!is_str(sql)){ return [_tok("eof", "", 0)] }
    mut out = []
@@ -145,7 +151,7 @@ fn tokenize(any: sql): list {
          continue
       }
       def two = (i + 1 < sql.len) ? slice(sql, i, i + 2) : ""
-      if(two == "<=" || two == ">=" || two == "<>" || two == "!=" || two == "||" || two == "::"){
+      if(case two { "<=", ">=", "<>", "!=", "||", "::" -> true _ -> false }){
          out = out.append(_tok("op", two, i))
          i += 2
          continue
@@ -156,30 +162,43 @@ fn tokenize(any: sql): list {
    out.append(_tok("eof", "", sql.len))
 }
 
-fn _result(bool: ok_v, any: value, str: error, int: pos): dict {
+fn _result(bool ok_v, any value, str error, int pos) dict {
    return {"ok": ok_v, "value": value, "error": error, "pos": pos}
 }
 
-fn _st(list: toks): list { [toks, 0, ""] }
-fn _peek(list: st, int: off=0): dict { st[0].get(st[1] + off, _tok("eof", "", 0)) }
-fn _pos(list: st): int { _peek(st).get("pos", 0) }
-fn _err(list: st, str: msg): any { if(st[2].len == 0){ st[2] = msg } 0 }
-fn _eof(list: st): bool { _peek(st).get("kind", "") == "eof" }
-fn _val(list: st, int: off=0): str { to_str(_peek(st, off).get("value", "")) }
-fn _consume(list: st): dict { def t = _peek(st) st[1] = st[1] + 1 t }
-fn _match_val(list: st, str: v): bool { upper(_val(st)) == upper(v) }
-fn _accept_val(list: st, str: v): bool { if(_match_val(st, v)){ _consume(st) return true } false }
-fn _expect_val(list: st, str: v): bool { if(_accept_val(st, v)){ return true } _err(st, "expected " + v) false }
-fn _is_name_tok(dict: t): bool { t.get("kind", "") == "ident" || t.get("kind", "") == "kw" }
+fn _st(list toks) list { [toks, 0, ""] }
 
-fn _name(list: st): str {
+fn _peek(list st, int off=0) dict { st[0].get(st[1] + off, _tok("eof", "", 0)) }
+
+fn _pos(list st) int { _peek(st).get("pos", 0) }
+
+fn _err(list st, str msg) int {
+   if(st[2].len == 0){ st[2] = msg }
+   return 0
+}
+
+fn _eof(list st) bool { _peek(st).get("kind", "") == "eof" }
+
+fn _val(list st, int off=0) str { to_str(_peek(st, off).get("value", "")) }
+
+fn _consume(list st) dict { def t = _peek(st) st[1] = st[1] + 1 t }
+
+fn _match_val(list st, str v) bool { upper(_val(st)) == upper(v) }
+
+fn _accept_val(list st, str v) bool { if(_match_val(st, v)){ _consume(st) return true } false }
+
+fn _expect_val(list st, str v) bool { if(_accept_val(st, v)){ return true } _err(st, "expected " + v) false }
+
+fn _is_name_tok(dict t) bool { t.get("kind", "") == "ident" || t.get("kind", "") == "kw" }
+
+fn _name(list st) str {
    def t = _peek(st)
    if(!_is_name_tok(t)){ _err(st, "expected identifier") return "" }
    _consume(st)
    to_str(t.get("value", ""))
 }
 
-fn _qualified_name(list: st): str {
+fn _qualified_name(list st) str {
    mut out = _name(st)
    while(st[2].len == 0 && _accept_val(st, ".")){
       if(_accept_val(st, "*")){ out = out + ".*" }
@@ -188,10 +207,11 @@ fn _qualified_name(list: st): str {
    out
 }
 
-fn _literal(any: v): dict { {"node": "literal", "value": v} }
-fn _ident(str: name): dict { {"node": "identifier", "name": name} }
+fn _literal(any v) dict { {"node": "literal", "value": v} }
 
-fn _parse_expr_list(list: st, str: end_val=")"): list {
+fn _ident(str name) dict { {"node": "identifier", "name": name} }
+
+fn _parse_expr_list(list st, str end_val=")") list {
    mut xs = []
    if(_match_val(st, end_val)){ return xs }
    while(!_eof(st) && st[2].len == 0){
@@ -201,7 +221,7 @@ fn _parse_expr_list(list: st, str: end_val=")"): list {
    xs
 }
 
-fn _parse_clause_expr_list(list: st): list {
+fn _parse_clause_expr_list(list st) list {
    mut xs = []
    while(!_eof(st) && st[2].len == 0 && !_clause_start(st)){
       xs = xs.append(_parse_expr(st, 1))
@@ -210,7 +230,7 @@ fn _parse_clause_expr_list(list: st): list {
    xs
 }
 
-fn _parse_primary(list: st): dict {
+fn _parse_primary(list st) dict {
    def t = _peek(st)
    def k = t.get("kind", "")
    def v = to_str(t.get("value", ""))
@@ -253,19 +273,20 @@ fn _parse_primary(list: st): dict {
    _literal(0)
 }
 
-fn _op_prec(str: op): int {
+fn _op_prec(str op) int {
    def u = upper(op)
-   if(u == "OR"){ return 1 }
-   if(u == "AND"){ return 2 }
-   if(u == "=" || u == "!=" || u == "<>" || u == "<" || u == "<=" || u == ">" || u == ">=" ||
-      u == "LIKE" || u == "IN" || u == "IS"){ return 3 }
-   if(u == "||"){ return 4 }
-   if(u == "+" || u == "-"){ return 5 }
-   if(u == "*" || u == "/" || u == "%"){ return 6 }
-   0
+   case u {
+      "OR" -> 1
+      "AND" -> 2
+      "=", "!=", "<>", "<", "<=", ">", ">=", "LIKE", "IN", "IS" -> 3
+      "||" -> 4
+      "+", "-" -> 5
+      "*", "/", "%" -> 6
+      _ -> 0
+   }
 }
 
-fn _parse_prefix(list: st): dict {
+fn _parse_prefix(list st) dict {
    if(_match_val(st, "NOT") || _match_val(st, "+") || _match_val(st, "-")){
       mut op = _val(st)
       _consume(st)
@@ -274,7 +295,7 @@ fn _parse_prefix(list: st): dict {
    _parse_primary(st)
 }
 
-fn _parse_expr(list: st, int: min_prec=1): dict {
+fn _parse_expr(list st, int min_prec=1) dict {
    mut left = _parse_prefix(st)
    while(st[2].len == 0){
       mut op = _val(st)
@@ -296,14 +317,14 @@ fn _parse_expr(list: st, int: min_prec=1): dict {
    left
 }
 
-fn _clause_start(list: st): bool {
+fn _clause_start(list st) bool {
    _match_val(st, "FROM") || _match_val(st, "WHERE") || _match_val(st, "GROUP") ||
    _match_val(st, "HAVING") || _match_val(st, "ORDER") || _match_val(st, "LIMIT") ||
    _match_val(st, "OFFSET") || _match_val(st, "RETURNING") || _match_val(st, ";") ||
    _eof(st)
 }
 
-fn _select_item(list: st): dict {
+fn _select_item(list st) dict {
    def expr = _parse_expr(st, 1)
    mut alias = ""
    if(_accept_val(st, "AS")){ alias = _name(st) }
@@ -311,7 +332,7 @@ fn _select_item(list: st): dict {
    return {"expr": expr, "alias": alias}
 }
 
-fn _parse_select_list(list: st): list {
+fn _parse_select_list(list st) list {
    mut cols = []
    while(!_eof(st) && st[2].len == 0){
       if(_clause_start(st)){ break }
@@ -321,7 +342,7 @@ fn _parse_select_list(list: st): list {
    cols
 }
 
-fn _parse_table_ref(list: st): dict {
+fn _parse_table_ref(list st) dict {
    mut item = {"name": _qualified_name(st), "alias": "", "joins": []}
    if(_accept_val(st, "AS")){ item["alias"] = _name(st) }
    elif(_peek(st).get("kind", "") == "ident"){ item["alias"] = _name(st) }
@@ -358,7 +379,7 @@ fn _parse_table_ref(list: st): dict {
    item
 }
 
-fn _parse_from(list: st): list {
+fn _parse_from(list st) list {
    mut xs = []
    if(!_accept_val(st, "FROM")){ return xs }
    while(!_eof(st) && st[2].len == 0){
@@ -369,7 +390,7 @@ fn _parse_from(list: st): list {
    xs
 }
 
-fn _parse_order(list: st): list {
+fn _parse_order(list st) list {
    mut xs = []
    if(!(_accept_val(st, "ORDER") && _expect_val(st, "BY"))){ return xs }
    while(!_eof(st) && st[2].len == 0){
@@ -382,7 +403,7 @@ fn _parse_order(list: st): list {
    xs
 }
 
-fn _parse_select(list: st): dict {
+fn _parse_select(list st) dict {
    _expect_val(st, "SELECT")
    mut out = {"kind": "select", "distinct": false, "columns": [], "from": [], "where": 0, "group_by": [], "having": 0, "order_by": [], "limit": 0, "offset": 0}
    if(_accept_val(st, "DISTINCT")){ out["distinct"] = true }
@@ -398,7 +419,7 @@ fn _parse_select(list: st): dict {
    out
 }
 
-fn _parse_names_in_parens(list: st): list {
+fn _parse_names_in_parens(list st) list {
    mut xs = []
    if(!_accept_val(st, "(")){ return xs }
    while(!_eof(st) && st[2].len == 0 && !_match_val(st, ")")){
@@ -409,7 +430,7 @@ fn _parse_names_in_parens(list: st): list {
    xs
 }
 
-fn _parse_insert(list: st): dict {
+fn _parse_insert(list st) dict {
    _expect_val(st, "INSERT")
    _expect_val(st, "INTO")
    mut out = {"kind": "insert", "table": _qualified_name(st), "columns": [], "values": [], "query": 0, "returning": []}
@@ -429,7 +450,7 @@ fn _parse_insert(list: st): dict {
    out
 }
 
-fn _parse_update(list: st): dict {
+fn _parse_update(list st) dict {
    _expect_val(st, "UPDATE")
    mut out = {"kind": "update", "table": _qualified_name(st), "set": [], "where": 0, "returning": []}
    _expect_val(st, "SET")
@@ -446,7 +467,7 @@ fn _parse_update(list: st): dict {
    out
 }
 
-fn _parse_delete(list: st): dict {
+fn _parse_delete(list st) dict {
    _expect_val(st, "DELETE")
    _expect_val(st, "FROM")
    mut out = {"kind": "delete", "table": _qualified_name(st), "where": 0, "returning": []}
@@ -455,7 +476,7 @@ fn _parse_delete(list: st): dict {
    out
 }
 
-fn _parse_create_table(list: st): dict {
+fn _parse_create_table(list st) dict {
    _expect_val(st, "CREATE")
    _expect_val(st, "TABLE")
    mut out = {"kind": "create_table", "if_not_exists": false, "name": "", "columns": []}
@@ -479,7 +500,7 @@ fn _parse_create_table(list: st): dict {
    out
 }
 
-fn _parse_drop_table(list: st): dict {
+fn _parse_drop_table(list st) dict {
    _expect_val(st, "DROP")
    _expect_val(st, "TABLE")
    mut out = {"kind": "drop_table", "if_exists": false, "name": ""}
@@ -488,7 +509,7 @@ fn _parse_drop_table(list: st): dict {
    out
 }
 
-fn _parse_statement(list: st): dict {
+fn _parse_statement(list st) dict {
    if(_match_val(st, "SELECT")){ return _parse_select(st) }
    if(_match_val(st, "INSERT")){ return _parse_insert(st) }
    if(_match_val(st, "UPDATE")){ return _parse_update(st) }
@@ -504,7 +525,7 @@ fn _parse_statement(list: st): dict {
    return {"kind": "unknown"}
 }
 
-fn try_parse(any: sql): dict {
+fn try_parse(any sql) dict {
    "Parses one SQL statement and returns `{ok, value, error, pos}`."
    def st = _st(tokenize(sql))
    while(_accept_val(st, ";")){}
@@ -515,13 +536,13 @@ fn try_parse(any: sql): dict {
    _result(true, ast, "", _pos(st))
 }
 
-fn parse(any: sql): any {
+fn parse(any sql) any {
    "Parses one SQL statement and returns its AST, or `0` on error."
    def r = try_parse(sql)
    r.get("ok", false) ? r.get("value", 0) : 0
 }
 
-fn parse_all(any: sql): dict {
+fn parse_all(any sql) dict {
    "Parses semicolon-separated SQL statements and returns `{ok, value, error, pos}`."
    def st = _st(tokenize(sql))
    mut xs = []
@@ -536,7 +557,7 @@ fn parse_all(any: sql): dict {
    _result(true, xs, "", _pos(st))
 }
 
-fn normalize(any: sql): str {
+fn normalize(any sql) str {
    "Returns a whitespace-normalized SQL token stream."
    def toks = tokenize(sql)
    mut parts = []
@@ -549,18 +570,17 @@ fn normalize(any: sql): str {
    join(parts, " ")
 }
 
-fn statement_kind(any: sql): str {
+fn statement_kind(any sql) str {
    "Returns the parsed statement kind, or an empty string on parse error."
    def ast = parse(sql)
    is_dict(ast) ? ast.get("kind", "") : ""
 }
 
-if(comptime{ __main() }){
+#main {
    def toks = tokenize("select a, 'b''c' from t where id = :id")
    assert(toks.len > 6, "sql tokenizer returns tokens")
    assert_eq(toks[0].get("value", ""), "SELECT", "sql keyword normalized")
    assert_eq(toks[3].get("value", ""), "b'c", "sql string unescaped")
-
    def ast = parse("SELECT DISTINCT u.id, count(*) AS n FROM users u LEFT JOIN logs l ON l.user_id = u.id WHERE u.id = :id ORDER BY n DESC LIMIT 10")
    assert(is_dict(ast), "sql parse returns ast")
    assert_eq(ast.get("kind", ""), "select", "select kind")
@@ -571,25 +591,21 @@ if(comptime{ __main() }){
    assert_eq(ast.get("from", [])[0].get("joins", [])[0].get("kind", ""), "LEFT", "join kind")
    assert_eq(ast.get("where", 0).get("node", ""), "binary", "where expression")
    assert_eq(ast.get("order_by", [])[0].get("dir", ""), "DESC", "order direction")
-
    def ins = parse("INSERT INTO audit(user_id, action) VALUES(7, 'login'), (8, 'logout') RETURNING id")
    assert_eq(ins.get("kind", ""), "insert", "insert kind")
    assert_eq(ins.get("columns", []).len, 2, "insert columns")
    assert_eq(ins.get("values", []).len, 2, "insert values")
    assert_eq(ins.get("returning", []).len, 1, "insert returning")
-
    def upd = parse("UPDATE users SET name = 'ny', visits = visits + 1 WHERE id = ?")
    assert_eq(upd.get("kind", ""), "update", "update kind")
    assert_eq(upd.get("set", []).len, 2, "update assignments")
-
    def ddl = parse("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT DEFAULT 'x')")
    assert_eq(ddl.get("kind", ""), "create_table", "create table kind")
    assert_eq(ddl.get("if_not_exists", false), true, "create if not exists")
    assert_eq(ddl.get("columns", []).len, 2, "create columns")
-
    def all = parse_all("BEGIN; DELETE FROM users WHERE id = 1; COMMIT;")
    assert_eq(all.get("ok", false), true, "parse_all ok")
    assert_eq(all.get("value", []).len, 3, "parse_all statements")
    assert_eq(statement_kind("drop table if exists tmp"), "drop_table", "statement kind")
-   print("sql parser self-test ok")
+   print("✓ std.parse.data.sql self-test passed")
 }

@@ -1,24 +1,28 @@
-;; Keywords: cipher caesar
+;; Keywords: cipher caesar math crypto
 ;; Caesar cipher encryption, decryption, and brute force routines.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.caesar(caesar_encrypt, caesar_decrypt, caesar_bruteforce, caesar_encrypt_alnum, caesar_decrypt_alnum, caesar_progressive_encrypt, caesar_progressive_decrypt)
 use std.core
 use std.core.str
 use std.math.crypto.error
 
-fn _caesar_builder_take(list: b): str { def out = builder_to_str(b) builder_free(b) out }
+fn _caesar_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) out }
 
-fn _caesar_apply_shift(int: c, int: shift): str {
+fn _caesar_apply_shift(int c, int shift, bool digits=false) str {
    case c {
       65..90 -> chr(((c - 65 + shift) % 26 + 26) % 26 + 65)
       97..122 -> chr(((c - 97 + shift) % 26 + 26) % 26 + 97)
+      48..57 -> digits ? chr(((c - 48 + shift) % 10 + 10) % 10 + 48) : chr(c)
       _ -> chr(c)
    }
 }
 
-fn caesar_encrypt(str: text, int: shift): str {
+fn caesar_encrypt(str text, int shift) str {
    "Encrypt text using Caesar cipher with the given shift, preserving case and non-alphabetic characters."
    crypto_require(text != nil, "cipher.caesar_encrypt", "text is nil")
    mut n = text.len
@@ -32,40 +36,31 @@ fn caesar_encrypt(str: text, int: shift): str {
    _caesar_builder_take(result)
 }
 
-fn caesar_decrypt(str: text, int: shift): str {
+fn caesar_decrypt(str text, int shift) str {
    "Decrypt text encrypted with Caesar cipher by reversing the shift."
    crypto_require(text != nil, "cipher.caesar_decrypt", "text is nil")
    caesar_encrypt(text, 0 - shift)
 }
 
-fn _caesar_apply_shift_alnum(int: c, int: shift): str {
-   case c {
-      65..90 -> chr(((c - 65 + shift) % 26 + 26) % 26 + 65)
-      97..122 -> chr(((c - 97 + shift) % 26 + 26) % 26 + 97)
-      48..57 -> chr(((c - 48 + shift) % 10 + 10) % 10 + 48)
-      _ -> chr(c)
-   }
-}
-
-fn caesar_encrypt_alnum(str: text, int: shift): str {
+fn caesar_encrypt_alnum(str text, int shift) str {
    "Encrypt text using Caesar shift over letters and decimal digits."
    crypto_require(text != nil, "cipher.caesar_encrypt_alnum", "text is nil")
    mut result = Builder(text.len + 8)
    mut i = 0
    while(i < text.len){
-      result = builder_append(result, _caesar_apply_shift_alnum(load8(text, i), shift))
+      result = builder_append(result, _caesar_apply_shift(load8(text, i), shift, true))
       i += 1
    }
    _caesar_builder_take(result)
 }
 
-fn caesar_decrypt_alnum(str: text, int: shift): str {
+fn caesar_decrypt_alnum(str text, int shift) str {
    "Decrypt a Caesar shift over letters and decimal digits."
    crypto_require(text != nil, "cipher.caesar_decrypt_alnum", "text is nil")
    caesar_encrypt_alnum(text, 0 - shift)
 }
 
-fn caesar_bruteforce(str: text): list {
+fn caesar_bruteforce(str text) list {
    "Try all 26 possible shifts and return a list of [shift, decrypted_text] pairs."
    crypto_require_nonempty(text, "cipher.caesar_bruteforce", "text")
    mut results = list(0)
@@ -78,7 +73,7 @@ fn caesar_bruteforce(str: text): list {
    results
 }
 
-fn _caesar_progressive_apply(str: text, int: start_shift, bool: step_all, int: direction): str {
+fn _caesar_progressive_apply(str text, int start_shift, bool step_all, int direction) str {
    crypto_require(text != nil, "cipher.caesar_progressive", "text is nil")
    mut result = Builder(text.len + 8)
    mut shift = start_shift
@@ -93,7 +88,7 @@ fn _caesar_progressive_apply(str: text, int: start_shift, bool: step_all, int: d
    _caesar_builder_take(result)
 }
 
-fn caesar_progressive_encrypt(str: text, int: start_shift=0, bool: step_all=false): str {
+fn caesar_progressive_encrypt(str text, int start_shift=0, bool step_all=false) str {
    "Encrypt with a progressive Caesar/Trithemius shift.
    start_shift is used for the first byte. The shift increases after each
    alphabetic character ; when step_all is true, punctuation and digits also
@@ -101,7 +96,7 @@ fn caesar_progressive_encrypt(str: text, int: start_shift=0, bool: step_all=fals
    _caesar_progressive_apply(text, start_shift, step_all, 1)
 }
 
-fn caesar_progressive_decrypt(str: text, int: start_shift=0, bool: step_all=false): str {
+fn caesar_progressive_decrypt(str text, int start_shift=0, bool step_all=false) str {
    "Decrypt text encrypted by caesar_progressive_encrypt."
    _caesar_progressive_apply(text, start_shift, step_all, -1)
 }

@@ -1,20 +1,23 @@
-;; Keywords: rsa desmedt-odlyzko
+;; Keywords: rsa desmedt-odlyzko math crypto
 ;; RSA Desmedt-Odlyzko RSA attack routines.
 ;; Reference:
 ;; - "Practical Cryptanalysis of ISO 9796-2 and EMV Signatures" (Section 3)
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.desmedt_odlyzko(desmedt_odlyzko_attack)
 use std.core
 use std.math.nt
 use std.math.matrix (Matrix, matrix_solve_mod)
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 
-fn _modp(any: x, any: p): any {
+fn _modp(any x, any p) any {
    def r = x % p
    if(r < 0){ return r + p }
    r
 }
 
-fn _prime_basis_upto(any: B): list {
+fn _prime_basis_upto(any B) list {
    mut primes = []
    mut p = Z(2)
    while(p <= B){
@@ -24,7 +27,7 @@ fn _prime_basis_upto(any: B): list {
    primes
 }
 
-fn _prime_index_map(list: primes): dict {
+fn _prime_index_map(list primes) dict {
    mut out = dict(primes.len * 2 + 1)
    mut i = 0
    while(i < primes.len){
@@ -34,7 +37,7 @@ fn _prime_index_map(list: primes): dict {
    out
 }
 
-fn _smooth_factor_vector(any: v, list: primes, dict: prime_pos, any: modp_value): any {
+fn _smooth_factor_vector(any v, list primes, dict prime_pos, any modp_value) any {
    def facs = factor(v)
    mut vec = list(primes.len)
    __list_set_len(vec, primes.len)
@@ -56,7 +59,7 @@ fn _smooth_factor_vector(any: v, list: primes, dict: prime_pos, any: modp_value)
    vec
 }
 
-fn _rows_plus(list: rows, list: row): list {
+fn _rows_plus(list rows, list row) list {
    mut out = list(rows.len + 1)
    __list_set_len(out, rows.len + 1)
    mut i = 0
@@ -68,7 +71,7 @@ fn _rows_plus(list: rows, list: row): list {
    out
 }
 
-fn _echelon_accept_row(list: echelon_rows, list: pivots, list: vec, any: p): list {
+fn _echelon_accept_row(list echelon_rows, list pivots, list vec, any p) list {
    def n = vec.len
    mut work = list(n)
    __list_set_len(work, n)
@@ -107,7 +110,7 @@ fn _echelon_accept_row(list: echelon_rows, list: pivots, list: vec, any: p): lis
    [true, _rows_plus(echelon_rows, work), pivots.append(pivot)]
 }
 
-fn _solve_coefficients(list: rows, list: target, any: p): any {
+fn _solve_coefficients(list rows, list target, any p) any {
    def l = target.len
    if(rows.len != l){ return nil }
    mut A = list(l)
@@ -127,7 +130,7 @@ fn _solve_coefficients(list: rows, list: target, any: p): any {
    matrix_solve_mod(Matrix(A), target, p)
 }
 
-fn desmedt_odlyzko_attack(fnptr: hash_oracle, fnptr: sign_oracle, any: N, any: e, any: target_m): any {
+fn desmedt_odlyzko_attack(fnptr hash_oracle, fnptr sign_oracle, any N, any e, any target_m) any {
    "Selective forgery attack using a smooth-hash basis and modular linear algebra.
    Returns a signature integer for target_m, or nil if a basis cannot be built."
    if(!is_prime(e)){ return nil }

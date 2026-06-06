@@ -1,10 +1,12 @@
-;; Keywords: primitives
+;; Keywords: core primitives values types builtins
 ;; Primitive platform constants, low-level numeric types, and built-in runtime bindings.
+;; References:
+;; - std.core
 module std.core.primitives(add, sub, mul, div, mod, band, bor, bxor, bshl, bshr, bnot, and, or, eq, lt, le, gt, ge, argv, errno, is_int, is_ptr, is_none, globals, set_globals, argc, envc, envp, __big_add_abs, __big_sub_abs, __big_mul_abs, runtime_tag_raw, init_str_raw, bytes_new_raw, kwarg_new_raw, range_new_raw, list_as_tuple_raw)
 comptime template _prim_bin(name, intr, doc){
    @jit
    @inline
-   fn name(a, b){
+   fn name(a, b) {
       doc
       return intr(a, b)
    }
@@ -13,7 +15,7 @@ comptime template _prim_bin(name, intr, doc){
 comptime template _prim_bin_bool(name, intr, doc){
    @jit
    @inline
-   fn name(a, b): bool {
+   fn name(a, b) bool {
       doc
       return intr(a, b)
    }
@@ -22,7 +24,7 @@ comptime template _prim_bin_bool(name, intr, doc){
 comptime template _prim_un(name, intr, doc){
    @jit
    @inline
-   fn name(x){
+   fn name(x) {
       doc
       return intr(x)
    }
@@ -31,7 +33,7 @@ comptime template _prim_un(name, intr, doc){
 comptime template _prim_un_bool(name, intr, doc){
    @jit
    @inline
-   fn name(x): bool {
+   fn name(x) bool {
       doc
       return intr(x)
    }
@@ -40,7 +42,7 @@ comptime template _prim_un_bool(name, intr, doc){
 comptime template _prim_zero(name, Ret, intr, doc){
    @jit
    @inline
-   fn name(): Ret {
+   fn name() Ret {
       doc
       return intr()
    }
@@ -49,7 +51,7 @@ comptime template _prim_zero(name, Ret, intr, doc){
 comptime template _prim_bigbin(name, intr, doc){
    @jit
    @inline
-   fn name(a, b){
+   fn name(a, b) {
       doc
       return intr(a, b)
    }
@@ -58,7 +60,7 @@ comptime template _prim_bigbin(name, intr, doc){
 comptime template _prim_untyped_un(name, intr, doc){
    @jit
    @inline
-   fn name(x){
+   fn name(x) {
       doc
       return intr(x)
    }
@@ -67,7 +69,7 @@ comptime template _prim_untyped_un(name, intr, doc){
 comptime template _prim_untyped_bin(name, intr, doc){
    @jit
    @inline
-   fn name(a, b){
+   fn name(a, b) {
       doc
       return intr(a, b)
    }
@@ -76,7 +78,7 @@ comptime template _prim_untyped_bin(name, intr, doc){
 comptime template _prim_untyped_tri(name, intr, doc){
    @jit
    @inline
-   fn name(a, b, c){
+   fn name(a, b, c) {
       doc
       return intr(a, b, c)
    }
@@ -119,28 +121,28 @@ comptime emit _prim_zero(errno, int, __errno, "Returns the last error number fro
 
 @jit
 @inline
-fn argv(int: i): str {
+fn argv(int i) str {
    "Returns the command-line argument at index `i`."
    return __argv(i)
 }
 
 @jit
 @inline
-fn set_globals(ptr: p): ptr {
+fn set_globals(ptr p) ptr {
    "Sets the pointer to the global variable table."
    return __set_globals(p)
 }
 
 @jit
 @inline
-fn envp(int: i): ptr {
+fn envp(int i) ptr {
    "Returns the raw pointer to the environment entry at index `i`."
    return __load64_idx(__envp(), i * 8)
 }
 
 @jit
 @inline
-fn is_ptr(any: x): bool {
+fn is_ptr(any x) bool {
    "Returns **true** if `x` appears to be a valid heap pointer."
    if(!x){ return false }
    if(__is_int(x)){ return false }
@@ -149,7 +151,7 @@ fn is_ptr(any: x): bool {
 
 @jit
 @inline
-fn is_none(any: x): bool {
+fn is_none(any x) bool {
    "Returns **true** if `x` is **none**. Integer 0 is not **none**."
    if(__is_int(x)){ return false }
    return x == nil

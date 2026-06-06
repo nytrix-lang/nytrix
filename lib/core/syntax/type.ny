@@ -1,10 +1,13 @@
-;; Keywords: syntax type
+;; Keywords: syntax type core
 ;; Runtime type utilities for Nytrix.
 ;;
 ;; The compiler still needs a small amount of primitive type knowledge for code
 ;; generation, but public runtime grouping is intentionally data-driven here:
 ;; aliases such as `num -> number` and groups such as `number = [int, float,
 ;; bigint]` are normal Ny values and can be extended by user code.
+;; References:
+;; - std.core.syntax
+;; - std.core
 module std.core.syntax.type(
    is_int, is_float, is_number, is_bool, is_nil,
    is_list, is_dict, is_str, is_tuple, is_set,
@@ -43,7 +46,7 @@ mut TYPE_ALIASES = nil
 mut TYPE_GROUPS = nil
 mut TYPE_GROUP_ORDER = nil
 
-fn _name_in_list(any: xs, str: name): bool {
+fn _name_in_list(any xs, str name) bool {
    if(!(is_list(xs) || is_tuple(xs))){ return false }
    mut i = 0
    while(i < xs.len){
@@ -53,7 +56,7 @@ fn _name_in_list(any: xs, str: name): bool {
    false
 }
 
-fn _clone_spec_list(any: members): list {
+fn _clone_spec_list(any members) list {
    mut out = list(0)
    if(members == nil){ return out }
    if(is_list(members) || is_tuple(members)){
@@ -67,24 +70,24 @@ fn _clone_spec_list(any: members): list {
    out.append(members)
 }
 
-fn _type_name_set(int: tag, str: name): str {
+fn _type_name_set(int tag, str name) str {
    TYPE_NAMES = TYPE_NAMES.set(tag, name)
    name
 }
 
-fn _type_alias_set(str: name, str: target): str {
+fn _type_alias_set(str name, str target) str {
    TYPE_ALIASES = TYPE_ALIASES.set(name, target)
    target
 }
 
-fn _type_group_set(str: name, any: members): list {
+fn _type_group_set(str name, any members) list {
    def xs = _clone_spec_list(members)
    TYPE_GROUPS = TYPE_GROUPS.set(name, xs)
    if(!_name_in_list(TYPE_GROUP_ORDER, name)){ TYPE_GROUP_ORDER = TYPE_GROUP_ORDER.append(name) }
    xs
 }
 
-fn _types_init(): int {
+fn _types_init() int {
    if(TYPE_ALIASES != nil){ return 0 }
    TYPE_NAMES = dict(32)
    TYPE_ALIASES = dict(64)
@@ -142,7 +145,7 @@ fn _types_init(): int {
    0
 }
 
-fn normalize_type_name(str: name): str {
+fn normalize_type_name(str name) str {
    "Returns the canonical runtime type/group name after resolving aliases."
    _types_init()
    mut cur = name
@@ -156,19 +159,19 @@ fn normalize_type_name(str: name): str {
    cur
 }
 
-fn define_type_alias(str: name, str: target): str {
+fn define_type_alias(str name, str target) str {
    "Defines `name` as an alias for `target` and returns the canonical target."
    _types_init()
    def canonical = normalize_type_name(target)
    _type_alias_set(name, canonical)
 }
 
-fn type_alias(str: name, str: target): str {
+fn type_alias(str name, str target) str {
    "Alias for define_type_alias."
    define_type_alias(name, target)
 }
 
-fn _canonical_spec_list(any: members): list {
+fn _canonical_spec_list(any members) list {
    def xs = _clone_spec_list(members)
    mut out = list(xs.len)
    mut i = 0
@@ -184,13 +187,13 @@ fn _canonical_spec_list(any: members): list {
    out
 }
 
-fn define_type_group(str: name, any: members): list {
+fn define_type_group(str name, any members) list {
    "Defines a runtime type group. Members can be type names, tags, aliases, or other groups."
    _types_init()
    _type_group_set(normalize_type_name(name), _canonical_spec_list(members))
 }
 
-fn extend_type_group(str: name, any: members): list {
+fn extend_type_group(str name, any members) list {
    "Adds members to a runtime type group without duplicating existing entries."
    _types_init()
    def key = normalize_type_name(name)
@@ -211,115 +214,115 @@ fn extend_type_group(str: name, any: members): list {
    _type_group_set(key, out)
 }
 
-fn type_group_members(str: name): list {
+fn type_group_members(str name) list {
    "Returns a copy of the members for type group `name`, or an empty list."
    _types_init()
    def members = TYPE_GROUPS.get(normalize_type_name(name), nil)
    _clone_spec_list(members)
 }
 
-fn type_group(str: name): list {
+fn type_group(str name) list {
    "Alias for type_group_members."
    type_group_members(name)
 }
 
-fn type_group_names(): list {
+fn type_group_names() list {
    "Returns known type group names in registration order."
    _types_init()
    _clone_spec_list(TYPE_GROUP_ORDER)
 }
 
-fn type_groups(): dict {
+fn type_groups() dict {
    "Returns a shallow copy of the type-group registry."
    _types_init()
    dict_clone(TYPE_GROUPS)
 }
 
-fn is_type_group(str: name): bool {
+fn is_type_group(str name) bool {
    "Returns true when `name` resolves to a registered type group."
    _types_init()
    TYPE_GROUPS.get(normalize_type_name(name), nil) != nil
 }
 
-fn is_int(any: x): bool {
+fn is_int(any x) bool {
    "Check if x is an integer(tagged pointer with LSB=1)."
    (__tagof(x) & 1) != 0
 }
 
-fn is_float(any: x): bool {
+fn is_float(any x) bool {
    "Check if x is a boxed f64 float."
    __is_float_obj(x)
 }
 
-fn is_bool(any: x): bool {
+fn is_bool(any x) bool {
    "Check if x is a boolean."
    x == true || x == false
 }
 
-fn is_nil(any: x): bool {
+fn is_nil(any x) bool {
    "Check if x is nil. Integer 0 is NOT nil."
    if(__is_int(x)){ return false }
    x == nil
 }
 
-fn is_list(any: x): bool {
+fn is_list(any x) bool {
    "Check if x is a list."
    __tagof(x) == TAG_LIST
 }
 
-fn is_dict(any: x): bool {
+fn is_dict(any x) bool {
    "Check if x is a dict."
    __tagof(x) == TAG_DICT
 }
 
-fn is_str(any: x): bool {
+fn is_str(any x) bool {
    "Check if x is a string."
    def tag = __tagof(x)
    tag == TAG_STR1 || tag == TAG_STR2
 }
 
-fn is_tuple(any: x): bool {
+fn is_tuple(any x) bool {
    "Check if x is a tuple."
    __tagof(x) == TAG_TUPLE
 }
 
-fn is_set(any: x): bool {
+fn is_set(any x) bool {
    "Check if x is a set."
    __tagof(x) == TAG_SET
 }
 
-fn is_bigint(any: x): bool {
+fn is_bigint(any x) bool {
    "Check if x is a BigInt."
    def f = globals().get("std.math.nt.is_bigint")
    if(f){ return f(x) == true }
    __tagof(x) == TAG_BIGINT
 }
 
-fn is_poly(any: x): bool {
+fn is_poly(any x) bool {
    "Check if x is a Polynomial(tag 302)."
    def f = globals().get("std.math.crypto.poly.is_poly")
    if(f){ return f(x) == true }
    __tagof(x) == TAG_POLY
 }
 
-fn is_matrix(any: x): bool {
+fn is_matrix(any x) bool {
    "Check if x is a Matrix(tag 303)."
    def f = globals().get("std.math.matrix.is_matrix")
    if(f){ return f(x) == true }
    __tagof(x) == TAG_MATRIX
 }
 
-fn is_number(any: x): bool {
+fn is_number(any x) bool {
    "Check if x is a member of the language-defined `number` group."
    is_type(x, "number")
 }
 
-fn type_tag(any: x): int {
+fn type_tag(any x) int {
    "Get the runtime tag of x."
    __tagof(x)
 }
 
-fn type_name(any: x): str {
+fn type_name(any x) str {
    "Get the canonical runtime type name for x."
    _types_init()
    if(is_nil(x)){ return "nil" }
@@ -333,7 +336,7 @@ fn type_name(any: x): str {
    f"unknown({tag})"
 }
 
-fn _is_leaf_type(any: x, str: name): bool {
+fn _is_leaf_type(any x, str name) bool {
    case name {
       "any" -> true
       "int" -> is_int(x)
@@ -357,38 +360,33 @@ fn _is_leaf_type(any: x, str: name): bool {
    }
 }
 
-fn _is_type_spec_at(any: x, any: spec, int: depth): bool {
+fn _is_type_spec_at(any x, any spec, int depth) bool {
    if(depth <= 0){ return false }
    if(is_str(spec)){ return _type_name_accepts_at(x, to_str(spec), depth) }
    if(is_int(spec)){ return type_tag(x) == spec }
-   if(is_list(spec) || is_tuple(spec)){
-      mut i = 0
-      while(i < spec.len){
-         if(_is_type_spec_at(x, spec.get(i, nil), depth - 1)){ return true }
-         i += 1
-      }
-      return false
+   if(is_list(spec) || is_tuple(spec)){ return _any_type_spec_at(x, spec, depth - 1) }
+   false
+}
+
+fn _any_type_spec_at(any x, any specs, int depth) bool {
+   mut i = 0
+   while(i < specs.len){
+      if(_is_type_spec_at(x, specs.get(i, nil), depth)){ return true }
+      i += 1
    }
    false
 }
 
-fn _type_name_accepts_at(any: x, str: name, int: depth): bool {
+fn _type_name_accepts_at(any x, str name, int depth) bool {
    if(depth <= 0){ return false }
    _types_init()
    def n = normalize_type_name(name)
    def group = TYPE_GROUPS.get(n, nil)
-   if(group != nil){
-      mut i = 0
-      while(i < group.len){
-         if(_is_type_spec_at(x, group.get(i, nil), depth - 1)){ return true }
-         i += 1
-      }
-      return false
-   }
+   if(group != nil){ return _any_type_spec_at(x, group, depth - 1) }
    _is_leaf_type(x, n)
 }
 
-fn is_type(any: x, any: spec): bool {
+fn is_type(any x, any spec) bool {
    "Returns true when x matches a type spec.
    Specs can be canonical type names, aliases, group names, numeric tags, or
    lists/tuples of any of those. Built-in groups such as `number` and `seq`
@@ -396,12 +394,12 @@ fn is_type(any: x, any: spec): bool {
    _is_type_spec_at(x, spec, 16)
 }
 
-fn is_one_of(any: x, any: spec): bool {
+fn is_one_of(any x, any spec) bool {
    "Alias for is_type with list/tuple union specs."
    is_type(x, spec)
 }
 
-fn _type_spec_to_str(any: spec): str {
+fn _type_spec_to_str(any spec) str {
    if(is_list(spec) || is_tuple(spec)){
       mut parts = list(0)
       mut i = 0
@@ -414,24 +412,24 @@ fn _type_spec_to_str(any: spec): str {
    to_str(spec)
 }
 
-fn require_type(any: x, any: spec, str: msg="type check failed"): any {
+fn require_type(any x, any spec, str msg="type check failed") any {
    "Return x if it matches spec, otherwise panic with msg."
    if(!is_type(x, spec)){ panic(msg) }
    x
 }
 
-fn assert_type(any: x, any: spec, str: msg="type check failed"): any {
+fn assert_type(any x, any spec, str msg="type check failed") any {
    "Assert that x matches a type spec, panic with expected and actual type names."
    if(!is_type(x, spec)){ panic(f"{msg}: expected {_type_spec_to_str(spec)}, got {type_name(x)}") }
    x
 }
 
-fn require_one_of(any: x, any: spec, str: msg="type check failed"): any {
+fn require_one_of(any x, any spec, str msg="type check failed") any {
    "Return x if it matches spec, otherwise panic with msg."
    require_type(x, spec, msg)
 }
 
-fn assert_one_of(any: x, any: spec, str: msg="type check failed"): any {
+fn assert_one_of(any x, any spec, str msg="type check failed") any {
    "Assert that x matches a type spec, panic with expected and actual type names."
    assert_type(x, spec, msg)
 }
@@ -439,7 +437,7 @@ fn assert_one_of(any: x, any: spec, str: msg="type check failed"): any {
 mut CUSTOM_TYPES = dict(0)
 mut NEXT_CUSTOM_TAG = 200
 
-fn register_type(str: name): int {
+fn register_type(str name) int {
    "Register a new custom type name, returns assigned tag."
    def existing = CUSTOM_TYPES.get(name, nil)
    if(existing != nil){ return existing }
@@ -450,9 +448,36 @@ fn register_type(str: name): int {
    tag
 }
 
-fn is_registered_type(any: x, str: name): bool {
+fn is_registered_type(any x, str name) bool {
    "Check if x is of registered custom type name."
    def tag = CUSTOM_TYPES.get(name, nil)
    if(tag == nil){ return false }
    __tagof(x) == tag
+}
+
+#main {
+   assert(is_int(42), "syntax type is_int")
+   assert(is_float(3.14), "syntax type is_float")
+   assert(is_bool(true), "syntax type is_bool")
+   assert(is_list([1, 2, 3]), "syntax type is_list")
+   assert(is_dict({"a": 1}), "syntax type is_dict")
+   assert(is_str("hello"), "syntax type is_str")
+   assert(type_name(42) == "int", "syntax type_name int")
+   assert(normalize_type_name("num") == "number", "syntax type alias")
+   assert(is_type(42, "number"), "syntax number accepts int")
+   assert(is_type(3.14, "number"), "syntax number accepts float")
+   assert(!is_type("42", "number"), "syntax number rejects str")
+   assert(is_type("abc", "seq"), "syntax seq accepts str")
+   assert(type_group_members("number").len >= 3, "syntax group members")
+   define_type_alias("text", "str")
+   define_type_group("textish", ["text"])
+   assert(is_type("abc", "textish"), "syntax custom group alias")
+   extend_type_group("textish", ["list"])
+   assert(is_type(["a"], "textish"), "syntax custom group extension")
+   assert(require_type(42, "number", "must be number") == 42, "syntax require_type")
+   assert(assert_type([1, 2, 3], "seq", "must be seq").len == 3, "syntax assert_type")
+   def tag = register_type("SelfTestType")
+   assert(tag >= 200, "syntax custom type tag")
+   assert(register_type("SelfTestType") == tag, "syntax custom type stable")
+   print("✓ std.core.syntax.type self-test passed")
 }

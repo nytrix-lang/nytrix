@@ -1,8 +1,11 @@
-;; Keywords: lattice coppersmith
+;; Keywords: lattice coppersmith math crypto number-theory
 ;; Lattice routines for Coppersmith small-root lattice construction.
 ;; Reference:
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/lowRSAexp.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.coppersmith(howgrave_graham, coppersmith_univariate, coppersmith_univariate_report, coppersmith_univariate_plan, poly_pow, coppersmith_bivariate, coppersmith_coron_integer_bivariate, coppersmith_herrmann_may_bivariate, coppersmith_multivariate_heuristic)
 use std.core
 use std.math.scalar (ceil, floor, float)
@@ -12,7 +15,7 @@ use std.math.crypto.lattice.lll
 use std.math.crypto.lattice.small_roots
 use std.math.crypto.lattice.mvpoly
 
-fn _poly_copy_local(list: p): list {
+fn _poly_copy_local(list p) list {
    mut out = []
    mut i = 0
    while(i < p.len){
@@ -22,7 +25,7 @@ fn _poly_copy_local(list: p): list {
    out
 }
 
-fn poly_pow(list: p, int: e): list {
+fn poly_pow(list p, int e) list {
    "Compute polynomial p raised to integer power e via binary exponentiation.
    p is a list of coefficients in ascending order ; e is non-negative."
    def early = e == 0 ? [1] : ((e == 1) ? _poly_copy_local(p) : nil)
@@ -38,7 +41,7 @@ fn poly_pow(list: p, int: e): list {
    res
 }
 
-fn poly_shift(list: p, int: s): list {
+fn poly_shift(list p, int s) list {
    "Multiply polynomial p by x^s.
    Shifts coefficients by s positions with leading zero padding."
    mut result = list(0)
@@ -56,23 +59,23 @@ fn poly_shift(list: p, int: s): list {
    result
 }
 
-fn howgrave_graham(any: f, any: N, any: m, any: t, any: X, str: reduction_method="ny"): list {
+fn howgrave_graham(any f, any N, any m, any t, any X, str reduction_method="ny") list {
    "Howgrave-Graham small-roots algorithm for f(x) = 0 mod N^m.
    f is monic ; N is modulus; m/t are shift controls; X is root bound."
    modular_univariate(f, N, m, t, X, nil, reduction_method)
 }
 
-fn _ceil_int_pos(any: x): int {
+fn _ceil_int_pos(any x) int {
    def v = int(ceil(float(x)))
    v < 1 ? 1 : v
 }
 
-fn _floor_int_nonnegative(any: x): int {
+fn _floor_int_nonnegative(any x) int {
    def v = int(floor(float(x)))
    v < 0 ? 0 : v
 }
 
-fn _coppersmith_auto_X(any: N, int: degree, any: beta, any: epsilon): bigint {
+fn _coppersmith_auto_X(any N, int degree, any beta, any epsilon) bigint {
    def exponent = float(beta) * float(beta) / float(max(1, degree)) - float(epsilon)
    if(exponent <= 0.0){ return Z(1) }
    def bits = float(bit_length(N)) * exponent - 1.0
@@ -80,14 +83,14 @@ fn _coppersmith_auto_X(any: N, int: degree, any: beta, any: epsilon): bigint {
    bigint_lshift(Z(1), shift)
 }
 
-fn _coppersmith_min_factor_bound(any: N, any: beta): bigint {
+fn _coppersmith_min_factor_bound(any N, any beta) bigint {
    if(float(beta) >= 0.999999){ return Z(N) }
    def bits = int(floor(float(bit_length(N)) * float(beta))) - 2
    if(bits <= 0){ return Z(1) }
    bigint_lshift(Z(1), bits)
 }
 
-fn coppersmith_univariate_plan(any: f, any: N, any: X=nil, any: beta=1.0, any: m=nil, any: t=nil, any: epsilon=nil, str: reduction_method="ny"): dict {
+fn coppersmith_univariate_plan(any f, any N, any X=nil, any beta=1.0, any m=nil, any t=nil, any epsilon=nil, str reduction_method="ny") dict {
    "Return the derived parameter plan for univariate Coppersmith.
    This mirrors Sage-style inspectability: callers can see degree, beta,
    epsilon, m/t, bound X, reduction method, and the validation factor bound before reduction."
@@ -129,7 +132,7 @@ fn coppersmith_univariate_plan(any: f, any: N, any: X=nil, any: beta=1.0, any: m
    out
 }
 
-fn coppersmith_univariate(any: f, any: N, any: X=nil, any: beta=1.0, any: m=nil, any: t=nil, any: epsilon=nil, str: reduction_method="ny"): list {
+fn coppersmith_univariate(any f, any N, any X=nil, any beta=1.0, any m=nil, any t=nil, any epsilon=nil, str reduction_method="ny") list {
    "Automated univariate Coppersmith small-roots solver.
    Uses May-style defaults:
    - epsilon defaults to beta/8
@@ -146,7 +149,7 @@ fn coppersmith_univariate(any: f, any: N, any: X=nil, any: beta=1.0, any: m=nil,
    modular_univariate(f, N, plan.get("m"), plan.get("t"), plan.get("X"), plan.get("min_factor"), reduction_method)
 }
 
-fn coppersmith_univariate_report(any: f, any: N, any: X=nil, any: beta=1.0, any: m=nil, any: t=nil, any: epsilon=nil, str: reduction_method="ny"): dict {
+fn coppersmith_univariate_report(any f, any N, any X=nil, any beta=1.0, any m=nil, any t=nil, any epsilon=nil, str reduction_method="ny") dict {
    "Report-first automated univariate Coppersmith small-roots solver.
    Compact callers should use coppersmith_univariate ; audit/debug callers can
    inspect the plan, lattice dimensions, reduction profile, roots tried, and
@@ -177,7 +180,7 @@ fn coppersmith_univariate_report(any: f, any: N, any: X=nil, any: beta=1.0, any:
    out
 }
 
-fn coppersmith_bivariate(any: f, any: N, any: X, any: Y, any: beta=0.5, any: m=nil): list {
+fn coppersmith_bivariate(any f, any N, any X, any Y, any beta=0.5, any m=nil) list {
    "Bivariate Coppersmith method(Coron's approach) for polynomials f(x, y) = 0 mod N.
    Finds roots(x0, y0) such that |x0| < X and |y0| < Y."
    if(!mv_is_poly(f)){ return [] }
@@ -188,19 +191,19 @@ fn coppersmith_bivariate(any: f, any: N, any: X, any: Y, any: beta=0.5, any: m=n
    herrmann_may_modular_bivariate(f, N, mm, tt, X, Y)
 }
 
-fn coppersmith_herrmann_may_bivariate(any: f, any: N, any: X, any: Y, any: m=2, any: t=1): list {
+fn coppersmith_herrmann_may_bivariate(any f, any N, any X, any Y, any m=2, any t=1) list {
    "Explicit Herrmann-May modular bivariate wrapper."
    if(!mv_is_poly(f)){ return [] }
    herrmann_may_modular_bivariate(f, N, int(m), int(t), X, Y)
 }
 
-fn coppersmith_coron_integer_bivariate(any: f, any: X, any: Y, int: k=2): list {
+fn coppersmith_coron_integer_bivariate(any f, any X, any Y, int k=2) list {
    "Coron direct integer bivariate wrapper."
    if(!mv_is_poly(f)){ return [] }
    coron_integer_bivariate(f, int(k), X, Y)
 }
 
-fn coppersmith_multivariate_heuristic(any: f, any: N, any: bounds, any: beta=1.0, any: m=2, any: t=1, str: strategy="jochemsz_may"): list {
+fn coppersmith_multivariate_heuristic(any f, any N, any bounds, any beta=1.0, any m=2, any t=1, str strategy="jochemsz_may") list {
    "Multivariate modular small-roots wrapper over Ny strategies.
    strategy:
    - `jochemsz_may` (default)
