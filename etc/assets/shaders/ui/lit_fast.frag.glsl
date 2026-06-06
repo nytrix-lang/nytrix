@@ -73,7 +73,7 @@ float decodeNormalScale7(uint packedIndex){
 }
 vec3 applyNormalMap(vec3 N, vec4 authoredTangent, uint packedIndex, uint xf0, uint xf1){
   uint normalIndex = packedIndex & 0xFFFFu ;
-  if(normalIndex == 0u || normalIndex >= 1024u){ return N ; }
+  if(normalIndex >= 1024u){ return N ; }
   vec2 uv = mapUv(packedIndex, xf0, xf1) ;
   vec3 T = authoredTangent.xyz ;
   float handedness = authoredTangent.w ;
@@ -134,7 +134,7 @@ void main(){
 
   vec4 tex = vec4(1.0) ;
   vec2 buv = baseUv() ;
-  if(!vertexColorPrimary && baseIndex < 1024u){ tex = textureLod(texSamplers[nonuniformEXT(baseIndex)], buv, 0.0) ; }
+  if(!vertexColorPrimary && baseIndex < 1024u){ tex = texture(texSamplers[nonuniformEXT(baseIndex)], buv) ; }
 
   uint alphaMode = pc.alphaPacked & 3u ;
   float alphaCutoff = float((pc.alphaPacked >> 8u) & 255u) / 255.0 ;
@@ -327,10 +327,11 @@ void main(){
   if(anySceneLight < 0.5 && baseIndex < 1024u && metallic <= 0.05 && transmission <= 0.001 && diffuseTransmission <= 0.001 && iridescence <= 0.001){
     float albedoLum = dot(baseColor, vec3(0.299, 0.587, 0.114)) ;
     float albedoChroma = max3(abs(baseColor - vec3(albedoLum))) ;
-    float albedoFloor = clamp(0.16 + roughness * 0.34 + albedoChroma * 0.16, 0.18, 0.52) ;
+    float albedoFloor = clamp(0.18 + roughness * 0.38 + albedoChroma * 0.22, 0.22, 0.62) ;
     float litLum = dot(max(Lo, vec3(0.0)), vec3(0.299, 0.587, 0.114)) ;
-    vec3 albedoTarget = baseColor * max(albedoFloor, litLum * 1.25) ;
-    Lo = mix(Lo, max(albedoTarget, baseColor * albedoFloor), clamp(0.50 + albedoChroma * 0.45, 0.50, 0.82)) ;
+    vec3 albedoTarget = baseColor * max(albedoFloor, litLum * 1.10) ;
+    vec3 albedoLit = max(albedoTarget, baseColor * max(albedoFloor, 0.42)) ;
+    Lo = mix(Lo, albedoLit, clamp(0.54 + albedoChroma * 0.36, 0.54, 0.84)) ;
   }
 
   vec3 emissive = unpackEmissive(pc.emissivePacked) ;
