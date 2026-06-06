@@ -1,10 +1,14 @@
-;; Keywords: platform window backend linux x11 common shared
+;; Keywords: platform window backend linux x11 common shared os ui input
 ;; Portable X11 utility operations shared by the native Linux window backend.
+;; References:
+;; - std.os.ui.window.platform.linux.x11
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.linux.x11.common(encodeUTF8, encodeUTF8String, decodeUTF8, convertLatin1toUTF8, parseUriList, dup_string)
 use std.core
 use std.core.str as str
 
-fn _decode_utf8_offset(int: count): int {
+fn _decode_utf8_offset(int count) int {
    match count {
       1 -> 0x00000000
       2 -> 0x00003080
@@ -16,14 +20,16 @@ fn _decode_utf8_offset(int: count): int {
    }
 }
 
-fn _hex_value(int: c): int {
-   if(c >= 48 && c <= 57){ return c - 48 }
-   if(c >= 65 && c <= 70){ return c - 55 }
-   if(c >= 97 && c <= 102){ return c - 87 }
-   -1
+fn _hex_value(int c) int {
+   case c {
+      48..57 -> c - 48
+      65..70 -> c - 55
+      97..102 -> c - 87
+      _ -> -1
+   }
 }
 
-fn _percent_decode_uri(any: line): any {
+fn _percent_decode_uri(any line) any {
    if(!is_str(line)){ return "" }
    def n = line.len
    def out = malloc(n + 1)
@@ -50,7 +56,7 @@ fn _percent_decode_uri(any: line): any {
    out
 }
 
-fn encodeUTF8(any: s, int: codepoint): int {
+fn encodeUTF8(any s, int codepoint) int {
    "Encode one Unicode codepoint into a caller-provided UTF-8 byte buffer."
    mut count = 0
    if(codepoint < 0x80){
@@ -81,7 +87,7 @@ fn encodeUTF8(any: s, int: codepoint): int {
    count
 }
 
-fn encodeUTF8String(int: codepoint): any {
+fn encodeUTF8String(int codepoint) any {
    "Returns a Ny string containing the UTF-8 sequence for `codepoint`."
    def out = malloc(5)
    if(!out){ return 0 }
@@ -91,7 +97,7 @@ fn encodeUTF8String(int: codepoint): any {
    out
 }
 
-fn decodeUTF8(any: s, int: start=0): list {
+fn decodeUTF8(any s, int start=0) list {
    "Decode one UTF-8 sequence and return `[codepoint, next_index]`."
    if(!is_str(s)){ return [0, start] }
    def n = s.len
@@ -109,7 +115,7 @@ fn decodeUTF8(any: s, int: start=0): list {
    [codepoint - _decode_utf8_offset(count), i]
 }
 
-fn convertLatin1toUTF8(any: source): any {
+fn convertLatin1toUTF8(any source) any {
    "Convert a Latin-1 byte string to UTF-8."
    if(!is_str(source)){ return "" }
    def n = source.len
@@ -132,7 +138,7 @@ fn convertLatin1toUTF8(any: source): any {
    out
 }
 
-fn parseUriList(any: text): list {
+fn parseUriList(any text) list {
    "Parse a text/uri-list payload and return decoded filesystem paths."
    if(!is_str(text)){ return list(0) }
    mut paths = list(8)
@@ -157,7 +163,7 @@ fn parseUriList(any: text): list {
    paths
 }
 
-fn dup_string(any: source): any {
+fn dup_string(any source) any {
    "Copy a Ny string into owned NUL-terminated string storage."
    if(!is_str(source)){ return "" }
    def n = source.len
@@ -171,4 +177,29 @@ fn dup_string(any: source): any {
    }
    store8(out, 0, n)
    out
+}
+
+fn _x11_common_test_latin1(list bytes) any {
+   def n = bytes.len
+   def out = malloc(n + 1)
+   if(!out){ return "" }
+   init_str(out, n)
+   mut i = 0
+   while(i < n){
+      store8(out, bytes.get(i), i)
+      i += 1
+   }
+   store8(out, 0, n)
+   out
+}
+
+#main {
+   def euro = encodeUTF8String(0x20ac)
+   def decoded = decodeUTF8(euro, 0)
+   assert(euro == str.chr(0x20ac) && decoded.get(0) == 0x20ac && decoded.get(1) == euro.len, "x11 common utf8")
+   def latin1 = _x11_common_test_latin1([65, 233])
+   assert(convertLatin1toUTF8(latin1) == ("A" + str.chr(233)), "convertLatin1toUTF8")
+   def parsed = parseUriList("file:///var/demo/a%20b\r\n#ignored\nfile://host/opt/demo/test")
+   assert(parsed.len == 2 && parsed.get(0) == "/var/demo/a b" && parsed.get(1) == "/opt/demo/test" && dup_string("copy") == "copy", "x11 common uri/string")
+   print("✓ std.os.ui.window.platform.linux.x11.common self-test passed")
 }

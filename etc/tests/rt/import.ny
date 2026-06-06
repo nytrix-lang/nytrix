@@ -1,6 +1,7 @@
 use std.core
 use std
 use std math as loose_math
+use std.core.dict
 use std.core.iter
 use std.core.str as str
 use std.math.bin as bin
@@ -15,7 +16,7 @@ use "./use/local.ny" (helper_add as add2)
 use "./use/declared.ny" as declared_provider
 use "./use/declared.ny" (make_report as declared_make_report)
 use "./use/collision/provider.ny" as collision_a
-use "./use/guard.ny" (main_guard_runtime_seen, main_guard_comptime_seen)
+use "./use/guard.ny" (main_guard_runtime_seen, main_guard_comptime_seen, hash_main_guard_seen)
 use "./use/implicitpkg.ny" as implicitpkg
 use "./use/implicitpkg.ny" (child_value as implicit_child_value)
 use "./use/implicitpkg.ny"
@@ -42,7 +43,7 @@ use ReExportMath (floor as re_floor)
 use ReExportChain as chain_math
 use ReExportChain (ceil as chain_ceil, PI as CHAIN_PI)
 
-fn flag_from(vals): str { "shadow:" + to_str(vals.len) }
+fn flag_from(vals) str { "shadow:" + to_str(vals.len) }
 assert(helper_val() == 123, "relative import value")
 assert(helper_add(19, 23) == 42, "relative import function")
 assert(add2(20, 22) == 42, "relative import alias")
@@ -56,6 +57,7 @@ assert(declared_dynamic.get("tag", "") == "dynamic", "local path alias supports 
 assert(collision_a.collision_marker() == "a", "relative path use resolves from importing file, not suffix")
 assert(!main_guard_runtime_seen(), "runtime __main() is false in imported files")
 assert(!main_guard_comptime_seen(), "comptime __main() is false in imported files")
+assert(!hash_main_guard_seen(), "#main is false in imported files")
 assert(implicitpkg.parent_value() == 7, "explicit parent module function resolves")
 assert(implicitpkg.parent_child_sum() == 84, "parent module uses exported child without a child use line")
 assert(implicitpkg.child.child_value() == 42, "exported child module loads without repeated use")
@@ -65,8 +67,8 @@ assert(implicitpkg.child_value() == 42, "parent module exposes exported child pu
 assert(implicit_child_value() == 42, "named import resolves through exported child public surface")
 assert(child.child_label() == "implicit-child", "import-all exposes exported child module alias")
 assert(child_label() == "implicit-child", "import-all exposes exported child functions")
-assert(all([1, 2, 3], fn(v){ v > 0 }), "bare use imports exported names")
-assert(iter.any([1, 2, 3], fn(v){ v > 2 }), "bare use keeps module alias")
+assert(all([1, 2, 3], fn(v) { v > 0 }), "bare use imports exported names")
+assert(iter.any([1, 2, 3], fn(v) { v > 2 }), "bare use keeps module alias")
 assert(math.abs(-9) == 9, "std root use exposes math namespace")
 assert(std.math.abs(-11) == 11, "std root use exposes full std namespace")
 assert(str.split("alpha,beta", ",").get(0) == "alpha", "std root use exposes str namespace")

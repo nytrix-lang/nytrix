@@ -1,7 +1,7 @@
 ;; expect: variable declaration: expected str, got int
 use std.core
 
-fn pick(rows){
+fn pick(rows) {
    rows[1][0]
 }
 

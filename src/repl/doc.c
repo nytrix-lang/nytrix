@@ -177,7 +177,7 @@ static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *pr
     const param_t *p = &s->as.fn.params.data[j];
     const char *vararg = (s->as.fn.is_variadic && j + 1 == s->as.fn.params.len) ? "..." : "";
     if (p->type && *p->type) {
-      repl_doc_buf_appendf(&def, "%s%s: %s%s", vararg, p->type, p->name,
+      repl_doc_buf_appendf(&def, "%s%s %s%s", vararg, p->type, p->name,
                            p->def ? "=..." : "");
     } else {
       repl_doc_buf_appendf(&def, "%s%s%s", vararg, p->name, p->def ? "=..." : "");
@@ -187,7 +187,7 @@ static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *pr
   }
   repl_doc_buf_appendf(&def, ")");
   if (s->as.fn.return_type && *s->as.fn.return_type)
-    repl_doc_buf_appendf(&def, ": %s", s->as.fn.return_type);
+    repl_doc_buf_appendf(&def, " %s", s->as.fn.return_type);
   char *def_buf = repl_doc_buf_take(&def);
   char *src = NULL;
   if (s->as.fn.src_start && s->as.fn.src_end > s->as.fn.src_start) {

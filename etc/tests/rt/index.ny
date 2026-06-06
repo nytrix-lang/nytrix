@@ -5,7 +5,7 @@ use std.math.crypto.encoding.bytes
 
 mut caught = ""
 
-fn capture(thunk){
+fn capture(thunk) {
    caught = ""
    try {
       thunk()
@@ -15,7 +15,7 @@ fn capture(thunk){
    caught
 }
 
-fn did_catch(thunk){
+fn did_catch(thunk) {
    try {
       thunk()
       false
@@ -89,14 +89,14 @@ assert(nested_sum == 21, "nested indexed loop read")
 def d = {"a": 1}
 assert(d["a"] == 1, "dict index read")
 assert(d["missing"] == 0, "dict index miss default")
-assert(str_contains(capture(fn(){ xs[9] }), "index_read out of range"), "list out-of-range should panic")
-assert(str_contains(capture(fn(){ s[9] }), "index_read out of range"), "string out-of-range should panic")
-assert(str_contains(capture(fn(){ bs[9] }), "index_read out of range"), "bytes out-of-range should panic")
-assert(str_contains(capture(fn(){ rg[9] }), "index_read out of range"), "range out-of-range should panic")
-assert(str_contains(capture(fn(){ xs["x"] }), "index_read expects an integer index"), "list non-int index should panic")
-assert(str_contains(capture(fn(){ tp["x"] }), "index_read expects an integer index"), "tuple non-int index should panic")
-assert(str_contains(capture(fn(){ s[false] }), "index_read expects an integer index"), "string non-int index should panic")
-assert(str_contains(capture(fn(){ rg[true] }), "index_read expects an integer index"), "range non-int index should panic")
-assert(did_catch(fn(){ xs[9] }), "list out-of-range should be catchable")
-assert(did_catch(fn(){ xs["x"] }), "list non-int index should be catchable")
+assert(str_contains(capture(fn() { xs[9] }), "index_read out of range"), "list out-of-range should panic")
+assert(str_contains(capture(fn() { s[9] }), "index_read out of range"), "string out-of-range should panic")
+assert(str_contains(capture(fn() { bs[9] }), "index_read out of range"), "bytes out-of-range should panic")
+assert(str_contains(capture(fn() { rg[9] }), "index_read out of range"), "range out-of-range should panic")
+assert(str_contains(capture(fn() { xs["x"] }), "index_read expects an integer index"), "list non-int index should panic")
+assert(str_contains(capture(fn() { tp["x"] }), "index_read expects an integer index"), "tuple non-int index should panic")
+assert(str_contains(capture(fn() { s[false] }), "index_read expects an integer index"), "string non-int index should panic")
+assert(str_contains(capture(fn() { rg[true] }), "index_read expects an integer index"), "range non-int index should panic")
+assert(did_catch(fn() { xs[9] }), "list out-of-range should be catchable")
+assert(did_catch(fn() { xs["x"] }), "list non-int index should be catchable")
 print("✓ index runtime tests passed")

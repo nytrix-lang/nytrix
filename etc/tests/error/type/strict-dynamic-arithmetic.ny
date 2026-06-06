@@ -2,7 +2,7 @@
 ;; expect: hm-strict-dynamic-arithmetic
 use std.core
 
-fn add_one(any: x){
+fn add_one(any x) {
    x + 1
 }
 

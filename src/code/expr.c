@@ -1629,16 +1629,6 @@ static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
   return ny_try_eval_comptime_expr_fast(cg, e, out, 0);
 }
 
-static bool ny_try_eval_comptime_fast(codegen_t *cg, stmt_t *body,
-                                      int64_t *out_tagged) {
-  ny_ct_fast_val_t v = ny_ct_fast_none();
-  if (!ny_try_eval_comptime_fast_value(cg, body, &v))
-    return false;
-  bool ok = ny_ct_fast_to_tagged(&v, out_tagged);
-  ny_ct_fast_val_free(&v);
-  return ok;
-}
-
 typedef struct ny_ct_interp_var_t {
   const char *name;
   ny_ct_fast_val_t value;
@@ -4032,11 +4022,15 @@ static void ny_ct_ensure_parent_fun_sig(codegen_t *tcg, const fun_sig *src,
   LLVMTypeRef *pt = param_count ? alloca(sizeof(*pt) * param_count) : NULL;
   for (size_t i = 0; i < param_count; i++) {
     const char *ptype = params->data[i].type;
-    pt[i] = (src->is_native_abi && ptype)
+    bool tagged_user_fnptr = !is_extern && ptype && ny_type_is(ptype, "fnptr");
+    pt[i] = (src->is_native_abi && ptype && !tagged_user_fnptr)
                 ? resolve_abi_type_name(tcg, ptype, s->tok)
                 : tcg->type_i64;
   }
-  LLVMTypeRef rty = (src->is_native_abi && ret_name)
+  bool tagged_user_fnptr_ret = !is_extern && ret_name &&
+                               ny_type_is(ret_name, "fnptr");
+  LLVMTypeRef rty = (src->is_native_abi && ret_name &&
+                     !tagged_user_fnptr_ret)
                         ? resolve_abi_type_name(tcg, ret_name, s->tok)
                         : tcg->type_i64;
   LLVMTypeRef ft = LLVMFunctionType(rty, pt, (unsigned)param_count, 0);
@@ -4677,7 +4671,7 @@ LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes,
   size_t item_count = e->as.list_like.len;
   /* Header (16 bytes) + items * 8 bytes. We also need space for the tag at p-8.
      Actually, standard Nytrix pointers point to (data + 8), and tag is at p-8.
-     Wait, rt_list_new allocates (16 + n*8). The pointer returned is the start of the 16 bytes? 
+     Wait, rt_list_new allocates (16 + n*8). The pointer returned is the start of the 16 bytes?
      No, rt_list_new:
      int64_t p = rt_malloc(16 + n * 8);
      *(int64_t *)(p-8) = TAG_LIST;

@@ -2,5 +2,5 @@
 use std.core
 
 @consumes(y)
-fn f(x){ x }
+fn f(x) { x }
 print(f(1))

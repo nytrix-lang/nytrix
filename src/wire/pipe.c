@@ -2244,16 +2244,21 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
     return false;
   if (!ny_env_enabled_default_on("NYTRIX_AOT_CACHE"))
     return false;
-  if (opt->do_timing || opt->dump_ast || opt->expand || opt->dump_llvm ||
-      opt->dump_tokens || opt->dump_docs || opt->dump_funcs ||
-      opt->dump_symbols || opt->dump_stats || opt->emit_ir_path ||
-      opt->emit_asm_path)
+  if (opt->dump_ast || opt->expand || opt->dump_llvm || opt->dump_tokens ||
+      opt->dump_docs || opt->dump_funcs || opt->dump_symbols ||
+      opt->dump_stats || opt->emit_ir_path || opt->emit_asm_path)
     return false;
   return true;
 }
 
 static bool ny_should_use_jit_cache(const ny_options *opt) {
   if (!opt)
+    return false;
+  if (opt->emit_only && !opt->output_file && !opt->run_jit && !opt->run_aot)
+    return false;
+  if (ny_opt_profile_kind_from_name(opt->opt_profile) ==
+          NY_OPT_PROFILE_COMPILE &&
+      !ny_env_enabled("NYTRIX_COMPILE_PROFILE_CACHE"))
     return false;
   if (opt->stop_after != NY_STOP_AFTER_NONE || opt->emit_artifact_path ||
       opt->collect_errors || opt->emit_shapes)
@@ -2267,6 +2272,12 @@ static bool ny_should_use_jit_cache(const ny_options *opt) {
       !ny_env_enabled("NYTRIX_JIT_CACHE_RUN"))
     return false;
   return ny_jit_cache_enabled();
+}
+
+static bool ny_should_write_compile_caches(const ny_options *opt) {
+  if (!opt)
+    return false;
+  return true;
 }
 
 static bool ny_std_bc_cache_preverify_enabled(void) {
@@ -2783,6 +2794,102 @@ static bool ny_ir_is_string_global(const char *name) {
                   strncmp(name, ".str.runtime.", 13) == 0);
 }
 
+static bool ny_std_bc_symbol_is_mixed_codegen_artifact(const char *name) {
+  if (!name || !*name)
+    return false;
+  return strncmp(name, "__ny_callable_adapter_", 22) == 0 ||
+         strncmp(name, "__ny_callable_adapter_env_", 26) == 0;
+}
+
+static bool ny_std_bc_value_is_global_ref(LLVMValueRef v) {
+  if (!v)
+    return false;
+  LLVMValueKind kind = LLVMGetValueKind(v);
+  return kind == LLVMFunctionValueKind ||
+         kind == LLVMGlobalAliasValueKind ||
+         kind == LLVMGlobalIFuncValueKind ||
+         kind == LLVMGlobalVariableValueKind;
+}
+
+static bool ny_std_bc_value_kind_has_operands(LLVMValueKind kind) {
+  return kind == LLVMConstantExprValueKind ||
+         kind == LLVMConstantArrayValueKind ||
+         kind == LLVMConstantStructValueKind ||
+         kind == LLVMConstantVectorValueKind ||
+#if defined(NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND)
+         kind == LLVMConstantPtrAuthValueKind ||
+#endif
+         kind == LLVMInstructionValueKind;
+}
+
+static bool ny_std_bc_value_refs_mixed_codegen_artifact(LLVMValueRef v,
+                                                        unsigned depth) {
+  if (!v || depth > 32)
+    return false;
+  LLVMValueKind kind = LLVMGetValueKind(v);
+  if (ny_std_bc_value_is_global_ref(v)) {
+    const char *name = LLVMGetValueName(v);
+    return ny_std_bc_symbol_is_mixed_codegen_artifact(name);
+  }
+  if (!ny_std_bc_value_kind_has_operands(kind))
+    return false;
+  int n = LLVMGetNumOperands(v);
+  if (n <= 0)
+    return false;
+  for (int i = 0; i < n; ++i) {
+    LLVMValueRef op = LLVMGetOperand(v, (unsigned)i);
+    if (ny_std_bc_value_refs_mixed_codegen_artifact(op, depth + 1))
+      return true;
+  }
+  return false;
+}
+
+static bool ny_std_bc_module_is_link_safe(LLVMModuleRef module,
+                                          const char **bad_symbol) {
+  if (bad_symbol)
+    *bad_symbol = NULL;
+  if (!module)
+    return false;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    const char *name = LLVMGetValueName(fn);
+    if (ny_std_bc_symbol_is_mixed_codegen_artifact(name)) {
+      if (bad_symbol)
+        *bad_symbol = name;
+      return false;
+    }
+    if (!LLVMIsDeclaration(fn)) {
+      for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb;
+           bb = LLVMGetNextBasicBlock(bb)) {
+        for (LLVMValueRef inst = LLVMGetFirstInstruction(bb); inst;
+             inst = LLVMGetNextInstruction(inst)) {
+          if (ny_std_bc_value_refs_mixed_codegen_artifact(inst, 0)) {
+            if (bad_symbol)
+              *bad_symbol = LLVMGetValueName(inst);
+            return false;
+          }
+        }
+      }
+    }
+  }
+  for (LLVMValueRef gv = LLVMGetFirstGlobal(module); gv;
+       gv = LLVMGetNextGlobal(gv)) {
+    const char *name = LLVMGetValueName(gv);
+    if (ny_std_bc_symbol_is_mixed_codegen_artifact(name)) {
+      if (bad_symbol)
+        *bad_symbol = name;
+      return false;
+    }
+    LLVMValueRef init = LLVMGetInitializer(gv);
+    if (init && ny_std_bc_value_refs_mixed_codegen_artifact(init, 0)) {
+      if (bad_symbol)
+        *bad_symbol = name;
+      return false;
+    }
+  }
+  return true;
+}
+
 static void ny_drop_llvm_used_globals(LLVMModuleRef module) {
   if (!module)
     return;
@@ -2806,12 +2913,9 @@ static void ny_preserve_std_values_for_dce(LLVMModuleRef module) {
   }
   for (LLVMValueRef gv = LLVMGetFirstGlobal(module); gv;
        gv = LLVMGetNextGlobal(gv)) {
-    const char *name = LLVMGetValueName(gv);
     if (LLVMIsDeclaration(gv))
       continue;
-    if (ny_ir_is_std_value(gv) ||
-        (name && ny_ir_is_string_global(name) &&
-         !ny_is_llvm_special_global(name)))
+    if (ny_ir_is_std_value(gv))
       vec_push(&values, gv);
   }
   if (values.len)
@@ -2942,6 +3046,15 @@ static bool ny_save_std_bc_cache_from_module(LLVMModuleRef module,
         LLVMDisposeErrorMessage(msg);
     }
     LLVMDisposePassBuilderOptions(popt);
+  }
+  const char *bad_symbol = NULL;
+  if (!ny_std_bc_module_is_link_safe(std_mod, &bad_symbol)) {
+    if (verbose_enabled >= 2 && bad_symbol && *bad_symbol)
+      NY_LOG_INFO("skipping stdlib bitcode cache: mixed codegen artifact %s\n",
+                  bad_symbol);
+    LLVMDisposeModule(std_mod);
+    (void)unlink(cache_path);
+    return false;
   }
   char *verify_msg = NULL;
   if (LLVMVerifyModule(std_mod, LLVMReturnStatusAction, &verify_msg) != 0) {
@@ -3202,8 +3315,27 @@ static bool ny_link_module_cache(LLVMContextRef ctx, LLVMModuleRef main_mod,
     (void)unlink(cache_path);
     return false;
   }
+  const char *bad_symbol = NULL;
+  if (!ny_std_bc_module_is_link_safe(mod, &bad_symbol)) {
+    if (bad_symbol && *bad_symbol)
+      NY_LOG_WARN("Ignoring unsafe std cache %s: mixed codegen artifact %s\n",
+                  cache_path, bad_symbol);
+    LLVMDisposeModule(mod);
+    (void)unlink(cache_path);
+    return false;
+  }
   if (LLVMLinkModules2(main_mod, mod) != 0) {
     LLVMDisposeModule(mod);
+    (void)unlink(cache_path);
+    return false;
+  }
+  verify_msg = NULL;
+  if (LLVMVerifyModule(main_mod, LLVMReturnStatusAction, &verify_msg) != 0) {
+    if (verify_msg) {
+      NY_LOG_WARN("Linked module cache verification failed: %s\n",
+                  verify_msg);
+      LLVMDisposeMessage(verify_msg);
+    }
     (void)unlink(cache_path);
     return false;
   }
@@ -4327,6 +4459,397 @@ static void run_dead_strip_if_needed(const ny_options *opt, codegen_t *cg,
   LLVMDisposePassBuilderOptions(popt);
 }
 
+typedef VEC(char *) ny_link_lib_vec;
+
+static bool ny_link_lib_basename(const char *lib, const char **base_out,
+                                 size_t *len_out) {
+  if (!lib || strncmp(lib, "lib", 3) != 0 || !base_out || !len_out)
+    return false;
+  const char *base = lib + 3;
+  size_t len = strlen(base);
+  const char *dot = strstr(base, ".so");
+#ifdef __APPLE__
+  const char *dylib = strstr(base, ".dylib");
+  if (dylib && dylib > base && (!dot || dylib < dot))
+    dot = dylib;
+#endif
+  if (dot && dot > base)
+    len = (size_t)(dot - base);
+  if (len == 0)
+    return false;
+  *base_out = base;
+  *len_out = len;
+  return true;
+}
+
+static bool ny_link_lib_vec_contains_exact(const ny_link_lib_vec *libs,
+                                           const char *name) {
+  if (!libs || !name)
+    return false;
+  for (size_t i = 0; i < libs->len; i++) {
+    const char *existing = libs->data[i];
+    if (existing && strcmp(existing, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool ny_link_lib_vec_contains_dash_l(const ny_link_lib_vec *libs,
+                                            const char *name, size_t len) {
+  if (!libs || !name)
+    return false;
+  for (size_t i = 0; i < libs->len; i++) {
+    const char *existing = libs->data[i];
+    if (existing && existing[0] == '-' && existing[1] == 'l' &&
+        strncmp(existing + 2, name, len) == 0 && existing[2 + len] == '\0')
+      return true;
+  }
+  return false;
+}
+
+static void ny_link_lib_vec_add_option(ny_link_lib_vec *libs,
+                                       const char *lib) {
+  const char *name = NULL;
+  size_t len = 0;
+  if (ny_link_lib_basename(lib, &name, &len) && len < 256) {
+    char buf[260];
+    snprintf(buf, sizeof(buf), "-l%.*s", (int)len, name);
+    vec_push(libs, ny_strdup(buf));
+    return;
+  }
+  vec_push(libs, ny_strdup(lib));
+}
+
+static void ny_link_lib_vec_add_codegen(ny_link_lib_vec *libs,
+                                        const char *name) {
+  if (!name)
+    return;
+  if (name[0] == '-' || strchr(name, '/') || strchr(name, '\\')) {
+    if (!ny_link_lib_vec_contains_exact(libs, name))
+      vec_push(libs, ny_strdup(name));
+    return;
+  }
+  const char *lib_name = name;
+  size_t lib_len = strlen(name);
+  const char *base = NULL;
+  size_t base_len = 0;
+  if (ny_link_lib_basename(name, &base, &base_len)) {
+    lib_name = base;
+    lib_len = base_len;
+  }
+  if (!ny_link_lib_vec_contains_dash_l(libs, lib_name, lib_len)) {
+    char buf[260];
+    snprintf(buf, sizeof(buf), "-l%.*s", (int)lib_len, lib_name);
+    vec_push(libs, ny_strdup(buf));
+  }
+}
+
+static void ny_link_lib_vec_merge(ny_link_lib_vec *libs, const ny_options *opt,
+                                  const codegen_t *cg) {
+  for (size_t i = 0; opt && i < opt->link_libs.len; i++)
+    ny_link_lib_vec_add_option(libs, opt->link_libs.data[i]);
+  for (size_t i = 0; cg && i < cg->links.len; i++)
+    ny_link_lib_vec_add_codegen(libs, cg->links.data[i]);
+}
+
+static void ny_link_lib_vec_dispose(ny_link_lib_vec *libs) {
+  if (!libs)
+    return;
+  for (size_t i = 0; i < libs->len; i++)
+    free(libs->data[i]);
+  vec_free(libs);
+}
+
+static bool ny_pipeline_configure_fast_compiler(ny_options *opt) {
+  if (!opt)
+    return false;
+  bool low_overhead = ny_env_enabled("NYTRIX_FAST_COMPILE");
+  bool fast_compiler = low_overhead || ny_env_enabled("NYTRIX_FAST_COMPILER");
+  if (!fast_compiler)
+    return false;
+  opt->opt_level = low_overhead ? 0 : 1;
+  opt->opt_pipeline = NULL;
+  opt->opt_loops = 0;
+  opt->opt_autotune = 0;
+  opt->verify_module = false;
+  opt->debug_symbols = false;
+  ny_setenv("NYTRIX_JIT_CACHE", "1", 0);
+  ny_setenv("NYTRIX_JIT_OPT_LEVEL", low_overhead ? "0" : "1", 0);
+  if (!ny_jit_module_is_apple_arm64(NULL))
+    ny_setenv("NYTRIX_JIT_FAST_ISEL", "1", 0);
+  return true;
+}
+
+static void ny_pipeline_configure_worker(ny_options *opt) {
+  if (!opt || !getenv("NYTRIX_WORKER") || getenv("NYTRIX_WORKER_OPT"))
+    return;
+  opt->opt_level = 0;
+  opt->opt_pipeline = NULL;
+  opt->opt_dce = 0;
+}
+
+static bool ny_pipeline_prepare_aot_run_output(ny_options *opt,
+                                               const char **output_path,
+                                               char *path, size_t path_len) {
+  if (!opt || !output_path || !path || path_len == 0 || !opt->run_aot)
+    return false;
+  if (*output_path && **output_path)
+    return false;
+#ifdef _WIN32
+  snprintf(path, path_len, "%s/ny_aot_run_%d.exe", ny_get_temp_dir(),
+           (int)getpid());
+#else
+  snprintf(path, path_len, "%s/ny_aot_run_%d", ny_get_temp_dir(),
+           (int)getpid());
+#endif
+  opt->output_file = path;
+  *output_path = opt->output_file;
+  opt->emit_only = true;
+  opt->run_jit = false;
+  return true;
+}
+
+typedef struct {
+  std_mode_t mode;
+  const char *prebuilt_path;
+  char *src;
+  char *auto_bc_cache;
+  const char *bc_cache;
+  bool use_bc_cache;
+  bool auto_bc_cache_needs_links;
+  bool has_local;
+} ny_pipeline_std_load;
+
+static void ny_pipeline_scan_std_imports(char **uses, size_t use_count,
+                                         bool *has_local,
+                                         bool *has_project_std) {
+  if (has_local)
+    *has_local = false;
+  if (has_project_std)
+    *has_project_std = false;
+  for (size_t i = 0; uses && i < use_count; i++) {
+    const char *u = uses[i];
+    bool is_std = (strcmp(u, "std") == 0 || strncmp(u, "std.", 4) == 0);
+    bool is_lib = (strcmp(u, "lib") == 0 || strncmp(u, "lib.", 4) == 0);
+    if (has_project_std && ny_use_name_is_project_std_module(u))
+      *has_project_std = true;
+    if (has_local && !is_std && !is_lib) {
+      *has_local = true;
+      break;
+    }
+  }
+}
+
+static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
+                                    size_t use_count, char *std_cache_path,
+                                    size_t std_cache_path_len,
+                                    ny_pipeline_std_load *std) {
+  if (!opt || !std)
+    return false;
+  memset(std, 0, sizeof(*std));
+  std->mode = opt->std_mode;
+  std->prebuilt_path = resolve_std_path(
+      opt->std_path ? opt->std_path
+                    : (NYTRIX_STD_PATH ? NYTRIX_STD_PATH : "build/std.ny"));
+  if (opt->no_std)
+    std->mode = STD_MODE_NONE;
+  if (std->mode == STD_MODE_DEFAULT && use_count == 0)
+    std->mode = STD_MODE_NONE;
+
+  bool has_project_std = false;
+  ny_pipeline_scan_std_imports(uses, use_count, &std->has_local,
+                               &has_project_std);
+  bool std_sources_ok = ny_std_sources_available();
+  bool prebuilt_ok =
+      std->prebuilt_path && ny_access(std->prebuilt_path, R_OK) == 0;
+  bool prefer_prebuilt = ny_env_enabled("NYTRIX_STD_PREFER_PREBUILT");
+  bool prebuilt_preferred =
+      (std->mode == STD_MODE_FULL ||
+       (prefer_prebuilt && std->mode == STD_MODE_DEFAULT)) &&
+      !std->has_local;
+  bool prebuilt_required = !std_sources_ok;
+
+  if (opt->std_bc_path && ny_access(opt->std_bc_path, R_OK) == 0) {
+    std->bc_cache = opt->std_bc_path;
+    std->use_bc_cache = true;
+  } else {
+    const char *env_bc = getenv("NYTRIX_STD_BC_CACHE");
+    if (std->mode != STD_MODE_NONE && env_bc && *env_bc &&
+        ny_access(env_bc, R_OK) == 0) {
+      std->bc_cache = env_bc;
+      std->use_bc_cache = true;
+    } else if (std->mode != STD_MODE_NONE && !opt->run_jit &&
+               !std->has_local && !has_project_std &&
+               ny_env_enabled_default_on("NYTRIX_STD_BC_CACHE_AUTO")) {
+      std->auto_bc_cache = ny_std_bc_cache_path(
+          std->prebuilt_path, (const char *const *)uses, use_count,
+          (int)std->mode, opt->debug_symbols,
+          (unsigned long)ny_std_latest_mtime(), opt->argv0);
+      if (std->auto_bc_cache && ny_access(std->auto_bc_cache, R_OK) == 0) {
+        bool cache_ok = true;
+        if (ny_std_bc_cache_preverify_enabled()) {
+          LLVMContextRef cache_ctx = LLVMContextCreate();
+          cache_ok =
+              cache_ctx && ny_verify_bitcode(cache_ctx, std->auto_bc_cache);
+          if (cache_ctx)
+            LLVMContextDispose(cache_ctx);
+        }
+        if (cache_ok) {
+          bool needs_link_sidecar =
+              opt->output_file && !ny_output_path_is_object(opt->output_file);
+          if (needs_link_sidecar &&
+              !ny_std_bc_cache_has_links(std->auto_bc_cache)) {
+            std->auto_bc_cache_needs_links = true;
+          } else {
+            std->bc_cache = std->auto_bc_cache;
+            std->use_bc_cache = true;
+          }
+        } else {
+          (void)unlink(std->auto_bc_cache);
+        }
+      }
+    }
+  }
+
+  if (std->mode != STD_MODE_NONE && prebuilt_ok &&
+      (prebuilt_preferred || prebuilt_required)) {
+    if (verbose_enabled)
+      NY_LOG_INFO("Using prebuilt std.ny: %s\n", std->prebuilt_path);
+    std->src = ny_read_file(std->prebuilt_path);
+    if (!std->src && verbose_enabled) {
+      NY_LOG_WARN("Failed to read prebuilt std.ny: %s (falling back)\n",
+                  std->prebuilt_path);
+    }
+  }
+
+  if (std->mode != STD_MODE_NONE && !std->src) {
+    bool use_std_cache =
+        !std->has_local && ny_env_enabled_default_on("NYTRIX_STD_CACHE");
+    uint64_t std_cache_sig = 0;
+    if (use_std_cache && std_cache_path && std_cache_path_len > 0) {
+      std_cache_sig = ny_build_std_cache_path(
+          opt, (const char *const *)uses, use_count, std->mode,
+          std->prebuilt_path, std_cache_path, std_cache_path_len);
+      if (std_cache_path[0] != '\0' && ny_access(std_cache_path, R_OK) == 0) {
+        std->src = ny_read_file(std_cache_path);
+        if (std->src && std->src[0] == '\0') {
+          free(std->src);
+          std->src = NULL;
+          (void)unlink(std_cache_path);
+        }
+        if (std->src && std_cache_sig) {
+          char expect[128];
+          int nw =
+              snprintf(expect, sizeof(expect), "; ny_std_cache_v10 %016llx\n",
+                       (unsigned long long)std_cache_sig);
+          if (nw <= 0 || (size_t)nw >= sizeof(expect) ||
+              strncmp(std->src, expect, (size_t)nw) != 0) {
+            free(std->src);
+            std->src = NULL;
+            (void)unlink(std_cache_path);
+          }
+        }
+        if (std->src && verbose_enabled >= 2)
+          NY_LOG_INFO("Using std cache: %s\n", std_cache_path);
+      }
+    }
+    if (!std->src) {
+      std->src = ny_build_std_source((const char **)uses, use_count, std->mode,
+                                     opt->verbose, opt->input_file);
+      if (std->src && use_std_cache && std_cache_path &&
+          std_cache_path[0] != '\0' && std_cache_sig) {
+        char header[128];
+        int hn = snprintf(header, sizeof(header), "; ny_std_cache_v10 %016llx\n",
+                          (unsigned long long)std_cache_sig);
+        if (hn > 0 && (size_t)hn < sizeof(header)) {
+          size_t sl = strlen(std->src);
+          char *wrapped = malloc((size_t)hn + sl + 1);
+          if (wrapped) {
+            memcpy(wrapped, header, (size_t)hn);
+            memcpy(wrapped + hn, std->src, sl + 1);
+            (void)ny_write_file_atomic(std_cache_path, wrapped,
+                                       (size_t)hn + sl);
+            free(wrapped);
+          }
+        }
+      }
+    }
+  }
+
+  if (std->mode == STD_MODE_NONE || std->src)
+    return true;
+
+  NY_LOG_ERR("Could not load std.ny or standard library source files.\n");
+  NY_LOG_ERR("Checked paths: %s and %s/std\n",
+             std->prebuilt_path ? std->prebuilt_path : "NULL", ny_src_root());
+  free(std->auto_bc_cache);
+  std->auto_bc_cache = NULL;
+  return false;
+}
+
+static char *ny_pipeline_join_sources(const char *std_src, const char *user_src,
+                                      const char *parse_name,
+                                      size_t *user_len_out,
+                                      size_t *split_pos_out) {
+  if (user_len_out)
+    *user_len_out = 0;
+  if (split_pos_out)
+    *split_pos_out = 0;
+  if (!user_src)
+    return NULL;
+
+  size_t slen = std_src ? strlen(std_src) : 0;
+  size_t ulen = strlen(user_src);
+  size_t line_directive_len = 0;
+  if (parse_name && parse_name[0] != '<') {
+    size_t parse_len = strlen(parse_name);
+    if (parse_len > SIZE_MAX - (sizeof("#line 1 \"\"\n") - 1)) {
+      NY_LOG_ERR("Source file name too large for #line directive\n");
+      return NULL;
+    }
+    line_directive_len = parse_len + (sizeof("#line 1 \"\"\n") - 1);
+  }
+
+  size_t total = slen;
+  if (ulen > SIZE_MAX - total ||
+      line_directive_len > SIZE_MAX - total - ulen ||
+      4 > SIZE_MAX - total - ulen - line_directive_len) {
+    NY_LOG_ERR("Source code too large to concatenate\n");
+    return NULL;
+  }
+  total += ulen + line_directive_len + 4;
+
+  char *source = malloc(total);
+  if (!source) {
+    NY_LOG_ERR("Failed to allocate combined source input\n");
+    return NULL;
+  }
+
+  char *ptr = source;
+  if (std_src) {
+    memcpy(ptr, std_src, slen);
+    ptr += slen;
+    if (ptr > source && ptr[-1] != '\n')
+      *ptr++ = '\n';
+    if (split_pos_out)
+      *split_pos_out = (size_t)(ptr - source);
+  }
+  if (line_directive_len > 0) {
+    int n = snprintf(ptr, line_directive_len + 1, "#line 1 \"%s\"\n",
+                     parse_name);
+    if (n < 0 || (size_t)n != line_directive_len) {
+      free(source);
+      NY_LOG_ERR("Failed to build #line directive\n");
+      return NULL;
+    }
+    ptr += line_directive_len;
+  }
+  memcpy(ptr, user_src, ulen + 1);
+  if (user_len_out)
+    *user_len_out = ulen;
+  return source;
+}
+
 int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
   ny_tick_t pipeline_prof_t0 = ny_ticks_now();
@@ -4336,28 +4859,8 @@ int ny_pipeline_run(ny_options *opt) {
   ny_diag_configure(opt ? opt->warn_level : 1, opt ? opt->diag_compact : false);
   if (opt && opt->dump_diagnose)
     ny_ensure_dir_recursive(ny_dump_dir(opt));
-  if (getenv("NYTRIX_WORKER") && !getenv("NYTRIX_WORKER_OPT")) {
-    opt->opt_level = 0;
-    opt->opt_pipeline = NULL;
-    opt->opt_dce = 0;
-  }
-
-  /* Low-overhead compiler mode for development iteration. */
-  bool low_overhead = ny_env_enabled("NYTRIX_FAST_COMPILE");
-  bool fast_compiler = low_overhead || ny_env_enabled("NYTRIX_FAST_COMPILER");
-  if (low_overhead || fast_compiler) {
-    opt->opt_level = low_overhead ? 0 : 1;
-    opt->opt_pipeline = NULL;
-    opt->opt_loops = 0;
-    opt->opt_autotune = 0;
-    opt->verify_module = false;
-    opt->debug_symbols = false;
-    /* Enable JIT caching for faster subsequent runs */
-    ny_setenv("NYTRIX_JIT_CACHE", "1", 0);
-    ny_setenv("NYTRIX_JIT_OPT_LEVEL", low_overhead ? "0" : "1", 0);
-    if (!ny_jit_module_is_apple_arm64(NULL))
-      ny_setenv("NYTRIX_JIT_FAST_ISEL", "1", 0);
-  }
+  ny_pipeline_configure_worker(opt);
+  bool fast_compiler = ny_pipeline_configure_fast_compiler(opt);
   verbose_enabled = opt->verbose;
   ny_tick_t t_start = 0;
   ny_tick_t t0 = 0;
@@ -4393,27 +4896,8 @@ int ny_pipeline_run(ny_options *opt) {
   void *native_cache_handle = NULL;
   void (*native_cache_entry)(void) = NULL;
 #endif
-#ifdef _WIN32
-  if (opt->run_aot && (!output_path || !*output_path)) {
-    snprintf(aot_run_path, sizeof(aot_run_path), "%s/ny_aot_run_%d.exe",
-             ny_get_temp_dir(), (int)getpid());
-    opt->output_file = aot_run_path;
-    output_path = opt->output_file;
-    opt->emit_only = true;
-    opt->run_jit = false;
-    aot_run_temp = true;
-  }
-#else
-  if (opt->run_aot && (!output_path || !*output_path)) {
-    snprintf(aot_run_path, sizeof(aot_run_path), "%s/ny_aot_run_%d",
-             ny_get_temp_dir(), (int)getpid());
-    opt->output_file = aot_run_path;
-    output_path = opt->output_file;
-    opt->emit_only = true;
-    opt->run_jit = false;
-    aot_run_temp = true;
-  }
-#endif
+  aot_run_temp = ny_pipeline_prepare_aot_run_output(
+      opt, &output_path, aot_run_path, sizeof(aot_run_path));
 #ifdef _WIN32
   char output_win[4096];
   if (output_path)
@@ -4442,194 +4926,39 @@ int ny_pipeline_run(ny_options *opt) {
     }
     fprintf(stderr, "\n");
   }
-  std_mode_t std_mode = opt->std_mode;
-  const char *prebuilt_path = resolve_std_path(
-      opt->std_path ? opt->std_path
-                    : (NYTRIX_STD_PATH ? NYTRIX_STD_PATH : "build/std.ny"));
-  if (opt->no_std) {
-    std_mode = STD_MODE_NONE;
-  }
-  if (std_mode == STD_MODE_DEFAULT && use_count == 0) {
-    std_mode = STD_MODE_NONE;
-  }
   ny_tick_t t_std = opt->do_timing ? ny_ticks_now() : 0;
-  bool has_local = false;
-  bool has_project_std = false;
-  for (size_t i = 0; i < use_count; i++) {
-    const char *u = uses[i];
-    bool is_std = (strcmp(u, "std") == 0 || strncmp(u, "std.", 4) == 0);
-    bool is_lib = (strcmp(u, "lib") == 0 || strncmp(u, "lib.", 4) == 0);
-    if (ny_use_name_is_project_std_module(u))
-      has_project_std = true;
-    if (!is_std && !is_lib) {
-      has_local = true;
-      break;
-    }
-  }
-  bool std_sources_ok = ny_std_sources_available();
-  bool prebuilt_ok = prebuilt_path && ny_access(prebuilt_path, R_OK) == 0;
-  bool prefer_prebuilt = ny_env_enabled("NYTRIX_STD_PREFER_PREBUILT");
-  bool prebuilt_preferred =
-      (std_mode == STD_MODE_FULL ||
-       (prefer_prebuilt && std_mode == STD_MODE_DEFAULT)) &&
-      !has_local;
-  bool prebuilt_required = !std_sources_ok;
+  ny_pipeline_std_load std_load = {0};
+  std_mode_t std_mode = STD_MODE_NONE;
+  const char *prebuilt_path = NULL;
   char *auto_std_bc_cache = NULL;
   const char *std_bc_cache = NULL;
   bool use_std_bc_cache = false;
   bool auto_std_bc_cache_needs_links = false;
+  bool has_local = false;
   bool auto_std_bc_cache_saved = false;
-  if (opt->std_bc_path && ny_access(opt->std_bc_path, R_OK) == 0) {
-    std_bc_cache = opt->std_bc_path;
-    use_std_bc_cache = true;
-  } else {
-    const char *env_bc = getenv("NYTRIX_STD_BC_CACHE");
-    if (std_mode != STD_MODE_NONE && env_bc && *env_bc &&
-        ny_access(env_bc, R_OK) == 0) {
-      std_bc_cache = env_bc;
-      use_std_bc_cache = true;
-    } else if (std_mode != STD_MODE_NONE && !opt->run_jit && !has_local &&
-               !has_project_std &&
-               ny_env_enabled_default_on("NYTRIX_STD_BC_CACHE_AUTO")) {
-      auto_std_bc_cache = ny_std_bc_cache_path(
-          prebuilt_path, (const char *const *)uses, use_count, (int)std_mode,
-          opt->debug_symbols, (unsigned long)ny_std_latest_mtime(), opt->argv0);
-      if (auto_std_bc_cache && ny_access(auto_std_bc_cache, R_OK) == 0) {
-        bool cache_ok = true;
-        if (ny_std_bc_cache_preverify_enabled()) {
-          LLVMContextRef cache_ctx = LLVMContextCreate();
-          cache_ok =
-              cache_ctx && ny_verify_bitcode(cache_ctx, auto_std_bc_cache);
-          if (cache_ctx)
-            LLVMContextDispose(cache_ctx);
-        }
-        if (cache_ok) {
-          bool needs_link_sidecar =
-              opt->output_file && !ny_output_path_is_object(opt->output_file);
-          if (needs_link_sidecar &&
-              !ny_std_bc_cache_has_links(auto_std_bc_cache)) {
-            auto_std_bc_cache_needs_links = true;
-          } else {
-            std_bc_cache = auto_std_bc_cache;
-            use_std_bc_cache = true;
-          }
-        } else {
-          (void)unlink(auto_std_bc_cache);
-        }
-      }
-    }
+  bool write_compile_caches = ny_should_write_compile_caches(opt);
+  if (!ny_pipeline_load_stdlib(opt, uses, use_count, std_cache_path,
+                               sizeof(std_cache_path), &std_load)) {
+    exit_code = 1;
+    goto exit_success;
   }
-  if (std_mode != STD_MODE_NONE && prebuilt_ok &&
-      (prebuilt_preferred || prebuilt_required)) {
-    if (verbose_enabled)
-      NY_LOG_INFO("Using prebuilt std.ny: %s\n", prebuilt_path);
-    std_src = ny_read_file(prebuilt_path);
-    if (!std_src && verbose_enabled) {
-      NY_LOG_WARN("Failed to read prebuilt std.ny: %s (falling back)\n",
-                  prebuilt_path);
-    }
-  }
-  if (std_mode != STD_MODE_NONE && !std_src) {
-    bool use_std_cache =
-        !has_local && ny_env_enabled_default_on("NYTRIX_STD_CACHE");
-    uint64_t std_cache_sig = 0;
-    if (use_std_cache) {
-      std_cache_sig = ny_build_std_cache_path(
-          opt, (const char *const *)uses, use_count, std_mode, prebuilt_path,
-          std_cache_path, sizeof(std_cache_path));
-      if (std_cache_path[0] != '\0' && ny_access(std_cache_path, R_OK) == 0) {
-        std_src = ny_read_file(std_cache_path);
-        if (std_src && std_src[0] == '\0') {
-          free(std_src);
-          std_src = NULL;
-          (void)unlink(std_cache_path);
-        }
-        if (std_src && std_cache_sig) {
-          char expect[128];
-          int nw =
-              snprintf(expect, sizeof(expect), "; ny_std_cache_v10 %016llx\n",
-                       (unsigned long long)std_cache_sig);
-          if (nw <= 0 || (size_t)nw >= sizeof(expect) ||
-              strncmp(std_src, expect, (size_t)nw) != 0) {
-            free(std_src);
-            std_src = NULL;
-            (void)unlink(std_cache_path);
-          }
-        }
-        if (std_src && verbose_enabled >= 2)
-          NY_LOG_INFO("Using std cache: %s\n", std_cache_path);
-      }
-    }
-    if (!std_src) {
-      std_src = ny_build_std_source((const char **)uses, use_count, std_mode,
-                                    opt->verbose, opt->input_file);
-      if (std_src && use_std_cache && std_cache_path[0] != '\0' &&
-          std_cache_sig) {
-        char header[128];
-        int hn = snprintf(header, sizeof(header), "; ny_std_cache_v10 %016llx\n",
-                          (unsigned long long)std_cache_sig);
-        if (hn > 0 && (size_t)hn < sizeof(header)) {
-          size_t sl = strlen(std_src);
-          char *wrapped = malloc((size_t)hn + sl + 1);
-          if (wrapped) {
-            memcpy(wrapped, header, (size_t)hn);
-            memcpy(wrapped + hn, std_src, sl + 1);
-            (void)ny_write_file_atomic(std_cache_path, wrapped,
-                                       (size_t)hn + sl);
-            free(wrapped);
-          }
-        }
-      }
-    }
-  }
-  if (std_mode != STD_MODE_NONE && !std_src) {
-    NY_LOG_ERR("Could not load std.ny or standard library source files.\n");
-    NY_LOG_ERR("Checked paths: %s and %s/std\n",
-               prebuilt_path ? prebuilt_path : "NULL", ny_src_root());
-    if (user_src)
-      free(user_src);
-    if (uses)
-      ny_str_list_free(uses, use_count);
-    free(auto_std_bc_cache);
-    return 1;
-  }
+  std_mode = std_load.mode;
+  prebuilt_path = std_load.prebuilt_path;
+  std_src = std_load.src;
+  auto_std_bc_cache = std_load.auto_bc_cache;
+  std_bc_cache = std_load.bc_cache;
+  use_std_bc_cache = std_load.use_bc_cache;
+  auto_std_bc_cache_needs_links = std_load.auto_bc_cache_needs_links;
+  has_local = std_load.has_local;
   maybe_log_phase_time(opt->do_timing, "Stdlib load:", t_std);
-  size_t slen = std_src ? strlen(std_src) : 0;
-  size_t ulen = strlen(user_src);
-  if (slen > (SIZE_MAX - ulen - 2)) {
-    NY_LOG_ERR("Source code too large to concatenate\n");
-    if (user_src)
-      free(user_src);
-    if (std_src)
-      free(std_src);
-    if (uses)
-      ny_str_list_free(uses, use_count);
-    return 1;
-  }
-  size_t line_directive_len = 0;
-  char line_buf[1024];
+  size_t ulen = 0;
   size_t split_pos = 0;
-  if (parse_name && parse_name[0] != '<') {
-    line_directive_len =
-        snprintf(line_buf, sizeof(line_buf), "#line 1 \"%s\"\n", parse_name);
+  source = ny_pipeline_join_sources(std_src, user_src, parse_name, &ulen,
+                                    &split_pos);
+  if (!source) {
+    exit_code = 1;
+    goto exit_success;
   }
-
-  source = malloc(slen + ulen + line_directive_len + 4);
-  char *ptr = source;
-  if (std_src) {
-    memcpy(ptr, std_src, slen);
-    ptr += slen;
-    if (ptr > source && ptr[-1] != '\n')
-      *ptr++ = '\n';
-    split_pos = (size_t)(ptr - source);
-  }
-
-  if (line_directive_len > 0) {
-    memcpy(ptr, line_buf, line_directive_len);
-    ptr += line_directive_len;
-  }
-
-  memcpy(ptr, user_src, ulen + 1);
 #ifndef _WIN32
   if (opt->run_jit && !opt->command_string && ny_should_use_jit_cache(opt) &&
       ny_jit_native_cache_enabled() && !opt->dump_ast && !opt->expand &&
@@ -5091,7 +5420,8 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (opt->do_timing && opt->verify_module)
     fprintf(stderr, "Verify:       %.4fs\n", ny_ticks_elapsed_sec(t_ver));
-  if (!use_std_bc_cache && auto_std_bc_cache && cg.module &&
+  if (write_compile_caches && !use_std_bc_cache && auto_std_bc_cache &&
+      cg.module &&
       !loaded_from_cache && !opt->emit_module && std_mode != STD_MODE_NONE &&
       !has_local) {
     bool need_bc = ny_access(auto_std_bc_cache, R_OK) != 0;
@@ -5151,7 +5481,7 @@ int ny_pipeline_run(ny_options *opt) {
     ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
                            cg.module, false);
   }
-  if (jit_cache_file && !loaded_from_cache) {
+  if (write_compile_caches && jit_cache_file && !loaded_from_cache) {
 #ifndef _WIN32
     if (native_cache_file && opt->run_jit && !opt->command_string) {
       ny_tick_t t_native = opt->do_timing ? ny_ticks_now() : 0;
@@ -5174,7 +5504,8 @@ skip_compilation:
     free(jit_cache_file);
     jit_cache_file = NULL;
   }
-  if (!auto_std_bc_cache_saved && !use_std_bc_cache && auto_std_bc_cache &&
+  if (write_compile_caches && !auto_std_bc_cache_saved && !use_std_bc_cache &&
+      auto_std_bc_cache &&
       cg.module &&
       !loaded_from_cache && !opt->emit_module && std_mode != STD_MODE_NONE &&
       !has_local) {
@@ -5331,81 +5662,9 @@ skip_compilation:
       }
       NY_LOG_V2("Linking executable %s (strip=%d, debug=%d)...\n", output_path,
                 link_strip, opt->debug_symbols);
-      /* Merge #link directives from codegen into link_libs */
-      VEC(char *) merged_libs;
+      ny_link_lib_vec merged_libs;
       vec_init(&merged_libs);
-      for (size_t li = 0; li < opt->link_libs.len; li++) {
-        const char *lib = opt->link_libs.data[li];
-        /* Convert libXXX.so / libXXX.dylib -> -lXXX for native linkers. */
-        if (lib && strncmp(lib, "lib", 3) == 0) {
-          const char *base = lib + 3;
-          size_t blen = strlen(base);
-          const char *dot = strstr(base, ".so");
-#ifdef __APPLE__
-          const char *dylib = strstr(base, ".dylib");
-          if (dylib && dylib > base && (!dot || dylib < dot))
-            dot = dylib;
-#endif
-          if (dot && dot > base)
-            blen = (size_t)(dot - base);
-          if (blen > 0 && blen < 256) {
-            char buf[260];
-            snprintf(buf, sizeof(buf), "-l%.*s", (int)blen, base);
-            vec_push(&merged_libs, ny_strdup(buf));
-            continue;
-          }
-        }
-        vec_push(&merged_libs, ny_strdup(lib));
-      }
-      for (size_t li = 0; li < cg.links.len; li++) {
-        const char *name = cg.links.data[li];
-        if (!name)
-          continue;
-        if (name[0] == '-' || strchr(name, '/') || strchr(name, '\\')) {
-          bool dup = false;
-          for (size_t lj = 0; lj < merged_libs.len; lj++) {
-            const char *e = merged_libs.data[lj];
-            if (e && strcmp(e, name) == 0) {
-              dup = true;
-              break;
-            }
-          }
-          if (!dup)
-            vec_push(&merged_libs, ny_strdup(name));
-          continue;
-        }
-        /* Convert libXXX.so[.N] / libXXX.dylib -> XXX for -lXXX format. */
-        const char *lib_name = name;
-        size_t lib_len = strlen(name);
-        if (strncmp(name, "lib", 3) == 0) {
-          lib_name = name + 3;
-          lib_len = strlen(lib_name);
-          const char *dot = strstr(lib_name, ".so");
-#ifdef __APPLE__
-          const char *dylib = strstr(lib_name, ".dylib");
-          if (dylib && dylib > lib_name && (!dot || dylib < dot))
-            dot = dylib;
-#endif
-          if (dot && dot > lib_name)
-            lib_len = (size_t)(dot - lib_name);
-        }
-        /* Check for duplicates */
-        bool dup = false;
-        for (size_t lj = 0; lj < merged_libs.len; lj++) {
-          const char *e = merged_libs.data[lj];
-          if (e && e[0] == '-' && e[1] == 'l' &&
-              strncmp(e + 2, lib_name, lib_len) == 0 &&
-              e[2 + lib_len] == '\0') {
-            dup = true;
-            break;
-          }
-        }
-        if (!dup) {
-          char buf[260];
-          snprintf(buf, sizeof(buf), "-l%.*s", (int)lib_len, lib_name);
-          vec_push(&merged_libs, ny_strdup(buf));
-        }
-      }
+      ny_link_lib_vec_merge(&merged_libs, opt, &cg);
       ny_tick_t t_link = opt->do_timing ? ny_ticks_now() : 0;
       if (!ny_builder_link(
               cc, obj, rto, NULL, NULL, 0,
@@ -5417,15 +5676,11 @@ skip_compilation:
         unlink(rto);
         dump_debug_bundle(opt, source, cg.module);
         exit_code = 1;
-        for (size_t li = 0; li < merged_libs.len; li++)
-          free(merged_libs.data[li]);
-        vec_free(&merged_libs);
+        ny_link_lib_vec_dispose(&merged_libs);
         goto exit_success;
       }
       maybe_log_phase_time(opt->do_timing, "Link:", t_link);
-      for (size_t li = 0; li < merged_libs.len; li++)
-        free(merged_libs.data[li]);
-      vec_free(&merged_libs);
+      ny_link_lib_vec_dispose(&merged_libs);
       unlink(obj);
       unlink(rto);
       if (aot_cache_path[0] != '\0' &&

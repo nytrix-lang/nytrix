@@ -364,6 +364,7 @@ bool ny_emit_module_match(codegen_t *cg, const char *cur_mod);
 bool ny_lazy_emit_stdlib_var_needed(codegen_t *cg, stmt_t *s,
                                     const char *cur_mod);
 void ny_diag_configure(int warn_level, bool compact_mode);
+int ny_diag_warn_level(void);
 void ny_diag_error(token_t tok, const char *fmt, ...);
 void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_error_code(token_t tok, int code, const char *fmt, ...);

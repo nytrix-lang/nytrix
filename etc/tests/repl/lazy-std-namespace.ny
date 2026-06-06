@@ -1,7 +1,7 @@
 ;; repl-expect: REPL_LAZY_STD_NAMESPACE_OK
 use std
 
-fn main(): int {
+fn main() int {
    assert(math.abs(-9) == 9, "lazy std root imports namespace math calls")
    assert(std.math.abs(-11) == 11, "lazy std root accepts full std math completions")
    def parts = str.split("alpha,beta", ",")

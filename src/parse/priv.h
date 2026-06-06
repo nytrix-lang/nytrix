@@ -109,32 +109,53 @@ static inline bool parser_type_ref_is_builtin_type(const char *type_name) {
 
 typedef const char *(*parser_type_ref_fn)(parser_t *p, const char *err_msg);
 
+static inline bool parser_token_can_start_type_ref(token_t tok) {
+  return tok.kind == NY_T_IDENT || tok.kind == NY_T_NUMBER || tok.kind == NY_T_QUESTION ||
+         tok.kind == NY_T_STAR;
+}
+
+static inline bool parser_kind_after_return_type(token_kind kind) {
+  return kind == NY_T_LBRACE || kind == NY_T_ASSIGN || kind == NY_T_SEMI ||
+         kind == NY_T_AS || kind == NY_T_FN || kind == NY_T_RBRACE ||
+         kind == NY_T_EOF;
+}
+
+static inline const char *parser_parse_return_type_suffix(parser_t *p,
+                                                          parser_type_ref_fn parse_type_ref,
+                                                          const char *err_msg) {
+  if (!parser_token_can_start_type_ref(p->cur))
+    return NULL;
+  parser_t probe = *p;
+  probe.quiet = true;
+  const char *type = parse_type_ref(&probe, NULL);
+  if (!type || !parser_kind_after_return_type(probe.cur.kind))
+    return NULL;
+  return parse_type_ref(p, err_msg ? err_msg : "expected return type");
+}
+
 static inline bool parser_parse_param_type_first(parser_t *p, param_t *pr,
                                                 parser_type_ref_fn parse_type_ref) {
-  if (p->cur.kind == NY_T_IDENT && parser_peek(p).kind != NY_T_COLON &&
-      parser_peek(p).kind != NY_T_DOT && parser_peek(p).kind != NY_T_LT) {
+  token_t next = parser_peek(p);
+  if (p->cur.kind == NY_T_IDENT && next.kind != NY_T_COLON && next.kind != NY_T_DOT &&
+      next.kind != NY_T_LT && next.kind != NY_T_IDENT) {
     pr->name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     return true;
   }
-  if (p->cur.kind != NY_T_IDENT && p->cur.kind != NY_T_NUMBER && p->cur.kind != NY_T_QUESTION &&
-      p->cur.kind != NY_T_STAR) {
+  if (!parser_token_can_start_type_ref(p->cur)) {
     parser_error(p, p->cur, "param must be identifier or type", NULL);
     return false;
   }
   pr->type = parse_type_ref(p, "expected parameter type");
-  if (!parser_match(p, NY_T_COLON)) {
-    parser_error(p, p->cur, "expected ':' after parameter type",
-                 "typed parameters use 'type: name', for example 'f64: spacing'");
-    return false;
-  }
+  parser_match(p, NY_T_COLON);
   if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected parameter name after ':'", NULL);
+    parser_error(p, p->cur, "expected parameter name after type",
+                 "write 'Type name' or 'Type: name'");
     return false;
   }
   if (parser_token_is_builtin_type(p->cur) && !parser_type_ref_is_builtin_type(pr->type)) {
     parser_error(p, p->cur, "typed parameters are type-first",
-                 "write 'int: value', not 'value: int'");
+                 "write 'int value', not 'value int'");
     return false;
   }
   pr->name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);

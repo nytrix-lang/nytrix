@@ -1,7 +1,7 @@
 use std.core
 use std.core.test
 
-if(__main()){
+#main {
    ;; Control Flow (Test)
    ;; Tests conditional logic including if, elif, and else statements, along with nesting.
    mut x = 1

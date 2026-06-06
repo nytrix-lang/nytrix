@@ -3,7 +3,7 @@ use std.os.time
 use benchmark.helpers
 
 ;; Mandelbrot Set (Benchmark)
-fn mandelbrot(w, h, max_iter){
+fn mandelbrot(w, h, max_iter) {
    mut count = 0
    def sx = 4.0 / w
    def sy = 4.0 / h

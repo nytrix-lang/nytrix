@@ -5,9 +5,9 @@ use std.os.net.socket as sock
 
 assert(aio.backend() == "stackless", "async backend is stackless")
 
-fn plus_one(x){ x + 1 }
+fn plus_one(x) { x + 1 }
 
-fn times_two(x){ x * 2 }
+fn times_two(x) { x * 2 }
 def h = aio.async(plus_one, 41)
 assert(aio.await(h) == 42, "std.os.async await")
 def hs = [aio.future(times_two, 3), aio.Future(times_two, 5)]
@@ -21,7 +21,7 @@ assert(await(ch) == 6, "bare async/await call compatibility")
 def sh = async plus_one(41)
 assert(await sh == 42, "async/await syntax")
 assert(await async times_two(7) == 14, "nested async/await syntax")
-def lh = async fn(){ plus_one(11) }
+def lh = async fn() { plus_one(11) }
 assert(await lh == 12, "async zero-arg lambda syntax")
 mut many = list(10000)
 mut mi = 0
@@ -40,7 +40,7 @@ while(mi < many.len){
 assert(many_sum == 50005000, "10k stackless tasks")
 assert(await aio.sleep_ms(1) == 0, "stackless sleep")
 assert(await aio.yield_now() == 0, "stackless yield")
-def wait_lh = async fn(){
+def wait_lh = async fn() {
    await aio.yield_now()
    21
 }
@@ -61,7 +61,7 @@ assert(aio.await_all(waiters).len == 10000, "10k yield/sleep tasks")
 
 @async_effects
 @effects(io, alloc, ffi)
-fn effect_async_worker(base=41){
+fn effect_async_worker(base=41) {
    base + 1
 }
 

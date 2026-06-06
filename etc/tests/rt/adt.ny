@@ -6,7 +6,7 @@ enum Shape {
    Empty
 }
 
-fn area(s){
+fn area(s) {
    match s {
       Shape.Circle(radius: r) -> r * r
       Shape.Rect(width: w, height: h) -> w * h
@@ -14,7 +14,7 @@ fn area(s){
    }
 }
 
-fn positive_radius(s){
+fn positive_radius(s) {
    match s {
       Shape.Circle(radius: r) if r > 0 -> r
       Shape.Circle(radius: _) -> 0
@@ -24,7 +24,7 @@ fn positive_radius(s){
 }
 
 impl Shape {
-   fn method_area(self: s): int {
+   fn method_area(self s) int {
       match s {
          Shape.Circle(radius: r) -> r * r
          Shape.Rect(width: w, height: h) -> w * h
@@ -55,7 +55,7 @@ enum Option<T> {
    None
 }
 
-fn unwrap_or_zero(o){
+fn unwrap_or_zero(o) {
    match o {
       Option.Some(value: v) -> v
       Option.None -> 0

@@ -13,7 +13,7 @@ while(i < n){
 
 store64(xs, n, 0)
 def start = ticks()
-def mapped = it.map(xs, fn(v){ v + 1 })
+def mapped = it.map(xs, fn(v) { v + 1 })
 def reversed = it.reverse(mapped)
 def chained = it.chain(mapped, reversed)
 mut sum = 0

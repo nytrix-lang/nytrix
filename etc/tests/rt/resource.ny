@@ -3,11 +3,11 @@ use std.core.error
 
 mut cleanup_log = ""
 
-fn close(str: name){
+fn close(str name) {
    cleanup_log = cleanup_log + name
 }
 
-fn test_with_ptr(){
+fn test_with_ptr() {
    mut seen = 0
    with ptr: buf = malloc(8){
       assert(buf != 0, "with ptr binds allocation")
@@ -17,7 +17,7 @@ fn test_with_ptr(){
    assert(seen == 65, "with ptr body can access resource")
 }
 
-fn test_with_cleanup(){
+fn test_with_cleanup() {
    cleanup_log = ""
    with str: label = "C" {
       cleanup_log = cleanup_log + "B"
@@ -25,14 +25,14 @@ fn test_with_cleanup(){
    assert(cleanup_log == "BC", "with runs close after body")
 }
 
-fn return_through_with(){
+fn return_through_with() {
    with str: label = "R" {
       cleanup_log = cleanup_log + "body|"
       return 7
    }
 }
 
-fn panic_through_with(){
+fn panic_through_with() {
    try {
       with str: label = "P" {
          panic("resource boom")

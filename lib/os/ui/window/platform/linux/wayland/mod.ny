@@ -1,19 +1,21 @@
-;; Keywords: platform window backend linux wayland
+;; Keywords: platform window backend linux wayland os ui input
 ;; Wayland native window backend for surfaces, input, monitors, clipboard, and Vulkan surfaces.
+;; References:
+;; - std.os.ui.window.platform.linux
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.linux.wayland(available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
 use std.core
 use std.core.mem (cstr)
 use std.core.str as str
-use std.core.str (to_hex)
 use std.os.ui.render.vk.vulkan (vk_create_wayland_surface_khr, vk_get_physical_device_wayland_presentation_support_khr)
 use std.os.ui.window.consts
 use std.os.ui.window.event as ui_event
 use std.os.ui.window.platform.api
-use std.os.ui.window.platform.api as backend_api
 use std.os.ui.window.platform.linux.x11.keymap as x11_keymap
 use std.os.ui.window.platform.linux.joystick as linux_joystick
 use std.core.common as common
-use std.os.ui.profile as ui_profile
+use std.os.ui.render.dump as ui_profile
 use std.os.ffi as ffi
 
 #linux {
@@ -27,66 +29,210 @@ use std.os.ffi as ffi
    #include <vulkan/vulkan_wayland.h>
    #include <poll.h>
 } #else {
-   fn wl_proxy_marshal_flags(..._args): any { 0 }
-   fn wl_proxy_destroy(..._args): any { 0 }
-   fn wl_proxy_add_listener(..._args): any { 0 }
-   fn wl_display_connect(..._args): any { 0 }
-   fn wl_display_disconnect(..._args): any { 0 }
-   fn wl_display_flush(..._args): any { 0 }
-   fn wl_display_roundtrip(..._args): any { 0 }
-   fn wl_display_get_fd(..._args): any { 0 }
-   fn wl_display_dispatch_pending(..._args): any { 0 }
-   fn wl_display_dispatch(..._args): any { 0 }
-   fn wl_display_prepare_read(..._args): any { 0 }
-   fn wl_display_read_events(..._args): any { 0 }
-   fn wl_display_create_queue(..._args): any { 0 }
-   fn wl_display_cancel_read(..._args): any { 0 }
-   fn wl_display_prepare_read_queue(..._args): any { 0 }
-   fn wl_display_dispatch_queue_pending(..._args): any { 0 }
-   fn wl_event_queue_destroy(..._args): any { 0 }
-   fn wl_proxy_create_wrapper(..._args): any { 0 }
-   fn wl_proxy_get_user_data(..._args): any { 0 }
-   fn wl_proxy_get_version(..._args): any { 0 }
-   fn wl_proxy_set_queue(..._args): any { 0 }
-   fn wl_proxy_set_user_data(..._args): any { 0 }
-   fn wl_proxy_wrapper_destroy(..._args): any { 0 }
-   fn wl_cursor_theme_load(..._args): any { 0 }
-   fn wl_cursor_theme_get_cursor(..._args): any { 0 }
-   fn wl_cursor_theme_destroy(..._args): any { 0 }
-   fn wl_cursor_image_get_buffer(..._args): any { 0 }
-   fn xkb_context_new(..._args): any { 0 }
-   fn xkb_context_unref(..._args): any { 0 }
-   fn xkb_keymap_new_from_string(..._args): any { 0 }
-   fn xkb_keymap_mod_get_index(..._args): any { 0 }
-   fn xkb_keymap_unref(..._args): any { 0 }
-   fn xkb_keysym_get_name(..._args): any { 0 }
-   fn xkb_keysym_to_utf32(..._args): any { 0 }
-   fn xkb_state_key_get_one_sym(..._args): any { 0 }
-   fn xkb_state_key_get_utf8(..._args): any { 0 }
-   fn xkb_state_mod_index_is_active(..._args): any { 0 }
-   fn xkb_state_new(..._args): any { 0 }
-   fn xkb_state_unref(..._args): any { 0 }
-   fn xkb_state_update_mask(..._args): any { 0 }
-   fn close(..._args): any { 0 }
-   fn mmap(..._args): any { -1 }
-   fn munmap(..._args): any { 0 }
-   fn pipe(..._args): any { -1 }
-   fn poll(..._args): any { 0 }
-   fn read(..._args): any { 0 }
-   fn strdup(..._args): any { 0 }
-   fn write(..._args): any { 0 }
+   fn wl_proxy_marshal_flags(..._args) any {
+      "Stub for Wayland proxy marshaling on non-Wayland builds."
+      0
+   }
+   fn wl_proxy_destroy(..._args) any {
+      "Runs the wl proxy destroy operation."
+      0
+   }
+   fn wl_proxy_add_listener(..._args) any {
+      "Runs the wl proxy add listener operation."
+      0
+   }
+   fn wl_display_connect(..._args) any {
+      "Runs the wl display connect operation."
+      0
+   }
+   fn wl_display_disconnect(..._args) any {
+      "Runs the wl display disconnect operation."
+      0
+   }
+   fn wl_display_flush(..._args) any {
+      "Runs the wl display flush operation."
+      0
+   }
+   fn wl_display_roundtrip(..._args) any {
+      "Runs the wl display roundtrip operation."
+      0
+   }
+   fn wl_display_get_fd(..._args) any {
+      "Runs the wl display get fd operation."
+      0
+   }
+   fn wl_display_dispatch_pending(..._args) any {
+      "Runs the wl display dispatch pending operation."
+      0
+   }
+   fn wl_display_dispatch(..._args) any {
+      "Runs the wl display dispatch operation."
+      0
+   }
+   fn wl_display_prepare_read(..._args) any {
+      "Runs the wl display prepare read operation."
+      0
+   }
+   fn wl_display_read_events(..._args) any {
+      "Runs the wl display read events operation."
+      0
+   }
+   fn wl_display_create_queue(..._args) any {
+      "Runs the wl display create queue operation."
+      0
+   }
+   fn wl_display_cancel_read(..._args) any {
+      "Runs the wl display cancel read operation."
+      0
+   }
+   fn wl_display_prepare_read_queue(..._args) any {
+      "Runs the wl display prepare read queue operation."
+      0
+   }
+   fn wl_display_dispatch_queue_pending(..._args) any {
+      "Runs the wl display dispatch queue pending operation."
+      0
+   }
+   fn wl_event_queue_destroy(..._args) any {
+      "Runs the wl event queue destroy operation."
+      0
+   }
+   fn wl_proxy_create_wrapper(..._args) any {
+      "Runs the wl proxy create wrapper operation."
+      0
+   }
+   fn wl_proxy_get_user_data(..._args) any {
+      "Runs the wl proxy get user data operation."
+      0
+   }
+   fn wl_proxy_get_version(..._args) any {
+      "Runs the wl proxy get version operation."
+      0
+   }
+   fn wl_proxy_set_queue(..._args) any {
+      "Runs the wl proxy set queue operation."
+      0
+   }
+   fn wl_proxy_set_user_data(..._args) any {
+      "Runs the wl proxy set user data operation."
+      0
+   }
+   fn wl_proxy_wrapper_destroy(..._args) any {
+      "Runs the wl proxy wrapper destroy operation."
+      0
+   }
+   fn wl_cursor_theme_load(..._args) any {
+      "Runs the wl cursor theme load operation."
+      0
+   }
+   fn wl_cursor_theme_get_cursor(..._args) any {
+      "Runs the wl cursor theme get cursor operation."
+      0
+   }
+   fn wl_cursor_theme_destroy(..._args) any {
+      "Runs the wl cursor theme destroy operation."
+      0
+   }
+   fn wl_cursor_image_get_buffer(..._args) any {
+      "Runs the wl cursor image get buffer operation."
+      0
+   }
+   fn xkb_context_new(..._args) any {
+      "Runs the xkb context new operation."
+      0
+   }
+   fn xkb_context_unref(..._args) any {
+      "Runs the xkb context unref operation."
+      0
+   }
+   fn xkb_keymap_new_from_string(..._args) any {
+      "Runs the xkb keymap new from string operation."
+      0
+   }
+   fn xkb_keymap_mod_get_index(..._args) any {
+      "Runs the xkb keymap mod get index operation."
+      0
+   }
+   fn xkb_keymap_unref(..._args) any {
+      "Runs the xkb keymap unref operation."
+      0
+   }
+   fn xkb_keysym_get_name(..._args) any {
+      "Runs the xkb keysym get name operation."
+      0
+   }
+   fn xkb_keysym_to_utf32(..._args) any {
+      "Runs the xkb keysym to utf32 operation."
+      0
+   }
+   fn xkb_state_key_get_one_sym(..._args) any {
+      "Runs the xkb state key get one sym operation."
+      0
+   }
+   fn xkb_state_key_get_utf8(..._args) any {
+      "Runs the xkb state key get utf8 operation."
+      0
+   }
+   fn xkb_state_mod_index_is_active(..._args) any {
+      "Returns whether xkb state mod index is active."
+      0
+   }
+   fn xkb_state_new(..._args) any {
+      "Runs the xkb state new operation."
+      0
+   }
+   fn xkb_state_unref(..._args) any {
+      "Runs the xkb state unref operation."
+      0
+   }
+   fn xkb_state_update_mask(..._args) any {
+      "Runs the xkb state update mask operation."
+      0
+   }
+   fn close(..._args) any {
+      "Closes close."
+      0
+   }
+   fn mmap(..._args) any {
+      "Runs the mmap operation."
+      -1
+   }
+   fn munmap(..._args) any {
+      "Runs the munmap operation."
+      0
+   }
+   fn pipe(..._args) any {
+      "Runs the pipe operation."
+      -1
+   }
+   fn poll(..._args) any {
+      "Polls poll."
+      0
+   }
+   fn read(..._args) any {
+      "Reads read."
+      0
+   }
+   fn strdup(..._args) any {
+      "Runs the strdup operation."
+      0
+   }
+   fn write(..._args) any {
+      "Writes write."
+      0
+   }
 }
 
-fn _is_debug(): bool { ui_profile.debug_enabled() }
+fn _is_debug() bool { ui_profile.debug_enabled() }
 
-fn _dbg(any: msg): any { if(_is_debug()){ ui_profile.print_text("[wayland] " + msg) } }
+fn _dbg(any msg) any { if(_is_debug()){ ui_profile.print_text("[wayland] " + msg) } }
 
-fn _dbgu(any: msg): any { if(_is_debug()){ ui_profile.print_text("[wayland:v] " + msg) } }
+fn _dbgu(any msg) any { if(_is_debug()){ ui_profile.print_text("[wayland:v] " + msg) } }
 
-fn _dbg_err(any: msg): any { if(_is_debug()){ ui_profile.print_text("[wayland:ERROR] " + msg) } }
+fn _dbg_err(any msg) any { if(_is_debug()){ ui_profile.print_text("[wayland:ERROR] " + msg) } }
 mut _wayland_globals = 0
 
-fn set_globals(any: g): any {
+fn set_globals(any g) any {
    "Overrides the process-global Wayland state dictionary."
    _wayland_globals = g
 }
@@ -300,14 +446,14 @@ comptime table WaylandScancodeKey {
    _ -> default
 }
 
-fn _translate_wayland_scancode(any: scancode): int { comptime match WaylandScancodeKey(int(scancode), 0) }
+fn _translate_wayland_scancode(any scancode) int { comptime match WaylandScancodeKey(int(scancode), 0) }
 
-fn _push_event(any: win, int: typ, any: data=0): any {
+fn _push_event(any win, int typ, any data=0) any {
    if(!win){ return 0 }
    _pending_events = _pending_events.append(ui_event.make_event(typ, win, win.get("handle", 0), data))
 }
 
-fn _broadcast_event(int: typ, any: data=0): any {
+fn _broadcast_event(int typ, any data=0) any {
    def keys = dict_keys(_windows)
    mut i = 0
    def keys_n = keys.len
@@ -336,7 +482,7 @@ def _WO_SIZE = 112
 def _WL_IFACE_SZ = 40
 def _WL_MSG_SZ = 24
 
-fn _build_msgs(list: msgs): any {
+fn _build_msgs(list msgs) any {
    def n = msgs.len
    def ms = malloc(_WL_MSG_SZ * n)
    if(!ms){ return 0 }
@@ -344,8 +490,8 @@ fn _build_msgs(list: msgs): any {
    while(i < n){
       def m = msgs.get(i)
       def msg = ms + i * _WL_MSG_SZ
-      store64_h(msg, cstr(m.get(0)), 0) ;; name
-      store64_h(msg, cstr(m.get(1)), 8) ;; signature
+      store64_h(msg, cstr(m.get(0)), 0)
+      store64_h(msg, cstr(m.get(1)), 8)
       def types_list = m.get(2, 0)
       if(types_list && is_list(types_list)){
          def types_n = types_list.len
@@ -356,7 +502,7 @@ fn _build_msgs(list: msgs): any {
                store64_h(ts, types_list.get(j, 0), j * 8)
                j += 1
             }
-            store64_h(msg, ts, 16) ;; types
+            store64_h(msg, ts, 16)
          }
       } else {
          store64_h(msg, 0, 16)
@@ -366,19 +512,19 @@ fn _build_msgs(list: msgs): any {
    ms
 }
 
-fn _create_interface(str: name, int: version, any: methods=0, any: events=0): any {
+fn _create_interface(str name, int version, any methods=0, any events=0) any {
    def iface = malloc(_WL_IFACE_SZ)
    if(!iface){ return 0 }
    memset(iface, 0, _WL_IFACE_SZ)
-   store64_h(iface, cstr(name), 0) ;; name
-   store32(iface, int(version), 8) ;; version
+   store64_h(iface, cstr(name), 0)
+   store32(iface, int(version), 8)
    if(methods){
-      store32(iface, methods.len, 12) ;; method_count
-      store64_h(iface, _build_msgs(methods), 16) ;; methods
+      store32(iface, methods.len, 12)
+      store64_h(iface, _build_msgs(methods), 16)
    }
    if(events){
-      store32(iface, events.len, 24) ;; event_count
-      store64_h(iface, _build_msgs(events), 32) ;; events
+      store32(iface, events.len, 24)
+      store64_h(iface, _build_msgs(events), 32)
    }
    iface
 }
@@ -420,7 +566,7 @@ mut _wl_callback_interface_local = 0
 mut _wl_subcompositor_interface_local = 0
 mut _wl_subsurface_interface_local = 0
 
-fn _init_core_interfaces_base(): any {
+fn _init_core_interfaces_base() any {
    _wl_callback_interface_local = _create_interface(
       "wl_callback", 1, 0, [["done", "u", 0]],
    )
@@ -488,7 +634,7 @@ fn _init_core_interfaces_base(): any {
    )
 }
 
-fn _init_core_interfaces_data(): any {
+fn _init_core_interfaces_data() any {
    _wl_data_offer_interface_local = _create_interface("wl_data_offer", 3,
       [
          ["accept", "u?s", 0], ["receive", "sh", 0], ["destroy", "", 0],
@@ -547,7 +693,7 @@ fn _init_core_interfaces_data(): any {
    )
 }
 
-fn _init_core_interfaces_shell(): any {
+fn _init_core_interfaces_shell() any {
    _wl_subsurface_interface_local = _create_interface("wl_subsurface", 1,
       [
          ["destroy", "", 0], ["set_position", "ii", 0],
@@ -577,14 +723,14 @@ fn _init_core_interfaces_shell(): any {
    )
 }
 
-fn _init_core_interfaces(): any {
+fn _init_core_interfaces() any {
    if(_wl_registry_interface_local){ return 0 }
    _init_core_interfaces_base()
    _init_core_interfaces_data()
    _init_core_interfaces_shell()
 }
 
-fn _init_xdg_interfaces(): any {
+fn _init_xdg_interfaces() any {
    _init_core_interfaces()
    if(_xdg_wm_base_interface){ return 0 }
    def wl_seat_iface = _interface_symbol("wl_seat_interface")
@@ -631,7 +777,7 @@ fn _init_xdg_interfaces(): any {
    [["ping", "u", 0]])
 }
 
-fn _init_unstable_interfaces(): any {
+fn _init_unstable_interfaces() any {
    _init_core_interfaces()
    _init_xdg_interfaces()
    if(_wp_relative_pointer_manager_interface){ return 0 }
@@ -730,42 +876,42 @@ def PROT_READ = 0x1
 def MAP_PRIVATE = 0x02
 
 comptime template _wl_marshal_flags_wrap0(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags) }
       #else { return 0 } #endif
    }
 }
 
 comptime template _wl_marshal_flags_wrap1(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags, any: arg0): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags, any arg0) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags, arg0) }
       #else { return 0 } #endif
    }
 }
 
 comptime template _wl_marshal_flags_wrap2(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags, any: arg0, any: arg1): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags, any arg0, any arg1) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags, arg0, arg1) }
       #else { return 0 } #endif
    }
 }
 
 comptime template _wl_marshal_flags_wrap3(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags, any: arg0, any: arg1, any: arg2): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags, any arg0, any arg1, any arg2) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags, arg0, arg1, arg2) }
       #else { return 0 } #endif
    }
 }
 
 comptime template _wl_marshal_flags_wrap4(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags, any: arg0, any: arg1, any: arg2, any: arg3): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags, any arg0, any arg1, any arg2, any arg3) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags, arg0, arg1, arg2, arg3) }
       #else { return 0 } #endif
    }
 }
 
 comptime template _wl_marshal_flags_wrap5(name){
-   fn ${name}(any: proxy, int: opcode, any: interface, int: version, any: flags, any: arg0, any: arg1, any: arg2, any: arg3, any: arg4): any {
+   fn ${name}(any proxy, int opcode, any interface, int version, any flags, any arg0, any arg1, any arg2, any arg3, any arg4) any {
       #linux { return wl_proxy_marshal_flags(proxy, opcode, interface, version, flags, arg0, arg1, arg2, arg3, arg4) }
       #else { return 0 } #endif
    }
@@ -785,51 +931,51 @@ comptime emit _wl_marshal_flags_wrap0(wl_proxy_marshal_flags_void)
 comptime emit _wl_marshal_flags_wrap1(wl_proxy_marshal_flags_u)
 comptime emit _wl_marshal_flags_wrap4(wl_proxy_marshal_flags_registry_bind)
 
-fn _wl_proxy_marshal_new_id0(any: proxy, int: opcode, any: interface): any {
+fn _wl_proxy_marshal_new_id0(any proxy, int opcode, any interface) any {
    if(!proxy || !interface){ return 0 }
    wl_proxy_marshal_flags_ptr(proxy, opcode, interface, int(get_proxy_version(proxy)), 0, 0)
 }
 
-fn _wl_proxy_marshal_new_id1_obj(any: proxy, int: opcode, any: interface, any: arg0): any {
+fn _wl_proxy_marshal_new_id1_obj(any proxy, int opcode, any interface, any arg0) any {
    if(!proxy || !interface){ return 0 }
    wl_proxy_marshal_flags_ptr_obj(proxy, opcode, interface, int(get_proxy_version(proxy)), 0, 0, arg0)
 }
 
-fn _wl_proxy_marshal_void(any: proxy, int: opcode): any {
+fn _wl_proxy_marshal_void(any proxy, int opcode) any {
    if(!proxy){ return 0 }
    wl_proxy_marshal_flags_void(proxy, opcode, 0, int(get_proxy_version(proxy)), 0)
 }
 
-fn _wl_proxy_marshal_str(any: proxy, int: opcode, any: s): any {
+fn _wl_proxy_marshal_str(any proxy, int opcode, any s) any {
    if(!proxy){ return 0 }
    wl_proxy_marshal_flags_str(proxy, opcode, 0, int(get_proxy_version(proxy)), 0, s)
 }
 
-fn _wl_proxy_marshal_u(any: proxy, int: opcode, int: value): any {
+fn _wl_proxy_marshal_u(any proxy, int opcode, int value) any {
    if(!proxy){ return 0 }
    wl_proxy_marshal_flags_u(proxy, opcode, 0, int(get_proxy_version(proxy)), 0, int(value))
 }
 
-fn _wl_display_get_registry(any: display): any {
+fn _wl_display_get_registry(any display) any {
    if(!display){ return 0 }
    def iface = _interface_symbol("wl_registry_interface")
    if(!iface){ return 0 }
    wl_proxy_marshal_flags_ptr(display, WL_DISPLAY_GET_REGISTRY, iface, int(get_proxy_version(display)), 0, 0)
 }
 
-fn _wl_registry_destroy(any: registry): bool {
+fn _wl_registry_destroy(any registry) bool {
    if(!registry){ return false }
    #linux { wl_proxy_destroy(registry) }
    true
 }
 
-fn _wl_registry_add_listener(any: registry, any: listener, any: data): int {
+fn _wl_registry_add_listener(any registry, any listener, any data) int {
    if(!registry || !listener){ return -1 }
    #linux { return wl_proxy_add_listener(registry, listener, data) }
    #else { return -1 } #endif
 }
 
-fn _wl_registry_bind(any: registry, any: name, any: interface, any: version): any {
+fn _wl_registry_bind(any registry, any name, any interface, any version) any {
    if(!registry || !interface){ return 0 }
    def iface_name = load64_h(interface, 0)
    if(!iface_name){ return 0 }
@@ -837,14 +983,14 @@ fn _wl_registry_bind(any: registry, any: name, any: interface, any: version): an
    int(name), iface_name, int(version), 0)
 }
 
-fn _wl_compositor_create_surface(any: compositor): any {
+fn _wl_compositor_create_surface(any compositor) any {
    if(!compositor){ return 0 }
    def iface = _interface_symbol("wl_surface_interface")
    if(!iface){ return 0 }
    _wl_proxy_marshal_new_id0(compositor, WL_COMPOSITOR_CREATE_SURFACE, iface)
 }
 
-fn available(): bool {
+fn available() bool {
    "Returns true when the process appears to be running under Wayland."
    #linux {
       def wd = common.env_trim("WAYLAND_DISPLAY")
@@ -857,12 +1003,12 @@ fn available(): bool {
    false
 }
 
-fn get_backend_name(): str {
+fn get_backend_name() str {
    "Identifies this backend entry module."
    "wayland"
 }
 
-fn connect_display(any: name=0): any {
+fn connect_display(any name=0) any {
    "Connects to a Wayland display."
    if(!available()){ _dbg("connect_display: not available") return 0 }
    mut dpy = 0
@@ -874,24 +1020,24 @@ fn connect_display(any: name=0): any {
    } else {
       dpy = wl_display_connect(0)
    }
-   _dbg("connect_display: dpy=" + to_hex(dpy))
+   _dbg("connect_display: dpy=" + str.to_hex(dpy))
    dpy
 }
 
-fn disconnect_display(any: display): bool {
+fn disconnect_display(any display) bool {
    "Disconnects from a Wayland display."
-   _dbg("disconnect_display: dpy=" + to_hex(display))
+   _dbg("disconnect_display: dpy=" + str.to_hex(display))
    if(display){ wl_display_disconnect(display) }
    true
 }
 
-fn get_registry(any: display): any {
+fn get_registry(any display) any {
    "Returns the Wayland registry for a connected display."
    if(!display){ return 0 }
    _wl_display_get_registry(display)
 }
 
-fn destroy_registry(any: registry): bool {
+fn destroy_registry(any registry) bool {
    "Destroys a Wayland registry object."
    if(!registry){ return false }
    _wl_registry_destroy(registry)
@@ -899,7 +1045,7 @@ fn destroy_registry(any: registry): bool {
 }
 
 comptime template _wl_wrap_display_i(name, doc, call_fn){
-   fn ${name}(any: display): int {
+   fn ${name}(any display) int {
       doc
       if(!display){ return -1 }
       call_fn(display)
@@ -907,7 +1053,7 @@ comptime template _wl_wrap_display_i(name, doc, call_fn){
 }
 
 comptime template _wl_wrap_display_ptr(name, doc, call_fn){
-   fn ${name}(any: display): any {
+   fn ${name}(any display) any {
       doc
       if(!display){ return 0 }
       call_fn(display)
@@ -915,7 +1061,7 @@ comptime template _wl_wrap_display_ptr(name, doc, call_fn){
 }
 
 comptime template _wl_wrap_display_bool(name, doc, call_fn){
-   fn ${name}(any: display): bool {
+   fn ${name}(any display) bool {
       doc
       if(!display){ return false }
       call_fn(display)
@@ -924,7 +1070,7 @@ comptime template _wl_wrap_display_bool(name, doc, call_fn){
 }
 
 comptime template _wl_wrap_display_queue_i(name, doc, call_fn){
-   fn ${name}(any: display, any: queue): int {
+   fn ${name}(any display, any queue) int {
       doc
       if(!display || !queue){ return -1 }
       call_fn(display, queue)
@@ -932,7 +1078,7 @@ comptime template _wl_wrap_display_queue_i(name, doc, call_fn){
 }
 
 comptime template _wl_wrap_proxy_ptr(name, doc, call_fn){
-   fn ${name}(any: proxy): any {
+   fn ${name}(any proxy) any {
       doc
       if(!proxy){ return 0 }
       call_fn(proxy)
@@ -940,7 +1086,7 @@ comptime template _wl_wrap_proxy_ptr(name, doc, call_fn){
 }
 
 comptime template _wl_wrap_proxy_bool(name, doc, call_fn){
-   fn ${name}(any: proxy): bool {
+   fn ${name}(any proxy) bool {
       doc
       if(!proxy){ return false }
       call_fn(proxy)
@@ -958,14 +1104,14 @@ comptime emit _wl_wrap_display_i(read_events, "Reads pending Wayland events afte
 comptime emit _wl_wrap_display_ptr(create_event_queue, "Creates a dedicated Wayland event queue.", wl_display_create_queue)
 comptime emit _wl_wrap_display_bool(cancel_read, "Cancels a previously prepared blocking read.", wl_display_cancel_read)
 
-fn wl_pointer_set_cursor(any: pointer, any: serial, any: surface, any: hotspot_x, any: hotspot_y): bool {
+fn wl_pointer_set_cursor(any pointer, any serial, any surface, any hotspot_x, any hotspot_y) bool {
    "Sends wl_pointer.set_cursor(serial, surface, hotspot_x, hotspot_y)."
    if(!pointer){ return false }
    wl_proxy_marshal_flags_ptr_obj(pointer, _WP_SET_CURSOR, 0, wl_proxy_get_version(pointer), 0, surface, 0)
    true
 }
 
-fn destroy_event_queue(any: queue): bool {
+fn destroy_event_queue(any queue) bool {
    "Destroys a previously created Wayland event queue."
    if(!queue){ return false }
    wl_event_queue_destroy(queue)
@@ -980,7 +1126,7 @@ comptime emit _wl_wrap_proxy_bool(destroy_proxy, "Destroys a generic Wayland pro
 comptime emit _wl_wrap_proxy_bool(destroy_proxy_wrapper, "Destroys a Wayland proxy wrapper.", wl_proxy_wrapper_destroy)
 
 comptime template _wl_wrap_proxy_bool2(name, doc, require_arg, call_fn){
-   fn ${name}(any: proxy, any: arg0): bool {
+   fn ${name}(any proxy, any arg0) bool {
       doc
       if(!proxy || (require_arg && !arg0)){ return false }
       call_fn(proxy, arg0)
@@ -991,18 +1137,18 @@ comptime template _wl_wrap_proxy_bool2(name, doc, require_arg, call_fn){
 comptime emit _wl_wrap_proxy_bool2(set_proxy_queue, "Assigns a Wayland proxy to an explicit event queue.", true, wl_proxy_set_queue)
 comptime emit _wl_wrap_proxy_bool2(set_proxy_user_data, "Sets the Wayland proxy user-data pointer.", false, wl_proxy_set_user_data)
 
-fn get_proxy_version(any: proxy): int {
+fn get_proxy_version(any proxy) int {
    "Returns the protocol version advertised by a Wayland proxy."
    if(!proxy){ return 0 }
    int(wl_proxy_get_version(proxy))
 }
 
-fn _bind_version(int: advertised, int: max_supported): int {
+fn _bind_version(int advertised, int max_supported) int {
    if(advertised < 1){ return 1 }
    advertised < max_supported ? advertised : max_supported
 }
 
-fn _interface_symbol(str: name): any {
+fn _interface_symbol(str name) any {
    if(!name || !is_str(name) || name.len == 0){ return 0 }
    _init_core_interfaces()
    if(name == "wl_registry_interface"){ return _wl_registry_interface_local }
@@ -1031,34 +1177,34 @@ fn _interface_symbol(str: name): any {
    _wl_client_lib ? ffi.dlsym(_wl_client_lib, name) : 0
 }
 
-fn _create_seat_pointer(any: seat): any {
+fn _create_seat_pointer(any seat) any {
    if(!seat){ return 0 }
    def iface = _interface_symbol("wl_pointer_interface")
    if(!iface){ return 0 }
    _wl_proxy_marshal_new_id0(seat, WL_SEAT_GET_POINTER, iface)
 }
 
-fn _create_seat_keyboard(any: seat): any {
+fn _create_seat_keyboard(any seat) any {
    if(!seat){ return 0 }
    def iface = _interface_symbol("wl_keyboard_interface")
    if(!iface){ return 0 }
    _wl_proxy_marshal_new_id0(seat, WL_SEAT_GET_KEYBOARD, iface)
 }
 
-fn _create_data_device(any: manager, any: seat): any {
+fn _create_data_device(any manager, any seat) any {
    if(!manager || !seat){ return 0 }
    def iface = _interface_symbol("wl_data_device_interface")
    if(!iface){ return 0 }
    _wl_proxy_marshal_new_id1_obj(manager, WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE, iface, seat)
 }
 
-fn create_wl_surface(any: compositor): any {
+fn create_wl_surface(any compositor) any {
    "Creates a raw `wl_surface` from `wl_compositor`."
    if(!compositor){ return 0 }
    _wl_compositor_create_surface(compositor)
 }
 
-fn create_xdg_surface(any: wm_base, any: surface): any {
+fn create_xdg_surface(any wm_base, any surface) any {
    "Creates an `xdg_surface` wrapper around a `wl_surface`."
    if(!wm_base || !surface){ return 0 }
    _init_xdg_interfaces()
@@ -1067,7 +1213,7 @@ fn create_xdg_surface(any: wm_base, any: surface): any {
    _wl_proxy_marshal_new_id1_obj(wm_base, XDG_WM_BASE_GET_XDG_SURFACE, iface, surface)
 }
 
-fn create_xdg_toplevel(any: xdg_surface): any {
+fn create_xdg_toplevel(any xdg_surface) any {
    "Creates an `xdg_toplevel` object from an `xdg_surface`."
    if(!xdg_surface){ return 0 }
    _init_xdg_interfaces()
@@ -1076,36 +1222,36 @@ fn create_xdg_toplevel(any: xdg_surface): any {
    _wl_proxy_marshal_new_id0(xdg_surface, XDG_SURFACE_GET_TOPLEVEL, iface)
 }
 
-fn xdg_toplevel_set_title(any: toplevel, any: title): any {
+fn xdg_toplevel_set_title(any toplevel, any title) any {
    "Sets the title of an `xdg_toplevel` window."
    if(!toplevel){ return 0 }
    def s = cstr(title)
    _wl_proxy_marshal_str(toplevel, XDG_TOPLEVEL_SET_TITLE, s)
 }
 
-fn xdg_toplevel_set_app_id(any: toplevel, any: app_id): any {
+fn xdg_toplevel_set_app_id(any toplevel, any app_id) any {
    "Sets the app_id of an `xdg_toplevel` window."
    if(!toplevel){ return 0 }
    def s = cstr(app_id)
    _wl_proxy_marshal_str(toplevel, XDG_TOPLEVEL_SET_APP_ID, s)
 }
 
-fn xdg_toplevel_set_minimized(any: toplevel): any {
+fn xdg_toplevel_set_minimized(any toplevel) any {
    "Requests minimization for an `xdg_toplevel`."
    if(toplevel){ _wl_proxy_marshal_void(toplevel, XDG_TOPLEVEL_SET_MINIMIZED) }
 }
 
-fn xdg_toplevel_set_maximized(any: toplevel): any {
+fn xdg_toplevel_set_maximized(any toplevel) any {
    "Requests maximization for an `xdg_toplevel`."
    if(toplevel){ _wl_proxy_marshal_void(toplevel, XDG_TOPLEVEL_SET_MAXIMIZED) }
 }
 
-fn xdg_toplevel_unset_maximized(any: toplevel): any {
+fn xdg_toplevel_unset_maximized(any toplevel) any {
    "Restores an `xdg_toplevel` from maximized state."
    if(toplevel){ _wl_proxy_marshal_void(toplevel, XDG_TOPLEVEL_UNSET_MAXIMIZED) }
 }
 
-fn _surface_handle_enter(any: data, any: surface, any: output): any {
+fn _surface_handle_enter(any data, any surface, any output) any {
    mut win = _windows.get(data, 0)
    if(!win || !is_dict(win)){ return 0 }
    def outputs = win.get("outputs", [])
@@ -1113,7 +1259,7 @@ fn _surface_handle_enter(any: data, any: surface, any: output): any {
    _windows = _windows.set(data, win)
 }
 
-fn _surface_handle_leave(any: data, any: surface, any: output): any {
+fn _surface_handle_leave(any data, any surface, any output) any {
    mut win = _windows.get(data, 0)
    if(!win || !is_dict(win)){ return 0 }
    def outputs = win.get("outputs", [])
@@ -1129,9 +1275,9 @@ fn _surface_handle_leave(any: data, any: surface, any: output): any {
    _windows = _windows.set(data, win)
 }
 
-fn _xdg_surface_handle_configure(any: surface, any: xdg_surface, any: serial): any {
+fn _xdg_surface_handle_configure(any surface, any xdg_surface, any serial) any {
    if(!xdg_surface){ return 0 }
-   _dbgu("xdg_surface.configure surface=0x" + to_hex(surface) + " serial=" + to_str(from_int(serial)))
+   _dbgu("xdg_surface.configure surface=0x" + str.to_hex(surface) + " serial=" + to_str(from_int(serial)))
    _wl_proxy_marshal_u(xdg_surface, XDG_SURFACE_ACK_CONFIGURE, int(from_int(serial)))
    mut win = _windows.get(surface, 0)
    if(win){
@@ -1152,10 +1298,10 @@ fn _xdg_surface_handle_configure(any: surface, any: xdg_surface, any: serial): a
    }
 }
 
-fn _xdg_toplevel_handle_configure(any: surface, any: toplevel, any: width, any: height, any: states): any {
+fn _xdg_toplevel_handle_configure(any surface, any toplevel, any width, any height, any states) any {
    mut win = _windows.get(surface, 0)
    if(!win || !is_dict(win)){ return 0 }
-   _dbgu("xdg_toplevel.configure surface=0x" + to_hex(surface) +
+   _dbgu("xdg_toplevel.configure surface=0x" + str.to_hex(surface) +
       " width=" + to_str(int(from_int(width))) +
    " height=" + to_str(int(from_int(height))))
    mut next_maximized = false
@@ -1195,12 +1341,12 @@ fn _xdg_toplevel_handle_configure(any: surface, any: toplevel, any: width, any: 
    _windows = _windows.set(surface, win)
 }
 
-fn _xdg_toplevel_handle_close(any: win_obj, any: toplevel): any {
+fn _xdg_toplevel_handle_close(any win_obj, any toplevel) any {
    def win = _windows.get(win_obj, 0)
    if(win){ _push_event(win, 15, 0) }
 }
 
-fn _decoration_handle_configure(any: win_obj, any: decoration, any: mode): any {
+fn _decoration_handle_configure(any win_obj, any decoration, any mode) any {
    mut win = _windows.get(win_obj, 0)
    if(win && is_dict(win)){
       win = win.set("decoration_mode", int(from_int(mode)))
@@ -1208,7 +1354,7 @@ fn _decoration_handle_configure(any: win_obj, any: decoration, any: mode): any {
    }
 }
 
-fn _create_shell_objects(any: win): any {
+fn _create_shell_objects(any win) any {
    if(!win || !is_dict(win)){ return win }
    def handle = win.get("handle", 0)
    def globals = win.get("globals", 0)
@@ -1253,7 +1399,7 @@ fn _create_shell_objects(any: win): any {
    next_win
 }
 
-fn _destroy_shell_objects(any: win): any {
+fn _destroy_shell_objects(any win) any {
    if(!win || !is_dict(win)){ return win }
    def xdg_surface = win.get("xdg_surface", 0)
    def toplevel = win.get("xdg_toplevel", 0)
@@ -1264,16 +1410,16 @@ fn _destroy_shell_objects(any: win): any {
    next_win
 }
 
-fn create_basic_window(any: globals, str: title, int: width, int: height, str: app_id="nytrix"): any {
+fn create_basic_window(any globals, str title, int width, int height, str app_id="nytrix") any {
    "High-level helper to create a Wayland window with all necessary surface/shell wrappers."
    _dbg("create_basic_window: title=" + title + " size=" + to_str(width) + "x" + to_str(height))
    if(!globals || !is_dict(globals)){ _dbg_err("no globals") return 0 }
    def comp = globals.get("compositor", 0)
    if(!comp){ _dbg_err("no compositor") return 0 }
-   _dbg("  compositor=0x" + to_hex(comp))
+   _dbg("  compositor=0x" + str.to_hex(comp))
    def surface = create_wl_surface(comp)
    if(!surface){ _dbg_err("failed to create surface") return 0 }
-   _dbg("  surface=0x" + to_hex(surface))
+   _dbg("  surface=0x" + str.to_hex(surface))
    def wl_surface_listener = zalloc(16)
    store64_h(wl_surface_listener, _surface_handle_enter, 0)
    store64_h(wl_surface_listener, _surface_handle_leave, 8)
@@ -1317,21 +1463,21 @@ fn create_basic_window(any: globals, str: title, int: width, int: height, str: a
    }
    _windows = _windows.set(surface, win)
    _wl_proxy_marshal_void(surface, WL_SURFACE_COMMIT)
-   _dbgu("create_basic_window commit surface=0x" + to_hex(surface))
+   _dbgu("create_basic_window commit surface=0x" + str.to_hex(surface))
    def display = globals.get("handle", 0)
    if(display){
-      _dbgu("create_basic_window roundtrip begin surface=0x" + to_hex(surface))
+      _dbgu("create_basic_window roundtrip begin surface=0x" + str.to_hex(surface))
       wl_display_roundtrip(display)
-      _dbgu("create_basic_window roundtrip end surface=0x" + to_hex(surface))
+      _dbgu("create_basic_window roundtrip end surface=0x" + str.to_hex(surface))
    }
    _windows.get(surface, win)
 }
 
-fn _wl_destroy_proxy_slot(dict: win, str: key_proxy, str: key_listener="", str: key_data=""): bool {
+fn _wl_destroy_proxy_slot(dict win, str key_proxy, str key_listener="", str key_data="") bool {
    if(!win || !is_dict(win)){ return false }
    def handle = win.get(key_proxy, 0)
    if(!handle){ return false }
-   wl_proxy_marshal_flags_ptr(handle, 0, 0, 1, 1, 0) ;; destroy
+   wl_proxy_marshal_flags_ptr(handle, 0, 0, 1, 1, 0)
    destroy_proxy(handle)
    if(key_listener){
       def listener = win.get(key_listener, 0)
@@ -1344,7 +1490,7 @@ fn _wl_destroy_proxy_slot(dict: win, str: key_proxy, str: key_listener="", str: 
    true
 }
 
-fn destroy_basic_window(any: win): bool {
+fn destroy_basic_window(any win) bool {
    "Destroys a Wayland window and its associated surface proxies."
    if(!win || !is_dict(win)){ return false }
    def surface = win.get("handle", 0)
@@ -1359,25 +1505,25 @@ fn destroy_basic_window(any: win): bool {
    true
 }
 
-fn get_size(any: win): list {
+fn get_size(any win) list {
    "Returns the Wayland window size as [width, height]."
    if(!win || !is_dict(win)){ return [0, 0] }
    [win.get("w", 0), win.get("h", 0)]
 }
 
-fn set_size(any: win, int: w, int: h): bool {
+fn set_size(any win, int w, int h) bool {
    "Sets the Wayland window size(as a hint to the compositor)."
    if(!win || !is_dict(win)){ return false }
    true
 }
 
-fn get_cursor_pos(any: win): list {
+fn get_cursor_pos(any win) list {
    "Returns the current cursor position relative to the Wayland window."
    if(!win || !is_dict(win)){ return [0.0, 0.0] }
    [float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))]
 }
 
-fn get_key_name(any: win, int: key, int: scancode): str {
+fn get_key_name(any win, int key, int scancode) str {
    "Returns the keyboard-layout specific name for a key using XKB if available."
    if(!win || !is_dict(win)){ return "" }
    def globals = win.get("globals", 0)
@@ -1405,24 +1551,24 @@ fn get_key_name(any: win, int: key, int: scancode): str {
    ""
 }
 
-fn set_window_icon(any: win, any: images): bool {
+fn set_window_icon(any win, any images) bool {
    "Wayland does not support setting window icons directly."
    false
 }
 
-fn get_key_state(any: win, int: key): int {
+fn get_key_state(any win, int key) int {
    "Returns the Wayland key state from the local dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get("key_states", dict(8)).get(key, false) ? 1 : 0
 }
 
-fn get_mouse_button_state(any: win, int: btn): int {
+fn get_mouse_button_state(any win, int btn) int {
    "Returns the Wayland mouse button state from the local dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get("mouse_button_" + to_str(btn), 0)
 }
 
-fn set_cursor_pos(any: win, any: x, any: y): bool {
+fn set_cursor_pos(any win, any x, any y) bool {
    "Wayland cursor warping: only available via pointer lock hint when CURSOR_DISABLED."
    if(!win || !is_dict(win)){ return false }
    def locked_ptr = win.get("locked_pointer", 0)
@@ -1432,7 +1578,7 @@ fn set_cursor_pos(any: win, any: x, any: y): bool {
    true
 }
 
-fn _ensure_cursor_theme(any: globals): any {
+fn _ensure_cursor_theme(any globals) any {
    if(_cursor_theme){ return _cursor_theme }
    if(!globals){ return 0 }
    def shm = globals.get("shm", 0)
@@ -1441,7 +1587,7 @@ fn _ensure_cursor_theme(any: globals): any {
    _cursor_theme
 }
 
-fn _ensure_cursor_surface(any: globals): any {
+fn _ensure_cursor_surface(any globals) any {
    if(_cursor_surface){ return _cursor_surface }
    if(!globals){ return 0 }
    def comp = globals.get("compositor", 0)
@@ -1451,19 +1597,19 @@ fn _ensure_cursor_surface(any: globals): any {
 }
 
 comptime table WaylandCursorShapeNames {
-   backend_api.ARROW_CURSOR -> ["default", "left_ptr", "arrow"]
-   backend_api.IBEAM_CURSOR -> ["text", "xterm", "ibeam"]
-   backend_api.CROSSHAIR_CURSOR -> ["crosshair", "cross"]
-   backend_api.POINTING_HAND_CURSOR -> ["pointer", "hand2", "pointing_hand"]
-   backend_api.RESIZE_EW_CURSOR -> ["ew-resize", "sb_h_double_arrow", "size_hor"]
-   backend_api.RESIZE_NS_CURSOR -> ["ns-resize", "sb_v_double_arrow", "size_ver"]
-   backend_api.RESIZE_NWSE_CURSOR -> ["nwse-resize", "top_left_corner", "size_fdiag"]
-   backend_api.RESIZE_NESW_CURSOR -> ["nesw-resize", "top_right_corner", "size_bdiag"]
-   backend_api.RESIZE_ALL_CURSOR -> ["all-scroll", "fleur", "size_all"]
-   backend_api.NOT_ALLOWED_CURSOR -> ["not-allowed", "crossed_circle", "forbidden"]
+   ARROW_CURSOR -> ["default", "left_ptr", "arrow"]
+   IBEAM_CURSOR -> ["text", "xterm", "ibeam"]
+   CROSSHAIR_CURSOR -> ["crosshair", "cross"]
+   POINTING_HAND_CURSOR -> ["pointer", "hand2", "pointing_hand"]
+   RESIZE_EW_CURSOR -> ["ew-resize", "sb_h_double_arrow", "size_hor"]
+   RESIZE_NS_CURSOR -> ["ns-resize", "sb_v_double_arrow", "size_ver"]
+   RESIZE_NWSE_CURSOR -> ["nwse-resize", "top_left_corner", "size_fdiag"]
+   RESIZE_NESW_CURSOR -> ["nesw-resize", "top_right_corner", "size_bdiag"]
+   RESIZE_ALL_CURSOR -> ["all-scroll", "fleur", "size_all"]
+   NOT_ALLOWED_CURSOR -> ["not-allowed", "crossed_circle", "forbidden"]
 }
 
-fn _wl_cursor_for_shape(any: theme, int: shape): any {
+fn _wl_cursor_for_shape(any theme, int shape) any {
    if(!theme){ return 0 }
    def names = comptime match WaylandCursorShapeNames(shape, ["default", "left_ptr", "arrow"])
    if(!names){ return 0 }
@@ -1477,23 +1623,23 @@ fn _wl_cursor_for_shape(any: theme, int: shape): any {
    0
 }
 
-fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
+fn create_cursor(any image, int xhot=0, int yhot=0) any {
    "Custom cursor from image data: stores as dict for deferred upload."
    if(!image){ return 0 }
    return {"type": "custom", "image": image, "xhot": xhot, "yhot": yhot}
 }
 
-fn create_standard_cursor(int: shape): dict {
+fn create_standard_cursor(int shape) dict {
    "Creates a Wayland standard cursor by shape index."
    return {"type": "standard", "shape": shape}
 }
 
-fn destroy_cursor(any: cursor): bool {
+fn destroy_cursor(any cursor) bool {
    "Destroys a cursor dict(theme-owned cursors are freed with the theme)."
    true
 }
 
-fn set_cursor(any: win, any: cursor): any {
+fn set_cursor(any win, any cursor) any {
    "Sets the cursor for a Wayland window using the cursor theme."
    if(!win || !is_dict(win)){ return win }
    def globals = win.get("globals", 0)
@@ -1515,8 +1661,8 @@ fn set_cursor(any: win, any: cursor): any {
    if(!wl_cur){ return win }
    def image_count = load32(wl_cur, 0)
    if(image_count == 0){ return win }
-   def images_ptr = load64_h(wl_cur, 8) ;; ptr to array of wl_cursor_image*
-   def img = load64_h(images_ptr, 0) ;; first image
+   def images_ptr = load64_h(wl_cur, 8)
+   def img = load64_h(images_ptr, 0)
    if(!img){ return win }
    def hx, hy = load32(img, 8), load32(img, 12)
    def buf = wl_cursor_image_get_buffer(img)
@@ -1527,7 +1673,7 @@ fn set_cursor(any: win, any: cursor): any {
    win
 }
 
-fn _ensure_data_source_iface(): any {
+fn _ensure_data_source_iface() any {
    if(!_wl_data_source_iface){
       _wl_data_source_iface = _create_interface("wl_data_source", 3,
          [["offer", "s", 0], ["destroy", "n", 0], ["set_actions", "u", 0]],
@@ -1536,14 +1682,14 @@ fn _ensure_data_source_iface(): any {
    _wl_data_source_iface
 }
 
-fn _data_source_send(any: data, any: source, any: mime_type, any: fd): any {
+fn _data_source_send(any data, any source, any mime_type, any fd) any {
    if(!_clipboard_text || !fd){ close(int(fd)) return 0 }
    def n = _clipboard_text.len
    if(n > 0){ write(int(fd), cstr(_clipboard_text), int(n)) }
    close(int(fd))
 }
 
-fn _data_source_cancelled(any: data, any: source): any {
+fn _data_source_cancelled(any data, any source) any {
    if(source && source == _clipboard_source){
       destroy_proxy(source)
       _clipboard_source = 0
@@ -1551,16 +1697,16 @@ fn _data_source_cancelled(any: data, any: source): any {
    }
 }
 
-fn _data_device_data_offer(any: data, any: device, any: offer): any {
+fn _data_device_data_offer(any data, any device, any offer) any {
 }
 
-fn _data_device_selection(any: data, any: device, any: offer): any {
+fn _data_device_selection(any data, any device, any offer) any {
    def prev = load64_h(data, _WG_CLIPBOARD_OFFER)
    if(prev && prev != offer){ destroy_proxy(prev) }
    store64_h(data, offer, _WG_CLIPBOARD_OFFER)
 }
 
-fn _data_device_enter(any: data, any: device, any: serial, any: surface, any: x, any: y, any: offer): any {
+fn _data_device_enter(any data, any device, any serial, any surface, any x, any y, any offer) any {
    if(!data){ return 0 }
    store64_h(data, offer, _WG_DND_OFFER)
    store64_h(data, surface, _WG_DND_SURFACE)
@@ -1569,17 +1715,17 @@ fn _data_device_enter(any: data, any: device, any: serial, any: surface, any: x,
       mut ev = dict(8)
       ev = ev.set("x", int(x))
       ev = ev.set("y", int(y))
-      _push_event(win, EVENT_DATA_DROP, ev)
+      _push_event(win, EVENT_DATA_DRAG, ev)
    }
 }
 
-fn _data_device_leave(any: data, any: device): any {
+fn _data_device_leave(any data, any device) any {
    if(!data){ return 0 }
    store64_h(data, 0, _WG_DND_OFFER)
    store64_h(data, 0, _WG_DND_SURFACE)
 }
 
-fn _data_device_motion(any: data, any: device, any: time, any: x, any: y): any {
+fn _data_device_motion(any data, any device, any time, any x, any y) any {
    if(!data){ return 0 }
    def surface = load64_h(data, _WG_DND_SURFACE)
    if(!surface){ return 0 }
@@ -1588,11 +1734,11 @@ fn _data_device_motion(any: data, any: device, any: time, any: x, any: y): any {
       mut ev = dict(8)
       ev = ev.set("x", int(x))
       ev = ev.set("y", int(y))
-      _push_event(win, EVENT_DATA_DROP, ev)
+      _push_event(win, EVENT_DATA_DRAG, ev)
    }
 }
 
-fn _data_device_drop(any: data, any: device): any {
+fn _data_device_drop(any data, any device) any {
    if(!data){ return 0 }
    def offer = load64_h(data, _WG_DND_OFFER)
    def surface = load64_h(data, _WG_DND_SURFACE)
@@ -1625,7 +1771,7 @@ fn _data_device_drop(any: data, any: device): any {
    store64_h(data, 0, _WG_DND_OFFER)
 }
 
-fn _install_data_device_listener(any: state): bool {
+fn _install_data_device_listener(any state) bool {
    if(!state){ return false }
    def device = load64_h(state, _WG_DATA_DEVICE)
    if(!device){ return false }
@@ -1646,7 +1792,7 @@ fn _install_data_device_listener(any: state): bool {
    true
 }
 
-fn set_clipboard(any: win, any: text): bool {
+fn set_clipboard(any win, any text) bool {
    "Sets the Wayland clipboard via wl_data_source / wl_data_device."
    if(!win || !is_dict(win)){ return false }
    def globals = win.get("globals", 0)
@@ -1667,7 +1813,7 @@ fn set_clipboard(any: win, any: text): bool {
    if(!source){ return false }
    def src_listener = zalloc(24)
    if(!src_listener){ destroy_proxy(source) return false }
-   store64_h(src_listener, 0, 0) ;; target (noop)
+   store64_h(src_listener, 0, 0)
    store64_h(src_listener, _data_source_send, 8)
    store64_h(src_listener, _data_source_cancelled, 16)
    wl_proxy_add_listener(source, src_listener, 0)
@@ -1682,7 +1828,7 @@ fn set_clipboard(any: win, any: text): bool {
    true
 }
 
-fn get_clipboard(any: win): str {
+fn get_clipboard(any win) str {
    "Gets the Wayland clipboard via wl_data_offer pipe receive."
    if(_clipboard_source && _clipboard_text.len > 0){ return _clipboard_text }
    if(!win || !is_dict(win)){ return "" }
@@ -1721,7 +1867,7 @@ fn get_clipboard(any: win): str {
    result
 }
 
-fn get_window_monitor(any: win): any {
+fn get_window_monitor(any win) any {
    "Returns the first associated output for a Wayland window."
    if(!is_dict(win)){ return 0 }
    def outputs = win.get("outputs", [])
@@ -1738,12 +1884,12 @@ fn get_window_monitor(any: win): any {
    0
 }
 
-fn set_window_monitor(dict: win, any: monitor, int: xpos, int: ypos, int: width, int: height, int: refresh_rate=0): dict {
+fn set_window_monitor(dict win, any monitor, int xpos, int ypos, int width, int height, int refresh_rate=0) dict {
    "Stub for Wayland window-monitor association."
    win
 }
 
-fn show_window(any: win): bool {
+fn show_window(any win) bool {
    "Shows the Wayland window by creating shell objects if needed."
    _dbg("show_window: visible=" + to_str(win.get("visible", false)))
    if(!win || !is_dict(win)){ _dbg("show_window: invalid win") return false }
@@ -1757,7 +1903,7 @@ fn show_window(any: win): bool {
    true
 }
 
-fn hide_window(any: win): bool {
+fn hide_window(any win) bool {
    "Hides the Wayland window by destroying shell objects and detaching surface buffer."
    if(!win || !is_dict(win)){ return false }
    if(!win.get("visible", false)){ return true }
@@ -1772,7 +1918,7 @@ fn hide_window(any: win): bool {
 }
 
 comptime template _wl_toplevel_action(name, doc, call_fn){
-   fn name(any: win): bool {
+   fn name(any win) bool {
       doc
       if(!win || !is_dict(win)){ return false }
       def toplevel = win.get("xdg_toplevel", 0)
@@ -1785,7 +1931,7 @@ comptime emit _wl_toplevel_action(iconify_window, "Iconify a native Wayland topl
 comptime emit _wl_toplevel_action(maximize_window, "Maximize a native Wayland toplevel.", xdg_toplevel_set_maximized)
 comptime emit _wl_toplevel_action(restore_window, "Restore a native Wayland toplevel.", xdg_toplevel_unset_maximized)
 
-fn _set_toplevel_size_limits(any: toplevel, int: min_w, int: min_h, int: max_w, int: max_h): bool {
+fn _set_toplevel_size_limits(any toplevel, int min_w, int min_h, int max_w, int max_h) bool {
    if(!toplevel){ return false }
    def ver = int(get_proxy_version(toplevel))
    def minw = (min_w >= 0 && min_h >= 0) ? int(min_w) : 0
@@ -1797,12 +1943,12 @@ fn _set_toplevel_size_limits(any: toplevel, int: min_w, int: min_h, int: max_w, 
    true
 }
 
-fn _window_toplevel(any: win): any {
+fn _window_toplevel(any win) any {
    if(!win || !is_dict(win)){ return 0 }
    win.get("xdg_toplevel", 0)
 }
 
-fn set_title(any: win, str: title): bool {
+fn set_title(any win, str title) bool {
    "Updates the Wayland platform window title."
    if(!title){ return false }
    def toplevel = _window_toplevel(win)
@@ -1810,12 +1956,12 @@ fn set_title(any: win, str: title): bool {
    xdg_toplevel_set_title(toplevel, title)
 }
 
-fn set_window_opacity(any: win, f64: opacity): bool {
+fn set_window_opacity(any win, f64 opacity) bool {
    "Applies window opacity via Wayland protocols(currently a no-op)."
    false
 }
 
-fn set_window_resizable(any: win, bool: enabled): bool {
+fn set_window_resizable(any win, bool enabled) bool {
    "Toggles the resizable state of a Wayland window by setting min/max sizes."
    def toplevel = _window_toplevel(win)
    if(!toplevel){ return false }
@@ -1826,7 +1972,7 @@ fn set_window_resizable(any: win, bool: enabled): bool {
    _set_toplevel_size_limits(toplevel, -1, -1, -1, -1)
 }
 
-fn set_window_decorated(any: win, bool: enabled): bool {
+fn set_window_decorated(any win, bool enabled) bool {
    "Requests server-side or no-decoration mode via zxdg_decoration_manager_v1."
    if(!win || !is_dict(win)){ return false }
    def globals = win.get("globals", 0)
@@ -1845,19 +1991,19 @@ fn set_window_decorated(any: win, bool: enabled): bool {
    true
 }
 
-fn set_window_floating(any: win, bool: enabled): bool {
+fn set_window_floating(any win, bool enabled) bool {
    "Stub for Wayland floating state(not directly supported by xdg-shell)."
    false
 }
 
-fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max_h): bool {
+fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) bool {
    "Sets size limits for a Wayland window via xdg_toplevel."
    def toplevel = _window_toplevel(win)
    if(!toplevel){ return false }
    _set_toplevel_size_limits(toplevel, min_w, min_h, max_w, max_h)
 }
 
-fn get_window_attrib(any: win, int: attrib): int {
+fn get_window_attrib(any win, int attrib) int {
    "Unified getter for Wayland window attributes matching Nytrix constants."
    if(!win || !is_dict(win)){ return 0 }
    match attrib {
@@ -1871,9 +2017,9 @@ fn get_window_attrib(any: win, int: attrib): int {
    }
 }
 
-fn _free_cstr_ptr(any: p): any { if(p){ free(p) } }
+fn _free_cstr_ptr(any p) any { if(p){ free(p) } }
 
-fn _new_output_state(any: output, any: global_name): any {
+fn _new_output_state(any output, any global_name) any {
    def state = zalloc(_WO_SIZE)
    if(!state){ return 0 }
    store64_h(state, output, _WO_PROXY)
@@ -1882,7 +2028,7 @@ fn _new_output_state(any: output, any: global_name): any {
    state
 }
 
-fn _append_output_state(any: state, any: out_state): bool {
+fn _append_output_state(any state, any out_state) bool {
    if(!state || !out_state){ return false }
    mut cap = load64_h(state, _WG_OUTPUT_CAP)
    mut arr = load64_h(state, _WG_OUTPUTS)
@@ -1902,25 +2048,25 @@ fn _append_output_state(any: state, any: out_state): bool {
    true
 }
 
-fn _output_count(any: state): int { state ? load64_h(state, _WG_OUTPUT_COUNT) : 0 }
+fn _output_count(any state) int { state ? load64_h(state, _WG_OUTPUT_COUNT) : 0 }
 
-fn _output_at(any: state, int: index): any {
+fn _output_at(any state, int index) any {
    if(!state || index < 0 || index >= _output_count(state)){ return 0 }
    def arr = load64_h(state, _WG_OUTPUTS)
    if(!arr){ return 0 }
    load64_h(arr, index * 8)
 }
 
-fn _refresh_hz(any: refresh_mhz): int { refresh_mhz > 0 ? int((refresh_mhz + 500) / 1000) : 0 }
+fn _refresh_hz(any refresh_mhz) int { refresh_mhz > 0 ? int((refresh_mhz + 500) / 1000) : 0 }
 
-fn _store_output_name_if_empty(any: out_state, any: make, any: model): any {
+fn _store_output_name_if_empty(any out_state, any make, any model) any {
    if(!out_state || load64_h(out_state, _WO_NAME)){ return 0 }
    def mk, md = make ? to_str(make) : "", model ? to_str(model) : ""
    def full = str.strip(mk + " " + md)
    if(full.len > 0){ store64_h(out_state, strdup(cstr(full)), _WO_NAME) }
 }
 
-fn _output_handle_geometry(any: data, any: wl_output, any: x, any: y, any: physical_width, any: physical_height, any: subpixel, any: make, any: model, any: transform): any {
+fn _output_handle_geometry(any data, any wl_output, any x, any y, any physical_width, any physical_height, any subpixel, any make, any model, any transform) any {
    if(!data){ return 0 }
    store64_h(data, from_int(x), _WO_X)
    store64_h(data, from_int(y), _WO_Y)
@@ -1929,7 +2075,7 @@ fn _output_handle_geometry(any: data, any: wl_output, any: x, any: y, any: physi
    _store_output_name_if_empty(data, make, model)
 }
 
-fn _output_handle_mode(any: data, any: wl_output, any: flags, any: width, any: height, any: refresh): any {
+fn _output_handle_mode(any data, any wl_output, any flags, any width, any height, any refresh) any {
    if(!data){ return 0 }
    def mode_flags = from_int(flags)
    if(band(mode_flags, WL_OUTPUT_MODE_CURRENT)){
@@ -1939,7 +2085,7 @@ fn _output_handle_mode(any: data, any: wl_output, any: flags, any: width, any: h
    }
 }
 
-fn _output_handle_done(any: data, any: wl_output): any {
+fn _output_handle_done(any data, any wl_output) any {
    if(!data){ return 0 }
    if(load64_h(data, _WO_WIDTH_MM) <= 0 || load64_h(data, _WO_HEIGHT_MM) <= 0){
       def w, h = load64_h(data, _WO_MODE_W), load64_h(data, _WO_MODE_H)
@@ -1956,7 +2102,7 @@ fn _output_handle_done(any: data, any: wl_output): any {
    }
 }
 
-fn _output_handle_scale(any: data, any: wl_output, any: factor): any {
+fn _output_handle_scale(any data, any wl_output, any factor) any {
    if(!data){ return 0 }
    def next_scale = int(from_int(factor))
    store64_h(data, next_scale, _WO_SCALE)
@@ -1981,19 +2127,19 @@ fn _output_handle_scale(any: data, any: wl_output, any: factor): any {
    }
 }
 
-fn _output_handle_name(any: data, any: wl_output, any: name): any {
+fn _output_handle_name(any data, any wl_output, any name) any {
    if(!data){ return 0 }
    _free_cstr_ptr(load64_h(data, _WO_NAME))
    store64_h(data, name ? strdup(name) : 0, _WO_NAME)
 }
 
-fn _output_handle_description(any: data, any: wl_output, any: description): any {
+fn _output_handle_description(any data, any wl_output, any description) any {
    if(!data){ return 0 }
    _free_cstr_ptr(load64_h(data, _WO_DESCRIPTION))
    store64_h(data, description ? strdup(description) : 0, _WO_DESCRIPTION)
 }
 
-fn _install_output_listener(any: out_state): bool {
+fn _install_output_listener(any out_state) bool {
    def any: state_mem = out_state
    if(!state_mem || load64_h(state_mem, _WO_LISTENER)){ return true }
    def listener = zalloc(48)
@@ -2013,7 +2159,7 @@ fn _install_output_listener(any: out_state): bool {
    true
 }
 
-fn _find_output_index_by_global_name(any: state, any: global_name): int {
+fn _find_output_index_by_global_name(any state, any global_name) int {
    mut i = 0
    while(i < _output_count(state)){
       def out_state = _output_at(state, i)
@@ -2023,7 +2169,7 @@ fn _find_output_index_by_global_name(any: state, any: global_name): int {
    -1
 }
 
-fn _destroy_output_state(any: out_state): any {
+fn _destroy_output_state(any out_state) any {
    if(!out_state){ return 0 }
    def proxy = load64_h(out_state, _WO_PROXY)
    def listener = load64_h(out_state, _WO_LISTENER)
@@ -2034,7 +2180,7 @@ fn _destroy_output_state(any: out_state): any {
    free(out_state)
 }
 
-fn _remove_output_state(any: state, int: index): bool {
+fn _remove_output_state(any state, int index) bool {
    if(!state || index < 0 || index >= _output_count(state)){ return false }
    def arr = load64_h(state, _WG_OUTPUTS)
    if(!arr){ return false }
@@ -2058,7 +2204,7 @@ fn _remove_output_state(any: state, int: index): bool {
    true
 }
 
-fn _output_state_to_dict(any: out_state): any {
+fn _output_state_to_dict(any out_state) any {
    if(!out_state){ return false }
    mut out = dict(8)
    out = out.set("handle", load64_h(out_state, _WO_PROXY))
@@ -2076,7 +2222,7 @@ fn _output_state_to_dict(any: out_state): any {
    out
 }
 
-fn _ensure_seat_objects(any: state): any {
+fn _ensure_seat_objects(any state) any {
    if(!state){ return 0 }
    def seat = load64_h(state, _WG_SEAT)
    def manager = load64_h(state, _WG_DATA_DEVICE_MANAGER)
@@ -2104,17 +2250,17 @@ fn _ensure_seat_objects(any: state): any {
    }
 }
 
-fn _pointer_pending(any: data): int {
+fn _pointer_pending(any data) int {
    if(!data){ return 0 }
    load32(data, _WG_PENDING_EVENTS)
 }
 
-fn _pointer_set_pending(any: data, int: bits): any {
+fn _pointer_set_pending(any data, int bits) any {
    if(!data){ return 0 }
    store32(data, bor(load32(data, _WG_PENDING_EVENTS), bits), _WG_PENDING_EVENTS)
 }
 
-fn _pointer_active_surface(any: data): any {
+fn _pointer_active_surface(any data) any {
    if(!data){ return 0 }
    def pending = _pointer_pending(data)
    if(band(pending, _WP_PENDING_SURFACE)){
@@ -2124,13 +2270,13 @@ fn _pointer_active_surface(any: data): any {
    load64_h(data, _WG_POINTER_FOCUS)
 }
 
-fn _pointer_apply_cursor(any: data, any: pointer, any: serial, any: win): any {
+fn _pointer_apply_cursor(any data, any pointer, any serial, any win) any {
    if(!data || !win || !is_dict(win)){ return 0 }
    def mode = win.get("mode_" + to_str(CURSOR), 0)
    if(mode == CURSOR_HIDDEN || mode == CURSOR_DISABLED){ wl_proxy_marshal_flags_full_set_cursor(pointer, serial, 0, 0, 0) }
 }
 
-fn _pointer_push_motion(any: surface, any: x, any: y): bool {
+fn _pointer_push_motion(any surface, any x, any y) bool {
    mut win = _windows.get(surface, 0)
    if(!win){ return false }
    win = win.set("mouse_x", x)
@@ -2141,7 +2287,7 @@ fn _pointer_push_motion(any: surface, any: x, any: y): bool {
    true
 }
 
-fn _pointer_push_button(any: surface, int: btn, bool: action): bool {
+fn _pointer_push_button(any surface, int btn, bool action) bool {
    mut win = _windows.get(surface, 0)
    if(!win){ return false }
    win = win.set("mouse_button_" + to_str(btn), action ? 1 : 0)
@@ -2157,7 +2303,7 @@ fn _pointer_push_button(any: surface, int: btn, bool: action): bool {
    true
 }
 
-fn _pointer_handle_enter(any: data, any: pointer, any: serial, any: surface, any: sx, any: sy): any {
+fn _pointer_handle_enter(any data, any pointer, any serial, any surface, any sx, any sy) any {
    if(!data){ return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_ENTER_SERIAL)
    def win = _windows.get(surface, 0)
@@ -2169,38 +2315,38 @@ fn _pointer_handle_enter(any: data, any: pointer, any: serial, any: surface, any
    store32_f32(data, fy, _WG_PENDING_Y)
 }
 
-fn _pointer_handle_leave(any: data, any: pointer, any: serial, any: surface): any {
+fn _pointer_handle_leave(any data, any pointer, any serial, any surface) any {
    if(!data){ return 0 }
    _pointer_set_pending(data, _WP_PENDING_SURFACE)
    store64_h(data, 0, _WG_PENDING_SURFACE)
 }
 
-fn _pointer_handle_motion(any: data, any: pointer, any: time, any: sx, any: sy): any {
+fn _pointer_handle_motion(any data, any pointer, any time, any sx, any sy) any {
    if(!data){ return 0 }
    def surface = _pointer_active_surface(data)
    def win = _windows.get(surface, 0)
    if(!win){ return 0 }
-   def fx = float(from_int(sx)) / 256.0 ;; Wayland fixed-point to float
+   def fx = float(from_int(sx)) / 256.0
    def fy = float(from_int(sy)) / 256.0
    _pointer_set_pending(data, _WP_PENDING_MOTION)
    store32_f32(data, fx, _WG_PENDING_X)
    store32_f32(data, fy, _WG_PENDING_Y)
 }
 
-fn _pointer_handle_button(any: data, any: pointer, any: serial, any: time, any: button, any: state): any {
+fn _pointer_handle_button(any data, any pointer, any serial, any time, any button, any state) any {
    if(!data){ return 0 }
    def surface = _pointer_active_surface(data)
    def win = _windows.get(surface, 0)
    if(!win){ return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_BUTTON_SERIAL)
-   def btn = int(from_int(button)) - 0x110 ;; BTN_LEFT baseline.
+   def btn = int(from_int(button)) - 0x110
    if(btn < 0){ return 0 }
    _pointer_set_pending(data, _WP_PENDING_BUTTON)
    store32(data, btn, _WG_PENDING_BUTTON)
    store32(data, (from_int(state) == 1) ? 1 : 0, _WG_PENDING_ACTION)
 }
 
-fn _pointer_reset_scroll(any: data): any {
+fn _pointer_reset_scroll(any data) any {
    if(!data){ return 0 }
    store32_f32(data, 0.0, _WG_SCROLL_AXIS_DX)
    store32_f32(data, 0.0, _WG_SCROLL_AXIS_DY)
@@ -2213,7 +2359,7 @@ fn _pointer_reset_scroll(any: data): any {
    store32(data, 0, _WG_SCROLL_HAS_DISCRETE)
 }
 
-fn _pointer_reset_frame(any: data): any {
+fn _pointer_reset_frame(any data) any {
    if(!data){ return 0 }
    store32(data, 0, _WG_PENDING_EVENTS)
    store64_h(data, 0, _WG_PENDING_SURFACE)
@@ -2224,14 +2370,14 @@ fn _pointer_reset_frame(any: data): any {
    _pointer_reset_scroll(data)
 }
 
-fn _pointer_accum_scroll(any: data, f64: dx, f64: dy, int: dx_off, int: dy_off, int: flag_off): any {
+fn _pointer_accum_scroll(any data, f64 dx, f64 dy, int dx_off, int dy_off, int flag_off) any {
    if(!data){ return 0 }
    store32_f32(data, load32_f32(data, dx_off) + dx, dx_off)
    store32_f32(data, load32_f32(data, dy_off) + dy, dy_off)
    store32(data, 1, flag_off)
 }
 
-fn _pointer_flush_scroll(any: data): any {
+fn _pointer_flush_scroll(any data) any {
    if(!data){ return 0 }
    mut dx, dy = 0.0, 0.0
    if(load32(data, _WG_SCROLL_HAS_VALUE120)!= 0){ dx, dy = load32_f32(data, _WG_SCROLL_VALUE120_DX), load32_f32(data, _WG_SCROLL_VALUE120_DY) }
@@ -2253,7 +2399,7 @@ fn _pointer_flush_scroll(any: data): any {
    _push_event(win, EVENT_MOUSE_SCROLL, ev_data)
 }
 
-fn _pointer_flush_frame(any: data, any: pointer=0): any {
+fn _pointer_flush_frame(any data, any pointer=0) any {
    if(!data){ return 0 }
    def pending = _pointer_pending(data)
    if(pending == 0 && load32(data, _WG_SCROLL_HAS_AXIS) == 0 &&
@@ -2299,26 +2445,26 @@ fn _pointer_flush_frame(any: data, any: pointer=0): any {
    _pointer_reset_frame(data)
 }
 
-fn _pointer_handle_axis(any: data, any: pointer, any: time, any: axis, any: value): any {
+fn _pointer_handle_axis(any data, any pointer, any time, any axis, any value) any {
    if(!data){ return 0 }
    def raw = float(from_int(value)) / 256.0
    def amag = raw < 0.0 ? (0.0 - raw) : raw
    def scroll_val = (amag > 2.0) ? (raw / 10.0) : raw
    mut dx, dy = 0.0, 0.0
-   if(from_int(axis) == 0){ dy = -scroll_val } ;; Vertical axis
-   else { dx = -scroll_val } ;; Horizontal axis
+   if(from_int(axis) == 0){ dy = -scroll_val }
+   else { dx = -scroll_val }
    _pointer_accum_scroll(data, dx, dy, _WG_SCROLL_AXIS_DX, _WG_SCROLL_AXIS_DY, _WG_SCROLL_HAS_AXIS)
    if(load64_h(data, _WG_SEAT_VER) <= 5){ _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_frame(any: data, any: pointer): any { _pointer_flush_frame(data, pointer) }
+fn _pointer_handle_frame(any data, any pointer) any { _pointer_flush_frame(data, pointer) }
 
-fn _pointer_handle_axis_source(any: data, any: pointer, any: axis_source): any { if(data){ store32(data, int(from_int(axis_source)), _WG_SCROLL_AXIS_SOURCE) } }
+fn _pointer_handle_axis_source(any data, any pointer, any axis_source) any { if(data){ store32(data, int(from_int(axis_source)), _WG_SCROLL_AXIS_SOURCE) } }
 
-fn _pointer_handle_axis_stop(any: data, any: pointer, any: time, any: axis): any {
+fn _pointer_handle_axis_stop(any data, any pointer, any time, any axis) any {
 }
 
-fn _pointer_handle_axis_discrete(any: data, any: pointer, any: axis, any: discrete): any {
+fn _pointer_handle_axis_discrete(any data, any pointer, any axis, any discrete) any {
    if(!data){ return 0 }
    mut dx, dy = 0.0, 0.0
    if(from_int(axis) == 0){ dy = -float(from_int(discrete)) }
@@ -2327,7 +2473,7 @@ fn _pointer_handle_axis_discrete(any: data, any: pointer, any: axis, any: discre
    if(load64_h(data, _WG_SEAT_VER) <= 5){ _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_axis_value120(any: data, any: pointer, any: axis, any: value120): any {
+fn _pointer_handle_axis_value120(any data, any pointer, any axis, any value120) any {
    if(!data){ return 0 }
    def scroll_val = float(from_int(value120)) / 120.0
    mut dx, dy = 0.0, 0.0
@@ -2337,10 +2483,10 @@ fn _pointer_handle_axis_value120(any: data, any: pointer, any: axis, any: value1
    if(load64_h(data, _WG_SEAT_VER) <= 5){ _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_axis_relative_direction(any: data, any: pointer, any: axis, any: direction): any {
+fn _pointer_handle_axis_relative_direction(any data, any pointer, any axis, any direction) any {
 }
 
-fn _relative_pointer_handle_motion(any: data, any: rel_ptr, any: utime_hi, any: utime_lo, any: dx, any: dy, any: dx_unaccel, any: dy_unaccel): any {
+fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utime_lo, any dx, any dy, any dx_unaccel, any dy_unaccel) any {
    if(!data){ return 0 }
    def surface = load64_h(data, 0)
    mut win = _windows.get(surface, 0)
@@ -2363,23 +2509,23 @@ fn _relative_pointer_handle_motion(any: data, any: rel_ptr, any: utime_hi, any: 
    _push_event(win, EVENT_MOUSE_POS_CHANGED, ev_data)
 }
 
-fn _locked_pointer_handle_locked(any: data, any: locked_ptr): any {
+fn _locked_pointer_handle_locked(any data, any locked_ptr) any {
 }
 
-fn _locked_pointer_handle_unlocked(any: data, any: locked_ptr): any {
+fn _locked_pointer_handle_unlocked(any data, any locked_ptr) any {
 }
 
-fn _confined_pointer_handle_confined(any: data, any: confined_ptr): any {
+fn _confined_pointer_handle_confined(any data, any confined_ptr) any {
 }
 
-fn _confined_pointer_handle_unconfined(any: data, any: confined_ptr): any {
+fn _confined_pointer_handle_unconfined(any data, any confined_ptr) any {
 }
 
-fn _install_pointer_listener(any: state): bool {
+fn _install_pointer_listener(any state) bool {
    if(!state){ return false }
    def pointer = load64_h(state, _WG_POINTER)
    if(!pointer || load64_h(state, _WG_POINTER_LISTENER)){ return true }
-   def listener = zalloc(88) ;; wl_pointer listener through axis_relative_direction
+   def listener = zalloc(88)
    if(!listener){ return false }
    store64_h(listener, _pointer_handle_enter, 0)
    store64_h(listener, _pointer_handle_leave, 8)
@@ -2400,7 +2546,7 @@ fn _install_pointer_listener(any: state): bool {
    true
 }
 
-fn _get_xkb_mods(any: data): int {
+fn _get_xkb_mods(any data) int {
    if(!data){ return 0 }
    def state = load64(data, _WG_XKB_STATE)
    if(!state){ return 0 }
@@ -2427,7 +2573,7 @@ fn _get_xkb_mods(any: data): int {
    mods
 }
 
-fn _keyboard_handle_keymap(any: data, any: keyboard, any: keymap_format_raw, any: fd, any: size): any {
+fn _keyboard_handle_keymap(any data, any keyboard, any keymap_format_raw, any fd, any size) any {
    def keymap_format = from_int(keymap_format_raw)
    def keymap_fd = int(from_int(fd))
    def keymap_size = int(from_int(size))
@@ -2473,7 +2619,7 @@ fn _keyboard_handle_keymap(any: data, any: keyboard, any: keymap_format_raw, any
    close(keymap_fd)
 }
 
-fn _keyboard_handle_enter(any: data, any: keyboard, any: serial, any: surface, any: keys): any {
+fn _keyboard_handle_enter(any data, any keyboard, any serial, any surface, any keys) any {
    if(!data){ return 0 }
    store64_h(data, surface, _WG_KEYBOARD_FOCUS)
    mut win = _windows.get(surface, 0)
@@ -2484,7 +2630,7 @@ fn _keyboard_handle_enter(any: data, any: keyboard, any: serial, any: surface, a
    }
 }
 
-fn _keyboard_handle_leave(any: data, any: keyboard, any: serial, any: surface): any {
+fn _keyboard_handle_leave(any data, any keyboard, any serial, any surface) any {
    if(!data){ return 0 }
    store64_h(data, 0, _WG_KEYBOARD_FOCUS)
    mut win = _windows.get(surface, 0)
@@ -2501,7 +2647,7 @@ fn _keyboard_handle_leave(any: data, any: keyboard, any: serial, any: surface): 
    }
 }
 
-fn _keyboard_handle_key(any: data, any: keyboard, any: serial, any: time, any: key, any: state): any {
+fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, any state) any {
    if(!data){ return 0 }
    def surface = load64_h(data, _WG_KEYBOARD_FOCUS)
    mut win = _windows.get(surface, 0)
@@ -2523,7 +2669,7 @@ fn _keyboard_handle_key(any: data, any: keyboard, any: serial, any: time, any: k
    def ev_data = {
       "key": nk,
       "scancode": int(scancode),
-      "action": (key_state == 1) ? backend_api.ACTION_PRESS : backend_api.ACTION_RELEASE,
+      "action": (key_state == 1) ? ACTION_PRESS : ACTION_RELEASE,
       "mod": mods,
       "mods": mods
    }
@@ -2584,7 +2730,7 @@ fn _keyboard_handle_key(any: data, any: keyboard, any: serial, any: time, any: k
    }
 }
 
-fn _synthesize_key_repeat(any: win, any: state): any {
+fn _synthesize_key_repeat(any win, any state) any {
    if(!state){ return 0 }
    def repeat_key = load64_h(state, _WG_REPEAT_KEY)
    if(!repeat_key){ return 0 }
@@ -2610,7 +2756,7 @@ fn _synthesize_key_repeat(any: win, any: state): any {
    def ev_data = {
       "key": from_int(repeat_key),
       "scancode": int(scancode),
-      "action": backend_api.ACTION_REPEAT,
+      "action": ACTION_REPEAT,
       "mod": mods,
       "mods": mods
    }
@@ -2621,7 +2767,7 @@ fn _synthesize_key_repeat(any: win, any: state): any {
    }
 }
 
-fn poll_window_events(any: win, int: max_events=64): list {
+fn poll_window_events(any win, int max_events=64) list {
    "Drains pending events for the given window from the shared backend queue."
    if(!win || !is_dict(win)){ return [win, []] }
    win = poll_joystick_events(win)
@@ -2654,7 +2800,7 @@ fn poll_window_events(any: win, int: max_events=64): list {
    [latest_win, out]
 }
 
-fn _keyboard_handle_modifiers(any: data, any: keyboard, any: serial, any: mods_depres, any: mods_latched, any: mods_locked, any: group): any {
+fn _keyboard_handle_modifiers(any data, any keyboard, any serial, any mods_depres, any mods_latched, any mods_locked, any group) any {
    if(!data){ return 0 }
    def depressed = from_int(mods_depres)
    def latched = from_int(mods_latched)
@@ -2665,13 +2811,13 @@ fn _keyboard_handle_modifiers(any: data, any: keyboard, any: serial, any: mods_d
    if(state){ xkb_state_update_mask(state, depressed, latched, locked, 0, 0, layout_group) }
 }
 
-fn _keyboard_handle_repeat_info(any: data, any: keyboard, any: rate, any: delay): any {
+fn _keyboard_handle_repeat_info(any data, any keyboard, any rate, any delay) any {
    if(!data){ return 0 }
    store64_h(data, from_int(rate), _WG_REPEAT_RATE)
    store64_h(data, from_int(delay), _WG_REPEAT_DELAY)
 }
 
-fn _install_keyboard_listener(any: state): bool {
+fn _install_keyboard_listener(any state) bool {
    if(!state){ return false }
    def keyboard = load64_h(state, _WG_KEYBOARD)
    if(!keyboard || load64_h(state, _WG_KEYBOARD_LISTENER)){ return true }
@@ -2691,7 +2837,7 @@ fn _install_keyboard_listener(any: state): bool {
    true
 }
 
-fn _seat_handle_capabilities(any: data, any: seat, any: capabilities): any {
+fn _seat_handle_capabilities(any data, any seat, any capabilities) any {
    if(!data){ return 0 }
    def caps = from_int(capabilities)
    store64_h(data, caps, _WG_SEAT_CAPS)
@@ -2712,14 +2858,14 @@ fn _seat_handle_capabilities(any: data, any: seat, any: capabilities): any {
    _ensure_seat_objects(data)
 }
 
-fn _seat_handle_name(any: data, any: seat, any: name): any {
+fn _seat_handle_name(any data, any seat, any name) any {
    if(!data){ return 0 }
    def old = load64_h(data, _WG_SEAT_NAME)
    if(old){ free(old) }
    if(name){ store64_h(data, strdup(name), _WG_SEAT_NAME) } else { store64_h(data, 0, _WG_SEAT_NAME) }
 }
 
-fn _install_seat_listener(any: state): bool {
+fn _install_seat_listener(any state) bool {
    if(!state){ return false }
    def seat = load64_h(state, _WG_SEAT)
    if(!seat){ return false }
@@ -2736,12 +2882,12 @@ fn _install_seat_listener(any: state): bool {
    true
 }
 
-fn _xdg_wm_base_handle_ping(any: data, any: wm_base, any: serial): any {
+fn _xdg_wm_base_handle_ping(any data, any wm_base, any serial) any {
    if(!wm_base){ return 0 }
    _wl_proxy_marshal_u(wm_base, XDG_WM_BASE_PONG, int(from_int(serial)))
 }
 
-fn _install_wm_base_listener(any: state): bool {
+fn _install_wm_base_listener(any state) bool {
    if(!state){ return false }
    def wm_base = load64_h(state, _WG_WM_BASE)
    if(!wm_base){ return false }
@@ -2758,17 +2904,17 @@ fn _install_wm_base_listener(any: state): bool {
 }
 
 fn _bind_registry_iface_once(
-   any: data,
-   any: registry,
-   str: iface,
-   str: want_iface,
-   int: global_name,
-   int: global_version,
-   any: symbol,
-   int: slot_off,
-   int: ver_off=-1,
-   int: max_supported=1,
-): bool {
+   any data,
+   any registry,
+   str iface,
+   str want_iface,
+   int global_name,
+   int global_version,
+   any symbol,
+   int slot_off,
+   int ver_off=-1,
+   int max_supported=1,
+) bool {
    if(iface != want_iface || load64_h(data, slot_off) != 0 || !symbol){ return false }
    def bind_ver = _bind_version(global_version, max_supported)
    def proxy = _wl_registry_bind(registry, global_name, symbol, bind_ver)
@@ -2779,7 +2925,7 @@ fn _bind_registry_iface_once(
    true
 }
 
-fn _registry_handle_global(any: data, any: registry, any: name, any: iface_cstr, any: version): any {
+fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any version) any {
    if(!data || !registry || !iface_cstr){ return 0 }
    def iface = str.cstr_to_str(iface_cstr)
    def global_name = from_int(name)
@@ -2898,15 +3044,15 @@ fn _registry_handle_global(any: data, any: registry, any: name, any: iface_cstr,
    }
 }
 
-fn _registry_handle_global_remove(any: data, any: registry, any: name): any {
+fn _registry_handle_global_remove(any data, any registry, any name) any {
    if(!data){ return 0 }
    def index = _find_output_index_by_global_name(data, from_int(name))
    if(index >= 0){ _remove_output_state(data, index) }
 }
 
-fn bootstrap_globals(any: display): any {
+fn bootstrap_globals(any display) any {
    "Bootstrap core Wayland globals from the registry."
-   _dbg("bootstrap_globals: display=" + to_hex(display))
+   _dbg("bootstrap_globals: display=" + str.to_hex(display))
    if(!display){ _dbg("bootstrap_globals: no display") return false }
    def registry = get_registry(display)
    if(!registry){ _dbg("bootstrap_globals: no registry") return false }
@@ -2972,7 +3118,7 @@ fn bootstrap_globals(any: display): any {
    out
 }
 
-fn destroy_globals(any: globals): bool {
+fn destroy_globals(any globals) bool {
    "Destroys the bootstrapped Wayland globals tracked by `bootstrap_globals`."
    if(!globals || !is_dict(globals)){ return false }
    def pointer = globals.get("pointer", 0)
@@ -3030,7 +3176,7 @@ fn destroy_globals(any: globals): bool {
    true
 }
 
-fn wait_events(any: display, int: timeout_ms=-1): int {
+fn wait_events(any display, int timeout_ms=-1) int {
    "Block until Wayland events arrive or timeout elapses."
    if(!display){ return -1 }
    def pending0 = dispatch_pending(display)
@@ -3062,7 +3208,7 @@ fn wait_events(any: display, int: timeout_ms=-1): int {
    dispatch_pending(display)
 }
 
-fn wait_events_queue(any: display, any: queue, int: timeout_ms=-1): int {
+fn wait_events_queue(any display, any queue, int timeout_ms=-1) int {
    "Block on a specific Wayland event queue."
    if(!display || !queue){ return -1 }
    def pending0 = dispatch_queue_pending(display, queue)
@@ -3094,7 +3240,7 @@ fn wait_events_queue(any: display, any: queue, int: timeout_ms=-1): int {
    dispatch_queue_pending(display, queue)
 }
 
-fn probe_display(any: name=0): bool {
+fn probe_display(any name=0) bool {
    "Checks that a Wayland display can actually be opened."
    def display = connect_display(name)
    if(!display){ return false }
@@ -3103,7 +3249,7 @@ fn probe_display(any: name=0): bool {
    true
 }
 
-fn vulkan_supported(): bool {
+fn vulkan_supported() bool {
    "Returns true if the Wayland backend supports Vulkan."
    true
 }
@@ -3112,7 +3258,7 @@ mut _wayland_vk_ext_ptrs = 0
 mut _wayland_vk_ext_surface = 0
 mut _wayland_vk_ext_wayland = 0
 
-fn vulkan_required_extensions(): list {
+fn vulkan_required_extensions() list {
    "Returns the Vulkan instance extensions required for a Wayland surface."
    if(!_wayland_vk_ext_ptrs){
       _wayland_vk_ext_surface = cstr("VK_KHR_surface")
@@ -3126,12 +3272,12 @@ fn vulkan_required_extensions(): list {
    _wayland_vk_ext_ptrs
 }
 
-fn vulkan_get_presentation_support(any: device, int: queuefamily, any: display): bool {
+fn vulkan_get_presentation_support(any device, int queuefamily, any display) bool {
    "Returns true when the queue family can present to Wayland."
    vk_get_physical_device_wayland_presentation_support_khr(device, queuefamily, display) != 0
 }
 
-fn create_surface(any: instance, any: win, any: allocator, any: surface_out): int {
+fn create_surface(any instance, any win, any allocator, any surface_out) int {
    "Creates a Vulkan Wayland surface for the given backend window."
    if(!is_dict(win)){ return -1 }
    def globals = win.get("globals", _wayland_globals)
@@ -3160,17 +3306,17 @@ fn create_surface(any: instance, any: win, any: allocator, any: surface_out): in
    res
 }
 
-fn get_gamma_ramp(any: monitor): bool {
+fn get_gamma_ramp(any monitor) bool {
    "Stub for Wayland gamma support(currently unsupported)."
    false
 }
 
-fn set_gamma_ramp(any: monitor, any: ramp): bool {
+fn set_gamma_ramp(any monitor, any ramp) bool {
    "Stub for Wayland gamma support(currently unsupported)."
    false
 }
 
-fn get_monitors(): list {
+fn get_monitors() list {
    "Returns list of Wayland output dictionaries as monitor handles."
    if(!_wayland_globals){ return [] }
    mut state = _wayland_globals
@@ -3189,7 +3335,7 @@ fn get_monitors(): list {
    out
 }
 
-fn get_primary_monitor(): any {
+fn get_primary_monitor() any {
    "Returns the first available Wayland output as the primary monitor."
    def all = get_monitors()
    if(all.len > 0){ return all.get(0) }
@@ -3197,7 +3343,7 @@ fn get_primary_monitor(): any {
 }
 
 comptime template _wl_monitor_get2(name, doc, k0, d0, k1, d1){
-   fn name(any: monitor): list {
+   fn name(any monitor) list {
       doc
       if(!is_dict(monitor)){ return [d0, d1] }
       [monitor.get(k0, d0), monitor.get(k1, d1)]
@@ -3205,7 +3351,7 @@ comptime template _wl_monitor_get2(name, doc, k0, d0, k1, d1){
 }
 
 comptime template _wl_monitor_get4(name, doc, k0, d0, k1, d1, k2, d2, k3, d3){
-   fn name(any: monitor): list {
+   fn name(any monitor) list {
       doc
       if(!is_dict(monitor)){ return [d0, d1, d2, d3] }
       [monitor.get(k0, d0), monitor.get(k1, d1), monitor.get(k2, d2), monitor.get(k3, d3)]
@@ -3213,7 +3359,7 @@ comptime template _wl_monitor_get4(name, doc, k0, d0, k1, d1, k2, d2, k3, d3){
 }
 
 comptime template _wl_monitor_get1(name, doc, key, defv, fallback){
-   fn name(any: monitor): any {
+   fn name(any monitor) any {
       doc
       if(!is_dict(monitor)){ return fallback }
       monitor.get(key, defv)
@@ -3230,7 +3376,7 @@ comptime emit _wl_monitor_get2(get_monitor_physical_size,
    "Returns [width_mm, height_mm] of a Wayland output.",
 "physical_w", 0, "physical_h", 0)
 
-fn get_monitor_content_scale(any: monitor): list {
+fn get_monitor_content_scale(any monitor) list {
    "Returns [xscale, yscale] of a Wayland output."
    if(!is_dict(monitor)){ return [1.0, 1.0] }
    def scale = float(monitor.get("scale", 1))
@@ -3241,20 +3387,20 @@ comptime emit _wl_monitor_get1(get_monitor_name,
    "Returns the human-readable name of a Wayland output.",
 "name", "", "")
 
-fn get_video_mode(any: monitor): any {
+fn get_video_mode(any monitor) any {
    "Returns current video mode(w, h, refresh) for a Wayland output."
    if(!is_dict(monitor)){ return 0 }
    return {"w": monitor.get("w", 0), "h": monitor.get("h", 0), "refresh": monitor.get("refresh", 0)}
 }
 
-fn get_video_modes(any: monitor): list {
+fn get_video_modes(any monitor) list {
    "Wayland currently reports only the current/active mode."
    def cur = get_video_mode(monitor)
    if(cur){ return [cur] }
    []
 }
 
-fn set_input_mode(any: win, int: mode, int: value): dict {
+fn set_input_mode(any win, int mode, int value) dict {
    "Updates the input mode for a Wayland window and applies it if possible."
    if(!available() || !win || !is_dict(win)){ return win }
    mut next_win = win
@@ -3357,18 +3503,18 @@ fn set_input_mode(any: win, int: mode, int: value): dict {
    next_win.set("mode_" + mode, value)
 }
 
-fn get_input_mode(any: win, int: mode): int {
+fn get_input_mode(any win, int mode) int {
    "Queries the current input mode for the given native Wayland window."
    if(!win || !is_dict(win)){ return 0 }
    win.get("mode_" + mode, 0)
 }
 
-fn get_key_scancode(any: win, int: key): int {
+fn get_key_scancode(any win, int key) int {
    "Wayland has no stable hardware scancode mapping; returns -1."
    -1
 }
 
-fn wl_proxy_marshal_flags_full_set_cursor(any: pointer, int: serial, any: surface, int: x, int: y): any {
+fn wl_proxy_marshal_flags_full_set_cursor(any pointer, int serial, any surface, int x, int y) any {
    "Low-level cursor marshal helper for pointer enter/hidden-mode paths."
    if(!pointer){ return 0 }
    wl_proxy_marshal_flags_cursor(
@@ -3377,7 +3523,7 @@ fn wl_proxy_marshal_flags_full_set_cursor(any: pointer, int: serial, any: surfac
    )
 }
 
-fn _text_input_handle_commit(any: data, any: text_input, any: text): any {
+fn _text_input_handle_commit(any data, any text_input, any text) any {
    if(!data || !text){ return 0 }
    def win = _windows.get(data, 0)
    if(!win || !is_dict(win)){ return 0 }
@@ -3411,22 +3557,22 @@ fn _text_input_handle_commit(any: data, any: text_input, any: text): any {
    }
 }
 
-fn _text_input_handle_preedit(any: data, any: text_input, any: text, any: cursor_begin, any: cursor_end): any {
+fn _text_input_handle_preedit(any data, any text_input, any text, any cursor_begin, any cursor_end) any {
 }
 
-fn _text_input_handle_delete_surrounding(any: data, any: text_input, any: before_length, any: after_length): any {
+fn _text_input_handle_delete_surrounding(any data, any text_input, any before_length, any after_length) any {
 }
 
-fn _text_input_handle_done(any: data, any: text_input, any: serial): any {
+fn _text_input_handle_done(any data, any text_input, any serial) any {
 }
 
-fn _text_input_handle_enter(any: data, any: text_input, any: surface): any {
+fn _text_input_handle_enter(any data, any text_input, any surface) any {
 }
 
-fn _text_input_handle_leave(any: data, any: text_input, any: surface): any {
+fn _text_input_handle_leave(any data, any text_input, any surface) any {
 }
 
-fn _fractional_scale_handle_preferred_scale(any: data, any: fs_obj, any: scale_120): any {
+fn _fractional_scale_handle_preferred_scale(any data, any fs_obj, any scale_120) any {
    if(!data){ return 0 }
    mut win = _windows.get(data, 0)
    if(!win || !is_dict(win)){ return 0 }
@@ -3435,7 +3581,7 @@ fn _fractional_scale_handle_preferred_scale(any: data, any: fs_obj, any: scale_1
    _windows = _windows.set(data, win)
 }
 
-fn _create_text_input(any: state, any: seat): any {
+fn _create_text_input(any state, any seat) any {
    def mgr = load64_h(state, _WG_TEXT_INPUT_MANAGER)
    if(!mgr){ return 0 }
    _init_unstable_interfaces()
@@ -3443,7 +3589,7 @@ fn _create_text_input(any: state, any: seat): any {
    wl_proxy_marshal_flags_ptr_obj(mgr, 1, _wp_text_input_interface, int(get_proxy_version(mgr)), 0, 0, seat)
 }
 
-fn _create_fractional_scale(any: state, any: surface): any {
+fn _create_fractional_scale(any state, any surface) any {
    def mgr = load64_h(state, _WG_FRACTIONAL_SCALE_MANAGER)
    if(!mgr){ return 0 }
    _init_unstable_interfaces()
@@ -3451,7 +3597,7 @@ fn _create_fractional_scale(any: state, any: surface): any {
    wl_proxy_marshal_flags_ptr_obj(mgr, 1, _wp_fractional_scale_interface, int(get_proxy_version(mgr)), 0, 0, surface)
 }
 
-fn text_input_enable(any: win): bool {
+fn text_input_enable(any win) bool {
    "Enables zwp_text_input_v3 for IME on the given Wayland window."
    if(!win || !is_dict(win)){ return false }
    def ti = win.get("text_input", 0)
@@ -3461,7 +3607,7 @@ fn text_input_enable(any: win): bool {
    true
 }
 
-fn text_input_disable(any: win): bool {
+fn text_input_disable(any win) bool {
    "Disables zwp_text_input_v3 for IME on the given Wayland window."
    if(!win || !is_dict(win)){ return false }
    def ti = win.get("text_input", 0)
@@ -3471,34 +3617,34 @@ fn text_input_disable(any: win): bool {
    true
 }
 
-fn get_window_content_scale(any: win): list {
+fn get_window_content_scale(any win) list {
    "Returns [sx, sy] content scale for a Wayland window(from wp_fractional_scale_v1 or 1.0)."
    if(!win || !is_dict(win)){ return [1.0, 1.0] }
    def scale = float(win.get("content_scale", 1.0))
    [scale, scale]
 }
 
-fn get_window_opacity(any: win): f64 {
+fn get_window_opacity(any win) f64 {
    "Wayland backend opacity querying is unsupported; returns 1.0."
    1.0
 }
 
-fn get_window_frame_size(any: win): list {
+fn get_window_frame_size(any win) list {
    "Wayland cannot reliably expose frame extents; returns zero margins."
    [0, 0, 0, 0]
 }
 
-fn request_window_attention(any: win): bool {
+fn request_window_attention(any win) bool {
    "Best-effort attention request; currently a no-op that returns true."
    true
 }
 
-fn get_content_scale(any: win): list {
+fn get_content_scale(any win) list {
    "Compatibility alias for `get_window_content_scale`."
    get_window_content_scale(win)
 }
 
-fn get_seat_capabilities(any: win): dict {
+fn get_seat_capabilities(any win) dict {
    "Returns a dict with keys pointer/keyboard/touch indicating seat capabilities."
    if(!win || !is_dict(win)){ return dict(8) }
    def globals = win.get("globals", 0)
@@ -3512,7 +3658,7 @@ fn get_seat_capabilities(any: win): dict {
    }
 }
 
-fn poll_joystick_events(any: win): any {
+fn poll_joystick_events(any win) any {
    "Polls evdev joystick events and returns updated window. Requires linux_joystick module."
    if(!win || !is_dict(win)){ return win }
    #linux {
@@ -3521,7 +3667,59 @@ fn poll_joystick_events(any: win): any {
    win
 }
 
-fn get_wayland_monitor(any: mon): any {
+fn get_wayland_monitor(any mon) any {
    "Returns the raw Wayland output handle from a monitor dict."
    mon.get("handle", 0)
+}
+
+#main {
+   assert(get_backend_name() == "wayland", "wayland backend name")
+   def ok = available()
+   assert(ok == true || ok == false, "wayland availability boolean")
+   assert(get_monitors() == [] && get_primary_monitor() == 0, "wayland monitor fallback")
+   mut key_states = dict(4)
+   key_states = key_states.set(KEY_A, true)
+   def win = {
+      "handle": 0,
+      "w": 12,
+      "h": 9,
+      "mouse_x": 3,
+      "mouse_y": 4,
+      "mouse_button_0": 1,
+      "key_states": key_states,
+      "focused": true,
+      "maximized": false,
+      "content_scale": 1.5,
+   }
+   assert(get_size(win) == [12, 9] && get_cursor_pos(win) == [3.0, 4.0], "wayland cached geometry")
+   assert(get_key_state(win, KEY_A) == 1 && get_mouse_button_state(win, 0) == 1, "wayland cached input")
+   assert(get_window_attrib(win, FOCUSED) == 1, "wayland focused attrib")
+   assert(get_window_content_scale(win) == [1.5, 1.5] && get_window_opacity(win) == 1.0, "wayland window scale")
+   assert(get_window_frame_size(win) == [0, 0, 0, 0] && request_window_attention(win), "wayland frame fallback")
+   def standard_cursor = create_standard_cursor(ARROW_CURSOR)
+   def custom_cursor = create_cursor({"pixels": []}, 1, 2)
+   assert(standard_cursor.get("shape", 0) == ARROW_CURSOR && custom_cursor.get("xhot", 0) == 1 && custom_cursor.get("yhot", 0) == 2, "wayland cursor records")
+   assert(destroy_cursor(standard_cursor), "wayland destroy cursor")
+   def cursor_mode_key = "mode_" + CURSOR
+   mut mode_win = dict(4)
+   mode_win = mode_win.set(cursor_mode_key, CURSOR_HIDDEN)
+   assert(get_input_mode(mode_win, CURSOR) == CURSOR_HIDDEN, "wayland input mode")
+   def monitor = {
+      "handle": 123,
+      "x": 5,
+      "y": 7,
+      "w": 800,
+      "h": 600,
+      "physical_w": 340,
+      "physical_h": 190,
+      "refresh": 60,
+      "scale": 2,
+      "name": "probe-output",
+   }
+   assert(get_monitor_pos(monitor) == [5, 7] && get_monitor_workarea(monitor) == [5, 7, 800, 600], "wayland monitor geometry")
+   assert(get_monitor_physical_size(monitor) == [340, 190] && get_monitor_content_scale(monitor) == [2.0, 2.0], "wayland monitor scale")
+   assert(get_monitor_name(monitor) == "probe-output" && get_video_mode(monitor).get("w", 0) == 800 && get_video_modes(monitor).len == 1, "wayland monitor mode")
+   assert(get_wayland_monitor(monitor) == 123 && !get_gamma_ramp(monitor) && !set_gamma_ramp(monitor, 0), "wayland monitor handles")
+   assert(create_surface(0, {"globals": {"handle": 0}, "handle": 0}, 0, 0) == -1, "wayland surface fallback")
+   print("✓ std.os.ui.window.platform.linux.wayland self-test passed")
 }

@@ -408,7 +408,6 @@ const char *ny_default_cache_root_dir(void) {
   if (override && *override)
     return ny_cache_path(path, sizeof(path), override);
 
-  const char *src = ny_src_root();
   const char *xdg = getenv("XDG_CACHE_HOME");
   if (xdg && *xdg) {
     ny_join_path(path, sizeof(path), xdg, "nytrix");
@@ -423,6 +422,7 @@ const char *ny_default_cache_root_dir(void) {
     return path;
   }
 
+  const char *src = ny_src_root();
   if (src && *src) {
     ny_join_path(path, sizeof(path), src, "build/cache/nytrix");
     return path;

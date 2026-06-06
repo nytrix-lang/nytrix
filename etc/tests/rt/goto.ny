@@ -1,20 +1,20 @@
 use std.core
 
-fn jump_forward(): int {
+fn jump_forward() int {
    goto done
    return 0
-done:
+   done:
    7
 }
 
-fn jump_out(): int {
+fn jump_out() int {
    mut x = 0
    if(true){
       x = 3
       goto done
       x = 9
    }
-done:
+   done:
    x
 }
 

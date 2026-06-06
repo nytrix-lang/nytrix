@@ -207,23 +207,6 @@ static bool trace_is_internal_helper(int64_t func) {
          trace_func_matches(func, "std.core.error.panic");
 }
 
-static void rt_trace_dump_filtered(size_t want) {
-  if (!g_trace_requested || g_trace_len == 0)
-    return;
-  size_t shown = 0;
-  for (size_t i = 0; i < g_trace_len && shown < want; i++) {
-    size_t idx = (g_trace_idx + TRACE_RING - 1 - i) % TRACE_RING;
-    int64_t func = g_trace_funcs[idx];
-    if (trace_is_internal_helper(func))
-      continue;
-    print_trace_entry(g_trace_files[idx], g_trace_lines[idx], g_trace_cols[idx], func, "  at ");
-    shown++;
-  }
-  if (shown == 0) {
-    rt_trace_dump(((int64_t)want << 1) | 1);
-  }
-}
-
 #define RT_PRINT_BUF_SIZE 65536
 static char rt_print_buf[RT_PRINT_BUF_SIZE];
 static uint32_t rt_print_pos = 0;
@@ -1434,6 +1417,15 @@ int64_t rt_list_sum_int_range(int64_t lst, int64_t start_v, int64_t stop_v) {
 
 static inline int64_t rt_dict_raw_i64(int64_t v) { return is_int(v) ? (v >> 1) : v; }
 
+static inline uint64_t rt_dict_hash_mix64(uint64_t bits) {
+  bits ^= bits >> 33;
+  bits *= 0xff51afd7ed558ccdULL;
+  bits ^= bits >> 33;
+  bits *= 0xc4ceb9fe1a85ec53ULL;
+  bits ^= bits >> 33;
+  return bits & 2147483647u;
+}
+
 static uint64_t rt_dict_hash_raw(int64_t key) {
   if (is_int(key))
     return (uint64_t)(key >> 1);
@@ -1446,6 +1438,15 @@ static uint64_t rt_dict_hash_raw(int64_t key) {
     for (size_t i = 0; i < n; i++)
       h = ((h ^ (uint64_t)s[i]) * 16777619u) & 2147483647u;
     return h;
+  }
+  if (is_v_flt(key)) {
+    uint64_t bits = (uint64_t)_rt_flt_unbox_val(key);
+    if (bits == 0x8000000000000000ULL)
+      bits = 0;
+    if ((bits & 0x7ff0000000000000ULL) == 0x7ff0000000000000ULL &&
+        (bits & 0x000fffffffffffffULL) != 0)
+      bits = 0x7ff8000000000000ULL;
+    return rt_dict_hash_mix64(bits);
   }
   if (is_ptr(key))
     return (((uint64_t)key) >> 3) & 2147483647u;

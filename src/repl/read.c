@@ -94,6 +94,25 @@ static int repl_insert_bytes(char **pbuf, int *cap, int *len, int *pos,
   return 1;
 }
 
+static int repl_insert_newline_indent(char **pbuf, int *cap, int *len,
+                                      int *pos, int indent, int extra) {
+  if (!pbuf || !*pbuf || !cap || !len || !pos)
+    return 0;
+  if (indent < 0)
+    indent = 0;
+  int data_len = 1 + indent;
+  if (!repl_reserve_buf(pbuf, cap, *len + data_len, extra + indent))
+    return 0;
+  char *buf = *pbuf;
+  memmove(buf + *pos + data_len, buf + *pos, (size_t)(*len - *pos) + 1u);
+  buf[*pos] = '\n';
+  if (indent > 0)
+    memset(buf + *pos + 1, ' ', (size_t)indent);
+  *pos += data_len;
+  *len += data_len;
+  return 1;
+}
+
 static int repl_set_buffer_text(char **pbuf, int *cap, int *len, int *pos,
                                 const char *src, int extra) {
   if (!pbuf || !cap || !len || !pos)
@@ -1812,6 +1831,33 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
   fflush(stdout);
 }
 
+static void repl_finish_submit_display(const char *prompt, const char *buf,
+                                       int len, int pos, int prompt_cols,
+                                       int allow_viewport_summary) {
+  if (!g_vt_output_ok) {
+    printf("\n");
+  } else if (allow_viewport_summary && viewport_start > 0) {
+    printf("\r");
+    if (prev_lines > 0)
+      printf("\x1b[%dA", prev_lines);
+    printf("\x1b[J");
+    if (prompt)
+      fputs(prompt, stdout);
+    repl_highlight_line_ex(buf, -1, "\x1b[90m..|\x1b[0m", -1, -1,
+                           REPL_SEL_NONE);
+    printf("\n");
+  } else {
+    draw_line(prompt, buf, len, pos, prompt_cols);
+    int last_r, last_c, term_cols, term_rows;
+    get_term_size(&term_cols, &term_rows);
+    calc_cursor(buf, len, term_cols, prompt_cols, &last_r, &last_c);
+    if (last_r > prev_lines)
+      printf("\x1b[%dB", last_r - prev_lines);
+    printf("\n");
+  }
+  fflush(stdout);
+}
+
 static int repl_sel_active(int sel_anchor, int pos) { return sel_anchor >= 0 && sel_anchor != pos; }
 
 static int repl_sel_start(int sel_anchor, int pos) { return (sel_anchor < pos) ? sel_anchor : pos; }
@@ -2009,7 +2055,7 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {":save", ":save [file]", "Save the current session source.", 8},
     {":std", ":std", "Show standard-library loading information.", 8},
     {":complete", ":complete [prefix]", "Print completion candidates for a prefix.", 8},
-    {"fn", "fn name(type: arg): ret { ... }", "Define a function.", 6},
+    {"fn", "fn name(type arg) ret { ... }", "Define a function.", 6},
     {"def", "def name = value", "Bind an immutable value.", 6},
     {"mut", "mut name = value", "Bind a mutable value.", 6},
     {"if", "if(cond){ ... }", "Branch when a condition is true.", 6},
@@ -3314,30 +3360,15 @@ char *ny_readline(const char *prompt) {
     if (k == K_ENTER || k == K_ALT_ENTER) {
 #ifdef _WIN32
       if (k == K_ENTER && !pasting && win_has_queued_text_event()) {
-        if (!repl_reserve_buf(&buf, &cap, len + 1, 256))
+        if (!repl_insert_newline_indent(&buf, &cap, &len, &pos, 0, 256))
           continue;
-        memmove(buf + pos + 1, buf + pos, len - pos + 1);
-        buf[pos++] = '\n';
-        len++;
-        buf[len] = '\0';
         win_drain_queued_text(&buf, &cap, &len, &pos, 1);
         if (win_pasted_buffer_should_submit(buf, len, pos)) {
           while (len > 0 && isspace((unsigned char)buf[len - 1]))
             len--;
           buf[len] = '\0';
           pos = len;
-          if (!g_vt_output_ok) {
-            printf("\n");
-          } else {
-            draw_line(prompt, buf, len, pos, prompt_cols);
-            int last_r, last_c, t_cols, t_rows;
-            get_term_size(&t_cols, &t_rows);
-            calc_cursor(buf, len, t_cols, prompt_cols, &last_r, &last_c);
-            if (last_r > prev_lines)
-              printf("\x1b[%dB", last_r - prev_lines);
-            printf("\n");
-          }
-          fflush(stdout);
+          repl_finish_submit_display(prompt, buf, len, pos, prompt_cols, 0);
           break;
         }
         if (!repl_is_input_pending())
@@ -3346,12 +3377,8 @@ char *ny_readline(const char *prompt) {
       }
 #endif
       if (pasting) {
-        if (!repl_reserve_buf(&buf, &cap, len + 1, 256))
+        if (!repl_insert_newline_indent(&buf, &cap, &len, &pos, 0, 256))
           continue;
-        memmove(buf + pos + 1, buf + pos, len - pos + 1);
-        buf[pos++] = '\n';
-        len++;
-        buf[len] = '\0';
       } else {
         int complete = is_input_complete(buf);
         int at_end = (pos == len);
@@ -3370,39 +3397,12 @@ char *ny_readline(const char *prompt) {
             len--;
           buf[len] = '\0';
           pos = len;
-          if (!g_vt_output_ok) {
-            printf("\n");
-          } else if (viewport_start > 0) {
-            printf("\r");
-            if (prev_lines > 0)
-              printf("\x1b[%dA", prev_lines);
-            printf("\x1b[J");
-            if (prompt)
-              fputs(prompt, stdout);
-            repl_highlight_line_ex(buf, -1, "\x1b[90m..|\x1b[0m", -1, -1, REPL_SEL_NONE);
-            printf("\n");
-          } else {
-            draw_line(prompt, buf, len, pos, prompt_cols);
-            int last_r, last_c, t_cols, t_rows;
-            get_term_size(&t_cols, &t_rows);
-            calc_cursor(buf, len, t_cols, prompt_cols, &last_r, &last_c);
-            if (last_r > prev_lines)
-              printf("\x1b[%dB", last_r - prev_lines);
-            printf("\n");
-          }
-          fflush(stdout);
+          repl_finish_submit_display(prompt, buf, len, pos, prompt_cols, 1);
           break;
         } else {
           int indent = pasting ? 0 : repl_calc_indent(buf);
-          if (!repl_reserve_buf(&buf, &cap, len + 1 + indent, 256 + indent))
+          if (!repl_insert_newline_indent(&buf, &cap, &len, &pos, indent, 256))
             continue;
-          memmove(buf + pos + 1 + indent, buf + pos, len - pos + 1);
-          buf[pos] = '\n';
-          for (int i = 0; i < indent; i++)
-            buf[pos + 1 + i] = ' ';
-          pos += 1 + indent;
-          len += 1 + indent;
-          buf[len] = '\0';
         }
       }
       if (!pasting && !repl_is_input_pending())

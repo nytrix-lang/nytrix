@@ -1,5 +1,9 @@
-;; Keywords: platform window backend opengl nsgl glx egl
+;; Keywords: platform window backend opengl nsgl glx egl os ui input
 ;; OpenGL context facade for EGL, GLX, and NSGL platform backends.
+;; References:
+;; - std.os.ui.window.platform
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval)
 use std.core
 use std.core.common as common
@@ -7,14 +11,24 @@ use std.os.ui.window.platform.api as api
 use std.os.ui.window.platform.opengl.glx as glx
 use std.os.ui.window.platform.opengl.egl as egl
 use std.os.ui.window.platform.opengl.nsgl as nsgl
+
 #macos {
-   fn OSMesaCreateContext(any: _format, any: _share): any { 0 }
-   fn OSMesaDestroyContext(any: _ctx): any { 0 }
-   fn OSMesaMakeCurrent(any: _ctx, any: _buffer, any: _type, any: _w, any: _h): int { 0 }
+   fn OSMesaCreateContext(any _format, any _share) any {
+      "Runs the OSMesaCreateContext operation."
+      0
+   }
+   fn OSMesaDestroyContext(any _ctx) any {
+      "Runs the OSMesaDestroyContext operation."
+      0
+   }
+   fn OSMesaMakeCurrent(any _ctx, any _buffer, any _type, any _w, any _h) int {
+      "Runs the OSMesaMakeCurrent operation."
+      0
+   }
 } #endif
 mut _current_context = 0
 
-fn _get_backend_name(): str {
+fn _get_backend_name() str {
    def requested = common.env_lower("NY_UI_BACKEND")
    if(requested.len > 0){ return requested }
    #linux { return "x11" }
@@ -24,7 +38,7 @@ fn _get_backend_name(): str {
    "none"
 }
 
-fn get_proc_address(any: name): any {
+fn get_proc_address(any name) any {
    "Returns the address of the specified OpenGL core or extension function."
    def proc_name = to_str(name)
    if(!startswith(proc_name, "gl") && !startswith(proc_name, "egl")){ return 0 }
@@ -44,7 +58,7 @@ fn get_proc_address(any: name): any {
    0
 }
 
-fn create_offscreen_context(int: width=1, int: height=1, any: share_context=0): any {
+fn create_offscreen_context(int width=1, int height=1, any share_context=0) any {
    "Creates an offscreen OpenGL context. On Linux tries EGL/GLX; falls back to OSMesa."
    def b = _get_backend_name()
    #linux {
@@ -77,7 +91,7 @@ fn create_offscreen_context(int: width=1, int: height=1, any: share_context=0): 
    0
 }
 
-fn destroy_offscreen_context(any: ctx): bool {
+fn destroy_offscreen_context(any ctx) bool {
    "Destroys an offscreen OpenGL context."
    if(!ctx || !is_dict(ctx)){ return false }
    def typ = ctx.get("type", "")
@@ -109,7 +123,7 @@ fn destroy_offscreen_context(any: ctx): bool {
    false
 }
 
-fn make_context_current(any: ctx): bool {
+fn make_context_current(any ctx) bool {
    "Makes the given context current on the calling thread."
    if(!ctx || !is_dict(ctx)){ return false }
    _current_context = ctx
@@ -143,7 +157,7 @@ fn make_context_current(any: ctx): bool {
    false
 }
 
-fn release_context_current(): bool {
+fn release_context_current() bool {
    "Releases the current OpenGL context on the calling thread."
    _current_context = 0
    def b = _get_backend_name()
@@ -158,12 +172,12 @@ fn release_context_current(): bool {
    true
 }
 
-fn get_current_context(): any {
+fn get_current_context() any {
    "Returns the context most recently passed to make_context_current."
    _current_context
 }
 
-fn create_osmesa_context(int: width=1, int: height=1): any {
+fn create_osmesa_context(int width=1, int height=1) any {
    "Creates an OSMesa software-rendered offscreen context. Returns 0 if OSMesa is unavailable."
    #macos {
       def ctx = OSMesaCreateContext(0x1908, 0)
@@ -179,12 +193,13 @@ fn create_osmesa_context(int: width=1, int: height=1): any {
    0
 }
 
-fn destroy_osmesa_context(any: ctx): bool {
+fn destroy_osmesa_context(any ctx) bool {
    "Destroys an OSMesa context."
    destroy_offscreen_context(ctx)
 }
 
-fn swap_buffers(any: ctx): bool {
+fn swap_buffers(any ctx) bool {
+   "Runs the swap buffers operation."
    if(!ctx || !is_dict(ctx)){ return false }
    def typ = ctx.get("type", "")
    if(typ == "egl_offscreen"){
@@ -196,7 +211,8 @@ fn swap_buffers(any: ctx): bool {
    false
 }
 
-fn swap_interval(any: interval): bool {
+fn swap_interval(any interval) bool {
+   "Runs the swap interval operation."
    if(!_current_context){ return false }
    def b = _get_backend_name()
    #linux {
@@ -206,7 +222,7 @@ fn swap_interval(any: interval): bool {
    false
 }
 
-fn choose_visual(any: hints, any: display=0, any: screen=0): list {
+fn choose_visual(any hints, any display=0, any screen=0) list {
    "Returns [visual, depth] matched to the given hints."
    def b = _get_backend_name()
    #linux {
@@ -233,7 +249,7 @@ fn choose_visual(any: hints, any: display=0, any: screen=0): list {
    [0, 0]
 }
 
-fn create_context(any: native, any: hints): any {
+fn create_context(any native, any hints) any {
    "Create an OpenGL context for a native window using backend context hints."
    def b = _get_backend_name()
    #linux {
@@ -281,4 +297,18 @@ fn create_context(any: native, any: hints): any {
       }
    } #endif
    0
+}
+
+#main {
+   assert(get_current_context() == 0, "opengl no current context")
+   assert(get_proc_address("definitely_missing_nytrix_probe_symbol") == 0, "opengl missing proc")
+   assert(create_offscreen_context(1, 1, 0) == 0, "opengl offscreen fallback")
+   assert(!destroy_offscreen_context(0), "opengl destroy missing offscreen")
+   assert(!make_context_current(0), "opengl make missing current")
+   assert(release_context_current(), "opengl release missing current")
+   assert(!destroy_osmesa_context(0), "opengl destroy osmesa fallback")
+   assert(!swap_buffers(0) && !swap_interval(1), "opengl swap fallback")
+   assert(choose_visual(dict(4), 0, 0) == [0, 0], "opengl visual fallback")
+   assert(create_context(dict(2), dict(4)) == 0, "opengl native context fallback")
+   print("✓ std.os.ui.window.platform.opengl self-test passed")
 }

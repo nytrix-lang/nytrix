@@ -1,15 +1,15 @@
 use std.core
 use std.core.iter
 
-fn trait_numeric(numeric: x): number { x + 1 }
+fn trait_numeric(numeric x) number { x + 1 }
 
-fn trait_sequence(sequence: xs): int { count(xs) }
+fn trait_sequence(sequence xs) int { count(xs) }
 
-fn trait_indexable(indexable: xs): any { get(xs, 0) }
+fn trait_indexable(indexable xs) any { get(xs, 0) }
 
-fn trait_iterable(iterable: xs): int { len(xs) }
+fn trait_iterable(iterable xs) int { len(xs) }
 
-fn trait_allocator(allocator: p): allocator { p }
+fn trait_allocator(allocator p) allocator { p }
 assert(trait_numeric(41) == 42, "numeric static capability")
 assert(trait_sequence([1, 2, 3]) == 3, "sequence list capability")
 assert(trait_sequence("abc") == 3, "sequence string capability")

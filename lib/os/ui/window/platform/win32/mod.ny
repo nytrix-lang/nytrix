@@ -1,17 +1,21 @@
-;; Keywords: platform window backend win32 windows joystick
+;; Keywords: platform window backend win32 windows joystick os ui input
 ;; Win32 native window backend for Windows windows, events, monitors, clipboard, and Vulkan surfaces.
+;; References:
+;; - std.os.ui.window.platform
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
 use std.core
 use std.core.mem (cstr)
 use std.core.str as str
 use std.os.ui.window.platform.api as backend_api
-use std.os.ui.consts as ui_consts
+use std.os.ui.window.consts as ui_consts
 use std.os.ui.window.event as ui_event
 use std.core.common as common
 use std.math (abs)
 use std.os.ui.render.vk.vulkan (vk_create_win32_surface_khr)
 
-fn _handle_from(any: v): any {
+fn _handle_from(any v) any {
    if(is_dict(v)){ return v.get("handle", 0) }
    v
 }
@@ -254,10 +258,12 @@ def DISP_CHANGE_SUCCESSFUL = 0
 def PROCESS_PER_MONITOR_DPI_AWARE = 2
 def DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 def CURSOR_SHOWING = 0x00000001
+
 layout POINT {
    x: i32,
    y: i32
 }
+
 mut _registered_classes = dict(4)
 mut _windows = dict(8)
 mut _timer_frequency = 0
@@ -280,245 +286,567 @@ mut _cursor_visible_asserted = false
    #include <imm.h>
    #include <vulkan/vulkan_win32.h>
    extern "" {
-      fn _ny_GetModuleHandleA(ptr: name): ptr as "GetModuleHandleA"
-      fn _ny_GetModuleHandleW(ptr: name): ptr as "GetModuleHandleW"
-      fn GetProcAddress(ptr: _module, ptr: _name): ptr
-      fn AdjustWindowRectEx(any: _rect, any: _style, any: _menu, any: _ex_style): any
-      fn AdjustWindowRectExForDpi(any: _rect, any: _style, any: _menu, any: _ex_style, any: _dpi): any
-      fn BringWindowToTop(ptr: _hwnd): i32
-      fn ChangeDisplaySettingsExW(ptr: _device, ptr: _mode, ptr: _hwnd, u32: _flags, ptr: _param): i32
-      fn ChangeWindowMessageFilterEx(any: _hwnd, any: _msg, any: _action, any: _change): any
-      fn ClientToScreen(ptr: _hwnd, ptr: _pt): i32
-      fn ClipCursor(any: _rect): any
-      fn CloseClipboard(): any
-      fn CreateBitmap(any: _w, any: _h, any: _planes, any: _bits, any: _data): any
-      fn CreateDCW(ptr: _driver, ptr: _device, ptr: _output, ptr: _init): ptr
-      fn CreateDIBSection(any: _dc, any: _bmi, any: _usage, any: _bits, any: _section, any: _offset): any
-      fn CreateIconIndirect(any: _icon_info): any
-      fn CreateRectRgn(any: _left, any: _top, any: _right, any: _bottom): any
-      fn CreateWindowExW(u32: _ex, ptr: _class, ptr: _title, u32: _style, i32: _x, i32: _y, i32: _w, i32: _h, ptr: _parent, ptr: _menu, ptr: _instance, ptr: _param): ptr
-      fn DefWindowProcW(any: _hwnd, any: _msg, any: _wparam, any: _lparam): any
-      fn DeleteDC(ptr: _dc): i32
-      fn DeleteObject(any: _obj): any
-      fn DestroyIcon(any: _icon): any
-      fn DestroyWindow(any: _hwnd): any
-      fn DisableProcessWindowsGhosting(): any
-      fn DispatchMessageW(any: _msg): any
-      fn DragAcceptFiles(any: _hwnd, any: _accept): any
-      fn DragFinish(any: _drop): any
-      fn DragQueryFileW(any: _drop, any: _index, any: _buf, any: _len): any
-      fn DragQueryPoint(any: _drop, any: _pt): any
-      fn DwmEnableBlurBehindWindow(any: _hwnd, any: _blur): any
-      fn DwmGetColorizationColor(any: _color, any: _opaque): any
-      fn DwmIsCompositionEnabled(any: _enabled): any
-      fn EmptyClipboard(): any
-      fn EnumDisplayDevicesW(ptr: _device, u32: _index, ptr: _adapter, u32: _flags): i32
-      fn EnumDisplaySettingsW(ptr: _device, u32: _mode, ptr: _devmode): i32
-      fn FlashWindow(any: _hwnd, any: _invert): any
-      fn GetActiveWindow(): any
-      fn GetClassLongPtrW(any: _hwnd, any: _index): any
-      fn GetClientRect(ptr: _hwnd, ptr: _rect): i32
-      fn GetClipboardData(any: _format): any
-      fn GetCursorInfo(ptr: _info): i32
-      fn GetCursorPos(ptr: _pt): i32
-      fn GetDC(ptr: _hwnd): ptr
-      fn GetDeviceCaps(ptr: _dc, i32: _index): i32
-      fn GetDeviceGammaRamp(any: _dc, any: _ramp): any
-      fn GetDpiForMonitor(ptr: _monitor, i32: _typ, ptr: _x, ptr: _y): i32
-      fn GetDpiForWindow(ptr: _hwnd): u32
-      fn GetKeyNameTextW(any: _lparam, any: _buf, any: _len): any
-      fn GetKeyState(any: _key): any
-      fn GetLastError(): u32
-      fn GetLayeredWindowAttributes(any: _hwnd, any: _key, any: _alpha, any: _flags): any
-      fn GetMonitorInfoW(ptr: _monitor, ptr: _info): i32
-      fn GetRawInputData(ptr: _raw, u32: _cmd, ptr: _data, ptr: _size, u32: _header): u32
-      fn GetCapture(): ptr
-      fn GetSystemMetrics(i32: _index): i32
-      fn GetSystemMetricsForDpi(i32: _index, u32: _dpi): i32
-      fn GetWindowRect(ptr: _hwnd, ptr: _rect): i32
-      fn GetWindowLongW(ptr: _hwnd, i32: _index): i64
-      fn GlobalAlloc(any: _flags, any: _bytes): any
-      fn GlobalFree(any: _obj): any
-      fn GlobalLock(any: _obj): any
-      fn GlobalUnlock(any: _obj): any
-      fn ImmGetCompositionStringW(any: _ctx, any: _index, any: _buf, any: _len): any
-      fn ImmGetContext(any: _hwnd): any
-      fn ImmReleaseContext(any: _hwnd, any: _ctx): any
-      fn IsIconic(ptr: _hwnd): i32
-      fn IsWindowVisible(ptr: _hwnd): i32
-      fn IsZoomed(ptr: _hwnd): i32
-      fn LoadCursorW(ptr: _inst, u64: _name): ptr
-      fn LoadImageW(ptr: _inst, u64: _name, u32: _typ, i32: _cx, i32: _cy, u32: _flags): ptr
-      fn MapVirtualKeyW(any: _code, any: _map_type): any
-      fn MonitorFromRect(ptr: _rect, u32: _flags): ptr
-      fn MonitorFromWindow(ptr: _hwnd, u32: _flags): ptr
-      fn MoveWindow(ptr: _hwnd, i32: _x, i32: _y, i32: _w, i32: _h, i32: _repaint): i32
-      fn MsgWaitForMultipleObjects(any: _count, any: _handles, any: _wait_all, any: _ms, any: _mask): any
-      fn MultiByteToWideChar(u32: _cp, u32: _flags, ptr: _src, i32: _src_len, ptr: _dst, i32: _dst_len): i32
-      fn OpenClipboard(any: _hwnd): any
-      fn PeekMessageW(any: _msg, any: _hwnd, any: _min, any: _max, any: _remove): any
-      fn QueryPerformanceCounter(any: _value): any
-      fn QueryPerformanceFrequency(any: _value): any
-      fn RegisterClassExW(any: _wc): any
-      fn RegisterRawInputDevices(ptr: _rid, u32: _count, u32: _size): i32
-      fn ReleaseDC(ptr: _hwnd, ptr: _dc): i32
-      fn ReleaseCapture(): i32
-      fn ScreenToClient(ptr: _hwnd, ptr: _pt): i32
-      fn SendMessageW(any: _hwnd, any: _msg, any: _wparam, any: _lparam): any
-      fn SetClipboardData(any: _format, any: _obj): any
-      fn SetCursor(any: _cursor): any
-      fn SetCursorPos(i32: _x, i32: _y): i32
-      fn SetDeviceGammaRamp(any: _dc, any: _ramp): any
-      fn SetFocus(ptr: _hwnd): ptr
-      fn SetForegroundWindow(ptr: _hwnd): i32
-      fn SetLayeredWindowAttributes(any: _hwnd, any: _key, any: _alpha, any: _flags): any
-      fn SetProcessDPIAware(): any
-      fn SetProcessDpiAwareness(any: _value): any
-      fn SetProcessDpiAwarenessContext(any: _value): any
-      fn SetPropW(any: _hwnd, any: _name, any: _value): any
-      fn SetWindowLongW(ptr: _hwnd, i32: _index, i64: _value): i64
-      fn SetWindowPos(ptr: _hwnd, any: _after, i32: _x, i32: _y, i32: _w, i32: _h, u32: _flags): i32
-      fn SetWindowTextW(any: _hwnd, any: _text): any
-      fn ShowCursor(i32: _show): i32
-      fn ShowWindow(ptr: _hwnd, i32: _cmd): i32
-      fn SetCapture(ptr: _hwnd): ptr
-      fn TrackMouseEvent(ptr: _event): i32
-      fn UpdateWindow(ptr: _hwnd): i32
-      fn ValidateRect(any: _hwnd, any: _rect): i32
-      fn Sleep(any: _ms): any
-      fn TranslateMessage(any: _msg): any
-      fn vkCreateWin32SurfaceKHR(any: _instance, any: _info, any: _allocator, any: _surface): any
-      fn WideCharToMultiByte(u32: _cp, u32: _flags, ptr: _src, i32: _src_len, ptr: _dst, i32: _dst_len, ptr: _def, ptr: _used): i32
+      fn _ny_GetModuleHandleA(ptr name) ptr as "GetModuleHandleA"
+      fn _ny_GetModuleHandleW(ptr name) ptr as "GetModuleHandleW"
+      fn GetProcAddress(ptr _module, ptr _name) ptr
+      fn AdjustWindowRectEx(any _rect, any _style, any _menu, any _ex_style) any
+      fn AdjustWindowRectExForDpi(any _rect, any _style, any _menu, any _ex_style, any _dpi) any
+      fn BringWindowToTop(ptr _hwnd) i32
+      fn ChangeDisplaySettingsExW(ptr _device, ptr _mode, ptr _hwnd, u32 _flags, ptr _param) i32
+      fn ChangeWindowMessageFilterEx(any _hwnd, any _msg, any _action, any _change) any
+      fn ClientToScreen(ptr _hwnd, ptr _pt) i32
+      fn ClipCursor(any _rect) any
+      fn CloseClipboard() any
+      fn CreateBitmap(any _w, any _h, any _planes, any _bits, any _data) any
+      fn CreateDCW(ptr _driver, ptr _device, ptr _output, ptr _init) ptr
+      fn CreateDIBSection(any _dc, any _bmi, any _usage, any _bits, any _section, any _offset) any
+      fn CreateIconIndirect(any _icon_info) any
+      fn CreateRectRgn(any _left, any _top, any _right, any _bottom) any
+      fn CreateWindowExW(u32 _ex, ptr _class, ptr _title, u32 _style, i32 _x, i32 _y, i32 _w, i32 _h, ptr _parent, ptr _menu, ptr _instance, ptr _param) ptr
+      fn DefWindowProcW(any _hwnd, any _msg, any _wparam, any _lparam) any
+      fn DeleteDC(ptr _dc) i32
+      fn DeleteObject(any _obj) any
+      fn DestroyIcon(any _icon) any
+      fn DestroyWindow(any _hwnd) any
+      fn DisableProcessWindowsGhosting() any
+      fn DispatchMessageW(any _msg) any
+      fn DragAcceptFiles(any _hwnd, any _accept) any
+      fn DragFinish(any _drop) any
+      fn DragQueryFileW(any _drop, any _index, any _buf, any _len) any
+      fn DragQueryPoint(any _drop, any _pt) any
+      fn DwmEnableBlurBehindWindow(any _hwnd, any _blur) any
+      fn DwmGetColorizationColor(any _color, any _opaque) any
+      fn DwmIsCompositionEnabled(any _enabled) any
+      fn EmptyClipboard() any
+      fn EnumDisplayDevicesW(ptr _device, u32 _index, ptr _adapter, u32 _flags) i32
+      fn EnumDisplaySettingsW(ptr _device, u32 _mode, ptr _devmode) i32
+      fn FlashWindow(any _hwnd, any _invert) any
+      fn GetActiveWindow() any
+      fn GetClassLongPtrW(any _hwnd, any _index) any
+      fn GetClientRect(ptr _hwnd, ptr _rect) i32
+      fn GetClipboardData(any _format) any
+      fn GetCursorInfo(ptr _info) i32
+      fn GetCursorPos(ptr _pt) i32
+      fn GetDC(ptr _hwnd) ptr
+      fn GetDeviceCaps(ptr _dc, i32 _index) i32
+      fn GetDeviceGammaRamp(any _dc, any _ramp) any
+      fn GetDpiForMonitor(ptr _monitor, i32 _typ, ptr _x, ptr _y) i32
+      fn GetDpiForWindow(ptr _hwnd) u32
+      fn GetKeyNameTextW(any _lparam, any _buf, any _len) any
+      fn GetKeyState(any _key) any
+      fn GetLastError() u32
+      fn GetLayeredWindowAttributes(any _hwnd, any _key, any _alpha, any _flags) any
+      fn GetMonitorInfoW(ptr _monitor, ptr _info) i32
+      fn GetRawInputData(ptr _raw, u32 _cmd, ptr _data, ptr _size, u32 _header) u32
+      fn GetCapture() ptr
+      fn GetSystemMetrics(i32 _index) i32
+      fn GetSystemMetricsForDpi(i32 _index, u32 _dpi) i32
+      fn GetWindowRect(ptr _hwnd, ptr _rect) i32
+      fn GetWindowLongW(ptr _hwnd, i32 _index) i64
+      fn GlobalAlloc(any _flags, any _bytes) any
+      fn GlobalFree(any _obj) any
+      fn GlobalLock(any _obj) any
+      fn GlobalUnlock(any _obj) any
+      fn ImmGetCompositionStringW(any _ctx, any _index, any _buf, any _len) any
+      fn ImmGetContext(any _hwnd) any
+      fn ImmReleaseContext(any _hwnd, any _ctx) any
+      fn IsIconic(ptr _hwnd) i32
+      fn IsWindowVisible(ptr _hwnd) i32
+      fn IsZoomed(ptr _hwnd) i32
+      fn LoadCursorW(ptr _inst, u64 _name) ptr
+      fn LoadImageW(ptr _inst, u64 _name, u32 _typ, i32 _cx, i32 _cy, u32 _flags) ptr
+      fn MapVirtualKeyW(any _code, any _map_type) any
+      fn MonitorFromRect(ptr _rect, u32 _flags) ptr
+      fn MonitorFromWindow(ptr _hwnd, u32 _flags) ptr
+      fn MoveWindow(ptr _hwnd, i32 _x, i32 _y, i32 _w, i32 _h, i32 _repaint) i32
+      fn MsgWaitForMultipleObjects(any _count, any _handles, any _wait_all, any _ms, any _mask) any
+      fn MultiByteToWideChar(u32 _cp, u32 _flags, ptr _src, i32 _src_len, ptr _dst, i32 _dst_len) i32
+      fn OpenClipboard(any _hwnd) any
+      fn PeekMessageW(any _msg, any _hwnd, any _min, any _max, any _remove) any
+      fn QueryPerformanceCounter(any _value) any
+      fn QueryPerformanceFrequency(any _value) any
+      fn RegisterClassExW(any _wc) any
+      fn RegisterRawInputDevices(ptr _rid, u32 _count, u32 _size) i32
+      fn ReleaseDC(ptr _hwnd, ptr _dc) i32
+      fn ReleaseCapture() i32
+      fn ScreenToClient(ptr _hwnd, ptr _pt) i32
+      fn SendMessageW(any _hwnd, any _msg, any _wparam, any _lparam) any
+      fn SetClipboardData(any _format, any _obj) any
+      fn SetCursor(any _cursor) any
+      fn SetCursorPos(i32 _x, i32 _y) i32
+      fn SetDeviceGammaRamp(any _dc, any _ramp) any
+      fn SetFocus(ptr _hwnd) ptr
+      fn SetForegroundWindow(ptr _hwnd) i32
+      fn SetLayeredWindowAttributes(any _hwnd, any _key, any _alpha, any _flags) any
+      fn SetProcessDPIAware() any
+      fn SetProcessDpiAwareness(any _value) any
+      fn SetProcessDpiAwarenessContext(any _value) any
+      fn SetPropW(any _hwnd, any _name, any _value) any
+      fn SetWindowLongW(ptr _hwnd, i32 _index, i64 _value) i64
+      fn SetWindowPos(ptr _hwnd, any _after, i32 _x, i32 _y, i32 _w, i32 _h, u32 _flags) i32
+      fn SetWindowTextW(any _hwnd, any _text) any
+      fn ShowCursor(i32 _show) i32
+      fn ShowWindow(ptr _hwnd, i32 _cmd) i32
+      fn SetCapture(ptr _hwnd) ptr
+      fn TrackMouseEvent(ptr _event) i32
+      fn UpdateWindow(ptr _hwnd) i32
+      fn ValidateRect(any _hwnd, any _rect) i32
+      fn Sleep(any _ms) any
+      fn TranslateMessage(any _msg) any
+      fn vkCreateWin32SurfaceKHR(any _instance, any _info, any _allocator, any _surface) any
+      fn WideCharToMultiByte(u32 _cp, u32 _flags, ptr _src, i32 _src_len, ptr _dst, i32 _dst_len, ptr _def, ptr _used) i32
    }
 } #else {
-   fn AdjustWindowRectEx(any: _rect, any: _style, any: _menu, any: _ex_style): any { 0 }
-   fn AdjustWindowRectExForDpi(any: _rect, any: _style, any: _menu, any: _ex_style, any: _dpi): any { 0 }
-   fn BringWindowToTop(ptr: _hwnd): i32 { 0 }
-   fn ChangeDisplaySettingsExW(ptr: _device, ptr: _mode, ptr: _hwnd, u32: _flags, ptr: _param): i32 { -1 }
-   fn ChangeWindowMessageFilterEx(any: _hwnd, any: _msg, any: _action, any: _change): any { 0 }
-   fn ClientToScreen(ptr: _hwnd, ptr: _pt): i32 { 0 }
-   fn ClipCursor(any: _rect): any { 0 }
-   fn CloseClipboard(): any { 0 }
-   fn CreateBitmap(any: _w, any: _h, any: _planes, any: _bits, any: _data): any { 0 }
-   fn CreateDCW(ptr: _driver, ptr: _device, ptr: _output, ptr: _init): ptr { 0 }
-   fn CreateDIBSection(any: _dc, any: _bmi, any: _usage, any: _bits, any: _section, any: _offset): any { 0 }
-   fn CreateIconIndirect(any: _icon_info): any { 0 }
-   fn CreateRectRgn(any: _left, any: _top, any: _right, any: _bottom): any { 0 }
-   fn CreateWindowExW(u32: _ex, ptr: _class, ptr: _title, u32: _style, i32: _x, i32: _y, i32: _w, i32: _h, ptr: _parent, ptr: _menu, ptr: _instance, ptr: _param): ptr { 0 }
-   fn DefWindowProcW(any: _hwnd, any: _msg, any: _wparam, any: _lparam): any { 0 }
-   fn DeleteDC(ptr: _dc): i32 { 0 }
-   fn DeleteObject(any: _obj): any { 0 }
-   fn DestroyIcon(any: _icon): any { 0 }
-   fn DestroyWindow(any: _hwnd): any { 0 }
-   fn DisableProcessWindowsGhosting(): any { 0 }
-   fn DispatchMessageW(any: _msg): any { 0 }
-   fn DragAcceptFiles(any: _hwnd, any: _accept): any { 0 }
-   fn DragFinish(any: _drop): any { 0 }
-   fn DragQueryFileW(any: _drop, any: _index, any: _buf, any: _len): any { 0 }
-   fn DragQueryPoint(any: _drop, any: _pt): any { 0 }
-   fn DwmEnableBlurBehindWindow(any: _hwnd, any: _blur): any { 0 }
-   fn DwmGetColorizationColor(any: _color, any: _opaque): any { 1 }
-   fn DwmIsCompositionEnabled(any: _enabled): any { 1 }
-   fn EmptyClipboard(): any { 0 }
-   fn EnumDisplayDevicesW(ptr: _device, u32: _index, ptr: _adapter, u32: _flags): i32 { 0 }
-   fn EnumDisplaySettingsW(ptr: _device, u32: _mode, ptr: _devmode): i32 { 0 }
-   fn FlashWindow(any: _hwnd, any: _invert): any { 0 }
-   fn GetActiveWindow(): any { 0 }
-   fn GetClassLongPtrW(any: _hwnd, any: _index): any { 0 }
-   fn GetClientRect(ptr: _hwnd, ptr: _rect): i32 { 0 }
-   fn GetClipboardData(any: _format): any { 0 }
-   fn GetCursorInfo(ptr: _info): i32 { 0 }
-   fn GetCursorPos(ptr: _pt): i32 { 0 }
-   fn GetDC(ptr: _hwnd): ptr { 0 }
-   fn GetDeviceCaps(ptr: _dc, i32: _index): i32 { 0 }
-   fn GetDeviceGammaRamp(any: _dc, any: _ramp): any { 0 }
-   fn GetDpiForMonitor(ptr: _monitor, i32: _typ, ptr: _x, ptr: _y): i32 { 1 }
-   fn GetDpiForWindow(ptr: _hwnd): u32 { USER_DEFAULT_SCREEN_DPI }
-   fn GetKeyNameTextW(any: _lparam, any: _buf, any: _len): any { 0 }
-   fn GetKeyState(any: _key): any { 0 }
-   fn GetLastError(): u32 { 0 }
-   fn GetLayeredWindowAttributes(any: _hwnd, any: _key, any: _alpha, any: _flags): any { 0 }
-   fn _ny_GetModuleHandleA(ptr: _name): ptr { 0 }
-   fn _ny_GetModuleHandleW(ptr: _name): ptr { 0 }
-   fn GetProcAddress(ptr: _module, ptr: _name): ptr { 0 }
-   fn GetMonitorInfoW(ptr: _monitor, ptr: _info): i32 { 0 }
-   fn GetRawInputData(ptr: _raw, u32: _cmd, ptr: _data, ptr: _size, u32: _header): u32 { 0xffffffff }
-   fn GetCapture(): ptr { 0 }
-   fn GetSystemMetrics(i32: _index): i32 { 0 }
-   fn GetSystemMetricsForDpi(i32: _index, u32: _dpi): i32 { 0 }
-   fn GetWindowRect(ptr: _hwnd, ptr: _rect): i32 { 0 }
-   fn GetWindowLongW(ptr: _hwnd, i32: _index): i64 { 0 }
-   fn GlobalAlloc(any: _flags, any: _bytes): any { 0 }
-   fn GlobalFree(any: _obj): any { 0 }
-   fn GlobalLock(any: _obj): any { 0 }
-   fn GlobalUnlock(any: _obj): any { 0 }
-   fn ImmGetCompositionStringW(any: _ctx, any: _index, any: _buf, any: _len): any { 0 }
-   fn ImmGetContext(any: _hwnd): any { 0 }
-   fn ImmReleaseContext(any: _hwnd, any: _ctx): any { 0 }
-   fn IsIconic(ptr: _hwnd): i32 { 0 }
-   fn IsWindowVisible(ptr: _hwnd): i32 { 0 }
-   fn IsZoomed(ptr: _hwnd): i32 { 0 }
-   fn LoadCursorW(ptr: _inst, u64: _name): ptr { 0 }
-   fn LoadImageW(ptr: _inst, u64: _name, u32: _typ, i32: _cx, i32: _cy, u32: _flags): ptr { 0 }
-   fn MapVirtualKeyW(any: _code, any: _map_type): any { 0 }
-   fn MonitorFromRect(ptr: _rect, u32: _flags): ptr { 0 }
-   fn MonitorFromWindow(ptr: _hwnd, u32: _flags): ptr { 0 }
-   fn MoveWindow(ptr: _hwnd, i32: _x, i32: _y, i32: _w, i32: _h, i32: _repaint): i32 { 0 }
-   fn MsgWaitForMultipleObjects(any: _count, any: _handles, any: _wait_all, any: _ms, any: _mask): any { 0 }
-   fn MultiByteToWideChar(u32: _cp, u32: _flags, ptr: _src, i32: _src_len, ptr: _dst, i32: _dst_len): i32 { 0 }
-   fn OpenClipboard(any: _hwnd): any { 0 }
-   fn PeekMessageW(any: _msg, any: _hwnd, any: _min, any: _max, any: _remove): any { 0 }
-   fn QueryPerformanceCounter(any: _value): any { 0 }
-   fn QueryPerformanceFrequency(any: _value): any { 0 }
-   fn RegisterClassExW(any: _wc): any { 0 }
-   fn RegisterRawInputDevices(ptr: _rid, u32: _count, u32: _size): i32 { 0 }
-   fn ReleaseDC(ptr: _hwnd, ptr: _dc): i32 { 0 }
-   fn ReleaseCapture(): i32 { 0 }
-   fn ScreenToClient(ptr: _hwnd, ptr: _pt): i32 { 0 }
-   fn SendMessageW(any: _hwnd, any: _msg, any: _wparam, any: _lparam): any { 0 }
-   fn SetClipboardData(any: _format, any: _obj): any { 0 }
-   fn SetCursor(any: _cursor): any { 0 }
-   fn SetCursorPos(i32: _x, i32: _y): i32 { 0 }
-   fn SetDeviceGammaRamp(any: _dc, any: _ramp): any { 0 }
-   fn SetFocus(ptr: _hwnd): ptr { 0 }
-   fn SetForegroundWindow(ptr: _hwnd): i32 { 0 }
-   fn SetLayeredWindowAttributes(any: _hwnd, any: _key, any: _alpha, any: _flags): any { 0 }
-   fn SetProcessDPIAware(): any { 0 }
-   fn SetProcessDpiAwareness(any: _value): any { 1 }
-   fn SetProcessDpiAwarenessContext(any: _value): any { 0 }
-   fn SetPropW(any: _hwnd, any: _name, any: _value): any { 0 }
-   fn SetWindowLongW(ptr: _hwnd, i32: _index, i64: _value): i64 { 0 }
-   fn SetWindowPos(ptr: _hwnd, any: _after, i32: _x, i32: _y, i32: _w, i32: _h, u32: _flags): i32 { 0 }
-   fn SetWindowTextW(any: _hwnd, any: _text): any { 0 }
-   fn ShowCursor(i32: _show): i32 { 0 }
-   fn ShowWindow(ptr: _hwnd, i32: _cmd): i32 { 0 }
-   fn SetCapture(ptr: _hwnd): ptr { 0 }
-   fn TrackMouseEvent(ptr: _event): i32 { 0 }
-   fn UpdateWindow(ptr: _hwnd): i32 { 0 }
-   fn ValidateRect(any: _hwnd, any: _rect): i32 { 0 }
-   fn Sleep(any: _ms): any { 0 }
-   fn TranslateMessage(any: _msg): any { 0 }
-   fn vkCreateWin32SurfaceKHR(any: _instance, any: _info, any: _allocator, any: _surface): any { -1 }
-   fn WideCharToMultiByte(u32: _cp, u32: _flags, ptr: _src, i32: _src_len, ptr: _dst, i32: _dst_len, ptr: _def, ptr: _used): i32 { 0 }
+   "Runs the WideCharToMultiByte operation."
+   fn AdjustWindowRectEx(any _rect, any _style, any _menu, any _ex_style) any {
+      "Runs the AdjustWindowRectEx operation."
+      0
+   }
+   fn AdjustWindowRectExForDpi(any _rect, any _style, any _menu, any _ex_style, any _dpi) any {
+      "Runs the AdjustWindowRectExForDpi operation."
+      0
+   }
+   fn BringWindowToTop(ptr _hwnd) i32 {
+      "Runs the BringWindowToTop operation."
+      0
+   }
+   fn ChangeDisplaySettingsExW(ptr _device, ptr _mode, ptr _hwnd, u32 _flags, ptr _param) i32 {
+      "Runs the ChangeDisplaySettingsExW operation."
+      -1
+   }
+   fn ChangeWindowMessageFilterEx(any _hwnd, any _msg, any _action, any _change) any {
+      "Runs the ChangeWindowMessageFilterEx operation."
+      0
+   }
+   fn ClientToScreen(ptr _hwnd, ptr _pt) i32 {
+      "Runs the ClientToScreen operation."
+      0
+   }
+   fn ClipCursor(any _rect) any {
+      "Runs the ClipCursor operation."
+      0
+   }
+   fn CloseClipboard() any {
+      "Runs the CloseClipboard operation."
+      0
+   }
+   fn CreateBitmap(any _w, any _h, any _planes, any _bits, any _data) any {
+      "Runs the CreateBitmap operation."
+      0
+   }
+   fn CreateDCW(ptr _driver, ptr _device, ptr _output, ptr _init) ptr {
+      "Runs the CreateDCW operation."
+      0
+   }
+   fn CreateDIBSection(any _dc, any _bmi, any _usage, any _bits, any _section, any _offset) any {
+      "Runs the CreateDIBSection operation."
+      0
+   }
+   fn CreateIconIndirect(any _icon_info) any {
+      "Runs the CreateIconIndirect operation."
+      0
+   }
+   fn CreateRectRgn(any _left, any _top, any _right, any _bottom) any {
+      "Runs the CreateRectRgn operation."
+      0
+   }
+   fn CreateWindowExW(u32 _ex, ptr _class, ptr _title, u32 _style, i32 _x, i32 _y, i32 _w, i32 _h, ptr _parent, ptr _menu, ptr _instance, ptr _param) ptr {
+      "Runs the CreateWindowExW operation."
+      0
+   }
+   fn DefWindowProcW(any _hwnd, any _msg, any _wparam, any _lparam) any {
+      "Runs the DefWindowProcW operation."
+      0
+   }
+   fn DeleteDC(ptr _dc) i32 {
+      "Runs the DeleteDC operation."
+      0
+   }
+   fn DeleteObject(any _obj) any {
+      "Runs the DeleteObject operation."
+      0
+   }
+   fn DestroyIcon(any _icon) any {
+      "Runs the DestroyIcon operation."
+      0
+   }
+   fn DestroyWindow(any _hwnd) any {
+      "Runs the DestroyWindow operation."
+      0
+   }
+   fn DisableProcessWindowsGhosting() any {
+      "Runs the DisableProcessWindowsGhosting operation."
+      0
+   }
+   fn DispatchMessageW(any _msg) any {
+      "Runs the DispatchMessageW operation."
+      0
+   }
+   fn DragAcceptFiles(any _hwnd, any _accept) any {
+      "Runs the DragAcceptFiles operation."
+      0
+   }
+   fn DragFinish(any _drop) any {
+      "Runs the DragFinish operation."
+      0
+   }
+   fn DragQueryFileW(any _drop, any _index, any _buf, any _len) any {
+      "Runs the DragQueryFileW operation."
+      0
+   }
+   fn DragQueryPoint(any _drop, any _pt) any {
+      "Runs the DragQueryPoint operation."
+      0
+   }
+   fn DwmEnableBlurBehindWindow(any _hwnd, any _blur) any {
+      "Runs the DwmEnableBlurBehindWindow operation."
+      0
+   }
+   fn DwmGetColorizationColor(any _color, any _opaque) any {
+      "Runs the DwmGetColorizationColor operation."
+      1
+   }
+   fn DwmIsCompositionEnabled(any _enabled) any {
+      "Runs the DwmIsCompositionEnabled operation."
+      1
+   }
+   fn EmptyClipboard() any {
+      "Runs the EmptyClipboard operation."
+      0
+   }
+   fn EnumDisplayDevicesW(ptr _device, u32 _index, ptr _adapter, u32 _flags) i32 {
+      "Runs the EnumDisplayDevicesW operation."
+      0
+   }
+   fn EnumDisplaySettingsW(ptr _device, u32 _mode, ptr _devmode) i32 {
+      "Runs the EnumDisplaySettingsW operation."
+      0
+   }
+   fn FlashWindow(any _hwnd, any _invert) any {
+      "Runs the FlashWindow operation."
+      0
+   }
+   fn GetActiveWindow() any {
+      "Runs the GetActiveWindow operation."
+      0
+   }
+   fn GetClassLongPtrW(any _hwnd, any _index) any {
+      "Runs the GetClassLongPtrW operation."
+      0
+   }
+   fn GetClientRect(ptr _hwnd, ptr _rect) i32 {
+      "Runs the GetClientRect operation."
+      0
+   }
+   fn GetClipboardData(any _format) any {
+      "Runs the GetClipboardData operation."
+      0
+   }
+   fn GetCursorInfo(ptr _info) i32 {
+      "Runs the GetCursorInfo operation."
+      0
+   }
+   fn GetCursorPos(ptr _pt) i32 {
+      "Runs the GetCursorPos operation."
+      0
+   }
+   fn GetDC(ptr _hwnd) ptr {
+      "Runs the GetDC operation."
+      0
+   }
+   fn GetDeviceCaps(ptr _dc, i32 _index) i32 {
+      "Runs the GetDeviceCaps operation."
+      0
+   }
+   fn GetDeviceGammaRamp(any _dc, any _ramp) any {
+      "Runs the GetDeviceGammaRamp operation."
+      0
+   }
+   fn GetDpiForMonitor(ptr _monitor, i32 _typ, ptr _x, ptr _y) i32 {
+      "Runs the GetDpiForMonitor operation."
+      1
+   }
+   fn GetDpiForWindow(ptr _hwnd) u32 {
+      "Runs the GetDpiForWindow operation."
+      USER_DEFAULT_SCREEN_DPI
+   }
+   fn GetKeyNameTextW(any _lparam, any _buf, any _len) any {
+      "Runs the GetKeyNameTextW operation."
+      0
+   }
+   fn GetKeyState(any _key) any {
+      "Runs the GetKeyState operation."
+      0
+   }
+   fn GetLastError() u32 {
+      "Runs the GetLastError operation."
+      0
+   }
+   fn GetLayeredWindowAttributes(any _hwnd, any _key, any _alpha, any _flags) any {
+      "Runs the GetLayeredWindowAttributes operation."
+      0
+   }
+   fn _ny_GetModuleHandleA(ptr _name) ptr { 0 }
+   fn _ny_GetModuleHandleW(ptr _name) ptr { 0 }
+   fn GetProcAddress(ptr _module, ptr _name) ptr {
+      "Runs the GetProcAddress operation."
+      0
+   }
+   fn GetMonitorInfoW(ptr _monitor, ptr _info) i32 {
+      "Runs the GetMonitorInfoW operation."
+      0
+   }
+   fn GetRawInputData(ptr _raw, u32 _cmd, ptr _data, ptr _size, u32 _header) u32 {
+      "Runs the GetRawInputData operation."
+      0xffffffff
+   }
+   fn GetCapture() ptr {
+      "Runs the GetCapture operation."
+      0
+   }
+   fn GetSystemMetrics(i32 _index) i32 {
+      "Runs the GetSystemMetrics operation."
+      0
+   }
+   fn GetSystemMetricsForDpi(i32 _index, u32 _dpi) i32 {
+      "Runs the GetSystemMetricsForDpi operation."
+      0
+   }
+   fn GetWindowRect(ptr _hwnd, ptr _rect) i32 {
+      "Runs the GetWindowRect operation."
+      0
+   }
+   fn GetWindowLongW(ptr _hwnd, i32 _index) i64 {
+      "Runs the GetWindowLongW operation."
+      0
+   }
+   fn GlobalAlloc(any _flags, any _bytes) any {
+      "Runs the GlobalAlloc operation."
+      0
+   }
+   fn GlobalFree(any _obj) any {
+      "Runs the GlobalFree operation."
+      0
+   }
+   fn GlobalLock(any _obj) any {
+      "Runs the GlobalLock operation."
+      0
+   }
+   fn GlobalUnlock(any _obj) any {
+      "Runs the GlobalUnlock operation."
+      0
+   }
+   fn ImmGetCompositionStringW(any _ctx, any _index, any _buf, any _len) any {
+      "Runs the ImmGetCompositionStringW operation."
+      0
+   }
+   fn ImmGetContext(any _hwnd) any {
+      "Runs the ImmGetContext operation."
+      0
+   }
+   fn ImmReleaseContext(any _hwnd, any _ctx) any {
+      "Runs the ImmReleaseContext operation."
+      0
+   }
+   fn IsIconic(ptr _hwnd) i32 {
+      "Runs the IsIconic operation."
+      0
+   }
+   fn IsWindowVisible(ptr _hwnd) i32 {
+      "Runs the IsWindowVisible operation."
+      0
+   }
+   fn IsZoomed(ptr _hwnd) i32 {
+      "Runs the IsZoomed operation."
+      0
+   }
+   fn LoadCursorW(ptr _inst, u64 _name) ptr {
+      "Runs the LoadCursorW operation."
+      0
+   }
+   fn LoadImageW(ptr _inst, u64 _name, u32 _typ, i32 _cx, i32 _cy, u32 _flags) ptr {
+      "Runs the LoadImageW operation."
+      0
+   }
+   fn MapVirtualKeyW(any _code, any _map_type) any {
+      "Runs the MapVirtualKeyW operation."
+      0
+   }
+   fn MonitorFromRect(ptr _rect, u32 _flags) ptr {
+      "Runs the MonitorFromRect operation."
+      0
+   }
+   fn MonitorFromWindow(ptr _hwnd, u32 _flags) ptr {
+      "Runs the MonitorFromWindow operation."
+      0
+   }
+   fn MoveWindow(ptr _hwnd, i32 _x, i32 _y, i32 _w, i32 _h, i32 _repaint) i32 {
+      "Runs the MoveWindow operation."
+      0
+   }
+   fn MsgWaitForMultipleObjects(any _count, any _handles, any _wait_all, any _ms, any _mask) any {
+      "Runs the MsgWaitForMultipleObjects operation."
+      0
+   }
+   fn MultiByteToWideChar(u32 _cp, u32 _flags, ptr _src, i32 _src_len, ptr _dst, i32 _dst_len) i32 {
+      "Runs the MultiByteToWideChar operation."
+      0
+   }
+   fn OpenClipboard(any _hwnd) any {
+      "Runs the OpenClipboard operation."
+      0
+   }
+   fn PeekMessageW(any _msg, any _hwnd, any _min, any _max, any _remove) any {
+      "Runs the PeekMessageW operation."
+      0
+   }
+   fn QueryPerformanceCounter(any _value) any {
+      "Runs the QueryPerformanceCounter operation."
+      0
+   }
+   fn QueryPerformanceFrequency(any _value) any {
+      "Runs the QueryPerformanceFrequency operation."
+      0
+   }
+   fn RegisterClassExW(any _wc) any {
+      "Runs the RegisterClassExW operation."
+      0
+   }
+   fn RegisterRawInputDevices(ptr _rid, u32 _count, u32 _size) i32 {
+      "Runs the RegisterRawInputDevices operation."
+      0
+   }
+   fn ReleaseDC(ptr _hwnd, ptr _dc) i32 {
+      "Runs the ReleaseDC operation."
+      0
+   }
+   fn ReleaseCapture() i32 {
+      "Runs the ReleaseCapture operation."
+      0
+   }
+   fn ScreenToClient(ptr _hwnd, ptr _pt) i32 {
+      "Runs the ScreenToClient operation."
+      0
+   }
+   fn SendMessageW(any _hwnd, any _msg, any _wparam, any _lparam) any {
+      "Runs the SendMessageW operation."
+      0
+   }
+   fn SetClipboardData(any _format, any _obj) any {
+      "Runs the SetClipboardData operation."
+      0
+   }
+   fn SetCursor(any _cursor) any {
+      "Runs the SetCursor operation."
+      0
+   }
+   fn SetCursorPos(i32 _x, i32 _y) i32 {
+      "Runs the SetCursorPos operation."
+      0
+   }
+   fn SetDeviceGammaRamp(any _dc, any _ramp) any {
+      "Runs the SetDeviceGammaRamp operation."
+      0
+   }
+   fn SetFocus(ptr _hwnd) ptr {
+      "Runs the SetFocus operation."
+      0
+   }
+   fn SetForegroundWindow(ptr _hwnd) i32 {
+      "Runs the SetForegroundWindow operation."
+      0
+   }
+   fn SetLayeredWindowAttributes(any _hwnd, any _key, any _alpha, any _flags) any {
+      "Runs the SetLayeredWindowAttributes operation."
+      0
+   }
+   fn SetProcessDPIAware() any {
+      "Runs the SetProcessDPIAware operation."
+      0
+   }
+   fn SetProcessDpiAwareness(any _value) any {
+      "Runs the SetProcessDpiAwareness operation."
+      1
+   }
+   fn SetProcessDpiAwarenessContext(any _value) any {
+      "Runs the SetProcessDpiAwarenessContext operation."
+      0
+   }
+   fn SetPropW(any _hwnd, any _name, any _value) any {
+      "Runs the SetPropW operation."
+      0
+   }
+   fn SetWindowLongW(ptr _hwnd, i32 _index, i64 _value) i64 {
+      "Runs the SetWindowLongW operation."
+      0
+   }
+   fn SetWindowPos(ptr _hwnd, any _after, i32 _x, i32 _y, i32 _w, i32 _h, u32 _flags) i32 {
+      "Runs the SetWindowPos operation."
+      0
+   }
+   fn SetWindowTextW(any _hwnd, any _text) any {
+      "Runs the SetWindowTextW operation."
+      0
+   }
+   fn ShowCursor(i32 _show) i32 {
+      "Runs the ShowCursor operation."
+      0
+   }
+   fn ShowWindow(ptr _hwnd, i32 _cmd) i32 {
+      "Runs the ShowWindow operation."
+      0
+   }
+   fn SetCapture(ptr _hwnd) ptr {
+      "Runs the SetCapture operation."
+      0
+   }
+   fn TrackMouseEvent(ptr _event) i32 {
+      "Runs the TrackMouseEvent operation."
+      0
+   }
+   fn UpdateWindow(ptr _hwnd) i32 {
+      "Runs the UpdateWindow operation."
+      0
+   }
+   fn ValidateRect(any _hwnd, any _rect) i32 {
+      "Runs the ValidateRect operation."
+      0
+   }
+   fn Sleep(any _ms) any {
+      "Runs the Sleep operation."
+      0
+   }
+   fn TranslateMessage(any _msg) any {
+      "Runs the TranslateMessage operation."
+      0
+   }
+   fn vkCreateWin32SurfaceKHR(any _instance, any _info, any _allocator, any _surface) any {
+      "Runs the vkCreateWin32SurfaceKHR operation."
+      -1
+   }
+   fn WideCharToMultiByte(u32 _cp, u32 _flags, ptr _src, i32 _src_len, ptr _dst, i32 _dst_len, ptr _def, ptr _used) i32 {
+      "Runs the WideCharToMultiByte operation."
+      0
+   }
 }
 
-fn _instance_from_window(any: win): any {
+fn _instance_from_window(any win) any {
    if(is_dict(win)){ return win.get("instance", _ny_GetModuleHandleW(0)) }
    _ny_GetModuleHandleW(0)
 }
 
-fn available(): bool {
+fn available() bool {
    "Returns true when the process is running on Win32."
    #windows { return true }
    false
 }
 
-fn get_backend_name(): str {
+fn get_backend_name() str {
    "Identifies this backend entry module."
    "win32"
 }
 
-fn init_dpi_awareness(): bool {
+fn init_dpi_awareness() bool {
    "Initialize Win32 process DPI-awareness."
    if(!available()){ return false }
    if(_dpi_awareness_done){ return true }
@@ -538,7 +866,7 @@ fn init_dpi_awareness(): bool {
    false
 }
 
-fn init_timer(): bool {
+fn init_timer() bool {
    "Initializes the high-resolution Win32 timer frequency."
    if(!available()){ return false }
    if(_timer_frequency > 0){ return _timer_frequency > 0 }
@@ -550,7 +878,7 @@ fn init_timer(): bool {
    ok
 }
 
-fn get_timer_value(): int {
+fn get_timer_value() int {
    "Returns the current Win32 performance counter value."
    if(!available()){ return 0 }
    def value = zalloc(8)
@@ -561,49 +889,32 @@ fn get_timer_value(): int {
    out
 }
 
-fn get_timer_frequency(): int {
+fn get_timer_frequency() int {
    "Returns the Win32 performance counter frequency."
    if(!available()){ return 0 }
    if(_timer_frequency <= 0){ init_timer() }
    _timer_frequency
 }
 
-fn module_handle(any: module_name=0): any {
+fn module_handle(any module_name=0) any {
    "Returns the Win32 HMODULE for the current process or the named module."
    if(!available()){ return 0 }
    if(module_name && is_str(module_name) && module_name.len > 0){ return _ny_GetModuleHandleA(cstr(module_name)) }
    _ny_GetModuleHandleA(0)
 }
 
-fn _native_proc_address(str: module_name, str: proc_name): any {
+fn _native_proc_address(str module_name, str proc_name) any {
    if(!available()){ return 0 }
    def hmod = _ny_GetModuleHandleA(cstr(module_name))
    if(!hmod){ return 0 }
    GetProcAddress(hmod, cstr(proc_name))
 }
 
-fn _def_window_proc_ptr(): any {
+fn _def_window_proc_ptr() any {
    _native_proc_address("user32.dll", "DefWindowProcW")
 }
 
-fn _default_window_proc(ptr: hwnd, u32: msg, u64: wparam, i64: lparam): i64 {
-   if(!available()){ return 0 }
-   if(msg == WM_GETMINMAXINFO){
-      def win = _windows.get(hwnd, 0)
-      if(win){
-         def min_w, min_h = win.get("min_w", -1), win.get("min_h", -1)
-         def max_w, max_h = win.get("max_w", -1), win.get("max_h", -1)
-         if(min_w >= 0){ store32(lparam, min_w, 24) } ;; ptMinTrackSize.x
-         if(min_h >= 0){ store32(lparam, min_h, 28) } ;; ptMinTrackSize.y
-         if(max_w >= 0){ store32(lparam, max_w, 16) } ;; ptMaxTrackSize.x
-         if(max_h >= 0){ store32(lparam, max_h, 20) } ;; ptMaxTrackSize.y
-         return 0
-      }
-   }
-   DefWindowProcW(hwnd, msg, wparam, lparam)
-}
-
-fn utf16_from_utf8(any: s): any {
+fn utf16_from_utf8(any s) any {
    "Returns a heap-allocated UTF-16LE string buffer for a UTF-8 Ny string."
    if(!available()){ return 0 }
    if(!is_str(s)){ s = to_str(s) }
@@ -618,7 +929,7 @@ fn utf16_from_utf8(any: s): any {
    out
 }
 
-fn utf8_from_utf16(any: wide): str {
+fn utf8_from_utf16(any wide) str {
    "Returns a UTF-8 Ny string converted from a NUL-terminated UTF-16 buffer."
    if(!available() || !wide){ return "" }
    def size = WideCharToMultiByte(CP_UTF8, 0, wide, -1, 0, 0, 0, 0)
@@ -634,7 +945,7 @@ fn utf8_from_utf16(any: wide): str {
    s
 }
 
-fn get_window_style(int: flags=0, bool: monitor=false): int {
+fn get_window_style(int flags=0, bool monitor=false) int {
    "Select the Win32 window style for the requested backend hints."
    mut style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN
    if(monitor || band(flags, ui_consts.WINDOW_FULLSCREEN)){ style = bor(style, WS_POPUP) } else {
@@ -650,28 +961,28 @@ fn get_window_style(int: flags=0, bool: monitor=false): int {
    style
 }
 
-fn get_window_ex_style(int: flags=0, bool: monitor=false): int {
+fn get_window_ex_style(int flags=0, bool monitor=false) int {
    "Select the extended Win32 window style for the requested backend hints."
    mut style = WS_EX_APPWINDOW
    if(monitor || band(flags, ui_consts.WINDOW_FULLSCREEN) || band(flags, ui_consts.WINDOW_FLOATING)){ style = bor(style, WS_EX_TOPMOST) }
    style
 }
 
-fn _rect_width(any: rect): int { load32(rect, 8) - load32(rect, 0) }
+fn _rect_width(any rect) int { load32(rect, 8) - load32(rect, 0) }
 
-fn _rect_height(any: rect): int { load32(rect, 12) - load32(rect, 4) }
+fn _rect_height(any rect) int { load32(rect, 12) - load32(rect, 4) }
 
-fn _near_i(int: a, int: b): bool { abs(a - b) <= 1 }
+fn _near_i(int a, int b) bool { abs(a - b) <= 1 }
 
-fn _size_matches(list: sz, int: w, int: h): bool {
+fn _size_matches(list sz, int w, int h) bool {
    sz.len >= 2 && _near_i(int(sz.get(0, 0)), w) && _near_i(int(sz.get(1, 0)), h)
 }
 
-fn _pos_matches(list: pos, int: x, int: y): bool {
+fn _pos_matches(list pos, int x, int y) bool {
    pos.len >= 2 && _near_i(int(pos.get(0, 0)), x) && _near_i(int(pos.get(1, 0)), y)
 }
 
-fn _window_dpi(any: hwnd=0): int {
+fn _window_dpi(any hwnd=0) int {
    if(!available()){ return USER_DEFAULT_SCREEN_DPI }
    if(hwnd){
       def dpi = int(GetDpiForWindow(hwnd))
@@ -680,14 +991,14 @@ fn _window_dpi(any: hwnd=0): int {
    USER_DEFAULT_SCREEN_DPI
 }
 
-fn _adjust_window_rect(any: rect, any: style, any: ex_style, any: hwnd=0): bool {
+fn _adjust_window_rect(any rect, any style, any ex_style, any hwnd=0) bool {
    if(!rect){ return false }
    def dpi = _window_dpi(hwnd)
    if(AdjustWindowRectExForDpi(rect, style, backend_api.FALSE, ex_style, dpi) != 0){ return true }
    AdjustWindowRectEx(rect, style, backend_api.FALSE, ex_style) != 0
 }
 
-fn _frame_size_for_client(any: hwnd, int: width, int: height, any: style, any: ex_style): list {
+fn _frame_size_for_client(any hwnd, int width, int height, any style, any ex_style) list {
    def rect = zalloc(16)
    if(!rect){ return [common.max(1, width), common.max(1, height)] }
    store32(rect, 0, 0)
@@ -702,7 +1013,7 @@ fn _frame_size_for_client(any: hwnd, int: width, int: height, any: style, any: e
    out
 }
 
-fn _centered_client_pos(int: width, int: height): list {
+fn _centered_client_pos(int width, int height) list {
    def monitor = get_primary_monitor()
    mut x, y, w, h = 0, 0, 0, 0
    if(monitor && is_dict(monitor)){
@@ -720,7 +1031,7 @@ fn _centered_client_pos(int: width, int: height): list {
    [x + common.max(0, (w - width) / 2), y + common.max(0, (h - height) / 2)]
 }
 
-fn _system_metric(int: index, int: dpi=0): int {
+fn _system_metric(int index, int dpi=0) int {
    if(!available()){ return 0 }
    def actual_dpi = dpi > 0 ? dpi : USER_DEFAULT_SCREEN_DPI
    def value = GetSystemMetricsForDpi(index, actual_dpi)
@@ -728,7 +1039,7 @@ fn _system_metric(int: index, int: dpi=0): int {
    GetSystemMetrics(index)
 }
 
-fn _store_native_ptr(any: p, any: v, int: offset): any {
+fn _store_native_ptr(any p, any v, int offset) any {
    if(v != 0){
       store64(p, v, offset)
    } else {
@@ -736,7 +1047,7 @@ fn _store_native_ptr(any: p, any: v, int: offset): any {
    }
 }
 
-fn _update_framebuffer_transparency(any: win): any {
+fn _update_framebuffer_transparency(any win) any {
    if(!available() || !win || !is_dict(win) || !win.get("transparent", false)){ return win }
    def hwnd = win.get("handle", 0)
    if(!hwnd){ return win }
@@ -768,46 +1079,46 @@ fn _update_framebuffer_transparency(any: win): any {
    win
 }
 
-fn _signed16(any: v): int {
+fn _signed16(any v) int {
    def x = int(v) & 0xffff
    if(x >= 0x8000){ x - 0x10000 } else { x }
 }
 
-fn _signed32(any: v): int {
+fn _signed32(any v) int {
    def x = int(v) & 0xffffffff
    if(x >= 0x80000000){ x - 0x100000000 } else { x }
 }
 
-fn _icon_image_width(any: image): int {
+fn _icon_image_width(any image) int {
    if(!is_dict(image)){ return 0 }
    int(image.get("width", image.get("w", 0)))
 }
 
-fn _icon_image_height(any: image): int {
+fn _icon_image_height(any image) int {
    if(!is_dict(image)){ return 0 }
    int(image.get("height", image.get("h", 0)))
 }
 
-fn _icon_image_pixels(any: image): any {
+fn _icon_image_pixels(any image) any {
    if(!is_dict(image)){ return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
    image.get("data", 0)))
 }
 
-fn _icon_pixel_source_len(any: pixels): int {
+fn _icon_pixel_source_len(any pixels) int {
    if(is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels)){ return pixels.len }
    if(is_ptr(pixels)){ return -1 }
    0
 }
 
-fn _icon_pixel_byte(any: pixels, int: index): int {
+fn _icon_pixel_byte(any pixels, int index) int {
    if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){ return load8(pixels, index) }
    if(is_list(pixels) || is_tuple(pixels)){ return pixels.get(index, 0) }
    0
 }
 
-fn _choose_icon_image(any: images, int: wanted_w, int: wanted_h): any {
+fn _choose_icon_image(any images, int wanted_w, int wanted_h) any {
    if(is_dict(images)){ return images }
    if(!is_list(images) && !is_tuple(images)){ return false }
    mut best = false
@@ -830,26 +1141,26 @@ fn _choose_icon_image(any: images, int: wanted_w, int: wanted_h): any {
    best
 }
 
-fn _wide_field_utf8(any: base, int: offset): str {
+fn _wide_field_utf8(any base, int offset) str {
    if(!base){ return "" }
    utf8_from_utf16(base + offset)
 }
 
-fn _alloc_display_device(): any {
+fn _alloc_display_device() any {
    def dd = zalloc(840)
    if(!dd){ return 0 }
    store32(dd, 840, 0)
    dd
 }
 
-fn _alloc_devmode(): any {
+fn _alloc_devmode() any {
    def dm = zalloc(220)
    if(!dm){ return 0 }
    store16(dm, 220, 68)
    dm
 }
 
-fn _split_bpp(any: bpp): list {
+fn _split_bpp(any bpp) list {
    mut depth = int(bpp)
    if(depth == 32){ depth = 24 }
    mut red = int(depth / 3)
@@ -861,7 +1172,7 @@ fn _split_bpp(any: bpp): list {
    [red, green, blue]
 }
 
-fn _devmode_to_vidmode(any: dm): any {
+fn _devmode_to_vidmode(any dm) any {
    if(!dm){ return false }
    def rgb = _split_bpp(load32(dm, 168))
    mut mode = dict(8)
@@ -874,13 +1185,13 @@ fn _devmode_to_vidmode(any: dm): any {
    mode
 }
 
-fn _vidmode_bpp(any: mode): int {
+fn _vidmode_bpp(any mode) int {
    int(mode.get("red_bits", 8)) +
    int(mode.get("green_bits", 8)) +
    int(mode.get("blue_bits", 8))
 }
 
-fn _choose_best_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0): any {
+fn _choose_best_video_mode(any monitor, int width, int height, int refresh_rate=0) any {
    def modes = get_video_modes(monitor)
    if(modes.len == 0){ return get_video_mode(monitor) }
    mut best = false
@@ -904,7 +1215,7 @@ fn _choose_best_video_mode(any: monitor, int: width, int: height, int: refresh_r
    best
 }
 
-fn _set_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0): bool {
+fn _set_video_mode(any monitor, int width, int height, int refresh_rate=0) bool {
    if(!available() || !monitor || !is_dict(monitor)){ return false }
    def adapter = monitor.get("adapter_name", "")
    if(adapter.len == 0){ return false }
@@ -937,7 +1248,7 @@ fn _set_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0): 
    result == DISP_CHANGE_SUCCESSFUL
 }
 
-fn _restore_video_mode(str: adapter_name): bool {
+fn _restore_video_mode(str adapter_name) bool {
    if(!available() || adapter_name.len == 0){ return false }
    def wide = utf16_from_utf8(adapter_name)
    if(!wide){ return false }
@@ -946,9 +1257,9 @@ fn _restore_video_mode(str: adapter_name): bool {
    result == DISP_CHANGE_SUCCESSFUL
 }
 
-fn _driver_display_wide(): any { utf16_from_utf8("DISPLAY") }
+fn _driver_display_wide() any { utf16_from_utf8("DISPLAY") }
 
-fn _physical_size_from_adapter(any: adapter_wide, int: width, int: height): list {
+fn _physical_size_from_adapter(any adapter_wide, int width, int height) list {
    if(!adapter_wide){ return [0, 0] }
    def driver = _driver_display_wide()
    def dc = CreateDCW(driver, adapter_wide, 0, 0)
@@ -965,7 +1276,7 @@ fn _physical_size_from_adapter(any: adapter_wide, int: width, int: height): list
    [width_mm, height_mm]
 }
 
-fn _content_scale_from_monitor(any: monitor_handle, any: adapter_wide): list {
+fn _content_scale_from_monitor(any monitor_handle, any adapter_wide) list {
    mut xdpi, ydpi = 0, 0
    def xp, yp = zalloc(4), zalloc(4)
    if(monitor_handle && xp && yp && GetDpiForMonitor(monitor_handle, MDT_EFFECTIVE_DPI, xp, yp) == 0){ xdpi, ydpi = load32(xp, 0), load32(yp, 0) }
@@ -985,7 +1296,7 @@ fn _content_scale_from_monitor(any: monitor_handle, any: adapter_wide): list {
    [float(xdpi) / float(USER_DEFAULT_SCREEN_DPI), float(ydpi) / float(USER_DEFAULT_SCREEN_DPI)]
 }
 
-fn _create_monitor_from_devices(any: adapter, any: display=0): any {
+fn _create_monitor_from_devices(any adapter, any display=0) any {
    if(!available() || !adapter){ return false }
    def adapter_name = _wide_field_utf8(adapter, 4)
    if(adapter_name.len == 0){ return false }
@@ -1060,7 +1371,7 @@ fn _create_monitor_from_devices(any: adapter, any: display=0): any {
    monitor
 }
 
-fn _gamma_ramp_from_buffer(any: values, int: size=256): any {
+fn _gamma_ramp_from_buffer(any values, int size=256) any {
    if(!values || size <= 0){ return false }
    mut red = []
    mut green = []
@@ -1080,14 +1391,14 @@ fn _gamma_ramp_from_buffer(any: values, int: size=256): any {
    ramp
 }
 
-fn _clamp_gamma_word(any: v): int {
+fn _clamp_gamma_word(any v) int {
    def x = int(v)
    if(x < 0){ return 0 }
    if(x > 65535){ return 65535 }
    x
 }
 
-fn _copy_gamma_channel(any: src, any: dst, int: off, int: size): bool {
+fn _copy_gamma_channel(any src, any dst, int off, int size) bool {
    if(!src || !dst || size <= 0){ return false }
    if(!is_list(src) || src.len < size){ return false }
    mut i = 0
@@ -1098,26 +1409,26 @@ fn _copy_gamma_channel(any: src, any: dst, int: off, int: size): bool {
    true
 }
 
-fn _get_x_lparam(any: lp): int { _signed16(lp) }
+fn _get_x_lparam(any lp) int { _signed16(lp) }
 
-fn _get_y_lparam(any: lp): int { _signed16(bshr(lp, 16)) }
+fn _get_y_lparam(any lp) int { _signed16(bshr(lp, 16)) }
 
-fn _hiword(any: v): int { int(band(bshr(v, 16), 0xffff)) }
+fn _hiword(any v) int { int(band(bshr(v, 16), 0xffff)) }
 
-fn _loword(any: v): int { int(band(v, 0xffff)) }
+fn _loword(any v) int { int(band(v, 0xffff)) }
 
-fn _key_state_bit(any: win, int: key): bool {
+fn _key_state_bit(any win, int key) bool {
    if(!win || !is_dict(win)){ return false }
    win.get("key_states", dict(8)).get(key, false)
 }
 
-fn _cursor_handle(any: cursor): any {
+fn _cursor_handle(any cursor) any {
    if(!cursor){ return 0 }
    if(is_dict(cursor)){ return cursor.get("handle", 0) }
    cursor
 }
 
-fn _cursor_is_showing(): bool {
+fn _cursor_is_showing() bool {
    if(!available()){ return true }
    def info = zalloc(24)
    if(!info){ return true }
@@ -1128,7 +1439,7 @@ fn _cursor_is_showing(): bool {
    !ok || band(flags, CURSOR_SHOWING) != 0
 }
 
-fn _cursor_dbg(any: msg): any {
+fn _cursor_dbg(any msg) any {
    if(common.env_truthy("NY_WIN_CURSOR_DEBUG") && _cursor_debug_count < 32){
       print("[win32:cursor] " + to_str(msg))
       _cursor_debug_count += 1
@@ -1136,7 +1447,7 @@ fn _cursor_dbg(any: msg): any {
    0
 }
 
-fn _show_cursor(bool: visible): bool {
+fn _show_cursor(bool visible) bool {
    if(!available()){ return false }
    mut n = 0
    if(visible){
@@ -1163,7 +1474,7 @@ fn _show_cursor(bool: visible): bool {
    true
 }
 
-fn _client_clip_rect(any: hwnd): any {
+fn _client_clip_rect(any hwnd) any {
    if(!available() || !hwnd){ return 0 }
    def rect = zalloc(16)
    if(!rect){ return 0 }
@@ -1178,7 +1489,7 @@ fn _client_clip_rect(any: hwnd): any {
    rect
 }
 
-fn _capture_cursor(any: hwnd): bool {
+fn _capture_cursor(any hwnd) bool {
    if(!available() || !hwnd){ return false }
    def rect = _client_clip_rect(hwnd)
    if(!rect){ return false }
@@ -1187,12 +1498,12 @@ fn _capture_cursor(any: hwnd): bool {
    ok
 }
 
-fn _release_cursor(): bool {
+fn _release_cursor() bool {
    if(!available()){ return false }
    ClipCursor(0) != 0
 }
 
-fn _effective_flags(any: win): int {
+fn _effective_flags(any win) int {
    if(!win || !is_dict(win)){ return 0 }
    mut flags = int(win.get("flags", 0))
    if(win.get("decorated", !band(flags, ui_consts.WINDOW_NO_BORDER))){ flags = band(flags, bnot(ui_consts.WINDOW_NO_BORDER)) } else { flags = bor(flags, ui_consts.WINDOW_NO_BORDER) }
@@ -1202,7 +1513,7 @@ fn _effective_flags(any: win): int {
    flags
 }
 
-fn _update_window_styles(any: win): any {
+fn _update_window_styles(any win) any {
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
    if(!hwnd){ return win }
@@ -1228,12 +1539,12 @@ fn _update_window_styles(any: win): any {
    win
 }
 
-fn _clipboard_hwnd(any: win): any {
+fn _clipboard_hwnd(any win) any {
    if(is_dict(win)){ return win.get("handle", 0) }
    win
 }
 
-fn _open_clipboard_with_retry(any: hwnd, int: tries=3): bool {
+fn _open_clipboard_with_retry(any hwnd, int tries=3) bool {
    mut n = 0
    while(n < tries){
       if(OpenClipboard(hwnd) != 0){ return true }
@@ -1243,7 +1554,7 @@ fn _open_clipboard_with_retry(any: hwnd, int: tries=3): bool {
    false
 }
 
-fn _create_rgba_cursor_handle(any: image, int: xhot=0, int: yhot=0, bool: icon=false): any {
+fn _create_rgba_cursor_handle(any image, int xhot=0, int yhot=0, bool icon=false) any {
    if(!available() || !image || !is_dict(image)){ return 0 }
    def width = _icon_image_width(image)
    def height = _icon_image_height(image)
@@ -1316,7 +1627,7 @@ fn _create_rgba_cursor_handle(any: image, int: xhot=0, int: yhot=0, bool: icon=f
    handle
 }
 
-fn _enable_raw_mouse_motion(any: hwnd): bool {
+fn _enable_raw_mouse_motion(any hwnd) bool {
    if(!available() || !hwnd){ return false }
    def rid = zalloc(16)
    if(!rid){ return false }
@@ -1329,7 +1640,7 @@ fn _enable_raw_mouse_motion(any: hwnd): bool {
    ok
 }
 
-fn _disable_raw_mouse_motion(): bool {
+fn _disable_raw_mouse_motion() bool {
    if(!available()){ return false }
    def rid = zalloc(16)
    if(!rid){ return false }
@@ -1342,7 +1653,7 @@ fn _disable_raw_mouse_motion(): bool {
    ok
 }
 
-fn _apply_cursor_handle(any: win): any {
+fn _apply_cursor_handle(any win) any {
    if(!win || !is_dict(win)){ return win }
    def mode = win.get("cursor_mode", backend_api.CURSOR_NORMAL)
    if(mode != backend_api.CURSOR_NORMAL && mode != backend_api.CURSOR_CAPTURED){ return win }
@@ -1353,7 +1664,7 @@ fn _apply_cursor_handle(any: win): any {
    win
 }
 
-fn _poll_monitor_changes(list: events, any: win): list {
+fn _poll_monitor_changes(list events, any win) list {
    if(!_monitors_initialized){
       def monitors0 = get_monitors()
       mut names0 = []
@@ -1411,7 +1722,7 @@ fn _poll_monitor_changes(list: events, any: win): list {
    [events, win]
 }
 
-fn _mods_from_win_state(any: win): int {
+fn _mods_from_win_state(any win) int {
    mut mods = 0
    if(_key_state_bit(win, backend_api.KEY_LEFT_SHIFT) ||
       _key_state_bit(win, backend_api.KEY_RIGHT_SHIFT)){
@@ -1434,7 +1745,7 @@ fn _mods_from_win_state(any: win): int {
    mods
 }
 
-fn _mods_for_key_event(any: win, int: key, bool: pressed): int {
+fn _mods_for_key_event(any win, int key, bool pressed) int {
    mut mods = _mods_from_win_state(win)
    match key {
       backend_api.KEY_LEFT_SHIFT, backend_api.KEY_RIGHT_SHIFT -> {
@@ -1543,7 +1854,7 @@ comptime table Win32ScancodeKey {
    _ -> default
 }
 
-fn _translate_win32_scancode(any: scancode): int { comptime match Win32ScancodeKey(int(scancode), -1) }
+fn _translate_win32_scancode(any scancode) int { comptime match Win32ScancodeKey(int(scancode), -1) }
 
 comptime table Win32VirtualKeyFallback {
    VK_ESCAPE -> backend_api.KEY_ESCAPE
@@ -1595,7 +1906,7 @@ comptime table Win32VirtualKeyFallback {
    _ -> default
 }
 
-fn translate_vk_key(int: vk, int: scancode=0, bool: extended=false): int {
+fn translate_vk_key(int vk, int scancode=0, bool extended=false) int {
    "Translates Win32 virtual keys to backend key ids."
    def key = _translate_win32_scancode(scancode)
    if(key >= 0){ return key }
@@ -1605,9 +1916,9 @@ fn translate_vk_key(int: vk, int: scancode=0, bool: extended=false): int {
    comptime match Win32VirtualKeyFallback(vk, -1)
 }
 
-fn _push_event(list: events, int: typ, any: win, any: data=0): list { events.append(ui_event.make_event(typ, win, win.get("handle", 0), data)) }
+fn _push_event(list events, int typ, any win, any data=0) list { events.append(ui_event.make_event(typ, win, win.get("handle", 0), data)) }
 
-fn _emit_char_event(list: events, any: win, int: codepoint, int: mods=0): list {
+fn _emit_char_event(list events, any win, int codepoint, int mods=0) list {
    if(codepoint <= 0){ return events }
    mut data = dict(8)
    data = data.set("char", int(codepoint))
@@ -1617,7 +1928,7 @@ fn _emit_char_event(list: events, any: win, int: codepoint, int: mods=0): list {
    _push_event(events, ui_consts.EVENT_KEY_CHAR, win, data)
 }
 
-fn _emit_utf16_char_events(list: events, any: win, any: wide, int: units, int: mods=0): list {
+fn _emit_utf16_char_events(list events, any win, any wide, int units, int mods=0) list {
    if(!wide || units <= 0){ return events }
    mut out = events
    mut pending_high = 0
@@ -1639,7 +1950,7 @@ fn _emit_utf16_char_events(list: events, any: win, any: wide, int: units, int: m
    out
 }
 
-fn _emit_drop_event(list: events, any: win, any: drop): list {
+fn _emit_drop_event(list events, any win, any drop) list {
    if(!drop){ return [win, events] }
    mut out = events
    def point = zalloc(8)
@@ -1681,7 +1992,7 @@ fn _emit_drop_event(list: events, any: win, any: drop): list {
    [win, out]
 }
 
-fn _emit_ime_result_events(list: events, any: win): list {
+fn _emit_ime_result_events(list events, any win) list {
    if(!available() || !win || !is_dict(win)){ return [win, events] }
    def hwnd = win.get("handle", 0)
    if(!hwnd){ return [win, events] }
@@ -1704,7 +2015,7 @@ fn _emit_ime_result_events(list: events, any: win): list {
    [win, out]
 }
 
-fn _translate_message_general(any: win, list: events, int: typ, any: wparam, any: lparam): list {
+fn _translate_message_general(any win, list events, int typ, any wparam, any lparam) list {
    match typ {
       WM_CLOSE, WM_QUIT -> {
          win = win.set("should_close", true)
@@ -1767,7 +2078,7 @@ fn _translate_message_general(any: win, list: events, int: typ, any: wparam, any
    [true, win, events]
 }
 
-fn _translate_message_key(any: win, list: events, int: typ, any: wparam, any: lparam): list {
+fn _translate_message_key(any win, list events, int typ, any wparam, any lparam) list {
    if(!(typ == WM_KEYDOWN || typ == WM_SYSKEYDOWN || typ == WM_KEYUP || typ == WM_SYSKEYUP)){ return [false, win, events] }
    def hi = _hiword(lparam)
    mut scancode = band(hi, bor(KF_EXTENDED, 0xff))
@@ -1839,7 +2150,7 @@ fn _translate_message_key(any: win, list: events, int: typ, any: wparam, any: lp
    [true, win, events]
 }
 
-fn _track_mouse_leave(any: hwnd): bool {
+fn _track_mouse_leave(any hwnd) bool {
    if(!available() || !hwnd){ return false }
    def tme = zalloc(24)
    if(!tme){ return false }
@@ -1852,7 +2163,7 @@ fn _track_mouse_leave(any: hwnd): bool {
    ok
 }
 
-fn _any_mouse_button_down(any: buttons): bool {
+fn _any_mouse_button_down(any buttons) bool {
    if(!buttons || !is_dict(buttons)){ return false }
    buttons.get(backend_api.MOUSE_BUTTON_LEFT, false) ||
    buttons.get(backend_api.MOUSE_BUTTON_RIGHT, false) ||
@@ -1861,7 +2172,7 @@ fn _any_mouse_button_down(any: buttons): bool {
    buttons.get(backend_api.MOUSE_BUTTON_5, false)
 }
 
-fn _translate_message_pointer(any: win, list: events, int: typ, any: wparam, any: lparam): list {
+fn _translate_message_pointer(any win, list events, int typ, any wparam, any lparam) list {
    match typ {
       WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN,
       WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP, WM_XBUTTONUP -> {
@@ -1982,7 +2293,7 @@ fn _translate_message_pointer(any: win, list: events, int: typ, any: wparam, any
    [true, win, events]
 }
 
-fn _translate_message_window_state(any: win, list: events, int: typ, any: wparam, any: lparam): list {
+fn _translate_message_window_state(any win, list events, int typ, any wparam, any lparam) list {
    match typ {
       WM_MOVE -> {
          def x, y = _get_x_lparam(lparam), _get_y_lparam(lparam)
@@ -2046,7 +2357,7 @@ fn _translate_message_window_state(any: win, list: events, int: typ, any: wparam
    [true, win, events]
 }
 
-fn translate_message(any: win, any: msg): list {
+fn translate_message(any win, any msg) list {
    "Translates a raw Win32 message dict into Ny window events and updated state."
    if(!win || !is_dict(win) || !msg || !is_dict(msg)){ return [win, []] }
    mut events = []
@@ -2064,7 +2375,7 @@ fn translate_message(any: win, any: msg): list {
    [win, events]
 }
 
-fn translate_messages(any: win, any: messages): list {
+fn translate_messages(any win, any messages) list {
    "Translates a list of raw Win32 messages for one window."
    if(!win || !is_dict(win) || !is_list(messages)){ return [win, []] }
    mut out = []
@@ -2098,9 +2409,9 @@ fn translate_messages(any: win, any: messages): list {
    [win, out]
 }
 
-fn _vk_from_key(int: key): int {
-   if(key >= 65 && key <= 90){ return key } ;; A-Z
-   if(key >= 48 && key <= 57){ return key } ;; 0-9
+fn _vk_from_key(int key) int {
+   if(key >= 65 && key <= 90){ return key }
+   if(key >= 48 && key <= 57){ return key }
    match key {
       backend_api.KEY_SPACE -> { return 0x20 }
       backend_api.KEY_APOSTROPHE -> { return 0xDE }
@@ -2118,7 +2429,7 @@ fn _vk_from_key(int: key): int {
    0
 }
 
-fn get_key_name(any: win, int: key, int: scancode): str {
+fn get_key_name(any win, int key, int scancode) str {
    "Returns the layout-specific name of the specified printable key."
    if(!available()){ return "" }
    mut code = int(scancode)
@@ -2138,19 +2449,19 @@ fn get_key_name(any: win, int: key, int: scancode): str {
    name
 }
 
-fn get_key_state(any: win, int: key): int {
+fn get_key_state(any win, int key) int {
    "Returns cached key state from the cached native window dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get("key_states", dict(8)).get(key, false) ? 1 : 0
 }
 
-fn get_mouse_button_state(any: win, int: button): int {
+fn get_mouse_button_state(any win, int button) int {
    "Returns cached mouse button state from the cached native window dictionary."
    if(!win || !is_dict(win)){ return 0 }
    win.get("mouse_buttons", dict(8)).get(button, false) ? 1 : 0
 }
 
-fn ensure_window_class(any: class_name="NytrixWindowClass", any: icon_res=0): any {
+fn ensure_window_class(any class_name="NytrixWindowClass", any icon_res=0) any {
    "Registers a reusable Win32 window class and returns its atom."
    if(!available()){ return 0 }
    def key = to_str(class_name)
@@ -2187,7 +2498,7 @@ fn ensure_window_class(any: class_name="NytrixWindowClass", any: icon_res=0): an
       print("[window:win32] RegisterClassExW instance=0x" + to_hex(instance) +
          " proc=0x" + to_hex(window_proc) +
          " icon=0x" + to_hex(icon) +
-         " cursor=0x" + to_hex(class_cursor))
+      " cursor=0x" + to_hex(class_cursor))
    }
    _store_native_ptr(wc, icon, 32)
    _store_native_ptr(wc, class_cursor, 40)
@@ -2210,7 +2521,7 @@ fn ensure_window_class(any: class_name="NytrixWindowClass", any: icon_res=0): an
    atom
 }
 
-fn create_basic_window(any: title, int: width, int: height, int: x=CW_USEDEFAULT, int: y=CW_USEDEFAULT, int: flags=0, any: class_name="NytrixWindowClass"): any {
+fn create_basic_window(any title, int width, int height, int x=CW_USEDEFAULT, int y=CW_USEDEFAULT, int flags=0, any class_name="NytrixWindowClass") any {
    "Creates a basic native Win32 window directly from Ny code."
    if(!available()){ return false }
    init_dpi_awareness()
@@ -2324,7 +2635,7 @@ fn create_basic_window(any: title, int: width, int: height, int: x=CW_USEDEFAULT
    win
 }
 
-fn destroy_basic_window(any: win): bool {
+fn destroy_basic_window(any win) bool {
    "Destroys a Win32 window created by `create_basic_window`."
    if(!available()){ return false }
    if(is_dict(win) && win.get("monitor_mode_changed", false)){ _restore_video_mode(win.get("monitor_adapter_name", "")) }
@@ -2338,7 +2649,7 @@ fn destroy_basic_window(any: win): bool {
    DestroyWindow(hwnd) != 0
 }
 
-fn show_window(any: win, int: cmd=8): bool {
+fn show_window(any win, int cmd=8) bool {
    "Shows a Win32 window."
    if(!available()){ return false }
    def hwnd = _handle_from(win)
@@ -2348,17 +2659,17 @@ fn show_window(any: win, int: cmd=8): bool {
    ShowWindow(hwnd, cmd)
    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
-      SWP_FRAMECHANGED | SWP_SHOWWINDOW)
+   SWP_FRAMECHANGED | SWP_SHOWWINDOW)
    UpdateWindow(hwnd)
    true
 }
 
-fn hide_window(any: win): bool {
+fn hide_window(any win) bool {
    "Hides a Win32 window."
    show_window(win, SW_HIDE)
 }
 
-fn set_title(any: win, any: title): bool {
+fn set_title(any win, any title) bool {
    "Sets a Win32 window title using a UTF-16 conversion path."
    if(!available()){ return false }
    def hwnd = _handle_from(win)
@@ -2370,7 +2681,7 @@ fn set_title(any: win, any: title): bool {
    ok
 }
 
-fn set_window_icon(any: win, any: images): any {
+fn set_window_icon(any win, any images) any {
    "Applies Win32 big/small icons from Ny RGBA image dictionaries."
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
@@ -2409,7 +2720,7 @@ fn set_window_icon(any: win, any: images): any {
    win
 }
 
-fn _window_client_pos(any: win, bool: fallback_cached=false): list {
+fn _window_client_pos(any win, bool fallback_cached=false) list {
    if(!available() || !win || !is_dict(win)){ return [0, 0] }
    def hwnd = win.get("handle", 0)
    if(!hwnd){ return [0, 0] }
@@ -2426,7 +2737,7 @@ fn _window_client_pos(any: win, bool: fallback_cached=false): list {
    out
 }
 
-fn _window_client_size(any: win, bool: fallback_cached=false): list {
+fn _window_client_size(any win, bool fallback_cached=false) list {
    if(!available() || !win || !is_dict(win)){ return [0, 0] }
    def hwnd = win.get("handle", 0)
    if(!hwnd){ return [0, 0] }
@@ -2441,12 +2752,12 @@ fn _window_client_size(any: win, bool: fallback_cached=false): list {
    out
 }
 
-fn get_pos(any: win): list {
+fn get_pos(any win) list {
    "Returns the window client-area origin in screen coordinates."
    _window_client_pos(win, true)
 }
 
-fn set_pos(any: win, int: x, int: y): bool {
+fn set_pos(any win, int x, int y) bool {
    "Sets the Win32 window client-area origin."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2472,17 +2783,17 @@ fn set_pos(any: win, int: x, int: y): bool {
    ok
 }
 
-fn get_size(any: win): list {
+fn get_size(any win) list {
    "Returns the Win32 client-area size."
    _window_client_size(win, true)
 }
 
-fn get_framebuffer_size(any: win): list {
+fn get_framebuffer_size(any win) list {
    "Returns the framebuffer size, matching Win32 client size."
    get_size(win)
 }
 
-fn set_size(any: win, int: width, int: height): bool {
+fn set_size(any win, int width, int height) bool {
    "Sets the Win32 client-area size."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2515,7 +2826,7 @@ fn set_size(any: win, int: width, int: height): bool {
 }
 
 comptime template _win32_showwindow_action(name, doc, cmd){
-   fn ${name}(any: win): bool {
+   fn ${name}(any win) bool {
       doc
       if(!available() || !win || !is_dict(win)){ return false }
       ShowWindow(win.get("handle", 0), cmd) != 0
@@ -2526,13 +2837,13 @@ comptime emit _win32_showwindow_action(iconify_window, "Iconifies a Win32 window
 comptime emit _win32_showwindow_action(restore_window, "Restores a minimized or maximized Win32 window.", SW_RESTORE)
 comptime emit _win32_showwindow_action(maximize_window, "Maximizes a Win32 window.", SW_SHOWMAXIMIZED)
 
-fn request_window_attention(any: win): bool {
+fn request_window_attention(any win) bool {
    "Requests user attention for a Win32 window."
    if(!available() || !win || !is_dict(win)){ return false }
    FlashWindow(win.get("handle", 0), backend_api.TRUE) != 0
 }
 
-fn focus_window(any: win): bool {
+fn focus_window(any win) bool {
    "Brings a Win32 window to the foreground and focuses it."
    if(!available()){ return false }
    def hwnd = _handle_from(win)
@@ -2545,7 +2856,7 @@ fn focus_window(any: win): bool {
 }
 
 comptime template _win32_hwnd_bool(name, doc, call_fn){
-   fn ${name}(any: win): bool {
+   fn ${name}(any win) bool {
       doc
       if(!available() || !win){ return false }
       def hwnd = _handle_from(win)
@@ -2554,7 +2865,7 @@ comptime template _win32_hwnd_bool(name, doc, call_fn){
    }
 }
 
-fn get_window_attrib(any: win, int: attrib): int {
+fn get_window_attrib(any win, int attrib) int {
    "Unified getter for Win32 window attributes."
    if(!win || !is_dict(win)){ return 0 }
    match attrib {
@@ -2569,7 +2880,7 @@ fn get_window_attrib(any: win, int: attrib): int {
    }
 }
 
-fn is_window_focused(any: win): bool {
+fn is_window_focused(any win) bool {
    "Returns true if the Win32 window is the active window."
    if(!available() || !win || !is_dict(win)){ return false }
    win.get("handle", 0) == GetActiveWindow()
@@ -2579,7 +2890,7 @@ comptime emit _win32_hwnd_bool(is_window_iconified, "Returns true if the Win32 w
 comptime emit _win32_hwnd_bool(is_window_visible, "Returns true if the Win32 window is visible.", IsWindowVisible)
 comptime emit _win32_hwnd_bool(is_window_maximized, "Returns true if the Win32 window is maximized.", IsZoomed)
 
-fn is_window_hovered(any: win): bool {
+fn is_window_hovered(any win) bool {
    "Returns true if the cursor is currently over the Win32 client area."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2595,13 +2906,13 @@ fn is_window_hovered(any: win): bool {
    if(GetCursorPos(pt) != 0){
       def x, y = load32(pt, 0), load32(pt, 4)
       ok = x >= load32(rect, 0) && x < load32(rect, 8) &&
-           y >= load32(rect, 4) && y < load32(rect, 12)
+      y >= load32(rect, 4) && y < load32(rect, 12)
    }
    free(pt, rect)
    ok
 }
 
-fn get_window_opacity(any: win): f64 {
+fn get_window_opacity(any win) f64 {
    "Returns the current Win32 layered-window opacity."
    if(!available() || !win || !is_dict(win)){ return 1.0 }
    def hwnd = win.get("handle", 0)
@@ -2624,7 +2935,7 @@ fn get_window_opacity(any: win): f64 {
    out
 }
 
-fn set_window_opacity(any: win, f64: opacity): bool {
+fn set_window_opacity(any win, f64 opacity) bool {
    "Applies whole-window opacity using layered window attributes."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2641,12 +2952,12 @@ fn set_window_opacity(any: win, f64: opacity): bool {
    }
 }
 
-fn get_window_pos(any: win): list {
+fn get_window_pos(any win) list {
    "Returns the top-left screen coordinates [x, y] of a Win32 window's client area."
    _window_client_pos(win, false)
 }
 
-fn set_window_pos(any: win, int: x, int: y): bool {
+fn set_window_pos(any win, int x, int y) bool {
    "Moves a Win32 window so its client area starts at screen coordinates [x, y]."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2665,12 +2976,12 @@ fn set_window_pos(any: win, int: x, int: y): bool {
    SetWindowPos(hwnd, 0, final_x, final_y, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER) != 0
 }
 
-fn get_window_size(any: win): list {
+fn get_window_size(any win) list {
    "Returns the pixel size [width, height] of a Win32 window's client area."
    _window_client_size(win, false)
 }
 
-fn set_window_size(any: win, int: w, int: h): bool {
+fn set_window_size(any win, int w, int h) bool {
    "Resizes a Win32 window so its client area has width `w` and height `h`."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2689,7 +3000,7 @@ fn set_window_size(any: win, int: w, int: h): bool {
    SetWindowPos(hwnd, 0, 0, 0, fw, fh, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER) != 0
 }
 
-fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max_h): bool {
+fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) bool {
    "Applies window size constraints tracked via WM_GETMINMAXINFO."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2699,22 +3010,22 @@ fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max
    true
 }
 
-fn _set_style_flag(any: win, str: key, bool: enabled): any {
+fn _set_style_flag(any win, str key, bool enabled) any {
    if(!available() || !win || !is_dict(win)){ return win }
    _update_window_styles(win.set(key, !!enabled))
 }
 
-fn set_window_resizable(any: win, bool: enabled): any {
+fn set_window_resizable(any win, bool enabled) any {
    "Updates the Win32 resizable style flag."
    _set_style_flag(win, "resizable", enabled)
 }
 
-fn set_window_decorated(any: win, bool: enabled): any {
+fn set_window_decorated(any win, bool enabled) any {
    "Updates the Win32 decorated style flag."
    _set_style_flag(win, "decorated", enabled)
 }
 
-fn set_window_floating(any: win, bool: enabled): any {
+fn set_window_floating(any win, bool enabled) any {
    "Updates the Win32 topmost state."
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
@@ -2725,7 +3036,7 @@ fn set_window_floating(any: win, bool: enabled): any {
    win.set("floating", !!enabled)
 }
 
-fn set_clipboard(any: win, any: s): bool {
+fn set_clipboard(any win, any s) bool {
    "Sets the Win32 clipboard using CF_UNICODETEXT."
    if(!available()){ return false }
    if(!is_str(s)){ s = to_str(s) }
@@ -2758,7 +3069,7 @@ fn set_clipboard(any: win, any: s): bool {
    true
 }
 
-fn get_clipboard(any: win): str {
+fn get_clipboard(any win) str {
    "Gets the Win32 clipboard as UTF-8 text."
    if(!available()){ return "" }
    if(!_open_clipboard_with_retry(_clipboard_hwnd(win))){ return "" }
@@ -2778,7 +3089,7 @@ fn get_clipboard(any: win): str {
    out
 }
 
-fn get_cursor_pos(any: win): list {
+fn get_cursor_pos(any win) list {
    "Returns the current cursor position relative to the Win32 client area."
    if(!available() || !win || !is_dict(win)){ return [0.0, 0.0] }
    if(win.get("disabled_cursor", false)){ return [float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))] }
@@ -2792,7 +3103,7 @@ fn get_cursor_pos(any: win): list {
    out
 }
 
-fn set_cursor_pos(any: win, any: x, any: y): bool {
+fn set_cursor_pos(any win, any x, any y) bool {
    "Sets the Win32 cursor position in client-area coordinates."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -2806,7 +3117,7 @@ fn set_cursor_pos(any: win, any: x, any: y): bool {
    ok
 }
 
-fn create_standard_cursor(int: shape): any {
+fn create_standard_cursor(int shape) any {
    "Create a shared Win32 standard cursor for a backend cursor shape."
    if(!available()){ return 0 }
    def rid = case shape {
@@ -2832,7 +3143,7 @@ fn create_standard_cursor(int: shape): any {
    cursor
 }
 
-fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
+fn create_cursor(any image, int xhot=0, int yhot=0) any {
    "Creates a Win32 cursor from a Ny RGBA8 image dictionary."
    if(!available()){ return 0 }
    def handle = _create_rgba_cursor_handle(image, xhot, yhot, false)
@@ -2846,7 +3157,7 @@ fn create_cursor(any: image, int: xhot=0, int: yhot=0): any {
    cursor
 }
 
-fn destroy_cursor(any: cursor): bool {
+fn destroy_cursor(any cursor) bool {
    "Destroys a Win32 cursor object when it owns native resources."
    if(!cursor || !is_dict(cursor)){ return true }
    if(!cursor.get("shared", false)){
@@ -2856,19 +3167,19 @@ fn destroy_cursor(any: cursor): bool {
    true
 }
 
-fn set_cursor(any: win, any: cursor): any {
+fn set_cursor(any win, any cursor) any {
    "Applies a cursor object to a Win32 window dictionary."
    if(!win || !is_dict(win)){ return win }
    win = win.set("cursor", cursor)
    _apply_cursor_handle(win)
 }
 
-fn cursor_visible(): bool {
+fn cursor_visible() bool {
    "Returns true when the Win32 system cursor is currently visible."
    _cursor_is_showing()
 }
 
-fn set_input_mode(any: win, int: mode, any: value): any {
+fn set_input_mode(any win, int mode, any value) any {
    "Applies cursor and raw-mouse modes to a Win32 window dictionary."
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
@@ -2937,7 +3248,7 @@ fn set_input_mode(any: win, int: mode, any: value): any {
    win
 }
 
-fn _message_to_dict(any: msg): dict {
+fn _message_to_dict(any msg) dict {
    mut out = dict(8)
    out = out.set("hwnd", load64_h(msg, 0))
    out = out.set("message", load32(msg, 8))
@@ -2949,7 +3260,7 @@ fn _message_to_dict(any: msg): dict {
    out
 }
 
-fn _synthetic_key_release(any: win, list: events, int: vk, int: key): list {
+fn _synthetic_key_release(any win, list events, int vk, int key) list {
    if(!win || !is_dict(win)){ return [win, events] }
    if(GetKeyState(vk) & 0x8000){ return [win, events] }
    mut ks = win.get("key_states", dict(64))
@@ -2966,7 +3277,7 @@ fn _synthetic_key_release(any: win, list: events, int: vk, int: key): list {
    [win, events]
 }
 
-fn _sync_special_key_releases(any: win, list: events): list {
+fn _sync_special_key_releases(any win, list events) list {
    if(!win || !is_dict(win) || GetActiveWindow() != win.get("handle", 0)){ return [win, events] }
    def left_shift = _synthetic_key_release(win, events, VK_LSHIFT, backend_api.KEY_LEFT_SHIFT)
    win, events = left_shift.get(0, win), left_shift.get(1, events)
@@ -2979,7 +3290,7 @@ fn _sync_special_key_releases(any: win, list: events): list {
    [win, events]
 }
 
-fn _recenter_disabled_cursor(any: win): any {
+fn _recenter_disabled_cursor(any win) any {
    if(!win || !is_dict(win) || !win.get("disabled_cursor", false)){ return win }
    def center_x, center_y = int(max(1, win.get("w", 1)) / 2), int(max(1, win.get("h", 1)) / 2)
    if(win.get("last_cursor_client_x", center_x) != center_x ||
@@ -2991,15 +3302,15 @@ fn _recenter_disabled_cursor(any: win): any {
    win
 }
 
-fn wait_messages(int: timeout_ms=-1): bool {
+fn wait_messages(int timeout_ms=-1) bool {
    "Blocks until a new message is posted to the thread's queue or timeout elapses."
    if(!available()){ return false }
    def ms = (timeout_ms < 0) ? 0xffffffff : int(timeout_ms)
-   MsgWaitForMultipleObjects(0, 0, 0, ms, 0x04FF) ;; 0x04FF = QS_ALLINPUT
+   MsgWaitForMultipleObjects(0, 0, 0, ms, 0x04FF)
    true
 }
 
-fn poll_messages(any: hwnd=0, int: max_messages=512, bool: remove=true): list {
+fn poll_messages(any hwnd=0, int max_messages=512, bool remove=true) list {
    "Polls raw Win32 messages into a list of dicts."
    if(!available()){ return [] }
    def msg = zalloc(48)
@@ -3016,7 +3327,7 @@ fn poll_messages(any: hwnd=0, int: max_messages=512, bool: remove=true): list {
    out
 }
 
-fn pump_window_messages(any: hwnd=0, int: max_messages=512): list {
+fn pump_window_messages(any hwnd=0, int max_messages=512) list {
    "Polls and dispatches queued Win32 messages."
    if(!available()){ return [] }
    def msg = zalloc(48)
@@ -3034,12 +3345,9 @@ fn pump_window_messages(any: hwnd=0, int: max_messages=512): list {
    out
 }
 
-fn poll_window_events(any: win, int: max_messages=512): list {
+fn poll_window_events(any win, int max_messages=512) list {
    "Polls and translates Win32 messages for a backend window."
    if(!available() || !win || !is_dict(win)){ return [win, []] }
-   ;; Drain the whole thread queue. Filtering by HWND misses thread-level focus,
-   ;; sizing, and posted messages, which can make Windows mark the app busy while
-   ;; the renderer waits on Vulkan fences or presentation.
    wait_messages(0)
    def messages = pump_window_messages(0, max_messages)
    def res = translate_messages(win, messages)
@@ -3052,13 +3360,13 @@ fn poll_window_events(any: win, int: max_messages=512): list {
    [win, events]
 }
 
-fn primary_screen_size(): list {
+fn primary_screen_size() list {
    "Returns the primary screen size using GetSystemMetrics."
    if(!available()){ return [0, 0] }
    [GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)]
 }
 
-fn _fallback_primary_monitor(): any {
+fn _fallback_primary_monitor() any {
    def sz = primary_screen_size()
    mut w, h = int(sz.get(0, 0)), int(sz.get(1, 0))
    if(w <= 0){ w = 1280 }
@@ -3089,7 +3397,7 @@ fn _fallback_primary_monitor(): any {
    }
 }
 
-fn get_monitors(): list {
+fn get_monitors() list {
    "Enumerates active Win32 display devices as monitor dicts."
    if(!available()){ return [] }
    mut primary = []
@@ -3149,20 +3457,20 @@ fn get_monitors(): list {
    out
 }
 
-fn get_primary_monitor(): any {
+fn get_primary_monitor() any {
    "Returns the primary Win32 monitor dict."
    def monitors = get_monitors()
    if(monitors.len == 0){ return false }
    monitors.get(0)
 }
 
-fn get_monitor_pos(any: monitor): list {
+fn get_monitor_pos(any monitor) list {
    "Returns `[x, y]` for a monitor dict."
    if(!monitor || !is_dict(monitor)){ return [0, 0] }
    [monitor.get("x", 0), monitor.get("y", 0)]
 }
 
-fn get_monitor_workarea(any: monitor): list {
+fn get_monitor_workarea(any monitor) list {
    "Returns `[x, y, width, height]` for a monitor work area."
    if(!monitor || !is_dict(monitor)){ return [0, 0, 0, 0] }
    [
@@ -3173,25 +3481,25 @@ fn get_monitor_workarea(any: monitor): list {
    ]
 }
 
-fn get_monitor_physical_size(any: monitor): list {
+fn get_monitor_physical_size(any monitor) list {
    "Returns `[width_mm, height_mm]` for a monitor dict."
    if(!monitor || !is_dict(monitor)){ return [0, 0] }
    [monitor.get("width_mm", 0), monitor.get("height_mm", 0)]
 }
 
-fn get_monitor_content_scale(any: monitor): list {
+fn get_monitor_content_scale(any monitor) list {
    "Returns `[xscale, yscale]` for a monitor dict."
    if(!monitor || !is_dict(monitor)){ return [1.0, 1.0] }
    [monitor.get("scale_x", 1.0), monitor.get("scale_y", 1.0)]
 }
 
-fn get_monitor_name(any: monitor): str {
+fn get_monitor_name(any monitor) str {
    "Returns the UTF-8 display name for a monitor dict."
    if(!monitor || !is_dict(monitor)){ return "" }
    monitor.get("name", "")
 }
 
-fn get_video_mode(any: monitor): any {
+fn get_video_mode(any monitor) any {
    "Returns the current window video mode dict for a monitor."
    if(!available() || !monitor || !is_dict(monitor)){ return false }
    def adapter = monitor.get("adapter_name", "")
@@ -3221,7 +3529,7 @@ fn get_video_mode(any: monitor): any {
    mode
 }
 
-fn get_video_modes(any: monitor): list {
+fn get_video_modes(any monitor) list {
    "Returns distinct window video modes for a monitor."
    if(!available() || !monitor || !is_dict(monitor)){ return [] }
    def adapter = monitor.get("adapter_name", "")
@@ -3265,7 +3573,7 @@ fn get_video_modes(any: monitor): list {
    out
 }
 
-fn get_gamma_ramp(any: monitor): any {
+fn get_gamma_ramp(any monitor) any {
    "Returns the current Win32 gamma ramp as a dict with `size`, `red`, `green`, and `blue`."
    if(!available() || !monitor || !is_dict(monitor)){ return false }
    def adapter = monitor.get("adapter_name", "")
@@ -3296,7 +3604,7 @@ fn get_gamma_ramp(any: monitor): any {
    ramp
 }
 
-fn set_gamma_ramp(any: monitor, any: ramp): bool {
+fn set_gamma_ramp(any monitor, any ramp) bool {
    "Sets the Win32 gamma ramp from a dict containing `size`, `red`, `green`, and `blue` arrays."
    if(!available() || !monitor || !is_dict(monitor) || !ramp || !is_dict(ramp)){ return false }
    def size = ramp.get("size", 0)
@@ -3333,7 +3641,7 @@ fn set_gamma_ramp(any: monitor, any: ramp): bool {
    ok
 }
 
-fn get_window_monitor(any: win): any {
+fn get_window_monitor(any win) any {
    "Returns the monitor dict nearest the specified Win32 window."
    if(!available() || !win || !is_dict(win)){ return false }
    def hwnd = win.get("handle", 0)
@@ -3351,7 +3659,7 @@ fn get_window_monitor(any: win): any {
    false
 }
 
-fn set_window_monitor(any: win, any: monitor, int: xpos, int: ypos, int: width, int: height, int: refresh_rate=0): any {
+fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int height, int refresh_rate=0) any {
    "Applies a basic basic monitor/fullscreen transition for Win32."
    if(!available() || !win || !is_dict(win)){ return win }
    def hwnd = win.get("handle", 0)
@@ -3402,7 +3710,7 @@ fn set_window_monitor(any: win, any: monitor, int: xpos, int: ypos, int: width, 
    win
 }
 
-fn vulkan_supported(): bool {
+fn vulkan_supported() bool {
    "Returns true when the Win32 backend supports Vulkan."
    true
 }
@@ -3411,7 +3719,7 @@ mut _win32_vk_ext_ptrs = 0
 mut _win32_vk_ext_surface = 0
 mut _win32_vk_ext_win32 = 0
 
-fn vulkan_required_extensions(): list {
+fn vulkan_required_extensions() list {
    "Returns the Vulkan instance extensions required for a Win32 surface."
    if(!_win32_vk_ext_ptrs){
       _win32_vk_ext_surface = cstr("VK_KHR_surface")
@@ -3425,7 +3733,7 @@ fn vulkan_required_extensions(): list {
    _win32_vk_ext_ptrs
 }
 
-fn create_surface(any: instance, any: win, any: allocator, any: surface_out): int {
+fn create_surface(any instance, any win, any allocator, any surface_out) int {
    "Creates a Vulkan Win32 surface from a native Win32 window."
    if(!available()){ return -1 }
    def hwnd = _handle_from(win)
@@ -3440,30 +3748,30 @@ fn create_surface(any: instance, any: win, any: allocator, any: surface_out): in
    res
 }
 
-fn set_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0): bool {
+fn set_video_mode(any monitor, int width, int height, int refresh_rate=0) bool {
    "Public wrapper: sets video mode on a Win32 monitor via ChangeDisplaySettingsExW."
    _set_video_mode(monitor, width, height, refresh_rate)
 }
 
-fn restore_video_mode(any: monitor): bool {
+fn restore_video_mode(any monitor) bool {
    "Public wrapper: restores the original video mode on a Win32 monitor."
    if(!monitor || !is_dict(monitor)){ return false }
    _restore_video_mode(monitor.get("adapter_name", ""))
 }
 
-fn get_win32_window(any: win): any {
+fn get_win32_window(any win) any {
    "Returns the Win32 HWND handle for the given window dict."
    if(is_dict(win)){ win.get("handle", 0) } else { win }
 }
 
-fn get_win32_monitor(any: mon): any {
+fn get_win32_monitor(any mon) any {
    "Returns the Win32 HMONITOR handle for the given monitor dict."
    if(is_dict(mon)){ mon.get("handle", 0) } else { 0 }
 }
 
 mut _adapter_wide_cache = dict(4)
 
-fn get_win32_adapter(any: mon): any {
+fn get_win32_adapter(any mon) any {
    "Returns a wide-string pointer to the Win32 adapter device name for the given monitor."
    if(!is_dict(mon)){ return 0 }
    def name = mon.get("adapter_name", "")
@@ -3473,4 +3781,24 @@ fn get_win32_adapter(any: mon): any {
    def wide = utf16_from_utf8(name)
    _adapter_wide_cache = _adapter_wide_cache.set(name, wide)
    wide
+}
+
+#main {
+   assert(get_backend_name() == "win32", "win32 backend name")
+   assert(translate_vk_key(0x1B, 0, false) == backend_api.KEY_ESCAPE, "win32 escape key")
+   assert(translate_vk_key(0x41, 0x01E, false) == backend_api.KEY_A, "win32 scancode key")
+   assert(translate_vk_key(0x10, 0x36, false) == backend_api.KEY_RIGHT_SHIFT, "win32 shift side")
+   def style = get_window_style(ui_consts.WINDOW_NORMAL, false)
+   assert((style & 0x00080000) != 0, "win32 normal style")
+   assert(get_window_ex_style(ui_consts.WINDOW_FLOATING, false) != 0, "win32 floating ex style")
+   if(!available()){
+      assert(!init_dpi_awareness() && !init_timer(), "win32 init fallback")
+      assert(get_timer_value() == 0 && get_timer_frequency() == 0 && module_handle() == 0, "win32 timer fallback")
+      assert(primary_screen_size() == [0, 0] && get_monitors() == [], "win32 monitor fallback")
+      def win = {"handle": 0, "w": 4, "h": 3}
+      assert(get_window_size(win) == [0, 0] && !set_window_size(win, 4, 3), "win32 window size fallback")
+      assert(poll_window_events(win) == [win, []], "win32 event poll fallback")
+      assert(create_surface(0, win, 0, 0) == -1, "win32 surface fallback")
+   }
+   print("✓ std.os.ui.window.platform.win32 self-test passed")
 }

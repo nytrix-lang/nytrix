@@ -76,17 +76,6 @@ static binding *ny_binary_lookup_binding(codegen_t *cg, scope *scopes, size_t de
   return lookup_binding_hash(cg, scopes, depth, name, name_len, hash);
 }
 
-static bool ny_binary_call_builtin_name_shadowed(codegen_t *cg, scope *scopes,
-                                                 size_t depth, expr_t *callee) {
-  size_t name_len = 0;
-  uint64_t hash = 0;
-  const char *name = ny_builtin_surface_name_for_callee(callee, &name_len, &hash);
-  if (!name)
-    return true;
-  return ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name,
-                                                 name_len, hash);
-}
-
 static bool ny_const_num_eval(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
                               ny_const_num_t *out, int recursion) {
   if (!e || !out || recursion > 32)
@@ -760,18 +749,6 @@ static bool ny_expr_is_int_typed(codegen_t *cg, scope *scopes, size_t depth, exp
   if (!e)
     return false;
   return ny_is_proven_int(cg, scopes, depth, e, NULL);
-}
-
-static bool ny_ident_is_guaranteed_tagged_small_int(codegen_t *cg, scope *scopes, size_t depth,
-                                                    expr_t *e) {
-  if (!e || e->kind != NY_E_IDENT)
-    return false;
-  size_t name_len = (size_t)e->tok.len;
-  if (name_len == 0)
-    name_len = strlen(e->as.ident.name);
-  binding *b =
-      ny_binary_lookup_binding(cg, scopes, depth, e->as.ident.name, name_len, e->as.ident.hash);
-  return b && (b->is_int_slot || b->is_int_direct);
 }
 
 static bool ny_can_lower_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e) {

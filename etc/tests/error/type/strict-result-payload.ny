@@ -2,7 +2,7 @@
 ;; expect: hm-strict-result-payload
 use std.core
 
-fn bad_unwrap(any: x){
+fn bad_unwrap(any x) {
    unwrap(x)
 }
 
