@@ -1,22 +1,16 @@
-;; Keywords: factorization known-phi
+;; Keywords: factorization known-phi math crypto number-theory
 ;; Integer-factorization routines for factorization from phi or private-exponent leaks.
 ;; to recover p and q from the sum S = p+q and product P = p*q = N.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.known_phi(factor_from_phi, factor_from_multiple_phi, factor_from_phi_multi, factor_from_phi_with_e_d, recover_phi_from_d, solve_quadratic_roots)
 use std.math.nt
 
-fn _list_contains(any: lst, any: x): bool {
-   mut i = 0
-   while(i < lst.len){
-      if(lst.get(i) == x){ return true }
-      i += 1
-   }
-   false
-}
-
-fn solve_quadratic_roots(any: sum_pq, any: prod_pq): any {
+fn solve_quadratic_roots(any sum_pq, any prod_pq) any {
    "Solve x^2 - sum_pq*x + prod_pq = 0 and return [r1, r2].
    Uses the quadratic formula: x = (sum +- sqrt(sum^2 - 4*prod)) / 2.
    Returns nil if the discriminant is not a perfect square."
@@ -29,7 +23,7 @@ fn solve_quadratic_roots(any: sum_pq, any: prod_pq): any {
    [r1, r2]
 }
 
-fn factor_from_phi(any: n, any: phi): any {
+fn factor_from_phi(any n, any phi) any {
    "Factor n given phi(n). Since phi = (p-1)(q-1) = n - p - q + 1,
    we have p + q = n + 1 - phi. With p*q = n, we solve
    x^2 - (n+1-phi)*x + n = 0.
@@ -44,7 +38,7 @@ fn factor_from_phi(any: n, any: phi): any {
    (p < q) ? [p, q] : [q, p]
 }
 
-fn factor_from_multiple_phi(any: n, any: multiple_phi, any: bases=[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]): any {
+fn factor_from_multiple_phi(any n, any multiple_phi, any bases=[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]) any {
    "Factor semiprime n given any nonzero multiple of phi(n).
    This is the same square-root-of-1 idea used when factoring from e*d-1:
    write the multiple as 2^t*r, then search deterministic bases for a
@@ -87,7 +81,7 @@ fn factor_from_multiple_phi(any: n, any: multiple_phi, any: bases=[2, 3, 5, 7, 1
    nil
 }
 
-fn factor_from_phi_multi(any: n, any: phi, int: num_primes): any {
+fn factor_from_phi_multi(any n, any phi, int num_primes) any {
    "Factor n given phi(n) when n is a product of multiple equal-size primes.
    Uses the relationship between elementary symmetric polynomials and phi.
    For num_primes=2 this is the standard two-prime case.
@@ -101,7 +95,7 @@ fn factor_from_phi_multi(any: n, any: phi, int: num_primes): any {
       pending = slice(pending, 0, pending.len - 1)
       if(cur <= 1){ continue }
       if(is_prime(cur)){
-         if(!_list_contains(primes, cur)){ primes = primes.append(cur) }
+         if(!primes.contains(cur)){ primes = primes.append(cur) }
          continue
       }
       mut split = false
@@ -145,7 +139,7 @@ fn factor_from_phi_multi(any: n, any: phi, int: num_primes): any {
    primes
 }
 
-fn factor_from_phi_with_e_d(any: n, any: e, any: d): any {
+fn factor_from_phi_with_e_d(any n, any e, any d) any {
    "Factor n given the public exponent e and private exponent d.
    Uses the fact that e*d - 1 = k*phi(n) for some k.
    Tries each possible k to recover phi, then factors.
@@ -163,7 +157,7 @@ fn factor_from_phi_with_e_d(any: n, any: e, any: d): any {
    nil
 }
 
-fn recover_phi_from_d(any: n, any: e, any: d): any {
+fn recover_phi_from_d(any n, any e, any d) any {
    "Recover phi(n) given n, e, and d.
    Since e*d = 1 mod phi(n), we have e*d - 1 = k*phi(n).
    Returns the correct phi(n), or nil."

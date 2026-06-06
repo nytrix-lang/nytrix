@@ -1,13 +1,16 @@
-;; Keywords: hash birthday
+;; Keywords: hash birthday math crypto
 ;; Hash-analysis routines for birthday bounds and collision search.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+;; References:
+;; - std.math.crypto.hash
+;; - std.math.crypto
 module std.math.crypto.hash.birthday(birthday_bound, birthday_collision_prob, find_collision)
 use std.core
 use std.math.nt
 
-fn birthday_bound(int: n): int {
+fn birthday_bound(int n) int {
    "Estimate the number of random samples needed from a space of size n to have a 50% chance of collision.
    Uses the approximation sqrt(2 * n * ln(2)) ~ 1.177 * sqrt(n).
    n: size of the output space(number of possible values)
@@ -26,7 +29,7 @@ fn birthday_bound(int: n): int {
    x
 }
 
-fn birthday_collision_prob(int: n, int: k): int {
+fn birthday_collision_prob(int n, int k) int {
    "Compute the approximate probability of at least one collision.
    Draws k samples uniformly from a space of size n.
    Uses the approximation 1 - exp(-k*(k-1)/(2*n)).
@@ -52,7 +55,7 @@ fn birthday_collision_prob(int: n, int: k): int {
    prob
 }
 
-fn find_collision(fnptr: hash_fn, int: max_trials): any {
+fn find_collision(fnptr hash_fn, int max_trials) any {
    "Find a hash collision using the birthday attack method.
    hash_fn: a function that takes an input and returns a hash value
    max_trials: maximum number of hash computations before giving up

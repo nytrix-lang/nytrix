@@ -1,13 +1,16 @@
-;; Keywords: factorization base-conversion
+;; Keywords: factorization base-conversion math crypto number-theory
 ;; Integer-factorization routines that exploit base-conversion structure.
 ;; This Ny port looks for bases where the digit polynomial of N has a short,
 ;; Z-factorable representation and evaluates those factors back at the base.
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.base_conversion(base_conversion_factor, base_conversion_factor_pow2)
 use std.math.nt
 
-fn _absz(any: x): any { bigint_lt(x, Z(0)) ? (-x) : x }
+fn _absz(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 
-fn _digits_poly(any: n, any: base): list {
+fn _digits_poly(any n, any base) list {
    case Z(n){
       Z(0) -> [Z(0)]
       _ -> {
@@ -22,13 +25,13 @@ fn _digits_poly(any: n, any: base): list {
    }
 }
 
-fn _poly_trim(list: p): list {
+fn _poly_trim(list p) list {
    mut out = clone(p)
    while(out.len > 1 && out.get(out.len - 1) == Z(0)){ out = slice(out, 0, out.len - 1) }
    out
 }
 
-fn _poly_eval_int(list: p, any: x): any {
+fn _poly_eval_int(list p, any x) any {
    mut acc = Z(0)
    mut i = p.len - 1
    while(i >= 0){
@@ -38,7 +41,7 @@ fn _poly_eval_int(list: p, any: x): any {
    acc
 }
 
-fn _poly_div_linear(list: p, any: root): any {
+fn _poly_div_linear(list p, any root) any {
    def pp = _poly_trim(p)
    if(pp.len <= 1){ return nil }
    def r = Z(root)
@@ -62,7 +65,7 @@ fn _poly_div_linear(list: p, any: root): any {
    _poly_trim(q)
 }
 
-fn _divisors_z(any: n): list {
+fn _divisors_z(any n) list {
    def nn = _absz(n)
    case nn {
       Z(0) -> [Z(0)]
@@ -84,7 +87,7 @@ fn _divisors_z(any: n): list {
    }
 }
 
-fn _root_candidate(list: pp, any: d): any {
+fn _root_candidate(list pp, any d) any {
    case _poly_eval_int(pp, d){
       Z(0) -> d
       _ -> {
@@ -96,7 +99,7 @@ fn _root_candidate(list: pp, any: d): any {
    }
 }
 
-fn _find_integer_root(list: p): any {
+fn _find_integer_root(list p) any {
    def pp = _poly_trim(p)
    if(pp.len <= 1){ return nil }
    def c0 = pp.get(0)
@@ -118,7 +121,7 @@ fn _find_integer_root(list: p): any {
    }
 }
 
-fn _factor_integer_poly(list: p): any {
+fn _factor_integer_poly(list p) any {
    "Repeatedly splits off integer linear factors. Any irreducible residual is
    kept as one final factor."
    mut work = _poly_trim(p)
@@ -143,7 +146,7 @@ fn _factor_integer_poly(list: p): any {
    facs.len == 0 ? [work] : facs
 }
 
-fn _subset_partition(list: vals): any {
+fn _subset_partition(list vals) any {
    def n = vals.len
    mut best = nil
    mut best_gap = Z(0)
@@ -167,7 +170,7 @@ fn _subset_partition(list: vals): any {
    best
 }
 
-fn _factor_at_base(list: poly, any: base): any {
+fn _factor_at_base(list poly, any base) any {
    def facs = _factor_integer_poly(poly)
    if(facs == nil || facs.len < 2){ return nil }
    mut vals = []
@@ -181,7 +184,7 @@ fn _factor_at_base(list: poly, any: base): any {
    _subset_partition(vals)
 }
 
-fn _base_try(any: n, any: base, int: coefficient_threshold): any {
+fn _base_try(any n, any base, int coefficient_threshold) any {
    def poly = _digits_poly(n, base)
    if(poly.len >= coefficient_threshold){ return nil }
    def pq = _factor_at_base(poly, base)
@@ -191,7 +194,7 @@ fn _base_try(any: n, any: base, int: coefficient_threshold): any {
    nil
 }
 
-fn base_conversion_factor(any: n, int: coefficient_threshold=32, int: max_base=256): any {
+fn base_conversion_factor(any n, int coefficient_threshold=32, int max_base=256) any {
    "Searches consecutive bases."
    mut base = 2
    while(base <= max_base){
@@ -202,7 +205,7 @@ fn base_conversion_factor(any: n, int: coefficient_threshold=32, int: max_base=2
    nil
 }
 
-fn base_conversion_factor_pow2(any: n, int: coefficient_threshold=32, int: max_base=(1 << 16)): any {
+fn base_conversion_factor_pow2(any n, int coefficient_threshold=32, int max_base=(1 << 16)) any {
    "Searches bases of the form 2^k."
    mut base = 2
    while(base <= max_base){

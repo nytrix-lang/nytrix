@@ -1,14 +1,17 @@
-;; Keywords: factorization implicit
+;; Keywords: factorization implicit math crypto number-theory
 ;; Integer-factorization routines for implicit factorization from related moduli.
 ;; Reference:
 ;; - Nitaj A., Ariffin M.R.K., "Implicit factorization of unbalanced RSA moduli"
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.implicit(implicit_factorize_msb, implicit_factorize_lsb)
 use std.math.nt
 use std.math.crypto.lattice.flatter
 
-fn _abs(any: x): any { x < 0 ? (0 - x) : x }
+fn _abs(any x) any { x < 0 ? (0 - x) : x }
 
-fn _recover_factors(list: v, list: mods): any {
+fn _recover_factors(list v, list mods) any {
    mut out = []
    mut i = 0
    while(i < mods.len && i < v.len){
@@ -20,7 +23,7 @@ fn _recover_factors(list: v, list: mods): any {
    out.len == mods.len ? out : nil
 }
 
-fn _trial_factor_pair(any: n, int: bound=10000): any {
+fn _trial_factor_pair(any n, int bound=10000) any {
    def nn = _abs(n)
    if(nn < 4){ return nil }
    if(nn % 2 == 0){ return [2, nn / 2] }
@@ -32,7 +35,7 @@ fn _trial_factor_pair(any: n, int: bound=10000): any {
    nil
 }
 
-fn _trial_factor_mods(list: mods): any {
+fn _trial_factor_mods(list mods) any {
    mut out = []
    mut i = 0
    while(i < mods.len){
@@ -44,7 +47,7 @@ fn _trial_factor_mods(list: mods): any {
    out
 }
 
-fn _basis_candidates(list: basis): list {
+fn _basis_candidates(list basis) list {
    mut out = []
    def reduced = lll_reduce(basis, 0.75)
    if(reduced.len == 0){ return out }
@@ -68,7 +71,7 @@ fn _basis_candidates(list: basis): list {
    out
 }
 
-fn implicit_factorize_msb(list: mods, int: n, int: t): any {
+fn implicit_factorize_msb(list mods, int n, int t) any {
    "Factor moduli when the hidden cofactors share most-significant bits.
    mods: list of RSA moduli, n: modulus bit length, t: shared MSB count.
    Returns list of [p, q] factor pairs or nil."
@@ -103,7 +106,7 @@ fn implicit_factorize_msb(list: mods, int: n, int: t): any {
    _trial_factor_mods(mods)
 }
 
-fn implicit_factorize_lsb(list: mods, int: n, int: t): any {
+fn implicit_factorize_lsb(list mods, int n, int t) any {
    "Factor moduli when the hidden cofactors share least-significant bits.
    mods: list of RSA moduli, n: modulus bit length, t: shared LSB count.
    Returns list of [p, q] factor pairs or nil."

@@ -1,8 +1,11 @@
-;; Keywords: cipher adfgvx
+;; Keywords: cipher adfgvx math crypto
 ;; ADFGVX substitution and transposition cipher routines.
 ;; 6×6 Polybius substitution (letters ADFGVX) + columnar transposition.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/ADFGVX_cipher
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.adfgvx(adfgvx_encrypt, adfgvx_decrypt, adfgvx_substitute, adfgvx_desubstitute, adfgvx_build_matrix)
 use std.core.str
 
@@ -15,14 +18,14 @@ def ADFGVX_COORDS = [
    "XA", "XD", "XF", "XG", "XV", "XX",
 ]
 
-fn _char_at(str: text, int: i): str { utf8_slice(text, i, i + 1, 1) }
+fn _char_at(str text, int i) str { utf8_slice(text, i, i + 1, 1) }
 
-fn _normalized_char(str: ch): str {
+fn _normalized_char(str ch) str {
    def up = upper(ch)
    up == "J" ? "I" : up
 }
 
-fn _matrix_index(str: matrix, str: target): int {
+fn _matrix_index(str matrix, str target) int {
    mut found = -1
    mut i = 0
    while(i < matrix.len){
@@ -32,7 +35,7 @@ fn _matrix_index(str: matrix, str: target): int {
    found
 }
 
-fn _coord_index(str: pair): int {
+fn _coord_index(str pair) int {
    mut found = -1
    mut i = 0
    while(i < ADFGVX_COORDS.len){
@@ -42,7 +45,7 @@ fn _coord_index(str: pair): int {
    found
 }
 
-fn adfgvx_build_matrix(str: keyword, bool: include_digits): str {
+fn adfgvx_build_matrix(str keyword, bool include_digits) str {
    "Build the 6×6 ADFGVX substitution matrix from a keyword.
    Fills with A-Z(merging I/J) and 0-9 if include_digits is true.
    Returns the 36-character string."
@@ -71,7 +74,7 @@ fn adfgvx_build_matrix(str: keyword, bool: include_digits): str {
    matrix
 }
 
-fn adfgvx_substitute(str: text, str: matrix): str {
+fn adfgvx_substitute(str text, str matrix) str {
    "Apply ADFGVX Polybius substitution to text using the given 36-char matrix.
    Returns the substituted string(pairs of ADFGVX chars)."
    mut out = ""
@@ -84,7 +87,7 @@ fn adfgvx_substitute(str: text, str: matrix): str {
    out
 }
 
-fn adfgvx_desubstitute(str: coded, str: matrix): str {
+fn adfgvx_desubstitute(str coded, str matrix) str {
    "Reverse ADFGVX Polybius substitution. coded is string of ADFGVX pairs.
    Returns the original characters."
    mut out = ""
@@ -98,7 +101,7 @@ fn adfgvx_desubstitute(str: coded, str: matrix): str {
    out
 }
 
-fn _col_order(str: key): list {
+fn _col_order(str key) list {
    def n = key.len
    mut used = list(n)
    mut order = list(n)
@@ -122,7 +125,7 @@ fn _col_order(str: key): list {
    order
 }
 
-fn adfgvx_encrypt(str: plaintext, str: matrix, str: transposition_key): str {
+fn adfgvx_encrypt(str plaintext, str matrix, str transposition_key) str {
    "Encrypt plaintext using ADFGVX cipher.
    plaintext: input text. matrix: 36-char substitution matrix.
    transposition_key: columnar transposition keyword.
@@ -146,7 +149,7 @@ fn adfgvx_encrypt(str: plaintext, str: matrix, str: transposition_key): str {
    out
 }
 
-fn _column_lengths(list: order, int: n_chars, int: n_cols): list {
+fn _column_lengths(list order, int n_chars, int n_cols) list {
    def n_full_rows = n_chars / n_cols
    def extra = n_chars % n_cols
    mut lens = list(n_cols)
@@ -159,7 +162,7 @@ fn _column_lengths(list: order, int: n_chars, int: n_cols): list {
    lens
 }
 
-fn _cipher_columns(str: ciphertext, list: col_lens): list {
+fn _cipher_columns(str ciphertext, list col_lens) list {
    mut cols = list(col_lens.len)
    mut pos = 0
    mut ci = 0
@@ -172,7 +175,7 @@ fn _cipher_columns(str: ciphertext, list: col_lens): list {
    cols
 }
 
-fn _blank_grid(int: n_chars): list {
+fn _blank_grid(int n_chars) list {
    mut grid = list(n_chars)
    mut i = 0
    while(i < n_chars){
@@ -182,7 +185,7 @@ fn _blank_grid(int: n_chars): list {
    grid
 }
 
-fn _read_rows(list: cols, list: order, int: n_chars, int: n_cols): list {
+fn _read_rows(list cols, list order, int n_chars, int n_cols) list {
    mut grid = _blank_grid(n_chars)
    mut off = list(n_cols)
    mut r = 0
@@ -205,7 +208,7 @@ fn _read_rows(list: cols, list: order, int: n_chars, int: n_cols): list {
    grid
 }
 
-fn adfgvx_decrypt(str: ciphertext, str: matrix, str: transposition_key): str {
+fn adfgvx_decrypt(str ciphertext, str matrix, str transposition_key) str {
    "Decrypt ADFGVX ciphertext.
    ciphertext: encrypted string. matrix: 36-char substitution matrix.
    transposition_key: keyword used during encryption.

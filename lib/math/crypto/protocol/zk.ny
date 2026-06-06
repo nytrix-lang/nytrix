@@ -1,25 +1,28 @@
-;; Keywords: protocol zk
+;; Keywords: protocol zk math crypto
 ;; Protocol-analysis routines for zero-knowledge transcript and nonce-reuse extraction.
 ;; Reference:
 ;; - https://datatracker.ietf.org/doc/draft-irtf-cfrg-sigma-protocols/
+;; References:
+;; - std.math.crypto.protocol
+;; - std.math.crypto
 module std.math.crypto.protocol.zk(sigma_linear_witness_from_reuse, schnorr_secret_from_nonce_reuse, oss_public_h, oss_sign, oss_verify, fiat_shamir_challenge, zk_transcript_reused_commitment, girault_malicious_challenge_extract)
 use std.math.nt
 use std.math.crypto.hash
 use std.core.str
 
-fn zk_transcript_reused_commitment(list: t1, list: t2): bool {
+fn zk_transcript_reused_commitment(list t1, list t2) bool {
    "Return true if two transcript tuples reuse the same commitment at index 0."
    t1.get(0) == t2.get(0)
 }
 
-fn sigma_linear_witness_from_reuse(any: z1, any: c1, any: z2, any: c2, any: q): any {
+fn sigma_linear_witness_from_reuse(any z1, any c1, any z2, any c2, any q) any {
    "Extract witness w from linear Sigma responses z = r + c*w mod q."
    def den = mod(Z(c1) - Z(c2), q)
    def inv = den == Z(0) ? nil : inverse_mod(den, q)
    (inv == nil || inv == Z(0)) ? nil : mod((Z(z1) - Z(z2)) * inv, q)
 }
 
-fn girault_malicious_challenge_extract(any: z, any: e, any: r_bound): any {
+fn girault_malicious_challenge_extract(any z, any e, any r_bound) any {
    "Extract the witness from a Girault-style response z = r + e*w when
    a malicious verifier chooses e larger than the prover's randomizer bound."
    def eZ = Z(e)
@@ -30,13 +33,13 @@ fn girault_malicious_challenge_extract(any: z, any: e, any: r_bound): any {
    (r >= Z(0) && r < Z(r_bound)) ? w : nil
 }
 
-fn schnorr_secret_from_nonce_reuse(list: sig1, list: sig2, any: q): any {
+fn schnorr_secret_from_nonce_reuse(list sig1, list sig2, any q) any {
    "Extract Schnorr secret from two signatures/transcripts [R, c, s] sharing R."
    if(!zk_transcript_reused_commitment(sig1, sig2)){ return nil }
    sigma_linear_witness_from_reuse(sig1.get(2), sig1.get(1), sig2.get(2), sig2.get(1), q)
 }
 
-fn oss_public_h(any: n, any: k): any {
+fn oss_public_h(any n, any k) any {
    "Compute Ong-Schnorr-Shamir public coefficient h = -(k^{-1})^2 mod n."
    def nZ, kZ = Z(n), mod(Z(k), nZ)
    if(kZ == Z(0)){ return nil }
@@ -45,7 +48,7 @@ fn oss_public_h(any: n, any: k): any {
    mod(Z(0) - (kinv * kinv), nZ)
 }
 
-fn _oss_pick_r(any: n): any {
+fn _oss_pick_r(any n) any {
    mut r = Z(2)
    while(r < n){
       if(gcd(r, n) == Z(1)){ return r }
@@ -54,7 +57,7 @@ fn _oss_pick_r(any: n): any {
    nil
 }
 
-fn oss_sign(any: m, any: n, any: k, any: r=nil): any {
+fn oss_sign(any m, any n, any k, any r=nil) any {
    "Sign message representative m with Ong-Schnorr-Shamir.
    Returns [s1, s2, h] or nil.
    If r is nil, picks the first invertible r >= 2."
@@ -75,7 +78,7 @@ fn oss_sign(any: m, any: n, any: k, any: r=nil): any {
    [s1, s2, h]
 }
 
-fn oss_verify(any: m, any: sig, any: n, any: h): bool {
+fn oss_verify(any m, any sig, any n, any h) bool {
    "Verify Ong-Schnorr-Shamir signature tuple [s1, s2]."
    if(!is_list(sig) || sig.len < 2){ return false }
    def nZ = Z(n)
@@ -87,7 +90,7 @@ fn oss_verify(any: m, any: sig, any: n, any: h): bool {
    mod(s1 * s1 + hZ * s2 * s2, nZ) == mZ
 }
 
-fn fiat_shamir_challenge(list: parts, any: q): any {
+fn fiat_shamir_challenge(list parts, any q) any {
    "Hash transcript parts to a challenge modulo q using SHA-256 over their string forms."
    mut msg = Builder(parts.len * 16 + 8)
    mut i = 0

@@ -1,22 +1,25 @@
-;; Keywords: ecc ecdlp
+;; Keywords: ecc ecdlp math crypto public-key
 ;; Elliptic-curve routines for elliptic-curve discrete-log attacks.
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.ecdlp(ecdlp_baby_step_giant_step, ecdlp_brute_force, ecdlp_pollard_rho, ecdlp_recover_from_linear_collision)
 use std.math.nt
 use std.math.crypto.ecc.ecc
 
-fn _ec_point_eq(any: P, any: Q): bool {
+fn _ec_point_eq(any P, any Q) bool {
    if(P == nil || Q == nil){ return P == nil && Q == nil }
    P[0] == Q[0] && P[1] == Q[1]
 }
 
-fn _ec_point_key(any: P): str {
+fn _ec_point_key(any P) str {
    if(P == nil){ return "inf" }
    bigint_to_str(P[0]) + ":" + bigint_to_str(P[1])
 }
 
-fn ecdlp_baby_step_giant_step(list: P, any: Q, any: curve_a, any: p, any: n): any {
+fn ecdlp_baby_step_giant_step(list P, any Q, any curve_a, any p, any n) any {
    "Baby-step giant-step for ECDLP: find x such that Q = xP."
    if(Q == nil){ return Z(0) }
    if(_ec_point_eq(Q, P)){ return Z(1) }
@@ -41,12 +44,12 @@ fn ecdlp_baby_step_giant_step(list: P, any: Q, any: curve_a, any: p, any: n): an
    nil
 }
 
-fn _ecdlp_partition(any: X): any {
+fn _ecdlp_partition(any X) any {
    if(X == nil){ return Z(0) }
    mod(X[0], Z(3))
 }
 
-fn _ecdlp_step(any: X, any: a, any: b, list: P, list: Q, any: curve_a, any: p, any: n): list {
+fn _ecdlp_step(any X, any a, any b, list P, list Q, any curve_a, any p, any n) list {
    def cls = _ecdlp_partition(X)
    if(cls == Z(2)){ [ecc_point_add(X, Q, curve_a, p), a, mod(b + Z(1), n)] } elif(cls == Z(0)){
       [ecc_point_double(X, curve_a, p), mod(a * Z(2), n), mod(b * Z(2), n)]
@@ -55,7 +58,7 @@ fn _ecdlp_step(any: X, any: a, any: b, list: P, list: Q, any: curve_a, any: p, a
    }
 }
 
-fn ecdlp_brute_force(list: P, any: Q, any: curve_a, any: p, any: n): any {
+fn ecdlp_brute_force(list P, any Q, any curve_a, any p, any n) any {
    "Brute-force solve Q = xP for x in [0, n)."
    mut cur = nil
    mut x = Z(0)
@@ -67,7 +70,7 @@ fn ecdlp_brute_force(list: P, any: Q, any: curve_a, any: p, any: n): any {
    nil
 }
 
-fn ecdlp_pollard_rho(list: P, list: Q, any: curve_a, any: p, any: n, int: retries=8): any {
+fn ecdlp_pollard_rho(list P, list Q, any curve_a, any p, any n, int retries=8) any {
    "Pollard-rho for ECDLP. Returns x such that Q = xP, or nil."
    mut seed = 1
    while(seed <= retries){
@@ -103,7 +106,7 @@ fn ecdlp_pollard_rho(list: P, list: Q, any: curve_a, any: p, any: n, int: retrie
    nil
 }
 
-fn ecdlp_recover_from_linear_collision(any: c1, any: d1, any: c2, any: d2, any: n): any {
+fn ecdlp_recover_from_linear_collision(any c1, any d1, any c2, any d2, any n) any {
    "Recover x from a collision c1*P + d1*Q = c2*P + d2*Q where Q = x*P.
    Returns x = (c1-c2)/(d2-d1) mod n, or nil if the denominator is not invertible."
    def den = mod(Z(d2) - Z(d1), Z(n))

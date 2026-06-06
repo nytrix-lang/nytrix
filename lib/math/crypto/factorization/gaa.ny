@@ -1,11 +1,14 @@
-;; Keywords: factorization gaa
+;; Keywords: factorization gaa math crypto number-theory
 ;; Integer-factorization routines for GAA-style factorization.
 ;; Reference:
 ;; - "A New LSB Attack on Special-Structured RSA Primes"
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.gaa(gaa_factor, nearest_sqrt_int)
 use std.math.nt
 
-fn nearest_sqrt_int(any: n): any {
+fn nearest_sqrt_int(any n) any {
    "Return the nearest integer to sqrt(n), rounding to the closer square."
    def s = isqrt(n)
    def lo = n - s * s
@@ -14,7 +17,7 @@ fn nearest_sqrt_int(any: n): any {
    hi < lo ? sp : s
 }
 
-fn _gaa_roots(any: z, any: sigma, any: rp, any: rq): any {
+fn _gaa_roots(any z, any sigma, any rp, any rq) any {
    def disc = z * z - 4 * sigma * rp * rq
    if(disc < 0 || !is_perfect_square(disc)){ return nil }
    def t = isqrt(disc)
@@ -25,7 +28,7 @@ fn _gaa_roots(any: z, any: sigma, any: rp, any: rq): any {
    nil
 }
 
-fn gaa_factor(any: n, any: rp, any: rq, int: max_iter): any {
+fn gaa_factor(any n, any rp, any rq, int max_iter) any {
    "Recover [p, q] from n = p*q using the Ghafar-Ariffin-Asbullah attack.
    rp and rq are the structural parameters from the prime construction.
    Returns [p, q] with p <= q, or nil."

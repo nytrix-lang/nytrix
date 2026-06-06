@@ -1,11 +1,15 @@
-;; Keywords: syntax xml
+;; Keywords: syntax xml parse highlight
 ;; XML syntax highlighter
+;; References:
+;; - std.parse.syntax
+;; - std.parse.syntax.helpers
 module std.parse.syntax.xml(tokenize)
 use std.core
 use std.core.str as str
 use std.parse.syntax.helpers as _h
 
-fn tokenize(str: source, list: out_tokens): list {
+fn tokenize(str source, list out_tokens) list {
+   "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
    while(i < src_len){

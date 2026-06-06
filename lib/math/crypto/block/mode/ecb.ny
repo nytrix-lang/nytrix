@@ -1,12 +1,15 @@
-;; Keywords: block-cipher mode ecb
+;; Keywords: block-cipher mode ecb math crypto
 ;; Block-mode routines for ECB detection and byte-at-a-time oracle attacks.
 ;; Reference:
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.ecb(ecb_detect, ecb_byte_by_byte, ecb_byte_at_a_time_suffix, cbc_fixed_iv_byte_at_a_time_suffix, oracle_detect_block_size, zero_pad_to_block, locked_dungeon_mod_pad, ecb_split_blocks, ecb_splice_blocks)
 use std.core
 use std.math.bin
 
-fn ecb_split_blocks(list: ciphertext, int: block_size=16): list {
+fn ecb_split_blocks(list ciphertext, int block_size=16) list {
    "Split ciphertext bytes into fixed-size ECB blocks. Drops no trailing bytes."
    mut blocks = []
    mut i = 0
@@ -18,7 +21,7 @@ fn ecb_split_blocks(list: ciphertext, int: block_size=16): list {
    blocks
 }
 
-fn ecb_splice_blocks(list: blocks): list {
+fn ecb_splice_blocks(list blocks) list {
    "Concatenate selected ECB blocks into a forged ciphertext."
    mut out = []
    mut i = 0
@@ -34,7 +37,7 @@ fn ecb_splice_blocks(list: blocks): list {
    out
 }
 
-fn zero_pad_to_block(list: data, int: block_size, int: zero_byte=48): list {
+fn zero_pad_to_block(list data, int block_size, int zero_byte=48) list {
    "Pad a byte list with zero_byte until its length is a multiple of block_size.
    This models legacy oracles that append ASCII '0' instead of PKCS#7."
    mut out = clone(data)
@@ -42,7 +45,7 @@ fn zero_pad_to_block(list: data, int: block_size, int: zero_byte=48): list {
    out
 }
 
-fn locked_dungeon_mod_pad(list: data, int: secret_size, int: block_size=16, int: pad_limit=48): list {
+fn locked_dungeon_mod_pad(list data, int secret_size, int block_size=16, int pad_limit=48) list {
    "Model a quirky byte-at-a-time oracle that normally PKCS#7-pads, but for
    inputs longer than pad_limit deletes a window around the secret boundary."
    def input_len = data.len
@@ -72,7 +75,7 @@ fn locked_dungeon_mod_pad(list: data, int: secret_size, int: block_size=16, int:
    pkcs7_pad(data, block_size)
 }
 
-fn ecb_detect(list: ciphertext, int: block_size): int {
+fn ecb_detect(list ciphertext, int block_size) int {
    "Detect ECB mode by checking for duplicate ciphertext blocks.
    ciphertext: byte list of ciphertext
    block_size: size of cipher blocks(e.g. 16 for AES)
@@ -102,13 +105,13 @@ fn ecb_detect(list: ciphertext, int: block_size): int {
    duplicates
 }
 
-fn ecb_byte_by_byte(fnptr: oracle_fn, int: block_size): list {
+fn ecb_byte_by_byte(fnptr oracle_fn, int block_size) list {
    "Byte-at-a-time suffix recovery entrypoint.
    Recovers up to three blocks if the exact secret length is unknown."
    ecb_byte_at_a_time_suffix(oracle_fn, block_size, block_size * 3)
 }
 
-fn oracle_detect_block_size(fnptr: oracle_fn, int: max_probe=128): any {
+fn oracle_detect_block_size(fnptr oracle_fn, int max_probe=128) any {
    "Detect the block size of a deterministic append-and-encrypt oracle by watching ciphertext length jumps."
    def base_len = len(oracle_fn([]))
    mut n = 1
@@ -126,7 +129,7 @@ fn oracle_detect_block_size(fnptr: oracle_fn, int: max_probe=128): any {
    nil
 }
 
-fn _bytes_equal_at(list: a, int: a_start, list: b, int: b_start, int: block_size): bool {
+fn _bytes_equal_at(list a, int a_start, list b, int b_start, int block_size) bool {
    mut i = 0
    while(i < block_size){
       if(a[a_start + i] != b[b_start + i]){ return false }
@@ -135,7 +138,7 @@ fn _bytes_equal_at(list: a, int: a_start, list: b, int: b_start, int: block_size
    true
 }
 
-fn _byte_at_a_time_suffix(fnptr: oracle_fn, int: block_size, int: max_len): list {
+fn _byte_at_a_time_suffix(fnptr oracle_fn, int block_size, int max_len) list {
    mut recovered = []
    mut byte_idx = 0
    while(byte_idx < max_len){
@@ -178,13 +181,13 @@ fn _byte_at_a_time_suffix(fnptr: oracle_fn, int: block_size, int: max_len): list
    recovered
 }
 
-fn ecb_byte_at_a_time_suffix(fnptr: oracle_fn, int: block_size, int: max_len): list {
+fn ecb_byte_at_a_time_suffix(fnptr oracle_fn, int block_size, int max_len) list {
    "Recover a secret appended to attacker-controlled input by a deterministic ECB oracle.
    oracle_fn(prefix_bytes) must return ciphertext for prefix || secret."
    _byte_at_a_time_suffix(oracle_fn, block_size, max_len)
 }
 
-fn cbc_fixed_iv_byte_at_a_time_suffix(fnptr: oracle_fn, int: block_size, int: max_len): list {
+fn cbc_fixed_iv_byte_at_a_time_suffix(fnptr oracle_fn, int block_size, int max_len) list {
    "Recover an appended secret from deterministic CBC with a fixed IV.
    Identical controlled prefixes keep previous CBC blocks identical,
    so the same block dictionary strategy works for the target block."

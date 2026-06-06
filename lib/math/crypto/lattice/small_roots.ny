@@ -1,7 +1,10 @@
-;; Keywords: lattice small-roots
+;; Keywords: lattice small-roots math crypto number-theory
 ;; Lattice routines for small-root search over modular and integer polynomials.
 ;; Univariate modular roots are solved directly; multivariate helpers build
 ;; Ny mvpoly lattices and return bounded candidate roots where available.
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.small_roots(small_roots_backend_report, create_lattice_univariate, reduce_lattice_basis, reduce_lattice_basis_report, reconstruct_polynomials_univariate, modular_univariate, modular_univariate_report, small_roots_strategy_unavailable, howgrave_graham_modular_univariate, aono_integer_multivariate, blomer_may_modular_trivariate, blomer_may_modular_bivariate, coron_integer_bivariate, coron_direct_integer_bivariate, ernst_integer_trivariate_1, ernst_integer_trivariate_2, herrmann_may_modular_bivariate, herrmann_may_modular_multivariate, jochemsz_may_integer_multivariate, jochemsz_may_modular_multivariate, nitaj_fouotsa_modular_trivariate)
 use std.core
 use std.core.common as common
@@ -17,7 +20,7 @@ use std.math.matrix
 mut _sr_trace_cache = -1
 mut _sr_exact_gcd_cache = -1
 
-fn small_roots_backend_report(): dict {
+fn small_roots_backend_report() dict {
    "Return the small-roots lattice reduction policy used by the Ny implementation."
    mut out = dict(10)
    out = out.set("default_method", "ny")
@@ -28,22 +31,22 @@ fn small_roots_backend_report(): dict {
    out
 }
 
-fn _sr_rows(any: m): int {
+fn _sr_rows(any m) int {
    "Return row count from the compact matrix tuple used by this module."
    int(m[0])
 }
 
-fn _sr_cols(any: m): int {
+fn _sr_cols(any m) int {
    "Return column count from the compact matrix tuple used by this module."
    int(m[1])
 }
 
-fn _sr_data(any: m): list {
+fn _sr_data(any m) list {
    "Return row data from the compact matrix tuple used by this module."
    m[2]
 }
 
-fn _sr_get(any: m, int: i, int: j): any {
+fn _sr_get(any m, int i, int j) any {
    "Read a matrix cell, returning zero for out-of-range sparse accesses."
    def data = _sr_data(m)
    if(i < 0 || i >= data.len){ return Z(0) }
@@ -52,24 +55,24 @@ fn _sr_get(any: m, int: i, int: j): any {
    row[j]
 }
 
-fn _sr_trace_on(): bool {
+fn _sr_trace_on() bool {
    "Return true when small-roots trace logging is enabled."
    _sr_trace_cache = common.cached_env_enabled(_sr_trace_cache, "NY_SMALL_ROOTS_TRACE")
    _sr_trace_cache == 1
 }
 
-fn _sr_exact_gcd_on(): bool {
+fn _sr_exact_gcd_on() bool {
    "Return true when exact GCD fallback is enabled."
    _sr_exact_gcd_cache = common.cached_env_enabled(_sr_exact_gcd_cache, "NY_SMALL_ROOTS_EXACT_GCD")
    _sr_exact_gcd_cache == 1
 }
 
-fn _sr_trace(str: stage, any: t0): any {
+fn _sr_trace(str stage, any t0) any {
    "Emit a timed trace line for a small-roots stage when tracing is enabled."
    if(_sr_trace_on()){ eprint("[small_roots] " + stage + " ms=" + to_str(float(ticks() - t0) / 1000000.0)) }
 }
 
-fn _poly_copy(list: p): list {
+fn _poly_copy(list p) list {
    "Copy a coefficient list."
    mut out = []
    mut i = 0
@@ -80,7 +83,7 @@ fn _poly_copy(list: p): list {
    out
 }
 
-fn _poly_trim(any: p): list {
+fn _poly_trim(any p) list {
    "Remove trailing zero coefficients from a polynomial coefficient list."
    if(!is_list(p)){ return [] }
    mut out = _poly_copy(p)
@@ -88,7 +91,7 @@ fn _poly_trim(any: p): list {
    out
 }
 
-fn _poly_is_zero(list: p): bool {
+fn _poly_is_zero(list p) bool {
    "Return true when every polynomial coefficient is zero."
    mut i = 0
    while(i < p.len){
@@ -98,7 +101,7 @@ fn _poly_is_zero(list: p): bool {
    true
 }
 
-fn _sr_small_nonnegative_int(any: x, str: name): int {
+fn _sr_small_nonnegative_int(any x, str name) int {
    "Convert x to a non-negative host int or raise a named parameter error."
    if(is_int(x)){
       if(x < 0){ panic("SmallRootsParameterError: " + name + " must be non-negative") }
@@ -111,7 +114,7 @@ fn _sr_small_nonnegative_int(any: x, str: name): int {
    panic("SmallRootsTypeError: " + name + " must be an int or bigint")
 }
 
-fn _poly_pow(list: p, any: e): list {
+fn _poly_pow(list p, any e) list {
    "Raise a coefficient-list polynomial to a non-negative integer power."
    def early = case e {
       0 -> [Z(1)]
@@ -130,7 +133,7 @@ fn _poly_pow(list: p, any: e): list {
    res
 }
 
-fn _poly_shift(list: p, int: s): list {
+fn _poly_shift(list p, int s) list {
    "Multiply polynomial p by x^s."
    mut out = []
    mut i = 0
@@ -146,7 +149,7 @@ fn _poly_shift(list: p, int: s): list {
    out
 }
 
-fn _poly_div_exact(list: a, list: b): any {
+fn _poly_div_exact(list a, list b) any {
    "Return exact quotient a / b over ZZ coefficients, or nil."
    def aa = _poly_trim(a)
    def bb = _poly_trim(b)
@@ -178,13 +181,13 @@ fn _poly_div_exact(list: a, list: b): any {
    _poly_is_zero(r) ? _poly_trim(q) : nil
 }
 
-fn _poly_degree_zz(list: p): int {
+fn _poly_degree_zz(list p) int {
    "Return the degree of a ZZ polynomial, or -1 for zero."
    def pp = _poly_trim(p)
    _poly_is_zero(pp) ? -1 : len(pp) - 1
 }
 
-fn _poly_scalar_mul_zz(list: p, any: s): list {
+fn _poly_scalar_mul_zz(list p, any s) list {
    "Multiply a ZZ polynomial by scalar s."
    mut out = []
    mut i = 0
@@ -195,7 +198,7 @@ fn _poly_scalar_mul_zz(list: p, any: s): list {
    _poly_trim(out)
 }
 
-fn _poly_content_abs_zz(list: p): bigint {
+fn _poly_content_abs_zz(list p) bigint {
    "Return the absolute content gcd of a ZZ polynomial."
    mut c, i = Z(0), 0
    while(i < p.len){
@@ -206,7 +209,7 @@ fn _poly_content_abs_zz(list: p): bigint {
    c
 }
 
-fn _poly_primitive_part_zz(list: p): list {
+fn _poly_primitive_part_zz(list p) list {
    "Return primitive part of a ZZ polynomial with positive leading coefficient."
    mut pp = _poly_trim(p)
    if(_poly_is_zero(pp)){ return [Z(0)] }
@@ -224,7 +227,7 @@ fn _poly_primitive_part_zz(list: p): list {
    pp
 }
 
-fn _poly_pseudo_remainder_zz(list: a, list: b): any {
+fn _poly_pseudo_remainder_zz(list a, list b) any {
    "Compute a content-normalized pseudo-remainder over ZZ polynomials."
    mut r = _poly_primitive_part_zz(a)
    def bb = _poly_primitive_part_zz(b)
@@ -249,7 +252,7 @@ fn _poly_pseudo_remainder_zz(list: a, list: b): any {
    _poly_trim(r)
 }
 
-fn _poly_gcd_zz(list: a, list: b): list {
+fn _poly_gcd_zz(list a, list b) list {
    "Return primitive polynomial gcd over ZZ coefficients."
    mut u, v = _poly_primitive_part_zz(a), _poly_primitive_part_zz(b)
    if(_poly_is_zero(u)){ return v }
@@ -267,26 +270,13 @@ fn _poly_gcd_zz(list: a, list: b): list {
    _poly_primitive_part_zz(u)
 }
 
-fn _append_unique_poly(list: polys, list: p): list {
+fn _append_unique_poly(list polys, list p) list {
    "Append polynomial p if it is not already present."
    def pp = _poly_trim(p)
-   mut found = false
-   mut i = 0
-   while(!found && i < polys.len){
-      def q = _poly_trim(polys[i])
-      mut same = q.len == pp.len
-      mut j = 0
-      while(same && j < pp.len){
-         same = q[j] == pp[j]
-         j += 1
-      }
-      found = same
-      i += 1
-   }
-   found ? polys : polys.append(pp)
+   polys.contains(pp) ? polys : polys.append(pp)
 }
 
-fn _poly_common_factor_candidates(list: polys): list {
+fn _poly_common_factor_candidates(list polys) list {
    "Extract candidate common factors from reconstructed relation polynomials."
    mut out = []
    def n = min(len(polys), 18)
@@ -330,7 +320,7 @@ fn _poly_common_factor_candidates(list: polys): list {
    out
 }
 
-fn create_lattice_univariate(any: shifts, any: X): any {
+fn create_lattice_univariate(any shifts, any X) any {
    "Builds the univariate lattice basis and monomial degree list."
    if(!is_list(shifts) || shifts.len <= 0){ return nil }
    mut max_deg = 0
@@ -366,7 +356,7 @@ fn create_lattice_univariate(any: shifts, any: X): any {
    [Matrix(data), monomials]
 }
 
-fn reduce_lattice_basis_report(any: L, any: delta=0.99, str: method="ny", any: eta=0.51): dict {
+fn reduce_lattice_basis_report(any L, any delta=0.99, str method="ny", any eta=0.51) dict {
    "Shared report-first lattice reduction wrapper for small-roots callers.
    Defaults to LLL and records profile movement for audit output.
    `auto` resolves to the same path."
@@ -387,12 +377,12 @@ fn reduce_lattice_basis_report(any: L, any: delta=0.99, str: method="ny", any: e
    out
 }
 
-fn reduce_lattice_basis(any: L, any: delta=0.99, str: method="ny", any: eta=0.51): any {
+fn reduce_lattice_basis(any L, any delta=0.99, str method="ny", any eta=0.51) any {
    "Shared lattice reduction wrapper. Returns only the reduced basis."
    reduce_lattice_basis_report(L, delta, method, eta).get("basis")
 }
 
-fn _poly_eval_mod_local(list: p, any: x, any: modulus): bigint {
+fn _poly_eval_mod_local(list p, any x, any modulus) bigint {
    "Evaluate polynomial p at x modulo modulus."
    mut r, i = Z(0), len(p) - 1
    while(i >= 0){
@@ -402,7 +392,7 @@ fn _poly_eval_mod_local(list: p, any: x, any: modulus): bigint {
    r
 }
 
-fn _poly_roots_mod_bruteforce(list: p, any: prime): list {
+fn _poly_roots_mod_bruteforce(list p, any prime) list {
    "Find roots of p modulo a small prime by brute force."
    mut roots = []
    mut x = 0
@@ -414,24 +404,18 @@ fn _poly_roots_mod_bruteforce(list: p, any: prime): list {
    roots
 }
 
-fn _append_unique_root(list: roots, any: r): list {
+fn _append_unique_root(list roots, any r) list {
    "Append root r if it is not already present."
-   mut found = false
-   mut i = 0
-   while(!found && i < roots.len){
-      found = roots[i] == r
-      i += 1
-   }
-   found ? roots : roots.append(r)
+   roots.contains(r) ? roots : roots.append(r)
 }
 
-fn _poly_degree_for_roots(list: p): int {
+fn _poly_degree_for_roots(list p) int {
    "Return degree used for root-search ordering."
    def pp = _poly_trim(p)
    len(pp) - 1
 }
 
-fn _sort_polys_for_roots(list: polys): list {
+fn _sort_polys_for_roots(list polys) list {
    "Sort relation polynomials by increasing root-search degree."
    mut out = []
    mut i = 0
@@ -459,7 +443,7 @@ fn _sort_polys_for_roots(list: polys): list {
    out
 }
 
-fn _prime_root_sets_by_branching(list: p, list: primes, int: max_branch=12): list {
+fn _prime_root_sets_by_branching(list p, list primes, int max_branch=12) list {
    "Collect usable root sets modulo primes while limiting CRT branching."
    mut sets = []
    mut pi = 0
@@ -489,7 +473,7 @@ fn _prime_root_sets_by_branching(list: p, list: primes, int: max_branch=12): lis
    sets
 }
 
-fn _sr_crt2_z(any: a1, any: m1, any: a2, any: m2): bigint {
+fn _sr_crt2_z(any a1, any m1, any a2, any m2) bigint {
    "CRT for two possibly-BigInt congruences. Returns the least non-negative solution."
    def za1 = Z(a1)
    def zm1 = Z(m1)
@@ -505,7 +489,7 @@ fn _sr_crt2_z(any: a1, any: m1, any: a2, any: m2): bigint {
    mod(za1 + zm1 * t, lcm)
 }
 
-fn _sr_crt_expand(list: candidates, list: rmods, any: pr, int: seed=1): list {
+fn _sr_crt_expand(list candidates, list rmods, any pr, int seed=1) list {
    "CRT-expand candidate residue/modulus pairs by residues modulo pr."
    mut next = []
    mut seen = dict(seed)
@@ -533,17 +517,17 @@ fn _sr_crt_expand(list: candidates, list: rmods, any: pr, int: seed=1): list {
    next
 }
 
-fn _sr_center_residue(any: r, any: m): any {
+fn _sr_center_residue(any r, any m) any {
    "Center a CRT residue around zero."
    r > m / Z(2) ? r - m : r
 }
 
-fn _sr_crt_mod_exceeds(list: candidates, any: bound): bool {
+fn _sr_crt_mod_exceeds(list candidates, any bound) bool {
    "Return true once CRT modulus covers the signed search interval."
    candidates.len > 0 && candidates[0][1] > Z(2) * Z(bound) + Z(1)
 }
 
-fn _poly_integer_roots_crt(list: p, any: X): list {
+fn _poly_integer_roots_crt(list p, any X) list {
    "Recover bounded integer roots by CRT-combining small-prime roots."
    def bound = Z(X)
    def primes = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151,
@@ -587,7 +571,7 @@ fn _poly_integer_roots_crt(list: p, any: X): list {
    roots
 }
 
-fn _intersect_root_sets(list: a, list: b): list {
+fn _intersect_root_sets(list a, list b) list {
    "Intersect two small root-residue lists."
    mut out = []
    mut i = 0
@@ -606,7 +590,7 @@ fn _intersect_root_sets(list: a, list: b): list {
    out
 }
 
-fn _common_roots_mod_prime(list: polys, any: prime, int: max_polys=10): list {
+fn _common_roots_mod_prime(list polys, any prime, int max_polys=10) list {
    "Find residue roots shared by at least two relation polynomials."
    mut common = []
    mut used = 0
@@ -625,7 +609,7 @@ fn _common_roots_mod_prime(list: polys, any: prime, int: max_polys=10): list {
    used >= 2 ? common : []
 }
 
-fn _root_exact_hits(list: polys, any: r, int: max_polys=12): int {
+fn _root_exact_hits(list polys, any r, int max_polys=12) int {
    "Count relation polynomials that vanish exactly at integer root r."
    mut hits = 0
    mut i = 0
@@ -638,7 +622,7 @@ fn _root_exact_hits(list: polys, any: r, int: max_polys=12): int {
    hits
 }
 
-fn _poly_common_roots_crt(list: polys, any: X): list {
+fn _poly_common_roots_crt(list polys, any X) list {
    "Recover bounded roots shared by reconstructed relations via CRT."
    if(_sr_trace_on()){ eprint("[small_roots] common_crt enter polys=" + to_str(len(polys))) }
    def bound = Z(X)
@@ -677,7 +661,7 @@ fn _poly_common_roots_crt(list: polys, any: X): list {
    roots
 }
 
-fn _root_valid_for_modulus(list: ff, any: r, any: N, any: min_factor=nil): bool {
+fn _root_valid_for_modulus(list ff, any r, any N, any min_factor=nil) bool {
    "Check whether r satisfies the original modular root condition."
    def fr = poly_eval(ff, r)
    def exact = mod(fr, N) == Z(0)
@@ -687,7 +671,7 @@ fn _root_valid_for_modulus(list: ff, any: r, any: N, any: min_factor=nil): bool 
    exact || (bounded && factor >= threshold)
 }
 
-fn reconstruct_polynomials_univariate(any: B, any: f, any: modulus, list: monomials, any: X, bool: divide_original=true): list {
+fn reconstruct_polynomials_univariate(any B, any f, any modulus, list monomials, any X, bool divide_original=true) list {
    "Reconstruct short integer polynomials from a reduced lattice basis."
    mut polys = []
    mut fallback = []
@@ -726,7 +710,7 @@ fn reconstruct_polynomials_univariate(any: B, any: f, any: modulus, list: monomi
    len(polys) > 0 ? polys : fallback
 }
 
-fn _roots_from_poly(list: pp, any: X): list {
+fn _roots_from_poly(list pp, any X) list {
    "Find bounded integer roots from low-degree relation polynomials."
    mut rs = []
    if(pp.len <= 1){ return rs }
@@ -764,7 +748,7 @@ fn _roots_from_poly(list: pp, any: X): list {
    rs
 }
 
-fn _modular_univariate_shifts(list: ff, any: N, int: m, int: t, int: delta): list {
+fn _modular_univariate_shifts(list ff, any N, int m, int t, int delta) list {
    "Build Howgrave-Graham univariate shift polynomials."
    mut shifts = []
    mut i = 0
@@ -794,7 +778,7 @@ fn _modular_univariate_shifts(list: ff, any: N, int: m, int: t, int: delta): lis
    shifts
 }
 
-fn _sr_filter_roots(list: ff, any: N, any: min_factor, list: candidates, bool: trace_accept=false): list {
+fn _sr_filter_roots(list ff, any N, any min_factor, list candidates, bool trace_accept=false) list {
    "Filter candidate roots against the original modular predicate."
    mut roots = []
    mut i = 0
@@ -808,7 +792,7 @@ fn _sr_filter_roots(list: ff, any: N, any: min_factor, list: candidates, bool: t
    roots
 }
 
-fn _sr_roots_from_polys(list: ff, any: N, any: min_factor, any: X, list: search_polys, bool: stop_on_hit=true, bool: trace_poly=false): list {
+fn _sr_roots_from_polys(list ff, any N, any min_factor, any X, list search_polys, bool stop_on_hit=true, bool trace_poly=false) list {
    "Extract and validate roots from reconstructed relation polynomials."
    mut roots = []
    mut i = 0
@@ -830,7 +814,7 @@ fn _sr_roots_from_polys(list: ff, any: N, any: min_factor, any: X, list: search_
    roots
 }
 
-fn _sr_empty_modular_report(str: reason, str: reduction_method="ny"): dict {
+fn _sr_empty_modular_report(str reason, str reduction_method="ny") dict {
    mut out = dict(8)
    out = out.set("success", false)
    out = out.set("reason", reason)
@@ -840,7 +824,7 @@ fn _sr_empty_modular_report(str: reason, str: reduction_method="ny"): dict {
    out
 }
 
-fn modular_univariate_report(any: poly_in, any: N, any: m, any: t, any: X, any: min_factor=nil, str: reduction_method="ny"): dict {
+fn modular_univariate_report(any poly_in, any N, any m, any t, any X, any min_factor=nil, str reduction_method="ny") dict {
    "Report-first Howgrave-Graham / May modular univariate small-roots path."
    def t_all = ticks()
    if(!is_list(poly_in)){ return _sr_empty_modular_report("polynomial must be a coefficient list", reduction_method) }
@@ -919,22 +903,22 @@ fn modular_univariate_report(any: poly_in, any: N, any: m, any: t, any: X, any: 
    out
 }
 
-fn modular_univariate(any: poly_in, any: N, any: m, any: t, any: X, any: min_factor=nil, str: reduction_method="ny"): list {
+fn modular_univariate(any poly_in, any N, any m, any t, any X, any min_factor=nil, str reduction_method="ny") list {
    "Shared Howgrave-Graham / May modular univariate small-roots path."
    modular_univariate_report(poly_in, N, m, t, X, min_factor, reduction_method).get("roots", [])
 }
 
-fn small_roots_strategy_unavailable(str: name): any {
+fn small_roots_strategy_unavailable(str name) any {
    "Raise the standard small-roots strategy error for unsupported input shapes."
    crypto_fail("lattice.small_roots." + name, "expected a Ny mvpoly sparse polynomial(or a univariate coefficient list where supported)")
 }
 
-fn howgrave_graham_modular_univariate(any: f, any: N, any: m, any: t, any: X, str: reduction_method="ny"): list {
+fn howgrave_graham_modular_univariate(any f, any N, any m, any t, any X, str reduction_method="ny") list {
    "Run the Howgrave-Graham/Coppersmith univariate modular strategy."
    modular_univariate(f, N, m, t, X, nil, reduction_method)
 }
 
-fn _sr_exps(int: n, int: i0=0, int: e0=0, int: i1=0, int: e1=0, int: i2=0, int: e2=0): list {
+fn _sr_exps(int n, int i0=0, int e0=0, int i1=0, int e1=0, int i2=0, int e2=0) list {
    "Build an exponent vector with up to three non-zero positions."
    mut out = []
    mut i = 0
@@ -949,7 +933,7 @@ fn _sr_exps(int: n, int: i0=0, int: e0=0, int: i1=0, int: e1=0, int: i2=0, int: 
    out
 }
 
-fn _sr_lift(any: f, int: n): any {
+fn _sr_lift(any f, int n) any {
    "Lift an mvpoly to at least n variables by padding exponent vectors."
    if(!mv_is_poly(f)){ return f }
    if(mv_nvars(f) >= n){ return f }
@@ -966,7 +950,7 @@ fn _sr_lift(any: f, int: n): any {
    mv_poly(n, ts)
 }
 
-fn _sr_aono_products(list: gsets, int: idx, any: cur, list: out): list {
+fn _sr_aono_products(list gsets, int idx, any cur, list out) list {
    "Recursively multiply one shift from each Aono shift set."
    if(idx >= gsets.len){ return out.append(cur) }
    def group = gsets.get(idx)
@@ -978,7 +962,7 @@ fn _sr_aono_products(list: gsets, int: idx, any: cur, list: out): list {
    out
 }
 
-fn aono_integer_multivariate(any: F, any: e, int: m, list: X, str: roots_method="groebner"): list {
+fn aono_integer_multivariate(any F, any e, int m, list X, str roots_method="groebner") list {
    "Run Aono-style integer multivariate small-root shifts over mvpoly inputs."
    def invalid_input = !is_list(F) || F.len == 0 || !mv_is_poly(F.get(0))
    def _shape_guard = invalid_input ? small_roots_strategy_unavailable("aono.integer_multivariate") : nil
@@ -1007,7 +991,7 @@ fn aono_integer_multivariate(any: F, any: e, int: m, list: X, str: roots_method=
    return mv_find_roots(F, X, nil)
 }
 
-fn blomer_may_modular_trivariate(any: f, any: N, int: m, int: t, any: X, any: Y, any: Z, str: roots_method="groebner"): list {
+fn blomer_may_modular_trivariate(any f, any N, int m, int t, any X, any Y, any Z, str roots_method="groebner") list {
    "Run Blomer-May modular trivariate shifts and bounded root search."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("blomer_may.modular_trivariate") }
    def n = 3
@@ -1034,7 +1018,7 @@ fn blomer_may_modular_trivariate(any: f, any: N, int: m, int: t, any: X, any: Y,
    mv_small_roots_modular(ff, bigint_pow(N, m), shifts, [X, Y, Z])
 }
 
-fn blomer_may_modular_bivariate(any: f, any: eM, int: m, int: t, any: Y, any: Z, str: roots_method="groebner"): list {
+fn blomer_may_modular_bivariate(any f, any eM, int m, int t, any Y, any Z, str roots_method="groebner") list {
    "Run Blomer-May modular bivariate shifts and bounded root search."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("blomer_may.modular_bivariate") }
    def ff = _sr_lift(f, 2)
@@ -1056,7 +1040,7 @@ fn blomer_may_modular_bivariate(any: f, any: eM, int: m, int: t, any: Y, any: Z,
    mv_small_roots_modular(ff, bigint_pow(eM, m), shifts, [Y, Z])
 }
 
-fn coron_integer_bivariate(any: p, int: k, any: X, any: Y, str: roots_method="groebner"): list {
+fn coron_integer_bivariate(any p, int k, any X, any Y, str roots_method="groebner") list {
    "Run Coron integer bivariate shifts and bounded root search."
    if(!mv_is_poly(p)){ small_roots_strategy_unavailable("coron.integer_bivariate") }
    def pp = _sr_lift(p, 2)
@@ -1084,12 +1068,12 @@ fn coron_integer_bivariate(any: p, int: k, any: X, any: Y, str: roots_method="gr
    mv_small_roots_integer(pp, shifts, [X, Y])
 }
 
-fn coron_direct_integer_bivariate(any: p, int: k, any: X, any: Y, str: echelon_algorithm="default", str: roots_method="groebner"): list {
+fn coron_direct_integer_bivariate(any p, int k, any X, any Y, str echelon_algorithm="default", str roots_method="groebner") list {
    "Direct Coron integer bivariate strategy entrypoint."
    coron_integer_bivariate(p, k, X, Y, roots_method)
 }
 
-fn ernst_integer_trivariate_1(any: f, int: m, int: t, any: W, any: X, any: Y, any: Z, bool: check_bounds=true, str: roots_method="groebner"): list {
+fn ernst_integer_trivariate_1(any f, int m, int t, any W, any X, any Y, any Z, bool check_bounds=true, str roots_method="groebner") list {
    "Run Ernst trivariate integer strategy family 1 over mvpoly input."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("ernst.integer_trivariate_1") }
    def ff = _sr_lift(f, 3)
@@ -1118,7 +1102,7 @@ fn ernst_integer_trivariate_1(any: f, int: m, int: t, any: W, any: X, any: Y, an
    mv_small_roots_integer(ff, shifts, [X, Y, Z])
 }
 
-fn ernst_integer_trivariate_2(any: f, int: m, int: t, any: W, any: X, any: Y, any: Z, bool: check_bounds=true, str: roots_method="groebner"): list {
+fn ernst_integer_trivariate_2(any f, int m, int t, any W, any X, any Y, any Z, bool check_bounds=true, str roots_method="groebner") list {
    "Run Ernst trivariate integer strategy family 2 over mvpoly input."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("ernst.integer_trivariate_2") }
    def ff = _sr_lift(f, 3)
@@ -1147,7 +1131,7 @@ fn ernst_integer_trivariate_2(any: f, int: m, int: t, any: W, any: X, any: Y, an
    mv_small_roots_integer(ff, shifts, [X, Y, Z])
 }
 
-fn herrmann_may_modular_bivariate(any: f, any: e, int: m, int: t, any: X, any: Y, str: roots_method="groebner"): list {
+fn herrmann_may_modular_bivariate(any f, any e, int m, int t, any X, any Y, str roots_method="groebner") list {
    "Run Herrmann-May modular bivariate shifts and bounded root search."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("herrmann_may.modular_bivariate") }
    def ff = _sr_lift(f, 2)
@@ -1173,7 +1157,7 @@ fn herrmann_may_modular_bivariate(any: f, any: e, int: m, int: t, any: X, any: Y
    mv_small_roots_modular(ff, bigint_pow(e, m), shifts, [X, Y])
 }
 
-fn herrmann_may_modular_multivariate(any: f, any: N, int: m, int: t, any: X, str: roots_method="groebner"): list {
+fn herrmann_may_modular_multivariate(any f, any N, int m, int t, any X, str roots_method="groebner") list {
    "Run Herrmann-May modular multivariate strategy, or univariate fallback for coefficient lists."
    if(is_list(f) && !mv_is_poly(f)){ return modular_univariate(f, N, m, t, X.get(0, X)) }
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("herrmann_may_multivariate.modular_multivariate") }
@@ -1186,7 +1170,7 @@ fn herrmann_may_modular_multivariate(any: f, any: N, int: m, int: t, any: X, str
    mv_small_roots_modular(f, N, shifts, X)
 }
 
-fn jochemsz_may_integer_multivariate(any: f, int: m, any: W, list: X, any: strategy, str: roots_method="resultants"): list {
+fn jochemsz_may_integer_multivariate(any f, int m, any W, list X, any strategy, str roots_method="resultants") list {
    "Run Jochemsz-May integer multivariate shifts and bounded root search."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("jochemsz_may_integer.integer_multivariate") }
    def n = mv_nvars(f)
@@ -1210,7 +1194,7 @@ fn jochemsz_may_integer_multivariate(any: f, int: m, any: W, list: X, any: strat
    mv_small_roots_integer(f, shifts, X)
 }
 
-fn jochemsz_may_modular_multivariate(any: f, any: N, int: m, any: X, any: strategy, str: roots_method="groebner"): list {
+fn jochemsz_may_modular_multivariate(any f, any N, int m, any X, any strategy, str roots_method="groebner") list {
    "Run Jochemsz-May modular multivariate strategy, or univariate fallback for coefficient lists."
    if(is_list(f) && !mv_is_poly(f)){ return modular_univariate(f, N, m, 0, X.get(0, X)) }
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("jochemsz_may_modular.modular_multivariate") }
@@ -1223,7 +1207,7 @@ fn jochemsz_may_modular_multivariate(any: f, any: N, int: m, any: X, any: strate
    mv_small_roots_modular(f, bigint_pow(N, m), shifts, X)
 }
 
-fn nitaj_fouotsa_modular_trivariate(any: f, any: e, int: m, int: t, any: X, any: Y, any: Z, str: roots_method="groebner"): list {
+fn nitaj_fouotsa_modular_trivariate(any f, any e, int m, int t, any X, any Y, any Z, str roots_method="groebner") list {
    "Run Nitaj-Fouotsa modular trivariate shifts and bounded root search."
    if(!mv_is_poly(f)){ small_roots_strategy_unavailable("nitaj_fouotsa.modular_trivariate") }
    def ff = _sr_lift(f, 3)

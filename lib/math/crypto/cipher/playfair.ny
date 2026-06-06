@@ -1,20 +1,23 @@
-;; Keywords: cipher playfair
+;; Keywords: cipher playfair math crypto
 ;; Classical cipher routines for Playfair square construction, encryption, and decryption.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.playfair(playfair_make_square, playfair_encrypt, playfair_decrypt, playfair_decrypt_offset, playfair_decrypt_both_offsets)
 use std.core
 use std.math.nt
 use std.core.str
 
-fn _playfair_builder_take(list: b): str {
+fn _playfair_builder_take(list b) str {
    def out = builder_to_str(b)
    builder_free(b)
    out
 }
 
-fn _playfair_pos_map(list: square): dict {
+fn _playfair_pos_map(list square) dict {
    mut pos = dict(32)
    mut idx = 0
    while(idx < 25){
@@ -24,11 +27,11 @@ fn _playfair_pos_map(list: square): dict {
    pos
 }
 
-fn _playfair_pair(list: square, int: idx1, int: idx2): list {
+fn _playfair_pair(list square, int idx1, int idx2) list {
    [load8(square[idx1], 0), load8(square[idx2], 0)]
 }
 
-fn playfair_make_square(str: key): list {
+fn playfair_make_square(str key) list {
    "Build a 5x5 Playfair key square from the given keyword.
    I and J are treated as the same letter(J is mapped to I).
    key: keyword string(case-insensitive, non-alpha ignored)
@@ -71,7 +74,7 @@ fn playfair_make_square(str: key): list {
    square
 }
 
-fn playfair_find_pos(list: square, any: letter): list {
+fn playfair_find_pos(list square, any letter) list {
    "Find the row and column of a letter in the 5x5 Playfair square.
    square: flat list of 25 characters
    letter: uppercase character code to find
@@ -83,7 +86,7 @@ fn playfair_find_pos(list: square, any: letter): list {
    [-1, -1]
 }
 
-fn playfair_prepare_digraphs(str: plaintext): list {
+fn playfair_prepare_digraphs(str plaintext) list {
    "Prepare plaintext for Playfair encryption by splitting into digraphs.
    Inserts 'X' between duplicate letters and pads with 'X' if odd length.
    plaintext: uppercase alphabetic string
@@ -127,7 +130,7 @@ fn playfair_prepare_digraphs(str: plaintext): list {
    digraphs
 }
 
-fn _playfair_shift_digraph(list: square, dict: pos, int: c1, int: c2, int: shift): list {
+fn _playfair_shift_digraph(list square, dict pos, int c1, int c2, int shift) list {
    "Transform a Playfair digraph by shifting same-row/same-column pairs."
    def idxp1, idxp2 = pos.get(to_str(c1), -1), pos.get(to_str(c2), -1)
    def r1 = idxp1 / 5
@@ -143,27 +146,27 @@ fn _playfair_shift_digraph(list: square, dict: pos, int: c1, int: c2, int: shift
    _playfair_pair(square, r1 * 5 + col2, r2 * 5 + col1)
 }
 
-fn _playfair_encrypt_digraph(list: square, dict: pos, int: c1, int: c2): list {
+fn _playfair_encrypt_digraph(list square, dict pos, int c1, int c2) list {
    "Encrypt a single Playfair digraph using the given square."
    _playfair_shift_digraph(square, pos, c1, c2, 1)
 }
 
-fn playfair_encrypt_digraph(list: square, int: c1, int: c2): list {
+fn playfair_encrypt_digraph(list square, int c1, int c2) list {
    "Encrypt one Playfair digraph using a 5x5 key square."
    _playfair_encrypt_digraph(square, _playfair_pos_map(square), c1, c2)
 }
 
-fn _playfair_decrypt_digraph(list: square, dict: pos, int: c1, int: c2): list {
+fn _playfair_decrypt_digraph(list square, dict pos, int c1, int c2) list {
    "Decrypt a single Playfair digraph using the given square."
    _playfair_shift_digraph(square, pos, c1, c2, 4)
 }
 
-fn playfair_decrypt_digraph(list: square, int: c1, int: c2): list {
+fn playfair_decrypt_digraph(list square, int c1, int c2) list {
    "Decrypt one Playfair digraph using a 5x5 key square."
    _playfair_decrypt_digraph(square, _playfair_pos_map(square), c1, c2)
 }
 
-fn playfair_encrypt(str: plaintext, list: square): str {
+fn playfair_encrypt(str plaintext, list square) str {
    "Encrypt plaintext using the Playfair cipher with the given 5x5 key square.
    plaintext: string to encrypt(non-alpha characters are stripped)
    square: flat list of 25 characters from playfair_make_square
@@ -186,7 +189,7 @@ fn playfair_encrypt(str: plaintext, list: square): str {
    _playfair_builder_take(result)
 }
 
-fn playfair_decrypt(str: ciphertext, list: square): str {
+fn playfair_decrypt(str ciphertext, list square) str {
    "Decrypt ciphertext using the Playfair cipher with the given 5x5 key square.
    ciphertext: uppercase alphabetic string to decrypt
    square: flat list of 25 characters from playfair_make_square
@@ -206,7 +209,7 @@ fn playfair_decrypt(str: ciphertext, list: square): str {
    _playfair_builder_take(result)
 }
 
-fn playfair_decrypt_offset(str: ciphertext, list: square, int: offset=0, bool: strip_x=false): str {
+fn playfair_decrypt_offset(str ciphertext, list square, int offset=0, bool strip_x=false) str {
    "Decrypt ciphertext after skipping an initial offset.
    Useful for captured Playfair streams that start mid-digraph. If the
    remaining ciphertext length is odd, the trailing byte is dropped."
@@ -220,7 +223,7 @@ fn playfair_decrypt_offset(str: ciphertext, list: square, int: offset=0, bool: s
    out
 }
 
-fn playfair_decrypt_both_offsets(str: ciphertext, list: square, bool: strip_x=false): list {
+fn playfair_decrypt_both_offsets(str ciphertext, list square, bool strip_x=false) list {
    "Return the offset-0 and offset-1 Playfair decryptions for a ciphertext."
    [
       playfair_decrypt_offset(ciphertext, square, 0, strip_x),

@@ -1,20 +1,22 @@
-;; Keywords: ntt number-theoretic-transform
+;; Keywords: ntt number-theoretic-transform math crypto
 ;; Number Theoretic Transform (NTT) for fast polynomial multiplication.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Number-theoretic_transform
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto
 module std.math.crypto.ntt(ntt, intt, ntt_mul, ntt_is_power_of_2, ntt_get_root)
 use std.core
 use std.math.nt
 use std.math.bin as bin
 
-fn ntt_is_power_of_2(int: n): bool {
+fn ntt_is_power_of_2(int n) bool {
    "Returns true when n is a positive power of two."
    if(n <= 0){ return false }
    (n & (n - 1)) == 0
 }
 
-fn ntt_get_root(int: n, any: p): any {
+fn ntt_get_root(int n, any p) any {
    "Find an n-th root of unity in GF(p). p must be prime and n | (p - 1)."
    def q = Z(p)
    if((q - 1) % n != 0){ return nil }
@@ -29,12 +31,12 @@ fn ntt_get_root(int: n, any: p): any {
    nil
 }
 
-fn _ntt_mod(any: x, any: p): any {
+fn _ntt_mod(any x, any p) any {
    def r = mod(x, p)
    r < 0 ? r + p : r
 }
 
-fn _ntt_bit_reverse_copy(list: a, int: n): list {
+fn _ntt_bit_reverse_copy(list a, int n) list {
    mut res = list(n)
    mut i = 0
    while(i < n){
@@ -51,7 +53,7 @@ fn _ntt_bit_reverse_copy(list: a, int: n): list {
    res
 }
 
-fn ntt(list: a, any: p, any: g): list {
+fn ntt(list a, any p, any g) list {
    "Iterative NTT on list a modulo p with n-th root of unity g.
    n must be a power of 2 and a.len == n."
    def n = a.len
@@ -80,7 +82,7 @@ fn ntt(list: a, any: p, any: g): list {
    A
 }
 
-fn intt(list: a, any: p, any: g): list {
+fn intt(list a, any p, any g) list {
    "Inverse NTT: returns original polynomial coefficients mod p."
    def n, q = a.len, Z(p)
    def gi = inverse_mod(Z(g), q)
@@ -94,7 +96,7 @@ fn intt(list: a, any: p, any: g): list {
    res
 }
 
-fn ntt_mul(list: a, list: b, any: p): list {
+fn ntt_mul(list a, list b, any p) list {
    "Fast polynomial multiplication mod p using NTT.
    Pads input to next power of 2."
    def n1, n2 = a.len, b.len

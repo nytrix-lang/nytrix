@@ -1,18 +1,21 @@
-;; Keywords: encoding pairing
+;; Keywords: encoding pairing math crypto
 ;; Encoding routines for Cantor pairing and unpairing.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.pairing(cantor_pair, cantor_unpair, cantor_unpair_leaves)
 use std.core
 use std.math.nt
 
-fn cantor_pair(any: x, any: y): any {
+fn cantor_pair(any x, any y) any {
    "Cantor-pair two non-negative integers into one integer."
    def s = Z(x) + Z(y)
    ((s * (s + Z(1))) / Z(2)) + Z(y)
 }
 
-fn cantor_unpair(any: z): list {
+fn cantor_unpair(any z) list {
    "Inverse Cantor pairing. Returns `[x, y]` for a non-negative integer."
    def zz = Z(z)
    def w = (isqrt(Z(8) * zz + Z(1)) - Z(1)) / Z(2)
@@ -22,7 +25,7 @@ fn cantor_unpair(any: z): list {
    [x, y]
 }
 
-fn cantor_unpair_leaves(any: z, int: leaf_limit=256): list {
+fn cantor_unpair_leaves(any z, int leaf_limit=256) list {
    "Decode a recursively Cantor-paired integer into leaves below `leaf_limit`.
    This mirrors recursive encoders that stop at byte-sized leaves."
    mut stack = [Z(z)]

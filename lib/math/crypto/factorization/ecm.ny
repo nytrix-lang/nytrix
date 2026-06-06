@@ -1,7 +1,10 @@
-;; Keywords: factorization ecm
+;; Keywords: factorization ecm math crypto number-theory
 ;; Integer-factorization routines for elliptic-curve factorization method.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Lenstra_elliptic-curve_factorization
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.ecm(ecm_factor, ecm_factor_report, micro_ecm_work_plan_report, ecm_work_plan_report, ecm_scheduled_factor_report, ecm_batch_lane_factor_report, ecm_batch_lane_factor, montgomery_ecm_factor, montgomery_ecm_factor_report)
 use std.math.nt
 use std.os.time (ticks)
@@ -12,29 +15,29 @@ mut _ecm_stage2_scalars_cache = dict()
 mut _ecm_stage1_product_cache = dict()
 mut _ecm_stage2_product_cache = dict()
 
-fn _ecm_elapsed_ms(any: t0): number { float(ticks() - t0) / 1000000.0 }
+fn _ecm_elapsed_ms(any t0) number { float(ticks() - t0) / 1000000.0 }
 
-fn _ecm_z(any: x): bigint { is_bigint(x) ? x : Z(x) }
+fn _ecm_z(any x) bigint { is_bigint(x) ? x : Z(x) }
 
-fn _ecm_abs(any: x): bigint {
+fn _ecm_abs(any x) bigint {
    def z = _ecm_z(x)
    z < Z(0) ? -z : z
 }
 
-fn _ecm_nontrivial(any: g, any: n): bool {
+fn _ecm_nontrivial(any g, any n) bool {
    def gg, nn = _ecm_abs(g), _ecm_abs(n)
    gg > Z(1) && gg < nn && nn % gg == Z(0)
 }
 
-fn _ecm_digits(any: n): int {
+fn _ecm_digits(any n) int {
    to_str(_ecm_abs(n)).len
 }
 
-fn _ecm_micro_attempt(int: B1): dict {
+fn _ecm_micro_attempt(int B1) dict {
    {"B1": B1, "B2": B1 * 25, "curves": 1, "stage2_ratio": 25}
 }
 
-fn _ecm_micro_plan(int: bits): list {
+fn _ecm_micro_plan(int bits) list {
    case bits {
       0..40 -> [27, 32, 0]
       41..44 -> [47, 32, 0]
@@ -46,7 +49,7 @@ fn _ecm_micro_plan(int: bits): list {
    }
 }
 
-fn micro_ecm_work_plan_report(any: n, bool: arbitrary_precheck=false): dict {
+fn micro_ecm_work_plan_report(any n, bool arbitrary_precheck=false) dict {
    "Return the small-target ECM dispatch plan used for <=64-bit cofactors."
    def t0 = ticks()
    def nn = _ecm_abs(n)
@@ -69,7 +72,7 @@ fn micro_ecm_work_plan_report(any: n, bool: arbitrary_precheck=false): dict {
    }
 }
 
-fn ecm_work_plan_report(any: n, bool: deep=false): dict {
+fn ecm_work_plan_report(any n, bool deep=false) dict {
    "Return an ECM work plan: target digits, B1, B2, and curve count."
    def t0 = ticks()
    def nn = _ecm_abs(n)
@@ -95,19 +98,19 @@ fn ecm_work_plan_report(any: n, bool: deep=false): dict {
    }
 }
 
-fn _ecm_point(any: x, any: y): dict {
+fn _ecm_point(any x, any y) dict {
    {"inf": false, "x": _ecm_z(x), "y": _ecm_z(y)}
 }
 
-fn _ecm_inf(): dict {
+fn _ecm_inf() dict {
    {"inf": true}
 }
 
-fn _ecm_result(any: point, any: factor=nil): dict {
+fn _ecm_result(any point, any factor=nil) dict {
    {"point": point, "factor": factor}
 }
 
-fn _ecm_add(any: p, any: q, any: a, any: n): dict {
+fn _ecm_add(any p, any q, any a, any n) dict {
    def nn = _ecm_z(n)
    if(p == nil || p.get("inf", false)){ return _ecm_result(q) }
    if(q == nil || q.get("inf", false)){ return _ecm_result(p) }
@@ -134,7 +137,7 @@ fn _ecm_add(any: p, any: q, any: a, any: n): dict {
    _ecm_result(_ecm_point(x3, y3))
 }
 
-fn _ecm_mul(any: p, any: k, any: a, any: n): dict {
+fn _ecm_mul(any p, any k, any a, any n) dict {
    mut acc = _ecm_inf()
    mut base = p
    mut kk = _ecm_z(k)
@@ -154,13 +157,13 @@ fn _ecm_mul(any: p, any: k, any: a, any: n): dict {
    _ecm_result(acc)
 }
 
-fn _ecm_prime_power(int: p, int: B1): bigint {
+fn _ecm_prime_power(int p, int B1) bigint {
    mut q = Z(p)
    while(q * Z(p) <= Z(B1)){ q = q * Z(p) }
    q
 }
 
-fn _ecm_stage1_scalars(int: B1): list {
+fn _ecm_stage1_scalars(int B1) list {
    if(_ecm_stage1_scalars_cache == nil){ _ecm_stage1_scalars_cache = dict() }
    def key = to_str(B1)
    def cached = _ecm_stage1_scalars_cache.get(key, nil)
@@ -175,7 +178,7 @@ fn _ecm_stage1_scalars(int: B1): list {
    out
 }
 
-fn _ecm_stage1_product_scalar(list: scalars): bigint {
+fn _ecm_stage1_product_scalar(list scalars) bigint {
    mut k = Z(1)
    mut i = 0
    while(i < scalars.len){
@@ -185,11 +188,11 @@ fn _ecm_stage1_product_scalar(list: scalars): bigint {
    k
 }
 
-fn _ecm_stage2_product_scalar(list: scalars): bigint {
+fn _ecm_stage2_product_scalar(list scalars) bigint {
    _ecm_stage1_product_scalar(scalars)
 }
 
-fn _ecm_stage2_scalars(int: B1, int: B2): list {
+fn _ecm_stage2_scalars(int B1, int B2) list {
    if(_ecm_stage2_scalars_cache == nil){ _ecm_stage2_scalars_cache = dict() }
    def key = to_str(B1) + ":" + to_str(B2)
    def cached = _ecm_stage2_scalars_cache.get(key, nil)
@@ -205,7 +208,7 @@ fn _ecm_stage2_scalars(int: B1, int: B2): list {
    out
 }
 
-fn _ecm_stage1_product_for(int: B1): bigint {
+fn _ecm_stage1_product_for(int B1) bigint {
    if(_ecm_stage1_product_cache == nil){ _ecm_stage1_product_cache = dict() }
    def key = to_str(B1)
    def cached = _ecm_stage1_product_cache.get(key, nil)
@@ -215,7 +218,7 @@ fn _ecm_stage1_product_for(int: B1): bigint {
    prod
 }
 
-fn _ecm_stage2_product_for(int: B1, int: B2): bigint {
+fn _ecm_stage2_product_for(int B1, int B2) bigint {
    if(_ecm_stage2_product_cache == nil){ _ecm_stage2_product_cache = dict() }
    def key = to_str(B1) + ":" + to_str(B2)
    def cached = _ecm_stage2_product_cache.get(key, nil)
@@ -225,7 +228,7 @@ fn _ecm_stage2_product_for(int: B1, int: B2): bigint {
    prod
 }
 
-fn _ecm_curve_report(any: n, int: B1, int: curve, int: B2=0): dict {
+fn _ecm_curve_report(any n, int B1, int curve, int B2=0) dict {
    def nn = _ecm_abs(n)
    def a = Z(curve + 1)
    def x = Z(2 + curve)
@@ -281,13 +284,13 @@ fn _ecm_curve_report(any: n, int: B1, int: curve, int: B2=0): dict {
    })
 }
 
-fn _ecm_mont_point(any: x, any: z): list { [_ecm_z(x), _ecm_z(z)] }
+fn _ecm_mont_point(any x, any z) list { [_ecm_z(x), _ecm_z(z)] }
 
-fn _ecm_mont_x(list: p): bigint { _ecm_z(p[0]) }
+fn _ecm_mont_x(list p) bigint { _ecm_z(p[0]) }
 
-fn _ecm_mont_z(list: p): bigint { _ecm_z(p[1]) }
+fn _ecm_mont_z(list p) bigint { _ecm_z(p[1]) }
 
-fn _ecm_mont_setup(any: n, int: sigma): dict {
+fn _ecm_mont_setup(any n, int sigma) dict {
    def nn = _ecm_abs(n)
    def sz = Z(sigma)
    def u = mod(sz * sz - Z(5), nn)
@@ -311,40 +314,7 @@ fn _ecm_mont_setup(any: n, int: sigma): dict {
    out.merge({"A": A, "A24": A24, "point": _ecm_mont_point(x, z), "success": true, "status": "ok"})
 }
 
-fn _ecm_mont_double(any: p, any: a24, any: n): dict {
-   def nn = _ecm_abs(n)
-   def X = _ecm_mont_x(p)
-   def Zp = _ecm_mont_z(p)
-   def t1 = mod(X + Zp, nn)
-   def t2 = mod(X - Zp, nn)
-   def aa = mod(t1 * t1, nn)
-   def bb = mod(t2 * t2, nn)
-   def e = mod(aa - bb, nn)
-   def x2 = mod(aa * bb, nn)
-   def z2 = mod(e * mod(bb + _ecm_z(a24) * e, nn), nn)
-   _ecm_mont_point(x2, z2)
-}
-
-fn _ecm_mont_add(any: p, any: q, any: diff, any: n): dict {
-   def nn = _ecm_abs(n)
-   def xp = _ecm_mont_x(p)
-   def zp = _ecm_mont_z(p)
-   def xq = _ecm_mont_x(q)
-   def zq = _ecm_mont_z(q)
-   def xd = _ecm_mont_x(diff)
-   def zd = _ecm_mont_z(diff)
-   def a = mod(xp + zp, nn)
-   def b = mod(xp - zp, nn)
-   def c = mod(xq + zq, nn)
-   def d = mod(xq - zq, nn)
-   def da = mod(d * a, nn)
-   def cb = mod(c * b, nn)
-   def x = mod(zd * mod((da + cb) * (da + cb), nn), nn)
-   def z = mod(xd * mod((da - cb) * (da - cb), nn), nn)
-   _ecm_mont_point(x, z)
-}
-
-fn _ecm_mont_mul(any: p, any: k, any: a24, any: n): dict {
+fn _ecm_mont_mul(any p, any k, any a24, any n) dict {
    def kk = _ecm_z(k)
    if(kk <= Z(0)){ return _ecm_mont_point(Z(1), Z(0)) }
    if(kk == Z(1)){ return p }
@@ -406,7 +376,7 @@ fn _ecm_mont_mul(any: p, any: k, any: a24, any: n): dict {
    _ecm_mont_point(r0x, r0z)
 }
 
-fn _ecm_mont_batch_factor(any: z_product, list: z_values, any: n): dict {
+fn _ecm_mont_batch_factor(any z_product, list z_values, any n) dict {
    def nn = _ecm_abs(n)
    mut checks = 1
    def g = gcd(_ecm_z(z_product), nn)
@@ -429,7 +399,7 @@ fn _ecm_mont_batch_factor(any: z_product, list: z_values, any: n): dict {
    out
 }
 
-fn _ecm_mont_curve_status(dict: out, any: factor, bool: success, int: stage, int: stage1_ops, int: stage2_ops, int: scalar_bits, int: gcd_checks, int: ambiguous_batches, any: pnt, str: status): dict {
+fn _ecm_mont_curve_status(dict out, any factor, bool success, int stage, int stage1_ops, int stage2_ops, int scalar_bits, int gcd_checks, int ambiguous_batches, any pnt, str status) dict {
    mut fields = {
       "success": success, "stage": stage, "stage1_ops": stage1_ops,
       "stage2_ops": stage2_ops, "scalar_bits": scalar_bits,
@@ -440,7 +410,7 @@ fn _ecm_mont_curve_status(dict: out, any: factor, bool: success, int: stage, int
    out.merge(fields)
 }
 
-fn _ecm_mont_curve_report(any: n, int: B1, int: curve, int: B2=0, int: sigma_start=6, int: gcd_interval=16, any: stage1_scalars=nil, any: stage2_scalars=nil, any: stage1_product_in=nil, any: stage2_product_in=nil): dict {
+fn _ecm_mont_curve_report(any n, int B1, int curve, int B2=0, int sigma_start=6, int gcd_interval=16, any stage1_scalars=nil, any stage2_scalars=nil, any stage1_product_in=nil, any stage2_product_in=nil) dict {
    def nn = _ecm_abs(n)
    def sigma = sigma_start + curve
    def setup = _ecm_mont_setup(nn, sigma)
@@ -591,7 +561,7 @@ fn _ecm_mont_curve_report(any: n, int: B1, int: curve, int: B2=0, int: sigma_sta
    _ecm_mont_curve_status(out, nil, false, 0, stage1_ops, stage2_ops, scalar_bits, gcd_checks, ambiguous_batches, pnt, "not-found")
 }
 
-fn montgomery_ecm_factor_report(any: n, int: B1=1000, int: curves=32, int: B2=0, int: sigma_start=6, int: gcd_interval=16): dict {
+fn montgomery_ecm_factor_report(any n, int B1=1000, int curves=32, int B2=0, int sigma_start=6, int gcd_interval=16) dict {
    "Run deterministic Montgomery x-only ECM with Suyama-style sigma curves."
    def t0 = ticks()
    def nn = _ecm_abs(n)
@@ -634,12 +604,12 @@ fn montgomery_ecm_factor_report(any: n, int: B1=1000, int: curves=32, int: B2=0,
    })
 }
 
-fn montgomery_ecm_factor(any: n, int: B1=1000, int: curves=32, int: B2=0, int: sigma_start=6, int: gcd_interval=16): any {
+fn montgomery_ecm_factor(any n, int B1=1000, int curves=32, int B2=0, int sigma_start=6, int gcd_interval=16) any {
    "Return one non-trivial factor found by Montgomery ECM, or nil."
    montgomery_ecm_factor_report(n, B1, curves, B2, sigma_start, gcd_interval).get("factor", nil)
 }
 
-fn ecm_scheduled_factor_report(any: n, bool: deep=false, int: max_curves=24, int: max_B1=2000, int: max_B2=5000, int: batch_size=8): dict {
+fn ecm_scheduled_factor_report(any n, bool deep=false, int max_curves=24, int max_B1=2000, int max_B2=5000, int batch_size=8) dict {
    "Run bounded batched Montgomery ECM using the built-in work plan."
    def t0 = ticks()
    def nn = _ecm_abs(n)
@@ -699,7 +669,7 @@ fn ecm_scheduled_factor_report(any: n, bool: deep=false, int: max_curves=24, int
    })
 }
 
-fn _ecm_batch_lane_entry(any: raw, int: index, bool: arbitrary_precheck, int: max_curves, int: max_B1, int: max_B2): dict {
+fn _ecm_batch_lane_entry(any raw, int index, bool arbitrary_precheck, int max_curves, int max_B1, int max_B2) dict {
    def nn = _ecm_abs(raw)
    def plan = micro_ecm_work_plan_report(nn, arbitrary_precheck)
    def bits = int(plan.get("n_bits", 0))
@@ -749,7 +719,7 @@ fn _ecm_batch_lane_entry(any: raw, int: index, bool: arbitrary_precheck, int: ma
    })
 }
 
-fn ecm_batch_lane_factor_report(list: values, bool: arbitrary_precheck=false, int: lane_width=8, int: max_curves=42, int: max_B1=205, int: max_B2=5125): dict {
+fn ecm_batch_lane_factor_report(list values, bool arbitrary_precheck=false, int lane_width=8, int max_curves=42, int max_B1=205, int max_B2=5125) dict {
    "Run the small-cofactor ECM list dispatcher over values and return per-lane reports."
    def t0 = ticks()
    def width = max(1, lane_width)
@@ -781,7 +751,7 @@ fn ecm_batch_lane_factor_report(list: values, bool: arbitrary_precheck=false, in
    }
 }
 
-fn ecm_batch_lane_factor(list: values, bool: arbitrary_precheck=false, int: lane_width=8): list {
+fn ecm_batch_lane_factor(list values, bool arbitrary_precheck=false, int lane_width=8) list {
    "Return factors from ecm_batch_lane_factor_report in input order."
    def rep = ecm_batch_lane_factor_report(values, arbitrary_precheck, lane_width)
    mut out = []
@@ -794,7 +764,7 @@ fn ecm_batch_lane_factor(list: values, bool: arbitrary_precheck=false, int: lane
    out
 }
 
-fn ecm_factor_report(any: n, int: B1=1000, int: curves=32, int: B2=0): dict {
+fn ecm_factor_report(any n, int B1=1000, int curves=32, int B2=0) dict {
    "Run deterministic ECM and return per-curve stage diagnostics."
    def t0 = ticks()
    def nn = _ecm_abs(n)
@@ -824,7 +794,7 @@ fn ecm_factor_report(any: n, int: B1=1000, int: curves=32, int: B2=0): dict {
    out.merge({"attempts": attempts, "elapsed_ms": _ecm_elapsed_ms(t0), "status": "not-found"})
 }
 
-fn ecm_factor(any: n, int: B1=1000, int: curves=32, int: B2=0): any {
+fn ecm_factor(any n, int B1=1000, int curves=32, int B2=0) any {
    "Return one non-trivial factor found by ECM, or nil."
    ecm_factor_report(n, B1, curves, B2).get("factor", nil)
 }

@@ -1,11 +1,15 @@
-;; Keywords: syntax json
+;; Keywords: syntax json parse highlight
 ;; JSON syntax highlighter
+;; References:
+;; - std.parse.syntax
+;; - std.parse.syntax.helpers
 module std.parse.syntax.json(tokenize)
 use std.core
 use std.core.str as str
 use std.parse.syntax.helpers as _h
 
-fn tokenize(str: source, list: out_tokens): list {
+fn tokenize(str source, list out_tokens) list {
+   "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
    while(i < src_len){
@@ -18,7 +22,8 @@ fn tokenize(str: source, list: out_tokens): list {
          i = j
       } elif(ch == 34){
          def j = _h.scan_quoted(source, i, src_len)
-         out_tokens = _h.add_tok(out_tokens, 2, i, j - i)
+         def next = _h.scan_space(source, j, src_len)
+         out_tokens = _h.add_tok(out_tokens, next < src_len && load8(source, next) == 58 ? 20 : 2, i, j - i)
          i = j
       } elif(_h.is_digit_ch(ch) || ch == 45){
          def j = _h.scan_number(source, i, src_len, ".eE+-")

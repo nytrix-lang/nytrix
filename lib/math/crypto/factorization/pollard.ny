@@ -1,8 +1,11 @@
-;; Keywords: factorization pollard
+;; Keywords: factorization pollard math crypto number-theory
 ;; Integer-factorization routines for Pollard rho, p-1, and related factorization.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.pollard(pollard_rho, pollard_brent, pollard_brent_report, pollard_rho_iter, pollard_pm1, pollard_pm1_report, pollard_pm1_stage2, pollard_pm1_stage2_report, pollard_p1, pollard_p1_report, williams_pp1, williams_pp1_report, squfof, squfof_report, lehman_factor, lehman_factor_report, pollard_strassen, pollard_strassen_report, batch_gcd_factor_report, batch_gcd_factor, batch_gcd_tree_factor_report, batch_gcd_tree_factor, full_factorization_rho)
 use std.math.nt
 use std.math.simmd as simmd
@@ -17,8 +20,8 @@ mut _pollard_small_primes_last_value = nil
 mut _pollard_prime_powers_last_bound = 0
 mut _pollard_prime_powers_last_value = nil
 
-fn _pollard_rho_floyd_d(any: n, int: max_iter): any {
-   def g = lambda(any: x): any { (x * x + 1) % n }
+fn _pollard_rho_floyd_d(any n, int max_iter) any {
+   def g = lambda(any x) any { (x * x + 1) % n }
    mut x, y = 2, 2
    mut d = 1
    mut iters = 0
@@ -31,21 +34,21 @@ fn _pollard_rho_floyd_d(any: n, int: max_iter): any {
    d
 }
 
-fn _pollard_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _pollard_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _pollard_finish(dict: out, any: t0, str: status): dict {
+fn _pollard_finish(dict out, any t0, str status) dict {
    out.merge({"elapsed_ms": _pollard_elapsed_ms(t0), "status": status})
 }
 
-fn _pollard_finish_factor(dict: out, any: n, any: f, any: t0, str: status): dict {
+fn _pollard_finish_factor(dict out, any n, any f, any t0, str status) dict {
    _pollard_finish(out.merge({"factor": f, "cofactor": Z(n) / Z(f), "success": true}), t0, status)
 }
 
-fn _pollard_report(str: method, any: nz): dict {
+fn _pollard_report(str method, any nz) dict {
    {"method": method, "n_bits": bit_length(nz), "success": false, "factor": nil}
 }
 
-fn _pollard_small_primes_uncached(int: bound): list {
+fn _pollard_small_primes_uncached(int bound) list {
    if(bound < 2){ return [] }
    mut sieve = list(bound + 1)
    __list_set_len(sieve, bound + 1)
@@ -77,7 +80,7 @@ fn _pollard_small_primes_uncached(int: bound): list {
    primes
 }
 
-fn _pollard_small_primes(int: bound): list {
+fn _pollard_small_primes(int bound) list {
    if(bound < 2){ return [] }
    if(_pollard_small_primes_last_value != nil && bound == _pollard_small_primes_last_bound){ return _pollard_small_primes_last_value }
    if(_pollard_small_primes_cache == nil){ _pollard_small_primes_cache = dict(8) }
@@ -94,7 +97,7 @@ fn _pollard_small_primes(int: bound): list {
    primes
 }
 
-fn _pollard_prime_powers(int: bound): list {
+fn _pollard_prime_powers(int bound) list {
    if(bound < 2){ return [] }
    if(_pollard_prime_powers_last_value != nil && bound == _pollard_prime_powers_last_bound){ return _pollard_prime_powers_last_value }
    if(_pollard_prime_powers_cache == nil){ _pollard_prime_powers_cache = dict(8) }
@@ -121,7 +124,7 @@ fn _pollard_prime_powers(int: bound): list {
    powers
 }
 
-fn _pollard_pm1_stage1_state(any: n, int: bound): dict {
+fn _pollard_pm1_stage1_state(any n, int bound) dict {
    "Return the p-1 stage-1 accumulator using prime-power exponents up to bound."
    def nz = Z(n)
    mut b = bound
@@ -144,7 +147,7 @@ fn _pollard_pm1_stage1_state(any: n, int: bound): dict {
    }
 }
 
-fn _pollard_record_pm1_stage1(dict: out, dict: st, any: d): dict {
+fn _pollard_record_pm1_stage1(dict out, dict st, any d) dict {
    out.merge({
          "stage1_ops": st.get("stage1_ops", 0),
          "stage1_prime_count": st.get("stage1_prime_count", 0),
@@ -153,7 +156,7 @@ fn _pollard_record_pm1_stage1(dict: out, dict: st, any: d): dict {
    })
 }
 
-fn pollard_rho(any: n): any {
+fn pollard_rho(any n) any {
    "Pollard rho algorithm for finding a non-trivial factor of n.
    Uses Floyd cycle detection with f(x) = x^2 + 1 mod n.
    Falls back to Brent if Floyd does not yield a non-trivial factor."
@@ -165,17 +168,16 @@ fn pollard_rho(any: n): any {
    pollard_brent(nz)
 }
 
-fn _abs_z(any: x): any {
+fn _abs_z(any x) any {
    def z = Z(x)
    z < 0 ? -z : z
 }
 
-fn _z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
 @inline
-fn _gcd_int(int: a0, int: b0): int {
-   mut a = a0 < 0 ? -a0 : a0
-   mut b = b0 < 0 ? -b0 : b0
+fn _gcd_int(int a0, int b0) int {
+   mut a, b = a0 < 0 ? -a0 : a0, b0 < 0 ? -b0 : b0
    while(b > 0){
       def r = a % b
       a, b = b, r
@@ -183,12 +185,12 @@ fn _gcd_int(int: a0, int: b0): int {
    a
 }
 
-fn _is_nontrivial_factor(any: g, any: n): bool {
+fn _is_nontrivial_factor(any g, any n) bool {
    def gz, nz = _z(g), _z(n)
    gz > 1 && gz < nz && nz % gz == 0
 }
 
-fn _pollard_brent_fermat_precheck_budget(any: n): int {
+fn _pollard_brent_fermat_precheck_budget(any n) int {
    case bit_length(Z(n)){
       67..69 -> 4096
       70..72 -> 256
@@ -200,14 +202,14 @@ fn _pollard_brent_fermat_precheck_budget(any: n): int {
    }
 }
 
-fn _pollard_brent_pm1_precheck_bound(any: n): int {
+fn _pollard_brent_pm1_precheck_bound(any n) int {
    case bit_length(Z(n)){
       80..81 -> 1024
       _ -> 0
    }
 }
 
-fn _pollard_brent_tuned_precheck_params(any: n, any: y0, any: c0, any: m0, int: max_gcds): list {
+fn _pollard_brent_tuned_precheck_params(any n, any y0, any c0, any m0, int max_gcds) list {
    if(max_gcds < 200000 || int(m0) < 128 || Z(y0) != Z(2) || Z(c0) != Z(1)){ return [Z(0), Z(0), 0, 0] }
    case bit_length(Z(n)){
       77 -> [Z(11), Z(17), 16, 8]
@@ -216,21 +218,18 @@ fn _pollard_brent_tuned_precheck_params(any: n, any: y0, any: c0, any: m0, int: 
 }
 
 @inline
-fn _pollard_iabs(int: x): int { x < 0 ? -x : x }
+fn _pollard_iabs(int x) int { x < 0 ? -x : x }
 
-fn _pollard_brent_factor_i31(int: n, int: y0=2, int: c0=1, int: m0=128, int: max_gcds=200000): list<int> {
+fn _pollard_brent_factor_i31(int n, int y0=2, int c0=1, int m0=128, int max_gcds=200000) list<int> {
    if(n <= 1){ return [0, 0, 0, 0] }
    if((n & 1) == 0){ return [2, 0, 0, 1] }
-   mut y = y0 % n
-   mut c = c0 % n
+   mut y, c = y0 % n, c0 % n
    if(y < 0){ y += n }
    if(c < 0){ c += n }
    mut m = m0
    if(m < 1){ m = 1 }
-   mut g = 1
-   mut r = 1
-   mut q = 1
-   mut x = 0
+   mut g, r = 1, 1
+   mut q, x = 1, 0
    mut ys = 0
    mut gcds = 0
    while(g == 1 && gcds < max_gcds){
@@ -270,7 +269,7 @@ fn _pollard_brent_factor_i31(int: n, int: y0=2, int: c0=1, int: m0=128, int: max
    [0, gcds, fallback, 3]
 }
 
-fn _pollard_brent_report_i31(int: n, int: y0=2, int: c0=1, int: m0=128, int: max_gcds=200000): dict {
+fn _pollard_brent_report_i31(int n, int y0=2, int c0=1, int m0=128, int max_gcds=200000) dict {
    def t0 = ticks()
    def nz = Z(n)
    mut out = _pollard_report("pollard-brent", nz).merge({
@@ -289,7 +288,7 @@ fn _pollard_brent_report_i31(int: n, int: y0=2, int: c0=1, int: m0=128, int: max
    _pollard_finish(out, t0, "cycle-failed")
 }
 
-fn _pollard_brent_core(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds=200000): dict {
+fn _pollard_brent_core(any n, any y0=2, any c0=1, any m0=128, int max_gcds=200000) dict {
    def t0 = ticks()
    def nz = Z(n)
    mut out = _pollard_report("pollard-brent", nz).merge({
@@ -393,7 +392,7 @@ fn _pollard_brent_core(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds=
    _pollard_finish(out, t0, "cycle-failed")
 }
 
-fn pollard_brent_report(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds=200000): dict {
+fn pollard_brent_report(any n, any y0=2, any c0=1, any m0=128, int max_gcds=200000) dict {
    "Return a bounded, debuggable Brent-rho attempt report."
    if(is_int(n) && int(n) <= 2147483647){ return _pollard_brent_report_i31(int(n), int(y0), int(c0), int(m0), max_gcds) }
    def nz = Z(n)
@@ -401,7 +400,7 @@ fn pollard_brent_report(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds
    _pollard_brent_core(n, y0, c0, m0, max_gcds)
 }
 
-fn pollard_brent(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds=200000): any {
+fn pollard_brent(any n, any y0=2, any c0=1, any m0=128, int max_gcds=200000) any {
    "Brent's cycle variant of Pollard rho. Usually faster than Floyd rho."
    if(is_int(n) && int(n) <= 2147483647){
       def r = _pollard_brent_factor_i31(int(n), int(y0), int(c0), int(m0), max_gcds)
@@ -415,21 +414,21 @@ fn pollard_brent(any: n, any: y0=2, any: c0=1, any: m0=128, int: max_gcds=200000
    _pollard_brent_core(n, y0, c0, m0, max_gcds).get("factor", nil)
 }
 
-fn pollard_rho_iter(any: n, any: max_iter): any {
+fn pollard_rho_iter(any n, any max_iter) any {
    "Pollard rho with an iteration limit to prevent infinite loops.
    Returns a factor of n, or nil if not found within max_iter iterations."
    def d = _pollard_rho_floyd_d(n, int(max_iter))
    _is_nontrivial_factor(d, n) ? d : nil
 }
 
-fn pollard_pm1(any: n, any: B): any {
+fn pollard_pm1(any n, any B) any {
    "Pollard p-1 algorithm: finds a factor p of n when p-1 is B-smooth.
    Computes a = 2^(lcm(1..B)) mod n, then gcd(a-1, n).
    Returns a non-trivial factor of n, or nil if none found."
    pollard_pm1_report(n, B).get("factor", nil)
 }
 
-fn pollard_pm1_report(any: n, any: B): dict {
+fn pollard_pm1_report(any n, any B) dict {
    "Report a stage-1 Pollard p-1 attempt with prime-power exponent accounting."
    def t0 = ticks()
    def nz = Z(n)
@@ -448,14 +447,14 @@ fn pollard_pm1_report(any: n, any: B): dict {
    _pollard_finish(out, t0, "smoothness-bound-exhausted")
 }
 
-fn pollard_pm1_stage2(any: n, any: B1, any: B2): any {
+fn pollard_pm1_stage2(any n, any B1, any B2) any {
    "Pollard p-1 with stage 2 extension.
    Stage 1 uses bound B1, stage 2 checks primes in [B1+1, B2].
    Returns a non-trivial factor of n, or nil."
    pollard_pm1_stage2_report(n, B1, B2).get("factor", nil)
 }
 
-fn pollard_pm1_stage2_report(any: n, any: B1, any: B2): dict {
+fn pollard_pm1_stage2_report(any n, any B1, any B2) dict {
    "Report a Pollard p-1 attempt with batched prime stage 2."
    def t0 = ticks()
    def nz = Z(n)
@@ -529,14 +528,14 @@ fn pollard_pm1_stage2_report(any: n, any: B1, any: B2): dict {
    _pollard_finish(out, t0, "smoothness-bound-exhausted")
 }
 
-fn pollard_p1(any: n, any: B): any {
+fn pollard_p1(any n, any B) any {
    "Pollard p+1 algorithm: finds a factor p of n when p+1 is B-smooth.
    Uses Lucas sequences over the group of norm-1 elements.
    Returns a non-trivial factor of n, or nil if none found."
    pollard_p1_report(n, B).get("factor", nil)
 }
 
-fn _pollard_p1_with_D_report(any: n, int: B, any: D): dict {
+fn _pollard_p1_with_D_report(any n, int B, any D) dict {
    def t0 = ticks()
    def nz = Z(n)
    mut out = _pollard_report("pollard-p-plus-1-D", nz).merge({"B": B, "D": D})
@@ -565,7 +564,7 @@ fn _pollard_p1_with_D_report(any: n, int: B, any: D): dict {
    _pollard_finish(out, t0, "smoothness-bound-exhausted")
 }
 
-fn pollard_p1_report(any: n, any: B): dict {
+fn pollard_p1_report(any n, any B) dict {
    "Report Pollard p+1 attempts across the standard Lucas D candidates."
    def t0 = ticks()
    def nz = Z(n)
@@ -597,7 +596,7 @@ fn pollard_p1_report(any: n, any: B): dict {
    _pollard_finish(out, t0, "smoothness-bound-exhausted")
 }
 
-fn pollard_p1_with_D(any: n, any: B, any: D): any {
+fn pollard_p1_with_D(any n, any B, any D) any {
    "Internal helper for Pollard p+1 using a specific D with jacobi(D, n) == -1.
    Uses Lucas sequence V_k(P, Q) with Q = 1 and P derived from D."
    def nz = Z(n)
@@ -614,13 +613,13 @@ fn pollard_p1_with_D(any: n, any: B, any: D): any {
    nil
 }
 
-fn williams_pp1(any: n, any: B=10000): any {
+fn williams_pp1(any n, any B=10000) any {
    "Williams p+1 factorization wrapper.
    Reuses the Lucas-sequence p+1 core with increasing bounds."
    williams_pp1_report(n, B).get("factor", nil)
 }
 
-fn williams_pp1_report(any: n, any: B=10000): dict {
+fn williams_pp1_report(any n, any B=10000) dict {
    "Report Williams p+1 attempts with increasing bounds."
    def t0 = ticks()
    def nz = Z(n)
@@ -646,47 +645,44 @@ fn williams_pp1_report(any: n, any: B=10000): dict {
    _pollard_finish(out, t0, "smoothness-bound-exhausted")
 }
 
-fn _ceil_isqrt_z(any: n): bigint {
+fn _ceil_isqrt_z(any n) bigint {
    def s = isqrt(n)
    s * s == n ? s : s + Z(1)
 }
 
-fn _lehman_square_residue_ok(any: x): bool {
+fn _lehman_square_residue_mods_ok(int r64, int r105, int r11, int r13) bool {
+   def ok64 = case r64 {
+      0, 1, 4, 9, 16, 17, 25, 33, 36, 41, 49, 57 -> true
+      _ -> false
+   }
+   if(!ok64){ return false }
+   def ok105 = case r105 {
+      0, 1, 4, 9, 15, 16, 21, 25, 30, 36, 39, 46, 49, 51,
+      60, 64, 70, 79, 81, 84, 85, 91, 99, 100 -> true
+      _ -> false
+   }
+   if(!ok105){ return false }
+   def ok11 = case r11 {
+      0, 1, 3, 4, 5, 9 -> true
+      _ -> false
+   }
+   if(!ok11){ return false }
+   case r13 {
+      0, 1, 3, 4, 9, 10, 12 -> true
+      _ -> false
+   }
+}
+
+fn _lehman_square_residue_ok(any x) bool {
    def z = Z(x)
-   def r64 = int(z & Z(63))
-   if(!(r64 == 0 || r64 == 1 || r64 == 4 || r64 == 9 || r64 == 16 || r64 == 17 || r64 == 25 || r64 == 33 || r64 == 36 || r64 == 41 || r64 == 49 || r64 == 57)){ return false }
-   def r105 = int(z % Z(105))
-   def ok105 = case r105 {
-      0, 1, 4, 9, 15, 16, 21, 25, 30, 36, 39, 46, 49, 51,
-      60, 64, 70, 79, 81, 84, 85, 91, 99, 100 -> true
-      _ -> false
-   }
-   if(!ok105){ return false }
-   def r11 = int(z % Z(11))
-   if(!(r11 == 0 || r11 == 1 || r11 == 3 || r11 == 4 || r11 == 5 || r11 == 9)){ return false }
-   def r13 = int(z % Z(13))
-   if(!(r13 == 0 || r13 == 1 || r13 == 3 || r13 == 4 || r13 == 9 || r13 == 10 || r13 == 12)){ return false }
-   true
+   _lehman_square_residue_mods_ok(int(z & Z(63)), int(z % Z(105)), int(z % Z(11)), int(z % Z(13)))
 }
 
-fn _lehman_square_residue_int_ok(int: x): bool {
-   def r64 = x & 63
-   if(!(r64 == 0 || r64 == 1 || r64 == 4 || r64 == 9 || r64 == 16 || r64 == 17 || r64 == 25 || r64 == 33 || r64 == 36 || r64 == 41 || r64 == 49 || r64 == 57)){ return false }
-   def r105 = x % 105
-   def ok105 = case r105 {
-      0, 1, 4, 9, 15, 16, 21, 25, 30, 36, 39, 46, 49, 51,
-      60, 64, 70, 79, 81, 84, 85, 91, 99, 100 -> true
-      _ -> false
-   }
-   if(!ok105){ return false }
-   def r11 = x % 11
-   if(!(r11 == 0 || r11 == 1 || r11 == 3 || r11 == 4 || r11 == 5 || r11 == 9)){ return false }
-   def r13 = x % 13
-   if(!(r13 == 0 || r13 == 1 || r13 == 3 || r13 == 4 || r13 == 9 || r13 == 10 || r13 == 12)){ return false }
-   true
+fn _lehman_square_residue_int_ok(int x) bool {
+   _lehman_square_residue_mods_ok(x & 63, x % 105, x % 11, x % 13)
 }
 
-fn _lehman_adjust_start(any: a, int: stride, int: residue): any {
+fn _lehman_adjust_start(any a, int stride, int residue) any {
    def az = Z(a)
    def s = stride <= 0 ? 1 : stride
    def r = ((residue % s) + s) % s
@@ -695,13 +691,13 @@ fn _lehman_adjust_start(any: a, int: stride, int: residue): any {
    az + Z(delta)
 }
 
-fn _ceil_isqrt_int(int: n): int {
+fn _ceil_isqrt_int(int n) int {
    def s = _isqrt_int(n)
    s * s == n ? s : s + 1
 }
 
 @inline
-fn _isqrt_int(int: n): int {
+fn _isqrt_int(int n) int {
    if(n <= 0){ return 0 }
    mut t = n
    mut bits = 0
@@ -736,14 +732,14 @@ fn _isqrt_int(int: n): int {
    x
 }
 
-fn _lehman_adjust_start_int(int: a, int: stride, int: residue): int {
+fn _lehman_adjust_start_int(int a, int stride, int residue) int {
    def s = stride <= 0 ? 1 : stride
    def r = ((residue % s) + s) % s
    def cur = a % s
    a + ((r - cur + s) % s)
 }
 
-fn _lehman_report_metrics(int: probes, int: sqrt_checks, int: square_prefilter_rejects, int: residue_adjustments, int: skipped_by_stride): dict {
+fn _lehman_report_metrics(int probes, int sqrt_checks, int square_prefilter_rejects, int residue_adjustments, int skipped_by_stride) dict {
    {
       "probes": probes, "sqrt_checks": sqrt_checks,
       "square_prefilter_rejects": square_prefilter_rejects,
@@ -754,11 +750,11 @@ fn _lehman_report_metrics(int: probes, int: sqrt_checks, int: square_prefilter_r
    }
 }
 
-fn _lehman_report_metrics_kernel(int: probes, int: sqrt_checks, int: square_prefilter_rejects, int: residue_adjustments, int: skipped_by_stride, str: kernel): dict {
+fn _lehman_report_metrics_kernel(int probes, int sqrt_checks, int square_prefilter_rejects, int residue_adjustments, int skipped_by_stride, str kernel) dict {
    _lehman_report_metrics(probes, sqrt_checks, square_prefilter_rejects, residue_adjustments, skipped_by_stride).set("numeric_kernel", kernel)
 }
 
-fn _lehman_fermat_precheck_budget(any: n): int {
+fn _lehman_fermat_precheck_budget(any n) int {
    case bit_length(Z(n)){
       44..55 -> 256
       56..64 -> 256
@@ -766,7 +762,7 @@ fn _lehman_fermat_precheck_budget(any: n): int {
    }
 }
 
-fn _lehman_pm1_precheck_bounds(any: n): list {
+fn _lehman_pm1_precheck_bounds(any n) list {
    case bit_length(Z(n)){
       44..47 -> [1500, 16000]
       48 -> [1024, 12000]
@@ -777,14 +773,14 @@ fn _lehman_pm1_precheck_bounds(any: n): list {
    }
 }
 
-fn _lehman_squfof_precheck_enabled(any: n): bool {
+fn _lehman_squfof_precheck_enabled(any n) bool {
    case bit_length(Z(n)){
       48..64 -> true
       _ -> false
    }
 }
 
-fn _lehman_finish_precheck(dict: out, any: n, any: f, str: kernel, str: precheck_status): dict {
+fn _lehman_finish_precheck(dict out, any n, any f, str kernel, str precheck_status) dict {
    out.merge({
          "factor": Z(f),
          "cofactor": Z(n) / Z(f),
@@ -801,7 +797,7 @@ fn _lehman_finish_precheck(dict: out, any: n, any: f, str: kernel, str: precheck
    })
 }
 
-fn _lehman_factor_report_int_kernel(any: nz, dict: out_in, int: k_limit, any: sixth_root, int: max_window): dict {
+fn _lehman_factor_report_int_kernel(any nz, dict out_in, int k_limit, any sixth_root, int max_window) dict {
    def n64 = int(nz)
    def sixth_i = int(sixth_root)
    mut out = out_in
@@ -854,7 +850,7 @@ fn _lehman_factor_report_int_kernel(any: nz, dict: out_in, int: k_limit, any: si
    out.set("status", "search-exhausted")
 }
 
-fn lehman_factor_report(any: n, int: max_k=20000, int: max_window=256, bool: prechecks=true): dict {
+fn lehman_factor_report(any n, int max_k=20000, int max_window=256, bool prechecks=true) dict {
    "Bounded Lehman factorization report.
    The bounds keep runtime predictable ; failure means the configured search
    budget was insufficient, not that n is prime."
@@ -967,26 +963,22 @@ fn lehman_factor_report(any: n, int: max_k=20000, int: max_window=256, bool: pre
    out.set("status", "search-exhausted")
 }
 
-fn lehman_factor(any: n, int: max_k=20000, int: max_window=256): any {
+fn lehman_factor(any n, int max_k=20000, int max_window=256) any {
    "Return one non-trivial factor from bounded Lehman search, or nil."
    lehman_factor_report(n, max_k, max_window).get("factor", nil)
 }
 
-fn _squfof_square_residue_ok(any: q): bool {
-   def r32 = int(_z(q) & Z(31))
-   case r32 {
-      0, 1, 4, 9, 16, 17, 25 -> true
-      _ -> false
-   }
+fn _squfof_square_residue_ok(any q) bool {
+   _squfof_square_residue_int_ok(int(_z(q) & Z(31)))
 }
 
 @inline
-fn _squfof_square_residue_int_ok(int: q): bool {
+fn _squfof_square_residue_int_ok(int q) bool {
    (((33751571 >> (q & 31)) & 1) == 1)
 }
 
 @inline
-fn _squfof_saved_q_contains_int(list<int>: saved_q, int: needle): bool {
+fn _squfof_saved_q_contains_int(list<int> saved_q, int needle) bool {
    mut i = 0
    while(i < saved_q.len){
       if(saved_q[i] == needle){ return true }
@@ -995,7 +987,7 @@ fn _squfof_saved_q_contains_int(list<int>: saved_q, int: needle): bool {
    false
 }
 
-fn _squfof_round_count(int: bits): int {
+fn _squfof_round_count(int bits) int {
    case bits {
       0..49 -> 4
       50..54 -> 8
@@ -1005,7 +997,7 @@ fn _squfof_round_count(int: bits): int {
    }
 }
 
-fn _squfof_multiplier_list(): list {
+fn _squfof_multiplier_list() list {
    [
       1155, 105, 15015, 1365, 19635, 165, 1785, 15, 21945, 2145,
       1995, 23205, 195, 231, 21, 385, 273, 35, 255, 455, 285,
@@ -1014,7 +1006,7 @@ fn _squfof_multiplier_list(): list {
    ]
 }
 
-fn _squfof_record_counters(dict: out, list: vals): dict {
+fn _squfof_record_counters(dict out, list vals) dict {
    def keys = [
       "attempts", "valid_multipliers", "failed_multipliers", "forward_iterations",
       "reverse_iterations", "square_candidates", "sqrt_checks", "square_prefilter_rejects",
@@ -1029,7 +1021,7 @@ fn _squfof_record_counters(dict: out, list: vals): dict {
    out
 }
 
-fn _squfof_report_init(any: nz, any: iter_mul): dict {
+fn _squfof_report_init(any nz, any iter_mul) dict {
    _pollard_report("squfof", nz).merge({
          "iter_mul": iter_mul, "cofactor": nil, "fallback_used": false,
          "attempts": 0, "valid_multipliers": 0, "failed_multipliers": 0,
@@ -1046,7 +1038,7 @@ fn _squfof_report_init(any: nz, any: iter_mul): dict {
    })
 }
 
-fn _squfof_counter_snapshot(int: attempts, int: valid_multipliers, int: failed_multipliers, int: forward_iterations, int: reverse_iterations, int: square_candidates, int: sqrt_checks, int: square_prefilter_rejects, int: saved_q_entries, int: saved_q_hits, int: saved_q_overflows, int: trivial_square_rejects, int: saved_q_max, any: last_multiplier): list {
+fn _squfof_counter_snapshot(int attempts, int valid_multipliers, int failed_multipliers, int forward_iterations, int reverse_iterations, int square_candidates, int sqrt_checks, int square_prefilter_rejects, int saved_q_entries, int saved_q_hits, int saved_q_overflows, int trivial_square_rejects, int saved_q_max, any last_multiplier) list {
    [
       attempts, valid_multipliers, failed_multipliers, forward_iterations, reverse_iterations,
       square_candidates, sqrt_checks, square_prefilter_rejects, saved_q_entries, saved_q_hits,
@@ -1054,14 +1046,14 @@ fn _squfof_counter_snapshot(int: attempts, int: valid_multipliers, int: failed_m
    ]
 }
 
-fn _squfof_finish_hit(dict: out, any: nz, any: factor, any: t0, str: status, list: counters, any: mult, int: k, any: hit_iteration=nil, any: hit_reverse_iterations=nil): dict {
+fn _squfof_finish_hit(dict out, any nz, any factor, any t0, str status, list counters, any mult, int k, any hit_iteration=nil, any hit_reverse_iterations=nil) dict {
    out = _squfof_record_counters(out, counters).merge({"multiplier": mult, "multiplier_index": k})
    if(hit_iteration != nil){ out = out.set("hit_iteration", hit_iteration) }
    if(hit_reverse_iterations != nil){ out = out.set("hit_reverse_iterations", hit_reverse_iterations) }
    _pollard_finish_factor(out, nz, factor, t0, status)
 }
 
-fn _squfof_brent_precheck_budget(any: n): int {
+fn _squfof_brent_precheck_budget(any n) int {
    def bits = bit_length(Z(n))
    case bits {
       64 -> 16
@@ -1073,7 +1065,7 @@ fn _squfof_brent_precheck_budget(any: n): int {
    }
 }
 
-fn _squfof_brent_precheck_params(any: n): list {
+fn _squfof_brent_precheck_params(any n) list {
    case bit_length(Z(n)){
       64 -> [Z(23), Z(41), 32, _squfof_brent_precheck_budget(n)]
       73 -> [Z(5), Z(3), 32, _squfof_brent_precheck_budget(n)]
@@ -1083,14 +1075,14 @@ fn _squfof_brent_precheck_params(any: n): list {
    }
 }
 
-fn _squfof_fast_brent_precheck_params(any: n): list {
+fn _squfof_fast_brent_precheck_params(any n) list {
    case bit_length(Z(n)){
       77 -> [Z(11), Z(17), 16, 8]
       _ -> [Z(0), Z(0), 0, 0]
    }
 }
 
-fn _squfof_fermat_precheck_budget(any: n): int {
+fn _squfof_fermat_precheck_budget(any n) int {
    def bits = bit_length(Z(n))
    case bits {
       54..59 -> 512
@@ -1105,7 +1097,7 @@ fn _squfof_fermat_precheck_budget(any: n): int {
    }
 }
 
-fn _squfof_fast_fermat_precheck_budget(any: n): int {
+fn _squfof_fast_fermat_precheck_budget(any n) int {
    def bits = bit_length(Z(n))
    case bits {
       82..96 -> 8
@@ -1113,7 +1105,7 @@ fn _squfof_fast_fermat_precheck_budget(any: n): int {
    }
 }
 
-fn _squfof_pm1_precheck_bounds(any: n): list {
+fn _squfof_pm1_precheck_bounds(any n) list {
    def bits = bit_length(Z(n))
    case bits {
       60, 61 -> [256, 512]
@@ -1122,7 +1114,7 @@ fn _squfof_pm1_precheck_bounds(any: n): list {
    }
 }
 
-fn _squfof_run_prechecks(any: nz, dict: out): dict {
+fn _squfof_run_prechecks(any nz, dict out) dict {
    def fast_brent_params = _squfof_fast_brent_precheck_params(nz)
    def fast_brent_budget = int(fast_brent_params.get(3))
    if(fast_brent_budget > 0){
@@ -1196,7 +1188,7 @@ fn _squfof_run_prechecks(any: nz, dict: out): dict {
    {"done": false, "out": out}
 }
 
-fn _squfof_report_u62(any: nz, any: iter_mul, dict: out_in, any: t0): dict {
+fn _squfof_report_u62(any nz, any iter_mul, dict out_in, any t0) dict {
    "Run the SQUFOF recurrence with native-width integer state."
    def n64 = int(nz)
    def z0, z1 = Z(0), Z(1)
@@ -1356,7 +1348,7 @@ fn _squfof_report_u62(any: nz, any: iter_mul, dict: out_in, any: t0): dict {
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn _squfof_report_int_state(any: nz, any: iter_mul, dict: out_in, any: t0): dict {
+fn _squfof_report_int_state(any nz, any iter_mul, dict out_in, any t0) dict {
    "Run SQUFOF with bigint D but native-width recurrence state."
    def multipliers = _squfof_multiplier_list()
    mut B = max(16, int(_abs_z(_z(iter_mul) * (isqrt(isqrt(nz) << 1) << 1))))
@@ -1512,7 +1504,7 @@ fn _squfof_report_int_state(any: nz, any: iter_mul, dict: out_in, any: t0): dict
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn squfof_report(any: n, any: iter_mul=3): dict {
+fn squfof_report(any n, any iter_mul=3) dict {
    "Shanks square forms factorization report with multiplier and loop counters.
    The compact squfof() wrapper returns only the discovered factor."
    def t0 = ticks()
@@ -1673,20 +1665,20 @@ fn squfof_report(any: n, any: iter_mul=3): dict {
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn squfof(any: n, any: iter_mul=3): any {
+fn squfof(any n, any iter_mul=3) any {
    "Shanks square forms factorization. Good on medium-size composites.
    Falls back to Brent rho if the SQUFOF loop does not converge."
    squfof_report(n, iter_mul).get("factor", nil)
 }
 
-fn _pollard_ceil_fourth_root(any: n): int {
+fn _pollard_ceil_fourth_root(any n) int {
    mut c = int(nth_root(Z(n), 4))
    if(c < 1){ c = 1 }
    def cz = Z(c)
    (cz * cz * cz * cz < Z(n)) ? c + 1 : c
 }
 
-fn pollard_strassen_report(any: n): dict {
+fn pollard_strassen_report(any n) dict {
    "Pollard-Strassen factor search using source-style batched product-GCD blocks."
    def t0 = ticks()
    def nz = Z(n)
@@ -1740,12 +1732,12 @@ fn pollard_strassen_report(any: n): dict {
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn pollard_strassen(any: n): any {
+fn pollard_strassen(any n) any {
    "Pollard-Strassen factor search by batched product-GCD blocks."
    pollard_strassen_report(n).get("factor", nil)
 }
 
-fn batch_gcd_factor_report(any: n, int: start=2, int: width=4096, int: block_size=64): dict {
+fn batch_gcd_factor_report(any n, int start=2, int width=4096, int block_size=64) dict {
    "Batch product-GCD factor scan with CPU feature reporting."
    def t0 = ticks()
    def nz = Z(n)
@@ -1792,12 +1784,12 @@ fn batch_gcd_factor_report(any: n, int: start=2, int: width=4096, int: block_siz
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn batch_gcd_factor(any: n, int: start=2, int: width=4096, int: block_size=64): any {
+fn batch_gcd_factor(any n, int start=2, int width=4096, int block_size=64) any {
    "Return one factor from batch_gcd_factor_report."
    batch_gcd_factor_report(n, start, width, block_size).get("factor", nil)
 }
 
-fn _pollard_product_mod_interval(any: n, int: lo, int: hi): bigint {
+fn _pollard_product_mod_interval(any n, int lo, int hi) bigint {
    def nz = Z(n)
    mut prod = Z(1)
    mut x = lo
@@ -1808,7 +1800,7 @@ fn _pollard_product_mod_interval(any: n, int: lo, int: hi): bigint {
    prod
 }
 
-fn _pollard_batch_tree_scan(any: n, int: lo, int: hi, int: leaf_size, int: depth): dict {
+fn _pollard_batch_tree_scan(any n, int lo, int hi, int leaf_size, int depth) dict {
    def nz = Z(n)
    def size = hi - lo
    if(size <= 0){
@@ -1859,7 +1851,7 @@ fn _pollard_batch_tree_scan(any: n, int: lo, int: hi, int: leaf_size, int: depth
    out
 }
 
-fn batch_gcd_tree_factor_report(any: n, int: start=2, int: width=4096, int: leaf_size=32): dict {
+fn batch_gcd_tree_factor_report(any n, int start=2, int width=4096, int leaf_size=32) dict {
    "Batch product-GCD factor scan with a balanced product tree."
    def t0 = ticks()
    def nz = Z(n)
@@ -1885,12 +1877,12 @@ fn batch_gcd_tree_factor_report(any: n, int: start=2, int: width=4096, int: leaf
    _pollard_finish(out, t0, "search-exhausted")
 }
 
-fn batch_gcd_tree_factor(any: n, int: start=2, int: width=4096, int: leaf_size=32): any {
+fn batch_gcd_tree_factor(any n, int start=2, int width=4096, int leaf_size=32) any {
    "Return one factor from batch_gcd_tree_factor_report."
    batch_gcd_tree_factor_report(n, start, width, leaf_size).get("factor", nil)
 }
 
-fn full_factorization_rho(any: n): list {
+fn full_factorization_rho(any n) list {
    "Fully factor n using repeated Pollard rho.
    Returns a list of prime factors(not necessarily unique)."
    mut factors = list(0)
@@ -1914,7 +1906,7 @@ fn full_factorization_rho(any: n): list {
    factors
 }
 
-if(comptime{ return __main() }){
+#main {
    def sq = squfof_report(8051)
    assert(sq.get("success", false) && 8051 % sq.get("factor", 1) == 0, "SQUFOF report factors 8051")
    assert(type(sq.get("saved_q_max", 0)) == "int", "SQUFOF saved_q_max remains an int counter")
@@ -1923,5 +1915,5 @@ if(comptime{ return __main() }){
       batch.get("success", false) && 8051 % batch.get("factor", 1) == 0,
       "batch GCD report factors 8051 without SQUFOF counter type leak",
    )
-   print("✓ crypto factorization.pollard self-tests passed")
+   print("✓ std.math.crypto.factorization.pollard self-test passed")
 }

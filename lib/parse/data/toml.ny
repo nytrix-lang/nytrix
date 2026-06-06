@@ -1,5 +1,8 @@
-;; Keywords: data serialization toml
+;; Keywords: data serialization toml parse
 ;; Practical TOML parser/generator for flat and sectioned configuration files.
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.toml(toml_decode, toml_try_decode, toml_last_error, toml_encode, decode, encode)
 use std.core
 use std.core.str as str
@@ -7,21 +10,21 @@ use std.parse.data.json as json
 
 mut _toml_error = ""
 
-fn toml_last_error(): str {
+fn toml_last_error() str {
    "Returns the error from the last TOML decode attempt."
    _toml_error
 }
 
-fn _toml_result(any: ok, any: value, any: error, any: line): dict {
+fn _toml_result(any ok, any value, any error, any line) dict {
    {"ok": ok, "value": value, "error": error, "line": line}
 }
 
-fn _toml_set_error(any: msg): int {
+fn _toml_set_error(any msg) int {
    if(_toml_error.len == 0){ _toml_error = msg }
    0
 }
 
-fn _toml_strip_comment(str: line): str {
+fn _toml_strip_comment(str line) str {
    mut quote = 0
    mut i = 0
    while(i < line.len){
@@ -38,7 +41,7 @@ fn _toml_strip_comment(str: line): str {
    line
 }
 
-fn _toml_unquote(str: v): str {
+fn _toml_unquote(str v) str {
    if(v.len >= 2){
       def a, b = load8(v, 0), load8(v, v.len - 1)
       if((a == 34 && b == 34) || (a == 39 && b == 39)){ return str.str_slice(v, 1, v.len - 1) }
@@ -46,7 +49,7 @@ fn _toml_unquote(str: v): str {
    v
 }
 
-fn _toml_numeric_like(str: v): bool {
+fn _toml_numeric_like(str v) bool {
    if(v.len == 0){ return false }
    mut i = 0
    if(load8(v, 0) == 45){ i = 1 }
@@ -66,12 +69,20 @@ fn _toml_numeric_like(str: v): bool {
    saw_digit
 }
 
-fn _toml_scalar(any: raw): any {
+fn _toml_literal(any lo) any {
+   case lo {
+      "true" -> true
+      "false" -> false
+      _ -> nil
+   }
+}
+
+fn _toml_scalar(any raw) any {
    mut v = str.strip(raw)
    if(v.len == 0){ return "" }
    def lo = str.lower(v)
-   if(lo == "true"){ return true }
-   if(lo == "false"){ return false }
+   def lit = _toml_literal(lo)
+   if(lit != nil){ return lit }
    if(load8(v, 0) == 91 && load8(v, v.len - 1) == 93){
       def inner = str.str_slice(v, 1, v.len - 1)
       def parts = str.split(inner, ",")
@@ -91,7 +102,7 @@ fn _toml_scalar(any: raw): any {
    _toml_unquote(v)
 }
 
-fn _toml_section(dict: root, any: name): any {
+fn _toml_section(dict root, any name) any {
    def parts = str.split(name, ".")
    mut cur = root
    mut i = 0
@@ -109,7 +120,7 @@ fn _toml_section(dict: root, any: name): any {
    cur
 }
 
-fn toml_try_decode(any: src): dict {
+fn toml_try_decode(any src) dict {
    "Decodes TOML sections, key/value pairs, scalars, and simple arrays."
    _toml_error = ""
    if(!is_str(src)){ return _toml_result(false, 0, "toml input must be a string", 0) }
@@ -148,7 +159,7 @@ fn toml_try_decode(any: src): dict {
    _toml_result(true, root, "", 0)
 }
 
-fn toml_decode(any: src): any {
+fn toml_decode(any src) any {
    "Decodes TOML and returns 0 on error; inspect toml_last_error() for details."
    def res = toml_try_decode(src)
    _toml_error = res.get("error", "")
@@ -156,7 +167,7 @@ fn toml_decode(any: src): any {
    res.get("value")
 }
 
-fn _toml_encode_scalar(any: v): str {
+fn _toml_encode_scalar(any v) str {
    if(type(v) == "bool"){
       if(v){ return "true" }
       return "false"
@@ -180,7 +191,7 @@ fn _toml_encode_scalar(any: v): str {
    json.json_encode(to_str(v))
 }
 
-fn _toml_encode_table(any: out, str: prefix, dict: table): any {
+fn _toml_encode_table(any out, str prefix, dict table) any {
    def items = dict_items(table)
    mut i = 0
    while(i < items.len){
@@ -203,7 +214,7 @@ fn _toml_encode_table(any: out, str: prefix, dict: table): any {
    out
 }
 
-fn toml_encode(any: value): str {
+fn toml_encode(any value) str {
    "Encodes a dict as TOML."
    if(!is_dict(value)){ return _toml_encode_scalar(value) + "\n" }
    mut out = Builder(128)
@@ -213,6 +224,6 @@ fn toml_encode(any: value): str {
    s
 }
 
-fn decode(any: src): any { toml_decode(src) }
+fn decode(any src) any { toml_decode(src) }
 
-fn encode(any: value): str { toml_encode(value) }
+fn encode(any value) str { toml_encode(value) }

@@ -1,8 +1,11 @@
-;; Keywords: protocol sharing
+;; Keywords: protocol sharing math crypto
 ;; Protocol-analysis routines for Shamir secret sharing, recovery, and forgery analysis.
 ;; Reference:
 ;; - https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
+;; References:
+;; - std.math.crypto.protocol
+;; - std.math.crypto
 module std.math.crypto.protocol.sharing(lagrange_interpolate_mod, lagrange_recover_secret, int_to_charset, shamir_generate_shares, shamir_recover, shamir_lagrange, shamir_recovery_weights, shamir_recover_with_weights, shamir_share_forgery, shamir_verify_consistency, shamir_lagrange_weight_zero, shamir_replace_share_value, shamir_forced_share_value, share_forgery, deterministic_coefficients_recover, shamir_recover_small_coeff_secret, shamir_recover_ascii_hex_coeffs)
 use std.core
 use std.core as core
@@ -19,29 +22,29 @@ mut _sss_weight_cache_prime = nil
 mut _sss_weight_cache_xs = nil
 mut _sss_weight_cache_weights = nil
 
-fn _sss_env_enabled(str: name, bool: fallback=false): bool {
+fn _sss_env_enabled(str name, bool fallback=false) bool {
    def v = env(name)
    if(!is_str(v) || v.len == 0){ return fallback }
    v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
-fn _sss_env_int(str: name, int: fallback): int {
+fn _sss_env_int(str name, int fallback) int {
    def v = env(name)
    if(is_str(v) && v.len > 0){ return atoi(v) }
    fallback
 }
 
-fn _sss_trace_enabled(): bool {
+fn _sss_trace_enabled() bool {
    _sss_env_enabled("NY_SHAMIR_TRACE")
 }
 
-fn _sss_trace(str: label, any: value=nil): any {
+fn _sss_trace(str label, any value=nil) any {
    if(_sss_trace_enabled()){
       print("[shamir]", label, value)
    }
 }
 
-fn _sss_batch_inverse_mod(list: vals, any: p): list {
+fn _sss_batch_inverse_mod(list vals, any p) list {
    def n = vals.len
    if(n == 0){ return [] }
    mut prefix = list(n)
@@ -64,7 +67,7 @@ fn _sss_batch_inverse_mod(list: vals, any: p): list {
    vals
 }
 
-fn _sss_same_xs(list: xs, any: cached): bool {
+fn _sss_same_xs(list xs, any cached) bool {
    if(cached == nil || xs.len != cached.len){ return false }
    mut i = 0
    while(i < xs.len){
@@ -74,7 +77,7 @@ fn _sss_same_xs(list: xs, any: cached): bool {
    true
 }
 
-fn _sss_lagrange_weights_zero(list: xs, any: p): list {
+fn _sss_lagrange_weights_zero(list xs, any p) list {
    if(_sss_weight_cache_weights != nil && _sss_weight_cache_prime == p && _sss_same_xs(xs, _sss_weight_cache_xs)){
       return _sss_weight_cache_weights
    }
@@ -117,7 +120,7 @@ fn _sss_lagrange_weights_zero(list: xs, any: p): list {
    weights
 }
 
-fn lagrange_interpolate_mod(list: points, number: x, number: prime): number {
+fn lagrange_interpolate_mod(list points, number x, number prime) number {
    "Evaluate the unique polynomial through [x,y] points at x over a prime field."
    def p = Z(prime)
    def x0 = Z(x)
@@ -167,7 +170,7 @@ fn lagrange_interpolate_mod(list: points, number: x, number: prime): number {
    return mod(total, p)
 }
 
-fn lagrange_recover_secret(list: points, number: prime): number {
+fn lagrange_recover_secret(list points, number prime) number {
    "Recover the constant term of a Shamir polynomial at x=0 from [x,y] points over prime."
    def p = Z(prime)
    def n = points.len
@@ -190,7 +193,7 @@ fn lagrange_recover_secret(list: points, number: prime): number {
    mod(total, p)
 }
 
-fn int_to_charset(number: x, str: charset): str {
+fn int_to_charset(number x, str charset) str {
    "Convert a non-negative integer to a string using the given charset as the digit alphabet."
    def base = charset.len
    if(base <= 1){ return "" }
@@ -206,7 +209,7 @@ fn int_to_charset(number: x, str: charset): str {
    return out
 }
 
-fn shamir_generate_shares(number: secret, int: threshold, int: n_shares, number: prime): list {
+fn shamir_generate_shares(number secret, int threshold, int n_shares, number prime) list {
    "Generate n_shares Shamir shares of the integer secret with a deterministic test polynomial."
    def p = Z(prime)
    mut coeffs = list(threshold)
@@ -234,17 +237,17 @@ fn shamir_generate_shares(number: secret, int: threshold, int: n_shares, number:
    shares
 }
 
-fn shamir_lagrange(list: points, number: prime): number {
+fn shamir_lagrange(list points, number prime) number {
    "Lagrange interpolation at x=0 over a prime field."
    lagrange_recover_secret(points, prime)
 }
 
-fn shamir_recover(list: shares, number: prime): number {
+fn shamir_recover(list shares, number prime) number {
    "Recover a Shamir secret from [x, y] share pairs."
    lagrange_recover_secret(shares, prime)
 }
 
-fn shamir_recovery_weights(list: shares, number: prime): list {
+fn shamir_recovery_weights(list shares, number prime) list {
    "Precompute Lagrange weights at x=0 for repeated recovery on the same x coordinates."
    def p = Z(prime)
    def n = shares.len
@@ -259,7 +262,7 @@ fn shamir_recovery_weights(list: shares, number: prime): list {
    _sss_lagrange_weights_zero(xs, p)
 }
 
-fn shamir_recover_with_weights(list: shares, list: weights, number: prime): number {
+fn shamir_recover_with_weights(list shares, list weights, number prime) number {
    "Recover a Shamir secret using weights from shamir_recovery_weights for the same share x coordinates."
    def p = Z(prime)
    def n = shares.len
@@ -273,13 +276,13 @@ fn shamir_recover_with_weights(list: shares, list: weights, number: prime): numb
    mod(total, p)
 }
 
-fn shamir_share_forgery(number: p, number: s_orig, number: s_target, number: x, number: y, list: xs): number {
+fn shamir_share_forgery(number p, number s_orig, number s_target, number x, number y, list xs) number {
    "Forge one Shamir share so recombination shifts s_orig to s_target."
    def c_val = shamir_lagrange_weight_zero(x, xs, p)
    mod((Z(s_target) - Z(s_orig)) * inverse_mod(c_val, p) + Z(y), p)
 }
 
-fn shamir_lagrange_weight_zero(number: x, list: xs, number: prime): number {
+fn shamir_lagrange_weight_zero(number x, list xs, number prime) number {
    "Return the Lagrange basis weight at zero for share x given peer x values.
    This is the multiplier applied to that share's y value when recovering the
    Shamir secret at x=0."
@@ -296,23 +299,23 @@ fn shamir_lagrange_weight_zero(number: x, list: xs, number: prime): number {
    mod(weight * inverse_mod(den, p), p)
 }
 
-fn shamir_replace_share_value(number: p, number: current_secret, number: target_secret, number: x, number: current_y, list: peer_xs): number {
+fn shamir_replace_share_value(number p, number current_secret, number target_secret, number x, number current_y, list peer_xs) number {
    "Return a replacement y for share x that changes recovered secret to target_secret.
    current_secret is the secret recovered with the current_y share already included."
    shamir_share_forgery(p, current_secret, target_secret, x, current_y, peer_xs)
 }
 
-fn shamir_forced_share_value(number: p, number: partial_secret, number: target_secret, number: x, list: peer_xs): number {
+fn shamir_forced_share_value(number p, number partial_secret, number target_secret, number x, list peer_xs) number {
    "Return the y value for a missing or zeroed share x that forces target_secret."
    shamir_replace_share_value(p, partial_secret, target_secret, x, Z(0), peer_xs)
 }
 
-fn share_forgery(number: p, number: s_orig, number: s_target, number: x, number: y, list: xs): number {
+fn share_forgery(number p, number s_orig, number s_target, number x, number y, list xs) number {
    "Alias for shamir_share_forgery."
    shamir_share_forgery(Z(p), Z(s_orig), Z(s_target), Z(x), Z(y), xs)
 }
 
-fn shamir_verify_consistency(list: shares, number: prime): bool {
+fn shamir_verify_consistency(list shares, number prime) bool {
    "Check adjacent share pairs reconstruct the same secret."
    def n = shares.len
    if(n < 2){ return true }
@@ -325,7 +328,7 @@ fn shamir_verify_consistency(list: shares, number: prime): bool {
    true
 }
 
-fn deterministic_coefficients_recover(number: p, int: k, number: a1, fnptr: next_coeff_fn, number: x, number: y): number {
+fn deterministic_coefficients_recover(number p, int k, number a1, fnptr next_coeff_fn, number x, number y) number {
    "Recover the Shamir secret when polynomial coefficients were generated deterministically."
    mut s, a = Z(y), Z(a1)
    mut i = 1
@@ -337,7 +340,7 @@ fn deterministic_coefficients_recover(number: p, int: k, number: a1, fnptr: next
    mod(s, Z(p))
 }
 
-fn _sss_pow_row(any: x, int: degree, any: p): list {
+fn _sss_pow_row(any x, int degree, any p) list {
    mut row = []
    mut cur = Z(1)
    mut j = 0
@@ -349,7 +352,7 @@ fn _sss_pow_row(any: x, int: degree, any: p): list {
    row
 }
 
-fn _sss_linear_affine_basis(list: mat, list: rhs, any: p): list {
+fn _sss_linear_affine_basis(list mat, list rhs, any p) list {
    mut rows = []
    mut i = 0
    while(i < mat.len){
@@ -442,7 +445,7 @@ fn _sss_linear_affine_basis(list: mat, list: rhs, any: p): list {
    [part, kernel, pivots]
 }
 
-fn _sss_eval_coeffs(list: coeffs, any: x, any: p): any {
+fn _sss_eval_coeffs(list coeffs, any x, any p) any {
    mut acc = Z(0)
    mut pow = Z(1)
    mut i = 0
@@ -454,7 +457,7 @@ fn _sss_eval_coeffs(list: coeffs, any: x, any: p): any {
    acc
 }
 
-fn _sss_shares_match(list: shares, list: coeffs, any: p): bool {
+fn _sss_shares_match(list shares, list coeffs, any p) bool {
    mut i = 0
    while(i < shares.len){
       if(_sss_eval_coeffs(coeffs, shares[i][0], p) != mod(Z(shares[i][1]), p)){ return false }
@@ -463,12 +466,12 @@ fn _sss_shares_match(list: shares, list: coeffs, any: p): bool {
    true
 }
 
-fn _sss_center(any: x, any: p): any {
+fn _sss_center(any x, any p) any {
    def v = mod(Z(x), p)
    v > p / Z(2) ? v - p : v
 }
 
-fn _sss_free_columns(int: degree, list: pivots): list {
+fn _sss_free_columns(int degree, list pivots) list {
    mut free_cols = []
    mut col = 0
    while(col <= degree){
@@ -484,7 +487,7 @@ fn _sss_free_columns(int: degree, list: pivots): list {
    free_cols
 }
 
-fn _sss_small_homogeneous_lattice(list: kernel, list: free_cols, int: degree, any: p): list {
+fn _sss_small_homogeneous_lattice(list kernel, list free_cols, int degree, any p) list {
    mut hom = []
    mut i = 0
    while(i < kernel.len){
@@ -520,7 +523,7 @@ fn _sss_small_homogeneous_lattice(list: kernel, list: free_cols, int: degree, an
    hom
 }
 
-fn _sss_part_small_and_target(list: part, int: degree, any: p): list {
+fn _sss_part_small_and_target(list part, int degree, any p) list {
    mut part_small = []
    mut target = []
    mut i = 1
@@ -533,7 +536,7 @@ fn _sss_part_small_and_target(list: part, int: degree, any: p): list {
    [part_small, target]
 }
 
-fn _sss_ascii_hex_center(int: byte_count): any {
+fn _sss_ascii_hex_center(int byte_count) any {
    mut out = Z(0)
    mut pow = Z(1)
    mut i = 0
@@ -545,7 +548,7 @@ fn _sss_ascii_hex_center(int: byte_count): any {
    out
 }
 
-fn _sss_ascii_hex_fill(int: byte_count, int: value): any {
+fn _sss_ascii_hex_fill(int byte_count, int value) any {
    mut out = Z(0)
    mut pow = Z(1)
    mut i = 0
@@ -557,7 +560,7 @@ fn _sss_ascii_hex_fill(int: byte_count, int: value): any {
    out
 }
 
-fn _sss_full_homogeneous_lattice(list: kernel, list: free_cols, int: degree, any: p): list {
+fn _sss_full_homogeneous_lattice(list kernel, list free_cols, int degree, any p) list {
    mut hom = []
    mut i = 0
    while(i < kernel.len){
@@ -592,7 +595,7 @@ fn _sss_full_homogeneous_lattice(list: kernel, list: free_cols, int: degree, any
    hom
 }
 
-fn _sss_ascii_hex_bytes(any: x, int: byte_count): bool {
+fn _sss_ascii_hex_bytes(any x, int byte_count) bool {
    def bs = Z(x).bytes
    if(bs.len != byte_count){ return false }
    mut i = 0
@@ -604,7 +607,7 @@ fn _sss_ascii_hex_bytes(any: x, int: byte_count): bool {
    true
 }
 
-fn _sss_smt_hex_byte(any: ctx, any: solver, str: name): any {
+fn _sss_smt_hex_byte(any ctx, any solver, str name) any {
    def b = smt.z3_int_const(ctx, name)
    def digit = smt.z3_mk_and(ctx, [smt.z3_int_ge(ctx, b, smt.z3_int_val(ctx, 48)), smt.z3_int_le(ctx, b, smt.z3_int_val(ctx, 57))])
    def alpha = smt.z3_mk_and(ctx, [smt.z3_int_ge(ctx, b, smt.z3_int_val(ctx, 65)), smt.z3_int_le(ctx, b, smt.z3_int_val(ctx, 70))])
@@ -612,7 +615,7 @@ fn _sss_smt_hex_byte(any: ctx, any: solver, str: name): any {
    b
 }
 
-fn _sss_ascii_hex_affine_smt_recover(list: shares, list: part, list: kernel, int: degree, any: p, int: byte_count): any {
+fn _sss_ascii_hex_affine_smt_recover(list shares, list part, list kernel, int degree, any p, int byte_count) any {
    if(kernel.len == 0 || !smt.z3_available()){ return nil }
    mut selected = nil
    mut ki = 0
@@ -710,7 +713,7 @@ fn _sss_ascii_hex_affine_smt_recover(list: shares, list: part, list: kernel, int
    _sss_shares_match(shares, out, p) ? [out[0], out] : nil
 }
 
-fn _sss_zero_row(int: n): list {
+fn _sss_zero_row(int n) list {
    mut row = []
    mut i = 0
    while(i < n){
@@ -720,7 +723,7 @@ fn _sss_zero_row(int: n): list {
    row
 }
 
-fn _sss_ascii_hex_embedding_scan(list: shares, any: rows_or_basis, int: const_idx, any: w_const, any: center, list: pow256, int: degree, int: byte_count, any: p): any {
+fn _sss_ascii_hex_embedding_scan(list shares, any rows_or_basis, int const_idx, any w_const, any center, list pow256, int degree, int byte_count, any p) any {
    def data = is_int(rows_or_basis[0]) ? rows_or_basis[2] : rows_or_basis
    mut const_hits = 0
    mut share_fail = 0
@@ -773,7 +776,7 @@ fn _sss_ascii_hex_embedding_scan(list: shares, any: rows_or_basis, int: const_id
    nil
 }
 
-fn _sss_ascii_hex_embedding_recover(list: shares, list: part, list: kernel, int: degree, any: p, int: byte_count): any {
+fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int degree, any p, int byte_count) any {
    if(kernel.len == 0){ return nil }
    mut ki = 0
    mut selected = nil
@@ -874,7 +877,7 @@ fn _sss_ascii_hex_embedding_recover(list: shares, list: part, list: kernel, int:
    nil
 }
 
-fn _sss_secret_from_small_coeffs(list: shares, list: coeffs, int: degree, any: p): list {
+fn _sss_secret_from_small_coeffs(list shares, list coeffs, int degree, any p) list {
    def x0 = Z(shares[0][0])
    def y0 = Z(shares[0][1])
    mut secret = mod(y0, p)
@@ -889,7 +892,7 @@ fn _sss_secret_from_small_coeffs(list: shares, list: coeffs, int: degree, any: p
    [secret, coeffs]
 }
 
-fn shamir_recover_small_coeff_secret(list: shares, number: prime, int: degree, any: coeff_bound=nil): any {
+fn shamir_recover_small_coeff_secret(list shares, number prime, int degree, any coeff_bound=nil) any {
    "Recover a Shamir secret from too few shares when non-secret coefficients are small.
    Returns [secret, coeffs] or nil.  The method solves the affine system over F_p
    and applies LLL to the lattice of possible c1..c_degree values."
@@ -932,7 +935,7 @@ fn shamir_recover_small_coeff_secret(list: shares, number: prime, int: degree, a
    nil
 }
 
-fn shamir_recover_ascii_hex_coeffs(list: shares, number: prime, int: degree, int: byte_count=8): any {
+fn shamir_recover_ascii_hex_coeffs(list shares, number prime, int degree, int byte_count=8) any {
    "Recover Shamir coefficients when every coefficient is an uppercase ASCII hex byte string.
    Returns [secret, coeffs] or nil. This models random bytes encoded as uppercase ASCII hex."
    _sss_trace("ascii:start", {"shares": shares.len, "degree": degree, "byte_count": byte_count})

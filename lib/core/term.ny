@@ -1,5 +1,7 @@
-;; Keywords: term terminal ansi tty
+;; Keywords: term terminal ansi tty core console
 ;; Terminal styling, tables, progress bars, canvas drawing, keyboard input, and TUI control.
+;; References:
+;; - std.core
 module std.core.term(bold, italic, dim, underline, color, style, panel, table, tree, bar, bar_update, bar_finish, bar_range, bar_write, get_terminal_size, clear_screen, cursor_hide, cursor_show, cursor_move, cursor_up, cursor_down, cursor_left, cursor_right, enable_wrap, disable_wrap, screen_reset, enter_alt_screen, leave_alt_screen, tui_begin, tui_end, is_quit_key, color_names, get_color_name, get_color, shapes, log_color_enabled, log_tag_color, log_tag, log_text, log_line, elog_line, canvas, canvas_clear, canvas_set, canvas_print, canvas_box, canvas_refresh, get_key, poll_key, set_raw_mode, set_cooked_mode, write_str)
 use std.core.str
 use std.core.reflect
@@ -18,7 +20,7 @@ mut _alt_enabled = 0
 mut _refresh_buf = 0
 mut _refresh_size = 0
 
-fn _term_bytes(int: n): ptr {
+fn _term_bytes(int n) ptr {
    "Allocates zeroed byte storage for terminal buffers."
    if(n <= 0){ n = 1 }
    def p = malloc(n + 1)
@@ -26,24 +28,24 @@ fn _term_bytes(int: n): ptr {
    p
 }
 
-fn bytes_get(any: b, int: i): int { load8(b, i) }
+fn bytes_get(any b, int i) int { load8(b, i) }
 
-fn bytes_set(any: b, int: i, int: v): any { store8(b, v, i) }
+fn bytes_set(any b, int i, int v) any { store8(b, v, i) }
 
-fn _ensure_vt(): int {
+fn _ensure_vt() int {
    if(_vt_enabled){ return 0 }
    if(platform.is_windows()){ __enable_vt() }
    _vt_enabled = 1
    0
 }
 
-fn write_str(any: s): int {
+fn write_str(any s) int {
    "Safely write a Nytrix string to stdout(bypassing metadata)."
    if(s){ unwrap(sys_write(1, s, s.len)) }
    0
 }
 
-fn clear_screen(): int {
+fn clear_screen() int {
    "Clears the entire screen and moves cursor to home."
    _ensure_vt()
    unwrap(sys_write(1, "\033[2J", 4))
@@ -51,21 +53,21 @@ fn clear_screen(): int {
    0
 }
 
-fn cursor_hide(): int {
+fn cursor_hide() int {
    "Hides the terminal cursor."
    _ensure_vt()
    unwrap(sys_write(1, "\033[?25l", 6))
    0
 }
 
-fn cursor_show(): int {
+fn cursor_show() int {
    "Shows the terminal cursor."
    _ensure_vt()
    unwrap(sys_write(1, "\033[?25h", 6))
    0
 }
 
-fn cursor_move(any: x, any: y): int {
+fn cursor_move(any x, any y) int {
    "Moves the cursor to position(x, y). 1-based indexing."
    _ensure_vt()
    def s = f"\033[{to_str(y)};{to_str(x)}H"
@@ -73,7 +75,7 @@ fn cursor_move(any: x, any: y): int {
    0
 }
 
-fn cursor_up(any: n=1): int {
+fn cursor_up(any n=1) int {
    "Moves cursor up by `n` lines."
    _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
@@ -82,7 +84,7 @@ fn cursor_up(any: n=1): int {
    0
 }
 
-fn cursor_down(any: n=1): int {
+fn cursor_down(any n=1) int {
    "Moves cursor down by `n` lines."
    _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
@@ -91,7 +93,7 @@ fn cursor_down(any: n=1): int {
    0
 }
 
-fn cursor_right(any: n=1): int {
+fn cursor_right(any n=1) int {
    "Moves cursor right by `n` columns."
    _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
@@ -100,7 +102,7 @@ fn cursor_right(any: n=1): int {
    0
 }
 
-fn cursor_left(any: n=1): int {
+fn cursor_left(any n=1) int {
    "Moves cursor left by `n` columns."
    _ensure_vt()
    if(is_int(n) == 0){ n = 1 }
@@ -109,31 +111,29 @@ fn cursor_left(any: n=1): int {
    0
 }
 
-fn disable_wrap(): int {
+fn disable_wrap() int {
    "Disables line wrapping."
    _ensure_vt()
    unwrap(sys_write(1, "\033[?7l", 5))
    0
 }
 
-fn enable_wrap(): int {
+fn enable_wrap() int {
    "Enables line wrapping."
    _ensure_vt()
    unwrap(sys_write(1, "\033[?7h", 5))
    0
 }
 
-fn screen_reset(): int {
+fn screen_reset() int {
    "Resets the terminal state: visible cursor, enabled wrap, cleared screen, reset styles."
    _ensure_vt()
    set_cooked_mode()
-   ; Reset all attributes, show cursor, enable wrap, clear screen in one shot
-   ; \033[0m=4 \033[?25h=6 \033[?7h=5 \033[2J=4 \033[H=3 -> 22 bytes
    unwrap(sys_write(1, "\033[0m\033[?25h\033[?7h\033[2J\033[H", 22))
    0
 }
 
-fn enter_alt_screen(): int {
+fn enter_alt_screen() int {
    "Switches to terminal alternate screen buffer."
    _ensure_vt()
    if(_alt_enabled){ return 0 }
@@ -142,7 +142,7 @@ fn enter_alt_screen(): int {
    0
 }
 
-fn leave_alt_screen(): int {
+fn leave_alt_screen() int {
    "Leaves alternate screen buffer and returns to previous screen."
    _ensure_vt()
    if(!_alt_enabled){ return 0 }
@@ -151,7 +151,7 @@ fn leave_alt_screen(): int {
    0
 }
 
-fn tui_begin(): int {
+fn tui_begin() int {
    "Enters stable full-screen TUI mode using alternate screen buffer."
    _ensure_vt()
    enter_alt_screen()
@@ -162,35 +162,30 @@ fn tui_begin(): int {
    0
 }
 
-fn tui_end(): int {
+fn tui_end() int {
    "Restores terminal after TUI mode, leaving alternate screen buffer."
    _ensure_vt()
-   ; Restore cooked mode first so the terminal is responsive again
    set_cooked_mode()
-   ; Reset attrs + cursor + wrap + paste/mouse modes WHILE still on alt screen
    def cleanup_seq = "\033[0m\033[?25h\033[?7h\033[?2004l\033[?1000l\033[?1002l\033[?1003l\033[?1006l"
    unwrap(sys_write(1, cleanup_seq, cleanup_seq.len))
-   ; Leave alt screen - returns to the original main buffer
    leave_alt_screen()
-   ; Belt-and-suspenders on main screen as well
    unwrap(sys_write(1, cleanup_seq, cleanup_seq.len))
    0
 }
 
-fn is_quit_key(any: key): bool {
+fn is_quit_key(any key) bool {
    "Returns true for quit keys in TUI mode(Esc or Ctrl+C)."
    key == 27 || key == 3
 }
 
-fn _stty_bin(): str {
+fn _stty_bin() str {
    if(file_exists("/usr/bin/stty")){ return "/usr/bin/stty" }
    if(file_exists("/bin/stty")){ return "/bin/stty" }
    "stty"
 }
 
-fn set_raw_mode(): int {
+fn set_raw_mode() int {
    "Enables raw mode for the terminal(no echo, no buffering)."
-   ; Install signal handler so Ctrl+C always restores the terminal
    def rt = __tty_raw(1)
    if(platform.is_windows()){ return rt }
    if(rt == 0){ return 0 }
@@ -198,13 +193,17 @@ fn set_raw_mode(): int {
    use std.os.process
    def st = _stty_bin()
    mut rc = -1
-   if(platform.is_macos()){ rc = run(st, ["-f", "/dev/tty", "raw", "-echo"]) } else { rc = run(st, ["-F", "/dev/tty", "raw", "-echo"]) }
+   if(platform.is_macos()){
+      rc = run(st, ["-f", "/dev/tty", "raw", "-echo"])
+   } else {
+      rc = run(st, ["-F", "/dev/tty", "raw", "-echo"])
+   }
    if(rc != 0){ rc = run(st, ["raw", "-echo"]) }
    if(rc == 0){ return 0 }
    rc
 }
 
-fn set_cooked_mode(): int {
+fn set_cooked_mode() int {
    "Restores terminal to normal mode."
    def rt = __tty_raw(0)
    if(platform.is_windows()){ return rt }
@@ -215,49 +214,56 @@ fn set_cooked_mode(): int {
    use std.os.process
    def st = _stty_bin()
    mut rc = -1
-   if(platform.is_macos()){ rc = run(st, ["-f", "/dev/tty", "-raw", "echo"]) } else { rc = run(st, ["-F", "/dev/tty", "-raw", "echo"]) }
+   if(platform.is_macos()){
+      rc = run(st, ["-f", "/dev/tty", "-raw", "echo"])
+   } else {
+      rc = run(st, ["-F", "/dev/tty", "-raw", "echo"])
+   }
    if(rc != 0){ rc = run(st, ["-raw", "echo"]) }
    if(rc == 0){ return 0 }
    rc
 }
 
-fn get_key(): int {
+fn get_key() int {
    "Reads a single key from stdin in raw mode. Blocks until key is pressed."
    def b = _term_bytes(1)
    def res = unwrap(sys_read(0, b, 1))
-   if(res <= 0){ free(b) return 0 }
+   if(res <= 0){
+      free(b)
+      return 0
+   }
    def k = __load8_idx(b, 0)
    free(b)
    k
 }
 
-fn poll_key(): int {
+fn poll_key() int {
    "Polls for a key without blocking. Returns 0 if no key."
    if(__tty_pending() <= 0){ return 0 }
    get_key()
 }
 
-fn bold(any: s): str {
+fn bold(any s) str {
    "Wraps string `s` with ANSI bold escape codes."
    f"\033[1m{s}\033[0m"
 }
 
-fn italic(any: s): str {
+fn italic(any s) str {
    "Wraps string `s` with ANSI italic escape codes."
    f"\033[3m{s}\033[0m"
 }
 
-fn dim(any: s): str {
+fn dim(any s) str {
    "Wraps string `s` with ANSI dim/faint escape codes."
    f"\033[2m{s}\033[0m"
 }
 
-fn underline(any: s): str {
+fn underline(any s) str {
    "Wraps string `s` with ANSI underline escape codes."
    f"\033[4m{s}\033[0m"
 }
 
-fn _ansi_color_code(any: c): str {
+fn _ansi_color_code(any c) str {
    case c {
       "black"   -> "30"
       "red"     -> "31"
@@ -272,13 +278,13 @@ fn _ansi_color_code(any: c): str {
    }
 }
 
-fn color(any: s, any: c): str {
+fn color(any s, any c) str {
    "Wraps string `s` with ANSI foreground color escape codes for color `c`."
    def code = _ansi_color_code(c)
    f"\033[{code}m{s}\033[0m"
 }
 
-fn style(any: text, any: color_name="", any: is_bold=0): str {
+fn style(any text, any color_name="", any is_bold=0) str {
    "Applies ANSI styling to text."
    if(is_str(color_name) == 0){ color_name = "" }
    if(is_int(is_bold) == 0){ is_bold = 0 }
@@ -292,24 +298,24 @@ fn style(any: text, any: color_name="", any: is_bold=0): str {
    return out
 }
 
-fn color_names(): list {
+fn color_names() list {
    "Returns a list of supported color names."
    def c = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray"]
    c
 }
 
-fn get_color_name(int: idx): str {
+fn get_color_name(int idx) str {
    "Returns the color name at index `idx` (cycling)."
    def c, n = color_names(), c.len
    c.get(idx % n)
 }
 
-fn get_color(any: text, int: idx): str {
+fn get_color(any text, int idx) str {
    "Returns `text` wrapped in the color at index `idx`."
    color(text, get_color_name(idx))
 }
 
-fn log_color_enabled(): bool {
+fn log_color_enabled() bool {
    "Returns true when terminal log colors should be emitted."
    if(common.env_present("NO_COLOR")){ return false }
    if(common.env_present("NY_UI_COLOR")){ return common.env_enabled("NY_UI_COLOR") }
@@ -322,29 +328,38 @@ fn log_color_enabled(): bool {
    true
 }
 
-fn log_tag_color(any: tag): str {
+fn _tag_has(str key, str a, str b="", str c="", str d="", str e="") bool {
+   if(a.len > 0 && str.find(key, a) >= 0){ return true }
+   if(b.len > 0 && str.find(key, b) >= 0){ return true }
+   if(c.len > 0 && str.find(key, c) >= 0){ return true }
+   if(d.len > 0 && str.find(key, d) >= 0){ return true }
+   if(e.len > 0 && str.find(key, e) >= 0){ return true }
+   false
+}
+
+fn log_tag_color(any tag) str {
    "Returns a semantic color name for a bracketed log tag."
    def key = str.lower(to_str(tag))
-   if(str.find(key, "fail") >= 0 || str.find(key, "error") >= 0 || str.find(key, "err") >= 0 || str.find(key, "panic") >= 0){ return "red" }
-   if(str.find(key, "warn") >= 0 || str.find(key, "retry") >= 0 || str.find(key, "fallback") >= 0 || str.find(key, "slow") >= 0){ return "yellow" }
-   if(str.find(key, "ok") >= 0 || str.find(key, "done") >= 0 || str.find(key, "complete") >= 0 || str.find(key, "ready") >= 0){ return "green" }
-   if(str.find(key, "batch") >= 0 || str.find(key, "dump") >= 0 || str.find(key, "render") >= 0 || str.find(key, "frame") >= 0){ return "cyan" }
-   if(str.find(key, "gltf") >= 0 || str.find(key, "model") >= 0 || str.find(key, "scene") >= 0 || str.find(key, "vk") >= 0 || str.find(key, "gfx") >= 0){ return "magenta" }
+   if(_tag_has(key, "fail", "error", "err", "panic")){ return "red" }
+   if(_tag_has(key, "warn", "retry", "fallback", "slow")){ return "yellow" }
+   if(_tag_has(key, "ok", "done", "complete", "ready")){ return "green" }
+   if(_tag_has(key, "batch", "dump", "render", "frame")){ return "cyan" }
+   if(_tag_has(key, "gltf", "model", "scene", "vk", "gfx")){ return "magenta" }
    "blue"
 }
 
-fn log_tag(any: tag): str {
+fn log_tag(any tag) str {
    "Formats `[tag]` with semantic color inside the brackets when colors are enabled."
    def raw = to_str(tag)
    log_color_enabled() ? ("[" + style(raw, log_tag_color(raw), 1) + "]") : ("[" + raw + "]")
 }
 
-fn _log_color_bracket(str: line, int: start, int: stop): str {
+fn _log_color_bracket(str line, int start, int stop) str {
    def tag = str.str_slice(line, start + 1, stop)
    log_tag(tag)
 }
 
-fn log_text(any: line): str {
+fn log_text(any line) str {
    "Colors bracketed log tags inside a line, e.g. `[gltf]`, `[vk:error]`."
    def s = to_str(line)
    if(!log_color_enabled()){ return s }
@@ -353,12 +368,12 @@ fn log_text(any: line): str {
    mut i = 0
    while(i < n){
       def ch = load8(s, i)
-      if(ch == 91){ ;; '['
+      if(ch == 91){
          mut j = i + 1
          mut ok = false
          while(j < n && j - i <= 48){
             def cj = load8(s, j)
-            if(cj == 93){ ok = true break } ;; ']'
+            if(cj == 93){ ok = true break }
             if(cj < 32 || cj == 91){ break }
             j += 1
          }
@@ -374,39 +389,39 @@ fn log_text(any: line): str {
    out
 }
 
-fn log_line(any: tag, any: msg=""): int {
+fn log_line(any tag, any msg="") int {
    "Prints a semantic colored `[tag] message` line."
    print(log_tag(tag) + (to_str(msg).len > 0 ? (" " + to_str(msg)) : ""))
    0
 }
 
-fn elog_line(any: tag, any: msg=""): int {
+fn elog_line(any tag, any msg="") int {
    "Prints a semantic colored `[tag] message` line to stderr."
    eprint(log_tag(tag) + (to_str(msg).len > 0 ? (" " + to_str(msg)) : ""))
    0
 }
 
-fn shapes(): dict {
+fn shapes() dict {
    "Returns a dictionary of common TUI shapes/symbols."
-   def s = dict(64)
-   s.set("v_line", "\xe2\x94\x82") ; │
-   s.set("h_line", "\xe2\x94\x80") ; ─
-   s.set("top_left", "\xe2\x95\xad") ; ╭
-   s.set("top_right", "\xe2\x95\xae") ; ╮
-   s.set("bot_left", "\xe2\x95\xb0") ; ╰
-   s.set("bot_right", "\xe2\x95\xaf") ; ╯
-   s.set("cross", "\xe2\x94\xbc") ; ┼
-   s.set("t_down", "\xe2\x94\xac") ; ┬
-   s.set("t_up", "\xe2\x94\xb4") ; ┴
-   s.set("t_left", "\xe2\x94\xa4") ; ┤
-   s.set("t_right", "\xe2\x94\x9c") ; ├
-   s.set("shade", "\xe2\x96\x92") ; ▒
-   s.set("dot", "\xc2\xb7") ; ·
-   s.set("block", "\xe2\x96\x88") ; █
-   s
+   {
+      "v_line": "\xe2\x94\x82",
+      "h_line": "\xe2\x94\x80",
+      "top_left": "\xe2\x95\xad",
+      "top_right": "\xe2\x95\xae",
+      "bot_left": "\xe2\x95\xb0",
+      "bot_right": "\xe2\x95\xaf",
+      "cross": "\xe2\x94\xbc",
+      "t_down": "\xe2\x94\xac",
+      "t_up": "\xe2\x94\xb4",
+      "t_left": "\xe2\x94\xa4",
+      "t_right": "\xe2\x94\x9c",
+      "shade": "\xe2\x96\x92",
+      "dot": "\xc2\xb7",
+      "block": "\xe2\x96\x88"
+   }
 }
 
-fn panel(any: text, any: title="", any: border_color="white"): int {
+fn panel(any text, any title="", any border_color="white") int {
    "Prints a styled panel with optional title."
    def l = text.len
    mut w = l + 4
@@ -414,7 +429,6 @@ fn panel(any: text, any: title="", any: border_color="white"): int {
       def tl = title.len
       if(tl + 4 > w){ w = tl + 4 }
    }
-   ; Top
    mut top = "╭"
    mut i = 0
    while(i < w - 2){
@@ -439,24 +453,28 @@ fn panel(any: text, any: title="", any: border_color="white"): int {
       top = f"{top}{cap_col}"
    }
    print(top)
-   ; Content
    def padding = w - 4 - text.len
    def cbar = color("│", border_color)
    mut line = f"{cbar} {text} "
    i = 0
-   while(i < padding){ line = f"{line} " i += 1 }
+   while(i < padding){
+      line = f"{line} "
+      i += 1
+   }
    line = f"{line}{cbar}"
    print(line)
-   ; Bottom
    mut bot = "╰"
    i = 0
-   while(i < w - 2){ bot = f"{bot}─" i += 1 }
+   while(i < w - 2){
+      bot = f"{bot}─"
+      i += 1
+   }
    bot = f"{bot}╯"
    print(color(bot, border_color))
    0
 }
 
-fn table(list: headers, list: rows): int {
+fn table(list headers, list rows) int {
    "Prints a simple table."
    def cols = headers.len
    mut widths = list(8)
@@ -488,8 +506,13 @@ fn table(list: headers, list: rows): int {
       i += 1
    }
    print(line)
-   mut sep = "" def slen = line.len ; Approximation
-   i = 0 while(i < (slen / 2)){ sep = f"{sep}─" i += 1 }
+   mut sep = ""
+   def slen = line.len
+   i = 0
+   while(i < (slen / 2)){
+      sep = f"{sep}─"
+      i += 1
+   }
    print(color(sep, "gray"))
    r = 0
    while(r < nr){
@@ -500,7 +523,11 @@ fn table(list: headers, list: rows): int {
          def w = widths.get(c)
          line_row = f"{line_row}{val}"
          def pad = w - val.len + 2
-         mut p = 0 while(p < pad){ line_row = f"{line_row} " p += 1 }
+         mut p = 0
+         while(p < pad){
+            line_row = f"{line_row} "
+            p += 1
+         }
          line_row = f"{line_row} "
          c += 1
       }
@@ -510,11 +537,14 @@ fn table(list: headers, list: rows): int {
    0
 }
 
-fn tree(any: node, any: pref="", any: head_in=""): int {
+fn tree(any node, any pref="", any head_in="") int {
    "Prints a tree structure. Node is [label, [children...]] or just label string."
    def prefix = is_str(pref) ? to_str(pref) : ""
    def head = is_str(head_in) ? to_str(head_in) : ""
-   if(is_str(node)){ print(f"{prefix}{head}{node}") return 0 }
+   if(is_str(node)){
+      print(f"{prefix}{head}{node}")
+      return 0
+   }
    def label = node.get(0)
    print(f"{prefix}{head}{bold(label)}")
    def children = node.get(1)
@@ -531,13 +561,13 @@ fn tree(any: node, any: pref="", any: head_in=""): int {
    0
 }
 
-fn _bar_pad2(int: n): str {
+fn _bar_pad2(int n) str {
    if(n < 0){ n = 0 }
    if(n < 10){ return "0" + to_str(n) }
    to_str(n)
 }
 
-fn _bar_duration(any: seconds): str {
+fn _bar_duration(any seconds) str {
    mut total = int(seconds)
    if(total < 0){ total = 0 }
    def hours = total / 3600
@@ -547,14 +577,14 @@ fn _bar_duration(any: seconds): str {
    _bar_pad2(mins) + ":" + _bar_pad2(secs)
 }
 
-fn _bar_rate(f64: rate): str {
+fn _bar_rate(f64 rate) str {
    if(rate <= 0.0){ return "?it/s" }
    if(rate >= 100.0){ return to_fixed(rate, 0) + "it/s" }
    if(rate >= 10.0){ return to_fixed(rate, 1) + "it/s" }
    to_fixed(rate, 2) + "it/s"
 }
 
-fn bar(any: tot=100, any: d="Progress", any: w=40, any: bc="green", any: se=1, any: lv=1): list {
+fn bar(any tot=100, any d="Progress", any w=40, any bc="green", any se=1, any lv=1) list {
    "Create a progress bar. Returns a bar object(list)."
    mut total = 100
    if(is_int(tot)){ total = tot }
@@ -572,23 +602,23 @@ fn bar(any: tot=100, any: d="Progress", any: w=40, any: bc="green", any: se=1, a
    mut leave = 1
    if(is_int(lv)){ leave = lv }
    mut bar = list(12)
-   bar = bar.append(total) ; 0
-   bar = bar.append(0) ; 1
-   bar = bar.append(desc) ; 2
-   bar = bar.append(width) ; 3
-   bar = bar.append(bar_color) ; 4
-   bar = bar.append(show_eta) ; 5
-   bar = bar.append(leave) ; 6
+   bar = bar.append(total)
+   bar = bar.append(0)
+   bar = bar.append(desc)
+   bar = bar.append(width)
+   bar = bar.append(bar_color)
+   bar = bar.append(show_eta)
+   bar = bar.append(leave)
    def start_time = ticks()
-   bar = bar.append(start_time) ; 7
-   bar = bar.append(start_time) ; 8
-   bar = bar.append(0) ; 9
-   bar = bar.append(0) ; 10
-   bar = bar.append(0.0) ; 11
+   bar = bar.append(start_time)
+   bar = bar.append(start_time)
+   bar = bar.append(0)
+   bar = bar.append(0)
+   bar = bar.append(0.0)
    return bar
 }
 
-fn bar_update(list: bar, any: current): int {
+fn bar_update(list bar, any current) int {
    "Updates the progress bar to the `current` value and renders it to stdout."
    if(bar.get(9) == 1){ return 0 }
    mut cur = 0
@@ -597,18 +627,27 @@ fn bar_update(list: bar, any: current): int {
    def total = bar.get(0)
    if(total > 0 && cur > total){ cur = total }
    if(cur <= bar.get(10) && cur != 0 && cur < bar.get(0)){ return 0 }
-   bar.set(1, cur) bar.set(10, cur)
-   def desc = bar.get(2) def width = bar.get(3)
+   bar.set(1, cur)
+   bar.set(10, cur)
+   def desc = bar.get(2)
+   def width = bar.get(3)
    def bar_color = bar.get(4)
-   def start_time = bar.get(7) def last_time = bar.get(8)
-   def now = ticks() def dt = now - last_time
+   def start_time = bar.get(7)
+   def last_time = bar.get(8)
+   def now = ticks()
+   def dt = now - last_time
    def elapsed = (now - start_time) / 1000000000.0
    mut avg_rate = bar.get(11)
    if(dt > 150000000 || cur == total){
       if(elapsed > 0.0 && cur > 0){
          def inst = cur / elapsed
-         if(avg_rate == 0.0){ avg_rate = inst } else { avg_rate = (avg_rate * 0.8) + (inst * 0.2) }
-         bar.set(11, avg_rate) bar.set(8, now)
+         if(avg_rate == 0.0){
+            avg_rate = inst
+         } else {
+            avg_rate = (avg_rate * 0.8) + (inst * 0.2)
+         }
+         bar.set(11, avg_rate)
+         bar.set(8, now)
       }
    }
    mut den = total
@@ -636,29 +675,35 @@ fn bar_update(list: bar, any: current): int {
    return 0
 }
 
-fn bar_finish(list: bar): int {
+fn bar_finish(list bar) int {
    "Completes the progress bar, ensuring it reaches 100% and cleanup/newline as needed."
    if(bar.get(1) < bar.get(0)){ bar_update(bar, bar.get(0)) }
-   if(bar.get(6)){ print("") } else { unwrap(sys_write(1, "\r\033[K", 4)) }
+   if(bar.get(6)){
+      print("")
+   } else {
+      unwrap(sys_write(1, "\r\033[K", 4))
+   }
    bar.set(9, 1)
    0
 }
 
-fn bar_range(any: n, any: desc=""): list {
+fn bar_range(any n, any desc="") list {
    "Compatibility wrapper for `bar(n, desc)`. Returns a new bar object."
    return bar(n, desc)
 }
 
-fn bar_write(list: bar_obj, any: msg): int {
+fn bar_write(list bar_obj, any msg) int {
    "Clears the current progress bar line, prints `msg`, and redraws the bar."
-   unwrap(sys_write(1, "\r\033[K", 4)) print(msg) bar_update(bar_obj, bar_obj.get(1))
+   unwrap(sys_write(1, "\r\033[K", 4))
+   print(msg)
+   bar_update(bar_obj, bar_obj.get(1))
    0
 }
 
 mut _term_buf = 0
 mut _chr_cache = 0
 
-fn _chr_cached(int: code): str {
+fn _chr_cached(int code) str {
    if(code < 0 || code > 255){ return "" }
    if(!_chr_cache){
       _chr_cache = list(256)
@@ -671,7 +716,7 @@ fn _chr_cached(int: code): str {
    _chr_cache.get(code, "")
 }
 
-fn get_terminal_size(): list {
+fn get_terminal_size() list {
    "Retrieves terminal [width, height] using ioctl, environment variables, or defaults."
    if(!_term_buf){ _term_buf = malloc(8) }
    def buf = _term_buf
@@ -680,7 +725,6 @@ fn get_terminal_size(): list {
       def rows = load32(buf, 4)
       if(rows > 0 && cols > 0){ return [cols, rows] }
    }
-   ; Fallback to Environment Variables
    def env_c, env_l = env("COLUMNS"), env("LINES")
    if(is_str(env_c) && is_str(env_l)){
       mut ic, il = 0, 0
@@ -688,15 +732,14 @@ fn get_terminal_size(): list {
       ic, il = int(env_c), int(env_l)
       if(ic > 0 && il > 0){ return [ic, il] }
    }
-   return [80, 24] ; Final fallback
+   return [80, 24]
 }
 
-fn canvas(int: w, int: h): list {
+fn canvas(int w, int h) list {
    "Creates a new terminal canvas for buffered drawing."
    mut c = list(10)
-   c = c.append(w) ; 0: width
-   c = c.append(h) ; 1: height
-   ; 2: char buffer (list of strings, one per cell, UTF-8 safe)
+   c = c.append(w)
+   c = c.append(h)
    mut char_buf = list(w * h)
    mut i = 0
    while(i < w * h){
@@ -704,19 +747,20 @@ fn canvas(int: w, int: h): list {
       i += 1
    }
    c = c.append(char_buf)
-   c = c.append(_term_bytes(w * h)) ; 3: attr buffer (0=norm, 1=bold)
-   c = c.append(_term_bytes(w * h)) ; 4: color buffer (color index 0-8)
-   c = c.append(_term_bytes(w * h)) ; 5: byte-length buffer
+   c = c.append(_term_bytes(w * h))
+   c = c.append(_term_bytes(w * h))
+   c = c.append(_term_bytes(w * h))
    canvas_clear(c)
    return c
 }
 
-fn canvas_clear(list: canv): int {
+fn canvas_clear(list canv) int {
    "Clears all buffers(characters, attributes, and colors) in the canvas."
-   def w = canv.get(0) def h = canv.get(1)
-   def buf = canv.get(2) def attr = canv.get(3) def col = canv.get(4)
+   def w, h = canv.get(0), canv.get(1)
+   def buf, attr, col = canv.get(2), canv.get(3), canv.get(4)
    def blen = canv.get(5)
-   mut i = 0 def n = w * h
+   mut i = 0
+   def n = w * h
    while(i < n){
       buf.set(i, " ")
       bytes_set(attr, i, 0)
@@ -727,7 +771,7 @@ fn canvas_clear(list: canv): int {
    0
 }
 
-fn _byte_len(any: s): int {
+fn _byte_len(any s) int {
    if(!is_str(s)){ return 0 }
    def n = s.len
    if(n == 0){ return 0 }
@@ -737,7 +781,7 @@ fn _byte_len(any: s): int {
    i
 }
 
-fn _substr_bytes(str: s, int: start, int: len): str {
+fn _substr_bytes(str s, int start, int len) str {
    if(len <= 0){ return "" }
    mut out = malloc(len + 1)
    if(!out){ return "" }
@@ -751,9 +795,9 @@ fn _substr_bytes(str: s, int: start, int: len): str {
    out
 }
 
-fn canvas_set(list: canv, int: x, int: y, any: ch, int: color_idx=0, int: is_bold=0): int {
+fn canvas_set(list canv, int x, int y, any ch, int color_idx=0, int is_bold=0) int {
    "Sets a character and its attributes at(x, y) on the canvas."
-   def w = canv.get(0) def h = canv.get(1)
+   def w, h = canv.get(0), canv.get(1)
    if(x < 0 || x >= w || y < 0 || y >= h){ return 0 }
    def idx = y * w + x
    def chars = canv.get(2)
@@ -762,8 +806,14 @@ fn canvas_set(list: canv, int: x, int: y, any: ch, int: color_idx=0, int: is_bol
    def blen = canv.get(5)
    if(!is_list(chars) || idx < 0 || idx >= chars.len){ return 0 }
    mut char_str = ""
-   if(is_str(ch)){ char_str = ch } else {
-      if(ch >= 0 && ch <= 255){ char_str = _chr_cached(ch) } else { char_str = str.chr(ch) }
+   if(is_str(ch)){
+      char_str = ch
+   } else {
+      if(ch >= 0 && ch <= 255){
+         char_str = _chr_cached(ch)
+      } else {
+         char_str = str.chr(ch)
+      }
    }
    if(char_str.len == 0){ char_str = "?" }
    chars.set(idx, char_str)
@@ -773,9 +823,9 @@ fn canvas_set(list: canv, int: x, int: y, any: ch, int: color_idx=0, int: is_bol
    0
 }
 
-fn canvas_print(list: canv, int: x, int: y, str: text, int: color_idx=0, int: is_bold=0): int {
+fn canvas_print(list canv, int x, int y, str text, int color_idx=0, int is_bold=0) int {
    "Prints a string horizontally on the canvas starting at(x, y)."
-   def w = canv.get(0) def h = canv.get(1)
+   def w, h = canv.get(0), canv.get(1)
    if(y < 0 || y >= h || text.len == 0){ return 0 }
    mut i = 0
    mut col = 0
@@ -796,7 +846,7 @@ fn canvas_print(list: canv, int: x, int: y, str: text, int: color_idx=0, int: is
    0
 }
 
-fn canvas_box(list: canv, int: x, int: y, int: w, int: h, any: title="", int: color_idx=0): int {
+fn canvas_box(list canv, int x, int y, int w, int h, any title="", int color_idx=0) int {
    "Draws a styled box with an optional title on the canvas."
    def s = shapes()
    mut i = 0
@@ -819,7 +869,7 @@ fn canvas_box(list: canv, int: x, int: y, int: w, int: h, any: title="", int: co
    0
 }
 
-fn canvas_refresh(any: canv): int {
+fn canvas_refresh(any canv) int {
    "Renders the entire canvas buffer to the physical terminal using an optimized single-write approach."
    if(!is_list(canv)){ return 0 }
    def w, h = canv.get(0), canv.get(1)
@@ -831,7 +881,9 @@ fn canvas_refresh(any: canv): int {
    def r_buf = _term_bytes(w * h * 64 + 1024)
    if(!r_buf){ return 0 }
    mut p = 0
-   bytes_set(r_buf, p, 27) bytes_set(r_buf, p + 1, 91) bytes_set(r_buf, p + 2, 72)
+   bytes_set(r_buf, p, 27)
+   bytes_set(r_buf, p + 1, 91)
+   bytes_set(r_buf, p + 2, 72)
    p += 3
    mut last_c, last_b = -1, -1
    mut y = 0
@@ -843,14 +895,16 @@ fn canvas_refresh(any: canv): int {
          def b = bytes_get(attr, idx)
          def c = bytes_get(col, idx)
          if(c != last_c || b != last_b){
-            bytes_set(r_buf, p, 27) bytes_set(r_buf, p + 1, 91)
+            bytes_set(r_buf, p, 27)
+            bytes_set(r_buf, p + 1, 91)
             p += 2
             if(c == 0 && b == 0){
                bytes_set(r_buf, p, 48)
                p += 1
             } else {
                if(b){
-                  bytes_set(r_buf, p, 49) bytes_set(r_buf, p + 1, 59)
+                  bytes_set(r_buf, p, 49)
+                  bytes_set(r_buf, p + 1, 59)
                   p += 2
                }
                def code = case c {
@@ -883,8 +937,10 @@ fn canvas_refresh(any: canv): int {
       }
       y += 1
    }
-   bytes_set(r_buf, p, 27) bytes_set(r_buf, p + 1, 91)
-   bytes_set(r_buf, p + 2, 48) bytes_set(r_buf, p + 3, 109)
+   bytes_set(r_buf, p, 27)
+   bytes_set(r_buf, p + 1, 91)
+   bytes_set(r_buf, p + 2, 48)
+   bytes_set(r_buf, p + 3, 109)
    p += 4
    unwrap(sys_write(1, r_buf, p))
    free(r_buf)

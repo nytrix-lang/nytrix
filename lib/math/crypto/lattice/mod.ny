@@ -1,4 +1,5 @@
-;; Keywords: lattice lll cvp svp bkz flatter basis gram-schmidt gso matrix reduction small-roots coppersmith ntru lwe acd linmod mvpoly
+;; Keywords: lattice lll cvp svp bkz flatter basis gram-schmidt gso matrix reduction small-roots coppersmith ntru lwe acd linmod mvpoly math crypto number-theory
+;; Cryptography lattice helpers for algorithms, analysis, validation, or supporting math.
 ;; References:
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
@@ -7,7 +8,7 @@ use std.math.matrix as matrix
 use std.math.crypto.lattice.lll
 use std.math.crypto.lattice.lattice
 
-fn _lattice_coverage_item(str: name, bool: ny_default, bool: tested, bool: benchmarked, bool: remove_blocker, str: reason): dict {
+fn _lattice_coverage_item(str name, bool ny_default, bool tested, bool benchmarked, bool remove_blocker, str reason) dict {
    {
       "capability": name,
       "ny_default": ny_default,
@@ -18,17 +19,17 @@ fn _lattice_coverage_item(str: name, bool: ny_default, bool: tested, bool: bench
    }
 }
 
-fn _lattice_is_matrix(any: basis): bool { is_list(basis) && basis.len >= 3 && is_int(basis.get(0, nil)) && is_int(basis.get(1, nil)) && is_list(basis.get(2, nil)) }
+fn _lattice_is_matrix(any basis) bool { is_list(basis) && basis.len >= 3 && is_int(basis.get(0, nil)) && is_int(basis.get(1, nil)) && is_list(basis.get(2, nil)) }
 
-fn _lattice_matrix(any: basis): any { _lattice_is_matrix(basis) ? basis : matrix.Matrix(basis) }
+fn _lattice_matrix(any basis) any { _lattice_is_matrix(basis) ? basis : matrix.Matrix(basis) }
 
-fn _lattice_rows(any: basis): int { _lattice_is_matrix(basis) ? int(basis.get(0, 0)) : (is_list(basis) ? basis.len : 0) }
+fn _lattice_rows(any basis) int { _lattice_is_matrix(basis) ? int(basis.get(0, 0)) : (is_list(basis) ? basis.len : 0) }
 
-fn _lattice_public_basis(any: basis): any { _lattice_is_matrix(basis) ? basis.get(2, []) : basis }
+fn _lattice_public_basis(any basis) any { _lattice_is_matrix(basis) ? basis.get(2, []) : basis }
 
-fn _lattice_opts(any: opts): dict { is_dict(opts) ? opts : dict(0) }
+fn _lattice_opts(any opts) dict { is_dict(opts) ? opts : dict(0) }
 
-fn _lattice_blockers(list: rows): list {
+fn _lattice_blockers(list rows) list {
    mut blockers = []
    mut i = 0
    while(i < rows.len){
@@ -39,7 +40,7 @@ fn _lattice_blockers(list: rows): list {
    blockers
 }
 
-fn _lattice_completed(list: rows): list {
+fn _lattice_completed(list rows) list {
    mut completed = []
    mut i = 0
    while(i < rows.len){
@@ -52,7 +53,7 @@ fn _lattice_completed(list: rows): list {
    completed
 }
 
-fn lattice_core_coverage_report(): dict {
+fn lattice_core_coverage_report() dict {
    "Return the lattice coverage matrix."
    mut rows = []
    rows = rows.append(_lattice_coverage_item("LLL", true, true, true, false, "fixture, transform, quality, and timing gates pass"))
@@ -86,7 +87,7 @@ fn lattice_core_coverage_report(): dict {
    }
 }
 
-fn lattice_replacement_report(): dict {
+fn lattice_replacement_report() dict {
    "Return the lattice replacement readiness report."
    def core = lattice_core_coverage_report()
    {
@@ -105,7 +106,7 @@ fn lattice_replacement_report(): dict {
    }
 }
 
-fn lattice_reduction_report(any: basis, str: strategy="auto", any: opts=nil): dict {
+fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
    "Unified report-first reducer. `auto` selects LLL for small bases and flatter_reduce for large bases."
    def o = _lattice_opts(opts)
    def input = _lattice_matrix(basis)

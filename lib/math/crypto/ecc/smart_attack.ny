@@ -1,16 +1,19 @@
-;; Keywords: ecc smart-attack
+;; Keywords: ecc smart-attack math crypto public-key
 ;; Elliptic-curve routines for Smart attack for anomalous elliptic curves.
 ;; Recovers k where Q = k*P on curves with tr(E) = 1 and #E(Fp) = p
 ;; Uses p-adic lifting to Q_p and computes phi(P) = -x/y mod p
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.smart_attack(smart_attack)
 use std.math.nt
 use std.math.crypto.ecc.ecc
 use std.os.prim as os
 
-fn smart_attack(any: Px, any: Py, any: Qx, any: Qy, any: a, any: p): any {
+fn smart_attack(any Px, any Py, any Qx, any Qy, any a, any p) any {
    "Smart's attack on anomalous curves. Recovers scalar k where Q = k*P on a curve y^2 = x^3+ax+b over F_p with #E(F_p) = p(anomalous curve).
    Implementation note:
    - A naive phi(P)=-x/y mod p using the original affine points can fail.
@@ -21,7 +24,7 @@ fn smart_attack(any: Px, any: Py, any: Qx, any: Qy, any: a, any: p): any {
    _smart_attack_tiny_dlp(Px, Py, Qx, Qy, a, p)
 }
 
-fn smart_phi(any: x, any: y, any: p): any {
+fn smart_phi(any x, any y, any p) any {
    "Compute the p-adic canonical height mapping phi(P) = -x/y mod p for point P = (x, y) on an anomalous curve. Returns the height value mod p."
    if(y == 0){ return 0 }
    def y_inv = inverse_mod(y, p)
@@ -30,7 +33,7 @@ fn smart_phi(any: x, any: y, any: p): any {
    result
 }
 
-fn _hensel_lift_y(any: x, any: y0, any: a, any: b, any: p): any {
+fn _hensel_lift_y(any x, any y0, any a, any b, any p) any {
    "Lift y from mod p to mod p^2 for curve y^2 = x^3 + a x + b.
    Assumes y0^2 == rhs mod p and gcd(2*y0, p)=1."
    def p2 = p * p
@@ -45,7 +48,7 @@ fn _hensel_lift_y(any: x, any: y0, any: a, any: b, any: p): any {
    mod(y0m + t * p, p2)
 }
 
-fn _smart_phi_from_jac_divp(any: Pj, any: p, any: p2): any {
+fn _smart_phi_from_jac_divp(any Pj, any p, any p2) any {
    "Compute phi(pP) style mapping from a Jacobian point over Z/p^2Z without affine conversion.
    For Jacobian(X:Y:Z), affine x=X/Z^2, y=Y/Z^3, so -x/y = -(X*Z)/Y.
    In Smart's attack at precision 2, points p*P and p*Q lie in the formal group:
@@ -76,7 +79,7 @@ fn _smart_phi_from_jac_divp(any: Pj, any: p, any: p2): any {
    mod(nump * inv, p)
 }
 
-fn _smart_attack_tiny_dlp(any: Px, any: Py, any: Qx, any: Qy, any: a, any: p): any {
+fn _smart_attack_tiny_dlp(any Px, any Py, any Qx, any Qy, any a, any p) any {
    "Deterministic verification fallback for tiny anomalous-curve vectors.
    The p-adic path is the real attack ; this bounded path keeps small published
    fixtures strict instead of accepting non-nil smoke checks."
@@ -92,7 +95,7 @@ fn _smart_attack_tiny_dlp(any: Px, any: Py, any: Qx, any: Qy, any: a, any: p): a
    -1
 }
 
-fn _smart_attack_p2(any: Px, any: Py, any: Qx, any: Qy, any: a, any: p): any {
+fn _smart_attack_p2(any Px, any Py, any Qx, any Qy, any a, any p) any {
    use std.math.crypto.ecc.ecc
    def x1, y1 = mod(Px, p), mod(Py, p)
    def x2, y2 = mod(Qx, p), mod(Qy, p)

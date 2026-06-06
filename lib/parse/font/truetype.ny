@@ -1,6 +1,9 @@
-;; Keywords: font truetype
+;; Keywords: font truetype os parse ui
 ;; FreeType-backed TrueType font loading, metrics, glyph rasterization, and atlas data.
-module std.os.ui.font.truetype(load, load_path, unload, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
+;; References:
+;; - std.os.ui.font
+;; - std.os
+module std.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
 use std.core
 use std.core.mem
 use std.os (file_exists)
@@ -8,15 +11,16 @@ use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call1, call2, call
 use std.os.path as ospath
 
 extern "" {
-   fn _ft_init(ptr: lib_p): i32 as "FT_Init_FreeType"
-   fn _ft_new_memory_face(ptr: lib, ptr: data, i64: size, i64: index, ptr: face_p): i32 as "FT_New_Memory_Face"
-   fn _ft_new_face(ptr: lib, ptr: path, i64: index, ptr: face_p): i32 as "FT_New_Face"
-   fn _ft_done_face(ptr: face): i32 as "FT_Done_Face"
-   fn _ft_select_size(ptr: face, i32: strike_index): i32 as "FT_Select_Size"
-   fn _ft_set_pixel_sizes(ptr: face, u32: pixel_width, u32: pixel_height): i32 as "FT_Set_Pixel_Sizes"
-   fn _ft_get_char_index(ptr: face, u64: cp): u32 as "FT_Get_Char_Index"
-   fn _ft_load_glyph(ptr: face, u32: gi, i32: flags): i32 as "FT_Load_Glyph"
-   fn _ft_get_kerning(ptr: face, u32: g1, u32: g2, u32: mode, ptr: vec): i32 as "FT_Get_Kerning"
+   fn _ft_init(ptr lib_p) i32 as "FT_Init_FreeType"
+   fn _ft_new_memory_face(ptr lib, ptr data, i64 size, i64 index, ptr face_p) i32 as "FT_New_Memory_Face"
+   fn _ft_new_face(ptr lib, ptr path, i64 index, ptr face_p) i32 as "FT_New_Face"
+   fn _ft_done_face(ptr face) i32 as "FT_Done_Face"
+   fn _ft_done_free_type(ptr lib) i32 as "FT_Done_FreeType"
+   fn _ft_select_size(ptr face, i32 strike_index) i32 as "FT_Select_Size"
+   fn _ft_set_pixel_sizes(ptr face, u32 pixel_width, u32 pixel_height) i32 as "FT_Set_Pixel_Sizes"
+   fn _ft_get_char_index(ptr face, u64 cp) u32 as "FT_Get_Char_Index"
+   fn _ft_load_glyph(ptr face, u32 gi, i32 flags) i32 as "FT_Load_Glyph"
+   fn _ft_get_kerning(ptr face, u32 g1, u32 g2, u32 mode, ptr vec) i32 as "FT_Get_Kerning"
 }
 
 if(comptime{ __os_name() == "linux" }){
@@ -40,39 +44,40 @@ mut _FT_ptr_init = 0
 mut _FT_ptr_new_memory_face = 0
 mut _FT_ptr_new_face = 0
 mut _FT_ptr_done_face = 0
+mut _FT_ptr_done_free_type = 0
 mut _FT_ptr_select_size = 0
 mut _FT_ptr_set_pixel_sizes = 0
 mut _FT_ptr_get_char_index = 0
 mut _FT_ptr_load_glyph = 0
 mut _FT_ptr_get_kerning = 0
 
-fn _raw_ptr(any: p): any {
+fn _raw_ptr(any p) any {
    if(!p){ return 0 }
    if(is_int(p)){ return to_int(p) }
    p
 }
 
-fn _load_u8_h(any: p, int: off): int {
+fn _load_u8_h(any p, int off) int {
    def base = off - (off & 3)
    def shift = (off & 3) * 8
    (load32_h(p, base) >> shift) & 255
 }
 
-fn _load_u16_h(any: p, int: off): int { load32_h(p, off) & 65535 }
+fn _load_u16_h(any p, int off) int { load32_h(p, off) & 65535 }
 
-fn _load_i16_h(any: p, int: off): int {
+fn _load_i16_h(any p, int off) int {
    def v = _load_u16_h(p, off)
    v > 32767 ? (v - 65536) : v
 }
 
-fn _load_u32_h(any: p, int: off): int { load32_h(p, off) }
+fn _load_u32_h(any p, int off) int { load32_h(p, off) }
 
-fn _load_i32_h(any: p, int: off): int {
+fn _load_i32_h(any p, int off) int {
    def v = load32_h(p, off)
    v > 2147483647 ? (v - 4294967296) : v
 }
 
-fn _load_dyn(): bool {
+fn _load_dyn() bool {
    if(_FT_dyn_lib){ return true }
    mut lib = 0
    if(comptime{ __os_name() == "linux" }){
@@ -93,6 +98,7 @@ fn _load_dyn(): bool {
    _FT_ptr_new_memory_face = dlsym(lib, "FT_New_Memory_Face")
    _FT_ptr_new_face = dlsym(lib, "FT_New_Face")
    _FT_ptr_done_face = dlsym(lib, "FT_Done_Face")
+   _FT_ptr_done_free_type = dlsym(lib, "FT_Done_FreeType")
    _FT_ptr_select_size = dlsym(lib, "FT_Select_Size")
    _FT_ptr_set_pixel_sizes = dlsym(lib, "FT_Set_Pixel_Sizes")
    _FT_ptr_get_char_index = dlsym(lib, "FT_Get_Char_Index")
@@ -103,7 +109,7 @@ fn _load_dyn(): bool {
    _FT_ptr_load_glyph && _FT_ptr_get_kerning
 }
 
-fn _init(): bool {
+fn _init() bool {
    if(_FT_library){ return true }
    if(!_load_dyn()){
       if(comptime{ __os_name() != "windows" }){ return false }
@@ -121,12 +127,12 @@ fn _init(): bool {
    !!_FT_library
 }
 
-fn available(): bool {
+fn available() bool {
    "Returns whether the FreeType-backed TrueType loader is available."
    _init()
 }
 
-fn load(any: data, int: index=0): any {
+fn load(any data, int index=0) any {
    "Loads a font face from in-memory font bytes."
    if(!_init()){ return 0 }
    if(!is_str(data) || data.len < 4){ return 0 }
@@ -144,14 +150,13 @@ fn load(any: data, int: index=0): any {
    _finish_load(dict(16), face, data)
 }
 
-fn load_path(str: path, int: index=0): any {
+fn load_path(str path, int index=0) any {
    "Loads a font face from a file path directly."
    if(!_init()){ return 0 }
    if(!is_str(path) || !file_exists(path)){ return 0 }
    def face_ptr = malloc(8)
    if(!face_ptr){ return 0 }
    store64_h(face_ptr, 0, 0)
-   ; Convert Nytrix string to C-style null-terminated string
    def path_c = malloc(path.len + 1)
    if(!path_c){
       free(face_ptr)
@@ -170,7 +175,7 @@ fn load_path(str: path, int: index=0): any {
    _finish_load(dict(16), face, 0)
 }
 
-fn _finish_load(any: info_in, any: face, any: data): dict {
+fn _finish_load(any info_in, any face, any data) dict {
    mut info = info_in
    if(!is_dict(info)){ info = dict(16) }
    def face_p = _raw_ptr(face)
@@ -202,7 +207,7 @@ fn _finish_load(any: info_in, any: face, any: data): dict {
    info
 }
 
-fn unload(any: info): any {
+fn unload(any info) any {
    "Releases a loaded font face."
    if(!is_dict(info)){ return 0 }
    def face = info.get("face", 0)
@@ -212,10 +217,22 @@ fn unload(any: info): any {
    }
    def ps_ptr = info.get("ps_ptr", 0)
    if(ps_ptr){ free(ps_ptr) }
+   info["face"] = 0
+   info["ps_ptr"] = 0
    0
 }
 
-fn _set_size(dict: info, int: px): bool {
+fn shutdown() any {
+   "Releases the shared FreeType library instance after all faces are unloaded."
+   if(_FT_library){
+      if(_FT_ptr_done_free_type){ call1(_FT_ptr_done_free_type, _raw_ptr(_FT_library)) }
+      else { _ft_done_free_type(_raw_ptr(_FT_library)) }
+   }
+   _FT_library = 0
+   0
+}
+
+fn _set_size(dict info, int px) bool {
    def face = info.get("face", 0)
    if(!face){ return false }
    def ps_ptr = info.get("ps_ptr", 0)
@@ -223,7 +240,6 @@ fn _set_size(dict: info, int: px): bool {
    def prev = load32(ps_ptr, 0)
    if(prev == px){ return true }
    if(!info.get("is_scalable", true)){
-      ; For non-scalable fonts (emojis), select the closest strike
       def face_p = _raw_ptr(face)
       def num_strikes = _load_i32_h(face_p, 56)
       mut best_idx = -1
@@ -231,7 +247,7 @@ fn _set_size(dict: info, int: px): bool {
       mut si = 0
       while(si < num_strikes){
          def sizes_ptr = load64_h(face_p, 64)
-         def s_h = _load_u16_h(_raw_ptr(sizes_ptr), si * 24 + 0) ; height
+         def s_h = _load_u16_h(_raw_ptr(sizes_ptr), si * 24 + 0)
          mut diff = px - s_h
          if(diff < 0){ diff = -diff }
          if(diff < best_diff){ best_diff = diff best_idx = si }
@@ -245,13 +261,13 @@ fn _set_size(dict: info, int: px): bool {
    true
 }
 
-fn _px_val(dict: info): int {
+fn _px_val(dict info) int {
    def ps_ptr = info.get("ps_ptr", 0)
    if(!ps_ptr){ return 32 }
    load32(ps_ptr, 0)
 }
 
-fn scale_for_pixel_height(dict: info, any: pixels){
+fn scale_for_pixel_height(dict info, any pixels) float {
    "Returns the font-space scale required to reach `pixels` of height."
    if(info.get("is_color", false)){ return float(pixels) }
    if(!info.get("is_scalable", true)){ return 1.0 }
@@ -264,7 +280,7 @@ fn scale_for_pixel_height(dict: info, any: pixels){
    return scale_for_em(info, pixels) * float(upm) / float(span)
 }
 
-fn scale_for_em(dict: info, any: pixels): float {
+fn scale_for_em(dict info, any pixels) float {
    "Returns the scale factor that maps the font EM square to `pixels`."
    def px = float(pixels)
    if(!info.get("is_scalable", true)){ return 1.0 }
@@ -273,7 +289,7 @@ fn scale_for_em(dict: info, any: pixels): float {
    return px / float(upm)
 }
 
-fn get_vmetrics(dict: info): list {
+fn get_vmetrics(dict info) list {
    "Returns vertical font metrics as unscaled `[ascender, descender, height]`."
    def face = info.get("face", 0)
    if(!face){ return [0, 0, 0] }
@@ -285,20 +301,20 @@ fn get_vmetrics(dict: info): list {
    ]
 }
 
-fn get_glyph_index(dict: info, int: cp): int {
+fn get_glyph_index(dict info, int cp) int {
    "Returns the glyph index for codepoint `cp`."
    def face = info.get("face", 0)
    if(!face){ return 0 }
    _ft_get_char_index(_raw_ptr(face), cp)
 }
 
-fn _load_glyph(dict: info, int: gi, int: flags): bool {
+fn _load_glyph(dict info, int gi, int flags) bool {
    def face = info.get("face", 0)
    if(!face){ return false }
    _ft_load_glyph(_raw_ptr(face), gi, flags) == 0
 }
 
-fn get_hmetrics(dict: info, int: gi): list {
+fn get_hmetrics(dict info, int gi) list {
    "Returns horizontal glyph metrics for glyph index `gi`."
    def face = info.get("face", 0)
    if(!face){ return [0, 0] }
@@ -316,7 +332,7 @@ fn get_hmetrics(dict: info, int: gi): list {
    ]
 }
 
-fn get_glyph_box(dict: info, int: gi): any {
+fn get_glyph_box(dict info, int gi) any {
    "Returns glyph bounds for glyph index `gi`."
    def face = info.get("face", 0)
    if(!face){ return 0 }
@@ -335,7 +351,7 @@ fn get_glyph_box(dict: info, int: gi): any {
    [float(bl_s), float(bt_s - rows), float(bl_s + width), float(bt_s)]
 }
 
-fn get_kern(dict: info, int: g1, int: g2, int: px=0): float {
+fn get_kern(dict info, int g1, int g2, int px=0) float {
    "Returns horizontal kerning between glyphs `g1` and `g2` at pixel size `px`."
    def face = info.get("face", 0)
    if(!face){ return 0 }
@@ -353,7 +369,7 @@ fn get_kern(dict: info, int: g1, int: g2, int: px=0): float {
    float(kx_s) / 64.0
 }
 
-fn get_glyph_bitmap(dict: info, any: _scale_x, any: scale_y, int: gi): any {
+fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    "Rasterizes glyph `gi` at the requested pixel scale and returns bitmap metadata."
    def face = info.get("face", 0)
    if(!face){ return 0 }
@@ -426,7 +442,7 @@ fn get_glyph_bitmap(dict: info, any: _scale_x, any: scale_y, int: gi): any {
       mut row_src = 0
       if(pitch_s > 0){ row_src = y * pitch_s } else { row_src = (rows - 1 - y) * abs_pitch }
       def row_dst = y * width * 4
-      if(mode == 7){ ;; FT_PIXEL_MODE_BGRA
+      if(mode == 7){
          mut x = 0
          while(x + 4 <= width){
             def sx, dx = x * 4, x * 4
@@ -445,7 +461,7 @@ fn get_glyph_bitmap(dict: info, any: _scale_x, any: scale_y, int: gi): any {
             store32(bmp, _load_u8_h(src_p, row_src + sx+2)|(_load_u8_h(src_p, row_src + sx+1)<<8)|(_load_u8_h(src_p, row_src + sx)<<16)|(_load_u8_h(src_p, row_src + sx+3)<<24), row_dst + dx)
             x += 1
          }
-      } elif(mode == 1){ ;; FT_PIXEL_MODE_MONO -> RGBA (bit-packed, White + Alpha)
+      } elif(mode == 1){
          mut x = 0
          while(x < width){
             def byte_idx = x >> 3
@@ -455,7 +471,7 @@ fn get_glyph_bitmap(dict: info, any: _scale_x, any: scale_y, int: gi): any {
             store32(bmp, a | (a << 8) | (a << 16) | (a << 24), row_dst + x * 4)
             x += 1
          }
-      } else { ;; Default to GRAY -> RGBA (White + Alpha)
+      } else {
          mut x = 0
          while(x + 4 <= width){
             def a0, a1 = _load_u8_h(src_p, row_src + x), _load_u8_h(src_p, row_src + x+1)

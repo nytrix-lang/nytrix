@@ -1,14 +1,17 @@
-;; Keywords: rsa cca-malleability
+;; Keywords: rsa cca-malleability math crypto
 ;; RSA CCA malleability demonstrations routines.
 ;; Demonstrates why raw RSA must never be used without padding (OAEP).
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.cca_malleability(rsa_malleable_multiply, rsa_blind_decrypt, rsa_cca_attack)
 use std.core
 use std.math.nt
 
-fn rsa_malleable_multiply(any: c, any: s, any: e, any: n): any {
+fn rsa_malleable_multiply(any c, any s, any e, any n) any {
    "Multiply ciphertext c by s^e mod n to create a blinded ciphertext.
    The result is(c * s^e) mod n, which decrypts to(m * s) mod n.
    c: original ciphertext, s: random blinding factor, e: public exponent, n: modulus."
@@ -17,7 +20,7 @@ fn rsa_malleable_multiply(any: c, any: s, any: e, any: n): any {
    result
 }
 
-fn rsa_blind_decrypt(any: cipher, any: e, any: n, fnptr: oracle_fn): any {
+fn rsa_blind_decrypt(any cipher, any e, any n, fnptr oracle_fn) any {
    "Blind the ciphertext with a random factor s, query the decryption oracle,
    and unblind the result to recover the plaintext.
    cipher: ciphertext to decrypt, e: public exponent, n: modulus,
@@ -36,7 +39,7 @@ fn rsa_blind_decrypt(any: cipher, any: e, any: n, fnptr: oracle_fn): any {
    plain
 }
 
-fn rsa_cca_attack(any: c, any: e, any: n, fnptr: oracle_fn): any {
+fn rsa_cca_attack(any c, any e, any n, fnptr oracle_fn) any {
    "Perform a full chosen-ciphertext attack to recover the plaintext.
    This attack exploits the malleability of raw RSA.
    c: target ciphertext, e: public exponent, n: modulus,

@@ -1,6 +1,9 @@
-;; Keywords: symmetric des
+;; Keywords: symmetric des math crypto
 ;; Symmetric-crypto routines for DES block cipher operations.
 ;; Reference: NIST FIPS PUB 46-3, Data Encryption Standard.
+;; References:
+;; - std.math.crypto.symmetric
+;; - std.math.crypto
 module std.math.crypto.symmetric.des(des_encrypt_block, des_decrypt_block, des_encrypt_ecb, des_decrypt_ecb)
 use std.core
 
@@ -46,12 +49,12 @@ def _DES_PC2 = [
 def _DES_SHIFTS = [1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1]
 def _DES_S = [[ 14,4,13,1,2,15,11,8,3,10,6,12,5,9,0,7, 0,15,7,4,14,2,13,1,10,6,12,11,9,5,3,8, 4,1,14,8,13,6,2,11,15,12,9,7,3,10,5,0, 15,12,8,2,4,9,1,7,5,11,3,14,10,0,6,13 ], [ 15,1,8,14,6,11,3,4,9,7,2,13,12,0,5,10, 3,13,4,7,15,2,8,14,12,0,1,10,6,9,11,5, 0,14,7,11,10,4,13,1,5,8,12,6,9,3,2,15, 13,8,10,1,3,15,4,2,11,6,7,12,0,5,14,9 ], [ 10,0,9,14,6,3,15,5,1,13,12,7,11,4,2,8, 13,7,0,9,3,4,6,10,2,8,5,14,12,11,15,1, 13,6,4,9,8,15,3,0,11,1,2,12,5,10,14,7, 1,10,13,0,6,9,8,7,4,15,14,3,11,5,2,12 ], [ 7,13,14,3,0,6,9,10,1,2,8,5,11,12,4,15, 13,8,11,5,6,15,0,3,4,7,2,12,1,10,14,9, 10,6,9,0,12,11,7,13,15,1,3,14,5,2,8,4, 3,15,0,6,10,1,13,8,9,4,5,11,12,7,2,14 ], [ 2,12,4,1,7,10,11,6,8,5,3,15,13,0,14,9, 14,11,2,12,4,7,13,1,5,0,15,10,3,9,8,6, 4,2,1,11,10,13,7,8,15,9,12,5,6,3,0,14, 11,8,12,7,1,14,2,13,6,15,0,9,10,4,5,3 ], [ 12,1,10,15,9,2,6,8,0,13,3,4,14,7,5,11, 10,15,4,2,7,12,9,5,6,1,13,14,0,11,3,8, 9,14,15,5,2,8,12,3,7,0,4,10,1,13,11,6, 4,3,2,12,9,5,15,10,11,14,1,7,6,0,8,13 ], [ 4,11,2,14,15,0,8,13,3,12,9,7,5,10,6,1, 13,0,11,7,4,9,1,10,14,3,5,12,2,15,8,6, 1,4,11,13,12,3,7,14,10,15,6,8,0,5,9,2, 6,11,13,8,1,4,10,7,9,5,0,15,14,2,3,12 ], [ 13,2,8,4,6,15,11,1,10,9,3,14,5,0,12,7, 1,15,13,8,10,3,7,4,12,5,6,11,0,14,9,2, 7,11,4,1,9,12,14,2,0,6,10,13,15,3,5,8, 2,1,14,7,4,10,8,13,15,12,9,0,3,5,6,11 ]]
 
-fn _byte_bit(list: bytes, int: off, int: bit_pos): int {
+fn _byte_bit(list bytes, int off, int bit_pos) int {
    def b = __load_item_fast(bytes, off + ((bit_pos - 1) / 8))
    return(b >> (7 - ((bit_pos - 1) % 8))) & 1
 }
 
-fn _permute_bytes_int(list: bytes, int: off, list: table): int {
+fn _permute_bytes_int(list bytes, int off, list table) int {
    mut out = 0
    mut i = 0
    while(i < table.len){
@@ -61,7 +64,7 @@ fn _permute_bytes_int(list: bytes, int: off, list: table): int {
    return out
 }
 
-fn _initial_halves(list: block, int: off): list {
+fn _initial_halves(list block, int off) list {
    mut l = 0
    mut i = 0
    while(i < 32){
@@ -76,11 +79,11 @@ fn _initial_halves(list: block, int: off): list {
    return [l, r]
 }
 
-fn _pair_bit(int: hi, int: lo, int: bit_pos): int {
+fn _pair_bit(int hi, int lo, int bit_pos) int {
    bit_pos <= 32 ? ((hi >> (32 - bit_pos)) & 1) : ((lo >> (64 - bit_pos)) & 1)
 }
 
-fn _final_bytes_into(int: hi, int: lo, list: out, int: out_off){
+fn _final_bytes_into(int hi, int lo, list out, int out_off) any {
    mut i = 0
    while(i < 8){
       mut b = 0
@@ -94,7 +97,7 @@ fn _final_bytes_into(int: hi, int: lo, list: out, int: out_off){
    }
 }
 
-fn _final_bytes_list(int: hi, int: lo): list {
+fn _final_bytes_list(int hi, int lo) list {
    mut out = []
    mut i = 0
    while(i < 8){
@@ -110,7 +113,7 @@ fn _final_bytes_list(int: hi, int: lo): list {
    return out
 }
 
-fn _permute_int(int: value, int: width, list: table): int {
+fn _permute_int(int value, int width, list table) int {
    mut out = 0
    mut i = 0
    while(i < table.len){
@@ -120,11 +123,11 @@ fn _permute_int(int: value, int: width, list: table): int {
    return out
 }
 
-fn _rotl28(int: x, int: shift): int {
+fn _rotl28(int x, int shift) int {
    ((x << shift) | (x >> (28 - shift))) & 0x0fffffff
 }
 
-fn _subkeys(list: key): list {
+fn _subkeys(list key) list {
    def kb = _permute_bytes_int(key, 0, _DES_PC1)
    mut c = (kb >> 28) & 0x0fffffff
    mut d = kb & 0x0fffffff
@@ -140,7 +143,7 @@ fn _subkeys(list: key): list {
    return keys
 }
 
-fn _f(int: r, int: k): int {
+fn _f(int r, int k) int {
    def x = _permute_int(r, 32, _DES_E) ^^ k
    mut s = 0
    mut box = 0
@@ -154,7 +157,7 @@ fn _f(int: r, int: k): int {
    return _permute_int(s, 32, _DES_P)
 }
 
-fn _crypt_halves(list: keys, list: block, int: off, bool: decrypt): list {
+fn _crypt_halves(list keys, list block, int off, bool decrypt) list {
    def halves = _initial_halves(block, off)
    mut l = __load_item_fast(halves, 0)
    mut r = __load_item_fast(halves, 1)
@@ -169,7 +172,7 @@ fn _crypt_halves(list: keys, list: block, int: off, bool: decrypt): list {
    return [r, l]
 }
 
-fn _crypt_block_into(list: keys, list: block, int: off, bool: decrypt, list: out, int: out_off){
+fn _crypt_block_into(list keys, list block, int off, bool decrypt, list out, int out_off) any {
    def halves = _initial_halves(block, off)
    mut l = __load_item_fast(halves, 0)
    mut r = __load_item_fast(halves, 1)
@@ -184,29 +187,29 @@ fn _crypt_block_into(list: keys, list: block, int: off, bool: decrypt, list: out
    _final_bytes_into(r, l, out, out_off)
 }
 
-fn _crypt_block_with_keys(list: keys, list: block, int: off, bool: decrypt): list {
+fn _crypt_block_with_keys(list keys, list block, int off, bool decrypt) list {
    def halves = _crypt_halves(keys, block, off, decrypt)
    return _final_bytes_list(__load_item_fast(halves, 0), __load_item_fast(halves, 1))
 }
 
-fn _crypt_block(list: key, list: block, bool: decrypt): list {
+fn _crypt_block(list key, list block, bool decrypt) list {
    assert(key.len == 8, "DES key must be 8 bytes")
    assert(block.len == 8, "DES block must be 8 bytes")
    def keys = _subkeys(key)
    return _crypt_block_with_keys(keys, block, 0, decrypt)
 }
 
-fn des_encrypt_block(list: key, list: block): list {
+fn des_encrypt_block(list key, list block) list {
    "Encrypt one 8-byte DES block."
    return _crypt_block(key, block, false)
 }
 
-fn des_decrypt_block(list: key, list: block): list {
+fn des_decrypt_block(list key, list block) list {
    "Decrypt one 8-byte DES block."
    return _crypt_block(key, block, true)
 }
 
-fn des_encrypt_ecb(list: key, list: plaintext): list {
+fn des_encrypt_ecb(list key, list plaintext) list {
    "DES-ECB encryption. Input length must be a multiple of 8."
    assert((plaintext.len % 8) == 0, "DES-ECB plaintext length must be a multiple of 8")
    assert(key.len == 8, "DES key must be 8 bytes")
@@ -221,7 +224,7 @@ fn des_encrypt_ecb(list: key, list: plaintext): list {
    return out
 }
 
-fn des_decrypt_ecb(list: key, list: ciphertext): list {
+fn des_decrypt_ecb(list key, list ciphertext) list {
    "DES-ECB decryption. Input length must be a multiple of 8."
    assert((ciphertext.len % 8) == 0, "DES-ECB ciphertext length must be a multiple of 8")
    assert(key.len == 8, "DES key must be 8 bytes")

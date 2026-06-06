@@ -1,11 +1,14 @@
-;; Keywords: number-theory hensel hensel-lifting
+;; Keywords: number-theory hensel hensel-lifting math crypto
 ;; Crypto number-theory routines for Hensel lifting over modular polynomial roots.
 ;; Polynomials are coefficient lists in ascending order: c0 + c1*x + c2*x^2 + ...
+;; References:
+;; - std.math.crypto.number
+;; - std.math.crypto
 module std.math.crypto.number.hensel(poly_eval_mod, hensel_lift_linear, hensel_roots)
 use std.core
 use std.math.nt
 
-fn poly_eval_mod(list: poly, any: x, any: m): any {
+fn poly_eval_mod(list poly, any x, any m) any {
    "Evaluate a coefficient-list polynomial at x modulo m."
    mut acc = Z(0)
    mut pow_x = Z(1)
@@ -18,7 +21,7 @@ fn poly_eval_mod(list: poly, any: x, any: m): any {
    acc
 }
 
-fn _int_pow(any: base, int: exp): any {
+fn _int_pow(any base, int exp) any {
    mut out = Z(1)
    mut b = Z(base)
    mut e = exp
@@ -29,7 +32,7 @@ fn _int_pow(any: base, int: exp): any {
    out
 }
 
-fn hensel_lift_linear(list: poly, int: p, int: k, list: roots): list {
+fn hensel_lift_linear(list poly, int p, int k, list roots) list {
    "Lift roots of poly modulo p^k to roots modulo p^(k+1) by trying root + i*p^k.
    This brute-force linear lift also works for singular roots."
    def pk = _int_pow(p, k)
@@ -49,7 +52,7 @@ fn hensel_lift_linear(list: poly, int: p, int: k, list: roots): list {
    lifted
 }
 
-fn hensel_roots(list: poly, int: p, int: k): list {
+fn hensel_roots(list poly, int p, int k) list {
    "Find roots of a coefficient-list polynomial modulo p^k by brute root search mod p, then linear Hensel lifting."
    if(k <= 0){ return [] }
    mut roots = []

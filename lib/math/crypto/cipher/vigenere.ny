@@ -1,8 +1,11 @@
-;; Keywords: cipher vigenere
+;; Keywords: cipher vigenere math crypto
 ;; Vigenere cipher encryption, decryption, and key recovery routines.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.vigenere(vigenere_encrypt, vigenere_decrypt, vigenere_crack, vigenere_guess_key_lengths, index_of_coincidence, kasiski_test)
 use std.core
 use std.core.str (Builder, builder_append, builder_append_byte, builder_to_str, builder_free)
@@ -10,7 +13,7 @@ use std.math.crypto.error
 
 def _VG_ENG_FREQ = [82, 15, 28, 43, 127, 22, 20, 61, 70, 2, 8, 40, 24, 67, 75, 19, 1, 60, 63, 91, 28, 10, 24, 2, 20, 2]
 
-fn _vigenere_require_key(str: key, str: scope): bool {
+fn _vigenere_require_key(str key, str scope) bool {
    crypto_require_nonempty(key, scope, "key")
    mut i = 0
    while(i < key.len){
@@ -24,13 +27,13 @@ fn _vigenere_require_key(str: key, str: scope): bool {
    true
 }
 
-fn _vg_builder_take(list: b): str {
+fn _vg_builder_take(list b) str {
    def out = builder_to_str(b)
    builder_free(b)
    out
 }
 
-fn _vg_zero_list(int: n): list {
+fn _vg_zero_list(int n) list {
    mut xs = list(n)
    mut i = 0
    while(i < n){
@@ -41,7 +44,7 @@ fn _vg_zero_list(int: n): list {
    xs
 }
 
-fn _vg_english_byte_score(int: b): int {
+fn _vg_english_byte_score(int b) int {
    mut score = 0
    case b {
       32..126 -> { score += 2 }
@@ -57,7 +60,7 @@ fn _vg_english_byte_score(int: b): int {
    score
 }
 
-fn _vigenere_plain_score(str: text): int {
+fn _vigenere_plain_score(str text) int {
    mut score = 0
    mut has_ing = false
    mut has_tion = false
@@ -74,7 +77,7 @@ fn _vigenere_plain_score(str: text): int {
    score
 }
 
-fn _vg_clean_alpha(str: text): str {
+fn _vg_clean_alpha(str text) str {
    mut out = Builder(max(16, text.len + 8))
    mut i = 0
    while(i < text.len){
@@ -89,18 +92,7 @@ fn _vg_clean_alpha(str: text): str {
    _vg_builder_take(out)
 }
 
-fn _vg_column(str: text, int: key_len, int: pos): str {
-   if(key_len <= 0){ return "" }
-   mut sub = Builder(max(16, (text.len / key_len) + 8))
-   mut j = pos
-   while(j < text.len){
-      sub = builder_append_byte(sub, load8(text, j))
-      j += key_len
-   }
-   _vg_builder_take(sub)
-}
-
-fn _vg_avg_ic_for_len(str: text, int: key_len): f64 {
+fn _vg_avg_ic_for_len(str text, int key_len) f64 {
    if(key_len <= 0){ return 0.0 }
    def width = key_len * 26
    mut counts = _vg_zero_list(width)
@@ -148,7 +140,7 @@ fn _vg_avg_ic_for_len(str: text, int: key_len): f64 {
    count == 0 ? 0.0 : total / count
 }
 
-fn _vg_key_char_from_counts(list: counts, int: base, int: n): str {
+fn _vg_key_char_from_counts(list counts, int base, int n) str {
    if(n <= 0){ return "A" }
    mut best_shift = 0
    mut best_chi = 999999999
@@ -173,7 +165,7 @@ fn _vg_key_char_from_counts(list: counts, int: base, int: n): str {
    chr(best_shift + 65)
 }
 
-fn _vg_key_for_len(str: clean, int: key_len): str {
+fn _vg_key_for_len(str clean, int key_len) str {
    def width = key_len * 26
    mut counts = _vg_zero_list(width)
    mut lens = _vg_zero_list(key_len)
@@ -199,7 +191,7 @@ fn _vg_key_for_len(str: clean, int: key_len): str {
    _vg_builder_take(guessed_key)
 }
 
-fn _vg_sort_score_rows_desc(list: rows): list {
+fn _vg_sort_score_rows_desc(list rows) list {
    def out = clone(rows)
    mut i = 1
    while(i < out.len){
@@ -216,7 +208,7 @@ fn _vg_sort_score_rows_desc(list: rows): list {
    out
 }
 
-fn _vg_kasiski_factor_counts(str: text, int: max_len): list {
+fn _vg_kasiski_factor_counts(str text, int max_len) list {
    mut counts = _vg_zero_list(max_len + 1)
    def text_len = text.len
    if(text_len < 3){ return counts }
@@ -242,12 +234,12 @@ fn _vg_kasiski_factor_counts(str: text, int: max_len): list {
    counts
 }
 
-fn _vg_apply_shift(int: value, int: key_val, bool: decrypt): int {
+fn _vg_apply_shift(int value, int key_val, bool decrypt) int {
    if(decrypt){ return(value - key_val + 26) % 26 }
    (value + key_val) % 26
 }
 
-fn _vg_transform(str: text, str: key, bool: decrypt, str: scope, str: name): str {
+fn _vg_transform(str text, str key, bool decrypt, str scope, str name) str {
    crypto_require(text != nil, scope, name + " is nil")
    _vigenere_require_key(key, scope)
    mut result = Builder(max(16, text.len + 8))
@@ -275,7 +267,7 @@ fn _vg_transform(str: text, str: key, bool: decrypt, str: scope, str: name): str
    _vg_builder_take(result)
 }
 
-fn _vg_guess_key_len_rows_clean(str: clean, int: max_len): list {
+fn _vg_guess_key_len_rows_clean(str clean, int max_len) list {
    max_len = max(1, max_len)
    mut scores = list(max_len)
    def kasiski_counts = _vg_kasiski_factor_counts(clean, max_len)
@@ -291,7 +283,7 @@ fn _vg_guess_key_len_rows_clean(str: clean, int: max_len): list {
    _vg_sort_score_rows_desc(scores)
 }
 
-fn vigenere_guess_key_lengths(str: ciphertext, int: max_len=20): list {
+fn vigenere_guess_key_lengths(str ciphertext, int max_len=20) list {
    "Guess likely Vigenere key lengths using Kasiski distances and average IC.
    Returns a list of candidate key lengths ordered best-first."
    crypto_require_nonempty(ciphertext, "cipher.vigenere_guess_key_lengths", "ciphertext")
@@ -308,7 +300,7 @@ fn vigenere_guess_key_lengths(str: ciphertext, int: max_len=20): list {
    out
 }
 
-fn vigenere_encrypt(str: plaintext, str: key): str {
+fn vigenere_encrypt(str plaintext, str key) str {
    "Encrypt plaintext using Vigenere polyalphabetic substitution cipher with the given keyword.
    plaintext: uppercase alphabetic string to encrypt
    key: uppercase alphabetic keyword
@@ -316,7 +308,7 @@ fn vigenere_encrypt(str: plaintext, str: key): str {
    _vg_transform(plaintext, key, false, "cipher.vigenere_encrypt", "plaintext")
 }
 
-fn vigenere_decrypt(str: ciphertext, str: key): str {
+fn vigenere_decrypt(str ciphertext, str key) str {
    "Decrypt ciphertext that was encrypted with the Vigenere cipher using the given keyword.
    ciphertext: uppercase alphabetic string to decrypt
    key: uppercase alphabetic keyword used during encryption
@@ -324,7 +316,7 @@ fn vigenere_decrypt(str: ciphertext, str: key): str {
    _vg_transform(ciphertext, key, true, "cipher.vigenere_decrypt", "ciphertext")
 }
 
-fn index_of_coincidence(str: text): f64 {
+fn index_of_coincidence(str text) f64 {
    "Compute the index of coincidence for the given text.
    text: alphabetic string(case-insensitive, non-alpha ignored)
    Returns the IC value as a float. Higher values indicate non-random text."
@@ -360,7 +352,7 @@ fn index_of_coincidence(str: text): f64 {
    float(sum) / float(n * (n - 1))
 }
 
-fn kasiski_test(str: text): list {
+fn kasiski_test(str text) list {
    "Find repeated sequences of length 3 or more in the text and compute the distances between their occurrences.
    text: alphabetic string to analyze
    Returns a list of distance values between repeated sequence occurrences."
@@ -399,7 +391,7 @@ fn kasiski_test(str: text): list {
    distances
 }
 
-fn vigenere_crack(str: ciphertext): list {
+fn vigenere_crack(str ciphertext) list {
    "Attempt to crack Vigenere cipher by estimating key length via index of coincidence,
    then performing frequency analysis on each key position.
    ciphertext: uppercase alphabetic string encrypted with Vigenere
@@ -439,8 +431,8 @@ fn vigenere_crack(str: ciphertext): list {
    result
 }
 
-if(comptime{ return __main() }){
+#main {
    def f64: ic = index_of_coincidence("ABAB")
    assert(ic > 0.33 && ic < 0.34, "index_of_coincidence uses floating division")
-   print("✓ crypto cipher.vigenere self-tests passed")
+   print("✓ std.math.crypto.cipher.vigenere self-test passed")
 }

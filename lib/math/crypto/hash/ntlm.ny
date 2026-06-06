@@ -1,30 +1,39 @@
-;; Keywords: hash ntlm
+;; Keywords: hash ntlm math crypto
 ;; Hash-analysis routines for NTLM, LM, MD4, and DCC password hashes.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc1320
+;; References:
+;; - std.math.crypto.hash
+;; - std.math.crypto
 module std.math.crypto.hash.ntlm(md4_bytes, md4_hex, lm_hash, ntlm_hash, dcc_hash, dcc2_hash)
 use std.core
 use std.math.bin (zero_list)
 use std.math.crypto.symmetric.des
 use std.core.str as str
 
-fn _u32(int: x): int { x & 4294967295 }
-fn _and32(int: a, int: b): int { (a & 4294967295) & (b & 4294967295) }
-fn _or32(int: a, int: b): int { (a & 4294967295) | (b & 4294967295) }
-fn _xor32(int: a, int: b): int { (a & 4294967295) ^^ (b & 4294967295) }
-fn _not32(int: x): int { 4294967295 - (x & 4294967295) }
-fn _add32(int: a, int: b): int { (a + b) & 4294967295 }
-fn _rotl32(int: x, int: n): int {
+fn _u32(int x) int { x & 4294967295 }
+
+fn _and32(int a, int b) int { (a & 4294967295) & (b & 4294967295) }
+
+fn _or32(int a, int b) int { (a & 4294967295) | (b & 4294967295) }
+
+fn _xor32(int a, int b) int { (a & 4294967295) ^^ (b & 4294967295) }
+
+fn _not32(int x) int { 4294967295 - (x & 4294967295) }
+
+fn _add32(int a, int b) int { (a + b) & 4294967295 }
+
+fn _rotl32(int x, int n) int {
    def k = n & 31
    if(k == 0){ return _u32(x) }
    _u32((x << k) | ((x & 4294967295) >> (32 - k)))
 }
 
-fn _be32_from_bytes(list: data, int: i): int {
+fn _be32_from_bytes(list data, int i) int {
    (__load_item_fast(data, i) << 24) | (__load_item_fast(data, i + 1) << 16) | (__load_item_fast(data, i + 2) << 8) | __load_item_fast(data, i + 3)
 }
 
-fn _sha1_bytes(list: data): list {
+fn _sha1_bytes(list data) list {
    def data_len = data.len
    def bit_len = data_len * 8
    def zero_len = (56 - ((data_len + 1) % 64) + 64) % 64
@@ -111,7 +120,7 @@ fn _sha1_bytes(list: data): list {
    out
 }
 
-fn _hmac_sha1_with_pads(list: ipad, list: opad, list: message): list {
+fn _hmac_sha1_with_pads(list ipad, list opad, list message) list {
    mut inner = zero_list(64 + message.len)
    mut i = 0
    while(i < 64){
@@ -138,7 +147,7 @@ fn _hmac_sha1_with_pads(list: ipad, list: opad, list: message): list {
    _sha1_bytes(outer)
 }
 
-fn _hmac_sha1_pads(list: key): list {
+fn _hmac_sha1_pads(list key) list {
    def src = (key.len > 64) ? _sha1_bytes(key) : key
    mut k = zero_list(64)
    mut i = 0
@@ -157,12 +166,7 @@ fn _hmac_sha1_pads(list: key): list {
    [ipad, opad]
 }
 
-fn _hmac_sha1_bytes(list: key, list: message): list {
-   def pads = _hmac_sha1_pads(key)
-   _hmac_sha1_with_pads(pads[0], pads[1], message)
-}
-
-fn _xor_bytes(list: a, list: b): list {
+fn _xor_bytes(list a, list b) list {
    mut out = zero_list(a.len)
    mut i = 0
    while(i < a.len){
@@ -172,7 +176,7 @@ fn _xor_bytes(list: a, list: b): list {
    out
 }
 
-fn _pbkdf2_hmac_sha1_16(list: password, list: salt, int: iterations): list {
+fn _pbkdf2_hmac_sha1_16(list password, list salt, int iterations) list {
    mut block_salt = zero_list(salt.len + 4)
    mut si = 0
    while(si < salt.len){
@@ -200,7 +204,7 @@ fn _pbkdf2_hmac_sha1_16(list: password, list: salt, int: iterations): list {
    out
 }
 
-fn _utf16le_bytes(str: s): list {
+fn _utf16le_bytes(str s) list {
    def n = s.len * 2
    mut out = zero_list(n)
    mut i = 0
@@ -211,7 +215,7 @@ fn _utf16le_bytes(str: s): list {
    out
 }
 
-fn md4_bytes(list: data): list {
+fn md4_bytes(list data) list {
    "Return MD4 digest bytes for a byte list."
    def data_len = data.len
    def bit_len = data_len * 8
@@ -334,12 +338,12 @@ fn md4_bytes(list: data): list {
    out
 }
 
-fn md4_hex(list: data): str {
+fn md4_hex(list data) str {
    "Return MD4 digest hex for a byte list."
    md4_bytes(data).hex
 }
 
-fn _set_odd_parity(int: b): int {
+fn _set_odd_parity(int b) int {
    def base = b & 0xfe
    mut ones = 0
    mut i = 1
@@ -351,7 +355,7 @@ fn _set_odd_parity(int: b): int {
    base
 }
 
-fn _lm_des_key_from_buf(list: buf, int: start): list {
+fn _lm_des_key_from_buf(list buf, int start) list {
    def b0, b1 = __load_item_fast(buf, start), __load_item_fast(buf, start + 1)
    def b2, b3 = __load_item_fast(buf, start + 2), __load_item_fast(buf, start + 3)
    def b4, b5 = __load_item_fast(buf, start + 4), __load_item_fast(buf, start + 5)
@@ -368,7 +372,7 @@ fn _lm_des_key_from_buf(list: buf, int: start): list {
    ]
 }
 
-fn lm_hash(str: password): str {
+fn lm_hash(str password) str {
    "Return the Windows LM hash of a password as lowercase hex.
    The password is uppercased, truncated/padded to 14 bytes, split into two
    7-byte DES keys, then used to encrypt the constant KGS!@#$%."
@@ -388,12 +392,12 @@ fn lm_hash(str: password): str {
    des_encrypt_block(k1, magic).concat(des_encrypt_block(k2, magic)).hex
 }
 
-fn ntlm_hash(str: password): str {
+fn ntlm_hash(str password) str {
    "Return the NT hash, MD4(UTF-16LE(password)), as lowercase hex."
    md4_hex(_utf16le_bytes(password))
 }
 
-fn dcc_hash(str: password, str: username): str {
+fn dcc_hash(str password, str username) str {
    "Return MSCache v1 / DCC hash: MD4(NT_hash_bytes || UTF-16LE(lower(username)))."
    def nt = md4_bytes(_utf16le_bytes(password))
    def user = _utf16le_bytes(str.lower(username))
@@ -411,14 +415,15 @@ fn dcc_hash(str: password, str: username): str {
    md4_hex(data)
 }
 
-fn dcc2_hash(str: password, str: username, int: iterations=10240): str {
+fn dcc2_hash(str password, str username, int iterations=10240) str {
    "Return MSCache v2 / DCC2 hash: PBKDF2-HMAC-SHA1(DCC1, lower(username UTF-16LE), iterations)[:16]."
    def dcc1 = dcc_hash(password, username).unhex
    _pbkdf2_hmac_sha1_16(dcc1, _utf16le_bytes(str.lower(username)), iterations).hex
 }
 
-if(comptime{ return __main() }){
+#main {
    assert(md4_hex([]) == "31d6cfe0d16ae931b73c59d7e0c089c0", "MD4 empty vector")
    assert(md4_hex("abc".to_bytes) == "a448017aaf21d8525fc10ae87aa6729d", "MD4 abc vector")
    assert(ntlm_hash("password") == "8846f7eaee8fb117ad06bdd830b7586c", "NTLM password vector")
+   print("✓ std.math.crypto.hash.ntlm self-test passed")
 }

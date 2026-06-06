@@ -1,5 +1,8 @@
-;; Keywords: syntax lua
+;; Keywords: syntax lua parse highlight
 ;; Lua syntax highlighter
+;; References:
+;; - std.parse.syntax
+;; - std.parse.syntax.helpers
 module std.parse.syntax.lua(tokenize)
 use std.core
 use std.core.str as str
@@ -8,7 +11,8 @@ use std.parse.syntax.helpers as _h
 def KW = "and;break;do;else;elseif;end;false;for;function;goto;if;in;local;nil;not;or;repeat;return;then;true;until;while"
 def FN = "print;type;tostring;tonumber;ipairs;pairs;next;select;unpack;require;assert;error;getmetatable;setmetatable;rawget;rawset;rawequal;rawlen;pcall;xpcall;coroutine;string;table;math;os;io;file;debug;package;utf8;load;loadfile;dofile;collectgarbage"
 
-fn tokenize(str: source, list: out_tokens): list {
+fn tokenize(str source, list out_tokens) list {
+   "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
    while(i < src_len){

@@ -1,8 +1,11 @@
-;; Keywords: rsa pkcs1-v15
+;; Keywords: rsa pkcs1-v15 math crypto
 ;; RSA PKCS#1 v1.5 padding and oracle analysis routines.
 ;; Reference:
 ;; - RFC 8017
 ;; - PKCS #1 v2.2, EMSA-PKCS1-v1_5 and RSAES-PKCS1-v1_5
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.pkcs1_v15(emsa_pkcs1_v15_encode, rsa_pkcs1_v15_sign, rsa_pkcs1_v15_verify, eme_pkcs1_v15_encode, eme_pkcs1_v15_decode, rsa_pkcs1_v15_encrypt, rsa_pkcs1_v15_decrypt, rsa_pkcs1_v15_padding_oracle)
 use std.core
 use std.math.nt
@@ -14,7 +17,7 @@ def _ASN1_MD5 = [0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x0
 def _ASN1_SHA1 = [0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x05,0x00,0x04,0x14]
 def _ASN1_SHA256 = [0x30,0x31,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x01,0x05,0x00,0x04,0x20]
 
-fn _bytes_concat(list: a, list: b): list {
+fn _bytes_concat(list a, list b) list {
    def n = a.len + b.len
    mut out = list(n)
    __list_set_len(out, n)
@@ -31,7 +34,7 @@ fn _bytes_concat(list: a, list: b): list {
    out
 }
 
-fn _bigint_to_fixed_bytes(any: value, int: n): list {
+fn _bigint_to_fixed_bytes(any value, int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut x = Z(value)
@@ -44,23 +47,23 @@ fn _bigint_to_fixed_bytes(any: value, int: n): list {
    out
 }
 
-fn _pkcs1_hash_bytes(str: algo, any: msg): any {
+fn _pkcs1_hash_bytes(str algo, any msg) any {
    if(algo == "md5"){ return md5(msg).unhex }
    if(algo == "sha1"){ return sha1(msg).unhex }
    if(algo == "sha256"){ return sha256(msg) }
    nil
 }
 
-fn _pkcs1_digest_info_prefix(str: algo): any {
+fn _pkcs1_digest_info_prefix(str algo) any {
    if(algo == "md5"){ return _ASN1_MD5 }
    if(algo == "sha1"){ return _ASN1_SHA1 }
    if(algo == "sha256"){ return _ASN1_SHA256 }
    nil
 }
 
-fn _nonzero_random_byte(): int { int(rand() % 255) + 1 }
+fn _nonzero_random_byte() int { int(rand() % 255) + 1 }
 
-fn _valid_nonzero_bytes(list: ps): bool {
+fn _valid_nonzero_bytes(list ps) bool {
    mut i = 0
    while(i < ps.len){
       def b = ps[i]
@@ -70,7 +73,7 @@ fn _valid_nonzero_bytes(list: ps): bool {
    true
 }
 
-fn emsa_pkcs1_v15_encode(any: msg, int: em_len, str: algo="sha256"): any {
+fn emsa_pkcs1_v15_encode(any msg, int em_len, str algo="sha256") any {
    "Encode msg using EMSA-PKCS1-v1_5 for the selected hash algorithm."
    def digest = _pkcs1_hash_bytes(algo, msg)
    if(digest == nil){ return nil }
@@ -97,7 +100,7 @@ fn emsa_pkcs1_v15_encode(any: msg, int: em_len, str: algo="sha256"): any {
    em
 }
 
-fn rsa_pkcs1_v15_sign(any: msg, number: d, number: n, str: algo="sha256"): any {
+fn rsa_pkcs1_v15_sign(any msg, number d, number n, str algo="sha256") any {
    "Sign msg using RSA PKCS#1 v1.5."
    def k = (bit_length(n) + 7) / 8
    def em = emsa_pkcs1_v15_encode(msg, k, algo)
@@ -105,7 +108,7 @@ fn rsa_pkcs1_v15_sign(any: msg, number: d, number: n, str: algo="sha256"): any {
    power_mod(bytes_to_bigint(em), d, n)
 }
 
-fn rsa_pkcs1_v15_verify(any: msg, number: sig, number: e, number: n, str: algo="sha256"): bool {
+fn rsa_pkcs1_v15_verify(any msg, number sig, number e, number n, str algo="sha256") bool {
    "Verify an RSA PKCS#1 v1.5 signature."
    def k = (bit_length(n) + 7) / 8
    def em_expect = emsa_pkcs1_v15_encode(msg, k, algo)
@@ -113,7 +116,7 @@ fn rsa_pkcs1_v15_verify(any: msg, number: sig, number: e, number: n, str: algo="
    power_mod(sig, e, n) == bytes_to_bigint(em_expect)
 }
 
-fn eme_pkcs1_v15_encode(list: message, int: k, any: ps=nil): any {
+fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
    "Encode byte list message as an RSAES-PKCS1-v1_5 block of k bytes.
    ps may be supplied for deterministic tests and must contain nonzero bytes."
    if(k < message.len + 11){ return nil }
@@ -152,7 +155,7 @@ fn eme_pkcs1_v15_encode(list: message, int: k, any: ps=nil): any {
    out
 }
 
-fn eme_pkcs1_v15_decode(list: em): any {
+fn eme_pkcs1_v15_decode(list em) any {
    "Decode an RSAES-PKCS1-v1_5 encoded block. Returns message bytes or nil."
    if(em.len < 11){ return nil }
    if(em[0] != 0 || em[1] != 2){ return nil }
@@ -181,7 +184,7 @@ fn eme_pkcs1_v15_decode(list: em): any {
    msg
 }
 
-fn rsa_pkcs1_v15_encrypt(list: message, number: e, number: n, any: ps=nil): any {
+fn rsa_pkcs1_v15_encrypt(list message, number e, number n, any ps=nil) any {
    "Encrypt byte list message with RSAES-PKCS1-v1_5. Returns integer ciphertext."
    def k = (bit_length(n) + 7) / 8
    def em = eme_pkcs1_v15_encode(message, k, ps)
@@ -189,21 +192,21 @@ fn rsa_pkcs1_v15_encrypt(list: message, number: e, number: n, any: ps=nil): any 
    power_mod(bytes_to_bigint(em), e, n)
 }
 
-fn rsa_pkcs1_v15_decrypt(number: ciphertext, number: d, number: n): any {
+fn rsa_pkcs1_v15_decrypt(number ciphertext, number d, number n) any {
    "Decrypt RSAES-PKCS1-v1_5 integer ciphertext. Returns message bytes or nil."
    def k, m = (bit_length(n) + 7) / 8, power_mod(ciphertext, d, n)
    eme_pkcs1_v15_decode(_bigint_to_fixed_bytes(m, k))
 }
 
-fn rsa_pkcs1_v15_padding_oracle(number: ciphertext, number: d, number: n): bool {
+fn rsa_pkcs1_v15_padding_oracle(number ciphertext, number d, number n) bool {
    "Return true if RSA decryption has RSAES-PKCS1-v1_5 block structure."
    rsa_pkcs1_v15_decrypt(ciphertext, d, n) != nil
 }
 
-if(comptime{ return __main() }){
+#main {
    def msg = "ny".to_bytes
    def ps = [1,2,3,4,5,6,7,8]
    def em = eme_pkcs1_v15_encode(msg, msg.len + 11, ps)
    assert(em != nil && eme_pkcs1_v15_decode(em) == msg, "PKCS1 v1.5 deterministic EME roundtrip")
-   print("RSA_PKCS1_V15_OK")
+   print("✓ std.math.crypto.rsa.pkcs1_v15 self-test passed")
 }

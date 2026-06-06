@@ -1,7 +1,9 @@
-;; Keywords: noise procedural
+;; Keywords: noise procedural math
 ;; Perlin and Fractal Noise Implementation for Nytrix
 ;; Reference:
 ;; - https://github.com/nothings/stb/blob/master/stb_perlin.h
+;; References:
+;; - std.math
 module std.math.noise(perlin3, perlin3_seed, fbm3, turbulence3)
 use std.core
 use std.math
@@ -14,16 +16,16 @@ def _grads = [
    [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]
 ]
 
-fn _lerp(any: a, any: b, any: t): any { a + (b - a) * t }
+fn _lerp(any a, any b, any t) any { a + (b - a) * t }
 
-fn _ease(any: t): any { t * t * t * (t * (t * 6 - 15) + 10) }
+fn _ease(any t) any { t * t * t * (t * (t * 6 - 15) + 10) }
 
-fn _grad(int: idx, any: x, any: y, any: z): any {
+fn _grad(int idx, any x, any y, any z) any {
    def g = _grads.get(idx)
    g.get(0) * x + g.get(1) * y + g.get(2) * z
 }
 
-fn perlin3_seed(any: x, any: y, any: z, int: seed=0): any {
+fn perlin3_seed(any x, any y, any z, int seed=0) any {
    "Computes 3D Perlin noise value at(x, y, z) with a specific `seed`."
    def px, py = floor(x), floor(y)
    def pz = floor(z)
@@ -63,12 +65,12 @@ fn perlin3_seed(any: x, any: y, any: z, int: seed=0): any {
    _lerp(n0, n1, u)
 }
 
-fn perlin3(any: x, any: y, any: z): any {
+fn perlin3(any x, any y, any z) any {
    "Computes 3D Perlin noise value at coordinates(x, y, z). Returns a value approximately in the range [-1.0, 1.0]."
    perlin3_seed(x, y, z, 0)
 }
 
-fn fbm3(any: x, any: y, any: z, any: lacunarity=2.0, any: gain=0.5, int: octaves=6): any {
+fn fbm3(any x, any y, any z, any lacunarity=2.0, any gain=0.5, int octaves=6) any {
    "Computes 3D Fractal Brownian Motion noise(sum of octaves of Perlin noise with increasing frequency and decreasing amplitude)."
    mut sum = 0.0
    mut freq = 1.0
@@ -83,7 +85,7 @@ fn fbm3(any: x, any: y, any: z, any: lacunarity=2.0, any: gain=0.5, int: octaves
    sum
 }
 
-fn turbulence3(any: x, any: y, any: z, any: lacunarity=2.0, any: gain=0.5, int: octaves=6): any {
+fn turbulence3(any x, any y, any z, any lacunarity=2.0, any gain=0.5, int octaves=6) any {
    "Computes 3D Turbulence noise(sum of absolute values of octaves of Perlin noise), creating sharper features like ridges."
    mut sum = 0.0
    mut freq = 1.0

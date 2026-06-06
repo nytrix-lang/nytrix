@@ -1,8 +1,11 @@
-;; Keywords: lattice lll
+;; Keywords: lattice lll math crypto number-theory
 ;; LLL reduction.
 ;; Reference:
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.lll(lll, gram_schmidt, lll_backend_report, gso_profile, gso_report, lll_quality_report, lll_is_reduced, lll_reduce_report, lll_report, lll_reduce_bounded, lll_reduce_bounded_report, lll_find_ternary_pair_rows, lll_find_ntru_key_rows, lll_basis_gram_gso_parity_report, lll_gso_parity_report, lll_gram_gso_report, lll_gram_quality_report, lll_gram_is_reduced, lll_gram_reduce_report, lll_gram_reduce_bounded_report, lll_gram_first_column_reduce_report, lll_gram_report, lll_gram)
 use std.core
 use std.core.str as str
@@ -14,7 +17,7 @@ use std.math.scalar (pow)
 use std.os.clock (ticks)
 use std.os.prim (env)
 
-fn _lll_set_fields(dict: out, list: fields): dict {
+fn _lll_set_fields(dict out, list fields) dict {
    mut i = 0
    while(i < fields.len){
       def field = fields.get(i)
@@ -24,30 +27,30 @@ fn _lll_set_fields(dict: out, list: fields): dict {
    out
 }
 
-fn _lll_rows(any: m): int { int(m[0]) }
+fn _lll_rows(any m) int { int(m[0]) }
 
-fn _lll_cols(any: m): int { int(m[1]) }
+fn _lll_cols(any m) int { int(m[1]) }
 
-fn _lll_data(any: m): list { m[2] }
+fn _lll_data(any m) list { m[2] }
 
-fn _lll_big_float(any: x): f64 {
+fn _lll_big_float(any x) f64 {
    __bigint_to_f64(Z(x))
 }
 
-fn _lll_float(any: x): f64 { is_bigint(x) ? _lll_big_float(x) : float(x) }
+fn _lll_float(any x) f64 { is_bigint(x) ? _lll_big_float(x) : float(x) }
 
-fn _lll_big_float_scaled(any: x, int: scale_digits): f64 {
+fn _lll_big_float_scaled(any x, int scale_digits) f64 {
    mut out = __bigint_to_f64(Z(x))
    if(scale_digits != 0){ out *= pow(10.0, 0.0 - float(scale_digits)) }
    out
 }
 
-fn _lll_float_scaled(any: x, int: scale_digits): f64 {
+fn _lll_float_scaled(any x, int scale_digits) f64 {
    if(is_bigint(x)){ return _lll_big_float_scaled(x, scale_digits) }
    float(x) * pow(10.0, 0.0 - float(scale_digits))
 }
 
-fn _lll_float_row_scaled(list: row, int: scale_digits): list {
+fn _lll_float_row_scaled(list row, int scale_digits) list {
    mut out = []
    mut i = 0
    while(i < row.len){
@@ -57,7 +60,7 @@ fn _lll_float_row_scaled(list: row, int: scale_digits): list {
    out
 }
 
-fn _lll_entry_digits(any: x): int {
+fn _lll_entry_digits(any x) int {
    if(is_float(x)){ return 1 }
    if(is_int(x)){
       mut v = int(x)
@@ -90,7 +93,7 @@ fn _lll_entry_digits(any: x): int {
    bigint_to_str(a).len
 }
 
-fn _lll_scale_digits(any: basis): int {
+fn _lll_scale_digits(any basis) int {
    def data = _lll_data(basis)
    mut max_digits = 0
    mut i = 0
@@ -107,7 +110,7 @@ fn _lll_scale_digits(any: basis): int {
    max(0, max_digits - 80)
 }
 
-fn _lll_get(any: m, int: i, int: j): any {
+fn _lll_get(any m, int i, int j) any {
    def data = _lll_data(m)
    if(i < 0 || i >= data.len){ return Z(0) }
    def row = data[i]
@@ -115,7 +118,7 @@ fn _lll_get(any: m, int: i, int: j): any {
    row[j]
 }
 
-fn _lll_set(any: m, int: i, int: j, any: val): any {
+fn _lll_set(any m, int i, int j, any val) any {
    def rows = _lll_rows(m)
    def cols = _lll_cols(m)
    mut data = _lll_data(m)
@@ -126,7 +129,7 @@ fn _lll_set(any: m, int: i, int: j, any: val): any {
    [rows, cols, data]
 }
 
-fn lll_backend_report(any: basis=nil): dict {
+fn lll_backend_report(any basis=nil) dict {
    "Return the LLL strategy policy and audit fields."
    if(basis == nil){ return _lll_backend_stub().set("threshold_hint", _lll_auto_threshold()) }
    {
@@ -141,7 +144,7 @@ fn lll_backend_report(any: basis=nil): dict {
    }
 }
 
-fn gram_schmidt(any: basis): list {
+fn gram_schmidt(any basis) list {
    "Perform Gram-Schmidt orthogonalization on a matrix basis.
    Returns [b_star, mu]."
    def n = _lll_rows(basis)
@@ -167,23 +170,23 @@ fn gram_schmidt(any: basis): list {
    [b_star, mu]
 }
 
-fn _lll_min_dim(any: basis): int {
+fn _lll_min_dim(any basis) int {
    def rows = _lll_rows(basis)
    def cols = _lll_cols(basis)
    rows < cols ? rows : cols
 }
 
-fn _lll_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _lll_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _lll_backend_stub(): dict { {"default_method": "ny", "auto_method": "ny", "ny_default": true} }
+fn _lll_backend_stub() dict { {"default_method": "ny", "auto_method": "ny", "ny_default": true} }
 
-fn _lll_skipped(str: reason): dict { {"skipped": true, "reason": reason} }
+fn _lll_skipped(str reason) dict { {"skipped": true, "reason": reason} }
 
-fn _lll_first_profile(any: basis): list {
+fn _lll_first_profile(any basis) list {
    _lll_rows(basis) > 0 ? [dot_product(_lll_data(basis).get(0), _lll_data(basis).get(0))] : []
 }
 
-fn _lll_best_row_norm_sq(any: basis): any {
+fn _lll_best_row_norm_sq(any basis) any {
    def B = _lll_as_matrix(basis)
    def rows = _lll_rows(B)
    def data = _lll_data(B)
@@ -197,7 +200,7 @@ fn _lll_best_row_norm_sq(any: basis): any {
    best == nil ? Z(0) : best
 }
 
-fn gso_profile(any: basis): dict {
+fn gso_profile(any basis) dict {
    "Return reusable Gram-Schmidt data for a basis.
    The report exposes b*, mu, squared norms, zero-row count, and timing so
    LLL/BKZ/SVP callers can share one profile instead of recomputing their own
@@ -239,12 +242,12 @@ fn gso_profile(any: basis): dict {
    }
 }
 
-fn gso_report(any: basis): dict {
+fn gso_report(any basis) dict {
    "Alias for gso_profile; kept as the public report-style API name."
    gso_profile(basis)
 }
 
-fn _lll_quality_report_fast_native(any: basis, any: delta=0.75, any: eta=0.51): any {
+fn _lll_quality_report_fast_native(any basis, any delta=0.75, any eta=0.51) any {
    "Fast LLL quality checks for small integer bases.
    This returns only the public quality fields, not public b* vectors, so
    report callers avoid generic Gram-Schmidt vector allocation."
@@ -326,14 +329,14 @@ fn _lll_quality_report_fast_native(any: basis, any: delta=0.75, any: eta=0.51): 
    ])
 }
 
-fn _lll_auto_threshold(): int {
+fn _lll_auto_threshold() int {
    mut threshold = 40
    mut env_min = env("NY_LATTICE_FAST_MIN")
    if(is_str(env_min) && env_min.len > 0){ threshold = atoi(env_min) }
    threshold
 }
 
-fn _lll_identity(int: n): any {
+fn _lll_identity(int n) any {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -349,13 +352,13 @@ fn _lll_identity(int: n): any {
    Matrix(rows)
 }
 
-fn _lll_integer_entry(any: x): bigint {
+fn _lll_integer_entry(any x) bigint {
    if(is_bigint(x)){ return x }
    if(is_int(x)){ return bigint_from_int(x) }
    bigint_from_int(round(x))
 }
 
-fn _lll_pow10_z(int: n): bigint {
+fn _lll_pow10_z(int n) bigint {
    mut out = Z(1)
    mut i = 0
    while(i < n){
@@ -365,7 +368,7 @@ fn _lll_pow10_z(int: n): bigint {
    out
 }
 
-fn _lll_round_float_string_to_z(str: raw): bigint {
+fn _lll_round_float_string_to_z(str raw) bigint {
    mut s = raw
    mut neg = false
    if(s.len > 0 && load8(s, 0) == 45){
@@ -409,7 +412,7 @@ fn _lll_round_float_string_to_z(str: raw): bigint {
    neg ? Z(0) - z : z
 }
 
-fn _lll_round_to_z(any: x): bigint {
+fn _lll_round_to_z(any x) bigint {
    if(is_bigint(x)){ return x }
    if(is_int(x)){ return bigint_from_int(x) }
    def ax = abs(x)
@@ -417,7 +420,7 @@ fn _lll_round_to_z(any: x): bigint {
    _lll_round_float_string_to_z(to_str(x))
 }
 
-fn _lll_row_sub_scaled(any: m, int: k, int: j, any: q): any {
+fn _lll_row_sub_scaled(any m, int k, int j, any q) any {
    def qz = _lll_round_to_z(q)
    def rk = matrix_get_row(m, k)
    def rj = matrix_get_row(m, j)
@@ -430,7 +433,7 @@ fn _lll_row_sub_scaled(any: m, int: k, int: j, any: q): any {
    matrix_set_row(m, k, out)
 }
 
-fn _lll_transform_row_sub_scaled(any: m, int: k, int: j, any: q): any {
+fn _lll_transform_row_sub_scaled(any m, int k, int j, any q) any {
    def qz = _lll_round_to_z(q)
    def rk = matrix_get_row(m, k)
    def rj = matrix_get_row(m, j)
@@ -443,7 +446,7 @@ fn _lll_transform_row_sub_scaled(any: m, int: k, int: j, any: q): any {
    matrix_set_row(m, k, out)
 }
 
-fn _lll_lovasz_holds_gso(any: gs_res, int: k, any: delta): bool {
+fn _lll_lovasz_holds_gso(any gs_res, int k, any delta) bool {
    def b_star = gs_res[0]
    def mu = gs_res[1]
    def list: b_k_star = b_star[k]
@@ -454,14 +457,14 @@ fn _lll_lovasz_holds_gso(any: gs_res, int: k, any: delta): bool {
    lhs >= rhs
 }
 
-fn _lll_apply_row_op(any: basis, any: transform, int: k, int: j, any: q): list {
+fn _lll_apply_row_op(any basis, any transform, int k, int j, any q) list {
    def q_z = _lll_round_to_z(q)
    def next_basis = _lll_row_sub_scaled(basis, k, j, q_z)
    def next_transform = _lll_transform_row_sub_scaled(transform, k, j, q_z)
    [next_basis, next_transform]
 }
 
-fn _lll_fast_rows(any: basis): list {
+fn _lll_fast_rows(any basis) list {
    def data = _lll_data(basis)
    mut out = list(data.len)
    mut i = 0
@@ -478,7 +481,7 @@ fn _lll_fast_rows(any: basis): list {
    out
 }
 
-fn _lll_fast_identity_rows(int: n): list {
+fn _lll_fast_identity_rows(int n) list {
    mut out = list(n)
    mut i = 0
    while(i < n){
@@ -494,7 +497,7 @@ fn _lll_fast_identity_rows(int: n): list {
    out
 }
 
-fn _lll_fast_identity_rows_native(int: n): list {
+fn _lll_fast_identity_rows_native(int n) list {
    mut list: out = list(n)
    __list_set_len(out, n)
    mut i = 0
@@ -512,11 +515,11 @@ fn _lll_fast_identity_rows_native(int: n): list {
    out
 }
 
-fn _lll_fast_matrix(list: rows, int: cols): any {
+fn _lll_fast_matrix(list rows, int cols) any {
    [rows.len, cols, rows]
 }
 
-fn _lll_fast_f64buf_rows_within_bound(list<ptr>: rows, int: cols, f64: bound): bool {
+fn _lll_fast_f64buf_rows_within_bound(list<ptr> rows, int cols, f64 bound) bool {
    def upto = _lll_i_max(0, cols - 1)
    mut i = 0
    while(i < rows.len){
@@ -532,7 +535,7 @@ fn _lll_fast_f64buf_rows_within_bound(list<ptr>: rows, int: cols, f64: bound): b
    true
 }
 
-fn _lll_fast_native_rows_from_data(list: data, int: bound): ?list {
+fn _lll_fast_native_rows_from_data(list data, int bound) ?list {
    def zbound = Z(bound)
    mut out = list(data.len)
    __list_set_len(out, data.len)
@@ -560,22 +563,11 @@ fn _lll_fast_native_rows_from_data(list: data, int: bound): ?list {
    out
 }
 
-fn _lll_fast_native_rows(any: basis, int: bound): ?list {
+fn _lll_fast_native_rows(any basis, int bound) ?list {
    _lll_fast_native_rows_from_data(_lll_data(basis), bound)
 }
 
-fn _lll_fast_f64buf_row_int(list<int>: row): ptr {
-   def int: n = row.len
-   def out = f64buf_new(n)
-   mut int: i = 0
-   while(i < n){
-      f64buf_store(out, i, float(_lll_fast_list_int_at(row, i)))
-      i += 1
-   }
-   out
-}
-
-fn _lll_fast_f64buf_row_int_limit(list<int>: row, int: limit): ptr {
+fn _lll_fast_f64buf_row_int_limit(list<int> row, int limit) ptr {
    def int: n = row.len
    def int: upto = _lll_i_min(_lll_i_max(-1, limit), n - 1)
    def out = f64buf_new(n)
@@ -587,17 +579,7 @@ fn _lll_fast_f64buf_row_int_limit(list<int>: row, int: limit): ptr {
    out
 }
 
-fn _lll_fast_f64buf_fill_row_int(ptr: out, list<int>: row): ptr {
-   def int: n = row.len
-   mut int: i = 0
-   while(i < n){
-      f64buf_store(out, i, float(_lll_fast_list_int_at(row, i)))
-      i += 1
-   }
-   out
-}
-
-fn _lll_fast_f64buf_fill_row_int_limit(ptr: out, list<int>: row, int: limit, int: old_limit): ptr {
+fn _lll_fast_f64buf_fill_row_int_limit(ptr out, list<int> row, int limit, int old_limit) ptr {
    def int: n = row.len
    def int: upto = _lll_i_min(_lll_i_max(-1, limit), n - 1)
    def int: old_upto = _lll_i_min(_lll_i_max(-1, old_limit), n - 1)
@@ -614,53 +596,7 @@ fn _lll_fast_f64buf_fill_row_int_limit(ptr: out, list<int>: row, int: limit, int
 }
 
 @inline
-fn _lll_fast_f64buf_dot_prefix(ptr: a, ptr: b, int: limit): f64 {
-   mut f64: s0 = 0.0
-   mut f64: s1 = 0.0
-   mut f64: s2 = 0.0
-   mut f64: s3 = 0.0
-   mut int: i = 0
-   def int: bulk16 = limit - 15
-   while(i <= bulk16){
-      s0 += f64buf_load(a, i) * f64buf_load(b, i)
-      s1 += f64buf_load(a, i + 1) * f64buf_load(b, i + 1)
-      s2 += f64buf_load(a, i + 2) * f64buf_load(b, i + 2)
-      s3 += f64buf_load(a, i + 3) * f64buf_load(b, i + 3)
-      s0 += f64buf_load(a, i + 4) * f64buf_load(b, i + 4)
-      s1 += f64buf_load(a, i + 5) * f64buf_load(b, i + 5)
-      s2 += f64buf_load(a, i + 6) * f64buf_load(b, i + 6)
-      s3 += f64buf_load(a, i + 7) * f64buf_load(b, i + 7)
-      s0 += f64buf_load(a, i + 8) * f64buf_load(b, i + 8)
-      s1 += f64buf_load(a, i + 9) * f64buf_load(b, i + 9)
-      s2 += f64buf_load(a, i + 10) * f64buf_load(b, i + 10)
-      s3 += f64buf_load(a, i + 11) * f64buf_load(b, i + 11)
-      s0 += f64buf_load(a, i + 12) * f64buf_load(b, i + 12)
-      s1 += f64buf_load(a, i + 13) * f64buf_load(b, i + 13)
-      s2 += f64buf_load(a, i + 14) * f64buf_load(b, i + 14)
-      s3 += f64buf_load(a, i + 15) * f64buf_load(b, i + 15)
-      i += 16
-   }
-   def int: bulk = limit - 7
-   while(i <= bulk){
-      s0 += f64buf_load(a, i) * f64buf_load(b, i)
-      s1 += f64buf_load(a, i + 1) * f64buf_load(b, i + 1)
-      s2 += f64buf_load(a, i + 2) * f64buf_load(b, i + 2)
-      s3 += f64buf_load(a, i + 3) * f64buf_load(b, i + 3)
-      s0 += f64buf_load(a, i + 4) * f64buf_load(b, i + 4)
-      s1 += f64buf_load(a, i + 5) * f64buf_load(b, i + 5)
-      s2 += f64buf_load(a, i + 6) * f64buf_load(b, i + 6)
-      s3 += f64buf_load(a, i + 7) * f64buf_load(b, i + 7)
-      i += 8
-   }
-   while(i <= limit){
-      s0 += f64buf_load(a, i) * f64buf_load(b, i)
-      i += 1
-   }
-   (s0 + s1) + (s2 + s3)
-}
-
-@inline
-fn _lll_fast_f64buf_store_dot_div_norm_prefix(ptr: out, int: out_i, ptr: a, ptr: b, ptr: norms, int: norm_i, int: limit): ptr {
+fn _lll_fast_f64buf_store_dot_div_norm_prefix(ptr out, int out_i, ptr a, ptr b, ptr norms, int norm_i, int limit) ptr {
    mut f64: s0 = 0.0
    mut f64: s1 = 0.0
    mut f64: s2 = 0.0
@@ -707,7 +643,7 @@ fn _lll_fast_f64buf_store_dot_div_norm_prefix(ptr: out, int: out_i, ptr: a, ptr:
 }
 
 @inline
-fn _lll_fast_f64buf_store_dot_prefix(ptr: out, int: out_i, ptr: a, ptr: b, int: limit): ptr {
+fn _lll_fast_f64buf_store_dot_prefix(ptr out, int out_i, ptr a, ptr b, int limit) ptr {
    mut f64: s0 = 0.0
    mut f64: s1 = 0.0
    mut f64: s2 = 0.0
@@ -754,7 +690,7 @@ fn _lll_fast_f64buf_store_dot_prefix(ptr: out, int: out_i, ptr: a, ptr: b, int: 
 }
 
 @inline
-fn _lll_fast_f64buf_sub_scaled_prefix(ptr: a, ptr: b, f64: coeff, int: limit): ptr {
+fn _lll_fast_f64buf_sub_scaled_prefix(ptr a, ptr b, f64 coeff, int limit) ptr {
    mut int: i = 0
    def int: bulk16 = limit - 15
    while(i <= bulk16){
@@ -796,7 +732,7 @@ fn _lll_fast_f64buf_sub_scaled_prefix(ptr: a, ptr: b, f64: coeff, int: limit): p
 }
 
 @inline
-fn _lll_fast_f64buf_sub_scaled_mu_prefix(ptr: a, ptr: b, ptr: mu_row, int: mu_i, int: limit): ptr {
+fn _lll_fast_f64buf_sub_scaled_mu_prefix(ptr a, ptr b, ptr mu_row, int mu_i, int limit) ptr {
    def f64: coeff = f64buf_load(mu_row, mu_i)
    mut int: i = 0
    def int: bulk16 = limit - 15
@@ -838,7 +774,7 @@ fn _lll_fast_f64buf_sub_scaled_mu_prefix(ptr: a, ptr: b, ptr: mu_row, int: mu_i,
    a
 }
 
-fn _lll_fast_f64buf_row_any(list: row): ptr {
+fn _lll_fast_f64buf_row_any(list row) ptr {
    def out = f64buf_new(row.len)
    mut i = 0
    while(i < row.len){
@@ -848,7 +784,7 @@ fn _lll_fast_f64buf_row_any(list: row): ptr {
    out
 }
 
-fn _lll_fast_f64buf_fill_row_any(ptr: out, list: row): ptr {
+fn _lll_fast_f64buf_fill_row_any(ptr out, list row) ptr {
    mut i = 0
    while(i < row.len){
       __bigint_f64buf_store(out, i, row[i])
@@ -857,7 +793,7 @@ fn _lll_fast_f64buf_fill_row_any(ptr: out, list: row): ptr {
    out
 }
 
-fn _lll_fast_f64buf_rows_any(list: rows): list {
+fn _lll_fast_f64buf_rows_any(list rows) list {
    mut list<ptr>: out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -868,30 +804,13 @@ fn _lll_fast_f64buf_rows_any(list: rows): list {
    out
 }
 
-fn _lll_fast_mu_row(int: n): list<f64> {
-   mut list<f64>: out = list(n)
-   __list_set_len(out, n)
-   if(n > 0){ out[n - 1] = 0.0 }
-   out
-}
-
-fn _lll_fast_mu_buf(int: n): ptr {
+fn _lll_fast_mu_buf(int n) ptr {
    def out = f64buf_new(n)
    if(n > 0){ f64buf_store(out, n - 1, 0.0) }
    out
 }
 
-fn _lll_fast_f64buf_clone_prefix(ptr: row, int: n): ptr {
-   def out = f64buf_new(n)
-   mut int: i = 0
-   while(i < n){
-      f64buf_store(out, i, f64buf_load(row, i))
-      i += 1
-   }
-   out
-}
-
-fn _lll_fast_f64buf_clone_limit(ptr: row, int: n, int: limit): ptr {
+fn _lll_fast_f64buf_clone_limit(ptr row, int n, int limit) ptr {
    def out = f64buf_new(n)
    mut int: i = 0
    def int: upto = _lll_i_min(limit, n - 1)
@@ -902,16 +821,7 @@ fn _lll_fast_f64buf_clone_limit(ptr: row, int: n, int: limit): ptr {
    out
 }
 
-fn _lll_fast_f64buf_fill_from_buf(ptr: out, ptr: row, int: limit): ptr {
-   mut int: i = 0
-   while(i <= limit){
-      f64buf_store(out, i, f64buf_load(row, i))
-      i += 1
-   }
-   out
-}
-
-fn _lll_fast_f64buf_fill_from_buf_limit(ptr: out, ptr: row, int: limit, int: old_limit): ptr {
+fn _lll_fast_f64buf_fill_from_buf_limit(ptr out, ptr row, int limit, int old_limit) ptr {
    mut int: i = 0
    def int: upto = _lll_i_max(-1, limit)
    def int: old_upto = _lll_i_max(-1, old_limit)
@@ -926,7 +836,7 @@ fn _lll_fast_f64buf_fill_from_buf_limit(ptr: out, ptr: row, int: limit, int: old
    out
 }
 
-fn _lll_fast_f64buf_to_list(ptr: values, int: n): list {
+fn _lll_fast_f64buf_to_list(ptr values, int n) list {
    mut list<f64>: out = list(n)
    __list_set_len(out, n)
    mut int: i = 0
@@ -938,49 +848,49 @@ fn _lll_fast_f64buf_to_list(ptr: values, int: n): list {
 }
 
 @inline
-fn _lll_fast_list_int_at(list<int>: xs, int: i): int {
+fn _lll_fast_list_int_at(list<int> xs, int i) int {
    (load64_i(xs, 16 + i * 8) - 1) / 2
 }
 
 @inline
-fn _lll_fast_list_int_set(list<int>: xs, int: i, int: v): list<int> {
+fn _lll_fast_list_int_set(list<int> xs, int i, int v) list<int> {
    __store_item_fast(xs, i, v)
    xs
 }
 
 @inline
-fn _lll_fast_ptr_at(list<ptr>: xs, int: i): ptr { __load_item_fast(xs, i) }
+fn _lll_fast_ptr_at(list<ptr> xs, int i) ptr { __load_item_fast(xs, i) }
 
 @inline
-fn _lll_fast_ptr_set(list<ptr>: xs, int: i, ptr: v): list<ptr> {
+fn _lll_fast_ptr_set(list<ptr> xs, int i, ptr v) list<ptr> {
    __store_item_fast(xs, i, v)
    xs
 }
 
 @inline
-fn _lll_fast_int_row_at(list<list<int>>: xs, int: i): list<int> { __load_item_fast(xs, i) }
+fn _lll_fast_int_row_at(list<list<int>> xs, int i) list<int> { __load_item_fast(xs, i) }
 
 @inline
-fn _lll_fast_any_at(list: xs, int: i): any { __load_item_fast(xs, i) }
+fn _lll_fast_any_at(list xs, int i) any { __load_item_fast(xs, i) }
 
 @inline
-fn _lll_fast_any_set(list: xs, int: i, any: v): list {
+fn _lll_fast_any_set(list xs, int i, any v) list {
    __store_item_fast(xs, i, v)
    xs
 }
 
 @inline
-fn _lll_fast_round_f64_to_int(f64: x): int {
+fn _lll_fast_round_f64_to_int(f64 x) int {
    x < 0.0 ? int(x - 0.5) : int(x + 0.5)
 }
 
 @inline
-fn _lll_i_min(int: a, int: b): int { a < b ? a : b }
+fn _lll_i_min(int a, int b) int { a < b ? a : b }
 
 @inline
-fn _lll_i_max(int: a, int: b): int { a > b ? a : b }
+fn _lll_i_max(int a, int b) int { a > b ? a : b }
 
-fn _lll_fast_mu_bufs_to_lists(list<ptr>: mu, int: n): list {
+fn _lll_fast_mu_bufs_to_lists(list<ptr> mu, int n) list {
    mut out = []
    mut int: i = 0
    while(i < n){
@@ -997,7 +907,7 @@ fn _lll_fast_mu_bufs_to_lists(list<ptr>: mu, int: n): list {
    out
 }
 
-fn _lll_fast_gso_extend_int_support(list: existing, list<list<int>>: rows, list<int>: supports, int: upto): list {
+fn _lll_fast_gso_extend_int_support(list existing, list<list<int>> rows, list<int> supports, int upto) list {
    def int: n = rows.len
    mut int: limit = upto
    if(limit < 0){ limit = 0 }
@@ -1045,7 +955,7 @@ fn _lll_fast_gso_extend_int_support(list: existing, list<list<int>>: rows, list<
    [bstar, mu, norms, limit + 1, bstar_limits]
 }
 
-fn _lll_fast_gso_prefix_int_support(list<list<int>>: rows, list<int>: supports, int: upto): list {
+fn _lll_fast_gso_prefix_int_support(list<list<int>> rows, list<int> supports, int upto) list {
    def int: n = rows.len
    mut int: limit = upto
    if(limit < 0){ limit = 0 }
@@ -1086,7 +996,7 @@ fn _lll_fast_gso_prefix_int_support(list<list<int>>: rows, list<int>: supports, 
    [bstar, mu, norms, limit + 1, bstar_limits]
 }
 
-fn _lll_fast_gso_extend_buf_rows(list: existing, list<ptr>: rows, int: cols, list<int>: supports, int: upto): list {
+fn _lll_fast_gso_extend_buf_rows(list existing, list<ptr> rows, int cols, list<int> supports, int upto) list {
    def int: n = rows.len
    mut int: limit = upto
    if(limit < 0){ limit = 0 }
@@ -1134,7 +1044,7 @@ fn _lll_fast_gso_extend_buf_rows(list: existing, list<ptr>: rows, int: cols, lis
    [bstar, mu, norms, limit + 1, bstar_limits]
 }
 
-fn _lll_fast_gso_prefix_buf_rows(list<ptr>: rows, int: cols, list<int>: supports, int: upto): list {
+fn _lll_fast_gso_prefix_buf_rows(list<ptr> rows, int cols, list<int> supports, int upto) list {
    def int: n = rows.len
    mut int: limit = upto
    if(limit < 0){ limit = 0 }
@@ -1175,7 +1085,7 @@ fn _lll_fast_gso_prefix_buf_rows(list<ptr>: rows, int: cols, list<int>: supports
    [bstar, mu, norms, limit + 1, bstar_limits]
 }
 
-fn _lll_fast_row_submul(list: rows, int: k, int: j, any: q): list {
+fn _lll_fast_row_submul(list rows, int k, int j, any q) list {
    def qz = (is_int(q) || is_bigint(q)) ? q : _lll_round_to_z(q)
    def rk = _lll_fast_any_at(rows, k)
    def rj = _lll_fast_any_at(rows, j)
@@ -1184,7 +1094,7 @@ fn _lll_fast_row_submul(list: rows, int: k, int: j, any: q): list {
    rows
 }
 
-fn _lll_fast_row_submul_limit(list: rows, int: k, int: j, any: q, int: limit): list {
+fn _lll_fast_row_submul_limit(list rows, int k, int j, any q, int limit) list {
    def qz = (is_int(q) || is_bigint(q)) ? q : _lll_round_to_z(q)
    def rk = _lll_fast_any_at(rows, k)
    def rj = _lll_fast_any_at(rows, j)
@@ -1194,7 +1104,7 @@ fn _lll_fast_row_submul_limit(list: rows, int: k, int: j, any: q, int: limit): l
 }
 
 @inline
-fn _lll_fast_row_submul_int_checked_limit(list<list<int>>: rows, int: k, int: j, int: q, int: bound, int: limit): list {
+fn _lll_fast_row_submul_int_checked_limit(list<list<int>> rows, int k, int j, int q, int bound, int limit) list {
    def list: rk = _lll_fast_int_row_at(rows, k)
    def list: rj = _lll_fast_int_row_at(rows, j)
    mut ok = true
@@ -1215,7 +1125,7 @@ fn _lll_fast_row_submul_int_checked_limit(list<list<int>>: rows, int: k, int: j,
    [rows, ok, row_max_tag / 2]
 }
 
-fn _lll_fast_row_submul_int_unchecked_limit(list<list<int>>: rows, int: k, int: j, int: q, int: limit): list {
+fn _lll_fast_row_submul_int_unchecked_limit(list<list<int>> rows, int k, int j, int q, int limit) list {
    def list: rk = _lll_fast_int_row_at(rows, k)
    def list: rj = _lll_fast_int_row_at(rows, j)
    mut int: c = 0
@@ -1228,7 +1138,7 @@ fn _lll_fast_row_submul_int_unchecked_limit(list<list<int>>: rows, int: k, int: 
    rows
 }
 
-fn _lll_fast_supports(list<list<int>>: rows): list<int> {
+fn _lll_fast_supports(list<list<int>> rows) list<int> {
    mut list<int>: out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -1242,11 +1152,11 @@ fn _lll_fast_supports(list<list<int>>: rows): list<int> {
    out
 }
 
-fn _lll_fast_is_zero_entry(any: v): bool {
+fn _lll_fast_is_zero_entry(any v) bool {
    is_int(v) ? int(v) == 0 : v == Z(0)
 }
 
-fn _lll_fast_supports_any(list: rows): list<int> {
+fn _lll_fast_supports_any(list rows) list<int> {
    mut list<int>: out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -1260,7 +1170,7 @@ fn _lll_fast_supports_any(list: rows): list<int> {
    out
 }
 
-fn _lll_fast_row_abs_max(list: row, int: limit): int {
+fn _lll_fast_row_abs_max(list row, int limit) int {
    mut m = 0
    mut j = 0
    def n = _lll_i_min(limit, row.len - 1)
@@ -1273,7 +1183,7 @@ fn _lll_fast_row_abs_max(list: row, int: limit): int {
    m
 }
 
-fn _lll_fast_row_abs_maxes(list<list<int>>: rows): list<int> {
+fn _lll_fast_row_abs_maxes(list<list<int>> rows) list<int> {
    mut list<int>: out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -1285,26 +1195,19 @@ fn _lll_fast_row_abs_maxes(list<list<int>>: rows): list<int> {
    out
 }
 
-fn _lll_fast_trim_support(list<int>: row, int: start): int {
+fn _lll_fast_trim_support(list<int> row, int start) int {
    mut int: j = _lll_i_min(start, row.len - 1)
    while(j >= 0 && _lll_fast_list_int_at(row, j) == 0){ j -= 1 }
    j
 }
 
-fn _lll_fast_trim_support_any(list: row, int: start): int {
+fn _lll_fast_trim_support_any(list row, int start) int {
    mut int: j = _lll_i_min(start, row.len - 1)
    while(j >= 0 && _lll_fast_is_zero_entry(row[j])){ j -= 1 }
    j
 }
 
-fn _lll_fast_swap_rows(list: rows, int: i, int: j): list {
-   def tmp = _lll_fast_any_at(rows, i)
-   _lll_fast_any_set(rows, i, _lll_fast_any_at(rows, j))
-   _lll_fast_any_set(rows, j, tmp)
-   rows
-}
-
-fn _lll_fast_move_row(list: rows, int: from_idx, int: to_idx): list {
+fn _lll_fast_move_row(list rows, int from_idx, int to_idx) list {
    if(from_idx == to_idx){ return rows }
    def item = _lll_fast_any_at(rows, from_idx)
    if(from_idx > to_idx){
@@ -1325,16 +1228,7 @@ fn _lll_fast_move_row(list: rows, int: from_idx, int: to_idx): list {
    rows
 }
 
-fn _lll_fast_lovasz_holds(any: gs, int: k, f64: delta): bool {
-   def list: mu = gs[1]
-   def list: norms = gs[2]
-   def f64: mu_prev = mu[k][k - 1]
-   def f64: lhs = norms[k]
-   def f64: rhs = (delta - mu_prev * mu_prev) * norms[k - 1]
-   lhs >= rhs
-}
-
-fn _lll_fast_lovasz_holds_buf(any: gs, int: k, f64: delta): bool {
+fn _lll_fast_lovasz_holds_buf(any gs, int k, f64 delta) bool {
    def list<ptr>: mu = gs[1]
    def ptr: norms = gs[2]
    def f64: mu_prev = f64buf_load(mu[k], k - 1)
@@ -1343,25 +1237,7 @@ fn _lll_fast_lovasz_holds_buf(any: gs, int: k, f64: delta): bool {
    lhs >= rhs
 }
 
-fn _lll_fast_insertion_index(any: gs, int: k, f64: delta): int {
-   def list: mu = gs[1]
-   def list: norms = gs[2]
-   def list: mu_row = mu[k]
-   mut suffix = norms[k]
-   mut t = k - 1
-   while(t >= 0){
-      def f64: mij = mu_row[t]
-      suffix = suffix + mij * mij * norms[t]
-      if(t < k - 1){
-         def f64: threshold = delta * norms[t]
-         if(threshold < suffix){ return t + 1 }
-      }
-      t -= 1
-   }
-   suffix <= 0.0 ? k - 1 : 0
-}
-
-fn _lll_fast_insertion_index_buf(any: gs, int: k, f64: delta): int {
+fn _lll_fast_insertion_index_buf(any gs, int k, f64 delta) int {
    def list<ptr>: mu = gs[1]
    def ptr: norms = gs[2]
    def ptr: mu_row = mu[k]
@@ -1379,14 +1255,14 @@ fn _lll_fast_insertion_index_buf(any: gs, int: k, f64: delta): int {
    suffix <= 0.0 ? k - 1 : 0
 }
 
-fn _lll_fast_gso_truncate(any: gs, int: upto): any {
+fn _lll_fast_gso_truncate(any gs, int upto) any {
    if(gs == nil || upto < 0){ return nil }
    def valid = _lll_i_min(upto + 1, gs[0].len)
    if(gs.len > 3){ gs[3] = valid } else { gs = gs.append(valid) }
    gs
 }
 
-fn _lll_fast_reduce_row_native(list<list<int>>: rows, list<int>: supports, list<int>: row_abs_maxes, int: k, f64: eta, int: max_passes, int: bound, list: gso_hint): list {
+fn _lll_fast_reduce_row_native(list<list<int>> rows, list<int> supports, list<int> row_abs_maxes, int k, f64 eta, int max_passes, int bound, list gso_hint) list {
    mut list<list<int>>: work = rows
    mut list<int>: supp = supports
    mut list<int>: maxes = row_abs_maxes
@@ -1432,7 +1308,7 @@ fn _lll_fast_reduce_row_native(list<list<int>>: rows, list<int>: supports, list<
    [work, supp, maxes, steps, ok, gs]
 }
 
-fn _lll_fast_reduce_row_native_transform(list<list<int>>: rows, list<list<int>>: transform, list<int>: supports, list<int>: row_abs_maxes, list<int>: transform_abs_maxes, int: k, f64: eta, int: max_passes, int: bound, list: gso_hint): list {
+fn _lll_fast_reduce_row_native_transform(list<list<int>> rows, list<list<int>> transform, list<int> supports, list<int> row_abs_maxes, list<int> transform_abs_maxes, int k, f64 eta, int max_passes, int bound, list gso_hint) list {
    mut list<list<int>>: work = rows
    mut list<list<int>>: tr = transform
    mut list<int>: supp = supports
@@ -1491,7 +1367,7 @@ fn _lll_fast_reduce_row_native_transform(list<list<int>>: rows, list<list<int>>:
    [work, tr, supp, maxes, tr_maxes, steps, ok, gs]
 }
 
-fn _lll_fast_reduce_row_buf_shadow(list: rows, any: transform, list<ptr>: float_rows, list<int>: supports, int: k, f64: eta, int: max_passes, int: cols, list: gso_hint): list {
+fn _lll_fast_reduce_row_buf_shadow(list rows, any transform, list<ptr> float_rows, list<int> supports, int k, f64 eta, int max_passes, int cols, list gso_hint) list {
    mut work = rows
    mut tr = transform
    mut list<ptr>: fwork = float_rows
@@ -1555,7 +1431,7 @@ fn _lll_fast_reduce_row_buf_shadow(list: rows, any: transform, list<ptr>: float_
    [work, tr, fwork, supp, steps, true, gs]
 }
 
-fn _lll_reduce_state_fast_buf_with_budget(any: basis, any: delta, any: eta=0.51, int: requested_total_budget=0, int: requested_row_budget=0, bool: track_transform=false): list {
+fn _lll_reduce_state_fast_buf_with_budget(any basis, any delta, any eta=0.51, int requested_total_budget=0, int requested_row_budget=0, bool track_transform=false) list {
    def int: n = _lll_rows(basis)
    def int: cols = _lll_cols(basis)
    mut work = _lll_fast_rows(basis)
@@ -1644,11 +1520,11 @@ fn _lll_reduce_state_fast_buf_with_budget(any: basis, any: delta, any: eta=0.51,
    [_lll_fast_matrix(work, cols), tr == nil ? nil : _lll_fast_matrix(tr, n), steps, ok, track_transform ? "buf-gso-bigint-transform" : "buf-gso-bigint-no-transform", total_budget, deep_insertions, insertion_distance]
 }
 
-fn _lll_reduce_state_fast_list_with_budget(any: basis, any: delta, any: eta=0.51, int: requested_total_budget=0, int: requested_row_budget=0, bool: track_transform=true): list {
+fn _lll_reduce_state_fast_list_with_budget(any basis, any delta, any eta=0.51, int requested_total_budget=0, int requested_row_budget=0, bool track_transform=true) list {
    _lll_reduce_state_fast_buf_with_budget(basis, delta, eta, requested_total_budget, requested_row_budget, track_transform)
 }
 
-fn _lll_reduce_state_fast_native_work_no_transform_with_budget(list: initial_work, int: cols, any: delta, any: eta=0.51, int: requested_total_budget=0, int: requested_row_budget=0, int: start_k=1): list {
+fn _lll_reduce_state_fast_native_work_no_transform_with_budget(list initial_work, int cols, any delta, any eta=0.51, int requested_total_budget=0, int requested_row_budget=0, int start_k=1) list {
    def int: n = initial_work.len
    def int: bound = 750000000000000
    mut list: work = initial_work
@@ -1718,7 +1594,7 @@ fn _lll_reduce_state_fast_native_work_no_transform_with_budget(list: initial_wor
    [_lll_fast_matrix(work, cols), nil, steps, ok, "list-gso-int-no-transform", total_budget, deep_insertions, insertion_distance]
 }
 
-fn _lll_reduce_state_fast_native_no_transform_with_budget(any: basis, any: delta, any: eta=0.51, int: requested_total_budget=0, int: requested_row_budget=0): list {
+fn _lll_reduce_state_fast_native_no_transform_with_budget(any basis, any delta, any eta=0.51, int requested_total_budget=0, int requested_row_budget=0) list {
    def int: cols = _lll_cols(basis)
    def int: bound = 750000000000000
    def maybe_work = _lll_fast_native_rows(basis, bound)
@@ -1726,7 +1602,7 @@ fn _lll_reduce_state_fast_native_no_transform_with_budget(any: basis, any: delta
    _lll_reduce_state_fast_native_work_no_transform_with_budget(maybe_work, cols, delta, eta, requested_total_budget, requested_row_budget, 1)
 }
 
-fn _lll_is_ternary_pair_row(list: row, int: n): bool {
+fn _lll_is_ternary_pair_row(list row, int n) bool {
    if(row.len < 2 * n){ return false }
    mut i = 0
    while(i < 2 * n){
@@ -1737,7 +1613,7 @@ fn _lll_is_ternary_pair_row(list: row, int: n): bool {
    true
 }
 
-fn _lll_is_ternary_range(list: row, int: start, int: stop): bool {
+fn _lll_is_ternary_range(list row, int start, int stop) bool {
    if(row.len < stop){ return false }
    mut i = start
    while(i < stop){
@@ -1748,7 +1624,7 @@ fn _lll_is_ternary_range(list: row, int: start, int: stop): bool {
    true
 }
 
-fn _lll_is_scaled_ternary_range(list: row, int: start, int: stop, any: scale): bool {
+fn _lll_is_scaled_ternary_range(list row, int start, int stop, any scale) bool {
    if(row.len < stop){ return false }
    mut i = start
    while(i < stop){
@@ -1761,14 +1637,14 @@ fn _lll_is_scaled_ternary_range(list: row, int: start, int: stop, any: scale): b
    true
 }
 
-fn _lll_is_ntru_key_row(list: row, int: n, any: p): bool {
+fn _lll_is_ntru_key_row(list row, int n, any p) bool {
    if(row.len < 2 * n){ return false }
    (_lll_is_ternary_pair_row(row, n)) ||
    (_lll_is_scaled_ternary_range(row, 0, n, p) && _lll_is_ternary_range(row, n, 2 * n)) ||
    (_lll_is_ternary_range(row, 0, n) && _lll_is_scaled_ternary_range(row, n, 2 * n, p))
 }
 
-fn _lll_scan_ternary_pair_rows(list: rows, int: n): list {
+fn _lll_scan_ternary_pair_rows(list rows, int n) list {
    mut out = []
    mut i = 0
    while(i < rows.len){
@@ -1778,7 +1654,7 @@ fn _lll_scan_ternary_pair_rows(list: rows, int: n): list {
    out
 }
 
-fn _lll_scan_ntru_key_rows(list: rows, int: n, any: p): list {
+fn _lll_scan_ntru_key_rows(list rows, int n, any p) list {
    mut out = []
    mut i = 0
    while(i < rows.len){
@@ -1788,7 +1664,7 @@ fn _lll_scan_ntru_key_rows(list: rows, int: n, any: p): list {
    out
 }
 
-fn lll_find_ternary_pair_rows(any: basis, int: n, int: step_cap=300000, any: delta=0.99, any: eta=0.51): list {
+fn lll_find_ternary_pair_rows(any basis, int n, int step_cap=300000, any delta=0.99, any eta=0.51) list {
    "Reduce a small integer lattice and return rows whose first `2*n` entries are ternary.
    The scan runs inside the LLL loop so challenge solvers can stop at the first private-key row."
    def B = _lll_as_matrix(basis)
@@ -1857,7 +1733,7 @@ fn lll_find_ternary_pair_rows(any: basis, int: n, int: step_cap=300000, any: del
    full.len > 0 ? full : partial
 }
 
-fn lll_find_ntru_key_rows(any: basis, int: n, any: p, int: step_cap=300000, any: delta=0.99, any: eta=0.51): list {
+fn lll_find_ntru_key_rows(any basis, int n, any p, int step_cap=300000, any delta=0.99, any eta=0.51) list {
    "Reduce an NTRU key lattice and return rows shaped like `[f | p*g]`, `[p*g | f]`, or `[f | g]`."
    def B = _lll_as_matrix(basis)
    def cols = _lll_cols(B)
@@ -1925,7 +1801,7 @@ fn lll_find_ntru_key_rows(any: basis, int: n, any: p, int: step_cap=300000, any:
    full.len > 0 ? full : partial
 }
 
-fn _lll_reduce_state_fast_native_transform_with_budget(any: basis, any: delta, any: eta=0.51, int: requested_total_budget=0, int: requested_row_budget=0): list {
+fn _lll_reduce_state_fast_native_transform_with_budget(any basis, any delta, any eta=0.51, int requested_total_budget=0, int requested_row_budget=0) list {
    def int: n = _lll_rows(basis)
    def int: cols = _lll_cols(basis)
    def int: bound = 1000000000000
@@ -2004,12 +1880,12 @@ fn _lll_reduce_state_fast_native_transform_with_budget(any: basis, any: delta, a
    [_lll_fast_matrix(work, cols), _lll_fast_matrix(tr, n), steps, ok, "list-gso-int-transform", total_budget, deep_insertions, insertion_distance]
 }
 
-fn _lll_reduce_state_fast_list(any: basis, any: delta, any: eta=0.51): list {
+fn _lll_reduce_state_fast_list(any basis, any delta, any eta=0.51) list {
    def state = _lll_reduce_state_fast_list_with_budget(basis, delta, eta)
    [state[0], state[1], state[2], state[3], state[4]]
 }
 
-fn _lll_row_violation(any: basis, int: k, any: eta): list {
+fn _lll_row_violation(any basis, int k, any eta) list {
    def mu_matrix = gram_schmidt(basis)[1]
    mut j = k - 1
    while(j >= 0){
@@ -2022,7 +1898,7 @@ fn _lll_row_violation(any: basis, int: k, any: eta): list {
    [-1, -1, 0]
 }
 
-fn _lll_babai_row_pass(any: basis, any: transform, int: k, any: eta): list {
+fn _lll_babai_row_pass(any basis, any transform, int k, any eta) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2066,7 +1942,7 @@ fn _lll_babai_row_pass(any: basis, any: transform, int: k, any: eta): list {
    [work, tr, steps, changed, [gs[0], updated_mu]]
 }
 
-fn _lll_reduce_row_babai(any: basis, any: transform, int: k, any: eta, int: max_passes): list {
+fn _lll_reduce_row_babai(any basis, any transform, int k, any eta, int max_passes) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2083,7 +1959,7 @@ fn _lll_reduce_row_babai(any: basis, any: transform, int: k, any: eta, int: max_
    [work, tr, steps, false, final_gs]
 }
 
-fn _lll_reduce_row_fixpoint(any: basis, any: transform, int: k, any: eta, int: budget, int: steps): list {
+fn _lll_reduce_row_fixpoint(any basis, any transform, int k, any eta, int budget, int steps) list {
    if(budget <= 0){ return [basis, transform, steps, false] }
    def violation = _lll_row_violation(basis, k, eta)
    if(violation[0] < 0){ return [basis, transform, steps, true] }
@@ -2091,7 +1967,7 @@ fn _lll_reduce_row_fixpoint(any: basis, any: transform, int: k, any: eta, int: b
    _lll_reduce_row_fixpoint(next[0], next[1], k, eta, budget - 1, steps + 1)
 }
 
-fn _lll_first_size_violation(any: basis, any: eta): list {
+fn _lll_first_size_violation(any basis, any eta) list {
    def n = _lll_rows(basis)
    mut i = 1
    while(i < n){
@@ -2102,7 +1978,7 @@ fn _lll_first_size_violation(any: basis, any: eta): list {
    [-1, -1, 0]
 }
 
-fn _lll_size_reduce_fixpoint(any: basis, any: transform, any: eta, int: budget, int: steps): list {
+fn _lll_size_reduce_fixpoint(any basis, any transform, any eta, int budget, int steps) list {
    if(budget <= 0){ return [basis, transform, steps, false] }
    def violation = _lll_first_size_violation(basis, eta)
    if(violation[0] < 0){ return [basis, transform, steps, true] }
@@ -2110,7 +1986,7 @@ fn _lll_size_reduce_fixpoint(any: basis, any: transform, any: eta, int: budget, 
    _lll_size_reduce_fixpoint(next[0], next[1], eta, budget - 1, steps + 1)
 }
 
-fn _lll_reduce_row_sweep(any: basis, any: transform, int: k, any: eta, int: max_passes=4): list {
+fn _lll_reduce_row_sweep(any basis, any transform, int k, any eta, int max_passes=4) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2139,7 +2015,7 @@ fn _lll_reduce_row_sweep(any: basis, any: transform, int: k, any: eta, int: max_
    [work, tr, steps]
 }
 
-fn _lll_size_reduce_sweep(any: basis, any: transform, any: eta, int: max_passes=4): list {
+fn _lll_size_reduce_sweep(any basis, any transform, any eta, int max_passes=4) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2173,16 +2049,16 @@ fn _lll_size_reduce_sweep(any: basis, any: transform, any: eta, int: max_passes=
    [work, tr, steps]
 }
 
-fn _lll_xf_abs(any: x): bigint { x < Z(0) ? Z(0) - x : x }
+fn _lll_xf_abs(any x) bigint { x < Z(0) ? Z(0) - x : x }
 
-fn _lll_xf_mul(any: a, any: b, any: scale): bigint { (a * b) / scale }
+fn _lll_xf_mul(any a, any b, any scale) bigint { (a * b) / scale }
 
-fn _lll_xf_div(any: a, any: b, any: scale): bigint {
+fn _lll_xf_div(any a, any b, any scale) bigint {
    if(b == Z(0)){ return Z(0) }
    (a * scale) / b
 }
 
-fn _lll_xf_from_scalar(any: x, any: scale): bigint {
+fn _lll_xf_from_scalar(any x, any scale) bigint {
    if(is_float(x)){
       def ppm = bigint_from_int(round(float(x) * 1000000.0))
       return(ppm * scale) / Z(1000000)
@@ -2190,7 +2066,7 @@ fn _lll_xf_from_scalar(any: x, any: scale): bigint {
    Z(x) * scale
 }
 
-fn _lll_xf_round_to_z(any: x, any: scale): bigint {
+fn _lll_xf_round_to_z(any x, any scale) bigint {
    def neg = x < Z(0)
    def a = neg ? Z(0) - x : x
    mut q = a / scale
@@ -2199,7 +2075,7 @@ fn _lll_xf_round_to_z(any: x, any: scale): bigint {
    neg ? Z(0) - q : q
 }
 
-fn _lll_xf_row(list: row, any: scale): list {
+fn _lll_xf_row(list row, any scale) list {
    mut out = []
    mut i = 0
    while(i < row.len){
@@ -2209,7 +2085,7 @@ fn _lll_xf_row(list: row, any: scale): list {
    out
 }
 
-fn _lll_xf_dot(list: a, list: b, any: scale): bigint {
+fn _lll_xf_dot(list a, list b, any scale) bigint {
    mut sum = Z(0)
    mut i = 0
    while(i < a.len){
@@ -2219,7 +2095,7 @@ fn _lll_xf_dot(list: a, list: b, any: scale): bigint {
    sum
 }
 
-fn _lll_xf_sub_scaled(list: a, list: b, any: s, any: scale): list {
+fn _lll_xf_sub_scaled(list a, list b, any s, any scale) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -2229,7 +2105,7 @@ fn _lll_xf_sub_scaled(list: a, list: b, any: s, any: scale): list {
    out
 }
 
-fn _lll_xf_gram_schmidt(any: basis, any: scale): list {
+fn _lll_xf_gram_schmidt(any basis, any scale) list {
    def n = _lll_rows(basis)
    mut b_star = list(0)
    mut mu = matrix_zero(n, n)
@@ -2254,7 +2130,7 @@ fn _lll_xf_gram_schmidt(any: basis, any: scale): list {
    [b_star, mu, norms]
 }
 
-fn _lll_xf_lovasz_holds_gso(any: gs_res, int: k, any: delta_xf, any: scale): bool {
+fn _lll_xf_lovasz_holds_gso(any gs_res, int k, any delta_xf, any scale) bool {
    def mu = gs_res[1]
    def norms = gs_res[2]
    def lhs = norms[k]
@@ -2264,7 +2140,7 @@ fn _lll_xf_lovasz_holds_gso(any: gs_res, int: k, any: delta_xf, any: scale): boo
    lhs >= _lll_xf_mul(rhs_factor, norms[k - 1], scale)
 }
 
-fn _lll_xf_babai_row_pass(any: basis, any: transform, int: k, any: eta_xf, any: scale): list {
+fn _lll_xf_babai_row_pass(any basis, any transform, int k, any eta_xf, any scale) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2302,7 +2178,7 @@ fn _lll_xf_babai_row_pass(any: basis, any: transform, int: k, any: eta_xf, any: 
    [work, tr, steps, changed]
 }
 
-fn _lll_xf_reduce_row(any: basis, any: transform, int: k, any: eta_xf, any: scale, int: max_passes): list {
+fn _lll_xf_reduce_row(any basis, any transform, int k, any eta_xf, any scale, int max_passes) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2318,7 +2194,7 @@ fn _lll_xf_reduce_row(any: basis, any: transform, int: k, any: eta_xf, any: scal
    [work, tr, steps, false]
 }
 
-fn _lll_xf_size_reduce_sweep(any: basis, any: transform, any: eta_xf, any: scale, int: max_passes=4): list {
+fn _lll_xf_size_reduce_sweep(any basis, any transform, any eta_xf, any scale, int max_passes=4) list {
    mut work = basis
    mut tr = transform
    mut steps = 0
@@ -2341,7 +2217,7 @@ fn _lll_xf_size_reduce_sweep(any: basis, any: transform, any: eta_xf, any: scale
    [work, tr, steps, !changed]
 }
 
-fn _lll_reduce_state_xfixed(any: basis, any: delta, any: eta=0.51): list {
+fn _lll_reduce_state_xfixed(any basis, any delta, any eta=0.51) list {
    def n = _lll_rows(basis)
    def cols = _lll_cols(basis)
    def max_digits = _lll_scale_digits(basis) + 80
@@ -2382,11 +2258,11 @@ fn _lll_reduce_state_xfixed(any: basis, any: delta, any: eta=0.51): list {
    [work, tr, steps, ok, "adaptive-fixed-gso-transform", precision_digits]
 }
 
-fn _lll_high_dynamic_small_basis(any: basis): bool {
+fn _lll_high_dynamic_small_basis(any basis) bool {
    _lll_scale_digits(basis) > 0 && _lll_rows(basis) <= 16 && _lll_cols(basis) <= 32
 }
 
-fn _lll_reduce_state_lazy(any: basis, any: delta, any: eta=0.51): list {
+fn _lll_reduce_state_lazy(any basis, any delta, any eta=0.51) list {
    def n = _lll_rows(basis)
    def cols = _lll_cols(basis)
    mut work = basis
@@ -2419,7 +2295,7 @@ fn _lll_reduce_state_lazy(any: basis, any: delta, any: eta=0.51): list {
    [work, tr, steps, ok]
 }
 
-fn _lll_reduce_state_strict(any: basis, any: delta, any: eta=0.51): list {
+fn _lll_reduce_state_strict(any basis, any delta, any eta=0.51) list {
    def n = _lll_rows(basis)
    def cols = _lll_cols(basis)
    if(n > 32 || cols > 64){
@@ -2462,7 +2338,7 @@ fn _lll_reduce_state_strict(any: basis, any: delta, any: eta=0.51): list {
    [work, tr, steps, ok]
 }
 
-fn _lll_pure_reduce(any: basis, any: delta, any: eta=0.51): any {
+fn _lll_pure_reduce(any basis, any delta, any eta=0.51) any {
    def B = _lll_as_matrix(basis)
    def rows = _lll_rows(B)
    def cols = _lll_cols(B)
@@ -2475,7 +2351,7 @@ fn _lll_pure_reduce(any: basis, any: delta, any: eta=0.51): any {
    _lll_reduce_state_final(B, delta, eta)[0]
 }
 
-fn _lll_reduce_state_final(any: basis, any: delta, any: eta=0.51): list {
+fn _lll_reduce_state_final(any basis, any delta, any eta=0.51) list {
    if(_lll_rows(basis) <= 160 && _lll_cols(basis) <= 256 && _lll_scale_digits(basis) == 0){
       def native = _lll_reduce_state_fast_native_transform_with_budget(basis, delta, eta, 0, 0)
       if(native[3] && lll_quality_report(native[0], delta, eta).get("reduced", false)){ return native }
@@ -2494,7 +2370,7 @@ fn _lll_reduce_state_final(any: basis, any: delta, any: eta=0.51): list {
    _lll_reduce_state_strict(basis, delta, eta)
 }
 
-fn _lll_reduce_state_report_fast(any: basis, any: delta, any: eta=0.51, bool: track_transform=true): list {
+fn _lll_reduce_state_report_fast(any basis, any delta, any eta=0.51, bool track_transform=true) list {
    if(_lll_rows(basis) <= 160 && _lll_cols(basis) <= 256 && _lll_scale_digits(basis) == 0){
       def native = track_transform ? _lll_reduce_state_fast_native_transform_with_budget(basis, delta, eta, 0, 0) : _lll_reduce_state_fast_native_no_transform_with_budget(basis, delta, eta, 0, 0)
       if(native[3]){ return native }
@@ -2504,7 +2380,7 @@ fn _lll_reduce_state_report_fast(any: basis, any: delta, any: eta=0.51, bool: tr
    _lll_reduce_state_final(basis, delta, eta)
 }
 
-fn _lll_apply_transform(any: transform, any: basis): any {
+fn _lll_apply_transform(any transform, any basis) any {
    def rows = _lll_rows(transform)
    def inner = _lll_cols(transform)
    def cols = _lll_cols(basis)
@@ -2529,7 +2405,7 @@ fn _lll_apply_transform(any: transform, any: basis): any {
    Matrix(out)
 }
 
-fn _lll_transform_verified_fast(any: transform, any: basis, any: reduced): any {
+fn _lll_transform_verified_fast(any transform, any basis, any reduced) any {
    def bound = 1000000
    def tr = _lll_fast_native_rows(transform, bound)
    def br = _lll_fast_native_rows(basis, bound)
@@ -2560,7 +2436,7 @@ fn _lll_transform_verified_fast(any: transform, any: basis, any: reduced): any {
    true
 }
 
-fn _lll_replace_col(any: m, int: col, list: rhs): any {
+fn _lll_replace_col(any m, int col, list rhs) any {
    def rows = _lll_rows(m)
    def cols = _lll_cols(m)
    mut out = []
@@ -2578,7 +2454,7 @@ fn _lll_replace_col(any: m, int: col, list: rhs): any {
    Matrix(out)
 }
 
-fn _lll_recover_transform(any: basis, any: reduced): any {
+fn _lll_recover_transform(any basis, any reduced) any {
    def rows = _lll_rows(basis)
    def cols = _lll_cols(basis)
    if(rows != cols || _lll_rows(reduced) != rows || _lll_cols(reduced) != cols || rows > 8){ return nil }
@@ -2607,7 +2483,7 @@ fn _lll_recover_transform(any: basis, any: reduced): any {
    Matrix(tr_rows)
 }
 
-fn _lll_same_matrix(any: a, any: b): bool {
+fn _lll_same_matrix(any a, any b) bool {
    if(_lll_rows(a) != _lll_rows(b) || _lll_cols(a) != _lll_cols(b)){ return false }
    mut i = 0
    while(i < _lll_rows(a)){
@@ -2621,15 +2497,15 @@ fn _lll_same_matrix(any: a, any: b): bool {
    true
 }
 
-fn _lll_as_matrix(any: m): any { is_matrix(m) ? m : Matrix(m) }
+fn _lll_as_matrix(any m) any { is_matrix(m) ? m : Matrix(m) }
 
-fn _lll_gram_square(any: gram): any {
+fn _lll_gram_square(any gram) any {
    def G = _lll_as_matrix(gram)
    if(_lll_rows(G) != _lll_cols(G)){ panic("lll_gram: Gram matrix must be square") }
    G
 }
 
-fn _lll_gram_row_sub_scaled(any: gram, int: k, int: j, any: q): any {
+fn _lll_gram_row_sub_scaled(any gram, int k, int j, any q) any {
    def qz = _lll_round_to_z(q)
    if(qz == Z(0)){ return gram }
    def n = _lll_rows(gram)
@@ -2659,7 +2535,7 @@ fn _lll_gram_row_sub_scaled(any: gram, int: k, int: j, any: q): any {
    Matrix(rows)
 }
 
-fn _lll_gram_swap(any: gram, int: a, int: b): any {
+fn _lll_gram_swap(any gram, int a, int b) any {
    if(a == b){ return gram }
    def n = _lll_rows(gram)
    mut rows = []
@@ -2679,7 +2555,7 @@ fn _lll_gram_swap(any: gram, int: a, int: b): any {
    Matrix(rows)
 }
 
-fn _lll_basis_gram(any: basis): any {
+fn _lll_basis_gram(any basis) any {
    def B = _lll_as_matrix(basis)
    def rows = _lll_rows(B)
    def cols = _lll_cols(B)
@@ -2704,7 +2580,7 @@ fn _lll_basis_gram(any: basis): any {
    Matrix(out)
 }
 
-fn _lll_basis_swap(any: basis, int: a, int: b): any {
+fn _lll_basis_swap(any basis, int a, int b) any {
    if(a == b){ return basis }
    mut data = _lll_data(basis)
    def tmp = data[a]
@@ -2713,14 +2589,14 @@ fn _lll_basis_swap(any: basis, int: a, int: b): any {
    Matrix(data)
 }
 
-fn _lll_basis_move(any: basis, int: from_idx, int: to_idx): any {
+fn _lll_basis_move(any basis, int from_idx, int to_idx) any {
    if(from_idx == to_idx){ return basis }
    mut data = _lll_data(basis)
    data = _lll_fast_move_row(data, from_idx, to_idx)
    Matrix(data)
 }
 
-fn _lll_basis_row_add_scaled(any: basis, int: dst, int: src, any: q): any {
+fn _lll_basis_row_add_scaled(any basis, int dst, int src, any q) any {
    def qz = _lll_round_to_z(q)
    if(qz == Z(0)){ return basis }
    mut data = _lll_data(basis)
@@ -2735,7 +2611,7 @@ fn _lll_basis_row_add_scaled(any: basis, int: dst, int: src, any: q): any {
    Matrix(data)
 }
 
-fn _lll_gram_move(any: gram, int: from_idx, int: to_idx): any {
+fn _lll_gram_move(any gram, int from_idx, int to_idx) any {
    if(from_idx == to_idx){ return gram }
    def n = _lll_rows(gram)
    mut rows = []
@@ -2759,22 +2635,22 @@ fn _lll_gram_move(any: gram, int: from_idx, int: to_idx): any {
    Matrix(rows)
 }
 
-fn _lll_parity_op_kind(any: op): str {
+fn _lll_parity_op_kind(any op) str {
    if(is_dict(op)){ return op.get("kind", op.get("op", "")) }
    is_list(op) && op.len > 0 ? to_str(op[0]) : ""
 }
 
-fn _lll_parity_op_i(any: op, str: key, int: pos, int: fallback=0): int {
+fn _lll_parity_op_i(any op, str key, int pos, int fallback=0) int {
    if(is_dict(op)){ return int(op.get(key, fallback)) }
    is_list(op) && op.len > pos ? int(op[pos]) : fallback
 }
 
-fn _lll_parity_op_q(any: op, any: fallback=1): any {
+fn _lll_parity_op_q(any op, any fallback=1) any {
    if(is_dict(op)){ return op.get("q", op.get("coeff", fallback)) }
    is_list(op) && op.len > 3 ? op[3] : fallback
 }
 
-fn _lll_apply_gso_parity_op(any: basis, any: gram, any: op): list {
+fn _lll_apply_gso_parity_op(any basis, any gram, any op) list {
    def kind = _lll_parity_op_kind(op)
    if(kind == "swap"){
       def i = _lll_parity_op_i(op, "i", 1)
@@ -2801,14 +2677,14 @@ fn _lll_apply_gso_parity_op(any: basis, any: gram, any: op): list {
    [basis, gram]
 }
 
-fn _lll_rel_diff(any: a, any: b): f64 {
+fn _lll_rel_diff(any a, any b) f64 {
    def af = float(a)
    def bf = float(b)
    def den = abs(af) + abs(bf)
    den == 0.0 ? abs(af - bf) : abs(af - bf) / den
 }
 
-fn _lll_gso_parity_diff(dict: basis_gso, dict: gram_gso): dict {
+fn _lll_gso_parity_diff(dict basis_gso, dict gram_gso) dict {
    def rows = int(basis_gso.get("rows", 0))
    def bmu = basis_gso.get("mu")
    def gmu = gram_gso.get("mu")
@@ -2849,12 +2725,12 @@ fn _lll_gso_parity_diff(dict: basis_gso, dict: gram_gso): dict {
    }
 }
 
-fn _lll_rat_abs_z(any: x): bigint {
+fn _lll_rat_abs_z(any x) bigint {
    def z = Z(x)
    z < Z(0) ? (Z(0) - z) : z
 }
 
-fn _lll_rat(any: num, any: den=Z(1)): list {
+fn _lll_rat(any num, any den=Z(1)) list {
    mut n = Z(num)
    mut d = Z(den)
    if(d == Z(0)){ return [Z(0), Z(1)] }
@@ -2867,37 +2743,37 @@ fn _lll_rat(any: num, any: den=Z(1)): list {
    [n / g, d / g]
 }
 
-fn _lll_rat_zero(): list { [Z(0), Z(1)] }
+fn _lll_rat_zero() list { [Z(0), Z(1)] }
 
-fn _lll_rat_from(any: x): list {
+fn _lll_rat_from(any x) list {
    is_list(x) && x.len >= 2 ? _lll_rat(x[0], x[1]) : _lll_rat(x, Z(1))
 }
 
-fn _lll_rat_sub(any: a, any: b): list {
+fn _lll_rat_sub(any a, any b) list {
    def x = _lll_rat_from(a)
    def y = _lll_rat_from(b)
    _lll_rat(x[0] * y[1] - y[0] * x[1], x[1] * y[1])
 }
 
-fn _lll_rat_mul(any: a, any: b): list {
+fn _lll_rat_mul(any a, any b) list {
    def x = _lll_rat_from(a)
    def y = _lll_rat_from(b)
    _lll_rat(x[0] * y[0], x[1] * y[1])
 }
 
-fn _lll_rat_div(any: a, any: b): list {
+fn _lll_rat_div(any a, any b) list {
    def x = _lll_rat_from(a)
    def y = _lll_rat_from(b)
    if(y[0] == Z(0)){ return _lll_rat_zero() }
    _lll_rat(x[0] * y[1], x[1] * y[0])
 }
 
-fn _lll_rat_square(any: a): list {
+fn _lll_rat_square(any a) list {
    def x = _lll_rat_from(a)
    _lll_rat(x[0] * x[0], x[1] * x[1])
 }
 
-fn _lll_rat_round_to_z(any: a): bigint {
+fn _lll_rat_round_to_z(any a) bigint {
    def x = _lll_rat_from(a)
    def neg = x[0] < Z(0)
    def n = neg ? (Z(0) - x[0]) : x[0]
@@ -2908,7 +2784,7 @@ fn _lll_rat_round_to_z(any: a): bigint {
    neg ? (Z(0) - q) : q
 }
 
-fn _lll_rat_to_float(any: a): f64 {
+fn _lll_rat_to_float(any a) f64 {
    def x = _lll_rat_from(a)
    def nd = _lll_entry_digits(x[0])
    def dd = _lll_entry_digits(x[1])
@@ -2917,11 +2793,11 @@ fn _lll_rat_to_float(any: a): f64 {
    den == 0.0 ? 0.0 : _lll_float_scaled(x[0], scale) / den
 }
 
-fn _lll_rat_abs_gt_float(any: a, any: bound): bool {
+fn _lll_rat_abs_gt_float(any a, any bound) bool {
    abs(_lll_rat_to_float(a)) > float(bound)
 }
 
-fn _lll_rat_zero_rows(int: n): list {
+fn _lll_rat_zero_rows(int n) list {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -2937,7 +2813,7 @@ fn _lll_rat_zero_rows(int: n): list {
    rows
 }
 
-fn _lll_gram_gso_report_exact(any: G): dict {
+fn _lll_gram_gso_report_exact(any G) dict {
    def t0 = ticks()
    def n = _lll_rows(G)
    def scale_digits = _lll_scale_digits(G)
@@ -2985,7 +2861,7 @@ fn _lll_gram_gso_report_exact(any: G): dict {
    ])
 }
 
-fn _lll_gram_gso_report_float(any: gram): dict {
+fn _lll_gram_gso_report_float(any gram) dict {
    def t0 = ticks()
    def G = _lll_gram_square(gram)
    def n = _lll_rows(G)
@@ -3024,7 +2900,7 @@ fn _lll_gram_gso_report_float(any: gram): dict {
    ])
 }
 
-fn _lll_gram_gso_fast_float(any: G, int: scale_digits): list {
+fn _lll_gram_gso_fast_float(any G, int scale_digits) list {
    def n = _lll_rows(G)
    def data = _lll_data(G)
    mut mu_rows = list(n)
@@ -3060,23 +2936,23 @@ fn _lll_gram_gso_fast_float(any: G, int: scale_digits): list {
    [mu_rows, norms, n]
 }
 
-fn _lll_gram_fast_mu(any: gso, int: i, int: j): f64 {
+fn _lll_gram_fast_mu(any gso, int i, int j) f64 {
    if(i < 0 || i >= int(gso[2]) || j < 0){ return 0.0 }
    f64buf_load(gso[0][i], j)
 }
 
-fn _lll_gram_fast_norm(any: gso, int: i): f64 {
+fn _lll_gram_fast_norm(any gso, int i) f64 {
    if(i < 0 || i >= int(gso[2])){ return 0.0 }
    f64buf_load(gso[1], i)
 }
 
-fn _lll_gram_fast_lovasz_holds(any: gso, int: k, any: delta): bool {
+fn _lll_gram_fast_lovasz_holds(any gso, int k, any delta) bool {
    if(k <= 0 || k >= int(gso[2])){ return true }
    def f64: muk = _lll_gram_fast_mu(gso, k, k - 1)
    _lll_gram_fast_norm(gso, k) >= (float(delta) - muk * muk) * _lll_gram_fast_norm(gso, k - 1)
 }
 
-fn lll_gram_gso_report(any: gram): dict {
+fn lll_gram_gso_report(any gram) dict {
    "Return GSO coefficients and squared norms computed directly from a Gram matrix."
    def G = _lll_gram_square(gram)
    def exact_env = env("NY_LATTICE_GRAM_EXACT")
@@ -3084,7 +2960,7 @@ fn lll_gram_gso_report(any: gram): dict {
    _lll_gram_gso_report_float(G)
 }
 
-fn lll_basis_gram_gso_parity_report(any: basis, any: operations=nil, any: tolerance=0.001): dict {
+fn lll_basis_gram_gso_parity_report(any basis, any operations=nil, any tolerance=0.001) dict {
    "Compare basis-derived GSO against direct Gram-matrix GSO, optionally after row operations."
    def t0 = ticks()
    mut B = _lll_as_matrix(basis)
@@ -3130,12 +3006,12 @@ fn lll_basis_gram_gso_parity_report(any: basis, any: operations=nil, any: tolera
    }
 }
 
-fn lll_gso_parity_report(any: basis, any: operations=nil, any: tolerance=0.001): dict {
+fn lll_gso_parity_report(any basis, any operations=nil, any tolerance=0.001) dict {
    "Alias for lll_basis_gram_gso_parity_report."
    lll_basis_gram_gso_parity_report(basis, operations, tolerance)
 }
 
-fn _lll_gram_lovasz_holds(any: gso, int: k, any: delta): bool {
+fn _lll_gram_lovasz_holds(any gso, int k, any delta) bool {
    def exact_norms = gso.get("norms_exact", nil)
    def exact_mu = gso.get("mu_exact", nil)
    if(is_list(exact_norms) && is_list(exact_mu) && k > 0 && k < exact_norms.len){
@@ -3151,7 +3027,7 @@ fn _lll_gram_lovasz_holds(any: gso, int: k, any: delta): bool {
    float(norms[k]) >= (float(delta) - muk * muk) * float(norms[k - 1])
 }
 
-fn _lll_gram_exact_mu_or(any: mu_exact, any: gso, int: k, int: j): any {
+fn _lll_gram_exact_mu_or(any mu_exact, any gso, int k, int j) any {
    if(is_list(mu_exact) && k >= 0 && k < mu_exact.len){
       def row = mu_exact[k]
       if(is_list(row) && j >= 0 && j < row.len){ return row[j] }
@@ -3159,7 +3035,7 @@ fn _lll_gram_exact_mu_or(any: mu_exact, any: gso, int: k, int: j): any {
    _lll_get(gso.get("mu"), k, j)
 }
 
-fn _lll_gram_quality_from_gso(any: G, any: gso, any: delta, any: eta): dict {
+fn _lll_gram_quality_from_gso(any G, any gso, any delta, any eta) dict {
    def n = _lll_rows(G)
    def mu = gso.get("mu")
    mut violations = []
@@ -3191,29 +3067,29 @@ fn _lll_gram_quality_from_gso(any: G, any: gso, any: delta, any: eta): dict {
    ])
 }
 
-fn lll_gram_quality_report(any: gram, any: delta=0.75, any: eta=0.51): dict {
+fn lll_gram_quality_report(any gram, any delta=0.75, any eta=0.51) dict {
    "Return LLL quality checks computed directly from a Gram matrix."
    def G = _lll_gram_square(gram)
    _lll_gram_quality_from_gso(G, lll_gram_gso_report(G), delta, eta)
 }
 
-fn lll_gram_is_reduced(any: gram, any: delta=0.75, any: eta=0.51): bool {
+fn lll_gram_is_reduced(any gram, any delta=0.75, any eta=0.51) bool {
    "Return true when a Gram matrix satisfies LLL quality checks."
    lll_gram_quality_report(gram, delta, eta).get("reduced", false)
 }
 
-fn _lll_gram_verify_transform(any: original, any: transform, any: reduced): bool {
+fn _lll_gram_verify_transform(any original, any transform, any reduced) bool {
    def prod = matrix_mul(matrix_mul(transform, original), matrix_transpose(transform))
    _lll_same_matrix(prod, reduced)
 }
 
-fn _lll_round_div_to_z(any: num, any: den): bigint {
+fn _lll_round_div_to_z(any num, any den) bigint {
    def dz = Z(den)
    if(dz == Z(0)){ return Z(0) }
    _lll_rat_round_to_z(_lll_rat(num, dz))
 }
 
-fn _lll_gram_first_column_reduce_state(any: gram): list {
+fn _lll_gram_first_column_reduce_state(any gram) list {
    mut work = _lll_gram_square(gram)
    def n = _lll_rows(work)
    mut transform = _lll_identity(n)
@@ -3231,7 +3107,7 @@ fn _lll_gram_first_column_reduce_state(any: gram): list {
    [work, transform, ops]
 }
 
-fn _lll_gram_first_column_max_mu(any: gram): f64 {
+fn _lll_gram_first_column_max_mu(any gram) f64 {
    def G = _lll_gram_square(gram)
    def n = _lll_rows(G)
    def den = _lll_get(G, 0, 0)
@@ -3246,7 +3122,7 @@ fn _lll_gram_first_column_max_mu(any: gram): f64 {
    out
 }
 
-fn lll_gram_first_column_reduce_report(any: gram, any: delta=0.75, any: eta=0.51): dict {
+fn lll_gram_first_column_reduce_report(any gram, any delta=0.75, any eta=0.51) dict {
    "Exact first-column Gram size-reduction prepass for high-dynamic cleanup paths."
    def t0 = ticks()
    def G = _lll_gram_square(gram)
@@ -3266,7 +3142,7 @@ fn lll_gram_first_column_reduce_report(any: gram, any: delta=0.75, any: eta=0.51
    ])
 }
 
-fn _lll_env_positive_int(str: name, int: fallback): int {
+fn _lll_env_positive_int(str name, int fallback) int {
    def raw = env(name)
    if(is_str(raw) && raw.len > 0){
       def parsed = atoi(raw)
@@ -3275,11 +3151,11 @@ fn _lll_env_positive_int(str: name, int: fallback): int {
    fallback
 }
 
-fn _lll_gram_exact_step_cap(any: gram): int {
+fn _lll_gram_exact_step_cap(any gram) int {
    _lll_env_positive_int("NY_LATTICE_GRAM_EXACT_MAX_STEPS", 32)
 }
 
-fn _lll_gram_reduce_state(any: gram, any: delta, any: eta, bool: exact=false, int: max_steps=0): list {
+fn _lll_gram_reduce_state(any gram, any delta, any eta, bool exact=false, int max_steps=0) list {
    mut work = _lll_gram_square(gram)
    def n = _lll_rows(work)
    mut transform = _lll_identity(n)
@@ -3322,7 +3198,7 @@ fn _lll_gram_reduce_state(any: gram, any: delta, any: eta, bool: exact=false, in
    [work, transform, steps, ok, total_budget, exact ? "exact-rational" : "float-scaled"]
 }
 
-fn _lll_gram_reduce_report_with_cap(any: gram, any: delta=0.75, str: method="ny", any: eta=0.51, int: requested_exact_step_cap=0): dict {
+fn _lll_gram_reduce_report_with_cap(any gram, any delta=0.75, str method="ny", any eta=0.51, int requested_exact_step_cap=0) dict {
    "Reduce an integer Gram matrix by exact row/column LLL operations and report transform verification."
    def t0 = ticks()
    def G = _lll_gram_square(gram)
@@ -3372,27 +3248,27 @@ fn _lll_gram_reduce_report_with_cap(any: gram, any: delta=0.75, str: method="ny"
    out
 }
 
-fn lll_gram_reduce_report(any: gram, any: delta=0.75, str: method="ny", any: eta=0.51): dict {
+fn lll_gram_reduce_report(any gram, any delta=0.75, str method="ny", any eta=0.51) dict {
    "Reduce a Gram matrix and return transform, quality, timing, and completion diagnostics."
    _lll_gram_reduce_report_with_cap(gram, delta, method, eta, 0)
 }
 
-fn lll_gram_reduce_bounded_report(any: gram, int: exact_step_cap=8, any: delta=0.75, str: method="ny", any: eta=0.51): dict {
+fn lll_gram_reduce_bounded_report(any gram, int exact_step_cap=8, any delta=0.75, str method="ny", any eta=0.51) dict {
    "Reduce a Gram matrix with an explicit exact-step cap; reports incomplete instead of running pathological cleanups."
    _lll_gram_reduce_report_with_cap(gram, delta, method, eta, exact_step_cap)
 }
 
-fn lll_gram_report(any: gram, any: delta=0.75, str: method="auto", any: eta=0.51): dict {
+fn lll_gram_report(any gram, any delta=0.75, str method="auto", any eta=0.51) dict {
    "Report-first Gram-LLL API. `auto` resolves to Ny's exact Gram reducer."
    lll_gram_reduce_report(gram, delta, method, eta)
 }
 
-fn lll_gram(any: gram, any: delta=0.75, str: method="ny", any: eta=0.51): any {
+fn lll_gram(any gram, any delta=0.75, str method="ny", any eta=0.51) any {
    "Return only the reduced Gram matrix."
    lll_gram_reduce_report(gram, delta, method, eta).get("gram")
 }
 
-fn lll_reduce_bounded(any: basis, int: step_cap=0, any: delta=0.75, str: method="bounded-fast", any: eta=0.51): any {
+fn lll_reduce_bounded(any basis, int step_cap=0, any delta=0.75, str method="bounded-fast", any eta=0.51) any {
    "Run bounded LLL and return only the reduced basis, avoiding report/profile overhead."
    def B = _lll_as_matrix(basis)
    def rows = _lll_rows(B)
@@ -3413,7 +3289,7 @@ fn lll_reduce_bounded(any: basis, int: step_cap=0, any: delta=0.75, str: method=
    state[0]
 }
 
-fn lll_quality_report(any: basis, any: delta=0.75, any: eta=0.51): dict {
+fn lll_quality_report(any basis, any delta=0.75, any eta=0.51) dict {
    "Return standard LLL quality checks: size reduction, Lovasz, profile, and violations."
    def B = _lll_as_matrix(basis)
    def fast = _lll_quality_report_fast_native(B, delta, eta)
@@ -3465,12 +3341,12 @@ fn lll_quality_report(any: basis, any: delta=0.75, any: eta=0.51): dict {
    }
 }
 
-fn lll_is_reduced(any: basis, any: delta=0.75, any: eta=0.51): bool {
+fn lll_is_reduced(any basis, any delta=0.75, any eta=0.51) bool {
    "Return true when a basis satisfies the same LLL checks exposed by lll_quality_report."
    lll_quality_report(basis, delta, eta).get("reduced", false)
 }
 
-fn lll_reduce_report(any: basis, any: delta=0.75, str: method="ny", any: eta=0.51): dict {
+fn lll_reduce_report(any basis, any delta=0.75, str method="ny", any eta=0.51) dict {
    "Reduce a basis and return strategy choice, GSO/profile data, transform, timings, and the reduced basis."
    def t0 = ticks()
    def B = _lll_as_matrix(basis)
@@ -3608,7 +3484,7 @@ fn lll_reduce_report(any: basis, any: delta=0.75, str: method="ny", any: eta=0.5
    out
 }
 
-fn lll_reduce_bounded_report(any: basis, int: step_cap=0, any: delta=0.75, str: method="bounded-fast", any: eta=0.51): dict {
+fn lll_reduce_bounded_report(any basis, int step_cap=0, any delta=0.75, str method="bounded-fast", any eta=0.51) dict {
    "Run the list-GSO LLL kernel under an explicit step budget and report incomplete status instead of falling back to slower cleanup paths."
    def t0 = ticks()
    def B = _lll_as_matrix(basis)
@@ -3719,12 +3595,12 @@ fn lll_reduce_bounded_report(any: basis, int: step_cap=0, any: delta=0.75, str: 
    out
 }
 
-fn lll_report(any: basis, any: delta=0.75, str: method="auto", any: eta=0.51): dict {
+fn lll_report(any basis, any delta=0.75, str method="auto", any eta=0.51) dict {
    "Report-first public LLL API. `auto` resolves to LLL."
    lll_reduce_report(basis, delta, method, eta)
 }
 
-fn lll(any: basis, any: delta=0.75, str: method="ny", any: eta=0.51): any {
+fn lll(any basis, any delta=0.75, str method="ny", any eta=0.51) any {
    "Perform LLL lattice reduction on a matrix basis.
    - `method=\"ny\"` (default): use LLL.
    - `method=\"auto\"`: resolve to LLL.
@@ -3736,14 +3612,14 @@ fn lll(any: basis, any: delta=0.75, str: method="ny", any: eta=0.51): any {
    _lll_pure_reduce(basis, delta, eta)
 }
 
-fn matrix_get_row(any: m, int: i): list {
+fn matrix_get_row(any m, int i) list {
    "Internal: get row i from matrix m by reading from the matrix data array."
    def data = _lll_data(m)
    if(i < 0 || i >= data.len){ return [] }
    data[i]
 }
 
-fn matrix_set_row(any: m, int: i, any: row): any {
+fn matrix_set_row(any m, int i, any row) any {
    "Internal: set row i of matrix m to row and return the updated matrix representation."
    def rows = _lll_rows(m)
    def cols = _lll_cols(m)
@@ -3770,7 +3646,7 @@ fn matrix_set_row(any: m, int: i, any: row): any {
    [rows, cols, new_data]
 }
 
-fn matrix_swap_rows(any: m, int: i, int: j): any {
+fn matrix_swap_rows(any m, int i, int j) any {
    "Internal: swap rows i and j in matrix m and return the updated matrix."
    def row_i, row_j = matrix_get_row(m, i), matrix_get_row(m, j)
    mut res = matrix_set_row(m, i, row_j)
@@ -3778,7 +3654,7 @@ fn matrix_swap_rows(any: m, int: i, int: j): any {
    res
 }
 
-fn dot_product(list: v1, list: v2): any {
+fn dot_product(list v1, list v2) any {
    "Internal: compute the dot product of two vectors v1 and v2 using big integer arithmetic."
    mut sum = 0
    mut i = 0
@@ -3789,7 +3665,7 @@ fn dot_product(list: v1, list: v2): any {
    sum
 }
 
-fn vector_sub(list: v1, list: v2): list {
+fn vector_sub(list v1, list v2) list {
    "Internal: subtract vector v2 from v1 element-wise and return the result."
    mut res = list(0)
    mut i = 0
@@ -3800,7 +3676,7 @@ fn vector_sub(list: v1, list: v2): list {
    res
 }
 
-fn vector_scale(list: v, any: s): list {
+fn vector_scale(list v, any s) list {
    "Internal: scale vector v by scalar s element-wise and return the result."
    mut res = list(0)
    mut i = 0
@@ -3811,17 +3687,17 @@ fn vector_scale(list: v, any: s): list {
    res
 }
 
-fn abs(any: x): any {
+fn abs(any x) any {
    "Internal: compute the absolute value of x."
    (x < 0) ? (-x) : x
 }
 
-fn round(any: x): int {
+fn round(any x) int {
    "Internal: round x to the nearest integer."
    (x > 0) ? to_int(x + 0.5) : to_int(x - 0.5)
 }
 
-if(comptime{ return __main() }){
+#main {
    def q = lll_quality_report([[1, 0], [0, 1]])
    assert(
       q.get("ok", false) && q.get("is_reduced", false) && q.get("reduced", false),
@@ -3832,5 +3708,5 @@ if(comptime{ return __main() }){
       r.get("reduction_complete", false) && r.get("ok", false) && r.get("is_reduced", false),
       "LLL reduce report completes and carries reduced quality",
    )
-   print("✓ crypto lattice.lll self-tests passed")
+   print("✓ std.math.crypto.lattice.lll self-test passed")
 }

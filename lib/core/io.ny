@@ -1,19 +1,21 @@
-;; Keywords: io input output stream
+;; Keywords: io input output stream core
 ;; Core input/output operations for files, streams, and process pipes.
+;; References:
+;; - std.core
 module std.core.io(_print_write, print)
 use std.core
 use std.core.primitives as prim
 
-fn _write_str(str: s): int {
+fn _write_str(str s) int {
    def n = load64(s, -16)
    if(n > 0){ __write_off(1, s, n, 0) }
    0
 }
 
-fn _print_join3(str: a, str: b, str: c): str { __str_concat(__str_concat(a, b), c) }
+fn _print_join3(str a, str b, str c) str { __str_concat(__str_concat(a, b), c) }
 
 @returns_owned
-fn _print_list_repr(any: v, str: open, str: close): str {
+fn _print_list_repr(any v, str open, str close) str {
    def n = load64(v, 0)
    use std.core.str
    mut b = Builder(64)
@@ -31,12 +33,12 @@ fn _print_list_repr(any: v, str: open, str: close): str {
    s
 }
 
-fn _print_bytes_repr(any: v): str {
+fn _print_bytes_repr(any v) str {
    def n = load64(v, -16)
    _print_join3("<bytes ", __to_str(n), ">")
 }
 
-fn _print_to_str(any: v): str {
+fn _print_to_str(any v) str {
    if(v == true){ return "true" }
    if(v == false){ return "false" }
    if(__is_int(v)){ return __to_str(v) }
@@ -55,12 +57,12 @@ fn _print_to_str(any: v): str {
    return __to_str(v)
 }
 
-fn _print_write(any: v): int {
+fn _print_write(any v) int {
    def s = _print_to_str(v)
    _write_str(s)
 }
 
-fn print(...args): int {
+fn print(...args) int {
    "Prints values with optional keyword args `sep` and `end`."
    mut sep = " "
    mut end = "\n"
@@ -90,4 +92,11 @@ fn print(...args): int {
    }
    _write_str(end)
    0
+}
+
+#main {
+   assert(_print_to_str(true) == "true" && _print_to_str(false) == "false", "io bool text")
+   assert(_print_to_str([1, "x"]) == "[1, x]", "io list text")
+   assert(_write_str("") == 0 && _print_write("") == 0, "io empty writes")
+   print("✓ std.core.io self-test passed")
 }

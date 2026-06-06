@@ -1,12 +1,15 @@
-;; Keywords: encoding uu
+;; Keywords: encoding uu math crypto
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc4648
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.uu(uu_decode_line)
 use std.core
 use std.core.str
 
-fn uu_decode_line(any: line): str {
+fn uu_decode_line(any line) str {
    "Decode one uuencoded line to text."
    if(!is_str(line) || line.len == 0){ return "" }
    def out_len = (ord_at(line, 0) - 32) & 63

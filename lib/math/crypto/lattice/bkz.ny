@@ -1,9 +1,12 @@
-;; Keywords: lattice bkz
+;; Keywords: lattice bkz math crypto number-theory
 ;; BKZ reduction.
 ;;
 ;; Reference:
 ;; - https://www.iacr.org/archive/crypto2011/68410061/68410061.pdf
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.bkz(bkz, svp_enumerate, svp_enumerate_report, svp_report, bkz_backend_report, svp_kernel, svp_kernel_report, svp_gram, svp_gram_report, bkz_gram, bkz_gram_report, bkz_gram_reduce_report, dual_svp, dual_svp_report, dual_svp_norm, dual_svp_reduce, dual_svp_reduce_report, bkz_projected_block_report, bkz_rerandomize_block_report, svp_pruning_profile, svp_pruning_calibration_report, svp_pruning_optimize, svp_pruning_optimize_report, bkz_strategy, bkz_strategy_report, bkz_reduce_report, bkz_report)
 use std.core
 use std.math.matrix
@@ -18,7 +21,7 @@ use std.os.clock (ticks)
 use std.os.prim (env)
 use std.os.thread (thread_spawn, thread_join)
 
-fn _bkz_set_fields(dict: out, list: fields): dict {
+fn _bkz_set_fields(dict out, list fields) dict {
    mut i = 0
    while(i + 1 < fields.len){
       out = out.set(fields[i], fields[i + 1])
@@ -27,22 +30,22 @@ fn _bkz_set_fields(dict: out, list: fields): dict {
    out
 }
 
-fn _bkz_dict_with(any: base, str: key, any: value): dict {
+fn _bkz_dict_with(any base, str key, any value) dict {
    (is_dict(base) ? base : dict(0)).set(key, value)
 }
 
-fn _bkz_pruning_bound(int: k, int: n, any: radius_sq): any {
+fn _bkz_pruning_bound(int k, int n, any radius_sq) any {
    def ratio = to_float(k) / to_float(n)
    radius_sq * (0.1 + 0.9 * ratio)
 }
 
-fn _bkz_row_norm(any: row): any { dot_product(row, row) }
+fn _bkz_row_norm(any row) any { dot_product(row, row) }
 
-fn _bkz_entry_z(any: x): bigint { is_float(x) ? Z(int(x)) : Z(x) }
+fn _bkz_entry_z(any x) bigint { is_float(x) ? Z(int(x)) : Z(x) }
 
-fn _bkz_as_matrix(any: basis): any { is_matrix(basis) ? basis : Matrix(basis) }
+fn _bkz_as_matrix(any basis) any { is_matrix(basis) ? basis : Matrix(basis) }
 
-fn _bkz_zero_vec(int: n): list {
+fn _bkz_zero_vec(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -52,7 +55,7 @@ fn _bkz_zero_vec(int: n): list {
    out
 }
 
-fn _bkz_vec_nonzero(list: v): bool {
+fn _bkz_vec_nonzero(list v) bool {
    mut i = 0
    while(i < v.len){
       if(v.get(i) != Z(0)){ return true }
@@ -61,7 +64,7 @@ fn _bkz_vec_nonzero(list: v): bool {
    false
 }
 
-fn _bkz_vec_add_scaled(list: a, list: b, any: coeff): list {
+fn _bkz_vec_add_scaled(list a, list b, any coeff) list {
    mut out = []
    def cc = Z(coeff)
    mut i = 0
@@ -72,7 +75,7 @@ fn _bkz_vec_add_scaled(list: a, list: b, any: coeff): list {
    out
 }
 
-fn _bkz_vec_add_scaled_inplace(list: a, list: b, any: coeff): list {
+fn _bkz_vec_add_scaled_inplace(list a, list b, any coeff) list {
    def cc = Z(coeff)
    mut i = 0
    while(i < a.len){
@@ -82,7 +85,7 @@ fn _bkz_vec_add_scaled_inplace(list: a, list: b, any: coeff): list {
    a
 }
 
-fn _bkz_vec_dot_z(list: a, list: b): bigint {
+fn _bkz_vec_dot_z(list a, list b) bigint {
    mut s = Z(0)
    mut i = 0
    while(i < a.len && i < b.len){
@@ -92,7 +95,7 @@ fn _bkz_vec_dot_z(list: a, list: b): bigint {
    s
 }
 
-fn _svp_row_gram(list: rows): list {
+fn _svp_row_gram(list rows) list {
    mut gram = []
    mut i = 0
    while(i < rows.len){
@@ -108,7 +111,7 @@ fn _svp_row_gram(list: rows): list {
    gram
 }
 
-fn _svp_coeff_gram_dot(list: coeffs, list: gram_row): bigint {
+fn _svp_coeff_gram_dot(list coeffs, list gram_row) bigint {
    mut s = Z(0)
    mut i = 0
    while(i < coeffs.len && i < gram_row.len){
@@ -118,7 +121,7 @@ fn _svp_coeff_gram_dot(list: coeffs, list: gram_row): bigint {
    s
 }
 
-fn _svp_coeff_norm_from_gram(list: coeffs, list: gram): bigint {
+fn _svp_coeff_norm_from_gram(list coeffs, list gram) bigint {
    mut s = Z(0)
    mut i = 0
    while(i < coeffs.len){
@@ -130,13 +133,13 @@ fn _svp_coeff_norm_from_gram(list: coeffs, list: gram): bigint {
    s
 }
 
-fn _bkz_small_int_or_nil(any: x, int: bits=61): any {
+fn _bkz_small_int_or_nil(any x, int bits=61) any {
    def z = Z(x)
    def a = z < Z(0) ? Z(0) - z : z
    bigint_bit_length(a) < bits ? [true, bigint_to_int(z)] : [false, 0]
 }
 
-fn _svp_gram_int_or_nil(list: gram, int: bits=61): any {
+fn _svp_gram_int_or_nil(list gram, int bits=61) any {
    mut out = []
    mut i = 0
    while(i < gram.len){
@@ -155,7 +158,7 @@ fn _svp_gram_int_or_nil(list: gram, int: bits=61): any {
    out
 }
 
-fn _svp_coeff_gram_dot_int(list<int>: coeffs, list<int>: gram_row): int {
+fn _svp_coeff_gram_dot_int(list<int> coeffs, list<int> gram_row) int {
    mut s = 0
    mut i = 0
    while(i < coeffs.len && i < gram_row.len){
@@ -165,7 +168,7 @@ fn _svp_coeff_gram_dot_int(list<int>: coeffs, list<int>: gram_row): int {
    s
 }
 
-fn _svp_coeff_norm_from_gram_int(list<int>: coeffs, list<list<int>>: gram): int {
+fn _svp_coeff_norm_from_gram_int(list<int> coeffs, list<list<int>> gram) int {
    mut s = 0
    mut i = 0
    while(i < coeffs.len){
@@ -176,7 +179,7 @@ fn _svp_coeff_norm_from_gram_int(list<int>: coeffs, list<list<int>>: gram): int 
    s
 }
 
-fn _bkz_rows_equal(any: a, any: b): bool {
+fn _bkz_rows_equal(any a, any b) bool {
    if(!is_list(a) || !is_list(b) || a.len != b.len){ return false }
    mut i = 0
    while(i < a.len){
@@ -186,7 +189,7 @@ fn _bkz_rows_equal(any: a, any: b): bool {
    true
 }
 
-fn _bkz_extract_block(any: basis, int: start, int: stop): any {
+fn _bkz_extract_block(any basis, int start, int stop) any {
    mut rows = []
    def data = _matrix_data(basis)
    mut i = start
@@ -197,7 +200,7 @@ fn _bkz_extract_block(any: basis, int: start, int: stop): any {
    Matrix(rows)
 }
 
-fn _bkz_replace_block(any: basis, int: start, any: block): any {
+fn _bkz_replace_block(any basis, int start, any block) any {
    def rows = _matrix_rows(basis)
    def data = _matrix_data(basis)
    def block_data = _matrix_data(block)
@@ -211,7 +214,7 @@ fn _bkz_replace_block(any: basis, int: start, any: block): any {
    Matrix(out)
 }
 
-fn _bkz_block_changed(any: basis, int: start, any: block): bool {
+fn _bkz_block_changed(any basis, int start, any block) bool {
    def data = _matrix_data(basis)
    def block_data = _matrix_data(block)
    mut i = 0
@@ -222,7 +225,7 @@ fn _bkz_block_changed(any: basis, int: start, any: block): bool {
    false
 }
 
-fn _bkz_identity(int: n): any {
+fn _bkz_identity(int n) any {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -238,7 +241,7 @@ fn _bkz_identity(int: n): any {
    Matrix(rows)
 }
 
-fn _bkz_signed_unit_orthogonal(any: basis): bool {
+fn _bkz_signed_unit_orthogonal(any basis) bool {
    def B = _bkz_as_matrix(basis)
    def rows = _matrix_rows(B)
    def cols = _matrix_cols(B)
@@ -271,7 +274,7 @@ fn _bkz_signed_unit_orthogonal(any: basis): bool {
    true
 }
 
-fn _bkz_lower_triangular_high_precision(any: basis): bool {
+fn _bkz_lower_triangular_high_precision(any basis) bool {
    def B = _bkz_as_matrix(basis)
    def rows = _matrix_rows(B)
    def cols = _matrix_cols(B)
@@ -299,7 +302,7 @@ fn _bkz_lower_triangular_high_precision(any: basis): bool {
    saw_high
 }
 
-fn _bkz_unit_coeffs(int: n, int: idx): list {
+fn _bkz_unit_coeffs(int n, int idx) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -309,7 +312,7 @@ fn _bkz_unit_coeffs(int: n, int: idx): list {
    out
 }
 
-fn _bkz_zero_coeffs(int: n): list {
+fn _bkz_zero_coeffs(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -319,7 +322,7 @@ fn _bkz_zero_coeffs(int: n): list {
    out
 }
 
-fn _bkz_apply_local_transform_to_rows(any: rows_matrix, int: start, any: local): any {
+fn _bkz_apply_local_transform_to_rows(any rows_matrix, int start, any local) any {
    def rows = _matrix_rows(rows_matrix)
    def cols = _matrix_cols(rows_matrix)
    def data = _matrix_data(rows_matrix)
@@ -351,7 +354,7 @@ fn _bkz_apply_local_transform_to_rows(any: rows_matrix, int: start, any: local):
    Matrix(out)
 }
 
-fn _bkz_sparse_entries(any: m): dict {
+fn _bkz_sparse_entries(any m) dict {
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
    mut sparse = []
@@ -374,7 +377,7 @@ fn _bkz_sparse_entries(any: m): dict {
    {"rows": sparse, "nonzero": nonzero}
 }
 
-fn _bkz_zero_matrix_rows(int: rows, int: cols): list {
+fn _bkz_zero_matrix_rows(int rows, int cols) list {
    mut out = []
    mut i = 0
    while(i < rows){
@@ -384,7 +387,7 @@ fn _bkz_zero_matrix_rows(int: rows, int: cols): list {
    out
 }
 
-fn _bkz_sparse_matmul_report(any: left, any: right): dict {
+fn _bkz_sparse_matmul_report(any left, any right) dict {
    def t0 = ticks()
    def A = _bkz_as_matrix(left)
    def B = _bkz_as_matrix(right)
@@ -440,11 +443,11 @@ fn _bkz_sparse_matmul_report(any: left, any: right): dict {
    }
 }
 
-fn _bkz_sparse_matmul(any: left, any: right): any {
+fn _bkz_sparse_matmul(any left, any right) any {
    _bkz_sparse_matmul_report(left, right).get("matrix")
 }
 
-fn _bkz_same_matrix(any: a, any: b): bool {
+fn _bkz_same_matrix(any a, any b) bool {
    if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ return false }
    mut i = 0
    while(i < _matrix_rows(a)){
@@ -458,7 +461,7 @@ fn _bkz_same_matrix(any: a, any: b): bool {
    true
 }
 
-fn _bkz_first_matrix_mismatch(any: a, any: b): list {
+fn _bkz_first_matrix_mismatch(any a, any b) list {
    if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){
       return [-1, -1, _matrix_rows(a), _matrix_cols(a), _matrix_rows(b), _matrix_cols(b)]
    }
@@ -476,29 +479,29 @@ fn _bkz_first_matrix_mismatch(any: a, any: b): list {
    []
 }
 
-fn _bkz_debug_transform_steps(): bool {
+fn _bkz_debug_transform_steps() bool {
    def v = env("NY_BKZ_DEBUG_TRANSFORM")
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _bkz_full_projection_reports(): bool {
+fn _bkz_full_projection_reports() bool {
    def v = env("NY_BKZ_FULL_PROJECTION_REPORTS")
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _bkz_full_tours(): bool {
+fn _bkz_full_tours() bool {
    def v = env("NY_BKZ_FULL_TOURS")
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _bkz_block_stride(int: n, int: block_size, bool: record): int {
+fn _bkz_block_stride(int n, int block_size, bool record) int {
    if(!record || _bkz_full_tours()){ return 1 }
    if(n <= 64 || block_size <= 16){ return 1 }
    if(block_size > 32){ return max(1, block_size / 2) }
    max(1, block_size / 4)
 }
 
-fn _bkz_projection_summary(int: n, int: start, int: stop, any: before_norm): dict {
+fn _bkz_projection_summary(int n, int start, int stop, any before_norm) dict {
    {
       "method": "bounded-projection-summary",
       "projection_kind": "skipped-large-basis-report",
@@ -510,7 +513,7 @@ fn _bkz_projection_summary(int: n, int: start, int: stop, any: before_norm): dic
    }
 }
 
-fn _bkz_append_transform_check(list: checks, str: stage, any: original, any: transform, any: current, int: tour, int: start): list {
+fn _bkz_append_transform_check(list checks, str stage, any original, any transform, any current, int tour, int start) list {
    def actual = _bkz_sparse_matmul(transform, original)
    def mismatch = _bkz_first_matrix_mismatch(actual, current)
    checks.append({
@@ -522,7 +525,7 @@ fn _bkz_append_transform_check(list: checks, str: stage, any: original, any: tra
    })
 }
 
-fn bkz_projected_block_report(any: basis, int: start, int: stop): dict {
+fn bkz_projected_block_report(any basis, int start, int stop) dict {
    "Report the GSO-projected block used by a BKZ local SVP step."
    def rows = _matrix_rows(basis)
    mut s = max(0, min(rows, start))
@@ -562,7 +565,7 @@ fn bkz_projected_block_report(any: basis, int: start, int: stop): dict {
    }
 }
 
-fn _bkz_coeff_order(int: bound): list {
+fn _bkz_coeff_order(int bound) list {
    mut out = [0]
    mut c = 1
    while(c <= bound){
@@ -573,7 +576,7 @@ fn _bkz_coeff_order(int: bound): list {
    out
 }
 
-fn _bkz_nodes_vec(int: n): list {
+fn _bkz_nodes_vec(int n) list {
    mut out = []
    mut i = 0
    while(i <= n){
@@ -583,7 +586,7 @@ fn _bkz_nodes_vec(int: n): list {
    out
 }
 
-fn _bkz_pow_int(int: base, int: exp): int {
+fn _bkz_pow_int(int base, int exp) int {
    mut out = 1
    mut i = 0
    while(i < exp){
@@ -593,7 +596,7 @@ fn _bkz_pow_int(int: base, int: exp): int {
    out
 }
 
-fn _svp_coeffs_from_code(list: coeff_order, int: n, int: code): list {
+fn _svp_coeffs_from_code(list coeff_order, int n, int code) list {
    def choices = coeff_order.len
    mut coeffs = []
    mut pos = 0
@@ -606,7 +609,7 @@ fn _svp_coeffs_from_code(list: coeff_order, int: n, int: code): list {
    coeffs
 }
 
-fn _svp_coeff_indices_from_code(list: coeff_order, int: n, int: code): list<int> {
+fn _svp_coeff_indices_from_code(list coeff_order, int n, int code) list<int> {
    def choices = coeff_order.len
    mut list<int>: out = list(n)
    mut pos = 0
@@ -618,7 +621,7 @@ fn _svp_coeff_indices_from_code(list: coeff_order, int: n, int: code): list<int>
    out
 }
 
-fn _bkz_pruning_profile(int: n, any: radius_sq): list {
+fn _bkz_pruning_profile(int n, any radius_sq) list {
    mut out = []
    mut i = 0
    while(i <= n){
@@ -628,7 +631,7 @@ fn _bkz_pruning_profile(int: n, any: radius_sq): list {
    out
 }
 
-fn svp_pruning_profile(int: dimension, any: radius_sq=1.0, str: shape="linear"): list {
+fn svp_pruning_profile(int dimension, any radius_sq=1.0, str shape="linear") list {
    "Return a deterministic pruning-radius profile for bounded SVP enumeration."
    def n = max(1, dimension)
    mut out = []
@@ -645,9 +648,9 @@ fn svp_pruning_profile(int: dimension, any: radius_sq=1.0, str: shape="linear"):
    out
 }
 
-fn _svp_profile_terminal(list: profile, any: fallback): any { profile.len > 0 ? profile.get(profile.len - 1, fallback) : fallback }
+fn _svp_profile_terminal(list profile, any fallback) any { profile.len > 0 ? profile.get(profile.len - 1, fallback) : fallback }
 
-fn _svp_profile_density(list: profile, any: radius_sq): f64 {
+fn _svp_profile_density(list profile, any radius_sq) f64 {
    if(profile.len <= 1){ return 1.0 }
    def denom = max(0.000001, to_float(radius_sq))
    mut total = 0.0
@@ -659,7 +662,7 @@ fn _svp_profile_density(list: profile, any: radius_sq): f64 {
    total / to_float(profile.len - 1)
 }
 
-fn _svp_profile_estimated_nodes(list: profile, any: radius_sq, int: max_nodes): int {
+fn _svp_profile_estimated_nodes(list profile, any radius_sq, int max_nodes) int {
    if(profile.len <= 1){ return 1 }
    def denom = max(0.000001, to_float(radius_sq))
    mut nodes = 1
@@ -674,25 +677,25 @@ fn _svp_profile_estimated_nodes(list: profile, any: radius_sq, int: max_nodes): 
    nodes
 }
 
-fn _svp_pruning_probability(list: profile, any: radius_sq): f64 {
+fn _svp_pruning_probability(list profile, any radius_sq) f64 {
    def density = max(0.000001, min(1.0, _svp_profile_density(profile, radius_sq)))
    def n = max(1, profile.len - 1)
    max(0.000001, min(1.0, math.pow(density, max(1.0, float(n) / 4.0))))
 }
 
-fn _svp_pruning_trials(f64: success_probability, f64: target_probability): int {
+fn _svp_pruning_trials(f64 success_probability, f64 target_probability) int {
    def p = max(0.000001, min(0.999999, success_probability))
    def target = max(0.000001, min(0.999999, target_probability))
    if(p >= target){ return 1 }
    max(1, int(math.ceil(math.log(1.0 - target) / math.log(1.0 - p))))
 }
 
-fn _svp_pruning_gh_radius_sq(int: dimension, any: radius_sq, f64: density): f64 {
+fn _svp_pruning_gh_radius_sq(int dimension, any radius_sq, f64 density) f64 {
    def n = max(1, dimension)
    float(radius_sq) * math.pow(max(0.000001, density), 2.0 / float(n))
 }
 
-fn _svp_pruning_candidate(int: dimension, any: radius_sq, int: max_nodes, str: shape): dict {
+fn _svp_pruning_candidate(int dimension, any radius_sq, int max_nodes, str shape) dict {
    def profile = svp_pruning_profile(dimension, radius_sq, shape)
    def est = _svp_profile_estimated_nodes(profile, radius_sq, max_nodes)
    def density = _svp_profile_density(profile, radius_sq)
@@ -711,7 +714,7 @@ fn _svp_pruning_candidate(int: dimension, any: radius_sq, int: max_nodes, str: s
    }
 }
 
-fn svp_pruning_calibration_report(int: dimension, any: radius_sq=1.0, int: max_nodes=200000, any: opts=nil): dict {
+fn svp_pruning_calibration_report(int dimension, any radius_sq=1.0, int max_nodes=200000, any opts=nil) dict {
    "Calibrate a pruning profile with GH, success-probability, and repeated-cost counters."
    def o = is_dict(opts) ? opts : dict(0)
    def n = max(1, dimension)
@@ -747,7 +750,7 @@ fn svp_pruning_calibration_report(int: dimension, any: radius_sq=1.0, int: max_n
    }
 }
 
-fn svp_pruning_optimize_report(int: dimension, any: radius_sq=1.0, int: max_nodes=200000, any: opts=nil): dict {
+fn svp_pruning_optimize_report(int dimension, any radius_sq=1.0, int max_nodes=200000, any opts=nil) dict {
    "Choose a deterministic pruning profile by comparing simple node estimates for supported shapes."
    def o = is_dict(opts) ? opts : dict(0)
    def n = max(1, dimension)
@@ -789,12 +792,12 @@ fn svp_pruning_optimize_report(int: dimension, any: radius_sq=1.0, int: max_node
    }
 }
 
-fn svp_pruning_optimize(int: dimension, any: radius_sq=1.0, int: max_nodes=200000, any: opts=nil): list {
+fn svp_pruning_optimize(int dimension, any radius_sq=1.0, int max_nodes=200000, any opts=nil) list {
    "Return the profile selected by svp_pruning_optimize_report."
    svp_pruning_optimize_report(dimension, radius_sq, max_nodes, opts).get("profile")
 }
 
-fn _bkz_strategy_window_report(int: start, int: stop, int: max_nodes, bool: adaptive, any: opt, any: radius_sq, str: shape): dict {
+fn _bkz_strategy_window_report(int start, int stop, int max_nodes, bool adaptive, any opt, any radius_sq, str shape) dict {
    def win_dim = stop - start
    def pruning_profile = adaptive ? opt.get("profile", []) : svp_pruning_profile(win_dim, radius_sq, shape)
    mut out = {
@@ -811,7 +814,7 @@ fn _bkz_strategy_window_report(int: start, int: stop, int: max_nodes, bool: adap
    out
 }
 
-fn _bkz_strategy_phase_report(int: phase, int: phase_block, int: phase_stride, int: phase_count, int: max_tours, int: max_nodes): dict {
+fn _bkz_strategy_phase_report(int phase, int phase_block, int phase_stride, int phase_count, int max_tours, int max_nodes) dict {
    {
       "phase": phase,
       "kind": phase < phase_count ? "progressive" : "target",
@@ -822,7 +825,7 @@ fn _bkz_strategy_phase_report(int: phase, int: phase_block, int: phase_stride, i
    }
 }
 
-fn bkz_strategy_report(int: dimension, int: block_size=10, any: opts=nil): dict {
+fn bkz_strategy_report(int dimension, int block_size=10, any opts=nil) dict {
    "Build a deterministic BKZ strategy report: windows, pruning, budgets, and tours."
    def o = is_dict(opts) ? opts : dict(0)
    def n = max(0, dimension)
@@ -903,12 +906,12 @@ fn bkz_strategy_report(int: dimension, int: block_size=10, any: opts=nil): dict 
    }
 }
 
-fn bkz_strategy(int: dimension, int: block_size=10, any: opts=nil): list {
+fn bkz_strategy(int dimension, int block_size=10, any opts=nil) list {
    "Return the deterministic BKZ window schedule from bkz_strategy_report."
    bkz_strategy_report(dimension, block_size, opts).get("windows", [])
 }
 
-fn bkz_backend_report(any: basis=nil): dict {
+fn bkz_backend_report(any basis=nil) dict {
    "Return the BKZ strategy policy and audit fields."
    mut out = {
       "default_method": "ny",
@@ -929,7 +932,7 @@ fn bkz_backend_report(any: basis=nil): dict {
    out
 }
 
-fn _svp_core_record(list: vector, any: norm, int: nodes, bool: hit_limit, list: nodes_by_level, any: basis): dict {
+fn _svp_core_record(list vector, any norm, int nodes, bool hit_limit, list nodes_by_level, any basis) dict {
    {
       "vector": vector,
       "norm": norm,
@@ -940,11 +943,11 @@ fn _svp_core_record(list: vector, any: norm, int: nodes, bool: hit_limit, list: 
    }
 }
 
-fn _svp_core_record_coeffs(list: vector, any: norm, int: nodes, bool: hit_limit, list: nodes_by_level, any: basis, list: coeffs): dict {
+fn _svp_core_record_coeffs(list vector, any norm, int nodes, bool hit_limit, list nodes_by_level, any basis, list coeffs) dict {
    _bkz_set_fields(_svp_core_record(vector, norm, nodes, hit_limit, nodes_by_level, basis), ["coeffs", coeffs])
 }
 
-fn _svp_combo(list: rows, int: dim, list: coeffs): list {
+fn _svp_combo(list rows, int dim, list coeffs) list {
    mut cur = _bkz_zero_vec(dim)
    mut i = 0
    while(i < coeffs.len){
@@ -955,7 +958,7 @@ fn _svp_combo(list: rows, int: dim, list: coeffs): list {
    cur
 }
 
-fn _svp_seed_best_range(list: rows, int: dim, any: radius_sq=nil, int: first=0, int: last=0): dict {
+fn _svp_seed_best_range(list rows, int dim, any radius_sq=nil, int first=0, int last=0) dict {
    def end = last <= 0 ? rows.len : min(rows.len, last)
    def start = max(0, min(first, end))
    if(start >= end){
@@ -992,11 +995,11 @@ fn _svp_seed_best_range(list: rows, int: dim, any: radius_sq=nil, int: first=0, 
    }
 }
 
-fn _svp_seed_best(list: rows, int: dim, any: radius_sq=nil): dict {
+fn _svp_seed_best(list rows, int dim, any radius_sq=nil) dict {
    _svp_seed_best_range(rows, dim, radius_sq, 0, rows.len)
 }
 
-fn _svp_last_useful_index_from_norms(list: norms): int {
+fn _svp_last_useful_index_from_norms(list norms) int {
    if(norms.len <= 1){ return norms.len }
    def base = to_float(norms.get(0, Z(0))) * 2.0
    mut i = norms.len - 1
@@ -1007,7 +1010,7 @@ fn _svp_last_useful_index_from_norms(list: norms): int {
    1
 }
 
-fn _svp_prefix_rows(list: rows, int: count): list {
+fn _svp_prefix_rows(list rows, int count) list {
    mut out = []
    mut i = 0
    def end = max(0, min(rows.len, count))
@@ -1018,7 +1021,7 @@ fn _svp_prefix_rows(list: rows, int: count): list {
    out
 }
 
-fn _svp_extend_coeffs(list: coeffs, int: n): list {
+fn _svp_extend_coeffs(list coeffs, int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1028,7 +1031,7 @@ fn _svp_extend_coeffs(list: coeffs, int: n): list {
    out
 }
 
-fn _svp_useful_search_basis(any: reduced, list: rows, int: useful_dim): dict {
+fn _svp_useful_search_basis(any reduced, list rows, int useful_dim) dict {
    def n = _matrix_rows(reduced)
    if(useful_dim <= 0 || useful_dim >= n){
       return {"basis": reduced, "rows": rows, "dimension": n}
@@ -1037,7 +1040,7 @@ fn _svp_useful_search_basis(any: reduced, list: rows, int: useful_dim): dict {
    {"basis": Matrix(search_rows), "rows": search_rows, "dimension": useful_dim}
 }
 
-fn _svp_reduce_with_transform(any: basis): dict {
+fn _svp_reduce_with_transform(any basis) dict {
    def rep = lll_reduce_report(basis, 0.75, "ny", 0.51)
    {
       "basis": rep.get("basis"),
@@ -1046,7 +1049,7 @@ fn _svp_reduce_with_transform(any: basis): dict {
    }
 }
 
-fn _svp_lift_coeffs_to_input(list: coeffs, any: transform): list {
+fn _svp_lift_coeffs_to_input(list coeffs, any transform) list {
    def rows = _matrix_rows(transform)
    def cols = _matrix_cols(transform)
    if(coeffs.len != rows){ return coeffs }
@@ -1065,7 +1068,7 @@ fn _svp_lift_coeffs_to_input(list: coeffs, any: transform): list {
    out
 }
 
-fn _svp_state_with_input_coeffs(dict: state, any: transform): dict {
+fn _svp_state_with_input_coeffs(dict state, any transform) dict {
    def reduced_coeffs = state.get("coeffs", [])
    if(!is_list(reduced_coeffs)){ return state }
    state.set("reduced_coeffs", reduced_coeffs)
@@ -1074,7 +1077,7 @@ fn _svp_state_with_input_coeffs(dict: state, any: transform): dict {
    .set("basis_transform", transform)
 }
 
-fn _svp_zero_coeffs(int: n): list {
+fn _svp_zero_coeffs(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1084,7 +1087,7 @@ fn _svp_zero_coeffs(int: n): list {
    out
 }
 
-fn _svp_gso_bound_for_level(any: radius_sq, any: norm_sq, int: coeff_bound): int {
+fn _svp_gso_bound_for_level(any radius_sq, any norm_sq, int coeff_bound) int {
    def cap = max(1, int(coeff_bound))
    if(norm_sq == Z(0)){ return cap }
    def ratio = max(0.0, to_float(radius_sq) / max(0.000001, to_float(norm_sq)))
@@ -1092,7 +1095,7 @@ fn _svp_gso_bound_for_level(any: radius_sq, any: norm_sq, int: coeff_bound): int
    max(1, min(cap, b))
 }
 
-fn _svp_gso_bounds(list: norms, any: radius_sq, int: coeff_bound): list {
+fn _svp_gso_bounds(list norms, any radius_sq, int coeff_bound) list {
    mut out = []
    mut i = 0
    while(i < norms.len){
@@ -1102,7 +1105,7 @@ fn _svp_gso_bounds(list: norms, any: radius_sq, int: coeff_bound): list {
    out
 }
 
-fn _svp_gso_bound_estimate(list: bounds, int: max_nodes): int {
+fn _svp_gso_bound_estimate(list bounds, int max_nodes) int {
    mut est = 1
    mut i = 0
    while(i < bounds.len){
@@ -1113,7 +1116,7 @@ fn _svp_gso_bound_estimate(list: bounds, int: max_nodes): int {
    est
 }
 
-fn _svp_extend_bounds(list: bounds, int: n): list {
+fn _svp_extend_bounds(list bounds, int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1123,7 +1126,7 @@ fn _svp_extend_bounds(list: bounds, int: n): list {
    out
 }
 
-fn _svp_mu_tail(int: idx, list: coeffs, any: mu, int: n): f64 {
+fn _svp_mu_tail(int idx, list coeffs, any mu, int n) f64 {
    mut s = 0.0
    mut j = idx + 1
    while(j < n){
@@ -1133,7 +1136,7 @@ fn _svp_mu_tail(int: idx, list: coeffs, any: mu, int: n): f64 {
    s
 }
 
-fn _svp_gso_enum_dfs(int: idx, list: rows, int: dim, any: basis, any: mu, list: norms, list: bounds, list: coeffs, f64: partial_cost, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _svp_gso_enum_dfs(int idx, list rows, int dim, any basis, any mu, list norms, list bounds, list coeffs, f64 partial_cost, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    if(idx >= 0 && idx < nodes_by_level.len){ nodes_by_level = nodes_by_level.set(idx, nodes_by_level[idx] + 1) }
    if(nodes >= max_nodes){ return _svp_core_record(best_v, best_norm, nodes, true, nodes_by_level, basis) }
    nodes += 1
@@ -1164,7 +1167,7 @@ fn _svp_gso_enum_dfs(int: idx, list: rows, int: dim, any: basis, any: mu, list: 
    state
 }
 
-fn _svp_gso_enumerate_prepped(any: reduced, any: reduce_transform, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): dict {
+fn _svp_gso_enumerate_prepped(any reduced, any reduce_transform, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) dict {
    def rows = _matrix_data(reduced)
    def n = _matrix_rows(reduced)
    def dim = _matrix_cols(reduced)
@@ -1233,38 +1236,11 @@ fn _svp_gso_enumerate_prepped(any: reduced, any: reduce_transform, any: radius_s
    _svp_state_with_input_coeffs(state, reduce_transform)
 }
 
-fn _svp_try_combo(list: rows, int: dim, list: coeffs, list: best_v, any: best_norm, list: best_coeffs): dict {
-   def cur = _svp_combo(rows, dim, coeffs)
-   if(_bkz_vec_nonzero(cur)){
-      def nr = _bkz_row_norm(cur)
-      if(nr > Z(0) && nr < best_norm){
-         return {"vector": cur, "norm": nr, "coeffs": coeffs, "improved": true}
-      }
-   }
-   {"vector": best_v, "norm": best_norm, "coeffs": best_coeffs, "improved": false}
-}
+fn _svp_low_weight_nodes(list state) int { int(state.get(3, 0)) }
 
-fn _svp_low_weight_state(list: best_v, any: best_norm, list: best_coeffs): list { [best_v, best_norm, best_coeffs, 0, 0] }
+fn _svp_low_weight_hits(list state) int { int(state.get(4, 0)) }
 
-fn _svp_low_weight_nodes(list: state): int { int(state.get(3, 0)) }
-
-fn _svp_low_weight_hits(list: state): int { int(state.get(4, 0)) }
-
-fn _svp_low_weight_note_trial(list: state, list: rows, int: dim, list: coeffs): list {
-   def trial = _svp_try_combo(rows, dim, coeffs, state.get(0), state.get(1), state.get(2))
-   state[3] = _svp_low_weight_nodes(state) + 1
-   if(trial.get("improved", false)){
-      state[0] = trial.get("vector")
-      state[1] = trial.get("norm")
-      state[2] = trial.get("coeffs")
-      state[4] = _svp_low_weight_hits(state) + 1
-   }
-   state
-}
-
-fn _svp_low_weight_alive(list: state, int: max_nodes): bool { _svp_low_weight_nodes(state) < max_nodes }
-
-fn _svp_low_weight_coeff_values(int: coeff_bound): list {
+fn _svp_low_weight_coeff_values(int coeff_bound) list {
    def coeff_order = _bkz_coeff_order(max(1, int(coeff_bound)))
    mut coeff_values = []
    mut ci = 0
@@ -1275,92 +1251,20 @@ fn _svp_low_weight_coeff_values(int: coeff_bound): list {
    coeff_values.len == 0 ? [-1, 1] : coeff_values
 }
 
-fn _svp_low_weight_one(list: state, list: rows, int: dim, int: n, list: coeff_values, int: max_nodes): list {
-   mut i = 0
-   while(i < n && _svp_low_weight_alive(state, max_nodes)){
-      mut si = 0
-      while(si < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-         mut coeffs = _svp_zero_coeffs(n)
-         coeffs[i] = coeff_values[si]
-         state = _svp_low_weight_note_trial(state, rows, dim, coeffs)
-         si += 1
-      }
-      i += 1
-   }
-   state
-}
-
-fn _svp_low_weight_two(list: state, list: rows, int: dim, int: n, list: coeff_values, int: max_nodes): list {
-   mut i = 0
-   while(i < n && _svp_low_weight_alive(state, max_nodes)){
-      mut j = i + 1
-      while(j < n && _svp_low_weight_alive(state, max_nodes)){
-         mut si = 0
-         while(si < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-            mut sj = 0
-            while(sj < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-               mut coeffs = _svp_zero_coeffs(n)
-               coeffs[i] = coeff_values[si]
-               coeffs[j] = coeff_values[sj]
-               state = _svp_low_weight_note_trial(state, rows, dim, coeffs)
-               sj += 1
-            }
-            si += 1
-         }
-         j += 1
-      }
-      i += 1
-   }
-   state
-}
-
-fn _svp_low_weight_three(list: state, list: rows, int: dim, int: n, list: coeff_values, int: max_nodes): list {
-   mut i = 0
-   while(i < n && _svp_low_weight_alive(state, max_nodes)){
-      mut j = i + 1
-      while(j < n && _svp_low_weight_alive(state, max_nodes)){
-         mut k = j + 1
-         while(k < n && _svp_low_weight_alive(state, max_nodes)){
-            mut si = 0
-            while(si < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-               mut sj = 0
-               while(sj < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-                  mut sk = 0
-                  while(sk < coeff_values.len && _svp_low_weight_alive(state, max_nodes)){
-                     mut coeffs = _svp_zero_coeffs(n)
-                     coeffs[i] = coeff_values[si]
-                     coeffs[j] = coeff_values[sj]
-                     coeffs[k] = coeff_values[sk]
-                     state = _svp_low_weight_note_trial(state, rows, dim, coeffs)
-                     sk += 1
-                  }
-                  sj += 1
-               }
-               si += 1
-            }
-            k += 1
-         }
-         j += 1
-      }
-      i += 1
-   }
-   state
-}
-
-fn _svp_low_weight_coeffs1(int: n, int: i, any: ci): list {
+fn _svp_low_weight_coeffs1(int n, int i, any ci) list {
    mut out = _svp_zero_coeffs(n)
    out[i] = ci
    out
 }
 
-fn _svp_low_weight_coeffs2(int: n, int: i, any: ci, int: j, any: cj): list {
+fn _svp_low_weight_coeffs2(int n, int i, any ci, int j, any cj) list {
    mut out = _svp_zero_coeffs(n)
    out[i] = ci
    out[j] = cj
    out
 }
 
-fn _svp_low_weight_coeffs3(int: n, int: i, any: ci, int: j, any: cj, int: k, any: ck): list {
+fn _svp_low_weight_coeffs3(int n, int i, any ci, int j, any cj, int k, any ck) list {
    mut out = _svp_zero_coeffs(n)
    out[i] = ci
    out[j] = cj
@@ -1368,7 +1272,7 @@ fn _svp_low_weight_coeffs3(int: n, int: i, any: ci, int: j, any: cj, int: k, any
    out
 }
 
-fn _svp_low_weight_gram_note1(list: state, int: n, any: norm, int: i, any: ci): list {
+fn _svp_low_weight_gram_note1(list state, int n, any norm, int i, any ci) list {
    state[2] = int(state.get(2, 0)) + 1
    if(norm > Z(0) && norm < state[0]){
       state[0] = norm
@@ -1378,7 +1282,7 @@ fn _svp_low_weight_gram_note1(list: state, int: n, any: norm, int: i, any: ci): 
    state
 }
 
-fn _svp_low_weight_gram_note2(list: state, int: n, any: norm, int: i, any: ci, int: j, any: cj): list {
+fn _svp_low_weight_gram_note2(list state, int n, any norm, int i, any ci, int j, any cj) list {
    state[2] = int(state.get(2, 0)) + 1
    if(norm > Z(0) && norm < state[0]){
       state[0] = norm
@@ -1388,7 +1292,7 @@ fn _svp_low_weight_gram_note2(list: state, int: n, any: norm, int: i, any: ci, i
    state
 }
 
-fn _svp_low_weight_gram_note3(list: state, int: n, any: norm, int: i, any: ci, int: j, any: cj, int: k, any: ck): list {
+fn _svp_low_weight_gram_note3(list state, int n, any norm, int i, any ci, int j, any cj, int k, any ck) list {
    state[2] = int(state.get(2, 0)) + 1
    if(norm > Z(0) && norm < state[0]){
       state[0] = norm
@@ -1398,7 +1302,7 @@ fn _svp_low_weight_gram_note3(list: state, int: n, any: norm, int: i, any: ci, i
    state
 }
 
-fn _svp_low_weight_gram_note1_int(list: state, int: n, int: norm, int: i, int: ci): list {
+fn _svp_low_weight_gram_note1_int(list state, int n, int norm, int i, int ci) list {
    state[2] = int(state[2]) + 1
    if(norm > 0 && norm < int(state[0])){
       state[0] = norm
@@ -1408,7 +1312,7 @@ fn _svp_low_weight_gram_note1_int(list: state, int: n, int: norm, int: i, int: c
    state
 }
 
-fn _svp_low_weight_gram_note2_int(list: state, int: n, int: norm, int: i, int: ci, int: j, int: cj): list {
+fn _svp_low_weight_gram_note2_int(list state, int n, int norm, int i, int ci, int j, int cj) list {
    state[2] = int(state[2]) + 1
    if(norm > 0 && norm < int(state[0])){
       state[0] = norm
@@ -1418,7 +1322,7 @@ fn _svp_low_weight_gram_note2_int(list: state, int: n, int: norm, int: i, int: c
    state
 }
 
-fn _svp_low_weight_gram_note3_int(list: state, int: n, int: norm, int: i, int: ci, int: j, int: cj, int: k, int: ck): list {
+fn _svp_low_weight_gram_note3_int(list state, int n, int norm, int i, int ci, int j, int cj, int k, int ck) list {
    state[2] = int(state[2]) + 1
    if(norm > 0 && norm < int(state[0])){
       state[0] = norm
@@ -1428,7 +1332,7 @@ fn _svp_low_weight_gram_note3_int(list: state, int: n, int: norm, int: i, int: c
    state
 }
 
-fn _svp_low_weight_gram_one(list: state, list: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_one(list state, list gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state.get(2, 0)) < max_nodes){
       mut si = 0
@@ -1443,7 +1347,7 @@ fn _svp_low_weight_gram_one(list: state, list: gram, int: n, list: coeff_values,
    state
 }
 
-fn _svp_low_weight_gram_one_int(list: state, list<list<int>>: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_one_int(list state, list<list<int>> gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state[2]) < max_nodes){
       def gii = gram[i][i]
@@ -1458,7 +1362,7 @@ fn _svp_low_weight_gram_one_int(list: state, list<list<int>>: gram, int: n, list
    state
 }
 
-fn _svp_low_weight_gram_two(list: state, list: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_two(list state, list gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state.get(2, 0)) < max_nodes){
       mut j = i + 1
@@ -1484,7 +1388,7 @@ fn _svp_low_weight_gram_two(list: state, list: gram, int: n, list: coeff_values,
    state
 }
 
-fn _svp_low_weight_gram_two_int(list: state, list<list<int>>: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_two_int(list state, list<list<int>> gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state[2]) < max_nodes){
       def gii = gram[i][i]
@@ -1512,7 +1416,7 @@ fn _svp_low_weight_gram_two_int(list: state, list<list<int>>: gram, int: n, list
    state
 }
 
-fn _svp_low_weight_gram_three(list: state, list: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_three(list state, list gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state.get(2, 0)) < max_nodes){
       mut j = i + 1
@@ -1548,7 +1452,7 @@ fn _svp_low_weight_gram_three(list: state, list: gram, int: n, list: coeff_value
    state
 }
 
-fn _svp_low_weight_gram_three_int(list: state, list<list<int>>: gram, int: n, list: coeff_values, int: max_nodes): list {
+fn _svp_low_weight_gram_three_int(list state, list<list<int>> gram, int n, list coeff_values, int max_nodes) list {
    mut i = 0
    while(i < n && int(state[2]) < max_nodes){
       def gii = gram[i][i]
@@ -1589,7 +1493,7 @@ fn _svp_low_weight_gram_three_int(list: state, list<list<int>>: gram, int: n, li
    state
 }
 
-fn _svp_low_weight_gram_search_int(list: rows, int: dim, dict: seed, list: coeff_values, int: max_nodes, int: max_weight, list<list<int>>: gram, int: seed_norm): list {
+fn _svp_low_weight_gram_search_int(list rows, int dim, dict seed, list coeff_values, int max_nodes, int max_weight, list<list<int>> gram, int seed_norm) list {
    mut state = [seed_norm, seed.get("coeffs", _svp_zero_coeffs(rows.len)), 0, 0]
    state = _svp_low_weight_gram_one_int(state, gram, rows.len, coeff_values, max_nodes)
    state = _svp_low_weight_gram_two_int(state, gram, rows.len, coeff_values, max_nodes)
@@ -1597,7 +1501,7 @@ fn _svp_low_weight_gram_search_int(list: rows, int: dim, dict: seed, list: coeff
    [_svp_combo(rows, dim, state[1]), Z(int(state[0])), state[1], int(state[2]), int(state[3])]
 }
 
-fn _svp_low_weight_gram_search(list: rows, int: dim, dict: seed, list: coeff_values, int: max_nodes, int: max_weight): list {
+fn _svp_low_weight_gram_search(list rows, int dim, dict seed, list coeff_values, int max_nodes, int max_weight) list {
    def gram = _svp_row_gram(rows)
    def gram_int = _svp_gram_int_or_nil(gram, 40)
    def seed_norm_int = _bkz_small_int_or_nil(seed.get("norm"), 50)
@@ -1611,7 +1515,7 @@ fn _svp_low_weight_gram_search(list: rows, int: dim, dict: seed, list: coeff_val
    [_svp_combo(rows, dim, state.get(1)), state.get(0), state.get(1), state.get(2), state.get(3)]
 }
 
-fn _svp_low_weight_nodes_by_level(int: n, int: nodes): list {
+fn _svp_low_weight_nodes_by_level(int n, int nodes) list {
    mut out = _bkz_nodes_vec(n)
    mut i = 0
    while(i < out.len){
@@ -1621,7 +1525,7 @@ fn _svp_low_weight_nodes_by_level(int: n, int: nodes): list {
    out
 }
 
-fn _svp_low_weight_record(any: reduced, any: reduce_transform, list: state, int: n, int: max_nodes, int: max_weight, list: coeff_values): dict {
+fn _svp_low_weight_record(any reduced, any reduce_transform, list state, int n, int max_nodes, int max_weight, list coeff_values) dict {
    def nodes = _svp_low_weight_nodes(state)
    mut out = _svp_core_record_coeffs(state.get(0), state.get(1), nodes, nodes >= max_nodes, _svp_low_weight_nodes_by_level(n, nodes), reduced, state.get(2))
    out = out.set("kernel", "low-weight-signed-combiner")
@@ -1633,7 +1537,7 @@ fn _svp_low_weight_record(any: reduced, any: reduce_transform, list: state, int:
    _svp_state_with_input_coeffs(out, reduce_transform)
 }
 
-fn _svp_low_weight_prepped(any: reduced, any: reduce_transform, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000, int: max_weight=3): dict {
+fn _svp_low_weight_prepped(any reduced, any reduce_transform, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000, int max_weight=3) dict {
    def rows = _matrix_data(reduced)
    def n = _matrix_rows(reduced)
    def dim = _matrix_cols(reduced)
@@ -1643,7 +1547,7 @@ fn _svp_low_weight_prepped(any: reduced, any: reduce_transform, any: radius_sq=n
    _svp_low_weight_record(reduced, reduce_transform, state, n, max_nodes, max_weight, coeff_values)
 }
 
-fn _svp_better_core(dict: a, dict: b): dict {
+fn _svp_better_core(dict a, dict b) dict {
    def an = a.get("norm", nil)
    def bn = b.get("norm", nil)
    if(an == nil){ return b }
@@ -1651,7 +1555,7 @@ fn _svp_better_core(dict: a, dict: b): dict {
    bn < an ? b : a
 }
 
-fn _svp_gram_norm(any: gram, list: coeffs): any {
+fn _svp_gram_norm(any gram, list coeffs) any {
    def n = _matrix_rows(gram)
    mut s = Z(0)
    mut i = 0
@@ -1666,7 +1570,7 @@ fn _svp_gram_norm(any: gram, list: coeffs): any {
    s
 }
 
-fn _svp_gram_seed(any: gram): dict {
+fn _svp_gram_seed(any gram) dict {
    def n = _matrix_rows(gram)
    mut best = nil
    mut best_coeffs = _svp_zero_coeffs(n)
@@ -1683,7 +1587,7 @@ fn _svp_gram_seed(any: gram): dict {
    {"norm": best == nil ? Z(0) : best, "coeffs": best_coeffs}
 }
 
-fn _svp_gram_try(any: gram, list: coeffs, any: best_norm, list: best_coeffs): dict {
+fn _svp_gram_try(any gram, list coeffs, any best_norm, list best_coeffs) dict {
    if(_bkz_vec_nonzero(coeffs)){
       def nr = _svp_gram_norm(gram, coeffs)
       if(nr > Z(0) && (best_norm == Z(0) || nr < best_norm)){
@@ -1693,7 +1597,7 @@ fn _svp_gram_try(any: gram, list: coeffs, any: best_norm, list: best_coeffs): di
    {"norm": best_norm, "coeffs": best_coeffs, "improved": false}
 }
 
-fn svp_gram_report(any: gram, any: radius_sq=nil, int: coeff_bound=2, int: max_nodes=200000): dict {
+fn svp_gram_report(any gram, any radius_sq=nil, int coeff_bound=2, int max_nodes=200000) dict {
    "Return a shortest coefficient-vector report for an integer Gram matrix.
    The norm is computed exactly as c^T G c, so Gram-form fixtures can be
    checked without converting back to a basis."
@@ -1769,17 +1673,17 @@ fn svp_gram_report(any: gram, any: radius_sq=nil, int: coeff_bound=2, int: max_n
    out
 }
 
-fn svp_gram(any: gram, any: radius_sq=nil, int: coeff_bound=2, int: max_nodes=200000): list {
+fn svp_gram(any gram, any radius_sq=nil, int coeff_bound=2, int max_nodes=200000) list {
    "Return a shortest coefficient vector for an integer Gram matrix."
    svp_gram_report(gram, radius_sq, coeff_bound, max_nodes).get("coeffs", [])
 }
 
-fn _bkz_abs_z(any: x): bigint {
+fn _bkz_abs_z(any x) bigint {
    def z = Z(x)
    z < Z(0) ? (Z(0) - z) : z
 }
 
-fn _bkz_coeffs_gcd_abs(list: coeffs): bigint {
+fn _bkz_coeffs_gcd_abs(list coeffs) bigint {
    mut g = Z(0)
    mut i = 0
    while(i < coeffs.len){
@@ -1790,7 +1694,7 @@ fn _bkz_coeffs_gcd_abs(list: coeffs): bigint {
    g
 }
 
-fn _bkz_swap_matrix_rows(any: m, int: a, int: b): any {
+fn _bkz_swap_matrix_rows(any m, int a, int b) any {
    if(a == b){ return m }
    def rows = _matrix_rows(m)
    def data = _matrix_data(m)
@@ -1809,7 +1713,7 @@ fn _bkz_swap_matrix_rows(any: m, int: a, int: b): any {
    Matrix(out)
 }
 
-fn _bkz_unit_first_row_transform(list: coeffs): dict {
+fn _bkz_unit_first_row_transform(list coeffs) dict {
    def n = coeffs.len
    mut idx = -1
    mut sign = Z(1)
@@ -1839,7 +1743,7 @@ fn _bkz_unit_first_row_transform(list: coeffs): dict {
    dict(6).set("ok", true).set("reason", "").set("transform", U).set("primitive_gcd", Z(1)).set("first_row", coeffs).set("source", "unit-row-permutation")
 }
 
-fn _bkz_first_row_transform_from_coeffs(list: coeffs): dict {
+fn _bkz_first_row_transform_from_coeffs(list coeffs) dict {
    "Build a unimodular transform whose first row is the primitive coefficient vector."
    def n = coeffs.len
    if(n <= 0){
@@ -1868,13 +1772,13 @@ fn _bkz_first_row_transform_from_coeffs(list: coeffs): dict {
    dict(6).set("ok", ok).set("reason", ok ? "" : "completed transform first row mismatch").set("transform", U).set("primitive_gcd", g).set("first_row", first).set("source", "xgcd-row-completion")
 }
 
-fn _bkz_gram_square(any: gram): any {
+fn _bkz_gram_square(any gram) any {
    def G = _bkz_as_matrix(gram)
    if(_matrix_rows(G) != _matrix_cols(G)){ panic("bkz_gram: Gram matrix must be square") }
    G
 }
 
-fn _bkz_gram_extract_block(any: gram, int: start, int: stop): any {
+fn _bkz_gram_extract_block(any gram, int start, int stop) any {
    mut rows = []
    mut i = start
    while(i < stop){
@@ -1890,7 +1794,7 @@ fn _bkz_gram_extract_block(any: gram, int: start, int: stop): any {
    Matrix(rows)
 }
 
-fn _bkz_embed_local_transform(int: n, int: start, any: local): any {
+fn _bkz_embed_local_transform(int n, int start, any local) any {
    def L = _bkz_as_matrix(local)
    def lrows = _matrix_rows(L)
    mut rows = []
@@ -1914,30 +1818,30 @@ fn _bkz_embed_local_transform(int: n, int: start, any: local): any {
    Matrix(rows)
 }
 
-fn _bkz_gram_transform(any: transform, any: gram): any {
+fn _bkz_gram_transform(any transform, any gram) any {
    _bkz_sparse_matmul(_bkz_sparse_matmul(transform, gram), matrix_transpose(transform))
 }
 
-fn _bkz_gram_verify_transform(any: original, any: transform, any: reduced): bool {
+fn _bkz_gram_verify_transform(any original, any transform, any reduced) bool {
    _bkz_same_matrix(_bkz_gram_transform(transform, original), reduced)
 }
 
-fn _bkz_gram_block_report(int: start,
-   int: stop,
-   any: before_norm,
-   any: sv_norm,
-   list: coeffs,
-   any: sv,
-   any: completion,
-   bool: local_verified,
-   str: insertion_reason,
-   bool: candidate_improved,
-   bool: applied,
-   bool: improved,
-   any: block_t0,
-   any: cleanup_report=nil,
-   bool: cleanup_complete=false,
-   bool: bounded_exact_fallback=false): dict {
+fn _bkz_gram_block_report(int start,
+   int stop,
+   any before_norm,
+   any sv_norm,
+   list coeffs,
+   any sv,
+   any completion,
+   bool local_verified,
+   str insertion_reason,
+   bool candidate_improved,
+   bool applied,
+   bool improved,
+   any block_t0,
+   any cleanup_report=nil,
+   bool cleanup_complete=false,
+   bool bounded_exact_fallback=false) dict {
    mut out = _bkz_set_fields(dict(20), [
          "start", start,
          "stop", stop,
@@ -1967,7 +1871,7 @@ fn _bkz_gram_block_report(int: start,
    out
 }
 
-fn _bkz_gram_block_step(any: G, any: transform, int: n, int: i, int: block_size, any: delta, any: eta, int: svp_coeff_bound, int: svp_max_nodes, bool: bounded_exact_fallback, bool: record): list {
+fn _bkz_gram_block_step(any G, any transform, int n, int i, int block_size, any delta, any eta, int svp_coeff_bound, int svp_max_nodes, bool bounded_exact_fallback, bool record) list {
    def block_t0 = ticks()
    def h = (i + block_size < n) ? (i + block_size) : n
    def block = _bkz_gram_extract_block(G, i, h)
@@ -2027,7 +1931,7 @@ fn _bkz_gram_block_step(any: G, any: transform, int: n, int: i, int: block_size,
    [outG, out_transform, changed, report]
 }
 
-fn _bkz_gram_reduce_core(any: gram, int: block_size=10, any: delta=0.75, any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000, bool: record=false): list {
+fn _bkz_gram_reduce_core(any gram, int block_size=10, any delta=0.75, any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000, bool record=false) list {
    def t0 = ticks()
    def G0 = _bkz_gram_square(gram)
    def n = _matrix_rows(G0)
@@ -2107,7 +2011,7 @@ fn _bkz_gram_reduce_core(any: gram, int: block_size=10, any: delta=0.75, any: et
    }
 }
 
-fn bkz_gram_reduce_report(any: gram, int: block_size=10, any: delta=0.75, str: method="ny", any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): dict {
+fn bkz_gram_reduce_report(any gram, int block_size=10, any delta=0.75, str method="ny", any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) dict {
    "Reduce an integer Gram matrix by pure row/column BKZ operations and report exact transform verification."
    def t0 = ticks()
    def G0 = _bkz_gram_square(gram)
@@ -2147,19 +2051,19 @@ fn bkz_gram_reduce_report(any: gram, int: block_size=10, any: delta=0.75, str: m
    out
 }
 
-fn bkz_gram_report(any: gram, int: block_size=10, any: delta=0.75, str: method="auto", any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): dict {
+fn bkz_gram_report(any gram, int block_size=10, any delta=0.75, str method="auto", any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) dict {
    "Report-first Gram-BKZ API. `auto` resolves to Ny's exact Gram reducer."
    bkz_gram_reduce_report(gram, block_size, delta, method, eta, max_tours, early_abort, svp_coeff_bound, svp_max_nodes)
 }
 
-fn bkz_gram(any: gram, int: block_size=10, any: delta=0.75, str: method="ny", any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): any {
+fn bkz_gram(any gram, int block_size=10, any delta=0.75, str method="ny", any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) any {
    "Return only the reduced Gram matrix."
    bkz_gram_reduce_report(gram, block_size, delta, method, eta, max_tours, early_abort, svp_coeff_bound, svp_max_nodes).get("gram")
 }
 
-fn _dual_round_float(f64: x): int { x >= 0.0 ? int(x + 0.5) : int(x - 0.5) }
+fn _dual_round_float(f64 x) int { x >= 0.0 ? int(x + 0.5) : int(x - 0.5) }
 
-fn _dual_unit_coeffs(int: n, int: idx): list {
+fn _dual_unit_coeffs(int n, int idx) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -2169,7 +2073,7 @@ fn _dual_unit_coeffs(int: n, int: idx): list {
    out
 }
 
-fn _dual_alpha_from_gso(any: gso, list: coeffs): list {
+fn _dual_alpha_from_gso(any gso, list coeffs) list {
    def mu = gso.get("mu")
    def n = coeffs.len
    mut alpha = []
@@ -2187,7 +2091,7 @@ fn _dual_alpha_from_gso(any: gso, list: coeffs): list {
    alpha
 }
 
-fn _dual_norm_from_gso(any: gso, list: coeffs): f64 {
+fn _dual_norm_from_gso(any gso, list coeffs) f64 {
    def alpha = _dual_alpha_from_gso(gso, coeffs)
    def norms = gso.get("norms_sq", [])
    mut total = 0.0
@@ -2200,12 +2104,12 @@ fn _dual_norm_from_gso(any: gso, list: coeffs): f64 {
    total
 }
 
-fn dual_svp_norm(any: basis, list: coeffs): f64 {
+fn dual_svp_norm(any basis, list coeffs) f64 {
    "Return the dual norm c^T G^-1 c for integer coefficient vector c."
    _dual_norm_from_gso(gso_report(_bkz_as_matrix(basis)), coeffs)
 }
 
-fn _dual_inverse_gram_float(any: gso): list {
+fn _dual_inverse_gram_float(any gso) list {
    def n = int(gso.get("rows", 0))
    def norms = gso.get("norms_sq", [])
    mut alphas = []
@@ -2236,7 +2140,7 @@ fn _dual_inverse_gram_float(any: gso): list {
    rows
 }
 
-fn _dual_index_used(list: used, int: idx): bool {
+fn _dual_index_used(list used, int idx) bool {
    mut i = 0
    while(i < used.len){
       if(int(used[i]) == idx){ return true }
@@ -2245,7 +2149,7 @@ fn _dual_index_used(list: used, int: idx): bool {
    false
 }
 
-fn _dual_diag_order(list: q): list {
+fn _dual_diag_order(list q) list {
    def n = q.len
    mut order = []
    while(order.len < n){
@@ -2267,7 +2171,7 @@ fn _dual_diag_order(list: q): list {
    order
 }
 
-fn _dual_permute_matrix(list: q, list: order): list {
+fn _dual_permute_matrix(list q, list order) list {
    mut rows = []
    mut i = 0
    while(i < order.len){
@@ -2283,7 +2187,7 @@ fn _dual_permute_matrix(list: q, list: order): list {
    rows
 }
 
-fn _dual_zero_float_matrix(int: n): list {
+fn _dual_zero_float_matrix(int n) list {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -2299,7 +2203,7 @@ fn _dual_zero_float_matrix(int: n): list {
    rows
 }
 
-fn _dual_cholesky_upper(list: q): list {
+fn _dual_cholesky_upper(list q) list {
    def n = q.len
    mut r = _dual_zero_float_matrix(n)
    mut i = 0
@@ -2325,7 +2229,7 @@ fn _dual_cholesky_upper(list: q): list {
    r
 }
 
-fn _dual_seed_from_diag(list: q): dict {
+fn _dual_seed_from_diag(list q) dict {
    def n = q.len
    mut best_i = 0
    mut best_norm = n > 0 ? float(q[0][0]) : 0.0
@@ -2341,7 +2245,7 @@ fn _dual_seed_from_diag(list: q): dict {
    dict(2).set("coeffs", _dual_unit_coeffs(n, best_i)).set("norm", best_norm)
 }
 
-fn _dual_nodes_vec(int: n): list {
+fn _dual_nodes_vec(int n) list {
    mut out = []
    mut i = 0
    while(i <= n){
@@ -2351,11 +2255,11 @@ fn _dual_nodes_vec(int: n): list {
    out
 }
 
-fn _dual_record(list: coeffs, f64: norm, int: nodes, bool: hit_limit, list: nodes_by_level): list {
+fn _dual_record(list coeffs, f64 norm, int nodes, bool hit_limit, list nodes_by_level) list {
    [coeffs, norm, nodes, hit_limit, nodes_by_level]
 }
 
-fn _dual_enum_dfs(int: idx, list: r, list: coeffs, f64: partial, list: best_coeffs, f64: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _dual_enum_dfs(int idx, list r, list coeffs, f64 partial, list best_coeffs, f64 best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    if(idx >= 0 && idx < nodes_by_level.len){ nodes_by_level = nodes_by_level.set(idx, nodes_by_level[idx] + 1) }
    if(nodes >= max_nodes){ return _dual_record(best_coeffs, best_norm, nodes, true, nodes_by_level) }
    nodes += 1
@@ -2411,7 +2315,7 @@ fn _dual_enum_dfs(int: idx, list: r, list: coeffs, f64: partial, list: best_coef
    state
 }
 
-fn _dual_unpermute_coeffs(list: coeffs, list: order): list {
+fn _dual_unpermute_coeffs(list coeffs, list order) list {
    mut out = _dual_unit_coeffs(coeffs.len, -1)
    mut i = 0
    while(i < coeffs.len){
@@ -2421,7 +2325,7 @@ fn _dual_unpermute_coeffs(list: coeffs, list: order): list {
    out
 }
 
-fn _dual_swap_list_entries(list: xs, int: a, int: b): list {
+fn _dual_swap_list_entries(list xs, int a, int b) list {
    if(a == b){ return xs }
    def tmp = xs[a]
    xs[a] = xs[b]
@@ -2429,7 +2333,7 @@ fn _dual_swap_list_entries(list: xs, int: a, int: b): list {
    xs
 }
 
-fn _dual_neg_row(list: row): list {
+fn _dual_neg_row(list row) list {
    mut out = []
    mut i = 0
    while(i < row.len){
@@ -2439,7 +2343,7 @@ fn _dual_neg_row(list: row): list {
    out
 }
 
-fn _dual_row_linear(list: a, any: ca, list: b, any: cb): list {
+fn _dual_row_linear(list a, any ca, list b, any cb) list {
    mut out = []
    def xa = Z(ca)
    def xb = Z(cb)
@@ -2451,7 +2355,7 @@ fn _dual_row_linear(list: a, any: ca, list: b, any: cb): list {
    out
 }
 
-fn _dual_first_nonzero(list: coeffs): int {
+fn _dual_first_nonzero(list coeffs) int {
    mut i = 0
    while(i < coeffs.len){
       if(Z(coeffs[i]) != Z(0)){ return i }
@@ -2460,7 +2364,7 @@ fn _dual_first_nonzero(list: coeffs): int {
    -1
 }
 
-fn _dual_unit_to_last_transform(list: coeffs): dict {
+fn _dual_unit_to_last_transform(list coeffs) dict {
    def n = coeffs.len
    if(n <= 0){
       return dict(5).set("ok", false).set("reason", "empty dual coefficient vector").set("transform", _bkz_identity(n)).set("mapped", coeffs).set("primitive_gcd", Z(0))
@@ -2510,7 +2414,7 @@ fn _dual_unit_to_last_transform(list: coeffs): dict {
    dict(5).set("ok", mapped == _dual_unit_coeffs(n, last)).set("reason", "").set("transform", Matrix(rows)).set("mapped", mapped).set("primitive_gcd", primitive_gcd)
 }
 
-fn dual_svp_report(any: basis, int: max_nodes=400000): dict {
+fn dual_svp_report(any basis, int max_nodes=400000) dict {
    "Report a short dual coefficient vector for the row lattice using inverse-Gram enumeration."
    def t0 = ticks()
    def B = _bkz_as_matrix(basis)
@@ -2546,12 +2450,12 @@ fn dual_svp_report(any: basis, int: max_nodes=400000): dict {
    out
 }
 
-fn dual_svp(any: basis, int: max_nodes=400000): list {
+fn dual_svp(any basis, int max_nodes=400000) list {
    "Return a short dual coefficient vector for the row lattice."
    dual_svp_report(basis, max_nodes).get("coeffs", [])
 }
 
-fn dual_svp_reduce_report(any: basis, int: max_nodes=400000): dict {
+fn dual_svp_reduce_report(any basis, int max_nodes=400000) dict {
    "Return a report for exact row-transform reduction that moves a short dual vector to the last dual coordinate."
    def t0 = ticks()
    def B = _bkz_as_matrix(basis)
@@ -2587,16 +2491,16 @@ fn dual_svp_reduce_report(any: basis, int: max_nodes=400000): dict {
    out
 }
 
-fn dual_svp_reduce(any: basis, int: max_nodes=400000): any {
+fn dual_svp_reduce(any basis, int max_nodes=400000) any {
    "Return a basis whose last dual coordinate has the short dual-vector norm."
    dual_svp_reduce_report(basis, max_nodes).get("basis")
 }
 
-fn _svp_small_depth_state(list: best_v, any: best_norm, list: best_coeffs, int: nodes): dict {
+fn _svp_small_depth_state(list best_v, any best_norm, list best_coeffs, int nodes) dict {
    {"vector": best_v, "norm": best_norm, "coeffs": best_coeffs, "nodes": nodes}
 }
 
-fn _svp_small_depth_dfs(int: idx, list: rows, list: coeff_order, list: coeffs, list: cur, list: best_v, any: best_norm, list: best_coeffs, int: nodes, int: max_nodes): dict {
+fn _svp_small_depth_dfs(int idx, list rows, list coeff_order, list coeffs, list cur, list best_v, any best_norm, list best_coeffs, int nodes, int max_nodes) dict {
    if(nodes >= max_nodes){ return _svp_small_depth_state(best_v, best_norm, best_coeffs, nodes) }
    if(idx >= rows.len){
       nodes += 1
@@ -2632,7 +2536,7 @@ fn _svp_small_depth_dfs(int: idx, list: rows, list: coeff_order, list: coeffs, l
    state
 }
 
-fn _svp_small_kernel_name(int: n): str {
+fn _svp_small_kernel_name(int n) str {
    case n {
       1..5 -> "dim" + str(n) + "-loop"
       6, 7 -> "dim" + str(n) + "-depth-loop"
@@ -2640,7 +2544,7 @@ fn _svp_small_kernel_name(int: n): str {
    }
 }
 
-fn _svp_small_kernel_core(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): dict {
+fn _svp_small_kernel_core(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) dict {
    def B = _bkz_as_matrix(basis)
    def prep = _svp_reduce_with_transform(B)
    def reduced = prep.get("basis")
@@ -2680,7 +2584,7 @@ fn _svp_small_kernel_core(any: basis, any: radius_sq=nil, int: coeff_bound=1, in
    _svp_state_with_input_coeffs(out, reduce_transform)
 }
 
-fn _svp_nodes_fill(int: n, int: nodes): list {
+fn _svp_nodes_fill(int n, int nodes) list {
    mut out = []
    mut i = 0
    while(i <= n){
@@ -2690,7 +2594,7 @@ fn _svp_nodes_fill(int: n, int: nodes): list {
    out
 }
 
-fn _svp_range_stats(int: nodes, int: updates, int: avoided, int: norm_updates, int: norm_avoided, int: best_rebuilds): dict {
+fn _svp_range_stats(int nodes, int updates, int avoided, int norm_updates, int norm_avoided, int best_rebuilds) dict {
    {
       "nodes": nodes,
       "updates": updates,
@@ -2701,7 +2605,7 @@ fn _svp_range_stats(int: nodes, int: updates, int: avoided, int: norm_updates, i
    }
 }
 
-fn _svp_range_result(list: best_v, any: best_norm, list: best_coeffs, dict: stats): dict {
+fn _svp_range_result(list best_v, any best_norm, list best_coeffs, dict stats) dict {
    {
       "vector": best_v,
       "norm": best_norm,
@@ -2711,18 +2615,18 @@ fn _svp_range_result(list: best_v, any: best_norm, list: best_coeffs, dict: stat
 }
 
 fn _svp_range_record(
-   any: reduced,
-   list: best_v,
-   any: best_norm,
-   list: best_coeffs,
-   int: n,
-   int: start_code,
-   int: stop_code,
-   dict: stats,
-   bool: shared_gram,
-   any: t0,
-   str: numeric_kernel=""
-): dict {
+   any reduced,
+   list best_v,
+   any best_norm,
+   list best_coeffs,
+   int n,
+   int start_code,
+   int stop_code,
+   dict stats,
+   bool shared_gram,
+   any t0,
+   str numeric_kernel=""
+) dict {
    def nodes = int(stats.get("nodes", 0))
    def elapsed = _bkz_elapsed_ms(t0)
    mut out = _svp_core_record_coeffs(best_v, best_norm, nodes, false, _svp_nodes_fill(n, nodes), reduced, best_coeffs)
@@ -2742,7 +2646,7 @@ fn _svp_range_record(
    out
 }
 
-fn _svp_coeffs_int(list: coeffs): list<int> {
+fn _svp_coeffs_int(list coeffs) list<int> {
    mut list<int>: out = list(coeffs.len)
    mut i = 0
    while(i < coeffs.len){
@@ -2752,7 +2656,7 @@ fn _svp_coeffs_int(list: coeffs): list<int> {
    out
 }
 
-fn _svp_range_step_z(list: coeff_order, int: choices, int: n, int: code, int: next_code, list: coeffs, list: gram, any: cur_norm): list {
+fn _svp_range_step_z(list coeff_order, int choices, int n, int code, int next_code, list coeffs, list gram, any cur_norm) list {
    mut div = 1
    mut pos = n - 1
    mut carry = true
@@ -2775,7 +2679,7 @@ fn _svp_range_step_z(list: coeff_order, int: choices, int: n, int: code, int: ne
    [cur_norm, coeffs, updates]
 }
 
-fn _svp_range_loop_int(list: rows, int: dim, list: coeff_order, int: start_code, int: stop_code, list: seed_v, int: seed_norm, list: seed_coeffs, list<list<int>>: gram): dict {
+fn _svp_range_loop_int(list rows, int dim, list coeff_order, int start_code, int stop_code, list seed_v, int seed_norm, list seed_coeffs, list<list<int>> gram) dict {
    def n = gram.len
    def choices = coeff_order.len
    mut best_v = seed_v
@@ -2816,12 +2720,12 @@ fn _svp_range_loop_int(list: rows, int: dim, list: coeff_order, int: start_code,
                mut gram_dot = 0
                if(n == 12){
                   gram_dot =
-                     cur_coeffs[0] * gram_row[0] + cur_coeffs[1] * gram_row[1] +
-                     cur_coeffs[2] * gram_row[2] + cur_coeffs[3] * gram_row[3] +
-                     cur_coeffs[4] * gram_row[4] + cur_coeffs[5] * gram_row[5] +
-                     cur_coeffs[6] * gram_row[6] + cur_coeffs[7] * gram_row[7] +
-                     cur_coeffs[8] * gram_row[8] + cur_coeffs[9] * gram_row[9] +
-                     cur_coeffs[10] * gram_row[10] + cur_coeffs[11] * gram_row[11]
+                  cur_coeffs[0] * gram_row[0] + cur_coeffs[1] * gram_row[1] +
+                  cur_coeffs[2] * gram_row[2] + cur_coeffs[3] * gram_row[3] +
+                  cur_coeffs[4] * gram_row[4] + cur_coeffs[5] * gram_row[5] +
+                  cur_coeffs[6] * gram_row[6] + cur_coeffs[7] * gram_row[7] +
+                  cur_coeffs[8] * gram_row[8] + cur_coeffs[9] * gram_row[9] +
+                  cur_coeffs[10] * gram_row[10] + cur_coeffs[11] * gram_row[11]
                } else {
                   mut gi = 0
                   while(gi < n){
@@ -2844,7 +2748,7 @@ fn _svp_range_loop_int(list: rows, int: dim, list: coeff_order, int: start_code,
    _svp_range_result(best_v, Z(best_norm), best_coeffs, _svp_range_stats(nodes, updates, avoided, norm_updates, norm_avoided, best_rebuilds))
 }
 
-fn _svp_range_loop_z(list: rows, int: dim, list: coeff_order, int: start_code, int: stop_code, list: seed_v, any: seed_norm, list: seed_coeffs, list: gram): dict {
+fn _svp_range_loop_z(list rows, int dim, list coeff_order, int start_code, int stop_code, list seed_v, any seed_norm, list seed_coeffs, list gram) dict {
    def n = gram.len
    def choices = coeff_order.len
    mut best_v = seed_v
@@ -2882,7 +2786,7 @@ fn _svp_range_loop_z(list: rows, int: dim, list: coeff_order, int: start_code, i
    _svp_range_result(best_v, best_norm, best_coeffs, _svp_range_stats(nodes, updates, avoided, norm_updates, norm_avoided, best_rebuilds))
 }
 
-fn _svp_coeff_cube_range_core(any: reduced, list: rows, int: dim, list: coeff_order, int: start_code, int: stop_code, list: seed_v, any: seed_norm, list: seed_coeffs, list: gram=[]): dict {
+fn _svp_coeff_cube_range_core(any reduced, list rows, int dim, list coeff_order, int start_code, int stop_code, list seed_v, any seed_norm, list seed_coeffs, list gram=[]) dict {
    def t0 = ticks()
    def n = _matrix_rows(reduced)
    def choices = coeff_order.len
@@ -2901,14 +2805,14 @@ fn _svp_coeff_cube_range_core(any: reduced, list: rows, int: dim, list: coeff_or
    _svp_range_record(reduced, r.get("vector"), r.get("norm"), r.get("coeffs"), n, start_code, stop_code, r.get("stats"), shared_gram, t0)
 }
 
-fn _svp_coeff_cube_range_worker(any: args): dict {
+fn _svp_coeff_cube_range_worker(any args) dict {
    _svp_coeff_cube_range_core(
       args.get(0), args.get(1), int(args.get(2)), args.get(3),
       int(args.get(4)), int(args.get(5)), args.get(6), args.get(7), args.get(8), args.get(9)
    )
 }
 
-fn _svp_coeff_cube_shard_ranges(int: count, int: shards): list {
+fn _svp_coeff_cube_shard_ranges(int count, int shards) list {
    mut out = []
    if(count <= 0){ return out }
    if(shards < 1){ shards = 1 }
@@ -2923,15 +2827,15 @@ fn _svp_coeff_cube_shard_ranges(int: count, int: shards): list {
    out
 }
 
-fn _svp_shard_args(any: reduced, list: rows, int: dim, list: coeff_order, list: range, list: best_v, any: best_norm, list: best_coeffs, list: gram): list {
+fn _svp_shard_args(any reduced, list rows, int dim, list coeff_order, list range, list best_v, any best_norm, list best_coeffs, list gram) list {
    [reduced, rows, dim, coeff_order, int(range.get(0)), int(range.get(1)), best_v, best_norm, best_coeffs, gram]
 }
 
-fn _svp_range_result_serial(any: reduced, list: rows, int: dim, list: coeff_order, list: range, list: best_v, any: best_norm, list: best_coeffs, list: gram): dict {
+fn _svp_range_result_serial(any reduced, list rows, int dim, list coeff_order, list range, list best_v, any best_norm, list best_coeffs, list gram) dict {
    _svp_coeff_cube_range_core(reduced, rows, dim, coeff_order, int(range.get(0)), int(range.get(1)), best_v, best_norm, best_coeffs, gram)
 }
 
-fn _svp_collect_shards_serial(list: ranges, any: reduced, list: rows, int: dim, list: coeff_order, list: best_v, any: best_norm, list: best_coeffs, list: gram): list {
+fn _svp_collect_shards_serial(list ranges, any reduced, list rows, int dim, list coeff_order, list best_v, any best_norm, list best_coeffs, list gram) list {
    mut out = []
    mut ri = 0
    while(ri < ranges.len){
@@ -2941,7 +2845,7 @@ fn _svp_collect_shards_serial(list: ranges, any: reduced, list: rows, int: dim, 
    out
 }
 
-fn _svp_collect_shards_threaded(list: ranges, any: reduced, list: rows, int: dim, list: coeff_order, list: best_v, any: best_norm, list: best_coeffs, list: gram): list {
+fn _svp_collect_shards_threaded(list ranges, any reduced, list rows, int dim, list coeff_order, list best_v, any best_norm, list best_coeffs, list gram) list {
    mut handles = []
    mut ok = true
    mut hi = 0
@@ -2961,7 +2865,7 @@ fn _svp_collect_shards_threaded(list: ranges, any: reduced, list: rows, int: dim
    [ok, out]
 }
 
-fn _svp_collect_shards(list: ranges, any: reduced, list: rows, int: dim, list: coeff_order, list: best_v, any: best_norm, list: best_coeffs, list: gram): list {
+fn _svp_collect_shards(list ranges, any reduced, list rows, int dim, list coeff_order, list best_v, any best_norm, list best_coeffs, list gram) list {
    if(ranges.len > 1){
       def threaded = _svp_collect_shards_threaded(ranges, reduced, rows, dim, coeff_order, best_v, best_norm, best_coeffs, gram)
       if(threaded[0]){ return [true, threaded[1]] }
@@ -2969,7 +2873,7 @@ fn _svp_collect_shards(list: ranges, any: reduced, list: rows, int: dim, list: c
    [false, _svp_collect_shards_serial(ranges, reduced, rows, dim, coeff_order, best_v, best_norm, best_coeffs, gram)]
 }
 
-fn _svp_shard_accum_init(list: best_v, any: best_norm, list: best_coeffs): dict {
+fn _svp_shard_accum_init(list best_v, any best_norm, list best_coeffs) dict {
    {
       "reports": [],
       "nodes": 0,
@@ -2991,7 +2895,7 @@ fn _svp_shard_accum_init(list: best_v, any: best_norm, list: best_coeffs): dict 
    }
 }
 
-fn _svp_shard_report_row(int: si, dict: rep, bool: threaded, f64: elapsed_ms, f64: nodes_per_sec, str: numeric_kernel, any: best_norm): dict {
+fn _svp_shard_report_row(int si, dict rep, bool threaded, f64 elapsed_ms, f64 nodes_per_sec, str numeric_kernel, any best_norm) dict {
    {
       "shard": si,
       "start_code": rep.get("start_code", 0),
@@ -3013,7 +2917,7 @@ fn _svp_shard_report_row(int: si, dict: rep, bool: threaded, f64: elapsed_ms, f6
    }
 }
 
-fn _svp_shard_accum_add(dict: acc, int: si, dict: rep, bool: threaded): dict {
+fn _svp_shard_accum_add(dict acc, int si, dict rep, bool threaded) dict {
    def elapsed_ms = float(rep.get("elapsed_ms", 0.0))
    def nodes_per_sec = float(rep.get("nodes_per_sec", 0.0))
    def numeric_kernel = to_str(rep.get("numeric_kernel", ""))
@@ -3041,7 +2945,7 @@ fn _svp_shard_accum_add(dict: acc, int: si, dict: rep, bool: threaded): dict {
    acc
 }
 
-fn _svp_shard_accumulate(list: shard_results, bool: threaded, list: best_v, any: best_norm, list: best_coeffs): dict {
+fn _svp_shard_accumulate(list shard_results, bool threaded, list best_v, any best_norm, list best_coeffs) dict {
    mut acc = _svp_shard_accum_init(best_v, best_norm, best_coeffs)
    mut si = 0
    while(si < shard_results.len){
@@ -3051,7 +2955,7 @@ fn _svp_shard_accumulate(list: shard_results, bool: threaded, list: best_v, any:
    acc
 }
 
-fn _svp_sharded_record(any: reduced, any: reduce_transform, dict: acc, int: n, int: total_points, int: visit_points, int: max_shards, int: range_count, bool: threaded): dict {
+fn _svp_sharded_record(any reduced, any reduce_transform, dict acc, int n, int total_points, int visit_points, int max_shards, int range_count, bool threaded) dict {
    def nodes = int(acc.get("nodes", 0))
    def numeric_kernel = to_str(acc.get("numeric_kernel", ""))
    mut out = _svp_core_record_coeffs(acc.get("best_v"), acc.get("best_norm"), nodes, visit_points < total_points, _svp_nodes_fill(n, nodes), reduced, acc.get("best_coeffs"))
@@ -3086,7 +2990,7 @@ fn _svp_sharded_record(any: reduced, any: reduce_transform, dict: acc, int: n, i
    _svp_state_with_input_coeffs(out, reduce_transform)
 }
 
-fn _svp_coeff_cube_sharded_core(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000, int: max_shards=8): dict {
+fn _svp_coeff_cube_sharded_core(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000, int max_shards=8) dict {
    def B = _bkz_as_matrix(basis)
    def prep = _svp_reduce_with_transform(B)
    def reduced = prep.get("basis")
@@ -3111,7 +3015,7 @@ fn _svp_coeff_cube_sharded_core(any: basis, any: radius_sq=nil, int: coeff_bound
    _svp_sharded_record(reduced, reduce_transform, acc, n, total_points, visit_points, max_shards, ranges.len, threaded)
 }
 
-fn _svp_enumerate_core(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): dict {
+fn _svp_enumerate_core(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) dict {
    def B = _bkz_as_matrix(basis)
    def n = _matrix_rows(B)
    def cube_points = _bkz_pow_int(_bkz_coeff_order(max(1, int(coeff_bound))).len, n)
@@ -3138,7 +3042,7 @@ fn _svp_enumerate_core(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: 
    best.set("enumeration_order", "reverse-gso+low-weight")
 }
 
-fn svp_enumerate_report(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): dict {
+fn svp_enumerate_report(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) dict {
    "GSO-profiled bounded SVP enumeration report.
    The search walks short integer combinations of an LLL-reduced basis, uses
    dimension-specialized kernels for tiny blocks and reverse-GSO bounded DFS for
@@ -3181,7 +3085,7 @@ fn svp_enumerate_report(any: basis, any: radius_sq=nil, int: coeff_bound=1, int:
    }
 }
 
-fn svp_kernel_report(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000, int: max_shards=8): dict {
+fn svp_kernel_report(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000, int max_shards=8) dict {
    "Run the bounded coefficient-kernel path: dimension-specialized through eight rows, incremental cube above that when budget allows."
    def t0 = ticks()
    def B = _bkz_as_matrix(basis)
@@ -3215,29 +3119,29 @@ fn svp_kernel_report(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: ma
    }
 }
 
-fn svp_kernel(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000, int: max_shards=8): list {
+fn svp_kernel(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000, int max_shards=8) list {
    "Return the vector found by svp_kernel_report."
    svp_kernel_report(basis, radius_sq, coeff_bound, max_nodes, max_shards).get("vector")
 }
 
-fn svp_enumerate(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): list {
+fn svp_enumerate(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) list {
    "Return a short non-zero lattice vector found by bounded enumeration."
    _svp_enumerate_core(basis, radius_sq, coeff_bound, max_nodes).get("vector")
 }
 
-fn svp_report(any: basis, any: radius_sq=nil, int: coeff_bound=1, int: max_nodes=200000): dict {
+fn svp_report(any basis, any radius_sq=nil, int coeff_bound=1, int max_nodes=200000) dict {
    "Report-first public SVP API backed by bounded enumeration."
    svp_enumerate_report(basis, radius_sq, coeff_bound, max_nodes)
 }
 
-fn _bkz_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _bkz_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _bkz_nodes_per_sec(int: nodes, any: elapsed_ms): f64 {
+fn _bkz_nodes_per_sec(int nodes, any elapsed_ms) f64 {
    def ms = float(elapsed_ms)
    ms <= 0.0 ? 0.0 : float(nodes) * 1000.0 / ms
 }
 
-fn _bkz_block_with_vector_report(any: block, list: v, list: coeffs): dict {
+fn _bkz_block_with_vector_report(any block, list v, list coeffs) dict {
    def want = _matrix_rows(block)
    def old = _matrix_data(block)
    def dim = _matrix_cols(block)
@@ -3266,7 +3170,7 @@ fn _bkz_block_with_vector_report(any: block, list: v, list: coeffs): dict {
    out
 }
 
-fn _bkz_count_tour_block_bool(list: tours, str: field): int {
+fn _bkz_count_tour_block_bool(list tours, str field) int {
    mut count = 0
    mut ti = 0
    while(ti < tours.len){
@@ -3281,7 +3185,7 @@ fn _bkz_count_tour_block_bool(list: tours, str: field): int {
    count
 }
 
-fn _bkz_sum_tour_block_int(list: tours, str: field): int {
+fn _bkz_sum_tour_block_int(list tours, str field) int {
    mut total = 0
    mut ti = 0
    while(ti < tours.len){
@@ -3296,7 +3200,7 @@ fn _bkz_sum_tour_block_int(list: tours, str: field): int {
    total
 }
 
-fn _bkz_retry_policy(int: n, int: block_size, bool: record, int: svp_max_nodes): dict {
+fn _bkz_retry_policy(int n, int block_size, bool record, int svp_max_nodes) dict {
    if(n <= 32){
       return {
          "method": "bounded-bkz-rerandomized-retry-policy", "rows": n, "block_size": block_size, "svp_max_nodes": svp_max_nodes,
@@ -3318,7 +3222,7 @@ fn _bkz_retry_policy(int: n, int: block_size, bool: record, int: svp_max_nodes):
    }
 }
 
-fn _bkz_prepare_insert_candidate(any: block, any: svcore, list: sv, list: sv_coeffs, any: delta, any: eta, bool: record, bool: debug_transform): list {
+fn _bkz_prepare_insert_candidate(any block, any svcore, list sv, list sv_coeffs, any delta, any eta, bool record, bool debug_transform) list {
    mut candidate = block
    mut local_transform = _bkz_identity(_matrix_rows(block))
    mut local_transform_mismatch = []
@@ -3348,7 +3252,7 @@ fn _bkz_prepare_insert_candidate(any: block, any: svcore, list: sv, list: sv_coe
    [candidate, local_transform, direct_reduced, local_transform_mismatch, pre_transform_mismatch, local_lll_transform_mismatch]
 }
 
-fn _bkz_retry_insert_candidate(any: B, int: i, any: block, dict: retry_policy, int: svp_coeff_bound, int: svp_max_nodes, int: tour, int: block_size, any: before_norm, any: projected_before, any: delta, any: eta, bool: record): list {
+fn _bkz_retry_insert_candidate(any B, int i, any block, dict retry_policy, int svp_coeff_bound, int svp_max_nodes, int tour, int block_size, any before_norm, any projected_before, any delta, any eta, bool record) list {
    def rerandomization = bkz_rerandomize_block_report(block, 0, _matrix_rows(block), max(1, svp_coeff_bound), (tour + 1) * 131 + i + block_size)
    def randomized_block = rerandomization.get("basis", block)
    def retry_node_budget = max(1, int(retry_policy.get("retry_node_budget", svp_max_nodes)))
@@ -3379,7 +3283,7 @@ fn _bkz_retry_insert_candidate(any: B, int: i, any: block, dict: retry_policy, i
    [rerandomization, retry_nodes, retry_hit_limit, retry_improved, candidate, local_transform, rsv_norm, rsv_coeffs, insertion_reason, projected_candidate, direct_reduced]
 }
 
-fn _bkz_initial_reduce(any: B0, any: delta, any: eta, bool: record, bool: debug_transform): list {
+fn _bkz_initial_reduce(any B0, any delta, any eta, bool record, bool debug_transform) list {
    mut B = B0
    mut transform = _bkz_identity(_matrix_rows(B0))
    mut transform_checks = []
@@ -3394,7 +3298,7 @@ fn _bkz_initial_reduce(any: B0, any: delta, any: eta, bool: record, bool: debug_
    [B, transform, transform_checks]
 }
 
-fn _bkz_tour_reduce(any: B0, any: B, any: transform, list: transform_checks, int: n, int: tour, any: delta, any: eta, bool: record, bool: debug_transform): list {
+fn _bkz_tour_reduce(any B0, any B, any transform, list transform_checks, int n, int tour, any delta, any eta, bool record, bool debug_transform) list {
    if(record){
       def tour_lll = lll_reduce_report(B, delta, "ny", eta)
       B = tour_lll.get("basis")
@@ -3406,7 +3310,7 @@ fn _bkz_tour_reduce(any: B0, any: B, any: transform, list: transform_checks, int
    [B, transform, transform_checks]
 }
 
-fn _bkz_primary_insert_state(any: B, int: i, any: block, any: svcore, any: before_norm, any: projected_before, any: delta, any: eta, bool: record, bool: debug_transform): dict {
+fn _bkz_primary_insert_state(any B, int i, any block, any svcore, any before_norm, any projected_before, any delta, any eta, bool record, bool debug_transform) dict {
    def sv = svcore.get("vector", _bkz_zero_vec(_matrix_cols(block)))
    def has_sv = _bkz_vec_nonzero(sv)
    mut state = {
@@ -3430,14 +3334,14 @@ fn _bkz_primary_insert_state(any: B, int: i, any: block, any: svcore, any: befor
    state.set("improved", _bkz_block_changed(B, i, candidate) && after_norm <= before_norm)
 }
 
-fn _bkz_apply_block_update(any: B0, any: B, any: transform, list: transform_checks, int: i, any: candidate, any: local_transform, int: tour, str: stage, bool: record, bool: debug_transform): list {
+fn _bkz_apply_block_update(any B0, any B, any transform, list transform_checks, int i, any candidate, any local_transform, int tour, str stage, bool record, bool debug_transform) list {
    B = _bkz_replace_block(B, i, candidate)
    if(record){ transform = _bkz_apply_local_transform_to_rows(transform, i, local_transform) }
    if(debug_transform){ transform_checks = _bkz_append_transform_check(transform_checks, stage, B0, transform, B, tour + 1, i) }
    [B, transform, transform_checks]
 }
 
-fn _bkz_retry_state(dict: state, any: B, int: i, any: block, dict: retry_policy, int: svp_coeff_bound, int: svp_max_nodes, int: tour, int: block_size, any: before_norm, any: projected_before, any: delta, any: eta, bool: record): dict {
+fn _bkz_retry_state(dict state, any B, int i, any block, dict retry_policy, int svp_coeff_bound, int svp_max_nodes, int tour, int block_size, any before_norm, any projected_before, any delta, any eta, bool record) dict {
    def retry_out = _bkz_retry_insert_candidate(B, i, block, retry_policy, svp_coeff_bound, svp_max_nodes, tour, block_size, before_norm, projected_before, delta, eta, record)
    state = state.set("rerandomization", retry_out[0])
    state = state.set("retry_nodes", retry_out[1])
@@ -3454,7 +3358,7 @@ fn _bkz_retry_state(dict: state, any: B, int: i, any: block, dict: retry_policy,
    state.set("improved", true)
 }
 
-fn _bkz_block_report(int: i, int: h, any: before_norm, any: projected_before, any: projection, any: svcore, dict: state, dict: retry_policy, any: block_t0, bool: debug_transform): dict {
+fn _bkz_block_report(int i, int h, any before_norm, any projected_before, any projection, any svcore, dict state, dict retry_policy, any block_t0, bool debug_transform) dict {
    mut br = {
       "start": i, "stop": h, "before_norm": before_norm, "projected_norm_before": projected_before,
       "projection": projection, "svp_norm": state.get("sv_norm"), "svp_coeffs": state.get("sv_coeffs"), "nodes": svcore.get("nodes", 0),
@@ -3476,7 +3380,7 @@ fn _bkz_block_report(int: i, int: h, any: before_norm, any: projected_before, an
    br
 }
 
-fn _bkz_reduce_block_step(any: B0, any: B, any: transform, list: transform_checks, int: n, int: i, int: block_size, int: tour, any: delta, any: eta, int: svp_coeff_bound, int: svp_max_nodes, dict: retry_policy, int: retry_used, bool: record, bool: debug_transform): list {
+fn _bkz_reduce_block_step(any B0, any B, any transform, list transform_checks, int n, int i, int block_size, int tour, any delta, any eta, int svp_coeff_bound, int svp_max_nodes, dict retry_policy, int retry_used, bool record, bool debug_transform) list {
    def block_t0 = ticks()
    def h = (i + block_size < n) ? (i + block_size) : n
    def before_norm = _bkz_row_norm(_matrix_data(B).get(i))
@@ -3510,14 +3414,14 @@ fn _bkz_reduce_block_step(any: B0, any: B, any: transform, list: transform_check
    [B, transform, changed, retry_used, report, transform_checks]
 }
 
-fn _bkz_tour_report(int: tour, bool: changed, int: block_stride, dict: retry_policy, int: retry_used, list: block_reports): dict {
+fn _bkz_tour_report(int tour, bool changed, int block_stride, dict retry_policy, int retry_used, list block_reports) dict {
    {
       "tour": tour + 1, "changed": changed, "block_stride": block_stride,
       "retry_policy": retry_policy, "retry_used": retry_used, "blocks": block_reports
    }
 }
 
-fn _bkz_final_cleanup(any: B0, any: B, any: transform, list: transform_checks, int: n, int: tour, any: delta, any: eta, bool: record, bool: debug_transform): list {
+fn _bkz_final_cleanup(any B0, any B, any transform, list transform_checks, int n, int tour, any delta, any eta, bool record, bool debug_transform) list {
    mut final_cleanup = nil
    if(record && n <= 32){
       final_cleanup = lll_reduce_report(B, delta, "ny", eta)
@@ -3532,7 +3436,7 @@ fn _bkz_final_cleanup(any: B0, any: B, any: transform, list: transform_checks, i
    [B, transform, transform_checks, final_cleanup]
 }
 
-fn _bkz_pure_reduce_core(any: basis, int: block_size=10, any: delta=0.75, any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000, bool: record=false): list {
+fn _bkz_pure_reduce_core(any basis, int block_size=10, any delta=0.75, any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000, bool record=false) list {
    def t0 = ticks()
    def B0 = _bkz_as_matrix(basis)
    def debug_transform = record && _bkz_debug_transform_steps()
@@ -3579,7 +3483,7 @@ fn _bkz_pure_reduce_core(any: basis, int: block_size=10, any: delta=0.75, any: e
    [B, tours, _bkz_elapsed_ms(t0), transform, transform_checks, block_stride, final_cleanup, retry_policy]
 }
 
-fn _bkz_pure_reduce_report(any: basis, int: block_size=10, any: delta=0.75, any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): dict {
+fn _bkz_pure_reduce_report(any basis, int block_size=10, any delta=0.75, any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) dict {
    def B0 = _bkz_as_matrix(basis)
    def unit_orthogonal = _bkz_signed_unit_orthogonal(B0)
    if(unit_orthogonal && _matrix_rows(B0) > 16){
@@ -3673,12 +3577,12 @@ fn _bkz_pure_reduce_report(any: basis, int: block_size=10, any: delta=0.75, any:
    out
 }
 
-fn _bkz_lcg_next(int: state): int {
+fn _bkz_lcg_next(int state) int {
    def n = (state * 1103515245 + 12345) % 2147483647
    n < 0 ? -n : n
 }
 
-fn _bkz_move_row_list(list: rows, int: from_idx, int: to_idx): list {
+fn _bkz_move_row_list(list rows, int from_idx, int to_idx) list {
    if(from_idx == to_idx){ return rows }
    def n = rows.len
    if(from_idx < 0 || from_idx >= n || to_idx < 0 || to_idx >= n){ return rows }
@@ -3699,7 +3603,7 @@ fn _bkz_move_row_list(list: rows, int: from_idx, int: to_idx): list {
    out
 }
 
-fn bkz_rerandomize_block_report(any: basis, int: start=0, int: stop=0, int: density=1, int: seed=1): dict {
+fn bkz_rerandomize_block_report(any basis, int start=0, int stop=0, int density=1, int seed=1) dict {
    "Report BKZ stalled-block rerandomization: row moves plus triangular +/-1 row operations."
    def t0 = ticks()
    def B = _bkz_as_matrix(basis)
@@ -3766,7 +3670,7 @@ fn bkz_rerandomize_block_report(any: basis, int: start=0, int: stop=0, int: dens
    }
 }
 
-fn bkz(any: basis, int: block_size=10, any: delta=0.75, str: method="ny", any: eta=0.51): any {
+fn bkz(any basis, int block_size=10, any delta=0.75, str method="ny", any eta=0.51) any {
    "Perform BKZ lattice reduction on a matrix basis with given block size.
    `method=\"auto\"` and `method=\"ny\"` use BKZ."
    def B0 = _bkz_as_matrix(basis)
@@ -3774,7 +3678,7 @@ fn bkz(any: basis, int: block_size=10, any: delta=0.75, str: method="ny", any: e
    _bkz_pure_reduce_core(B0, block_size, delta, eta, 0, true, 1, 200000, false)[0]
 }
 
-fn bkz_reduce_report(any: basis, int: block_size=10, any: delta=0.75, str: method="ny", any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): dict {
+fn bkz_reduce_report(any basis, int block_size=10, any delta=0.75, str method="ny", any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) dict {
    "Reduce with BKZ and return method, strategy policy, LLL-quality before/after, and timing."
    def t0 = ticks()
    def B0 = _bkz_as_matrix(basis)
@@ -3858,7 +3762,7 @@ fn bkz_reduce_report(any: basis, int: block_size=10, any: delta=0.75, str: metho
    }
 }
 
-fn bkz_report(any: basis, int: block_size=10, any: delta=0.75, str: method="auto", any: eta=0.51, int: max_tours=0, bool: early_abort=true, int: svp_coeff_bound=1, int: svp_max_nodes=200000): dict {
+fn bkz_report(any basis, int block_size=10, any delta=0.75, str method="auto", any eta=0.51, int max_tours=0, bool early_abort=true, int svp_coeff_bound=1, int svp_max_nodes=200000) dict {
    "Report-first public BKZ API. `auto` resolves to BKZ."
    bkz_reduce_report(basis, block_size, delta, method, eta, max_tours, early_abort, svp_coeff_bound, svp_max_nodes)
 }

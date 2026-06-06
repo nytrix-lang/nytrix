@@ -1,12 +1,15 @@
-;; Keywords: number-theory pseudoprimes
+;; Keywords: number-theory pseudoprimes math crypto
 ;; Crypto number-theory routines for pseudoprime generation and checks.
 ;; Reference:
 ;; - "Prime and Prejudice: Primality Testing Under Adversarial Conditions"
+;; References:
+;; - std.math.crypto.number
+;; - std.math.crypto
 module std.math.crypto.number.pseudoprimes(generate_pseudoprime)
 use std.math.nt
 use std.math.crypto.number.crt
 
-fn _pp_index(list: xs, any: v): int {
+fn _pp_index(list xs, any v) int {
    mut i = 0
    while(i < xs.len){
       if(xs.get(i) == v){ return i }
@@ -15,12 +18,12 @@ fn _pp_index(list: xs, any: v): int {
    -1
 }
 
-fn _pp_set_add(list: xs, any: v): list {
+fn _pp_set_add(list xs, any v) list {
    if(_pp_index(xs, v) >= 0){ return xs }
    xs.append(v)
 }
 
-fn _pp_set_intersect(list: a, list: b): list {
+fn _pp_set_intersect(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -31,7 +34,7 @@ fn _pp_set_intersect(list: a, list: b): list {
    out
 }
 
-fn _kronecker_minus_one_residues(any: a): list {
+fn _kronecker_minus_one_residues(any a) list {
    mut out = []
    mut p = Z(1)
    def lim = Z(4) * Z(a)
@@ -42,7 +45,7 @@ fn _kronecker_minus_one_residues(any: a): list {
    out
 }
 
-fn _generate_s(list: bases, list: ks): list {
+fn _generate_s(list bases, list ks) list {
    mut all_s = []
    mut i = 0
    while(i < bases.len){
@@ -69,7 +72,7 @@ fn _generate_s(list: bases, list: ks): list {
    all_s
 }
 
-fn _backtrack_crt(list: S, list: A, list: X, list: M, int: i): any {
+fn _backtrack_crt(list S, list A, list X, list M, int i) any {
    if(i >= S.len){ return fast_crt(X, M) }
    def mods = clone(M).append(Z(4) * Z(A.get(i)))
    def opts = S.get(i)
@@ -86,7 +89,7 @@ fn _backtrack_crt(list: S, list: A, list: X, list: M, int: i): any {
    nil
 }
 
-fn generate_pseudoprime(list: bases, any: k2=nil, any: k3=nil, int: min_bit_length=0): any {
+fn generate_pseudoprime(list bases, any k2=nil, any k3=nil, int min_bit_length=0) any {
    "Generate n = p1*p2*p3 passing Miller-Rabin for the provided bases.
    Returns [n,p1,p2,p3] or nil."
    if(bases.len <= 0){ return nil }

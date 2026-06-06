@@ -1,8 +1,11 @@
-;; Keywords: factorization hybrid-factor
+;; Keywords: factorization hybrid-factor math crypto number-theory
 ;; Integer-factorization routines for hybrid factorization strategies.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.hybrid_factor(hybrid_factor, is_prime_hybrid, pollard_rho_factor, pollard_pm1_factor, brute_force_factor, add_factor, next_prime_hybrid, prev_prime_hybrid, factor_to_number, mul_mod, factordb_query, factor_plan, trial_division_split, hybrid_factor_one, hybrid_factor_one_report, factor_work_schedule_report, hybrid_factor_orchestration_report, factor_complete, factor_complete_report, factor_validate, hybrid_factor_local, hybrid_factor_report)
 use std.math.nt
 use std.math.crypto.factorization.pollard as pollard
@@ -18,7 +21,7 @@ mut _hf_ecm_max_curves_cache = nil
 mut _hf_step_report_keys_cache = nil
 mut _hf_brent_seeds_cache = nil
 
-fn _hf_step_report_keys(): list {
+fn _hf_step_report_keys() list {
    if(_hf_step_report_keys_cache == nil){
       _hf_step_report_keys_cache = [
          "autotuned", "work_plan", "relation_count", "factor_base_size", "linear_algebra",
@@ -30,12 +33,12 @@ fn _hf_step_report_keys(): list {
    _hf_step_report_keys_cache
 }
 
-fn _hf_brent_seeds(): list {
+fn _hf_brent_seeds() list {
    if(_hf_brent_seeds_cache == nil){ _hf_brent_seeds_cache = [[2, 1], [3, 1], [5, 3], [7, 11], [11, 17], [13, 23]] }
    _hf_brent_seeds_cache
 }
 
-fn _hf_brent_seeds_for(any: n): list {
+fn _hf_brent_seeds_for(any n) list {
    def bits = bit_length(_hf_abs(n))
    if(bits == 80){
       return [[19, 37], [17, 29], [5, 3], [2, 1], [3, 1], [13, 23], [7, 11], [11, 17]]
@@ -46,12 +49,12 @@ fn _hf_brent_seeds_for(any: n): list {
    _hf_brent_seeds()
 }
 
-fn mul_mod(any: a, any: b, any: m): any {
+fn mul_mod(any a, any b, any m) any {
    "Compute(a * b) % m safely, avoiding overflow for large numbers."
    (a % m) * (b % m) % m
 }
 
-fn pow_mod_safe(any: base, any: exp, any: modulus): any {
+fn pow_mod_safe(any base, any exp, any modulus) any {
    "Compute(base^exp) % modulus using binary exponentiation."
    if(modulus == 1){ return 0 }
    mut result = 1
@@ -64,18 +67,18 @@ fn pow_mod_safe(any: base, any: exp, any: modulus): any {
    result
 }
 
-fn is_prime_hybrid(any: n): int {
+fn is_prime_hybrid(any n) int {
    "Miller-Rabin primality test with deterministic witnesses.
    Returns 1 if n is probably prime, 0 otherwise."
    is_prime(n) ? 1 : 0
 }
 
-fn pollard_rho_factor(any: n): any {
+fn pollard_rho_factor(any n) any {
    "Pollard rho factorization. Returns a non-trivial factor of n, or 0 if none found."
    if(n % 2 == 0){ return 2 }
    mut x, y = 2, 2
    mut d = 1
-   def f = fn(any: val): any { (val * val + 1) % n }
+   def f = fn(any val) any { (val * val + 1) % n }
    while(d == 1){
       x, y = f(x), f(f(y))
       def diff = (x > y) ? x - y : y - x
@@ -84,7 +87,7 @@ fn pollard_rho_factor(any: n): any {
    (d != n) ? d : 0
 }
 
-fn pollard_pm1_factor(any: n, any: B): any {
+fn pollard_pm1_factor(any n, any B) any {
    "Pollard p-1 factorization with smoothness bound B.
    Returns a non-trivial factor of n, or 0 if none found."
    mut a, j = 2, 2
@@ -96,7 +99,7 @@ fn pollard_pm1_factor(any: n, any: B): any {
    (g > 1 && g < n) ? g : 0
 }
 
-fn brute_force_factor(any: n): list {
+fn brute_force_factor(any n) list {
    "Brute force trial division factorization. Returns a list of all prime factors of n."
    mut factors = list(0)
    mut nn = n
@@ -127,19 +130,19 @@ fn brute_force_factor(any: n): list {
    factors
 }
 
-fn add_factor(list: factors, any: factor): list {
+fn add_factor(list factors, any factor) list {
    "Add a factor to the factor list and return the updated list."
    factors.append(factor)
 }
 
-fn next_prime_hybrid(any: n): any {
+fn next_prime_hybrid(any n) any {
    "Find the next prime after n using the hybrid primality test."
    mut p = n + 1
    while(is_prime_hybrid(p) == 0){ p += 1 }
    p
 }
 
-fn prev_prime_hybrid(any: n): any {
+fn prev_prime_hybrid(any n) any {
    "Find the largest prime less than n using the hybrid primality test.
    Returns 2 if no prime exists below n."
    mut p = n - 1
@@ -147,7 +150,7 @@ fn prev_prime_hybrid(any: n): any {
    (p > 1) ? p : 2
 }
 
-fn factor_to_number(list: factors): any {
+fn factor_to_number(list factors) any {
    "Multiply all factors together to reconstruct the original number."
    mut n = factors.len
    if(n == 0){ return 1 }
@@ -160,20 +163,20 @@ fn factor_to_number(list: factors): any {
    result
 }
 
-fn _hf_z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _hf_z(any x) any { is_bigint(x) ? x : Z(x) }
 
-fn _hf_abs(any: x): any {
+fn _hf_abs(any x) any {
    def z = _hf_z(x)
    z < Z(0) ? -z : z
 }
 
-fn _hf_nontrivial(any: f, any: n): bool {
+fn _hf_nontrivial(any f, any n) bool {
    if(f == nil){ return false }
    def ff, nn = _hf_z(f), _hf_z(n)
    ff > Z(1) && ff < nn && nn % ff == Z(0)
 }
 
-fn _hf_append_sorted(list: xs, any: x): list {
+fn _hf_append_sorted(list xs, any x) list {
    mut out = []
    mut inserted = false
    mut i = 0
@@ -189,7 +192,7 @@ fn _hf_append_sorted(list: xs, any: x): list {
    out
 }
 
-fn factor_validate(any: n, list: factors): bool {
+fn factor_validate(any n, list factors) bool {
    "Return true when `factors` multiply back to `n` and every factor is > 1."
    def nn = _hf_abs(n)
    if(nn < Z(2)){ return factors.len == 0 }
@@ -204,7 +207,7 @@ fn factor_validate(any: n, list: factors): bool {
    prod == nn
 }
 
-fn factor_plan(any: n): list {
+fn factor_plan(any n) list {
    "Return the factor-splitting method schedule for `n`."
    def bits = bit_length(_hf_abs(n))
    mut plan = ["trial", "perfect-square", "fermat"]
@@ -223,29 +226,29 @@ fn factor_plan(any: n): list {
    plan
 }
 
-fn _hf_digits(any: n): int { to_str(_hf_abs(n)).len }
+fn _hf_digits(any n) int { to_str(_hf_abs(n)).len }
 
-fn _hf_ceil_float(any: x): int {
+fn _hf_ceil_float(any x) int {
    def i = int(x)
    float(i) < float(x) ? i + 1 : i
 }
 
-fn _hf_ecm_levels(): list {
+fn _hf_ecm_levels() list {
    if(_hf_ecm_levels_cache == nil){ _hf_ecm_levels_cache = [15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65] }
    _hf_ecm_levels_cache
 }
 
-fn _hf_ecm_b1s(): list {
+fn _hf_ecm_b1s() list {
    if(_hf_ecm_b1s_cache == nil){ _hf_ecm_b1s_cache = [2000, 11000, 50000, 250000, 1000000, 3000000, 11000000, 43000000, 110000000, 260000000, 850000000] }
    _hf_ecm_b1s_cache
 }
 
-fn _hf_ecm_max_curves(): list {
+fn _hf_ecm_max_curves() list {
    if(_hf_ecm_max_curves_cache == nil){ _hf_ecm_max_curves_cache = [34, 86, 214, 430, 910, 2351, 4482, 7557, 17884, 42057, 69471] }
    _hf_ecm_max_curves_cache
 }
 
-fn _hf_target_pretest_digits(int: digits, str: pretest_policy, any: explicit_target=nil, any: custom_ratio=nil, bool: snfs=false): list {
+fn _hf_target_pretest_digits(int digits, str pretest_policy, any explicit_target=nil, any custom_ratio=nil, bool snfs=false) list {
    mut target = float(digits) * 4.0 / 13.0
    mut source = "default-4/13"
    if(explicit_target != nil && float(explicit_target) > 1.0){
@@ -269,11 +272,11 @@ fn _hf_target_pretest_digits(int: digits, str: pretest_policy, any: explicit_tar
    [target, source]
 }
 
-fn _hf_work_step(str: state, str: kind, int: order, any: B1=0, any: B2=0, int: curves=0, any: target_digits=nil): dict {
+fn _hf_work_step(str state, str kind, int order, any B1=0, any B2=0, int curves=0, any target_digits=nil) dict {
    {"state": state, "kind": kind, "order": order, "B1": B1, "B2": B2, "curves": curves, "target_digits": target_digits}
 }
 
-fn _hf_scheduled_ecm_curves(any: target_digits, int: level, int: prev_level, int: max_curves): int {
+fn _hf_scheduled_ecm_curves(any target_digits, int level, int prev_level, int max_curves) int {
    def t = float(target_digits)
    if(t <= float(prev_level)){ return 0 }
    if(t >= float(level)){ return max_curves }
@@ -282,7 +285,7 @@ fn _hf_scheduled_ecm_curves(any: target_digits, int: level, int: prev_level, int
    max(1, _hf_ceil_float(float(max_curves) * frac))
 }
 
-fn factor_work_schedule_report(any: n, str: pretest_policy="default", any: explicit_target=nil, any: custom_ratio=nil, bool: snfs=false): dict {
+fn factor_work_schedule_report(any n, str pretest_policy="default", any explicit_target=nil, any custom_ratio=nil, bool snfs=false) dict {
    "Return a factor work schedule with target pretest depth, ECM levels, and sieve handoff."
    def t0 = ticks()
    def nn = _hf_abs(n)
@@ -354,7 +357,7 @@ fn factor_work_schedule_report(any: n, str: pretest_policy="default", any: expli
    }
 }
 
-fn hybrid_factor_orchestration_report(any: n=8051): dict {
+fn hybrid_factor_orchestration_report(any n=8051) dict {
    "Return an auditable summary of the default hybrid factor schedule and report surfaces."
    def plan = factor_plan(n)
    def schedule = factor_work_schedule_report(n)
@@ -387,7 +390,7 @@ fn hybrid_factor_orchestration_report(any: n=8051): dict {
    }
 }
 
-fn _trial_division_split_i60(int: nn0, int: bound): list {
+fn _trial_division_split_i60(int nn0, int bound) list {
    mut nn = nn0
    mut factors = []
    if(nn < 2){ return [factors, Z(nn)] }
@@ -421,7 +424,7 @@ fn _trial_division_split_i60(int: nn0, int: bound): list {
    [factors, Z(nn)]
 }
 
-fn trial_division_split(any: n, int: bound=10000): list {
+fn trial_division_split(any n, int bound=10000) list {
    "Split small prime factors from `n`. Returns [factors, cofactor]."
    mut nn = _hf_abs(n)
    mut factors = []
@@ -460,15 +463,15 @@ fn trial_division_split(any: n, int: bound=10000): list {
    [factors, nn]
 }
 
-fn _hf_try_candidate(any: n, any: f): any { _hf_nontrivial(f, n) ? _hf_z(f) : nil }
+fn _hf_try_candidate(any n, any f) any { _hf_nontrivial(f, n) ? _hf_z(f) : nil }
 
-fn _hf_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _hf_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _hf_step(str: method, any: factor, any: t0): dict {
+fn _hf_step(str method, any factor, any t0) dict {
    {"method": method, "factor": factor, "success": factor != nil, "elapsed_ms": _hf_elapsed_ms(t0)}
 }
 
-fn _hf_step_report(str: method, any: report, any: t0): dict {
+fn _hf_step_report(str method, any report, any t0) dict {
    def factor = report == nil ? nil : report.get("factor", nil)
    mut step = _hf_step(method, factor, t0)
    step = step.set("report", report)
@@ -485,7 +488,7 @@ fn _hf_step_report(str: method, any: report, any: t0): dict {
    step
 }
 
-fn _hf_report_candidate_step(any: n, str: method, any: report, any: t0): dict {
+fn _hf_report_candidate_step(any n, str method, any report, any t0) dict {
    def f = report == nil ? nil : _hf_try_candidate(n, report.get("factor", nil))
    mut step = _hf_step_report(method, report, t0)
    step["factor"] = f
@@ -493,21 +496,21 @@ fn _hf_report_candidate_step(any: n, str: method, any: report, any: t0): dict {
    step
 }
 
-fn _hf_squfof_before_lehman(any: n): bool {
+fn _hf_squfof_before_lehman(any n) bool {
    def bits = bit_length(_hf_abs(n))
    bits > 40 && bits <= 64
 }
 
-fn _hf_squfof_step(any: n, any: t0): dict {
+fn _hf_squfof_step(any n, any t0) dict {
    _hf_report_candidate_step(n, "squfof", pollard.squfof_report(n), t0)
 }
 
-fn _hf_brent_step(any: n, any: y0, any: c0, int: max_gcds, any: t0): dict {
+fn _hf_brent_step(any n, any y0, any c0, int max_gcds, any t0) dict {
    def br = pollard.pollard_brent_report(n, y0, c0, 64, max_gcds)
    _hf_report_candidate_step(n, "brent-rho:" + to_str(y0) + "," + to_str(c0), br, t0)
 }
 
-fn _hf_named_report(any: n, str: method): any {
+fn _hf_named_report(any n, str method) any {
    case method {
       "p-1-stage2" -> pollard.pollard_pm1_stage2_report(n, 2000, 50000)
       "p+1" -> pollard.williams_pp1_report(n, 20000)
@@ -519,7 +522,7 @@ fn _hf_named_report(any: n, str: method): any {
    }
 }
 
-fn _hf_try_report_suite(any: n, list: steps, list: methods): dict {
+fn _hf_try_report_suite(any n, list steps, list methods) dict {
    mut out = steps
    mut i = 0
    while(i < methods.len){
@@ -534,7 +537,7 @@ fn _hf_try_report_suite(any: n, list: steps, list: methods): dict {
    {"steps": out, "method": "", "factor": nil, "success": false}
 }
 
-fn _hf_try_brent_schedule(any: n, list: steps, int: max_gcds): list {
+fn _hf_try_brent_schedule(any n, list steps, int max_gcds) list {
    def seeds = _hf_brent_seeds_for(n)
    mut out = steps
    mut i = 0
@@ -549,7 +552,7 @@ fn _hf_try_brent_schedule(any: n, list: steps, int: max_gcds): list {
    [out, dict()]
 }
 
-fn _hf_prime_powers_to_flat(any: facs): any {
+fn _hf_prime_powers_to_flat(any facs) any {
    if(facs == nil){ return nil }
    mut out = []
    mut i = 0
@@ -566,18 +569,18 @@ fn _hf_prime_powers_to_flat(any: facs): any {
    out
 }
 
-fn _hf_use_factordb(any: source): bool { source == true || source == "factordb" || source == "fdb" }
+fn _hf_use_factordb(any source) bool { source == true || source == "factordb" || source == "fdb" }
 
-fn _hf_finish_one(dict: out, list: steps, str: method, any: factor, any: t0): dict {
+fn _hf_finish_one(dict out, list steps, str method, any factor, any t0) dict {
    out.set("method", method).set("factor", factor).set("success", factor != nil).set("steps", steps).set("elapsed_ms", _hf_elapsed_ms(t0))
 }
 
-fn hybrid_factor_one(any: n): any {
+fn hybrid_factor_one(any n) any {
    "Find one non-trivial factor using the bounded method schedule."
    hybrid_factor_one_report(n).get("factor", nil)
 }
 
-fn hybrid_factor_one_report(any: n): dict {
+fn hybrid_factor_one_report(any n) dict {
    "Explain one factor-splitting attempt."
    def t0 = ticks()
    def nn = _hf_abs(n)
@@ -668,7 +671,7 @@ fn hybrid_factor_one_report(any: n): dict {
    _hf_finish_one(out, steps, "none", nil, t0)
 }
 
-fn factor_complete(any: n, int: max_rounds=512): list {
+fn factor_complete(any n, int max_rounds=512) list {
    "Complete local factorization into prime-looking factors.
    Composite leftovers are retained if the bounded schedule cannot split them."
    def start = _hf_abs(n)
@@ -727,7 +730,7 @@ fn factor_complete(any: n, int: max_rounds=512): list {
    out
 }
 
-fn factor_complete_report(any: n, int: max_rounds=512): dict {
+fn factor_complete_report(any n, int max_rounds=512) dict {
    "Complete factorization through the bounded method schedule and return validation metadata."
    def t0 = ticks()
    def factors = factor_complete(n, max_rounds)
@@ -741,17 +744,17 @@ fn factor_complete_report(any: n, int: max_rounds=512): dict {
    }
 }
 
-fn factordb_query(any: n, bool: fallback=true): any {
+fn factordb_query(any n, bool fallback=true) any {
    "Query FactorDB and return a flat factor list; fallback keeps old challenge scripts stable."
    _hf_prime_powers_to_flat(factordb_factor(n, fallback))
 }
 
-fn hybrid_factor_local(any: n): list {
+fn hybrid_factor_local(any n) list {
    "Factorization through the bounded method schedule."
    factor_complete(n)
 }
 
-fn hybrid_factor(any: n, any: source=false, any: reserved=false): list {
+fn hybrid_factor(any n, any source=false, any reserved=false) list {
    "Hybrid factorization through the bounded method schedule.
    Returns a flat list of factors."
    def nn = _hf_abs(n)
@@ -763,7 +766,7 @@ fn hybrid_factor(any: n, any: source=false, any: reserved=false): list {
    factor_complete(nn)
 }
 
-fn hybrid_factor_report(any: n, any: source=false, any: reserved=false): dict {
+fn hybrid_factor_report(any n, any source=false, any reserved=false) dict {
    "Return factorization result plus the method schedule and validation status."
    def t0 = ticks()
    def nn = _hf_abs(n)

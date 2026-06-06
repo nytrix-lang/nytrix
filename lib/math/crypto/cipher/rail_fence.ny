@@ -1,22 +1,25 @@
-;; Keywords: cipher rail-fence
+;; Keywords: cipher rail-fence math crypto
 ;; Rail-fence cipher encryption, decryption, and recovery routines.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.rail_fence(rail_fence_encrypt, rail_fence_decrypt, rail_fence_encrypt_offset, rail_fence_decrypt_offset, rail_fence_crack)
 use std.core
 use std.core.str
 use std.math.crypto.error
 
-fn _rail_builder_take(list: b): str { def out = builder_to_str(b) builder_free(b) out }
+fn _rail_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) out }
 
-fn _rail_zero_list(int: n): list {
+fn _rail_zero_list(int n) list {
    mut out, i = list(0), 0
    while(i < n){ out = out.append(0) i += 1 }
    out
 }
 
-fn _rail_phase_row(int: phase, int: rails): int {
+fn _rail_phase_row(int phase, int rails) int {
    def period = 2 * (rails - 1)
    mut p = phase % period
    if(p < 0){ p += period }
@@ -24,7 +27,7 @@ fn _rail_phase_row(int: phase, int: rails): int {
    period - p
 }
 
-fn _rail_lengths_offset(int: n, int: rails, int: offset): list {
+fn _rail_lengths_offset(int n, int rails, int offset) list {
    mut lens = _rail_zero_list(rails)
    mut i = 0
    while(i < n){
@@ -35,12 +38,12 @@ fn _rail_lengths_offset(int: n, int: rails, int: offset): list {
    lens
 }
 
-fn rail_fence_encrypt(str: text, int: rails): str {
+fn rail_fence_encrypt(str text, int rails) str {
    "Encrypt text using the rail fence cipher with the specified number of rails."
    rail_fence_encrypt_offset(text, rails, 0)
 }
 
-fn rail_fence_encrypt_offset(str: text, int: rails, int: offset=0): str {
+fn rail_fence_encrypt_offset(str text, int rails, int offset=0) str {
    "Encrypt text using a rail fence whose zigzag starts at the given phase offset."
    crypto_require(text != nil, "cipher.rail_fence_encrypt_offset", "text is nil")
    crypto_require(rails != nil, "cipher.rail_fence_encrypt_offset", "rails is nil")
@@ -68,12 +71,12 @@ fn rail_fence_encrypt_offset(str: text, int: rails, int: offset=0): str {
    _rail_builder_take(result)
 }
 
-fn rail_fence_decrypt(str: ciphertext, int: rails): str {
+fn rail_fence_decrypt(str ciphertext, int rails) str {
    "Decrypt text encrypted with the rail fence cipher by reconstructing the zigzag rail pattern."
    rail_fence_decrypt_offset(ciphertext, rails, 0)
 }
 
-fn rail_fence_decrypt_offset(str: ciphertext, int: rails, int: offset=0): str {
+fn rail_fence_decrypt_offset(str ciphertext, int rails, int offset=0) str {
    "Decrypt text encrypted with a rail fence whose zigzag starts at the given phase offset."
    crypto_require(ciphertext != nil, "cipher.rail_fence_decrypt_offset", "ciphertext is nil")
    crypto_require(rails != nil, "cipher.rail_fence_decrypt_offset", "rails is nil")
@@ -104,7 +107,7 @@ fn rail_fence_decrypt_offset(str: ciphertext, int: rails, int: offset=0): str {
    _rail_builder_take(result)
 }
 
-fn rail_fence_crack(str: ciphertext): list {
+fn rail_fence_crack(str ciphertext) list {
    "Try all possible rail counts from 2 to length-1 and return a list of [rails, plaintext] pairs."
    crypto_require_nonempty(ciphertext, "cipher.rail_fence_crack", "ciphertext")
    mut n = ciphertext.len

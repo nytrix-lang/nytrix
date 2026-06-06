@@ -1,18 +1,21 @@
-;; Keywords: lattice noisy-linear
+;; Keywords: lattice noisy-linear math crypto number-theory
 ;; Lattice routines for noisy linear relation recovery.
 ;; Useful when most equations are correct but some bits are flipped.
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.noisy_linear(score_gf2_candidate, inlier_mask_gf2, solve_noisy_gf2)
 use std.core
 use std.math.crypto.gf as gf
 
-fn _bit(any: x): int { int(x) & 1 }
+fn _bit(any x) int { int(x) & 1 }
 
-fn _at(any: v, int: i, any: fallback): any {
+fn _at(any v, int i, any fallback) any {
    if(!is_list(v) || i < 0 || i >= v.len){ return fallback }
    v[i]
 }
 
-fn _row_dot_gf2(any: row, list: x): int {
+fn _row_dot_gf2(any row, list x) int {
    mut acc = 0
    mut j = 0
    while(j < x.len){
@@ -22,7 +25,7 @@ fn _row_dot_gf2(any: row, list: x): int {
    acc
 }
 
-fn _validate_system(any: A, any: b): int {
+fn _validate_system(any A, any b) int {
    panic_if(!is_list(A) || A.len == 0, "solve_noisy_gf2: A must be a non-empty list")
    panic_if(!is_list(b) || b.len != A.len, "solve_noisy_gf2: b must have same length as A")
    def nc = len(A[0])
@@ -35,7 +38,7 @@ fn _validate_system(any: A, any: b): int {
    nc
 }
 
-fn score_gf2_candidate(list: A, list: b, any: x): int {
+fn score_gf2_candidate(list A, list b, any x) int {
    "Count how many equations in Ax=b over GF(2) are satisfied by candidate x."
    def usable = is_list(x)
    mut ok = 0
@@ -48,7 +51,7 @@ fn score_gf2_candidate(list: A, list: b, any: x): int {
    ok
 }
 
-fn inlier_mask_gf2(list: A, list: b, list: x): list {
+fn inlier_mask_gf2(list A, list b, list x) list {
    "Return per-equation inlier mask(1 means satisfied, 0 means mismatch)."
    mut mask = []
    mut i = 0
@@ -60,11 +63,11 @@ fn inlier_mask_gf2(list: A, list: b, list: x): list {
    mask
 }
 
-fn _lcg_next(any: state): int {
+fn _lcg_next(any state) int {
    ((int(state) * 1103515245 + 12345) & 0x7fffffff)
 }
 
-fn _subset_indices(int: nr, int: need, int: seed0): list {
+fn _subset_indices(int nr, int need, int seed0) list {
    mut seed = int(seed0)
    mut idxs = []
    mut seen = []
@@ -93,7 +96,7 @@ fn _subset_indices(int: nr, int: need, int: seed0): list {
    [idxs, seed]
 }
 
-fn _extract_subset(list: A, list: b, list: idxs): list {
+fn _extract_subset(list A, list b, list idxs) list {
    mut As, bs = [], []
    mut i = 0
    while(i < idxs.len){
@@ -104,7 +107,7 @@ fn _extract_subset(list: A, list: b, list: idxs): list {
    [As, bs]
 }
 
-fn _extract_inliers(list: A, list: b, list: mask): list {
+fn _extract_inliers(list A, list b, list mask) list {
    mut As, bs = [], []
    mut i = 0
    while(i < A.len){
@@ -114,15 +117,15 @@ fn _extract_inliers(list: A, list: b, list: mask): list {
    [As, bs]
 }
 
-fn _exact_solution_gf2(list: A, list: b, int: nr): any {
+fn _exact_solution_gf2(list A, list b, int nr) any {
    def exact = gf.solve_gf2(A, b)
    def score = exact == nil ? -1 : score_gf2_candidate(A, b, exact)
    score == nr ? [exact, score, inlier_mask_gf2(A, b, exact)] : nil
 }
 
-fn _round_count(int: rounds, int: nr): int { rounds > 0 ? rounds : max(64, nr * 4) }
+fn _round_count(int rounds, int nr) int { rounds > 0 ? rounds : max(64, nr * 4) }
 
-fn _search_noisy_gf2(list: A, list: b, int: nc, int: nr, int: tries, int: seed0): list {
+fn _search_noisy_gf2(list A, list b, int nc, int nr, int tries, int seed0) list {
    mut state = int(seed0)
    mut best_x = nil
    mut best_score = -1
@@ -142,7 +145,7 @@ fn _search_noisy_gf2(list: A, list: b, int: nc, int: nr, int: tries, int: seed0)
    [best_x, best_score]
 }
 
-fn _refit_noisy_gf2(list: A, list: b, any: best_x, int: best_score): list {
+fn _refit_noisy_gf2(list A, list b, any best_x, int best_score) list {
    def mask = inlier_mask_gf2(A, b, best_x)
    def in_sys = _extract_inliers(A, b, mask)
    def refit = gf.solve_gf2(in_sys[0], in_sys[1])
@@ -151,7 +154,7 @@ fn _refit_noisy_gf2(list: A, list: b, any: best_x, int: best_score): list {
    score >= best_score ? [refit, score] : [best_x, best_score]
 }
 
-fn solve_noisy_gf2(any: A, any: b, int: rounds=0, any: min_inliers=nil, int: seed=1337): any {
+fn solve_noisy_gf2(any A, any b, int rounds=0, any min_inliers=nil, int seed=1337) any {
    "Recover x from noisy Ax=b over GF(2).
    Returns [x, inlier_count, inlier_mask] or nil."
    def nc, nr = _validate_system(A, b), A.len
@@ -167,4 +170,14 @@ fn solve_noisy_gf2(any: A, any: b, int: rounds=0, any: min_inliers=nil, int: see
    best_score = int(refit[1])
    if(min_inliers != nil && best_score < int(min_inliers)){ return nil }
    [best_x, best_score, inlier_mask_gf2(A, b, best_x)]
+}
+
+#main {
+   def A = [[1, 0, 1], [0, 1, 1], [1, 1, 0], [1, 0, 0]]
+   def b = [0, 1, 1, 1]
+   def r = solve_noisy_gf2(A, b, 32, 4, 7)
+   assert(r != nil && r[0] == [1, 0, 1], "noisy gf2 exact solve")
+   assert(score_gf2_candidate(A, b, r[0]) == 4, "noisy gf2 score")
+   assert(inlier_mask_gf2(A, b, r[0]) == [1, 1, 1, 1], "noisy gf2 mask")
+   print("✓ std.math.crypto.lattice.noisy_linear self-test passed")
 }
