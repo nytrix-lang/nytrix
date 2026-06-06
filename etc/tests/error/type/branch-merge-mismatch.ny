@@ -1,7 +1,7 @@
 ;; expect: cannot assign string literal to int
 use std.core
 
-fn choose(flag, a, b){
+fn choose(flag, a, b) {
    if(flag){ return a }
    b
 }

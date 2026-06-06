@@ -1,7 +1,7 @@
 ;; expect: function argument: expected str, got int
 use std.core
 
-fn suffix(x){
+fn suffix(x) {
    x + "!"
 }
 

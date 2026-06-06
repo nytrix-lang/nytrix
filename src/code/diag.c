@@ -84,6 +84,8 @@ void ny_diag_configure(int warn_level, bool compact_mode) {
   g_diag_compact_mode = compact_mode;
 }
 
+int ny_diag_warn_level(void) { return g_warn_level; }
+
 /* ── source loading ────────────────────────────────────────────────── */
 static const char *diag_load_source(const char *filename) {
   if (!filename || filename[0] == '<')
@@ -164,6 +166,25 @@ bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
 }
 
 /* ── stdlib token check ────────────────────────────────────────────── */
+#define NY_STDLIB_TOK_CACHE_SLOTS 4096u
+
+typedef struct {
+  const char *filename;
+  bool value;
+  bool valid;
+} stdlib_tok_cache_entry_t;
+
+static stdlib_tok_cache_entry_t g_stdlib_tok_cache[NY_STDLIB_TOK_CACHE_SLOTS];
+
+static size_t stdlib_tok_cache_slot(const char *ptr) {
+  uintptr_t x = (uintptr_t)ptr;
+  x >>= 3;
+  x ^= x >> 33;
+  x *= (uintptr_t)0xff51afd7ed558ccdULL;
+  x ^= x >> 33;
+  return (size_t)x & (NY_STDLIB_TOK_CACHE_SLOTS - 1u);
+}
+
 static void ny_diag_norm_path(char *dst, size_t dst_len, const char *src) {
   if (!dst || dst_len == 0)
     return;
@@ -185,39 +206,63 @@ static bool ny_diag_path_has_prefix(const char *path, const char *prefix) {
   return path[n] == '\0' || path[n] == '/';
 }
 
+static const char *ny_diag_root_lib_path(void) {
+  static bool initialized = false;
+  static char root_lib[4096];
+  if (initialized)
+    return root_lib[0] ? root_lib : NULL;
+  initialized = true;
+  const char *root = ny_src_root();
+  if (!root || !*root)
+    return NULL;
+  char norm_root[4096];
+  ny_diag_norm_path(norm_root, sizeof(norm_root), root);
+  snprintf(root_lib, sizeof(root_lib), "%s/lib", norm_root);
+  return root_lib[0] ? root_lib : NULL;
+}
+
+static bool ny_is_stdlib_filename_uncached(const char *filename) {
+  if (!filename)
+    return false;
+  if (filename[0] == '<')
+    return strcmp(filename, "<stdlib>") == 0 || strcmp(filename, "<repl_std>") == 0;
+  if (strncmp(filename, "lib/", 4) == 0 || strncmp(filename, "lib\\", 4) == 0)
+    return true;
+  if (strstr(filename, "/nytrix/lib/") != NULL ||
+      strstr(filename, "/nytrix/nytrix/lib/") != NULL ||
+      strstr(filename, "/share/nytrix/") != NULL ||
+      strstr(filename, "/lib/nytrix/std/") != NULL ||
+      strstr(filename, "std.ny") != NULL) {
+    return true;
+  }
+
+  char norm[4096];
+  ny_diag_norm_path(norm, sizeof(norm), filename);
+  const char *root_lib = ny_diag_root_lib_path();
+  return (root_lib && ny_diag_path_has_prefix(norm, root_lib)) ||
+         strstr(norm, "/lib/core/") != NULL ||
+         strstr(norm, "/lib/math/") != NULL ||
+         strstr(norm, "/lib/os/") != NULL ||
+         strstr(norm, "/lib/parse/") != NULL ||
+         strstr(norm, "/nytrix/lib/") != NULL ||
+         strstr(norm, "/nytrix/nytrix/lib/") != NULL ||
+         strstr(norm, "std.ny") != NULL ||
+         strstr(norm, "/share/nytrix/") != NULL ||
+         strstr(norm, "/lib/nytrix/std/") != NULL;
+}
+
 bool ny_is_stdlib_tok(token_t tok) {
   const char *filename = diag_token_filename(tok);
   if (!filename)
     return false;
-  bool res = false;
-  if (filename[0] == '<') {
-    res = strcmp(filename, "<stdlib>") == 0 || strcmp(filename, "<repl_std>") == 0;
-  } else {
-    char norm[4096];
-    ny_diag_norm_path(norm, sizeof(norm), filename);
-    char root_lib[4096];
-    const char *root = ny_src_root();
-    if (root && *root) {
-      char norm_root[4096];
-      ny_diag_norm_path(norm_root, sizeof(norm_root), root);
-      snprintf(root_lib, sizeof(root_lib), "%s/lib", norm_root);
-    } else {
-      root_lib[0] = '\0';
-    }
-    if (strncmp(norm, "lib/", 4) == 0 ||
-        (root_lib[0] && ny_diag_path_has_prefix(norm, root_lib)) ||
-        strstr(norm, "/lib/core/") != NULL ||
-        strstr(norm, "/lib/math/") != NULL ||
-        strstr(norm, "/lib/os/") != NULL ||
-        strstr(norm, "/lib/parse/") != NULL ||
-        strstr(norm, "/nytrix/lib/") != NULL ||
-        strstr(norm, "/nytrix/nytrix/lib/") != NULL ||
-        strstr(norm, "std.ny") != NULL ||
-        strstr(norm, "/share/nytrix/") != NULL ||
-        strstr(norm, "/lib/nytrix/std/") != NULL) {
-      res = true;
-    }
-  }
+  stdlib_tok_cache_entry_t *entry =
+      &g_stdlib_tok_cache[stdlib_tok_cache_slot(filename)];
+  if (entry->valid && entry->filename == filename)
+    return entry->value;
+  bool res = ny_is_stdlib_filename_uncached(filename);
+  entry->filename = filename;
+  entry->value = res;
+  entry->valid = true;
   return res;
 }
 

@@ -286,6 +286,14 @@ static expr_t *make_call_expr(parser_t *p, token_t tok, const char *callee_name,
   return call;
 }
 
+static expr_t *make_zero_arg_call_expr(parser_t *p, token_t tok,
+                                       const char *callee_name) {
+  expr_t *callee = make_ident_expr(p, tok, callee_name);
+  expr_t *call = expr_new(p->arena, NY_E_CALL, tok);
+  call->as.call.callee = callee;
+  return call;
+}
+
 static stmt_t *make_expr_stmt(parser_t *p, token_t tok, expr_t *e) {
   stmt_t *s = stmt_new(p->arena, NY_S_EXPR, tok);
   s->as.expr.expr = e;
@@ -766,7 +774,6 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     }
     param_t pr = {0};
     if (!parse_param_type_first(p, &pr)) {
-      vec_free(&params);
       stmt_free_members(fn_stmt);
       return NULL;
     }
@@ -787,24 +794,24 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   }
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   if (parser_match(p, NY_T_ARROW)) {
-    parser_error(p, p->prev, "function return types use ':'",
-                 "use ': RetType' before '{' for return type");
+    parser_error(p, p->prev, "function return types do not use '->'",
+                 "write 'fn name(params) RetType { ... }'");
     if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
         p->cur.kind != NY_T_EOF)
       (void)parse_type_ref(p, "expected return type after '->'");
   }
   if (parser_match(p, NY_T_COLON)) {
-    if (p->cur.kind == NY_T_LBRACE) {
-      parser_error(p, p->cur, "expected return type",
-                   "did you mean to start the body? remove ':'");
-    } else {
-      fn_stmt->as.fn.return_type = parse_type_ref(p, "expected return type");
-    }
-  }
+    parser_error(p, p->prev, "legacy function return syntax",
+                 "write 'fn name(params) RetType { ... }', without ':'");
+    if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
+        p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_EOF)
+      (void)parse_type_ref(p, "expected return type");
+  } else
+    fn_stmt->as.fn.return_type =
+        parser_parse_return_type_suffix(p, parse_type_ref, "expected return type");
   if (p->cur.kind == NY_T_ARROW) {
-    parser_error(p, p->cur, "use ': RetType' before '{' for return type",
-                 "Nytrix uses 'fn name(params): RetType { body }' not 'fn "
-                 "name(params) -> RetType { body }'");
+    parser_error(p, p->cur, "function return types do not use '->'",
+                 "write 'fn name(params) RetType { ... }'");
     parser_advance(p);
     parse_type_ref(p, NULL);
   }
@@ -863,7 +870,6 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     if (p->cur.kind == NY_T_EOF || p->cur.line > p->prev.line) {
       parser_error(p, p->cur, "expected function body",
                    "use '{ ... }', '= expr', or ';' for declarations");
-      vec_free(&params);
       stmt_free_members(fn_stmt);
       return NULL;
     }
@@ -1032,7 +1038,7 @@ static stmt_t *parse_impl_stmt(parser_t *p) {
     if (p->cur.kind != NY_T_FN && p->cur.kind != NY_T_AT) {
       parser_error(p, p->cur,
                    "impl blocks only accept attached functions or operators",
-                   "example: impl Vec3 { fn len(self: value): f64 { ... } "
+                   "example: impl Vec3 { fn len(self value) f64 { ... } "
                    "operator + self: self = add }");
       parser_sync_stmt_boundary(p);
       if (p->cur.kind == NY_T_RBRACE)
@@ -1097,8 +1103,12 @@ static stmt_t *parse_extern_fn_decl(parser_t *p, token_t tok,
   parser_expect(p, NY_T_RPAREN, NULL, NULL);
   const char *return_type = NULL;
   if (parser_match(p, NY_T_COLON)) {
-    return_type = parse_type_ref(p, "expected return type");
-  }
+    parser_error(p, p->prev, "legacy extern return syntax",
+                 "write 'fn name(params) RetType', without ':'");
+    if (p->cur.kind != NY_T_AS && p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_EOF)
+      (void)parse_type_ref(p, "expected return type");
+  } else
+    return_type = parser_parse_return_type_suffix(p, parse_type_ref, "expected return type");
   const char *link_name = NULL;
   if (parser_match(p, NY_T_AS)) {
     if (p->cur.kind == NY_T_STRING) {
@@ -1123,6 +1133,32 @@ static stmt_t *parse_extern_fn_decl(parser_t *p, token_t tok,
   s->as.ext.link_name = link_name;
   s->as.ext.is_variadic = is_variadic;
   return s;
+}
+
+static stmt_t *parse_extern_block(parser_t *p, token_t tok, const char *lib) {
+  parser_expect(p, NY_T_LBRACE, "'{' after extern", NULL);
+  stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
+  vec_reserve_arena(p->arena, &blk->as.block.body, 8);
+  if (lib && *lib) {
+    stmt_t *link = stmt_new(p->arena, NY_S_LINK, tok);
+    link->as.link.lib = lib;
+    vec_push_arena(p->arena, &blk->as.block.body, link);
+  }
+  while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+    if (parser_match(p, NY_T_SEMI))
+      continue;
+    token_t fn_tok = p->cur;
+    stmt_t *decl = parse_extern_fn_decl(p, fn_tok, true);
+    if (decl) {
+      vec_push_arena(p->arena, &blk->as.block.body, decl);
+      continue;
+    }
+    while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF &&
+           p->cur.kind != NY_T_FN)
+      parser_advance(p);
+  }
+  parser_expect(p, NY_T_RBRACE, "'}' after extern block", NULL);
+  return blk;
 }
 
 static stmt_t *parse_extern(parser_t *p) {
@@ -1213,30 +1249,10 @@ static stmt_t *parse_extern(parser_t *p) {
       s->as.link.lib = lib;
       return s;
     }
-    parser_expect(p, NY_T_LBRACE, "'{' after extern library name", NULL);
-    stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
-    vec_reserve_arena(p->arena, &blk->as.block.body, 8);
-    if (lib && *lib) {
-      stmt_t *link = stmt_new(p->arena, NY_S_LINK, tok);
-      link->as.link.lib = lib;
-      vec_push_arena(p->arena, &blk->as.block.body, link);
-    }
-    while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
-      if (parser_match(p, NY_T_SEMI))
-        continue;
-      token_t fn_tok = p->cur;
-      stmt_t *decl = parse_extern_fn_decl(p, fn_tok, true);
-      if (decl) {
-        vec_push_arena(p->arena, &blk->as.block.body, decl);
-        continue;
-      }
-      while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF &&
-             p->cur.kind != NY_T_FN)
-        parser_advance(p);
-    }
-    parser_expect(p, NY_T_RBRACE, "'}' after extern block", NULL);
-    return blk;
+    return parse_extern_block(p, tok, lib);
   }
+  if (p->cur.kind == NY_T_LBRACE)
+    return parse_extern_block(p, tok, NULL);
   return parse_extern_fn_decl(p, tok, false);
 }
 
@@ -1599,13 +1615,13 @@ static void layout_emit_default_constructor(layout_gen_buf_t *b,
   if (params) {
     for (size_t i = 0; i < fields->len; ++i) {
       layout_field_t *f = &fields->data[i];
-      layout_gen_append(b, "%s: %s=%s", f->type_name, f->name,
+      layout_gen_append(b, "%s %s=%s", f->type_name, f->name,
                         layout_default_src(f));
       if (i + 1 < fields->len)
         layout_gen_append(b, ", ");
     }
   }
-  layout_gen_append(b, "): ptr {\n");
+  layout_gen_append(b, ") ptr {\n");
   if (!params) {
     for (size_t i = 0; i < fields->len; ++i) {
       layout_field_t *f = &fields->data[i];
@@ -1622,7 +1638,7 @@ static void layout_emit_default_constructor(layout_gen_buf_t *b,
 
 static void layout_emit_shape_from(layout_gen_buf_t *b, const char *owner,
                                    ny_layout_field_list *fields) {
-  layout_gen_append(b, "fn %s_from(value): ptr {\n", owner);
+  layout_gen_append(b, "fn %s_from(value) ptr {\n", owner);
   layout_gen_append(b,
                     "   if(!is_dict(value) && !is_list(value)){ return 0 }\n");
   layout_gen_append(b, "   def ptr: out = malloc(__layout_size(");
@@ -1646,7 +1662,7 @@ static void layout_emit_load_derives(layout_gen_buf_t *b, const char *owner,
                                      ny_layout_field_list *fields) {
   for (size_t i = 0; i < fields->len; ++i) {
     layout_field_t *f = &fields->data[i];
-    layout_gen_append(b, "fn %s_load_%s(ptr: self): %s {\n", owner, f->name,
+    layout_gen_append(b, "fn %s_load_%s(ptr self) %s {\n", owner, f->name,
                       f->type_name);
     layout_gen_append(b, "   return load_layout(self, ");
     layout_gen_append_str_lit(b, owner);
@@ -1658,18 +1674,18 @@ static void layout_emit_load_derives(layout_gen_buf_t *b, const char *owner,
 
 static void layout_emit_store_derive(layout_gen_buf_t *b, const char *owner,
                                      ny_layout_field_list *fields) {
-  layout_gen_append(b, "fn %s_store(ptr: out", owner);
+  layout_gen_append(b, "fn %s_store(ptr out", owner);
   for (size_t i = 0; i < fields->len; ++i) {
     layout_field_t *f = &fields->data[i];
-    layout_gen_append(b, ", %s: %s", f->type_name, f->name);
+    layout_gen_append(b, ", %s %s", f->type_name, f->name);
   }
-  layout_gen_append(b, "): ptr {\n");
+  layout_gen_append(b, ") ptr {\n");
   layout_emit_store_call(b, owner, fields);
   layout_gen_append(b, "   return out\n}\n");
 }
 
 static void layout_emit_zero_derive(layout_gen_buf_t *b, const char *owner) {
-  layout_gen_append(b, "fn %s_zero(): ptr {\n", owner);
+  layout_gen_append(b, "fn %s_zero() ptr {\n", owner);
   layout_gen_append(b, "   def ptr: out = malloc(__layout_size(");
   layout_gen_append_str_lit(b, owner);
   layout_gen_append(b, "))\n");
@@ -1681,7 +1697,7 @@ static void layout_emit_zero_derive(layout_gen_buf_t *b, const char *owner) {
 
 static void layout_emit_eq_derive(layout_gen_buf_t *b, const char *owner,
                                   ny_layout_field_list *fields) {
-  layout_gen_append(b, "fn %s_eq(ptr: a, ptr: b): bool {\n", owner);
+  layout_gen_append(b, "fn %s_eq(ptr a, ptr b) bool {\n", owner);
   layout_gen_append(b, "   if(!a || !b){ return false }\n");
   for (size_t i = 0; i < fields->len; ++i) {
     layout_field_t *f = &fields->data[i];
@@ -1700,7 +1716,7 @@ static void layout_emit_eq_derive(layout_gen_buf_t *b, const char *owner,
 
 static void layout_emit_hash_derive(layout_gen_buf_t *b, const char *owner,
                                     ny_layout_field_list *fields) {
-  layout_gen_append(b, "fn %s_hash(ptr: self): int {\n", owner);
+  layout_gen_append(b, "fn %s_hash(ptr self) int {\n", owner);
   layout_gen_append(b, "   if(!self){ return 0 }\n");
   layout_gen_append(b, "   mut h = 17\n");
   for (size_t i = 0; i < fields->len; ++i) {
@@ -1716,7 +1732,7 @@ static void layout_emit_hash_derive(layout_gen_buf_t *b, const char *owner,
 
 static void layout_emit_debug_str_derive(layout_gen_buf_t *b, const char *owner,
                                          ny_layout_field_list *fields) {
-  layout_gen_append(b, "fn %s_debug_str(ptr: self): str {\n", owner);
+  layout_gen_append(b, "fn %s_debug_str(ptr self) str {\n", owner);
   layout_gen_append(b, "   if(!self){ return ");
   layout_gen_append_str_lit(b, "<null>");
   layout_gen_append(b, " }\n");
@@ -2447,6 +2463,11 @@ static expr_t *make_platform_guard_comptime(parser_t *p, token_t tok) {
   return make_comptime_return_expr(p, tok, id);
 }
 
+static expr_t *make_main_guard_comptime(parser_t *p, token_t tok) {
+  return make_comptime_return_expr(
+      p, tok, make_zero_arg_call_expr(p, tok, "__main"));
+}
+
 static expr_t *parse_hash_if_cond_as_comptime(parser_t *p, token_t tok) {
   bool has_paren = parser_match(p, NY_T_LPAREN);
   expr_t *cond = p_parse_expr(p, 0);
@@ -2513,6 +2534,30 @@ static stmt_t *parse_hash_if_stmt(parser_t *p, token_t hash_tok) {
   s->as.iff.test = cond;
   s->as.iff.conseq = conseq;
   s->as.iff.alt = alt;
+  s->as.iff.init = NULL;
+  return s;
+}
+
+static stmt_t *parse_hash_main_guard_stmt(parser_t *p, token_t hash_tok) {
+  token_t main_tok = p->cur;
+  if (!tok_is_hash_kw(main_tok, "main", NY_T_IDENT)) {
+    parser_error(p, main_tok, "expected 'main' after '#'", NULL);
+    return NULL;
+  }
+  parser_advance(p);
+
+  expr_t *cond = make_main_guard_comptime(p, main_tok);
+  if (!cond)
+    return NULL;
+
+  stmt_t *conseq = ny_parse_stmt_or_block(p);
+  if (!conseq)
+    return NULL;
+
+  stmt_t *s = stmt_new(p->arena, NY_S_IF, hash_tok);
+  s->as.iff.test = cond;
+  s->as.iff.conseq = conseq;
+  s->as.iff.alt = NULL;
   s->as.iff.init = NULL;
   return s;
 }
@@ -4224,6 +4269,126 @@ static stmt_t *parse_comptime_family_for_stmt(parser_t *p, bool *handled) {
   return block;
 }
 
+static stmt_t *parse_hash_stmt(parser_t *p) {
+  token_t tok = p->cur;
+  parser_advance(p);
+  if (tok_is_platform_guard(p->cur))
+    return parse_hash_platform_guard_stmt(p, tok);
+  if (tok_is_hash_kw(p->cur, "if", NY_T_IF) ||
+      tok_is_hash_kw(p->cur, "elif", NY_T_ELIF))
+    return parse_hash_if_stmt(p, tok);
+  if (tok_is_hash_kw(p->cur, "main", NY_T_IDENT))
+    return parse_hash_main_guard_stmt(p, tok);
+  if (tok_is_hash_kw(p->cur, "else", NY_T_ELSE)) {
+    parser_error(p, p->cur, "'#else' without matching '#if'", NULL);
+    parser_advance(p);
+    return NULL;
+  }
+  if (tok_is_hash_kw(p->cur, "endif", NY_T_IDENT)) {
+    parser_error(p, p->cur, "'#endif' without matching '#if'", NULL);
+    parser_advance(p);
+    return NULL;
+  }
+  if (p->cur.kind == NY_T_IDENT &&
+      strncmp(p->cur.lexeme, "line", p->cur.len) == 0) {
+    parser_advance(p);
+    if (p->cur.kind == NY_T_NUMBER)
+      parser_advance(p);
+    if (p->cur.kind == NY_T_STRING)
+      parser_advance(p);
+    return NULL;
+  }
+  if (p->cur.kind == NY_T_IDENT &&
+      strncmp(p->cur.lexeme, "include", p->cur.len) == 0) {
+    parser_advance(p);
+    bool is_std = false;
+    const char *path = NULL;
+    if (p->cur.kind == NY_T_STRING) {
+      size_t slen = 0;
+      path = parser_decode_string(p, p->cur, &slen);
+      parser_advance(p);
+    } else if (parser_match(p, NY_T_LT)) {
+      is_std = true;
+      token_t start = p->cur;
+      while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF)
+        parser_advance(p);
+      path = arena_strndup(p->arena, start.lexeme,
+                           (size_t)(p->cur.lexeme - start.lexeme));
+      parser_expect(p, NY_T_GT, "'>' after system header", NULL);
+    } else {
+      parser_error(p, p->cur,
+                   "expected string or '<header>' after '#include'", NULL);
+      return NULL;
+    }
+    const char *prefix = NULL;
+    if (parser_match(p, NY_T_AS)) {
+      if (p->cur.kind == NY_T_STRING) {
+        size_t slen = 0;
+        prefix = parser_decode_string(p, p->cur, &slen);
+        parser_advance(p);
+      } else if (p->cur.kind == NY_T_IDENT) {
+        prefix = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+      }
+    }
+    const char *lib = NULL;
+    if (p->cur.kind == NY_T_IDENT &&
+        strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
+      parser_advance(p);
+      if (p->cur.kind == NY_T_STRING) {
+        lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+        parser_advance(p);
+      }
+    }
+    parser_match(p, NY_T_SEMI);
+    stmt_t *s = stmt_new(p->arena, NY_S_INCLUDE, tok);
+    s->as.inc.path = path;
+    s->as.inc.prefix = prefix;
+    s->as.inc.is_std = is_std;
+    s->as.inc.lib = lib;
+    return s;
+  }
+  if (p->cur.kind == NY_T_IDENT &&
+      strncmp(p->cur.lexeme, "define", p->cur.len) == 0) {
+    parser_advance(p);
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected identifier after '#define'", NULL);
+      return NULL;
+    }
+    const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+    parser_advance(p);
+    const char *value = "";
+    if (p->cur.kind == NY_T_NUMBER || p->cur.kind == NY_T_IDENT) {
+      value = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+      parser_advance(p);
+    }
+    parser_match(p, NY_T_SEMI);
+    stmt_t *s = stmt_new(p->arena, NY_S_DEFINE, tok);
+    s->as.def.name = name;
+    s->as.def.value = value;
+    return s;
+  }
+  if (p->cur.kind != NY_T_IDENT ||
+      strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
+    parser_error(p, p->cur,
+                 "expected platform guard, 'main', 'link', 'include', "
+                 "'define', or 'line' after '#'",
+                 "valid platform guards include #linux, #unix, #windows, "
+                 "#macos, #x86, #x86_64, #arm, #aarch64");
+    return NULL;
+  }
+  parser_advance(p);
+  if (p->cur.kind != NY_T_STRING) {
+    parser_error(p, p->cur, "expected library name string after '#link'",
+                 NULL);
+    return NULL;
+  }
+  stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
+  s->as.link.lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+  parser_advance(p);
+  return s;
+}
+
 stmt_t *p_parse_stmt(parser_t *p) {
   switch (p->cur.kind) {
   case NY_T_SEMI:
@@ -4269,131 +4434,8 @@ stmt_t *p_parse_stmt(parser_t *p) {
     parser_match(p, NY_T_SEMI);
     return s;
   }
-  case NY_T_HASH: {
-    token_t tok = p->cur;
-    parser_advance(p);
-    if (tok_is_platform_guard(p->cur)) {
-      return parse_hash_platform_guard_stmt(p, tok);
-    }
-    if (tok_is_hash_kw(p->cur, "if", NY_T_IF) ||
-        tok_is_hash_kw(p->cur, "elif", NY_T_ELIF)) {
-      return parse_hash_if_stmt(p, tok);
-    }
-    if (tok_is_hash_kw(p->cur, "else", NY_T_ELSE)) {
-      parser_error(p, p->cur, "'#else' without matching '#if'", NULL);
-      parser_advance(p);
-      return NULL;
-    }
-    if (tok_is_hash_kw(p->cur, "endif", NY_T_IDENT)) {
-      parser_error(p, p->cur, "'#endif' without matching '#if'", NULL);
-      parser_advance(p);
-      return NULL;
-    }
-    if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "line", p->cur.len) == 0) {
-      parser_advance(p); // line
-      if (p->cur.kind == NY_T_NUMBER)
-        parser_advance(p); // number
-      if (p->cur.kind == NY_T_STRING)
-        parser_advance(p); // filename
-      return NULL;
-    }
-    if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "include", p->cur.len) == 0) {
-      /* Top-level  #include <header>  or  #include "header"
-         (C-style, no 'extern' prefix required)                */
-      parser_advance(p);
-      bool is_std = false;
-      const char *path = NULL;
-      if (p->cur.kind == NY_T_STRING) {
-        size_t slen = 0;
-        path = parser_decode_string(p, p->cur, &slen);
-        parser_advance(p);
-      } else if (parser_match(p, NY_T_LT)) {
-        is_std = true;
-        token_t start = p->cur;
-        while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF)
-          parser_advance(p);
-        path = arena_strndup(p->arena, start.lexeme,
-                             (size_t)(p->cur.lexeme - start.lexeme));
-        parser_expect(p, NY_T_GT, "'>' after system header", NULL);
-      } else {
-        parser_error(p, p->cur,
-                     "expected string or '<header>' after '#include'", NULL);
-        return NULL;
-      }
-      /* optional:  as prefix */
-      const char *prefix = NULL;
-      if (parser_match(p, NY_T_AS)) {
-        if (p->cur.kind == NY_T_STRING) {
-          size_t slen = 0;
-          prefix = parser_decode_string(p, p->cur, &slen);
-          parser_advance(p);
-        } else if (p->cur.kind == NY_T_IDENT) {
-          prefix = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-          parser_advance(p);
-        }
-      }
-      /* optional:  link "libname" */
-      const char *lib = NULL;
-      if (p->cur.kind == NY_T_IDENT &&
-          strncmp(p->cur.lexeme, "link", p->cur.len) == 0) {
-        parser_advance(p);
-        if (p->cur.kind == NY_T_STRING) {
-          lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-          parser_advance(p);
-        }
-      }
-      parser_match(p, NY_T_SEMI);
-      stmt_t *s = stmt_new(p->arena, NY_S_INCLUDE, tok);
-      s->as.inc.path = path;
-      s->as.inc.prefix = prefix;
-      s->as.inc.is_std = is_std;
-      s->as.inc.lib = lib;
-      return s;
-    }
-    if (p->cur.kind == NY_T_IDENT &&
-        strncmp(p->cur.lexeme, "define", p->cur.len) == 0) {
-      /* #define NAME  or  #define NAME value  (FFI preprocessor macro) */
-      parser_advance(p);
-      if (p->cur.kind != NY_T_IDENT) {
-        parser_error(p, p->cur, "expected identifier after '#define'", NULL);
-        return NULL;
-      }
-      const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-      parser_advance(p);
-      /* Optional single value token */
-      const char *value = "";
-      if (p->cur.kind == NY_T_NUMBER || p->cur.kind == NY_T_IDENT) {
-        value = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-        parser_advance(p);
-      }
-      parser_match(p, NY_T_SEMI);
-      stmt_t *s = stmt_new(p->arena, NY_S_DEFINE, tok);
-      s->as.def.name = name;
-      s->as.def.value = value;
-      return s;
-    }
-    if (p->cur.kind != NY_T_IDENT ||
-        strncmp(p->cur.lexeme, "link", p->cur.len) != 0) {
-      parser_error(p, p->cur,
-                   "expected platform guard, 'link', 'include', 'define', or "
-                   "'line' after '#'",
-                   "valid platform guards include #linux, #unix, #windows, "
-                   "#macos, #x86, #x86_64, #arm, #aarch64");
-      return NULL;
-    }
-    parser_advance(p);
-    if (p->cur.kind != NY_T_STRING) {
-      parser_error(p, p->cur, "expected library name string after '#link'",
-                   NULL);
-      return NULL;
-    }
-    stmt_t *s = stmt_new(p->arena, NY_S_LINK, tok);
-    s->as.link.lib = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
-    parser_advance(p);
-    return s;
-  }
+  case NY_T_HASH:
+    return parse_hash_stmt(p);
   case NY_T_AT: {
     /* Save state so we can backtrack if this is not a loop attribute */
     parser_t saved = *p;

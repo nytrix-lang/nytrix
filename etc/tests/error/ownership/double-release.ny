@@ -2,7 +2,7 @@
 ;; expect: double release of owned slot 'a'
 use std.core
 
-fn bad(): int {
+fn bad() int {
    def a = [1]
    release(a)
    release(a)

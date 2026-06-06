@@ -9,20 +9,20 @@ layout ExternDivResult {
 }
 
 if(comptime{ __os_name() == "windows" }){
-   extern "" {
-      fn c_getpid(): i32 as "GetCurrentProcessId"
-      fn my_getpid(): i32 as "GetCurrentProcessId"
+   extern {
+      fn c_getpid() i32 as "GetCurrentProcessId"
+      fn my_getpid() i32 as "GetCurrentProcessId"
    }
 } else {
-   extern "" {
-      fn c_getpid(): i32 as "getpid"
-      fn my_getpid(): i32 as "getpid"
+   extern {
+      fn c_getpid() i32 as "getpid"
+      fn my_getpid() i32 as "getpid"
    }
    ;; `extern "c"` expands to a link declaration plus extern fn declarations.
    ;; Functions inside the block default their native symbol to the local name.
    extern "c" {
-      fn getpid(): i32
-      fn c_div(i32: numer, i32: denom): ExternDivResult as "div"
+      fn getpid() i32
+      fn c_div(i32 numer, i32 denom) ExternDivResult as "div"
    }
 }
 

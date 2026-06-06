@@ -45,6 +45,7 @@ typedef struct {
   int color;
   int limit;
   const char *audit_mode;
+  char audit_mode_buf[256];
   const char *min_sev;
   const char *conv_input;
   const char *conv_name;
@@ -243,6 +244,11 @@ typedef struct {
   int untyped_params;
   int missing_returns;
   int type_suggestions;
+  int append_builders;
+  int literal_tables;
+  int repeated_get_shapes;
+  int trivial_main_wrappers;
+  int accepted_findings;
 } AuditStats;
 
 typedef struct {
@@ -507,12 +513,17 @@ static int ensure_repo_root(char *out, size_t out_sz) {
   snprintf(cur, sizeof(cur), "%s", cwd);
   for (;;) {
     char probe[PATH_MAX];
-    if (strlen(cur) + 4 >= sizeof(probe))
+    if (strlen(cur) + 16 >= sizeof(probe))
       return 0;
     snprintf(probe, sizeof(probe), "%s/etc", cur);
     if (is_dir(probe)) {
       snprintf(out, out_sz, "%s", cur);
       ny_setenv("NYTRIX_ROOT", cur, 1);
+      return 1;
+    }
+    snprintf(probe, sizeof(probe), "%s/ny.pkg.json", cur);
+    if (is_file(probe)) {
+      snprintf(out, out_sz, "%s", cur);
       return 1;
     }
     size_t n = strlen(cur);
@@ -738,6 +749,236 @@ static void short_forms(char *s) {
   }
 }
 
+static int fmt_ident_char(char ch) {
+  return isalnum((unsigned char)ch) || ch == '_';
+}
+
+static size_t fmt_find_matching_paren(const char *s, size_t open) {
+  int quote = 0, esc = 0, depth = 0;
+  for (size_t i = open; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '(')
+      depth++;
+    else if (ch == ')' && --depth == 0)
+      return i;
+  }
+  return (size_t)-1;
+}
+
+static size_t fmt_skip_angle(const char *s, size_t i) {
+  if (!s || s[i] != '<')
+    return i;
+  int quote = 0, esc = 0, depth = 0;
+  for (; s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '<')
+      depth++;
+    else if (ch == '>' && --depth == 0)
+      return i + 1;
+  }
+  return i;
+}
+
+static size_t fmt_skip_template_hole(const char *s, size_t i) {
+  if (!s || s[i] != '$' || s[i + 1] != '{')
+    return i;
+  int quote = 0, esc = 0, depth = 1;
+  i += 2;
+  for (; s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '{')
+      depth++;
+    else if (ch == '}' && --depth == 0)
+      return i + 1;
+  }
+  return i;
+}
+
+static size_t fmt_fn_param_open(const char *s, size_t fn_pos) {
+  size_t i = fn_pos + 2;
+  while (s[i] == ' ' || s[i] == '\t')
+    i++;
+  if (s[i] == '(')
+    return i;
+  int saw_name = 0;
+  for (;;) {
+    if (isalpha((unsigned char)s[i]) || s[i] == '_') {
+      saw_name = 1;
+      while (fmt_ident_char(s[i]))
+        i++;
+      continue;
+    }
+    if (s[i] == '$' && s[i + 1] == '{') {
+      size_t next = fmt_skip_template_hole(s, i);
+      if (next == i)
+        return (size_t)-1;
+      saw_name = 1;
+      i = next;
+      continue;
+    }
+    break;
+  }
+  if (!saw_name)
+    return (size_t)-1;
+  while (s[i] == ' ' || s[i] == '\t')
+    i++;
+  if (s[i] == '<') {
+    i = fmt_skip_angle(s, i);
+    while (s[i] == ' ' || s[i] == '\t')
+      i++;
+  }
+  return s[i] == '(' ? i : (size_t)-1;
+}
+
+static size_t fmt_fn_body_brace(const char *s, size_t close) {
+  size_t i = close + 1;
+  while (s[i] == ' ' || s[i] == '\t')
+    i++;
+  if (s[i] == ':') {
+    i++;
+    while (s[i] == ' ' || s[i] == '\t')
+      i++;
+  }
+
+  int quote = 0, esc = 0, paren = 0, bracket = 0, angle = 0;
+  for (; s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch == '$' && s[i + 1] == '{') {
+      i = fmt_skip_template_hole(s, i);
+      if (s[i] == '\0')
+        break;
+      i--;
+      continue;
+    }
+    if (ch == '(')
+      paren++;
+    else if (ch == ')' && paren > 0)
+      paren--;
+    else if (ch == '[')
+      bracket++;
+    else if (ch == ']' && bracket > 0)
+      bracket--;
+    else if (ch == '<')
+      angle++;
+    else if (ch == '>' && angle > 0)
+      angle--;
+    else if (ch == '{' && paren == 0 && bracket == 0 && angle == 0)
+      return i;
+  }
+  return (size_t)-1;
+}
+
+static int fmt_ensure_one_space_before(char *s, size_t cap, size_t idx) {
+  if (!s || idx == 0 || s[idx] == '\0')
+    return 0;
+  size_t start = idx;
+  while (start > 0 && (s[start - 1] == ' ' || s[start - 1] == '\t'))
+    start--;
+  if (idx - start == 1 && s[start] == ' ')
+    return 0;
+  size_t len = strlen(s);
+  if (start == idx) {
+    if (len + 2 > cap)
+      return 0;
+    memmove(s + idx + 1, s + idx, len - idx + 1);
+    s[idx] = ' ';
+    return 1;
+  }
+  s[start] = ' ';
+  memmove(s + start + 1, s + idx, len - idx + 1);
+  return 1;
+}
+
+static void normalize_fn_scope_space(char *s, size_t cap) {
+  int quote = 0, esc = 0;
+  for (size_t i = 0; s && s[i]; i++) {
+    char ch = s[i];
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      continue;
+    }
+    if (ch != 'f' || s[i + 1] != 'n')
+      continue;
+    char before = i == 0 ? '\0' : s[i - 1];
+    char after = s[i + 2];
+    if (fmt_ident_char(before) || !(after == '(' || after == ' ' || after == '\t'))
+      continue;
+    size_t open = fmt_fn_param_open(s, i);
+    if (open == (size_t)-1)
+      continue;
+    size_t close = fmt_find_matching_paren(s, open);
+    if (close == (size_t)-1)
+      continue;
+    size_t brace = fmt_fn_body_brace(s, close);
+    if (brace == (size_t)-1)
+      continue;
+    if (fmt_ensure_one_space_before(s, cap, brace))
+      brace++;
+    i = brace;
+  }
+}
+
 static void normalize_use_import_star(char *s) {
   char *p = (char *)lstrip_ws(s);
   if (strncmp(p, "use", 3) != 0 || (isalnum((unsigned char)p[3]) || p[3] == '_'))
@@ -950,10 +1191,66 @@ static int starts_with_word(const char *s, const char *word) {
 
 static const char *find_outside_string(const char *line, const char *needle);
 
+static void compact_main_guard_prefix(const char *s, char *out, size_t out_sz) {
+  size_t n = 0;
+  int quote = 0, esc = 0;
+  if (!out || out_sz == 0)
+    return;
+  out[0] = '\0';
+  for (size_t i = 0; s && s[i] && n + 1 < out_sz; i++) {
+    char ch = s[i];
+    if (!quote && ch == ';')
+      break;
+    if (quote) {
+      if (esc)
+        esc = 0;
+      else if (ch == '\\')
+        esc = 1;
+      else if (ch == quote)
+        quote = 0;
+      out[n++] = ch;
+      continue;
+    }
+    if (ch == '"' || ch == '\'') {
+      quote = ch;
+      out[n++] = ch;
+      continue;
+    }
+    if (isspace((unsigned char)ch))
+      continue;
+    out[n++] = ch;
+  }
+  out[n] = '\0';
+}
+
+static int starts_with_hash_main_guard(const char *s) {
+  if (!s)
+    return 0;
+  s = lstrip_ws(s);
+  return strncmp(s, "#main", 5) == 0 &&
+         (s[5] == '\0' || isspace((unsigned char)s[5]) || s[5] == '{');
+}
+
+static int starts_with_verbose_main_guard(const char *s) {
+  char compact[160];
+  compact_main_guard_prefix(lstrip_ws(s), compact, sizeof(compact));
+  if (strncmp(compact, "if(", 3) != 0)
+    return 0;
+  const char *cond = compact + 3;
+  if (strncmp(cond, "__main", 6) == 0 &&
+      strncmp(cond + 6, "())", 3) == 0)
+    return 1;
+  if (strncmp(cond, "comptime{", 9) != 0)
+    return 0;
+  cond += 9;
+  if (strncmp(cond, "return", 6) == 0)
+    cond += 6;
+  return strncmp(cond, "__main", 6) == 0 &&
+         strncmp(cond + 6, "()})", 4) == 0;
+}
+
 static int starts_with_main_guard(const char *s) {
-  return strncmp(s, "if(__main())", 12) == 0 ||
-         strncmp(s, "if(comptime{__main()})", 22) == 0 ||
-         strncmp(s, "if(comptime{ __main() })", 24) == 0;
+  return starts_with_hash_main_guard(s) || starts_with_verbose_main_guard(s);
 }
 
 static int starts_with_use_line(const char *s) {
@@ -1540,6 +1837,7 @@ static char *format_ny_text(const char *in) {
     char code_stripped[8192];
     snprintf(code_stripped, sizeof(code_stripped), "%s", lstrip_ws(code));
     short_forms(code_stripped);
+    normalize_fn_scope_space(code_stripped, sizeof(code_stripped));
     normalize_use_import_star(code_stripped);
     normalize_use_import_list_space(code_stripped, sizeof(code_stripped));
 
@@ -1918,19 +2216,6 @@ static int has_trailing_ws(const char *s) {
   return n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t');
 }
 
-static int line_has_wordish(const char *s, const char *word) {
-  size_t n = strlen(word);
-  for (const char *p = s; p && *p; p++) {
-    if (strncmp(p, word, n) == 0) {
-      unsigned char a = (p == s) ? 0 : (unsigned char)p[-1];
-      unsigned char b = (unsigned char)p[n];
-      if (!(isalnum(a) || a == '_') && !(isalnum(b) || b == '_'))
-        return 1;
-    }
-  }
-  return 0;
-}
-
 static const char *find_outside_string(const char *line, const char *needle) {
   if (!line || !needle || !*needle)
     return NULL;
@@ -2087,6 +2372,8 @@ static void ny_collect_fn_signature(StrVec *lines, size_t idx, char *out, size_t
   size_t used = 0;
   for (size_t j = idx; j < lines->len && j < idx + 64; j++) {
     const char *line = lstrip_ws(lines->items[j]);
+    if (j > idx && (strncmp(line, "fn ", 3) == 0 || line[0] == '}'))
+      break;
     size_t n = strlen(line);
     if (used > 0 && used + 1 < out_sz)
       out[used++] = ' ';
@@ -2548,6 +2835,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         char fn_sig[2048];
         ny_collect_fn_signature(&lines, i, fn_sig, sizeof(fn_sig));
         parse_ny_fn_line(fn_sig, name, sizeof(name), params, sizeof(params));
+        int fn_has_body = find_outside_string(fn_sig, "{") != NULL;
         Fn fn;
         memset(&fn, 0, sizeof(fn));
         snprintf(fn.name, sizeof(fn.name), "%s", name);
@@ -2557,7 +2845,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         fn.end_line = find_end_line(&lines, i, 0);
         fn.is_method = in_impl;
         fn.is_private = (fn.name[0] == '_') || fn.is_method || in_main_guard;
-        fn.has_doc = ny_fn_has_doc(&lines, i) || ny_fn_is_forwarding_wrapper(line);
+        fn.has_doc = !fn_has_body || ny_fn_has_doc(&lines, i) || ny_fn_is_forwarding_wrapper(line);
         fn.is_c = 0;
         fn.untyped_params = ny_params_untyped_count(params);
         fn.missing_return = ny_fn_missing_return_type(fn_sig);
@@ -2567,7 +2855,7 @@ static void analyze_file(const char *path, FnVec *fns, IssueVec *issues, Analyze
         stats->ny_functions++;
         if (!fn.is_private)
           stats->public_functions++;
-        if (wants_public_docs && !fn.is_private && !fn.has_doc) {
+        if (wants_public_docs && fn_has_body && !fn.is_private && !fn.has_doc) {
           stats->missing_doc++;
           issue_push(issues, path, ln, 1, "NYFMT2000", "warning",
                      "public std Ny function is missing a doc string",
@@ -2691,7 +2979,7 @@ static const AuditModeMap k_audit_mode_maps[] = {
     {"constants|consts", "constants"},
 };
 
-static int audit_wants(const char *mode, const char *section) {
+static int audit_wants_one(const char *mode, const char *section) {
   if (!mode || !*mode || strcmp(mode, "all") == 0)
     return 1;
   if (strcmp(mode, section) == 0)
@@ -2700,6 +2988,27 @@ static int audit_wants(const char *mode, const char *section) {
     if (token_list_contains(k_audit_mode_maps[i].modes, mode) &&
         token_list_contains(k_audit_mode_maps[i].sections, section))
       return 1;
+  }
+  return 0;
+}
+
+static int audit_wants(const char *mode, const char *section) {
+  if (!mode || !*mode || strcmp(mode, "all") == 0)
+    return 1;
+  const char *start = mode;
+  while (*start) {
+    const char *end = strchr(start, '|');
+    size_t len = end ? (size_t)(end - start) : strlen(start);
+    char token[64];
+    if (len >= sizeof(token))
+      len = sizeof(token) - 1;
+    memcpy(token, start, len);
+    token[len] = '\0';
+    if (audit_wants_one(token, section))
+      return 1;
+    if (!end)
+      break;
+    start = end + 1;
   }
   return 0;
 }
@@ -3377,6 +3686,7 @@ static void audit_add_metaprog_findings(const char *path, const char *txt, FnVec
   int parser_errors = 0, parser_error_first = 0;
   int issue_pushes = 0, issue_push_first = 0;
   int ny_diag_errors = 0, ny_diag_error_first = 0, ny_diag_fixes = 0;
+  int verbose_main_guards = 0, verbose_main_guard_first = 0;
 
   for (size_t i = 0; i < lines->len; i++) {
     const char *raw = lines->items[i];
@@ -3446,6 +3756,11 @@ static void audit_add_metaprog_findings(const char *path, const char *txt, FnVec
         if (!extern_first)
           extern_first = ln;
         externs++;
+      }
+      if (starts_with_verbose_main_guard(line)) {
+        if (!verbose_main_guard_first)
+          verbose_main_guard_first = ln;
+        verbose_main_guards++;
       }
     } else if (is_c_file) {
       if (audit_line_has_plain_call(line, "parser_error")) {
@@ -3529,6 +3844,11 @@ static void audit_add_metaprog_findings(const char *path, const char *txt, FnVec
     audit_push_trim(issues, stats, path, extern_first, "NYAUD4401", "note",
                     "extern surface can be block/code-generated",
                     "group adjacent FFI declarations and consider data-driven module generation for repeated native wrappers");
+  }
+  if (is_ny_file && verbose_main_guards > 0) {
+    audit_push_trim(issues, stats, path, verbose_main_guard_first, "NYAUD4901", "note",
+                    "verbose direct-main guard",
+                    "prefer #main { ... } for module self-tests and direct-run code");
   }
   if (is_c_file && parser_errors >= 12) {
     audit_push_trim(issues, stats, path, parser_error_first, "NYAUD4501", "note",
@@ -6033,6 +6353,244 @@ static int audit_file_score(FilePressure *f) {
          f->repeated_score / 40;
 }
 
+static int audit_count_char(const char *s, char needle) {
+  int n = 0;
+  for (const char *p = s ? s : ""; *p; p++) {
+    if (*p == needle)
+      n++;
+  }
+  return n;
+}
+
+static int audit_decl_name(const char *line, char *out, size_t out_sz) {
+  if (!line || !out || out_sz == 0)
+    return 0;
+  out[0] = '\0';
+  const char *p = lstrip_ws(line);
+  if (starts_with_word(p, "def"))
+    p += 3;
+  else if (starts_with_word(p, "mut"))
+    p += 3;
+  else
+    return 0;
+  while (*p && isspace((unsigned char)*p))
+    p++;
+  size_t w = 0;
+  while (*p && (isalnum((unsigned char)*p) || *p == '_') && w + 1 < out_sz)
+    out[w++] = *p++;
+  out[w] = '\0';
+  return out[0] != '\0';
+}
+
+static int audit_large_literal_decl_score(const char *line, char *name, size_t name_sz) {
+  char code[2048];
+  audit_code_line(line, 1, code, sizeof(code));
+  const char *s = lstrip_ws(code);
+  if (!audit_decl_name(s, name, name_sz))
+    return 0;
+  if (!find_outside_string(s, "="))
+    return 0;
+  int width = visual_len(line);
+  int opens = audit_count_char(s, '[') + audit_count_char(s, '{');
+  int commas = audit_count_char(s, ',');
+  int quotes = audit_count_char(s, '"') + audit_count_char(s, '\'');
+  if (width < 180 && opens < 6)
+    return 0;
+  if (commas < 12 && quotes < 8)
+    return 0;
+  return width / 60 + opens * 2 + commas / 8 + quotes / 8;
+}
+
+static int audit_get_literal_key(const char *line, char *key, size_t key_sz) {
+  if (!line || !key || key_sz == 0)
+    return 0;
+  key[0] = '\0';
+  char code[2048];
+  audit_code_line(line, 1, code, sizeof(code));
+  const char *p = find_outside_string(code, ".get(");
+  if (!p)
+    p = find_outside_string(code, "get(");
+  if (!p)
+    return 0;
+  p = strchr(p, '(');
+  if (!p)
+    return 0;
+  p++;
+  while (*p && isspace((unsigned char)*p))
+    p++;
+  if (*p != '"' && *p != '\'')
+    return 0;
+  char quote = *p++;
+  size_t w = 0;
+  while (*p && *p != quote && w + 1 < key_sz) {
+    if (*p == '\\' && p[1])
+      p++;
+    key[w++] = *p++;
+  }
+  key[w] = '\0';
+  return key[0] != '\0' && *p == quote;
+}
+
+static int audit_trivial_main_wrapper(const StrVec *lines, size_t start) {
+  if (!lines || start >= lines->len)
+    return 0;
+  char compact[128];
+  size_t w = 0;
+  int depth = 0;
+  int seen_open = 0;
+  for (size_t j = start; j < lines->len && j < start + 12; j++) {
+    char code[1024];
+    audit_code_line(lines->items[j], 1, code, sizeof(code));
+    const char *p = code;
+    if (j == start) {
+      const char *m = strstr(p, "#main");
+      if (m)
+        p = m + 5;
+    }
+    for (; *p && w + 1 < sizeof(compact); p++) {
+      char ch = *p;
+      if (ch == '{') {
+        depth++;
+        seen_open = 1;
+        continue;
+      }
+      if (ch == '}') {
+        depth--;
+        continue;
+      }
+      if (!seen_open || isspace((unsigned char)ch))
+        continue;
+      compact[w++] = ch;
+    }
+    if (seen_open && depth <= 0)
+      break;
+  }
+  compact[w] = '\0';
+  return strcmp(compact, "main()") == 0 || strcmp(compact, "returnmain()") == 0;
+}
+
+static int audit_code_number(const char *code);
+static int issue_is_audit(const Issue *it);
+
+static int audit_accept_token(const char *s, const char *token) {
+  if (!s || !token || !*token)
+    return 0;
+  size_t n = strlen(token);
+  for (const char *p = strstr(s, token); p; p = strstr(p + n, token)) {
+    unsigned char before = p == s ? 0 : (unsigned char)p[-1];
+    unsigned char after = (unsigned char)p[n];
+    int left_ok = p == s || !(isalnum(before) || before == '_' || before == '-');
+    int right_ok = after == 0 || !(isalnum(after) || after == '_' || after == '-');
+    if (left_ok && right_ok)
+      return 1;
+  }
+  return 0;
+}
+
+static int audit_accept_line_matches(const char *line, const char *code, int file_only) {
+  const char *p = strstr(line ? line : "", "ny-fmt:");
+  if (!p)
+    p = strstr(line ? line : "", "nyfmt:");
+  if (!p)
+    return 0;
+  int accepts = audit_accept_token(p, "accept") || audit_accept_token(p, "accept-file") ||
+                audit_accept_token(p, "allow") || audit_accept_token(p, "ignore");
+  if (!accepts)
+    return 0;
+  if (file_only && !audit_accept_token(p, "accept-file"))
+    return 0;
+  if (audit_accept_token(p, "all") || (code && audit_accept_token(p, code)))
+    return 1;
+  int n = audit_code_number(code);
+  if (n > 0) {
+    char short_code[16];
+    snprintf(short_code, sizeof(short_code), "%d", n);
+    if (audit_accept_token(p, short_code))
+      return 1;
+  }
+  return 0;
+}
+
+static int audit_issue_is_accepted(const StrVec *lines, const Issue *it) {
+  if (!lines || !it)
+    return 0;
+  int idx = it->line - 1;
+  int first = idx - 2;
+  int last = idx;
+  if (first < 0)
+    first = 0;
+  if (last >= (int)lines->len)
+    last = (int)lines->len - 1;
+  for (int i = first; i <= last; i++) {
+    if (audit_accept_line_matches(lines->items[i], it->code, 0))
+      return 1;
+  }
+  for (size_t i = 0; i < lines->len; i++) {
+    if (audit_accept_line_matches(lines->items[i], it->code, 1))
+      return 1;
+  }
+  return 0;
+}
+
+static void audit_stats_accept(AuditStats *stats, const Issue *it) {
+  if (!stats || !it)
+    return;
+  stats->accepted_findings++;
+  if (stats->findings > 0)
+    stats->findings--;
+  int n = audit_code_number(it->code);
+  if (n >= 1100 && n < 1200 && stats->bug_findings > 0)
+    stats->bug_findings--;
+  if (((n >= 3000 && n < 5000) || n == 8102) && stats->trim_targets > 0)
+    stats->trim_targets--;
+  if (n == 1001 && stats->hot_files > 0)
+    stats->hot_files--;
+  if (n == 1002 && stats->hot_functions > 0)
+    stats->hot_functions--;
+  if ((n == 9002 || n == 9003) && stats->type_suggestions > 0)
+    stats->type_suggestions--;
+  if (n == 3004 && stats->append_builders > 0)
+    stats->append_builders--;
+  if (n == 3005 && stats->repeated_get_shapes > 0)
+    stats->repeated_get_shapes--;
+  if (n == 3006 && stats->literal_tables > 0)
+    stats->literal_tables--;
+  if (n == 4902 && stats->trivial_main_wrappers > 0)
+    stats->trivial_main_wrappers--;
+}
+
+static void audit_apply_accepts(IssueVec *issues, AuditStats *stats,
+                                const StrVec *lines, size_t start) {
+  if (!issues || !lines || start >= issues->len)
+    return;
+  size_t w = start;
+  for (size_t r = start; r < issues->len; r++) {
+    if (issue_is_audit(&issues->items[r]) && audit_issue_is_accepted(lines, &issues->items[r])) {
+      audit_stats_accept(stats, &issues->items[r]);
+      continue;
+    }
+    if (w != r)
+      issues->items[w] = issues->items[r];
+    w++;
+  }
+  issues->len = w;
+}
+
+static int audit_find_or_add_slot(char *items, size_t width, int *count, int cap,
+                                  const char *value, int *firsts, int line) {
+  for (int i = 0; i < *count; i++) {
+    if (strcmp(items + (size_t)i * width, value) == 0)
+      return i;
+  }
+  if (*count >= cap)
+    return -1;
+  int slot = (*count)++;
+  snprintf(items + (size_t)slot * width, width, "%s", value);
+  if (firsts)
+    firsts[slot] = line;
+  return slot;
+}
+
 static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files,
                             FunctionPressureVec *functions, IssueVec *issues, AuditStats *stats,
                             const char *mode) {
@@ -6042,6 +6600,7 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
     return;
   StrVec lines = {0};
   split_lines_keep_empty(txt, &lines);
+  size_t issue_start = issues->len;
 
   FilePressure fp;
   memset(&fp, 0, sizeof(fp));
@@ -6051,14 +6610,22 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
 
   StrVec seen = {0};
   const int debug_legacy = getenv("NYFMT_DEBUG_LEGACY") != NULL;
-  char case_selectors[32][64];
-  int case_scores[32];
-  int case_firsts[32];
+  char case_selectors[32][64] = {{0}};
+  int case_scores[32] = {0};
+  int case_firsts[32] = {0};
   int case_selector_count = 0;
   int indexed_set_helpers = 0;
   int indexed_set_first = 0;
   int receiver_rewrites = 0;
   int receiver_rewrite_first = 0;
+  int literal_table_score = 0;
+  int literal_table_first = 0;
+  char literal_table_name[128] = {0};
+  char get_keys[64][80] = {{0}};
+  int get_counts[64] = {0};
+  int get_firsts[64] = {0};
+  int get_key_count = 0;
+  int get_literal_total = 0;
   for (size_t i = 0; i < lines.len; i++) {
     const char *line = lines.items[i];
     const char *s = lstrip_ws(line);
@@ -6085,22 +6652,39 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
     fp.eager_defaults += audit_line_eager_default(line);
     fp.eager_ternaries += (strstr(line, " ? ") && strstr(line, " : ")) ? 1 : 0;
     if (nyt_ends_with(path, ".ny")) {
+      if (starts_with_word(s, "#main") && audit_trivial_main_wrapper(&lines, i)) {
+        issue_push(issues, path, (int)i + 1, 1, "NYAUD4902", "note",
+                   "trivial #main wrapper",
+                   "write the body directly in #main or keep main() only when external callers also use it");
+        stats->findings++;
+        stats->trim_targets++;
+        stats->trivial_main_wrappers++;
+      }
+      char literal_name[128];
+      int literal_score = audit_large_literal_decl_score(line, literal_name, sizeof(literal_name));
+      if (literal_score > 0) {
+        literal_table_score += literal_score;
+        if (!literal_table_first) {
+          literal_table_first = (int)i + 1;
+          snprintf(literal_table_name, sizeof(literal_table_name), "%s", literal_name);
+        }
+      }
+      char get_key[80];
+      if (audit_get_literal_key(line, get_key, sizeof(get_key))) {
+        get_literal_total++;
+        int slot = audit_find_or_add_slot((char *)get_keys, sizeof(get_keys[0]),
+                                          &get_key_count, 64, get_key,
+                                          get_firsts, (int)i + 1);
+        if (slot >= 0)
+          get_counts[slot]++;
+      }
       char selector[64];
       int case_score = audit_line_case_dispatch_score(line, selector, sizeof(selector));
       if (case_score > 0 && selector[0]) {
-        int found = -1;
-        for (int si = 0; si < case_selector_count; si++) {
-          if (strcmp(case_selectors[si], selector) == 0) {
-            found = si;
-            break;
-          }
-        }
-        if (found < 0 && case_selector_count < 32) {
-          found = case_selector_count++;
-          snprintf(case_selectors[found], sizeof(case_selectors[found]), "%s", selector);
-          case_scores[found] = 0;
-          case_firsts[found] = (int)i + 1;
-        }
+        int found = audit_find_or_add_slot((char *)case_selectors,
+                                           sizeof(case_selectors[0]),
+                                           &case_selector_count, 32, selector,
+                                           case_firsts, (int)i + 1);
         if (found >= 0)
           case_scores[found] += case_score;
       }
@@ -6171,6 +6755,17 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
                  "split parsing/state extraction away from the per-frame or inner-loop path");
       stats->findings++;
       stats->hot_functions++;
+    }
+    if (audit_wants(mode, "trim") && f.appends >= 12 && f.loops > 0) {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "%s appends %d time(s) across %d loop marker(s)",
+               f.name, f.appends, f.loops);
+      issue_push(issues, path, start, 1, "NYAUD3004", f.appends >= 32 ? "warning" : "note",
+                 msg,
+                 "when result length is known, allocate list(n) and fill x[i]; otherwise isolate the builder helper");
+      stats->findings++;
+      stats->trim_targets++;
+      stats->append_builders++;
     }
   }
 
@@ -6247,6 +6842,37 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
     stats->findings++;
     stats->trim_targets++;
   }
+  if (audit_wants(mode, "trim") && literal_table_score >= 8) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "dense literal table%s%s%s",
+             literal_table_name[0] ? " '" : "",
+             literal_table_name[0] ? literal_table_name : "",
+             literal_table_name[0] ? "'" : "");
+    issue_push(issues, path, literal_table_first ? literal_table_first : 1, 1,
+               "NYAUD3006", literal_table_score >= 24 ? "warning" : "note", msg,
+               "move large static data to a small data module/asset or generate rows from compact specs; runtime modules should keep behavior readable");
+    stats->findings++;
+    stats->trim_targets++;
+    stats->literal_tables++;
+  }
+  if (audit_wants(mode, "trim") && get_literal_total >= 12) {
+    int best = -1;
+    for (int gi = 0; gi < get_key_count; gi++) {
+      if (best < 0 || get_counts[gi] > get_counts[best])
+        best = gi;
+    }
+    if (best >= 0 && get_counts[best] >= 4) {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "%d literal-key get() call(s); most repeated key '%s' appears %d time(s)",
+               get_literal_total, get_keys[best], get_counts[best]);
+      issue_push(issues, path, get_firsts[best] ? get_firsts[best] : 1, 1,
+                 "NYAUD3005", get_literal_total >= 32 ? "warning" : "note", msg,
+                 "promote repeated dict shapes to layout guards/records or unpack once at the boundary");
+      stats->findings++;
+      stats->trim_targets++;
+      stats->repeated_get_shapes++;
+    }
+  }
   if ((audit_wants(mode, "legacy") || audit_wants(mode, "methods")) && receiver_rewrites > 0) {
     char msg[256];
     snprintf(msg, sizeof(msg), "%d receiver-method rewrite candidate(s)", receiver_rewrites);
@@ -6273,6 +6899,7 @@ static void audit_scan_file(const char *path, FnVec *fns, FilePressureVec *files
     stats->findings++;
   }
 
+  audit_apply_accepts(issues, stats, &lines, issue_start);
   sv_free(&seen);
   sv_free(&lines);
   free(txt);
@@ -6454,8 +7081,21 @@ static void print_debloat_priorities(const AuditStats *s) {
   if (s->repeated_lines > 0)
     printf("  4. Remove repeated source by lifting tables/templates; repeated line hits: %d.\n",
            s->repeated_lines);
+  if (s->literal_tables > 0)
+    printf("  5. Review %d dense literal table(s): move static data out or generate it when that keeps behavior clearer.\n",
+           s->literal_tables);
+  if (s->append_builders > 0)
+    printf("  6. Review %d append-built loop result(s): preallocate only when size is known and clarity improves.\n",
+           s->append_builders);
+  if (s->repeated_get_shapes > 0)
+    printf("  7. Review %d repeated literal-key dict shape(s): use typed layouts or one boundary unpack when the shape is stable.\n",
+           s->repeated_get_shapes);
+  if (s->trivial_main_wrappers > 0)
+    printf("  8. Review %d trivial #main wrapper(s): keep them only when main() is intentionally public API.\n",
+           s->trivial_main_wrappers);
   if (s->receiver_rewrites == 0 && s->legacy_calls == 0 && s->untyped_params == 0 &&
-      s->missing_returns == 0 && s->repeated_lines == 0)
+      s->missing_returns == 0 && s->repeated_lines == 0 && s->literal_tables == 0 &&
+      s->append_builders == 0 && s->repeated_get_shapes == 0 && s->trivial_main_wrappers == 0)
     printf("  %sNo obvious debloat priority in this scan.%s\n", gray, rs);
 }
 
@@ -6486,12 +7126,12 @@ typedef struct {
 
 static const AuditHint k_audit_hints[] = {
     {1001, "split-file", "split module Foo(...); keep public exports in mod.ny"},
-    {1002, "split-function", "fn small_part(T: x): R { ... }; call it from the wrapper"},
+    {1002, "split-function", "fn small_part(T x) R { ... }; call it from the wrapper"},
     {1101, "condition-assignment-check", "if(x == y){ ... }; lift x = y before the branch"},
     {1102, "constant-branch-check", "if(comptime{ return cond }){ ... } or delete dead branch"},
     {1103, "empty-control-body-check", "if(cond){ ... }"},
     {1104, "bounded-c-string-check", "snprintf(dst, dst_len, \"%s\", src)"},
-    {1105, "nil-return-contract-check", "fn f(...): any { return nil } or return a typed fallback"},
+    {1105, "nil-return-contract-check", "fn f(...) any { return nil } or return a typed fallback"},
     {1106, "unreachable-code-check", "return value; delete or move later statements before it"},
     {1107, "loop-progress-check", "while(i < n){ ...; i += 1 }"},
     {1108, "duplicate-branch-check", "elif(other_cond){ ... } or merge identical branches"},
@@ -6506,7 +7146,7 @@ static const AuditHint k_audit_hints[] = {
     {1117, "overwritten-assignment-check", "def x = one_expression"},
     {1118, "allocation-size-check", "if(n >= 0){ malloc(n) }"},
     {2001, "cached-env-bool", "def enabled = env(\"NAME\", \"\") == \"1\""},
-    {2002, "centralized-env-parser", "fn env_bool(str: name, bool: fallback=false): bool { ... }"},
+    {2002, "centralized-env-parser", "fn env_bool(str name, bool fallback=false) bool { ... }"},
     {2003, "boolean-expression-return", "return cond"},
     {2004, "cached-loop-length", "def n = xs.len; while(i < n){ ... }"},
     {2005, "guarded-allocation", "def p = malloc(n); if(!p){ return nil }"},
@@ -6514,6 +7154,9 @@ static const AuditHint k_audit_hints[] = {
     {3001, "trim-refactor", "lift helper/table; keep leaf fn short and typed"},
     {3002, "case-range-dispatch", "case x { 0, 1 -> a; 2..9 -> b; _ -> c }"},
     {3003, "indexed-assignment", "x[i] = value"},
+    {3004, "preallocated-builder", "def out = list(n); out[i] = value"},
+    {3005, "layout-boundary-unpack", "layout guard Shape: row = input else { ... }; row.field"},
+    {3006, "data-module-or-generated-table", "def rows = load_table(\"asset\") or comptime{ emit_rows(spec) }"},
     {3101, "comptime-case-selector", "case comptime{ return selector } { key -> value; _ -> fallback }"},
     {3102, "comptime-branch", "if(comptime{ return cond }){ ... }"},
     {3103, "comptime-table-dispatch", "comptime table Name = {...}; comptime match Name(key, fallback)"},
@@ -6537,6 +7180,8 @@ static const AuditHint k_audit_hints[] = {
     {4601, "generated-backend-module", "module backend from Spec { emit fn wrapper(...) }"},
     {4701, "comptime-template-family", "for name in comptime [...] { emit make(name) }"},
     {4801, "derive-block", "layout record Type derive(default, eq, hash, debug_str) { ... }"},
+    {4901, "main-guard", "#main { ... }"},
+    {4902, "inline-trivial-main", "#main { body() } only when body is also a public entry"},
     {5001, "extern-block", "extern \"lib\" { fn a(...); fn b(...); }"},
     {6001, "typed-layout-accessors", "layout shape Row derive(load, store) { T: field = default }"},
     {6101, "backend-contract", "layout BackendContract pack(4){ i32: caps }"},
@@ -6545,11 +7190,11 @@ static const AuditHint k_audit_hints[] = {
     {7301, "remove-dead-constant", "delete unused constant"},
     {7302, "remove-dead-key-constant", "delete unused key/table constant"},
     {8001, "receiver-methods", "d.get(k), b.hex, b.text, x.len, x[i] = v"},
-    {8101, "property-method", "impl T { fn prop(T: self): R { ... } }; value.prop"},
+    {8101, "property-method", "impl T { fn prop(T self) R { ... } }; value.prop"},
     {8102, "receiver-methods", "s.to_bytes, h.unhex, b.hex, b.text, b.long, a.concat(b)"},
-    {9001, "typed-signature", "fn f(str: s, int: n=0): bool { ... }"},
-    {9002, "typed-parameter", "fn f(Type: arg): R { ... }"},
-    {9003, "typed-return", "fn f(...): ReturnType { ... }"},
+    {9001, "typed-signature", "fn f(str s, int n=0) bool { ... }"},
+    {9002, "typed-parameter", "fn f(Type arg) R { ... }"},
+    {9003, "typed-return", "fn f(...) ReturnType { ... }"},
 };
 
 static int audit_code_number(const char *code) {
@@ -6602,7 +7247,7 @@ static const char *audit_syntax_hint_for_code(const char *code) {
   if (n >= 8000 && n < 9000)
     return "receiver syntax: value.method(args) or value.property";
   if (n >= 9000 && n < 10000)
-    return "typed signature: fn f(Type: arg): Return { ... }";
+    return "typed signature: fn f(Type arg) Return { ... }";
   return "";
 }
 
@@ -6692,6 +7337,11 @@ static void print_audit_json(const AuditStats *s, IssueVec *issues, FilePressure
   printf("  \"untyped_params\": %d,\n", s->untyped_params);
   printf("  \"missing_returns\": %d,\n", s->missing_returns);
   printf("  \"type_suggestions\": %d,\n", s->type_suggestions);
+  printf("  \"append_builders\": %d,\n", s->append_builders);
+  printf("  \"literal_tables\": %d,\n", s->literal_tables);
+  printf("  \"repeated_get_shapes\": %d,\n", s->repeated_get_shapes);
+  printf("  \"trivial_main_wrappers\": %d,\n", s->trivial_main_wrappers);
+  printf("  \"accepted_findings\": %d,\n", s->accepted_findings);
   printf("  \"top_files\": [\n");
   size_t nf = files->len;
   if (limit > 0 && nf > (size_t)limit)
@@ -6822,6 +7472,12 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
            stats.legacy_calls, stats.receiver_rewrites, stats.method_syntax);
     nyt_kv("types", "%d untyped param(s), %d missing return annotation(s), %d suggestion(s)",
            stats.untyped_params, stats.missing_returns, stats.type_suggestions);
+    nyt_kv("smells", "%d append builder(s), %d dense table(s), %d repeated dict shape(s), %d trivial main wrapper(s)",
+           stats.append_builders, stats.literal_tables, stats.repeated_get_shapes,
+           stats.trivial_main_wrappers);
+    if (stats.accepted_findings > 0)
+      nyt_kv("accepted", "%d justified audit finding(s) hidden by ny-fmt accept comments",
+             stats.accepted_findings);
     fputc('\n', stdout);
 
     if (audit_wants(mode, "trim") || audit_wants(mode, "legacy") ||
@@ -7888,6 +8544,8 @@ static void usage(void) {
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--min-sev CRIT|HIGH|MED|LOW --types-strict -v%s\n", nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
+  printf("  audit modes compose; accept justified smells with %sny-fmt: accept NYAUDxxxx reason%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
 }
 
 static char *str_replace_all(const char *in, const char *pat, const char *rep) {
@@ -8051,6 +8709,38 @@ static const char *fmt_audit_mode_for_arg(const char *arg) {
   return NULL;
 }
 
+static void fmt_audit_mode_set(FmtOpts *o, const char *mode) {
+  if (!o)
+    return;
+  snprintf(o->audit_mode_buf, sizeof(o->audit_mode_buf), "%s",
+           (mode && *mode) ? mode : "all");
+  o->audit_mode = o->audit_mode_buf;
+}
+
+static void fmt_audit_mode_add(FmtOpts *o, const char *mode) {
+  if (!o || !mode || !*mode)
+    return;
+  if (strcmp(mode, "all") == 0) {
+    fmt_audit_mode_set(o, "all");
+    return;
+  }
+  if (strcmp(o->audit_mode_buf, "all") == 0)
+    o->audit_mode_buf[0] = '\0';
+  if (token_list_contains(o->audit_mode_buf, mode)) {
+    o->audit_mode = o->audit_mode_buf;
+    return;
+  }
+  size_t used = strlen(o->audit_mode_buf);
+  if (used > 0 && used + 1 < sizeof(o->audit_mode_buf)) {
+    o->audit_mode_buf[used++] = '|';
+    o->audit_mode_buf[used] = '\0';
+  }
+  if (used < sizeof(o->audit_mode_buf) - 1) {
+    strncat(o->audit_mode_buf, mode, sizeof(o->audit_mode_buf) - used - 1);
+  }
+  o->audit_mode = o->audit_mode_buf[0] ? o->audit_mode_buf : "all";
+}
+
 static int parse_args(int argc, char **argv, FmtOpts *o) {
   memset(o, 0, sizeof(*o));
   o->min_sev = "LOW";
@@ -8084,7 +8774,7 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
     const char *audit_mode = fmt_audit_mode_for_arg(a);
     if (audit_mode) {
       o->audit = 1;
-      o->audit_mode = audit_mode;
+      fmt_audit_mode_add(o, audit_mode);
     } else if (strcmp(a, "--analyze") == 0) {
       o->analyze = 1;
     } else if (strcmp(a, "--cloc") == 0 || strcmp(a, "cloc") == 0) {
@@ -8109,10 +8799,10 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
       o->cloc_top = atoi(a + 6);
     } else if (strcmp(a, "--audit-mode") == 0 && i + 1 < argc) {
       o->audit = 1;
-      o->audit_mode = argv[++i];
+      fmt_audit_mode_set(o, argv[++i]);
     } else if (strncmp(a, "--audit-mode=", 13) == 0) {
       o->audit = 1;
-      o->audit_mode = a + 13;
+      fmt_audit_mode_set(o, a + 13);
     } else if (strcmp(a, "--check") == 0) {
       o->check = 1;
     } else if (strcmp(a, "--fix") == 0) {
@@ -8121,7 +8811,7 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
       o->json = 1;
     } else if (strcmp(a, "--types-strict") == 0) {
       o->audit = 1;
-      o->audit_mode = "types";
+      fmt_audit_mode_add(o, "types");
       o->types_strict = 1;
     } else if (strcmp(a, "--limit") == 0 && i + 1 < argc) {
       o->limit = atoi(argv[++i]);
@@ -8173,6 +8863,39 @@ static int parse_args(int argc, char **argv, FmtOpts *o) {
     }
   }
   return 2;
+}
+
+static void run_check_mode(const FmtOpts *opts) {
+  StrVec files = {0};
+  if (opts->paths.len == 0) {
+    collect_files_rec("lib", &files, 1);
+    collect_files_rec("etc/tests", &files, 1);
+  } else {
+    for (size_t i = 0; i < opts->paths.len; i++)
+      collect_files_rec(opts->paths.items[i], &files, 1);
+  }
+
+  size_t check_count = 0;
+  for (size_t i = 0; i < files.len; i++) {
+    if (!is_expected_error_fixture(files.items[i]))
+      check_count++;
+  }
+  nyt_msg("CHECK", NYT_CYAN, "scanning %zu files for parse bugs", check_count);
+
+  int failed = 0;
+  for (size_t i = 0; i < files.len; i++) {
+    if (is_expected_error_fixture(files.items[i]))
+      continue;
+    int issue = 0;
+    brace_check_file(files.items[i], opts->fix, opts->verbose, &issue);
+    if (issue)
+      failed++;
+  }
+  if (failed == 0)
+    nyt_msg("OK", NYT_GREEN, "check complete: all %zu files OK", check_count);
+  else
+    nyt_msg("CHECK", NYT_RED, "%d file(s) with issues", failed);
+  sv_free(&files);
 }
 
 int ny_fmt_main(int argc, char **argv) {
@@ -8230,9 +8953,6 @@ int ny_fmt_main(int argc, char **argv) {
     return rc;
   }
 
-  if (opts.audit && audit_wants(opts.audit_mode, "bugs") && !opts.json)
-    opts.check = 1;
-
   int only_default_fmt =
       !(opts.analyze || opts.audit || opts.check || opts.optimize || opts.tidy || opts.dupes);
 
@@ -8256,36 +8976,8 @@ int ny_fmt_main(int argc, char **argv) {
     sv_free(&files);
   }
 
-  if (opts.check || opts.tidy) {
-    StrVec files = {0};
-    if (opts.paths.len == 0) {
-      collect_files_rec("lib", &files, 1);
-      collect_files_rec("etc/tests", &files, 1);
-    } else {
-      for (size_t i = 0; i < opts.paths.len; i++)
-        collect_files_rec(opts.paths.items[i], &files, 1);
-    }
-    size_t check_count = 0;
-    for (size_t i = 0; i < files.len; i++) {
-      if (!is_expected_error_fixture(files.items[i]))
-        check_count++;
-    }
-    nyt_msg("CHECK", NYT_CYAN, "scanning %zu files for parse bugs", check_count);
-    int failed = 0;
-    for (size_t i = 0; i < files.len; i++) {
-      if (is_expected_error_fixture(files.items[i]))
-        continue;
-      int issue = 0;
-      brace_check_file(files.items[i], opts.fix, opts.verbose, &issue);
-      if (issue)
-        failed++;
-    }
-    if (failed == 0)
-      nyt_msg("OK", NYT_GREEN, "check complete: all %zu files OK", check_count);
-    else
-      nyt_msg("CHECK", NYT_RED, "%d file(s) with issues", failed);
-    sv_free(&files);
-  }
+  if (opts.check || opts.tidy)
+    run_check_mode(&opts);
 
   if (opts.analyze || opts.optimize || opts.tidy)
     run_analyze_simple(&opts.paths, opts.json, opts.limit);

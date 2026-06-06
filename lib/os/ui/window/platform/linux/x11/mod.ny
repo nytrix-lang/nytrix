@@ -1,5 +1,9 @@
-;; Keywords: platform window backend linux x11 common shared keymap
+;; Keywords: platform window backend linux x11 common shared keymap os ui input
 ;; X11 native window backend for windows, events, monitors, clipboard, and Vulkan surfaces.
+;; References:
+;; - std.os.ui.window.platform.linux
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.linux.x11(available, get_backend_name, InputOutput, AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWEventMask, ShiftMask, LockMask, ControlMask, Mod1Mask, Mod2Mask, Mod4Mask, KeyPressMask, KeyReleaseMask, ButtonPressMask, ButtonReleaseMask, EnterWindowMask, LeaveWindowMask, PointerMotionMask, ExposureMask, FocusChangeMask, StructureNotifyMask, PropertyChangeMask, PropertyNewValue, WithdrawnState, NormalState, IconicState, IsViewable, XA_ATOM, XA_CARDINAL, PropModeReplace, PropModeAppend, MWM_HINTS_DECORATIONS, MWM_DECOR_ALL, PMinSize, PMaxSize, PAspect, SubstructureNotifyMask, SubstructureRedirectMask, NET_WM_STATE_REMOVE, NET_WM_STATE_ADD, NET_WM_STATE_TOGGLE, RRScreenChangeNotifyMask, RRCrtcChangeNotifyMask, RROutputChangeNotifyMask, Button1, Button2, Button3, Button4, Button5, Button6, Button7, NotifyGrab, NotifyUngrab, ClientMessage, ReparentNotify, ConfigureNotify, PropertyNotify, DestroyNotify, Expose, FocusIn, FocusOut, KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify, VisibilityNotify, SelectionClear, SelectionRequest, SelectionNotify, EnterNotify, LeaveNotify, translate_keysym, translate_scancode, get_window_property, get_window_state, is_window_iconified, get_cardinal_value, get_window_frame_size, get_window_size, property_has_atom, is_window_visible, is_window_maximized, is_window_floating, is_window_fullscreen, append_atom_property, remove_atom_property, send_client_message, send_wm_state_event, iconify_window, show_window, hide_window, update_normal_hints, set_window_size, set_size, set_window_size_limits, set_window_aspect_ratio, maximize_window, restore_window, set_window_floating, set_window_fullscreen, set_window_decorated, request_window_attention, set_clipboard, get_clipboard, set_primary_selection, get_primary_selection, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_x11_monitor, get_x11_adapter, get_video_mode, get_video_modes, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_cursor_pos, get_key_name, get_key_scancode, get_size, set_size, get_pos, set_pos, set_input_mode, get_input_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, translate_event, poll_window_events, poll_display_events, set_window_opacity, get_window_opacity, get_window_content_scale, set_window_resizable, post_empty_event, set_window_icon, focus_window, set_cursor_pos, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, INPUT_MODE_CURSOR, INPUT_MODE_STICKY_KEYS, INPUT_MODE_STICKY_MOUSE_BUTTONS, INPUT_MODE_LOCK_KEY_MODS, INPUT_MODE_RAW_MOUSE, CURSOR_MODE_NORMAL, CURSOR_MODE_HIDDEN, CURSOR_MODE_DISABLED, CURSOR_MODE_CAPTURED, wait_events, wait_for_visibility_notify, translate_state, create_basic_window, destroy_basic_window, set_title, set_window_icon, get_window_attrib, open_display, close_display, default_screen, root_window, default_visual, default_depth, intern_atom, create_colormap, create_window_raw, destroy_window_raw, map_window, unmap_window, next_event, pending, select_input, flush, sync, put_pixels, store_name, move_window, resize_window, set_wm_protocols, create_surface, get_gamma_ramp, set_gamma_ramp, vulkan_supported, vulkan_required_extensions, vulkan_get_surface_capabilities, xdnd_begin_drag, _handle_xdnd_status, _handle_xdnd_finished, set_video_mode, restore_video_mode, INVALID_CODEPOINT)
 use std.core
 use std.core.mem
@@ -7,7 +11,6 @@ use std.math (abs)
 use std.os.prim
 use std.os.time
 use std.core.str as str
-use std.core.str (to_hex)
 use std.os.ui.render.vk.vulkan (vk_create_xcb_surface_khr, vk_create_xlib_surface_khr, vkGetPhysicalDeviceSurfaceCapabilitiesKHR, vkGetPhysicalDeviceSurfaceSupportKHR)
 use std.os.ui.window.consts
 use std.os.ui.window.event as ui_event
@@ -16,9 +19,9 @@ use std.os.ui.window.platform.state as platform_state
 use std.os.ui.window.platform.linux.x11.common as x11_common
 use std.os.ui.window.platform.linux.x11.keymap as x11_keymap
 use std.core.common as common
-use std.os.ui.profile as ui_profile
+use std.os.ui.render.dump as ui_profile
 
-fn _get_x11_val(str: key, any: default=0): any {
+fn _get_x11_val(str key, any default=0) any {
    def p = platform_state._get_platform_val("platform", 0)
    if(!is_dict(p)){ return default }
    def x11 = p.get("x11", 0)
@@ -26,7 +29,7 @@ fn _get_x11_val(str: key, any: default=0): any {
    x11.get(key, default)
 }
 
-fn _set_x11_val(str: key, any: val): any {
+fn _set_x11_val(str key, any val) any {
    mut p = platform_state._get_platform_val("platform", 0)
    if(!is_dict(p)){ p = dict(8) }
    mut x11 = p.get("x11", 0)
@@ -37,52 +40,42 @@ fn _set_x11_val(str: key, any: val): any {
    val
 }
 
-fn _is_debug(): bool {
+fn _is_debug() bool {
    ui_profile.debug_enabled()
 }
 
-fn _dbg_tagged(str: tag, any: msg, str: env_gate=""): bool {
+fn _dbg_tagged(str tag, any msg, str env_gate="") bool {
    if(env_gate.len > 0 && !ui_profile.env_truthy_cached(env_gate)){ return false }
    ui_profile.eprint_text("[" + tag + "] " + to_str(msg))
 }
 
-fn _dbg(any: msg): bool {
+fn _dbg(any msg) bool {
    if(!_is_debug()){ return false }
    _dbg_tagged("ui:x11", msg)
 }
 
-fn _dbg_v(any: msg): bool {
+fn _dbg_v(any msg) bool {
    if(!ui_profile.debug_verbose_enabled()){ return false }
    _dbg_tagged("ui:x11", msg)
 }
 
-fn _dbg_err(any: msg): bool { _dbg_tagged("ui:x11:error", msg) }
+fn _dbg_err(any msg) bool { _dbg_tagged("ui:x11:error", msg) }
 
-fn _input_debug_enabled(): bool {
+fn _input_debug_enabled() bool {
    ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") || ui_profile.event_trace_enabled() || ui_profile.debug_verbose_enabled()
 }
 
-fn _dbg_input(any: msg): bool {
+fn _dbg_input(any msg) bool {
    if(!_input_debug_enabled()){ return false }
    _dbg_tagged("ui:x11:input", msg)
 }
 
-fn _dbg_key_name(any: win, int: key, int: scancode=0): str {
+fn _dbg_key_name(any win, int key, int scancode=0) str {
    if(key < 0){ return "none" }
    def name = get_key_name(win, key, scancode)
    if(name && is_str(name) && name.len > 0){ return name + "(" + to_str(key) + ")" }
    if(key >= 32 && key <= 126){ return str.chr(key) + "(" + to_str(key) + ")" }
    to_str(key)
-}
-
-mut _x11_motion_trace_count = 0
-
-fn _debug_should_log_motion_event(): bool {
-   if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE_MOTION")){ return true }
-   def limit = ui_profile.env_int_cached("NY_UI_INPUT_TRACE_MOTION_LIMIT", 24, 0, 1000000)
-   if(_x11_motion_trace_count >= limit){ return false }
-   _x11_motion_trace_count += 1
-   true
 }
 
 def InputOutput = 1
@@ -243,7 +236,7 @@ def PropertyNotify = 28
 def ClientMessage = 33
 def GenericEvent = 35
 
-fn available(): bool {
+fn available() bool {
    "Returns true if the X11 backend is available on Linux with a set DISPLAY."
    #linux {
       if(common.env_trim("DISPLAY").len == 0){ return false }
@@ -253,20 +246,20 @@ fn available(): bool {
    } #endif
 }
 
-fn get_backend_name(): str {
+fn get_backend_name() str {
    "Identifies this low-level backend."
    "x11"
 }
 
-fn _cursor_get(int: id): any { _get_x11_val("cursor_specs", dict(8)).get(id, 0) }
+fn _cursor_get(int id) any { _get_x11_val("cursor_specs", dict(8)).get(id, 0) }
 
-fn _cursor_put(int: id, any: spec): any {
+fn _cursor_put(int id, any spec) any {
    mut specs = _get_x11_val("cursor_specs", dict(8))
    specs[id] = spec
    _set_x11_val("cursor_specs", specs)
 }
 
-fn _next_cursor_id(): int {
+fn _next_cursor_id() int {
    def nid = int(_get_x11_val("cursor_next_id", 1))
    _set_x11_val("cursor_next_id", nid + 1)
    nid
@@ -295,154 +288,457 @@ fn _next_cursor_id(): int {
    #include <vulkan/vulkan_xcb.h>
    #include <vulkan/vulkan_xlib.h>
    extern "X11" {
-      fn _c_xset_locale_modifiers(ptr: modifiers): ptr as "XSetLocaleModifiers"
-      fn _c_xopenim(ptr: display, ptr: rdb, ptr: resource_name, ptr: resource_class): ptr as "XOpenIM"
-      fn _c_xcloseim(ptr: im): i32 as "XCloseIM"
+      fn _c_xset_locale_modifiers(ptr modifiers) ptr as "XSetLocaleModifiers"
+      fn _c_xopenim(ptr display, ptr rdb, ptr resource_name, ptr resource_class) ptr as "XOpenIM"
+      fn _c_xcloseim(ptr im) i32 as "XCloseIM"
       fn _c_xcreateic(
-         ptr: im,
-         ptr: name_input_style,
-         u64: input_style,
-         ptr: name_client_window,
-         u64: client_window,
-         ptr: name_focus_window,
-         u64: focus_window,
-         ptr: terminator,
-      ): ptr as "XCreateIC"
-      fn _c_xdestroyic(ptr: ic) as "XDestroyIC"
-      fn _c_xseticfocus(ptr: ic) as "XSetICFocus"
-      fn _c_xunseticfocus(ptr: ic) as "XUnsetICFocus"
+         ptr im,
+         ptr name_input_style,
+         u64 input_style,
+         ptr name_client_window,
+         u64 client_window,
+         ptr name_focus_window,
+         u64 focus_window,
+         ptr terminator,
+      ) ptr as "XCreateIC"
+      fn _c_xdestroyic(ptr ic) as "XDestroyIC"
+      fn _c_xseticfocus(ptr ic) as "XSetICFocus"
+      fn _c_xunseticfocus(ptr ic) as "XUnsetICFocus"
       fn _c_xutf8_lookup_string(
-         ptr: ic,
-         ptr: event,
-         ptr: buffer,
-         i32: buffer_cap,
-         ptr: keysym,
-         ptr: status,
-      ): i32 as "Xutf8LookupString"
-      fn _c_xset_error_handler(fnptr: handler): fnptr as "XSetErrorHandler"
-      fn _c_xgetxcbconnection(ptr: display): ptr as "XGetXCBConnection"
-      fn _c_xkb_keycode_to_keysym(ptr: display, u32: keycode, u32: group, u32: level): u64 as "XkbKeycodeToKeysym"
-      fn _c_xkeysym_to_keycode(ptr: display, u64: keysym): u32 as "XKeysymToKeycode"
-      fn _c_xkeysym_to_string(u64: keysym): ptr as "XKeysymToString"
+         ptr ic,
+         ptr event,
+         ptr buffer,
+         i32 buffer_cap,
+         ptr keysym,
+         ptr status,
+      ) i32 as "Xutf8LookupString"
+      fn _c_xset_error_handler(fnptr handler) fnptr as "XSetErrorHandler"
+      fn _c_xgetxcbconnection(ptr display) ptr as "XGetXCBConnection"
+      fn _c_xkb_keycode_to_keysym(ptr display, u32 keycode, u32 group, u32 level) u64 as "XkbKeycodeToKeysym"
+      fn _c_xkeysym_to_keycode(ptr display, u64 keysym) u32 as "XKeysymToKeycode"
+      fn _c_xkeysym_to_string(u64 keysym) ptr as "XKeysymToString"
    }
 } #else {
-   fn _c_xset_locale_modifiers(..._args): any { 0 }
-   fn _c_xopenim(..._args): any { 0 }
-   fn _c_xcloseim(..._args): any { 0 }
-   fn _c_xcreateic(..._args): any { 0 }
-   fn _c_xdestroyic(..._args): any { 0 }
-   fn _c_xseticfocus(..._args): any { 0 }
-   fn _c_xunseticfocus(..._args): any { 0 }
-   fn _c_xutf8_lookup_string(..._args): any { 0 }
-   fn _c_xset_error_handler(..._args): any { 0 }
-   fn _c_xgetxcbconnection(..._args): any { 0 }
-   fn _c_xkb_keycode_to_keysym(..._args): any { 0 }
-   fn _c_xkeysym_to_keycode(..._args): any { 0 }
-   fn _c_xkeysym_to_string(..._args): any { 0 }
-   fn XAllocClassHint(..._args): any { 0 }
-   fn XAllocSizeHints(..._args): any { 0 }
-   fn XAllocWMHints(..._args): any { 0 }
-   fn XChangeProperty(..._args): any { 0 }
-   fn XChangeWindowAttributes(..._args): any { 0 }
-   fn XCheckTypedWindowEvent(..._args): any { 0 }
-   fn XCloseDisplay(..._args): any { 0 }
-   fn XConvertSelection(..._args): any { 0 }
-   fn XCreateColormap(..._args): any { 0 }
-   fn XCreateFontCursor(..._args): any { 0 }
-   fn XCreateGC(..._args): any { 0 }
-   fn XCreateImage(..._args): any { 0 }
-   fn XCreateWindow(..._args): any { 0 }
-   fn XcursorGetDefaultSize(..._args): any { 0 }
-   fn XcursorGetTheme(..._args): any { 0 }
-   fn XcursorImageCreate(..._args): any { 0 }
-   fn XcursorImageDestroy(..._args): any { 0 }
-   fn XcursorImageLoadCursor(..._args): any { 0 }
-   fn XcursorLibraryLoadImage(..._args): any { 0 }
-   fn XDefaultDepth(..._args): any { 0 }
-   fn XDefaultScreen(..._args): any { 0 }
-   fn XDefaultVisual(..._args): any { 0 }
-   fn XDefineCursor(..._args): any { 0 }
-   fn XDeleteProperty(..._args): any { 0 }
-   fn XDestroyWindow(..._args): any { 0 }
-   fn XDisplayHeight(..._args): any { 0 }
-   fn XDisplayKeycodes(..._args): any { 0 }
-   fn XDisplayWidth(..._args): any { 0 }
-   fn XEventsQueued(..._args): any { 0 }
-   fn XFilterEvent(..._args): any { 0 }
-   fn XFixesHideCursor(..._args): any { 0 }
-   fn XFixesShowCursor(..._args): any { 0 }
-   fn XFlush(..._args): any { 0 }
-   fn XFree(..._args): any { 0 }
-   fn XFreeColormap(..._args): any { 0 }
-   fn XFreeCursor(..._args): any { 0 }
-   fn XFreeEventData(..._args): any { 0 }
-   fn XFreeGC(..._args): any { 0 }
-   fn XGetEventData(..._args): any { 0 }
-   fn XGetInputFocus(..._args): any { 0 }
-   fn XGetKeyboardMapping(..._args): any { 0 }
-   fn XGetSelectionOwner(..._args): any { 0 }
-   fn XGetVisualInfo(..._args): any { 0 }
-   fn XGetWindowAttributes(..._args): any { 0 }
-   fn XGetWindowProperty(..._args): any { 0 }
-   fn XGetWMNormalHints(..._args): any { 0 }
-   fn XGrabPointer(..._args): any { 0 }
-   fn XIconifyWindow(..._args): any { 0 }
-   fn XInitThreads(..._args): any { 0 }
-   fn XInternAtom(..._args): any { 0 }
-   fn XIQueryVersion(..._args): any { 0 }
-   fn XISelectEvents(..._args): any { 0 }
-   fn XkbQueryExtension(..._args): any { 0 }
-   fn XkbSetDetectableAutoRepeat(..._args): any { 0 }
-   fn XKeysymToKeycode(..._args): any { 0 }
-   fn XLookupString(..._args): any { 0 }
-   fn XMapRaised(..._args): any { 0 }
-   fn XMapWindow(..._args): any { 0 }
-   fn XMoveWindow(..._args): any { 0 }
-   fn XNextEvent(..._args): any { 0 }
-   fn XOpenDisplay(..._args): any { 0 }
-   fn XPeekEvent(..._args): any { 0 }
-   fn XPending(..._args): any { 0 }
-   fn XPutImage(..._args): any { 0 }
-   fn XQueryExtension(..._args): any { 0 }
-   fn XQueryKeymap(..._args): any { 0 }
-   fn XQueryPointer(..._args): any { 0 }
-   fn XRaiseWindow(..._args): any { 0 }
-   fn XResizeWindow(..._args): any { 0 }
-   fn XrmInitialize(..._args): any { 0 }
-   fn XRootWindow(..._args): any { 0 }
-   fn XRRAllocGamma(..._args): any { 0 }
-   fn XRRFreeCrtcInfo(..._args): any { 0 }
-   fn XRRFreeGamma(..._args): any { 0 }
-   fn XRRFreeOutputInfo(..._args): any { 0 }
-   fn XRRFreeScreenResources(..._args): any { 0 }
-   fn XRRGetCrtcGamma(..._args): any { 0 }
-   fn XRRGetCrtcGammaSize(..._args): any { 0 }
-   fn XRRGetCrtcInfo(..._args): any { 0 }
-   fn XRRGetOutputInfo(..._args): any { 0 }
-   fn XRRGetOutputPrimary(..._args): any { 0 }
-   fn XRRGetScreenResourcesCurrent(..._args): any { 0 }
-   fn XRRSetCrtcConfig(..._args): any { 0 }
-   fn XRRSetCrtcGamma(..._args): any { 0 }
-   fn XRRUpdateConfiguration(..._args): any { 0 }
-   fn XSelectInput(..._args): any { 0 }
-   fn XSendEvent(..._args): any { 0 }
-   fn XSetClassHint(..._args): any { 0 }
-   fn XSetInputFocus(..._args): any { 0 }
-   fn XSetSelectionOwner(..._args): any { 0 }
-   fn XSetWMHints(..._args): any { 0 }
-   fn XSetWMNormalHints(..._args): any { 0 }
-   fn XSetWMProtocols(..._args): any { 0 }
-   fn XShapeCombineRectangles(..._args): any { 0 }
-   fn XStoreName(..._args): any { 0 }
-   fn XSync(..._args): any { 0 }
-   fn XTranslateCoordinates(..._args): any { 0 }
-   fn XUndefineCursor(..._args): any { 0 }
-   fn XUngrabPointer(..._args): any { 0 }
-   fn XUnmapWindow(..._args): any { 0 }
-   fn XWarpPointer(..._args): any { 0 }
+   fn _c_xset_locale_modifiers(..._args) any { 0 }
+   fn _c_xopenim(..._args) any { 0 }
+   fn _c_xcloseim(..._args) any { 0 }
+   fn _c_xcreateic(..._args) any { 0 }
+   fn _c_xdestroyic(..._args) any { 0 }
+   fn _c_xseticfocus(..._args) any { 0 }
+   fn _c_xunseticfocus(..._args) any { 0 }
+   fn _c_xutf8_lookup_string(..._args) any { 0 }
+   fn _c_xset_error_handler(..._args) any { 0 }
+   fn _c_xgetxcbconnection(..._args) any { 0 }
+   fn _c_xkb_keycode_to_keysym(..._args) any { 0 }
+   fn _c_xkeysym_to_keycode(..._args) any { 0 }
+   fn _c_xkeysym_to_string(..._args) any { 0 }
+   fn XAllocClassHint(..._args) any {
+      "Runs the XAllocClassHint operation."
+      0
+   }
+   fn XAllocSizeHints(..._args) any {
+      "Runs the XAllocSizeHints operation."
+      0
+   }
+   fn XAllocWMHints(..._args) any {
+      "Runs the XAllocWMHints operation."
+      0
+   }
+   fn XChangeProperty(..._args) any {
+      "Runs the XChangeProperty operation."
+      0
+   }
+   fn XChangeWindowAttributes(..._args) any {
+      "Runs the XChangeWindowAttributes operation."
+      0
+   }
+   fn XCheckTypedWindowEvent(..._args) any {
+      "Runs the XCheckTypedWindowEvent operation."
+      0
+   }
+   fn XCloseDisplay(..._args) any {
+      "Runs the XCloseDisplay operation."
+      0
+   }
+   fn XConvertSelection(..._args) any {
+      "Runs the XConvertSelection operation."
+      0
+   }
+   fn XCreateColormap(..._args) any {
+      "Runs the XCreateColormap operation."
+      0
+   }
+   fn XCreateFontCursor(..._args) any {
+      "Runs the XCreateFontCursor operation."
+      0
+   }
+   fn XCreateGC(..._args) any {
+      "Runs the XCreateGC operation."
+      0
+   }
+   fn XCreateImage(..._args) any {
+      "Runs the XCreateImage operation."
+      0
+   }
+   fn XCreateWindow(..._args) any {
+      "Runs the XCreateWindow operation."
+      0
+   }
+   fn XcursorGetDefaultSize(..._args) any {
+      "Runs the XcursorGetDefaultSize operation."
+      0
+   }
+   fn XcursorGetTheme(..._args) any {
+      "Runs the XcursorGetTheme operation."
+      0
+   }
+   fn XcursorImageCreate(..._args) any {
+      "Runs the XcursorImageCreate operation."
+      0
+   }
+   fn XcursorImageDestroy(..._args) any {
+      "Runs the XcursorImageDestroy operation."
+      0
+   }
+   fn XcursorImageLoadCursor(..._args) any {
+      "Runs the XcursorImageLoadCursor operation."
+      0
+   }
+   fn XcursorLibraryLoadImage(..._args) any {
+      "Runs the XcursorLibraryLoadImage operation."
+      0
+   }
+   fn XDefaultDepth(..._args) any {
+      "Runs the XDefaultDepth operation."
+      0
+   }
+   fn XDefaultScreen(..._args) any {
+      "Runs the XDefaultScreen operation."
+      0
+   }
+   fn XDefaultVisual(..._args) any {
+      "Runs the XDefaultVisual operation."
+      0
+   }
+   fn XDefineCursor(..._args) any {
+      "Runs the XDefineCursor operation."
+      0
+   }
+   fn XDeleteProperty(..._args) any {
+      "Runs the XDeleteProperty operation."
+      0
+   }
+   fn XDestroyWindow(..._args) any {
+      "Runs the XDestroyWindow operation."
+      0
+   }
+   fn XDisplayHeight(..._args) any {
+      "Runs the XDisplayHeight operation."
+      0
+   }
+   fn XDisplayKeycodes(..._args) any {
+      "Runs the XDisplayKeycodes operation."
+      0
+   }
+   fn XDisplayWidth(..._args) any {
+      "Runs the XDisplayWidth operation."
+      0
+   }
+   fn XEventsQueued(..._args) any {
+      "Runs the XEventsQueued operation."
+      0
+   }
+   fn XFilterEvent(..._args) any {
+      "Runs the XFilterEvent operation."
+      0
+   }
+   fn XFixesHideCursor(..._args) any {
+      "Runs the XFixesHideCursor operation."
+      0
+   }
+   fn XFixesShowCursor(..._args) any {
+      "Runs the XFixesShowCursor operation."
+      0
+   }
+   fn XFlush(..._args) any {
+      "Runs the XFlush operation."
+      0
+   }
+   fn XFree(..._args) any {
+      "Runs the XFree operation."
+      0
+   }
+   fn XFreeColormap(..._args) any {
+      "Runs the XFreeColormap operation."
+      0
+   }
+   fn XFreeCursor(..._args) any {
+      "Runs the XFreeCursor operation."
+      0
+   }
+   fn XFreeEventData(..._args) any {
+      "Runs the XFreeEventData operation."
+      0
+   }
+   fn XFreeGC(..._args) any {
+      "Runs the XFreeGC operation."
+      0
+   }
+   fn XGetEventData(..._args) any {
+      "Runs the XGetEventData operation."
+      0
+   }
+   fn XGetInputFocus(..._args) any {
+      "Runs the XGetInputFocus operation."
+      0
+   }
+   fn XGetKeyboardMapping(..._args) any {
+      "Runs the XGetKeyboardMapping operation."
+      0
+   }
+   fn XGetSelectionOwner(..._args) any {
+      "Runs the XGetSelectionOwner operation."
+      0
+   }
+   fn XGetVisualInfo(..._args) any {
+      "Runs the XGetVisualInfo operation."
+      0
+   }
+   fn XGetWindowAttributes(..._args) any {
+      "Runs the XGetWindowAttributes operation."
+      0
+   }
+   fn XGetWindowProperty(..._args) any {
+      "Runs the XGetWindowProperty operation."
+      0
+   }
+   fn XGetWMNormalHints(..._args) any {
+      "Runs the XGetWMNormalHints operation."
+      0
+   }
+   fn XGrabPointer(..._args) any {
+      "Runs the XGrabPointer operation."
+      0
+   }
+   fn XIconifyWindow(..._args) any {
+      "Runs the XIconifyWindow operation."
+      0
+   }
+   fn XInitThreads(..._args) any {
+      "Runs the XInitThreads operation."
+      0
+   }
+   fn XInternAtom(..._args) any {
+      "Runs the XInternAtom operation."
+      0
+   }
+   fn XIQueryVersion(..._args) any {
+      "Runs the XIQueryVersion operation."
+      0
+   }
+   fn XISelectEvents(..._args) any {
+      "Runs the XISelectEvents operation."
+      0
+   }
+   fn XkbQueryExtension(..._args) any {
+      "Runs the XkbQueryExtension operation."
+      0
+   }
+   fn XkbSetDetectableAutoRepeat(..._args) any {
+      "Runs the XkbSetDetectableAutoRepeat operation."
+      0
+   }
+   fn XKeysymToKeycode(..._args) any {
+      "Runs the XKeysymToKeycode operation."
+      0
+   }
+   fn XLookupString(..._args) any {
+      "Runs the XLookupString operation."
+      0
+   }
+   fn XMapRaised(..._args) any {
+      "Runs the XMapRaised operation."
+      0
+   }
+   fn XMapWindow(..._args) any {
+      "Runs the XMapWindow operation."
+      0
+   }
+   fn XMoveWindow(..._args) any {
+      "Runs the XMoveWindow operation."
+      0
+   }
+   fn XNextEvent(..._args) any {
+      "Runs the XNextEvent operation."
+      0
+   }
+   fn XOpenDisplay(..._args) any {
+      "Runs the XOpenDisplay operation."
+      0
+   }
+   fn XPeekEvent(..._args) any {
+      "Runs the XPeekEvent operation."
+      0
+   }
+   fn XPending(..._args) any {
+      "Runs the XPending operation."
+      0
+   }
+   fn XPutImage(..._args) any {
+      "Runs the XPutImage operation."
+      0
+   }
+   fn XQueryExtension(..._args) any {
+      "Runs the XQueryExtension operation."
+      0
+   }
+   fn XQueryKeymap(..._args) any {
+      "Runs the XQueryKeymap operation."
+      0
+   }
+   fn XQueryPointer(..._args) any {
+      "Runs the XQueryPointer operation."
+      0
+   }
+   fn XRaiseWindow(..._args) any {
+      "Runs the XRaiseWindow operation."
+      0
+   }
+   fn XResizeWindow(..._args) any {
+      "Runs the XResizeWindow operation."
+      0
+   }
+   fn XrmInitialize(..._args) any {
+      "Runs the XrmInitialize operation."
+      0
+   }
+   fn XRootWindow(..._args) any {
+      "Runs the XRootWindow operation."
+      0
+   }
+   fn XRRAllocGamma(..._args) any {
+      "Runs the XRRAllocGamma operation."
+      0
+   }
+   fn XRRFreeCrtcInfo(..._args) any {
+      "Runs the XRRFreeCrtcInfo operation."
+      0
+   }
+   fn XRRFreeGamma(..._args) any {
+      "Runs the XRRFreeGamma operation."
+      0
+   }
+   fn XRRFreeOutputInfo(..._args) any {
+      "Runs the XRRFreeOutputInfo operation."
+      0
+   }
+   fn XRRFreeScreenResources(..._args) any {
+      "Runs the XRRFreeScreenResources operation."
+      0
+   }
+   fn XRRGetCrtcGamma(..._args) any {
+      "Runs the XRRGetCrtcGamma operation."
+      0
+   }
+   fn XRRGetCrtcGammaSize(..._args) any {
+      "Runs the XRRGetCrtcGammaSize operation."
+      0
+   }
+   fn XRRGetCrtcInfo(..._args) any {
+      "Runs the XRRGetCrtcInfo operation."
+      0
+   }
+   fn XRRGetOutputInfo(..._args) any {
+      "Runs the XRRGetOutputInfo operation."
+      0
+   }
+   fn XRRGetOutputPrimary(..._args) any {
+      "Runs the XRRGetOutputPrimary operation."
+      0
+   }
+   fn XRRGetScreenResourcesCurrent(..._args) any {
+      "Runs the XRRGetScreenResourcesCurrent operation."
+      0
+   }
+   fn XRRSetCrtcConfig(..._args) any {
+      "Runs the XRRSetCrtcConfig operation."
+      0
+   }
+   fn XRRSetCrtcGamma(..._args) any {
+      "Runs the XRRSetCrtcGamma operation."
+      0
+   }
+   fn XRRUpdateConfiguration(..._args) any {
+      "Runs the XRRUpdateConfiguration operation."
+      0
+   }
+   fn XSelectInput(..._args) any {
+      "Runs the XSelectInput operation."
+      0
+   }
+   fn XSendEvent(..._args) any {
+      "Runs the XSendEvent operation."
+      0
+   }
+   fn XSetClassHint(..._args) any {
+      "Runs the XSetClassHint operation."
+      0
+   }
+   fn XSetInputFocus(..._args) any {
+      "Runs the XSetInputFocus operation."
+      0
+   }
+   fn XSetSelectionOwner(..._args) any {
+      "Runs the XSetSelectionOwner operation."
+      0
+   }
+   fn XSetWMHints(..._args) any {
+      "Runs the XSetWMHints operation."
+      0
+   }
+   fn XSetWMNormalHints(..._args) any {
+      "Runs the XSetWMNormalHints operation."
+      0
+   }
+   fn XSetWMProtocols(..._args) any {
+      "Runs the XSetWMProtocols operation."
+      0
+   }
+   fn XShapeCombineRectangles(..._args) any {
+      "Runs the XShapeCombineRectangles operation."
+      0
+   }
+   fn XStoreName(..._args) any {
+      "Runs the XStoreName operation."
+      0
+   }
+   fn XSync(..._args) any {
+      "Runs the XSync operation."
+      0
+   }
+   fn XTranslateCoordinates(..._args) any {
+      "Runs the XTranslateCoordinates operation."
+      0
+   }
+   fn XUndefineCursor(..._args) any {
+      "Runs the XUndefineCursor operation."
+      0
+   }
+   fn XUngrabPointer(..._args) any {
+      "Runs the XUngrabPointer operation."
+      0
+   }
+   fn XUnmapWindow(..._args) any {
+      "Runs the XUnmapWindow operation."
+      0
+   }
+   fn XWarpPointer(..._args) any {
+      "Runs the XWarpPointer operation."
+      0
+   }
 } #endif
 
-fn _ensure_x11_connected(): bool {
+fn _ensure_x11_connected() bool {
    if(_get_x11_val("x11_connected", 0)){ return true }
    XInitThreads()
    XrmInitialize()
@@ -451,7 +747,7 @@ fn _ensure_x11_connected(): bool {
    true
 }
 
-fn open_display(str: name=""): any {
+fn open_display(str name="") any {
    "Opens a connection to the X server."
    _ensure_x11_connected()
    mut display = 0
@@ -469,13 +765,13 @@ fn open_display(str: name=""): any {
    display
 }
 
-fn close_display(any: display): int {
+fn close_display(any display) int {
    "Closes an X display connection."
    if(!display){ return 0 }
    XCloseDisplay(display)
 }
 
-fn _open_input_method(any: display): any {
+fn _open_input_method(any display) any {
    if(!display){ return 0 }
    _c_xset_locale_modifiers(cstr(""))
    mut im = _c_xopenim(display, 0, 0, 0)
@@ -491,7 +787,7 @@ fn _open_input_method(any: display): any {
    im
 }
 
-fn _create_input_context(any: im, any: window_handle): any {
+fn _create_input_context(any im, any window_handle) any {
    if(!im || !window_handle){ return 0 }
    def ic = _c_xcreateic(im,
       cstr("inputStyle"), XIMPreeditNothing | XIMStatusNothing,
@@ -502,7 +798,7 @@ fn _create_input_context(any: im, any: window_handle): any {
    ic
 }
 
-fn _ensure_input_context(any: win): any {
+fn _ensure_input_context(any win) any {
    if(!win || !is_dict(win)){ return win }
    if(win.get("ic", 0)){ return win }
    def im = win.get("im", 0)
@@ -516,7 +812,7 @@ fn _ensure_input_context(any: win): any {
    win
 }
 
-fn _emit_utf8_chars(list: events, dict: win, ptr: buffer, int: count, int: mods, bool: plain): list {
+fn _emit_utf8_chars(list events, dict win, ptr buffer, int count, int mods, bool plain) list {
    if(!buffer || count <= 0){ return events }
    mut i = 0
    while(i < count){
@@ -549,7 +845,7 @@ fn _emit_utf8_chars(list: events, dict: win, ptr: buffer, int: count, int: mods,
          char_data["mods"] = mods
          char_data["plain"] = plain
          _dbg_input("char utf8 codepoint=" + to_str(codepoint) +
-            " mods=0x" + to_hex(mods) +
+            " mods=0x" + str.to_hex(mods) +
          " plain=" + to_str(plain))
          events = _push_translated_event(events, 3, win, char_data)
       }
@@ -559,7 +855,7 @@ fn _emit_utf8_chars(list: events, dict: win, ptr: buffer, int: count, int: mods,
    events
 }
 
-fn _emit_ic_chars(list: events, dict: win, ptr: event_ptr, int: mods, bool: plain): list {
+fn _emit_ic_chars(list events, dict win, ptr event_ptr, int mods, bool plain) list {
    def ic = win.get("ic", 0)
    if(!ic){ return events }
    def status_ptr = malloc(4)
@@ -579,7 +875,7 @@ fn _emit_ic_chars(list: events, dict: win, ptr: event_ptr, int: mods, bool: plai
    if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){
       _dbg_input("xim lookup count=" + to_str(count) +
          " status=" + to_str(status) +
-      " keysym=0x" + to_hex(load64_h(keysym_ptr, 0)))
+      " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
    }
    if(status == XBufferOverflow && count > 0){
       free(buffer)
@@ -596,7 +892,7 @@ fn _emit_ic_chars(list: events, dict: win, ptr: event_ptr, int: mods, bool: plai
       if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){
          _dbg_input("xim lookup resize count=" + to_str(count) +
             " status=" + to_str(status) +
-         " keysym=0x" + to_hex(load64_h(keysym_ptr, 0)))
+         " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
       }
    }
    if(count > 0 && (status == XLookupChars || status == XLookupBoth)){
@@ -608,14 +904,14 @@ fn _emit_ic_chars(list: events, dict: win, ptr: event_ptr, int: mods, bool: plai
 }
 
 comptime template _x11_wrap1(name, doc, call_fn){
-   fn ${name}(any: a): any {
+   fn ${name}(any a) any {
       doc
       call_fn(a)
    }
 }
 
 comptime template _x11_wrap2(name, doc, call_fn){
-   fn ${name}(any: a, any: b): any {
+   fn ${name}(any a, any b) any {
       doc
       call_fn(a, b)
    }
@@ -626,35 +922,35 @@ comptime emit _x11_wrap2(root_window, "Returns the root window for `screen_numbe
 comptime emit _x11_wrap2(default_visual, "Returns the default visual pointer for `screen_number`.", XDefaultVisual)
 comptime emit _x11_wrap2(default_depth, "Returns the default depth for `screen_number`.", XDefaultDepth)
 
-fn intern_atom(any: display, str: atom_name, bool: only_if_exists=false): any {
+fn intern_atom(any display, str atom_name, bool only_if_exists=false) any {
    "Interns an X11 atom and returns its id."
    XInternAtom(display, cstr(atom_name), only_if_exists ? 1 : 0)
 }
 
-fn create_colormap(any: display, any: win, any: visual, int: alloc=AllocNone): any {
+fn create_colormap(any display, any win, any visual, int alloc=AllocNone) any {
    "Creates a colormap for a native X11 window."
    XCreateColormap(display, win, visual, alloc)
 }
 
-fn free_colormap(any: display, any: colormap): any {
+fn free_colormap(any display, any colormap) any {
    "Frees a colormap created for a native X11 window."
    if(display && colormap){ XFreeColormap(display, colormap) }
 }
 
 fn create_window_raw(
-   any: display,
-   any: parent,
-   int: x,
-   int: y,
-   int: width,
-   int: height,
-   int: border_width,
-   int: depth,
-   int: klass,
-   any: visual,
-   int: value_mask,
-   any: attributes
-): int {
+   any display,
+   any parent,
+   int x,
+   int y,
+   int width,
+   int height,
+   int border_width,
+   int depth,
+   int klass,
+   any visual,
+   int value_mask,
+   any attributes
+) int {
    "Creates a raw X11 window."
    XCreateWindow(
       display, parent, x, y, width, height,
@@ -667,7 +963,7 @@ comptime emit _x11_wrap2(map_window, "Maps a raw X11 window.", XMapWindow)
 comptime emit _x11_wrap2(unmap_window, "Unmaps a raw X11 window.", XUnmapWindow)
 comptime emit _x11_wrap1(pending, "Returns the number of queued X11 events.", XPending)
 
-fn get_window_property(any: display, any: win, any: property, any: typ, int: long_length=4096): any {
+fn get_window_property(any display, any win, any property, any typ, int long_length=4096) any {
    "Read a native X11 window property into Ny-managed storage."
    if(!display || !win || !property){ return false }
    def actual_type = malloc(8)
@@ -700,12 +996,12 @@ fn get_window_property(any: display, any: win, any: property, any: typ, int: lon
    out
 }
 
-fn _prop_data_ptr(any: prop): any {
+fn _prop_data_ptr(any prop) any {
    if(!prop || !is_dict(prop)){ return 0 }
    prop.get("data_ptr", prop.get("data", 0))
 }
 
-fn get_window_state(any: display, any: win, any: wm_state_atom): int {
+fn get_window_state(any display, any win, any wm_state_atom) int {
    "Read EWMH window-state atoms for a native X11 window."
    if(!display || !win || !wm_state_atom){ return WithdrawnState }
    def prop = get_window_property(display, win, wm_state_atom, wm_state_atom)
@@ -718,12 +1014,12 @@ fn get_window_state(any: display, any: win, any: wm_state_atom): int {
    result
 }
 
-fn is_window_iconified(any: display, any: win, any: wm_state_atom): bool {
+fn is_window_iconified(any display, any win, any wm_state_atom) bool {
    "Returns true when the window is in X11 `IconicState`."
    get_window_state(display, win, wm_state_atom) == IconicState
 }
 
-fn get_cardinal_value(any: display, any: win, any: property, int: index=0): any {
+fn get_cardinal_value(any display, any win, any property, int index=0) any {
    "Returns the CARDINAL value at `index` for `property`, or false if missing."
    if(!display || !win || !property || index < 0){ return false }
    def prop = get_window_property(display, win, property, XA_CARDINAL)
@@ -736,7 +1032,7 @@ fn get_cardinal_value(any: display, any: win, any: property, int: index=0): any 
    value
 }
 
-fn property_has_atom(any: display, any: win, any: property, any: atom): bool {
+fn property_has_atom(any display, any win, any property, any atom) bool {
    "Returns true when `property` on `win` contains `atom`."
    if(!display || !win || !property || !atom){ return false }
    def prop = get_window_property(display, win, property, XA_ATOM)
@@ -758,13 +1054,13 @@ fn property_has_atom(any: display, any: win, any: property, any: atom): bool {
    found
 }
 
-fn is_window_maximized(any: display, any: win, any: net_wm_state_atom, any: max_vert_atom, any: max_horz_atom): bool {
+fn is_window_maximized(any display, any win, any net_wm_state_atom, any max_vert_atom, any max_horz_atom) bool {
    "Returns true when both maximized state atoms are present."
    property_has_atom(display, win, net_wm_state_atom, max_vert_atom) &&
    property_has_atom(display, win, net_wm_state_atom, max_horz_atom)
 }
 
-fn is_window_visible(any: display, any: win): bool {
+fn is_window_visible(any display, any win) bool {
    "Returns true when the X11 window is currently viewable."
    if(!display || !win){ return false }
    def attrs = zalloc(256)
@@ -778,7 +1074,7 @@ fn is_window_visible(any: display, any: win): bool {
    visible
 }
 
-fn get_window_size(any: display, any: win): any {
+fn get_window_size(any display, any win) any {
    "Returns `{ width, height }` based on `XGetWindowAttributes`."
    if(!display || !win){ return false }
    def attrs = zalloc(256)
@@ -795,17 +1091,17 @@ fn get_window_size(any: display, any: win): any {
    out
 }
 
-fn is_window_floating(any: display, any: win, any: net_wm_state_atom, any: above_atom): bool {
+fn is_window_floating(any display, any win, any net_wm_state_atom, any above_atom) bool {
    "Returns true when `_NET_WM_STATE_ABOVE` is present."
    property_has_atom(display, win, net_wm_state_atom, above_atom)
 }
 
-fn is_window_fullscreen(any: display, any: win, any: net_wm_state_atom, any: fullscreen_atom): bool {
+fn is_window_fullscreen(any display, any win, any net_wm_state_atom, any fullscreen_atom) bool {
    "Returns true when `_NET_WM_STATE_FULLSCREEN` is present."
    property_has_atom(display, win, net_wm_state_atom, fullscreen_atom)
 }
 
-fn append_atom_property(any: display, any: win, any: property, any: atom): bool {
+fn append_atom_property(any display, any win, any property, any atom) bool {
    "Appends `atom` to an X11 atom-list property if it is not already present."
    if(!display || !win || !property || !atom){ return false }
    if(property_has_atom(display, win, property, atom)){ return true }
@@ -817,7 +1113,7 @@ fn append_atom_property(any: display, any: win, any: property, any: atom): bool 
    ok
 }
 
-fn remove_atom_property(any: display, any: win, any: property, any: atom): bool {
+fn remove_atom_property(any display, any win, any property, any atom) bool {
    "Removes `atom` from an X11 atom-list property."
    if(!display || !win || !property || !atom){ return false }
    def prop = get_window_property(display, win, property, XA_ATOM)
@@ -852,7 +1148,7 @@ fn remove_atom_property(any: display, any: win, any: property, any: atom): bool 
    ok
 }
 
-fn send_client_message(any: display, any: root, any: win, any: atom, int: d0, int: d1=0, int: d2=0, int: d3=0, int: d4=0): bool {
+fn send_client_message(any display, any root, any win, any atom, int d0, int d1=0, int d2=0, int d3=0, int d4=0) bool {
    "Sends a 32-bit X11 ClientMessage event."
    if(!display || !root || !win || !atom){ return false }
    def ev = malloc(96)
@@ -874,21 +1170,21 @@ fn send_client_message(any: display, any: root, any: win, any: atom, int: d0, in
 }
 
 fn send_wm_state_event(
-   any: display, any: root, any: win, any: net_wm_state_atom, int: action,
-   any: first_atom, any: second_atom=0, int: source_indication=1
-): bool {
+   any display, any root, any win, any net_wm_state_atom, int action,
+   any first_atom, any second_atom=0, int source_indication=1
+) bool {
    "Sends an EWMH `_NET_WM_STATE` client message."
    send_client_message(display, root, win, net_wm_state_atom,
    action, first_atom, second_atom, source_indication, 0)
 }
 
-fn _iconify_window_raw(any: display, any: window_handle, int: screen_number): bool {
+fn _iconify_window_raw(any display, any window_handle, int screen_number) bool {
    def ok = XIconifyWindow(display, window_handle, screen_number) != 0
    flush(display)
    ok
 }
 
-fn iconify_window(any: win): bool {
+fn iconify_window(any win) bool {
    "Iconify a native X11 window."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -900,7 +1196,7 @@ fn iconify_window(any: win): bool {
    _iconify_window_raw(display, handle, screen_number)
 }
 
-fn _show_window_raw(any: display, any: window_handle, bool: floating=false, any: net_wm_state_atom=0, any: above_atom=0): bool {
+fn _show_window_raw(any display, any window_handle, bool floating=false, any net_wm_state_atom=0, any above_atom=0) bool {
    def trace = common.env_truthy("NY_UI_STARTUP_TRACE") || common.env_truthy("NY_UI_DEBUG_WINDOW")
    if(floating && net_wm_state_atom && above_atom){
       if(trace){ ui_profile.print_text("[x11:show] floating.before") }
@@ -916,7 +1212,7 @@ fn _show_window_raw(any: display, any: window_handle, bool: floating=false, any:
    true
 }
 
-fn show_window(any: win): bool {
+fn show_window(any win) bool {
    "Show and map a native X11 window."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -928,25 +1224,25 @@ fn show_window(any: win): bool {
    _show_window_raw(display, handle, floating, net_wm_state_atom, above_atom)
 }
 
-fn _hide_window_raw(any: display, any: window_handle): bool {
+fn _hide_window_raw(any display, any window_handle) bool {
    XUnmapWindow(display, window_handle)
    flush(display)
    true
 }
 
-fn hide_window(any: win): bool {
+fn hide_window(any win) bool {
    "Hide and unmap a native X11 window."
    def dh = _win_display_handle(win)
    dh ? _hide_window_raw(dh.get(0), dh.get(1)) : false
 }
 
 fn _update_normal_hints_raw(
-   any: display, any: win, int: width, int: height,
-   bool: resizable=true, bool: monitor=false,
-   int: minwidth=-1, int: minheight=-1,
-   int: maxwidth=-1, int: maxheight=-1,
-   int: numer=-1, int: denom=-1
-): bool {
+   any display, any win, int width, int height,
+   bool resizable=true, bool monitor=false,
+   int minwidth=-1, int minheight=-1,
+   int maxwidth=-1, int maxheight=-1,
+   int numer=-1, int denom=-1
+) bool {
    if(!display || !win){ return false }
    def hints = XAllocSizeHints()
    if(!hints){ return false }
@@ -991,19 +1287,19 @@ fn _update_normal_hints_raw(
 }
 
 fn update_normal_hints(
-   any: display,
-   any: win,
-   int: width,
-   int: height,
-   bool: resizable=true,
-   bool: monitor=false,
-   int: minwidth=-1,
-   int: minheight=-1,
-   int: maxwidth=-1,
-   int: maxheight=-1,
-   int: numer=-1,
-   int: denom=-1
-): bool {
+   any display,
+   any win,
+   int width,
+   int height,
+   bool resizable=true,
+   bool monitor=false,
+   int minwidth=-1,
+   int minheight=-1,
+   int maxwidth=-1,
+   int maxheight=-1,
+   int numer=-1,
+   int denom=-1
+) bool {
    "Updates ICCCM WM_NORMAL_HINTS for size limits and aspect ratio."
    _update_normal_hints_raw(
       display, win, width, height,
@@ -1014,7 +1310,7 @@ fn update_normal_hints(
    )
 }
 
-fn _set_window_manager_hints(any: display, any: win): bool {
+fn _set_window_manager_hints(any display, any win) bool {
    if(!display || !win){ return false }
    def hints = XAllocWMHints()
    if(!hints){ return false }
@@ -1027,10 +1323,10 @@ fn _set_window_manager_hints(any: display, any: win): bool {
 }
 
 fn _set_initial_normal_hints(
-   any: display, any: win, int: width, int: height,
-   bool: resizable=true, int: xpos=0, int: ypos=0,
-   bool: honor_position=false,
-): bool {
+   any display, any win, int width, int height,
+   bool resizable=true, int xpos=0, int ypos=0,
+   bool honor_position=false,
+) bool {
    "Initial X11 normal hints for native window creation."
    if(!display || !win){ return false }
    def hints = XAllocSizeHints()
@@ -1055,7 +1351,7 @@ fn _set_initial_normal_hints(
    true
 }
 
-fn _set_u32_property(any: display, any: win, any: property_atom, any: type_atom, any: value): bool {
+fn _set_u32_property(any display, any win, any property_atom, any type_atom, any value) bool {
    if(!display || !win || !property_atom || !type_atom){ return false }
    def data = zalloc(8)
    if(!data){ return false }
@@ -1065,24 +1361,24 @@ fn _set_u32_property(any: display, any: win, any: property_atom, any: type_atom,
    true
 }
 
-fn _set_cardinal_property(any: display, any: win, any: property_atom, any: value): bool { _set_u32_property(display, win, property_atom, XA_CARDINAL, value) }
+fn _set_cardinal_property(any display, any win, any property_atom, any value) bool { _set_u32_property(display, win, property_atom, XA_CARDINAL, value) }
 
-fn _set_atom_property(any: display, any: win, any: property_atom, any: value_atom): bool {
+fn _set_atom_property(any display, any win, any property_atom, any value_atom) bool {
    if(!value_atom){ return false }
    _set_u32_property(display, win, property_atom, XA_ATOM, value_atom)
 }
 
-fn _set_window_pid(any: display, any: win, any: net_wm_pid_atom): bool {
+fn _set_window_pid(any display, any win, any net_wm_pid_atom) bool {
    if(!display || !win || !net_wm_pid_atom){ return false }
    _set_cardinal_property(display, win, net_wm_pid_atom, pid())
 }
 
-fn _set_window_type_normal(any: display, any: win, any: net_wm_window_type_atom, any: net_wm_window_type_normal_atom): bool {
+fn _set_window_type_normal(any display, any win, any net_wm_window_type_atom, any net_wm_window_type_normal_atom) bool {
    if(!display || !win || !net_wm_window_type_atom || !net_wm_window_type_normal_atom){ return false }
    _set_atom_property(display, win, net_wm_window_type_atom, net_wm_window_type_normal_atom)
 }
 
-fn _set_compositor_bypass(any: display, any: win, any: bypass_atom, bool: enabled): bool {
+fn _set_compositor_bypass(any display, any win, any bypass_atom, bool enabled) bool {
    if(!display || !win || !bypass_atom){ return false }
    if(enabled){ return _set_cardinal_property(display, win, bypass_atom, 1) }
    XDeleteProperty(display, win, bypass_atom)
@@ -1090,7 +1386,7 @@ fn _set_compositor_bypass(any: display, any: win, any: bypass_atom, bool: enable
    true
 }
 
-fn _set_fullscreen_monitors(any: display, any: root, any: win, any: atom, any: monitor): bool {
+fn _set_fullscreen_monitors(any display, any root, any win, any atom, any monitor) bool {
    if(!display || !root || !win || !atom){ return false }
    if(!monitor || !is_dict(monitor)){
       XDeleteProperty(display, win, atom)
@@ -1104,7 +1400,7 @@ fn _set_fullscreen_monitors(any: display, any: root, any: win, any: atom, any: m
    ok
 }
 
-fn _set_class_hint(any: display, any: win, str: res_name, str: res_class): bool {
+fn _set_class_hint(any display, any win, str res_name, str res_class) bool {
    if(!display || !win){ return false }
    def hint = XAllocClassHint()
    if(!hint){ return false }
@@ -1115,7 +1411,7 @@ fn _set_class_hint(any: display, any: win, str: res_name, str: res_class): bool 
    true
 }
 
-fn _reply_wm_ping(any: display, any: root, any: event_ptr): bool {
+fn _reply_wm_ping(any display, any root, any event_ptr) bool {
    if(!display || !root || !event_ptr){ return false }
    def reply = zalloc(96)
    if(!reply){ return false }
@@ -1128,7 +1424,7 @@ fn _reply_wm_ping(any: display, any: root, any: event_ptr): bool {
    true
 }
 
-fn _set_override_redirect(any: display, any: win, bool: enabled): bool {
+fn _set_override_redirect(any display, any win, bool enabled) bool {
    if(!display || !win){ return false }
    def attrs = zalloc(112)
    if(!attrs){ return false }
@@ -1139,7 +1435,7 @@ fn _set_override_redirect(any: display, any: win, bool: enabled): bool {
    ok
 }
 
-fn _win_display_handle(any: win): any {
+fn _win_display_handle(any win) any {
    if(!win || !is_dict(win)){ return 0 }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -1147,20 +1443,20 @@ fn _win_display_handle(any: win): any {
 }
 
 comptime template _x11_wrap_win_dh_xy(name, doc, call_fn){
-   fn name(any: win, any: x, any: y): any {
+   fn name(any win, any x, any y) any {
       doc
       def dh = _win_display_handle(win)
       dh ? call_fn(dh.get(0), dh.get(1), x, y) : false
    }
 }
 
-fn set_size(any: win, int: w, int: h): bool {
+fn set_size(any win, int w, int h) bool {
    "Sets the X11 window size."
    def dh = _win_display_handle(win)
    dh ? set_window_size(dh.get(0), dh.get(1), w, h) : false
 }
 
-fn set_window_size(any: display, any: win, int: width, int: height, bool: resizable=true, bool: monitor=false): bool {
+fn set_window_size(any display, any win, int width, int height, bool resizable=true, bool monitor=false) bool {
    "Set the native X11 window size."
    if(!display || !win){ return false }
    width = max(1, width)
@@ -1174,10 +1470,10 @@ fn set_window_size(any: display, any: win, int: width, int: height, bool: resiza
 }
 
 fn _update_normal_hints_for_size(
-   any: display, any: win, bool: resizable, bool: monitor=false,
-   int: minwidth=-1, int: minheight=-1, int: maxwidth=-1, int: maxheight=-1,
-   int: numer=-1, int: denom=-1
-): bool {
+   any display, any win, bool resizable, bool monitor=false,
+   int minwidth=-1, int minheight=-1, int maxwidth=-1, int maxheight=-1,
+   int numer=-1, int denom=-1
+) bool {
    if(!display || !win){ return false }
    def size = get_window_size(display, win)
    if(!size || !is_dict(size)){ return false }
@@ -1188,26 +1484,26 @@ fn _update_normal_hints_for_size(
 }
 
 fn _set_window_size_limits_raw(
-   any: display, any: win, int: minwidth=-1, int: minheight=-1,
-   int: maxwidth=-1, int: maxheight=-1, bool: resizable=true,
-   bool: monitor=false, int: numer=-1, int: denom=-1
-): bool {
+   any display, any win, int minwidth=-1, int minheight=-1,
+   int maxwidth=-1, int maxheight=-1, bool resizable=true,
+   bool monitor=false, int numer=-1, int denom=-1
+) bool {
    "Set native X11 window size limits."
    _update_normal_hints_for_size(display, win, resizable, monitor,
    minwidth, minheight, maxwidth, maxheight, numer, denom)
 }
 
 fn _set_window_aspect_ratio_raw(
-   any: display, any: win, int: numer, int: denom, bool: resizable=true,
-   bool: monitor=false, int: minwidth=-1, int: minheight=-1,
-   int: maxwidth=-1, int: maxheight=-1
-): bool {
+   any display, any win, int numer, int denom, bool resizable=true,
+   bool monitor=false, int minwidth=-1, int minheight=-1,
+   int maxwidth=-1, int maxheight=-1
+) bool {
    "Set native X11 window aspect-ratio hints."
    _update_normal_hints_for_size(display, win, resizable, monitor,
    minwidth, minheight, maxwidth, maxheight, numer, denom)
 }
 
-fn _maximize_window_raw(any: display, any: root, any: window_handle, any: net_wm_state_atom, any: max_vert_atom, any: max_horz_atom): bool {
+fn _maximize_window_raw(any display, any root, any window_handle, any net_wm_state_atom, any max_vert_atom, any max_horz_atom) bool {
    if(is_window_visible(display, window_handle)){
       def ok_visible = send_wm_state_event(display, root, window_handle, net_wm_state_atom,
       NET_WM_STATE_ADD, max_vert_atom, max_horz_atom)
@@ -1220,7 +1516,7 @@ fn _maximize_window_raw(any: display, any: root, any: window_handle, any: net_wm
    ok_vert && ok_horz
 }
 
-fn maximize_window(any: win): bool {
+fn maximize_window(any win) bool {
    "Maximize a native X11 window."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -1233,7 +1529,7 @@ fn maximize_window(any: win): bool {
    _maximize_window_raw(display, root, handle, net_wm_state_atom, max_vert_atom, max_horz_atom)
 }
 
-fn _restore_window_raw(any: display, any: root, any: window_handle, any: wm_state_atom, any: net_wm_state_atom, any: max_vert_atom=0, any: max_horz_atom=0): bool {
+fn _restore_window_raw(any display, any root, any window_handle, any wm_state_atom, any net_wm_state_atom, any max_vert_atom=0, any max_horz_atom=0) bool {
    if(wm_state_atom && is_window_iconified(display, window_handle, wm_state_atom)){
       XMapWindow(display, window_handle)
       flush(display)
@@ -1249,7 +1545,7 @@ fn _restore_window_raw(any: display, any: root, any: window_handle, any: wm_stat
    true
 }
 
-fn restore_window(any: win): bool {
+fn restore_window(any win) bool {
    "Restore a native X11 window from maximized or minimized state."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -1265,7 +1561,7 @@ fn restore_window(any: win): bool {
    _restore_window_raw(display, root, handle, wm_state_atom, net_wm_state_atom, max_vert_atom, max_horz_atom)
 }
 
-fn _set_window_floating_raw(any: display, any: root, any: win, any: net_wm_state_atom, any: above_atom, bool: enabled): bool {
+fn _set_window_floating_raw(any display, any root, any win, any net_wm_state_atom, any above_atom, bool enabled) bool {
    if(!display || !win || !net_wm_state_atom || !above_atom){ return false }
    if(is_window_visible(display, win)){
       if(!root){ return false }
@@ -1283,7 +1579,7 @@ fn _set_window_floating_raw(any: display, any: root, any: win, any: net_wm_state
    ok_remove
 }
 
-fn set_window_fullscreen(any: display, any: root, any: win, any: net_wm_state_atom, any: fullscreen_atom, bool: enabled): bool {
+fn set_window_fullscreen(any display, any root, any win, any net_wm_state_atom, any fullscreen_atom, bool enabled) bool {
    "Sets `_NET_WM_STATE_FULLSCREEN` via EWMH client messages."
    if(!display || !root || !win || !net_wm_state_atom || !fullscreen_atom){ return false }
    def action = enabled ? NET_WM_STATE_ADD : NET_WM_STATE_REMOVE
@@ -1292,7 +1588,7 @@ fn set_window_fullscreen(any: display, any: root, any: win, any: net_wm_state_at
    ok
 }
 
-fn _set_window_decorated_raw(any: display, any: win, any: motif_wm_hints_atom, bool: enabled): bool {
+fn _set_window_decorated_raw(any display, any win, any motif_wm_hints_atom, bool enabled) bool {
    if(!display || !win || !motif_wm_hints_atom){ return false }
    def hints = zalloc(40)
    if(!hints){ return false }
@@ -1304,15 +1600,15 @@ fn _set_window_decorated_raw(any: display, any: win, any: motif_wm_hints_atom, b
    ok
 }
 
-fn set_window_resizable(any: win, bool: enabled): bool {
+fn set_window_resizable(any win, bool enabled) bool {
    "Toggles the resizable state of an X11 window."
    _update_window_hints(win, enabled)
 }
 
 fn _update_window_hints(
-   any: win, bool: resizable, int: min_w=-1, int: min_h=-1,
-   int: max_w=-1, int: max_h=-1, int: numer=-1, int: denom=-1
-): bool {
+   any win, bool resizable, int min_w=-1, int min_h=-1,
+   int max_w=-1, int max_h=-1, int numer=-1, int denom=-1
+) bool {
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -1324,7 +1620,7 @@ fn _update_window_hints(
    true
 }
 
-fn set_window_decorated(any: win, bool: enabled): bool {
+fn set_window_decorated(any win, bool enabled) bool {
    "Toggles window decorations for an X11 window."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -1337,7 +1633,7 @@ fn set_window_decorated(any: win, bool: enabled): bool {
    ok
 }
 
-fn set_window_floating(any: win, bool: enabled): bool {
+fn set_window_floating(any win, bool enabled) bool {
    "Toggles the always-on-top state of an X11 window."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -1352,7 +1648,7 @@ fn set_window_floating(any: win, bool: enabled): bool {
    ok
 }
 
-fn set_window_mouse_passthrough(any: win, bool: enabled): bool {
+fn set_window_mouse_passthrough(any win, bool enabled) bool {
    "Sets mouse passthrough mode for an X11 window(click-through)."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -1368,7 +1664,7 @@ fn set_window_mouse_passthrough(any: win, bool: enabled): bool {
    true
 }
 
-fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max_h): bool {
+fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) bool {
    "Sets size limits for an X11 window via WM_NORMAL_HINTS."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -1380,7 +1676,7 @@ fn set_window_size_limits(any: win, int: min_w, int: min_h, int: max_w, int: max
    )
 }
 
-fn set_window_aspect_ratio(any: win, int: numer, int: denom): bool {
+fn set_window_aspect_ratio(any win, int numer, int denom) bool {
    "Sets aspect ratio for an X11 window via WM_NORMAL_HINTS."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -1391,7 +1687,7 @@ fn set_window_aspect_ratio(any: win, int: numer, int: denom): bool {
    )
 }
 
-fn set_window_opacity(any: win, f64: opacity): bool {
+fn set_window_opacity(any win, f64 opacity) bool {
    "Sets `_NET_WM_WINDOW_OPACITY` when supported by the window manager."
    def dh = _win_display_handle(win)
    if(!dh){ return false }
@@ -1412,7 +1708,7 @@ fn set_window_opacity(any: win, f64: opacity): bool {
    ok
 }
 
-fn get_window_opacity(any: win): f64 {
+fn get_window_opacity(any win) f64 {
    "Returns the window opacity from _NET_WM_WINDOW_OPACITY(1.0 if not set)."
    def dh = _win_display_handle(win)
    if(!dh){ return 1.0 }
@@ -1433,71 +1729,25 @@ fn get_window_opacity(any: win): f64 {
    float(raw) / 4294967295.0
 }
 
-fn get_window_content_scale(any: win): list {
+fn get_window_content_scale(any win) list {
    "Returns [xscale, yscale] from the cached scale values."
    if(!win || !is_dict(win)){ return [1.0, 1.0] }
    [win.get("scale_x", 1.0), win.get("scale_y", 1.0)]
 }
 
-fn get_content_scale(any: win): list {
+fn get_content_scale(any win) list {
    "Alias for `get_window_content_scale`."
    get_window_content_scale(win)
 }
 
-fn _focus_window_raw(any: display, any: win): bool {
+fn _focus_window_raw(any display, any win) bool {
    XRaiseWindow(display, win)
    XSetInputFocus(display, win, RevertToParent, CurrentTime)
    flush(display)
    true
 }
 
-fn _debug_focus_state(any: display, any: handle, str: label): any {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return 0 }
-   if(!display || !handle){ return 0 }
-   def focused = zalloc(8)
-   def state = zalloc(4)
-   if(!focused || !state){
-      if(focused){ free(focused) }
-      if(state){ free(state) }
-      return 0
-   }
-   XGetInputFocus(display, focused, state)
-   _dbg_input(label + " target=0x" + to_hex(handle) +
-      " focus=0x" + to_hex(load64_h(focused, 0)) +
-   " revert=" + to_str(load32(state, 0)))
-   free(focused, state)
-   0
-}
-
-fn _debug_raw_key_event(any: event_ptr, any: target, bool: filtered, str: label): any {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return 0 }
-   def typ = load32(event_ptr, 0)
-   if(typ != KeyPress && typ != KeyRelease && typ != ButtonPress && typ != ButtonRelease && typ != MotionNotify){ return 0 }
-   if(typ == MotionNotify && !_debug_should_log_motion_event()){ return 0 }
-   def kind = case typ {
-      KeyPress -> "KeyPress"
-      KeyRelease -> "KeyRelease"
-      ButtonPress -> "ButtonPress"
-      ButtonRelease -> "ButtonRelease"
-      MotionNotify -> "MotionNotify"
-      _ -> "Event"
-   }
-   def code_label = (typ == KeyPress || typ == KeyRelease) ? " keycode=" : ((typ == ButtonPress || typ == ButtonRelease) ? " button=" : " detail=")
-   _dbg_input(label +
-      " raw=" + kind + "(" + to_str(typ) + ")" +
-      " target=0x" + to_hex(target) +
-      code_label + to_str(load32(event_ptr, 84)) +
-      " state=0x" + to_hex(load32(event_ptr, 80)) +
-      " time=" + to_str(load64_h(event_ptr, 56)) +
-      " serial=" + to_str(load64_h(event_ptr, 8)) +
-      " send=" + to_str(load32(event_ptr, 16) != 0) +
-      " x=" + to_str(load32(event_ptr, 64)) +
-      " y=" + to_str(load32(event_ptr, 68)) +
-   " filtered=" + to_str(filtered))
-   0
-}
-
-fn focus_window(any: win): bool {
+fn focus_window(any win) bool {
    "Raise and focus an X11 toplevel window, preferring _NET_ACTIVE_WINDOW."
    win = _ensure_input_context(win)
    def dh = _win_display_handle(win)
@@ -1513,21 +1763,19 @@ fn focus_window(any: win): bool {
       flush(display)
       XSync(display, 0)
       if(_window_focused(display, handle)== 0 && is_window_visible(display, handle)){ _focus_window_raw(display, handle) }
-      _debug_focus_state(display, handle, "focus_window")
       return true
    }
    if(is_window_visible(display, handle)){ _focus_window_raw(display, handle) }
-   _debug_focus_state(display, handle, "focus_window")
    true
 }
 
-fn _set_cursor_pos_raw(any: display, any: win, any: x, any: y): bool {
+fn _set_cursor_pos_raw(any display, any win, any x, any y) bool {
    XWarpPointer(display, 0, win, 0, 0, 0, 0, int(x), int(y))
    flush(display)
    true
 }
 
-fn _alloc_query_pointer_args(bool: zeroed=false): any {
+fn _alloc_query_pointer_args(bool zeroed=false) any {
    def alloc4, alloc8 = zeroed ? zalloc : malloc, zeroed ? zalloc : malloc
    def root = alloc8(8)
    def child = alloc8(8)
@@ -1554,7 +1802,7 @@ fn _alloc_query_pointer_args(bool: zeroed=false): any {
    }
 }
 
-fn _free_query_pointer_args(any: args): bool {
+fn _free_query_pointer_args(any args) bool {
    if(!is_dict(args)){ return false }
    def root = args.get("root", 0)
    def child = args.get("child", 0)
@@ -1573,7 +1821,7 @@ fn _free_query_pointer_args(any: args): bool {
    true
 }
 
-fn set_cursor_pos(dict: win, any: x, any: y): dict {
+fn set_cursor_pos(dict win, any x, any y) dict {
    "Warps the cursor to window-local coordinates."
    if(!win || !is_dict(win)){ return win }
    def display = win.get("display", 0)
@@ -1593,7 +1841,7 @@ fn set_cursor_pos(dict: win, any: x, any: y): dict {
 
 comptime emit _x11_wrap_win_dh_xy(set_pos, "Moves the X11 window to [x, y].", move_window)
 
-fn get_cursor_pos(dict: win): list {
+fn get_cursor_pos(dict win) list {
    "Queries the current pointer position relative to the X11 window."
    if(!win || !is_dict(win)){ return [0.0, 0.0] }
    if(win.get("cursor_mode", CURSOR_MODE_NORMAL) == CURSOR_MODE_DISABLED){
@@ -1624,7 +1872,7 @@ fn get_cursor_pos(dict: win): list {
    out
 }
 
-fn _capture_cursor(any: display, any: win, any: cursor=0): bool {
+fn _capture_cursor(any display, any win, any cursor=0) bool {
    if(!display || !win){ return false }
    if(common.env_truthy("NY_UI_HEADLESS")){ return true }
    XGrabPointer(display, win, 1,
@@ -1632,14 +1880,14 @@ fn _capture_cursor(any: display, any: win, any: cursor=0): bool {
    GrabModeAsync, GrabModeAsync, win, cursor, CurrentTime) == GrabSuccess
 }
 
-fn _release_cursor(any: display): bool {
+fn _release_cursor(any display) bool {
    if(!display){ return false }
    XUngrabPointer(display, CurrentTime)
    flush(display)
    true
 }
 
-fn _hidden_cursor_handle(any: display): any {
+fn _hidden_cursor_handle(any display) any {
    if(!display){ return 0 }
    def key = "hidden_cursor_" + to_str(display)
    def cached = _get_x11_val(key, 0)
@@ -1656,7 +1904,7 @@ fn _hidden_cursor_handle(any: display): any {
    cursor
 }
 
-fn _set_cursor_visibility(any: display, any: win, bool: visible): bool {
+fn _set_cursor_visibility(any display, any win, bool visible) bool {
    if(!display || !win){ return false }
    if(!visible && common.env_truthy("NY_UI_HEADLESS")){ return true }
    _suppress_x11_errors_temp(true)
@@ -1672,7 +1920,7 @@ fn _set_cursor_visibility(any: display, any: win, bool: visible): bool {
    true
 }
 
-fn get_key_state(dict: win, int: key): int {
+fn get_key_state(dict win, int key) int {
    "Returns live key state for the native X11 window, falling back to cached events."
    if(!win || !is_dict(win)){ return 0 }
    def display = win.get("display", 0)
@@ -1696,7 +1944,7 @@ fn get_key_state(dict: win, int: key): int {
    win.get("key_states", dict(8)).get(key, false) ? 1 : 0
 }
 
-fn _x11_mouse_button_mask_for_ny_button(int: button): int {
+fn _x11_mouse_button_mask_for_ny_button(int button) int {
    case button {
       0 -> Button1Mask
       1 -> Button3Mask
@@ -1705,7 +1953,7 @@ fn _x11_mouse_button_mask_for_ny_button(int: button): int {
    }
 }
 
-fn get_mouse_button_state(any: win, int: button): int {
+fn get_mouse_button_state(any win, int button) int {
    "Returns the live X11 mouse button state for the cached native window."
    if(!win || !is_dict(win)){ return 0 }
    def display = win.get("display", 0)
@@ -1744,34 +1992,56 @@ fn get_mouse_button_state(any: win, int: button): int {
    win.get("mouse_buttons", dict(8)).get(button, false) ? 1 : 0
 }
 
-fn _x11_clear_mouse_buttons(any: win): any {
+fn _x11_clear_mouse_buttons(any win) any {
    if(!is_dict(win)){ return win }
    win["mouse_buttons"] = dict(8)
    win
 }
 
-fn _clear_sticky_input_state(any: state): any {
+fn _clear_sticky_input_state(any state) any {
    if(!is_dict(state)){ state = dict(8) }
    def keys = dict_keys(state)
    mut i = 0
    while(i < keys.len){
       def key = keys[i]
-      if(state.get(key, 0) == 3){ ;; sticky key state
-         state[key] = 0 ;; released
+      if(state.get(key, 0) == 3){
+         state[key] = 0
       }
       i += 1
    }
    state
 }
 
-fn _set_cursor_capture_flags(any: win, bool: captured, bool: disabled): any {
+fn _set_cursor_capture_flags(any win, bool captured, bool disabled) any {
    win["captured_cursor"] = captured
    win["disabled_cursor"] = disabled
    win["ignore_warp_motion"] = false
    win
 }
 
-fn set_input_mode(dict: win, int: mode, int: value): dict {
+fn _x11_auto_raw_lock_allowed() bool {
+   if(ui_profile.env_truthy_cached("NY_UI_X11_DISABLE_RAW_LOCK")){
+      return false
+   }
+   if(ui_profile.env_present_cached("NY_UI_RAW_MOUSE") && !ui_profile.env_truthy_cached("NY_UI_RAW_MOUSE")){
+      return false
+   }
+   true
+}
+
+fn _x11_leave_disabled_raw(any win, any display, any root, bool xi_available, bool raw_mouse_motion, bool disabled_cursor) any {
+   if(xi_available && disabled_cursor && (raw_mouse_motion || win.get("raw_mouse_lock_auto", false))){
+      _xi_set_raw_motion_enabled(display, root, false)
+   }
+   if(win.get("raw_mouse_lock_auto", false)){
+      win["raw_mouse_motion"] = false
+      win["raw_mouse_lock_auto"] = false
+   }
+   win["raw_motion_nonzero_seen"] = false
+   win
+}
+
+fn set_input_mode(dict win, int mode, int value) dict {
    "Apply cursor and raw-mouse modes to the native X11 window state."
    if(!win || !is_dict(win)){ return win }
    def display = win.get("display", 0)
@@ -1790,6 +2060,7 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
       mut enabled = value != 0
       if(enabled && !xi_available){ enabled = false }
       win["raw_mouse_motion"] = enabled
+      win["raw_mouse_lock_auto"] = false
       if(!enabled){ win["raw_motion_nonzero_seen"] = false }
       if(cursor_mode == CURSOR_MODE_DISABLED && xi_available){
          if(!_xi_set_raw_motion_enabled(display, root, enabled)){ win["raw_mouse_motion"] = false }
@@ -1816,9 +2087,15 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
    }
    if(mode != INPUT_MODE_CURSOR){ return win }
    def previous = cursor_mode
-   win["cursor_mode"] = value
+   if(previous == CURSOR_MODE_DISABLED && value == CURSOR_MODE_DISABLED){
+      if(xi_available && raw_mouse_motion){
+         _xi_set_raw_motion_enabled(display, root, true)
+      }
+      return win
+   }
    if(value == CURSOR_MODE_NORMAL){
-      if(xi_available && raw_mouse_motion && disabled_cursor){ _xi_set_raw_motion_enabled(display, root, false) }
+      win["cursor_mode"] = value
+      win = _x11_leave_disabled_raw(win, display, root, xi_available, raw_mouse_motion, disabled_cursor)
       _release_cursor(display)
       _set_cursor_visibility(display, handle, true)
       win = _apply_window_cursor(win)
@@ -1833,13 +2110,15 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
       return _set_cursor_capture_flags(win, false, false)
    }
    if(value == CURSOR_MODE_HIDDEN){
-      if(xi_available && raw_mouse_motion){ _xi_set_raw_motion_enabled(display, root, false) }
+      win["cursor_mode"] = value
+      win = _x11_leave_disabled_raw(win, display, root, xi_available, raw_mouse_motion, disabled_cursor)
       _release_cursor(display)
       _set_cursor_visibility(display, handle, false)
       return _set_cursor_capture_flags(win, false, false)
    }
    if(value == CURSOR_MODE_CAPTURED){
-      if(xi_available && raw_mouse_motion){ _xi_set_raw_motion_enabled(display, root, false) }
+      win["cursor_mode"] = value
+      win = _x11_leave_disabled_raw(win, display, root, xi_available, raw_mouse_motion, disabled_cursor)
       _set_cursor_visibility(display, handle, true)
       win = _apply_window_cursor(win)
       _capture_cursor(display, handle)
@@ -1848,17 +2127,26 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
    if(value == CURSOR_MODE_DISABLED){
       mut pos = get_cursor_pos(win)
       if(!is_list(pos) || pos.len < 2){ pos = [float(mouse_x), float(mouse_y)] }
+      win["cursor_mode"] = value
       def center_x, center_y = int(win_w / 2), int(win_h / 2)
       win["restore_cursor_x"] = int(pos[0])
       win["restore_cursor_y"] = int(pos[1])
       _set_cursor_visibility(display, handle, false)
       _capture_cursor(display, handle, _hidden_cursor_handle(display))
-      if(xi_available && raw_mouse_motion){ _xi_set_raw_motion_enabled(display, root, true) }
+      def auto_raw = xi_available && !raw_mouse_motion && _x11_auto_raw_lock_allowed()
+      def lock_raw = xi_available && (raw_mouse_motion || auto_raw)
+      if(lock_raw){
+         if(_xi_set_raw_motion_enabled(display, root, true)){
+            win["raw_mouse_motion"] = true
+            win["raw_mouse_lock_auto"] = auto_raw
+         } else {
+            win["raw_mouse_motion"] = false
+            win["raw_mouse_lock_auto"] = false
+         }
+      }
       _set_cursor_pos_raw(display, handle, center_x, center_y)
       win["warp_cursor_x"] = center_x
       win["warp_cursor_y"] = center_y
-      win["warp_event_offset_x"] = 0
-      win["warp_event_offset_y"] = 0
       win["ignore_warp_motion"] = true
       win["raw_motion_nonzero_seen"] = false
       win["mouse_x"] = center_x
@@ -1868,7 +2156,8 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
       win["captured_cursor"] = true
       win["disabled_cursor"] = true
       _dbg_input("cursor disabled xi=" + to_str(xi_available) +
-         " raw=" + to_str(raw_mouse_motion) +
+         " raw=" + to_str(win.get("raw_mouse_motion", false)) +
+         " auto_raw=" + to_str(win.get("raw_mouse_lock_auto", false)) +
          " center=(" + to_str(center_x) + "," + to_str(center_y) + ")" +
          " restore=(" + to_str(win.get("restore_cursor_x", center_x)) +
       "," + to_str(win.get("restore_cursor_y", center_y)) + ")")
@@ -1877,34 +2166,34 @@ fn set_input_mode(dict: win, int: mode, int: value): dict {
    win
 }
 
-fn get_input_mode(any: win, int: mode): int {
+fn get_input_mode(any win, int mode) int {
    "Queries the current input mode for the given native X11 window."
    if(!win || !is_dict(win)){ return 0 }
-   if(mode == 0x00033005){ ;; INPUT_MODE_RAW_MOUSE
+   if(mode == 0x00033005){
       return win.get("raw_mouse_motion", false) ? 1 : 0
    }
-   if(mode == 0x00033001){ ;; INPUT_MODE_CURSOR
+   if(mode == 0x00033001){
       return win.get("cursor_mode", 0x00034001) ;; CURSOR_MODE_NORMAL
    }
-   if(mode == 0x00033002){ ;; INPUT_MODE_STICKY_KEYS
+   if(mode == 0x00033002){
       return win.get("sticky_keys", false) ? 1 : 0
    }
-   if(mode == 0x00033003){ ;; INPUT_MODE_STICKY_MOUSE_BUTTONS
+   if(mode == 0x00033003){
       return win.get("sticky_mouse_buttons", false) ? 1 : 0
    }
-   if(mode == 0x00033004){ ;; INPUT_MODE_LOCK_KEY_MODS
+   if(mode == 0x00033004){
       return win.get("lock_key_mods", false) ? 1 : 0
    }
    0
 }
 
-fn get_key_scancode(any: win, int: key): int {
+fn get_key_scancode(any win, int key) int {
    "Returns the backend scancode for a logical key, or -1 when unavailable."
    if(!win || !is_dict(win)){ return -1 }
    int(win.get("x11_scancodes", dict(8)).get(key, -1))
 }
 
-fn _request_window_attention_raw(any: display, any: root, any: win, any: net_wm_state_atom, any: demands_attention_atom): bool {
+fn _request_window_attention_raw(any display, any root, any win, any net_wm_state_atom, any demands_attention_atom) bool {
    if(!display || !root || !win || !net_wm_state_atom || !demands_attention_atom){ return false }
    def ok = send_wm_state_event(display, root, win, net_wm_state_atom,
    NET_WM_STATE_ADD, demands_attention_atom)
@@ -1912,7 +2201,7 @@ fn _request_window_attention_raw(any: display, any: root, any: win, any: net_wm_
    ok
 }
 
-fn request_window_attention(any: win): bool {
+fn request_window_attention(any win) bool {
    "Requests user attention for the window."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -1923,7 +2212,7 @@ fn request_window_attention(any: win): bool {
    _request_window_attention_raw(display, root, handle, net_wm_state, demands_attention)
 }
 
-fn _get_window_frame_extents_property(any: display, any: win, any: net_frame_extents_atom): any {
+fn _get_window_frame_extents_property(any display, any win, any net_frame_extents_atom) any {
    def prop = get_window_property(display, win, net_frame_extents_atom, XA_CARDINAL)
    if(!prop || !is_dict(prop)){ return false }
    def data = _prop_data_ptr(prop)
@@ -1943,13 +2232,13 @@ fn _get_window_frame_extents_property(any: display, any: win, any: net_frame_ext
 }
 
 fn _get_window_frame_extents_raw(
-   any: display,
-   any: root,
-   any: win,
-   any: net_frame_extents_atom,
-   any: net_request_frame_extents_atom=0,
-   int: timeout_ms=500
-): any {
+   any display,
+   any root,
+   any win,
+   any net_frame_extents_atom,
+   any net_request_frame_extents_atom=0,
+   int timeout_ms=500
+) any {
    "Compute native X11 window frame extents."
    if(!display || !win || !net_frame_extents_atom){ return false }
    def existing = _get_window_frame_extents_property(display, win, net_frame_extents_atom)
@@ -1968,7 +2257,7 @@ fn _get_window_frame_extents_raw(
    false
 }
 
-fn get_window_frame_size(any: win): list {
+fn get_window_frame_size(any win) list {
    "Returns the window frame size [left, top, right, bottom]."
    if(!win || !is_dict(win)){ return [0, 0, 0, 0] }
    def display = win.get("display", 0)
@@ -1981,7 +2270,7 @@ fn get_window_frame_size(any: win): list {
    [extents.get("left", 0), extents.get("top", 0), extents.get("right", 0), extents.get("bottom", 0)]
 }
 
-fn wait_events(any: display, int: timeout_ms=100): bool {
+fn wait_events(any display, int timeout_ms=100) bool {
    "Waits until at least one X11 event is pending or the timeout expires."
    if(!display){ return false }
    if(timeout_ms <= 0){ return pending(display) > 0 }
@@ -1994,7 +2283,7 @@ fn wait_events(any: display, int: timeout_ms=100): bool {
    pending(display) > 0
 }
 
-fn wait_for_visibility_notify(any: display, any: win, int: timeout_ms=100): bool {
+fn wait_for_visibility_notify(any display, any win, int timeout_ms=100) bool {
    "Wait for a `VisibilityNotify` event for a native X11 window."
    if(!display || !win){ return false }
    def event_buf = malloc(256)
@@ -2015,11 +2304,11 @@ fn wait_for_visibility_notify(any: display, any: win, int: timeout_ms=100): bool
    ok
 }
 
-fn _actual_event_window(any: event_ptr, any: typ): int {
+fn _actual_event_window(any event_ptr, any typ) int {
    load32(event_ptr, 32)
 }
 
-fn _send_selection_notify(any: display, any: requestor, any: selection, any: target, any: property, any: time): bool {
+fn _send_selection_notify(any display, any requestor, any selection, any target, any property, any time) bool {
    if(!display || !requestor){ return false }
    def ev = zalloc(96)
    if(!ev){ return false }
@@ -2035,13 +2324,13 @@ fn _send_selection_notify(any: display, any: requestor, any: selection, any: tar
    ok
 }
 
-fn _selection_text_for_request(any: win, any: selection_atom): str {
+fn _selection_text_for_request(any win, any selection_atom) str {
    if(!win || !is_dict(win)){ return "" }
    if(selection_atom && selection_atom == win.get("primary_atom", 0)){ return win.get("primary_selection_string", "") }
    win.get("clipboard_string", "")
 }
 
-fn _set_utf8_text_property(any: display, any: win, any: property, any: utf8_string_atom, any: text): bool {
+fn _set_utf8_text_property(any display, any win, any property, any utf8_string_atom, any text) bool {
    if(!display || !win || !property || !utf8_string_atom){ return false }
    if(!is_str(text)){ text = to_str(text) }
    if(text.len == 0){
@@ -2053,7 +2342,7 @@ fn _set_utf8_text_property(any: display, any: win, any: property, any: utf8_stri
 }
 
 comptime template _x11_icon_dim_getter(name, key0, key1){
-   fn ${name}(any: image): int {
+   fn ${name}(any image) int {
       if(!is_dict(image)){ return 0 }
       int(image.get(key0, image.get(key1, 0)))
    }
@@ -2062,32 +2351,32 @@ comptime template _x11_icon_dim_getter(name, key0, key1){
 comptime emit _x11_icon_dim_getter(_icon_image_width, "width", "w")
 comptime emit _x11_icon_dim_getter(_icon_image_height, "height", "h")
 
-fn _icon_image_pixels(any: image): any {
+fn _icon_image_pixels(any image) any {
    if(!is_dict(image)){ return 0 }
    image.get("pixels_ptr",
       image.get("pixels",
    image.get("data", 0)))
 }
 
-fn _icon_pixel_source_len(any: pixels): int {
+fn _icon_pixel_source_len(any pixels) int {
    if(is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels)){ return pixels.len }
    if(is_ptr(pixels)){ return -1 }
    0
 }
 
-fn _icon_pixel_byte(any: pixels, int: index): int {
+fn _icon_pixel_byte(any pixels, int index) int {
    if(is_ptr(pixels) || is_str(pixels) || is_bytes(pixels)){ return load8(pixels, index) }
    if(is_list(pixels) || is_tuple(pixels)){ return pixels.get(index, 0) }
    0
 }
 
-fn _is_standard_cursor_shape(any: shape): bool { comptime match X11StandardCursorShape(shape, false) }
+fn _is_standard_cursor_shape(any shape) bool { comptime match X11StandardCursorShape(shape, false) }
 
-fn _cursor_theme_name(any: shape): str { comptime match X11CursorThemeName(shape, "") }
+fn _cursor_theme_name(any shape) str { comptime match X11CursorThemeName(shape, "") }
 
-fn _cursor_font_shape(any: shape): int { comptime match X11CursorFontShape(shape, 0) }
+fn _cursor_font_shape(any shape) int { comptime match X11CursorFontShape(shape, 0) }
 
-fn _create_native_cursor_handle(any: display, any: image, int: xhot=0, int: yhot=0): any {
+fn _create_native_cursor_handle(any display, any image, int xhot=0, int yhot=0) any {
    if(!display){ return 0 }
    def width = _icon_image_width(image)
    def height = _icon_image_height(image)
@@ -2119,7 +2408,7 @@ fn _create_native_cursor_handle(any: display, any: image, int: xhot=0, int: yhot
    cursor_handle
 }
 
-fn _create_standard_cursor_handle(any: display, any: shape): any {
+fn _create_standard_cursor_handle(any display, any shape) any {
    if(!display || !_is_standard_cursor_shape(shape)){ return 0 }
    mut cursor_handle = 0
    def theme_name = _cursor_theme_name(shape)
@@ -2140,7 +2429,7 @@ fn _create_standard_cursor_handle(any: display, any: shape): any {
    XCreateFontCursor(display, fallback)
 }
 
-fn create_cursor(any: image, int: xhot=0, int: yhot=0): int {
+fn create_cursor(any image, int xhot=0, int yhot=0) int {
    "Creates a backend cursor object from a Ny RGBA8 image dictionary."
    def width = _icon_image_width(image)
    def height = _icon_image_height(image)
@@ -2154,7 +2443,7 @@ fn create_cursor(any: image, int: xhot=0, int: yhot=0): int {
    cursor
 }
 
-fn create_standard_cursor(any: shape): int {
+fn create_standard_cursor(any shape) int {
    "Create a backend cursor object for a standard cursor shape."
    if(!_is_standard_cursor_shape(shape)){ return 0 }
    def cursor = _next_cursor_id()
@@ -2163,7 +2452,7 @@ fn create_standard_cursor(any: shape): int {
    cursor
 }
 
-fn _realize_cursor_handle(any: display, any: cursor): any {
+fn _realize_cursor_handle(any display, any cursor) any {
    if(!display || !is_int(cursor) || cursor <= 0){ return 0 }
    mut spec = _cursor_get(cursor)
    if(!spec || !is_dict(spec)){ return 0 }
@@ -2186,7 +2475,7 @@ fn _realize_cursor_handle(any: display, any: cursor): any {
    handle
 }
 
-fn destroy_cursor(any: cursor): bool {
+fn destroy_cursor(any cursor) bool {
    "Destroys a previously created X11 cursor object."
    if(!is_int(cursor) || cursor <= 0){ return false }
    def spec = _cursor_get(cursor)
@@ -2198,7 +2487,7 @@ fn destroy_cursor(any: cursor): bool {
    true
 }
 
-fn _apply_cursor_handle(any: display, any: window_handle, any: cursor_handle): bool {
+fn _apply_cursor_handle(any display, any window_handle, any cursor_handle) bool {
    if(!display || !window_handle){ return false }
    if(cursor_handle){ XDefineCursor(display, window_handle, cursor_handle) }
    else { XUndefineCursor(display, window_handle) }
@@ -2206,7 +2495,7 @@ fn _apply_cursor_handle(any: display, any: window_handle, any: cursor_handle): b
    true
 }
 
-fn _apply_window_cursor(any: win): any {
+fn _apply_window_cursor(any win) any {
    if(!win || !is_dict(win)){ return win }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -2220,14 +2509,14 @@ fn _apply_window_cursor(any: win): any {
    win
 }
 
-fn set_cursor(any: win, any: cursor): any {
+fn set_cursor(any win, any cursor) any {
    "Applies a cursor object to an X11 window, or clears it when cursor is zero."
    if(!win || !is_dict(win)){ return win }
    win["cursor"] = cursor
    _apply_window_cursor(win)
 }
 
-fn set_window_icon(dict: win, any: images): bool {
+fn set_window_icon(dict win, any images) bool {
    "Publishes `_NET_WM_ICON` using packed ARGB32 data."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -2287,19 +2576,19 @@ fn set_window_icon(dict: win, any: images): bool {
    ok
 }
 
-fn _xevent_client_l(any: event_ptr, int: index): any { load64_h(event_ptr, 56 + index * 8) }
+fn _xevent_client_l(any event_ptr, int index) any { load64_h(event_ptr, 56 + index * 8) }
 
-fn _send_xdnd_status(any: display, any: source, any: target, bool: accept, any: action_copy_atom=0): bool {
+fn _send_xdnd_status(any display, any source, any target, bool accept, any action_copy_atom=0) bool {
    _send_xdnd_client_message(display, source, target.get("xdnd_status", 0),
    target.get("handle", 0), accept ? 1 : 0, 0, 0, accept ? action_copy_atom : 0)
 }
 
-fn _send_xdnd_finished(any: display, any: source, any: target, bool: accepted, any: action_copy_atom=0): bool {
+fn _send_xdnd_finished(any display, any source, any target, bool accepted, any action_copy_atom=0) bool {
    _send_xdnd_client_message(display, source, target.get("xdnd_finished", 0),
    target.get("handle", 0), accepted ? 1 : 0, accepted ? action_copy_atom : 0)
 }
 
-fn _send_xdnd_client_message(any: display, any: source, any: message, any: window_handle, any: l0=0, any: l1=0, any: l2=0, any: l3=0): bool {
+fn _send_xdnd_client_message(any display, any source, any message, any window_handle, any l0=0, any l1=0, any l2=0, any l3=0) bool {
    if(!display || !source || !message || !window_handle){ return false }
    def ev = zalloc(96)
    if(!ev){ return false }
@@ -2318,7 +2607,7 @@ fn _send_xdnd_client_message(any: display, any: source, any: message, any: windo
    ok
 }
 
-fn _clear_xdnd_state(any: win): any {
+fn _clear_xdnd_state(any win) any {
    if(!win || !is_dict(win)){ return win }
    win["xdnd_source"] = 0
    win["xdnd_version"] = 0
@@ -2326,7 +2615,7 @@ fn _clear_xdnd_state(any: win): any {
    win
 }
 
-fn _translate_root_to_window(any: display, any: root, any: win, int: xabs, int: yabs): list {
+fn _translate_root_to_window(any display, any root, any win, int xabs, int yabs) list {
    def out_x, out_y = malloc(4), malloc(4)
    def child = malloc(8)
    if(!out_x || !out_y || !child){
@@ -2341,7 +2630,7 @@ fn _translate_root_to_window(any: display, any: root, any: win, int: xabs, int: 
    res
 }
 
-fn _xdnd_pick_format(any: display, any: source, any: offered_list, any: text_uri_atom, any: xdnd_type_list_atom): any {
+fn _xdnd_pick_format(any display, any source, any offered_list, any text_uri_atom, any xdnd_type_list_atom) any {
    if(!display || !source || !text_uri_atom){ return 0 }
    if(is_list(offered_list)){
       def offered_n = offered_list.len
@@ -2371,14 +2660,14 @@ fn _xdnd_pick_format(any: display, any: source, any: offered_list, any: text_uri
    chosen
 }
 
-fn _compute_scale(int: width, int: height, int: mm_width, int: mm_height): list {
+fn _compute_scale(int width, int height, int mm_width, int mm_height) list {
    mut sx, sy = 1.0, 1.0
    if(width > 0 && mm_width > 0){ sx = (float(width) * 25.4) / (float(mm_width) * 96.0) }
    if(height > 0 && mm_height > 0){ sy = (float(height) * 25.4) / (float(mm_height) * 96.0) }
    [sx, sy]
 }
 
-fn _resolve_monitor_context(any: display=0, any: root=0): any {
+fn _resolve_monitor_context(any display=0, any root=0) any {
    mut owned = false
    mut resolved = display
    mut screen = 0
@@ -2393,13 +2682,13 @@ fn _resolve_monitor_context(any: display=0, any: root=0): any {
    ctx
 }
 
-fn _release_monitor_context(any: ctx): bool {
+fn _release_monitor_context(any ctx) bool {
    if(!ctx || !is_dict(ctx)){ return false }
    if(ctx.get("owned", false)){ close_display(ctx.get("display", 0)) }
    true
 }
 
-fn _split_bpp(int: depth): list {
+fn _split_bpp(int depth) list {
    match depth {
       30 -> { return [10, 10, 10] }
       24 -> { return [8, 8, 8] }
@@ -2412,7 +2701,7 @@ fn _split_bpp(int: depth): list {
    }
 }
 
-fn _get_mode_info(any: resources, any: mode_id): any {
+fn _get_mode_info(any resources, any mode_id) any {
    if(!resources || !mode_id){ return 0 }
    def count = load32(resources, 48)
    def modes = load64_h(resources, 56)
@@ -2425,7 +2714,7 @@ fn _get_mode_info(any: resources, any: mode_id): any {
    0
 }
 
-fn _refresh_from_mode_info(any: mode_ptr): int {
+fn _refresh_from_mode_info(any mode_ptr) int {
    if(!mode_ptr){ return 0 }
    def dot_clock = load64_h(mode_ptr, 16)
    def h_total = load32(mode_ptr, 32)
@@ -2434,7 +2723,7 @@ fn _refresh_from_mode_info(any: mode_ptr): int {
    int(float(dot_clock) / (float(h_total) * float(v_total)) + 0.5)
 }
 
-fn _mode_size_from_info(any: mode_ptr, int: rotation=RR_Rotate_0): list {
+fn _mode_size_from_info(any mode_ptr, int rotation=RR_Rotate_0) list {
    if(!mode_ptr){ return [0, 0] }
    mut width = load32(mode_ptr, 8)
    mut height = load32(mode_ptr, 12)
@@ -2446,7 +2735,7 @@ fn _mode_size_from_info(any: mode_ptr, int: rotation=RR_Rotate_0): list {
    [width, height]
 }
 
-fn _monitor_from_output(any: display, any: resources, any: output, any: primary_output=0): any {
+fn _monitor_from_output(any display, any resources, any output, any primary_output=0) any {
    if(!display || !resources || !output){ return false }
    def info = XRRGetOutputInfo(display, resources, output)
    if(!info){ return false }
@@ -2494,7 +2783,7 @@ fn _monitor_from_output(any: display, any: resources, any: output, any: primary_
    monitor
 }
 
-fn get_monitors(any: display=0, any: root=0): list {
+fn get_monitors(any display=0, any root=0) list {
    "Enumerates connected X11/RandR monitors as monitor dicts."
    def ctx = _resolve_monitor_context(display, root)
    if(!ctx){ return [] }
@@ -2542,7 +2831,7 @@ fn get_monitors(any: display=0, any: root=0): list {
    out
 }
 
-fn get_primary_monitor(any: display=0, any: root=0): any {
+fn get_primary_monitor(any display=0, any root=0) any {
    "Returns the primary monitor dict, or false if none are connected."
    def monitors = get_monitors(display, root)
    if(monitors.len == 0){ return false }
@@ -2550,7 +2839,7 @@ fn get_primary_monitor(any: display=0, any: root=0): any {
 }
 
 comptime template _x11_monitor_get2(name, doc, k0, d0, k1, d1){
-   fn ${name}(any: monitor): list {
+   fn ${name}(any monitor) list {
       doc
       if(!monitor || !is_dict(monitor)){ return [d0, d1] }
       [monitor.get(k0, d0), monitor.get(k1, d1)]
@@ -2558,7 +2847,7 @@ comptime template _x11_monitor_get2(name, doc, k0, d0, k1, d1){
 }
 
 comptime template _x11_monitor_get1(name, doc, key, defv){
-   fn ${name}(any: monitor): any {
+   fn ${name}(any monitor) any {
       doc
       if(!monitor || !is_dict(monitor)){ return defv }
       monitor.get(key, defv)
@@ -2571,7 +2860,7 @@ comptime emit _x11_monitor_get2(get_monitor_physical_size, "Returns `[width_mm, 
 comptime emit _x11_monitor_get2(get_monitor_content_scale, "Returns `[xscale, yscale]` for a monitor dict.", "scale_x", _X11_MONITOR_SCALE_DEF, "scale_y", _X11_MONITOR_SCALE_DEF)
 comptime emit _x11_monitor_get1(get_monitor_name, "Returns the UTF-8 display name for a monitor dict.", "name", "")
 
-fn get_monitor_workarea(dict: monitor, any: display=0, any: root=0, any: net_workarea_atom=0, any: net_current_desktop_atom=0): list {
+fn get_monitor_workarea(dict monitor, any display=0, any root=0, any net_workarea_atom=0, any net_current_desktop_atom=0) list {
    "Returns `[x, y, width, height]` clipped to `_NET_WORKAREA` when available."
    if(!monitor || !is_dict(monitor)){ return [0, 0, 0, 0] }
    def ctx = _resolve_monitor_context(display, root)
@@ -2625,7 +2914,7 @@ fn get_monitor_workarea(dict: monitor, any: display=0, any: root=0, any: net_wor
    [area_x, area_y, area_w, area_h]
 }
 
-fn get_video_mode(any: monitor, any: display=0, any: root=0): any {
+fn get_video_mode(any monitor, any display=0, any root=0) any {
    "Returns the current window video mode dict for a monitor."
    if(!monitor || !is_dict(monitor)){ return false }
    def ctx = _resolve_monitor_context(display, root)
@@ -2653,7 +2942,7 @@ fn get_video_mode(any: monitor, any: display=0, any: root=0): any {
    out
 }
 
-fn get_video_modes(any: monitor, any: display=0, any: root=0): list {
+fn get_video_modes(any monitor, any display=0, any root=0) list {
    "Returns distinct window video modes for a monitor."
    if(!monitor || !is_dict(monitor)){ return [] }
    def ctx = _resolve_monitor_context(display, root)
@@ -2704,7 +2993,7 @@ fn get_video_modes(any: monitor, any: display=0, any: root=0): list {
    modes
 }
 
-fn _choose_video_mode(any: resources, any: output_info, int: rotation, int: width, int: height, int: refresh_rate=0): any {
+fn _choose_video_mode(any resources, any output_info, int rotation, int width, int height, int refresh_rate=0) any {
    if(!resources || !output_info){ return 0 }
    def count = load32(output_info, 80)
    def mode_ids = load64_h(output_info, 88)
@@ -2730,13 +3019,13 @@ fn _choose_video_mode(any: resources, any: output_info, int: rotation, int: widt
    best_mode
 }
 
-fn get_window_monitor(any: win): any {
+fn get_window_monitor(any win) any {
    "Returns the monitor dict currently associated with a native X11 window."
    if(!win || !is_dict(win)){ return false }
    win.get("monitor", false)
 }
 
-fn set_window_monitor(dict: win, any: monitor, int: xpos, int: ypos, int: width, int: height, int: refresh_rate=0): dict {
+fn set_window_monitor(dict win, any monitor, int xpos, int ypos, int width, int height, int refresh_rate=0) dict {
    "Switch a native X11 window between fullscreen and windowed monitor modes."
    if(!win || !is_dict(win)){ return win }
    def display = win.get("display", 0)
@@ -2848,7 +3137,7 @@ fn set_window_monitor(dict: win, any: monitor, int: xpos, int: ypos, int: width,
    _sync_window_state(win)
 }
 
-fn x11_error_handler(any: display, ptr: error_ptr): int {
+fn x11_error_handler(any display, ptr error_ptr) int {
    "Installs as Xlib error callback; stores latest error details in platform state."
    if(!error_ptr){ return 0 }
    def error_code = load8(error_ptr, 32)
@@ -2867,21 +3156,21 @@ fn x11_error_handler(any: display, ptr: error_ptr): int {
       ui_profile.print_text("[x11:ERROR]   error_code: " + to_str(error_code))
       ui_profile.print_text("[x11:ERROR]   request_code: " + to_str(request_code))
       ui_profile.print_text("[x11:ERROR]   minor_code: " + to_str(minor_code))
-      ui_profile.print_text("[x11:ERROR]   resource_id: 0x" + to_hex(resource_id))
+      ui_profile.print_text("[x11:ERROR]   resource_id: 0x" + str.to_hex(resource_id))
    }
    0
 }
 
-fn _suppress_x11_errors_temp(any: suppress): any { _set_x11_val("suppress_errors", suppress ? 1 : 0) }
+fn _suppress_x11_errors_temp(any suppress) any { _set_x11_val("suppress_errors", suppress ? 1 : 0) }
 
-fn _setup_x11_error_handler(): bool {
+fn _setup_x11_error_handler() bool {
    #linux {
       _c_xset_error_handler(x11_error_handler)
    } #endif
    true
 }
 
-fn _xrandr_connected_outputs(any: display, any: root): dict {
+fn _xrandr_connected_outputs(any display, any root) dict {
    if(!display || !root){ return dict(8) }
    def prev_handler = _c_xset_error_handler(x11_error_handler)
    def resources = XRRGetScreenResourcesCurrent(display, root)
@@ -2907,7 +3196,7 @@ fn _xrandr_connected_outputs(any: display, any: root): dict {
    outputs
 }
 
-fn _xrandr_event_scale(any: event_ptr): list {
+fn _xrandr_event_scale(any event_ptr) list {
    def width = load32(event_ptr, 72)
    def height = load32(event_ptr, 76)
    def mm_width = load32(event_ptr, 80)
@@ -2915,7 +3204,7 @@ fn _xrandr_event_scale(any: event_ptr): list {
    _compute_scale(width, height, mm_width, mm_height)
 }
 
-fn _push_randr_output_diff(list: events, any: win, dict: before_outputs, dict: after_outputs): list {
+fn _push_randr_output_diff(list events, any win, dict before_outputs, dict after_outputs) list {
    mut keys = dict_keys(after_outputs)
    mut keys_n = keys.len
    mut i = 0
@@ -2941,7 +3230,7 @@ fn _push_randr_output_diff(list: events, any: win, dict: before_outputs, dict: a
    events
 }
 
-fn _xrandr_poll_outputs(any: win, list: events): any {
+fn _xrandr_poll_outputs(any win, list events) any {
    def display = win.get("display", 0)
    def root = win.get("root", 0)
    def before_outputs = win.get("randr_outputs", dict(8))
@@ -2951,16 +3240,16 @@ fn _xrandr_poll_outputs(any: win, list: events): any {
    win
 }
 
-fn _write_selection_to_property(any: display,
-   any: requestor,
-   any: property,
-   any: target,
-   any: text,
-   any: utf8_string_atom,
-   any: targets_atom,
-   any: multiple_atom=0,
-   any: atom_pair_atom=0,
-   any: save_targets_atom=0): any {
+fn _write_selection_to_property(any display,
+   any requestor,
+   any property,
+   any target,
+   any text,
+   any utf8_string_atom,
+   any targets_atom,
+   any multiple_atom=0,
+   any atom_pair_atom=0,
+   any save_targets_atom=0) any {
    "Writes clipboard data for a SelectionRequest and returns the reply property."
    if(!display || !requestor || !property || !target){ return NoAtom }
    if(!is_str(text)){ text = to_str(text) }
@@ -3017,7 +3306,7 @@ fn _write_selection_to_property(any: display,
    NoAtom
 }
 
-fn _read_selection_property_text(any: display, any: win, any: selection_property_atom, any: target, any: incr_atom=0, int: timeout_ms=500): str {
+fn _read_selection_property_text(any display, any win, any selection_property_atom, any target, any incr_atom=0, int timeout_ms=500) str {
    if(!display || !win || !selection_property_atom){ return "" }
    def prop = get_window_property(display, win, selection_property_atom, AnyPropertyType)
    if(!prop || !is_dict(prop)){ return "" }
@@ -3080,17 +3369,25 @@ fn _read_selection_property_text(any: display, any: win, any: selection_property
    text
 }
 
-fn set_clipboard(any: win, any: text): bool {
+fn set_clipboard(any win, any text) bool {
    "Claims the X11 clipboard selection for `win` and stores `text` locally."
-   _set_selection_owner(win, "clipboard_atom")
+   if(!win || !is_dict(win)){ return false }
+   win["clipboard_string"] = to_str(text)
+   def ok = _set_selection_owner(win, "clipboard_atom")
+   win["clipboard_owned"] = ok
+   ok
 }
 
-fn set_primary_selection(any: win, any: text): bool {
+fn set_primary_selection(any win, any text) bool {
    "Claims the X11 PRIMARY selection for `win` and stores `text` locally."
-   _set_selection_owner(win, "primary_atom")
+   if(!win || !is_dict(win)){ return false }
+   win["primary_selection_string"] = to_str(text)
+   def ok = _set_selection_owner(win, "primary_atom")
+   win["primary_owned"] = ok
+   ok
 }
 
-fn _set_selection_owner(any: win, str: selection_key): bool {
+fn _set_selection_owner(any win, str selection_key) bool {
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -3101,17 +3398,17 @@ fn _set_selection_owner(any: win, str: selection_key): bool {
    XGetSelectionOwner(display, selection) == handle
 }
 
-fn get_clipboard(any: win): str {
+fn get_clipboard(any win) str {
    "Fetches clipboard text using the X11 selection conversion path."
    _get_selection_text(win, "clipboard_atom", "clipboard_string")
 }
 
-fn get_primary_selection(any: win): str {
+fn get_primary_selection(any win) str {
    "Fetches PRIMARY selection text using the X11 selection conversion path."
    _get_selection_text(win, "primary_atom", "primary_selection_string")
 }
 
-fn _get_selection_text(any: win, str: selection_key, str: local_key): str {
+fn _get_selection_text(any win, str selection_key, str local_key) str {
    if(!win || !is_dict(win)){ return "" }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -3161,12 +3458,12 @@ fn _get_selection_text(any: win, str: selection_key, str: local_key): str {
    ""
 }
 
-fn destroy_basic_window(any: win): bool {
+fn destroy_basic_window(any win) bool {
    "Destroys an X11 window and its associated resources."
    close_basic_window(win)
 }
 
-fn set_title(any: win, str: title): bool {
+fn set_title(any win, str title) bool {
    "Unified setter for the X11 window title."
    if(!win || !is_dict(win)){ return false }
    store_name(win.get("display", 0), win.get("handle", 0), title,
@@ -3175,7 +3472,7 @@ fn set_title(any: win, str: title): bool {
    win.get("utf8_string", 0))
 }
 
-fn get_window_attrib(any: win, int: attrib): int {
+fn get_window_attrib(any win, int attrib) int {
    "Unified getter for X11 window attributes matching Nytrix constants."
    if(!win || !is_dict(win)){ return 0 }
    def display = win.get("display", 0)
@@ -3210,7 +3507,7 @@ fn get_window_attrib(any: win, int: attrib): int {
    result
 }
 
-fn _window_hovered(any: display, any: window_handle): int {
+fn _window_hovered(any display, any window_handle) int {
    if(!display || !window_handle){ return 0 }
    def qargs = _alloc_query_pointer_args(true)
    if(!qargs){ return 0 }
@@ -3240,7 +3537,7 @@ fn _window_hovered(any: display, any: window_handle): int {
    hovered
 }
 
-fn _window_focused(any: display, any: window_handle): int {
+fn _window_focused(any display, any window_handle) int {
    if(!display || !window_handle){ return 0 }
    def focused = zalloc(8)
    def state = zalloc(4)
@@ -3255,7 +3552,7 @@ fn _window_focused(any: display, any: window_handle): int {
    out
 }
 
-fn _sync_window_state(any: win): any {
+fn _sync_window_state(any win) any {
    if(!win || !is_dict(win)){ return win }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -3275,7 +3572,7 @@ fn _sync_window_state(any: win): any {
    win
 }
 
-fn _push_selection_to_manager(any: win, int: timeout_ms=250): bool {
+fn _push_selection_to_manager(any win, int timeout_ms=250) bool {
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
    def handle = win.get("handle", 0)
@@ -3317,13 +3614,13 @@ fn _push_selection_to_manager(any: win, int: timeout_ms=250): bool {
    false
 }
 
-fn _push_translated_event(list: events, int: typ, any: win, any: data=0): list {
+fn _push_translated_event(list events, int typ, any win, any data=0) list {
    def h = win.get("handle", 0)
    def e = ui_event.make_event(typ, win, h, data)
    events.append(e)
 }
 
-fn _xkb_setup(any: display): dict {
+fn _xkb_setup(any display) dict {
    mut out = {"available": false, "event_base": -1, "error_base": -1, "group": 0, "detectable_repeat": false}
    if(!display){ return out }
    def opcode = malloc(4)
@@ -3360,7 +3657,7 @@ fn _xkb_setup(any: display): dict {
    out
 }
 
-fn _xi_setup(any: display): dict {
+fn _xi_setup(any display) dict {
    mut out = {
       "available": false, "major_opcode": -1, "event_base": -1,
       "error_base": -1, "major": XI_2_Major, "minor": XI_2_Minor
@@ -3394,7 +3691,7 @@ fn _xi_setup(any: display): dict {
    out
 }
 
-fn _xi_set_raw_motion_enabled(any: display, any: root, bool: enabled): bool {
+fn _xi_set_raw_motion_enabled(any display, any root, bool enabled) bool {
    if(!display || !root){ return false }
    def mask_len = (XI_RawMotion >> 3) + 1
    def mask = zalloc(mask_len)
@@ -3417,12 +3714,12 @@ fn _xi_set_raw_motion_enabled(any: display, any: root, bool: enabled): bool {
    ok
 }
 
-fn _ximask_is_set(any: mask, int: bit): bool {
+fn _ximask_is_set(any mask, int bit) bool {
    if(!mask || bit < 0){ return false }
    band(load8(mask, bit >> 3), (1 << band(bit, 7))) != 0
 }
 
-fn _translate_raw_motion_event(any: win, any: event_ptr, list: events): list {
+fn _translate_raw_motion_event(any win, any event_ptr, list events) list {
    if(!win || !is_dict(win) || !event_ptr){ return [win, events] }
    def display = win.get("display", 0)
    if(!display){ return [win, events] }
@@ -3486,7 +3783,7 @@ fn _translate_raw_motion_event(any: win, any: event_ptr, list: events): list {
    [win, events]
 }
 
-fn _x11_button_to_ny(int: button): int {
+fn _x11_button_to_ny(int button) int {
    match button {
       Button1 -> { return 0 }
       Button2 -> { return 2 }
@@ -3498,19 +3795,19 @@ fn _x11_button_to_ny(int: button): int {
    }
 }
 
-fn _store_key_table_pair(dict: keycodes, dict: scancodes, int: scancode, int: key): list {
+fn _store_key_table_pair(dict keycodes, dict scancodes, int scancode, int key) list {
    if(scancode <= 0 || key < 0){ return [keycodes, scancodes] }
    keycodes[scancode] = key
    if(key > 0 && !scancodes.contains(key)){ scancodes[key] = scancode }
    [keycodes, scancodes]
 }
 
-fn _key_table_result(dict: keycodes, dict: scancodes): dict {
+fn _key_table_result(dict keycodes, dict scancodes) dict {
    def out = {"keycodes": keycodes, "scancodes": scancodes}
    out
 }
 
-fn _create_key_tables(any: display): dict {
+fn _create_key_tables(any display) dict {
    mut keycodes = dict(256)
    mut scancodes = dict(256)
    if(!display){ return _key_table_result(keycodes, scancodes) }
@@ -3556,7 +3853,7 @@ fn _create_key_tables(any: display): dict {
    _key_table_result(keycodes, scancodes)
 }
 
-fn _translate_keycode(any: win, int: keycode): int {
+fn _translate_keycode(any win, int keycode) int {
    if(keycode <= 0 || keycode > 255){ return -1 }
    if(win && is_dict(win)){
       def cached_keycodes = win.get("x11_keycodes", 0)
@@ -3579,7 +3876,7 @@ fn _translate_keycode(any: win, int: keycode): int {
    scancode_key
 }
 
-fn _modifier_bit_for_key_event(int: key, int: scancode): int {
+fn _modifier_bit_for_key_event(int key, int scancode) int {
    case key {
       KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT -> { return MOD_SHIFT }
       KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL -> { return MOD_CONTROL }
@@ -3597,13 +3894,13 @@ fn _modifier_bit_for_key_event(int: key, int: scancode): int {
    0
 }
 
-fn _mods_for_key_event(int: mods, int: key, int: scancode, bool: down): int {
+fn _mods_for_key_event(int mods, int key, int scancode, bool down) int {
    def bit = _modifier_bit_for_key_event(key, scancode)
    if(bit == 0){ return mods }
    down ? bor(mods, bit) : band(mods, bnot(bit))
 }
 
-fn _translate_key_press_event(any: win, any: event_ptr, list: events, any: key_states, any: key_press_times, any: ic, bool: was_filtered, int: repeat_sc): list {
+fn _translate_key_press_event(any win, any event_ptr, list events, any key_states, any key_press_times, any ic, bool was_filtered, int repeat_sc) list {
    def scancode = load32(event_ptr, 84)
    def key = _translate_keycode(win, scancode)
    def mods = _mods_for_key_event(translate_state(load32(event_ptr, 80)), key, scancode, true)
@@ -3627,7 +3924,7 @@ fn _translate_key_press_event(any: win, any: event_ptr, list: events, any: key_s
    if(_input_debug_enabled()){
       _dbg_input("key press key=" + _dbg_key_name(win, key, scancode) +
          " scancode=" + to_str(scancode) +
-         " mods=0x" + to_hex(mods) +
+         " mods=0x" + str.to_hex(mods) +
       " repeat=" + to_str(is_repeat))
    }
    events = _push_translated_event(events, 1, win, data)
@@ -3653,7 +3950,7 @@ fn _translate_key_press_event(any: win, any: event_ptr, list: events, any: key_s
    [win, events]
 }
 
-fn _translate_key_release_event(any: win, any: event_ptr, list: events, any: key_states, any: display): list {
+fn _translate_key_release_event(any win, any event_ptr, list events, any key_states, any display) list {
    def scancode = load32(event_ptr, 84)
    def time = load64_h(event_ptr, 56)
    def key = _translate_keycode(win, scancode)
@@ -3684,14 +3981,14 @@ fn _translate_key_release_event(any: win, any: event_ptr, list: events, any: key
       if(_input_debug_enabled()){
          _dbg_input("key release key=" + _dbg_key_name(win, key, scancode) +
             " scancode=" + to_str(scancode) +
-         " mods=0x" + to_hex(mods))
+         " mods=0x" + str.to_hex(mods))
       }
       events = _push_translated_event(events, 2, win, data)
    }
    [win, events]
 }
 
-fn _translate_button_press_event(any: win, any: event_ptr, list: events, any: mouse_buttons): list {
+fn _translate_button_press_event(any win, any event_ptr, list events, any mouse_buttons) list {
    def button = load32(event_ptr, 84)
    def raw_state = load32(event_ptr, 80)
    def mods = translate_state(raw_state)
@@ -3706,7 +4003,7 @@ fn _translate_button_press_event(any: win, any: event_ptr, list: events, any: mo
       win["modifiers"] = mods
       _dbg_input("mouse scroll dx=" + to_str(data.get("dx", 0.0)) +
          " dy=" + to_str(data.get("dy", 0.0)) +
-      " mods=0x" + to_hex(mods))
+      " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 6, win, data)
    } else {
       def x, y = load32(event_ptr, 64), load32(event_ptr, 68)
@@ -3726,13 +4023,13 @@ fn _translate_button_press_event(any: win, any: event_ptr, list: events, any: mo
       win["mouse_y"] = y
       _dbg_input("mouse press button=" + to_str(ny_button) +
          " x=" + to_str(x) + " y=" + to_str(y) +
-      " mods=0x" + to_hex(mods))
+      " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 4, win, data)
    }
    [win, events]
 }
 
-fn _translate_button_release_event(any: win, any: event_ptr, list: events, any: mouse_buttons): list {
+fn _translate_button_release_event(any win, any event_ptr, list events, any mouse_buttons) list {
    def button = load32(event_ptr, 84)
    if(button <= Button3 || button > Button7){
       def x, y = load32(event_ptr, 64), load32(event_ptr, 68)
@@ -3754,13 +4051,13 @@ fn _translate_button_release_event(any: win, any: event_ptr, list: events, any: 
       win["mouse_y"] = y
       _dbg_input("mouse release button=" + to_str(ny_button) +
          " x=" + to_str(x) + " y=" + to_str(y) +
-      " mods=0x" + to_hex(mods))
+      " mods=0x" + str.to_hex(mods))
       events = _push_translated_event(events, 5, win, data)
    }
    [win, events]
 }
 
-fn _x11_sync_mouse_buttons_from_state(any: win, int: state): any {
+fn _x11_sync_mouse_buttons_from_state(any win, int state) any {
    if(!is_dict(win)){ return win }
    mut mb = win.get("mouse_buttons", 0)
    if(!is_dict(mb)){ mb = dict(8) }
@@ -3771,39 +4068,40 @@ fn _x11_sync_mouse_buttons_from_state(any: win, int: state): any {
    win
 }
 
-fn _learn_warp_event_offset(any: win, int: x, int: y, int: warp_x, int: warp_y): any {
-   if(!win || !is_dict(win)){ return win }
-   def ox = x - warp_x
-   def oy = y - warp_y
-   if(abs(float(ox)) <= 32.0 && abs(float(oy)) <= 32.0){
-      win["warp_event_offset_x"] = ox
-      win["warp_event_offset_y"] = oy
-   }
-   win
-}
-
 fn _translate_motion_event(
-   any: win, any: event_ptr, list: events, int: cursor_mode, bool: xi_available, bool: raw_mouse_motion,
-   bool: ignore_warp, int: warp_x, int: warp_y, int: win_w, int: win_h, any: mouse_x_prev,
-   any: mouse_y_prev, any: display, any: window_handle,
-): list {
+   any win, any event_ptr, list events, int cursor_mode, bool xi_available, bool raw_mouse_motion,
+   bool ignore_warp, int warp_x, int warp_y, int win_w, int win_h, any mouse_x_prev,
+   any mouse_y_prev, any display, any window_handle,
+) list {
    def x, y = load32(event_ptr, 64), load32(event_ptr, 68)
    if(cursor_mode == CURSOR_MODE_DISABLED){
       if(xi_available && raw_mouse_motion && win.get("raw_motion_nonzero_seen", false)){
-         if(ignore_warp){ win["ignore_warp_motion"] = false }
+         if(ignore_warp){
+            win["ignore_warp_motion"] = false
+            win["mouse_x"] = float(warp_x)
+            win["mouse_y"] = float(warp_y)
+         }
          return [win, events]
       }
       if(ignore_warp){
          win["ignore_warp_motion"] = false
-         win = _learn_warp_event_offset(win, x, y, warp_x, warp_y)
          win["mouse_x"] = float(warp_x)
          win["mouse_y"] = float(warp_y)
          return [win, events]
       }
       def center_x, center_y = int(win_w / 2), int(win_h / 2)
-      def event_center_x = center_x + int(win.get("warp_event_offset_x", 0))
-      def event_center_y = center_y + int(win.get("warp_event_offset_y", 0))
-      def dx, dy = x - event_center_x, y - event_center_y
+      def dx, dy = x - center_x, y - center_y
+      if(abs(float(dx)) <= 1.0 && abs(float(dy)) <= 1.0){
+         win["mouse_x"] = float(center_x)
+         win["mouse_y"] = float(center_y)
+         win["warp_cursor_x"] = center_x
+         win["warp_cursor_y"] = center_y
+         if(dx != 0 || dy != 0){
+            win["ignore_warp_motion"] = true
+            _set_cursor_pos_raw(display, window_handle, center_x, center_y)
+         }
+         return [win, events]
+      }
       if(dx != 0 || dy != 0){
          def fb_dbg_count = int(win.get("motion_fallback_debug_count", 0))
          if(fb_dbg_count < 24){
@@ -3813,7 +4111,6 @@ fn _translate_motion_event(
                " ignore=" + to_str(ignore_warp) +
                " pos=(" + to_str(x) + "," + to_str(y) + ")" +
                " center=(" + to_str(center_x) + "," + to_str(center_y) + ")" +
-               " event_center=(" + to_str(event_center_x) + "," + to_str(event_center_y) + ")" +
                " delta=(" + to_str(dx) + "," + to_str(dy) + ")" +
             " size=(" + to_str(win_w) + "," + to_str(win_h) + ")")
          }
@@ -3868,7 +4165,7 @@ fn _translate_motion_event(
    [win, events]
 }
 
-fn _translate_configure_event(any: win, any: event_ptr, list: events, any: display, any: window_handle, any: root, int: win_w, int: win_h): list {
+fn _translate_configure_event(any win, any event_ptr, list events, any display, any window_handle, any root, int win_w, int win_h) list {
    def width = load32(event_ptr, 56)
    def height = load32(event_ptr, 60)
    mut xpos, ypos = load32(event_ptr, 48), load32(event_ptr, 52)
@@ -3881,7 +4178,7 @@ fn _translate_configure_event(any: win, any: event_ptr, list: events, any: displ
       if(out_y){ free(out_y) }
       if(child){ free(child) }
    }
-   if(ui_profile.debug_verbose_enabled()){ _dbg("ConfigureNotify: win=0x" + to_hex(window_handle)) }
+   if(ui_profile.debug_verbose_enabled()){ _dbg("ConfigureNotify: win=0x" + str.to_hex(window_handle)) }
    if(width != win_w || height != win_h){
       win["w"] = width
       win["h"] = height
@@ -3899,9 +4196,9 @@ fn _translate_configure_event(any: win, any: event_ptr, list: events, any: displ
 }
 
 fn _translate_client_message_event(
-   any: win, any: event_ptr, list: events, any: display, any: window_handle, any: root,
-   any: wm_protocols, any: wm_delete, any: net_wm_ping, any: xdnd_enter_at, any: xdnd_position_at, any: xdnd_drop_at,
-): list {
+   any win, any event_ptr, list events, any display, any window_handle, any root,
+   any wm_protocols, any wm_delete, any net_wm_ping, any xdnd_enter_at, any xdnd_position_at, any xdnd_drop_at,
+) list {
    def message_type = load64_h(event_ptr, 40)
    def protocol = load64_h(event_ptr, 56)
    if(message_type == wm_protocols && protocol == wm_delete){
@@ -3979,7 +4276,7 @@ fn _translate_client_message_event(
    [win, events]
 }
 
-fn _translate_selection_notify_event(any: win, any: event_ptr, list: events, any: display, any: window_handle): list {
+fn _translate_selection_notify_event(any win, any event_ptr, list events, any display, any window_handle) list {
    def xdnd_selection = win.get("xdnd_selection", 0)
    if(load64_h(event_ptr, 56) != xdnd_selection){ return [win, events] }
    def property = load64_h(event_ptr, 56)
@@ -4011,7 +4308,7 @@ fn _translate_selection_notify_event(any: win, any: event_ptr, list: events, any
    [win, events]
 }
 
-fn _translate_focus_in_event(any: win, any: event_ptr, list: events, any: ic, int: cursor_mode, bool: raw_mouse_motion): list {
+fn _translate_focus_in_event(any win, any event_ptr, list events, any ic, int cursor_mode, bool raw_mouse_motion) list {
    def mode = load32(event_ptr, 40)
    if(mode == NotifyGrab || mode == NotifyUngrab){ return [win, events] }
    mut active_ic = ic
@@ -4031,9 +4328,9 @@ fn _translate_focus_in_event(any: win, any: event_ptr, list: events, any: ic, in
 }
 
 fn _translate_focus_out_event(
-   any: win, any: event_ptr, list: events, any: display, any: window_handle, any: root, any: ic, int: cursor_mode,
-   bool: disabled_cursor, bool: xi_available, bool: raw_mouse_motion,
-): list {
+   any win, any event_ptr, list events, any display, any window_handle, any root, any ic, int cursor_mode,
+   bool disabled_cursor, bool xi_available, bool raw_mouse_motion,
+) list {
    def mode = load32(event_ptr, 40)
    if(mode == NotifyGrab || mode == NotifyUngrab){ return [win, events] }
    if(ic){ _c_xunseticfocus(ic) }
@@ -4063,7 +4360,7 @@ fn _translate_focus_out_event(
    [win, events]
 }
 
-fn _translate_property_notify_event(any: win, any: event_ptr, list: events, any: display, any: window_handle): list {
+fn _translate_property_notify_event(any win, any event_ptr, list events, any display, any window_handle) list {
    if(load32(event_ptr, 56) != PropertyNewValue){ return [win, events] }
    def atom = load64_h(event_ptr, 40)
    def wm_state = win.get("wm_state", 0)
@@ -4096,7 +4393,7 @@ fn _translate_property_notify_event(any: win, any: event_ptr, list: events, any:
    [win, events]
 }
 
-fn _translate_enter_event(any: win, any: event_ptr, list: events): list {
+fn _translate_enter_event(any win, any event_ptr, list events) list {
    def x, y = load32(event_ptr, 64), load32(event_ptr, 68)
    def prev_x = int(win.get("mouse_x", x))
    def prev_y = int(win.get("mouse_y", y))
@@ -4111,7 +4408,7 @@ fn _translate_enter_event(any: win, any: event_ptr, list: events): list {
    [win, events]
 }
 
-fn _translate_selection_clear_event(any: win, any: event_ptr): any {
+fn _translate_selection_clear_event(any win, any event_ptr) any {
    def selection = load64_h(event_ptr, 40)
    def clipboard_atom = win.get("clipboard_atom", 0)
    def primary_atom = win.get("primary_atom", 0)
@@ -4120,7 +4417,7 @@ fn _translate_selection_clear_event(any: win, any: event_ptr): any {
    win
 }
 
-fn _translate_selection_request_event(any: win, any: event_ptr, any: display): bool {
+fn _translate_selection_request_event(any win, any event_ptr, any display) bool {
    def requestor = load64_h(event_ptr, 40)
    def selection = load64_h(event_ptr, 48)
    def target = load64_h(event_ptr, 56)
@@ -4139,21 +4436,21 @@ fn _translate_selection_request_event(any: win, any: event_ptr, any: display): b
    true
 }
 
-fn _translate_expose_event(any: win, list: events): list {
+fn _translate_expose_event(any win, list events) list {
    win["mapped"] = true
    [win, _push_translated_event(events, 14, win, 0)]
 }
 
-fn _translate_destroy_event(any: win, list: events): list {
+fn _translate_destroy_event(any win, list events) list {
    win["should_close"] = true
    [win, _push_translated_event(events, 15, win, 0)]
 }
 
 fn _translate_event_server_events(
-   any: win, any: event_ptr, list: events, int: typ, int: randr_base, int: xkb_base,
-   bool: xi_available, bool: disabled_cursor, bool: raw_mouse_motion, int: xi_major_opcode,
-   any: scale_x, any: scale_y,
-): list {
+   any win, any event_ptr, list events, int typ, int randr_base, int xkb_base,
+   bool xi_available, bool disabled_cursor, bool raw_mouse_motion, int xi_major_opcode,
+   any scale_x, any scale_y,
+) list {
    if(randr_base >= 0){
       if(typ == randr_base + RRScreenChangeNotify){
          XRRUpdateConfiguration(event_ptr)
@@ -4195,17 +4492,17 @@ fn _translate_event_server_events(
    [false, win, events]
 }
 
-fn _translate_event_target_discard(any: event_window, any: window_handle, any: root): bool {
+fn _translate_event_target_discard(any event_window, any window_handle, any root) bool {
    if(event_window && window_handle && event_window != window_handle){ return true }
    event_window && event_window != window_handle && event_window != root
 }
 
 fn _translate_event_input_dispatch(
-   any: win, any: event_ptr, list: events, int: typ, any: display, any: window_handle, any: root,
-   any: key_states, any: mouse_buttons, any: ic, any: key_press_times, int: repeat_sc,
-   bool: was_filtered, int: cursor_mode, bool: xi_available, bool: raw_mouse_motion,
-   bool: ignore_warp, int: warp_x, int: warp_y, int: win_w, int: win_h, any: mouse_x_prev, any: mouse_y_prev,
-): list {
+   any win, any event_ptr, list events, int typ, any display, any window_handle, any root,
+   any key_states, any mouse_buttons, any ic, any key_press_times, int repeat_sc,
+   bool was_filtered, int cursor_mode, bool xi_available, bool raw_mouse_motion,
+   bool ignore_warp, int warp_x, int warp_y, int win_w, int win_h, any mouse_x_prev, any mouse_y_prev,
+) list {
    match typ {
       ReparentNotify -> {
          win["parent"] = load64_h(event_ptr, 32)
@@ -4253,10 +4550,10 @@ fn _translate_event_input_dispatch(
 }
 
 fn _translate_event_system_dispatch(
-   any: win, any: event_ptr, list: events, int: typ, any: display, any: window_handle, any: root,
-   any: ic, int: cursor_mode, bool: raw_mouse_motion, bool: disabled_cursor, bool: xi_available,
-   any: wm_protocols, any: wm_delete, any: net_wm_ping, any: xdnd_enter_at, any: xdnd_position_at, any: xdnd_drop_at,
-): list {
+   any win, any event_ptr, list events, int typ, any display, any window_handle, any root,
+   any ic, int cursor_mode, bool raw_mouse_motion, bool disabled_cursor, bool xi_available,
+   any wm_protocols, any wm_delete, any net_wm_ping, any xdnd_enter_at, any xdnd_position_at, any xdnd_drop_at,
+) list {
    match typ {
       ClientMessage -> {
          def out = _translate_client_message_event(
@@ -4303,7 +4600,7 @@ fn _translate_event_system_dispatch(
    [true, win, events]
 }
 
-fn _translated_event_result(any: win, any: events): list {
+fn _translated_event_result(any win, any events) list {
    if(!is_list(events)){ return [win, []] }
    mut stable = []
    mut i = 0
@@ -4316,7 +4613,7 @@ fn _translated_event_result(any: win, any: events): list {
    [win, stable]
 }
 
-fn translate_event(any: win, any: event_ptr): list {
+fn translate_event(any win, any event_ptr) list {
    "Translates one raw `XEvent` into zero or more std.os.ui events."
    if(!win || !is_dict(win) || !event_ptr){ return [win, []] }
    def display        = win.get("display", 0)
@@ -4374,7 +4671,7 @@ fn translate_event(any: win, any: event_ptr): list {
    _translated_event_result(win, events)
 }
 
-fn poll_window_events(any: win, int: max_events=64): list {
+fn poll_window_events(any win, int max_events=64) list {
    "Polls queued X11 events for `win` and returns `[updated_win, events]`."
    if(!win || !is_dict(win)){ return [win, []] }
    def fallback_win = win
@@ -4391,7 +4688,6 @@ fn poll_window_events(any: win, int: max_events=64): list {
       def typ = load32(event_buf, 0)
       def target = _actual_event_window(event_buf, typ)
       def filtered = XFilterEvent(event_buf, target) != 0
-      _debug_raw_key_event(event_buf, target, filtered, "poll_window")
       if(!is_dict(win)){ win = fallback_win }
       if(is_dict(win)){ win["last_event_was_filtered"] = filtered }
       def translated = translate_event(win, event_buf)
@@ -4407,7 +4703,7 @@ fn poll_window_events(any: win, int: max_events=64): list {
    [win, out]
 }
 
-fn poll_display_events(list: windows, int: max_events=256): list {
+fn poll_display_events(list windows, int max_events=256) list {
    "Polls queued X11 events once per display and routes them to the owning window."
    if(!is_list(windows) || windows.len == 0){ return [dict(8), []] }
    def first = windows.get(0)
@@ -4464,7 +4760,6 @@ fn poll_display_events(list: windows, int: max_events=256): list {
          updated[win.get("handle", 0)] = win
       }
       def filtered = XFilterEvent(event_buf, target) != 0
-      _debug_raw_key_event(event_buf, target, filtered, "poll_display")
       if(is_dict(win)){ win["last_event_was_filtered"] = filtered }
       def translated = translate_event(win, event_buf)
       def next_win = translated.get(0, win)
@@ -4479,7 +4774,7 @@ fn poll_display_events(list: windows, int: max_events=256): list {
    [updated, out]
 }
 
-fn translate_state(int: state): int {
+fn translate_state(int state) int {
    "Translates an X11 modifier mask to Ny window modifier flags."
    mut mods = 0
    if(band(state, ShiftMask)){ mods = bor(mods, MOD_SHIFT) }
@@ -4491,22 +4786,22 @@ fn translate_state(int: state): int {
 
 def INVALID_CODEPOINT = x11_keymap.INVALID_CODEPOINT
 
-fn translate_keysym(any: primary, any: secondary=0, int: width=1): int {
+fn translate_keysym(any primary, any secondary=0, int width=1) int {
    "Translate X11 keysyms using the backend fallback table."
    x11_keymap.translate_keysym(primary, secondary, width)
 }
 
-fn translate_scancode(int: scancode): int {
+fn translate_scancode(int scancode) int {
    "Translates common X11 hardware scancodes to Ny key codes."
    x11_keymap.translate_scancode(scancode)
 }
 
-fn next_event(any: display, any: event_ptr): any {
+fn next_event(any display, any event_ptr) any {
    "Fetches the next X11 event from the display queue."
    XNextEvent(display, event_ptr)
 }
 
-fn post_empty_event(any: win): bool {
+fn post_empty_event(any win) bool {
    "Posts a dummy ClientMessage event to unblock event waiting."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -4524,85 +4819,17 @@ fn post_empty_event(any: win): bool {
    true
 }
 
-fn _debug_event_mask_line(str: label, int: mask): any {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return 0 }
-   def key_bits = bor(KeyPressMask, KeyReleaseMask)
-   def button_bits = bor(ButtonPressMask, ButtonReleaseMask)
-   def pointer_bits = bor(EnterWindowMask, bor(LeaveWindowMask, PointerMotionMask))
-   def redraw_bits = bor(ExposureMask, VisibilityChangeMask)
-   def window_bits = bor(FocusChangeMask, bor(StructureNotifyMask, PropertyChangeMask))
-   _dbg_input(label +
-      " mask=0x" + to_hex(mask) +
-      " key=" + to_str(band(mask, key_bits) == key_bits) +
-      " button=" + to_str(band(mask, button_bits) == button_bits) +
-      " pointer=" + to_str(band(mask, pointer_bits) == pointer_bits) +
-      " redraw=" + to_str(band(mask, redraw_bits) == redraw_bits) +
-      " window=" + to_str(band(mask, window_bits) == window_bits) +
-   " missing=0x" + to_hex(band(_canonical_window_event_mask(), bnot(mask))))
-   0
-}
-
-fn _debug_event_mask_constants(str: label): any {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return 0 }
-   _dbg_input(label +
-      " constants" +
-      " key_press=0x" + to_hex(KeyPressMask) +
-      " key_release=0x" + to_hex(KeyReleaseMask) +
-      " button_press=0x" + to_hex(ButtonPressMask) +
-      " button_release=0x" + to_hex(ButtonReleaseMask) +
-      " enter=0x" + to_hex(EnterWindowMask) +
-      " leave=0x" + to_hex(LeaveWindowMask) +
-      " motion=0x" + to_hex(PointerMotionMask) +
-      " exposure=0x" + to_hex(ExposureMask) +
-      " visibility=0x" + to_hex(VisibilityChangeMask) +
-      " focus=0x" + to_hex(FocusChangeMask) +
-      " structure=0x" + to_hex(StructureNotifyMask) +
-      " property=0x" + to_hex(PropertyChangeMask) +
-   " canonical=0x" + to_hex(_canonical_window_event_mask()))
-   0
-}
-
-fn _debug_window_event_mask_snapshot(any: display, any: win, str: label): any {
-   if(!ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){ return 0 }
-   if(!display || !win){ return 0 }
-   def attrs = zalloc(160)
-   if(!attrs){ return 0 }
-   def ok = XGetWindowAttributes(display, win, attrs) != 0
-   if(!ok){
-      _dbg_input(label + " xattrs=unavailable win=0x" + to_hex(win))
-      free(attrs)
-      return 0
-   }
-   def all_mask = load64_h(attrs, 96)
-   def your_mask = load64_h(attrs, 104)
-   def dont_mask = load64_h(attrs, 112)
-   _dbg_input(label +
-      " xattrs your=0x" + to_hex(your_mask) +
-      " all=0x" + to_hex(all_mask) +
-      " dont=0x" + to_hex(dont_mask) +
-      " map_state=" + to_str(load32(attrs, 92)) +
-   " override=" + to_str(load32(attrs, 120)))
-   _debug_event_mask_line(label + ".your", int(your_mask))
-   free(attrs)
-   0
-}
-
-fn select_input(any: display, any: win, any: event_mask): any {
+fn select_input(any display, any win, any event_mask) any {
    "Selects the X11 event mask for a window."
-   _debug_event_mask_line("select_input.before", int(event_mask))
    XSelectInput(display, win, event_mask)
-   if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){
-      XSync(display, 0)
-      _debug_window_event_mask_snapshot(display, win, "select_input.after")
-   }
 }
 
-fn flush(any: display): any {
+fn flush(any display) any {
    "Flushes pending X11 requests."
    XFlush(display)
 }
 
-fn put_pixels(any: display, any: win_ref, ptr: buf, int: w, int: h): bool {
+fn put_pixels(any display, any win_ref, ptr buf, int w, int h) bool {
    "Blits an RGBA pixel buffer to an X11 window using XPutImage."
    if(!display || !win_ref || !buf || w <= 0 || h <= 0){ return false }
    mut win_handle = win_ref
@@ -4652,12 +4879,12 @@ fn put_pixels(any: display, any: win_ref, ptr: buf, int: w, int: h): bool {
    true
 }
 
-fn sync(any: display, bool: discard=false): any {
+fn sync(any display, bool discard=false) any {
    "Synchronizes with the X server."
    XSync(display, discard ? 1 : 0)
 }
 
-fn store_name(any: display, any: win, any: window_name, any: net_wm_name_atom=0, any: net_wm_icon_name_atom=0, any: utf8_string_atom=0): bool {
+fn store_name(any display, any win, any window_name, any net_wm_name_atom=0, any net_wm_icon_name_atom=0, any utf8_string_atom=0) bool {
    "Sets the X11 window title via both ICCCM and EWMH UTF-8 properties."
    if(!display || !win){ return false }
    if(!is_str(window_name)){ window_name = to_str(window_name) }
@@ -4679,7 +4906,7 @@ fn store_name(any: display, any: win, any: window_name, any: net_wm_name_atom=0,
    true
 }
 
-fn get_pos(any: win): list {
+fn get_pos(any win) list {
    "Returns the X11 window position as [x, y] via XTranslateCoordinates."
    if(!win || !is_dict(win)){ return [0, 0] }
    def display = win.get("display", 0)
@@ -4699,12 +4926,12 @@ fn get_pos(any: win): list {
    [rx, ry]
 }
 
-fn move_window(any: display, any: win, int: x, int: y): any {
+fn move_window(any display, any win, int x, int y) any {
    "Moves a raw X11 window."
    XMoveWindow(display, win, x, y)
 }
 
-fn _get_visual_depth_fallback(any: display, int: screen, any: visual): int {
+fn _get_visual_depth_fallback(any display, int screen, any visual) int {
    if(!display || !visual){ return 24 }
    def vptr = zalloc(8)
    def n = zalloc(4)
@@ -4718,9 +4945,9 @@ fn _get_visual_depth_fallback(any: display, int: screen, any: visual): int {
    mut depth = 24
    if(vinfo && count > 0){
       mut i = 0 while(i < count){
-         def vi = vinfo + i * 64 ;; Assuming 64-byte sizeof(XVisualInfo)
-         if(load64_h(vi, 0) == visual){ ;; Check if .visual field matches
-            depth = load32(vi, 20) ;; XVisualInfo.depth on 64-bit X11
+         def vi = vinfo + i * 64
+         if(load64_h(vi, 0) == visual){
+            depth = load32(vi, 20)
             break
          }
          i += 1
@@ -4731,7 +4958,7 @@ fn _get_visual_depth_fallback(any: display, int: screen, any: visual): int {
    depth
 }
 
-fn _choose_window_visual(any: display, int: screen, bool: want_argb32, any: provided_visual=0, int: provided_depth=0): list {
+fn _choose_window_visual(any display, int screen, bool want_argb32, any provided_visual=0, int provided_depth=0) list {
    if(provided_visual){
       def visual_depth = _get_visual_depth_fallback(display, screen, provided_visual)
       def depth = (visual_depth > 0) ? visual_depth : provided_depth
@@ -4747,16 +4974,16 @@ fn _choose_window_visual(any: display, int: screen, bool: want_argb32, any: prov
       if(n){ free(n) }
       return [fallback_visual, fallback_depth]
    }
-   store32(tpl, screen, 16) ;; XVisualInfo.screen on 64-bit X11
-   def infos = XGetVisualInfo(display, 2, tpl, n) ;; VisualScreenMask
+   store32(tpl, screen, 16)
+   def infos = XGetVisualInfo(display, 2, tpl, n)
    def count = load32(n, 0)
    if(infos && count > 0){
       mut i = 0
       while(i < count){
-         def vi = infos + i * 64 ;; XVisualInfo on 64-bit X11
+         def vi = infos + i * 64
          def depth = load32(vi, 20)
          def klass = load32(vi, 24)
-         if(depth == 32 && klass == 4){ ;; TrueColor
+         if(depth == 32 && klass == 4){
             fallback_visual = load64_h(vi, 0)
             fallback_depth = 32
             break
@@ -4769,24 +4996,24 @@ fn _choose_window_visual(any: display, int: screen, bool: want_argb32, any: prov
    [fallback_visual, fallback_depth]
 }
 
-fn resize_window(any: display, any: win, int: width, int: height): any {
+fn resize_window(any display, any win, int width, int height) any {
    "Resizes a raw X11 window."
    XResizeWindow(display, win, width, height)
 }
 
-fn _canonical_window_event_mask(): int {
+fn _canonical_window_event_mask() int {
    KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
    EnterWindowMask | LeaveWindowMask | PointerMotionMask | ExposureMask |
    VisibilityChangeMask | FocusChangeMask | StructureNotifyMask |
    PropertyChangeMask
 }
 
-fn _default_create_event_mask(int: event_mask): int {
+fn _default_create_event_mask(int event_mask) int {
    if(event_mask != 0){ return bor(_canonical_window_event_mask(), event_mask) }
    _canonical_window_event_mask()
 }
 
-fn _adjust_window_create_geometry(any: display, int: screen, int: flags, int: x, int: y, int: width, int: height): list {
+fn _adjust_window_create_geometry(any display, int screen, int flags, int x, int y, int width, int height) list {
    mut out_x, out_y = x, y
    mut out_w, out_h = width, height
    if(band(flags, WINDOW_FULLSCREEN)){
@@ -4803,7 +5030,7 @@ fn _adjust_window_create_geometry(any: display, int: screen, int: flags, int: x,
    [out_x, out_y, out_w, out_h]
 }
 
-fn _intern_named_atoms(any: display, list: names): dict {
+fn _intern_named_atoms(any display, list names) dict {
    if(!display || !names || !is_list(names)){ return dict(8) }
    mut out = dict(64)
    mut i = 0
@@ -4815,7 +5042,7 @@ fn _intern_named_atoms(any: display, list: names): dict {
    out
 }
 
-fn _x11_window_atom_state(any: display): dict {
+fn _x11_window_atom_state(any display) dict {
    def raw = _intern_named_atoms(display, [
          "WM_PROTOCOLS", "WM_DELETE_WINDOW", "_NET_WM_PING", "WM_STATE",
          "_NET_ACTIVE_WINDOW", "_NET_WM_PID", "_NET_WM_FULLSCREEN_MONITORS",
@@ -4878,14 +5105,14 @@ fn _x11_window_atom_state(any: display): dict {
    }
 }
 
-fn _x11_close_create_resources(any: display, any: im, any: colormap=0): bool {
+fn _x11_close_create_resources(any display, any im, any colormap=0) bool {
    if(colormap){ free_colormap(display, colormap) }
    if(im){ _c_xcloseim(im) }
    if(display){ close_display(display) }
    false
 }
 
-fn _x11_create_window_handle(any: display, any: root, int: x, int: y, int: width, int: height, int: depth, any: visual, int: event_mask, any: colormap): any {
+fn _x11_create_window_handle(any display, any root, int x, int y, int width, int height, int depth, any visual, int event_mask, any colormap) any {
    def attrs = zalloc(112)
    if(!attrs){ return 0 }
    store64_h(attrs, 0, 0)
@@ -4903,7 +5130,7 @@ fn _x11_create_window_handle(any: display, any: root, int: x, int: y, int: width
    handle
 }
 
-fn _x11_set_wm_protocols(any: display, any: window_handle, any: wm_protocols, any: wm_delete, any: net_wm_ping): bool {
+fn _x11_set_wm_protocols(any display, any window_handle, any wm_protocols, any wm_delete, any net_wm_ping) bool {
    if(!(wm_protocols && wm_delete)){ return false }
    def protocol_count = net_wm_ping ? 2 : 1
    def protocol_atoms = zalloc(protocol_count * 8)
@@ -4915,7 +5142,7 @@ fn _x11_set_wm_protocols(any: display, any: window_handle, any: wm_protocols, an
    true
 }
 
-fn _x11_enable_xdnd(any: display, any: window_handle, any: xdnd_aware): bool {
+fn _x11_enable_xdnd(any display, any window_handle, any xdnd_aware) bool {
    if(!xdnd_aware){ return false }
    def xdnd_ver = zalloc(8)
    if(!xdnd_ver){ return false }
@@ -4926,11 +5153,11 @@ fn _x11_enable_xdnd(any: display, any: window_handle, any: xdnd_aware): bool {
 }
 
 fn _x11_apply_initial_window_presentation(
-   any: display, any: root, any: window_handle, int: screen, int: flags, bool: hidden, bool: fullscreen,
-   bool: floating, bool: maximized, bool: minimized, any: net_wm_state, any: net_wm_state_fullscreen,
-   any: net_wm_state_above, any: net_wm_state_maximized_vert, any: net_wm_state_maximized_horz,
-   any: net_wm_bypass_compositor,
-): bool {
+   any display, any root, any window_handle, int screen, int flags, bool hidden, bool fullscreen,
+   bool floating, bool maximized, bool minimized, any net_wm_state, any net_wm_state_fullscreen,
+   any net_wm_state_above, any net_wm_state_maximized_vert, any net_wm_state_maximized_horz,
+   any net_wm_bypass_compositor,
+) bool {
    if(hidden){ return false }
    if(fullscreen && net_wm_state && net_wm_state_fullscreen){ append_atom_property(display, window_handle, net_wm_state, net_wm_state_fullscreen) }
    _show_window_raw(display, window_handle, floating, net_wm_state, net_wm_state_above)
@@ -4952,7 +5179,7 @@ fn _x11_apply_initial_window_presentation(
    true
 }
 
-fn _x11_has_compositor(any: display, int: screen, int: flags): bool {
+fn _x11_has_compositor(any display, int screen, int flags) bool {
    if(!band(flags, WINDOW_TRANSPARENT)){ return false }
    def cm_name = f"_NET_WM_CM_S{screen}"
    def cm_atom = intern_atom(display, cm_name)
@@ -4960,13 +5187,13 @@ fn _x11_has_compositor(any: display, int: screen, int: flags): bool {
 }
 
 fn _x11_build_window_state(
-   any: display, any: im, any: ic, dict: xkb, dict: xi, dict: key_tables, int: screen, any: root,
-   any: colormap, any: visual, int: depth, any: window_handle, dict: atoms, any: title, int: x, int: y,
-   int: width, int: height, int: flags, int: event_mask, bool: resizable, bool: decorated, bool: floating,
-   bool: fullscreen, bool: hidden, bool: focus_on_show, bool: minimized, bool: maximized,
-   bool: want_transparent, bool: has_compositor, bool: randr_available, int: randr_event,
-   int: randr_error, int: cursor_mode,
-): dict {
+   any display, any im, any ic, dict xkb, dict xi, dict key_tables, int screen, any root,
+   any colormap, any visual, int depth, any window_handle, dict atoms, any title, int x, int y,
+   int width, int height, int flags, int event_mask, bool resizable, bool decorated, bool floating,
+   bool fullscreen, bool hidden, bool focus_on_show, bool minimized, bool maximized,
+   bool want_transparent, bool has_compositor, bool randr_available, int randr_event,
+   int randr_error, int cursor_mode,
+) dict {
    def net_wm_state = atoms.get("net_wm_state", 0)
    def net_wm_state_fullscreen = atoms.get("net_wm_state_fullscreen", 0)
    mut win = {
@@ -4990,38 +5217,36 @@ fn _x11_build_window_state(
       "transparent": want_transparent && has_compositor && depth >= 32, "flags": flags,
       "cursor": 0, "cursor_handle": 0, "randr_available": randr_available,
       "randr_event_base": randr_event, "randr_error_base": randr_error,
-      "raw_mouse_motion": band(flags, WINDOW_RAW_MOUSE), "cursor_mode": cursor_mode,
+      "raw_mouse_motion": band(flags, WINDOW_RAW_MOUSE), "raw_mouse_lock_auto": false, "cursor_mode": cursor_mode,
       "captured_cursor": false, "disabled_cursor": false,
       "restore_cursor_x": 0, "restore_cursor_y": 0, "virtual_cursor_x": 0.0, "virtual_cursor_y": 0.0,
       "warp_cursor_x": 0, "warp_cursor_y": 0, "ignore_warp_motion": false,
-      "warp_event_offset_x": 0, "warp_event_offset_y": 0,
       "randr_outputs": dict(8), "scale_x": 1.0, "scale_y": 1.0
    }
    dict_merge(win, atoms)
 }
 
 fn create_basic_window(
-   str: title,
-   int: width,
-   int: height,
-   int: x=0,
-   int: y=0,
-   int: flags=0,
-   int: event_mask=0,
-   str: class_name="Nytrix",
-   str: instance_name="nytrix",
-   any: provided_visual=0,
-   int: provided_depth=0
-): any {
+   str title,
+   int width,
+   int height,
+   int x=0,
+   int y=0,
+   int flags=0,
+   int event_mask=0,
+   str class_name="Nytrix",
+   str instance_name="nytrix",
+   any provided_visual=0,
+   int provided_depth=0
+) any {
    "Creates and maps a basic X11 top-level window using Ny-side logic."
    if(!available()){ return false }
    if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){
       _dbg_input("create.entry title=" + title +
-         " flags=0x" + to_hex(flags) +
-         " event_arg=0x" + to_hex(event_mask) +
-         " provided_visual=0x" + to_hex(provided_visual) +
+         " flags=0x" + str.to_hex(flags) +
+         " event_arg=0x" + str.to_hex(event_mask) +
+         " provided_visual=0x" + str.to_hex(provided_visual) +
       " provided_depth=" + to_str(provided_depth))
-      _debug_event_mask_constants("create.entry")
    }
    def display = open_display()
    if(!display){ return false }
@@ -5041,7 +5266,6 @@ fn create_basic_window(
    def randr_event_base = 0
    def randr_error_base = 0
    event_mask = _default_create_event_mask(event_mask)
-   _debug_event_mask_line("create.default_event_mask", event_mask)
    def geom = _adjust_window_create_geometry(display, screen, flags, x, y, width, height)
    x, y = int(geom.get(0, x)), int(geom.get(1, y))
    width = int(geom.get(2, width))
@@ -5119,7 +5343,7 @@ fn create_basic_window(
    _sync_window_state(win)
 }
 
-fn get_key_name(any: win, int: key, int: scancode): str {
+fn get_key_name(any win, int key, int scancode) str {
    "Returns the layout-specific name of the specified printable key."
    if(!win || !is_dict(win)){ return "" }
    def display = win.get("display", 0)
@@ -5142,7 +5366,7 @@ fn get_key_name(any: win, int: key, int: scancode): str {
    name_ptr ? str.cstr_to_str(name_ptr) : ""
 }
 
-fn get_size(any: win): list {
+fn get_size(any win) list {
    "Returns the X11 window size as [width, height]."
    if(!win || !is_dict(win)){ return [0, 0] }
    def display = win.get("display", 0)
@@ -5152,7 +5376,7 @@ fn get_size(any: win): list {
    [sz.get("width", 0), sz.get("height", 0)]
 }
 
-fn close_basic_window(any: win): bool {
+fn close_basic_window(any win) bool {
    "Destroys a basic Ny-created X11 window and closes its display connection."
    if(!win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -5169,24 +5393,24 @@ fn close_basic_window(any: win): bool {
    true
 }
 
-fn _vk_surface_preference(): str {
+fn _vk_surface_preference() str {
    def pref = common.value_or(common.env_lower("NY_UI_X11_VK_SURFACE"), "auto")
    if(pref == "xcb" || pref == "xlib"){ return pref }
    "auto"
 }
 
-fn _vk_xcb_surface_create_info(any: connection, any: handle): any {
+fn _vk_xcb_surface_create_info(any connection, any handle) any {
    def info = zalloc(40)
    if(!info){ return 0 }
    store32(info, 1000005000, 0)
-   store64_h(info, 0, 8) ; pNext
-   store32(info, 0, 16) ; flags
+   store64_h(info, 0, 8)
+   store32(info, 0, 16)
    store64_h(info, connection, 24)
-   store32(info, handle, 32) ; xcb_window_t
+   store32(info, handle, 32)
    info
 }
 
-fn _finish_vk_surface_create(any: surface, int: res, str: label): int {
+fn _finish_vk_surface_create(any surface, int res, str label) int {
    if(res != 0){
       store64(surface, 0, 0)
       return -1
@@ -5196,7 +5420,7 @@ fn _finish_vk_surface_create(any: surface, int: res, str: label): int {
       if(ui_profile.debug_verbose_enabled()){
          print(
             "[x11] " + label +
-            " invalid handle=0x" + to_hex(handle_val) +
+            " invalid handle=0x" + str.to_hex(handle_val) +
             " (forcing fallback)",
          )
       }
@@ -5206,7 +5430,7 @@ fn _finish_vk_surface_create(any: surface, int: res, str: label): int {
    0
 }
 
-fn _create_xcb_surface(any: instance, any: display, any: handle, any: surface): int {
+fn _create_xcb_surface(any instance, any display, any handle, any surface) int {
    def connection = _c_xgetxcbconnection(display)
    if(!connection){
       if(ui_profile.debug_verbose_enabled()){ print("[x11] XCB surface unavailable: XGetXCBConnection returned null") }
@@ -5222,9 +5446,9 @@ fn _create_xcb_surface(any: instance, any: display, any: handle, any: surface): 
       print(
          "[x11] XCB info ptr=" + to_str(info) +
          " stype=" + to_str(load32(info, 0)) +
-         " pnext=0x" + to_hex(load64(info, 8)) +
+         " pnext=0x" + str.to_hex(load64(info, 8)) +
          " flags=" + to_str(load32(info, 16)) +
-         " conn=0x" + to_hex(load64(info, 24)) +
+         " conn=0x" + str.to_hex(load64(info, 24)) +
          " win=" + to_str(load32(info, 32)),
       )
    }
@@ -5232,7 +5456,7 @@ fn _create_xcb_surface(any: instance, any: display, any: handle, any: surface): 
    if(ui_profile.debug_verbose_enabled()){
       print(
          "[x11] vkCreateXcbSurfaceKHR res=" + to_str(res) +
-         " surf=0x" + to_hex(load64(surface, 0)) +
+         " surf=0x" + str.to_hex(load64(surface, 0)) +
          " conn=" + to_str(connection) +
          " win=" + to_str(handle),
       )
@@ -5241,7 +5465,7 @@ fn _create_xcb_surface(any: instance, any: display, any: handle, any: surface): 
    _finish_vk_surface_create(surface, res, "vkCreateXcbSurfaceKHR")
 }
 
-fn _create_xlib_surface(any: instance, any: display, any: handle, any: surface): int {
+fn _create_xlib_surface(any instance, any display, any handle, any surface) int {
    def info = zalloc(48)
    if(!info){
       store64(surface, 0, 0)
@@ -5251,17 +5475,17 @@ fn _create_xlib_surface(any: instance, any: display, any: handle, any: surface):
    store64_h(info, 0, 8)
    store32(info, 0, 16)
    store64_h(info, display, 24)
-   store64_h(info, handle, 32) ; Window
+   store64_h(info, handle, 32)
    XSync(display, 0)
    if(ui_profile.debug_verbose_enabled()){
       print(
          "[x11] BEFORE vkCreateXlibSurfaceKHR surf_ptr=" + to_str(surface) +
-         " surf_val=0x" + to_hex(load64(surface, 0)) +
+         " surf_val=0x" + str.to_hex(load64(surface, 0)) +
          " info=" + to_str(info) +
          " stype=" + to_str(load32(info, 0)) +
-         " pnext=0x" + to_hex(load64(info, 8)) +
+         " pnext=0x" + str.to_hex(load64(info, 8)) +
          " flags=" + to_str(load32(info, 16)) +
-         " dpy=0x" + to_hex(load64(info, 24)) +
+         " dpy=0x" + str.to_hex(load64(info, 24)) +
          " win=" + to_str(load64(info, 32)),
       )
    }
@@ -5269,7 +5493,7 @@ fn _create_xlib_surface(any: instance, any: display, any: handle, any: surface):
    if(ui_profile.debug_verbose_enabled()){
       print(
          "[x11] vkCreateXlibSurfaceKHR res=" + to_str(res) +
-         " surf=0x" + to_hex(load64(surface, 0)) +
+         " surf=0x" + str.to_hex(load64(surface, 0)) +
          " dpy=" + to_str(display) +
          " win=" + to_str(handle),
       )
@@ -5279,25 +5503,22 @@ fn _create_xlib_surface(any: instance, any: display, any: handle, any: surface):
    _finish_vk_surface_create(surface, res, "vkCreateXlibSurfaceKHR")
 }
 
-fn _restore_window_event_mask(any: win, any: display, any: handle): bool {
+fn _restore_window_event_mask(any win, any display, any handle) bool {
    if(!display || !handle){ return false }
    def mask = _default_create_event_mask(0)
-   _debug_event_mask_line("restore.computed", mask)
-   _debug_window_event_mask_snapshot(display, handle, "restore.before")
    select_input(display, handle, mask)
    XSync(display, 0)
-   _debug_window_event_mask_snapshot(display, handle, "restore.after")
    if(is_dict(win)){
       win["event_mask"] = mask
       _sync_window_state(win)
    }
    if(ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE")){
-      _dbg_input("restore event_mask=0x" + to_hex(mask) + " win=0x" + to_hex(handle))
+      _dbg_input("restore event_mask=0x" + str.to_hex(mask) + " win=0x" + str.to_hex(handle))
    }
    true
 }
 
-fn create_surface(any: instance, any: win, any: allocator, any: surface): int {
+fn create_surface(any instance, any win, any allocator, any surface) int {
    "Creates a Vulkan X11 surface for the given backend window."
    if(!is_dict(win)){ return -1 }
    mut display = win.get("display", 0)
@@ -5327,19 +5548,19 @@ fn create_surface(any: instance, any: win, any: allocator, any: surface): int {
    res
 }
 
-fn vulkan_get_surface_capabilities(any: phys, any: surf, any: caps): int {
+fn vulkan_get_surface_capabilities(any phys, any surf, any caps) int {
    "Thin wrapper over `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`."
    def res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surf, caps)
    res
 }
 
-fn vulkan_get_surface_support(any: phys, int: queue_family, any: surf, any: supported_ptr): int {
+fn vulkan_get_surface_support(any phys, int queue_family, any surf, any supported_ptr) int {
    "Thin wrapper over `vkGetPhysicalDeviceSurfaceSupportKHR`."
    def res = vkGetPhysicalDeviceSurfaceSupportKHR(phys, queue_family, surf, supported_ptr)
    res
 }
 
-fn get_gamma_ramp(any: monitor): any {
+fn get_gamma_ramp(any monitor) any {
    "Returns the XRandR gamma ramp for the given monitor."
    if(!is_dict(monitor)){ return 0 }
    def display = monitor.get("display", 0)
@@ -5364,7 +5585,7 @@ fn get_gamma_ramp(any: monitor): any {
    res
 }
 
-fn set_gamma_ramp(any: monitor, any: ramp): bool {
+fn set_gamma_ramp(any monitor, any ramp) bool {
    "Applies an XRandR gamma ramp to the given monitor."
    if(!is_dict(monitor) || !is_dict(ramp)){ return false }
    def display = monitor.get("display", 0)
@@ -5392,12 +5613,12 @@ fn set_gamma_ramp(any: monitor, any: ramp): bool {
    true
 }
 
-fn vulkan_supported(): bool {
+fn vulkan_supported() bool {
    "Returns true if the X11 backend supports Vulkan(currently always true for Linux builds)."
    true
 }
 
-fn _vulkan_extension_ptrs(any: surface, any: xcb, any: xlib, str: pref, bool: use_xcb): list {
+fn _vulkan_extension_ptrs(any surface, any xcb, any xlib, str pref, bool use_xcb) list {
    mut count = 2
    if(pref != "xcb" && pref != "xlib" && use_xcb){ count = 3 }
    def arr = zalloc(count * 8)
@@ -5412,7 +5633,7 @@ fn _vulkan_extension_ptrs(any: surface, any: xcb, any: xlib, str: pref, bool: us
    [count, arr]
 }
 
-fn vulkan_required_extensions(): any {
+fn vulkan_required_extensions() any {
    "Returns the Vulkan instance extensions required for X11 surfaces."
    mut ptrs = _get_x11_val("vk_ext_ptrs", 0)
    if(!ptrs){
@@ -5430,7 +5651,7 @@ fn vulkan_required_extensions(): any {
    ptrs
 }
 
-fn xdnd_begin_drag(any: win, any: data, str: mime_type="text/uri-list"): bool {
+fn xdnd_begin_drag(any win, any data, str mime_type="text/uri-list") bool {
    "Initiates an Xdnd drag from win as source. Returns false if setup fails."
    if(!available() || !win || !is_dict(win)){ return false }
    def display = win.get("display", 0)
@@ -5459,14 +5680,14 @@ fn xdnd_begin_drag(any: win, any: data, str: mime_type="text/uri-list"): bool {
    true
 }
 
-fn _handle_xdnd_status(any: win, any: display, any: event_ptr): any {
+fn _handle_xdnd_status(any win, any display, any event_ptr) any {
    if(!win || !display || !event_ptr){ return win }
    def accepted = band(load64_h(event_ptr, 64), 1) != 0
    win["xdnd_drag_accepted"] = accepted
    win
 }
 
-fn _handle_xdnd_finished(any: win, any: display, any: event_ptr): any {
+fn _handle_xdnd_finished(any win, any display, any event_ptr) any {
    if(!win || !display || !event_ptr){ return win }
    def success = band(load64_h(event_ptr, 64), 1) != 0
    win["xdnd_drag_finished"] = success
@@ -5475,7 +5696,7 @@ fn _handle_xdnd_finished(any: win, any: display, any: event_ptr): any {
    win
 }
 
-fn set_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0, any: display=0, any: root=0): bool {
+fn set_video_mode(any monitor, int width, int height, int refresh_rate=0, any display=0, any root=0) bool {
    "Sets the video mode for a monitor using XRandR. Returns true on success."
    if(!available() || !monitor || !is_dict(monitor)){ return false }
    def ctx = _resolve_monitor_context(display, root)
@@ -5535,7 +5756,7 @@ fn set_video_mode(any: monitor, int: width, int: height, int: refresh_rate=0, an
    ok
 }
 
-fn restore_video_mode(any: monitor, any: display=0, any: root=0): bool {
+fn restore_video_mode(any monitor, any display=0, any root=0) bool {
    "Restores the original video mode for a monitor using XRandR."
    if(!available() || !monitor || !is_dict(monitor)){ return false }
    def orig_mode = monitor.get("mode_id", 0)
@@ -5545,12 +5766,12 @@ fn restore_video_mode(any: monitor, any: display=0, any: root=0): bool {
    set_video_mode(monitor, w, h, refresh, display, root)
 }
 
-fn get_x11_monitor(any: mon): any {
+fn get_x11_monitor(any mon) any {
    "Returns the native X11 output handle from a monitor dict."
    if(is_dict(mon)){ mon.get("handle", 0) } else { 0 }
 }
 
-fn get_x11_adapter(any: mon): any {
+fn get_x11_adapter(any mon) any {
    "Returns the native X11 CRTC handle from a monitor dict."
    if(is_dict(mon)){ mon.get("crtc", 0) } else { 0 }
 }

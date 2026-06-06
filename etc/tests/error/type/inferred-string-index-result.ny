@@ -1,7 +1,7 @@
 ;; expect: cannot assign string literal to int
 use std.core
 
-fn first(xs){
+fn first(xs) {
    xs[0]
 }
 

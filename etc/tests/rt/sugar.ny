@@ -1,12 +1,12 @@
 use std.core
 use std.math.crypto.encoding.bytes as bytes_mod
 
-fn double(x){
+fn double(x) {
    "Doubles an integer for pipeline syntax tests."
    x * 2
 }
 
-fn cast_float_param(v){
+fn cast_float_param(v) {
    float(v)
 }
 

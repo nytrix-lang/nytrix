@@ -1,7 +1,7 @@
 ;; expect: variable declaration: expected str, got int
 use std.core
 
-fn first(xs){
+fn first(xs) {
    xs[0]
 }
 

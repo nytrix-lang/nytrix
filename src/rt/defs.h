@@ -85,6 +85,7 @@ RT_DEF("__getgid", rt_getgid, 0, "fn __getgid()", "Portable getgid wrapper.")
 RT_DEF("__getcwd", rt_getcwd, 2, "fn __getcwd(buf, size)", "Portable getcwd wrapper.")
 RT_DEF("__access", rt_access, 2, "fn __access(path, mode)", "Portable access wrapper.")
 RT_DEF("__unlink", rt_unlink, 1, "fn __unlink(path)", "Portable unlink wrapper.")
+RT_DEF("__rename", rt_rename, 2, "fn __rename(old_path, new_path)", "Portable rename wrapper.")
 RT_DEF("__pipe", rt_pipe, 1, "fn __pipe(fds_ptr)", "Portable pipe wrapper.")
 RT_DEF("__dup2", rt_dup2, 2, "fn __dup2(oldfd, newfd)", "Portable dup2 wrapper.")
 RT_DEF("__fork", rt_fork, 0, "fn __fork()", "Portable fork wrapper (non-Windows).")
@@ -355,6 +356,9 @@ RT_DEF("__flt_gt", rt_flt_gt, 2, "fn __flt_gt(a, b)", "Float greater than.")
 RT_DEF("__flt_eq", rt_flt_eq, 2, "fn __flt_eq(a, b)", "Float equality.")
 RT_DEF("__flt_is_nan", rt_flt_is_nan, 1, "fn __flt_is_nan(f)", "Returns true for NaN floats.")
 RT_DEF("__flt_is_inf", rt_flt_is_inf, 1, "fn __flt_is_inf(f)", "Returns true for infinite floats.")
+RT_DEF("__flt_nan", rt_flt_nan, 0, "fn __flt_nan()", "Returns a NaN float.")
+RT_DEF("__flt_inf", rt_flt_inf, 0, "fn __flt_inf()", "Returns positive infinity.")
+RT_DEF("__flt_hash", rt_flt_hash, 1, "fn __flt_hash(f)", "Returns a stable integer hash for a float.")
 RT_DEF("__flt_sin", rt_flt_sin, 1, "fn __flt_sin(x)", "Float sine.")
 RT_DEF("__flt_cos", rt_flt_cos, 1, "fn __flt_cos(x)", "Float cosine.")
 RT_DEF("__flt_tan", rt_flt_tan, 1, "fn __flt_tan(x)", "Float tangent.")
@@ -365,6 +369,8 @@ RT_DEF("__flt_atan2", rt_flt_atan2, 2, "fn __flt_atan2(y, x)", "Float arctangent
 RT_DEF("__flt_sqrt", rt_flt_sqrt, 1, "fn __flt_sqrt(x)", "Float square root.")
 RT_DEF("__flt_exp", rt_flt_exp, 1, "fn __flt_exp(x)", "Float natural exponent.")
 RT_DEF("__flt_log", rt_flt_log, 1, "fn __flt_log(x)", "Float natural logarithm.")
+RT_DEF("__flt_log2", rt_flt_log2, 1, "fn __flt_log2(x)", "Float base-2 logarithm.")
+RT_DEF("__flt_log10", rt_flt_log10, 1, "fn __flt_log10(x)", "Float base-10 logarithm.")
 RT_DEF("__flt_floor", rt_flt_floor, 1, "fn __flt_floor(x)", "Float floor as integer.")
 RT_DEF("__flt_ceil", rt_flt_ceil, 1, "fn __flt_ceil(x)", "Float ceil as integer.")
 RT_DEF("__flt_round", rt_flt_round, 1, "fn __flt_round(x)", "Float round as integer.")
@@ -597,6 +603,9 @@ RT_DEF("__gltf_skin_apply_raw", rt_gltf_skin_apply_raw, 7,
 RT_DEF("__gltf_skin_apply_one_raw", rt_gltf_skin_apply_one_raw, 6,
        "fn __gltf_skin_apply_one_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)",
        "Hot CPU skinning for packed glTF/Vulkan vertices with one joint influence per vertex.")
+RT_DEF("__gltf_skin_apply_one_fast_raw", rt_gltf_skin_apply_one_fast_raw, 6,
+       "fn __gltf_skin_apply_one_fast_raw(vptr, bind_vptr, joints_ptr, vcnt, skin_slab, mat_count)",
+       "Fast unchecked CPU skinning for valid packed glTF/Vulkan vertices with one joint influence.")
 RT_DEF("__simd_mat4_mul", rt_simd_mat4_mul, 3, "fn __simd_mat4_mul(a, b, out)",
        "SIMD-accelerated 4x4 column-major float matrix multiply "
        "(SSE2/NEON/scalar).")

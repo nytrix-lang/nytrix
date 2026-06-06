@@ -409,6 +409,32 @@ static inline void rt_gltf_skin_one(const float *m, float px, float py, float pz
   }
 }
 
+static inline void rt_gltf_skin_one_fast(const float *m, float px, float py, float pz, float nx,
+                                         float ny, float nz, unsigned char *dst) {
+  *(float *)(void *)(dst + 0) = m[0] * px + m[4] * py + m[8] * pz + m[12];
+  *(float *)(void *)(dst + 4) = m[1] * px + m[5] * py + m[9] * pz + m[13];
+  *(float *)(void *)(dst + 8) = m[2] * px + m[6] * py + m[10] * pz + m[14];
+
+  const float nnx = m[0] * nx + m[4] * ny + m[8] * nz;
+  const float nny = m[1] * nx + m[5] * ny + m[9] * nz;
+  const float nnz = m[2] * nx + m[6] * ny + m[10] * nz;
+  const float nlen2 = nnx * nnx + nny * nny + nnz * nnz;
+  if (nlen2 > 0.999f && nlen2 < 1.001f) {
+    *(float *)(void *)(dst + 24) = nnx;
+    *(float *)(void *)(dst + 28) = nny;
+    *(float *)(void *)(dst + 32) = nnz;
+  } else if (nlen2 > 0.000001f) {
+    const float inv_n = 1.0f / sqrtf(nlen2);
+    *(float *)(void *)(dst + 24) = nnx * inv_n;
+    *(float *)(void *)(dst + 28) = nny * inv_n;
+    *(float *)(void *)(dst + 32) = nnz * inv_n;
+  } else {
+    *(float *)(void *)(dst + 24) = nx;
+    *(float *)(void *)(dst + 28) = ny;
+    *(float *)(void *)(dst + 32) = nz;
+  }
+}
+
 int64_t rt_gltf_skin_apply_raw(int64_t vptr_v, int64_t bind_vptr_v, int64_t joints_ptr_v,
                                int64_t weights_ptr_v, int64_t vcnt_v, int64_t skin_slab_v,
                                int64_t mat_count_v) {
@@ -498,6 +524,34 @@ int64_t rt_gltf_skin_apply_raw(int64_t vptr_v, int64_t bind_vptr_v, int64_t join
       *(float *)(void *)(dst + 28) = rt_gltf_f32_clean(nny * inv_n);
       *(float *)(void *)(dst + 32) = rt_gltf_f32_clean(nnz * inv_n);
     }
+  }
+  return vptr_v;
+}
+
+int64_t rt_gltf_skin_apply_one_fast_raw(int64_t vptr_v, int64_t bind_vptr_v,
+                                        int64_t joints_ptr_v, int64_t vcnt_v,
+                                        int64_t skin_slab_v, int64_t mat_count_v) {
+  unsigned char *restrict vptr = (unsigned char *)(uintptr_t)vptr_v;
+  const unsigned char *restrict bind = (const unsigned char *)(uintptr_t)bind_vptr_v;
+  const uint32_t *restrict joints = (const uint32_t *)(uintptr_t)joints_ptr_v;
+  const float *restrict mats = (const float *)(uintptr_t)skin_slab_v;
+  int64_t vcnt = is_int(vcnt_v) ? (vcnt_v >> 1) : vcnt_v;
+  int64_t mat_count = is_int(mat_count_v) ? (mat_count_v >> 1) : mat_count_v;
+  if (!vptr || !bind || !joints || !mats || vcnt <= 0 || mat_count <= 0)
+    return 0;
+
+  for (int64_t vi = 0; vi < vcnt; vi++) {
+    const uint32_t ji = joints[(size_t)vi * 4u];
+    if (ji >= (uint32_t)mat_count)
+      continue;
+    const unsigned char *src = bind + (size_t)vi * 64u;
+    unsigned char *dst = vptr + (size_t)vi * 64u;
+    rt_gltf_skin_one_fast(mats + (size_t)ji * 16u, *(const float *)(const void *)(src + 0),
+                          *(const float *)(const void *)(src + 4),
+                          *(const float *)(const void *)(src + 8),
+                          *(const float *)(const void *)(src + 24),
+                          *(const float *)(const void *)(src + 28),
+                          *(const float *)(const void *)(src + 32), dst);
   }
   return vptr_v;
 }

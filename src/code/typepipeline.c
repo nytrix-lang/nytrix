@@ -4,6 +4,7 @@
 #include "code/nullnarrow.h"
 #include "parse/ast.h"
 #include "priv.h"
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,25 @@ typedef VEC(ny_tp_env_entry_t) ny_tp_env_list;
 typedef struct ny_tp_env_t {
   ny_tp_env_list vars;
 } ny_tp_env_t;
+
+#define NY_TP_USE_ALIAS_CACHE_SLOTS 4096u
+#define NY_TP_USE_ALIAS_KEY_MAX 128u
+
+typedef struct ny_tp_use_alias_cache_entry_t {
+  const codegen_t *cg;
+  const program_t *prog;
+  const void *extra_data;
+  size_t extra_len;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_TP_USE_ALIAS_KEY_MAX];
+  const char *value;
+} ny_tp_use_alias_cache_entry_t;
+
+typedef struct ny_tp_use_alias_cache_t {
+  ny_tp_use_alias_cache_entry_t entries[NY_TP_USE_ALIAS_CACHE_SLOTS];
+} ny_tp_use_alias_cache_t;
 
 typedef struct ny_tp_param_fact_t {
   char *inferred_type;
@@ -292,62 +312,38 @@ static void tp_diag_dispose(ny_tp_diag_t *diag) {
 }
 
 static const char *tp_expr_kind_name(expr_kind_t kind) {
-  switch (kind) {
-  case NY_E_LITERAL:
-    return "literal";
-  case NY_E_IDENT:
-    return "ident";
-  case NY_E_UNARY:
-    return "unary";
-  case NY_E_BINARY:
-    return "binary";
-  case NY_E_LOGICAL:
-    return "logical";
-  case NY_E_TERNARY:
-    return "ternary";
-  case NY_E_CALL:
-    return "call";
-  case NY_E_MEMCALL:
-    return "memcall";
-  case NY_E_INDEX:
-    return "index";
-  case NY_E_MEMBER:
-    return "member";
-  case NY_E_PTR_TYPE:
-    return "ptr_type";
-  case NY_E_DEREF:
-    return "deref";
-  case NY_E_SIZEOF:
-    return "sizeof";
-  case NY_E_TRY:
-    return "try_expr";
-  case NY_E_LAMBDA:
-    return "lambda";
-  case NY_E_FN:
-    return "fn";
-  case NY_E_LIST:
-    return "list";
-  case NY_E_TUPLE:
-    return "tuple";
-  case NY_E_DICT:
-    return "dict";
-  case NY_E_SET:
-    return "set";
-  case NY_E_FSTRING:
-    return "fstring";
-  case NY_E_MATCH:
-    return "match";
-  case NY_E_ASM:
-    return "asm";
-  case NY_E_COMPTIME:
-    return "comptime";
-  case NY_E_INFERRED_MEMBER:
-    return "inferred_member";
-  case NY_E_EMBED:
-    return "embed";
-  default:
-    return "expr";
-  }
+  static const char *names[] = {
+      [NY_E_IDENT] = "ident",
+      [NY_E_LITERAL] = "literal",
+      [NY_E_UNARY] = "unary",
+      [NY_E_BINARY] = "binary",
+      [NY_E_LOGICAL] = "logical",
+      [NY_E_TERNARY] = "ternary",
+      [NY_E_CALL] = "call",
+      [NY_E_MEMCALL] = "memcall",
+      [NY_E_INDEX] = "index",
+      [NY_E_LAMBDA] = "lambda",
+      [NY_E_FN] = "fn",
+      [NY_E_LIST] = "list",
+      [NY_E_TUPLE] = "tuple",
+      [NY_E_DICT] = "dict",
+      [NY_E_SET] = "set",
+      [NY_E_ASM] = "asm",
+      [NY_E_COMPTIME] = "comptime",
+      [NY_E_FSTRING] = "fstring",
+      [NY_E_INFERRED_MEMBER] = "inferred_member",
+      [NY_E_EMBED] = "embed",
+      [NY_E_MATCH] = "match",
+      [NY_E_MEMBER] = "member",
+      [NY_E_PTR_TYPE] = "ptr_type",
+      [NY_E_DEREF] = "deref",
+      [NY_E_SIZEOF] = "sizeof",
+      [NY_E_TRY] = "try_expr",
+  };
+  return kind >= 0 && (size_t)kind < sizeof(names) / sizeof(names[0]) &&
+                 names[kind]
+             ? names[kind]
+             : "expr";
 }
 
 static void tp_add_fallback(ny_tp_ctx_t *ctx, token_t tok, const char *stage,
@@ -370,6 +366,141 @@ static void tp_add_fallback(ny_tp_ctx_t *ctx, token_t tok, const char *stage,
                     code ? code : "hm-any-fallback",
                     expr_kind ? expr_kind : "expr", fb.reason ? fb.reason : "");
   }
+}
+
+static bool tp_fallback_warning_enabled(const ny_tp_ctx_t *ctx) {
+  if (!ctx || !ctx->fallbacks.len)
+    return false;
+  if (ctx->cg && ctx->cg->strict_types)
+    return false;
+  return ny_env_enabled_default_on("NYTRIX_TYPE_FALLBACK_WARN");
+}
+
+static bool tp_fallback_warning_interesting(const ny_tp_fallback_t *fb) {
+  if (!fb || !fb->code || fb->tok.line <= 0)
+    return false;
+  if (strcmp(fb->code, "hm-unknown-member") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-dynamic-member") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-dynamic-call") == 0 ||
+      strcmp(fb->code, "hm-unknown-call") == 0 ||
+      strcmp(fb->code, "hm-call-missing-callee") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-result-payload-dynamic") == 0)
+    return true;
+  bool verbose = ny_diag_warn_level() >= 2 ||
+                 ny_env_enabled("NYTRIX_TYPE_FALLBACK_WARN_VERBOSE");
+  if (!verbose)
+    return false;
+  if (strcmp(fb->code, "hm-dict-heterogeneous-literal") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-dynamic-arithmetic") == 0 ||
+      strcmp(fb->code, "hm-dynamic-comparison") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-index-dynamic-result") == 0)
+    return true;
+  if (strcmp(fb->code, "hm-callable-return-any") == 0)
+    return true;
+  return false;
+}
+
+static const char *tp_fallback_hint(const ny_tp_fallback_t *fb) {
+  const char *code = fb ? fb->code : NULL;
+  if (!code)
+    return "the program still compiles; the checker lost static evidence here";
+  if (strcmp(code, "hm-dict-heterogeneous-literal") == 0)
+    return "the dict literal mixes key or value shapes and was widened to any";
+  if (strcmp(code, "hm-dynamic-arithmetic") == 0 ||
+      strcmp(code, "hm-dynamic-comparison") == 0)
+    return "an operand is any, so the checker cannot prove the operator result "
+           "or select an unboxed fast path";
+  if (strcmp(code, "hm-dynamic-member") == 0 ||
+      strcmp(code, "hm-unknown-member") == 0)
+    return "the receiver type is unknown or the member is not present on the "
+           "inferred receiver";
+  if (strcmp(code, "hm-index-dynamic-result") == 0)
+    return "the indexed value has no proven element type, so reads stay on the "
+           "boxed dynamic path";
+  if (strcmp(code, "hm-dynamic-call") == 0 ||
+      strcmp(code, "hm-unknown-call") == 0 ||
+      strcmp(code, "hm-call-missing-callee") == 0 ||
+      strcmp(code, "hm-callable-return-any") == 0)
+    return "the callable or its return payload is not statically known, so the "
+           "call cannot be specialized";
+  if (strcmp(code, "hm-result-payload-dynamic") == 0)
+    return "the Result payload type is not known before unwrap or pattern bind";
+  return "the program still compiles; the checker lost static evidence here";
+}
+
+static const char *tp_fallback_fix(const ny_tp_fallback_t *fb) {
+  const char *code = fb ? fb->code : NULL;
+  if (!code)
+    return "add a local annotation/converter or use --strict-types to turn this "
+           "class into an error";
+  if (strcmp(code, "hm-dict-heterogeneous-literal") == 0)
+    return "split the record shape, annotate the dict value type, or make the "
+           "dynamic intent explicit near the literal";
+  if (strcmp(code, "hm-dynamic-arithmetic") == 0 ||
+      strcmp(code, "hm-dynamic-comparison") == 0)
+    return "convert or annotate the operand before the operator, for example "
+           "int(x), float(x), str(x), or a typed local";
+  if (strcmp(code, "hm-dynamic-member") == 0 ||
+      strcmp(code, "hm-unknown-member") == 0)
+    return "prove the receiver shape with a type annotation, layout guard, or "
+           "correct import/member spelling";
+  if (strcmp(code, "hm-index-dynamic-result") == 0)
+    return "prove the container element type before indexing or guard the "
+           "dynamic lookup result";
+  if (strcmp(code, "hm-dynamic-call") == 0 ||
+      strcmp(code, "hm-unknown-call") == 0 ||
+      strcmp(code, "hm-call-missing-callee") == 0 ||
+      strcmp(code, "hm-callable-return-any") == 0)
+    return "import or annotate the callable, or give the returned fnptr/result a "
+           "typed boundary";
+  if (strcmp(code, "hm-result-payload-dynamic") == 0)
+    return "construct or annotate the value as Result<T,E> before unwrap or "
+           "pattern binding";
+  return "add a local annotation/converter or use --strict-types to turn this "
+         "class into an error";
+}
+
+static size_t tp_emit_fallback_warnings(const ny_tp_ctx_t *ctx) {
+  if (!tp_fallback_warning_enabled(ctx))
+    return 0;
+  int limit = ny_env_int_range("NYTRIX_TYPE_FALLBACK_WARN_LIMIT", 5, 0, 100);
+  if (limit <= 0)
+    return 0;
+  size_t emitted = 0;
+  size_t skipped = 0;
+  token_t skipped_tok = {0};
+  for (size_t i = 0; i < ctx->fallbacks.len; ++i) {
+    const ny_tp_fallback_t *fb = &ctx->fallbacks.data[i];
+    if (!tp_fallback_warning_interesting(fb))
+      continue;
+    if (emitted >= (size_t)limit) {
+      skipped++;
+      if (skipped_tok.line <= 0)
+        skipped_tok = fb->tok;
+      continue;
+    }
+    ny_diag_warning_code(
+        fb->tok, 2101, "dynamic type fallback: %s",
+        fb->reason && *fb->reason ? fb->reason
+                                  : (fb->code ? fb->code : "inferred any"));
+    ny_diag_hint("%s", tp_fallback_hint(fb));
+    ny_diag_fix("%s", tp_fallback_fix(fb));
+    emitted++;
+  }
+  if (skipped > 0) {
+    ny_diag_warning_code(
+        skipped_tok.line > 0 ? skipped_tok : (token_t){0}, 2102,
+        "%zu more dynamic type fallback warning(s) suppressed; set "
+        "NYTRIX_TYPE_FALLBACK_WARN_LIMIT or use --strict-types for the full "
+        "gate",
+        skipped);
+  }
+  return emitted;
 }
 
 static void tp_emit_diagnostics_json(ny_tp_json_t *j, const ny_tp_ctx_t *ctx) {
@@ -604,35 +735,42 @@ static bool tp_type_eq(const char *a, const char *b) {
   return strcmp(a, b) == 0;
 }
 
+static bool tp_str_in(const char *s, const char *const *vals, size_t n) {
+  if (!s)
+    return false;
+  for (size_t i = 0; i < n; ++i)
+    if (strcmp(s, vals[i]) == 0)
+      return true;
+  return false;
+}
+
 static bool tp_is_int_type(const char *t) {
   t = tp_skip_nullable(t);
-  return t && (strcmp(t, "int") == 0 || strcmp(t, "i8") == 0 ||
-               strcmp(t, "i16") == 0 || strcmp(t, "i32") == 0 ||
-               strcmp(t, "i64") == 0 || strcmp(t, "i128") == 0 ||
-               strcmp(t, "u8") == 0 || strcmp(t, "u16") == 0 ||
-               strcmp(t, "u32") == 0 || strcmp(t, "u64") == 0 ||
-               strcmp(t, "u128") == 0);
+  static const char *const ints[] = {"int", "i8",   "i16",  "i32",
+                                     "i64", "i128", "u8",   "u16",
+                                     "u32", "u64",  "u128"};
+  return tp_str_in(t, ints, sizeof(ints) / sizeof(ints[0]));
 }
 
 static bool tp_is_float_type(const char *t) {
   t = tp_skip_nullable(t);
-  return t && (strcmp(t, "f32") == 0 || strcmp(t, "f64") == 0 ||
-               strcmp(t, "f128") == 0);
+  static const char *const floats[] = {"f32", "f64", "f128"};
+  return tp_str_in(t, floats, sizeof(floats) / sizeof(floats[0]));
 }
 
 static bool tp_is_complex_type(const char *t) {
   t = tp_skip_nullable(t);
-  return t && (strcmp(t, "complex") == 0 || strcmp(t, "c64") == 0 ||
-               strcmp(t, "c128") == 0);
+  static const char *const complex[] = {"complex", "c64", "c128"};
+  return tp_str_in(t, complex, sizeof(complex) / sizeof(complex[0]));
 }
 
 static bool tp_is_core_scalar(const char *t) {
   t = tp_skip_nullable(t);
-  return !t || !*t || strcmp(t, "any") == 0 || strcmp(t, "nil") == 0 ||
-         strcmp(t, "bool") == 0 || strcmp(t, "str") == 0 ||
-         strcmp(t, "char") == 0 || strcmp(t, "ptr") == 0 ||
-         strcmp(t, "handle") == 0 || tp_is_int_type(t) || tp_is_float_type(t) ||
-         tp_is_complex_type(t);
+  static const char *const scalars[] = {"any",  "nil", "bool", "str",
+                                        "char", "ptr", "handle"};
+  return !t || !*t ||
+         tp_str_in(t, scalars, sizeof(scalars) / sizeof(scalars[0])) ||
+         tp_is_int_type(t) || tp_is_float_type(t) || tp_is_complex_type(t);
 }
 
 static bool tp_type_base_name(const char *type, char *out, size_t cap) {
@@ -656,17 +794,14 @@ static bool tp_is_builtin_value_type(const char *type) {
   char base[128];
   if (!tp_type_base_name(type, base, sizeof(base)))
     return true;
-  return tp_is_core_scalar(base) || strcmp(base, "list") == 0 ||
-         strcmp(base, "tuple") == 0 || strcmp(base, "dict") == 0 ||
-         strcmp(base, "set") == 0 || strcmp(base, "bytes") == 0 ||
-         strcmp(base, "range") == 0 || strcmp(base, "fnptr") == 0 ||
-         strcmp(base, "number") == 0 || strcmp(base, "numeric") == 0 ||
-         strcmp(base, "integer") == 0 || strcmp(base, "float") == 0 ||
-         strcmp(base, "scalar") == 0 || strcmp(base, "seq") == 0 ||
-         strcmp(base, "sequence") == 0 || strcmp(base, "collection") == 0 ||
-         strcmp(base, "container") == 0 || strcmp(base, "iterable") == 0 ||
-         strcmp(base, "indexable") == 0 || strcmp(base, "allocator") == 0 ||
-         strcmp(base, "bigint") == 0;
+  static const char *const values[] = {
+      "list",       "tuple",    "dict",       "set",       "bytes",
+      "range",      "fnptr",    "number",     "numeric",   "integer",
+      "float",      "scalar",   "seq",        "sequence",  "collection",
+      "container",  "iterable", "indexable",  "allocator", "bigint",
+  };
+  return tp_is_core_scalar(base) ||
+         tp_str_in(base, values, sizeof(values) / sizeof(values[0]));
 }
 
 static const char *tp_group_canon(const char *name) {
@@ -986,6 +1121,25 @@ static const char *tp_lookup_module_alias_member_type(codegen_t *cg,
              : NULL;
 }
 
+static bool tp_module_alias_member_exists(codegen_t *cg, const char *target_name,
+                                          const char *member_name) {
+  if (!cg || !target_name || !*target_name || !member_name || !*member_name)
+    return false;
+  const char *module_name =
+      ny_lookup_module_alias(cg, NULL, 0, target_name, strlen(target_name), 0);
+  if (!module_name || !*module_name)
+    return false;
+  char dotted[512];
+  int nw = snprintf(dotted, sizeof(dotted), "%s.%s", module_name, member_name);
+  if (nw <= 0 || (size_t)nw >= sizeof(dotted))
+    return false;
+  if (lookup_fun(cg, dotted, 0) || lookup_global(cg, dotted))
+    return true;
+  const char *resolved = resolve_import_alias(cg, dotted);
+  return resolved && *resolved && strcmp(resolved, dotted) != 0 &&
+         (lookup_fun(cg, resolved, 0) || lookup_global(cg, resolved));
+}
+
 static const char *tp_lookup_use_alias_stmt(stmt_t *s, const char *alias) {
   if (!s || !alias || !*alias)
     return NULL;
@@ -1016,16 +1170,94 @@ static const char *tp_lookup_use_alias_stmt(stmt_t *s, const char *alias) {
   }
 }
 
+static bool tp_use_alias_cacheable_name(const char *alias, size_t *len_out) {
+  if (!alias || !*alias)
+    return false;
+  size_t len = strlen(alias);
+  if (len == 0 || len >= NY_TP_USE_ALIAS_KEY_MAX || len > UINT16_MAX)
+    return false;
+  if (len_out)
+    *len_out = len;
+  return true;
+}
+
+static ny_tp_use_alias_cache_t *tp_use_alias_cache(codegen_t *cg) {
+  if (!cg)
+    return NULL;
+  if (!cg->use_alias_lookup_cache)
+    cg->use_alias_lookup_cache = calloc(1, sizeof(ny_tp_use_alias_cache_t));
+  return (ny_tp_use_alias_cache_t *)cg->use_alias_lookup_cache;
+}
+
+static int tp_use_alias_cache_get(codegen_t *cg, const char *alias,
+                                  size_t alias_len, uint64_t hash,
+                                  const char **out) {
+  if (!cg || !alias || alias_len == 0 || alias_len >= NY_TP_USE_ALIAS_KEY_MAX)
+    return -1;
+  ny_tp_use_alias_cache_t *cache = tp_use_alias_cache(cg);
+  if (!cache)
+    return -1;
+  ny_tp_use_alias_cache_entry_t *e =
+      &cache->entries[hash & (NY_TP_USE_ALIAS_CACHE_SLOTS - 1u)];
+  if (!e->state || e->cg != cg || e->prog != cg->prog ||
+      e->extra_data != cg->extra_progs.data ||
+      e->extra_len != cg->extra_progs.len || e->hash != hash ||
+      e->len != (uint16_t)alias_len ||
+      memcmp(e->key, alias, alias_len) != 0 || e->key[alias_len] != '\0')
+    return -1;
+  if (e->state == 2u) {
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void tp_use_alias_cache_put(codegen_t *cg, const char *alias,
+                                   size_t alias_len, uint64_t hash,
+                                   const char *value) {
+  if (!cg || !alias || alias_len == 0 || alias_len >= NY_TP_USE_ALIAS_KEY_MAX)
+    return;
+  ny_tp_use_alias_cache_t *cache = tp_use_alias_cache(cg);
+  if (!cache)
+    return;
+  ny_tp_use_alias_cache_entry_t *e =
+      &cache->entries[hash & (NY_TP_USE_ALIAS_CACHE_SLOTS - 1u)];
+  e->cg = cg;
+  e->prog = cg->prog;
+  e->extra_data = cg->extra_progs.data;
+  e->extra_len = cg->extra_progs.len;
+  e->hash = hash;
+  e->len = (uint16_t)alias_len;
+  memcpy(e->key, alias, alias_len);
+  e->key[alias_len] = '\0';
+  e->value = value;
+  e->state = value ? 2u : 1u;
+}
+
 static const char *tp_lookup_program_use_alias(codegen_t *cg,
                                                const char *alias) {
   if (!cg || !alias || !*alias)
     return NULL;
+  size_t alias_len = 0;
+  bool cacheable = tp_use_alias_cacheable_name(alias, &alias_len);
+  uint64_t hash = cacheable ? ny_hash_name(alias, alias_len) : 0;
+  if (cacheable) {
+    const char *cached = NULL;
+    int hit = tp_use_alias_cache_get(cg, alias, alias_len, hash, &cached);
+    if (hit == 1)
+      return cached;
+    if (hit == 0)
+      return NULL;
+  }
   if (cg->prog) {
     for (size_t i = 0; i < cg->prog->body.len; ++i) {
       const char *found =
           tp_lookup_use_alias_stmt(cg->prog->body.data[i], alias);
-      if (found && *found)
+      if (found && *found) {
+        if (cacheable)
+          tp_use_alias_cache_put(cg, alias, alias_len, hash, found);
         return found;
+      }
     }
   }
   for (size_t p = 0; p < cg->extra_progs.len; ++p) {
@@ -1034,10 +1266,15 @@ static const char *tp_lookup_program_use_alias(codegen_t *cg,
       continue;
     for (size_t i = 0; i < prog->body.len; ++i) {
       const char *found = tp_lookup_use_alias_stmt(prog->body.data[i], alias);
-      if (found && *found)
+      if (found && *found) {
+        if (cacheable)
+          tp_use_alias_cache_put(cg, alias, alias_len, hash, found);
         return found;
+      }
     }
   }
+  if (cacheable)
+    tp_use_alias_cache_put(cg, alias, alias_len, hash, NULL);
   return NULL;
 }
 
@@ -2056,12 +2293,6 @@ static bool hm_is_callable_name(const char *name) {
                   strcmp(name, "callable") == 0);
 }
 
-static bool hm_type_is_callable(ny_hm_type_t *t) {
-  t = hm_prune(t);
-  return t && (t->kind == NY_HM_FN ||
-               (t->kind == NY_HM_NAME && hm_is_callable_name(t->name)));
-}
-
 static bool hm_strict_types_enabled(ny_hm_state_t *hm, token_t tok) {
   if (!hm || !hm->ctx || !hm->ctx->cg || !hm->ctx->cg->strict_types)
     return false;
@@ -2096,10 +2327,11 @@ static void hm_strict_diag(ny_hm_state_t *hm, token_t tok, const char *code,
       context ? context : "strict type validation",
       expected ? expected : "static type evidence", got ? got : "dynamic any",
       expr_kind ? expr_kind : "expr",
-      "Strict type mode rejects dynamic fallbacks that hide performance or "
-      "safety cliffs.",
-      "Add an explicit annotation, use a layout guard/converter, return "
-      "Result<T,E>, or intentionally annotate the value as any.",
+      "strict type checks reject dynamic fallbacks that hide performance or "
+      "safety cliffs",
+      "add a local annotation/converter, use a layout guard, refine the "
+      "Result<T,E> payload, or run with --no-strict-types for intentional "
+      "dynamic code",
       "%s", message ? message : "strict type validation failed");
 }
 
@@ -2844,6 +3076,29 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
   return out ? out : hm_name(hm, raw);
 }
 
+static const char *hm_type_part(const char *s) { return s ? s : "any"; }
+
+static char *hm_type_format(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  va_list copy;
+  va_copy(copy, ap);
+  int n = vsnprintf(NULL, 0, fmt, copy);
+  va_end(copy);
+  if (n < 0) {
+    va_end(ap);
+    return NULL;
+  }
+  char *out = malloc((size_t)n + 1);
+  if (!out) {
+    va_end(ap);
+    return NULL;
+  }
+  vsnprintf(out, (size_t)n + 1, fmt, ap);
+  va_end(ap);
+  return out;
+}
+
 static char *hm_type_string(ny_hm_type_t *t) {
   t = hm_prune(t);
   if (!t)
@@ -2872,20 +3127,13 @@ static char *hm_type_string(ny_hm_type_t *t) {
     name = "tuple";
     break;
   case NY_HM_NULLABLE:
-    out = malloc(strlen(a ? a : "any") + 2);
-    if (out)
-      snprintf(out, strlen(a ? a : "any") + 2, "?%s", a ? a : "any");
+    out = hm_type_format("?%s", hm_type_part(a));
     break;
   case NY_HM_PTR:
-    out = malloc(strlen(a ? a : "any") + 2);
-    if (out)
-      snprintf(out, strlen(a ? a : "any") + 2, "*%s", a ? a : "any");
+    out = hm_type_format("*%s", hm_type_part(a));
     break;
   case NY_HM_DICT:
-    out = malloc(strlen(a ? a : "any") + strlen(b ? b : "any") + 9);
-    if (out)
-      snprintf(out, strlen(a ? a : "any") + strlen(b ? b : "any") + 9,
-               "dict<%s, %s>", a ? a : "any", b ? b : "any");
+    out = hm_type_format("dict<%s, %s>", hm_type_part(a), hm_type_part(b));
     break;
   case NY_HM_FN: {
     ny_tp_json_t j = {0};
@@ -2902,10 +3150,7 @@ static char *hm_type_string(ny_hm_type_t *t) {
     break;
   }
   case NY_HM_UNION:
-    out = malloc(strlen(a ? a : "any") + strlen(b ? b : "any") + 2);
-    if (out)
-      snprintf(out, strlen(a ? a : "any") + strlen(b ? b : "any") + 2, "%s|%s",
-               a ? a : "any", b ? b : "any");
+    out = hm_type_format("%s|%s", hm_type_part(a), hm_type_part(b));
     break;
   case NY_HM_INDEXABLE:
     name = "indexable";
@@ -2914,10 +3159,7 @@ static char *hm_type_string(ny_hm_type_t *t) {
     break;
   }
   if (!out && name) {
-    out = malloc(strlen(name) + strlen(a ? a : "any") + 3);
-    if (out)
-      snprintf(out, strlen(name) + strlen(a ? a : "any") + 3, "%s<%s>", name,
-               a ? a : "any");
+    out = hm_type_format("%s<%s>", name, hm_type_part(a));
   }
   free(a);
   free(b);
@@ -2972,16 +3214,22 @@ static void hm_strict_result_payload_check(ny_hm_state_t *hm, token_t tok,
                                            ny_hm_type_t *result_t,
                                            ny_hm_type_t *payload_t,
                                            const char *context) {
-  if (!hm_strict_types_enabled(hm, tok))
-    return;
   if (hm_type_is_result_type(result_t) && !hm_type_is_dynamic(payload_t))
     return;
   char *got = hm_type_string(result_t);
+  tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm",
+                  "hm-result-payload-dynamic", "result",
+                  "%s has no statically known Result payload",
+                  context ? context : "result payload");
+  if (!hm_strict_types_enabled(hm, tok)) {
+    free(got);
+    return;
+  }
   hm_strict_diag(hm, tok, "hm-strict-result-payload",
                  context ? context : "result payload refinement",
                  "Result<T, E> with statically known payload",
                  got ? got : "any", "result",
-                 "strict type mode requires Result<T, E> payload evidence "
+                 "strict type checks require Result<T, E> payload evidence "
                  "before unwrap or result-pattern binding");
   free(got);
 }
@@ -3076,17 +3324,17 @@ static char *hm_pattern_call_name(ny_hm_state_t *hm, expr_t *pat) {
       return NULL;
     size_t a = strlen(target);
     size_t b = strlen(pat->as.memcall.name);
-	    char *out = malloc(a + b + 2);
-	    if (!out) {
-	      free(target);
-	      return NULL;
-	    }
-	    memcpy(out, target, a);
-	    out[a] = '.';
-	    memcpy(out + a + 1, pat->as.memcall.name, b + 1);
-	    free(target);
-	    return out;
-	  }
+       char *out = malloc(a + b + 2);
+       if (!out) {
+         free(target);
+         return NULL;
+       }
+       memcpy(out, target, a);
+       out[a] = '.';
+       memcpy(out + a + 1, pat->as.memcall.name, b + 1);
+       free(target);
+       return out;
+     }
   return NULL;
 }
 
@@ -3324,11 +3572,14 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
                       token_t tok, const char *self_name, const char *context) {
   callee_t = hm_prune(callee_t);
   if (!callee_t || hm_is_any(callee_t)) {
+    tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-dynamic-call",
+                    "call", "%s uses a callee inferred as any",
+                    context ? context : "call expression");
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call",
         context ? context : "call expression", "known callable signature",
         "dynamic any", "call",
-        "strict type mode rejects calls through values inferred as any");
+        "strict type checks reject calls through values inferred as any");
     for (size_t i = 0; args && i < args->len; ++i)
       (void)hm_infer_expr(hm, env, args->data[i].val, self_name);
     return hm_any(hm);
@@ -3342,11 +3593,16 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_call_function_type(hm, env, fn, args, tok, self_name, context);
   }
   if (callee_t->kind == NY_HM_NAME && hm_is_callable_name(callee_t->name)) {
+    tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm",
+                    "hm-callable-return-any", "call",
+                    "%s calls %s without a known return payload",
+                    context ? context : "call expression",
+                    callee_t->name ? callee_t->name : "callable");
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call",
         context ? context : "call expression", "fn(...) -> T signature",
         callee_t->name ? callee_t->name : "callable", "call",
-        "strict type mode rejects calls whose return payload is unknown");
+        "strict type checks reject calls whose return payload is unknown");
     for (size_t i = 0; args && i < args->len; ++i)
       (void)hm_infer_expr(hm, env, args->data[i].val, self_name);
     return hm_any(hm);
@@ -3601,16 +3857,19 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
       return hm_sig_return_type(hm, sig, self_name);
     }
     if (target || (name && strchr(name, '.'))) {
+      tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-unknown-call",
+                      "call", "unresolved call '%s' returns any",
+                      name ? name : "<anonymous>");
       hm_strict_diag(hm, tok, "hm-strict-dynamic-call", "function call",
                      "known callable", name ? name : "<anonymous>", "call",
-                     "strict type mode rejects unresolved member or qualified "
+                     "strict type checks reject unresolved member or qualified "
                      "calls that would return any");
       return hm_any(hm);
     }
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call", "function call", "known callable",
         name ? name : "<anonymous>", "call",
-        "strict type mode rejects unknown calls that would return any");
+        "strict type checks reject unknown calls that would return any");
     return hm_any_fallback(hm, NULL, "hm-unknown-call", "unknown callable '%s'",
                            name ? name : "<anonymous>");
   }
@@ -3653,10 +3912,13 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
       char got[512];
       snprintf(got, sizeof(got), "%s %s %s", ls ? ls : "any", op ? op : "cmp",
                rs ? rs : "any");
+      tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm",
+                      "hm-dynamic-comparison", "binary",
+                      "comparison operands inferred as %s", got);
       hm_strict_diag(hm, e->tok, "hm-strict-dynamic-arithmetic",
                      "comparison expression", "statically typed operands", got,
                      "binary",
-                     "strict type mode rejects dynamic comparison operands");
+                     "strict type checks reject dynamic comparison operands");
       free(ls);
       free(rs);
     }
@@ -3681,10 +3943,13 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
     char got[512];
     snprintf(got, sizeof(got), "%s %s %s", ls ? ls : "any", op ? op : "op",
              rs ? rs : "any");
+    tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm",
+                    "hm-dynamic-arithmetic", "binary",
+                    "arithmetic operands inferred as %s", got);
     hm_strict_diag(hm, e->tok, "hm-strict-dynamic-arithmetic",
                    "arithmetic expression",
                    "numeric/string/collection operands", got, "binary",
-                   "strict type mode rejects dynamic arithmetic operands");
+                   "strict type checks reject dynamic arithmetic operands");
     free(ls);
     free(rs);
     return hm_any(hm);
@@ -3839,7 +4104,7 @@ static ny_hm_type_t *hm_infer_expr(ny_hm_state_t *hm, ny_hm_env_list *env,
                        "dict literal",
                        "homogeneous dict or explicit dynamic annotation",
                        "mixed dict literal", "dict",
-                       "strict type mode rejects heterogeneous dict literals "
+                       "strict type checks reject heterogeneous dict literals "
                        "without explicit dynamic intent");
       }
     }
@@ -3976,10 +4241,22 @@ static ny_hm_type_t *hm_infer_expr(ny_hm_state_t *hm, ny_hm_env_list *env,
         return hm_name(hm, "fnptr");
       if (hm_member_root_is_unresolved_ident(hm, env, e->as.member.target))
         return hm_any(hm);
+      if (e->as.member.target->kind == NY_E_IDENT &&
+          e->as.member.target->as.ident.name &&
+          !hm_env_get(hm, env, e->as.member.target->as.ident.name) &&
+          tp_module_alias_member_exists(hm && hm->ctx ? hm->ctx->cg : NULL,
+                                        e->as.member.target->as.ident.name,
+                                        e->as.member.name))
+        return hm_any(hm);
       ny_hm_type_t *target_t =
           hm_infer_expr(hm, env, e->as.member.target, self_name);
-      if (hm_type_is_unbound_var(target_t))
+      if (hm_type_is_unbound_var(target_t)) {
+        tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm",
+                        "hm-dynamic-member", "member",
+                        "member '%s' read from unconstrained value",
+                        e->as.member.name ? e->as.member.name : "<member>");
         return hm_any(hm);
+      }
       char *target_s = hm_type_string(target_t);
       char *owner = hm_attached_owner_name(target_s);
       if (target_s && strcmp(target_s, "nil") == 0) {
@@ -4234,12 +4511,6 @@ static void hm_infer_stmt_list_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
     bool child_tail = allow_tail_expr && i + 1 == body->len;
     hm_infer_stmt_mode(hm, env, body->data[i], self_name, ret, child_tail);
   }
-}
-
-static void hm_infer_stmt_list(ny_hm_state_t *hm, ny_hm_env_list *env,
-                               ny_stmt_list *body, const char *self_name,
-                               ny_hm_type_t *ret) {
-  hm_infer_stmt_list_mode(hm, env, body, self_name, ret, true);
 }
 
 static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -4528,6 +4799,8 @@ int ny_type_pipeline_validate_hm(program_t *prog, codegen_t *cg,
       tp_emit_user_diag(d, "HM validation failed");
     }
   }
+  if (emit_diagnostics && ctx.diagnostics.len == 0)
+    (void)tp_emit_fallback_warnings(&ctx);
   hm_dispose(&hm);
   tp_ctx_dispose(&ctx);
   return count;
@@ -4564,6 +4837,8 @@ int ny_type_pipeline_validate_semantics(
     return count;
   }
   if (max_stage <= NY_TYPE_PIPELINE_STAGE_HM) {
+    if (emit_diagnostics)
+      (void)tp_emit_fallback_warnings(&ctx);
     hm_dispose(&hm);
     tp_ctx_dispose(&ctx);
     return 0;
@@ -4595,6 +4870,8 @@ int ny_type_pipeline_validate_semantics(
     return count;
   }
   if (max_stage <= NY_TYPE_PIPELINE_STAGE_TRAIT) {
+    if (emit_diagnostics)
+      (void)tp_emit_fallback_warnings(&ctx);
     hm_dispose(&hm);
     tp_ctx_dispose(&ctx);
     return 0;
@@ -4619,6 +4896,8 @@ int ny_type_pipeline_validate_semantics(
     return count;
   }
 
+  if (emit_diagnostics)
+    (void)tp_emit_fallback_warnings(&ctx);
   hm_dispose(&hm);
   tp_ctx_dispose(&ctx);
   return 0;

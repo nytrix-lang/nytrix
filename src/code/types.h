@@ -84,6 +84,7 @@ typedef VEC(uint64_t) assigned_hash_list;
 typedef struct ny_name_set_slot {
   const char *name;
   uint64_t hash;
+  size_t len;
 } ny_name_set_slot;
 
 typedef struct ny_name_set {

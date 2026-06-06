@@ -2,13 +2,13 @@
 use std.core
 
 impl Meter {
-   fn val(self: m): int {
+   fn val(self m) int {
       m.get("value", 0)
    }
 }
 
 impl Meter {
-   fn val(self: m): int {
+   fn val(self m) int {
       m.get("other", 0)
    }
 }

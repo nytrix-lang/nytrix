@@ -21,6 +21,12 @@ static const uint8_t ny_lex_table[256] = {
 #define IS_DIGIT(c) (ny_lex_table[(uint8_t)(c)] & 4)
 #define IS_ALNUM(c) (ny_lex_table[(uint8_t)(c)] & 6)
 
+static token_t make_token(lexer_t *lx, token_kind kind, size_t start);
+static void lexer_error(lexer_t *lx, size_t start, const char *msg,
+                        const char *hint);
+static void lex_number_suffix_digits(lexer_t *lx,
+                                     bool underscore_allows_float);
+
 static inline bool ny_is_alnum8(const unsigned char *p) {
   return (ny_lex_table[p[0]] & 6) && (ny_lex_table[p[1]] & 6) &&
          (ny_lex_table[p[2]] & 6) && (ny_lex_table[p[3]] & 6) &&
@@ -39,20 +45,35 @@ static inline bool ny_digit_sep_before_digit(const char *src, size_t pos) {
   return src[pos] == '_' && IS_DIGIT(src[pos + 1]);
 }
 
-static inline bool ny_digit_sep_before_xdigit(const char *src, size_t pos) {
-  return src[pos] == '_' && isxdigit((unsigned char)src[pos + 1]);
+static inline bool ny_digit_sep_before(const char *src, size_t pos,
+                                       bool (*pred)(char)) {
+  return src[pos] == '_' && pred(src[pos + 1]);
 }
 
 static inline bool ny_is_bindigit(char c) { return c == '0' || c == '1'; }
 
-static inline bool ny_digit_sep_before_bindigit(const char *src, size_t pos) {
-  return src[pos] == '_' && ny_is_bindigit(src[pos + 1]);
-}
-
 static inline bool ny_is_octdigit(char c) { return c >= '0' && c <= '7'; }
 
-static inline bool ny_digit_sep_before_octdigit(const char *src, size_t pos) {
-  return src[pos] == '_' && ny_is_octdigit(src[pos + 1]);
+static inline bool ny_is_xdigit(char c) { return isxdigit((unsigned char)c); }
+
+static token_t lex_radix_number(lexer_t *lx, size_t start, bool (*digit)(char),
+                                bool require_digit, const char *err,
+                                const char *hint) {
+  const char *src = lx->src;
+  lx->pos++;
+  lx->col++;
+  if (require_digit && !digit(src[lx->pos])) {
+    lexer_error(lx, start, err, hint);
+    return make_token(lx, NY_T_ERROR, start);
+  }
+  while (digit(src[lx->pos]) || ny_digit_sep_before(src, lx->pos, digit)) {
+    lx->pos++;
+    lx->col++;
+  }
+  lex_number_suffix_digits(lx, false);
+  token_t tok = make_token(lx, NY_T_NUMBER, start);
+  tok.hash = 0;
+  return tok;
 }
 
 static void lex_decimal_digits(lexer_t *lx) {
@@ -614,53 +635,17 @@ token_t lexer_next(lexer_t *lx) {
   }
   if (IS_DIGIT(c)) {
     if (c == '0' && (src[lx->pos] == 'x' || src[lx->pos] == 'X')) {
-      lx->pos++;
-      lx->col++;
-      while (isxdigit((unsigned char)src[lx->pos]) ||
-             ny_digit_sep_before_xdigit(src, lx->pos)) {
-        lx->pos++;
-        lx->col++;
-      }
-      lex_number_suffix_digits(lx, false);
-      token_t tok = make_token(lx, NY_T_NUMBER, start);
-      tok.hash = 0;
-      return tok;
+      return lex_radix_number(lx, start, ny_is_xdigit, false, NULL, NULL);
     }
     if (c == '0' && (src[lx->pos] == 'b' || src[lx->pos] == 'B')) {
-      lx->pos++;
-      lx->col++;
-      if (!ny_is_bindigit(src[lx->pos])) {
-        lexer_error(lx, start, "malformed binary numeric constant",
-                    "binary literals need at least one 0 or 1 digit after 0b");
-        return make_token(lx, NY_T_ERROR, start);
-      }
-      while (ny_is_bindigit(src[lx->pos]) ||
-             ny_digit_sep_before_bindigit(src, lx->pos)) {
-        lx->pos++;
-        lx->col++;
-      }
-      lex_number_suffix_digits(lx, false);
-      token_t tok = make_token(lx, NY_T_NUMBER, start);
-      tok.hash = 0;
-      return tok;
+      return lex_radix_number(
+          lx, start, ny_is_bindigit, true, "malformed binary numeric constant",
+          "binary literals need at least one 0 or 1 digit after 0b");
     }
     if (c == '0' && (src[lx->pos] == 'o' || src[lx->pos] == 'O')) {
-      lx->pos++;
-      lx->col++;
-      if (!ny_is_octdigit(src[lx->pos])) {
-        lexer_error(lx, start, "malformed octal numeric constant",
-                    "octal literals need at least one 0..7 digit after 0o");
-        return make_token(lx, NY_T_ERROR, start);
-      }
-      while (ny_is_octdigit(src[lx->pos]) ||
-             ny_digit_sep_before_octdigit(src, lx->pos)) {
-        lx->pos++;
-        lx->col++;
-      }
-      lex_number_suffix_digits(lx, false);
-      token_t tok = make_token(lx, NY_T_NUMBER, start);
-      tok.hash = 0;
-      return tok;
+      return lex_radix_number(
+          lx, start, ny_is_octdigit, true, "malformed octal numeric constant",
+          "octal literals need at least one 0..7 digit after 0o");
     }
     lex_decimal_digits(lx);
     if (src[lx->pos] == '.' && IS_DIGIT(src[lx->pos + 1])) {

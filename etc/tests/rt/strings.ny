@@ -15,13 +15,13 @@ assert(typed_len_source.len == 5, "typed str property len")
 assert("abc".len == 3, "literal str property len")
 assert(["x", "y"].len == 2, "literal list property len")
 
-fn property_len(x){ x.len }
+fn property_len(x) { x.len }
 assert(property_len("abcd") == 4, "dynamic str property len")
 assert(property_len(["a", "b", "c"]) == 3, "dynamic list property len")
 
-fn _len_return_source(){ [7, 8, 9] }
+fn _len_return_source() { [7, 8, 9] }
 
-fn _len_modulo_index(xs){
+fn _len_modulo_index(xs) {
    mut i = 0
    mut total = 0
    while(i < 10){
@@ -81,8 +81,8 @@ assert("abc".byte_at(1) == 98, "str byte_at method")
 assert(sort("baba") == "aabb", "sort string")
 assert(sorted("dcba") == "abcd", "sorted string")
 assert(swapped("abcd", 0, 3) == "dbca", "swapped string")
-assert(it.map("ab", fn(v){ v + "!" }) == "a!b!", "map string")
-assert(it.filter("aaba", fn(v){ v >= "a" }) == "aaba", "filter string")
+assert(it.map("ab", fn(v) { v + "!" }) == "a!b!", "map string")
+assert(it.filter("aaba", fn(v) { v >= "a" }) == "aaba", "filter string")
 assert(it.take("abcd", 2) == "ab", "take string")
 assert(it.drop("abcd", 2) == "cd", "drop string")
 assert(it.reverse("abcd") == "dcba", "reverse string")

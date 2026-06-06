@@ -34,11 +34,11 @@ def d = {"a": 1, "b": 2, "c": 3}
 assert(d["a"] == 1, "dict a")
 assert(d["c"] == 3, "dict c")
 
-fn dict_expr_direct(){
+fn dict_expr_direct() {
    {"x": 10, "y": 20}
 }
 
-fn dict_expr_local(v){
+fn dict_expr_local(v) {
    def out = {"value": v, "plus": v + 1}
    out
 }
@@ -48,7 +48,7 @@ def d3 = dict_expr_local(41)
 assert(d2["x"] == 10 && d2["y"] == 20, "direct dict expr")
 assert(d3["value"] == 41 && d3["plus"] == 42, "local dict expr")
 
-fn square(x){ x * x }
+fn square(x) { x * x }
 assert(square(7) == 49, "fn expr")
 def ternary_test = 42
 mut ternary_result = 0

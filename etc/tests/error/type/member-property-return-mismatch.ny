@@ -2,7 +2,7 @@
 use std.core
 
 impl PropBox {
-   fn value(self: box): int {
+   fn value(self box) int {
       7
    }
 }

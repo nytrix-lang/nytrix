@@ -1,5 +1,9 @@
-;; Keywords: platform window backend linux x11 keymap
+;; Keywords: platform window backend linux x11 keymap os ui input
 ;; Native X11 keyboard fallback logic.
+;; References:
+;; - std.os.ui.window.platform.linux.x11
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.linux.x11.keymap(translate_keysym, translate_scancode, keysym_to_unicode, keysym_from_key, INVALID_CODEPOINT)
 use std.core
 use std.os.ui.window.platform.api
@@ -108,7 +112,7 @@ def XK_slash = 0x002f
 def XK_less = 0x003c
 def INVALID_CODEPOINT = -1
 
-fn translate_keysym(int: primary, int: secondary=0, int: width=1): int {
+fn translate_keysym(int primary, int secondary=0, int width=1) int {
    "Translate common X11 keysyms into backend key codes."
    if(width > 1){
       match secondary {
@@ -223,7 +227,7 @@ fn translate_keysym(int: primary, int: secondary=0, int: width=1): int {
    -1
 }
 
-fn translate_scancode(int: scancode): int {
+fn translate_scancode(int scancode) int {
    "Common X11 hardware scancode mapping used by the native backend fallback."
    match scancode {
       9 -> KEY_ESCAPE
@@ -335,7 +339,7 @@ fn translate_scancode(int: scancode): int {
    }
 }
 
-fn keysym_from_key(int: key): int {
+fn keysym_from_key(int key) int {
    "Returns the primary KeySym for a Nytrix key constant."
    if(key >= 32 && key <= 126){ return key }
    match key {
@@ -450,7 +454,7 @@ def _KEYSYM_TO_UCS = [
 
 def _KEYSYM_TABLE_LEN = 784
 
-fn _keysym_table_lookup(int: keysym): int {
+fn _keysym_table_lookup(int keysym) int {
    "Binary search through the sorted keysym-to-unicode table."
    mut lo = 0
    mut hi = _KEYSYM_TABLE_LEN - 1
@@ -464,7 +468,7 @@ fn _keysym_table_lookup(int: keysym): int {
    INVALID_CODEPOINT
 }
 
-fn keysym_to_unicode(int: keysym): int {
+fn keysym_to_unicode(int keysym) int {
    "Map an X11 keysym to its Unicode codepoint using the full keysym table."
    if((keysym >= 0x0020 && keysym <= 0x007e) ||
       (keysym >= 0x00a0 && keysym <= 0x00ff)){
@@ -472,4 +476,20 @@ fn keysym_to_unicode(int: keysym): int {
    }
    if(band(keysym, 0xff000000) == 0x01000000){ return band(keysym, 0x00ffffff) }
    _keysym_table_lookup(keysym)
+}
+
+#main {
+   assert(translate_keysym(0xff1b) == KEY_ESCAPE, "keysym escape")
+   assert(translate_keysym(0x61) == KEY_A, "keysym alpha")
+   assert(translate_keysym(0x30 + 5) == KEY_5, "keysym digit")
+   assert(translate_keysym(0xff9e) == KEY_KP_0, "keysym keypad fallback")
+   assert(translate_keysym(0xffff) == KEY_DELETE, "keysym delete")
+   assert(translate_scancode(9) == KEY_ESCAPE, "scancode esc")
+   assert(translate_scancode(24) == KEY_Q, "scancode q")
+   assert(translate_scancode(133) == KEY_LEFT_SUPER, "scancode super")
+   assert(keysym_from_key(KEY_ESCAPE) == 0xff1b, "key to keysym")
+   assert(keysym_to_unicode(0x00e9) == 0x00e9, "latin1 keysym")
+   assert(keysym_to_unicode(0x010020ac) == 0x20ac, "keysym direct unicode")
+   assert(keysym_to_unicode(1) == INVALID_CODEPOINT, "invalid keysym")
+   print("✓ std.os.ui.window.platform.linux.x11.keymap self-test passed")
 }

@@ -56,8 +56,7 @@ static inline void nyt_rule(FILE *out) {
 }
 
 static inline void nyt_heading(const char *name) {
-  printf("%s%s%s%s\n", nyt_clr(NYT_BOLD), nyt_clr(NYT_CYAN), name ? name : "Nytrix",
-         nyt_clr(NYT_RESET));
+  (void)name;
   nyt_rule(stdout);
 }
 

@@ -714,7 +714,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
             typeinfer_mark_i64(ctx, name);
           else if (typeinfer_is_f64(ctx, init->as.ident.name))
             typeinfer_mark_f64(ctx, name);
-            
+
           if (typeinfer_escapes(ctx, init->as.ident.name))
             typeinfer_mark_escape(ctx, name);
         } else if (init->kind == NY_E_BINARY) {
@@ -748,7 +748,7 @@ void typeinfer_walk_stmt(typeinfer_ctx_t *ctx, stmt_t *s) {
       } else if (!s->as.var.is_decl) {
         typeinfer_mark_dynamic(ctx, name);
       }
-      
+
       /* Propagate escape back to initializer if this variable escapes */
       if (typeinfer_escapes(ctx, name) && init && init->kind == NY_E_IDENT) {
         typeinfer_mark_escape(ctx, init->as.ident.name);
@@ -859,7 +859,7 @@ void typeinfer_func_body(typeinfer_ctx_t *ctx, stmt_t *body) {
   for (int pass = 0; pass < max_passes; pass++) {
     ctx->changed = false;
     typeinfer_walk_stmt(ctx, body);
-    
+
     /* If nothing changed in this pass, we have reached a fixed point */
     if (!ctx->changed) {
       break;
@@ -893,33 +893,33 @@ void typeinfer_apply_to_scopes(typeinfer_ctx_t *ctx, scope *scopes, size_t depth
           b->is_f64_direct = !b->is_slot;
         }
 
-	    if (b->stmt_t && b->stmt_t->kind == NY_S_VAR &&
-	        b->stmt_t->sema_kind == NY_STMT_SEMA_VAR && b->stmt_t->sema) {
-	      sema_var_t *sv = (sema_var_t *)b->stmt_t->sema;
-	      arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
-	      for (size_t k = 0; k < b->stmt_t->as.var.names.len; k++) {
-	        if (strcmp(b->stmt_t->as.var.names.data[k], b->name) == 0) {
-	          while (sv->is_int_proven.len <= k) {
-	            if (sema_arena)
-	              vec_push_arena(sema_arena, &sv->is_int_proven, false);
-	            else
-	              vec_push(&sv->is_int_proven, false);
-	          }
-	          while (sv->is_f64_proven.len <= k) {
-	            if (sema_arena)
-	              vec_push_arena(sema_arena, &sv->is_f64_proven, false);
-	            else
-	              vec_push(&sv->is_f64_proven, false);
-	          }
-	          while (sv->escapes.len <= k) {
-	            if (sema_arena)
-	              vec_push_arena(sema_arena, &sv->escapes, false);
-	            else
-	              vec_push(&sv->escapes, false);
-	          }
-	          sv->is_int_proven.data[k] = bit_i64 && !bit_dyn;
-	          sv->is_f64_proven.data[k] = bit_f64 && !bit_dyn;
-	          sv->escapes.data[k] = bit_esc;
+       if (b->stmt_t && b->stmt_t->kind == NY_S_VAR &&
+           b->stmt_t->sema_kind == NY_STMT_SEMA_VAR && b->stmt_t->sema) {
+         sema_var_t *sv = (sema_var_t *)b->stmt_t->sema;
+         arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
+         for (size_t k = 0; k < b->stmt_t->as.var.names.len; k++) {
+           if (strcmp(b->stmt_t->as.var.names.data[k], b->name) == 0) {
+             while (sv->is_int_proven.len <= k) {
+               if (sema_arena)
+                 vec_push_arena(sema_arena, &sv->is_int_proven, false);
+               else
+                 vec_push(&sv->is_int_proven, false);
+             }
+             while (sv->is_f64_proven.len <= k) {
+               if (sema_arena)
+                 vec_push_arena(sema_arena, &sv->is_f64_proven, false);
+               else
+                 vec_push(&sv->is_f64_proven, false);
+             }
+             while (sv->escapes.len <= k) {
+               if (sema_arena)
+                 vec_push_arena(sema_arena, &sv->escapes, false);
+               else
+                 vec_push(&sv->escapes, false);
+             }
+             sv->is_int_proven.data[k] = bit_i64 && !bit_dyn;
+             sv->is_f64_proven.data[k] = bit_f64 && !bit_dyn;
+             sv->escapes.data[k] = bit_esc;
               break;
             }
           }

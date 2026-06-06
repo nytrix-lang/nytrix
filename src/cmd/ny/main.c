@@ -15,7 +15,6 @@
 #include "rt/shared.h"
 #include "wire/pipe.h"
 #ifndef _WIN32
-#include <execinfo.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -63,16 +62,6 @@ const char *__lsan_default_suppressions() {
 }
 #endif
 
-static void print_trace_snippet(const char *file, int line, int col) {
-  if (!file || file[0] == '<' || line <= 0 || col <= 0)
-    return;
-  char *src = ny_read_file(file);
-  if (!src)
-    return;
-  ny_print_snippet(src, line, col, 1, NY_CLR_RED);
-  free(src);
-}
-
 /* Async-signal-safe string writer */
 static void write_str(const char *s) {
   if (s)
@@ -102,43 +91,6 @@ static void write_dec(int64_t v) {
 #ifndef _WIN32
 static void handle_timeout(int sig);
 #endif
-
-/* Async-signal-safe hex printer for backtrace pointers. */
-#ifndef _WIN32
-static void write_ptr_hex(void *p) {
-  static const char hex[] = "0123456789abcdef";
-  char buf[20];
-  buf[0] = '0';
-  buf[1] = 'x';
-  uintptr_t v = (uintptr_t)p;
-  for (int i = 17; i >= 2; i--) {
-    buf[i] = hex[v & 0xf];
-    v >>= 4;
-  }
-  buf[18] = '\n';
-  buf[19] = '\0';
-  write_str(buf);
-}
-#endif
-
-static void print_last_trace(void) {
-  int64_t file = rt_trace_last_file();
-  if (!is_v_str(file))
-    return;
-  const char *fname = (const char *)(uintptr_t)file;
-  int64_t ftagged = *(int64_t *)((char *)(uintptr_t)file - 16);
-  size_t flen = is_int(ftagged) ? (size_t)(ftagged >> 1) : 0;
-  int64_t tline = rt_trace_last_line();
-  int64_t tcol = rt_trace_last_col();
-  int64_t line = is_int(tline) ? rt_untag_v(tline) : 0;
-  int64_t col = is_int(tcol) ? rt_untag_v(tcol) : 0;
-  int64_t fn = rt_trace_last_func();
-  char prefix[256];
-  snprintf(prefix, sizeof(prefix), "%sLast Nytrix location:%s ", clr(NY_CLR_CYAN),
-           clr(NY_CLR_RESET));
-  print_trace_entry(file, tline, tcol, fn, prefix);
-  print_trace_snippet(fname, (int)line, (int)col);
-}
 
 static void write_ny_signal_frame(int64_t file, int64_t line, int64_t col, int64_t func) {
   const char *file_ptr = (const char *)(uintptr_t)file;
@@ -342,6 +294,211 @@ static void ny_env_append_semicolon_unique(const char *name, const char *extra) 
   free(buf);
 }
 
+static bool ny_config_key_ok(const char *s, size_t n) {
+  if (!s || n == 0)
+    return false;
+  unsigned char c0 = (unsigned char)s[0];
+  if (!(isalpha(c0) || c0 == '_'))
+    return false;
+  for (size_t i = 1; i < n; ++i) {
+    unsigned char c = (unsigned char)s[i];
+    if (!(isalnum(c) || c == '_'))
+      return false;
+  }
+  return true;
+}
+
+static char *ny_trim_span_dup(const char *s, size_t n) {
+  while (n > 0 && isspace((unsigned char)*s)) {
+    s++;
+    n--;
+  }
+  while (n > 0 && isspace((unsigned char)s[n - 1]))
+    n--;
+  char *out = (char *)malloc(n + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, s, n);
+  out[n] = '\0';
+  return out;
+}
+
+static void ny_strip_matching_quotes(char *s) {
+  if (!s)
+    return;
+  size_t n = strlen(s);
+  if (n < 2)
+    return;
+  if ((s[0] == '"' && s[n - 1] == '"') || (s[0] == '\'' && s[n - 1] == '\'')) {
+    memmove(s, s + 1, n - 2);
+    s[n - 2] = '\0';
+  }
+}
+
+static char *ny_config_expand_value(const char *value) {
+  if (!value)
+    return NULL;
+  if (value[0] != '~' || (value[1] != '/' && value[1] != '\\' && value[1] != '\0'))
+    return ny_strdup(value);
+#ifdef _WIN32
+  const char *home = getenv("USERPROFILE");
+  if (!home || !*home)
+    home = getenv("APPDATA");
+#else
+  const char *home = getenv("HOME");
+#endif
+  if (!home || !*home)
+    return ny_strdup(value);
+  size_t nh = strlen(home);
+  size_t nv = strlen(value);
+  char *out = (char *)malloc(nh + nv);
+  if (!out)
+    return NULL;
+  memcpy(out, home, nh);
+  memcpy(out + nh, value + 1, nv);
+  out[nh + nv - 1] = '\0';
+  return out;
+}
+
+static void ny_config_path_join(char *out, size_t out_sz, const char *a, const char *b) {
+  if (!out || out_sz == 0)
+    return;
+  if (!a || !*a) {
+    snprintf(out, out_sz, "%s", b ? b : "");
+    return;
+  }
+  size_t n = strlen(a);
+  const char sep =
+#ifdef _WIN32
+      '\\';
+#else
+      '/';
+#endif
+  if (n > 0 && (a[n - 1] == '/' || a[n - 1] == '\\'))
+    snprintf(out, out_sz, "%s%s", a, b ? b : "");
+  else
+    snprintf(out, out_sz, "%s%c%s", a, sep, b ? b : "");
+}
+
+static void ny_config_home(char *out, size_t out_sz) {
+  const char *xdg = getenv("XDG_CONFIG_HOME");
+  if (xdg && *xdg) {
+    snprintf(out, out_sz, "%s", xdg);
+    return;
+  }
+#ifdef _WIN32
+  const char *home = getenv("USERPROFILE");
+  if (!home || !*home)
+    home = getenv("APPDATA");
+#else
+  const char *home = getenv("HOME");
+#endif
+  if (home && *home)
+    ny_config_path_join(out, out_sz, home, ".config");
+  else
+    out[0] = '\0';
+}
+
+static void ny_config_candidate(int idx, char *out, size_t out_sz) {
+  out[0] = '\0';
+  if (idx == 0) {
+    const char *explicit_path = getenv("NYTRIX_CONFIG");
+    if (!explicit_path || !*explicit_path)
+      explicit_path = getenv("NY_CONFIG");
+    snprintf(out, out_sz, "%s", explicit_path && *explicit_path ? explicit_path : "");
+    return;
+  }
+  if (idx == 1) {
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd))) {
+      char dir[4096];
+      ny_config_path_join(dir, sizeof(dir), cwd, ".nytrix");
+      ny_config_path_join(out, out_sz, dir, "config");
+    }
+    return;
+  }
+  if (idx == 2) {
+    char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd)))
+      ny_config_path_join(out, out_sz, cwd, "nytrix.config");
+    return;
+  }
+  char base[4096];
+  ny_config_home(base, sizeof(base));
+  if (!base[0])
+    return;
+  if (idx == 3) {
+    char dir[4096];
+    ny_config_path_join(dir, sizeof(dir), base, "nytrix");
+    ny_config_path_join(out, out_sz, dir, "config");
+  } else if (idx == 4) {
+    char dir[4096];
+    ny_config_path_join(dir, sizeof(dir), base, "ny");
+    ny_config_path_join(out, out_sz, dir, "config");
+  }
+}
+
+static void ny_load_config_file(const char *path) {
+  if (!path || !*path)
+    return;
+  char *txt = ny_read_file(path);
+  if (!txt)
+    return;
+  bool loaded = false;
+  char *p = txt;
+  while (*p) {
+    char *line = p;
+    while (*p && *p != '\n')
+      p++;
+    size_t n = (size_t)(p - line);
+    if (*p == '\n')
+      p++;
+    char *s = ny_trim_span_dup(line, n);
+    if (!s)
+      continue;
+    if (!*s || *s == '#' || *s == ';') {
+      free(s);
+      continue;
+    }
+    loaded = true;
+    if (strncmp(s, "export ", 7) == 0) {
+      char *trimmed = ny_trim_span_dup(s + 7, strlen(s + 7));
+      free(s);
+      s = trimmed;
+      if (!s)
+        continue;
+    }
+    char *eq = strchr(s, '=');
+    if (!eq) {
+      free(s);
+      continue;
+    }
+    char *key = ny_trim_span_dup(s, (size_t)(eq - s));
+    char *val = ny_trim_span_dup(eq + 1, strlen(eq + 1));
+    if (key && val && ny_config_key_ok(key, strlen(key))) {
+      ny_strip_matching_quotes(val);
+      char *expanded = ny_config_expand_value(val);
+      ny_setenv_default(key, expanded ? expanded : val);
+      free(expanded);
+    }
+    free(key);
+    free(val);
+    free(s);
+  }
+  if (loaded)
+    ny_env_append_semicolon_unique("NYTRIX_CONFIG_LOADED", path);
+  free(txt);
+}
+
+static void ny_load_default_config(void) {
+  for (int i = 0; i < 5; ++i) {
+    char path[4096];
+    ny_config_candidate(i, path, sizeof(path));
+    if (path[0])
+      ny_load_config_file(path);
+  }
+}
+
 static void ny_global_cleanup(void) {
   parser_global_cleanup();
   ny_intern_cleanup();
@@ -426,7 +583,7 @@ static char **ny_current_envp(char **fallback_envp) {
 #endif
 }
 
-static bool ny_input_file_looks_like_ui(const char *path) {
+static bool ny_input_file_looks_like_engine(const char *path) {
   if (!path || !*path)
     return false;
   const char *base = path;
@@ -434,7 +591,7 @@ static bool ny_input_file_looks_like_ui(const char *path) {
     if (*p == '/' || *p == '\\')
       base = p + 1;
   }
-  return strcmp(base, "ui.ny") == 0;
+  return strcmp(base, "engine.ny") == 0;
 }
 
 static char *ny_join_path_file(const char *dir, const char *file) {
@@ -627,7 +784,7 @@ static void ny_enable_ui_nosurface_bench_env(bool profile) {
                        profile ? "0" : "1", NULL);
   if (profile)
     ny_setenv_force("NY_UI_BENCH_PROFILE", "1");
-  ny_setenv_default_many("NY_UI_MSAA", "1", "NYTRIX_VK_NOSURFACE_LOAD_PASS", "1",
+  ny_setenv_default_many("NY_UI_MSAA", "4", "NYTRIX_VK_NOSURFACE_LOAD_PASS", "1",
                          "NYTRIX_VK_NOSURFACE_REPLAY", "1", NULL);
 }
 
@@ -939,7 +1096,7 @@ static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
 }
 
 static int ny_bridge_ui_script_args_to_env(const ny_options *opt, int argc, char **argv) {
-  if (!opt || !opt->input_file || !ny_input_file_looks_like_ui(opt->input_file))
+  if (!opt || !opt->input_file || !ny_input_file_looks_like_engine(opt->input_file))
     return 0;
 
   ny_ui_bridge_state_t st = {0};
@@ -994,7 +1151,7 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   if (opt->strict_types)
     ny_env_config_set(env, "NYTRIX_STRICT_TYPES", "1");
   else if (opt->strict_types_explicit)
-    ny_env_config_unset(env, "NYTRIX_STRICT_TYPES");
+    ny_env_config_set(env, "NYTRIX_STRICT_TYPES", "0");
   if (opt->gprof >= 0)
     ny_env_config_set_bool(env, "NYTRIX_GPROF", opt->gprof != 0);
   if (opt->opt_profile)
@@ -1190,6 +1347,7 @@ static void handle_timeout(int sig) {
 #endif
 
 int main(int argc, char **argv, char **envp) {
+  ny_load_default_config();
   int unified_rc = 0;
   if (ny_try_unified_tool(argc, argv, &unified_rc))
     return unified_rc;

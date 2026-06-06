@@ -3,11 +3,11 @@
 use std.core
 
 @mutates(x)
-fn touch(x): int {
+fn touch(x) int {
    0
 }
 
-fn bad(): int {
+fn bad() int {
    def a = [1, 2]
    def b = borrow(a)
    touch(a)

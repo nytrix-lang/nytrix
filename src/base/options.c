@@ -354,6 +354,11 @@ static bool ny_is_opt_profile_name(const char *name) {
   return name && ny_opt_profile_name_is_valid(name);
 }
 
+static void ny_set_opt_level(ny_options *opt, int level) {
+  opt->opt_level = level;
+  opt->opt_level_explicit = true;
+}
+
 static void ny_sync_opt_profile_env(ny_options *opt) {
   if (!opt)
     return;
@@ -367,6 +372,8 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
 
   ny_opt_profile_kind_t profile = ny_opt_profile_kind_from_name(opt->opt_profile);
   bool native_emit = !opt->run_jit && (opt->emit_only || opt->run_aot);
+  bool standalone_emit_check =
+      opt->emit_only && !opt->output_file && !opt->run_aot && !opt->run_jit;
   if (!opt->opt_level_explicit) {
     switch (profile) {
     case NY_OPT_PROFILE_PEAK:
@@ -388,13 +395,16 @@ static void ny_sync_opt_profile_env(ny_options *opt) {
     case NY_OPT_PROFILE_CUSTOM:
     case NY_OPT_PROFILE_DEFAULT:
     default:
-      if (native_emit)
-        opt->opt_level = 2;
+      if (standalone_emit_check)
+        opt->opt_level = 0;
+      else if (native_emit)
+        opt->opt_level = 0;
       break;
     }
   }
 
-  if (profile == NY_OPT_PROFILE_DEFAULT && native_emit) {
+  if (profile == NY_OPT_PROFILE_DEFAULT && native_emit &&
+      !standalone_emit_check) {
     ny_setenv("NYTRIX_SIMPLE_RAW_INT_CALL_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_BRANCH_FAST", "1", 0);
     ny_setenv("NYTRIX_PROVEN_INT_MOD_FAST", "1", 0);
@@ -819,6 +829,25 @@ static bool ny_is_parallel_mode(const char *mode) {
                   strcmp(mode, "threads") == 0 || strcmp(mode, "modules") == 0);
 }
 
+typedef bool (*ny_option_choice_pred_t)(const char *);
+
+static const char *ny_gpu_backend_option_value(const char *backend) {
+  return backend && strcmp(backend, "off") == 0 ? "none" : backend;
+}
+
+static void ny_set_option_choice_or_die(const char **slot, const char *value,
+                                        ny_option_choice_pred_t valid,
+                                        const char *label,
+                                        const char *argv0) {
+  if (valid(value)) {
+    *slot = value;
+    return;
+  }
+  fprintf(stderr, "unknown %s: %s\n", label, value ? value : "(null)");
+  ny_options_usage(argv0);
+  exit(1);
+}
+
 typedef enum {
   NY_OPT_TOGGLE_BOOL,
   NY_OPT_TOGGLE_INT,
@@ -1033,11 +1062,11 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Enable strict safety/effect/alias checks"},
       {NY_CLR_MAGENTA, "--mode=MODE", "Runtime preset: safe | fast | bare"},
       {NY_CLR_MAGENTA, "--strict",
-       "Strict types plus ownership/borrow diagnostics"},
+       "Default type checks plus ownership/borrow diagnostics"},
       {NY_CLR_MAGENTA, "--strict-types",
        "Reject dynamic type cliffs at compile time"},
       {NY_CLR_MAGENTA, "--no-strict-types",
-       "Allow dynamic type cliffs even under safe mode"},
+       "Allow legacy dynamic type cliffs"},
       {NY_CLR_MAGENTA, "--max-errors=N",
        "Stop parsing after N errors (0 disables the cap)"},
       {NULL, NULL, NULL}});
@@ -1075,7 +1104,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
   ny_usage_section("OPTIMIZATION");
   ny_usage_items((const ny_usage_entry_t[]){
       {NY_CLR_GREEN, "-O1/-O2/-O3",
-       "Optimization level (native emit default: -O2; JIT/REPL default: -O0)"},
+       "Optimization level (default: -O0 for fast development builds)"},
       {NY_CLR_GREEN, "--profile=MODE",
        "Optimization profile: speed | balanced | compile | size | none | "
        "peak"},
@@ -1333,6 +1362,50 @@ void ny_options_usage_env(const char *prog) {
   ny_options_usage_impl(prog, true);
 }
 
+static const char *ny_default_std_path(void) {
+  const char *env_std = getenv("NYTRIX_STD_PATH");
+  if (env_std)
+    return env_std;
+  if (ny_access("./build/std.ny", R_OK) == 0)
+    return "./build/std.ny";
+
+  char *exe_dir = ny_get_executable_dir();
+  if (exe_dir && *exe_dir) {
+    static char exe_stdp[4096];
+    ny_join_path(exe_stdp, sizeof(exe_stdp), exe_dir, "std.ny");
+    if (ny_access(exe_stdp, R_OK) == 0)
+      return exe_stdp;
+  }
+#ifdef _WIN32
+  const char *pd = getenv("PROGRAMDATA");
+  if (pd && *pd) {
+    static char stdp[4096];
+    char tmp[4096];
+    ny_join_path(tmp, sizeof(tmp), pd, "nytrix");
+    ny_join_path(stdp, sizeof(stdp), tmp, "std.ny");
+    if (ny_access(stdp, R_OK) == 0)
+      return stdp;
+  }
+  return "C:/ProgramData/nytrix/std.ny";
+#else
+#ifdef NYTRIX_STD_PATH
+  if (ny_access(NYTRIX_STD_PATH, R_OK) == 0)
+    return NYTRIX_STD_PATH;
+#endif
+  static const char *paths[] = {
+      "/usr/share/nytrix/std.ny",
+      "/usr/local/share/nytrix/std.ny",
+      "/opt/homebrew/share/nytrix/std.ny",
+      "/opt/nytrix/share/std.ny",
+  };
+  for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
+    if (ny_access(paths[i], R_OK) == 0)
+      return paths[i];
+  }
+  return paths[0];
+#endif
+}
+
 void ny_options_parse(ny_options *opt, int argc, char **argv) {
   if (argc > 0)
     opt->argv0 = argv[0];
@@ -1355,23 +1428,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       } else if ((value = ny_option_value_or_die(a, "--mode", &i, argc, argv,
                                                  argv[0])) != NULL) {
         ny_apply_runtime_mode_or_die(opt, value, argv[0]);
-      } else if (strcmp(a, "--strict") == 0) {
-        opt->strict_types = true;
-        opt->strict_types_explicit = true;
-        opt->ownership = true;
-        opt->ownership_strict = true;
-        if (!opt->heap_policy_explicit)
-          opt->heap_policy = NY_HEAP_RAII;
-      } else if (strcmp(a, "--strict-types") == 0) {
-        opt->strict_types = true;
-        opt->strict_types_explicit = true;
-      } else if (strcmp(a, "--no-strict-types") == 0) {
-        opt->strict_types = false;
-        opt->strict_types_explicit = true;
-      } else if ((value = ny_option_value_or_die(a, "--max-errors", &i, argc,
-                                                 argv, argv[0])) != NULL) {
-        opt->max_errors =
-            ny_parse_nonneg_int_or_die(value, "max errors", argv[0]);
+      } else if (ny_options_apply_common_codegen_option(opt, a, &i, argc, argv,
+                                                        argv[0])) {
       } else if (ny_options_apply_toggle(opt, a)) {
       } else if (strcmp(a, "--gprof") == 0 || strcmp(a, "-pg") == 0 ||
                  strcmp(a, "--profile-gprof") == 0) {
@@ -1410,8 +1468,7 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         }
         opt->arm_float_abi = value;
       } else if (strcmp(a, "-O") == 0 || strcmp(a, "-O2") == 0) {
-        opt->opt_level = 2;
-        opt->opt_level_explicit = true;
+        ny_set_opt_level(opt, 2);
       } else if ((value = ny_option_value_or_die(a, "--profile", &i, argc, argv,
                                                  argv[0])) != NULL) {
         if (!ny_is_opt_profile_name(value)) {
@@ -1421,14 +1478,11 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         }
         opt->opt_profile = value;
       } else if (strcmp(a, "-O1") == 0) {
-        opt->opt_level = 1;
-        opt->opt_level_explicit = true;
+        ny_set_opt_level(opt, 1);
       } else if (strcmp(a, "-O0") == 0) {
-        opt->opt_level = 0;
-        opt->opt_level_explicit = true;
+        ny_set_opt_level(opt, 0);
       } else if (strcmp(a, "-O3") == 0) {
-        opt->opt_level = 3;
-        opt->opt_level_explicit = true;
+        ny_set_opt_level(opt, 3);
       } else if (strcmp(a, "--fast") == 0) {
         if (!opt->opt_level)
           opt->opt_level = 2;
@@ -1438,25 +1492,13 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->opt_pipeline = a + 8;
       else if ((value = ny_option_value_or_die(a, "--gpu", &i, argc, argv,
                                                argv[0])) != NULL) {
-        if (ny_is_gpu_mode(value)) {
-          opt->gpu_mode = value;
-        } else {
-          fprintf(stderr, "unknown gpu mode: %s\n", value);
-          ny_options_usage(argv[0]);
-          exit(1);
-        }
+        ny_set_option_choice_or_die(&opt->gpu_mode, value, ny_is_gpu_mode,
+                                    "gpu mode", argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--gpu-backend", &i, argc,
                                                  argv, argv[0])) != NULL) {
-        const char *backend = value;
-        if (strcmp(backend, "off") == 0)
-          backend = "none";
-        if (ny_is_gpu_backend(backend)) {
-          opt->gpu_backend = backend;
-        } else {
-          fprintf(stderr, "unknown gpu backend: %s\n", backend);
-          ny_options_usage(argv[0]);
-          exit(1);
-        }
+        value = ny_gpu_backend_option_value(value);
+        ny_set_option_choice_or_die(&opt->gpu_backend, value, ny_is_gpu_backend,
+                                    "gpu backend", argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--accel-target", &i, argc,
                                                  argv, argv[0])) != NULL) {
         ny_set_accel_target_or_die(opt, value, argv[0], "--accel-target");
@@ -1468,26 +1510,18 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         ny_set_gpu_target_compat_or_die(opt, value, argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--gpu-offload", &i, argc,
                                                  argv, argv[0])) != NULL) {
-        if (ny_is_gpu_offload_mode(value)) {
-          opt->gpu_offload = value;
-        } else {
-          fprintf(stderr, "unknown gpu offload mode: %s\n", value);
-          ny_options_usage(argv[0]);
-          exit(1);
-        }
+        ny_set_option_choice_or_die(&opt->gpu_offload, value,
+                                    ny_is_gpu_offload_mode,
+                                    "gpu offload mode", argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--gpu-min-work", &i, argc,
                                                  argv, argv[0])) != NULL) {
         opt->gpu_min_work =
             ny_parse_nonneg_int_or_die(value, "gpu min work", argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--parallel", &i, argc,
                                                  argv, argv[0])) != NULL) {
-        if (ny_is_parallel_mode(value)) {
-          opt->parallel_mode = value;
-        } else {
-          fprintf(stderr, "unknown parallel mode: %s\n", value);
-          ny_options_usage(argv[0]);
-          exit(1);
-        }
+        ny_set_option_choice_or_die(&opt->parallel_mode, value,
+                                    ny_is_parallel_mode, "parallel mode",
+                                    argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--threads", &i, argc, argv,
                                                  argv[0])) != NULL) {
         opt->thread_count =
@@ -1530,8 +1564,6 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       } else if (strcmp(a, "-emit-only") == 0) {
         opt->emit_only = true;
         opt->run_aot = false;
-      } else if (ny_options_apply_common_codegen_option(opt, a, &i, argc, argv,
-                                                        argv[0])) {
       } else if (ny_options_apply_exec_option(opt, a, &i, argc, argv, argv[0])) {
       } else if (strcmp(a, "--debug") == 0) {
         opt->verbose = 3;
@@ -1799,8 +1831,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       fprintf(stderr,
               "--safe-mode cannot be combined with -gc or --heap=gc\n");
       fprintf(stderr,
-              "safe mode uses strict types, ownership checks, and RC/RAII "
-              "cleanup; choose --mode=fast or --heap=gc explicitly.\n");
+              "safe mode uses the default type checks, ownership checks, and "
+              "RC/RAII cleanup; choose --mode=fast or --heap=gc explicitly.\n");
       exit(1);
     }
     opt->ownership = true;
@@ -1843,60 +1875,8 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
     opt->opt_autotune = 0;
   }
   ny_warn_inline_code_semicolon(opt);
-  if (!opt->std_path) {
-    const char *env_std = getenv("NYTRIX_STD_PATH");
-    if (env_std) {
-      opt->std_path = env_std;
-    } else {
-      if (ny_access("./build/std.ny", R_OK) == 0) {
-        opt->std_path = "./build/std.ny";
-      } else {
-        char *exe_dir = ny_get_executable_dir();
-        if (exe_dir && *exe_dir) {
-          static char exe_stdp[4096];
-          ny_join_path(exe_stdp, sizeof(exe_stdp), exe_dir, "std.ny");
-          if (ny_access(exe_stdp, R_OK) == 0) {
-            opt->std_path = exe_stdp;
-            return;
-          }
-        }
-#ifdef _WIN32
-        const char *pd = getenv("PROGRAMDATA");
-        if (pd && *pd) {
-          static char stdp[4096];
-          char tmp[4096];
-          ny_join_path(tmp, sizeof(tmp), pd, "nytrix");
-          ny_join_path(stdp, sizeof(stdp), tmp, "std.ny");
-          if (ny_access(stdp, R_OK) == 0) {
-            opt->std_path = stdp;
-            return;
-          }
-        }
-        opt->std_path = "C:/ProgramData/nytrix/std.ny";
-#else
-#ifdef NYTRIX_STD_PATH
-        if (ny_access(NYTRIX_STD_PATH, R_OK) == 0) {
-          opt->std_path = NYTRIX_STD_PATH;
-          return;
-        }
-#endif
-        static const char *paths[] = {
-            "/usr/share/nytrix/std.ny",
-            "/usr/local/share/nytrix/std.ny",
-            "/opt/homebrew/share/nytrix/std.ny",
-            "/opt/nytrix/share/std.ny",
-        };
-        for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
-          if (ny_access(paths[i], R_OK) == 0) {
-            opt->std_path = paths[i];
-            return;
-          }
-        }
-        opt->std_path = paths[0];
-#endif
-      }
-    }
-  }
+  if (!opt->std_path)
+    opt->std_path = ny_default_std_path();
 }
 
 void ny_options_free(ny_options *opt) {

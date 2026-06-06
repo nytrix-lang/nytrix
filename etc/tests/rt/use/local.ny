@@ -6,18 +6,18 @@ module local {
 
 use std.core
 
-fn helper_val(){
+fn helper_val() {
    123
 }
 
-fn helper_add(a, b){
+fn helper_add(a, b) {
    a + b
 }
 
-fn helper_debug(){
+fn helper_debug() {
    9001
 }
 
-fn _helper_secret(){
+fn _helper_secret() {
    -1
 }

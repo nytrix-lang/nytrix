@@ -2,7 +2,7 @@
 use std.core
 
 @pure
-fn bad(){
+fn bad() {
    print("effect")
    1
 }

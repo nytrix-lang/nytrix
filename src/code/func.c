@@ -87,6 +87,18 @@ static bool fn_uses_native_abi(codegen_t *cg, const stmt_t *fn) {
   return fn->as.fn.is_extern || !cg || cg->user_native_abi;
 }
 
+static LLVMTypeRef fn_resolve_user_abi_type(codegen_t *cg, const stmt_t *fn,
+                                            bool use_native_abi,
+                                            const char *type_name,
+                                            token_t tok) {
+  if (!use_native_abi || !type_name)
+    return cg->type_i64;
+  if (fn && fn->kind == NY_S_FUNC && !fn->as.fn.is_extern &&
+      ny_type_is(type_name, "fnptr"))
+    return cg->type_i64;
+  return resolve_abi_type_name(cg, type_name, tok);
+}
+
 static bool fn_tagged_abi_should_normalize_param(const char *type_name) {
   const char *leaf = ny_type_leaf(type_name);
   if (!leaf || !*leaf)
@@ -2244,22 +2256,6 @@ static char *infer_fn_return_type(stmt_t *fn, const char **param_types) {
   return out;
 }
 
-static bool fn_is_tiny_int_helper(const stmt_t *fn, const char *name) {
-  if (!fn || fn->kind != NY_S_FUNC || !fn->as.fn.return_type ||
-      strcmp(fn->as.fn.return_type, "int") != 0)
-    return false;
-  if (!name || strcmp(name, "main") == 0 || strcmp(name, "_ny_top_entry") == 0)
-    return false;
-  if (fn->as.fn.params.len == 0 || fn->as.fn.params.len > 4)
-    return false;
-  for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
-    const char *ptype = fn->as.fn.params.data[i].type;
-    if (!ptype || strcmp(ptype, "int") != 0)
-      return false;
-  }
-  return true;
-}
-
 static bool fn_is_synthetic_closure(const stmt_t *fn, const char *name) {
   const char *raw = name && *name ? name : (fn && fn->kind == NY_S_FUNC ? fn->as.fn.name : NULL);
   return raw && (strncmp(raw, "__defer", 7) == 0 || strncmp(raw, "__lambda", 8) == 0);
@@ -2286,13 +2282,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
      distinguish std/lib symbols from user code even when the language-level
      name is unqualified (e.g. `print`). */
   const char *origin_section = "ny.user";
-  if (fn->tok.filename) {
-    const char *ff = fn->tok.filename;
-    if (strstr(ff, "/std/") || strstr(ff, "/lib/") || strstr(ff, "std.ny") || strstr(ff, "lib.ny") ||
-        strncmp(ff, "<stdlib>", 8) == 0 || strstr(ff, "/share/nytrix/")) {
-      origin_section = "ny.std";
-    }
-  }
+  if (ny_is_stdlib_tok(fn->tok))
+    origin_section = "ny.std";
 #ifdef __APPLE__
   origin_section = (strcmp(origin_section, "ny.std") == 0) ? "__TEXT,ny_std" : "__TEXT,ny_user";
 #endif
@@ -2370,10 +2361,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
   }
   if (split_worker_attached_method)
     LLVMSetLinkage(f, LLVMWeakODRLinkage);
-  if (cg->skip_stdlib && fn->tok.filename && !fn_is_synthetic_closure(fn, name) &&
-      (strstr(fn->tok.filename, "std.ny") || strstr(fn->tok.filename, "lib.ny") ||
-       strncmp(fn->tok.filename, "<stdlib>", 8) == 0 ||
-       strstr(fn->tok.filename, "/share/nytrix/"))) {
+  if (cg->skip_stdlib && !fn_is_synthetic_closure(fn, name) &&
+      ny_is_stdlib_tok(fn->tok)) {
     return;
   }
   if (prof_func) {
@@ -2543,7 +2532,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes, size_t
         param_val = ny_box_abi_result(cg, raw, explicit_ptype);
       } else if (param_val && function_native_abi && explicit_ptype != NULL &&
                  ny_is_native_abi_type_name(explicit_ptype) &&
-                 !ny_type_is_tagged(explicit_ptype)) {
+                 !ny_type_is_tagged(explicit_ptype) &&
+                 !ny_type_is(explicit_ptype, "fnptr")) {
         LLVMTypeRef pllty = LLVMTypeOf(param_val);
         LLVMTypeKind pk = LLVMGetTypeKind(pllty);
         if (pk == LLVMDoubleTypeKind || pk == LLVMFloatTypeKind) {
@@ -2859,14 +2849,12 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     sema_func_t *sema_func = arena_alloc(cg->arena, sizeof(sema_func_t));
     memset(sema_func, 0, sizeof(sema_func_t));
     bool use_native_abi = fn_uses_native_abi(cg, s);
-    sema_func->resolved_return_type =
-        (use_native_abi && s->as.fn.return_type)
-            ? resolve_abi_type_name(cg, s->as.fn.return_type, s->tok)
-            : cg->type_i64;
+    sema_func->resolved_return_type = fn_resolve_user_abi_type(
+        cg, s, use_native_abi, s->as.fn.return_type, s->tok);
     for (size_t j = 0; j < s->as.fn.params.len; j++) {
       const char *ptype = s->as.fn.params.data[j].type;
       LLVMTypeRef param_ty =
-          (use_native_abi && ptype) ? resolve_abi_type_name(cg, ptype, s->tok) : cg->type_i64;
+          fn_resolve_user_abi_type(cg, s, use_native_abi, ptype, s->tok);
       vec_push_arena(cg->arena, &sema_func->resolved_param_types, param_ty);
     }
     s->sema = (void *)sema_func;

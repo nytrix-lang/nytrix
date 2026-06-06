@@ -3,7 +3,7 @@ use std.os.time
 
 ;; Vector Benchmark (Benchmark)
 ; Fixed scale values (helpers may return 0 if env not set)
-fn hadamard_kernel(a, b){
+fn hadamard_kernel(a, b) {
    def n = a.len
    mut out = list(n)
    mut i = 0

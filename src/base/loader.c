@@ -120,6 +120,10 @@ static int ny_std_trace_chunks_enabled(void) {
 static void std_push_mod(const char *name, const char *path, const char *package) {
   if (!name || !path || !package)
     return;
+  for (size_t i = 0; i < ny_std_mods_len; ++i) {
+    if (ny_std_mods[i].name && strcmp(ny_std_mods[i].name, name) == 0)
+      return;
+  }
   if (ny_std_mods_len == ny_std_mods_cap) {
     size_t nc = ny_std_mods_cap ? ny_std_mods_cap * 2 : 64;
     ny_std_mod *nm = ny_loader_xrealloc(ny_std_mods, nc * sizeof(ny_std_mod));
@@ -368,6 +372,38 @@ static void ny_scan_std_or_lib_roots(const char *src_root, const char *pkg) {
   (void)ny_scan_recursive_if_dir(pkg, pkg);
 }
 
+static void ny_scan_std_overlay_path_list(const char *paths) {
+  if (!paths || !*paths)
+    return;
+  const char *p = paths;
+  while (*p) {
+    while (*p == ':' || *p == ';')
+      p++;
+    const char *start = p;
+    while (*p && *p != ':' && *p != ';')
+      p++;
+    if (p > start && (size_t)(p - start) < 4096) {
+      char root[4096];
+      memcpy(root, start, (size_t)(p - start));
+      root[p - start] = '\0';
+      (void)ny_scan_recursive_if_dir(root, root);
+    }
+  }
+}
+
+static void ny_scan_std_overlays(void) {
+  ny_scan_std_overlay_path_list(getenv("NYTRIX_STD_OVERLAY"));
+  static const char *const project_roots[] = {
+      ".nytrix/std",
+      ".nytrix/lib",
+      "std_overrides",
+      "lib_overrides",
+  };
+  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]); ++i) {
+    (void)ny_scan_recursive_if_dir(project_roots[i], project_roots[i]);
+  }
+}
+
 static long long ny_get_dir_mtime(const char *path) {
   struct stat st;
   if (stat(path, &st) == 0) {
@@ -413,6 +449,38 @@ static long long ny_get_tree_mtime(const char *path) {
   }
   closedir(d);
   return latest;
+}
+
+static long long ny_std_overlay_mtime(void) {
+  long long total = 0;
+  const char *paths = getenv("NYTRIX_STD_OVERLAY");
+  if (paths && *paths) {
+    total ^= (long long)ny_hash64_cstr(paths);
+    const char *p = paths;
+    while (*p) {
+      while (*p == ':' || *p == ';')
+        p++;
+      const char *start = p;
+      while (*p && *p != ':' && *p != ';')
+        p++;
+      if (p > start && (size_t)(p - start) < 4096) {
+        char root[4096];
+        memcpy(root, start, (size_t)(p - start));
+        root[p - start] = '\0';
+        total ^= ny_get_tree_mtime(root);
+      }
+    }
+  }
+  static const char *const project_roots[] = {
+      ".nytrix/std",
+      ".nytrix/lib",
+      "std_overrides",
+      "lib_overrides",
+  };
+  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]); ++i) {
+    total ^= ny_get_tree_mtime(project_roots[i]);
+  }
+  return total;
 }
 
 static time_t ny_std_compute_latest_source_mtime(void) {
@@ -589,7 +657,7 @@ static void ny_std_init_modules(void) {
   snprintf(plib, sizeof(plib), "%s/lib", root);
   long long m2 = ny_get_tree_mtime(pstd);
   long long m3 = ny_get_tree_mtime(plib);
-  long long total_mtime = m1 ^ m2 ^ m3;
+  long long total_mtime = m1 ^ m2 ^ m3 ^ ny_std_overlay_mtime();
 
   if (ny_std_load_cache(total_mtime)) {
     if (!ny_std_latest_src_mtime_known) {
@@ -607,6 +675,7 @@ static void ny_std_init_modules(void) {
     fprintf(stderr, "STD_TRACE init_modules\n");
   }
   ny_tick_t t0 = ny_ticks_now();
+  ny_scan_std_overlays();
   ny_scan_std_or_lib_roots(root, "std");
   ny_scan_std_or_lib_roots(root, "lib");
   if (ny_std_mods_len > 0) {
@@ -1211,6 +1280,51 @@ static char *find_local_module(const char *name, const char *base_dir) {
   return find_module_in_global_package_roots(name);
 }
 
+static char *find_project_demo_module(const char *name, const char *base_dir) {
+  if (!name || !*name)
+    return NULL;
+  const char *leaf = strrchr(name, '.');
+  leaf = (leaf && leaf[1]) ? leaf + 1 : name;
+  if (!leaf || !*leaf)
+    return NULL;
+
+  char cur[4096];
+  snprintf(cur, sizeof(cur), "%s", (base_dir && *base_dir) ? base_dir : ".");
+  while (cur[0]) {
+    char path[4096];
+    int nw = snprintf(path, sizeof(path), "%s/lib/%s.ny", cur, leaf);
+    if (nw > 0 && (size_t)nw < sizeof(path) && ny_access(path, R_OK) == 0)
+      return ny_strdup(path);
+
+    nw = snprintf(path, sizeof(path), "%s/lib/%s/mod.ny", cur, leaf);
+    if (nw > 0 && (size_t)nw < sizeof(path) && ny_access(path, R_OK) == 0)
+      return ny_strdup(path);
+
+    size_t n = strlen(cur);
+    while (n > 1 && (cur[n - 1] == '/' || cur[n - 1] == '\\'))
+      cur[--n] = '\0';
+    char *slash = strrchr(cur, '/');
+#ifdef _WIN32
+    char *bslash = strrchr(cur, '\\');
+    if (bslash && (!slash || bslash > slash))
+      slash = bslash;
+#endif
+    if (!slash) {
+      if (strcmp(cur, ".") != 0) {
+        snprintf(cur, sizeof(cur), "%s", ".");
+        continue;
+      }
+      break;
+    }
+    if (slash == cur) {
+      cur[1] = '\0';
+      continue;
+    }
+    *slash = '\0';
+  }
+  return NULL;
+}
+
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
@@ -1346,6 +1460,16 @@ static char *resolve_module_path(const char *raw, const char *base_dir, bool pre
   bool explicit_std = (strncmp(raw, "std.", 4) == 0);
   bool explicit_lib = (strncmp(raw, "lib.", 4) == 0);
   bool explicit_pkg = explicit_std || explicit_lib;
+  bool project_std = (strcmp(raw, "std.demo") == 0 ||
+                      strncmp(raw, "std.demo.", 9) == 0);
+  if (prefer_local && project_std) {
+    char *local = find_project_demo_module(raw, base_dir);
+    if (local) {
+      if (is_std_out)
+        *is_std_out = false;
+      return local;
+    }
+  }
   if (prefer_local && explicit_lib) {
     char *local = find_local_module(raw, base_dir);
     if (local) {
@@ -1481,20 +1605,6 @@ static bool mod_list_has_path(mod_list *list, const char *path) {
       return true;
     pos = (pos + 1u) & mask;
   }
-}
-
-static bool mod_list_has_descendant_name(mod_list *list, const char *name) {
-  if (!list || !name || !*name)
-    return false;
-  size_t name_len = strlen(name);
-  for (size_t i = 0; i < list->len; ++i) {
-    const char *cur = list->entries[i].name;
-    if (!cur || !*cur)
-      continue;
-    if (strncmp(cur, name, name_len) == 0 && cur[name_len] == '.')
-      return true;
-  }
-  return false;
 }
 
 static void mod_list_put_path(mod_list *list, const char *path) {
@@ -1700,11 +1810,6 @@ static void add_module_dependency_ex(mod_list *list, const char *raw,
       free(mname);
   }
   free(path);
-}
-
-static void add_module_dependency(mod_list *list, const char *raw,
-                                  const char *base_dir, bool prefer_local) {
-  add_module_dependency_ex(list, raw, base_dir, prefer_local, -1);
 }
 
 static bool ny_std_module_has_descendant(const char *module_name) {

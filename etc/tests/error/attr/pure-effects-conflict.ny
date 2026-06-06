@@ -3,7 +3,7 @@ use std.core
 
 @pure
 @effects(io)
-fn f(): int {
+fn f() int {
    1
 }
 

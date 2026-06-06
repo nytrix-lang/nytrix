@@ -51,23 +51,6 @@ __attribute__((destructor)) static void rt_stats(void) {
 atomic_uint_fast64_t g_ny_alloc_count = 0;
 atomic_uint_fast64_t g_ny_realloc_count = 0;
 
-#if defined(rt_SANITIZE_ADDRESS__)
-#define NY_WITH_ASAN 1
-#elif defined(rt_has_feature)
-#if rt_has_feature(address_sanitizer)
-#define NY_WITH_ASAN 1
-#endif
-#endif
-#ifndef NY_WITH_ASAN
-#define NY_WITH_ASAN 0
-#endif
-
-#if NY_WITH_ASAN
-#define NY_TRACK_LIVE_ALLOCS 1
-#else
-#define NY_TRACK_LIVE_ALLOCS 0
-#endif
-
 static inline void *ny_aligned_alloc(size_t alignment, size_t size) {
 #ifdef _WIN32
   return _aligned_malloc(size, alignment);
@@ -88,88 +71,6 @@ static inline void ny_aligned_free(void *p) {
   free(p);
 #endif
 }
-
-#if NY_TRACK_LIVE_ALLOCS
-static atomic_flag g_live_alloc_lock = ATOMIC_FLAG_INIT;
-static void *g_live_alloc_head = NULL;
-
-static inline void ny_live_alloc_lock(void) {
-  while (atomic_flag_test_and_set_explicit(&g_live_alloc_lock, memory_order_acquire)) {
-  }
-}
-
-static inline void ny_live_alloc_unlock(void) {
-  atomic_flag_clear_explicit(&g_live_alloc_lock, memory_order_release);
-}
-
-static inline void **ny_live_prev_slot(void *base) { return (void **)((char *)base + 24); }
-
-static inline void **ny_live_next_slot(void *base) { return (void **)((char *)base + 32); }
-
-static inline uint64_t ny_live_size(void *base) { return *(uint64_t *)((char *)base + 8); }
-
-static inline void ny_live_link(void *base) {
-  if (!base)
-    return;
-  void **prev_slot = ny_live_prev_slot(base);
-  void **next_slot = ny_live_next_slot(base);
-  *prev_slot = NULL;
-  *next_slot = g_live_alloc_head;
-  if (g_live_alloc_head)
-    *ny_live_prev_slot(g_live_alloc_head) = base;
-  g_live_alloc_head = base;
-}
-
-static inline void ny_live_unlink(void *base) {
-  if (!base)
-    return;
-  void **prev_slot = ny_live_prev_slot(base);
-  void **next_slot = ny_live_next_slot(base);
-  void *prev = *prev_slot;
-  void *next = *next_slot;
-  if (prev)
-    *ny_live_next_slot(prev) = next;
-  else if (g_live_alloc_head == base)
-    g_live_alloc_head = next;
-  if (next)
-    *ny_live_prev_slot(next) = prev;
-  *prev_slot = NULL;
-  *next_slot = NULL;
-}
-#endif
-
-#if NY_WITH_ASAN
-static void **g_quarantine = NULL;
-static size_t g_quarantine_len = 0;
-static size_t g_quarantine_cap = 0;
-
-static void quarantine_push(void *p) {
-  if (!p)
-    return;
-  for (size_t i = 0; i < g_quarantine_len; ++i) {
-    if (g_quarantine[i] == p)
-      return;
-  }
-  if (g_quarantine_len == g_quarantine_cap) {
-    size_t new_cap = g_quarantine_cap ? g_quarantine_cap * 2 : 1024;
-    void **next = realloc(g_quarantine, new_cap * sizeof(void *));
-    if (!next)
-      return;
-    g_quarantine = next;
-    g_quarantine_cap = new_cap;
-  }
-  g_quarantine[g_quarantine_len++] = p;
-}
-
-__attribute__((destructor)) static void quarantine_drain(void) {
-  for (size_t i = 0; i < g_quarantine_len; ++i)
-    ny_aligned_free(g_quarantine[i]);
-  free(g_quarantine);
-  g_quarantine = NULL;
-  g_quarantine_len = 0;
-  g_quarantine_cap = 0;
-}
-#endif
 
 static const size_t g_pool_sizes[] = {32, 64, 128, 256, 512, 1024, 2048, 4096};
 #define NUM_POOLS (sizeof(g_pool_sizes) / sizeof(g_pool_sizes[0]))
@@ -486,23 +387,6 @@ int64_t rt_runtime_cleanup(void) {
   rt_print_flush();
   rt_cleanup_args();
   rt_cleanup_small_strings();
-#if NY_TRACK_LIVE_ALLOCS
-  while (1) {
-    ny_live_alloc_lock();
-    void *base = g_live_alloc_head;
-    if (base)
-      ny_live_unlink(base);
-    ny_live_alloc_unlock();
-    if (!base)
-      break;
-#ifndef NDEBUG
-    g_free += (size_t)ny_live_size(base) + 128;
-#endif
-    *(uint64_t *)base = 0;
-    *(uint64_t *)((char *)base + 16) = 0;
-    ny_aligned_free(base);
-  }
-#endif
   return 0;
 }
 
