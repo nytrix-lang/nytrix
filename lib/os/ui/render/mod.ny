@@ -1,10 +1,13 @@
-;; Keywords: render graphics atlas camera view term terminal ansi tty shader matrix linear-algebra snapshot vterm
+;; Keywords: render graphics atlas camera view term terminal ansi tty shader matrix linear-algebra snapshot vterm os ui
 ;; Rendering facade: frame loop, colors, 2D primitives, text, textures, cameras, meshes, capture, and renderer state.
+;; References:
+;; - std.os.ui
+;; - std.os.ui.render.matrix
 module std.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_lerp, color_alpha,
-   backend_capabilities, get_active_backend_name, renderer_frame_stats,
+   backend_capabilities, get_active_backend_name, renderer_frame_stats, camera,
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
@@ -14,7 +17,7 @@ module std.os.ui.render(
    draw_ellipse, draw_ellipse_lines, draw_arc, draw_sector, draw_rounded_rectangle,
    draw_rounded_rectangle_sdf,
    draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube,
-   draw_rect_tex, draw_rect_tex_uv, get_frame_time, get_time, load_shader,
+   draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, get_frame_time, get_time, load_shader,
    load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
    create_pipeline, bind_pipeline, push_constants, store_mat4_cm, reset_pipeline,
    blit_buffer, set_clear_color, draw_vertices, draw_lines_raw, color_pack, set_unlit,
@@ -24,14 +27,13 @@ module std.os.ui.render(
    mat4_rotate_y, mat4_rotate_z, mat4_translate, mat4_scale, init, shutdown,
    get_delta_time, camera_init, camera_update, camera_set_look_at, set_model_matrix,
    set_view, set_projection, set_camera, set_projection_mode, set_ortho_zoom,
-   set_win_size, __cam_compute_vectors, collision_rect_rect, collision_rect_circle,
-   collision_circle_circle, random_seed, random_value, open_url, easing, log, snapshot,
+   set_win_size, __cam_compute_vectors, log, snapshot,
    clear_depth, request_frame_capture, set_backend_type, get_backend_type, scissor_push,
    scissor_pop, texture_load, texture_load_ex, texture_load_gltf,
    texture_try_load_cached_ex, texture_upload_image_ex, texture_destroy, texture_bind,
-   draw_texture, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
+   texture_size, draw_texture, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
    FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_destroy,
-   font_allow_color_fallback, _font_get, draw_text, draw_text_3d, measure_text,
+   font_allow_color_fallback, _font_get, font_prepare, draw_text, draw_text_3d, measure_text,
    font_line_height, font_ascent, mesh_load, mesh_create, mesh_create_cpu,
    mesh_create_static, mesh_create_ex, mesh_create_indexed, mesh_create_cpu_part_from_raw,
    mesh_set_bounds, mesh_fit_world, mesh_fit_perspective, mesh_fit_camera, mesh_destroy,
@@ -47,9 +49,8 @@ module std.os.ui.render(
 use std.core
 use std.core.mem
 use std.core.error
-use std.os.ui.consts as ui_consts
-use std.os.ui.profile as ui_profile
-use std.os.ui.window
+use std.os.ui.window.consts as ui_consts
+use std.os.ui.render.dump as ui_profile
 use std.os.ui.window as lib_uiw
 use std.os.ui.window.platform as ui_backend
 use std.os.ui.render.vk as lib_vkr
@@ -71,14 +72,13 @@ use std.os.ui.render.vk.state (
 
 use std.os.ui.render.vk.vulkan
 use std.os.ui.render.shader as lib_shader
+use std.os.ui.render.camera as camera
 use std.os.ui.render.atlas as lib_atlas
-use std.os.ui.render.img.ops as img_ops
 use std.os.ui.font.truetype as lib_ttf
 use std.core.str as lib_str
-use std.core.str (to_hex)
 use std.math.crypto.encoding.base as str_base
 use std.math.crypto.encoding.bytes
-use std.os as std_os
+use std.os (file_exists, file_read, file_write)
 use std.os.sys as os_sys
 use std.os.fs as lib_fs
 use std.os.path as lib_path
@@ -86,7 +86,6 @@ use std.os.thread
 use std.os.time as ostime
 use std.math
 use std.os.ui.render.matrix
-use std.os.ui.render.matrix as render_matrix
 use std.math.vector
 use std.math.crypto.hash as lib_hash
 use std.parse.img as lib_img
@@ -128,25 +127,25 @@ layout MeshGpuDrawSlab pack(8){
    i32: idx_u32
 }
 
-fn _font_resolve_filter(int: filter, any: info=0): int {
+fn _font_resolve_filter(int filter, any info=0) int {
    if(is_int(filter) && filter >= 0){ return filter ? FONT_FILTER_LINEAR : FONT_FILTER_NEAREST }
    if(info && !info.get("is_scalable", true) && !info.get("is_color", false)){ return FONT_FILTER_NEAREST }
    FONT_FILTER_LINEAR
 }
 
-fn _slab_i32(int: slab, int: off): int {
+fn _slab_i32(int slab, int off) int {
    if(!slab){ return -1 }
    def n = int(load32(slab, off))
    if(n > 2147483647){ return n - 4294967296 }
    n
 }
 
-fn color_alpha(any: c, f64: a): vec4 {
+fn color_alpha(any c, f64 a) vec4 {
    "Returns color `c` with the same RGB and replaced alpha."
    [_color_at(c, 0, 1.0), _color_at(c, 1, 1.0), _color_at(c, 2, 1.0), a]
 }
 
-mut any: _active_win = nil
+mut _active_win = nil
 mut _active_scene_group = 0
 mut _active_scene_gpu_slab = 0
 mut _active_scene_render_parts = 0
@@ -164,12 +163,6 @@ mut _active_scene_have_lights = false
 mut _active_scene_gpu_ready = false
 mut _active_scene_force_cpu_anim = false
 mut _active_scene_cpu_optical_start = -1
-mut _anim_frame_trace_hits = 0
-
-fn _anim_frame_trace_enabled(): bool {
-   ui_profile.env_truthy_cached("NY_UI_ANIM_FRAME_TRACE")
-}
-
 mut _vk_cam_pos_valid = false
 mut _vk_cam_pos_x = 0.0
 mut _vk_cam_pos_y = 0.0
@@ -201,20 +194,18 @@ mut _3d_view = 0
 mut _3d_mvp = 0
 mut _3d_last_aspect = 0.0
 mut _3d_last_fovy = 0.0
-mut _scene_proj_mode = 0 ;; 0=PERSPECTIVE, 1=ORTHO
+mut _scene_proj_mode = 0
 mut _proj_fov  = 120.0
 mut _proj_zoom = 40.0
-mut _font_cache_by_key = dict(32) ;; "path:size" -> font_id, for instant reload on resize
-mut _font_info_cache = dict(32) ;; "path" -> parsed font info, reused across sizes
-mut _font_priming = false ;; true during _font_prime_fast_data: suppresses per-glyph atlas flush
-mut _font_dirty = dict(8) ;; font_id -> true when atlas has unflushed updates
-mut _font_gpu_ready = dict(8) ;; font_id -> atlases already have GPU texture slots
-mut _font_fast_text_enabled = -1
-mut _font_vk_legacy_fallback_enabled = -1
+mut _font_cache_by_key = dict(32)
+mut _font_info_cache = dict(32)
+mut _font_priming = false
+mut _font_dirty = dict(8)
+mut _font_gpu_ready = dict(8)
 mut _font_defer_flush_enabled = -1
 mut _builtin_font_cache = dict(8)
 mut _auto_show_pending = false
-mut _text_batch_info = 0 ;; lazy-allocated 16-byte scratch buffer for _draw_text_ttf_fast
+mut _text_batch_info = 0
 mut _grid_cache = dict(16)
 mut _axes_cache = dict(8)
 mut _grid_axes_cache_keys = []
@@ -235,7 +226,7 @@ mut _fallback_scan_active = false
 mut _fallback_scan_started = false
 mut _fallback_cache_path = ""
 
-fn _ensure_grid_axes_cache_lists(){
+fn _ensure_grid_axes_cache_lists() any {
    if(!is_list(_grid_axes_cache_keys)){ _grid_axes_cache_keys = [] }
    if(!is_list(_grid_axes_cache_vals)){ _grid_axes_cache_vals = [] }
 }
@@ -250,8 +241,9 @@ mut _tex_mips_cache = -1
 mut _font_fallback_mode_cache = -1
 mut _font_prime_mode_cache = -1
 mut _deep_log_mesh_counter = 0
+mut _mesh_diag_counter = 0
 
-fn _ensure_font_info_cache(bool: fallback): dict {
+fn _ensure_font_info_cache(bool fallback) dict {
    if(fallback){
       if(!is_dict(_fallback_info_cache)){ _fallback_info_cache = dict(32) }
       return _fallback_info_cache
@@ -260,28 +252,20 @@ fn _ensure_font_info_cache(bool: fallback): dict {
    _font_info_cache
 }
 
-fn _ensure_fallback_meta_cache(): dict {
+fn _ensure_fallback_meta_cache() dict {
    if(!is_dict(_fallback_meta_cache)){ _fallback_meta_cache = dict(32) }
    _fallback_meta_cache
 }
 
-fn _gltf_force_cpu_blend_enabled(): bool {
+fn _gltf_force_cpu_blend_enabled() bool {
    ui_profile.env_truthy_cached("NY_GLTF_FORCE_CPU_BLEND")
 }
 
-fn _gltf_model_debug_enabled(): bool {
-   ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG")
-}
-
-fn _gltf_frustum_cull_enabled(): bool {
+fn _gltf_frustum_cull_enabled() bool {
    ui_profile.env_toggle_cached("NY_GLTF_FRUSTUM_CULL", true)
 }
 
-fn _light_trace_bind_enabled(): bool {
-   ui_profile.env_lower_cached("NY_UI_LIGHT_TRACE") == "bind"
-}
-
-fn _env_full_none_mode(str: name): int {
+fn _env_full_none_mode(str name) int {
    case ui_profile.env_lower_cached(name){
       "full", "1", "true", "yes", "on" -> 1
       "none", "0", "false", "no", "off" -> 2
@@ -289,32 +273,39 @@ fn _env_full_none_mode(str: name): int {
    }
 }
 
-fn _font_fallback_mode(): int {
+fn _font_fallback_mode() int {
    if(_font_fallback_mode_cache != -1){ return _font_fallback_mode_cache }
    _font_fallback_mode_cache = _env_full_none_mode("NY_FONT_FALLBACK")
    _font_fallback_mode_cache
 }
 
-fn _font_prime_mode(): int {
+fn _font_prime_mode() int {
    if(_font_prime_mode_cache != -1){ return _font_prime_mode_cache }
    _font_prime_mode_cache = _env_full_none_mode("NY_FONT_PRIME")
    _font_prime_mode_cache
 }
 
-fn _deep_should_log_mesh(): bool {
+fn _deep_should_log_mesh() bool {
    if(!ui_profile.debug_deep_enabled()){ return false }
    _deep_log_mesh_counter += 1
    (_deep_log_mesh_counter % 600) == 1
 }
 
+fn _mesh_diag(str msg) any {
+   if(!(ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_MESH_PIPE_TRACE"))){ return 0 }
+   if(_mesh_diag_counter < 24){ ui_profile.print_text("[mesh:diag] " + msg) }
+   _mesh_diag_counter += 1
+   0
+}
+
 fn _set_material_packed_defaults(
-   int: material_u32 = 0,
-   int: base_tex_id = -1,
-   int: alpha_u32 = 0,
-   int: normal_tex_id = -1,
-   int: ext2_tex_word = 0x80000000,
-   int: vc_mode = 0
-): any {
+   int material_u32 = 0,
+   int base_tex_id = -1,
+   int alpha_u32 = 0,
+   int normal_tex_id = -1,
+   int ext2_tex_word = 0x80000000,
+   int vc_mode = 0
+) any {
    lib_vkr.set_material_packed(
       0xffffffff,
       material_u32,
@@ -327,13 +318,13 @@ fn _set_material_packed_defaults(
    )
 }
 
-fn _reset_material_state(): any {
+fn _reset_material_state() any {
    if(_backend == BACKEND_VK){
       _set_material_packed_defaults()
    }
 }
 
-fn mesh_create_cpu_part_from_raw(any: part, any: opts=0): list {
+fn mesh_create_cpu_part_from_raw(any part, any opts=0) list {
    "Creates a CPU mesh from a raw glTF part and returns [part, mesh]."
    if(!is_dict(part)){ return [part, 0] }
    def vptr = part.get("vptr", 0)
@@ -350,7 +341,7 @@ fn mesh_create_cpu_part_from_raw(any: part, any: opts=0): list {
    [part, mesh]
 }
 
-fn _rebuild_drawable_parts_from_raw(any: parts): list {
+fn _rebuild_drawable_parts_from_raw(any parts) list {
    mut out = []
    if(!is_list(parts)){ return out }
    def parts_n = parts.len
@@ -380,16 +371,16 @@ fn _rebuild_drawable_parts_from_raw(any: parts): list {
 }
 
 fn _anim_apply_part_overrides(
-   dict: part,
-   int: node_idx,
-   int: skin_idx,
-   dict: anim_mats,
-   bool: use_vis_map,
-   any: vis_map,
-   bool: fast_numeric_anim,
-   bool: have_ptr_overrides,
-   list: ptr_overrides
-): list {
+   dict part,
+   int node_idx,
+   int skin_idx,
+   dict anim_mats,
+   bool use_vis_map,
+   any vis_map,
+   bool fast_numeric_anim,
+   bool have_ptr_overrides,
+   list ptr_overrides
+) list {
    "Applies non-skin animation overrides to a single drawable part.
    Returns [part, changed]."
    mut part_changed = false
@@ -426,7 +417,7 @@ fn _anim_apply_part_overrides(
    [part, part_changed]
 }
 
-fn _anim_wrapped_time(dict: group, f64: frame_time): f64 {
+fn _anim_wrapped_time(dict group, f64 frame_time) f64 {
    def anim_duration = float(group.get("anim_duration", 0.0))
    def use_anim_time = group.get("anim_time_override", false)
    mut t = use_anim_time ? float(group.get("anim_time", frame_time)) : float(frame_time)
@@ -437,17 +428,15 @@ fn _anim_wrapped_time(dict: group, f64: frame_time): f64 {
    t
 }
 
-fn _anim_sample_overrides(dict: gltf_data, int: anim_count, int: anim_idx, f64: t, bool: anim_trace): dict {
+fn _anim_sample_overrides(dict gltf_data, int anim_count, int anim_idx, f64 t) dict {
    mut overrides = dict(0)
-   def sample_t0 = anim_trace ? ticks() : 0
    if(anim_count > 0){
       if(anim_idx < 0){ overrides = gltf.gltf_sample_animation_merged(gltf_data, t) } else { overrides = gltf.gltf_sample_animation(gltf_data, anim_idx, t) }
    }
-   if(anim_trace){ ui_profile.print_text("[anim:apply] sample_ms=" + to_str(ui_profile.elapsed_ms(sample_t0))) }
    overrides
 }
 
-fn _anim_apply_morph_rebuild(dict: group, dict: gltf_data, dict: overrides, any: mat_records, any: parts): list {
+fn _anim_apply_morph_rebuild(dict group, dict gltf_data, dict overrides, any mat_records, any parts) list {
    def morph_apply = gltf.gltf_apply_morph_weights(gltf_data, overrides)
    mut next_gltf = morph_apply.get(0, gltf_data)
    def morph_changed = morph_apply.get(1, false) ? true : false
@@ -469,26 +458,22 @@ fn _anim_apply_morph_rebuild(dict: group, dict: gltf_data, dict: overrides, any:
 }
 
 fn _anim_apply_parts(
-   any: parts,
-   any: gltf_data,
-   any: anim_mats,
-   bool: use_vis_map,
-   any: vis_map,
-   bool: fast_numeric_anim,
-   bool: have_ptr_overrides,
-   list: ptr_overrides,
-   any: skin_mats_cache,
-   bool: anim_trace
-): list {
+   any parts,
+   any gltf_data,
+   any anim_mats,
+   bool use_vis_map,
+   any vis_map,
+   bool fast_numeric_anim,
+   bool have_ptr_overrides,
+   list ptr_overrides,
+   any skin_mats_cache
+) list {
    def parts_n = parts.len
    mut i = 0
    mut parts_changed = false
-   mut part_skin_ms = 0.0
-   mut part_other_ms = 0.0
    while(i < parts_n){
       mut part = parts[i]
       if(is_dict(part)){
-         def part_other_t0 = anim_trace ? ticks() : 0
          def node_idx = int(part.get("node_idx", -1))
          def skin_idx = int(part.get("skin_idx", -1))
          def part_state = _anim_apply_part_overrides(part,
@@ -502,11 +487,8 @@ fn _anim_apply_parts(
          ptr_overrides)
          part = part_state.get(0, part)
          mut part_changed = part_state.get(1, false) ? true : false
-         if(anim_trace){ part_other_ms += ui_profile.elapsed_ms(part_other_t0) }
          if(skin_idx >= 0){
-            def skin_t0 = anim_trace ? ticks() : 0
             def skin_part = gltf.gltf_apply_skinning(part, gltf_data, anim_mats, skin_mats_cache)
-            if(anim_trace){ part_skin_ms += ui_profile.elapsed_ms(skin_t0) }
             if(to_int(skin_part) != to_int(part)){
                part = skin_part
                part_changed = true
@@ -519,11 +501,10 @@ fn _anim_apply_parts(
       }
       i += 1
    }
-   if(anim_trace){ ui_profile.print_text("[anim:apply] part_other_ms=" + to_str(part_other_ms) + " skin_ms=" + to_str(part_skin_ms)) }
    [parts, parts_changed]
 }
 
-fn _apply_group_gltf_animation(dict: group): dict {
+fn _apply_group_gltf_animation(dict group) dict {
    if(!is_dict(group)){ return group }
    mut gltf_data = group.get("gltf_data", 0)
    if(!is_dict(gltf_data)){ return group }
@@ -533,17 +514,12 @@ fn _apply_group_gltf_animation(dict: group): dict {
    if(anim_count <= 0 && skin_count <= 0 && morph_count_total <= 0){ return group }
    def t = _anim_wrapped_time(group, float(_frame_time_accum))
    def anim_idx = int(group.get("anim_idx", 0))
-   def anim_trace = _anim_frame_trace_enabled() && _anim_frame_trace_hits < 16
-   def overrides = _anim_sample_overrides(gltf_data, anim_count, anim_idx, t, anim_trace)
+   def overrides = _anim_sample_overrides(gltf_data, anim_count, anim_idx, t)
    if(!is_dict(overrides)){ return group }
-   def rebuild_t0 = anim_trace ? ticks() : 0
    def anim_mats = gltf.gltf_rebuild_animated_mats(gltf_data, overrides)
-   if(anim_trace){ ui_profile.print_text("[anim:apply] rebuild_mats_ms=" + to_str(ui_profile.elapsed_ms(rebuild_t0))) }
    def fast_numeric_anim = overrides.get("__fast_numeric", false) ? true : false
-   def vis_t0 = anim_trace ? ticks() : 0
    def use_vis_map = fast_numeric_anim ? false : gltf.gltf_has_node_visibility(gltf_data, overrides)
    def vis_map = use_vis_map ? gltf.gltf_resolve_node_visibility(gltf_data, overrides) : 0
-   if(anim_trace){ ui_profile.print_text("[anim:apply] visibility_ms=" + to_str(ui_profile.elapsed_ms(vis_t0))) }
    def ptr_overrides = overrides.get("__pointers", [])
    def have_ptr_overrides = is_list(ptr_overrides) && ptr_overrides.len > 0
    def mat_records = group.get("mat_records", [])
@@ -556,15 +532,18 @@ fn _apply_group_gltf_animation(dict: group): dict {
       parts_changed = morph_state.get(3, false) ? true : false
    }
    if(!is_list(parts)){ return group }
-   def part_state = _anim_apply_parts(parts, gltf_data, anim_mats, use_vis_map, vis_map, fast_numeric_anim, have_ptr_overrides, ptr_overrides, skin_mats_cache, anim_trace)
+   def part_state = _anim_apply_parts(parts, gltf_data, anim_mats, use_vis_map, vis_map, fast_numeric_anim, have_ptr_overrides, ptr_overrides, skin_mats_cache)
    parts = part_state.get(0, parts)
    parts_changed = parts_changed || (part_state.get(1, false) ? true : false)
    gltf.gltf_free_skin_mats_cache(skin_mats_cache)
-   if(parts_changed){ group["parts"] = parts }
+   if(parts_changed){
+      group["parts"] = parts
+      group["static_pose_gpu_ready"] = false
+   }
    group
 }
 
-fn fallback_scan_cb(any: p): int {
+fn fallback_scan_cb(any p) int {
    "Internal: Callback for font directory scanning. Adds discovered fonts to the fallback list."
    if(!_fallback_scan_active){ return 0 }
    if(!p || !is_str(p)){ return 0 }
@@ -576,15 +555,15 @@ fn fallback_scan_cb(any: p): int {
    0
 }
 
-fn _fallback_cache_file(): str {
+fn _fallback_cache_file() str {
    if(_fallback_cache_path == ""){ _fallback_cache_path = lib_path.join(cache_dir(), "nytrix_fallback_fonts.txt") }
    _fallback_cache_path
 }
 
-fn _fallback_cache_load(): list {
+fn _fallback_cache_load() list {
    def path = _fallback_cache_file()
-   if(!std_os.file_exists(path)){ return [] }
-   match std_os.file_read(path){
+   if(!file_exists(path)){ return [] }
+   match file_read(path){
       ok(s) -> {
          if(!is_str(s) || s.len == 0){ return [] }
          def parts = lib_str.split(s, "\n")
@@ -602,7 +581,7 @@ fn _fallback_cache_load(): list {
    }
 }
 
-fn _fallback_cache_write(list: paths): int {
+fn _fallback_cache_write(list paths) int {
    if(!is_list(paths) || paths.len == 0){ return 0 }
    mut s, i = lib_str.Builder(paths.len * 32 + 8), 0
    def paths_n = paths.len
@@ -616,20 +595,19 @@ fn _fallback_cache_write(list: paths): int {
    }
    def text = lib_str.builder_to_str(s)
    lib_str.builder_free(s)
-   if(text.len > 0){ _ = std_os.file_write(_fallback_cache_file(), text) }
+   if(text.len > 0){ _ = file_write(_fallback_cache_file(), text) }
    0
 }
 
-; Scratch matrices and cached window state.
-mut _scratch_view = render_matrix.mat4_identity()
-mut _scratch_proj = render_matrix.mat4_identity()
-mut _scratch_mvp  = render_matrix.mat4_identity()
-mut _cull_mvp     = render_matrix.mat4_identity() ; scratch for culling matrix compute
-mut _scratch_model_set = render_matrix.mat4_identity() ; stable copy of the active model matrix
-mut _scratch_model_mul = render_matrix.mat4_identity() ; reusable model composition scratch (avoids per-part alloc)
-mut _scratch_model_conv = render_matrix.mat4_identity() ; reusable foreign->renderer model conversion scratch
-mut _scratch_model_saved_b = render_matrix.mat4_identity() ; stable snapshot for grouped CPU pass
-mut _scratch_marker_model = render_matrix.mat4_identity() ; stable snapshot for CPU point/line marker fallback
+mut _scratch_view = mat4_identity()
+mut _scratch_proj = mat4_identity()
+mut _scratch_mvp  = mat4_identity()
+mut _cull_mvp     = mat4_identity()
+mut _scratch_model_set = mat4_identity()
+mut _scratch_model_mul = mat4_identity()
+mut _scratch_model_conv = mat4_identity()
+mut _scratch_model_saved_b = mat4_identity()
+mut _scratch_marker_model = mat4_identity()
 mut _model_debug = -1
 mut _model_debug_seen = dict(256)
 mut _last_win_w = 1280.0
@@ -641,45 +619,28 @@ mut _last_ortho2d_b = 0.0
 mut _last_ortho2d_t = 0.0
 mut _last_ortho2d_valid = false
 mut _backend_pref = BACKEND_VK
-mut _font_parity_seen = dict(2048)
-mut _font_parity_log_count = 0
 
-fn _is_debug(): int {
+fn _is_debug() int {
    ui_profile.debug_enabled() ? 1 : 0
 }
 
-fn _is_frame_debug(): int {
+fn _is_frame_debug() int {
    ui_profile.gfx_frame_trace_enabled() ? 1 : 0
 }
 
-fn _ensure_scissor_stack(): any {
+fn _ensure_scissor_stack() any {
    if(!is_list(_scissor_stack)){ _scissor_stack = [] }
 }
 
-fn _font_parity_trace_enabled(): bool {
-   ui_profile.env_truthy_cached("NY_FONT_PARITY_TRACE")
-}
-
-fn _font_parity_trace_once(any: tag, any: key, any: msg): bool {
-   if(!_font_parity_trace_enabled()){ return false }
-   if(_font_parity_log_count >= 64){ return false }
-   def k = to_str(tag) + "|" + to_str(key)
-   if(_font_parity_seen.get(k, false)){ return false }
-   _font_parity_seen[k] = true
-   _font_parity_log_count += 1
-   ui_profile.print_text("[parity:font] " + msg)
-   true
-}
-
-fn _cpu_pack_color(f64: r, f64: g, f64: b, f64: a): int {
+fn _cpu_pack_color(f64 r, f64 g, f64 b, f64 a) int {
    def rr = int(clamp01(r) * 255.0 + 0.5)
    def gg = int(clamp01(g) * 255.0 + 0.5)
    def bb = int(clamp01(b) * 255.0 + 0.5)
    def a8 = int(clamp01(a) * 255.0 + 0.5)
-   return(a8 << 24) | (rr << 16) | (gg << 8) | bb
+   return(a8 << 24) | (bb << 16) | (gg << 8) | rr
 }
 
-fn _cpu_ensure_surface(): bool {
+fn _cpu_ensure_surface() bool {
    if(!_active_win){ return false }
    def w, h = int(_active_win.get("w", 0)), int(_active_win.get("h", 0))
    if(w <= 0 || h <= 0){ return false }
@@ -696,21 +657,21 @@ fn _cpu_ensure_surface(): bool {
    true
 }
 
-fn _cpu_put(int: x, int: y, int: c): bool {
+fn _cpu_put(int x, int y, int c) bool {
    if(x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h){ return false }
    def off = ((y * _cpu_w) + x) * 4
    store32(_cpu_buf, c, off)
    true
 }
 
-fn _cpu_blend(int: x, int: y, f64: r, f64: g, f64: b, f64: a): bool {
+fn _cpu_blend(int x, int y, f64 r, f64 g, f64 b, f64 a) bool {
    if(x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h || a <= 0.0){ return false }
    def off = ((y * _cpu_w) + x) * 4
    def dst = load32(_cpu_buf, off)
    def da = float((dst >> 24) & 255) / 255.0
-   def dr = float((dst >> 16) & 255) / 255.0
+   def db = float((dst >> 16) & 255) / 255.0
    def dg = float((dst >> 8) & 255) / 255.0
-   def db = float(dst & 255) / 255.0
+   def dr = float(dst & 255) / 255.0
    def oa = a + da * (1.0 - a)
    mut or, og = r * a + dr * (1.0 - a), g * a + dg * (1.0 - a)
    mut ob = b * a + db * (1.0 - a)
@@ -722,18 +683,70 @@ fn _cpu_blend(int: x, int: y, f64: r, f64: g, f64: b, f64: a): bool {
    true
 }
 
-fn _cpu_clear(int: c): bool {
+fn _mock_fast_editor_bench_enabled() bool {
+   ui_profile.env_truthy_cached("NY_EDITOR_BENCH_SELFTEST") ||
+   ui_profile.env_truthy_cached("NY_EDITOR_PROBE_BENCH") ||
+   ui_profile.env_truthy_cached("NY_EDITOR_BENCH_PROBE")
+}
+
+fn _mock_fast_fill_enabled() bool {
+   _backend == BACKEND_MOCK &&
+   !ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") &&
+   (ui_profile.env_truthy_cached("NY_UI_MOCK_FILL_FAST") || _mock_fast_editor_bench_enabled())
+}
+
+fn _cpu_clear(int c) bool {
    if(!_cpu_ensure_surface()){ return false }
-   def pixels = _cpu_w * _cpu_h
+   if(_mock_fast_fill_enabled()){
+      _cpu_clear_color = c
+      return true
+   }
+   _cpu_fill_rect_raw(0, 0, _cpu_w, _cpu_h, c)
+}
+
+@jit
+fn _cpu_fill_rect_raw(int x0, int y0, int x1, int y1, int c) bool {
+   if(!_cpu_buf || x1 <= x0 || y1 <= y0){ return true }
+   def row_pixels = x1 - x0
+   def row_bytes = row_pixels * 4
+   def first_off = ((y0 * _cpu_w) + x0) * 4
    mut i = 0
-   while(i < pixels){
-      store32(_cpu_buf, c, i * 4)
+   mut off = first_off
+   while(i < row_pixels){
+      store32(_cpu_buf, c, off)
+      off += 4
       i += 1
+   }
+   mut yy = y0 + 1
+   while(yy < y1){
+      memcpy(_cpu_buf + ((yy * _cpu_w + x0) * 4), _cpu_buf + first_off, row_bytes)
+      yy += 1
    }
    true
 }
 
-fn _cpu_draw_triangle(f64: x0, f64: y0, f64: x1, f64: y1, f64: x2, f64: y2, int: c): bool {
+@jit
+fn _cpu_draw_rect_packed(f64 x, f64 y, f64 w, f64 h, int vk_packed) bool {
+   if(!_cpu_ensure_surface() || w <= 0.0 || h <= 0.0){ return false }
+   if(_mock_fast_fill_enabled()){ return true }
+   mut x0 = int(x)
+   mut y0 = int(y)
+   mut x1 = int(x + w)
+   mut y1 = int(y + h)
+   if(float(x0) > x){ x0 -= 1 }
+   if(float(y0) > y){ y0 -= 1 }
+   if(float(x1) < x + w){ x1 += 1 }
+   if(float(y1) < y + h){ y1 += 1 }
+   if(x0 < 0){ x0 = 0 }
+   if(y0 < 0){ y0 = 0 }
+   if(x1 > _cpu_w){ x1 = _cpu_w }
+   if(y1 > _cpu_h){ y1 = _cpu_h }
+   if(x1 <= x0 || y1 <= y0){ return true }
+   def c = _cpu_color_from_vk_packed(vk_packed)
+   _cpu_fill_rect_raw(x0, y0, x1, y1, c)
+}
+
+fn _cpu_draw_triangle(f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2, int c) bool {
    if(!_cpu_ensure_surface()){ return false }
    mut min_x = int(min(x0, min(x1, x2)))
    mut max_x = int(max(x0, max(x1, x2)) + 1.0)
@@ -761,18 +774,18 @@ fn _cpu_draw_triangle(f64: x0, f64: y0, f64: x1, f64: y1, f64: x2, f64: y2, int:
    true
 }
 
-fn _cpu_color_from_vk_packed(int: c): int {
+fn _cpu_color_from_vk_packed(int c) int {
    def a, b = float((c >> 24) & 255) / 255.0, float((c >> 16) & 255) / 255.0
    def g, r = float((c >> 8) & 255) / 255.0, float(c & 255) / 255.0
    _cpu_pack_color(r, g, b, a)
 }
 
-fn _cpu_pack_color_from(any: color, f64: r=1.0, f64: g=1.0, f64: b=1.0, f64: a=1.0): int {
+fn _cpu_pack_color_from(any color, f64 r=1.0, f64 g=1.0, f64 b=1.0, f64 a=1.0) int {
    if(is_int(color)){ return _cpu_color_from_vk_packed(color) }
    _cpu_pack_color(_color_at(color, 0, r), _color_at(color, 1, g), _color_at(color, 2, b), _color_at(color, 3, a))
 }
 
-fn _cpu_project_vertex(f64: x, f64: y, f64: z, any: mvp): any {
+fn _cpu_project_vertex(f64 x, f64 y, f64 z, any mvp) any {
    if(!mvp || !_cpu_ensure_surface()){ return 0 }
    def cx, cy = horizontal_mul_mvp(x, y, z, 0, mvp), horizontal_mul_mvp(x, y, z, 1, mvp)
    def cz, cw = horizontal_mul_mvp(x, y, z, 2, mvp), horizontal_mul_mvp(x, y, z, 3, mvp)
@@ -786,14 +799,14 @@ fn _cpu_project_vertex(f64: x, f64: y, f64: z, any: mvp): any {
    [sx, sy, nz]
 }
 
-fn _cpu_mul_active_mvp_into(any: out): bool {
+fn _cpu_mul_active_mvp_into(any out) bool {
    def mvp = _mvp_matrix
    if(!is_list(mvp)){ return false }
    mat4_mul_into(mvp, _model_matrix, out)
    true
 }
 
-fn _cpu_line_world(list: start, list: finish, int: color, f64: thickness): bool {
+fn _cpu_line_world(list start, list finish, int color, f64 thickness) bool {
    if(!_cpu_mul_active_mvp_into(_cull_mvp)){ return false }
    def a = _cpu_project_vertex(start.get(0,0.0), start.get(1,0.0), start.get(2,0.0), _cull_mvp)
    def b = _cpu_project_vertex(finish.get(0,0.0), finish.get(1,0.0), finish.get(2,0.0), _cull_mvp)
@@ -809,25 +822,25 @@ fn _cpu_line_world(list: start, list: finish, int: color, f64: thickness): bool 
    true
 }
 
-fn get_pixel(int: x, int: y): any {
+fn get_pixel(int x, int y) any {
    "Returns the pixel color at(x,y) as [r,g,b,a] floats, or 0 if out of bounds."
    if(!_cpu_buf || x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h){ return 0 }
    def off = ((y * _cpu_w) + x) * 4
    def c = load32(_cpu_buf, off)
    def a8 = (c >> 24) & 255
-   def r8 = (c >> 16) & 255
+   def b8 = (c >> 16) & 255
    def g8 = (c >> 8) & 255
-   def b8 = c & 255
+   def r8 = c & 255
    [float(r8) / 255.0, float(g8) / 255.0, float(b8) / 255.0, float(a8) / 255.0]
 }
 
-fn get_framebuffer_size(): list {
+fn get_framebuffer_size() list {
    "Returns [width, height] of the active framebuffer."
    if(_backend == BACKEND_VK){ return lib_vkr.get_swapchain_size() }
    [_cpu_w, _cpu_h]
 }
 
-fn framebuffer_size_f64(f64: fallback_w=960.0, f64: fallback_h=540.0): list {
+fn framebuffer_size_f64(f64 fallback_w=960.0, f64 fallback_h=540.0) list {
    "Returns sanitized [width, height] of the active framebuffer as floats."
    def fb = get_framebuffer_size()
    mut w, h = float(fb.get(0, fallback_w)), float(fb.get(1, fallback_h))
@@ -838,7 +851,7 @@ fn framebuffer_size_f64(f64: fallback_w=960.0, f64: fallback_h=540.0): list {
    [w, h]
 }
 
-fn layout_fit(f64: base_w=960.0, f64: base_h=540.0, f64: min_scale=0.0, f64: max_scale=0.0): dict {
+fn layout_fit(f64 base_w=960.0, f64 base_h=540.0, f64 min_scale=0.0, f64 max_scale=0.0) dict {
    "Syncs a Y-down 2D projection to the framebuffer and returns an aspect-fit layout."
    mut bw, bh = base_w, base_h
    if(bw <= 0.0){ bw = 1.0 }
@@ -873,65 +886,158 @@ fn layout_fit(f64: base_w=960.0, f64: base_h=540.0, f64: min_scale=0.0, f64: max
    }
 }
 
-fn begin_frame_layout(any: color=BLACK, f64: base_w=960.0, f64: base_h=540.0, f64: min_scale=0.0, f64: max_scale=0.0): any {
+fn begin_frame_layout(any color=BLACK, f64 base_w=960.0, f64 base_h=540.0, f64 min_scale=0.0, f64 max_scale=0.0) any {
    "Begins a cleared 2D frame and returns layout_fit(); returns 0 if the frame cannot begin."
    if(!begin_frame_clear(color)){ return 0 }
    layout_fit(base_w, base_h, min_scale, max_scale)
 }
 
-fn layout_x(any: fit, f64: x): f64 {
+fn layout_x(any fit, f64 x) f64 {
    "Maps a design-space x coordinate to framebuffer pixels using a layout_fit result."
    if(!is_dict(fit)){ return x }
    float(fit.get("x", 0.0)) + x * float(fit.get("scale", 1.0))
 }
 
-fn layout_y(any: fit, f64: y): f64 {
+fn layout_y(any fit, f64 y) f64 {
    "Maps a design-space y coordinate to framebuffer pixels using a layout_fit result."
    if(!is_dict(fit)){ return y }
    float(fit.get("y", 0.0)) + y * float(fit.get("scale", 1.0))
 }
 
-fn layout_size(any: fit, f64: value): f64 {
+fn layout_size(any fit, f64 value) f64 {
    "Scales a design-space size to framebuffer pixels using a layout_fit result."
    if(!is_dict(fit)){ return value }
    value * float(fit.get("scale", 1.0))
 }
 
-fn layout_rect(any: fit, f64: x, f64: y, f64: w, f64: h): list {
+fn layout_rect(any fit, f64 x, f64 y, f64 w, f64 h) list {
    "Maps a design-space rectangle to framebuffer pixels using a layout_fit result."
    [layout_x(fit, x), layout_y(fit, y), layout_size(fit, w), layout_size(fit, h)]
 }
 
-fn get_swapchain_image_count(): int {
+fn get_swapchain_image_count() int {
    "Returns the active Vulkan swapchain image count, 0 before Vulkan init, or 1 for non-Vulkan renderers."
    if(_backend == BACKEND_VK){ return lib_vkr.get_swapchain_image_count() }
    1
 }
 
-fn _ensure_fonts(): dict {
+fn _ensure_fonts() dict {
    if(!is_dict(_fonts)){ _fonts = dict(32) }
    _fonts
 }
 
-fn _font_register(dict: font_obj): int {
+fn _font_register(dict font_obj) int {
    def id = _next_font_id
    _next_font_id += 1
-   _ensure_fonts()[id] = font_obj
+   _fonts = _ensure_fonts()
+   _fonts[id] = font_obj
    id
 }
 
-fn _font_get(int: font_id): any {
+fn _font_get(int font_id) any {
    if(!is_int(font_id) || font_id <= 0){ return 0 }
    _ensure_fonts().get(font_id, 0)
 }
 
-fn _font_set(int: font_id, dict: font_obj): int {
+fn _font_set(int font_id, dict font_obj) int {
    if(!is_int(font_id) || font_id <= 0){ return 0 }
-   _ensure_fonts()[font_id] = font_obj
+   _fonts = _ensure_fonts()
+   _fonts[font_id] = font_obj
    0
 }
 
-fn _font_line_height(any: info, f64: scale, f64: size): f64 {
+fn _font_free_fast_glyphs(any font_obj) bool {
+   if(!is_dict(font_obj)){ return false }
+   def root = font_obj.get("fast_glyphs", 0)
+   if(!root){ return false }
+   mut page = 0
+   while(page < 4352){
+      def page_ptr = load64(root, page * 8)
+      if(page_ptr){ free(page_ptr) }
+      page += 1
+   }
+   free(root)
+   true
+}
+
+fn _font_destroy_glyph_bitmaps(int font_id, any font_obj) bool {
+   if(!is_dict(font_obj)){ return false }
+   def glyphs = font_obj.get("glyphs", 0)
+   if(!is_dict(glyphs)){ return false }
+   def items = dict_items(glyphs)
+   mut i = 0
+   def items_n = items.len
+   while(i < items_n){
+      def kv = items[i]
+      def glyph = is_list(kv) && kv.len > 1 ? kv.get(1, 0) : 0
+      if(is_dict(glyph) && int(glyph.get("_font_id", font_id)) == font_id){
+         def bm = glyph.get("bitmap", 0)
+         if(is_dict(bm)){
+            def bdata = bm.get("data", 0)
+            if(bdata){
+               free(bdata)
+               bm["data"] = 0
+            }
+         }
+      }
+      i += 1
+   }
+   true
+}
+
+fn _font_unload_info_cache(any cache_in) bool {
+   if(!is_dict(cache_in)){ return false }
+   def items = dict_items(cache_in)
+   mut i = 0
+   def items_n = items.len
+   while(i < items_n){
+      def kv = items[i]
+      def info = is_list(kv) && kv.len > 1 ? kv.get(1, 0) : 0
+      if(is_dict(info)){ lib_ttf.unload(info) }
+      i += 1
+   }
+   true
+}
+
+fn _font_release_all() bool {
+   if(is_dict(_fonts)){
+      def items = dict_items(_fonts)
+      mut i = 0
+      def items_n = items.len
+      while(i < items_n){
+         def kv = items[i]
+         if(is_list(kv) && kv.len > 0){ font_destroy(int(kv.get(0, 0))) }
+         i += 1
+      }
+   }
+   _font_unload_info_cache(_font_info_cache)
+   _font_unload_info_cache(_fallback_info_cache)
+   lib_ttf.shutdown()
+   _fonts = dict(32)
+   _font_cache_by_key = dict(32)
+   _font_info_cache = dict(32)
+   _fallback_info_cache = dict(32)
+   _fallback_meta_cache = dict(32)
+   _font_dirty = dict(8)
+   _font_gpu_ready = dict(8)
+   _builtin_font_cache = dict(8)
+   _mt_cache = dict(256)
+   _default_font_id = 0
+   _default_font_fail_sizes = dict(8)
+   true
+}
+
+fn _render_release_scratch_buffers() bool {
+   if(_shape_scratch){
+      free(_shape_scratch)
+      _shape_scratch = 0
+      _shape_scratch_cap = 0
+      _shape_scratch_used = 0
+   }
+   true
+}
+
+fn _font_line_height(any info, f64 scale, f64 size) f64 {
    def vm = lib_ttf.get_vmetrics(info)
    def line_h = vm.get(2, 0) * scale
    def size_f = float(size)
@@ -942,7 +1048,7 @@ fn _font_line_height(any: info, f64: scale, f64: size): f64 {
    lh
 }
 
-fn _fallback_path_priority(any: path): int {
+fn _fallback_path_priority(any path) int {
    if(!path || !is_str(path)){ return 9 }
    def lp = lib_str.lower(path)
    if(lib_str.find(lp, "coloremoji") >= 0
@@ -972,7 +1078,7 @@ fn _fallback_path_priority(any: path): int {
    4
 }
 
-fn _fallback_merge_ranked(list: base, list: extra): list {
+fn _fallback_merge_ranked(list base, list extra) list {
    mut out = []
    mut seen = dict(16)
    mut i = 0
@@ -993,7 +1099,7 @@ fn _fallback_merge_ranked(list: base, list: extra): list {
    while(i < extra_n){
       def raw = extra[i]
       def p = is_str(raw) ? lib_path.resolve_repo_asset(raw) : raw
-      if(is_str(p) && p.len > 0 && !seen.get(p, 0) && std_os.file_exists(p)){
+      if(is_str(p) && p.len > 0 && !seen.get(p, 0) && file_exists(p)){
          seen[p] = 1
          def pri = _fallback_path_priority(p)
          case pri {
@@ -1022,7 +1128,7 @@ fn _fallback_merge_ranked(list: base, list: extra): list {
    out
 }
 
-fn _get_fallback_paths(): list {
+fn _get_fallback_paths() list {
    if(_fallback_paths_cached){ return _fallback_paths }
    def full_scan = ui_profile.env_truthy_cached("NY_TERM_FULL_FONTS")
    mut out = [
@@ -1067,7 +1173,7 @@ fn _get_fallback_paths(): list {
    def out_n = out.len
    while(i < out_n){
       def p = out[i]
-      if(std_os.file_exists(p)){ filtered = filtered.append(p) }
+      if(file_exists(p)){ filtered = filtered.append(p) }
       i += 1
    }
    out = filtered
@@ -1076,7 +1182,7 @@ fn _get_fallback_paths(): list {
    _fallback_paths_cached = true
    if(full_scan && !_fallback_scan_started){
       _fallback_scan_started = true
-      thread_spawn(fn(){
+      thread_spawn(fn() {
             def dirs = [
                "/usr/share/fonts",
                "/usr/local/share/fonts",
@@ -1099,7 +1205,7 @@ fn _get_fallback_paths(): list {
             def dirs_n = dirs.len
             while(di < dirs_n){
                def d = dirs.get(di)
-               if(std_os.file_exists(d)){ lib_fs.walk(d, fallback_scan_cb) }
+               if(file_exists(d)){ lib_fs.walk(d, fallback_scan_cb) }
                di += 1
             }
             _fallback_scan_active = false
@@ -1113,7 +1219,7 @@ fn _get_fallback_paths(): list {
    _fallback_paths
 }
 
-fn _cached_ttf_info(str: path, bool: fallback): any {
+fn _cached_ttf_info(str path, bool fallback) any {
    mut cache = _ensure_font_info_cache(fallback)
    def cached = cache.get(path, 0)
    if(cached){ return cached }
@@ -1128,11 +1234,11 @@ fn _cached_ttf_info(str: path, bool: fallback): any {
    info
 }
 
-fn _fallback_info(str: path): any { _cached_ttf_info(path, true) }
+fn _fallback_info(str path) any { _cached_ttf_info(path, true) }
 
-fn _font_info(str: path): any { _cached_ttf_info(path, false) }
+fn _font_info(str path) any { _cached_ttf_info(path, false) }
 
-fn _fallback_meta(str: path): dict {
+fn _fallback_meta(str path) dict {
    def cached = _ensure_fallback_meta_cache().get(path, 0)
    if(cached){ return cached }
    def lp = lib_str.lower(path)
@@ -1165,7 +1271,7 @@ fn _fallback_meta(str: path): dict {
    m
 }
 
-fn _font_build_fallback_chain(int: font_id): bool {
+fn _font_build_fallback_chain(int font_id) bool {
    mut mf = _font_get(font_id)
    if(!is_dict(mf)){ return false }
    if(mf.get("fallback_built", false)){ return true }
@@ -1175,12 +1281,6 @@ fn _font_build_fallback_chain(int: font_id): bool {
       _font_set(font_id, mf)
       return true
    }
-   ; Fallback chain — ordered by priority:
-   ;   1. NotoColorEmoji — color emoji (SMP U+1F300+)
-   ;   2. NotoSansCJK — CJK unified ideographs, Hangul, Hiragana, Katakana
-   ;   3. DejaVu — broad Latin, Greek, Cyrillic, Hebrew, Arabic, math, box-drawing, braille
-   ;   4. Liberation / FreeMono — final Latin/mono safety net
-   ;   5. Nerd Font monospaced (Nerd symbols, powerline, icons) — LAST to avoid icons
    mut ei = 0
    def fallback_paths_n = fallback_paths.len
    while(ei < fallback_paths_n){
@@ -1234,7 +1334,7 @@ fn _font_build_fallback_chain(int: font_id): bool {
    true
 }
 
-fn _font_load_impl(str: path, int: size, int: filter=FONT_FILTER_DEFAULT): int {
+fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
    if(!is_str(path) || path.len == 0){ return 0 }
    if(size < 4){ size = 4 }
    def cache_key = path + ":" + to_str(size)
@@ -1243,7 +1343,7 @@ fn _font_load_impl(str: path, int: size, int: filter=FONT_FILTER_DEFAULT): int {
    mut f_info = _font_info(path)
    mut f_data = 0
    if(!f_info){
-      def rd = std_os.file_read(path)
+      def rd = file_read(path)
       if(is_err(rd)){ return 0 }
       f_data = unwrap(rd)
       f_info = lib_ttf.load(f_data, 0)
@@ -1270,7 +1370,6 @@ fn _font_load_impl(str: path, int: size, int: filter=FONT_FILTER_DEFAULT): int {
    }
    def id = _font_register(font_obj)
    if(ui_profile.env_truthy_cached("NY_FONT_LOAD_TRACE")){ ui_profile.print_text("[font:load] id=" + to_str(id) + " path=" + path + " size=" + to_str(size) + " scale=" + to_str(scale) + " filter=" + to_str(resolved_filter)) }
-   ; Fallback chain build mode: "full", "lazy" (default), or "none"
    def fb_mode = _font_fallback_mode()
    def fb_full = fb_mode == 1
    def fb_none = fb_mode == 2
@@ -1286,7 +1385,6 @@ fn _font_load_impl(str: path, int: size, int: filter=FONT_FILTER_DEFAULT): int {
       font_obj["fallback_chain"] = []
       _font_set(id, font_obj)
    }
-   ; Prime AFTER fallback chain is built (if full); lazy mode primes base font only.
    _font_prime_fast_data(id)
    if(!is_dict(_font_cache_by_key)){ _font_cache_by_key = dict(32) }
    _font_cache_by_key[cache_key] = id
@@ -1294,7 +1392,7 @@ fn _font_load_impl(str: path, int: size, int: filter=FONT_FILTER_DEFAULT): int {
 }
 
 @inline
-fn _font_prime_range(int: font_id, int: cp_start, int: cp_end): bool {
+fn _font_prime_range(int font_id, int cp_start, int cp_end) bool {
    mut cp = cp_start
    while(cp <= cp_end){
       _font_resolve_glyph(font_id, cp)
@@ -1304,7 +1402,7 @@ fn _font_prime_range(int: font_id, int: cp_start, int: cp_end): bool {
    true
 }
 
-fn _font_prime_fast_data(int: font_id): any {
+fn _font_prime_fast_data(int font_id) any {
    "Allocates fast_glyphs table and eagerly primes ASCII + common terminal codepoints.
    All glyph pixels accumulate in atlas CPU buffers during resolve, then ONE
    atlas_flush() per atlas uploads everything in a single GPU call."
@@ -1344,7 +1442,7 @@ fn _font_prime_fast_data(int: font_id): any {
    ptr
 }
 
-fn _font_flush_atlases(int: font_id): bool {
+fn _font_flush_atlases(int font_id) bool {
    "Flushes all dirty atlas CPU buffers for a font and its fallback chain to the GPU.
    Called once after priming — replaces thousands of per-glyph GPU uploads with one per lib_atlas."
    mut f = _font_get(font_id)
@@ -1354,7 +1452,7 @@ fn _font_flush_atlases(int: font_id): bool {
    true
 }
 
-fn _font_apply_atlas_op(any: a, bool: ensure_gpu=false, bool: destroy=false): bool {
+fn _font_apply_atlas_op(any a, bool ensure_gpu=false, bool destroy=false) bool {
    if(!is_dict(a)){ return false }
    if(destroy){ lib_atlas.atlas_destroy(a) return false }
    if(!ensure_gpu){ lib_atlas.atlas_flush(a) return false }
@@ -1364,7 +1462,7 @@ fn _font_apply_atlas_op(any: a, bool: ensure_gpu=false, bool: destroy=false): bo
    old_id < 0 && new_id >= 0
 }
 
-fn _font_apply_atlas_chain(any: font_obj, bool: ensure_gpu=false, bool: destroy=false): bool {
+fn _font_apply_atlas_chain(any font_obj, bool ensure_gpu=false, bool destroy=false) bool {
    if(!is_dict(font_obj)){ return false }
    mut changed = false
    def chain = font_obj.get("atlas_chain", 0)
@@ -1381,9 +1479,9 @@ fn _font_apply_atlas_chain(any: font_obj, bool: ensure_gpu=false, bool: destroy=
    changed
 }
 
-fn _font_flush_atlas_chain(any: font_obj): bool{ _font_apply_atlas_chain(font_obj, false, false) }
+fn _font_flush_atlas_chain(any font_obj) bool { _font_apply_atlas_chain(font_obj, false, false) }
 
-fn _font_apply_fallback_chain(any: font_obj, bool: ensure_gpu=false): bool {
+fn _font_apply_fallback_chain(any font_obj, bool ensure_gpu=false) bool {
    def fchain_ids = font_obj.get("fallback_chain", [])
    mut changed = false
    mut i = 0
@@ -1401,9 +1499,9 @@ fn _font_apply_fallback_chain(any: font_obj, bool: ensure_gpu=false): bool {
    changed
 }
 
-fn _font_ensure_atlas_chain_gpu(any: font_obj): bool{ _font_apply_atlas_chain(font_obj, true, false) }
+fn _font_ensure_atlas_chain_gpu(any font_obj) bool { _font_apply_atlas_chain(font_obj, true, false) }
 
-fn _font_atlas_chain_ready(any: font_obj): bool {
+fn _font_atlas_chain_ready(any font_obj) bool {
    if(!is_dict(font_obj)){ return false }
    def chain = font_obj.get("atlas_chain", 0)
    if(is_list(chain) && chain.len > 0){
@@ -1420,7 +1518,7 @@ fn _font_atlas_chain_ready(any: font_obj): bool {
    is_dict(a0) && int(lib_atlas.atlas_texture_id(a0)) >= 0
 }
 
-fn _font_resync_cached_glyphs(int: font_id): bool {
+fn _font_resync_cached_glyphs(int font_id) bool {
    mut f = _font_get(font_id)
    if(!f){ return false }
    def glyphs = f.get("glyphs", 0)
@@ -1436,7 +1534,7 @@ fn _font_resync_cached_glyphs(int: font_id): bool {
    true
 }
 
-fn _font_ensure_gpu_atlases(int: font_id): bool {
+fn _font_ensure_gpu_atlases(int font_id) bool {
    def cached_ready = _font_gpu_ready.get(font_id, false)
    if(cached_ready && !_font_dirty.get(font_id, false)){ return false }
    def f = _font_get(font_id)
@@ -1449,7 +1547,7 @@ fn _font_ensure_gpu_atlases(int: font_id): bool {
    changed
 }
 
-fn _fit_color_glyph_metrics(dict: font_obj, f64: advance, f64: xoff, f64: yoff, f64: bw, f64: bh): list {
+fn _fit_color_glyph_metrics(dict font_obj, f64 advance, f64 xoff, f64 yoff, f64 bw, f64 bh) list {
    def target_h0 = min(float(font_obj.get("size", 16.0)) * 0.78, float(font_obj.get("line_height", 16.0)) * 0.74)
    if(bh <= 0.0 || target_h0 <= 0.0){ return [advance, xoff, yoff, bw, bh] }
    def line_h = float(font_obj.get("line_height", target_h0))
@@ -1472,7 +1570,27 @@ fn _fit_color_glyph_metrics(dict: font_obj, f64: advance, f64: xoff, f64: yoff, 
    [out_adv, out_xoff, out_yoff, out_w, out_h]
 }
 
-fn _font_bitmap_is_color_like(any: font_obj, any: bm): bool {
+@inline
+fn _glyph_center_yoff(dict font_obj, f64 bh) f64 {
+   def line_h = max(1.0, float(font_obj.get("line_height", font_obj.get("size", 16.0))))
+   def ascent = max(1.0, float(font_obj.get("ascent", line_h * 0.8)))
+   def top_pad = max(0.0, (line_h - max(0.0, bh)) * 0.5)
+   ascent - top_pad
+}
+
+fn _glyph_center_align_needed(int cp, int is_color) bool {
+   if(is_color){ return true }
+   (cp == 0x2022)
+   || (cp == 0x2026)
+   || (cp >= 0x2190 && cp <= 0x27BF)
+   || (cp >= 0x2B00 && cp <= 0x2BFF)
+   || (cp >= 0x1F000 && cp <= 0x1FAFF)
+   || (cp >= 0xE000 && cp <= 0xF8FF)
+   || (cp >= 0xF0000 && cp <= 0xFFFFD)
+   || (cp >= 0x100000 && cp <= 0x10FFFD)
+}
+
+fn _font_bitmap_is_color_like(any font_obj, any bm) bool {
    if(!bm){ return false }
    mut color_like = bm.get("is_color", 0) ? true : false
    if(!font_obj){ return color_like }
@@ -1485,7 +1603,7 @@ fn _font_bitmap_is_color_like(any: font_obj, any: bm): bool {
    (lib_str.find(lp, "coloremoji") >= 0) || (lib_str.find(lp, "emoji") >= 0) || (lib_str.find(lp, "seguiemj") >= 0) || (lib_str.find(lp, "apple color emoji") >= 0) || (lib_str.find(lp, "twemoji") >= 0)
 }
 
-fn _font_raster_oversample(dict: font_obj): f64 {
+fn _font_raster_oversample(dict font_obj) f64 {
    def info = font_obj.get("info", 0)
    if(info && (!info.get("is_scalable", true) || info.get("is_color", false))){ return 1.0 }
    if(!font_obj.get("is_scalable", true) || font_obj.get("is_color", false)){ return 1.0 }
@@ -1495,7 +1613,7 @@ fn _font_raster_oversample(dict: font_obj): f64 {
    2.0
 }
 
-fn _font_bitmap_atlas_ref(any: owner_font, any: bm): any {
+fn _font_bitmap_atlas_ref(any owner_font, any bm) any {
    mut atlas_ref = bm.get("atlas", 0)
    if(is_dict(atlas_ref)){ return atlas_ref }
    def page_idx = int(bm.get("atlas_page", 0))
@@ -1508,7 +1626,7 @@ fn _font_bitmap_atlas_ref(any: owner_font, any: bm): any {
    is_dict(primary_atlas) ? primary_atlas : atlas_ref
 }
 
-fn _font_sync_bitmap_tex_id(any: atlas_ref, any: bm, any: glyph, int: font_id, int: cp, any: font_obj): int {
+fn _font_sync_bitmap_tex_id(any atlas_ref, any bm, any glyph, int font_id, int cp, any font_obj) int {
    mut tex_id = int(bm.get("tex_id", -1))
    if(!is_dict(atlas_ref) || tex_id >= 0){ return tex_id }
    def live_tex = lib_atlas.atlas_ensure_texture(atlas_ref)
@@ -1524,7 +1642,7 @@ fn _font_sync_bitmap_tex_id(any: atlas_ref, any: bm, any: glyph, int: font_id, i
    tex_id
 }
 
-fn _font_bitmap_uv(any: atlas_ref, any: bm, int: cp): any {
+fn _font_bitmap_uv(any atlas_ref, any bm, int cp) any {
    mut uv = bm.get("uv", [0.0, 0.0, 0.0, 0.0])
    if(!is_dict(atlas_ref)){ return uv }
    def u0, v0 = is_list(uv) ? _list_num_safe(uv, 0, 0.0) : 0.0, is_list(uv) ? _list_num_safe(uv, 1, 0.0) : 0.0
@@ -1534,22 +1652,7 @@ fn _font_bitmap_uv(any: atlas_ref, any: bm, int: cp): any {
    (is_list(atlas_uv) && atlas_uv.len >= 4) ? atlas_uv : uv
 }
 
-fn _font_trace_sync_fast_glyph(int: font_id, int: cp, int: tex_id, any: uv, any: bm, any: atlas_ref): bool {
-   if(!ui_profile.env_truthy_cached("NY_FONT_SYNC_TRACE") || !(cp == 65 || cp == 71 || cp == 101)){ return false }
-   ui_profile.print_text("[font:sync] font=" + to_str(font_id) +
-      " cp=" + to_str(cp) +
-      " tex=" + to_str(tex_id) +
-      " uv_list=" + to_str(is_list(uv)) +
-      " uv_len=" + to_str(is_list(uv) ? uv.len : 0) +
-      " uv0=" + to_str(is_list(uv) ? _list_num_safe(uv, 0, -1.0) : -1.0) +
-      " uv2=" + to_str(is_list(uv) ? _list_num_safe(uv, 2, -1.0) : -1.0) +
-      " page=" + to_str(int(bm.get("atlas_page", -1))) +
-      " atlas_tex=" + to_str(is_dict(atlas_ref) ? lib_atlas.atlas_texture_id(atlas_ref) : -99)
-   )
-   true
-}
-
-fn _font_store_fast_bitmap_metrics(any: off, any: font_obj, any: owner_font, any: glyph, any: bm, any: uv, int: tex_id, int: is_color): bool {
+fn _font_store_fast_bitmap_metrics(any off, any font_obj, any owner_font, any glyph, any bm, any uv, int tex_id, int is_color, int cp) bool {
    mut xoff, yoff = float(bm.get("xoff", 0)), float(bm.get("yoff", 0))
    mut bw, bh = float(bm.get("width", 0)), float(bm.get("height", 0))
    def raster_os = (is_color == 0) ? _font_raster_oversample(owner_font) : 1.0
@@ -1567,6 +1670,8 @@ fn _font_store_fast_bitmap_metrics(any: off, any: font_obj, any: owner_font, any
       eff_yoff = _list_num_safe(fit, 2, eff_yoff)
       eff_bw = _list_num_safe(fit, 3, eff_bw)
       eff_bh = _list_num_safe(fit, 4, eff_bh)
+   } elif(_glyph_center_align_needed(cp, is_color) && eff_bh > 0.0){
+      eff_yoff = _glyph_center_yoff(font_obj, eff_bh)
    }
    store32_f32(off, eff_adv, 0)
    store32_f32(off, eff_xoff, 4)
@@ -1583,7 +1688,7 @@ fn _font_store_fast_bitmap_metrics(any: off, any: font_obj, any: owner_font, any
    true
 }
 
-fn _font_sync_fast_glyph(int: font_id, int: cp): bool {
+fn _font_sync_fast_glyph(int font_id, int cp) bool {
    if(cp < 0 || cp >= 1114112){ return false }
    mut f = _font_get(font_id)
    if(!f){ return false }
@@ -1609,8 +1714,7 @@ fn _font_sync_fast_glyph(int: font_id, int: cp): bool {
       def resolved_tex_id = _font_sync_bitmap_tex_id(atlas_ref, bm, glyph, font_id, cp, f)
       def is_color = _font_bitmap_is_color_like(owner_font, bm) ? 1 : 0
       def uv = _font_bitmap_uv(atlas_ref, bm, cp)
-      _font_trace_sync_fast_glyph(font_id, cp, resolved_tex_id, uv, bm, atlas_ref)
-      _font_store_fast_bitmap_metrics(off, f, owner_font, glyph, bm, uv, resolved_tex_id, is_color)
+      _font_store_fast_bitmap_metrics(off, f, owner_font, glyph, bm, uv, resolved_tex_id, is_color, cp)
    } else {
       store32_f32(off, float(advance), 0)
       store32(off, 1, 40)
@@ -1619,7 +1723,7 @@ fn _font_sync_fast_glyph(int: font_id, int: cp): bool {
    true
 }
 
-fn _default_font_candidates(): list {
+fn _default_font_candidates() list {
    #windows {
       return [
          "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/seguiemj.ttf", "C:/Windows/Fonts/seguisym.ttf",
@@ -1647,7 +1751,7 @@ fn _default_font_candidates(): list {
    ]
 }
 
-fn _ensure_default_font(int: size=16): int {
+fn _ensure_default_font(int size=16) int {
    if(size < 4){ size = 4 }
    if(_default_font_id){
       def f = _font_get(_default_font_id)
@@ -1677,13 +1781,13 @@ fn _ensure_default_font(int: size=16): int {
 }
 
 fn _font_try_resolve_fallback_chain(
-   int: font_id,
-   int: cp,
-   dict: font_obj,
-   dict: glyphs,
-   list: fallbacks,
-   int: emoji_fid
-): list {
+   int font_id,
+   int cp,
+   dict font_obj,
+   dict glyphs,
+   list fallbacks,
+   int emoji_fid
+) list {
    "Resolves glyph from fallback chain/emoji fallback and caches primary hit.
    Returns [glyph_or_zero, font_obj, glyphs]."
    mut fi = 0
@@ -1716,14 +1820,14 @@ fn _font_try_resolve_fallback_chain(
 }
 
 fn _font_prepare_bitmap_for_atlas(
-   int: font_id,
-   dict: font_obj,
-   any: bm,
-   int: cp,
-   f64: raster_os,
-   int: atlas_size,
-   int: atlas_filter
-): list {
+   int font_id,
+   dict font_obj,
+   any bm,
+   int cp,
+   f64 raster_os,
+   int atlas_size,
+   int atlas_filter
+) list {
    "Normalizes glyph bitmap metrics and packs bitmap into atlas pages.
    Returns [bitmap, font_obj]."
    if(!bm){ return [bm, font_obj] }
@@ -1775,11 +1879,10 @@ fn _font_prepare_bitmap_for_atlas(
    [out_bm, font_obj]
 }
 
-fn _font_resolve_glyph(int: font_id, int: cp, bool: allow_default=true): any {
+fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
    mut font_obj = _font_get(font_id)
    if(!is_dict(font_obj)){ return 0 }
    def font_size = _dict_int(font_obj, "size", 16)
-   _font_parity_trace_once("resolve_font", to_str(font_id), "font=" + to_str(font_id) + " size=" + to_str(font_size))
    mut glyphs = font_obj.get("glyphs", dict(256))
    def cached = glyphs.get(cp, 0)
    if(cached && !_dict_bool(cached, "_provisional", false)){ return cached }
@@ -1794,7 +1897,6 @@ fn _font_resolve_glyph(int: font_id, int: cp, bool: allow_default=true): any {
    mut _used_q_fallback = false
    mut _skipped_fallback_build = false
    if(gi == 0 && cp != 32){
-      ; Walk fallback chain (CJK, Emoji, etc.)
       if(!fallbacks || !is_list(fallbacks)){ fallbacks = [] }
       if(fallbacks.len == 0 && !_dict_bool(font_obj, "fallback_built", false)){
          _font_build_fallback_chain(font_id)
@@ -1815,7 +1917,6 @@ fn _font_resolve_glyph(int: font_id, int: cp, bool: allow_default=true): any {
       _font_set(font_id, font_obj)
       return empty
    }
-   ; Get bitmap FIRST to prime pixel_size in info, then get metrics at correct size.
    def raster_os = _font_raster_oversample(font_obj)
    mut bm, hm = lib_ttf.get_glyph_bitmap(info, scale * raster_os, scale * raster_os, gi), lib_ttf.get_hmetrics(info, gi)
    if(raster_os > 1.0){ hm = [float(hm.get(0, 0.0)) / raster_os, float(hm.get(1, 0.0)) / raster_os] }
@@ -1825,63 +1926,37 @@ fn _font_resolve_glyph(int: font_id, int: cp, bool: allow_default=true): any {
       bm, font_obj = bm_state.get(0, bm), bm_state.get(1, font_obj)
    }
    glyph["bitmap"] = bm
-   ; get_hmetrics returns pixels (FT already scaled via FT_Set_Pixel_Sizes) — do NOT multiply by scale
    glyph["advance"] = _list_num_safe(hm, 0, 0.0)
    glyph["_font_id"] = font_id
    if(_used_q_fallback){ glyph["_provisional"] = true }
    glyphs[cp] = glyph
    font_obj["glyphs"] = glyphs
    _font_set(font_id, font_obj)
-   def bm_trace = glyph.get("bitmap", 0)
-   def bm_color = (bm_trace && int(bm_trace.get("is_color", 0)) != 0) ? 1 : 0
-   _font_parity_trace_once(
-      "glyph_first",
-      to_str(font_id) + ":" + to_str(cp),
-      "font=" + to_str(font_id) +
-      " cp=" + to_str(cp) +
-      " gi=" + to_str(glyph.get("gi", 0)) +
-      " adv=" + to_str(glyph.get("advance", 0.0)) +
-      " tex=" + to_str(bm_trace ? bm_trace.get("tex_id", -1) : -1) +
-      " uv=" + to_str((bm_trace && bm_trace.get("uv", 0)) ? 1 : 0) +
-      " color=" + to_str(bm_color) +
-      " bw=" + to_str(bm_trace ? bm_trace.get("width", 0) : 0) +
-      " bh=" + to_str(bm_trace ? bm_trace.get("height", 0) : 0)
-   )
-   if(bm_color == 1){
-      _font_parity_trace_once(
-         "glyph_color_first",
-         to_str(font_id),
-         "font=" + to_str(font_id) +
-         " color_cp=" + to_str(cp) +
-         " tex=" + to_str(bm_trace ? bm_trace.get("tex_id", -1) : -1)
-      )
-   }
    glyph
 }
 
-fn _utf8_next_cp(str: s, int: i, int: n): list {
+fn _utf8_next_cp(str s, int i, int n) list {
    if(i >= n){ return [0, i + 1] }
    def w = lib_str._utf8_seq_len(s, i, n)
    if(w <= 0){
-      ; Invalid UTF-8 byte: consume one byte and render replacement '?'
       return [63, i + 1]
    }
    [lib_str._utf8_decode_at(s, i, w), i + w]
 }
 
 fn _draw_glyph_bitmap_runs(
-   ptr: data,
-   int: bw,
-   int: bh,
-   f64: ox,
-   f64: oy,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a,
-   int: bpp=4,
-   bool: is_color=false
-) : bool {
+   ptr data,
+   int bw,
+   int bh,
+   f64 ox,
+   f64 oy,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a,
+   int bpp=4,
+   bool is_color=false
+)  bool {
    "Internal helper to draw a glyph into the CPU framebuffer."
    if(!data || bw <= 0 || bh <= 0 || a <= 0.0 || !_cpu_ensure_surface()){ return false }
    mut drew = false
@@ -1908,7 +1983,7 @@ fn _draw_glyph_bitmap_runs(
    drew
 }
 
-fn _ttf_color_rgba(any: color): list {
+fn _ttf_color_rgba(any color) list {
    if(is_int(color)){
       return [
          float((color >> 0) & 255) / 255.0,
@@ -1926,15 +2001,15 @@ fn _ttf_color_rgba(any: color): list {
 }
 
 fn _ttf_apply_control_cp(
-   int: font_id,
-   int: cp,
-   f64: line_h,
-   f64: base_x,
-   f64: pen_x,
-   f64: pen_y,
-   int: prev_gi,
-   f64: space_adv
-): list {
+   int font_id,
+   int cp,
+   f64 line_h,
+   f64 base_x,
+   f64 pen_x,
+   f64 pen_y,
+   int prev_gi,
+   f64 space_adv
+) list {
    if(cp == 13){ return [true, pen_x, pen_y, prev_gi, space_adv] }
    if(cp == 10){ return [true, base_x, pen_y + line_h, -1, space_adv] }
    if(cp == 9){
@@ -1948,16 +2023,16 @@ fn _ttf_apply_control_cp(
 }
 
 fn _ttf_draw_bitmap_glyph(
-   dict: font_obj,
-   dict: bm,
-   f64: pen_x,
-   f64: pen_y,
-   f64: g_adv,
-   f64: cr,
-   f64: cg,
-   f64: cb,
-   f64: ca
-): list {
+   dict font_obj,
+   dict bm,
+   f64 pen_x,
+   f64 pen_y,
+   f64 g_adv,
+   f64 cr,
+   f64 cg,
+   f64 cb,
+   f64 ca
+) list {
    def tex_id = bm.get("tex_id", -1)
    mut bw, bh = float(bm.get("draw_width", bm.get("width", 0))), float(bm.get("draw_height", bm.get("height", 0)))
    def uv = bm.get("uv", 0)
@@ -2013,21 +2088,12 @@ fn _ttf_draw_bitmap_glyph(
    [g_adv, drew]
 }
 
-fn _draw_text_ttf(int: font_id, str: text, f64: x, f64: y, any: color): bool {
+fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
    def font_obj = _font_get(font_id)
    if(!font_obj || !is_str(text)){ return false }
    def info = font_obj.get("info", 0)
    if(!info){ return false }
    def font_size = int(font_obj.get("size", 16))
-   _font_parity_trace_once(
-      "draw_call",
-      to_str(font_id),
-      "draw font=" + to_str(font_id) +
-      " size=" + to_str(font_size) +
-      " len=" + to_str(text.len) +
-      " x=" + to_str(int(x)) +
-      " y=" + to_str(int(y))
-   )
    def ascent = font_obj.get("ascent", 0.0)
    def line_h = font_obj.get("line_height", float(font_obj.get("size", 16)))
    def rgba = _ttf_color_rgba(color)
@@ -2086,19 +2152,19 @@ comptime table BuiltinGlyphBits {
    62 -> 17452568848 60 -> 1145311297 124 -> 4433514628 42 -> 720353952
 }
 
-fn _builtin_glyph_bits(int: c): int {
+fn _builtin_glyph_bits(int c) int {
    if(c >= 97 && c <= 122){ c = c - 32 }
    comptime match BuiltinGlyphBits(c, 33874822719)
 }
 
 @jit
-fn _builtin_text_rect_capacity(str: text): int {
+fn _builtin_text_rect_capacity(str text) int {
    if(!is_str(text)){ return 0 }
    text.len * 21
 }
 
 @jit
-fn _builtin_text_rects_append(any: rects, int: count, int: cap, str: text, f64: x, f64: y, int: packed): int {
+fn _builtin_text_rects_append(any rects, int count, int cap, str text, f64 x, f64 y, int packed) int {
    mut cx, cy = x, y
    def px = 1.45
    def cw = px * 6.0
@@ -2145,9 +2211,10 @@ fn _builtin_text_rects_append(any: rects, int: count, int: cap, str: text, f64: 
 }
 
 @jit
-fn _draw_text_builtin_runs_flat_color_batched(list: runs): bool {
+fn _draw_text_builtin_runs_flat_color_batched(list runs) bool {
    def n = is_list(runs) ? runs.len : 0
    if(n < 4){ return false }
+   if(_mock_fast_text_enabled()){ return _draw_text_mock_flat_color_bars(runs) }
    mut cap = 0
    mut i = 0
    while(i + 3 < n){
@@ -2177,7 +2244,52 @@ fn _draw_text_builtin_runs_flat_color_batched(list: runs): bool {
    true
 }
 
-fn _font_builtin_make_pixels(int: bits, int: scale, int: w, int: h): any {
+fn _mock_fast_text_enabled() bool {
+   _backend == BACKEND_MOCK &&
+   !ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") &&
+   (ui_profile.env_truthy_cached("NY_UI_MOCK_TEXT_FAST") || _mock_fast_editor_bench_enabled())
+}
+
+@jit
+fn _draw_text_mock_flat_color_bars(list runs) bool {
+   def mode = ui_profile.env_lower_cached("NY_UI_MOCK_TEXT_FAST")
+   if(mode != "bar" && mode != "bars"){ return true }
+   def n = is_list(runs) ? runs.len : 0
+   mut i = 0
+   while(i + 3 < n){
+      def text = runs[i]
+      if(is_str(text) && text.len > 0){
+         def x = float(runs[i + 1])
+         def y = float(runs[i + 2])
+         def w = min(max(3.0, float(text.len) * 6.5), 4096.0)
+         draw_rect_fast(x, y + 8.0, w, 2.0, int(runs[i + 3]))
+      }
+      i += 4
+   }
+   true
+}
+
+@jit
+fn _draw_text_mock_flat_bars(list runs, any color) bool {
+   def mode = ui_profile.env_lower_cached("NY_UI_MOCK_TEXT_FAST")
+   if(mode != "bar" && mode != "bars"){ return true }
+   def n = is_list(runs) ? runs.len : 0
+   def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
+   mut i = 0
+   while(i + 2 < n){
+      def text = runs[i]
+      if(is_str(text) && text.len > 0){
+         def x = float(runs[i + 1])
+         def y = float(runs[i + 2])
+         def w = min(max(3.0, float(text.len) * 6.5), 4096.0)
+         draw_rect_fast(x, y + 8.0, w, 2.0, packed)
+      }
+      i += 3
+   }
+   true
+}
+
+fn _font_builtin_make_pixels(int bits, int scale, int w, int h) any {
    def pixels = zalloc(w * h * 4)
    if(!pixels){ return 0 }
    mut gy = 0
@@ -2209,7 +2321,7 @@ fn _font_builtin_make_pixels(int: bits, int: scale, int: w, int: h): any {
    pixels
 }
 
-fn _font_builtin_store_glyph(any: page0, int: cp, f64: adv, f64: bw, f64: bh, list: uv, int: tex_id): bool {
+fn _font_builtin_store_glyph(any page0, int cp, f64 adv, f64 bw, f64 bh, list uv, int tex_id) bool {
    def off = ptr_add(page0, (cp & 255) * 48)
    store32_f32(off, adv, 0)
    store32_f32(off, 0.0, 4)
@@ -2226,7 +2338,7 @@ fn _font_builtin_store_glyph(any: page0, int: cp, f64: adv, f64: bw, f64: bh, li
    true
 }
 
-fn _font_builtin_create(int: size): int {
+fn _font_builtin_create(int size) int {
    if(size < 4){ size = 4 }
    def key = to_str(size)
    def cached = _builtin_font_cache.get(key, 0)
@@ -2292,7 +2404,7 @@ fn _font_builtin_create(int: size): int {
    id
 }
 
-fn _draw_text_builtin(str: text, f64: x, f64: y, any: color): bool {
+fn _draw_text_builtin(str text, f64 x, f64 y, any color) bool {
    mut cx, cy = x, y
    def px = 1.45
    def cw = px * 6.0
@@ -2328,17 +2440,17 @@ fn _draw_text_builtin(str: text, f64: x, f64: y, any: color): bool {
    true
 }
 
-fn color_rgba(f64: r, f64: g, f64: b, f64: a=1.0): vec4 {
+fn color_rgba(f64 r, f64 g, f64 b, f64 a=1.0) vec4 {
    "Creates a vec4 color from floating point RGBA components(0.0 to 1.0)."
    return [r, g, b, a]
 }
 
-fn color_rgb(f64: r, f64: g, f64: b): vec4 {
+fn color_rgb(f64 r, f64 g, f64 b) vec4 {
    "Creates an opaque vec4 color from RGB components."
    color_rgba(r, g, b, 1.0)
 }
 
-fn color_gray(f64: v, f64: a=1.0): vec4 {
+fn color_gray(f64 v, f64 a=1.0) vec4 {
    "Creates a grayscale vec4 color."
    color_rgba(v, v, v, a)
 }
@@ -2349,18 +2461,18 @@ comptime table HexNibble {
    97..102 -> raw - 87
 }
 
-fn _hex_nibble(int: ch): int { comptime match HexNibble(ch, 0) }
+fn _hex_nibble(int ch) int { comptime match HexNibble(ch, 0) }
 
-fn _hex_byte(str: hex, int: idx): int {
+fn _hex_byte(str hex, int idx) int {
    if(hex.len <= idx + 1){ return 0 }
    (_hex_nibble(load8(hex, idx)) << 4) | _hex_nibble(load8(hex, idx + 1))
 }
 
-fn color_hex(any: hex): vec4 {
+fn color_hex(any hex) vec4 {
    "Creates a color from a hex string(e.g. \"#ff0000\" or \"ff0000\")."
    if(!is_str(hex) || hex.len < 6){ return BLACK }
    mut start = 0
-   if(hex.len > 0 && load8(hex, 0) == 35){ start = 1 } ; '#'
+   if(hex.len > 0 && load8(hex, 0) == 35){ start = 1 }
    if(hex.len < start + 6){ return BLACK }
    def r, g = float(_hex_byte(hex, start + 0)) / 255.0, float(_hex_byte(hex, start + 2)) / 255.0
    def b = float(_hex_byte(hex, start + 4)) / 255.0
@@ -2369,7 +2481,7 @@ fn color_hex(any: hex): vec4 {
    color_rgba(r, g, b, a)
 }
 
-fn color_lerp(vec4: a, vec4: b, f64: t): vec4 {
+fn color_lerp(vec4 a, vec4 b, f64 t) vec4 {
    "Linearly interpolates between two colors."
    def ar, ag, ab, aa = a.get(0), a.get(1), a.get(2), a.get(3)
    def br, bg, bb, ba = b.get(0), b.get(1), b.get(2), b.get(3)
@@ -2378,53 +2490,52 @@ fn color_lerp(vec4: a, vec4: b, f64: t): vec4 {
    vec4(r, g, bl, al)
 }
 
-fn get_active_backend(): int {
+fn get_active_backend() int {
    "Returns the active graphics backend constant."
    _backend
 }
 
-fn get_active_window(): any {
+fn get_active_window() any {
    "Returns the currently active window object."
    _active_win
 }
 
-fn get_active_backend_name(): str {
+fn get_active_backend_name() str {
    "Returns a human-readable name for the active backend."
    if(_backend == BACKEND_VK){ return "vulkan" }
    if(_backend == BACKEND_MOCK){ return "mock" }
    return "none"
 }
 
-fn vk_available(): bool {
+fn vk_available() bool {
    "Returns true when the Vulkan renderer facade is selected or preferred."
    _backend == BACKEND_VK || _backend_pref == BACKEND_VK
 }
 
-fn backend_capabilities(): dict {
+fn backend_capabilities() dict {
    "Returns a dictionary of supported features for the active backend."
    {"vulkan": vk_available(), "software": _backend == BACKEND_MOCK, "active": get_active_backend_name()}
 }
 
-fn load_shader_agnostic(any: _defs): int {
+fn load_shader_agnostic(any _defs) int {
    "Loads a shader with architecture-agnostic source definitions."
    0
 }
 
-fn load_shader(str: combined_src): int {
+fn load_shader(str combined_src) int {
    "Loads a shader from a combined source string(automated transpilation)."
    load_shader_agnostic(lib_shader.transpile_shader_source(combined_src))
 }
 
-fn shader_transpile(str: combined_src): any {
+fn shader_transpile(str combined_src) any {
    "Transpiles an agnostic shader source into backend-specific code."
    lib_shader.transpile_shader_source(combined_src)
 }
 
-fn _wait_window_ready(any: win): bool {
+fn _wait_window_ready(any win) bool {
    if(!win){ return false }
-   ; X11/GL contexts can race window realization in headless setups (e.g. xvfb).
-   def b = win.get(13, 0) ; _W_BACKEND in std.os.ui.window
-   if(b != 1){ return false } ; x11
+   def b = win.get(13, 0)
+   if(b != 1){ return false }
    mut i = 0
    while(i < 2){
       lib_uiw.check_event(win)
@@ -2433,7 +2544,7 @@ fn _wait_window_ready(any: win): bool {
    true
 }
 
-fn _init_with_window(any: win, bool: prefer_vulkan=true): bool {
+fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    if(!win){ return false }
    _wait_window_ready(win)
    _active_win = win
@@ -2467,14 +2578,23 @@ fn _init_with_window(any: win, bool: prefer_vulkan=true): bool {
    true
 }
 
-fn init_mock_surface(int: width=1280, int: height=720): any {
+fn init_mock_surface(int width=1280, int height=720) any {
    "Initializes the CPU/mock backend with an offscreen framebuffer and no real window."
    if(_backend == BACKEND_VK){ lib_vkr.shutdown() }
    _vk_cam_pos_valid = false
    if(_cpu_buf != 0){ free(_cpu_buf) _cpu_buf = 0 _cpu_w = 0 _cpu_h = 0 }
    _auto_show_pending = false
    _backend = BACKEND_MOCK
-   def win = {"_mock": true, "w": int(max(1, width)), "h": int(max(1, height))}
+   def win = {
+      "_mock": true, "handle": 0,
+      "x": 0, "y": 0, "w": int(max(1, width)), "h": int(max(1, height)),
+      "should_close": false, "events": [], "events_head": 0,
+      "mouse_x": 0, "mouse_y": 0, "mouse_last_x": 0, "mouse_last_y": 0,
+      "scroll_x": 0.0, "scroll_y": 0.0, "scroll_last_x": 0.0, "scroll_last_y": 0.0,
+      "scroll_dx": 0.0, "scroll_dy": 0.0,
+      "mouse_buttons": dict(8), "key_states": dict(32), "last_key_states": dict(32),
+      "pressed_keys": dict(32), "modifiers": 0,
+   }
    _active_win = win
    set_win_size(int(max(1, width)), int(max(1, height)))
    if(!_cpu_ensure_surface()){
@@ -2490,19 +2610,19 @@ fn init_mock_surface(int: width=1280, int: height=720): any {
    win
 }
 
-fn renderer_config(bool: vsync, bool: filter, str: vert="", str: frag="", int: msaa=1): bool {
+fn renderer_config(any vsync, bool filter, str vert="", str frag="", int msaa=1) bool {
    "Configures the graphics renderer settings(Vulkan only)."
    lib_vkr.renderer_config(vsync, filter, vert, frag, msaa)
    true
 }
 
-fn _visible_vulkan_boot_required(): bool {
+fn _visible_vulkan_boot_required() bool {
    #windows { return false }
    #else { return false }
    #endif
 }
 
-fn _prepare_visible_vulkan_boot(any: win, bool: explicit_hide, bool: headless): any {
+fn _prepare_visible_vulkan_boot(any win, bool explicit_hide, bool headless) any {
    #windows {
       if(_visible_vulkan_boot_required() && win && !explicit_hide && !headless){
          lib_uiw.show(win)
@@ -2515,7 +2635,7 @@ fn _prepare_visible_vulkan_boot(any: win, bool: explicit_hide, bool: headless): 
    0
 }
 
-fn _show_pending_after_first_frame(): any {
+fn _show_pending_after_first_frame() any {
    if(_backend != BACKEND_MOCK && _auto_show_pending && _active_win){
       if(_is_frame_debug()){ ui_profile.print_text("[gfx] end_frame auto_show start") }
       lib_uiw.show(_active_win)
@@ -2528,13 +2648,13 @@ fn _show_pending_after_first_frame(): any {
    0
 }
 
-fn init_window(int: width, int: height, str: title, int: flags=0, bool: vsync=false, bool: filter=false, int: msaa=1): any {
+fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=1) any {
    "Initializes a window with renderer config and graphics context. Returns window dict or false."
    if(_backend_pref == BACKEND_MOCK){ return init_mock_surface(width, height) }
    renderer_config(vsync, filter, "", "", msaa)
-   mut int: f = flags
-   mut int: x = 100
-   mut int: y = 100
+   mut f = flags
+   mut x = 100
+   mut y = 100
    if(f == 0){ f = 0 }
    def explicit_hide = (f & 0x0200) != 0
    f = f | 0x80000
@@ -2558,12 +2678,12 @@ fn init_window(int: width, int: height, str: title, int: flags=0, bool: vsync=fa
    win
 }
 
-fn set_active_window(any: win): bool {
+fn set_active_window(any win) bool {
    "Changes the target window for subsequent drawing operations."
    _init_with_window(win, true)
 }
 
-fn render_init(any: win=0): bool {
+fn render_init(any win=0) bool {
    "Ensures the graphics renderer is initialized for the specified window."
    if(_backend_pref == BACKEND_MOCK){
       if(_active_win && is_dict(_active_win) && _active_win.get("_mock", false)){ return true }
@@ -2576,23 +2696,25 @@ fn render_init(any: win=0): bool {
    false
 }
 
-fn set_window_pos(any: win, int: x, int: y): bool {
+fn set_window_pos(any win, int x, int y) bool {
    "Moves a window to the specified screen position."
    lib_uiw.move(win, x, y)
    true
 }
 
-fn close_window(): bool {
+fn close_window() bool {
    "Shuts down graphics services and closes the active window."
+   _font_release_all()
    if(_backend == BACKEND_VK){ lib_vkr.shutdown() }
    _vk_cam_pos_valid = false
    if(_active_win && !_active_win.get("_mock", false)){ lib_uiw.close(_active_win) }
    _active_win = nil
    if(_cpu_buf != 0){ free(_cpu_buf) _cpu_buf = 0 _cpu_w = 0 _cpu_h = 0 }
+   _render_release_scratch_buffers()
    true
 }
 
-fn window_should_close(any: win=0): bool {
+fn window_should_close(any win=0) bool {
    "Returns true if the window has requested closure. Polls events automatically."
    lib_uiw.poll_events()
    if(win){ return lib_uiw.should_close(win) }
@@ -2600,7 +2722,7 @@ fn window_should_close(any: win=0): bool {
    lib_uiw.should_close(_active_win)
 }
 
-fn _sync_win32_native_cursor(): bool {
+fn _sync_win32_native_cursor() bool {
    #windows {
       if(!_active_win || lib_uiw.backend() != "win32"){ return false }
       def win = lib_uiw.get_win(_active_win)
@@ -2615,15 +2737,36 @@ fn _sync_win32_native_cursor(): bool {
    #endif
 }
 
-fn begin_drawing(): bool {
+fn _sync_vk_framebuffer_to_window(bool headless) bool {
+   if(_backend != BACKEND_VK || headless || !_active_win){ return false }
+   def fresh = lib_uiw.get_win(_active_win)
+   if(fresh){ _active_win = fresh }
+   mut fb = lib_uiw.get_framebuffer_size(_active_win)
+   mut w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+   if(w <= 0 || h <= 0){
+      fb = lib_uiw.size(_active_win)
+      w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
+   }
+   if(w <= 0 || h <= 0){ return false }
+   if(w != int(lib_vkr.get_swapchain_width()) || h != int(lib_vkr.get_swapchain_height())){
+      lib_vkr.notify_window_resize(w, h)
+   }
+   if(w != int(_active_win.get("w", 0)) || h != int(_active_win.get("h", 0))){
+      _active_win["w"] = w
+      _active_win["h"] = h
+      lib_uiw._save_win(_active_win)
+   }
+   _last_win_w, _last_win_h = float(w), float(h)
+   true
+}
+
+fn begin_drawing() bool {
    "Begins a new drawing frame, clearing states."
    if(!_active_win){ return false }
    _sync_win32_native_cursor()
    _shape_scratch_used = 0
    _ensure_scissor_stack()
    if(_scissor_stack.len > 0){ _scissor_stack = [] }
-   ; Only close on ESC when explicitly enabled. This prevents ESC from
-   ; stealing input from TUI/terminal applications.
    if(_backend != BACKEND_MOCK && ui_profile.env_present_cached("NY_GFX_ESC_CLOSE")){ if(lib_uiw.key_down(_active_win, ui_consts.KEY_ESCAPE) || lib_uiw.key_down(_active_win, 0xFF1B)){ lib_uiw.set_should_close(_active_win, true) } }
    def now = ticks()
    _current_frame_time = (now - _last_frame_time) / 1000000000.0
@@ -2636,7 +2779,7 @@ fn begin_drawing(): bool {
          def fresh = lib_uiw.get_win(_active_win)
          if(fresh){ _active_win = fresh }
       }
-      ; print("GFX: begin_drawing _backend=VK device=", lib_vkr._get_device()) __print_flush()
+      _sync_vk_framebuffer_to_window(headless)
       lib_vkr.set_frame_time_sec(_frame_time_accum)
       mut vk_begin_ok = false
       try {
@@ -2649,7 +2792,6 @@ fn begin_drawing(): bool {
       if(_is_frame_debug()){ ui_profile.print_text("[gfx] begin_drawing vk begin_frame ok") }
       lib_vkr.set_unlit(true)
       if(headless && ui_profile.env_truthy_cached("NYTRIX_VK_ALLOW_HEADLESS")){ return true }
-      ; Sync _active_win size to actual swapchain extent (WM may have resized us)
       def scw, sch = int(lib_vkr.get_swapchain_width()), int(lib_vkr.get_swapchain_height())
       if(scw > 0 && sch > 0){
          if(scw != int(_active_win.get("w", 0)) || sch != int(_active_win.get("h", 0))){
@@ -2666,12 +2808,12 @@ fn begin_drawing(): bool {
    true
 }
 
-fn begin_frame(): bool {
+fn begin_frame() bool {
    "Begins a new drawing frame."
    return begin_drawing()
 }
 
-fn begin_frame_clear(any: color=BLACK): bool {
+fn begin_frame_clear(any color=BLACK) bool {
    "Begins a new frame and clears the background with the specified color."
    set_clear_color(color)
    if(begin_drawing()){
@@ -2681,12 +2823,12 @@ fn begin_frame_clear(any: color=BLACK): bool {
    false
 }
 
-fn end_frame(): bool {
+fn end_frame() bool {
    "Finalizes and presents the current frame."
    return end_drawing()
 }
 
-fn _draw_win32_software_cursor(): bool {
+fn _draw_win32_software_cursor() bool {
    #windows {
       if(!_active_win || !ui_profile.env_truthy_cached("NY_WIN_SOFTWARE_CURSOR")){ return false }
       if(lib_uiw.backend() != "win32"){ return false }
@@ -2712,7 +2854,7 @@ fn _draw_win32_software_cursor(): bool {
    #endif
 }
 
-fn end_drawing(): bool {
+fn end_drawing() bool {
    "Finalizes a drawing frame and swaps buffers."
    if(!_active_win){ return false }
    if(_backend == BACKEND_VK){
@@ -2727,7 +2869,7 @@ fn end_drawing(): bool {
    true
 }
 
-fn begin_mode_3d(any: camera): bool {
+fn begin_mode_3d(any camera) bool {
    "Enters 3D rendering mode using the specified camera."
    if(!_active_win){ return false }
    if(_backend == BACKEND_VK){
@@ -2738,21 +2880,21 @@ fn begin_mode_3d(any: camera): bool {
    true
 }
 
-fn set_projection(any: mat): bool {
+fn set_projection(any mat) bool {
    "Sets the active projection matrix."
    _proj_matrix = mat
    _sync_combined_vp()
    true
 }
 
-fn set_view(any: mat): bool {
+fn set_view(any mat) bool {
    "Sets the active view matrix."
    _view_matrix = mat
    _sync_combined_vp()
    true
 }
 
-fn _send_vk_cam_pos(f64: x, f64: y, f64: z): bool {
+fn _send_vk_cam_pos(f64 x, f64 y, f64 z) bool {
    if(_backend != BACKEND_VK){ return false }
    def nx, ny = float(x), float(y)
    def nz = float(z)
@@ -2764,7 +2906,7 @@ fn _send_vk_cam_pos(f64: x, f64: y, f64: z): bool {
    true
 }
 
-fn set_camera(any: cam): bool {
+fn set_camera(any cam) bool {
    "Sets both view and projection from a camera object."
    if(!cam){ return false }
    if(_active_win){
@@ -2786,10 +2928,10 @@ fn set_camera(any: cam): bool {
    if(_last_win_h > 0.0){ aspect = _last_win_w / _last_win_h }
    mat4_look_at_into(pos, target, up, _scratch_view)
    _view_matrix = _scratch_view
-   if(_scene_proj_mode == 1){ ;; SCENE ORTHO
+   if(_scene_proj_mode == 1){
       def z = _proj_zoom
       mat4_ortho_into(-z * aspect, z * aspect, -z, z, -1000.0, 1000.0, _scratch_proj)
-   } else { ;; PERSPECTIVE
+   } else {
       mat4_perspective_into(fovy * PI / 180.0, aspect, 0.1, 1000.0, _scratch_proj)
    }
    _proj_matrix = _scratch_proj
@@ -2797,7 +2939,7 @@ fn set_camera(any: cam): bool {
    true
 }
 
-fn set_win_size(int: w, int: h): bool {
+fn set_win_size(int w, int h) bool {
    "Updates cached window size used for projection calculations."
    if(w > 0){ _last_win_w = float(w) }
    if(h > 0){ _last_win_h = float(h) }
@@ -2805,19 +2947,19 @@ fn set_win_size(int: w, int: h): bool {
    true
 }
 
-fn set_projection_mode(int: mode): bool {
+fn set_projection_mode(int mode) bool {
    "Sets the active 3D scene projection mode: 0 for Perspective, 1 for Orthographic."
    _scene_proj_mode = mode
    true
 }
 
-fn set_ortho_zoom(f64: zoom): bool {
+fn set_ortho_zoom(f64 zoom) bool {
    "Sets the zoom level for orthographic projection."
    _proj_zoom = float(zoom)
    true
 }
 
-fn _sync_combined_vp(): bool {
+fn _sync_combined_vp() bool {
    if(!_proj_matrix){ _proj_matrix = _scratch_proj }
    if(!_view_matrix){ _view_matrix = _scratch_view }
    mat4_mul_into(_proj_matrix, _view_matrix, _scratch_mvp)
@@ -2826,7 +2968,7 @@ fn _sync_combined_vp(): bool {
    true
 }
 
-fn end_mode_3d(): bool {
+fn end_mode_3d() bool {
    "Exits 3D rendering mode, restoring the 2D default projection."
    _proj_matrix = nil
    _view_matrix = nil
@@ -2839,7 +2981,7 @@ fn end_mode_3d(): bool {
    true
 }
 
-fn clear_background(any: color=BLACK): bool {
+fn clear_background(any color=BLACK) bool {
    "Fills the background with the specified color."
    if(_backend == BACKEND_VK){
       lib_vkr.clear(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
@@ -2855,37 +2997,37 @@ fn clear_background(any: color=BLACK): bool {
    true
 }
 
-fn get_frame_time(): f64 {
+fn get_frame_time() f64 {
    "Returns the duration of the last frame in seconds."
    _current_frame_time
 }
 
-fn get_delta_time(): f64 {
+fn get_delta_time() f64 {
    "Returns the duration of the last frame in seconds."
    _current_frame_time
 }
 
-fn get_time(): f64 {
+fn get_time() f64 {
    "Returns the total elapsed time in seconds since library initialization."
    if(_start_time_sec == 0.0){ _start_time_sec = ostime.time() }
    ostime.time() - _start_time_sec
 }
 
 fn _renderer_frame_stats_pack(
-   dict: stats,
-   int: draws=0,
-   int: dynamic_draws=0,
-   int: static_draws=0,
-   int: indexed_draws=0,
-   int: flushes=0,
-   int: pipeline_binds=0,
-   int: descriptor_binds=0,
-   int: submitted_vertices=0,
-   int: begin_us=0,
-   int: syncpc_us=0,
-   int: flush_us=0,
-   int: end_us=0
-) : dict {
+   dict stats,
+   int draws=0,
+   int dynamic_draws=0,
+   int static_draws=0,
+   int indexed_draws=0,
+   int flushes=0,
+   int pipeline_binds=0,
+   int descriptor_binds=0,
+   int submitted_vertices=0,
+   int begin_us=0,
+   int syncpc_us=0,
+   int flush_us=0,
+   int end_us=0
+)  dict {
    dict_merge(stats, {
          "draws": draws,
          "dynamic_draws": dynamic_draws,
@@ -2903,7 +3045,7 @@ fn _renderer_frame_stats_pack(
    })
 }
 
-fn renderer_frame_stats(): dict {
+fn renderer_frame_stats() dict {
    "Returns the most recent renderer counters for the active backend."
    mut stats = {"backend": get_active_backend_name()}
    if(_backend == BACKEND_VK){
@@ -2937,44 +3079,44 @@ fn renderer_frame_stats(): dict {
 }
 
 comptime template _vk_only_void0(name, doc, call_fn){
-   fn ${name}(){
+   fn ${name}() {
       doc
       if(_backend == BACKEND_VK){ call_fn() }
    }
 }
 
 comptime template _vk_only_void1(name, doc, call_fn){
-   fn ${name}(arg0){
+   fn ${name}(arg0) {
       doc
       if(_backend == BACKEND_VK){ call_fn(arg0) }
    }
 }
 
 comptime template _vk_only_void3(name, doc, call_fn){
-   fn ${name}(arg0, arg1, arg2){
+   fn ${name}(arg0, arg1, arg2) {
       doc
       if(_backend == BACKEND_VK){ call_fn(arg0, arg1, arg2) }
    }
 }
 
-fn draw_vertices(ptr: p, int: count, int: tex_id=-1): bool {
+fn draw_vertices(ptr p, int count, int tex_id=-1) bool {
    "Fast-path: submits a raw vertex buffer for drawing."
    if(_backend == BACKEND_VK){ lib_vkr.draw_vertices(p, count, tex_id) return true }
    false
 }
 
-fn draw_lines_raw(ptr: p, int: count, f64: width=1.0): bool {
+fn draw_lines_raw(ptr p, int count, f64 width=1.0) bool {
    "Fast-path: submits a raw vertex buffer for line drawing."
    if(_backend == BACKEND_VK){ lib_vkr.draw_lines_raw(p, count, width) return true }
    false
 }
 
-fn color_pack(f64: r, f64: g, f64: b, f64: a=1.0): int {
+fn color_pack(f64 r, f64 g, f64 b, f64 a=1.0) int {
    "Packs RGBA floats into a native integer format for fast drawing."
    lib_vkr._pack_color(r, g, b, a)
 }
 
-fn _pack_color_from(any: color, f64: r=1.0, f64: g=1.0, f64: b=1.0, f64: a=1.0, bool: preserve_int=false): int {
+fn _pack_color_from(any color, f64 r=1.0, f64 g=1.0, f64 b=1.0, f64 a=1.0, bool preserve_int=false) int {
    if(preserve_int && is_int(color)){ return color }
    lib_vkr._pack_color(_color_at(color, 0, r), _color_at(color, 1, g), _color_at(color, 2, b), _color_at(color, 3, a))
 }
@@ -2982,7 +3124,7 @@ fn _pack_color_from(any: color, f64: r=1.0, f64: g=1.0, f64: b=1.0, f64: a=1.0, 
 comptime emit _vk_only_void1(set_unlit, "Toggles shading for subsequent draw calls.", lib_vkr.set_unlit)
 comptime emit _vk_only_void3(set_material, "Sets PBR material parameters for subsequent draw calls.", lib_vkr.set_material)
 
-fn set_cam_pos(f64: x, f64: y, f64: z): bool {
+fn set_cam_pos(f64 x, f64 y, f64 z) bool {
    "Sets camera world-space position for PBR specular calculation."
    _send_vk_cam_pos(x, y, z)
 }
@@ -2991,18 +3133,18 @@ comptime emit _vk_only_void1(set_env_tex, "Sets the active environment/sky textu
 comptime emit _vk_only_void1(set_env_spec_tex, "Sets the active specular IBL texture for lit shading.", lib_vkr.set_env_spec_tex)
 
 fn push_vertex(
-   ptr: p,
-   f64: x,
-   f64: y,
-   f64: z,
-   f64: u,
-   f64: v,
-   any: color,
-   int: tex_id=0,
-   f64: nx=0.0,
-   f64: ny=0.0,
-   f64: nz=1.0
-): bool {
+   ptr p,
+   f64 x,
+   f64 y,
+   f64 z,
+   f64 u,
+   f64 v,
+   any color,
+   int tex_id=0,
+   f64 nx=0.0,
+   f64 ny=0.0,
+   f64 nz=1.0
+) bool {
    "Internal helper to store a vertex into a raw buffer."
    lib_vkr.__vkr_push_vertex(p, x, y, z, u, v, color, tex_id, nx, ny, nz)
    true
@@ -3010,17 +3152,17 @@ fn push_vertex(
 
 comptime emit _vk_only_void1(set_view_proj, "Sets the View-Projection matrix for 3D rendering.", lib_vkr.set_mvp)
 
-fn set_ortho(f64: l, f64: r, f64: b, f64: t, f64: n, f64: f): bool {
+fn set_ortho(f64 l, f64 r, f64 b, f64 t, f64 n, f64 f) bool {
    "Sets the active projection to a standard 3D orthographic projection."
    _proj_matrix = mat4_ortho(l, r, b, t, n, f)
    _sync_combined_vp()
    true
 }
 
-fn set_ortho_2d(f64: l, f64: r, f64: b, f64: t): bool {
+fn set_ortho_2d(f64 l, f64 r, f64 b, f64 t) bool {
    "Sets the active projection to a Y-down orthographic projection for 2D(resets view/model)."
    mut bb, tt = b, t
-   if(bb < tt){ def tmp = bb bb = tt tt = tmp } ; UI coords: Y-down
+   if(bb < tt){ def tmp = bb bb = tt tt = tmp }
    if(!_last_ortho2d_valid
       || l != _last_ortho2d_l
       || r != _last_ortho2d_r
@@ -3041,7 +3183,7 @@ fn set_ortho_2d(f64: l, f64: r, f64: b, f64: t): bool {
    true
 }
 
-fn set_perspective(f64: fovy_deg, f64: aspect, f64: near, f64: far): bool {
+fn set_perspective(f64 fovy_deg, f64 aspect, f64 near, f64 far) bool {
    "Sets the active projection to 3D perspective(fovy in degrees)."
    _scratch_proj = mat4_perspective(fovy_deg * PI / 180.0, aspect, near, far)
    _proj_matrix = _scratch_proj
@@ -3051,7 +3193,7 @@ fn set_perspective(f64: fovy_deg, f64: aspect, f64: near, f64: far): bool {
 
 def VERTEX_STRIDE = 64
 
-fn compile_shader(str: source, str: stage_ext): any {
+fn compile_shader(str source, str stage_ext) any {
    "Compiles GLSL source string and creates a backend shader module."
    if(_debug_gfx_enabled){ ui_profile.print_text(f"[gfx:shader] compile stage='{stage_ext}'") }
    if(_backend == BACKEND_VK){ return lib_vkr.create_shader_module_from_source(source, stage_ext) }
@@ -3059,16 +3201,16 @@ fn compile_shader(str: source, str: stage_ext): any {
 }
 
 fn create_pipeline(
-   any: vert_mod,
-   any: frag_mod,
-   int: topology=3,
-   int: depth_test=1,
-   int: depth_write=1,
-   int: cull_mode=0,
-   int: front_face=0,
-   int: depth_bias=0,
-   int: depth_clamp=0
-): any {
+   any vert_mod,
+   any frag_mod,
+   int topology=3,
+   int depth_test=1,
+   int depth_write=1,
+   int cull_mode=0,
+   int front_face=0,
+   int depth_bias=0,
+   int depth_clamp=0
+) any {
    "Creates a custom graphics pipeline from shader modules."
    if(_backend == BACKEND_VK){ return lib_vkr.create_pipeline(vert_mod, frag_mod, topology, depth_test, depth_write, cull_mode, front_face, depth_bias, depth_clamp) }
    0
@@ -3076,19 +3218,19 @@ fn create_pipeline(
 
 comptime emit _vk_only_void1(bind_pipeline, "Binds a custom graphics pipeline for subsequent draw calls.", lib_vkr.bind_pipeline)
 
-fn reset_pipeline(): bool {
+fn reset_pipeline() bool {
    "Restores the engine's default graphics pipeline."
    if(_backend == BACKEND_VK){ lib_vkr.bind_pipeline(lib_vkr._get_default_pipeline()) }
    _backend == BACKEND_VK
 }
 
-fn push_constants(ptr: p, int: size, int: offset=0): bool {
+fn push_constants(ptr p, int size, int offset=0) bool {
    "Pushes custom data to the current pipeline's push constants."
    if(_backend == BACKEND_VK){ lib_vkr.push_constants(p, size, offset) return true }
    false
 }
 
-fn store_mat4_cm(ptr: p, any: mat): bool {
+fn store_mat4_cm(ptr p, any mat) bool {
    "Stores a 16-float or tagged 18-float column-major mat4 into raw memory."
    vk_utils.store_mat4_cm_raw(p, mat, false)
    true
@@ -3097,7 +3239,7 @@ fn store_mat4_cm(ptr: p, any: mat): bool {
 comptime emit _vk_only_void3(blit_buffer, "Blits a raw pixel buffer to the screen.", lib_vkr.blit_buffer)
 comptime emit _vk_only_void0(clear_depth, "Explicitly clears the depth buffer. Useful for drawing on top of existing scene data.", lib_vkr.clear_depth)
 
-fn set_clear_color(any: color): bool {
+fn set_clear_color(any color) bool {
    "Sets the clear color for the next frame."
    if(_backend == BACKEND_VK){
       lib_vkr.set_clear_color(_color_at(color, 0, 0.0), _color_at(color, 1, 0.0),
@@ -3111,7 +3253,7 @@ fn set_clear_color(any: color): bool {
 }
 
 @inline
-fn _color_at(any: color, int: idx, f64: fallback): f64 {
+fn _color_at(any color, int idx, f64 fallback) f64 {
    if(is_list(color) && color.len > idx){ return float(color.get(idx, fallback)) }
    if(is_int(color)){
       if(idx == 0){ return float(color & 255) / 255.0 }
@@ -3122,7 +3264,7 @@ fn _color_at(any: color, int: idx, f64: fallback): f64 {
    fallback
 }
 
-fn _shape_sdf_color(any: color): vec4 {
+fn _shape_sdf_color(any color) vec4 {
    mut r, g, b, a = 1.0, 1.0, 1.0, 1.0
    if(is_int(color)){
       a, r = float((color >> 24) & 255) / 255.0, float((color >> 16) & 255) / 255.0
@@ -3134,9 +3276,8 @@ fn _shape_sdf_color(any: color): vec4 {
    [r, g, b, a]
 }
 
-fn _store_v3_c4(ptr: buf, int: vi, f64: x, f64: y, f64: z, f64: r, f64: g, f64: b, f64: a): bool {
+fn _store_v3_c4(ptr buf, int vi, f64 x, f64 y, f64 z, f64 r, f64 g, f64 b, f64 a) bool {
    def off = vi * 28
-   ; Vertex pack is 7x f32; write IEEE float payloads explicitly.
    store32_f32(buf, x, off)
    store32_f32(buf, y, off + 4)
    store32_f32(buf, z, off + 8)
@@ -3148,42 +3289,42 @@ fn _store_v3_c4(ptr: buf, int: vi, f64: x, f64: y, f64: z, f64: r, f64: g, f64: 
 }
 
 fn _store_fan_tri_c4(
-   ptr: buf,
-   int: vi,
-   f64: cx,
-   f64: cy,
-   f64: x0,
-   f64: y0,
-   f64: x1,
-   f64: y1,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a
-) : int {
+   ptr buf,
+   int vi,
+   f64 cx,
+   f64 cy,
+   f64 x0,
+   f64 y0,
+   f64 x1,
+   f64 y1,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a
+)  int {
    _store_v3_c4(buf, vi, cx, cy, 0.0, r, g, b, a) _store_v3_c4(buf, vi + 1, x0, y0, 0.0, r, g, b, a)
    _store_v3_c4(buf, vi + 2, x1, y1, 0.0, r, g, b, a)
    vi + 3
 }
 
-fn _grid_cache_key(int: slices, f64: spacing, f64: thickness, any: minor_col, any: major_col): str {
+fn _grid_cache_key(int slices, f64 spacing, f64 thickness, any minor_col, any major_col) str {
    def minor = _pack_color_from(minor_col, 0.3, 0.3, 0.3, 0.55)
    def major = _pack_color_from(major_col, 0.58, 0.62, 0.7, 0.95)
    f"{slices}:{spacing}:{thickness}:{minor}:{major}"
 }
 
 fn _grid_write_thick_line(
-   ptr: p,
-   int: idx,
-   f64: x1,
-   f64: y1,
-   f64: z1,
-   f64: x2,
-   f64: y2,
-   f64: z2,
-   f64: thickness,
-   int: color_u32
-) : int {
+   ptr p,
+   int idx,
+   f64 x1,
+   f64 y1,
+   f64 z1,
+   f64 x2,
+   f64 y2,
+   f64 z2,
+   f64 thickness,
+   int color_u32
+)  int {
    "Internal: Writes a thick 3D line quad into a vertex buffer."
    def dx, dy, dz = float(x2) - float(x1), float(y2) - float(y1), float(z2) - float(z1)
    def l = sqrt(dx*dx + dy*dy + dz*dz)
@@ -3202,12 +3343,12 @@ fn _grid_write_thick_line(
    idx + 6
 }
 
-fn _prepare_draw(): bool {
+fn _prepare_draw() bool {
    if(_backend == BACKEND_VK || _backend == BACKEND_MOCK){ return true }
    false
 }
 
-fn _shape_scratch_alloc(int: bytes): ptr {
+fn _shape_scratch_alloc(int bytes) ptr {
    if(bytes <= 0){ return 0 }
    if(_shape_scratch == 0 || (_shape_scratch_used + bytes) > _shape_scratch_cap){
       mut new_cap = max(65536, _shape_scratch_cap)
@@ -3222,7 +3363,7 @@ fn _shape_scratch_alloc(int: bytes): ptr {
    ptr
 }
 
-fn _draw_triangles_impl(ptr: verts, int: tri_count, bool: owns=true): bool {
+fn _draw_triangles_impl(ptr verts, int tri_count, bool owns=true) bool {
    if(verts == 0 || tri_count <= 0){ return false }
    if(!_prepare_draw()){ if(owns){ free(verts) } return false }
    def draw_vk = _backend == BACKEND_VK
@@ -3263,12 +3404,12 @@ fn _draw_triangles_impl(ptr: verts, int: tri_count, bool: owns=true): bool {
    true
 }
 
-fn _to_v3(any: v): list {
+fn _to_v3(any v) list {
    if(is_list(v)){ return [v.get(0, 0.0), v.get(1, 0.0), v.get(2, 0.0)] }
    return [0.0, 0.0, 0.0]
 }
 
-fn draw_triangles(list: vertices, any: color): bool {
+fn draw_triangles(list vertices, any color) bool {
    "Draws a list of triangles with a single color."
    if(!is_list(vertices)){ return false }
    def tri_count = int(vertices.len / 3)
@@ -3300,7 +3441,7 @@ fn draw_triangles(list: vertices, any: color): bool {
    _draw_triangles_impl(verts, tri_count)
 }
 
-fn draw_polyline(list: points, any: color, f64: thickness=0.02, bool: closed=false): bool {
+fn draw_polyline(list points, any color, f64 thickness=0.02, bool closed=false) bool {
    "Draws a sequence of connected lines."
    if(!is_list(points) || points.len < 2){ return false }
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
@@ -3329,7 +3470,7 @@ fn draw_polyline(list: points, any: color, f64: thickness=0.02, bool: closed=fal
    true
 }
 
-fn _draw_tri_quad_vk(list: v1, list: v2, list: v3, any: v4, any: color): bool {
+fn _draw_tri_quad_vk(list v1, list v2, list v3, any v4, any color) bool {
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
    def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
    if(v4){
@@ -3347,19 +3488,19 @@ fn _draw_tri_quad_vk(list: v1, list: v2, list: v3, any: v4, any: color): bool {
    true
 }
 
-fn draw_triangle(list: v1, list: v2, list: v3, any: color): bool {
+fn draw_triangle(list v1, list v2, list v3, any color) bool {
    "Draws a single filled triangle."
    if(_backend == BACKEND_VK){ return _draw_tri_quad_vk(v1, v2, v3, 0, color) }
    draw_triangles([v1, v2, v3], color)
 }
 
-fn draw_quad(list: v1, list: v2, list: v3, list: v4, any: color): bool {
+fn draw_quad(list v1, list v2, list v3, list v4, any color) bool {
    "Draws a single filled quadrilateral."
    if(_backend == BACKEND_VK){ return _draw_tri_quad_vk(v1, v2, v3, v4, color) }
    draw_triangles([v1, v2, v3, v1, v3, v4], color)
 }
 
-fn _draw_line_impl(list: start, list: finish, any: color, f64: thickness): bool {
+fn _draw_line_impl(list start, list finish, any color, f64 thickness) bool {
    if(thickness <= 0){ thickness = 0.02 }
    if(_backend == BACKEND_VK){
       def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
@@ -3384,12 +3525,12 @@ fn _draw_line_impl(list: start, list: finish, any: color, f64: thickness): bool 
    draw_quad(v1, v2, v4, v3, color)
 }
 
-fn draw_line(list: start, list: finish, any: color, f64: thickness=0.02): bool {
+fn draw_line(list start, list finish, any color, f64 thickness=0.02) bool {
    "Draws a thick line between two 3D positions."
    _draw_line_impl(start, finish, color, thickness)
 }
 
-fn draw_line_fast(f64: x1, f64: y1, f64: x2, f64: y2, f64: thickness, int: c_u32): bool {
+fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int c_u32) bool {
    "Draws a packed-color 2D line without color conversion."
    if(_backend == BACKEND_VK){
       lib_vkr.draw_line_fast(x1, y1, x2, y2, thickness, c_u32)
@@ -3398,9 +3539,13 @@ fn draw_line_fast(f64: x1, f64: y1, f64: x2, f64: y2, f64: thickness, int: c_u32
    draw_line_2d(x1, y1, x2, y2, c_u32, thickness)
 }
 
-fn draw_line_2d(f64: x1, f64: y1, f64: x2, f64: y2, any: color, f64: thickness=0.02): bool {
+fn draw_line_2d(f64 x1, f64 y1, f64 x2, f64 y2, any color, f64 thickness=0.02) bool {
    "Draws a thick line between two 2D screen positions."
    if(_backend == BACKEND_VK){
+      if(abs(x2 - x1) < 0.001 && abs(y2 - y1) < 0.001){
+         draw_circle(x1, y1, max(0.5, thickness * 0.5), color)
+         return true
+      }
       if(is_int(color)){ lib_vkr.draw_line_fast(x1, y1, x2, y2, thickness, color) } else {
          lib_vkr.draw_line(x1, y1, x2, y2, thickness, _color_at(color, 0, 1.0), _color_at(color, 1, 1.0),
          _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
@@ -3410,7 +3555,7 @@ fn draw_line_2d(f64: x1, f64: y1, f64: x2, f64: y2, any: color, f64: thickness=0
    _draw_line_impl([x1, y1, 0.0], [x2, y2, 0.0], color, thickness)
 }
 
-fn draw_rect(f64: x, f64: y, f64: w, f64: h, any: color): bool {
+fn draw_rect(f64 x, f64 y, f64 w, f64 h, any color) bool {
    "Draws a filled rectangle on screen. Automatically uses the fastest path available."
    if(_backend == BACKEND_VK){
       lib_vkr.draw_rect_fast(x, y, w, h, _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true))
@@ -3419,7 +3564,7 @@ fn draw_rect(f64: x, f64: y, f64: w, f64: h, any: color): bool {
    draw_quad([x, y, 0.0], [x+w, y, 0.0], [x+w, y+h, 0.0], [x, y+h, 0.0], color)
 }
 
-fn draw_rect_sharp(f64: x, f64: y, f64: w, f64: h, any: color, f64: r=4.0): bool {
+fn draw_rect_sharp(f64 x, f64 y, f64 w, f64 h, any color, f64 r=4.0) bool {
    "Draws a rectangle with 45-degree chamfered corners."
    if(r <= 0.0){ return draw_rect(x, y, w, h, color) }
    def rad = (r > min(w, h) / 2.0) ? min(w, h) / 2.0 : r
@@ -3439,44 +3584,61 @@ fn draw_rect_sharp(f64: x, f64: y, f64: w, f64: h, any: color, f64: r=4.0): bool
    true
 }
 
-fn draw_rect_rounded(f64: x, f64: y, f64: w, f64: h, f64: r, any: color, int: segments=24): bool {
+fn draw_rect_rounded(f64 x, f64 y, f64 w, f64 h, f64 r, any color, int segments=24) bool {
    "Draws a rounded rectangle using proper quarter-corner sectors."
    draw_rounded_rectangle(x, y, w, h, r, color, segments)
 }
 
-fn draw_rect_tex(f64: x, f64: y, f64: w, f64: h, int: tex_id, f64: r, f64: g, f64: b, f64: a): bool {
+fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a textured rectangle on screen."
    if(_backend == BACKEND_VK){ lib_vkr.draw_rect_tex(x, y, w, h, tex_id, r, g, b, a) return true }
    false
 }
 
 fn draw_rect_tex_uv(
-   f64: x,
-   f64: y,
-   f64: w,
-   f64: h,
-   int: tex_id,
-   f64: u1,
-   f64: v1,
-   f64: u2,
-   f64: v2,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a
-): bool {
+   f64 x,
+   f64 y,
+   f64 w,
+   f64 h,
+   int tex_id,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a
+) bool {
    "Draws a textured rectangle with custom UV coordinates."
    if(_backend == BACKEND_VK){ lib_vkr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    false
 }
 
-fn draw_rectangle_lines(f64: x, f64: y, f64: w, f64: h, any: color, f64: thickness=0.02): bool {
+fn draw_rect_tex_uv_rot(
+   f64 cx,
+   f64 cy,
+   f64 w,
+   f64 h,
+   f64 rot_deg,
+   int tex_id,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a
+) bool {
+   "Draws a rotated textured rectangle around center with custom UV coordinates."
+   if(_backend == BACKEND_VK){ lib_vkr.draw_rect_tex_uv_rot(cx, cy, w, h, rot_deg, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
+   false
+}
+
+fn draw_rectangle_lines(f64 x, f64 y, f64 w, f64 h, any color, f64 thickness=0.02) bool {
    "Draws the outline of a rectangle."
    if(_backend == BACKEND_VK){
-      if(float(thickness) == 1.0){
-         lib_vkr.draw_rect_outline_fast(x, y, w, h, _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true))
-         return true
-      }
       def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
       def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
       lib_vkr.draw_rect_lines_2d(x, y, w, h, thickness, r, g, b, a)
@@ -3490,17 +3652,17 @@ fn draw_rectangle_lines(f64: x, f64: y, f64: w, f64: h, any: color, f64: thickne
 }
 
 fn _draw_filled_fan_fallback(
-   f64: cx,
-   f64: cy,
-   f64: rx,
-   f64: ry,
-   int: segments,
-   f64: rot,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: alpha
-) : bool {
+   f64 cx,
+   f64 cy,
+   f64 rx,
+   f64 ry,
+   int segments,
+   f64 rot,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 alpha
+)  bool {
    segments = max(3, int(segments))
    def verts = _shape_scratch_alloc(segments * 84)
    if(!verts){ return false }
@@ -3517,7 +3679,7 @@ fn _draw_filled_fan_fallback(
    true
 }
 
-fn draw_circle(f64: cx, f64: cy, f64: radius, any: color, int: segments=256): bool {
+fn draw_circle(f64 cx, f64 cy, f64 radius, any color, int segments=256) bool {
    "Draws a filled circle. Reuses edge points to minimize trig calls."
    if(radius <= 0){ return false }
    def rgba = _shape_sdf_color(color)
@@ -3531,18 +3693,18 @@ fn draw_circle(f64: cx, f64: cy, f64: radius, any: color, int: segments=256): bo
 }
 
 fn _draw_ring_sector_fallback(
-   f64: cx,
-   f64: cy,
-   f64: inner_radius,
-   f64: outer_radius,
-   f64: start_rad,
-   f64: span_rad,
-   int: steps,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a
-): bool {
+   f64 cx,
+   f64 cy,
+   f64 inner_radius,
+   f64 outer_radius,
+   f64 start_rad,
+   f64 span_rad,
+   int steps,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a
+) bool {
    steps = max(1, int(steps))
    def tri_count = steps * 2
    def verts = _shape_scratch_alloc(tri_count * 84)
@@ -3565,7 +3727,7 @@ fn _draw_ring_sector_fallback(
    true
 }
 
-fn draw_ring(f64: cx, f64: cy, f64: inner_radius, f64: outer_radius, any: color, int: segments=256): bool {
+fn draw_ring(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, any color, int segments=256) bool {
    "Draws a filled ring/annulus using SDF for Vulkan or triangle segments for fallback."
    if(inner_radius < 0){ inner_radius = 0 }
    if(outer_radius <= inner_radius){ return false }
@@ -3580,12 +3742,12 @@ fn draw_ring(f64: cx, f64: cy, f64: inner_radius, f64: outer_radius, any: color,
    _draw_ring_sector_fallback(cx, cy, inner_radius, outer_radius, 0.0, TAU, segments, r, g, b, a)
 }
 
-fn draw_circle_lines(f64: cx, f64: cy, f64: radius, any: color, f64: thickness=0.02, int: segments=256): bool {
+fn draw_circle_lines(f64 cx, f64 cy, f64 radius, any color, f64 thickness=0.02, int segments=256) bool {
    "Draws the outline of a circle."
    draw_ring(cx, cy, max(0.0, radius - thickness / 2.0), radius + thickness / 2.0, color, segments)
 }
 
-fn _draw_filled_fan_2d(f64: cx, f64: cy, f64: rx, f64: ry, int: segments, any: color, f64: rot=0.0): bool {
+fn _draw_filled_fan_2d(f64 cx, f64 cy, f64 rx, f64 ry, int segments, any color, f64 rot=0.0) bool {
    if(rx <= 0 || ry <= 0){ return false }
    segments = max(3, int(segments))
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
@@ -3597,28 +3759,28 @@ fn _draw_filled_fan_2d(f64: cx, f64: cy, f64: rx, f64: ry, int: segments, any: c
    _draw_filled_fan_fallback(cx, cy, rx, ry, segments, rot, r, g, b, alpha)
 }
 
-fn draw_polygon(f64: cx, f64: cy, int: sides, f64: radius, any: color, f64: rotation_deg=0.0): bool {
+fn draw_polygon(f64 cx, f64 cy, int sides, f64 radius, any color, f64 rotation_deg=0.0) bool {
    "Draws a regular filled polygon."
    _draw_filled_fan_2d(cx, cy, radius, radius, max(3, int(sides)), color, rotation_deg * PI / 180.0)
 }
 
-fn draw_ellipse(f64: cx, f64: cy, f64: rx, f64: ry, any: color, int: segments=256): bool {
+fn draw_ellipse(f64 cx, f64 cy, f64 rx, f64 ry, any color, int segments=256) bool {
    "Draws a filled ellipse."
    _draw_filled_fan_2d(cx, cy, rx, ry, segments, color, 0.0)
 }
 
 fn _draw_radial_polyline_fallback(
-   f64: cx,
-   f64: cy,
-   f64: rx,
-   f64: ry,
-   f64: start_rad,
-   f64: span_rad,
-   int: steps,
-   any: color,
-   f64: thickness,
-   bool: closed=false
-): bool {
+   f64 cx,
+   f64 cy,
+   f64 rx,
+   f64 ry,
+   f64 start_rad,
+   f64 span_rad,
+   int steps,
+   any color,
+   f64 thickness,
+   bool closed=false
+) bool {
    steps = max(1, int(steps))
    def limit = closed ? steps : steps + 1
    mut points, i = [], 0
@@ -3630,7 +3792,7 @@ fn _draw_radial_polyline_fallback(
    draw_polyline(points, color, thickness, closed)
 }
 
-fn draw_ellipse_lines(f64: cx, f64: cy, f64: rx, f64: ry, any: color, f64: thickness=0.02, int: segments=72): bool {
+fn draw_ellipse_lines(f64 cx, f64 cy, f64 rx, f64 ry, any color, f64 thickness=0.02, int segments=72) bool {
    "Draws the outline of an ellipse."
    if(rx <= 0 || ry <= 0){ return false }
    segments = max(8, int(segments))
@@ -3643,7 +3805,7 @@ fn draw_ellipse_lines(f64: cx, f64: cy, f64: rx, f64: ry, any: color, f64: thick
    _draw_radial_polyline_fallback(cx, cy, rx, ry, 0.0, TAU, segments, color, thickness, true)
 }
 
-fn draw_arc(f64: cx, f64: cy, f64: radius, f64: start_deg, f64: end_deg, any: color, f64: thickness=0.02, int: segments=32): bool {
+fn draw_arc(f64 cx, f64 cy, f64 radius, f64 start_deg, f64 end_deg, any color, f64 thickness=0.02, int segments=32) bool {
    "Draws an arc segment outline."
    if(radius <= 0){ return false }
    if(end_deg < start_deg){ def t = start_deg start_deg = end_deg end_deg = t }
@@ -3662,15 +3824,15 @@ fn draw_arc(f64: cx, f64: cy, f64: radius, f64: start_deg, f64: end_deg, any: co
 }
 
 fn draw_sector(
-   f64: cx,
-   f64: cy,
-   f64: inner_radius,
-   f64: outer_radius,
-   f64: start_deg,
-   f64: end_deg,
-   any: color,
-   int: segments=32
-): bool {
+   f64 cx,
+   f64 cy,
+   f64 inner_radius,
+   f64 outer_radius,
+   f64 start_deg,
+   f64 end_deg,
+   any color,
+   int segments=32
+) bool {
    "Draws a filled sector(pie slice/ring segment)."
    if(inner_radius < 0){ inner_radius = 0 }
    if(outer_radius <= inner_radius){ return false }
@@ -3689,7 +3851,7 @@ fn draw_sector(
    _draw_ring_sector_fallback(cx, cy, inner_radius, outer_radius, start, span_rad, steps, r, g, b, a)
 }
 
-fn draw_rounded_rectangle(f64: x, f64: y, f64: w, f64: h, f64: radius, any: color, int: segments=24): bool {
+fn draw_rounded_rectangle(f64 x, f64 y, f64 w, f64 h, f64 radius, any color, int segments=24) bool {
    "Draws a filled rectangle with rounded corners."
    if(w <= 0 || h <= 0){ return false }
    if(radius <= 0){ return draw_rect(x, y, w, h, color) }
@@ -3712,7 +3874,7 @@ fn draw_rounded_rectangle(f64: x, f64: y, f64: w, f64: h, f64: radius, any: colo
    true
 }
 
-fn draw_rounded_rectangle_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, any: color): bool {
+fn draw_rounded_rectangle_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool {
    "Draws a smooth filled rectangle with rounded corners."
    if(w <= 0 || h <= 0){ return false }
    if(radius <= 0){ return draw_rect(x, y, w, h, color) }
@@ -3726,7 +3888,7 @@ fn draw_rounded_rectangle_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, any: 
    draw_rounded_rectangle(x, y, w, h, radius, color, 48)
 }
 
-fn draw_star(f64: cx, f64: cy, f64: inner_radius, f64: outer_radius, int: pts, any: color, f64: rotation_deg=0.0): bool {
+fn draw_star(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, int pts, any color, f64 rotation_deg=0.0) bool {
    "Draws a filled star shape."
    pts = max(2, int(pts))
    if(inner_radius <= 0){ inner_radius = outer_radius * 0.5 }
@@ -3752,7 +3914,7 @@ fn draw_star(f64: cx, f64: cy, f64: inner_radius, f64: outer_radius, int: pts, a
    _draw_triangles_impl(verts, total, false)
 }
 
-fn _draw_grid_static_buffer(any: cached): bool {
+fn _draw_grid_static_buffer(any cached) bool {
    if(!cached){ return false }
    lib_vkr.bind_default_texture()
    lib_vkr.set_vertex_color_mode(1)
@@ -3761,7 +3923,7 @@ fn _draw_grid_static_buffer(any: cached): bool {
    true
 }
 
-fn _draw_grid_lines(int: slices, f64: spacing, any: minor_col, any: major_col, f64: thickness, f64: dx=0.0, f64: dz=0.0): bool {
+fn _draw_grid_lines(int slices, f64 spacing, any minor_col, any major_col, f64 thickness, f64 dx=0.0, f64 dz=0.0) bool {
    def extent = float(slices) * spacing
    mut i = 0 - slices
    while(i <= slices){
@@ -3775,17 +3937,17 @@ fn _draw_grid_lines(int: slices, f64: spacing, any: minor_col, any: major_col, f
 }
 
 fn _grid_write_xz_static_lines(
-   ptr: buf,
-   int: idx,
-   int: slices,
-   f64: spacing,
-   f64: extent,
-   f64: dx,
-   f64: dz,
-   f64: thickness,
-   int: minor_col,
-   int: major_col
-): int {
+   ptr buf,
+   int idx,
+   int slices,
+   f64 spacing,
+   f64 extent,
+   f64 dx,
+   f64 dz,
+   f64 thickness,
+   int minor_col,
+   int major_col
+) int {
    mut i = 0 - slices
    while(i <= slices){
       def d = float(i) * spacing
@@ -3798,12 +3960,12 @@ fn _grid_write_xz_static_lines(
 }
 
 fn draw_grid(
-   int: slices=10,
-   f64: spacing=1.0,
-   any: minor_col=[0.3, 0.34, 0.4, 0.55],
-   any: major_col=[0.58, 0.62, 0.7, 0.95],
-   f64: thickness=0.01
-): bool {
+   int slices=10,
+   f64 spacing=1.0,
+   any minor_col=[0.3, 0.34, 0.4, 0.55],
+   any major_col=[0.58, 0.62, 0.7, 0.95],
+   f64 thickness=0.01
+) bool {
    "Draws a grid on the ground plane(XZ)."
    slices = max(1, int(slices))
    def extent = float(slices) * spacing
@@ -3829,10 +3991,10 @@ fn draw_grid(
 }
 
 fn draw_grid_pair(
-   int: fine_slices, f64: fine_spacing, any: fine_minor_col, any: fine_major_col, f64: fine_thickness,
-   int: coarse_slices, f64: coarse_spacing, any: coarse_minor_col, any: coarse_major_col, f64: coarse_thickness,
-   f64: coarse_dx=0.0, f64: coarse_dz=0.0
-): bool {
+   int fine_slices, f64 fine_spacing, any fine_minor_col, any fine_major_col, f64 fine_thickness,
+   int coarse_slices, f64 coarse_spacing, any coarse_minor_col, any coarse_major_col, f64 coarse_thickness,
+   f64 coarse_dx=0.0, f64 coarse_dz=0.0
+) bool {
    "Draws fine+coarse XZ grids as one cached static buffer."
    fine_slices = max(1, int(fine_slices))
    coarse_slices = max(1, int(coarse_slices))
@@ -3878,7 +4040,7 @@ fn draw_grid_pair(
    true
 }
 
-fn draw_grid_pair_axes(f64: coarse_dx, f64: coarse_dz, f64: axes_dx, f64: axes_dz): bool {
+fn draw_grid_pair_axes(f64 coarse_dx, f64 coarse_dz, f64 axes_dx, f64 axes_dz) bool {
    "Draws the editor fine+coarse XZ grid plus centered RGB axes as one cached static buffer."
    if(_backend != BACKEND_VK){ return false }
    _ensure_grid_axes_cache_lists()
@@ -3969,7 +4131,7 @@ fn draw_grid_pair_axes(f64: coarse_dx, f64: coarse_dz, f64: axes_dx, f64: axes_d
    true
 }
 
-fn draw_axes(f64: length=1.0, f64: thickness=0.02): bool {
+fn draw_axes(f64 length=1.0, f64 thickness=0.02) bool {
    "Draws RGB colored axes(XYZ)."
    if(_backend == BACKEND_VK){
       def key = f"{float(length)}:{float(thickness)}"
@@ -3992,7 +4154,7 @@ fn draw_axes(f64: length=1.0, f64: thickness=0.02): bool {
    true
 }
 
-fn draw_cube(list: pos, f64: size, any: color): bool {
+fn draw_cube(list pos, f64 size, any color) bool {
    "Draws a colored 3D cube."
    def x, y, z = pos.get(0, 0.0), pos.get(1, 0.0), pos.get(2, 0.0)
    if(_backend == BACKEND_VK){
@@ -4009,26 +4171,24 @@ fn draw_cube(list: pos, f64: size, any: color): bool {
    true
 }
 
-fn init(): bool {
+fn init() bool {
    "Initializes the graphics library with default settings."
    lib_uiw.set_blit_handler(blit_buffer)
    if(_backend_pref == BACKEND_MOCK){ init_mock_surface(800, 600) } else {
-      ; Defaults to VK if not specified via environment or prefs
       init_window(800, 600, "Nytrix GFX")
    }
    true
 }
 
-fn shutdown(): bool {
+fn shutdown() bool {
    "Shuts down the graphics library and releases all resources."
    _texture_cache_writer_flush()
    close_window()
    true
 }
 
-fn camera_init(list: pos, f64: yaw, f64: pitch, f64: aspect=1.33): list {
+fn camera_init(list pos, f64 yaw, f64 pitch, f64 aspect=1.33) list {
    "Initializes a 3D camera object with position and orientation."
-   ; Returns a camera object [pos, target, up, fovy, yaw, pitch, aspect]
    def ryaw = yaw * PI / 180.0
    def rpitch = pitch * PI / 180.0
    def front = vec3(sin(ryaw) * cos(rpitch), sin(rpitch), -cos(ryaw) * cos(rpitch))
@@ -4044,7 +4204,7 @@ fn camera_init(list: pos, f64: yaw, f64: pitch, f64: aspect=1.33): list {
    cam
 }
 
-fn camera_update(list: camera): list {
+fn camera_update(list camera) list {
    "Updates the camera's target position based on its orientation."
    def yaw = camera.get(4)
    def pitch = camera.get(5)
@@ -4065,7 +4225,7 @@ fn camera_update(list: camera): list {
    camera
 }
 
-fn __cam_compute_vectors(f64: yaw, f64: pitch, any: out): any {
+fn __cam_compute_vectors(f64 yaw, f64 pitch, any out) any {
    def y, p = float(yaw), float(pitch)
    def cp = cos(p)
    def fx = sin(y) * cp
@@ -4079,99 +4239,36 @@ fn __cam_compute_vectors(f64: yaw, f64: pitch, any: out): any {
    out
 }
 
-fn camera_set_look_at(any: camera, list: target): any {
+fn camera_set_look_at(any camera, list target) any {
    "Explicitly sets the camera's look-at target."
    camera[1] = target
    camera
 }
 
-fn set_model_matrix(any: mat): bool {
+fn set_model_matrix(any mat) bool {
    "Sets the transformation matrix for subsequent 3D draw calls."
    if(!_mat4_valid(_scratch_model_set)){
-      _scratch_model_set = render_matrix.mat4_identity()
+      _scratch_model_set = mat4_identity()
    }
    def off = _mat4_data_off(mat)
    if(off >= 0){
       mut i = 0
       while(i < 16){ _scratch_model_set[2 + i] = mat.get(off + i, 0.0) i += 1 }
    } elif(!_mat4_valid(_scratch_ident)){
-      render_matrix.mat4_identity_into(_scratch_model_set)
+      mat4_identity_into(_scratch_model_set)
    }
    _model_matrix = (off >= 0 || !_mat4_valid(_scratch_ident)) ? _scratch_model_set : _scratch_ident
    if(_backend == BACKEND_VK){ lib_vkr.set_model_matrix(_model_matrix) }
    true
 }
 
-fn collision_rect_rect(f64: x1, f64: y1, f64: w1, f64: h1, f64: x2, f64: y2, f64: w2, f64: h2): bool {
-   "Checks for intersection between two axis-aligned rectangles."
-   if(x1 + w1 < x2){ return false }
-   if(x1 > x2 + w2){ return false }
-   if(y1 + h1 < y2){ return false }
-   if(y1 > y2 + h2){ return false }
-   return true
-}
-
-fn collision_rect_circle(f64: rx, f64: ry, f64: rw, f64: rh, f64: cx, f64: cy, f64: cr): bool {
-   "Checks for intersection between a rectangle and a circle."
-   mut tx, ty = cx, cy
-   if(cx < rx){ tx = rx } elif(cx > rx + rw){ tx = rx + rw }
-   if(cy < ry){ ty = ry } elif(cy > ry + rh){ ty = ry + rh }
-   def dx, dy = cx - tx, cy - ty
-   return(dx * dx + dy * dy) <= (cr * cr)
-}
-
-fn collision_circle_circle(f64: x1, f64: y1, f64: r1, f64: x2, f64: y2, f64: r2): bool {
-   "Checks for intersection between two circles."
-   def dx, dy = x1 - x2, y1 - y2
-   def dsum = r1 + r2
-   return(dx * dx + dy * dy) <= (dsum * dsum)
-}
-
-mut _seed = 0
-
-fn random_seed(int: seed): bool {
-   "Sets the seed for the internal pseudo-random number generator."
-   _seed = int(seed)
-   true
-}
-
-fn random_value(int: min, int: max): int {
-   "Returns a random integer within the specified range [min, max]."
-   _seed = (_seed * 1103515245 + 12345) & 0x7FFFFFFF
-   min + (_seed % (max - min + 1))
-}
-
-fn open_url(str: url): bool {
-   "Opens the given URL in the default system browser."
-   #linux {
-      std_os.shell("xdg-open '" + url + "' > /dev/null 2>&1", false, false)
-   }
-   #elif macos {
-      std_os.shell("open '" + url + "'", false, false)
-   }
-   #elif windows {
-      std_os.shell("start " + url, false, false)
-   }
-   #endif
-   true
-}
-
-fn easing(f64: t, str: type): f64 {
-   "Calculates an easing value for normalized time t."
-   if(eq(type, "SineIn")){ return 1.0 - cos(t * PI / 2.0) }
-   if(eq(type, "SineOut")){ return sin(t * PI / 2.0) }
-   if(eq(type, "CubicIn")){ return t * t * t }
-   if(eq(type, "CubicOut")){ def p = t - 1.0 return p * p * p + 1.0 }
-   t ; Linear fallback
-}
-
-fn log(any: msg): bool {
+fn log(any msg) bool {
    "Prints a formatted GFX log message."
    ui_profile.print_text("[GFX] " + str(msg))
    true
 }
 
-fn _snapshot_fill_alpha(any: data, int: w, int: h): bool {
+fn _snapshot_fill_alpha(any data, int w, int h) bool {
    if(!data || w <= 0 || h <= 0){ return false }
    mut ai = 3
    def aend = w * h * 4
@@ -4182,7 +4279,7 @@ fn _snapshot_fill_alpha(any: data, int: w, int: h): bool {
    true
 }
 
-fn snapshot(str: filename): bool {
+fn snapshot(str filename) bool {
    "Saves the current framebuffer to an image file. Supports TGA, PNG, BMP formats based on extension."
    if(_backend == BACKEND_MOCK && _cpu_buf != 0 && _cpu_w > 0 && _cpu_h > 0){
       _snapshot_fill_alpha(_cpu_buf, _cpu_w, _cpu_h)
@@ -4204,25 +4301,25 @@ fn snapshot(str: filename): bool {
    false
 }
 
-fn request_frame_capture(): bool {
+fn request_frame_capture() bool {
    "Requests that the next Vulkan end_frame embed a framebuffer readback for snapshot()."
    if(_backend == BACKEND_VK){ lib_vkr.request_frame_capture() return true }
    false
 }
 
-fn set_backend_type(int: type): bool {
+fn set_backend_type(int type) bool {
    "Configures the preferred graphics backend(must be called before init)."
    def t = int(type)
    if(t == BACKEND_MOCK){ _backend_pref = BACKEND_MOCK } elif(t == BACKEND_VK || t == BACKEND_AUTO){ _backend_pref = BACKEND_VK } else { _backend_pref = BACKEND_VK }
    true
 }
 
-fn get_backend_type(): int {
+fn get_backend_type() int {
    "Returns the requested backend type."
    _backend_pref
 }
 
-fn scissor_push(f64: x, f64: y, f64: w, f64: h): bool {
+fn scissor_push(f64 x, f64 y, f64 w, f64 h) bool {
    "Enables scissor testing for the specified rectangular area."
    _ensure_scissor_stack()
    mut rx, ry = float(x), float(y)
@@ -4258,12 +4355,11 @@ fn scissor_push(f64: x, f64: y, f64: w, f64: h): bool {
    _scissor_stack = _scissor_stack.append(rect)
    if(_backend == BACKEND_VK){ lib_vkr.set_scissor_rect(int(rx), int(ry), int(rw), int(rh)) }
    elif(_backend == BACKEND_GL){
-      ; gl.scissor(x, _active_win_h - y - h, w, h)
    }
    true
 }
 
-fn scissor_pop(): bool {
+fn scissor_pop() bool {
    "Disables scissor testing."
    _ensure_scissor_stack()
    if(_scissor_stack.len > 0){ _scissor_stack = slice(_scissor_stack, 0, _scissor_stack.len - 1) }
@@ -4275,7 +4371,6 @@ fn scissor_pop(): bool {
          lib_vkr.reset_scissor_rect()
       }
    } elif(_backend == BACKEND_GL){
-      ; gl.disable(GL_SCISSOR_TEST)
    }
    true
 }
@@ -4294,37 +4389,36 @@ mut _texture_cache_writer_stop = false
 mut _tex_cache_enabled = -1
 mut _tex_disable_write_cache = -1
 
-fn _ensure_texture_caches(): any {
+fn _ensure_texture_caches() any {
    if(!is_dict(_texture_cache)){ _texture_cache = dict(8) }
    if(!is_dict(_texture_disk_path_cache)){ _texture_disk_path_cache = dict(64) }
    if(!is_dict(_texture_source_sig_cache)){ _texture_source_sig_cache = dict(256) }
    if(!is_list(_texture_cache_writer_jobs)){ _texture_cache_writer_jobs = [] }
 }
 
-fn _tex_cache_init(): bool {
+fn _tex_cache_init() bool {
    _ensure_texture_caches()
    if(_tex_cache_enabled >= 0){ return false }
    _tex_cache_enabled = ui_profile.env_toggle_cached("NY_TEX_CACHE", true) ? 1 : 0
    true
 }
 
-fn _texture_disable_disk_cache_writes(): bool {
+fn _texture_disable_disk_cache_writes() bool {
    if(_tex_disable_write_cache != -1){ return _tex_disable_write_cache == 1 }
    if(ui_profile.env_truthy_cached("NY_TEX_DISABLE_WRITE")){
       _tex_disable_write_cache = 1
       return true
    }
-   def batch_list = ui_profile.env_trim_cached("NY_UI_BATCH_DUMP_LIST")
-   _tex_disable_write_cache = batch_list.len > 0 ? 1 : 0
+   _tex_disable_write_cache = 0
    _tex_disable_write_cache == 1
 }
 
-fn _texture_async_disk_cache_writes(): bool {
+fn _texture_async_disk_cache_writes() bool {
    ui_profile.env_truthy_cached("NY_TEX_ASYNC_WRITE") ||
    ui_profile.env_truthy_cached("NY_TEX_ASYNC_WRITES")
 }
 
-fn _texture_source_sig(any: path): str {
+fn _texture_source_sig(any path) str {
    _ensure_texture_caches()
    if(!is_str(path) || path.len == 0 || lib_str.startswith(path, "data:")){ return "" }
    def norm = lib_path.normalize(path)
@@ -4364,7 +4458,7 @@ fn _texture_source_sig(any: path): str {
             return ""
          }
          def prefix = init_str(buf, rn)
-         def sig = to_hex(lib_hash.xxh32("src0|" + to_str(rn) + "|" + prefix)) + "_" + to_hex(lib_hash.xxh32("src1|" + norm + "|" + prefix))
+         def sig = lib_str.to_hex(lib_hash.xxh32("src0|" + to_str(rn) + "|" + prefix)) + "_" + lib_str.to_hex(lib_hash.xxh32("src1|" + norm + "|" + prefix))
          _texture_source_sig_cache = cache.cache_put_reset(_texture_source_sig_cache,
             norm,
             sig,
@@ -4383,7 +4477,7 @@ fn _texture_source_sig(any: path): str {
    }
 }
 
-fn _texture_cache_key_for(any: path, any: format, bool: use_mipmaps=false, int: filter=-1, int: wrap_s=10497, int: wrap_t=10497): str {
+fn _texture_cache_key_for(any path, any format, bool use_mipmaps=false, int filter=-1, int wrap_s=10497, int wrap_t=10497) str {
    def norm = (is_str(path) && path.len > 0 && !lib_str.startswith(path, "data:")) ? lib_path.normalize(path) : to_str(path)
    mut key = norm + ":" + to_str(format) + ":" + to_str(use_mipmaps ? 1 : 0) + ":" + to_str(int(filter)) + ":" + to_str(int(wrap_s)) + ":" + to_str(int(wrap_t))
    def sig = _texture_source_sig(norm)
@@ -4391,32 +4485,32 @@ fn _texture_cache_key_for(any: path, any: format, bool: use_mipmaps=false, int: 
    key
 }
 
-fn _texture_disk_cache_path_for(any: path, any: format, bool: use_mipmaps=false, int: filter=-1, int: wrap_s=10497, int: wrap_t=10497): str {
+fn _texture_disk_cache_path_for(any path, any format, bool use_mipmaps=false, int filter=-1, int wrap_s=10497, int wrap_t=10497) str {
    _ensure_texture_caches()
    if(!is_str(path) || path.len == 0 || lib_str.startswith(path, "data:")){ return "" }
    def key = _texture_cache_key_for(path, format, use_mipmaps, filter, wrap_s, wrap_t)
    if(_texture_disk_path_cache.contains(key)){ return to_str(_texture_disk_path_cache.get(key, "")) }
-   def h0, h1 = to_hex(lib_hash.xxh32("tex|" + key)), to_hex(lib_hash.xxh32("ntex|" + key))
+   def h0, h1 = lib_str.to_hex(lib_hash.xxh32("tex|" + key)), lib_str.to_hex(lib_hash.xxh32("ntex|" + key))
    def out = lib_path.join(cache_dir(), "ny_tex_" + _TEXTURE_CACHE_ABI + "_" + h0 + "_" + h1 + ".ntex")
    _texture_disk_path_cache = cache.cache_put_reset(_texture_disk_path_cache, key, out, _TEXTURE_CACHE_PATH_LIMIT, 64)
    out
 }
 
-fn _texture_cache_writer_mutex(): any {
+fn _texture_cache_writer_mutex() any {
    if(!_texture_cache_writer_mu){ _texture_cache_writer_mu = mutex_new() }
    _texture_cache_writer_mu
 }
 
-fn _texture_decode_mutex(): any {
+fn _texture_decode_mutex() any {
    if(!_texture_decode_mu){ _texture_decode_mu = mutex_new() }
    _texture_decode_mu
 }
 
-fn _texture_decode_serial_enabled(): bool {
+fn _texture_decode_serial_enabled() bool {
    ui_profile.env_truthy_cached("NY_IMAGE_SERIAL")
 }
 
-fn _texture_load_image_native(any: path): any {
+fn _texture_load_image_native(any path) any {
    "Decode a texture source through the repo image loaders.
    This replaces the old implicit native hook so non-predecoded one-texture
    glTF materials do not fall through to a missing dynamic symbol."
@@ -4438,7 +4532,7 @@ fn _texture_load_image_native(any: path): any {
    lib_img.load(path)
 }
 
-fn _texture_load_image_locked(any: path): any {
+fn _texture_load_image_locked(any path) any {
    if(!_texture_decode_serial_enabled()){ return _texture_load_image_native(path) }
    def mu = _texture_decode_mutex()
    if(mu){ mutex_lock(mu) }
@@ -4447,7 +4541,7 @@ fn _texture_load_image_locked(any: path): any {
    img
 }
 
-fn _texture_cache_write_job(any: path, int: w, int: h, int: format, bool: use_mipmaps, any: pixels_ptr): bool {
+fn _texture_cache_write_job(any path, int w, int h, int format, bool use_mipmaps, any pixels_ptr) bool {
    if(!path || path == "" || !pixels_ptr || w <= 0 || h <= 0){
       if(pixels_ptr){ free(pixels_ptr) }
       return false
@@ -4464,8 +4558,8 @@ fn _texture_cache_write_job(any: path, int: w, int: h, int: format, bool: use_mi
          tw, th = max(1, tw >> 1), max(1, th >> 1)
          levels += 1
       }
-      def payload_bytes = img_ops.rgba_mip_total_bytes(w, h)
-      def mip_pixels = img_ops.generate_rgba_mips(pixels_ptr, w, h, true)
+      def payload_bytes = vk_texture.rgba_mip_total_bytes(w, h)
+      def mip_pixels = vk_texture.generate_rgba_mips(pixels_ptr, w, h, true)
       free(pixels_ptr)
       if(!mip_pixels){ return false }
       def ok = _texture_cache_write_ntex(path, w, h, format, levels, mip_pixels, payload_bytes)
@@ -4477,7 +4571,7 @@ fn _texture_cache_write_job(any: path, int: w, int: h, int: format, bool: use_mi
    ok
 }
 
-fn _texture_cache_writer_loop(): int {
+fn _texture_cache_writer_loop() int {
    _ensure_texture_caches()
    while(true){
       mut job = 0
@@ -4505,18 +4599,18 @@ fn _texture_cache_writer_loop(): int {
    0
 }
 
-fn _texture_cache_writer_ensure(): any {
+fn _texture_cache_writer_ensure() any {
    if(_texture_disable_disk_cache_writes()){ return 0 }
    if(!_texture_async_disk_cache_writes()){ return 0 }
    if(_texture_cache_writer_thread){ return _texture_cache_writer_thread }
    _texture_cache_writer_stop = false
-   _texture_cache_writer_thread = thread_spawn(fn(){
+   _texture_cache_writer_thread = thread_spawn(fn() {
          _texture_cache_writer_loop()
    })
    _texture_cache_writer_thread
 }
 
-fn _texture_cache_enqueue_write(any: path, int: w, int: h, int: format, bool: use_mipmaps, any: pixels): bool {
+fn _texture_cache_enqueue_write(any path, int w, int h, int format, bool use_mipmaps, any pixels) bool {
    _ensure_texture_caches()
    if(!path || path == "" || !pixels || w <= 0 || h <= 0){ return false }
    if(_texture_disable_disk_cache_writes()){ return false }
@@ -4535,7 +4629,7 @@ fn _texture_cache_enqueue_write(any: path, int: w, int: h, int: format, bool: us
    true
 }
 
-fn _texture_cache_writer_flush(): bool {
+fn _texture_cache_writer_flush() bool {
    if(!_texture_cache_writer_thread){ return false }
    _texture_cache_writer_stop = true
    thread_join(_texture_cache_writer_thread)
@@ -4545,21 +4639,21 @@ fn _texture_cache_writer_flush(): bool {
 }
 
 fn _texture_cache_write_ntex(
-   str: path,
-   int: w,
-   int: h,
-   int: format,
-   int: mip_levels,
-   ptr: pixels,
-   int: payload_bytes
-) : bool {
+   str path,
+   int w,
+   int h,
+   int format,
+   int mip_levels,
+   ptr pixels,
+   int payload_bytes
+)  bool {
    if(!path || path == "" || !pixels || payload_bytes <= 0){ return false }
    mut blob = bytes(32 + payload_bytes)
    if(!blob){ return false }
-   store8(blob, 78, 0) ;; N
-   store8(blob, 84, 1) ;; T
-   store8(blob, 69, 2) ;; E
-   store8(blob, 88, 3) ;; X
+   store8(blob, 78, 0)
+   store8(blob, 84, 1)
+   store8(blob, 69, 2)
+   store8(blob, 88, 3)
    store32(blob, 1, 4)
    store32(blob, int(w), 8)
    store32(blob, int(h), 12)
@@ -4568,24 +4662,24 @@ fn _texture_cache_write_ntex(
    store32(blob, int(payload_bytes), 24)
    store32(blob, 0, 28)
    memcpy(blob + 32, pixels, payload_bytes)
-   match std_os.file_write(path, blob){ ok(ignoredok) -> { ignoredok  true } err(ignorederr) -> { ignorederr  false } }
+   match file_write(path, blob){ ok(ignoredok) -> { ignoredok  true } err(ignorederr) -> { ignorederr  false } }
 }
 
 fn _texture_cache_try_upload_ntex(
-   str: cache_path,
-   int: format,
-   int: filter,
-   int: wrap_s,
-   int: wrap_t,
-   str: cache_key,
-   bool: use_cache,
-   bool: trace_on=false,
-   bool: deep_on=false,
-   int: t0=0
-) : int {
+   str cache_path,
+   int format,
+   int filter,
+   int wrap_s,
+   int wrap_t,
+   str cache_key,
+   bool use_cache,
+   bool trace_on=false,
+   bool deep_on=false,
+   int t0=0
+)  int {
    if(!_texture_gpu_ready()){ return -2 }
    if(!cache_path || cache_path == "" || !file_exists(cache_path)){ return -2 }
-   def rd = std_os.file_read(cache_path)
+   def rd = file_read(cache_path)
    if(!is_ok(rd)){ return -2 }
    def data = unwrap(rd)
    if(!data || data.len < 32){ return -2 }
@@ -4609,24 +4703,24 @@ fn _texture_cache_try_upload_ntex(
    return tex_id
 }
 
-fn _texture_trace_enabled(): bool {
+fn _texture_trace_enabled() bool {
    ui_profile.env_truthy_cached("NY_TEX_TRACE")
 }
 
-fn _texture_deep_trace_enabled(): bool {
+fn _texture_deep_trace_enabled() bool {
    ui_profile.debug_deep_enabled()
 }
 
-fn _texture_skip_enabled(): bool {
+fn _texture_skip_enabled() bool {
    ui_profile.env_truthy_cached("NY_TEX_SKIP")
 }
 
-fn _texture_stable_upload_id(any: candidate): int {
+fn _texture_stable_upload_id(any candidate) int {
    mut tex_id = int(candidate)
    if(tex_id >= 0 && tex_id < MAX_TEXTURES){ return tex_id }
    if(tex_id < 0){ return -1 }
-   def stable_tex_id = int(vk_texture.last_created_texture_id())
-   def tex_count = int(vk_texture.texture_count())
+   def stable_tex_id = int(lib_vkr.last_created_texture_id())
+   def tex_count = int(lib_vkr.texture_count())
    mut latest_tex_id = -1
    if(tex_count > 0){ latest_tex_id = tex_count - 1 }
    mut out = tex_id
@@ -4635,7 +4729,7 @@ fn _texture_stable_upload_id(any: candidate): int {
    return out
 }
 
-fn _texture_cached_id_valid(int: tex_id): bool {
+fn _texture_cached_id_valid(int tex_id) bool {
    "Reject the default 1x1 white fallback, but allow slot 0 if a backend legitimately reused it for a real upload."
    if(tex_id < 0 || tex_id >= MAX_TEXTURES){ return false }
    if(tex_id == 0){
@@ -4646,7 +4740,7 @@ fn _texture_cached_id_valid(int: tex_id): bool {
    return true
 }
 
-fn _texture_uploaded_id_matches(int: tex_id, int: w, int: h): bool {
+fn _texture_uploaded_id_matches(int tex_id, int w, int h) bool {
    if(tex_id < 0 || tex_id >= MAX_TEXTURES){ return false }
    if(w <= 0 || h <= 0){ return _texture_cached_id_valid(tex_id) }
    def sz = lib_vkr.texture_size(tex_id)
@@ -4658,12 +4752,12 @@ fn _texture_uploaded_id_matches(int: tex_id, int: w, int: h): bool {
    return tex_id >= 0
 }
 
-fn _texture_recover_upload_id(any: candidate, int: w, int: h): int {
+fn _texture_recover_upload_id(any candidate, int w, int h) int {
    mut tex_id = _texture_stable_upload_id(candidate)
    if(_texture_uploaded_id_matches(tex_id, w, h)){ return tex_id }
-   def stable_tex_id = int(vk_texture.last_created_texture_id())
+   def stable_tex_id = int(lib_vkr.last_created_texture_id())
    if(_texture_uploaded_id_matches(stable_tex_id, w, h)){ return stable_tex_id }
-   def tex_count = int(vk_texture.texture_count())
+   def tex_count = int(lib_vkr.texture_count())
    if(tex_count > 0){
       def latest_tex_id = tex_count - 1
       if(_texture_uploaded_id_matches(latest_tex_id, w, h)){ return latest_tex_id }
@@ -4671,7 +4765,7 @@ fn _texture_recover_upload_id(any: candidate, int: w, int: h): int {
    return tex_id
 }
 
-fn _texture_load_gltf_attempt(str: path, int: format, bool: use_mips, bool: allow_disk_cache, int: filter, int: wrap_s, int: wrap_t): int {
+fn _texture_load_gltf_attempt(str path, int format, bool use_mips, bool allow_disk_cache, int filter, int wrap_s, int wrap_t) int {
    mut tex_id = texture_load_ex(path, format, use_mips, allow_disk_cache, filter, wrap_s, wrap_t, use_mips)
    if(_texture_cached_id_valid(tex_id)){ return tex_id }
    if(!use_mips){
@@ -4685,46 +4779,46 @@ fn _texture_load_gltf_attempt(str: path, int: format, bool: use_mips, bool: allo
 }
 
 fn _texture_live_cache_key(
-   str: path,
-   int: format,
-   bool: use_mipmaps,
-   int: filter,
-   int: wrap_s,
-   int: wrap_t,
-   str: cache_key=""
-) : str {
+   str path,
+   int format,
+   bool use_mipmaps,
+   int filter,
+   int wrap_s,
+   int wrap_t,
+   str cache_key=""
+)  str {
    def key = to_str(cache_key)
    key == "" ? _texture_cache_key_for(path, format, use_mipmaps, filter, wrap_s, wrap_t) : key
 }
 
 fn _texture_disk_cache_path_maybe(
-   str: path,
-   int: format,
-   bool: use_mipmaps,
-   int: filter,
-   int: wrap_s,
-   int: wrap_t,
-   bool: allow_disk_cache=true
-) : str {
+   str path,
+   int format,
+   bool use_mipmaps,
+   int filter,
+   int wrap_s,
+   int wrap_t,
+   bool allow_disk_cache=true
+)  str {
    if(!allow_disk_cache || !is_str(path) || path.len == 0 || lib_str.startswith(path, "data:")){ return "" }
    _texture_disk_cache_path_for(path, format, use_mipmaps, filter, wrap_s, wrap_t)
 }
 
-fn texture_load(str: path): int {
+fn texture_load(str path) int {
    "Loads an image file as RGBA8_UNORM. Use texture_load_ex for explicit control."
-   return texture_load_ex(path, 37) ; 37 = RGBA8_UNORM
+   return texture_load_ex(path, 37)
 }
 
-fn _texture_gpu_ready(): bool{ _backend == BACKEND_VK && lib_vkr._get_device() != 0 }
+fn _texture_gpu_ready() bool { _backend == BACKEND_VK && lib_vkr._get_device() != 0 }
 
 fn texture_try_load_cached_ex(
-   str: path,
-   int: format=37,
-   bool: use_mipmaps=false,
-   int: filter=-1,
-   int: wrap_s=10497,
-   int: wrap_t=10497
-) : int {
+   str path,
+   int format=37,
+   bool use_mipmaps=false,
+   int filter=-1,
+   int wrap_s=10497,
+   int wrap_t=10497
+)  int {
    "Returns a texture id from memory/disk cache without decoding the source image; returns -2 on cache miss."
    _ensure_texture_caches()
    if(!is_str(path) || path.len == 0 || lib_str.startswith(path, "data:")){ return -2 }
@@ -4756,15 +4850,15 @@ fn texture_try_load_cached_ex(
 }
 
 fn texture_load_ex(
-   str: path,
-   int: format=37,
-   bool: use_mipmaps=false,
-   bool: allow_disk_cache=true,
-   int: filter=-1,
-   int: wrap_s=10497,
-   int: wrap_t=10497,
-   bool: use_live_cache=true
-) : int {
+   str path,
+   int format=37,
+   bool use_mipmaps=false,
+   bool allow_disk_cache=true,
+   int filter=-1,
+   int wrap_s=10497,
+   int wrap_t=10497,
+   bool use_live_cache=true
+)  int {
    "Loads an image file with explicit format(e.g. 37=UNORM, 43=SRGB) and mipmap option."
    _ensure_texture_caches()
    if(!_texture_gpu_ready()){ return -1 }
@@ -4841,17 +4935,17 @@ fn texture_load_ex(
 }
 
 fn texture_upload_image_ex(
-   dict: img,
-   str: path,
-   int: format=37,
-   bool: use_mipmaps=false,
-   bool: allow_disk_cache=true,
-   int: filter=-1,
-   int: wrap_s=10497,
-   int: wrap_t=10497,
-   str: cache_key="",
-   bool: take_ownership=true
-) : int {
+   dict img,
+   str path,
+   int format=37,
+   bool use_mipmaps=false,
+   bool allow_disk_cache=true,
+   int filter=-1,
+   int wrap_s=10497,
+   int wrap_t=10497,
+   str cache_key="",
+   bool take_ownership=true
+)  int {
    "Uploads a decoded image dict directly to a GPU texture, reusing the normal cache/upload path."
    _ensure_texture_caches()
    if(!img || !is_dict(img)){ return -1 }
@@ -4908,21 +5002,21 @@ fn texture_upload_image_ex(
    take_ownership)
 }
 
-fn _texture_temp_alloc(any: img, bool: free_img, int: bytes): ptr {
+fn _texture_temp_alloc(any img, bool free_img, int bytes) ptr {
    def ptr = malloc(bytes)
    if(!ptr && free_img){ lib_img.free(img) }
    ptr
 }
 
 fn _texture_prepare_upload_pixels(
-   dict: img,
-   ?ptr: pixels,
-   int: w,
-   int: h,
-   int: channels,
-   int: format,
-   bool: free_img
-): list {
+   dict img,
+   ?ptr pixels,
+   int w,
+   int h,
+   int channels,
+   int format,
+   bool free_img
+) list {
    "Returns [upload_pixels, temp_pixels, channels] with on-demand format conversion."
    mut upload_pixels = pixels
    mut temp_pixels = 0
@@ -4980,11 +5074,11 @@ fn _texture_prepare_upload_pixels(
    return [upload_pixels, temp_pixels, channels]
 }
 
-fn _texture_cache_src(bool: loaded_from_disk_cache, str: cache_label=""): str {
+fn _texture_cache_src(bool loaded_from_disk_cache, str cache_label="") str {
    cache_label.len > 0 ? cache_label : (loaded_from_disk_cache ? "disk" : "src")
 }
 
-fn _texture_trace_upload_result(str: path, str: cache_src, bool: trace_on, bool: deep_on, int: tex_id, int: w, int: h, int: format, int: filter, int: channels, f64: decode_ms, f64: convert_ms, f64: upload_ms, int: t0): int {
+fn _texture_trace_upload_result(str path, str cache_src, bool trace_on, bool deep_on, int tex_id, int w, int h, int format, int filter, int channels, f64 decode_ms, f64 convert_ms, f64 upload_ms, int t0) int {
    if(!_texture_uploaded_id_matches(tex_id, w, h)){
       if(trace_on || deep_on){
          ui_profile.print_text(
@@ -5024,14 +5118,14 @@ fn _texture_trace_upload_result(str: path, str: cache_src, bool: trace_on, bool:
 }
 
 fn _texture_upload_image_ex(
-   dict: img, str: path, int: format=37,
-   bool: use_mipmaps=false, bool: allow_disk_cache=true, int: filter=-1,
-   int: wrap_s=10497, int: wrap_t=10497,
-   str: cache_key="", str: disk_cache_path="",
-   bool: use_cache=true, bool: loaded_from_disk_cache=false,
-   f64: decode_ms=0.0, bool: trace_on=false, bool: deep_on=false,
-   int: t0=0, bool: free_img=true
-): int {
+   dict img, str path, int format=37,
+   bool use_mipmaps=false, bool allow_disk_cache=true, int filter=-1,
+   int wrap_s=10497, int wrap_t=10497,
+   str cache_key="", str disk_cache_path="",
+   bool use_cache=true, bool loaded_from_disk_cache=false,
+   f64 decode_ms=0.0, bool trace_on=false, bool deep_on=false,
+   int t0=0, bool free_img=true
+) int {
    "Uploads a decoded image dict to a GPU texture, handling format conversion and cache bookkeeping."
    _ensure_texture_caches()
    if(!img || !is_dict(img)){ return -1 }
@@ -5106,22 +5200,18 @@ fn _texture_upload_image_ex(
    return tex_id
 }
 
-fn texture_load_gltf(str: uri, str: base_path="", str: usage="color", int: filter=-1, any: sampler_info=0): int {
+fn texture_load_gltf(str uri, str base_path="", str usage="color", int filter=-1, any sampler_info=0) int {
    "Loads a glTF texture URI, choosing sRGB(43) for 'color'/'emissive' and UNORM(37) for others."
    _ensure_texture_caches()
    if(ui_profile.env_present_cached("NY_RENDER_DEBUG")){ ui_profile.print_text("[render] loading texture: " + to_str(uri)) }
    if(!is_str(uri) || uri.len == 0){ return -1 }
    def is_color = (usage == "color" || usage == "emissive")
    def allow_disk_cache = usage != "emissive"
-   def format = is_color ? 43 : 37 ; 43 = SRGB, 37 = UNORM
-   def batch_dumping = ui_profile.env_present_cached("NY_UI_BATCH_DUMP_LIST") || ui_profile.env_present_cached("NY_UI_BATCH_DUMP_FILE") || ui_profile.env_truthy_cached("NY_UI_BATCH_DUMP_ALL")
+   def format = is_color ? 43 : 37
    def sampler_uses_mips = is_dict(sampler_info) && bool(sampler_info.get("min_uses_mips", false))
-   if(batch_dumping && !ui_profile.env_present_cached("NY_TEX_MIPS")&& !ui_profile.env_truthy_cached("NY_UI_BATCH_KEEP_MIPS") && !sampler_uses_mips){ _tex_mips_cache = 0 }
    if(_tex_mips_cache < 0){
       if(ui_profile.env_present_cached("NY_TEX_MIPS")){
          _tex_mips_cache = ui_profile.env_toggle_cached("NY_TEX_MIPS", true) ? 1 : 0
-      } elif(batch_dumping && !ui_profile.env_truthy_cached("NY_UI_BATCH_KEEP_MIPS") && !sampler_uses_mips){
-         _tex_mips_cache = 0
       } else {
          _tex_mips_cache = ui_profile.env_toggle_cached("NY_TEX_MIPS", false) ? 1 : 0
       }
@@ -5156,7 +5246,7 @@ fn texture_load_gltf(str: uri, str: base_path="", str: usage="color", int: filte
    return -1
 }
 
-fn texture_destroy(int: tex): bool {
+fn texture_destroy(int tex) bool {
    "Releases a texture and its GPU memory."
    _ensure_texture_caches()
    if(!is_int(tex) || tex <= 0){ return false }
@@ -5172,19 +5262,26 @@ fn texture_destroy(int: tex): bool {
    true
 }
 
-fn create_cubemap(int: face_size, list: face_pixels_list): any {
+fn create_cubemap(int face_size, list face_pixels_list) any {
    "Creates a cubemap texture from 6 RGBA8 face buffers."
    lib_vkr.create_cubemap(face_size, face_pixels_list)
 }
 
-fn texture_bind(int: tex, int: slot=0): bool {
+fn texture_bind(int tex, int slot=0) bool {
    "Binds a texture to the specified shader sampler slot."
    if(_backend != BACKEND_VK || !is_int(tex) || tex <= 0){ return false }
    lib_vkr.bind_texture(tex)
    true
 }
 
-fn draw_texture(int: tex, f64: x, f64: y, f64: scale=1.0, any: color=WHITE): bool {
+fn texture_size(int tex) list {
+   "Returns [width, height] for a live texture id, or [0, 0] if unavailable."
+   if(_backend != BACKEND_VK || !is_int(tex) || tex <= 0){ return [0, 0] }
+   def sz = lib_vkr.texture_size(tex)
+   is_list(sz) ? sz : [0, 0]
+}
+
+fn draw_texture(int tex, f64 x, f64 y, f64 scale=1.0, any color=WHITE) bool {
    "Draws a texture at the given position with optional scale."
    if(_backend != BACKEND_VK || !is_int(tex) || tex <= 0){ return false }
    def sz = lib_vkr.texture_size(tex)
@@ -5197,7 +5294,7 @@ fn draw_texture(int: tex, f64: x, f64: y, f64: scale=1.0, any: color=WHITE): boo
    true
 }
 
-fn font_load(str: path, int: size, any: filter=FONT_FILTER_DEFAULT): int {
+fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT) int {
    "Loads a TrueType font at the specified pixel size and optional texture filter."
    def id = _font_load_impl(path, size, int(filter))
    if(id){ _default_font_fail_sizes = _default_font_fail_sizes.delete(max(4, size)) }
@@ -5205,7 +5302,7 @@ fn font_load(str: path, int: size, any: filter=FONT_FILTER_DEFAULT): int {
    id
 }
 
-fn font_load_first(list: paths, int: size, any: filter=FONT_FILTER_DEFAULT): int {
+fn font_load_first(list paths, int size, any filter=FONT_FILTER_DEFAULT) int {
    "Loads the first available font from `paths`, resolving repo-relative paths when needed."
    if(!is_list(paths) || paths.len == 0){ return 0 }
    mut i = 0
@@ -5224,7 +5321,7 @@ fn font_load_first(list: paths, int: size, any: filter=FONT_FILTER_DEFAULT): int
    0
 }
 
-fn font_allow_color_fallback(int: font, bool: enabled=true): bool {
+fn font_allow_color_fallback(int font, bool enabled=true) bool {
    "Enables or disables color-emoji fallback for a loaded font."
    def font_id = _resolve_text_font(font)
    mut f = _font_get(font_id)
@@ -5234,30 +5331,15 @@ fn font_allow_color_fallback(int: font, bool: enabled=true): bool {
    true
 }
 
-fn font_destroy(int: font): bool {
+fn font_destroy(int font) bool {
    "Unloads a font and releases its memory and glyph caches."
    if(!is_int(font) || font <= 0){ return false }
    def font_obj = _font_get(font)
    if(font_obj){
-      def glyphs = font_obj.get("glyphs", 0)
-      if(glyphs && is_dict(glyphs)){
-         def items = dict_items(glyphs)
-         mut i = 0
-         def items_n = items.len
-         while(i < items_n){
-            def kv = items[i]
-            def glyph = kv.get(1, 0)
-            if(glyph && is_dict(glyph)){
-               def bm = glyph.get("bitmap", 0)
-               if(bm && is_dict(bm)){
-                  def bdata = bm.get("data", 0)
-                  if(bdata){ free(bdata) }
-               }
-            }
-            i += 1
-         }
-      }
+      _font_destroy_glyph_bitmaps(font, font_obj)
+      _font_free_fast_glyphs(font_obj)
       _font_apply_atlas_chain(font_obj, false, true)
+      if(font_obj.get("data", 0) && is_dict(font_obj.get("info", 0))){ lib_ttf.unload(font_obj.get("info", 0)) }
    }
    _fonts = _fonts.delete(font)
    _font_dirty = _font_dirty.delete(font)
@@ -5270,12 +5352,12 @@ fn font_destroy(int: font): bool {
 }
 
 @jit
-fn draw_text(int: font, any: text, f64: x, f64: y, any: color=WHITE): bool {
+fn draw_text(int font, any text, f64 x, f64 y, any color=WHITE) bool {
    "Draws text at the given screen coordinates. Automatically uses the fastest path."
    _draw_text_impl(font, text, x, y, color)
 }
 
-fn measure_text(int: font, any: text): list {
+fn measure_text(int font, any text) list {
    "Returns [width, height] of the string `text` when rendered with `font`."
    if(!is_str(text)){ text = to_str(text) }
    def font_id = _resolve_text_font(font)
@@ -5333,13 +5415,13 @@ fn measure_text(int: font, any: text): list {
 
 mut _mt_cache = dict(256)
 
-fn _ensure_mt_cache(): dict {
+fn _ensure_mt_cache() dict {
    if(!is_dict(_mt_cache)){ _mt_cache = dict(256) }
    _mt_cache
 }
 
 @jit
-fn measure_text_fast(int: font, any: text): list {
+fn measure_text_fast(int font, any text) list {
    "Cached version of measure_text for repeated short strings."
    if(!is_str(text)){ return measure_text(font, text) }
    if(text.len > 256){ return measure_text(font, text) }
@@ -5352,23 +5434,23 @@ fn measure_text_fast(int: font, any: text): list {
    sz
 }
 
-fn _font_metric_line_height(dict: f): f64 {
+fn _font_metric_line_height(dict f) f64 {
    def size = _dict_num(f, "size", 16.0)
    mut h = _dict_num(f, "line_height", size)
    if(h <= 0.0){ h = size }
    h
 }
 
-fn _font_metric_source(int: font): any { _font_get(font) }
+fn _font_metric_source(int font) any { _font_get(font) }
 
-fn font_line_height(int: font): f64 {
+fn font_line_height(int font) f64 {
    "Returns the configured line height for a font."
    def f = _font_metric_source(font)
    if(!f){ return 0.0 }
    _font_metric_line_height(f)
 }
 
-fn font_ascent(int: font): f64 {
+fn font_ascent(int font) f64 {
    "Returns the configured ascent for a font."
    def f = _font_metric_source(font)
    if(!f){ return 0.0 }
@@ -5377,37 +5459,25 @@ fn font_ascent(int: font): f64 {
    a
 }
 
-@jit
-fn _font_fast_text_mode(): int {
-   if(_font_fast_text_enabled != -1){ return _font_fast_text_enabled }
-   _font_fast_text_enabled = ui_profile.env_toggle_cached("NY_FONT_FAST_TEXT", true) ? 1 : 0
-   _font_fast_text_enabled
-}
-
-fn _font_vk_legacy_fallback_mode(): bool {
-   if(_font_vk_legacy_fallback_enabled != -1){ return _font_vk_legacy_fallback_enabled == 1 }
-   _font_vk_legacy_fallback_enabled = ui_profile.env_toggle_cached("NY_FONT_VK_LEGACY_FALLBACK", false) ? 1 : 0
-   _font_vk_legacy_fallback_enabled == 1
-}
-
-fn _font_defer_flush_mode(): bool {
+fn _font_defer_flush_mode() bool {
    if(_font_defer_flush_enabled != -1){ return _font_defer_flush_enabled == 1 }
    _font_defer_flush_enabled = ui_profile.env_toggle_cached("NY_FONT_DEFER_FLUSH", true) ? 1 : 0
    _font_defer_flush_enabled == 1
 }
 
-fn draw_rect_fast(f64: x, f64: y, f64: w, f64: h, int: c_u32): bool {
+fn draw_rect_fast(f64 x, f64 y, f64 w, f64 h, int c_u32) bool {
    "Draws a rectangle using a pre-packed color."
    if(_backend == BACKEND_VK){
       lib_vkr.draw_rect_fast(x, y, w, h, c_u32)
       return true
    }
+   if(_backend == BACKEND_MOCK){ return _cpu_draw_rect_packed(x, y, w, h, c_u32) }
    def a, b = float((c_u32 >> 24) & 255) / 255.0, float((c_u32 >> 16) & 255) / 255.0
    def g, r = float((c_u32 >> 8) & 255) / 255.0, float(c_u32 & 255) / 255.0
    draw_rect(x, y, w, h, [r, g, b, a])
 }
 
-fn draw_rect_outline_fast(f64: x, f64: y, f64: w, f64: h, int: c_u32): bool {
+fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int c_u32) bool {
    "Draws a 1px rectangle outline using a pre-packed color."
    if(_backend == BACKEND_VK){
       lib_vkr.draw_rect_outline_fast(x, y, w, h, c_u32)
@@ -5421,10 +5491,11 @@ fn draw_rect_outline_fast(f64: x, f64: y, f64: w, f64: h, int: c_u32): bool {
 }
 
 @jit
-fn draw_rects_fast_ptr(any: rects, int: count, int: stride=20): int{
+fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    "Draws packed rect records: f32 x,y,w,h + u32 color."
    if(count <= 0 || !rects){ return 0 }
    if(_backend == BACKEND_VK){ return lib_vkr.draw_rects_fast_ptr(rects, count, stride) }
+   if(_mock_fast_fill_enabled()){ return count }
    if(stride < 20){ stride = 20 }
    mut i = 0
    while(i < count){
@@ -5440,7 +5511,7 @@ fn draw_rects_fast_ptr(any: rects, int: count, int: stride=20): int{
 }
 
 @jit
-fn draw_lines_2d_fast_ptr(any: lines, int: count, int: stride=24): int{
+fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
    "Draws packed 2D line records: f32 x1,y1,x2,y2,thickness + u32 color."
    if(count <= 0 || !lines){ return 0 }
    if(_backend == BACKEND_VK){ return lib_vkr.draw_lines_2d_fast_ptr(lines, count, stride) }
@@ -5459,10 +5530,10 @@ fn draw_lines_2d_fast_ptr(any: lines, int: count, int: stride=24): int{
 }
 
 @jit
-fn _font_can_use_fast_vk_text(): bool{ _backend == BACKEND_VK && _font_fast_text_mode() == 1 }
+fn _font_can_use_fast_vk_text() bool { _backend == BACKEND_VK }
 
 @jit
-fn _font_sync_and_ensure_gpu(int: font_id): bool {
+fn _font_sync_and_ensure_gpu(int font_id) bool {
    if(_font_dirty.get(font_id, false)){
       _font_flush_atlases(font_id)
       _font_dirty = _font_dirty.delete(font_id)
@@ -5472,7 +5543,17 @@ fn _font_sync_and_ensure_gpu(int: font_id): bool {
 }
 
 @jit
-fn _draw_text_runs_list(int: font_id, list: runs, any: color): bool {
+fn font_prepare(int font, any text=" ") int {
+   "Primes a font string, ensures its atlas is available, and returns the resolved font id."
+   def font_id = _resolve_text_font(font)
+   if(font_id <= 0){ return 0 }
+   if(is_str(text) && text.len > 0){ _font_maybe_prime_string(font_id, text) }
+   _font_sync_and_ensure_gpu(font_id)
+   font_id
+}
+
+@jit
+fn _draw_text_runs_list(int font_id, list runs, any color) bool {
    mut i = 0
    def n = runs.len
    while(i < n){
@@ -5484,7 +5565,7 @@ fn _draw_text_runs_list(int: font_id, list: runs, any: color): bool {
 }
 
 @jit
-fn _draw_text_builtin_runs_list(list: runs, any: color): bool {
+fn _draw_text_builtin_runs_list(list runs, any color) bool {
    mut i = 0
    def n = runs.len
    while(i < n){
@@ -5496,7 +5577,7 @@ fn _draw_text_builtin_runs_list(list: runs, any: color): bool {
 }
 
 @jit
-fn _prime_text_runs_list(int: font_id, list: runs): bool {
+fn _prime_text_runs_list(int font_id, list runs) bool {
    mut i = 0
    def n = runs.len
    while(i < n){
@@ -5508,7 +5589,7 @@ fn _prime_text_runs_list(int: font_id, list: runs): bool {
 }
 
 @jit
-fn _draw_text_runs_flat_list(int: font_id, list: runs, any: color): bool {
+fn _draw_text_runs_flat_list(int font_id, list runs, any color) bool {
    mut i = 0
    def n = runs.len
    while(i + 2 < n){
@@ -5519,7 +5600,7 @@ fn _draw_text_runs_flat_list(int: font_id, list: runs, any: color): bool {
 }
 
 @jit
-fn _draw_text_runs_flat_color_list(int: font_id, list: runs): bool {
+fn _draw_text_runs_flat_color_list(int font_id, list runs) bool {
    mut i = 0
    def n = runs.len
    while(i + 3 < n){
@@ -5530,7 +5611,7 @@ fn _draw_text_runs_flat_color_list(int: font_id, list: runs): bool {
 }
 
 @jit
-fn _draw_text_builtin_runs_flat_list(list: runs, any: color): bool {
+fn _draw_text_builtin_runs_flat_list(list runs, any color) bool {
    mut i = 0
    def n = runs.len
    while(i + 2 < n){
@@ -5541,29 +5622,31 @@ fn _draw_text_builtin_runs_flat_list(list: runs, any: color): bool {
 }
 
 @jit
-fn _prime_text_runs_flat_list(int: font_id, list: runs): bool {
+fn _prime_text_runs_flat_list(int font_id, list runs) bool {
    mut i = 0
    def n = runs.len
    while(i + 2 < n){
-      _font_maybe_prime_string(font_id, runs[i])
+      def text = runs[i]
+      if(is_str(text)){ _font_maybe_prime_string(font_id, text) }
       i += 3
    }
    true
 }
 
 @jit
-fn _prime_text_runs_flat_color_list(int: font_id, list: runs): bool {
+fn _prime_text_runs_flat_color_list(int font_id, list runs) bool {
    mut i = 0
    def n = runs.len
    while(i + 3 < n){
-      _font_maybe_prime_string(font_id, runs[i])
+      def text = runs[i]
+      if(is_str(text)){ _font_maybe_prime_string(font_id, text) }
       i += 4
    }
    true
 }
 
 @jit
-fn draw_text_batch(int: font, list: lines, f64: x, f64: y, f64: spacing, int: color_u32): bool {
+fn draw_text_batch(int font, list lines, f64 x, f64 y, f64 spacing, int color_u32) bool {
    "Draws multiple lines of text with minimal interpreter overhead."
    def font_id = _resolve_text_font(font)
    def n_lines = is_list(lines) ? lines.len : 0
@@ -5575,19 +5658,16 @@ fn draw_text_batch(int: font, list: lines, f64: x, f64: y, f64: spacing, int: co
       }
       return true
    }
-   def use_fast_text = _font_can_use_fast_vk_text()
    mut i = 0 while(i < n_lines){
       _font_maybe_prime_string(font_id, lines[i])
       i += 1
    }
    _font_sync_and_ensure_gpu(font_id)
    def col = _pack_color_from(color_u32, 1.0, 1.0, 1.0, 1.0, true)
-   if(!use_fast_text){
-      mut li = 0
-      while(li < n_lines){
-         draw_text(font_id, lines.get(li), x, y + float(li) * float(spacing), col)
-         li += 1
-      }
+   def f = _font_get(font_id)
+   def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
+   if(glyphs_ptr){
+      lib_vkr.draw_text_batch(font_id, lines, x, y, spacing, col)
       return true
    }
    mut fi = 0
@@ -5595,11 +5675,7 @@ fn draw_text_batch(int: font, list: lines, f64: x, f64: y, f64: spacing, int: co
       def line = lines[fi]
       def ly = y + float(fi) * float(spacing)
       if(!_draw_text_ttf_fast(font_id, line, x, ly, col)){
-         if(_font_vk_legacy_fallback_mode()){
-            if(!_draw_text_ttf(font_id, line, x, ly, col)){ _draw_text_builtin(line, x, ly, col) }
-         } else {
-            _draw_text_builtin(line, x, ly, col)
-         }
+         _draw_text_builtin(line, x, ly, col)
       }
       fi += 1
    }
@@ -5607,7 +5683,7 @@ fn draw_text_batch(int: font, list: lines, f64: x, f64: y, f64: spacing, int: co
 }
 
 @jit
-fn draw_text_runs(int: font, list: runs, any: color=WHITE): bool {
+fn draw_text_runs(int font, list runs, any color=WHITE) bool {
    "Draws arbitrary [text, x, y] runs with shared font/color using the fastest backend path."
    def font_id = _resolve_text_font(font)
    def n_runs = is_list(runs) ? runs.len : 0
@@ -5625,18 +5701,18 @@ fn draw_text_runs(int: font, list: runs, any: color=WHITE): bool {
       lib_vkr.draw_text_runs_ptr(font_id, runs, col, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)))
       return true
    }
-   if(_font_vk_legacy_fallback_mode()){ _draw_text_runs_list(font_id, runs, col) }
-   else { _draw_text_builtin_runs_list(runs, col) }
+   _draw_text_builtin_runs_list(runs, col)
    true
 }
 
 @jit
-fn draw_text_runs_flat(int: font, list: runs, any: color=WHITE): bool {
+fn draw_text_runs_flat(int font, list runs, any color=WHITE) bool {
    "Draws flat [text, x, y, ...] runs with shared font/color using the fastest backend path."
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
    if(n < 3){ return false }
    if(!_font_can_use_fast_vk_text()){
+      if(_mock_fast_text_enabled()){ return _draw_text_mock_flat_bars(runs, color) }
       _draw_text_runs_flat_list(font_id, runs, color)
       return true
    }
@@ -5649,13 +5725,12 @@ fn draw_text_runs_flat(int: font, list: runs, any: color=WHITE): bool {
       lib_vkr.draw_text_runs_flat_ptr(font_id, runs, col, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)))
       return true
    }
-   if(_font_vk_legacy_fallback_mode()){ _draw_text_runs_flat_list(font_id, runs, col) }
-   else { _draw_text_builtin_runs_flat_list(runs, col) }
+   _draw_text_builtin_runs_flat_list(runs, col)
    true
 }
 
 @jit
-fn draw_text_runs_flat_colors(int: font, list: runs): bool {
+fn draw_text_runs_flat_colors(int font, list runs) bool {
    "Draws flat [text, x, y, color, ...] runs with shared font and per-run packed colors."
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
@@ -5677,7 +5752,7 @@ fn draw_text_runs_flat_colors(int: font, list: runs): bool {
 }
 
 @jit
-fn _font_ascii_preprimed(str: text): bool {
+fn _font_ascii_preprimed(str text) bool {
    if(_font_prime_mode() == 2){ return false }
    mut i = 0
    def n = text.len
@@ -5689,14 +5764,14 @@ fn _font_ascii_preprimed(str: text): bool {
 }
 
 @jit
-fn _font_maybe_prime_string(int: font_id, any: text): bool {
+fn _font_maybe_prime_string(int font_id, any text) bool {
    if(!is_str(text)){ return false }
    if(_font_ascii_preprimed(text)){ return true }
    _font_prime_string(font_id, text)
 }
 
 @jit
-fn _font_prime_string(int: font_id, any: text): bool {
+fn _font_prime_string(int font_id, any text) bool {
    if(!is_str(text)){ return false }
    def f = _font_get(font_id)
    if(!f){ return false }
@@ -5729,7 +5804,7 @@ fn _font_prime_string(int: font_id, any: text): bool {
 }
 
 @jit
-fn _resolve_text_font(int: font): int {
+fn _resolve_text_font(int font) int {
    mut font_id = 0
    if(is_int(font) && font > 0){ font_id = font }
    if(font_id == 0){ font_id = _ensure_default_font(16) }
@@ -5737,20 +5812,13 @@ fn _resolve_text_font(int: font): int {
 }
 
 @jit
-fn _draw_text_impl(int: font, any: text, f64: x, f64: y, any: color=WHITE): bool {
+fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
    if(!is_str(text)){ text = to_str(text) }
    def font_id = _resolve_text_font(font)
    if(_backend == BACKEND_VK && font_id > 0){
       def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
-      if(_font_can_use_fast_vk_text()){
-         if(_draw_text_ttf_fast(font_id, text, x, y, packed)){ return true }
-         if(!_font_vk_legacy_fallback_mode()){
-            _draw_text_builtin(text, x, y, packed)
-            return true
-         }
-      }
-      if(_draw_text_ttf(font_id, text, x, y, color)){ return true }
-      _draw_text_builtin(text, x, y, color)
+      if(_draw_text_ttf_fast(font_id, text, x, y, packed)){ return true }
+      _draw_text_builtin(text, x, y, packed)
       return true
    }
    if(font_id > 0 && _draw_text_ttf(font_id, text, x, y, color)){ return true }
@@ -5759,7 +5827,7 @@ fn _draw_text_impl(int: font, any: text, f64: x, f64: y, any: color=WHITE): bool
 }
 
 @jit
-fn _draw_text_ttf_fast(int: font_id, str: text, f64: x, f64: y, int: packed_color): bool {
+fn _draw_text_ttf_fast(int font_id, str text, f64 x, f64 y, int packed_color) bool {
    def f = _font_get(font_id)
    if(!f){ return false }
    def glyphs_ptr = f.get("fast_glyphs", 0)
@@ -5769,13 +5837,11 @@ fn _draw_text_ttf_fast(int: font_id, str: text, f64: x, f64: y, int: packed_colo
    def ascent = f.get("ascent", 0.0)
    def f_size = float(f.get("size", 16.0))
    def line_h = f.get("line_height", f_size)
-   ; Do NOT pre-bind the atlas here — the C renderer binds per-glyph tex_id itself
-   ; Defer vertex writing and offsetting to the backend to handle batch changes
    lib_vkr.__vkr_draw_text(font_id, text, x, y, packed_color, glyphs_ptr, ascent, line_h, 0)
    true
 }
 
-fn draw_text_3d(int: font, any: text, list: pos, f64: size, any: color=WHITE): bool {
+fn draw_text_3d(int font, any text, list pos, f64 size, any color=WHITE) bool {
    "Draws text in 3D space."
    if(!is_list(pos)){ return false }
    mut font_id = font
@@ -5783,7 +5849,7 @@ fn draw_text_3d(int: font, any: text, list: pos, f64: size, any: color=WHITE): b
    draw_text(font_id, text, pos.get(0, 0.0), pos.get(1, 0.0), color)
 }
 
-fn mesh_build_grid(int: radius=200, f64: spacing=5.0, f64: thickness=0.04, any: color=[0.12, 0.15, 0.18, 1.0]): any {
+fn mesh_build_grid(int radius=200, f64 spacing=5.0, f64 thickness=0.04, any color=[0.12, 0.15, 0.18, 1.0]) any {
    "Builds XZ grid mesh data as solid quads and returns `{ptr, cnt}`."
    def size = float(radius) * spacing
    def buf = malloc((radius * 2 + 1) * 12 * VERTEX_STRIDE)
@@ -5801,7 +5867,7 @@ fn mesh_build_grid(int: radius=200, f64: spacing=5.0, f64: thickness=0.04, any: 
    {"ptr": buf, "cnt": idx}
 }
 
-fn mesh_build_axes(f64: length=1.0, f64: thickness=0.12): any {
+fn mesh_build_axes(f64 length=1.0, f64 thickness=0.12) any {
    "Builds centered RGB axis sticks as a static triangle mesh."
    def vert_count = 36 * 3
    def buf = malloc(vert_count * VERTEX_STRIDE)
@@ -5816,26 +5882,26 @@ fn mesh_build_axes(f64: length=1.0, f64: thickness=0.12): any {
    {"ptr": buf, "cnt": idx}
 }
 
-fn mesh_create(?ptr: p, int: count, bool: is_lines=false): any {
+fn mesh_create(?ptr p, int count, bool is_lines=false) any {
    "Creates a static GPU mesh from raw vertex data(count vertices, packed stride)."
    mesh_create_ex(p, count, 0, is_lines)
 }
 
-fn mesh_create_static(?ptr: p, int: count, bool: is_lines=false, any: opts=0): any {
+fn mesh_create_static(?ptr p, int count, bool is_lines=false, any opts=0) any {
    "Creates a mesh backed by a static GPU buffer."
    mut mopts = is_dict(opts) ? opts : dict(4)
    mopts["storage"] = "static"
    mesh_create_ex(p, count, mopts, is_lines)
 }
 
-fn mesh_create_cpu(?ptr: p, int: count, bool: is_lines=false, any: opts=0): any {
+fn mesh_create_cpu(?ptr p, int count, bool is_lines=false, any opts=0) any {
    "Creates a mesh backed by host memory only."
    mut mopts = is_dict(opts) ? opts : dict(4)
    mopts["storage"] = "cpu"
    mesh_create_ex(p, count, mopts, is_lines)
 }
 
-fn _mesh_options(any: opts, bool: is_lines, bool: indexed=false): list {
+fn _mesh_options(any opts, bool is_lines, bool indexed=false) list {
    def has_opts = is_dict(opts)
    def use_points = has_opts && opts.get("is_points", false)
    if(use_points){ is_lines = false }
@@ -5851,7 +5917,7 @@ fn _mesh_options(any: opts, bool: is_lines, bool: indexed=false): list {
    ]
 }
 
-fn _mesh_render_flags(bool: use_points, bool: is_lines, bool: use_unlit, bool: use_nocull, bool: indexed=false): int {
+fn _mesh_render_flags(bool use_points, bool is_lines, bool use_unlit, bool use_nocull, bool indexed=false) int {
    mut flags = use_points ? _MESH_GPU_POINTS : (is_lines ? _MESH_GPU_LINES : 0)
    if(use_unlit){ flags = flags | _MESH_GPU_UNLIT }
    if(use_nocull){ flags = flags | _MESH_GPU_NOCULL }
@@ -5859,7 +5925,7 @@ fn _mesh_render_flags(bool: use_points, bool: is_lines, bool: use_unlit, bool: u
    flags
 }
 
-fn _mesh_base_result(int: count, int: idx_count, list: opt): dict {
+fn _mesh_base_result(int count, int idx_count, list opt) dict {
    def use_points = opt.get(0, false)
    def is_lines = opt.get(1, false)
    def use_unlit = opt.get(3, false)
@@ -5880,7 +5946,7 @@ fn _mesh_base_result(int: count, int: idx_count, list: opt): dict {
    res
 }
 
-fn _mesh_cpu_result(dict: res, ?ptr: p, int: flags, ?ptr: idx_ptr=nil, bool: idx_u32=false): dict {
+fn _mesh_cpu_result(dict res, ?ptr p, int flags, ?ptr idx_ptr=nil, bool idx_u32=false) dict {
    res["ptr"] = p
    if(idx_ptr){
       res["idx_ptr"] = idx_ptr
@@ -5890,15 +5956,37 @@ fn _mesh_cpu_result(dict: res, ?ptr: p, int: flags, ?ptr: idx_ptr=nil, bool: idx
    res
 }
 
+fn _mesh_cpu_indexed_result(dict res, ?ptr p, int count, ?ptr idx_ptr, int idx_count, int flags, bool idx_u32=false) dict {
+   mut out = _mesh_cpu_result(res, p, flags, idx_ptr, idx_u32)
+   if(_backend != BACKEND_VK || !ui_profile.env_toggle_cached("NY_GLTF_DYNAMIC_GPU_INDEX", true)){ return out }
+   def sbuf = lib_vkr.create_static_index_buffer(idx_ptr, idx_count, idx_u32)
+   if(!sbuf){ return out }
+   def ih = sbuf.get("ibuf", 0)
+   if(!ih){
+      lib_vkr.destroy_static_buffer(sbuf)
+      return out
+   }
+   def io = int(sbuf.get("ioffset", 0))
+   out["sbuf"] = sbuf
+   out["ibuf"] = ih
+   out["ibuf_offset"] = io
+   out["index_count"] = idx_count
+   out["draw_index_count"] = idx_count
+   out["dynamic_vertices"] = true
+   out["gpu_draw"] = [0, 0, ih, io, count, idx_count, flags, idx_u32]
+   out["gpu_draw_slab"] = _mesh_gpu_draw_slab(0, 0, ih, io, count, idx_count, flags, idx_u32)
+   out
+}
+
 fn _mesh_static_result(
-   dict: res,
-   ?ptr: p,
-   dict: sbuf,
-   int: flags,
-   int: count,
-   ?ptr: idx_ptr=nil,
-   int: idx_count=0
-) : dict {
+   dict res,
+   ?ptr p,
+   dict sbuf,
+   int flags,
+   int count,
+   ?ptr idx_ptr=nil,
+   int idx_count=0
+)  dict {
    def indexed = idx_ptr && idx_count > 0
    def final_idx_count = indexed ? sbuf.get("index_count", idx_count) : 0
    def idx_u32 = indexed ? sbuf.get("index_type_u32", false) : false
@@ -5924,7 +6012,7 @@ fn _mesh_static_result(
    res
 }
 
-fn mesh_create_ex(?ptr: p, int: count, any: opts=0, bool: is_lines=false): any {
+fn mesh_create_ex(?ptr p, int count, any opts=0, bool is_lines=false) any {
    "Creates a mesh from raw vertex data. `opts.storage` may be `static` or `cpu`."
    if(!p || count <= 0){ return 0 }
    def opt = _mesh_options(opts, is_lines, false)
@@ -5941,7 +6029,7 @@ fn mesh_create_ex(?ptr: p, int: count, any: opts=0, bool: is_lines=false): any {
    _mesh_static_result(res, p, sbuf, flags, count)
 }
 
-fn mesh_create_indexed(?ptr: p, int: count, ?ptr: idx_ptr, int: idx_count, any: opts=0, bool: is_lines=false): any {
+fn mesh_create_indexed(?ptr p, int count, ?ptr idx_ptr, int idx_count, any opts=0, bool is_lines=false) any {
    "Creates an indexed mesh from raw vertex and index data."
    if(!p || count <= 0 || !idx_ptr || idx_count <= 0){ return 0 }
    def opt = _mesh_options(opts, is_lines, true)
@@ -5953,7 +6041,7 @@ fn mesh_create_indexed(?ptr: p, int: count, ?ptr: idx_ptr, int: idx_count, any: 
    def use_u32 = opt.get(6, false)
    mut res = _mesh_base_result(count, idx_count, opt)
    def flags = _mesh_render_flags(use_points, is_lines, use_unlit, use_nocull, true)
-   if(storage == "cpu" || _backend == BACKEND_MOCK){ return _mesh_cpu_result(res, p, flags, idx_ptr, use_u32) }
+   if(storage == "cpu" || _backend == BACKEND_MOCK){ return _mesh_cpu_indexed_result(res, p, count, idx_ptr, idx_count, flags, use_u32) }
    mut buf_opts = 0
    if(use_u32){
       buf_opts = dict(4)
@@ -5965,15 +6053,15 @@ fn mesh_create_indexed(?ptr: p, int: count, ?ptr: idx_ptr, int: idx_count, any: 
 }
 
 fn _mesh_gpu_draw_slab(
-   any: sbuf_handle,
-   any: sbuf_offset,
-   any: ibuf,
-   any: ibuf_offset,
-   int: draw_count,
-   int: idx_count,
-   int: flags,
-   bool: idx_u32=false
-) : ptr {
+   any sbuf_handle,
+   any sbuf_offset,
+   any ibuf,
+   any ibuf_offset,
+   int draw_count,
+   int idx_count,
+   int flags,
+   bool idx_u32=false
+)  ptr {
    "Packs immutable GPU draw state into a raw slab."
    mut slab = malloc(__layout_size("MeshGpuDrawSlab"))
    if(!slab){ return 0 }
@@ -5986,7 +6074,7 @@ fn _mesh_gpu_draw_slab(
    slab
 }
 
-fn mesh_set_bounds(dict: m, any: min, any: max): dict {
+fn mesh_set_bounds(dict m, any min, any max) dict {
    "Attaches world-space AABB bounds to a mesh for culling."
    if(!is_dict(m)){ return m }
    m["min"] = min
@@ -5994,7 +6082,7 @@ fn mesh_set_bounds(dict: m, any: min, any: max): dict {
    m
 }
 
-fn _mesh_bounds_info(dict: m): list {
+fn _mesh_bounds_info(dict m) list {
    def bmin = m.get("min", [-1.0, -1.0, -1.0])
    def bmax = m.get("max", [ 1.0,  1.0,  1.0])
    def min_x, min_y, min_z =
@@ -6015,7 +6103,7 @@ fn _mesh_bounds_info(dict: m): list {
    (min_z + max_z) * 0.5]
 }
 
-fn _mesh_store_fit(dict: m, f64: scale, f64: cx, f64: min_y, f64: cz, f64: target_z): dict {
+fn _mesh_store_fit(dict m, f64 scale, f64 cx, f64 min_y, f64 cz, f64 target_z) dict {
    m["fit_scale"] = scale
    m["fit_tx"] = 0.0 - cx * scale
    m["fit_ty"] = 0.0 - min_y * scale
@@ -6023,7 +6111,7 @@ fn _mesh_store_fit(dict: m, f64: scale, f64: cx, f64: min_y, f64: cz, f64: targe
    m
 }
 
-fn mesh_fit_world(any: m, f64: target_longest=16.0, f64: z_offset=0.0): any {
+fn mesh_fit_world(any m, f64 target_longest=16.0, f64 z_offset=0.0) any {
    "Computes a stable world fit from cached mesh bounds and stores it on the mesh."
    if(!is_dict(m)){ return m }
    def bi = _mesh_bounds_info(m)
@@ -6033,7 +6121,7 @@ fn mesh_fit_world(any: m, f64: target_longest=16.0, f64: z_offset=0.0): any {
    _mesh_store_fit(m, scale, bi.get(9, 0.0), bi.get(1, 0.0), bi.get(11, 0.0), z_offset)
 }
 
-fn mesh_fit_perspective(any: m, f64: fovy_deg, f64: aspect=16.0 / 9.0, f64: distance=25.0, f64: fill=0.9, f64: z_center=0.0): any {
+fn mesh_fit_perspective(any m, f64 fovy_deg, f64 aspect=16.0 / 9.0, f64 distance=25.0, f64 fill=0.9, f64 z_center=0.0) any {
    "Fits a bounded mesh into a perspective view frustum at a chosen distance."
    if(!is_dict(m)){ return m }
    def bi = _mesh_bounds_info(m)
@@ -6057,7 +6145,7 @@ fn mesh_fit_perspective(any: m, f64: fovy_deg, f64: aspect=16.0 / 9.0, f64: dist
    _mesh_store_fit(m, scale, bi.get(9, 0.0), bi.get(1, 0.0), bi.get(11, 0.0), z_center)
 }
 
-fn mesh_fit_camera(any: m, f64: fovy_deg, f64: aspect=16.0 / 9.0, f64: fill=0.9, f64: target_y_bias=0.35): any {
+fn mesh_fit_camera(any m, f64 fovy_deg, f64 aspect=16.0 / 9.0, f64 fill=0.9, f64 target_y_bias=0.35) any {
    "Fits a bounded mesh and stores a suggested camera pose that frames it."
    if(!is_dict(m)){ return m }
    mut fm = m
@@ -6100,7 +6188,7 @@ fn mesh_fit_camera(any: m, f64: fovy_deg, f64: aspect=16.0 / 9.0, f64: fill=0.9,
    fm
 }
 
-fn mesh_load(str: path, any: color=WHITE): any {
+fn mesh_load(str path, any color=WHITE) any {
    "Loads an OBJ file and returns a native vertex buffer {ptr, count}."
    def obj = lib_obj.load_obj(path)
    if(!obj){ return 0 }
@@ -6136,16 +6224,16 @@ fn mesh_load(str: path, any: color=WHITE): any {
       store32_f32(off, _list_num_safe(n, 2, 0.0), 32)
       store32_f32(off, 0.0, 36)
       store32_f32(off, 0.0, 40)
-      store32(off, 0, 44) ; tex index
+      store32(off, 0, 44)
       i += 1
    }
    def sbuf = lib_vkr.create_static_buffer(buf, count)
    return {"ptr": buf, "count": count, "sbuf": sbuf, "min": [min_x, min_y, min_z], "max": [max_x, max_y, max_z]}
 }
 
-fn _ptr_key(any: p): str{ __ptr_key(p) }
+fn _ptr_key(any p) str { __ptr_key(p) }
 
-fn _mark_ptr_once(any: p, dict: seen): dict{
+fn _mark_ptr_once(any p, dict seen) dict {
    if(p == 0){ return seen }
    def key = _ptr_key(p)
    if(key == "" || seen.get(key, 0)){ return seen }
@@ -6153,7 +6241,7 @@ fn _mark_ptr_once(any: p, dict: seen): dict{
    seen
 }
 
-fn _free_ptr_once(any: p, dict: seen): dict{
+fn _free_ptr_once(any p, dict seen) dict {
    if(p == 0){ return seen }
    def key = _ptr_key(p)
    if(key == "" || seen.get(key, 0)){ return seen }
@@ -6162,7 +6250,7 @@ fn _free_ptr_once(any: p, dict: seen): dict{
    seen
 }
 
-fn _free_ptr_list_once(list: ptrs, dict: seen): dict {
+fn _free_ptr_list_once(list ptrs, dict seen) dict {
    mut out = seen
    mut i = 0
    def ptrs_n = ptrs.len
@@ -6173,7 +6261,7 @@ fn _free_ptr_list_once(list: ptrs, dict: seen): dict {
    out
 }
 
-fn mesh_destroy(any: m): bool {
+fn mesh_destroy(any m) bool {
    "Unloads a mesh and releases its resources."
    if(is_dict(m)){
       def sbuf = m.get("sbuf", 0)
@@ -6181,6 +6269,11 @@ fn mesh_destroy(any: m): bool {
          lib_vkr.destroy_static_buffer(sbuf)
          m["sbuf"] = 0
          m["ibuf"] = 0
+      }
+      def gpu_draw_slab = m.get("gpu_draw_slab", 0)
+      if(gpu_draw_slab){
+         free(gpu_draw_slab)
+         m["gpu_draw_slab"] = 0
       }
       mut seen_ptrs = dict(2)
       seen_ptrs = _free_ptr_list_once([m.get("ptr", 0), m.get("idx_ptr", 0)], seen_ptrs)
@@ -6190,7 +6283,7 @@ fn mesh_destroy(any: m): bool {
    true
 }
 
-fn _clear_active_scene_cache(): bool {
+fn _clear_active_scene_cache() bool {
    _active_scene_group = 0
    _active_scene_gpu_slab = 0
    _active_scene_render_parts = 0
@@ -6213,14 +6306,14 @@ fn _clear_active_scene_cache(): bool {
    true
 }
 
-fn _mesh_gpu_handles(any: m): list {
+fn _mesh_gpu_handles(any m) list {
    if(!is_dict(m)){ return [] }
    def sbuf = m.get("sbuf", 0)
    if(!is_dict(sbuf)){ return [] }
    [sbuf.get("handle", 0), sbuf.get("memory", 0), sbuf.get("ibuf", 0), sbuf.get("imemory", 0)]
 }
 
-fn _mark_mesh_gpu_handles_for_destroy(any: m, dict: freed): dict {
+fn _mark_mesh_gpu_handles_for_destroy(any m, dict freed) dict {
    mut out = freed
    def handles = _mesh_gpu_handles(m)
    mut hi = 0
@@ -6233,7 +6326,7 @@ fn _mark_mesh_gpu_handles_for_destroy(any: m, dict: freed): dict {
    out
 }
 
-fn _mesh_clear_shared_gpu_handles(any: m, dict: freed): any {
+fn _mesh_clear_shared_gpu_handles(any m, dict freed) any {
    mut out = m
    if(!is_dict(out)){ return out }
    def handles = _mesh_gpu_handles(out)
@@ -6251,7 +6344,7 @@ fn _mesh_clear_shared_gpu_handles(any: m, dict: freed): any {
    out
 }
 
-fn _mesh_mark_or_clear_ptr(any: m, str: key, dict: freed): list {
+fn _mesh_mark_or_clear_ptr(any m, str key, dict freed) list {
    mut out_m = m
    mut out_freed = freed
    def p = out_m.get(key, 0)
@@ -6260,7 +6353,7 @@ fn _mesh_mark_or_clear_ptr(any: m, str: key, dict: freed): list {
    [out_m, out_freed]
 }
 
-fn _mesh_prepare_for_destroy(any: m, dict: freed): list {
+fn _mesh_prepare_for_destroy(any m, dict freed) list {
    mut out_m = _mesh_clear_shared_gpu_handles(m, freed)
    mut out_freed = _free_ptr_list_once([out_m.get("ptr", 0), out_m.get("idx_ptr", 0)], freed)
    out_freed = _mark_mesh_gpu_handles_for_destroy(out_m, out_freed)
@@ -6269,7 +6362,7 @@ fn _mesh_prepare_for_destroy(any: m, dict: freed): list {
    [out_m, out_freed]
 }
 
-fn _free_part_ptr_key_once(any: part, str: key, dict: freed): dict {
+fn _free_part_ptr_key_once(any part, str key, dict freed) dict {
    mut out_freed = freed
    if(!is_dict(part)){ return out_freed }
    def p = part.get(key, 0)
@@ -6278,7 +6371,7 @@ fn _free_part_ptr_key_once(any: part, str: key, dict: freed): dict {
    out_freed
 }
 
-fn _free_part_ptrs_once(any: part, dict: freed): dict {
+fn _free_part_ptrs_once(any part, dict freed) dict {
    mut out = freed
    out = _free_part_ptr_key_once(part, "vptr", out)
    out = _free_part_ptr_key_once(part, "iptr", out)
@@ -6289,15 +6382,14 @@ fn _free_part_ptrs_once(any: part, dict: freed): dict {
    out
 }
 
-fn _destroy_group_textures_enabled(any: group): bool {
+fn _destroy_group_textures_enabled(any group) bool {
    if(!is_dict(group)){ return false }
    if(ui_profile.env_truthy_cached("NY_UI_KEEP_SCENE_TEXTURES")){ return false }
    if(ui_profile.env_truthy_cached("NY_UI_DESTROY_SCENE_TEXTURES")){ return true }
-   def recs = group.get("mat_records", [])
-   is_list(recs) && recs.len > 0
+   false
 }
 
-fn _destroy_tex_once(any: tex, dict: seen): dict {
+fn _destroy_tex_once(any tex, dict seen) dict {
    mut out = seen
    if(!is_int(tex)){ return out }
    def tid = int(tex)
@@ -6309,7 +6401,7 @@ fn _destroy_tex_once(any: tex, dict: seen): dict {
    out
 }
 
-fn _destroy_packed_ext2_tex_once(any: word, dict: seen): dict {
+fn _destroy_packed_ext2_tex_once(any word, dict seen) dict {
    if(!is_int(word)){ return seen }
    def w = int(word)
    def kind = band(bshr(w, 24), 0xff)
@@ -6319,7 +6411,7 @@ fn _destroy_packed_ext2_tex_once(any: word, dict: seen): dict {
    _destroy_tex_once(tid, seen)
 }
 
-fn _destroy_texture_dict_keys(any: rec, list: keys_in, dict: seen): dict {
+fn _destroy_texture_dict_keys(any rec, list keys_in, dict seen) dict {
    mut out = seen
    if(!is_dict(rec)){ return out }
    mut ki = 0
@@ -6332,7 +6424,7 @@ fn _destroy_texture_dict_keys(any: rec, list: keys_in, dict: seen): dict {
    out
 }
 
-fn _destroy_group_textures_once(any: group): bool {
+fn _destroy_group_textures_once(any group) bool {
    if(!_destroy_group_textures_enabled(group)){ return false }
    mut seen_tex = dict(32)
    def mat_keys = ["base", "normal", "metallic_roughness", "occlusion", "emissive"]
@@ -6358,7 +6450,7 @@ fn _destroy_group_textures_once(any: group): bool {
    true
 }
 
-fn _mesh_group_clear_destroyed_state(any: group): bool {
+fn _mesh_group_clear_destroyed_state(any group) bool {
    if(!is_dict(group)){ return false }
    group["gpu_resources"] = []
    group["parts"] = []
@@ -6370,11 +6462,27 @@ fn _mesh_group_clear_destroyed_state(any: group): bool {
    true
 }
 
-fn mesh_group_destroy(any: group): bool {
+fn _mesh_group_free_draw_state_slabs(any group, dict freed) dict {
+   mut out = freed
+   if(!is_dict(group)){ return out }
+   def gpu_state = group.get("gpu_draw_state", 0)
+   if(is_list(gpu_state)){
+      if(gpu_state.len >= 2){ out = _free_ptr_once(gpu_state.get(0, 0), out) }
+      if(gpu_state.len >= 9){
+         out = _free_ptr_once(gpu_state.get(6, 0), out)
+      } elif(gpu_state.len >= 7){
+         out = _free_ptr_once(gpu_state.get(5, 0), out)
+      }
+   }
+   out
+}
+
+fn mesh_group_destroy(any group) bool {
    "Destroys every mesh in a grouped mesh scene, or a single mesh fallback."
    if(!is_dict(group)){ return false }
    if(to_int(group) == to_int(_active_scene_group)){ _clear_active_scene_cache() }
    mut freed_ptrs = dict(16)
+   freed_ptrs = _mesh_group_free_draw_state_slabs(group, freed_ptrs)
    def gpu_parts_slab = group.get("gpu_parts_slab", 0)
    freed_ptrs = _free_ptr_once(gpu_parts_slab, freed_ptrs)
    if(gpu_parts_slab){ group["gpu_parts_slab"] = 0 }
@@ -6431,13 +6539,13 @@ fn mesh_group_destroy(any: group): bool {
    true
 }
 
-fn mesh_retire(any: m): bool {
+fn mesh_retire(any m) bool {
    "Queues a mesh for deferred destruction. Useful for streamed mesh replacement."
    if(is_dict(m)){ _retired_meshes = _retired_meshes.append(m) return true }
    false
 }
 
-fn mesh_collect_retired(int: limit=0): int {
+fn mesh_collect_retired(int limit=0) int {
    "Destroys queued retired meshes. `limit<=0` drains the whole queue."
    if(_retired_meshes.len <= 0){ return 0 }
    def n = (limit <= 0 || limit >= _retired_meshes.len) ? _retired_meshes.len : limit
@@ -6450,9 +6558,9 @@ fn mesh_collect_retired(int: limit=0): int {
    n
 }
 
-fn _cpu_project_vertex_at(?ptr: p, int: off, any: mvp): any { _cpu_project_vertex(load32_f32(p, off + 0), load32_f32(p, off + 4), load32_f32(p, off + 8), mvp) }
+fn _cpu_project_vertex_at(?ptr p, int off, any mvp) any { _cpu_project_vertex(load32_f32(p, off + 0), load32_f32(p, off + 4), load32_f32(p, off + 8), mvp) }
 
-fn _cpu_draw_projected_thick_line(any: p0, any: p1, f64: width, int: color): bool {
+fn _cpu_draw_projected_thick_line(any p0, any p1, f64 width, int color) bool {
    if(!p0 || !p1){ return false }
    def x0, y0 = p0.get(0, 0.0), p0.get(1, 0.0)
    def x1, y1 = p1.get(0, 0.0), p1.get(1, 0.0)
@@ -6465,7 +6573,7 @@ fn _cpu_draw_projected_thick_line(any: p0, any: p1, f64: width, int: color): boo
    true
 }
 
-fn _cpu_draw_mesh_mock_lines(?ptr: p, int: count, f64: width, any: mvp): bool {
+fn _cpu_draw_mesh_mock_lines(?ptr p, int count, f64 width, any mvp) bool {
    mut i = 0
    while(i + 1 < count){
       def off0, off1 = i * VERTEX_STRIDE, (i + 1) * VERTEX_STRIDE
@@ -6479,7 +6587,7 @@ fn _cpu_draw_mesh_mock_lines(?ptr: p, int: count, f64: width, any: mvp): bool {
    true
 }
 
-fn _cpu_draw_mesh_mock_tris(?ptr: p, int: count, any: mvp): bool {
+fn _cpu_draw_mesh_mock_tris(?ptr p, int count, any mvp) bool {
    mut i = 0
    while(i + 2 < count){
       def off0, off1 = i * VERTEX_STRIDE, (i + 1) * VERTEX_STRIDE
@@ -6501,7 +6609,7 @@ fn _cpu_draw_mesh_mock_tris(?ptr: p, int: count, any: mvp): bool {
    true
 }
 
-fn _draw_mesh_mock(dict: m, bool: is_lines=false, f64: width=1.0): bool {
+fn _draw_mesh_mock(dict m, bool is_lines=false, f64 width=1.0) bool {
    def ptr = m.get("ptr", 0)
    def count = m.get("count", 0)
    if(!ptr || count <= 0){ return false }
@@ -6514,7 +6622,7 @@ fn _draw_mesh_mock(dict: m, bool: is_lines=false, f64: width=1.0): bool {
    _cpu_draw_mesh_mock_tris(ptr, count, _cull_mvp)
 }
 
-fn draw_mesh(dict: m, bool: is_lines=false, f64: width=1.0): bool {
+fn draw_mesh(dict m, bool is_lines=false, f64 width=1.0) bool {
    "Draws a 3D mesh using the direct GPU-buffer path."
    if(!is_dict(m)){ return false }
    if(_backend == BACKEND_MOCK){
@@ -6525,13 +6633,13 @@ fn draw_mesh(dict: m, bool: is_lines=false, f64: width=1.0): bool {
 }
 
 fn _mesh_pipe_override(
-   bool: lines,
-   bool: points,
-   bool: mesh_blend,
-   bool: use_unlit,
-   bool: use_nocull,
-   bool: mesh_flip
-) : int {
+   bool lines,
+   bool points,
+   bool mesh_blend,
+   bool use_unlit,
+   bool use_nocull,
+   bool mesh_flip
+)  int {
    if(!lines && !points){
       if(mesh_blend){
          if(use_unlit){
@@ -6552,7 +6660,7 @@ fn _mesh_pipe_override(
    0
 }
 
-fn _mesh_unpack_draw_source(dict: m, any: gpu_slab): list {
+fn _mesh_unpack_draw_source(dict m, any gpu_slab) list {
    mut gpu_draw = 0
    mut _has_gpu = false
    mut gpu_draw_len = 0
@@ -6601,7 +6709,7 @@ fn _mesh_unpack_draw_source(dict: m, any: gpu_slab): list {
    [sbuf_handle, sbuf_offset, ibuf, ibuf_offset, draw_count, idx_count, gpu_flags, idx_u32, _has_gpu]
 }
 
-fn _mesh_unpack_material_state(dict: m, any: material_slab): list {
+fn _mesh_unpack_material_state(dict m, any material_slab) list {
    mut cpu_tex_id = -1
    mut mesh_lines = false
    mut mesh_points = false
@@ -6629,16 +6737,32 @@ fn _mesh_unpack_material_state(dict: m, any: material_slab): list {
    [cpu_tex_id, mesh_lines, mesh_points, mesh_unlit, mesh_flip, mesh_alpha_u32]
 }
 
-fn _mesh_draw_dispatch(?ptr: p, int: count, int: tex_id, bool: lines, bool: points, f64: width, int: pipe_override=0): bool {
-   if(pipe_override){ lib_vkr.bind_pipeline(pipe_override) }
-   if(points){ lib_vkr.draw_points_raw(p, count, tex_id) }
-   elif(lines){ lib_vkr.draw_lines_raw(p, count / 2, width) }
-   else { lib_vkr.draw_vertices(p, count, tex_id) }
-   if(pipe_override){ lib_vkr.bind_pipeline(0) }
+fn _mesh_draw_dispatch(?ptr p, int count, int tex_id, bool lines, bool points, f64 width, int pipe_override=0) bool {
+   _mesh_diag("dispatch enter")
+   if(pipe_override){
+      _mesh_diag("dispatch bind override")
+      lib_vkr.bind_pipeline(pipe_override)
+      _mesh_diag("dispatch bound override")
+   }
+   if(points){
+      _mesh_diag("dispatch points")
+      lib_vkr.draw_points_raw(p, count, tex_id)
+   } elif(lines){
+      _mesh_diag("dispatch lines")
+      lib_vkr.draw_lines_raw(p, count / 2, width)
+   } else {
+      _mesh_diag("dispatch vertices")
+      lib_vkr.draw_vertices(p, count, tex_id)
+      _mesh_diag("dispatch vertices done")
+   }
+   if(pipe_override){
+      _mesh_diag("dispatch reset pipeline")
+      lib_vkr.bind_pipeline(0)
+   }
    true
 }
 
-fn _mesh_draw_dispatch_rewind(?ptr: p, int: count, int: tex_id, bool: lines, bool: points, f64: width, int: pipe_override=0, bool: cpu_rewind=false): bool {
+fn _mesh_draw_dispatch_rewind(?ptr p, int count, int tex_id, bool lines, bool points, f64 width, int pipe_override=0, bool cpu_rewind=false) bool {
    if(cpu_rewind){
       def rew = vk_utils.gltf_rewind_triangle_vertices(p, count)
       if(rew){
@@ -6650,7 +6774,7 @@ fn _mesh_draw_dispatch_rewind(?ptr: p, int: count, int: tex_id, bool: lines, boo
    _mesh_draw_dispatch(p, count, tex_id, lines, points, width, pipe_override)
 }
 
-fn _mesh_draw_primitive_markers(?ptr: p, int: count, bool: lines, bool: points, f64: width): bool {
+fn _mesh_draw_primitive_markers(?ptr p, int count, bool lines, bool points, f64 width) bool {
    if(!p || count <= 0 || (!lines && !points)){ return false }
    mut mi = 0
    while(mi < 18){
@@ -6738,10 +6862,12 @@ fn _mesh_draw_primitive_markers(?ptr: p, int: count, bool: lines, bool: points, 
    true
 }
 
-fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: restore_unlit=true): bool {
+fn _draw_mesh_vk_fast(dict m, bool is_lines=false, f64 width=1.0, bool restore_unlit=true) bool {
    if(!is_dict(m) || _backend != BACKEND_VK){ return false }
+   _mesh_diag("start")
    def gpu_slab = m.get("gpu_draw_slab", 0)
    def source = _mesh_unpack_draw_source(m, gpu_slab)
+   _mesh_diag("source")
    def sbuf_handle = _list_any_safe(source, 0, 0)
    def sbuf_offset = _list_any_safe(source, 1, 0)
    def ibuf = _list_any_safe(source, 2, 0)
@@ -6754,6 +6880,7 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
    def index_type  = idx_u32 ? 1 : 0
    def material_slab = m.get("material_slab", 0)
    def mat_state = _mesh_unpack_material_state(m, material_slab)
+   _mesh_diag("material state")
    def cpu_tex_id = int(_list_any_safe(mat_state, 0, -1))
    def mesh_lines = !!_list_any_safe(mat_state, 1, false)
    def mesh_points = !!_list_any_safe(mat_state, 2, false)
@@ -6775,6 +6902,7 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
    def lines      = !points && (is_lines || _lines_flag || mesh_lines)
    def use_unlit  = _unlit_flag  || mesh_unlit || points
    def use_nocull = (_nocull_flag || mesh_nocull) && !lines && !points
+   _mesh_diag("flags")
    def log_mesh = _deep_should_log_mesh()
    mut cpu_ptr = 0
    mut cpu_idx_ptr = 0
@@ -6789,6 +6917,7 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
       use_unlit,
       use_nocull,
    cpu_rewind ? false : mesh_flip)
+   _mesh_diag("pipeline")
    if(ui_profile.env_truthy_cached("NY_MESH_PIPE_TRACE")){
       ui_profile.print_text("[mesh:pipe] draw=" + to_str(draw_count) +
          " idx=" + to_str(idx_count) +
@@ -6798,17 +6927,20 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
          " unlit=" + to_str(use_unlit) +
          " nocull=" + to_str(use_nocull) +
          " flip=" + to_str(mesh_flip) +
-         " alpha=" + to_hex(mesh_alpha_u32) +
+         " alpha=" + lib_str.to_hex(mesh_alpha_u32) +
          " pipe=" + to_str(pipe_override) +
          " gpu=" + to_str(_has_gpu) +
          " cpu=" + to_str(cpu_ptr != 0) +
       " rewind=" + to_str(cpu_rewind))
    }
    if(log_mesh){ ui_profile.print_text("[mesh_fast] draw=" + to_str(draw_count) + " idx=" + to_str(idx_count) + " lines=" + to_str(lines) + " points=" + to_str(points) + " unlit=" + to_str(use_unlit) + " nocull=" + to_str(use_nocull) + " gpu=" + to_str(_has_gpu) + " cpu=" + to_str(cpu_ptr != 0)) }
+   _mesh_diag("before unlit")
    if(use_unlit){ lib_vkr.set_unlit(true) }
    else { lib_vkr.set_unlit(false) }
+   _mesh_diag("after unlit")
    if(cpu_tex_id >= 0){ lib_vkr.bind_texture(cpu_tex_id) }
    else { lib_vkr.bind_default_texture() }
+   _mesh_diag("after texture")
    if(material_slab){ lib_vkr.set_material_from_slab(material_slab, m.get("vc_mode", false)) } else {
       _set_material_packed_defaults(
          0x0000ff00,
@@ -6819,6 +6951,7 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
          m.get("vc_mode", false)
       )
    }
+   _mesh_diag("after material")
    if(lines && !points && !sbuf_handle && ui_profile.env_truthy_cached("NY_UI_PRIMITIVE_LINE_MARKERS")){
       def marker_ptr = m.get("ptr", 0)
       if(_mesh_draw_primitive_markers(marker_ptr, draw_count, lines, points, width)){
@@ -6826,6 +6959,7 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
          return true
       }
    }
+   _mesh_diag("before dispatch")
    if(dynamic_vertices && ibuf != 0 && idx_count > 0 && cpu_ptr){ lib_vkr.draw_vertices_indexed_raw(cpu_ptr, draw_count, ibuf, ibuf_offset, idx_count, index_type, cpu_tex_id, lines, width, pipe_override, points) } elif(sbuf_handle){
       if(ibuf != 0 && idx_count > 0){ lib_vkr.draw_static_buffer_indexed_raw(sbuf_handle, sbuf_offset, ibuf, ibuf_offset, idx_count, lines, width, pipe_override, index_type, points) } else { lib_vkr.draw_static_buffer_raw(sbuf_handle, sbuf_offset, draw_count, lines, width, pipe_override, points) }
    } elif(idx_count > 0 && cpu_ptr && cpu_idx_ptr){
@@ -6851,11 +6985,12 @@ fn _draw_mesh_vk_fast(dict: m, bool: is_lines=false, f64: width=1.0, bool: resto
    } else {
       _mesh_draw_dispatch(m.get("ptr"), draw_count, -1, lines, points, width, 0)
    }
+   _mesh_diag("after dispatch")
    if(restore_unlit && use_unlit){ lib_vkr.set_unlit(false) }
    true
 }
 
-fn _model_matrix_to_render_mat(any: model_m): any {
+fn _model_matrix_to_render_mat(any model_m) any {
    if(!is_list(model_m)){ return 0 }
    def n = model_m.len
    if(n == 18){
@@ -6880,20 +7015,20 @@ fn _model_matrix_to_render_mat(any: model_m): any {
    0
 }
 
-fn _num_from_any(any: v, f64: fallback=0.0): f64 {
+fn _num_from_any(any v, f64 fallback=0.0) f64 {
    if(is_int(v) || is_float(v)){ return float(v) }
    if(is_bool(v)){ return v ? 1.0 : 0.0 }
    fallback
 }
 
-fn _dict_num(any: d, str: key, f64: fallback=0.0): f64 {
+fn _dict_num(any d, str key, f64 fallback=0.0) f64 {
    if(!is_dict(d)){ return fallback }
    _num_from_any(d.get(key, fallback), fallback)
 }
 
-fn _dict_int(any: d, str: key, int: fallback=0): int{ int(_dict_num(d, key, float(fallback))) }
+fn _dict_int(any d, str key, int fallback=0) int { int(_dict_num(d, key, float(fallback))) }
 
-fn _dict_bool(any: d, str: key, bool: fallback=false): bool {
+fn _dict_bool(any d, str key, bool fallback=false) bool {
    if(!is_dict(d)){ return fallback }
    def v = d.get(key, fallback)
    if(is_bool(v)){ return v }
@@ -6901,19 +7036,19 @@ fn _dict_bool(any: d, str: key, bool: fallback=false): bool {
    fallback
 }
 
-fn _list_num_safe(any: xs, int: idx, f64: fallback=0.0): f64 {
+fn _list_num_safe(any xs, int idx, f64 fallback=0.0) f64 {
    if(!is_list(xs) || idx < 0 || idx >= xs.len){ return fallback }
    _num_from_any(xs.get(idx, fallback), fallback)
 }
 
-fn _list_int_safe(any: xs, int: idx, int: fallback=0): int{ int(_list_num_safe(xs, idx, float(fallback))) }
+fn _list_int_safe(any xs, int idx, int fallback=0) int { int(_list_num_safe(xs, idx, float(fallback))) }
 
-fn _list_any_safe(any: xs, int: idx, any: fallback=0): any {
+fn _list_any_safe(any xs, int idx, any fallback=0) any {
    if(!is_list(xs) || idx < 0 || idx >= xs.len){ return fallback }
    xs[idx]
 }
 
-fn _cpu_part_is_optical(any: part): bool {
+fn _cpu_part_is_optical(any part) bool {
    if(!is_dict(part)){ return false }
    def slab = part.get("material_slab", 0)
    if(slab){
@@ -6942,7 +7077,7 @@ fn _cpu_part_is_optical(any: part): bool {
    ((bshr(bsdf0, 16) & 255) > 0) || ((bsdf5 & 255) > 0) || ((bshr(bsdf5, 8) & 255) > 0)
 }
 
-fn _cpu_parts_optical_start(any: parts): int {
+fn _cpu_parts_optical_start(any parts) int {
    if(!is_list(parts)){ return 0 }
    def parts_n = parts.len
    mut i = 0
@@ -6953,7 +7088,7 @@ fn _cpu_parts_optical_start(any: parts): int {
    parts_n
 }
 
-fn _active_scene_clamp_ranges(): bool {
+fn _active_scene_clamp_ranges() bool {
    if(_active_scene_optical_start < 0){ _active_scene_optical_start = 0 }
    if(_active_scene_optical_start > _active_scene_count){ _active_scene_optical_start = _active_scene_count }
    if(_active_scene_blend_start < 0){ _active_scene_blend_start = 0 }
@@ -6961,7 +7096,7 @@ fn _active_scene_clamp_ranges(): bool {
    true
 }
 
-fn _active_scene_refresh_cpu_anim(dict: group): bool {
+fn _active_scene_refresh_cpu_anim(dict group) bool {
    _active_scene_group = group
    _active_scene_render_parts = group.get("parts", _active_scene_render_parts)
    _active_scene_gpu_slab = 0
@@ -6982,30 +7117,42 @@ fn _active_scene_refresh_cpu_anim(dict: group): bool {
    true
 }
 
+fn _scene_group_static_pose_gpu_ready(dict group, bool gpu_ready) bool {
+   bool(group.get("static_pose_gpu_ready", false)) &&
+   !bool(group.get("anim_playing", false)) &&
+   gpu_ready
+}
+
+fn _scene_group_force_cpu_anim(dict group, bool gpu_ready) bool {
+   if(!bool(group.get("anim_playing", false))){ return false }
+   (
+      int(group.get("anim_count", 0)) > 0 ||
+      int(group.get("skin_count", 0)) > 0 ||
+      int(group.get("morph_target_count", 0)) > 0
+   ) &&
+   is_dict(group.get("gltf_data", 0)) &&
+   !_scene_group_static_pose_gpu_ready(group, gpu_ready)
+}
+
 fn _bind_scene_lights_for_draw(
-   bool: have_scene_lights,
-   any: light_slab,
-   int: light_count,
-   any: light_list,
-   bool: trace_light_bind=false,
-   str: label=""
-): bool {
+   bool have_scene_lights,
+   any light_slab,
+   int light_count,
+   any light_list
+) bool {
    if(have_scene_lights){
       if(light_slab){
-         if(trace_light_bind){ ui_profile.print_text("[scene:call] vk " + label + " set_scene_lights_slab") }
          lib_vkr.set_scene_lights_slab(light_slab, light_count)
       } else {
-         if(trace_light_bind){ ui_profile.print_text("[scene:call] vk " + label + " set_scene_lights list len=" + to_str(is_list(light_list) ? light_list.len : -1)) }
          lib_vkr.set_scene_lights(light_list)
       }
    } else {
-      if(trace_light_bind){ ui_profile.print_text("[scene:call] vk " + label + " clear_scene_lights") }
       lib_vkr.set_scene_lights_slab(0, 0)
    }
    true
 }
 
-fn _scene_cpu_part_draw_info(any: part, any: saved_model, bool: have_saved_model, bool: parts_baked): any {
+fn _scene_cpu_part_draw_info(any part, any saved_model, bool have_saved_model, bool parts_baked) any {
    if(!is_dict(part) || !part.get("visible", true)){ return 0 }
    def mesh = part.get("mesh", 0)
    def render_model = _model_matrix_to_render_mat(part.get("model", 0))
@@ -7024,11 +7171,10 @@ fn _scene_cpu_part_draw_info(any: part, any: saved_model, bool: have_saved_model
       false),
       float(part.get("width",
       1.0)),
-      draw_model,
-   have_render_model]
+   draw_model]
 }
 
-fn _scene_set_unlit_if_changed(bool: part_unlit, int: last_unlit): int {
+fn _scene_set_unlit_if_changed(bool part_unlit, int last_unlit) int {
    def want_unlit = part_unlit ? 1 : 0
    if(want_unlit != last_unlit){
       lib_vkr.set_unlit(want_unlit == 1)
@@ -7037,73 +7183,13 @@ fn _scene_set_unlit_if_changed(bool: part_unlit, int: last_unlit): int {
    last_unlit
 }
 
-fn _scene_debug_cpu_anim_draw(
-   int: i,
-   any: mesh,
-   any: draw_model,
-   bool: cpu_parts_baked,
-   bool: have_saved_model,
-   bool: have_render_model,
-   bool: part_unlit
-): bool {
-   mut dbg_tx, dbg_ty, dbg_tz = 0.0, 0.0, 0.0
-   if(is_list(draw_model) && draw_model.len == 18){
-      dbg_tx, dbg_ty = _list_num_safe(draw_model, 14, 0.0), _list_num_safe(draw_model, 15, 0.0)
-      dbg_tz = _list_num_safe(draw_model, 16, 0.0)
-   }
-   mut vwx, vwy, vwz = 0.0, 0.0, 0.0
-   if(is_dict(mesh)){
-      def dbg_ptr = mesh.get("ptr", 0)
-      if(dbg_ptr && is_list(draw_model) && draw_model.len == 18){
-         def vx, vy = load32_f32(dbg_ptr, _VKR_OFF_X), load32_f32(dbg_ptr, _VKR_OFF_Y)
-         def vz = load32_f32(dbg_ptr, _VKR_OFF_Z)
-         def m00 = _list_num_safe(draw_model, 2, 1.0)
-         def m01 = _list_num_safe(draw_model, 3, 0.0)
-         def m02 = _list_num_safe(draw_model, 4, 0.0)
-         def m10 = _list_num_safe(draw_model, 6, 0.0)
-         def m11 = _list_num_safe(draw_model, 7, 1.0)
-         def m12 = _list_num_safe(draw_model, 8, 0.0)
-         def m20 = _list_num_safe(draw_model, 10, 0.0)
-         def m21 = _list_num_safe(draw_model, 11, 0.0)
-         def m22 = _list_num_safe(draw_model, 12, 1.0)
-         vwx, vwy = vx * m00 + vy * m10 + vz * m20 + dbg_tx, vx * m01 + vy * m11 + vz * m21 + dbg_ty
-         vwz = vx * m02 + vy * m12 + vz * m22 + dbg_tz
-      }
-   }
-   def mesh_is_dict = is_dict(mesh)
-   mut mesh_draw_unlit = false
-   mut mesh_draw_nocull = false
-   mut mesh_draw_count = 0
-   mut mesh_index_count = 0
-   if(mesh_is_dict){
-      mesh_draw_unlit, mesh_draw_nocull = mesh.get("draw_unlit", false), mesh.get("draw_nocull", false)
-      mesh_draw_count = int(mesh.get("draw_count", 0))
-      mesh_index_count = int(mesh.get("draw_index_count", 0))
-   }
-   ui_profile.print_text("[scene:cpu_anim_draw] i=" + to_str(i) +
-      " baked=" + to_str(cpu_parts_baked) +
-      " have_scene_model=" + to_str(have_saved_model) +
-      " have_part_model=" + to_str(have_render_model) +
-      " visible=true" +
-      " unlit=" + to_str(part_unlit) +
-      " mesh_unlit=" + to_str(mesh_draw_unlit) +
-      " mesh_nocull=" + to_str(mesh_draw_nocull) +
-      " draw=" + to_str(mesh_draw_count) +
-      " idx=" + to_str(mesh_index_count) +
-      " model_t=(" + to_str(dbg_tx) + "," + to_str(dbg_ty) + "," + to_str(dbg_tz) + ")" +
-   " v0_world=(" + to_str(vwx) + "," + to_str(vwy) + "," + to_str(vwz) + ")")
-   true
-}
-
 fn _scene_draw_cpu_part(
-   dict: part,
-   any: saved_model,
-   bool: have_saved_model,
-   bool: parts_baked,
-   int: last_unlit,
-   bool: debug=false,
-   int: debug_index=0
-): int {
+   dict part,
+   any saved_model,
+   bool have_saved_model,
+   bool parts_baked,
+   int last_unlit
+) int {
    def draw_info = _scene_cpu_part_draw_info(part, saved_model, have_saved_model, parts_baked)
    if(!draw_info){ return last_unlit }
    def mesh = draw_info.get(0, 0)
@@ -7111,15 +7197,13 @@ fn _scene_draw_cpu_part(
    def part_unlit = draw_info.get(2, false)
    def part_width = draw_info.get(3, 1.0)
    def draw_model = draw_info.get(4, saved_model)
-   def have_render_model = draw_info.get(5, false)
    set_model_matrix(draw_model)
-   if(debug){ _scene_debug_cpu_anim_draw(debug_index, mesh, draw_model, parts_baked, have_saved_model, have_render_model, part_unlit) }
    last_unlit = _scene_set_unlit_if_changed(part_unlit, last_unlit)
    draw_mesh(mesh, part_lines, part_width)
    last_unlit
 }
 
-fn _scene_cache_group(dict: group): bool {
+fn _scene_cache_group(dict group) bool {
    _active_scene_group = group
    _active_scene_gpu_slab = 0
    _active_scene_render_parts = group.get("parts", 0)
@@ -7176,24 +7260,20 @@ fn _scene_cache_group(dict: group): bool {
    _active_scene_clamp_ranges()
    _active_scene_have_lights = _active_scene_light_count > 0
    _active_scene_gpu_ready = bool(_active_scene_gpu_slab) && _active_scene_count > 0
-   _active_scene_force_cpu_anim = (
-      int(group.get("anim_count", 0)) > 0 ||
-      int(group.get("skin_count", 0)) > 0 ||
-      int(group.get("morph_target_count", 0)) > 0
-   ) && is_dict(group.get("gltf_data", 0))
+   _active_scene_force_cpu_anim = _scene_group_force_cpu_anim(group, _active_scene_gpu_ready)
    true
 }
 
 fn _scene_draw_group_gpu(
-   any: gpu_slab, int: gpu_part_count, int: gpu_optical_start, int: gpu_blend_start,
-   any: render_parts_cached, any: gpu_parts_cached,
-   bool: group_model_baked, bool: group_has_optical, bool: group_has_blend,
-   bool: have_scene_lights, any: group_scene_light_slab, int: group_scene_light_count, any: group_scene_lights,
-   bool: trace_light_bind, bool: force_cpu_draw
-): bool {
+   any gpu_slab, int gpu_part_count, int gpu_optical_start, int gpu_blend_start,
+   any render_parts_cached, any gpu_parts_cached,
+   bool group_model_baked, bool group_has_optical, bool group_has_blend,
+   bool have_scene_lights, any group_scene_light_slab, int group_scene_light_count, any group_scene_lights,
+   bool force_cpu_draw
+) bool {
    if(_backend != BACKEND_VK || gpu_part_count <= 0 || !bool(gpu_slab) || force_cpu_draw){ return false }
    def gpu_visible_count = _scene_update_gpu_visibility_slab(gpu_slab, gpu_part_count, render_parts_cached, gpu_parts_cached, group_model_baked)
-   _bind_scene_lights_for_draw(have_scene_lights, group_scene_light_slab, group_scene_light_count, group_scene_lights, trace_light_bind, "gpu")
+   _bind_scene_lights_for_draw(have_scene_lights, group_scene_light_slab, group_scene_light_count, group_scene_lights)
    if(gpu_visible_count <= 0){
       lib_vkr.set_mask(0)
       _reset_material_state()
@@ -7218,7 +7298,11 @@ fn _scene_draw_group_gpu(
       if(gpu_optical_start > 0){ gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_optical_start, 0) }
       if(group_has_optical && gpu_optical_start < gpu_part_count){ lib_vkr.capture_scene_color_resume_pass() }
       if(gpu_optical_start < gpu_blend_start){ gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_optical_start, gpu_blend_start, 0) }
-      if(group_has_blend && gpu_blend_start < gpu_part_count){ gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_blend_start, gpu_part_count, 1) } elif(!group_has_blend && gpu_optical_start == 0){ gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_part_count, 0) } elif(gpu_optical_start == 0 && gpu_part_count > 0){ gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_part_count, 0) }
+      if(group_has_blend && gpu_blend_start < gpu_part_count){
+         gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, gpu_blend_start, gpu_part_count, 1)
+      } elif(gpu_drawn <= 0 && gpu_part_count > 0){
+         gpu_drawn += lib_vkr.draw_parts_flat_range_no_restore(gpu_slab, 0, gpu_part_count, 0)
+      }
    }
    lib_vkr.clear_scene_color_capture()
    if(gpu_drawn <= 0){
@@ -7232,19 +7316,17 @@ fn _scene_draw_group_gpu(
 }
 
 fn _scene_draw_group_cpu(
-   any: render_parts,
-   int: render_count,
-   bool: force_cpu_anim,
-   bool: group_parts_baked,
-   bool: group_has_optical,
-   bool: group_has_blend,
-   bool: have_scene_lights,
-   any: group_scene_light_slab,
-   int: group_scene_light_count,
-   any: group_scene_lights,
-   bool: trace_light_bind,
-   bool: anim_trace
-): bool {
+   any render_parts,
+   int render_count,
+   bool force_cpu_anim,
+   bool group_parts_baked,
+   bool group_has_optical,
+   bool group_has_blend,
+   bool have_scene_lights,
+   any group_scene_light_slab,
+   int group_scene_light_count,
+   any group_scene_lights
+) bool {
    def cpu_parts_baked = force_cpu_anim ? false : group_parts_baked
    mut cpu_optical_start = _active_scene_cpu_optical_start
    if(cpu_optical_start < 0){
@@ -7256,7 +7338,7 @@ fn _scene_draw_group_cpu(
    mut last_unlit = -1
    def cpu_blend_start = group_has_blend ? _active_scene_blend_start : render_count
    if(!_mat4_valid(_scratch_model_saved_b)){
-      _scratch_model_saved_b = render_matrix.mat4_identity()
+      _scratch_model_saved_b = mat4_identity()
    }
    mut saved_model2 = _scratch_model_saved_b
    mut have_saved_model = false
@@ -7268,36 +7350,28 @@ fn _scene_draw_group_cpu(
       }
       have_saved_model = true
    }
-   _bind_scene_lights_for_draw(have_scene_lights, group_scene_light_slab, group_scene_light_count, group_scene_lights, trace_light_bind, "cpu")
+   _bind_scene_lights_for_draw(have_scene_lights, group_scene_light_slab, group_scene_light_count, group_scene_lights)
    lib_vkr.set_mask(0)
-   def model_debug_on = _gltf_model_debug_enabled()
-   def model_debug_all = model_debug_on && ui_profile.env_truthy_cached("NY_GLTF_MODEL_DEBUG_ALL")
-   def cpu_opaque_t0 = anim_trace ? ticks() : 0
    if(cpu_optical_start > 0){
       mut i = 0
       while(i < cpu_optical_start){
          def part = render_parts[i]
-         def debug_draw = model_debug_on && (i == 0 || model_debug_all)
-         last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit, debug_draw, i)
+         last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit)
          i += 1
       }
    }
-   if(anim_trace){ ui_profile.print_text("[anim:draw] cpu_opaque_ms=" + to_str(ui_profile.elapsed_ms(cpu_opaque_t0))) }
    if(group_has_optical && cpu_optical_start < render_count){ lib_vkr.capture_scene_color_resume_pass() }
-   def cpu_tail_t0 = anim_trace ? ticks() : 0
    mut pass = 1
    while(pass <= 2){
       mut i = (pass == 1) ? cpu_optical_start : cpu_blend_start
       def pass_end = (pass == 1) ? cpu_blend_start : render_count
       while(i < pass_end){
          def part = render_parts[i]
-         def debug_draw = model_debug_on && pass == 1 && (i == cpu_optical_start || model_debug_all)
-         last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit, debug_draw, i)
+         last_unlit = _scene_draw_cpu_part(part, saved_model2, have_saved_model, cpu_parts_baked, last_unlit)
          i += 1
       }
       pass += 1
    }
-   if(anim_trace){ ui_profile.print_text("[anim:draw] cpu_tail_ms=" + to_str(ui_profile.elapsed_ms(cpu_tail_t0))) }
    lib_vkr.clear_scene_color_capture()
    set_model_matrix(saved_model2)
    _reset_material_state()
@@ -7305,30 +7379,26 @@ fn _scene_draw_group_cpu(
    true
 }
 
-fn _scene_group_edit_active(any: group): bool {
+fn _scene_group_edit_active(any group) bool {
    if(!is_dict(group)){ return false }
    abs(float(group.get("edit_tx", 0.0))) > 0.000001 ||
    abs(float(group.get("edit_ty", 0.0))) > 0.000001 ||
-   abs(float(group.get("edit_tz", 0.0))) > 0.000001
+   abs(float(group.get("edit_tz", 0.0))) > 0.000001 ||
+   abs(float(group.get("edit_rx", 0.0))) > 0.000001 ||
+   abs(float(group.get("edit_ry", 0.0))) > 0.000001 ||
+   abs(float(group.get("edit_rz", 0.0))) > 0.000001 ||
+   abs(float(group.get("edit_scale", 1.0)) - 1.0) > 0.000001
 }
 
-fn draw_mesh_group(any: group): bool {
+fn draw_mesh_group(any group) bool {
    "Draws a grouped mesh scene, binding per-part textures when present."
    if(!is_dict(group)){ return false }
    if(to_int(group) != to_int(_active_scene_group)){ _scene_cache_group(group) }
-   def force_cpu_anim = _active_scene_force_cpu_anim
+   def force_cpu_anim = _scene_group_force_cpu_anim(group, _active_scene_gpu_ready)
+   _active_scene_force_cpu_anim = force_cpu_anim
    mut force_cpu_draw = force_cpu_anim || (_active_scene_has_blend && _gltf_force_cpu_blend_enabled())
-   def anim_trace = _anim_frame_trace_enabled() && _anim_frame_trace_hits < 16
-   def anim_trace_t0 = anim_trace ? ticks() : 0
-   if(anim_trace){
-      ui_profile.print_text("[anim:draw] begin gpu_ready=" + to_str(_active_scene_gpu_ready) +
-         " parts=" + to_str(_active_scene_count) +
-      " force_cpu_anim=" + to_str(force_cpu_anim))
-   }
    if(force_cpu_anim){
-      def anim_apply_t0 = anim_trace ? ticks() : 0
       group = _apply_group_gltf_animation(group)
-      if(anim_trace){ ui_profile.print_text("[anim:draw] apply_ms=" + to_str(ui_profile.elapsed_ms(anim_apply_t0))) }
       _active_scene_refresh_cpu_anim(group)
    }
    def gpu_slab = _active_scene_gpu_slab
@@ -7341,7 +7411,6 @@ fn draw_mesh_group(any: group): bool {
    mut group_parts_baked = _active_scene_parts_baked
    def group_scene_light_slab = _active_scene_light_slab
    def group_scene_light_count = _active_scene_light_count
-   def have_gpu_slab = _active_scene_gpu_ready
    def have_scene_lights = _active_scene_have_lights
    def render_parts_cached = _active_scene_render_parts
    def gpu_parts_cached = _active_scene_gpu_parts
@@ -7349,25 +7418,8 @@ fn draw_mesh_group(any: group): bool {
    if(group_has_edit){
       group_model_baked = false
       group_parts_baked = false
-      if(is_list(render_parts_cached)){ force_cpu_draw = true }
    }
    def group_scene_lights = (have_scene_lights && !group_scene_light_slab) ? group.get("scene_lights", []) : []
-   def trace_light_bind = _light_trace_bind_enabled()
-   if(trace_light_bind){
-      ui_profile.print_text(
-         "[scene:draw] gpu_ready=" + to_str(have_gpu_slab) +
-         " gpu_count=" + to_str(gpu_part_count) +
-         " optical_start=" + to_str(gpu_optical_start) +
-         " baked=" + to_str(group_model_baked) +
-         " force_cpu=" + to_str(force_cpu_draw) +
-         " has_optical=" + to_str(group_has_optical) +
-         " lights=" + to_str(have_scene_lights) +
-         " light_count=" + to_str(group_scene_light_count) +
-         " slab=" + to_str(group_scene_light_slab) +
-         " slab_bool=" + to_str(bool(group_scene_light_slab)) +
-         " list_len=" + to_str(is_list(group_scene_lights) ? group_scene_lights.len : -1)
-      )
-   }
    if(_scene_draw_group_gpu(
          gpu_slab,
          gpu_part_count,
@@ -7382,7 +7434,6 @@ fn draw_mesh_group(any: group): bool {
          group_scene_light_slab,
          group_scene_light_count,
          group_scene_lights,
-         trace_light_bind,
          force_cpu_draw
    )){ return true }
    def render_parts = render_parts_cached
@@ -7399,18 +7450,12 @@ fn draw_mesh_group(any: group): bool {
       have_scene_lights,
       group_scene_light_slab,
       group_scene_light_count,
-      group_scene_lights,
-      trace_light_bind,
-      anim_trace
+      group_scene_lights
    )
-   if(anim_trace){
-      ui_profile.print_text("[anim:draw] total_ms=" + to_str(ui_profile.elapsed_ms(anim_trace_t0)))
-      _anim_frame_trace_hits += 1
-   }
    true
 }
 
-fn _mat4_data_off(any: m): int {
+fn _mat4_data_off(any m) int {
    if(!is_list(m)){ return -1 }
    def n = m.len
    if(n >= 18 && int(m.get(0, 0)) == 4 && int(m.get(1, 0)) == 4){ return 2 }
@@ -7418,16 +7463,16 @@ fn _mat4_data_off(any: m): int {
    -1
 }
 
-fn _mat4_valid(any: m): bool{ _mat4_data_off(m) >= 0 }
+fn _mat4_valid(any m) bool { _mat4_data_off(m) >= 0 }
 
-fn horizontal_mul_mvp(f64: x, f64: y, f64: z, int: row, any: m): f64 {
+fn horizontal_mul_mvp(f64 x, f64 y, f64 z, int row, any m) f64 {
    "Multiplies point [x,y,z,1] by one row of a column-major MVP matrix."
    def off = _mat4_data_off(m)
    if(off < 0){ return row == 3 ? 1.0 : 0.0 }
    x * float(m.get(off + row, 0.0)) + y * float(m.get(off + 4 + row, 0.0)) + z * float(m.get(off + 8 + row, 0.0)) + float(m.get(off + 12 + row, 0.0))
 }
 
-fn _scene_bounds_cullable(any: min, any: max): bool {
+fn _scene_bounds_cullable(any min, any max) bool {
    if(!is_list(min) || !is_list(max) || min.len < 3 || max.len < 3){ return false }
    def sx = abs(float(max.get(0, 0.0)) - float(min.get(0, 0.0)))
    def sy = abs(float(max.get(1, 0.0)) - float(min.get(1, 0.0)))
@@ -7435,7 +7480,7 @@ fn _scene_bounds_cullable(any: min, any: max): bool {
    (sx + sy + sz) > 0.000001
 }
 
-fn _clip_corner_reject_bits(f64: cx, f64: cy, f64: cz, f64: cw, f64: eps): int {
+fn _clip_corner_reject_bits(f64 cx, f64 cy, f64 cz, f64 cw, f64 eps) int {
    mut bits = 0
    if(cx < (0.0 - cw - eps)){ bits = bits | 1 } if(cx > (cw + eps)){ bits = bits | 2 }
    if(cy < (0.0 - cw - eps)){ bits = bits | 4 } if(cy > (cw + eps)){ bits = bits | 8 }
@@ -7443,12 +7488,12 @@ fn _clip_corner_reject_bits(f64: cx, f64: cy, f64: cz, f64: cw, f64: eps): int {
    bits
 }
 
-fn _is_aabb_visible_xform(list: min, list: max, list: mvp, any: model=0): bool {
+fn _is_aabb_visible_xform(list min, list max, list mvp, any model=0) bool {
    if(!_mat4_valid(mvp)){ return true }
    if(!_scene_bounds_cullable(min, max)){ return true }
    def x1, y1, z1 = float(min.get(0, 0.0)), float(min.get(1, 0.0)), float(min.get(2, 0.0))
    def x2, y2, z2 = float(max.get(0, 0.0)), float(max.get(1, 0.0)), float(max.get(2, 0.0))
-   mut out_bits = 63 ;; 111111 in binary
+   mut out_bits = 63
    def eps = 0.0001
    def use_model = _mat4_valid(model)
    mut i = 0 while(i < 8){
@@ -7462,15 +7507,15 @@ fn _is_aabb_visible_xform(list: min, list: max, list: mvp, any: model=0): bool {
       def cx, cy = horizontal_mul_mvp(tx, ty, tz, 0, mvp), horizontal_mul_mvp(tx, ty, tz, 1, mvp)
       def cz, cw = horizontal_mul_mvp(tx, ty, tz, 2, mvp), horizontal_mul_mvp(tx, ty, tz, 3, mvp)
       out_bits = out_bits & _clip_corner_reject_bits(cx, cy, cz, cw, eps)
-      if(out_bits == 0){ return true } ;; At least one point potentially visible
+      if(out_bits == 0){ return true }
       i += 1
    }
-   false ;; Wholly outside at least one plane
+   false
 }
 
-fn _is_aabb_visible_model(any: min, any: max, any: model, any: mvp): bool{ _is_aabb_visible_xform(min, max, mvp, model) }
+fn _is_aabb_visible_model(any min, any max, any model, any mvp) bool { _is_aabb_visible_xform(min, max, mvp, model) }
 
-fn _scene_part_frustum_visible(any: part, any: model): bool {
+fn _scene_part_frustum_visible(any part, any model) bool {
    if(!_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix)){ return true }
    if(!is_dict(part)){ return true }
    def bmin = part.get("min", 0)
@@ -7479,7 +7524,7 @@ fn _scene_part_frustum_visible(any: part, any: model): bool {
    _is_aabb_visible_model(bmin, bmax, model, _mvp_matrix)
 }
 
-fn _scene_effective_part_model(any: render_model, any: scene_model, bool: group_model_baked): any {
+fn _scene_effective_part_model(any render_model, any scene_model, bool group_model_baked) any {
    if(!_mat4_valid(render_model)){ return scene_model }
    if(!group_model_baked && _mat4_valid(scene_model)){
       mat4_mul_into(scene_model, render_model, _scratch_model_mul)
@@ -7488,7 +7533,7 @@ fn _scene_effective_part_model(any: render_model, any: scene_model, bool: group_
    render_model
 }
 
-fn _scene_gpu_part_frame_visible_from_part(any: part, any: scene_model, bool: group_model_baked): bool {
+fn _scene_gpu_part_frame_visible_from_part(any part, any scene_model, bool group_model_baked) bool {
    if(is_dict(part) && !part.get("visible", true)){ return false }
    if(!is_dict(part)){ return true }
    if(!_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix)){ return true }
@@ -7500,7 +7545,7 @@ fn _scene_gpu_part_frame_visible_from_part(any: part, any: scene_model, bool: gr
    _is_aabb_visible_model(bmin, bmax, model, _mvp_matrix)
 }
 
-fn _scene_gpu_part_frame_visible_from_rec(any: rec, any: scene_model, bool: group_model_baked): bool {
+fn _scene_gpu_part_frame_visible_from_rec(any rec, any scene_model, bool group_model_baked) bool {
    if(is_list(rec) && _list_int_safe(rec, 37, 1) == 0){ return false }
    if(!is_list(rec)){ return true }
    if(!_gltf_frustum_cull_enabled() || !_mat4_valid(_mvp_matrix)){ return true }
@@ -7512,7 +7557,7 @@ fn _scene_gpu_part_frame_visible_from_rec(any: rec, any: scene_model, bool: grou
    _is_aabb_visible_model(bmin, bmax, model, _mvp_matrix)
 }
 
-fn _scene_update_gpu_visibility_slab(any: slab_ptr, int: count, any: render_parts, any: gpu_parts, bool: group_model_baked): int {
+fn _scene_update_gpu_visibility_slab(any slab_ptr, int count, any render_parts, any gpu_parts, bool group_model_baked) int {
    if(!slab_ptr || count <= 0){ return 0 }
    def have_render_parts = is_list(render_parts) && render_parts.len >= count
    if(!have_render_parts){ return count }
@@ -7550,11 +7595,40 @@ fn _scene_update_gpu_visibility_slab(any: slab_ptr, int: count, any: render_part
    visible_count
 }
 
-fn set_wireframe(bool: enabled): bool {
+fn set_wireframe(bool enabled) bool {
    "Enables or disables wireframe rendering mode(where supported)."
    if(_backend == BACKEND_VK){ lib_vkr.set_wireframe(enabled) }
    elif(_backend == BACKEND_GL){
-      ; gl.polygon_mode
    }
    true
+}
+
+#main {
+   def win = init_mock_surface(64, 64)
+   assert(is_dict(win) && get_active_backend() == BACKEND_MOCK, "render mock surface")
+   assert(get_framebuffer_size() == [64, 64] && framebuffer_size_f64() == [64.0, 64.0], "render framebuffer size")
+   assert(begin_drawing() && clear_background(BLACK), "render mock begin")
+   def fit = layout_fit(128.0, 64.0)
+   assert(fit.get("scale", 0.0) == 0.5 && layout_x(fit, 10.0) == 5.0 && layout_y(fit, 10.0) == 21.0, "render layout fit")
+   assert(layout_size(fit, 8.0) == 4.0 && layout_rect(fit, 10.0, 20.0, 30.0, 40.0) == [5.0, 26.0, 15.0, 20.0], "render layout helpers")
+   assert(set_ortho_2d(0.0, 64.0, 0.0, 64.0), "render ortho setup")
+   assert(draw_rect(8.0, 8.0, 18.0, 18.0, RED), "render mock rect")
+   def px = get_pixel(16, 16)
+   assert(is_list(px) && float(px.get(0, 0.0)) > 0.5 && float(px.get(3, 0.0)) > 0.5, "render mock pixel")
+   assert(draw_rectangle_lines(2.0, 2.0, 20.0, 16.0, GREEN, 1.0), "render rectangle outline")
+   assert(draw_line_2d(0.0, 63.0, 63.0, 0.0, BLUE, 1.0), "render line 2d")
+   assert(draw_circle(44.0, 14.0, 6.0, YELLOW, 18) && draw_ring(44.0, 32.0, 3.0, 8.0, CYAN, 24), "render circles")
+   assert(draw_polygon(18.0, 46.0, 5, 7.0, MAGENTA) && draw_ellipse(45.0, 48.0, 9.0, 5.0, ORANGE, 24), "render filled shapes")
+   assert(draw_arc(32.0, 32.0, 12.0, 20.0, 160.0, PURPLE, 1.0, 24), "render arc")
+   assert(draw_rounded_rectangle(4.0, 36.0, 14.0, 12.0, 3.0, CYAN, 12) && draw_star(54.0, 54.0, 3.0, 7.0, 5, WHITE), "render rounded/star")
+   assert(draw_text(999999, "a9?#", 5.0, 22.0, WHITE), "render builtin text")
+   assert(draw_rect_fast(1.0, 1.0, 3.0, 3.0, color_pack(1.0, 1.0, 1.0, 1.0)), "render fast rect")
+   assert(draw_rect_outline_fast(28.0, 28.0, 10.0, 10.0, color_pack(0.0, 1.0, 0.0, 1.0)), "render fast outline")
+   assert(scissor_push(0.0, 0.0, 12.0, 12.0) && scissor_pop(), "render scissor")
+   assert(set_model_matrix(mat4_identity()) && draw_line([4.0, 4.0, 0.0], [60.0, 4.0, 0.0], YELLOW, 1.0), "render world line")
+   assert(end_drawing(), "render mock end")
+   def next_fit = begin_frame_layout(BLACK, 128.0, 64.0)
+   assert(is_dict(next_fit) && next_fit.get("scale", 0.0) == 0.5 && end_frame(), "render frame layout")
+   assert(close_window(), "render mock close")
+   print("✓ std.os.ui.render self-test passed")
 }

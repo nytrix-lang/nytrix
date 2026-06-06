@@ -1,5 +1,8 @@
-;; Keywords: sound backend pulse
+;; Keywords: sound backend pulse os
 ;; PulseAudio simple-client backend for Linux audio playback.
+;; References:
+;; - std.os.sound.backend
+;; - std.os
 module std.os.sound.backend.pulse(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use std.core
 use std.core.dict_mod
@@ -15,38 +18,56 @@ use std.os.sound.backend.shared as backend_shared
    #link "libpulse.so"
    #include <pulse/error.h> as "pa_"
 } #else {
-   fn pa_simple_new(..._args): any { 0 }
-   fn pa_strerror(any: _err): any { 0 }
-   fn pa_simple_drain(..._args): int { -1 }
-   fn pa_simple_flush(..._args): int { -1 }
-   fn pa_simple_free(any: _pa): any { 0 }
-   fn pa_simple_write(..._args): int { -1 }
+   fn pa_simple_new(..._args) any {
+      "Runs the pa simple new operation."
+      0
+   }
+   fn pa_strerror(any _err) any {
+      "Runs the pa strerror operation."
+      0
+   }
+   fn pa_simple_drain(..._args) int {
+      "Runs the pa simple drain operation."
+      -1
+   }
+   fn pa_simple_flush(..._args) int {
+      "Runs the pa simple flush operation."
+      -1
+   }
+   fn pa_simple_free(any _pa) any {
+      "Runs the pa simple free operation."
+      0
+   }
+   fn pa_simple_write(..._args) int {
+      "Runs the pa simple write operation."
+      -1
+   }
 } #endif
 
-fn _get_latency_ms(): int { common.env_int_clamped("NY_AUDIO_LATENCY_MS", 40, 10, 500) }
+fn _get_latency_ms() int { common.env_int_clamped("NY_AUDIO_LATENCY_MS", 40, 10, 500) }
 def PA_STREAM_PLAYBACK = 1
 def PA_SAMPLE_S16LE = 3
 def PA_SAMPLE_FLOAT32LE = 5
 mut _lib = 0
 mut _avail = -1
 
-fn is_available(): bool {
+fn is_available() bool {
    "Returns whether the PulseAudio backend is available on this host."
    def state = backend_shared.probe_linux_library_once(_avail, _lib, "pulse-simple", "pa_simple_new")
    _avail, _lib = state.get(0), state.get(1)
    _avail == 1
 }
 
-fn init(any: ctx): any {
+fn init(any ctx) any {
    "Registers the PulseAudio backend in the shared audio context."
    if(!is_available()){ return 0 }
    if(sound_debug.enabled()){ print("Sound: Pulse: init") }
    backend_shared.append_output_device(ctx, "PulseAudio Default", "pulse_default")
 }
 
-fn shutdown(any: ctx): any { "Shuts down PulseAudio backend state stored in `ctx`." }
+fn shutdown(any ctx) any { "Shuts down PulseAudio backend state stored in `ctx`." }
 
-fn stream_open(any: stream): any {
+fn stream_open(any stream) any {
    "Opens a PulseAudio playback stream for the provided stream dictionary."
    if(!is_available()){ return false }
    def ss = malloc(12)
@@ -124,12 +145,12 @@ fn stream_open(any: stream): any {
    stream
 }
 
-fn stream_start(any: stream): bool {
+fn stream_start(any stream) bool {
    "PulseAudio streams begin writing immediately after open."
    true
 }
 
-fn stream_stop(any: stream): any {
+fn stream_stop(any stream) any {
    "Flushes, drains, and frees a PulseAudio playback stream."
    def pa = stream.get("handle")
    if(pa){
@@ -143,7 +164,7 @@ fn stream_stop(any: stream): any {
    stream = stream.set("handle", 0)
 }
 
-fn write(any: pa, any: buf, int: size): bool {
+fn write(any pa, any buf, int size) bool {
    "Writes `size` bytes to a PulseAudio stream."
    if(!pa){ return false }
    def n = size

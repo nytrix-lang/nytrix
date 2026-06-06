@@ -1,5 +1,8 @@
-;; Keywords: sound backend alsa
+;; Keywords: sound backend alsa os
 ;; ALSA sound backend for Linux audio playback.
+;; References:
+;; - std.os.sound.backend
+;; - std.os
 module std.os.sound.backend.alsa(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use std.core
 use std.core.mem (cstr)
@@ -11,13 +14,34 @@ use std.os.sound.backend.shared as backend_shared
 #linux {
    #include <alsa/asoundlib.h> as "snd_"
 } #else {
-   fn snd_pcm_open(..._args): int { -1 }
-   fn snd_pcm_set_params(..._args): int { -1 }
-   fn snd_pcm_close(any: _pcm): int { 0 }
-   fn snd_pcm_prepare(any: _pcm): int { -1 }
-   fn snd_pcm_drain(any: _pcm): int { 0 }
-   fn snd_pcm_writei(..._args): int { -1 }
-   fn snd_pcm_recover(..._args): int { -1 }
+   fn snd_pcm_open(..._args) int {
+      "Runs the snd pcm open operation."
+      -1
+   }
+   fn snd_pcm_set_params(..._args) int {
+      "Runs the snd pcm set params operation."
+      -1
+   }
+   fn snd_pcm_close(any _pcm) int {
+      "Runs the snd pcm close operation."
+      0
+   }
+   fn snd_pcm_prepare(any _pcm) int {
+      "Runs the snd pcm prepare operation."
+      -1
+   }
+   fn snd_pcm_drain(any _pcm) int {
+      "Runs the snd pcm drain operation."
+      0
+   }
+   fn snd_pcm_writei(..._args) int {
+      "Runs the snd pcm writei operation."
+      -1
+   }
+   fn snd_pcm_recover(..._args) int {
+      "Runs the snd pcm recover operation."
+      -1
+   }
 } #endif
 def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2
@@ -26,14 +50,14 @@ def SND_PCM_ACCESS_RW_INTERLEAVED = 3
 mut _lib = 0
 mut _avail = -1
 
-fn is_available(): bool {
+fn is_available() bool {
    "Returns whether the ALSA backend is available on this host."
    def state = backend_shared.probe_linux_library_once(_avail, _lib, "asound", "snd_pcm_open")
    _avail, _lib = state.get(0), state.get(1)
    _avail == 1
 }
 
-fn _push_unique(list: lst, any: item): list {
+fn _push_unique(list lst, any item) list {
    if(!is_str(item) || item.len == 0){ return lst }
    mut i = 0
    while(i < lst.len){
@@ -43,7 +67,7 @@ fn _push_unique(list: lst, any: item): list {
    lst.append(item)
 }
 
-fn _build_candidates(any: dev_id): list {
+fn _build_candidates(any dev_id) list {
    mut out = list()
    out = _push_unique(out, dev_id)
    out = _push_unique(out, "pipewire")
@@ -57,20 +81,20 @@ fn _build_candidates(any: dev_id): list {
    out
 }
 
-fn _latency_us(): int { common.env_int_clamped("NY_AUDIO_ALSA_LATENCY_MS", 120, 20, 2000) * 1000 }
+fn _latency_us() int { common.env_int_clamped("NY_AUDIO_ALSA_LATENCY_MS", 120, 20, 2000) * 1000 }
 
-fn init(any: ctx): any {
+fn init(any ctx) any {
    "Registers the ALSA backend in the shared audio context."
    backend_shared.init_output_device(ctx, is_available(), "ALSA Default", "default")
 }
 
-fn shutdown(any: ctx): any {
+fn shutdown(any ctx) any {
    "Shuts down ALSA backend state stored in `ctx`."
    if(ctx){ return ctx }
    0
 }
 
-fn stream_open(any: stream): any {
+fn stream_open(any stream) any {
    "Opens an ALSA playback stream for the provided stream dictionary."
    if(!is_available()){ return false }
    def device = stream.get("device")
@@ -126,14 +150,14 @@ fn stream_open(any: stream): any {
    stream
 }
 
-fn stream_start(any: stream): bool {
+fn stream_start(any stream) bool {
    "Prepares an ALSA playback stream for writes."
    def pcm = stream.get("handle")
    if(!pcm){ return false }
    snd_pcm_prepare(pcm) >= 0
 }
 
-fn stream_stop(any: stream): any {
+fn stream_stop(any stream) any {
    "Drains and closes an ALSA playback stream."
    def pcm = stream.get("handle")
    if(pcm){ snd_pcm_drain(pcm) }
@@ -141,7 +165,7 @@ fn stream_stop(any: stream): any {
    stream = stream.set("handle", 0)
 }
 
-fn write(any: pcm, any: buf, int: frames, int: frame_bytes=4): bool {
+fn write(any pcm, any buf, int frames, int frame_bytes=4) bool {
    "Writes interleaved audio frames to ALSA, recovering transient write errors when possible."
    if(!pcm){ return false }
    mut ptr = buf

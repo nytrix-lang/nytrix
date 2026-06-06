@@ -1,5 +1,7 @@
-;; Keywords: process spawn subprocess
+;; Keywords: process spawn subprocess os
 ;; Process execution, spawning, waiting, capture, and pipe control.
+;; References:
+;; - std.os
 module std.os.process(run, popen, waitpid)
 use std.core
 use std.core as core
@@ -9,12 +11,12 @@ use std.core.str
 use std.core.reflect
 use std.os.path as ospath
 
-fn _path_exists(any: path): bool {
+fn _path_exists(any path) bool {
    if(!is_str(path) || path.len == 0){ return false }
    __access(path, 0) == 0
 }
 
-fn _resolve_cmd(any: cmd): any {
+fn _resolve_cmd(any cmd) any {
    if(!is_str(cmd)){ return cmd }
    if(ospath.has_sep(cmd) || ospath.is_abs(cmd)){
       def norm = ospath.normalize(cmd)
@@ -69,12 +71,12 @@ fn _resolve_cmd(any: cmd): any {
    ospath.normalize(cmd)
 }
 
-fn _argv_offset(str: path, str: rpath, list: args, int: n): int {
+fn _argv_offset(str path, str rpath, list args, int n) int {
    if(n > 0 && (eq(args.get(0, ""), path) || eq(args.get(0, ""), rpath))){ return 0 }
    1
 }
 
-fn _build_argv(str: path, str: rpath, list: args): any {
+fn _build_argv(str path, str rpath, list args) any {
    def n = args.len
    def offset = _argv_offset(path, rpath, args, n)
    def argv = malloc((n + offset + 1) * 8)
@@ -89,7 +91,7 @@ fn _build_argv(str: path, str: rpath, list: args): any {
    argv
 }
 
-fn waitpid(int: pid, int: options): int {
+fn waitpid(int pid, int options) int {
    "Waits for `pid` and returns the **exit code** (0..255). Negative on failure."
    #windows {
       if(pid <= 0){ return -1 }
@@ -101,13 +103,12 @@ fn waitpid(int: pid, int: options): int {
       def res = __wait4(pid, status_ptr, options)
       if(res < 0){ return res }
       def status = load32(status_ptr, 0)
-      ; Normalize to exit code
       if((status & 127) != 0){ return 128 + (status & 127) }
       return(status / 256) % 256
    } #endif
 }
 
-fn run(str: path, list: args): int {
+fn run(str path, list args) int {
    "Forks and execs `path` with `args`, waits for completion, and returns the child exit code(0..255); returns `-1` if fork fails."
    mut rpath = _resolve_cmd(path)
    #if(windows || macos){
@@ -130,7 +131,7 @@ fn run(str: path, list: args): int {
    } #endif
 }
 
-fn popen(str: path, list: args): any {
+fn popen(str path, list args) any {
    "Starts `path` with stdin/stdout pipes(stderr merged) and returns `[pid, child_stdin_fd, child_stdout_fd]`; returns `0` on setup failure."
    mut rpath = _resolve_cmd(path)
    #windows {
@@ -197,4 +198,19 @@ fn popen(str: path, list: args): any {
    sys_close_quiet(stdin_read)
    sys_close_quiet(stdout_write)
    [pid, stdin_write, stdout_read]
+}
+
+#main {
+   mut sh = "/bin/sh"
+   mut ok_args = [sh, "-c", "exit 0"]
+   mut exit_args = [sh, "-c", "exit 7"]
+   #windows {
+      sh = "cmd"
+      ok_args = [sh, "/c", "exit", "0"]
+      exit_args = [sh, "/c", "exit", "7"]
+   } #endif
+   assert(run(sh, ok_args) == 0, "process run zero")
+   assert(run(sh, exit_args) == 7, "process run exit code")
+   assert(run("nytrix-does-not-exist-nytrix", ["nytrix-does-not-exist-nytrix"]) != 0, "process run missing command")
+   print("✓ std.os.process self-test passed")
 }

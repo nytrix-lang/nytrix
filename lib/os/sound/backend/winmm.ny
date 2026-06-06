@@ -1,5 +1,8 @@
-;; Keywords: sound backend winmm
+;; Keywords: sound backend winmm os
 ;; WinMM sound backend for Windows audio playback.
+;; References:
+;; - std.os.sound.backend
+;; - std.os
 module std.os.sound.backend.winmm(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use std.core
 use std.core.dict_mod
@@ -12,35 +15,36 @@ use std.os.sound.backend.shared as backend_shared
    #include <windows.h>
    #include <mmsystem.h>
    extern "" {
-      fn waveOutOpen(ptr: _phwo, u32: _uDeviceID, ptr: _pwfx, ptr: _dwCallback, ptr: _dwInstance, u32: _fdwOpen): u32
-      fn waveOutClose(ptr: _hwo): u32
-      fn waveOutPrepareHeader(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
-      fn waveOutUnprepareHeader(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
-      fn waveOutWrite(ptr: _hwo, ptr: _pwh, u32: _cbwh): u32
-      fn waveOutReset(ptr: _hwo): u32
+      fn waveOutOpen(ptr _phwo, u32 _uDeviceID, ptr _pwfx, ptr _dwCallback, ptr _dwInstance, u32 _fdwOpen) u32
+      fn waveOutClose(ptr _hwo) u32
+      fn waveOutPrepareHeader(ptr _hwo, ptr _pwh, u32 _cbwh) u32
+      fn waveOutUnprepareHeader(ptr _hwo, ptr _pwh, u32 _cbwh) u32
+      fn waveOutWrite(ptr _hwo, ptr _pwh, u32 _cbwh) u32
+      fn waveOutReset(ptr _hwo) u32
    }
 } #else {
-   fn waveOutOpen(any: _phwo, any: _uDeviceID, any: _pwfx, any: _dwCallback, any: _dwInstance, any: _fdwOpen): int {
+   "Runs the waveOutReset operation."
+   fn waveOutOpen(any _phwo, any _uDeviceID, any _pwfx, any _dwCallback, any _dwInstance, any _fdwOpen) int {
       "Stubbed non-Windows implementation of `waveOutOpen`."
       0
    }
-   fn waveOutClose(any: _hwo): int {
+   fn waveOutClose(any _hwo) int {
       "Stubbed non-Windows implementation of `waveOutClose`."
       0
    }
-   fn waveOutPrepareHeader(any: _hwo, any: _pwh, any: _cbwh): int {
+   fn waveOutPrepareHeader(any _hwo, any _pwh, any _cbwh) int {
       "Stubbed non-Windows implementation of `waveOutPrepareHeader`."
       0
    }
-   fn waveOutUnprepareHeader(any: _hwo, any: _pwh, any: _cbwh): int {
+   fn waveOutUnprepareHeader(any _hwo, any _pwh, any _cbwh) int {
       "Stubbed non-Windows implementation of `waveOutUnprepareHeader`."
       0
    }
-   fn waveOutWrite(any: _hwo, any: _pwh, any: _cbwh): int {
+   fn waveOutWrite(any _hwo, any _pwh, any _cbwh) int {
       "Stubbed non-Windows implementation of `waveOutWrite`."
       0
    }
-   fn waveOutReset(any: _hwo): int {
+   fn waveOutReset(any _hwo) int {
       "Stubbed non-Windows implementation of `waveOutReset`."
       0
    }
@@ -49,7 +53,7 @@ def WAVE_FORMAT_PCM = 1
 def MMSYSERR_NOERROR = 0
 def CALLBACK_NULL = 0
 
-fn is_available(): bool {
+fn is_available() bool {
    "Returns whether the WinMM backend is available on this host."
    #windows {
       true
@@ -58,14 +62,14 @@ fn is_available(): bool {
    } #endif
 }
 
-fn init(any: ctx): any {
+fn init(any ctx) any {
    "Registers the WinMM backend in the shared audio context."
    backend_shared.init_output_device(ctx, is_available(), "Windows Multimedia", "winmm")
 }
 
-fn shutdown(any: ctx): any { "Shuts down WinMM backend state stored in `ctx`." }
+fn shutdown(any ctx) any { "Shuts down WinMM backend state stored in `ctx`." }
 
-fn stream_open(any: stream): any {
+fn stream_open(any stream) any {
    "Opens a WinMM playback stream for the provided stream dictionary."
    def hWaveOut = malloc(8)
    def wfx = malloc(18)
@@ -93,12 +97,12 @@ fn stream_open(any: stream): any {
    stream
 }
 
-fn stream_start(any: stream): bool {
+fn stream_start(any stream) bool {
    "WinMM streams begin playback immediately after the first write."
    true
 }
 
-fn stream_stop(any: stream): bool {
+fn stream_stop(any stream) bool {
    "Stops and closes a WinMM playback stream."
    def handle = stream.get("handle")
    if(handle){
@@ -109,7 +113,7 @@ fn stream_stop(any: stream): bool {
    true
 }
 
-fn write(any: h, any: buf, int: bytes): bool {
+fn write(any h, any buf, int bytes) bool {
    "Writes `bytes` of PCM data to a WinMM output stream."
    if(!h){ return false }
    def hdr_size = 32

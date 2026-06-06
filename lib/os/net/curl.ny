@@ -1,8 +1,11 @@
-;; Keywords: net socket curl http-client
+;; Keywords: net socket curl http-client os
 ;; libcurl-backed HTTP client transport for requests that need curl features.
 ;;
 ;; This lives in Ny stdlib (not the C runtime) to keep the runtime smaller while
 ;; still allowing HTTPS + redirects when libcurl is present.
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.curl(curl_available, curl_request, curl_request_raw, curl_get, curl_fetch)
 use std.core
 use std.core.error
@@ -26,8 +29,8 @@ use std.os.ffi (dlsym, call0_ptr, call1, call1_ptr, call2_ptr, call3, cstr, cptr
    #include <curl/curl.h> as "curl_"
 } #endif
 extern "" {
-   fn _fopen(ptr: path, ptr: mode): ptr as "fopen"
-   fn _fclose(ptr: fp): i32 as "fclose"
+   fn _fopen(ptr path, ptr mode) ptr as "fopen"
+   fn _fclose(ptr fp) i32 as "fclose"
 }
 
 def _CURLOPT_URL            = 10002
@@ -100,7 +103,7 @@ mut _p_slist_free_all = 0
 mut _curl_inited = false
 mut _tmp_seq = 0
 
-fn _load(): bool {
+fn _load() bool {
    if(_curl){ return true }
    _p_global_init = dlsym(0, "curl_global_init")
    _p_easy_init = dlsym(0, "curl_easy_init")
@@ -114,9 +117,9 @@ fn _load(): bool {
    _curl != 0
 }
 
-fn curl_available(): bool { _load() }
+fn curl_available() bool { _load() }
 
-fn _tmp_path(str: tag="curl"): str {
+fn _tmp_path(str tag="curl") str {
    def t = temp_dir()
    def pid = __getpid()
    _tmp_seq += 1
@@ -124,14 +127,14 @@ fn _tmp_path(str: tag="curl"): str {
    ospath.join(t, "nycurl_" + tag + "_" + to_str(pid) + "_" + to_str(stamp) + "_" + to_str(_tmp_seq) + ".tmp")
 }
 
-fn _timeout_sec(any: v): int {
+fn _timeout_sec(any v) int {
    if(!is_int(v)){ return 60 }
    if(v < 1){ return 1 }
    if(v > 3600){ return 3600 }
    v
 }
 
-fn _has_ctl(any: s): bool {
+fn _has_ctl(any s) bool {
    if(!is_str(s)){ return true }
    mut i = 0
    def n = s.len
@@ -143,18 +146,18 @@ fn _has_ctl(any: s): bool {
    false
 }
 
-fn _ua(any: v): str {
+fn _ua(any v) str {
    if(!is_str(v) || v.len == 0 || _has_ctl(v)){ return "nytrix/1.0" }
    v
 }
 
-fn _method(any: v): str {
+fn _method(any v) str {
    mut m = upper(strip(to_str(v)))
    if(m.len == 0 || _has_ctl(m)){ return "GET" }
    m
 }
 
-fn _opt_bool(any: options, str: name, bool: fallback): bool {
+fn _opt_bool(any options, str name, bool fallback) bool {
    if(!is_dict(options)){ return fallback }
    def v = options.get(name, fallback)
    if(is_int(v)){ return v != 0 }
@@ -165,11 +168,11 @@ fn _opt_bool(any: options, str: name, bool: fallback): bool {
    v ? true : false
 }
 
-fn _opt_has(any: options, str: name): bool {
+fn _opt_has(any options, str name) bool {
    is_dict(options) && options.get(name, nil) != nil
 }
 
-fn _opt_int(any: options, str: name, int: fallback, int: min_v, int: max_v): int {
+fn _opt_int(any options, str name, int fallback, int min_v, int max_v) int {
    if(!is_dict(options)){ return fallback }
    def v = options.get(name, fallback)
    mut out = is_int(v) ? v : int(v)
@@ -178,7 +181,7 @@ fn _opt_int(any: options, str: name, int: fallback, int: min_v, int: max_v): int
    out
 }
 
-fn _opt_int_any(any: options, list: names, int: fallback, int: min_v, int: max_v): int {
+fn _opt_int_any(any options, list names, int fallback, int min_v, int max_v) int {
    mut i = 0
    while(i < names.len){
       def k = to_str(names.get(i))
@@ -188,14 +191,14 @@ fn _opt_int_any(any: options, list: names, int: fallback, int: min_v, int: max_v
    fallback
 }
 
-fn _opt_str(any: options, str: name, str: fallback=""): str {
+fn _opt_str(any options, str name, str fallback="") str {
    if(!is_dict(options)){ return fallback }
    def v = options.get(name, fallback)
    if(!is_str(v) || _has_ctl(v)){ return fallback }
    v
 }
 
-fn _opt_str_any(any: options, list: names, str: fallback=""): str {
+fn _opt_str_any(any options, list names, str fallback="") str {
    mut i = 0
    while(i < names.len){
       def k = to_str(names.get(i))
@@ -205,7 +208,7 @@ fn _opt_str_any(any: options, list: names, str: fallback=""): str {
    fallback
 }
 
-fn _curl_error(int: code): str {
+fn _curl_error(int code) str {
    if(code == 0){ return "" }
    if(_p_easy_strerror != 0){
       def p = call1_ptr(_p_easy_strerror, code)
@@ -214,63 +217,71 @@ fn _curl_error(int: code): str {
    "curl error " + to_str(code)
 }
 
-fn _curl_auth_mask(any: v, int: fallback=1): int {
+fn _curl_auth_mask(any v, int fallback=1) int {
    if(is_int(v)){ return v }
    def s = lower(strip(to_str(v)))
-   if(s == "" || s == "basic"){ return 1 }
-   if(s == "digest"){ return 2 }
-   if(s == "negotiate" || s == "gssapi" || s == "spnego"){ return 4 }
-   if(s == "ntlm"){ return 8 }
-   if(s == "digest-ie" || s == "digest_ie"){ return 16 }
-   if(s == "bearer"){ return 64 }
-   if(s == "any"){ return 4294967279 }
-   if(s == "anysafe" || s == "safe"){ return 4294967278 }
-   fallback
+   case s {
+      "", "basic" -> 1
+      "digest" -> 2
+      "negotiate", "gssapi", "spnego" -> 4
+      "ntlm" -> 8
+      "digest-ie", "digest_ie" -> 16
+      "bearer" -> 64
+      "any" -> 4294967279
+      "anysafe", "safe" -> 4294967278
+      _ -> fallback
+   }
 }
 
-fn _curl_http_version(any: v): int {
+fn _curl_http_version(any v) int {
    if(is_int(v)){ return v }
    def s = lower(strip(to_str(v)))
-   if(s == "" || s == "auto" || s == "none"){ return 0 }
-   if(s == "1" || s == "1.0" || s == "http/1.0"){ return 1 }
-   if(s == "1.1" || s == "http/1.1"){ return 2 }
-   if(s == "2" || s == "2.0" || s == "h2" || s == "http/2"){ return 3 }
-   if(s == "2tls" || s == "h2tls"){ return 4 }
-   if(s == "2-prior" || s == "h2c" || s == "prior"){ return 5 }
-   if(s == "3" || s == "h3" || s == "http/3"){ return 30 }
-   if(s == "3only" || s == "h3only"){ return 31 }
-   0
+   case s {
+      "", "auto", "none" -> 0
+      "1", "1.0", "http/1.0" -> 1
+      "1.1", "http/1.1" -> 2
+      "2", "2.0", "h2", "http/2" -> 3
+      "2tls", "h2tls" -> 4
+      "2-prior", "h2c", "prior" -> 5
+      "3", "h3", "http/3" -> 30
+      "3only", "h3only" -> 31
+      _ -> 0
+   }
 }
 
-fn _curl_ip_resolve(any: v): int {
+fn _curl_ip_resolve(any v) int {
    if(is_int(v)){ return v }
    def s = lower(strip(to_str(v)))
-   if(s == "4" || s == "v4" || s == "ipv4"){ return 1 }
-   if(s == "6" || s == "v6" || s == "ipv6"){ return 2 }
-   0
+   case s {
+      "4", "v4", "ipv4" -> 1
+      "6", "v6", "ipv6" -> 2
+      _ -> 0
+   }
 }
 
-fn _curl_postredir(any: v): int {
+fn _curl_postredir(any v) int {
    if(is_int(v)){ return v }
    if(v ? false : true){ return 0 }
    def s = lower(strip(to_str(v)))
-   if(s == "all" || s == "true" || s == "1" || s == "yes" || s == "on"){ return 7 }
-   if(s == "301"){ return 1 }
-   if(s == "302"){ return 2 }
-   if(s == "303"){ return 4 }
-   0
+   case s {
+      "all", "true", "1", "yes", "on" -> 7
+      "301" -> 1
+      "302" -> 2
+      "303" -> 4
+      _ -> 0
+   }
 }
 
-fn _log_enabled(any: options, str: want): bool {
+fn _log_enabled(any options, str want) bool {
    _opt_bool(options, "curl_log", true) && netctx.log_enabled(options, want)
 }
 
-fn _curl_log(any: options, str: want, str: msg): int {
+fn _curl_log(any options, str want, str msg) int {
    if(!_opt_bool(options, "curl_log", true)){ return 0 }
    netctx.log_line("curl", want, msg, options)
 }
 
-fn _headers_slist(any: headers): any {
+fn _headers_slist(any headers) any {
    if(_p_slist_append == 0){ return 0 }
    if(is_list(headers) || is_tuple(headers)){
       mut sl0 = 0
@@ -299,7 +310,7 @@ fn _headers_slist(any: headers): any {
    sl
 }
 
-fn _string_slist(any: values): any {
+fn _string_slist(any values) any {
    if(_p_slist_append == 0 || !(is_list(values) || is_tuple(values))){ return 0 }
    mut sl = 0
    mut i = 0
@@ -311,7 +322,7 @@ fn _string_slist(any: values): any {
    sl
 }
 
-fn _count_header_blocks(str: headers): int {
+fn _count_header_blocks(str headers) int {
    mut count = 0
    if(startswith(headers, "HTTP/")){ count += 1 }
    mut pos = 0
@@ -328,7 +339,7 @@ fn _count_header_blocks(str: headers): int {
    count
 }
 
-fn _last_headers(str: headers): str {
+fn _last_headers(str headers) str {
    if(headers.len == 0){ return "" }
    mut start = 0
    def cr = find_last(headers, "\r\nHTTP/")
@@ -338,7 +349,7 @@ fn _last_headers(str: headers): str {
    strip(slice(headers, start, headers.len))
 }
 
-fn _curl_result(str: headers, str: body, str: method, any: url, int: curl_code): dict {
+fn _curl_result(str headers, str body, str method, any url, int curl_code) dict {
    def last_head = _last_headers(headers)
    def raw = last_head.len > 0 ? (last_head + "\r\n\r\n" + body) : body
    mut out = http.http_parse_response(raw)
@@ -357,7 +368,7 @@ fn _curl_result(str: headers, str: body, str: method, any: url, int: curl_code):
    out
 }
 
-fn curl_request(any: method, any: url, any: data=0, any: headers=0, any: timeout_sec=60, any: user_agent="nytrix/1.0", any: options=0): dict {
+fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
    "Performs an HTTP/HTTPS request via libcurl and returns parsed status, headers, and body."
    def m = _method(method)
    _curl_log(options, "info", m + " " + (is_str(url) ? url : to_str(url)))
@@ -537,19 +548,19 @@ fn curl_request(any: method, any: url, any: data=0, any: headers=0, any: timeout
    okr
 }
 
-fn curl_request_raw(any: method, any: url, any: data=0, any: headers=0, any: timeout_sec=60, any: user_agent="nytrix/1.0", any: options=0): str {
+fn curl_request_raw(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) str {
    "Performs a libcurl request and returns the final raw HTTP response."
    def r = curl_request(method, url, data, headers, timeout_sec, user_agent, options)
    if(!is_dict(r)){ return "" }
    r.get("raw", "")
 }
 
-fn curl_get(any: url, any: headers=0, any: timeout_sec=60, any: user_agent="nytrix/1.0", any: options=0): dict {
+fn curl_get(any url, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
    "Performs a libcurl GET request and returns parsed response metadata."
    curl_request("GET", url, 0, headers, timeout_sec, user_agent, options)
 }
 
-fn curl_fetch(any: url, any: timeout_sec=60, any: user_agent="nytrix/1.0"): any {
+fn curl_fetch(any url, any timeout_sec=60, any user_agent="nytrix/1.0") any {
    "Fetches `url` via libcurl and returns the body string. Returns 0 on failure or non-2xx status."
    def r = curl_request("GET", url, 0, 0, timeout_sec, user_agent)
    if(!is_dict(r) || !r.get("ok", false)){ return 0 }
