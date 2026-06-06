@@ -127,7 +127,7 @@ static void ny_cg_init_options(codegen_t *cg) {
   if (cg->strict_diagnostics)
     NY_LOG_V1("Strict diagnostics enabled (NYTRIX_STRICT_DIAGNOSTICS)\n");
   if (cg->strict_types)
-    NY_LOG_V1("Strict type cliffs enabled (NYTRIX_STRICT_TYPES)\n");
+    NY_LOG_V1("Compile-time type checks enabled (NYTRIX_STRICT_TYPES)\n");
 }
 
 static bool ny_triple_is_apple(const char *triple) {
@@ -431,12 +431,14 @@ static bool ny_lazy_name_set_contains_hash(const ny_name_set *set,
                                            const char *name, uint64_t hash) {
   if (!set || !set->slots || !set->cap || !name || !*name)
     return false;
+  size_t name_len = strlen(name);
   size_t idx = ny_lazy_name_set_slot(hash, set->cap);
   for (size_t probe = 0; probe < set->cap; ++probe) {
     const ny_name_set_slot *slot = &set->slots[idx];
     if (!slot->name)
       return false;
-    if (slot->hash == hash && strcmp(slot->name, name) == 0)
+    if (slot->hash == hash && slot->len == name_len &&
+        (slot->name == name || memcmp(slot->name, name, name_len) == 0))
       return true;
     idx = (idx + 1) & (set->cap - 1);
   }
@@ -447,6 +449,7 @@ static bool ny_lazy_name_set_insert_hash(ny_name_set *set, const char *name,
                                          uint64_t hash) {
   if (!set || !name || !*name)
     return false;
+  size_t name_len = strlen(name);
   if (ny_lazy_name_set_contains_hash(set, name, hash))
     return false;
   if (!set->cap || ((set->len + 1) * 10) >= (set->cap * 7)) {
@@ -459,6 +462,7 @@ static bool ny_lazy_name_set_insert_hash(ny_name_set *set, const char *name,
     idx = (idx + 1) & (set->cap - 1);
   set->slots[idx].name = name;
   set->slots[idx].hash = hash;
+  set->slots[idx].len = name_len;
   set->len++;
   return true;
 }
@@ -868,44 +872,6 @@ static bool ny_lazy_emit_function_reached(codegen_t *cg, const char *name) {
   return ny_lazy_emit_has_name(cg, name);
 }
 
-static bool ny_stmt_tree_has_user_code(stmt_t *s) {
-  if (!s)
-    return false;
-  if (!ny_is_stdlib_tok(s->tok))
-    return true;
-  switch (s->kind) {
-  case NY_S_MODULE:
-    for (size_t i = 0; i < s->as.module.body.len; i++) {
-      if (ny_stmt_tree_has_user_code(s->as.module.body.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_BLOCK:
-    for (size_t i = 0; i < s->as.block.body.len; i++) {
-      if (ny_stmt_tree_has_user_code(s->as.block.body.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_IF:
-    return ny_stmt_tree_has_user_code(s->as.iff.conseq) ||
-           ny_stmt_tree_has_user_code(s->as.iff.alt);
-  case NY_S_GUARD:
-    return ny_stmt_tree_has_user_code(s->as.guard.fallback);
-  default:
-    return false;
-  }
-}
-
-static bool ny_program_has_user_code(program_t *prog) {
-  if (!prog)
-    return false;
-  for (size_t i = 0; i < prog->body.len; i++) {
-    if (ny_stmt_tree_has_user_code(prog->body.data[i]))
-      return true;
-  }
-  return false;
-}
-
 bool ny_codegen_token_is_source_file(codegen_t *cg, token_t tok) {
   if (!cg || !cg->source_main_file || !*cg->source_main_file || !tok.filename ||
       !*tok.filename)
@@ -977,16 +943,6 @@ static bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s) {
   default:
     return false;
   }
-}
-
-static bool ny_program_has_source_file(codegen_t *cg, program_t *prog) {
-  if (!cg || !prog || !cg->source_main_file || !*cg->source_main_file)
-    return false;
-  for (size_t i = 0; i < prog->body.len; i++) {
-    if (ny_stmt_tree_has_source_file(cg, prog->body.data[i]))
-      return true;
-  }
-  return false;
 }
 
 static bool ny_stmt_tree_has_zero_arg_call_named(const stmt_t *s,
@@ -2236,30 +2192,30 @@ static void ny_apply_top_level_typeinfer_to_sema(typeinfer_ctx_t *ctx,
   case NY_S_VAR: {
     if (s->sema_kind != NY_STMT_SEMA_VAR)
       return;
-	    sema_var_t *sv = (sema_var_t *)s->sema;
-	    if (!sv)
-	      return;
-	    arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
-	    for (size_t i = 0; i < s->as.var.names.len; ++i) {
-	      const char *name = s->as.var.names.data[i];
-	      while (sv->is_int_proven.len <= i) {
-	        if (sema_arena)
-	          vec_push_arena(sema_arena, &sv->is_int_proven, false);
-	        else
-	          vec_push(&sv->is_int_proven, false);
-	      }
-	      while (sv->is_f64_proven.len <= i) {
-	        if (sema_arena)
-	          vec_push_arena(sema_arena, &sv->is_f64_proven, false);
-	        else
-	          vec_push(&sv->is_f64_proven, false);
-	      }
-	      while (sv->escapes.len <= i) {
-	        if (sema_arena)
-	          vec_push_arena(sema_arena, &sv->escapes, false);
-	        else
-	          vec_push(&sv->escapes, false);
-	      }
+       sema_var_t *sv = (sema_var_t *)s->sema;
+       if (!sv)
+         return;
+       arena_t *sema_arena = ctx->cg ? ctx->cg->arena : NULL;
+       for (size_t i = 0; i < s->as.var.names.len; ++i) {
+         const char *name = s->as.var.names.data[i];
+         while (sv->is_int_proven.len <= i) {
+           if (sema_arena)
+             vec_push_arena(sema_arena, &sv->is_int_proven, false);
+           else
+             vec_push(&sv->is_int_proven, false);
+         }
+         while (sv->is_f64_proven.len <= i) {
+           if (sema_arena)
+             vec_push_arena(sema_arena, &sv->is_f64_proven, false);
+           else
+             vec_push(&sv->is_f64_proven, false);
+         }
+         while (sv->escapes.len <= i) {
+           if (sema_arena)
+             vec_push_arena(sema_arena, &sv->escapes, false);
+           else
+             vec_push(&sv->escapes, false);
+         }
       bool proven_i64 = name && typeinfer_is_i64(ctx, name) &&
                         !typeinfer_needs_dynamic(ctx, name);
       bool proven_f64 = name && typeinfer_is_f64(ctx, name) &&
@@ -2808,6 +2764,12 @@ void codegen_dispose(codegen_t *cg) {
   cg->module_stmt_index = NULL;
   cg->module_stmt_index_cap = 0;
   cg->module_stmt_index_len = 0;
+  free(cg->module_stmt_lookup_cache);
+  cg->module_stmt_lookup_cache = NULL;
+  free(cg->module_public_target_cache);
+  cg->module_public_target_cache = NULL;
+  free(cg->use_alias_lookup_cache);
+  cg->use_alias_lookup_cache = NULL;
   vec_free(&cg->use_modules);
   vec_free(&cg->user_use_modules);
   for (size_t i = 0; i < cg->link_allowed_modules.len; i++)

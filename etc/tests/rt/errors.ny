@@ -5,15 +5,15 @@ use std.core.str
 
 mut caught = ""
 
-fn id(v){
+fn id(v) {
    v
 }
 
-fn any_id(any: v): any {
+fn any_id(any v) any {
    v
 }
 
-fn capture(thunk){
+fn capture(thunk) {
    caught = ""
    try {
       thunk()
@@ -23,7 +23,7 @@ fn capture(thunk){
    caught
 }
 
-fn did_catch(thunk){
+fn did_catch(thunk) {
    try {
       thunk()
       false
@@ -32,23 +32,23 @@ fn did_catch(thunk){
    }
 }
 
-fn flatten_inline(l){
+fn flatten_inline(l) {
    is_list(l) ? mapcat(flatten_inline, l) : [l]
 }
 
-fn flatten_try(x){
+fn flatten_try(x) {
    if(is_str(x)) return [x]
    try{
       mapcat(flatten_try, x)
    } catch(_){[x]}
 }
 
-fn flatten_recursive(x){
+fn flatten_recursive(x) {
    if(is_str(x) || !is_list(x)){ return [x] }
    it.mapcat(flatten_recursive, x)
 }
 
-fn catch_len(x){
+fn catch_len(x) {
    try{
       x.len
    } catch(_){
@@ -56,7 +56,7 @@ fn catch_len(x){
    }
 }
 
-fn fdiv_zero(f64: a, f64: b){
+fn fdiv_zero(f64 a, f64 b) {
    a / b
 }
 
@@ -68,18 +68,18 @@ assert(flatten_recursive([1, [2, [3, 4, [1, 2, 3, "ny"]], 5]]) == [1, 2, 3, 4, 1
 "recursive flatten should preserve scalar leaves")
 assert(catch_len("abc") == 3, "try/catch len should pass through valid sequence")
 assert(catch_len(1) == -1, "try/catch len should recover from invalid scalar input")
-assert(str_contains(capture(fn(){ len(id(1)) }), "len expects"), "len should reject ints")
-assert(str_contains(capture(fn(){ len(id(1)) }), "got int"), "len should report bad value")
-assert(str_contains(capture(fn(){ contains(id(1), 2) }), "contains expects"), "receiver contains should reject ints")
-assert(str_contains(capture(fn(){ get(id(1), 0) }), "get expects"), "receiver get should reject ints")
-assert(str_contains(capture(fn(){ return append(id(1), 2) }), "append expects"), "receiver append should reject non-lists")
-assert(str_contains(capture(fn(){ pop(id(1)) }), "pop expects"), "receiver pop should reject non-lists")
-assert(str_contains(capture(fn(){ slice(id(1), 0, 1) }), "slice expects"), "slice should reject ints")
-assert(str_contains(capture(fn(){ set([1], 9, 2) }), "set index out of range"), "receiver set should reject out-of-range writes")
-assert(str_contains(capture(fn(){ set([1], 9, 2) }), "index=9"), "receiver set should report bad index")
-assert(str_contains(capture(fn(){ id(1) / id(0) }), "division by zero"), "integer division by zero should panic")
-assert(str_contains(capture(fn(){ id(1) % id(0) }), "modulo by zero"), "integer modulo by zero should panic")
-assert(str_contains(capture(fn(){ fdiv_zero(1.0, 0.0) }), "division by zero"), "float division by zero should panic")
+assert(str_contains(capture(fn() { len(id(1)) }), "len expects"), "len should reject ints")
+assert(str_contains(capture(fn() { len(id(1)) }), "got int"), "len should report bad value")
+assert(str_contains(capture(fn() { contains(id(1), 2) }), "contains expects"), "receiver contains should reject ints")
+assert(str_contains(capture(fn() { get(id(1), 0) }), "get expects"), "receiver get should reject ints")
+assert(str_contains(capture(fn() { return append(id(1), 2) }), "append expects"), "receiver append should reject non-lists")
+assert(str_contains(capture(fn() { pop(id(1)) }), "pop expects"), "receiver pop should reject non-lists")
+assert(str_contains(capture(fn() { slice(id(1), 0, 1) }), "slice expects"), "slice should reject ints")
+assert(str_contains(capture(fn() { set([1], 9, 2) }), "set index out of range"), "receiver set should reject out-of-range writes")
+assert(str_contains(capture(fn() { set([1], 9, 2) }), "index=9"), "receiver set should report bad index")
+assert(str_contains(capture(fn() { id(1) / id(0) }), "division by zero"), "integer division by zero should panic")
+assert(str_contains(capture(fn() { id(1) % id(0) }), "modulo by zero"), "integer modulo by zero should panic")
+assert(str_contains(capture(fn() { fdiv_zero(1.0, 0.0) }), "division by zero"), "float division by zero should panic")
 def div_err = exception(ERR_DIV_ZERO, "division by zero")
 assert(get(div_err, "kind", "") == ERR_DIV_ZERO, "structured div error .get kind")
 assert(get(div_err, "message", "") == "division by zero", "structured div error .get message")
@@ -88,17 +88,17 @@ assert(error_message(div_err) == "division by zero", "structured div error messa
 assert(is_error(div_err, ERR_DIV_ZERO), "structured div error match")
 def runtime_warn = warning(WARN_RUNTIME, "slow fallback")
 assert(error_kind(runtime_warn) == WARN_RUNTIME, "structured warning kind")
-assert(did_catch(fn(){ len(id(1)) }), "len should reject ints")
-assert(did_catch(fn(){ contains(id(1), 2) }), "receiver contains should reject ints")
-assert(did_catch(fn(){ get(id(1), 0) }), "receiver get should reject ints")
-assert(did_catch(fn(){ return append(id(1), 2) }), "receiver append should reject non-lists")
-assert(did_catch(fn(){ pop(id(1)) }), "receiver pop should reject non-lists")
-assert(did_catch(fn(){ slice(id(1), 0, 1) }), "slice should reject ints")
-assert(did_catch(fn(){ set([1], 9, 2) }), "receiver set should reject out-of-range writes")
-assert(did_catch(fn(){ id(1) / id(0) }), "division by zero should be catchable")
-assert(did_catch(fn(){ it.mapcat(fn(v){ [v] }, any_id(1)) }),
+assert(did_catch(fn() { len(id(1)) }), "len should reject ints")
+assert(did_catch(fn() { contains(id(1), 2) }), "receiver contains should reject ints")
+assert(did_catch(fn() { get(id(1), 0) }), "receiver get should reject ints")
+assert(did_catch(fn() { return append(id(1), 2) }), "receiver append should reject non-lists")
+assert(did_catch(fn() { pop(id(1)) }), "receiver pop should reject non-lists")
+assert(did_catch(fn() { slice(id(1), 0, 1) }), "slice should reject ints")
+assert(did_catch(fn() { set([1], 9, 2) }), "receiver set should reject out-of-range writes")
+assert(did_catch(fn() { id(1) / id(0) }), "division by zero should be catchable")
+assert(did_catch(fn() { it.mapcat(fn(v) { [v] }, any_id(1)) }),
 "mapcat should reject non-sequences")
-assert(did_catch(fn(){ it.any(any_id(1), fn(v){ v }) }),
+assert(did_catch(fn() { it.any(any_id(1), fn(v) { v }) }),
 "any should reject non-sequences")
 assert(get(any_id(nil), 0, 55) == 55, "receiver get should return default for nil")
 assert(set_idx(any_id(nil), 0, 1) == 0, "receiver set_idx should reject nil")

@@ -38,68 +38,27 @@ static bool ny_codegen_stmt_kind_profile_enabled(void) {
 }
 
 static const char *ny_stmt_kind_profile_name(int kind) {
-  switch (kind) {
-  case NY_S_BLOCK:
-    return "BLOCK";
-  case NY_S_USE:
-    return "USE";
-  case NY_S_VAR:
-    return "VAR";
-  case NY_S_EXPR:
-    return "EXPR";
-  case NY_S_IF:
-    return "IF";
-  case NY_S_GUARD:
-    return "GUARD";
-  case NY_S_WHILE:
-    return "WHILE";
-  case NY_S_FOR:
-    return "FOR";
-  case NY_S_TRY:
-    return "TRY";
-  case NY_S_FUNC:
-    return "FUNC";
-  case NY_S_EXTERN:
-    return "EXTERN";
-  case NY_S_LINK:
-    return "LINK";
-  case NY_S_RETURN:
-    return "RETURN";
-  case NY_S_LABEL:
-    return "LABEL";
-  case NY_S_DEFER:
-    return "DEFER";
-  case NY_S_GOTO:
-    return "GOTO";
-  case NY_S_BREAK:
-    return "BREAK";
-  case NY_S_CONTINUE:
-    return "CONTINUE";
-  case NY_S_LAYOUT:
-    return "LAYOUT";
-  case NY_S_MATCH:
-    return "MATCH";
-  case NY_S_MODULE:
-    return "MODULE";
-  case NY_S_EXPORT:
-    return "EXPORT";
-  case NY_S_STRUCT:
-    return "STRUCT";
-  case NY_S_ENUM:
-    return "ENUM";
-  case NY_S_MACRO:
-    return "MACRO";
-  case NY_S_INCLUDE:
-    return "INCLUDE";
-  case NY_S_DEFINE:
-    return "DEFINE";
-  case NY_S_OPERATOR:
-    return "OPERATOR";
-  case NY_S_IMPL:
-    return "IMPL";
-  default:
-    return "UNKNOWN";
-  }
+  static const char *names[] = {
+      [NY_S_BLOCK] = "BLOCK",       [NY_S_USE] = "USE",
+      [NY_S_VAR] = "VAR",           [NY_S_EXPR] = "EXPR",
+      [NY_S_IF] = "IF",             [NY_S_GUARD] = "GUARD",
+      [NY_S_WHILE] = "WHILE",       [NY_S_FOR] = "FOR",
+      [NY_S_TRY] = "TRY",           [NY_S_FUNC] = "FUNC",
+      [NY_S_EXTERN] = "EXTERN",     [NY_S_LINK] = "LINK",
+      [NY_S_RETURN] = "RETURN",     [NY_S_LABEL] = "LABEL",
+      [NY_S_DEFER] = "DEFER",       [NY_S_GOTO] = "GOTO",
+      [NY_S_BREAK] = "BREAK",       [NY_S_CONTINUE] = "CONTINUE",
+      [NY_S_LAYOUT] = "LAYOUT",     [NY_S_MATCH] = "MATCH",
+      [NY_S_MODULE] = "MODULE",     [NY_S_EXPORT] = "EXPORT",
+      [NY_S_STRUCT] = "STRUCT",     [NY_S_ENUM] = "ENUM",
+      [NY_S_MACRO] = "MACRO",       [NY_S_INCLUDE] = "INCLUDE",
+      [NY_S_DEFINE] = "DEFINE",     [NY_S_OPERATOR] = "OPERATOR",
+      [NY_S_IMPL] = "IMPL",
+  };
+  return kind >= 0 && (size_t)kind < sizeof(names) / sizeof(names[0]) &&
+                 names[kind]
+             ? names[kind]
+             : "UNKNOWN";
 }
 
 static void ny_codegen_stmt_kind_profile_report(void) {
@@ -920,6 +879,8 @@ stmt_ownership_begin_return_transfer(codegen_t *cg, scope *scopes, size_t depth,
   if (old_state)
     *old_state = b->owner_state;
   b->owner_state = NY_OWNER_MOVED;
+  if (b->is_slot && b->value)
+    ny_store(cg, b->value, ny_c0(cg));
   return b;
 }
 
@@ -940,6 +901,45 @@ static bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes,
   return true;
 }
 
+static bool stmt_str_in(const char *s, const char *const *vals, size_t n) {
+  if (!s)
+    return false;
+  for (size_t i = 0; i < n; ++i)
+    if (strcmp(s, vals[i]) == 0)
+      return true;
+  return false;
+}
+
+static bool stmt_type_name_is_float_value(const char *type_name) {
+  static const char *const names[] = {"f64", "float", "f32"};
+  return stmt_str_in(type_name, names, sizeof(names) / sizeof(names[0]));
+}
+
+static bool stmt_type_name_is_f64_value(const char *type_name) {
+  static const char *const names[] = {"f64", "float"};
+  return stmt_str_in(type_name, names, sizeof(names) / sizeof(names[0]));
+}
+
+static bool stmt_type_name_is_f32_value(const char *type_name) {
+  return type_name && strcmp(type_name, "f32") == 0;
+}
+
+static bool stmt_type_name_is_int_value(const char *type_name) {
+  return type_name && strcmp(type_name, "int") == 0;
+}
+
+static bool stmt_type_name_is_index_int_value(const char *type_name) {
+  static const char *const names[] = {"int", "i8",  "i16", "i32", "i64",
+                                      "u8",  "u16", "u32", "u64"};
+  return stmt_str_in(type_name, names, sizeof(names) / sizeof(names[0]));
+}
+
+static bool stmt_type_name_is_narrow_fixed_int_value(const char *type_name) {
+  static const char *const names[] = {"u8", "u16", "u32", "u64",
+                                      "i8", "i16", "i32", "i64"};
+  return stmt_str_in(type_name, names, sizeof(names) / sizeof(names[0]));
+}
+
 static bool stmt_expr_is_f64_value(codegen_t *cg, scope *scopes, size_t depth,
                                    expr_t *e) {
   if (!e)
@@ -957,8 +957,7 @@ static bool stmt_expr_is_f64_value(codegen_t *cg, scope *scopes, size_t depth,
       return true;
   }
   const char *t = infer_expr_type(cg, scopes, depth, e);
-  return t && (strcmp(t, "f64") == 0 || strcmp(t, "float") == 0 ||
-               strcmp(t, "f32") == 0);
+  return stmt_type_name_is_float_value(t);
 }
 
 static bool stmt_expr_is_f64_list_literal(codegen_t *cg, scope *scopes,
@@ -1024,11 +1023,7 @@ static bool stmt_expr_is_int_index_expr(codegen_t *cg, scope *scopes,
   if (ny_expr_literal_i64(e, NULL))
     return true;
   const char *t = infer_expr_type(cg, scopes, depth, e);
-  return t && (strcmp(t, "int") == 0 || strcmp(t, "i8") == 0 ||
-               strcmp(t, "i16") == 0 || strcmp(t, "i32") == 0 ||
-               strcmp(t, "i64") == 0 || strcmp(t, "u8") == 0 ||
-               strcmp(t, "u16") == 0 || strcmp(t, "u32") == 0 ||
-               strcmp(t, "u64") == 0);
+  return stmt_type_name_is_index_int_value(t);
 }
 
 static bool stmt_expr_contains_ident_name(expr_t *e, const char *name) {
@@ -3088,19 +3083,19 @@ static void stmt_var_setup_local_binding(
     if (sema->is_f64_proven.len > idx && sema->is_f64_proven.data[idx])
       use_f64_slot = true;
     if (!use_int_slot && !use_f64_slot && decl_type) {
-      if (strcmp(decl_type, "f64") == 0 || strcmp(decl_type, "float") == 0)
+      if (stmt_type_name_is_f64_value(decl_type))
         use_f64_slot = true;
-      else if (strcmp(decl_type, "f32") == 0)
+      else if (stmt_type_name_is_f32_value(decl_type))
         use_f32_slot = true;
     }
   } else if (decl_type) {
-    if (strcmp(decl_type, "f64") == 0 || strcmp(decl_type, "float") == 0) {
+    if (stmt_type_name_is_f64_value(decl_type)) {
       var_type = cg->type_f64;
       use_f64_slot = true;
-    } else if (strcmp(decl_type, "f32") == 0) {
+    } else if (stmt_type_name_is_f32_value(decl_type)) {
       var_type = cg->type_f32;
       use_f32_slot = true;
-    } else if (strcmp(decl_type, "int") == 0) {
+    } else if (stmt_type_name_is_int_value(decl_type)) {
       use_int_slot = true;
     } else {
       var_type = resolve_type_name(cg, decl_type, var_stmt->tok);
@@ -3177,9 +3172,8 @@ static bool stmt_top_entry_can_hoist_var(codegen_t *cg, const char *name) {
 }
 
 static bool stmt_type_name_is_top_entry_numeric(const char *decl_type) {
-  return decl_type &&
-         (strcmp(decl_type, "int") == 0 || strcmp(decl_type, "f64") == 0 ||
-          strcmp(decl_type, "float") == 0 || strcmp(decl_type, "f32") == 0);
+  return stmt_type_name_is_int_value(decl_type) ||
+         stmt_type_name_is_float_value(decl_type);
 }
 
 static bool stmt_top_entry_numeric_hoist(codegen_t *cg, scope *scopes,
@@ -3202,9 +3196,7 @@ static bool stmt_top_entry_numeric_hoist(codegen_t *cg, scope *scopes,
       init_numeric = true;
     } else {
       const char *init_type = infer_expr_type(cg, scopes, depth, init);
-      init_numeric = init_type && (strcmp(init_type, "f64") == 0 ||
-                                   strcmp(init_type, "f32") == 0 ||
-                                   strcmp(init_type, "float") == 0);
+      init_numeric = stmt_type_name_is_float_value(init_type);
     }
   }
   return sema_numeric || init_numeric ||
@@ -3225,37 +3217,31 @@ static bool stmt_platform_ident_bool(const char *name, bool *out) {
   bool is_aarch64 = strcmp(arch, "aarch64") == 0 || strcmp(arch, "arm64") == 0;
   bool is_arm = strcmp(arch, "arm") == 0 || is_aarch64;
   bool is_riscv = strcmp(arch, "riscv") == 0;
-#define NY_STMT_PLATFORM_BOOL(symbol, value)                                   \
-  if (strcmp(name, symbol) == 0) {                                             \
-    *out = (value);                                                            \
-    return true;                                                               \
+  const struct {
+    const char *symbol;
+    bool value;
+  } platform_bools[] = {
+      {"linux", is_linux},       {"LINUX", is_linux},
+      {"IS_LINUX", is_linux},   {"macos", is_macos},
+      {"mac", is_macos},         {"MACOS", is_macos},
+      {"IS_MACOS", is_macos},   {"windows", is_windows},
+      {"IS_WINDOWS", is_windows},
+      {"unix", is_unix},         {"posix", is_unix},
+      {"UNIX", is_unix},         {"IS_UNIX", is_unix},
+      {"x86_64", is_x86_64},     {"x64", is_x86_64},
+      {"IS_X86_64", is_x86_64}, {"x86", is_x86},
+      {"IS_X86", is_x86},       {"aarch64", is_aarch64},
+      {"arm64", is_aarch64},     {"IS_AARCH64", is_aarch64},
+      {"arm", is_arm},           {"IS_ARM", is_arm},
+      {"riscv", is_riscv},       {"IS_RISCV", is_riscv},
+  };
+  for (size_t i = 0; i < sizeof(platform_bools) / sizeof(platform_bools[0]);
+       i++) {
+    if (strcmp(name, platform_bools[i].symbol) == 0) {
+      *out = platform_bools[i].value;
+      return true;
+    }
   }
-  NY_STMT_PLATFORM_BOOL("linux", is_linux)
-  NY_STMT_PLATFORM_BOOL("LINUX", is_linux)
-  NY_STMT_PLATFORM_BOOL("IS_LINUX", is_linux)
-  NY_STMT_PLATFORM_BOOL("macos", is_macos)
-  NY_STMT_PLATFORM_BOOL("mac", is_macos)
-  NY_STMT_PLATFORM_BOOL("MACOS", is_macos)
-  NY_STMT_PLATFORM_BOOL("IS_MACOS", is_macos)
-  NY_STMT_PLATFORM_BOOL("windows", is_windows)
-  NY_STMT_PLATFORM_BOOL("IS_WINDOWS", is_windows)
-  NY_STMT_PLATFORM_BOOL("unix", is_unix)
-  NY_STMT_PLATFORM_BOOL("posix", is_unix)
-  NY_STMT_PLATFORM_BOOL("UNIX", is_unix)
-  NY_STMT_PLATFORM_BOOL("IS_UNIX", is_unix)
-  NY_STMT_PLATFORM_BOOL("x86_64", is_x86_64)
-  NY_STMT_PLATFORM_BOOL("x64", is_x86_64)
-  NY_STMT_PLATFORM_BOOL("IS_X86_64", is_x86_64)
-  NY_STMT_PLATFORM_BOOL("x86", is_x86)
-  NY_STMT_PLATFORM_BOOL("IS_X86", is_x86)
-  NY_STMT_PLATFORM_BOOL("aarch64", is_aarch64)
-  NY_STMT_PLATFORM_BOOL("arm64", is_aarch64)
-  NY_STMT_PLATFORM_BOOL("IS_AARCH64", is_aarch64)
-  NY_STMT_PLATFORM_BOOL("arm", is_arm)
-  NY_STMT_PLATFORM_BOOL("IS_ARM", is_arm)
-  NY_STMT_PLATFORM_BOOL("riscv", is_riscv)
-  NY_STMT_PLATFORM_BOOL("IS_RISCV", is_riscv)
-#undef NY_STMT_PLATFORM_BOOL
   return false;
 }
 
@@ -3421,42 +3407,11 @@ static bool stmt_expr_is_cond_small_int(codegen_t *cg, scope *scopes,
         return stmt_expr_is_cond_small_int(cg, scopes, depth, init);
     }
     const char *t = infer_expr_type(cg, scopes, depth, e);
-    return t && (strcmp(t, "int") == 0 || strcmp(t, "i8") == 0 ||
-                 strcmp(t, "i16") == 0 || strcmp(t, "i32") == 0 ||
-                 strcmp(t, "i64") == 0 || strcmp(t, "u8") == 0 ||
-                 strcmp(t, "u16") == 0 || strcmp(t, "u32") == 0 ||
-                 strcmp(t, "u64") == 0);
+    return stmt_type_name_is_index_int_value(t);
   }
   default:
     return false;
   }
-}
-
-static bool stmt_expr_is_trivial_small_int(expr_t *e) {
-  if (!e)
-    return false;
-  if (e->kind == NY_E_IDENT)
-    return true;
-  return e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT;
-}
-
-static bool stmt_expr_is_immutable_int_ident(codegen_t *cg, scope *scopes,
-                                             size_t depth, expr_t *e) {
-  if (!cg || !e || e->kind != NY_E_IDENT || !e->as.ident.name)
-    return false;
-  size_t name_len = (size_t)e->tok.len;
-  if (name_len == 0)
-    name_len = strlen(e->as.ident.name);
-  binding *b = stmt_lookup_binding(cg, scopes, depth, e->as.ident.name,
-                                   name_len, e->as.ident.hash);
-  if (!b || b->is_mut)
-    return false;
-  if (b->is_int_slot || b->is_int_direct)
-    return true;
-  expr_t *init = ny_binding_var_init_expr(b, e->as.ident.name);
-  if (!init)
-    return false;
-  return ny_is_proven_int(cg, scopes, depth, init, NULL);
 }
 
 static LLVMIntPredicate stmt_cmp_pred_for_op(const char *op) {
@@ -3501,9 +3456,9 @@ static int stmt_expr_numeric_kind(codegen_t *cg, scope *scopes, size_t depth,
   const char *t = infer_expr_type(cg, scopes, depth, e);
   if (!t)
     return 0;
-  if (strcmp(t, "f64") == 0 || strcmp(t, "f32") == 0 || strcmp(t, "float") == 0)
+  if (stmt_type_name_is_float_value(t))
     return 2;
-  if (strcmp(t, "int") == 0)
+  if (stmt_type_name_is_int_value(t))
     return 1;
   return 0;
 }
@@ -3632,40 +3587,6 @@ static fun_sig *stmt_cmp_runtime_sig(codegen_t *cg, const char *op) {
   if (!name)
     return NULL;
   return lookup_fun(cg, name, 0);
-}
-
-typedef struct {
-  bool ok;
-  expr_t *varying;
-  expr_t *invariant;
-  bool invariant_is_left;
-  const char *op;
-} stmt_loop_int_cmp_spec_t;
-
-static stmt_loop_int_cmp_spec_t
-stmt_loop_try_small_int_cmp_specialize(codegen_t *cg, scope *scopes,
-                                       size_t depth, expr_t *e) {
-  stmt_loop_int_cmp_spec_t no = {0};
-  if (!cg || !e || e->kind != NY_E_BINARY || !e->as.binary.op)
-    return no;
-  const char *op = e->as.binary.op;
-  bool is_cmp =
-      (strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 || strcmp(op, ">") == 0 ||
-       strcmp(op, ">=") == 0 || strcmp(op, "==") == 0 || strcmp(op, "!=") == 0);
-  if (!is_cmp)
-    return no;
-
-  expr_t *le = e->as.binary.left;
-  expr_t *re = e->as.binary.right;
-  if (stmt_expr_is_cond_small_int(cg, scopes, depth, le) &&
-      stmt_expr_is_trivial_small_int(le) &&
-      stmt_expr_is_immutable_int_ident(cg, scopes, depth, re))
-    return (stmt_loop_int_cmp_spec_t){true, le, re, false, op};
-  if (stmt_expr_is_cond_small_int(cg, scopes, depth, re) &&
-      stmt_expr_is_trivial_small_int(re) &&
-      stmt_expr_is_immutable_int_ident(cg, scopes, depth, le))
-    return (stmt_loop_int_cmp_spec_t){true, re, le, true, op};
-  return no;
 }
 
 static binding *stmt_expr_target_binding(codegen_t *cg, scope *scopes,
@@ -4609,10 +4530,7 @@ static bool stmt_bindable_inferred_type(const char *type_name) {
     return false;
   /* Do not retroactively force large numeric literals into narrow fixed-width
    * declarations. */
-  if (strcmp(type_name, "u8") == 0 || strcmp(type_name, "u16") == 0 ||
-      strcmp(type_name, "u32") == 0 || strcmp(type_name, "u64") == 0 ||
-      strcmp(type_name, "i8") == 0 || strcmp(type_name, "i16") == 0 ||
-      strcmp(type_name, "i32") == 0 || strcmp(type_name, "i64") == 0)
+  if (stmt_type_name_is_narrow_fixed_int_value(type_name))
     return false;
   return true;
 }
@@ -4621,8 +4539,7 @@ static bool stmt_bindable_mut_inferred_type(const char *type_name) {
   if (!type_name || !*type_name || strcmp(type_name, "any") == 0 ||
       strcmp(type_name, "void") == 0)
     return false;
-  if (strcmp(type_name, "f64") == 0 || strcmp(type_name, "float") == 0 ||
-      strcmp(type_name, "f32") == 0)
+  if (stmt_type_name_is_float_value(type_name))
     return true;
   /*
    * Mutable bindings still need the inferred owner for attached methods:
@@ -4680,14 +4597,9 @@ static void stmt_update_numeric_binding_proof(codegen_t *cg, binding *b,
   if (is_global_binding)
     b->raw_int_value = NULL;
 
-  bool float_layout =
-      (b->decl_type_name && (strcmp(b->decl_type_name, "f64") == 0 ||
-                             strcmp(b->decl_type_name, "float") == 0 ||
-                             strcmp(b->decl_type_name, "f32") == 0)) ||
-      (b->type_name && (strcmp(b->type_name, "f64") == 0 ||
-                        strcmp(b->type_name, "float") == 0 ||
-                        strcmp(b->type_name, "f32") == 0)) ||
-      b->is_f64_slot || b->is_f64_direct;
+  bool float_layout = stmt_type_name_is_float_value(b->decl_type_name) ||
+                      stmt_type_name_is_float_value(b->type_name) ||
+                      b->is_f64_slot || b->is_f64_direct;
   bool int_layout = stmt_binding_accepts_int_proof(b);
 
   b->is_int_slot = false;
@@ -6556,6 +6468,8 @@ static bool stmt_type_is_native_abi_value(codegen_t *cg,
                                           const char *type_name) {
   if (!type_name || !*type_name)
     return false;
+  if (ny_type_is(type_name, "fnptr"))
+    return false;
   if (ny_is_native_abi_type_name(type_name) && !ny_type_is_tagged(type_name))
     return true;
   while (*type_name == '?')
@@ -7245,17 +7159,6 @@ static void apply_loop_metadata(codegen_t *cg, LLVMValueRef branch,
     ny_loop_nounroll_hint(cg, branch);
   if (attr_vectorize || ny_env_enabled("NYTRIX_AUTO_VECTORIZE_LOOPS"))
     ny_loop_vectorize_hint(cg, branch);
-}
-
-/* ── Common loop/branch boilerplate helper ───────────────────────── */
-/* Emit defers and branch to dest if current block has no terminator */
-static void emit_defers_and_br(codegen_t *cg, scope *scopes, size_t depth,
-                               LLVMBasicBlockRef dest, token_t tok) {
-  emit_defers(cg, scopes, depth, depth);
-  if (!ny_has_terminator(cg)) {
-    ny_dbg_loc(cg, tok);
-    ny_br(cg, dest);
-  }
 }
 
 static void gen_stmt_while(codegen_t *cg, scope *scopes, size_t *depth,
@@ -8242,10 +8145,9 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           if (!type_name && sema_global_f64)
             type_name = "f64";
           LLVMTypeRef global_type = cg->type_i64;
-          bool global_is_f64 = sema_global_f64 ||
-                               (type_name && (strcmp(type_name, "f64") == 0 ||
-                                              strcmp(type_name, "float") == 0));
-          bool global_is_f32 = type_name && strcmp(type_name, "f32") == 0;
+          bool global_is_f64 =
+              sema_global_f64 || stmt_type_name_is_f64_value(type_name);
+          bool global_is_f32 = stmt_type_name_is_f32_value(type_name);
           if (global_is_f64)
             global_type = cg->type_f64;
           else if (global_is_f32)
@@ -8409,9 +8311,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
           continue;
         }
         const char *et = infer_expr_type(cg, scopes, *depth, expr_for_check);
-        bool rhs_is_float =
-            et && (strcmp(et, "f64") == 0 || strcmp(et, "float") == 0 ||
-                   strcmp(et, "f32") == 0);
+        bool rhs_is_float = stmt_type_name_is_float_value(et);
         if (rhs_is_float) {
           LLVMValueRef fv = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
           if (target_is_f32_slot)
@@ -8420,7 +8320,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
             ny_store(cg, slot, fv);
           continue;
         }
-        bool rhs_is_int = et && strcmp(et, "int") == 0;
+        bool rhs_is_int = stmt_type_name_is_int_value(et);
         if (rhs_is_int) {
           LLVMValueRef iv = gen_expr(cg, scopes, *depth, expr_for_check);
           LLVMValueRef fv = LLVMBuildSIToFP(
@@ -8442,9 +8342,8 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
       }
 
       bool direct_native_float_candidate =
-          bind_direct && decl_type &&
-          (strcmp(decl_type, "f64") == 0 || strcmp(decl_type, "float") == 0) &&
-          !dest && expr_for_check &&
+          bind_direct && stmt_type_name_is_f64_value(decl_type) && !dest &&
+          expr_for_check &&
           (!parallel || s->as.var.names.len == 1);
 
       binding *rhs_self_dest = resolved_local ? resolved_local : resolved_global;
@@ -8520,9 +8419,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
             ny_is_proven_int(cg, scopes, *depth, expr_for_check, target_val);
         const char *rhs_type =
             infer_expr_type(cg, scopes, *depth, expr_for_check);
-        rhs_proven_f64 = rhs_type && (strcmp(rhs_type, "f64") == 0 ||
-                                      strcmp(rhs_type, "float") == 0 ||
-                                      strcmp(rhs_type, "f32") == 0);
+        rhs_proven_f64 = stmt_type_name_is_float_value(rhs_type);
         if (rhs_proven_int) {
           rhs_has_int_range =
               stmt_expr_int_range(cg, scopes, *depth, expr_for_check,
@@ -8664,8 +8561,7 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
         if (direct_native_float_candidate) {
           target_val = gen_expr_as_f64(cg, scopes, *depth, expr_for_check);
           is_f64_direct = true;
-        } else if ((decl_type && strcmp(decl_type, "int") == 0 &&
-                    rhs_proven_int) ||
+        } else if ((stmt_type_name_is_int_value(decl_type) && rhs_proven_int) ||
                    rhs_proven_int) {
           is_int_direct = true;
         }

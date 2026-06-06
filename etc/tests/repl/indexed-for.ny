@@ -1,7 +1,7 @@
 ;; repl-expect: REPL_INDEXED_FOR_OK
 use std.core
 
-fn main(): int {
+fn main() int {
    mut list_seen = []
    def fruits = [1, 2, 3, 4]
    for fruit, i in fruits {

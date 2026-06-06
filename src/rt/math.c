@@ -503,6 +503,26 @@ int64_t rt_flt_is_inf(int64_t v) {
   return isinf(d) ? NY_IMM_TRUE : NY_IMM_FALSE;
 }
 
+int64_t rt_flt_nan(void) { return rt_flt_box_double(NAN); }
+
+int64_t rt_flt_inf(void) { return rt_flt_box_double(INFINITY); }
+
+int64_t rt_flt_hash(int64_t v) {
+  double d = get_flt(v);
+  uint64_t bits = 0;
+  memcpy(&bits, &d, 8);
+  if (bits == 0x8000000000000000ULL)
+    bits = 0;
+  if (isnan(d))
+    bits = 0x7ff8000000000000ULL;
+  uint64_t h = bits ^ (bits >> 33);
+  h *= 0xff51afd7ed558ccdULL;
+  h ^= h >> 33;
+  h *= 0xc4ceb9fe1a85ec53ULL;
+  h ^= h >> 33;
+  return rt_tag_v((int64_t)(h & 0x7fffffffULL));
+}
+
 int64_t rt_flt_sin(int64_t v) { return rt_flt_box_double(sin(get_flt(v))); }
 int64_t rt_flt_cos(int64_t v) { return rt_flt_box_double(cos(get_flt(v))); }
 int64_t rt_flt_tan(int64_t v) { return rt_flt_box_double(tan(get_flt(v))); }
@@ -515,6 +535,8 @@ int64_t rt_flt_atan2(int64_t y, int64_t x) {
 int64_t rt_flt_sqrt(int64_t v) { return rt_flt_box_double(sqrt(get_flt(v))); }
 int64_t rt_flt_exp(int64_t v) { return rt_flt_box_double(exp(get_flt(v))); }
 int64_t rt_flt_log(int64_t v) { return rt_flt_box_double(log(get_flt(v))); }
+int64_t rt_flt_log2(int64_t v) { return rt_flt_box_double(log2(get_flt(v))); }
+int64_t rt_flt_log10(int64_t v) { return rt_flt_box_double(log10(get_flt(v))); }
 int64_t rt_flt_floor(int64_t v) { return rt_tag_v((int64_t)floor(get_flt(v))); }
 int64_t rt_flt_ceil(int64_t v) { return rt_tag_v((int64_t)ceil(get_flt(v))); }
 int64_t rt_flt_round(int64_t v) { return rt_tag_v((int64_t)llround(get_flt(v))); }

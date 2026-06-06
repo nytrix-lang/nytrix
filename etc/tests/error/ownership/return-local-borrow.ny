@@ -4,9 +4,9 @@ use std.core
 
 @borrows(x)
 @returns_borrow(x)
-fn peek(x){ x }
+fn peek(x) { x }
 
-fn bad(){
+fn bad() {
    def a = [1]
    return peek(a)
 }

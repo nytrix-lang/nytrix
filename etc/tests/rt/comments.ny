@@ -15,7 +15,7 @@ mut x = 1 ;; inline
 ;; Comment line 3
 def y = 2
 
-fn add(a, b){
+fn add(a, b) {
    ;; inside function
    a + b ;; return comment
 }
@@ -50,7 +50,7 @@ if 1 == 1 {
    }
 }
 
-fn test(){
+fn test() {
    def val = 100
    ;; last comment
 }

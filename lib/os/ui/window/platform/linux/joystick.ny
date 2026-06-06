@@ -1,12 +1,16 @@
-;; Keywords: platform window backend linux joystick
+;; Keywords: platform window backend linux joystick os ui input
 ;; Native Linux joystick backend behavior.
+;; References:
+;; - std.os.ui.window.platform.linux
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.linux.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
 use std.core
 use std.core.mem
 use std.os.fs as osfs
 use std.os.time
 use std.core.str as str
-use std.os.ui.profile as ui_profile
+use std.os.ui.render.dump as ui_profile
 use std.os.ui.window.platform.api as backend_api
 use std.os.ui.window.platform.gamepad_map as gamepad_map
 use std.core.common as common
@@ -99,7 +103,7 @@ while(ji < MAX_JOYSTICKS){
 
 mut _linux_js = dict(8)
 
-fn _ensure_slot_buffers(int: jid): bool {
+fn _ensure_slot_buffers(int jid) bool {
    if(jid < 0 || jid >= MAX_JOYSTICKS){ return false }
    while(_js_buttons.len <= jid){ _js_buttons = _js_buttons.append(0) }
    while(_js_axes.len <= jid){ _js_axes = _js_axes.append(0) }
@@ -112,7 +116,7 @@ fn _ensure_slot_buffers(int: jid): bool {
    _js_buttons.get(jid, 0) && _js_axes.get(jid, 0) && _js_hats.get(jid, 0) && _js_hat_axes.get(jid, 0)
 }
 
-fn _reset_js_buffers(int: jid): bool {
+fn _reset_js_buffers(int jid) bool {
    if(jid < 0 || jid >= MAX_JOYSTICKS){ return false }
    if(!_ensure_slot_buffers(jid)){ return false }
    def buttons_ptr = _js_buttons.get(jid, 0)
@@ -126,30 +130,30 @@ fn _reset_js_buffers(int: jid): bool {
    true
 }
 
-fn _get_js_val(str: key, any: default=0): any { _linux_js.get(key, default) }
+fn _get_js_val(str key, any default=0) any { _linux_js.get(key, default) }
 
-fn _set_js_val(str: key, any: val): any {
+fn _set_js_val(str key, any val) any {
    _linux_js[key] = val
    val
 }
 
-fn _is_debug(): bool {
+fn _is_debug() bool {
    ui_profile.debug_enabled() || ui_profile.env_truthy_cached("NY_JOYSTICK_DEBUG")
 }
 
-fn _is_trace(): bool { ui_profile.env_truthy_cached("NY_JOYSTICK_TRACE") }
+fn _is_trace() bool { ui_profile.env_truthy_cached("NY_JOYSTICK_TRACE") }
 
-fn _dbg(any: msg): bool {
+fn _dbg(any msg) bool {
    if(_is_debug()){ ui_profile.print_text("[linux:joystick] " + to_str(msg)) }
    false
 }
 
-fn _trace(any: msg): bool {
+fn _trace(any msg) bool {
    if(_is_trace()){ ui_profile.print_text("[linux:joystick:trace] " + to_str(msg)) }
    false
 }
 
-fn _invoke_callback(int: jid, int: event): any {
+fn _invoke_callback(int jid, int event) any {
    def cb = _get_js_val("joystick_callback", 0)
    if(cb){ cb(jid, event) }
 }
@@ -157,12 +161,21 @@ fn _invoke_callback(int: jid, int: event): any {
 #linux {
    #include <sys/inotify.h>
 } #else {
-   fn inotify_init1(any: _flags): int { -1 }
-   fn inotify_add_watch(any: _fd, any: _path, any: _mask): int { -1 }
-   fn inotify_rm_watch(any: _fd, any: _wd): int { 0 }
+   fn inotify_init1(any _flags) int {
+      "Runs the inotify init1 operation."
+      -1
+   }
+   fn inotify_add_watch(any _fd, any _path, any _mask) int {
+      "Runs the inotify add watch operation."
+      -1
+   }
+   fn inotify_rm_watch(any _fd, any _wd) int {
+      "Runs the inotify rm watch operation."
+      0
+   }
 } #endif
 
-fn _is_event_device_name(any: name): bool {
+fn _is_event_device_name(any name) bool {
    if(!name || !is_str(name)){ return false }
    if(!str.startswith(name, "event")){ return false }
    def n = name.len
@@ -176,12 +189,12 @@ fn _is_event_device_name(any: name): bool {
    true
 }
 
-fn _bit_is_set(any: bits, int: bit): bool {
+fn _bit_is_set(any bits, int bit) bool {
    if(!bits || bit < 0){ return false }
    (load8(bits, bit / 8) & (1 << (bit % 8))) != 0
 }
 
-fn _looks_like_aux_input(any: name): bool {
+fn _looks_like_aux_input(any name) bool {
    def lname = str.lower(to_str(name))
    if(str.find(lname, "touchpad") != -1){ return true }
    if(str.find(lname, "motion sensor") != -1){ return true }
@@ -192,28 +205,28 @@ fn _looks_like_aux_input(any: name): bool {
    false
 }
 
-fn _is_controller_aux_input(any: name): bool {
+fn _is_controller_aux_input(any name) bool {
    def lname = str.lower(to_str(name))
    def controller =
-      str.find(lname, "controller") != -1 ||
-      str.find(lname, "gamepad") != -1 ||
-      str.find(lname, "dualsense") != -1 ||
-      str.find(lname, "dualshock") != -1 ||
-      str.find(lname, "xbox") != -1
+   str.find(lname, "controller") != -1 ||
+   str.find(lname, "gamepad") != -1 ||
+   str.find(lname, "dualsense") != -1 ||
+   str.find(lname, "dualshock") != -1 ||
+   str.find(lname, "xbox") != -1
    if(!controller){ return false }
    str.find(lname, "motion sensor") != -1 ||
-      str.find(lname, "motion sensors") != -1 ||
-      str.find(lname, "touchpad") != -1
+   str.find(lname, "motion sensors") != -1 ||
+   str.find(lname, "touchpad") != -1
 }
 
-fn _linux_input_supported(): bool { return osfs.is_dir("/dev/input") }
+fn _linux_input_supported() bool { return osfs.is_dir("/dev/input") }
 
-fn _get_js(int: jid): any {
+fn _get_js(int jid) any {
    if(jid < 0 || jid >= MAX_JOYSTICKS){ return 0 }
    _get_js_val("joysticks", dict(8)).get(jid, 0)
 }
 
-fn _put_js(int: jid, any: js): any {
+fn _put_js(int jid, any js) any {
    if(jid >= 0 && jid < MAX_JOYSTICKS){
       mut joysticks = _get_js_val("joysticks", dict(8))
       joysticks[jid] = js
@@ -222,7 +235,7 @@ fn _put_js(int: jid, any: js): any {
    js
 }
 
-fn _find_free_slot(): int {
+fn _find_free_slot() int {
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
       if(!_get_js(jid)){ return jid }
@@ -231,7 +244,7 @@ fn _find_free_slot(): int {
    -1
 }
 
-fn _free_js(int: jid): bool {
+fn _free_js(int jid) bool {
    def js = _get_js(jid)
    if(!js){ return false }
    _close_fd(js.get("fd", -1))
@@ -244,7 +257,7 @@ fn _free_js(int: jid): bool {
    true
 }
 
-fn _find_slot_by_path(str: path): int {
+fn _find_slot_by_path(str path) int {
    mut jid = 0
    while(jid < MAX_JOYSTICKS){
       def js = _get_js(jid)
@@ -254,21 +267,21 @@ fn _find_slot_by_path(str: path): int {
    -1
 }
 
-fn _close_fd(int: fd): any { if(fd >= 0){ __close(fd) } }
+fn _close_fd(int fd) any { if(fd >= 0){ __close(fd) } }
 
-fn _free_ptr(any: p): any { if(p){ free(p) } }
+fn _free_ptr(any p) any { if(p){ free(p) } }
 
-fn _free_probe_allocs(any: ev_bits, any: key_bits, any: abs_bits, any: id_ptr, any: name_ptr): any {
+fn _free_probe_allocs(any ev_bits, any key_bits, any abs_bits, any id_ptr, any name_ptr) any {
    _free_ptr(ev_bits) _free_ptr(key_bits) _free_ptr(abs_bits)
    _free_ptr(id_ptr) _free_ptr(name_ptr)
 }
 
-fn _free_map_allocs(any: key_map_ptr, any: abs_map_ptr, any: abs_info_ptr): any { _free_ptr(key_map_ptr) _free_ptr(abs_map_ptr) _free_ptr(abs_info_ptr) }
+fn _free_map_allocs(any key_map_ptr, any abs_map_ptr, any abs_info_ptr) any { _free_ptr(key_map_ptr) _free_ptr(abs_map_ptr) _free_ptr(abs_info_ptr) }
 
 fn _reject_open_device(
-   int: fd, int: js_fd, any: ev_bits, any: key_bits, any: abs_bits, any: id_ptr, any: name_ptr,
-   any: key_map_ptr=0, any: abs_map_ptr=0, any: abs_info_ptr=0
-): bool {
+   int fd, int js_fd, any ev_bits, any key_bits, any abs_bits, any id_ptr, any name_ptr,
+   any key_map_ptr=0, any abs_map_ptr=0, any abs_info_ptr=0
+) bool {
    _close_fd(fd)
    _close_fd(js_fd)
    _free_probe_allocs(ev_bits, key_bits, abs_bits, id_ptr, name_ptr)
@@ -276,19 +289,19 @@ fn _reject_open_device(
    false
 }
 
-fn _open_fd(str: path, int: flags, int: mode=0): int { __open(path, flags, mode) }
+fn _open_fd(str path, int flags, int mode=0) int { __open(path, flags, mode) }
 
-fn _read_fd(int: fd, any: buf, int: n): int { __read_off(fd, buf, n, 0) }
+fn _read_fd(int fd, any buf, int n) int { __read_off(fd, buf, n, 0) }
 
-fn _ioctl(int: fd, any: req, any: arg): int { __ioctl(fd, int(req) & 0xffffffff, arg) }
+fn _ioctl(int fd, any req, any arg) int { __ioctl(fd, int(req) & 0xffffffff, arg) }
 
-fn _clear_slot(int: jid): any {
+fn _clear_slot(int jid) any {
    mut joysticks = _get_js_val("joysticks", dict(8))
    joysticks[jid] = 0
    _set_js_val("joysticks", joysticks)
 }
 
-fn _disconnect_js(int: jid): bool {
+fn _disconnect_js(int jid) bool {
    if(!_get_js(jid)){ return false }
    def js = _get_js(jid)
    _dbg("disconnected jid=" + to_str(jid) +
@@ -298,7 +311,7 @@ fn _disconnect_js(int: jid): bool {
    _free_js(jid)
 }
 
-fn _hat_state(int: x_state, int: y_state): int {
+fn _hat_state(int x_state, int y_state) int {
    if(x_state == 1){
       if(y_state == 1){ return HAT_LEFT_UP }
       if(y_state == 2){ return HAT_LEFT_DOWN }
@@ -314,26 +327,26 @@ fn _hat_state(int: x_state, int: y_state): int {
    HAT_CENTERED
 }
 
-fn _signed32(any: v): int {
+fn _signed32(any v) int {
    def x = int(v) & 0xffffffff
    if(x >= 0x80000000){ x - 0x100000000 } else { x }
 }
 
-fn _signed16(any: v): int {
+fn _signed16(any v) int {
    def x = int(v) & 0xffff
    if(x >= 0x8000){ x - 0x10000 } else { x }
 }
 
-fn _same_input_name(any: a, any: b): bool { str.lower(str.strip(to_str(a))) == str.lower(str.strip(to_str(b))) }
+fn _same_input_name(any a, any b) bool { str.lower(str.strip(to_str(a))) == str.lower(str.strip(to_str(b))) }
 
-fn _normalize_js_axis(any: value): f64 {
+fn _normalize_js_axis(any value) f64 {
    def fv = float(value)
    if(fv <= -32767.0){ return -1.0 }
    if(fv >= 32767.0){ return 1.0 }
    fv / 32767.0
 }
 
-fn _open_js_fd_for_name(any: name): list {
+fn _open_js_fd_for_name(any name) list {
    if(!_linux_input_supported()){ return [-1, 0, 0] }
    def names = osfs.list_dir("/dev/input")
    mut i = 0
@@ -375,7 +388,7 @@ fn _open_js_fd_for_name(any: name): list {
    [-1, 0, 0]
 }
 
-fn _maybe_attach_js_fd(any: js): any {
+fn _maybe_attach_js_fd(any js) any {
    if(!js){ return js }
    if(!js.get("use_js", false)){ return js }
    if(js.get("js_fd", -1) >= 0){ return js }
@@ -399,7 +412,7 @@ fn _maybe_attach_js_fd(any: js): any {
    js
 }
 
-fn _handle_key_event(int: jid, any: js, int: code, any: value): any {
+fn _handle_key_event(int jid, any js, int code, any value) any {
    if(code < BTN_MISC || code >= KEY_CNT){ return js }
    def key_map_ptr = js.get("key_map_ptr", 0)
    def buttons_ptr = _js_buttons.get(jid, 0)
@@ -411,7 +424,7 @@ fn _handle_key_event(int: jid, any: js, int: code, any: value): any {
    js
 }
 
-fn _handle_abs_event(int: jid, any: js, int: code, any: value): any {
+fn _handle_abs_event(int jid, any js, int code, any value) any {
    if(code < 0 || code >= ABS_CNT){ return js }
    def abs_map_ptr = js.get("abs_map_ptr", 0)
    if(!abs_map_ptr){ return js }
@@ -463,7 +476,7 @@ fn _handle_abs_event(int: jid, any: js, int: code, any: value): any {
    js
 }
 
-fn _poll_abs_state(any: js): any {
+fn _poll_abs_state(any js) any {
    if(!js){ return js }
    def fd = js.get("fd", -1)
    def abs_map_ptr = js.get("abs_map_ptr", 0)
@@ -484,7 +497,7 @@ fn _poll_abs_state(any: js): any {
    js
 }
 
-fn _poll_key_state(any: js): any {
+fn _poll_key_state(any js) any {
    if(!js){ return js }
    def fd = js.get("fd", -1)
    def key_map_ptr = js.get("key_map_ptr", 0)
@@ -506,7 +519,7 @@ fn _poll_key_state(any: js): any {
    js
 }
 
-fn _poll_js_slot(any: js): any {
+fn _poll_js_slot(any js) any {
    if(!js){ return js }
    if(!js.get("use_js", false)){ return js }
    def js_fd = js.get("js_fd", -1)
@@ -568,23 +581,23 @@ fn _poll_js_slot(any: js): any {
    js
 }
 
-fn _hex_nibble(any: n): str {
+fn _hex_nibble(any n) str {
    def x = int(n) & 0xf
    if(x < 10){ return chr(48 + x) }
    chr(97 + x - 10)
 }
 
-fn _hex_byte(any: v): str {
+fn _hex_byte(any v) str {
    def x = int(v) & 0xff
    _hex_nibble(x >> 4) + _hex_nibble(x)
 }
 
-fn _guid_bytes16(any: data_ptr, int: off): str {
+fn _guid_bytes16(any data_ptr, int off) str {
    if(!data_ptr){ return "0000" }
    _hex_byte(load8(data_ptr, off + 0)) + _hex_byte(load8(data_ptr, off + 1))
 }
 
-fn _zero_guid_fallback(any: name): str {
+fn _zero_guid_fallback(any name) str {
    def lname = str.lower(to_str(name))
    if(str.find(lname, "dualsense") != -1 || str.find(lname, "ps5 controller") != -1){ return "050000004c050000e60c000000810000" }
    if(str.find(lname, "xbox one") != -1 || str.find(lname, "xbox wireless") != -1){ return "050000005e040000e002000003090000" }
@@ -592,7 +605,7 @@ fn _zero_guid_fallback(any: name): str {
    ""
 }
 
-fn _build_linux_guid(any: id_ptr, any: device_name): str {
+fn _build_linux_guid(any id_ptr, any device_name) str {
    if(!id_ptr){ return "00000000000000000000000000000000" }
    if(load8(id_ptr, 0) == 0 && load8(id_ptr, 1) == 0 &&
       load8(id_ptr, 2) == 0 && load8(id_ptr, 3) == 0 &&
@@ -609,7 +622,7 @@ fn _build_linux_guid(any: id_ptr, any: device_name): str {
    guid
 }
 
-fn _open_device(str: path): bool {
+fn _open_device(str path) bool {
    if(_find_slot_by_path(path) >= 0){ return false }
    def jid = _find_free_slot()
    if(jid < 0){ return false }
@@ -765,9 +778,9 @@ fn _open_device(str: path): bool {
    true
 }
 
-fn _mark_scan_now(): any { _set_js_val("last_scan_ticks", ticks()) }
+fn _mark_scan_now() any { _set_js_val("last_scan_ticks", ticks()) }
 
-fn _scan_devices(): int {
+fn _scan_devices() int {
    if(!_linux_input_supported()){ return 0 }
    def names = osfs.list_dir("/dev/input")
    mut i = 0
@@ -781,7 +794,7 @@ fn _scan_devices(): int {
    0
 }
 
-fn _maybe_rescan_devices(bool: force=false): int {
+fn _maybe_rescan_devices(bool force=false) int {
    if(!_linux_input_supported()){ return 0 }
    def now = ticks()
    def last = _get_js_val("last_scan_ticks", 0)
@@ -789,7 +802,7 @@ fn _maybe_rescan_devices(bool: force=false): int {
    0
 }
 
-fn _detect_connections(): int {
+fn _detect_connections() int {
    def inotify_fd = _get_js_val("inotify_fd", -1)
    if(inotify_fd < 0){ return _maybe_rescan_devices() }
    def buffer = malloc(16384)
@@ -833,7 +846,7 @@ fn _detect_connections(): int {
    0
 }
 
-fn _poll_slot(int: jid): bool {
+fn _poll_slot(int jid) bool {
    mut js = _get_js(jid)
    if(!js || !js.get("connected", false)){ return false }
    js = _maybe_attach_js_fd(js)
@@ -887,7 +900,7 @@ fn _poll_slot(int: jid): bool {
    true
 }
 
-fn _ensure_init(): bool {
+fn _ensure_init() bool {
    def initialized = _get_js_val("initialized", false)
    if(initialized || !_linux_input_supported()){ return initialized }
    _set_js_val("initialized", true)
@@ -903,12 +916,12 @@ fn _ensure_init(): bool {
    true
 }
 
-fn init(): bool {
+fn init() bool {
    "Initializes native Linux joystick handling."
    _ensure_init()
 }
 
-fn terminate(): bool {
+fn terminate() bool {
    "Shuts down native Linux joystick handling."
    if(!_get_js_val("initialized", false)){ return true }
    mut jid = 0
@@ -931,7 +944,7 @@ fn terminate(): bool {
    true
 }
 
-fn poll_joysticks(): bool {
+fn poll_joysticks() bool {
    "Polls connection changes and queued joystick events."
    if(!_ensure_init()){ return false }
    def now = ticks()
@@ -947,24 +960,28 @@ fn poll_joysticks(): bool {
    true
 }
 
-fn joystick_present(int: jid): bool {
+fn joystick_present(int jid) bool {
+   "Runs the joystick present operation."
    if(!_ensure_init() || jid < 0 || jid >= MAX_JOYSTICKS){ return false }
    poll_joysticks()
    def js = _get_js(jid)
    !!js.get("connected", false)
 }
 
-fn get_joystick_name(int: jid): str {
+fn get_joystick_name(int jid) str {
+   "Returns get joystick name."
    if(!joystick_present(jid)){ return "Unknown" }
    _get_js(jid).get("name", "Unknown")
 }
 
-fn get_joystick_guid(int: jid): str {
+fn get_joystick_guid(int jid) str {
+   "Returns get joystick guid."
    if(!joystick_present(jid)){ return "00000000000000000000000000000000" }
    _get_js(jid).get("guid", "00000000000000000000000000000000")
 }
 
-fn get_joystick_axes(int: jid, any: count_ptr): any {
+fn get_joystick_axes(int jid, any count_ptr) any {
+   "Returns get joystick axes."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    _poll_slot(jid)
@@ -973,7 +990,8 @@ fn get_joystick_axes(int: jid, any: count_ptr): any {
    _js_axes.get(jid, 0)
 }
 
-fn get_joystick_buttons(int: jid, any: count_ptr): any {
+fn get_joystick_buttons(int jid, any count_ptr) any {
+   "Returns get joystick buttons."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    _poll_slot(jid)
@@ -982,7 +1000,8 @@ fn get_joystick_buttons(int: jid, any: count_ptr): any {
    _js_buttons.get(jid, 0)
 }
 
-fn get_joystick_hats(int: jid, any: count_ptr): any {
+fn get_joystick_hats(int jid, any count_ptr) any {
+   "Returns get joystick hats."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    _poll_slot(jid)
@@ -991,14 +1010,16 @@ fn get_joystick_hats(int: jid, any: count_ptr): any {
    _js_hats.get(jid, 0)
 }
 
-fn joystick_is_gamepad(int: jid): bool {
+fn joystick_is_gamepad(int jid) bool {
+   "Runs the joystick is gamepad operation."
    if(!joystick_present(jid)){ return false }
    def js = _get_js(jid)
    if(js.get("controller_aux", false)){ return false }
    gamepad_map.joystick_is_gamepad(js)
 }
 
-fn get_gamepad_state(int: jid, any: state_ptr): bool {
+fn get_gamepad_state(int jid, any state_ptr) bool {
+   "Returns get gamepad state."
    if(!joystick_present(jid)){ if(state_ptr){ memset(state_ptr, 0, 64) } return false }
    _poll_slot(jid)
    def js = _get_js(jid)
@@ -1006,17 +1027,19 @@ fn get_gamepad_state(int: jid, any: state_ptr): bool {
    gamepad_map.get_gamepad_state(js, state_ptr)
 }
 
-fn get_gamepad_name(int: jid): str {
+fn get_gamepad_name(int jid) str {
+   "Returns get gamepad name."
    if(!joystick_present(jid)){ return "Unknown" }
    def name = gamepad_map.get_gamepad_name(_get_js(jid))
    if(name && name.len > 0){ return name }
    get_joystick_name(jid)
 }
 
-fn set_joystick_callback(any: cb): any {
+fn set_joystick_callback(any cb) any {
+   "Sets set joystick callback."
    def prev = _get_js_val("joystick_callback", 0)
    _set_js_val("joystick_callback", cb)
    prev
 }
 
-fn update_gamepad_mappings(str: s): int { gamepad_map.update_mappings(s, "Linux") }
+fn update_gamepad_mappings(str s) int { gamepad_map.update_mappings(s, "Linux") }

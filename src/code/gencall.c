@@ -64,6 +64,16 @@ static LLVMValueRef ny_build_untagged_or_raw_i64(codegen_t *cg, LLVMValueRef v,
   return ny_select(cg, is_tagged, untagged, v, name ? name : "idx_raw");
 }
 
+static bool ny_gencall_str_in(const char *s, const char *const *vals,
+                              size_t n) {
+  if (!s)
+    return false;
+  for (size_t i = 0; i < n; i++)
+    if (strcmp(s, vals[i]) == 0)
+      return true;
+  return false;
+}
+
 static binding *ny_gencall_lookup_binding(codegen_t *cg, scope *scopes,
                                           size_t depth, const char *name,
                                           size_t name_len, uint64_t hash);
@@ -131,14 +141,6 @@ static bool ny_proven_int_cast_fast_enabled(codegen_t *cg) {
   if (cg)
     cg->env_cache.proven_int_cast_fast = enabled ? 1 : -1;
   return enabled;
-}
-
-static bool ny_is_unshadowed_builtin_name(codegen_t *cg, scope *scopes,
-                                          size_t depth, const char *name) {
-  if (!name || !*name)
-    return false;
-  return !ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name,
-                                                  strlen(name), 0);
 }
 
 static bool ny_is_unshadowed_builtin_callee(codegen_t *cg, scope *scopes,
@@ -261,12 +263,10 @@ static bool ny_gencall_const_small_int_value(codegen_t *cg, scope *scopes,
 }
 
 static bool ny_gencall_type_is_fixed_int_leaf(const char *leaf) {
-  return leaf && (strcmp(leaf, "i8") == 0 || strcmp(leaf, "i16") == 0 ||
-                  strcmp(leaf, "i32") == 0 || strcmp(leaf, "i64") == 0 ||
-                  strcmp(leaf, "i128") == 0 || strcmp(leaf, "u8") == 0 ||
-                  strcmp(leaf, "u16") == 0 || strcmp(leaf, "u32") == 0 ||
-                  strcmp(leaf, "u64") == 0 || strcmp(leaf, "u128") == 0 ||
-                  strcmp(leaf, "char") == 0);
+  static const char *const ints[] = {"i8",   "i16",  "i32", "i64",
+                                     "i128", "u8",   "u16", "u32",
+                                     "u64",  "u128", "char"};
+  return ny_gencall_str_in(leaf, ints, sizeof(ints) / sizeof(ints[0]));
 }
 
 static const char *ny_gencall_static_surface_type(codegen_t *cg, scope *scopes,
@@ -316,13 +316,18 @@ static const char *ny_gencall_static_surface_type(codegen_t *cg, scope *scopes,
     const char *leaf = ny_type_leaf(infer_expr_type(cg, scopes, depth, e));
     if (ny_gencall_type_is_fixed_int_leaf(leaf))
       return "int";
-    if (leaf && (strcmp(leaf, "bigint") == 0 || strcmp(leaf, "BigInt") == 0))
+    static const char *const bigint_names[] = {"bigint", "BigInt"};
+    static const char *const float_names[] = {"f32", "f64", "f128", "float"};
+    static const char *const direct_names[] = {"bool", "str", "ptr",
+                                               "handle"};
+    if (ny_gencall_str_in(leaf, bigint_names,
+                          sizeof(bigint_names) / sizeof(bigint_names[0])))
       return "bigint";
-    if (leaf && (strcmp(leaf, "f32") == 0 || strcmp(leaf, "f64") == 0 ||
-                 strcmp(leaf, "f128") == 0 || strcmp(leaf, "float") == 0))
+    if (ny_gencall_str_in(leaf, float_names,
+                          sizeof(float_names) / sizeof(float_names[0])))
       return "float";
-    if (leaf && (strcmp(leaf, "bool") == 0 || strcmp(leaf, "str") == 0 ||
-                 strcmp(leaf, "ptr") == 0 || strcmp(leaf, "handle") == 0))
+    if (ny_gencall_str_in(leaf, direct_names,
+                          sizeof(direct_names) / sizeof(direct_names[0])))
       return leaf;
     return NULL;
   }
@@ -366,14 +371,22 @@ static const char *ny_gencall_static_surface_type(codegen_t *cg, scope *scopes,
 
 static bool ny_gencall_type_is_raw_to_str_scalar(const char *type_name) {
   const char *leaf = ny_type_leaf(type_name);
-  return leaf &&
-         (strcmp(leaf, "int") == 0 || ny_gencall_type_is_fixed_int_leaf(leaf) ||
-          strcmp(leaf, "bigint") == 0 || strcmp(leaf, "BigInt") == 0 ||
-          strcmp(leaf, "float") == 0 || strcmp(leaf, "f32") == 0 ||
-          strcmp(leaf, "f64") == 0 || strcmp(leaf, "f128") == 0 ||
-          strcmp(leaf, "bool") == 0 || strcmp(leaf, "str") == 0 ||
-          strcmp(leaf, "nil") == 0 || strcmp(leaf, "none") == 0 ||
-          strcmp(leaf, "ptr") == 0 || strcmp(leaf, "handle") == 0);
+  static const char *const scalar_names[] = {
+      "int",    "bigint", "BigInt", "float", "f32",  "f64", "f128",
+      "bool",   "str",    "nil",    "none",  "ptr",  "handle"};
+  return ny_gencall_type_is_fixed_int_leaf(leaf) ||
+         ny_gencall_str_in(leaf, scalar_names,
+                           sizeof(scalar_names) / sizeof(scalar_names[0]));
+}
+
+static bool ny_gencall_name_matches_prefix_tail(const char *name,
+                                                const char *prefix,
+                                                const char *tail) {
+  size_t prefix_len = strlen(prefix);
+  size_t tail_len = strlen(tail);
+  return strncmp(name, prefix, prefix_len) == 0 &&
+         strlen(name + prefix_len) == tail_len &&
+         memcmp(name + prefix_len, tail, tail_len) == 0;
 }
 
 static bool ny_gencall_builtin_name_is(const char *name, const char *tail,
@@ -386,18 +399,13 @@ static bool ny_gencall_builtin_name_is(const char *name, const char *tail,
   if (leaf && leaf[1] && strcmp(leaf + 1, tail) == 0 &&
       strncmp(name, "std.", 4) == 0)
     return true;
-  char qname[128];
-  snprintf(qname, sizeof(qname), "std.core.%s", tail);
-  if (strcmp(name, qname) == 0)
+  if (ny_gencall_name_matches_prefix_tail(name, "std.core.", tail))
     return true;
-  snprintf(qname, sizeof(qname), "std.core.reflect.%s", tail);
-  if (strcmp(name, qname) == 0)
+  if (ny_gencall_name_matches_prefix_tail(name, "std.core.reflect.", tail))
     return true;
-  snprintf(qname, sizeof(qname), "std.core.primitives.%s", tail);
-  if (strcmp(name, qname) == 0)
+  if (ny_gencall_name_matches_prefix_tail(name, "std.core.primitives.", tail))
     return true;
-  snprintf(qname, sizeof(qname), "std.core.syntax.type.%s", tail);
-  if (strcmp(name, qname) == 0)
+  if (ny_gencall_name_matches_prefix_tail(name, "std.core.syntax.type.", tail))
     return true;
   return false;
 }
@@ -2861,19 +2869,19 @@ static bool abi_type_is_tagged(const char *type_name) {
   type_name = abi_skip_nullable(type_name);
   if (ny_gencall_type_is_vec(type_name))
     return true;
-  return strcmp(type_name, "any") == 0 || strcmp(type_name, "str") == 0 ||
-         strcmp(type_name, "bool") == 0 || strcmp(type_name, "Result") == 0 ||
-         strcmp(type_name, "list") == 0 || strcmp(type_name, "dict") == 0 ||
-         strcmp(type_name, "tuple") == 0 || strcmp(type_name, "set") == 0 ||
-         strcmp(type_name, "bytes") == 0 || strcmp(type_name, "range") == 0 ||
-         strcmp(type_name, "bigint") == 0;
+  static const char *const tagged[] = {"any",   "str",   "bool", "Result",
+                                       "list",  "dict",  "tuple", "set",
+                                       "bytes", "range", "bigint"};
+  return ny_gencall_str_in(type_name, tagged,
+                           sizeof(tagged) / sizeof(tagged[0]));
 }
 
 static bool ny_memo_impure_return_allowed(const char *type_name) {
   if (!type_name || !*type_name)
     return false;
-  return strcmp(type_name, "int") == 0 || strcmp(type_name, "bool") == 0 ||
-         strcmp(type_name, "none") == 0;
+  static const char *const allowed[] = {"int", "bool", "none"};
+  return ny_gencall_str_in(type_name, allowed,
+                           sizeof(allowed) / sizeof(allowed[0]));
 }
 
 static bool abi_type_is_ptr(const char *type_name) {
@@ -2972,17 +2980,18 @@ static bool abi_type_is_float(const char *type_name) {
   if (!type_name)
     return false;
   type_name = abi_skip_nullable(type_name);
-  return strcmp(type_name, "f32") == 0 || strcmp(type_name, "f64") == 0 ||
-         strcmp(type_name, "f128") == 0;
+  static const char *const floats[] = {"f32", "f64", "f128"};
+  return ny_gencall_str_in(type_name, floats,
+                           sizeof(floats) / sizeof(floats[0]));
 }
 
 static bool abi_type_is_complex(const char *type_name) {
   if (!type_name)
     return false;
   type_name = ny_type_leaf(abi_skip_nullable(type_name));
-  return type_name &&
-         (strcmp(type_name, "complex") == 0 || strcmp(type_name, "c128") == 0 ||
-          strcmp(type_name, "c64") == 0);
+  static const char *const complex[] = {"complex", "c128", "c64"};
+  return ny_gencall_str_in(type_name, complex,
+                           sizeof(complex) / sizeof(complex[0]));
 }
 
 static LLVMTypeRef abi_complex_type(codegen_t *cg, const char *type_name) {
@@ -2997,19 +3006,18 @@ static bool abi_type_is_signed_int(const char *type_name) {
   if (!type_name)
     return false;
   type_name = abi_skip_nullable(type_name);
-  return strcmp(type_name, "i8") == 0 || strcmp(type_name, "i16") == 0 ||
-         strcmp(type_name, "i32") == 0 || strcmp(type_name, "i64") == 0 ||
-         strcmp(type_name, "i128") == 0 || strcmp(type_name, "char") == 0 ||
-         strcmp(type_name, "int") == 0;
+  static const char *const ints[] = {"i8",  "i16",  "i32", "i64",
+                                     "i128", "char", "int"};
+  return ny_gencall_str_in(type_name, ints, sizeof(ints) / sizeof(ints[0]));
 }
 
 static bool abi_type_is_unsigned_int(const char *type_name) {
   if (!type_name)
     return false;
   type_name = abi_skip_nullable(type_name);
-  return strcmp(type_name, "u8") == 0 || strcmp(type_name, "u16") == 0 ||
-         strcmp(type_name, "u32") == 0 || strcmp(type_name, "u64") == 0 ||
-         strcmp(type_name, "u128") == 0 || strcmp(type_name, "handle") == 0;
+  static const char *const ints[] = {"u8", "u16", "u32", "u64", "u128",
+                                     "handle"};
+  return ny_gencall_str_in(type_name, ints, sizeof(ints) / sizeof(ints[0]));
 }
 
 static layout_def_t *abi_layout_from_name(codegen_t *cg,
@@ -3034,6 +3042,26 @@ static bool abi_type_needs_native_coerce(codegen_t *cg, const char *type_name) {
   if (abi_layout_from_name(cg, type_name))
     return true;
   return ny_is_native_abi_type_name(type_name) && !ny_type_is_tagged(type_name);
+}
+
+static bool abi_sig_type_needs_native_coerce(codegen_t *cg, fun_sig *sig,
+                                             const char *type_name) {
+  if (!sig || !sig->is_native_abi || !type_name || !*type_name)
+    return false;
+  type_name = abi_skip_nullable(type_name);
+  if (abi_type_is_fnptr(type_name) && !sig->is_extern)
+    return false;
+  return abi_type_needs_native_coerce(cg, type_name);
+}
+
+static bool abi_sig_param_needs_native_coerce(fun_sig *sig,
+                                              const char *type_name) {
+  if (!sig || !sig->is_native_abi || !type_name || !*type_name)
+    return false;
+  type_name = abi_skip_nullable(type_name);
+  if (abi_type_is_fnptr(type_name) && !sig->is_extern)
+    return false;
+  return !abi_type_is_tagged(type_name);
 }
 
 static LLVMTypeRef abi_layout_carrier_type(codegen_t *cg,
@@ -3725,21 +3753,6 @@ static bool ny_expr_is_direct_dict_storage(codegen_t *cg, scope *scopes,
   return ny_binding_dict_storage_init(b) != NULL;
 }
 
-static bool ny_expr_is_static_indexable(codegen_t *cg, scope *scopes,
-                                        size_t depth, expr_t *target) {
-  if (ny_expr_is_list_or_tuple_lit(target))
-    return true;
-  if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
-    return false;
-  size_t name_len = (size_t)target->tok.len;
-  if (name_len == 0)
-    name_len = strlen(target->as.ident.name);
-  binding *b =
-      ny_gencall_lookup_binding(cg, scopes, depth, target->as.ident.name,
-                                name_len, target->as.ident.hash);
-  return ny_binding_static_indexable_lit(b) != NULL;
-}
-
 static LLVMValueRef ny_emit_trusted_fast_indexable_get(
     codegen_t *cg, scope *scopes, size_t depth, expr_t *target, expr_t *key,
     expr_t *default_expr, token_t tok, bool assume_nonnegative,
@@ -4109,15 +4122,6 @@ static LLVMValueRef ny_emit_trusted_fast_list_set(
   LLVMBasicBlockRef incoming_bbs[2] = {fast_end_bb, slow_end_bb};
   LLVMAddIncoming(phi, incoming_vals, incoming_bbs, 2);
   return phi;
-}
-
-static bool ny_gencall_builtin_name_shadowed(codegen_t *cg, scope *scopes,
-                                             size_t depth, const char *name,
-                                             uint64_t name_hash) {
-  if (!name)
-    return true;
-  return ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth, name, 0,
-                                                 name_hash);
 }
 
 static LLVMValueRef
@@ -7141,7 +7145,7 @@ static bool ny_gencall_sig_has_native_param(fun_sig *sig) {
     n = sig->stmt_t->as.ext.params.len;
   for (size_t i = 0; i < n; ++i) {
     const char *t = ny_gencall_sig_param_type(sig, i);
-    if (t && !abi_type_is_tagged(t))
+    if (abi_sig_param_needs_native_coerce(sig, t))
       return true;
   }
   return false;
@@ -7186,10 +7190,11 @@ LLVMValueRef ny_try_native_call_as_f64(codegen_t *cg, scope *scopes,
   for (size_t i = 0; i < argc; ++i) {
     expr_t *arg = c->args.data[i].val;
     const char *ptype = ny_gencall_sig_param_type(sig, i);
-    if (ptype && !abi_type_is_tagged(ptype) &&
+    if (abi_sig_param_needs_native_coerce(sig, ptype) &&
         (ny_type_is(ptype, "f64") || ny_type_is(ptype, "float"))) {
       args[i] = gen_expr_as_f64(cg, scopes, depth, arg);
-    } else if (ptype && !abi_type_is_tagged(ptype) && ny_type_is(ptype, "f32")) {
+    } else if (abi_sig_param_needs_native_coerce(sig, ptype) &&
+               ny_type_is(ptype, "f32")) {
       args[i] = LLVMBuildFPTrunc(cg->builder,
                                  gen_expr_as_f64(cg, scopes, depth, arg),
                                  cg->type_f32, NY_LLVM_NAME(cg, "f64_to_f32"));
@@ -7197,7 +7202,7 @@ LLVMValueRef ny_try_native_call_as_f64(codegen_t *cg, scope *scopes,
       LLVMValueRef v = gen_expr(cg, scopes, depth, arg);
       if (!v)
         return NULL;
-      args[i] = (ptype && !abi_type_is_tagged(ptype))
+      args[i] = abi_sig_param_needs_native_coerce(sig, ptype)
                     ? ny_coerce_to_abi(cg, v, ptype)
                     : v;
     }
@@ -7253,8 +7258,7 @@ static LLVMValueRef ny_gencall_try_thread_call_api(codegen_t *cg, scope *scopes,
       ny_gencall_resolve_static_callable(cg, fn_expr, thread_argc);
   if (!target)
     return NULL;
-  if (target->is_native_abi && target->return_type &&
-      !abi_type_is_tagged(target->return_type)) {
+  if (abi_sig_type_needs_native_coerce(cg, target, target->return_type)) {
     ny_diag_error(fn_expr->tok,
                   "thread_spawn_call target '%s' must return tagged any or "
                   "omit a native return annotation",
@@ -7292,7 +7296,7 @@ static LLVMValueRef ny_gencall_try_thread_call_api(codegen_t *cg, scope *scopes,
         free(argv_values);
         return ny_c0(cg);
       }
-      if (target->is_native_abi && ptype && !abi_type_is_tagged(ptype)) {
+      if (abi_sig_param_needs_native_coerce(target, ptype)) {
         if (abi_type_is_float(ptype)) {
           ny_diag_error(
               arg_expr->tok,
@@ -8853,7 +8857,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         if (sig_meta->is_variadic && (int)i >= sig_arity - 1)
           break;
         const char *tname = call_params->data[i].type;
-        if (sig_meta->is_native_abi && tname && !abi_type_is_tagged(tname)) {
+        if (abi_sig_param_needs_native_coerce(sig_meta, tname)) {
           bool mono_int_arg = sig_meta->name &&
                               strstr(sig_meta->name, "__ny_mono_") && tname &&
                               ny_type_is(tname, "int");
@@ -8878,7 +8882,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         if (sig_meta->is_variadic && (int)i >= sig_arity - 1)
           break;
         const char *tname = sig_meta->param_types.data[i];
-        if (sig_meta->is_native_abi && tname && !abi_type_is_tagged(tname)) {
+        if (abi_sig_param_needs_native_coerce(sig_meta, tname)) {
           bool proven_int_arg = false;
           if (proven_int_cast_fast && arg_exprs && i < final_argc &&
               arg_exprs[i] && ny_proven_int_cast_fast_allowed(arg_exprs[i]))
@@ -9208,8 +9212,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         const char *slow_ret_type =
             sig_meta->abi_return_type ? sig_meta->abi_return_type
                                       : sig_meta->return_type;
-        if (sig_meta->is_native_abi && slow_ret_type &&
-            abi_type_needs_native_coerce(cg, slow_ret_type)) {
+        if (abi_sig_type_needs_native_coerce(cg, sig_meta, slow_ret_type)) {
           if (ny_type_is(slow_ret_type, "f32") ||
               ny_type_is(slow_ret_type, "f64") ||
               ny_type_is(slow_ret_type, "f128")) {
@@ -9262,8 +9265,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     const char *ret_type =
         sig_meta->abi_return_type ? sig_meta->abi_return_type
                                   : sig_meta->return_type;
-    if (sig_meta->is_native_abi &&
-        abi_type_needs_native_coerce(cg, ret_type)) {
+    if (abi_sig_type_needs_native_coerce(cg, sig_meta, ret_type)) {
       return ny_box_abi_result(cg, res, ret_type);
     }
   }

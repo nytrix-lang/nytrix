@@ -3,7 +3,7 @@ use std.os.time
 use benchmark.helpers
 
 ;; Sieve of Eratosthenes (Benchmark)
-fn sieve(n){
+fn sieve(n) {
    if(n < 2){ return 0 }
    def size = (n >> 1) + 1
    def flags = malloc(size)

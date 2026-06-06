@@ -3,13 +3,13 @@ use std.os.time
 use benchmark.helpers
 
 ;; Binary Trees (Benchmark)
-fn make_tree(int: depth): any {
+fn make_tree(int depth) any {
    if(depth == 0){ return 0 }
    mut d = depth - 1
    return [make_tree(d), make_tree(d)]
 }
 
-fn check(any: t): int {
+fn check(any t) int {
    if(t == 0){ return 1 }
    return 1 + check(t.get(0)) + check(t.get(1))
 }

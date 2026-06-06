@@ -2,7 +2,7 @@
 use std.core
 
 impl Bad {
-   fn add(self: x): self {
+   fn add(self x) self {
       x
    }
    operator + self: self = add

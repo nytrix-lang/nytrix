@@ -1,5 +1,9 @@
-;; Keywords: platform window backend win32 windows joystick
+;; Keywords: platform window backend win32 windows joystick os ui input
 ;; Native Win32 XInput/WinMM joystick backend for Nytrix.
+;; References:
+;; - std.os.ui.window.platform.win32
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.platform.win32.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
 use std.core
 use std.core.mem
@@ -12,14 +16,14 @@ use std.os.ui.window.platform.gamepad_map as gamepad_map
 def XINPUT_MAX_CONTROLLERS = 4
 def ERROR_SUCCESS = 0
 def ERROR_DEVICE_NOT_CONNECTED = 1167
-def _XI_PACKET    = 0 ;; u32
-def _XI_BUTTONS   = 4 ;; u16
-def _XI_LT        = 6 ;; u8
-def _XI_RT        = 7 ;; u8
-def _XI_LX        = 8 ;; i16
-def _XI_LY        = 10 ;; i16
-def _XI_RX        = 12 ;; i16
-def _XI_RY        = 14 ;; i16
+def _XI_PACKET    = 0
+def _XI_BUTTONS   = 4
+def _XI_LT        = 6
+def _XI_RT        = 7
+def _XI_LX        = 8
+def _XI_LY        = 10
+def _XI_RX        = 12
+def _XI_RY        = 14
 def _XI_STATE_SZ  = 16
 def XINPUT_A           = 0x1000
 def XINPUT_B           = 0x2000
@@ -148,19 +152,19 @@ mut _dinput_enum_slider_count = 0
 mut _dinput_enum_button_count = 0
 mut _dinput_enum_pov_count = 0
 
-fn _has_native_support(): bool {
+fn _has_native_support() bool {
    #windows { return true }
    false
 }
 
-fn _get_js(int: jid): any { _joysticks.get(jid, 0) }
+fn _get_js(int jid) any { _joysticks.get(jid, 0) }
 
-fn _put_js(int: jid, any: js): any {
+fn _put_js(int jid, any js) any {
    _joysticks = _joysticks.set(jid, js)
    js
 }
 
-fn _free_js(int: jid): bool {
+fn _free_js(int jid) bool {
    def js = _get_js(jid)
    if(!js){ return false }
    if(js.get("kind", "") == "dinput"){
@@ -183,34 +187,34 @@ fn _free_js(int: jid): bool {
    true
 }
 
-fn _invoke_callback(int: jid, int: event): any {
+fn _invoke_callback(int jid, int event) any {
    def cb = _joystick_callback
    if(cb){ cb(jid, event) }
 }
 
-fn _ensure_windows_mappings(): bool {
+fn _ensure_windows_mappings() bool {
    gamepad_map.init_default_windows_mappings()
    true
 }
 
-fn _ensure_init(): bool {
+fn _ensure_init() bool {
    if(_initialized){ return _ensure_windows_mappings() }
    if(!_has_native_support()){ return false }
    _initialized = true
    _ensure_windows_mappings()
 }
 
-fn _scratch_xi_state(): any {
+fn _scratch_xi_state() any {
    if(!_xi_state_buf){ _xi_state_buf = malloc(_XI_STATE_SZ) }
    _xi_state_buf
 }
 
-fn _scratch_winmm_info(): any {
+fn _scratch_winmm_info() any {
    if(!_winmm_info_buf){ _winmm_info_buf = malloc(_WINMM_JOYINFOEX_SIZE) }
    _winmm_info_buf
 }
 
-fn _dinput_guid(u32: a, u32: b, u32: c, u32: d0, u32: d1, u32: d2, u32: d3, u32: d4, u32: d5, u32: d6, u32: d7): ptr {
+fn _dinput_guid(u32 a, u32 b, u32 c, u32 d0, u32 d1, u32 d2, u32 d3, u32 d4, u32 d5, u32 d6, u32 d7) ptr {
    def g = zalloc(_DINPUT_GUID_SIZE)
    if(!g){ return 0 }
    store32(g, a, 0)
@@ -227,7 +231,7 @@ fn _dinput_guid(u32: a, u32: b, u32: c, u32: d0, u32: d1, u32: d2, u32: d3, u32:
    g
 }
 
-fn _dinput_guid_init(): bool {
+fn _dinput_guid_init() bool {
    if(_dinput_guid_dinput8){ return true }
    _dinput_guid_dinput8 = _dinput_guid(0xbf798031, 0x483a, 0x4da2, 0xaa, 0x99, 0x5d, 0x64, 0xed, 0x36, 0x97, 0x00)
    _dinput_guid_x = _dinput_guid(0xa36d02e0, 0xc9f3, 0x11cf, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00)
@@ -239,11 +243,11 @@ fn _dinput_guid_init(): bool {
    _dinput_guid_slider = _dinput_guid(0xa36d02e4, 0xc9f3, 0x11cf, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00)
    _dinput_guid_pov = _dinput_guid(0xa36d02f2, 0xc9f3, 0x11cf, 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00)
    _dinput_guid_dinput8 && _dinput_guid_x && _dinput_guid_y && _dinput_guid_z &&
-      _dinput_guid_rx && _dinput_guid_ry && _dinput_guid_rz &&
-      _dinput_guid_slider && _dinput_guid_pov
+   _dinput_guid_rx && _dinput_guid_ry && _dinput_guid_rz &&
+   _dinput_guid_slider && _dinput_guid_pov
 }
 
-fn _dinput_store_objfmt(int: idx, any: guid, int: ofs, int: typ, int: flags): any {
+fn _dinput_store_objfmt(int idx, any guid, int ofs, int typ, int flags) any {
    def p = _dinput_object_formats + idx * _DINPUT_DIOBJECTDATAFORMAT_SIZE
    store64_h(p, guid, 0)
    store32(p, ofs, 8)
@@ -251,19 +255,19 @@ fn _dinput_store_objfmt(int: idx, any: guid, int: ofs, int: typ, int: flags): an
    store32(p, flags, 16)
 }
 
-fn _dinput_axis_format_type(): int {
+fn _dinput_axis_format_type() int {
    _DINPUT_DIDFT_AXIS | _DINPUT_DIDFT_OPTIONAL | _DINPUT_DIDFT_ANYINSTANCE
 }
 
-fn _dinput_button_format_type(): int {
+fn _dinput_button_format_type() int {
    _DINPUT_DIDFT_BUTTON | _DINPUT_DIDFT_OPTIONAL | _DINPUT_DIDFT_ANYINSTANCE
 }
 
-fn _dinput_pov_format_type(): int {
+fn _dinput_pov_format_type() int {
    _DINPUT_DIDFT_POV | _DINPUT_DIDFT_OPTIONAL | _DINPUT_DIDFT_ANYINSTANCE
 }
 
-fn _dinput_build_data_format(): bool {
+fn _dinput_build_data_format() bool {
    if(_dinput_data_format){ return true }
    if(!_dinput_guid_init()){ return false }
    _dinput_object_formats = zalloc(_DINPUT_DIOBJECTDATAFORMAT_SIZE * _DINPUT_MAX_OBJECT_FORMATS)
@@ -299,29 +303,29 @@ fn _dinput_build_data_format(): bool {
    true
 }
 
-fn _dinput_method(any: obj, int: index): any {
+fn _dinput_method(any obj, int index) any {
    if(!obj){ return 0 }
    def vt = load64(obj, 0)
    if(!vt){ return 0 }
    ffi.tag_native(load64(vt, index * 8))
 }
 
-fn _dinput_release(any: obj): int {
+fn _dinput_release(any obj) int {
    if(!obj){ return 0 }
    int(ffi.call1(_dinput_method(obj, 2), obj))
 }
 
-fn _dinput_device_unacquire(any: dev): int {
+fn _dinput_device_unacquire(any dev) int {
    if(!dev){ return 0 }
    int(ffi.call1(_dinput_method(dev, 8), dev))
 }
 
-fn _dinput_device_acquire(any: dev): int {
+fn _dinput_device_acquire(any dev) int {
    if(!dev){ return 1 }
    int(ffi.call1(_dinput_method(dev, 7), dev))
 }
 
-fn _dinput_init(): bool {
+fn _dinput_init() bool {
    if(_dinput_api){ return true }
    if(!_has_native_support() || !_dinput_build_data_format()){ return false }
    def out = zalloc(8)
@@ -334,7 +338,7 @@ fn _dinput_init(): bool {
    true
 }
 
-fn _dinput_shutdown(): any {
+fn _dinput_shutdown() any {
    if(_dinput_api){
       _dinput_release(_dinput_api)
       _dinput_api = 0
@@ -373,51 +377,73 @@ fn _dinput_shutdown(): any {
    #include <xinput.h>
    #include <mmsystem.h>
    extern "" {
-      fn _ny_GetModuleHandleA(ptr: _name): ptr as "GetModuleHandleA"
-      fn XInputGetState(u32: _idx, ptr: _state): u32
-      fn joyGetNumDevs(): u32
-      fn joyGetPosEx(u32: _id, ptr: _info): u32
-      fn joyGetDevCapsW(u32: _id, ptr: _caps, u32: _size): u32
-      fn DirectInput8Create(ptr: _inst, u32: _version, ptr: _iid, ptr: _out, ptr: _outer): i32
-      fn GetRawInputDeviceList(ptr: _devices, ptr: _count, u32: _size): u32
-      fn GetRawInputDeviceInfoA(ptr: _device, u32: _cmd, ptr: _data, ptr: _size): u32
+      fn _ny_GetModuleHandleA(ptr _name) ptr as "GetModuleHandleA"
+      fn XInputGetState(u32 _idx, ptr _state) u32
+      fn joyGetNumDevs() u32
+      fn joyGetPosEx(u32 _id, ptr _info) u32
+      fn joyGetDevCapsW(u32 _id, ptr _caps, u32 _size) u32
+      fn DirectInput8Create(ptr _inst, u32 _version, ptr _iid, ptr _out, ptr _outer) i32
+      fn GetRawInputDeviceList(ptr _devices, ptr _count, u32 _size) u32
+      fn GetRawInputDeviceInfoA(ptr _device, u32 _cmd, ptr _data, ptr _size) u32
    }
 } #else {
-   fn _ny_GetModuleHandleA(ptr: _name): ptr { 0 }
-   fn XInputGetState(any: _idx, any: _state): int { ERROR_DEVICE_NOT_CONNECTED }
-   fn joyGetNumDevs(): u32 { 0 }
-   fn joyGetPosEx(u32: _id, ptr: _info): u32 { 1 }
-   fn joyGetDevCapsW(u32: _id, ptr: _caps, u32: _size): u32 { 1 }
-   fn DirectInput8Create(ptr: _inst, u32: _version, ptr: _iid, ptr: _out, ptr: _outer): i32 { 1 }
-   fn GetRawInputDeviceList(ptr: _devices, ptr: _count, u32: _size): u32 { 0xffffffff }
-   fn GetRawInputDeviceInfoA(ptr: _device, u32: _cmd, ptr: _data, ptr: _size): u32 { 0xffffffff }
+   "Runs the GetRawInputDeviceInfoA operation."
+   fn _ny_GetModuleHandleA(ptr _name) ptr { 0 }
+   fn XInputGetState(any _idx, any _state) int {
+      "Runs the XInputGetState operation."
+      ERROR_DEVICE_NOT_CONNECTED
+   }
+   fn joyGetNumDevs() u32 {
+      "Runs the joyGetNumDevs operation."
+      0
+   }
+   fn joyGetPosEx(u32 _id, ptr _info) u32 {
+      "Runs the joyGetPosEx operation."
+      1
+   }
+   fn joyGetDevCapsW(u32 _id, ptr _caps, u32 _size) u32 {
+      "Runs the joyGetDevCapsW operation."
+      1
+   }
+   fn DirectInput8Create(ptr _inst, u32 _version, ptr _iid, ptr _out, ptr _outer) i32 {
+      "Runs the DirectInput8Create operation."
+      1
+   }
+   fn GetRawInputDeviceList(ptr _devices, ptr _count, u32 _size) u32 {
+      "Runs the GetRawInputDeviceList operation."
+      0xffffffff
+   }
+   fn GetRawInputDeviceInfoA(ptr _device, u32 _cmd, ptr _data, ptr _size) u32 {
+      "Runs the GetRawInputDeviceInfoA operation."
+      0xffffffff
+   }
 }
 
-fn _signed16(any: v): int {
+fn _signed16(any v) int {
    def x = int(v) & 0xffff
    if(x >= 0x8000){ x - 0x10000 } else { x }
 }
 
-fn _signed32(any: v): int {
+fn _signed32(any v) int {
    def x = int(v) & 0xffffffff
    if(x >= 0x80000000){ x - 0x100000000 } else { x }
 }
 
-fn _hresult_failed(any: hr): bool {
+fn _hresult_failed(any hr) bool {
    (int(hr) & 0x80000000) != 0
 }
 
-fn _normalize_thumb(any: v): f64 {
+fn _normalize_thumb(any v) f64 {
    def fv = float(v)
    if(fv < 0.0){ return fv / 32768.0 }
    fv / 32767.0
 }
 
-fn _normalize_trigger(any: v): f64 {
+fn _normalize_trigger(any v) f64 {
    float(v) / 127.5 - 1.0
 }
 
-fn _normalize_winmm_axis(any: v): f64 {
+fn _normalize_winmm_axis(any v) f64 {
    def fv = float(int(v) & 0xffffffff)
    mut out = fv / 32767.5 - 1.0
    if(out < -1.0){ out = -1.0 }
@@ -425,14 +451,14 @@ fn _normalize_winmm_axis(any: v): f64 {
    out
 }
 
-fn _normalize_dinput_axis(any: v): f64 {
+fn _normalize_dinput_axis(any v) f64 {
    mut out = (float(_signed32(v)) + 0.5) / 32767.5
    if(out < -1.0){ out = -1.0 }
    if(out > 1.0){ out = 1.0 }
    out
 }
 
-fn _normalize_dinput_axis_unsigned(any: v): f64 {
+fn _normalize_dinput_axis_unsigned(any v) f64 {
    mut raw = int(v) & 0xffffffff
    if(raw > 65535){ raw = 65535 }
    mut out = float(raw) / 32767.5 - 1.0
@@ -441,29 +467,29 @@ fn _normalize_dinput_axis_unsigned(any: v): f64 {
    out
 }
 
-fn _normalize_dinput_axis_for_js(any: js, any: v): f64 {
+fn _normalize_dinput_axis_for_js(any js, any v) f64 {
    if(js && js.get("dinput_unsigned_axes", false)){
       return _normalize_dinput_axis_unsigned(v)
    }
    _normalize_dinput_axis(v)
 }
 
-fn _hex_nibble(any: n): str {
+fn _hex_nibble(any n) str {
    def x = int(n) & 0xf
    if(x < 10){ return chr(48 + x) }
    chr(97 + x - 10)
 }
 
-fn _hex_byte(any: v): str {
+fn _hex_byte(any v) str {
    def x = int(v) & 0xff
    _hex_nibble(x >> 4) + _hex_nibble(x)
 }
 
-fn _hex_word_le(any: v): str {
+fn _hex_word_le(any v) str {
    _hex_byte(v) + _hex_byte(int(v) >> 8)
 }
 
-fn _utf16_name(any: p, int: off, int: max_chars): str {
+fn _utf16_name(any p, int off, int max_chars) str {
    mut out = ""
    mut i = 0
    while(i < max_chars){
@@ -477,7 +503,7 @@ fn _utf16_name(any: p, int: off, int: max_chars): str {
    out
 }
 
-fn _fallback_guid_for_name(any: name): str {
+fn _fallback_guid_for_name(any name) str {
    def lname = str.lower(to_str(name))
    if(str.find(lname, "dualsense") != -1 || str.find(lname, "ps5") != -1){
       return "030000004c050000e60c000000000000"
@@ -488,27 +514,27 @@ fn _fallback_guid_for_name(any: name): str {
    ""
 }
 
-fn _build_winmm_guid(any: name, any: mid, any: pid): str {
+fn _build_winmm_guid(any name, any mid, any pid) str {
    def fallback = _fallback_guid_for_name(name)
    if(fallback != ""){ return fallback }
    "03000000" + _hex_word_le(mid) + "0000" + _hex_word_le(pid) + "000000000000"
 }
 
-fn _dinput_product_has_pidvid(any: product): bool {
+fn _dinput_product_has_pidvid(any product) bool {
    product &&
-      load8(product, 10) == 80 && load8(product, 11) == 73 &&
-      load8(product, 12) == 68 && load8(product, 13) == 86 &&
-      load8(product, 14) == 73 && load8(product, 15) == 68
+   load8(product, 10) == 80 && load8(product, 11) == 73 &&
+   load8(product, 12) == 68 && load8(product, 13) == 86 &&
+   load8(product, 14) == 73 && load8(product, 15) == 68
 }
 
-fn _build_dinput_guid(any: product, any: name): str {
+fn _build_dinput_guid(any product, any name) str {
    if(_dinput_product_has_pidvid(product)){
       def data1 = load32(product, 0)
       return "03000000" +
-         _hex_byte(data1) + _hex_byte(data1 >> 8) +
-         "0000" +
-         _hex_byte(data1 >> 16) + _hex_byte(data1 >> 24) +
-         "000000000000"
+      _hex_byte(data1) + _hex_byte(data1 >> 8) +
+      "0000" +
+      _hex_byte(data1 >> 16) + _hex_byte(data1 >> 24) +
+      "000000000000"
    }
    mut out = "05000000"
    def s = to_str(name)
@@ -520,7 +546,7 @@ fn _build_dinput_guid(any: product, any: name): str {
    out + "00"
 }
 
-fn _ascii_cstr(any: p, int: max_len): str {
+fn _ascii_cstr(any p, int max_len) str {
    if(!p || max_len <= 0){ return "" }
    mut out = ""
    mut i = 0
@@ -535,7 +561,7 @@ fn _ascii_cstr(any: p, int: max_len): str {
    out
 }
 
-fn _rawinput_name_contains_ig(any: handle): bool {
+fn _rawinput_name_contains_ig(any handle) bool {
    def size_ptr = zalloc(4)
    def name = zalloc(_RAWINPUT_NAME_MAX)
    if(!size_ptr || !name){
@@ -551,7 +577,7 @@ fn _rawinput_name_contains_ig(any: handle): bool {
    ok
 }
 
-fn _dinput_supports_xinput(any: product): bool {
+fn _dinput_supports_xinput(any product) bool {
    if(!product){ return false }
    def product_code = load32(product, 0) & 0xffffffff
    def count_ptr = zalloc(4)
@@ -603,7 +629,7 @@ fn _dinput_supports_xinput(any: product): bool {
    result
 }
 
-fn _dinput_guid_instance_seen(any: guid): bool {
+fn _dinput_guid_instance_seen(any guid) bool {
    if(!guid){ return false }
    mut jid = _DINPUT_BASE_JID
    while(jid < _MAX_JOYSTICKS){
@@ -617,7 +643,7 @@ fn _dinput_guid_instance_seen(any: guid): bool {
    false
 }
 
-fn _dinput_connected_count(): int {
+fn _dinput_connected_count() int {
    mut n = 0
    mut jid = _DINPUT_BASE_JID
    while(jid < _MAX_JOYSTICKS){
@@ -628,7 +654,7 @@ fn _dinput_connected_count(): int {
    n
 }
 
-fn _first_free_dinput_jid(): int {
+fn _first_free_dinput_jid() int {
    mut jid = _DINPUT_BASE_JID
    while(jid < _MAX_JOYSTICKS){
       if(!_get_js(jid)){ return jid }
@@ -637,7 +663,7 @@ fn _first_free_dinput_jid(): int {
    -1
 }
 
-fn _dinput_object_less(any: a, any: b): bool {
+fn _dinput_object_less(any a, any b) bool {
    if(!a || !b){ return false }
    def at = int(a.get("type", 0))
    def bt = int(b.get("type", 0))
@@ -645,7 +671,7 @@ fn _dinput_object_less(any: a, any: b): bool {
    int(a.get("offset", 0)) < int(b.get("offset", 0))
 }
 
-fn _dinput_sort_objects(list: objs): list {
+fn _dinput_sort_objects(list objs) list {
    mut out = objs
    mut i = 0
    while(i < out.len){
@@ -661,7 +687,7 @@ fn _dinput_sort_objects(list: objs): list {
    out
 }
 
-fn _dinput_axis_offset(any: guid): int {
+fn _dinput_axis_offset(any guid) int {
    def data1 = load32(guid, 0) & 0xffffffff
    if(data1 == 0xa36d02e4){
       return _DINPUT_DIJOFS_SLIDER0 + _dinput_enum_slider_count * 4
@@ -675,7 +701,7 @@ fn _dinput_axis_offset(any: guid): int {
    -1
 }
 
-fn _dinput_set_axis_range(any: dev, int: obj_type): bool {
+fn _dinput_set_axis_range(any dev, int obj_type) bool {
    def dipr = zalloc(_DINPUT_DIPROPRANGE_SIZE)
    if(!dipr){ return false }
    store32(dipr, _DINPUT_DIPROPRANGE_SIZE, 0)
@@ -685,12 +711,12 @@ fn _dinput_set_axis_range(any: dev, int: obj_type): bool {
    store32(dipr, -32768, 16)
    store32(dipr, 32767, 20)
    def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
-      ffi.tag_native(_DINPUT_DIPROP_RANGE), dipr))
+   ffi.tag_native(_DINPUT_DIPROP_RANGE), dipr))
    free(dipr)
    !_hresult_failed(hr)
 }
 
-fn _dinput_set_axis_mode_abs(any: dev): bool {
+fn _dinput_set_axis_mode_abs(any dev) bool {
    def dipd = zalloc(_DINPUT_DIPROPDWORD_SIZE)
    if(!dipd){ return false }
    store32(dipd, _DINPUT_DIPROPDWORD_SIZE, 0)
@@ -699,17 +725,17 @@ fn _dinput_set_axis_mode_abs(any: dev): bool {
    store32(dipd, _DINPUT_DIPH_DEVICE, 12)
    store32(dipd, _DINPUT_DIPROPAXISMODE_ABS, 16)
    def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
-      ffi.tag_native(_DINPUT_DIPROP_AXISMODE), dipd))
+   ffi.tag_native(_DINPUT_DIPROP_AXISMODE), dipd))
    free(dipd)
    !_hresult_failed(hr)
 }
 
-fn _dinput_append_object(int: typ, int: offset): any {
+fn _dinput_append_object(int typ, int offset) any {
    if(_dinput_enum_objects.len >= _DINPUT_MAX_OBJECTS){ return nil }
    _dinput_enum_objects = _dinput_enum_objects.append({"type": typ, "offset": offset})
 }
 
-fn _dinput_add_default_axes(int: axis_count): any {
+fn _dinput_add_default_axes(int axis_count) any {
    def offsets = [
       _DINPUT_DIJOFS_X,
       _DINPUT_DIJOFS_Y,
@@ -726,7 +752,7 @@ fn _dinput_add_default_axes(int: axis_count): any {
    }
 }
 
-fn _dinput_object_cb(ptr: doi, ptr: user): i32 {
+fn _dinput_object_cb(ptr doi, ptr user) i32 {
    if(!doi || !_dinput_enum_device){ return _DINPUT_DIENUM_CONTINUE }
    def typ = load32(doi, 24) & 0xff
    def raw_type = load32(doi, 24)
@@ -735,8 +761,10 @@ fn _dinput_object_cb(ptr: doi, ptr: user): i32 {
       def offset = _dinput_axis_offset(guid)
       if(offset < 0){ return _DINPUT_DIENUM_CONTINUE }
       if(!_dinput_set_axis_range(_dinput_enum_device, raw_type)){ return _DINPUT_DIENUM_CONTINUE }
-      def obj_type = (offset == _DINPUT_DIJOFS_SLIDER0 || offset == _DINPUT_DIJOFS_SLIDER0 + 4) ?
-         _DINPUT_TYPE_SLIDER : _DINPUT_TYPE_AXIS
+      mut obj_type = _DINPUT_TYPE_AXIS
+      if(offset == _DINPUT_DIJOFS_SLIDER0 || offset == _DINPUT_DIJOFS_SLIDER0 + 4){
+         obj_type = _DINPUT_TYPE_SLIDER
+      }
       if(obj_type == _DINPUT_TYPE_AXIS){ _dinput_enum_axis_count += 1 }
       else { _dinput_enum_slider_count += 1 }
       _dinput_append_object(obj_type, offset)
@@ -750,7 +778,7 @@ fn _dinput_object_cb(ptr: doi, ptr: user): i32 {
    _DINPUT_DIENUM_CONTINUE
 }
 
-fn _alloc_dinput_js(int: jid, any: dev, any: di, any: objects): any {
+fn _alloc_dinput_js(int jid, any dev, any di, any objects) any {
    def axis_count = _dinput_enum_axis_count + _dinput_enum_slider_count
    def button_count = _dinput_enum_button_count
    def hat_count = _dinput_enum_pov_count
@@ -798,7 +826,7 @@ fn _alloc_dinput_js(int: jid, any: dev, any: di, any: objects): any {
    }
 }
 
-fn _dinput_device_cb(ptr: di, ptr: user): i32 {
+fn _dinput_device_cb(ptr di, ptr user) i32 {
    if(!di || !_dinput_api){ return _DINPUT_DIENUM_CONTINUE }
    if(_dinput_guid_instance_seen(di + 4)){ return _DINPUT_DIENUM_CONTINUE }
    if(_dinput_supports_xinput(di + 20)){ return _DINPUT_DIENUM_CONTINUE }
@@ -859,15 +887,15 @@ fn _dinput_device_cb(ptr: di, ptr: user): i32 {
    _DINPUT_DIENUM_CONTINUE
 }
 
-fn _dinput_scan(): bool {
+fn _dinput_scan() bool {
    if(!_dinput_init()){ return false }
    def hr = int(ffi.call5(_dinput_method(_dinput_api, 4), _dinput_api,
-      _DINPUT_DI8DEVCLASS_GAMECTRL, ffi.tag_native(_dinput_device_cb), 0,
-      _DINPUT_DIEDFL_ALLDEVICES))
+         _DINPUT_DI8DEVCLASS_GAMECTRL, ffi.tag_native(_dinput_device_cb), 0,
+   _DINPUT_DIEDFL_ALLDEVICES))
    !_hresult_failed(hr)
 }
 
-fn _dinput_pov_to_hat(any: v): int {
+fn _dinput_pov_to_hat(any v) int {
    def p = int(v) & 0xffff
    if(p > 36000){ return HAT_CENTERED }
    def idx = p / 4500
@@ -882,12 +910,12 @@ fn _dinput_pov_to_hat(any: v): int {
    HAT_CENTERED
 }
 
-fn _dinput_device_state(any: dev, any: state): int {
+fn _dinput_device_state(any dev, any state) int {
    ffi.call1(_dinput_method(dev, 25), dev)
    int(ffi.call3(_dinput_method(dev, 9), dev, _DINPUT_DIJOYSTATE_SIZE, state))
 }
 
-fn _dinput_detect_unsigned_axes(any: js, any: state, any: objects): any {
+fn _dinput_detect_unsigned_axes(any js, any state, any objects) any {
    if(!js || !state || !objects || js.get("dinput_axis_mode_known", false)){ return nil }
    mut axes = 0
    mut negative = 0
@@ -914,7 +942,7 @@ fn _dinput_detect_unsigned_axes(any: js, any: state, any: objects): any {
    }
 }
 
-fn _update_dinput_js_state(int: jid): any {
+fn _update_dinput_js_state(int jid) any {
    def js = _get_js(jid)
    if(!js || js.get("kind", "") != "dinput"){ return nil }
    def dev = js.get("device", 0)
@@ -965,7 +993,7 @@ fn _update_dinput_js_state(int: jid): any {
    }
 }
 
-fn _pov_to_hat(any: pov): int {
+fn _pov_to_hat(any pov) int {
    def p = int(pov) & 0xffffffff
    if(p == JOY_POVCENTERED || p < 0){ return HAT_CENTERED }
    def dir = ((p + 2250) / 4500) % 8
@@ -979,7 +1007,7 @@ fn _pov_to_hat(any: pov): int {
    HAT_LEFT_UP
 }
 
-fn _read_winmm_state(int: native_jid, any: info): bool {
+fn _read_winmm_state(int native_jid, any info) bool {
    if(!info){ return false }
    memset(info, 0, _WINMM_JOYINFOEX_SIZE)
    store32(info, _WINMM_JOYINFOEX_SIZE, 0)
@@ -987,7 +1015,7 @@ fn _read_winmm_state(int: native_jid, any: info): bool {
    joyGetPosEx(native_jid, info) == JOYERR_NOERROR
 }
 
-fn _winmm_stable_axis(any: js, any: ap, int: idx, f64: value): f64 {
+fn _winmm_stable_axis(any js, any ap, int idx, f64 value) f64 {
    if(idx < 4){ return value }
    def samples = int(js.get("winmm_samples", 0))
    if(samples < 20 && value > -0.01 && value < 0.01 &&
@@ -997,7 +1025,7 @@ fn _winmm_stable_axis(any: js, any: ap, int: idx, f64: value): f64 {
    value
 }
 
-fn _alloc_js(int: jid): any {
+fn _alloc_js(int jid) any {
    def axes_ptr    = malloc(_AXIS_COUNT * 4)
    def buttons_ptr = malloc(_BUTTON_COUNT)
    if(!axes_ptr || !buttons_ptr){
@@ -1022,7 +1050,7 @@ fn _alloc_js(int: jid): any {
    }
 }
 
-fn _fill_winmm_buffers_from_info(any: js, any: info): any {
+fn _fill_winmm_buffers_from_info(any js, any info) any {
    if(!js || !info){ return nil }
    def ap = js.get("axes_ptr", 0)
    def bp = js.get("buttons_ptr", 0)
@@ -1047,7 +1075,7 @@ fn _fill_winmm_buffers_from_info(any: js, any: info): any {
    }
 }
 
-fn _alloc_winmm_js(int: jid, int: native_jid, any: info): any {
+fn _alloc_winmm_js(int jid, int native_jid, any info) any {
    def caps = malloc(_WINMM_JOYCAPSW_SIZE)
    def axes_ptr = malloc(_WINMM_AXIS_COUNT * 4)
    def buttons_ptr = malloc(_WINMM_MAX_BUTTONS)
@@ -1100,7 +1128,7 @@ fn _alloc_winmm_js(int: jid, int: native_jid, any: info): any {
    js
 }
 
-fn _update_js_state(int: jid, any: xi_state): any {
+fn _update_js_state(int jid, any xi_state) any {
    def js = _get_js(jid)
    if(!js){ return nil }
    def ap, bp = js.get("axes_ptr", 0), js.get("buttons_ptr", 0)
@@ -1135,7 +1163,7 @@ fn _update_js_state(int: jid, any: xi_state): any {
    store8(bp, (wbtns & XINPUT_DPAD_LEFT)  ? 1 : 0, 14)
 }
 
-fn _update_winmm_js_state(int: jid): any {
+fn _update_winmm_js_state(int jid) any {
    def js = _get_js(jid)
    if(!js){ return nil }
    def info = js.get("info_ptr", 0)
@@ -1143,11 +1171,13 @@ fn _update_winmm_js_state(int: jid): any {
    _fill_winmm_buffers_from_info(js, info)
 }
 
-fn init(): bool {
+fn init() bool {
+   "Initializes init."
    _ensure_init()
 }
 
-fn terminate(): bool {
+fn terminate() bool {
+   "Runs the terminate operation."
    if(!_initialized){ return true }
    mut jid = 0
    while(jid < _MAX_JOYSTICKS){
@@ -1169,7 +1199,8 @@ fn terminate(): bool {
    true
 }
 
-fn poll_joysticks(): bool {
+fn poll_joysticks() bool {
+   "Polls poll joysticks."
    if(!_ensure_init()){ return false }
    def now = ticks()
    if(_last_poll_ticks > 0 && (now - _last_poll_ticks) < JOYSTICK_POLL_COALESCE_NS){ return true }
@@ -1244,24 +1275,28 @@ fn poll_joysticks(): bool {
    true
 }
 
-fn joystick_present(int: jid): bool {
+fn joystick_present(int jid) bool {
+   "Runs the joystick present operation."
    if(!_ensure_init() || jid < 0 || jid >= _MAX_JOYSTICKS){ return false }
    poll_joysticks()
    def js = _get_js(jid)
    !!js.get("connected", false)
 }
 
-fn get_joystick_name(int: jid): str {
+fn get_joystick_name(int jid) str {
+   "Returns get joystick name."
    if(!joystick_present(jid)){ return "Unknown" }
    _get_js(jid).get("name", "Unknown")
 }
 
-fn get_joystick_guid(int: jid): str {
+fn get_joystick_guid(int jid) str {
+   "Returns get joystick guid."
    if(!joystick_present(jid)){ return "00000000000000000000000000000000" }
    _get_js(jid).get("guid", "00000000000000000000000000000000")
 }
 
-fn get_joystick_axes(int: jid, any: count_ptr): any {
+fn get_joystick_axes(int jid, any count_ptr) any {
+   "Returns get joystick axes."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    def js = _get_js(jid)
@@ -1269,7 +1304,8 @@ fn get_joystick_axes(int: jid, any: count_ptr): any {
    js.get("axes_ptr", 0)
 }
 
-fn get_joystick_buttons(int: jid, any: count_ptr): any {
+fn get_joystick_buttons(int jid, any count_ptr) any {
+   "Returns get joystick buttons."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    def js = _get_js(jid)
@@ -1277,7 +1313,8 @@ fn get_joystick_buttons(int: jid, any: count_ptr): any {
    js.get("buttons_ptr", 0)
 }
 
-fn get_joystick_hats(int: jid, any: count_ptr): any {
+fn get_joystick_hats(int jid, any count_ptr) any {
+   "Returns get joystick hats."
    if(count_ptr){ store32(count_ptr, 0, 0) }
    if(!joystick_present(jid)){ return 0 }
    def js = _get_js(jid)
@@ -1285,49 +1322,42 @@ fn get_joystick_hats(int: jid, any: count_ptr): any {
    js.get("hats_ptr", 0)
 }
 
-fn joystick_is_gamepad(int: jid): bool {
+fn joystick_is_gamepad(int jid) bool {
+   "Runs the joystick is gamepad operation."
    if(!joystick_present(jid)){ return false }
    def js = _get_js(jid)
    if(js.get("kind", "") == "xinput"){ return true }
    gamepad_map.joystick_is_gamepad(js)
 }
 
-fn _raw_button(any: buttons_ptr, int: button_count, int: idx): int {
+fn _raw_button(any buttons_ptr, int button_count, int idx) int {
    (buttons_ptr && idx >= 0 && idx < button_count) ? load8(buttons_ptr, idx) : 0
 }
 
-fn _raw_axis(any: axes_ptr, int: axis_count, int: idx): f64 {
+fn _raw_axis(any axes_ptr, int axis_count, int idx) f64 {
    (axes_ptr && idx >= 0 && idx < axis_count) ? load32_f32(axes_ptr, idx * 4) : 0.0
 }
 
-fn _store_standard_button(any: state_ptr, int: dst, any: buttons_ptr, int: button_count, int: src): any {
+fn _store_standard_button(any state_ptr, int dst, any buttons_ptr, int button_count, int src) any {
    store8(state_ptr, _raw_button(buttons_ptr, button_count, src), dst)
 }
 
-fn _store_standard_hat_button(any: state_ptr, int: dst, any: hats_ptr, int: hat_count, int: bit): any {
-   def hat = (hats_ptr && hat_count > 0) ? load8(hats_ptr, 0) : HAT_CENTERED
-   store8(state_ptr, (hat & bit) != 0 ? 1 : 0, dst)
-}
-
-fn _winmm_uses_button_triggers(any: js): bool {
+fn _winmm_uses_button_triggers(any js) bool {
    if(!js){ return false }
    def buttons_ptr = js.get("buttons_ptr", 0)
    def button_count = int(js.get("button_count", 0))
    def lt_down = _raw_button(buttons_ptr, button_count, 6) != 0
    def rt_down = _raw_button(buttons_ptr, button_count, 7) != 0 ||
-      _raw_button(buttons_ptr, button_count, 8) != 0
+   _raw_button(buttons_ptr, button_count, 8) != 0
    if(lt_down || rt_down){ js["winmm_button_triggers"] = true }
    !!js.get("winmm_button_triggers", false)
 }
 
-fn _store_winmm_standard_axes(any: js, any: state_ptr): bool {
+fn _store_winmm_standard_axes(any js, any state_ptr) bool {
    if(!js || !state_ptr){ return false }
    def axes_ptr = js.get("axes_ptr", 0)
    def axis_count = int(js.get("axis_count", 0))
    if(!axes_ptr){ return false }
-   ;; WinMM exposes extended joystick axes as X/Y/Z/R/U/V. Keep GLFW/SDL
-   ;; mappings for identity/buttons, but publish axes in Nytrix gamepad order.
-   ;; The WinMM HID bridge reports the trigger pair as V/U for gamepad LT/RT.
    store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 0), 16)
    store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 1), 20)
    store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 2), 24)
@@ -1338,8 +1368,8 @@ fn _store_winmm_standard_axes(any: js, any: state_ptr): bool {
       store32_f32(state_ptr, _raw_button(buttons_ptr, button_count, 6) ? 1.0 : -1.0, 32)
       store32_f32(state_ptr,
          (_raw_button(buttons_ptr, button_count, 7) ||
-          _raw_button(buttons_ptr, button_count, 8)) ? 1.0 : -1.0,
-         36)
+         _raw_button(buttons_ptr, button_count, 8)) ? 1.0 : -1.0,
+      36)
    } else {
       store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 5), 32)
       store32_f32(state_ptr, _raw_axis(axes_ptr, axis_count, 4), 36)
@@ -1347,7 +1377,7 @@ fn _store_winmm_standard_axes(any: js, any: state_ptr): bool {
    true
 }
 
-fn _fill_winmm_gamepad_state(any: js, any: state_ptr): bool {
+fn _fill_winmm_gamepad_state(any js, any state_ptr) bool {
    if(!js || !state_ptr){ return false }
    memset(state_ptr, 0, 64)
    def buttons_ptr = js.get("buttons_ptr", 0)
@@ -1377,7 +1407,7 @@ fn _fill_winmm_gamepad_state(any: js, any: state_ptr): bool {
    true
 }
 
-fn _apply_standard_hat_buttons(any: js, any: state_ptr): any {
+fn _apply_standard_hat_buttons(any js, any state_ptr) any {
    if(!js || !state_ptr){ return nil }
    def hats_ptr = js.get("hats_ptr", 0)
    def hat_count = int(js.get("hat_count", 0))
@@ -1389,7 +1419,8 @@ fn _apply_standard_hat_buttons(any: js, any: state_ptr): any {
    store8(state_ptr, (hat & HAT_LEFT) != 0 ? 1 : 0, 14)
 }
 
-fn get_gamepad_state(int: jid, any: state_ptr): bool {
+fn get_gamepad_state(int jid, any state_ptr) bool {
+   "Returns get gamepad state."
    if(!joystick_present(jid)){
       if(state_ptr){ memset(state_ptr, 0, 64) }
       return false
@@ -1415,7 +1446,8 @@ fn get_gamepad_state(int: jid, any: state_ptr): bool {
    true
 }
 
-fn get_gamepad_name(int: jid): str {
+fn get_gamepad_name(int jid) str {
+   "Returns get gamepad name."
    if(!joystick_present(jid)){ return "Unknown" }
    def js = _get_js(jid)
    if(js.get("kind", "") != "xinput"){
@@ -1425,7 +1457,8 @@ fn get_gamepad_name(int: jid): str {
    get_joystick_name(jid)
 }
 
-fn debug_joystick_objects(int: jid): list {
+fn debug_joystick_objects(int jid) list {
+   "Runs the debug joystick objects operation."
    poll_joysticks()
    def js = _get_js(jid)
    if(!js){ return [] }
@@ -1435,16 +1468,17 @@ fn debug_joystick_objects(int: jid): list {
    while(i < objects.len){
       def obj = objects[i]
       out = out.append({
-         "slot": i,
-         "type": int(obj.get("type", 0)),
-         "offset": int(obj.get("offset", 0))
+            "slot": i,
+            "type": int(obj.get("type", 0)),
+            "offset": int(obj.get("offset", 0))
       })
       i += 1
    }
    out
 }
 
-fn debug_joystick_state(int: jid): list {
+fn debug_joystick_state(int jid) list {
+   "Runs the debug joystick state operation."
    poll_joysticks()
    def js = _get_js(jid)
    if(!js || js.get("kind", "") != "dinput"){ return [] }
@@ -1466,20 +1500,21 @@ fn debug_joystick_state(int: jid): list {
          value = load32(state, offset)
       }
       out = out.append({
-         "slot": i,
-         "type": typ,
-         "offset": offset,
-         "value": value
+            "slot": i,
+            "type": typ,
+            "offset": offset,
+            "value": value
       })
       i += 1
    }
    out
 }
 
-fn set_joystick_callback(any: cb): any {
+fn set_joystick_callback(any cb) any {
+   "Sets set joystick callback."
    def prev = _joystick_callback
    _joystick_callback = cb
    prev
 }
 
-fn update_gamepad_mappings(str: s): int { gamepad_map.update_mappings(s, "Windows") }
+fn update_gamepad_mappings(str s) int { gamepad_map.update_mappings(s, "Windows") }

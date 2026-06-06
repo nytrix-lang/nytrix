@@ -1,9 +1,13 @@
-;; Keywords: window input keyboard mouse key
+;; Keywords: window input keyboard mouse key os ui
 ;; Key normalization and key-chord parsing for std.os.ui input APIs.
+;; References:
+;; - std.os.ui.window.input
+;; - std.os.ui.window
+;; - std.os.ui.window.consts
 module std.os.ui.window.input.key(normalize_key, normalize_mod, mod_bit_for_key, mods_from_key_states, parse_notation)
 use std.core
 use std.core.str
-use std.os.ui.consts
+use std.os.ui.window.consts
 
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
 
@@ -101,14 +105,14 @@ comptime table KeyPrefixMod {
    "COMMAND", "CMD", "WIN", "SUPER", "HYPER", "H", "D" -> MOD_SUPER
 }
 
-fn normalize_mod(any: mod): i32 {
+fn normalize_mod(any mod) i32 {
    "Masks a modifier bitset down to the supported std.os.ui modifier flags."
    if(is_str(mod)){ return _prefix_mod(upper(strip(to_str(mod)))) & _MOD_MASK }
    if(is_int(mod) || is_float(mod)){ return int(mod) & _MOD_MASK }
    0
 }
 
-fn _normalize_named_key(str: name): i32 {
+fn _normalize_named_key(str name) i32 {
    def n = upper(strip(name))
    if(n.len == 0){ return KEY_NULL }
    if(n.len == 1){
@@ -119,7 +123,7 @@ fn _normalize_named_key(str: name): i32 {
    comptime match KeyNameCode(n, KEY_NULL)
 }
 
-fn normalize_key(any: key): i32 {
+fn normalize_key(any key) i32 {
    "Normalizes native key codes for stable comparisons across backends."
    if(is_str(key)){ return _normalize_named_key(to_str(key)) }
    if(!is_int(key) && !is_float(key)){ return KEY_NULL }
@@ -151,7 +155,7 @@ fn normalize_key(any: key): i32 {
    }
 }
 
-fn mod_bit_for_key(any: key): i32 {
+fn mod_bit_for_key(any key) i32 {
    "Returns the modifier bit corresponding to the given native key code."
    def k = normalize_key(key)
    case k {
@@ -164,7 +168,7 @@ fn mod_bit_for_key(any: key): i32 {
    }
 }
 
-fn mods_from_key_states(any: ks): i32 {
+fn mods_from_key_states(any ks) i32 {
    "Reconstructs the active modifier bitset from a key-state dictionary."
    if(!is_dict(ks)){ return 0 }
    mut mods = 0
@@ -182,9 +186,9 @@ fn mods_from_key_states(any: ks): i32 {
    normalize_mod(mods)
 }
 
-fn _prefix_mod(str: seg): i32 { comptime match KeyPrefixMod(seg, 0) }
+fn _prefix_mod(str seg) i32 { comptime match KeyPrefixMod(seg, 0) }
 
-fn _parse_single_key(str: tok): list {
+fn _parse_single_key(str tok) list {
    mut mods = 0
    def parts = split(upper(tok), "-")
    def n = parts.len
@@ -199,7 +203,7 @@ fn _parse_single_key(str: tok): list {
    [key, mods]
 }
 
-fn parse_notation(str: notation): list {
+fn parse_notation(str notation) list {
    "Parses a key-sequence notation string into a list of `[key, mod]` pairs."
    def toks = split(notation, " ")
    mut seq = []
@@ -211,4 +215,24 @@ fn parse_notation(str: notation): list {
       i += 1
    }
    seq
+}
+
+#main {
+   assert(normalize_key(0xFFBE) == KEY_F1 && normalize_key(0xFFC9) == KEY_F12 && normalize_key(1008) == KEY_F1 && normalize_key(1032) == KEY_F25, "input numeric keys")
+   assert(normalize_key("F1") == KEY_F1 && normalize_key("f13") == KEY_F13 && normalize_key("Escape") == KEY_ESCAPE && normalize_key("Page_Down") == KEY_PAGE_DOWN, "input named keys")
+   assert(normalize_key("KP_0") == KEY_KP_0 && normalize_key("NumpadEnter") == KEY_KP_ENTER && mod_bit_for_key("shift") == MOD_SHIFT && mod_bit_for_key("right_control") == MOD_CONTROL, "input keypad/mod keys")
+   def f1 = parse_notation("F1").get(0)
+   def f12 = parse_notation("F12").get(0)
+   def f13 = parse_notation("F13").get(0)
+   def kp0 = parse_notation("KP_0").get(0)
+   def c_f13 = parse_notation("C-F13").get(0)
+   assert(f1.get(0) == KEY_F1 && f12.get(0) == KEY_F12 && f13.get(0) == KEY_F13 && kp0.get(0) == KEY_KP_0, "input notation basics")
+   assert(c_f13.get(0) == KEY_F13 && (c_f13.get(1) & MOD_CONTROL) != 0, "input notation modifiers")
+   mut ks = dict(4)
+   ks = ks.set(KEY_LEFT_SHIFT, true)
+   ks = ks.set(KEY_RIGHT_CONTROL, true)
+   ks = ks.set(KEY_LEFT_ALT, false)
+   ks = ks.set("right_alt", true)
+   assert(mods_from_key_states(ks) == (MOD_SHIFT | MOD_CONTROL | MOD_ALT), "input key state mods")
+   print("✓ std.os.ui.window.input.key self-test passed")
 }

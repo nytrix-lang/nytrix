@@ -42,14 +42,14 @@ assert(to_str(big_add) == "4611686018427387904", "add overflow value")
 assert(to_str(big_sub) == "-4611686018427387905", "sub overflow value")
 assert(to_str(big_mul) == "9223372036854775806", "mul overflow value")
 
-fn fib(n){
+fn fib(n) {
    if(n < 2){ return n }
    fib(n - 1) + fib(n - 2)
 }
 
 assert(fib(10) == 55, "fib")
 
-fn adder(x){
+fn adder(x) {
    lambda(y){ x + y }
 }
 
@@ -112,10 +112,12 @@ while(fill_i < 16){
    half_full = half_full.set("k" + to_str(fill_i), fill_i)
    fill_i += 1
 }
-fn update_half_full_dict(any: x): int {
+
+fn update_half_full_dict(any x) int {
    x.set("k0", 99)
    0
 }
+
 update_half_full_dict(half_full)
 assert(half_full.get("k0", 0) == 99, "dict update at resize threshold mutates existing key")
 mut s = set()

@@ -3,8 +3,8 @@
 use std.core
 
 mut int: i = 0
-if(argc() > 0){ i = argc() }
 
+if(argc() > 0){ i = argc() }
 with ptr: p = malloc(8){
    load8(p, i)
 }

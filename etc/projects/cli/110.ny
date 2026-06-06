@@ -1,21 +1,19 @@
 #!/usr/bin/env ny
 
+;; Keywords: cli terminal automata rule110 example
 ;; Rule 110 - https://en.wikipedia.org/wiki/Rule_110
 use std.core
 use std.core.term
-use std.os.time
-use std.math.crypto.encoding.bytes
 
-def CHAR_FULL = "█"
-def SX        = 2
+def SX = 2
 
-fn rule(l, c, r){
+fn rule(l, c, r) {
    if(l && c && r){ return 0 }
    if(c || r){ return 1 }
    0
 }
 
-fn step(cur, w){
+fn step(cur, w) {
    def nxt = bytes(w)
    mut i = 0
    while(i < w){
@@ -40,33 +38,27 @@ def prefix_len  = 7
 mut w = (tW - prefix_len) / (SX * 2)
 
 if(w < 1){ w = 1 }
-write_str(f"Terminal Size: {tW}x{tH} | Displaying: {target_gens} Generations\n")
+write_str(color(f"Terminal Size: {tW}x{tH} | Displaying: {target_gens} Generations", "magenta") + "\n")
 mut u = bytes(w)
 bytes_set(u, w - 1, 1)
 def block = "██"
 def space = "  "
 mut gen = 0
 while(gen < target_gens){
-   mut line = "["
-   if(gen < 100){ line = line + "0" }
-   if(gen < 10){ line = line + "0" }
-   line = line + to_str(gen) + "]: "
-   ; Left
+   mut line = ""
    mut i = 0
    while(i < w){
       if(bytes_get(u, i)){ line = line + block }
       else { line = line + space }
       i += 1
    }
-   ; Right
    mut i2 = w - 1
    while(i2 >= 0){
       if(bytes_get(u, i2)){ line = line + block }
       else { line = line + space }
       i2 -= 1
    }
-   write_str(line + "\n")
-   msleep(100)
+   write_str(color(line, "magenta") + "\n")
    u = step(u, w)
    gen += 1
 }

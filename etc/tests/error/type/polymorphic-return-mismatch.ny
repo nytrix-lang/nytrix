@@ -1,7 +1,7 @@
 ;; expect: variable declaration: expected str, got int
 use std.core
 
-fn id(x){
+fn id(x) {
    x
 }
 

@@ -17,7 +17,7 @@ comptime table KeyMap {
    0xffbe..0xffc9 -> KEY_F1 + (raw - 0xffbe)
 }
 
-fn map_key(i32: raw): i32 = comptime match KeyMap(raw, KEY_NULL)
+fn map_key(i32 raw) i32 = comptime match KeyMap(raw, KEY_NULL)
 assert(map_key(0x35) == 0x35, "comptime table digit range")
 assert(map_key(0x61) == 0x41, "comptime table lowercase fold")
 assert(map_key(0xff1b) == KEY_ESCAPE, "comptime table literal")
@@ -32,7 +32,7 @@ comptime table SemanticKind {
    _ -> 99
 }
 
-fn semantic_kind(i32: raw): i32 = comptime match SemanticKind(raw, -1)
+fn semantic_kind(i32 raw) i32 = comptime match SemanticKind(raw, -1)
 assert(semantic_kind(2) == 10, "comptime table multi-pattern")
 assert(semantic_kind(12) == 24, "comptime table range expression")
 assert(semantic_kind(40) == 99, "comptime table wildcard")
@@ -45,7 +45,7 @@ module TableModule(
       7 -> raw + 1
       _ -> default
    }
-   fn map_mod_key(i32: raw): i32 = comptime match ModKeyMap(raw, -7)
+   fn map_mod_key(i32 raw) i32 = comptime match ModKeyMap(raw, -7)
 }
 
 use TableModule (map_mod_key)

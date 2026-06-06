@@ -120,6 +120,61 @@ static int is_fn_call(const char *line, int pos) {
   return line[pos] == '(';
 }
 
+static int is_builtin_type_name(const char *s, size_t len);
+
+static int next_non_ws_char(const char *line, size_t pos) {
+  while (line[pos] && isspace((unsigned char)line[pos]))
+    pos++;
+  return (unsigned char)line[pos];
+}
+
+static int prev_non_ws_char(const char *line, size_t pos) {
+  while (pos > 0) {
+    pos--;
+    if (!isspace((unsigned char)line[pos]))
+      return (unsigned char)line[pos];
+  }
+  return 0;
+}
+
+static int word_eq_lit(const char *s, size_t len, const char *lit) {
+  size_t n = strlen(lit);
+  return len == n && memcmp(s, lit, n) == 0;
+}
+
+static size_t skip_type_suffix(const char *line, size_t pos) {
+  while (line[pos] && isspace((unsigned char)line[pos]))
+    pos++;
+  while (line[pos] == '<') {
+    int depth = 0;
+    while (line[pos]) {
+      if (line[pos] == '<')
+        depth++;
+      else if (line[pos] == '>') {
+        depth--;
+        pos++;
+        if (depth <= 0)
+          break;
+        continue;
+      }
+      pos++;
+    }
+    while (line[pos] && isspace((unsigned char)line[pos]))
+      pos++;
+  }
+  return pos;
+}
+
+static int has_param_name_after_type(const char *line, size_t pos) {
+  pos = skip_type_suffix(line, pos);
+  return isalpha((unsigned char)line[pos]) || line[pos] == '_';
+}
+
+static int sig_word_is_type(const char *line, size_t start, size_t end) {
+  return is_builtin_type_name(line + start, end - start) || has_param_name_after_type(line, end) ||
+         prev_non_ws_char(line, start) == '<';
+}
+
 static int is_known_name(const char *name, size_t len, int *out_kind) {
   if (!g_repl_docs)
     return 0;
@@ -273,20 +328,43 @@ static int is_builtin_type_name(const char *s, size_t len) {
     return (len == 4 && !memcmp(s, "bool", 4)) ||
            (len == 6 && !memcmp(s, "bigint", 6)) ||
            (len == 5 && !memcmp(s, "bytes", 5));
+  case 'a':
+    return len == 3 && !memcmp(s, "any", 3);
   case 'd':
     return len == 4 && !memcmp(s, "dict", 4);
+  case 'h':
+    return len == 6 && !memcmp(s, "handle", 6);
   case 'f':
-    return len == 5 && !memcmp(s, "float", 5);
+    return (len == 5 && !memcmp(s, "float", 5)) ||
+           (len == 3 && (!memcmp(s, "f32", 3) || !memcmp(s, "f64", 3))) ||
+           (len == 4 && !memcmp(s, "f128", 4)) ||
+           (len == 5 && !memcmp(s, "fnptr", 5));
   case 'i':
     return (len == 3 && !memcmp(s, "int", 3)) ||
-           (len == 3 && !memcmp(s, "i64", 3));
+           (len == 2 && (!memcmp(s, "i8", 2))) ||
+           (len == 3 && (!memcmp(s, "i16", 3) || !memcmp(s, "i32", 3) || !memcmp(s, "i64", 3)));
   case 'l':
     return len == 4 && !memcmp(s, "list", 4);
+  case 'n':
+    return len == 6 && !memcmp(s, "number", 6);
+  case 'p':
+    return len == 3 && !memcmp(s, "ptr", 3);
+  case 'R':
+    return len == 6 && !memcmp(s, "Result", 6);
+  case 'O':
+    return len == 6 && !memcmp(s, "Option", 6);
+  case 'E':
+    return len == 5 && !memcmp(s, "Error", 5);
   case 's':
     return (len == 3 && !memcmp(s, "str", 3)) ||
            (len == 3 && !memcmp(s, "set", 3));
   case 't':
     return len == 5 && !memcmp(s, "tuple", 5);
+  case 'u':
+    return (len == 2 && !memcmp(s, "u8", 2)) ||
+           (len == 3 && (!memcmp(s, "u16", 3) || !memcmp(s, "u32", 3) || !memcmp(s, "u64", 3)));
+  case 'v':
+    return len == 4 && !memcmp(s, "void", 4);
   default:
     return 0;
   }
@@ -372,6 +450,11 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
     match_pos = find_matching_paren(line, target_pos);
   }
   size_t i = 0;
+  int expect_fn_name = 0;
+  int expect_fn_lparen = 0;
+  int fn_sig_depth = 0;
+  int fn_sig_default = 0;
+  int expect_return_type = 0;
   while (line[i]) {
     if ((int)i == target_pos || (int)i == match_pos) {
       styles[i] = ST_MATCH;
@@ -425,9 +508,27 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
       size_t len = i - start;
       unsigned char style = ST_NONE;
       int kind = 0;
-      if (is_keyword(line + start, len))
+      int next = next_non_ws_char(line, i);
+      if (expect_fn_name) {
+        style = ST_FUNCTION;
+        expect_fn_name = 0;
+        expect_fn_lparen = next == '(';
+      } else if (expect_return_type &&
+                 (word_eq_lit(line + start, len, "case") || word_eq_lit(line + start, len, "as"))) {
         style = ST_KEYWORD;
-      else if (is_builtin_type_name(line + start, len))
+        expect_return_type = 0;
+      } else if (expect_return_type && !is_keyword(line + start, len)) {
+        style = ST_TYPE;
+      } else if (fn_sig_depth > 0 && !fn_sig_default && !is_keyword(line + start, len)) {
+        style = sig_word_is_type(line, start, i) ? ST_TYPE : ST_MEMBER;
+      } else if (is_keyword(line + start, len)) {
+        style = ST_KEYWORD;
+        if (word_eq_lit(line + start, len, "fn")) {
+          expect_fn_name = 1;
+          expect_fn_lparen = 0;
+          expect_return_type = 0;
+        }
+      } else if (is_builtin_type_name(line + start, len))
         style = ST_TYPE;
       else if (is_fn_call(line, i))
         style = ST_FUNCTION;
@@ -441,10 +542,30 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
       continue;
     }
     if (strchr("+-*%/%=&|^<>!.~", line[i])) {
+      if (line[i] == '=' && fn_sig_depth == 1)
+        fn_sig_default = 1;
       styles[i++] = ST_OPERATOR;
       continue;
     }
     if (strchr("()[]{};,", line[i])) {
+      if (line[i] == '(' && (expect_fn_name || expect_fn_lparen)) {
+        expect_fn_name = 0;
+        expect_fn_lparen = 0;
+        fn_sig_depth = 1;
+        fn_sig_default = 0;
+      } else if (line[i] == '(' && fn_sig_depth > 0) {
+        fn_sig_depth++;
+      } else if (line[i] == ')' && fn_sig_depth > 0) {
+        fn_sig_depth--;
+        if (fn_sig_depth == 0) {
+          fn_sig_default = 0;
+          expect_return_type = 1;
+        }
+      } else if (line[i] == ',' && fn_sig_depth == 1) {
+        fn_sig_default = 0;
+      } else if (line[i] == '{') {
+        expect_return_type = 0;
+      }
       styles[i++] = ST_PAREN;
       continue;
     }

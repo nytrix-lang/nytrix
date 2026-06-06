@@ -13,47 +13,47 @@ use std.math.crypto.encoding.bytes
 use std.core.io
 use std.core.tbuf
 
-fn test_add(int: a, int: b): int {
+fn test_add(int a, int b) int {
    return a + b
 }
 
-fn get_name(): str {
+fn get_name() str {
    return "John"
 }
 
-fn process(str: data): str {
+fn process(str data) str {
    return data
 }
 
-fn maybe_int(bool: flag): ?int {
+fn maybe_int(bool flag) ?int {
    if(flag){ return 7 }
    return nil
 }
 
-fn read_opt(?int: v): ?int {
+fn read_opt(?int v) ?int {
    return v
 }
 
-fn maybe_list(bool: flag): ?list {
+fn maybe_list(bool flag) ?list {
    if(flag){ return [4, 5] }
    return nil
 }
 
-fn nullable_list_after_guard(): int {
+fn nullable_list_after_guard() int {
    def ?list: raw = maybe_list(true)
    if(raw == nil){ return 0 }
    def list: xs = raw
    xs.len
 }
 
-fn nullable_list_after_reversed_guard(): int {
+fn nullable_list_after_reversed_guard() int {
    def ?list: raw = [7, 8, 9]
    if(nil == raw){ return 0 }
    def list: xs = raw
    xs.len
 }
 
-fn nullable_list_after_else_guard(): int {
+fn nullable_list_after_else_guard() int {
    def ?list: raw = [1]
    if(raw != nil){
    }else{
@@ -63,74 +63,74 @@ fn nullable_list_after_else_guard(): int {
    xs.len
 }
 
-fn need_int(int: v): int {
+fn need_int(int v) int {
    return v
 }
 
 ;; Inference audit: dynamic float result.
-fn dynamic_float_size(){
+fn dynamic_float_size() {
    15.5
 }
 
-fn is_nonzero(int: v): bool {
+fn is_nonzero(int v) bool {
    return v != 0
 }
 
-fn echo_int_ptr(*int: p): *int {
+fn echo_int_ptr(*int p) *int {
    return p
 }
 
-fn read_int_ptr(*int: p): int {
+fn read_int_ptr(*int p) int {
    if(p == nil){ return 0 }
    return load64(p)
 }
 
-fn write_int_ptr(*int: p, int: v): *int {
+fn write_int_ptr(*int p, int v) *int {
    if(p != nil){ store64(p, v) }
    return p
 }
 
-fn echo_handle(handle: h): handle {
+fn echo_handle(handle h) handle {
    return h
 }
 
-fn read_opt_handle(?handle: h): ?handle {
+fn read_opt_handle(?handle h) ?handle {
    return h
 }
 
-fn typed_f64_add(f64: a, f64: b): f64 {
+fn typed_f64_add(f64 a, f64 b) f64 {
    return a + b
 }
 
-fn typed_f32_f64_mix(f32: a, f64: b): f64 {
+fn typed_f32_f64_mix(f32 a, f64 b) f64 {
    return a + b
 }
 
-fn typed_f64_tail(f64: a, f64: b): f64 {
+fn typed_f64_tail(f64 a, f64 b) f64 {
    a * b + 1.0
 }
 
-fn typed_list_size(list: xs): int {
+fn typed_list_size(list xs) int {
    xs.len
 }
 
-fn typed_dict_size(dict: d): int {
+fn typed_dict_size(dict d) int {
    d.len
 }
 
-fn typed_tuple_size(tuple: t): int {
+fn typed_tuple_size(tuple t) int {
    t.len
 }
 
-fn typed_set_has_x(set: s): bool {
+fn typed_set_has_x(set s) bool {
    contains(s, "x")
 }
 
-fn typed_bytes_size(bytes: b): int {
+fn typed_bytes_size(bytes b) int {
    b.len
 }
 
-fn typed_list_index_sum(list: xs): int {
+fn typed_list_index_sum(list xs) int {
    mut i = 0
    mut acc = 0
    while(i < xs.len){
@@ -140,7 +140,7 @@ fn typed_list_index_sum(list: xs): int {
    acc
 }
 
-fn typed_nested_index_sum(list: rows): int {
+fn typed_nested_index_sum(list rows) int {
    mut i = 0
    mut acc = 0
    while(i < rows.len){
@@ -151,7 +151,7 @@ fn typed_nested_index_sum(list: rows): int {
    acc
 }
 
-fn strict_bare_list_sum(list: xs): int {
+fn strict_bare_list_sum(list xs) int {
    mut i = 0
    mut acc = 0
    while(i < xs.len){
@@ -161,7 +161,7 @@ fn strict_bare_list_sum(list: xs): int {
    acc
 }
 
-fn strict_bare_nested_list_sum(list: rows): int {
+fn strict_bare_nested_list_sum(list rows) int {
    mut i = 0
    mut acc = 0
    while(i < rows.len){
@@ -172,11 +172,11 @@ fn strict_bare_nested_list_sum(list: rows): int {
    acc
 }
 
-fn strict_bare_dict_sum(dict: d): int {
+fn strict_bare_dict_sum(dict d) int {
    d["x"] + d["y"]
 }
 
-fn strict_bare_float_list_sum(list: xs): f64 {
+fn strict_bare_float_list_sum(list xs) f64 {
    mut f64: acc = 0.0
    mut i = 0
    while(i < xs.len){
@@ -186,15 +186,15 @@ fn strict_bare_float_list_sum(list: xs): f64 {
    acc
 }
 
-fn echo_any(any: x): any {
+fn echo_any(any x) any {
    x
 }
 
-fn any_type_name(any: x): str {
+fn any_type_name(any x) str {
    type(x)
 }
 
-fn nullable_list_index_sum(): int {
+fn nullable_list_index_sum() int {
    def ?list: raw = [2, 4, 6]
    if(raw == nil){ return 0 }
    def list: xs = raw
@@ -207,7 +207,7 @@ fn nullable_list_index_sum(): int {
    acc
 }
 
-fn test_primitives(){
+fn test_primitives() {
    def i8: a = 10
    def i16: b = 20
    def i32: c = 30
@@ -230,7 +230,7 @@ fn test_primitives(){
    assert(j == true, "bool failed")
 }
 
-fn test_typed_bindings_smoke(){
+fn test_typed_bindings_smoke() {
    def i32: a = 10
    def u16: b = 20
    def bool: c = true
@@ -248,7 +248,7 @@ fn test_typed_bindings_smoke(){
    assert(absent == nil, "optional return nil")
 }
 
-fn test_null_contracts(){
+fn test_null_contracts() {
    def *int: p = nil
    assert(p == nil, "typed pointer nil assignment failed")
    def ?int: o = nil
@@ -257,7 +257,7 @@ fn test_null_contracts(){
    assert(q == 9, "typed nullable int value assignment failed")
 }
 
-fn test_pointer_arg_types(){
+fn test_pointer_arg_types() {
    def *int: p = malloc(8)
    assert(p != nil, "typed pointer malloc failed")
    assert(echo_int_ptr(p) == p, "typed pointer arg roundtrip failed")
@@ -269,7 +269,7 @@ fn test_pointer_arg_types(){
    free(p)
 }
 
-fn test_handle_arg_types(){
+fn test_handle_arg_types() {
    def ptr: p = malloc(8)
    assert(p != nil, "handle test malloc failed")
    store64_h(p, 0x12345678)
@@ -282,7 +282,7 @@ fn test_handle_arg_types(){
    free(p)
 }
 
-fn test_raw_i64_buffer_types(){
+fn test_raw_i64_buffer_types() {
    def ptr: p = malloc(16)
    assert(p != nil, "raw i64 test malloc failed")
    store64_i(p, 7, 0)
@@ -295,7 +295,7 @@ fn test_raw_i64_buffer_types(){
    free(p)
 }
 
-fn test_typed_float_abi(){
+fn test_typed_float_abi() {
    def f64: a = typed_f64_add(1.25, 2.75)
    def f64: b = typed_f32_f64_mix(1.5f32, 2.25)
    def f64: c = typed_f64_tail(2.0, 4.0)
@@ -309,7 +309,7 @@ fn test_typed_float_abi(){
    assert(need_int(dynamic_float_size()) == 15, "dynamic float to typed int param failed")
 }
 
-fn test_typed_f64_buffer(){
+fn test_typed_f64_buffer() {
    def b = f64buf_new(4)
    f64buf_store(b, 0, 1.5)
    f64buf_store(b, 1, 2.25)
@@ -324,7 +324,7 @@ fn test_typed_f64_buffer(){
    assert(int(sum * 100.0) == 600, "typed f64 buffer load/store failed")
 }
 
-fn test_typed_collections(){
+fn test_typed_collections() {
    assert(typed_list_size([1, 2, 3]) == 3, "typed list param failed")
    assert(typed_dict_size(set(dict(4), "a", 1)) == 1, "typed dict param failed")
    assert(typed_tuple_size((1, 2, 3)) == 3, "typed tuple param failed")
@@ -338,7 +338,7 @@ fn test_typed_collections(){
    assert(nullable_list_index_sum() == 12, "nullable list index sum failed")
 }
 
-fn test_runtime_type_shape(){
+fn test_runtime_type_shape() {
    def rows = [[1, 2], [3, 4]]
    assert(eq(type(rows), "list"), "type keeps top-level list tag")
    assert(eq(type(rows[0]), "list"), "type keeps nested list tag")
@@ -363,7 +363,7 @@ fn test_runtime_type_shape(){
    assert(eq(type_shape([[[1]]], 2), "list<list<list>>"), "type_shape max depth")
 }
 
-fn test_typeinfer_boolean_results(){
+fn test_typeinfer_boolean_results() {
    def int: a = 3
    def int: b = 5
    def lt = a < b
@@ -376,7 +376,7 @@ fn test_typeinfer_boolean_results(){
    assert(mask == 13, "integer shift/bitwise inference stays int")
 }
 
-fn test_any_dynamic_surface(){
+fn test_any_dynamic_surface() {
    def any: a = 42
    def any: b = "ny"
    def any: c = [1, 2, 3]
@@ -389,7 +389,7 @@ fn test_any_dynamic_surface(){
    assert(ty.require_type(echo_any([4, 5]), "seq").len == 2, "any result remains shape-checkable")
 }
 
-fn test_language_type_groups(){
+fn test_language_type_groups() {
    assert(ty.normalize_type_name("num") == "number", "type group alias num")
    assert(ty.is_type(42, "number"), "language number group accepts int")
    assert(ty.is_type(3.5, "number"), "language number group accepts float")
@@ -406,21 +406,21 @@ fn test_language_type_groups(){
    assert(eq(ty.assert_type("xy", "math_input", "math input required"), "xy"), "assert_type accepts group")
 }
 
-fn type_group_passthrough(number: x): number {
+fn type_group_passthrough(number x) number {
    x
 }
 
 impl SelfBox {
-   fn value(self: box): int {
+   fn value(self box) int {
       box.get("value", 0)
    }
-   fn add(self: a, self: b): self {
+   fn add(self a, self b) self {
       SelfBox({"value": a.value + b.value})
    }
-   fn same(self: a, self: b): bool {
+   fn same(self a, self b) bool {
       a.value == b.value
    }
-   fn maybe(self: box, bool: keep): ?self {
+   fn maybe(self box, bool keep) ?self {
       if(keep){ return box }
       nil
    }
@@ -434,46 +434,46 @@ layout SelfPair {
 }
 
 impl SelfPair {
-   fn new(i32: x, i32: y): *self {
+   fn new(i32 x, i32 y) *self {
       def ptr: out = malloc(__layout_size("SelfPair"))
       store_layout(out, "SelfPair", x, y)
       out
    }
-   fn sum(*self: p): i32 {
+   fn sum(*self p) i32 {
       load32(p, __layout_offset("SelfPair", "x")) + load32(p, __layout_offset("SelfPair", "y"))
    }
 }
 
 impl Meter {
-   fn val(self: m): int {
+   fn val(self m) int {
       m.get("value", 0)
    }
-   fn same(self: a, self: b): bool {
+   fn same(self a, self b) bool {
       a.val == b.val
    }
    operator == self: bool = same
 }
 
 impl ShapeBox {
-   fn value(self: b): list {
+   fn value(self b) list {
       b.get("value", [])
    }
-   fn shape(self: b): str {
+   fn shape(self b) str {
       b.value.type_shape
    }
-   fn concat(self: a, self: b): self {
+   fn concat(self a, self b) self {
       def left = a.value.require_shape("list<int>", "ShapeBox + left")
       def right = b.value.require_shape("list<int>", "ShapeBox + right")
       ShapeBox({"value": left + right})
    }
-   fn same_shape(self: a, self: b): bool {
+   fn same_shape(self a, self b) bool {
       eq(a.shape, b.shape)
    }
    operator + self: self = concat
 }
 
 impl int, f32 {
-   fn twice(self: x): self {
+   fn twice(self x) self {
       x + x
    }
 }
@@ -548,12 +548,12 @@ layout TypePushConstants pack(4){
 layout TypeMethodPair pack(4){
    i32: x,
    i32: y,
-   fn new(i32: x, i32: y): *self {
+   fn new(i32 x, i32 y) *self {
       def ptr: out = malloc(__layout_size("TypeMethodPair"))
       store_layout(out, "TypeMethodPair", x, y)
       out
    }
-   fn sum(*self: pair): i32 {
+   fn sum(*self pair) i32 {
       load32(pair, __layout_offset("TypeMethodPair", "x")) +
       load32(pair, __layout_offset("TypeMethodPair", "y"))
    }
@@ -567,18 +567,18 @@ layout TypeWindowState {
 }
 
 impl TypeMaterial {
-   fn has_texture(*self: mat): bool {
+   fn has_texture(*self mat) bool {
       def i32: flags = load32(mat, __layout_offset("TypeMaterial", "flags"))
       (flags & 1) != 0
    }
-   fn score(*self: mat): f64 {
+   fn score(*self mat) f64 {
       def f64: metallic = load64_f64(mat, __layout_offset("TypeMaterial", "metallic"))
       def f64: roughness = load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))
       metallic * (1.0 - roughness)
    }
 }
 
-fn test_impl_self_type_alias(){
+fn test_impl_self_type_alias() {
    def SelfBox: a = SelfBox({"value": 5})
    def SelfBox: b = SelfBox({"value": 8})
    def SelfBox: c = a + b
@@ -598,30 +598,30 @@ fn test_impl_self_type_alias(){
    free(p)
 }
 
-fn type_material_new(i32: base_tex, i32: normal_tex, f64: metallic, f64: roughness): ptr {
+fn type_material_new(i32 base_tex, i32 normal_tex, f64 metallic, f64 roughness) ptr {
    def ptr: mat = malloc(__layout_size("TypeMaterial"))
    store_layout(mat, "TypeMaterial", base_tex, normal_tex, (base_tex >= 0) ? 1 : 0, metallic, roughness)
    mat
 }
 
-fn type_pc_write(ptr: dst, f64: time, f64: exposure, i32: base_color, i32: tex_id, i32: flags): ptr {
+fn type_pc_write(ptr dst, f64 time, f64 exposure, i32 base_color, i32 tex_id, i32 flags) ptr {
    store_layout(dst, "TypePushConstants", time, exposure, base_color, tex_id, flags)
    dst
 }
 
-fn type_packed_write(ptr: dst): ptr {
+fn type_packed_write(ptr dst) ptr {
    store_layout(dst, "TypeStorePacked", 7, 0x1234, 1.5, true)
    dst
 }
 
-fn type_read_texture_info(any: value): ptr {
+fn type_read_texture_info(any value) ptr {
    layout guard TypeTextureInfo: info = value else {
       return TypeTextureInfo()
    }
    info
 }
 
-fn type_read_header_info(any: value): *TypeHeaderInfo {
+fn type_read_header_info(any value) *TypeHeaderInfo {
    layout guard TypeHeaderInfo: info = value else {
       return TypeHeaderInfo()
    }
@@ -631,7 +631,7 @@ fn type_read_header_info(any: value): *TypeHeaderInfo {
    info
 }
 
-fn type_header_result(any: value){
+fn type_header_result(any value) {
    layout guard TypeHeaderInfo: info = value else {
       return err("bad header")
    }
@@ -641,32 +641,32 @@ fn type_header_result(any: value){
    ok(info)
 }
 
-fn type_header_result_annotated(any: value): Result<*TypeHeaderInfo, str> {
+fn type_header_result_annotated(any value) Result<*TypeHeaderInfo, str> {
    layout guard TypeHeaderInfo: info = value else {
       return err("bad header")
    }
    ok(info)
 }
 
-fn strict_result(bool: ok_flag): Result<int, str> {
+fn strict_result(bool ok_flag) Result<int, str> {
    if(ok_flag){ return ok(7) }
    err("bad")
 }
 
-fn strict_inferred_header_result(any: raw){
+fn strict_inferred_header_result(any raw) {
    layout guard StrictInferHeader: h = raw else {
       return err("bad header")
    }
    ok(h)
 }
 
-fn type_win_new(i32: backend, i32: width, i32: height): ptr {
+fn type_win_new(i32 backend, i32 width, i32 height) ptr {
    def ptr: state = malloc(__layout_size("TypeWindowState"))
    store_layout(state, "TypeWindowState", backend, width, height, 0)
    state
 }
 
-fn type_backend_poll(ptr: state): i32 {
+fn type_backend_poll(ptr state) i32 {
    def i32: backend = load32(state, __layout_offset("TypeWindowState", "backend"))
    def i32: events = load32(state, __layout_offset("TypeWindowState", "events")) + 1
    store32(state, events, __layout_offset("TypeWindowState", "events"))
@@ -675,7 +675,7 @@ fn type_backend_poll(ptr: state): i32 {
    0
 }
 
-fn test_operator_examples(){
+fn test_operator_examples() {
    def i = 15
    assert((i + 1) % 16 == 0, "mod inner parens")
    assert(((i + 1) % 16) == 0, "mod outer parens")
@@ -714,7 +714,7 @@ fn test_operator_examples(){
    assert(scalar.twice() == 3.0, "multi-owner f32 impl method")
 }
 
-fn test_layout_examples(){
+fn test_layout_examples() {
    assert(__layout_size("TypePoint") == 8, "TypePoint size")
    assert(__layout_align("TypePoint") == 4, "TypePoint align")
    assert(__layout_offset("TypePoint", "y") == 4, "TypePoint y offset")
@@ -728,14 +728,14 @@ fn test_layout_examples(){
    def ptr: pair = malloc(__layout_size("TypeMethodPair"))
    store_layout(pair, "TypeMethodPair", 7, 11)
    assert(load32(pair, __layout_offset("TypeMethodPair", "x")) +
-          load32(pair, __layout_offset("TypeMethodPair", "y")) == 18, "layout-local pointer fields")
+   load32(pair, __layout_offset("TypeMethodPair", "y")) == 18, "layout-local pointer fields")
    free(pair)
    def *TypeMaterial: mat = type_material_new(4, 7, 0.8, 0.25)
    assert(load32(mat, __layout_offset("TypeMaterial", "base_tex")) == 4, "material base tex")
    assert(load32(mat, __layout_offset("TypeMaterial", "flags")) != 0, "attached material texture flag")
    assert(load64_f64(mat, __layout_offset("TypeMaterial", "metallic")) *
-          (1.0 - load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))) == 0.6000000000000001,
-          "material score from layout fields")
+      (1.0 - load64_f64(mat, __layout_offset("TypeMaterial", "roughness"))) == 0.6000000000000001,
+   "material score from layout fields")
    free(mat)
    def ptr: derived_default = malloc(__layout_size("TypeDerivedMaterial"))
    store_layout(derived_default, "TypeDerivedMaterial", -1, -1, 0, 1.0, 0.5)
@@ -746,9 +746,9 @@ fn test_layout_examples(){
    store_layout(derived_a, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    store_layout(derived_b, "TypeDerivedMaterial", 4, 7, 1, 0.8, 0.25)
    assert(load32(derived_a, __layout_offset("TypeDerivedMaterial", "base_tex")) ==
-          load32(derived_b, __layout_offset("TypeDerivedMaterial", "base_tex")), "record raw field equality")
+   load32(derived_b, __layout_offset("TypeDerivedMaterial", "base_tex")), "record raw field equality")
    assert(load64_f64(derived_a, __layout_offset("TypeDerivedMaterial", "roughness")) ==
-          load64_f64(derived_b, __layout_offset("TypeDerivedMaterial", "roughness")), "record raw f64 equality")
+   load64_f64(derived_b, __layout_offset("TypeDerivedMaterial", "roughness")), "record raw f64 equality")
    free(derived_default)
    free(derived_a)
    free(derived_b)
@@ -827,7 +827,7 @@ fn test_layout_examples(){
    free(backend)
 }
 
-fn test_strict_types(){
+fn test_strict_types() {
    def any: explicit_any = {"sender": "ny", "priority": 1}
    assert(eq(type(explicit_any), "dict"), "explicit any keeps dict runtime type")
    def dict<str, any>: explicit_dict = {"sender": "ny", "priority": 1}
@@ -850,7 +850,7 @@ fn test_strict_types(){
    }
 }
 
-fn test_flow_null_narrowing(){
+fn test_flow_null_narrowing() {
    def ?int: a = 5
    if(a != nil){
       def int: v = a
@@ -927,37 +927,37 @@ fn test_flow_null_narrowing(){
 }
 
 ;; Inference audit: identity preserves argument type.
-fn hm_identity(x){
+fn hm_identity(x) {
    x
 }
 
 ;; Inference audit: numeric operator constrains argument type.
-fn hm_add1(x){
+fn hm_add1(x) {
    x + 1
 }
 
 ;; Inference audit: string operator constrains argument type.
-fn hm_suffix(x){
+fn hm_suffix(x) {
    x + "!"
 }
 
 ;; Inference audit: index result follows list element type.
-fn hm_first(xs){
+fn hm_first(xs) {
    xs[0]
 }
 
 ;; Inference audit: nested index result follows inner element type.
-fn hm_pick_nested(rows){
+fn hm_pick_nested(rows) {
    rows[1][0]
 }
 
 ;; Inference audit: dictionary lookup result follows value type.
-fn hm_getx(d){
+fn hm_getx(d) {
    d["x"]
 }
 
 ;; Inference audit: generic container parameters preserve element type.
-fn hm_sum_typed_f64(list<f64>: xs): f64 {
+fn hm_sum_typed_f64(list<f64> xs) f64 {
    mut s = 0.0
    mut i = 0
    while(i < xs.len){
@@ -967,7 +967,7 @@ fn hm_sum_typed_f64(list<f64>: xs): f64 {
    s
 }
 
-fn hm_mut_float_accumulator(list<f64>: xs): f64 {
+fn hm_mut_float_accumulator(list<f64> xs) f64 {
    mut s = 0.0
    mut i = 0
    while(i < xs.len){
@@ -977,25 +977,25 @@ fn hm_mut_float_accumulator(list<f64>: xs): f64 {
    s
 }
 
-fn hm_update_typed_nested_f64(list<list<f64>>: rows): list<list<f64>> {
+fn hm_update_typed_nested_f64(list<list<f64>> rows) list<list<f64>> {
    def list<f64>: row = rows[0]
    row[1] = row[1] + 0.5
    rows[0] = row
    rows
 }
 
-fn hm_append_typed_f64(): f64 {
+fn hm_append_typed_f64() f64 {
    mut list<f64>: xs = list(2)
    xs = xs.append(1.5)
    xs = xs.append(-2.5)
    xs[0] + xs[1]
 }
 
-fn hm_negative_literal_fold(): int {
+fn hm_negative_literal_fold() int {
    -5 + 2
 }
 
-fn hm_sum_typed_ints(list<int>: xs): int {
+fn hm_sum_typed_ints(list<int> xs) int {
    mut s = 0
    mut i = 0
    while(i < xs.len){
@@ -1005,34 +1005,34 @@ fn hm_sum_typed_ints(list<int>: xs): int {
    s
 }
 
-fn hm_pick_typed_nested_int(list<list<int>>: rows): int {
+fn hm_pick_typed_nested_int(list<list<int>> rows) int {
    rows[0][1] + rows[1][0]
 }
 
-fn hm_pick_typed_nested_f64(list<list<f64>>: rows): f64 {
+fn hm_pick_typed_nested_f64(list<list<f64>> rows) f64 {
    rows[0][0] + rows[1][1]
 }
 
-fn hm_typed_dict_value_sum(dict<str, int>: d): int {
+fn hm_typed_dict_value_sum(dict<str, int> d) int {
    d["x"] + d["y"]
 }
 
 ;; Inference audit: floating division result.
-fn hm_half(x){
+fn hm_half(x) {
    x / 2.0
 }
 
 ;; Inference audit: comparison result.
-fn hm_small(x){
+fn hm_small(x) {
    x < 10
 }
 
-fn hm_choose_int(bool: flag): int {
+fn hm_choose_int(bool flag) int {
    if(flag){ return 21 }
    34
 }
 
-fn hm_loop_tail_value(): int {
+fn hm_loop_tail_value() int {
    mut i = 0
    while(i < 1){
       "loop body expression is not a function return"
@@ -1041,38 +1041,38 @@ fn hm_loop_tail_value(): int {
    7
 }
 
-fn hm_nontail_if_value(): int {
+fn hm_nontail_if_value() int {
    if(true){
       "non-tail branch expression is not a function return"
    }
    8
 }
 
-fn hm_compose(f, g, x){
+fn hm_compose(f, g, x) {
    f(g(x))
 }
 
-fn hm_map_pair(f, xs){
+fn hm_map_pair(f, xs) {
    [f(xs[0]), f(xs[1])]
 }
 
-fn test_hm_callable_examples(){
-   def add_one = fn(x){ x + 1 }
-   def shout = fn(str: x): str { x + "!" }
-   def inferred_num = fn(v){ v + 2 }
-   def inferred_str = fn(v){ v + "?" }
+fn test_hm_callable_examples() {
+   def add_one = fn(x) { x + 1 }
+   def shout = fn(str x) str { x + "!" }
+   def inferred_num = fn(v) { v + 2 }
+   def inferred_str = fn(v) { v + "?" }
    assert(add_one(41) == 42, "HM fn value call")
    assert(shout("ny") == "ny!", "HM typed fn value return")
    assert(inferred_num(5) == 7, "HM lambda infers numeric arg")
    assert(inferred_str("ok") == "ok?", "HM lambda infers string arg")
-   assert((fn(str: x): str { x + "!" })("go") == "go!", "HM direct fn expression call")
-   assert(hm_compose(fn(x){ x + 1 }, fn(x){ x * 2 }, 20) == 41, "HM compose callable chain")
-   assert(hm_map_pair(fn(x){ x + 10 }, [1, 2]) == [11, 12], "HM map pair callable")
-   def typed_list_lambda = fn(list<int>: xs){ xs[0] + xs[1] }
+   assert((fn(str x) str { x + "!" })("go") == "go!", "HM direct fn expression call")
+   assert(hm_compose(fn(x) { x + 1 }, fn(x) { x * 2 }, 20) == 41, "HM compose callable chain")
+   assert(hm_map_pair(fn(x) { x + 10 }, [1, 2]) == [11, 12], "HM map pair callable")
+   def typed_list_lambda = fn(list<int> xs) { xs[0] + xs[1] }
    assert(typed_list_lambda([4, 5]) == 9, "HM lambda generic list parameter")
 }
 
-fn test_hm_principal_examples(){
+fn test_hm_principal_examples() {
    assert(hm_identity(7) == 7, "HM identity int instantiation")
    assert(hm_identity("ny") == "ny", "HM identity str instantiation")
    def rows = [[1, 2], [3, 4]]
@@ -1085,12 +1085,12 @@ fn test_hm_principal_examples(){
    assert(config["enabled"], "HM heterogeneous dict literal bool value")
    def config_shape = type_shape(config)
    assert(eq(config_shape, "dict<str, str|int|bool>") ||
-          eq(config_shape, "dict<str, str|bool|int>") ||
-          eq(config_shape, "dict<str, int|str|bool>") ||
-          eq(config_shape, "dict<str, int|bool|str>") ||
-          eq(config_shape, "dict<str, bool|str|int>") ||
-          eq(config_shape, "dict<str, bool|int|str>"),
-          "HM heterogeneous dict runtime shape")
+      eq(config_shape, "dict<str, str|bool|int>") ||
+      eq(config_shape, "dict<str, int|str|bool>") ||
+      eq(config_shape, "dict<str, int|bool|str>") ||
+      eq(config_shape, "dict<str, bool|str|int>") ||
+      eq(config_shape, "dict<str, bool|int|str>"),
+   "HM heterogeneous dict runtime shape")
    mut ?int: maybe = nil
    if(true){ maybe = 9 }
    assert(maybe == 9, "HM nullable merge shape")
@@ -1123,27 +1123,27 @@ fn test_hm_principal_examples(){
    assert(hm_nontail_if_value() == 8, "HM non-tail if expression is not return")
 }
 
-fn long_runtime_str_source(): str { "AB" }
+fn long_runtime_str_source() str { "AB" }
 
-fn long_runtime_hex_source(): str { "4142" }
+fn long_runtime_hex_source() str { "4142" }
 
-fn long_runtime_any_str_source(): any { "AB" }
+fn long_runtime_any_str_source() any { "AB" }
 
-fn long_runtime_result_source(): Result<list<int>, str> { ok([4, 5, 6]) }
+fn long_runtime_result_source() Result<list<int>, str> { ok([4, 5, 6]) }
 
-fn long_runtime_option_source(): ?list<int> { [7, 8, 9] }
+fn long_runtime_option_source() ?list<int> { [7, 8, 9] }
 
-fn strict_long_any_source(): any { [1, 2, 3] }
+fn strict_long_any_source() any { [1, 2, 3] }
 
-fn strict_long_result_source(): Result<list<int>, str> { ok([4, 5, 6]) }
+fn strict_long_result_source() Result<list<int>, str> { ok([4, 5, 6]) }
 
-fn strict_long_option_source(): ?list<int> { [7, 8, 9] }
+fn strict_long_option_source() ?list<int> { [7, 8, 9] }
 
-fn long_runtime_long_return_from_list(list<int>: xs): any { xs.long }
+fn long_runtime_long_return_from_list(list<int> xs) any { xs.long }
 
-fn long_runtime_long_return_from_any(any: x): any { x.long }
+fn long_runtime_long_return_from_any(any x) any { x.long }
 
-fn test_strict_type_inference_regressions(){
+fn test_strict_type_inference_regressions() {
    assert(strict_bare_list_sum([1, 2, 3]) == 6, "strict bare list infers int elements")
    assert(strict_bare_nested_list_sum([[1, 2, 3], [4, 5, 6]]) == 14, "strict bare nested list infers indexed rows")
    assert(strict_bare_dict_sum({"x": 11, "y": 31}) == 42, "strict bare dict infers indexed values")
@@ -1166,7 +1166,7 @@ fn test_strict_type_inference_regressions(){
    free(strict_direct_header)
 }
 
-fn test_strict_long_regressions(){
+fn test_strict_long_regressions() {
    static_assert("ABC".long == 0x414243, "strict static string .long")
    static_assert([1, 2, 3].long == 0x010203, "strict static list .long")
    static_assert("010203".unhex.long == 0x010203, "strict static unhex .long")
@@ -1196,7 +1196,7 @@ fn test_strict_long_regressions(){
    assert_compile_index([10, 20, 30], 1, "strict index proof builtin")
 }
 
-fn test_dynamic_byte_list_long_property(){
+fn test_dynamic_byte_list_long_property() {
    static_assert([1, 2, 3].long == 0x010203, "compile-time list .long property")
    static_assert("ABC".long == 0x414243, "compile-time string .long property")
    static_assert("010203".unhex.long == 0x010203, "compile-time unhex .long property")
@@ -1317,7 +1317,7 @@ def int: type_flow_idx = 1
 assert_compile_range(type_flow_idx, 1, 1, "type flow range proof")
 assert_compile_index(type_flow_values, type_flow_idx, "type flow index proof")
 
-fn test_type_flow_range_examples(): int {
+fn test_type_flow_range_examples() int {
    def xs = [10, 20, 30]
    mut int: i = 0
    mut int: acc = 0
@@ -1331,11 +1331,11 @@ fn test_type_flow_range_examples(): int {
 }
 
 ;; Inference audit: masked arithmetic stays monomorphic.
-fn mono_mask_mix(a, b){
+fn mono_mask_mix(a, b) {
    ((a * 1664525) + b + 1013904223) & 0x7fffffff
 }
 
-fn test_mono_masked_wrap_examples(): int {
+fn test_mono_masked_wrap_examples() int {
    mut int: acc = 1
    mut int: i = 0
    while(i < 64){

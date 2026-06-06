@@ -6,6 +6,7 @@
 
 #define NY_INTERN_MAP_CAP_INIT 8192
 #define NY_INTERN_PTR_CACHE_SLOTS 8192
+#define NY_INTERN_PTR_MAP_CAP_INIT 8192
 
 typedef struct {
   const char *str;
@@ -20,6 +21,65 @@ static size_t g_intern_cap = 0;
 static uint32_t *g_intern_map = NULL;
 static size_t g_intern_map_cap = 0;
 static const char *g_intern_ptr_cache[NY_INTERN_PTR_CACHE_SLOTS];
+static const char **g_intern_ptr_map = NULL;
+static size_t g_intern_ptr_map_cap = 0;
+static size_t g_intern_ptr_map_len = 0;
+
+static size_t ny_intern_ptr_hash(const char *ptr) {
+  uintptr_t x = (uintptr_t)ptr;
+  x >>= 3;
+  x ^= x >> 33;
+  x *= (uintptr_t)0xff51afd7ed558ccdULL;
+  x ^= x >> 33;
+  return (size_t)x;
+}
+
+static void ny_intern_ptr_map_resize(size_t new_cap) {
+  const char **old_map = g_intern_ptr_map;
+  size_t old_cap = g_intern_ptr_map_cap;
+  g_intern_ptr_map = calloc(new_cap, sizeof(const char *));
+  if (!g_intern_ptr_map) {
+    g_intern_ptr_map = old_map;
+    return;
+  }
+  g_intern_ptr_map_cap = new_cap;
+  g_intern_ptr_map_len = 0;
+  for (size_t i = 0; i < old_cap; ++i) {
+    const char *ptr = old_map[i];
+    if (!ptr)
+      continue;
+    size_t mask = g_intern_ptr_map_cap - 1;
+    size_t idx = ny_intern_ptr_hash(ptr) & mask;
+    while (g_intern_ptr_map[idx])
+      idx = (idx + 1) & mask;
+    g_intern_ptr_map[idx] = ptr;
+    g_intern_ptr_map_len++;
+  }
+  free(old_map);
+}
+
+static void ny_intern_ptr_map_put(const char *ptr) {
+  if (!ptr)
+    return;
+  if (!g_intern_ptr_map) {
+    g_intern_ptr_map_cap = NY_INTERN_PTR_MAP_CAP_INIT;
+    g_intern_ptr_map = calloc(g_intern_ptr_map_cap, sizeof(const char *));
+    g_intern_ptr_map_len = 0;
+    if (!g_intern_ptr_map)
+      return;
+  } else if ((g_intern_ptr_map_len + 1) * 10 > g_intern_ptr_map_cap * 7) {
+    ny_intern_ptr_map_resize(g_intern_ptr_map_cap * 2);
+  }
+  size_t mask = g_intern_ptr_map_cap - 1;
+  size_t idx = ny_intern_ptr_hash(ptr) & mask;
+  while (g_intern_ptr_map[idx]) {
+    if (g_intern_ptr_map[idx] == ptr)
+      return;
+    idx = (idx + 1) & mask;
+  }
+  g_intern_ptr_map[idx] = ptr;
+  g_intern_ptr_map_len++;
+}
 
 void ny_intern_init(void) {
   if (g_intern_table)
@@ -34,6 +94,10 @@ void ny_intern_init(void) {
 
   g_intern_map_cap = NY_INTERN_MAP_CAP_INIT;
   g_intern_map = calloc(g_intern_map_cap, sizeof(uint32_t));
+  g_intern_ptr_map_cap = NY_INTERN_PTR_MAP_CAP_INIT;
+  g_intern_ptr_map = calloc(g_intern_ptr_map_cap, sizeof(const char *));
+  g_intern_ptr_map_len = 0;
+  ny_intern_ptr_map_put(g_intern_table[0].str);
 }
 
 ny_sym_id ny_intern_str(const char *str, size_t len) {
@@ -71,6 +135,7 @@ ny_sym_id ny_intern_str(const char *str, size_t len) {
   g_intern_table[new_id].len = len;
   g_intern_table[new_id].hash = hash;
   g_intern_ptr_cache[(((uintptr_t)dup) >> 3) & (NY_INTERN_PTR_CACHE_SLOTS - 1u)] = dup;
+  ny_intern_ptr_map_put(dup);
 
   g_intern_map[idx] = new_id;
 
@@ -113,11 +178,16 @@ bool ny_intern_contains_ptr(const char *str) {
   size_t slot = (((uintptr_t)str) >> 3) & (NY_INTERN_PTR_CACHE_SLOTS - 1u);
   if (g_intern_ptr_cache[slot] == str)
     return true;
-  for (size_t i = 0; i < g_intern_count; ++i) {
-    if (g_intern_table[i].str == str) {
+  if (!g_intern_ptr_map || g_intern_ptr_map_cap == 0)
+    return false;
+  size_t mask = g_intern_ptr_map_cap - 1;
+  size_t idx = ny_intern_ptr_hash(str) & mask;
+  while (g_intern_ptr_map[idx]) {
+    if (g_intern_ptr_map[idx] == str) {
       g_intern_ptr_cache[slot] = str;
       return true;
     }
+    idx = (idx + 1) & mask;
   }
   return false;
 }
@@ -133,9 +203,13 @@ void ny_intern_cleanup(void) {
 
   free(g_intern_map);
   g_intern_map = NULL;
+  free(g_intern_ptr_map);
+  g_intern_ptr_map = NULL;
   memset(g_intern_ptr_cache, 0, sizeof(g_intern_ptr_cache));
 
   g_intern_count = 0;
   g_intern_cap = 0;
   g_intern_map_cap = 0;
+  g_intern_ptr_map_cap = 0;
+  g_intern_ptr_map_len = 0;
 }

@@ -5,7 +5,7 @@ use std.os.interact as interact
 use std.os.net.remote as tube
 use std.os.net.requests as requests
 
-fn test_tube_fuzz(){
+fn test_tube_fuzz() {
    assert_eq(tube.set_default_level("trace"), "trace", "set_default_level trace")
    assert_eq(tube.default_level(), "trace", "default_level trace")
    def ctx = tube.context(log_level="quiet")
@@ -45,7 +45,7 @@ fn test_tube_fuzz(){
    assert_eq(tube.close(dbg), 0, "close debug tube")
 }
 
-fn test_fixture_sendafter(){
+fn test_fixture_sendafter() {
    def io = tube.fixture("name: ", "quiet", 2)
    assert_eq(tube.tube_kind(io), "fixture", "fixture kind")
    assert_eq(tube.sendlineafter(io, "name: ", "nytrix"), "name: ", "fixture prompt")
@@ -57,7 +57,7 @@ fn test_fixture_sendafter(){
    assert_eq(tube.close(io), 0, "fixture close")
 }
 
-fn test_interact_facade(){
+fn test_interact_facade() {
    def io = tube.fixture("ready\n", "quiet", 1)
    assert_eq(interact.tube_kind(io), "fixture", "interact facade keeps tube kind")
    assert_eq(interact.recvline(io, false), "ready", "interact facade delegates recvline")
@@ -66,7 +66,7 @@ fn test_interact_facade(){
    assert_eq(interact.close(io), 0, "interact facade close")
 }
 
-fn test_process_tube(){
+fn test_process_tube() {
    #windows {
       print("skip process tube test on Windows")
       return 0
@@ -86,7 +86,7 @@ fn test_process_tube(){
    0
 }
 
-fn test_ssh_tube_smoke(){
+fn test_ssh_tube_smoke() {
    #windows {
       print("skip ssh tube smoke on Windows")
       return 0
@@ -105,7 +105,7 @@ fn test_ssh_tube_smoke(){
    0
 }
 
-fn test_requests_parse_metadata(){
+fn test_requests_parse_metadata() {
    def raw = "HTTP/1.1 201 Created\r\nContent-Length: 5\r\nX-Test: ok\r\n\r\nhelloignored"
    def r = requests.requests_parse_response(raw)
    assert_eq(r.get("ok", false), true, "parsed response ok")
@@ -116,7 +116,7 @@ fn test_requests_parse_metadata(){
    assert_eq(h.get("x-test", ""), "ok", "parsed header")
 }
 
-fn test_remote_fetch(){
+fn test_remote_fetch() {
    if(!env("NYTRIX_TEST_REMOTE")){
       print("skip remote fetch(set NYTRIX_TEST_REMOTE=1 to run)")
       return 0

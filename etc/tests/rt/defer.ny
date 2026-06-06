@@ -3,7 +3,7 @@ use std.core.str
 
 mut log = ""
 
-fn test_unwind(){
+fn test_unwind() {
    "Checks defer execution order across panic unwinding."
    log = log + "1"
    defer { log = log + "2" }
@@ -21,7 +21,7 @@ fn test_unwind(){
 test_unwind()
 assert(log == "1P3C42", "Defer unwind order")
 
-fn test_basic_order(){
+fn test_basic_order() {
    "Checks basic LIFO defer order."
    log = ""
    log = log + "S|"
@@ -33,7 +33,7 @@ fn test_basic_order(){
 test_basic_order()
 assert(log == "S|E|D2|D1|", "Basic defer execution order")
 
-fn test_scoping(){
+fn test_scoping() {
    "Checks that block-local defers run at block exit."
    log = ""
    {

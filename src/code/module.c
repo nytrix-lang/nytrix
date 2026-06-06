@@ -4,7 +4,57 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+
+#define NY_MODULE_STMT_LOOKUP_CACHE_SLOTS 8192u
+#define NY_MODULE_STMT_LOOKUP_KEY_MAX 192u
+#define NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS 4096u
+#define NY_MODULE_PUBLIC_TARGET_KEY_MAX 128u
+#define NY_MODULE_PUBLIC_TARGET_PROFILE_MAX 32u
+#define NY_MODULE_PUBLIC_TARGET_VALUE_MAX 1024u
+#define NY_MODULE_LOOKUP_CACHE_PROBES 8u
+
+typedef struct ny_module_stmt_lookup_entry_t {
+  const codegen_t *cg;
+  const program_t *prog;
+  const void *extra_data;
+  size_t extra_len;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  char key[NY_MODULE_STMT_LOOKUP_KEY_MAX];
+  stmt_t *value;
+} ny_module_stmt_lookup_entry_t;
+
+typedef struct ny_module_stmt_lookup_cache_t {
+  ny_module_stmt_lookup_entry_t entries[NY_MODULE_STMT_LOOKUP_CACHE_SLOTS];
+} ny_module_stmt_lookup_cache_t;
+
+typedef struct ny_module_public_target_entry_t {
+  const codegen_t *cg;
+  const stmt_t *mod;
+  const void *body_data;
+  size_t body_len;
+  uint64_t hash;
+  uint16_t target_len;
+  uint8_t profile_len;
+  uint8_t include_child_uses;
+  uint8_t state; /* 0=empty, 1=cached miss, 2=cached hit */
+  uint16_t value_len;
+  char target[NY_MODULE_PUBLIC_TARGET_KEY_MAX];
+  char profile[NY_MODULE_PUBLIC_TARGET_PROFILE_MAX];
+  char value[NY_MODULE_PUBLIC_TARGET_VALUE_MAX];
+} ny_module_public_target_entry_t;
+
+typedef struct ny_module_public_target_cache_t {
+  ny_module_public_target_entry_t entries[NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS];
+} ny_module_public_target_cache_t;
+
+static inline uint64_t ny_module_mix64(uint64_t h, uint64_t v) {
+  h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+  return h;
+}
 
 static size_t ny_alias_index_min_cap(size_t len) {
   size_t cap = 64;
@@ -518,31 +568,144 @@ static void ny_module_stmt_index_build(codegen_t *cg) {
   cg->module_stmt_index_len = n;
 }
 
+static bool ny_module_stmt_cacheable_name(const char *name, size_t *len_out) {
+  if (!name || !*name)
+    return false;
+  size_t len = strlen(name);
+  if (len == 0 || len >= NY_MODULE_STMT_LOOKUP_KEY_MAX ||
+      len > UINT16_MAX)
+    return false;
+  if (len_out)
+    *len_out = len;
+  return true;
+}
+
+static ny_module_stmt_lookup_cache_t *
+ny_module_stmt_lookup_cache(codegen_t *cg) {
+  if (!cg)
+    return NULL;
+  if (!cg->module_stmt_lookup_cache) {
+    cg->module_stmt_lookup_cache =
+        calloc(1, sizeof(ny_module_stmt_lookup_cache_t));
+  }
+  return (ny_module_stmt_lookup_cache_t *)cg->module_stmt_lookup_cache;
+}
+
+static int ny_module_stmt_cache_get(codegen_t *cg, const char *name,
+                                    size_t name_len, uint64_t hash,
+                                    stmt_t **out) {
+  if (!cg || !name || name_len == 0 || name_len >= NY_MODULE_STMT_LOOKUP_KEY_MAX)
+    return -1;
+  ny_module_stmt_lookup_cache_t *cache = ny_module_stmt_lookup_cache(cg);
+  if (!cache)
+    return -1;
+  size_t base = hash & (NY_MODULE_STMT_LOOKUP_CACHE_SLOTS - 1u);
+  for (size_t probe = 0; probe < NY_MODULE_LOOKUP_CACHE_PROBES; ++probe) {
+    ny_module_stmt_lookup_entry_t *e = &cache->entries[
+        (base + probe) & (NY_MODULE_STMT_LOOKUP_CACHE_SLOTS - 1u)];
+    if (!e->state)
+      continue;
+    if (e->cg != cg || e->prog != cg->prog ||
+        e->extra_data != cg->extra_progs.data ||
+        e->extra_len != cg->extra_progs.len || e->hash != hash ||
+        e->len != (uint16_t)name_len ||
+        memcmp(e->key, name, name_len) != 0 || e->key[name_len] != '\0')
+      continue;
+    if (e->state == 2u) {
+      *out = e->value;
+      return 1;
+    }
+    return 0;
+  }
+  return -1;
+}
+
+static void ny_module_stmt_cache_put(codegen_t *cg, const char *name,
+                                     size_t name_len, uint64_t hash,
+                                     stmt_t *value) {
+  if (!cg || !name || name_len == 0 || name_len >= NY_MODULE_STMT_LOOKUP_KEY_MAX)
+    return;
+  ny_module_stmt_lookup_cache_t *cache = ny_module_stmt_lookup_cache(cg);
+  if (!cache)
+    return;
+  size_t base = hash & (NY_MODULE_STMT_LOOKUP_CACHE_SLOTS - 1u);
+  ny_module_stmt_lookup_entry_t *e = &cache->entries[base];
+  for (size_t probe = 0; probe < NY_MODULE_LOOKUP_CACHE_PROBES; ++probe) {
+    ny_module_stmt_lookup_entry_t *cur = &cache->entries[
+        (base + probe) & (NY_MODULE_STMT_LOOKUP_CACHE_SLOTS - 1u)];
+    if (!cur->state) {
+      e = cur;
+      break;
+    }
+    if (cur->cg == cg && cur->prog == cg->prog &&
+        cur->extra_data == cg->extra_progs.data &&
+        cur->extra_len == cg->extra_progs.len && cur->hash == hash &&
+        cur->len == (uint16_t)name_len &&
+        memcmp(cur->key, name, name_len) == 0 &&
+        cur->key[name_len] == '\0') {
+      e = cur;
+      break;
+    }
+  }
+  e->cg = cg;
+  e->prog = cg->prog;
+  e->extra_data = cg->extra_progs.data;
+  e->extra_len = cg->extra_progs.len;
+  e->hash = hash;
+  e->len = (uint16_t)name_len;
+  memcpy(e->key, name, name_len);
+  e->key[name_len] = '\0';
+  e->value = value;
+  e->state = value ? 2u : 1u;
+}
+
 static stmt_t *find_module_stmt_any(codegen_t *cg, const char *name) {
   if (!cg || !name || !*name)
     return NULL;
   ny_module_stmt_index_build(cg);
+  size_t name_len = 0;
+  bool cacheable = ny_module_stmt_cacheable_name(name, &name_len);
+  uint64_t hash = cacheable ? ny_hash_name(name, name_len) : 0;
+  if (cacheable) {
+    stmt_t *cached = NULL;
+    int cache_hit = ny_module_stmt_cache_get(cg, name, name_len, hash, &cached);
+    if (cache_hit == 1)
+      return cached;
+    if (cache_hit == 0)
+      return NULL;
+  }
   if (cg->module_stmt_index && cg->module_stmt_index_cap) {
-    size_t name_len = strlen(name);
-    uint64_t hash = ny_hash_name(name, name_len);
+    if (!cacheable) {
+      name_len = strlen(name);
+      hash = ny_hash_name(name, name_len);
+    }
     size_t mask = cg->module_stmt_index_cap - 1u;
     size_t pos = hash & mask;
     for (;;) {
       module_stmt_slot *slot = &cg->module_stmt_index[pos];
-      if (!slot->occupied)
+      if (!slot->occupied) {
+        if (cacheable)
+          ny_module_stmt_cache_put(cg, name, name_len, hash, NULL);
         return NULL;
+      }
       if (slot->hash == hash && slot->name &&
           memcmp(slot->name, name, name_len) == 0 &&
-          slot->name[name_len] == '\0')
+          slot->name[name_len] == '\0') {
+        if (cacheable)
+          ny_module_stmt_cache_put(cg, name, name_len, hash, slot->stmt);
         return slot->stmt;
+      }
       pos = (pos + 1u) & mask;
     }
   }
   if (cg->prog) {
     for (size_t i = 0; i < cg->prog->body.len; ++i) {
       stmt_t *m = find_module_stmt(cg->prog->body.data[i], name);
-      if (m)
+      if (m) {
+        if (cacheable)
+          ny_module_stmt_cache_put(cg, name, name_len, hash, m);
         return m;
+      }
     }
   }
   for (size_t p = 0; p < cg->extra_progs.len; ++p) {
@@ -551,10 +714,15 @@ static stmt_t *find_module_stmt_any(codegen_t *cg, const char *name) {
       continue;
     for (size_t i = 0; i < prog->body.len; ++i) {
       stmt_t *m = find_module_stmt(prog->body.data[i], name);
-      if (m)
+      if (m) {
+        if (cacheable)
+          ny_module_stmt_cache_put(cg, name, name_len, hash, m);
         return m;
+      }
     }
   }
+  if (cacheable)
+    ny_module_stmt_cache_put(cg, name, name_len, hash, NULL);
   return NULL;
 }
 
@@ -717,23 +885,6 @@ static void ny_push_use_module_unique(codegen_t *cg, bool user_only,
     vec_push(&cg->user_use_modules, ny_strdup(value));
   else
     vec_push(&cg->use_modules, ny_strdup(value));
-}
-
-static bool ny_use_module_has_descendant(codegen_t *cg, bool user_only,
-                                         const char *value) {
-  if (!cg || !value || !*value)
-    return false;
-  char **data = user_only ? cg->user_use_modules.data : cg->use_modules.data;
-  size_t len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
-  size_t value_len = strlen(value);
-  for (size_t i = 0; i < len; ++i) {
-    const char *used = data[i];
-    if (!used || !*used)
-      continue;
-    if (strncmp(used, value, value_len) == 0 && used[value_len] == '.')
-      return true;
-  }
-  return false;
 }
 
 static bool ny_module_user_ctx_is_non_std(const codegen_t *cg) {
@@ -1975,10 +2126,164 @@ static bool ny_module_exported_child_target(codegen_t *cg, stmt_t *mod,
   return false;
 }
 
-static bool ny_module_public_target(codegen_t *cg, stmt_t *mod,
-                                    const char *target, char *out,
-                                    size_t out_cap, const char *profile,
-                                    bool include_child_uses, int depth) {
+static bool ny_module_public_target_cacheable(const char *target,
+                                              const char *profile,
+                                              size_t *target_len_out,
+                                              size_t *profile_len_out) {
+  if (!target || !*target)
+    return false;
+  size_t target_len = strlen(target);
+  size_t profile_len = profile ? strlen(profile) : 0;
+  if (target_len == 0 || target_len >= NY_MODULE_PUBLIC_TARGET_KEY_MAX ||
+      target_len > UINT16_MAX ||
+      profile_len >= NY_MODULE_PUBLIC_TARGET_PROFILE_MAX)
+    return false;
+  if (target_len_out)
+    *target_len_out = target_len;
+  if (profile_len_out)
+    *profile_len_out = profile_len;
+  return true;
+}
+
+static uint64_t ny_module_public_target_hash(stmt_t *mod, const char *target,
+                                             size_t target_len,
+                                             const char *profile,
+                                             size_t profile_len,
+                                             bool include_child_uses) {
+  uint64_t h = ny_hash_name(target, target_len);
+  h = ny_module_mix64(h, (uint64_t)(uintptr_t)mod);
+  if (profile_len > 0)
+    h = ny_module_mix64(h, ny_hash_name(profile, profile_len));
+  h = ny_module_mix64(h, include_child_uses ? 1u : 0u);
+  return h ? h : 1u;
+}
+
+static ny_module_public_target_cache_t *
+ny_module_public_target_cache(codegen_t *cg) {
+  if (!cg)
+    return NULL;
+  if (!cg->module_public_target_cache)
+    cg->module_public_target_cache =
+        calloc(1, sizeof(ny_module_public_target_cache_t));
+  return (ny_module_public_target_cache_t *)cg->module_public_target_cache;
+}
+
+static int ny_module_public_target_cache_get(
+    codegen_t *cg, stmt_t *mod, const char *target, size_t target_len,
+    const char *profile, size_t profile_len, bool include_child_uses,
+    uint64_t hash, char *out, size_t out_cap) {
+  if (!cg || !mod || !target || !out || out_cap == 0)
+    return -1;
+  ny_module_public_target_cache_t *cache = ny_module_public_target_cache(cg);
+  if (!cache)
+    return -1;
+  size_t base = hash & (NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS - 1u);
+  for (size_t probe = 0; probe < NY_MODULE_LOOKUP_CACHE_PROBES; ++probe) {
+    ny_module_public_target_entry_t *e = &cache->entries[
+        (base + probe) & (NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS - 1u)];
+    if (!e->state)
+      continue;
+    if (e->cg != cg || e->mod != mod ||
+        e->body_data != mod->as.module.body.data ||
+        e->body_len != mod->as.module.body.len || e->hash != hash ||
+        e->target_len != (uint16_t)target_len ||
+        e->profile_len != (uint8_t)profile_len ||
+        e->include_child_uses != (include_child_uses ? 1u : 0u) ||
+        memcmp(e->target, target, target_len) != 0 ||
+        e->target[target_len] != '\0')
+      continue;
+    if (profile_len > 0) {
+      if (!profile || memcmp(e->profile, profile, profile_len) != 0 ||
+          e->profile[profile_len] != '\0')
+        continue;
+    } else if (e->profile[0] != '\0') {
+      continue;
+    }
+    if (e->state == 2u) {
+      if ((size_t)e->value_len >= out_cap)
+        return 0;
+      memcpy(out, e->value, (size_t)e->value_len + 1u);
+      return 1;
+    }
+    return 0;
+  }
+  return -1;
+}
+
+static void ny_module_public_target_cache_put(
+    codegen_t *cg, stmt_t *mod, const char *target, size_t target_len,
+    const char *profile, size_t profile_len, bool include_child_uses,
+    uint64_t hash, const char *value) {
+  if (!cg || !mod || !target)
+    return;
+  ny_module_public_target_cache_t *cache = ny_module_public_target_cache(cg);
+  if (!cache)
+    return;
+  size_t base = hash & (NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS - 1u);
+  ny_module_public_target_entry_t *e = &cache->entries[base];
+  for (size_t probe = 0; probe < NY_MODULE_LOOKUP_CACHE_PROBES; ++probe) {
+    ny_module_public_target_entry_t *cur = &cache->entries[
+        (base + probe) & (NY_MODULE_PUBLIC_TARGET_CACHE_SLOTS - 1u)];
+    if (!cur->state) {
+      e = cur;
+      break;
+    }
+    if (cur->cg == cg && cur->mod == mod &&
+        cur->body_data == mod->as.module.body.data &&
+        cur->body_len == mod->as.module.body.len && cur->hash == hash &&
+        cur->target_len == (uint16_t)target_len &&
+        cur->profile_len == (uint8_t)profile_len &&
+        cur->include_child_uses == (include_child_uses ? 1u : 0u) &&
+        memcmp(cur->target, target, target_len) == 0 &&
+        cur->target[target_len] == '\0') {
+      bool profile_match =
+          profile_len > 0
+              ? profile && memcmp(cur->profile, profile, profile_len) == 0 &&
+                    cur->profile[profile_len] == '\0'
+              : cur->profile[0] == '\0';
+      if (profile_match) {
+        e = cur;
+        break;
+      }
+    }
+  }
+  e->cg = cg;
+  e->mod = mod;
+  e->body_data = mod->as.module.body.data;
+  e->body_len = mod->as.module.body.len;
+  e->hash = hash;
+  e->target_len = (uint16_t)target_len;
+  e->profile_len = (uint8_t)profile_len;
+  e->include_child_uses = include_child_uses ? 1u : 0u;
+  memcpy(e->target, target, target_len);
+  e->target[target_len] = '\0';
+  if (profile_len > 0 && profile) {
+    memcpy(e->profile, profile, profile_len);
+    e->profile[profile_len] = '\0';
+  } else {
+    e->profile[0] = '\0';
+  }
+  if (value && *value) {
+    size_t value_len = strlen(value);
+    if (value_len >= NY_MODULE_PUBLIC_TARGET_VALUE_MAX)
+      value_len = NY_MODULE_PUBLIC_TARGET_VALUE_MAX - 1u;
+    memcpy(e->value, value, value_len);
+    e->value[value_len] = '\0';
+    e->value_len = (uint16_t)value_len;
+    e->state = 2u;
+  } else {
+    e->value[0] = '\0';
+    e->value_len = 0;
+    e->state = 1u;
+  }
+}
+
+static bool ny_module_public_target_uncached(codegen_t *cg, stmt_t *mod,
+                                             const char *target, char *out,
+                                             size_t out_cap,
+                                             const char *profile,
+                                             bool include_child_uses,
+                                             int depth) {
   if (!cg || !mod || mod->kind != NY_S_MODULE || !target || !*target || !out ||
       out_cap == 0 || depth > 8)
     return false;
@@ -2056,6 +2361,49 @@ static bool ny_module_public_target(codegen_t *cg, stmt_t *mod,
   }
 
   return false;
+}
+
+static bool ny_module_public_target(codegen_t *cg, stmt_t *mod,
+                                    const char *target, char *out,
+                                    size_t out_cap, const char *profile,
+                                    bool include_child_uses, int depth) {
+  if (!cg || !mod || mod->kind != NY_S_MODULE || !target || !*target || !out ||
+      out_cap == 0 || depth > 8)
+    return false;
+
+  size_t target_len = 0;
+  size_t profile_len = 0;
+  bool cacheable = ny_module_public_target_cacheable(
+      target, profile, &target_len, &profile_len);
+  uint64_t hash =
+      cacheable ? ny_module_public_target_hash(
+                      mod, target, target_len, profile, profile_len,
+                      include_child_uses)
+                : 0;
+  if (cacheable) {
+    int hit = ny_module_public_target_cache_get(
+        cg, mod, target, target_len, profile, profile_len, include_child_uses,
+        hash, out, out_cap);
+    if (hit == 1)
+      return true;
+    if (hit == 0)
+      return false;
+  }
+
+  char tmp[NY_MODULE_PUBLIC_TARGET_VALUE_MAX];
+  bool ok = ny_module_public_target_uncached(
+      cg, mod, target, tmp, sizeof(tmp), profile, include_child_uses, depth);
+  if (cacheable)
+    ny_module_public_target_cache_put(cg, mod, target, target_len, profile,
+                                      profile_len, include_child_uses, hash,
+                                      ok ? tmp : NULL);
+  if (!ok)
+    return false;
+  size_t value_len = strlen(tmp);
+  if (value_len >= out_cap)
+    return false;
+  memcpy(out, tmp, value_len + 1u);
+  return true;
 }
 
 static bool ny_module_local_import_target(codegen_t *cg, stmt_t *mod,

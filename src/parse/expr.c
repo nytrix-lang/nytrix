@@ -704,6 +704,30 @@ static expr_t *expr_nil_literal(parser_t *p, token_t tok) {
 
 static expr_t *parse_if_stmt_as_expr(parser_t *p, stmt_t *s, token_t tok);
 
+static void parse_call_arg_list(parser_t *p, ny_call_arg_list *args,
+                                const char *close_msg) {
+  while (p->cur.kind != NY_T_RPAREN) {
+    call_arg_t arg = {0};
+    if (p->cur.kind == NY_T_IDENT) {
+      token_t next = parser_peek(p);
+      if (next.kind == NY_T_ASSIGN || next.kind == NY_T_COLON) {
+        arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+        parser_advance(p);
+        arg.val = p_parse_expr(p, 0);
+      } else {
+        arg.val = p_parse_expr(p, 0);
+      }
+    } else {
+      arg.val = p_parse_expr(p, 0);
+    }
+    vec_push_arena(p->arena, args, arg);
+    if (!parser_match(p, NY_T_COMMA))
+      break;
+  }
+  parser_expect(p, NY_T_RPAREN, close_msg, NULL);
+}
+
 static expr_t *stmt_value_expr(parser_t *p, stmt_t *s, token_t tok,
                                const char *branch_name) {
   if (!s)
@@ -1089,14 +1113,19 @@ static expr_t *parse_primary(parser_t *p) {
     }
     parser_expect(p, NY_T_RPAREN, NULL, NULL);
     if (parser_match(p, NY_T_COLON)) {
-      lam->as.lambda.return_type =
-          expr_parse_type_ref(p, "expected return type");
+      parser_error(p, p->prev, "legacy function return syntax",
+                   "write 'fn(params) RetType { ... }', without ':'");
+      if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
+          p->cur.kind != NY_T_EOF)
+        (void)expr_parse_type_ref(p, "expected return type");
     } else if (p->cur.kind == NY_T_ARROW) {
-      parser_error(p, p->cur, "function return types use ':'",
-                   "use ': RetType' before the body, not '-> RetType'");
+      parser_error(p, p->cur, "function return types do not use '->'",
+                   "write 'fn(params) RetType { ... }'");
       parser_advance(p);
       (void)expr_parse_type_ref(p, "expected return type after '->'");
-    }
+    } else
+      lam->as.lambda.return_type =
+          parser_parse_return_type_suffix(p, expr_parse_type_ref, "expected return type");
     stmt_t *body = NULL;
     if (p->cur.kind == NY_T_LBRACE) {
       body = p_parse_block(p);
@@ -1162,22 +1191,7 @@ static expr_t *parse_postfix(parser_t *p) {
       parser_advance(p);
       expr_t *call = expr_new(p->arena, NY_E_CALL, p->cur);
       call->as.call.callee = expr;
-      while (p->cur.kind != NY_T_RPAREN) {
-        call_arg_t arg = {0};
-        if (p->cur.kind == NY_T_IDENT && (parser_peek(p).kind == NY_T_ASSIGN ||
-                                          parser_peek(p).kind == NY_T_COLON)) {
-          arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-          parser_advance(p);
-          parser_advance(p);
-          arg.val = p_parse_expr(p, 0);
-        } else {
-          arg.val = p_parse_expr(p, 0);
-        }
-        vec_push_arena(p->arena, &call->as.call.args, arg);
-        if (!parser_match(p, NY_T_COMMA))
-          break;
-      }
-      parser_expect(p, NY_T_RPAREN, NULL, NULL);
+      parse_call_arg_list(p, &call->as.call.args, NULL);
       expr = call;
     } else if (p->cur.kind == NY_T_DOT) {
       parser_advance(p);
@@ -1193,23 +1207,7 @@ static expr_t *parse_postfix(parser_t *p) {
         expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
         mc->as.memcall.target = expr;
         mc->as.memcall.name = name;
-        while (p->cur.kind != NY_T_RPAREN) {
-          call_arg_t arg = {0};
-          if (p->cur.kind == NY_T_IDENT &&
-              (parser_peek(p).kind == NY_T_ASSIGN ||
-               parser_peek(p).kind == NY_T_COLON)) {
-            arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-            parser_advance(p);
-            parser_advance(p);
-            arg.val = p_parse_expr(p, 0);
-          } else {
-            arg.val = p_parse_expr(p, 0);
-          }
-          vec_push_arena(p->arena, &mc->as.memcall.args, arg);
-          if (!parser_match(p, NY_T_COMMA))
-            break;
-        }
-        parser_expect(p, NY_T_RPAREN, NULL, NULL);
+        parse_call_arg_list(p, &mc->as.memcall.args, NULL);
         expr = mc;
       } else {
         expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);
@@ -1238,23 +1236,7 @@ static expr_t *parse_postfix(parser_t *p) {
         expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
         mc->as.memcall.target = target;
         mc->as.memcall.name = name;
-        while (p->cur.kind != NY_T_RPAREN) {
-          call_arg_t arg = {0};
-          if (p->cur.kind == NY_T_IDENT &&
-              (parser_peek(p).kind == NY_T_ASSIGN ||
-               parser_peek(p).kind == NY_T_COLON)) {
-            arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-            parser_advance(p);
-            parser_advance(p);
-            arg.val = p_parse_expr(p, 0);
-          } else {
-            arg.val = p_parse_expr(p, 0);
-          }
-          vec_push_arena(p->arena, &mc->as.memcall.args, arg);
-          if (!parser_match(p, NY_T_COMMA))
-            break;
-        }
-        parser_expect(p, NY_T_RPAREN, NULL, NULL);
+        parse_call_arg_list(p, &mc->as.memcall.args, NULL);
         access = mc;
       } else {
         /* expr?.foo */
@@ -1450,23 +1432,8 @@ expr_t *p_parse_expr(parser_t *p, int prec) {
           expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
           mc->as.memcall.target = left;
           mc->as.memcall.name = name;
-          while (p->cur.kind != NY_T_RPAREN) {
-            call_arg_t arg = {0};
-            if (p->cur.kind == NY_T_IDENT &&
-                (parser_peek(p).kind == NY_T_ASSIGN ||
-                 parser_peek(p).kind == NY_T_COLON)) {
-              arg.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-              parser_advance(p);
-              parser_advance(p);
-              arg.val = p_parse_expr(p, 0);
-            } else {
-              arg.val = p_parse_expr(p, 0);
-            }
-            vec_push_arena(p->arena, &mc->as.memcall.args, arg);
-            if (!parser_match(p, NY_T_COMMA))
-              break;
-          }
-          parser_expect(p, NY_T_RPAREN, "')' in piped member call", NULL);
+          parse_call_arg_list(p, &mc->as.memcall.args,
+                              "')' in piped member call");
           left = mc;
         } else {
           expr_t *m = expr_new(p->arena, NY_E_MEMBER, id_tok);

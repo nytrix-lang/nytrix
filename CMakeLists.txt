@@ -5,6 +5,7 @@ if (APPLE)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 include(CheckLinkerFlag)
+include(CheckCSourceCompiles)
 
 set(NYTRIX_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 set(CMAKE_C_STANDARD 11)
@@ -26,8 +27,8 @@ set(NYTRIX_DWARF_VERSION "5" CACHE STRING "DWARF version for Unix-like debug bui
 set_property(CACHE NYTRIX_DWARF_VERSION PROPERTY STRINGS 2 3 4 5)
 
 set(NYTRIX_VERSION_MAJOR "0")
-set(NYTRIX_VERSION_MINOR "4")
-set(NYTRIX_VERSION_PATCH "3")
+set(NYTRIX_VERSION_MINOR "5")
+set(NYTRIX_VERSION_PATCH "0")
 set(NYTRIX_VERSION_REF "" CACHE STRING
     "Git ref used for version metadata; empty prefers the upstream remote ref")
 set(NYTRIX_VERSION_HEADER "${CMAKE_BINARY_DIR}/nytrix_version.h")
@@ -98,10 +99,10 @@ if(NOT _version_major)
   set(_version_major "0")
 endif()
 if(NOT _version_minor)
-  set(_version_minor "4")
+  set(_version_minor "5")
 endif()
 if(NOT _version_patch)
-  set(_version_patch "3")
+  set(_version_patch "0")
 endif()
 
 set(_patch "${_version_patch}")
@@ -389,6 +390,14 @@ if (NYTRIX_LLVM_INCLUDE)
   set(NYTRIX_LLVM_INCLUDE "${NYTRIX_LLVM_INCLUDE}" CACHE STRING "LLVM include root" FORCE)
   include_directories(SYSTEM "${NYTRIX_LLVM_INCLUDE}")
 endif()
+
+set(_nytrix_saved_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+set(CMAKE_REQUIRED_INCLUDES "${NYTRIX_LLVM_INCLUDE}")
+check_c_source_compiles("
+#include <llvm-c/Core.h>
+int main(void) { return (int)LLVMConstantPtrAuthValueKind; }
+" NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND)
+set(CMAKE_REQUIRED_INCLUDES "${_nytrix_saved_required_includes}")
 
 set(NYTRIX_CLANG_LIBRARY "" CACHE FILEPATH "libclang library")
 set(_nytrix_llvm_lib_paths)
@@ -724,6 +733,11 @@ target_compile_definitions(nytrix_compiler PRIVATE
   VERBOSE_BUILD
   NYTRIX_STD_PATH="${NYTRIX_STD_PATH}"
 )
+if (NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND)
+  target_compile_definitions(nytrix_compiler PRIVATE
+    NYTRIX_HAS_LLVM_CONSTANT_PTR_AUTH_VALUE_KIND=1
+  )
+endif()
 
 target_compile_definitions(nytrix_runtime PRIVATE
   __STDC_CONSTANT_MACROS

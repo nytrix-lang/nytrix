@@ -1,7 +1,7 @@
 ;; expect: variable declaration: expected str, got int
 use std.core
 
-fn getx(d){
+fn getx(d) {
    d["x"]
 }
 

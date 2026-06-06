@@ -1453,7 +1453,7 @@ static void ny_ast_append_param_signature(char **buf, size_t *len, size_t *cap,
   if (!p)
     return;
   if (p->type && *p->type)
-    append(buf, len, cap, "%s: %s", p->type, p->name ? p->name : "");
+    append(buf, len, cap, "%s %s", p->type, p->name ? p->name : "");
   else
     append(buf, len, cap, "%s", p->name ? p->name : "");
 }
@@ -1557,7 +1557,7 @@ static void ny_ast_append_symbol_for_stmt(char **buf, size_t *len, size_t *cap,
     append(&sig, &sig_len, &sig_cap, "fn %s", name ? name : "");
     ny_ast_append_params_signature(&sig, &sig_len, &sig_cap, &s->as.fn.params);
     if (s->as.fn.return_type && *s->as.fn.return_type)
-      append(&sig, &sig_len, &sig_cap, ": %s", s->as.fn.return_type);
+      append(&sig, &sig_len, &sig_cap, " %s", s->as.fn.return_type);
     break;
   case NY_S_EXTERN:
     kind = "extern";
@@ -1565,7 +1565,7 @@ static void ny_ast_append_symbol_for_stmt(char **buf, size_t *len, size_t *cap,
     append(&sig, &sig_len, &sig_cap, "extern fn %s", name ? name : "");
     ny_ast_append_params_signature(&sig, &sig_len, &sig_cap, &s->as.ext.params);
     if (s->as.ext.return_type && *s->as.ext.return_type)
-      append(&sig, &sig_len, &sig_cap, ": %s", s->as.ext.return_type);
+      append(&sig, &sig_len, &sig_cap, " %s", s->as.ext.return_type);
     break;
   case NY_S_LAYOUT:
     kind = "layout";

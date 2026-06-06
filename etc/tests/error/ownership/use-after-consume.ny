@@ -3,11 +3,11 @@
 use std.core
 
 @consumes(x)
-fn take(x): int {
+fn take(x) int {
    0
 }
 
-fn bad(): int {
+fn bad() int {
    def a = [1]
    take(a)
    len(a)

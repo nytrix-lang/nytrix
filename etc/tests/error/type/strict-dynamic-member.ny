@@ -2,7 +2,7 @@
 ;; expect: hm-strict-dynamic-member
 use std.core
 
-fn read_member(any: x){
+fn read_member(any x) {
    x.missing
 }
 

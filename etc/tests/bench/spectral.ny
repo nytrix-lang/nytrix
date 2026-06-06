@@ -17,12 +17,12 @@ while(i < N){
    i += 1
 }
 
-fn A(i, j){
+fn A(i, j) {
    def ij = i + j
    return 1.0 / (((ij * (ij + 1)) >> 1) + i + 1)
 }
 
-fn mul_Av(x, out){
+fn mul_Av(x, out) {
    mut i = 0
    while(i < N){
       mut sum = 0.0
@@ -36,7 +36,7 @@ fn mul_Av(x, out){
    }
 }
 
-fn mul_Atv(x, out){
+fn mul_Atv(x, out) {
    mut i = 0
    while(i < N){
       mut sum = 0.0
