@@ -1,12 +1,15 @@
-;; Keywords: data serialization csv delimited
+;; Keywords: data serialization csv delimited parse
 ;; Comma-Separated Values (CSV) Parser and Generator for Nytrix
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc4180.html
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.csv(decode, encode)
 use std.core
 use std.core.str as str
 
-fn decode(any: data, str: sep=","): list {
+fn decode(any data, str sep=",") list {
    "Decodes a CSV string into a list of lists."
    if(!is_str(data)){ return [] }
    def n = data.len
@@ -38,14 +41,14 @@ fn decode(any: data, str: sep=","): list {
                builder_free(cell_b)
                cell_b = Builder(64)
             }
-            10 -> { ; '\n'
+            10 -> {
                row = row.append(builder_to_str(cell_b))
                rows = rows.append(row)
                row = []
                builder_free(cell_b)
                cell_b = Builder(64)
             }
-            13 -> { ; '\r'
+            13 -> {
                if(i + 1 < n && load8(data, i + 1) == 10){ i += 1 }
                row = row.append(builder_to_str(cell_b))
                rows = rows.append(row)
@@ -67,7 +70,7 @@ fn decode(any: data, str: sep=","): list {
    rows
 }
 
-fn encode(list: rows, str: sep=","): str {
+fn encode(list rows, str sep=",") str {
    "Encodes a list of lists into a CSV string."
    mut out = Builder(256)
    mut i = 0
@@ -78,7 +81,6 @@ fn encode(list: rows, str: sep=","): str {
       def c_len = row.len
       while(j < c_len){
          mut cell = to_str(row.get(j))
-         ; Escape if needed
          def needs_quote = str.str_contains(cell, sep) || str.str_contains(cell, "\"") ||
          str.str_contains(cell, "\n") || str.str_contains(cell, "\r")
          if(needs_quote){
@@ -106,4 +108,16 @@ fn encode(list: rows, str: sep=","): str {
    def s = builder_to_str(out)
    builder_free(out)
    s
+}
+
+#main {
+   def raw = "name,team,score\nAda,compiler,98\nKen,stdlib,91\n"
+   def rows = decode(raw)
+   assert_eq(rows.get(0).get(0), "name", "csv header")
+   assert_eq(rows.get(1).get(0), "Ada", "csv first row")
+   assert_eq(rows.get(2).get(2), "91", "csv field")
+   def out = encode([["a", "b,c"], ["quote", "x\"y"]])
+   assert(str.str_contains(out, "\"b,c\""), "csv quotes separator")
+   assert(str.str_contains(out, "\"x\"\"y\""), "csv escapes quote")
+   print("✓ std.parse.data.csv self-test passed")
 }

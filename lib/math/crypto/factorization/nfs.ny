@@ -1,23 +1,26 @@
-;; Keywords: factorization nfs
+;; Keywords: factorization nfs math crypto number-theory
 ;; Integer-factorization routines for number-field-sieve data preparation and support.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/General_number_field_sieve
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.nfs(nfs_polynomial_report, snfs_shape_report, nfs_factor_base_report, nfs_trial_relation_report, nfs_line_relation_report, nfs_lattice_sieve_report, nfs_relation_filter_report, nfs_dependency_report, nfs_algebraic_product_report, nfs_qadic_prime_for_sqrt_report, nfs_qadic_initial_inverse_sqrt_report, nfs_qadic_newton_sqrt_report, nfs_qadic_sqrt_report, nfs_square_root_report, nfs_factor_report, nfs_factor)
 use std.core
 use std.math.nt
 use std.math.crypto.factorization.classical as classical
 use std.os.clock (ticks)
 
-fn _nfs_elapsed_ms(any: t0): number { float(ticks() - t0) / 1000000.0 }
+fn _nfs_elapsed_ms(any t0) number { float(ticks() - t0) / 1000000.0 }
 
-fn _nfs_z(any: x): bigint { is_bigint(x) ? x : Z(x) }
+fn _nfs_z(any x) bigint { is_bigint(x) ? x : Z(x) }
 
-fn _nfs_abs(any: x): bigint {
+fn _nfs_abs(any x) bigint {
    def z = _nfs_z(x)
    z < Z(0) ? -z : z
 }
 
-fn _nfs_pow(any: a, int: e): bigint {
+fn _nfs_pow(any a, int e) bigint {
    mut out = Z(1)
    mut i = 0
    while(i < e){
@@ -27,7 +30,7 @@ fn _nfs_pow(any: a, int: e): bigint {
    out
 }
 
-fn _nfs_pow_mod(any: a, int: e, any: m): bigint {
+fn _nfs_pow_mod(any a, int e, any m) bigint {
    def mz = _nfs_z(m)
    if(mz == Z(1)){ return Z(0) }
    mut out = Z(1)
@@ -41,14 +44,14 @@ fn _nfs_pow_mod(any: a, int: e, any: m): bigint {
    out
 }
 
-fn _nfs_degree_for_bits(int: bits): int {
+fn _nfs_degree_for_bits(int bits) int {
    if(bits < 80){ return 3 }
    if(bits < 160){ return 4 }
    if(bits < 320){ return 5 }
    6
 }
 
-fn _nfs_coeffs_base_m(any: n, any: m, int: degree): list {
+fn _nfs_coeffs_base_m(any n, any m, int degree) list {
    mut rem = _nfs_z(n)
    def mz = _nfs_z(m)
    mut coeffs = []
@@ -61,7 +64,7 @@ fn _nfs_coeffs_base_m(any: n, any: m, int: degree): list {
    coeffs
 }
 
-fn _nfs_poly_eval(list: coeffs, any: x): bigint {
+fn _nfs_poly_eval(list coeffs, any x) bigint {
    mut acc = Z(0)
    def xz = _nfs_z(x)
    mut i = coeffs.len - 1
@@ -72,7 +75,7 @@ fn _nfs_poly_eval(list: coeffs, any: x): bigint {
    acc
 }
 
-fn _nfs_poly_homogeneous_eval(list: coeffs, any: a, any: b): bigint {
+fn _nfs_poly_homogeneous_eval(list coeffs, any a, any b) bigint {
    def az = _nfs_z(a)
    def bz = _nfs_z(b)
    def degree = coeffs.len - 1
@@ -88,7 +91,7 @@ fn _nfs_poly_homogeneous_eval(list: coeffs, any: a, any: b): bigint {
    acc
 }
 
-fn _nfs_prime_base(int: bound): list {
+fn _nfs_prime_base(int bound) list {
    mut out = []
    mut p = Z(2)
    while(p <= Z(bound)){
@@ -98,7 +101,7 @@ fn _nfs_prime_base(int: bound): list {
    out
 }
 
-fn _nfs_zero_counts(int: width): list {
+fn _nfs_zero_counts(int width) list {
    mut out = []
    mut i = 0
    while(i < width){
@@ -108,7 +111,7 @@ fn _nfs_zero_counts(int: width): list {
    out
 }
 
-fn _nfs_factor_over_base(any: v, list: base): dict {
+fn _nfs_factor_over_base(any v, list base) dict {
    mut rem = _nfs_abs(v)
    mut exps = []
    mut i = 0
@@ -125,7 +128,7 @@ fn _nfs_factor_over_base(any: v, list: base): dict {
    {"smooth": rem == Z(1), "exponents": exps, "remaining": rem}
 }
 
-fn _nfs_parity_row(any: value, list: exps): list {
+fn _nfs_parity_row(any value, list exps) list {
    mut row = [(_nfs_z(value) < Z(0)) ? 1 : 0]
    mut i = 0
    while(i < exps.len){
@@ -135,7 +138,7 @@ fn _nfs_parity_row(any: value, list: exps): list {
    row
 }
 
-fn _nfs_relation_parity(any: rat_value, list: rat_exps, any: alg_value, list: alg_exps): list {
+fn _nfs_relation_parity(any rat_value, list rat_exps, any alg_value, list alg_exps) list {
    def r = _nfs_parity_row(rat_value, rat_exps)
    def a = _nfs_parity_row(alg_value, alg_exps)
    mut out = []
@@ -152,7 +155,7 @@ fn _nfs_relation_parity(any: rat_value, list: rat_exps, any: alg_value, list: al
    out
 }
 
-fn nfs_factor_base_report(int: rational_bound=64, int: algebraic_bound=64): dict {
+fn nfs_factor_base_report(int rational_bound=64, int algebraic_bound=64) dict {
    "Return rational and algebraic factor bases used by the small NFS relation pipeline."
    def t0 = ticks()
    def rb = _nfs_prime_base(rational_bound)
@@ -166,7 +169,7 @@ fn nfs_factor_base_report(int: rational_bound=64, int: algebraic_bound=64): dict
    }
 }
 
-fn nfs_polynomial_report(any: n, int: degree=0): dict {
+fn nfs_polynomial_report(any n, int degree=0) dict {
    "Choose a base-m polynomial f such that f(m)=n and report its shape."
    def t0 = ticks()
    def nz = _nfs_z(n)
@@ -187,7 +190,7 @@ fn nfs_polynomial_report(any: n, int: degree=0): dict {
    }
 }
 
-fn snfs_shape_report(any: n, int: max_degree=8, int: max_base=100000): dict {
+fn snfs_shape_report(any n, int max_degree=8, int max_base=100000) dict {
    "Search for a small special-form description n ~= a^k +/- c."
    def t0 = ticks()
    def nz = _nfs_z(n)
@@ -223,7 +226,7 @@ fn snfs_shape_report(any: n, int: max_degree=8, int: max_base=100000): dict {
    }
 }
 
-fn _nfs_line_relation(any: a, any: b, any: m, list: coeffs, list: rbase, list: abase): any {
+fn _nfs_line_relation(any a, any b, any m, list coeffs, list rbase, list abase) any {
    def az = _nfs_z(a)
    def bz = _nfs_z(b)
    def rat = az - bz * _nfs_z(m)
@@ -243,7 +246,7 @@ fn _nfs_line_relation(any: a, any: b, any: m, list: coeffs, list: rbase, list: a
    }
 }
 
-fn nfs_trial_relation_report(any: n, int: factor_base_bound=64, int: sieve_radius=32, int: degree=0): dict {
+fn nfs_trial_relation_report(any n, int factor_base_bound=64, int sieve_radius=32, int degree=0) dict {
    "Collect trial algebraic-side smooth values for the selected NFS polynomial."
    def t0 = ticks()
    def poly = nfs_polynomial_report(n, degree)
@@ -268,7 +271,7 @@ fn nfs_trial_relation_report(any: n, int: factor_base_bound=64, int: sieve_radiu
    }
 }
 
-fn nfs_line_relation_report(any: n, int: rational_bound=64, int: algebraic_bound=64, int: sieve_radius=32, int: degree=0, int: b_bound=1): dict {
+fn nfs_line_relation_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) dict {
    "Collect small NFS line-sieve relations with rational and algebraic smoothness."
    def t0 = ticks()
    def poly = nfs_polynomial_report(n, degree)
@@ -300,7 +303,7 @@ fn nfs_line_relation_report(any: n, int: rational_bound=64, int: algebraic_bound
    }
 }
 
-fn nfs_lattice_sieve_report(any: n, int: rational_bound=64, int: algebraic_bound=64, int: a_radius=128, int: b_start=1, int: b_count=16, int: degree=0, int: target_relations=0, int: segment_size=4): dict {
+fn nfs_lattice_sieve_report(any n, int rational_bound=64, int algebraic_bound=64, int a_radius=128, int b_start=1, int b_count=16, int degree=0, int target_relations=0, int segment_size=4) dict {
    "Collect segmented NFS lattice-sieve relations with reusable polynomial and factor bases."
    def t0 = ticks()
    def poly = nfs_polynomial_report(n, degree)
@@ -393,7 +396,7 @@ fn nfs_lattice_sieve_report(any: n, int: rational_bound=64, int: algebraic_bound
    }
 }
 
-fn _nfs_singleton_prune(list: unique, int: w, bool: prune_singletons): dict {
+fn _nfs_singleton_prune(list unique, int w, bool prune_singletons) dict {
    mut kept = unique
    mut singleton_rounds = 0
    mut singleton_dropped = 0
@@ -438,7 +441,7 @@ fn _nfs_singleton_prune(list: unique, int: w, bool: prune_singletons): dict {
    {"relations": kept, "rounds": singleton_rounds, "dropped": singleton_dropped}
 }
 
-fn nfs_relation_filter_report(list: relations, int: width=0, bool: prune_singletons=true): dict {
+fn nfs_relation_filter_report(list relations, int width=0, bool prune_singletons=true) dict {
    "Filter NFS relations with duplicate(a,b) removal and singleton-column pruning."
    def t0 = ticks()
    mut w = width
@@ -486,7 +489,7 @@ fn nfs_relation_filter_report(list: relations, int: width=0, bool: prune_singlet
    }
 }
 
-fn _nfs_dependency_matrix(list: relations, int: width): list {
+fn _nfs_dependency_matrix(list relations, int width) list {
    mut rows = []
    mut j = 0
    while(j < width){
@@ -502,7 +505,7 @@ fn _nfs_dependency_matrix(list: relations, int: width): list {
    rows
 }
 
-fn _nfs_zero_vec(int: width): list {
+fn _nfs_zero_vec(int width) list {
    mut out = []
    mut i = 0
    while(i < width){
@@ -512,7 +515,7 @@ fn _nfs_zero_vec(int: width): list {
    out
 }
 
-fn _nfs_xor_vec(list: a, list: b): list {
+fn _nfs_xor_vec(list a, list b) list {
    mut out = []
    mut i = 0
    def n = max(a.len, b.len)
@@ -523,7 +526,7 @@ fn _nfs_xor_vec(list: a, list: b): list {
    out
 }
 
-fn _nfs_dependency_candidates(list: basis, int: width, int: max_count=4096): list {
+fn _nfs_dependency_candidates(list basis, int width, int max_count=4096) list {
    if(basis.len == 0){ return [] }
    if(basis.len > 14){ return basis }
    mut out = []
@@ -542,7 +545,7 @@ fn _nfs_dependency_candidates(list: basis, int: width, int: max_count=4096): lis
    out
 }
 
-fn _nfs_selected_relations(list: relations, list: dependency): list {
+fn _nfs_selected_relations(list relations, list dependency) list {
    mut out = []
    mut i = 0
    while(i < dependency.len && i < relations.len){
@@ -552,7 +555,7 @@ fn _nfs_selected_relations(list: relations, list: dependency): list {
    out
 }
 
-fn _nfs_sum_exponents(list: relations, str: key, int: width): list {
+fn _nfs_sum_exponents(list relations, str key, int width) list {
    mut out = _nfs_zero_counts(width)
    mut i = 0
    while(i < relations.len){
@@ -567,7 +570,7 @@ fn _nfs_sum_exponents(list: relations, str: key, int: width): list {
    out
 }
 
-fn _nfs_negative_count(list: relations, str: key): int {
+fn _nfs_negative_count(list relations, str key) int {
    mut out = 0
    mut i = 0
    while(i < relations.len){
@@ -577,7 +580,7 @@ fn _nfs_negative_count(list: relations, str: key): int {
    out
 }
 
-fn _nfs_exponents_even(list: exps): bool {
+fn _nfs_exponents_even(list exps) bool {
    mut i = 0
    while(i < exps.len){
       if((int(exps.get(i, 0)) % 2) != 0){ return false }
@@ -586,7 +589,7 @@ fn _nfs_exponents_even(list: exps): bool {
    true
 }
 
-fn _nfs_sqrt_from_exponents_mod(list: base, list: exps, any: modulus): bigint {
+fn _nfs_sqrt_from_exponents_mod(list base, list exps, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut out = Z(1)
    mut i = 0
@@ -598,7 +601,7 @@ fn _nfs_sqrt_from_exponents_mod(list: base, list: exps, any: modulus): bigint {
    out
 }
 
-fn _nfs_zero_poly(int: n): list {
+fn _nfs_zero_poly(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -608,7 +611,7 @@ fn _nfs_zero_poly(int: n): list {
    out
 }
 
-fn _nfs_poly_mul_mod_monic(list: p, list: q, list: mod_coeffs): list {
+fn _nfs_poly_mul_mod_monic(list p, list q, list mod_coeffs) list {
    def d = mod_coeffs.len - 1
    if(d <= 0){ return [Z(0)] }
    mut prod = _nfs_zero_poly(p.len + q.len - 1)
@@ -642,7 +645,7 @@ fn _nfs_poly_mul_mod_monic(list: p, list: q, list: mod_coeffs): list {
    out
 }
 
-fn _nfs_poly_eval_mod(list: coeffs, any: x, any: modulus): bigint {
+fn _nfs_poly_eval_mod(list coeffs, any x, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut acc = Z(0)
    mut i = coeffs.len - 1
@@ -653,14 +656,14 @@ fn _nfs_poly_eval_mod(list: coeffs, any: x, any: modulus): bigint {
    acc
 }
 
-fn _nfs_coeff_mod(any: x, any: modulus): bigint {
+fn _nfs_coeff_mod(any x, any modulus) bigint {
    def mz = _nfs_z(modulus)
    mut r = _nfs_z(x) % mz
    if(r < Z(0)){ r += mz }
    r
 }
 
-fn _nfs_poly_coeff_mod(list: coeffs, any: modulus): list {
+fn _nfs_poly_coeff_mod(list coeffs, any modulus) list {
    mut out = []
    mut i = 0
    while(i < coeffs.len){
@@ -670,11 +673,11 @@ fn _nfs_poly_coeff_mod(list: coeffs, any: modulus): list {
    out
 }
 
-fn _nfs_poly_mul_mod_monic_q(list: p, list: q, list: mod_coeffs, any: modulus): list {
+fn _nfs_poly_mul_mod_monic_q(list p, list q, list mod_coeffs, any modulus) list {
    _nfs_poly_coeff_mod(_nfs_poly_mul_mod_monic(p, q, mod_coeffs), modulus)
 }
 
-fn _nfs_poly_centered_mod(list: coeffs, any: modulus): list {
+fn _nfs_poly_centered_mod(list coeffs, any modulus) list {
    def mz = _nfs_z(modulus)
    def half = mz / Z(2)
    mut out = []
@@ -688,7 +691,7 @@ fn _nfs_poly_centered_mod(list: coeffs, any: modulus): list {
    out
 }
 
-fn _nfs_poly_total_bits(list: coeffs): int {
+fn _nfs_poly_total_bits(list coeffs) int {
    mut total = 0
    mut i = 0
    while(i < coeffs.len){
@@ -698,7 +701,7 @@ fn _nfs_poly_total_bits(list: coeffs): int {
    total
 }
 
-fn _nfs_poly_one(int: degree): list {
+fn _nfs_poly_one(int degree) list {
    mut out = []
    mut i = 0
    while(i < degree){
@@ -708,7 +711,7 @@ fn _nfs_poly_one(int: degree): list {
    out
 }
 
-fn _nfs_poly_candidate_from_index(int: index, int: degree, int: q): list {
+fn _nfs_poly_candidate_from_index(int index, int degree, int q) list {
    mut out = []
    mut x = index
    mut i = 0
@@ -720,7 +723,7 @@ fn _nfs_poly_candidate_from_index(int: index, int: degree, int: q): list {
    out
 }
 
-fn nfs_qadic_initial_inverse_sqrt_report(list: product_poly, list: monic_poly, any: q, int: max_candidates=100000): dict {
+fn nfs_qadic_initial_inverse_sqrt_report(list product_poly, list monic_poly, any q, int max_candidates=100000) dict {
    "Find an initial reciprocal square root modulo q for the GNFS q-adic lift."
    def t0 = ticks()
    def qz = _nfs_z(q)
@@ -748,7 +751,7 @@ fn nfs_qadic_initial_inverse_sqrt_report(list: product_poly, list: monic_poly, a
    }
 }
 
-fn _nfs_poly_has_root_mod_q(list: poly, any: q): bool {
+fn _nfs_poly_has_root_mod_q(list poly, any q) bool {
    def qi = int(_nfs_z(q))
    mut x = 0
    while(x < qi){
@@ -758,7 +761,7 @@ fn _nfs_poly_has_root_mod_q(list: poly, any: q): bool {
    false
 }
 
-fn nfs_qadic_prime_for_sqrt_report(list: monic_poly, int: min_q=3, int: max_tries=64): dict {
+fn nfs_qadic_prime_for_sqrt_report(list monic_poly, int min_q=3, int max_tries=64) dict {
    "Select a small prime q whose reduction is root-free for the GNFS q-adic square-root lift."
    def t0 = ticks()
    def degree = monic_poly.len - 1
@@ -784,7 +787,7 @@ fn nfs_qadic_prime_for_sqrt_report(list: monic_poly, int: min_q=3, int: max_trie
    }
 }
 
-fn nfs_qadic_newton_sqrt_report(list: product_poly, list: monic_poly, list: inverse_sqrt_mod_q, any: q, int: iterations=4): dict {
+fn nfs_qadic_newton_sqrt_report(list product_poly, list monic_poly, list inverse_sqrt_mod_q, any q, int iterations=4) dict {
    "Lift a reciprocal square root with the q-adic Newton step used by GNFS sqrt_a."
    def t0 = ticks()
    def q0 = _nfs_z(q)
@@ -833,7 +836,7 @@ fn nfs_qadic_newton_sqrt_report(list: product_poly, list: monic_poly, list: inve
    }
 }
 
-fn nfs_qadic_sqrt_report(list: product_poly, list: monic_poly, int: min_q=3, int: iterations=4, int: max_initial_candidates=100000): dict {
+fn nfs_qadic_sqrt_report(list product_poly, list monic_poly, int min_q=3, int iterations=4, int max_initial_candidates=100000) dict {
    "Select q, find the initial reciprocal square root, and run the q-adic GNFS sqrt lift."
    def t0 = ticks()
    def prime = nfs_qadic_prime_for_sqrt_report(monic_poly, min_q)
@@ -860,7 +863,7 @@ fn nfs_qadic_sqrt_report(list: product_poly, list: monic_poly, int: min_q=3, int
    })
 }
 
-fn nfs_algebraic_product_report(any: n, list: relations, any: polynomial=nil, list: dependency=[], bool: include_qadic=true): dict {
+fn nfs_algebraic_product_report(any n, list relations, any polynomial=nil, list dependency=[], bool include_qadic=true) dict {
    "Multiply selected relation polynomials modulo the monic algebraic polynomial."
    def t0 = ticks()
    def nz = _nfs_z(n)
@@ -895,7 +898,7 @@ fn nfs_algebraic_product_report(any: n, list: relations, any: polynomial=nil, li
    }
 }
 
-fn _nfs_try_square_root_candidate(any: n, list: relations, list: dependency, list: rbase, list: abase): dict {
+fn _nfs_try_square_root_candidate(any n, list relations, list dependency, list rbase, list abase) dict {
    def nz = _nfs_z(n)
    def selected = _nfs_selected_relations(relations, dependency)
    def rexps = _nfs_sum_exponents(selected, "rational_exponents", rbase.len)
@@ -923,7 +926,7 @@ fn _nfs_try_square_root_candidate(any: n, list: relations, list: dependency, lis
    })
 }
 
-fn nfs_dependency_report(any: n, int: rational_bound=64, int: algebraic_bound=64, int: sieve_radius=32, int: degree=0, int: b_bound=1): dict {
+fn nfs_dependency_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) dict {
    "Collect, filter, and run GF(2) dependency analysis on small NFS relations."
    def t0 = ticks()
    def rels = b_bound > 1 ? nfs_lattice_sieve_report(n, rational_bound, algebraic_bound, sieve_radius, 1, b_bound, degree, 0, min(8, max(1, b_bound))) : nfs_line_relation_report(n, rational_bound, algebraic_bound, sieve_radius, degree, b_bound)
@@ -948,7 +951,7 @@ fn nfs_dependency_report(any: n, int: rational_bound=64, int: algebraic_bound=64
    }
 }
 
-fn nfs_square_root_report(any: n, int: rational_bound=64, int: algebraic_bound=64, int: sieve_radius=32, int: degree=0, int: max_dependencies=4096, int: b_bound=1): dict {
+fn nfs_square_root_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int max_dependencies=4096, int b_bound=1) dict {
    "Try square-root/GCD extraction from verified NFS dependencies."
    def t0 = ticks()
    def nz = _nfs_z(n)
@@ -1007,13 +1010,13 @@ fn nfs_square_root_report(any: n, int: rational_bound=64, int: algebraic_bound=6
    }
 }
 
-fn nfs_factor_report(any: n, int: rational_bound=64, int: algebraic_bound=64, int: sieve_radius=32, int: degree=0, int: b_bound=1): dict {
+fn nfs_factor_report(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) dict {
    "Run the small NFS relation, dependency, square-root, and GCD pipeline."
    def r = nfs_square_root_report(n, rational_bound, algebraic_bound, sieve_radius, degree, 4096, b_bound)
    r.set("method", "nfs-factor-report")
 }
 
-fn nfs_factor(any: n, int: rational_bound=64, int: algebraic_bound=64, int: sieve_radius=32, int: degree=0, int: b_bound=1): any {
+fn nfs_factor(any n, int rational_bound=64, int algebraic_bound=64, int sieve_radius=32, int degree=0, int b_bound=1) any {
    "Return one factor from nfs_factor_report, or nil."
    nfs_factor_report(n, rational_bound, algebraic_bound, sieve_radius, degree, b_bound).get("factor", nil)
 }

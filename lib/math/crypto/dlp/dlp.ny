@@ -1,16 +1,19 @@
-;; Keywords: dlp discrete-log group-theory
+;; Keywords: dlp discrete-log group-theory math crypto
 ;; Discrete-log routines for generic discrete-log solvers and Pohlig-Hellman composition.
 ;; baby_step_giant_step: O(sqrt(order)) time and space.
 ;; pohlig_hellman: reduces DLP to subgroup DLPs, efficient when order is smooth.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
+;; References:
+;; - std.math.crypto.dlp
+;; - std.math.crypto
 module std.math.crypto.dlp.dlp(multiplicative_order_from_factors, multiplicative_order_factorization, baby_step_giant_step, pohlig_hellman, pohlig_hellman_bounded, ph_prime_power, ph_recombine, pohlig_hellman_prime_power, pohlig_hellman_recombine, pollard_rho_dlp, dlp_brute_force, solve_dlp)
 use std.core
 use std.core.dict_mod
 use std.math.nt
 
-fn baby_step_giant_step(any: g, any: h, any: p, any: order=nil): any {
+fn baby_step_giant_step(any g, any h, any p, any order=nil) any {
    "Solve the discrete log g^x = h(mod p) using baby-step giant-step.
    order: group order(defaults to p-1 for Fp*).
    Returns x if found, nil otherwise.
@@ -41,7 +44,7 @@ fn baby_step_giant_step(any: g, any: h, any: p, any: order=nil): any {
    -1
 }
 
-fn pohlig_hellman(any: g, any: h, any: p, list: order_factors): any {
+fn pohlig_hellman(any g, any h, any p, list order_factors) any {
    "Solve g^x = h(mod p) via Pohlig-Hellman decomposition.
    order_factors: list of [prime, exponent] pairs whose product equals the group order.
    Decomposes the DLP into DLPs in prime-power order subgroups, then recombines via CRT.
@@ -68,7 +71,7 @@ fn pohlig_hellman(any: g, any: h, any: p, list: order_factors): any {
    (x == nil) ? -1 : x
 }
 
-fn pohlig_hellman_bounded(any: g, any: h, any: p, list: order_factors, any: exponent_bound): any {
+fn pohlig_hellman_bounded(any g, any h, any p, list order_factors, any exponent_bound) any {
    "Solve g^x = h(mod p) via enough Pohlig-Hellman factors to identify x < exponent_bound.
    Useful when the discrete log encodes a bounded plaintext or nonce ; selected residues are recombined
    with CRT, and callers can verify the full group equation afterward."
@@ -98,29 +101,29 @@ fn pohlig_hellman_bounded(any: g, any: h, any: p, list: order_factors, any: expo
    (x == nil) ? -1 : x
 }
 
-fn pohlig_hellman_prime_power(any: g, any: h, any: p, any: q, any: e): any {
+fn pohlig_hellman_prime_power(any g, any h, any p, any q, any e) any {
    "Solve g^x = h(mod p) in a subgroup of order q^e.
    Returns x in [0, q^e) or -1."
    _ph_solve_prime_power(g, h, p, q, e)
 }
 
-fn pohlig_hellman_recombine(list: remainders, list: moduli): any {
+fn pohlig_hellman_recombine(list remainders, list moduli) any {
    "CRT recombination helper for Pohlig-Hellman residues."
    def x = crt(remainders, moduli)
    (x == nil) ? -1 : x
 }
 
-fn ph_prime_power(any: g, any: h, any: p, any: q, any: e): any {
+fn ph_prime_power(any g, any h, any p, any q, any e) any {
    "Short export wrapper for prime-power Pohlig-Hellman."
    pohlig_hellman_prime_power(g, h, p, q, e)
 }
 
-fn ph_recombine(list: remainders, list: moduli): any {
+fn ph_recombine(list remainders, list moduli) any {
    "Short export wrapper for CRT recombination."
    pohlig_hellman_recombine(remainders, moduli)
 }
 
-fn _ph_order_from_factors(list: factors): any {
+fn _ph_order_from_factors(list factors) any {
    mut ord = Z(1)
    mut i = 0
    while(i < factors.len){
@@ -131,7 +134,7 @@ fn _ph_order_from_factors(list: factors): any {
    ord
 }
 
-fn multiplicative_order_from_factors(any: g, any: p, list: group_order_factors): any {
+fn multiplicative_order_from_factors(any g, any p, list group_order_factors) any {
    "Compute the multiplicative order of g modulo p from a factorization of the ambient group order."
    def pp = Z(p)
    def gg = Z(g) % pp
@@ -147,7 +150,7 @@ fn multiplicative_order_from_factors(any: g, any: p, list: group_order_factors):
    order
 }
 
-fn multiplicative_order_factorization(any: g, any: p, list: group_order_factors): list {
+fn multiplicative_order_factorization(any g, any p, list group_order_factors) list {
    "Return the factorization of ord_p(g) from a factorization of p-1."
    def order = multiplicative_order_from_factors(g, p, group_order_factors)
    mut out = []
@@ -166,7 +169,7 @@ fn multiplicative_order_factorization(any: g, any: p, list: group_order_factors)
    out
 }
 
-fn _ph_pow(any: base, any: exp): any {
+fn _ph_pow(any base, any exp) any {
    mut result = Z(1)
    mut b = Z(base)
    mut e = Z(exp)
@@ -178,7 +181,7 @@ fn _ph_pow(any: base, any: exp): any {
    result
 }
 
-fn _ph_solve_prime_power(any: g, any: h, any: p, any: q, any: e): any {
+fn _ph_solve_prime_power(any g, any h, any p, any q, any e) any {
    "Solve g^x = h(mod p) where g has order q^e.
    Uses iterative lifting: recover x mod q, then x mod q^2, etc.
    Returns x in [0, q^e) or nil."
@@ -200,7 +203,7 @@ fn _ph_solve_prime_power(any: g, any: h, any: p, any: q, any: e): any {
    mod(x, q_e)
 }
 
-fn _ph_brute_q(any: g, any: h, any: p, any: q): any {
+fn _ph_brute_q(any g, any h, any p, any q) any {
    def gg, pp, qq = Z(g), Z(p), Z(q)
    def hh = mod(h, pp)
    mut curr = Z(1)
@@ -213,14 +216,14 @@ fn _ph_brute_q(any: g, any: h, any: p, any: q): any {
    -1
 }
 
-fn _ph_solve_digit(any: g, any: h, any: p, any: q): any {
+fn _ph_solve_digit(any g, any h, any p, any q) any {
    "Solve a Pohlig-Hellman digit in a subgroup of prime order q."
    if(Z(q) <= Z(4096)){ return _ph_brute_q(g, h, p, q) }
    def x = baby_step_giant_step(g, h, p, q)
    x == nil ? -1 : x
 }
 
-fn _rho_state_next(any: xi, any: ai, any: bi, any: g, any: h, any: p, any: n): list {
+fn _rho_state_next(any xi, any ai, any bi, any g, any h, any p, any n) list {
    def cls = mod(xi, Z(3))
    if(cls == Z(2)){ [mod(xi * h, p), ai, mod(bi + Z(1), n)] } elif(cls == Z(0)){
       [power_mod(xi, Z(2), p), mod(ai * Z(2), n), mod(bi * Z(2), n)]
@@ -229,7 +232,7 @@ fn _rho_state_next(any: xi, any: ai, any: bi, any: g, any: h, any: p, any: n): l
    }
 }
 
-fn pollard_rho_dlp(any: g, any: h, any: p, any: n): any {
+fn pollard_rho_dlp(any g, any h, any p, any n) any {
    "Pollard-rho discrete log in a prime-order subgroup.
    Solves g^x = h(mod p). Returns x or nil."
    if(n == nil){ return -1 }
@@ -261,7 +264,7 @@ fn pollard_rho_dlp(any: g, any: h, any: p, any: n): any {
    -1
 }
 
-fn dlp_brute_force(any: g, any: h, any: p, any: order=nil): any {
+fn dlp_brute_force(any g, any h, any p, any order=nil) any {
    "Brute-force solve g^x = h(mod p). Iterates x from 0 to order.
    Returns x if found, nil otherwise."
    if(order == nil){ order = Z(p) - Z(1) } else { order = Z(order) }
@@ -277,7 +280,7 @@ fn dlp_brute_force(any: g, any: h, any: p, any: order=nil): any {
    -1
 }
 
-fn solve_dlp(any: g, any: h, any: p, any: order=nil): list {
+fn solve_dlp(any g, any h, any p, any order=nil) list {
    "Solve the discrete log g^x = h(mod p) by trying BSGS, Pollard-rho, then brute force.
    Returns [x, method] if found, nil otherwise."
    def x = baby_step_giant_step(g, h, p, order)

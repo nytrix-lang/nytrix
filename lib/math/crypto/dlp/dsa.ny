@@ -1,12 +1,15 @@
-;; Keywords: dlp discrete-log group-theory dsa
+;; Keywords: dlp discrete-log group-theory dsa math crypto
 ;; Discrete-log routines for DSA nonce and signature analysis.
 ;; Reference:
 ;; - FIPS 186-4, Digital Signature Algorithm
+;; References:
+;; - std.math.crypto.dlp
+;; - std.math.crypto
 module std.math.crypto.dlp.dsa(dsa_sign_hash, dsa_verify_hash, dsa_recover_key_from_nonce, dsa_recover_nonce_reuse, dsa_recover_nonce_lcg_two_sigs, dsa_nonce_polynomial_value, dsa_verify_nonce_polynomial, dsa_recover_key_from_nonce_polynomial, dsa_recover_key_from_quadratic_nonces, dsa_verify_hash_or_bounds_zero_inverse_bug, dsa_zero_inverse_bypass_signature)
 use std.math.nt
 use std.math.matrix as matrix
 
-fn dsa_sign_hash(any: h, any: x, any: k, any: p, any: q, any: g): any {
+fn dsa_sign_hash(any h, any x, any k, any p, any q, any g) any {
    "Sign integer hash h with DSA private key x and nonce k. Returns [r, s] or nil."
    def r = power_mod(g, k, p) % q
    if(r == 0){ return nil }
@@ -17,7 +20,7 @@ fn dsa_sign_hash(any: h, any: x, any: k, any: p, any: q, any: g): any {
    [r, s]
 }
 
-fn dsa_verify_hash(any: h, list: sig, any: y, any: p, any: q, any: g): bool {
+fn dsa_verify_hash(any h, list sig, any y, any p, any q, any g) bool {
    "Verify DSA signature [r, s] for integer hash h."
    def r, s = sig[0], sig[1]
    if(r <= 0 || r >= q || s <= 0 || s >= q){ return false }
@@ -28,7 +31,7 @@ fn dsa_verify_hash(any: h, list: sig, any: y, any: p, any: q, any: g): bool {
    v == r
 }
 
-fn dsa_verify_hash_or_bounds_zero_inverse_bug(any: h, list: sig, any: y, any: p, any: q, any: g): bool {
+fn dsa_verify_hash_or_bounds_zero_inverse_bug(any h, list sig, any y, any p, any q, any g) bool {
    "Model the common broken DSA verifier that checks `(r in range) or(s in range)`
    and treats a missing inverse as Python False/0. This accepts [1, 0]."
    def r, s = Z(sig[0]), Z(sig[1])
@@ -40,19 +43,19 @@ fn dsa_verify_hash_or_bounds_zero_inverse_bug(any: h, list: sig, any: y, any: p,
    v == r
 }
 
-fn dsa_zero_inverse_bypass_signature(): list {
+fn dsa_zero_inverse_bypass_signature() list {
    "Return the malformed [r, s] signature accepted by the zero-inverse DSA verifier bug."
    [Z(1), Z(0)]
 }
 
-fn dsa_recover_key_from_nonce(any: h, any: r, any: s, any: k, any: q): any {
+fn dsa_recover_key_from_nonce(any h, any r, any s, any k, any q) any {
    "Recover DSA private key x from one signature and known nonce k."
    def rinv = inverse_mod(r, q)
    if(rinv == nil || rinv == 0){ return nil }
    mod((Z(s) * Z(k) - Z(h)) * rinv, q)
 }
 
-fn dsa_recover_nonce_reuse(any: h1, any: r1, any: s1, any: h2, any: r2, any: s2, any: q): any {
+fn dsa_recover_nonce_reuse(any h1, any r1, any s1, any h2, any r2, any s2, any q) any {
    "Recover [k, x] from two DSA signatures that reused the same nonce."
    if(r1 != r2){ return nil }
    def den = mod(Z(s1) - Z(s2), q)
@@ -64,7 +67,7 @@ fn dsa_recover_nonce_reuse(any: h1, any: r1, any: s1, any: h2, any: r2, any: s2,
    [k, x]
 }
 
-fn dsa_recover_nonce_lcg_two_sigs(any: h1, any: r1, any: s1, any: h2, any: r2, any: s2, any: a, any: c, any: q): any {
+fn dsa_recover_nonce_lcg_two_sigs(any h1, any r1, any s1, any h2, any r2, any s2, any a, any c, any q) any {
    "Recover [k1, k2, x] when two DSA nonces are consecutive outputs of
    k2 = a*k1 + c(mod q)."
    def A, B = mod(Z(a) * Z(s2) * Z(r1) - Z(s1) * Z(r2), q), mod(Z(h2) * Z(r1) - Z(h1) * Z(r2) - Z(s2) * Z(c) * Z(r1), q)
@@ -77,7 +80,7 @@ fn dsa_recover_nonce_lcg_two_sigs(any: h1, any: r1, any: s1, any: h2, any: r2, a
    [k1, k2, x]
 }
 
-fn dsa_nonce_polynomial_value(list: coeffs, any: i, any: q): any {
+fn dsa_nonce_polynomial_value(list coeffs, any i, any q) any {
    "Evaluate a nonce polynomial at index i modulo q.
    coeffs are low-to-high: [a0, a1, a2, ...]."
    mut acc = Z(0)
@@ -92,7 +95,7 @@ fn dsa_nonce_polynomial_value(list: coeffs, any: i, any: q): any {
    acc
 }
 
-fn dsa_verify_nonce_polynomial(list: records, any: x, list: coeffs, any: q): bool {
+fn dsa_verify_nonce_polynomial(list records, any x, list coeffs, any q) bool {
    "Verify records [i, h, r, s] against DSA's s*k = h + x*r equation
    where k is a polynomial in i."
    mut n = 0
@@ -109,7 +112,7 @@ fn dsa_verify_nonce_polynomial(list: records, any: x, list: coeffs, any: q): boo
    true
 }
 
-fn dsa_recover_key_from_nonce_polynomial(list: records, int: degree, any: q): any {
+fn dsa_recover_key_from_nonce_polynomial(list records, int degree, any q) any {
    "Recover [x, coeffs] when DSA nonces follow a degree-d polynomial in
    the record index. records are [i, h, r, s].
    From s_i*k(i) = h_i + x*r_i and k(i)=a0+a1*i+...+ad*i^d:
@@ -145,7 +148,7 @@ fn dsa_recover_key_from_nonce_polynomial(list: records, int: degree, any: q): an
    [mod(sol[0], q), coeffs]
 }
 
-fn dsa_recover_key_from_quadratic_nonces(list: records, any: q): any {
+fn dsa_recover_key_from_quadratic_nonces(list records, any q) any {
    "Recover [x, [a0, a1, a2]] when DSA nonces are quadratic in record index."
    dsa_recover_key_from_nonce_polynomial(records, 2, q)
 }

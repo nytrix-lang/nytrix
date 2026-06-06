@@ -1,5 +1,7 @@
-;; Keywords: data serialization zlib deflate compression csv delimited xml json yaml yml toml sql
+;; Keywords: data serialization zlib deflate compression csv delimited xml json yaml yml toml sql parse
 ;; Data-format facade for JSON, YAML, TOML, CSV, XML, SQL inspection, and zlib compression.
+;; References:
+;; - std.parse
 module std.parse.data(json, yaml, toml, zlib, csv, xml, sql)
 use std.parse.data.json as json
 use std.parse.data.yaml as yaml

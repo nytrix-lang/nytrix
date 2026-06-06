@@ -1,17 +1,22 @@
-;; Keywords: encoding base
+;; Keywords: encoding base math crypto
 ;; Encoding routines for base/radix encoding and decoding.
 ;; Reference:
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.base(encode64, decode64, encode64_url, decode64_url, encode32, decode32, encode32_hex, decode32_hex, encode16, decode16)
 use std.core
 use std.core.str as str
 
-fn _base_builder_take(list: b): str {
+def _BASE16_ALPHABET = "0123456789ABCDEF"
+
+fn _base_builder_take(list b) str {
    def out = str.builder_to_str(b)
    str.builder_free(b)
    out
 }
 
-fn _b64_unmap(int: c, bool: url=false): int {
+fn _b64_unmap(int c, bool url=false) int {
    if(url){
       return case c {
          65..90 -> c - 65
@@ -32,7 +37,7 @@ fn _b64_unmap(int: c, bool: url=false): int {
    }
 }
 
-fn _base_hex_unmap(int: c): int {
+fn _base_hex_unmap(int c) int {
    case c {
       48..57 -> c - 48
       65..70 -> c - 55
@@ -41,7 +46,7 @@ fn _base_hex_unmap(int: c): int {
    }
 }
 
-fn _encode64_internal(str: data, str: alphabet, bool: padding=true): str {
+fn _encode64_internal(str data, str alphabet, bool padding=true) str {
    if(!is_str(data)){ return "" }
    def n = data.len
    mut out = str.Builder(max(16, ((n + 2) / 3) * 4 + 8))
@@ -59,7 +64,7 @@ fn _encode64_internal(str: data, str: alphabet, bool: padding=true): str {
    _base_builder_take(out)
 }
 
-fn _decode64_internal(str: s, bool: url=false): str {
+fn _decode64_internal(str s, bool url=false) str {
    if(!is_str(s)){ return "" }
    def n = s.len
    mut out = malloc(n)
@@ -70,9 +75,8 @@ fn _decode64_internal(str: s, bool: url=false): str {
       if(v1 == 0){ break }
       def c1 = _b64_unmap(v1, url)
       if(c1 == -1){
-         if(v1 == 61){ break } ; RFC 4648 padding char '='
+         if(v1 == 61){ break }
          i += 1
-         ; Skip other characters
          while(i < n && _b64_unmap(load8(s, i), url) == -1){ i += 1 }
          continue
       }
@@ -107,27 +111,27 @@ fn _decode64_internal(str: s, bool: url=false): str {
    out
 }
 
-fn encode64(str: data): str {
+fn encode64(str data) str {
    "Encodes a byte string into Base64(RFC 4648 Section 4)."
    _encode64_internal(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
 }
 
-fn decode64(str: s): str {
+fn decode64(str s) str {
    "Decodes a Base64 string into bytes(RFC 4648 Section 4)."
    _decode64_internal(s, false)
 }
 
-fn encode64_url(str: data): str {
+fn encode64_url(str data) str {
    "Encodes a byte string into Base64 URL and Filename Safe(RFC 4648 Section 5)."
    _encode64_internal(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 }
 
-fn decode64_url(str: s): str {
+fn decode64_url(str s) str {
    "Decodes a Base64 URL and Filename Safe string into bytes(RFC 4648 Section 5)."
    _decode64_internal(s, true)
 }
 
-fn _b32_unmap(int: c, bool: hex=false): int {
+fn _b32_unmap(int c, bool hex=false) int {
    if(hex){
       return case c {
          48..57 -> c - 48
@@ -144,7 +148,7 @@ fn _b32_unmap(int: c, bool: hex=false): int {
    }
 }
 
-fn _encode32_internal(str: data, str: alphabet, bool: padding=true): str {
+fn _encode32_internal(str data, str alphabet, bool padding=true) str {
    if(!is_str(data)){ return "" }
    def n = data.len
    mut out = str.Builder(max(16, ((n + 4) / 5) * 8 + 8))
@@ -184,7 +188,7 @@ fn _encode32_internal(str: data, str: alphabet, bool: padding=true): str {
    _base_builder_take(out)
 }
 
-fn _decode32_internal(str: s, bool: hex=false): str {
+fn _decode32_internal(str s, bool hex=false) str {
    if(!is_str(s)){ return "" }
    def n = s.len
    mut out = malloc(n)
@@ -214,43 +218,42 @@ fn _decode32_internal(str: s, bool: hex=false): str {
    out
 }
 
-fn encode32(str: data): str {
+fn encode32(str data) str {
    "Encodes a byte string into Base32(RFC 4648 Section 6)."
    _encode32_internal(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
 }
 
-fn decode32(str: s): str {
+fn decode32(str s) str {
    "Decodes a Base32 string into bytes(RFC 4648 Section 6)."
    _decode32_internal(s, false)
 }
 
-fn encode32_hex(str: data): str {
+fn encode32_hex(str data) str {
    "Encodes a byte string into Base32 with Hex Alphabet(RFC 4648 Section 7)."
    _encode32_internal(data, "0123456789ABCDEFGHIJKLMNOPQRSTUV")
 }
 
-fn decode32_hex(str: s): str {
+fn decode32_hex(str s) str {
    "Decodes a Base32 Hex string into bytes(RFC 4648 Section 7)."
    _decode32_internal(s, true)
 }
 
-fn encode16(str: data): str {
+fn encode16(str data) str {
    "Encodes a byte string into Base16(Hex) (RFC 4648 Section 8)."
    if(!is_str(data)){ return "" }
    def n = data.len
    mut out = str.Builder(max(16, n * 2 + 8))
-   def alphabet = "0123456789ABCDEF"
    mut i = 0
    while(i < n){
       def b = load8(data, i) & 255
-      out = str.builder_append(out, chr(load8(alphabet, b >> 4)))
-      out = str.builder_append(out, chr(load8(alphabet, b & 15)))
+      out = str.builder_append(out, chr(load8(_BASE16_ALPHABET, b >> 4)))
+      out = str.builder_append(out, chr(load8(_BASE16_ALPHABET, b & 15)))
       i += 1
    }
    _base_builder_take(out)
 }
 
-fn decode16(str: s): str {
+fn decode16(str s) str {
    "Decodes a Base16(Hex) string into bytes(RFC 4648 Section 8)."
    if(!is_str(s)){ return "" }
    def n = s.len

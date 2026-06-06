@@ -1,13 +1,16 @@
-;; Keywords: image gif
+;; Keywords: image gif parse
 ;; Graphics Interchange Format (GIF) Image Loader for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/GIF
-module std.parse.img.gif(decode, encode)
+;; References:
+;; - std.parse.img
+;; - std.parse
+module std.parse.img.gif(decode, decode_frames, encode)
 use std.core
 use std.core.dict_mod
 use std.math.bin as pbin
 
-fn _g_sb(any: data, int: p): dict {
+fn _g_sb(any data, int p) dict {
    def n = data.len
    mut q = p
    mut total = 0
@@ -30,12 +33,12 @@ fn _g_sb(any: data, int: p): dict {
       q2 += sz
    }
    mut res = dict(2)
-   res.set("blob", out)
-   res.set("next", q2)
+   res = res.set("blob", out)
+   res = res.set("next", q2)
    return res
 }
 
-fn _g_lzw_dec(any: comp, int: mcs, int: olen): any {
+fn _g_lzw_dec(any comp, int mcs, int olen) any {
    if(!is_str(comp) || olen <= 0){ return 0 }
    def clr = 1 << mcs
    def end_code = clr + 1
@@ -47,9 +50,13 @@ fn _g_lzw_dec(any: comp, int: mcs, int: olen): any {
    mut nextcode = end_code + 1
    mut oldcode = -1
    mut op = 0
+   mut guard = 0
+   def guard_limit = comp.len * 16 + olen * 32 + 8192
    def out = init_str(malloc(olen + 1), olen)
    memset(out, 0, olen)
    while(op < olen){
+      guard += 1
+      if(guard > guard_limit){ break }
       mut code = 0
       mut k = 0
       while(k < csz){
@@ -109,7 +116,7 @@ fn _g_lzw_dec(any: comp, int: mcs, int: olen): any {
    return out
 }
 
-fn _g_di(any: src, int: w, int: h): str {
+fn _g_di(any src, int w, int h) str {
    def out = init_str(malloc(w * h + 1), w * h)
    memset(out, 0, w * h)
    mut p = 0
@@ -134,8 +141,58 @@ fn _g_di(any: src, int: w, int: h): str {
    return out
 }
 
-fn decode(any: data): any {
-   "Decodes a GIF image into the standard image dictionary shape."
+fn _g_new_canvas(int bytes) str {
+   def canv = init_str(malloc(bytes + 1), bytes)
+   memset(canv, 0, bytes)
+   canv
+}
+
+fn _g_copy_canvas(any canv, int bytes) str {
+   def out = init_str(malloc(bytes + 1), bytes)
+   memcpy(out, canv, bytes)
+   out
+}
+
+fn _g_clear_rect(any canv, int w, int h, int fx, int fy, int fw, int fh) any {
+   mut y = 0
+   while(y < fh){
+      mut x = 0
+      while(x < fw){
+         if((fy + y) >= 0 && (fy + y) < h && (fx + x) >= 0 && (fx + x) < w){
+            def off_pix = ((fy + y) * w + (fx + x)) * 4
+            store32(canv, 0, off_pix)
+         }
+         x += 1
+      }
+      y += 1
+   }
+   canv
+}
+
+fn _g_draw_indexed_frame(any data, any canv, int w, int h, int fx, int fy, int fw, int fh, int cp_addr, int trans_idx, any idx_data) bool {
+   mut y_loop = 0
+   while(y_loop < fh){
+      mut x_loop = 0
+      while(x_loop < fw){
+         if((fy + y_loop) < h && (fx + x_loop) < w){
+            def pi = load8(idx_data, (y_loop * fw + x_loop))
+            if(pi != trans_idx && cp_addr != -1){
+               def off_pix = ((fy + y_loop) * w + (fx + x_loop)) * 4
+               store8(canv, load8(data, cp_addr + pi * 3), off_pix)
+               store8(canv, load8(data, cp_addr + pi * 3 + 1), off_pix + 1)
+               store8(canv, load8(data, cp_addr + pi * 3 + 2), off_pix + 2)
+               store8(canv, 255, off_pix + 3)
+            }
+         }
+         x_loop += 1
+      }
+      y_loop += 1
+   }
+   true
+}
+
+fn decode_frames(any data) any {
+   "Decodes a GIF into composed RGBA frames. Returns a dict with `frames`, `width`, `height`, and `channels`."
    if(!is_str(data)){ return 0 }
    def data_n = data.len
    if(data_n < 13){ return 0 }
@@ -148,10 +205,16 @@ fn decode(any: data): any {
       gaddr = p
       p += (1 << ((flags & 7) + 1)) * 3
    }
-   def canv = init_str(malloc(w * h * 4 + 1), (w * h * 4))
-   memset(canv, 0, (w * h * 4))
+   def canvas_bytes = w * h * 4
+   mut canv = _g_new_canvas(canvas_bytes)
+   mut frames = []
    mut trans_idx = -1
+   mut disposal = 0
+   mut delay_cs = 0
+   mut guard = 0
    while(p < (data_n - 1)){
+      guard += 1
+      if(guard > data_n * 4){ break }
       def bt = load8(data, p)
       p += 1
       if(bt == 0x3B){ break }
@@ -162,6 +225,8 @@ fn decode(any: data): any {
             def sz = load8(data, p)
             if(sz == 4){
                def gce_f = load8(data, p + 1)
+               disposal = (gce_f >> 2) & 7
+               delay_cs = pbin.u16le(data, p + 2)
                if(gce_f & 1){ trans_idx = load8(data, p + 4) } else { trans_idx = -1 }
             }
             p += sz + 1
@@ -178,9 +243,11 @@ fn decode(any: data): any {
          continue
       }
       if(bt != 0x2C){ continue }
+      if(p + 8 >= data_n){ break }
       def fx, fy = pbin.u16le(data, p), pbin.u16le(data, p + 2)
       def fw, fh = pbin.u16le(data, p + 4), pbin.u16le(data, p + 6)
       def ffl = load8(data, p + 8)
+      if(fw <= 0 || fh <= 0 || fx < 0 || fy < 0 || fx + fw > w || fy + fh > h){ continue }
       p += 9
       mut cp_addr = gaddr
       if(ffl & 128){
@@ -196,38 +263,40 @@ fn decode(any: data): any {
       mut idx_data = _g_lzw_dec(blocks_res.get("blob"), mcs, (fw * fh))
       if(is_int(idx_data)){ return 0 }
       if(ffl & 64){ idx_data = _g_di(idx_data, fw, fh) }
-      mut y_loop = 0
-      while(y_loop < fh){
-         mut x_loop = 0
-         while(x_loop < fw){
-            if((fy + y_loop) < h && (fx + x_loop) < w){
-               def pi = load8(idx_data, (y_loop * fw + x_loop))
-               if(pi != trans_idx){
-                  def off_pix = ((fy + y_loop) * w + (fx + x_loop)) * 4
-                  if(cp_addr != -1){
-                     store8(canv, load8(data, cp_addr + pi * 3), off_pix)
-                     store8(canv, load8(data, cp_addr + pi * 3 + 1), off_pix + 1)
-                     store8(canv, load8(data, cp_addr + pi * 3 + 2), off_pix + 2)
-                     store8(canv, 255, off_pix + 3)
-                  }
-               }
-            }
-            x_loop += 1
-         }
-         y_loop += 1
+      def restore_prev = disposal == 3 ? _g_copy_canvas(canv, canvas_bytes) : 0
+      _g_draw_indexed_frame(data, canv, w, h, fx, fy, fw, fh, cp_addr, trans_idx, idx_data)
+      frames = frames.append({"data": _g_copy_canvas(canv, canvas_bytes), "delay": delay_cs, "x": fx, "y": fy, "w": fw, "h": fh})
+      if(disposal == 2){
+         _g_clear_rect(canv, w, h, fx, fy, fw, fh)
+      } elif(disposal == 3 && restore_prev){
+         canv = restore_prev
       }
       trans_idx = -1
-      break
+      disposal = 0
+      delay_cs = 0
    }
+   if(frames.len == 0){ return 0 }
+   {"frames": frames, "width": w, "height": h, "channels": 4}
+}
+
+fn decode(any data) any {
+   "Decodes a GIF image into the standard image dictionary shape."
+   def anim = decode_frames(data)
+   if(!is_dict(anim)){ return 0 }
+   def frames = anim.get("frames", [])
+   if(!is_list(frames) || frames.len == 0){ return 0 }
+   def first = frames.get(0, {})
+   if(!is_dict(first)){ return 0 }
    mut out_dict = dict(8)
-   out_dict.set("data", canv)
-   out_dict.set("width", w)
-   out_dict.set("height", h)
-   out_dict.set("channels", 4)
+   out_dict = out_dict.set("data", first.get("data", ""))
+   out_dict = out_dict.set("width", anim.get("width", 0))
+   out_dict = out_dict.set("height", anim.get("height", 0))
+   out_dict = out_dict.set("channels", 4)
+   out_dict = out_dict.set("frame_count", frames.len)
    return out_dict
 }
 
-fn _gif_palette_info(any: d, int: w, int: h, int: ch): list {
+fn _gif_palette_info(any d, int w, int h, int ch) list {
    mut col_map = dict(256)
    mut pal_list = list(768)
    mut trans_idx_enc = -1
@@ -263,7 +332,7 @@ fn _gif_palette_info(any: d, int: w, int: h, int: ch): list {
          def rgb = (r << 16) | (g << 8) | b
          if(!col_map.contains(rgb)){
             if(n_cols < 256){
-               col_map.set(rgb, n_cols)
+               col_map = col_map.set(rgb, n_cols)
                pal_list = pal_list.append(r)
                pal_list = pal_list.append(g)
                pal_list = pal_list.append(b)
@@ -281,7 +350,7 @@ fn _gif_palette_info(any: d, int: w, int: h, int: ch): list {
    [col_map, pal_list, trans_idx_enc, n_cols, has_trans_enc, use_fix]
 }
 
-fn _gif_index_buffer(any: d, int: w, int: h, int: ch, any: col_map, int: trans_idx_enc, bool: has_trans_enc, bool: use_fix): any {
+fn _gif_index_buffer(any d, int w, int h, int ch, any col_map, int trans_idx_enc, bool has_trans_enc, bool use_fix) any {
    def idx_buf = init_str(malloc(w * h + 1), w * h)
    mut iC2 = 0
    while(iC2 < (w * h)){
@@ -312,7 +381,7 @@ fn _gif_index_buffer(any: d, int: w, int: h, int: ch, any: col_map, int: trans_i
    idx_buf
 }
 
-fn _gif_lzw_emit_code(list: state, int: code, int: csz): list {
+fn _gif_lzw_emit_code(list state, int code, int csz) list {
    mut out_l = state.get(0)
    mut acc_bits = int(state.get(1, 0))
    mut bits_count = int(state.get(2, 0))
@@ -333,7 +402,7 @@ fn _gif_lzw_emit_code(list: state, int: code, int: csz): list {
    state
 }
 
-fn _gif_lzw_encode(any: idx_buf, int: pixel_count): list {
+fn _gif_lzw_encode(any idx_buf, int pixel_count) list {
    def clr_code = 256
    def end_code_lzw = 257
    mut out_l = list(pixel_count * 2)
@@ -355,7 +424,7 @@ fn _gif_lzw_encode(any: idx_buf, int: pixel_count): list {
       if(dict_lzw.contains(key)){ ent = dict_lzw.get(key) } else {
          state = _gif_lzw_emit_code(state, ent, csz_enc)
          if(next_code < 4096){
-            dict_lzw.set(key, next_code)
+            dict_lzw = dict_lzw.set(key, next_code)
             next_code += 1
             if(next_code == (1 << csz_enc) + 1 && csz_enc < 12){ csz_enc += 1 }
          } else {
@@ -377,7 +446,7 @@ fn _gif_lzw_encode(any: idx_buf, int: pixel_count): list {
    out_l
 }
 
-fn _gif_emit_file(list: out_l, int: w, int: h, list: pal_list, int: n_cols, bool: has_trans_enc, int: trans_idx_enc, bool: use_fix): any {
+fn _gif_emit_file(list out_l, int w, int h, list pal_list, int n_cols, bool has_trans_enc, int trans_idx_enc, bool use_fix) any {
    mut res_l = list(out_l.len + 1024)
    res_l = res_l.append(71)
    res_l = res_l.append(73)
@@ -461,7 +530,7 @@ fn _gif_emit_file(list: out_l, int: w, int: h, list: pal_list, int: n_cols, bool
    return pbin.from_list(res_l)
 }
 
-fn encode(any: img): any {
+fn encode(any img) any {
    "Encodes an indexed or RGBA image dictionary as a GIF byte string."
    def w, h = img.get("width"), img.get("height")
    def d = img.get("data")

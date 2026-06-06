@@ -1,9 +1,12 @@
-;; Keywords: block-cipher stream stream-core
+;; Keywords: block-cipher stream stream-core math crypto
 ;; CTR and many-time-pad stream-cipher analysis routines.
+;; References:
+;; - std.math.crypto.block.stream
+;; - std.math.crypto
 module std.math.crypto.block.stream.core(ctr_xor_plaintexts, ctr_recover_keystream, ctr_bit_flip_byte, ctr_bit_flipping, ctr_score_english_byte, ctr_recover_periodic_keystream_english, ctr_apply_periodic_keystream, mtp_xor_all, mtp_guess_key_byte, mtp_crib_drag)
 use std.core
 
-fn _xor_overlap(list: a, list: b): list {
+fn _xor_overlap(list a, list b) list {
    def n = a.len < b.len ? a.len : b.len
    mut out = list(n)
    store64(out, n, 0)
@@ -15,7 +18,7 @@ fn _xor_overlap(list: a, list: b): list {
    out
 }
 
-fn _ascii_base_score(int: b): int {
+fn _ascii_base_score(int b) int {
    case int(b){
       9, 10, 13 -> 1
       32..126 -> 10
@@ -23,7 +26,7 @@ fn _ascii_base_score(int: b): int {
    }
 }
 
-fn _printable_score(int: b): int {
+fn _printable_score(int b) int {
    mut score = _ascii_base_score(b)
    score += b == 32 ? 9 : 0
    score += (b >= 65 && b <= 90) ? 4 : 0
@@ -35,17 +38,17 @@ fn _printable_score(int: b): int {
    score
 }
 
-fn ctr_xor_plaintexts(list: ct1, list: ct2): list {
+fn ctr_xor_plaintexts(list ct1, list ct2) list {
    "XOR two CTR ciphertexts encrypted with the same keystream, yielding p1 XOR p2 over the overlap."
    _xor_overlap(ct1, ct2)
 }
 
-fn ctr_recover_keystream(list: ciphertext, list: known_plaintext): list {
+fn ctr_recover_keystream(list ciphertext, list known_plaintext) list {
    "Recover keystream bytes from ciphertext and matching known plaintext bytes."
    _xor_overlap(ciphertext, known_plaintext)
 }
 
-fn ctr_bit_flip_byte(list: ciphertext, int: pos, int: old_byte, int: new_byte): list {
+fn ctr_bit_flip_byte(list ciphertext, int pos, int old_byte, int new_byte) list {
    "Flip one plaintext byte under CTR by editing ciphertext at the same position."
    if(pos < 0 || pos >= ciphertext.len){ return clone(ciphertext) }
    mut out = clone(ciphertext)
@@ -53,7 +56,7 @@ fn ctr_bit_flip_byte(list: ciphertext, int: pos, int: old_byte, int: new_byte): 
    out
 }
 
-fn ctr_bit_flipping(list: ciphertext, list: edits): list {
+fn ctr_bit_flipping(list ciphertext, list edits) list {
    "Apply [pos, old_byte, new_byte] CTR bit-flip edits."
    mut out = clone(ciphertext)
    mut i = 0
@@ -68,12 +71,12 @@ fn ctr_bit_flipping(list: ciphertext, list: edits): list {
    out
 }
 
-fn ctr_score_english_byte(int: b): int {
+fn ctr_score_english_byte(int b) int {
    "Score one candidate plaintext byte for simple ASCII/English keystream recovery."
    _printable_score(b)
 }
 
-fn ctr_recover_periodic_keystream_english(list: ciphertexts, int: period=16): list {
+fn ctr_recover_periodic_keystream_english(list ciphertexts, int period=16) list {
    "Recover a repeated keystream period by independently scoring each byte position."
    if(period <= 0){ return [] }
    mut keystream = list(period)
@@ -107,7 +110,7 @@ fn ctr_recover_periodic_keystream_english(list: ciphertexts, int: period=16): li
    keystream
 }
 
-fn ctr_apply_periodic_keystream(list: ciphertext, list: keystream): list {
+fn ctr_apply_periodic_keystream(list ciphertext, list keystream) list {
    "XOR ciphertext with a repeating keystream byte list."
    if(keystream.len == 0){ return [] }
    def n = ciphertext.len
@@ -122,7 +125,7 @@ fn ctr_apply_periodic_keystream(list: ciphertext, list: keystream): list {
    out
 }
 
-fn mtp_xor_all(list: ciphertexts): dict {
+fn mtp_xor_all(list ciphertexts) dict {
    "XOR all ciphertext pairs from a reused one-time-pad/multi-time-pad set."
    def n = ciphertexts.len
    mut result = dict((n * (n - 1)) / 2)
@@ -138,7 +141,7 @@ fn mtp_xor_all(list: ciphertexts): dict {
    result
 }
 
-fn mtp_guess_key_byte(list: ciphertexts, int: position, int: guess): dict {
+fn mtp_guess_key_byte(list ciphertexts, int position, int guess) dict {
    "Score a key-byte guess at one position across many ciphertexts."
    mut score = 0
    def n = ciphertexts.len
@@ -164,7 +167,7 @@ fn mtp_guess_key_byte(list: ciphertexts, int: position, int: guess): dict {
    {"score": score, "plaintexts": plaintexts, "valid": valid}
 }
 
-fn mtp_crib_drag(list: ciphertexts, list: crib): list {
+fn mtp_crib_drag(list ciphertexts, list crib) list {
    "Drag a known byte-list crib across all ciphertext pairs and return likely keystream fragments."
    if(ciphertexts.len < 2 || crib.len == 0){ return [] }
    mut matches = []

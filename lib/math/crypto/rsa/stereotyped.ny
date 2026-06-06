@@ -1,8 +1,11 @@
-;; Keywords: rsa stereotyped
+;; Keywords: rsa stereotyped math crypto
 ;; RSA stereotyped-message attacks routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.stereotyped(stereotyped_solve, stereotyped_message_attack)
 use std.math.nt
 use std.math.crypto.poly (poly_set_at)
@@ -12,7 +15,7 @@ use std.math.crypto.lattice.coppersmith
 
 def _STEREOTYPED_DIRECT_BITS = 20
 
-fn _sm_build_linear(any: pi): any {
+fn _sm_build_linear(any pi) any {
    "Build known + x*2^off for a PartialInteger with exactly one unknown chunk.
    Returns [poly_coeffs, bound] or nil."
    def bounds = partial_integer_unknown_bounds(pi)
@@ -27,7 +30,7 @@ fn _sm_build_linear(any: pi): any {
    [[known, bigint_lshift(Z(1), off)], bigint_lshift(Z(1), bits)]
 }
 
-fn _stereotyped_direct_scan(any: n, int: e, any: c, any: known_msg, int: unknown_bits): any {
+fn _stereotyped_direct_scan(any n, int e, any c, any known_msg, int unknown_bits) any {
    if(unknown_bits < 0 || unknown_bits > _STEREOTYPED_DIRECT_BITS){ return nil }
    def nn = Z(n)
    def cc = mod(Z(c), nn)
@@ -53,13 +56,13 @@ fn _stereotyped_direct_scan(any: n, int: e, any: c, any: known_msg, int: unknown
    nil
 }
 
-fn stereotyped_solve(number: n, int: e, number: c, number: known_msg, int: unknown_bits): any {
+fn stereotyped_solve(number n, int e, number c, number known_msg, int unknown_bits) any {
    "Coppersmith's stereotyped message attack: recover m = known_msg + x
    where x < 2^unknown_bits and(known_msg + x)^e = c(mod n).
    Uses polynomial root-finding via LLL.  Returns m or nil."
    def direct = _stereotyped_direct_scan(n, e, c, known_msg, unknown_bits)
    if(direct != nil){ return direct }
-   def p_init = [known_msg, 1] ;; 1*x + known_msg
+   def p_init = [known_msg, 1]
    mut list: f = poly_pow(p_init, e)
    def c_val = f.get(0)
    poly_set_at(f, 0, (c_val - c) % n)
@@ -72,7 +75,7 @@ fn stereotyped_solve(number: n, int: e, number: c, number: known_msg, int: unkno
    nil
 }
 
-fn stereotyped_message_attack(number: n, int: e, number: c, any: partial_m, int: m=1, int: t=0): any {
+fn stereotyped_message_attack(number n, int e, number c, any partial_m, int m=1, int t=0) any {
    "Recover plaintext from c when the plaintext has one bounded unknown chunk.
    partial_m must be a PartialInteger with exactly one unknown segment."
    def lin = _sm_build_linear(partial_m)
@@ -94,7 +97,7 @@ fn stereotyped_message_attack(number: n, int: e, number: c, any: partial_m, int:
    nil
 }
 
-if(comptime{ return __main() }){
+#main {
    def p = Z(1000003)
    def q = Z(1000033)
    def n = p * q
@@ -102,5 +105,5 @@ if(comptime{ return __main() }){
    def msg = known + Z(7)
    def c = power_mod(msg, Z(3), n)
    assert(stereotyped_solve(n, 3, c, known, 4) == msg, "stereotyped small window direct recovery")
-   print("RSA_STEREOTYPED_OK")
+   print("✓ std.math.crypto.rsa.stereotyped self-test passed")
 }

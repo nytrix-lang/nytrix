@@ -1,12 +1,15 @@
-;; Keywords: symmetric sbox
+;; Keywords: symmetric sbox math crypto
 ;; Symmetric-crypto routines for S-box construction, metrics, algebraic forms, and tables.
+;; References:
+;; - std.math.crypto.symmetric
+;; - std.math.crypto
 module std.math.crypto.symmetric.sbox(sbox_repr, sbox_len, sbox_equal, sbox_not_equal, sbox_get, sbox_items, sbox_input_size, sbox_output_size, sbox_to_bits, sbox_from_bits, sbox_coeff_vector, sbox_from_coeff_vector, sbox_apply_gf2m, sbox_apply, sbox_solutions, sbox_is_permutation, sbox_inverse, sbox_fixed_points, sbox_ddt, sbox_difference_distribution_table, sbox_differential_uniformity, sbox_lat, sbox_linear_approximation_table, sbox_linearity, sbox_maximal_linear_bias_absolute, sbox_maximal_linear_bias_relative, sbox_maximal_difference_probability_absolute, sbox_maximal_difference_probability, sbox_nonlinearity, sbox_derivative, sbox_component_function, sbox_autocorrelation_table, sbox_component_anf, sbox_polynomials, sbox_interpolation_polynomial, sbox_interpolation_polynomial_gf2m, sbox_interpolation_polynomial_gf2m_str, sbox_eval_polynomial_gf2m, sbox_from_polynomial_gf2m, sbox_from_interpolation_polynomial_gf2m, sbox_is_monomial_function, sbox_monomial_str, sbox_component_anf_str, sbox_polynomial_strs, sbox_degree_fit_polynomial_strs, sbox_degree_fit_basis_report, sbox_direct_polynomial_strs, sbox_groebner_polynomial_strs, sbox_groebner_basis_report, sbox_ring_str, sbox_ring, sbox_eval_anf, sbox_cnf, sbox_cnf_clauses, sbox_cnf_satisfied, sbox_boomerang_connectivity_table, sbox_boomerang_uniformity, sbox_linear_structures, sbox_has_linear_structure, sbox_is_linear_structure, sbox_is_apn, sbox_is_balanced, sbox_is_almost_bent, sbox_is_bent, sbox_is_plateaued, sbox_is_involution, sbox_feistel_construction, sbox_misty_construction, sbox_branch_number, sbox_differential_branch_number, sbox_linear_branch_number, sbox_algebraic_degree, sbox_max_degree, sbox_min_degree)
 use std.math.bin as bin
 use std.math.matrix as matrix
 
-fn _sbox_pow2(int: n): bool { n > 0 && (n & (n - 1)) == 0 }
+fn _sbox_pow2(int n) bool { n > 0 && (n & (n - 1)) == 0 }
 
-fn _sbox_bits_for_cardinality(int: n): int {
+fn _sbox_bits_for_cardinality(int n) int {
    mut bits = 0
    mut p = 1
    while(p < n){
@@ -16,9 +19,9 @@ fn _sbox_bits_for_cardinality(int: n): int {
    bits
 }
 
-fn _sbox_check(list: S): any { if(S.len == 0 || !_sbox_pow2(S.len)){ panic("sbox: lookup table length must be a power of 2") } }
+fn _sbox_check(list S) any { if(S.len == 0 || !_sbox_pow2(S.len)){ panic("sbox: lookup table length must be a power of 2") } }
 
-fn _sbox_output_cardinality(list: S): int {
+fn _sbox_output_cardinality(list S) int {
    mut max_v = 0
    mut i = 0
    while(i < S.len){
@@ -30,7 +33,7 @@ fn _sbox_output_cardinality(list: S): int {
    1 << _sbox_bits_for_cardinality(max_v + 1)
 }
 
-fn _sbox_zero_row(int: n): list {
+fn _sbox_zero_row(int n) list {
    mut row = list(n)
    __list_set_len(row, n)
    mut i = 0
@@ -41,16 +44,16 @@ fn _sbox_zero_row(int: n): list {
    row
 }
 
-fn _sbox_parity(int: x): int { bin.bit_count(x) & 1 }
+fn _sbox_parity(int x) int { bin.bit_count(x) & 1 }
 
-fn _sbox_abs_int(int: x): int { x < 0 ? 0 - x : x }
+fn _sbox_abs_int(int x) int { x < 0 ? 0 - x : x }
 
-fn _sbox_default_width(list: S, any: n, bool: output): int {
+fn _sbox_default_width(list S, any n, bool output) int {
    if(n != nil){ return int(n) }
    output ? sbox_output_size(S) : sbox_input_size(S)
 }
 
-fn sbox_repr(list: S): str {
+fn sbox_repr(list S) str {
    "Return Sage SBox repr formatting, e.g. (7, 6, 0, ...)."
    _sbox_check(S)
    mut out = "("
@@ -63,12 +66,12 @@ fn sbox_repr(list: S): str {
    out + ")"
 }
 
-fn sbox_len(list: S): int {
+fn sbox_len(list S) int {
    "Return Sage-compatible len(SBox(...)): the input bit width."
    sbox_input_size(S)
 }
 
-fn sbox_equal(list: a, list: b, bool: a_big_endian=true, bool: b_big_endian=true): bool {
+fn sbox_equal(list a, list b, bool a_big_endian=true, bool b_big_endian=true) bool {
    "Return Sage-compatible SBox equality over lookup table and endian flag."
    if(a_big_endian != b_big_endian){ return false }
    if(a.len != b.len){ return false }
@@ -80,36 +83,36 @@ fn sbox_equal(list: a, list: b, bool: a_big_endian=true, bool: b_big_endian=true
    true
 }
 
-fn sbox_not_equal(list: a, list: b, bool: a_big_endian=true, bool: b_big_endian=true): bool {
+fn sbox_not_equal(list a, list b, bool a_big_endian=true, bool b_big_endian=true) bool {
    "Return Sage-compatible SBox inequality over lookup table and endian flag."
    !sbox_equal(a, b, a_big_endian, b_big_endian)
 }
 
-fn sbox_get(list: S, any: i): any {
+fn sbox_get(list S, any i) any {
    "Sage-compatible item access for SBox tables."
    _sbox_check(S)
    S.get(i)
 }
 
-fn sbox_items(list: S): list {
+fn sbox_items(list S) list {
    "Return lookup values in Sage SBox iteration order."
    _sbox_check(S)
    clone(S)
 }
 
-fn sbox_input_size(list: S): int {
+fn sbox_input_size(list S) int {
    "Return the input bit width of a power-of-two S-box table."
    _sbox_check(S)
    _sbox_bits_for_cardinality(S.len)
 }
 
-fn sbox_output_size(list: S): int {
+fn sbox_output_size(list S) int {
    "Return the minimum output bit width covering all table values."
    _sbox_check(S)
    _sbox_bits_for_cardinality(_sbox_output_cardinality(S))
 }
 
-fn sbox_to_bits(list: S, int: x, any: n=nil, bool: big_endian=true): list {
+fn sbox_to_bits(list S, int x, any n=nil, bool big_endian=true) list {
    "Return a fixed-width bit list for x using Sage-compatible endian order."
    def width = _sbox_default_width(S, n, true)
    mut out = []
@@ -130,7 +133,7 @@ fn sbox_to_bits(list: S, int: x, any: n=nil, bool: big_endian=true): list {
    out
 }
 
-fn sbox_from_bits(list: S, list: bits, any: n=nil, bool: big_endian=true): int {
+fn sbox_from_bits(list S, list bits, any n=nil, bool big_endian=true) int {
    "Return the integer represented by a bit list using Sage-compatible endian order."
    def width = _sbox_default_width(S, n, false)
    if(bits.len > width){ panic("sbox_from_bits: bit list is wider than requested width") }
@@ -158,7 +161,7 @@ fn sbox_from_bits(list: S, list: bits, any: n=nil, bool: big_endian=true): int {
    out
 }
 
-fn sbox_coeff_vector(int: x, int: width): list {
+fn sbox_coeff_vector(int x, int width) list {
    "Return the GF(2^m) coefficient vector used by Sage finite-field SBox calls."
    if(width < 0){ panic("sbox_coeff_vector: width must be non-negative") }
    if(x < 0){ panic("sbox_coeff_vector: value must be non-negative") }
@@ -171,7 +174,7 @@ fn sbox_coeff_vector(int: x, int: width): list {
    out
 }
 
-fn sbox_from_coeff_vector(list: coeffs): int {
+fn sbox_from_coeff_vector(list coeffs) int {
    "Return an integer from a GF(2^m) coefficient vector in Sage order."
    mut out = 0
    mut i = 0
@@ -182,7 +185,7 @@ fn sbox_from_coeff_vector(list: coeffs): int {
    out
 }
 
-fn sbox_apply_gf2m(list: S, int: x, bool: big_endian=true): int {
+fn sbox_apply_gf2m(list S, int x, bool big_endian=true) int {
    "Apply S using Sage finite-field element semantics over GF(2^m) coefficient vectors."
    def m = sbox_input_size(S)
    if(sbox_output_size(S) > m){ panic("sbox_apply_gf2m: output does not fit the input extension degree") }
@@ -190,7 +193,7 @@ fn sbox_apply_gf2m(list: S, int: x, bool: big_endian=true): int {
    sbox_from_coeff_vector(sbox_apply(S, sbox_coeff_vector(x, m), big_endian))
 }
 
-fn sbox_apply(list: S, any: x, bool: big_endian=true): any {
+fn sbox_apply(list S, any x, bool big_endian=true) any {
    "Apply an S-box to an integer or to an input-width bit list."
    _sbox_check(S)
    if(is_list(x)){
@@ -205,7 +208,7 @@ fn sbox_apply(list: S, any: x, bool: big_endian=true): any {
    S.get(idx)
 }
 
-fn sbox_solutions(list: S, bool: big_endian=true): list {
+fn sbox_solutions(list S, bool big_endian=true) list {
    "Return Sage-style input/output bit assignments as [input_bits, output_bits]."
    _sbox_check(S)
    mut out = []
@@ -219,7 +222,7 @@ fn sbox_solutions(list: S, bool: big_endian=true): list {
    out
 }
 
-fn sbox_is_permutation(list: S): bool {
+fn sbox_is_permutation(list S) bool {
    "Return true when the S-box is a permutation of 0..len(S)-1."
    _sbox_check(S)
    mut seen = _sbox_zero_row(S.len)
@@ -233,7 +236,7 @@ fn sbox_is_permutation(list: S): bool {
    true
 }
 
-fn sbox_inverse(list: S): list {
+fn sbox_inverse(list S) list {
    "Return the inverse lookup table for a permutation S-box."
    if(!sbox_is_permutation(S)){ panic("sbox_inverse: table is not a permutation") }
    mut inv = _sbox_zero_row(S.len)
@@ -245,7 +248,7 @@ fn sbox_inverse(list: S): list {
    inv
 }
 
-fn sbox_fixed_points(list: S): list {
+fn sbox_fixed_points(list S) list {
    "Return all inputs x where S[x] == x."
    _sbox_check(S)
    mut out = []
@@ -257,7 +260,7 @@ fn sbox_fixed_points(list: S): list {
    out
 }
 
-fn sbox_ddt(list: S): any {
+fn sbox_ddt(list S) any {
    "Return the differential distribution table as a Matrix."
    _sbox_check(S)
    def n = S.len
@@ -279,12 +282,12 @@ fn sbox_ddt(list: S): any {
    matrix.Matrix(rows)
 }
 
-fn sbox_difference_distribution_table(list: S): any {
+fn sbox_difference_distribution_table(list S) any {
    "Sage-compatible alias for the difference distribution table."
    sbox_ddt(S)
 }
 
-fn sbox_differential_uniformity(list: S): int {
+fn sbox_differential_uniformity(list S) int {
    "Return max DDT entry excluding the zero input difference."
    _sbox_check(S)
    def n = S.len
@@ -306,7 +309,7 @@ fn sbox_differential_uniformity(list: S): int {
    best
 }
 
-fn sbox_differential_uniformity_from_ddt(list: S): int {
+fn sbox_differential_uniformity_from_ddt(list S) int {
    "Return max DDT entry excluding the zero input difference from the materialized table."
    def ddt = sbox_ddt(S)
    def out_n = _sbox_output_cardinality(S)
@@ -324,17 +327,17 @@ fn sbox_differential_uniformity_from_ddt(list: S): int {
    best
 }
 
-fn sbox_maximal_difference_probability_absolute(list: S): int {
+fn sbox_maximal_difference_probability_absolute(list S) int {
    "Return Sage-compatible maximum DDT entry excluding [0,0]."
    sbox_differential_uniformity(S)
 }
 
-fn sbox_maximal_difference_probability(list: S): f64 {
+fn sbox_maximal_difference_probability(list S) f64 {
    "Return Sage-compatible maximum differential probability."
    float(sbox_maximal_difference_probability_absolute(S)) / float(1 << sbox_output_size(S))
 }
 
-fn _sbox_walsh_table(list: S): any {
+fn _sbox_walsh_table(list S) any {
    "Return unscaled Walsh/Fourier coefficients for internal linear tests."
    _sbox_check(S)
    def in_n = S.len
@@ -381,7 +384,7 @@ fn _sbox_walsh_table(list: S): any {
    matrix.Matrix(rows)
 }
 
-fn sbox_linear_approximation_table(list: S, any: scale="absolute_bias"): any {
+fn sbox_linear_approximation_table(list S, any scale="absolute_bias") any {
    "Return the Sage-compatible LAT scaled as absolute_bias, bias, correlation, or fourier_coefficient."
    def mode = scale == nil ? "absolute_bias" : to_str(scale)
    def walsh = _sbox_walsh_table(S)
@@ -417,12 +420,12 @@ fn sbox_linear_approximation_table(list: S, any: scale="absolute_bias"): any {
    matrix.Matrix(rows)
 }
 
-fn sbox_lat(list: S): any {
+fn sbox_lat(list S) any {
    "Return the Sage-default linear approximation table(absolute_bias scale)."
    sbox_linear_approximation_table(S, "absolute_bias")
 }
 
-fn sbox_linearity(list: S): int {
+fn sbox_linearity(list S) int {
    "Return Sage-compatible linearity: twice the maximum absolute bias."
    _sbox_check(S)
    def in_n = S.len
@@ -467,22 +470,22 @@ fn sbox_linearity(list: S): int {
    best
 }
 
-fn sbox_maximal_linear_bias_absolute(list: S): int {
+fn sbox_maximal_linear_bias_absolute(list S) int {
    "Return Sage-compatible maximum absolute linear bias."
    sbox_linearity(S) / 2
 }
 
-fn sbox_maximal_linear_bias_relative(list: S): f64 {
+fn sbox_maximal_linear_bias_relative(list S) f64 {
    "Return Sage-compatible maximum relative linear bias."
    float(sbox_maximal_linear_bias_absolute(S)) / float(S.len)
 }
 
-fn sbox_nonlinearity(list: S): int {
+fn sbox_nonlinearity(list S) int {
    "Return the minimum nonlinearity over all non-zero component functions."
    (S.len / 2) - sbox_maximal_linear_bias_absolute(S)
 }
 
-fn _sbox_input_mask(list: S, any: mask, bool: big_endian=true): int {
+fn _sbox_input_mask(list S, any mask, bool big_endian=true) int {
    def in_bits = sbox_input_size(S)
    if(is_list(mask)){
       if(mask.len > in_bits){ panic("sbox input mask: bit list is wider than input size") }
@@ -491,12 +494,12 @@ fn _sbox_input_mask(list: S, any: mask, bool: big_endian=true): int {
    int(mask)
 }
 
-fn _sbox_input_mask_loose(list: S, any: mask, bool: big_endian=true): int {
+fn _sbox_input_mask_loose(list S, any mask, bool big_endian=true) int {
    if(is_list(mask)){ return sbox_from_coeff_vector(mask) }
    int(mask)
 }
 
-fn sbox_derivative(list: S, any: u, bool: big_endian=true): list {
+fn sbox_derivative(list S, any u, bool big_endian=true) list {
    "Return the derivative x -> S[x] xor S[x xor u]."
    _sbox_check(S)
    def v = _sbox_input_mask(S, u, big_endian)
@@ -509,7 +512,7 @@ fn sbox_derivative(list: S, any: u, bool: big_endian=true): list {
    out
 }
 
-fn _sbox_component_mask(list: S, any: mask, bool: big_endian=true): int {
+fn _sbox_component_mask(list S, any mask, bool big_endian=true) int {
    def out_bits = sbox_output_size(S)
    if(is_list(mask)){
       if(mask.len > out_bits){ panic("sbox component mask: bit list is wider than output size") }
@@ -518,7 +521,7 @@ fn _sbox_component_mask(list: S, any: mask, bool: big_endian=true): int {
    int(mask)
 }
 
-fn sbox_component_function(list: S, any: mask, bool: big_endian=true): list {
+fn sbox_component_function(list S, any mask, bool big_endian=true) list {
    "Return the truth table of the component function mask dot S(x)."
    _sbox_check(S)
    def m = _sbox_component_mask(S, mask, big_endian)
@@ -531,7 +534,7 @@ fn sbox_component_function(list: S, any: mask, bool: big_endian=true): list {
    out
 }
 
-fn _sbox_anf_from_truth_table(list: table): list {
+fn _sbox_anf_from_truth_table(list table) list {
    if(table.len == 0 || !_sbox_pow2(table.len)){ panic("sbox ANF: truth table length must be a power of 2") }
    mut coeff = []
    mut i = 0
@@ -557,12 +560,12 @@ fn _sbox_anf_from_truth_table(list: table): list {
    out
 }
 
-fn sbox_component_anf(list: S, any: mask, bool: big_endian=true): list {
+fn sbox_component_anf(list S, any mask, bool big_endian=true) list {
    "Return ANF monomial masks for the component function mask dot S(x)."
    _sbox_anf_from_truth_table(sbox_component_function(S, mask, big_endian))
 }
 
-fn sbox_polynomials(list: S): list {
+fn sbox_polynomials(list S) list {
    "Return output-bit ANFs as monomial-mask lists, ordered from low bit to high bit."
    _sbox_check(S)
    def out_bits = sbox_output_size(S)
@@ -575,12 +578,12 @@ fn sbox_polynomials(list: S): list {
    polys
 }
 
-fn sbox_interpolation_polynomial(list: S): list {
+fn sbox_interpolation_polynomial(list S) list {
    "Return the vectorial interpolation form as output-bit ANF monomial masks."
    sbox_polynomials(S)
 }
 
-fn _sbox_gf_modulus(int: m): int {
+fn _sbox_gf_modulus(int m) int {
    if(m == 1){ return 0b11 }
    if(m == 2){ return 0b111 }
    if(m == 3){ return 0b1011 }
@@ -592,7 +595,7 @@ fn _sbox_gf_modulus(int: m): int {
    panic("sbox GF interpolation: supported extension degrees are 1..8")
 }
 
-fn _sbox_bit_reverse(int: x, int: width): int {
+fn _sbox_bit_reverse(int x, int width) int {
    mut out = 0
    mut i = 0
    while(i < width){
@@ -602,7 +605,7 @@ fn _sbox_bit_reverse(int: x, int: width): int {
    out
 }
 
-fn _sbox_gf_mul(int: a, int: b, int: m, int: poly): int {
+fn _sbox_gf_mul(int a, int b, int m, int poly) int {
    def mask = (1 << m) - 1
    mut aa = a & mask
    mut bb = b & mask
@@ -616,7 +619,7 @@ fn _sbox_gf_mul(int: a, int: b, int: m, int: poly): int {
    out & mask
 }
 
-fn _sbox_gf_pow(int: a, int: e, int: m, int: poly): int {
+fn _sbox_gf_pow(int a, int e, int m, int poly) int {
    mut base = a
    mut exp = e
    mut out = 1
@@ -628,12 +631,12 @@ fn _sbox_gf_pow(int: a, int: e, int: m, int: poly): int {
    out
 }
 
-fn _sbox_gf_inv(int: a, int: m, int: poly): int {
+fn _sbox_gf_inv(int a, int m, int poly) int {
    if(a == 0){ panic("sbox GF interpolation: zero denominator") }
    _sbox_gf_pow(a, (1 << m) - 2, m, poly)
 }
 
-fn _sbox_poly_mul_linear_gf(list: p, int: root, int: m, int: poly): list {
+fn _sbox_poly_mul_linear_gf(list p, int root, int m, int poly) list {
    mut out = []
    mut i = 0
    while(i <= p.len){
@@ -650,7 +653,7 @@ fn _sbox_poly_mul_linear_gf(list: p, int: root, int: m, int: poly): list {
    out
 }
 
-fn sbox_eval_polynomial_gf2m(list: coeffs, int: x, int: m): int {
+fn sbox_eval_polynomial_gf2m(list coeffs, int x, int m) int {
    "Evaluate low-degree-first coefficients over GF(2^m) using Sage-compatible field constants."
    if(coeffs.len == 0){ return 0 }
    def poly = _sbox_gf_modulus(m)
@@ -663,7 +666,7 @@ fn sbox_eval_polynomial_gf2m(list: coeffs, int: x, int: m): int {
    out
 }
 
-fn sbox_from_polynomial_gf2m(list: coeffs, int: m): list {
+fn sbox_from_polynomial_gf2m(list coeffs, int m) list {
    "Build the Sage SBox(poly) lookup table by evaluating over sorted GF(2^m) elements."
    def q = 1 << m
    mut out = []
@@ -675,7 +678,7 @@ fn sbox_from_polynomial_gf2m(list: coeffs, int: m): list {
    out
 }
 
-fn sbox_from_interpolation_polynomial_gf2m(list: coeffs, int: m): list {
+fn sbox_from_interpolation_polynomial_gf2m(list coeffs, int m) list {
    "Build a lookup table from coefficients returned by sbox_interpolation_polynomial_gf2m."
    def q = 1 << m
    mut out = []
@@ -689,7 +692,7 @@ fn sbox_from_interpolation_polynomial_gf2m(list: coeffs, int: m): list {
    out
 }
 
-fn sbox_interpolation_polynomial_gf2m(list: S): list {
+fn sbox_interpolation_polynomial_gf2m(list S) list {
    "Return Sage-compatible univariate GF(2^m) interpolation coefficients, low degree first."
    _sbox_check(S)
    def m = sbox_input_size(S)
@@ -733,7 +736,7 @@ fn sbox_interpolation_polynomial_gf2m(list: S): list {
    coeffs
 }
 
-fn _sbox_gf_coeff_str(int: c, int: m): str {
+fn _sbox_gf_coeff_str(int c, int m) str {
    if(c == 0){ return "0" }
    mut out = ""
    mut p = m - 1
@@ -750,7 +753,7 @@ fn _sbox_gf_coeff_str(int: c, int: m): str {
    out
 }
 
-fn _sbox_gf_poly_term_str(int: coeff, int: exp, int: m, str: variable): str {
+fn _sbox_gf_poly_term_str(int coeff, int exp, int m, str variable) str {
    def c = _sbox_gf_coeff_str(coeff, m)
    if(exp == 0){ return c }
    def x = exp == 1 ? variable : (variable + "^" + to_str(exp))
@@ -759,7 +762,7 @@ fn _sbox_gf_poly_term_str(int: coeff, int: exp, int: m, str: variable): str {
    cc + "*" + x
 }
 
-fn sbox_interpolation_polynomial_gf2m_str(list: S, str: variable="x"): str {
+fn sbox_interpolation_polynomial_gf2m_str(list S, str variable="x") str {
    "Return a Sage-style GF(2^m) interpolation polynomial string."
    def coeffs = sbox_interpolation_polynomial_gf2m(S)
    def m = sbox_input_size(S)
@@ -776,7 +779,7 @@ fn sbox_interpolation_polynomial_gf2m_str(list: S, str: variable="x"): str {
    out.len == 0 ? "0" : out
 }
 
-fn sbox_is_monomial_function(list: S): bool {
+fn sbox_is_monomial_function(list S) bool {
    "Return true when the GF(2^m) interpolation polynomial has one non-zero term."
    def coeffs = sbox_interpolation_polynomial_gf2m(S)
    mut count = 0
@@ -788,7 +791,7 @@ fn sbox_is_monomial_function(list: S): bool {
    count == 1
 }
 
-fn sbox_ring_str(list: S, str: x_prefix="x", str: y_prefix="y"): str {
+fn sbox_ring_str(list S, str x_prefix="x", str y_prefix="y") str {
    "Return a Sage-style description of the Boolean polynomial ring for S-box equations."
    def m = sbox_input_size(S)
    def n = sbox_output_size(S)
@@ -806,12 +809,12 @@ fn sbox_ring_str(list: S, str: x_prefix="x", str: y_prefix="y"): str {
    "Multivariate Polynomial Ring in " + vars + " over Finite Field of size 2"
 }
 
-fn sbox_ring(list: S, str: x_prefix="x", str: y_prefix="y"): str {
+fn sbox_ring(list S, str x_prefix="x", str y_prefix="y") str {
    "Sage-compatible ring() alias returning the graph polynomial ring description."
    sbox_ring_str(S, x_prefix, y_prefix)
 }
 
-fn sbox_monomial_str(int: monomial_mask, int: input_bits, str: variable_prefix="x", bool: big_endian=true): str {
+fn sbox_monomial_str(int monomial_mask, int input_bits, str variable_prefix="x", bool big_endian=true) str {
    "Format one ANF monomial mask using Sage-style variable names."
    if(monomial_mask == 0){ return "1" }
    mut out = ""
@@ -827,7 +830,7 @@ fn sbox_monomial_str(int: monomial_mask, int: input_bits, str: variable_prefix="
    out
 }
 
-fn _sbox_terms_str_desc(list: monomials, int: input_bits, str: variable_prefix, bool: big_endian): str {
+fn _sbox_terms_str_desc(list monomials, int input_bits, str variable_prefix, bool big_endian) str {
    mut out = ""
    mut idx = monomials.len - 1
    while(idx >= 0){
@@ -838,12 +841,12 @@ fn _sbox_terms_str_desc(list: monomials, int: input_bits, str: variable_prefix, 
    out.len == 0 ? "0" : out
 }
 
-fn sbox_component_anf_str(list: S, any: mask, str: variable_prefix="x", bool: big_endian=true): str {
+fn sbox_component_anf_str(list S, any mask, str variable_prefix="x", bool big_endian=true) str {
    "Return a component ANF as a Sage-style polynomial string."
    _sbox_terms_str_desc(sbox_component_anf(S, mask, big_endian), sbox_input_size(S), variable_prefix, big_endian)
 }
 
-fn sbox_polynomial_strs(list: S, str: variable_prefix="x", bool: big_endian=true): list {
+fn sbox_polynomial_strs(list S, str variable_prefix="x", bool big_endian=true) list {
    "Return output-bit ANFs as Sage-style polynomial strings."
    def out_bits = sbox_output_size(S)
    mut out = []
@@ -856,7 +859,7 @@ fn sbox_polynomial_strs(list: S, str: variable_prefix="x", bool: big_endian=true
    out
 }
 
-fn _sbox_comb_masks_from(int: total, int: start, int: need, int: mask): list {
+fn _sbox_comb_masks_from(int total, int start, int need, int mask) list {
    if(need == 0){ return [mask] }
    mut out = []
    mut i = start
@@ -872,7 +875,7 @@ fn _sbox_comb_masks_from(int: total, int: start, int: need, int: mask): list {
    out
 }
 
-fn _sbox_monomial_masks_upto(int: total, int: degree): list {
+fn _sbox_monomial_masks_upto(int total, int degree) list {
    if(degree < 0){ panic("sbox degree fit: degree must be non-negative") }
    if(degree > total){ degree = total }
    mut out = []
@@ -889,7 +892,7 @@ fn _sbox_monomial_masks_upto(int: total, int: degree): list {
    out
 }
 
-fn _sbox_eval_graph_monomial(list: S, int: x, int: mask, int: in_bits, int: out_bits, bool: big_endian): int {
+fn _sbox_eval_graph_monomial(list S, int x, int mask, int in_bits, int out_bits, bool big_endian) int {
    mut prod = 1
    mut idx = 0
    while(idx < in_bits + out_bits){
@@ -902,7 +905,7 @@ fn _sbox_eval_graph_monomial(list: S, int: x, int: mask, int: in_bits, int: out_
    prod
 }
 
-fn _sbox_row_xor(list: a, list: b): list {
+fn _sbox_row_xor(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -912,7 +915,7 @@ fn _sbox_row_xor(list: a, list: b): list {
    out
 }
 
-fn _sbox_degree_fit_rows(list: S, int: degree, bool: big_endian): dict {
+fn _sbox_degree_fit_rows(list S, int degree, bool big_endian) dict {
    _sbox_check(S)
    def in_bits = sbox_input_size(S)
    def out_bits = sbox_output_size(S)
@@ -965,7 +968,7 @@ fn _sbox_degree_fit_rows(list: S, int: degree, bool: big_endian): dict {
    {"rows": rows, "rank": rank, "rank_size": rank_size, "monomials": monomials}
 }
 
-fn _sbox_graph_monomial_str(int: mask, int: in_bits, str: x_prefix, str: y_prefix): str {
+fn _sbox_graph_monomial_str(int mask, int in_bits, str x_prefix, str y_prefix) str {
    if(mask == 0){ return "1" }
    mut out = ""
    mut v = 0
@@ -980,7 +983,7 @@ fn _sbox_graph_monomial_str(int: mask, int: in_bits, str: x_prefix, str: y_prefi
    out
 }
 
-fn _sbox_degree_fit_poly_str(list: coeffs, list: monomials, int: in_bits, int: out_bits, int: degree, str: x_prefix, str: y_prefix): str {
+fn _sbox_degree_fit_poly_str(list coeffs, list monomials, int in_bits, int out_bits, int degree, str x_prefix, str y_prefix) str {
    mut out = ""
    mut d = degree
    while(d >= 0){
@@ -998,7 +1001,7 @@ fn _sbox_degree_fit_poly_str(list: coeffs, list: monomials, int: in_bits, int: o
    out.len == 0 ? "0" : out
 }
 
-fn sbox_degree_fit_polynomial_strs(list: S, int: degree=2, str: x_prefix="x", str: y_prefix="y", bool: big_endian=true): list {
+fn sbox_degree_fit_polynomial_strs(list S, int degree=2, str x_prefix="x", str y_prefix="y", bool big_endian=true) list {
    "Return Sage-compatible default SBox.polynomials(degree=...) fitting relations."
    def fit = _sbox_degree_fit_rows(S, degree, big_endian)
    def rows = fit["rows"]
@@ -1022,7 +1025,7 @@ fn sbox_degree_fit_polynomial_strs(list: S, int: degree=2, str: x_prefix="x", st
    out
 }
 
-fn sbox_degree_fit_basis_report(list: S, int: degree=2, bool: big_endian=true): dict {
+fn sbox_degree_fit_basis_report(list S, int degree=2, bool big_endian=true) dict {
    "Return an auditable report for Sage-compatible degree-fit S-box relations."
    def fit = _sbox_degree_fit_rows(S, degree, big_endian)
    def basis = sbox_degree_fit_polynomial_strs(S, degree, "x", "y", big_endian)
@@ -1040,7 +1043,7 @@ fn sbox_degree_fit_basis_report(list: S, int: degree=2, bool: big_endian=true): 
    }
 }
 
-fn sbox_direct_polynomial_strs(list: S, str: x_prefix="x", str: y_prefix="y", bool: big_endian=true): list {
+fn sbox_direct_polynomial_strs(list S, str x_prefix="x", str y_prefix="y", bool big_endian=true) list {
    "Return direct Boolean equations `yi + ANF_i(x)` as Sage-style strings."
    def out_bits = sbox_output_size(S)
    mut out = []
@@ -1054,12 +1057,12 @@ fn sbox_direct_polynomial_strs(list: S, str: x_prefix="x", str: y_prefix="y", bo
    out
 }
 
-fn sbox_groebner_polynomial_strs(list: S, str: x_prefix="x", str: y_prefix="y", bool: big_endian=true): list {
+fn sbox_groebner_polynomial_strs(list S, str x_prefix="x", str y_prefix="y", bool big_endian=true) list {
    "Return the reduced lex Boolean Groebner basis for the graph y = S(x), with field equations omitted."
    sbox_direct_polynomial_strs(S, x_prefix, y_prefix, big_endian)
 }
 
-fn sbox_groebner_basis_report(list: S, str: x_prefix="x", str: y_prefix="y", bool: big_endian=true): dict {
+fn sbox_groebner_basis_report(list S, str x_prefix="x", str y_prefix="y", bool big_endian=true) dict {
    "Return an auditable report for the reduced lex Boolean Groebner basis of y = S(x)."
    def basis = sbox_groebner_polynomial_strs(S, x_prefix, y_prefix, big_endian)
    {
@@ -1075,7 +1078,7 @@ fn sbox_groebner_basis_report(list: S, str: x_prefix="x", str: y_prefix="y", boo
    }
 }
 
-fn sbox_eval_anf(list: monomials, int: x): int {
+fn sbox_eval_anf(list monomials, int x) int {
    "Evaluate an ANF encoded as monomial masks at integer input x."
    mut out = 0
    mut i = 0
@@ -1087,20 +1090,20 @@ fn sbox_eval_anf(list: monomials, int: x): int {
    out
 }
 
-fn _sbox_clause_literal(int: var_idx, int: bit): int {
+fn _sbox_clause_literal(int var_idx, int bit) int {
    bit != 0 ? (0 - var_idx) : var_idx
 }
 
-fn _sbox_required_literal(int: var_idx, int: bit): int {
+fn _sbox_required_literal(int var_idx, int bit) int {
    bit != 0 ? var_idx : (0 - var_idx)
 }
 
-fn _sbox_ordered_bit(int: value, int: pos, int: width, bool: big_endian): int {
+fn _sbox_ordered_bit(int value, int pos, int width, bool big_endian) int {
    def bit_pos = big_endian ? (width - 1 - pos) : pos
    (value >> bit_pos) & 1
 }
 
-fn _sbox_default_indices(int: start, int: count): list {
+fn _sbox_default_indices(int start, int count) list {
    mut out = []
    mut i = 0
    while(i < count){
@@ -1110,7 +1113,7 @@ fn _sbox_default_indices(int: start, int: count): list {
    out
 }
 
-fn _sbox_validate_indices(any: raw, int: count, str: name): list {
+fn _sbox_validate_indices(any raw, int count, str name) list {
    if(raw == nil){ return _sbox_default_indices(name == "xi" ? 1 : 0, count) }
    if(!is_list(raw)){ panic("sbox_cnf: " + name + " must be a list") }
    if(raw.len != count){ panic("sbox_cnf: " + name + " has wrong length") }
@@ -1123,7 +1126,7 @@ fn _sbox_validate_indices(any: raw, int: count, str: name): list {
    out
 }
 
-fn _sbox_cnf_clauses_with_indices(list: S, list: xi, list: yi, bool: big_endian): list {
+fn _sbox_cnf_clauses_with_indices(list S, list xi, list yi, bool big_endian) list {
    def in_bits = sbox_input_size(S)
    def out_bits = sbox_output_size(S)
    mut output_order = []
@@ -1155,7 +1158,7 @@ fn _sbox_cnf_clauses_with_indices(list: S, list: xi, list: yi, bool: big_endian)
    clauses
 }
 
-fn _sbox_cnf_dimacs(list: clauses, int: var_count, bool: header): str {
+fn _sbox_cnf_dimacs(list clauses, int var_count, bool header) str {
    mut out = header ? ("p cnf " + to_str(var_count) + " " + to_str(clauses.len) + "\n") : ""
    mut i = 0
    while(i < clauses.len){
@@ -1172,11 +1175,11 @@ fn _sbox_cnf_dimacs(list: clauses, int: var_count, bool: header): str {
    out
 }
 
-fn _sbox_symbolic_var(int: idx, int: in_bits): str {
+fn _sbox_symbolic_var(int idx, int in_bits) str {
    idx <= in_bits ? ("x" + to_str(idx - 1)) : ("y" + to_str(idx - in_bits - 1))
 }
 
-fn _sbox_cnf_symbolic(list: clauses, int: in_bits): str {
+fn _sbox_cnf_symbolic(list clauses, int in_bits) str {
    mut out = ""
    mut i = 0
    while(i < clauses.len){
@@ -1200,7 +1203,7 @@ fn _sbox_cnf_symbolic(list: clauses, int: in_bits): str {
    out
 }
 
-fn _sbox_cnf_symbolic_sage_legacy(list: clauses, int: in_bits): str {
+fn _sbox_cnf_symbolic_sage_legacy(list clauses, int in_bits) str {
    mut out = ""
    mut i = 0
    while(i < clauses.len){
@@ -1219,7 +1222,7 @@ fn _sbox_cnf_symbolic_sage_legacy(list: clauses, int: in_bits): str {
    out
 }
 
-fn sbox_cnf(list: S, any: xi=nil, any: yi=nil, any: format=nil, bool: big_endian=true): any {
+fn sbox_cnf(list S, any xi=nil, any yi=nil, any format=nil, bool big_endian=true) any {
    "Return Sage-compatible CNF clauses or formatted DIMACS/symbolic output for y = S(x)."
    _sbox_check(S)
    def in_bits = sbox_input_size(S)
@@ -1236,12 +1239,12 @@ fn sbox_cnf(list: S, any: xi=nil, any: yi=nil, any: format=nil, bool: big_endian
    panic("sbox_cnf: unsupported format " + mode)
 }
 
-fn sbox_cnf_clauses(list: S, bool: big_endian=true): list {
+fn sbox_cnf_clauses(list S, bool big_endian=true) list {
    "Return Sage-compatible CNF clauses for y = S(x)."
    sbox_cnf(S, nil, nil, nil, big_endian)
 }
 
-fn sbox_cnf_satisfied(list: clauses, list: assignment): bool {
+fn sbox_cnf_satisfied(list clauses, list assignment) bool {
    "Return true if a 0/1 assignment satisfies clauses returned by sbox_cnf_clauses."
    mut c = 0
    while(c < clauses.len){
@@ -1262,7 +1265,7 @@ fn sbox_cnf_satisfied(list: clauses, list: assignment): bool {
    true
 }
 
-fn sbox_autocorrelation_table(list: S): any {
+fn sbox_autocorrelation_table(list S) any {
    "Return the Sage-style autocorrelation table for all input/output masks."
    _sbox_check(S)
    def in_n = S.len
@@ -1289,7 +1292,7 @@ fn sbox_autocorrelation_table(list: S): any {
    matrix.Matrix(rows)
 }
 
-fn sbox_boomerang_connectivity_table(list: S): any {
+fn sbox_boomerang_connectivity_table(list S) any {
    "Return the boomerang connectivity table for an invertible square S-box."
    if(!sbox_is_permutation(S)){ panic("sbox_boomerang_connectivity_table: S-box must be a permutation") }
    def inv = sbox_inverse(S)
@@ -1330,7 +1333,7 @@ fn sbox_boomerang_connectivity_table(list: S): any {
    matrix.Matrix(rows)
 }
 
-fn sbox_boomerang_uniformity(list: S): int {
+fn sbox_boomerang_uniformity(list S) int {
    "Return maximum BCT entry excluding the first row and column."
    if(!sbox_is_permutation(S)){ panic("sbox_boomerang_uniformity: S-box must be a permutation") }
    def inv = sbox_inverse(S)
@@ -1367,7 +1370,7 @@ fn sbox_boomerang_uniformity(list: S): int {
    best
 }
 
-fn sbox_linear_structures(list: S): list {
+fn sbox_linear_structures(list S) list {
    "Return Sage-style [output_mask, input_mask, constant] linear structures."
    def act = sbox_autocorrelation_table(S)
    def out_n = _sbox_output_cardinality(S)
@@ -1388,12 +1391,12 @@ fn sbox_linear_structures(list: S): list {
    out
 }
 
-fn sbox_has_linear_structure(list: S): bool {
+fn sbox_has_linear_structure(list S) bool {
    "Return true when a non-zero component has a non-zero linear structure."
    sbox_linear_structures(S).len > 0
 }
 
-fn sbox_is_linear_structure(list: S, any: a, any: b, bool: big_endian=true): bool {
+fn sbox_is_linear_structure(list S, any a, any b, bool big_endian=true) bool {
    "Return true if a is a linear structure of component b dot S(x)."
    def ai = _sbox_input_mask_loose(S, a, big_endian)
    def bi = _sbox_component_mask(S, b, big_endian)
@@ -1402,13 +1405,13 @@ fn sbox_is_linear_structure(list: S, any: a, any: b, bool: big_endian=true): boo
    _sbox_abs_int(matrix.mat_get(act, ai, bi)) == S.len
 }
 
-fn sbox_is_apn(list: S): bool {
+fn sbox_is_apn(list S) bool {
    "Return true for square APN S-boxes."
    if(sbox_input_size(S) != sbox_output_size(S)){ panic("sbox_is_apn: APN is defined for square S-boxes") }
    sbox_differential_uniformity(S) == 2
 }
 
-fn sbox_is_balanced(list: S): bool {
+fn sbox_is_balanced(list S) bool {
    "Return true when every non-zero component function is balanced."
    def out_n = _sbox_output_cardinality(S)
    mut b = 1
@@ -1425,7 +1428,7 @@ fn sbox_is_balanced(list: S): bool {
    true
 }
 
-fn sbox_is_almost_bent(list: S): bool {
+fn sbox_is_almost_bent(list S) bool {
    "Return true when a square odd-dimensional S-box has optimal AB nonlinearity."
    def m = sbox_input_size(S)
    if(m != sbox_output_size(S)){ panic("sbox_is_almost_bent: almost-bent is defined for square S-boxes") }
@@ -1433,7 +1436,7 @@ fn sbox_is_almost_bent(list: S): bool {
    sbox_nonlinearity(S) == ((1 << (m - 1)) - (1 << ((m - 1) / 2)))
 }
 
-fn sbox_is_bent(list: S): bool {
+fn sbox_is_bent(list S) bool {
    "Return true when the S-box reaches the bent nonlinearity bound."
    def m = sbox_input_size(S)
    def n = sbox_output_size(S)
@@ -1441,7 +1444,7 @@ fn sbox_is_bent(list: S): bool {
    sbox_nonlinearity(S) == ((1 << (m - 1)) - (1 << (m / 2 - 1)))
 }
 
-fn sbox_is_plateaued(list: S): bool {
+fn sbox_is_plateaued(list S) bool {
    "Return true when every non-zero component has a plateaued Walsh spectrum."
    def lat = _sbox_walsh_table(S)
    def out_n = _sbox_output_cardinality(S)
@@ -1462,7 +1465,7 @@ fn sbox_is_plateaued(list: S): bool {
    true
 }
 
-fn sbox_is_involution(list: S): bool {
+fn sbox_is_involution(list S) bool {
    "Return true if the S-box equals its inverse."
    if(!sbox_is_permutation(S)){ return false }
    def inv = sbox_inverse(S)
@@ -1474,7 +1477,7 @@ fn sbox_is_involution(list: S): bool {
    true
 }
 
-fn _sbox_construction_check(list: sboxes): int {
+fn _sbox_construction_check(list sboxes) int {
    if(sboxes.len == 0){ panic("sbox construction: no input S-boxes") }
    def width = sbox_input_size(sboxes.get(0))
    if(width != sbox_output_size(sboxes.get(0))){ panic("sbox construction: S-boxes must be square") }
@@ -1488,7 +1491,7 @@ fn _sbox_construction_check(list: sboxes): int {
    width
 }
 
-fn sbox_feistel_construction(list: sboxes): list {
+fn sbox_feistel_construction(list sboxes) list {
    "Return the Sage-style Feistel S-box construction over a list of round S-boxes."
    def w = _sbox_construction_check(sboxes)
    def mask = (1 << w) - 1
@@ -1512,7 +1515,7 @@ fn sbox_feistel_construction(list: sboxes): list {
    out
 }
 
-fn sbox_misty_construction(list: sboxes): list {
+fn sbox_misty_construction(list sboxes) list {
    "Return the Sage-style MISTY S-box construction over a list of round S-boxes."
    def w = _sbox_construction_check(sboxes)
    def mask = (1 << w) - 1
@@ -1536,7 +1539,7 @@ fn sbox_misty_construction(list: sboxes): list {
    out
 }
 
-fn sbox_differential_branch_number(list: S): int {
+fn sbox_differential_branch_number(list S) int {
    "Return min wt(x xor y)+wt(S[x] xor S[y]) for x != y."
    _sbox_check(S)
    mut best = S.len + _sbox_output_cardinality(S)
@@ -1557,7 +1560,7 @@ fn sbox_differential_branch_number(list: S): int {
    best
 }
 
-fn sbox_linear_branch_number(list: S): int {
+fn sbox_linear_branch_number(list S) int {
    "Return min wt(a)+wt(b) over non-zero LAT entries with b non-zero."
    _sbox_check(S)
    def in_n = S.len
@@ -1601,17 +1604,17 @@ fn sbox_linear_branch_number(list: S): int {
    best
 }
 
-fn sbox_branch_number(list: S): int {
+fn sbox_branch_number(list S) int {
    "Alias for the differential branch number kept for compatibility."
    sbox_differential_branch_number(S)
 }
 
-fn sbox_max_degree(list: S): int {
+fn sbox_max_degree(list S) int {
    "Return maximum algebraic degree over non-zero component functions."
    sbox_algebraic_degree(S)
 }
 
-fn sbox_min_degree(list: S): int {
+fn sbox_min_degree(list S) int {
    "Return minimum algebraic degree over non-zero component functions."
    _sbox_check(S)
    def out_n = _sbox_output_cardinality(S)
@@ -1648,7 +1651,7 @@ fn sbox_min_degree(list: S): int {
    best
 }
 
-fn sbox_algebraic_degree(list: S): int {
+fn sbox_algebraic_degree(list S) int {
    "Return the maximum algebraic normal form degree over output bits."
    _sbox_check(S)
    def n = S.len
@@ -1685,12 +1688,12 @@ fn sbox_algebraic_degree(list: S): int {
    best
 }
 
-if(comptime{ return __main() }){
+#main {
    def S = [0, 3, 1, 2]
    assert(sbox_is_permutation(S), "sbox permutation")
    assert(sbox_inverse(S) == [0, 2, 3, 1], "sbox inverse")
    assert(sbox_differential_uniformity(S) == 4, "sbox ddt uniformity")
    assert(sbox_linearity(S) == 4, "sbox Walsh linearity")
    assert(sbox_nonlinearity(S) == 0, "sbox nonlinearity")
-   print("SBOX_OK")
+   print("✓ std.math.crypto.symmetric.sbox self-test passed")
 }

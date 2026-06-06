@@ -1,7 +1,10 @@
-;; Keywords: data serialization json
+;; Keywords: data serialization json parse
 ;; JavaScript Object Notation (JSON) Parser and Generator for Nytrix
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc8259.html
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.json(json_decode, json_try_decode, json_last_error, json_encode)
 use std.core
 use std.core.dict_mod
@@ -10,18 +13,18 @@ use std.math.float as f
 
 mut _json_error = ""
 
-fn json_last_error(): str {
+fn json_last_error() str {
    "Returns the error from the last decode attempt(empty string on success)."
    _json_error
 }
 
-fn _json_set_error(list: st, str: msg): int {
+fn _json_set_error(list st, str msg) int {
    def cur = st.get(3, "")
    if(!is_str(cur) || cur.len == 0){ st[3] = msg }
    0
 }
 
-fn _json_make_result(bool: ok, any: value, str: err, int: pos): dict {
+fn _json_make_result(bool ok, any value, str err, int pos) dict {
    mut r = dict(8)
    r["ok"] = ok
    r["value"] = value
@@ -30,25 +33,32 @@ fn _json_make_result(bool: ok, any: value, str: err, int: pos): dict {
    r
 }
 
-fn _json_peek(list: st): int {
+fn _json_peek(list st) int {
    def pos = st.get(2)
    def n = st.get(1)
    if(pos < 0 || pos >= n){ return -1 }
    load8(st.get(0), pos)
 }
 
-fn _json_skip_ws(list: st): any {
+@inline
+fn _json_is_ws(int c) bool {
+   return case c {
+      9, 10, 13, 32 -> true
+      _ -> false
+   }
+}
+
+fn _json_skip_ws(list st) any {
    def s, n = st.get(0), st.get(1)
    mut pos = st.get(2)
    def start = pos
    while(pos < n){
-      def c = load8(s, pos)
-      if(c == 32 || c == 9 || c == 10 || c == 13){ pos += 1 } else { break }
+      if(_json_is_ws(load8(s, pos))){ pos += 1 } else { break }
    }
    if(pos != start){ st[2] = pos }
 }
 
-fn _json_expect(list: st, int: want, str: msg): any {
+fn _json_expect(list st, int want, str msg) any {
    def pos = st.get(2)
    def n = st.get(1)
    def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
@@ -57,9 +67,9 @@ fn _json_expect(list: st, int: want, str: msg): any {
    true
 }
 
-fn _json_is_digit(int: c): bool { c >= 48 && c <= 57 }
+fn _json_is_digit(int c) bool { c >= 48 && c <= 57 }
 
-fn _json_hex4(str: s, int: start): int {
+fn _json_hex4(str s, int start) int {
    mut cp = 0
    mut k = 0
    while(k < 4){
@@ -71,7 +81,7 @@ fn _json_hex4(str: s, int: start): int {
    cp
 }
 
-fn _json_parse_literal(list: st, str: lit, any: value): any {
+fn _json_parse_literal(list st, str lit, any value) any {
    def s, n = st.get(0), st.get(1)
    def pos = st.get(2)
    def m = lit.len
@@ -85,9 +95,9 @@ fn _json_parse_literal(list: st, str: lit, any: value): any {
    value
 }
 
-fn _json_parse_float_text(str: s): f64 { str.atof(s) }
+fn _json_parse_float_text(str s) f64 { str.atof(s) }
 
-fn _json_parse_val(list: st): any {
+fn _json_parse_val(list st) any {
    _json_skip_ws(st)
    def pos = st.get(2)
    def n = st.get(1)
@@ -105,7 +115,7 @@ fn _json_parse_val(list: st): any {
    }
 }
 
-fn _json_parse_obj(list: st): any {
+fn _json_parse_obj(list st) any {
    if(!_json_expect(st, 123, "expected '{'")){ return 0 }
    mut d = dict(8)
    _json_skip_ws(st)
@@ -137,7 +147,7 @@ fn _json_parse_obj(list: st): any {
    }
 }
 
-fn _json_parse_arr(list: st): any {
+fn _json_parse_arr(list st) any {
    if(!_json_expect(st, 91, "expected '['")){ return 0 }
    mut l = list(8)
    _json_skip_ws(st)
@@ -162,7 +172,7 @@ fn _json_parse_arr(list: st): any {
    }
 }
 
-fn _json_parse_str(list: st): any {
+fn _json_parse_str(list st) any {
    mut pos = st.get(2)
    def s, n = st.get(0), st.get(1)
    if(pos >= n || load8(s, pos) != 34){ return _json_set_error(st, "expected string") }
@@ -279,7 +289,7 @@ fn _json_parse_str(list: st): any {
    result
 }
 
-fn _json_parse_num(list: st): any {
+fn _json_parse_num(list st) any {
    mut pos = st.get(2)
    def s, n = st.get(0), st.get(1)
    mut start = pos
@@ -335,7 +345,7 @@ fn _json_parse_num(list: st): any {
    return res
 }
 
-fn json_try_decode(any: s): dict {
+fn json_try_decode(any s) dict {
    "Decodes JSON and returns `{ok, value, error, pos}`."
    if(!is_str(s)){
       _json_error = "json input must be a string"
@@ -354,19 +364,19 @@ fn json_try_decode(any: s): dict {
    _json_make_result(false, 0, _json_error, st.get(2))
 }
 
-fn json_decode(any: s): any {
+fn json_decode(any s) any {
    "Decodes JSON string and returns parsed value(`0` on error)."
    def res = json_try_decode(s)
    if(res != 0 && res.get("ok", false)){ return res.get("value", 0) }
    0
 }
 
-fn _json_hex_digit(int: n): str {
+fn _json_hex_digit(int n) str {
    if(n < 10){ return chr(48 + n) }
    chr(87 + n)
 }
 
-fn _json_escape_string(any: s): str {
+fn _json_escape_string(any s) str {
    if(!is_str(s)){ return "\"\"" }
    def n = s.len
    mut out = Builder(max(16, n + 8))
@@ -388,7 +398,6 @@ fn _json_escape_string(any: s): str {
                out = builder_append(out, _json_hex_digit((c / 16) % 16))
                out = builder_append(out, _json_hex_digit(c % 16))
             } else {
-               ; Preserve original UTF-8 bytes from the source text.
                out = builder_append_byte(out, c)
             }
          }
@@ -401,7 +410,7 @@ fn _json_escape_string(any: s): str {
    s_out
 }
 
-fn _json_encode_seq(any: v): str {
+fn _json_encode_seq(any v) str {
    def n = v.len
    mut out = Builder(max(16, n * 8 + 8))
    out = builder_append(out, "[")
@@ -417,7 +426,7 @@ fn _json_encode_seq(any: v): str {
    s_out
 }
 
-fn json_encode(any: obj): str {
+fn json_encode(any obj) str {
    "Encodes Nytrix values into JSON string."
    if(type(obj) == "bool"){
       if obj{ return "true" }
@@ -453,4 +462,17 @@ fn json_encode(any: obj): str {
       return s_out
    }
    "null"
+}
+
+#main {
+   def raw = "{\"name\":\"ny\",\"version\":\"0.5.0\",\"tags\":[\"fast\",\"compiled\",\"llvm\"],\"meta\":{\"active\":true,\"score\":9}}"
+   def parsed = json_decode(raw)
+   assert_eq(parsed.get("name"), "ny", "json object string")
+   assert_eq(parsed.get("version"), "0.5.0", "json object version")
+   assert_eq(parsed.get("tags").get(2), "llvm", "json array")
+   assert_eq(parsed.get("meta").get("score"), 9, "json nested object")
+   def back = json_encode(parsed)
+   assert(str_contains(back, "\"name\""), "json encoded name")
+   assert(str_contains(back, "\"tags\""), "json encoded tags")
+   print("✓ std.parse.data.json self-test passed")
 }

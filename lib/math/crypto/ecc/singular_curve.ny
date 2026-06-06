@@ -1,14 +1,17 @@
-;; Keywords: ecc singular-curve
+;; Keywords: ecc singular-curve math crypto public-key
 ;; Singular-curve attack routines for elliptic-curve discrete logs.
 ;; Singular curves have discriminant = 0 mod p and DLP reduces to F_p^* or F_p^+
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.singular_curve(detect_singular, singular_curve_dlp)
 use std.math.nt
 use std.math.crypto.ecc
 
-fn detect_singular(any: a, any: b, any: p): bool {
+fn detect_singular(any a, any b, any p) bool {
    "Check whether y^2 = x^3 + ax + b is singular mod p. " +
    "Singular iff discriminant 4a^3 + 27b^2 == 0 mod p."
    def a2, a3 = (a * a) % p, (a2 * a) % p
@@ -17,7 +20,7 @@ fn detect_singular(any: a, any: b, any: p): bool {
    disc == 0
 }
 
-fn singular_curve_dlp(any: Px, any: Py, any: Qx, any: Qy, any: a, any: b, any: p): any {
+fn singular_curve_dlp(any Px, any Py, any Qx, any Qy, any a, any b, any p) any {
    "Solve DLP on singular y^2 = x^3 + ax + b over F_p. " +
    "Given P=(Px,Py), Q=(Qx,Qy), find k with Q=k*P via isomorphism to F_p^* (node) " +
    "or F_p^+ (cusp). Returns k or nil."
@@ -34,7 +37,7 @@ fn singular_curve_dlp(any: Px, any: Py, any: Qx, any: Qy, any: a, any: b, any: p
    }
 }
 
-fn singular_point(any: a, any: b, any: p): any {
+fn singular_point(any a, any b, any p) any {
    "Find x-coordinate of singular point on y^2 = x^3 + ax + b mod p. " +
    "Singular point satisfies f(x)=f'(x)=0. Returns x or -1."
    def a2, a3 = (a * a) % p, (a2 * a) % p
@@ -52,7 +55,7 @@ fn singular_point(any: a, any: b, any: p): any {
    -1
 }
 
-fn classify_singularity(any: a, any: b, any: x0, any: p): int {
+fn classify_singularity(any a, any b, any x0, any p) int {
    "Classify singularity at x0 on y^2 = x^3 + ax + b mod p. " +
    "Returns 1 for node(two tangents) or 0 for cusp(single tangent)."
    def f2 = (6 * x0) % p
@@ -64,7 +67,7 @@ fn classify_singularity(any: a, any: b, any: x0, any: p): int {
    }
 }
 
-fn solve_dlp_multiplicative(any: Px, any: Py, any: Qx, any: Qy, any: x0, any: p): any {
+fn solve_dlp_multiplicative(any Px, any Py, any Qx, any Qy, any x0, any p) any {
    "Solve DLP via F_p^* isomorphism for nodal singular curve. " +
    "Maps points to multiplicative group and solves discrete log."
    def tP_num = (Py) % p
@@ -85,7 +88,7 @@ fn solve_dlp_multiplicative(any: Px, any: Py, any: Qx, any: Qy, any: x0, any: p)
    k
 }
 
-fn solve_dlp_additive(any: Px, any: Py, any: Qx, any: Qy, any: x0, any: p): any {
+fn solve_dlp_additive(any Px, any Py, any Qx, any Qy, any x0, any p) any {
    "Solve DLP via F_p^+ isomorphism for cuspidal singular curve. " +
    "Maps points to additive group and solves discrete log."
    def uP_num = (Px - x0) % p
@@ -106,7 +109,7 @@ fn solve_dlp_additive(any: Px, any: Py, any: Qx, any: Qy, any: x0, any: p): any 
    k
 }
 
-fn solve_dlog_in_group(any: g, any: h, any: p, any: order): any {
+fn solve_dlog_in_group(any g, any h, any p, any order) any {
    "Solve discrete log g^k = h in F_p^* of given order using brute force. Returns k or nil if not found."
    mut val = 1
    mut k = 0

@@ -1,4 +1,4 @@
-;; Keywords: rsa public-key key op encrypt decrypt signature verify pkcs1-v15 multiprime modular-arithmetic crt
+;; Keywords: rsa public-key key op encrypt decrypt signature verify pkcs1-v15 multiprime modular-arithmetic crt math crypto
 ;; RSA facade for keys, operations, signatures, PKCS#1 v1.5 helpers, and modular arithmetic.
 ;; References:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
@@ -13,18 +13,18 @@ use std.math.crypto.rsa.lcg_rng as lcg_rng_mod
 use std.math.crypto.factorization.fermat
 use std.math.crypto.factorization.pollard
 
-fn rsa_lcg_factor_power2(any: n, any: mult, any: inc, int: modulus_bits=512, int: max_gap=4096): list {
+fn rsa_lcg_factor_power2(any n, any mult, any inc, int modulus_bits=512, int max_gap=4096) list {
    "Recover RSA factors when primes are consecutive LCG prime states modulo 2^modulus_bits."
    lcg_rng_mod.rsa_lcg_factor_power2(n, mult, inc, modulus_bits, max_gap)
 }
 
-fn _rsa_solve_with_factors(any: n, any: e, any: c, any: p, any: q): any {
+fn _rsa_solve_with_factors(any n, any e, any c, any p, any q) any {
    def d = compute_d(e, compute_phi(p, q))
    if(d <= 0){ return nil }
    [power_mod(c, d, n), d]
 }
 
-fn _rsa_small_d_brute(any: n, any: e, any: c, int: start, int: limit): any {
+fn _rsa_small_d_brute(any n, any e, any c, int start, int limit) any {
    mut d = start
    while(d < limit){
       def m = power_mod(c, d, n)
@@ -34,7 +34,7 @@ fn _rsa_small_d_brute(any: n, any: e, any: c, int: start, int: limit): any {
    nil
 }
 
-fn _rsa_small_d_brute_limit(any: n): int {
+fn _rsa_small_d_brute_limit(any n) int {
    "Keep exhaustive private-exponent search for toy challenge keys only.
    Real RSA-sized moduli should use Wiener/factorization paths instead of a
    blind 100k modular-exponent sweep."
@@ -44,7 +44,7 @@ fn _rsa_small_d_brute_limit(any: n): int {
    0
 }
 
-fn rsa_solve(any: n, any: e, any: c, any: e2=0, any: c2=0): any {
+fn rsa_solve(any n, any e, any c, any e2=0, any c2=0) any {
    "Automatically attempt to solve RSA ciphertext c given(n, e).
    Order: low_exponent → wiener → bounded Fermat → pollard_pm1 → common_modulus → batch_gcd → small_d_brute(toy keys).
    Returns [m, method, extra] or nil."

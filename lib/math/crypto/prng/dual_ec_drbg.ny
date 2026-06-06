@@ -1,14 +1,17 @@
-;; Keywords: prng dual-ec-drbg
+;; Keywords: prng dual-ec-drbg math crypto
 ;; PRNG analysis routines for Dual EC DRBG prediction and backdoor recovery.
 ;; Exploit the NIST SP 800-90A backdoor where P = d*Q
 ;; Reference:
 ;; - https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90Ar1.pdf
 ;; - https://rump2007.cr.yp.to/15-shumow.pdf
+;; References:
+;; - std.math.crypto.prng
+;; - std.math.crypto
 module std.math.crypto.prng.dual_ec_drbg(dual_ec_drbg_predict, dual_ec_backdoor, dual_ec_backdoor_recover_tail)
 use std.math.nt
 use std.math.crypto.ecc.ecc (ecc_scalar_mult, ecc_sqrt_mod)
 
-fn dual_ec_backdoor(list: Q, any: d, any: p): any {
+fn dual_ec_backdoor(list Q, any d, any p) any {
    "Compute the backdoor point P for Dual_EC_DRBG given Q and secret scalar d.
    The backdoor relationship is P = d * Q on the elliptic curve over Fp.
    Q: point [x, y] on the curve
@@ -21,7 +24,7 @@ fn dual_ec_backdoor(list: Q, any: d, any: p): any {
    P
 }
 
-fn dual_ec_backdoor_recover_tail(any: observed, any: d, list: Q, any: curve_a, any: curve_b, any: p, int: full_x_bytes=32, int: emitted_bytes=30, int: check_bytes=2, int: tail_bytes=28, any: high_start=0, any: high_stop=nil): any {
+fn dual_ec_backdoor_recover_tail(any observed, any d, list Q, any curve_a, any curve_b, any p, int full_x_bytes=32, int emitted_bytes=30, int check_bytes=2, int tail_bytes=28, any high_start=0, any high_stop=nil) any {
    "Recover a future Dual_EC truncated-output tail from one concatenated output window.
    `observed` is emitted_bytes from x(sQ) followed by check_bytes from the next emitted block.
    The helper brute-forces the missing high bytes of x(sQ), applies the backdoor scalar d,
@@ -62,7 +65,7 @@ fn dual_ec_backdoor_recover_tail(any: observed, any: d, list: Q, any: curve_a, a
    nil
 }
 
-fn dual_ec_drbg_predict(list: outputs, list: P, list: Q, any: p): any {
+fn dual_ec_drbg_predict(list outputs, list P, list Q, any p) any {
    "Predict future Dual_EC_DRBG outputs given observed outputs and curve points.
    Given outputs [s1, s2, ...] and the backdoor relationship P = d*Q,
    recover the internal state and predict the next output.
@@ -121,7 +124,7 @@ fn dual_ec_drbg_predict(list: outputs, list: P, list: Q, any: p): any {
    next_state.get(0)
 }
 
-fn _ec_scalar_mult(any: k, any: px, any: py, any: p): list {
+fn _ec_scalar_mult(any k, any px, any py, any p) list {
    "Internal: Multiply point P by scalar k using double-and-add on curve y^2 = x^3 + x over Fp.
    Returns the resulting point [x, y]."
    if(k == 0){ return [0, 0] }
@@ -146,7 +149,7 @@ fn _ec_scalar_mult(any: k, any: px, any: py, any: p): list {
    if(has_result){ [qx, qy] } else { [0, 0] }
 }
 
-fn _ec_point_add(any: x1, any: y1, any: x2, any: y2, any: p): list {
+fn _ec_point_add(any x1, any y1, any x2, any y2, any p) list {
    "Internal: Add two points on y^2 = x^3 + x over Fp(curve with a=1, b=0).
    Returns the resulting point [x3, y3]."
    if(x1 == 0 && y1 == 0){ return [x2, y2] }

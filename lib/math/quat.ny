@@ -1,10 +1,12 @@
-;; Keywords: quat quaternion
+;; Keywords: quat quaternion math crypto
 ;; Quaternion mathematics for Nytrix
+;; References:
+;; - std.math.crypto
 module std.math.crypto.quat(quat, quat_identity, quat_mul, quat_dot, quat_norm, quat_slerp, quat_to_mat4, mul)
 use std.core
 use std.math
 
-fn quat(any: x=0, any: y=0, any: z=0, any: w=1): list {
+fn quat(any x=0, any y=0, any z=0, any w=1) list {
    "Creates a 4-component quaternion [x, y, z, w]. Defaults to identity if no arguments provided."
    def q = list(4)
    q[0] = x
@@ -15,17 +17,17 @@ fn quat(any: x=0, any: y=0, any: z=0, any: w=1): list {
    q
 }
 
-fn quat_identity(): list {
+fn quat_identity() list {
    "Returns a new identity quaternion [0, 0, 0, 1] representing no rotation."
    quat(0, 0, 0, 1)
 }
 
-fn quat_dot(list: a, list: b): any {
+fn quat_dot(list a, list b) any {
    "Returns the scalar dot product of quaternions `a` and `b`."
    a.get(0) * b.get(0) + a.get(1) * b.get(1) + a.get(2) * b.get(2) + a.get(3) * b.get(3)
 }
 
-fn quat_norm(list: q): list {
+fn quat_norm(list q) list {
    "Returns a new normalized(unit-length) quaternion derived from `q`. If `q` has zero length, returns identity."
    def d2 = quat_dot(q, q)
    if(d2 == 0){ return quat_identity() }
@@ -33,7 +35,7 @@ fn quat_norm(list: q): list {
    quat(q.get(0) * inv_l, q.get(1) * inv_l, q.get(2) * inv_l, q.get(3) * inv_l)
 }
 
-fn quat_mul(list: a, list: b): list {
+fn quat_mul(list a, list b) list {
    "Returns the Hamilton product of quaternions `a` and `b` (composing rotations `a` after `b`)."
    def ax, ay, az, aw = a.get(0), a.get(1), a.get(2), a.get(3)
    def bx, by, bz, bw = b.get(0), b.get(1), b.get(2), b.get(3)
@@ -45,7 +47,7 @@ fn quat_mul(list: a, list: b): list {
    )
 }
 
-fn quat_slerp(list: a, list: b, any: t): list {
+fn quat_slerp(list a, list b, any t) list {
    "Performs spherical linear interpolation(SLERP) between quaternions `a` and `b` by factor `t` [0, 1]."
    mut cos_theta = quat_dot(a, b)
    mut b_rot = b
@@ -54,7 +56,6 @@ fn quat_slerp(list: a, list: b, any: t): list {
       b_rot = quat(-b.get(0), -b.get(1), -b.get(2), -b.get(3))
    }
    if(cos_theta > 0.9995){
-      ; Linear interpolation for very close angles
       def it = 1 - t
       return quat_norm(quat(
             a.get(0) * it + b_rot.get(0) * t,
@@ -75,7 +76,7 @@ fn quat_slerp(list: a, list: b, any: t): list {
    )
 }
 
-fn quat_to_mat4(list: q): list {
+fn quat_to_mat4(list q) list {
    "Converts quaternion `q` to a 4x4 rotation matrix representation."
    def nq = quat_norm(q)
    def x, y, z, w = nq.get(0), nq.get(1), nq.get(2), nq.get(3)
@@ -96,8 +97,18 @@ fn quat_to_mat4(list: q): list {
    m
 }
 
-fn mul(any: a, any: b): any {
+fn mul(any a, any b) any {
    "Generic multiplication operator supporting quaternion-quaternion products."
    if(is_list(a) && a.len == 4 && is_list(b) && b.len == 4){ return quat_mul(a, b) }
    a * b
+}
+
+#main {
+   def id = quat_identity()
+   assert(id == [0, 0, 0, 1] && quat_dot(id, id) == 1, "quat identity dot")
+   assert(quat_norm([0, 0, 0, 0]) == id, "quat zero normalizes to identity")
+   def m = quat_to_mat4(quat(1, 0, 0, 0))
+   assert(m.len == 16 && m[0] == 1.0 && m[5] == -1.0 && m[10] == -1.0, "quat mat4 axes")
+   assert(quat_mul(id, quat(1, 2, 3, 4)) == quat(1, 2, 3, 4), "quat multiply identity")
+   print("✓ std.math.crypto.quat self-test passed")
 }

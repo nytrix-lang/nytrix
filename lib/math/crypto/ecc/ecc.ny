@@ -1,9 +1,12 @@
-;; Keywords: ecc
+;; Keywords: crypto ecc elliptic-curve public-key group-theory math
 ;; Elliptic-curve routines for elliptic-curve point arithmetic and curve operations.
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; Public operations favor correctness and simple affine behavior.
 ;; Jacobian helpers remain exported for callers that need them.
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.ecc(ecc_point_add, ecc_point_double, ecc_scalar_mult, ecc_scalar_mult_jacobian,
    ecc_negate, ecc_sub, ecc_is_on_curve, ecc_parameter_recovery,
    ecc_curve_secp256k1, ecc_curve_p256, ecc_curve_p384, ecc_sqrt_mod,
@@ -12,30 +15,30 @@ ecc_precompute_table, ecc_glv_decompose)
 
 use std.math.nt
 
-fn ecc_point_add(any: P, any: Q, any: a, any: p): any {
+fn ecc_point_add(any P, any Q, any a, any p) any {
    "Add points P and Q in Affine coordinates."
    def Pj, Qj = ecc_to_jacobian(P, p), ecc_to_jacobian(Q, p)
    ecc_from_jacobian(ecc_jacobian_add(Pj, Qj, a, p), p)
 }
 
-fn ecc_point_double(any: P, any: a, any: p): any {
+fn ecc_point_double(any P, any a, any p) any {
    "Double point P in Affine coordinates."
    ecc_from_jacobian(ecc_jacobian_double(ecc_to_jacobian(P, p), a, p), p)
 }
 
-fn ecc_scalar_mult(any: k, any: P, any: a, any: p, any: n=nil): any {
+fn ecc_scalar_mult(any k, any P, any a, any p, any n=nil) any {
    "Scalar multiplication k*P using Jacobian binary double-and-add."
    if(k == 0 || P == nil){ return nil }
    ecc_from_jacobian(_ecc_scalar_mult_jacobian(k, ecc_to_jacobian(P, p), a, p), p)
 }
 
-fn ecc_scalar_mult_jacobian(any: k, any: P, any: a, any: p): list {
+fn ecc_scalar_mult_jacobian(any k, any P, any a, any p) list {
    "Scalar multiplication k*P in Jacobian space. Returns [X,Y,Z] (Jacobian)."
    if(k == 0 || P == nil){ return [Z(0), Z(1), Z(0)] }
    _ecc_scalar_mult_jacobian(k, P, a, p)
 }
 
-fn _ecc_scalar_mult_jacobian(any: k, list: Pj, any: a, any: p): list {
+fn _ecc_scalar_mult_jacobian(any k, list Pj, any a, any p) list {
    mut kk = Z(k)
    mut Pt = Pj
    if(bigint_lt(kk, Z(0))){
@@ -53,13 +56,13 @@ fn _ecc_scalar_mult_jacobian(any: k, list: Pj, any: a, any: p): list {
    R
 }
 
-fn ecc_to_jacobian(any: P, any: p): any {
+fn ecc_to_jacobian(any P, any p) any {
    "Convert affine point P=[x,y] into Jacobian [X,Y,Z] over Fp."
    if(P == nil){ return nil }
    [mod(P[0], p), mod(P[1], p), Z(1)]
 }
 
-fn ecc_from_jacobian(any: P, any: p): any {
+fn ecc_from_jacobian(any P, any p) any {
    "Convert Jacobian point [X,Y,Z] back to affine coordinates over Fp."
    if(P == nil){ return nil }
    def X = P[0] def Y = P[1] def Z = P[2]
@@ -70,7 +73,7 @@ fn ecc_from_jacobian(any: P, any: p): any {
    [mod_mul(X, Zi2, p), mod_mul(Y, Zi3, p)]
 }
 
-fn ecc_jacobian_double(any: P, any: a, any: p): list {
+fn ecc_jacobian_double(any P, any a, any p) list {
    "Double a Jacobian point on y^2 = x^3 + ax + b over Fp."
    if(P == nil || P[2] == 0 || P[1] == 0){ return [Z(0), Z(1), Z(0)] }
    def X1 = P[0] def Y1 = P[1] def Z1 = P[2]
@@ -87,7 +90,7 @@ fn ecc_jacobian_double(any: P, any: a, any: p): list {
    [X3, Y3, Z3]
 }
 
-fn ecc_jacobian_add(any: P, any: Q, any: a, any: p): any {
+fn ecc_jacobian_add(any P, any Q, any a, any p) any {
    "Add two Jacobian points on y^2 = x^3 + ax + b over Fp."
    if(P == nil){ return Q }
    if(Q == nil){ return P }
@@ -112,18 +115,18 @@ fn ecc_jacobian_add(any: P, any: Q, any: a, any: p): any {
    [X3, Y3, Z3]
 }
 
-fn ecc_negate(any: P, any: p): any {
+fn ecc_negate(any P, any p) any {
    "Return the additive inverse of affine point P over Fp."
    if(P == nil){ return nil }
    [P[0], mod_sub(0, P[1], p)]
 }
 
-fn ecc_sub(any: P, any: Q, any: a, any: p): any {
+fn ecc_sub(any P, any Q, any a, any p) any {
    "Subtract affine point Q from P over Fp."
    ecc_point_add(P, ecc_negate(Q, p), a, p)
 }
 
-fn ecc_is_on_curve(any: P, any: a, any: b, any: p): bool {
+fn ecc_is_on_curve(any P, any a, any b, any p) bool {
    "Return true when affine point P lies on y^2 = x^3 + ax + b over Fp."
    if(P == nil){ return true }
    def x = P[0] def y = P[1]
@@ -131,7 +134,7 @@ fn ecc_is_on_curve(any: P, any: a, any: b, any: p): bool {
    lhs == rhs
 }
 
-fn ecc_parameter_recovery(list: pts, any: p): any {
+fn ecc_parameter_recovery(list pts, any p) any {
    "Recover(a, b) from points on curve. Needs 2 points."
    if(pts.len < 2){ return nil }
    def P1 = pts[0] def P2 = pts[1]
@@ -145,7 +148,7 @@ fn ecc_parameter_recovery(list: pts, any: p): any {
    [a, b]
 }
 
-fn ecc_curve_secp256k1(): list {
+fn ecc_curve_secp256k1() list {
    "Return secp256k1 parameters as [p, a, b, G, n]."
    def p, a = hex_to_bigint("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"), Z(0)
    def b, n = Z(7), hex_to_bigint("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
@@ -154,7 +157,7 @@ fn ecc_curve_secp256k1(): list {
    [p, a, b, G, n]
 }
 
-fn ecc_curve_p256(): list {
+fn ecc_curve_p256() list {
    "Return NIST P-256 parameters as [p, a, b, G, n]."
    def p, a = hex_to_bigint("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF"), Z("-3")
    def b = hex_to_bigint("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B")
@@ -164,7 +167,7 @@ fn ecc_curve_p256(): list {
    [p, a, b, G, n]
 }
 
-fn ecc_curve_p384(): list {
+fn ecc_curve_p384() list {
    "Return NIST P-384 parameters as [p, a, b, G, n]."
    def p = hex_to_bigint(
       "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE" +
@@ -191,12 +194,12 @@ fn ecc_curve_p384(): list {
    [p, a, b, G, n]
 }
 
-fn ecc_sqrt_mod(any: n, any: p): any {
+fn ecc_sqrt_mod(any n, any p) any {
    "Return a square root of n modulo prime p using Tonelli-Shanks."
    tonelli_shanks(n, p)
 }
 
-fn ecc_precompute_table(any: P, any: a, any: p, int: w=4): list {
+fn ecc_precompute_table(any P, any a, any p, int w=4) list {
    "Build a small affine precomputation table for windowed scalar multiplication."
    mut table = [P]
    mut i = 1
@@ -207,7 +210,7 @@ fn ecc_precompute_table(any: P, any: a, any: p, int: w=4): list {
    table
 }
 
-fn ecc_glv_decompose(any: k, any: n): list {
+fn ecc_glv_decompose(any k, any n) list {
    "Decompose a secp256k1 scalar into GLV basis components."
    def b11 = hex_to_bigint("3086D221A7D46BCDE86C90E49284EB15")
    def b12 = bigint_neg(hex_to_bigint("E4437ED6010E88286F547FA90ABFE4C3"))

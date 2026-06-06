@@ -1,73 +1,53 @@
-;; Keywords: prng lcg
+;; Keywords: prng lcg math crypto
 ;; PRNG analysis routines for linear-congruential generator prediction and recovery.
 ;; Recover multiplier, increment, modulus from output sequence; predict next values.
 ;; x_{n+1} = a*x_n + c (mod m)
 ;; Reference:
 ;; - https://cseweb.ucsd.edu/~mihir/papers/dss-lcg.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
+;; References:
+;; - std.math.crypto.prng
+;; - std.math.crypto
 module std.math.crypto.prng.lcg(lcg_next, lcg_previous, lcg_predict_next, lcg_crack_multiplier, lcg_crack_increment, lcg_crack_modulus, lcg_crack_full, lcg_recover_state_mod_outputs, lcg_smt_recover_seed_from_bit_outputs, msvc_rand_next_state, msvc_rand_output, msvc_rand_outputs, msvc_rand_key_bytes, msvc_rand_key, msvc_rand_crypt, msvc_rand_bruteforce_seed, tlcg_modulus, tlcg_next_state, tlcg_high_output, tlcg_output_at, tlcg_recover, tlcg_recover_state)
 use std.math.nt
 use std.math.bin
 use std.math.smt
 use std.math.crypto.lattice.cvp as lcvp
 
-fn _z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
-fn _byte_len(any: data): int {
+fn _byte_len(any data) int {
    if(is_str(data) || is_bytes(data)){ return len(data) }
    data.len
 }
 
-fn _byte_at(any: data, int: i): int {
+fn _byte_at(any data, int i) int {
    if(is_str(data) || is_bytes(data)){ return load8(data, i) & 255 }
    int(data[i]) & 255
 }
 
-fn _byte_prefix_matches(any: data, any: prefix): bool {
-   def n = _byte_len(prefix)
-   if(_byte_len(data) < n){ return false }
-   mut i = 0
-   while(i < n){
-      if(_byte_at(data, i) != _byte_at(prefix, i)){ return false }
-      i += 1
-   }
-   true
-}
+fn _smt_unsat_result() dict { dict().set("sat", false) }
 
-fn _byte_suffix_matches(any: data, any: suffix): bool {
-   def n = _byte_len(suffix)
-   def m = _byte_len(data)
-   if(m < n){ return false }
-   mut i = 0
-   while(i < n){
-      if(_byte_at(data, m - n + i) != _byte_at(suffix, i)){ return false }
-      i += 1
-   }
-   true
-}
-
-fn _smt_unsat_result(): dict { dict().set("sat", false) }
-
-fn lcg_next(any: x, any: a, any: c, any: m): any {
+fn lcg_next(any x, any a, any c, any m) any {
    "Compute one LCG step: returns(a*x + c) mod m."
    (a * x + c) % m
 }
 
-fn lcg_previous(any: x, any: a, any: c, any: m): any {
+fn lcg_previous(any x, any a, any c, any m) any {
    "Invert one LCG step when a is invertible modulo m: returns a^-1*(x-c) mod m, or 0 if not invertible."
    if(gcd(a, m) != 1){ return 0 }
    def inv_a = inverse_mod(a, m)
    ((x - c) % m + m) % m * inv_a % m
 }
 
-fn lcg_predict_next(list: outputs, any: a, any: c, any: m): any {
+fn lcg_predict_next(list outputs, any a, any c, any m) any {
    "Predict the next LCG output given a list of previous outputs and known parameters.
    Returns(a * last + c) mod m."
    def n = outputs.len
    n == 0 ? 0 : lcg_next(outputs.get(n - 1), a, c, m)
 }
 
-fn lcg_crack_multiplier(list: outputs, any: m): any {
+fn lcg_crack_multiplier(list outputs, any m) any {
    "Recover LCG multiplier a from three consecutive outputs and known modulus m.
    Uses: a = (y2-y1) * (y1-y0)^-1 mod m.
    Returns a, or 0 if denominator is not invertible or not enough data."
@@ -79,7 +59,7 @@ fn lcg_crack_multiplier(list: outputs, any: m): any {
    ((y2 - y1) % m + m) % m * inverse_mod(den, m) % m
 }
 
-fn lcg_crack_increment(list: outputs, any: a, any: m): any {
+fn lcg_crack_increment(list outputs, any a, any m) any {
    "Recover LCG increment c from two consecutive outputs and known a, m.
    Uses: c = y1 - a*y0 mod m.
    Returns c, or 0 if not enough data."
@@ -88,7 +68,7 @@ fn lcg_crack_increment(list: outputs, any: a, any: m): any {
    ((y1 - a * y0) % m + m) % m
 }
 
-fn lcg_crack_modulus(list: outputs): any {
+fn lcg_crack_modulus(list outputs) any {
    "Recover LCG modulus m from a sequence of at least 4 consecutive outputs.
    Method: compute second differences t_i = y_{i+1}-y_i, then m | t_{i+1}*t_{i-1}-t_i^2.
    Take GCD of multiple such values. Returns m or 0 on failure."
@@ -108,7 +88,7 @@ fn lcg_crack_modulus(list: outputs): any {
    cand
 }
 
-fn lcg_crack_full(list: outputs): list {
+fn lcg_crack_full(list outputs) list {
    "Recover all LCG parameters [a, c, m] from at least 4 consecutive raw outputs.
    Uses GCD-based modulus recovery, then derives a and c.
    Returns [a, c, m] or [0, 0, 0] on failure."
@@ -118,7 +98,7 @@ fn lcg_crack_full(list: outputs): list {
    [a, c, m]
 }
 
-fn _lcg_state_matches_mod_outputs(any: state, list: outputs_mod, any: a, any: c, any: m, any: output_mod): bool {
+fn _lcg_state_matches_mod_outputs(any state, list outputs_mod, any a, any c, any m, any output_mod) bool {
    mut cur = _z(state)
    mut i = 0
    while(i < outputs_mod.len){
@@ -129,7 +109,7 @@ fn _lcg_state_matches_mod_outputs(any: state, list: outputs_mod, any: a, any: c,
    true
 }
 
-fn _lcg_recover_state_mod_outputs_pruned(list: outputs_mod, any: a, any: c, any: m, any: output_mod): any {
+fn _lcg_recover_state_mod_outputs_pruned(list outputs_mod, any a, any c, any m, any output_mod) any {
    def om = _z(output_mod)
    def mm = _z(m)
    def aa = _z(a)
@@ -166,7 +146,7 @@ fn _lcg_recover_state_mod_outputs_pruned(list: outputs_mod, any: a, any: c, any:
    Z(-1)
 }
 
-fn lcg_recover_state_mod_outputs(list: outputs_mod, any: a, any: c, any: m, any: output_mod): any {
+fn lcg_recover_state_mod_outputs(list outputs_mod, any a, any c, any m, any output_mod) any {
    "Recover the first raw LCG state when only `state mod output_mod` is observed.
    Parameters `a`, `c`, and `m` are known. Returns the first matching state or -1."
    if(outputs_mod.len == 0 || output_mod <= 0 || m <= 0){ return Z(-1) }
@@ -184,7 +164,7 @@ fn lcg_recover_state_mod_outputs(list: outputs_mod, any: a, any: c, any: m, any:
    Z(-1)
 }
 
-fn lcg_smt_recover_seed_from_bit_outputs(list: bits, any: a, any: c, int: modulus_bits, int: bit_index): dict {
+fn lcg_smt_recover_seed_from_bit_outputs(list bits, any a, any c, int modulus_bits, int bit_index) dict {
    "Recover an LCG seed from one leaked bit of each successive state.
    Models `x = a*x + c mod 2^modulus_bits`, then constrains
    `((x >> bit_index) & 1)` for each observed bit. The first bit constrains the
@@ -222,17 +202,17 @@ fn lcg_smt_recover_seed_from_bit_outputs(list: bits, any: a, any: c, int: modulu
    result
 }
 
-fn msvc_rand_next_state(any: state): any {
+fn msvc_rand_next_state(any state) any {
    "Advance the MSVC/Visual C `rand()` state: `state = state*214013 + 2531011 mod 2^32`."
    ((int(state) & 4294967295) * 214013 + 2531011) & 4294967295
 }
 
-fn msvc_rand_output(any: state): int {
+fn msvc_rand_output(any state) int {
    "Return the 15-bit output value produced from an already-advanced MSVC rand state."
    (int(state) >> 16) & 32767
 }
 
-fn msvc_rand_outputs(any: seed, int: count): list {
+fn msvc_rand_outputs(any seed, int count) list {
    "Generate `count` MSVC rand outputs from `seed`."
    mut state = _z(seed)
    mut out = list(count)
@@ -246,7 +226,7 @@ fn msvc_rand_outputs(any: seed, int: count): list {
    out
 }
 
-fn msvc_rand_key_bytes(any: seed, int: key_len=32, str: charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789"): list<int> {
+fn msvc_rand_key_bytes(any seed, int key_len=32, str charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789") list<int> {
    "Generate key bytes with MSVC rand outputs reduced modulo `charset.len`.
    This matches code shaped like `charset[Rand() % (sizeof(charset)-1)]`."
    if(key_len <= 0 || charset.len == 0){ return [] }
@@ -263,12 +243,12 @@ fn msvc_rand_key_bytes(any: seed, int: key_len=32, str: charset="abcdefghijklmno
    out
 }
 
-fn msvc_rand_key(any: seed, int: key_len=32, str: charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789"): str {
+fn msvc_rand_key(any seed, int key_len=32, str charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789") str {
    "Generate an ASCII key string with `msvc_rand_key_bytes`."
    msvc_rand_key_bytes(seed, key_len, charset).text
 }
 
-fn msvc_rand_crypt(any: data, any: key): list<int> {
+fn msvc_rand_crypt(any data, any key) list<int> {
    "XOR `data` with repeating `key`. `data` and `key` may be strings, bytes, or byte lists."
    def n = _byte_len(data)
    def k = _byte_len(key)
@@ -283,33 +263,7 @@ fn msvc_rand_crypt(any: data, any: key): list<int> {
    out
 }
 
-fn _msvc_rand_seed_matches(any: ciphertext, any: known_prefix, any: known_suffix, any: seed, int: key_len, str: charset): bool {
-   def n = _byte_len(ciphertext)
-   def pn = _byte_len(known_prefix)
-   def sn = _byte_len(known_suffix)
-   if(key_len <= 0 || charset.len == 0 || n < pn || n < sn){ return false }
-   mut state = int(seed)
-   mut ki = 0
-   while(ki < key_len){
-      state = msvc_rand_next_state(state)
-      def kb = load8(charset, msvc_rand_output(state) % charset.len) & 255
-      mut pos = ki
-      while(pos < pn){
-         if((_byte_at(ciphertext, pos) ^^ kb) != _byte_at(known_prefix, pos)){ return false }
-         pos += key_len
-      }
-      pos = n - sn
-      if(pos < 0){ pos = 0 }
-      while(pos < n){
-         if(pos % key_len == ki && (_byte_at(ciphertext, pos) ^^ kb) != _byte_at(known_suffix, pos - (n - sn))){ return false }
-         pos += 1
-      }
-      ki += 1
-   }
-   true
-}
-
-fn _msvc_rand_seed_matches_checks(list<int>: expected_by_ki, int: seed, int: max_ki, str: charset): bool {
+fn _msvc_rand_seed_matches_checks(list<int> expected_by_ki, int seed, int max_ki, str charset) bool {
    mut state = seed & 4294967295
    def clen = charset.len
    mut ki = 0
@@ -322,7 +276,7 @@ fn _msvc_rand_seed_matches_checks(list<int>: expected_by_ki, int: seed, int: max
    true
 }
 
-fn _msvc_rand_build_checks(any: data, any: known_prefix, any: known_suffix, int: key_len): list {
+fn _msvc_rand_build_checks(any data, any known_prefix, any known_suffix, int key_len) list {
    def n = _byte_len(data)
    mut list<int>: expected = list(key_len)
    __list_set_len(expected, key_len)
@@ -355,7 +309,7 @@ fn _msvc_rand_build_checks(any: data, any: known_prefix, any: known_suffix, int:
    [expected, max_ki, true]
 }
 
-fn msvc_rand_bruteforce_seed(any: ciphertext, any: known_prefix, int: start_seed, int: end_seed, int: key_len=32, str: charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789", any: known_suffix=""): any {
+fn msvc_rand_bruteforce_seed(any ciphertext, any known_prefix, int start_seed, int end_seed, int key_len=32, str charset="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789", any known_suffix="") any {
    "Search inclusive seed range for an MSVC-rand key that decrypts ciphertext
    to bytes matching known_prefix and optional known_suffix.
    Returns [seed, key, plaintext_bytes], or nil when no candidate matches."
@@ -381,25 +335,25 @@ fn msvc_rand_bruteforce_seed(any: ciphertext, any: known_prefix, int: start_seed
    nil
 }
 
-fn _rhs_from_y(list: ys, any: a, any: b, int: i): any { _z(ys[i + 1]) - _z(a) * _z(ys[i]) - _z(b) }
+fn _rhs_from_y(list ys, any a, any b, int i) any { _z(ys[i + 1]) - _z(a) * _z(ys[i]) - _z(b) }
 
-fn tlcg_modulus(int: modulus_bits): any {
+fn tlcg_modulus(int modulus_bits) any {
    "Return modulus `2^modulus_bits`."
    if(modulus_bits <= 0){ return Z(0) }
    bigint_lshift(Z(1), modulus_bits)
 }
 
-fn tlcg_next_state(any: state, any: a, any: b, any: m): any {
+fn tlcg_next_state(any state, any a, any b, any m) any {
    "One LCG step: `(a*state + b) mod m`."
    mod(_z(a) * _z(state) + _z(b), _z(m))
 }
 
-fn tlcg_high_output(any: state, int: low_bits): any {
+fn tlcg_high_output(any state, int low_bits) any {
    "High-part observable output when low `low_bits` bits are truncated."
    _z(state) / bigint_lshift(Z(1), low_bits)
 }
 
-fn tlcg_output_at(any: state0, any: a, any: b, int: modulus_bits, int: low_bits, int: idx): any {
+fn tlcg_output_at(any state0, any a, any b, int modulus_bits, int low_bits, int idx) any {
    "Return high output at relative index `idx` from recovered state `state0`."
    def m = tlcg_modulus(modulus_bits)
    if(m == 0){ return Z(-1) }
@@ -422,7 +376,7 @@ fn tlcg_output_at(any: state0, any: a, any: b, int: modulus_bits, int: low_bits,
    tlcg_high_output(state, low_bits)
 }
 
-fn _zero_matrix(int: rows, int: cols): list {
+fn _zero_matrix(int rows, int cols) list {
    mut out = []
    mut i = 0
    while(i < rows){
@@ -438,7 +392,7 @@ fn _zero_matrix(int: rows, int: cols): list {
    out
 }
 
-fn _scaled_high_outputs(list: outputs_high, any: trunc): list {
+fn _scaled_high_outputs(list outputs_high, any trunc) list {
    mut ys = []
    mut i = 0
    while(i < outputs_high.len){
@@ -448,7 +402,7 @@ fn _scaled_high_outputs(list: outputs_high, any: trunc): list {
    ys
 }
 
-fn _build_recover_matrix(int: n, any: a, any: m): list {
+fn _build_recover_matrix(int n, any a, any m) list {
    def dim = 2 * n - 1
    mut M, i = _zero_matrix(dim, dim), 0
    while(i < n - 1){
@@ -470,7 +424,7 @@ fn _build_recover_matrix(int: n, any: a, any: m): list {
    M
 }
 
-fn _build_recover_bounds(list: ys, any: a, any: b, any: trunc, int: n): list {
+fn _build_recover_bounds(list ys, any a, any b, any trunc, int n) list {
    mut lb, ub = [], []
    mut i = 0
    while(i < n - 1){
@@ -486,7 +440,7 @@ fn _build_recover_bounds(list: ys, any: a, any: b, any: trunc, int: n): list {
    [lb, ub]
 }
 
-fn _extract_zk_from_fin(list: fin, int: n, int: dim): list {
+fn _extract_zk_from_fin(list fin, int n, int dim) list {
    if(fin.len != dim){ return [[], []] }
    mut zs, ks = [], []
    mut i = 0
@@ -502,7 +456,7 @@ fn _extract_zk_from_fin(list: fin, int: n, int: dim): list {
    [zs, ks]
 }
 
-fn _extract_zk_from_vals(list: vals, list: ys, any: a, any: b, any: m, int: n, int: dim): list {
+fn _extract_zk_from_vals(list vals, list ys, any a, any b, any m, int n, int dim) list {
    if(vals.len != dim){ return [[], []] }
    mut zs, ks = [], []
    mut i = 0
@@ -521,7 +475,7 @@ fn _extract_zk_from_vals(list: vals, list: ys, any: a, any: b, any: m, int: n, i
    [zs, ks]
 }
 
-fn _recover_low_parts(list: outputs_high, any: a, any: b, any: m, any: trunc): list {
+fn _recover_low_parts(list outputs_high, any a, any b, any m, any trunc) list {
    def n = outputs_high.len
    if(n < 2){ return [[], []] }
    def ys = _scaled_high_outputs(outputs_high, trunc)
@@ -535,7 +489,7 @@ fn _recover_low_parts(list: outputs_high, any: a, any: b, any: m, any: trunc): l
    _extract_zk_from_vals(vals, ys, a, b, m, n, dim)
 }
 
-fn tlcg_recover(any: outputs_high, any: a, any: b, int: modulus_bits, int: low_bits): list {
+fn tlcg_recover(any outputs_high, any a, any b, int modulus_bits, int low_bits) list {
    "Recover first observed internal state from truncated high-part outputs."
    def n = is_list(outputs_high) ? outputs_high.len : 0
    if(n < 2){ return [Z(0), [], []] }
@@ -562,17 +516,17 @@ fn tlcg_recover(any: outputs_high, any: a, any: b, int: modulus_bits, int: low_b
    [ok ? state0 : Z(0), low_parts, carries]
 }
 
-fn tlcg_recover_state(any: outputs_high, any: a, any: b, int: modulus_bits, int: low_bits): any {
+fn tlcg_recover_state(any outputs_high, any a, any b, int modulus_bits, int low_bits) any {
    "Recover first observed internal state from truncated outputs, or `0` on failure."
    tlcg_recover(outputs_high, a, b, modulus_bits, low_bits)[0]
 }
 
-if(comptime{ return __main() }){
+#main {
    def seed = 18765
    def key = msvc_rand_key(seed, 32)
    def msg = "MSG{lcg}"
    def ct = msvc_rand_crypt(msg, key)
    def hit = msvc_rand_bruteforce_seed(ct, "MSG{", 18000, 19000, 32, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789", "}")
    assert(hit != nil && hit[0] == seed && hit[2] == msg.to_bytes, "MSVC rand brute-force roundtrip")
-   print("LCG_PRNG_OK")
+   print("✓ std.math.crypto.prng.lcg self-test passed")
 }

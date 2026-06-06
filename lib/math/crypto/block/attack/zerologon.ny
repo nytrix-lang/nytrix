@@ -1,15 +1,18 @@
-;; Keywords: block-cipher attack zerologon
+;; Keywords: block-cipher attack zerologon math crypto
 ;; Block-cipher attack routines for Zerologon verification and attack steps.
 ;; Model the all-zero AES-CFB8 credential condition used by ZeroLogon.
 ;; Reference:
 ;; - https://www.secura.com/uploads/whitepapers/Zerologon.pdf
 ;; - https://nvd.nist.gov/vuln/detail/CVE-2020-1472
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
+;; References:
+;; - std.math.crypto.block.attack
+;; - std.math.crypto
 module std.math.crypto.block.attack.zerologon(zerologon_attack_step, zerologon_verify)
 use std.core
 use std.math.bin
 
-fn _zero_bytes(int: n): list {
+fn _zero_bytes(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -19,7 +22,7 @@ fn _zero_bytes(int: n): list {
    out
 }
 
-fn _all_zero(list: bs): bool {
+fn _all_zero(list bs) bool {
    mut i = 0
    while(i < bs.len){
       if(bs[i] != 0){ return false }
@@ -28,7 +31,7 @@ fn _all_zero(list: bs): bool {
    bs.len > 0
 }
 
-fn zerologon_attack_step(fnptr: encrypt_oracle, int: nonce_size): dict {
+fn zerologon_attack_step(fnptr encrypt_oracle, int nonce_size) dict {
    "Try the all-zero AES-CFB8 credential condition used by ZeroLogon.
    Netlogon accepts repeated all-zero attempts because AES-CFB8 with an
    all-zero challenge can emit an all-zero credential with probability 1/256.
@@ -51,7 +54,7 @@ fn zerologon_attack_step(fnptr: encrypt_oracle, int: nonce_size): dict {
    {"attempts": attempts, "success": found, "recovered_byte": recovered}
 }
 
-fn zerologon_verify(fnptr: auth_oracle, list: session_key): bool {
+fn zerologon_verify(fnptr auth_oracle, list session_key) bool {
    "Verify recovered session key authenticates successfully.
    Uses the recovered key to compute a valid authentication signature
    and checks it against the server's expected response.

@@ -1,14 +1,17 @@
-;; Keywords: rsa d-fault
+;; Keywords: rsa d-fault math crypto
 ;; RSA private-exponent fault attack routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; Reference idea:
 ;; - bit flips during exponentiation leak bits of d through valid/faulty signatures
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.d_fault(d_fault_bits, d_fault_attack)
 use std.math.nt
 use std.math.crypto.number.partial as partial
 
-fn d_fault_bits(any: n, any: e, any: valid_sig, list: faulty_sigs): any {
+fn d_fault_bits(any n, any e, any valid_sig, list faulty_sigs) any {
    "Recover known bits of d from signatures generated with one-bit faults in d.
    Returns a PartialInteger in little-endian bit order."
    def bits_n = bit_length(Z(n))
@@ -37,7 +40,16 @@ fn d_fault_bits(any: n, any: e, any: valid_sig, list: faulty_sigs): any {
    partial.partial_integer_from_bits_le(d_bits)
 }
 
-fn d_fault_attack(any: n, any: e, any: valid_sig, list: faulty_sigs): any {
+fn d_fault_attack(any n, any e, any valid_sig, list faulty_sigs) any {
    "Return a PartialInteger view of d from valid/faulty signatures."
    d_fault_bits(n, e, valid_sig, faulty_sigs)
+}
+
+#main {
+   def n, e, d = Z(3233), Z(17), Z(2753)
+   def valid = power_mod(Z(2), d, n)
+   def faulty_bit0 = power_mod(Z(2), d - Z(1), n)
+   def out = d_fault_bits(n, e, valid, [faulty_bit0])
+   assert(out != nil, "rsa d-fault returns partial integer")
+   print("✓ std.math.crypto.rsa.d_fault self-test passed")
 }

@@ -1,12 +1,15 @@
-;; Keywords: block-cipher mode tools
+;; Keywords: block-cipher mode tools math crypto
 ;; Block mode utilities.
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.tools(detect_block_mode, recover_cbc_iv, cbc_bitflip_delta, cbc_apply_bitflip_delta, addition_block_chaining_roll, addition_block_chaining_unroll)
 use std.core
 use std.math.integer (Z)
 use std.math.crypto.block.mode.ecb
 use std.math.crypto.support.tools as support
 
-fn _xor_prefix(any: a, any: b): list {
+fn _xor_prefix(any a, any b) list {
    def n = (a.len < b.len) ? a.len : b.len
    mut out = list(n)
    mut i = 0
@@ -17,12 +20,12 @@ fn _xor_prefix(any: a, any: b): list {
    out
 }
 
-fn cbc_bitflip_delta(any: original_plain, any: target_plain): any {
+fn cbc_bitflip_delta(any original_plain, any target_plain) any {
    "Return the XOR delta needed in the previous CBC block to turn original_plain into target_plain."
    (original_plain == nil || target_plain == nil) ? nil : _xor_prefix(original_plain, target_plain)
 }
 
-fn cbc_apply_bitflip_delta(any: previous_cipher_block, any: delta): any {
+fn cbc_apply_bitflip_delta(any previous_cipher_block, any delta) any {
    "Apply a CBC bitflip delta to the previous ciphertext block."
    if(previous_cipher_block == nil || delta == nil){ return nil }
    mut out = _xor_prefix(previous_cipher_block, delta)
@@ -34,22 +37,22 @@ fn cbc_apply_bitflip_delta(any: previous_cipher_block, any: delta): any {
    out
 }
 
-fn detect_block_mode(any: ciphertext, int: block_size): str {
+fn detect_block_mode(any ciphertext, int block_size) str {
    "Heuristic block-mode detector.
    Returns one of: ecb, cbc_or_ctr, too_short."
    if(ciphertext == nil || ciphertext.len < block_size * 2){ return "too_short" }
    ecb_detect(ciphertext, block_size) > 0 ? "ecb" : "cbc_or_ctr"
 }
 
-fn _abc_block_int(list: data, int: off, int: block_size): any {
+fn _abc_block_int(list data, int off, int block_size) any {
    slice(data, off, off + block_size).long
 }
 
-fn _abc_append_fixed(list: out, any: value, int: block_size): list {
+fn _abc_append_fixed(list out, any value, int block_size) list {
    out.extend(support.bytes_fixed_from_bigint(value, block_size))
 }
 
-fn addition_block_chaining_roll(list: ecb_ciphertext, list: iv, int: block_size=16): any {
+fn addition_block_chaining_roll(list ecb_ciphertext, list iv, int block_size=16) any {
    "Apply Addition Block Chaining post-processing to ECB blocks.
    Returns iv || abc_blocks, where each block is added to the previous block
    modulo 256^block_size."
@@ -69,7 +72,7 @@ fn addition_block_chaining_roll(list: ecb_ciphertext, list: iv, int: block_size=
    out
 }
 
-fn addition_block_chaining_unroll(list: abc_ciphertext, int: block_size=16): any {
+fn addition_block_chaining_unroll(list abc_ciphertext, int block_size=16) any {
    "Undo Addition Block Chaining post-processing.
    Input must be iv || abc_blocks. Returns the original ECB-shaped blocks."
    if(abc_ciphertext == nil || block_size <= 0){ return nil }
@@ -88,7 +91,7 @@ fn addition_block_chaining_unroll(list: abc_ciphertext, int: block_size=16): any
    out
 }
 
-fn recover_cbc_iv(fnptr: decrypt_oracle_fn, any: ciphertext, int: block_size): any {
+fn recover_cbc_iv(fnptr decrypt_oracle_fn, any ciphertext, int block_size) any {
    "Recover CBC IV from a raw decryption oracle by querying c1 || 0^b || c1.
    decrypt_oracle_fn(ct) must return the raw CBC-decrypted plaintext bytes."
    if(ciphertext == nil || ciphertext.len < block_size){ return nil }

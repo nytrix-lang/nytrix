@@ -1,10 +1,12 @@
-;; Keywords: debug
+;; Keywords: core debug diagnostics trace inspect
 ;; Core Debug for Nytrix
+;; References:
+;; - std.core
 module std.core.debug(debug_print_val, debug_print, breakpoint)
 use std.core
 use std.core.io
 
-fn debug_print_val(any: val): any {
+fn debug_print_val(any val) any {
    "Prints a detailed debug representation of a single value."
    _print_write("Value(raw: ")
    _print_write(to_str(val))
@@ -17,7 +19,7 @@ fn debug_print_val(any: val): any {
    _print_write(")\n")
 }
 
-fn debug_print(...args): any {
+fn debug_print(...args) any {
    "Prints a detailed debug representation of one or more values."
    mut xs = args
    if(args.len == 1){
@@ -33,7 +35,7 @@ fn debug_print(...args): any {
    }
 }
 
-fn breakpoint(): any {
+fn breakpoint() any {
    "Triggers a debugger trap on supported architectures."
    __breakpoint()
 }

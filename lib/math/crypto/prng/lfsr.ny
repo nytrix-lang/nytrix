@@ -1,20 +1,23 @@
-;; Keywords: prng lfsr
+;; Keywords: prng lfsr math crypto
 ;; PRNG analysis routines for LFSR generation, Berlekamp-Massey, and state recovery.
 ;; Berlekamp-Massey algorithm to recover the minimal LFSR from a known bitstream.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Linear-feedback_shift_register
 ;; - https://en.wikipedia.org/wiki/Berlekamp%E2%80%93Massey_algorithm
+;; References:
+;; - std.math.crypto.prng
+;; - std.math.crypto
 module std.math.crypto.prng.lfsr(lfsr_next, lfsr_run, lfsr_keystream, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial, lfsr_connection_polynomial_mod, lfsr_berlekamp_massey, lfsr_berlekamp_massey_mod, berlekamp_massey_mod, lfsr_polynomial_str, lfsr_connection_polynomial_str, lfsr_berlekamp_massey_polynomial_str, lfsr_rewind_sequence, lfsr_recover_state, lfsr_crack_from_output)
 use std.core
 use std.math.nt
 
-fn _lfsr_modp(any: x, any: p): any {
+fn _lfsr_modp(any x, any p) any {
    def r = x % p
    if(r < 0){ return r + p }
    r
 }
 
-fn lfsr_next(any: state, list: taps, int: n_bits): list {
+fn lfsr_next(any state, list taps, int n_bits) list {
    "Compute one LFSR clock step. Returns [output_bit, new_state].
    state: integer representing register contents(LSB = bit 0 output).
    taps: list of tap positions(1-indexed from LSB, i.e. feedback polynomial).
@@ -31,7 +34,7 @@ fn lfsr_next(any: state, list: taps, int: n_bits): list {
    [out, new_state]
 }
 
-fn lfsr_run(any: initial_state, list: taps, int: n_bits, int: steps): list {
+fn lfsr_run(any initial_state, list taps, int n_bits, int steps) list {
    "Run LFSR for given number of steps from initial_state.
    Returns [bit_list, final_state]."
    mut state = initial_state
@@ -46,14 +49,14 @@ fn lfsr_run(any: initial_state, list: taps, int: n_bits, int: steps): list {
    [bits, state]
 }
 
-fn lfsr_keystream(any: initial_state, list: taps, int: n_bits, int: length): list {
+fn lfsr_keystream(any initial_state, list taps, int n_bits, int length) list {
    "Generate a keystream of `length` bits from the LFSR.
    Returns the bit list."
    def r = lfsr_run(initial_state, taps, n_bits, length)
    r.get(0)
 }
 
-fn lfsr_sequence(list: key, list: fill, int: n, any: p=2): list {
+fn lfsr_sequence(list key, list fill, int n, any p=2) list {
    "Reference LFSR sequence over Z/pZ.
    key and fill are coefficient/state lists over Z/pZ. The output emits the
    leftmost state entry each step and appends sum(key[i] * old_state[i])."
@@ -84,7 +87,7 @@ fn lfsr_sequence(list: key, list: fill, int: n, any: p=2): list {
    out
 }
 
-fn lfsr_autocorrelation(list: xs, any: period, any: shift): list {
+fn lfsr_autocorrelation(list xs, any period, any shift) list {
    "Return autocorrelation numerator/denominator [sum(seq[i]*seq[i+k]), period]."
    if(!is_list(xs)){ panic("lfsr_autocorrelation: sequence must be a list") }
    def p, k = int(period), int(shift)
@@ -98,7 +101,7 @@ fn lfsr_autocorrelation(list: xs, any: period, any: shift): list {
    [num, p]
 }
 
-fn lfsr_berlekamp_massey_mod(list: xs, any: p): list {
+fn lfsr_berlekamp_massey_mod(list xs, any p) list {
    "Berlekamp-Massey over GF(p). Returns `[linear_complexity, connection_coeffs]`.
    `connection_coeffs` are constant-first and satisfy
    `s[n] + c[1]*s[n-1] + ... + c[L]*s[n-L] = 0 mod p`."
@@ -140,7 +143,7 @@ fn lfsr_berlekamp_massey_mod(list: xs, any: p): list {
    [L, C]
 }
 
-fn lfsr_berlekamp_massey(list: bits): list {
+fn lfsr_berlekamp_massey(list bits) list {
    "Find the minimal LFSR that generates the given bit sequence using the
    Berlekamp-Massey algorithm. Works over GF(2).
    bits: list of 0/1 values.
@@ -149,7 +152,7 @@ fn lfsr_berlekamp_massey(list: bits): list {
    lfsr_berlekamp_massey_mod(bits, 2)
 }
 
-fn lfsr_connection_polynomial_mod(list: xs, any: p): list {
+fn lfsr_connection_polynomial_mod(list xs, any p) list {
    "Return minimal polynomial coefficients over GF(p), constant-first and monic."
    def bm = lfsr_berlekamp_massey_mod(xs, p)
    def c = bm.get(1)
@@ -162,19 +165,19 @@ fn lfsr_connection_polynomial_mod(list: xs, any: p): list {
    out
 }
 
-fn berlekamp_massey_mod(list: xs, any: p): list {
+fn berlekamp_massey_mod(list xs, any p) list {
    "Return the monic minimal polynomial over GF(p), constant-first."
    lfsr_connection_polynomial_mod(xs, p)
 }
 
-fn lfsr_connection_polynomial(list: bits): list {
+fn lfsr_connection_polynomial(list bits) list {
    "Return the connection polynomial coefficients for a GF(2) sequence.
    This is the reverse of the Berlekamp-Massey polynomial representation used
    by `lfsr_berlekamp_massey`."
    lfsr_connection_polynomial_mod(bits, 2)
 }
 
-fn lfsr_polynomial_str(list: coeffs, str: variable="x"): str {
+fn lfsr_polynomial_str(list coeffs, str variable="x") str {
    "Format monic polynomial coefficients in descending-degree order."
    mut out = ""
    def degree = coeffs.len - 1
@@ -198,18 +201,18 @@ fn lfsr_polynomial_str(list: coeffs, str: variable="x"): str {
    out.len == 0 ? "0" : out
 }
 
-fn lfsr_connection_polynomial_str(list: bits, str: variable="x"): str {
+fn lfsr_connection_polynomial_str(list bits, str variable="x") str {
    "Return the Sage-style connection polynomial string for a GF(2) sequence."
    lfsr_polynomial_str(lfsr_connection_polynomial(bits), variable)
 }
 
-fn lfsr_berlekamp_massey_polynomial_str(list: bits, str: variable="x"): str {
+fn lfsr_berlekamp_massey_polynomial_str(list bits, str variable="x") str {
    "Return the Sage-style Berlekamp-Massey polynomial string for a GF(2) sequence."
    def bm = lfsr_berlekamp_massey(bits)
    lfsr_polynomial_str(bm.get(1), variable)
 }
 
-fn lfsr_rewind_sequence(list: window, list: connection_coeffs, int: steps): list {
+fn lfsr_rewind_sequence(list window, list connection_coeffs, int steps) list {
    "Rewind a GF(2) LFSR output window by `steps` clocks.
    `window` is `[s[t], ..., s[t+L-1]]`.
    `connection_coeffs` is the Berlekamp-Massey form `[1, c1, ..., cL]`
@@ -240,7 +243,7 @@ fn lfsr_rewind_sequence(list: window, list: connection_coeffs, int: steps): list
    state
 }
 
-fn lfsr_recover_state(list: bits, list: taps, int: n_bits): any {
+fn lfsr_recover_state(list bits, list taps, int n_bits) any {
    "Recover the LFSR initial state from known output bits.
    Tries all 2^n_bits possible initial states and returns the one
    that produces the observed bits(or nil if not found).
@@ -266,7 +269,7 @@ fn lfsr_recover_state(list: bits, list: taps, int: n_bits): any {
    nil
 }
 
-fn lfsr_crack_from_output(list: bits): list {
+fn lfsr_crack_from_output(list bits) list {
    "Crack LFSR parameters from known output bitstream using Berlekamp-Massey.
    Returns [length, polynomial] where polynomial coefficients indicate taps.
    Use the returned length and polynomial to predict future bits."

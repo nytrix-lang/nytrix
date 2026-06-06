@@ -1,16 +1,19 @@
-;; Keywords: rsa hastad
+;; Keywords: rsa hastad math crypto
 ;; RSA Hastad broadcast attack routines.
 ;; CRT combines e ciphertexts to get M^e over Z, then takes the eth root.
 ;; Works because M^e < product of moduli when e is small.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.hastad(hastad_solve, hastad_find, hastad_attack, hastad_attack_report, hastads_attack)
 use std.math.nt
 
-fn _hastad_exp(any: e): int { is_bigint(e) ? bigint_to_int(e) : int(e) }
+fn _hastad_exp(any e) int { is_bigint(e) ? bigint_to_int(e) : int(e) }
 
-fn hastad_solve(list: ns, list: cs, any: e): any {
+fn hastad_solve(list ns, list cs, any e) any {
    "Recover plaintext m from Hastad's broadcast attack.
    ns: list of distinct moduli n_i(pairwise coprime).
    cs: list of ciphertexts c_i = m^e mod n_i.
@@ -42,7 +45,7 @@ fn hastad_solve(list: ns, list: cs, any: e): any {
    nil
 }
 
-fn _hastad_next_combo(list: combo, int: n, int: k): bool {
+fn _hastad_next_combo(list combo, int n, int k) bool {
    mut i = k - 1
    while(i >= 0){
       if(combo.get(i) < n - k + i){
@@ -59,7 +62,7 @@ fn _hastad_next_combo(list: combo, int: n, int: k): bool {
    false
 }
 
-fn _hastad_subset(list: ns, list: cs, list: combo): list {
+fn _hastad_subset(list ns, list cs, list combo) list {
    mut sub_ns, sub_cs = [], []
    mut i = 0
    while(i < combo.len){
@@ -70,7 +73,7 @@ fn _hastad_subset(list: ns, list: cs, list: combo): list {
    [sub_ns, sub_cs]
 }
 
-fn hastad_find(list: ns, list: cs, any: e): any {
+fn hastad_find(list ns, list cs, any e) any {
    "Scan e-sized recipient subsets for a valid Hastad broadcast recovery.
    Returns [m, indices] or nil."
    def ee = _hastad_exp(e)
@@ -90,12 +93,12 @@ fn hastad_find(list: ns, list: cs, any: e): any {
    nil
 }
 
-fn hastad_attack(list: ns, any: e, list: cs): any {
+fn hastad_attack(list ns, any e, list cs) any {
    "Hastad broadcast attack entrypoint."
    hastad_solve(ns, cs, e)
 }
 
-fn hastad_attack_report(list: ns, any: e, list: cs): dict {
+fn hastad_attack_report(list ns, any e, list cs) dict {
    "Explain a Hastad broadcast recovery attempt.
    Returns a report with sample counts, selected indices, recovered plaintext
    when successful, and a short reason when recovery fails."
@@ -129,7 +132,7 @@ fn hastad_attack_report(list: ns, any: e, list: cs): dict {
    }
 }
 
-fn hastads_attack(list: ns, any: e, list: cs): any {
+fn hastads_attack(list ns, any e, list cs) any {
    "Pluralized alias for multi-key broadcast inputs."
    hastad_attack(ns, e, cs)
 }

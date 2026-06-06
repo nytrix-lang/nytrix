@@ -1,12 +1,15 @@
-;; Keywords: factorization chunked-primes
+;; Keywords: factorization chunked-primes math crypto number-theory
 ;; Integer-factorization routines for structured-prime factorization for chunked or limb-shaped primes.
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.chunked_primes(chunked_prime_factor, chunked_prime_factor_params, chunked_prime_factor_with_limb_factors, chunked_low_limb_factors, factor_chunked_primes)
 use std.core
 use std.math.nt (Z, bit_length, gcd, inverse_mod, factor, factordb_factor, is_prime, next_prime)
 use std.math.crypto.factorization.ecm as ecm
 use std.math.crypto.factorization.pollard as pollard
 
-fn _chunked_product(list: facs): any {
+fn _chunked_product(list facs) any {
    mut prod = Z(1)
    mut i = 0
    while(i < facs.len){
@@ -21,7 +24,7 @@ fn _chunked_product(list: facs): any {
    prod
 }
 
-fn _chunked_factor_low_limb(any: n): any {
+fn _chunked_factor_low_limb(any n) any {
    def nn = Z(n)
    def fd = factordb_factor(nn, false)
    if(is_list(fd)){
@@ -30,7 +33,7 @@ fn _chunked_factor_low_limb(any: n): any {
    _chunked_factor_local(nn)
 }
 
-fn _chunked_pack_flat(list: flat): list {
+fn _chunked_pack_flat(list flat) list {
    mut out = []
    mut i = 0
    while(i < flat.len){
@@ -51,7 +54,7 @@ fn _chunked_pack_flat(list: flat): list {
    out
 }
 
-fn _chunked_trial_factor(any: n, int: bound): any {
+fn _chunked_trial_factor(any n, int bound) any {
    def nn = Z(n)
    if(nn % Z(2) == Z(0)){ return Z(2) }
    mut p = Z(3)
@@ -63,7 +66,7 @@ fn _chunked_trial_factor(any: n, int: bound): any {
    nil
 }
 
-fn _chunked_split_once(any: n): any {
+fn _chunked_split_once(any n) any {
    def nn = Z(n)
    def small = _chunked_trial_factor(nn, 200000)
    if(small != nil){ return small }
@@ -76,7 +79,7 @@ fn _chunked_split_once(any: n): any {
    pollard.pollard_brent(nn, Z(2), Z(1), 128, 50000)
 }
 
-fn _chunked_factor_flat_rec(any: n, list: out): list {
+fn _chunked_factor_flat_rec(any n, list out) list {
    def nn = Z(n)
    if(nn == Z(1)){ return out }
    if(is_prime(nn)){ return out.append(nn) }
@@ -87,7 +90,7 @@ fn _chunked_factor_flat_rec(any: n, list: out): list {
    _chunked_factor_flat_rec(nn / f, a)
 }
 
-fn _chunked_factor_flat_from_factor(list: facs, list: out): list {
+fn _chunked_factor_flat_from_factor(list facs, list out) list {
    mut acc = out
    mut i = 0
    while(i < facs.len){
@@ -102,18 +105,18 @@ fn _chunked_factor_flat_from_factor(list: facs, list: out): list {
    acc
 }
 
-fn _chunked_factor_local(any: n): any {
+fn _chunked_factor_local(any n) any {
    def flat = _chunked_factor_flat_rec(n, [])
    def packed = _chunked_pack_flat(flat)
    _chunked_product(packed) == Z(n) ? packed : nil
 }
 
-fn chunked_low_limb_factors(any: n, int: limb_bits=512): any {
+fn chunked_low_limb_factors(any n, int limb_bits=512) any {
    "Return the factorization used for the public low limb `n mod 2^limb_bits`."
    _chunked_factor_low_limb(Z(n) % (Z(1) << Z(limb_bits)))
 }
 
-fn _chunked_append_divisors(list: facs, int: i, any: a, any: bound, int: lo, int: hi, list: out): list {
+fn _chunked_append_divisors(list facs, int i, any a, any bound, int lo, int hi, list out) list {
    if(a > bound){ return out }
    if(i == facs.len){
       def bits = bit_length(a)
@@ -131,7 +134,7 @@ fn _chunked_append_divisors(list: facs, int: i, any: a, any: bound, int: lo, int
    acc
 }
 
-fn _chunked_try_low(any: n, any: R, any: B, any: t, any: n1, any: n2, any: cp, int: min_factor_bits): any {
+fn _chunked_try_low(any n, any R, any B, any t, any n1, any n2, any cp, int min_factor_bits) any {
    mut cpl, cq = cp, t / cp
    if(cpl > cq){
       cpl = t / cp
@@ -182,7 +185,7 @@ fn _chunked_try_low(any: n, any: R, any: B, any: t, any: n1, any: n2, any: cp, i
    nil
 }
 
-fn chunked_prime_factor_params(any: n, int: limb_bits, int: small_limb_bits, any: windows, int: min_factor_bits): any {
+fn chunked_prime_factor_params(any n, int limb_bits, int small_limb_bits, any windows, int min_factor_bits) any {
    "Recover RSA factors when p and q are built from R=2^limb_bits chunks and both low chunks multiply without carry.
    FactorDB is tried for the public low limb first ; local fallback stays bounded for small limbs."
    def nn = Z(n)
@@ -195,8 +198,8 @@ fn chunked_prime_factor_params(any: n, int: limb_bits, int: small_limb_bits, any
 }
 
 fn chunked_prime_factor_with_limb_factors(
-   any: n, list: facs, int: limb_bits=512, int: small_limb_bits=256, any: windows=nil, int: min_factor_bits=1000
-): any {
+   any n, list facs, int limb_bits=512, int small_limb_bits=256, any windows=nil, int min_factor_bits=1000
+) any {
    "Recover chunked-prime RSA factors using a supplied factorization of `n mod 2^limb_bits`."
    def nn = Z(n)
    def R = Z(1) << Z(limb_bits)
@@ -221,12 +224,12 @@ fn chunked_prime_factor_with_limb_factors(
    nil
 }
 
-fn chunked_prime_factor(any: n): any {
+fn chunked_prime_factor(any n) any {
    "Recover RSA factors for the common 512-bit limb / 256-bit low-chunk construction."
    chunked_prime_factor_params(n, 512, 256, [[248, 264], [240, 272], [232, 280], [224, 288], [1, 256]], 1000)
 }
 
-fn factor_chunked_primes(any: n): any {
+fn factor_chunked_primes(any n) any {
    "Alias for chunked_prime_factor."
    chunked_prime_factor(n)
 }

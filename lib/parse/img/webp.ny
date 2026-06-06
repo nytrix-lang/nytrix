@@ -1,22 +1,26 @@
-;; Keywords: image webp
+;; Keywords: image webp parse
 ;; WebP Image Loader for Nytrix using libwebp
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.webp(decode)
 #include <webp/decode.h>
 extern "webp" {
-   fn WebPGetInfo(ptr: data, u64: data_size, ptr: width_p, ptr: height_p): i32
-   fn WebPDecodeRGBAInto(ptr: data, u64: data_size, ptr: output_buffer, u64: output_buffer_size, i32: output_stride): ptr
+   fn WebPGetInfo(ptr data, u64 data_size, ptr width_p, ptr height_p) i32
+   fn WebPDecodeRGBAInto(ptr data, u64 data_size, ptr output_buffer, u64 output_buffer_size, i32 output_stride) ptr
 }
 
 use std.core
 use std.core.dict_mod
 
-fn _raw_ptr(any: p): any {
+fn _raw_ptr(any p) any {
+   "Runs the WebPDecodeRGBAInto operation."
    if(!p){ return 0 }
    if(is_int(p)){ return to_int(p) }
    p
 }
 
-fn decode(str: data): any {
+fn decode(str data) any {
    "Decodes WebP bytes into an image dict with RGBA pixel data, or 0 on failure."
    if(!is_str(data) || data.len < 12){ return 0 }
    def w_p, h_p = zalloc(4), zalloc(4)

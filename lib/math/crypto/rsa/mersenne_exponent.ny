@@ -1,13 +1,16 @@
-;; Keywords: rsa mersenne-exponent
+;; Keywords: rsa mersenne-exponent math crypto
 ;; RSA attacks involving Mersenne-shaped exponents routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.mersenne_exponent(rsa_mersenne_plaintext_from_factors, rsa_mersenne_plaintext_scan_from_factors)
 use std.math.nt
 use std.math.bin
 use std.core.str as str
 
-fn _rsa_mersenne_plain_from_power(any: mg, any: g): any {
+fn _rsa_mersenne_plain_from_power(any mg, any g) any {
    if(g == Z(1)){ return Z(mg).bytes.text }
    def gi = bigint_to_int(g)
    if(gi <= 1 || gi > 1000000){ return nil }
@@ -16,7 +19,7 @@ fn _rsa_mersenne_plain_from_power(any: mg, any: g): any {
    Z(m).bytes.text
 }
 
-fn rsa_mersenne_plaintext_from_factors(any: n, any: c, any: p, any: q, int: k): any {
+fn rsa_mersenne_plaintext_from_factors(any n, any c, any p, any q, int k) any {
    "Decrypt RSA where e = 2^k - 1 and factors p,q are known.
    If gcd(e, phi)>1, returns the exact g-th-root plaintext when it exists.
    Returns [k, gcd(e, phi), plaintext] or nil."
@@ -42,8 +45,8 @@ fn rsa_mersenne_plaintext_from_factors(any: n, any: c, any: p, any: q, int: k): 
 }
 
 fn rsa_mersenne_plaintext_scan_from_factors(
-   any: n, any: c, any: p, any: q, int: max_k, str: prefix="", str: suffix=""
-): any {
+   any n, any c, any p, any q, int max_k, str prefix="", str suffix=""
+) any {
    "Scan k for e = 2^k - 1 and return [k, gcd(e, phi), plaintext].
    Optional prefix/suffix filters keep plaintext selection deterministic."
    def phi = (Z(p) - Z(1)) * (Z(q) - Z(1))

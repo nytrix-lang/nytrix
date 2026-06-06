@@ -1,7 +1,10 @@
-;; Keywords: lattice cvp
+;; Keywords: lattice cvp math crypto number-theory
 ;; Lattice routines for closest-vector and bounded modular linear solving.
 ;; Reference:
 ;; - https://cims.nyu.edu/~regev/teaching/lattices_fall_2004/ln/cvp.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.cvp(build_lattice, solve_inequality, solve_inequality_ex, cvp, cvp_report, cvp_babai, cvp_babai_report, cvp_enumerate, cvp_enumerate_report, cvp_list_gso_count_report, cvp_gso_bound_report, affine_cvp, bounded, bounded_ex, qary_lattice, reduce_mod_p, solve_weighted_bounds, solve_multi_mod_linear, solve_underconstrained_linear, enum_brute, mod_arc_is_inside, mod_arc_has_solution, mod_arc_optf, mod_arc_solve_range)
 use std.math.nt
 use std.math.big
@@ -13,7 +16,7 @@ use std.core.str (atof)
 use std.os.clock (ticks)
 use std.os.prim (env)
 
-fn _cvp_set_fields(dict: out, list: fields): dict {
+fn _cvp_set_fields(dict out, list fields) dict {
    mut i = 0
    while(i < fields.len){
       def field = fields.get(i)
@@ -23,27 +26,27 @@ fn _cvp_set_fields(dict: out, list: fields): dict {
    out
 }
 
-fn _z(any: x): bigint { is_bigint(x) ? x : Z(x) }
+fn _z(any x) bigint { is_bigint(x) ? x : Z(x) }
 
-fn _cvp_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _cvp_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _cvp_nodes_per_sec(int: nodes, any: elapsed_ms): f64 {
+fn _cvp_nodes_per_sec(int nodes, any elapsed_ms) f64 {
    def ms = float(elapsed_ms)
    ms <= 0.0 ? 0.0 : float(nodes) * 1000.0 / ms
 }
 
-fn _cvp_finish_report(any: out, any: t0): dict {
+fn _cvp_finish_report(any out, any t0) dict {
    def elapsed = _cvp_elapsed_ms(t0)
    out["elapsed_ms"] = elapsed
    out.set("nodes_per_sec", _cvp_nodes_per_sec(int(out.get("nodes", 0)), elapsed))
 }
 
-fn _cvp_count_level(list: nodes_by_level, int: idx): list {
+fn _cvp_count_level(list nodes_by_level, int idx) list {
    if(idx >= 0 && idx < nodes_by_level.len){ nodes_by_level[idx] = int(nodes_by_level[idx]) + 1 }
    nodes_by_level
 }
 
-fn _cvp_enum_report_common(dict: out, bool: reduced, int: coeff_bound, int: max_nodes, int: nodes, list: nodes_by_level, bool: hit_limit, int: radius_levels, any: radius_sq, list: vector, any: distance_sq, bool: verified, list: basis): dict {
+fn _cvp_enum_report_common(dict out, bool reduced, int coeff_bound, int max_nodes, int nodes, list nodes_by_level, bool hit_limit, int radius_levels, any radius_sq, list vector, any distance_sq, bool verified, list basis) dict {
    {
       "method": out.get("method", "gso-bounded-enumeration"),
       "ok": true,
@@ -62,14 +65,14 @@ fn _cvp_enum_report_common(dict: out, bool: reduced, int: coeff_bound, int: max_
    }
 }
 
-fn _cvp_attach_gso_reuse_report(any: out, int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source): dict {
+fn _cvp_attach_gso_reuse_report(any out, int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source) dict {
    _cvp_set_fields(out, [
          ["input_gso_builds", input_gso_builds], ["work_gso_builds", work_gso_builds],
          ["input_gso_reused", input_gso_reused], ["work_gso_source", work_gso_source],
    ])
 }
 
-fn _cvp_attach_enum_context(any: out, any: reduction_report, str: candidate_mode, any: residual, any: coords, int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source): dict {
+fn _cvp_attach_enum_context(any out, any reduction_report, str candidate_mode, any residual, any coords, int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source) dict {
    out = _cvp_set_fields(out, [
          ["reduction", reduction_report], ["candidate_mode", candidate_mode],
          ["residualization", residual], ["target_coordinates", coords],
@@ -77,14 +80,14 @@ fn _cvp_attach_enum_context(any: out, any: reduction_report, str: candidate_mode
    _cvp_attach_gso_reuse_report(out, input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source)
 }
 
-fn _cvp_enum_context_common(dict: out, bool: reduced, int: coeff_bound, int: max_nodes, int: nodes, list: nodes_by_level, bool: hit_limit, int: radius_levels, any: radius_sq, list: vector, any: distance_sq, bool: verified, list: basis, any: reduction_report, str: candidate_mode, any: residual, any: coords, int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source): dict {
+fn _cvp_enum_context_common(dict out, bool reduced, int coeff_bound, int max_nodes, int nodes, list nodes_by_level, bool hit_limit, int radius_levels, any radius_sq, list vector, any distance_sq, bool verified, list basis, any reduction_report, str candidate_mode, any residual, any coords, int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source) dict {
    _cvp_attach_enum_context(
       _cvp_enum_report_common(out, reduced, coeff_bound, max_nodes, nodes, nodes_by_level, hit_limit, radius_levels, radius_sq, vector, distance_sq, verified, basis),
       reduction_report, candidate_mode, residual, coords,
    input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source)
 }
 
-fn _cvp_big_float(any: x): f64 {
+fn _cvp_big_float(any x) f64 {
    def z = Z(x)
    def neg = z < Z(0)
    def abs_z = neg ? Z(0) - z : z
@@ -109,14 +112,14 @@ fn _cvp_big_float(any: x): f64 {
    neg ? (0.0 - out) : out
 }
 
-fn _cvp_float(any: x): f64 { is_bigint(x) ? _cvp_big_float(x) : float(x) }
+fn _cvp_float(any x) f64 { is_bigint(x) ? _cvp_big_float(x) : float(x) }
 
-fn _at(any: v, int: i, any: fallback): any {
+fn _at(any v, int i, any fallback) any {
    if(!is_list(v) || i < 0 || i >= v.len){ return fallback }
    v[i]
 }
 
-fn _tail_vec(list: vals, int: offset, int: count): list {
+fn _tail_vec(list vals, int offset, int count) list {
    mut out = []
    mut i = 0
    while(i < count){
@@ -126,12 +129,12 @@ fn _tail_vec(list: vals, int: offset, int: count): list {
    out
 }
 
-fn _abs_z(any: x): bigint {
+fn _abs_z(any x) bigint {
    def zx = _z(x)
    zx < 0 ? -zx : zx
 }
 
-fn _vec_add(list: a, list: b): list {
+fn _vec_add(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -141,7 +144,7 @@ fn _vec_add(list: a, list: b): list {
    out
 }
 
-fn _vec_sub(list: a, list: b): list {
+fn _vec_sub(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -151,7 +154,7 @@ fn _vec_sub(list: a, list: b): list {
    out
 }
 
-fn _vec_equal(list: a, list: b): bool {
+fn _vec_equal(list a, list b) bool {
    if(a.len != b.len){ return false }
    mut i = 0
    while(i < a.len){
@@ -161,7 +164,7 @@ fn _vec_equal(list: a, list: b): bool {
    true
 }
 
-fn _vec_dot(list: a, list: b): bigint {
+fn _vec_dot(list a, list b) bigint {
    mut s, i = Z(0), 0
    while(i < a.len){
       s = s + _z(a[i]) * _z(_at(b, i, 0))
@@ -170,7 +173,7 @@ fn _vec_dot(list: a, list: b): bigint {
    s
 }
 
-fn _vec_add_scaled(list: a, list: b, any: k): list {
+fn _vec_add_scaled(list a, list b, any k) list {
    mut out = []
    mut i = 0
    def kk = _z(k)
@@ -181,7 +184,7 @@ fn _vec_add_scaled(list: a, list: b, any: k): list {
    out
 }
 
-fn _round_div(any: num, any: den): bigint {
+fn _round_div(any num, any den) bigint {
    if(den == 0){ return Z(0) }
    def nn = _z(num)
    def dd = _z(den)
@@ -189,7 +192,7 @@ fn _round_div(any: num, any: den): bigint {
    -(((-nn) + dd / 2) / dd)
 }
 
-fn _ceil_div(any: num, any: den): bigint {
+fn _ceil_div(any num, any den) bigint {
    if(den == 0){ panic("cvp: ceil_div division by zero") }
    def nn = _z(num)
    def dd = _z(den)
@@ -197,7 +200,7 @@ fn _ceil_div(any: num, any: den): bigint {
    nn / dd
 }
 
-fn _check_rect(list: mat): list {
+fn _check_rect(list mat) list {
    if(!is_list(mat) || mat.len == 0){ panic("cvp: matrix must be a non-empty list of rows") }
    def n = len(mat[0])
    if(n == 0){ panic("cvp: matrix must have at least one column") }
@@ -209,7 +212,7 @@ fn _check_rect(list: mat): list {
    [mat.len, n]
 }
 
-fn _scale_cols(list: mat, list: scales): list {
+fn _scale_cols(list mat, list scales) list {
    mut out = []
    mut i = 0
    while(i < mat.len){
@@ -226,7 +229,7 @@ fn _scale_cols(list: mat, list: scales): list {
    out
 }
 
-fn _scale_vec(list: v, list: scales): list {
+fn _scale_vec(list v, list scales) list {
    mut out = []
    mut i = 0
    while(i < v.len){
@@ -236,7 +239,7 @@ fn _scale_vec(list: v, list: scales): list {
    out
 }
 
-fn _unscale_vec(list: v, list: scales): list {
+fn _unscale_vec(list v, list scales) list {
    mut out = []
    mut i = 0
    while(i < v.len){
@@ -247,7 +250,7 @@ fn _unscale_vec(list: v, list: scales): list {
    out
 }
 
-fn _unscale_rows(list: rows, list: scales): list {
+fn _unscale_rows(list rows, list scales) list {
    mut out = []
    mut i = 0
    while(i < rows.len){
@@ -257,7 +260,7 @@ fn _unscale_rows(list: rows, list: scales): list {
    out
 }
 
-fn _matrix_zero(int: rows, int: cols): list {
+fn _matrix_zero(int rows, int cols) list {
    mut out = []
    mut i = 0
    while(i < rows){
@@ -273,7 +276,7 @@ fn _matrix_zero(int: rows, int: cols): list {
    out
 }
 
-fn _zero_vec(int: n): list {
+fn _zero_vec(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -283,7 +286,7 @@ fn _zero_vec(int: n): list {
    out
 }
 
-fn _nodes_vec(int: n): list {
+fn _nodes_vec(int n) list {
    mut out = []
    mut i = 0
    while(i <= n){
@@ -293,21 +296,21 @@ fn _nodes_vec(int: n): list {
    out
 }
 
-fn _cvp_trace_enabled(): bool {
+fn _cvp_trace_enabled() bool {
    def v = env("NY_CVP_TRACE")
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _cvp_trace(str: label, any: value=nil): any {
+fn _cvp_trace(str label, any value=nil) any {
    if(_cvp_trace_enabled()){
       if(value == nil){ print("[cvp]", label) } else { print("[cvp]", label, value) }
    }
    value
 }
 
-fn _cvp_row_norm(list: row): bigint { _vec_dot(row, row) }
+fn _cvp_row_norm(list row) bigint { _vec_dot(row, row) }
 
-fn _cvp_sort_rows_by_norm(list: basis): list {
+fn _cvp_sort_rows_by_norm(list basis) list {
    mut rows = clone(basis)
    mut out = []
    while(rows.len > 0){
@@ -328,7 +331,7 @@ fn _cvp_sort_rows_by_norm(list: basis): list {
    out
 }
 
-fn _cvp_sort_rows_by_norm_desc(list: basis): list {
+fn _cvp_sort_rows_by_norm_desc(list basis) list {
    mut rows = clone(basis)
    mut out = []
    while(rows.len > 0){
@@ -349,13 +352,13 @@ fn _cvp_sort_rows_by_norm_desc(list: basis): list {
    out
 }
 
-fn _cvp_enum_order_basis(list: basis): list {
+fn _cvp_enum_order_basis(list basis) list {
    def v = env("NY_CVP_ENUM_ORDER")
    if(is_str(v) && (v == "row-norm-desc" || v == "desc")){ return _cvp_sort_rows_by_norm_desc(basis) }
    basis
 }
 
-fn _cvp_size_reduce_rows(list: basis, int: rounds=2): list {
+fn _cvp_size_reduce_rows(list basis, int rounds=2) list {
    mut rows = clone(basis)
    mut pass = 0
    while(pass < rounds){
@@ -386,7 +389,7 @@ fn _cvp_size_reduce_rows(list: basis, int: rounds=2): list {
    rows
 }
 
-fn _cvp_gso_size_reduce_rows(list: basis, int: rounds=2): list {
+fn _cvp_gso_size_reduce_rows(list basis, int rounds=2) list {
    mut rows = clone(basis)
    mut pass = 0
    while(pass < rounds){
@@ -412,7 +415,7 @@ fn _cvp_gso_size_reduce_rows(list: basis, int: rounds=2): list {
    rows
 }
 
-fn _cvp_lovasz_holds(any: gso, int: k, any: delta): bool {
+fn _cvp_lovasz_holds(any gso, int k, any delta) bool {
    def norms = gso.get("norms_sq", [])
    def mu = gso.get("mu")
    def lhs = _cvp_float(_at(norms, k, 0.0))
@@ -421,7 +424,7 @@ fn _cvp_lovasz_holds(any: gso, int: k, any: delta): bool {
    lhs >= (_cvp_float(delta) - m * m) * prev
 }
 
-fn _cvp_lll_fast_reduce_rows(list: basis, any: delta=0.75, any: eta=0.51, int: max_steps=20000): list {
+fn _cvp_lll_fast_reduce_rows(list basis, any delta=0.75, any eta=0.51, int max_steps=20000) list {
    mut rows = clone(basis)
    def n = rows.len
    if(n <= 1){ return rows }
@@ -459,7 +462,7 @@ fn _cvp_lll_fast_reduce_rows(list: basis, any: delta=0.75, any: eta=0.51, int: m
    final_rounds <= 0 ? rows : _cvp_gso_size_reduce_rows(rows, final_rounds)
 }
 
-fn _cvp_env_bool(str: name, bool: fallback=false): bool {
+fn _cvp_env_bool(str name, bool fallback=false) bool {
    def v = env(name)
    case v {
       "1", "true", "yes" -> true
@@ -468,45 +471,45 @@ fn _cvp_env_bool(str: name, bool: fallback=false): bool {
    }
 }
 
-fn _cvp_aggressive_reduce_enabled(): bool {
+fn _cvp_aggressive_reduce_enabled() bool {
    _cvp_env_bool("NY_CVP_AGGRESSIVE_REDUCE")
 }
 
-fn _cvp_embedding_enabled(int: n): bool {
+fn _cvp_embedding_enabled(int n) bool {
    _cvp_env_bool("NY_CVP_EMBEDDING", n <= 18)
 }
 
-fn _cvp_coordinate_cube_enabled(int: n): bool {
+fn _cvp_coordinate_cube_enabled(int n) bool {
    _cvp_env_bool("NY_CVP_COORD_CUBE", n <= 32)
 }
 
-fn _cvp_descent_enabled(int: n): bool {
+fn _cvp_descent_enabled(int n) bool {
    _cvp_env_bool("NY_CVP_DESCENT", n < 32)
 }
 
-fn _cvp_env_int(str: name, int: fallback): int {
+fn _cvp_env_int(str name, int fallback) int {
    def v = env(name)
    if(is_str(v) && v.len > 0){ return atoi(v) }
    fallback
 }
 
-fn _cvp_reduce_steps(int: n): int {
+fn _cvp_reduce_steps(int n) int {
    def fallback = n <= 32 ? max(1200, n * 64) : (n <= 48 ? max(1500, n * 36) : max(1600, n * 24))
    _cvp_env_int("NY_CVP_REDUCE_STEPS", fallback)
 }
 
-fn _cvp_reduce_delta(int: n): f64 {
+fn _cvp_reduce_delta(int n) f64 {
    def v = env("NY_CVP_REDUCE_DELTA")
    if(is_str(v) && v.len > 0){ return atof(v) }
    0.75
 }
 
-fn _cvp_reduce_mode(): str {
+fn _cvp_reduce_mode() str {
    def v = env("NY_CVP_REDUCER")
    is_str(v) && v.len > 0 ? v : "lll"
 }
 
-fn _cvp_reduce_basis(list: basis): list {
+fn _cvp_reduce_basis(list basis) list {
    if(basis.len > 48 && !_cvp_aggressive_reduce_enabled()){
       _cvp_trace("reduce:large-basis-size-pass", {"rows": basis.len, "cols": basis.len > 0 ? basis[0].len : 0})
       return _cvp_gso_size_reduce_rows(_cvp_size_reduce_rows(basis, 2), 2)
@@ -531,7 +534,7 @@ fn _cvp_reduce_basis(list: basis): list {
    basis
 }
 
-fn _cvp_gso_profile(list: basis): dict {
+fn _cvp_gso_profile(list basis) dict {
    def gs = gram_schmidt_rows(basis)
    mut norms = []
    mut i = 0
@@ -544,14 +547,14 @@ fn _cvp_gso_profile(list: basis): dict {
    ])
 }
 
-fn _cvp_mu_get(list: mu, int: i, int: j): any {
+fn _cvp_mu_get(list mu, int i, int j) any {
    if(i < 0 || i >= mu.len){ return Z(0) }
    def row = mu[i]
    if(!is_list(row) || j < 0 || j >= row.len){ return Z(0) }
    row[j]
 }
 
-fn _cvp_float_row(list: row): list<f64> {
+fn _cvp_float_row(list row) list<f64> {
    mut out = []
    mut i = 0
    while(i < row.len){
@@ -561,7 +564,7 @@ fn _cvp_float_row(list: row): list<f64> {
    out
 }
 
-fn _cvp_float_target_dot(list: a, list: b): f64 {
+fn _cvp_float_target_dot(list a, list b) f64 {
    mut s = 0.0
    mut i = 0
    while(i < a.len){
@@ -571,7 +574,7 @@ fn _cvp_float_target_dot(list: a, list: b): f64 {
    s
 }
 
-fn _cvp_f64_dot(list<f64>: a, list<f64>: b): f64 {
+fn _cvp_f64_dot(list<f64> a, list<f64> b) f64 {
    mut s = 0.0
    mut i = 0
    while(i < a.len){
@@ -581,7 +584,7 @@ fn _cvp_f64_dot(list<f64>: a, list<f64>: b): f64 {
    s
 }
 
-fn _cvp_f64_sub_scaled(list<f64>: a, list<f64>: b, f64: coeff): list<f64> {
+fn _cvp_f64_sub_scaled(list<f64> a, list<f64> b, f64 coeff) list<f64> {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -591,12 +594,12 @@ fn _cvp_f64_sub_scaled(list<f64>: a, list<f64>: b, f64: coeff): list<f64> {
    out
 }
 
-fn _cvp_gso_mu_profile(list: basis): dict {
+fn _cvp_gso_mu_profile(list basis) dict {
    def n = basis.len
    _cvp_gso_mu_profile_prefix(basis, n - 1)
 }
 
-fn _cvp_gso_mu_profile_prefix(list: basis, int: limit): dict {
+fn _cvp_gso_mu_profile_prefix(list basis, int limit) dict {
    def n = min(basis.len, max(0, limit + 1))
    mut bstar = list(0)
    mut mu = []
@@ -634,7 +637,7 @@ fn _cvp_gso_mu_profile_prefix(list: basis, int: limit): dict {
    }
 }
 
-fn _cvp_offset_bound_for_level(any: radius_sq, any: norm_sq, int: coeff_bound): int {
+fn _cvp_offset_bound_for_level(any radius_sq, any norm_sq, int coeff_bound) int {
    def cap = max(1, int(coeff_bound))
    if(norm_sq == Z(0)){ return cap }
    def ratio = max(0.0, _cvp_float(radius_sq) / max(0.000001, _cvp_float(norm_sq)))
@@ -642,7 +645,7 @@ fn _cvp_offset_bound_for_level(any: radius_sq, any: norm_sq, int: coeff_bound): 
    max(1, min(cap, b))
 }
 
-fn _cvp_gso_offset_bounds(list: norms, any: radius_sq, int: coeff_bound): list {
+fn _cvp_gso_offset_bounds(list norms, any radius_sq, int coeff_bound) list {
    mut out = []
    mut i = 0
    while(i < norms.len){
@@ -652,7 +655,7 @@ fn _cvp_gso_offset_bounds(list: norms, any: radius_sq, int: coeff_bound): list {
    out
 }
 
-fn _cvp_bounds_sum(list: bounds): int {
+fn _cvp_bounds_sum(list bounds) int {
    mut total = 0
    mut i = 0
    while(i < bounds.len){
@@ -662,7 +665,7 @@ fn _cvp_bounds_sum(list: bounds): int {
    total
 }
 
-fn _cvp_bounds_product(list: bounds, int: max_nodes): int {
+fn _cvp_bounds_product(list bounds, int max_nodes) int {
    mut total = 1
    mut i = 0
    while(i < bounds.len){
@@ -673,7 +676,7 @@ fn _cvp_bounds_product(list: bounds, int: max_nodes): int {
    total
 }
 
-fn cvp_gso_bound_report(list: basis, list: target, bool: reduce=true, int: coeff_bound=2): dict {
+fn cvp_gso_bound_report(list basis, list target, bool reduce=true, int coeff_bound=2) dict {
    "Report the per-level GSO offset bounds used by CVP bounded enumeration."
    def work = reduce ? _cvp_reduce_basis(basis) : basis
    def seed = _cvp_nearest_seed(work, target)
@@ -687,7 +690,7 @@ fn cvp_gso_bound_report(list: basis, list: target, bool: reduce=true, int: coeff
    ])
 }
 
-fn _cvp_target_coords(list: basis, list: target): list {
+fn _cvp_target_coords(list basis, list target) list {
    if(!is_list(basis) || basis.len == 0){ return [] }
    def gs = gram_schmidt_rows(basis)
    mut coords = []
@@ -710,7 +713,7 @@ fn _cvp_target_coords(list: basis, list: target): list {
    coords
 }
 
-fn _cvp_coeff_order(any: center, int: bound): list {
+fn _cvp_coeff_order(any center, int bound) list {
    mut out = [center]
    mut d = 1
    while(d <= bound){
@@ -721,7 +724,7 @@ fn _cvp_coeff_order(any: center, int: bound): list {
    out
 }
 
-fn _cvp_offset_order(int: bound): list {
+fn _cvp_offset_order(int bound) list {
    mut out = [0]
    mut d = 1
    while(d <= bound){
@@ -732,14 +735,14 @@ fn _cvp_offset_order(int: bound): list {
    out
 }
 
-fn _cvp_abs_int(int: x): int { x < 0 ? -x : x }
+fn _cvp_abs_int(int x) int { x < 0 ? -x : x }
 
-fn _cvp_round_float(any: x): int {
+fn _cvp_round_float(any x) int {
    def f = _cvp_float(x)
    f >= 0.0 ? int(f + 0.5) : int(f - 0.5)
 }
 
-fn _cvp_target_coords_solve(list: basis, list: target): list {
+fn _cvp_target_coords_solve(list basis, list target) list {
    if(!is_list(basis) || basis.len == 0){ return [] }
    def n = basis.len
    if(target.len != n || basis[0].len != n){ return _cvp_target_coords(basis, target) }
@@ -813,7 +816,7 @@ fn _cvp_target_coords_solve(list: basis, list: target): list {
    out
 }
 
-fn _cvp_target_coords_float_solve(list: basis, list: target): any {
+fn _cvp_target_coords_float_solve(list basis, list target) any {
    if(!is_list(basis) || basis.len == 0){ return nil }
    def n = basis.len
    if(target.len != n || basis[0].len != n){ return nil }
@@ -881,11 +884,11 @@ fn _cvp_target_coords_float_solve(list: basis, list: target): any {
    b
 }
 
-fn _cvp_floor_int(any: x): int { int(math.floor(_cvp_float(x))) }
+fn _cvp_floor_int(any x) int { int(math.floor(_cvp_float(x))) }
 
-fn _cvp_ceil_int(any: x): int { int(math.ceil(_cvp_float(x))) }
+fn _cvp_ceil_int(any x) int { int(math.ceil(_cvp_float(x))) }
 
-fn _cvp_float_coord_options(list: coords): list {
+fn _cvp_float_coord_options(list coords) list {
    mut opts = []
    mut i = 0
    while(i < coords.len){
@@ -897,17 +900,17 @@ fn _cvp_float_coord_options(list: coords): list {
    opts
 }
 
-fn _cvp_abs_float(any: x): f64 {
+fn _cvp_abs_float(any x) f64 {
    def f = _cvp_float(x)
    f < 0.0 ? -f : f
 }
 
-fn _cvp_distance_sq(list: v, list: target): bigint {
+fn _cvp_distance_sq(list v, list target) bigint {
    def diff = _vec_sub(target, v)
    _vec_dot(diff, diff)
 }
 
-fn _cvp_core_record(list: vector, any: distance_sq, int: nodes, bool: hit_limit, list: nodes_by_level): dict {
+fn _cvp_core_record(list vector, any distance_sq, int nodes, bool hit_limit, list nodes_by_level) dict {
    {
       "vector": vector,
       "distance_sq": distance_sq,
@@ -917,7 +920,7 @@ fn _cvp_core_record(list: vector, any: distance_sq, int: nodes, bool: hit_limit,
    }
 }
 
-fn _cvp_core_record_coeffs(list: vector, any: distance_sq, int: nodes, bool: hit_limit, list: nodes_by_level, list: coeffs): dict {
+fn _cvp_core_record_coeffs(list vector, any distance_sq, int nodes, bool hit_limit, list nodes_by_level, list coeffs) dict {
    {
       "vector": vector,
       "distance_sq": distance_sq,
@@ -928,7 +931,7 @@ fn _cvp_core_record_coeffs(list: vector, any: distance_sq, int: nodes, bool: hit
    }
 }
 
-fn _cvp_babai_coeff_report(list: basis, list: target): dict {
+fn _cvp_babai_coeff_report(list basis, list target) dict {
    def n = basis.len
    def gso = _cvp_gso_mu_profile(basis)
    def bstar = gso.get("b_star", [])
@@ -950,7 +953,7 @@ fn _cvp_babai_coeff_report(list: basis, list: target): dict {
    ])
 }
 
-fn _cvp_coeffs_max_abs(list: coeffs): bigint {
+fn _cvp_coeffs_max_abs(list coeffs) bigint {
    mut best = Z(0)
    mut i = 0
    while(i < coeffs.len){
@@ -961,7 +964,7 @@ fn _cvp_coeffs_max_abs(list: coeffs): bigint {
    best
 }
 
-fn _cvp_babai_residual_report(list: basis, list: target, int: max_loops=256, any: gso=nil): dict {
+fn _cvp_babai_residual_report(list basis, list target, int max_loops=256, any gso=nil) dict {
    mut shift = _zero_vec(target.len)
    mut residual_target = clone(target)
    mut loops = 0
@@ -993,7 +996,7 @@ fn _cvp_babai_residual_report(list: basis, list: target, int: max_loops=256, any
    ])
 }
 
-fn _cvp_center_vector(list: basis, list: coeffs, int: dim): list {
+fn _cvp_center_vector(list basis, list coeffs, int dim) list {
    mut out = _zero_vec(dim)
    mut i = 0
    while(i < basis.len){
@@ -1004,7 +1007,7 @@ fn _cvp_center_vector(list: basis, list: coeffs, int: dim): list {
    out
 }
 
-fn _cvp_projection_seed(list: basis, list: target, int: passes=2): dict {
+fn _cvp_projection_seed(list basis, list target, int passes=2) dict {
    mut best = _zero_vec(target.len)
    mut best_norm = _cvp_distance_sq(best, target)
    mut pass = 0
@@ -1035,7 +1038,7 @@ fn _cvp_projection_seed(list: basis, list: target, int: passes=2): dict {
    {"vector": best, "distance_sq": best_norm}
 }
 
-fn _cvp_babai_gso_report_with_profile(list: basis, list: target, any: gso): dict {
+fn _cvp_babai_gso_report_with_profile(list basis, list target, any gso) dict {
    def n = basis.len
    if(!is_dict(gso)){
       _cvp_trace("babai-gso:fallback", {"reason": "non-dict-gso", "rows": n})
@@ -1082,11 +1085,11 @@ fn _cvp_babai_gso_report_with_profile(list: basis, list: target, any: gso): dict
    }
 }
 
-fn _cvp_babai_gso_report(list: basis, list: target): dict {
+fn _cvp_babai_gso_report(list basis, list target) dict {
    _cvp_babai_gso_report_with_profile(basis, target, _cvp_gso_mu_profile(basis))
 }
 
-fn _cvp_nearest_seed_with_profile(list: basis, list: target, any: gso): list {
+fn _cvp_nearest_seed_with_profile(list basis, list target, any gso) list {
    if(!is_list(basis) || basis.len == 0 || !is_dict(gso)){ return [] }
    def n = basis.len
    mut coords = _cvp_gso_target_coords(target, gso)
@@ -1106,16 +1109,16 @@ fn _cvp_nearest_seed_with_profile(list: basis, list: target, any: gso): list {
    _cvp_center_vector(basis, coeffs, target.len)
 }
 
-fn _cvp_nearest_seed(list: basis, list: target): list {
+fn _cvp_nearest_seed(list basis, list target) list {
    if(!is_list(basis) || basis.len == 0){ return [] }
    _cvp_nearest_seed_with_profile(basis, target, _cvp_gso_mu_profile(basis))
 }
 
-fn _cvp_babai_step_report(list: basis, list: target, any: gso=nil): dict {
+fn _cvp_babai_step_report(list basis, list target, any gso=nil) dict {
    gso == nil ? _cvp_babai_gso_report(basis, target) : _cvp_babai_gso_report_with_profile(basis, target, gso)
 }
 
-fn _cvp_local_descent_report(list: basis, list: target, list: seed, any: seed_norm, int: max_steps): dict {
+fn _cvp_local_descent_report(list basis, list target, list seed, any seed_norm, int max_steps) dict {
    mut best = seed
    mut best_norm = seed_norm
    mut steps = 0
@@ -1225,7 +1228,7 @@ fn _cvp_local_descent_report(list: basis, list: target, list: seed, any: seed_no
    ])
 }
 
-fn _cvp_round_float_coords(list: coords): list {
+fn _cvp_round_float_coords(list coords) list {
    mut out = []
    mut i = 0
    while(i < coords.len){
@@ -1235,7 +1238,7 @@ fn _cvp_round_float_coords(list: coords): list {
    out
 }
 
-fn _cvp_gso_target_coords(list: target, any: gso): list {
+fn _cvp_gso_target_coords(list target, any gso) list {
    def bstar = gso.get("b_star", [])
    def norms = gso.get("norms_sq", [])
    mut out = []
@@ -1248,7 +1251,7 @@ fn _cvp_gso_target_coords(list: target, any: gso): list {
    out
 }
 
-fn _cvp_center_tail(int: idx, list: coeffs, list: coords, any: mu, int: n): f64 {
+fn _cvp_center_tail(int idx, list coeffs, list coords, any mu, int n) f64 {
    mut center = float(coords[idx])
    mut j = idx + 1
    while(j < n){
@@ -1261,7 +1264,7 @@ fn _cvp_center_tail(int: idx, list: coeffs, list: coords, any: mu, int: n): f64 
    center
 }
 
-fn _cvp_mu_flat(list: mu, int: n): list<f64> {
+fn _cvp_mu_flat(list mu, int n) list<f64> {
    mut list<f64>: out = list(n * n)
    mut i = 0
    while(i < n){
@@ -1275,7 +1278,7 @@ fn _cvp_mu_flat(list: mu, int: n): list<f64> {
    out
 }
 
-fn _cvp_center_tail_flat(int: idx, list: coeffs, list: coords, list<f64>: mu, int: n): f64 {
+fn _cvp_center_tail_flat(int idx, list coeffs, list coords, list<f64> mu, int n) f64 {
    mut center = float(coords[idx])
    mut j = idx + 1
    while(j < n){
@@ -1288,13 +1291,13 @@ fn _cvp_center_tail_flat(int: idx, list: coeffs, list: coords, list<f64>: mu, in
    center
 }
 
-fn _cvp_search_bound_float(any: best_norm, any: radius_sq): f64 {
+fn _cvp_search_bound_float(any best_norm, any radius_sq) f64 {
    def b = _cvp_float(best_norm)
    def r = _cvp_float(radius_sq)
    r > 0.0 && r < b ? r : b
 }
 
-fn _cvp_early_accept_norm(any: seed_norm): any {
+fn _cvp_early_accept_norm(any seed_norm) any {
    def num_s = env("NY_CVP_EARLY_ACCEPT_NUM")
    def den_s = env("NY_CVP_EARLY_ACCEPT_DEN")
    if(!is_str(num_s) || !is_str(den_s) || num_s.len == 0 || den_s.len == 0){ return nil }
@@ -1303,7 +1306,7 @@ fn _cvp_early_accept_norm(any: seed_norm): any {
    den <= Z(0) ? nil : (Z(seed_norm) * num) / den
 }
 
-fn _cvp_gso_cvp_radius_sq(list: norms): any {
+fn _cvp_gso_cvp_radius_sq(list norms) any {
    mut s = 0.0
    mut i = 1
    while(i < norms.len){
@@ -1313,7 +1316,7 @@ fn _cvp_gso_cvp_radius_sq(list: norms): any {
    s <= 0.0 ? Z(0) : s
 }
 
-fn _cvp_gso_enum_dfs(int: idx, list: basis, list: target, list: coords, any: mu, list: norms, list: coeffs, f64: partial_cost, list: best_v, any: best_norm, any: radius_sq, any: early_norm, list: best_coeffs, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_gso_enum_dfs(int idx, list basis, list target, list coords, any mu, list norms, list coeffs, f64 partial_cost, list best_v, any best_norm, any radius_sq, any early_norm, list best_coeffs, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level
    if(nodes >= max_nodes){ return _cvp_core_record_coeffs(best_v, best_norm, nodes, true, nodes_by_level, best_coeffs) }
    nodes += 1
@@ -1351,7 +1354,7 @@ fn _cvp_gso_enum_dfs(int: idx, list: basis, list: target, list: coords, any: mu,
    state
 }
 
-fn _cvp_gso_enum_dfs_mut_flat(int: idx, list: basis, list: target, list: coords, list<f64>: mu, list<f64>: norms, list: coeffs, f64: partial_cost, any: radius_sq, any: early_norm, list: state): bool {
+fn _cvp_gso_enum_dfs_mut_flat(int idx, list basis, list target, list coords, list<f64> mu, list<f64> norms, list coeffs, f64 partial_cost, any radius_sq, any early_norm, list state) bool {
    def nodes = int(state[2])
    if(nodes >= int(state[6])){
       state[3] = true
@@ -1395,7 +1398,7 @@ fn _cvp_gso_enum_dfs_mut_flat(int: idx, list: basis, list: target, list: coords,
    false
 }
 
-fn _cvp_gso_enumerate_report(list: basis, list: target, list: seed, any: seed_norm, int: max_nodes, any: gso_override=nil): dict {
+fn _cvp_gso_enumerate_report(list basis, list target, list seed, any seed_norm, int max_nodes, any gso_override=nil) dict {
    def enum_basis = _cvp_enum_order_basis(basis)
    def reordered = enum_basis.len == basis.len && enum_basis != basis
    def gso = (!reordered && gso_override != nil) ? gso_override : _cvp_gso_mu_profile(enum_basis)
@@ -1434,7 +1437,7 @@ fn _cvp_gso_enumerate_report(list: basis, list: target, list: seed, any: seed_no
    out
 }
 
-fn _cvp_list_default_target(int: n): list {
+fn _cvp_list_default_target(int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -1444,7 +1447,7 @@ fn _cvp_list_default_target(int: n): list {
    out
 }
 
-fn _cvp_list_target(any: target_coords, int: n): list {
+fn _cvp_list_target(any target_coords, int n) list {
    if(!is_list(target_coords)){ return _cvp_list_default_target(n) }
    mut out = []
    mut i = 0
@@ -1455,7 +1458,7 @@ fn _cvp_list_target(any: target_coords, int: n): list {
    out
 }
 
-fn _cvp_list_norms_f64(list: norms, int: n): list<f64> {
+fn _cvp_list_norms_f64(list norms, int n) list<f64> {
    mut list<f64>: out = list(n)
    mut i = 0
    while(i < n){
@@ -1465,11 +1468,11 @@ fn _cvp_list_norms_f64(list: norms, int: n): list<f64> {
    out
 }
 
-fn _cvp_list_count_record(int: count, int: nodes, bool: hit_limit): list {
+fn _cvp_list_count_record(int count, int nodes, bool hit_limit) list {
    [count, nodes, hit_limit]
 }
 
-fn _cvp_isqrt_int(int: n): int {
+fn _cvp_isqrt_int(int n) int {
    if(n <= 0){ return 0 }
    if(n <= 9007199254740991){
       mut x = int(math.sqrt(float(n)))
@@ -1488,12 +1491,12 @@ fn _cvp_isqrt_int(int: n): int {
 }
 
 @inline
-fn _cvp_round_div_nearest(int: x, int: scale): int {
+fn _cvp_round_div_nearest(int x, int scale) int {
    if(x >= 0){ return(x + scale / 2) / scale }
    0 - ((0 - x + scale / 2) / scale)
 }
 
-fn _cvp_list_gso_dfs_f64(int: idx, list<f64>: target_coords, list<int>: coeffs, any: mu, list<f64>: norms, f64: partial_cost, f64: radius, int: count, int: nodes, int: max_solutions, int: max_nodes): list {
+fn _cvp_list_gso_dfs_f64(int idx, list<f64> target_coords, list<int> coeffs, any mu, list<f64> norms, f64 partial_cost, f64 radius, int count, int nodes, int max_solutions, int max_nodes) list {
    if(nodes >= max_nodes || count >= max_solutions){ return _cvp_list_count_record(count, nodes, true) }
    nodes += 1
    if(idx < 0){
@@ -1526,13 +1529,13 @@ fn _cvp_list_gso_dfs_f64(int: idx, list<f64>: target_coords, list<int>: coeffs, 
    state
 }
 
-fn _cvp_list_scaled_int(any: x, int: scale): list {
+fn _cvp_list_scaled_int(any x, int scale) list {
    def fx = _cvp_float(x) * float(scale)
    def zi = _cvp_round_float(fx)
    [_cvp_abs_float(fx - float(zi)) <= 0.0000001, zi]
 }
 
-fn _cvp_i64buf(int: n): ptr {
+fn _cvp_i64buf(int n) ptr {
    def bytes = max(1, n) * 8
    def p = malloc(bytes)
    if(!p){ panic("cvp list count buffer allocation failed") }
@@ -1540,7 +1543,7 @@ fn _cvp_i64buf(int: n): ptr {
    p
 }
 
-fn _cvp_list_fixed_setup_ptr(list<f64>: target_coords, any: mu, list<f64>: norms, f64: radius, int: scale): list {
+fn _cvp_list_fixed_setup_ptr(list<f64> target_coords, any mu, list<f64> norms, f64 radius, int scale) list {
    def n = target_coords.len
    def target = _cvp_i64buf(n)
    def norm_buf = _cvp_i64buf(n)
@@ -1576,59 +1579,7 @@ fn _cvp_list_fixed_setup_ptr(list<f64>: target_coords, any: mu, list<f64>: norms
    [ok, target, norm_buf, nil, int(r[1]), dep_counts, dep_idx, dep_mu]
 }
 
-fn _cvp_list_sub_center_delta(ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, int: n, int: idx, int: c): any {
-   if(c == 0){ return nil }
-   def int: dep_count = load64(dep_counts, idx * 8)
-   if(dep_count == 1){
-      def int: off = load64(dep_idx, idx * n * 8) * 8
-      store64(centers, load64(centers, off) - c * load64(dep_mu, idx * n * 8), off)
-      return nil
-   }
-   if(dep_count == 2){
-      def base = idx * n * 8
-      def int: off0 = load64(dep_idx, base) * 8
-      def int: off1 = load64(dep_idx, base + 8) * 8
-      store64(centers, load64(centers, off0) - c * load64(dep_mu, base), off0)
-      store64(centers, load64(centers, off1) - c * load64(dep_mu, base + 8), off1)
-      return nil
-   }
-   mut k = 0
-   while(k < dep_count){
-      def int: col = load64(dep_idx, (idx * n + k) * 8)
-      def off = col * 8
-      store64(centers, load64(centers, off) - c * load64(dep_mu, (idx * n + k) * 8), off)
-      k += 1
-   }
-   nil
-}
-
-fn _cvp_list_add_center_delta(ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, int: n, int: idx, int: c): any {
-   if(c == 0){ return nil }
-   def int: dep_count = load64(dep_counts, idx * 8)
-   if(dep_count == 1){
-      def int: off = load64(dep_idx, idx * n * 8) * 8
-      store64(centers, load64(centers, off) + c * load64(dep_mu, idx * n * 8), off)
-      return nil
-   }
-   if(dep_count == 2){
-      def base = idx * n * 8
-      def int: off0 = load64(dep_idx, base) * 8
-      def int: off1 = load64(dep_idx, base + 8) * 8
-      store64(centers, load64(centers, off0) + c * load64(dep_mu, base), off0)
-      store64(centers, load64(centers, off1) + c * load64(dep_mu, base + 8), off1)
-      return nil
-   }
-   mut k = 0
-   while(k < dep_count){
-      def int: col = load64(dep_idx, (idx * n + k) * 8)
-      def off = col * 8
-      store64(centers, load64(centers, off) + c * load64(dep_mu, (idx * n + k) * 8), off)
-      k += 1
-   }
-   nil
-}
-
-fn _cvp_list_gso_leaf_count_ptr(ptr: centers, ptr: norms, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_leaf_count_ptr(ptr centers, ptr norms, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    def int: nodes0 = load64(counters, 8)
    if(nodes0 >= max_nodes){
       store64(counters, 1, 16)
@@ -1685,7 +1636,7 @@ fn _cvp_list_gso_leaf_count_ptr(ptr: centers, ptr: norms, int: scale, int: parti
    false
 }
 
-fn _cvp_list_count_leaf_span_len(int: center, int: norm_i, int: scale, int: rem): int {
+fn _cvp_list_count_leaf_span_len(int center, int norm_i, int scale, int rem) int {
    mut int: lo = 0
    mut int: hi = 0
    if(norm_i <= 1000000000 && rem <= norm_i * scale * scale * 64){
@@ -1716,7 +1667,7 @@ fn _cvp_list_count_leaf_span_len(int: center, int: norm_i, int: scale, int: rem)
    hi >= lo ? hi - lo + 1 : 0
 }
 
-fn _cvp_list_gso_count_idx1_core(int: lo, int: hi, int: center0_base, int: center1, int: norm1, int: dep_count, int: mu0, ptr: norms, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_count_idx1_core(int lo, int hi, int center0_base, int center1, int norm1, int dep_count, int mu0, ptr norms, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    def int: norm0_raw = load64(norms, 0)
    def int: norm0 = norm0_raw > 1 ? norm0_raw : 1
    mut int: count_local = load64(counters, 0)
@@ -1758,14 +1709,14 @@ fn _cvp_list_gso_count_idx1_core(int: lo, int: hi, int: center0_base, int: cente
    false
 }
 
-fn _cvp_list_gso_count_idx1_ptr(int: lo, int: hi, int: center1, int: norm1, ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, ptr: norms, int: n, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_count_idx1_ptr(int lo, int hi, int center1, int norm1, ptr centers, ptr dep_counts, ptr dep_idx, ptr dep_mu, ptr norms, int n, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    def int: dep_count = load64(dep_counts, 8)
    def int: dep_base = n * 8
    def int: mu0 = dep_count > 0 ? load64(dep_mu, dep_base) : 0
    _cvp_list_gso_count_idx1_core(lo, hi, load64(centers, 0), center1, norm1, dep_count, mu0, norms, scale, partial_cost, radius_scaled, counters, max_solutions, max_nodes)
 }
 
-fn _cvp_list_gso_count_idx1_state_ptr(ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, ptr: norms, int: n, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_count_idx1_state_ptr(ptr centers, ptr dep_counts, ptr dep_idx, ptr dep_mu, ptr norms, int n, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    def int: nodes0 = load64(counters, 8)
    if(nodes0 >= max_nodes){
       store64(counters, 1, 16)
@@ -1807,7 +1758,7 @@ fn _cvp_list_gso_count_idx1_state_ptr(ptr: centers, ptr: dep_counts, ptr: dep_id
    _cvp_list_gso_count_idx1_ptr(lo, hi, center1, norm1, centers, dep_counts, dep_idx, dep_mu, norms, n, scale, partial_cost, radius_scaled, counters, max_solutions, max_nodes)
 }
 
-fn _cvp_list_gso_count_idx2_ptr(int: lo, int: hi, int: center2, int: norm2, ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, ptr: norms, int: n, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_count_idx2_ptr(int lo, int hi, int center2, int norm2, ptr centers, ptr dep_counts, ptr dep_idx, ptr dep_mu, ptr norms, int n, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    def int: dep_count = load64(dep_counts, 16)
    def int: dep_base = 2 * n * 8
    if(dep_count <= 0){
@@ -1865,7 +1816,7 @@ fn _cvp_list_gso_count_idx2_ptr(int: lo, int: hi, int: center2, int: norm2, ptr:
    false
 }
 
-fn _cvp_list_gso_dfs_fixed_sparse_ptr(int: idx, ptr: centers, ptr: dep_counts, ptr: dep_idx, ptr: dep_mu, ptr: norms, int: n, int: scale, int: partial_cost, int: radius_scaled, ptr: counters, int: max_solutions, int: max_nodes): bool {
+fn _cvp_list_gso_dfs_fixed_sparse_ptr(int idx, ptr centers, ptr dep_counts, ptr dep_idx, ptr dep_mu, ptr norms, int n, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
    if(idx == 0){ return _cvp_list_gso_leaf_count_ptr(centers, norms, scale, partial_cost, radius_scaled, counters, max_solutions, max_nodes) }
    def int: nodes0 = load64(counters, 8)
    if(nodes0 >= max_nodes){
@@ -2029,7 +1980,7 @@ fn _cvp_list_gso_dfs_fixed_sparse_ptr(int: idx, ptr: centers, ptr: dep_counts, p
    false
 }
 
-fn cvp_list_gso_count_report(list: basis, any: radius_sq=32.5, any: target_coords=nil, int: max_solutions=999999, int: max_nodes=10000000): dict {
+fn cvp_list_gso_count_report(list basis, any radius_sq=32.5, any target_coords=nil, int max_solutions=999999, int max_nodes=10000000) dict {
    "Count GSO-coordinate CVP enumeration hits inside `radius_sq`, using list-CVP evaluator semantics."
    def t0 = ticks()
    if(!is_list(basis) || basis.len == 0){
@@ -2075,22 +2026,22 @@ fn cvp_list_gso_count_report(list: basis, any: radius_sq=32.5, any: target_coord
    _cvp_finish_report(out, t0)
 }
 
-fn _cvp_beam_width(): int {
+fn _cvp_beam_width() int {
    def v = _cvp_env_int("NY_CVP_BEAM_WIDTH", 192)
    max(8, v)
 }
 
-fn _cvp_beam_bound(): int {
+fn _cvp_beam_bound() int {
    def v = _cvp_env_int("NY_CVP_BEAM_BOUND", 8)
    max(1, v)
 }
 
-fn _cvp_beam_enabled(): bool {
+fn _cvp_beam_enabled() bool {
    def v = env("NY_CVP_BEAM")
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _cvp_beam_push(list: states, list: cand, int: width): list {
+fn _cvp_beam_push(list states, list cand, int width) list {
    if(states.len < width){ return states.append(cand) }
    mut worst_i = 0
    mut worst = _cvp_float(states[0][0])
@@ -2107,7 +2058,7 @@ fn _cvp_beam_push(list: states, list: cand, int: width): list {
    states
 }
 
-fn _cvp_gso_beam_report(list: basis, list: target, list: seed, any: seed_norm, int: max_nodes): dict {
+fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int max_nodes) dict {
    def n = basis.len
    mut out = dict(14)
    if(n <= 0){
@@ -2182,7 +2133,7 @@ fn _cvp_gso_beam_report(list: basis, list: target, list: seed, any: seed_norm, i
    out
 }
 
-fn _cvp_embedding_report(list: basis, list: target, any: scale=1): dict {
+fn _cvp_embedding_report(list basis, list target, any scale=1) dict {
    def dim = target.len
    def m = _z(scale)
    mut rows = []
@@ -2244,7 +2195,7 @@ fn _cvp_embedding_report(list: basis, list: target, any: scale=1): dict {
    out
 }
 
-fn _cvp_best_embedding_report(list: basis, list: target, any: current_norm): dict {
+fn _cvp_best_embedding_report(list basis, list target, any current_norm) dict {
    def scales = [1, 2, 4, 8, 16, 32, 64, 128]
    mut best = nil
    mut i = 0
@@ -2259,7 +2210,7 @@ fn _cvp_best_embedding_report(list: basis, list: target, any: current_norm): dic
    best == nil ? _cvp_embedding_report(basis, target, 1) : best
 }
 
-fn _cvp_enum_dfs(int: idx, list: basis, list: target, list: centers, int: coeff_bound, list: cur, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_enum_dfs(int idx, list basis, list target, list centers, int coeff_bound, list cur, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level = _cvp_count_level(nodes_by_level, idx)
    if(nodes >= max_nodes){ return _cvp_core_record(best_v, best_norm, nodes, true, nodes_by_level) }
    if(idx >= basis.len){
@@ -2281,7 +2232,7 @@ fn _cvp_enum_dfs(int: idx, list: basis, list: target, list: centers, int: coeff_
    state
 }
 
-fn _cvp_enum_radius_dfs(int: idx, int: radius_left, list: basis, list: target, list: centers, int: coeff_bound, list: cur, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_enum_radius_dfs(int idx, int radius_left, list basis, list target, list centers, int coeff_bound, list cur, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level = _cvp_count_level(nodes_by_level, idx)
    if(nodes >= max_nodes){ return _cvp_core_record(best_v, best_norm, nodes, true, nodes_by_level) }
    if(idx >= basis.len){
@@ -2308,7 +2259,7 @@ fn _cvp_enum_radius_dfs(int: idx, int: radius_left, list: basis, list: target, l
    state
 }
 
-fn _cvp_enum_offset_radius_dfs(int: idx, int: radius_left, list: basis, list: target, int: coeff_bound, list: cur, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_enum_offset_radius_dfs(int idx, int radius_left, list basis, list target, int coeff_bound, list cur, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level = _cvp_count_level(nodes_by_level, idx)
    if(nodes >= max_nodes){ return _cvp_core_record(best_v, best_norm, nodes, true, nodes_by_level) }
    if(idx >= basis.len){
@@ -2334,7 +2285,7 @@ fn _cvp_enum_offset_radius_dfs(int: idx, int: radius_left, list: basis, list: ta
    state
 }
 
-fn _cvp_enum_gso_offset_radius_dfs(int: idx, int: radius_left, list: basis, list: target, list: offset_bounds, list: cur, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_enum_gso_offset_radius_dfs(int idx, int radius_left, list basis, list target, list offset_bounds, list cur, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level = _cvp_count_level(nodes_by_level, idx)
    if(nodes >= max_nodes){ return _cvp_core_record(best_v, best_norm, nodes, true, nodes_by_level) }
    nodes += 1
@@ -2361,7 +2312,7 @@ fn _cvp_enum_gso_offset_radius_dfs(int: idx, int: radius_left, list: basis, list
    state
 }
 
-fn _cvp_coord_cube_dfs(int: idx, list: basis, list: target, list: options, list: cur, list: best_v, any: best_norm, int: nodes, int: max_nodes, list: nodes_by_level): dict {
+fn _cvp_coord_cube_dfs(int idx, list basis, list target, list options, list cur, list best_v, any best_norm, int nodes, int max_nodes, list nodes_by_level) dict {
    nodes_by_level = _cvp_count_level(nodes_by_level, idx)
    if(nodes >= max_nodes){ return _cvp_core_record(best_v, best_norm, nodes, true, nodes_by_level) }
    if(idx >= basis.len){
@@ -2383,7 +2334,7 @@ fn _cvp_coord_cube_dfs(int: idx, list: basis, list: target, list: options, list:
    state
 }
 
-fn _cvp_coordinate_cube_report(list: basis, list: target, int: max_nodes): any {
+fn _cvp_coordinate_cube_report(list basis, list target, int max_nodes) any {
    def coords_f = _cvp_target_coords_float_solve(basis, target)
    if(coords_f == nil){ return nil }
    def options = _cvp_float_coord_options(coords_f)
@@ -2404,7 +2355,7 @@ fn _cvp_coordinate_cube_report(list: basis, list: target, int: max_nodes): any {
    }
 }
 
-fn build_lattice(list: mat, list: lb, list: ub): list {
+fn build_lattice(list mat, list lb, list ub) list {
    "Build scaled CVP lattice metadata for bounded inequalities.
    Returns [mat, target, scales], where `target` is interval midpoint and
    `scales` are per-column diagonal weights."
@@ -2440,7 +2391,7 @@ fn build_lattice(list: mat, list: lb, list: ub): list {
    [mat, target, scales]
 }
 
-fn cvp(list: basis, list: target, bool: reduce=true): list {
+fn cvp(list basis, list target, bool reduce=true) list {
    "Closest vector helper. Uses Babai CVP; optionally LLL-reduces first."
    if(!is_list(basis) || basis.len == 0){ return [] }
    _cvp_trace("cvp:start", {"rows": basis.len, "cols": basis[0].len, "target_dim": target.len, "reduce": reduce})
@@ -2453,7 +2404,7 @@ fn cvp(list: basis, list: target, bool: reduce=true): list {
    seed
 }
 
-fn _cvp_reduction_selection(list: basis, list: target, bool: reduce, any: raw_seed_norm, any: raw_gso): dict {
+fn _cvp_reduction_selection(list basis, list target, bool reduce, any raw_seed_norm, any raw_gso) dict {
    mut work = basis
    mut work_gso = nil
    mut input_gso_reused = false
@@ -2487,7 +2438,7 @@ fn _cvp_reduction_selection(list: basis, list: target, bool: reduce, any: raw_se
    {"work": work, "work_gso": work_gso, "input_gso_reused": input_gso_reused, "work_gso_source": work_gso_source, "reduction_ms": reduction_ms, "reduction": reduction_report}
 }
 
-fn cvp_babai_report(list: basis, list: target, bool: reduce=true): dict {
+fn cvp_babai_report(list basis, list target, bool reduce=true) dict {
    "Return a Babai nearest-plane CVP report with coefficients, GSO profile, reduction choice, and exact distance verification."
    def t0 = ticks()
    mut out = dict(18)
@@ -2543,33 +2494,33 @@ fn cvp_babai_report(list: basis, list: target, bool: reduce=true): dict {
    _cvp_finish_report(out, t0)
 }
 
-fn cvp_babai(list: basis, list: target, bool: reduce=true): list {
+fn cvp_babai(list basis, list target, bool reduce=true) list {
    "Return the Babai nearest-plane CVP vector."
    cvp_babai_report(basis, target, reduce).get("vector", [])
 }
 
-fn _cvp_direct_hit_finish(dict: out, any: t0, list: basis, list: target, int: direct_i, int: coeff_bound, int: max_nodes): dict {
+fn _cvp_direct_hit_finish(dict out, any t0, list basis, list target, int direct_i, int coeff_bound, int max_nodes) dict {
    out = _cvp_enum_report_common(out.set("method", "gso-bounded-enumeration").set("direct_hit", true).set("direct_row", direct_i), false, coeff_bound, max_nodes, 0, _nodes_vec(basis.len), false, 0, Z(0), basis[direct_i], Z(0), true, basis)
    out = out.set("target_coordinates", _cvp_target_coords_solve(basis, target))
    out = out.set("gso_profile", _cvp_gso_profile(basis))
    _cvp_finish_report(out, t0)
 }
 
-fn _cvp_coordinate_cube_finish(dict: out, any: t0, list: basis, list: target, bool: reduce, int: coeff_bound, int: max_nodes, dict: cube, any: raw_seed_norm): dict {
+fn _cvp_coordinate_cube_finish(dict out, any t0, list basis, list target, bool reduce, int coeff_bound, int max_nodes, dict cube, any raw_seed_norm) dict {
    def vector = cube.get("vector", _zero_vec(target.len))
    def distance_sq = cube.get("distance_sq", raw_seed_norm)
    out = _cvp_enum_report_common({"method": "coordinate-cube-enumeration", "candidate_mode": "floor-ceil-coordinate-cube", "exhaustive_bound": false}, reduce, coeff_bound, max_nodes, cube.get("nodes", 0), cube.get("nodes_by_level", _nodes_vec(basis.len)), false, 0, raw_seed_norm, vector, distance_sq, _cvp_distance_sq(vector, target) == distance_sq, basis)
    _cvp_finish_report(out, t0)
 }
 
-fn _cvp_pre_reduce_exact_finish(dict: out, any: t0, list: basis, list: target, bool: reduce, int: coeff_bound, int: max_nodes, list: raw_seed): dict {
+fn _cvp_pre_reduce_exact_finish(dict out, any t0, list basis, list target, bool reduce, int coeff_bound, int max_nodes, list raw_seed) dict {
    out = _cvp_enum_report_common(out.set("method", "gso-bounded-enumeration").set("pre_reduce_exact", true), reduce, coeff_bound, max_nodes, 0, _nodes_vec(basis.len), false, 0, Z(0), raw_seed, Z(0), true, basis)
    out = out.set("target_coordinates", _cvp_target_coords_solve(basis, target))
    out = out.set("gso_profile", _cvp_gso_profile(basis))
    _cvp_finish_report(out, t0)
 }
 
-fn _cvp_initial_refinement(list: work, list: search_target, list: raw_seed, list: shift, any: emb, list: center_vec, any: center_norm, list: seed, any: seed_norm, int: max_nodes, dict: phase_times): dict {
+fn _cvp_initial_refinement(list work, list search_target, list raw_seed, list shift, any emb, list center_vec, any center_norm, list seed, any seed_norm, int max_nodes, dict phase_times) dict {
    mut initial_v = seed
    mut initial_norm = seed_norm
    def raw_rel = _vec_sub(raw_seed, shift)
@@ -2614,7 +2565,7 @@ fn _cvp_initial_refinement(list: work, list: search_target, list: raw_seed, list
    {"vector": initial_v, "distance_sq": initial_norm, "residual_embedding": residual_emb, "descent": descent, "phase_times": phase_times}
 }
 
-fn _cvp_raw_seed_stage(list: basis, list: target, int: max_nodes, dict: phase_times): dict {
+fn _cvp_raw_seed_stage(list basis, list target, int max_nodes, dict phase_times) dict {
    _cvp_trace("coordinate-cube:start", basis.len)
    def cube_t0 = ticks()
    def cube = _cvp_coordinate_cube_enabled(basis.len) ? _cvp_coordinate_cube_report(basis, target, min(int(max_nodes), 4096)) : nil
@@ -2634,7 +2585,7 @@ fn _cvp_raw_seed_stage(list: basis, list: target, int: max_nodes, dict: phase_ti
    {"cube": cube, "raw_gso": raw_gso, "input_gso_builds": input_gso_builds, "raw_seed": raw_seed, "raw_seed_norm": _cvp_distance_sq(raw_seed, target), "phase_times": phase_times}
 }
 
-fn _cvp_embedding_seed_stage(list: basis, list: target, list: raw_seed_in, any: raw_seed_norm_in, dict: phase_times): dict {
+fn _cvp_embedding_seed_stage(list basis, list target, list raw_seed_in, any raw_seed_norm_in, dict phase_times) dict {
    mut raw_seed = raw_seed_in
    mut raw_seed_norm = raw_seed_norm_in
    _cvp_trace("embedding:start", raw_seed_norm)
@@ -2650,7 +2601,7 @@ fn _cvp_embedding_seed_stage(list: basis, list: target, list: raw_seed_in, any: 
    {"embedding": emb, "raw_seed": raw_seed, "raw_seed_norm": raw_seed_norm, "phase_times": phase_times}
 }
 
-fn _cvp_work_stage(list: basis, list: target, bool: reduce, any: raw_seed_norm, any: raw_gso, dict: phase_times): dict {
+fn _cvp_work_stage(list basis, list target, bool reduce, any raw_seed_norm, any raw_gso, dict phase_times) dict {
    def selection = _cvp_reduction_selection(basis, target, reduce, raw_seed_norm, raw_gso)
    mut work = selection.get("work", basis)
    mut work_gso = selection.get("work_gso", nil)
@@ -2672,7 +2623,7 @@ fn _cvp_work_stage(list: basis, list: target, bool: reduce, any: raw_seed_norm, 
    }
 }
 
-fn _cvp_residual_stage(list: work, list: target, any: work_gso, dict: phase_times): dict {
+fn _cvp_residual_stage(list work, list target, any work_gso, dict phase_times) dict {
    _cvp_trace("residual:start", work.len)
    def residual_t0 = ticks()
    def residual = _cvp_babai_residual_report(work, target, 256, work_gso)
@@ -2693,7 +2644,7 @@ fn _cvp_residual_stage(list: work, list: target, any: work_gso, dict: phase_time
    }
 }
 
-fn _cvp_gso_enum_stage(list: work, list: search_target, list: initial_v_in, any: initial_norm_in, int: max_nodes, any: work_gso, dict: phase_times): dict {
+fn _cvp_gso_enum_stage(list work, list search_target, list initial_v_in, any initial_norm_in, int max_nodes, any work_gso, dict phase_times) dict {
    mut initial_v = initial_v_in
    mut initial_norm = initial_norm_in
    _cvp_trace("gso-enum:start", initial_norm)
@@ -2711,7 +2662,7 @@ fn _cvp_gso_enum_stage(list: work, list: search_target, list: initial_v_in, any:
    {"vector": initial_v, "distance_sq": initial_norm, "gso_enumeration": gso_enum, "improved": improved, "phase_times": phase_times}
 }
 
-fn _cvp_beam_stage(list: work, list: search_target, list: initial_v_in, any: initial_norm_in, int: max_nodes, dict: phase_times): dict {
+fn _cvp_beam_stage(list work, list search_target, list initial_v_in, any initial_norm_in, int max_nodes, dict phase_times) dict {
    mut initial_v = initial_v_in
    mut initial_norm = initial_norm_in
    mut beam = nil
@@ -2731,12 +2682,12 @@ fn _cvp_beam_stage(list: work, list: search_target, list: initial_v_in, any: ini
 }
 
 fn _cvp_beam_return_report(
-   dict: out, any: t0, bool: reduce, int: coeff_bound, int: max_nodes,
-   list: work, list: target, list: shift, list: initial_v, any: initial_norm,
-   any: reduction_report, any: residual, any: coords,
-   int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source,
-   any: descent, any: beam,
-): any {
+   dict out, any t0, bool reduce, int coeff_bound, int max_nodes,
+   list work, list target, list shift, list initial_v, any initial_norm,
+   any reduction_report, any residual, any coords,
+   int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source,
+   any descent, any beam,
+) any {
    if(beam == nil){ return nil }
    def beam_return_s = env("NY_CVP_BEAM_RETURN")
    if(!(is_str(beam_return_s) && (beam_return_s == "1" || beam_return_s == "true" || beam_return_s == "yes") && beam.get("found", false))){ return nil }
@@ -2750,12 +2701,12 @@ fn _cvp_beam_return_report(
 }
 
 fn _cvp_gso_terminal_report(
-   dict: out, any: t0, bool: reduce, int: coeff_bound, int: max_nodes,
-   list: work, list: target, list: shift, list: initial_v, any: initial_norm,
-   any: reduction_report, any: residual, any: coords,
-   int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source,
-   any: descent, any: beam, any: residual_emb, any: gso_enum, bool: gso_improved, dict: phase_times,
-): any {
+   dict out, any t0, bool reduce, int coeff_bound, int max_nodes,
+   list work, list target, list shift, list initial_v, any initial_norm,
+   any reduction_report, any residual, any coords,
+   int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source,
+   any descent, any beam, any residual_emb, any gso_enum, bool gso_improved, dict phase_times,
+) any {
    if(gso_enum.get("hit_limit", false) && !gso_improved){
       def exhausted_v = _vec_add(shift, initial_v)
       def exhausted_dist = _cvp_distance_sq(exhausted_v, target)
@@ -2784,12 +2735,12 @@ fn _cvp_gso_terminal_report(
 }
 
 fn _cvp_offset_shell_finish(
-   any: t0, bool: reduce, int: coeff_bound, int: max_nodes,
-   list: work, list: search_target, list: target, list: shift, list: initial_v, any: initial_norm, any: report_radius_sq,
-   list: center_vec, any: center_norm, any: reduction_report, any: residual, any: coords,
-   int: input_gso_builds, int: work_gso_builds, bool: input_gso_reused, str: work_gso_source,
-   any: descent, any: residual_emb, any: gso_enum, any: gso, dict: phase_times,
-): dict {
+   any t0, bool reduce, int coeff_bound, int max_nodes,
+   list work, list search_target, list target, list shift, list initial_v, any initial_norm, any report_radius_sq,
+   list center_vec, any center_norm, any reduction_report, any residual, any coords,
+   int input_gso_builds, int work_gso_builds, bool input_gso_reused, str work_gso_source,
+   any descent, any residual_emb, any gso_enum, any gso, dict phase_times,
+) dict {
    mut state = _cvp_core_record(initial_v, initial_norm, 0, false, _nodes_vec(work.len))
    mut radius = 0
    def offset_bounds = _cvp_gso_offset_bounds(gso.get("norms_sq", []), state.get("distance_sq", initial_norm), int(coeff_bound))
@@ -2817,7 +2768,7 @@ fn _cvp_offset_shell_finish(
    _cvp_finish_report(offset_out, t0)
 }
 
-fn cvp_enumerate_report(list: basis, list: target, bool: reduce=true, int: coeff_bound=2, int: max_nodes=200000): dict {
+fn cvp_enumerate_report(list basis, list target, bool reduce=true, int coeff_bound=2, int max_nodes=200000) dict {
    "GSO-profiled CVP enumeration report.
    The search explores a Babai-centered coefficient window on the optionally
    reduced basis and records radius, target coordinates, node counts per level,
@@ -2911,7 +2862,7 @@ fn cvp_enumerate_report(list: basis, list: target, bool: reduce=true, int: coeff
    return _cvp_offset_shell_finish(t0, reduce, coeff_bound, max_nodes, work, search_target, target, shift, initial_v, initial_norm, seed_norm, center_vec, center_norm, reduction_report, residual, coords, input_gso_builds, work_gso_builds, input_gso_reused, work_gso_source, descent, residual_emb, gso_enum, work_gso, phase_times)
 }
 
-fn cvp_enumerate(list: basis, list: target, bool: reduce=true, int: coeff_bound=2, int: max_nodes=200000): list {
+fn cvp_enumerate(list basis, list target, bool reduce=true, int coeff_bound=2, int max_nodes=200000) list {
    "Return the bounded-enumeration CVP vector."
    if(!is_list(basis) || basis.len == 0){ return [] }
    def work = reduce ? _cvp_reduce_basis(basis) : basis
@@ -2922,14 +2873,14 @@ fn cvp_enumerate(list: basis, list: target, bool: reduce=true, int: coeff_bound=
    state.get("vector", seed)
 }
 
-fn cvp_report(list: basis, list: target, bool: reduce=true, str: method="babai", int: coeff_bound=2, int: max_nodes=200000): dict {
+fn cvp_report(list basis, list target, bool reduce=true, str method="babai", int coeff_bound=2, int max_nodes=200000) dict {
    "Return a CVP report. method=\"babai\" is fast; method=\"enumerate\"
    uses bounded enumeration and records node-budget status."
    if(method == "enumerate" || method == "bounded"){ return cvp_enumerate_report(basis, target, reduce, coeff_bound, max_nodes) }
    cvp_babai_report(basis, target, reduce)
 }
 
-fn solve_inequality(list: mat, list: lb, list: ub): list {
+fn solve_inequality(list mat, list lb, list ub) list {
    "Solve bounded linear inequality in the lll_cvp style.
    Returns a vector `y` expected to satisfy lb <= y <= ub(unchecked)."
    def b = build_lattice(mat, lb, ub)
@@ -2944,7 +2895,7 @@ fn solve_inequality(list: mat, list: lb, list: ub): list {
    _unscale_vec(nearest, scales)
 }
 
-fn solve_inequality_ex(list: mat, list: lb, list: ub): list {
+fn solve_inequality_ex(list mat, list lb, list ub) list {
    "Extended bounded inequality solve.
    Returns [solutions, reduced_basis], where solutions is a candidate list."
    def b = build_lattice(mat, lb, ub)
@@ -2958,7 +2909,7 @@ fn solve_inequality_ex(list: mat, list: lb, list: ub): list {
    [[_unscale_vec(nearest, scales)], _unscale_rows(reduced, scales)]
 }
 
-fn affine_cvp(list: base, list: lattice_basis, list: target): list {
+fn affine_cvp(list base, list lattice_basis, list target) list {
    "Return `base + CVP(lattice_basis, target - base)`."
    if(!is_list(base) || base.len == 0){ return [] }
    def delta = _vec_sub(target, base)
@@ -2966,17 +2917,17 @@ fn affine_cvp(list: base, list: lattice_basis, list: target): list {
    _vec_add(base, nearest)
 }
 
-fn bounded(list: mat, list: lb, list: ub): list {
+fn bounded(list mat, list lb, list ub) list {
    "Compact alias for solve_inequality."
    solve_inequality(mat, lb, ub)
 }
 
-fn bounded_ex(list: mat, list: lb, list: ub): list {
+fn bounded_ex(list mat, list lb, list ub) list {
    "Compact alias for solve_inequality_ex."
    solve_inequality_ex(mat, lb, ub)
 }
 
-fn _clone_matrix_rows(list: mat): list {
+fn _clone_matrix_rows(list mat) list {
    mut out = []
    mut i = 0
    while(i < mat.len){
@@ -2986,7 +2937,7 @@ fn _clone_matrix_rows(list: mat): list {
    out
 }
 
-fn _mat_max_abs(list: mat, int: num_var, int: num_ineq): bigint {
+fn _mat_max_abs(list mat, int num_var, int num_ineq) bigint {
    mut max_element = Z(0)
    mut i = 0
    while(i < num_var){
@@ -3002,7 +2953,7 @@ fn _mat_max_abs(list: mat, int: num_var, int: num_ineq): bigint {
    max_element
 }
 
-fn _bounds_max_diff(list: lb, list: ub, int: num_ineq): bigint {
+fn _bounds_max_diff(list lb, list ub, int num_ineq) bigint {
    mut max_diff = Z(0)
    mut i = 0
    while(i < num_ineq){
@@ -3014,14 +2965,14 @@ fn _bounds_max_diff(list: lb, list: ub, int: num_ineq): bigint {
    max_diff <= 0 ? Z(1) : max_diff
 }
 
-fn _weight_for_interval(any: lo, any: hi, any: w_base, any: max_diff): bigint {
+fn _weight_for_interval(any lo, any hi, any w_base, any max_diff) bigint {
    def d = _z(hi) - _z(lo)
    mut wi = Z(1)
    if(d == 0){ wi = w_base } else { wi = max_diff / d }
    wi <= 0 ? Z(1) : wi
 }
 
-fn _midpoint_vec(list: lb, list: ub, int: n): list {
+fn _midpoint_vec(list lb, list ub, int n) list {
    mut out = []
    mut i = 0
    while(i < n){
@@ -3031,7 +2982,7 @@ fn _midpoint_vec(list: lb, list: ub, int: n): list {
    out
 }
 
-fn _unscale_result_checked(list: result_scaled, list: applied_weights, list: scaled_lb, list: scaled_ub, int: num_ineq): list {
+fn _unscale_result_checked(list result_scaled, list applied_weights, list scaled_lb, list scaled_ub, int num_ineq) list {
    mut ok = true
    mut result = []
    mut i = 0
@@ -3045,7 +2996,7 @@ fn _unscale_result_checked(list: result_scaled, list: applied_weights, list: sca
    [result, ok]
 }
 
-fn _recover_fin_square(list: scaled_mat, list: result_scaled, bool: recover_fin, int: num_var, int: num_ineq): list {
+fn _recover_fin_square(list scaled_mat, list result_scaled, bool recover_fin, int num_var, int num_ineq) list {
    if(!recover_fin || num_var != num_ineq){ return [] }
    def mm = matrix.Matrix(scaled_mat)
    def det = matrix.matrix_det(mm)
@@ -3054,7 +3005,7 @@ fn _recover_fin_square(list: scaled_mat, list: result_scaled, bool: recover_fin,
    matrix.matrix_solve(mt, result_scaled)
 }
 
-fn solve_weighted_bounds(list: mat, list: lb, list: ub, any: weight=0, bool: recover_fin=false): list {
+fn solve_weighted_bounds(list mat, list lb, list ub, any weight=0, bool recover_fin=false) list {
    "rkm-style weighted CVP inequality solve.
    - `mat`: rows are variables, cols are inequality expressions
    - `lb`, `ub`: per-inequality bounds
@@ -3105,7 +3056,7 @@ fn solve_weighted_bounds(list: mat, list: lb, list: ub, any: weight=0, bool: rec
    [result, applied_weights, result_scaled, ok, fin]
 }
 
-fn qary_lattice(list: mat, any: q): list {
+fn qary_lattice(list mat, any q) list {
    "Build q-ary lattice basis from independent row-space generators."
    def dims = _check_rect(mat)
    def nr = int(dims[0])
@@ -3146,13 +3097,13 @@ fn qary_lattice(list: mat, any: q): list {
    L
 }
 
-fn reduce_mod_p(list: mat, any: p): list {
+fn reduce_mod_p(list mat, any p) list {
    "Return an LLL-reduced short basis for matrix rows modulo prime p."
    def L = qary_lattice(mat, p)
    _cvp_reduce_basis(L)
 }
 
-fn solve_multi_mod_linear(list: coeff_rows, list: consts, list: mods, list: lb, list: ub): list {
+fn solve_multi_mod_linear(list coeff_rows, list consts, list mods, list lb, list ub) list {
    "Solve bounded linear equations modulo possibly-different moduli.
    Each equation is: `dot(coeff_rows[i], x) + consts[i] == 0(mod mods[i])`.
    Returns bounded `x` candidate vector."
@@ -3230,7 +3181,7 @@ fn solve_multi_mod_linear(list: coeff_rows, list: consts, list: mods, list: lb, 
    _tail_vec(vals, neq, nvars)
 }
 
-fn solve_underconstrained_linear(list: mat, list: target, list: lb, list: ub): list {
+fn solve_underconstrained_linear(list mat, list target, list lb, list ub) list {
    "Solve underconstrained linear equations via CVP embedding.
    `mat` shape is [num_vars x num_eq], finds bounded vars `x` such that
    `x * mat == target` with `lb <= x <= ub`."
@@ -3287,7 +3238,7 @@ fn solve_underconstrained_linear(list: mat, list: target, list: lb, list: ub): l
    _tail_vec(sol, num_eq, num_var)
 }
 
-fn _enum_check(list: v, any: lb, any: ub): bool {
+fn _enum_check(list v, any lb, any ub) bool {
    mut i = 0
    while(i < v.len){
       def x = _z(v[i])
@@ -3298,7 +3249,7 @@ fn _enum_check(list: v, any: lb, any: ub): bool {
    true
 }
 
-fn _enum_brute_dfs(int: idx, int: k, int: n, list: coeffs, list: base, list: basis, any: lb, any: ub, list: out): list {
+fn _enum_brute_dfs(int idx, int k, int n, list coeffs, list base, list basis, any lb, any ub, list out) list {
    if(idx >= k){
       mut v, i = clone(base), 0
       while(i < k){
@@ -3317,7 +3268,7 @@ fn _enum_brute_dfs(int: idx, int: k, int: n, list: coeffs, list: base, list: bas
    out
 }
 
-fn enum_brute(any: base, list: basis, any: lb=nil, any: ub=nil, int: n=5): list {
+fn enum_brute(any base, list basis, any lb=nil, any ub=nil, int n=5) list {
    "Enumerate `v = base + c@basis` with integer coefficients in [-n, n].
    Returns all vectors that satisfy optional bounds."
    if(!is_list(basis) || basis.len == 0){ return [] }
@@ -3346,7 +3297,7 @@ fn enum_brute(any: base, list: basis, any: lb=nil, any: ub=nil, int: n=5): list 
    _enum_brute_dfs(0, k, int(n), coeffs, origin, basis, lb, ub, [])
 }
 
-fn mod_arc_is_inside(any: L, any: R, any: M, any: val): bool {
+fn mod_arc_is_inside(any L, any R, any M, any val) bool {
    "Return true when `val` lies in modular arc [L, R] over modulus M."
    def mm = _z(M)
    if(mm <= 0){ return false }
@@ -3356,7 +3307,7 @@ fn mod_arc_is_inside(any: L, any: R, any: M, any: val): bool {
    v >= l || v <= r
 }
 
-fn mod_arc_has_solution(any: A, any: M, any: L, any: R): bool {
+fn mod_arc_has_solution(any A, any M, any L, any R) bool {
    "Check if modular interval equation L <= A*x(mod M) <= R can have a solution."
    def l, r = _z(L), _z(R)
    if(l == 0 || l > r){ return true }
@@ -3364,7 +3315,7 @@ fn mod_arc_has_solution(any: A, any: M, any: L, any: R): bool {
    ((l - 1) / g) != (r / g)
 }
 
-fn mod_arc_optf(any: A, any: M, any: L, any: R): bigint {
+fn mod_arc_optf(any A, any M, any L, any R) bigint {
    "Minimum nonnegative x such that L <= A*x(mod M) <= R.
    Assumes the interval does not wrap(L <= R)."
    def az, mz = _z(A), _z(M)
@@ -3382,7 +3333,7 @@ fn mod_arc_optf(any: A, any: M, any: L, any: R): bigint {
    _ceil_div(l + mz * c2, az)
 }
 
-fn mod_arc_solve_range(any: A, any: M, any: L, any: R, any: S, any: E, int: max_solutions=0): list {
+fn mod_arc_solve_range(any A, any M, any L, any R, any S, any E, int max_solutions=0) list {
    "Find all x in [S, E] satisfying L <= A*x(mod M) <= R."
    if(!mod_arc_has_solution(A, M, L, R)){ return [] }
    def az, mz = _z(A), _z(M)

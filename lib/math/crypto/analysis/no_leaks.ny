@@ -1,9 +1,12 @@
-;; Keywords: analysis no-leaks constraints
+;; Keywords: analysis no-leaks constraints math crypto
 ;; Cryptanalysis scoring and recovery routines for leak-free candidate filtering and byte recovery.
+;; References:
+;; - std.math.crypto.analysis
+;; - std.math.crypto
 module std.math.crypto.analysis.no_leaks(no_leaks_candidates, no_leaks_candidate_sets, no_leaks_apply_sample, no_leaks_recover_bytes, no_leaks_recover_text, no_leaks_summary)
 use std.core
 
-fn _no_leaks_byte_at(any: sample, int: i): int {
+fn _no_leaks_byte_at(any sample, int i) int {
    if(sample == nil){ return -1 }
    if(i < 0 || i >= sample.len){ return -1 }
    if(is_str(sample)){ return load8(sample, i) & 255 }
@@ -11,13 +14,13 @@ fn _no_leaks_byte_at(any: sample, int: i): int {
    -1
 }
 
-fn _no_leaks_sample_len(any: sample): int {
+fn _no_leaks_sample_len(any sample) int {
    if(sample == nil){ return 0 }
    if(is_str(sample) || is_list(sample) || is_bytes(sample)){ return sample.len }
    0
 }
 
-fn _no_leaks_max_len(list: samples): int {
+fn _no_leaks_max_len(list samples) int {
    mut n = 0
    mut i = 0
    while(i < samples.len){
@@ -27,7 +30,7 @@ fn _no_leaks_max_len(list: samples): int {
    n
 }
 
-fn _no_leaks_full_row(): list {
+fn _no_leaks_full_row() list {
    mut row = list(256)
    mut b = 0
    while(b < 256){
@@ -38,7 +41,7 @@ fn _no_leaks_full_row(): list {
    row
 }
 
-fn _no_leaks_full_flags(): list {
+fn _no_leaks_full_flags() list {
    mut row = list(256)
    mut b = 0
    while(b < 256){
@@ -49,7 +52,7 @@ fn _no_leaks_full_flags(): list {
    row
 }
 
-fn no_leaks_candidates(int: length): list {
+fn no_leaks_candidates(int length) list {
    "Build initial candidate byte sets for a no-leaks OTP attack.
    length: target plaintext byte length.
    Returns a list of rows, each row initially containing bytes 0..255."
@@ -63,7 +66,7 @@ fn no_leaks_candidates(int: length): list {
    out
 }
 
-fn _no_leaks_without_byte(list: row, int: blocked): list {
+fn _no_leaks_without_byte(list row, int blocked) list {
    mut out = list(max(0, row.len - 1))
    mut out_i = 0
    mut i = 0
@@ -79,7 +82,7 @@ fn _no_leaks_without_byte(list: row, int: blocked): list {
    out
 }
 
-fn no_leaks_apply_sample(list: candidates, any: sample): list {
+fn no_leaks_apply_sample(list candidates, any sample) list {
    "Apply one accepted ciphertext sample to no-leaks candidate sets.
    In this leak model, an accepted ciphertext byte means the
    plaintext byte at that position is not equal to that byte."
@@ -95,7 +98,7 @@ fn no_leaks_apply_sample(list: candidates, any: sample): list {
    out
 }
 
-fn no_leaks_candidate_sets(list: samples, int: length=0): list {
+fn no_leaks_candidate_sets(list samples, int length=0) list {
    "Recover possible plaintext byte sets from accepted no-leaks ciphertexts.
    samples: accepted ciphertexts as byte lists, bytes objects, or strings.
    length: 0 auto-detects the maximum sample length."
@@ -146,7 +149,7 @@ fn no_leaks_candidate_sets(list: samples, int: length=0): list {
    candidates
 }
 
-fn _no_leaks_recover_from_candidates(list: candidates, int: unknown): list {
+fn _no_leaks_recover_from_candidates(list candidates, int unknown) list {
    mut out = list(candidates.len)
    mut i = 0
    while(i < candidates.len){
@@ -158,7 +161,7 @@ fn _no_leaks_recover_from_candidates(list: candidates, int: unknown): list {
    out
 }
 
-fn _no_leaks_text_from_recovered(list: recovered, int: fill): str {
+fn _no_leaks_text_from_recovered(list recovered, int fill) str {
    def out = malloc(recovered.len + 1)
    mut i = 0
    while(i < recovered.len){
@@ -170,20 +173,20 @@ fn _no_leaks_text_from_recovered(list: recovered, int: fill): str {
    init_str(out, recovered.len)
 }
 
-fn no_leaks_recover_bytes(list: samples, int: length=0, int: unknown=-1): list {
+fn no_leaks_recover_bytes(list samples, int length=0, int unknown=-1) list {
    "Return singleton recovered bytes from no-leaks samples.
    Positions with more than one remaining candidate are filled with unknown."
    _no_leaks_recover_from_candidates(no_leaks_candidate_sets(samples, length), unknown)
 }
 
-fn no_leaks_recover_text(list: samples, int: length=0, str: unknown="?"): str {
+fn no_leaks_recover_text(list samples, int length=0, str unknown="?") str {
    "Return recovered ASCII text from no-leaks samples.
    Unresolved positions use the first byte of unknown, usually '?'."
    def fill = unknown.len > 0 ? (load8(unknown, 0) & 255) : 63
    _no_leaks_text_from_recovered(no_leaks_recover_bytes(samples, length, -1), fill)
 }
 
-fn no_leaks_summary(list: samples, int: length=0): dict {
+fn no_leaks_summary(list samples, int length=0) dict {
    "Summarize a no-leaks OTP recovery session.
    Returns candidates, recovered bytes, text, resolved count, and length."
    def candidates = no_leaks_candidate_sets(samples, length)

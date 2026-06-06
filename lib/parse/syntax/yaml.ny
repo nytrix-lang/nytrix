@@ -1,5 +1,8 @@
-;; Keywords: syntax yaml yml
+;; Keywords: syntax yaml yml parse highlight
 ;; YAML syntax highlighter
+;; References:
+;; - std.parse.syntax
+;; - std.parse.syntax.helpers
 module std.parse.syntax.yaml(tokenize)
 use std.core
 use std.core.str as str
@@ -7,7 +10,8 @@ use std.parse.syntax.helpers as _h
 
 def KW = "true;false;null;True;False;Null;TRUE;FALSE;NULL;yes;no;Yes;No;YES;NO;on;off;On;Off;ON;OFF"
 
-fn tokenize(str: source, list: out_tokens): list {
+fn tokenize(str source, list out_tokens) list {
+   "Runs the tokenize operation."
    def src_len = source.len
    mut i = 0
    while(i < src_len){
@@ -39,8 +43,10 @@ fn tokenize(str: source, list: out_tokens): list {
       } elif(_h.is_alpha_ch(ch) || ch == 95){
          def j = _h.scan_ident(source, i, src_len)
          def word = str.str_slice(source, i, j)
-         if(_h.in_list(word, KW)){ out_tokens = _h.add_tok(out_tokens, 9, i, j - i) }
-         else { out_tokens = _h.add_tok(out_tokens, 20, i, j - i) }
+         def next = _h.scan_space(source, j, src_len)
+         if(next < src_len && load8(source, next) == 58){ out_tokens = _h.add_tok(out_tokens, 20, i, j - i) }
+         elif(_h.in_list(word, KW)){ out_tokens = _h.add_tok(out_tokens, 9, i, j - i) }
+         else { out_tokens = _h.add_tok(out_tokens, 21, i, j - i) }
          i = j
       } elif(ch == 58){
          out_tokens = _h.add_tok(out_tokens, 7, i, 1)

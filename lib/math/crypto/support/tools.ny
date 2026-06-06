@@ -1,7 +1,10 @@
-;; Keywords: support utilities helpers tools
+;; Keywords: support utilities helpers tools math crypto
 ;; Byte, text, rotation, and flag-extraction utilities shared by crypto modules.
 ;;
 ;; These are intentionally generic utilities.
+;; References:
+;; - std.math.crypto.support
+;; - std.math.crypto
 module std.math.crypto.support.tools(scan_lines, collect_lines, bytes_contains, find_subseq, rol_bits, ror_bits, bytes_fixed_from_bigint, bytes_ascii, bytes_is_printable_ascii, bytes_has_prefix, extract_flag, extract_flag_bytes, list_uniq, max_bit_length, str_strip_ws, str_strip_bytes_literal)
 use std.core
 use std.math.bin
@@ -9,7 +12,7 @@ use std.math.big
 use std.math.nt
 use std.core.str as str
 
-fn scan_lines(str: txt, fnptr: on_line): any {
+fn scan_lines(str txt, fnptr on_line) any {
    "Call on_line(line_str) for each non-empty line in txt.
    If on_line returns false, stops early."
    def n = txt.len
@@ -28,7 +31,7 @@ fn scan_lines(str: txt, fnptr: on_line): any {
    nil
 }
 
-fn collect_lines(str: txt): list {
+fn collect_lines(str txt) list {
    "Return all non-empty lines from txt as a list of strings."
    mut out = []
    def n = txt.len
@@ -47,29 +50,12 @@ fn collect_lines(str: txt): list {
    out
 }
 
-fn bytes_contains(list: haystack, list: needle): bool {
+fn bytes_contains(list haystack, list needle) bool {
    "Return true if needle(byte list) appears in haystack(byte list)."
-   def hn, nn = haystack.len, needle.len
-   if(nn == 0){ return true }
-   if(hn < nn){ return false }
-   mut i = 0
-   while(i + nn <= hn){
-      mut ok = true
-      mut j = 0
-      while(j < nn){
-         if(haystack[i + j] != needle[j]){
-            ok = false
-            break
-         }
-         j += 1
-      }
-      if(ok){ return true }
-      i += 1
-   }
-   false
+   find_subseq(haystack, needle) >= 0
 }
 
-fn find_subseq(list: xs, list: pat): int {
+fn find_subseq(list xs, list pat) int {
    "Return the first index where pat appears in xs, or -1."
    mut i = 0
    while(i + pat.len <= xs.len){
@@ -88,7 +74,7 @@ fn find_subseq(list: xs, list: pat): int {
    -1
 }
 
-fn rol_bits(any: x, int: shift, int: bits): any {
+fn rol_bits(any x, int shift, int bits) any {
    "Rotate-left x inside a bits-wide word(BigInt).
    shift may be larger than bits."
    if(bits <= 0){ return Z(0) }
@@ -101,7 +87,7 @@ fn rol_bits(any: x, int: shift, int: bits): any {
    (left + right) % MOD
 }
 
-fn ror_bits(any: x, int: shift, int: bits): any {
+fn ror_bits(any x, int shift, int bits) any {
    "Rotate-right x inside a bits-wide word(BigInt)."
    if(bits <= 0){ return Z(0) }
    mut s = shift % bits
@@ -110,7 +96,7 @@ fn ror_bits(any: x, int: shift, int: bits): any {
    rol_bits(x, bits - s, bits)
 }
 
-fn bytes_fixed_from_bigint(any: x, int: n): list {
+fn bytes_fixed_from_bigint(any x, int n) list {
    "Convert bigint x to big-endian bytes and left-pad with zeros to length n."
    def bs0 = Z(x).bytes
    if(bs0.len >= n){ return bs0 }
@@ -123,12 +109,12 @@ fn bytes_fixed_from_bigint(any: x, int: n): list {
    pad.extend(bs0)
 }
 
-fn bytes_ascii(list: bs): str {
+fn bytes_ascii(list bs) str {
    "Convert a byte-list to an ASCII/Latin-1 style string."
    bs.text
 }
 
-fn bytes_is_printable_ascii(any: bs, int: min_len=1, int: printable_pct=95): bool {
+fn bytes_is_printable_ascii(any bs, int min_len=1, int printable_pct=95) bool {
    "Return true if a byte list is mostly printable ASCII.
    Printable bytes are 0x20..0x7e plus LF. printable_pct is an integer percentage threshold."
    if(bs == nil || !is_list(bs)){ return false }
@@ -144,7 +130,7 @@ fn bytes_is_printable_ascii(any: bs, int: min_len=1, int: printable_pct=95): boo
    good * 100 >= n * printable_pct
 }
 
-fn bytes_has_prefix(any: bs, any: prefix): bool {
+fn bytes_has_prefix(any bs, any prefix) bool {
    "Return true if byte-list bs starts with prefix. Prefix may be a string or byte list."
    if(bs == nil || prefix == nil || !is_list(bs)){ return false }
    def pn = prefix.len
@@ -158,7 +144,7 @@ fn bytes_has_prefix(any: bs, any: prefix): bool {
    true
 }
 
-fn extract_flag(str: text, str: prefix, str: suffix="}"): str {
+fn extract_flag(str text, str prefix, str suffix="}") str {
    "Extract prefix...suffix from text, or return an empty string."
    def start = str.find(text, prefix)
    if(start < 0){ return "" }
@@ -167,12 +153,12 @@ fn extract_flag(str: text, str: prefix, str: suffix="}"): str {
    str.str_slice(text, start, stop + suffix.len)
 }
 
-fn extract_flag_bytes(list: bs, str: prefix, str: suffix="}"): str {
+fn extract_flag_bytes(list bs, str prefix, str suffix="}") str {
    "Extract a delimited flag from a byte list."
    extract_flag(bytes_ascii(bs), prefix, suffix)
 }
 
-fn list_uniq(any: xs): list {
+fn list_uniq(any xs) list {
    "Return xs with duplicates removed, preserving first occurrence order."
    if(xs == nil){ return [] }
    mut out = []
@@ -194,7 +180,7 @@ fn list_uniq(any: xs): list {
    out
 }
 
-fn max_bit_length(list: xs): int {
+fn max_bit_length(list xs) int {
    "Return the largest BigInt bit length in xs."
    mut best = 0
    mut i = 0
@@ -206,7 +192,7 @@ fn max_bit_length(list: xs): int {
    best
 }
 
-fn str_strip_ws(any: s): str {
+fn str_strip_ws(any s) str {
    "Trim ASCII whitespace from both ends."
    if(s == nil){ return "" }
    mut i0, i1 = 0, s.len
@@ -215,7 +201,7 @@ fn str_strip_ws(any: s): str {
    str.str_slice(s, i0, i1)
 }
 
-fn str_strip_bytes_literal(any: s): str {
+fn str_strip_bytes_literal(any s) str {
    "Strip byte-literal wrappers like b'..' or b\"..\" when present."
    if(s == nil){ return "" }
    def t, n = str_strip_ws(s), t.len

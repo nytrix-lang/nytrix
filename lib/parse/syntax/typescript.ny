@@ -1,5 +1,8 @@
-;; Keywords: syntax typescript ts
+;; Keywords: syntax typescript ts parse highlight
 ;; TypeScript syntax highlighter
+;; References:
+;; - std.parse.syntax
+;; - std.parse.syntax.helpers
 module std.parse.syntax.typescript(tokenize)
 use std.parse.syntax.helpers as _h
 
@@ -7,6 +10,7 @@ def KW = "break;case;catch;continue;debugger;default;delete;do;else;finally;for;
 def TP = "Array;Boolean;Date;Error;Function;JSON;Math;Number;Object;RegExp;String;Symbol;Map;Set;WeakMap;WeakSet;Promise;Proxy;Reflect;Int8Array;Uint8Array;Float32Array;Float64Array"
 def FN = "console;log;warn;error;info;setTimeout;setInterval;clearTimeout;clearInterval;parseInt;parseFloat;isNaN;isFinite;eval;fetch;require"
 
-fn tokenize(str: source, list: out_tokens): list {
+fn tokenize(str source, list out_tokens) list {
+   "Runs the tokenize operation."
    _h.tokenize_c_like(source, out_tokens, KW, TP, FN, "$", ".xobeE+-n", "+-*/%=!<>&|^~?", "()[]{};,.:@#", 47, true, -1, true, false)
 }

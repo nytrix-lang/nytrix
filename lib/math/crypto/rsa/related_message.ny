@@ -1,14 +1,17 @@
-;; Keywords: rsa related-message
+;; Keywords: rsa related-message math crypto
 ;; RSA related-message attacks routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.related_message(franklin_reiter_attack, franklin_reiter_e3_successor)
 use std.core
 use std.math.nt
 use std.math.crypto.poly
 
-fn franklin_reiter_attack(any: n, int: e, any: c1, any: c2, list: f1_coeffs, list: f2_coeffs): any {
+fn franklin_reiter_attack(any n, int e, any c1, any c2, list f1_coeffs, list f2_coeffs) any {
    "Franklin-Reiter related message attack.  Recovers the shared message m
    given two ciphertexts c1, c2 encrypted under the same key(n, e) where
    m is related by polynomials f1 and f2.  Returns m or nil."
@@ -26,7 +29,7 @@ fn franklin_reiter_attack(any: n, int: e, any: c1, any: c2, list: f1_coeffs, lis
    nil
 }
 
-fn franklin_reiter_e3_successor(any: n, any: c_m, any: c_m_plus_1): any {
+fn franklin_reiter_e3_successor(any n, any c_m, any c_m_plus_1) any {
    "Closed-form Franklin-Reiter recovery for e=3 and related messages m, m+1.
    Given c_m = m^3 mod n and c_m_plus_1 = (m+1)^3 mod n, returns m or nil."
    def num = (Z(2) * c_m + c_m_plus_1 - Z(1)) % n
@@ -36,7 +39,7 @@ fn franklin_reiter_e3_successor(any: n, any: c_m, any: c_m_plus_1): any {
    (num * inv) % n
 }
 
-fn poly_pow_mod(list: p, int: e, any: m): list {
+fn poly_pow_mod(list p, int e, any m) list {
    "Compute p(x)^e mod m using binary exponentiation on polynomials.
    Returns the resulting polynomial coefficients."
    if(e == 0){ return [1] }
@@ -51,7 +54,7 @@ fn poly_pow_mod(list: p, int: e, any: m): list {
    res
 }
 
-fn poly_mul_mod(list: a, list: b, any: m): list {
+fn poly_mul_mod(list a, list b, any m) list {
    "Multiply two polynomials a(x) and b(x) with all coefficients reduced mod m.
    Returns the product polynomial coefficients."
    def na, nb = a.len, b.len
@@ -78,7 +81,7 @@ fn poly_mul_mod(list: a, list: b, any: m): list {
    res
 }
 
-fn poly_gcd_mod(list: a, list: b, any: m): list {
+fn poly_gcd_mod(list a, list b, any m) list {
    "Compute the GCD of two polynomials a(x) and b(x) over Z_m.
    Returns the GCD polynomial coefficients."
    mut va, vb = a, b
@@ -89,7 +92,7 @@ fn poly_gcd_mod(list: a, list: b, any: m): list {
    va
 }
 
-fn poly_mod_mod(list: a, list: b, any: m): list {
+fn poly_mod_mod(list a, list b, any m) list {
    "Compute a(x) mod b(x) over Z_m via polynomial long division.
    Returns the remainder polynomial coefficients."
    def na, nb = a.len, b.len

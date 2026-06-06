@@ -1,9 +1,12 @@
-;; Keywords: rsa partial-key-exposure
+;; Keywords: rsa partial-key-exposure math crypto
 ;; RSA partial-key-exposure attacks routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; This module covers the bounded-enumeration cases directly and routes into
 ;; known-d / known-CRT-exponent recovery when enough structure is available.
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.partial_key_exposure(partial_key_exposure_known_d, partial_key_exposure_known_crt, partial_key_exposure_attack, partial_key_exposure_attack_report, partial_key_exposure_known_p, partial_key_exposure_known_p_msb, partial_key_exposure_known_p_msb_coppersmith, partial_key_exposure_known_p_msb_report)
 use std.core
 use std.os.clock (ticks)
@@ -14,30 +17,30 @@ use std.math.crypto.rsa.known_d
 use std.math.crypto.rsa.known_crt_exponents
 use std.math.crypto.lattice.coppersmith as coppersmith
 
-fn _pke_factor_pair_from_p(any: n, any: p): any {
+fn _pke_factor_pair_from_p(any n, any p) any {
    def nn, pp = Z(n), Z(p)
    if(pp <= Z(1) || pp >= nn || nn % pp != Z(0)){ return nil }
    def q = nn / pp
    (pp < q) ? [pp, q] : [q, pp]
 }
 
-fn _pke_elapsed_ms(any: t0): f64 { float(ticks() - t0) / 1000000.0 }
+fn _pke_elapsed_ms(any t0) f64 { float(ticks() - t0) / 1000000.0 }
 
-fn _pke_success_report(dict: out, str: method, any: result, any: t0): dict {
+fn _pke_success_report(dict out, str method, any result, any t0) dict {
    out = out.set("success", true)
    out = out.set("method", method)
    out = out.set("result", result)
    out.set("elapsed_ms", _pke_elapsed_ms(t0))
 }
 
-fn _pke_fail_report(dict: out, str: reason, any: t0): dict {
+fn _pke_fail_report(dict out, str reason, any t0) dict {
    out = out.set("success", false)
    out = out.set("method", "none")
    out = out.set("reason", reason)
    out.set("elapsed_ms", _pke_elapsed_ms(t0))
 }
 
-fn _pke_partial_report(any: pi): dict {
+fn _pke_partial_report(any pi) dict {
    "Summarize a partial integer without expanding candidates."
    mut out = dict(8)
    if(pi == nil){
@@ -52,7 +55,7 @@ fn _pke_partial_report(any: pi): dict {
    out
 }
 
-fn _pke_single_unknown_values(any: partial_pi, int: max_unknown_bits): any {
+fn _pke_single_unknown_values(any partial_pi, int max_unknown_bits) any {
    if(_pi_unknowns_count(partial_pi) != 1){ return nil }
    def bounds = partial_integer_unknown_bounds(partial_pi)
    if(bounds.len != 1){ return nil }
@@ -69,12 +72,12 @@ fn _pke_single_unknown_values(any: partial_pi, int: max_unknown_bits): any {
    vals
 }
 
-fn _pi_unknowns_count(any: partial_pi): int {
+fn _pi_unknowns_count(any partial_pi) int {
    def bounds = partial_integer_unknown_bounds(partial_pi)
    is_list(bounds) ? bounds.len : 0
 }
 
-fn _pke_try_known_d(any: n, any: e, any: partial_d, int: max_unknown_bits): any {
+fn _pke_try_known_d(any n, any e, any partial_d, int max_unknown_bits) any {
    if(partial_d == nil){ return nil }
    if(_pi_unknowns_count(partial_d) == 0){
       def d0 = partial_integer_to_int(partial_d)
@@ -95,7 +98,7 @@ fn _pke_try_known_d(any: n, any: e, any: partial_d, int: max_unknown_bits): any 
    nil
 }
 
-fn _pke_crt_candidates(any: e, any: n, any: partial_dp, any: partial_dq, int: max_unknown_bits): any {
+fn _pke_crt_candidates(any e, any n, any partial_dp, any partial_dq, int max_unknown_bits) any {
    mut dp_vals, dq_vals = nil, nil
    if(partial_dp != nil){
       if(_pi_unknowns_count(partial_dp) == 0){ dp_vals = [partial_integer_to_int(partial_dp)] } else {
@@ -124,13 +127,13 @@ fn _pke_crt_candidates(any: e, any: n, any: partial_dp, any: partial_dq, int: ma
    [dp_vals, dq_vals]
 }
 
-fn partial_key_exposure_known_d(any: n, any: e, any: partial_d, int: max_unknown_bits=18): any {
+fn partial_key_exposure_known_d(any n, any e, any partial_d, int max_unknown_bits=18) any {
    "Recover [p, q, d] from a partial private exponent when the unknown chunk
    is small enough for direct enumeration."
    _pke_try_known_d(n, e, partial_d, max_unknown_bits)
 }
 
-fn partial_key_exposure_known_crt(any: n, any: e, any: partial_dp=nil, any: partial_dq=nil, int: max_unknown_bits=16): any {
+fn partial_key_exposure_known_crt(any n, any e, any partial_dp=nil, any partial_dq=nil, int max_unknown_bits=16) any {
    "Recover [p, q, dp, dq] from partial dp and/or dq using bounded
    enumeration plus CRT-exponent candidate generation."
    if(partial_dp == nil && partial_dq == nil){ return nil }
@@ -177,7 +180,7 @@ fn partial_key_exposure_known_crt(any: n, any: e, any: partial_dp=nil, any: part
    nil
 }
 
-fn partial_key_exposure_known_p(any: n, any: partial_p, int: max_unknown_bits=22): any {
+fn partial_key_exposure_known_p(any n, any partial_p, int max_unknown_bits=22) any {
    "Recover [p, q] from a partial prime p when the unknown segment is small.
    The partial integer is little-endian by segment, matching
    std.math.crypto.number.partial. This is the bounded counterpart to the
@@ -199,7 +202,7 @@ fn partial_key_exposure_known_p(any: n, any: partial_p, int: max_unknown_bits=22
    nil
 }
 
-fn partial_key_exposure_known_p_msb_coppersmith(any: n, any: p_msb, any: unknown_bits, any: beta=0.5, int: m=2, int: t=1, str: reduction_method="ny"): any {
+fn partial_key_exposure_known_p_msb_coppersmith(any n, any p_msb, any unknown_bits, any beta=0.5, int m=2, int t=1, str reduction_method="ny") any {
    "Recover [p, q] from public(N, p_msb, unknown_bits) by building the
    univariate Coppersmith problem f(x)=p_msb+x. Every recovered root is
    validated before returning."
@@ -221,7 +224,7 @@ fn partial_key_exposure_known_p_msb_coppersmith(any: n, any: p_msb, any: unknown
    nil
 }
 
-fn partial_key_exposure_known_p_msb_report(any: n, any: p_msb, any: unknown_bits, int: max_unknown_bits=22, any: beta=0.5, int: m=2, int: t=1, str: reduction_method="ny"): dict {
+fn partial_key_exposure_known_p_msb_report(any n, any p_msb, any unknown_bits, int max_unknown_bits=22, any beta=0.5, int m=2, int t=1, str reduction_method="ny") dict {
    "Explain the RSA high-bits-known recovery path.
    The report records bounded enumeration, Coppersmith parameters, root counts,
    and the validated factor pair when recovery succeeds."
@@ -279,14 +282,14 @@ fn partial_key_exposure_known_p_msb_report(any: n, any: p_msb, any: unknown_bits
    _pke_fail_report(out, "no validated factor from bounded or Coppersmith roots", t0)
 }
 
-fn partial_key_exposure_known_p_msb(any: n, any: p_msb, any: unknown_bits, int: max_unknown_bits=22, str: reduction_method="ny"): any {
+fn partial_key_exposure_known_p_msb(any n, any p_msb, any unknown_bits, int max_unknown_bits=22, str reduction_method="ny") any {
    "Recover [p, q] when the most-significant bits of p are known and the
    bottom `unknown_bits` bits are bounded enough for direct Ny enumeration."
    def report = partial_key_exposure_known_p_msb_report(n, p_msb, unknown_bits, max_unknown_bits, 0.5, 2, 1, reduction_method)
    report.get("success", false) ? report.get("result") : nil
 }
 
-fn partial_key_exposure_attack_report(any: n, any: e, any: partial_d=nil, any: partial_dp=nil, any: partial_dq=nil, int: max_unknown_bits=16, any: partial_p=nil): dict {
+fn partial_key_exposure_attack_report(any n, any e, any partial_d=nil, any partial_dp=nil, any partial_dq=nil, int max_unknown_bits=16, any partial_p=nil) dict {
    "Explain the staged RSA partial-key recovery pipeline."
    def t0 = ticks()
    mut out = dict(20)
@@ -320,7 +323,7 @@ fn partial_key_exposure_attack_report(any: n, any: e, any: partial_d=nil, any: p
    _pke_fail_report(out, "no staged partial-key method recovered factors", t0)
 }
 
-fn partial_key_exposure_attack(any: n, any: e, any: partial_d=nil, any: partial_dp=nil, any: partial_dq=nil, int: max_unknown_bits=16, any: partial_p=nil): any {
+fn partial_key_exposure_attack(any n, any e, any partial_d=nil, any partial_dp=nil, any partial_dq=nil, int max_unknown_bits=16, any partial_p=nil) any {
    "Recover RSA factors from practical partial-key leakage. Tries partial d
    first, then partial CRT exponents, then a bounded partial-prime leak."
    def report = partial_key_exposure_attack_report(n, e, partial_d, partial_dp, partial_dq, max_unknown_bits, partial_p)

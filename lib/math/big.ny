@@ -1,5 +1,7 @@
-;; Keywords: big bigint bignum
+;; Keywords: big bigint bignum math
 ;; arbitrary-precision integer and fixed-point float arithmetic.
+;; References:
+;; - std.math
 module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_to_str,
    bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod, bigint_cmp,
    bigint_eq, bigint_neq, bigint_lt, bigint_le, bigint_gt, bigint_ge,
@@ -19,41 +21,39 @@ use std.math.float (float)
 def _TAG_BIGINT = __runtime_tag("bigint")
 def _TAG_LIST = __runtime_tag("list")
 
-fn _big_float_sqrt(number: x): f64 { __flt_sqrt(float(x)) }
+fn _big_float_sqrt(number x) f64 { __flt_sqrt(float(x)) }
 
-fn _big_float_log10(number: x): f64 { __flt_log(float(x)) / 2.30258509299404523536 }
+fn _big_float_log10(number x) f64 { __flt_log(float(x)) / 2.30258509299404523536 }
 
-fn _big_float_floor(number: x): int { __flt_floor(float(x)) }
+fn _big_float_floor(number x) int { __flt_floor(float(x)) }
 
-fn _big_rand(): int { from_int(__rand64() & 0x7fffffffffffffff) }
+fn _big_rand() int { from_int(__rand64() & 0x7fffffffffffffff) }
 
-fn _big_randrange(int: a, int: b): int {
+fn _big_randrange(int a, int b) int {
    if(a == b){ return a }
    def range = b - a
    if(range <= 0){ return a }
    a + (_big_rand() % range)
 }
 
-fn _big_randint(int: a, int: b): int {
+fn _big_randint(int a, int b) int {
    if(a == b){ return a }
    def range = b - a + 1
    if(range <= 0){ return a }
    a + (_big_rand() % range)
 }
 
-fn _big_is_rt(any: x): bool { __has_tag(x, _TAG_BIGINT) }
+fn _big_is_rt(any x) bool { __has_tag(x, _TAG_BIGINT) }
 
-fn _big_zero(): bigint { __bigint_from_int(0) }
+fn _big_zero() bigint { __bigint_from_int(0) }
 
-fn is_bigint(any: x): bool {
+fn is_bigint(any x) bool {
    "Returns true if `x` is a BigInt object."
    if(_big_is_rt(x)){ return true }
-   if(!is_ptr(x)){ return false }
-   if(__tagof(x) != _TAG_LIST){ return false }
-   x.get(0) == 107
+   is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107
 }
 
-fn _big_make(int: sign, list: digits, bool: owned=false): any {
+fn _big_make(int sign, list digits, bool owned=false) any {
    mut actual_digits = digits
    if(!owned){ actual_digits = clone(digits) }
    mut n_actual = actual_digits.len
@@ -66,14 +66,14 @@ fn _big_make(int: sign, list: digits, bool: owned=false): any {
    out
 }
 
-fn _big_digits(any: b): list { b.get(2) }
+fn _big_digits(any b) list { b.get(2) }
 
-fn _big_sign(any: b): int {
+fn _big_sign(any b) int {
    if(_big_is_rt(b)){ return __untag(load64(b, 0)) }
    b.get(1)
 }
 
-fn _big_abs_cmp(any: a, any: b): int {
+fn _big_abs_cmp(any a, any b) int {
    mut da = _big_digits(a)
    def db = _big_digits(b)
    mut na, nb = da.len, db.len
@@ -89,9 +89,9 @@ fn _big_abs_cmp(any: a, any: b): int {
    return 0
 }
 
-fn _big_from_int(int: n): bigint { __bigint_from_int(n) }
+fn _big_from_int(int n) bigint { __bigint_from_int(n) }
 
-fn bigint(any: x): bigint {
+fn bigint(any x) bigint {
    "Converts an integer, string, or existing bigint to a BigInt object."
    if(_big_is_rt(x) || is_bigint(x)){ return x }
    if(is_int(x)){ return __bigint_from_int(x) }
@@ -99,14 +99,14 @@ fn bigint(any: x): bigint {
    _big_zero()
 }
 
-fn bigint_from_str(str: s): bigint {
+fn bigint_from_str(str s) bigint {
    "Parses a decimal string into a BigInt."
    if(s.len == 0){ return _big_zero() }
    def r = __bigint_from_str(s)
    r ? r : _big_zero()
 }
 
-fn bigint_to_str(bigint: b): str {
+fn bigint_to_str(bigint b) str {
    "Converts a BigInt to its decimal string representation."
    if(_big_is_rt(b)){ return __bigint_to_str(b) }
    b = bigint(b)
@@ -135,7 +135,7 @@ fn bigint_to_str(bigint: b): str {
    out_s
 }
 
-fn _big_add_abs(any: a, any: b): any {
+fn _big_add_abs(any a, any b) any {
    def da, db = _big_digits(a), _big_digits(b)
    def na, nb = da.len, db.len
    mut nmax = na
@@ -163,7 +163,7 @@ fn _big_add_abs(any: a, any: b): any {
    _big_make(1, result, true)
 }
 
-fn _big_sub_abs(any: a, any: b): any {
+fn _big_sub_abs(any a, any b) any {
    def da, db = _big_digits(a), _big_digits(b)
    def na, nb = da.len, db.len
    mut out = list(0)
@@ -195,28 +195,26 @@ fn _big_sub_abs(any: a, any: b): any {
    _big_make(1, trimmed, true)
 }
 
-fn bigint_add(any: a, any: b): bigint {
+fn bigint_add(any a, any b) bigint {
    "Adds two BigInts together."
    __bigint_add(bigint(a), bigint(b))
 }
 
-fn bigint_sub(any: a, any: b): bigint {
+fn bigint_sub(any a, any b) bigint {
    "Subtracts BigInt `b` from BigInt `a`."
    __bigint_sub(bigint(a), bigint(b))
 }
 
-fn _big_mul_abs(any: a, any: b): any {
+fn _big_mul_abs(any a, any b) any {
    def da, db = _big_digits(a), _big_digits(b)
    def na, nb = da.len, db.len
    if(na == 0 || nb == 0){ return _big_make(0, []) }
-   ; Initialize result with zeros
    mut out = list(0)
    mut i = 0
    while(i < na + nb){
       out = out.append(0)
       i += 1
    }
-   ; Multiply digit by digit
    i = 0
    while(i < na){
       mut carry = 0
@@ -234,7 +232,6 @@ fn _big_mul_abs(any: a, any: b): any {
       }
       i += 1
    }
-   ; Remove trailing zeros by creating new list
    mut end_idx = out.len
    while(end_idx > 1 && out.get(end_idx - 1) == 0){ end_idx -= 1 }
    mut trimmed = list(0)
@@ -246,12 +243,12 @@ fn _big_mul_abs(any: a, any: b): any {
    _big_make(1, trimmed, true)
 }
 
-fn bigint_mul(any: a, any: b): bigint {
+fn bigint_mul(any a, any b) bigint {
    "Multiplies two BigInts."
    __bigint_mul(bigint(a), bigint(b))
 }
 
-fn _big_mul_small(any: a, int: m): any {
+fn _big_mul_small(any a, int m) any {
    if(m == 0){ return _big_make(0, []) }
    mut da = _big_digits(a)
    def na = da.len
@@ -269,7 +266,7 @@ fn _big_mul_small(any: a, int: m): any {
    _big_make(_big_sign(a), out, true)
 }
 
-fn _big_add_small(any: a, int: v): any {
+fn _big_add_small(any a, int v) any {
    mut da = clone(_big_digits(a))
    mut i = 0
    mut carry = v
@@ -290,7 +287,7 @@ fn _big_add_small(any: a, int: v): any {
    _big_make(s, da)
 }
 
-fn _digits_prepend(list: digits, any: v): list {
+fn _digits_prepend(list digits, any v) list {
    mut out = []
    out = out.append(v)
    mut i = 0
@@ -302,7 +299,7 @@ fn _digits_prepend(list: digits, any: v): list {
    out
 }
 
-fn _big_divmod_abs(any: a, any: b): list {
+fn _big_divmod_abs(any a, any b) list {
    if(_big_sign(b) == 0){ panic("bigint division by zero") }
    mut cmp = _big_abs_cmp(a, b)
    if(cmp < 0){ return [_big_make(0, []), a] }
@@ -340,108 +337,108 @@ fn _big_divmod_abs(any: a, any: b): list {
    return [q, r]
 }
 
-fn bigint_div(any: a, any: b): bigint {
+fn bigint_div(any a, any b) bigint {
    "Integer division of BigInts."
    def bb = bigint(b)
    if(__bigint_cmp(bb, _big_zero()) == 0){ panic("bigint division by zero") }
    __bigint_div(bigint(a), bb)
 }
 
-fn bigint_mod(any: a, any: b): bigint {
+fn bigint_mod(any a, any b) bigint {
    "Modulo of BigInts."
    def bb = bigint(b)
    if(__bigint_cmp(bb, _big_zero()) == 0){ panic("bigint division by zero") }
    __bigint_mod(bigint(a), bb)
 }
 
-fn bigint_cmp(any: a, any: b): int {
+fn bigint_cmp(any a, any b) int {
    "Compares two BigInts. Returns -1 if a < b, 1 if a > b, 0 if equal."
    __bigint_cmp(bigint(a), bigint(b))
 }
 
-fn bigint_eq(any: a, any: b): bool {
+fn bigint_eq(any a, any b) bool {
    "Returns true if BigInts `a` and `b` are equal."
    bigint_cmp(a, b) == 0
 }
 
-fn bigint_neq(any: a, any: b): bool {
+fn bigint_neq(any a, any b) bool {
    "Returns true if BigInts `a` and `b` are not equal."
    !bigint_eq(a, b)
 }
 
-fn bigint_lt(any: a, any: b): bool {
+fn bigint_lt(any a, any b) bool {
    "Returns true if a < b."
    bigint_cmp(a, b) == -1
 }
 
-fn bigint_le(any: a, any: b): bool {
+fn bigint_le(any a, any b) bool {
    "Returns true if a <= b."
    def c = bigint_cmp(a, b)
    c == -1 || c == 0
 }
 
-fn bigint_gt(any: a, any: b): bool {
+fn bigint_gt(any a, any b) bool {
    "Returns true if a > b."
    bigint_cmp(a, b) == 1
 }
 
-fn bigint_ge(any: a, any: b): bool {
+fn bigint_ge(any a, any b) bool {
    "Returns true if a >= b."
    def c = bigint_cmp(a, b)
    c == 1 || c == 0
 }
 
-fn bigint_from_int(int: n): bigint {
+fn bigint_from_int(int n) bigint {
    "Build BigInt from int."
    __bigint_from_int(n)
 }
 
-fn bigint_neg(any: a): bigint {
+fn bigint_neg(any a) bigint {
    "Negate BigInt."
    bigint_sub(_big_zero(), a)
 }
 
-fn bigint_abs(bigint: a): bigint {
+fn bigint_abs(bigint a) bigint {
    "Absolute value of BigInt."
    def x = bigint(a)
    if(bigint_cmp(x, _big_zero()) < 0){ return bigint_neg(x) }
    x
 }
 
-fn bigint_clone(bigint: a): bigint {
+fn bigint_clone(bigint a) bigint {
    "Clone BigInt."
    bigint_add(bigint(a), _big_zero())
 }
 
-fn bigint_pow(any: a, any: b): bigint {
+fn bigint_pow(any a, any b) bigint {
    "Power: a^b using binary exponentiation."
    __bigint_pow(bigint(a), bigint(b))
 }
 
-fn bigint_divmod(any: a, any: b): list {
+fn bigint_divmod(any a, any b) list {
    "Division with remainder: returns [quotient, remainder]."
    [bigint_div(a, b), bigint_mod(a, b)]
 }
 
-fn bigint_bit_length(bigint: a): int {
+fn bigint_bit_length(bigint a) int {
    "Number of bits needed to represent BigInt."
    __bigint_bitlen(bigint_abs(a))
 }
 
-fn bigint_to_int(any: a): int {
+fn bigint_to_int(any a) int {
    "Convert BigInt to int(may overflow for large values)."
    if(is_int(a)){ return a }
    __bigint_to_int(bigint(a))
 }
 
-fn bigint_random(any: n): bigint {
+fn bigint_random(any n) bigint {
    "Random BigInt in [0, n)."
    def n_int = bigint_to_int(n)
    if(n_int <= 0){ return bigint_from_int(0) }
    bigint_from_int(_big_randrange(0, n_int))
 }
 
-fn bigint_random_bits(int: bits): bigint {
+fn bigint_random_bits(int bits) bigint {
    "Random BigInt with given bit length."
    def one = bigint_from_int(1)
    mut result = bigint_from_int(0)
@@ -454,27 +451,27 @@ fn bigint_random_bits(int: bits): bigint {
    result
 }
 
-fn bigint_lshift(bigint: a, int: n): bigint {
+fn bigint_lshift(bigint a, int n) bigint {
    "Left shift: a << n(multiply by 2^n)."
    bigint_mul(bigint(a), bigint_pow(bigint_from_int(2), bigint_from_int(n)))
 }
 
-fn bigint_or(bigint: a, bigint: b): bigint {
+fn bigint_or(bigint a, bigint b) bigint {
    "Bitwise OR for non-negative BigInts."
    __bigint_or(bigint(a), bigint(b))
 }
 
-fn bigint_xor(bigint: a, bigint: b): bigint {
+fn bigint_xor(bigint a, bigint b) bigint {
    "Bitwise XOR for non-negative BigInts."
    __bigint_xor(bigint(a), bigint(b))
 }
 
-fn bigint_popcount(bigint: a): int {
+fn bigint_popcount(bigint a) int {
    "Count set bits in a non-negative BigInt."
    __bigint_popcount(bigint_abs(a))
 }
 
-fn _big_pow_small(any: base, int: exp): bigint {
+fn _big_pow_small(any base, int exp) bigint {
    mut acc = bigint_from_int(1)
    mut i = 0
    while(i < exp){
@@ -484,7 +481,7 @@ fn _big_pow_small(any: base, int: exp): bigint {
    acc
 }
 
-fn bigint_nth_root(bigint: a, int: n): bigint {
+fn bigint_nth_root(bigint a, int n) bigint {
    "Integer n-th root using Newton iteration."
    def aa = bigint_abs(a)
    if(n <= 0){ return bigint_from_int(0) }
@@ -524,34 +521,34 @@ fn bigint_nth_root(bigint: a, int: n): bigint {
 }
 
 impl bigint {
-   fn add(bigint: a, bigint: b): bigint { bigint_add(a, b) }
-   fn add_int(bigint: a, int: b): bigint { bigint_add(a, b) }
-   fn sub(bigint: a, bigint: b): bigint { bigint_sub(a, b) }
-   fn sub_int(bigint: a, int: b): bigint { bigint_sub(a, b) }
-   fn mul(bigint: a, bigint: b): bigint { bigint_mul(a, b) }
-   fn mul_int(bigint: a, int: b): bigint { bigint_mul(a, b) }
-   fn div(bigint: a, bigint: b): bigint { bigint_div(a, b) }
-   fn div_int(bigint: a, int: b): bigint { bigint_div(a, b) }
-   fn rem(bigint: a, bigint: b): bigint { bigint_mod(a, b) }
-   fn rem_int(bigint: a, int: b): bigint { bigint_mod(a, b) }
-   fn pow(bigint: a, bigint: b): bigint { bigint_pow(a, b) }
-   fn pow_int(bigint: a, int: b): bigint { bigint_pow(a, b) }
-   fn xor(bigint: a, bigint: b): bigint { bigint_xor(a, b) }
-   fn xor_int(bigint: a, int: b): bigint { bigint_xor(a, bigint(b)) }
-   fn cmp(bigint: a, bigint: b): int { bigint_cmp(a, b) }
-   fn eq(bigint: a, bigint: b): bool { bigint_eq(a, b) }
-   fn ne(bigint: a, bigint: b): bool { bigint_neq(a, b) }
-   fn lt(bigint: a, bigint: b): bool { bigint_lt(a, b) }
-   fn le(bigint: a, bigint: b): bool { bigint_le(a, b) }
-   fn gt(bigint: a, bigint: b): bool { bigint_gt(a, b) }
-   fn ge(bigint: a, bigint: b): bool { bigint_ge(a, b) }
-   fn neg(bigint: a): bigint { bigint_neg(a) }
-   fn abs(bigint: a): bigint { bigint_abs(a) }
-   fn clone(bigint: a): bigint { bigint_clone(a) }
-   fn str(bigint: a): str { bigint_to_str(a) }
-   fn int(bigint: a): int { bigint_to_int(a) }
-   fn bits(bigint: a): int { bigint_bit_length(a) }
-   fn bit_length(bigint: a): int { bigint_bit_length(a) }
+   fn add(bigint a, bigint b) bigint { bigint_add(a, b) }
+   fn add_int(bigint a, int b) bigint { bigint_add(a, b) }
+   fn sub(bigint a, bigint b) bigint { bigint_sub(a, b) }
+   fn sub_int(bigint a, int b) bigint { bigint_sub(a, b) }
+   fn mul(bigint a, bigint b) bigint { bigint_mul(a, b) }
+   fn mul_int(bigint a, int b) bigint { bigint_mul(a, b) }
+   fn div(bigint a, bigint b) bigint { bigint_div(a, b) }
+   fn div_int(bigint a, int b) bigint { bigint_div(a, b) }
+   fn rem(bigint a, bigint b) bigint { bigint_mod(a, b) }
+   fn rem_int(bigint a, int b) bigint { bigint_mod(a, b) }
+   fn pow(bigint a, bigint b) bigint { bigint_pow(a, b) }
+   fn pow_int(bigint a, int b) bigint { bigint_pow(a, b) }
+   fn xor(bigint a, bigint b) bigint { bigint_xor(a, b) }
+   fn xor_int(bigint a, int b) bigint { bigint_xor(a, bigint(b)) }
+   fn cmp(bigint a, bigint b) int { bigint_cmp(a, b) }
+   fn eq(bigint a, bigint b) bool { bigint_eq(a, b) }
+   fn ne(bigint a, bigint b) bool { bigint_neq(a, b) }
+   fn lt(bigint a, bigint b) bool { bigint_lt(a, b) }
+   fn le(bigint a, bigint b) bool { bigint_le(a, b) }
+   fn gt(bigint a, bigint b) bool { bigint_gt(a, b) }
+   fn ge(bigint a, bigint b) bool { bigint_ge(a, b) }
+   fn neg(bigint a) bigint { bigint_neg(a) }
+   fn abs(bigint a) bigint { bigint_abs(a) }
+   fn clone(bigint a) bigint { bigint_clone(a) }
+   fn str(bigint a) str { bigint_to_str(a) }
+   fn int(bigint a) int { bigint_to_int(a) }
+   fn bits(bigint a) int { bigint_bit_length(a) }
+   fn bit_length(bigint a) int { bigint_bit_length(a) }
    operator + bigint: bigint = add
    operator + int: bigint = add_int
    operator - bigint: bigint = sub
@@ -575,13 +572,13 @@ impl bigint {
 }
 
 impl int {
-   fn add_bigint(int: a, bigint: b): bigint { bigint_add(a, b) }
-   fn sub_bigint(int: a, bigint: b): bigint { bigint_sub(a, b) }
-   fn mul_bigint(int: a, bigint: b): bigint { bigint_mul(a, b) }
-   fn div_bigint(int: a, bigint: b): bigint { bigint_div(a, b) }
-   fn rem_bigint(int: a, bigint: b): bigint { bigint_mod(a, b) }
-   fn pow_bigint(int: a, bigint: b): bigint { bigint_pow(a, b) }
-   fn xor_bigint(int: a, bigint: b): bigint { bigint_xor(bigint(a), b) }
+   fn add_bigint(int a, bigint b) bigint { bigint_add(a, b) }
+   fn sub_bigint(int a, bigint b) bigint { bigint_sub(a, b) }
+   fn mul_bigint(int a, bigint b) bigint { bigint_mul(a, b) }
+   fn div_bigint(int a, bigint b) bigint { bigint_div(a, b) }
+   fn rem_bigint(int a, bigint b) bigint { bigint_mod(a, b) }
+   fn pow_bigint(int a, bigint b) bigint { bigint_pow(a, b) }
+   fn xor_bigint(int a, bigint b) bigint { bigint_xor(bigint(a), b) }
    operator + bigint: bigint = add_bigint
    operator - bigint: bigint = sub_bigint
    operator * bigint: bigint = mul_bigint
@@ -593,23 +590,22 @@ impl int {
 
 def BF_SCALE = __bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
 
-fn bf_zero(): bigint {
+fn bf_zero() bigint {
    "Returns the BigFloat value 0."
    bigint(0)
 }
 
-fn bf_one(): bigint {
+fn bf_one() bigint {
    "Returns the BigFloat value 1.0 in BigFloat representation."
    BF_SCALE
 }
 
-fn bf_from_float(f64: f): bigint {
+fn bf_from_float(f64 f) bigint {
    "Converts a standard float `f` to a BigFloat. Supports all magnitudes safely."
    if(f == 0.0){ return bigint(0) }
    def neg = f < 0.0
    mut af = f if(neg){ af = 0.0 - f }
    def e, m = _big_float_floor(_big_float_log10(af)), af / __flt_pow(10.0, e)
-   ; 14 digits of precision
    def m_int = bigint(int(m * 100000000000000.0))
    mut p = int(46.0 + e)
    mut res = m_int
@@ -632,7 +628,7 @@ fn bf_from_float(f64: f): bigint {
    res
 }
 
-fn _bf_decimal_prefix_to_float(str: s, int: max_digits): f64 {
+fn _bf_decimal_prefix_to_float(str s, int max_digits) f64 {
    mut out = 0.0
    mut i = 0
    def n = min(s.len, max_digits)
@@ -645,7 +641,7 @@ fn _bf_decimal_prefix_to_float(str: s, int: max_digits): f64 {
    out
 }
 
-fn bf_to_float(any: a): f64 {
+fn bf_to_float(any a) f64 {
    "Converts a BigFloat `a` back to a standard float(loses precision beyond ~15 digits)."
    def neg = bigint_cmp(a, 0) < 0
    mut abs_a = a
@@ -659,54 +655,54 @@ fn bf_to_float(any: a): f64 {
    d
 }
 
-fn bf_add(any: a, any: b): bigint {
+fn bf_add(any a, any b) bigint {
    "Returns a + b(BigFloat)."
    bigint_add(a, b)
 }
 
-fn bf_sub(any: a, any: b): bigint {
+fn bf_sub(any a, any b) bigint {
    "Returns a - b(BigFloat)."
    bigint_sub(a, b)
 }
 
-fn bf_mul(any: a, any: b): bigint {
+fn bf_mul(any a, any b) bigint {
    "Returns a * b(BigFloat)."
    bigint_div(bigint_mul(a, b), BF_SCALE)
 }
 
-fn bf_div(any: a, any: b): bigint {
+fn bf_div(any a, any b) bigint {
    "Returns a / b(BigFloat). Returns zero if b is zero."
    if(bigint_cmp(b, 0) == 0){ return bigint(0) }
    bigint_div(bigint_mul(a, BF_SCALE), b)
 }
 
-fn bf_neg(any: a): bigint {
+fn bf_neg(any a) bigint {
    "Returns -a(BigFloat)."
    bigint_sub(bigint(0), a)
 }
 
-fn bf_abs(any: a): bigint {
+fn bf_abs(any a) bigint {
    "Returns |a| (BigFloat)."
    if(bigint_cmp(a, 0) < 0){ return bigint_sub(bigint(0), a) }
    a
 }
 
-fn bf_sign(any: a): int {
+fn bf_sign(any a) int {
    "Returns -1, 0, or 1 depending on the sign of BigFloat `a`."
    bigint_cmp(a, 0)
 }
 
-fn bf_eq(any: a, any: b): bool { "Returns true if a == b(BigFloat)." bigint_eq(a, b) }
+fn bf_eq(any a, any b) bool { "Returns true if a == b(BigFloat)." bigint_eq(a, b) }
 
-fn bf_lt(any: a, any: b): bool { "Returns true if a < b(BigFloat)." bigint_cmp(a, b) < 0 }
+fn bf_lt(any a, any b) bool { "Returns true if a < b(BigFloat)." bigint_cmp(a, b) < 0 }
 
-fn bf_gt(any: a, any: b): bool { "Returns true if a > b(BigFloat)." bigint_cmp(a, b) > 0 }
+fn bf_gt(any a, any b) bool { "Returns true if a > b(BigFloat)." bigint_cmp(a, b) > 0 }
 
-fn bf_le(any: a, any: b): bool { "Returns true if a <= b(BigFloat)." !bf_gt(a, b) }
+fn bf_le(any a, any b) bool { "Returns true if a <= b(BigFloat)." !bf_gt(a, b) }
 
-fn bf_ge(any: a, any: b): bool { "Returns true if a >= b(BigFloat)." !bf_lt(a, b) }
+fn bf_ge(any a, any b) bool { "Returns true if a >= b(BigFloat)." !bf_lt(a, b) }
 
-fn bf_sqrt(any: a): bigint {
+fn bf_sqrt(any a) bigint {
    "Returns sqrt(a) via Newton's method in BigFloat precision(20 iterations)."
    if(bigint_cmp(a, 0) <= 0){ return bigint(0) }
    def fa = bf_to_float(a)
@@ -720,7 +716,7 @@ fn bf_sqrt(any: a): bigint {
    r
 }
 
-fn bf_pow_int(any: a, int: n): bigint {
+fn bf_pow_int(any a, int n) bigint {
    "Returns a^n for integer exponent n >= 0(BigFloat)."
    if(n == 0){ return BF_SCALE }
    mut res = BF_SCALE

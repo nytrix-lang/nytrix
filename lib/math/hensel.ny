@@ -1,12 +1,14 @@
-;; Keywords: hensel hensel-lifting
+;; Keywords: hensel hensel-lifting math crypto
 ;; Hensel lifting: linear and nonlinear Hensel root lifting mod p^k
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto
 module std.math.crypto.hensel(hensel_lift_linear, hensel_lift, hensel_roots, poly_eval_mod, poly_derivative, find_roots_mod_p)
 use std.math.nt
 
-fn poly_eval_mod(list: poly, any: x, any: modulus): any {
+fn poly_eval_mod(list poly, any x, any modulus) any {
    "Evaluate polynomial at x modulo modulus using Horner's method. Returns the result mod modulus."
    case poly.len {
       0 -> Z(0)
@@ -21,7 +23,7 @@ fn poly_eval_mod(list: poly, any: x, any: modulus): any {
    }
 }
 
-fn poly_derivative(list: poly): list {
+fn poly_derivative(list poly) list {
    "Compute formal derivative of polynomial. Returns derivative as coefficient list."
    def n = poly.len
    if(n <= 1){ return [Z(0)] }
@@ -34,7 +36,7 @@ fn poly_derivative(list: poly): list {
    result
 }
 
-fn find_roots_mod_p(list: poly, int: p): list {
+fn find_roots_mod_p(list poly, int p) list {
    "Find all roots of polynomial mod p by brute force search over [0, p). Returns list of roots."
    def n = poly.len
    if(n == 0 || p <= 0){ return list(0) }
@@ -48,7 +50,7 @@ fn find_roots_mod_p(list: poly, int: p): list {
    roots
 }
 
-fn _int_pow(any: base, int: exp): any {
+fn _int_pow(any base, int exp) any {
    mut out = Z(1)
    mut b = Z(base)
    mut e = exp
@@ -59,7 +61,7 @@ fn _int_pow(any: base, int: exp): any {
    out
 }
 
-fn hensel_lift_linear(list: poly, int: p, int: k, list: roots): list {
+fn hensel_lift_linear(list poly, int p, int k, list roots) list {
    "Lift roots of poly modulo p^k to roots modulo p^(k+1) by trying root + i*p^k.
    This brute-force linear lift also works for singular roots."
    if(p <= 0 || k <= 0){ return list(0) }
@@ -80,7 +82,7 @@ fn hensel_lift_linear(list: poly, int: p, int: k, list: roots): list {
    lifted
 }
 
-fn hensel_lift(list: poly, any: r, int: p, int: k): any {
+fn hensel_lift(list poly, any r, int p, int k) any {
    "Hensel lifting: lift root r of poly mod p to mod p^k. poly is coefficient list [c0, c1, ..., cn]. Returns lifted root."
    if(k <= 1){ return Z(r) }
    mut roots = [Z(r)]
@@ -93,7 +95,7 @@ fn hensel_lift(list: poly, any: r, int: p, int: k): any {
    roots.get(0)
 }
 
-fn hensel_roots(list: poly, int: p, int: k): list {
+fn hensel_roots(list poly, int p, int k) list {
    "Find all roots of poly mod p^k using Hensel lifting. Returns list of all lifted roots."
    if(k <= 0){ return list(0) }
    mut roots = find_roots_mod_p(poly, p)

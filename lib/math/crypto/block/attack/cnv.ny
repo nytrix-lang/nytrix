@@ -1,14 +1,17 @@
-;; Keywords: block-cipher attack cnv
+;; Keywords: block-cipher attack cnv math crypto
 ;; Block-cipher attack routines for chosen-nonce CBC/MD5 attack.
 ;; This variant uses AES blocks with an MD5-derived chaining mask:
 ;; the first mask is the IV, then each next mask is MD5(cipher_block).
+;; References:
+;; - std.math.crypto.block.attack
+;; - std.math.crypto
 module std.math.crypto.block.attack.cnv(cnv_md5_cbc_encrypt, cnv_md5_cbc_decrypt, cnv_cookie_iv_from_name)
 use std.core
 use std.math.bin (pkcs7_pad, pkcs7_unpad)
 use std.math.crypto.hash as hash
 use std.math.crypto.symmetric.aes
 
-fn _cnv_xor_block(list: a, list: b): list {
+fn _cnv_xor_block(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < 16){
@@ -18,9 +21,9 @@ fn _cnv_xor_block(list: a, list: b): list {
    out
 }
 
-fn _cnv_md5_bytes(list: block): list { hash.md5(block).unhex }
+fn _cnv_md5_bytes(list block) list { hash.md5(block).unhex }
 
-fn cnv_md5_cbc_encrypt(list: key, list: iv, list: plaintext): list {
+fn cnv_md5_cbc_encrypt(list key, list iv, list plaintext) list {
    "Encrypt with the AES-CNV MD5-chained CBC variant.
    Returns iv || ciphertext. Plaintext is PKCS#7 padded."
    def ctx = aes_init(key)
@@ -42,7 +45,7 @@ fn cnv_md5_cbc_encrypt(list: key, list: iv, list: plaintext): list {
    out
 }
 
-fn cnv_md5_cbc_decrypt(list: key, list: ciphertext): ?list {
+fn cnv_md5_cbc_decrypt(list key, list ciphertext) ?list {
    "Decrypt iv || ciphertext from the AES-CNV MD5-chained CBC variant."
    if(ciphertext.len < 32 || ciphertext.len % 16 != 0){ return nil }
    def ctx = aes_init(key)
@@ -65,7 +68,7 @@ fn cnv_md5_cbc_decrypt(list: key, list: ciphertext): ?list {
    pkcs7_unpad(out)
 }
 
-fn cnv_cookie_iv_from_name(list: name_bytes, list: hidden_md5_bytes): list {
+fn cnv_cookie_iv_from_name(list name_bytes, list hidden_md5_bytes) list {
    "Build a CNV registration IV as PKCS#7(name) XOR MD5(hidden)."
    def padded = pkcs7_pad(name_bytes, 16)
    _cnv_xor_block(slice(padded, 0, 16), hidden_md5_bytes)

@@ -1,12 +1,15 @@
-;; Keywords: data serialization xml
+;; Keywords: data serialization xml parse
 ;; Extensible Markup Language (XML) Parser and Generator for Nytrix
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc3470.html
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.xml(parse, encode, Node)
 use std.core
 use std.core.str as str
 
-fn Node(str: name, any: attr=0, any: children=0, any: text=""): dict {
+fn Node(str name, any attr=0, any children=0, any text="") dict {
    "Creates an XML node record."
    mut n = dict(8)
    n["name"] = name
@@ -16,7 +19,7 @@ fn Node(str: name, any: attr=0, any: children=0, any: text=""): dict {
    n
 }
 
-fn _skip_ws(str: s, int: p, int: n): int {
+fn _skip_ws(str s, int p, int n) int {
    while(p < n){
       def c = load8(s, p)
       if(c <= 32){ p += 1 }
@@ -25,45 +28,64 @@ fn _skip_ws(str: s, int: p, int: n): int {
    p
 }
 
-fn _parse_attr(str: s, int: p, int: n): list {
+@inline
+fn _attr_key_stop(int c) bool {
+   return case c {
+      47, 61, 62 -> true
+      _ -> c <= 32
+   }
+}
+
+fn _parse_attr(str s, int p, int n) list {
    mut attrs = dict(8)
    while(p < n){
       p = _skip_ws(s, p, n)
-      if(p >= n || load8(s, p) == 62 || load8(s, p) == 47){ break } ; '>' or '/'
-      mut kb = Builder(16)
+      if(p >= n || load8(s, p) == 62 || load8(s, p) == 47){ break }
+      mut kb = Builder(32)
       while(p < n){
          def c = load8(s, p)
-         if(c == 61 || c == 62 || c == 47 || c <= 32){ break }
+         if(_attr_key_stop(c)){ break }
          kb = builder_append(kb, chr(c))
          p += 1
       }
       def key = builder_to_str(kb)
       builder_free(kb)
       p = _skip_ws(s, p, n)
-      if(p < n && load8(s, p) == 61){ ; '='
+      if(p < n && load8(s, p) == 61){
          p += 1
          p = _skip_ws(s, p, n)
          def quote = load8(s, p)
-         if(quote == 34 || quote == 39){ ; '"' or "'"
+         if(quote == 34 || quote == 39){
             p += 1
-            mut vb = Builder(16)
+            mut vb = Builder(64)
             while(p < n && load8(s, p) != quote){
                vb = builder_append(vb, chr(load8(s, p)))
                p += 1
             }
             def val = builder_to_str(vb)
             builder_free(vb)
-            p += 1
-            attrs[key] = val
+            if(key.len > 0){ attrs = attrs.set(key, val) }
+            if(p < n){ p += 1 }
+         } else {
+            mut vb = Builder(32)
+            while(p < n){
+               def c = load8(s, p)
+               if(c <= 32 || c == 47 || c == 62){ break }
+               vb = builder_append(vb, chr(c))
+               p += 1
+            }
+            def val = builder_to_str(vb)
+            builder_free(vb)
+            if(key.len > 0){ attrs = attrs.set(key, val) }
          }
       } else {
-         attrs[key] = true
+         if(key.len > 0){ attrs = attrs.set(key, true) }
       }
    }
    [attrs, p]
 }
 
-fn parse(any: data): any {
+fn parse(any data) any {
    "Parses a simple XML string into a tree of nodes."
    if(!is_str(data)){ return 0 }
    def n = data.len
@@ -73,9 +95,9 @@ fn parse(any: data): any {
    while(p < n){
       p = _skip_ws(data, p, n)
       if(p >= n){ break }
-      if(load8(data, p) == 60){ ; '<'
+      if(load8(data, p) == 60){
          p += 1
-         if(p < n && load8(data, p) == 47){ ; '</'
+         if(p < n && load8(data, p) == 47){
             p += 1
             mut nb = Builder(16)
             while(p < n && load8(data, p) != 62){
@@ -86,10 +108,10 @@ fn parse(any: data): any {
             builder_free(nb)
             p += 1
             if(stack.len > 1){ stack.pop() }
-         } elif(p < n && load8(data, p) == 33){ ; '<!' (Comment or CDATA)
+         } elif(p < n && load8(data, p) == 33){
             while(p < n && load8(data, p) != 62){ p += 1 }
             p += 1
-         } elif(p < n && load8(data, p) == 63){ ; '<?' (Declaration)
+         } elif(p < n && load8(data, p) == 63){
             while(p < n && load8(data, p) != 62){ p += 1 }
             p += 1
          } else {
@@ -139,7 +161,7 @@ fn parse(any: data): any {
    root
 }
 
-fn _xml_encode_node(any: node): str {
+fn _xml_encode_node(any node) str {
    "Serializes a node tree into an XML string."
    if(!is_dict(node)){ return "" }
    def name = node.get("name", "node")
@@ -181,7 +203,7 @@ fn _xml_encode_node(any: node): str {
    s_out
 }
 
-fn encode(any: node): str {
+fn encode(any node) str {
    "Serializes a node tree into an XML string."
    _xml_encode_node(node)
 }

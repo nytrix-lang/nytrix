@@ -1,14 +1,17 @@
-;; Keywords: rsa multiprime
+;; Keywords: rsa multiprime math crypto
 ;; RSA multiprime RSA recovery routines.
 ;; N = p1 * p2 * ... * pk, phi = product of (pi - 1) for all i.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.multiprime(multiprime_phi, multiprime_decrypt, repeated_prime_factor, repeated_prime_phi)
 use std.core
 use std.math.nt
 
-fn multiprime_phi(list: primes): any {
+fn multiprime_phi(list primes) any {
    "Compute Euler's totient for multi-prime RSA where N = p1 * p2 * ... * pk.
    phi(N) = (p1-1) * (p2-1) * ... * (pk-1).
    primes: list of distinct prime factors of N.
@@ -24,7 +27,7 @@ fn multiprime_phi(list: primes): any {
    result
 }
 
-fn multiprime_decrypt(any: c, any: d, any: n): any {
+fn multiprime_decrypt(any c, any d, any n) any {
    "Decrypt ciphertext c using private exponent d and modulus n for multi-prime RSA.
    This is the same as standard RSA decrypt: m = c^d mod n.
    c: ciphertext, d: private exponent, n: public modulus(product of all primes).
@@ -33,7 +36,7 @@ fn multiprime_decrypt(any: c, any: d, any: n): any {
    m
 }
 
-fn repeated_prime_factor(any: n, int: min_power=2, int: max_power=64): any {
+fn repeated_prime_factor(any n, int min_power=2, int max_power=64) any {
    "Recover [p, r] when RSA modulus n is an exact prime power p^r.
    Returns nil if no exact prime power is found in the requested exponent range."
    def nn = Z(n)
@@ -54,7 +57,7 @@ fn repeated_prime_factor(any: n, int: min_power=2, int: max_power=64): any {
    nil
 }
 
-fn repeated_prime_phi(any: p, int: r): any {
+fn repeated_prime_phi(any p, int r) any {
    "Compute Euler phi(p^r) = p^(r-1) * (p-1)."
    def pp = Z(p)
    mut acc = Z(1)

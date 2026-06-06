@@ -1,8 +1,11 @@
-;; Keywords: rsa boneh-durfee
+;; Keywords: rsa boneh-durfee math crypto
 ;; RSA Boneh-Durfee small-private-exponent attack routines.
 ;; Reference:
 ;; - https://crypto.stanford.edu/~dabo/pubs/abstracts/lowRSAexp.html
 ;; Uses LLL and bivariate Coppersmith-style resultant elimination.
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.boneh_durfee(boneh_durfee_attack)
 use std.core
 use std.math.nt
@@ -12,7 +15,7 @@ use std.math.crypto.lattice.lll
 use std.math.crypto.lattice.coppersmith
 use std.math.crypto.poly
 
-fn boneh_durfee_attack(any: e, any: n, f64: delta=0.292, int: m=3, any: t=nil): any {
+fn boneh_durfee_attack(any e, any n, f64 delta=0.292, int m=3, any t=nil) any {
    "Boneh-Durfee attack on RSA with small private exponent d < n^0.292.
    Uses LLL on a bivariate lattice to find small roots of f(x, y) = x(A + y) + 1 mod e."
    if(e <= 1 || n <= 1 || m < 1){ return nil }
@@ -44,19 +47,19 @@ fn boneh_durfee_attack(any: e, any: n, f64: delta=0.292, int: m=3, any: t=nil): 
    [d, phi]
 }
 
-fn _bd_gen_shift(int: i, int: j, int: k, any: A, any: e, any: X, any: Y): list {
+fn _bd_gen_shift(int i, int j, int k, any A, any e, any X, any Y) list {
    mut res = poly2_new(i + j + 1, j + 1)
    _poly2_to_flat_vector(res, X, Y)
 }
 
-fn _bd_extract_roots(any: basis, any: X, any: Y, int: m): any {
+fn _bd_extract_roots(any basis, any X, any Y, int m) any {
    def row1, row2 = _matrix_data(basis).get(0), _matrix_data(basis).get(1)
    def p1, p2 = _flat_vector_to_poly2(row1, X, Y, m, m), _flat_vector_to_poly2(row2, X, Y, m, m)
    def res_y = poly2_resultant_x(p1, p2)
    poly_small_roots(res_y, Y)
 }
 
-fn _poly2_to_flat_vector(any: p, any: X, any: Y): list {
+fn _poly2_to_flat_vector(any p, any X, any Y) list {
    def r, c = _matrix_rows(p), _matrix_cols(p)
    mut vec = []
    mut i = 0 while(i < r){
@@ -70,7 +73,7 @@ fn _poly2_to_flat_vector(any: p, any: X, any: Y): list {
    vec
 }
 
-fn _flat_vector_to_poly2(list: vec, any: X, any: Y, int: r, int: c): any {
+fn _flat_vector_to_poly2(list vec, any X, any Y, int r, int c) any {
    mut p = poly2_new(r, c)
    mut idx = 0
    mut i = 0 while(i < r){

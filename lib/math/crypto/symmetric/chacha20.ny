@@ -1,13 +1,16 @@
-;; Keywords: symmetric chacha20
+;; Keywords: symmetric chacha20 math crypto
 ;; Symmetric-crypto routines for ChaCha20 stream cipher operations.
 ;; Reference: RFC 8439 (https://tools.ietf.org/html/rfc8439)
+;; References:
+;; - std.math.crypto.symmetric
+;; - std.math.crypto
 module std.math.crypto.symmetric.chacha20(chacha20_encrypt, chacha20_decrypt, chacha20_encrypt_64nonce, chacha20_decrypt_64nonce, chacha20_block)
 use std.core
 use std.math.bin (zero_list, unpack_le32)
 
-fn _rotl32(int: x, int: n): int { ((x << n) | (x >> (32 - n))) & 0xffffffff }
+fn _rotl32(int x, int n) int { ((x << n) | (x >> (32 - n))) & 0xffffffff }
 
-fn _quarter_round(list: st, int: a, int: b, int: c, int: d): any {
+fn _quarter_round(list st, int a, int b, int c, int d) any {
    mut va, vb, vc, vd = st[a], st[b], st[c], st[d]
    va = (va + vb) & 0xffffffff
    vd = _rotl32(vd ^^ va, 16)
@@ -21,13 +24,13 @@ fn _quarter_round(list: st, int: a, int: b, int: c, int: d): any {
    st[c] = vc st[d] = vd
 }
 
-fn chacha20_block(list: st): list {
+fn chacha20_block(list st) list {
    "Inner block function: 20 rounds(10 column rounds, 10 diagonal rounds)."
    mut st_orig = clone(st)
    _chacha20_block_with_orig(st, st_orig)
 }
 
-fn _chacha20_block_with_orig(list: st, list: st_orig): list {
+fn _chacha20_block_with_orig(list st, list st_orig) list {
    mut i = 0
    while(i < 10){
       _quarter_round(st, 0, 4, 8, 12)
@@ -47,7 +50,7 @@ fn _chacha20_block_with_orig(list: st, list: st_orig): list {
    st
 }
 
-fn _chacha20_base_ctx(list: key): list {
+fn _chacha20_base_ctx(list key) list {
    mut ctx = zero_list(16)
    ctx[0] = 0x61707865 ctx[1] = 0x3320646e
    ctx[2] = 0x79622d32 ctx[3] = 0x6b206574
@@ -58,7 +61,7 @@ fn _chacha20_base_ctx(list: key): list {
    ctx
 }
 
-fn _chacha20_xor_words(list: out, list: data, int: offset, list: st): list {
+fn _chacha20_xor_words(list out, list data, int offset, list st) list {
    mut wi = 0
    mut j = 0
    def remaining = data.len - offset
@@ -74,7 +77,7 @@ fn _chacha20_xor_words(list: out, list: data, int: offset, list: st): list {
    out
 }
 
-fn _chacha20_crypt_ctx(list: ctx, int: counter, list: data, bool: wide_counter): list {
+fn _chacha20_crypt_ctx(list ctx, int counter, list data, bool wide_counter) list {
    mut res = list(data.len)
    store64(res, data.len, 0)
    mut st = zero_list(16)
@@ -101,7 +104,7 @@ fn _chacha20_crypt_ctx(list: ctx, int: counter, list: data, bool: wide_counter):
    res
 }
 
-fn chacha20_encrypt(list: key, list: nonce, int: counter, list: plaintext): list {
+fn chacha20_encrypt(list key, list nonce, int counter, list plaintext) list {
    "Encrypt plaintext with ChaCha20."
    mut ctx = _chacha20_base_ctx(key)
    ctx[12] = counter
@@ -111,12 +114,12 @@ fn chacha20_encrypt(list: key, list: nonce, int: counter, list: plaintext): list
    _chacha20_crypt_ctx(ctx, counter, plaintext, false)
 }
 
-fn chacha20_decrypt(list: key, list: nonce, int: counter, list: ciphertext): list {
+fn chacha20_decrypt(list key, list nonce, int counter, list ciphertext) list {
    "Decrypt with IETF ChaCha20; encryption and decryption are identical."
    chacha20_encrypt(key, nonce, counter, ciphertext)
 }
 
-fn chacha20_encrypt_64nonce(list: key, list: nonce, int: counter, list: plaintext): list {
+fn chacha20_encrypt_64nonce(list key, list nonce, int counter, list plaintext) list {
    "Encrypt with original ChaCha20 layout: 64-bit block counter and 64-bit nonce.
    This matches PyCryptodome's ChaCha20 mode when an 8-byte nonce is supplied."
    mut ctx = _chacha20_base_ctx(key)
@@ -127,7 +130,7 @@ fn chacha20_encrypt_64nonce(list: key, list: nonce, int: counter, list: plaintex
    _chacha20_crypt_ctx(ctx, counter, plaintext, true)
 }
 
-fn chacha20_decrypt_64nonce(list: key, list: nonce, int: counter, list: ciphertext): list {
+fn chacha20_decrypt_64nonce(list key, list nonce, int counter, list ciphertext) list {
    "Decrypt original 64-bit-nonce ChaCha20; encryption and decryption are identical."
    chacha20_encrypt_64nonce(key, nonce, counter, ciphertext)
 }

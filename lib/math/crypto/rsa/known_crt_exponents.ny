@@ -1,4 +1,4 @@
-;; Keywords: rsa known-crt-exponents
+;; Keywords: rsa known-crt-exponents math crypto
 ;; RSA recovery from known CRT exponents routines.
 ;; References:
 ;; - Campagna, Sethi, "Key Recovery Method for CRT Implementation of RSA"
@@ -6,7 +6,7 @@ module std.math.crypto.rsa.known_crt_exponents(possible_prime_factors_from_crt_e
 use std.math.nt
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 
-fn _get_possible_primes(any: e, any: d_crt): list {
+fn _get_possible_primes(any e, any d_crt) list {
    mut out = list(0)
    def mul = Z(e) * Z(d_crt) - Z(1)
    mut k = Z(3)
@@ -20,7 +20,7 @@ fn _get_possible_primes(any: e, any: d_crt): list {
    out
 }
 
-fn possible_prime_factors_from_crt_exponents(any: e_start, any: e_end, any: n=nil, any: dp=nil, any: dq=nil, any: p_bits=nil, any: q_bits=nil): list {
+fn possible_prime_factors_from_crt_exponents(any e_start, any e_end, any n=nil, any dp=nil, any dq=nil, any p_bits=nil, any q_bits=nil) list {
    "Return candidate factors implied by known dp and/or dq over a public exponent range.
    Each result is either [p], [q], or [p, q]."
    assert(!(dp == nil && dq == nil), "dp or dq required")
@@ -73,7 +73,7 @@ fn possible_prime_factors_from_crt_exponents(any: e_start, any: e_end, any: n=ni
    out
 }
 
-fn factor_from_known_crt_exponent(any: e, any: d_crt, any: n): any {
+fn factor_from_known_crt_exponent(any e, any d_crt, any n) any {
    "Factor RSA modulus n from a known CRT exponent dp=d mod(p-1) or dq=d mod(q-1).
    Since e*d_crt - 1 is a small public-exponent multiple of p-1 or q-1,
    scan k < e and test the implied factor against n. Returns [p, q] or nil."
@@ -90,7 +90,7 @@ fn factor_from_known_crt_exponent(any: e, any: d_crt, any: n): any {
    nil
 }
 
-fn factor_from_small_crt_exponent_gcd(any: n, any: e, any: max_dcrt=(1 << 16), any: probe=2): any {
+fn factor_from_small_crt_exponent_gcd(any n, any e, any max_dcrt=(1 << 16), any probe=2) any {
    "Factor RSA modulus n when dp or dq is small but not known.
    For the correct CRT exponent dcrt, (probe^e)^dcrt == probe mod p or q, so
    gcd((probe^e)^dcrt - probe, n) reveals a factor. Returns [p, q, dcrt] or nil."

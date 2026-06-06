@@ -1,6 +1,8 @@
-;; Keywords: bin binary bytes packing
+;; Keywords: bin binary bytes packing math
 ;; Binary and byte operations for endian access, bit manipulation, packing, and padding.
 ;; Endian reads/writes, bit operations, packing, padding, and byte codecs.
+;; References:
+;; - std.math
 module std.math.bin(u8, u16le, u16be, u32le, u32be, u64le, u64be, f32le,
    unpack_le32, unpack_be32, unpack_le64, unpack_be64,
    p16le, p16be, p32le, p32be, p64le, p64be,
@@ -26,27 +28,27 @@ use std.math.crypto.encoding.base
 use std.math.big
 use std.math.simmd as simmd
 
-fn _bin_max_int(int: a, int: b): int { a > b ? a : b }
+fn _bin_max_int(int a, int b) int { a > b ? a : b }
 
 @inline
-fn _byte_list_new(int: n): list<int> {
+fn _byte_list_new(int n) list<int> {
    mut out = list(n)
    __list_set_len(out, n)
    out
 }
 
 @inline
-fn _byte_list_store(list: out, int: i, int: value): any { __store_item_fast(out, i, value) }
+fn _byte_list_store(list out, int i, int value) any { __store_item_fast(out, i, value) }
 
 @inline
-fn _bytes_like_len(any: x): int {
+fn _bytes_like_len(any x) int {
    if(is_str(x) || is_bytes(x)){ return load64(x, -16) }
    if(is_list(x)){ return x.len }
    0
 }
 
 @inline
-fn _hex_nibble(int: c): int {
+fn _hex_nibble(int c) int {
    case c {
       48..57 -> c - 48
       65..70 -> c - 55
@@ -56,80 +58,74 @@ fn _hex_nibble(int: c): int {
 }
 
 @inline
-fn _hex_is_digit(int: c): bool { (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) }
+fn _hex_is_digit(int c) bool { (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) }
 
-fn _read_u8(any: s, int: i=0): int {
+fn _read_u8(any s, int i=0) int {
    load8(s, i) & 255
 }
 
-fn u8(any: s, int: i=0): int {
+fn u8(any s, int i=0) int {
    "Read unsigned 8-bit value from byte string s at offset i."
    _read_u8(s, i)
 }
 
-fn u16le(any: s, int: i=0): int {
+fn u16le(any s, int i=0) int {
    "Read unsigned 16-bit little-endian value."
    (load8(s, i) | (load8(s, i + 1) << 8)) & 65535
 }
 
-fn u16be(any: s, int: i=0): int {
+fn u16be(any s, int i=0) int {
    "Read unsigned 16-bit big-endian value."
    ((load8(s, i) << 8) | load8(s, i + 1)) & 65535
 }
 
-fn u32le(any: s, int: i=0): int {
+fn u32le(any s, int i=0) int {
    "Read unsigned 32-bit little-endian value."
    (load8(s, i) | (load8(s, i + 1) << 8) |
    (load8(s, i + 2) << 16) | (load8(s, i + 3) << 24)) & 4294967295
 }
 
-fn u32be(any: s, int: i=0): int {
+fn u32be(any s, int i=0) int {
    "Read unsigned 32-bit big-endian value."
    ((load8(s, i) << 24) | (load8(s, i + 1) << 16) |
    (load8(s, i + 2) << 8) | load8(s, i + 3)) & 4294967295
 }
 
-fn u64le(any: s, int: i=0): int {
+fn _join_u64(int hi, int lo) int { (hi << 32) | lo }
+
+fn u64le(any s, int i=0) int {
    "Read unsigned 64-bit little-endian value."
-   mut lo = u32le(s, i)
-   mut hi = u32le(s, i + 4)
-   lo | (hi << 32)
+   _join_u64(u32le(s, i + 4), u32le(s, i))
 }
 
-fn u64be(any: s, int: i=0): int {
+fn u64be(any s, int i=0) int {
    "Read unsigned 64-bit big-endian value."
-   mut hi = u32be(s, i)
-   mut lo = u32be(s, i + 4)
-   (hi << 32) | lo
+   _join_u64(u32be(s, i), u32be(s, i + 4))
 }
 
-fn unpack_le32(list: b, int: i=0): int {
+fn unpack_le32(list b, int i=0) int {
    "Read 32-bit little-endian value from bytes list."
    (b[i] | (b[i + 1] << 8) |
    (b[i + 2] << 16) | (b[i + 3] << 24)) & 4294967295
 }
 
-fn unpack_be32(list: b, int: i=0): int {
+fn unpack_be32(list b, int i=0) int {
    "Read 32-bit big-endian value from bytes list."
    ((b[i] << 24) | (b[i + 1] << 16) |
    (b[i + 2] << 8) | b[i + 3]) & 4294967295
 }
 
-fn unpack_le64(list: b, int: i=0): int {
+fn unpack_le64(list b, int i=0) int {
    "Read 64-bit little-endian value from bytes list."
-   mut lo = unpack_le32(b, i)
-   mut hi = unpack_le32(b, i + 4)
-   lo | (hi << 32)
+   _join_u64(unpack_le32(b, i + 4), unpack_le32(b, i))
 }
 
-fn unpack_be64(list: b, int: i=0): int {
+fn unpack_be64(list b, int i=0) int {
    "Read 64-bit big-endian value from bytes list."
-   mut hi = unpack_be32(b, i)
-   mut lo = unpack_be32(b, i + 4)
-   (hi << 32) | lo
+   _join_u64(unpack_be32(b, i), unpack_be32(b, i + 4))
 }
 
-fn bigint_to_bin_fixed(any: x, int: width): str {
+fn bigint_to_bin_fixed(any x, int width) str {
    "Render x as a fixed-width binary string of 0/1(most significant bit first)."
    def bx = bigint(x)
    def one = bigint_from_int(1)
@@ -146,71 +142,49 @@ fn bigint_to_bin_fixed(any: x, int: width): str {
    text
 }
 
-fn p16le(int: n): str {
+fn _pack_uint(int n, int width, bool little) str {
+   mut out = malloc(width)
+   if(!out){ return "" }
+   mut i = 0
+   while(i < width){
+      def byte_i = little ? i : (width - 1 - i)
+      store8(out, (n >> (byte_i * 8)) & 255, i)
+      i += 1
+   }
+   init_str(out, width)
+}
+
+fn p16le(int n) str {
    "Pack 16-bit value as little-endian bytes."
-   mut out = malloc(2)
-   if(!out){ return "" }
-   store8(out, n & 255, 0)
-   store8(out, (n >> 8) & 255, 1)
-   init_str(out, 2)
+   _pack_uint(n, 2, true)
 }
 
-fn p16be(int: n): str {
+fn p16be(int n) str {
    "Pack 16-bit value as big-endian bytes."
-   mut out = malloc(2)
-   if(!out){ return "" }
-   store8(out, (n >> 8) & 255, 0)
-   store8(out, n & 255, 1)
-   init_str(out, 2)
+   _pack_uint(n, 2, false)
 }
 
-fn p32le(int: n): str {
+fn p32le(int n) str {
    "Pack 32-bit value as little-endian bytes."
-   mut out = malloc(4)
-   if(!out){ return "" }
-   store8(out, n & 255, 0)
-   store8(out, (n >> 8) & 255, 1)
-   store8(out, (n >> 16) & 255, 2)
-   store8(out, (n >> 24) & 255, 3)
-   init_str(out, 4)
+   _pack_uint(n, 4, true)
 }
 
-fn p32be(int: n): str {
+fn p32be(int n) str {
    "Pack 32-bit value as big-endian bytes."
-   mut out = malloc(4)
-   if(!out){ return "" }
-   store8(out, (n >> 24) & 255, 0)
-   store8(out, (n >> 16) & 255, 1)
-   store8(out, (n >> 8) & 255, 2)
-   store8(out, n & 255, 3)
-   init_str(out, 4)
+   _pack_uint(n, 4, false)
 }
 
-fn p64le(int: n): str {
+fn p64le(int n) str {
    "Pack 64-bit value as little-endian bytes."
-   mut out = malloc(8)
-   if(!out){ return "" }
-   mut i = 0
-   while(i < 8){
-      store8(out, (n >> (i * 8)) & 255, i)
-      i += 1
-   }
-   init_str(out, 8)
+   _pack_uint(n, 8, true)
 }
 
-fn p64be(int: n): str {
+fn p64be(int n) str {
    "Pack 64-bit value as big-endian bytes."
-   mut out = malloc(8)
-   if(!out){ return "" }
-   mut i = 0
-   while(i < 8){
-      store8(out, (n >> ((7 - i) * 8)) & 255, i)
-      i += 1
-   }
-   init_str(out, 8)
+   _pack_uint(n, 8, false)
 }
 
-fn u16le_vec(any: s): list {
+fn u16le_vec(any s) list {
    "Read all 16-bit LE values from string."
    mut result = list(0)
    mut n = _bytes_like_len(s)
@@ -222,7 +196,7 @@ fn u16le_vec(any: s): list {
    result
 }
 
-fn u32le_vec(any: s): list {
+fn u32le_vec(any s) list {
    "Read all 32-bit LE values from string."
    mut result = list(0)
    mut n = _bytes_like_len(s)
@@ -234,7 +208,7 @@ fn u32le_vec(any: s): list {
    result
 }
 
-fn u64le_vec(any: s): list {
+fn u64le_vec(any s) list {
    "Read all 64-bit LE values from string."
    mut result = list(0)
    mut n = _bytes_like_len(s)
@@ -246,7 +220,7 @@ fn u64le_vec(any: s): list {
    result
 }
 
-fn rotl(int: x, int: n, int: bits=32): int {
+fn rotl(int x, int n, int bits=32) int {
    "Rotate left: rotate x left by n bits within bits-width."
    case bits {
       32 -> simmd.rotl32(x, n)
@@ -259,7 +233,7 @@ fn rotl(int: x, int: n, int: bits=32): int {
    }
 }
 
-fn rotr(int: x, int: n, int: bits=32): int {
+fn rotr(int x, int n, int bits=32) int {
    "Rotate right: rotate x right by n bits within bits-width."
    case bits {
       32 -> simmd.rotr32(x, n)
@@ -272,11 +246,11 @@ fn rotr(int: x, int: n, int: bits=32): int {
    }
 }
 
-fn rol(int: x, int: n, int: bits=32): int { rotl(x, n, bits) }
+fn rol(int x, int n, int bits=32) int { rotl(x, n, bits) }
 
-fn ror(int: x, int: n, int: bits=32): int { rotr(x, n, bits) }
+fn ror(int x, int n, int bits=32) int { rotr(x, n, bits) }
 
-fn _pow2_32(int: n): int {
+fn _pow2_32(int n) int {
    mut v, i = 1, 0
    while(i < n){
       v = v * 2
@@ -285,37 +259,37 @@ fn _pow2_32(int: n): int {
    v
 }
 
-fn _u32(int: x): int {
+fn _u32(int x) int {
    x & 4294967295
 }
 
-fn _and32(int: a, int: b): int {
+fn _and32(int a, int b) int {
    (a & 4294967295) & (b & 4294967295)
 }
 
-fn _or32(int: a, int: b): int {
+fn _or32(int a, int b) int {
    (a & 4294967295) | (b & 4294967295)
 }
 
-fn _xor32(int: a, int: b): int {
+fn _xor32(int a, int b) int {
    (a & 4294967295) ^^ (b & 4294967295)
 }
 
-fn _not32(int: x): int { 4294967295 - (x & 4294967295) }
+fn _not32(int x) int { 4294967295 - (x & 4294967295) }
 
-fn _add32(int: a, int: b): int { (a + b) & 4294967295 }
+fn _add32(int a, int b) int { (a + b) & 4294967295 }
 
-fn _lshr32(int: x, int: n): int {
+fn _lshr32(int x, int n) int {
    if(n <= 0){ return _u32(x) }
    if(n >= 32){ return 0 }
    _u32(x) / _pow2_32(n)
 }
 
-fn _rotl32(int: x, int: n): int { simmd.rotl32(x, n) }
+fn _rotl32(int x, int n) int { simmd.rotl32(x, n) }
 
-fn _load_le32(any: s, int: i): int { load8(s, i) + load8(s, i + 1) * 256 + load8(s, i + 2) * 65536 + load8(s, i + 3) * 16777216 }
+fn _load_le32(any s, int i) int { load8(s, i) + load8(s, i + 1) * 256 + load8(s, i + 2) * 65536 + load8(s, i + 3) * 16777216 }
 
-fn bit_reverse(int: x, int: bits=32): int {
+fn bit_reverse(int x, int bits=32) int {
    "Reverse the order of bits in x."
    mut result = 0
    mut i = 0
@@ -326,7 +300,7 @@ fn bit_reverse(int: x, int: bits=32): int {
    result
 }
 
-fn byte_reverse(int: x): int {
+fn byte_reverse(int x) int {
    "Reverse byte order(32-bit)."
    ((x & 0xFF) << 24) |
    ((x & 0xFF00) << 8) |
@@ -334,27 +308,27 @@ fn byte_reverse(int: x): int {
    ((x >> 24) & 0xFF)
 }
 
-fn set_bit(int: x, int: n): int {
+fn set_bit(int x, int n) int {
    "Set bit n of x to 1."
    x | (1 << n)
 }
 
-fn get_bit(int: x, int: n): int {
+fn get_bit(int x, int n) int {
    "Get bit n of x(returns 0 or 1)."
    (x >> n) & 1
 }
 
-fn clear_bit(int: x, int: n): int {
+fn clear_bit(int x, int n) int {
    "Clear bit n of x to 0."
    x & ~(1 << n)
 }
 
-fn toggle_bit(int: x, int: n): int {
+fn toggle_bit(int x, int n) int {
    "Toggle bit n of x."
    x ^^ (1 << n)
 }
 
-fn bit_count(int: x): int {
+fn bit_count(int x) int {
    "Count number of set bits(population count)."
    if(x >= 0){ return simmd.popcnt64(x) }
    mut count = 0
@@ -366,7 +340,7 @@ fn bit_count(int: x): int {
    count
 }
 
-fn trailing_zeros(int: x): int {
+fn trailing_zeros(int x) int {
    "Count trailing zero bits."
    if(x == 0){ return 0 }
    if(x > 0){ return simmd.ctz64(x) }
@@ -378,7 +352,7 @@ fn trailing_zeros(int: x): int {
    count
 }
 
-fn leading_zeros(int: x, int: bits=32): int {
+fn leading_zeros(int x, int bits=32) int {
    "Count leading zero bits."
    if(x == 0){ return bits }
    if(bits == 32 && x > 0){ return simmd.clz32(x) }
@@ -392,7 +366,7 @@ fn leading_zeros(int: x, int: bits=32): int {
    count
 }
 
-fn _bytes_to_long(list: b): bigint {
+fn _bytes_to_long(list b) bigint {
    "Convert bytes(list of ints) to long integer(big-endian)."
    def base = bigint_from_int(256)
    mut result = bigint_from_int(0)
@@ -404,7 +378,7 @@ fn _bytes_to_long(list: b): bigint {
    result
 }
 
-fn _long_to_bytes(any: n, int: length=0): list<int> {
+fn _long_to_bytes(any n, int length=0) list<int> {
    "Convert long integer to bytes list(big-endian)."
    def zero = bigint_from_int(0)
    def base = bigint_from_int(256)
@@ -451,7 +425,7 @@ fn _long_to_bytes(any: n, int: length=0): list<int> {
    result
 }
 
-fn _bytes_to_hex(list: b): str {
+fn _bytes_to_hex(list b) str {
    "Convert bytes list to hex string."
    def n = b.len
    if(n <= 0){ return "" }
@@ -472,7 +446,7 @@ fn _bytes_to_hex(list: b): str {
    init_str(out, out_len)
 }
 
-fn _hex_to_bytes(str: hex_str): list<int> {
+fn _hex_to_bytes(str hex_str) list<int> {
    "Convert hex string to bytes list."
    def n = _bytes_like_len(hex_str)
    if(n <= 0){ return list(0) }
@@ -494,13 +468,13 @@ fn _hex_to_bytes(str: hex_str): list<int> {
    result
 }
 
-fn hex_normalize(str: s): str {
+fn hex_normalize(str s) str {
    "Normalize hex text by stripping ASCII whitespace and `0x`/`0X` markers."
    def compact = str_replace(str_replace(str_replace(str_replace(s, " ", ""), "\t", ""), "\n", ""), "\r", "")
    str_replace(str_replace(compact, "0x", ""), "0X", "")
 }
 
-fn hex_is_valid(str: s, bool: even=true): bool {
+fn hex_is_valid(str s, bool even=true) bool {
    "Returns true when normalized hex text contains only hex digits.
    By default, also requires an even number of digits."
    s = hex_normalize(s)
@@ -515,7 +489,7 @@ fn hex_is_valid(str: s, bool: even=true): bool {
    true
 }
 
-fn _bytes_concat(list: a, list: b): list {
+fn _bytes_concat(list a, list b) list {
    "Concatenate two byte lists."
    def an, bn = a.len, b.len
    mut out = _byte_list_new(an + bn)
@@ -532,7 +506,7 @@ fn _bytes_concat(list: a, list: b): list {
    out
 }
 
-fn bytes_concat3(list: a, list: b, list: c): list {
+fn bytes_concat3(list a, list b, list c) list {
    "Concatenate three byte lists."
    def an, bn = a.len, b.len
    def cn = c.len
@@ -555,7 +529,7 @@ fn bytes_concat3(list: a, list: b, list: c): list {
    out
 }
 
-fn _bytes_xor(list: b1, list: b2): list {
+fn _bytes_xor(list b1, list b2) list {
    "XOR two byte lists."
    mut n1, n2 = b1.len, b2.len
    mut n = n1
@@ -569,7 +543,7 @@ fn _bytes_xor(list: b1, list: b2): list {
    result
 }
 
-fn _bytes_repeat(list: b, int: n): list {
+fn _bytes_repeat(list b, int n) list {
    "Repeat byte list b, n times."
    if(n <= 0 || b.len <= 0){ return list(0) }
    def blen = b.len
@@ -589,7 +563,7 @@ fn _bytes_repeat(list: b, int: n): list {
    result
 }
 
-fn _bytes_reverse(list: b): list {
+fn _bytes_reverse(list b) list {
    "Reverse byte list."
    def n = b.len
    mut result = _byte_list_new(n)
@@ -601,7 +575,7 @@ fn _bytes_reverse(list: b): list {
    result
 }
 
-fn _bytes_trim_leading_zeros(list: b): list {
+fn _bytes_trim_leading_zeros(list b) list {
    "Remove leading zero bytes, preserving a single zero for an all-zero input."
    mut i = 0
    while(i + 1 < b.len && b[i] == 0){ i += 1 }
@@ -609,12 +583,12 @@ fn _bytes_trim_leading_zeros(list: b): list {
 }
 
 @jit
-fn f32le(any: s, int: i=0): f32 {
+fn f32le(any s, int i=0) f32 {
    "Reads a 32-bit float(IEEE 754) little-endian from byte string `s` at offset `i`."
    load32_f32(s, i)
 }
 
-fn _bytes_to_base64(list: b): str {
+fn _bytes_to_base64(list b) str {
    "Encode bytes list to base64 string."
    def chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
    mut result = Builder(_bin_max_int(16, ((b.len + 2) / 3) * 4 + 8))
@@ -646,12 +620,12 @@ fn _bytes_to_base64(list: b): str {
    out
 }
 
-fn _base64_to_bytes(str: b64_str): list<int> {
+fn _base64_to_bytes(str b64_str) list<int> {
    "Decode base64 string to bytes list."
    decode64(b64_str).to_bytes
 }
 
-fn _str_to_bytes(str: s): list<int> {
+fn _str_to_bytes(str s) list<int> {
    "Convert string to bytes list."
    def n = _bytes_like_len(s)
    mut result = _byte_list_new(n)
@@ -663,7 +637,7 @@ fn _str_to_bytes(str: s): list<int> {
    result
 }
 
-fn bytes_to_list(any: s): list<int> {
+fn bytes_to_list(any s) list<int> {
    "Convert bytes to a byte list."
    if(is_list(s)){ return s }
    def n = _bytes_like_len(s)
@@ -676,7 +650,7 @@ fn bytes_to_list(any: s): list<int> {
    result
 }
 
-fn _bytes_to_str(list: b): str {
+fn _bytes_to_str(list b) str {
    "Convert bytes list to string."
    def n = b.len
    if(n <= 0){ return "" }
@@ -693,155 +667,155 @@ fn _bytes_to_str(list: b): str {
 
 impl list {
    @inline
-   fn hex(list: b): str { _bytes_to_hex(b) }
+   fn hex(list b) str { _bytes_to_hex(b) }
    @inline
-   fn base64(list: b): str { _bytes_to_base64(b) }
+   fn base64(list b) str { _bytes_to_base64(b) }
    @inline
-   fn text(list: b): str { _bytes_to_str(b) }
+   fn text(list b) str { _bytes_to_str(b) }
    @inline
-   fn le32(list: b, int: i=0): int { unpack_le32(b, i) }
+   fn le32(list b, int i=0) int { unpack_le32(b, i) }
    @inline
-   fn be32(list: b, int: i=0): int { unpack_be32(b, i) }
+   fn be32(list b, int i=0) int { unpack_be32(b, i) }
    @inline
-   fn le64(list: b, int: i=0): int { unpack_le64(b, i) }
+   fn le64(list b, int i=0) int { unpack_le64(b, i) }
    @inline
-   fn be64(list: b, int: i=0): int { unpack_be64(b, i) }
+   fn be64(list b, int i=0) int { unpack_be64(b, i) }
    @inline
-   fn xor(list: b, list: other): list { _bytes_xor(b, other) }
+   fn xor(list b, list other) list { _bytes_xor(b, other) }
    @inline
-   fn concat(list: b, list: other): list { _bytes_concat(b, other) }
+   fn concat(list b, list other) list { _bytes_concat(b, other) }
    @inline
-   fn repeat(list: b, int: n): list { _bytes_repeat(b, n) }
+   fn repeat(list b, int n) list { _bytes_repeat(b, n) }
    @inline
-   fn rev(list: b): list { _bytes_reverse(b) }
+   fn rev(list b) list { _bytes_reverse(b) }
    @inline
-   fn trim0(list: b): list { _bytes_trim_leading_zeros(b) }
+   fn trim0(list b) list { _bytes_trim_leading_zeros(b) }
 }
 
 impl bytes {
    @inline
-   fn hex(bytes: b): str { _bytes_to_hex(bytes_to_list(b)) }
+   fn hex(bytes b) str { _bytes_to_hex(bytes_to_list(b)) }
    @inline
-   fn base64(bytes: b): str { _bytes_to_base64(bytes_to_list(b)) }
+   fn base64(bytes b) str { _bytes_to_base64(bytes_to_list(b)) }
    @inline
-   fn text(bytes: b): str { _bytes_to_str(bytes_to_list(b)) }
+   fn text(bytes b) str { _bytes_to_str(bytes_to_list(b)) }
    @inline
-   fn u8(bytes: b, int: i=0): int { _read_u8(b, i) }
+   fn u8(bytes b, int i=0) int { _read_u8(b, i) }
    @inline
-   fn le16(bytes: b, int: i=0): int { u16le(b, i) }
+   fn le16(bytes b, int i=0) int { u16le(b, i) }
    @inline
-   fn be16(bytes: b, int: i=0): int { u16be(b, i) }
+   fn be16(bytes b, int i=0) int { u16be(b, i) }
    @inline
-   fn le32(bytes: b, int: i=0): int { u32le(b, i) }
+   fn le32(bytes b, int i=0) int { u32le(b, i) }
    @inline
-   fn be32(bytes: b, int: i=0): int { u32be(b, i) }
+   fn be32(bytes b, int i=0) int { u32be(b, i) }
    @inline
-   fn le64(bytes: b, int: i=0): int { u64le(b, i) }
+   fn le64(bytes b, int i=0) int { u64le(b, i) }
    @inline
-   fn be64(bytes: b, int: i=0): int { u64be(b, i) }
+   fn be64(bytes b, int i=0) int { u64be(b, i) }
 }
 
 impl str {
    @inline
-   fn to_bytes(str: self): list<int> { _str_to_bytes(self) }
+   fn to_bytes(str self) list<int> { _str_to_bytes(self) }
    @inline
-   fn unhex(str: self): list<int> { _hex_to_bytes(self) }
+   fn unhex(str self) list<int> { _hex_to_bytes(self) }
    @inline
-   fn long(str: self): bigint { _bytes_to_long(_str_to_bytes(self)) }
+   fn long(str self) bigint { _bytes_to_long(_str_to_bytes(self)) }
    @inline
-   fn bytes(str: self): list<int> { _str_to_bytes(self) }
+   fn bytes(str self) list<int> { _str_to_bytes(self) }
    @inline
-   fn bytes_long(str: self): bigint { _bytes_to_long(_str_to_bytes(self)) }
+   fn bytes_long(str self) bigint { _bytes_to_long(_str_to_bytes(self)) }
    @inline
-   fn base64_decode(str: s): list<int> { _base64_to_bytes(s) }
+   fn base64_decode(str s) list<int> { _base64_to_bytes(s) }
    @inline
-   fn hex(str: s): str { _bytes_to_hex(_str_to_bytes(s)) }
+   fn hex(str s) str { _bytes_to_hex(_str_to_bytes(s)) }
    @inline
-   fn base64(str: s): str { _bytes_to_base64(_str_to_bytes(s)) }
+   fn base64(str s) str { _bytes_to_base64(_str_to_bytes(s)) }
    @inline
-   fn u8(str: s, int: i=0): int { _read_u8(s, i) }
+   fn u8(str s, int i=0) int { _read_u8(s, i) }
    @inline
-   fn le16(str: s, int: i=0): int { u16le(s, i) }
+   fn le16(str s, int i=0) int { u16le(s, i) }
    @inline
-   fn be16(str: s, int: i=0): int { u16be(s, i) }
+   fn be16(str s, int i=0) int { u16be(s, i) }
    @inline
-   fn le32(str: s, int: i=0): int { u32le(s, i) }
+   fn le32(str s, int i=0) int { u32le(s, i) }
    @inline
-   fn be32(str: s, int: i=0): int { u32be(s, i) }
+   fn be32(str s, int i=0) int { u32be(s, i) }
    @inline
-   fn le64(str: s, int: i=0): int { u64le(s, i) }
+   fn le64(str s, int i=0) int { u64le(s, i) }
    @inline
-   fn be64(str: s, int: i=0): int { u64be(s, i) }
+   fn be64(str s, int i=0) int { u64be(s, i) }
 }
 
 impl int {
    @inline
-   fn u32(int: x): int { _u32(x) }
+   fn u32(int x) int { _u32(x) }
    @inline
-   fn rotl(int: x, int: n, int: bits=32): int { rotl(x, n, bits) }
+   fn rotl(int x, int n, int bits=32) int { rotl(x, n, bits) }
    @inline
-   fn rotr(int: x, int: n, int: bits=32): int { rotr(x, n, bits) }
+   fn rotr(int x, int n, int bits=32) int { rotr(x, n, bits) }
    @inline
-   fn rol(int: x, int: n, int: bits=32): int { rotl(x, n, bits) }
+   fn rol(int x, int n, int bits=32) int { rotl(x, n, bits) }
    @inline
-   fn ror(int: x, int: n, int: bits=32): int { rotr(x, n, bits) }
+   fn ror(int x, int n, int bits=32) int { rotr(x, n, bits) }
    @inline
-   fn bit(int: x, int: n): int { get_bit(x, n) }
+   fn bit(int x, int n) int { get_bit(x, n) }
    @inline
-   fn set_bit(int: x, int: n): int { set_bit(x, n) }
+   fn set_bit(int x, int n) int { set_bit(x, n) }
    @inline
-   fn clear_bit(int: x, int: n): int { clear_bit(x, n) }
+   fn clear_bit(int x, int n) int { clear_bit(x, n) }
    @inline
-   fn toggle_bit(int: x, int: n): int { toggle_bit(x, n) }
+   fn toggle_bit(int x, int n) int { toggle_bit(x, n) }
    @inline
-   fn bit_count(int: x): int { bit_count(x) }
+   fn bit_count(int x) int { bit_count(x) }
    @inline
-   fn trailing_zeros(int: x): int { trailing_zeros(x) }
+   fn trailing_zeros(int x) int { trailing_zeros(x) }
    @inline
-   fn leading_zeros(int: x, int: bits=32): int { leading_zeros(x, bits) }
+   fn leading_zeros(int x, int bits=32) int { leading_zeros(x, bits) }
    @inline
-   fn swap16(int: x): int { swap16(x) }
+   fn swap16(int x) int { swap16(x) }
    @inline
-   fn swap32(int: x): int { swap32(x) }
+   fn swap32(int x) int { swap32(x) }
    @inline
-   fn swap64(int: x): int { swap64(x) }
+   fn swap64(int x) int { swap64(x) }
    @inline
-   fn extract_bits(int: x, int: start, int: width): int { extract_bits(x, start, width) }
+   fn extract_bits(int x, int start, int width) int { extract_bits(x, start, width) }
    @inline
-   fn insert_bits(int: x, int: value, int: start, int: width): int { insert_bits(x, value, start, width) }
+   fn insert_bits(int x, int value, int start, int width) int { insert_bits(x, value, start, width) }
    @inline
-   fn mask_bits(int: x, int: start, int: width): int { mask_bits(x, start, width) }
+   fn mask_bits(int x, int start, int width) int { mask_bits(x, start, width) }
    @inline
-   fn bytes(int: x): list<int> { _long_to_bytes(x) }
+   fn bytes(int x) list<int> { _long_to_bytes(x) }
 }
 
-fn bytes_to_long(list: b): bigint { b.long }
+fn bytes_to_long(list b) bigint { b.long }
 
-fn long_to_bytes(any: n, int: length=0): list<int> { _long_to_bytes(n, length) }
+fn long_to_bytes(any n, int length=0) list<int> { _long_to_bytes(n, length) }
 
-fn bytes_to_hex(list: b): str { b.hex }
+fn bytes_to_hex(list b) str { b.hex }
 
-fn hex_to_bytes(str: hex_str): list<int> { _hex_to_bytes(hex_str) }
+fn hex_to_bytes(str hex_str) list<int> { _hex_to_bytes(hex_str) }
 
-fn bytes_to_base64(list: b): str { b.base64 }
+fn bytes_to_base64(list b) str { b.base64 }
 
-fn base64_to_bytes(str: b64_str): list<int> { b64_str.base64_decode }
+fn base64_to_bytes(str b64_str) list<int> { b64_str.base64_decode }
 
-fn bytes_to_str(list: b): str { b.text }
+fn bytes_to_str(list b) str { b.text }
 
-fn str_to_bytes(str: s): list<int> { _str_to_bytes(s) }
+fn str_to_bytes(str s) list<int> { _str_to_bytes(s) }
 
-fn bytes_concat(list: a, list: b): list { a.concat(b) }
+fn bytes_concat(list a, list b) list { a.concat(b) }
 
-fn bytes_xor(list: a, list: b): list { a.xor(b) }
+fn bytes_xor(list a, list b) list { a.xor(b) }
 
-fn bytes_repeat(list: b, int: n): list { b.repeat(n) }
+fn bytes_repeat(list b, int n) list { b.repeat(n) }
 
-fn bytes_reverse(list: b): list { b.rev }
+fn bytes_reverse(list b) list { b.rev }
 
-fn bytes_trim_leading_zeros(list: b): list { b.trim0 }
+fn bytes_trim_leading_zeros(list b) list { b.trim0 }
 
-fn zero_list(int: n): list {
+fn zero_list(int n) list {
    "Create list of n zeros."
    if(n <= 0){ return list(0) }
    mut out = _byte_list_new(n)
@@ -853,12 +827,12 @@ fn zero_list(int: n): list {
    out
 }
 
-fn zero_bytes(int: n): list {
+fn zero_bytes(int n) list {
    "Create a byte list of n zeros."
    zero_list(n)
 }
 
-fn from_list(list: xs): str {
+fn from_list(list xs) str {
    "Converts a list of byte values into a NUL-terminated byte string."
    def n = xs.len
    def out = malloc(n + 1)
@@ -872,7 +846,7 @@ fn from_list(list: xs): str {
    init_str(out, n)
 }
 
-fn pkcs7_pad(list: data, int: block_size=16): list {
+fn pkcs7_pad(list data, int block_size=16) list {
    "PKCS#7 padding for bytes list."
    mut padding_len = block_size - (data.len % block_size)
    mut result = clone(data)
@@ -884,7 +858,7 @@ fn pkcs7_pad(list: data, int: block_size=16): list {
    result
 }
 
-fn pkcs7_unpad(list: data): list {
+fn pkcs7_unpad(list data) list {
    "Remove PKCS#7 padding from bytes list."
    if(data.len == 0){ return data }
    def padding_len = data[data.len - 1]
@@ -898,7 +872,7 @@ fn pkcs7_unpad(list: data): list {
    result
 }
 
-fn zero_pad(list: data, int: block_size=16): list {
+fn zero_pad(list data, int block_size=16) list {
    "Zero padding for bytes list."
    mut padding_len = block_size - (data.len % block_size)
    if(padding_len == block_size){ padding_len = 0 }
@@ -911,22 +885,22 @@ fn zero_pad(list: data, int: block_size=16): list {
    result
 }
 
-fn zero_unpad(list: data): list {
+fn zero_unpad(list data) list {
    "Remove zero padding from bytes list."
    mut result = clone(data)
    while(result.len > 0 && result[result.len - 1] == 0){ result = slice(result, 0, result.len - 1) }
    result
 }
 
-fn bit_pad(list: data, int: block_bits=8): list {
+fn bit_pad(list data, int block_bits=8) list {
    "Bit padding(1 followed by zeros)."
    mut result = clone(data)
-   result = result.append(128) ;; 0x80 = 10000000
+   result = result.append(128)
    while(result.len % (block_bits / 8) != 0){ result = result.append(0) }
    result
 }
 
-fn bit_unpad(list: data): list {
+fn bit_unpad(list data) list {
    "Remove bit padding."
    mut i = data.len - 1
    while(i >= 0 && data[i] == 0){ i -= 1 }
@@ -934,51 +908,51 @@ fn bit_unpad(list: data): list {
    data
 }
 
-fn swap16(int: n): int {
+fn swap16(int n) int {
    "Swap bytes of 16-bit value."
    ((n & 0xFF) << 8) | ((n >> 8) & 0xFF)
 }
 
-fn swap32(int: n): int {
+fn swap32(int n) int {
    "Swap bytes of 32-bit value."
    simmd.bswap32(n)
 }
 
-fn swap64(int: n): int {
+fn swap64(int n) int {
    "Swap bytes of 64-bit value."
    simmd.bswap64(n)
 }
 
-fn to_le16(int: n): str { p16le(n) }
+fn to_le16(int n) str { p16le(n) }
 
-fn to_le32(int: n): str { p32le(n) }
+fn to_le32(int n) str { p32le(n) }
 
-fn to_le64(int: n): str { p64le(n) }
+fn to_le64(int n) str { p64le(n) }
 
-fn to_be16(int: n): str { p16be(n) }
+fn to_be16(int n) str { p16be(n) }
 
-fn to_be32(int: n): str { p32be(n) }
+fn to_be32(int n) str { p32be(n) }
 
-fn to_be64(int: n): str { p64be(n) }
+fn to_be64(int n) str { p64be(n) }
 
-fn extract_bits(int: x, int: start, int: width): int {
+fn extract_bits(int x, int start, int width) int {
    "Extract width bits starting at position start."
    def mask = (1 << width) - 1
    (x >> start) & mask
 }
 
-fn insert_bits(int: x, int: value, int: start, int: width): int {
+fn insert_bits(int x, int value, int start, int width) int {
    "Insert value into x at position start with given width."
    def mask = ((1 << width) - 1) << start
    (x & ~mask) | ((value & ((1 << width) - 1)) << start)
 }
 
-fn mask_bits(int: x, int: start, int: width): int {
+fn mask_bits(int x, int start, int width) int {
    "Create mask for bits from start to start+width."
    ((1 << width) - 1) << start
 }
 
-fn expand_bits(int: x, list: positions): int {
+fn expand_bits(int x, list positions) int {
    "Expand bits of x to positions specified in list."
    if(positions.len <= 64){
       mut mask = 0
@@ -1001,7 +975,7 @@ fn expand_bits(int: x, list: positions): int {
    result
 }
 
-fn compress_bits(int: x, list: positions): int {
+fn compress_bits(int x, list positions) int {
    "Compress bits from positions into consecutive bits."
    if(positions.len <= 64){
       mut mask = 0

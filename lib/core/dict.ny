@@ -1,11 +1,13 @@
-;; Keywords: dict map
+;; Keywords: dict map core
 ;; Dictionary operations for lookup, mutation, deletion, merging, and compatibility calls.
+;; References:
+;; - std.core
 module std.core.dict_mod(dict, dict_len, dict_read, dict_exists, dict_write, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
 use std.core.primitives
 use std.core.error
 
 @inline
-fn is_dict(any: x): bool {
+fn is_dict(any x) bool {
    "Internal: returns **true** when `x` is a dictionary object."
    def tag = runtime_tag_raw("dict")
    def got = __tagof(x)
@@ -13,81 +15,80 @@ fn is_dict(any: x): bool {
 }
 
 @inline
-fn is_str(any: x): bool {
+fn is_str(any x) bool {
    "Internal: returns **true** when `x` is a Nytrix string object."
    __is_str_obj(x)
 }
 
 @inline
-fn to_int(any: v): any {
+fn to_int(any v) any {
    "Internal: converts tagged integers to raw ints and leaves other values unchanged."
    __is_int(v) ? __untag(v) : v
 }
 
 @returns_owned
-fn list(int: cap=8): list {
+fn list(int cap=8) list {
    "Internal: allocates a list with initial capacity `cap`."
    __list_new(cap)
 }
 
 @inline
-fn _dict_store_item(list: xs, int: index, any: value): list {
+fn _dict_store_item(list xs, int index, any value) list {
    xs[index] = value
    xs
 }
 
-fn _pow2(int: n): int {
+fn _pow2(int n) int {
    mut v = 1
    while(v < n){ v = v << 1 }
    v
 }
 
 @inline
-fn _dict_str_eq(any: a, any: b): bool { __str_eq(a, b) }
+fn _dict_str_eq(any a, any b) bool { __str_eq(a, b) }
 
 @inline
-fn _dict_key_eq(any: a, any: b): bool {
+fn _dict_key_eq(any a, any b) bool {
    if(is_str(a) && is_str(b)){ return _dict_str_eq(a, b) }
    return(a == b)
 }
 
 @inline
-fn _dict_hash(any: x): int {
+fn _dict_hash(any x) int {
    if(is_int(x)){ return x }
    if(!x){ return 0 }
    if(is_str(x)){ return __str_hash(x) }
+   if(__is_float_obj(x)){ return __flt_hash(x) }
    if(is_ptr(x)){ return band(bshr(to_int(x), 3), 2147483647) }
    return 0
 }
 
 @returns_owned
-fn _dict_new(int: cap): dict {
-   ; Header: count(8) + cap(8) = 16 bytes
-   ; Each slot: key(8) + val(8) + state(8, 0=empty, 1=filled) = 24 bytes
+fn _dict_new(int cap) dict {
    def size = 16 + cap * 24
    mut p = __malloc(size)
    __memset(p, 0, size)
    __store64_idx(p, -8, runtime_tag_raw("dict"))
-   __store64_idx(p, 0, 0) ; count (tagged 0)
-   __store64_idx(p, 8, cap) ; cap
+   __store64_idx(p, 0, 0)
+   __store64_idx(p, 8, cap)
    p
 }
 
 @returns_owned
-fn dict(int: cap=8): dict {
+fn dict(int cap=8) dict {
    "Creates a new empty dictionary."
    _dict_new(_pow2(cap))
 }
 
 @inline
-fn dict_len(dict: d): int {
+fn dict_len(dict d) int {
    "Returns the number of entries in dictionary `d`."
    if(!is_dict(d)){ return 0 }
    __load64_idx(d, 0)
 }
 
 @inline
-fn _dict_find_off(dict: d, any: key): int {
+fn _dict_find_off(dict d, any key) int {
    def cap = __load64_idx(d, 8)
    if(cap <= 0){ return -1 }
    def mask = cap - 1
@@ -111,7 +112,7 @@ fn _dict_find_off(dict: d, any: key): int {
 }
 
 @returns_owned
-fn _dict_resize(dict: d): dict {
+fn _dict_resize(dict d) dict {
    def old_cap = __load64_idx(d, 8)
    def new_cap = old_cap < 8 ? 8 : old_cap * 2
    mut nd = _dict_new(new_cap)
@@ -124,7 +125,7 @@ fn _dict_resize(dict: d): dict {
    nd
 }
 
-fn dict_write(dict: d, any: key, any: val): dict {
+fn dict_write(dict d, any key, any val) dict {
    "Inserts or updates a key/value pair in dictionary `d`."
    if(!is_dict(d)){ return d }
    def tc = __load64_idx(d, 0)
@@ -141,12 +142,12 @@ fn dict_write(dict: d, any: key, any: val): dict {
    __store64_idx(d, off, key)
    __store64_idx(d, off + 8, val)
    __store64_idx(d, off + 16, 1)
-   __store64_idx(d, 0, tc + 1) ; Increment tagged count
+   __store64_idx(d, 0, tc + 1)
    d
 }
 
 @inline
-fn dict_read(dict: d, any: key, any: default=0): any {
+fn dict_read(dict d, any key, any default=0) any {
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
    if(!is_dict(d)){ return default }
    def off = _dict_find_off(d, key)
@@ -155,7 +156,7 @@ fn dict_read(dict: d, any: key, any: default=0): any {
 }
 
 @inline
-fn dict_exists(dict: d, any: key): bool {
+fn dict_exists(dict d, any key) bool {
    "Returns **true** if `key` exists in dictionary `d`."
    if(!is_dict(d)){ return false }
    def off = _dict_find_off(d, key)
@@ -164,13 +165,13 @@ fn dict_exists(dict: d, any: key): bool {
 }
 
 @inline
-fn dict_has(dict: d, any: key): bool {
+fn dict_has(dict d, any key) bool {
    "Compatibility bridge for old free helper calls. Prefer `d.contains(key)`."
    dict_exists(d, key)
 }
 
 @inline
-fn dict_remove(dict: d, any: key): dict {
+fn dict_remove(dict d, any key) dict {
    "Removes `key` from dictionary `d`. Returns the dictionary."
    if(!is_dict(d)){ return d }
    def off = _dict_find_off(d, key)
@@ -178,18 +179,18 @@ fn dict_remove(dict: d, any: key): dict {
       __store64_idx(d, off, 0)
       __store64_idx(d, off + 8, 0)
       __store64_idx(d, off + 16, 2)
-      __store64_idx(d, 0, __load64_idx(d, 0) - 1) ; Decrement tagged count
+      __store64_idx(d, 0, __load64_idx(d, 0) - 1)
    }
    d
 }
 
 @inline
-fn dict_del(dict: d, any: key): dict {
+fn dict_del(dict d, any key) dict {
    "Compatibility bridge for old free helper calls. Prefer `d.delete(key)`."
    dict_remove(d, key)
 }
 
-fn dict_pop(dict: d, any: key, any: default=0): any {
+fn dict_pop(dict d, any key, any default=0) any {
    "Removes and returns the value for `key`, or `default` if not found."
    if(!is_dict(d)){ return default }
    def off = _dict_find_off(d, key)
@@ -204,7 +205,7 @@ fn dict_pop(dict: d, any: key, any: default=0): any {
    default
 }
 
-fn dict_popitem(dict: d): any {
+fn dict_popitem(dict d) any {
    "Removes and returns the last inserted [key, value] pair, or 0 if empty."
    if(!is_dict(d)){ return 0 }
    def cap = __load64_idx(d, 8)
@@ -225,7 +226,7 @@ fn dict_popitem(dict: d): any {
    0
 }
 
-fn dict_setdefault(dict: d, any: key, any: default=0): any {
+fn dict_setdefault(dict d, any key, any default=0) any {
    "Returns the value for `key`, or sets and returns `default` if not found."
    if(!is_dict(d)){ return default }
    if(dict_exists(d, key)){ return dict_read(d, key, default) }
@@ -234,7 +235,7 @@ fn dict_setdefault(dict: d, any: key, any: default=0): any {
 }
 
 @returns_owned
-fn dict_clone(dict: d): dict {
+fn dict_clone(dict d) dict {
    "Creates a shallow copy of dictionary `d`."
    if(!is_dict(d)){ return d }
    def cap = __load64_idx(d, 8)
@@ -253,7 +254,7 @@ fn dict_clone(dict: d): dict {
    nd
 }
 
-fn dict_clear(dict: d): dict {
+fn dict_clear(dict d) dict {
    "Removes all entries from dictionary `d`."
    if(!is_dict(d)){ return d }
    def cap = __load64_idx(d, 8)
@@ -269,7 +270,7 @@ fn dict_clear(dict: d): dict {
    d
 }
 
-fn dict_merge(dict: dst, dict: src): dict {
+fn dict_merge(dict dst, dict src) dict {
    "Merges `src` into `dst` (overwriting duplicate keys). Returns merged dictionary."
    if(!is_dict(dst) || !is_dict(src)){ return dst }
    def cap = __load64_idx(src, 8)
@@ -284,7 +285,7 @@ fn dict_merge(dict: dst, dict: src): dict {
 
 @inline
 @returns_owned
-fn _dict_pair(any: a, any: b): list {
+fn _dict_pair(any a, any b) list {
    mut p = list(2)
    _dict_store_item(p, 0, a)
    _dict_store_item(p, 1, b)
@@ -293,7 +294,7 @@ fn _dict_pair(any: a, any: b): list {
 }
 
 @returns_owned
-fn dict_items(dict: d): list {
+fn dict_items(dict d) list {
    "Returns a list of [key, value] pairs."
    if(!is_dict(d)){ return list() }
    def n = __load64_idx(d, 0)
@@ -314,7 +315,7 @@ fn dict_items(dict: d): list {
 }
 
 @returns_owned
-fn dict_keys(dict: d): list {
+fn dict_keys(dict d) list {
    "Returns a list of keys."
    if(!is_dict(d)){ return list() }
    def n = __load64_idx(d, 0)
@@ -335,7 +336,7 @@ fn dict_keys(dict: d): list {
 }
 
 @returns_owned
-fn dict_values(dict: d): list {
+fn dict_values(dict d) list {
    "Returns a list of values."
    if(!is_dict(d)){ return list() }
    def n = __load64_idx(d, 0)
@@ -353,4 +354,34 @@ fn dict_values(dict: d): list {
    }
    __store64_idx(out, 0, pos)
    out
+}
+
+#main {
+   fn _dict_check(bool cond, str msg) int {
+      if(!cond){ __panic(msg) }
+      0
+   }
+   mut d = dict(4)
+   _dict_check(dict_len(d) == 0 && !dict_has(d, "a"), "dict empty")
+   d = dict_write(d, "a", 1)
+   d = dict_write(d, "b", 2)
+   d = dict_write(d, "c", 3)
+   _dict_check(dict_len(d) == 3 && dict_has(d, "b") && dict_read(d, "b", 0) == 2 && dict_read(d, "x", 77) == 77, "dict write/read")
+   mut copy = dict_clone(d)
+   copy = dict_write(copy, "b", 22)
+   _dict_check(dict_read(d, "b", 0) == 2 && dict_read(copy, "b", 0) == 22, "dict clone isolates writes")
+   mut other = dict(4)
+   other = dict_write(other, "b", 200)
+   other = dict_write(other, "d", 4)
+   d = dict_merge(d, other)
+   _dict_check(dict_len(d) == 4 && dict_read(d, "b", 0) == 200 && dict_read(d, "d", 0) == 4, "dict merge")
+   d = dict_del(d, "b")
+   _dict_check(!dict_has(d, "b") && dict_len(d) == 3, "dict delete")
+   _dict_check(dict_keys(d).contains("a") && dict_values(d).contains(4) && dict_items(d).len == 3, "dict views")
+   mut fd = dict(8)
+   def half_a = 0.5
+   def half_b = 0.25 + 0.25
+   fd[half_a] = "half"
+   _dict_check(dict_read(fd, half_b, "") == "half", "dict float keys")
+   print("✓ std.core.dict_mod self-test passed")
 }

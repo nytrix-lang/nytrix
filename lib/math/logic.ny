@@ -1,11 +1,13 @@
-;; Keywords: logic boolean
+;; Keywords: logic boolean math
 ;; Math Logic for Nytrix
+;; References:
+;; - std.math
 module std.math.logic(any, all)
 use std.math
 use std.core
 use std.core.reflect
 
-fn any(any: xs): bool {
+fn any(any xs) bool {
    "Returns true if at least one element in `xs` is truthy. If `xs` is not a list, returns `bool(xs)`."
    if(!is_list(xs)){ return bool(xs) }
    mut i = 0
@@ -16,7 +18,7 @@ fn any(any: xs): bool {
    false
 }
 
-fn all(any: xs): bool {
+fn all(any xs) bool {
    "Returns true if all elements in `xs` are truthy. If `xs` is not a list, returns `bool(xs)`."
    if(!is_list(xs)){ return bool(xs) }
    mut i = 0

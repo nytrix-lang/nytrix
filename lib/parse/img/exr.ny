@@ -1,5 +1,8 @@
-;; Keywords: image exr openexr hdr
+;; Keywords: image exr openexr hdr parse
 ;; OpenEXR image loader implemented in Ny via dynamic FFI.
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.exr(decode, decode_bytes, load_path, available, last_error, backend_name)
 use std.core
 use std.core.dict_mod
@@ -29,22 +32,22 @@ mut _ptr_ImfInputSetFrameBuffer = 0
 mut _ptr_ImfInputReadPixels = 0
 mut _ptr_ImfErrorMessage = 0
 
-fn _set_error(any: msg): int {
+fn _set_error(any msg) int {
    _exr_last_error = to_str(msg)
    0
 }
 
-fn last_error(): str {
+fn last_error() str {
    "Returns the last EXR backend error."
    _exr_last_error
 }
 
-fn backend_name(): str {
+fn backend_name() str {
    "Returns the active EXR backend name, or empty string when unavailable."
    _exr_backend_name
 }
 
-fn _exr_error_message(str: fallback="OpenEXR error"): str {
+fn _exr_error_message(str fallback="OpenEXR error") str {
    if(_ptr_ImfErrorMessage){
       def msg_ptr = call0_ptr(_ptr_ImfErrorMessage)
       if(msg_ptr){
@@ -55,7 +58,7 @@ fn _exr_error_message(str: fallback="OpenEXR error"): str {
    fallback
 }
 
-fn _exr_load_dyn(): any {
+fn _exr_load_dyn() any {
    if(_exr_checked){ return _exr_ok }
    _exr_checked = true
    _exr_ok = false
@@ -89,12 +92,12 @@ fn _exr_load_dyn(): any {
    true
 }
 
-fn available(): any {
+fn available() any {
    "Returns whether the OpenEXR backend is available."
    _exr_load_dyn()
 }
 
-fn _ensure_half_luts(): bool {
+fn _ensure_half_luts() bool {
    if(_half_u8_lut && _half_a8_lut){ return true }
    def n = 65536
    def pu = malloc(n)
@@ -115,7 +118,7 @@ fn _ensure_half_luts(): bool {
    true
 }
 
-fn _half_to_float(any: h): float {
+fn _half_to_float(any h) float {
    def bits = int(h) & 65535
    def sign = (bits >> 15) & 1
    def exp = (bits >> 10) & 31
@@ -133,7 +136,7 @@ fn _half_to_float(any: h): float {
    out
 }
 
-fn _linear_to_u8(any: v): int {
+fn _linear_to_u8(any v) int {
    mut x = float(v)
    if(!(x >= 0.0)){ x = 0.0 }
    if(x < 0.0){ x = 0.0 }
@@ -144,7 +147,7 @@ fn _linear_to_u8(any: v): int {
    int(x * 255.0 + 0.5)
 }
 
-fn _alpha_to_u8(any: v): int {
+fn _alpha_to_u8(any v) int {
    mut x = float(v)
    if(!(x >= 0.0)){ x = 0.0 }
    if(x < 0.0){ x = 0.0 }
@@ -152,17 +155,17 @@ fn _alpha_to_u8(any: v): int {
    int(x * 255.0 + 0.5)
 }
 
-fn _cleanup_input(any: in_p): int {
+fn _cleanup_input(any in_p) int {
    if(in_p && _ptr_ImfCloseInputFile){ call1(_ptr_ImfCloseInputFile, in_p) }
    0
 }
 
-fn _alloc_i32_slot(): any {
+fn _alloc_i32_slot() any {
    def p = zalloc(8)
    p
 }
 
-fn _read_data_window(any: hdr): any {
+fn _read_data_window(any hdr) any {
    def x_min_p, y_min_p = _alloc_i32_slot(), _alloc_i32_slot()
    def x_max_p, y_max_p = _alloc_i32_slot(), _alloc_i32_slot()
    if(!x_min_p || !y_min_p || !x_max_p || !y_max_p){
@@ -179,7 +182,7 @@ fn _read_data_window(any: hdr): any {
    [x_min, y_min, x_max, y_max]
 }
 
-fn load_path(any: path): any {
+fn load_path(any path) any {
    "Loads an EXR image from `path` into a standard RGBA image dict."
    _exr_last_error = ""
    if(!is_str(path) || path.len == 0){ return _set_error("empty EXR path") }
@@ -238,7 +241,7 @@ fn load_path(any: path): any {
    out
 }
 
-fn _decode_exr_bytes_impl(any: data, any: ext=""): any {
+fn _decode_exr_bytes_impl(any data, any ext="") any {
    if(!is_str(data) || data.len < 4){ return 0 }
    if(load8(data, 0) != _EXR_MAGIC_0 || load8(data, 1) != _EXR_MAGIC_1 || load8(data, 2) != _EXR_MAGIC_2 || load8(data, 3) != _EXR_MAGIC_3){ return _set_error("not an OpenEXR stream") }
    def td = temp_dir()
@@ -258,12 +261,12 @@ fn _decode_exr_bytes_impl(any: data, any: ext=""): any {
    _set_error("failed to decode staged EXR image")
 }
 
-fn decode_bytes(any: data, any: ext=""): any {
+fn decode_bytes(any data, any ext="") any {
    "Decodes EXR bytes by staging them to a temp file and reading them via OpenEXR."
    _decode_exr_bytes_impl(data, ext)
 }
 
-fn decode(any: data, any: ext=""): any {
+fn decode(any data, any ext="") any {
    "Compatibility wrapper for EXR byte decoding."
    return decode_bytes(data, ext)
 }
