@@ -1,17 +1,14 @@
-;; Keywords: subprocess process spawn
+;; Keywords: subprocess process spawn os
 ;; Subprocess convenience API for quick scripts that need spawn, capture, and wait behavior.
+;; References:
+;; - std.os
 module std.os.subprocess(check_output, output, check_lines, shell, shell_lines, run_capture)
 use std.core
 use std.core.error
 use std.core.str as str
 use std.os.io as pio
 
-fn _cmd_path(any: cmd): str {
-   if(is_list(cmd)){ return to_str(cmd.get(0, "")) }
-   to_str(cmd)
-}
-
-fn _cmd_args(any: cmd, any: args=[]): list {
+fn _cmd_args(any cmd, any args=[]) list {
    if(is_list(cmd)){ return cmd }
    mut out = []
    out = out.append(to_str(cmd))
@@ -25,11 +22,11 @@ fn _cmd_args(any: cmd, any: args=[]): list {
    out
 }
 
-fn run_capture(any: cmd, any: args=[], any: input=nil, bool: check=true): dict {
+fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    "Runs a command and captures stdout. Returns `{code, stdout, ok, argv}`.
    `cmd` may be a string plus `args`, or a full argv list like `['git', 'status']`."
-   def path = _cmd_path(cmd)
    def argv = _cmd_args(cmd, args)
+   def path = to_str(argv.get(0, ""))
    def p = pio.spawn(path, argv)
    if(p == 0){
       if(check){ panic("spawn failed: " + repr(argv)) }
@@ -59,7 +56,7 @@ fn run_capture(any: cmd, any: args=[], any: input=nil, bool: check=true): dict {
    out
 }
 
-fn check_output(any: cmd, any: args=[], bool: text=true, bool: strip=false, any: input=nil): str {
+fn check_output(any cmd, any args=[], bool text=true, bool strip=false, any input=nil) str {
    "Python-style check_output. Returns stdout or panics on non-zero exit."
    def res = run_capture(cmd, args, input, true)
    mut out = res.get("stdout", "")
@@ -67,12 +64,12 @@ fn check_output(any: cmd, any: args=[], bool: text=true, bool: strip=false, any:
    out
 }
 
-fn output(any: cmd, any: args=[], bool: strip=false): str {
+fn output(any cmd, any args=[], bool strip=false) str {
    "Short alias for `check_output`."
    check_output(cmd, args, true, strip)
 }
 
-fn _split_lines(str: text, bool: keep_empty=false): list {
+fn _split_lines(str text, bool keep_empty=false) list {
    mut raw = str.split(text, "\n")
    mut out = []
    mut i = 0
@@ -85,12 +82,12 @@ fn _split_lines(str: text, bool: keep_empty=false): list {
    out
 }
 
-fn check_lines(any: cmd, any: args=[], bool: keep_empty=false, any: input=nil): list {
+fn check_lines(any cmd, any args=[], bool keep_empty=false, any input=nil) list {
    "Runs a command and returns stdout split into lines."
    _split_lines(check_output(cmd, args, true, false, input), keep_empty)
 }
 
-fn shell(str: command, bool: check=true, bool: strip=false): str {
+fn shell(str command, bool check=true, bool strip=false) str {
    "Runs a shell command and returns stdout. Prefer argv-list commands for untrusted data."
    mut argv = ["/bin/sh", "-c", command]
    #windows {
@@ -102,7 +99,22 @@ fn shell(str: command, bool: check=true, bool: strip=false): str {
    out
 }
 
-fn shell_lines(str: command, bool: keep_empty=false): list {
+fn shell_lines(str command, bool keep_empty=false) list {
    "Runs a shell command and returns stdout lines."
    _split_lines(shell(command, true, false), keep_empty)
+}
+
+#main {
+   mut echo_argv = ["/bin/sh", "-c", "echo subprocess-probe"]
+   #windows {
+      echo_argv = ["cmd", "/c", "echo subprocess-probe"]
+   } #endif
+   def cap = run_capture(echo_argv, [], nil, true)
+   assert(cap.get("ok", false) && str.strip(cap.get("stdout", "")) == "subprocess-probe", "subprocess run_capture")
+   assert(check_output(echo_argv, [], true, true) == "subprocess-probe", "subprocess check_output")
+   assert(output(echo_argv, [], true) == "subprocess-probe", "subprocess output")
+   assert(check_lines(echo_argv) == ["subprocess-probe"], "subprocess check_lines")
+   assert(shell("echo shell-probe", true, true) == "shell-probe", "subprocess shell")
+   assert(shell_lines("echo line-probe") == ["line-probe"], "subprocess shell_lines")
+   print("✓ std.os.subprocess self-test passed")
 }

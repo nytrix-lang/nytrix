@@ -1,5 +1,8 @@
-;; Keywords: net socket tcp udp
+;; Keywords: net socket tcp udp os
 ;; Net Socket for Nytrix
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
 use std.core
 use std.core.str
@@ -13,34 +16,34 @@ use std.core.mem as mem
 #windows {
    #link "ws2_32.lib"
    extern "" {
-      fn _c_wsa_startup(u16: version, ptr: data): i32 as "WSAStartup"
-      fn _c_socket(i32: domain, i32: typ, i32: protocol): i64 as "socket"
-      fn _c_connect(i64: fd, ptr: addr, i32: addrlen): i32 as "connect"
-      fn _c_bind(i64: fd, ptr: addr, i32: addrlen): i32 as "bind"
-      fn _c_listen(i64: fd, i32: backlog): i32 as "listen"
-      fn _c_accept(i64: fd, ptr: addr, ptr: addrlen): i64 as "accept"
-      fn _c_send(i64: fd, ptr: buf, i32: len, i32: flags): i32 as "send"
-      fn _c_recv(i64: fd, ptr: buf, i32: len, i32: flags): i32 as "recv"
-      fn _c_sendto(i64: fd, ptr: buf, i32: len, i32: flags, ptr: addr, i32: addrlen): i32 as "sendto"
-      fn _c_recvfrom(i64: fd, ptr: buf, i32: len, i32: flags, ptr: addr, ptr: addrlen): i32 as "recvfrom"
-      fn _c_setsockopt(i64: fd, i32: level, i32: optname, ptr: optval, i32: optlen): i32 as "setsockopt"
-      fn _c_close_socket(i64: fd): i32 as "closesocket"
-      fn _c_gethostbyname(ptr: name): ptr as "gethostbyname"
+      fn _c_wsa_startup(u16 version, ptr data) i32 as "WSAStartup"
+      fn _c_socket(i32 domain, i32 typ, i32 protocol) i64 as "socket"
+      fn _c_connect(i64 fd, ptr addr, i32 addrlen) i32 as "connect"
+      fn _c_bind(i64 fd, ptr addr, i32 addrlen) i32 as "bind"
+      fn _c_listen(i64 fd, i32 backlog) i32 as "listen"
+      fn _c_accept(i64 fd, ptr addr, ptr addrlen) i64 as "accept"
+      fn _c_send(i64 fd, ptr buf, i32 len, i32 flags) i32 as "send"
+      fn _c_recv(i64 fd, ptr buf, i32 len, i32 flags) i32 as "recv"
+      fn _c_sendto(i64 fd, ptr buf, i32 len, i32 flags, ptr addr, i32 addrlen) i32 as "sendto"
+      fn _c_recvfrom(i64 fd, ptr buf, i32 len, i32 flags, ptr addr, ptr addrlen) i32 as "recvfrom"
+      fn _c_setsockopt(i64 fd, i32 level, i32 optname, ptr optval, i32 optlen) i32 as "setsockopt"
+      fn _c_close_socket(i64 fd) i32 as "closesocket"
+      fn _c_gethostbyname(ptr name) ptr as "gethostbyname"
    }
 } #else {
    extern "" {
-      fn _c_socket(i32: domain, i32: typ, i32: protocol): i32 as "socket"
-      fn _c_connect(i32: fd, ptr: addr, u32: addrlen): i32 as "connect"
-      fn _c_bind(i32: fd, ptr: addr, u32: addrlen): i32 as "bind"
-      fn _c_listen(i32: fd, i32: backlog): i32 as "listen"
-      fn _c_accept(i32: fd, ptr: addr, ptr: addrlen): i32 as "accept"
-      fn _c_send(i32: fd, ptr: buf, u64: len, i32: flags): i64 as "send"
-      fn _c_recv(i32: fd, ptr: buf, u64: len, i32: flags): i64 as "recv"
-      fn _c_sendto(i32: fd, ptr: buf, u64: len, i32: flags, ptr: addr, u32: addrlen): i64 as "sendto"
-      fn _c_recvfrom(i32: fd, ptr: buf, u64: len, i32: flags, ptr: addr, ptr: addrlen): i64 as "recvfrom"
-      fn _c_setsockopt(i32: fd, i32: level, i32: optname, ptr: optval, u32: optlen): i32 as "setsockopt"
-      fn _c_close_socket(i32: fd): i32 as "close"
-      fn _c_gethostbyname(ptr: name): ptr as "gethostbyname"
+      fn _c_socket(i32 domain, i32 typ, i32 protocol) i32 as "socket"
+      fn _c_connect(i32 fd, ptr addr, u32 addrlen) i32 as "connect"
+      fn _c_bind(i32 fd, ptr addr, u32 addrlen) i32 as "bind"
+      fn _c_listen(i32 fd, i32 backlog) i32 as "listen"
+      fn _c_accept(i32 fd, ptr addr, ptr addrlen) i32 as "accept"
+      fn _c_send(i32 fd, ptr buf, u64 len, i32 flags) i64 as "send"
+      fn _c_recv(i32 fd, ptr buf, u64 len, i32 flags) i64 as "recv"
+      fn _c_sendto(i32 fd, ptr buf, u64 len, i32 flags, ptr addr, u32 addrlen) i64 as "sendto"
+      fn _c_recvfrom(i32 fd, ptr buf, u64 len, i32 flags, ptr addr, ptr addrlen) i64 as "recvfrom"
+      fn _c_setsockopt(i32 fd, i32 level, i32 optname, ptr optval, u32 optlen) i32 as "setsockopt"
+      fn _c_close_socket(i32 fd) i32 as "close"
+      fn _c_gethostbyname(ptr name) ptr as "gethostbyname"
    }
 } #endif
 def AF_INET     = 2
@@ -60,9 +63,9 @@ mut _hosts_cache_loaded = false
 mut _hosts_cache_txt = ""
 mut _net_ready_done = false
 
-fn _cptr(any: s): any { to_int(mem.cstr(s)) }
+fn _cptr(any s) any { to_int(mem.cstr(s)) }
 
-fn _net_ready(): bool {
+fn _net_ready() bool {
    #windows {
       if(_net_ready_done){ return true }
       def data = malloc(512)
@@ -76,26 +79,26 @@ fn _net_ready(): bool {
    } #endif
 }
 
-fn _net_socket(int: domain, int: typ, int: protocol): int {
+fn _net_socket(int domain, int typ, int protocol) int {
    if(!_net_ready()){ return -1 }
    def fd = _c_socket(domain, typ, protocol)
    #windows { if(fd == -1){ return -1 } } #endif
    return fd
 }
 
-fn _net_close(int: fd): int {
+fn _net_close(int fd) int {
    if(fd < 0){ return -1 }
    return _c_close_socket(fd)
 }
 
-fn htons(int: x): int {
+fn htons(int x) int {
    "Convert a 16-bit integer from host byte order to network byte order(big-endian)."
    def lo = x % 256
    def hi = (x / 256) % 256
    return lo*256 + hi
 }
 
-fn ipv4_parse(str: s): int {
+fn ipv4_parse(str s) int {
    "Parses an IPv4 address string(e.g., '127.0.0.1') into a 32-bit integer(little-endian)."
    mut p, val, oct, shift, parts, digits = 0, 0, 0, 0, 0, 0
    while(p <= s.len){
@@ -125,7 +128,7 @@ fn ipv4_parse(str: s): int {
    return 0
 }
 
-fn ipv4_format(int: ip): str {
+fn ipv4_format(int ip) str {
    "Formats an IPv4 address integer returned by Ny socket helpers."
    def a = ip % 256
    def b = (ip / 256) % 256
@@ -134,7 +137,7 @@ fn ipv4_format(int: ip): str {
    to_str(a) + "." + to_str(b) + "." + to_str(c) + "." + to_str(d)
 }
 
-fn _hosts_file_path(): str {
+fn _hosts_file_path() str {
    #windows {
       mut root = env("SystemRoot")
       if(!is_str(root) || root.len == 0){ root = env("SYSTEMROOT") }
@@ -145,7 +148,7 @@ fn _hosts_file_path(): str {
    } #endif
 }
 
-fn _lookup_hosts(str: name, any: hosts): int {
+fn _lookup_hosts(str name, any hosts) int {
    if(!is_str(hosts) || hosts.len == 0){ return 0 }
    def lines = split(hosts, "\n")
    mut i = 0
@@ -168,7 +171,7 @@ fn _lookup_hosts(str: name, any: hosts): int {
    0
 }
 
-fn gethostbyname(any: name): int {
+fn gethostbyname(any name) int {
    "Resolves a hostname to an IPv4 address integer using hosts plus the OS resolver."
    if(!is_str(name) || name.len == 0){ return 0 }
    def direct = ipv4_parse(name)
@@ -199,19 +202,19 @@ fn gethostbyname(any: name): int {
    ip
 }
 
-fn _resolve_host(str: host): int {
+fn _resolve_host(str host) int {
    mut ip = ipv4_parse(host)
    if(ip == 0){ ip = gethostbyname(host) }
    return ip
 }
 
-fn _resolve_bind_host(str: host): int {
+fn _resolve_bind_host(str host) int {
    if(host.len == 0 || host == "*" || host == "0.0.0.0"){ return 0 }
    _resolve_host(host)
 }
 
 #macos {
-   fn _make_sockaddr(int: ip, int: port): any {
+   fn _make_sockaddr(int ip, int port) any {
       def sa = malloc(16)
       if(sa == 0){ return 0 }
       store8(sa, 16, 0)
@@ -222,7 +225,7 @@ fn _resolve_bind_host(str: host): int {
       return sa
    }
 } #else {
-   fn _make_sockaddr(int: ip, int: port): any {
+   fn _make_sockaddr(int ip, int port) any {
       def sa = malloc(16)
       if(sa == 0){ return 0 }
       store16(sa, AF_INET, 0)
@@ -233,7 +236,7 @@ fn _resolve_bind_host(str: host): int {
    }
 } #endif
 
-fn socket_connect(str: host, int: port): int {
+fn socket_connect(str host, int port) int {
    "Connect to host:port(TCP). Returns fd or -1."
    def ip = _resolve_host(host)
    if(ip == 0){ return -1 }
@@ -253,7 +256,7 @@ fn socket_connect(str: host, int: port): int {
    return fd
 }
 
-fn socket_connect_async(str: host, int: port): any {
+fn socket_connect_async(str host, int port) any {
    "Starts a non-blocking TCP connect task. Await it for fd or -1."
    def ip = _resolve_host(host)
    if(ip == 0){ return __async_value(-1) }
@@ -269,7 +272,7 @@ fn socket_connect_async(str: host, int: port): any {
    h
 }
 
-fn socket_bind(str: host, int: port): int {
+fn socket_bind(str host, int port) int {
    "Create a TCP socket, binds it to the specified host and port, and starts listening. Returns the file descriptor or -1 on error."
    def ip = _resolve_bind_host(host)
    if(ip == 0 && !(host.len == 0 || host == "*" || host == "0.0.0.0")){ return -1 }
@@ -308,12 +311,12 @@ fn socket_bind(str: host, int: port): int {
    return fd
 }
 
-fn socket_accept(int: server_fd): int {
+fn socket_accept(int server_fd) int {
    "Accepts an incoming connection on a listening socket. Returns the client file descriptor."
    socket_accept_info(server_fd).get("fd", -1)
 }
 
-fn socket_accept_info(int: server_fd): dict {
+fn socket_accept_info(int server_fd) dict {
    "Accepts an incoming connection and returns fd plus peer IPv4 metadata."
    def addr = malloc(16)
    def len = malloc(4)
@@ -333,12 +336,12 @@ fn socket_accept_info(int: server_fd): dict {
    return {"ok": true, "fd": res, "host": host, "ip": ip, "port": port, "addr": host + ":" + to_str(port)}
 }
 
-fn socket_accept_async(int: server_fd): any {
+fn socket_accept_async(int server_fd) any {
    "Starts an accept task. Await it for the accepted client fd or -1."
    __async_accept(server_fd)
 }
 
-fn _socket_set_timeval_opt(int: fd, int: optname, int: timeout_ms): int {
+fn _socket_set_timeval_opt(int fd, int optname, int timeout_ms) int {
    if(fd < 0){ return -1 }
    if(timeout_ms < 0){ timeout_ms = 0 }
    #windows {
@@ -359,23 +362,23 @@ fn _socket_set_timeval_opt(int: fd, int: optname, int: timeout_ms): int {
    } #endif
 }
 
-fn socket_set_recv_timeout_ms(int: fd, int: timeout_ms): int {
+fn socket_set_recv_timeout_ms(int fd, int timeout_ms) int {
    "Sets socket receive timeout in milliseconds. `0` asks the OS for blocking/default behavior."
    return _socket_set_timeval_opt(fd, SO_RCVTIMEO, timeout_ms)
 }
 
-fn socket_set_send_timeout_ms(int: fd, int: timeout_ms): int {
+fn socket_set_send_timeout_ms(int fd, int timeout_ms) int {
    "Sets socket send timeout in milliseconds. `0` asks the OS for blocking/default behavior."
    return _socket_set_timeval_opt(fd, SO_SNDTIMEO, timeout_ms)
 }
 
-fn socket_set_timeout_ms(int: fd, int: timeout_ms): int {
+fn socket_set_timeout_ms(int fd, int timeout_ms) int {
    "Sets both receive and send socket timeouts in milliseconds."
    def r1, r2 = socket_set_recv_timeout_ms(fd, timeout_ms), socket_set_send_timeout_ms(fd, timeout_ms)
    (r1 < 0 || r2 < 0) ? -1 : 0
 }
 
-fn read_socket(int: fd, any: max_len): any {
+fn read_socket(int fd, any max_len) any {
    "Reads up to `max_len` bytes from a socket. Returns the data as a string."
    if(!is_int(max_len) || max_len <= 0){ return "" }
    if(max_len > 1048576){ max_len = 1048576 }
@@ -391,19 +394,19 @@ fn read_socket(int: fd, any: max_len): any {
    return init_str(buf, n)
 }
 
-fn read_socket_async(int: fd, any: max_len): any {
+fn read_socket_async(int fd, any max_len) any {
    "Starts a socket read task returning a string when awaited."
    if(!is_int(max_len) || max_len <= 0){ return __async_value("") }
    if(max_len > 1048576){ max_len = 1048576 }
    __async_read_socket(fd, max_len)
 }
 
-fn write_socket(int: fd, any: data): int {
+fn write_socket(int fd, any data) int {
    "Writes all bytes in `data` to a socket."
    return write_socket_all(fd, data)
 }
 
-fn read_socket_exact(int: fd, any: want_len): str {
+fn read_socket_exact(int fd, any want_len) str {
    "Reads until `want_len` bytes are collected, EOF happens, or the peer stops sending."
    if(!is_int(want_len) || want_len <= 0){ return "" }
    if(want_len > 1048576){ want_len = 1048576 }
@@ -420,7 +423,7 @@ fn read_socket_exact(int: fd, any: want_len): str {
    return out
 }
 
-fn write_socket_part(int: fd, any: data, any: off, any: size=-1): int {
+fn write_socket_part(int fd, any data, any off, any size=-1) int {
    "Writes a string slice `[off, off+size)` to socket without allocating substrings."
    if(!is_str(data) || !is_int(off)){ return -1 }
    def n = data.len
@@ -432,7 +435,7 @@ fn write_socket_part(int: fd, any: data, any: off, any: size=-1): int {
    return _c_send(fd, to_int(data) + off, count, 0)
 }
 
-fn write_socket_part_async(int: fd, any: data, any: off, any: size=-1): any {
+fn write_socket_part_async(int fd, any data, any off, any size=-1) any {
    "Starts a socket write task for a string slice. Await it for bytes written or -1."
    if(!is_str(data) || !is_int(off)){ return __async_value(-1) }
    def n = data.len
@@ -444,7 +447,7 @@ fn write_socket_part_async(int: fd, any: data, any: off, any: size=-1): any {
    __async_write_socket_part(fd, data, off, count)
 }
 
-fn write_socket_all(int: fd, any: data): int {
+fn write_socket_all(int fd, any data) int {
    "Writes all bytes in `data` unless the peer closes or send fails. Returns bytes written, or -1."
    if(!is_str(data)){ return -1 }
    mut off = 0
@@ -457,19 +460,19 @@ fn write_socket_all(int: fd, any: data): int {
    return off
 }
 
-fn write_socket_all_async(int: fd, any: data): any {
+fn write_socket_all_async(int fd, any data) any {
    "Starts a socket write task that sends the whole string. Await it for bytes written or -1."
    if(!is_str(data)){ return __async_value(-1) }
    __async_write_socket_all(fd, data)
 }
 
-fn write_socket_line(int: fd, any: data): int {
+fn write_socket_line(int fd, any data) int {
    "Writes `data` plus a trailing newline."
    if(!is_str(data)){ return -1 }
    return write_socket_all(fd, data + "\n")
 }
 
-fn read_socket_until(int: fd, any: needle, any: max_bytes=65536): str {
+fn read_socket_until(int fd, any needle, any max_bytes=65536) str {
    "Reads from socket until `needle` appears, EOF, or `max_bytes` is reached."
    if(!is_str(needle)){ return "" }
    if(!is_int(max_bytes) || max_bytes <= 0){ max_bytes = 65536 }
@@ -490,14 +493,25 @@ fn read_socket_until(int: fd, any: needle, any: max_bytes=65536): str {
    return buf
 }
 
-fn read_socket_until_async(int: fd, any: needle, any: max_bytes=65536): any {
+fn read_socket_until_async(int fd, any needle, any max_bytes=65536) any {
    "Starts a task that reads until `needle`, EOF, or `max_bytes`."
    if(!is_str(needle)){ return __async_value("") }
    if(!is_int(max_bytes) || max_bytes <= 0){ max_bytes = 65536 }
    __async_read_socket_until(fd, needle, max_bytes)
 }
 
-fn close_socket(int: fd): int {
+fn close_socket(int fd) int {
    "Closes a socket file descriptor."
    return _net_close(fd)
+}
+
+#main {
+   assert(htons(0x1234) == 0x3412, "socket htons")
+   def loop = ipv4_parse("127.0.0.1")
+   assert(loop != 0, "socket ipv4 parse")
+   assert(ipv4_format(loop) == "127.0.0.1", "socket ipv4 format")
+   assert(ipv4_parse("999.1.1.1") == 0, "socket invalid ipv4")
+   assert(socket_set_timeout_ms(-1, 100) == -1, "socket invalid timeout")
+   assert(close_socket(-1) == -1, "socket invalid close")
+   print("✓ std.os.net.socket self-test passed")
 }

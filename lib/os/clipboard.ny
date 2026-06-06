@@ -1,5 +1,7 @@
-;; Keywords: clipboard copy paste
+;; Keywords: clipboard copy paste os
 ;; Clipboard access utilities with backend/tool fallbacks.
+;; References:
+;; - std.os
 module std.os.clipboard(set_text, get_text, set_clipboard_text, get_clipboard_text)
 use std.core
 use std.os
@@ -9,7 +11,7 @@ use std.os.sys (sys_close_quiet)
 use std.os.subprocess as subprocess
 use std.core.str as str
 
-fn _detect_tool(): str {
+fn _detect_tool() str {
    def wd = env("WAYLAND_DISPLAY")
    if(is_str(wd) && wd.len > 0){ if(file_exists("/usr/bin/wl-copy") || file_exists("/usr/local/bin/wl-copy")){ return "wl" } }
    def xd = env("DISPLAY")
@@ -20,7 +22,7 @@ fn _detect_tool(): str {
    "none"
 }
 
-fn _env_prefix(): str {
+fn _env_prefix() str {
    mut p = ""
    def wd = env("WAYLAND_DISPLAY")
    if(is_str(wd) && wd.len > 0){ p = p + "WAYLAND_DISPLAY=" + wd + " " }
@@ -31,7 +33,7 @@ fn _env_prefix(): str {
    p
 }
 
-fn _tmp_base_dir(): str {
+fn _tmp_base_dir() str {
    #windows {
       mut d = env("TEMP")
       if(!is_str(d) || str.strip(d).len == 0){ d = env("TMP") }
@@ -42,7 +44,7 @@ fn _tmp_base_dir(): str {
    } #endif
 }
 
-fn _tmp_file(str: tag): str {
+fn _tmp_file(str tag) str {
    def base = _tmp_base_dir()
    #windows {
       return base + "\\ny_cb_" + tag + "_" + to_str(pid()) + "_" + to_str(ticks()) + ".txt"
@@ -51,7 +53,7 @@ fn _tmp_file(str: tag): str {
    } #endif
 }
 
-fn _timeout_prefix(): str {
+fn _timeout_prefix() str {
    #linux {
       if(file_exists("/usr/bin/timeout")){ return "timeout 1 " }
       if(file_exists("/bin/timeout")){ return "timeout 1 " }
@@ -59,7 +61,7 @@ fn _timeout_prefix(): str {
    ""
 }
 
-fn _feed_clipboard_writer(str: path, list: args, any: text): bool {
+fn _feed_clipboard_writer(str path, list args, any text) bool {
    def p = pio.spawn(path, args)
    if(!p){ return false }
    match pio.send(p, text){
@@ -74,7 +76,7 @@ fn _feed_clipboard_writer(str: path, list: args, any: text): bool {
    true
 }
 
-fn set_text(any: text): bool {
+fn set_text(any text) bool {
    "Copies text to the system clipboard."
    def tmp = _tmp_file("w")
    def qtmp = "\"" + tmp + "\""
@@ -104,7 +106,7 @@ fn set_text(any: text): bool {
    true
 }
 
-fn get_text(): str {
+fn get_text() str {
    "Retrieves text from the system clipboard."
    mut res = ""
    def tmp = _tmp_file("r")
@@ -141,6 +143,6 @@ fn get_text(): str {
    res
 }
 
-fn set_clipboard_text(any: text): bool { "Updates the system clipboard with the provided text string." set_text(text) }
+fn set_clipboard_text(any text) bool { "Updates the system clipboard with the provided text string." set_text(text) }
 
-fn get_clipboard_text(): str { "Retrieves the current text content from the system clipboard." get_text() }
+fn get_clipboard_text() str { "Retrieves the current text content from the system clipboard." get_text() }

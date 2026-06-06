@@ -1,21 +1,27 @@
-;; Keywords: render vulkan gpu draw
+;; Keywords: render vulkan gpu draw os ui
 ;; Vulkan draw submission for renderer primitives, batches, meshes, grids, and SDF shapes.
-module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, mesh_build_axes_3d)
+;; References:
+;; - std.os.ui.render.vk
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
+module std.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use std.core
 use std.core.mem
 use std.math
+use std.math.simmd as simmd
 use std.os.ui.render.vk.state
 use std.os.ui.render.vk.vulkan (
    cmd_bind_descriptor_sets, cmd_push_constants, cmd_bind_vertex_buffers, cmd_bind_index_buffer,
    cmd_set_line_width, cmd_bind_pipeline, cmd_draw, cmd_draw_indexed,
 )
 
-use std.os.ui.profile as ui_profile
+use std.os.ui.render.dump as ui_profile
 use std.os.ui.render.vk.utils
 use std.os.ui.render.vk.pipeline (_ensure_circle_pipeline,
    _ensure_ring_pipeline,
    _ensure_rounded_rect_pipeline,
    _ensure_line_pipeline,
+   _ensure_sdf_line_pipeline,
    _ensure_point_pipeline,
    _get_nocull_pipeline,
 
@@ -26,19 +32,20 @@ use std.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sy
 
 mut _ui_rect_trace_hits = 0
 
-fn color_pack(any: r, any: g, any: b, any: a=1.0): int { _pack_color(r, g, b, a) }
+fn color_pack(any r, any g, any b, any a=1.0) int { _pack_color(r, g, b, a) }
 
 @inline
-fn _draw_light_trace_bind_enabled(): bool {
+fn _draw_light_trace_bind_enabled() bool {
    ui_profile.env_lower_cached("NY_UI_LIGHT_TRACE") == "bind"
 }
 
 @inline
-fn _draw_gui_trace_enabled(): bool {
+fn _draw_gui_trace_enabled() bool {
    ui_profile.env_enabled_cached("NY_UI_GUI_TRACE")
 }
 
-fn _bind_descriptors(any: cb): any {
+fn _bind_descriptors(any cb) any {
+   if(!cb){ return 0 }
    def ubo_ds = _current_frame_ubo_ds
    def ds_count = 2
    if(_draw_light_trace_bind_enabled()){ ui_profile.print_text("[vk:bind] bindless_ds=" + to_str(_bindless_ds) + " ubo_ds=" + to_str(ubo_ds) + " frame=" + to_str(_current_frame)) }
@@ -53,7 +60,7 @@ fn _bind_descriptors(any: cb): any {
    0
 }
 
-fn _ensure_static_bind_scratch(): bool {
+fn _ensure_static_bind_scratch() bool {
    if(_static_vbo_ptr && _static_off_ptr){ return _static_vbo_ptr != 0 && _static_off_ptr != 0 }
    def slab = malloc(16)
    if(!slab){ return false }
@@ -63,7 +70,32 @@ fn _ensure_static_bind_scratch(): bool {
    true
 }
 
-fn _bind_static_vertex_buffer(any: cb, any: buf, any: voff): int {
+mut _static_bind_diag_count = 0
+mut _static_bind_diag_scratch = 0
+
+fn _static_bind_bits(any v) str {
+   if(!_static_bind_diag_scratch){ _static_bind_diag_scratch = malloc(8) }
+   if(!_static_bind_diag_scratch){ return "0" }
+   store64(_static_bind_diag_scratch, v, 0)
+   to_hex(load64_h(_static_bind_diag_scratch, 0))
+}
+
+fn _static_bind_diag(any cb, any buf, any vbo_ptr, any off_ptr, any off) any {
+   if(!ui_profile.env_truthy_cached("NY_VK_STATIC_BIND_TRACE")){ return 0 }
+   if(_static_bind_diag_count < 64){
+      ui_profile.print_text("[vk:static-bind] cb=0x" + _static_bind_bits(cb) +
+         " buf=0x" + _static_bind_bits(buf) +
+         " off=" + to_str(off) +
+         " pbuf=0x" + _static_bind_bits(vbo_ptr) +
+         " pbuf0=0x" + _static_bind_bits(load64(vbo_ptr, 0)) +
+      " poff0=" + to_str(load64_h(off_ptr, 0)))
+   }
+   _static_bind_diag_count += 1
+   0
+}
+
+fn _bind_static_vertex_buffer(any cb, any buf, any voff) int {
+   if(!cb){ return -1 }
    if(!_ensure_static_bind_scratch()){ return -1 }
    def can_base_vertex = (voff % _VKR_VERT_STRIDE) == 0
    def vbo_bind_off = can_base_vertex ? 0 : voff
@@ -71,6 +103,7 @@ fn _bind_static_vertex_buffer(any: cb, any: buf, any: voff): int {
    if(_dynamic_vbo_bound || buf != _last_static_vbo || vbo_bind_off != _last_static_vbo_off){
       store64_h(_static_vbo_ptr, buf, 0)
       store64_h(_static_off_ptr, vbo_bind_off, 0)
+      _static_bind_diag(cb, buf, _static_vbo_ptr, _static_off_ptr, vbo_bind_off)
       cmd_bind_vertex_buffers(cb, 0, 1, _static_vbo_ptr, _static_off_ptr)
       _last_static_vbo = buf
       _last_static_vbo_off = vbo_bind_off
@@ -79,7 +112,8 @@ fn _bind_static_vertex_buffer(any: cb, any: buf, any: voff): int {
    first_vertex
 }
 
-fn _bind_static_index_buffer(any: cb, any: idx_buf, any: ioff, int: index_type): int {
+fn _bind_static_index_buffer(any cb, any idx_buf, any ioff, int index_type) int {
+   if(!cb || !idx_buf){ return -1 }
    def idx_size = (index_type == 1) ? 4 : 2
    def can_base_index = (ioff % idx_size) == 0
    def ibo_bind_off = can_base_index ? 0 : ioff
@@ -94,7 +128,7 @@ fn _bind_static_index_buffer(any: cb, any: idx_buf, any: ioff, int: index_type):
 }
 
 @inline
-fn _set_unlit_true_fast(): any {
+fn _set_unlit_true_fast() any {
    if(_current_is_unlit != 1){
       if(_vertex_offset != _last_flush_offset){
          _flush_reason = 2
@@ -107,7 +141,7 @@ fn _set_unlit_true_fast(): any {
 }
 
 @inline
-fn _set_mask_zero_fast(): any {
+fn _set_mask_zero_fast() any {
    if(_last_is_mask != 0){
       if(_vertex_offset != _last_flush_offset){
          _flush_reason = 2
@@ -120,25 +154,25 @@ fn _set_mask_zero_fast(): any {
 }
 
 @inline
-fn _ensure_ui_vertex_material_mode_fast(int: vc_mode): any {
+fn _ensure_ui_vertex_material_mode_fast(int vc_mode) any {
    if(_current_base_color_u32 == 0xffffffff && _current_base_tex_id == -1 && _current_vc_mode == vc_mode){ return 0 }
    set_ui_material(-1, 0, vc_mode)
    0
 }
 
 @inline
-fn _ensure_ui_vertex_material_fast(): any {
+fn _ensure_ui_vertex_material_fast() any {
    _ensure_ui_vertex_material_mode_fast(12)
 }
 
 @inline
-fn _ensure_ui_vertex_color_material_fast(): any {
+fn _ensure_ui_vertex_color_material_fast() any {
    _ensure_ui_vertex_material_mode_fast(1)
    0
 }
 
 @inline
-fn _bind_texture_slot_fast(any: tid): any {
+fn _bind_texture_slot_fast(any tid) any {
    if(_bindless_ds && tid >= 0){
       if(_current_tex_index != tid){
          bindless_sync_texture_slot(tid)
@@ -156,7 +190,7 @@ fn _bind_texture_slot_fast(any: tid): any {
 }
 
 @inline
-fn _bind_vertex_texture_fast(any: tex_id): any {
+fn _bind_vertex_texture_fast(any tex_id) any {
    _set_unlit_true_fast()
    _ensure_ui_vertex_material_fast()
    mut tid = tex_id
@@ -165,7 +199,7 @@ fn _bind_vertex_texture_fast(any: tex_id): any {
 }
 
 @inline
-fn _bind_default_texture_fast(): any {
+fn _bind_default_texture_fast() any {
    _set_unlit_true_fast()
    _ensure_ui_vertex_color_material_fast()
    def tid = _default_texture
@@ -174,7 +208,7 @@ fn _bind_default_texture_fast(): any {
 }
 
 @inline
-fn _begin_ui_triangle_stream(any: tex_id): bool {
+fn _begin_ui_triangle_stream(any tex_id) bool {
    if(!_frame_open){ return false }
    _bind_vertex_texture_fast(tex_id)
    _set_mask_zero_fast()
@@ -183,7 +217,7 @@ fn _begin_ui_triangle_stream(any: tex_id): bool {
 }
 
 @inline
-fn _begin_ui_default_triangle_stream(): bool {
+fn _begin_ui_default_triangle_stream() bool {
    if(!_frame_open){ return false }
    _bind_default_texture_fast()
    _set_mask_zero_fast()
@@ -192,23 +226,23 @@ fn _begin_ui_default_triangle_stream(): bool {
 }
 
 @inline
-fn _begin_default_stream_bytes(int: bytes): bool {
+fn _begin_default_stream_bytes(int bytes) bool {
    if(!_begin_ui_default_triangle_stream()){ return false }
    _check_flush(bytes)
 }
 
 @inline
-fn _begin_default_stream_vertices(int: verts): bool{ _begin_default_stream_bytes(_VKR_VERT_STRIDE * verts) }
+fn _begin_default_stream_vertices(int verts) bool { _begin_default_stream_bytes(_VKR_VERT_STRIDE * verts) }
 
 @inline
-fn _bind_default_stream_vertices(int: verts): bool {
+fn _bind_default_stream_vertices(int verts) bool {
    if(!_frame_open){ return false }
    _bind_default_texture_fast()
    _check_flush(_VKR_VERT_STRIDE * verts)
 }
 
 @inline
-fn _write_ui_rect_vertex(any: v, f64: x, f64: y, f64: u, f64: uv, int: color_u32, int: tex_id): any {
+fn _write_ui_rect_vertex(any v, f64 x, f64 y, f64 u, f64 uv, int color_u32, int tex_id) any {
    store32_f32(v, x, _VKR_OFF_X)
    store32_f32(v, y, _VKR_OFF_Y)
    store32_f32(v, 0.0, _VKR_OFF_Z)
@@ -227,10 +261,31 @@ fn _write_ui_rect_vertex(any: v, f64: x, f64: y, f64: u, f64: uv, int: color_u32
    store32(v, tex_id, _VKR_OFF_TEX)
 }
 
-fn _push_rect_tex_direct(any: p, f64: x, f64: y, f64: w, f64: h, f64: u1, f64: v1, f64: u2, f64: v2, int: color_u32, int: tex_id): any {
+@inline
+fn _patch_ui_rect_vertex(any v, f64 x, f64 y, f64 u, f64 uv, int color_u32, int tex_id) any {
+   store32_f32(v, x, _VKR_OFF_X)
+   store32_f32(v, y, _VKR_OFF_Y)
+   store32_f32(v, u, _VKR_OFF_U)
+   store32_f32(v, uv, _VKR_OFF_V)
+   store32(v, color_u32, _VKR_OFF_C)
+   store32(v, tex_id, _VKR_OFF_TEX)
+}
+
+@inline
+fn _push_rect_tex_direct(any p, f64 x, f64 y, f64 w, f64 h, f64 u1, f64 v1, f64 u2, f64 v2, int color_u32, int tex_id) any {
    if(!p){ return 0 }
    def x2 = x + w
    def y2 = y + h
+   if(_quad_template){
+      __copy_mem(p, _quad_template, _VKR_VERT_STRIDE * 6)
+      _patch_ui_rect_vertex(p + 0 * _VKR_VERT_STRIDE, x, y, u1, v1, color_u32, tex_id)
+      _patch_ui_rect_vertex(p + 1 * _VKR_VERT_STRIDE, x, y2, u1, v2, color_u32, tex_id)
+      _patch_ui_rect_vertex(p + 2 * _VKR_VERT_STRIDE, x2, y2, u2, v2, color_u32, tex_id)
+      _patch_ui_rect_vertex(p + 3 * _VKR_VERT_STRIDE, x2, y2, u2, v2, color_u32, tex_id)
+      _patch_ui_rect_vertex(p + 4 * _VKR_VERT_STRIDE, x2, y, u2, v1, color_u32, tex_id)
+      _patch_ui_rect_vertex(p + 5 * _VKR_VERT_STRIDE, x, y, u1, v1, color_u32, tex_id)
+      return p
+   }
    _write_ui_rect_vertex(p + 0 * _VKR_VERT_STRIDE, x, y, u1, v1, color_u32, tex_id)
    _write_ui_rect_vertex(p + 1 * _VKR_VERT_STRIDE, x, y2, u1, v2, color_u32, tex_id)
    _write_ui_rect_vertex(p + 2 * _VKR_VERT_STRIDE, x2, y2, u2, v2, color_u32, tex_id)
@@ -240,7 +295,31 @@ fn _push_rect_tex_direct(any: p, f64: x, f64: y, f64: w, f64: h, f64: u1, f64: v
    p
 }
 
-fn _select_static_draw_pipeline(any: cb, bool: is_lines, f64: width, any: pipe_override, bool: is_points=false): any {
+@inline
+fn _rot2(f64 cx, f64 cy, f64 x, f64 y, f64 c, f64 s) list {
+   [cx + x * c - y * s, cy + x * s + y * c]
+}
+
+fn _push_rect_tex_rot_direct(any p, f64 cx, f64 cy, f64 w, f64 h, f64 rot_deg, f64 u1, f64 v1, f64 u2, f64 v2, int color_u32, int tex_id) any {
+   if(!p){ return 0 }
+   def hw, hh = w * 0.5, h * 0.5
+   def rad = rot_deg * 0.017453292519943295
+   def cr, sr = cos(rad), sin(rad)
+   def p0 = _rot2(cx, cy, -hw, -hh, cr, sr)
+   def p1 = _rot2(cx, cy, -hw, hh, cr, sr)
+   def p2 = _rot2(cx, cy, hw, hh, cr, sr)
+   def p3 = _rot2(cx, cy, hw, -hh, cr, sr)
+   _write_ui_rect_vertex(p + 0 * _VKR_VERT_STRIDE, float(p0.get(0, cx)), float(p0.get(1, cy)), u1, v1, color_u32, tex_id)
+   _write_ui_rect_vertex(p + 1 * _VKR_VERT_STRIDE, float(p1.get(0, cx)), float(p1.get(1, cy)), u1, v2, color_u32, tex_id)
+   _write_ui_rect_vertex(p + 2 * _VKR_VERT_STRIDE, float(p2.get(0, cx)), float(p2.get(1, cy)), u2, v2, color_u32, tex_id)
+   _write_ui_rect_vertex(p + 3 * _VKR_VERT_STRIDE, float(p2.get(0, cx)), float(p2.get(1, cy)), u2, v2, color_u32, tex_id)
+   _write_ui_rect_vertex(p + 4 * _VKR_VERT_STRIDE, float(p3.get(0, cx)), float(p3.get(1, cy)), u2, v1, color_u32, tex_id)
+   _write_ui_rect_vertex(p + 5 * _VKR_VERT_STRIDE, float(p0.get(0, cx)), float(p0.get(1, cy)), u1, v1, color_u32, tex_id)
+   p
+}
+
+fn _select_static_draw_pipeline(any cb, bool is_lines, f64 width, any pipe_override, bool is_points=false) any {
+   if(!cb){ return 0 }
    mut target = _pipeline
    if(is_points && !_point_pipeline){ _ = _ensure_point_pipeline() }
    if(is_lines && !_line_pipeline){ _ = _ensure_line_pipeline() }
@@ -270,6 +349,7 @@ fn _select_static_draw_pipeline(any: cb, bool: is_lines, f64: width, any: pipe_o
             || target == _skybox_pipeline
             || target == _flip_pipeline
             || target == _flip_unlit_pipeline
+            || target == _sdf_line_pipeline
             || target == _line_pipeline
             || target == _point_pipeline){
             target = base_pipe
@@ -285,12 +365,12 @@ fn _select_static_draw_pipeline(any: cb, bool: is_lines, f64: width, any: pipe_o
          }
       }
    }
-   _vkr_bind_pipeline_if_needed(cb, target)
+   if(!_vkr_bind_pipeline_if_needed(cb, target)){ return 0 }
    target
 }
 
 @inline
-fn _activate_pipeline_target(any: target): any {
+fn _activate_pipeline_target(any target) any {
    if(_target_pipeline != target){
       _flush_reason = 4
       _flush()
@@ -307,14 +387,25 @@ fn _activate_pipeline_target(any: target): any {
 }
 
 @inline
-fn _prepare_sdf_draw(any: pipe): bool {
+fn _prepare_sdf_draw_bytes(any pipe, int bytes) bool {
    if(!_frame_open || !pipe){ return false }
    _activate_pipeline_target(pipe)
-   _check_flush(_VKR_VERT_STRIDE * 6)
+   _check_flush(bytes)
 }
 
 @inline
-fn _use_default_triangle_pipeline(): any {
+fn _prepare_sdf_draw(any pipe) bool {
+   _prepare_sdf_draw_bytes(pipe, _VKR_VERT_STRIDE * 6)
+}
+
+@inline
+fn _prepare_sdf_line_vertices(int verts) bool {
+   if(!_sdf_line_pipeline && !_ensure_sdf_line_pipeline()){ return false }
+   _prepare_sdf_draw_bytes(_sdf_line_pipeline, _VKR_VERT_STRIDE * verts)
+}
+
+@inline
+fn _use_default_triangle_pipeline() any {
    mut target = _pipeline
    if(_current_is_unlit != 0){
       if(_unlit_nocull_pipeline != 0){ target = _unlit_nocull_pipeline }
@@ -327,24 +418,26 @@ fn _use_default_triangle_pipeline(): any {
    _activate_pipeline_target(target)
 }
 
-fn _ensure_default_triangle_pipeline(): any {
+fn _ensure_default_triangle_pipeline() any {
    if(!_frame_open){ return 0 }
    _use_default_triangle_pipeline()
 }
 
-fn _begin_static_draw(bool: is_lines, f64: width, any: pipe_override, bool: is_points): any {
+fn _begin_static_draw(bool is_lines, f64 width, any pipe_override, bool is_points) any {
+   if(!_frame_open || !_current_frame_cb){ return 0 }
    if(_vertex_offset != _last_flush_offset){
       _flush_reason = 3
       _flush()
    }
    def cb = _current_frame_cb
-   _select_static_draw_pipeline(cb, is_lines, width, pipe_override, is_points)
+   if(!_select_static_draw_pipeline(cb, is_lines, width, pipe_override, is_points)){ return 0 }
    _bind_descriptors(cb)
    _sync_pc()
    cb
 }
 
-fn _draw_raw_stream_current_material(any: p, int: vertex_count, any: pipe): bool {
+fn _draw_raw_stream_current_material(any p, int vertex_count, any pipe) bool {
+   if(!_frame_open || !_current_frame_cb){ return false }
    if(_vertex_offset != _last_flush_offset){
       _flush_reason = 4
       _flush()
@@ -352,15 +445,15 @@ fn _draw_raw_stream_current_material(any: p, int: vertex_count, any: pipe): bool
    def bytes = vertex_count * _VKR_VERT_STRIDE
    if(!_check_flush(bytes)){ return false }
    def cb = _current_frame_cb
-   if(_last_bound_pipe != pipe){
-      cmd_bind_pipeline(cb, 0, pipe)
-      _last_bound_pipe = pipe
-      _pc_dirty = true
-   }
+   if(!_vkr_bind_pipeline_if_needed(cb, pipe)){ return false }
+   _pc_dirty = true
    _bind_descriptors(cb)
    _sync_pc()
    def first_vert = _vertex_offset / _VKR_VERT_STRIDE
-   __copy_mem(_local_vertex_map + _vertex_offset, p, bytes)
+   def dst = _local_vertex_map + _vertex_offset
+   simmd.prefetch_read(p, 3)
+   simmd.prefetch_write(dst, 3)
+   __copy_mem(dst, p, bytes)
    _vkr_bind_dynamic_vertex_buffer(cb)
    cmd_draw(cb, vertex_count, 1, first_vert, 0)
    _vertex_offset += bytes
@@ -368,7 +461,40 @@ fn _draw_raw_stream_current_material(any: p, int: vertex_count, any: pipe): bool
    true
 }
 
-fn draw_rect_fast(f64: x, f64: y, f64: w, f64: h, int: color_u32): any {
+fn _draw_static_cpu_copy(any p,
+   int count,
+   bool is_lines=false,
+   f64 width=1.0,
+   any pipe_override=0,
+   bool is_points=false) bool {
+   if(!_frame_open || !_current_frame_cb || !p || count <= 0){ return false }
+   if(_vertex_offset != _last_flush_offset){
+      _flush_reason = 3
+      _flush()
+   }
+   def bytes = count * _VKR_VERT_STRIDE
+   if(!_check_flush(bytes)){ return false }
+   def cb = _current_frame_cb
+   if(!_select_static_draw_pipeline(cb, is_lines, width, pipe_override, is_points)){ return false }
+   _bind_descriptors(cb)
+   _sync_pc()
+   def first_vert = _vertex_offset / _VKR_VERT_STRIDE
+   def dst = _local_vertex_map + _vertex_offset
+   simmd.prefetch_read(p, 3)
+   simmd.prefetch_write(dst, 3)
+   __copy_mem(dst, p, bytes)
+   _vkr_bind_dynamic_vertex_buffer(cb)
+   cmd_draw(cb, count, 1, first_vert, 0)
+   _vertex_offset += bytes
+   _last_flush_offset = _vertex_offset
+   _total_draw_calls += 1
+   _frame_draw_calls += 1
+   _frame_static_draw_calls += 1
+   true
+}
+
+@jit
+fn draw_rect_fast(f64 x, f64 y, f64 w, f64 h, int color_u32) any {
    "Submits a rectangle using pre-packed color and fixed vertex layout."
    if(!_frame_open){
       def gui_trace = _draw_gui_trace_enabled()
@@ -399,7 +525,8 @@ fn draw_rect_fast(f64: x, f64: y, f64: w, f64: h, int: color_u32): any {
    0
 }
 
-fn draw_rect_outline_fast(f64: x, f64: y, f64: w, f64: h, int: color_u32): any {
+@jit
+fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32) any {
    "Batches a 1px rectangle outline with one state setup instead of four rect calls."
    if(w <= 0.0 || h <= 0.0){ return 0 }
    def need = _VKR_VERT_STRIDE * 24
@@ -414,7 +541,8 @@ fn draw_rect_outline_fast(f64: x, f64: y, f64: w, f64: h, int: color_u32): any {
    0
 }
 
-fn draw_rects_fast_ptr(any: rects, int: count, int: stride=20): int {
+@jit
+fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    "Batches packed 2D rect records: f32 x,y,w,h + u32 color."
    if(count <= 0 || !rects){ return 0 }
    if(stride < 20){ stride = 20 }
@@ -426,12 +554,13 @@ fn draw_rects_fast_ptr(any: rects, int: count, int: stride=20): int {
       def bytes = batch * _VKR_VERT_STRIDE * 6
       if(!_check_flush(bytes)){ return done }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_read(rects + done * stride, 3)
+      simmd.prefetch_write(base, 3)
       mut j = 0
       while(j < batch){
          def rec = rects + (done + j) * stride
-         def dst = base + j * _VKR_VERT_STRIDE * 6
          _push_rect_tex_direct(
-            dst,
+            base + j * _VKR_VERT_STRIDE * 6,
             load32_f32(rec, 0), load32_f32(rec, 4),
             load32_f32(rec, 8), load32_f32(rec, 12),
             0.0, 0.0, 0.0, 0.0,
@@ -447,22 +576,23 @@ fn draw_rects_fast_ptr(any: rects, int: count, int: stride=20): int {
 }
 
 @jit
-fn draw_lines_2d_fast_ptr(any: lines, int: count, int: stride=24): int {
+fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
    "Batches packed 2D line records: f32 x1,y1,x2,y2,thickness + u32 color."
    if(count <= 0 || !lines){ return 0 }
    if(stride < 24){ stride = 24 }
-   if(!_begin_ui_default_triangle_stream()){ return 0 }
    def max_batch = max(1, int(_vertex_capacity / (_VKR_VERT_STRIDE * 6)))
    mut done = 0
    while(done < count){
       def batch = min(max_batch, count - done)
       def bytes = batch * _VKR_VERT_STRIDE * 6
-      if(!_check_flush(bytes)){ return done }
+      if(!_prepare_sdf_line_vertices(batch * 6)){ return done }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_read(lines + done * stride, 3)
+      simmd.prefetch_write(base, 3)
       mut j = 0
       while(j < batch){
          def rec = lines + (done + j) * stride
-         __vkr_push_line(
+         __vkr_push_line_sdf(
             base + j * _VKR_VERT_STRIDE * 6,
             load32_f32(rec, 0), load32_f32(rec, 4),
             load32_f32(rec, 8), load32_f32(rec, 12),
@@ -478,12 +608,12 @@ fn draw_lines_2d_fast_ptr(any: lines, int: count, int: stride=24): int {
 }
 
 @jit
-fn draw_rect(f64: x, f64: y, f64: w, f64: h, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_rect(f64 x, f64 y, f64 w, f64 h, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a colored rectangle(6-vertex CW triangle list) — optimized path."
    draw_rect_fast(x, y, w, h, _pack_color(r, g, b, a))
 }
 
-fn _draw_textured_rect_packed(f64: x, f64: y, f64: w, f64: h, int: tex_id, f64: u1, f64: v1, f64: u2, f64: v2, int: c): any {
+fn _draw_textured_rect_packed(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 u1, f64 v1, f64 u2, f64 v2, int c) any {
    if(!_begin_ui_triangle_stream(tex_id)){ return 0 }
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    _push_rect_tex_direct(_local_vertex_map + _vertex_offset, x, y, w, h, u1, v1, u2, v2, c, _current_tex_index)
@@ -492,24 +622,24 @@ fn _draw_textured_rect_packed(f64: x, f64: y, f64: w, f64: h, int: tex_id, f64: 
    0
 }
 
-fn draw_rect_tex(f64: x, f64: y, f64: w, f64: h, int: tex_id, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a textured rectangle as a 6-vertex triangle list."
    _draw_textured_rect_packed(x, y, w, h, tex_id, 0.0, 0.0, 1.0, 1.0, _pack_color(r, g, b, a))
 }
 
-fn draw_glyph(f64: x,
-   f64: y,
-   f64: w,
-   f64: h,
-   f64: u1,
-   f64: v1,
-   f64: u2,
-   f64: v2,
-   int: tex_id,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_glyph(f64 x,
+   f64 y,
+   f64 w,
+   f64 h,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   int tex_id,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Submits a glyph quad for text rendering."
    if(!_begin_ui_triangle_stream(tex_id)){ return 0 }
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
@@ -519,47 +649,73 @@ fn draw_glyph(f64: x,
    0
 }
 
-fn draw_rect_tex_uv(f64: x,
-   f64: y,
-   f64: w,
-   f64: h,
-   int: tex_id,
-   f64: u1,
-   f64: v1,
-   f64: u2,
-   f64: v2,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_rect_tex_uv(f64 x,
+   f64 y,
+   f64 w,
+   f64 h,
+   int tex_id,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a textured rectangle with explicit UV coordinates."
    _draw_textured_rect_packed(x, y, w, h, tex_id, u1, v1, u2, v2, _pack_color(r, g, b, a))
 }
 
-fn draw_vertices(any: p, int: count, int: tex_id): bool {
+fn draw_rect_tex_uv_rot(f64 cx,
+   f64 cy,
+   f64 w,
+   f64 h,
+   f64 rot_deg,
+   int tex_id,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
+   "Batches a rotated textured rectangle around center using explicit UV coordinates."
+   if(!_begin_ui_triangle_stream(tex_id)){ return 0 }
+   if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
+   _push_rect_tex_rot_direct(_local_vertex_map + _vertex_offset, cx, cy, w, h, rot_deg, u1, v1, u2, v2, _pack_color(r, g, b, a), _current_tex_index)
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   _prim_rect_quads += 1
+   0
+}
+
+fn draw_vertices(any p, int count, int tex_id) bool {
    "Bulk-uploads raw vertex data(packed vertex stride) to the local mapping."
    if(!_frame_open || count <= 0 || !p){ return false }
    bind_texture(tex_id)
    def bytes = count * _VKR_VERT_STRIDE
    if(!_check_flush(bytes)){ return false }
-   __copy_mem(_local_vertex_map + _vertex_offset, p, bytes)
+   def dst = _local_vertex_map + _vertex_offset
+   simmd.prefetch_read(p, 3)
+   simmd.prefetch_write(dst, 3)
+   __copy_mem(dst, p, bytes)
    _vertex_offset += bytes
    true
 }
 
-fn draw_vertices_indexed_raw(any: p,
-   int: count,
-   any: idx_buf,
-   int: ioff,
-   int: index_count,
-   int: index_type=0,
-   int: tex_id=-1,
-   bool: is_lines=false,
-   f64: width=1.0,
-   any: pipe_override=0,
-   bool: is_points=false): bool {
+fn draw_vertices_indexed_raw(any p,
+   int count,
+   any idx_buf,
+   int ioff,
+   int index_count,
+   int index_type=0,
+   int tex_id=-1,
+   bool is_lines=false,
+   f64 width=1.0,
+   any pipe_override=0,
+   bool is_points=false) bool {
    "Streams dynamic vertices but draws them with an existing GPU index buffer."
-   if(!_frame_open || count <= 0 || !p || !idx_buf || index_count <= 0){ return false }
+   if(!_frame_open || !_current_frame_cb || count <= 0 || !p || !idx_buf || index_count <= 0){ return false }
    if(_vertex_offset != _last_flush_offset){
       _flush_reason = 3
       _flush()
@@ -568,11 +724,14 @@ fn draw_vertices_indexed_raw(any: p,
    if(!_check_flush(bytes)){ return false }
    if(tex_id >= 0){ bind_texture(tex_id) }
    def cb = _current_frame_cb
-   _select_static_draw_pipeline(cb, is_lines, width, pipe_override, is_points)
+   if(!_select_static_draw_pipeline(cb, is_lines, width, pipe_override, is_points)){ return false }
    _bind_descriptors(cb)
    _sync_pc()
    def first_vert = _vertex_offset / _VKR_VERT_STRIDE
-   __copy_mem(_local_vertex_map + _vertex_offset, p, bytes)
+   def dst = _local_vertex_map + _vertex_offset
+   simmd.prefetch_read(p, 3)
+   simmd.prefetch_write(dst, 3)
+   __copy_mem(dst, p, bytes)
    _vkr_bind_dynamic_vertex_buffer(cb)
    if(idx_buf != _last_static_ibuf || ioff != _last_static_ibuf_off || index_type != _last_static_ibuf_type){
       cmd_bind_index_buffer(cb, idx_buf, ioff, index_type)
@@ -590,7 +749,7 @@ fn draw_vertices_indexed_raw(any: p,
    true
 }
 
-fn draw_lines_raw(any: p, int: line_count, f64: _line_width): bool {
+fn draw_lines_raw(any p, int line_count, f64 _line_width) bool {
    "Draws lines using pre-baked raw vertex buffer. Immediate line draw path."
    if(!_line_pipeline){ _ = _ensure_line_pipeline() }
    if(!_frame_open || line_count <= 0 || !p || !_line_pipeline){ return false }
@@ -599,7 +758,7 @@ fn draw_lines_raw(any: p, int: line_count, f64: _line_width): bool {
    true
 }
 
-fn draw_points_raw(any: p, int: point_count, int: tex_id=-1): bool {
+fn draw_points_raw(any p, int point_count, int tex_id=-1) bool {
    "Draws points using pre-baked raw vertex data. Immediate point-list path."
    if(!_point_pipeline){ _ = _ensure_point_pipeline() }
    if(!_frame_open || point_count <= 0 || !p || !_point_pipeline){ return false }
@@ -609,7 +768,7 @@ fn draw_points_raw(any: p, int: point_count, int: tex_id=-1): bool {
    true
 }
 
-fn _draw_triangle_2d(f64: x1, f64: y1, f64: x2, f64: y2, f64: x3, f64: y3, f64: r, f64: g, f64: b, f64: a): any {
+fn _draw_triangle_2d(f64 x1, f64 y1, f64 x2, f64 y2, f64 x3, f64 y3, f64 r, f64 g, f64 b, f64 a) any {
    if(!_begin_default_stream_vertices(3)){ return 0 }
    def c = _pack_color(r, g, b, a)
    def base = _local_vertex_map + _vertex_offset
@@ -621,33 +780,33 @@ fn _draw_triangle_2d(f64: x1, f64: y1, f64: x2, f64: y2, f64: x3, f64: y3, f64: 
 }
 
 @jit
-fn draw_line_fast(f64: x1, f64: y1, f64: x2, f64: y2, f64: thickness, int: color_u32): any {
-   "Batches a thick packed-color line using a 6-vertex triangle quad."
-   if(!_begin_default_stream_vertices(6)){ return 0 }
-   __vkr_push_line(_local_vertex_map + _vertex_offset, x1, y1, x2, y2, thickness, color_u32)
+fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int color_u32) any {
+   "Batches a smooth packed-color line using the SDF line pipeline."
+   if(!_prepare_sdf_line_vertices(6)){ return 0 }
+   __vkr_push_line_sdf(_local_vertex_map + _vertex_offset, x1, y1, x2, y2, thickness, color_u32)
    _vertex_offset += _VKR_VERT_STRIDE * 6
    _prim_line_quads += 1
    0
 }
 
-fn draw_line(f64: x1, f64: y1, f64: x2, f64: y2, f64: thickness, f64: r, f64: g, f64: b, f64: a): any {
-   "Batches a thick line using a 6-vertex triangle quad."
+fn draw_line(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, f64 r, f64 g, f64 b, f64 a) any {
+   "Batches a smooth line using the SDF line pipeline."
    draw_line_fast(x1, y1, x2, y2, thickness, _pack_color(r, g, b, a))
 }
 
-fn draw_triangle_3d(f64: x1,
-   f64: y1,
-   f64: z1,
-   f64: x2,
-   f64: y2,
-   f64: z2,
-   f64: x3,
-   f64: y3,
-   f64: z3,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_triangle_3d(f64 x1,
+   f64 y1,
+   f64 z1,
+   f64 x2,
+   f64 y2,
+   f64 z2,
+   f64 x3,
+   f64 y3,
+   f64 z3,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a single colored 3D triangle(zero-alloc)."
    if(!_bind_default_stream_vertices(3)){ return 0 }
    def c = _pack_color(r, g, b, a)
@@ -659,22 +818,22 @@ fn draw_triangle_3d(f64: x1,
    0
 }
 
-fn draw_quad_3d(f64: x1,
-   f64: y1,
-   f64: z1,
-   f64: x2,
-   f64: y2,
-   f64: z2,
-   f64: x3,
-   f64: y3,
-   f64: z3,
-   f64: x4,
-   f64: y4,
-   f64: z4,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_quad_3d(f64 x1,
+   f64 y1,
+   f64 z1,
+   f64 x2,
+   f64 y2,
+   f64 z2,
+   f64 x3,
+   f64 y3,
+   f64 z3,
+   f64 x4,
+   f64 y4,
+   f64 z4,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a single colored 3D quad(zero-alloc)."
    if(!_bind_default_stream_vertices(6)){ return 0 }
    def c = _pack_color(r, g, b, a)
@@ -689,26 +848,26 @@ fn draw_quad_3d(f64: x1,
    0
 }
 
-fn draw_rect_lines_2d(f64: x, f64: y, f64: w, f64: h, f64: thickness, f64: r, f64: g, f64: b, f64: a): any {
-   "Batches a 2D rectangle outline as four thick line quads."
+fn draw_rect_lines_2d(f64 x, f64 y, f64 w, f64 h, f64 thickness, f64 r, f64 g, f64 b, f64 a) any {
+   "Batches a 2D rectangle outline as four smooth SDF lines."
    if(w <= 0.0 || h <= 0.0){ return 0 }
-   if(!_bind_default_stream_vertices(24)){ return 0 }
+   if(!_prepare_sdf_line_vertices(24)){ return 0 }
    def c = _pack_color(r, g, b, a)
    def x0 = float(x)
    def y0 = float(y)
    def x1 = x0 + float(w)
    def y1 = y0 + float(h)
    def base = _local_vertex_map + _vertex_offset
-   __vkr_push_line(base, x0, y0, x1, y0, thickness, c)
-   __vkr_push_line(base + _VKR_VERT_STRIDE * 6, x1, y0, x1, y1, thickness, c)
-   __vkr_push_line(base + _VKR_VERT_STRIDE * 12, x1, y1, x0, y1, thickness, c)
-   __vkr_push_line(base + _VKR_VERT_STRIDE * 18, x0, y1, x0, y0, thickness, c)
+   __vkr_push_line_sdf(base, x0, y0, x1, y0, thickness, c)
+   __vkr_push_line_sdf(base + _VKR_VERT_STRIDE * 6, x1, y0, x1, y1, thickness, c)
+   __vkr_push_line_sdf(base + _VKR_VERT_STRIDE * 12, x1, y1, x0, y1, thickness, c)
+   __vkr_push_line_sdf(base + _VKR_VERT_STRIDE * 18, x0, y1, x0, y0, thickness, c)
    _vertex_offset += _VKR_VERT_STRIDE * 24
    _prim_line_quads += 4
    0
 }
 
-fn draw_chamfer_rect_2d(f64: x, f64: y, f64: w, f64: h, f64: rad, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_chamfer_rect_2d(f64 x, f64 y, f64 w, f64 h, f64 rad, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a 45-degree chamfered rectangle as one convex fan."
    if(w <= 0.0 || h <= 0.0){ return 0 }
    if(rad <= 0.0){ draw_rect(x, y, w, h, r, g, b, a) return 0 }
@@ -744,14 +903,14 @@ fn draw_chamfer_rect_2d(f64: x, f64: y, f64: w, f64: h, f64: rad, f64: r, f64: g
 
 @inline
 @jit
-fn _vkr_store_fan_step(any: base, int: vi, f64: cx, f64: cy, f64: x0, f64: y0, f64: x1, f64: y1, int: c): any {
+fn _vkr_store_fan_step(any base, int vi, f64 cx, f64 cy, f64 x0, f64 y0, f64 x1, f64 y1, int c) any {
    _vkr_store_vertex(base, vi + 0, cx, cy, 0.0, 0.0, 0.0, c, _current_tex_index)
    _vkr_store_vertex(base, vi + 1, x0, y0, 0.0, 0.0, 0.0, c, _current_tex_index)
    _vkr_store_vertex(base, vi + 2, x1, y1, 0.0, 0.0, 0.0, c, _current_tex_index)
    0
 }
 
-fn draw_rounded_rect_2d(f64: x, f64: y, f64: w, f64: h, f64: radius, int: segments, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_rounded_rect_2d(f64 x, f64 y, f64 w, f64 h, f64 radius, int segments, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a filled rounded rectangle with four fan corners."
    if(!_frame_open){ return 0 }
    if(w <= 0.0 || h <= 0.0){ return 0 }
@@ -836,17 +995,17 @@ fn draw_rounded_rect_2d(f64: x, f64: y, f64: w, f64: h, f64: radius, int: segmen
 }
 
 @jit
-fn draw_fan_2d(f64: cx,
-   f64: cy,
-   f64: rx,
-   f64: ry,
-   int: segments,
-   f64: start_rad,
-   f64: span_rad,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_fan_2d(f64 cx,
+   f64 cy,
+   f64 rx,
+   f64 ry,
+   int segments,
+   f64 start_rad,
+   f64 span_rad,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a filled 2D triangle fan as raw vertices."
    if(!_frame_open){ return 0 }
    segments = int(segments)
@@ -864,6 +1023,7 @@ fn draw_fan_2d(f64: cx,
       def bytes = _VKR_VERT_STRIDE * 3 * batch
       if(!_check_flush(bytes)){ return 0 }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_write(base, 3)
       mut vi = 0
       mut j = 0
       while(j < batch){
@@ -882,15 +1042,15 @@ fn draw_fan_2d(f64: cx,
 }
 
 @jit
-fn _draw_curve_lines_rot(f64: cx,
-   f64: cy,
-   f64: rx,
-   f64: ry,
-   f64: start_rad,
-   f64: span_rad,
-   int: steps,
-   f64: thickness,
-   int: c): any {
+fn _draw_curve_lines_rot(f64 cx,
+   f64 cy,
+   f64 rx,
+   f64 ry,
+   f64 start_rad,
+   f64 span_rad,
+   int steps,
+   f64 thickness,
+   int c) any {
    def max_batch = max(1, int(_vertex_capacity / (_VKR_VERT_STRIDE * 6)))
    def step = float(span_rad) / float(steps)
    def cs = cos(step)
@@ -900,15 +1060,16 @@ fn _draw_curve_lines_rot(f64: cx,
    mut done = 0
    while(done < steps){
       def batch = min(max_batch, steps - done)
-      def bytes = _VKR_VERT_STRIDE * 6 * batch
-      if(!_check_flush(bytes)){ return 0 }
+      def bytes = batch * _VKR_VERT_STRIDE * 6
+      if(!_prepare_sdf_line_vertices(batch * 6)){ return 0 }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_write(base, 3)
       mut vi = 0
       mut j = 0
       while(j < batch){
          def ca1, sa1 = ca0 * cs - sa0 * sn, sa0 * cs + ca0 * sn
          def nx, ny = cx + ca1 * rx, cy + sa1 * ry
-         __vkr_push_line(base + vi * _VKR_VERT_STRIDE, px, py, nx, ny, thickness, c)
+         __vkr_push_line_sdf(base + vi * _VKR_VERT_STRIDE, px, py, nx, ny, thickness, c)
          ca0, sa0 = ca1, sa1
          px, py = nx, ny
          vi += 6
@@ -921,16 +1082,16 @@ fn _draw_curve_lines_rot(f64: cx,
 }
 
 @jit
-fn draw_ellipse_lines_2d(f64: cx,
-   f64: cy,
-   f64: rx,
-   f64: ry,
-   f64: thickness,
-   int: segments,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_ellipse_lines_2d(f64 cx,
+   f64 cy,
+   f64 rx,
+   f64 ry,
+   f64 thickness,
+   int segments,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches an outlined ellipse as thick 2D line quads."
    if(!_frame_open){ return 0 }
    segments = int(segments)
@@ -940,17 +1101,17 @@ fn draw_ellipse_lines_2d(f64: cx,
 }
 
 @jit
-fn draw_arc_2d(f64: cx,
-   f64: cy,
-   f64: radius,
-   f64: start_rad,
-   f64: span_rad,
-   f64: thickness,
-   int: steps,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_arc_2d(f64 cx,
+   f64 cy,
+   f64 radius,
+   f64 start_rad,
+   f64 span_rad,
+   f64 thickness,
+   int steps,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches an arc as thick 2D line quads."
    if(!_frame_open){ return 0 }
    steps = int(steps)
@@ -960,17 +1121,17 @@ fn draw_arc_2d(f64: cx,
 }
 
 @jit
-fn draw_sector_2d(f64: cx,
-   f64: cy,
-   f64: inner_radius,
-   f64: outer_radius,
-   f64: start_rad,
-   f64: span_rad,
-   int: steps,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_sector_2d(f64 cx,
+   f64 cy,
+   f64 inner_radius,
+   f64 outer_radius,
+   f64 start_rad,
+   f64 span_rad,
+   int steps,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a filled ring sector as raw vertices."
    if(!_frame_open){ return 0 }
    steps = int(steps)
@@ -990,6 +1151,7 @@ fn draw_sector_2d(f64: cx,
       def bytes = _VKR_VERT_STRIDE * 6 * batch
       if(!_check_flush(bytes)){ return 0 }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_write(base, 3)
       mut vi = 0
       mut j = 0
       while(j < batch){
@@ -1015,16 +1177,16 @@ fn draw_sector_2d(f64: cx,
 }
 
 @jit
-fn draw_star_2d(f64: cx,
-   f64: cy,
-   f64: inner_radius,
-   f64: outer_radius,
-   int: pts,
-   f64: rotation_rad,
-   f64: r,
-   f64: g,
-   f64: b,
-   f64: a): any {
+fn draw_star_2d(f64 cx,
+   f64 cy,
+   f64 inner_radius,
+   f64 outer_radius,
+   int pts,
+   f64 rotation_rad,
+   f64 r,
+   f64 g,
+   f64 b,
+   f64 a) any {
    "Batches a filled star as raw vertices."
    if(!_frame_open){ return 0 }
    pts = int(pts)
@@ -1044,6 +1206,7 @@ fn draw_star_2d(f64: cx,
       def bytes = _VKR_VERT_STRIDE * 3 * batch
       if(!_check_flush(bytes)){ return 0 }
       def base = _local_vertex_map + _vertex_offset
+      simmd.prefetch_write(base, 3)
       mut vi = 0
       mut j = 0
       while(j < batch){
@@ -1065,7 +1228,7 @@ fn draw_star_2d(f64: cx,
    0
 }
 
-fn draw_line_3d(f64: x1, f64: y1, f64: z1, f64: x2, f64: y2, f64: z2, f64: thickness, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_line_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 thickness, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a solid 3D extruded box(rectangular prism) along the line segment."
    if(!_frame_open){ return 0 }
    _bind_default_texture_fast()
@@ -1149,7 +1312,7 @@ fn draw_line_3d(f64: x1, f64: y1, f64: z1, f64: x2, f64: y2, f64: z2, f64: thick
 }
 
 @inline
-fn _draw_xz_line_3d_fast(f64: x1, f64: z1, f64: x2, f64: z2, f64: thick, int: c): any {
+fn _draw_xz_line_3d_fast(f64 x1, f64 z1, f64 x2, f64 z2, f64 thick, int c) any {
    def dx, dz = float(x2) - float(x1), float(z2) - float(z1)
    def len = sqrt(dx*dx + dz*dz)
    if(len < 0.0001){ return 0 }
@@ -1201,7 +1364,7 @@ fn _draw_xz_line_3d_fast(f64: x1, f64: z1, f64: x2, f64: z2, f64: thick, int: c)
    0
 }
 
-fn draw_grid_3d(f64: size, f64: step): any {
+fn draw_grid_3d(f64 size, f64 step) any {
    "Draws an infinite-style 3D grid on the XZ plane."
    if(!_frame_open){ return 0 }
    _bind_default_texture_fast()
@@ -1216,10 +1379,10 @@ fn draw_grid_3d(f64: size, f64: step): any {
 }
 
 @inline
-fn _cube_face_emit_store(any: base, int: vi,
-   f64: x0, f64: y0, f64: z0, f64: x1, f64: y1, f64: z1,
-   f64: x2, f64: y2, f64: z2, f64: x3, f64: y3, f64: z3,
-   int: c, int: tex_id, f64: nx, f64: ny, f64: nz): any {
+fn _cube_face_emit_store(any base, int vi,
+   f64 x0, f64 y0, f64 z0, f64 x1, f64 y1, f64 z1,
+   f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, f64 z3,
+   int c, int tex_id, f64 nx, f64 ny, f64 nz) any {
    _vkr_store_vertex(base, vi + 0, x0, y0, z0, 0, 0, c, tex_id, nx, ny, nz)
    _vkr_store_vertex(base, vi + 1, x1, y1, z1, 1, 1, c, tex_id, nx, ny, nz)
    _vkr_store_vertex(base, vi + 2, x2, y2, z2, 1, 0, c, tex_id, nx, ny, nz)
@@ -1230,7 +1393,7 @@ fn _cube_face_emit_store(any: base, int: vi,
 }
 
 @inline
-fn _mesh_axes_emit_box(any: base, f64: sx, f64: sy, f64: sz, int: c): any {
+fn _mesh_axes_emit_box(any base, f64 sx, f64 sy, f64 sz, int c) any {
    _cube_face_emit_store(base, 0, -0.5 * sx, -0.5 * sy, 0.5 * sz, 0.5 * sx, 0.5 * sy, 0.5 * sz, 0.5 * sx, -0.5 * sy, 0.5 * sz, -0.5 * sx, 0.5 * sy, 0.5 * sz, c, 0, 0, 0, 1)
    _cube_face_emit_store(base, 6, 0.5 * sx, -0.5 * sy, -0.5 * sz, -0.5 * sx, 0.5 * sy, -0.5 * sz, -0.5 * sx, -0.5 * sy, -0.5 * sz, 0.5 * sx, 0.5 * sy, -0.5 * sz, c, 0, 0, 0, -1)
    _cube_face_emit_store(base, 12, 0.5 * sx, -0.5 * sy, 0.5 * sz, 0.5 * sx, 0.5 * sy, -0.5 * sz, 0.5 * sx, -0.5 * sy, -0.5 * sz, 0.5 * sx, 0.5 * sy, 0.5 * sz, c, 0, 1, 0, 0)
@@ -1240,7 +1403,7 @@ fn _mesh_axes_emit_box(any: base, f64: sx, f64: sy, f64: sz, int: c): any {
    0
 }
 
-fn mesh_build_axes_3d(f64: gizmo_len, f64: cube_sz): any {
+fn mesh_build_axes_3d(f64 gizmo_len, f64 cube_sz) any {
    "Builds one combined 3-bar axis mesh centered on origin. Returns {ptr, cnt}."
    def L, T = float(gizmo_len), float(cube_sz)
    def total = 36 * 3
@@ -1254,18 +1417,18 @@ fn mesh_build_axes_3d(f64: gizmo_len, f64: cube_sz): any {
    return {"ptr": buf, "cnt": total}
 }
 
-fn draw_cube_3d(f64: x,
-   f64: y,
-   f64: z,
-   f64: size,
-   f64: rx=0.0,
-   f64: ry=0.0,
-   f64: rz=0.0,
-   any: r=1.0,
-   f64: g=1.0,
-   f64: b=1.0,
-   f64: a=1.0,
-   int: tex_id=-1): any {
+fn draw_cube_3d(f64 x,
+   f64 y,
+   f64 z,
+   f64 size,
+   f64 rx=0.0,
+   f64 ry=0.0,
+   f64 rz=0.0,
+   any r=1.0,
+   f64 g=1.0,
+   f64 b=1.0,
+   f64 a=1.0,
+   int tex_id=-1) any {
    "Batches a colored 3D cube with explicit XYZ rotation."
    if(!_frame_open){ return 0 }
    def nc_pipe = _get_nocull_pipeline()
@@ -1306,7 +1469,7 @@ fn draw_cube_3d(f64: x,
    def cx = cos(rx) def sx = sin(rx)
    def cy = cos(ry) def sy = sin(ry)
    def cz = cos(rz) def sz = sin(rz)
-   def rot = fn(f64: px, f64: py, f64: pz): any {
+   def rot = fn(f64 px, f64 py, f64 pz) any {
       def x1, y1 = px, py * cx - pz * sx
       def z1 = py * sx + pz * cx
       def x2 = x1 * cy + z1 * sy
@@ -1317,7 +1480,7 @@ fn draw_cube_3d(f64: x,
       def z3 = z2
       [x3, y3, z3]
    }
-   def v = fn(int: i, f64: px, f64: py, f64: pz, f64: u, f64: tv, f64: nx, f64: ny, f64: nz): any {
+   def v = fn(int i, f64 px, f64 py, f64 pz, f64 u, f64 tv, f64 nx, f64 ny, f64 nz) any {
       def p, n = rot(px, py, pz), rot(nx, ny, nz)
       _vkr_store_vertex(
          base, i,
@@ -1343,7 +1506,7 @@ fn draw_cube_3d(f64: x,
    0
 }
 
-fn draw_line_strip_2d(f64: x, f64: y, f64: w, f64: h, list: history, f64: scale, f64: r, f64: g, f64: b, f64: a): any {
+fn draw_line_strip_2d(f64 x, f64 y, f64 w, f64 h, list history, f64 scale, f64 r, f64 g, f64 b, f64 a) any {
    "Batches a UI line strip from a history list."
    if(!_frame_open){ return 0 }
    _bind_default_texture_fast()
@@ -1379,9 +1542,12 @@ fn draw_line_strip_2d(f64: x, f64: y, f64: w, f64: h, list: history, f64: scale,
    0
 }
 
-fn draw_static_buffer(dict: sbuf, bool: is_lines=false, f64: width=1.0, any: pipe_override=0, bool: is_points=false): bool {
+fn draw_static_buffer(dict sbuf, bool is_lines=false, f64 width=1.0, any pipe_override=0, bool is_points=false) bool {
    "Records a draw command for a static GPU buffer. Must be called inside a frame."
    if(!_frame_open || !is_dict(sbuf)){ return false }
+   def cpu = sbuf.get("cpu_ptr", 0)
+   def cpu_count = int(sbuf.get("cpu_count", 0))
+   if(cpu && cpu_count > 0){ return _draw_static_cpu_copy(cpu, cpu_count, is_lines, width, pipe_override, is_points) }
    def buf = sbuf.get("handle", 0)
    def voff = sbuf.get("offset", 0)
    def count = sbuf.get("count", 0)
@@ -1389,16 +1555,17 @@ fn draw_static_buffer(dict: sbuf, bool: is_lines=false, f64: width=1.0, any: pip
    draw_static_buffer_raw(buf, voff, count, is_lines, width, pipe_override, is_points)
 }
 
-fn draw_static_buffer_raw(any: buf,
-   any: voff,
-   int: count,
-   bool: is_lines=false,
-   f64: width=1.0,
-   any: pipe_override=0,
-   bool: is_points=false): bool {
+fn draw_static_buffer_raw(any buf,
+   any voff,
+   int count,
+   bool is_lines=false,
+   f64 width=1.0,
+   any pipe_override=0,
+   bool is_points=false) bool {
    "Records a draw command for a static GPU vertex buffer using raw Vulkan handles."
-   if(!_frame_open || !buf || count <= 0){ return false }
+   if(!_frame_open || !_current_frame_cb || !buf || count <= 0){ return false }
    def cb = _begin_static_draw(is_lines, width, pipe_override, is_points)
+   if(!cb){ return false }
    def first_vertex = _bind_static_vertex_buffer(cb, buf, voff)
    if(first_vertex < 0){ return false }
    cmd_draw(cb, count, 1, first_vertex, 0)
@@ -1408,13 +1575,13 @@ fn draw_static_buffer_raw(any: buf,
    true
 }
 
-fn draw_static_buffer_indexed(dict: sbuf,
-   any: idx_buf,
-   int: index_count,
-   bool: is_lines=false,
-   f64: width=1.0,
-   any: pipe_override=0,
-   bool: is_points=false): bool {
+fn draw_static_buffer_indexed(dict sbuf,
+   any idx_buf,
+   int index_count,
+   bool is_lines=false,
+   f64 width=1.0,
+   any pipe_override=0,
+   bool is_points=false) bool {
    "Records a draw command for a static GPU buffer with indices."
    if(!_frame_open || !is_dict(sbuf)){ return false }
    def buf = sbuf.get("handle", 0)
@@ -1424,19 +1591,20 @@ fn draw_static_buffer_indexed(dict: sbuf,
    draw_static_buffer_indexed_raw(buf, voff, idx_buf, ioff, index_count, is_lines, width, pipe_override, 0, is_points)
 }
 
-fn draw_static_buffer_indexed_raw(any: buf,
-   any: voff,
-   any: idx_buf,
-   any: ioff,
-   int: index_count,
-   bool: is_lines=false,
-   f64: width=1.0,
-   any: pipe_override=0,
-   int: index_type=0,
-   bool: is_points=false): bool {
+fn draw_static_buffer_indexed_raw(any buf,
+   any voff,
+   any idx_buf,
+   any ioff,
+   int index_count,
+   bool is_lines=false,
+   f64 width=1.0,
+   any pipe_override=0,
+   int index_type=0,
+   bool is_points=false) bool {
    "Records a draw command for a static indexed GPU buffer using raw Vulkan handles."
-   if(!_frame_open || !buf || !idx_buf || index_count <= 0){ return false }
+   if(!_frame_open || !_current_frame_cb || !buf || !idx_buf || index_count <= 0){ return false }
    def cb = _begin_static_draw(is_lines, width, pipe_override, is_points)
+   if(!cb){ return false }
    def first_vertex = _bind_static_vertex_buffer(cb, buf, voff)
    if(first_vertex < 0){ return false }
    def first_index = _bind_static_index_buffer(cb, idx_buf, ioff, index_type)
@@ -1448,7 +1616,7 @@ fn draw_static_buffer_indexed_raw(any: buf,
    true
 }
 
-fn draw_circle_sdf(f64: x, f64: y, f64: radius, f64: r, f64: g, f64: b, f64: a): bool {
+fn draw_circle_sdf(f64 x, f64 y, f64 radius, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a smooth circle using the SDF pipeline, but keeps batching active."
    if(!_circle_pipeline && !_ensure_circle_pipeline()){ return false }
    if(!_prepare_sdf_draw(_circle_pipeline)){ return false }
@@ -1463,7 +1631,7 @@ fn draw_circle_sdf(f64: x, f64: y, f64: radius, f64: r, f64: g, f64: b, f64: a):
    true
 }
 
-fn draw_ring_sdf(f64: x, f64: y, f64: inner_radius, f64: outer_radius, f64: r, f64: g, f64: b, f64: a): bool {
+fn draw_ring_sdf(f64 x, f64 y, f64 inner_radius, f64 outer_radius, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a smooth ring using the SDF pipeline, but keeps batching active."
    if(!_ring_pipeline && !_ensure_ring_pipeline()){ return false }
    if(outer_radius <= inner_radius){ return false }
@@ -1480,7 +1648,7 @@ fn draw_ring_sdf(f64: x, f64: y, f64: inner_radius, f64: outer_radius, f64: r, f
    true
 }
 
-fn draw_rounded_rect_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, f64: r, f64: g, f64: b, f64: a): bool {
+fn draw_rounded_rect_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a smooth rounded rectangle using the SDF pipeline."
    if(w <= 0.0 || h <= 0.0){ return false }
    if(radius <= 0.0){
@@ -1500,7 +1668,7 @@ fn draw_rounded_rect_sdf(f64: x, f64: y, f64: w, f64: h, f64: radius, f64: r, f6
    true
 }
 
-fn draw_axes_3d(f64: gizmo_len, f64: cube_sz=0.4): any {
+fn draw_axes_3d(f64 gizmo_len, f64 cube_sz=0.4) any {
    "Draws 3D coordinate axes(X=red, Y=green, Z=blue)."
    def len = float(gizmo_len)
    def sz = float(cube_sz)

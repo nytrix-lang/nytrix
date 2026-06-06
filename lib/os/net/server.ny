@@ -1,5 +1,8 @@
-;; Keywords: net socket http web server router
+;; Keywords: net socket http web server router os
 ;; Blocking HTTP/1.1 server operations for route handlers and structured responses.
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.server(
    Server, listen, serve, serve_app, serve_cli, serve_config, serve_once, serve_once_fd, handle_client,
    read_request, parse_request, response, text, html, json_response, json,
@@ -16,7 +19,7 @@ use std.os.net.socket as sock
 use std.os.net.http as http
 use std.parse.data.json as jsonlib
 
-fn status_text(int: status): str {
+fn status_text(int status) str {
    "Returns a standard HTTP reason phrase for common status codes."
    if(status == 100){ return "Continue" }
    if(status == 101){ return "Switching Protocols" }
@@ -44,7 +47,7 @@ fn status_text(int: status): str {
    "Status"
 }
 
-fn mime_type(any: path): str {
+fn mime_type(any path) str {
    "Returns a small built-in MIME type guess for a path."
    if(!is_str(path)){ return "application/octet-stream" }
    def p = lower(path)
@@ -62,7 +65,7 @@ fn mime_type(any: path): str {
    "application/octet-stream"
 }
 
-fn _has_header(any: headers, str: name): bool {
+fn _has_header(any headers, str name) bool {
    if(!is_dict(headers)){ return false }
    def want = lower(name)
    def items = _d.dict_items(headers)
@@ -75,7 +78,7 @@ fn _has_header(any: headers, str: name): bool {
    false
 }
 
-fn header(any: headers, str: name, any: fallback=""): any {
+fn header(any headers, str name, any fallback="") any {
    "Case-insensitive request/response header lookup."
    if(!is_dict(headers)){ return fallback }
    def want = lower(name)
@@ -92,7 +95,7 @@ fn header(any: headers, str: name, any: fallback=""): any {
    fallback
 }
 
-fn _opt_bool(any: options, str: key, bool: fallback): bool {
+fn _opt_bool(any options, str key, bool fallback) bool {
    if(!is_dict(options)){ return fallback }
    def v = options.get(key, fallback)
    if(is_int(v)){ return v != 0 }
@@ -103,31 +106,31 @@ fn _opt_bool(any: options, str: key, bool: fallback): bool {
    v ? true : false
 }
 
-fn _opt_int(any: options, str: key, int: fallback): int {
+fn _opt_int(any options, str key, int fallback) int {
    if(!is_dict(options)){ return fallback }
    def v = options.get(key, fallback)
    if(is_int(v)){ return v }
    atoi(to_str(v))
 }
 
-fn _opt_str(any: options, str: key, str: fallback=""): str {
+fn _opt_str(any options, str key, str fallback="") str {
    if(!is_dict(options)){ return fallback }
    def v = options.get(key, fallback)
    is_str(v) ? v : to_str(v)
 }
 
-fn _debug_enabled(any: options=0): bool {
+fn _debug_enabled(any options=0) bool {
    _opt_bool(options, "debug", false) || cli.flag("--debug") || cli.flag("--verbose") || cli.flag("-v")
 }
 
-fn _clip(any: value, int: limit): str {
+fn _clip(any value, int limit) str {
    def s = is_str(value) ? value : to_str(value)
    if(limit <= 0 || s.len <= limit){ return s }
    if(limit <= 3){ return slice(s, 0, limit) }
    slice(s, 0, limit - 3) + "..."
 }
 
-fn _peer_label(any: peer): str {
+fn _peer_label(any peer) str {
    if(is_dict(peer)){
       def addr = peer.get("addr", "")
       if(is_str(addr) && addr.len > 0){ return addr }
@@ -141,14 +144,14 @@ fn _peer_label(any: peer): str {
    is_str(peer) ? peer : ""
 }
 
-fn server_url(str: host, int: port): str {
+fn server_url(str host, int port) str {
    "Returns the primary URL shown for a server bind address."
    mut show = host
    if(show == "" || show == "*" || show == "0.0.0.0"){ show = "127.0.0.1" }
    "http://" + show + ":" + to_str(port) + "/"
 }
 
-fn serve_banner(str: host, int: port, any: options=0): int {
+fn serve_banner(str host, int port, any options=0) int {
    "Prints a formatted local-server banner."
    if(!_opt_bool(options, "banner", true)){ return 0 }
    def name = _opt_str(options, "name", "Ny HTTP")
@@ -161,7 +164,7 @@ fn serve_banner(str: host, int: port, any: options=0): int {
    0
 }
 
-fn _log_request(dict: r, any: options=0): int {
+fn _log_request(dict r, any options=0) int {
    if(!_opt_bool(options, "log", true)){ return 0 }
    def req = r.get("request", 0)
    def method = is_dict(req) ? req.get("method", "?") : "?"
@@ -186,48 +189,48 @@ fn _log_request(dict: r, any: options=0): int {
    0
 }
 
-fn response(any: body="", int: status=200, any: headers=0): dict {
+fn response(any body="", int status=200, any headers=0) dict {
    "Builds a response dictionary accepted by `send_response`."
    mut h = is_dict(headers) ? headers : _d.dict(8)
    if(!_has_header(h, "content-type")){ h["content-type"] = "text/plain; charset=utf-8" }
    return {"status": status, "reason": status_text(status), "headers": h, "body": is_str(body) ? body : to_str(body)}
 }
 
-fn text(any: body="", int: status=200, any: headers=0): dict {
+fn text(any body="", int status=200, any headers=0) dict {
    "Builds a plain-text HTTP response."
    mut h = is_dict(headers) ? headers : _d.dict(4)
    h["content-type"] = "text/plain; charset=utf-8"
    response(body, status, h)
 }
 
-fn html(any: body="", int: status=200, any: headers=0): dict {
+fn html(any body="", int status=200, any headers=0) dict {
    "Builds an HTML HTTP response."
    mut h = is_dict(headers) ? headers : _d.dict(4)
    h["content-type"] = "text/html; charset=utf-8"
    response(body, status, h)
 }
 
-fn json_response(any: value, int: status=200, any: headers=0): dict {
+fn json_response(any value, int status=200, any headers=0) dict {
    "Builds a JSON HTTP response."
    mut h = is_dict(headers) ? headers : _d.dict(4)
    h["content-type"] = "application/json; charset=utf-8"
    response(jsonlib.json_encode(value), status, h)
 }
 
-fn json(any: value, int: status=200, any: headers=0): dict { json_response(value, status, headers) }
+fn json(any value, int status=200, any headers=0) dict { json_response(value, status, headers) }
 
-fn redirect(str: location, int: status=302): dict {
+fn redirect(str location, int status=302) dict {
    "Builds a redirect response."
    response("", status, {"location": location, "content-type": "text/plain; charset=utf-8"})
 }
 
-fn bad_request(any: body="Bad Request\n"): dict { text(body, 400) }
+fn bad_request(any body="Bad Request\n") dict { text(body, 400) }
 
-fn not_found(any: body="Not Found\n"): dict { text(body, 404) }
+fn not_found(any body="Not Found\n") dict { text(body, 404) }
 
-fn method_not_allowed(any: allow="GET, HEAD"): dict { text("Method Not Allowed\n", 405, {"allow": allow}) }
+fn method_not_allowed(any allow="GET, HEAD") dict { text("Method Not Allowed\n", 405, {"allow": allow}) }
 
-fn _headers_wire(any: headers): str {
+fn _headers_wire(any headers) str {
    mut b = Builder(256)
    if(is_dict(headers)){
       def items = _d.dict_items(headers)
@@ -247,12 +250,12 @@ fn _headers_wire(any: headers): str {
    out
 }
 
-fn _coerce_response(any: res): dict {
+fn _coerce_response(any res) dict {
    if(is_dict(res) && res.get("status", 0) > 0){ return res }
    response(res, 200)
 }
 
-fn send_response(int: fd, any: res, str: method="GET"): int {
+fn send_response(int fd, any res, str method="GET") int {
    "Sends a response dictionary or string to a socket."
    def r = _coerce_response(res)
    def body = r.get("body", "")
@@ -269,7 +272,7 @@ fn send_response(int: fd, any: res, str: method="GET"): int {
    wrote + bw
 }
 
-fn _split_head_body(str: raw): list {
+fn _split_head_body(str raw) list {
    mut idx = find(raw, "\r\n\r\n")
    mut sep = 4
    if(idx < 0){
@@ -280,7 +283,7 @@ fn _split_head_body(str: raw): list {
    [slice(raw, 0, idx), slice(raw, idx + sep, raw.len)]
 }
 
-fn parse_request(any: raw, any: peer=""): dict {
+fn parse_request(any raw, any peer="") dict {
    "Parses a raw HTTP request into a request dictionary."
    mut req = {"ok": false, "method": "", "target": "", "path": "", "query": "", "query_params": _d.dict(4), "version": "", "headers": _d.dict(16), "body": "", "raw": raw, "peer": peer}
    if(!is_str(raw) || raw.len == 0){ return req }
@@ -324,7 +327,7 @@ fn parse_request(any: raw, any: peer=""): dict {
    req
 }
 
-fn _read_header_buffer(int: fd, int: max_header): str {
+fn _read_header_buffer(int fd, int max_header) str {
    mut raw = ""
    while(raw.len < max_header){
       def left = max_header - raw.len
@@ -338,7 +341,7 @@ fn _read_header_buffer(int: fd, int: max_header): str {
    raw
 }
 
-fn read_request(int: fd, int: max_header=65536, int: max_body=10485760, any: peer=0): dict {
+fn read_request(int fd, int max_header=65536, int max_body=10485760, any peer=0) dict {
    "Reads and parses one HTTP request from a socket."
    if(max_header < 1024){ max_header = 1024 }
    if(max_body < 0){ max_body = 0 }
@@ -357,7 +360,7 @@ fn read_request(int: fd, int: max_header=65536, int: max_body=10485760, any: pee
    req0
 }
 
-fn handle_client(int: fd, fnptr: handler, any: peer=0): dict {
+fn handle_client(int fd, fnptr handler, any peer=0) dict {
    "Handles one accepted client by reading a request, calling `handler(req)`, and sending the response."
    def req = read_request(fd, 65536, 10485760, peer)
    if(!req.get("ok", false)){
@@ -370,7 +373,7 @@ fn handle_client(int: fd, fnptr: handler, any: peer=0): dict {
    return {"ok": wrote >= 0, "request": req, "status": status, "bytes": wrote, "peer": peer}
 }
 
-fn serve_once_fd(int: server_fd, fnptr: handler, int: timeout_ms=0): dict {
+fn serve_once_fd(int server_fd, fnptr handler, int timeout_ms=0) dict {
    "Accepts and handles one client on an existing listening socket."
    if(timeout_ms > 0){ sock.socket_set_timeout_ms(server_fd, timeout_ms) }
    def accepted = sock.socket_accept_info(server_fd)
@@ -380,7 +383,7 @@ fn serve_once_fd(int: server_fd, fnptr: handler, int: timeout_ms=0): dict {
    handle_client(c, handler, accepted)
 }
 
-fn serve_once(str: host, int: port, fnptr: handler, int: timeout_ms=5000): dict {
+fn serve_once(str host, int port, fnptr handler, int timeout_ms=5000) dict {
    "Binds, accepts, and handles one HTTP request."
    def fd = sock.socket_bind(host, port)
    if(fd < 0){ return {"ok": false, "error": "bind failed"} }
@@ -388,23 +391,24 @@ fn serve_once(str: host, int: port, fnptr: handler, int: timeout_ms=5000): dict 
    serve_once_fd(fd, handler, timeout_ms)
 }
 
-fn Server(str: host="127.0.0.1", int: port=8080, any: handler=0, int: max_requests=-1, int: timeout_ms=0): dict {
+fn Server(str host="127.0.0.1", int port=8080, any handler=0, int max_requests=-1, int timeout_ms=0) dict {
    "Builds a server config for `serve_config`."
    return {"host": host, "port": port, "handler": handler, "max_requests": max_requests, "timeout_ms": timeout_ms}
 }
 
-fn serve_config(dict: cfg): dict {
+fn serve_config(dict cfg) dict {
    "Serves HTTP using a config from `Server(...)`."
    serve(cfg.get("host", "127.0.0.1"), cfg.get("port", 8080), cfg.get("handler", 0), cfg.get("max_requests", -1), cfg.get("timeout_ms", 0))
 }
 
-fn _listen_impl(str: host, int: port, fnptr: handler, int: max_requests=-1, int: timeout_ms=0, any: options=0): dict {
+fn _listen_impl(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0) dict {
    def fd = sock.socket_bind(host, port)
    if(fd < 0){ return {"ok": false, "error": "bind failed", "served": 0} }
    defer { sock.close_socket(fd) }
    serve_banner(host, port, options)
    mut served = 0
-   while(max_requests < 0 || served < max_requests){
+   while(true){
+      if(max_requests >= 0 && served >= max_requests){ break }
       def r = serve_once_fd(fd, handler, timeout_ms)
       if(!r.get("ok", false)){
          if(max_requests >= 0){ return {"ok": false, "error": r.get("error", "client failed"), "served": served} }
@@ -416,22 +420,22 @@ fn _listen_impl(str: host, int: port, fnptr: handler, int: max_requests=-1, int:
    return {"ok": true, "served": served}
 }
 
-fn listen(str: host, int: port, fnptr: handler, int: max_requests=-1, int: timeout_ms=0): dict {
+fn listen(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0) dict {
    "Starts a blocking HTTP server. Use `max_requests` for finite testable runs."
    _listen_impl(host, port, handler, max_requests, timeout_ms, {"banner": false, "log": false})
 }
 
-fn serve(str: host, int: port, fnptr: handler, int: max_requests=-1, int: timeout_ms=0): dict {
+fn serve(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0) dict {
    "Alias for `listen`."
    listen(host, port, handler, max_requests, timeout_ms)
 }
 
-fn serve_app(str: host, int: port, fnptr: handler, int: max_requests=-1, int: timeout_ms=0, any: options=0): dict {
+fn serve_app(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0) dict {
    "Starts a formatted blocking HTTP server with banner and request logging."
    _listen_impl(host, port, handler, max_requests, timeout_ms, options)
 }
 
-fn _cli_port(any: options): int {
+fn _cli_port(any options) int {
    def explicit = cli.int_value("--port", 0)
    if(explicit > 0){ return explicit }
    def ps = cli.positionals()
@@ -442,7 +446,7 @@ fn _cli_port(any: options): int {
    _opt_int(options, "port", 8080)
 }
 
-fn serve_cli(fnptr: handler, any: options=0): dict {
+fn serve_cli(fnptr handler, any options=0) dict {
    "Serves using CLI flags: `[port]`, `--port`, `--bind`/`--host`, `--once`, and `--requests`."
    mut host = cli.value("--bind", "")
    if(host.len == 0){ host = cli.value("--host", _opt_str(options, "host", "127.0.0.1")) }
@@ -453,7 +457,7 @@ fn serve_cli(fnptr: handler, any: options=0): dict {
    serve_app(host, port, handler, max_requests, timeout_ms, options)
 }
 
-fn route(dict: routes, dict: req, any: fallback=0): any {
+fn route(dict routes, dict req, any fallback=0) any {
    "Dispatches a request through a route map. Keys may be `/path` or `METHOD /path`."
    def method = upper(req.get("method", "GET"))
    def path = req.get("path", "/")
@@ -465,12 +469,12 @@ fn route(dict: routes, dict: req, any: fallback=0): any {
    not_found()
 }
 
-fn router(dict: routes, any: fallback=0): fnptr {
+fn router(dict routes, any fallback=0) fnptr {
    "Returns a handler function for a route map."
-   return fn(req){ route(routes, req, fallback) }
+   return fn(req) { route(routes, req, fallback) }
 }
 
-if(comptime{ __main() }){
+#main {
    use std.os (ticks)
    use std.os.async (await)
    def parsed = parse_request("POST /submit?x=1 HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\nabc")
@@ -480,8 +484,8 @@ if(comptime{ __main() }){
    assert_eq(parsed.get("query_params", 0).get("x", ""), "1", "request query")
    assert_eq(header(parsed.get("headers", 0), "HOST", ""), "local", "case-insensitive header")
    def rr = route({
-         "GET /ok": fn(r){ text("ok") },
-         "/json": fn(r){ json({"ok": true}) }
+         "GET /ok": fn(r) { text("ok") },
+         "/json": fn(r) { json({"ok": true}) }
    }, parse_request("GET /json HTTP/1.1\r\nHost: local\r\n\r\n"))
    assert_eq(rr.get("status", 0), 200, "route response")
    assert(str_contains(rr.get("body", ""), "\"ok\":true") || str_contains(rr.get("body", ""), "\"ok\": true"), "route json body")
@@ -494,7 +498,7 @@ if(comptime{ __main() }){
       if(client >= 0 && peer >= 0){
          def raw_req = "POST /echo?name=ny HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\n\r\nhello"
          assert(sock.write_socket_all(client, raw_req) == raw_req.len, "client writes request")
-         def handled = handle_client(peer, fn(in_req){
+         def handled = handle_client(peer, fn(in_req) {
                assert_eq(in_req.get("method", ""), "POST", "server handler method")
                assert_eq(in_req.get("path", ""), "/echo", "server handler path")
                assert_eq(in_req.get("body", ""), "hello", "server handler body")
@@ -509,5 +513,5 @@ if(comptime{ __main() }){
       }
       sock.close_socket(server)
    }
-   print("webserver self-test ok")
+   print("✓ std.os.net.server self-test passed")
 }

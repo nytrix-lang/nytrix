@@ -1,13 +1,23 @@
-;; Keywords: render shader
+;; Keywords: render shader os ui
 ;; Reduced shader-source handler for Vulkan std.os.ui.render usage.
-module std.os.ui.render.shader(SHADER_BACKEND_VK450, normalize_backend_name, select_shader_defs, select_shader_source, parse_combined_shader, transpile_shader_defs, transpile_shader_source)
+;; References:
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
+module std.os.ui.render.shader(
+   SHADER_BACKEND_VK450, normalize_backend_name, select_shader_defs, select_shader_source,
+   parse_combined_shader, transpile_shader_defs, transpile_shader_source,
+   shader_hash32, shader_sources, shader_watch
+)
+
 use std.core
 use std.core.dict_mod
 use std.core.str
+use std.os (file_read, ticks)
+use std.os.path as ospath
 
 def SHADER_BACKEND_VK450 = "vkglsl450"
 
-fn normalize_backend_name(any: name): str {
+fn normalize_backend_name(any name) str {
    "Normalizes backend aliases to Vulkan."
    def n = lower(strip(to_str(name)))
    if(n == "vk" || n == "vulkan" || n == "glsl450" ||
@@ -17,7 +27,7 @@ fn normalize_backend_name(any: name): str {
    SHADER_BACKEND_VK450
 }
 
-fn _strip_known_versions(str: src): str {
+fn _strip_known_versions(str src) str {
    mut out = str_replace(src, "\r\n", "\n")
    out = str_replace(out, "#version 120\n", "")
    out = str_replace(out, "#version 330\n", "")
@@ -29,22 +39,21 @@ fn _strip_known_versions(str: src): str {
    out
 }
 
-fn _vertex_to_vk450(str: src): str { "#version 450\n" + _strip_known_versions(src) }
+fn _vertex_to_vk450(str src) str { "#version 450\n" + _strip_known_versions(src) }
 
-fn _fragment_to_vk450(str: src): str {
+fn _fragment_to_vk450(str src) str {
    mut out = _strip_known_versions(src)
    if(str_contains(out, "gl_FragColor")){
       out = str_replace(out, "gl_FragColor", "fragColor")
       out = "layout(location = 0) out vec4 fragColor;\n" + out
    }
    if(!str_contains(out, "layout(location = 0) out")){
-      ; Ensure output is declared for VK if missing
       if(str_contains(out, "out vec4")){ out = str_replace(out, "out vec4", "layout(location = 0) out vec4") }
    }
    "#version 450\n" + out
 }
 
-fn _parse_marker(str: line, str: prefix): any {
+fn _parse_marker(str line, str prefix) any {
    def trimmed = strip(line)
    if(!startswith(trimmed, prefix)){ return 0 }
    mut tail = strip(str_replace(trimmed, prefix, ""))
@@ -52,7 +61,7 @@ fn _parse_marker(str: line, str: prefix): any {
    tail
 }
 
-fn parse_combined_shader(str: combined_src): dict {
+fn parse_combined_shader(str combined_src) dict {
    "Parses a single file containing multiple shader stages into a stage dictionary."
    mut defs = dict(8)
    def lines = split(str_replace(combined_src, "\r\n", "\n"), "\n")
@@ -81,7 +90,7 @@ fn parse_combined_shader(str: combined_src): dict {
    defs
 }
 
-fn transpile_shader_defs(any: defs): dict {
+fn transpile_shader_defs(any defs) dict {
    "Ensures defs include Vulkan-GLSL 450 variants."
    if(!is_dict(defs)){ return dict(4) }
    mut out = dict_clone(defs)
@@ -102,12 +111,73 @@ fn transpile_shader_defs(any: defs): dict {
    out
 }
 
-fn transpile_shader_source(str: combined_src): dict {
+fn transpile_shader_source(str combined_src) dict {
    "Convenience wrapper to parse and transpile a combined shader string."
    transpile_shader_defs(parse_combined_shader(combined_src))
 }
 
-fn select_shader_defs(any: defs, str: _backend="vkglsl450"): dict {
+fn _read_text(any path) str {
+   match file_read(path){
+      ok(s) -> { return s }
+      err(_) -> { return "" }
+   }
+}
+
+fn _resolve_repo_asset(any rel) str {
+   def raw = strip(to_str(rel))
+   raw.len == 0 ? "" : ospath.resolve_repo_asset(raw)
+}
+
+fn shader_hash32(any s) int {
+   "Returns a small stable hash for shader source change detection."
+   if(!is_str(s)){ return 0 }
+   mut h = 2166136261
+   mut i = 0
+   def n = s.len
+   while(i < n){
+      h = band(bxor(h, load8(s, i)) * 16777619, 2147483647)
+      i += 1
+   }
+   h
+}
+
+fn shader_sources(any vert_rel, any frag_rel) list {
+   "Loads vertex and fragment shader source from repo-relative or absolute paths."
+   [
+      _read_text(_resolve_repo_asset(vert_rel)),
+      _read_text(_resolve_repo_asset(frag_rel)),
+   ]
+}
+
+fn shader_watch(any state, any vert_rel, any frag_rel, any force=false, any poll_ns=250000000) dict {
+   "Polls shader source files and returns a state dict with ready/changed/source fields."
+   mut out = is_dict(state) ? state : dict(12)
+   def now = ticks()
+   def last = int(out.get("last_check", 0))
+   if(!bool(force) && int(poll_ns) > 0 && last > 0 && (now - last) < int(poll_ns)){
+      out["changed"] = false
+      return out
+   }
+   def vert_path = _resolve_repo_asset(vert_rel)
+   def frag_path = _resolve_repo_asset(frag_rel)
+   def vert = _read_text(vert_path)
+   def frag = _read_text(frag_path)
+   def ready = vert.len > 0 && frag.len > 0
+   def sig = ready ? (to_str(shader_hash32(vert)) + ":" + to_str(shader_hash32(frag)) + ":" + to_str(vert.len) + ":" + to_str(frag.len)) : ""
+   def changed = ready && sig != to_str(out.get("sig", ""))
+   out["vert_path"] = vert_path
+   out["frag_path"] = frag_path
+   out["vert"] = vert
+   out["frag"] = frag
+   out["sig"] = sig
+   out["ready"] = ready
+   out["changed"] = changed
+   out["last_check"] = now
+   out["error"] = ready ? "" : "missing shader source"
+   out
+}
+
+fn select_shader_defs(any defs, str _backend="vkglsl450") dict {
    "Selects the appropriate shader variants for the specified backend."
    defs = transpile_shader_defs(defs)
    return {
@@ -118,7 +188,19 @@ fn select_shader_defs(any: defs, str: _backend="vkglsl450"): dict {
    }
 }
 
-fn select_shader_source(str: combined_src, str: backend="vkglsl450"): dict {
+fn select_shader_source(str combined_src, str backend="vkglsl450") dict {
    "Convenience wrapper to parse, transpile, and select shader sources."
    select_shader_defs(parse_combined_shader(combined_src), backend)
+}
+
+#main {
+   def sel = select_shader_source("#vertex\nvoid main(){}\n#fragment\nvoid main(){}\n")
+   assert(sel.get("backend", "") == SHADER_BACKEND_VK450 && sel.get("vs", "").contains("#version 450") && sel.get("fs", "").contains("#version 450"), "shader source selection")
+   assert(shader_hash32("abc") == shader_hash32("abc") && shader_hash32("abc") != shader_hash32("abd"), "shader hash")
+   mut watch = dict(12)
+   watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)
+   assert(watch.get("ready", false) && watch.get("changed", false), "shader watch initial")
+   watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)
+   assert(watch.get("ready", false) && !watch.get("changed", true), "shader watch stable")
+   print("✓ std.os.ui.render.shader self-test passed")
 }
