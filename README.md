@@ -1,14 +1,15 @@
 # Nytrix
 
-Explicit imports. Native binaries. Cross-platform stdlib. Comptime. Direct C ABI.
+Explicit imports. Native binaries. Compile-time type checks. Cross-platform stdlib. Direct C ABI.
 
 > *Status*: Work in progress expect breaking changes.
 
 ## Focus
 
+- Productivity.
+- Performance.
 - Simplicity.
-- Low-level.
-- Batteries.
+- Iteration.
 
 ## Requirements
 

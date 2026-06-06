@@ -24,314 +24,208 @@ MIT License
 @contents
 
 @node Top
-@top nytrix - systems programming language
+@top Nytrix
 
-Nytrix is a systems language with a C core and a self-hosting standard
-library.
+Nytrix uses explicit imports, native output, compile-time source generation,
+and direct C ABI interop. The Markdown docs in @file{docs/spec/} are the
+canonical language reference; this manual is the compact Info entry point.
 
 @menu
-* Introduction::        Overview and execution model.
-* Language Reference::  Syntax, values, declarations, and control flow.
-* Syntax Grammar::      EBNF-style surface grammar.
-* Modules and Imports:: Organizing code with explicit @code{use}.
-* Extensible Syntax::   Registry-based macros, attributes, and rewrites.
-* Builtins::            Compile-time and low-level builtins.
-* Runtime::             Tagged-value runtime model.
-* Indices::             Index of commands and concepts.
+* Model::      Source units, values, execution, imports.
+* Syntax::     Core source spellings.
+* Native::     Layouts, externs, headers, pointers, handles.
+* Runtime::    Safety, ownership, cleanup, async.
+* Tooling::    Commands and documentation.
+* See Also::   Repository docs.
 @end menu
 
-@node Introduction
-@chapter Introduction
+@node Model
+@chapter Model
 
-Nytrix keeps most library features in @file{lib/}. There is no implicit
-prelude; symbols are brought into scope explicitly via @code{use}.
-
-Execution modes are provided by @command{ny}:
-
-@itemize @bullet
-@item @code{ny file.ny}: run one Nytrix file.
-@item @code{ny -c '...'}: run inline Nytrix code.
-@item @code{ny --plain-repl}: plain REPL path useful for incremental-eval debugging.
-@item @code{:snapshot app.nys -o app}: REPL command that saves an image-backed
-session and exports it through the normal AOT path.
-@end itemize
-
-File mode is the reproducible behavioral record. REPL mode can diverge because
-it evaluates through separate JIT submissions. Snapshot images provide a
-replayable bridge from interactive exploration back to file/AOT mode.
-
-@node Language Reference
-@chapter Language Reference
-
-@section Lexical Structure
-@table @asis
-@item Identifiers
-@code{[A-Za-z_][A-Za-z0-9_]*}
-@item Comments
-Single-line comments start with @code{;}. A common style is @code{;;}.
-@item Strings
-Single, double, and triple-quoted strings are supported. f-strings are also supported.
-@end table
-
-@section Values and Literals
-@itemize @bullet
-@item @strong{Integers}: decimal, hex (@code{0x}), octal (@code{0o}), binary (@code{0b}).
-@item @strong{Numeric suffixes}: @code{i8/i16/i32/i64}, @code{u8/u16/u32/u64}, @code{f32/f64/f128}.
-@item @strong{Native handles}: @code{handle} is an opaque native-width scalar for OS, Vulkan, and FFI handles.
-@item @strong{Booleans}: @code{true}, @code{false}.
-@item @strong{Nil}: @code{nil}.
-@item @strong{Containers}: list literals @code{[1, 2, 3]} and dict literals @code{@{"k": v@}}.
-@item @strong{Sets/Tuples}: provided by std constructors (for example @code{set(...)} and @code{tuple([...])}).
-@end itemize
-
-@section Declarations and Types
-
-@table @code
-@item def
-Immutable binding.
-@item mut
-Mutable binding.
-@item del
-Clears a binding.
-@end table
-
-Optional type annotations are supported on variables, parameters, and returns.
-Nullable types use @code{?T}; pointer types use @code{*T}.
-Native handles use @code{handle}. They are passed as integer ABI values, not as
-addressable memory; use @code{ptr} or @code{*T} for raw pointers and
-out-parameters.
-Capability annotations such as @code{sequence}, @code{numeric},
-@code{indexable}, @code{iterable}, and @code{allocator} are checked by the
-static conformance pipeline and do not create runtime wrapper objects.
-
-@example
-def int: x = 1
-mut ?int: y = nil
-def handle: image = load64_h(slot)
-
-fn add(int: a, int: b): int @{
-   return a + b
-@}
-@end example
-
-@section Functions
-
-@example
-fn adder(x)@{
-   lambda(y)@{ x + y @}
-@}
-
-fn log(...args)@{
-   return args
-@}
-@end example
-
-External declarations support symbol aliases:
-
-@example
-extern fn c_getpid(): i32 as "getpid"
-@end example
-
-Native ABI annotations include scalar types and layout names. A layout
-parameter is passed by value from Ny pointer storage; a layout return is copied
-into Ny-owned layout storage.
-
-@section Control Flow
-@table @asis
-@item Conditionals
-@code{if} / @code{elif} / @code{else}. Paren and no-paren condition forms are used in tests.
-@item Loops
-@code{while} and @code{for x in iter}.
-@item Pattern matching
-@code{match} supports guarded arms. @code{case} uses @code{->} arms,
-comma-separated patterns, wildcard @code{_}, and inclusive @code{a..b} ranges
-for fast multi-label dispatch.
-@item Errors
-@code{try @{ ... @} catch err @{ ... @}}.
-@item Scope exit
-@code{defer @{ ... @}}.
-@item Resource blocks
-@code{with Type: name = value @{ ... @}} binds a scoped value and runs the
-body. Use explicit @code{defer} cleanup around APIs that require close, free,
-destroy, or release calls.
-@end table
-
-Compile-time blocks use @code{comptime @{ ... @}}. @code{if(comptime@{ ... @})}
-is folded while compiling, and @code{case comptime@{ return value @} @{ ... @}}
-with literal or range arms emits only the selected guardless arm.
-Compile-time tables use @code{comptime table Name @{ pattern -> value @}} and
-are called with @code{comptime match Name(key, fallback)}. They reuse
-@code{case} patterns, including wildcard @code{_}, comma patterns, guards, and
-inclusive @code{a..b} ranges, without runtime dictionary setup.
-Compile-time reflection uses @code{comptime fields(Type) as f @{ emit ... @}}
-and @code{comptime exports(module.path) as name @{ emit ... @}} to expand
-field/export templates without runtime metadata.
-Compile-time function families use @code{comptime template make(v) @{ ... @}}
-plus @code{comptime emit make(arg)} or
-@code{for v in comptime ["x", "y"] @{ emit make(v) @}}. Template values can be
-used as expressions, bare symbols can fill generated function/type names, and
-generated identifiers can splice values inside names with @code{$@{v@}},
-while whole generated names use the plain template parameter, like
-@code{fn name(...): T}.
-Compile-time diagnostic rules use @code{comptime diagnostic rule Name @{ ... @}}
-to attach deterministic compiler checks and fixes to an abstraction without
-emitting runtime objects. The supported call predicate form is
-@code{when call.name == "fn" && !is_literal(call.arg(n))}; @code{call.arg(n)}
-is zero-based.
-Generated modules use @code{module pkg.name generated from Spec @{ ... @}}.
-Assignments in the block become compile-time properties, @code{emit} expands
-templates into a normal module, and ordinary declarations are explicit
-handwritten escape hatches.
-
-Layout records and shapes use the existing @code{layout} surface:
-@code{layout record Material derive(default, eq, hash, debug_str) @{ ... @}}
-emits ordinary constructor/equality/hash/debug helpers, and
-@code{layout shape Info derive(load, store, zero) @{ ... @}} emits default,
-boundary-unpack, load, store, and zero helpers. Shape boundaries use
-@code{layout guard Info: info = value else @{ ... @}} so repeated
-@code{is_dict}/@code{get}/default code is kept at the module input edge.
-
-@section Operators
-@itemize @bullet
-@item Arithmetic: @code{+ - * / %}
-@item Comparison: @code{== != < <= > >=}
-@item Logical: @code{&& || !}
-@item Bitwise/integer: @code{& | ^^ << >> ~}
-@item Ternary: @code{cond ? a : b}
-@end itemize
-
-@code{?} is used for nullable types and ternary expressions; it is not an error-propagation operator.
-
-@node Syntax Grammar
-@chapter Syntax Grammar
-
-Nytrix also has a dedicated syntax-format reference in
-@file{docs/spec/syntax.md}. The following mirrors the current compiler surface
-shape documented by the spec pages.
-
-@example
-program      = @{ top-item @}
-top-item     = stmt | fn-def | extern-fn-def | module-def | use-decl | enum-def | include
-
-binding-stmt = ("def" | "mut") bind-list [ "=" expr ]
-fn-def       = @{ attr @} "fn" ident "(" [ param-list ] ")" [ ":" type-expr ] block
-if-stmt      = "if" expr block @{ "elif" expr block @} [ "else" block ]
-if-expr      = "if" expr value-block "else" value-block
-while-stmt   = "while" expr block
-match-stmt   = "match" expr "@{" @{ match-arm @} "@}"
-case-stmt    = "case" expr "@{" @{ case-arm @} "@}"
-enum-def     = "enum" ident [ "<" type-param-list ">" ] "@{" @{ variant @} "@}"
-include      = "#include" (string | "<" header ">") "as" string
-
-expr         = ternary-expr
-ternary-expr = coalesce-expr [ "?" expr ":" expr ]
-coalesce-expr= pipe-expr @{ "??" pipe-expr @}
-pipe-expr    = logic-or-expr @{ "|>" logic-or-expr @}
-@end example
-
-@node Modules and Imports
-@chapter Modules and Imports
-
-Module declarations commonly use explicit export lists or star export:
-
-@example
-module pkg.name (sym1, sym2)
-module local *
-module pkg.name @{ export core(sym1) export debug(dump) internal(_helper) @}
-@end example
-
-Import forms used across std and runtime tests:
+A source unit is a UTF-8 file containing imports, declarations, modules, and
+statements. There is no implicit prelude. Names enter scope through @code{use}.
+Top-level statements run when a file is executed. @code{module} controls the
+exported surface.
 
 @example
 use std.core
-use std.core *
-use std.core:debug *
-use std.core.str as str
-use std.core (len, append as push)
-use "./local.ny" (helper_add as my_add)
+
+module sample(add)
+
+fn add(int a, int b) int @{
+   a + b
+@}
+
+#main @{
+   assert_eq(add(1, 2), 3, "add")
+@}
 @end example
 
-Default star imports see @code{core}. A profiled star import such as
-@code{use pkg.name:debug *} imports core plus that profile, while
-@code{internal(...)} keeps private helpers out of the public surface.
-When a braced module block contains only @code{export} / @code{internal}
-directives, it is a module surface header and following file-level definitions
-still belong to that module.
+@code{#main @{ ... @}} runs only for the direct entry file. Imported modules
+skip it.
 
-@node Extensible Syntax
-@chapter Extensible Syntax
-
-Nytrix exposes syntax extension through @code{std.core.syntax}.
-The API is registry-based and deterministic.
-
-@example
-use std.core.syntax as syntax
-
-mut reg = syntax.new_registry()
-reg = syntax.register_macro_in(reg, "double", handler)
-reg = syntax.register_attribute_in(reg, "mark", attr_handler)
-@end example
-
-Core surface includes:
-
-@itemize @bullet
-@item Registries: @code{new_registry}, @code{registry}, @code{reset_registry}
-@item Macros: @code{register_macro}, @code{expand_macro}, @code{expand_form}, @code{expand_form_deep}
-@item Attributes: @code{register_attribute}, @code{apply_attribute}
-@item Rewrites: @code{new_rewriter}, @code{register_rewrite}, @code{rewrite_fixpoint}
-@end itemize
-
-Behavior uses deterministic order, explicit state, and defined fallbacks:
-missing macro handlers yield @code{nil}; missing attribute handlers return the
-input node.
-
-@node Builtins
-@chapter Builtins
+Execution modes are:
 
 @table @code
-@item comptime
-@code{comptime @{ ... @}} executes at compile time.
-@item static_assert
-@code{static_assert(cond, "message")} fails compilation when @code{cond} is
-compile-time false. Use @code{static_assert(comptime @{ return cond @}, "msg")}
-for computed checks.
-@item assert_compile
-Alias for @code{static_assert}. @code{assert_compile_range(value, lo, hi, "msg")}
-and @code{assert_compile_index(container, index, "msg")} fail compilation unless
-the compiler's integer range and container length proofs prove the contract.
-@code{range_proven(value, lo, hi)} and @code{index_proven(container, index)}
-return compile-time booleans for the same proof engine.
-@item embed
-@code{embed("path")} embeds file content.
-@item asm
-@code{asm("template", "constraints", args...)} provides inline assembly.
-@item Attributes
-Built-in function attributes include @code{@@extern}, @code{@@naked},
-@code{@@jit}, @code{@@thread}, @code{@@consteval}, @code{@@pure},
-@code{@@effects(...)}, @code{@@async_effects}, @code{@@constant_time},
-@code{@@returns_owned}, @code{@@returns_borrow(x)}, ownership contract
-attributes such as @code{@@borrows(x)} and @code{@@consumes(x)}, and
-@code{@@llvm(...)}.
-@code{@@pure} is equivalent to @code{@@effects(none)}. Declared effect
-contracts are compile-time checks: inferred @code{io}, @code{alloc},
-@code{ffi}, or @code{thread} effects outside the declared mask are errors.
-@code{@@async_effects} lowers eligible @code{io}-effect functions through the
-stackless async path after those contracts pass.
-The expression form @code{llvm("ctpop.i64", x)} directly splices an LLVM
-intrinsic call through LLVM's intrinsic registry for scalar/native ABI values;
-the @code{llvm.} prefix is optional.
+@item ny file.ny
+JIT run one file.
+@item ny -c 'source'
+Run inline source.
+@item ny -run file.ny
+Build and run a temporary native executable.
+@item ny -o app file.ny
+Emit a native executable.
+@item ny, ny -i, ny --plain-repl
+Open the REPL.
 @end table
+
+@node Syntax
+@chapter Syntax
+
+@section Bindings And Functions
+
+@example
+def name = expr
+mut name = expr
+def Type: name = expr
+mut Type: name = expr
+def a, b = expr
+
+fn name(params) @{ body @}
+fn name(params) Type @{ body @}
+fn(v)@{ expr @}
+@end example
+
+Function parameters use @code{Type name}. Typed bindings and fields use
+@code{Type: name}. @code{fn(...)} is the canonical inline callable spelling.
+
+@section Types
+
+@example
+T
+T<A>
+T<A, B>
+?T
+*T
+fnptr
+seq | sequence
+numeric
+indexable
+iterable
+allocator
+handle
+@end example
+
+Common forms are @code{list<int>}, @code{dict<str, int>},
+@code{Result<T, E>}, and ADTs such as @code{Option<int>}.
+
+@section Control
+
+@example
+if(cond)@{ body @} elif(other)@{ body @} else @{ body @}
+while(cond)@{ body @}
+for value, index in expr @{ body @}
+case value @{ literal -> expr _ -> fallback @}
+match value @{ Pattern(field: name) -> expr _ -> fallback @}
+try @{ body @} catch err @{ handler @}
+defer @{ cleanup @}
+with Type: name = value @{ body @}
+@end example
+
+@section Compile Time
+
+@example
+comptime @{ body @}
+comptime table Name @{ pattern -> value @}
+comptime match Name(key, fallback)
+comptime template name(args) @{ declarations @}
+comptime emit name(args)
+assert_compile(cond, "message")
+assert_compile_range(value, lo, hi, "message")
+assert_compile_index(container, index, "message")
+@end example
+
+Generated modules use @code{module pkg.name generated from Spec @{ ... @}}.
+Platform guards include @code{#linux}, @code{#macos}, @code{#windows}, and
+@code{#if(expr)}.
+
+@node Native
+@chapter Native
+
+Native boundaries use layouts, externs, header imports, pointers, handles, and
+explicit ownership.
+
+@example
+#include <stdlib.h> as "c"
+#include "./header.h" as ""
+
+extern "library" @{ fn symbol(Type arg) Type @}
+extern @{ fn process_symbol(Type arg) Type @}
+
+layout Pixel @{
+   u8: r,
+   u8: g,
+   u8: b,
+   u8: a
+@}
+@end example
+
+@code{handle} is an opaque native scalar. A handle is not pointer-addressable
+unless the native API says so. Use @code{*T}, @code{ptr}, @code{load*_h}, and
+@code{store*_h} at pointer/handle boundaries.
 
 @node Runtime
 @chapter Runtime
 
-Nytrix uses 64-bit tagged values (LSB=1 for integers, LSB=0 for pointers).
-Manual allocation primitives include @code{__malloc}, @code{__free}, and @code{__realloc}.
-System/FFI interop is provided through std modules and the runtime C layer.
+Ordinary values are runtime-managed. Raw pointers, handles, layouts, and FFI
+strings cross into native lifetime rules.
 
-@node Indices
-@chapter Indices
-@appendix Index
-@printindex cp
+@table @code
+@item --strict-types
+Keep default compile-time type checks enabled.
+@item --borrow-check --ownership-strict
+Check moves, borrows, releases, and ownership returns.
+@item --safe-mode
+Use default type checks plus ownership/borrow checks, RC/RAII cleanup, strict
+effect/alias policy, and raw-memory diagnostics.
+@item --heap=gc
+Use the opt-in runtime collector.
+@end table
+
+Ownership helpers include @code{borrow(x)}, @code{&x}, @code{own(x)},
+@code{release(x)}, and @code{forget(x)}. Cleanup forms are @code{defer} and
+@code{with}.
+
+Async and concurrency live in the standard library: stackless async tasks, OS
+threads, atomics, queues, channels, sockets, and process tubes.
+
+@node Tooling
+@chapter Tooling
+
+@example
+ny doc search json
+ny doc search --symbols recvuntil
+ny doc get std.parse.data.json
+ny fmt --check file.ny
+ny fmt --trim --check file.ny
+ny test --pattern name
+ny perf
+@end example
+
+Use generated docs for signatures and exported names. Use spec pages for exact
+language rules.
+
+@node See Also
+@chapter See Also
+
+@itemize @bullet
+@item @file{docs/README.md}
+@item @file{docs/spec/language.md}
+@item @file{docs/spec/syntax.md}
+@item @file{docs/spec/native.md}
+@item @file{docs/spec/runtime.md}
+@item @file{docs/learn/start.md}
+@item @file{docs/learn/tooling.md}
+@end itemize
 
 @bye

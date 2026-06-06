@@ -44,7 +44,7 @@ Templates emit declarations. Generated names remain stable and searchable.
 
 ```ny
 comptime template make_backend(name) {
-   fn name(): int { 1 }
+   fn name() int { 1 }
 }
 
 module pkg.generated generated from Spec {

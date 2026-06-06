@@ -4,30 +4,30 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>Nytrix - Systems Programming Language Manual</title>
+    <title>Nytrix Lang - Native Programming Language</title>
     <meta name="description"
         content="Nytrix manual, language specification, examples, and source-linked API reference for native code, compile-time execution, and C ABI work." />
     <meta name="keywords"
-        content="Nytrix, Ny language, systems programming language, compiler, compile-time execution, comptime, native FFI, C ABI, standard library, networking, parsing, glTF" />
+        content="Nytrix, Ny language, native programming language, compiler, compile-time execution, comptime, native FFI, C ABI, standard library, networking, parsing, glTF" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta name="application-name" content="Nytrix" />
     <meta name="repository" content="https://github.com/nytrix-lang/nytrix" />
     <meta property="og:site_name" content="Nytrix" />
-    <meta property="og:title" content="Nytrix - Systems Programming Language Manual" />
+    <meta property="og:title" content="Nytrix Lang - Native Programming Language" />
     <meta property="og:description"
         content="Quick start, code examples, language specification, and source-linked API reference for Nytrix." />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Nytrix systems programming language manual" />
+    <meta property="og:image:alt" content="Nytrix Lang native programming language" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Nytrix - Systems Programming Language Manual" />
+    <meta name="twitter:title" content="Nytrix Lang - Native Programming Language" />
     <meta name="twitter:description"
         content="Quick start, code examples, language specification, and source-linked API reference." />
     <meta name="twitter:image" content="og.png" />
     <meta name="theme-color" content="#000000" />
-    <link rel="icon" type="image/svg+xml" href="logo.svg" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="source" href="https://github.com/nytrix-lang/nytrix" />
     <link rel="alternate" type="text/plain" href="manual.txt" title="Nytrix plain text manual" />
 SEO_PLACEHOLDER
@@ -92,7 +92,6 @@ SEO_PLACEHOLDER
         <div id="content">
             <div class="header">
                 <div class="header-top">
-                    <div class="title-icon" aria-hidden="true">NY</div>
                     <div class="header-copy">
                         <div class="mod-label"><span>NYTRIX MANUAL</span></div>
                         <div class="title">Nytrix</div>
@@ -104,8 +103,8 @@ SEO_PLACEHOLDER
                 <section class="docs-hero">
                     <div class="docs-hero-copy">
                         <div class="docs-eyebrow"><span>Nytrix Language</span></div>
-                        <h1>A language for native systems.</h1>
-                        <p>platform-agnostic, batteries included, and native with seamless interoperability.</p>
+                        <h1>Think freely.</h1>
+                        <p>Native. Explicit. Comptime. Cross-platform.</p>
                         <div class="hero-actions">
                             <a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">GitHub</a>
                             <a class="hero-action" href="#learn%2Fstart">Start</a>
@@ -116,10 +115,11 @@ SEO_PLACEHOLDER
                             <div><b><svg class="ico ico-xs" viewBox="0 0 24 24" aria-hidden="true" role="img" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path></svg><span>REPL</span></b><code>ny</code></div>
                             <div><b><svg class="ico ico-xs" viewBox="0 0 24 24" aria-hidden="true" role="img" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path><circle cx="12" cy="12" r="10"></circle></svg><span>Fmt</span></b><code>ny fmt file.ny</code></div>
                             <div><b><svg class="ico ico-xs" viewBox="0 0 24 24" aria-hidden="true" role="img" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span>Symbols</span></b><code>ny doc search --symbols print</code></div>
+                            <div><b><svg class="ico ico-xs" viewBox="0 0 24 24" aria-hidden="true" role="img" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 9.4-9-5.2"></path><path d="M21 13.5V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l2.1-1.2"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path><path d="M18 16v6"></path><path d="M15 19h6"></path></svg><span>New</span></b><code>ny new app</code></div>
                         </div>
                     </div>
                     <div class="docs-hero-aside">
-                        <pre class="docs-example"><code>use std
+                        <pre class="docs-example"><code class="language-ny">use std
 def scale = comptime { 2^5 }
 fn tag(n) case n {
    0..31 -&gt; "small"
@@ -129,6 +129,78 @@ fn tag(n) case n {
 def lens = [[3,4],[6,8],[5,12],[8,15]].map(fn(p){ int(sqrt(p[0]*p[0] + p[1]*p[1])) })
 def sum = lens.reduce(0, fn(a,n){ a + n })
 print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")</code></pre>
+                    </div>
+                </section>
+                <section class="docs-section">
+                    <div class="docs-section-head">
+                        <div>
+                            <h2>Learn</h2>
+                            <p>Everyday workflow.</p>
+                        </div>
+                        <span>Docs</span>
+                    </div>
+                    <div class="doc-card-grid">
+                        <a class="doc-card primary" href="#learn%2Fstart">
+                            <div class="doc-card-top"><span class="card-icon">01</span><div class="doc-card-kicker">Start</div></div>
+                            <div class="doc-card-title">Quick start</div>
+                            <p>Install, build, run, format, test, and navigate the toolchain.</p>
+                            <div class="doc-card-route">learn/start</div>
+                        </a>
+                        <a class="doc-card" href="#learn%2Ftooling">
+                            <div class="doc-card-top"><span class="card-icon">02</span><div class="doc-card-kicker">Tools</div></div>
+                            <div class="doc-card-title">Tooling</div>
+                            <p>Compiler, formatter, documentation, tests, and project commands.</p>
+                            <div class="doc-card-route">learn/tooling</div>
+                        </a>
+                        <a class="doc-card" href="#learn%2Fperformance">
+                            <div class="doc-card-top"><span class="card-icon">03</span><div class="doc-card-kicker">Runtime</div></div>
+                            <div class="doc-card-title">Performance</div>
+                            <p>Practical guidance for fast native code and compact modules.</p>
+                            <div class="doc-card-route">learn/performance</div>
+                        </a>
+                    </div>
+                </section>
+                <section class="docs-section">
+                    <div class="docs-section-head">
+                        <div>
+                            <h2>Spec</h2>
+                            <p>Exact behavior.</p>
+                        </div>
+                        <span>Language</span>
+                    </div>
+                    <div class="doc-card-grid">
+                        <a class="doc-card" href="#spec%2Fsyntax">
+                            <div class="doc-card-top"><span class="card-icon">S</span><div class="doc-card-kicker">Syntax</div></div>
+                            <div class="doc-card-title">Source syntax</div>
+                            <p>Declarations, expressions, control flow, and source layout.</p>
+                            <div class="doc-card-route">spec/syntax</div>
+                        </a>
+                        <a class="doc-card" href="#spec%2Ftypes">
+                            <div class="doc-card-top"><span class="card-icon">T</span><div class="doc-card-kicker">Types</div></div>
+                            <div class="doc-card-title">Types and values</div>
+                            <p>Core value model, type rules, functions, modules, and imports.</p>
+                            <div class="doc-card-route">spec/types</div>
+                        </a>
+                        <a class="doc-card" href="#spec%2Fcomptime">
+                            <div class="doc-card-top"><span class="card-icon">C</span><div class="doc-card-kicker">Comptime</div></div>
+                            <div class="doc-card-title">Compile-time execution</div>
+                            <p>Generated declarations, templates, and compile-time evaluation.</p>
+                            <div class="doc-card-route">spec/comptime</div>
+                        </a>
+                    </div>
+                </section>
+                <section class="docs-section">
+                    <div class="docs-section-head">
+                        <div>
+                            <h2>Reference</h2>
+                            <p>Source-linked library entry points.</p>
+                        </div>
+                        <span>API</span>
+                    </div>
+                    <div class="api-card-grid">
+                        <a class="api-card" href="#std.core"><div class="api-card-title"><span>std.core</span></div><p>Core language helpers and runtime primitives.</p><div class="api-card-meta">module</div></a>
+                        <a class="api-card" href="#std.os"><div class="api-card-title"><span>std.os</span></div><p>Operating-system APIs, process utilities, and platform support.</p><div class="api-card-meta">namespace</div></a>
+                        <a class="api-card" href="#std.parse"><div class="api-card-title"><span>std.parse</span></div><p>Data, syntax, images, and asset parsers.</p><div class="api-card-meta">namespace</div></a>
                     </div>
                 </section>
             </div>

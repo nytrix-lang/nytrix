@@ -9,7 +9,7 @@ native-boundary work.
 1. Run the same command again with compact collection.
 2. Switch to rich diagnostics when the source location matters.
 3. Find the owner of unknown names with `ny doc search --symbols`.
-4. Turn on strict types when the value shape is unclear.
+4. Treat default type-check failures as evidence that a value needs refinement.
 5. Turn on borrow checking when ownership, returned references, or native
    resources are involved.
 6. Shrink the input until one file, value, or boundary owns the failure.
@@ -52,7 +52,10 @@ the module's exported names when that list is available.
 
 ## Type failures
 
-Run strict mode when a value shape is unclear:
+Type checks run by default for typed code, generics, layouts, and native
+boundaries. The checker also warns when it has to fall back to dynamic `any` at
+high-risk expressions. Use `--strict-types` when you want those fallbacks to
+fail a command line or CI job:
 
 ```bash
 ny --strict-types file.ny
@@ -60,6 +63,10 @@ ny --strict-types file.ny
 
 Then isolate where the value is built. Dict literals, receiver calls, index
 access, nullable values, and `Result` payloads are common refinement points.
+
+The default warning level keeps this signal short. Use `--warn=all` or
+`NYTRIX_TYPE_FALLBACK_WARN_VERBOSE=1` when auditing optimization cliffs; use
+`NYTRIX_TYPE_FALLBACK_WARN_LIMIT=N` to raise the cap for one run.
 
 For list-building code, remember that `append` returns the updated list:
 
