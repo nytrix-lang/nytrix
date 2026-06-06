@@ -1,5 +1,7 @@
-;; Keywords: info environment system-info
+;; Keywords: info environment system-info os
 ;; OS system information (CPU, RAM, GPU).
+;; References:
+;; - std.os
 module std.os.info(cpu_name, ram_short, gpu_name, hostname, cpu_logical_count, cpu_features_raw, cpu_features, cpu_feature_map, has_cpu_feature, has_opencl, system_info)
 use std.core
 use std.core.dict_mod
@@ -38,7 +40,7 @@ mut _gpu_name_cache = ""
 mut _system_info_loaded = false
 mut _system_info_cache = dict(32)
 
-fn _linux_cpuinfo_text(): str {
+fn _linux_cpuinfo_text() str {
    if(!platform.is_linux()){ return "" }
    if(_linux_cpuinfo_loaded){ return _linux_cpuinfo_cache }
    _linux_cpuinfo_cache = _read_text(ospath.normalize("/proc/cpuinfo"))
@@ -46,14 +48,14 @@ fn _linux_cpuinfo_text(): str {
    _linux_cpuinfo_cache
 }
 
-fn _read_text(str: path): str {
+fn _read_text(str path) str {
    match file_read(path){
       ok(s) -> { return s }
       err(ignorederr) -> { ignorederr  return "" }
    }
 }
 
-fn _cmd_out(str: cmd, list: args): str {
+fn _cmd_out(str cmd, list args) str {
    def p = spawn(cmd, args)
    if(!p){ return "" }
    shutdown_send(p)
@@ -64,16 +66,18 @@ fn _cmd_out(str: cmd, list: args): str {
    strip(s)
 }
 
-fn _env_bool(str: key, bool: fallback=false): bool {
+fn _env_bool(str key, bool fallback=false) bool {
    def raw = env(key)
    if(!is_str(raw)){ return fallback }
    def v = lower(strip(raw))
-   if(v == "1" || v == "true" || v == "yes" || v == "on"){ return true }
-   if(v == "0" || v == "false" || v == "no" || v == "off"){ return false }
-   fallback
+   return case v {
+      "1", "true", "yes", "on" -> true
+      "0", "false", "no", "off" -> false
+      _ -> fallback
+   }
 }
 
-fn _first_existing_path(list: paths): bool {
+fn _first_existing_path(list paths) bool {
    mut i = 0
    while(i < paths.len){
       if(file_exists(ospath.normalize(paths.get(i, "")))){ return true }
@@ -82,7 +86,7 @@ fn _first_existing_path(list: paths): bool {
    false
 }
 
-fn _first_line(any: s): str {
+fn _first_line(any s) str {
    if(!is_str(s)){ return "" }
    def lines = split(s, "\n")
    mut i = 0
@@ -94,7 +98,7 @@ fn _first_line(any: s): str {
    ""
 }
 
-fn _find_value(list: lines, str: key): str {
+fn _find_value(list lines, str key) str {
    mut i = 0
    while(i < lines.len){
       def ln = strip(lines.get(i, ""))
@@ -108,7 +112,7 @@ fn _find_value(list: lines, str: key): str {
    ""
 }
 
-fn _find_colon_line_value(list: lines, str: prefix): str {
+fn _find_colon_line_value(list lines, str prefix) str {
    mut i = 0
    while(i < lines.len){
       def ln = strip(lines.get(i, ""))
@@ -118,7 +122,7 @@ fn _find_colon_line_value(list: lines, str: prefix): str {
    ""
 }
 
-fn _after_colon(any: s): str {
+fn _after_colon(any s) str {
    if(!is_str(s)){ return "" }
    def n = s.len
    mut i = 0
@@ -142,7 +146,7 @@ fn _after_colon(any: s): str {
    strip(s)
 }
 
-fn _first_number(any: s): int {
+fn _first_number(any s) int {
    if(!is_str(s)){ return 0 }
    def n = s.len
    mut i = 0
@@ -157,7 +161,7 @@ fn _first_number(any: s): int {
    v
 }
 
-fn _find_prefixed_line_value(any: text, any: prefix): str {
+fn _find_prefixed_line_value(any text, any prefix) str {
    if(!is_str(text) || !is_str(prefix)){ return "" }
    def n, m = text.len, prefix.len
    if(n == 0 || m == 0 || n < m){ return "" }
@@ -190,14 +194,14 @@ fn _find_prefixed_line_value(any: text, any: prefix): str {
    ""
 }
 
-fn _format_mem_usage_kb(int: total_kb, int: free_kb): str {
+fn _format_mem_usage_kb(int total_kb, int free_kb) str {
    if(total_kb <= 0){ return "" }
    def used_mb = (total_kb - free_kb) / 1024
    def total_mb = total_kb / 1024
    to_str(used_mb) + "/" + to_str(total_mb) + "MB"
 }
 
-fn _parse_windows_mem_summary(any: text): str {
+fn _parse_windows_mem_summary(any text) str {
    if(!is_str(text) || text.len == 0){ return "" }
    def lines = split(text, "\n")
    mut total_kb = 0
@@ -212,7 +216,7 @@ fn _parse_windows_mem_summary(any: text): str {
    _format_mem_usage_kb(total_kb, free_kb)
 }
 
-fn cpu_logical_count(): int {
+fn cpu_logical_count() int {
    "Returns the detected number of logical CPU cores."
    if(_cpu_logical_count_loaded){ return _cpu_logical_count_cache }
    mut out = 0
@@ -257,7 +261,7 @@ fn cpu_logical_count(): int {
    out
 }
 
-fn _linux_cpu_features_raw(): str {
+fn _linux_cpu_features_raw() str {
    def out = _cmd_out("lscpu", [])
    if(out.len > 0){
       def lines = split(out, "\n")
@@ -281,13 +285,12 @@ fn _linux_cpu_features_raw(): str {
    ""
 }
 
-fn _macos_cpu_features_raw(): str {
+fn _macos_cpu_features_raw() str {
    mut out = _cmd_out("sysctl", ["-n", "machdep.cpu.features"])
    mut out2 = _cmd_out("sysctl", ["-n", "machdep.cpu.leaf7_features"])
    if(out.len > 0 && out2.len > 0){ return strip(out + " " + out2) }
    if(out.len > 0){ return strip(out) }
    if(out2.len > 0){ return strip(out2) }
-   ; Apple Silicon/Generic: collect enabled hw.optional feature flags.
    def all = _cmd_out("sysctl", ["hw.optional"])
    if(all.len == 0){ return "" }
    def lines = split(all, "\n")
@@ -301,7 +304,6 @@ fn _macos_cpu_features_raw(): str {
             def key = strip(ln.slice(0, idx, 1))
             def val = strip(ln.slice(idx + 1, ln.len, 1))
             if(eq(val, "1")){
-               ; Clean up prefix (hw.optional. => "")
                def clean = key.slice(12, key.len, 1)
                feats = feats.append(clean)
             }
@@ -313,7 +315,7 @@ fn _macos_cpu_features_raw(): str {
    ""
 }
 
-fn _windows_cpu_features_raw(): str {
+fn _windows_cpu_features_raw() str {
    def env_cpu = env("PROCESSOR_IDENTIFIER")
    if(is_str(env_cpu) && strip(env_cpu).len > 0){ return strip(env_cpu) }
    mut out = _cmd_out("wmic", ["cpu", "get", "Caption,Name", "/value"])
@@ -323,7 +325,7 @@ fn _windows_cpu_features_raw(): str {
    ""
 }
 
-fn cpu_features_raw(): str {
+fn cpu_features_raw() str {
    "Returns a raw CPU feature string from OS-specific sources."
    if(_cpu_features_raw_loaded){ return _cpu_features_raw_cache }
    mut out = ""
@@ -336,7 +338,7 @@ fn cpu_features_raw(): str {
    out
 }
 
-fn _normalize_feature_text(any: raw): str {
+fn _normalize_feature_text(any raw) str {
    if(!is_str(raw)){ return "" }
    mut s = " " + lower(strip(raw)) + " "
    if(strip(s).len == 0){ return "" }
@@ -350,19 +352,19 @@ fn _normalize_feature_text(any: raw): str {
    s
 }
 
-fn _cpu_features_norm_text(): str {
+fn _cpu_features_norm_text() str {
    if(_cpu_features_norm_loaded){ return _cpu_features_norm_cache }
    _cpu_features_norm_cache = _normalize_feature_text(cpu_features_raw())
    _cpu_features_norm_loaded = true
    _cpu_features_norm_cache
 }
 
-fn _feature_has(str: norm, str: name): bool {
+fn _feature_has(str norm, str name) bool {
    if(!is_str(norm) || norm.len == 0){ return false }
    str_contains(norm, " " + name + " ")
 }
 
-fn _normalize_feature_name(any: name): str {
+fn _normalize_feature_name(any name) str {
    if(!is_str(name)){ return "" }
    mut s = lower(strip(name))
    if(s.len == 0){ return "" }
@@ -380,7 +382,7 @@ fn _normalize_feature_name(any: name): str {
    s
 }
 
-fn cpu_features(): list {
+fn cpu_features() list {
    "Returns a normalized list of commonly-used CPU feature names."
    if(_cpu_features_loaded){ return clone(_cpu_features_cache) }
    def n = _cpu_features_norm_text()
@@ -406,7 +408,7 @@ fn cpu_features(): list {
    clone(out)
 }
 
-fn cpu_feature_map(): dict {
+fn cpu_feature_map() dict {
    "Returns a normalized dictionary of commonly-used detected CPU features.
    The returned dict maps normalized feature names to `true` and is optimized
    for fast lookup of common features.
@@ -417,7 +419,6 @@ fn cpu_feature_map(): dict {
    "
    if(_cpu_feature_map_loaded){ return dict_clone(_cpu_feature_map_cache) }
    mut m = dict(64)
-   ; Ensure curated/common aliases are always present and normalized.
    def curated = cpu_features()
    mut j = 0
    while(j < curated.len){
@@ -430,7 +431,7 @@ fn cpu_feature_map(): dict {
    dict_clone(m)
 }
 
-fn has_cpu_feature(any: name): bool {
+fn has_cpu_feature(any name) bool {
    "Returns true when CPU feature `name` is detected.
    `name` is normalized, so variants like `\"sse4.1\"`, `\"sse41\"`,
    and `\"sse4_1\"` are equivalent.
@@ -441,14 +442,14 @@ fn has_cpu_feature(any: name): bool {
    _feature_has(_cpu_features_norm_text(), n)
 }
 
-fn _gpu_deep_scan_enabled(): bool {
+fn _gpu_deep_scan_enabled() bool {
    if(_gpu_deep_scan_loaded){ return _gpu_deep_scan_cache }
    _gpu_deep_scan_cache = _env_bool("NYTRIX_GPU_DEEP_SCAN", false)
    _gpu_deep_scan_loaded = true
    _gpu_deep_scan_cache
 }
 
-fn _gpu_scan_cards_limit(): int {
+fn _gpu_scan_cards_limit() int {
    if(_gpu_scan_cards_loaded){ return _gpu_scan_cards_cache }
    mut n = 4
    def raw = env("NYTRIX_GPU_SCAN_CARDS")
@@ -467,7 +468,7 @@ fn _gpu_scan_cards_limit(): int {
    n
 }
 
-fn has_opencl(): bool {
+fn has_opencl() bool {
    "Returns true when an OpenCL runtime appears available on this host."
    def force = env("NYTRIX_OPENCL_FORCE")
    if(is_str(force)){ return _env_bool("NYTRIX_OPENCL_FORCE", false) }
@@ -478,7 +479,7 @@ fn has_opencl(): bool {
    _first_existing_path(["/etc/OpenCL/vendors", "/usr/lib/libOpenCL.so", "/usr/lib64/libOpenCL.so", "/usr/local/lib/libOpenCL.so", "/lib/x86_64-linux-gnu/libOpenCL.so.1", "/usr/lib/x86_64-linux-gnu/libOpenCL.so.1"])
 }
 
-fn hostname(): str {
+fn hostname() str {
    "Returns the machine hostname."
    if(_hostname_loaded){ return _hostname_cache }
    mut out = ""
@@ -527,7 +528,7 @@ fn hostname(): str {
    out
 }
 
-fn cpu_name(): str {
+fn cpu_name() str {
    "Returns the CPU model name.
    Linux uses /proc, macOS uses sysctl, Windows uses wmic/powershell."
    if(_cpu_name_loaded){ return _cpu_name_cache }
@@ -591,7 +592,7 @@ fn cpu_name(): str {
    out
 }
 
-fn ram_short(): str {
+fn ram_short() str {
    "Returns a summary string of system RAM usage(e.g., '2048/8192MB').
    Linux uses /proc ; macOS uses sysctl/vm_stat; Windows uses wmic/powershell."
    if(_ram_short_loaded){ return _ram_short_cache }
@@ -675,20 +676,17 @@ fn ram_short(): str {
    _ram_short_cache
 }
 
-fn gpu_name(): str {
+fn gpu_name() str {
    "Returns the name or primary identifier of the system's GPU.
    Linux uses sysfs ; macOS uses system_profiler (cached); Windows uses wmic/powershell (cached)."
    if(_gpu_name_loaded){ return _gpu_name_cache }
-   ; Fast path for macOS to avoid system_profiler unless explicitly requested or needed
    if(platform.is_macos()){
-      ; Check for Apple Silicon GPU via sysctl (fast)
       def soc = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
       if(str_contains(soc, "Apple M")){
          _gpu_name_cache = "Apple GPU(" + strip(soc) + ")"
          _gpu_name_loaded = true
          return _gpu_name_cache
       }
-      ; Fallback to slower system_profiler only if NYTRIX_GPU_DEEP_SCAN is set
       if(_gpu_deep_scan_enabled()){
          def out = _cmd_out("system_profiler", ["SPDisplaysDataType", "-detailLevel", "mini"])
          if(out.len > 0){
@@ -715,7 +713,6 @@ fn gpu_name(): str {
       return _gpu_name_cache
    }
    if(platform.is_windows()){
-      ; Avoid slow wmic/powershell unless deep scan enabled
       if(_gpu_deep_scan_enabled()){
          mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
          if(out.len > 0){
@@ -743,7 +740,6 @@ fn gpu_name(): str {
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
-   ; 2. Fallback: DRM sysfs (card0-card7)
    def max_cards = _gpu_scan_cards_limit()
    mut i = 0
    while(i < max_cards){
@@ -762,7 +758,6 @@ fn gpu_name(): str {
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
-   ; 3. Fallback: PCI bus sysfs (scan /sys/bus/pci/devices)
    def pci_path = ospath.normalize("/sys/bus/pci/devices")
    if(file_exists(pci_path)){
       def entries = list_dir(pci_path)
@@ -772,7 +767,6 @@ fn gpu_name(): str {
          def class_file = ospath.normalize(pci_path + "/" + entry + "/class")
          if(file_exists(class_file)){
             def class_hex = strip(_read_text(class_file))
-            ; Display controller: 0x030000, 3D controller: 0x030200
             if(startswith(class_hex, "0x0300") || startswith(class_hex, "0x0302")){
                def vf = ospath.normalize(pci_path + "/" + entry + "/vendor")
                def df = ospath.normalize(pci_path + "/" + entry + "/device")
@@ -794,7 +788,7 @@ fn gpu_name(): str {
    _gpu_name_cache
 }
 
-fn system_info(): dict {
+fn system_info() dict {
    "Returns a dictionary with common host information.
    GPU/accelerator/parallel policy fields reflect current runtime configuration.
    In CLI usage, compiler flags are the primary source(for example `--gpu`,
@@ -832,4 +826,17 @@ fn system_info(): dict {
    _system_info_cache = d
    _system_info_loaded = true
    dict_clone(d)
+}
+
+#main {
+   assert(cpu_name().len > 0 && ram_short().len > 0 && hostname().len >= 0, "info host strings")
+   assert(cpu_logical_count() >= 1, "info cpu logical count")
+   assert(is_list(cpu_features()) && is_dict(cpu_feature_map()), "info cpu features")
+   assert(is_bool(has_cpu_feature("sse2")) && is_bool(has_opencl()), "info feature booleans")
+   def info = system_info()
+   assert(is_dict(info) && info.get("os", "") == os() && info.get("arch", "") == arch(), "info system os arch")
+   assert(info.get("logical_cpus", 0) >= 1 && info.get("platform", "").len > 0, "info system basics")
+   assert(info.get("gpu", "").len > 0 && info.get("ram", "").len > 0, "info system hardware strings")
+   assert(is_dict(info.get("accel_status", 0)) && is_dict(info.get("opencl_status", 0)), "info accel/opencl status")
+   print("✓ std.os.info self-test passed")
 }

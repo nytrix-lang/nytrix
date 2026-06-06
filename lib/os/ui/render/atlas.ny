@@ -1,17 +1,20 @@
-;; Keywords: render atlas
+;; Keywords: render atlas os ui
 ;; Texture Atlas manager for std.os.ui.render.
 ;; Efficiently packs many small images (glyphs, icons) into larger textures.
+;; References:
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
 module std.os.ui.render.atlas(atlas_create, atlas_destroy, atlas_add, atlas_get, atlas_bind, atlas_texture_id, atlas_uv_rect, atlas_ensure_texture, atlas_flush)
 use std.core
 use std.os.ui.render.vk as vkr
 use std.os.ui.render.vk.texture as vk_texture
 use std.math
 
-fn _atlas_stable_tex_id(any: candidate): int {
+fn _atlas_stable_tex_id(any candidate) int {
    mut tex_id = int(candidate)
-   def stable = int(vk_texture.last_created_texture_id())
+   def stable = int(vkr.last_created_texture_id())
    if(stable >= 0 && stable < 1024){ return stable }
-   def count = int(vk_texture.texture_count())
+   def count = int(vkr.texture_count())
    if((tex_id < 0 || tex_id >= 1024) && count > 0){
       def latest = count - 1
       if(latest >= 0 && latest < 1024){ return latest }
@@ -22,7 +25,7 @@ fn _atlas_stable_tex_id(any: candidate): int {
 mut _atlas_scratch = 0
 mut _atlas_scratch_cap = 0
 
-fn atlas_create(any: w=2048, any: h=2048, any: filter=-1, bool: defer_gpu=false): any {
+fn atlas_create(any w=2048, any h=2048, any filter=-1, bool defer_gpu=false) any {
    "Creates a new texture atlas. Uses a native state buffer for mutable metadata."
    def buf_size = w * h * 4
    def cpu_buf = zalloc(buf_size)
@@ -32,14 +35,14 @@ fn atlas_create(any: w=2048, any: h=2048, any: filter=-1, bool: defer_gpu=false)
       free(cpu_buf)
       return 0
    }
-   store32(state_ptr, 2, 0) ; cx
-   store32(state_ptr, 2, 4) ; cy
-   store32(state_ptr, 0, 8) ; mrh
-   store32(state_ptr, 0, 12) ; dirty
-   store32(state_ptr, w, 16) ; dx1
-   store32(state_ptr, h, 20) ; dy1
-   store32(state_ptr, 0, 24) ; dx2
-   store32(state_ptr, 0, 28) ; dy2
+   store32(state_ptr, 2, 0)
+   store32(state_ptr, 2, 4)
+   store32(state_ptr, 0, 8)
+   store32(state_ptr, 0, 12)
+   store32(state_ptr, w, 16)
+   store32(state_ptr, h, 20)
+   store32(state_ptr, 0, 24)
+   store32(state_ptr, 0, 28)
    def tex_id = defer_gpu ? -1 : _atlas_stable_tex_id(vkr.create_texture_ex(w, h, cpu_buf, 37, filter, 33071, 33071))
    if(tex_id >= 0){ vk_texture.set_texture_protected(tex_id, true) }
    return {
@@ -53,7 +56,7 @@ fn atlas_create(any: w=2048, any: h=2048, any: filter=-1, bool: defer_gpu=false)
    }
 }
 
-fn atlas_destroy(any: a): int {
+fn atlas_destroy(any a) int {
    "Frees atlas resources including GPU texture and state buffers."
    if(!is_dict(a)){ return 0 }
    def tex_id = a.get("tex_id", -1)
@@ -68,7 +71,7 @@ fn atlas_destroy(any: a): int {
    0
 }
 
-fn atlas_ensure_texture(any: a): int {
+fn atlas_ensure_texture(any a) int {
    "Ensures the CPU atlas has a live GPU texture. This allows fonts/icons to be
    loaded before Vulkan initialization and become valid on first draw."
    if(!is_dict(a)){ return -1 }
@@ -86,7 +89,7 @@ fn atlas_ensure_texture(any: a): int {
    tex_id
 }
 
-fn atlas_add(any: a, any: key, any: w, any: h, any: pixels): any {
+fn atlas_add(any a, any key, any w, any h, any pixels) any {
    "Packs an image and returns [u1,v1,u2,v2]. Correctly updates packing state."
    if(!is_dict(a) || w <= 0 || h <= 0){ return 0 }
    mut items = a.get("items")
@@ -148,7 +151,7 @@ fn atlas_add(any: a, any: key, any: w, any: h, any: pixels): any {
       if(cy + h + 1 > dy2){ dy2 = cy + h + 1 }
       store32(state_ptr, dx1, 16) store32(state_ptr, dy1, 20)
       store32(state_ptr, dx2, 24) store32(state_ptr, dy2, 28)
-      store32(state_ptr, 1, 12) ; dirty = true
+      store32(state_ptr, 1, 12)
    }
    if(h > mrh){ mrh = h }
    store32(state_ptr, cx + w + 2, 0)
@@ -165,7 +168,7 @@ fn atlas_add(any: a, any: key, any: w, any: h, any: pixels): any {
    uv
 }
 
-fn atlas_flush(any: a): int {
+fn atlas_flush(any a) int {
    "Uploads dirty CPU pixels to the existing GPU atlas texture."
    if(!is_dict(a)){ return 0 }
    def state_ptr = a.get("state_ptr", 0)
@@ -186,7 +189,7 @@ fn atlas_flush(any: a): int {
    def rw, rh = dx2 - dx1, dy2 - dy1
    if(rw <= 0 || rh <= 0){ return 0 }
    if(was_new){
-      store32(state_ptr, 0, 12) ; dirty = false
+      store32(state_ptr, 0, 12)
       store32(state_ptr, aw, 16) store32(state_ptr, ah, 20)
       store32(state_ptr, 0, 24) store32(state_ptr, 0, 28)
       return 0
@@ -208,19 +211,26 @@ fn atlas_flush(any: a): int {
       row += 1
    }
    vkr.update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch)
-   store32(state_ptr, 0, 12) ; dirty = false
+   store32(state_ptr, 0, 12)
    store32(state_ptr, aw, 16) store32(state_ptr, ah, 20)
    store32(state_ptr, 0, 24) store32(state_ptr, 0, 28)
    0
 }
 
-fn atlas_texture_id(any: a): int { is_dict(a) ? a.get("tex_id", -1) : -1 }
+fn atlas_texture_id(any a) int {
+   "Runs the atlas texture id operation."
+   is_dict(a) ? a.get("tex_id", -1) : -1
+}
 
-fn atlas_get(any: a, any: key): any { is_dict(a) ? a.get("items").get(key, 0) : 0 }
+fn atlas_get(any a, any key) any {
+   "Runs the atlas get operation."
+   is_dict(a) ? a.get("items").get(key, 0) : 0
+}
 
-fn atlas_uv_rect(any: a, any: key): any { atlas_get(a, key) }
+fn atlas_uv_rect(any a, any key) any { atlas_get(a, key) }
 
-fn atlas_bind(any: a): int {
+fn atlas_bind(any a) int {
+   "Runs the atlas bind operation."
    if(is_dict(a)){ vkr.bind_texture(atlas_texture_id(a)) }
    0
 }

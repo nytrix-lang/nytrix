@@ -1,5 +1,8 @@
-;; Keywords: net context logging color
+;; Keywords: net context logging color os
 ;; Shared network context and log formatting.
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.context(
    context, set_context, set_default_level, default_level,
    level_value, level_name, timeout_ms, chunk_size,
@@ -15,7 +18,7 @@ mut _default_timeout_ms = -1
 mut _default_chunk_size = 0
 mut _default_color = -1
 
-fn _env_int_or(str: key, int: fallback): int {
+fn _env_int_or(str key, int fallback) int {
    def v = env(key)
    if(is_int(v)){ return v }
    if(is_str(v)){
@@ -25,7 +28,7 @@ fn _env_int_or(str: key, int: fallback): int {
    fallback
 }
 
-fn _truthy(any: v, bool: fallback=false): bool {
+fn _truthy(any v, bool fallback=false) bool {
    if(v == nil || v == 0){ return fallback }
    if(is_int(v)){ return v != 0 }
    if(is_str(v)){
@@ -35,7 +38,7 @@ fn _truthy(any: v, bool: fallback=false): bool {
    v ? true : false
 }
 
-fn _verbose_default(): bool {
+fn _verbose_default() bool {
    def v = env("NY_NET_VERBOSE")
    if(v == nil || v == 0){ return false }
    if(is_int(v)){ return v != 0 }
@@ -43,21 +46,23 @@ fn _verbose_default(): bool {
    _truthy(v, false)
 }
 
-fn level_value(any: level): int {
+fn level_value(any level) int {
    "Returns numeric log severity: quiet=0, error=1, info=2, debug=3, trace=4."
    if(level == nil || level == 0){ return 0 }
    if(is_int(level)){ return level }
    if(!is_str(level)){ return level ? 2 : 0 }
    def s = lower(strip(level))
-   if(s == "" || s == "quiet" || s == "none" || s == "off" || s == "false" || s == "0"){ return 0 }
-   if(s == "error" || s == "err"){ return 1 }
-   if(s == "info" || s == "notice"){ return 2 }
-   if(s == "debug" || s == "dbg" || s == "true" || s == "1"){ return 3 }
-   if(s == "trace" || s == "verbose" || s == "2"){ return 4 }
-   3
+   return case s {
+      "", "quiet", "none", "off", "false", "0" -> 0
+      "error", "err" -> 1
+      "info", "notice" -> 2
+      "debug", "dbg", "true", "1" -> 3
+      "trace", "verbose", "2" -> 4
+      _ -> 3
+   }
 }
 
-fn level_name(any: level): str {
+fn level_name(any level) str {
    "Normalizes a log level to quiet/error/info/debug/trace."
    def n = level_value(level)
    if(n <= 0){ return "quiet" }
@@ -67,7 +72,7 @@ fn level_name(any: level): str {
    "trace"
 }
 
-fn default_level(): str {
+fn default_level() str {
    "Returns the process-wide network log level."
    if(is_str(_default_level_override) && _default_level_override.len > 0){ return _default_level_override }
    def lv = env("NY_NET_LOG_LEVEL")
@@ -75,24 +80,24 @@ fn default_level(): str {
    _verbose_default() ? "debug" : "quiet"
 }
 
-fn set_default_level(any: level="debug"): str {
+fn set_default_level(any level="debug") str {
    "Sets the process-wide default network log level."
    _default_level_override = level_name(level)
    _default_level_override
 }
 
-fn timeout_ms(int: fallback=5000): int {
+fn timeout_ms(int fallback=5000) int {
    "Returns the process-wide network timeout in milliseconds."
    if(_default_timeout_ms >= 0){ return _default_timeout_ms }
    _env_int_or("NY_NET_TIMEOUT_MS", fallback)
 }
 
-fn chunk_size(): int {
+fn chunk_size() int {
    "Returns the process-wide default tube chunk size, or 0 for backend default."
    _default_chunk_size
 }
 
-fn color_enabled(any: options=0): bool {
+fn color_enabled(any options=0) bool {
    "Returns whether network logs should use ANSI color."
    if(is_dict(options) && options.get("color", nil) != nil){ return _truthy(options.get("color"), true) }
    if(_default_color >= 0){ return _default_color != 0 }
@@ -103,27 +108,29 @@ fn color_enabled(any: options=0): bool {
    true
 }
 
-fn _ansi_code(str: color, int: bold=0): str {
-   mut c = "0"
-   if(color == "red"){ c = "31" }
-   elif(color == "green"){ c = "32" }
-   elif(color == "yellow"){ c = "33" }
-   elif(color == "blue"){ c = "34" }
-   elif(color == "magenta"){ c = "35" }
-   elif(color == "cyan"){ c = "36" }
-   elif(color == "gray"){ c = "90" }
-   elif(color == "white"){ c = "37" }
+fn _ansi_code(str color, int bold=0) str {
+   def c = case color {
+      "red" -> "31"
+      "green" -> "32"
+      "yellow" -> "33"
+      "blue" -> "34"
+      "magenta" -> "35"
+      "cyan" -> "36"
+      "gray" -> "90"
+      "white" -> "37"
+      _ -> "0"
+   }
    if(bold != 0){ return "1;" + c }
    c
 }
 
-fn paint(str: s, str: color="", int: bold=0, any: options=0): str {
+fn paint(str s, str color="", int bold=0, any options=0) str {
    "Applies ANSI color when network color is enabled."
    if(!color_enabled(options) || color.len == 0){ return s }
    "\033[" + _ansi_code(color, bold) + "m" + s + "\033[0m"
 }
 
-fn _option_level(any: options): str {
+fn _option_level(any options) str {
    if(is_dict(options)){
       def lv = options.get("log_level", options.get("level", ""))
       if(is_str(lv) && strip(lv).len > 0){ return level_name(lv) }
@@ -132,19 +139,19 @@ fn _option_level(any: options): str {
    default_level()
 }
 
-fn log_enabled(any: options, str: want): bool {
+fn log_enabled(any options, str want) bool {
    "Returns true when the current/default network context enables `want`."
    level_value(_option_level(options)) >= level_value(want)
 }
 
-fn _level_color(str: lvl): str {
+fn _level_color(str lvl) str {
    if(lvl == "error"){ return "red" }
    if(lvl == "info"){ return "green" }
    if(lvl == "debug"){ return "cyan" }
    "gray"
 }
 
-fn log_line(str: tag, str: want, str: msg, any: options=0): int {
+fn log_line(str tag, str want, str msg, any options=0) int {
    "Prints a consistently formatted network log line when enabled."
    if(!log_enabled(options, want)){ return 0 }
    def lvl = level_name(want)
@@ -152,7 +159,7 @@ fn log_line(str: tag, str: want, str: msg, any: options=0): int {
    0
 }
 
-fn set_context(any: options=0): dict {
+fn set_context(any options=0) dict {
    "Updates process-wide network defaults."
    if(is_str(options) && strip(options).len > 0){
       set_default_level(options)
@@ -167,7 +174,7 @@ fn set_context(any: options=0): dict {
    context()
 }
 
-fn context(any: options=0): dict {
+fn context(any options=0) dict {
    "Returns or updates process-wide network context."
    if((is_str(options) && strip(options).len > 0) || is_dict(options)){ return set_context(options) }
    {
@@ -178,7 +185,7 @@ fn context(any: options=0): dict {
    }
 }
 
-if(comptime{ __main() }){
+#main {
    assert_eq(level_name("dbg"), "debug", "dbg alias")
    assert_eq(level_name("verbose"), "trace", "verbose alias")
    assert_eq(level_value("info"), 2, "info numeric level")
@@ -194,5 +201,5 @@ if(comptime{ __main() }){
    assert_eq(color_enabled(), false, "context color off")
    assert_eq(paint("ny", "cyan", 1), "ny", "paint disabled")
    assert_eq(log_enabled(0, "debug"), true, "debug enabled")
-   print("net context self-test ok")
+   print("✓ std.os.net.context self-test passed")
 }

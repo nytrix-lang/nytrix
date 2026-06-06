@@ -1,5 +1,8 @@
-;; Keywords: sound backend jack
+;; Keywords: sound backend jack os
 ;; JACK sound backend probing and playback integration.
+;; References:
+;; - std.os.sound.backend
+;; - std.os
 module std.os.sound.backend.jack(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use std.core
 use std.core.mem (cstr)
@@ -13,27 +16,78 @@ use std.os.sound.backend.shared as backend_shared
    #include <jack/jack.h> as "jack_"
    #include <jack/ringbuffer.h> as "jack_"
    extern "jack" {
-      fn _ny_jack_set_process_callback(ptr: client, fnptr: cb, ptr: arg): i32 as "jack_set_process_callback"
+      fn _ny_jack_set_process_callback(ptr client, fnptr cb, ptr arg) i32 as "jack_set_process_callback"
    }
 } #else {
-   fn _ny_jack_set_process_callback(..._args): i32 { -1 }
-   fn jack_ringbuffer_free(any: _rb): any { 0 }
-   fn jack_get_buffer_size(any: _client): int { 0 }
-   fn jack_ringbuffer_create(any: _bytes): any { 0 }
-   fn jack_get_ports(..._args): any { 0 }
-   fn jack_port_name(any: _port): any { 0 }
-   fn jack_connect(..._args): int { -1 }
-   fn jack_free(any: _ptr): any { 0 }
-   fn jack_ringbuffer_read_space(any: _rb): int { 0 }
-   fn jack_ringbuffer_read(..._args): int { 0 }
-   fn jack_port_get_buffer(..._args): any { 0 }
-   fn jack_client_open(..._args): any { 0 }
-   fn jack_client_close(any: _client): int { 0 }
-   fn jack_port_register(..._args): any { 0 }
-   fn jack_activate(any: _client): int { -1 }
-   fn jack_deactivate(any: _client): int { 0 }
-   fn jack_ringbuffer_write_space(any: _rb): int { 0 }
-   fn jack_ringbuffer_write(..._args): int { 0 }
+   fn _ny_jack_set_process_callback(..._args) i32 { -1 }
+   fn jack_ringbuffer_free(any _rb) any {
+      "Runs the jack ringbuffer free operation."
+      0
+   }
+   fn jack_get_buffer_size(any _client) int {
+      "Runs the jack get buffer size operation."
+      0
+   }
+   fn jack_ringbuffer_create(any _bytes) any {
+      "Runs the jack ringbuffer create operation."
+      0
+   }
+   fn jack_get_ports(..._args) any {
+      "Runs the jack get ports operation."
+      0
+   }
+   fn jack_port_name(any _port) any {
+      "Runs the jack port name operation."
+      0
+   }
+   fn jack_connect(..._args) int {
+      "Runs the jack connect operation."
+      -1
+   }
+   fn jack_free(any _ptr) any {
+      "Runs the jack free operation."
+      0
+   }
+   fn jack_ringbuffer_read_space(any _rb) int {
+      "Runs the jack ringbuffer read space operation."
+      0
+   }
+   fn jack_ringbuffer_read(..._args) int {
+      "Runs the jack ringbuffer read operation."
+      0
+   }
+   fn jack_port_get_buffer(..._args) any {
+      "Runs the jack port get buffer operation."
+      0
+   }
+   fn jack_client_open(..._args) any {
+      "Runs the jack client open operation."
+      0
+   }
+   fn jack_client_close(any _client) int {
+      "Runs the jack client close operation."
+      0
+   }
+   fn jack_port_register(..._args) any {
+      "Runs the jack port register operation."
+      0
+   }
+   fn jack_activate(any _client) int {
+      "Runs the jack activate operation."
+      -1
+   }
+   fn jack_deactivate(any _client) int {
+      "Runs the jack deactivate operation."
+      0
+   }
+   fn jack_ringbuffer_write_space(any _rb) int {
+      "Runs the jack ringbuffer write space operation."
+      0
+   }
+   fn jack_ringbuffer_write(..._args) int {
+      "Runs the jack ringbuffer write operation."
+      0
+   }
 } #endif
 def JACK_NO_START_SERVER = 0x01
 def JACK_PORT_IS_INPUT = 0x1
@@ -58,7 +112,7 @@ mut _streams = dict(8)
 mut _lib = 0
 mut _avail = -1
 
-fn _state_free(any: st): any {
+fn _state_free(any st) any {
    if(st == 0){ return nil }
    def rb = load64(st, _ST_RB)
    if(rb != 0){ jack_ringbuffer_free(rb) }
@@ -71,7 +125,7 @@ fn _state_free(any: st): any {
    free(st)
 }
 
-fn _state_new(any: client, int: channels, int: format): any {
+fn _state_new(any client, int channels, int format) any {
    def st = malloc(_ST_SIZE)
    if(st == 0){ return 0 }
    memset(st, 0, _ST_SIZE)
@@ -113,7 +167,7 @@ fn _state_new(any: client, int: channels, int: format): any {
    st
 }
 
-fn _connect_outputs(any: client, any: st): any {
+fn _connect_outputs(any client, any st) any {
    if(client == 0 || st == 0){ return nil }
    mut targets = jack_get_ports(client, 0, 0, JACK_PORT_IS_PHYSICAL | JACK_PORT_IS_INPUT)
    if(targets == 0){ targets = jack_get_ports(client, 0, 0, JACK_PORT_IS_INPUT) }
@@ -133,7 +187,7 @@ fn _connect_outputs(any: client, any: st): any {
    jack_free(targets)
 }
 
-fn _process_cb(any: nframes, any: arg): int {
+fn _process_cb(any nframes, any arg) int {
    if(arg == 0){ return 0 }
    def st = arg
    def channels = load64(st, _ST_CHANNELS)
@@ -174,25 +228,25 @@ fn _process_cb(any: nframes, any: arg): int {
    0
 }
 
-fn is_available(): bool {
+fn is_available() bool {
    "Returns whether the JACK backend is available on this host."
    def state = backend_shared.probe_linux_library_once(_avail, _lib, "jack", "jack_client_open")
    _avail, _lib = state.get(0), state.get(1)
    _avail == 1
 }
 
-fn init(any: ctx): any {
+fn init(any ctx) any {
    "Initializes JACK backend and appends default JACK device."
    backend_shared.init_output_device(ctx, is_available(), "JACK Default", "jack")
 }
 
-fn shutdown(any: ctx): any {
+fn shutdown(any ctx) any {
    "Shuts down JACK backend global state."
    if(ctx){ return 0 }
    0
 }
 
-fn stream_open(any: stream): any {
+fn stream_open(any stream) any {
    "Opens JACK client, registers output ports, and installs process callback."
    if(!is_available()){ return false }
    mut channels = stream.get("channels", 2)
@@ -239,7 +293,7 @@ fn stream_open(any: stream): any {
    stream
 }
 
-fn stream_start(any: stream): bool {
+fn stream_start(any stream) bool {
    "Activates JACK processing and auto-connects output ports."
    def client = stream.get("handle")
    if(client == 0){ return false }
@@ -249,7 +303,7 @@ fn stream_start(any: stream): bool {
    true
 }
 
-fn stream_stop(any: stream): any {
+fn stream_stop(any stream) any {
    "Deactivates and closes JACK stream resources."
    def client = stream.get("handle")
    if(client == 0){ return nil }
@@ -263,7 +317,7 @@ fn stream_stop(any: stream): any {
    stream = stream.set("handle", 0)
 }
 
-fn write(any: h, any: buf, int: frames, int: frame_bytes=4): bool {
+fn write(any h, any buf, int frames, int frame_bytes=4) bool {
    "Converts interleaved S16/F32 frames to float and writes into JACK ringbuffer."
    if(h == 0){ return false }
    if(frames <= 0){ return true }

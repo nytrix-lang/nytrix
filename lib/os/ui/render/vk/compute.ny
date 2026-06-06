@@ -1,6 +1,10 @@
-;; Keywords: render vulkan gpu compute
+;; Keywords: render vulkan gpu compute os ui
 ;; Compute-shader sidecars for glTF materials, IBL, refraction, and GI probes.
 ;; Provides stable shader strings and descriptors for renderer integration.
+;; References:
+;; - std.os.ui.render.vk
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
 module std.os.ui.render.vk.compute(compute_caps, compute_workgroups, gltf_material_compute_shader, speculative_gi_probe_shader, ibl_prefilter_shader, brdf_lut_shader, transmission_blur_shader, material_ext_resolve_shader, refraction_resolve_shader, compute_pass_desc, compute_feature_mask, COMPUTE_FEATURE_REFRACTION, COMPUTE_FEATURE_TRANSMISSION, COMPUTE_FEATURE_VOLUME, COMPUTE_FEATURE_DIFFUSE_TRANSMISSION, COMPUTE_FEATURE_SPECULAR_GI, COMPUTE_FEATURE_MESH_INSTANCING)
 use std.core
 
@@ -11,7 +15,8 @@ def COMPUTE_FEATURE_DIFFUSE_TRANSMISSION = 8
 def COMPUTE_FEATURE_SPECULAR_GI = 16
 def COMPUTE_FEATURE_MESH_INSTANCING = 32
 
-fn compute_caps(): dict {
+fn compute_caps() dict {
+   "Computes compute caps."
    return {
       "refraction_resolve": true,
       "transmission_blur": true,
@@ -22,14 +27,15 @@ fn compute_caps(): dict {
    }
 }
 
-fn compute_workgroups(int: count, int: local_size=64): int {
+fn compute_workgroups(int count, int local_size=64) int {
    "Ceil-divide element count by local workgroup size for dispatch sizing."
    if(count <= 0){ return 0 }
    def ls = local_size <= 0 ? 1 : local_size
    (count + ls - 1) / ls
 }
 
-fn compute_feature_mask(any: mat_info): int {
+fn compute_feature_mask(any mat_info) int {
+   "Computes compute feature mask."
    if(!is_dict(mat_info)){ return 0 }
    mut m = 0
    if(float(mat_info.get("refraction_factor", 0.0)) > 0.0){ m = bor(m, COMPUTE_FEATURE_REFRACTION) }
@@ -39,7 +45,8 @@ fn compute_feature_mask(any: mat_info): int {
    m
 }
 
-fn compute_pass_desc(any: name, str: shader, any: local_x=8, any: local_y=8, any: local_z=1): dict {
+fn compute_pass_desc(any name, str shader, any local_x=8, any local_y=8, any local_z=1) dict {
+   "Computes compute pass desc."
    return {
       "name": to_str(name),
       "stage": "comp",
@@ -50,7 +57,7 @@ fn compute_pass_desc(any: name, str: shader, any: local_x=8, any: local_y=8, any
    }
 }
 
-fn gltf_material_compute_shader(): str {
+fn gltf_material_compute_shader() str {
    "Future material resolve compute path. Inputs are deliberately abstract binding names for renderer-side wiring."
    "
    #version 450
@@ -79,7 +86,7 @@ fn gltf_material_compute_shader(): str {
    "
 }
 
-fn refraction_resolve_shader(): str {
+fn refraction_resolve_shader() str {
    "Screen-space refraction/rough transmission resolve. Wire sceneColor/depth/normal plus material extension G-buffer."
    "
    #version 450
@@ -105,7 +112,7 @@ fn refraction_resolve_shader(): str {
    "
 }
 
-fn speculative_gi_probe_shader(): str {
+fn speculative_gi_probe_shader() str {
    "Very small probe irradiance accumulator scaffold for future Sponza-scale GI."
    "
    #version 450
@@ -124,7 +131,7 @@ fn speculative_gi_probe_shader(): str {
    "
 }
 
-fn ibl_prefilter_shader(): str {
+fn ibl_prefilter_shader() str {
    "Unwired compute shader scaffold for specular IBL prefiltering."
    "
    #version 450
@@ -143,7 +150,7 @@ fn ibl_prefilter_shader(): str {
    "
 }
 
-fn brdf_lut_shader(): str {
+fn brdf_lut_shader() str {
    "Unwired split-sum BRDF LUT shader scaffold."
    "
    #version 450
@@ -159,7 +166,7 @@ fn brdf_lut_shader(): str {
    "
 }
 
-fn transmission_blur_shader(): str {
+fn transmission_blur_shader() str {
    "Unwired rough-transmission blur pass. Use after opaque color resolve and before transparent composite."
    "
    #version 450
@@ -180,7 +187,7 @@ fn transmission_blur_shader(): str {
    "
 }
 
-fn material_ext_resolve_shader(): str {
+fn material_ext_resolve_shader() str {
    "Unwired material-extension G-buffer writer. Intended to be generated into fragment or compute path later."
    "
    #version 450

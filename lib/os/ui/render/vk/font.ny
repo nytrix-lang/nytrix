@@ -1,5 +1,9 @@
-;; Keywords: render vulkan gpu font truetype
+;; Keywords: render vulkan gpu font truetype os ui
 ;; Vulkan font atlas upload, glyph cache, and text draw submission.
+;; References:
+;; - std.os.ui.render.vk
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
 module std.os.ui.render.vk.font(draw_text_batch, draw_text_runs, draw_text_runs_ptr, draw_text_runs_flat_ptr, draw_text_runs_flat_color_ptr, draw_terminal_line_ptr, __vkr_draw_text, __vkr_draw_text_glyph, _vkr_glyph_get_off, _vkr_glyph_present)
 use std.core
 use std.core.mem
@@ -17,7 +21,7 @@ def _TEXT_COORD_LIMIT = 1048576.0
 
 @inline
 @jit
-fn _text_safe_metric(any: v, f64: fallback=0.0): f64 {
+fn _text_safe_metric(any v, f64 fallback=0.0) f64 {
    def fv = fmath.float(v)
    if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return fallback }
    if(fv > _TEXT_METRIC_LIMIT){ return _TEXT_METRIC_LIMIT }
@@ -27,7 +31,7 @@ fn _text_safe_metric(any: v, f64: fallback=0.0): f64 {
 
 @inline
 @jit
-fn _text_safe_coord(any: v, f64: fallback=0.0): f64 {
+fn _text_safe_coord(any v, f64 fallback=0.0) f64 {
    def fv = fmath.float(v)
    if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return fallback }
    if(fv > _TEXT_COORD_LIMIT){ return _TEXT_COORD_LIMIT }
@@ -37,7 +41,7 @@ fn _text_safe_coord(any: v, f64: fallback=0.0): f64 {
 
 @inline
 @jit
-fn _text_safe_uv(any: v, f64: fallback=0.0): f64 {
+fn _text_safe_uv(any v, f64 fallback=0.0) f64 {
    def fv = fmath.float(v)
    if(fmath.is_nan(fv) || fmath.is_inf(fv)){ return fallback }
    if(fv < 0.0){ return 0.0 }
@@ -45,7 +49,13 @@ fn _text_safe_uv(any: v, f64: fallback=0.0): f64 {
    fv
 }
 
-fn _begin_text_batch(int: base_tex_id=-1): any {
+@inline
+@jit
+fn _text_baseline_y(any y, any ascent) f64 {
+   floor(_text_safe_coord(y, 0.0) + _text_safe_metric(ascent, 0.0) + 0.5)
+}
+
+fn _begin_text_batch(int base_tex_id=-1) any {
    set_ui_material(base_tex_id, 2, 12)
    set_mask(0)
    set_unlit(true)
@@ -53,7 +63,7 @@ fn _begin_text_batch(int: base_tex_id=-1): any {
    0
 }
 
-fn _set_text_page(int: base_tex_id): any {
+fn _set_text_page(int base_tex_id) any {
    "Binds the active font-atlas page through the material path, so glyph sampling
    never falls back to the default white texture."
    if(base_tex_id < 0){ return 0 }
@@ -77,7 +87,7 @@ fn _set_text_page(int: base_tex_id): any {
 mut _glyph_page_frame = -1
 mut _glyph_page_tex = -999999
 
-fn _ensure_glyph_text_page(int: tex_id): any {
+fn _ensure_glyph_text_page(int tex_id) any {
    if(tex_id < 0){ return 0 }
    if(_glyph_page_frame == _current_frame && _glyph_page_tex == tex_id &&
       _current_texture_id == tex_id && _current_tex_index == tex_id){
@@ -92,7 +102,7 @@ fn _ensure_glyph_text_page(int: tex_id): any {
 
 @inline
 @jit
-fn _store_text_glyph_vertex_full(any: v, f64: x, f64: y, f64: u, f64: uv, int: color_u32, int: tex_id): any {
+fn _store_text_glyph_vertex_full(any v, f64 x, f64 y, f64 u, f64 uv, int color_u32, int tex_id) any {
    store32_f32(v, x, _VKR_OFF_X)
    store32_f32(v, y, _VKR_OFF_Y)
    store32_f32(v, 0.0, _VKR_OFF_Z)
@@ -113,15 +123,15 @@ fn _store_text_glyph_vertex_full(any: v, f64: x, f64: y, f64: u, f64: uv, int: c
 
 @inline
 @jit
-fn _push_text_glyph_rect_unchecked(f64: x,
-   f64: y,
-   f64: w,
-   f64: h,
-   f64: u1,
-   f64: v1,
-   f64: u2,
-   f64: v2,
-   int: c): bool {
+fn _push_text_glyph_rect_unchecked(f64 x,
+   f64 y,
+   f64 w,
+   f64 h,
+   f64 u1,
+   f64 v1,
+   f64 u2,
+   f64 v2,
+   int c) bool {
    def p = _local_vertex_map + _vertex_offset
    def x2 = x + w
    def y2 = y + h
@@ -184,7 +194,7 @@ fn _push_text_glyph_rect_unchecked(f64: x,
 }
 
 @inline
-fn _vkr_draw_text_fast_inner(str: text, f64: x, f64: y, int: color_u32, any: glyphs_ptr, f64: line_h_f, any: font_info=0): any {
+fn _vkr_draw_text_fast_inner(str text, f64 x, f64 y, int color_u32, any glyphs_ptr, f64 line_h_f, any font_info=0) any {
    def n = text.len
    if(n <= 0){ return 0 }
    _prim_text_calls += 1
@@ -268,8 +278,61 @@ fn _vkr_draw_text_fast_inner(str: text, f64: x, f64: y, int: color_u32, any: gly
    0
 }
 
+@inline
 @jit
-fn _vkr_draw_text_runs_flat_inner(list: runs, int: color_u32, any: glyphs_ptr, any: ascent, any: line_h, int: stride=3, int: color_slot=-1): any {
+fn _vkr_ascii_run_tid(str text, int n, any page0) int {
+   if(!page0 || n <= 0){ return -1 }
+   mut i = 0
+   mut tid = -1
+   while(i < n){
+      def cp = load8(text, i) & 255
+      if(cp < 32 || cp >= 128){ return -1 }
+      def g_off = ptr_add(page0, cp * 48)
+      if(load32(g_off, 40) == 0){ return -1 }
+      def gt = load32(g_off, 36)
+      if(tid < 0){ tid = gt }
+      elif(gt != tid){ return -1 }
+      i += 1
+   }
+   tid
+}
+
+@jit
+fn _vkr_draw_text_ascii_run(str text, int n, f64 pen_x, f64 pen_y, int color_u32, any page0, int tex_id) int {
+   if(tex_id < 0 || !_check_flush(n * (_VKR_VERT_STRIDE * 6))){ return -1 }
+   if(_current_tex_index != tex_id){ _set_text_page(tex_id) }
+   mut glyph_count = 0
+   mut i = 0
+   while(i < n){
+      def cp = load8(text, i) & 255
+      def g_off = ptr_add(page0, cp * 48)
+      def bw = load32_f32(g_off, 12)
+      if(bw > 0.0){
+         def gx = floor(pen_x + load32_f32(g_off, 4) + 0.5)
+         def bh = load32_f32(g_off, 16)
+         def gy = floor(pen_y - load32_f32(g_off, 8) + 0.5)
+         def c = load32(g_off, 44) != 0 ? 0xFFFFFFFF : color_u32
+         _push_text_glyph_rect_unchecked(
+            gx,
+            gy,
+            bw,
+            bh,
+            load32_f32(g_off, 20),
+            load32_f32(g_off, 24),
+            load32_f32(g_off, 28),
+            load32_f32(g_off, 32),
+            c
+         )
+         glyph_count += 1
+      }
+      pen_x += load32_f32(g_off, 0)
+      i += 1
+   }
+   glyph_count
+}
+
+@jit
+fn _vkr_draw_text_runs_flat_inner(list runs, int color_u32, any glyphs_ptr, any ascent, any line_h, int stride=3, int color_slot=-1) any {
    def n = runs.len
    if(n < stride){ return 0 }
    def asc = float(ascent)
@@ -281,14 +344,37 @@ fn _vkr_draw_text_runs_flat_inner(list: runs, int: color_u32, any: glyphs_ptr, a
    def need = stride - 1
    while(ri + need < n){
       mut text = runs.get(ri, "")
-      if(!is_str(text)){ text = to_str(text) }
+      if(!is_str(text)){
+         ri += stride
+         continue
+      }
       def tn = text.len
       if(tn > 0){
          def run_color = (color_slot >= 0) ? int(runs.get(ri + color_slot, color_u32)) : int(color_u32)
+         def run_x = float(runs.get(ri + 1, 0.0))
+         def run_y = _text_baseline_y(runs.get(ri + 2, 0.0), asc)
+         def ascii_tid = _vkr_ascii_run_tid(text, tn, page0)
+         if(ascii_tid >= 0){
+            _prim_text_calls += 1
+            def added = _vkr_draw_text_ascii_run(
+               text,
+               tn,
+               run_x,
+               run_y,
+               run_color,
+               page0,
+               ascii_tid
+            )
+            if(added >= 0){
+               glyph_total += added
+               ri += stride
+               continue
+            }
+         }
          _prim_text_calls += 1
          if(!_check_flush(tn * (_VKR_VERT_STRIDE * 6))){ return 0 }
-         def pen_x0 = float(runs.get(ri + 1, 0.0))
-         mut pen_x, pen_y = pen_x0, float(runs.get(ri + 2, 0.0)) + asc
+         def pen_x0 = run_x
+         mut pen_x, pen_y = pen_x0, run_y
          mut v_off = _vertex_offset
          mut j = 0
          while(j < tn){
@@ -352,7 +438,8 @@ fn _vkr_draw_text_runs_flat_inner(list: runs, int: color_u32, any: glyphs_ptr, a
    0
 }
 
-fn draw_text_batch(int: font_id, list: lines, any: x, any: y, any: spacing, int: color_u32): any {
+@jit
+fn draw_text_batch(int font_id, list lines, any x, any y, any spacing, int color_u32) any {
    "Draws multiple lines of text in a single Nytrix call to minimize interpreter overhead."
    if(!_frame_open){ return 0 }
    def f = _font_get(font_id)
@@ -365,13 +452,14 @@ fn draw_text_batch(int: font_id, list: lines, any: x, any: y, any: spacing, int:
    mut i = 0
    def n_lines = lines.len
    while(i < n_lines){
-      _vkr_draw_text_fast_inner(to_str(lines.get(i)), float(x), float(y) + float(i) * float(spacing) + ascent, color_u32, gptr, line_h, 0)
+      _vkr_draw_text_fast_inner(to_str(lines.get(i)), float(x), _text_baseline_y(float(y) + float(i) * float(spacing), ascent), color_u32, gptr, line_h, 0)
       i += 1
    }
    0
 }
 
-fn draw_text_runs(int: font_id, list: runs, int: color_u32): any {
+@jit
+fn draw_text_runs(int font_id, list runs, int color_u32) any {
    "Draws arbitrary same-font/same-color text runs in one backend text batch."
    if(!_frame_open || !is_list(runs)){ return 0 }
    def n_runs = runs.len
@@ -386,13 +474,14 @@ fn draw_text_runs(int: font_id, list: runs, int: color_u32): any {
    mut i = 0
    while(i < n_runs){
       def run = runs.get(i, 0)
-      if(is_list(run) && run.len >= 3){ _vkr_draw_text_fast_inner(to_str(run.get(0, "")), float(run.get(1, 0.0)), float(run.get(2, 0.0)) + ascent, color_u32, gptr, line_h, 0) }
+      if(is_list(run) && run.len >= 3){ _vkr_draw_text_fast_inner(to_str(run.get(0, "")), float(run.get(1, 0.0)), _text_baseline_y(run.get(2, 0.0), ascent), color_u32, gptr, line_h, 0) }
       i += 1
    }
    0
 }
 
-fn draw_text_runs_ptr(int: font_id, list: runs, int: color_u32, any: glyphs_ptr, any: ascent, any: line_h): any {
+@jit
+fn draw_text_runs_ptr(int font_id, list runs, int color_u32, any glyphs_ptr, any ascent, any line_h) any {
    "Draws arbitrary same-font/same-color text runs using a pre-resolved glyph table."
    if(!_frame_open || !is_list(runs) || !glyphs_ptr){ return 0 }
    def n_runs = runs.len
@@ -407,7 +496,7 @@ fn draw_text_runs_ptr(int: font_id, list: runs, int: color_u32, any: glyphs_ptr,
          _vkr_draw_text_fast_inner(
             to_str(run.get(0, "")),
             float(run.get(1, 0.0)),
-            float(run.get(2, 0.0)) + asc,
+            _text_baseline_y(run.get(2, 0.0), asc),
             color_u32,
             glyphs_ptr,
             line_h_f,
@@ -420,7 +509,7 @@ fn draw_text_runs_ptr(int: font_id, list: runs, int: color_u32, any: glyphs_ptr,
 }
 
 @jit
-fn draw_text_runs_flat_ptr(int: font_id, list: runs, int: color_u32, any: glyphs_ptr, any: ascent, any: line_h): any {
+fn draw_text_runs_flat_ptr(int font_id, list runs, int color_u32, any glyphs_ptr, any ascent, any line_h) any {
    "Draws flat [text,x,y,...] runs using a pre-resolved glyph table."
    if(!_frame_open || !is_list(runs) || !glyphs_ptr){ return 0 }
    def n = runs.len
@@ -431,7 +520,7 @@ fn draw_text_runs_flat_ptr(int: font_id, list: runs, int: color_u32, any: glyphs
 }
 
 @jit
-fn draw_text_runs_flat_color_ptr(int: font_id, list: runs, any: glyphs_ptr, any: ascent, any: line_h): any {
+fn draw_text_runs_flat_color_ptr(int font_id, list runs, any glyphs_ptr, any ascent, any line_h) any {
    "Draws flat [text,x,y,color,...] runs using a pre-resolved glyph table."
    if(!_frame_open || !is_list(runs) || !glyphs_ptr){ return 0 }
    def n = runs.len
@@ -443,7 +532,7 @@ fn draw_text_runs_flat_color_ptr(int: font_id, list: runs, any: glyphs_ptr, any:
 
 @readonly
 @jit
-fn _vkr_glyph_get_off(any: glyphs_ptr, int: cp): any {
+fn _vkr_glyph_get_off(any glyphs_ptr, int cp) any {
    if(cp < 0 || cp >= 1114112){ return 0 }
    def page_idx = cp >> 8
    def page_ptr = load64(glyphs_ptr, page_idx * 8)
@@ -453,27 +542,28 @@ fn _vkr_glyph_get_off(any: glyphs_ptr, int: cp): any {
 
 @readonly
 @jit
-fn _vkr_glyph_present(any: glyphs_ptr, int: cp): bool {
+fn _vkr_glyph_present(any glyphs_ptr, int cp) bool {
    def off = _vkr_glyph_get_off(glyphs_ptr, cp)
    if(!off){ return false }
    load32(off, 40) != 0
 }
 
 @jit
-fn __vkr_draw_text(int: font_id, any: text, any: x, any: y, any: color, any: glyphs_ptr, any: ascent, any: line_h, any: out_info, bool: begin_batch=true): any {
+fn __vkr_draw_text(int font_id, any text, any x, any y, any color, any glyphs_ptr, any ascent, any line_h, any out_info, bool begin_batch=true) any {
    if(begin_batch){ _begin_text_batch() }
    if(!glyphs_ptr || !is_str(text)){ return 0 }
    _prim_text_calls += 1
    def n = text.len
    def line_h_f = float(line_h)
    def c_text = _vkr_color_u32(color)
+   def base_y = _text_baseline_y(y, ascent)
    if(!out_info){
-      _vkr_draw_text_fast_inner(text, float(x), float(y) + float(ascent), c_text, glyphs_ptr, line_h_f, 0)
+      _vkr_draw_text_fast_inner(text, float(x), base_y, c_text, glyphs_ptr, line_h_f, 0)
       return 0
    }
    if(!_check_flush(n * (_VKR_VERT_STRIDE * 6))){ return 0 }
    def pen_x0 = float(x)
-   mut pen_x, pen_y = pen_x0, float(y) + float(ascent)
+   mut pen_x, pen_y = pen_x0, base_y
    mut total_verts = 0
    def page0 = load64(glyphs_ptr, 0)
    def font_obj = _font_get(font_id)
@@ -503,7 +593,7 @@ fn __vkr_draw_text(int: font_id, any: text, any: x, any: y, any: color, any: gly
             cp = ((b0 & 7) << 18) | ((load8(text, i + 1) & 255 & 63) << 12) | ((load8(text, i + 2) & 255 & 63) << 6) | (load8(text, i + 3) & 255 & 63)
             step = 4
          } else {
-            cp = 63 ;; '?' fallback for invalid UTF-8
+            cp = 63
             step = 1
          }
          i += step
@@ -580,7 +670,7 @@ fn __vkr_draw_text(int: font_id, any: text, any: x, any: y, any: color, any: gly
    0
 }
 
-fn __vkr_draw_text_glyph(any: g_ptr, any: v, any: x, any: y, int: cp, any: color, any: tid): any {
+fn __vkr_draw_text_glyph(any g_ptr, any v, any x, any y, int cp, any color, any tid) any {
    if(!g_ptr || !_frame_open){ return 0 }
    if(!_check_flush(_VKR_VERT_STRIDE * 6)){ return 0 }
    mut g_off = _vkr_glyph_get_off(g_ptr, cp)
@@ -604,7 +694,8 @@ fn __vkr_draw_text_glyph(any: g_ptr, any: v, any: x, any: y, int: cp, any: color
 }
 
 @jit
-fn draw_terminal_line_ptr(any: line_ptr, int: co, f64: px, f64: baseline_y, f64: cw, any: glyphs_ptr, int: skip_mask, int: reverse_mask): any {
+fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, any glyphs_ptr, int skip_mask, int reverse_mask) any {
+   "Draws draw terminal line ptr."
    if(!line_ptr || !glyphs_ptr || !_frame_open || co <= 0){ return 0 }
    if(!_check_flush(co * _VKR_VERT_STRIDE * 6)){ return 0 }
    def page0 = load64(glyphs_ptr, 0)

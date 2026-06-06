@@ -1,5 +1,8 @@
-;; Keywords: sound backend pulse jack io input output stream alsa shared winmm
+;; Keywords: sound backend pulse jack io input output stream alsa shared winmm os
 ;; Sound backend facade for ALSA, PulseAudio, JACK, WinMM, and shared backend selection.
+;; References:
+;; - std.os.sound
+;; - std.os
 module std.os.sound.backend(init, shutdown, play, stop, is_playing, set_master_volume, get_master_volume, get_backend_name)
 use std.core
 use std.math (abs)
@@ -15,6 +18,10 @@ use std.os.sound.backend.io (
    FORMAT_S16LE, FORMAT_FLOAT32LE, get_backend_name as io_backend_name,
 )
 
+use std.os.sound.backend.alsa as alsa
+use std.os.sound.backend.jack as jack
+use std.os.sound.backend.pulse as pulse
+use std.os.sound.backend.winmm as winmm
 use std.os.sound.mixer as mixer
 
 mut _ctx = 0
@@ -32,14 +39,14 @@ mut _out_format = FORMAT_S16LE
 mut _prime_periods = -1
 mut _idle_sleep_ms = 0
 
-fn _is_debug(): bool { sound_debug.enabled() }
+fn _is_debug() bool { sound_debug.enabled() }
 
-fn _is_mix_debug(): bool {
+fn _is_mix_debug() bool {
    _debug_mix = common.cached_env_present(_debug_mix, "NY_AUDIO_DEBUG_MIX")
    _debug_mix == 1
 }
 
-fn _is_async_mode(): bool {
+fn _is_async_mode() bool {
    if(_async_mode == -1){
       def v = common.env_lower("NY_AUDIO_ASYNC")
       if(v.len == 0){
@@ -54,7 +61,7 @@ fn _is_async_mode(): bool {
    _async_mode == 1
 }
 
-fn _get_period_frames(): int {
+fn _get_period_frames() int {
    if(_period_frames > 0){ return _period_frames }
    mut pf = 1024
    if(_ctx && eq(io_backend_name(_ctx), "alsa")){ pf = 2048 } elif(_ctx && eq(io_backend_name(_ctx), "pulse")){ pf = 1024 }
@@ -63,7 +70,7 @@ fn _get_period_frames(): int {
    _period_frames
 }
 
-fn _get_output_rate(): int {
+fn _get_output_rate() int {
    if(_out_rate > 0){ return _out_rate }
    mut r, v = 48000, common.env_trim("NY_AUDIO_SAMPLE_RATE")
    if(v.len == 0){ v = common.env_trim("NY_AUDIO_RATE") }
@@ -75,31 +82,33 @@ fn _get_output_rate(): int {
    _out_rate
 }
 
-fn _get_output_format_pref(): int {
+fn _get_output_format_pref() int {
    def s = common.env_lower("NY_AUDIO_FORMAT")
-   if(s == "s16" || s == "s16le" || s == "int16"){ return FORMAT_S16LE }
-   if(s == "f32" || s == "float32" || s == "float32le"){ return FORMAT_FLOAT32LE }
-   FORMAT_S16LE
+   case s {
+      "", "s16", "s16le", "int16" -> FORMAT_S16LE
+      "f32", "float32", "float32le" -> FORMAT_FLOAT32LE
+      _ -> FORMAT_S16LE
+   }
 }
 
-fn _frame_bytes(): int {
+fn _frame_bytes() int {
    if(_out_format == FORMAT_FLOAT32LE){ return 8 }
    4
 }
 
-fn _get_prime_periods(): int {
+fn _get_prime_periods() int {
    if(_prime_periods >= 0){ return _prime_periods }
    _prime_periods = common.env_int_clamped("NY_AUDIO_PRIME_PERIODS", 0, 0, 8)
    _prime_periods
 }
 
-fn _get_idle_sleep_ms(): int {
+fn _get_idle_sleep_ms() int {
    if(_idle_sleep_ms > 0){ return _idle_sleep_ms }
    _idle_sleep_ms = common.env_int_clamped("NY_AUDIO_IDLE_SLEEP_MS", 2, 1, 50)
    _idle_sleep_ms
 }
 
-fn _prime_stream(): any {
+fn _prime_stream() any {
    def primes = _get_prime_periods()
    if(primes <= 0){ return nil }
    def period_frames = _get_period_frames()
@@ -115,7 +124,7 @@ fn _prime_stream(): any {
    free(mix_buf)
 }
 
-fn _start_mixer_thread(): bool {
+fn _start_mixer_thread() bool {
    if(_thread){ return true }
    if(_mtx == 0){
       _mtx = mutex_new()
@@ -133,7 +142,7 @@ fn _start_mixer_thread(): bool {
    true
 }
 
-fn _cleanup_partial(): any {
+fn _cleanup_partial() any {
    _running = false
    if(_thread){ thread_join(_thread) _thread = 0 }
    if(_stream){ outstream_destroy(_stream) _stream = 0 }
@@ -147,7 +156,7 @@ fn _cleanup_partial(): any {
    _idle_sleep_ms = 0
 }
 
-fn _do_init(bool: force_async=false): bool {
+fn _do_init(bool force_async=false) bool {
    if(_ctx != 0){ return true }
    if(_is_debug()){ print("Sound: Initializing context...") }
    def ctx = create()
@@ -204,12 +213,12 @@ fn _do_init(bool: force_async=false): bool {
    true
 }
 
-fn init(bool: force_async=false): bool {
+fn init(bool force_async=false) bool {
    "Initializes module state."
    _do_init(force_async)
 }
 
-fn _make_inst(any: sound, any: pitch, any: vol, bool: looping, any: pan): list {
+fn _make_inst(any sound, any pitch, any vol, bool looping, any pan) list {
    mut inst = list()
    inst = inst.append(sound)
    inst = inst.append(0.0)
@@ -220,7 +229,7 @@ fn _make_inst(any: sound, any: pitch, any: vol, bool: looping, any: pan): list {
    inst
 }
 
-fn _play_sync(any: sound, any: pitch=1.0, any: vol=1.0, bool: looping=false, any: pan=0.0): any {
+fn _play_sync(any sound, any pitch=1.0, any vol=1.0, bool looping=false, any pan=0.0) any {
    if(looping && _is_debug()){ print("Sound: sync mode ignores looping=true") }
    def period_frames = _get_period_frames()
    def buf_size = period_frames * _frame_bytes()
@@ -238,13 +247,13 @@ fn _play_sync(any: sound, any: pitch=1.0, any: vol=1.0, bool: looping=false, any
    inst
 }
 
-fn shutdown(): any {
+fn shutdown() any {
    "Shuts down module state."
    if(_is_debug()){ print("Sound: Shutting down...") }
    _cleanup_partial()
 }
 
-fn _audio_thread(any: arg): int {
+fn _audio_thread(any arg) int {
    def period_frames = _get_period_frames()
    def buf_size = period_frames * _frame_bytes()
    def out_rate = _get_output_rate()
@@ -298,7 +307,7 @@ fn _audio_thread(any: arg): int {
    0
 }
 
-fn play(any: sound, any: pitch=1.0, any: vol=1.0, bool: looping=false, any: pan=0.0): any {
+fn play(any sound, any pitch=1.0, any vol=1.0, bool looping=false, any pan=0.0) any {
    "Implements `play`."
    if(!_ctx && !_do_init()){ return 0 }
    if(!_thread && looping){ if(!_start_mixer_thread() && _is_debug()){ print("Sound: looping requested but mixer thread start failed; using sync mode.") } }
@@ -311,7 +320,7 @@ fn play(any: sound, any: pitch=1.0, any: vol=1.0, bool: looping=false, any: pan=
    inst
 }
 
-fn stop(any: inst_or_sound): any {
+fn stop(any inst_or_sound) any {
    "Implements `stop`."
    if(!_mtx || !_thread){ return nil }
    mutex_lock(_mtx)
@@ -326,7 +335,7 @@ fn stop(any: inst_or_sound): any {
    mutex_unlock(_mtx)
 }
 
-fn is_playing(any: inst): bool {
+fn is_playing(any inst) bool {
    "Returns whether playing."
    if(!_mtx || !_thread){ return false }
    mutex_lock(_mtx)
@@ -339,17 +348,29 @@ fn is_playing(any: inst): bool {
    playing
 }
 
-fn set_master_volume(any: vol): any {
+fn set_master_volume(any vol) any {
    "Sets master volume."
    _master_vol = vol + 0.0
 }
 
-fn get_master_volume(): f64 {
+fn get_master_volume() f64 {
    "Gets master volume."
    _master_vol
 }
 
-fn get_backend_name(): str {
+fn get_backend_name() str {
    "Gets backend name."
    return io_backend_name(_ctx)
+}
+
+#main {
+   assert(is_bool(alsa.is_available()) && is_bool(jack.is_available()) && is_bool(pulse.is_available()) && is_bool(winmm.is_available()), "sound backend availability")
+   assert(get_backend_name() == "none", "sound backend initial name")
+   assert(get_master_volume() == 1.0, "sound backend master volume default")
+   set_master_volume(0.5)
+   assert(get_master_volume() == 0.5, "sound backend master volume set")
+   assert(!is_playing(0), "sound backend not playing")
+   stop(0)
+   shutdown()
+   print("✓ std.os.sound.backend self-test passed")
 }

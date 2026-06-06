@@ -1,5 +1,8 @@
-;; Keywords: net socket remote tube process ssh
+;; Keywords: net socket remote tube process ssh os
 ;; Buffered tube-style interaction with TCP sockets, local processes, SSH, and transcripts.
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.remote(remote, connect, remote_retry, connect_retry, process, proc, shell, ssh, ssh_process, ssh_shell, tube, tube_fd, tube_process, tube_fixture, fixture, tube_replay, replay, transcript, transcript_text, tube_kind, fileno, pid, connected, context, set_context, set_default_level, default_level, set_level, set_log_level, log_level, set_verbose, verbose, set_chunk_size, set_timeout, buffered, unrecv, clean, send, sendline, send_after, sendafter, sendline_after, sendlineafter, recv, recvn, recv_line, recvline, recv_until, recvuntil, recv_all, recvall, expect, expect_map, shutdown_send, close, interactive)
 use std.core
 use std.core.str
@@ -10,24 +13,24 @@ use std.os.prim
 use std.os.sys as sys
 use std.os.time
 
-fn set_default_level(any: level="debug"): str {
+fn set_default_level(any level="debug") str {
    "Sets the default logging level for newly created tubes."
    netctx.set_default_level(level)
 }
 
-fn default_level(): str { return netctx.default_level() }
+fn default_level() str { return netctx.default_level() }
 
-fn set_context(any: options=0): dict {
+fn set_context(any options=0) dict {
    "Updates process-wide net context defaults for tubes and requests."
    netctx.set_context(options)
 }
 
-fn context(any: log_level=""): dict {
+fn context(any log_level="") dict {
    "Returns or updates net context. Use `context(log_level=\"debug\")` or `context({\"log_level\":\"trace\"})`."
    netctx.context(log_level)
 }
 
-fn _ctx(dict: io): str {
+fn _ctx(dict io) str {
    def host = io.get("host", "")
    def port = io.get("port", 0)
    def fd = io.get("fd", -1)
@@ -40,14 +43,14 @@ fn _ctx(dict: io): str {
    out
 }
 
-fn _log_enabled(any: io, str: want): bool {
+fn _log_enabled(any io, str want) bool {
    if(!is_dict(io)){ return false }
    netctx.level_value(io.get("level", "quiet")) >= netctx.level_value(want)
 }
 
-fn _level_enabled(any: level, str: want): bool { netctx.level_value(level) >= netctx.level_value(want) }
+fn _level_enabled(any level, str want) bool { netctx.level_value(level) >= netctx.level_value(want) }
 
-fn _log(any: io, str: want, str: msg): int {
+fn _log(any io, str want, str msg) int {
    if(is_dict(io) && _log_enabled(io, want)){
       def lvl = netctx.level_name(want)
       def color = (lvl == "error") ? "red" : (lvl == "info" ? "green" : (lvl == "debug" ? "cyan" : "gray"))
@@ -56,14 +59,14 @@ fn _log(any: io, str: want, str: msg): int {
    0
 }
 
-fn _log_connect(str: host, int: port, any: level, str: msg): int {
+fn _log_connect(str host, int port, any level, str msg) int {
    if(_level_enabled(level, "info")){ print(netctx.paint("[net info]", "green", 1) + " tube " + host + ":" + to_str(port) + " " + msg) }
    0
 }
 
-fn _is_printable_ascii(int: b): bool { b >= 32 && b <= 126 }
+fn _is_printable_ascii(int b) bool { b >= 32 && b <= 126 }
 
-fn _hexdump_preview(str: s, int: max_bytes=96): str {
+fn _hexdump_preview(str s, int max_bytes=96) str {
    def n = s.len
    def take = (n < max_bytes) ? n : max_bytes
    mut hex_b = Builder(take * 2 + 8)
@@ -83,12 +86,12 @@ fn _hexdump_preview(str: s, int: max_bytes=96): str {
    hex + " |" + asc + "|"
 }
 
-fn _trace(dict: io, str: dir, str: op, str: data): int {
+fn _trace(dict io, str dir, str op, str data) int {
    if(_log_enabled(io, "debug")){ print(netctx.paint("[net debug]", "cyan", 0) + " " + _ctx(io) + " " + netctx.paint(dir, dir == "[>]" ? "yellow" : "magenta", 1) + " " + op + " " + to_str(data.len) + "B " + _hexdump_preview(data)) }
    0
 }
 
-fn _record(dict: io, str: op, str: data): int {
+fn _record(dict io, str op, str data) int {
    mut rows = io.get("transcript", 0)
    if(!is_list(rows)){ rows = list(8) }
    rows = rows.append({"op": op, "data": data, "size": data.len})
@@ -96,7 +99,7 @@ fn _record(dict: io, str: op, str: data): int {
    0
 }
 
-fn tube_fd(int: fd, any: host="", any: port=0, any: level="", int: timeout_ms=-1, int: chunk_size=0): dict {
+fn tube_fd(int fd, any host="", any port=0, any level="", int timeout_ms=-1, int chunk_size=0) dict {
    "Wraps an existing TCP socket fd in a buffered remote tube."
    mut io = dict(20)
    io = io.set("kind", "tcp")
@@ -124,9 +127,9 @@ fn tube_fd(int: fd, any: host="", any: port=0, any: level="", int: timeout_ms=-1
    return io
 }
 
-fn tube(int: fd): dict { return tube_fd(fd) }
+fn tube(int fd) dict { return tube_fd(fd) }
 
-fn tube_process(any: p, any: name="process", any: level="", int: timeout_ms=-1, int: chunk_size=0): dict {
+fn tube_process(any p, any name="process", any level="", int timeout_ms=-1, int chunk_size=0) dict {
    "Wraps a `std.os.io.spawn` process object as a buffered tube."
    if(!is_dict(p)){ return tube_fd(-1, name, 0, level, timeout_ms, chunk_size) }
    mut io = tube_fd(-1, name, 0, level, timeout_ms, chunk_size)
@@ -138,7 +141,7 @@ fn tube_process(any: p, any: name="process", any: level="", int: timeout_ms=-1, 
    io
 }
 
-fn tube_fixture(any: data="", any: level="", int: chunk_size=0): dict {
+fn tube_fixture(any data="", any level="", int chunk_size=0) dict {
    "Creates an offline tube backed by scripted receive bytes."
    if(!is_str(data)){ data = to_str(data) }
    mut io = tube_fd(-1, "fixture", 0, level, 0, chunk_size)
@@ -151,9 +154,9 @@ fn tube_fixture(any: data="", any: level="", int: chunk_size=0): dict {
    io
 }
 
-fn fixture(any: data="", any: level="", int: chunk_size=0): dict { return tube_fixture(data, level, chunk_size) }
+fn fixture(any data="", any level="", int chunk_size=0) dict { return tube_fixture(data, level, chunk_size) }
 
-fn tube_replay(any: rows, any: level="", int: chunk_size=0): dict {
+fn tube_replay(any rows, any level="", int chunk_size=0) dict {
    "Creates a fixture tube from transcript rows, replaying received bytes."
    if(is_str(rows)){ return tube_fixture(rows, level, chunk_size) }
    mut script = ""
@@ -172,21 +175,21 @@ fn tube_replay(any: rows, any: level="", int: chunk_size=0): dict {
    tube_fixture(script, level, chunk_size)
 }
 
-fn replay(any: rows, any: level="", int: chunk_size=0): dict { return tube_replay(rows, level, chunk_size) }
+fn replay(any rows, any level="", int chunk_size=0) dict { return tube_replay(rows, level, chunk_size) }
 
-fn process(str: path, list: args=[], any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn process(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts a local process and returns a buffered tube over its stdin/stdout."
    def p = pio.spawn(path, args)
    if(p == 0){ return 0 }
    tube_process(p, path, level, timeout_ms, chunk_size)
 }
 
-fn proc(str: path, list: args=[], any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn proc(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Alias for `process`."
    process(path, args, level, timeout_ms, chunk_size)
 }
 
-fn shell(str: command, any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn shell(str command, any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts the platform shell as a buffered process tube."
    #windows {
       return process("cmd", ["/c", command], level, timeout_ms, chunk_size)
@@ -195,12 +198,12 @@ fn shell(str: command, any: level="", int: timeout_ms=-1, int: chunk_size=0): an
    } #endif
 }
 
-fn _ssh_target(str: host, any: user=""): str {
+fn _ssh_target(str host, any user="") str {
    if(is_str(user) && strip(user).len > 0){ return strip(user) + "@" + host }
    host
 }
 
-fn _ssh_base_args(str: host, any: user="", int: port=22, list: options=[]): list {
+fn _ssh_base_args(str host, any user="", int port=22, list options=[]) list {
    mut argv = []
    if(port > 0 && port != 22){
       argv = argv.append("-p")
@@ -215,7 +218,7 @@ fn _ssh_base_args(str: host, any: user="", int: port=22, list: options=[]): list
    argv
 }
 
-fn _ssh_append_command(list: argv, any: command): list {
+fn _ssh_append_command(list argv, any command) list {
    if(command == nil || command == 0){ return argv }
    if(is_str(command)){
       if(command.len > 0){ argv = argv.append(command) }
@@ -231,30 +234,30 @@ fn _ssh_append_command(list: argv, any: command): list {
    argv
 }
 
-fn ssh(str: host, any: user="", int: port=22, any: command="", list: options=[], any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn ssh(str host, any user="", int port=22, any command="", list options=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts the local OpenSSH client as a tube. `command` may be a string or argv list."
    def argv = _ssh_append_command(_ssh_base_args(host, user, port, options), command)
    process("ssh", argv, level, timeout_ms, chunk_size)
 }
 
-fn ssh_process(str: host, list: command=[], any: user="", int: port=22, list: options=[], any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn ssh_process(str host, list command=[], any user="", int port=22, list options=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts an SSH command tube using a remote argv-style command list."
    ssh(host, user, port, command, options, level, timeout_ms, chunk_size)
 }
 
-fn ssh_shell(str: host, any: user="", int: port=22, list: options=[], any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn ssh_shell(str host, any user="", int port=22, list options=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts an interactive SSH shell tube using the local OpenSSH client."
    ssh(host, user, port, "", options, level, timeout_ms, chunk_size)
 }
 
-fn transcript(any: io): list {
+fn transcript(any io) list {
    "Returns transcript rows captured by a tube."
    if(!is_dict(io)){ return [] }
    def rows = io.get("transcript", 0)
    is_list(rows) ? rows : []
 }
 
-fn transcript_text(any: io): str {
+fn transcript_text(any io) str {
    "Returns a compact text rendering of the tube transcript."
    def rows = transcript(io)
    mut b, i = Builder(64), 0
@@ -268,14 +271,14 @@ fn transcript_text(any: io): str {
    out
 }
 
-fn tube_kind(any: io): str {
+fn tube_kind(any io) str {
    "Returns `tcp`, `process`, `fixture`, or `invalid`."
    if(!is_dict(io)){ return "invalid" }
    if(io.get("offline", false)){ return "fixture" }
    io.get("kind", "tcp")
 }
 
-fn remote(str: host, int: port, any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn remote(str host, int port, any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Connects to host:port and returns a buffered tube, or 0 on failure."
    def lvl = (is_str(level) && strip(level).len > 0) ? netctx.level_name(level) : netctx.default_level()
    _log_connect(host, port, lvl, "connect")
@@ -289,9 +292,9 @@ fn remote(str: host, int: port, any: level="", int: timeout_ms=-1, int: chunk_si
    return io
 }
 
-fn connect(str: host, int: port, any: level="", int: timeout_ms=-1, int: chunk_size=0): any { return remote(host, port, level, timeout_ms, chunk_size) }
+fn connect(str host, int port, any level="", int timeout_ms=-1, int chunk_size=0) any { return remote(host, port, level, timeout_ms, chunk_size) }
 
-fn remote_retry(str: host, int: port, int: retries=20, int: delay_ms=50, any: level="", int: timeout_ms=-1, int: chunk_size=0): any {
+fn remote_retry(str host, int port, int retries=20, int delay_ms=50, any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Connects with retries and returns a tube, or 0 on failure."
    if(retries < 1){ retries = 1 }
    if(delay_ms < 0){ delay_ms = 0 }
@@ -307,21 +310,21 @@ fn remote_retry(str: host, int: port, int: retries=20, int: delay_ms=50, any: le
    return 0
 }
 
-fn connect_retry(str: host, int: port, int: retries=20, int: delay_ms=50, any: level="", int: timeout_ms=-1, int: chunk_size=0): any { return remote_retry(host, port, retries, delay_ms, level, timeout_ms, chunk_size) }
+fn connect_retry(str host, int port, int retries=20, int delay_ms=50, any level="", int timeout_ms=-1, int chunk_size=0) any { return remote_retry(host, port, retries, delay_ms, level, timeout_ms, chunk_size) }
 
-fn fileno(any: io): int {
+fn fileno(any io) int {
    "Returns the underlying socket descriptor, or -1 for invalid/offline tubes."
    if(!is_dict(io)){ return -1 }
    return io.get("fd", -1)
 }
 
-fn pid(any: io): int {
+fn pid(any io) int {
    "Returns the process id for process/ssh/shell tubes, or -1 otherwise."
    if(!is_dict(io)){ return -1 }
    io.get("pid", -1)
 }
 
-fn connected(any: io): bool {
+fn connected(any io) bool {
    "Returns true while the tube is usable."
    if(!is_dict(io)){ return false }
    if(io.get("offline", false)){ return !io.get("closed", false) }
@@ -329,7 +332,7 @@ fn connected(any: io): bool {
    return io.get("fd", -1) >= 0 && !io.get("closed", false)
 }
 
-fn set_level(any: io, any: level="debug"): any {
+fn set_level(any io, any level="debug") any {
    "Sets the logging level on an existing tube."
    if(!is_dict(io)){ return io }
    def lvl = netctx.level_name(level)
@@ -339,23 +342,23 @@ fn set_level(any: io, any: level="debug"): any {
    return io
 }
 
-fn set_log_level(any: io, any: level="debug"): any { return set_level(io, level) }
+fn set_log_level(any io, any level="debug") any { return set_level(io, level) }
 
-fn log_level(any: io): str {
+fn log_level(any io) str {
    "Returns the tube logging level."
    if(!is_dict(io)){ return "quiet" }
    io.get("level", "quiet")
 }
 
-fn set_verbose(any: io, bool: on=true): any {
+fn set_verbose(any io, bool on=true) any {
    "Enables or disables debug-level tube logging."
    if(!is_dict(io)){ return io }
    return set_level(io, on ? "debug" : "quiet")
 }
 
-fn verbose(any: io, bool: on=true): any { return set_verbose(io, on) }
+fn verbose(any io, bool on=true) any { return set_verbose(io, on) }
 
-fn set_chunk_size(any: io, int: n): any {
+fn set_chunk_size(any io, int n) any {
    "Sets the maximum receive chunk size for a tube."
    if(!is_dict(io)){ return io }
    if(n < 1){ n = 1 }
@@ -364,7 +367,7 @@ fn set_chunk_size(any: io, int: n): any {
    return io
 }
 
-fn set_timeout(any: io, int: timeout_ms): any {
+fn set_timeout(any io, int timeout_ms) any {
    "Sets socket recv/send timeout for this tube in milliseconds."
    if(!is_dict(io)){ return io }
    if(timeout_ms < 0){ timeout_ms = 0 }
@@ -374,20 +377,20 @@ fn set_timeout(any: io, int: timeout_ms): any {
    return io
 }
 
-fn _buf(any: io): str {
+fn _buf(any io) str {
    if(!is_dict(io)){ return "" }
    def b = io.get("buf", "")
    return is_str(b) ? b : ""
 }
 
-fn _set_buf(any: io, str: b): any {
+fn _set_buf(any io, str b) any {
    if(is_dict(io)){ io.set("buf", b) }
    return io
 }
 
-fn buffered(any: io): int { "Returns the number of buffered receive bytes." return _buf(io).len }
+fn buffered(any io) int { "Returns the number of buffered receive bytes." return _buf(io).len }
 
-fn unrecv(any: io, any: data): int {
+fn unrecv(any io, any data) int {
    "Pushes bytes back to the front of the receive buffer."
    if(!is_dict(io) || !is_str(data)){ return -1 }
    _set_buf(io, data + _buf(io))
@@ -395,7 +398,7 @@ fn unrecv(any: io, any: data): int {
    return data.len
 }
 
-fn clean(any: io): str {
+fn clean(any io) str {
    "Returns and clears already-buffered bytes without blocking for more."
    def b = _buf(io)
    _set_buf(io, "")
@@ -403,7 +406,7 @@ fn clean(any: io): str {
    return b
 }
 
-fn _read_more(dict: io, int: want): str {
+fn _read_more(dict io, int want) str {
    if(!connected(io)){ return "" }
    if(want < 1){ want = io.get("chunk", 4096) }
    if(want > 1048576){ want = 1048576 }
@@ -447,7 +450,7 @@ fn _read_more(dict: io, int: want): str {
    return ""
 }
 
-fn _send_all(any: io, any: data): int {
+fn _send_all(any io, any data) int {
    "Sends all bytes in `data`."
    if(!is_dict(io) || !is_str(data) || !connected(io)){ return -1 }
    def _trace_ignore = (data.len > 0) ? _trace(io, "[>]", "send", data) : 0
@@ -471,15 +474,15 @@ fn _send_all(any: io, any: data): int {
    return off
 }
 
-fn send(any: io, any: data): int { return _send_all(io, data) }
+fn send(any io, any data) int { return _send_all(io, data) }
 
-fn sendline(any: io, any: data=""): int {
+fn sendline(any io, any data="") int {
    "Sends `data` followed by `\\n`."
    if(!is_str(data)){ data = to_str(data) }
    return _send_all(io, data + "\n")
 }
 
-fn _recv_take(any: io, any: n=4096): str {
+fn _recv_take(any io, any n=4096) str {
    "Receives up to `n` bytes, using the tube buffer first."
    if(!is_dict(io)){ return "" }
    if(!is_int(n) || n <= 0){ n = 4096 }
@@ -493,9 +496,9 @@ fn _recv_take(any: io, any: n=4096): str {
    return _read_more(io, n)
 }
 
-fn recv(any: io, any: n=4096): str { return _recv_take(io, n) }
+fn recv(any io, any n=4096) str { return _recv_take(io, n) }
 
-fn recvn(any: io, int: n): str {
+fn recvn(any io, int n) str {
    "Receives up to exactly `n` bytes, stopping early on EOF."
    if(!is_dict(io) || n <= 0){ return "" }
    mut out = Builder(n + 1)
@@ -511,7 +514,7 @@ fn recvn(any: io, int: n): str {
    return s
 }
 
-fn recv_until(any: io, any: needle, bool: drop=false, int: max_bytes=65536): str {
+fn recv_until(any io, any needle, bool drop=false, int max_bytes=65536) str {
    "Receives until `needle` appears. Extra bytes after the needle remain buffered."
    if(!is_dict(io) || !is_str(needle)){ return "" }
    if(max_bytes <= 0){ max_bytes = 65536 }
@@ -537,13 +540,13 @@ fn recv_until(any: io, any: needle, bool: drop=false, int: max_bytes=65536): str
    return acc
 }
 
-fn recvuntil(any: io, any: needle, bool: drop=false, int: max_bytes=65536): str { return recv_until(io, needle, drop, max_bytes) }
+fn recvuntil(any io, any needle, bool drop=false, int max_bytes=65536) str { return recv_until(io, needle, drop, max_bytes) }
 
-fn recv_line(any: io, bool: keepends=true, int: max_bytes=65536): str { return recv_until(io, "\n", !keepends, max_bytes) }
+fn recv_line(any io, bool keepends=true, int max_bytes=65536) str { return recv_until(io, "\n", !keepends, max_bytes) }
 
-fn recvline(any: io, bool: keepends=true, int: max_bytes=65536): str { return recv_line(io, keepends, max_bytes) }
+fn recvline(any io, bool keepends=true, int max_bytes=65536) str { return recv_line(io, keepends, max_bytes) }
 
-fn recv_all(any: io, int: max_bytes=65536): str {
+fn recv_all(any io, int max_bytes=65536) str {
    "Receives until EOF or `max_bytes` is reached."
    if(!is_dict(io)){ return "" }
    mut b = Builder(max(16, max_bytes + 8))
@@ -566,9 +569,9 @@ fn recv_all(any: io, int: max_bytes=65536): str {
    return out
 }
 
-fn recvall(any: io, int: max_bytes=65536): str { return recv_all(io, max_bytes) }
+fn recvall(any io, int max_bytes=65536) str { return recv_all(io, max_bytes) }
 
-fn expect(any: io, any: needles, int: max_bytes=65536): list {
+fn expect(any io, any needles, int max_bytes=65536) list {
    "Receives until any string in `needles` appears. Returns `[idx, buf]`."
    if(!is_list(needles) || needles.len == 0){ return [-1, ""] }
    mut buf = _buf(io)
@@ -605,7 +608,7 @@ fn expect(any: io, any: needles, int: max_bytes=65536): list {
    return [-1, buf]
 }
 
-fn expect_map(any: io, any: mapping, int: max_bytes=65536): list {
+fn expect_map(any io, any mapping, int max_bytes=65536) list {
    "Like `expect`, but maps matched needle to a caller-provided tag."
    if(!is_dict(mapping)){ return [nil, ""] }
    def ks = mapping.keys()
@@ -616,26 +619,28 @@ fn expect_map(any: io, any: mapping, int: max_bytes=65536): list {
    return [mapping.get(key, nil), res.get(1, "")]
 }
 
-fn send_after(any: io, any: needle, any: data, int: max_bytes=65536): str {
+fn _send_after_impl(any io, any needle, any data, bool newline, int max_bytes) str {
+   def seen = recv_until(io, needle, false, max_bytes)
+   if(newline && !is_str(data)){ data = to_str(data) }
+   _send_all(io, newline ? data + "\n" : data)
+   return seen
+}
+
+fn send_after(any io, any needle, any data, int max_bytes=65536) str {
    "Receives through `needle`, then sends `data`."
-   def seen = recv_until(io, needle, false, max_bytes)
-   _send_all(io, data)
-   return seen
+   _send_after_impl(io, needle, data, false, max_bytes)
 }
 
-fn sendafter(any: io, any: needle, any: data, int: max_bytes=65536): str { return send_after(io, needle, data, max_bytes) }
+fn sendafter(any io, any needle, any data, int max_bytes=65536) str { return send_after(io, needle, data, max_bytes) }
 
-fn sendline_after(any: io, any: needle, any: data, int: max_bytes=65536): str {
+fn sendline_after(any io, any needle, any data, int max_bytes=65536) str {
    "Receives through `needle`, then sends `data` plus a newline."
-   def seen = recv_until(io, needle, false, max_bytes)
-   if(!is_str(data)){ data = to_str(data) }
-   _send_all(io, data + "\n")
-   return seen
+   _send_after_impl(io, needle, data, true, max_bytes)
 }
 
-fn sendlineafter(any: io, any: needle, any: data, int: max_bytes=65536): str { return sendline_after(io, needle, data, max_bytes) }
+fn sendlineafter(any io, any needle, any data, int max_bytes=65536) str { return sendline_after(io, needle, data, max_bytes) }
 
-fn shutdown_send(any: io): int {
+fn shutdown_send(any io) int {
    "Closes the sending side for process tubes. Socket tubes currently return 0."
    if(!is_dict(io)){ return -1 }
    if(io.get("kind", "tcp") == "process"){
@@ -646,7 +651,7 @@ fn shutdown_send(any: io): int {
    return 0
 }
 
-fn close(any: io): int {
+fn close(any io) int {
    "Closes a tube and returns the backend close status."
    if(!is_dict(io)){ return -1 }
    def fd = io.get("fd", -1)
@@ -663,7 +668,7 @@ fn close(any: io): int {
    return 0
 }
 
-fn _write_fd(int: fd, any: data): int {
+fn _write_fd(int fd, any data) int {
    if(!is_str(data)){ data = to_str(data) }
    mut off = 0
    while(off < data.len){
@@ -678,7 +683,7 @@ fn _write_fd(int: fd, any: data): int {
    off
 }
 
-fn _read_stdin_byte(): str {
+fn _read_stdin_byte() str {
    def p = malloc(2)
    if(!p){ return "" }
    match sys.sys_read(0, p, 1){
@@ -691,7 +696,7 @@ fn _read_stdin_byte(): str {
    }
 }
 
-fn _interactive_opt_bool(any: options, str: key, bool: fallback): bool {
+fn _interactive_opt_bool(any options, str key, bool fallback) bool {
    if(!is_dict(options)){ return fallback }
    def v = options.get(key, fallback)
    if(is_int(v)){ return v != 0 }
@@ -702,7 +707,7 @@ fn _interactive_opt_bool(any: options, str: key, bool: fallback): bool {
    v ? true : false
 }
 
-fn interactive(any: io, int: max_read=4096, any: options=0): int {
+fn interactive(any io, int max_read=4096, any options=0) int {
    "Interactive tube bridge: forwards remote output to stdout and raw stdin to the tube. Ctrl-D detaches."
    if(!is_dict(io)){ return -1 }
    if(max_read <= 0){ max_read = 4096 }
@@ -731,4 +736,54 @@ fn interactive(any: io, int: max_read=4096, any: options=0): int {
       if(chunk.len == 0 && !did_input){ msleep(10) }
    }
    return 0
+}
+
+#main {
+   assert_eq(set_default_level("trace"), "trace", "remote default log level set")
+   assert_eq(default_level(), "trace", "remote default log level read")
+   def ctx = context(log_level="quiet")
+   assert_eq(ctx.get("log_level", ""), "quiet", "remote context log level")
+   def io = tube_fixture("user: ready\nmenu> token=abc\n", level="quiet")
+   assert(connected(io), "remote fixture connected")
+   assert_eq(sendlineafter(io, "user: ", "nytrix"), "user: ", "remote sendlineafter prompt")
+   assert_eq(io.get("sent", ""), "nytrix\n", "remote fixture sent buffer")
+   assert_eq(recvline(io), "ready\n", "remote fixture recvline")
+   def hit = expect(io, ["missing", "token="])
+   assert(hit.get(0) == 1 && hit.get(1) == "menu> token=", "remote expect indexed hit")
+   assert_eq(recvn(io, 4), "abc\n", "remote recvn tail")
+   assert(transcript(io).len >= 2 && find(transcript_text(io), "send") >= 0, "remote transcript")
+   def replay_io = tube_replay(transcript(io), level="quiet")
+   assert_eq(recvuntil(replay_io, "user: "), "user: ", "remote replay recvuntil")
+   close(io)
+   close(replay_io)
+   mut i = 0
+   while(i < 12){
+      def prefix = "case=" + to_str(i)
+      def line = "line-" + to_str(i)
+      def payload = prefix + "|" + line + "\nneedle-" + to_str(i) + "-END!tail"
+      def fz = tube_fd(-1, "fuzz", i, level="quiet", timeout_ms=0, chunk_size=(i % 7) + 1)
+      assert_eq(log_level(fz), "quiet", "remote fuzz log level")
+      assert_eq(fz.get("timeout_ms", -1), 0, "remote fuzz timeout")
+      assert_eq(fz.get("chunk", 0), (i % 7) + 1, "remote fuzz chunk")
+      assert_eq(unrecv(fz, payload), payload.len, "remote fuzz unrecv count")
+      assert_eq(buffered(fz), payload.len, "remote fuzz buffered count")
+      assert_eq(recvuntil(fz, "|"), prefix + "|", "remote fuzz recvuntil")
+      assert_eq(recvline(fz, false), line, "remote fuzz recvline drop newline")
+      def fhit = expect(fz, ["missing", "END"])
+      assert(fhit.get(0) == 1 && fhit.get(1) == "needle-" + to_str(i) + "-END", "remote fuzz expect")
+      assert_eq(recvn(fz, 5), "!tail", "remote fuzz recvn suffix")
+      assert_eq(buffered(fz), 0, "remote fuzz empty buffer")
+      assert_eq(unrecv(fz, "tail"), 4, "remote fuzz unrecv tail")
+      assert_eq(unrecv(fz, "head"), 4, "remote fuzz unrecv head")
+      assert_eq(recvn(fz, 8), "headtail", "remote fuzz unrecv prepend")
+      assert_eq(clean(fz), "", "remote fuzz clean empty")
+      assert_eq(send(fz, "x"), -1, "remote fuzz disconnected send")
+      assert_eq(close(fz), 0, "remote fuzz close")
+      i += 1
+   }
+   def dbg = tube_fd(-1, "fuzz", 999, level="quiet", timeout_ms=0)
+   set_verbose(dbg, false)
+   assert_eq(log_level(dbg), "quiet", "remote verbose false")
+   close(dbg)
+   print("✓ std.os.net.remote self-test passed")
 }

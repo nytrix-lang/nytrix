@@ -1,6 +1,9 @@
-;; Keywords: sound res
+;; Keywords: sound res os
 ;; Unified resource loader for sound and image files.
 ;; Uses libsndfile for sound.
+;; References:
+;; - std.os.sound
+;; - std.os
 module std.os.sound.res(init, shutdown, load, get_sound_info, get_image_info, clear_cache, is_cached)
 use std.core
 use std.core.error
@@ -19,20 +22,35 @@ use std.os.sound.source
    #link "libsndfile.so"
    #include <sndfile.h> as "sf_"
 } #else {
-   fn sf_open(any: _path, int: _mode, any: _info): any { 0 }
-   fn sf_error(any: _sf): int { 0 }
-   fn sf_error_number(int: _errnum): any { 0 }
-   fn sf_close(any: _sf): int { 0 }
-   fn sf_read_short(any: _sf, any: _ptr, int: _items): int { 0 }
+   fn sf_open(any _path, int _mode, any _info) any {
+      "Runs the sf open operation."
+      0
+   }
+   fn sf_error(any _sf) int {
+      "Runs the sf error operation."
+      0
+   }
+   fn sf_error_number(int _errnum) any {
+      "Runs the sf error number operation."
+      0
+   }
+   fn sf_close(any _sf) int {
+      "Runs the sf close operation."
+      0
+   }
+   fn sf_read_short(any _sf, any _ptr, int _items) int {
+      "Runs the sf read short operation."
+      0
+   }
 } #endif
 def SFM_READ = 0x10
 
-fn _sf_available(): bool {
+fn _sf_available() bool {
    "Checks whether libsndfile is available(linked via #include)."
    #linux { true } #else { false } #endif
 }
 
-fn _decode_sf(any: data): any {
+fn _decode_sf(any data) any {
    if(!_sf_available()){ return 0 }
    if(!is_str(data) || data.len < 16){ return 0 }
    def debug = sound_debug.enabled()
@@ -85,20 +103,20 @@ fn _decode_sf(any: data): any {
 mut _cache = dict(64)
 mut _mtx = 0
 
-fn init(): bool {
+fn init() bool {
    "Initializes the shared resource cache."
    if(_mtx == 0){ _mtx = mutex_new() }
    true
 }
 
-fn shutdown(): bool {
+fn shutdown() bool {
    "Clears cached resources and releases the cache mutex."
    clear_cache()
    if(_mtx != 0){ mutex_free(_mtx) _mtx = 0 }
    true
 }
 
-fn clear_cache(): bool {
+fn clear_cache() bool {
    "Drops all cached resource entries."
    if(_mtx == 0){ return true }
    mutex_lock(_mtx)
@@ -107,7 +125,7 @@ fn clear_cache(): bool {
    true
 }
 
-fn is_cached(any: filepath): bool {
+fn is_cached(any filepath) bool {
    "Returns whether `filepath` is already present in the resource cache."
    if(_mtx == 0){ return false }
    def full = path.normalize(filepath)
@@ -117,7 +135,7 @@ fn is_cached(any: filepath): bool {
    exists
 }
 
-fn load(any: filepath): any {
+fn load(any filepath) any {
    "Loads a sound or image asset from disk, caching successful results by normalized path."
    if(_mtx == 0){ init() }
    def full = path.normalize(filepath)
@@ -143,7 +161,7 @@ fn load(any: filepath): any {
    asset
 }
 
-fn get_sound_info(any: sound): any {
+fn get_sound_info(any sound) any {
    "Returns normalized metadata for a loaded sound source."
    if(!is_list(sound)){ return 0 }
    def tag = sound.get(0)
@@ -161,7 +179,7 @@ fn get_sound_info(any: sound): any {
    info
 }
 
-fn get_image_info(any: img): any {
+fn get_image_info(any img) any {
    "Returns normalized metadata for a loaded image."
    image.get_info(img)
 }

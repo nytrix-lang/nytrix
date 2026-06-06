@@ -1,11 +1,14 @@
-;; Keywords: render vulkan gpu state
+;; Keywords: render vulkan gpu state os ui
 ;; Shared Vulkan renderer state for frames, resources, debug counters, and cached handles.
-module std.os.ui.render.vk.state(_frame_draw_calls, _total_draw_calls, _static_vbo_ptr, _static_off_ptr, VERTEX_STRIDE, _VKR_VERT_STRIDE, _VKR_OFF_X, _VKR_OFF_Y, _VKR_OFF_Z, _VKR_OFF_U, _VKR_OFF_V, _VKR_OFF_C, _VKR_OFF_TEX, _VKR_OFF_NX, _VKR_OFF_NY, _VKR_OFF_NZ, _VKR_OFF_TX, _VKR_OFF_TY, _VKR_OFF_TZ, _VKR_OFF_TW, _VKR_OFF_U2, _VKR_OFF_V2, _VKR_GLYPH_STRIDE, _VKR_G_ADV, _VKR_G_XOFF, _VKR_G_YOFF, _VKR_G_BW, _VKR_G_BH, _VKR_G_U1, _VKR_G_V1, _VKR_G_U2, _VKR_G_V2, _VKR_G_TEX, _VKR_G_PRESENT, _VKR_G_IS_COLOR, _scratch_model_saved_a, _scratch_model_saved_b, _scratch_model_mul, _scratch_model_conv, _snapshot_model_matrix, _cfg_vsync, _cfg_filter, _cfg_vert_spv, _cfg_frag_spv, _cfg_msaa, _debug_gfx_enabled, _instance, _physical_device, _device, _graphics_queue, _present_queue, _graphics_family_index, _present_family_index, _surface, _surface_handle, _swapchain, _swapchain_image_count, _swapchain_images, _swapchain_image_views, _swapchain_format, _swapchain_extent_w, _swapchain_extent_h, _render_pass, _framebuffers, _depth_image, _depth_memory, _depth_view, _msaa_color_image, _msaa_color_memory, _msaa_color_view, _command_pool, _command_buffers, _descriptor_set_layout, _pipeline_layout, _pipeline, _nocull_pipeline, _unlit_pipeline, _unlit_nocull_pipeline, _line_pipeline, _point_pipeline, _wire_pipeline, _circle_pipeline, _ring_pipeline, _rounded_rect_pipeline, _flip_pipeline, _flip_unlit_pipeline, _skybox_pipeline, _skybox_ds_cache, _skybox_ds_tex_id, _mesh_opaque_pipeline, _mesh_opaque_nocull_pipeline, _mesh_opaque_nocull_flip_pipeline, _mesh_opaque_unlit_pipeline, _mesh_opaque_unlit_nocull_pipeline, _mesh_opaque_unlit_nocull_flip_pipeline, _mesh_alpha_pipeline, _mesh_alpha_nocull_pipeline, _mesh_alpha_nocull_flip_pipeline, _mesh_alpha_unlit_pipeline, _mesh_alpha_unlit_nocull_pipeline, _mesh_alpha_unlit_nocull_flip_pipeline, _mesh_alpha_flip_pipeline, _mesh_alpha_unlit_flip_pipeline, _mesh_fast_opaque_pipeline, _mesh_fast_opaque_nocull_pipeline, _mesh_fast_opaque_flip_pipeline, _mesh_fast_opaque_nocull_flip_pipeline, _mesh_fast_env_opaque_pipeline, _mesh_fast_env_opaque_nocull_pipeline, _mesh_fast_env_opaque_flip_pipeline, _mesh_fast_env_opaque_nocull_flip_pipeline, _vert_module, _frag_module, _frag_fast_module, _frag_fast_env_module, _is_wireframe, _descriptor_set_layout_ubo, _bindless_enabled, _bda_enabled, _bindless_ds, _ubo_enabled, _vertex_capacity, _current_frame_vertex_offset, _vertex_buffer, _vertex_buffer_raw, _vertex_memory, _vertex_map, _local_vertex_map, _vertex_offset, _last_flush_offset, _vertex_limit_hit, _dynamic_vbo_bound, _staging_buffer, _staging_memory, _staging_map, _staging_capacity, _static_mega_buffer, _static_mega_memory, _static_mega_capacity, _static_mega_used, _static_mega_index_buffer, _static_mega_index_memory, _static_mega_index_capacity, _static_mega_index_used, _ubo_buffer, _ubo_memory, _ubo_map, _ubo_staging, _ubo_map_size, _ubo_stride, _ubo_descriptor_sets, _default_texture, _default_normal_texture, _default_black_texture, _default_sampler, _nearest_sampler, _linear_sampler, _sampler_cache, _descriptor_pool, _textures, _texture_ds_cache, _material_ds_cache, _texture_fmt_cache, _free_texture_ids, _bindless_overflow_warned, _current_texture_id, _current_tex_index, _batch_texture_id, _batch_tex_index, _current_is_unlit, _last_is_unlit, _current_vc_mode, _last_vc_mode, _current_double_sided_lighting, _image_available_semaphores, _render_finished_semaphores, _in_flight_fences, _sem_avail_slab, _sem_finish_slab, _fences_slab, _cmd_bufs_slab, _ubo_ds_slab, _framebuffers_slab, _current_frame, _current_frame_cb, _current_frame_ubo_ds, _image_index, _total_frames, _pc_buffer, _pc_buffer_custom, _use_custom_pc, _current_mvp, _current_model, _frame_open, _window_ref, _upload_cb, _upload_alloc, _upload_bi, _upload_bar1, _upload_bar2, _upload_region, _upload_si, _upload_cb_arr, _upload_cb_ptr, _flush_off, _flush_buf, _last_bound_tex_id, _last_bound_ds, _last_bound_ubo_ds, _target_pipeline, _last_bound_pipe, _pc_dirty, _last_is_mask, _clear_ca, _clear_rect, _upload_fence, _upload_fence_ptr, _quad_template, _flush_reason, _flush_total, _flush_reason_tex, _flush_reason_pipe, _flush_reason_static, _flush_reason_special, _flush_reason_vertex_full, _pipeline_bind_count, _descriptor_bind_count, _prim_rect_quads, _prim_outline_quads, _prim_line_quads, _prim_raw_lines, _prim_raw_points, _prim_text_calls, _prim_text_glyphs, _last_prim_rect_quads, _last_prim_outline_quads, _last_prim_line_quads, _last_prim_raw_lines, _last_prim_raw_points, _last_prim_text_calls, _last_prim_text_glyphs, _frame_dynamic_draw_calls, _frame_static_draw_calls, _frame_indexed_draw_calls, _last_frame_draw_calls, _last_frame_dynamic_draw_calls, _last_frame_static_draw_calls, _last_frame_indexed_draw_calls, _last_flush_total, _last_pipeline_bind_count, _last_descriptor_bind_count, _last_submitted_vertices, _frame_begin_cpu_us, _frame_end_cpu_us, _frame_flush_cpu_us, _frame_sync_pc_cpu_us, _last_frame_begin_cpu_us, _last_frame_end_cpu_us, _last_frame_flush_cpu_us, _last_frame_sync_pc_cpu_us, _last_static_vbo, _last_static_vbo_off, _last_static_ibuf, _last_static_ibuf_off, _last_static_ibuf_type, _last_line_width, _upload_slab, _mat_slab, _frame_slab, _svbo_slab, _scene_capture_slab, _scene_capture_src_bar, _scene_capture_dst_bar, _scene_capture_copy_region, _readback_slab, _readback_ai, _readback_cb_p, _readback_bi, _readback_barrier, _readback_region, _readback_s_info, _capture_request, _capture_ready, _capture_pixels, _capture_w, _capture_h, _ptr_fence, _ptr_img_idx, _ptr_bi, _ptr_clear, _ptr_ri, _ptr_vp, _ptr_sci, _ptr_dsl, _ptr_ds, _ptr_sub, _ptr_wait_sems, _ptr_sig_sems, _ptr_stages, _clear_r, _clear_g, _clear_b, _clear_a, MAX_FRAMES_IN_FLIGHT, MAX_TEXTURES, _UBO_SIZE, _SCENE_LIGHT_MAX, _SCENE_LIGHT_UBO_SIZE, _fps_last_time, _fps_count, _fps_curr, _swapchain_recreate_pending, _swapchain_recreate_force, _pending_resize_w, _pending_resize_h, _frame_time_sec, _mvp_dirty, _model_dirty, _blit_tex_id, _current_window_flags, _cam_pos_x, _cam_pos_y, _cam_pos_z, _current_env_tex_id, _current_env_spec_tex_id, _last_metallic, _last_roughness, _current_metallic, _current_roughness, _current_base_color_u32, _current_metallic_roughness_u32, _current_emissive_u32, _current_emissive_tex_id, _current_emissive_uv_set, _current_base_tex_id, _current_normal_tex_id, _current_alpha_u32, _current_occlusion_tex_id, _current_occlusion_uv_set, _current_ext2_tex_word, _current_base_uv_xf0, _current_base_uv_xf1, _current_normal_uv_xf0, _current_normal_uv_xf1, _current_mr_uv_xf0, _current_mr_uv_xf1, _current_occlusion_uv_xf0, _current_occlusion_uv_xf1, _current_emissive_uv_xf0, _current_emissive_uv_xf1, _current_bsdf0_u32, _current_bsdf1_u32, _current_bsdf2_u32, _current_bsdf3_u32, _current_bsdf4_u32, _current_bsdf5_u32, _scene_light_count, _scene_light0_pos_type, _scene_light0_color_range, _scene_light0_dir_outer, _scene_light1_pos_type, _scene_light1_color_range, _scene_light1_dir_outer, _scene_lights_dirty, _scene_light_slab_src, _scene_light_slab_src_count, _scene_light_ubo_slab, _set_vertex_offset, _advance_vertex_offset, _model_matrix, _scratch_ident)
+;; References:
+;; - std.os.ui.render.vk
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
+module std.os.ui.render.vk.state(_frame_draw_calls, _total_draw_calls, _static_vbo_ptr, _static_off_ptr, VERTEX_STRIDE, _VKR_VERT_STRIDE, _VKR_OFF_X, _VKR_OFF_Y, _VKR_OFF_Z, _VKR_OFF_U, _VKR_OFF_V, _VKR_OFF_C, _VKR_OFF_TEX, _VKR_OFF_NX, _VKR_OFF_NY, _VKR_OFF_NZ, _VKR_OFF_TX, _VKR_OFF_TY, _VKR_OFF_TZ, _VKR_OFF_TW, _VKR_OFF_U2, _VKR_OFF_V2, _VKR_GLYPH_STRIDE, _VKR_G_ADV, _VKR_G_XOFF, _VKR_G_YOFF, _VKR_G_BW, _VKR_G_BH, _VKR_G_U1, _VKR_G_V1, _VKR_G_U2, _VKR_G_V2, _VKR_G_TEX, _VKR_G_PRESENT, _VKR_G_IS_COLOR, _scratch_model_saved_a, _scratch_model_saved_b, _scratch_model_mul, _scratch_model_conv, _snapshot_model_matrix, _cfg_vsync, _cfg_filter, _cfg_vert_spv, _cfg_frag_spv, _cfg_msaa, _debug_gfx_enabled, _instance, _physical_device, _device, _graphics_queue, _present_queue, _graphics_family_index, _present_family_index, _surface, _surface_handle, _swapchain, _swapchain_image_count, _swapchain_images, _swapchain_image_views, _swapchain_format, _swapchain_extent_w, _swapchain_extent_h, _render_pass, _framebuffers, _depth_image, _depth_memory, _depth_view, _msaa_color_image, _msaa_color_memory, _msaa_color_view, _command_pool, _command_buffers, _descriptor_set_layout, _pipeline_layout, _pipeline, _nocull_pipeline, _unlit_pipeline, _unlit_nocull_pipeline, _line_pipeline, _sdf_line_pipeline, _point_pipeline, _wire_pipeline, _circle_pipeline, _ring_pipeline, _rounded_rect_pipeline, _flip_pipeline, _flip_unlit_pipeline, _skybox_pipeline, _skybox_ds_cache, _skybox_ds_tex_id, _mesh_opaque_pipeline, _mesh_opaque_nocull_pipeline, _mesh_opaque_nocull_flip_pipeline, _mesh_opaque_unlit_pipeline, _mesh_opaque_unlit_nocull_pipeline, _mesh_opaque_unlit_nocull_flip_pipeline, _mesh_alpha_pipeline, _mesh_alpha_nocull_pipeline, _mesh_alpha_nocull_flip_pipeline, _mesh_alpha_unlit_pipeline, _mesh_alpha_unlit_nocull_pipeline, _mesh_alpha_unlit_nocull_flip_pipeline, _mesh_alpha_flip_pipeline, _mesh_alpha_unlit_flip_pipeline, _mesh_fast_opaque_pipeline, _mesh_fast_opaque_nocull_pipeline, _mesh_fast_opaque_flip_pipeline, _mesh_fast_opaque_nocull_flip_pipeline, _mesh_fast_env_opaque_pipeline, _mesh_fast_env_opaque_nocull_pipeline, _mesh_fast_env_opaque_flip_pipeline, _mesh_fast_env_opaque_nocull_flip_pipeline, _vert_module, _frag_module, _frag_fast_module, _frag_fast_env_module, _is_wireframe, _descriptor_set_layout_ubo, _bindless_enabled, _bda_enabled, _bindless_ds, _ubo_enabled, _vertex_capacity, _current_frame_vertex_offset, _vertex_buffer, _vertex_buffer_raw, _vertex_memory, _vertex_map, _local_vertex_map, _vertex_offset, _last_flush_offset, _vertex_limit_hit, _dynamic_vbo_bound, _staging_buffer, _staging_memory, _staging_map, _staging_capacity, _static_mega_buffer, _static_mega_memory, _static_mega_capacity, _static_mega_used, _static_mega_index_buffer, _static_mega_index_memory, _static_mega_index_capacity, _static_mega_index_used, _ubo_buffer, _ubo_memory, _ubo_map, _ubo_staging, _ubo_map_size, _ubo_stride, _ubo_descriptor_sets, _default_texture, _default_normal_texture, _default_black_texture, _default_sampler, _nearest_sampler, _linear_sampler, _sampler_cache, _descriptor_pool, _textures, _texture_ds_cache, _material_ds_cache, _texture_fmt_cache, _free_texture_ids, _bindless_overflow_warned, _current_texture_id, _current_tex_index, _batch_texture_id, _batch_tex_index, _current_is_unlit, _last_is_unlit, _current_vc_mode, _last_vc_mode, _current_double_sided_lighting, _image_available_semaphores, _render_finished_semaphores, _in_flight_fences, _sem_avail_slab, _sem_finish_slab, _fences_slab, _cmd_bufs_slab, _ubo_ds_slab, _framebuffers_slab, _current_frame, _current_frame_cb, _current_frame_ubo_ds, _image_index, _total_frames, _pc_buffer, _pc_buffer_custom, _use_custom_pc, _current_mvp, _current_model, _frame_open, _window_ref, _upload_cb, _upload_alloc, _upload_bi, _upload_bar1, _upload_bar2, _upload_region, _upload_si, _upload_cb_arr, _upload_cb_ptr, _flush_off, _flush_buf, _last_bound_tex_id, _last_bound_ds, _last_bound_ubo_ds, _target_pipeline, _last_bound_pipe, _pc_dirty, _last_is_mask, _clear_ca, _clear_rect, _upload_fence, _upload_fence_ptr, _quad_template, _flush_reason, _flush_total, _flush_reason_tex, _flush_reason_pipe, _flush_reason_static, _flush_reason_special, _flush_reason_vertex_full, _pipeline_bind_count, _descriptor_bind_count, _prim_rect_quads, _prim_outline_quads, _prim_line_quads, _prim_raw_lines, _prim_raw_points, _prim_text_calls, _prim_text_glyphs, _last_prim_rect_quads, _last_prim_outline_quads, _last_prim_line_quads, _last_prim_raw_lines, _last_prim_raw_points, _last_prim_text_calls, _last_prim_text_glyphs, _frame_dynamic_draw_calls, _frame_static_draw_calls, _frame_indexed_draw_calls, _last_frame_draw_calls, _last_frame_dynamic_draw_calls, _last_frame_static_draw_calls, _last_frame_indexed_draw_calls, _last_flush_total, _last_pipeline_bind_count, _last_descriptor_bind_count, _last_submitted_vertices, _frame_begin_cpu_us, _frame_end_cpu_us, _frame_flush_cpu_us, _frame_sync_pc_cpu_us, _last_frame_begin_cpu_us, _last_frame_end_cpu_us, _last_frame_flush_cpu_us, _last_frame_sync_pc_cpu_us, _last_static_vbo, _last_static_vbo_off, _last_static_ibuf, _last_static_ibuf_off, _last_static_ibuf_type, _last_line_width, _upload_slab, _mat_slab, _frame_slab, _svbo_slab, _scene_capture_slab, _scene_capture_src_bar, _scene_capture_dst_bar, _scene_capture_copy_region, _readback_slab, _readback_ai, _readback_cb_p, _readback_bi, _readback_barrier, _readback_region, _readback_s_info, _capture_request, _capture_ready, _capture_pixels, _capture_w, _capture_h, _ptr_fence, _ptr_img_idx, _ptr_bi, _ptr_clear, _ptr_ri, _ptr_vp, _ptr_sci, _ptr_dsl, _ptr_ds, _ptr_sub, _ptr_wait_sems, _ptr_sig_sems, _ptr_stages, _clear_r, _clear_g, _clear_b, _clear_a, MAX_FRAMES_IN_FLIGHT, MAX_TEXTURES, _UBO_SIZE, _SCENE_LIGHT_MAX, _SCENE_LIGHT_UBO_SIZE, _fps_last_time, _fps_count, _fps_curr, _swapchain_recreate_pending, _swapchain_recreate_force, _pending_resize_w, _pending_resize_h, _frame_time_sec, _mvp_dirty, _model_dirty, _blit_tex_id, _current_window_flags, _cam_pos_x, _cam_pos_y, _cam_pos_z, _current_env_tex_id, _current_env_spec_tex_id, _last_metallic, _last_roughness, _current_metallic, _current_roughness, _current_base_color_u32, _current_metallic_roughness_u32, _current_emissive_u32, _current_emissive_tex_id, _current_emissive_uv_set, _current_base_tex_id, _current_normal_tex_id, _current_alpha_u32, _current_occlusion_tex_id, _current_occlusion_uv_set, _current_ext2_tex_word, _current_base_uv_xf0, _current_base_uv_xf1, _current_normal_uv_xf0, _current_normal_uv_xf1, _current_mr_uv_xf0, _current_mr_uv_xf1, _current_occlusion_uv_xf0, _current_occlusion_uv_xf1, _current_emissive_uv_xf0, _current_emissive_uv_xf1, _current_bsdf0_u32, _current_bsdf1_u32, _current_bsdf2_u32, _current_bsdf3_u32, _current_bsdf4_u32, _current_bsdf5_u32, _scene_light_count, _scene_light0_pos_type, _scene_light0_color_range, _scene_light0_dir_outer, _scene_light1_pos_type, _scene_light1_color_range, _scene_light1_dir_outer, _scene_lights_dirty, _scene_light_slab_src, _scene_light_slab_src_count, _scene_light_ubo_slab, _set_vertex_offset, _advance_vertex_offset, _model_matrix, _scratch_ident)
 use std.core
 use std.os.ui.render.matrix
-use std.os.ui.render.matrix as render_matrix
 
-fn _state_alloc(any: size): any {
+fn _state_alloc(any size) any {
    def p = zalloc(size)
    if(!p){ panic("vulkan state allocation failed") }
    p
@@ -50,8 +53,6 @@ def _VKR_G_IS_COLOR = 44
 def MAX_TEXTURES = 4096
 def MAX_FRAMES_IN_FLIGHT = 4
 def _SCENE_LIGHT_MAX = 8
-
-;; Literal expression avoids sibling-module import-order folding in bundled std.
 def _SCENE_LIGHT_UBO_SIZE = 8 * 48
 def _UBO_SIZE = 8 * 48
 mut ?handle: _descriptor_set_layout_ubo = 0
@@ -62,7 +63,7 @@ mut _ubo_enabled = false
 mut ?handle: _ubo_buffer = 0
 mut ?handle: _ubo_memory = 0
 mut ?ptr: _ubo_map = 0
-mut ?ptr: _ubo_staging = 0 ;; Ny-heap mirror of UBO; store32_f32 here, then memcpy to _ubo_map
+mut ?ptr: _ubo_staging = 0
 mut _ubo_map_size = 0
 mut _ubo_stride = _UBO_SIZE
 mut _ubo_descriptor_sets = []
@@ -80,8 +81,8 @@ mut ?handle: _graphics_queue = 0
 mut ?handle: _present_queue = 0
 mut _graphics_family_index = 0
 mut _present_family_index = 0
-mut ?ptr: _surface = 0 ;; malloc'd 8-byte buffer holding raw VkSurfaceKHR
-mut ?handle: _surface_handle = 0 ;; cached raw handle for truthiness checks
+mut ?ptr: _surface = 0
+mut ?handle: _surface_handle = 0
 mut ?handle: _swapchain = 0
 mut _swapchain_image_count = 0
 mut _swapchain_images = []
@@ -130,14 +131,15 @@ mut ?handle: _mesh_fast_env_opaque_nocull_flip_pipeline = 0
 mut ?handle: _flip_pipeline = 0
 mut ?handle: _flip_unlit_pipeline = 0
 mut ?handle: _line_pipeline = 0
+mut ?handle: _sdf_line_pipeline = 0
 mut ?handle: _point_pipeline = 0
 mut ?handle: _wire_pipeline = 0
 mut ?handle: _circle_pipeline = 0
 mut ?handle: _ring_pipeline = 0
 mut ?handle: _rounded_rect_pipeline = 0
 mut ?handle: _skybox_pipeline = 0
-mut ?handle: _skybox_ds_cache = 0 ;; cached DS for the skybox texture (bindless-mode workaround)
-mut _skybox_ds_tex_id = -1 ;; tex_id the cached DS was created for
+mut ?handle: _skybox_ds_cache = 0
+mut _skybox_ds_tex_id = -1
 mut ?handle: _vert_module = 0
 mut ?handle: _frag_module = 0
 mut ?handle: _frag_fast_module = 0
@@ -158,11 +160,11 @@ mut ?handle: _staging_buffer = 0
 mut ?handle: _staging_memory = 0
 mut ?ptr: _staging_map = 0
 mut _staging_capacity = 134217728
-mut _capture_request = false
-mut _capture_ready = false
+mut bool: _capture_request = false
+mut bool: _capture_ready = false
 mut ?ptr: _capture_pixels = 0
-mut _capture_w = 0
-mut _capture_h = 0
+mut int: _capture_w = 0
+mut int: _capture_h = 0
 mut ?handle: _static_mega_buffer = 0
 mut ?handle: _static_mega_memory = 0
 mut _static_mega_capacity = 134217728
@@ -191,7 +193,7 @@ mut _batch_texture_id = -1
 mut _batch_tex_index = 0
 mut _current_is_unlit = 0
 mut _last_is_unlit = 0
-mut _current_vc_mode = 0 ;; 1 = vertex-color-primary, 4 = vertex-color-multiply
+mut _current_vc_mode = 0
 mut _last_vc_mode = 0
 mut _current_double_sided_lighting = 0
 mut _current_base_color = [1.0, 1.0, 1.0, 1.0]
@@ -239,19 +241,19 @@ mut ?ptr: _sem_finish_slab = 0
 mut ?ptr: _fences_slab     = 0
 mut ?ptr: _cmd_bufs_slab   = 0
 mut ?ptr: _ubo_ds_slab     = 0
-mut ?ptr: _framebuffers_slab = 0 ;; allocated dynamically when swapchain image count is known
+mut ?ptr: _framebuffers_slab = 0
 mut _current_frame = 0
 mut ?handle: _current_frame_cb = 0
 mut ?handle: _current_frame_ubo_ds = 0
 mut _image_index = 0
 mut _total_frames = 0
 mut ?ptr: _pc_buffer = 0
-mut ?ptr: _pc_buffer_custom = 0 ;; Separate buffer for custom pipeline push constants
+mut ?ptr: _pc_buffer_custom = 0
 mut ?ptr: _current_mvp = 0
 mut ?ptr: _current_model = 0
 mut _frame_open = false
 mut _window_ref = 0
-mut _use_custom_pc = false ;; Flag to use custom push constants
+mut _use_custom_pc = false
 mut ?ptr: _upload_slab = 0
 mut ?ptr: _mat_slab = 0
 mut ?ptr: _frame_slab = 0
@@ -376,25 +378,25 @@ mut _pending_resize_h = 0
 mut _mvp_dirty = true
 mut _model_dirty = true
 mut _blit_tex_id = -1
-mut _scratch_model_mul = render_matrix.mat4_identity()
-mut _scratch_model_conv = render_matrix.mat4_identity()
+mut _scratch_model_mul = mat4_identity()
+mut _scratch_model_conv = mat4_identity()
 
-fn _set_vertex_offset(any: n): int {
+fn _set_vertex_offset(any n) int {
    _vertex_offset = n
    0
 }
 
-fn _advance_vertex_offset(any: n): int {
+fn _advance_vertex_offset(any n) int {
    _vertex_offset += n
    0
 }
 
-fn _snapshot_model_matrix(any: dst): any {
+fn _snapshot_model_matrix(any dst) any {
    if(dst && _current_model){ memcpy(dst, _current_model, 64) return dst }
    return _scratch_ident
 }
 
 mut _scratch_model_saved_a = _state_alloc(72)
 mut _scratch_model_saved_b = _state_alloc(72)
-mut _model_matrix = render_matrix.mat4_identity()
-mut _scratch_ident = render_matrix.mat4_identity()
+mut _model_matrix = mat4_identity()
+mut _scratch_ident = mat4_identity()

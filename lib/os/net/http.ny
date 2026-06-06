@@ -1,7 +1,10 @@
-;; Keywords: net socket http web
+;; Keywords: net socket http web os
 ;; Hypertext Transfer Protocol (HTTP) Client for Nytrix
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc9110.html
+;; References:
+;; - std.os.net
+;; - std.os
 module std.os.net.http(_http_parse_url, http_request_raw, http_request, http_request_url, http_request_url_parsed, http_get, http_post, http_put, http_delete, http_get_parsed, http_post_parsed, http_put_parsed, http_delete_parsed, http_get_url, http_get_url_parsed, http_parse_url, http_parse_url_ex, http_parse_query, http_parse_response)
 use std.os.net.socket
 use std.core
@@ -11,18 +14,18 @@ use std.core.common as common
 
 def _HTTP_MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 
-fn _http_substr(str: s, int: a, int: b): str { slice(s, a, b, 1) }
+fn _http_substr(str s, int a, int b) str { slice(s, a, b, 1) }
 
-fn _http_strip_cr(any: s): str {
+fn _http_strip_cr(any s) str {
    if(!is_str(s)){ return "" }
    def n = s.len
    if(n > 0 && load8(s, n - 1) == 13){ return _http_substr(s, 0, n - 1) }
    s
 }
 
-fn _http_is_digit(int: c): bool { c >= 48 && c <= 57 }
+fn _http_is_digit(int c) bool { c >= 48 && c <= 57 }
 
-fn _http_all_digits(any: s): bool {
+fn _http_all_digits(any s) bool {
    if(!is_str(s)){ return false }
    def n = s.len
    if(n == 0){ return false }
@@ -34,7 +37,7 @@ fn _http_all_digits(any: s): bool {
    true
 }
 
-fn _http_atoi_hex(any: s): int {
+fn _http_atoi_hex(any s) int {
    if(!is_str(s)){ return 0 }
    def n = s.len
    mut i = 0
@@ -48,12 +51,12 @@ fn _http_atoi_hex(any: s): int {
    out
 }
 
-fn _http_default_port_for_scheme(any: scheme): int {
+fn _http_default_port_for_scheme(any scheme) int {
    if(lower(scheme) == "https"){ return 443 }
    80
 }
 
-fn _http_parse_port(any: pstr, int: default_port): int {
+fn _http_parse_port(any pstr, int default_port) int {
    if(!_http_all_digits(pstr)){ return default_port }
    def n = pstr.len
    if(n == 0 || n > 5){ return default_port }
@@ -62,26 +65,25 @@ fn _http_parse_port(any: pstr, int: default_port): int {
    p
 }
 
-fn _http_has_ctl(any: s): bool {
+fn _http_has_ctl(any s) bool {
    if(!is_str(s)){ return true }
    mut i = 0
    def n = s.len
    while(i < n){
-      def c = load8(s, i)
-      if(c == 0 || c == 10 || c == 13){ return true }
+      if(case load8(s, i){ 0, 10, 13 -> true _ -> false }){ return true }
       i += 1
    }
    false
 }
 
-fn _http_is_tchar(int: c): bool {
+fn _http_is_tchar(int c) bool {
    ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
       c == 33 || c == 35 || c == 36 || c == 37 || c == 38 || c == 39 ||
       c == 42 || c == 43 || c == 45 || c == 46 || c == 94 || c == 95 ||
    c == 96 || c == 124 || c == 126)
 }
 
-fn _http_valid_token(any: s): bool {
+fn _http_valid_token(any s) bool {
    if(!is_str(s)){ return false }
    def n = s.len
    if(n == 0){ return false }
@@ -93,7 +95,7 @@ fn _http_valid_token(any: s): bool {
    true
 }
 
-fn _http_parse_dec_bounded(any: s, int: max_v): int {
+fn _http_parse_dec_bounded(any s, int max_v) int {
    if(!_http_all_digits(s)){ return -1 }
    def n = s.len
    if(n == 0 || n > 10){ return -1 }
@@ -102,7 +104,7 @@ fn _http_parse_dec_bounded(any: s, int: max_v): int {
    v
 }
 
-fn _http_url_decode_component(any: s): str {
+fn _http_url_decode_component(any s) str {
    if(!is_str(s)){ return "" }
    def n = s.len
    mut b, i = Builder(n + 8), 0
@@ -130,35 +132,67 @@ fn _http_url_decode_component(any: s): str {
    out
 }
 
-fn _http_url_fields(): dict {
-   mut out = _d.dict(16)
-   out = out.set("ok", false)
-   out = out.set("scheme", "http")
-   out = out.set("userinfo", "")
-   out = out.set("authority", "")
-   out = out.set("host", "")
-   out = out.set("port", 80)
-   out = out.set("path", "/")
-   out = out.set("query", "")
-   out = out.set("fragment", "")
-   out = out.set("target", "/")
-   out
+fn _http_url_fields() dict {
+   {
+      "ok": false,
+      "scheme": "http",
+      "userinfo": "",
+      "authority": "",
+      "host": "",
+      "port": 80,
+      "path": "/",
+      "query": "",
+      "fragment": "",
+      "target": "/"
+   }
 }
 
-fn _http_response_fields(any: raw): dict {
-   mut out = _d.dict(16)
-   out = out.set("ok", false)
-   out = out.set("protocol", "")
-   out = out.set("status", 0)
-   out = out.set("reason", "")
-   out = out.set("headers", _d.dict(16))
-   out = out.set("raw_headers", "")
-   out = out.set("body", "")
-   out = out.set("raw", raw)
-   out
+fn _http_response_fields(any raw) dict {
+   {
+      "ok": false,
+      "protocol": "",
+      "status": 0,
+      "reason": "",
+      "headers": _d.dict(16),
+      "raw_headers": "",
+      "body": "",
+      "raw": raw
+   }
 }
 
-fn _http_parse_url_ex(any: url): dict {
+fn _http_authority_parts(str authority, int default_port) list {
+   mut userinfo = ""
+   mut host_port = authority
+   def at_idx = common.last_index_byte(authority, 64)
+   if(at_idx >= 0){
+      userinfo = _http_substr(authority, 0, at_idx)
+      host_port = _http_substr(authority, at_idx + 1, authority.len)
+   }
+   mut host = host_port
+   mut port = default_port
+   if(host_port.len > 0 && load8(host_port, 0) == 91){
+      def rb = find(host_port, "]")
+      if(rb >= 0){
+         host = _http_substr(host_port, 1, rb)
+         if(rb + 1 < host_port.len && load8(host_port, rb + 1) == 58){
+            port = _http_parse_port(_http_substr(host_port, rb + 2, host_port.len), default_port)
+         }
+      }
+   } else {
+      def colon = common.last_index_byte(host_port, 58)
+      if(colon > 0 && find(host_port, ":") == colon){
+         def pstr = _http_substr(host_port, colon + 1, host_port.len)
+         if(_http_all_digits(pstr)){
+            host = _http_substr(host_port, 0, colon)
+            port = _http_parse_port(pstr, default_port)
+         }
+      }
+   }
+   if(port <= 0){ port = default_port }
+   [userinfo, host, port]
+}
+
+fn _http_parse_url_ex(any url) dict {
    mut out = _http_url_fields()
    if(!is_str(url)){ return out }
    mut u = strip(url)
@@ -182,36 +216,9 @@ fn _http_parse_url_ex(any: url): dict {
       }
       i += 1
    }
-   mut authority = _http_substr(u, pos, auth_end)
-   mut userinfo = ""
-   mut host_port = authority
-   def at_idx = common.last_index_byte(authority, 64) ; @
-   if(at_idx >= 0){
-      userinfo = _http_substr(authority, 0, at_idx)
-      host_port = _http_substr(authority, at_idx + 1, authority.len)
-   }
-   mut host = host_port
-   mut port = default_port
-   if(host_port.len > 0 && load8(host_port, 0) == 91){
-      def rb = find(host_port, "]")
-      if(rb >= 0){
-         host = _http_substr(host_port, 1, rb)
-         if(rb + 1 < host_port.len && load8(host_port, rb + 1) == 58){
-            def pstr = _http_substr(host_port, rb + 2, host_port.len)
-            port = _http_parse_port(pstr, default_port)
-         }
-      }
-   } else {
-      def colon = common.last_index_byte(host_port, 58)
-      if(colon > 0 && find(host_port, ":") == colon){
-         def pstr = _http_substr(host_port, colon + 1, host_port.len)
-         if(_http_all_digits(pstr)){
-            host = _http_substr(host_port, 0, colon)
-            port = _http_parse_port(pstr, default_port)
-         }
-      }
-   }
-   if(port <= 0){ port = default_port }
+   def authority = _http_substr(u, pos, auth_end)
+   def auth = _http_authority_parts(authority, default_port)
+   def userinfo, host, port = auth[0], auth[1], auth[2]
    mut path = "/"
    mut query = ""
    mut fragment = ""
@@ -256,7 +263,7 @@ fn _http_parse_url_ex(any: url): dict {
    out
 }
 
-fn _http_parse_url(any: url): list {
+fn _http_parse_url(any url) list {
    def u = _http_parse_url_ex(url)
    def host = u.get("host", "")
    def port = u.get("port", 80)
@@ -264,7 +271,7 @@ fn _http_parse_url(any: url): list {
    return [host, port, target]
 }
 
-fn _http_read_all(int: fd, int: max_bytes=_HTTP_MAX_RESPONSE_BYTES): str {
+fn _http_read_all(int fd, int max_bytes=_HTTP_MAX_RESPONSE_BYTES) str {
    mut b = Builder(4096)
    mut total = 0
    while(1){
@@ -281,7 +288,7 @@ fn _http_read_all(int: fd, int: max_bytes=_HTTP_MAX_RESPONSE_BYTES): str {
    res
 }
 
-fn _http_has_header(any: headers, str: want_name): bool {
+fn _http_has_header(any headers, str want_name) bool {
    if(!is_dict(headers)){ return false }
    def want = lower(want_name)
    def items = _d.dict_items(headers)
@@ -295,7 +302,7 @@ fn _http_has_header(any: headers, str: want_name): bool {
    false
 }
 
-fn _http_headers_to_lines(any: headers): str {
+fn _http_headers_to_lines(any headers) str {
    if(!is_dict(headers)){ return "" }
    def items = _d.dict_items(headers)
    mut i, b = 0, Builder(256)
@@ -314,7 +321,7 @@ fn _http_headers_to_lines(any: headers): str {
    out
 }
 
-fn _http_send_all(int: fd, any: s): bool {
+fn _http_send_all(int fd, any s) bool {
    if(!is_str(s)){ return false }
    mut off = 0
    def n = s.len
@@ -326,7 +333,7 @@ fn _http_send_all(int: fd, any: s): bool {
    true
 }
 
-fn _http_normalize_target(any: path): str {
+fn _http_normalize_target(any path) str {
    mut target = path
    if(!is_str(target) || target.len == 0){ return "/" }
    if(startswith(target, "http://") || startswith(target, "https://")){
@@ -338,7 +345,7 @@ fn _http_normalize_target(any: path): str {
    "/" + target
 }
 
-fn _http_request(any: method, any: host, int: port, any: path, any: data=0, any: headers=0): str {
+fn _http_request(any method, any host, int port, any path, any data=0, any headers=0) str {
    if(!_http_valid_token(method)){ return "" }
    if(!is_str(host) || host.len == 0 || _http_has_ctl(host)){ return "" }
    def fd = socket_connect(host, port)
@@ -367,7 +374,7 @@ fn _http_request(any: method, any: host, int: port, any: path, any: data=0, any:
    _http_read_all(fd, _HTTP_MAX_RESPONSE_BYTES)
 }
 
-fn _http_decode_chunked(any: body): str {
+fn _http_decode_chunked(any body) str {
    if(!is_str(body)){ return "" }
    mut b = Builder(256)
    mut out_n = 0
@@ -405,7 +412,7 @@ fn _http_decode_chunked(any: body): str {
    out
 }
 
-fn http_parse_response(any: raw): dict {
+fn http_parse_response(any raw) dict {
    "Parses raw HTTP response into map with status, headers, and body."
    mut out = _http_response_fields(raw)
    if(!is_str(raw)){ return out }
@@ -482,98 +489,98 @@ fn http_parse_response(any: raw): dict {
    out
 }
 
-fn http_request_raw(any: method, any: host, int: port, any: path, any: data=0, any: headers=0): str {
+fn http_request_raw(any method, any host, int port, any path, any data=0, any headers=0) str {
    "Performs raw HTTP request and returns raw response."
    _http_request(method, host, port, path, data, headers)
 }
 
-fn _http_request_host(any: method, any: host, int: port, any: path, any: data=0, any: headers=0, bool: parsed=false): any {
+fn _http_request_host(any method, any host, int port, any path, any data=0, any headers=0, bool parsed=false) any {
    def raw = _http_request(method, host, port, path, data, headers)
    if(parsed){ return http_parse_response(raw) }
    raw
 }
 
-fn _http_request_url(any: method, any: url, any: data=0, any: headers=0, bool: parsed=false): any {
+fn _http_request_url(any method, any url, any data=0, any headers=0, bool parsed=false) any {
    def u = _http_parse_url_ex(url)
    _http_request_host(method, u.get("host", ""), u.get("port", 80), u.get("target", "/"), data, headers, parsed)
 }
 
-fn http_request(any: method, any: host, int: port, any: path, any: data=0, any: headers=0): dict {
+fn http_request(any method, any host, int port, any path, any data=0, any headers=0) dict {
    "Performs HTTP request and returns parsed response map."
    _http_request_host(method, host, port, path, data, headers, true)
 }
 
-fn http_request_url(any: method, any: url, any: data=0, any: headers=0): str {
+fn http_request_url(any method, any url, any data=0, any headers=0) str {
    "Performs raw HTTP request against URL."
    _http_request_url(method, url, data, headers)
 }
 
-fn http_request_url_parsed(any: method, any: url, any: data=0, any: headers=0): dict {
+fn http_request_url_parsed(any method, any url, any data=0, any headers=0) dict {
    "Performs HTTP request against URL and returns parsed response."
    _http_request_url(method, url, data, headers, true)
 }
 
-fn http_get(any: host, int: port, any: path, any: headers=0): str {
+fn http_get(any host, int port, any path, any headers=0) str {
    "Performs an HTTP GET request and returns raw response."
    _http_request_host("GET", host, port, path, 0, headers)
 }
 
-fn http_get_parsed(any: host, int: port, any: path, any: headers=0): dict {
+fn http_get_parsed(any host, int port, any path, any headers=0) dict {
    "Performs an HTTP GET request and returns parsed response."
    _http_request_host("GET", host, port, path, 0, headers, true)
 }
 
-fn http_post(any: host, int: port, any: path, any: data, any: headers=0): str {
+fn http_post(any host, int port, any path, any data, any headers=0) str {
    "Performs an HTTP POST request and returns raw response."
    _http_request_host("POST", host, port, path, data, headers)
 }
 
-fn http_post_parsed(any: host, int: port, any: path, any: data, any: headers=0): dict {
+fn http_post_parsed(any host, int port, any path, any data, any headers=0) dict {
    "Performs an HTTP POST request and returns parsed response."
    _http_request_host("POST", host, port, path, data, headers, true)
 }
 
-fn http_put(any: host, int: port, any: path, any: data, any: headers=0): str {
+fn http_put(any host, int port, any path, any data, any headers=0) str {
    "Performs an HTTP PUT request and returns raw response."
    _http_request_host("PUT", host, port, path, data, headers)
 }
 
-fn http_put_parsed(any: host, int: port, any: path, any: data, any: headers=0): dict {
+fn http_put_parsed(any host, int port, any path, any data, any headers=0) dict {
    "Performs an HTTP PUT request and returns parsed response."
    _http_request_host("PUT", host, port, path, data, headers, true)
 }
 
-fn http_delete(any: host, int: port, any: path, any: headers=0): str {
+fn http_delete(any host, int port, any path, any headers=0) str {
    "Performs an HTTP DELETE request and returns raw response."
    _http_request_host("DELETE", host, port, path, 0, headers)
 }
 
-fn http_delete_parsed(any: host, int: port, any: path, any: headers=0): dict {
+fn http_delete_parsed(any host, int port, any path, any headers=0) dict {
    "Performs an HTTP DELETE request and returns parsed response."
    _http_request_host("DELETE", host, port, path, 0, headers, true)
 }
 
-fn http_get_url(any: url, any: headers=0): str {
+fn http_get_url(any url, any headers=0) str {
    "Performs raw HTTP GET request to URL."
    _http_request_url("GET", url, 0, headers)
 }
 
-fn http_get_url_parsed(any: url, any: headers=0): dict {
+fn http_get_url_parsed(any url, any headers=0) dict {
    "Performs HTTP GET request to URL and returns parsed response."
    _http_request_url("GET", url, 0, headers, true)
 }
 
-fn http_parse_url(any: url): list {
+fn http_parse_url(any url) list {
    "Parses URL string into list `[host, port, target]`."
    _http_parse_url(url)
 }
 
-fn http_parse_url_ex(any: url): dict {
+fn http_parse_url_ex(any url) dict {
    "Parses URL string into map `{scheme, host, port, path, query, fragment, target, ...}`."
    _http_parse_url_ex(url)
 }
 
-fn http_parse_query(any: q): dict {
+fn http_parse_query(any q) dict {
    "Parses URL query string into decoded dictionary."
    mut d = _d.dict(16)
    if(q == 0 || !is_str(q)){ return d }
@@ -596,4 +603,23 @@ fn http_parse_query(any: q): dict {
       i = j + 1
    }
    d
+}
+
+#main {
+   def p = http_parse_url("http://google.com/foo")
+   assert(p.get(0) == "google.com" && p.get(1) == 80 && p.get(2) == "/foo", "http parse basic url")
+   def p2 = http_parse_url("https://example.com/api/v1?q=1#x")
+   assert(p2.get(0) == "example.com" && p2.get(1) == 443 && p2.get(2) == "/api/v1?q=1", "http parse https url")
+   def ex = http_parse_url_ex("https://user:pw@[::1]:8443/path?a=1&b=2#frag")
+   assert(ex.get("ok", false) && ex.get("scheme", "") == "https" && ex.get("userinfo", "") == "user:pw" && ex.get("host", "") == "::1", "http url ex authority")
+   assert(ex.get("port", 0) == 8443 && ex.get("path", "") == "/path" && ex.get("query", "") == "a=1&b=2" && ex.get("fragment", "") == "frag" && ex.get("target", "") == "/path?a=1&b=2", "http url ex target")
+   def q = http_parse_query("a=1&b=hello%20world&c&d=one+two")
+   assert(q.get("a") == "1" && q.get("b") == "hello world" && q.get("c", 0) == 1 && q.get("d") == "one two", "http query parse")
+   def raw = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhelloEXTRA"
+   def parsed = http_parse_response(raw)
+   assert(parsed.get("ok", false) && parsed.get("status", 0) == 200 && parsed.get("reason", "") == "OK", "http response status")
+   assert(parsed.get("headers", dict(4)).get("content-type", "") == "text/plain" && parsed.get("body", "") == "hello", "http response body")
+   def raw_chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"
+   assert(http_parse_response(raw_chunked).get("body", "") == "Wikipedia", "http chunked response")
+   print("✓ std.os.net.http self-test passed")
 }

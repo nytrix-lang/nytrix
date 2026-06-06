@@ -1,5 +1,9 @@
-;; Keywords: render vulkan gpu
+;; Keywords: render vulkan gpu os ui
 ;; Vulkan bindings for Nytrix
+;; References:
+;; - std.os.ui.render.vk
+;; - std.os.ui.render
+;; - std.os.ui.render.matrix
 module std.os.ui.render.vk.vulkan(
    VkImageMemoryBarrierColor, vk_get_instance_proc_addr, vk_create_instance, destroy_instance, vk_result_code,
    enumerate_instance_extension_properties, enumerate_instance_layer_properties, enumerate_physical_devices,
@@ -111,19 +115,19 @@ use std.os.ffi (
    __call4_ptr_ptr_ptr_ptr_i32, __call4_ptr_u32_u64_ptr_i32, __call4_ptr_u64_ptr_ptr_i32
 )
 
-fn _vk_alloc(int: size): ?ptr {
+fn _vk_alloc(int size) ?ptr {
    def p = zalloc(size)
    if(!p){ panic("vulkan struct allocation failed") }
    p
 }
 
-fn _vk_struct(int: size, int: stype): ?ptr {
+fn _vk_struct(int size, int stype) ?ptr {
    def info = _vk_alloc(size)
    store32(info, stype, 0)
    info
 }
 
-fn VkImageMemoryBarrierColor(any: bar, any: image, int: src_access, int: dst_access, int: old_layout, int: new_layout, int: base_layer=0, int: layer_count=1, int: level_count=1): ?ptr {
+fn VkImageMemoryBarrierColor(any bar, any image, int src_access, int dst_access, int old_layout, int new_layout, int base_layer=0, int layer_count=1, int level_count=1) ?ptr {
    "Writes a color-image memory barrier into `bar` and returns it."
    memset(bar, 0, 72)
    store32(bar, 45, 0)
@@ -163,110 +167,111 @@ fn VkImageMemoryBarrierColor(any: bar, any: image, int: src_access, int: dst_acc
    #include <vulkan/vulkan_metal.h> as ""
 } #endif
 extern "" {
-   fn vkGetInstanceProcAddr(ptr: inst, ptr: name): ptr
-   fn vkCreateInstance(ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyInstance(ptr: inst, ptr: al)
-   fn vkEnumerateInstanceExtensionProperties(ptr: layer, ptr: c, ptr: p): i32
-   fn vkEnumerateInstanceLayerProperties(ptr: c, ptr: p): i32
-   fn vkEnumeratePhysicalDevices(ptr: inst, ptr: c, ptr: p): i32
-   fn vkGetPhysicalDeviceProperties(ptr: pd, ptr: p)
-   fn vkGetPhysicalDeviceMemoryProperties(ptr: pd, ptr: p)
-   fn vkGetPhysicalDeviceQueueFamilyProperties(ptr: pd, ptr: c, ptr: p)
-   fn vkGetPhysicalDeviceFormatProperties(ptr: pd, i32: fmt, ptr: p)
-   fn vkGetPhysicalDeviceFeatures2(ptr: pd, ptr: p)
-   fn vkCreateDevice(ptr: pd, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyDevice(ptr: dev, ptr: al)
-   fn vkGetDeviceQueue(ptr: dev, u32: f, u32: idx, ptr: p)
-   fn vkGetBufferDeviceAddress(ptr: dev, ptr: info): u64
-   fn vkCreateSwapchainKHR(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroySwapchainKHR(ptr: dev, ptr: sc, ptr: al)
-   fn vkGetSwapchainImagesKHR(ptr: dev, ptr: sc, ptr: c, ptr: p): i32
-   fn vkAcquireNextImageKHR(ptr: dev, ptr: sc, u64: timeout, ptr: sem, ptr: fence, ptr: p): i32
-   fn vkQueuePresentKHR(ptr: q, ptr: p): i32
-   fn vkCreateImageView(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyImageView(ptr: dev, ptr: iv, ptr: al)
-   fn vkCreateImage(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyImage(ptr: dev, ptr: img, ptr: al)
-   fn vkCreateBuffer(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyBuffer(ptr: dev, ptr: buf, ptr: al)
-   fn vkGetBufferMemoryRequirements(ptr: dev, ptr: buf, ptr: p)
-   fn vkBindBufferMemory(ptr: dev, ptr: buf, ptr: mem, u64: off): i32
-   fn vkMapMemory(ptr: dev, ptr: mem, u64: off, u64: sz, u32: flags, ptr: p): i32
-   fn vkUnmapMemory(ptr: dev, ptr: mem)
-   fn vkCreateCommandPool(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyCommandPool(ptr: dev, ptr: cp, ptr: al)
-   fn vkAllocateCommandBuffers(ptr: dev, ptr: ai, ptr: p): i32
-   fn vkBeginCommandBuffer(ptr: cb, ptr: bi): i32
-   fn vkEndCommandBuffer(ptr: cb): i32
-   fn vkCmdBeginRenderPass(ptr: cb, ptr: bi, i32: contents)
-   fn vkCmdEndRenderPass(ptr: cb)
-   fn vkCmdBindPipeline(ptr: cb, i32: bp, ptr: pipe)
-   fn vkCmdDraw(ptr: cb, u32: vc, u32: ic, u32: fv, u32: fi)
-   fn vkCmdDrawIndexed(ptr: cb, u32: ic, u32: instc, u32: fi, i32: vo, u32: insto)
-   fn vkCmdDrawIndirect(ptr: cb, ptr: buf, u64: off, u32: count, u32: stride)
-   fn vkCmdDrawIndexedIndirect(ptr: cb, ptr: buf, u64: off, u32: count, u32: stride)
-   fn vkCmdDispatch(ptr: cb, u32: x, u32: y, u32: z)
-   fn vkCmdDispatchIndirect(ptr: cb, ptr: buf, u64: off)
-   fn vkCmdBindVertexBuffers(ptr: cb, u32: first, u32: count, ptr: p_buf, ptr: p_off)
-   fn vkCmdBindIndexBuffer(ptr: cb, ptr: buf, u64: off, i32: idx_type)
-   fn vkCmdPipelineBarrier(ptr: cb, u32: src, u32: dst, u32: dep, u32: mb_c, ptr: mb, u32: bb_c, ptr: bb, u32: ib_c, ptr: ib)
-   fn vkCmdCopyBuffer(ptr: cb, ptr: src, ptr: dst, u32: r_count, ptr: p_regions)
-   fn vkCmdCopyBufferToImage(ptr: cb, ptr: src, ptr: dst, i32: lyt, u32: r_count, ptr: p_regions)
-   fn vkCmdCopyImage(ptr: cb, ptr: src_img, i32: src_lyt, ptr: dst_img, i32: dst_lyt, u32: r_count, ptr: p_regions)
-   fn vkCmdBlitImage(ptr: cb, ptr: src_img, i32: src_lyt, ptr: dst_img, i32: dst_lyt, u32: r_count, ptr: p_regions, i32: filter)
-   fn vkCreateSemaphore(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkCreateFence(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroySemaphore(ptr: dev, ptr: sem, ptr: al)
-   fn vkDestroyFence(ptr: dev, ptr: f, ptr: al)
-   fn vkWaitForFences(ptr: dev, u32: c, ptr: p, u32: wait_all, u64: timeout): i32
-   fn vkResetFences(ptr: dev, u32: c, ptr: p): i32
-   fn vkQueueSubmit(ptr: q, u32: c, ptr: p, ptr: f): i32
-   fn vkCreateRenderPass(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyRenderPass(ptr: dev, ptr: rp, ptr: al)
-   fn vkCreateFramebuffer(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyFramebuffer(ptr: dev, ptr: fb, ptr: al)
-   fn vkCreateDescriptorSetLayout(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyDescriptorSetLayout(ptr: dev, ptr: dsl, ptr: al)
-   fn vkCreateDescriptorPool(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyDescriptorPool(ptr: dev, ptr: dp, ptr: al)
-   fn vkAllocateDescriptorSets(ptr: dev, ptr: ai, ptr: p): i32
-   fn vkUpdateDescriptorSets(ptr: dev, u32: wc, ptr: wp, u32: cc, ptr: cp)
-   fn vkCmdBindDescriptorSets(ptr: cb, i32: bp, ptr: lay, u32: f, u32: c, ptr: p_sets, u32: od_count, ptr: p_od)
-   fn vkCreatePipelineLayout(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyPipelineLayout(ptr: dev, ptr: pl, ptr: al)
-   fn vkCreateGraphicsPipelines(ptr: dev, ptr: cache, u32: c, ptr: p_ci, ptr: al, ptr: p): i32
-   fn vkCreateComputePipelines(ptr: dev, ptr: cache, u32: c, ptr: p_ci, ptr: al, ptr: p): i32
-   fn vkDestroyPipeline(ptr: dev, ptr: p, ptr: al)
-   fn vkCreateShaderModule(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroyShaderModule(ptr: dev, ptr: sm, ptr: al)
-   fn vkDestroySurfaceKHR(ptr: inst, ptr: surf, ptr: al)
-   fn vkAllocateMemory(ptr: dev, ptr: ai, ptr: al, ptr: p): i32
-   fn vkFreeMemory(ptr: dev, ptr: mem, ptr: al)
-   fn vkBindImageMemory(ptr: dev, ptr: img, ptr: mem, u64: off): i32
-   fn vkGetImageMemoryRequirements(ptr: dev, ptr: img, ptr: p)
-   fn vkDeviceWaitIdle(ptr: dev): i32
-   fn vkFreeCommandBuffers(ptr: dev, ptr: pool, u32: count, ptr: p)
-   fn vkCreateSampler(ptr: dev, ptr: ci, ptr: al, ptr: p): i32
-   fn vkDestroySampler(ptr: dev, ptr: sampler, ptr: al)
-   fn vkCmdSetViewport(ptr: cb, u32: first, u32: count, ptr: p)
-   fn vkCmdSetScissor(ptr: cb, u32: first, u32: count, ptr: p)
-   fn vkCmdSetLineWidth(ptr: cb, f32: width)
-   fn vkCmdPushConstants(ptr: cb, ptr: lay, u32: stages, u32: off, u32: sz, ptr: values)
-   fn vkCmdClearAttachments(ptr: cb, u32: count, ptr: attachments, u32: rect_count, ptr: rects)
-   fn vkCmdCopyImageToBuffer(ptr: cb, ptr: img, i32: lay, ptr: buf, u32: r_count, ptr: p_regions)
-   fn vkQueueWaitIdle(ptr: q): i32
-   fn vkResetCommandBuffer(ptr: cb, u32: flags): i32
-   fn vkCreateXcbSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
-   fn vkCreateXlibSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
-   fn vkCreateWin32SurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
-   fn vkCreateWaylandSurfaceKHR(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
-   fn vkCreateMetalSurfaceEXT(ptr: inst, ptr: ci, ptr: al, ptr: s): i32
-   fn vkGetPhysicalDeviceSurfaceSupportKHR(ptr: pd, u32: fam, ptr: surf, ptr: p): i32
-   fn vkGetPhysicalDeviceSurfaceFormatsKHR(ptr: pd, ptr: surf, ptr: c, ptr: p): i32
-   fn vkGetPhysicalDeviceSurfacePresentModesKHR(ptr: pd, ptr: surf, ptr: c, ptr: p): i32
-   fn vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ptr: pd, ptr: surf, ptr: p): i32
-   fn vkGetPhysicalDeviceWaylandPresentationSupportKHR(ptr: pd, u32: fam, ptr: dpy): i32
+   fn vkGetInstanceProcAddr(ptr inst, ptr name) ptr
+   fn vkCreateInstance(ptr ci, ptr al, ptr p) i32
+   fn vkDestroyInstance(ptr inst, ptr al)
+   fn vkEnumerateInstanceExtensionProperties(ptr layer, ptr c, ptr p) i32
+   fn vkEnumerateInstanceLayerProperties(ptr c, ptr p) i32
+   fn vkEnumeratePhysicalDevices(ptr inst, ptr c, ptr p) i32
+   fn vkGetPhysicalDeviceProperties(ptr pd, ptr p)
+   fn vkGetPhysicalDeviceMemoryProperties(ptr pd, ptr p)
+   fn vkGetPhysicalDeviceQueueFamilyProperties(ptr pd, ptr c, ptr p)
+   fn vkGetPhysicalDeviceFormatProperties(ptr pd, i32 fmt, ptr p)
+   fn vkGetPhysicalDeviceFeatures2(ptr pd, ptr p)
+   fn vkCreateDevice(ptr pd, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyDevice(ptr dev, ptr al)
+   fn vkGetDeviceQueue(ptr dev, u32 f, u32 idx, ptr p)
+   fn vkGetBufferDeviceAddress(ptr dev, ptr info) u64
+   fn vkCreateSwapchainKHR(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroySwapchainKHR(ptr dev, ?handle sc, ptr al)
+   fn vkGetSwapchainImagesKHR(ptr dev, ?handle sc, ptr c, ptr p) i32
+   fn vkAcquireNextImageKHR(ptr dev, ?handle sc, u64 timeout, ?handle sem, ?handle fence, ptr p) i32
+   fn vkQueuePresentKHR(ptr q, ptr p) i32
+   fn vkCreateImageView(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyImageView(ptr dev, ?handle iv, ptr al)
+   fn vkCreateImage(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyImage(ptr dev, ?handle img, ptr al)
+   fn vkCreateBuffer(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyBuffer(ptr dev, ?handle buf, ptr al)
+   fn vkGetBufferMemoryRequirements(ptr dev, ?handle buf, ptr p)
+   fn vkBindBufferMemory(ptr dev, ?handle buf, ?handle mem, u64 off) i32
+   fn vkMapMemory(ptr dev, ?handle mem, u64 off, u64 sz, u32 flags, ptr p) i32
+   fn vkUnmapMemory(ptr dev, ?handle mem)
+   fn vkCreateCommandPool(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyCommandPool(ptr dev, ?handle cp, ptr al)
+   fn vkAllocateCommandBuffers(ptr dev, ptr ai, ptr p) i32
+   fn vkBeginCommandBuffer(ptr cb, ptr bi) i32
+   fn vkEndCommandBuffer(ptr cb) i32
+   fn vkCmdBeginRenderPass(ptr cb, ptr bi, i32 contents)
+   fn vkCmdEndRenderPass(ptr cb) any
+   fn vkCmdBindPipeline(ptr cb, i32 bp, ?handle pipe)
+   fn vkCmdDraw(ptr cb, u32 vc, u32 ic, u32 fv, u32 fi)
+   fn vkCmdDrawIndexed(ptr cb, u32 ic, u32 instc, u32 fi, i32 vo, u32 insto)
+   fn vkCmdDrawIndirect(ptr cb, ?handle buf, u64 off, u32 count, u32 stride)
+   fn vkCmdDrawIndexedIndirect(ptr cb, ?handle buf, u64 off, u32 count, u32 stride)
+   fn vkCmdDispatch(ptr cb, u32 x, u32 y, u32 z)
+   fn vkCmdDispatchIndirect(ptr cb, ?handle buf, u64 off)
+   fn vkCmdBindVertexBuffers(ptr cb, u32 first, u32 count, ptr p_buf, ptr p_off)
+   fn vkCmdBindIndexBuffer(ptr cb, ?handle buf, u64 off, i32 idx_type)
+   fn vkCmdPipelineBarrier(ptr cb, u32 src, u32 dst, u32 dep, u32 mb_c, ptr mb, u32 bb_c, ptr bb, u32 ib_c, ptr ib)
+   fn vkCmdCopyBuffer(ptr cb, ?handle src, ?handle dst, u32 r_count, ptr p_regions)
+   fn vkCmdCopyBufferToImage(ptr cb, ?handle src, ?handle dst, i32 lyt, u32 r_count, ptr p_regions)
+   fn vkCmdCopyImage(ptr cb, ?handle src_img, i32 src_lyt, ?handle dst_img, i32 dst_lyt, u32 r_count, ptr p_regions)
+   fn vkCmdBlitImage(ptr cb, ?handle src_img, i32 src_lyt, ?handle dst_img, i32 dst_lyt, u32 r_count, ptr p_regions, i32 filter)
+   fn vkCreateSemaphore(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkCreateFence(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroySemaphore(ptr dev, ?handle sem, ptr al)
+   fn vkDestroyFence(ptr dev, ?handle f, ptr al)
+   fn vkWaitForFences(ptr dev, u32 c, ptr p, u32 wait_all, u64 timeout) i32
+   fn vkResetFences(ptr dev, u32 c, ptr p) i32
+   fn vkQueueSubmit(ptr q, u32 c, ptr p, ?handle f) i32
+   fn vkCreateRenderPass(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyRenderPass(ptr dev, ?handle rp, ptr al)
+   fn vkCreateFramebuffer(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyFramebuffer(ptr dev, ?handle fb, ptr al)
+   fn vkCreateDescriptorSetLayout(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyDescriptorSetLayout(ptr dev, ?handle dsl, ptr al)
+   fn vkCreateDescriptorPool(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyDescriptorPool(ptr dev, ?handle dp, ptr al)
+   fn vkAllocateDescriptorSets(ptr dev, ptr ai, ptr p) i32
+   fn vkUpdateDescriptorSets(ptr dev, u32 wc, ptr wp, u32 cc, ptr cp)
+   fn vkCmdBindDescriptorSets(ptr cb, i32 bp, ?handle lay, u32 f, u32 c, ptr p_sets, u32 od_count, ptr p_od)
+   fn vkCreatePipelineLayout(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyPipelineLayout(ptr dev, ?handle pl, ptr al)
+   fn vkCreateGraphicsPipelines(ptr dev, ?handle cache, u32 c, ptr p_ci, ptr al, ptr p) i32
+   fn vkCreateComputePipelines(ptr dev, ?handle cache, u32 c, ptr p_ci, ptr al, ptr p) i32
+   fn vkDestroyPipeline(ptr dev, ?handle p, ptr al)
+   fn vkCreateShaderModule(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroyShaderModule(ptr dev, ?handle sm, ptr al)
+   fn vkDestroySurfaceKHR(ptr inst, ?handle surf, ptr al)
+   fn vkAllocateMemory(ptr dev, ptr ai, ptr al, ptr p) i32
+   fn vkFreeMemory(ptr dev, ?handle mem, ptr al)
+   fn vkBindImageMemory(ptr dev, ?handle img, ?handle mem, u64 off) i32
+   fn vkGetImageMemoryRequirements(ptr dev, ?handle img, ptr p)
+   fn vkDeviceWaitIdle(ptr dev) i32
+   fn vkFreeCommandBuffers(ptr dev, ptr pool, u32 count, ptr p)
+   fn vkCreateSampler(ptr dev, ptr ci, ptr al, ptr p) i32
+   fn vkDestroySampler(ptr dev, ?handle sampler, ptr al)
+   fn vkCmdSetViewport(ptr cb, u32 first, u32 count, ptr p)
+   fn vkCmdSetScissor(ptr cb, u32 first, u32 count, ptr p)
+   fn vkCmdSetLineWidth(ptr cb, f32 width)
+   fn vkCmdPushConstants(ptr cb, ptr lay, u32 stages, u32 off, u32 sz, ptr values)
+   fn vkCmdClearAttachments(ptr cb, u32 count, ptr attachments, u32 rect_count, ptr rects)
+   fn vkCmdCopyImageToBuffer(ptr cb, ?handle img, i32 lay, ?handle buf, u32 r_count, ptr p_regions)
+   fn vkQueueWaitIdle(ptr q) i32
+   fn vkResetCommandBuffer(ptr cb, u32 flags) i32
+   fn vkCreateXcbSurfaceKHR(ptr inst, ptr ci, ptr al, ptr s) i32
+   fn vkCreateXlibSurfaceKHR(ptr inst, ptr ci, ptr al, ptr s) i32
+   fn vkCreateWin32SurfaceKHR(ptr inst, ptr ci, ptr al, ptr s) i32
+   fn vkCreateWaylandSurfaceKHR(ptr inst, ptr ci, ptr al, ptr s) i32
+   fn vkCreateMetalSurfaceEXT(ptr inst, ptr ci, ptr al, ptr s) i32
+   fn vkGetPhysicalDeviceSurfaceSupportKHR(ptr pd, u32 fam, ptr surf, ptr p) i32
+   fn vkGetPhysicalDeviceSurfaceFormatsKHR(ptr pd, ptr surf, ptr c, ptr p) i32
+   fn vkGetPhysicalDeviceSurfacePresentModesKHR(ptr pd, ptr surf, ptr c, ptr p) i32
+   fn vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ptr pd, ptr surf, ptr p) i32
+   fn vkGetPhysicalDeviceWaylandPresentationSupportKHR(ptr pd, u32 fam, ptr dpy) i32
 }
+
 mut _pfn_vkCreateXcbSurfaceKHR = 0
 mut _pfn_vkCreateXlibSurfaceKHR = 0
 mut _pfn_vkCreateWin32SurfaceKHR = 0
@@ -279,13 +284,14 @@ mut _pfn_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = 0
 mut _lib_vulkan_loader = 0
 mut _pfn_vkGetInstanceProcAddr = 0
 
-fn _vk_native_proc_ptr(any: p): any {
+fn _vk_native_proc_ptr(any p) any {
+   "Runs the vkGetPhysicalDeviceWaylandPresentationSupportKHR operation."
    if(!p){ return 0 }
    if(band(p, 7) == 6){ return p }
    tag_native(p)
 }
 
-fn _vk_get_instance_proc_addr_raw(any: inst, any: proc_name): any {
+fn _vk_get_instance_proc_addr_raw(any inst, any proc_name) any {
    if(!_pfn_vkGetInstanceProcAddr){
       if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so.1", 1) }
       if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so", 1) }
@@ -295,169 +301,259 @@ fn _vk_get_instance_proc_addr_raw(any: inst, any: proc_name): any {
    vkGetInstanceProcAddr(inst, proc_name)
 }
 
-fn vk_get_instance_proc_addr(any: inst, str: name): any {
+fn vk_get_instance_proc_addr(any inst, str name) any {
    "Looks up a Vulkan instance procedure by name."
    def any: proc_name_s = cstr(name)
    def ptr: proc_name = proc_name_s
    _vk_get_instance_proc_addr_raw(inst, proc_name)
 }
 
-fn vk_create_instance(any: ci, any: al, any: p): int { vkCreateInstance(ci, al, p) }
+fn vk_create_instance(any ci, any al, any p) int { vkCreateInstance(ci, al, p) }
 
-fn destroy_instance(any: inst, any: al): any { vkDestroyInstance(inst, al) }
+fn destroy_instance(any inst, any al) any { vkDestroyInstance(inst, al) }
 
-fn enumerate_instance_extension_properties(any: layer, any: c, any: p): int { vkEnumerateInstanceExtensionProperties(layer, c, p) }
+fn enumerate_instance_extension_properties(any layer, any c, any p) int { vkEnumerateInstanceExtensionProperties(layer, c, p) }
 
-fn enumerate_instance_layer_properties(any: c, any: p): int { vkEnumerateInstanceLayerProperties(c, p) }
+fn enumerate_instance_layer_properties(any c, any p) int { vkEnumerateInstanceLayerProperties(c, p) }
 
-fn enumerate_physical_devices(any: inst, any: c, any: p): int { vkEnumeratePhysicalDevices(inst, c, p) }
+fn enumerate_physical_devices(any inst, any c, any p) int { vkEnumeratePhysicalDevices(inst, c, p) }
 
-fn get_physical_device_properties(any: pd, any: p): any { vkGetPhysicalDeviceProperties(pd, p) }
+fn get_physical_device_properties(any pd, any p) any { vkGetPhysicalDeviceProperties(pd, p) }
 
-fn get_physical_device_memory_properties(any: pd, any: p): any { vkGetPhysicalDeviceMemoryProperties(pd, p) }
+fn get_physical_device_memory_properties(any pd, any p) any { vkGetPhysicalDeviceMemoryProperties(pd, p) }
 
-fn get_physical_device_queue_family_properties(any: pd, any: c, any: p): any { vkGetPhysicalDeviceQueueFamilyProperties(pd, c, p) }
+fn get_physical_device_queue_family_properties(any pd, any c, any p) any { vkGetPhysicalDeviceQueueFamilyProperties(pd, c, p) }
 
-fn get_physical_device_format_properties(any: pd, int: fmt, any: p): any { vkGetPhysicalDeviceFormatProperties(pd, fmt, p) }
+fn get_physical_device_format_properties(any pd, int fmt, any p) any { vkGetPhysicalDeviceFormatProperties(pd, fmt, p) }
 
-fn get_physical_device_features2(any: pd, any: p): any { vkGetPhysicalDeviceFeatures2(pd, p) }
+fn get_physical_device_features2(any pd, any p) any { vkGetPhysicalDeviceFeatures2(pd, p) }
 
-fn create_device(any: pd, any: ci, any: al, any: p): int { vkCreateDevice(pd, ci, al, p) }
+fn create_device(any pd, any ci, any al, any p) int { vkCreateDevice(pd, ci, al, p) }
 
-fn destroy_device(any: dev, any: al): any { vkDestroyDevice(dev, al) }
+fn destroy_device(any dev, any al) any { vkDestroyDevice(dev, al) }
 
-fn get_device_queue(any: dev, int: f, int: idx, any: p): any { vkGetDeviceQueue(dev, f, idx, p) }
+fn get_device_queue(any dev, int f, int idx, any p) any { vkGetDeviceQueue(dev, f, idx, p) }
 
-fn get_buffer_device_address(any: dev, any: info): int { vkGetBufferDeviceAddress(dev, info) }
+fn get_buffer_device_address(any dev, any info) int { vkGetBufferDeviceAddress(dev, info) }
 
-fn create_swapchain_khr(any: dev, any: ci, any: al, any: p): int { vkCreateSwapchainKHR(dev, ci, al, p) }
+fn create_swapchain_khr(any dev, any ci, any al, any p) int { vkCreateSwapchainKHR(dev, ci, al, p) }
 
-fn destroy_swapchain_khr(any: dev, any: sc, any: al): any { vkDestroySwapchainKHR(dev, sc, al) }
+fn destroy_swapchain_khr(any dev, ?handle sc, any al) any {
+   if(!sc){ return 0 }
+   vkDestroySwapchainKHR(dev, sc, al)
+}
 
-fn get_swapchain_images_khr(any: dev, any: sc, any: c, any: p): int {
+fn get_swapchain_images_khr(any dev, ?handle sc, any c, any p) int {
    "Queries swapchain image handles with basic invalid-handle guards."
    if(!dev || !sc || !c){ return -1 }
    if(sc == 0x8000000000 || sc == 0xc000000000 || sc == 0x18000000001){ return -1 }
    vkGetSwapchainImagesKHR(dev, sc, c, p)
 }
 
-fn acquire_next_image_khr(any: dev, any: sc, int: to, any: sem, any: f, any: p): int { vkAcquireNextImageKHR(dev, sc, to, sem, f, p) }
+fn acquire_next_image_khr(any dev, ?handle sc, int to, ?handle sem, ?handle f, any p) int {
+   if(!dev || !sc || !p){ return -1 }
+   vkAcquireNextImageKHR(dev, sc, to, sem, f, p)
+}
 
-fn queue_present_khr(any: q, any: p): int { vkQueuePresentKHR(q, p) }
+fn queue_present_khr(any q, any p) int { vkQueuePresentKHR(q, p) }
 
-fn create_image_view(any: dev, any: ci, any: al, any: p): int { vkCreateImageView(dev, ci, al, p) }
+fn create_image_view(any dev, any ci, any al, any p) int { vkCreateImageView(dev, ci, al, p) }
 
-fn destroy_image_view(any: dev, any: iv, any: al): any { vkDestroyImageView(dev, iv, al) }
+fn destroy_image_view(any dev, ?handle iv, any al) any {
+   if(!iv){ return 0 }
+   vkDestroyImageView(dev, iv, al)
+}
 
-fn create_image(any: dev, any: ci, any: al, any: p): int { vkCreateImage(dev, ci, al, p) }
+fn create_image(any dev, any ci, any al, any p) int { vkCreateImage(dev, ci, al, p) }
 
-fn destroy_image(any: dev, any: img, any: al): any { vkDestroyImage(dev, img, al) }
+fn destroy_image(any dev, ?handle img, any al) any {
+   if(!img){ return 0 }
+   vkDestroyImage(dev, img, al)
+}
 
-fn create_buffer(any: dev, any: ci, any: al, any: p): int { vkCreateBuffer(dev, ci, al, p) }
+fn create_buffer(any dev, any ci, any al, any p) int { vkCreateBuffer(dev, ci, al, p) }
 
-fn destroy_buffer(any: dev, any: buf, any: al): any { vkDestroyBuffer(dev, buf, al) }
+fn destroy_buffer(any dev, ?handle buf, any al) any {
+   if(!buf){ return 0 }
+   vkDestroyBuffer(dev, buf, al)
+}
 
-fn get_buffer_memory_requirements(any: dev, any: buf, any: p): any { vkGetBufferMemoryRequirements(dev, buf, p) }
+fn get_buffer_memory_requirements(any dev, ?handle buf, any p) any {
+   if(!buf || !p){ return 0 }
+   vkGetBufferMemoryRequirements(dev, buf, p)
+}
 
-fn bind_buffer_memory(any: dev, any: buf, any: mem, int: off): int { vkBindBufferMemory(dev, buf, mem, off) }
+fn bind_buffer_memory(any dev, ?handle buf, ?handle mem, int off) int {
+   if(!buf || !mem){ return -1 }
+   vkBindBufferMemory(dev, buf, mem, off)
+}
 
-fn map_memory(any: dev, any: mem, int: off, int: sz, int: flags, any: p): int { vkMapMemory(dev, mem, off, sz, flags, p) }
+fn map_memory(any dev, ?handle mem, int off, int sz, int flags, any p) int {
+   if(!mem || !p){ return -1 }
+   vkMapMemory(dev, mem, off, sz, flags, p)
+}
 
-fn unmap_memory(any: dev, any: mem): any { vkUnmapMemory(dev, mem) }
+fn unmap_memory(any dev, ?handle mem) any {
+   if(!mem){ return 0 }
+   vkUnmapMemory(dev, mem)
+}
 
-fn create_command_pool(any: dev, any: ci, any: al, any: p): int { vkCreateCommandPool(dev, ci, al, p) }
+fn create_command_pool(any dev, any ci, any al, any p) int { vkCreateCommandPool(dev, ci, al, p) }
 
-fn destroy_command_pool(any: dev, any: cp, any: al): any { vkDestroyCommandPool(dev, cp, al) }
+fn destroy_command_pool(any dev, ?handle cp, any al) any {
+   if(!cp){ return 0 }
+   vkDestroyCommandPool(dev, cp, al)
+}
 
-fn allocate_command_buffers(any: dev, any: ai, any: p): int { vkAllocateCommandBuffers(dev, ai, p) }
+fn allocate_command_buffers(any dev, any ai, any p) int { vkAllocateCommandBuffers(dev, ai, p) }
 
-fn begin_command_buffer(any: cb, any: bi): int { vkBeginCommandBuffer(cb, bi) }
+fn begin_command_buffer(any cb, any bi) int { vkBeginCommandBuffer(cb, bi) }
 
-fn end_command_buffer(any: cb): int { vkEndCommandBuffer(cb) }
+fn end_command_buffer(any cb) int { vkEndCommandBuffer(cb) }
 
-fn cmd_begin_render_pass(any: cb, any: bi, int: c): any { vkCmdBeginRenderPass(cb, bi, c) }
+fn cmd_begin_render_pass(any cb, any bi, int c) any { vkCmdBeginRenderPass(cb, bi, c) }
 
-fn cmd_end_render_pass(any: cb): any { vkCmdEndRenderPass(cb) }
+fn cmd_end_render_pass(any cb) any { vkCmdEndRenderPass(cb) }
 
-fn cmd_bind_pipeline(any: cb, int: bp, any: pipe): any { vkCmdBindPipeline(cb, bp, pipe) }
+fn cmd_bind_pipeline(any cb, int bp, ?handle pipe) any {
+   if(!pipe){ return 0 }
+   vkCmdBindPipeline(cb, bp, pipe)
+}
 
-fn cmd_draw(any: cb, int: vc, int: ic, int: fv, int: fi): any { vkCmdDraw(cb, vc, ic, fv, fi) }
+fn cmd_draw(any cb, int vc, int ic, int fv, int fi) any { vkCmdDraw(cb, vc, ic, fv, fi) }
 
-fn cmd_draw_indexed(any: cb, int: ic, int: instc, int: fi, int: vo, int: insto): any { vkCmdDrawIndexed(cb, ic, instc, fi, vo, insto) }
+fn cmd_draw_indexed(any cb, int ic, int instc, int fi, int vo, int insto) any { vkCmdDrawIndexed(cb, ic, instc, fi, vo, insto) }
 
-fn cmd_draw_indirect(any: cb, any: buf, int: off, int: count, int: stride): any { vkCmdDrawIndirect(cb, buf, off, count, stride) }
+fn cmd_draw_indirect(any cb, ?handle buf, int off, int count, int stride) any {
+   if(!buf){ return 0 }
+   vkCmdDrawIndirect(cb, buf, off, count, stride)
+}
 
-fn cmd_draw_indexed_indirect(any: cb, any: buf, int: off, int: count, int: stride): any { vkCmdDrawIndexedIndirect(cb, buf, off, count, stride) }
+fn cmd_draw_indexed_indirect(any cb, ?handle buf, int off, int count, int stride) any {
+   if(!buf){ return 0 }
+   vkCmdDrawIndexedIndirect(cb, buf, off, count, stride)
+}
 
-fn cmd_dispatch(any: cb, int: x, int: y, int: z): any { vkCmdDispatch(cb, x, y, z) }
+fn cmd_dispatch(any cb, int x, int y, int z) any { vkCmdDispatch(cb, x, y, z) }
 
-fn cmd_dispatch_indirect(any: cb, any: buf, int: off): any { vkCmdDispatchIndirect(cb, buf, off) }
+fn cmd_dispatch_indirect(any cb, ?handle buf, int off) any {
+   if(!buf){ return 0 }
+   vkCmdDispatchIndirect(cb, buf, off)
+}
 
-fn cmd_bind_vertex_buffers(any: cb, int: f, int: c, any: p_buf, any: p_off): any { vkCmdBindVertexBuffers(cb, f, c, p_buf, p_off) }
+fn cmd_bind_vertex_buffers(any cb, int f, int c, any p_buf, any p_off) any { vkCmdBindVertexBuffers(cb, f, c, p_buf, p_off) }
 
-fn cmd_bind_index_buffer(any: cb, any: buf, int: off, int: idx_type): any { vkCmdBindIndexBuffer(cb, buf, off, idx_type) }
+fn cmd_bind_index_buffer(any cb, ?handle buf, int off, int idx_type) any {
+   if(!buf){ return 0 }
+   vkCmdBindIndexBuffer(cb, buf, off, idx_type)
+}
 
-fn cmd_pipeline_barrier(any: cb, int: src, int: dst, int: dep, int: mb_c, any: mb, int: bb_c, any: bb, int: ib_c, any: ib): any { vkCmdPipelineBarrier(cb, src, dst, dep, mb_c, mb, bb_c, bb, ib_c, ib) }
+fn cmd_pipeline_barrier(any cb, int src, int dst, int dep, int mb_c, any mb, int bb_c, any bb, int ib_c, any ib) any { vkCmdPipelineBarrier(cb, src, dst, dep, mb_c, mb, bb_c, bb, ib_c, ib) }
 
-fn cmd_copy_buffer(any: cb, any: src, any: dst, int: r_count, any: p_regions): any { vkCmdCopyBuffer(cb, src, dst, r_count, p_regions) }
+fn cmd_copy_buffer(any cb, ?handle src, ?handle dst, int r_count, any p_regions) any {
+   if(!src || !dst){ return 0 }
+   vkCmdCopyBuffer(cb, src, dst, r_count, p_regions)
+}
 
-fn cmd_copy_buffer_to_image(any: cb, any: src, any: dst, int: lyt, int: r_count, any: p_regions): any { vkCmdCopyBufferToImage(cb, src, dst, lyt, r_count, p_regions) }
+fn cmd_copy_buffer_to_image(any cb, ?handle src, ?handle dst, int lyt, int r_count, any p_regions) any {
+   if(!src || !dst){ return 0 }
+   vkCmdCopyBufferToImage(cb, src, dst, lyt, r_count, p_regions)
+}
 
-fn cmd_copy_image(any: cb, any: src_img, int: src_lyt, any: dst_img, int: dst_lyt, int: r_count, any: p_regions): any { vkCmdCopyImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions) }
+fn cmd_copy_image(any cb, ?handle src_img, int src_lyt, ?handle dst_img, int dst_lyt, int r_count, any p_regions) any {
+   if(!src_img || !dst_img){ return 0 }
+   vkCmdCopyImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions)
+}
 
-fn cmd_blit_image(any: cb, any: src_img, int: src_lyt, any: dst_img, int: dst_lyt, int: r_count, any: p_regions, int: filter): any { vkCmdBlitImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions, filter) }
+fn cmd_blit_image(any cb, ?handle src_img, int src_lyt, ?handle dst_img, int dst_lyt, int r_count, any p_regions, int filter) any {
+   if(!src_img || !dst_img){ return 0 }
+   vkCmdBlitImage(cb, src_img, src_lyt, dst_img, dst_lyt, r_count, p_regions, filter)
+}
 
-fn create_semaphore(any: dev, any: ci, any: al, any: p): int { vkCreateSemaphore(dev, ci, al, p) }
+fn create_semaphore(any dev, any ci, any al, any p) int { vkCreateSemaphore(dev, ci, al, p) }
 
-fn create_fence(any: dev, any: ci, any: al, any: p): int { vkCreateFence(dev, ci, al, p) }
+fn create_fence(any dev, any ci, any al, any p) int { vkCreateFence(dev, ci, al, p) }
 
-fn destroy_semaphore(any: dev, any: sem, any: al): any { vkDestroySemaphore(dev, sem, al) }
+fn destroy_semaphore(any dev, ?handle sem, any al) any {
+   if(!sem){ return 0 }
+   vkDestroySemaphore(dev, sem, al)
+}
 
-fn destroy_fence(any: dev, any: f, any: al): any { vkDestroyFence(dev, f, al) }
+fn destroy_fence(any dev, ?handle f, any al) any {
+   if(!f){ return 0 }
+   vkDestroyFence(dev, f, al)
+}
 
-fn wait_for_fences(any: dev, int: c, any: p, int: wait_all, int: tm): int { vkWaitForFences(dev, c, p, wait_all, tm) }
+fn wait_for_fences(any dev, int c, any p, int wait_all, int tm) int { vkWaitForFences(dev, c, p, wait_all, tm) }
 
-fn reset_fences(any: dev, int: c, any: p): int { vkResetFences(dev, c, p) }
+fn reset_fences(any dev, int c, any p) int { vkResetFences(dev, c, p) }
 
-fn queue_submit(any: q, int: c, any: p, any: f): int { vkQueueSubmit(q, c, p, f) }
+fn queue_submit(any q, int c, any p, ?handle f) int {
+   if(!q || !p){ return -1 }
+   vkQueueSubmit(q, c, p, f)
+}
 
-fn create_render_pass(any: dev, any: ci, any: al, any: p): int { vkCreateRenderPass(dev, ci, al, p) }
+fn create_render_pass(any dev, any ci, any al, any p) int { vkCreateRenderPass(dev, ci, al, p) }
 
-fn destroy_render_pass(any: dev, any: rp, any: al): any { vkDestroyRenderPass(dev, rp, al) }
+fn destroy_render_pass(any dev, ?handle rp, any al) any {
+   if(!rp){ return 0 }
+   vkDestroyRenderPass(dev, rp, al)
+}
 
-fn create_framebuffer(any: dev, any: ci, any: al, any: p): int { vkCreateFramebuffer(dev, ci, al, p) }
+fn create_framebuffer(any dev, any ci, any al, any p) int { vkCreateFramebuffer(dev, ci, al, p) }
 
-fn destroy_framebuffer(any: dev, any: fb, any: al): any { vkDestroyFramebuffer(dev, fb, al) }
+fn destroy_framebuffer(any dev, ?handle fb, any al) any {
+   if(!fb){ return 0 }
+   vkDestroyFramebuffer(dev, fb, al)
+}
 
-fn create_descriptor_set_layout(any: dev, any: ci, any: al, any: p): int { vkCreateDescriptorSetLayout(dev, ci, al, p) }
+fn create_descriptor_set_layout(any dev, any ci, any al, any p) int { vkCreateDescriptorSetLayout(dev, ci, al, p) }
 
-fn destroy_descriptor_set_layout(any: dev, any: dsl, any: al): any { vkDestroyDescriptorSetLayout(dev, dsl, al) }
+fn destroy_descriptor_set_layout(any dev, ?handle dsl, any al) any {
+   if(!dsl){ return 0 }
+   vkDestroyDescriptorSetLayout(dev, dsl, al)
+}
 
-fn create_descriptor_pool(any: dev, any: ci, any: al, any: p): int { vkCreateDescriptorPool(dev, ci, al, p) }
+fn create_descriptor_pool(any dev, any ci, any al, any p) int { vkCreateDescriptorPool(dev, ci, al, p) }
 
-fn destroy_descriptor_pool(any: dev, any: dp, any: al): any { vkDestroyDescriptorPool(dev, dp, al) }
+fn destroy_descriptor_pool(any dev, ?handle dp, any al) any {
+   if(!dp){ return 0 }
+   vkDestroyDescriptorPool(dev, dp, al)
+}
 
-fn allocate_descriptor_sets(any: dev, any: ai, any: p): int { vkAllocateDescriptorSets(dev, ai, p) }
+fn allocate_descriptor_sets(any dev, any ai, any p) int { vkAllocateDescriptorSets(dev, ai, p) }
 
-fn update_descriptor_sets(any: dev, int: wc, any: wp, int: cc, any: cp): any { vkUpdateDescriptorSets(dev, wc, wp, cc, cp) }
+fn update_descriptor_sets(any dev, int wc, any wp, int cc, any cp) any { vkUpdateDescriptorSets(dev, wc, wp, cc, cp) }
 
-fn cmd_bind_descriptor_sets(any: cb, int: bp, any: lay, int: f, int: c, any: p_sets, int: od_count, any: p_od): any { vkCmdBindDescriptorSets(cb, bp, lay, f, c, p_sets, od_count, p_od) }
+fn cmd_bind_descriptor_sets(any cb, int bp, ?handle lay, int f, int c, any p_sets, int od_count, any p_od) any {
+   if(!lay){ return 0 }
+   vkCmdBindDescriptorSets(cb, bp, lay, f, c, p_sets, od_count, p_od)
+}
 
-fn create_pipeline_layout(any: dev, any: ci, any: al, any: p): int { vkCreatePipelineLayout(dev, ci, al, p) }
+fn create_pipeline_layout(any dev, any ci, any al, any p) int { vkCreatePipelineLayout(dev, ci, al, p) }
 
-fn destroy_pipeline_layout(any: dev, any: pl, any: al): any { vkDestroyPipelineLayout(dev, pl, al) }
+fn destroy_pipeline_layout(any dev, ?handle pl, any al) any {
+   if(!pl){ return 0 }
+   vkDestroyPipelineLayout(dev, pl, al)
+}
 
-fn create_graphics_pipelines(any: dev, any: cache, int: c, any: p_ci, any: al, any: p): int { vkCreateGraphicsPipelines(dev, cache, c, p_ci, al, p) }
+fn create_graphics_pipelines(any dev, ?handle cache, int c, any p_ci, any al, any p) int { vkCreateGraphicsPipelines(dev, cache, c, p_ci, al, p) }
 
-fn create_compute_pipelines(any: dev, any: cache, int: c, any: p_ci, any: al, any: p): int { vkCreateComputePipelines(dev, cache, c, p_ci, al, p) }
+fn create_compute_pipelines(any dev, ?handle cache, int c, any p_ci, any al, any p) int { vkCreateComputePipelines(dev, cache, c, p_ci, al, p) }
 
-fn destroy_pipeline(any: dev, any: p, any: al): any { vkDestroyPipeline(dev, p, al) }
+fn destroy_pipeline(any dev, ?handle p, any al) any {
+   if(!p){ return 0 }
+   vkDestroyPipeline(dev, p, al)
+}
 
-fn create_shader_module(any: dev, any: ci, any: al, any: p): int { vkCreateShaderModule(dev, ci, al, p) }
+fn create_shader_module(any dev, any ci, any al, any p) int { vkCreateShaderModule(dev, ci, al, p) }
 
-fn destroy_shader_module(any: dev, any: sm, any: al): any { vkDestroyShaderModule(dev, sm, al) }
+fn destroy_shader_module(any dev, ?handle sm, any al) any {
+   if(!sm){ return 0 }
+   vkDestroyShaderModule(dev, sm, al)
+}
 
-fn _vk_instance_proc_cached(any: inst, str: slot_name, str: name): any {
+fn _vk_instance_proc_cached(any inst, str slot_name, str name) any {
    def any: proc_name_s = cstr(name)
    def ptr: proc_name = proc_name_s
    if(slot_name == "vkCreateXcbSurfaceKHR"){
@@ -499,21 +595,22 @@ fn _vk_instance_proc_cached(any: inst, str: slot_name, str: name): any {
    0
 }
 
-fn vk_result_code(any: res): int {
+fn vk_result_code(any res) int {
+   "Runs the result code operation."
    if(res >= -13 && res <= 7){ return int(res) }
    if(res <= -1000000000){ return int(res) }
    if((res & 1) != 0){ return int(res >> 1) }
    int(res)
 }
 
-fn _vk_create_surface4(any: inst, any: ci, any: al, any: s, str: name, int: missing=-1): int {
+fn _vk_create_surface4(any inst, any ci, any al, any s, str name, int missing=-1) int {
    def f = _vk_instance_proc_cached(inst, name, name)
    if(!f){ return missing }
    def res = __call4_ptr_ptr_ptr_ptr_i32(f, inst, ci, al, s)
    vk_result_code(res)
 }
 
-fn _vk_surface_call4(any: inst, str: name, any: a, any: b, any: c, any: d): int {
+fn _vk_surface_call4(any inst, str name, any a, any b, any c, any d) int {
    def f = _vk_instance_proc_cached(inst, name, name)
    if(!f){ return -1 }
    mut res = 0
@@ -525,7 +622,7 @@ fn _vk_surface_call4(any: inst, str: name, any: a, any: b, any: c, any: d): int 
    vk_result_code(res)
 }
 
-fn vk_create_xcb_surface_khr(any: inst, any: ci, any: al, any: s): int {
+fn vk_create_xcb_surface_khr(any inst, any ci, any al, any s) int {
    "Creates an XCB Vulkan surface on Linux, or returns -1 elsewhere."
    #linux {
       _vk_create_surface4(inst, ci, al, s, "vkCreateXcbSurfaceKHR")
@@ -534,7 +631,7 @@ fn vk_create_xcb_surface_khr(any: inst, any: ci, any: al, any: s): int {
    } #endif
 }
 
-fn vk_create_xlib_surface_khr(any: inst, any: ci, any: al, any: s): int {
+fn vk_create_xlib_surface_khr(any inst, any ci, any al, any s) int {
    "Creates an Xlib Vulkan surface on Linux, or returns -1 elsewhere."
    #linux {
       _vk_create_surface4(inst, ci, al, s, "vkCreateXlibSurfaceKHR")
@@ -543,7 +640,7 @@ fn vk_create_xlib_surface_khr(any: inst, any: ci, any: al, any: s): int {
    } #endif
 }
 
-fn vk_create_win32_surface_khr(any: inst, any: ci, any: al, any: s): int {
+fn vk_create_win32_surface_khr(any inst, any ci, any al, any s) int {
    "Creates a Win32 Vulkan surface on Windows, or returns -1 elsewhere."
    #windows {
       _vk_create_surface4(inst, ci, al, s, "vkCreateWin32SurfaceKHR")
@@ -552,7 +649,7 @@ fn vk_create_win32_surface_khr(any: inst, any: ci, any: al, any: s): int {
    } #endif
 }
 
-fn vk_create_wayland_surface_khr(any: inst, any: ci, any: al, any: s): int {
+fn vk_create_wayland_surface_khr(any inst, any ci, any al, any s) int {
    "Creates a Wayland Vulkan surface on Linux, or returns -1 elsewhere."
    #linux {
       _vk_create_surface4(inst, ci, al, s, "vkCreateWaylandSurfaceKHR")
@@ -561,7 +658,7 @@ fn vk_create_wayland_surface_khr(any: inst, any: ci, any: al, any: s): int {
    } #endif
 }
 
-fn vk_create_metal_surface_ext(any: instance, any: info, any: allocator, any: surface): int {
+fn vk_create_metal_surface_ext(any instance, any info, any allocator, any surface) int {
    "Creates a Metal Vulkan surface on macOS, or returns -7 elsewhere."
    #macos {
       _vk_create_surface4(instance, info, allocator, surface, "vkCreateMetalSurfaceEXT", -7)
@@ -570,15 +667,15 @@ fn vk_create_metal_surface_ext(any: instance, any: info, any: allocator, any: su
    } #endif
 }
 
-fn vk_get_physical_device_surface_capabilities_khr(any: pd, any: surf, any: p): int { "Reserved direct surface capability hook." 0 }
+fn vk_get_physical_device_surface_capabilities_khr(any pd, any surf, any p) int { "Reserved direct surface capability hook." 0 }
 
-fn vk_get_physical_device_surface_support_khr(any: pd, int: fam, any: surf, any: p): int { "Reserved direct surface support hook." 0 }
+fn vk_get_physical_device_surface_support_khr(any pd, int fam, any surf, any p) int { "Reserved direct surface support hook." 0 }
 
-fn vk_get_physical_device_surface_formats_khr(any: pd, any: surf, any: c, any: p): int { "Reserved direct surface formats hook." 0 }
+fn vk_get_physical_device_surface_formats_khr(any pd, any surf, any c, any p) int { "Reserved direct surface formats hook." 0 }
 
-fn vk_get_physical_device_surface_present_modes_khr(any: pd, any: surf, any: c, any: p): int { "Reserved direct surface present-modes hook." 0 }
+fn vk_get_physical_device_surface_present_modes_khr(any pd, any surf, any c, any p) int { "Reserved direct surface present-modes hook." 0 }
 
-fn vk_get_physical_device_wayland_presentation_support_khr(any: pd, int: fam, any: dpy): int {
+fn vk_get_physical_device_wayland_presentation_support_khr(any pd, int fam, any dpy) int {
    "Checks Wayland presentation support on Linux, or returns false elsewhere."
    #linux {
       vkGetPhysicalDeviceWaylandPresentationSupportKHR(pd, fam, dpy)
@@ -587,25 +684,25 @@ fn vk_get_physical_device_wayland_presentation_support_khr(any: pd, int: fam, an
    } #endif
 }
 
-fn get_physical_device_surface_support_khr(any: inst, any: pd, int: qf, any: surf, any: p): int {
+fn get_physical_device_surface_support_khr(any inst, any pd, int qf, any surf, any p) int {
    "Calls `vkGetPhysicalDeviceSurfaceSupportKHR` through the instance loader."
    if(!inst || !pd || !surf || surf == 0x8000000000 || !p){ return -1 }
    _vk_surface_call4(inst, "vkGetPhysicalDeviceSurfaceSupportKHR", pd, qf, surf, p)
 }
 
-fn get_physical_device_surface_formats_khr(any: inst, any: pd, any: surf, any: c, any: p): int {
+fn get_physical_device_surface_formats_khr(any inst, any pd, any surf, any c, any p) int {
    "Calls `vkGetPhysicalDeviceSurfaceFormatsKHR` through the instance loader."
    if(!inst || !pd || !surf || surf == 0x8000000000 || !c){ return -1 }
    _vk_surface_call4(inst, "vkGetPhysicalDeviceSurfaceFormatsKHR", pd, surf, c, p)
 }
 
-fn get_physical_device_surface_present_modes_khr(any: inst, any: pd, any: surf, any: c, any: p): int {
+fn get_physical_device_surface_present_modes_khr(any inst, any pd, any surf, any c, any p) int {
    "Calls `vkGetPhysicalDeviceSurfacePresentModesKHR` through the instance loader."
    if(!inst || !pd || !surf || surf == 0x8000000000 || !c){ return -1 }
    _vk_surface_call4(inst, "vkGetPhysicalDeviceSurfacePresentModesKHR", pd, surf, c, p)
 }
 
-fn get_physical_device_surface_capabilities_khr(any: inst, any: pd, any: surf, any: p): int {
+fn get_physical_device_surface_capabilities_khr(any inst, any pd, any surf, any p) int {
    "Calls `vkGetPhysicalDeviceSurfaceCapabilitiesKHR` through the instance loader."
    if(!inst || !pd || !surf || surf == 0x8000000000 || !p){ return -1 }
    def f = _vk_instance_proc_cached(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
@@ -614,39 +711,57 @@ fn get_physical_device_surface_capabilities_khr(any: inst, any: pd, any: surf, a
    vk_result_code(res)
 }
 
-fn destroy_surface_khr(any: inst, any: surf, any: al): any { vkDestroySurfaceKHR(inst, surf, al) }
+fn destroy_surface_khr(any inst, ?handle surf, any al) any {
+   if(!surf){ return 0 }
+   vkDestroySurfaceKHR(inst, surf, al)
+}
 
-fn allocate_memory(any: dev, any: ai, any: al, any: p): int { vkAllocateMemory(dev, ai, al, p) }
+fn allocate_memory(any dev, any ai, any al, any p) int { vkAllocateMemory(dev, ai, al, p) }
 
-fn free_memory(any: dev, any: mem, any: al): any { vkFreeMemory(dev, mem, al) }
+fn free_memory(any dev, ?handle mem, any al) any {
+   if(!mem){ return 0 }
+   vkFreeMemory(dev, mem, al)
+}
 
-fn bind_image_memory(any: dev, any: img, any: mem, int: off): int { vkBindImageMemory(dev, img, mem, off) }
+fn bind_image_memory(any dev, ?handle img, ?handle mem, int off) int {
+   if(!img || !mem){ return -1 }
+   vkBindImageMemory(dev, img, mem, off)
+}
 
-fn get_image_memory_requirements(any: dev, any: img, any: p): any { vkGetImageMemoryRequirements(dev, img, p) }
+fn get_image_memory_requirements(any dev, ?handle img, any p) any {
+   if(!img || !p){ return 0 }
+   vkGetImageMemoryRequirements(dev, img, p)
+}
 
-fn device_wait_idle(any: dev): int { vkDeviceWaitIdle(dev) }
+fn device_wait_idle(any dev) int { vkDeviceWaitIdle(dev) }
 
-fn free_command_buffers(any: dev, any: pool, int: count, any: p): any { vkFreeCommandBuffers(dev, pool, count, p) }
+fn free_command_buffers(any dev, any pool, int count, any p) any { vkFreeCommandBuffers(dev, pool, count, p) }
 
-fn create_sampler(any: dev, any: ci, any: al, any: p): int { vkCreateSampler(dev, ci, al, p) }
+fn create_sampler(any dev, any ci, any al, any p) int { vkCreateSampler(dev, ci, al, p) }
 
-fn destroy_sampler(any: dev, any: sampler, any: al): any { vkDestroySampler(dev, sampler, al) }
+fn destroy_sampler(any dev, ?handle sampler, any al) any {
+   if(!sampler){ return 0 }
+   vkDestroySampler(dev, sampler, al)
+}
 
-fn cmd_set_viewport(any: cb, int: first, int: count, any: p): any { vkCmdSetViewport(cb, first, count, p) }
+fn cmd_set_viewport(any cb, int first, int count, any p) any { vkCmdSetViewport(cb, first, count, p) }
 
-fn cmd_set_scissor(any: cb, int: first, int: count, any: p): any { vkCmdSetScissor(cb, first, count, p) }
+fn cmd_set_scissor(any cb, int first, int count, any p) any { vkCmdSetScissor(cb, first, count, p) }
 
-fn cmd_set_line_width(any: cb, f64: width): any { vkCmdSetLineWidth(cb, float(width)) }
+fn cmd_set_line_width(any cb, f64 width) any { vkCmdSetLineWidth(cb, float(width)) }
 
-fn cmd_push_constants(any: cb, any: lay, int: stages, int: off, int: sz, any: values): any { vkCmdPushConstants(cb, lay, stages, off, sz, values) }
+fn cmd_push_constants(any cb, any lay, int stages, int off, int sz, any values) any { vkCmdPushConstants(cb, lay, stages, off, sz, values) }
 
-fn cmd_clear_attachments(any: cb, int: count, any: attachments, int: rect_count, any: rects): any { vkCmdClearAttachments(cb, count, attachments, rect_count, rects) }
+fn cmd_clear_attachments(any cb, int count, any attachments, int rect_count, any rects) any { vkCmdClearAttachments(cb, count, attachments, rect_count, rects) }
 
-fn cmd_copy_image_to_buffer(any: cb, any: img, int: lay, any: buf, int: r_count, any: p_regions): any { vkCmdCopyImageToBuffer(cb, img, lay, buf, r_count, p_regions) }
+fn cmd_copy_image_to_buffer(any cb, ?handle img, int lay, ?handle buf, int r_count, any p_regions) any {
+   if(!img || !buf){ return 0 }
+   vkCmdCopyImageToBuffer(cb, img, lay, buf, r_count, p_regions)
+}
 
-fn queue_wait_idle(any: q): int { vkQueueWaitIdle(q) }
+fn queue_wait_idle(any q) int { vkQueueWaitIdle(q) }
 
-fn reset_command_buffer(any: cb, int: flags): int { vkResetCommandBuffer(cb, flags) }
+fn reset_command_buffer(any cb, int flags) int { vkResetCommandBuffer(cb, flags) }
 def VK_STRUCTURE_TYPE_APPLICATION_INFO = 0
 def VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1
 def VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO = 2
@@ -783,49 +898,49 @@ def VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = 0x00000001
 def VK_QUEUE_GRAPHICS_BIT = 0x00000001
 def VK_QUEUE_TRANSFER_BIT = 0x00000002
 
-fn VkApplicationInfo(any: name, int: version, any: engine, int: engine_v, int: api_v): ?ptr {
+fn VkApplicationInfo(any name, int version, any engine, int engine_v, int api_v) ?ptr {
    "Creates a VkApplicationInfo structure."
    def info = _vk_struct(48, 0)
-   store64_h(info, name, 16) ; pApplicationName (pointer)
+   store64_h(info, name, 16)
    store32(info, version, 24)
-   store64_h(info, engine, 32) ; pEngineName (pointer)
+   store64_h(info, engine, 32)
    store32(info, engine_v, 40)
-   store32(info, api_v, 44) ; apiVersion
+   store32(info, api_v, 44)
    info
 }
 
-fn VkInstanceCreateInfo(any: app_info, int: ext_count, any: exts): ?ptr {
+fn VkInstanceCreateInfo(any app_info, int ext_count, any exts) ?ptr {
    "Creates a VkInstanceCreateInfo structure."
    def info = _vk_struct(64, 1)
-   store64_h(info, 0, 8) ; pNext
-   store64_h(info, 0, 16) ; flags
-   store64_h(info, app_info, 24) ; pApplicationInfo
-   store32(info, ext_count, 48) ; enabledExtensionCount
-   store64_h(info, exts, 56) ; ppEnabledExtensionNames
+   store64_h(info, 0, 8)
+   store64_h(info, 0, 16)
+   store64_h(info, app_info, 24)
+   store32(info, ext_count, 48)
+   store64_h(info, exts, 56)
    info
 }
 
-fn VkDeviceQueueCreateInfo(int: family, int: count, any: priorities): ?ptr {
+fn VkDeviceQueueCreateInfo(int family, int count, any priorities) ?ptr {
    "Creates a VkDeviceQueueCreateInfo structure."
    def info = _vk_struct(40, 2)
    store32(info, family, 20)
    store32(info, count, 24)
-   store64_h(info, priorities, 32) ; pQueuePriorities (pointer)
+   store64_h(info, priorities, 32)
    info
 }
 
-fn VkDeviceCreateInfo(int: q_count, any: queues, int: ext_count, any: exts, any: features): ?ptr {
+fn VkDeviceCreateInfo(int q_count, any queues, int ext_count, any exts, any features) ?ptr {
    "Creates a VkDeviceCreateInfo structure."
    def info = _vk_struct(72, 3)
    store32(info, q_count, 20)
-   store64_h(info, queues, 24) ; pQueueCreateInfos
+   store64_h(info, queues, 24)
    store32(info, ext_count, 48)
-   store64_h(info, exts, 56) ; ppEnabledExtensionNames
-   store64_h(info, features, 64) ; pEnabledFeatures
+   store64_h(info, exts, 56)
+   store64_h(info, features, 64)
    info
 }
 
-fn VkSubmitInfo(int: wait_count, any: wait_sems, any: wait_stages, int: cb_count, any: cbs, int: signal_count, any: signal_sems): ?ptr {
+fn VkSubmitInfo(int wait_count, any wait_sems, any wait_stages, int cb_count, any cbs, int signal_count, any signal_sems) ?ptr {
    "Creates a VkSubmitInfo structure."
    def info = _vk_struct(72, 4)
    store32(info, wait_count, 16)
@@ -838,7 +953,7 @@ fn VkSubmitInfo(int: wait_count, any: wait_sems, any: wait_stages, int: cb_count
    info
 }
 
-fn VkPresentInfoKHR(int: wait_count, any: wait_sems, int: sc_count, any: scs, any: indices, any: results): ?ptr {
+fn VkPresentInfoKHR(int wait_count, any wait_sems, int sc_count, any scs, any indices, any results) ?ptr {
    "Creates a VkPresentInfoKHR structure."
    def info = _vk_struct(64, 1000001001)
    store32(info, wait_count, 16)
@@ -850,37 +965,37 @@ fn VkPresentInfoKHR(int: wait_count, any: wait_sems, int: sc_count, any: scs, an
    info
 }
 
-fn VkCommandBufferAllocateInfo(any: pool, int: level, int: count): ?ptr {
+fn VkCommandBufferAllocateInfo(any pool, int level, int count) ?ptr {
    "Creates a VkCommandBufferAllocateInfo structure."
    def info = _vk_struct(32, 40)
-   store64_h(info, pool, 16) ; VkCommandPool (handle)
+   store64_h(info, pool, 16)
    store32(info, level, 24)
    store32(info, count, 28)
    info
 }
 
-fn VkCommandBufferBeginInfo(int: flags): ?ptr {
+fn VkCommandBufferBeginInfo(int flags) ?ptr {
    "Creates a VkCommandBufferBeginInfo structure."
    def info = _vk_struct(32, 42)
    store32(info, flags, 16)
    info
 }
 
-fn VkRenderPassBeginInfo(any: rp, any: fb, int: x, int: y, int: w, int: h, int: clear_count, any: clears): ?ptr {
+fn VkRenderPassBeginInfo(any rp, any fb, int x, int y, int w, int h, int clear_count, any clears) ?ptr {
    "Creates a VkRenderPassBeginInfo structure."
    def info = _vk_struct(64, 43)
-   store64_h(info, rp, 16) ; VkRenderPass (handle)
-   store64_h(info, fb, 24) ; VkFramebuffer (handle)
+   store64_h(info, rp, 16)
+   store64_h(info, fb, 24)
    store32(info, x, 32)
    store32(info, y, 36)
    store32(info, w, 40)
    store32(info, h, 44)
    store32(info, clear_count, 48)
-   store64_h(info, clears, 56) ; pClearValues
+   store64_h(info, clears, 56)
    info
 }
 
-fn VkMemoryAllocateInfo(int: size, int: type_idx): ?ptr {
+fn VkMemoryAllocateInfo(int size, int type_idx) ?ptr {
    "Creates a VkMemoryAllocateInfo structure."
    def info = _vk_struct(32, 5)
    store64_h(info, size, 16)
@@ -888,7 +1003,7 @@ fn VkMemoryAllocateInfo(int: size, int: type_idx): ?ptr {
    info
 }
 
-fn VkBufferCreateInfo(int: size, int: usage, int: mode): ?ptr {
+fn VkBufferCreateInfo(int size, int usage, int mode) ?ptr {
    "Creates a VkBufferCreateInfo structure."
    def info = _vk_struct(56, 12)
    store64_h(info, size, 24)
@@ -897,25 +1012,24 @@ fn VkBufferCreateInfo(int: size, int: usage, int: mode): ?ptr {
    info
 }
 
-fn VkImageViewCreateInfo(any: img, int: view_type, int: fmt, any: components_ptr, any: subresource_ptr): ?ptr {
+fn VkImageViewCreateInfo(any img, int view_type, int fmt, any components_ptr, any subresource_ptr) ?ptr {
    "Creates a VkImageViewCreateInfo structure."
    def info = _vk_struct(80, 15)
-   store64_h(info, img, 24) ; VkImage (handle)
+   store64_h(info, img, 24)
    store32(info, view_type, 32)
    store32(info, fmt, 36)
    if(components_ptr){ memcpy(info + 56, components_ptr, 16) }
    if(subresource_ptr){ memcpy(info + 56, subresource_ptr, 20) } else {
-      ; Default subresource range: COLOR aspect, 1 mip, 1 layer
-      store32(info, 1, 56) ; aspectMask = COLOR
-      store32(info, 0, 60) ; baseMipLevel
-      store32(info, 1, 64) ; levelCount
-      store32(info, 0, 68) ; baseArrayLayer
-      store32(info, 1, 72) ; layerCount
+      store32(info, 1, 56)
+      store32(info, 0, 60)
+      store32(info, 1, 64)
+      store32(info, 0, 68)
+      store32(info, 1, 72)
    }
    info
 }
 
-fn VkImageCreateInfo(int: flags, int: image_type, int: fmt, int: w, int: h, int: d, int: mips, int: layers, int: samples, int: tiling, int: usage, int: mode, int: lyt): ?ptr {
+fn VkImageCreateInfo(int flags, int image_type, int fmt, int w, int h, int d, int mips, int layers, int samples, int tiling, int usage, int mode, int lyt) ?ptr {
    "Creates a VkImageCreateInfo structure."
    def info = _vk_struct(88, 14)
    store32(info, flags, 16)
@@ -930,20 +1044,20 @@ fn VkImageCreateInfo(int: flags, int: image_type, int: fmt, int: w, int: h, int:
    store32(info, tiling, 52)
    store32(info, usage, 56)
    store32(info, mode, 60)
-   store32(info, lyt, 80) ; initialLayout
+   store32(info, lyt, 80)
    info
 }
 
-fn VkPipelineShaderStageCreateInfo(int: stage, any: shader_mod, any: entry_name): ?ptr {
+fn VkPipelineShaderStageCreateInfo(int stage, any shader_mod, any entry_name) ?ptr {
    "Creates a VkPipelineShaderStageCreateInfo structure."
    def info = _vk_struct(48, 18)
    store32(info, stage, 20)
-   store64_h(info, shader_mod, 24) ; VkShaderModule (handle)
-   store64_h(info, entry_name, 32) ; pName
+   store64_h(info, shader_mod, 24)
+   store64_h(info, entry_name, 32)
    info
 }
 
-fn VkSamplerCreateInfo(int: mag, int: min_filter, int: m_mode, int: a_u, int: a_v, int: a_w): ?ptr {
+fn VkSamplerCreateInfo(int mag, int min_filter, int m_mode, int a_u, int a_v, int a_w) ?ptr {
    "Creates a VkSamplerCreateInfo structure."
    def info = _vk_struct(80, 31)
    store32(info, mag, 20)
@@ -955,7 +1069,7 @@ fn VkSamplerCreateInfo(int: mag, int: min_filter, int: m_mode, int: a_u, int: a_
    info
 }
 
-fn VkShaderModuleCreateInfo(int: code_size, any: code_ptr): ?ptr {
+fn VkShaderModuleCreateInfo(int code_size, any code_ptr) ?ptr {
    "Creates a VkShaderModuleCreateInfo structure."
    def info = _vk_struct(48, 16)
    store64_h(info, code_size, 24)
@@ -963,17 +1077,17 @@ fn VkShaderModuleCreateInfo(int: code_size, any: code_ptr): ?ptr {
    info
 }
 
-fn VkPipelineLayoutCreateInfo(int: sl_count, any: l_layouts, int: pr_count, any: p_ranges): ?ptr {
+fn VkPipelineLayoutCreateInfo(int sl_count, any l_layouts, int pr_count, any p_ranges) ?ptr {
    "Creates a VkPipelineLayoutCreateInfo structure."
    def info = _vk_struct(48, 30)
    store32(info, sl_count, 20)
-   store64_h(info, l_layouts, 24) ; pSetLayouts
+   store64_h(info, l_layouts, 24)
    store32(info, pr_count, 32)
-   store64_h(info, p_ranges, 40) ; pPushConstantRanges
+   store64_h(info, p_ranges, 40)
    info
 }
 
-fn VkDescriptorSetLayoutBinding(int: binding, int: descriptor_type, int: count, int: stages, any: samplers): ?ptr {
+fn VkDescriptorSetLayoutBinding(int binding, int descriptor_type, int count, int stages, any samplers) ?ptr {
    "Creates a VkDescriptorSetLayoutBinding structure."
    def b = _vk_alloc(24)
    store32(b, binding, 0)
@@ -984,25 +1098,25 @@ fn VkDescriptorSetLayoutBinding(int: binding, int: descriptor_type, int: count, 
    b
 }
 
-fn VkDescriptorSetLayoutCreateInfo(int: b_count, any: bindings): ?ptr {
+fn VkDescriptorSetLayoutCreateInfo(int b_count, any bindings) ?ptr {
    "Creates a VkDescriptorSetLayoutCreateInfo structure."
    def info = _vk_struct(32, 32)
    store32(info, b_count, 20)
-   store64_h(info, bindings, 24) ; pBindings
+   store64_h(info, bindings, 24)
    info
 }
 
-fn VkPipelineVertexInputStateCreateInfo(int: b_count, any: bindings, int: a_count, any: attrs): ?ptr {
+fn VkPipelineVertexInputStateCreateInfo(int b_count, any bindings, int a_count, any attrs) ?ptr {
    "Creates a VkPipelineVertexInputStateCreateInfo structure."
    def info = _vk_struct(48, 19)
    store32(info, b_count, 20)
-   store64_h(info, bindings, 24) ; pVertexBindingDescriptions
+   store64_h(info, bindings, 24)
    store32(info, a_count, 32)
-   store64_h(info, attrs, 40) ; pVertexAttributeDescriptions
+   store64_h(info, attrs, 40)
    info
 }
 
-fn VkPipelineInputAssemblyStateCreateInfo(int: topo, int: restart): ?ptr {
+fn VkPipelineInputAssemblyStateCreateInfo(int topo, int restart) ?ptr {
    "Creates a VkPipelineInputAssemblyStateCreateInfo structure."
    def info = _vk_struct(32, 20)
    store32(info, topo, 20)
@@ -1010,17 +1124,17 @@ fn VkPipelineInputAssemblyStateCreateInfo(int: topo, int: restart): ?ptr {
    info
 }
 
-fn VkPipelineViewportStateCreateInfo(int: v_count, any: viewports, int: s_count, any: scissors): ?ptr {
+fn VkPipelineViewportStateCreateInfo(int v_count, any viewports, int s_count, any scissors) ?ptr {
    "Creates a VkPipelineViewportStateCreateInfo structure."
    def info = _vk_struct(48, 22)
    store32(info, v_count, 20)
-   store64_h(info, viewports, 24) ; pViewports
+   store64_h(info, viewports, 24)
    store32(info, s_count, 32)
-   store64_h(info, scissors, 40) ; pScissors
+   store64_h(info, scissors, 40)
    info
 }
 
-fn VkPipelineRasterizationStateCreateInfo(int: depth_clamp, int: discard, int: polygon_mode, int: cull_mode, int: front, int: depth_bias, f64: db_const, f64: db_clamp, f64: db_slope, f64: line_width): ?ptr {
+fn VkPipelineRasterizationStateCreateInfo(int depth_clamp, int discard, int polygon_mode, int cull_mode, int front, int depth_bias, f64 db_const, f64 db_clamp, f64 db_slope, f64 line_width) ?ptr {
    "Creates a VkPipelineRasterizationStateCreateInfo structure."
    def info = _vk_struct(64, 23)
    store32(info, depth_clamp, 20)
@@ -1036,7 +1150,7 @@ fn VkPipelineRasterizationStateCreateInfo(int: depth_clamp, int: discard, int: p
    info
 }
 
-fn VkPipelineMultisampleStateCreateInfo(int: samples, int: shading, f64: min_shading, any: mask, int: alpha_to_coverage, int: alpha_to_one): ?ptr {
+fn VkPipelineMultisampleStateCreateInfo(int samples, int shading, f64 min_shading, any mask, int alpha_to_coverage, int alpha_to_one) ?ptr {
    "Creates a VkPipelineMultisampleStateCreateInfo structure."
    def info = _vk_struct(48, 24)
    store32(info, samples, 20)
@@ -1048,7 +1162,7 @@ fn VkPipelineMultisampleStateCreateInfo(int: samples, int: shading, f64: min_sha
    info
 }
 
-fn VkPipelineDepthStencilStateCreateInfo(int: depth_test, int: depth_write, int: depth_compare, int: depth_bounds_test, int: stencil_test, any: _front, any: _back, f64: min_depth, f64: max_depth): ?ptr {
+fn VkPipelineDepthStencilStateCreateInfo(int depth_test, int depth_write, int depth_compare, int depth_bounds_test, int stencil_test, any _front, any _back, f64 min_depth, f64 max_depth) ?ptr {
    "Creates a VkPipelineDepthStencilStateCreateInfo structure."
    def info = _vk_struct(104, 25)
    store32(info, depth_test, 20)
@@ -1056,13 +1170,12 @@ fn VkPipelineDepthStencilStateCreateInfo(int: depth_test, int: depth_write, int:
    store32(info, depth_compare, 28)
    store32(info, depth_bounds_test, 32)
    store32(info, stencil_test, 36)
-   ; front (40) back (68)
    store32_f32(info, min_depth, 96)
    store32_f32(info, max_depth, 100)
    info
 }
 
-fn VkPipelineColorBlendAttachmentState(int: blend, int: src_color, int: dst_color, int: color_op, int: src_alpha, int: dst_alpha, int: alpha_op, int: mask): ?ptr {
+fn VkPipelineColorBlendAttachmentState(int blend, int src_color, int dst_color, int color_op, int src_alpha, int dst_alpha, int alpha_op, int mask) ?ptr {
    "Creates a VkPipelineColorBlendAttachmentState structure."
    def b = _vk_alloc(32)
    store32(b, blend, 0)
@@ -1076,18 +1189,17 @@ fn VkPipelineColorBlendAttachmentState(int: blend, int: src_color, int: dst_colo
    b
 }
 
-fn VkPipelineColorBlendStateCreateInfo(int: logic_op_enable, int: logic_op, int: a_count, any: attachments, any: _blend_constants): ?ptr {
+fn VkPipelineColorBlendStateCreateInfo(int logic_op_enable, int logic_op, int a_count, any attachments, any _blend_constants) ?ptr {
    "Creates a VkPipelineColorBlendStateCreateInfo structure."
    def info = _vk_struct(56, 26)
    store32(info, logic_op_enable, 20)
    store32(info, logic_op, 24)
    store32(info, a_count, 28)
-   store64_h(info, attachments, 32) ; pAttachments
-   ; blend_constants (40)
+   store64_h(info, attachments, 32)
    info
 }
 
-fn VkPipelineDynamicStateCreateInfo(int: d_count, any: d_states): ?ptr {
+fn VkPipelineDynamicStateCreateInfo(int d_count, any d_states) ?ptr {
    "Creates a VkPipelineDynamicStateCreateInfo structure."
    def info = _vk_struct(32, 27)
    store32(info, d_count, 20)
@@ -1095,41 +1207,41 @@ fn VkPipelineDynamicStateCreateInfo(int: d_count, any: d_states): ?ptr {
    info
 }
 
-fn VkGraphicsPipelineCreateInfo(int: stage_count, any: stages, any: v_input, any: i_assembly, any: tess, any: v_port, any: raster, any: multi, any: depth, any: blend, any: dynamic_state, any: lyt, any: rp, int: subpass, any: base_pipe, int: base_idx): ?ptr {
+fn VkGraphicsPipelineCreateInfo(int stage_count, any stages, any v_input, any i_assembly, any tess, any v_port, any raster, any multi, any depth, any blend, any dynamic_state, any lyt, any rp, int subpass, any base_pipe, int base_idx) ?ptr {
    "Creates a VkGraphicsPipelineCreateInfo structure."
    def info = _vk_struct(144, 28)
    store32(info, stage_count, 20)
-   store64_h(info, stages, 24) ; pStages
-   store64_h(info, v_input, 32) ; pVertexInputState
-   store64_h(info, i_assembly, 40) ; pInputAssemblyState
-   store64_h(info, tess, 48) ; pTessellationState
-   store64_h(info, v_port, 56) ; pViewportState
-   store64_h(info, raster, 64) ; pRasterizationState
-   store64_h(info, multi, 72) ; pMultisampleState
-   store64_h(info, depth, 80) ; pDepthStencilState
-   store64_h(info, blend, 88) ; pColorBlendState
-   store64_h(info, dynamic_state, 96) ; pDynamicState
-   store64_h(info, lyt, 104) ; VkPipelineLayout (handle)
-   store64_h(info, rp, 112) ; VkRenderPass (handle)
+   store64_h(info, stages, 24)
+   store64_h(info, v_input, 32)
+   store64_h(info, i_assembly, 40)
+   store64_h(info, tess, 48)
+   store64_h(info, v_port, 56)
+   store64_h(info, raster, 64)
+   store64_h(info, multi, 72)
+   store64_h(info, depth, 80)
+   store64_h(info, blend, 88)
+   store64_h(info, dynamic_state, 96)
+   store64_h(info, lyt, 104)
+   store64_h(info, rp, 112)
    store32(info, subpass, 120)
-   store64_h(info, base_pipe, 128) ; VkPipeline (handle)
+   store64_h(info, base_pipe, 128)
    store32(info, base_idx, 136)
    info
 }
 
-fn VkFramebufferCreateInfo(any: rp, int: a_count, any: attachments, int: width, int: height, int: layers): ?ptr {
+fn VkFramebufferCreateInfo(any rp, int a_count, any attachments, int width, int height, int layers) ?ptr {
    "Creates a VkFramebufferCreateInfo structure."
    def info = _vk_struct(64, 37)
-   store64_h(info, rp, 24) ; VkRenderPass (handle)
+   store64_h(info, rp, 24)
    store32(info, a_count, 32)
-   store64_h(info, attachments, 40) ; pAttachments
+   store64_h(info, attachments, 40)
    store32(info, width, 48)
    store32(info, height, 52)
    store32(info, layers, 56)
    info
 }
 
-fn VkRenderPassCreateInfo(int: a_count, any: attachments, int: s_count, any: subpasses, int: d_count, any: dependencies): ?ptr {
+fn VkRenderPassCreateInfo(int a_count, any attachments, int s_count, any subpasses, int d_count, any dependencies) ?ptr {
    "Creates a VkRenderPassCreateInfo structure."
    def info = _vk_struct(64, 38)
    store32(info, a_count, 20)
@@ -1141,7 +1253,7 @@ fn VkRenderPassCreateInfo(int: a_count, any: attachments, int: s_count, any: sub
    info
 }
 
-fn VkAttachmentDescription(int: flags, int: fmt, int: samples, int: load, int: store, int: s_load, int: s_store, int: initial, int: final_layout): ?ptr {
+fn VkAttachmentDescription(int flags, int fmt, int samples, int load, int store, int s_load, int s_store, int initial, int final_layout) ?ptr {
    "Creates a VkAttachmentDescription structure."
    def b = _vk_alloc(36)
    store32(b, flags, 0)
@@ -1156,7 +1268,7 @@ fn VkAttachmentDescription(int: flags, int: fmt, int: samples, int: load, int: s
    b
 }
 
-fn VkSubpassDescription(int: flags, int: bind_point, int: in_count, any: in_refs, int: col_count, any: col_refs, any: resolve_refs, any: depth_ref, int: p_count, any: p_refs): ?ptr {
+fn VkSubpassDescription(int flags, int bind_point, int in_count, any in_refs, int col_count, any col_refs, any resolve_refs, any depth_ref, int p_count, any p_refs) ?ptr {
    "Creates a VkSubpassDescription structure."
    def b = _vk_alloc(72)
    store32(b, flags, 0)
@@ -1172,7 +1284,7 @@ fn VkSubpassDescription(int: flags, int: bind_point, int: in_count, any: in_refs
    b
 }
 
-fn VkSubpassDependency(int: src_s, int: dst_s, int: src_mask, int: dst_mask, int: src_access, int: dst_access, int: flags): ?ptr {
+fn VkSubpassDependency(int src_s, int dst_s, int src_mask, int dst_mask, int src_access, int dst_access, int flags) ?ptr {
    "Creates a VkSubpassDependency structure."
    def b = _vk_alloc(28)
    store32(b, src_s, 0)
@@ -1185,15 +1297,14 @@ fn VkSubpassDependency(int: src_s, int: dst_s, int: src_mask, int: dst_mask, int
    b
 }
 
-fn VkMetalSurfaceCreateInfoEXT(any: layer): ?ptr {
+fn VkMetalSurfaceCreateInfoEXT(any layer) ?ptr {
    "Creates a VkMetalSurfaceCreateInfoEXT structure."
-   def info = _vk_struct(32, 1000217000) ; sType, pNext, flags, pLayer
-   ; pNext is at 8, flags at 16 (default 0)
-   store64_h(info, layer, 24) ; pLayer
+   def info = _vk_struct(32, 1000217000)
+   store64_h(info, layer, 24)
    info
 }
 
-fn VkXlibSurfaceCreateInfoKHR(int: flags, any: dpy, any: window): ?ptr {
+fn VkXlibSurfaceCreateInfoKHR(int flags, any dpy, any window) ?ptr {
    "Creates a VkXlibSurfaceCreateInfoKHR structure."
    def info = _vk_struct(48, 1000004000)
    store32(info, flags, 16)
@@ -1202,7 +1313,7 @@ fn VkXlibSurfaceCreateInfoKHR(int: flags, any: dpy, any: window): ?ptr {
    info
 }
 
-fn VkWaylandSurfaceCreateInfoKHR(int: flags, any: display, any: surface): ?ptr {
+fn VkWaylandSurfaceCreateInfoKHR(int flags, any display, any surface) ?ptr {
    "Creates a VkWaylandSurfaceCreateInfoKHR structure."
    def info = _vk_struct(40, 1000006000)
    store32(info, flags, 16)
@@ -1211,7 +1322,7 @@ fn VkWaylandSurfaceCreateInfoKHR(int: flags, any: display, any: surface): ?ptr {
    info
 }
 
-fn VkWin32SurfaceCreateInfoKHR(int: flags, any: hinstance, any: hwnd): ?ptr {
+fn VkWin32SurfaceCreateInfoKHR(int flags, any hinstance, any hwnd) ?ptr {
    "Creates a VkWin32SurfaceCreateInfoKHR structure."
    def info = _vk_struct(40, 1000009000)
    store32(info, flags, 16)
@@ -1220,7 +1331,7 @@ fn VkWin32SurfaceCreateInfoKHR(int: flags, any: hinstance, any: hwnd): ?ptr {
    info
 }
 
-fn get_memory_type_index(any: pd, int: filter, int: flags): int {
+fn get_memory_type_index(any pd, int filter, int flags) int {
    "Finds a suitable memory type index for the given criteria."
    mut props = _vk_alloc(512)
    get_physical_device_memory_properties(pd, props)
@@ -1240,10 +1351,47 @@ fn get_memory_type_index(any: pd, int: filter, int: flags): int {
    -1
 }
 
-fn vk_debug_marker_begin(any: cb, str: name, any: color=0): int { "Begins a debug marker when backend support is present." 0 }
+fn vk_debug_marker_begin(any cb, str name, any color=0) int { "Begins a debug marker when backend support is present." 0 }
 
-fn vk_debug_marker_end(any: cb): int { "Ends a debug marker when backend support is present." 0 }
+fn vk_debug_marker_end(any cb) int { "Ends a debug marker when backend support is present." 0 }
 
-fn vk_cmd_begin_debug_utils_label(any: cb, any: pLabelInfo): int { "Begins a debug utils label when backend support is present." 0 }
+fn vk_cmd_begin_debug_utils_label(any cb, any pLabelInfo) int { "Begins a debug utils label when backend support is present." 0 }
 
-fn vk_cmd_end_debug_utils_label(any: cb): int { "Ends a debug utils label when backend support is present." 0 }
+fn vk_cmd_end_debug_utils_label(any cb) int { "Ends a debug utils label when backend support is present." 0 }
+
+#main {
+   fn expect_stype(any p, int stype, str label) any {
+      assert(load32(p, 0) == stype, label)
+   }
+   def app = VkApplicationInfo(0, 1, 0, 2, 0x00400000)
+   expect_stype(app, VK_STRUCTURE_TYPE_APPLICATION_INFO, "vulkan application info stype")
+   assert(load32(app, 24) == 1 && load32(app, 40) == 2, "vulkan application versions")
+   free(app)
+   def buf = VkBufferCreateInfo(4096, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE)
+   expect_stype(buf, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, "vulkan buffer stype")
+   assert(load64_h(buf, 24) == 4096 && load32(buf, 32) == (VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT), "vulkan buffer fields")
+   free(buf)
+   def img = VkImageCreateInfo(0, 2, VK_FORMAT_R8G8B8A8_UNORM, 64, 32, 1, 1, 1, 1, 0, VK_IMAGE_USAGE_SAMPLED_BIT, VK_SHARING_MODE_EXCLUSIVE, VK_IMAGE_LAYOUT_UNDEFINED)
+   expect_stype(img, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, "vulkan image stype")
+   assert(load32(img, 20) == 2 && load32(img, 28) == 64 && load32(img, 32) == 32 && load32(img, 80) == VK_IMAGE_LAYOUT_UNDEFINED, "vulkan image fields")
+   free(img)
+   def barrier = zalloc(72)
+   assert(VkImageMemoryBarrierColor(barrier, 0x1234, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) == barrier, "vulkan barrier returns input")
+   expect_stype(barrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, "vulkan barrier stype")
+   assert(load32(barrier, 48) == VK_IMAGE_ASPECT_COLOR_BIT && load32(barrier, 56) == 1 && load32(barrier, 64) == 1, "vulkan barrier ranges")
+   free(barrier)
+   def binding = VkDescriptorSetLayoutBinding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, 0)
+   assert(load32(binding, 0) == 3 && load32(binding, 4) == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && load32(binding, 12) == VK_SHADER_STAGE_VERTEX_BIT, "vulkan descriptor binding")
+   free(binding)
+   def attachment = VkAttachmentDescription(0, VK_FORMAT_B8G8R8A8_UNORM, 1, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+   assert(load32(attachment, 4) == VK_FORMAT_B8G8R8A8_UNORM && load32(attachment, 12) == VK_ATTACHMENT_LOAD_OP_CLEAR && load32(attachment, 32) == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, "vulkan attachment")
+   free(attachment)
+   def dep = VkSubpassDependency(0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0)
+   assert(load32(dep, 0) == 0 && load32(dep, 4) == 1 && load32(dep, 20) == VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, "vulkan subpass dependency")
+   free(dep)
+   assert(get_swapchain_images_khr(0, 0, 0, 0) == -1, "vulkan swapchain guard")
+   assert(vk_get_physical_device_surface_support_khr(0, 0, 0, 0) == 0, "vulkan surface support stub")
+   assert(vk_debug_marker_begin(0, "probe") == 0 && vk_debug_marker_end(0) == 0, "vulkan debug marker stubs")
+   assert(vk_cmd_begin_debug_utils_label(0, 0) == 0 && vk_cmd_end_debug_utils_label(0) == 0, "vulkan debug utils stubs")
+   print("✓ std.os.ui.render.vk.vulkan self-test passed")
+}
