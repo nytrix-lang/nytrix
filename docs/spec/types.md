@@ -1,7 +1,7 @@
 # Types
 
-Types cover named values, nullable values, native boundary forms, and strict
-type checking.
+Types cover named values, nullable values, native boundary forms, and
+compile-time type checking.
 
 ## Type expressions
 
@@ -33,7 +33,7 @@ Generic type expressions are part of the compiler surface. Common forms are
 ```ny
 def int: port = 8080
 mut str: name = "ny"
-fn add(int: a, int: b): int { a + b }
+fn add(int a, int b) int { a + b }
 ```
 
 Typed binding order is always `Type: name`.
@@ -86,8 +86,8 @@ def also_c = Circle(radius: 2)
 Payload constructors require named fields. Pattern matching refines payload
 fields in each arm:
 
-```text
-fn area(Shape: s): int {
+```ny
+fn area(Shape s) int {
    match s {
       Shape.Circle(radius: r) -> r * r
       Shape.Rect(width: w, height: h) -> w * h
@@ -132,7 +132,7 @@ struct Box {
    int: value
 }
 
-fn read(Box: box): int {
+fn read(Box box) int {
    box.value
 }
 ```
@@ -144,7 +144,7 @@ boundary.
 
 Layout forms include packing, alignment, derived helpers, and guards:
 
-```text
+```ny
 layout Packed pack(1){
    u8: tag,
    i32: value
@@ -174,13 +174,13 @@ types, and operators:
 
 ```ny
 impl ShapeBox {
-   fn value(self: b): list { b.get("value", []) }
-   fn concat(self: a, self: b): self { ShapeBox({"value": a.value + b.value}) }
+   fn value(self b) list { b.get("value", []) }
+   fn concat(self a, self b) self { ShapeBox({"value": a.value + b.value}) }
    operator + self: self = concat
 }
 
 impl int, f32 {
-   fn twice(self: x): self { x + x }
+   fn twice(self x) self { x + x }
 }
 ```
 
@@ -191,7 +191,7 @@ Pointer receivers can use `*self`, and nullable receivers can use `?self`.
 `type(value)` returns the top-level runtime tag. `type_shape(value)` returns a
 recursive shape string such as `list<list<int>>` or `dict<str, int|bool>`.
 
-```text
+```ny
 type_shape([[1], [2]])
 is_shape(rows, "list<list<int>>")
 require_shape(rows, "list<list<int>>")
@@ -217,9 +217,17 @@ ty.extend_type_group("math_input", ["seq"])
 Groups are accepted by `is_type`, `require_type`, `assert_type`, and typed
 function annotations such as `number: x`.
 
-## Strict type mode
+## Compile-time checks
 
-Strict type mode rejects dynamic cliffs such as:
+Nytrix runs compile-time type checks by default for typed bindings, function
+arguments and returns, ADT payloads, generics, layouts, and native boundaries.
+That catches ordinary type mistakes without requiring ownership-style ceremony.
+When an expression loses static evidence and falls back to dynamic `any`, the
+checker emits capped source warnings for the high-risk cases.
+
+`--strict-types` turns those dynamic-cliff warnings into rejection. In that
+mode, the checker rejects places where the compiler would otherwise have to
+fall back to unchecked dynamic behavior:
 
 - accidental heterogeneous dict literals
 - unknown dynamic arithmetic
@@ -227,10 +235,17 @@ Strict type mode rejects dynamic cliffs such as:
 - unrefined `Result` payload use
 - native values used as the wrong native kind
 
-Run:
+Use it when a file should stay fully statically explainable:
 
 ```bash
 ny --strict-types file.ny
+```
+
+Use `--no-strict-types` only when an outer tool or environment enabled strict
+dynamic checks and a legacy probe intentionally relies on them:
+
+```bash
+ny --no-strict-types old_probe.ny
 ```
 
 ## Related

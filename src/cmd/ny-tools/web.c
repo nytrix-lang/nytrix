@@ -11,16 +11,26 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/limits.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
+#else
+#include <windows.h>
 #endif
 
 #ifndef PATH_MAX
@@ -187,6 +197,30 @@ static const char *find_cwd_share_root(void) {
   return NULL;
 }
 
+static const char *nyt_web_executable_path(void) {
+  static char path[PATH_MAX];
+  if (path[0])
+    return path;
+#ifdef _WIN32
+  DWORD len = GetModuleFileNameA(NULL, path, sizeof(path));
+  if (len > 0 && len < sizeof(path)) {
+    path[len] = '\0';
+    return path;
+  }
+#elif defined(__APPLE__)
+  uint32_t size = (uint32_t)sizeof(path);
+  if (_NSGetExecutablePath(path, &size) == 0)
+    return path;
+#else
+  ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+  if (len >= 0) {
+    path[len] = '\0';
+    return path;
+  }
+#endif
+  return NULL;
+}
+
 static const char *find_nytrix_share_root(void) {
   static char root[PATH_MAX];
   if (root[0])
@@ -204,16 +238,21 @@ static const char *find_nytrix_share_root(void) {
     snprintf(root, sizeof(root), "%s", cwd_root);
     return root;
   }
-#if defined(__linux__)
   {
-    char exe_path[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (len > 0 && (size_t)len < sizeof(exe_path)) {
-      exe_path[len] = '\0';
+    const char *resolved_exe = nyt_web_executable_path();
+    if (resolved_exe && *resolved_exe) {
+      char exe_path[PATH_MAX];
+      snprintf(exe_path, sizeof(exe_path), "%s", resolved_exe);
       char *slash = strrchr(exe_path, '/');
+#ifdef _WIN32
+      char *backslash = strrchr(exe_path, '\\');
+      if (!slash || (backslash && backslash > slash))
+        slash = backslash;
+#endif
       if (slash) {
         *slash = '\0';
-        const char *suffixes[] = {"../share/nytrix", "../../share/nytrix"};
+        const char *suffixes[] = {"../share/nytrix", "../../share/nytrix",
+                                  "../.."};
         for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
           char cand[PATH_MAX];
           if (join_path(cand, sizeof(cand), exe_path, suffixes[i]) &&
@@ -225,7 +264,6 @@ static const char *find_nytrix_share_root(void) {
       }
     }
   }
-#endif
   const char *system_roots[] = {
       "/usr/share/nytrix",          "/usr/local/share/nytrix",
       "/opt/nytrix/share/nytrix",   "/opt/nytrix/share",
@@ -270,6 +308,266 @@ static int sb_addn(sb_t *sb, const char *s, size_t n) {
 }
 
 static int sb_add(sb_t *sb, const char *s) { return sb_addn(sb, s, strlen(s)); }
+
+#define NYT_OG_W 1200
+#define NYT_OG_H 630
+
+static char *file_data_uri_from_file(const char *path, const char *mime) {
+  size_t n = 0;
+  char *raw = ny_read_file_raw(path, &n);
+  if (!raw)
+    return NULL;
+  static const char table[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  sb_t out = {0};
+  sb_add(&out, "data:");
+  sb_add(&out, mime && *mime ? mime : "application/octet-stream");
+  sb_add(&out, ";base64,");
+  for (size_t i = 0; i < n; i += 3) {
+    unsigned int a = (unsigned char)raw[i];
+    unsigned int b = i + 1 < n ? (unsigned char)raw[i + 1] : 0;
+    unsigned int c = i + 2 < n ? (unsigned char)raw[i + 2] : 0;
+    char enc[4];
+    enc[0] = table[(a >> 2) & 63];
+    enc[1] = table[((a & 3) << 4) | ((b >> 4) & 15)];
+    enc[2] = i + 1 < n ? table[((b & 15) << 2) | ((c >> 6) & 3)] : '=';
+    enc[3] = i + 2 < n ? table[c & 63] : '=';
+    sb_addn(&out, enc, sizeof(enc));
+  }
+  free(raw);
+  return out.data;
+}
+
+static char *svg_data_uri_from_file(const char *path) {
+  return file_data_uri_from_file(path, "image/svg+xml");
+}
+
+static int run_doc_tool_with_fontconfig(char *const argv[],
+                                        const char *fontconfig_file) {
+#ifdef _WIN32
+  (void)argv;
+  (void)fontconfig_file;
+  return 0;
+#else
+  pid_t pid = fork();
+  if (pid < 0)
+    return 0;
+  if (pid == 0) {
+    if (fontconfig_file && *fontconfig_file)
+      setenv("FONTCONFIG_FILE", fontconfig_file, 1);
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0) {
+    if (errno != EINTR)
+      return 0;
+  }
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
+}
+
+static int run_doc_tool(char *const argv[]) {
+  return run_doc_tool_with_fontconfig(argv, NULL);
+}
+
+static int dirname_into(char *out, size_t out_n, const char *path) {
+  if (!out || !out_n || !path || !*path)
+    return 0;
+  snprintf(out, out_n, "%s", path);
+  char *slash = strrchr(out, '/');
+  if (!slash) {
+    snprintf(out, out_n, ".");
+    return 1;
+  }
+  if (slash == out)
+    slash[1] = '\0';
+  else
+    *slash = '\0';
+  return 1;
+}
+
+static void sb_add_og_xml_escaped(sb_t *sb, const char *s) {
+  for (const char *p = s ? s : ""; *p; p++) {
+    switch (*p) {
+    case '&':
+      sb_add(sb, "&amp;");
+      break;
+    case '<':
+      sb_add(sb, "&lt;");
+      break;
+    case '>':
+      sb_add(sb, "&gt;");
+      break;
+    case '"':
+      sb_add(sb, "&quot;");
+      break;
+    default:
+      sb_addn(sb, p, 1);
+      break;
+    }
+  }
+}
+
+static int write_og_fontconfig(const char *path, const char *font_path) {
+  if (!font_path || !ny_path_readable(font_path))
+    return 0;
+  char font_dir[PATH_MAX];
+  if (!dirname_into(font_dir, sizeof(font_dir), font_path))
+    return 0;
+  sb_t xml = {0};
+  sb_add(&xml, "<?xml version=\"1.0\"?>\n"
+               "<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n"
+               "<fontconfig>\n"
+               "  <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n"
+               "  <dir>");
+  sb_add_og_xml_escaped(&xml, font_dir);
+  sb_add(&xml, "</dir>\n</fontconfig>\n");
+  int ok = xml.data && write_file(path, xml.data);
+  free(xml.data);
+  return ok;
+}
+
+static int generate_website_og_png(const char *svg_path, const char *png_path,
+                                   const char *font_path) {
+  unlink(png_path);
+#ifndef _WIN32
+  char fontconfig_path[PATH_MAX];
+  int has_fontconfig = 0;
+  if (font_path && *font_path &&
+      snprintf(fontconfig_path, sizeof(fontconfig_path), "%s.fonts.conf",
+               png_path) < (int)sizeof(fontconfig_path)) {
+    has_fontconfig = write_og_fontconfig(fontconfig_path, font_path);
+  }
+  char *rsvg[] = {"rsvg-convert", "-w", "1200", "-h", "630", "-f", "png",
+                  "-o",           (char *)png_path, (char *)svg_path, NULL};
+  if (run_doc_tool_with_fontconfig(rsvg,
+                                   has_fontconfig ? fontconfig_path : NULL) &&
+      ny_path_readable(png_path))
+    return 1;
+
+  char *magick[] = {"magick", (char *)svg_path, "-resize", "1200x630!",
+                    (char *)png_path, NULL};
+  if (run_doc_tool_with_fontconfig(
+          magick, has_fontconfig ? fontconfig_path : NULL) &&
+      ny_path_readable(png_path))
+    return 1;
+
+  char *convert[] = {"convert", (char *)svg_path, "-resize", "1200x630!",
+                     (char *)png_path, NULL};
+  if (run_doc_tool_with_fontconfig(
+          convert, has_fontconfig ? fontconfig_path : NULL) &&
+      ny_path_readable(png_path))
+    return 1;
+#endif
+  return 0;
+}
+
+static int generate_website_og_svg(const char *path, const char *logo_path,
+                                   const char *favicon_path,
+                                   const char *mono_font_path,
+                                   const char *display_font_path, int modules,
+                                   int symbols, int files) {
+  (void)modules;
+  (void)symbols;
+  (void)files;
+  char *logo_uri = svg_data_uri_from_file(logo_path);
+  char *favicon_uri = svg_data_uri_from_file(favicon_path);
+  char *mono_font_uri = mono_font_path && ny_path_readable(mono_font_path)
+                            ? file_data_uri_from_file(mono_font_path, "font/ttf")
+                            : NULL;
+  char *display_font_uri =
+      display_font_path && ny_path_readable(display_font_path)
+          ? file_data_uri_from_file(display_font_path, "font/ttf")
+          : NULL;
+  if (!logo_uri || !favicon_uri) {
+    free(logo_uri);
+    free(favicon_uri);
+    free(mono_font_uri);
+    free(display_font_uri);
+    return 0;
+  }
+  sb_t svg = {0};
+  sb_add(&svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" "
+               "height=\"630\" viewBox=\"0 0 1200 630\" role=\"img\" "
+               "aria-label=\"Nytrix\">\n"
+               "  <defs>\n"
+               "    <style><![CDATA[\n");
+  if (mono_font_uri) {
+    sb_add(&svg, "      @font-face{font-family:'NyOGMono';src:url(");
+    sb_add(&svg, mono_font_uri);
+    sb_add(&svg, ") format('truetype');font-weight:400 900;}\n");
+  }
+  if (display_font_uri) {
+    sb_add(&svg, "      @font-face{font-family:'NyOGDisplay';src:url(");
+    sb_add(&svg, display_font_uri);
+    sb_add(&svg, ") format('truetype');font-weight:400;}\n");
+  }
+  sb_add(&svg,
+               "    ]]></style>\n"
+               "    <linearGradient id=\"rule\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">\n"
+               "      <stop offset=\"0\" stop-color=\"#8ccfff\"/>\n"
+               "      <stop offset=\"0.48\" stop-color=\"#b8b0ff\"/>\n"
+               "      <stop offset=\"1\" stop-color=\"#8bdc9a\"/>\n"
+               "    </linearGradient>\n"
+               "    <pattern id=\"checker\" width=\"48\" height=\"48\" patternUnits=\"userSpaceOnUse\">\n"
+               "      <rect width=\"48\" height=\"48\" fill=\"#000\"/>\n"
+               "      <path d=\"M0 0h24v24H0zM24 24h24v24H24z\" fill=\"#040405\" opacity=\"0.62\"/>\n"
+               "      <path d=\"M24 0h24v24H24zM0 24h24v24H0z\" fill=\"#010102\" opacity=\"0.72\"/>\n"
+               "      <path d=\"M47.5 0v48M0 47.5h48\" stroke=\"#b6a0ff\" stroke-width=\"1\" opacity=\"0.035\"/>\n"
+               "    </pattern>\n"
+               "  </defs>\n"
+               "  <rect width=\"1200\" height=\"630\" fill=\"#000\"/>\n"
+               "  <rect width=\"1200\" height=\"630\" fill=\"url(#checker)\" opacity=\"0.72\"/>\n"
+               "  <path d=\"M0 0h1200v630H0z\" fill=\"#000\" opacity=\"0.36\"/>\n"
+               "  <path d=\"M84 548h1040\" stroke=\"#202433\" stroke-width=\"1.5\"/>\n"
+               "  <image x=\"70\" y=\"113\" width=\"90\" height=\"90\" preserveAspectRatio=\"xMidYMid meet\" href=\"");
+  sb_add(&svg, favicon_uri);
+  sb_add(&svg, "\"/>\n"
+               "  <image x=\"168\" y=\"113\" width=\"106\" height=\"106\" preserveAspectRatio=\"xMidYMid meet\" href=\"");
+  sb_add(&svg, logo_uri);
+  sb_add(&svg, "\"/>\n"
+               "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\">\n"
+               "    <text x=\"257\" y=\"197\" fill=\"#f6f7fb\" font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\" font-size=\"76\" font-weight=\"400\">ytrix</text>\n"
+               "    <text x=\"84\" y=\"258\" fill=\"#f0f1f5\" font-size=\"36\" font-weight=\"400\">Think freely.</text>\n"
+               "    <text x=\"84\" y=\"298\" fill=\"#b9bdc8\" font-size=\"25\" font-weight=\"400\">Native. Explicit. Comptime. Cross-platform.</text>\n"
+               "  </g>\n"
+               "  <g font-family=\"NyOGMono, JetBrains Mono, DejaVu Sans Mono, Consolas, monospace\">\n"
+               "    <rect x=\"72\" y=\"330\" width=\"1052\" height=\"150\" fill=\"#010102\" stroke=\"#202433\"/>\n"
+               "    <path d=\"M72 361h1052\" stroke=\"#151823\" stroke-width=\"1\"/>\n"
+               "    <text x=\"80\" y=\"350\" fill=\"#77717f\" font-size=\"13\" font-weight=\"700\" letter-spacing=\"2\">NYTRIX</text>\n"
+               "    <text x=\"80\" y=\"382\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">use</tspan><tspan fill=\"#aebdff\"> std.core</tspan></text>\n"
+               "    <text x=\"80\" y=\"410\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">fn</tspan><tspan fill=\"#d1c2ff\"> area</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> w</tspan><tspan fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> h</tspan><tspan fill=\"#85808d\" font-weight=\"700\">) </tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#85808d\" font-weight=\"700\"> {</tspan><tspan fill=\"#b6a0ff\" font-weight=\"760\"> return</tspan><tspan fill=\"#eeeeef\"> w</tspan><tspan fill=\"#c4bed2\"> *</tspan><tspan fill=\"#eeeeef\"> h</tspan><tspan fill=\"#85808d\" font-weight=\"700\"> }</tspan></text>\n"
+               "    <text x=\"80\" y=\"438\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">def</tspan><tspan fill=\"#eeeeef\"> pixels</tspan><tspan fill=\"#c4bed2\"> =</tspan><tspan fill=\"#d1c2ff\"> area</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#c9b6ff\">12</tspan><tspan fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan fill=\"#c9b6ff\">8</tspan><tspan fill=\"#85808d\" font-weight=\"700\">)</tspan></text>\n"
+               "    <text x=\"80\" y=\"466\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#e4ddff\">print</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#eeeeef\">pixels</tspan><tspan fill=\"#85808d\" font-weight=\"700\">)</tspan></text>\n"
+               "  </g>\n"
+               "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\" font-size=\"21\" font-weight=\"400\">\n"
+               "    <text x=\"84\" y=\"584\" fill=\"#858a96\">nytrix.x3ric.com</text>\n"
+               "    <text x=\"798\" y=\"584\" fill=\"#858a96\">learn / spec / changelog / API</text>\n"
+               "  </g>\n"
+               "</svg>\n");
+  free(logo_uri);
+  free(favicon_uri);
+  free(mono_font_uri);
+  free(display_font_uri);
+  if (!svg.data)
+    return 0;
+  int ok = write_file(path, svg.data);
+  free(svg.data);
+  return ok;
+}
+
+static int generate_website_og_assets(const char *svg_path, const char *png_path,
+                                      const char *logo_path,
+                                      const char *favicon_path,
+                                      const char *mono_font_path,
+                                      const char *display_font_path, int modules,
+                                      int symbols, int files) {
+  return generate_website_og_svg(svg_path, logo_path, favicon_path,
+                                 mono_font_path, display_font_path, modules,
+                                 symbols, files) &&
+         generate_website_og_png(svg_path, png_path, display_font_path);
+}
 
 static int sb_add_json_strn(sb_t *sb, const char *s, size_t n) {
   if (!sb_add(sb, "\""))
@@ -529,6 +827,162 @@ static int find_matching_brace(const char *s, size_t open_pos, size_t limit,
     }
   }
   return 0;
+}
+
+typedef struct {
+  size_t ret_start;
+  size_t ret_end;
+  size_t body_open;
+  size_t body_close;
+  char *name;
+  char *args;
+} ny_web_fn_decl_t;
+
+static void ny_web_fn_decl_free(ny_web_fn_decl_t *decl) {
+  if (!decl)
+    return;
+  free(decl->name);
+  free(decl->args);
+  memset(decl, 0, sizeof(*decl));
+}
+
+static size_t ny_web_skip_ws(const char *s, size_t n, size_t p) {
+  while (p < n && isspace((unsigned char)s[p]))
+    p++;
+  return p;
+}
+
+static size_t ny_web_trim_end_ws(const char *s, size_t start, size_t end) {
+  while (end > start && isspace((unsigned char)s[end - 1]))
+    end--;
+  return end;
+}
+
+static int find_matching_paren(const char *s, size_t open_pos, size_t limit,
+                               size_t *close_pos) {
+  int depth = 0, in_string = 0, in_comment = 0, esc_next = 0;
+  char quote = 0;
+  for (size_t i = open_pos; i < limit; i++) {
+    char c = s[i];
+    if (esc_next) {
+      esc_next = 0;
+      continue;
+    }
+    if (in_string && c == '\\') {
+      esc_next = 1;
+      continue;
+    }
+    if (!in_string && c == ';') {
+      in_comment = 1;
+      continue;
+    }
+    if (in_comment) {
+      if (c == '\n')
+        in_comment = 0;
+      continue;
+    }
+    if (!in_string && (c == '"' || c == '\'')) {
+      in_string = 1;
+      quote = c;
+      continue;
+    }
+    if (in_string) {
+      if (c == quote)
+        in_string = 0;
+      continue;
+    }
+    if (c == '(')
+      depth++;
+    else if (c == ')') {
+      depth--;
+      if (depth == 0) {
+        *close_pos = i;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static int parse_fn_decl_at(const char *body, size_t body_n, size_t pos,
+                            ny_web_fn_decl_t *out) {
+  ny_web_fn_decl_t decl = {0};
+  if (!out || pos + 3 >= body_n || !is_line_decl_at(body, pos, "fn "))
+    return 0;
+
+  size_t p = pos + 3;
+  while (p < body_n && isspace((unsigned char)body[p]) && body[p] != '\n')
+    p++;
+  size_t name_start = p;
+  while (p < body_n && is_ident_ch((unsigned char)body[p]))
+    p++;
+  if (p == name_start)
+    return 0;
+  size_t name_end = p;
+
+  p = ny_web_skip_ws(body, body_n, p);
+  if (p >= body_n || body[p] != '(')
+    return 0;
+  size_t args_open = p, args_close = 0;
+  if (!find_matching_paren(body, args_open, body_n, &args_close))
+    return 0;
+
+  p = ny_web_skip_ws(body, body_n, args_close + 1);
+  size_t ret_start = p, ret_end = p;
+  int has_ret = 0;
+  if (p < body_n && body[p] == ':') {
+    p = ny_web_skip_ws(body, body_n, p + 1);
+    ret_start = p;
+    has_ret = 1;
+  } else if (p + 1 < body_n && body[p] == '-' && body[p + 1] == '>') {
+    p = ny_web_skip_ws(body, body_n, p + 2);
+    ret_start = p;
+    has_ret = 1;
+  } else if (p < body_n && body[p] != '{') {
+    ret_start = p;
+    has_ret = 1;
+  }
+
+  if (has_ret) {
+    while (p < body_n && body[p] != '{' && body[p] != '\n' &&
+           body[p] != '\r' && body[p] != ';')
+      p++;
+    ret_end = ny_web_trim_end_ws(body, ret_start, p);
+    p = ny_web_skip_ws(body, body_n, p);
+  }
+
+  if (p >= body_n || body[p] != '{')
+    return 0;
+  size_t closep = 0;
+  if (!find_matching_brace(body, p, body_n, &closep))
+    return 0;
+
+  decl.ret_start = ret_start;
+  decl.ret_end = ret_end;
+  decl.body_open = p;
+  decl.body_close = closep;
+  decl.name = strndup0(body + name_start, name_end - name_start);
+  decl.args = trim_copy(body + args_open + 1, args_close - args_open - 1);
+  if (!decl.name || !decl.args) {
+    ny_web_fn_decl_free(&decl);
+    return 0;
+  }
+  *out = decl;
+  return 1;
+}
+
+static void append_fn_signature(sb_t *sig, const char *display_name,
+                                const ny_web_fn_decl_t *decl,
+                                const char *body) {
+  sb_add(sig, "fn ");
+  sb_add(sig, display_name ? display_name : (decl ? decl->name : ""));
+  sb_add(sig, "(");
+  sb_add(sig, (decl && decl->args) ? decl->args : "");
+  sb_add(sig, ")");
+  if (decl && decl->ret_end > decl->ret_start) {
+    sb_add(sig, " ");
+    sb_addn(sig, body + decl->ret_start, decl->ret_end - decl->ret_start);
+  }
 }
 
 static int ny_brace_depth_at(const char *s, size_t pos) {
@@ -1013,19 +1467,36 @@ static char *read_web_input_bundle(const char *input, const char *asset_root,
 static int docs_origin_is_lib(const char *root, const char *orig) {
   if (!orig || !*orig || strcmp(orig, "unknown") == 0)
     return 0;
-  if (strstr(orig, "/etc/projects/") || strstr(orig, "\\etc\\projects\\"))
+  char norm[PATH_MAX];
+  snprintf(norm, sizeof(norm), "%s", orig);
+  for (char *p = norm; *p; p++)
+    if (*p == '\\')
+      *p = '/';
+  const char *rel = norm;
+  if (root && *root && path_is_under(root, norm)) {
+    rel = norm + strlen(root);
+    while (*rel == '/')
+      rel++;
+  }
+  while (rel[0] == '.' && rel[1] == '/')
+    rel += 2;
+  if (strncmp(rel, "etc/projects/", 13) == 0 ||
+      strncmp(rel, "etc/tests/", 10) == 0 ||
+      strstr(rel, "/etc/projects/") || strstr(rel, "/etc/tests/"))
     return 0;
-  if (path_has_suffix(orig, ".ny"))
-    return 1;
   char lib_dir[PATH_MAX];
   if (join_path(lib_dir, sizeof(lib_dir), root, "lib")) {
     size_t n = strlen(lib_dir);
-    if (strncmp(orig, lib_dir, n) == 0 &&
-        (orig[n] == '/' || orig[n] == '\\' || orig[n] == '\0'))
+    if (strncmp(norm, lib_dir, n) == 0 &&
+        (norm[n] == '/' || norm[n] == '\0'))
       return 1;
   }
-  return strstr(orig, "/lib/") || strstr(orig, "\\lib\\") ||
-         strncmp(orig, "lib/", 4) == 0 || strncmp(orig, "lib\\", 4) == 0;
+  if (strcmp(rel, "lib") == 0 || strncmp(rel, "lib/", 4) == 0 ||
+      strstr(rel, "/lib/"))
+    return 1;
+  if (root && *root && path_is_under(root, norm))
+    return 0;
+  return path_has_suffix(orig, ".ny");
 }
 
 static char *docs_origin_relative(const char *root, const char *orig) {
@@ -1076,8 +1547,269 @@ static char *docs_origin_relative(const char *root, const char *orig) {
   return out.data ? out.data : strdup(orig);
 }
 
+static char *docs_origin_module_name(const char *root, const char *orig) {
+  char *rel = docs_origin_relative(root, orig);
+  const char *p = rel ? rel : (orig ? orig : "source");
+  if (strncmp(p, "lib/", 4) == 0 || strncmp(p, "lib\\", 4) == 0)
+    p += 4;
+  else if (strncmp(p, "./", 2) == 0 || strncmp(p, ".\\", 2) == 0)
+    p += 2;
+
+  size_t n = strlen(p);
+  if (n >= 3 && strcmp(p + n - 3, ".ny") == 0)
+    n -= 3;
+
+  sb_t out = {0};
+  int last_dot = 1;
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)p[i];
+    if (c == '/' || c == '\\' || c == '.') {
+      if (!last_dot) {
+        sb_add(&out, ".");
+        last_dot = 1;
+      }
+    } else if (isalnum(c) || c == '_') {
+      char ch[2] = {(char)c, 0};
+      sb_add(&out, ch);
+      last_dot = 0;
+    } else if (c == '-' || isspace(c)) {
+      sb_add(&out, "_");
+      last_dot = 0;
+    }
+  }
+  while (out.len && out.data[out.len - 1] == '.')
+    out.data[--out.len] = '\0';
+  free(rel);
+  return out.data && *out.data ? out.data : strdup("source");
+}
+
+static int markdown_include_path_ok(const char *path) {
+  return path && *path && path[0] != '/' && !strchr(path, '\\') &&
+         !strstr(path, "..");
+}
+
+static char *github_source_href_for_markdown(const char *href, size_t href_n) {
+  if (!href || href_n == 0)
+    return NULL;
+  const char *scheme = memchr(href, ':', href_n);
+  const char *slash = memchr(href, '/', href_n);
+  if ((href_n >= 2 && href[0] == '/' && href[1] == '/') ||
+      (scheme && (!slash || scheme < slash)))
+    return NULL;
+  size_t path_n = href_n;
+  const char *suffix = NULL;
+  for (size_t i = 0; i < href_n; i++) {
+    if (href[i] == '?' || href[i] == '#') {
+      path_n = i;
+      suffix = href + i;
+      break;
+    }
+  }
+  char path[PATH_MAX];
+  if (path_n == 0 || path_n >= sizeof(path))
+    return NULL;
+  memcpy(path, href, path_n);
+  path[path_n] = '\0';
+  for (char *p = path; *p; p++)
+    if (*p == '\\')
+      *p = '/';
+  const char *rel = strstr(path, "etc/projects/");
+  if (!rel || strstr(rel, ".."))
+    return NULL;
+  sb_t out = {0};
+  sb_add(&out, "https://github.com/nytrix-lang/nytrix/blob/main/");
+  sb_add(&out, rel);
+  if (suffix)
+    sb_addn(&out, suffix, href_n - (size_t)(suffix - href));
+  return out.data ? out.data : NULL;
+}
+
+static void rewrite_markdown_source_links_line(sb_t *out, const char *line,
+                                               size_t len) {
+  size_t last = 0;
+  for (size_t i = 0; i < len; i++) {
+    if (line[i] != '[')
+      continue;
+    const char *label_end = memchr(line + i + 1, ']', len - i - 1);
+    if (!label_end)
+      break;
+    size_t after_label = (size_t)(label_end - line + 1);
+    if (after_label >= len || line[after_label] != '(')
+      continue;
+    const char *href_start = line + after_label + 1;
+    const char *href_end =
+        memchr(href_start, ')', line + len - href_start);
+    if (!href_end)
+      break;
+    char *github =
+        github_source_href_for_markdown(href_start,
+                                        (size_t)(href_end - href_start));
+    if (github) {
+      sb_addn(out, line + last, (size_t)(href_start - (line + last)));
+      sb_add(out, github);
+      free(github);
+      last = (size_t)(href_end - line);
+      i = last;
+    }
+  }
+  sb_addn(out, line + last, len - last);
+}
+
+static char *rewrite_markdown_site_source_links(const char *md) {
+  if (!md)
+    return strdup("");
+  sb_t out = {0};
+  int in_code = 0;
+  for (const char *line = md; *line;) {
+    const char *next = strchr(line, '\n');
+    size_t len = next ? (size_t)(next - line) : strlen(line);
+    if (len >= 3 && strncmp(line, "```", 3) == 0) {
+      in_code = !in_code;
+      sb_addn(&out, line, len);
+    } else if (in_code) {
+      sb_addn(&out, line, len);
+    } else {
+      rewrite_markdown_source_links_line(&out, line, len);
+    }
+    if (next)
+      sb_add(&out, "\n");
+    else
+      break;
+    line = next + 1;
+  }
+  return out.data ? out.data : strdup(md);
+}
+
+static char *expand_markdown_code_includes(const char *root, const char *md);
+
+static char *prepare_markdown_doc_body(const char *root, const char *txt) {
+  char *expanded = expand_markdown_code_includes(root, txt);
+  char *linked = rewrite_markdown_site_source_links(expanded);
+  free(expanded);
+  return linked;
+}
+
+static int parse_code_include_directive(const char *line, size_t len,
+                                        char **lang_out, char **path_out) {
+  if (lang_out)
+    *lang_out = NULL;
+  if (path_out)
+    *path_out = NULL;
+  while (len && isspace((unsigned char)*line)) {
+    line++;
+    len--;
+  }
+  while (len && isspace((unsigned char)line[len - 1]))
+    len--;
+  const char *open = "<!--";
+  const char *key = "ny-doc-include-code:";
+  const char *close = "-->";
+  size_t open_n = strlen(open), key_n = strlen(key), close_n = strlen(close);
+  if (len < open_n + key_n + close_n ||
+      strncmp(line, open, open_n) != 0)
+    return 0;
+  line += open_n;
+  len -= open_n;
+  while (len && isspace((unsigned char)*line)) {
+    line++;
+    len--;
+  }
+  if (len < key_n || strncmp(line, key, key_n) != 0)
+    return 0;
+  line += key_n;
+  len -= key_n;
+  while (len && isspace((unsigned char)*line)) {
+    line++;
+    len--;
+  }
+  const char *lang = line;
+  size_t lang_n = 0;
+  while (lang_n < len && !isspace((unsigned char)line[lang_n]))
+    lang_n++;
+  if (lang_n == 0)
+    return 0;
+  line += lang_n;
+  len -= lang_n;
+  while (len && isspace((unsigned char)*line)) {
+    line++;
+    len--;
+  }
+  const char *path = line;
+  size_t path_n = 0;
+  while (path_n < len && !isspace((unsigned char)line[path_n]))
+    path_n++;
+  if (path_n == 0)
+    return 0;
+  line += path_n;
+  len -= path_n;
+  while (len && isspace((unsigned char)*line)) {
+    line++;
+    len--;
+  }
+  if (len != close_n || strncmp(line, close, close_n) != 0)
+    return 0;
+  char *lang_copy = strndup0(lang, lang_n);
+  char *path_copy = strndup0(path, path_n);
+  if (!lang_copy || !path_copy || !markdown_include_path_ok(path_copy)) {
+    free(lang_copy);
+    free(path_copy);
+    return 0;
+  }
+  if (lang_out)
+    *lang_out = lang_copy;
+  else
+    free(lang_copy);
+  if (path_out)
+    *path_out = path_copy;
+  else
+    free(path_copy);
+  return 1;
+}
+
+static char *expand_markdown_code_includes(const char *root, const char *md) {
+  if (!md)
+    return strdup("");
+  sb_t out = {0};
+  for (const char *line = md; *line;) {
+    const char *next = strchr(line, '\n');
+    size_t len = next ? (size_t)(next - line) : strlen(line);
+    char *lang = NULL, *rel = NULL;
+    if (parse_code_include_directive(line, len, &lang, &rel)) {
+      char full[PATH_MAX];
+      char *code = NULL;
+      if (root && *root && join_path(full, sizeof(full), root, rel))
+        code = ny_read_file_raw(full, NULL);
+      if (code) {
+        sb_add(&out, "```");
+        sb_add(&out, lang);
+        sb_add(&out, "\n");
+        sb_add(&out, code);
+        if (!out.len || out.data[out.len - 1] != '\n')
+          sb_add(&out, "\n");
+        sb_add(&out, "```\n");
+        free(code);
+      } else {
+        sb_addn(&out, line, len);
+        if (next)
+          sb_add(&out, "\n");
+      }
+      free(lang);
+      free(rel);
+    } else {
+      sb_addn(&out, line, len);
+      if (next)
+        sb_add(&out, "\n");
+    }
+    if (!next)
+      break;
+    line = next + 1;
+  }
+  return out.data ? out.data : strdup(md);
+}
+
 static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
-                                         const char *path, int *first,
+                                         const char *root, const char *path,
+                                         int *first,
                                          char **seen, int *seen_n,
                                          int seen_cap) {
   const char *dot = strrchr(path, '.');
@@ -1103,8 +1835,10 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
     body = refine_info_html(extract_body_html(txt));
     fmt = "html";
     free(txt);
-  } else
-    body = txt;
+  } else {
+    body = prepare_markdown_doc_body(root, txt);
+    free(txt);
+  }
   char *title = doc_title_from_route(name);
   if (!*first)
     sb_add(json, ",");
@@ -1127,7 +1861,8 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
 }
 
 static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
-                                          const char *dir, int *first,
+                                          const char *root, const char *dir,
+                                          int *first,
                                           char **seen, int *seen_n,
                                           int seen_cap, int recursive) {
   DIR *d = opendir(dir);
@@ -1155,11 +1890,11 @@ static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
     char path[PATH_MAX];
     if (join_path(path, sizeof(path), dir, names[i])) {
       if (recursive && path_is_dir(path))
-        append_markdown_docs_from_dir(json, base_dir, path, first, seen, seen_n,
-                                      seen_cap, recursive);
+        append_markdown_docs_from_dir(json, base_dir, root, path, first, seen,
+                                      seen_n, seen_cap, recursive);
       else
-        append_markdown_doc_json_item(json, base_dir, path, first, seen, seen_n,
-                                      seen_cap);
+        append_markdown_doc_json_item(json, base_dir, root, path, first, seen,
+                                      seen_n, seen_cap);
     }
     free(names[i]);
   }
@@ -1182,11 +1917,12 @@ static void append_markdown_docs_json(sb_t *json, const char *root) {
   int seen_n = 0;
   sb_add(json, "[");
   if (docs_dir[0])
-    append_markdown_docs_from_dir(json, docs_dir, docs_dir, &first, seen,
+    append_markdown_docs_from_dir(json, docs_dir, root, docs_dir, &first, seen,
                                   &seen_n,
                                   (int)(sizeof(seen) / sizeof(seen[0])), 1);
   if (env_dir[0])
-    append_markdown_docs_from_dir(json, env_dir, env_dir, &first, seen, &seen_n,
+    append_markdown_docs_from_dir(json, env_dir, root, env_dir, &first, seen,
+                                  &seen_n,
                                   (int)(sizeof(seen) / sizeof(seen[0])), 0);
   for (int i = 0; i < seen_n; i++)
     free(seen[i]);
@@ -1614,6 +2350,88 @@ static char *parse_docs_json(const char *bundle, const char *root,
         break;
       }
     }
+    if (!mm) {
+      char *mod_name = docs_origin_module_name(root, orig);
+      char *mod_doc = leading_file_comments(body, body_n);
+      sb_add(&json, ",{\"name\":");
+      sb_add_json_str(&json, mod_name);
+      sb_add(&json, ",\"module_doc\":");
+      sb_add_json_str(&json, mod_doc ? mod_doc : "");
+      sb_add(&json, ",\"symbols\":[");
+      int first_sym = 1;
+      char *seen_ids[20000];
+      int seen_id_n = 0;
+
+      for (size_t i = 0; i + 3 < body_n; i++) {
+        ny_web_fn_decl_t fn = {0};
+        if (!parse_fn_decl_at(body, body_n, i, &fn))
+          continue;
+        size_t p = fn.body_open;
+        size_t closep = fn.body_close;
+        char *doc = leading_comments(body, i);
+        size_t code_start = 0;
+        char *inner =
+            extract_docstring(body + p + 1, closep - p - 1, &code_start);
+        sb_t doc2 = {0};
+        if (doc && *doc)
+          sb_add(&doc2, doc);
+        if (inner && *inner) {
+          if (doc2.len)
+            sb_add(&doc2, "\n\n");
+          sb_add(&doc2, inner);
+        }
+        char *code = dedent_clean_code(body + p + 1 + code_start,
+                                       closep - p - 1 - code_start);
+        sb_t sig = {0};
+        append_fn_signature(&sig, fn.name, &fn, body);
+        append_symbol_json(
+            &json, fn.name, sig.data, "function", doc2.data ? doc2.data : "",
+            code, body + p + 1, closep - p - 1, seen_ids, &seen_id_n,
+            (int)(sizeof(seen_ids) / sizeof(seen_ids[0])), &first_sym);
+        (*symbol_count)++;
+        ny_web_fn_decl_free(&fn);
+        free(doc);
+        free(inner);
+        free(doc2.data);
+        free(code);
+        free(sig.data);
+        i = closep;
+      }
+
+      sb_add(&json, "],\"path\":[");
+      char *tmp = strdup(mod_name);
+      int first_path = 1;
+      for (char *part = strtok(tmp, "."); part; part = strtok(NULL, ".")) {
+        if (!first_path)
+          sb_add(&json, ",");
+        first_path = 0;
+        sb_add_json_str(&json, part);
+      }
+      free(tmp);
+      sb_add(&json, "],\"orig_file\":");
+      char *rel_orig = docs_origin_relative(root, orig);
+      sb_add_json_str(&json, rel_orig ? rel_orig : orig);
+      free(rel_orig);
+      sb_add(&json, ",\"source\":");
+      size_t source_n = 0;
+      char *source_txt = ny_read_file_raw(orig, &source_n);
+      if (source_txt) {
+        sb_add_json_strn(&json, source_txt, source_n);
+        free(source_txt);
+      } else {
+        sb_add_json_strn(&json, body, body_n);
+      }
+      sb_add(&json, "}");
+      (*module_count)++;
+      for (int sid = 0; sid < seen_id_n; sid++)
+        free(seen_ids[sid]);
+      free(mod_name);
+      free(mod_doc);
+      if (!had_marker)
+        break;
+      chunk_start = chunk_end;
+      continue;
+    }
     if (mm) {
       size_t mp = (size_t)(mm - body) + 7;
       while (mp < body_n && isspace((unsigned char)body[mp]))
@@ -1671,64 +2489,11 @@ static char *parse_docs_json(const char *bundle, const char *root,
       int range_n = 0;
 
       for (size_t i = 0; i + 3 < body_n; i++) {
-        if (!is_line_decl_at(body, i, "fn "))
+        ny_web_fn_decl_t fn = {0};
+        if (!parse_fn_decl_at(body, body_n, i, &fn))
           continue;
-        size_t p = i + 3, ns = p;
-        while (p < body_n && is_ident_ch((unsigned char)body[p]))
-          p++;
-        if (p == ns)
-          continue;
-        char *fn_name = strndup0(body + ns, p - ns);
-        while (p < body_n && isspace((unsigned char)body[p]))
-          p++;
-        if (p >= body_n || body[p] != '(') {
-          free(fn_name);
-          continue;
-        }
-        size_t args_s = p + 1, depth = 1;
-        p++;
-        while (p < body_n && depth) {
-          if (body[p] == '(')
-            depth++;
-          else if (body[p] == ')')
-            depth--;
-          p++;
-        }
-        if (depth) {
-          free(fn_name);
-          continue;
-        }
-        char *args = trim_copy(body + args_s, p - args_s - 1);
-        while (p < body_n && isspace((unsigned char)body[p]))
-          p++;
-        size_t ret_s = p, ret_e = p;
-        if (p < body_n &&
-            (body[p] == ':' ||
-             (body[p] == '-' && p + 1 < body_n && body[p + 1] == '>'))) {
-          int arrow_ret = body[p] == '-';
-          p += arrow_ret ? 2 : 1;
-          while (p < body_n && isspace((unsigned char)body[p]))
-            p++;
-          ret_s = p;
-          while (p < body_n && body[p] != '{' && body[p] != '\n')
-            p++;
-          ret_e = p;
-          while (ret_e > ret_s && isspace((unsigned char)body[ret_e - 1]))
-            ret_e--;
-          while (p < body_n && isspace((unsigned char)body[p]))
-            p++;
-        }
-        if (p >= body_n || body[p] != '{') {
-          free(fn_name);
-          free(args);
-          continue;
-        }
-        size_t closep = 0;
-        if (!find_matching_brace(body, p, body_n, &closep)) {
-          free(fn_name);
-          free(args);
-          continue;
-        }
+        size_t p = fn.body_open;
+        size_t closep = fn.body_close;
         if (range_n < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
           ranges[range_n][0] = i;
           ranges[range_n][1] = closep;
@@ -1749,22 +2514,13 @@ static char *parse_docs_json(const char *bundle, const char *root,
         char *code = dedent_clean_code(body + p + 1 + code_start,
                                        closep - p - 1 - code_start);
         sb_t sig = {0};
-        sb_add(&sig, "fn ");
-        sb_add(&sig, fn_name);
-        sb_add(&sig, "(");
-        sb_add(&sig, args);
-        sb_add(&sig, ")");
-        if (ret_e > ret_s) {
-          sb_add(&sig, ": ");
-          sb_addn(&sig, body + ret_s, ret_e - ret_s);
-        }
+        append_fn_signature(&sig, fn.name, &fn, body);
         append_symbol_json(
-            &json, fn_name, sig.data, "function", doc2.data ? doc2.data : "",
+            &json, fn.name, sig.data, "function", doc2.data ? doc2.data : "",
             code, body + p + 1, closep - p - 1, seen_ids, &seen_id_n,
             (int)(sizeof(seen_ids) / sizeof(seen_ids[0])), &first_sym);
         (*symbol_count)++;
-        free(fn_name);
-        free(args);
+        ny_web_fn_decl_free(&fn);
         free(doc);
         free(inner);
         free(doc2.data);
@@ -2482,9 +3238,11 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
     }
     if (!mm) {
       char *doc = leading_file_comments(body, body_n);
+      char *rel_orig = docs_origin_relative(root, orig);
+      char *stem = stem_name(rel_orig ? rel_orig : orig);
+      char *mod_name = docs_origin_module_name(root, orig);
+      char *mod_keywords = doc_extract_keywords(doc);
       if (doc && *doc) {
-        char *rel_orig = docs_origin_relative(root, orig);
-        char *stem = stem_name(rel_orig ? rel_orig : orig);
         char *code = dedent_clean_code(body, body_n);
         if (stem && *stem) {
           doc_search_add(idx, "script", stem, rel_orig ? rel_orig : orig,
@@ -2493,10 +3251,58 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
           if (symbol_count)
             (*symbol_count)++;
         }
-        free(rel_orig);
-        free(stem);
         free(code);
       }
+      for (size_t i = 0; i + 3 < body_n; i++) {
+        ny_web_fn_decl_t fn = {0};
+        if (!parse_fn_decl_at(body, body_n, i, &fn))
+          continue;
+        size_t p = fn.body_open;
+        size_t closep = fn.body_close;
+        char *fn_doc = leading_comments(body, i);
+        size_t code_start = 0;
+        char *inner =
+            extract_docstring(body + p + 1, closep - p - 1, &code_start);
+        sb_t doc2 = {0};
+        if (fn_doc && *fn_doc)
+          sb_add(&doc2, fn_doc);
+        if (inner && *inner) {
+          if (doc2.len)
+            sb_add(&doc2, "\n\n");
+          sb_add(&doc2, inner);
+        }
+        sb_t display = {0}, sig = {0}, full = {0};
+        if (mod_name && *mod_name && !strchr(fn.name, '.')) {
+          sb_add(&display, mod_name);
+          sb_add(&display, ".");
+          sb_add(&full, mod_name);
+          sb_add(&full, ".");
+        }
+        sb_add(&display, fn.name);
+        sb_add(&full, fn.name);
+        append_fn_signature(&sig, display.data ? display.data : fn.name, &fn,
+                            body);
+        char *code = dedent_clean_code(body + i, closep - i + 1);
+        doc_search_add(idx, "function", fn.name, full.data ? full.data : fn.name,
+                       rel_orig ? rel_orig : orig, line_number_at(body, i),
+                       sig.data ? sig.data : fn.name, mod_keywords,
+                       doc2.data ? doc2.data : "", code ? code : "");
+        if (symbol_count)
+          (*symbol_count)++;
+        ny_web_fn_decl_free(&fn);
+        free(fn_doc);
+        free(inner);
+        free(doc2.data);
+        free(display.data);
+        free(sig.data);
+        free(full.data);
+        free(code);
+        i = closep;
+      }
+      free(rel_orig);
+      free(stem);
+      free(mod_name);
+      free(mod_keywords);
       free(doc);
       if (!had_marker)
         break;
@@ -2530,63 +3336,11 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
     size_t ranges[20000][2];
     int range_n = 0;
     for (size_t i = 0; i + 3 < body_n; i++) {
-      if (!is_line_decl_at(body, i, "fn "))
+      ny_web_fn_decl_t fn = {0};
+      if (!parse_fn_decl_at(body, body_n, i, &fn))
         continue;
-      size_t p = i + 3, ns = p;
-      while (p < body_n && is_ident_ch((unsigned char)body[p]))
-        p++;
-      if (p == ns)
-        continue;
-      char *fn_name = strndup0(body + ns, p - ns);
-      while (p < body_n && isspace((unsigned char)body[p]))
-        p++;
-      if (p >= body_n || body[p] != '(') {
-        free(fn_name);
-        continue;
-      }
-      size_t args_s = p + 1, depth = 1;
-      p++;
-      while (p < body_n && depth) {
-        if (body[p] == '(')
-          depth++;
-        else if (body[p] == ')')
-          depth--;
-        p++;
-      }
-      if (depth) {
-        free(fn_name);
-        continue;
-      }
-      char *args = trim_copy(body + args_s, p - args_s - 1);
-      while (p < body_n && isspace((unsigned char)body[p]))
-        p++;
-      size_t ret_s = p, ret_e = p;
-      if (p < body_n && (body[p] == ':' || (body[p] == '-' && p + 1 < body_n &&
-                                            body[p + 1] == '>'))) {
-        int arrow_ret = body[p] == '-';
-        p += arrow_ret ? 2 : 1;
-        while (p < body_n && isspace((unsigned char)body[p]))
-          p++;
-        ret_s = p;
-        while (p < body_n && body[p] != '{' && body[p] != '\n')
-          p++;
-        ret_e = p;
-        while (ret_e > ret_s && isspace((unsigned char)body[ret_e - 1]))
-          ret_e--;
-        while (p < body_n && isspace((unsigned char)body[p]))
-          p++;
-      }
-      if (p >= body_n || body[p] != '{') {
-        free(fn_name);
-        free(args);
-        continue;
-      }
-      size_t closep = 0;
-      if (!find_matching_brace(body, p, body_n, &closep)) {
-        free(fn_name);
-        free(args);
-        continue;
-      }
+      size_t p = fn.body_open;
+      size_t closep = fn.body_close;
       if (range_n < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
         ranges[range_n][0] = i;
         ranges[range_n][1] = closep;
@@ -2605,38 +3359,33 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
         sb_add(&doc2, inner);
       }
       sb_t sig = {0};
-      sb_add(&sig, "fn ");
-      if (mod_name && *mod_name && !strchr(fn_name, '.')) {
-        sb_add(&sig, mod_name);
-        sb_add(&sig, ".");
+      sb_t display = {0};
+      if (mod_name && *mod_name && !strchr(fn.name, '.')) {
+        sb_add(&display, mod_name);
+        sb_add(&display, ".");
       }
-      sb_add(&sig, fn_name);
-      sb_add(&sig, "(");
-      sb_add(&sig, args ? args : "");
-      sb_add(&sig, ")");
-      if (ret_e > ret_s) {
-        sb_add(&sig, ": ");
-        sb_addn(&sig, body + ret_s, ret_e - ret_s);
-      }
+      sb_add(&display, fn.name);
+      append_fn_signature(&sig, display.data ? display.data : fn.name, &fn,
+                          body);
       sb_t full = {0};
-      if (mod_name && *mod_name && !strchr(fn_name, '.')) {
+      if (mod_name && *mod_name && !strchr(fn.name, '.')) {
         sb_add(&full, mod_name);
         sb_add(&full, ".");
       }
-      sb_add(&full, fn_name);
+      sb_add(&full, fn.name);
       char *code = dedent_clean_code(body + i, closep - i + 1);
-      doc_search_add(idx, "function", fn_name, full.data ? full.data : fn_name,
+      doc_search_add(idx, "function", fn.name, full.data ? full.data : fn.name,
                      rel_orig ? rel_orig : orig, line_number_at(body, i),
-                     sig.data ? sig.data : fn_name, mod_keywords,
+                     sig.data ? sig.data : fn.name, mod_keywords,
                      doc2.data ? doc2.data : "", code ? code : "");
       if (symbol_count)
         (*symbol_count)++;
-      free(fn_name);
-      free(args);
+      ny_web_fn_decl_free(&fn);
       free(doc);
       free(inner);
       free(doc2.data);
       free(sig.data);
+      free(display.data);
       free(full.data);
       free(code);
       i = closep;
@@ -3225,13 +3974,11 @@ static int ny_doc_search_main(int argc, char **argv, int get_one) {
 
   char default_input[PATH_MAX];
   if (!input) {
-    if (path_is_dir(root))
-      input = root;
-    else if (join_path(default_input, sizeof(default_input), root, "lib") &&
-             path_is_dir(default_input))
+    if (join_path(default_input, sizeof(default_input), root, "lib") &&
+        path_is_dir(default_input))
       input = default_input;
     else
-      input = ".";
+      input = root;
   }
 
   doc_search_index_t idx = {0};
@@ -3504,8 +4251,8 @@ static char *render_site_head(const char *site, const char *root) {
                "                    \"@type\": \"WebSite\",\n"
                "                    \"@id\": ");
   sb_add_json_str(&out, doc_url);
-  sb_add(&out, ",\n                    \"name\": \"Nytrix Manual\",\n"
-               "                    \"headline\": \"Nytrix systems programming "
+  sb_add(&out, ",\n                    \"name\": \"Nytrix Lang\",\n"
+               "                    \"headline\": \"Nytrix native programming "
                "language manual\",\n"
                "                    \"description\": \"Nytrix language manual, "
                "quick start, examples, standard library API reference, and "
@@ -3514,7 +4261,7 @@ static char *render_site_head(const char *site, const char *root) {
   sb_add_json_str(&out, doc_url);
   sb_add(
       &out,
-      ",\n                    \"about\": [\"systems programming language\", "
+      ",\n                    \"about\": [\"native programming language\", "
       "\"compiler\", \"compile-time execution\", \"native FFI\", \"C ABI\", "
       "\"standard library\", \"networking\", \"native FFI\", \"parsing\"],\n"
       "                    \"hasPart\": [");
@@ -3560,7 +4307,7 @@ static char *render_site_head(const char *site, const char *root) {
       "\"https://opensource.org/licenses/MIT\",\n"
       "                    \"runtimePlatform\": [\"Linux\", \"macOS\", "
       "\"Windows\"],\n"
-      "                    \"description\": \"Nytrix is a compact systems "
+      "                    \"description\": \"Nytrix is a compact native "
       "programming language with compile-time execution, native FFI, OS APIs, "
       "networking, parsing, UI, and source-linked documentation.\"\n"
       "                },\n"
@@ -3935,6 +4682,8 @@ static char *render_markdown_static(const char *md, const char *route) {
           sb_add(&out, " class=\"language-");
           sb_add_html_escapedn(&out, p + lang_start, off - lang_start);
           sb_add(&out, "\"");
+        } else {
+          sb_add(&out, " class=\"language-ny\"");
         }
         sb_add(&out, ">");
       }
@@ -4142,6 +4891,7 @@ static void append_sitemap_url(sb_t *sitemap, const char *site, const char *rel,
 }
 
 static void generate_static_docs_from_dir(const char *out_dir,
+                                          const char *root,
                                           const char *docs_dir, const char *dir,
                                           const char *site, sb_t *sitemap,
                                           sb_t *plain, sb_t *full,
@@ -4171,14 +4921,15 @@ static void generate_static_docs_from_dir(const char *out_dir,
     char path[PATH_MAX];
     if (join_path(path, sizeof(path), dir, names[i])) {
       if (recursive && path_is_dir(path)) {
-        generate_static_docs_from_dir(out_dir, docs_dir, path, site, sitemap,
-                                      plain, full, recursive, count);
+        generate_static_docs_from_dir(out_dir, root, docs_dir, path, site,
+                                      sitemap, plain, full, recursive, count);
       } else if (path_has_suffix(path, ".md")) {
         char *route = doc_route_name(docs_dir, path);
         char *title = doc_title_from_route(route);
         char *txt = ny_read_file_raw(path, NULL);
-        char *summary = markdown_summary(txt);
-        char *body = render_markdown_static(txt, route);
+        char *expanded = prepare_markdown_doc_body(root, txt);
+        char *summary = markdown_summary(expanded);
+        char *body = render_markdown_static(expanded, route);
         if (route && title && body &&
             write_static_doc_page(out_dir, site, route, title, summary, body)) {
           char safe[PATH_MAX];
@@ -4206,6 +4957,7 @@ static void generate_static_docs_from_dir(const char *out_dir,
         free(route);
         free(title);
         free(txt);
+        free(expanded);
         free(summary);
         free(body);
       }
@@ -4356,7 +5108,7 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
     append_sitemap_url(&sitemap, site, "", "1.0");
   }
   sb_add(&plain, "# Nytrix\n\n");
-  sb_add(&plain, "> Nytrix is a compact systems programming language with "
+  sb_add(&plain, "> Nytrix is a compact native programming language with "
                  "compile-time execution, native FFI, OS APIs, networking, "
                  "parsing, UI, and source-linked local documentation.\n\n");
   sb_add(&plain, "## Public Manual\n\n");
@@ -4365,7 +5117,7 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
   char docs_dir[PATH_MAX];
   int doc_count = 0;
   if (join_path(docs_dir, sizeof(docs_dir), root, "docs"))
-    generate_static_docs_from_dir(out_dir, docs_dir, docs_dir, site,
+    generate_static_docs_from_dir(out_dir, root, docs_dir, docs_dir, site,
                                   has_site ? &sitemap : NULL, &plain, &full, 1,
                                   &doc_count);
 
@@ -4398,7 +5150,7 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
     write_file(path, full.data ? full.data : "");
   if (join_path(path, sizeof(path), out_dir, "site.txt")) {
     sb_t site_txt = {0};
-    sb_add(&site_txt, "Nytrix systems programming language documentation\n");
+    sb_add(&site_txt, "Nytrix Lang native programming language documentation\n");
     sb_add(&site_txt, "URL: ");
     sb_add(&site_txt, has_site ? site : "local");
     sb_add(&site_txt, "\nDocs pages: ");
@@ -4665,9 +5417,6 @@ int ny_web_main(int argc, char **argv) {
       input = a;
   }
 
-  if (!input)
-    input = ".";
-
   char root[PATH_MAX];
   const char *src_root = find_nytrix_share_root();
   if (!src_root || !*src_root) {
@@ -4675,6 +5424,15 @@ int ny_web_main(int argc, char **argv) {
     return 1;
   }
   snprintf(root, sizeof(root), "%s", src_root);
+
+  char default_input[PATH_MAX];
+  if (!input) {
+    if (join_path(default_input, sizeof(default_input), root, "lib") &&
+        path_is_dir(default_input))
+      input = default_input;
+    else
+      input = root;
+  }
 
   int source_files = 0;
   char *bundle = read_web_input_bundle(input, root, &source_files);
@@ -4690,43 +5448,79 @@ int ny_web_main(int argc, char **argv) {
 
   char index_path[PATH_MAX];
   snprintf(index_path, sizeof(index_path), "%s/index.html", out_dir);
-  char cache_docs_dir[PATH_MAX];
-  nyt_path_join(cache_docs_dir, sizeof(cache_docs_dir),
-                nyt_default_cache_root_dir(), "docs");
-  if (!mkdir_p(cache_docs_dir)) {
+  char cache_docs_dir[PATH_MAX], cache_website_dir[PATH_MAX];
+  if (!join_path(cache_docs_dir, sizeof(cache_docs_dir), root,
+                 "build/cache/docs")) {
     free(bundle);
-    nyt_err("ny-doc", "failed to create cache dir: %s", cache_docs_dir);
+    nyt_err("ny-doc", "repository path is too long");
+    return 1;
+  }
+  if (!mkdir_p(cache_docs_dir)) {
+    nyt_path_join(cache_docs_dir, sizeof(cache_docs_dir),
+                  nyt_default_cache_root_dir(), "docs");
+    if (!mkdir_p(cache_docs_dir)) {
+      free(bundle);
+      nyt_err("ny-doc", "failed to create cache dir: %s", cache_docs_dir);
+      return 1;
+    }
+  }
+  if (!join_path(cache_website_dir, sizeof(cache_website_dir), cache_docs_dir,
+                 "website") ||
+      !mkdir_p(cache_website_dir)) {
+    free(bundle);
+    nyt_err("ny-doc", "failed to create cache dir: %s", cache_website_dir);
     return 1;
   }
 
   char cache_web_path[PATH_MAX];
+  char cache_og_svg_path[PATH_MAX], cache_og_png_path[PATH_MAX];
   char website_assets_dir[PATH_MAX], out_assets_dir[PATH_MAX],
       out_website_assets_dir[PATH_MAX];
   char template_path[PATH_MAX], js_path[PATH_MAX], css_path[PATH_MAX];
+  char favicon_path[PATH_MAX], mono_font_path[PATH_MAX],
+      display_font_path[PATH_MAX],
+      out_favicon_path[PATH_MAX];
   char logo_path[PATH_MAX], logo_png_path[PATH_MAX], out_logo_path[PATH_MAX],
       out_logo_png_path[PATH_MAX];
-  char og_png_path[PATH_MAX], out_og_png_path[PATH_MAX];
+  char out_og_svg_path[PATH_MAX], out_og_png_path[PATH_MAX];
+  char out_assets_og_svg_path[PATH_MAX], out_assets_og_png_path[PATH_MAX];
   if (!join_path(cache_web_path, sizeof(cache_web_path), cache_docs_dir,
                  "web.html") ||
+      !join_path(cache_og_svg_path, sizeof(cache_og_svg_path),
+                 cache_website_dir, "og.svg") ||
+      !join_path(cache_og_png_path, sizeof(cache_og_png_path),
+                 cache_website_dir, "og.png") ||
       !join_path(website_assets_dir, sizeof(website_assets_dir), root,
                  "etc/assets/website") ||
       !join_path(template_path, sizeof(template_path), website_assets_dir,
                  "web.html") ||
       !join_path(js_path, sizeof(js_path), website_assets_dir, "web.js") ||
       !join_path(css_path, sizeof(css_path), website_assets_dir, "web.css") ||
+      !join_path(favicon_path, sizeof(favicon_path), website_assets_dir,
+                 "favicon.svg") ||
+      !join_path(mono_font_path, sizeof(mono_font_path), root,
+                 "etc/assets/fonts/jetbrains.ttf") ||
+      !join_path(display_font_path, sizeof(display_font_path), root,
+                 "etc/assets/fonts/quantico.ttf") ||
       !join_path(logo_path, sizeof(logo_path), website_assets_dir,
                  "logo.svg") ||
       !join_path(logo_png_path, sizeof(logo_png_path), website_assets_dir,
                  "logo.png") ||
-      !join_path(og_png_path, sizeof(og_png_path), website_assets_dir,
-                 "og.png") ||
+      !join_path(out_favicon_path, sizeof(out_favicon_path), out_dir,
+                 "favicon.svg") ||
       !join_path(out_logo_path, sizeof(out_logo_path), out_dir, "logo.svg") ||
       !join_path(out_logo_png_path, sizeof(out_logo_png_path), out_dir,
                  "logo.png") ||
+      !join_path(out_og_svg_path, sizeof(out_og_svg_path), out_dir,
+                 "og.svg") ||
       !join_path(out_og_png_path, sizeof(out_og_png_path), out_dir, "og.png") ||
       !join_path(out_assets_dir, sizeof(out_assets_dir), out_dir, "assets") ||
       !join_path(out_website_assets_dir, sizeof(out_website_assets_dir),
-                 out_assets_dir, "website")) {
+                 out_assets_dir, "website") ||
+      !join_path(out_assets_og_svg_path, sizeof(out_assets_og_svg_path),
+                 out_website_assets_dir, "og.svg") ||
+      !join_path(out_assets_og_png_path, sizeof(out_assets_og_png_path),
+                 out_website_assets_dir, "og.png")) {
     free(bundle);
     nyt_err("ny-doc", "repository path is too long");
     return 1;
@@ -4758,6 +5552,18 @@ int ny_web_main(int argc, char **argv) {
     nyt_err("ny-doc", "failed to build docs data");
     return 1;
   }
+  if (!generate_website_og_assets(cache_og_svg_path, cache_og_png_path,
+                                  logo_path, favicon_path, mono_font_path,
+                                  display_font_path, parsed_modules,
+                                  parsed_symbols, source_files)) {
+    free(html_tpl);
+    free(js_tpl);
+    free(css_tpl);
+    free(docs_json);
+    nyt_err("ny-doc", "failed generating website OG assets in %s",
+            cache_website_dir);
+    return 1;
+  }
   char *seo_head = render_site_head(site_url, root);
   char *html =
       replace_doc_template(html_tpl, docs_json, js_tpl, css_tpl, seo_head);
@@ -4787,6 +5593,13 @@ int ny_web_main(int argc, char **argv) {
   write_seo_artifacts(out_dir, root, docs_json, parsed_modules, parsed_symbols,
                       site_url);
   free(docs_json);
+  if (ny_path_readable(favicon_path) &&
+      !copy_file_bytes(favicon_path, out_favicon_path)) {
+    nyt_err("ny-doc", "failed writing %s", out_favicon_path);
+    return 1;
+  }
+  if (!ny_path_readable(favicon_path))
+    unlink(out_favicon_path);
   if (ny_path_readable(logo_path) &&
       !copy_file_bytes(logo_path, out_logo_path)) {
     nyt_err("ny-doc", "failed writing %s", out_logo_path);
@@ -4799,16 +5612,23 @@ int ny_web_main(int argc, char **argv) {
   }
   if (!ny_path_readable(logo_png_path))
     unlink(out_logo_png_path);
-  if (ny_path_readable(og_png_path) &&
-      !copy_file_bytes(og_png_path, out_og_png_path)) {
+  if (!copy_file_bytes(cache_og_svg_path, out_og_svg_path)) {
+    nyt_err("ny-doc", "failed writing %s", out_og_svg_path);
+    return 1;
+  }
+  if (!copy_file_bytes(cache_og_png_path, out_og_png_path)) {
     nyt_err("ny-doc", "failed writing %s", out_og_png_path);
     return 1;
   }
-  if (!ny_path_readable(og_png_path))
-    unlink(out_og_png_path);
   if (!copy_regular_files_in_dir(website_assets_dir, out_website_assets_dir,
                                  "web.html")) {
     nyt_err("ny-doc", "failed writing website assets: %s",
+            out_website_assets_dir);
+    return 1;
+  }
+  if (!copy_file_bytes(cache_og_svg_path, out_assets_og_svg_path) ||
+      !copy_file_bytes(cache_og_png_path, out_assets_og_png_path)) {
+    nyt_err("ny-doc", "failed writing generated website assets: %s",
             out_website_assets_dir);
     return 1;
   }
@@ -4821,6 +5641,7 @@ int ny_web_main(int argc, char **argv) {
   nyt_msg("DOCS", NYT_CYAN,
           "parsed %d modules, %d symbols from %d source files", parsed_modules,
           parsed_symbols, source_files);
+  nyt_msg("CACHE", NYT_CYAN, "website OG assets: %s", cache_website_dir);
   nyt_msg("OK", NYT_GREEN, "docs ready: %s", out_dir);
   char display_index_path[PATH_MAX];
   abs_path_for_display(display_index_path, sizeof(display_index_path),

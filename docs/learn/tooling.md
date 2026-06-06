@@ -1,11 +1,9 @@
 # Tooling
 
-These commands cover common build, run, docs, and test loops. `ny --help` and
-subcommand help list every flag.
+Use `ny --help` and subcommand help for the full flag list. This page keeps the
+common build, run, docs, format, test, and diagnostic loops.
 
-## Common loop
-
-For a single-file change:
+## Common Loop
 
 ```bash
 ny file.ny
@@ -14,12 +12,75 @@ ny --diag-rich file.ny
 ny test --pattern name
 ```
 
-Use `-run` or `-o` for native executable checks. Use `ny doc search` to find
-module or function names.
+Use `-run` or `-o` for native checks. Use `ny doc search` before guessing API
+names.
 
-## Build or install
+## Tooling Shape
 
-From a source checkout:
+The command surface stays small on purpose. Use diagnostics to catch mistakes
+before runtime, and use environment inspection instead of remembering hidden
+state:
+
+```bash
+./make doctor
+./make doctor --install
+./make env
+./make targets
+```
+
+`doctor` checks required build tools, writable caches, built artifacts, optional
+runners, optional std/native deps, and UI display state. Plain `doctor` is
+read-only; `doctor --install` installs known required deps, optional std/native
+deps, and qemu/wine runners where the host package manager is supported. `env`
+prints the effective paths and overrides. `targets` lists the supported cross
+presets and runner status.
+
+## Configuration
+
+Nytrix tools load default configuration from simple env-style files. Real
+environment variables still win.
+
+Search order:
+
+```text
+$NYTRIX_CONFIG or $NY_CONFIG
+./.nytrix/config
+./nytrix.config
+$XDG_CONFIG_HOME/nytrix/config
+$XDG_CONFIG_HOME/ny/config
+~/.config/nytrix/config
+~/.config/ny/config
+```
+
+Use `KEY=value` or `export KEY=value` lines. `#` and `;` start comments.
+
+```text
+BUILD_DIR=build
+NYTRIX_BUILD_JOBS=12
+NYTRIX_PKG_HOME=~/.local/share/nytrix/pkg
+NYTRIX_PKG_PATH=./ny_modules:./vendor/ny_modules
+NYTRIX_STD_OVERLAY=./std_overrides
+NYTRIX_MINGW_CC=x86_64-w64-mingw32-gcc
+NYTRIX_MINGW_SYSROOT=/usr/x86_64-w64-mingw32
+repo core = git+https://github.com/owner/ny-packages.git
+```
+
+`./make env` prints the loaded config files. `ny pkg repo list` also reads
+`repo name = source` lines from the same config files.
+
+`NYTRIX_STD_OVERLAY` is a `:` or `;` separated list of roots scanned before the
+bundled standard library. Use it to replace one std/lib module in a project
+without copying all of std:
+
+```text
+std_overrides/core/str.ny       # declares: module std.core.str(...)
+std_overrides/os/ui/theme.ny    # declares: module std.os.ui.theme(...)
+```
+
+Project-local `.nytrix/std`, `.nytrix/lib`, `std_overrides`, and
+`lib_overrides` directories are scanned automatically when they exist.
+
+## Build
 
 ```bash
 chmod +x make
@@ -28,47 +89,71 @@ chmod +x make
 ny --version
 ```
 
-From Windows `cmd.exe` or PowerShell:
+Windows:
 
 ```bat
 py -3 -B .\make all
 ```
 
-The Windows wrapper can use plain `cmd.exe`: it finds or installs MSYS2, installs
-the UCRT64 build packages with `pacman`, and points CMake at that toolchain.
+The Windows wrapper finds or installs MSYS2, installs UCRT64 packages, and
+points CMake at that toolchain.
 
-Without installing, run commands through the produced `ny` binary from the
-build output.
+## Cross Compile
 
-## Run modes
+Nytrix native output can target another platform by giving the compiler a target
+triple and matching host compiler/linker flags. The `./make cross` wrapper keeps
+that setup in one place:
 
 ```bash
-ny
-ny file.ny
-ny -c '1 + 1'
-ny -ic 'a=1337'
-ny --eval-repl 'a=1337'
-ny -run file.ny
-ny -o app file.ny
-ny -i
-ny --interactive
+./make targets
+./make cross linux-arm64 hello.ny
+./make cross --target aarch64-linux-gnu --sysroot /opt/aarch64-sysroot hello.ny
+./make cross-run windows-x64 hello.ny
 ```
+
+The wrapper emits binaries under `build/cache/cross/<target>/` unless `-o` or
+`--output` is passed. Presets include `linux-x64`, `linux-arm64`,
+`linux-armhf`, `linux-riscv64`, and `windows-x64`. The Windows preset emits an
+`.exe`, prefers `NYTRIX_MINGW_CC` when configured, auto-detects
+`x86_64-w64-mingw32-gcc`, and uses Wine for `cross-run`.
+
+`./make cross-run` compiles first, then runs through qemu or wine when the
+runner is installed:
+
+```bash
+./make cross-run linux-arm64 hello.ny
+./make cross-run linux-arm64 --sysroot /opt/aarch64-sysroot hello.ny -- arg1 arg2
+```
+
+qemu and wine are soft dependencies. If the runner is missing, `cross-run`
+prints the tool name and keeps the compiled artifact.
+
+The direct compiler flags remain available for custom toolchains:
+
+```bash
+ny --host-triple aarch64-linux-gnu \
+   --host-cflags "--target=aarch64-linux-gnu --sysroot=/opt/aarch64-sysroot" \
+   --host-ldflags "--target=aarch64-linux-gnu --sysroot=/opt/aarch64-sysroot" \
+   -o build/hello-aarch64 hello.ny
+```
+
+## Run Modes
 
 | Form | Behavior |
 | --- | --- |
-| `ny` | Start the REPL, or read piped stdin as REPL batch input. |
-| `ny file.ny` | Run through the JIT path. |
+| `ny` | Start REPL, or read piped stdin as REPL batch input. |
+| `ny file.ny` | Run through JIT path. |
 | `ny -c 'code'` | Run inline source. |
-| `ny -ic 'code'`, `ny -ci 'code'` | Run inline source, then enter the REPL with that state. |
-| `ny --eval-repl 'code'` | Long spelling for inline source followed by REPL. |
+| `ny -ic 'code'`, `ny -ci 'code'` | Run inline source, then enter REPL. |
+| `ny --repl < file.ny` | Run stdin source once through REPL batch path. |
 | `ny -run file.ny` | Build and run a temporary native executable. |
 | `ny -o app file.ny` | Emit a native executable. |
-| `ny -i`, `ny --interactive` | Start the REPL. |
+| `ny -i`, `ny --interactive`, `ny --plain-repl` | Start explicit REPL. |
 
-Default `ny file.ny` uses the JIT path. Native `-o` builds use the default
-optimized native profile. JIT and REPL defaults use edit-latency settings.
+Native `-o` defaults to optimized native output. JIT and REPL favor edit
+latency.
 
-## Format and audit
+## Format And Audit
 
 ```bash
 ny fmt --fix file.ny
@@ -83,12 +168,23 @@ ny fmt --metaprog file.ny
 ny fmt --modules path
 ```
 
-Formatting changes source layout. Audit modes report cleanup candidates, likely
-bugs, stricter checks, specialization candidates, compile-time generation
-candidates, module shape, and line counts. Use `--apply` only after reviewing
-the reported change class.
+Formatting changes layout. Audit modes report findings. Use `--apply` only
+after reviewing the change class.
 
-## Documentation search
+| Mode | Use |
+| --- | --- |
+| `--check`, `--fix` | Verify or rewrite formatting. |
+| `--analyze`, `--audit`, `--smart`, `--checks` | General source review and stricter checks. |
+| `--trim`, `--bloat`, `--overhaul`, `--dupes` | Size, repetition, and refactor pressure. |
+| `--bugs` | Suspicious source patterns. |
+| `--syntax`, `--types`, `--contracts` | Syntax, type, and contract audits. |
+| `--dead`, `--modules`, `--profiles` | Dead code, module shape, and profile structure. |
+| `--layouts`, `--ffi` | Native layout and FFI boundary checks. |
+| `--constants`, `--constfold` | Constant and foldable expression checks. |
+| `--specialize`, `--metaprog` | Typed fast-path and compile-time-generation candidates. |
+| `--cloc`, `--conv` | Line counts and Texinfo conversion. |
+
+## Docs
 
 ```bash
 ny doc search [--docs|--symbols] query
@@ -96,10 +192,7 @@ ny doc get query
 ny doc -o docs
 ```
 
-`ny doc search` searches prose pages, modules, exported symbols, docstrings,
-and keyword tags. Use `--symbols` when you know you need an API name. Use
-`--docs` when you are looking for a concept such as imports, packages, or
-native ownership. `ny doc -o docs` writes the static HTML reference.
+Use `--symbols` for API names and `--docs` for concepts.
 
 ## Diagnostics
 
@@ -109,30 +202,22 @@ ny --diag-rich file.ny
 ny --safe-mode file.ny
 ny --strict file.ny
 ny --strict-types file.ny
-ny --borrow-check file.ny
+ny --no-strict-types legacy_probe.ny
 ny --borrow-check --ownership-strict file.ny
 ny --heap=gc file.ny
 ny --max-errors=20 file.ny
-ny --warn=none file.ny
 ny --warn=useful file.ny
-ny --warn=all file.ny
 ny --clean-cache
 ```
 
-Compact diagnostics collect the failure set. Rich diagnostics print wider
-source spans. `--safe-mode` is the full safety profile: strict types,
+Compile-time type checks are on by default for typed code, generics, layouts,
+and native boundaries. Suspicious dynamic fallbacks are warnings by default;
+`--strict-types` rejects them for files that should stay fully statically
+explainable. `--no-strict-types` is the legacy escape hatch when that stricter
+layer was enabled by a wrapper or environment. `--safe-mode` adds
 ownership/borrow checks, RC/RAII cleanup, strict effect/alias policy, and
-safe raw-memory diagnostics. `--strict` enables strict types plus
-ownership/borrow diagnostics without enabling the full safe-mode profile.
-`--heap=gc` or `-gc` enables the opt-in runtime collector. Strict type mode
-alone promotes dynamic type
-cliffs to compile-time errors. Borrow-check mode validates ownership/borrow
-contracts and `--ownership-strict` promotes ownership escapes to hard
-compile-time errors. `--max-errors=N` controls the parser error cap; use `0`
-to disable the cap.
-
-See [diagnostics.md](diagnostics.md) for the debugging order and
-[errors.md](../spec/errors.md) for language-level failure forms.
+raw-memory diagnostics. `--strict` adds
+ownership/borrow diagnostics without the full safe-mode profile.
 
 ## Packages
 
@@ -156,12 +241,10 @@ ny test --pattern name
 ny test --with-stdlib module-or-path
 ```
 
-Executable checks are in [testing.md](testing.md).
-
 Use a focused pattern for one area. Run the wider matrix for compiler, runtime,
 stdlib, docs-generator, or public API changes.
 
-## Compile-time audits
+## Compile-Time Audits
 
 ```bash
 ny fmt --metaprog file.ny
@@ -169,12 +252,8 @@ ny fmt --specialize file.ny
 ny fmt --trim --check file.ny
 ```
 
-Compile-time source generation is in [comptime.md](../spec/comptime.md) and
-[metaprogramming.md](metaprogramming.md).
-
-For code that needs compile-time range or bounds guarantees, use
-`assert_compile`, `assert_compile_range`, and `assert_compile_index` in the
-source and run the file normally; failures are compiler diagnostics.
+For compile-time guarantees, use `assert_compile`, `assert_compile_range`, and
+`assert_compile_index` in source and run the file normally.
 
 ## Performance
 
@@ -185,12 +264,12 @@ ny -O3 --profile=peak -o build/cache/bench/app.peak bench.ny
 ny fmt --cloc path
 ```
 
-Performance comparisons are identified by command line, binary, input, cache
-state, and environment. Native `-o` builds use the default optimized profile.
-`--profile=peak` is for peak native-speed checks. `--profile=compile`
-measures compiler latency rather than runtime throughput.
+Performance notes should include command, binary, input, cache state, and
+validation. Use [performance.md](performance.md) for timing discipline.
 
-Use [performance.md](performance.md) for timing and profiling discipline.
+## Related
 
-For a first-file path, use [start.md](start.md). For common failures, use
-[troubleshooting.md](troubleshooting.md).
+- [start.md](start.md)
+- [diagnostics.md](diagnostics.md)
+- [troubleshooting.md](troubleshooting.md)
+- [testing.md](testing.md)

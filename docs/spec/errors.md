@@ -57,12 +57,12 @@ invalid receiver/index access, can be captured by `try`/`catch`.
 
 Standard-library APIs can return structured result values for recoverable
 failure. Callers inspect the success/error shape before using the payload when
-strict type checking requires refinement.
+compile-time type checking requires refinement.
 
 ```ny
 use std.core
 
-fn operation(): dict {
+fn operation() dict {
    {"ok": true, "value": 42}
 }
 
@@ -91,7 +91,7 @@ ny --diag-rich file.ny
 | --- | --- |
 | Undefined symbol | Missing import, wrong export name, or out-of-scope binding. |
 | Unavailable receiver method | Receiver form is not available for that value/API. |
-| Strict type failure | Dynamic shape was not refined enough. |
+| Type-check failure | Dynamic shape was not refined enough. |
 | Ownership failure | A move, borrow, release, return, or contract violates `--borrow-check`. |
 | Compile-time proof failure | `assert_compile`, range proof, or index proof could not be proven. |
 | Safe-mode raw memory failure | A raw pointer access lacks a proven in-bounds byte range. |
@@ -100,7 +100,7 @@ ny --diag-rich file.ny
 
 ## Related
 
-- [types.md](types.md) for strict type rules.
+- [types.md](types.md) for compile-time type rules.
 - [syntax.md](syntax.md) for parser-level forms.
 - [diagnostics.md](../learn/diagnostics.md) for debugging workflow.
 - [troubleshooting.md](../learn/troubleshooting.md) for fixes by symptom.

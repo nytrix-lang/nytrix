@@ -5,7 +5,7 @@ block values.
 
 ## Bindings
 
-```text
+```ny
 def name = expr
 mut name = expr
 def Type: name = expr
@@ -20,10 +20,10 @@ binding order is `Type: name`.
 
 ## Function forms
 
-```text
+```ny
 fn name(params) { body }
-fn name(params): Type { body }
-fn name(params): Type = expr
+fn name(params) Type { body }
+fn name(params) Type = expr
 fn(v){ expr }
 fn(a, b){ body }
 ```
@@ -35,16 +35,16 @@ an inline callable value.
 same parameter-list and return-type syntax as `fn(...) { ... }`; `fn` is the
 canonical spelling in new code.
 
-Return types use `:` before the body. `->` is reserved for pattern/case arms,
-not function signatures.
+Return types follow the parameter list without `:`. `->` is reserved for
+pattern/case arms, not function signatures.
 
 ## Parameters
 
-```text
+```ny
 name
-Type: name
+Type name
 name = default
-Type: name = default
+Type name = default
 ...rest
 ```
 
@@ -55,7 +55,7 @@ call path according to the function definition.
 
 Blocks use braces:
 
-```text
+```ny
 { statement* expr? }
 ```
 
@@ -68,7 +68,7 @@ that expression unless control exits earlier.
 expression is the function result.
 
 ```ny
-fn clamp(number: x, number: lo, number: hi): number {
+fn clamp(number x, number lo, number hi) number {
    if(x < lo){ return lo }
    if(x > hi){ return hi }
    x
@@ -81,7 +81,7 @@ Function attributes attach compile-time metadata to the following function.
 The currently supported surface includes codegen hints, effects, async
 lowering, and ownership contracts.
 
-```text
+```ny
 @pure
 @effects(none|io|alloc|ffi|thread|all)
 @async_effects
@@ -132,7 +132,7 @@ assert(out == 41, "compose")
 Typed function expressions can declare parameter and return types inline:
 
 ```ny
-def shout = fn(str: x): str { x + "!" }
+def shout = fn(str x) str { x + "!" }
 ```
 
 ## Ownership contracts
@@ -151,7 +151,7 @@ fn adopt(x){ x }
 
 @consumes(x)
 @releases(x)
-fn close_owned(x): int {
+fn close_owned(x) int {
    __drop_owned(x)
    0
 }
@@ -171,7 +171,7 @@ A string literal at the start of a function body is the function docstring. It
 is documentation metadata; it is not ordinary executable work.
 
 ```ny
-fn normalize_port(int: raw): int {
+fn normalize_port(int raw) int {
    "Return a TCP port after a boundary check."
    assert(raw >= 0 && raw <= 65535, "port range")
    raw

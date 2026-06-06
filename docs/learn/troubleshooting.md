@@ -71,19 +71,19 @@ xs = xs.append(1)
 Strings are byte-length values. Generic string slicing uses UTF-8 code-point
 indices. FFI, socket, and binary parsers may require byte-oriented APIs.
 
-## Strict type failure
+## Type-check failure
 
-Strict type mode rejects dynamic cliffs such as heterogeneous dict literals,
-unknown member access, unknown index access, dynamic arithmetic, and unrefined
-`Result` payload use.
+Default type checks reject typed contradictions and warn on dynamic cliffs such
+as heterogeneous dict literals, unknown member/index access, dynamic
+arithmetic, and unrefined `Result` payload use.
 
-Command:
+Use `--strict-types` when a command line should reject those dynamic cliffs:
 
 ```bash
 ny --strict-types file.ny
 ```
 
-See [types.md](../spec/types.md) for strict mode rules.
+See [types.md](../spec/types.md) for compile-time type rules.
 
 ## OOM or GC panic
 

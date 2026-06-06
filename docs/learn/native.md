@@ -39,15 +39,17 @@ fields through runtime descriptor lookups.
 
 ```ny
 extern "library" {
-   fn native_call(int: value): int
+   fn native_call(int value) int
 }
 
-extern "" {
-   fn process_symbol(handle: h): int
+extern {
+   fn process_symbol(handle h) int
 }
 ```
 
-Use a declaration that matches the native header.
+Use `extern "library"` when Nytrix should link or load a library. Use bare
+`extern` for symbols already available from the current process. `extern ""`
+means the same thing, but the bare form is easier to read.
 
 Prefer `extern`, `#include`, and `layout` for code that should behave like
 native code. The dynamic `std.os.ffi` helpers are useful for quick symbol
@@ -105,7 +107,7 @@ fn allocate_block(){ malloc(64) }
 
 @consumes(p)
 @releases(p)
-fn release_block(p): int {
+fn release_block(p) int {
    free(p)
    0
 }

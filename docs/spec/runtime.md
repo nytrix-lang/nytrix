@@ -11,15 +11,16 @@ concurrency, cleanup, and effect metadata.
 | JIT | `ny file.ny` | Compile and run through the JIT path. |
 | Inline | `ny -c 'code'` | Compile and run inline source. |
 | Inline REPL | `ny -ic 'code'`, `ny -ci 'code'` | Compile inline source, then continue in the REPL. |
+| REPL batch | `ny --repl < file.ny` | Compile stdin source once through the REPL batch path. |
 | Native run | `ny -run file.ny` | Build a temporary executable and run it. |
 | Native output | `ny -o app file.ny` | Emit a native executable. |
-| REPL | `ny -i`, `ny --interactive` | Interactive evaluation. |
+| Explicit REPL | `ny -i`, `ny --interactive`, `ny --plain-repl` | Interactive evaluation. |
 
 ## Safety profile
 
-`--safe-mode` is the compile-time safety profile for Nytrix. It turns
-on strict types, ownership/borrow checking, RC/RAII cleanup, strict
-effect/alias policy, and stricter raw-memory diagnostics.
+`--safe-mode` is the compile-time safety profile for Nytrix. It keeps the
+default type checks and adds ownership/borrow checking, RC/RAII cleanup,
+strict effect/alias policy, and stricter raw-memory diagnostics.
 
 ```bash
 ny --safe-mode file.ny
@@ -77,7 +78,7 @@ Ownership contracts can be declared with attributes and checked by compiler or
 runtime modes. Resource APIs define whether a value is borrowed, owned,
 released, or intentionally forgotten.
 
-```text
+```ny
 def b = borrow(a)
 def c = &a
 def o = own(value)
@@ -117,7 +118,7 @@ Ownership function contracts are:
 `defer` and `with` are the language-level cleanup forms. Library APIs can build
 resource-safe wrappers on top of them.
 
-```text
+```ny
 defer { cleanup() }
 with Resource: r = open_resource() { use(r) }
 ```
@@ -154,7 +155,7 @@ Attributes describe declaration metadata: linkage, codegen hints, purity,
 effects, hot/cold markers, accelerator/vectorization hints, and ownership
 contracts.
 
-```text
+```ny
 @pure
 @effects(none|io|alloc|ffi|thread|all)
 @async_effects

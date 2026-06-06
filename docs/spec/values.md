@@ -27,13 +27,13 @@ document whether they expect text or raw bytes.
 
 Formatted strings use expression interpolation:
 
-```text
+```ny
 f"name={name} count={n}"
 ```
 
 A trailing top-level `=` keeps the expression text as a label:
 
-```text
+```ny
 f"{name=}"
 f"{count + 1=}"
 ```
@@ -58,7 +58,7 @@ Indexing an uninitialized reserved slot is not defined as a valid list element.
 
 Lists, tuples, strings, bytes, and ranges support integer indexing:
 
-```text
+```ny
 xs[0]
 xs[-1]
 "abcd"[2]
