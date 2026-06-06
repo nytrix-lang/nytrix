@@ -1,16 +1,19 @@
-;; Keywords: lattice acd
+;; Keywords: lattice acd math crypto number-theory
 ;; Lattice routines for approximate-common-divisor lattice attacks.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.acd(acd_solve_sda)
 use std.core
 use std.math.nt
 use std.math.crypto.lattice.lll
 
-fn _acd_abs(any: x): any { x < 0 ? -x : x }
+fn _acd_abs(any x) any { x < 0 ? -x : x }
 
-fn _acd_residue_gcd(list: x, int: rho_bits): any {
+fn _acd_residue_gcd(list x, int rho_bits) any {
    if(rho_bits < 0 || rho_bits > 10){ return nil }
    def R = Z(1) << rho_bits
    def x0 = Z(x.get(0))
@@ -40,7 +43,7 @@ fn _acd_residue_gcd(list: x, int: rho_bits): any {
    best_all > Z(1) ? best_all : nil
 }
 
-fn acd_solve_sda(list: x, int: rho_bits): any {
+fn acd_solve_sda(list x, int rho_bits) any {
    "Solve Approximate Common Divisor problem using LLL. x: samples x_i = p*q_i + r_i, rho_bits: bound on r_i. Returns recovered p or nil."
    def n = x.len
    if(n < 2){ return nil }
@@ -84,7 +87,7 @@ fn acd_solve_sda(list: x, int: rho_bits): any {
    nil
 }
 
-fn vec_zero(int: n): list {
+fn vec_zero(int n) list {
    "Internal: Create a zero vector of length n with bigint elements."
    mut v, i = list(0), 0
    while(i < n){

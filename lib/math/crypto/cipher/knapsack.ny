@@ -1,15 +1,18 @@
-;; Keywords: cipher knapsack
+;; Keywords: cipher knapsack math crypto
 ;; Knapsack cipher solving and meet-in-the-middle search routines.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.knapsack(knapsack_solve, knapsack_density, knapsack_lo, knapsack_cjloss, knapsack_mitm_table, knapsack_mitm_right_table, knapsack_mitm_solve_prepared, knapsack_mitm_solve_many_prepared, knapsack_mitm_solve)
 use std.core
 use std.math.nt
 use std.math.scalar (ceil, sqrt)
 use std.math.crypto.lattice.lll
 
-fn vec_zero(int: n): list {
+fn vec_zero(int n) list {
    "Internal: Create a zero vector of length n with bigint elements."
    mut v, i = list(0), 0
    while(i < n){
@@ -19,7 +22,7 @@ fn vec_zero(int: n): list {
    v
 }
 
-fn _sum_weighted(list: a, list: bits): bigint {
+fn _sum_weighted(list a, list bits) bigint {
    mut s, i = Z(0), 0
    while(i < bits.len){
       if(int(bits.get(i, 0)) != 0){ s = s + Z(a.get(i, 0)) }
@@ -28,7 +31,7 @@ fn _sum_weighted(list: a, list: bits): bigint {
    s
 }
 
-fn _knapsack_mask_sum(list: a, int: start, int: count, int: mask): bigint {
+fn _knapsack_mask_sum(list a, int start, int count, int mask) bigint {
    mut s = Z(0)
    mut i = 0
    while(i < count){
@@ -38,7 +41,7 @@ fn _knapsack_mask_sum(list: a, int: start, int: count, int: mask): bigint {
    s
 }
 
-fn _knapsack_bits_from_masks(int: n, int: split, int: left_mask, int: right_mask): list {
+fn _knapsack_bits_from_masks(int n, int split, int left_mask, int right_mask) list {
    mut bits = []
    mut i = 0
    while(i < split){
@@ -53,7 +56,7 @@ fn _knapsack_bits_from_masks(int: n, int: split, int: left_mask, int: right_mask
    bits
 }
 
-fn knapsack_mitm_table(list: a, int: split=0): dict {
+fn knapsack_mitm_table(list a, int split=0) dict {
    "Build a meet-in-the-middle subset-sum table for the first split items.
    Sums are stored directly as bigint keys."
    def n = a.len
@@ -69,7 +72,7 @@ fn knapsack_mitm_table(list: a, int: split=0): dict {
    table
 }
 
-fn knapsack_mitm_right_table(list: a, int: split=0): list {
+fn knapsack_mitm_right_table(list a, int split=0) list {
    "Build [sum, mask] pairs for the second half of a MITM subset-sum instance."
    def n = a.len
    if(split <= 0){ split = n / 2 }
@@ -84,7 +87,7 @@ fn knapsack_mitm_right_table(list: a, int: split=0): list {
    pairs
 }
 
-fn knapsack_mitm_solve_prepared(list: a, any: s, dict: table, int: split=0): any {
+fn knapsack_mitm_solve_prepared(list a, any s, dict table, int split=0) any {
    "Solve a subset-sum instance using a precomputed first-half MITM table.
    Returns a bit vector in the same order as a, or nil."
    def n = a.len
@@ -106,7 +109,7 @@ fn knapsack_mitm_solve_prepared(list: a, any: s, dict: table, int: split=0): any
    nil
 }
 
-fn knapsack_mitm_solve_many_prepared(list: a, list: targets, dict: left_table, any: right_pairs=nil, int: split=0): list {
+fn knapsack_mitm_solve_many_prepared(list a, list targets, dict left_table, any right_pairs=nil, int split=0) list {
    "Solve many subset-sum targets with one precomputed left table and right-pair table.
    Returns a list of bit vectors or nil entries in target order."
    def n = a.len
@@ -133,13 +136,13 @@ fn knapsack_mitm_solve_many_prepared(list: a, list: targets, dict: left_table, a
    out
 }
 
-fn knapsack_mitm_solve(list: a, any: s, int: split=0): any {
+fn knapsack_mitm_solve(list a, any s, int split=0) any {
    "Exact meet-in-the-middle subset-sum solver. Practical for about 32-40 items."
    if(split <= 0){ split = a.len / 2 }
    knapsack_mitm_solve_prepared(a, s, knapsack_mitm_table(a, split), split)
 }
 
-fn _max_abs(list: a): bigint {
+fn _max_abs(list a) bigint {
    mut mx = Z(0)
    mut i = 0
    while(i < a.len){
@@ -151,18 +154,18 @@ fn _max_abs(list: a): bigint {
    mx
 }
 
-fn knapsack_density(list: a): f64 {
+fn knapsack_density(list a) f64 {
    "Return subset-sum density n/log2(max(a))."
    def mx = _max_abs(a)
    mx <= 1 ? float(a.len) : float(a.len) / float(bit_length(mx))
 }
 
-fn _lll_rows(list: basis): list {
+fn _lll_rows(list basis) list {
    def red = lll(basis)
    red.get(2, [])
 }
 
-fn _knapsack_zero_basis(int: n): list {
+fn _knapsack_zero_basis(int n) list {
    mut basis = []
    mut i = 0
    while(i <= n){
@@ -172,7 +175,7 @@ fn _knapsack_zero_basis(int: n): list {
    basis
 }
 
-fn _knapsack_decode_lo(list: v, int: n): any {
+fn _knapsack_decode_lo(list v, int n) any {
    mut bits = []
    mut j = 0
    while(j < n){
@@ -184,7 +187,7 @@ fn _knapsack_decode_lo(list: v, int: n): any {
    bits
 }
 
-fn _knapsack_decode_cjloss(list: v, int: n): any {
+fn _knapsack_decode_cjloss(list v, int n) any {
    mut bits = []
    mut j = 0
    while(j < n){
@@ -197,12 +200,12 @@ fn _knapsack_decode_cjloss(list: v, int: n): any {
 }
 
 fn _knapsack_decoded_solution(
-   list: rows,
-   list: a,
-   any: s,
-   fnptr: decode,
-   bool: require_zero_tail,
-): any {
+   list rows,
+   list a,
+   any s,
+   fnptr decode,
+   bool require_zero_tail,
+) any {
    def n = a.len
    mut i = 0
    while(i < rows.len){
@@ -220,11 +223,11 @@ fn _knapsack_decoded_solution(
    nil
 }
 
-fn _knapsack_zero_tail_solution(list: rows, list: a, any: s, fnptr: decode): any {
+fn _knapsack_zero_tail_solution(list rows, list a, any s, fnptr decode) any {
    _knapsack_decoded_solution(rows, a, s, decode, true)
 }
 
-fn knapsack_lo(list: a, any: s, bool: try_on_high_density=false): any {
+fn knapsack_lo(list a, any s, bool try_on_high_density=false) any {
    "Lagarias-Odlyzko low-density subset-sum attack returning a bit vector or nil."
    if(a.len == 0){ return nil }
    def dens = knapsack_density(a)
@@ -247,7 +250,7 @@ fn knapsack_lo(list: a, any: s, bool: try_on_high_density=false): any {
    _knapsack_zero_tail_solution(rows, a, s, _knapsack_decode_lo)
 }
 
-fn knapsack_cjloss(list: a, any: s, bool: try_on_high_density=false): any {
+fn knapsack_cjloss(list a, any s, bool try_on_high_density=false) any {
    "Coster-Joux-LaMacchia-Odlyzko-Schnorr-Stern low-density attack returning a bit vector or nil."
    if(a.len == 0){ return nil }
    def dens = knapsack_density(a)
@@ -276,7 +279,7 @@ fn knapsack_cjloss(list: a, any: s, bool: try_on_high_density=false): any {
    _knapsack_zero_tail_solution(rows, a, s, _knapsack_decode_cjloss)
 }
 
-fn _knapsack_embed_legacy(list: a, any: s): any {
+fn _knapsack_embed_legacy(list a, any s) any {
    def n = a.len
    mut basis = _knapsack_zero_basis(n)
    def factor = isqrt(n) / 2 + 1
@@ -299,7 +302,7 @@ fn _knapsack_embed_legacy(list: a, any: s): any {
    _knapsack_decoded_solution(_lll_rows(basis), a, s, _knapsack_decode_cjloss, false)
 }
 
-fn _knapsack_bruteforce_small(list: a, any: s): any {
+fn _knapsack_bruteforce_small(list a, any s) any {
    def n = a.len
    if(n <= 0 || n > 28){ return nil }
    def limit = Z(1) << n
@@ -317,7 +320,7 @@ fn _knapsack_bruteforce_small(list: a, any: s): any {
    nil
 }
 
-fn knapsack_solve(list: a, any: s): any {
+fn knapsack_solve(list a, any s) any {
    "Subset-sum solver using low-density lattice attacks.
    Tries CJLOSS first, then LO."
    if(a.len > 0 && a.len <= 40){

@@ -1,13 +1,16 @@
-;; Keywords: rsa lcg-rng
+;; Keywords: rsa lcg-rng math crypto
 ;; RSA prime recovery from LCG-generated randomness routines.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.lcg_rng(rsa_lcg_factor_power2)
 use std.core
 use std.math.nt
 use std.math.crypto.number.arith (two_adic_valuation, mod_sqrt_power2)
 
-fn rsa_lcg_factor_power2(any: n, any: mult, any: inc, int: modulus_bits=512, int: max_gap=4096): list {
+fn rsa_lcg_factor_power2(any n, any mult, any inc, int modulus_bits=512, int max_gap=4096) list {
    "Recover [p, q, gap] when p*q == n and q follows p after gap LCG steps modulo 2^modulus_bits.
    The LCG is x -> mult*x + inc mod 2^modulus_bits. Returns [] if not found."
    def nn = Z(n)

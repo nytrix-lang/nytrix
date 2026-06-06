@@ -1,42 +1,45 @@
-;; Keywords: lattice
+;; Keywords: crypto lattice number-theory reduction vectors math
 ;; Lattice construction and formatting utilities for reduction, CVP/SVP workflows, and Coppersmith-style attacks.
 ;; Reference:
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.lattice(build_coppersmith_lattice, build_boneh_durfee_lattice, mat_from_rows, lattice_set_at, lattice_shortest_vectors, lattice_closest_vectors, gen_lattice, gen_modular_lattice, gen_random_lattice, gen_ideal_lattice, gen_cyclotomic_lattice, gen_lattice_report, gen_uniform_lattice, gen_intrel_lattice, gen_simdioph_lattice, gen_qary_lattice, latticegen, latticegen_report, gen_lattice_sweep_report, lattice_quotient_report, lattice_matrix_ntl_format, lattice_matrix_object_str, lattice_dot, lattice_norm2, gaussian_reduce_2d, lattice_text_parse, lattice_text_parse_matrix, lattice_text_parse_vector, lattice_text_format)
 use std.math.nt
 use std.math.matrix as matrix
 use std.math.crypto.lattice.lll as lllmod
 use std.core.str as str
 
-fn _lat_seed_next(any: state): bigint {
+fn _lat_seed_next(any state) bigint {
    mod(Z(6364136223846793005) * Z(state) + Z(1442695040888963407), Z(1) << Z(63))
 }
 
-fn _lat_rand_centered(any: state, any: q): list {
+fn _lat_rand_centered(any state, any q) list {
    def ns = _lat_seed_next(state)
    def qq = Z(q)
    def v = mod(ns, qq)
    [ns, (v * Z(2) > qq) ? v - qq : v]
 }
 
-fn _lat_zero_row(int: n): list {
+fn _lat_zero_row(int n) list {
    mut row = []
    mut i = 0
    while(i < n){ row = row.append(Z(0)) i += 1 }
    row
 }
 
-fn _lat_is_digit_byte(int: c): bool { c >= 48 && c <= 57 }
+fn _lat_is_digit_byte(int c) bool { c >= 48 && c <= 57 }
 
-fn _lat_is_num_start(int: c): bool { _lat_is_digit_byte(c) || c == 45 }
+fn _lat_is_num_start(int c) bool { _lat_is_digit_byte(c) || c == 45 }
 
-fn _lat_token_to_z(str: text, int: start, int: stop): bigint { Z(str.str_slice(text, start, stop)) }
+fn _lat_token_to_z(str text, int start, int stop) bigint { Z(str.str_slice(text, start, stop)) }
 
-fn _lat_can_fast_parse_matrix(str: s): bool {
+fn _lat_can_fast_parse_matrix(str s) bool {
    str.str_contains(s, "\n") && str.str_contains(s, "[[")
 }
 
-fn _lat_clean_matrix_line(str: line): str {
+fn _lat_clean_matrix_line(str line) str {
    mut s = str.strip(line)
    if(s.len == 0){ return s }
    s = str.str_replace(s, "[", "")
@@ -44,7 +47,7 @@ fn _lat_clean_matrix_line(str: line): str {
    str.strip(s)
 }
 
-fn _lat_fast_parse_matrix(str: text): any {
+fn _lat_fast_parse_matrix(str text) any {
    mut rows = []
    def lines = str.split(text, "\n")
    mut i = 0
@@ -65,7 +68,7 @@ fn _lat_fast_parse_matrix(str: text): any {
    matrix.Matrix(rows)
 }
 
-fn lattice_text_parse(any: text): any {
+fn lattice_text_parse(any text) any {
    "Parse bracketed integer lattice text. Matrices return Matrix(rows); vectors return list."
    def s = is_str(text) ? text : to_str(text)
    if(_lat_can_fast_parse_matrix(s)){ return _lat_fast_parse_matrix(s) }
@@ -100,14 +103,14 @@ fn lattice_text_parse(any: text): any {
    top
 }
 
-fn lattice_text_parse_matrix(any: text): any {
+fn lattice_text_parse_matrix(any text) any {
    "Parse bracketed integer matrix text and always return a Matrix."
    def parsed = lattice_text_parse(text)
    if(matrix.is_matrix(parsed)){ return parsed }
    matrix.Matrix(parsed.len == 0 ? [] : [parsed])
 }
 
-fn lattice_text_parse_vector(any: text): list {
+fn lattice_text_parse_vector(any text) list {
    "Parse bracketed integer vector text and return a list."
    def parsed = lattice_text_parse(text)
    if(matrix.is_matrix(parsed)){
@@ -117,7 +120,7 @@ fn lattice_text_parse_vector(any: text): list {
    parsed
 }
 
-fn _lat_text_append_row(list: b, list: row): list {
+fn _lat_text_append_row(list b, list row) list {
    b = str.builder_append(b, "[")
    mut j = 0
    while(j < row.len){
@@ -129,7 +132,7 @@ fn _lat_text_append_row(list: b, list: row): list {
    b
 }
 
-fn lattice_text_format(any: value): str {
+fn lattice_text_format(any value) str {
    "Format a Matrix or vector as compact bracketed integer lattice text."
    mut b = str.Builder(256)
    if(matrix.is_matrix(value)){
@@ -148,7 +151,7 @@ fn lattice_text_format(any: value): str {
    str.builder_to_str(str.builder_append(b, "[]"))
 }
 
-fn lattice_matrix_ntl_format(any: value): str {
+fn lattice_matrix_ntl_format(any value) str {
    "Format a Matrix in Sage/NTL-readable row format."
    def mat = matrix.is_matrix(value) ? value : matrix.Matrix(value)
    def rows = matrix._matrix_rows(mat)
@@ -164,7 +167,7 @@ fn lattice_matrix_ntl_format(any: value): str {
    str.builder_to_str(b)
 }
 
-fn lattice_matrix_object_str(any: value): str {
+fn lattice_matrix_object_str(any value) str {
    "Return a Sage-style IntegerLattice object summary with the user basis matrix."
    def mat = matrix.is_matrix(value) ? value : matrix.Matrix(value)
    def rows = matrix._matrix_rows(mat)
@@ -172,7 +175,7 @@ fn lattice_matrix_object_str(any: value): str {
    "Free module of degree " + to_str(cols) + " and rank " + to_str(rows) + " over Integer Ring\nUser basis matrix:\n" + lattice_text_format(mat)
 }
 
-fn _lat_pow_z(any: base, int: exp): any {
+fn _lat_pow_z(any base, int exp) any {
    mut out = Z(1)
    mut i = 0
    while(i < exp){
@@ -182,7 +185,7 @@ fn _lat_pow_z(any: base, int: exp): any {
    out
 }
 
-fn _lat_random_vec(int: n, any: q, any: state): list {
+fn _lat_random_vec(int n, any q, any state) list {
    mut row = []
    mut st = state
    mut j = 0
@@ -195,7 +198,7 @@ fn _lat_random_vec(int: n, any: q, any: state): list {
    [st, row]
 }
 
-fn _lat_random_block(int: rows_count, int: n, any: q, any: seed): list {
+fn _lat_random_block(int rows_count, int n, any q, any seed) list {
    def sage = _lat_sage_seed_block(rows_count, n, q, seed)
    if(sage != nil){ return sage }
    mut rows = []
@@ -210,7 +213,7 @@ fn _lat_random_block(int: rows_count, int: n, any: q, any: seed): list {
    rows
 }
 
-fn _lat_sage_seed_block(int: rows_count, int: n, any: q, any: seed): any {
+fn _lat_sage_seed_block(int rows_count, int n, any q, any seed) any {
    if(seed == nil){ return nil }
    if(Z(seed) == Z(42) && Z(q) == Z(11) && n == 4 && rows_count == 6){
       return [
@@ -231,7 +234,7 @@ fn _lat_sage_seed_block(int: rows_count, int: n, any: q, any: seed): any {
    nil
 }
 
-fn _lat_sage_seed_vec(int: n, any: q, any: seed): any {
+fn _lat_sage_seed_vec(int n, any q, any seed) any {
    if(seed == nil){ return nil }
    if(Z(seed) == Z(42) && Z(q) == Z(11) && n == 4){
       return [Z(-5), Z(3), Z(2), Z(5)]
@@ -242,7 +245,7 @@ fn _lat_sage_seed_vec(int: n, any: q, any: seed): any {
    nil
 }
 
-fn _lat_primal_from_A(list: A, int: n, int: m, any: q): list {
+fn _lat_primal_from_A(list A, int n, int m, any q) list {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -267,7 +270,7 @@ fn _lat_primal_from_A(list: A, int: n, int: m, any: q): list {
    matrix.Matrix(rows)
 }
 
-fn _lat_dual_from_A(list: A, int: n, int: m, any: q): list {
+fn _lat_dual_from_A(list A, int n, int m, any q) list {
    mut rows = []
    mut i = 0
    while(i < n){
@@ -297,30 +300,30 @@ fn _lat_dual_from_A(list: A, int: n, int: m, any: q): list {
    matrix.Matrix(rev)
 }
 
-fn gen_modular_lattice(int: n=4, int: m=8, any: q=11, any: seed=nil, bool: dual=false): list {
+fn gen_modular_lattice(int n=4, int m=8, any q=11, any seed=nil, bool dual=false) list {
    "Construct a modular lattice basis. Returns an integer Matrix."
    if(n < 1 || m < n){ panic("gen_modular_lattice: require 1 <= n <= m") }
    def A = _lat_random_block(m - n, n, q, seed)
    dual ? _lat_dual_from_A(A, n, m, q) : _lat_primal_from_A(A, n, m, q)
 }
 
-fn gen_random_lattice(int: m=8, any: q=11, any: seed=nil, bool: dual=false): list {
+fn gen_random_lattice(int m=8, any q=11, any seed=nil, bool dual=false) list {
    "Construct a random lattice as a modular lattice with n=1."
    gen_modular_lattice(1, m, q, seed, dual)
 }
 
-fn _lat_bit_bound(int: bits): bigint {
+fn _lat_bit_bound(int bits) bigint {
    if(bits <= 0){ return Z(2) }
    Z(1) << Z(bits)
 }
 
-fn gen_uniform_lattice(int: d=8, int: bits=20, any: seed=nil): any {
+fn gen_uniform_lattice(int d=8, int bits=20, any seed=nil) any {
    "Construct a deterministic d x d centered uniform integer lattice with entries bounded by 2^bits."
    if(d < 1){ panic("gen_uniform_lattice: dimension must be positive") }
    matrix.Matrix(_lat_random_block(d, d, _lat_bit_bound(bits), seed))
 }
 
-fn gen_intrel_lattice(int: d=8, int: bits=20, any: seed=nil): any {
+fn gen_intrel_lattice(int d=8, int bits=20, any seed=nil) any {
    "Construct a deterministic d x(d+1) integer-relation lattice fixture."
    if(d < 1){ panic("gen_intrel_lattice: dimension must be positive") }
    def q = _lat_bit_bound(bits)
@@ -338,7 +341,7 @@ fn gen_intrel_lattice(int: d=8, int: bits=20, any: seed=nil): any {
    matrix.Matrix(rows)
 }
 
-fn gen_simdioph_lattice(int: d=8, int: bits=20, int: rhs_bits=10, any: seed=nil): any {
+fn gen_simdioph_lattice(int d=8, int bits=20, int rhs_bits=10, any seed=nil) any {
    "Construct a deterministic simultaneous-Diophantine square lattice fixture."
    if(d < 1){ panic("gen_simdioph_lattice: dimension must be positive") }
    def q = _lat_bit_bound(bits)
@@ -360,13 +363,13 @@ fn gen_simdioph_lattice(int: d=8, int: bits=20, int: rhs_bits=10, any: seed=nil)
    matrix.Matrix(rows)
 }
 
-fn gen_qary_lattice(int: d=8, int: k=4, any: q=11, any: seed=nil, bool: dual=false): any {
+fn gen_qary_lattice(int d=8, int k=4, any q=11, any seed=nil, bool dual=false) any {
    "Construct a deterministic q-ary lattice fixture with k modular rows in dimension d."
    if(k < 1 || d < k){ panic("gen_qary_lattice: require 1 <= k <= d") }
    gen_modular_lattice(k, d, q, seed, dual)
 }
 
-fn _lat_cyclic_mul_matrix(list: coeffs, int: n, bool: negacyclic=false): list {
+fn _lat_cyclic_mul_matrix(list coeffs, int n, bool negacyclic=false) list {
    mut rows = []
    mut r = 0
    while(r < n){
@@ -385,13 +388,13 @@ fn _lat_cyclic_mul_matrix(list: coeffs, int: n, bool: negacyclic=false): list {
    rows
 }
 
-fn _lat_center_mod(any: value, any: q): bigint {
+fn _lat_center_mod(any value, any q) bigint {
    def qq = Z(q)
    def v = mod(Z(value), qq)
    (v * Z(2) > qq) ? v - qq : v
 }
 
-fn _lat_polynomial_mul_matrix(list: coeffs, int: n, list: modulus, any: q): list {
+fn _lat_polynomial_mul_matrix(list coeffs, int n, list modulus, any q) list {
    mut rows = []
    mut r = 0
    while(r < n){
@@ -431,11 +434,11 @@ fn _lat_polynomial_mul_matrix(list: coeffs, int: n, list: modulus, any: q): list
    rows
 }
 
-fn _lat_no_space(str: s): str {
+fn _lat_no_space(str s) str {
    str.str_replace(str.str_replace(str.str_replace(str.strip(s), " ", ""), "\t", ""), "**", "^")
 }
 
-fn _lat_parse_degree_from_power(str: s): int {
+fn _lat_parse_degree_from_power(str s) int {
    def caret = str.find(s, "^")
    if(caret < 0){ return -1 }
    mut end = caret + 1
@@ -448,16 +451,16 @@ fn _lat_parse_degree_from_power(str: s): int {
    str.parse_int(str.str_slice(s, caret + 1, end))
 }
 
-fn _lat_is_alpha_byte(int: c): bool {
+fn _lat_is_alpha_byte(int c) bool {
    (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 }
 
-fn _lat_signed_z(str: s): bigint {
+fn _lat_signed_z(str s) bigint {
    if(str.startswith(s, "+")){ return Z(str.str_slice(s, 1, s.len)) }
    Z(s)
 }
 
-fn _lat_detect_var(str: s): int {
+fn _lat_detect_var(str s) int {
    mut v = 0
    mut i = 0
    while(i < s.len){
@@ -471,7 +474,7 @@ fn _lat_detect_var(str: s): int {
    v
 }
 
-fn _lat_find_var(str: s, int: v): int {
+fn _lat_find_var(str s, int v) int {
    mut i = 0
    while(i < s.len){
       if(load8(s, i) == v){ return i }
@@ -480,11 +483,11 @@ fn _lat_find_var(str: s, int: v): int {
    -1
 }
 
-fn _lat_poly_error(str: kind, int: degree, str: raw, str: msg): dict {
+fn _lat_poly_error(str kind, int degree, str raw, str msg) dict {
    dict(5).set("ok", false).set("kind", kind).set("degree", degree).set("normalized", raw).set("error", msg)
 }
 
-fn _lat_parse_poly_string(int: n, str: raw): dict {
+fn _lat_parse_poly_string(int n, str raw) dict {
    def q = _lat_no_space(raw)
    if(str.str_contains(q, ",")){
       return _lat_poly_error("unsupported", -1, raw, "quotient should be a univariate polynomial")
@@ -544,7 +547,7 @@ fn _lat_parse_poly_string(int: n, str: raw): dict {
    dict(6).set("ok", true).set("kind", "polynomial").set("degree", n).set("coeffs", low).set("normalized", "monic polynomial degree " + to_str(n)).set("variable", str.str_slice(q, _lat_find_var(q, variable), _lat_find_var(q, variable) + 1))
 }
 
-fn lattice_quotient_report(int: n, any: quotient=nil): dict {
+fn lattice_quotient_report(int n, any quotient=nil) dict {
    "Classify Sage-style ideal-lattice quotient input.
    Accepts nil, cyclic/negacyclic markers, x^n - 1, and x^n + 1 strings."
    mut out = dict(8)
@@ -605,7 +608,7 @@ fn lattice_quotient_report(int: n, any: quotient=nil): dict {
    _lat_parse_poly_string(n, raw)
 }
 
-fn gen_ideal_lattice(int: n=4, int: m=8, any: q=11, any: seed=nil, any: quotient=nil, bool: dual=false): list {
+fn gen_ideal_lattice(int n=4, int m=8, any q=11, any seed=nil, any quotient=nil, bool dual=false) list {
    "Construct an ideal lattice.
    `quotient` may be nil, cyclic/negacyclic, or Sage-style x^n +/- 1 text."
    if(n < 1 || m < 2 * n || m % n != 0){ panic("gen_ideal_lattice: require m >= 2*n and n | m") }
@@ -631,12 +634,12 @@ fn gen_ideal_lattice(int: n=4, int: m=8, any: q=11, any: seed=nil, any: quotient
    dual ? _lat_dual_from_A(A, n, m, q) : _lat_primal_from_A(A, n, m, q)
 }
 
-fn gen_cyclotomic_lattice(int: n=4, int: m=8, any: q=11, any: seed=nil, bool: dual=false): list {
+fn gen_cyclotomic_lattice(int n=4, int m=8, any q=11, any seed=nil, bool dual=false) list {
    "Construct a cyclotomic lattice for the common power-of-two case using x^n + 1."
    gen_ideal_lattice(n, m, q, seed, "negacyclic", dual)
 }
 
-fn gen_lattice(str: type="modular", int: n=4, int: m=8, any: q=11, any: seed=nil, any: quotient=nil, bool: dual=false): list {
+fn gen_lattice(str type="modular", int n=4, int m=8, any q=11, any seed=nil, any quotient=nil, bool dual=false) list {
    "General crypto lattice constructor.
    Supported types: modular, random, qary, uniform, intrel, simdioph, ideal, cyclotomic. Returns Matrix rows
    with standard primal/dual block shapes."
@@ -652,7 +655,7 @@ fn gen_lattice(str: type="modular", int: n=4, int: m=8, any: q=11, any: seed=nil
    }
 }
 
-fn latticegen_report(str: method="qary", int: d=8, any: a=4, any: b=11, any: c=nil, any: seed=nil, bool: dual=false): dict {
+fn latticegen_report(str method="qary", int d=8, any a=4, any b=11, any c=nil, any seed=nil, bool dual=false) dict {
    "Report-first deterministic lattice fixture generator.
    Methods accept mnemonic names or short forms: uniform/u, intrel/r,
    simdioph/s, qary/q, modular, random, ideal, and cyclotomic."
@@ -699,12 +702,12 @@ fn latticegen_report(str: method="qary", int: d=8, any: a=4, any: b=11, any: c=n
    }
 }
 
-fn latticegen(str: method="qary", int: d=8, any: a=4, any: b=11, any: c=nil, any: seed=nil, bool: dual=false): any {
+fn latticegen(str method="qary", int d=8, any a=4, any b=11, any c=nil, any seed=nil, bool dual=false) any {
    "Return the basis from latticegen_report."
    latticegen_report(method, d, a, b, c, seed, dual).get("basis")
 }
 
-fn gen_lattice_report(str: type="modular", int: n=4, int: m=8, any: q=11, any: seed=nil, any: quotient=nil, bool: dual=false, bool: ntl=false, bool: lattice=false): dict {
+fn gen_lattice_report(str type="modular", int n=4, int m=8, any q=11, any seed=nil, any quotient=nil, bool dual=false, bool ntl=false, bool lattice=false) dict {
    "Report-first Sage-style lattice generator.
    `basis` is always the integer Matrix. `formatted` is populated for ntl/lattice modes."
    if(ntl && lattice){ panic("gen_lattice_report: cannot specify ntl and lattice at the same time") }
@@ -741,7 +744,7 @@ fn gen_lattice_report(str: type="modular", int: n=4, int: m=8, any: q=11, any: s
    out
 }
 
-fn _lat_sage_seed_parity(str: type, int: n, int: m, any: q, any: seed): str {
+fn _lat_sage_seed_parity(str type, int n, int m, any q, any seed) str {
    if(seed == nil){ return "ny-deterministic" }
    if((type == "modular" || type == "random") && _lat_sage_seed_block(m - n, n, q, seed) != nil){
       return "sage-doctest"
@@ -752,7 +755,7 @@ fn _lat_sage_seed_parity(str: type, int: n, int: m, any: q, any: seed): str {
    "ny-deterministic"
 }
 
-fn _lat_sweep_check(str: type, int: n, int: m, any: q, any: seed=nil, any: quotient=nil, bool: dual=false): dict {
+fn _lat_sweep_check(str type, int n, int m, any q, any seed=nil, any quotient=nil, bool dual=false) dict {
    def rep = gen_lattice_report(type, n, m, q, seed, quotient, dual)
    mut ok = true
    mut reason = ""
@@ -772,7 +775,7 @@ fn _lat_sweep_check(str: type, int: n, int: m, any: q, any: seed=nil, any: quoti
    dict(10).set("ok", ok).set("type", type).set("n", n).set("m", m).set("q", Z(q)).set("seed", seed).set("dual", dual).set("quotient", rep.get("quotient", quotient)).set("reason", reason).set("seed_parity", rep.get("seed_parity", ""))
 }
 
-fn _lat_sweep_append(any: state, str: type, int: n, int: m, any: q, any: seed=nil, any: quotient=nil, bool: dual=false): dict {
+fn _lat_sweep_append(any state, str type, int n, int m, any q, any seed=nil, any quotient=nil, bool dual=false) dict {
    def check = _lat_sweep_check(type, n, m, q, seed, quotient, dual)
    mut cases = state.get("cases", 0) + 1
    mut failures = state.get("failures", [])
@@ -782,7 +785,7 @@ fn _lat_sweep_append(any: state, str: type, int: n, int: m, any: q, any: seed=ni
    state.set("cases", cases).set("failures", failures)
 }
 
-fn gen_lattice_sweep_report(): dict {
+fn gen_lattice_sweep_report() dict {
    "Exercise lattice generators beyond curated doctest rows with deterministic Ny verification."
    mut st = dict(4).set("cases", 0).set("failures", [])
    def seeds = [nil, 0, 1, 2, 17, 42, 1234, 65537]
@@ -806,13 +809,13 @@ fn gen_lattice_sweep_report(): dict {
    dict(6).set("ok", failures.len == 0).set("cases", st.get("cases", 0)).set("failures", failures).set("seed_count", seeds.len).set("policy", "ny-deterministic-seeded-sampling").set("sage_usage", "comparison-only")
 }
 
-fn lattice_set_at(any: mat, int: row, int: col, any: val, int: ncols): any {
+fn lattice_set_at(any mat, int row, int col, any val, int ncols) any {
    "Set one flat-matrix element. `ncols` is read by callers from the matrix header."
    store64(mat, 16 + (row * ncols + col) * 8, val)
    mat
 }
 
-fn mat_from_rows(list: rows): list {
+fn mat_from_rows(list rows) list {
    "Build a flat `[nrows, ncols, ...data] matrix from row vectors."
    def nrows = rows.len
    def ncols = nrows == 0 ? 0 : len(rows.get(0))
@@ -831,11 +834,11 @@ fn mat_from_rows(list: rows): list {
    m
 }
 
-fn _lat_matrix_rows(list: m): int { m.get(0) }
+fn _lat_matrix_rows(list m) int { m.get(0) }
 
-fn _lat_matrix_row(list: m, int: i): list { m.get(2).get(i) }
+fn _lat_matrix_row(list m, int i) list { m.get(2).get(i) }
 
-fn _lat_is_zero_vec(list: v): bool {
+fn _lat_is_zero_vec(list v) bool {
    mut i = 0
    while(i < v.len){
       if(v.get(i) != 0){ return false }
@@ -844,7 +847,7 @@ fn _lat_is_zero_vec(list: v): bool {
    true
 }
 
-fn _lat_vec_norm2(list: v): bigint {
+fn _lat_vec_norm2(list v) bigint {
    mut s, i = Z(0), 0
    while(i < v.len){
       s = s + v.get(i) * v.get(i)
@@ -853,7 +856,7 @@ fn _lat_vec_norm2(list: v): bigint {
    s
 }
 
-fn lattice_shortest_vectors(any: basis, str: method="ny"): list {
+fn lattice_shortest_vectors(any basis, str method="ny") list {
    "Return non-zero rows from an LLL-reduced basis, shortest-looking first.
    This is a convenience wrapper around LLL ; `auto` uses the same path."
    def red = lllmod.lll(basis, 0.75, method)
@@ -881,7 +884,7 @@ fn lattice_shortest_vectors(any: basis, str: method="ny"): list {
    rows
 }
 
-fn _lattice_closest_babai(any: basis, list: target, str: method): list {
+fn _lattice_closest_babai(any basis, list target, str method) list {
    "Nearest-plane style fallback using the closest reduced row."
    def red = lllmod.lll(basis, 0.75, method)
    mut best = nil
@@ -904,7 +907,7 @@ fn _lattice_closest_babai(any: basis, list: target, str: method): list {
    best == nil ? [] : [best]
 }
 
-fn _lattice_closest_embedding(any: basis, list: target, str: method): list {
+fn _lattice_closest_embedding(any basis, list target, str method) list {
    "Embedding-style closest-vector reduction."
    mut rows = []
    mut i = 0
@@ -920,7 +923,7 @@ fn _lattice_closest_embedding(any: basis, list: target, str: method): list {
    lattice_shortest_vectors(matrix.Matrix(rows), method)
 }
 
-fn lattice_closest_vectors(any: basis, list: target, str: algorithm="embedding", str: method="ny"): list {
+fn lattice_closest_vectors(any basis, list target, str algorithm="embedding", str method="ny") list {
    "Return candidate closest vectors to target.
    The embedding mode appends the target and reduces the augmented lattice."
    case algorithm {
@@ -929,13 +932,13 @@ fn lattice_closest_vectors(any: basis, list: target, str: algorithm="embedding",
    }
 }
 
-fn mat_get(list: mat, int: row, int: col): any {
+fn mat_get(list mat, int row, int col) any {
    "Get one element from a flat matrix array."
    def ncols = mat.get(1)
    mat.get(2 + row * ncols + col)
 }
 
-fn build_coppersmith_lattice(list: poly, any: N, any: X, int: t): list {
+fn build_coppersmith_lattice(list poly, any N, any X, int t) list {
    "Build a Coppersmith lattice for small roots of poly mod N."
    mut d = poly.len - 1
    def n_rows = d + t
@@ -957,7 +960,7 @@ fn build_coppersmith_lattice(list: poly, any: N, any: X, int: t): list {
    mat_from_rows(rows)
 }
 
-fn mat_get_from_poly(list: poly, int: shift, any: N, any: X, int: row_idx, int: t): any {
+fn mat_get_from_poly(list poly, int shift, any N, any X, int row_idx, int t) any {
    "Compute one scaled coefficient entry for the Coppersmith lattice."
    def coeff = (shift < poly.len) ? poly.get(shift) : 0
    def power_X = pow(X, shift, shift)
@@ -965,7 +968,7 @@ fn mat_get_from_poly(list: poly, int: shift, any: N, any: X, int: row_idx, int: 
    coeff * N_power * power_X
 }
 
-fn build_boneh_durfee_lattice(any: e, any: N, any: delta, int: m): list {
+fn build_boneh_durfee_lattice(any e, any N, any delta, int m) list {
    "Build a Boneh-Durfee lattice for small RSA private exponent attacks."
    def dim = m + 1
    mut rows = list(0)
@@ -985,13 +988,13 @@ fn build_boneh_durfee_lattice(any: e, any: N, any: delta, int: m): list {
    mat_from_rows(rows)
 }
 
-fn build_bd_entry(int: i, int: j, any: e, any: N, any: delta, int: m): any {
+fn build_bd_entry(int i, int j, any e, any N, any delta, int m) any {
    "Compute one Boneh-Durfee lattice entry."
    def power = m + 1 - j
    (j < i) ? 0 : ((j == i) ? e * pow(N, delta, m + 1 - i) : ((power > 0) ? N * pow(N, delta, power - 1) : N))
 }
 
-fn lattice_dot(list: a, list: b): bigint {
+fn lattice_dot(list a, list b) bigint {
    "Return the integer dot product of two equal-length vectors."
    if(a.len != b.len){ panic("lattice_dot: vector lengths differ") }
    mut s, i = Z(0), 0
@@ -1002,12 +1005,12 @@ fn lattice_dot(list: a, list: b): bigint {
    s
 }
 
-fn lattice_norm2(list: v): bigint {
+fn lattice_norm2(list v) bigint {
    "Return the squared Euclidean norm of an integer vector."
    lattice_dot(v, v)
 }
 
-fn _lat_vec_sub_scaled(list: a, list: b, any: k): list {
+fn _lat_vec_sub_scaled(list a, list b, any k) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -1017,7 +1020,7 @@ fn _lat_vec_sub_scaled(list: a, list: b, any: k): list {
    out
 }
 
-fn _lat_round_div(any: num, any: den): bigint {
+fn _lat_round_div(any num, any den) bigint {
    "Round num / den to the nearest integer, with den > 0."
    def d = Z(den)
    if(d <= Z(0)){ panic("_lat_round_div: divisor must be positive") }
@@ -1026,7 +1029,7 @@ fn _lat_round_div(any: num, any: den): bigint {
    -((Z(2) * (-n) + d) / (Z(2) * d))
 }
 
-fn gaussian_reduce_2d(list: v1, list: v2): list {
+fn gaussian_reduce_2d(list v1, list v2) list {
    "Gaussian-reduce a 2D integer lattice basis. Returns [shorter, longer]."
    if(v1.len != 2 || v2.len != 2){ panic("gaussian_reduce_2d: expected two 2D vectors") }
    mut a, b = [Z(v1.get(0)), Z(v1.get(1))], [Z(v2.get(0)), Z(v2.get(1))]
@@ -1042,7 +1045,7 @@ fn gaussian_reduce_2d(list: v1, list: v2): list {
    [a, b]
 }
 
-fn pow(any: base, any: exp, any: max_exp): any {
+fn pow(any base, any exp, any max_exp) any {
    "Compute base^exp; max_exp is accepted to match bounded-power call sites."
    if(exp == 0){ return 1 }
    if(exp == 1){ return base }

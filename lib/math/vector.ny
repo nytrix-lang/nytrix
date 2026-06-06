@@ -1,31 +1,41 @@
-;; Keywords: vector linear-algebra
+;; Keywords: vector linear-algebra math
 ;; Vector construction and vector algebra for 2D, 3D, and 4D numeric values.
-module std.math.vector(vec2, vec3, vec4, Vector2, Vector3, Vector4, dim, at, set, x, y, z, w, xyz, is_vector, is_vec2, is_vec3, is_vec4, type_name, runtime_type, v_add, v_sub, v_mul, v_div, add, sub, mul, div, scale, divs, dot, dot3, hadamard, hadamard_div, cross3, len2, length3, magnitude, normalize, normalize3, lerp, op)
+;; References:
+;; - std.math
+module std.math.vector(vec2, vec3, vec4, Vector2, Vector3, Vector4, vec2_canonical, vec3_canonical, vec4_canonical, canonical, dim, at, set, x, y, z, w, xyz, is_vector, is_vec2, is_vec3, is_vec4, type_name, runtime_type, v_add, v_sub, v_mul, v_div, add, sub, mul, div, scale, divs, dot, dot3, hadamard, hadamard_div, cross3, len2, length3, magnitude, normalize, normalize3, lerp, op)
 use std.core as core
 use std.core
 use std.math.float (float)
 
-fn _vec_sqrt(number: x): f64 { __flt_sqrt(float(x)) }
+fn _vec_sqrt(number x) f64 { __flt_sqrt(float(x)) }
 
 @pure
 @jit
-fn is_vector(any: v): bool {
+fn is_vector(any v) bool {
    "Returns true for vector-compatible values. Any list remains a vector, matching the original module behavior."
    if(is_list(v)){ return true }
-   if(is_dict(v)){ return _type_dim(v.get("__type", "")) > 0 }
-   false
+   _dict_dim(v) > 0
 }
 
 @pure
 @jit
-fn _type_dim(str: t): int {
-   if(t == "vec2" || t == "Vector2"){ return 2 }
-   if(t == "vec3" || t == "Vector3"){ return 3 }
-   if(t == "vec4" || t == "Vector4"){ return 4 }
-   0
+fn _type_dim(str t) int {
+   case t {
+      "vec2", "Vector2" -> 2
+      "vec3", "Vector3" -> 3
+      "vec4", "Vector4" -> 4
+      _ -> 0
+   }
 }
 
-fn _typed_vec(str: t, any: x0, any: y0, any: z0=0, any: w0=0): dict {
+fn _dict_dim(any v) int { is_dict(v) ? _type_dim(v.get("__type", "")) : 0 }
+
+fn _is_dim(any v, int n) bool {
+   if(is_list(v)){ return __list_len(v) == n }
+   _dict_dim(v) == n
+}
+
+fn _typed_vec(str t, any x0, any y0, any z0=0, any w0=0) dict {
    mut d = dict(8)
    def n = _type_dim(t)
    d["__type"] = t
@@ -36,18 +46,18 @@ fn _typed_vec(str: t, any: x0, any: y0, any: z0=0, any: w0=0): dict {
    d
 }
 
-fn Vector2(...args): vec2 {
+fn Vector2(...args) vec2 {
    "Creates a named runtime 2D vector with `.x` and `.y` member access."
    def n = args.len
    if(n == 0){ return _typed_vec("vec2", 0.0, 0.0) }
    def x = args.get(0, 0.0)
-   mut y = args.get(1, 0.0)
+   mut y = args.get(1, nil)
    if(is_vector(x)){ if(y == nil){ return _typed_vec("vec2", at(x, 0, 0.0), at(x, 1, 0.0)) } }
    if(y == nil){ y = 0.0 }
    _typed_vec("vec2", x, y)
 }
 
-fn Vector3(...args): vec3 {
+fn Vector3(...args) vec3 {
    "Creates a named runtime 3D vector with `.x`, `.y`, and `.z` member access."
    def n = args.len
    if(n == 0){ return _typed_vec("vec3", 0.0, 0.0, 0.0) }
@@ -59,7 +69,7 @@ fn Vector3(...args): vec3 {
    _typed_vec("vec3", x, y, z)
 }
 
-fn Vector4(...args): vec4 {
+fn Vector4(...args) vec4 {
    "Creates a named runtime 4D vector with `.x`, `.y`, `.z`, and `.w` member access."
    def n = args.len
    if(n == 0){ return _typed_vec("vec4", 0.0, 0.0, 0.0, 0.0) }
@@ -75,11 +85,8 @@ fn Vector4(...args): vec4 {
    _typed_vec("vec4", x, y, z, w)
 }
 
-fn _vector_type_name(any: v): str {
-   if(is_dict(v)){
-      def t = v.get("__type", "")
-      if(_type_dim(t) > 0){ return t }
-   }
+fn _vector_type_name(any v) str {
+   if(is_dict(v) && _dict_dim(v) > 0){ return v.get("__type", "") }
    if(is_list(v)){
       def n = __list_len(v)
       if(n == 2){ return "vec2" }
@@ -91,75 +98,92 @@ fn _vector_type_name(any: v): str {
 
 @pure
 @jit
-fn type_name(any: v): str {
+fn type_name(any v) str {
    "Returns `vec2`, `vec3`, or `vec4` for vector values, else the regular runtime type name."
    _vector_type_name(v)
 }
 
 @pure
 @jit
-fn runtime_type(any: v): str {
+fn runtime_type(any v) str {
    "Returns the vector runtime type name for vec2/3/4 values."
    _vector_type_name(v)
 }
 
 @pure
 @jit
-fn is_vec2(any: v): bool {
+fn is_vec2(any v) bool {
    "Returns true when `v` is a two-component vector."
-   if(is_list(v)){ return __list_len(v) == 2 }
-   if(is_dict(v)){ return _type_dim(v.get("__type", "")) == 2 }
-   false
+   _is_dim(v, 2)
 }
 
 @pure
 @jit
-fn is_vec3(any: v): bool {
+fn is_vec3(any v) bool {
    "Returns true when `v` is a three-component vector."
-   if(is_list(v)){ return __list_len(v) == 3 }
-   if(is_dict(v)){ return _type_dim(v.get("__type", "")) == 3 }
-   false
+   _is_dim(v, 3)
 }
 
 @pure
 @jit
-fn is_vec4(any: v): bool {
+fn is_vec4(any v) bool {
    "Returns true when `v` is a four-component vector."
-   if(is_list(v)){ return __list_len(v) == 4 }
-   if(is_dict(v)){ return _type_dim(v.get("__type", "")) == 4 }
-   false
+   _is_dim(v, 4)
 }
 
 @jit
-fn vec2(any: x=0, any: y=0): vec2 {
+fn vec2(any x=0, any y=0) vec2 {
    "Creates a typed 2D vector value with `.x` and `.y` member access."
    _typed_vec("vec2", x, y)
 }
 
 @jit
-fn vec3(any: x=0, any: y=0, any: z=0): vec3 {
+fn vec3(any x=0, any y=0, any z=0) vec3 {
    "Creates a typed 3D vector value with `.x`, `.y`, and `.z` member access."
    _typed_vec("vec3", x, y, z)
 }
 
 @jit
-fn vec4(any: x=0, any: y=0, any: z=0, any: w=0): vec4 {
+fn vec4(any x=0, any y=0, any z=0, any w=0) vec4 {
    "Creates a typed 4D vector value with `.x`, `.y`, `.z`, and `.w` member access."
    _typed_vec("vec4", x, y, z, w)
 }
 
-@readonly
-@jit
-fn dim(any: v): int {
-   "Returns the dimension(number of elements) of vector `v`."
-   if(is_list(v)){ return __list_len(v) }
-   if(is_dict(v)){ return _type_dim(v.get("__type", "")) }
-   0
+fn vec2_canonical(any v) vec2 {
+   "Normalizes any vector-compatible value into the dict-backed vec2 representation."
+   Vector2(v)
+}
+
+fn vec3_canonical(any v) vec3 {
+   "Normalizes any vector-compatible value into the dict-backed vec3 representation."
+   Vector3(v)
+}
+
+fn vec4_canonical(any v) vec4 {
+   "Normalizes any vector-compatible value into the dict-backed vec4 representation."
+   Vector4(v)
+}
+
+fn canonical(any v) any {
+   "Normalizes a vec2/vec3/vec4-like value into the dict-backed vector representation."
+   def n = dim(v)
+   if(n == 2){ return vec2_canonical(v) }
+   if(n == 3){ return vec3_canonical(v) }
+   if(n == 4){ return vec4_canonical(v) }
+   v
 }
 
 @readonly
 @jit
-fn _list_at(any: v, int: i, any: default=0): any {
+fn dim(any v) int {
+   "Returns the dimension(number of elements) of vector `v`."
+   if(is_list(v)){ return __list_len(v) }
+   _dict_dim(v)
+}
+
+@readonly
+@jit
+fn _list_at(any v, int i, any default=0) any {
    def n = __list_len(v)
    if(i < 0){ i = i + n }
    if(i < 0 || i >= n){ return default }
@@ -168,52 +192,62 @@ fn _list_at(any: v, int: i, any: default=0): any {
 
 @readonly
 @jit
-fn at(any: v, int: i, any: default=0): any {
-   "Returns the element at index `i` of vector `v`, or `default` if not found."
-   if(is_list(v)){ return _list_at(v, i, default) }
-   if(is_dict(v)){
-      if(i == 0){ return v.get("x", default) }
-      if(i == 1){ return v.get("y", default) }
-      if(i == 2){ return v.get("z", default) }
-      if(i == 3){ return v.get("w", default) }
+fn _dict_at(any v, int i, any default=0) any {
+   case i {
+      0 -> v.get("x", default)
+      1 -> v.get("y", default)
+      2 -> v.get("z", default)
+      3 -> v.get("w", default)
+      _ -> default
    }
-   default
 }
 
-fn set(any: v, int: i, any: x): any {
+@readonly
+@jit
+fn at(any v, int i, any default=0) any {
+   "Returns the element at index `i` of vector `v`, or `default` if not found."
+   if(is_list(v)){ return _list_at(v, i, default) }
+   is_dict(v) ? _dict_at(v, i, default) : default
+}
+
+fn _dict_set_at(any v, int i, any x) any {
+   case i {
+      0 -> v.set("x", x)
+      1 -> v.set("y", x)
+      2 -> v.set("z", x)
+      3 -> v.set("w", x)
+      _ -> v
+   }
+}
+
+fn set(any v, int i, any x) any {
    "Sets the element at index `i` of vector `v` to value `x` and returns the vector."
    if(is_list(v)){
       v[i] = x
       return v
    }
-   if(is_dict(v)){
-      if(i == 0){ return v.set("x", x) }
-      if(i == 1){ return v.set("y", x) }
-      if(i == 2){ return v.set("z", x) }
-      if(i == 3){ return v.set("w", x) }
-   }
-   v
+   is_dict(v) ? _dict_set_at(v, i, x) : v
 }
 
 @readonly
 @jit
-fn x(any: v, any: default=0): any { at(v, 0, default) }
+fn x(any v, any default=0) any { at(v, 0, default) }
 
 @readonly
 @jit
-fn y(any: v, any: default=0): any { at(v, 1, default) }
+fn y(any v, any default=0) any { at(v, 1, default) }
 
 @readonly
 @jit
-fn z(any: v, any: default=0): any { at(v, 2, default) }
+fn z(any v, any default=0) any { at(v, 2, default) }
 
 @readonly
 @jit
-fn w(any: v, any: default=0): any { at(v, 3, default) }
+fn w(any v, any default=0) any { at(v, 3, default) }
 
 @pure
 @jit
-fn xyz(any: v): vec3 {
+fn xyz(any v) vec3 {
    "Returns the first three vector components as the fast list-backed vec3 representation."
    vec3(x(v), y(v), z(v))
 }
@@ -221,7 +255,7 @@ fn xyz(any: v): vec3 {
 @pure
 @jit
 @inline
-fn _zip2_op(any: av, any: bv, int: op): any {
+fn _zip2_op(any av, any bv, int op) any {
    case op {
       0 -> core.add(av, bv)
       1 -> core.sub(av, bv)
@@ -231,7 +265,7 @@ fn _zip2_op(any: av, any: bv, int: op): any {
    }
 }
 
-fn _vector_shape_out(list: out, int: n, bool: typed): any {
+fn _vector_shape_out(list out, int n, bool typed) any {
    __list_set_len(out, n)
    if(typed){
       if(n == 2){ return Vector2(_list_at(out, 0, 0), _list_at(out, 1, 0)) }
@@ -241,7 +275,7 @@ fn _vector_shape_out(list: out, int: n, bool: typed): any {
    out
 }
 
-fn _zip2(any: a, any: b, int: op): any {
+fn _zip2(any a, any b, int op) any {
    if(!is_vector(a)){ return [] }
    if(!is_vector(b)){ return [] }
    def both_list = is_list(a) && is_list(b)
@@ -265,35 +299,35 @@ fn _zip2(any: a, any: b, int: op): any {
 
 @pure
 @jit
-fn v_add(any: a, any: b): any {
+fn v_add(any a, any b) any {
    "Returns the element-wise sum of vectors `a` and `b`."
    _zip2(a, b, 0)
 }
 
 @pure
 @jit
-fn v_sub(any: a, any: b): any {
+fn v_sub(any a, any b) any {
    "Returns the element-wise difference of vectors `a` and `b` (a - b)."
    _zip2(a, b, 1)
 }
 
 @pure
 @jit
-fn hadamard(any: a, any: b): any {
+fn hadamard(any a, any b) any {
    "Returns the Hadamard(element-wise) product of vectors `a` and `b`."
    _zip2(a, b, 2)
 }
 
 @pure
 @jit
-fn hadamard_div(any: a, any: b): any {
+fn hadamard_div(any a, any b) any {
    "Returns the element-wise quotient of vectors `a` and `b`."
    _zip2(a, b, 3)
 }
 
 @pure
 @jit
-fn v_mul(any: a, any: b): any {
+fn v_mul(any a, any b) any {
    "Returns the product of vector `a` and `b`. If `b` is a scalar, performs scaling. If `b` is a vector, performs a dot product."
    def out = _mul_vector(a, b)
    if(out != nil){ return out }
@@ -302,7 +336,7 @@ fn v_mul(any: a, any: b): any {
 
 @pure
 @jit
-fn v_div(any: a, any: b): any {
+fn v_div(any a, any b) any {
    "Returns vector division: component-wise for vector/vector, scalar division for vector/scalar."
    if(is_vector(b)){ return hadamard_div(a, b) }
    divs(a, b)
@@ -310,7 +344,7 @@ fn v_div(any: a, any: b): any {
 
 @pure
 @jit
-fn add(any: a, any: b): any {
+fn add(any a, any b) any {
    "Generic addition: supports both numbers and vectors."
    if(is_vector(a)){ if(is_vector(b)){ return v_add(a, b) } }
    core.add(a, b)
@@ -318,7 +352,7 @@ fn add(any: a, any: b): any {
 
 @pure
 @jit
-fn sub(any: a, any: b): any {
+fn sub(any a, any b) any {
    "Generic subtraction: supports both numbers and vectors."
    if(is_vector(a)){ if(is_vector(b)){ return v_sub(a, b) } }
    core.sub(a, b)
@@ -326,7 +360,7 @@ fn sub(any: a, any: b): any {
 
 @pure
 @jit
-fn mul(any: a, any: b): any {
+fn mul(any a, any b) any {
    "Generic multiplication: supports numbers, scalar-vector, and vector-vector products."
    def out = _mul_vector(a, b)
    if(out != nil){ return out }
@@ -335,7 +369,7 @@ fn mul(any: a, any: b): any {
 
 @pure
 @jit
-fn div(any: a, any: b): any {
+fn div(any a, any b) any {
    "Generic division: supports numbers, vector-scalar division, and component-wise vector division."
    if(is_vector(a)){
       if(is_vector(b)){ return hadamard_div(a, b) }
@@ -344,42 +378,44 @@ fn div(any: a, any: b): any {
    core.div(a, b)
 }
 
-fn _map_s(any: v, any: s, int: op): any {
+@pure
+@jit
+@inline
+fn _scalar_op(any v, any s, int op) any {
+   op == 0 ? core.mul(v, s) : core.div(core.mul(v, 1.0), core.mul(s, 1.0))
+}
+
+fn _map_s(any v, any s, int op) any {
    if(!is_vector(v)){ return [] }
    def list_src = is_list(v)
    def n = list_src ? __list_len(v) : dim(v)
    mut out = list(n)
    mut i = 0
-   if(list_src){
-      if(op == 0){ while(i < n){ __store_item_fast(out, i, core.mul(__load_item_fast(v, i), s)) i += 1 } }
-      else { while(i < n){
-            __store_item_fast(out, i, core.div(core.mul(__load_item_fast(v, i), 1.0), core.mul(s, 1.0)))
-            i += 1
-      } }
-   } else {
-      if(op == 0){ while(i < n){ __store_item_fast(out, i, core.mul(at(v, i, 0), s)) i += 1 } }
-      else { while(i < n){ __store_item_fast(out, i, core.div(core.mul(at(v, i, 0), 1.0), core.mul(s, 1.0))) i += 1 } }
+   while(i < n){
+      def value = list_src ? __load_item_fast(v, i) : at(v, i, 0)
+      __store_item_fast(out, i, _scalar_op(value, s, op))
+      i += 1
    }
    _vector_shape_out(out, n, !list_src)
 }
 
 @pure
 @jit
-fn scale(any: v, any: s): any {
+fn scale(any v, any s) any {
    "Multiplies vector `v` by scalar `s`."
    _map_s(v, s, 0)
 }
 
 @pure
 @jit
-fn divs(any: v, any: s): any {
+fn divs(any v, any s) any {
    "Divides vector `v` by scalar `s`."
    _map_s(v, s, 1)
 }
 
 @pure
 @jit
-fn dot(any: a, any: b): any {
+fn dot(any a, any b) any {
    "Returns the dot product of vectors `a` and `b`."
    if(!is_vector(a)){ return 0 }
    if(!is_vector(b)){ return 0 }
@@ -405,7 +441,7 @@ fn dot(any: a, any: b): any {
 
 @pure
 @jit
-fn dot3(any: a, any: b): any {
+fn dot3(any a, any b) any {
    "Returns the 3D dot product without generic loop overhead."
    core.add(core.add(core.mul(x(a), x(b)), core.mul(y(a), y(b))), core.mul(z(a), z(b)))
 }
@@ -413,22 +449,22 @@ fn dot3(any: a, any: b): any {
 impl vec2 {
    @pure
    @jit
-   fn add(self: a, self: b): self { v_add(a, b) }
+   fn add(self a, self b) self { v_add(a, b) }
    @pure
    @jit
-   fn sub(self: a, self: b): self { v_sub(a, b) }
+   fn sub(self a, self b) self { v_sub(a, b) }
    @pure
    @jit
-   fn dot(self: a, self: b): f64 { dot(a, b) }
+   fn dot(self a, self b) f64 { dot(a, b) }
    @pure
    @jit
-   fn scale(self: v, f64: s): self { scale(v, s) }
+   fn scale(self v, f64 s) self { scale(v, s) }
    @pure
    @jit
-   fn divs(self: v, f64: s): self { divs(v, s) }
+   fn divs(self v, f64 s) self { divs(v, s) }
    @pure
    @jit
-   fn div(self: a, self: b): self { hadamard_div(a, b) }
+   fn div(self a, self b) self { hadamard_div(a, b) }
    operator + self: self = add
    operator - self: self = sub
    operator * self: f64 = dot
@@ -440,22 +476,22 @@ impl vec2 {
 impl vec3 {
    @pure
    @jit
-   fn add(self: a, self: b): self { v_add(a, b) }
+   fn add(self a, self b) self { v_add(a, b) }
    @pure
    @jit
-   fn sub(self: a, self: b): self { v_sub(a, b) }
+   fn sub(self a, self b) self { v_sub(a, b) }
    @pure
    @jit
-   fn dot(self: a, self: b): f64 { dot3(a, b) }
+   fn dot(self a, self b) f64 { dot3(a, b) }
    @pure
    @jit
-   fn scale(self: v, f64: s): self { scale(v, s) }
+   fn scale(self v, f64 s) self { scale(v, s) }
    @pure
    @jit
-   fn divs(self: v, f64: s): self { divs(v, s) }
+   fn divs(self v, f64 s) self { divs(v, s) }
    @pure
    @jit
-   fn div(self: a, self: b): self { hadamard_div(a, b) }
+   fn div(self a, self b) self { hadamard_div(a, b) }
    operator + self: self = add
    operator - self: self = sub
    operator * self: f64 = dot
@@ -467,22 +503,22 @@ impl vec3 {
 impl vec4 {
    @pure
    @jit
-   fn add(self: a, self: b): self { v_add(a, b) }
+   fn add(self a, self b) self { v_add(a, b) }
    @pure
    @jit
-   fn sub(self: a, self: b): self { v_sub(a, b) }
+   fn sub(self a, self b) self { v_sub(a, b) }
    @pure
    @jit
-   fn dot(self: a, self: b): f64 { dot(a, b) }
+   fn dot(self a, self b) f64 { dot(a, b) }
    @pure
    @jit
-   fn scale(self: v, f64: s): self { scale(v, s) }
+   fn scale(self v, f64 s) self { scale(v, s) }
    @pure
    @jit
-   fn divs(self: v, f64: s): self { divs(v, s) }
+   fn divs(self v, f64 s) self { divs(v, s) }
    @pure
    @jit
-   fn div(self: a, self: b): self { hadamard_div(a, b) }
+   fn div(self a, self b) self { hadamard_div(a, b) }
    operator + self: self = add
    operator - self: self = sub
    operator * self: f64 = dot
@@ -494,13 +530,13 @@ impl vec4 {
 impl f64 {
    @pure
    @jit
-   fn scale_vec2(self: s, vec2: v): vec2 { scale(v, s) }
+   fn scale_vec2(self s, vec2 v) vec2 { scale(v, s) }
    @pure
    @jit
-   fn scale_vec3(self: s, vec3: v): vec3 { scale(v, s) }
+   fn scale_vec3(self s, vec3 v) vec3 { scale(v, s) }
    @pure
    @jit
-   fn scale_vec4(self: s, vec4: v): vec4 { scale(v, s) }
+   fn scale_vec4(self s, vec4 v) vec4 { scale(v, s) }
    operator * vec2: vec2 = scale_vec2
    operator * vec3: vec3 = scale_vec3
    operator * vec4: vec4 = scale_vec4
@@ -508,7 +544,7 @@ impl f64 {
 
 @pure
 @jit
-fn cross3(any: a, any: b): vec3 {
+fn cross3(any a, any b) vec3 {
    "Returns the vector cross product of two 3D vectors `a` and `b`."
    if(dim(a) < 3 || dim(b) < 3){ return vec3(0, 0, 0) }
    def ax, ay = x(a), y(a)
@@ -529,21 +565,21 @@ fn cross3(any: a, any: b): vec3 {
 
 @pure
 @jit
-fn len2(any: v): any {
+fn len2(any v) any {
    "Returns the squared magnitude(Euclidean length) of vector `v`."
    dot(v, v)
 }
 
 @pure
 @jit
-fn magnitude(any: v): f64 {
+fn magnitude(any v) f64 {
    "Returns the magnitude(Euclidean length) of vector `v`."
    _vec_sqrt(len2(v))
 }
 
 @pure
 @jit
-fn length3(any: v): f64 {
+fn length3(any v) f64 {
    "Returns the 3D vector length without generic loop overhead."
    def vx, vy = x(v), y(v)
    def vz = z(v)
@@ -552,7 +588,7 @@ fn length3(any: v): f64 {
 
 @pure
 @jit
-fn normalize3(any: v): vec3 {
+fn normalize3(any v) vec3 {
    "Returns a unit-length 3D vector, preserving named Vector3 dictionaries."
    def vx, vy = x(v), y(v)
    def vz = z(v)
@@ -564,7 +600,7 @@ fn normalize3(any: v): vec3 {
 
 @pure
 @jit
-fn normalize(any: v): any {
+fn normalize(any v) any {
    "Returns a unit-length vector pointing in the same direction as `v`. Returns a copy of `v` if it has zero magnitude."
    if(dim(v) == 3){ return normalize3(v) }
    def l = magnitude(v)
@@ -581,12 +617,12 @@ fn normalize(any: v): any {
 
 @pure
 @jit
-fn lerp(any: a, any: b, f64: t): any {
+fn lerp(any a, any b, f64 t) any {
    "Linearly interpolates between vectors `a` and `b` using factor `t` (usually in range [0, 1])."
    v_add(a, scale(v_sub(b, a), t))
 }
 
-fn _mul_vector(any: a, any: b): any {
+fn _mul_vector(any a, any b) any {
    if(is_vector(a)){
       if(is_vector(b)){ return dot(a, b) }
       if(is_int(b) || is_float(b)){ return scale(a, b) }
@@ -595,7 +631,7 @@ fn _mul_vector(any: a, any: b): any {
    nil
 }
 
-fn _div_vector(any: a, any: b): any {
+fn _div_vector(any a, any b) any {
    if(is_vector(a)){
       if(is_int(b) || is_float(b)){ return divs(a, b) }
       if(is_vector(b)){ return hadamard_div(a, b) }
@@ -603,17 +639,17 @@ fn _div_vector(any: a, any: b): any {
    nil
 }
 
-fn _add_vector(any: a, any: b): any {
+fn _add_vector(any a, any b) any {
    if(is_vector(a)){ if(is_vector(b)){ return v_add(a, b) } }
    nil
 }
 
-fn _sub_vector(any: a, any: b): any {
+fn _sub_vector(any a, any b) any {
    if(is_vector(a)){ if(is_vector(b)){ return v_sub(a, b) } }
    nil
 }
 
-fn op(str: name, any: a, any: b=0): any {
+fn op(str name, any a, any b=0) any {
    "Runtime vector operator dispatcher for examples and dynamic code."
    match name {
       "+" -> { def out = _add_vector(a, b) return out != nil ? out : core.add(a, b) }
@@ -633,4 +669,12 @@ fn op(str: name, any: a, any: b=0): any {
       "normalize3" -> { return normalize3(a) }
       _ -> { return nil }
    }
+}
+
+#main {
+   def v2 = Vector2([7, 8])
+   assert(v2.get("x") == 7 && v2.get("y") == 8, "Vector2 canonicalizes list")
+   def v3 = vec3_canonical([1, 2, 3])
+   assert(dim(v3) == 3 && v3.get("z") == 3, "vec3 canonicalizes list")
+   print("✓ std.math.vector self-test passed")
 }

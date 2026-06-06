@@ -1,5 +1,8 @@
-;; Keywords: 3d meshopt meshoptimizer
+;; Keywords: 3d meshopt meshoptimizer parse gltf
 ;; meshoptimizer decoding and mesh-compression support for glTF assets.
+;; References:
+;; - std.parse.3d
+;; - std.parse
 module std.parse.3d.meshopt(meshopt_process_mesh, meshopt_select_lod_cut)
 use std.core
 use std.math
@@ -7,9 +10,9 @@ use std.math.bin (f32le)
 use std.core.str as str
 use std.core.common as common
 
-fn vec_push(list: xs, any: v): list { xs.append(v) }
+fn vec_push(list xs, any v) list { xs.append(v) }
 
-fn _filled_list(int: count, any: value): list {
+fn _filled_list(int count, any value) list {
    mut out = list(count)
    mut i = 0
    while i < count {
@@ -21,7 +24,7 @@ fn _filled_list(int: count, any: value): list {
 
 mut _meshopt_trace_cache = -1
 
-fn _meshopt_trace_enabled(): bool {
+fn _meshopt_trace_enabled() bool {
    _meshopt_trace_cache = common.cached_env_truthy(_meshopt_trace_cache, "NY_MESHOPT_TRACE")
    _meshopt_trace_cache == 1
 }
@@ -48,23 +51,23 @@ layout Meshlet {
    lod_level:       u32
 }
 
-fn _px(any: vbuf, int: vi, int: stride): any { f32le(vbuf, vi * stride) }
+fn _px(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride) }
 
-fn _py(any: vbuf, int: vi, int: stride): any { f32le(vbuf, vi * stride + 4) }
+fn _py(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride + 4) }
 
-fn _pz(any: vbuf, int: vi, int: stride): any { f32le(vbuf, vi * stride + 8) }
+fn _pz(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride + 8) }
 
-fn _len3(any: x, any: y, any: z): any { sqrt(x*x + y*y + z*z) }
+fn _len3(any x, any y, any z) any { sqrt(x*x + y*y + z*z) }
 
-fn _dot3(any: ax, any: ay, any: az, any: bx, any: by, any: bz): any { ax*bx + ay*by + az*bz }
+fn _dot3(any ax, any ay, any az, any bx, any by, any bz) any { ax*bx + ay*by + az*bz }
 
-fn _norm3(any: x, any: y, any: z): list {
+fn _norm3(any x, any y, any z) list {
    def l = _len3(x, y, z)
    if l < 1e-15 { return [0.0, 1.0, 0.0] }
    [x/l, y/l, z/l]
 }
 
-fn _build_adj(list: indices, int: idx_count, int: vcnt): dict {
+fn _build_adj(list indices, int idx_count, int vcnt) dict {
    mut counts = _filled_list(vcnt, 0)
    mut offsets = _filled_list(vcnt, 0)
    mut data = _filled_list(idx_count, 0)
@@ -107,18 +110,19 @@ def _CACHE  = [0.0, 0.779, 0.791, 0.789, 0.981, 0.843, 0.726, 0.847,
 0.882, 0.867, 0.799, 0.642, 0.613, 0.600, 0.568, 0.372, 0.234]
 def _VALENCE = [0.0, 0.995, 0.713, 0.450, 0.404, 0.059, 0.005, 0.147, 0.006]
 
-fn _vscore(int: cache_pos, int: live): any {
+fn _vscore(int cache_pos, int live) any {
    def cs = _CACHE.get(cache_pos + 1)
    def lv = live < 8 ? live : 8
    cs + _VALENCE.get(lv)
 }
 
-fn meshopt_optimize_vertex_cache(list: indices, int: vertex_count): list {
+fn meshopt_optimize_vertex_cache(list indices, int vertex_count) list {
+   "Runs the meshopt optimize vertex cache operation."
    def idx_count = indices.len
    def tri_count = idx_count / 3
    if tri_count == 0 { return indices }
    def adj = _build_adj(indices, idx_count, vertex_count)
-   def live   = adj.counts ;; lives = triangle count per vertex
+   def live   = adj.counts
    def offsets = adj.offsets
    def adj_data = adj.data
    mut emitted = _filled_list(tri_count, 0)
@@ -227,7 +231,7 @@ fn meshopt_optimize_vertex_cache(list: indices, int: vertex_count): list {
    dest
 }
 
-fn _compute_sphere(any: vbuf, list: idx_list, int: pos_stride): dict {
+fn _compute_sphere(any vbuf, list idx_list, int pos_stride) dict {
    def n = idx_list.len
    if n == 0 { return { "cx":0.0, "cy":0.0, "cz":0.0, "r":0.0 } }
    mut cx, cy = _px(vbuf, idx_list.get(0), pos_stride), _py(vbuf, idx_list.get(0), pos_stride)
@@ -257,7 +261,7 @@ fn _compute_sphere(any: vbuf, list: idx_list, int: pos_stride): dict {
    return { "cx":cx, "cy":cy, "cz":cz, "r":r }
 }
 
-fn _compute_cone(any: vbuf, list: tri_indices, int: pos_stride): dict {
+fn _compute_cone(any vbuf, list tri_indices, int pos_stride) dict {
    mut anx, any = 0.0, 0.0
    mut anz = 0.0
    mut ti = 0
@@ -308,21 +312,21 @@ fn _compute_cone(any: vbuf, list: tri_indices, int: pos_stride): dict {
    return { "ax":nax, "ay":nay, "az":naz, "cutoff":cutoff }
 }
 
-fn _qem_from_plane(any: nx, any: ny, any: nz, any: d): list {
+fn _qem_from_plane(any nx, any ny, any nz, any d) list {
    [nx*nx, nx*ny, nx*nz, nx*d,
       ny*ny, ny*nz, ny*d,
       nz*nz, nz*d,
    d*d]
 }
 
-fn _qem_add(list: a, list: b): list {
+fn _qem_add(list a, list b) list {
    [a.get(0)+b.get(0), a.get(1)+b.get(1), a.get(2)+b.get(2), a.get(3)+b.get(3),
       a.get(4)+b.get(4), a.get(5)+b.get(5), a.get(6)+b.get(6),
       a.get(7)+b.get(7), a.get(8)+b.get(8),
    a.get(9)+b.get(9)]
 }
 
-fn _qem_eval(list: q, any: x, any: y, any: z): any {
+fn _qem_eval(list q, any x, any y, any z) any {
    def a=q.get(0) def b=q.get(1) def c=q.get(2) def d=q.get(3)
    def e=q.get(4) def f=q.get(5) def g=q.get(6)
    def h=q.get(7) def ii=q.get(8)
@@ -332,7 +336,8 @@ fn _qem_eval(list: q, any: x, any: y, any: z): any {
 
 def _QEM_ZERO = [0.0,0.0,0.0,0.0, 0.0,0.0,0.0, 0.0,0.0, 0.0]
 
-fn meshopt_simplify(list: indices, any: vbuf, int: pos_stride, int: target_tris): dict {
+fn meshopt_simplify(list indices, any vbuf, int pos_stride, int target_tris) dict {
+   "Runs the meshopt simplify operation."
    def tc = indices.len / 3
    if tc <= target_tris { return { "indices": indices, "error": 0.0 } }
    if(_meshopt_trace_enabled()){ print("[meshopt:simplify] tri_count=" + to_str(tc) + " -> " + to_str(target_tris)) }
@@ -456,7 +461,7 @@ fn meshopt_simplify(list: indices, any: vbuf, int: pos_stride, int: target_tris)
    return { "indices": cur_idx, "error": max_error }
 }
 
-fn _meshlet_find_seed(list: emitted, int: tri_count, int: unseen): list {
+fn _meshlet_find_seed(list emitted, int tri_count, int unseen) list {
    mut u = unseen
    while u < tri_count {
       if emitted.get(u) == 0 { return [u, u + 1] }
@@ -465,7 +470,7 @@ fn _meshlet_find_seed(list: emitted, int: tri_count, int: unseen): list {
    [-1, u]
 }
 
-fn _meshlet_local_vertex(list: used, list: m_verts, int: gi): list {
+fn _meshlet_local_vertex(list used, list m_verts, int gi) list {
    mut li = used.get(gi)
    if li < 0 {
       li = m_verts.len
@@ -475,7 +480,7 @@ fn _meshlet_local_vertex(list: used, list: m_verts, int: gi): list {
    [li, m_verts]
 }
 
-fn _meshlet_append_tri(list: indices, int: t, list: used, list: live, list: emitted, list: m_verts, list: m_tris): list {
+fn _meshlet_append_tri(list indices, int t, list used, list live, list emitted, list m_verts, list m_tris) list {
    def gi0 = int(indices.get(t*3))
    def gi1 = int(indices.get(t*3+1))
    def gi2 = int(indices.get(t*3+2))
@@ -496,7 +501,7 @@ fn _meshlet_append_tri(list: indices, int: t, list: used, list: live, list: emit
    [m_verts, m_tris]
 }
 
-fn _meshlet_best_neighbor(list: indices, list: adj_offsets, list: adj_counts, list: adj_data, list: emitted, list: live, list: used, list: m_verts, int: max_verts): int {
+fn _meshlet_best_neighbor(list indices, list adj_offsets, list adj_counts, list adj_data, list emitted, list live, list used, list m_verts, int max_verts) int {
    mut nb = -1
    mut best_pri = 5
    mut best_score = 0
@@ -534,7 +539,7 @@ fn _meshlet_best_neighbor(list: indices, list: adj_offsets, list: adj_counts, li
    nb
 }
 
-fn _meshlet_flat_indices(list: m_verts, list: m_tris): list {
+fn _meshlet_flat_indices(list m_verts, list m_tris) list {
    mut flat = []
    mut ti_f = 0
    while ti_f < m_tris.len{
@@ -550,7 +555,7 @@ fn _meshlet_flat_indices(list: m_verts, list: m_tris): list {
    flat
 }
 
-fn _meshlet_flush(any: vbuf, int: pos_stride, int: lod_level, any: cluster_error, list: used, list: out_meshlets, list: out_vert_data, list: out_tri_data, list: m_verts, list: m_tris): list {
+fn _meshlet_flush(any vbuf, int pos_stride, int lod_level, any cluster_error, list used, list out_meshlets, list out_vert_data, list out_tri_data, list m_verts, list m_tris) list {
    def flat = _meshlet_flat_indices(m_verts, m_tris)
    def sphere = _compute_sphere(vbuf, flat, pos_stride)
    def cone = _compute_cone(vbuf, flat, pos_stride)
@@ -590,7 +595,8 @@ fn _meshlet_flush(any: vbuf, int: pos_stride, int: lod_level, any: cluster_error
    [out_meshlets, out_vert_data, out_tri_data]
 }
 
-fn meshopt_build_meshlets(list: indices, int: vcnt, any: vbuf, int: pos_stride, int: max_verts, int: max_tris, int: lod_level, any: cluster_error): dict {
+fn meshopt_build_meshlets(list indices, int vcnt, any vbuf, int pos_stride, int max_verts, int max_tris, int lod_level, any cluster_error) dict {
+   "Runs the meshopt build meshlets operation."
    def tri_count = indices.len / 3
    if tri_count == 0 { return { "meshlets":[], "vertex_data":[], "triangle_data":[] } }
    def adj = _build_adj(indices, tri_count, vcnt)
@@ -639,7 +645,7 @@ fn meshopt_build_meshlets(list: indices, int: vcnt, any: vbuf, int: pos_stride, 
    return { "meshlets": out_meshlets, "vertex_data": out_vert_data, "triangle_data": out_tri_data }
 }
 
-fn _group_clusters(dict: meshlets_result): list {
+fn _group_clusters(dict meshlets_result) list {
    def ms, mc = meshlets_result.meshlets, ms.len
    def target_group_sz = 4
    mut groups = []
@@ -656,7 +662,8 @@ fn _group_clusters(dict: meshlets_result): list {
    groups
 }
 
-fn meshopt_build_lod_hierarchy(list: indices, int: vcnt, any: vbuf, int: pos_stride, int: max_levels): dict {
+fn meshopt_build_lod_hierarchy(list indices, int vcnt, any vbuf, int pos_stride, int max_levels) dict {
+   "Runs the meshopt build lod hierarchy operation."
    mut lods = []
    def opt0 = meshopt_optimize_vertex_cache(indices, vcnt)
    def lod0 = meshopt_build_meshlets(opt0, vcnt, vbuf, pos_stride, 128, 128, 0, 0.0)
@@ -752,7 +759,8 @@ fn meshopt_build_lod_hierarchy(list: indices, int: vcnt, any: vbuf, int: pos_str
    return { "lods": lods }
 }
 
-fn meshopt_process_mesh(list: indices, int: vcnt, any: vbuf, int: pos_stride, int: max_levels): dict {
+fn meshopt_process_mesh(list indices, int vcnt, any vbuf, int pos_stride, int max_levels) dict {
+   "Runs the meshopt process mesh operation."
    if(_meshopt_trace_enabled()){ print("[meshopt] Processing mesh: indices=" + to_str(indices.len) + " verts=" + to_str(vcnt)) }
    def opt = meshopt_optimize_vertex_cache(indices, vcnt)
    if(_meshopt_trace_enabled()){ print("[meshopt] Cache optimization complete.") }
@@ -761,7 +769,8 @@ fn meshopt_process_mesh(list: indices, int: vcnt, any: vbuf, int: pos_stride, in
    return res
 }
 
-fn meshopt_cluster_screen_error(any: bounds_cx, any: bounds_cy, any: bounds_cz, any: bounds_r, any: cluster_error, any: cam_x, any: cam_y, any: cam_z, any: cam_proj, any: cam_znear): any {
+fn meshopt_cluster_screen_error(any bounds_cx, any bounds_cy, any bounds_cz, any bounds_r, any cluster_error, any cam_x, any cam_y, any cam_z, any cam_proj, any cam_znear) any {
+   "Runs the meshopt cluster screen error operation."
    def dx, dy = bounds_cx - cam_x, bounds_cy - cam_y
    def dz = bounds_cz - cam_z
    def dist = _len3(dx, dy, dz) - bounds_r
@@ -769,7 +778,8 @@ fn meshopt_cluster_screen_error(any: bounds_cx, any: bounds_cy, any: bounds_cz, 
    cluster_error / safe_dist * (cam_proj * 0.5)
 }
 
-fn meshopt_select_lod_cut(dict: lod_hierarchy, any: cam_x, any: cam_y, any: cam_z, any: cam_proj, any: cam_znear, any: pixel_error_threshold, any: screen_h): list {
+fn meshopt_select_lod_cut(dict lod_hierarchy, any cam_x, any cam_y, any cam_z, any cam_proj, any cam_znear, any pixel_error_threshold, any screen_h) list {
+   "Runs the meshopt select lod cut operation."
    def threshold = pixel_error_threshold / screen_h
    def lods = lod_hierarchy.lods
    mut render_list = []

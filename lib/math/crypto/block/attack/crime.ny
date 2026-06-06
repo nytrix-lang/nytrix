@@ -1,12 +1,15 @@
-;; Keywords: block-cipher attack crime
+;; Keywords: block-cipher attack crime math crypto
 ;; Block-cipher attack routines for CRIME compression-oracle attack.
 ;; Recover secrets by exploiting compression before encryption
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7457
+;; References:
+;; - std.math.crypto.block.attack
+;; - std.math.crypto
 module std.math.crypto.block.attack.crime(crime_attack, crime_recover_with_alphabet, deflate_compress)
 use std.core
 
-fn deflate_compress(list: data): list {
+fn deflate_compress(list data) list {
    "Simple DEFLATE-like compression using LZ77 + Huffman approximation.
    Implements a simplified version of DEFLATE that finds repeated strings
    and applies basic length encoding.
@@ -52,7 +55,7 @@ fn deflate_compress(list: data): list {
    result
 }
 
-fn crime_attack(fnptr: encrypt_oracle, list: secret_prefix, list: known_suffix, int: block_size): list {
+fn crime_attack(fnptr encrypt_oracle, list secret_prefix, list known_suffix, int block_size) list {
    "Recover secret via CRIME attack using compression oracle.
    Exploits the fact that compression reveals repeated strings:
    when attacker-controlled input overlaps with secret, compressed size decreases.
@@ -103,7 +106,7 @@ fn crime_attack(fnptr: encrypt_oracle, list: secret_prefix, list: known_suffix, 
    recovered
 }
 
-fn crime_recover_with_alphabet(fnptr: length_oracle, list: known_prefix, list: alphabet, int: stop_byte, int: max_len): list {
+fn crime_recover_with_alphabet(fnptr length_oracle, list known_prefix, list alphabet, int stop_byte, int max_len) list {
    "Recover a compression-oracle secret by extending known_prefix with bytes from alphabet.
    length_oracle(payload) must return the encrypted compressed length for secret || payload.
    Stops after stop_byte is recovered or max_len extra bytes are tried."

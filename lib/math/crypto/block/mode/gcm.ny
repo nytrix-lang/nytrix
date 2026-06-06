@@ -1,28 +1,29 @@
-;; Keywords: block-cipher mode gcm
+;; Keywords: block-cipher mode gcm math crypto
 ;; Block-mode routines for GCM encryption, authentication, nonce-reuse recovery, and tag forgery.
 ;; Reference:
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 ;; - https://eprint.iacr.org/2012/453.pdf (Joux nonce reuse)
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.gcm(gcm_nonce_reuse_decrypt, gcm_recover_keystream, ghash, gcm_forge_tag, recover_e0, forge_tag_from_known, gcm_recover_ectr0_from_sample, gcm_forge_tag_from_known_message, gcm_recover_auth_key_one_block, gf128_mult, gf128_inv, gf128_sqrt, gcm_ghash, gcm_auth_ghash, gcm_encrypt, gcm_decrypt, gcm_verify_tag)
 use std.core
 use std.math.nt
 use std.math.bin
 use std.math.crypto.symmetric.aes
 
-fn _r_bytes(): list { [225, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+fn _gf128_one() list { [128,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
 
-fn _gf128_one(): list { [128,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
+fn _gf128_zero() list { [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
 
-fn _gf128_zero(): list { [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
-
-fn _gcm_be32_at(list: data, int: off): int {
+fn _gcm_be32_at(list data, int off) int {
    (__load_item_fast(data, off) << 24) |
    (__load_item_fast(data, off + 1) << 16) |
    (__load_item_fast(data, off + 2) << 8) |
    __load_item_fast(data, off + 3)
 }
 
-fn _gcm_be32_at_padded(list: data, int: off): int {
+fn _gcm_be32_at_padded(list data, int off) int {
    def n = len(data)
    ((off < n ? __load_item_fast(data, off) : 0) << 24) |
    ((off + 1 < n ? __load_item_fast(data, off + 1) : 0) << 16) |
@@ -30,11 +31,11 @@ fn _gcm_be32_at_padded(list: data, int: off): int {
    (off + 3 < n ? __load_item_fast(data, off + 3) : 0)
 }
 
-fn _gf128_words(list: x): list {
+fn _gf128_words(list x) list {
    [_gcm_be32_at(x, 0), _gcm_be32_at(x, 4), _gcm_be32_at(x, 8), _gcm_be32_at(x, 12)]
 }
 
-fn _gf128_words_to_bytes(int: w0, int: w1, int: w2, int: w3): list {
+fn _gf128_words_to_bytes(int w0, int w1, int w2, int w3) list {
    mut out = []
    out = out.append((w0 >> 24) & 255)
    out = out.append((w0 >> 16) & 255)
@@ -55,7 +56,7 @@ fn _gf128_words_to_bytes(int: w0, int: w1, int: w2, int: w3): list {
    out
 }
 
-fn _gf128_mult_words(int: x0, int: x1, int: x2, int: x3, int: y0, int: y1, int: y2, int: y3): list {
+fn _gf128_mult_words(int x0, int x1, int x2, int x3, int y0, int y1, int y2, int y3) list {
    mut z0, z1, z2, z3 = 0, 0, 0, 0
    mut v0, v1, v2, v3 = y0, y1, y2, y3
    mut i = 0
@@ -78,7 +79,7 @@ fn _gf128_mult_words(int: x0, int: x1, int: x2, int: x3, int: y0, int: y1, int: 
    [z0, z1, z2, z3]
 }
 
-fn gf128_mult(list: x, list: y): list {
+fn gf128_mult(list x, list y) list {
    "Multiply two 128-bit values in GF(2^128) with GCM reduction polynomial.
    x, y: 16-byte lists(big-endian). Returns the 16-byte product."
    def xw = _gf128_words(x)
@@ -87,7 +88,7 @@ fn gf128_mult(list: x, list: y): list {
    _gf128_words_to_bytes(__load_item_fast(zw, 0), __load_item_fast(zw, 1), __load_item_fast(zw, 2), __load_item_fast(zw, 3))
 }
 
-fn _gf128_xor(list: a, list: b): list {
+fn _gf128_xor(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < 16){
@@ -97,7 +98,7 @@ fn _gf128_xor(list: a, list: b): list {
    out
 }
 
-fn _gf128_is_zero(list: a): bool {
+fn _gf128_is_zero(list a) bool {
    mut i = 0
    while(i < 16){
       if(a.get(i) != 0){ return false }
@@ -106,7 +107,7 @@ fn _gf128_is_zero(list: a): bool {
    true
 }
 
-fn gf128_inv(list: x): any {
+fn gf128_inv(list x) any {
    "Multiplicative inverse in GF(2^128), or nil for zero."
    if(_gf128_is_zero(x)){ return nil }
    mut result = _gf128_one()
@@ -119,7 +120,7 @@ fn gf128_inv(list: x): any {
    result
 }
 
-fn gf128_sqrt(list: x): list {
+fn gf128_sqrt(list x) list {
    "Square root in GF(2^128): x^(2^127)."
    mut y, i = clone(x), 0
    while(i < 127){
@@ -129,7 +130,7 @@ fn gf128_sqrt(list: x): list {
    y
 }
 
-fn ghash(list: h, list: blocks): list {
+fn ghash(list h, list blocks) list {
    "Compute GHASH(H, blocks) for GCM authentication.
    h: 16-byte authentication key H = E_K(0^128).
    blocks: list of 16-byte data blocks(padded to 16 bytes each).
@@ -155,7 +156,7 @@ fn ghash(list: h, list: blocks): list {
    _gf128_words_to_bytes(y0, y1, y2, y3)
 }
 
-fn gcm_ghash(list: h, list: data): list {
+fn gcm_ghash(list h, list data) list {
    "Compute GHASH over already-padded 16-byte blocks with subkey h."
    def hw = _gf128_words(h)
    def h0, h1 = __load_item_fast(hw, 0), __load_item_fast(hw, 1)
@@ -177,7 +178,7 @@ fn gcm_ghash(list: h, list: data): list {
    _gf128_words_to_bytes(y0, y1, y2, y3)
 }
 
-fn _gcm_ghash_update_data(int: y0, int: y1, int: y2, int: y3, int: h0, int: h1, int: h2, int: h3, list: data): list {
+fn _gcm_ghash_update_data(int y0, int y1, int y2, int y3, int h0, int h1, int h2, int h3, list data) list {
    mut a0, a1, a2, a3 = y0, y1, y2, y3
    mut p = 0
    while(p < data.len){
@@ -195,7 +196,7 @@ fn _gcm_ghash_update_data(int: y0, int: y1, int: y2, int: y3, int: h0, int: h1, 
    [a0, a1, a2, a3]
 }
 
-fn _gcm_u64_be_bits(any: n): list {
+fn _gcm_u64_be_bits(any n) list {
    def bits = n * 8
    [
       (bits >> 56) & 255, (bits >> 48) & 255, (bits >> 40) & 255, (bits >> 32) & 255,
@@ -203,13 +204,13 @@ fn _gcm_u64_be_bits(any: n): list {
    ]
 }
 
-fn _gcm_pad16(list: data): list {
+fn _gcm_pad16(list data) list {
    mut out = clone(data)
    while(out.len % 16 != 0){ out = out.append(0) }
    out
 }
 
-fn _gcm_xor(list: a, list: b, any: n=nil): list {
+fn _gcm_xor(list a, list b, any n=nil) list {
    def lim = n == nil ? (a.len < b.len ? a.len : b.len) : n
    mut out = []
    mut i = 0
@@ -220,7 +221,7 @@ fn _gcm_xor(list: a, list: b, any: n=nil): list {
    out
 }
 
-fn _gcm_join(list: a, list: b): list {
+fn _gcm_join(list a, list b) list {
    mut out = clone(a)
    mut i = 0
    while(i < b.len){
@@ -230,7 +231,7 @@ fn _gcm_join(list: a, list: b): list {
    out
 }
 
-fn _gcm_inc32(list: block): list {
+fn _gcm_inc32(list block) list {
    mut out = clone(block)
    def ctr = (((out[12] << 24) | (out[13] << 16) | (out[14] << 8) | out[15]) + 1) & 0xffffffff
    out[12] = (ctr >> 24) & 255
@@ -240,21 +241,13 @@ fn _gcm_inc32(list: block): list {
    out
 }
 
-fn _gcm_inc32_inplace(list: block){
-   def ctr = (((block[12] << 24) | (block[13] << 16) | (block[14] << 8) | block[15]) + 1) & 0xffffffff
-   block[12] = (ctr >> 24) & 255
-   block[13] = (ctr >> 16) & 255
-   block[14] = (ctr >> 8) & 255
-   block[15] = ctr & 255
-}
-
-fn _gcm_j0(list: h, list: nonce): list {
+fn _gcm_j0(list h, list nonce) list {
    if(nonce.len == 12){ return clone(nonce).append(0).append(0).append(0).append(1) }
    def len_block = _gcm_join([0,0,0,0,0,0,0,0], _gcm_u64_be_bits(nonce.len))
    gcm_ghash(h, _gcm_join(_gcm_pad16(nonce), len_block))
 }
 
-fn _gcm_ctr_crypt(any: ctx, list: j0, list: data): list {
+fn _gcm_ctr_crypt(any ctx, list j0, list data) list {
    mut ctr = _gcm_inc32(j0)
    mut out = []
    mut p = 0
@@ -268,7 +261,7 @@ fn _gcm_ctr_crypt(any: ctx, list: j0, list: data): list {
    out
 }
 
-fn gcm_auth_ghash(list: h, list: ad, list: ciphertext): list {
+fn gcm_auth_ghash(list h, list ad, list ciphertext) list {
    "Compute the GCM authentication GHASH over associated data and ciphertext."
    def hw = _gf128_words(h)
    def h0, h1 = __load_item_fast(hw, 0), __load_item_fast(hw, 1)
@@ -285,7 +278,7 @@ fn gcm_auth_ghash(list: h, list: ad, list: ciphertext): list {
    _gf128_words_to_bytes(__load_item_fast(zw, 0), __load_item_fast(zw, 1), __load_item_fast(zw, 2), __load_item_fast(zw, 3))
 }
 
-fn gcm_encrypt(list: key, list: nonce, list: ad, list: plaintext): list {
+fn gcm_encrypt(list key, list nonce, list ad, list plaintext) list {
    "Authenticated Encryption using AES-GCM. Returns [ciphertext, tag]."
    def ctx = aes_init(key)
    def h = aes_encrypt_block(ctx, [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
@@ -296,7 +289,7 @@ fn gcm_encrypt(list: key, list: nonce, list: ad, list: plaintext): list {
    [ciphertext, _gcm_xor(s, e0, 16)]
 }
 
-fn gcm_verify_tag(list: a, list: b): bool {
+fn gcm_verify_tag(list a, list b) bool {
    "Constant-shape tag comparison for GCM tags."
    if(a.len != b.len){ return false }
    mut diff = 0
@@ -308,7 +301,7 @@ fn gcm_verify_tag(list: a, list: b): bool {
    diff == 0
 }
 
-fn gcm_decrypt(list: key, list: nonce, list: ad, list: ciphertext, list: tag): any {
+fn gcm_decrypt(list key, list nonce, list ad, list ciphertext, list tag) any {
    "Authenticated AES-GCM decryption. Returns plaintext, or nil when tag verification fails."
    def ctx = aes_init(key)
    def h = aes_encrypt_block(ctx, [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
@@ -320,7 +313,7 @@ fn gcm_decrypt(list: key, list: nonce, list: ad, list: ciphertext, list: tag): a
    _gcm_ctr_crypt(ctx, j0, ciphertext)
 }
 
-fn gcm_recover_keystream(list: ct, list: known_pt): list {
+fn gcm_recover_keystream(list ct, list known_pt) list {
    "Recover GCM keystream bytes from ciphertext and known plaintext.
    ct: ciphertext bytes. known_pt: known plaintext bytes(any prefix).
    Returns keystream bytes."
@@ -334,7 +327,7 @@ fn gcm_recover_keystream(list: ct, list: known_pt): list {
    ks
 }
 
-fn gcm_nonce_reuse_decrypt(list: ct1, list: tag1, list: ct2, list: tag2): list {
+fn gcm_nonce_reuse_decrypt(list ct1, list tag1, list ct2, list tag2) list {
    "Exploit GCM nonce reuse: two messages encrypted with same(K, IV).
    XOR of ciphertexts = XOR of plaintexts. Keystream can be recovered
    if any plaintext is known.
@@ -351,26 +344,7 @@ fn gcm_nonce_reuse_decrypt(list: ct1, list: tag1, list: ct2, list: tag2): list {
    [ks_xor, ks_xor]
 }
 
-fn _gcm_padded_blocks(list: data): list {
-   def block_size = 16
-   mut blocks = []
-   mut i = 0
-   while(i < data.len){
-      mut block = []
-      def end = (i + block_size < data.len) ? i + block_size : data.len
-      mut j = i
-      while(j < end){
-         block = block.append(data.get(j))
-         j += 1
-      }
-      while(block.len < block_size){ block = block.append(0) }
-      blocks = blocks.append(block)
-      i += block_size
-   }
-   blocks
-}
-
-fn gcm_forge_tag(list: h, list: assoc_data, list: ct, list: ectr0): list {
+fn gcm_forge_tag(list h, list assoc_data, list ct, list ectr0) list {
    "Forge a GCM authentication tag given knowledge of the authentication key H
    and the keystream block E(K, ctr0).
    h: 16-byte H value. assoc_data: associated data bytes(padded to 16).
@@ -386,7 +360,7 @@ fn gcm_forge_tag(list: h, list: assoc_data, list: ct, list: ectr0): list {
    tag
 }
 
-fn gcm_recover_ectr0_from_sample(any: h, list: assoc_data, list: ct, any: tag): any {
+fn gcm_recover_ectr0_from_sample(any h, list assoc_data, list ct, any tag) any {
    "Recover E(K,J0) from one valid GCM tuple under a known H.
    ectr0 = tag XOR GHASH(H, A, C)."
    if(!is_list(h) || h.len != 16){ return nil }
@@ -402,7 +376,7 @@ fn gcm_recover_ectr0_from_sample(any: h, list: assoc_data, list: ct, any: tag): 
    out
 }
 
-fn gcm_forge_tag_from_known_message(list: h, list: known_assoc_data, list: known_ct, list: known_tag, list: target_assoc_data, list: target_ct): any {
+fn gcm_forge_tag_from_known_message(list h, list known_assoc_data, list known_ct, list known_tag, list target_assoc_data, list target_ct) any {
    "Forge a tag for target(A,C) using nonce reuse and known H from one valid tuple.
    Derives E(K,J0) from the known tuple and reuses it on the target."
    def ectr0 = gcm_recover_ectr0_from_sample(h, known_assoc_data, known_ct, known_tag)
@@ -410,17 +384,17 @@ fn gcm_forge_tag_from_known_message(list: h, list: known_assoc_data, list: known
    gcm_forge_tag(h, target_assoc_data, target_ct, ectr0)
 }
 
-fn recover_e0(list: h, list: assoc_data, list: ct, list: tag): any {
+fn recover_e0(list h, list assoc_data, list ct, list tag) any {
    "Short export wrapper for recovering E(K,J0)."
    gcm_recover_ectr0_from_sample(h, assoc_data, ct, tag)
 }
 
-fn forge_tag_from_known(list: h, list: known_assoc_data, list: known_ct, list: known_tag, list: target_assoc_data, list: target_ct): any {
+fn forge_tag_from_known(list h, list known_assoc_data, list known_ct, list known_tag, list target_assoc_data, list target_ct) any {
    "Short export wrapper for forging a tag from one known tuple."
    gcm_forge_tag_from_known_message(h, known_assoc_data, known_ct, known_tag, target_assoc_data, target_ct)
 }
 
-fn gcm_recover_auth_key_one_block(list: a1, list: c1, list: t1, list: a2, list: c2, list: t2): any {
+fn gcm_recover_auth_key_one_block(list a1, list c1, list t1, list a2, list c2, list t2) any {
    "Recover the GCM authentication subkey H for the common Joux nonce-reuse case:
    no AAD, one equal-length ciphertext block, same nonce/key. Returns H or nil.
    For one-block messages with equal lengths, tag1^tag2 = (c1^c2) * H^2."

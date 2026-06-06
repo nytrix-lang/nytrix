@@ -1,15 +1,18 @@
-;; Keywords: ecc ecdsa
+;; Keywords: ecc ecdsa math crypto public-key
 ;; Elliptic-curve routines for ECDSA signing and nonce-reuse analysis.
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://eprint.iacr.org/2019/023.pdf (HNP via lattice)
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.ecdsa(ecdsa_nonce_reuse, ecdsa_recover_key_from_two_sigs, ecdsa_forge_with_known_k, ecdsa_partial_nonce_leak, ecdsa_sign, ecdsa_verify, ecdsa_private_key_from_nonce, ecdsa_nonce_from_private_key, ecdsa_hnp_parse_signature_hex, ecdsa_hnp_parse_line, ecdsa_hnp_sample_residual, ecdsa_hnp_lsb_sample, ecdsa_hnp_msb_sample, ecdsa_hnp_lsb_samples, ecdsa_hnp_msb_samples, ecdsa_hnp_lsb_line, ecdsa_hnp_msb_line, ecdsa_hnp_lsb_lines, ecdsa_hnp_msb_lines, ecdsa_hnp_residuals, ecdsa_hnp_residual_width, ecdsa_hnp_count_valid_samples, ecdsa_hnp_check_samples, ecdsa_hnp_check_lsb_lines, ecdsa_hnp_check_msb_lines, ecdsa_hnp_recover, ecdsa_recover_key_from_lsb_lines, ecdsa_recover_key_from_msb_lines, ecdsa_recover_key_from_nonce_lsb, ecdsa_recover_key_from_nonce_msb)
 use std.math.nt
 use std.math.crypto.ecc.ecc
 use std.math.crypto.hnp.hnp as hnp
 use std.core.str as str
 
-fn ecdsa_nonce_reuse(list: sig1, list: sig2, any: msg1, any: msg2, any: curve_n): any {
+fn ecdsa_nonce_reuse(list sig1, list sig2, any msg1, any msg2, any curve_n) any {
    "Recover nonce k and private key d when two ECDSA signatures share the same k.
    sig1, sig2: [r, s] pairs. msg1, msg2: message hashes(integers).
    curve_n: curve order.
@@ -25,14 +28,14 @@ fn ecdsa_nonce_reuse(list: sig1, list: sig2, any: msg1, any: msg2, any: curve_n)
    [k, d]
 }
 
-fn ecdsa_recover_key_from_two_sigs(any: r1, any: s1, any: m1, any: r2, any: s2, any: m2, any: curve_n): any {
+fn ecdsa_recover_key_from_two_sigs(any r1, any s1, any m1, any r2, any s2, any m2, any curve_n) any {
    "Recover ECDSA private key d from two signatures with the same nonce k.
    r1,s1,m1: first(r,s,hash). r2,s2,m2: second(r,s,hash). curve_n: order.
    Returns [k, d] or nil."
    ecdsa_nonce_reuse([r1, s1], [r2, s2], m1, m2, curve_n)
 }
 
-fn ecdsa_forge_with_known_k(any: m, any: k, list: G, any: d, any: a, any: p, any: curve_n): any {
+fn ecdsa_forge_with_known_k(any m, any k, list G, any d, any a, any p, any curve_n) any {
    "Forge an ECDSA signature given the private key d and nonce k.
    m: message hash. k: nonce. G: base point [x,y]. d: private key.
    a, p: curve parameters. curve_n: curve order.
@@ -47,13 +50,13 @@ fn ecdsa_forge_with_known_k(any: m, any: k, list: G, any: d, any: a, any: p, any
    [r, s]
 }
 
-fn ecdsa_sign(any: m, any: k, list: G, any: d, any: a, any: p, any: curve_n): any {
+fn ecdsa_sign(any m, any k, list G, any d, any a, any p, any curve_n) any {
    "Compute ECDSA signature for message hash m with nonce k and private key d.
    Returns [r, s] or nil."
    ecdsa_forge_with_known_k(m, k, G, d, a, p, curve_n)
 }
 
-fn ecdsa_verify(any: m, list: sig, list: G, any: Q, any: a, any: p, any: curve_n): bool {
+fn ecdsa_verify(any m, list sig, list G, any Q, any a, any p, any curve_n) bool {
    "Verify ECDSA signature [r,s] for message hash m.
    G: base point. Q: public key = d*G. a,p: curve params. curve_n: order.
    Returns true if valid, false otherwise."
@@ -70,7 +73,7 @@ fn ecdsa_verify(any: m, list: sig, list: G, any: Q, any: a, any: p, any: curve_n
    R[0] % curve_n == r
 }
 
-fn ecdsa_private_key_from_nonce(list: sig, any: msg, any: curve_n, any: nonce): any {
+fn ecdsa_private_key_from_nonce(list sig, any msg, any curve_n, any nonce) any {
    "Recover an ECDSA private key from one signature when the exact nonce is known."
    def rs = _ecdsa_sig_rs(sig, curve_n)
    if(rs == nil){ return nil }
@@ -78,7 +81,7 @@ fn ecdsa_private_key_from_nonce(list: sig, any: msg, any: curve_n, any: nonce): 
    ((s * nonce - msg) % curve_n + curve_n) % curve_n * inverse_mod(r, curve_n) % curve_n
 }
 
-fn ecdsa_nonce_from_private_key(list: sig, any: msg, any: curve_n, any: priv): any {
+fn ecdsa_nonce_from_private_key(list sig, any msg, any curve_n, any priv) any {
    "Recover the ECDSA nonce used by a signature when the private key is known."
    def rs = _ecdsa_sig_rs(sig, curve_n)
    if(rs == nil){ return nil }
@@ -86,22 +89,22 @@ fn ecdsa_nonce_from_private_key(list: sig, any: msg, any: curve_n, any: priv): a
    ((msg + r * priv) % curve_n + curve_n) % curve_n * inverse_mod(s, curve_n) % curve_n
 }
 
-fn _ecdsa_pos_mod(any: x, any: n): any { ((Z(x) % n) + n) % n }
+fn _ecdsa_pos_mod(any x, any n) any { ((Z(x) % n) + n) % n }
 
-fn _ecdsa_sig_rs(list: sig, any: curve_n): any {
+fn _ecdsa_sig_rs(list sig, any curve_n) any {
    def r, s = _ecdsa_pos_mod(sig[0], curve_n), _ecdsa_pos_mod(sig[1], curve_n)
    (r == 0 || s == 0) ? nil : [r, s]
 }
 
-fn _ecdsa_hex_clean(str: hex): str {
+fn _ecdsa_hex_clean(str hex) str {
    mut h = str.strip(hex)
    if(str.startswith(h, "0x") || str.startswith(h, "0X")){ h = slice(h, 2, h.len) }
    h
 }
 
-fn _ecdsa_hex_to_z(str: hex): any { hex_to_bigint(_ecdsa_hex_clean(hex)) }
+fn _ecdsa_hex_to_z(str hex) any { hex_to_bigint(_ecdsa_hex_clean(hex)) }
 
-fn ecdsa_hnp_parse_signature_hex(str: signature_hex, any: baselen=nil): any {
+fn ecdsa_hnp_parse_signature_hex(str signature_hex, any baselen=nil) any {
    "Parse a concatenated ECDSA r||s hex signature into [r,s].
    `baselen` is the byte length of r and s ; nil splits the hex string in half."
    def h = _ecdsa_hex_clean(signature_hex)
@@ -116,7 +119,7 @@ fn ecdsa_hnp_parse_signature_hex(str: signature_hex, any: baselen=nil): any {
    [_ecdsa_hex_to_z(slice(h, 0, half)), _ecdsa_hex_to_z(slice(h, half, half * 2))]
 }
 
-fn ecdsa_hnp_parse_line(str: line, any: baselen=nil): any {
+fn ecdsa_hnp_parse_line(str line, any baselen=nil) any {
    "Parse a compact HNP signature line: '<hash_hex> <r||s hex>'. Returns [hash, [r,s]]."
    def parts = str.split(str.strip(line), " ")
    if(parts.len < 2){ return nil }
@@ -125,12 +128,12 @@ fn ecdsa_hnp_parse_line(str: line, any: baselen=nil): any {
    [_ecdsa_hex_to_z(parts[0]), sig]
 }
 
-fn ecdsa_hnp_sample_residual(list: sample, any: priv, any: curve_n): any {
+fn ecdsa_hnp_sample_residual(list sample, any priv, any curve_n) any {
    "Return t*priv-a modulo curve_n for an ECDSA-derived HNP sample."
    ((Z(sample[0]) * Z(priv) - Z(sample[1])) % curve_n + curve_n) % curve_n
 }
 
-fn ecdsa_hnp_residuals(list: samples, any: priv, any: curve_n): list {
+fn ecdsa_hnp_residuals(list samples, any priv, any curve_n) list {
    "Return all HNP residuals t*priv-a modulo curve_n for a sample list."
    mut out = []
    mut i = 0
@@ -141,13 +144,13 @@ fn ecdsa_hnp_residuals(list: samples, any: priv, any: curve_n): list {
    out
 }
 
-fn ecdsa_hnp_residual_width(any: curve_n, any: leaked_bits): any {
+fn ecdsa_hnp_residual_width(any curve_n, any leaked_bits) any {
    "Return the positive residual width q / 2^leaked_bits, rounded up."
    def denom = Z(1) << int(leaked_bits)
    (Z(curve_n) + denom - Z(1)) / denom
 }
 
-fn ecdsa_hnp_count_valid_samples(list: samples, any: priv, any: curve_n, any: leaked_bits): int {
+fn ecdsa_hnp_count_valid_samples(list samples, any priv, any curve_n, any leaked_bits) int {
    "Count samples whose residual is inside the nonce-leak interval."
    def width = ecdsa_hnp_residual_width(curve_n, leaked_bits)
    mut ok = 0
@@ -160,13 +163,13 @@ fn ecdsa_hnp_count_valid_samples(list: samples, any: priv, any: curve_n, any: le
    ok
 }
 
-fn ecdsa_hnp_check_samples(list: samples, any: priv, any: curve_n, any: leaked_bits, int: max_errors=0): bool {
+fn ecdsa_hnp_check_samples(list samples, any priv, any curve_n, any leaked_bits, int max_errors=0) bool {
    "Validate ECDSA HNP samples against a candidate private key and leakage width."
    def valid = ecdsa_hnp_count_valid_samples(samples, priv, curve_n, leaked_bits)
    samples.len - valid <= int(max_errors)
 }
 
-fn ecdsa_hnp_lsb_sample(list: sig, any: msg, any: leaked_lsb, any: leaked_bits, any: curve_n): any {
+fn ecdsa_hnp_lsb_sample(list sig, any msg, any leaked_lsb, any leaked_bits, any curve_n) any {
    "Convert one ECDSA signature with leaked nonce LSBs into an HNP [t,a] sample.
    The resulting relation is t*d - a = (k - leaked_lsb) / 2^leaked_bits(mod n)."
    def rs = _ecdsa_sig_rs(sig, curve_n)
@@ -179,7 +182,7 @@ fn ecdsa_hnp_lsb_sample(list: sig, any: msg, any: leaked_lsb, any: leaked_bits, 
    [t, a]
 }
 
-fn ecdsa_hnp_msb_sample(list: sig, any: msg, any: leaked_msb, any: leaked_bits, any: curve_n, any: nonce_bits=nil): any {
+fn ecdsa_hnp_msb_sample(list sig, any msg, any leaked_msb, any leaked_bits, any curve_n, any nonce_bits=nil) any {
    "Convert one ECDSA signature with leaked nonce MSBs into an HNP [t,a] sample.
    `nonce_bits` defaults to bit_length(n-1)."
    def rs = _ecdsa_sig_rs(sig, curve_n)
@@ -194,17 +197,17 @@ fn ecdsa_hnp_msb_sample(list: sig, any: msg, any: leaked_msb, any: leaked_bits, 
    [t, a]
 }
 
-fn _ecdsa_hnp_sample(list: sig, any: msg, any: leak, any: leaked_bits, any: curve_n, str: mode, any: nonce_bits=nil): any {
+fn _ecdsa_hnp_sample(list sig, any msg, any leak, any leaked_bits, any curve_n, str mode, any nonce_bits=nil) any {
    if(mode == "msb"){ return ecdsa_hnp_msb_sample(sig, msg, leak, leaked_bits, curve_n, nonce_bits) }
    ecdsa_hnp_lsb_sample(sig, msg, leak, leaked_bits, curve_n)
 }
 
-fn _ecdsa_hnp_line(str: line, any: leak, any: leaked_bits, any: curve_n, any: baselen, str: mode, any: nonce_bits=nil): any {
+fn _ecdsa_hnp_line(str line, any leak, any leaked_bits, any curve_n, any baselen, str mode, any nonce_bits=nil) any {
    def parsed = ecdsa_hnp_parse_line(line, baselen)
    parsed == nil ? nil : _ecdsa_hnp_sample(parsed[1], parsed[0], leak, leaked_bits, curve_n, mode, nonce_bits)
 }
 
-fn _ecdsa_hnp_samples(list: sigs, list: msgs, list: leaks, any: leaked_bits, any: curve_n, str: mode, any: nonce_bits=nil): any {
+fn _ecdsa_hnp_samples(list sigs, list msgs, list leaks, any leaked_bits, any curve_n, str mode, any nonce_bits=nil) any {
    mut out = []
    mut i = 0
    while(i < sigs.len && i < msgs.len && i < leaks.len){
@@ -216,7 +219,7 @@ fn _ecdsa_hnp_samples(list: sigs, list: msgs, list: leaks, any: leaked_bits, any
    out
 }
 
-fn _ecdsa_hnp_lines(list: lines, list: leaks, any: leaked_bits, any: curve_n, any: baselen, str: mode, any: nonce_bits=nil): any {
+fn _ecdsa_hnp_lines(list lines, list leaks, any leaked_bits, any curve_n, any baselen, str mode, any nonce_bits=nil) any {
    mut out = []
    mut i = 0
    while(i < lines.len && i < leaks.len){
@@ -228,51 +231,51 @@ fn _ecdsa_hnp_lines(list: lines, list: leaks, any: leaked_bits, any: curve_n, an
    out
 }
 
-fn ecdsa_hnp_lsb_line(str: line, any: leaked_lsb, any: leaked_bits, any: curve_n, any: baselen=nil): any {
+fn ecdsa_hnp_lsb_line(str line, any leaked_lsb, any leaked_bits, any curve_n, any baselen=nil) any {
    "Convert one '<hash_hex> <r||s hex>' line plus leaked nonce LSBs into an HNP sample."
    _ecdsa_hnp_line(line, leaked_lsb, leaked_bits, curve_n, baselen, "lsb")
 }
 
-fn ecdsa_hnp_msb_line(str: line, any: leaked_msb, any: leaked_bits, any: curve_n, any: baselen=nil, any: nonce_bits=nil): any {
+fn ecdsa_hnp_msb_line(str line, any leaked_msb, any leaked_bits, any curve_n, any baselen=nil, any nonce_bits=nil) any {
    "Convert one '<hash_hex> <r||s hex>' line plus leaked nonce MSBs into an HNP sample."
    _ecdsa_hnp_line(line, leaked_msb, leaked_bits, curve_n, baselen, "msb", nonce_bits)
 }
 
-fn ecdsa_hnp_lsb_samples(list: sigs, list: msgs, list: leaked_lsbs, any: leaked_bits, any: curve_n): any {
+fn ecdsa_hnp_lsb_samples(list sigs, list msgs, list leaked_lsbs, any leaked_bits, any curve_n) any {
    "Convert lists of ECDSA signatures, hashes, and nonce LSB leaks into HNP samples."
    _ecdsa_hnp_samples(sigs, msgs, leaked_lsbs, leaked_bits, curve_n, "lsb")
 }
 
-fn ecdsa_hnp_lsb_lines(list: lines, list: leaked_lsbs, any: leaked_bits, any: curve_n, any: baselen=nil): any {
+fn ecdsa_hnp_lsb_lines(list lines, list leaked_lsbs, any leaked_bits, any curve_n, any baselen=nil) any {
    "Convert compact signature lines and LSB leaks into HNP samples."
    _ecdsa_hnp_lines(lines, leaked_lsbs, leaked_bits, curve_n, baselen, "lsb")
 }
 
-fn ecdsa_hnp_msb_lines(list: lines, list: leaked_msbs, any: leaked_bits, any: curve_n, any: baselen=nil, any: nonce_bits=nil): any {
+fn ecdsa_hnp_msb_lines(list lines, list leaked_msbs, any leaked_bits, any curve_n, any baselen=nil, any nonce_bits=nil) any {
    "Convert compact signature lines and MSB leaks into HNP samples."
    _ecdsa_hnp_lines(lines, leaked_msbs, leaked_bits, curve_n, baselen, "msb", nonce_bits)
 }
 
-fn ecdsa_hnp_check_lsb_lines(list: lines, list: leaked_lsbs, any: leaked_bits, any: curve_n, any: priv, any: baselen=nil, int: max_errors=0): bool {
+fn ecdsa_hnp_check_lsb_lines(list lines, list leaked_lsbs, any leaked_bits, any curve_n, any priv, any baselen=nil, int max_errors=0) bool {
    "Parse and validate compact LSB line/leak datasets for a candidate key."
    def samples = ecdsa_hnp_lsb_lines(lines, leaked_lsbs, leaked_bits, curve_n, baselen)
    if(samples == nil){ return false }
    ecdsa_hnp_check_samples(samples, priv, curve_n, leaked_bits, max_errors)
 }
 
-fn ecdsa_hnp_check_msb_lines(list: lines, list: leaked_msbs, any: leaked_bits, any: curve_n, any: priv, any: baselen=nil, any: nonce_bits=nil, int: max_errors=0): bool {
+fn ecdsa_hnp_check_msb_lines(list lines, list leaked_msbs, any leaked_bits, any curve_n, any priv, any baselen=nil, any nonce_bits=nil, int max_errors=0) bool {
    "Parse and validate compact MSB line/leak datasets for a candidate key."
    def samples = ecdsa_hnp_msb_lines(lines, leaked_msbs, leaked_bits, curve_n, baselen, nonce_bits)
    if(samples == nil){ return false }
    ecdsa_hnp_check_samples(samples, priv, curve_n, leaked_bits, max_errors)
 }
 
-fn ecdsa_hnp_msb_samples(list: sigs, list: msgs, list: leaked_msbs, any: leaked_bits, any: curve_n, any: nonce_bits=nil): any {
+fn ecdsa_hnp_msb_samples(list sigs, list msgs, list leaked_msbs, any leaked_bits, any curve_n, any nonce_bits=nil) any {
    "Convert lists of ECDSA signatures, hashes, and nonce MSB leaks into HNP samples."
    _ecdsa_hnp_samples(sigs, msgs, leaked_msbs, leaked_bits, curve_n, "msb", nonce_bits)
 }
 
-fn _ecdsa_hnp_fail(str: reason, str: mode, int: sample_count=0): dict {
+fn _ecdsa_hnp_fail(str reason, str mode, int sample_count=0) dict {
    mut out = dict(8)
    out = out.set("ok", false)
    out = out.set("key", nil)
@@ -283,7 +286,7 @@ fn _ecdsa_hnp_fail(str: reason, str: mode, int: sample_count=0): dict {
    out
 }
 
-fn ecdsa_hnp_recover(list: samples, any: curve_n, any: leaked_bits, any: opts=nil): any {
+fn ecdsa_hnp_recover(list samples, any curve_n, any leaked_bits, any opts=nil) any {
    "Recover an ECDSA private key from already-built HNP [t,a] samples.
    Returns the HNP result dict ; recovered key is available as `key`."
    if(samples == nil){ return _ecdsa_hnp_fail("invalid samples", "samples") }
@@ -291,7 +294,7 @@ fn ecdsa_hnp_recover(list: samples, any: curve_n, any: leaked_bits, any: opts=ni
    is_dict(res) ? res.set("mode", "samples") : _ecdsa_hnp_fail("hnp recovery failed", "samples", samples.len)
 }
 
-fn ecdsa_recover_key_from_lsb_lines(list: lines, list: leaked_lsbs, any: leaked_bits, any: curve_n, any: baselen=nil, any: opts=nil): any {
+fn ecdsa_recover_key_from_lsb_lines(list lines, list leaked_lsbs, any leaked_bits, any curve_n, any baselen=nil, any opts=nil) any {
    "Recover an ECDSA private key from '<hash_hex> <r||s hex>' lines and nonce LSB leaks."
    def samples = ecdsa_hnp_lsb_lines(lines, leaked_lsbs, leaked_bits, curve_n, baselen)
    if(samples == nil){ return _ecdsa_hnp_fail("invalid lsb dataset", "lsb") }
@@ -299,7 +302,7 @@ fn ecdsa_recover_key_from_lsb_lines(list: lines, list: leaked_lsbs, any: leaked_
    is_dict(res) ? res.set("mode", "lsb") : _ecdsa_hnp_fail("hnp recovery failed", "lsb", samples.len)
 }
 
-fn ecdsa_recover_key_from_msb_lines(list: lines, list: leaked_msbs, any: leaked_bits, any: curve_n, any: baselen=nil, any: nonce_bits=nil, any: opts=nil): any {
+fn ecdsa_recover_key_from_msb_lines(list lines, list leaked_msbs, any leaked_bits, any curve_n, any baselen=nil, any nonce_bits=nil, any opts=nil) any {
    "Recover an ECDSA private key from '<hash_hex> <r||s hex>' lines and nonce MSB leaks."
    def samples = ecdsa_hnp_msb_lines(lines, leaked_msbs, leaked_bits, curve_n, baselen, nonce_bits)
    if(samples == nil){ return _ecdsa_hnp_fail("invalid msb dataset", "msb") }
@@ -307,7 +310,7 @@ fn ecdsa_recover_key_from_msb_lines(list: lines, list: leaked_msbs, any: leaked_
    is_dict(res) ? res.set("mode", "msb") : _ecdsa_hnp_fail("hnp recovery failed", "msb", samples.len)
 }
 
-fn ecdsa_partial_nonce_leak(list: sig, any: msg, any: curve_n, any: k_high_bits, int: unknown_bits): any {
+fn ecdsa_partial_nonce_leak(list sig, any msg, any curve_n, any k_high_bits, int unknown_bits) any {
    "Recover ECDSA private key d when high bits of nonce k are known.
    Searches 2^unknown_bits candidates. Practical when unknown_bits < 16.
    sig: [r,s]. msg: hash. k_high_bits: known high portion. unknown_bits: missing bits.
@@ -326,12 +329,12 @@ fn ecdsa_partial_nonce_leak(list: sig, any: msg, any: curve_n, any: k_high_bits,
    nil
 }
 
-fn _ecdsa_key_matches_public(any: d, any: G, any: Q, any: a, any: p): bool {
+fn _ecdsa_key_matches_public(any d, any G, any Q, any a, any p) bool {
    if(G == nil || Q == nil || a == nil || p == nil){ return true }
    ecc_scalar_mult(d, G, a, p) == Q
 }
 
-fn ecdsa_recover_key_from_nonce_lsb(list: sig, any: msg, any: n, any: leak, any: bits, any: hi_bits, any: G=nil, any: Q=nil, any: a=nil, any: p=nil): any {
+fn ecdsa_recover_key_from_nonce_lsb(list sig, any msg, any n, any leak, any bits, any hi_bits, any G=nil, any Q=nil, any a=nil, any p=nil) any {
    "Brute-force a private key when nonce LSBs are known and few high bits are unknown.
    Provide G/Q/a/p to reject false keys against the public key."
    def low_mask = Z(1) << int(bits)
@@ -348,7 +351,7 @@ fn ecdsa_recover_key_from_nonce_lsb(list: sig, any: msg, any: n, any: leak, any:
    nil
 }
 
-fn ecdsa_recover_key_from_nonce_msb(list: sig, any: msg, any: n, any: leak, any: bits, any: lo_bits, any: G=nil, any: Q=nil, any: a=nil, any: p=nil): any {
+fn ecdsa_recover_key_from_nonce_msb(list sig, any msg, any n, any leak, any bits, any lo_bits, any G=nil, any Q=nil, any a=nil, any p=nil) any {
    "Brute-force a private key when nonce MSBs are known and few low bits are unknown.
    Provide G/Q/a/p to reject false keys against the public key."
    def low_limit = Z(1) << int(lo_bits)

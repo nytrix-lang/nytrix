@@ -1,15 +1,18 @@
-;; Keywords: rsa repeated-roots
+;; Keywords: rsa repeated-roots math crypto
 ;; RSA repeated-root attacks routines.
 ;; mod_sqrt_all: Tonelli-Shanks to find all sqrt(a) mod p.
 ;; mod_2kth_roots: find all 2^k-th roots mod n = pq using CRT.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.repeated_roots(mod_sqrt_all, mod_2kth_roots)
 use std.core
 use std.math.nt
 
-fn mod_sqrt_all(number: a, number: p): list {
+fn mod_sqrt_all(number a, number p) list {
    "Find all square roots of a mod p using Tonelli-Shanks.
    Returns [r, p-r] if a is a quadratic residue mod p, empty list otherwise."
    def r = tonelli_shanks(a, p)
@@ -19,7 +22,7 @@ fn mod_sqrt_all(number: a, number: p): list {
    [r, r2]
 }
 
-fn _list_has(list: xs, any: x): bool {
+fn _list_has(list xs, any x) bool {
    mut i = 0
    while(i < xs.len){
       if(xs.get(i) == x){ return true }
@@ -28,7 +31,7 @@ fn _list_has(list: xs, any: x): bool {
    false
 }
 
-fn _find_2kth_roots_prime(number: c, int: k, number: p): list {
+fn _find_2kth_roots_prime(number c, int k, number p) list {
    if(k <= 0){ return [mod(c, p)] }
    mut roots = [mod(c, p)]
    mut depth = 0
@@ -51,7 +54,7 @@ fn _find_2kth_roots_prime(number: c, int: k, number: p): list {
    roots
 }
 
-fn mod_2kth_roots(number: c, int: k, number: p, number: q): list {
+fn mod_2kth_roots(number c, int k, number p, number q) list {
    "Find all 2^k-th roots of c mod n = p*q using CRT.
    Finds all x such that x^(2^k) = c mod n.
    c: target value, k: exponent(find 2^k-th roots),

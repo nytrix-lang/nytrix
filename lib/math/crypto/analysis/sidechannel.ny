@@ -1,11 +1,14 @@
-;; Keywords: analysis side-channel traces
+;; Keywords: analysis side-channel traces math crypto
 ;; Cryptanalysis scoring and recovery routines for side-channel trace thresholding and key-byte recovery.
+;; References:
+;; - std.math.crypto.analysis
+;; - std.math.crypto
 module std.math.crypto.analysis.sidechannel(trace_column_sums, threshold_trace_bits, bits_lsb_to_bigint, threshold_trace_text, aes_sbox_lsb_leak_count, aes_sbox_lsb_recover_byte, aes_sbox_lsb_recover_key)
 use std.math.bin as bin
 use std.math.nt
 use std.math.crypto.symmetric.aes (aes_sbox)
 
-fn trace_column_sums(list: traces): list {
+fn trace_column_sums(list traces) list {
    "Return per-column sums for a rectangular list of numeric traces."
    def rows = traces.len
    if(rows == 0){ return [] }
@@ -25,7 +28,7 @@ fn trace_column_sums(list: traces): list {
    sums
 }
 
-fn threshold_trace_bits(list: traces, int: threshold=120): list {
+fn threshold_trace_bits(list traces, int threshold=120) list {
    "Classify each trace column as 1 when its average is at least threshold."
    def rows = traces.len
    if(rows == 0){ return [] }
@@ -41,7 +44,7 @@ fn threshold_trace_bits(list: traces, int: threshold=120): list {
    bits
 }
 
-fn bits_lsb_to_bigint(list: bits): bigint {
+fn bits_lsb_to_bigint(list bits) bigint {
    "Pack a bit list whose index 0 is the least significant bit."
    def n = bits.len
    mut out = Z(0)
@@ -53,13 +56,13 @@ fn bits_lsb_to_bigint(list: bits): bigint {
    out
 }
 
-fn threshold_trace_text(list: traces, int: threshold=120): str {
+fn threshold_trace_text(list traces, int threshold=120) str {
    "Recover ASCII text from thresholded LSB-first trace columns."
    def n = bits_lsb_to_bigint(threshold_trace_bits(traces, threshold))
    n.bytes.trim0.text
 }
 
-fn aes_sbox_lsb_leak_count(list: plaintext, list: key): int {
+fn aes_sbox_lsb_leak_count(list plaintext, list key) int {
    "Return the leakage count: sum of AES S-box output LSBs for plaintext[i] ^ key[i]."
    def S = aes_sbox()
    def n = plaintext.len < key.len ? plaintext.len : key.len
@@ -72,7 +75,7 @@ fn aes_sbox_lsb_leak_count(list: plaintext, list: key): int {
    count
 }
 
-fn aes_sbox_lsb_recover_byte(list: leaks): int {
+fn aes_sbox_lsb_recover_byte(list leaks) int {
    "Recover one AES key byte from 256 leakage counts where plaintext byte p ranges 0..255.
    Other byte positions must be fixed, so the minimum leakage is treated as the constant baseline."
    if(leaks == nil || leaks.len != 256){ return -1 }
@@ -97,7 +100,7 @@ fn aes_sbox_lsb_recover_byte(list: leaks): int {
    -1
 }
 
-fn aes_sbox_lsb_recover_key(list: leak_rows): list {
+fn aes_sbox_lsb_recover_key(list leak_rows) list {
    "Recover an AES-style key from one 256-count leakage row per key byte."
    mut key = bin.zero_list(leak_rows.len)
    mut i = 0

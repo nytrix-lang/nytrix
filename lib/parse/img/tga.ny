@@ -1,18 +1,21 @@
-;; Keywords: image tga
+;; Keywords: image tga parse
 ;; Truevision TGA Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Truevision_TGA
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.tga(decode, encode, save)
 use std.core
 use std.core.dict_mod
 use std.math.bin as pbin
 
-fn decode(str: data): any {
+fn decode(str data) any {
    "Decodes an uncompressed 24-bit or 32-bit TGA image."
    if(data.len < 18){ return 0 }
    def id_len = load8(data, 0)
    def color_map_type = load8(data, 1)
-   load8(data, 2) ; image_type
+   load8(data, 2)
    def w, h = pbin.u16le(data, 12), pbin.u16le(data, 14)
    def bpp = load8(data, 16)
    def desc = load8(data, 17)
@@ -100,7 +103,7 @@ fn decode(str: data): any {
          y += 1
       }
    }
-   mut res_d = dict(4)
+   mut res_d = dict(8)
    res_d["data"] = pix
    res_d["width"] = w
    res_d["height"] = h
@@ -108,7 +111,7 @@ fn decode(str: data): any {
    res_d
 }
 
-fn encode(dict: img): str {
+fn encode(dict img) str {
    "Encodes an image dictionary as a 32-bit BGRA TGA byte string."
    def w, h = img.get("width"), img.get("height")
    def d = img.get("data")
@@ -120,8 +123,8 @@ fn encode(dict: img): str {
    store8(hdr, w >> 8, 13)
    store8(hdr, h & 255, 14)
    store8(hdr, h >> 8, 15)
-   store8(hdr, 32, 16) ; 32 bpp
-   store8(hdr, 40, 17) ; Origin top-left (bit 5 = 32) + 8 bits alpha
+   store8(hdr, 32, 16)
+   store8(hdr, 40, 17)
    def out = init_str(malloc(w * h * 4 + 19), w * h * 4 + 18)
    __copy_mem(out, hdr, 18)
    mut y = 0
@@ -145,7 +148,7 @@ fn encode(dict: img): str {
    out
 }
 
-fn save(dict: img, str: path): Result {
+fn save(dict img, str path) Result {
    "Writes a 32-bit top-left TGA through the native snapshot fast path."
    def w = int(img.get("width", 0))
    def h = int(img.get("height", 0))
@@ -155,4 +158,24 @@ fn save(dict: img, str: path): Result {
    def n = __save_tga_rgba(path, d, w, h, ch)
    if(n >= 0){ return ok(n) }
    err(n)
+}
+
+#main {
+   def w = 2
+   def h = 2
+   def data = init_str(malloc(w * h * 4 + 1), w * h * 4)
+   store8(data, 255, 0)  store8(data, 0, 1)    store8(data, 0, 2)    store8(data, 255, 3)
+   store8(data, 0, 4)    store8(data, 255, 5)  store8(data, 0, 6)    store8(data, 255, 7)
+   store8(data, 0, 8)    store8(data, 0, 9)    store8(data, 255, 10)  store8(data, 255, 11)
+   store8(data, 255, 12) store8(data, 255, 13) store8(data, 255, 14)  store8(data, 255, 15)
+   def img = {"width": w, "height": h, "data": data, "channels": 4}
+   def encoded = encode(img)
+   assert(is_str(encoded) && encoded.len == 34, "tga encoded size")
+   def decoded = decode(encoded)
+   assert(is_dict(decoded) && decoded.get("width") == 2 && decoded.get("height") == 2 && decoded.get("channels") == 4, "tga decoded shape")
+   match save(img, "build/tga-native-smoke.tga"){
+      ok(n) -> { assert(n > 0, "tga native save bytes") }
+      err(e) -> { panic("tga save failed: " + to_str(e)) }
+   }
+   print("✓ std.parse.img.tga self-test passed")
 }

@@ -1,14 +1,21 @@
-;; Keywords: 3d gltf glb
+;; Keywords: 3d gltf glb parse
 ;; glTF-specific matrix and vector math for column-major transforms.
 ;; lists with an optional trailing tag, not the generic std matrix shape.
+;; References:
+;; - std.parse.3d
+;; - std.parse
 module std.parse.3d.gltf_math(mat4_identity, mat4_mul, node_local_matrix, mat4_apply_pos, mat4_apply_dir, mat4_from_trs, mat4_inverse_affine, mat4_transform_point, mat4_transform_dir, safe_model_mat4)
 use std.core
 use std.math
 
-fn mat4_identity(): list { [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, "mat4", 400] }
+fn mat4_identity() list {
+   "Runs the mat4 identity operation."
+   [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, "mat4", 400]
+}
 
 @jit
-fn mat4_mul(any: a, any: b): list {
+fn mat4_mul(any a, any b) list {
+   "Runs the mat4 mul operation."
    def raw = __gltf_mat4_mul_list(a, b)
    if(is_list(raw)){ return raw }
    mut o, c = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400], 0
@@ -27,7 +34,8 @@ fn mat4_mul(any: a, any: b): list {
    o
 }
 
-fn node_local_matrix(any: node): list {
+fn node_local_matrix(any node) list {
+   "Runs the node local matrix operation."
    if(is_dict(node)){
       def raw_m = node.get("matrix")
       if(is_list(raw_m) && raw_m.len >= 16){
@@ -47,7 +55,8 @@ fn node_local_matrix(any: node): list {
 }
 
 @jit
-fn mat4_apply_pos(any: m, any: x, any: y, any: z): list {
+fn mat4_apply_pos(any m, any x, any y, any z) list {
+   "Runs the mat4 apply pos operation."
    [
       (0.0 + m.get(0 * 4 + 0, 1.0)) * x + (0.0 + m.get(1 * 4 + 0, 0.0)) * y + (0.0 + m.get(2 * 4 + 0, 0.0)) * z + (0.0 + m.get(3 * 4 + 0, 0.0)),
       (0.0 + m.get(0 * 4 + 1, 0.0)) * x + (0.0 + m.get(1 * 4 + 1, 1.0)) * y + (0.0 + m.get(2 * 4 + 1, 0.0)) * z + (0.0 + m.get(3 * 4 + 1, 0.0)),
@@ -56,7 +65,8 @@ fn mat4_apply_pos(any: m, any: x, any: y, any: z): list {
 }
 
 @jit
-fn mat4_apply_dir(any: m, any: x, any: y, any: z): list {
+fn mat4_apply_dir(any m, any x, any y, any z) list {
+   "Runs the mat4 apply dir operation."
    [
       (0.0 + m.get(0 * 4 + 0, 1.0)) * x + (0.0 + m.get(1 * 4 + 0, 0.0)) * y + (0.0 + m.get(2 * 4 + 0, 0.0)) * z,
       (0.0 + m.get(0 * 4 + 1, 0.0)) * x + (0.0 + m.get(1 * 4 + 1, 1.0)) * y + (0.0 + m.get(2 * 4 + 1, 0.0)) * z,
@@ -64,7 +74,7 @@ fn mat4_apply_dir(any: m, any: x, any: y, any: z): list {
    ]
 }
 
-fn mat4_from_trs(any: t, any: r, any: s): list {
+fn mat4_from_trs(any t, any r, any s) list {
    "Builds a tagged column-major mat4 from translation, rotation(quat xyzw) and scale lists."
    def tx = 0.0 + t.get(0, 0.0) def ty = 0.0 + t.get(1, 0.0) def tz = 0.0 + t.get(2, 0.0)
    def sx = 0.0 + s.get(0, 1.0) def sy = 0.0 + s.get(1, 1.0) def sz = 0.0 + s.get(2, 1.0)
@@ -79,7 +89,7 @@ fn mat4_from_trs(any: t, any: r, any: s): list {
    tx,                      ty,                      tz,                      1.0, "mat4", 400 ]
 }
 
-fn mat4_inverse_affine(any: m): list {
+fn mat4_inverse_affine(any m) list {
    "Inverts an affine tagged mat4. Returns identity when the matrix is singular."
    if(!is_list(m) || m.len < 16){ return mat4_identity() }
    def a00, a01 = 0.0 + m.get(0, 1.0), 0.0 + m.get(4, 0.0)
@@ -114,13 +124,15 @@ fn mat4_inverse_affine(any: m): list {
    itx, ity, itz, 1.0, "mat4", 400]
 }
 
-fn mat4_transform_point(any: m, any: p): list {
+fn mat4_transform_point(any m, any p) list {
+   "Runs the mat4 transform point operation."
    if(!is_list(m) || m.len < 16){ return [0.0 + p.get(0,0.0), 0.0 + p.get(1,0.0), 0.0 + p.get(2,0.0)] }
    def x = 0.0 + p.get(0,0.0) def y = 0.0 + p.get(1,0.0) def z = 0.0 + p.get(2,0.0)
    mat4_apply_pos(m, x, y, z)
 }
 
-fn mat4_transform_dir(any: m, any: d): list {
+fn mat4_transform_dir(any m, any d) list {
+   "Runs the mat4 transform dir operation."
    if(!is_list(m) || m.len < 16){ return [0.0 + d.get(0,0.0), 0.0 + d.get(1,0.0), 0.0 + d.get(2,-1.0)] }
    def x = 0.0 + d.get(0,0.0) def y = 0.0 + d.get(1,0.0) def z = 0.0 + d.get(2,-1.0)
    mut out = mat4_apply_dir(m, x, y, z)
@@ -134,7 +146,7 @@ fn mat4_transform_dir(any: m, any: d): list {
    out
 }
 
-fn safe_model_mat4(any: m): list {
+fn safe_model_mat4(any m) list {
    "Normalizes possibly malformed model matrices to a strict 16-float array."
    if(!is_list(m) || m.len < 16){ return mat4_identity() }
    [

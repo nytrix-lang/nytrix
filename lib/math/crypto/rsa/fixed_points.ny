@@ -1,15 +1,18 @@
-;; Keywords: rsa fixed-points
+;; Keywords: rsa fixed-points math crypto
 ;; RSA fixed-point analysis routines.
 ;; The number of fixed points is gcd(e-1, p-1) * gcd(e-1, q-1).
 ;; Finding all fixed points uses CRT on roots mod p and mod q.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.fixed_points(count_fixed_points, find_fixed_points)
 use std.core
 use std.math.nt
 
-fn _find_roots_of_xe_eq_x(any: e, any: p): list {
+fn _find_roots_of_xe_eq_x(any e, any p) list {
    "Find all m in [0, p) such that m^e = m mod p.
    Returns a list of all such roots.
    e: public exponent, p: prime modulus."
@@ -23,7 +26,7 @@ fn _find_roots_of_xe_eq_x(any: e, any: p): list {
    roots
 }
 
-fn count_fixed_points(any: e, any: p, any: q): any {
+fn count_fixed_points(any e, any p, any q) any {
    "Count the number of fixed points of RSA encryption mod n = p*q.
    The number of fixed points equals(gcd(e-1, p-1) + 1) * (gcd(e-1, q-1) + 1).
    e: public exponent, p: first prime, q: second prime.
@@ -33,7 +36,7 @@ fn count_fixed_points(any: e, any: p, any: q): any {
    count
 }
 
-fn find_fixed_points(any: e, any: p, any: q): list {
+fn find_fixed_points(any e, any p, any q) list {
    "Find all fixed points m such that m^e = m mod n where n = p*q.
    Uses brute-force root finding mod p and mod q, then combines via CRT.
    e: public exponent, p: first prime, q: second prime.

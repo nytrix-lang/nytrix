@@ -1,11 +1,14 @@
-;; Keywords: ecc montgomery
+;; Keywords: ecc montgomery math crypto public-key
 ;; Elliptic-curve routines for Montgomery-curve arithmetic.
 ;; Reference:
 ;; - https://cr.yp.to/ecdh/curve25519-20060209.pdf
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.montgomery(montgomery_is_on_curve, montgomery_negate, montgomery_point_add, montgomery_point_double, montgomery_scalar_mult, montgomery_base_point)
 use std.math.nt
 
-fn montgomery_is_on_curve(any: P, any: A, any: B, any: p): bool {
+fn montgomery_is_on_curve(any P, any A, any B, any p) bool {
    "Return true when P=[x,y] lies on B*y^2 = x^3 + A*x^2 + x over Fp."
    if(P == nil){ return true }
    def x, y = Z(P[0]), Z(P[1])
@@ -13,13 +16,13 @@ fn montgomery_is_on_curve(any: P, any: A, any: B, any: p): bool {
    lhs == rhs
 }
 
-fn montgomery_negate(any: P, any: p): any {
+fn montgomery_negate(any P, any p) any {
    "Return -P for a Montgomery affine point."
    if(P == nil){ return nil }
    [Z(P[0]), mod(-Z(P[1]), p)]
 }
 
-fn montgomery_point_double(any: P, any: A, any: B, any: p): any {
+fn montgomery_point_double(any P, any A, any B, any p) any {
    "Double a Montgomery affine point."
    if(P == nil){ return nil }
    def x, y = Z(P[0]), Z(P[1])
@@ -30,7 +33,7 @@ fn montgomery_point_double(any: P, any: A, any: B, any: p): any {
    [rx, ry]
 }
 
-fn montgomery_point_add(any: P, any: Q, any: A, any: B, any: p): any {
+fn montgomery_point_add(any P, any Q, any A, any B, any p) any {
    "Add two Montgomery affine points."
    if(P == nil){ return Q }
    if(Q == nil){ return P }
@@ -46,7 +49,7 @@ fn montgomery_point_add(any: P, any: Q, any: A, any: B, any: p): any {
    [rx, ry]
 }
 
-fn montgomery_scalar_mult(any: k, any: P, any: A, any: B, any: p): any {
+fn montgomery_scalar_mult(any k, any P, any A, any B, any p) any {
    "Scalar multiply a Montgomery affine point with a left-to-right ladder."
    mut kk = Z(k)
    if(P == nil || kk == Z(0)){ return nil }
@@ -69,7 +72,7 @@ fn montgomery_scalar_mult(any: k, any: P, any: A, any: B, any: p): any {
    r0
 }
 
-fn montgomery_base_point(any: x, any: A, any: B, any: p): any {
+fn montgomery_base_point(any x, any A, any B, any p) any {
    "Return one affine point with the given x-coordinate, or nil if none exists."
    def xx = Z(x)
    def rhs = mod((xx * xx * xx + A * xx * xx + xx) * inverse_mod(B, p), p)

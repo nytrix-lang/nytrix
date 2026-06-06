@@ -1,4 +1,4 @@
-;; Keywords: factorization integer-factorization fermat pollard pminus1 ecm primality known-primes chunked-primes quadratic-form nfs classical
+;; Keywords: factorization integer-factorization fermat pollard pminus1 ecm primality known-primes chunked-primes quadratic-form nfs classical math crypto number-theory
 ;; Integer-factorization facade for classical methods, Fermat, Pollard, ECM, primality, and known-prime helpers.
 ;; References:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf

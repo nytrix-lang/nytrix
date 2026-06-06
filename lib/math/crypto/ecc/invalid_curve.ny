@@ -1,15 +1,18 @@
-;; Keywords: ecc invalid-curve
+;; Keywords: ecc invalid-curve math crypto public-key
 ;; Invalid-curve attack routines for elliptic-curve protocols.
 ;; Recover private keys by exploiting invalid curve parameters and quadratic twists
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.invalid_curve(invalid_curve_attack, twist_attack, invalid_curve_dlog, invalid_curve_recover_transcript, crt_combine)
 use std.math.nt
 use std.math.crypto.ecc
 use std.math.crypto.ecc.ecc (ecc_point_add, ecc_scalar_mult)
 
-fn invalid_curve_attack(fnptr: oracle_fn, any: Gx, any: Gy, any: a, any: p, list: factors): any {
+fn invalid_curve_attack(fnptr oracle_fn, any Gx, any Gy, any a, any p, list factors) any {
    "Invalid curve attack: recover private key d from an oracle that does scalar multiplication " +
    "on y^2 = x^3 + ax + b over F_p without point validation. " +
    "factors is [prime, exponent] pairs for the order. Returns d or nil."
@@ -36,7 +39,7 @@ fn invalid_curve_attack(fnptr: oracle_fn, any: Gx, any: Gy, any: a, any: p, list
    result
 }
 
-fn twist_attack(fnptr: oracle_fn, any: Gx, any: Gy, any: a, any: b, any: p, list: factors): any {
+fn twist_attack(fnptr oracle_fn, any Gx, any Gy, any a, any b, any p, list factors) any {
    "Quadratic twist attack: recover d by sending points on the twist of y^2 = x^3 + ax + b over F_p. " +
    "Twist order is p + 1 - t while original is p + 1 + t. " +
    "factors is [prime, exponent] pairs for the twist order. Returns d or nil."
@@ -64,7 +67,7 @@ fn twist_attack(fnptr: oracle_fn, any: Gx, any: Gy, any: a, any: b, any: p, list
    result
 }
 
-fn invalid_curve_dlog(list: g, any: q, any: a, any: p, int: order): int {
+fn invalid_curve_dlog(list g, any q, any a, any p, int order) int {
    "Brute-force dlog in a small invalid-curve subgroup. Returns -1 if not found."
    mut r = nil
    mut k = 0
@@ -76,7 +79,7 @@ fn invalid_curve_dlog(list: g, any: q, any: a, any: p, int: order): int {
    -1
 }
 
-fn invalid_curve_recover_transcript(list: transcript, any: a, any: p): any {
+fn invalid_curve_recover_transcript(list transcript, any a, any p) any {
    "Recover a scalar from fixed invalid-curve query rows [x,y,order,qx,qy]. " +
    "Returns [scalar, combined_modulus], or nil if a row is inconsistent."
    mut rems = []
@@ -100,7 +103,7 @@ fn invalid_curve_recover_transcript(list: transcript, any: a, any: p): any {
    [crt(rems, mods), product]
 }
 
-fn find_point_of_order(any: a, any: q, any: p): any {
+fn find_point_of_order(any a, any q, any p) any {
    "Find a point of order q on y^2 = x^3 + ax + b' for some b' over F_p. " +
    "Searches small b' values. Returns [x, y] or nil."
    mut b_try = 0
@@ -114,7 +117,7 @@ fn find_point_of_order(any: a, any: q, any: p): any {
    nil
 }
 
-fn find_point_with_order(any: a, any: b, any: q, any: p): any {
+fn find_point_with_order(any a, any b, any q, any p) any {
    "Find a point on y^2 = x^3 + ax + b over F_p that has order dividing q. Returns [x, y] or nil."
    def order = compute_curve_order(a, b, p)
    if(order == 0){ return nil }
@@ -132,7 +135,7 @@ fn find_point_with_order(any: a, any: b, any: q, any: p): any {
    Q
 }
 
-fn find_point_x(any: a, any: b, any: p): any {
+fn find_point_x(any a, any b, any p) any {
    "Find an x-coordinate on curve y^2 = x^3 + ax + b over F_p. Returns x or -1 if not found in search range."
    mut x_max = p
    if(x_max > 500){ x_max = 500 }
@@ -146,7 +149,7 @@ fn find_point_x(any: a, any: b, any: p): any {
    -1
 }
 
-fn find_point_y(any: x, any: a, any: b, any: p): any {
+fn find_point_y(any x, any a, any b, any p) any {
    "Find y for x on y^2 = x^3 + ax + b over F_p. Returns y or -1 if no sqrt exists."
    mut rhs = (x * x * x + a * x + b) % p
    if(rhs < 0){ rhs = rhs + p }
@@ -154,13 +157,13 @@ fn find_point_y(any: x, any: a, any: b, any: p): any {
    tonelli_shanks(rhs, p)
 }
 
-fn is_quadratic_residue(any: a, any: p): bool {
+fn is_quadratic_residue(any a, any p) bool {
    "Check if a is a quadratic residue modulo p."
    if(a == 0){ return true }
    legendre(a, p) == 1
 }
 
-fn find_non_residue(any: p): any {
+fn find_non_residue(any p) any {
    "Find a quadratic non-residue modulo p by brute force. Returns the smallest non-residue."
    mut z = 2
    while(z < p){
@@ -170,7 +173,7 @@ fn find_non_residue(any: p): any {
    -1
 }
 
-fn compute_curve_order(any: a, any: b, any: p): any {
+fn compute_curve_order(any a, any b, any p) any {
    "Approximate order of y^2 = x^3 + ax + b over F_p using Hasse bound. " +
    "Returns estimated order or 0 on failure."
    mut x = 0
@@ -189,7 +192,7 @@ fn compute_curve_order(any: a, any: b, any: p): any {
    count
 }
 
-fn find_twist_b(any: b, any: p): any {
+fn find_twist_b(any b, any p) any {
    "Find b for the quadratic twist of y^2 = x^3 + ax + b over F_p. " +
    "Twist is y^2 = x^3 + a*g^2*x + b*g^3 for non-residue g. Returns twisted b."
    def g = find_non_residue(p)
@@ -198,7 +201,7 @@ fn find_twist_b(any: b, any: p): any {
    (b * g3) % p
 }
 
-fn find_point_on_twist(any: a, any: b, any: q, any: p): any {
+fn find_point_on_twist(any a, any b, any q, any p) any {
    "Find a point on the quadratic twist curve y^2 = x^3 + ax + b over F_p with order dividing q. Returns [x, y] or nil."
    mut x_max = p
    if(x_max > 500){ x_max = 500 }
@@ -215,7 +218,7 @@ fn find_point_on_twist(any: a, any: b, any: q, any: p): any {
    nil
 }
 
-fn tonelli_shanks_non_residue(any: n, any: p): any {
+fn tonelli_shanks_non_residue(any n, any p) any {
    "Compute sqrt of non-residue n in the twist: finds y with y^2 = n * g where g is non-residue. " +
    "Returns y or -1."
    def g = find_non_residue(p)
@@ -225,7 +228,7 @@ fn tonelli_shanks_non_residue(any: n, any: p): any {
    tonelli_shanks(ng, p)
 }
 
-fn crt_combine(any: r1, any: r2, any: m1, any: m2): list {
+fn crt_combine(any r1, any r2, any m1, any m2) list {
    "Combine two congruences using CRT: x = r1(mod m1), x = r2(mod m2). Returns [x, m1*m2].
    Uses the formula x = r1 + m1 * ((r2 - r1) * m1^-1 mod m2)."
    def g = gcd(m1, m2)

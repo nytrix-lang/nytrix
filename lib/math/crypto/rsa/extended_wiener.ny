@@ -1,4 +1,4 @@
-;; Keywords: rsa extended-wiener
+;; Keywords: rsa extended-wiener math crypto
 ;; RSA extended Wiener RSA attack routines.
 ;; References:
 ;; - Dujella A., "Continued fractions and RSA with small secret exponent"
@@ -9,9 +9,9 @@ use std.math.crypto.factorization.known_phi
 use std.math.crypto.lattice.lll
 use std.math.matrix
 
-fn _babs(any: x): any { bigint_lt(x, Z(0)) ? (-x) : x }
+fn _babs(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 
-fn _rsa_try_small_d(any: n, any: e, any: k, any: d): any {
+fn _rsa_try_small_d(any n, any e, any k, any d) any {
    if(bigint_eq(k, Z(0)) || bigint_le(d, Z(0))){ return nil }
    if(bigint_eq((e * d - Z(1)) % k, Z(0)) == false){ return nil }
    if(power_mod(power_mod(Z(2), e, n), d, n) != Z(2)){ return nil }
@@ -22,7 +22,7 @@ fn _rsa_try_small_d(any: n, any: e, any: k, any: d): any {
    [p, q, d]
 }
 
-fn extended_wiener_attack(any: n, any: e, int: max_s=20000, int: max_r=100, int: max_t=100): any {
+fn extended_wiener_attack(any n, any e, int max_s=20000, int max_r=100, int max_t=100) any {
    "Dujella's extension of Wiener's attack.
    Returns [p, q, d] or nil."
    def convs = cf_convergents(continued_fraction(e, n))
@@ -60,7 +60,7 @@ fn extended_wiener_attack(any: n, any: e, int: max_s=20000, int: max_r=100, int:
    nil
 }
 
-fn lattice_wiener_attack(any: n, any: e): any {
+fn lattice_wiener_attack(any n, any e) any {
    "Nguyen's lattice variant for small-d RSA.
    Returns [p, q, d] or nil."
    def s = isqrt(n)
@@ -80,12 +80,12 @@ fn lattice_wiener_attack(any: n, any: e): any {
    nil
 }
 
-fn extended_wiener_attack_entry(any: n, any: e, int: max_s=20000, int: max_r=100, int: max_t=100): any {
+fn extended_wiener_attack_entry(any n, any e, int max_s=20000, int max_r=100, int max_t=100) any {
    "Extended Wiener attack entrypoint."
    extended_wiener_attack(n, e, max_s, max_r, max_t)
 }
 
-fn wiener_attack_lattice_entry(any: n, any: e): any {
+fn wiener_attack_lattice_entry(any n, any e) any {
    "Nguyen lattice Wiener variant entrypoint."
    lattice_wiener_attack(n, e)
 }

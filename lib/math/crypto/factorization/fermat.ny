@@ -1,13 +1,16 @@
-;; Keywords: factorization fermat
+;; Keywords: factorization fermat math crypto number-theory
 ;; Integer-factorization routines for Fermat and near-square factorization.
 ;; Expresses n = a^2 - b^2 = (a-b)(a+b) where a = (p+q)/2, b = (p-q)/2.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.fermat(fermat_factor, fermat_factor_bounded, fermat_attack, is_perfect_square)
 use std.math.nt
 
-fn _fermat_isqrt_int(int: n): int {
+fn _fermat_isqrt_int(int n) int {
    if(n <= 0){ return 0 }
    mut hi = 1
    while(hi <= n / hi){ hi *= 2 }
@@ -19,13 +22,13 @@ fn _fermat_isqrt_int(int: n): int {
    lo
 }
 
-fn _fermat_is_square_int(int: n): bool {
+fn _fermat_is_square_int(int n) bool {
    if(n < 0){ return false }
    def r = _fermat_isqrt_int(n)
    r * r == n
 }
 
-fn _fermat_factor_bounded_i62(int: n, int: max_iter): any {
+fn _fermat_factor_bounded_i62(int n, int max_iter) any {
    mut a = _fermat_isqrt_int(n)
    mut count = 0
    while(count < max_iter){
@@ -43,7 +46,7 @@ fn _fermat_factor_bounded_i62(int: n, int: max_iter): any {
    nil
 }
 
-fn fermat_factor(any: n): list {
+fn fermat_factor(any n) list {
    "Factor n using Fermat method. Returns [p, q] with p <= q.
    Assumes n is an odd composite. Starts a = isqrt(n) and
    increments a until a^2 - n is a perfect square."
@@ -67,7 +70,7 @@ fn fermat_factor(any: n): list {
    }
 }
 
-fn fermat_factor_bounded(any: n, int: max_iter): any {
+fn fermat_factor_bounded(any n, int max_iter) any {
    "Factor n using Fermat method with an iteration limit.
    Returns [p, q] if found within max_iter iterations,
    or nil if the factors are too far apart."
@@ -88,7 +91,7 @@ fn fermat_factor_bounded(any: n, int: max_iter): any {
    nil
 }
 
-fn fermat_attack(any: n, int: max_iter=1000000): any {
+fn fermat_attack(any n, int max_iter=1000000) any {
    "RSA-oriented entrypoint for bounded Fermat factorization."
    fermat_factor_bounded(n, max_iter)
 }

@@ -1,21 +1,24 @@
-;; Keywords: cipher polybius
+;; Keywords: cipher polybius math crypto
 ;; Classical cipher routines for Polybius square encoding and decoding.
 ;; Core substitution step for ADFGX and ADFGVX ciphers
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Polybius_square
 ;; - https://en.wikipedia.org/wiki/ADFGVX_cipher
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.polybius(polybius_decode_pair, polybius_decode_text, polybius_encode_char, polybius_encode_text, polybius_make_grid)
 use std.core
 use std.core.str
 
-fn _pchar(str: text, int: i): str { utf8_slice(text, i, i + 1, 1) }
+fn _pchar(str text, int i) str { utf8_slice(text, i, i + 1, 1) }
 
-fn _pnormalize(str: ch): str {
+fn _pnormalize(str ch) str {
    def up = upper(ch)
    up == "J" ? "I" : up
 }
 
-fn polybius_make_grid(str: key_phrase, str: alphabet="ABCDEFGHIKLMNOPQRSTUVWXYZ", int: size=5): str {
+fn polybius_make_grid(str key_phrase, str alphabet="ABCDEFGHIKLMNOPQRSTUVWXYZ", int size=5) str {
    "Build a Polybius square from key phrase. Deduplicates, appends remaining alphabet chars. Returns the grid string."
    mut seen = set(32)
    mut grid = ""
@@ -40,7 +43,7 @@ fn polybius_make_grid(str: key_phrase, str: alphabet="ABCDEFGHIKLMNOPQRSTUVWXYZ"
    grid
 }
 
-fn polybius_encode_char(str: ch, str: grid, str: row_labels="12345", str: col_labels="12345", int: size=5): str {
+fn polybius_encode_char(str ch, str grid, str row_labels="12345", str col_labels="12345", int size=5) str {
    "Encode a single character as a(row, col) pair. Returns 2-char string or '' if not in grid."
    def lookup = _pnormalize(ch)
    mut i = 0
@@ -55,7 +58,7 @@ fn polybius_encode_char(str: ch, str: grid, str: row_labels="12345", str: col_la
    ""
 }
 
-fn polybius_encode_text(str: text, str: grid, str: row_labels="12345", str: col_labels="12345", str: sep=" ", int: size=5): str {
+fn polybius_encode_text(str text, str grid, str row_labels="12345", str col_labels="12345", str sep=" ", int size=5) str {
    "Encode text to Polybius coordinate pairs separated by sep."
    mut out = ""
    mut first = true
@@ -74,7 +77,7 @@ fn polybius_encode_text(str: text, str: grid, str: row_labels="12345", str: col_
    out
 }
 
-fn polybius_decode_pair(str: pair, str: grid, int: row_base=49, int: col_base=49, int: size=5): str {
+fn polybius_decode_pair(str pair, str grid, int row_base=49, int col_base=49, int size=5) str {
    "Decode a 2-char coordinate pair to a letter using the Polybius grid."
    if(pair.len < 2){ return "?" }
    def row = ord_at(pair, 0) - row_base
@@ -84,7 +87,7 @@ fn polybius_decode_pair(str: pair, str: grid, int: row_base=49, int: col_base=49
    _pchar(grid, idx)
 }
 
-fn polybius_decode_text(str: text, str: grid, int: row_min=49, int: row_max=53, int: col_min=49, int: col_max=53, int: size=5): str {
+fn polybius_decode_text(str text, str grid, int row_min=49, int row_max=53, int col_min=49, int col_max=53, int size=5) str {
    "Decode Polybius-encoded text. Strips spaces/commas and processes coordinate pairs."
    mut cleaned = ""
    mut i = 0

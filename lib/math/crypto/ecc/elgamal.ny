@@ -1,23 +1,26 @@
-;; Keywords: ecc elgamal
+;; Keywords: ecc elgamal math crypto public-key
 ;; EC ElGamal encryption, decryption, and recovery routines.
 ;; Decrypt, nonce reuse, key recovery
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
+;; References:
+;; - std.math.crypto.ecc
+;; - std.math.crypto
 module std.math.crypto.ecc.elgamal(elgamal_public_key, elgamal_private_key, elgamal_keygen, elgamal_encrypt, elgamal_decrypt, elgamal_derive_shared, elgamal_nonce_reuse, elgamal_recover_key_from_nonce_reuse, elgamal_key_nonce_reuse, elgamal_key_nonce_reuse_all, elgamal_recover_plaintext_from_nonce_reuse, elgamal_multiply_ciphertext, elgamal_unsafe_generator_leak, elgamal_sign, elgamal_verify, elgamal_signature_nonce_reuse)
 use std.math.nt
 
-fn elgamal_public_key(any: h, any: p, any: g, any: q=nil): list {
+fn elgamal_public_key(any h, any p, any g, any q=nil) list {
    "Create an ElGamal public key tuple [h, p, g, q]."
    [Z(h), Z(p), Z(g), q == nil ? Z(p) - Z(1) : Z(q)]
 }
 
-fn elgamal_private_key(any: x, any: p, any: g, any: q=nil): list {
+fn elgamal_private_key(any x, any p, any g, any q=nil) list {
    "Create an ElGamal private key tuple [x, p, g, q]."
    [Z(x), Z(p), Z(g), q == nil ? Z(p) - Z(1) : Z(q)]
 }
 
-fn elgamal_keygen(any: p=nil, any: g=nil, any: q=nil, any: x=nil): list {
+fn elgamal_keygen(any p=nil, any g=nil, any q=nil, any x=nil) list {
    "Generate an ElGamal [public, private] key pair. x may be supplied for deterministic tests."
    if(p == nil){ p = (Z(1) << Z(1024)) - Z(1093337) }
    if(g == nil){ g = Z(7) }
@@ -27,12 +30,12 @@ fn elgamal_keygen(any: p=nil, any: g=nil, any: q=nil, any: x=nil): list {
    [elgamal_public_key(h, p, g, q), elgamal_private_key(x, p, g, q)]
 }
 
-fn elgamal_derive_shared(list: pubkey, any: y): any {
+fn elgamal_derive_shared(list pubkey, any y) any {
    "Derive ElGamal shared secret h^y mod p from a public key."
    power_mod(pubkey[0], y, pubkey[1])
 }
 
-fn elgamal_encrypt(any: m, list: pubkey, any: y=nil): list {
+fn elgamal_encrypt(any m, list pubkey, any y=nil) list {
    "Encrypt integer message m with ElGamal public key [h, p, g, q]. Returns [c1, c2]."
    def h, p = pubkey[0], pubkey[1]
    def g = pubkey[2]
@@ -42,7 +45,7 @@ fn elgamal_encrypt(any: m, list: pubkey, any: y=nil): list {
    [c1, mod(Z(m) * s, p)]
 }
 
-fn elgamal_decrypt(any: c1, any: c2, any: x=nil, any: p=nil): any {
+fn elgamal_decrypt(any c1, any c2, any x=nil, any p=nil) any {
    "Decrypt an ElGamal ciphertext(c1, c2) using private key x modulo p. Returns the plaintext m."
    if(is_list(c1)){
       def ct = c1
@@ -54,14 +57,14 @@ fn elgamal_decrypt(any: c1, any: c2, any: x=nil, any: p=nil): any {
    (c2 * s_inv) % p
 }
 
-fn elgamal_nonce_reuse(any: c1, any: c2_1, any: m1, any: c2_2, any: m2, any: p): any {
+fn elgamal_nonce_reuse(any c1, any c2_1, any m1, any c2_2, any m2, any p) any {
    "Detect ElGamal nonce reuse by comparing shared secret s from two ciphertext/message pairs. " +
    "Returns nil when s values match(reused nonce), else [s1, s2]."
    def s1, s2 = (c2_1 * inverse_mod(m1, p)) % p, (c2_2 * inverse_mod(m2, p)) % p
    if(s1 == s2){ nil } else { [s1, s2] }
 }
 
-fn elgamal_recover_plaintext_from_nonce_reuse(any: p, any: known_m, any: known_c1, any: known_c2, any: target_c1, any: target_c2): any {
+fn elgamal_recover_plaintext_from_nonce_reuse(any p, any known_m, any known_c1, any known_c2, any target_c1, any target_c2) any {
    "Recover a target plaintext when ElGamal reused the same nonce/shared secret as a known plaintext.
    Returns nil if c1 differs or known_m is not invertible modulo p."
    if(known_c1 != target_c1){ return nil }
@@ -71,13 +74,13 @@ fn elgamal_recover_plaintext_from_nonce_reuse(any: p, any: known_m, any: known_c
    mod(target_c2 * inverse_mod(s, p), p)
 }
 
-fn elgamal_multiply_ciphertext(list: ct, any: multiplier, any: p): list {
+fn elgamal_multiply_ciphertext(list ct, any multiplier, any p) list {
    "Exploit ElGamal multiplicative malleability: ciphertext for m becomes ciphertext for m*multiplier mod p.
    Leaves c1 unchanged and multiplies c2 by multiplier."
    [ct[0], mod(ct[1] * multiplier, p)]
 }
 
-fn elgamal_recover_key_from_nonce_reuse(any: c1, any: c2_1, any: m1, any: c2_2, any: m2, any: p, any: g): any {
+fn elgamal_recover_key_from_nonce_reuse(any c1, any c2_1, any m1, any c2_2, any m2, any p, any g) any {
    "Recover ElGamal private key x from two ciphertexts that reused nonce, given g and p. " +
    "Returns x or nil."
    def s1 = (c2_1 * inverse_mod(m1, p)) % p
@@ -87,7 +90,7 @@ fn elgamal_recover_key_from_nonce_reuse(any: c1, any: c2_1, any: m1, any: c2_2, 
    x
 }
 
-fn elgamal_key_nonce_reuse(any: p, any: m1, any: r1, any: s1, any: m2, any: r2, any: s2): any {
+fn elgamal_key_nonce_reuse(any p, any m1, any r1, any s1, any m2, any r2, any s2) any {
    "Recover [k, x] from two ElGamal signatures that reused the same nonce."
    if(r1 != r2){ return nil }
    def pm1 = p - 1
@@ -99,7 +102,7 @@ fn elgamal_key_nonce_reuse(any: p, any: m1, any: r1, any: s1, any: m2, any: r2, 
    [k, x]
 }
 
-fn elgamal_key_nonce_reuse_all(any: p, any: m1, any: r1, any: s1, any: m2, any: r2, any: s2): list {
+fn elgamal_key_nonce_reuse_all(any p, any m1, any r1, any s1, any m2, any r2, any s2) list {
    "Recover all [k, x] candidates from two ElGamal signatures that reused a nonce.
    Handles non-coprime linear congruence cases by returning every valid candidate."
    if(r1 != r2){ return [] }
@@ -120,7 +123,7 @@ fn elgamal_key_nonce_reuse_all(any: p, any: m1, any: r1, any: s1, any: m2, any: 
    out
 }
 
-fn elgamal_unsafe_generator_leak(any: p, any: h, any: c1, any: c2): any {
+fn elgamal_unsafe_generator_leak(any p, any h, any c1, any c2) any {
    "Returns the Legendre-symbol leakage bit for unsafe-generator ElGamal."
    def lh = legendre(Z(h), Z(p))
    def lc1 = legendre(Z(c1), Z(p))
@@ -129,7 +132,7 @@ fn elgamal_unsafe_generator_leak(any: p, any: h, any: c1, any: c2): any {
    lc2 / max(lh, lc1)
 }
 
-fn elgamal_sign(any: m, any: x, any: p, any: g, any: k): any {
+fn elgamal_sign(any m, any x, any p, any g, any k) any {
    "Create ElGamal signature [r, s] for message representative m.
    Requires gcd(k, p-1) = 1. Returns nil if k is invalid."
    def pm1 = p - 1
@@ -141,7 +144,7 @@ fn elgamal_sign(any: m, any: x, any: p, any: g, any: k): any {
    [r, mod(s, pm1)]
 }
 
-fn elgamal_verify(any: m, list: sig, any: y, any: p, any: g): bool {
+fn elgamal_verify(any m, list sig, any y, any p, any g) bool {
    "Verify ElGamal signature [r, s] on message representative m."
    def r, s = sig[0], sig[1]
    if(r <= 0 || r >= p){ return false }
@@ -150,7 +153,7 @@ fn elgamal_verify(any: m, list: sig, any: y, any: p, any: g): bool {
    lhs == rhs
 }
 
-fn elgamal_signature_nonce_reuse(list: sig1, any: m1, list: sig2, any: m2, any: p): any {
+fn elgamal_signature_nonce_reuse(list sig1, any m1, list sig2, any m2, any p) any {
    "Recover [k, x] from two ElGamal signatures that reused the same nonce.
    This implementation handles the common invertible case where
    gcd(s1-s2, p-1) = gcd(r, p-1) = 1."
@@ -166,7 +169,7 @@ fn elgamal_signature_nonce_reuse(list: sig1, any: m1, list: sig2, any: m2, any: 
    [k, x]
 }
 
-fn dlog_brute(any: g, any: h, any: p, any: max_iter): any {
+fn dlog_brute(any g, any h, any p, any max_iter) any {
    "Internal brute-force DLP solver for g^x = h(mod p), up to max_iter iterations. " +
    "Returns x if found, else nil."
    mut val = 1

@@ -1,23 +1,21 @@
-;; Keywords: factorization complex-multiplication
+;; Keywords: factorization complex-multiplication math crypto number-theory
 ;; Integer-factorization routines for complex-multiplication leakage factorization.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.complex_multiplication(cm_factor, find_cm_curve, cm_order, class_number, cm_discriminant, cm_hilbert_class_poly, cm_j_invariant, is_cm_discriminant, cm_curve_params, cm11_prime_candidates_from_order_mod)
 use std.math.nt
 
-fn _cm_abs(number: n): number { (n < 0) ? 0 - n : n }
+fn _cm_abs(number n) number { (n < 0) ? 0 - n : n }
 
-fn _cm_append_unique(list: xs, any: value): list {
-   mut i = 0
-   while(i < xs.len){
-      if(xs[i] == value){ return xs }
-      i += 1
-   }
-   xs.append(value)
+fn _cm_append_unique(list xs, any value) list {
+   xs.contains(value) ? xs : xs.append(value)
 }
 
-fn cm11_prime_candidates_from_order_mod(any: gift, any: modulus): list {
+fn cm11_prime_candidates_from_order_mod(any gift, any modulus) list {
    "Recover p = u^2 + u + 3 candidates for the CM D=-11, j=-32768 order-mod leak.
    `gift` is the leaked isogenous-curve order modulo a prime modulus. The helper
    solves the two quadratic trace cases for u and returns distinct p candidates."
@@ -40,7 +38,7 @@ fn cm11_prime_candidates_from_order_mod(any: gift, any: modulus): list {
    out
 }
 
-fn is_cm_discriminant(number: d): int {
+fn is_cm_discriminant(number d) int {
    "Check if d is a valid CM discriminant(negative fundamental discriminant). Returns 1 if valid, 0 otherwise."
    if(d >= 0){ return 0 }
    case int(d % 4){
@@ -63,7 +61,7 @@ fn is_cm_discriminant(number: d): int {
    0
 }
 
-fn _is_squarefree(number: n): bool {
+fn _is_squarefree(number n) bool {
    if(n <= 1){ return true }
    mut test = 2
    while(test * test <= n){
@@ -73,7 +71,7 @@ fn _is_squarefree(number: n): bool {
    true
 }
 
-fn cm_discriminant(number: n): number {
+fn cm_discriminant(number n) number {
    "Find CM discriminant for field size n. Returns a negative discriminant d such that the imaginary quadratic field Q(sqrt(d)) has class number related to n."
    mut d = 0 - n
    if(is_cm_discriminant(d) == 1){ return d }
@@ -81,7 +79,7 @@ fn cm_discriminant(number: n): number {
    (is_cm_discriminant(d_alt) == 1) ? d_alt : d
 }
 
-fn class_number(number: d): int {
+fn class_number(number d) int {
    "Compute class number of imaginary quadratic field Q(sqrt(d)) where d is a negative discriminant. Returns the class number h."
    if(d >= 0){ return 0 }
    def abs_d = _cm_abs(d)
@@ -111,7 +109,7 @@ fn class_number(number: d): int {
    (h > 0) ? h : 1
 }
 
-fn cm_hilbert_class_poly(number: d): list {
+fn cm_hilbert_class_poly(number d) list {
    "Compute Hilbert class polynomial for discriminant d. Returns coefficients as list [c0, c1, ..., cn]."
    def h = class_number(d)
    if(h == 0){ return [1] }
@@ -120,7 +118,7 @@ fn cm_hilbert_class_poly(number: d): list {
    [j_approx, 1]
 }
 
-fn compute_j_approx(number: d): number {
+fn compute_j_approx(number d) number {
    "Internal: Approximate j-invariant for CM discriminant d using q-expansion. Returns integer approximation of j."
    def sqrt_d = isqrt(d)
    def q_val = exp_approx(0 - 2 * 314159 * sqrt_d / 100000)
@@ -128,7 +126,7 @@ fn compute_j_approx(number: d): number {
    j_val
 }
 
-fn exp_approx(number: x): number {
+fn exp_approx(number x) number {
    "Internal: Approximate e^x using Taylor series expansion(20 terms). Returns floating-point approximation."
    if(x < 0){ return 1 / exp_approx(0 - x) }
    mut result = 1
@@ -142,7 +140,7 @@ fn exp_approx(number: x): number {
    result
 }
 
-fn cm_j_invariant(number: d): number {
+fn cm_j_invariant(number d) number {
    "Compute j-invariant for CM discriminant d. Returns the approximate j-invariant value."
    def abs_d = _cm_abs(d)
    if(abs_d == 3){ return 0 }
@@ -150,7 +148,7 @@ fn cm_j_invariant(number: d): number {
    compute_j_approx(abs_d)
 }
 
-fn find_cm_curve(number: p, number: d): list {
+fn find_cm_curve(number p, number d) list {
    "Find elliptic curve with CM by discriminant d over F_p. Returns [j, a, b, p] defining the curve y^2 = x^3 + ax + b."
    def j = cm_j_invariant(d) % p
    def a = find_curve_a(j, p)
@@ -158,7 +156,7 @@ fn find_cm_curve(number: p, number: d): list {
    [j, a, b, p]
 }
 
-fn find_curve_a(number: j, number: p): number {
+fn find_curve_a(number j, number p) number {
    "Internal: Find curve parameter a from j-invariant over F_p. Returns the coefficient a for the elliptic curve."
    if(j == 0){ return 0 }
    if(j == 1728){ return 1 }
@@ -168,7 +166,7 @@ fn find_curve_a(number: j, number: p): number {
    (num * inv_den) % p
 }
 
-fn find_curve_b(number: j, number: a, number: p): number {
+fn find_curve_b(number j, number a, number p) number {
    "Internal: Find curve parameter b from j-invariant and a over F_p. Returns the coefficient b for the elliptic curve."
    if(j == 0){ return 1 }
    if(j == 1728){ return 0 }
@@ -178,25 +176,25 @@ fn find_curve_b(number: j, number: a, number: p): number {
    (num * inv_den) % p
 }
 
-fn cm_order(number: p, number: d): number {
+fn cm_order(number p, number d) number {
    "Compute order of elliptic curve with CM by d over F_p. Returns the number of points on the curve."
    def t = find_trace(p, d)
    p + 1 - t
 }
 
-fn find_trace(number: p, number: d): number {
+fn find_trace(number p, number d) number {
    "Internal: Find trace of Frobenius for CM curve over F_p with discriminant d. Returns the trace value t."
    def abs_d = _cm_abs(d)
    def kronecker_val = legendre_or_kronecker(abs_d, p)
    kronecker_val * find_t_from_equation(p, abs_d)
 }
 
-fn legendre_or_kronecker(number: a, number: p): number {
+fn legendre_or_kronecker(number a, number p) number {
    "Internal: Compute Legendre/Kronecker symbol(a/p). Returns 0, 1, or -1."
    legendre(a, p)
 }
 
-fn find_t_from_equation(number: p, number: d): number {
+fn find_t_from_equation(number p, number d) number {
    "Internal: Find t such that 4p = t^2 - d*v^2 for some v. Returns t or 0 if not found."
    def four_p = 4 * p
    def t_bound = 2 * isqrt(p) + 1
@@ -214,14 +212,14 @@ fn find_t_from_equation(number: p, number: d): number {
    0
 }
 
-fn cm_curve_params(number: p, number: d): list {
+fn cm_curve_params(number p, number d) list {
    "Get full CM curve parameters over F_p. Returns [j, a, b, p, order] for the elliptic curve with CM by d."
    def curve = find_cm_curve(p, d)
    def order = cm_order(p, d)
    [curve[0], curve[1], curve[2], curve[3], order]
 }
 
-fn cm_factor(number: n): number {
+fn cm_factor(number n) number {
    "Attempt to factor n using CM method. Works when n is a prime or has small prime factors. Returns a factor or 0 if none found."
    mut d = 3
    while(d < 100){

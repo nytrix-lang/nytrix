@@ -1,6 +1,9 @@
-;; Keywords: encoding ascii
+;; Keywords: encoding ascii math crypto
 ;; Encoding routines for ASCII conversion and scoring operations.
 ;; Reference:
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.ascii(lowercase, uppercase, letters, digits, hexdigits, octdigits, punctuation, whitespace, printable)
 use std.core
 

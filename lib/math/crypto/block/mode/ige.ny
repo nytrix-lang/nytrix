@@ -1,10 +1,13 @@
-;; Keywords: block-cipher mode ige
+;; Keywords: block-cipher mode ige math crypto
 ;; Block-mode routines for IGE bit-flipping analysis.
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.ige(ige_bit_flipping)
 use std.core
 use std.math.bin
 
-fn ige_bit_flipping(any: iv1, any: iv2, list: ct, int: pos, int: old_byte, int: new_byte): list {
+fn ige_bit_flipping(any iv1, any iv2, list ct, int pos, int old_byte, int new_byte) list {
    "Flip a byte in IGE-decrypted plaintext by modifying ciphertext bytes.
    IGE mode decryption:
    P[i] = D(C[i]) XOR C[i-1]    (with C[0] = iv2 for the first block)

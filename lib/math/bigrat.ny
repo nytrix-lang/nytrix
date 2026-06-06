@@ -1,4 +1,4 @@
-;; Keywords: bigrat rational fraction
+;; Keywords: bigrat rational fraction math crypto
 ;; BigInt and BigRational arithmetic for cryptographic math.
 ;; Search aliases: math, bigrat, rational
 ;;
@@ -14,12 +14,14 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; - https://en.wikipedia.org/wiki/Arbitrary-precision_arithmetic
+;; References:
+;; - std.math.crypto
 module std.math.crypto.bigrat(BIG_BASE, big_trim, big_copy, big_cmp, big_gte, big_gt, big_eq, big_sub, big_add, big_add_small, big_mul_small, big_mul, big_mod_digits, big_powmod, big_gcd, big_div_small, big_div, big_from_dec, big_to_dec, big_to_hex, hex_to_ascii, hex_val, int2s, rat_new, rat_zero, rat_one, rat_from_int, rat_from_int_den, rat_sign, rat_num, rat_den, rat_neg, rat_abs, rat_simplify, rat_add, rat_sub, rat_mul, rat_div, rat_cmp, rat_eq, rat_lt, rat_lte, rat_gt, rat_gte, rat_to_float, rat_floor, rat_round)
 use std.core.str (Builder, builder_append, builder_to_str, builder_free, atof)
 
-fn BIG_BASE(): int { "Returns the internal BigInt limb base." 1000000000 }
+fn BIG_BASE() int { "Returns the internal BigInt limb base." 1000000000 }
 
-fn big_trim(list: lst): list {
+fn big_trim(list lst) list {
    "Remove trailing zero digits from a BigInt digit array."
    mut n = lst.len
    while(n > 1 && lst.get(n - 1) == 0){
@@ -29,7 +31,7 @@ fn big_trim(list: lst): list {
    lst
 }
 
-fn _big_rm_last(list: lst): list {
+fn _big_rm_last(list lst) list {
    def n = lst.len
    if(n <= 1){ return [0] }
    mut result = []
@@ -41,7 +43,7 @@ fn _big_rm_last(list: lst): list {
    result
 }
 
-fn big_copy(list: digits): list {
+fn big_copy(list digits) list {
    "Return a copy of a BigInt digit array."
    def n = digits.len
    mut result = []
@@ -53,7 +55,7 @@ fn big_copy(list: digits): list {
    result
 }
 
-fn big_cmp(list: a, list: b): int {
+fn big_cmp(list a, list b) int {
    "Compare two unsigned BigInt digit arrays. Returns -1, 0, or 1."
    def na, nb = a.len, b.len
    if(na > nb){ return 1 }
@@ -68,13 +70,13 @@ fn big_cmp(list: a, list: b): int {
    0
 }
 
-fn big_gte(list: a, list: b): bool { "Returns true when BigInt a >= b." big_cmp(a, b) >= 0 }
+fn big_gte(list a, list b) bool { "Returns true when BigInt a >= b." big_cmp(a, b) >= 0 }
 
-fn big_gt(list: a, list: b): bool { "Returns true when BigInt a > b." big_cmp(a, b) > 0 }
+fn big_gt(list a, list b) bool { "Returns true when BigInt a > b." big_cmp(a, b) > 0 }
 
-fn big_eq(list: a, list: b): bool { "Returns true when BigInt a == b." big_cmp(a, b) == 0 }
+fn big_eq(list a, list b) bool { "Returns true when BigInt a == b." big_cmp(a, b) == 0 }
 
-fn big_sub(list: a, list: b): list {
+fn big_sub(list a, list b) list {
    "Subtract BigInt b from a. Assumes a >= b. Returns digit array."
    def na = a.len
    mut result = []
@@ -96,7 +98,7 @@ fn big_sub(list: a, list: b): list {
    big_trim(result)
 }
 
-fn big_add(list: a, list: b): list {
+fn big_add(list a, list b) list {
    "Add two BigInt digit arrays. Returns digit array."
    def na, nb = a.len, b.len
    def nmax = (na > nb) ? na : nb
@@ -114,7 +116,7 @@ fn big_add(list: a, list: b): list {
    big_trim(result)
 }
 
-fn big_mul_small(list: digits, int: n): list {
+fn big_mul_small(list digits, int n) list {
    "Multiply a BigInt digit array by a small non-negative integer."
    def len_d = digits.len
    if(n == 0){ return [0] }
@@ -136,7 +138,7 @@ fn big_mul_small(list: digits, int: n): list {
    big_trim(result)
 }
 
-fn big_add_small(list: digits, int: n): list {
+fn big_add_small(list digits, int n) list {
    "Add a small non-negative integer to a BigInt digit array."
    if(n == 0){ return big_copy(digits) }
    def len_d = digits.len
@@ -157,7 +159,7 @@ fn big_add_small(list: digits, int: n): list {
    result
 }
 
-fn big_mul(list: a, list: b): list {
+fn big_mul(list a, list b) list {
    "Multiply two BigInt digit arrays using schoolbook multiplication."
    def na, nb = a.len, b.len
    def nr = na + nb
@@ -191,7 +193,7 @@ fn big_mul(list: a, list: b): list {
    big_trim(result)
 }
 
-fn big_mod_digits(list: a, list: n): list {
+fn big_mod_digits(list a, list n) list {
    "Compute a mod n for two BigInt digit arrays."
    def na, nn = a.len, n.len
    if(na == 0){ return [0] }
@@ -215,7 +217,7 @@ fn big_mod_digits(list: a, list: n): list {
    big_trim(rem)
 }
 
-fn big_powmod(list: base_digits, list: exp_digits, list: mod_digits): list {
+fn big_powmod(list base_digits, list exp_digits, list mod_digits) list {
    "Compute base^exp mod m for BigInt digit arrays using square-and-multiply."
    def zero = [0]
    def one = [1]
@@ -239,7 +241,7 @@ fn big_powmod(list: base_digits, list: exp_digits, list: mod_digits): list {
    result
 }
 
-fn big_gcd(list: a, list: b): list {
+fn big_gcd(list a, list b) list {
    "Compute gcd of two BigInt digit arrays using the Euclidean algorithm."
    mut aa = big_copy(a)
    mut bb = big_copy(b)
@@ -251,7 +253,7 @@ fn big_gcd(list: a, list: b): list {
    big_trim(aa)
 }
 
-fn big_div_small(list: digits, int: d): list {
+fn big_div_small(list digits, int d) list {
    "Divide a BigInt digit array by a small integer. Returns [quotient, remainder]."
    def n = digits.len
    if(n == 0){ return [[0], 0] }
@@ -274,7 +276,7 @@ fn big_div_small(list: digits, int: d): list {
    [big_trim(result), rem]
 }
 
-fn big_div(list: a, list: b): list {
+fn big_div(list a, list b) list {
    "Divide BigInt a by b. Returns [quotient, remainder] as digit arrays."
    def cmp = big_cmp(a, b)
    if(cmp < 0){ return [[0], big_copy(a)] }
@@ -308,7 +310,7 @@ fn big_div(list: a, list: b): list {
    [big_trim(quot_le), big_trim(rem)]
 }
 
-fn big_from_dec(str: s): list {
+fn big_from_dec(str s) list {
    "Parse a decimal string into a BigInt digit array."
    def n = s.len
    if(n == 0){ return [0] }
@@ -338,7 +340,7 @@ fn big_from_dec(str: s): list {
    result
 }
 
-fn big_to_dec(list: digits): str {
+fn big_to_dec(list digits) str {
    "Convert a BigInt digit array to a decimal string."
    def n = digits.len
    if(n == 0){ return "0" }
@@ -360,7 +362,7 @@ fn big_to_dec(list: digits): str {
    (out.len == 0) ? "0" : out
 }
 
-fn big_to_hex(list: digits): str {
+fn big_to_hex(list digits) str {
    "Convert a BigInt digit array to a lowercase hexadecimal string."
    def n = digits.len
    if(n == 0){ return "0" }
@@ -388,7 +390,7 @@ fn big_to_hex(list: digits): str {
    out
 }
 
-fn hex_to_ascii(str: hex_str): str {
+fn hex_to_ascii(str hex_str) str {
    "Decode a hex string to an ASCII string."
    def n = hex_str.len
    mut result = Builder(max(16, (n / 2) + 8))
@@ -404,7 +406,7 @@ fn hex_to_ascii(str: hex_str): str {
    out
 }
 
-fn hex_val(int: c): int {
+fn hex_val(int c) int {
    "Return the numeric value of a hex digit byte(0-9, a-f, A-F)."
    case c {
       48..57 -> c - 48
@@ -414,7 +416,7 @@ fn hex_val(int: c): int {
    }
 }
 
-fn int2s(int: n): str {
+fn int2s(int n) str {
    "Convert a non-negative integer to its decimal string."
    if(n == 0){ return "0" }
    mut val = n
@@ -435,23 +437,23 @@ fn int2s(int: n): str {
    out
 }
 
-fn rat_new(list: num, list: den, int: sign): list {
+fn rat_new(list num, list den, int sign) list {
    "Create a BigRational from unsigned digit arrays num, den, and sign(1 or -1).
    den must not be zero. Does not simplify automatically — call rat_simplify if needed."
    [num, den, sign]
 }
 
-fn rat_zero(): list {
+fn rat_zero() list {
    "Return the BigRational zero(0/1)."
    [[0], [1], 1]
 }
 
-fn rat_one(): list {
+fn rat_one() list {
    "Return the BigRational one(1/1)."
    [[1], [1], 1]
 }
 
-fn rat_from_int(int: n): list {
+fn rat_from_int(int n) list {
    "Construct a BigRational from a plain integer(may be negative)."
    if(n == 0){ return rat_zero() }
    def sign = (n < 0) ? -1 : 1
@@ -459,7 +461,7 @@ fn rat_from_int(int: n): list {
    [[abs_n], [1], sign]
 }
 
-fn rat_from_int_den(int: num_int, int: den_int): list {
+fn rat_from_int_den(int num_int, int den_int) list {
    "Construct a BigRational from two plain integers num/den(signs handled)."
    if(num_int == 0){ return rat_zero() }
    def sign = ((num_int < 0) != (den_int < 0)) ? -1 : 1
@@ -468,29 +470,29 @@ fn rat_from_int_den(int: num_int, int: den_int): list {
    rat_simplify([[abs_n], [abs_d], sign])
 }
 
-fn rat_sign(list: r): int { r.get(2) }
+fn rat_sign(list r) int { r.get(2) }
 
-fn rat_num(list: r): list { r.get(0) }
+fn rat_num(list r) list { r.get(0) }
 
-fn rat_den(list: r): list { r.get(1) }
+fn rat_den(list r) list { r.get(1) }
 
-fn _rat_num_is_zero(list: r): bool {
+fn _rat_num_is_zero(list r) bool {
    def n = rat_num(r)
    n.len == 1 && n.get(0) == 0
 }
 
-fn rat_neg(list: r): list {
+fn rat_neg(list r) list {
    "Negate a BigRational."
    if(_rat_num_is_zero(r)){ return r }
    [rat_num(r), rat_den(r), 0 - rat_sign(r)]
 }
 
-fn rat_abs(list: r): list {
+fn rat_abs(list r) list {
    "Absolute value of a BigRational."
    [rat_num(r), rat_den(r), 1]
 }
 
-fn rat_simplify(list: r): list {
+fn rat_simplify(list r) list {
    "Reduce a BigRational to lowest terms by dividing by gcd(num, den)."
    def num = rat_num(r)
    def den = rat_den(r)
@@ -504,7 +506,7 @@ fn rat_simplify(list: r): list {
    [new_num, new_den, sign]
 }
 
-fn rat_add(list: a, list: b): list {
+fn rat_add(list a, list b) list {
    "Add two BigRationals. Returns simplified result."
    def an, ad = rat_num(a), rat_den(a)
    def as_ = rat_sign(a)
@@ -532,12 +534,12 @@ fn rat_add(list: a, list: b): list {
    rat_simplify([new_num_val, new_den, new_sign])
 }
 
-fn rat_sub(list: a, list: b): list {
+fn rat_sub(list a, list b) list {
    "Subtract BigRational b from a. Returns simplified result."
    rat_add(a, rat_neg(b))
 }
 
-fn rat_mul(list: a, list: b): list {
+fn rat_mul(list a, list b) list {
    "Multiply two BigRationals. Returns simplified result."
    def new_num = big_mul(rat_num(a), rat_num(b))
    def new_den = big_mul(rat_den(a), rat_den(b))
@@ -545,7 +547,7 @@ fn rat_mul(list: a, list: b): list {
    rat_simplify([new_num, new_den, new_sign])
 }
 
-fn rat_div(list: a, list: b): list {
+fn rat_div(list a, list b) list {
    "Divide BigRational a by b. Returns simplified result. b must not be zero."
    def new_num = big_mul(rat_num(a), rat_den(b))
    def new_den = big_mul(rat_den(a), rat_num(b))
@@ -553,24 +555,24 @@ fn rat_div(list: a, list: b): list {
    rat_simplify([new_num, new_den, new_sign])
 }
 
-fn rat_cmp(list: a, list: b): int {
+fn rat_cmp(list a, list b) int {
    "Compare two BigRationals. Returns -1, 0, or 1."
    def diff = rat_sub(a, b)
    if(_rat_num_is_zero(diff)){ return 0 }
    (rat_sign(diff) > 0) ? 1 : -1
 }
 
-fn rat_eq(list: a, list: b): bool { "Returns true when two BigRationals are equal." rat_cmp(a, b) == 0 }
+fn rat_eq(list a, list b) bool { "Returns true when two BigRationals are equal." rat_cmp(a, b) == 0 }
 
-fn rat_lt(list: a, list: b): bool { "Returns true when a < b for BigRationals." rat_cmp(a, b) < 0 }
+fn rat_lt(list a, list b) bool { "Returns true when a < b for BigRationals." rat_cmp(a, b) < 0 }
 
-fn rat_lte(list: a, list: b): bool { "Returns true when a <= b for BigRationals." rat_cmp(a, b) <= 0 }
+fn rat_lte(list a, list b) bool { "Returns true when a <= b for BigRationals." rat_cmp(a, b) <= 0 }
 
-fn rat_gt(list: a, list: b): bool { "Returns true when a > b for BigRationals." rat_cmp(a, b) > 0 }
+fn rat_gt(list a, list b) bool { "Returns true when a > b for BigRationals." rat_cmp(a, b) > 0 }
 
-fn rat_gte(list: a, list: b): bool { "Returns true when a >= b for BigRationals." rat_cmp(a, b) >= 0 }
+fn rat_gte(list a, list b) bool { "Returns true when a >= b for BigRationals." rat_cmp(a, b) >= 0 }
 
-fn rat_to_float(list: r): f64 {
+fn rat_to_float(list r) f64 {
    "Convert a BigRational to a native float(approximate).
    Converts both num and den to decimal strings, parses as floats, divides."
    if(_rat_num_is_zero(r)){ return 0.0 }
@@ -580,7 +582,7 @@ fn rat_to_float(list: r): f64 {
    (rat_sign(r) < 0) ? (0.0 - result) : result
 }
 
-fn rat_floor(list: r): int {
+fn rat_floor(list r) int {
    "Return the floor of a BigRational as a plain integer."
    if(_rat_num_is_zero(r)){ return 0 }
    def qr = big_div(rat_num(r), rat_den(r))
@@ -601,7 +603,7 @@ fn rat_floor(list: r): int {
    q
 }
 
-fn rat_round(list: r): int {
+fn rat_round(list r) int {
    "Round a BigRational to the nearest integer(half away from zero)."
    def half = rat_from_int_den(1, 2)
    def shifted = rat_add(rat_abs(r), half)

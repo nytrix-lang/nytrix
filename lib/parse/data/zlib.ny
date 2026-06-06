@@ -1,5 +1,8 @@
-;; Keywords: data serialization zlib deflate compression
+;; Keywords: data serialization zlib deflate compression parse
 ;; Zlib Compression and Decompression Library for Nytrix
+;; References:
+;; - std.parse.data
+;; - std.parse
 module std.parse.data.zlib(decompress_zlib, compress_zlib, error, last_out_len, decompress_zlib_limit)
 use std.core
 use std.core.mem as core_mem
@@ -9,17 +12,23 @@ use std.os.prim
 mut _error = ""
 mut _last_out_len = 0
 
-fn error(): str { _error }
+fn error() str {
+   "Runs the error operation."
+   _error
+}
 
-fn last_out_len(): int { _last_out_len }
+fn last_out_len() int {
+   "Runs the last out len operation."
+   _last_out_len
+}
 
-fn _set_error(str: msg): str {
+fn _set_error(str msg) str {
    _error = msg
    _last_out_len = 0
    ""
 }
 
-fn decompress_zlib_limit(any: s, int: out_cap): str {
+fn decompress_zlib_limit(any s, int out_cap) str {
    "Inflates zlib data into a fixed-size buffer to avoid realloc loops."
    def n = s.len
    if(out_cap < 256){ out_cap = 256 }
@@ -52,7 +61,7 @@ fn decompress_zlib_limit(any: s, int: out_cap): str {
    out
 }
 
-fn decompress_zlib(any: s, int: out_cap=0): str {
+fn decompress_zlib(any s, int out_cap=0) str {
    "Inflates zlib data. If `out_cap` is 0, tries to guess or use incremental growth."
    if(out_cap > 0){ return decompress_zlib_limit(s, out_cap) }
    def n = s.len
@@ -64,7 +73,7 @@ fn decompress_zlib(any: s, int: out_cap=0): str {
    if(out_len_p == 0){ free(raw_buf) return _set_error("output len alloc failed") }
    store64_h(out_len_p, cap, 0)
    mut r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
-   while(r == -5){ ;; Z_BUF_ERROR -> need more space
+   while(r == -5){
       cap = cap * 2
       def next_buf = realloc(raw_buf, cap + 1)
       if(next_buf == 0){
@@ -93,7 +102,7 @@ fn decompress_zlib(any: s, int: out_cap=0): str {
    out
 }
 
-fn compress_zlib(any: s, int: level=6): str {
+fn compress_zlib(any s, int level=6) str {
    "Deflates data using zlib."
    if(level < -1){ level = -1 }
    if(level > 9){ level = 9 }
@@ -105,4 +114,13 @@ fn compress_zlib(any: s, int: level=6): str {
    _last_out_len = out.len
    _error = ""
    out
+}
+
+#main {
+   def plain = "nytrix compression smoke abcabcabc"
+   def packed = compress_zlib(plain)
+   assert(packed.len > 0, "zlib compressed output")
+   assert_eq(decompress_zlib(packed, 4096), plain, "zlib round trip")
+   assert(error() == "", "zlib no error after round trip")
+   print("✓ std.parse.data.zlib self-test passed")
 }

@@ -1,13 +1,16 @@
-;; Keywords: rsa common-modulus
+;; Keywords: rsa common-modulus math crypto
 ;; RSA common-modulus RSA recovery routines.
 ;; Recovers m from (N, e1, c1) and (N, e2, c2) via extended GCD.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.common_modulus(common_modulus_attack, common_modulus_attack_root, common_modulus_attack_report, common_modulus_scan_same_n, common_modulus_related_message_attack, common_modulus_related_message_scan, same_n_huge_e_attack, same_n_huge_e_scan)
 use std.math.nt
 
-fn common_modulus_attack_root(number: N, number: e1, number: c1, number: e2, number: c2): any {
+fn common_modulus_attack_root(number N, number e1, number c1, number e2, number c2) any {
    "Recover plaintext m from two ciphertexts under the same modulus N.
    If gcd(e1,e2)=g>1, this requires m^g < N so the final integer g-th root is exact."
    def egcd_result = extended_gcd(e1, e2)
@@ -38,7 +41,7 @@ fn common_modulus_attack_root(number: N, number: e1, number: c1, number: e2, num
    m
 }
 
-fn common_modulus_attack_report(number: N, number: e1, number: c1, number: e2, number: c2): dict {
+fn common_modulus_attack_report(number N, number e1, number c1, number e2, number c2) dict {
    "Explain a common-modulus recovery attempt.
    Returns a report with gcd(e1,e2), Bezout coefficients, invertibility checks,
    root requirements, recovered plaintext when successful, and a failure reason."
@@ -79,13 +82,13 @@ fn common_modulus_attack_report(number: N, number: e1, number: c1, number: e2, n
    }
 }
 
-fn common_modulus_attack(number: N, number: e1, number: c1, number: e2, number: c2): any {
+fn common_modulus_attack(number N, number e1, number c1, number e2, number c2) any {
    "Recover plaintext m from two ciphertexts encrypted under the same modulus N
    but different public exponents e1, e2."
    common_modulus_attack_root(N, e1, c1, e2, c2)
 }
 
-fn _common_modulus_scan_pairs(list: entries, bool: require_non_coprime=false): list {
+fn _common_modulus_scan_pairs(list entries, bool require_non_coprime=false) list {
    if(!is_list(entries) || entries.len < 2){ return [] }
    mut out = []
    mut i = 0
@@ -118,25 +121,25 @@ fn _common_modulus_scan_pairs(list: entries, bool: require_non_coprime=false): l
    out
 }
 
-fn common_modulus_scan_same_n(list: entries): list {
+fn common_modulus_scan_same_n(list entries) list {
    "Scan list entries of [n, e, c] and recover plaintext candidates for pairs
    sharing the same modulus n.
    Returns list of [i, j, m]."
    _common_modulus_scan_pairs(entries, false)
 }
 
-fn same_n_huge_e_attack(number: N, number: e1, number: c1, number: e2, number: c2): any {
+fn same_n_huge_e_attack(number N, number e1, number c1, number e2, number c2) any {
    "Alias for the multi-key common-modulus attack.
    Recovers m when two ciphertexts share N with exponents e1/e2."
    common_modulus_attack_root(N, e1, c1, e2, c2)
 }
 
-fn same_n_huge_e_scan(list: entries): list {
+fn same_n_huge_e_scan(list entries) list {
    "Scanner alias for list entries [n, e, c]."
    common_modulus_scan_same_n(entries)
 }
 
-fn common_modulus_related_message_attack(number: e1, number: e2, number: N, number: c1, number: c2): any {
+fn common_modulus_related_message_attack(number e1, number e2, number N, number c1, number c2) any {
    "Alias for the related-message common-modulus path.
    This path is meaningful when gcd(e1,e2)=g>1 and m^g < N."
    def eg = extended_gcd(e1, e2)
@@ -145,7 +148,7 @@ fn common_modulus_related_message_attack(number: e1, number: e2, number: N, numb
    common_modulus_attack_root(N, e1, c1, e2, c2)
 }
 
-fn common_modulus_related_message_scan(list: entries): list {
+fn common_modulus_related_message_scan(list entries) list {
    "Related-message scanner for entries [n, e, c].
    Keeps only pairs with gcd(e1,e2)>1."
    _common_modulus_scan_pairs(entries, true)

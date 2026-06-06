@@ -1,14 +1,17 @@
-;; Keywords: lattice linmod
+;; Keywords: lattice linmod math crypto number-theory
 ;; Lattice routines for linear modular relation solving.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
+;; References:
+;; - std.math.crypto.lattice
+;; - std.math.crypto
 module std.math.crypto.lattice.linmod(solve_linear_mod)
 use std.core
 use std.math.nt
 use std.math.crypto.lattice.flatter
 
-fn solve_linear_mod(list: equations, list: bounds): list {
+fn solve_linear_mod(list equations, list bounds) list {
    "Solve Ax = b mod M using lattice reduction(LLL/CVP). equations: list of [[coeffs], target, modulus]. bounds: list of upper bounds per variable. Returns solution vector."
    def direct = _linmod_bruteforce(equations, bounds)
    if(direct != nil){ return direct }
@@ -21,7 +24,7 @@ fn solve_linear_mod(list: equations, list: bounds): list {
    _linmod_decode(babai_cvp(reduced_basis, Y), bounds, S, NR, NV)
 }
 
-fn _linmod_search_space(list: bounds, int: cap): int {
+fn _linmod_search_space(list bounds, int cap) int {
    mut prod = 1
    mut i = 0
    while(i < bounds.len){
@@ -34,7 +37,7 @@ fn _linmod_search_space(list: bounds, int: cap): int {
    prod
 }
 
-fn _linmod_solution_ok(list: vars, list: equations): bool {
+fn _linmod_solution_ok(list vars, list equations) bool {
    mut i = 0
    while(i < equations.len){
       def eq = equations.get(i)
@@ -54,7 +57,7 @@ fn _linmod_solution_ok(list: vars, list: equations): bool {
    true
 }
 
-fn _linmod_bruteforce(list: equations, list: bounds, int: cap=200000): any {
+fn _linmod_bruteforce(list equations, list bounds, int cap=200000) any {
    def space = _linmod_search_space(bounds, cap)
    if(space <= 0 || space > cap){ return nil }
    mut vars = []
@@ -77,7 +80,7 @@ fn _linmod_bruteforce(list: equations, list: bounds, int: cap=200000): any {
    nil
 }
 
-fn _linmod_scale(list: bounds, int: total_dim): bigint {
+fn _linmod_scale(list bounds, int total_dim) bigint {
    "Choose a large common lattice scaling factor from variable bounds."
    mut nS = 0
    mut i = 0
@@ -90,7 +93,7 @@ fn _linmod_scale(list: bounds, int: total_dim): bigint {
    bigint_lshift(Z(1), nS + total_dim + 1)
 }
 
-fn _linmod_empty_basis(int: total_dim): list {
+fn _linmod_empty_basis(int total_dim) list {
    mut basis = list(total_dim)
    mut i = 0
    while(i < total_dim){
@@ -100,7 +103,7 @@ fn _linmod_empty_basis(int: total_dim): list {
    basis
 }
 
-fn _linmod_basis(list: equations, list: bounds, any: S, int: NR, int: NV, int: total_dim): list {
+fn _linmod_basis(list equations, list bounds, any S, int NR, int NV, int total_dim) list {
    "Build the modular-linear embedding basis."
    mut basis = _linmod_empty_basis(total_dim)
    mut i = 0
@@ -130,7 +133,7 @@ fn _linmod_basis(list: equations, list: bounds, any: S, int: NR, int: NV, int: t
    basis
 }
 
-fn _linmod_target(list: equations, list: bounds, any: S, int: NR, int: NV, int: total_dim): list {
+fn _linmod_target(list equations, list bounds, any S, int NR, int NV, int total_dim) list {
    "Build the closest-vector target for modular-linear recovery."
    mut Y, i = vec_zero(total_dim), 0
    while(i < NR){
@@ -149,7 +152,7 @@ fn _linmod_target(list: equations, list: bounds, any: S, int: NR, int: NV, int: 
    Y
 }
 
-fn _linmod_decode(any: closest, list: bounds, any: S, int: NR, int: NV): list {
+fn _linmod_decode(any closest, list bounds, any S, int NR, int NV) list {
    "Decode variable coordinates from a closest lattice vector."
    mut solution = list(NV)
    mut i = 0
@@ -163,7 +166,7 @@ fn _linmod_decode(any: closest, list: bounds, any: S, int: NR, int: NV): list {
    solution
 }
 
-fn vec_zero(int: n): list {
+fn vec_zero(int n) list {
    "Internal: Create a zero vector of length n with bigint elements."
    mut v, i = list(n), 0
    while(i < n){

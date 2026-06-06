@@ -1,11 +1,14 @@
-;; Keywords: block-cipher stream rc4
+;; Keywords: block-cipher stream rc4 math crypto
 ;; Stream-cipher routines for RC4 KSA/PRGA and known-key decryption.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc6229
+;; References:
+;; - std.math.crypto.block.stream
+;; - std.math.crypto
 module std.math.crypto.block.stream.rc4(rc4_ksa, rc4_prga, rc4_decrypt_known_key)
 use std.core
 
-fn rc4_ksa(list: key): list {
+fn rc4_ksa(list key) list {
    "RC4 Key Scheduling Algorithm(KSA).
    key: byte list of the secret key
    Returns the initialized permutation state as a byte list of length 256."
@@ -29,7 +32,7 @@ fn rc4_ksa(list: key): list {
    state
 }
 
-fn rc4_prga(list: state, int: n): list {
+fn rc4_prga(list state, int n) list {
    "RC4 Pseudo-Random Generation Algorithm(PRGA).
    state: permutation state from KSA(will be cloned, not modified)
    n: number of keystream bytes to generate
@@ -53,7 +56,7 @@ fn rc4_prga(list: state, int: n): list {
    keystream
 }
 
-fn rc4_decrypt_known_key(list: ct, list: key): list {
+fn rc4_decrypt_known_key(list ct, list key) list {
    "Decrypt RC4 ciphertext when the key is known.
    ct: ciphertext byte list
    key: key byte list

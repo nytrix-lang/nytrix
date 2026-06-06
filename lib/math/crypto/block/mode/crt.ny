@@ -1,13 +1,16 @@
-;; Keywords: block-cipher mode crt
+;; Keywords: block-cipher mode crt math crypto
 ;; Chinese-remainder block recombination for shared-message modulus attacks.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
+;; References:
+;; - std.math.crypto.block.mode
+;; - std.math.crypto
 module std.math.crypto.block.mode.crt(crt_block_combine)
 use std.core
 use std.math.nt
 use std.math.bin
 
-fn crt_block_combine(list: remainders, list: moduli, int: block_size): list {
+fn crt_block_combine(list remainders, list moduli, int block_size) list {
    "Combine partial decryptions from multiple RSA/block-cipher moduli using CRT.
    Given ciphertexts encrypted under different moduli with the same small exponent,
    recover the original plaintext via the Chinese Remainder Theorem.
@@ -37,7 +40,7 @@ fn crt_block_combine(list: remainders, list: moduli, int: block_size): list {
    _int_to_bytes_le(result, block_size)
 }
 
-fn _bytes_to_int_le(list: bytes): any {
+fn _bytes_to_int_le(list bytes) any {
    "Convert a byte list to an integer(little-endian).
    bytes: byte list
    Returns the integer value."
@@ -53,7 +56,7 @@ fn _bytes_to_int_le(list: bytes): any {
    result
 }
 
-fn _int_to_bytes_le(any: value, int: block_size): list {
+fn _int_to_bytes_le(any value, int block_size) list {
    "Convert an integer to a byte list(little-endian, padded to block_size).
    value: integer to convert
    block_size: number of bytes in output

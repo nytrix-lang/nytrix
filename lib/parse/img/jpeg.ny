@@ -1,21 +1,24 @@
-;; Keywords: image jpeg jpg
+;; Keywords: image jpeg jpg parse
 ;; JPEG Image Loader and Encoder for Nytrix
 ;; Reference:
 ;; - https://jpeg.org/jpeg/index.html
 ;; - https://en.wikipedia.org/wiki/JPEG
 ;; - https://www.w3.org/Graphics/JPEG/itu-t81.pdf
 ;; - https://www.youtube.com/playlist?list=PLzH6n4zXuckoAod3z31QEST1ZaizBuNHh
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.jpeg(encode, decode)
 #include <turbojpeg.h>
 extern "turbojpeg" {
-   fn tjInitDecompress(): ptr
-   fn tjDecompressHeader3(ptr: tj, ptr: jpeg_buf, u64: jpeg_size, ptr: width_p, ptr: height_p, ptr: subsamp_p, ptr: colorspace_p): i32
-   fn tjDecompress2(ptr: tj, ptr: jpeg_buf, u64: jpeg_size, ptr: dst_buf, i32: width, i32: pitch, i32: height, i32: pixel_format, i32: flags): i32
-   fn tjDestroy(ptr: tj): i32
-   fn _tj_init_decompress(): ptr as "tjInitDecompress"
-   fn _tj_decompress_header3(ptr: tj, ptr: jpeg_buf, u64: jpeg_size, ptr: width_p, ptr: height_p, ptr: subsamp_p, ptr: colorspace_p): i32 as "tjDecompressHeader3"
-   fn _tj_decompress2(ptr: tj, ptr: jpeg_buf, u64: jpeg_size, ptr: dst_buf, i32: width, i32: pitch, i32: height, i32: pixel_format, i32: flags): i32 as "tjDecompress2"
-   fn _tj_destroy(ptr: tj): i32 as "tjDestroy"
+   fn tjInitDecompress() ptr
+   fn tjDecompressHeader3(ptr tj, ptr jpeg_buf, u64 jpeg_size, ptr width_p, ptr height_p, ptr subsamp_p, ptr colorspace_p) i32
+   fn tjDecompress2(ptr tj, ptr jpeg_buf, u64 jpeg_size, ptr dst_buf, i32 width, i32 pitch, i32 height, i32 pixel_format, i32 flags) i32
+   fn tjDestroy(ptr tj) i32
+   fn _tj_init_decompress() ptr as "tjInitDecompress"
+   fn _tj_decompress_header3(ptr tj, ptr jpeg_buf, u64 jpeg_size, ptr width_p, ptr height_p, ptr subsamp_p, ptr colorspace_p) i32 as "tjDecompressHeader3"
+   fn _tj_decompress2(ptr tj, ptr jpeg_buf, u64 jpeg_size, ptr dst_buf, i32 width, i32 pitch, i32 height, i32 pixel_format, i32 flags) i32 as "tjDecompress2"
+   fn _tj_destroy(ptr tj) i32 as "tjDestroy"
 }
 
 use std.core
@@ -42,29 +45,29 @@ mut _jpeg_trace_cache = -1
 mut _jpeg_disable_turbo_cache = -1
 mut _jpeg_max_scan_cache = -1
 
-fn _raw_ptr(any: p): any {
+fn _raw_ptr(any p) any {
    if(!p){ return 0 }
    if(is_int(p)){ return to_int(p) }
    p
 }
 
-fn _jpeg_decode_turbo(any: data): any {
+fn _jpeg_decode_turbo(any data) any {
    def handle = _tj_init_decompress()
    if(!handle){ return 0 }
    def w_p = zalloc(4) def h_p = zalloc(4) def ss_p = zalloc(4) def cs_p = zalloc(4)
    if(!w_p || !h_p || !ss_p || !cs_p){
-      if(w_p){ free(w_p) } if(h_p){ free(h_p) } if(ss_p){ free(ss_p) } if(cs_p){ free(cs_p) }
+      free(w_p, h_p, ss_p, cs_p)
       _tj_destroy(handle)
       return 0
    }
    def hdr_res = _tj_decompress_header3(handle, _raw_ptr(data), data.len, w_p, h_p, ss_p, cs_p)
    if(int(hdr_res) != 0){
-      free(w_p) free(h_p) free(ss_p) free(cs_p)
+      free(w_p, h_p, ss_p, cs_p)
       _tj_destroy(handle)
       return 0
    }
    def wVal, hVal = load32(w_p, 0), load32(h_p, 0)
-   free(w_p) free(h_p) free(ss_p) free(cs_p)
+   free(w_p, h_p, ss_p, cs_p)
    if(wVal <= 0 || hVal <= 0 || wVal > 16384 || hVal > 16384){
       _tj_destroy(handle)
       return 0
@@ -90,31 +93,31 @@ fn _jpeg_decode_turbo(any: data): any {
    rd
 }
 
-fn _jpeg_diag_enabled(): bool {
+fn _jpeg_diag_enabled() bool {
    _jpeg_trace_cache = common.cached_env_truthy(_jpeg_trace_cache, "NY_JPEG_TRACE")
    _jpeg_trace_cache == 1
 }
 
-fn _jpeg_diag_on(): bool { _jpeg_diag_enabled() }
+fn _jpeg_diag_on() bool { _jpeg_diag_enabled() }
 
-fn _jpeg_disable_turbo(): bool {
+fn _jpeg_disable_turbo() bool {
    _jpeg_disable_turbo_cache = common.cached_env_truthy(_jpeg_disable_turbo_cache, "NY_JPEG_DISABLE_TURBO")
    _jpeg_disable_turbo_cache == 1
 }
 
-fn _jpeg_prog_max_scan(): int {
+fn _jpeg_prog_max_scan() int {
    if(_jpeg_max_scan_cache != -1){ return _jpeg_max_scan_cache }
    _jpeg_max_scan_cache = common.parse_nonneg_int(common.env_trim("NY_JPEG_MAX_SCAN"))
    _jpeg_max_scan_cache
 }
 
-fn _c_u8(any: v): int {
+fn _c_u8(any v) int {
    if(v < 0){ return 0 }
    if(v > 255){ return 255 }
    v
 }
 
-fn _m_hm(list: b, list: val_list): list {
+fn _m_hm(list b, list val_list) list {
    mut cm, sm = pbin.zero_list(256), pbin.zero_list(256)
    mut cCount, kCount = 0, 0
    mut lIdx = 1
@@ -135,7 +138,7 @@ fn _m_hm(list: b, list: val_list): list {
    return [cm, sm]
 }
 
-fn _h_new(list: ctx): int {
+fn _h_new(list ctx) int {
    mut nodeList = ctx.get(0)
    def idx = nodeList.len
    mut n = list(4)
@@ -148,7 +151,7 @@ fn _h_new(list: ctx): int {
    return idx
 }
 
-fn _h_add(list: ctx, int: root, int: code, int: len_bits, int: sym): any {
+fn _h_add(list ctx, int root, int code, int len_bits, int sym) any {
    mut cur = root
    mut iBit = len_bits
    while(iBit > 0){
@@ -181,7 +184,7 @@ fn _h_add(list: ctx, int: root, int: code, int: len_bits, int: sym): any {
    0
 }
 
-fn _h_parse(any: data, int: off): list {
+fn _h_parse(any data, int off) list {
    mut ctx = list(1)
    ctx = ctx.append(list(512))
    _h_new(ctx)
@@ -209,7 +212,7 @@ fn _h_parse(any: data, int: off): list {
    return [ctx.get(0), (pPtr - off)]
 }
 
-fn _h_dec(list: nodes, list: bs): int {
+fn _h_dec(list nodes, list bs) int {
    mut cur = 0
    while(1){
       mut bl = bs.get(3)
@@ -238,7 +241,7 @@ fn _h_dec(list: nodes, list: bs): int {
    }
 }
 
-fn _bs_m(any: data, int: start): list {
+fn _bs_m(any data, int start) list {
    mut bs = list(5)
    bs = bs.append(data)
    bs = bs.append(start)
@@ -248,7 +251,7 @@ fn _bs_m(any: data, int: start): list {
    return bs
 }
 
-fn _bs_skip_restart(any: bs, int: expected_rst=-1): bool {
+fn _bs_skip_restart(any bs, int expected_rst=-1) bool {
    if(!is_list(bs)){ return false }
    bs[3] = 0
    bs[2] = 0
@@ -265,7 +268,7 @@ fn _bs_skip_restart(any: bs, int: expected_rst=-1): bool {
    true
 }
 
-fn _bs_gbs(list: bs, int: n): int {
+fn _bs_gbs(list bs, int n) int {
    mut v = 0
    mut iCount = 0
    while(iCount < n){
@@ -295,13 +298,13 @@ fn _bs_gbs(list: bs, int: n): int {
    return v
 }
 
-fn _d_cf(int: sz, int: bits): int {
+fn _d_cf(int sz, int bits) int {
    if(sz == 0){ return 0 }
    if((bits >> (sz - 1)) & 1){ return bits }
    return bits - (1 << sz) + 1
 }
 
-fn _jpeg_find_next_marker(any: data, int: start): int {
+fn _jpeg_find_next_marker(any data, int start) int {
    if(!is_str(data)){ return data.len }
    mut i = start
    def n = data.len
@@ -328,13 +331,13 @@ fn _jpeg_find_next_marker(any: data, int: start): int {
    n
 }
 
-fn _jpeg_prog_block_dims(int: wVal, int: hVal, int: mh, int: mv, int: hs, int: vs): list {
+fn _jpeg_prog_block_dims(int wVal, int hVal, int mh, int mv, int hs, int vs) list {
    def mcu_w, mcu_h = mh * 8, mv * 8
    def bw, bh = max(1, ((wVal + mcu_w - 1) / mcu_w) * hs), max(1, ((hVal + mcu_h - 1) / mcu_h) * vs)
    [bw, bh, bw * bh]
 }
 
-fn _jpeg_prog_alloc_component(int: wVal, int: hVal, int: mh, int: mv, any: dobj): list {
+fn _jpeg_prog_alloc_component(int wVal, int hVal, int mh, int mv, any dobj) list {
    def hs, vs = int(dobj.get(1, 1)), int(dobj.get(2, 1))
    def dims = _jpeg_prog_block_dims(wVal, hVal, mh, mv, hs, vs)
    def bw = int(dims.get(0, 0))
@@ -353,18 +356,18 @@ fn _jpeg_prog_alloc_component(int: wVal, int: hVal, int: mh, int: mv, any: dobj)
    [bw, bh, blocks, coeff]
 }
 
-fn _jpeg_prog_coeff_at(any: coeff, int: block_idx, int: pos): int {
+fn _jpeg_prog_coeff_at(any coeff, int block_idx, int pos) int {
    mut v = load32(coeff, (block_idx * 64 + pos) * 4)
    if(v >= 2147483648){ v -= 4294967296 }
    v
 }
 
-fn _jpeg_prog_set_coeff(any: coeff, int: block_idx, int: pos, any: value): any {
+fn _jpeg_prog_set_coeff(any coeff, int block_idx, int pos, any value) any {
    store32(coeff, int(value), (block_idx * 64 + pos) * 4)
    0
 }
 
-fn _jpeg_prog_refine_nonzero(any: coeff, int: block_idx, int: pos, int: al, list: bs): any {
+fn _jpeg_prog_refine_nonzero(any coeff, int block_idx, int pos, int al, list bs) any {
    def cur = _jpeg_prog_coeff_at(coeff, block_idx, pos)
    if(cur == 0){ return 0 }
    def bit = _bs_gbs(bs, 1)
@@ -379,7 +382,7 @@ fn _jpeg_prog_refine_nonzero(any: coeff, int: block_idx, int: pos, int: al, list
    0
 }
 
-fn _jpeg_prog_render_component(any: plane, int: plane_len, int: plane_w, any: coeff, any: qtbl, int: bw, int: bh, int: step_x, int: step_y): any {
+fn _jpeg_prog_render_component(any plane, int plane_len, int plane_w, any coeff, any qtbl, int bw, int bh, int step_x, int step_y) any {
    if(!plane || !coeff || bw <= 0 || bh <= 0 || !is_list(qtbl)){ return 0 }
    mut cf = pbin.zero_list(64)
    mut blk = pbin.zero_list(64)
@@ -403,7 +406,7 @@ fn _jpeg_prog_render_component(any: plane, int: plane_len, int: plane_w, any: co
    0
 }
 
-fn _jpeg_alloc_planes(int: plane_sz): any {
+fn _jpeg_alloc_planes(int plane_sz) any {
    def alloc_sz = plane_sz + 32
    def cyB = init_str(malloc(alloc_sz), plane_sz)
    def ccbB = init_str(malloc(alloc_sz), plane_sz)
@@ -424,7 +427,7 @@ fn _jpeg_alloc_planes(int: plane_sz): any {
    [cyB, ccbB, ccrB]
 }
 
-fn _jpeg_planes_to_rgba(any: cyB, any: ccbB, any: ccrB, int: wVal, int: hVal): any {
+fn _jpeg_planes_to_rgba(any cyB, any ccbB, any ccrB, int wVal, int hVal) any {
    def tpx = wVal * hVal
    def pix = init_str(malloc(tpx * 4 + 32), (tpx * 4))
    mut kL = 0
@@ -467,7 +470,7 @@ fn _jpeg_planes_to_rgba(any: cyB, any: ccbB, any: ccrB, int: wVal, int: hVal): a
    pix
 }
 
-fn _jpeg_image_result(any: pix, int: wVal, int: hVal): any {
+fn _jpeg_image_result(any pix, int wVal, int hVal) any {
    mut rd = dict(8)
    rd = rd.set("data", pix)
    rd = rd.set("width", wVal)
@@ -476,7 +479,7 @@ fn _jpeg_image_result(any: pix, int: wVal, int: hVal): any {
    rd
 }
 
-fn _jpeg_prog_component_info(int: wVal, int: hVal, int: mh, int: mv, list: cidMap, list: cord): any {
+fn _jpeg_prog_component_info(int wVal, int hVal, int mh, int mv, list cidMap, list cord) any {
    mut comp_info = dict(16)
    def cord_n = cord.len
    mut ci = 0
@@ -504,7 +507,7 @@ fn _jpeg_prog_component_info(int: wVal, int: hVal, int: mh, int: mv, list: cidMa
    comp_info
 }
 
-fn _jpeg_progressive_result(list: planes, int: plane_sz, int: wVal, int: hVal, int: mh, int: mv, list: cord, any: comp_info, list: qts): any {
+fn _jpeg_progressive_result(list planes, int plane_sz, int wVal, int hVal, int mh, int mv, list cord, any comp_info, list qts) any {
    def cyB, ccbB = planes.get(0), planes.get(1)
    def ccrB = planes.get(2)
    mut Yid = 1
@@ -541,7 +544,7 @@ fn _jpeg_progressive_result(list: planes, int: plane_sz, int: wVal, int: hVal, i
    rd
 }
 
-fn _jpeg_prog_decode_interleaved_dc(int: wVal, int: hVal, int: mh, int: mv, any: comp_info, list: hdc, any: comps, any: comp_meta, int: comps_n, int: comp_meta_n, int: ah, int: al, list: bs): any {
+fn _jpeg_prog_decode_interleaved_dc(int wVal, int hVal, int mh, int mv, any comp_info, list hdc, any comps, any comp_meta, int comps_n, int comp_meta_n, int ah, int al, list bs) any {
    mut pdc_map = dict(8)
    mut mcy = 0
    while((mcy * 8 * mv) < hVal){
@@ -601,7 +604,7 @@ fn _jpeg_prog_decode_interleaved_dc(int: wVal, int: hVal, int: mh, int: mv, any:
    0
 }
 
-fn _jpeg_prog_decode_ac_raster(any: coeff, int: bw, int: bh, int: ss, int: se, int: ah, int: al, any: ah_tbl, list: bs): any {
+fn _jpeg_prog_decode_ac_raster(any coeff, int bw, int bh, int ss, int se, int ah, int al, any ah_tbl, list bs) any {
    mut eobrun = 0
    mut by = 0
    while(by < bh){
@@ -688,7 +691,7 @@ fn _jpeg_prog_decode_ac_raster(any: coeff, int: bw, int: bh, int: ss, int: se, i
    0
 }
 
-fn _jpeg_decode_progressive(any: data, int: wVal, int: hVal, int: mh, int: mv, list: qts, list: hdc, list: hac, list: cidMap, list: cord, list: scan_list): any {
+fn _jpeg_decode_progressive(any data, int wVal, int hVal, int mh, int mv, list qts, list hdc, list hac, list cidMap, list cord, list scan_list) any {
    def tpx = wVal * hVal
    def mcu_w = mh * 8
    def mcu_h = mv * 8
@@ -801,14 +804,14 @@ def _JIDCT_FIX_2_053119869 = 16819
 def _JIDCT_FIX_2_562915447 = 20995
 def _JIDCT_FIX_3_072711026 = 25172
 
-fn _jpeg_descale(int: v, int: n): int {
+fn _jpeg_descale(int v, int n) int {
    if(n <= 0){ return v }
    def add = 1 << (n - 1)
    if(v >= 0){ return(v + add) >> n }
    -(((-v) + add) >> n)
 }
 
-fn _idct_has_ac(list: cf): bool {
+fn _idct_has_ac(list cf) bool {
    mut ci = 1
    while(ci < 64){
       if(cf.get(ci) != 0){ return true }
@@ -817,7 +820,7 @@ fn _idct_has_ac(list: cf): bool {
    false
 }
 
-fn _idct_store_sample(any: out, int: out_len, int: plane_w, int: off, int: step_x, int: step_y, int: x, int: y, int: fv): any {
+fn _idct_store_sample(any out, int out_len, int plane_w, int off, int step_x, int step_y, int x, int y, int fv) any {
    def py, px = (off / plane_w) + y * step_y, (off % plane_w) + x * step_x
    mut dy = 0
    while(dy < step_y){
@@ -832,7 +835,7 @@ fn _idct_store_sample(any: out, int: out_len, int: plane_w, int: off, int: step_
    0
 }
 
-fn _idct_store_dc(list: cf, list: qt, any: out, int: out_len, int: off, int: step_x, int: step_y, int: plane_w): any {
+fn _idct_store_dc(list cf, list qt, any out, int out_len, int off, int step_x, int step_y, int plane_w) any {
    def dcv = cf.get(0) * qt.get(0)
    def fv = _c_u8(_jpeg_descale(dcv, 3) + 128)
    mut y = 0
@@ -847,7 +850,7 @@ fn _idct_store_dc(list: cf, list: qt, any: out, int: out_len, int: off, int: ste
    0
 }
 
-fn _idct_prepare_block(list: cf, list: qt, list: blk, list: natural): any {
+fn _idct_prepare_block(list cf, list qt, list blk, list natural) any {
    mut kIdx = 0
    while(kIdx < 64){
       blk.set(kIdx, cf.get(kIdx) * qt.get(kIdx))
@@ -861,7 +864,7 @@ fn _idct_prepare_block(list: cf, list: qt, list: blk, list: natural): any {
    0
 }
 
-fn _idct_pass_columns(list: blk, list: natural): any {
+fn _idct_pass_columns(list blk, list natural) any {
    mut col = 0
    while(col < 8){
       def c1, c2 = natural.get(8 + col), natural.get(16 + col)
@@ -914,7 +917,7 @@ fn _idct_pass_columns(list: blk, list: natural): any {
    0
 }
 
-fn _idct_emit_rows(list: blk, any: out, int: out_len, int: off, int: step_x, int: step_y, int: plane_w): any {
+fn _idct_emit_rows(list blk, any out, int out_len, int off, int step_x, int step_y, int plane_w) any {
    mut y = 0
    while(y < 8){
       def row_off = y * 8
@@ -985,7 +988,7 @@ fn _idct_emit_rows(list: blk, any: out, int: out_len, int: off, int: step_x, int
    0
 }
 
-fn _idct(list: cf, list: qt, any: out, int: out_len, int: off, int: step_x, int: step_y, int: plane_w, list: blk, list: natural): any {
+fn _idct(list cf, list qt, any out, int out_len, int off, int step_x, int step_y, int plane_w, list blk, list natural) any {
    if(!_idct_has_ac(cf)){
       _idct_store_dc(cf, qt, out, out_len, off, step_x, step_y, plane_w)
       return 0
@@ -996,7 +999,7 @@ fn _idct(list: cf, list: qt, any: out, int: out_len, int: off, int: step_x, int:
    0
 }
 
-fn _d_du(list: bs, any: dh, any: ah, any: qt, int: pdc, any: plane, int: plane_len, int: off, int: step_x, int: step_y, int: pw, list: cf, list: blk, list: natural): any {
+fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int off, int step_x, int step_y, int pw, list cf, list blk, list natural) any {
    if(_jpeg_diag_on()){ _jpeg_diag_total_blocks += 1 }
    def sz = _h_dec(dh, bs)
    if(sz < 0){
@@ -1038,7 +1041,7 @@ fn _d_du(list: bs, any: dh, any: ah, any: qt, int: pdc, any: plane, int: plane_l
    0
 }
 
-fn _jpeg_parse_headers(any: data): any {
+fn _jpeg_parse_headers(any data) any {
    mut wVal, hVal = 0, 0
    mut ncVal = 0
    mut ssVal = 0
@@ -1161,7 +1164,7 @@ fn _jpeg_parse_headers(any: data): any {
    [wVal, hVal, ncVal, ssVal, qts, hdc, hac, cidMap, cord, scan, scan_list, is_prog, mh, mv, restart_interval]
 }
 
-fn decode(any: data): any {
+fn decode(any data) any {
    "Decodes a baseline JPEG byte string into an image dictionary."
    if(!is_str(data) || data.len < 4){ return 0 }
    if(load8(data, 0) != 255 || load8(data, 1) != 216){ return 0 }
@@ -1285,7 +1288,7 @@ fn decode(any: data): any {
    return rd
 }
 
-fn _mgb(any: v): int {
+fn _mgb(any v) int {
    mut xV = (v < 0) ? -v : v
    mut nC = 0
    while(xV > 0){
@@ -1295,13 +1298,13 @@ fn _mgb(any: v): int {
    return nC
 }
 
-fn _apb(int: v, int: n): int {
+fn _apb(int v, int n) int {
    if(n == 0){ return 0 }
    if(v < 0){ return v + (1 << n) - 1 }
    return v
 }
 
-fn _ebn(): list {
+fn _ebn() list {
    mut eb = list(3)
    eb = eb.append(0)
    eb = eb.append(0)
@@ -1309,7 +1312,7 @@ fn _ebn(): list {
    return eb
 }
 
-fn _eeb(list: eb, int: b): any {
+fn _eeb(list eb, int b) any {
    def bV = b & 255
    mut bL = eb.get(2)
    bL = bL.append(bV)
@@ -1318,7 +1321,7 @@ fn _eeb(list: eb, int: b): any {
    0
 }
 
-fn _epb(list: eb, int: b, int: n): any {
+fn _epb(list eb, int b, int n) any {
    if(n == 0){ return 0 }
    mut acc = eb.get(0)
    mut num = eb.get(1)
@@ -1338,7 +1341,7 @@ fn _epb(list: eb, int: b, int: n): any {
    0
 }
 
-fn _ebf(list: eb): any {
+fn _ebf(list eb) any {
    if(eb.get(1) > 0){
       def acc = eb.get(0)
       def num = eb.get(1)
@@ -1350,7 +1353,7 @@ fn _ebf(list: eb): any {
    0
 }
 
-fn _fdct(list: blk, list: qn): list {
+fn _fdct(list blk, list qn) list {
    mut nat = pbin.zero_list(64)
    mut vL = 0
    while(vL < 8){
@@ -1389,7 +1392,7 @@ fn _fdct(list: blk, list: qn): list {
    return zz
 }
 
-fn _ebk(list: eb, list: zz, int: pdc, list: dm, list: am): int {
+fn _ebk(list eb, list zz, int pdc, list dm, list am) int {
    def dc = zz.get(0)
    def dff = dc - pdc
    def nb = _mgb(dff)
@@ -1416,7 +1419,7 @@ fn _ebk(list: eb, list: zz, int: pdc, list: dm, list: am): int {
    return dc
 }
 
-fn _jpeg_append_bytes(list: out, list: bytes): list {
+fn _jpeg_append_bytes(list out, list bytes) list {
    def n = bytes.len
    mut i = 0
    while(i < n){
@@ -1426,7 +1429,7 @@ fn _jpeg_append_bytes(list: out, list: bytes): list {
    out
 }
 
-fn _jpeg_scaled_quant_tables(int: qual): list {
+fn _jpeg_scaled_quant_tables(int qual) list {
    mut q1Val = qual
    if(q1Val < 1){ q1Val = 1 }
    if(q1Val > 100){ q1Val = 100 }
@@ -1451,7 +1454,7 @@ fn _jpeg_scaled_quant_tables(int: qual): list {
    [qyn, qcn, qyz, qcz]
 }
 
-fn _jpeg_append_quant_table(list: out, int: table_id, list: qz): list {
+fn _jpeg_append_quant_table(list out, int table_id, list qz) list {
    out = _jpeg_append_bytes(out, [255, 219, 0, 67, table_id])
    mut kQ = 0
    while(kQ < 64){
@@ -1461,7 +1464,7 @@ fn _jpeg_append_quant_table(list: out, int: table_id, list: qz): list {
    out
 }
 
-fn _jpeg_append_huffman_table(list: out, int: table_class_id, list: counts, list: vals, int: val_count): list {
+fn _jpeg_append_huffman_table(list out, int table_class_id, list counts, list vals, int val_count) list {
    def seg_len = 3 + 16 + val_count
    out = _jpeg_append_bytes(out, [255, 196, (seg_len >> 8) & 255, seg_len & 255, table_class_id])
    mut kD = 0
@@ -1477,7 +1480,7 @@ fn _jpeg_append_huffman_table(list: out, int: table_class_id, list: counts, list
    out
 }
 
-fn _jpeg_append_sof0(list: out, int: wVal, int: hVal): list {
+fn _jpeg_append_sof0(list out, int wVal, int hVal) list {
    _jpeg_append_bytes(out, [
          255, 192, 0, 17, 8,
          (hVal >> 8), (hVal & 255), (wVal >> 8), (wVal & 255),
@@ -1488,11 +1491,11 @@ fn _jpeg_append_sof0(list: out, int: wVal, int: hVal): list {
    ])
 }
 
-fn _jpeg_append_scan_header(list: out): list {
+fn _jpeg_append_scan_header(list out) list {
    _jpeg_append_bytes(out, [255, 218, 0, 12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0])
 }
 
-fn _jpeg_append_baseline_headers(list: out, int: wVal, int: hVal, list: qyz, list: qcz): list {
+fn _jpeg_append_baseline_headers(list out, int wVal, int hVal, list qyz, list qcz) list {
    out = _jpeg_append_bytes(out, [
          255, 216,
          255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 72, 0, 72, 0, 0
@@ -1507,7 +1510,7 @@ fn _jpeg_append_baseline_headers(list: out, int: wVal, int: hVal, list: qyz, lis
    _jpeg_append_scan_header(out)
 }
 
-fn _jpeg_sample_ycc_blocks(any: dataV, int: wVal, int: hVal, int: chV, int: bx, int: by): list {
+fn _jpeg_sample_ycc_blocks(any dataV, int wVal, int hVal, int chV, int bx, int by) list {
    mut bYData = list(64)
    mut bCbData = list(64)
    mut bCrData = list(64)
@@ -1540,7 +1543,7 @@ fn _jpeg_sample_ycc_blocks(any: dataV, int: wVal, int: hVal, int: chV, int: bx, 
    [bYData, bCbData, bCrData]
 }
 
-fn _jpeg_append_entropy_payload(list: out, list: eb): list {
+fn _jpeg_append_entropy_payload(list out, list eb) list {
    _ebf(eb)
    def fb = eb.get(2)
    def fb_n = fb.len
@@ -1553,7 +1556,7 @@ fn _jpeg_append_entropy_payload(list: out, list: eb): list {
    out.append(217)
 }
 
-fn _jpeg_bytes_from_list(list: out): any {
+fn _jpeg_bytes_from_list(list out) any {
    def resL = out.len
    def resP = init_str(malloc(resL + 32), resL)
    mut rI = 0
@@ -1564,7 +1567,7 @@ fn _jpeg_bytes_from_list(list: out): any {
    resP
 }
 
-fn encode(any: img, int: qual=90): any {
+fn encode(any img, int qual=90) any {
    "Encodes an image dictionary into a baseline JPEG byte string."
    def wVal, hVal = img.get("width"), img.get("height")
    def dataV = img.get("data")

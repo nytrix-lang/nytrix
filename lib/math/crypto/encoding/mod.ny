@@ -1,6 +1,8 @@
-;; Keywords: encoding ascii bytes hex base16 base32 base45 base58 base64 base85 base91 base92 base65536 radix pem der asn1 xor uu rot13
+;; Keywords: encoding ascii bytes hex base16 base32 base45 base58 base64 base85 base91 base92 base65536 radix pem der asn1 xor uu rot13 math crypto
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc4648
+;; References:
+;; - std.math.crypto
 module std.math.crypto.encoding(ascii, base, bytes, encoding, xor, uu, radix, scream, pairing, lowercase, uppercase, letters, digits, hexdigits, octdigits, punctuation, whitespace, printable, encode64, decode64, encode64_url, decode64_url, encode32, decode32, encode32_hex, decode32_hex, encode16, decode16, bytes_set, bytes_get, asn1_parse, asn1_decode_length, asn1_to_json, asn1_get_integer, asn1_get_sequence, asn1_integers, pem_decode, hex_encode, hex_decode, base64_encode, base64_decode, base64_encode_str, base64_decode_str, base64_encode_bytes, base64_decode_custom, base64_decode_nested, base64_decode_until_marker, base32_encode, base32_decode, base32_decode_custom, base32_decode_custom_lsb, a1z26_pairs_decode, ascii_integer, ascii_to_bin, bin_to_ascii, binary_to_text, bits_to_text_width, text_to_binary, octal_to_text, text_to_octal, hex_to_text, hex_to_byte_list, text_to_hex, rot13, rot_n, rot_alphabet, bits_to_bytes, bytes_to_bits, bytes_concat, bytes_concat3, bytes_repeat_value, byte_list_to_ascii, ascii_contains, extract_ascii_span, xor_with_repeating_key, base91_pair_decode, affine_bytes_decrypt, base45_decode, ascii85_decode, base92_decode, base65536_decode, base58_encode_bytes, base58_decode_str, base58check_encode_bytes, base58check_decode_str, digit_value, parse_radix_int, parse_octal_int, decimal_chunks_to_text, octal_chunks_to_text, keyed_alpha_decode, uu_decode_line, xor_with_single_byte, xor_bytes_hex, single_byte_xor_bruteforce, english_score, repeating_key_xor_keylength, repeating_key_xor_crack, multi_text_xor_keystream, hamming_distance, crib_drag, xor_two_ciphertexts, repeating_xor_key_from_prefix, scream_mark_decode, scream_mark_from_codepoint, scream_extract_marks, scream_decode_marks, scream_decode_text, cantor_pair, cantor_unpair, cantor_unpair_leaves)
 use std.core
 use std.math.bin
@@ -10,7 +12,7 @@ use std.core.str
 use std.math.crypto.encoding.base
 use std.math.crypto.encoding.radix
 
-fn _alphabet_index(str: alphabet, str: ch, int: limit=0): int {
+fn _alphabet_index(str alphabet, str ch, int limit=0) int {
    def n = limit > 0 ? min(alphabet.len, limit) : alphabet.len
    mut i = 0
    while(i < n){
@@ -20,22 +22,22 @@ fn _alphabet_index(str: alphabet, str: ch, int: limit=0): int {
    -1
 }
 
-fn base64_encode_str(str: s): str {
+fn base64_encode_str(str s) str {
    "Encode a string to standard Base64."
    encode64(s)
 }
 
-fn base64_encode_bytes(list: bytes): str {
+fn base64_encode_bytes(list bytes) str {
    "Encode a byte list to standard Base64."
    bytes.base64
 }
 
-fn base64_decode_str(str: s): str {
+fn base64_decode_str(str s) str {
    "Decode a Base64 string to plain text."
    decode64(s)
 }
 
-fn _base64_translate_custom(str: s, str: alphabet): str {
+fn _base64_translate_custom(str s, str alphabet) str {
    def std = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
    def alpha_n = alphabet.len
    def pad_ch = alpha_n >= 65 ? utf8_slice(alphabet, 64, 65, 1) : "="
@@ -52,14 +54,14 @@ fn _base64_translate_custom(str: s, str: alphabet): str {
    translated
 }
 
-fn base64_decode_custom(str: s, str: alphabet): list {
+fn base64_decode_custom(str s, str alphabet) list {
    "Decode Base64 text using a custom alphabet.
    A 64-character alphabet uses standard '=' padding ; a 65-character alphabet
    may provide its own padding character as element 65."
    _base64_translate_custom(s, alphabet).base64_decode
 }
 
-fn base64_decode_nested(str: s, int: layers): str {
+fn base64_decode_nested(str s, int layers) str {
    "Decode Base64 repeatedly for `layers` iterations.
    Returns the final plaintext string."
    mut cur = s
@@ -71,14 +73,13 @@ fn base64_decode_nested(str: s, int: layers): str {
    cur
 }
 
-fn _base64_char_ok(str: ch): bool {
-   if(ch == "=" || ch == "+" || ch == "/" || ch == "-" || ch == "_"){ return true }
+fn _base64_char_ok(str ch) bool {
    if(ch.len == 0){ return false }
    def c = ord(ch)
-   (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+   ch == "=" || ch == "+" || ch == "/" || ch == "-" || ch == "_" || (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 }
 
-fn _base64_decode_candidate(str: s): bool {
+fn _base64_decode_candidate(str s) bool {
    if(s.len == 0 || s.len % 4 != 0){ return false }
    mut i = 0
    while(i < s.len){
@@ -88,7 +89,7 @@ fn _base64_decode_candidate(str: s): bool {
    true
 }
 
-fn base64_decode_until_marker(str: s, str: marker="", int: max_layers=64): str {
+fn base64_decode_until_marker(str s, str marker="", int max_layers=64) str {
    "Decode Base64 while the input still looks Base64-shaped, or until `marker` appears."
    mut cur = s
    mut i = 0
@@ -100,17 +101,17 @@ fn base64_decode_until_marker(str: s, str: marker="", int: max_layers=64): str {
    cur
 }
 
-fn base32_encode(str: s): str {
+fn base32_encode(str s) str {
    "Encode a string to standard Base32(RFC 4648)."
    encode32(s)
 }
 
-fn base32_decode(str: s): str {
+fn base32_decode(str s) str {
    "Decode a standard Base32(RFC 4648) string to plain text."
    decode32(s)
 }
 
-fn base32_decode_custom(str: s, str: alphabet): str {
+fn base32_decode_custom(str s, str alphabet) str {
    "Decode Base32 using a custom 32-character alphabet."
    mut clean = ""
    mut i = 0
@@ -148,7 +149,7 @@ fn base32_decode_custom(str: s, str: alphabet): str {
    out
 }
 
-fn base32_decode_custom_lsb(str: s, str: alphabet): str {
+fn base32_decode_custom_lsb(str s, str alphabet) str {
    "Decode custom Base32 where each 5-bit symbol is appended little-endian to a rolling bit buffer."
    mut bitstream = 0
    mut bitlen = 0
@@ -173,7 +174,7 @@ fn base32_decode_custom_lsb(str: s, str: alphabet): str {
    out
 }
 
-fn a1z26_pairs_decode(str: s, bool: mirror=false, int: shift=0): str {
+fn a1z26_pairs_decode(str s, bool mirror=false, int shift=0) str {
    "Decode runs of two-digit A1Z26 values into uppercase letters.
    With mirror=true, values are first Atbash-mirrored as 1<->26 ; shift then rotates the 1..26 result."
    mut out = ""
@@ -204,7 +205,7 @@ fn a1z26_pairs_decode(str: s, bool: mirror=false, int: shift=0): str {
    out
 }
 
-fn binary_to_text(str: binary_str): str {
+fn binary_to_text(str binary_str) str {
    "Convert a string of 0s and 1s(space-separated or 8-bit chunks) to ASCII text.
    Handles both '01000001' and '01000001 01000010' formats."
    def clean = str_replace(binary_str, " ", "")
@@ -224,7 +225,7 @@ fn binary_to_text(str: binary_str): str {
    out
 }
 
-fn bits_to_text_width(any: bits, int: width=8): str {
+fn bits_to_text_width(any bits, int width=8) str {
    "Decode fixed-width MSB-first bit chunks to text.
    Use width 7 for seven-bit ASCII and width 8 for byte ASCII."
    if(width <= 0 || width > 8){ panic("bits_to_text_width: width must be between 1 and 8") }
@@ -259,7 +260,7 @@ fn bits_to_text_width(any: bits, int: width=8): str {
    out
 }
 
-fn ascii_integer(any: bits): int {
+fn ascii_integer(any bits) int {
    "Convert exactly 8 MSB-first bits to an ASCII integer."
    if(bits.len != 8){ panic("ascii_integer: B must consist of 8 bits") }
    mut v, i = 0, 0
@@ -274,7 +275,7 @@ fn ascii_integer(any: bits): int {
    v
 }
 
-fn ascii_to_bin(any: value): str {
+fn ascii_to_bin(any value) str {
    "Encode ASCII text or a list of string chunks as a compact binary string."
    mut text = ""
    if(is_list(value)){
@@ -291,7 +292,7 @@ fn ascii_to_bin(any: value): str {
    str_replace(spaced, " ", "")
 }
 
-fn bin_to_ascii(any: bits): str {
+fn bin_to_ascii(any bits) str {
    "Decode a non-empty binary string/list whose length is a multiple of 8."
    if(bits.len == 0){ panic("bin_to_ascii: B must be a non-empty binary string") }
    if(bits.len % 8 != 0){ panic("bin_to_ascii: number of bits must be a multiple of 8") }
@@ -310,7 +311,7 @@ fn bin_to_ascii(any: bits): str {
    out
 }
 
-fn text_to_binary(str: text): str {
+fn text_to_binary(str text) str {
    "Convert ASCII text to binary string(8-bit groups space-separated)."
    mut out = ""
    mut i = 0
@@ -329,7 +330,7 @@ fn text_to_binary(str: text): str {
    out
 }
 
-fn octal_to_text(str: octal_str): str {
+fn octal_to_text(str octal_str) str {
    "Decode space-separated octal values to ASCII text."
    def parts = split(octal_str, " ")
    mut out = ""
@@ -350,7 +351,7 @@ fn octal_to_text(str: octal_str): str {
    out
 }
 
-fn text_to_octal(str: text): str {
+fn text_to_octal(str text) str {
    "Convert ASCII text to space-separated octal values."
    mut out = ""
    mut i = 0
@@ -372,24 +373,24 @@ fn text_to_octal(str: text): str {
    out
 }
 
-fn hex_to_text(str: hex_str): str {
+fn hex_to_text(str hex_str) str {
    "Decode a hex string(with or without spaces) to ASCII text."
    def clean = hex_normalize(hex_str)
    clean.unhex.text
 }
 
-fn hex_to_byte_list(str: hex_str): list {
+fn hex_to_byte_list(str hex_str) list {
    "Decode a hex string(with or without spaces) to a list of byte values."
    def clean = hex_normalize(hex_str)
    clean.unhex
 }
 
-fn text_to_hex(str: text): str {
+fn text_to_hex(str text) str {
    "Encode ASCII text to lowercase hex string."
    text.hex
 }
 
-fn rot_n(str: text, int: n): str {
+fn rot_n(str text, int n) str {
    "Apply ROT-N shift to alphabetic characters only."
    mut out = ""
    mut i = 0
@@ -405,12 +406,12 @@ fn rot_n(str: text, int: n): str {
    out
 }
 
-fn rot13(str: text): str {
+fn rot13(str text) str {
    "Apply ROT13 transformation to alphabetic characters."
    rot_n(text, 13)
 }
 
-fn rot_alphabet(str: text, str: alphabet, int: shift): str {
+fn rot_alphabet(str text, str alphabet, int shift) str {
    "Rotate characters found in a custom alphabet by `shift`, preserving other chars."
    mut out = ""
    def m = alphabet.len
@@ -430,7 +431,7 @@ fn rot_alphabet(str: text, str: alphabet, int: shift): str {
    out
 }
 
-fn bits_to_bytes(list: bit_list): list {
+fn bits_to_bytes(list bit_list) list {
    "Convert a list of 0/1 bits to a byte list(MSB first, padded to 8)."
    mut result = []
    mut i = 0
@@ -451,7 +452,7 @@ fn bits_to_bytes(list: bit_list): list {
    result
 }
 
-fn bytes_to_bits(list: byte_list): list {
+fn bytes_to_bits(list byte_list) list {
    "Convert a byte list to a list of 0/1 bits(MSB first)."
    mut result = []
    mut i = 0
@@ -467,17 +468,17 @@ fn bytes_to_bits(list: byte_list): list {
    result
 }
 
-fn bytes_concat(list: a, list: b): list {
+fn bytes_concat(list a, list b) list {
    "Concatenate two byte lists."
    a.concat(b)
 }
 
-fn bytes_concat3(list: a, list: b, list: c): list {
+fn bytes_concat3(list a, list b, list c) list {
    "Concatenate three byte lists."
    a.concat(b).concat(c)
 }
 
-fn bytes_repeat_value(int: value, int: n): list {
+fn bytes_repeat_value(int value, int n) list {
    "Return a byte list containing value repeated n times."
    if(n <= 0){ return list(0) }
    mut out = []
@@ -489,7 +490,7 @@ fn bytes_repeat_value(int: value, int: n): list {
    out
 }
 
-fn byte_list_to_ascii(list: byte_list): str {
+fn byte_list_to_ascii(list byte_list) str {
    "Convert a list of byte values to text by mapping each byte through `chr`."
    mut out = ""
    mut i = 0
@@ -500,7 +501,7 @@ fn byte_list_to_ascii(list: byte_list): str {
    out
 }
 
-fn _ascii_match_at(list: byte_list, str: pattern, int: at): bool {
+fn _ascii_match_at(list byte_list, str pattern, int at) bool {
    mut j = 0
    while(j < pattern.len){
       if(byte_list[at + j] != ord(utf8_slice(pattern, j, j + 1, 1))){ return false }
@@ -509,7 +510,7 @@ fn _ascii_match_at(list: byte_list, str: pattern, int: at): bool {
    true
 }
 
-fn ascii_contains(list: byte_list, str: needle): bool {
+fn ascii_contains(list byte_list, str needle) bool {
    "Return true if a byte list contains the ASCII substring `needle`."
    def bn, nn = byte_list.len, needle.len
    if(bn < nn){ return false }
@@ -521,7 +522,7 @@ fn ascii_contains(list: byte_list, str: needle): bool {
    false
 }
 
-fn extract_ascii_span(list: byte_list, str: prefix, str: suffix): any {
+fn extract_ascii_span(list byte_list, str prefix, str suffix) any {
    "Extract the first ASCII span that begins with `prefix` and ends with `suffix`."
    def bn, pn = byte_list.len, prefix.len
    def sn = suffix.len
@@ -548,12 +549,12 @@ fn extract_ascii_span(list: byte_list, str: prefix, str: suffix): any {
    nil
 }
 
-fn xor_with_repeating_key(list: byte_list, list: key_bytes): list {
+fn xor_with_repeating_key(list byte_list, list key_bytes) list {
    "XOR a byte list with a repeating key byte list."
    xor.xor_with_repeating_key(byte_list, key_bytes)
 }
 
-fn affine_bytes_decrypt(list: byte_list, int: a, int: b): list {
+fn affine_bytes_decrypt(list byte_list, int a, int b) list {
    "Affine decrypt over bytes: pt = a^{-1} * (ct - b) mod 256.
    Returns a byte list."
    def aa = mod(Z(a), Z(256))
@@ -573,82 +574,82 @@ fn affine_bytes_decrypt(list: byte_list, int: a, int: b): list {
 
 impl str {
    @inline
-   fn b64(str: s): str {
+   fn b64(str s) str {
       "Return base64 encoding of this string."
       base64_encode_str(s)
    }
    @inline
-   fn b64_text(str: s): str {
+   fn b64_text(str s) str {
       "Decode this base64 string to text."
       base64_decode_str(s)
    }
    @inline
-   fn b64_bytes(str: s): list {
+   fn b64_bytes(str s) list {
       "Decode this base64 string to bytes."
       s.base64_decode
    }
    @inline
-   fn b32(str: s): str {
+   fn b32(str s) str {
       "Return base32 encoding of this string."
       base32_encode(s)
    }
    @inline
-   fn unb32(str: s): str {
+   fn unb32(str s) str {
       "Decode this base32 string to text."
       base32_decode(s)
    }
    @inline
-   fn b45_text(str: s): str {
+   fn b45_text(str s) str {
       "Decode this Base45 string to text."
       base45_decode(s)
    }
    @inline
-   fn a85_text(str: s): str {
+   fn a85_text(str s) str {
       "Decode this Adobe Ascii85 string to text."
       ascii85_decode(s)
    }
    @inline
-   fn b92_text(str: s): str {
+   fn b92_text(str s) str {
       "Decode this Base92 string to text."
       base92_decode(s)
    }
    @inline
-   fn b65536_text(str: s): str {
+   fn b65536_text(str s) str {
       "Decode this Base65536 string to text."
       base65536_decode(s)
    }
    @inline
-   fn b58_bytes(str: s): ?list {
+   fn b58_bytes(str s) ?list {
       "Decode this base58 string to bytes."
       base58_decode_str(s)
    }
    @inline
-   fn bin_text(str: s): str {
+   fn bin_text(str s) str {
       "Decode a binary digit string to text."
       binary_to_text(s)
    }
    @inline
-   fn bin_text_width(str: s, int: width): str {
+   fn bin_text_width(str s, int width) str {
       "Decode fixed-width MSB-first bit chunks to text."
       bits_to_text_width(s, width)
    }
    @inline
-   fn oct_text(str: s): str {
+   fn oct_text(str s) str {
       "Decode an octal digit string to text."
       octal_to_text(s)
    }
    @inline
-   fn hex_text(str: s): str {
+   fn hex_text(str s) str {
       "Decode a hexadecimal string to text."
       hex_to_text(s)
    }
    @inline
-   fn rot(str: s, int: n): str {
+   fn rot(str s, int n) str {
       "Apply ROT-n alphabetic rotation to this string."
       rot_n(s, n)
    }
    @inline
-   fn rot13(str: s): str {
+   fn rot13(str s) str {
       "Apply ROT13 alphabetic rotation to this string."
       rot13(s)
    }
@@ -656,37 +657,37 @@ impl str {
 
 impl list {
    @inline
-   fn b64(list: b): str {
+   fn b64(list b) str {
       "Return base64 encoding of this byte list."
       base64_encode_bytes(b)
    }
    @inline
-   fn b58(list: b): str {
+   fn b58(list b) str {
       "Return base58 encoding of this byte list."
       base58_encode_bytes(b)
    }
    @inline
-   fn b58check(list: b): str {
+   fn b58check(list b) str {
       "Return Base58Check encoding of this byte list."
       base58check_encode_bytes(b)
    }
    @inline
-   fn bits(list: b): list {
+   fn bits(list b) list {
       "Expand this byte list into bits."
       bytes_to_bits(b)
    }
    @inline
-   fn ascii(list: b): str {
+   fn ascii(list b) str {
       "Interpret this byte list as ASCII text."
       byte_list_to_ascii(b)
    }
    @inline
-   fn xor_key(list: b, list: key): list {
+   fn xor_key(list b, list key) list {
       "XOR this byte list with a repeating key."
       xor_with_repeating_key(b, key)
    }
    @inline
-   fn affine_dec(list: b, int: a, int: off): list {
+   fn affine_dec(list b, int a, int off) list {
       "Affine-decrypt this byte list modulo 256."
       affine_bytes_decrypt(b, a, off)
    }
@@ -694,37 +695,37 @@ impl list {
 
 impl bytes {
    @inline
-   fn b64(bytes: b): str {
+   fn b64(bytes b) str {
       "Return base64 encoding of this byte buffer."
       base64_encode_bytes(b.to_list)
    }
    @inline
-   fn b58(bytes: b): str {
+   fn b58(bytes b) str {
       "Return base58 encoding of this byte buffer."
       base58_encode_bytes(b.to_list)
    }
    @inline
-   fn b58check(bytes: b): str {
+   fn b58check(bytes b) str {
       "Return Base58Check encoding of this byte buffer."
       base58check_encode_bytes(b.to_list)
    }
    @inline
-   fn bits(bytes: b): list {
+   fn bits(bytes b) list {
       "Expand this byte buffer into bits."
       bytes_to_bits(b.to_list)
    }
    @inline
-   fn ascii(bytes: b): str {
+   fn ascii(bytes b) str {
       "Interpret this byte buffer as ASCII text."
       byte_list_to_ascii(b.to_list)
    }
    @inline
-   fn xor_key(bytes: b, list: key): list {
+   fn xor_key(bytes b, list key) list {
       "XOR this byte buffer with a repeating key."
       xor_with_repeating_key(b.to_list, key)
    }
    @inline
-   fn affine_dec(bytes: b, int: a, int: off): list {
+   fn affine_dec(bytes b, int a, int off) list {
       "Affine-decrypt this byte buffer modulo 256."
       affine_bytes_decrypt(b.to_list, a, off)
    }

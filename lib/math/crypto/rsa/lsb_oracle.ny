@@ -1,15 +1,18 @@
-;; Keywords: rsa lsb-oracle
+;; Keywords: rsa lsb-oracle math crypto
 ;; RSA LSB-oracle attack routines.
 ;; Recovers plaintext by querying the least-significant bit of successive
 ;; doubled plaintexts.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.lsb_oracle(lsb_oracle_attack, lsb_oracle_recover_from_bits, lsb_oracle_variant_attack)
 use std.math.nt
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 
-fn lsb_oracle_recover_from_bits(any: n, list: bits): any {
+fn lsb_oracle_recover_from_bits(any n, list bits) any {
    "Recover plaintext from a recorded RSA parity-oracle bit transcript.
    `bits` must be the oracle answers for c*(2^e)^i mod n, starting at i=1."
    mut low = Z(0)
@@ -31,7 +34,7 @@ fn lsb_oracle_recover_from_bits(any: n, list: bits): any {
    (low * Z(n) + denom - Z(1)) / denom
 }
 
-fn lsb_oracle_attack(any: n, any: e, any: c, fnptr: oracle_fn): any {
+fn lsb_oracle_attack(any n, any e, any c, fnptr oracle_fn) any {
    "Recover plaintext from ciphertext c using a parity oracle.
    oracle_fn(ciphertext) must return the last bit of the decrypted plaintext.
    Returns the recovered plaintext integer."
@@ -55,7 +58,7 @@ fn lsb_oracle_attack(any: n, any: e, any: c, fnptr: oracle_fn): any {
    (low * Z(n) + denom - Z(1)) / denom
 }
 
-fn lsb_oracle_variant_attack(any: n, any: e, any: c, int: bit_len, fnptr: oracle_fn): any {
+fn lsb_oracle_variant_attack(any n, any e, any c, int bit_len, fnptr oracle_fn) any {
    "Recover plaintext from a parity oracle using inverse powers of two.
    oracle_fn(ciphertext) must return the least-significant bit of the decrypted plaintext.
    Returns the recovered plaintext integer modulo 2^bit_len."

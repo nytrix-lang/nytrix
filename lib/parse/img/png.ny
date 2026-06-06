@@ -1,14 +1,17 @@
-;; Keywords: image png
+;; Keywords: image png parse
 ;; Portable Network Graphics (PNG) Image Loader and Encoder for Nytrix
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.png(decode, encode)
 #include <png.h>
 extern "png16" {
-   fn png_image_begin_read_from_memory(ptr: image, ptr: memory, u64: size): i32
-   fn png_image_finish_read(ptr: image, ptr: background, ptr: buffer, i32: row_stride, ptr: colormap): i32
-   fn png_image_free(ptr: image)
-   fn _png_image_begin_read_from_memory(ptr: image, ptr: memory, u64: size): i32 as "png_image_begin_read_from_memory"
-   fn _png_image_finish_read(ptr: image, ptr: background, ptr: buffer, i32: row_stride, ptr: colormap): i32 as "png_image_finish_read"
-   fn _png_image_free(ptr: image) as "png_image_free"
+   fn png_image_begin_read_from_memory(ptr image, ptr memory, u64 size) i32
+   fn png_image_finish_read(ptr image, ptr background, ptr buffer, i32 row_stride, ptr colormap) i32
+   fn png_image_free(ptr image)
+   fn _png_image_begin_read_from_memory(ptr image, ptr memory, u64 size) i32 as "png_image_begin_read_from_memory"
+   fn _png_image_finish_read(ptr image, ptr background, ptr buffer, i32 row_stride, ptr colormap) i32 as "png_image_finish_read"
+   fn _png_image_free(ptr image) as "png_image_free"
 }
 
 use std.core
@@ -22,20 +25,6 @@ use std.math.crypto.hash as math_hash
 use std.parse.data.zlib as zlib
 use std.core.common as common
 
-def _PNG_IMAGE_SIZE = 128
-def _PNG_IMAGE_VERSION = 1
-def _PNG_FORMAT_RGBA = 3
-def _PNG_IMG_OFF_VERSION = 8
-def _PNG_IMG_OFF_WIDTH = 12
-def _PNG_IMG_OFF_HEIGHT = 16
-def _PNG_IMG_OFF_FORMAT = 20
-def _PNG_CHUNK_IHDR = 1229472850
-def _PNG_CHUNK_PLTE = 1347179589
-def _PNG_CHUNK_TRNS = 1951551059
-def _PNG_CHUNK_IDAT = 1229209940
-def _PNG_CHUNK_IEND = 1229278788
-def _PNG_CHUNK_ICCP = 1766015824
-def _PNG_CHUNK_GAMA = 1732332865
 mut _png_disable_libpng_cache = -1
 mut _png_stop_early_cache = -1
 mut _png_validate_crc_cache = -1
@@ -43,7 +32,7 @@ mut _png_no_decompress_cache = -1
 mut _png_stage_debug_cache = -1
 mut _png_encode_level_cache = -2
 
-fn _png_paeth(int: a, int: b, int: c): int {
+fn _png_paeth(int a, int b, int c) int {
    def p = a + b - c
    def pa = p - a
    def pb = p - b
@@ -56,26 +45,26 @@ fn _png_paeth(int: a, int: b, int: c): int {
    c
 }
 
-fn _s32be(any: p, int: v, int: o): any {
+fn _s32be(any p, int v, int o) any {
    store8(p, (v >> 24) & 255, o)
    store8(p, (v >> 16) & 255, o + 1)
    store8(p, (v >> 8) & 255, o + 2)
    store8(p, v & 255, o + 3)
 }
 
-fn _u16be(any: p, int: o): int {
+fn _u16be(any p, int o) int {
    (load8(p, o) << 8) | load8(p, o + 1)
 }
 
-fn _u32be(any: p, int: o): int {
+fn _u32be(any p, int o) int {
    (load8(p, o) << 24) | (load8(p, o + 1) << 16) | (load8(p, o + 2) << 8) | load8(p, o + 3)
 }
 
-fn _png_rgb_opaque32(any: p, int: o): int {
+fn _png_rgb_opaque32(any p, int o) int {
    load8(p, o) | (load8(p, o + 1) << 8) | (load8(p, o + 2) << 16) | (255 << 24)
 }
 
-fn _copy_bytes_safe(any: dst, int: dst_off, any: src, int: src_off, int: count): any {
+fn _copy_bytes_safe(any dst, int dst_off, any src, int src_off, int count) any {
    mut i = 0
    while(i < count){
       store8(dst, load8(src, src_off + i), dst_off + i)
@@ -83,34 +72,34 @@ fn _copy_bytes_safe(any: dst, int: dst_off, any: src, int: src_off, int: count):
    }
 }
 
-fn _png_chunk_is(any: data, int: chunk_pos, int: a, int: b, int: c, int: d): bool {
+fn _png_chunk_is(any data, int chunk_pos, int a, int b, int c, int d) bool {
    load8(data, chunk_pos + 4) == a &&
    load8(data, chunk_pos + 5) == b &&
    load8(data, chunk_pos + 6) == c &&
    load8(data, chunk_pos + 7) == d
 }
 
-fn _png_stop_early_enabled(): bool {
+fn _png_stop_early_enabled() bool {
    _png_stop_early_cache = common.cached_env_truthy(_png_stop_early_cache, "NY_PNG_STOP_EARLY")
    _png_stop_early_cache == 1
 }
 
-fn _png_validate_crc_enabled(): bool {
+fn _png_validate_crc_enabled() bool {
    _png_validate_crc_cache = common.cached_env_truthy(_png_validate_crc_cache, "NY_PNG_VALIDATE_CRC")
    _png_validate_crc_cache == 1
 }
 
-fn _png_no_decompress_enabled(): bool {
+fn _png_no_decompress_enabled() bool {
    _png_no_decompress_cache = common.cached_env_truthy(_png_no_decompress_cache, "NY_PNG_NO_DECOMPRESS")
    _png_no_decompress_cache == 1
 }
 
-fn _png_stage_debug_enabled(): bool {
+fn _png_stage_debug_enabled() bool {
    _png_stage_debug_cache = common.cached_env_truthy(_png_stage_debug_cache, "NY_PNG_STAGE_DEBUG")
    _png_stage_debug_cache == 1
 }
 
-fn _png_encode_level(): int {
+fn _png_encode_level() int {
    if(_png_encode_level_cache != -2){ return _png_encode_level_cache }
    mut level = 6
    if(common.env_present("NY_PNG_ENCODE_LEVEL")){ level = common.env_int_clamped("NY_PNG_ENCODE_LEVEL", level, 0, 9) } elif(common.env_truthy("NYTRIX_AUTO_DUMP") || common.env_truthy("NY_UI_BATCH_FAST_ENV")){ level = 1 }
@@ -118,12 +107,12 @@ fn _png_encode_level(): int {
    level
 }
 
-fn _fail(any: msg): int {
+fn _fail(any msg) int {
    print("[png] error: " + msg)
    0
 }
 
-fn _png_decode_result(any: pixels, int: w, int: h): dict {
+fn _png_decode_result(any pixels, int w, int h) dict {
    mut out = dict(8)
    out["data"] = pixels
    out["width"] = w
@@ -132,18 +121,18 @@ fn _png_decode_result(any: pixels, int: w, int: h): dict {
    out
 }
 
-fn _raw_ptr(any: p): any {
+fn _raw_ptr(any p) any {
    if(!p){ return 0 }
    if(is_int(p)){ return to_int(p) }
    p
 }
 
-fn _png_disable_libpng(): bool {
+fn _png_disable_libpng() bool {
    _png_disable_libpng_cache = common.cached_env_truthy(_png_disable_libpng_cache, "NY_PNG_DISABLE_LIBPNG")
    _png_disable_libpng_cache == 1
 }
 
-fn _png_has_sensitive_colorspace_chunks(any: data): bool {
+fn _png_has_sensitive_colorspace_chunks(any data) bool {
    "Returns true when the PNG carries colorspace metadata that the simplified
    libpng path would apply, but glTF sample tests expect raw texture samples."
    if(!is_str(data) || data.len < 16){ return false }
@@ -165,7 +154,7 @@ fn _png_has_sensitive_colorspace_chunks(any: data): bool {
    false
 }
 
-fn _png_decode_libpng(any: data): any {
+fn _png_decode_libpng(any data) any {
    def img = zalloc(128)
    if(!img){ return 0 }
    store32(img, 1, 8)
@@ -200,19 +189,19 @@ fn _png_decode_libpng(any: data): any {
    _png_decode_result(pix, w, h)
 }
 
-fn _png_free_tmp(any: s): int { 0 }
+fn _png_free_tmp(any s) int { 0 }
 
-fn _png_decode_result_clean(any: pixels,
-   int: w,
-   int: h,
-   any: raw=0,
-   any: idat=0,
-   any: gray_lut=0,
-   any: palette_lut=0,
-   any: palette=0,
-   any: palette_alpha=0,
-   any: prev_row=0,
-   any: cur_row=0): dict {
+fn _png_decode_result_clean(any pixels,
+   int w,
+   int h,
+   any raw=0,
+   any idat=0,
+   any gray_lut=0,
+   any palette_lut=0,
+   any palette=0,
+   any palette_alpha=0,
+   any prev_row=0,
+   any cur_row=0) dict {
    _png_free_tmp(raw)
    _png_free_tmp(idat)
    _png_free_tmp(gray_lut)
@@ -224,20 +213,20 @@ fn _png_decode_result_clean(any: pixels,
    _png_decode_result(pixels, w, h)
 }
 
-fn _png_decode_fail(any: msg,
-   any: raw=0,
-   any: idat=0,
-   any: palette=0,
-   any: palette_alpha=0,
-   any: gray_lut=0,
-   any: palette_lut=0,
-   any: prev_row=0,
-   any: cur_row=0,
-   any: pixels=0): any {
+fn _png_decode_fail(any msg,
+   any raw=0,
+   any idat=0,
+   any palette=0,
+   any palette_alpha=0,
+   any gray_lut=0,
+   any palette_lut=0,
+   any prev_row=0,
+   any cur_row=0,
+   any pixels=0) any {
    _fail(msg)
 }
 
-fn _png_build_gray_lut(int: bit_depth, int: trns_gray): any {
+fn _png_build_gray_lut(int bit_depth, int trns_gray) any {
    if(bit_depth < 1 || bit_depth > 8){ return 0 }
    def count = 1 << bit_depth
    def lut = init_str(malloc(count * 4 + 32), count * 4)
@@ -252,7 +241,7 @@ fn _png_build_gray_lut(int: bit_depth, int: trns_gray): any {
    lut
 }
 
-fn _png_build_palette_lut(any: palette, any: palette_alpha): any {
+fn _png_build_palette_lut(any palette, any palette_alpha) any {
    if(!palette || palette.len == 0 || (palette.len % 3) != 0){ return 0 }
    def count = palette.len / 3
    def lut = init_str(malloc(count * 4 + 32), count * 4)
@@ -268,17 +257,17 @@ fn _png_build_palette_lut(any: palette, any: palette_alpha): any {
    lut
 }
 
-fn _png_adam7_pass_w(int: w, int: x0, int: xstep): int {
+fn _png_adam7_pass_w(int w, int x0, int xstep) int {
    if(w <= x0){ return 0 }
    (w - x0 + xstep - 1) / xstep
 }
 
-fn _png_adam7_pass_h(int: h, int: y0, int: ystep): int {
+fn _png_adam7_pass_h(int h, int y0, int ystep) int {
    if(h <= y0){ return 0 }
    (h - y0 + ystep - 1) / ystep
 }
 
-fn _png_adam7_expected_raw(int: w, int: h, int: channels, int: bytes_per_sample): int {
+fn _png_adam7_expected_raw(int w, int h, int channels, int bytes_per_sample) int {
    mut total = 0
    mut pi = 0
    def pass_x0, pass_y0 = [0, 4, 0, 2, 0, 1, 0], [0, 0, 4, 0, 2, 0, 1]
@@ -292,7 +281,7 @@ fn _png_adam7_expected_raw(int: w, int: h, int: channels, int: bytes_per_sample)
    total
 }
 
-fn _png_color_channels(int: color_type): int {
+fn _png_color_channels(int color_type) int {
    case color_type {
       6 -> 4
       4 -> 2
@@ -302,7 +291,7 @@ fn _png_color_channels(int: color_type): int {
    }
 }
 
-fn _png_bit_depth_ok(int: color_type, int: bit_depth): bool {
+fn _png_bit_depth_ok(int color_type, int bit_depth) bool {
    case color_type {
       0 -> bit_depth == 1 || bit_depth == 2 || bit_depth == 4 || bit_depth == 8 || bit_depth == 16
       2 -> bit_depth == 8 || bit_depth == 16
@@ -312,7 +301,7 @@ fn _png_bit_depth_ok(int: color_type, int: bit_depth): bool {
    }
 }
 
-fn _png_bit_depth_error(int: color_type, int: bit_depth): str {
+fn _png_bit_depth_error(int color_type, int bit_depth) str {
    case color_type {
       0 -> "unsupported grayscale bit depth " + to_str(bit_depth)
       2 -> "unsupported truecolor bit depth " + to_str(bit_depth)
@@ -322,7 +311,7 @@ fn _png_bit_depth_error(int: color_type, int: bit_depth): str {
    }
 }
 
-fn _png_unfilter_row_8(any: raw, int: src_off, any: cur, any: prev, int: stride, int: bpp, int: filter): bool {
+fn _png_unfilter_row_8(any raw, int src_off, any cur, any prev, int stride, int bpp, int filter) bool {
    if(filter == 0){
       mut ci = 0
       while(ci < stride){
@@ -390,7 +379,7 @@ fn _png_unfilter_row_8(any: raw, int: src_off, any: cur, any: prev, int: stride,
    false
 }
 
-fn _png_unfilter_raw_row_inplace(any: raw, int: raw_p, int: stride, int: bpp, int: row_idx, int: filter): bool {
+fn _png_unfilter_raw_row_inplace(any raw, int raw_p, int stride, int bpp, int row_idx, int filter) bool {
    case filter {
       0 -> true
       1 -> {
@@ -449,7 +438,7 @@ fn _png_unfilter_raw_row_inplace(any: raw, int: raw_p, int: stride, int: bpp, in
    }
 }
 
-fn _png_expand_row_rgba8(any: dst, int: dst_off, any: src, int: w): any {
+fn _png_expand_row_rgba8(any dst, int dst_off, any src, int w) any {
    mut i, d = 0, dst_off
    while(i < w){
       def s = i * 4
@@ -462,7 +451,7 @@ fn _png_expand_row_rgba8(any: dst, int: dst_off, any: src, int: w): any {
    }
 }
 
-fn _png_expand_row_rgb8(any: dst, int: dst_off, any: src, int: w): any {
+fn _png_expand_row_rgb8(any dst, int dst_off, any src, int w) any {
    mut i, s = 0, 0
    mut d = dst_off
    while(i + 4 <= w){
@@ -482,7 +471,7 @@ fn _png_expand_row_rgb8(any: dst, int: dst_off, any: src, int: w): any {
    }
 }
 
-fn _png_expand_row_rgb8_trns(any: dst, int: dst_off, any: src, int: w, int: trns_r, int: trns_g, int: trns_b): any {
+fn _png_expand_row_rgb8_trns(any dst, int dst_off, any src, int w, int trns_r, int trns_g, int trns_b) any {
    def tr, tg = trns_r & 255, trns_g & 255
    def tb = trns_b & 255
    mut i, s = 0, 0
@@ -497,7 +486,7 @@ fn _png_expand_row_rgb8_trns(any: dst, int: dst_off, any: src, int: w, int: trns
    }
 }
 
-fn _png_expand_row_gray8_lut(any: dst, int: dst_off, any: src, int: w, any: gray_lut): any {
+fn _png_expand_row_gray8_lut(any dst, int dst_off, any src, int w, any gray_lut) any {
    mut i, d = 0, dst_off
    while(i + 4 <= w){
       store32(dst, load32(gray_lut, load8(src, i) * 4), d)
@@ -514,7 +503,7 @@ fn _png_expand_row_gray8_lut(any: dst, int: dst_off, any: src, int: w, any: gray
    }
 }
 
-fn _png_expand_row_palette8_lut(any: dst, int: dst_off, any: src, int: w, any: palette_lut): any {
+fn _png_expand_row_palette8_lut(any dst, int dst_off, any src, int w, any palette_lut) any {
    mut i, d = 0, dst_off
    while(i + 4 <= w){
       store32(dst, load32(palette_lut, load8(src, i) * 4), d)
@@ -531,7 +520,7 @@ fn _png_expand_row_palette8_lut(any: dst, int: dst_off, any: src, int: w, any: p
    }
 }
 
-fn _png_expand_row_gray_alpha8(any: dst, int: dst_off, any: src, int: w): any {
+fn _png_expand_row_gray_alpha8(any dst, int dst_off, any src, int w) any {
    mut i, s = 0, 0
    mut d = dst_off
    while(i < w){
@@ -544,10 +533,10 @@ fn _png_expand_row_gray_alpha8(any: dst, int: dst_off, any: src, int: w): any {
 }
 
 fn _png_decode_fast_rows8(
-   any: raw, int: raw_len, any: pixels, int: w, int: h, int: stride,
-   int: bytes_per_pixel, int: color_type, int: trns_r, int: trns_g, int: trns_b,
-   any: idat, any: palette, any: palette_alpha, any: gray_lut, any: palette_lut
-): list {
+   any raw, int raw_len, any pixels, int w, int h, int stride,
+   int bytes_per_pixel, int color_type, int trns_r, int trns_g, int trns_b,
+   any idat, any palette, any palette_alpha, any gray_lut, any palette_lut
+) list {
    mut prev_row = init_str(malloc(stride + 32), stride)
    mut cur_row = init_str(malloc(stride + 32), stride)
    if(!prev_row || !cur_row){ return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, prev_row, cur_row, pixels)] }
@@ -589,10 +578,10 @@ fn _png_decode_fast_rows8(
 }
 
 fn _png_decode_packed_rows(
-   any: raw, int: raw_len, any: pixels, int: w, int: h, int: stride,
-   int: bit_depth, int: color_type,
-   any: idat, any: palette, any: palette_alpha, any: gray_lut, any: palette_lut
-): list {
+   any raw, int raw_len, any pixels, int w, int h, int stride,
+   int bit_depth, int color_type,
+   any idat, any palette, any palette_alpha, any gray_lut, any palette_lut
+) list {
    mut prev_row = init_str(malloc(stride + 32), stride)
    mut cur_row = init_str(malloc(stride + 32), stride)
    if(!prev_row || !cur_row){ return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, prev_row, cur_row, pixels)] }
@@ -629,7 +618,7 @@ fn _png_decode_packed_rows(
    [true, _png_decode_result_clean(pixels, w, h, raw, idat, gray_lut, palette_lut, palette, palette_alpha, prev_row, cur_row)]
 }
 
-fn _join_chunks(any: chunks): any {
+fn _join_chunks(any chunks) any {
    mut total = 0
    mut i = 0
    def n = chunks.len
@@ -655,7 +644,7 @@ fn _join_chunks(any: chunks): any {
    res
 }
 
-fn _png_scan_decode_chunks(any: data): dict {
+fn _png_scan_decode_chunks(any data) dict {
    mut p = 8
    mut idat_list = list(4)
    mut w, h, bit_depth, color_type = 0, 0, 0, 0
@@ -723,13 +712,13 @@ fn _png_scan_decode_chunks(any: data): dict {
    }
 }
 
-fn _png_signature_ok(any: data): bool {
+fn _png_signature_ok(any data) bool {
    is_str(data) && data.len >= 8
    && load8(data, 0) == 137 && load8(data, 1) == 80 && load8(data, 2) == 78 && load8(data, 3) == 71
    && load8(data, 4) == 13 && load8(data, 5) == 10 && load8(data, 6) == 26 && load8(data, 7) == 10
 }
 
-fn _png_join_idat_list(any: idat_list): any {
+fn _png_join_idat_list(any idat_list) any {
    mut idat = _join_chunks(idat_list)
    def idat_list_n = idat_list.len
    mut ci = 0
@@ -740,17 +729,17 @@ fn _png_join_idat_list(any: idat_list): any {
    idat
 }
 
-fn _png_decode_stride(int: w, int: channels, int: bit_depth, int: bytes_per_sample): int {
+fn _png_decode_stride(int w, int channels, int bit_depth, int bytes_per_sample) int {
    if(bit_depth < 8){ return((w * channels * bit_depth) + 7) / 8 }
    w * channels * bytes_per_sample
 }
 
-fn _png_expected_raw(int: w, int: h, int: channels, int: bytes_per_sample, int: stride, int: interlace_method): int {
+fn _png_expected_raw(int w, int h, int channels, int bytes_per_sample, int stride, int interlace_method) int {
    if(interlace_method == 1){ return _png_adam7_expected_raw(w, h, channels, bytes_per_sample) }
    (stride + 1) * h
 }
 
-fn _png_copy_raw(any: raw_src, int: raw_len): any {
+fn _png_copy_raw(any raw_src, int raw_len) any {
    mut raw = init_str(malloc(raw_len + 32), raw_len)
    if(!raw){ return 0 }
    mut raw_i = 0
@@ -761,7 +750,7 @@ fn _png_copy_raw(any: raw_src, int: raw_len): any {
    raw
 }
 
-fn _png_decode_raw_payload(any: idat, int: expect_raw, any: palette=0, any: palette_alpha=0): any {
+fn _png_decode_raw_payload(any idat, int expect_raw, any palette=0, any palette_alpha=0) any {
    if(_png_no_decompress_enabled()){ return 0 }
    def raw_src = zlib.decompress_zlib_limit(idat, expect_raw)
    if(!raw_src){ return _png_decode_fail("zlib decompress failed/empty", raw_src, idat, palette, palette_alpha) }
@@ -777,14 +766,14 @@ fn _png_decode_raw_payload(any: idat, int: expect_raw, any: palette=0, any: pale
    raw
 }
 
-fn _png_decode_luts(int: color_type,
-   int: bit_depth,
-   int: trns_gray,
-   any: palette,
-   any: palette_alpha,
-   any: raw,
-   any: idat,
-   any: pixels): list {
+fn _png_decode_luts(int color_type,
+   int bit_depth,
+   int trns_gray,
+   any palette,
+   any palette_alpha,
+   any raw,
+   any idat,
+   any pixels) list {
    def gray_lut = (color_type == 0 && bit_depth <= 8) ? _png_build_gray_lut(bit_depth, trns_gray) : 0
    def palette_lut = (color_type == 3) ? _png_build_palette_lut(palette, palette_alpha) : 0
    if(color_type == 3 && !palette_lut){ return [false, _png_decode_fail("palette lookup build failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, 0, 0, pixels)] }
@@ -799,24 +788,24 @@ fn _png_decode_luts(int: color_type,
    [true, 0, gray_lut, palette_lut, keep_palette, keep_palette_alpha]
 }
 
-fn _png_try_fast_decode_paths(any: raw,
-   int: raw_len,
-   any: pixels,
-   int: w,
-   int: h,
-   int: stride,
-   int: bytes_per_pixel,
-   int: bit_depth,
-   int: color_type,
-   int: interlace_method,
-   int: trns_r,
-   int: trns_g,
-   int: trns_b,
-   any: idat,
-   any: palette,
-   any: palette_alpha,
-   any: gray_lut,
-   any: palette_lut): list {
+fn _png_try_fast_decode_paths(any raw,
+   int raw_len,
+   any pixels,
+   int w,
+   int h,
+   int stride,
+   int bytes_per_pixel,
+   int bit_depth,
+   int color_type,
+   int interlace_method,
+   int trns_r,
+   int trns_g,
+   int trns_b,
+   any idat,
+   any palette,
+   any palette_alpha,
+   any gray_lut,
+   any palette_lut) list {
    if(interlace_method == 0 && bit_depth == 8){
       if(_png_stage_debug_enabled()){ print("[png] stage: fast path") }
       def fast8 = _png_decode_fast_rows8(raw, raw_len, pixels, w, h, stride, bytes_per_pixel, color_type, trns_r, trns_g, trns_b, idat, palette, palette_alpha, gray_lut, palette_lut)
@@ -830,15 +819,15 @@ fn _png_try_fast_decode_paths(any: raw,
    [false, 0]
 }
 
-fn _png_store_adam7_pixel(any: pixels,
-   any: raw,
-   int: src_off,
-   int: dst_off,
-   int: bit_depth,
-   int: color_type,
-   int: trns_r,
-   any: gray_lut,
-   any: palette_lut): any {
+fn _png_store_adam7_pixel(any pixels,
+   any raw,
+   int src_off,
+   int dst_off,
+   int bit_depth,
+   int color_type,
+   int trns_r,
+   any gray_lut,
+   any palette_lut) any {
    if(bit_depth == 8 && color_type == 2 && trns_r < 0){
       store8(pixels, load8(raw, src_off), dst_off)
       store8(pixels, load8(raw, src_off + 1), dst_off + 1)
@@ -861,22 +850,22 @@ fn _png_store_adam7_pixel(any: pixels,
    }
 }
 
-fn _png_decode_adam7_rows(any: raw,
-   int: raw_len,
-   any: pixels,
-   int: w,
-   int: h,
-   int: channels,
-   int: bytes_per_sample,
-   int: bytes_per_pixel,
-   int: bit_depth,
-   int: color_type,
-   int: trns_r,
-   any: idat,
-   any: palette,
-   any: palette_alpha,
-   any: gray_lut,
-   any: palette_lut): any {
+fn _png_decode_adam7_rows(any raw,
+   int raw_len,
+   any pixels,
+   int w,
+   int h,
+   int channels,
+   int bytes_per_sample,
+   int bytes_per_pixel,
+   int bit_depth,
+   int color_type,
+   int trns_r,
+   any idat,
+   any palette,
+   any palette_alpha,
+   any gray_lut,
+   any palette_lut) any {
    if(_png_stage_debug_enabled()){ print("[png] stage: interlace path") }
    def pass_x0, pass_y0 = [0, 4, 0, 2, 0, 1, 0], [0, 0, 4, 0, 2, 0, 1]
    def pass_xs, pass_ys = [8, 8, 4, 4, 2, 2, 1], [8, 8, 8, 4, 4, 2, 2]
@@ -913,22 +902,22 @@ fn _png_decode_adam7_rows(any: raw,
    _png_decode_result(pixels, w, h)
 }
 
-fn _png_store_flat_pixel(any: pixels,
-   any: raw,
-   int: raw_p,
-   int: w,
-   int: y,
-   int: i,
-   int: channels,
-   int: bytes_per_sample,
-   int: bit_depth,
-   int: color_type,
-   int: trns_gray,
-   int: trns_r,
-   int: trns_g,
-   int: trns_b,
-   any: gray_lut,
-   any: palette_lut): any {
+fn _png_store_flat_pixel(any pixels,
+   any raw,
+   int raw_p,
+   int w,
+   int y,
+   int i,
+   int channels,
+   int bytes_per_sample,
+   int bit_depth,
+   int color_type,
+   int trns_gray,
+   int trns_r,
+   int trns_g,
+   int trns_b,
+   any gray_lut,
+   any palette_lut) any {
    def dst_off = (y * w + i) * 4
    def src_off = raw_p + i * channels * bytes_per_sample
    if(bit_depth < 8){
@@ -983,26 +972,26 @@ fn _png_store_flat_pixel(any: pixels,
    }
 }
 
-fn _png_decode_flat_rows(any: raw,
-   int: raw_len,
-   any: pixels,
-   int: w,
-   int: h,
-   int: stride,
-   int: channels,
-   int: bytes_per_sample,
-   int: bytes_per_pixel,
-   int: bit_depth,
-   int: color_type,
-   int: trns_gray,
-   int: trns_r,
-   int: trns_g,
-   int: trns_b,
-   any: idat,
-   any: palette,
-   any: palette_alpha,
-   any: gray_lut,
-   any: palette_lut): any {
+fn _png_decode_flat_rows(any raw,
+   int raw_len,
+   any pixels,
+   int w,
+   int h,
+   int stride,
+   int channels,
+   int bytes_per_sample,
+   int bytes_per_pixel,
+   int bit_depth,
+   int color_type,
+   int trns_gray,
+   int trns_r,
+   int trns_g,
+   int trns_b,
+   any idat,
+   any palette,
+   any palette_alpha,
+   any gray_lut,
+   any palette_lut) any {
    mut y = 0
    mut raw_p = 0
    while(y < h){
@@ -1024,7 +1013,8 @@ fn _png_decode_flat_rows(any: raw,
    _png_decode_result(pixels, w, h)
 }
 
-fn decode(any: data): any {
+fn decode(any data) any {
+   "Decodes decode."
    if(!is_str(data) || data.len < 8){ return _fail("bad input type/size") }
    if(!_png_signature_ok(data)){ return _fail("bad signature") }
    if(_png_stop_early_enabled()){ return 0 }
@@ -1081,7 +1071,7 @@ fn decode(any: data): any {
    _png_decode_flat_rows(raw, raw_len, pixels, w, h, stride, channels, bytes_per_sample, bytes_per_pixel, bit_depth, color_type, trns_gray, trns_r, trns_g, trns_b, idat, palette, palette_alpha, gray_lut, palette_lut)
 }
 
-fn _make_chunk(any: chunk_type, any: data): any {
+fn _make_chunk(any chunk_type, any data) any {
    def length = data.len
    def total = 8 + length + 4
    def res_p = malloc(total + 32)
@@ -1105,7 +1095,8 @@ fn _make_chunk(any: chunk_type, any: data): any {
    res
 }
 
-fn encode(any: img): any {
+fn encode(any img) any {
+   "Encodes encode."
    if(!img){ return 0 }
    def w, h = img.get("width"), img.get("height")
    def pixels = img.get("data")
@@ -1180,4 +1171,37 @@ fn encode(any: img): any {
    _png_free_tmp(idat_chunk)
    _png_free_tmp(iend_chunk)
    res
+}
+
+#main {
+   fn byte_str(list bytes) any {
+      def n = bytes.len
+      def out = malloc(n + 1)
+      assert(out != 0, "png byte string allocation")
+      init_str(out, n)
+      mut i = 0
+      while(i < n){
+         store8(out, bytes.get(i), i)
+         i += 1
+      }
+      store8(out, 0, n)
+      out
+   }
+   def rgba = byte_str([
+         255, 0, 0, 255,
+         0, 255, 0, 255,
+         0, 0, 255, 255,
+         255, 255, 0, 128
+   ])
+   def encoded = encode({"width": 2, "height": 2, "channels": 4, "data": rgba})
+   assert(is_str(encoded), "png encoded string")
+   assert(load8(encoded, 0) == 137 && load8(encoded, 1) == 80 && load8(encoded, 2) == 78, "png signature")
+   def decoded = decode(encoded)
+   assert(is_dict(decoded), "png decoded dict")
+   assert(decoded.get("width") == 2 && decoded.get("height") == 2 && decoded.get("channels") == 4, "png decoded shape")
+   def data = decoded.get("data")
+   assert(is_str(data) && data.len == 16, "png data size")
+   assert(load8(data, 0) == 255 && load8(data, 1) == 0 && load8(data, 2) == 0 && load8(data, 3) == 255, "png first pixel")
+   assert(load8(data, 12) == 255 && load8(data, 13) == 255 && load8(data, 14) == 0 && load8(data, 15) == 128, "png alpha pixel")
+   print("✓ std.parse.img.png self-test passed")
 }

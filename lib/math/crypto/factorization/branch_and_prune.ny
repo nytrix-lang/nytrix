@@ -1,13 +1,16 @@
-;; Keywords: factorization branch-and-prune
+;; Keywords: factorization branch-and-prune math crypto number-theory
 ;; Integer-factorization routines for branch-and-prune recovery of RSA factors and private exponents.
 ;; Reference:
 ;; - Heninger N., Shacham H., "Reconstructing RSA Private Keys from Random Key Bits"
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.branch_and_prune(factorize_pq, factorize_pqd, factorize_pqddpdq)
 use std.core
 use std.math.nt
 use std.math.crypto.number.partial
 
-fn _bits_to_int_le(list: bits, int: upto): any {
+fn _bits_to_int_le(list bits, int upto) any {
    mut out = 0
    mut i = 0
    while(i < upto && i < bits.len){
@@ -18,7 +21,7 @@ fn _bits_to_int_le(list: bits, int: upto): any {
    out
 }
 
-fn _partial_to_bits(any: pi): any {
+fn _partial_to_bits(any pi) any {
    if(!is_list(pi) || pi.len < 3){ return nil }
    def components = pi.get(2)
    if(!is_list(components)){ return nil }
@@ -39,7 +42,7 @@ fn _partial_to_bits(any: pi): any {
    bits
 }
 
-fn _tau(any: x): int {
+fn _tau(any x) int {
    mut v, i = x, 0
    while(v != 0 && (v % 2) == 0){
       v /= 2
@@ -48,26 +51,26 @@ fn _tau(any: x): int {
    i
 }
 
-fn _known_bit_match(any: known, any: guess): int { (known != nil && known == guess) ? 1 : 0 }
+fn _known_bit_match(any known, any guess) int { (known != nil && known == guess) ? 1 : 0 }
 
-fn _bit_lo(any: bit): any { bit == nil ? 0 : bit }
+fn _bit_lo(any bit) any { bit == nil ? 0 : bit }
 
-fn _bit_hi(any: bit): any { bit == nil ? 1 : bit }
+fn _bit_hi(any bit) any { bit == nil ? 1 : bit }
 
-fn _shifted_bit(list: bits, int: i): any { i >= bits.len ? 0 : bits.get(i) }
+fn _shifted_bit(list bits, int i) any { i >= bits.len ? 0 : bits.get(i) }
 
-fn _restore_pq(list: p_bits, list: q_bits, int: i, any: p_prev, any: q_prev): any {
+fn _restore_pq(list p_bits, list q_bits, int i, any p_prev, any q_prev) any {
    p_bits[i] = p_prev
    q_bits[i] = q_prev
    nil
 }
 
-fn _set_if_present(list: bits, int: i, any: bit): any {
+fn _set_if_present(list bits, int i, any bit) any {
    if(i < bits.len){ bits[i] = bit }
    nil
 }
 
-fn _find_k(any: n, any: e, list: d_bits): list {
+fn _find_k(any n, any e, list d_bits) list {
    mut best_score = -1
    mut best_k = nil
    mut best_bits = nil
@@ -96,7 +99,7 @@ fn _find_k(any: n, any: e, list: d_bits): list {
    [best_k, best_bits]
 }
 
-fn _correct_msb(list: d_bits, any: guess_bits): any {
+fn _correct_msb(list d_bits, any guess_bits) any {
    mut i = (d_bits.len / 2) + 2
    while(i < d_bits.len){
       d_bits[i] = d_bits.get(i) == nil ? guess_bits.get(i) : d_bits.get(i)
@@ -105,7 +108,7 @@ fn _correct_msb(list: d_bits, any: guess_bits): any {
    nil
 }
 
-fn _correct_lsb(any: e, list: bits, int: exp): any {
+fn _correct_lsb(any e, list bits, int exp) any {
    def inv = inverse_mod(e, 1 << exp)
    mut i = 0
    while(i < exp && i < bits.len){
@@ -115,24 +118,24 @@ fn _correct_lsb(any: e, list: bits, int: exp): any {
    nil
 }
 
-fn _ordered_factors(any: p, any: q): list { (p < q) ? [p, q] : [q, p] }
+fn _ordered_factors(any p, any q) list { (p < q) ? [p, q] : [q, p] }
 
-fn _valid_pq_bits(any: p_bits, any: q_bits): int { p_bits != nil && q_bits != nil && p_bits.len == q_bits.len }
+fn _valid_pq_bits(any p_bits, any q_bits) int { p_bits != nil && q_bits != nil && p_bits.len == q_bits.len }
 
-fn _force_odd_pq(list: p_bits, list: q_bits): any {
+fn _force_odd_pq(list p_bits, list q_bits) any {
    p_bits[0] = 1
    q_bits[0] = 1
    nil
 }
 
-fn _finish_factor_pair(any: n, any: r): any {
+fn _finish_factor_pair(any n, any r) any {
    if(r == nil){ return nil }
    def p, q = r.get(0), r.get(1)
    if(p * q != n){ return nil }
    _ordered_factors(p, q)
 }
 
-fn _prepare_d_bits(any: n, any: e, list: d_bits): any {
+fn _prepare_d_bits(any n, any e, list d_bits) any {
    def kg = _find_k(n, e, d_bits)
    def k, guess = kg.get(0), kg.get(1)
    if(k == nil || guess == nil){ return nil }
@@ -142,7 +145,7 @@ fn _prepare_d_bits(any: n, any: e, list: d_bits): any {
    [k, tk]
 }
 
-fn _bp_pq(any: n, list: p_bits, list: q_bits, any: p_cur, any: q_cur, int: i): any {
+fn _bp_pq(any n, list p_bits, list q_bits, any p_cur, any q_cur, int i) any {
    if(i >= p_bits.len || i >= q_bits.len){ return [p_cur, q_cur] }
    def c1 = ((n - p_cur * q_cur) >> i) & 1
    def p_prev, q_prev = p_bits.get(i), q_bits.get(i)
@@ -166,7 +169,7 @@ fn _bp_pq(any: n, list: p_bits, list: q_bits, any: p_cur, any: q_cur, int: i): a
    nil
 }
 
-fn _bp_pqd(any: n, any: e, any: k, int: tk, list: p_bits, list: q_bits, list: d_bits, any: p_cur, any: q_cur, int: i): any {
+fn _bp_pqd(any n, any e, any k, int tk, list p_bits, list q_bits, list d_bits, any p_cur, any q_cur, int i) any {
    if(i >= p_bits.len || i >= q_bits.len){ return [p_cur, q_cur] }
    def d_cur = _bits_to_int_le(d_bits, i)
    def c1 = ((n - p_cur * q_cur) >> i) & 1
@@ -201,7 +204,7 @@ fn _bp_pqd(any: n, any: e, any: k, int: tk, list: p_bits, list: q_bits, list: d_
    nil
 }
 
-fn _bp_pqddpdq(any: n, any: e, any: k, int: tk, any: kp, int: tkp, any: kq, int: tkq, list: p_bits, list: q_bits, list: d_bits, list: dp_bits, list: dq_bits, any: p_cur, any: q_cur, int: i): any {
+fn _bp_pqddpdq(any n, any e, any k, int tk, any kp, int tkp, any kq, int tkq, list p_bits, list q_bits, list d_bits, list dp_bits, list dq_bits, any p_cur, any q_cur, int i) any {
    if(i >= p_bits.len || i >= q_bits.len){ return [p_cur, q_cur] }
    def d_cur = _bits_to_int_le(d_bits, i)
    def dp_cur = _bits_to_int_le(dp_bits, i)
@@ -257,7 +260,7 @@ fn _bp_pqddpdq(any: n, any: e, any: k, int: tk, any: kp, int: tkp, any: kq, int:
    nil
 }
 
-fn factorize_pq(any: n, any: p_partial, any: q_partial): any {
+fn factorize_pq(any n, any p_partial, any q_partial) any {
    "Factor n when partial bits of p and q are known.
    Returns [p, q] with p <= q, or nil."
    def p_bits, q_bits = _partial_to_bits(p_partial), _partial_to_bits(q_partial)
@@ -266,7 +269,7 @@ fn factorize_pq(any: n, any: p_partial, any: q_partial): any {
    _finish_factor_pair(n, _bp_pq(n, p_bits, q_bits, 1, 1, 1))
 }
 
-fn factorize_pqd(any: n, any: e, any: p_partial, any: q_partial, any: d_partial): any {
+fn factorize_pqd(any n, any e, any p_partial, any q_partial, any d_partial) any {
    "Factor n when partial bits of p, q, and d are known.
    Returns [p, q] with p <= q, or nil."
    def p_bits, q_bits = _partial_to_bits(p_partial), _partial_to_bits(q_partial)
@@ -279,7 +282,7 @@ fn factorize_pqd(any: n, any: e, any: p_partial, any: q_partial, any: d_partial)
    _finish_factor_pair(n, _bp_pqd(n, e, k, tk, p_bits, q_bits, d_bits, 1, 1, 1))
 }
 
-fn factorize_pqddpdq(any: n, any: e, any: p_partial, any: q_partial, any: d_partial, any: dp_partial, any: dq_partial): any {
+fn factorize_pqddpdq(any n, any e, any p_partial, any q_partial, any d_partial, any dp_partial, any dq_partial) any {
    "Factor n when partial bits of p, q, d, dp, and dq are known.
    Returns [p, q] with p <= q, or nil."
    def p_bits, q_bits = _partial_to_bits(p_partial), _partial_to_bits(q_partial)

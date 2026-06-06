@@ -1,7 +1,10 @@
-;; Keywords: encoding radix
+;; Keywords: encoding radix math crypto
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc4648
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.radix(digit_value, parse_radix_int, parse_octal_int, decimal_chunks_to_text, octal_chunks_to_text, keyed_alpha_decode, base45_decode, ascii85_decode, base92_decode, base65536_decode, base58_encode_bytes, base58_decode_str, base58check_encode_bytes, base58check_decode_str, base91_pair_decode)
 use std.core
 use std.core.str
@@ -11,7 +14,7 @@ use std.math.crypto.hash as h
 def BASE58_CHARS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 mut _BASE91_DEFAULT = nil
 
-fn digit_value(int: ch): int {
+fn digit_value(int ch) int {
    "Return numeric digit value for ASCII code ch, or -1 if invalid."
    case ch {
       48..57 -> ch - 48
@@ -21,7 +24,7 @@ fn digit_value(int: ch): int {
    }
 }
 
-fn parse_radix_int(any: s, int: base): int {
+fn parse_radix_int(any s, int base) int {
    "Parse a base-2..36 integer string, returning -1 on invalid input."
    if(!is_str(s) || base < 2 || base > 36){ return -1 }
    mut out = 0
@@ -35,12 +38,20 @@ fn parse_radix_int(any: s, int: base): int {
    return out
 }
 
-fn parse_octal_int(any: s): int {
+fn parse_octal_int(any s) int {
    "Parse an octal integer string, returning -1 on invalid input."
    return parse_radix_int(s, 8)
 }
 
-fn _radix_chunks_to_text(str: text, int: base): str {
+@inline
+fn _radix_is_ws(int c) bool {
+   return case c {
+      9, 10, 13, 32 -> true
+      _ -> false
+   }
+}
+
+fn _radix_chunks_to_text(str text, int base) str {
    mut out = Builder(max(8, text.len / 2 + 4))
    mut value = 0
    mut valid = true
@@ -48,7 +59,7 @@ fn _radix_chunks_to_text(str: text, int: base): str {
    mut i = 0
    while(i <= text.len){
       def c = i < text.len ? load8(text, i) : 32
-      if(c == 32 || c == 9 || c == 10 || c == 13){
+      if(_radix_is_ws(c)){
          if(seen && valid && value >= 0){ out = builder_append_byte(out, value & 255) }
          value = 0
          valid = true
@@ -66,44 +77,42 @@ fn _radix_chunks_to_text(str: text, int: base): str {
    return _radix_finish_builder(out)
 }
 
-fn decimal_chunks_to_text(str: text): str {
+fn decimal_chunks_to_text(str text) str {
    "Decode space-separated decimal byte values into text."
    _radix_chunks_to_text(text, 10)
 }
 
-fn octal_chunks_to_text(str: text): str {
+fn octal_chunks_to_text(str text) str {
    "Decode space-separated octal byte values into text."
    _radix_chunks_to_text(text, 8)
 }
 
-fn _radix_whitespace_to_spaces(str: s): str {
-   str_replace(str_replace(str_replace(s, "\n", " "), "\r", " "), "\t", " ")
-}
-
-fn _radix_clean_linebreaks(str: s): str {
+fn _radix_clean_linebreaks(str s) str {
    str_replace(str_replace(str_replace(s, "\n", ""), "\r", ""), "\t", "")
 }
 
-fn _radix_clean_whitespace(str: s): str {
+fn _radix_clean_whitespace(str s) str {
    str_replace(str_replace(str_replace(str_replace(s, " ", ""), "\t", ""), "\n", ""), "\r", "")
 }
 
-fn _base45_value(int: c): int {
-   if(c >= 48 && c <= 57){ return c - 48 }
-   if(c >= 65 && c <= 90){ return 10 + c - 65 }
-   if(c == 32){ return 36 }
-   if(c == 36){ return 37 }
-   if(c == 37){ return 38 }
-   if(c == 42){ return 39 }
-   if(c == 43){ return 40 }
-   if(c == 45){ return 41 }
-   if(c == 46){ return 42 }
-   if(c == 47){ return 43 }
-   if(c == 58){ return 44 }
-   -1
+fn _base45_value(int c) int {
+   return case c {
+      48..57 -> c - 48
+      65..90 -> 10 + c - 65
+      32 -> 36
+      36 -> 37
+      37 -> 38
+      42 -> 39
+      43 -> 40
+      45 -> 41
+      46 -> 42
+      47 -> 43
+      58 -> 44
+      _ -> -1
+   }
 }
 
-fn base45_decode(str: s): str {
+fn base45_decode(str s) str {
    "Decode Base45 text to bytes interpreted as a string.
    Line breaks and tabs are ignored ; spaces are preserved because Base45 uses
    space as a valid alphabet symbol."
@@ -136,7 +145,7 @@ fn base45_decode(str: s): str {
    _radix_finish_builder(out)
 }
 
-fn _ascii85_append_value(list: out, int: v, int: take=4): list {
+fn _ascii85_append_value(list out, int v, int take=4) list {
    assert(v >= 0, "ascii85_decode: negative value")
    mut b = out
    if(take >= 1){ b = builder_append_byte(b, (v >> 24) & 255) }
@@ -146,7 +155,7 @@ fn _ascii85_append_value(list: out, int: v, int: take=4): list {
    b
 }
 
-fn ascii85_decode(str: s): str {
+fn ascii85_decode(str s) str {
    "Decode Adobe Ascii85/Base85 text to bytes interpreted as a string.
    Whitespace is ignored and optional <~ ~> markers are accepted."
    mut clean = _radix_clean_whitespace(s)
@@ -186,20 +195,22 @@ fn ascii85_decode(str: s): str {
    _radix_finish_builder(out)
 }
 
-fn _base92_value(int: c): int {
-   if(c == 33){ return 0 }
-   if(c >= 35 && c <= 95){ return c - 34 }
-   if(c >= 97 && c <= 125){ return c - 35 }
-   -1
+fn _base92_value(int c) int {
+   return case c {
+      33 -> 0
+      35..95 -> c - 34
+      97..125 -> c - 35
+      _ -> -1
+   }
 }
 
-fn _radix_finish_builder(list: out): str {
+fn _radix_finish_builder(list out) str {
    def text = builder_to_str(out)
    builder_free(out)
    text
 }
 
-fn base92_decode(str: s): str {
+fn base92_decode(str s) str {
    "Decode Base92 text to bytes interpreted as a string.
    ASCII whitespace is ignored ; `~` decodes to the empty byte string."
    def clean = _radix_clean_whitespace(s)
@@ -238,7 +249,7 @@ fn base92_decode(str: s): str {
    _radix_finish_builder(out)
 }
 
-fn _base65536_lookup(int: cp): list {
+fn _base65536_lookup(int cp) list {
    mut z2 = -1
    if(cp >= 0x3400 && cp <= 0x4cff){
       z2 = cp - 0x3400
@@ -266,7 +277,7 @@ fn _base65536_lookup(int: cp): list {
    []
 }
 
-fn base65536_decode(str: s): str {
+fn base65536_decode(str s) str {
    "Decode qntm Base65536 text to bytes interpreted as a string.
    ASCII whitespace is ignored so wrapped payloads can be pasted directly."
    def clean = _radix_clean_whitespace(s)
@@ -296,7 +307,7 @@ fn base65536_decode(str: s): str {
    _radix_finish_builder(out)
 }
 
-fn keyed_alpha_decode(str: nums_text, str: key, int: base=10): str {
+fn keyed_alpha_decode(str nums_text, str key, int base=10) str {
    "Decode space-separated numbers shifted by a repeating alphabetic key."
    mut out = Builder(max(8, nums_text.len / 2 + 4))
    mut value = 0
@@ -306,7 +317,7 @@ fn keyed_alpha_decode(str: nums_text, str: key, int: base=10): str {
    mut i = 0
    while(i <= nums_text.len){
       def c = i < nums_text.len ? load8(nums_text, i) : 32
-      if(c == 32 || c == 9 || c == 10 || c == 13){
+      if(_radix_is_ws(c)){
          if(seen && valid && key.len > 0){
             def k = load8(key, key_idx % key.len)
             def plain = ((value - k + 26) % 26) + 97
@@ -329,7 +340,7 @@ fn keyed_alpha_decode(str: nums_text, str: key, int: base=10): str {
    return _radix_finish_builder(out)
 }
 
-fn base58_encode_bytes(list: bytes): str {
+fn base58_encode_bytes(list bytes) str {
    "Encode bytes list as Base58(Bitcoin alphabet)."
    if(bytes == nil){ return "" }
    if(bytes.len == 0){ return "" }
@@ -357,17 +368,19 @@ fn base58_encode_bytes(list: bytes): str {
    _radix_finish_builder(out)
 }
 
-fn _base58_value(int: c): int {
-   if(c >= 49 && c <= 57){ return c - 49 }
-   if(c >= 65 && c <= 72){ return 9 + c - 65 }
-   if(c >= 74 && c <= 78){ return 17 + c - 74 }
-   if(c >= 80 && c <= 90){ return 22 + c - 80 }
-   if(c >= 97 && c <= 107){ return 33 + c - 97 }
-   if(c >= 109 && c <= 122){ return 44 + c - 109 }
-   -1
+fn _base58_value(int c) int {
+   return case c {
+      49..57 -> c - 49
+      65..72 -> 9 + c - 65
+      74..78 -> 17 + c - 74
+      80..90 -> 22 + c - 80
+      97..107 -> 33 + c - 97
+      109..122 -> 44 + c - 109
+      _ -> -1
+   }
 }
 
-fn base58_decode_str(str: s): ?list {
+fn base58_decode_str(str s) ?list {
    "Decode a Base58 string(Bitcoin alphabet) into a bytes list.
    Returns nil on invalid characters."
    if(!is_str(s) || s.len == 0){ return [] }
@@ -398,7 +411,7 @@ fn base58_decode_str(str: s): ?list {
    out
 }
 
-fn base58check_encode_bytes(list: payload_bytes): str {
+fn base58check_encode_bytes(list payload_bytes) str {
    "Base58Check encode: Base58( payload || checksum4 ), checksum = SHA256(SHA256(payload))[:4]."
    def h1, h2 = h.sha256_bytes(payload_bytes), h.sha256_bytes(h1)
    def checksum = [h2[0], h2[1], h2[2], h2[3]]
@@ -407,7 +420,7 @@ fn base58check_encode_bytes(list: payload_bytes): str {
    base58_encode_bytes(raw)
 }
 
-fn base58check_decode_str(str: s): ?list {
+fn base58check_decode_str(str s) ?list {
    "Decode Base58Check string to payload bytes.
    Returns nil on parse failure or checksum mismatch."
    def raw = base58_decode_str(s)
@@ -426,7 +439,7 @@ fn base58check_decode_str(str: s): ?list {
    return payload
 }
 
-fn _base91_default_alphabet(): str {
+fn _base91_default_alphabet() str {
    if(_BASE91_DEFAULT != nil){ return _BASE91_DEFAULT }
    mut b, i = Builder(96), 33
    while(i <= 123){
@@ -439,7 +452,7 @@ fn _base91_default_alphabet(): str {
    s
 }
 
-fn base91_pair_decode(str: s, str: alphabet=""): list {
+fn base91_pair_decode(str s, str alphabet="") list {
    "Decode a simple base-91 *pair* encoding used in some puzzle and legacy data formats.
    This is NOT basE91(bitpacking). It interprets input as 2-char digits over a
    91-char alphabet:

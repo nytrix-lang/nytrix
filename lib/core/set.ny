@@ -1,11 +1,13 @@
-;; Keywords: set hashset
+;; Keywords: set hashset core
 ;; Set construction, membership, mutation, and set algebra operations.
+;; References:
+;; - std.core
 module std.core.set_mod(set, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
 use std.core
 use std.core.primitives as prim
 
 @inline
-fn _set_str_eq(any: a, any: b): bool {
+fn _set_str_eq(any a, any b) bool {
    if(!is_str(a) || !is_str(b)){ return false }
    def n = a.len
    if(n != b.len){ return false }
@@ -13,13 +15,13 @@ fn _set_str_eq(any: a, any: b): bool {
 }
 
 @inline
-fn _set_key_eq(any: a, any: b): bool {
+fn _set_key_eq(any a, any b) bool {
    if(is_str(a) && is_str(b)){ return _set_str_eq(a, b) }
    return(a == b)
 }
 
 @inline
-fn _set_hash(any: x): int {
+fn _set_hash(any x) int {
    if(is_int(x)){ return x }
    if(is_str(x)){
       mut h, i = 2166136261, 0
@@ -34,7 +36,7 @@ fn _set_hash(any: x): int {
 }
 
 @inline
-fn _set_find_existing_off(set: s, any: key): int {
+fn _set_find_existing_off(set s, any key) int {
    def cap = load64(s, 8)
    mut i = 0
    while(i < cap){
@@ -48,22 +50,22 @@ fn _set_find_existing_off(set: s, any: key): int {
 @inline
 @returns_owned
 @consumes(s)
-fn _set_tombstone_at(set: s, int: off): set {
-   store64(s, 0, off) ;; Clear key
-   store64(s, 0, off + 8) ;; Clear occupied flag
-   store64(s, 2, off + 16) ;; Tombstone state
+fn _set_tombstone_at(set s, int off) set {
+   store64(s, 0, off)
+   store64(s, 0, off + 8)
+   store64(s, 2, off + 16)
    store64(s, load64(s, 0) - 1, 0)
    s
 }
 
 @returns_owned
-fn _set_new(int: cap): set {
+fn _set_new(int cap) set {
    if(cap < 8){ cap = 8 }
    cap = _pow2(cap)
    def p = __malloc(16 + cap * 24)
    if(!p){ panic("set malloc failed") }
    store64(p, prim.runtime_tag_raw("set"), -8)
-   store64(p, 0, 0) ;; count
+   store64(p, 0, 0)
    store64(p, cap, 8)
    mut i = 0
    while(i < cap){
@@ -78,7 +80,7 @@ fn _set_new(int: cap): set {
 
 @inline
 @returns_owned
-fn set(int: cap=8): set {
+fn set(int cap=8) set {
    "Creates a new empty set."
    _set_new(cap)
 }
@@ -86,7 +88,7 @@ fn set(int: cap=8): set {
 @inline
 @returns_owned
 @consumes(s)
-fn _set_insert(set: s, any: key): set {
+fn _set_insert(set s, any key) set {
    def cap = load64(s, 8)
    if(is_str(key) && _set_find_existing_off(s, key) >= 0){ return s }
    def h = _set_hash(key)
@@ -117,7 +119,7 @@ fn _set_insert(set: s, any: key): set {
 
 @returns_owned
 @consumes(s)
-fn _set_resize(set: s, int: newcap): set {
+fn _set_resize(set s, int newcap) set {
    mut ns = _set_new(newcap)
    def cap = load64(s, 8)
    mut i = 0
@@ -132,7 +134,7 @@ fn _set_resize(set: s, int: newcap): set {
 }
 
 @inline
-fn _set_has_existing(any: s, any: key): bool {
+fn _set_has_existing(any s, any key) bool {
    if(!is_set(s)){ return false }
    if(is_str(key)){ return _set_find_existing_off(s, key) >= 0 }
    def cap = load64(s, 8)
@@ -157,7 +159,7 @@ fn _set_has_existing(any: s, any: key): bool {
 }
 
 @returns_owned
-fn _set_add(any: s, any: key): set {
+fn _set_add(any s, any key) set {
    if(!s){ s = _set_new(8) }
    if(!is_set(s)){ panic("add on non-set") }
    if(_set_has_existing(s, key)){ return s }
@@ -171,10 +173,10 @@ fn _set_add(any: s, any: key): set {
 }
 
 @inline
-fn _set_contains(any: s, any: key): bool { _set_has_existing(s, key) }
+fn _set_contains(any s, any key) bool { _set_has_existing(s, key) }
 
 @returns_owned
-fn _set_remove(any: s, any: key): any {
+fn _set_remove(any s, any key) any {
    if(!is_set(s)){ return s }
    if(is_str(key)){
       def off = _set_find_existing_off(s, key)
@@ -191,7 +193,7 @@ fn _set_remove(any: s, any: key): any {
       def off = 16 + idx * 24
       def st = load64(s, off + 16)
       case st {
-         0 -> { return s } ;; Key not found
+         0 -> { return s }
          1 if _set_key_eq(load64(s, off), key) -> {
             return _set_tombstone_at(s, off)
          }
@@ -205,25 +207,25 @@ fn _set_remove(any: s, any: key): any {
 }
 
 @inline
-fn _set_len(any: s): int {
+fn _set_len(any s) int {
    if(!is_set(s)){ return 0 }
    load64(s, 0)
 }
 
 @inline
-fn len(any: s): int {
+fn len(any s) int {
    "Returns the number of elements in set `s`."
    _set_len(s)
 }
 
 @inline
-fn is_empty(any: s): bool {
+fn is_empty(any s) bool {
    "Returns true if set `s` has no elements."
    _set_len(s) == 0
 }
 
 @returns_owned
-fn _set_values(any: s): list {
+fn _set_values(any s) list {
    if(!is_set(s)){ return list(0) }
    def cap = load64(s, 8)
    def count = load64(s, 0)
@@ -244,7 +246,7 @@ fn _set_values(any: s): list {
 }
 
 @returns_owned
-fn _set_clear(any: s): any {
+fn _set_clear(any s) any {
    if(!is_set(s)){ return s }
    def cap = load64(s, 8)
    mut i = 0
@@ -261,34 +263,34 @@ fn _set_clear(any: s): any {
 
 @inline
 @returns_owned
-fn add(any: s, any: key): set {
+fn add(any s, any key) set {
    "Adds `key` to set `s`."
    _set_add(s, key)
 }
 
 @inline
 @returns_owned
-fn sub(any: s, any: key): any {
+fn sub(any s, any key) any {
    "Removes `key` from set `s`."
    _set_remove(s, key)
 }
 
 @inline
-fn contains(any: s, any: key): bool {
+fn contains(any s, any key) bool {
    "Returns true if `key` is in set `s`."
    _set_contains(s, key)
 }
 
 @inline
 @returns_owned
-fn clear(any: s): any {
+fn clear(any s) any {
    "Removes all elements from set `s`."
    _set_clear(s)
 }
 
 @inline
 @returns_owned
-fn values(any: s): list {
+fn values(any s) list {
    "Returns the values of set `s` as a list."
    _set_values(s)
 }

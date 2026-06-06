@@ -1,4 +1,5 @@
-;; Keywords: hash digest hmac md4 md5 sha1 sha256 sha512 sha3 blake2s ripemd160 crc32 adler32 fnv xxhash ntlm password length-extension
+;; Keywords: hash digest hmac md4 md5 sha1 sha256 sha512 sha3 blake2s ripemd160 crc32 adler32 fnv xxhash ntlm password length-extension math crypto
+;; Cryptography hash helpers for algorithms, analysis, validation, or supporting math.
 ;; References:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
@@ -35,13 +36,13 @@ if(comptime{ __os_name() == "macos" }){
 }
 
 extern "crypto" {
-   fn _EVP_MD_CTX_new(): handle as "EVP_MD_CTX_new"
-   fn _EVP_MD_CTX_free(handle: ctx) as "EVP_MD_CTX_free"
-   fn _EVP_get_digestbyname(str: name): handle as "EVP_get_digestbyname"
-   fn _EVP_DigestInit_ex(handle: ctx, handle: typ, handle: impl): i32 as "EVP_DigestInit_ex"
-   fn _EVP_DigestUpdate(handle: ctx, ptr: data, u64: count): i32 as "EVP_DigestUpdate"
-   fn _EVP_DigestFinal_ex(handle: ctx, ptr: md, ptr: size): i32 as "EVP_DigestFinal_ex"
-   fn _HMAC(handle: evp_md, ptr: key, i32: key_len, ptr: data, u64: data_len, ptr: md, ptr: md_len): handle as "HMAC"
+   fn _EVP_MD_CTX_new() handle as "EVP_MD_CTX_new"
+   fn _EVP_MD_CTX_free(handle ctx) as "EVP_MD_CTX_free"
+   fn _EVP_get_digestbyname(str name) handle as "EVP_get_digestbyname"
+   fn _EVP_DigestInit_ex(handle ctx, handle typ, handle impl) i32 as "EVP_DigestInit_ex"
+   fn _EVP_DigestUpdate(handle ctx, ptr data, u64 count) i32 as "EVP_DigestUpdate"
+   fn _EVP_DigestFinal_ex(handle ctx, ptr md, ptr size) i32 as "EVP_DigestFinal_ex"
+   fn _HMAC(handle evp_md, ptr key, i32 key_len, ptr data, u64 data_len, ptr md, ptr md_len) handle as "HMAC"
 }
 
 mut _hash_native_checked = false
@@ -49,7 +50,7 @@ mut _hash_native_ok = false
 mut _hash_native_backend_name = ""
 mut _hash_native_last_error = ""
 
-fn _hash_norm_span(any: s, int: start, int: span_len): list {
+fn _hash_norm_span(any s, int start, int span_len) list {
    if(!is_int(start)){ start = 0 }
    if(start < 0){ start = 0 }
    def n = (is_str(s) || is_bytes(s) || is_list(s)) ? s.len : 0
@@ -59,29 +60,29 @@ fn _hash_norm_span(any: s, int: start, int: span_len): list {
    [start, span_len]
 }
 
-fn _hash_native_set_error(any: msg): bool {
+fn _hash_native_set_error(any msg) bool {
    _hash_native_last_error = to_str(msg)
    false
 }
 
-fn native_available(): bool {
+fn native_available() bool {
    "Returns whether the optional native OpenSSL hash backend is available."
    _hash_native_load()
 }
 
-fn native_backend_name(): str {
+fn native_backend_name() str {
    "Returns the active native hash backend name, or empty string."
    _hash_native_backend_name
 }
 
-fn native_last_error(): str {
+fn native_last_error() str {
    "Returns the last native hash backend initialization error."
    _hash_native_last_error
 }
 
-fn _hash_native_enabled(): bool { common.env_toggle("NY_HASH_NATIVE", false) }
+fn _hash_native_enabled() bool { common.env_toggle("NY_HASH_NATIVE", false) }
 
-fn _hash_input_bytes(any: data, int: start=0, int: span_len=0): list {
+fn _hash_input_bytes(any data, int start=0, int span_len=0) list {
    def span = _hash_norm_span(data, start, span_len)
    start, span_len = span.get(0), span.get(1)
    mut out = []
@@ -104,7 +105,7 @@ fn _hash_input_bytes(any: data, int: start=0, int: span_len=0): list {
    out
 }
 
-fn _hash_data_bytes(any: data): list {
+fn _hash_data_bytes(any data) list {
    if(is_str(data) || is_bytes(data)){
       def n = data.len
       mut out = list(n)
@@ -129,16 +130,16 @@ fn _hash_data_bytes(any: data): list {
    []
 }
 
-fn _hash_byte(any: v): int { int(v) & 255 }
+fn _hash_byte(any v) int { int(v) & 255 }
 
-fn _hash_le32(list: data, int: i): int {
+fn _hash_le32(list data, int i) int {
    _hash_byte(data.get(i, 0)) |
    (_hash_byte(data.get(i + 1, 0)) << 8) |
    (_hash_byte(data.get(i + 2, 0)) << 16) |
    (_hash_byte(data.get(i + 3, 0)) << 24)
 }
 
-fn _hash_mul32(int: a, int: b): int {
+fn _hash_mul32(int a, int b) int {
    def aa = _u32(a)
    def bb = _u32(b)
    def alo = aa & 65535
@@ -148,12 +149,7 @@ fn _hash_mul32(int: a, int: b): int {
    _u32((alo * blo) + (((ahi * blo) + (alo * bhi)) << 16))
 }
 
-fn _hash_u32_hex(int: x): str {
-   def n = _u32(x)
-   [((n >> 24) & 255), ((n >> 16) & 255), ((n >> 8) & 255), (n & 255)].hex
-}
-
-fn _hash_native_load(): bool {
+fn _hash_native_load() bool {
    if(_hash_native_checked){ return _hash_native_ok }
    _hash_native_checked = true
    _hash_native_ok = false
@@ -180,7 +176,7 @@ fn _hash_native_load(): bool {
    true
 }
 
-fn _hash_native_digest_obj(list: names): handle {
+fn _hash_native_digest_obj(list names) handle {
    if(!_hash_native_load()){ return 0 }
    mut i = 0
    while(i < names.len){
@@ -191,7 +187,7 @@ fn _hash_native_digest_obj(list: names): handle {
    0
 }
 
-fn _hash_span_buf(any: s, int: start, int: span_len): list {
+fn _hash_span_buf(any s, int start, int span_len) list {
    def span = _hash_norm_span(s, start, span_len)
    start = span[0]
    def slen = span[1]
@@ -207,7 +203,7 @@ fn _hash_span_buf(any: s, int: start, int: span_len): list {
    [buf, slen, true]
 }
 
-fn _hash_bytes_from_ptr(any: p, int: n): list {
+fn _hash_bytes_from_ptr(any p, int n) list {
    mut out = list(n)
    __list_set_len(out, n)
    mut i = 0
@@ -218,13 +214,13 @@ fn _hash_bytes_from_ptr(any: p, int: n): list {
    out
 }
 
-fn _hash_native_digest_hex(list: names, any: s, int: start=0, int: count=0): any {
+fn _hash_native_digest_hex(list names, any s, int start=0, int count=0) any {
    def out = _hash_native_digest_bytes(names, s, start, count)
    if(out == nil){ return nil }
    out.hex
 }
 
-fn _hash_native_digest_bytes(list: names, any: s, int: start=0, int: count=0): any {
+fn _hash_native_digest_bytes(list names, any s, int start=0, int count=0) any {
    def md = _hash_native_digest_obj(names)
    if(!md){ return nil }
    def src = _hash_span_buf(s, start, count)
@@ -268,13 +264,13 @@ fn _hash_native_digest_bytes(list: names, any: s, int: start=0, int: count=0): a
    res
 }
 
-fn _hash_native_hmac_hex(list: names, any: key, any: data): any {
+fn _hash_native_hmac_hex(list names, any key, any data) any {
    def out = _hash_native_hmac_bytes(names, key, data)
    if(out == nil){ return nil }
    out.hex
 }
 
-fn _hash_native_hmac_bytes(list: names, any: key, any: data): any {
+fn _hash_native_hmac_bytes(list names, any key, any data) any {
    def md = _hash_native_digest_obj(names)
    if(!md || !_hash_native_load()){ return nil }
    def key_src = _hash_span_buf(key, 0, 0)
@@ -311,7 +307,7 @@ fn _hash_native_hmac_bytes(list: names, any: key, any: data): any {
 def _U64_MASK = bigint_from_str("18446744073709551615")
 def _U64_ZERO = bigint_from_str("0")
 
-fn _u64_list(int: n): list {
+fn _u64_list(int n) list {
    mut out = list(n)
    mut i = 0
    while(i < n){
@@ -321,50 +317,50 @@ fn _u64_list(int: n): list {
    out
 }
 
-fn _u64_word(any: x): any { (x & _U64_MASK) + _U64_ZERO }
+fn _u64_word(any x) any { (x & _U64_MASK) + _U64_ZERO }
 
-fn _rotr64(any: x, int: n): any {
+fn _rotr64(any x, int n) any {
    def shift = n % 64
    def word = _u64_word(x)
    if(shift == 0){ return word }
    _u64_word((word >> shift) | (word << (64 - shift)))
 }
 
-fn _Ch(any: x, any: y, any: z): any {
+fn _Ch(any x, any y, any z) any {
    def ux, uy = _u64_word(x), _u64_word(y)
    def uz = _u64_word(z)
    _u64_word((ux & uy) ^^ ((_U64_MASK ^^ ux) & uz))
 }
 
-fn _Maj(any: x, any: y, any: z): any {
+fn _Maj(any x, any y, any z) any {
    def ux, uy = _u64_word(x), _u64_word(y)
    def uz = _u64_word(z)
    _u64_word((ux & uy) ^^ (ux & uz) ^^ (uy & uz))
 }
 
-fn _Sigma0_512(any: x): any {
+fn _Sigma0_512(any x) any {
    def word = _u64_word(x)
    _u64_word(_rotr64(word, 28) ^^ _rotr64(word, 34) ^^ _rotr64(word, 39))
 }
 
-fn _Sigma1_512(any: x): any {
+fn _Sigma1_512(any x) any {
    def word = _u64_word(x)
    _u64_word(_rotr64(word, 14) ^^ _rotr64(word, 18) ^^ _rotr64(word, 41))
 }
 
-fn _sigma0_512(any: x): any {
+fn _sigma0_512(any x) any {
    def word = _u64_word(x)
    _u64_word(_rotr64(word, 1) ^^ _rotr64(word, 8) ^^ (word >> 7))
 }
 
-fn _sigma1_512(any: x): any {
+fn _sigma1_512(any x) any {
    def word = _u64_word(x)
    _u64_word(_rotr64(word, 19) ^^ _rotr64(word, 61) ^^ (word >> 6))
 }
 
 def _K512 = [0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc, 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118, 0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2, 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694, 0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65, 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5, 0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4, 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70, 0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df, 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b, 0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30, 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8, 0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8, 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3, 0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec, 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b, 0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178, 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b, 0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817]
 
-fn _dl64(any: s, int: i): any {
+fn _dl64(any s, int i) any {
    mut out = _U64_ZERO
    mut j = 0
    while(j < 8){
@@ -374,7 +370,7 @@ fn _dl64(any: s, int: i): any {
    _u64_word(out)
 }
 
-fn _ts64(any: s, int: i, any: v): any {
+fn _ts64(any s, int i, any v) any {
    mut j = 7
    mut val = v
    while(j >= 0){
@@ -384,7 +380,7 @@ fn _ts64(any: s, int: i, any: v): any {
    }
 }
 
-fn _u64_hex(any: v): str {
+fn _u64_hex(any v) str {
    def word = _u64_word(v)
    mut out = str.Builder(16)
    mut i = 7
@@ -397,7 +393,7 @@ fn _u64_hex(any: v): str {
    text
 }
 
-fn sha512(any: msg, int: start=0, int: count=0): str {
+fn sha512(any msg, int start=0, int count=0) str {
    "Computes the SHA-512 hash of a message."
    if(_hash_native_load()){
       def native = _hash_native_digest_hex(["SHA512", "sha512", "SHA-512"], msg, start, count)
@@ -417,7 +413,7 @@ fn sha512(any: msg, int: start=0, int: count=0): str {
       store8(m, data.get(bi), bi)
       bi += 1
    }
-   store8(m, 128, n) ;; 0x80
+   store8(m, 128, n)
    mut i = n + 1
    while(i < total_len - 16){ store8(m, 0, i) i += 1 }
    while(i < total_len - 8){ store8(m, 0, i) i += 1 }
@@ -475,9 +471,9 @@ fn sha512(any: msg, int: start=0, int: count=0): str {
    hex_text
 }
 
-fn _bit(any: v): int { int(v) }
+fn _bit(any v) int { int(v) }
 
-fn crc32(any: s, int: start=0, int: count=0): int {
+fn crc32(any s, int start=0, int count=0) int {
    "Calculates the CRC32(Cyclic Redundancy Check) checksum of a string or buffer."
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -494,7 +490,7 @@ fn crc32(any: s, int: start=0, int: count=0): int {
    _u32((c ^^ 4294967295))
 }
 
-fn adler32(any: s, int: start=0, int: count=0): int {
+fn adler32(any s, int start=0, int count=0) int {
    "Calculates the Adler-32 checksum of a string or buffer."
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -508,7 +504,7 @@ fn adler32(any: s, int: start=0, int: count=0): int {
    _u32(((b << 16) | a))
 }
 
-fn fnv1a(any: s, int: start=0, int: count=0): int {
+fn fnv1a(any s, int start=0, int count=0) int {
    "Calculates the 32-bit FNV-1a(Fowler-Noll-Vo) hash of a string or buffer."
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -520,7 +516,7 @@ fn fnv1a(any: s, int: start=0, int: count=0): int {
    h
 }
 
-fn xxh32(any: s, int: seed=0, int: start=0, int: count=0): int {
+fn xxh32(any s, int seed=0, int start=0, int count=0) int {
    "Calculates the XXH32 hash, a fast non-cryptographic hash algorithm."
    def data = _hash_input_bytes(s, start, count)
    def slen = data.len
@@ -562,7 +558,7 @@ fn xxh32(any: s, int: seed=0, int: start=0, int: count=0): int {
    h32
 }
 
-fn sha1(any: s, int: start=0, int: count=0): str {
+fn sha1(any s, int start=0, int count=0) str {
    "Calculates the SHA-1 hash of a string or buffer. Returns the result as a 40-character hexadecimal string."
    if(_hash_native_load()){
       def native = _hash_native_digest_hex(["SHA1", "sha1", "SHA-1"], s, start, count)
@@ -638,7 +634,7 @@ fn sha1(any: s, int: start=0, int: count=0): str {
    return str.to_hex(h0, 8) + str.to_hex(h1, 8) + str.to_hex(h2, 8) + str.to_hex(h3, 8) + str.to_hex(h4, 8)
 }
 
-fn md5(any: s, int: start=0, int: count=0): str {
+fn md5(any s, int start=0, int count=0) str {
    "Calculates the MD5(Message-Digest Algorithm 5) hash of a string or buffer. " +
    "Returns a 32-character hexadecimal string."
    if(_hash_native_load()){
@@ -730,22 +726,22 @@ fn md5(any: s, int: start=0, int: count=0): str {
    str.to_hex((h3 / 16777216) % 256, 2)
 }
 
-fn md5_bytes(any: data): list {
+fn md5_bytes(any data) list {
    "Compute MD5 and return a 16-byte list."
    md5(data).unhex
 }
 
 def SHA256_K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
 
-fn _sha256_rotr(int: x, int: n): int {
+fn _sha256_rotr(int x, int n) int {
    ((x >> n) | (x << (32 - n))) & 0xffffffff
 }
 
-fn _sha256_ch(int: x, int: y, int: z): int { (x & y) ^^ ((0xffffffff ^^ x) & z) }
+fn _sha256_ch(int x, int y, int z) int { (x & y) ^^ ((0xffffffff ^^ x) & z) }
 
-fn _sha256_maj(int: x, int: y, int: z): int { (x & y) ^^ (x & z) ^^ (y & z) }
+fn _sha256_maj(int x, int y, int z) int { (x & y) ^^ (x & z) ^^ (y & z) }
 
-fn sha256(any: data): list {
+fn sha256(any data) list {
    "Compute SHA-256 hash of message(string or bytes). Returns bytes list."
    if(_hash_native_load()){
       def native = _hash_native_digest_bytes(["SHA256", "sha256", "SHA-256"], data, 0, 0)
@@ -863,12 +859,12 @@ fn sha256(any: data): list {
    result
 }
 
-fn sha256_hex(any: data): str {
+fn sha256_hex(any data) str {
    "Compute SHA-256 hash and return as hex string."
    sha256(data).hex
 }
 
-fn sha256_bytes(any: data): list {
+fn sha256_bytes(any data) list {
    "Compute SHA-256 hash. Returns bytes list.
    Accepts string, bytes, or byte-list."
    sha256(data)
@@ -906,7 +902,7 @@ def _RIPEMD160_SP = [
    8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ]
 
-fn _ripemd160_f(int: j, int: x, int: y, int: z): int {
+fn _ripemd160_f(int j, int x, int y, int z) int {
    if(j < 16){ return _xor32(_xor32(x, y), z) }
    if(j < 32){ return _or32(_and32(x, y), _and32(_not32(x), z)) }
    if(j < 48){ return _xor32(_or32(x, _not32(y)), z) }
@@ -914,7 +910,7 @@ fn _ripemd160_f(int: j, int: x, int: y, int: z): int {
    _xor32(x, _or32(y, _not32(z)))
 }
 
-fn _ripemd160_k(int: j): int {
+fn _ripemd160_k(int j) int {
    if(j < 16){ return 0x00000000 }
    if(j < 32){ return 0x5a827999 }
    if(j < 48){ return 0x6ed9eba1 }
@@ -922,7 +918,7 @@ fn _ripemd160_k(int: j): int {
    0xa953fd4e
 }
 
-fn _ripemd160_kp(int: j): int {
+fn _ripemd160_kp(int j) int {
    if(j < 16){ return 0x50a28be6 }
    if(j < 32){ return 0x5c4dd124 }
    if(j < 48){ return 0x6d703ef3 }
@@ -930,19 +926,19 @@ fn _ripemd160_kp(int: j): int {
    0x00000000
 }
 
-fn _ripemd160_word(list: msg, int: off, int: i): int {
+fn _ripemd160_word(list msg, int off, int i) int {
    def p = off + i * 4
    _u32(msg[p] | (msg[p+1] << 8) | (msg[p+2] << 16) | (msg[p+3] << 24))
 }
 
-fn _ripemd160_append_le32(list: out, int: x): list {
+fn _ripemd160_append_le32(list out, int x) list {
    out = out.append(x & 255)
    out = out.append((x >> 8) & 255)
    out = out.append((x >> 16) & 255)
    out.append((x >> 24) & 255)
 }
 
-fn _ripemd160_pure(any: data): list {
+fn _ripemd160_pure(any data) list {
    mut msg = _hash_data_bytes(data)
    def bit_len = msg.len * 8
    msg = msg.append(128)
@@ -994,7 +990,7 @@ fn _ripemd160_pure(any: data): list {
    _ripemd160_append_le32(out, h4)
 }
 
-fn ripemd160_bytes(any: data): list {
+fn ripemd160_bytes(any data) list {
    "Compute RIPEMD-160 hash of message(string or bytes). Returns bytes list.
    Uses native OpenSSL when available, then a pure-Ny fallback."
    if(_hash_native_load()){
@@ -1004,7 +1000,7 @@ fn ripemd160_bytes(any: data): list {
    _ripemd160_pure(data)
 }
 
-fn ripemd160_hex(any: data): str {
+fn ripemd160_hex(any data) str {
    "Compute RIPEMD-160 hash and return as hex string."
    ripemd160_bytes(data).hex
 }
@@ -1026,7 +1022,7 @@ def _KECCAK_PI = [
    0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4
 ]
 
-fn _keccak_f1600(list: st): any {
+fn _keccak_f1600(list st) any {
    mut i = 0
    while(i < 24){
       mut c, x = _u64_list(0), 0 while(x < 5){
@@ -1063,7 +1059,7 @@ fn _keccak_f1600(list: st): any {
    }
 }
 
-fn _sha3_common(any: data, int: capacity, int: out_len): str {
+fn _sha3_common(any data, int capacity, int out_len) str {
    mut msg = _hash_data_bytes(data)
    def rate = 1600 - capacity
    def rate_bytes = rate / 8
@@ -1098,7 +1094,7 @@ fn _sha3_common(any: data, int: capacity, int: out_len): str {
    hex_text
 }
 
-fn sha3_256(any: data): str {
+fn sha3_256(any data) str {
    "Return SHA3-256 digest as a hexadecimal string."
    if(_hash_native_load()){
       def native = _hash_native_digest_hex(["SHA3-256", "sha3-256", "SHA3_256"], data, 0, 0)
@@ -1107,7 +1103,7 @@ fn sha3_256(any: data): str {
    _sha3_common(data, 512, 256)
 }
 
-fn sha3_512(any: data): str {
+fn sha3_512(any data) str {
    "Return SHA3-512 digest as a hexadecimal string."
    if(_hash_native_load()){
       def native = _hash_native_digest_hex(["SHA3-512", "sha3-512", "SHA3_512"], data, 0, 0)
@@ -1123,7 +1119,7 @@ def _BLAKE2S_IV = [
 
 def _BLAKE2S_SIGMA = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3], [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4], [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8], [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13], [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9], [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11], [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10], [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5], [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0]]
 
-fn _blake2s_g(list: v, int: a, int: b, int: c, int: d, int: x, int: y): any {
+fn _blake2s_g(list v, int a, int b, int c, int d, int x, int y) any {
    mut va, vb, vc, vd = v.get(a), v.get(b), v.get(c), v.get(d)
    va = _u32(va + vb + x)
    vd = rotr(vd ^^ va, 16, 32)
@@ -1139,9 +1135,9 @@ fn _blake2s_g(list: v, int: a, int: b, int: c, int: d, int: x, int: y): any {
    v[d] = vd
 }
 
-fn _blake2s_le32(any: msg, int: off): int { msg.get(off, 0) | (msg.get(off + 1, 0) << 8) | (msg.get(off + 2, 0) << 16) | (msg.get(off + 3, 0) << 24) }
+fn _blake2s_le32(any msg, int off) int { msg.get(off, 0) | (msg.get(off + 1, 0) << 8) | (msg.get(off + 2, 0) << 16) | (msg.get(off + 3, 0) << 24) }
 
-fn blake2s(any: data, any: key=nil, int: out_len=32): str {
+fn blake2s(any data, any key=nil, int out_len=32) str {
    "Return BLAKE2s digest as a hexadecimal string."
    if(key == nil && out_len == 32 && _hash_native_load()){
       def native = _hash_native_digest_hex(["BLAKE2S-256", "blake2s256", "BLAKE2s256"], data, 0, 0)
@@ -1200,7 +1196,7 @@ fn blake2s(any: data, any: key=nil, int: out_len=32): str {
    hex_text
 }
 
-fn md5_hmac(any: key, any: message): str {
+fn md5_hmac(any key, any message) str {
    "HMAC-MD5 implementation."
    if(_hash_native_load()){
       def native = _hash_native_hmac_hex(["MD5", "md5"], key, message)
@@ -1209,13 +1205,13 @@ fn md5_hmac(any: key, any: message): str {
    _hash_hmac_bytes(key, message, "md5").hex
 }
 
-fn _hash_hmac_digest_bytes(str: digest_name, any: data): list {
+fn _hash_hmac_digest_bytes(str digest_name, any data) list {
    if(digest_name == "md5"){ return md5(data).unhex }
    if(digest_name == "sha256"){ return sha256(data) }
    []
 }
 
-fn _hash_hmac_bytes(any: key, any: data, str: digest_name): list {
+fn _hash_hmac_bytes(any key, any data, str digest_name) list {
    def block_size = 64
    mut key_bytes = _hash_data_bytes(key)
    if(key_bytes.len > block_size){ key_bytes = _hash_hmac_digest_bytes(digest_name, key_bytes) }
@@ -1243,7 +1239,7 @@ fn _hash_hmac_bytes(any: key, any: data, str: digest_name): list {
    _hash_hmac_digest_bytes(digest_name, outer)
 }
 
-fn sha256_hmac(any: key, any: data): list {
+fn sha256_hmac(any key, any data) list {
    "HMAC-SHA256."
    if(_hash_native_load()){
       def native = _hash_native_hmac_bytes(["SHA256", "sha256", "SHA-256"], key, data)
@@ -1252,7 +1248,7 @@ fn sha256_hmac(any: key, any: data): list {
    _hash_hmac_bytes(key, data, "sha256")
 }
 
-fn md5_padding(int: msg_len): list {
+fn md5_padding(int msg_len) list {
    "Compute MD5 padding byte list."
    def bit_len = msg_len * 8
    def pad_len = ((55 - msg_len) % 64 + 64) % 64 + 1
@@ -1270,7 +1266,7 @@ fn md5_padding(int: msg_len): list {
    pad
 }
 
-fn sha1_padding(int: msg_len): list {
+fn sha1_padding(int msg_len) list {
    "Compute SHA1 padding byte list."
    def bit_len = msg_len * 8
    def pad_len = ((55 - msg_len) % 64 + 64) % 64 + 1
@@ -1288,59 +1284,59 @@ fn sha1_padding(int: msg_len): list {
    pad
 }
 
-fn sha256_padding(int: msg_len): list {
+fn sha256_padding(int msg_len) list {
    "Compute SHA256 padding byte list."
    sha1_padding(msg_len)
 }
 
 impl str {
    @inline
-   fn md5(str: s): str {
+   fn md5(str s) str {
       "Return MD5 hex digest for this string."
       md5(s)
    }
    @inline
-   fn sha1(str: s): str {
+   fn sha1(str s) str {
       "Return SHA1 hex digest for this string."
       sha1(s)
    }
    @inline
-   fn sha256(str: s): list {
+   fn sha256(str s) list {
       "Return SHA256 digest bytes for this string."
       sha256(s)
    }
    @inline
-   fn sha256_hex(str: s): str {
+   fn sha256_hex(str s) str {
       "Return SHA256 hex digest for this string."
       sha256_hex(s)
    }
    @inline
-   fn sha512(str: s): str {
+   fn sha512(str s) str {
       "Return SHA512 hex digest for this string."
       sha512(s)
    }
    @inline
-   fn sha3_256(str: s): str {
+   fn sha3_256(str s) str {
       "Return SHA3-256 hex digest for this string."
       sha3_256(s)
    }
    @inline
-   fn sha3_512(str: s): str {
+   fn sha3_512(str s) str {
       "Return SHA3-512 hex digest for this string."
       sha3_512(s)
    }
    @inline
-   fn blake2s(str: s): str {
+   fn blake2s(str s) str {
       "Return BLAKE2s hex digest for this string."
       blake2s(s)
    }
    @inline
-   fn ripemd160(str: s): list {
+   fn ripemd160(str s) list {
       "Return RIPEMD-160 digest bytes for this string."
       ripemd160_bytes(s)
    }
    @inline
-   fn ripemd160_hex(str: s): str {
+   fn ripemd160_hex(str s) str {
       "Return RIPEMD-160 hex digest for this string."
       ripemd160_hex(s)
    }
@@ -1348,52 +1344,52 @@ impl str {
 
 impl list {
    @inline
-   fn md5(list: b): str {
+   fn md5(list b) str {
       "Return MD5 hex digest for this byte list."
       md5(b)
    }
    @inline
-   fn sha1(list: b): str {
+   fn sha1(list b) str {
       "Return SHA1 hex digest for this byte list."
       sha1(b)
    }
    @inline
-   fn sha256(list: b): list {
+   fn sha256(list b) list {
       "Return SHA256 digest bytes for this byte list."
       sha256(b)
    }
    @inline
-   fn sha256_hex(list: b): str {
+   fn sha256_hex(list b) str {
       "Return SHA256 hex digest for this byte list."
       sha256_hex(b)
    }
    @inline
-   fn sha512(list: b): str {
+   fn sha512(list b) str {
       "Return SHA512 hex digest for this byte list."
       sha512(b)
    }
    @inline
-   fn sha3_256(list: b): str {
+   fn sha3_256(list b) str {
       "Return SHA3-256 hex digest for this byte list."
       sha3_256(b)
    }
    @inline
-   fn sha3_512(list: b): str {
+   fn sha3_512(list b) str {
       "Return SHA3-512 hex digest for this byte list."
       sha3_512(b)
    }
    @inline
-   fn blake2s(list: b): str {
+   fn blake2s(list b) str {
       "Return BLAKE2s hex digest for this byte list."
       blake2s(b)
    }
    @inline
-   fn ripemd160(list: b): list {
+   fn ripemd160(list b) list {
       "Return RIPEMD-160 digest bytes for this byte list."
       ripemd160_bytes(b)
    }
    @inline
-   fn ripemd160_hex(list: b): str {
+   fn ripemd160_hex(list b) str {
       "Return RIPEMD-160 hex digest for this byte list."
       ripemd160_hex(b)
    }
@@ -1401,58 +1397,58 @@ impl list {
 
 impl bytes {
    @inline
-   fn md5(bytes: b): str {
+   fn md5(bytes b) str {
       "Return MD5 hex digest for this byte buffer."
       md5(b)
    }
    @inline
-   fn sha1(bytes: b): str {
+   fn sha1(bytes b) str {
       "Return SHA1 hex digest for this byte buffer."
       sha1(b)
    }
    @inline
-   fn sha256(bytes: b): list {
+   fn sha256(bytes b) list {
       "Return SHA256 digest bytes for this byte buffer."
       sha256(b)
    }
    @inline
-   fn sha256_hex(bytes: b): str {
+   fn sha256_hex(bytes b) str {
       "Return SHA256 hex digest for this byte buffer."
       sha256_hex(b)
    }
    @inline
-   fn sha512(bytes: b): str {
+   fn sha512(bytes b) str {
       "Return SHA512 hex digest for this byte buffer."
       sha512(b)
    }
    @inline
-   fn sha3_256(bytes: b): str {
+   fn sha3_256(bytes b) str {
       "Return SHA3-256 hex digest for this byte buffer."
       sha3_256(b)
    }
    @inline
-   fn sha3_512(bytes: b): str {
+   fn sha3_512(bytes b) str {
       "Return SHA3-512 hex digest for this byte buffer."
       sha3_512(b)
    }
    @inline
-   fn blake2s(bytes: b): str {
+   fn blake2s(bytes b) str {
       "Return BLAKE2s hex digest for this byte buffer."
       blake2s(b)
    }
    @inline
-   fn ripemd160(bytes: b): list {
+   fn ripemd160(bytes b) list {
       "Return RIPEMD-160 digest bytes for this byte buffer."
       ripemd160_bytes(b)
    }
    @inline
-   fn ripemd160_hex(bytes: b): str {
+   fn ripemd160_hex(bytes b) str {
       "Return RIPEMD-160 hex digest for this byte buffer."
       ripemd160_hex(b)
    }
 }
 
-fn hash_dict_crack(any: target_hash, list: wordlist, fnptr: hash_fn): any {
+fn hash_dict_crack(any target_hash, list wordlist, fnptr hash_fn) any {
    "Dictionary attack on hashes."
    mut i = 0
    while(i < wordlist.len){
@@ -1463,7 +1459,7 @@ fn hash_dict_crack(any: target_hash, list: wordlist, fnptr: hash_fn): any {
    nil
 }
 
-fn hash_brute_crack(any: target_hash, str: charset, int: max_len, fnptr: hash_fn): any {
+fn hash_brute_crack(any target_hash, str charset, int max_len, fnptr hash_fn) any {
    "Brute-force attack on hashes."
    def cs_len = charset.len
    mut length = 1

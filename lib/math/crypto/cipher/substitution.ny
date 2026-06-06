@@ -1,8 +1,11 @@
-;; Keywords: cipher substitution
+;; Keywords: cipher substitution math crypto
 ;; Substitution cipher scoring and key recovery routines.
 ;; Reference:
 ;; - https://practicalcryptography.com/ciphers/simple-substitution-cipher/
 ;; - https://en.wikipedia.org/wiki/Letter_frequency
+;; References:
+;; - std.math.crypto.cipher
+;; - std.math.crypto.analysis
 module std.math.crypto.cipher.substitution(substitution_encrypt, substitution_decrypt, substitution_apply_key, substitution_freq_analysis, substitution_key_from_pairs, substitution_freq_key, substitution_crack_freq, substitution_crack_hill, substitution_crack_hill_multistart, substitution_score, substitution_tr)
 use std.core
 use std.core.str
@@ -12,13 +15,9 @@ use std.math.crypto.encoding.xor
 def ENGLISH_FREQ_ORDER = "ETAOINSHRDLCUMWFGYPBVKJXQZ"
 
 @inline
-fn _sub_is_alpha_code(int: c): bool { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) }
+fn _sub_is_alpha_code(int c) bool { (c >= 65 && c <= 90) || (c >= 97 && c <= 122) }
 
-fn _contains_local(any: haystack, any: needle): bool {
-   haystack != nil && needle != nil && find(haystack, needle) >= 0
-}
-
-fn _sub_inverse_key_map(str: key): list {
+fn _sub_inverse_key_map(str key) list {
    mut inv = []
    mut i = 0
    while(i < 26){
@@ -37,20 +36,20 @@ fn _sub_inverse_key_map(str: key): list {
    inv
 }
 
-fn _sub_text_score(str: text): int {
+fn _sub_text_score(str text) int {
    mut score = english_score(text.to_bytes) + substitution_score(text)
    def upper_text = " " + upper(text) + " "
-   if(_contains_local(upper_text, " THE ")){ score += 220 }
-   if(_contains_local(upper_text, " AND ")){ score += 160 }
-   if(_contains_local(upper_text, " THIS ")){ score += 160 }
-   if(_contains_local(upper_text, " THAT ")){ score += 120 }
-   if(_contains_local(upper_text, "TION")){ score += 180 }
-   if(_contains_local(upper_text, "THER")){ score += 160 }
-   if(_contains_local(upper_text, "ING")){ score += 120 }
+   if(upper_text.contains(" THE ")){ score += 220 }
+   if(upper_text.contains(" AND ")){ score += 160 }
+   if(upper_text.contains(" THIS ")){ score += 160 }
+   if(upper_text.contains(" THAT ")){ score += 120 }
+   if(upper_text.contains("TION")){ score += 180 }
+   if(upper_text.contains("THER")){ score += 160 }
+   if(upper_text.contains("ING")){ score += 120 }
    score
 }
 
-fn _swap_key_positions(str: key, int: i, int: j): str {
+fn _swap_key_positions(str key, int i, int j) str {
    mut chars = []
    mut k = 0
    while(k < key.len){
@@ -63,7 +62,7 @@ fn _swap_key_positions(str: key, int: i, int: j): str {
    join(chars, "")
 }
 
-fn _seed_keys(str: base_key): list {
+fn _seed_keys(str base_key) list {
    mut seeds = []
    seeds = seeds.append(base_key)
    def swap_pairs = [
@@ -80,7 +79,7 @@ fn _seed_keys(str: base_key): list {
    seeds
 }
 
-fn substitution_apply_key(str: text, str: key, bool: encrypt): str {
+fn substitution_apply_key(str text, str key, bool encrypt) str {
    "Apply a substitution key to text.
    key: 26-character string mapping A-Z(index 0=A, 1=B, ...).
    encrypt: true to encrypt, false to decrypt.
@@ -123,17 +122,17 @@ fn substitution_apply_key(str: text, str: key, bool: encrypt): str {
    out
 }
 
-fn substitution_encrypt(str: text, str: key): str {
+fn substitution_encrypt(str text, str key) str {
    "Encrypt text using a monoalphabetic substitution key(26 chars for A-Z)."
    substitution_apply_key(text, key, true)
 }
 
-fn substitution_decrypt(str: text, str: key): str {
+fn substitution_decrypt(str text, str key) str {
    "Decrypt text using a monoalphabetic substitution key(26 chars for A-Z)."
    substitution_apply_key(text, key, false)
 }
 
-fn substitution_tr(str: text, str: source, str: target): str {
+fn substitution_tr(str text, str source, str target) str {
    "Translate each character from `source` to the character at the same index in `target`."
    crypto_require(text != nil, "cipher.substitution_tr", "text is nil")
    crypto_require(source != nil && target != nil, "cipher.substitution_tr", "source/target is nil")
@@ -149,7 +148,7 @@ fn substitution_tr(str: text, str: source, str: target): str {
    out
 }
 
-fn substitution_key_from_pairs(str: plaintext, str: ciphertext): str {
+fn substitution_key_from_pairs(str plaintext, str ciphertext) str {
    "Derive a monoalphabetic substitution key from aligned known plaintext/ciphertext.
    Returns a 26-character encrypt key. Unknown plaintext letters are filled with
    unused cipher letters in alphabet order."
@@ -199,7 +198,7 @@ fn substitution_key_from_pairs(str: plaintext, str: ciphertext): str {
    join(key, "")
 }
 
-fn substitution_freq_analysis(str: text): list {
+fn substitution_freq_analysis(str text) list {
    "Compute letter frequency counts from text.
    Returns list of 26 counts(index 0=A, 25=Z)."
    crypto_require(text != nil, "cipher.substitution_freq_analysis", "text is nil")
@@ -218,7 +217,7 @@ fn substitution_freq_analysis(str: text): list {
    counts
 }
 
-fn substitution_freq_key(str: ciphertext): str {
+fn substitution_freq_key(str ciphertext) str {
    "Build a frequency-seeded monoalphabetic substitution key guess.
    Returns a 26-char key string."
    crypto_require_nonempty(ciphertext, "cipher.substitution_crack_freq", "ciphertext")
@@ -257,7 +256,7 @@ fn substitution_freq_key(str: ciphertext): str {
    join(key, "")
 }
 
-fn substitution_crack_freq(str: ciphertext): str {
+fn substitution_crack_freq(str ciphertext) str {
    "Crack a monoalphabetic substitution cipher using frequency analysis.
    Maps the most frequent ciphertext letters to English frequency order.
    Returns a best-guess plaintext string."
@@ -266,7 +265,7 @@ fn substitution_crack_freq(str: ciphertext): str {
    substitution_decrypt(ciphertext, key_str)
 }
 
-fn substitution_crack_hill(str: ciphertext, int: rounds=4): list {
+fn substitution_crack_hill(str ciphertext, int rounds=4) list {
    "Refine a substitution crack using greedy pair-swaps over a frequency-seeded key.
    Returns [key, plaintext, score]."
    crypto_require_nonempty(ciphertext, "cipher.substitution_crack_hill", "ciphertext")
@@ -298,7 +297,7 @@ fn substitution_crack_hill(str: ciphertext, int: rounds=4): list {
    [best_key, best_plain, best_score]
 }
 
-fn substitution_crack_hill_multistart(str: ciphertext, int: rounds=3): list {
+fn substitution_crack_hill_multistart(str ciphertext, int rounds=3) list {
    "Run several seeded hill-climbs and keep the best result.
    Returns [key, plaintext, score]."
    crypto_require_nonempty(ciphertext, "cipher.substitution_crack_hill_multistart", "ciphertext")
@@ -345,7 +344,7 @@ fn substitution_crack_hill_multistart(str: ciphertext, int: rounds=3): list {
    [best_key, best_plain, best_score]
 }
 
-fn substitution_score(str: text): int {
+fn substitution_score(str text) int {
    "Score text by English-like letter frequency(higher = more English-like).
    Computes sum of abs(freq - expected) penalties."
    crypto_require(text != nil, "cipher.substitution_score", "text is nil")

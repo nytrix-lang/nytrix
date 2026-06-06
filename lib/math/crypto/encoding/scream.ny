@@ -1,12 +1,15 @@
-;; Keywords: encoding scream
+;; Keywords: encoding scream math crypto
 ;; Encoding routines for Unicode steganography encoding and decoding.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.scream(scream_mark_decode, scream_mark_from_codepoint, scream_extract_marks, scream_decode_marks, scream_decode_text)
 use std.core
 use std.core.str
 
-fn _scream_mark_index(int: mark): int {
+fn _scream_mark_index(int mark) int {
    if(mark == 0){ return 0 }
    if(mark == 0x0307){ return 1 }
    if(mark == 0x0327){ return 2 }
@@ -36,7 +39,7 @@ fn _scream_mark_index(int: mark): int {
    -1
 }
 
-fn _scream_mark_by_index(int: idx): int {
+fn _scream_mark_by_index(int idx) int {
    if(idx == 0){ return 0 }
    if(idx == 1){ return 0x0307 }
    if(idx == 2){ return 0x0327 }
@@ -66,7 +69,7 @@ fn _scream_mark_by_index(int: idx): int {
    -1
 }
 
-fn _scream_precomposed_index(int: code): int {
+fn _scream_precomposed_index(int code) int {
    if(code == 0x1ec8){ return 8 }
    if(code == 0x00c9){ return 4 }
    if(code == 0x00ce){ return 13 }
@@ -81,13 +84,13 @@ fn _scream_precomposed_index(int: code): int {
    -1
 }
 
-fn scream_mark_decode(int: mark): str {
+fn scream_mark_decode(int mark) str {
    "Decode one Scream Cipher combining-mark codepoint to A-Z. Use 0 for bare A."
    def idx = _scream_mark_index(mark)
    idx >= 0 ? chr(65 + idx) : "?"
 }
 
-fn scream_mark_from_codepoint(int: code): int {
+fn scream_mark_from_codepoint(int code) int {
    "Return a Scream Cipher mark from a combining or known precomposed codepoint.
    Returns -1 when the codepoint is not a supported mark."
    if(code != 0){
@@ -99,15 +102,15 @@ fn scream_mark_from_codepoint(int: code): int {
    -1
 }
 
-fn _scream_is_ascii_letter(int: code): bool {
+fn _scream_is_ascii_letter(int code) bool {
    (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-fn _scream_is_combining_mark(int: code): bool {
+fn _scream_is_combining_mark(int code) bool {
    code >= 0x0300 && code <= 0x033d
 }
 
-fn scream_extract_marks(str: text): list {
+fn scream_extract_marks(str text) list {
    "Extract one Scream Cipher mark per visible letter from UTF-8 text.
    ASCII letters without a following combining mark become bare-A marks(0)."
    mut marks = []
@@ -126,7 +129,7 @@ fn scream_extract_marks(str: text): list {
    marks
 }
 
-fn scream_decode_marks(list: marks): str {
+fn scream_decode_marks(list marks) str {
    "Decode a list of Scream Cipher combining-mark codepoints. Use 0 for bare A."
    mut out = Builder(max(8, marks.len + 1))
    mut i = 0
@@ -140,7 +143,7 @@ fn scream_decode_marks(list: marks): str {
    text
 }
 
-fn scream_decode_text(str: text): str {
+fn scream_decode_text(str text) str {
    "Decode Scream Cipher directly from UTF-8 carrier text."
    mut out = Builder(max(8, text.utf8_len + 1))
    mut last_ascii_letter = 0

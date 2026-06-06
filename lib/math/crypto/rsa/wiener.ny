@@ -1,9 +1,12 @@
-;; Keywords: rsa wiener
+;; Keywords: rsa wiener math crypto
 ;; RSA Wiener small-private-exponent attack routines.
 ;; convergents of e/N.  Works when d < N^(1/4) / 3.
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
+;; References:
+;; - std.math.crypto.rsa
+;; - std.math.crypto
 module std.math.crypto.rsa.wiener(wiener_attack, wiener_attack_entry, convergents, factorize_from_phi, wiener_lattice_attack, wiener_attack_lattice_entry, wiener_attack_common_prime, wiener_attack_common_prime_entry)
 use std.math.nt
 use std.math.crypto.factorization.known_phi
@@ -12,7 +15,7 @@ use std.math.crypto.rsa.common_prime
 use std.math.crypto.rsa.op (compute_phi, compute_d)
 use std.math.matrix
 
-fn convergents(any: num, any: den): list {
+fn convergents(any num, any den) list {
    "Return list of [k, h, k2] convergent triples for num/den.
    Each triple is [quotient_sequence_index, numerator, denominator]."
    mut convs = list(0)
@@ -40,7 +43,7 @@ fn convergents(any: num, any: den): list {
    convs
 }
 
-fn factorize_from_phi(any: N, any: phi): list {
+fn factorize_from_phi(any N, any phi) list {
    "Given N = p*q and phi(N), recover [p, q].
    We have p+q = N - phi + 1 and pq = N, so p,q are roots of
    x^2 - (p+q)x + N = 0."
@@ -52,7 +55,7 @@ fn factorize_from_phi(any: N, any: phi): list {
    [p, q]
 }
 
-fn _wiener_small_d_fallback(any: N, any: e, any: limit=4096): any {
+fn _wiener_small_d_fallback(any N, any e, any limit=4096) any {
    "Bounded verifier for tiny private-exponent fixtures. The continued-fraction
    path above is the primary attack ; this keeps small known vectors strict even
    when callers pass mixed integer carriers."
@@ -86,7 +89,7 @@ fn _wiener_small_d_fallback(any: N, any: e, any: limit=4096): any {
    nil
 }
 
-fn _wiener_square_residue_filter(any: n): bool {
+fn _wiener_square_residue_filter(any n) bool {
    "Cheap prefilter before big isqrt: every square must be a quadratic
    residue modulo 64."
    case int(n & Z(63)){
@@ -95,14 +98,14 @@ fn _wiener_square_residue_filter(any: n): bool {
    }
 }
 
-fn _wiener_square_residue_filter_int(int: n): bool {
+fn _wiener_square_residue_filter_int(int n) bool {
    case n & 63 {
       0, 1, 4, 9, 16, 17, 25, 33, 36, 41, 49, 57 -> true
       _ -> false
    }
 }
 
-fn _wiener_attack_small_int(any: N, any: e): any {
+fn _wiener_attack_small_int(any N, any e) any {
    def NN_big = Z(N)
    if(bit_length(NN_big) > 52){ return nil }
    def NN = bigint_to_int(NN_big)
@@ -146,7 +149,7 @@ fn _wiener_attack_small_int(any: N, any: e): any {
    nil
 }
 
-fn wiener_attack(any: N, any: e): any {
+fn wiener_attack(any N, any e) any {
    "Recover [d, p, q] from RSA public key(N, e) when d is small.
    Returns [d, p, q] on success or nil on failure."
    def small_hit = _wiener_attack_small_int(N, e)
@@ -205,14 +208,14 @@ fn wiener_attack(any: N, any: e): any {
    _wiener_small_d_fallback(NN, ee)
 }
 
-fn wiener_attack_entry(any: n, any: e): any {
+fn wiener_attack_entry(any n, any e) any {
    "Classic Wiener attack entrypoint."
    wiener_attack(n, e)
 }
 
-fn _wl_abs(any: x): any { bigint_lt(x, Z(0)) ? (-x) : x }
+fn _wl_abs(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 
-fn _wl_try_small_d(any: n, any: e, any: k, any: d): any {
+fn _wl_try_small_d(any n, any e, any k, any d) any {
    if(k == Z(0) || d <= Z(0)){ return nil }
    if(((e * d - Z(1)) % k) != Z(0)){ return nil }
    if(power_mod(power_mod(Z(2), e, n), d, n) != Z(2)){ return nil }
@@ -222,7 +225,7 @@ fn _wl_try_small_d(any: n, any: e, any: k, any: d): any {
    [facs[0], facs[1], d]
 }
 
-fn wiener_lattice_attack(any: n, any: e): any {
+fn wiener_lattice_attack(any n, any e) any {
    "Nguyen-style lattice Wiener attack. Returns [p, q, d] or nil."
    def s = isqrt(n)
    if(s <= Z(0)){ return nil }
@@ -241,12 +244,12 @@ fn wiener_lattice_attack(any: n, any: e): any {
    nil
 }
 
-fn wiener_attack_lattice_entry(any: n, any: e): any {
+fn wiener_attack_lattice_entry(any n, any e) any {
    "Lattice Wiener variant entrypoint."
    wiener_lattice_attack(n, e)
 }
 
-fn _recover_d_with_wiener_fallback(any: n, any: e, any: p, any: q): any {
+fn _recover_d_with_wiener_fallback(any n, any e, any p, any q) any {
    def d = compute_d(e, compute_phi(p, q))
    if(d != nil && d > 0){ return d }
    if(e <= 0){ return nil }
@@ -255,7 +258,7 @@ fn _recover_d_with_wiener_fallback(any: n, any: e, any: p, any: q): any {
    nil
 }
 
-fn wiener_attack_common_prime(any: n1, any: e1, any: c1, any: n2, any: e2=0, any: c2=0): any {
+fn wiener_attack_common_prime(any n1, any e1, any c1, any n2, any e2=0, any c2=0) any {
    "Recover from a shared-prime RSA setup, preferring direct shared-prime
    recovery and falling back to Wiener when one side still needs d recovery.
    Returns [m1, m2, p, q1, q2, d1, d2] or nil."
@@ -274,7 +277,7 @@ fn wiener_attack_common_prime(any: n1, any: e1, any: c1, any: n2, any: e2=0, any
    [m1, m2, p, q1, q2, d1, d2]
 }
 
-fn wiener_attack_common_prime_entry(any: n1, any: e1, any: c1, any: n2, any: e2=0, any: c2=0): any {
+fn wiener_attack_common_prime_entry(any n1, any e1, any c1, any n2, any e2=0, any c2=0) any {
    "Shared-prime Wiener recovery entrypoint."
    wiener_attack_common_prime(n1, e1, c1, n2, e2, c2)
 }

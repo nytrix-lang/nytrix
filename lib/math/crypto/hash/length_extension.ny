@@ -1,8 +1,11 @@
-;; Keywords: hash length-extension
+;; Keywords: hash length-extension math crypto
 ;; Hash-analysis routines for MD/SHA length-extension padding and forgery.
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+;; References:
+;; - std.math.crypto.hash
+;; - std.math.crypto
 module std.math.crypto.hash.length_extension(md5_padding, sha512_padding, md5_length_extend, sha1_length_extend, sha256_length_extend, sha512_length_extend)
 use std.core
 use std.math.bin
@@ -12,7 +15,7 @@ def _MD5_K = [3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080
 def _MD5_S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
 def _SHA256_K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
 
-fn md5_padding(int: msg_len_bits): list {
+fn md5_padding(int msg_len_bits) list {
    "Compute MD5 padding bytes for a message of given bit length.
    MD5 padding: append 0x80, then zeros, then 64-bit little-endian length.
    Total padded message is congruent to 448 mod 512 bits before length field.
@@ -32,12 +35,12 @@ fn md5_padding(int: msg_len_bits): list {
    padding
 }
 
-fn sha512_padding(int: msg_len_bits): list {
+fn sha512_padding(int msg_len_bits) list {
    "Compute SHA-512 padding bytes for a message of given bit length."
    _sha_padding(msg_len_bits / 8, 128, 16)
 }
 
-fn md5_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_bytes): str {
+fn md5_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) str {
    "Perform MD5 length extension attack.
    Given a valid MD5 hash of an unknown message(whose length we know),
    compute a valid MD5 hash of(original_message || padding || suffix).
@@ -105,7 +108,7 @@ fn md5_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_bytes
    _u32_to_hex_le(ha) + _u32_to_hex_le(hb) + _u32_to_hex_le(hc) + _u32_to_hex_le(hd)
 }
 
-fn sha1_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_bytes): str {
+fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) str {
    "Perform SHA-1 length extension attack.
    Given a valid SHA-1 hash of an unknown message,
    compute a valid SHA-1 hash of(original_message || padding || suffix).
@@ -187,7 +190,7 @@ fn sha1_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_byte
    _u32_to_hex_be(ha2) + _u32_to_hex_be(hb2) + _u32_to_hex_be(hc2) + _u32_to_hex_be(hd2) + _u32_to_hex_be(he2)
 }
 
-fn sha256_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_bytes): str {
+fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) str {
    "Perform SHA-256 length extension attack.
    Given a valid SHA-256 hash of an unknown message,
    compute a valid SHA-256 hash of(original_message || padding || suffix).
@@ -310,9 +313,9 @@ def _K512_LE = [
    0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
 ]
 
-fn _u64_word_le(any: x): any { (x & _U64_MASK_LE) + _U64_ZERO_LE }
+fn _u64_word_le(any x) any { (x & _U64_MASK_LE) + _U64_ZERO_LE }
 
-fn _u64_list_le(int: n): list {
+fn _u64_list_le(int n) list {
    mut out = list(n)
    store64(out, n, 0)
    mut i = 0
@@ -323,40 +326,40 @@ fn _u64_list_le(int: n): list {
    out
 }
 
-fn _rotr64_le(any: x, int: n): any {
+fn _rotr64_le(any x, int n) any {
    def shift = n % 64
    def word = _u64_word_le(x)
    if(shift == 0){ return word }
    _u64_word_le((word >> shift) | (word << (64 - shift)))
 }
 
-fn _sha512_ch(any: x, any: y, any: z): any {
+fn _sha512_ch(any x, any y, any z) any {
    def ux, uy = _u64_word_le(x), _u64_word_le(y)
    def uz = _u64_word_le(z)
    _u64_word_le((ux & uy) ^^ ((_U64_MASK_LE ^^ ux) & uz))
 }
 
-fn _sha512_maj(any: x, any: y, any: z): any {
+fn _sha512_maj(any x, any y, any z) any {
    def ux, uy = _u64_word_le(x), _u64_word_le(y)
    def uz = _u64_word_le(z)
    _u64_word_le((ux & uy) ^^ (ux & uz) ^^ (uy & uz))
 }
 
-fn _sha512_big0(any: x): any { _u64_word_le(_rotr64_le(x, 28) ^^ _rotr64_le(x, 34) ^^ _rotr64_le(x, 39)) }
+fn _sha512_big0(any x) any { _u64_word_le(_rotr64_le(x, 28) ^^ _rotr64_le(x, 34) ^^ _rotr64_le(x, 39)) }
 
-fn _sha512_big1(any: x): any { _u64_word_le(_rotr64_le(x, 14) ^^ _rotr64_le(x, 18) ^^ _rotr64_le(x, 41)) }
+fn _sha512_big1(any x) any { _u64_word_le(_rotr64_le(x, 14) ^^ _rotr64_le(x, 18) ^^ _rotr64_le(x, 41)) }
 
-fn _sha512_small0(any: x): any {
+fn _sha512_small0(any x) any {
    def word = _u64_word_le(x)
    _u64_word_le(_rotr64_le(word, 1) ^^ _rotr64_le(word, 8) ^^ (word >> 7))
 }
 
-fn _sha512_small1(any: x): any {
+fn _sha512_small1(any x) any {
    def word = _u64_word_le(x)
    _u64_word_le(_rotr64_le(word, 19) ^^ _rotr64_le(word, 61) ^^ (word >> 6))
 }
 
-fn _u64_from_bytes_be(list: bs, int: offset): any {
+fn _u64_from_bytes_be(list bs, int offset) any {
    mut out = _U64_ZERO_LE
    mut i = 0
    while(i < 8){
@@ -366,7 +369,7 @@ fn _u64_from_bytes_be(list: bs, int: offset): any {
    _u64_word_le(out)
 }
 
-fn _u64_to_hex_be(any: v): str {
+fn _u64_to_hex_be(any v) str {
    def word = _u64_word_le(v)
    mut out = list(8)
    store64(out, 8, 0)
@@ -378,7 +381,7 @@ fn _u64_to_hex_be(any: v): str {
    out.hex
 }
 
-fn sha512_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_bytes): str {
+fn sha512_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) str {
    "Perform SHA-512 length extension attack.
    Given a valid SHA-512 hash of an unknown message,
    compute a valid SHA-512 hash of(original_message || padding || suffix)."
@@ -450,7 +453,7 @@ fn sha512_length_extend(str: orig_hash_hex, int: orig_len_bytes, list: suffix_by
    _u64_to_hex_be(h[4]) + _u64_to_hex_be(h[5]) + _u64_to_hex_be(h[6]) + _u64_to_hex_be(h[7])
 }
 
-fn _sha_padding(int: msg_len_bytes, int: block_size, int: len_field_bytes): list {
+fn _sha_padding(int msg_len_bytes, int block_size, int len_field_bytes) list {
    "Internal: Compute SHA-style padding for message of given byte length.
    Appends 0x80, then zeros, then big-endian length in bits.
    Returns padding bytes as a list."
@@ -476,36 +479,36 @@ fn _sha_padding(int: msg_len_bytes, int: block_size, int: len_field_bytes): list
    padding
 }
 
-fn _u32(int: x): int { x & 4294967295 }
+fn _u32(int x) int { x & 4294967295 }
 
-fn _rotl32(int: x, int: n): int {
+fn _rotl32(int x, int n) int {
    def v = _u32(x)
    _u32((v << n) | (v >> (32 - n)))
 }
 
-fn _rotr32(int: x, int: n): int {
+fn _rotr32(int x, int n) int {
    def v = _u32(x)
    _u32((v >> n) | (v << (32 - n)))
 }
 
-fn _u32_from_bytes_le(list: bs, int: offset): int {
+fn _u32_from_bytes_le(list bs, int offset) int {
    def b0, b1 = __load_item_fast(bs, offset), __load_item_fast(bs, offset + 1)
    def b2, b3 = __load_item_fast(bs, offset + 2), __load_item_fast(bs, offset + 3)
    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
-fn _u32_from_bytes_be(list: bs, int: offset): int {
+fn _u32_from_bytes_be(list bs, int offset) int {
    def b0, b1 = __load_item_fast(bs, offset), __load_item_fast(bs, offset + 1)
    def b2, b3 = __load_item_fast(bs, offset + 2), __load_item_fast(bs, offset + 3)
    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
 }
 
-fn _u32_to_hex_le(int: n): str {
+fn _u32_to_hex_le(int n) str {
    def v = _u32(n)
    [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255].hex
 }
 
-fn _u32_to_hex_be(int: n): str {
+fn _u32_to_hex_be(int n) str {
    def v = _u32(n)
    [(v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255].hex
 }

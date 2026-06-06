@@ -1,14 +1,17 @@
-;; Keywords: encoding xor
+;; Keywords: encoding xor math crypto
 ;; Encoding routines for XOR encoding, scoring, and key recovery.
 ;; Reference:
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
+;; References:
+;; - std.math.crypto.encoding
+;; - std.math.crypto
 module std.math.crypto.encoding.xor(xor_with_single_byte, xor_with_repeating_key, xor_bytes_hex, single_byte_xor_bruteforce, english_score, repeating_key_xor_keylength, repeating_key_xor_crack, multi_text_xor_keystream, hamming_distance, crib_drag, xor_two_ciphertexts, repeating_xor_key_from_prefix)
 use std.core
 use std.math.bin
 use std.core.str
 
-fn _xor_overlap(list: a, list: b): list {
+fn _xor_overlap(list a, list b) list {
    def n = a.len < b.len ? a.len : b.len
    mut out = list(n)
    mut i = 0
@@ -20,7 +23,7 @@ fn _xor_overlap(list: a, list: b): list {
    out
 }
 
-fn xor_with_single_byte(list: data, int: key_byte): list {
+fn xor_with_single_byte(list data, int key_byte) list {
    "XOR every byte in data with a single-byte key. Returns byte list."
    def n = data.len
    mut out = list(n)
@@ -33,7 +36,7 @@ fn xor_with_single_byte(list: data, int: key_byte): list {
    out
 }
 
-fn xor_with_repeating_key(list: data, list: key): list {
+fn xor_with_repeating_key(list data, list key) list {
    "XOR byte list data with a repeating byte-list key. Returns byte list."
    def key_len = key.len
    case key_len {
@@ -51,7 +54,7 @@ fn xor_with_repeating_key(list: data, list: key): list {
    out
 }
 
-fn repeating_xor_key_from_prefix(list: ciphertext, list: known_prefix): list {
+fn repeating_xor_key_from_prefix(list ciphertext, list known_prefix) list {
    "Recover a repeating-XOR key when the known prefix length is the key length."
    def n = known_prefix.len
    mut key = list(n)
@@ -64,13 +67,13 @@ fn repeating_xor_key_from_prefix(list: ciphertext, list: known_prefix): list {
    key
 }
 
-fn xor_bytes_hex(str: a_hex, str: b_hex): str {
+fn xor_bytes_hex(str a_hex, str b_hex) str {
    "XOR two equal-length hex strings. Returns hex string."
    def a, b = a_hex.unhex, b_hex.unhex
    _xor_overlap(a, b).hex
 }
 
-fn hamming_distance(list: a, list: b): int {
+fn hamming_distance(list a, list b) int {
    "Compute bit-level Hamming distance between two byte lists."
    def n = (a.len < b.len) ? a.len : b.len
    mut dist = 0
@@ -82,7 +85,7 @@ fn hamming_distance(list: a, list: b): int {
    dist
 }
 
-fn _english_byte_score(int: b): int {
+fn _english_byte_score(int b) int {
    mut score = 0
    case b {
       32..126 -> { score += 2 }
@@ -98,7 +101,7 @@ fn _english_byte_score(int: b): int {
    score
 }
 
-fn english_score(list: bytes): int {
+fn english_score(list bytes) int {
    "Score a byte list by English letter frequency. Higher = more English-like.
    Considers etaoin shrdlu ordering, spaces, and printable chars."
    mut score = 0
@@ -110,7 +113,7 @@ fn english_score(list: bytes): int {
    score
 }
 
-fn _english_score_xor_key(list: data, int: key_byte): int {
+fn _english_score_xor_key(list data, int key_byte) int {
    mut score = 0
    mut i = 0
    while(i < data.len){
@@ -120,7 +123,7 @@ fn _english_score_xor_key(list: data, int: key_byte): int {
    score
 }
 
-fn _english_score_xor_key_strided(list: data, int: start, int: stride, int: key_byte): int {
+fn _english_score_xor_key_strided(list data, int start, int stride, int key_byte) int {
    mut score = 0
    mut i = start
    while(i < data.len){
@@ -130,7 +133,7 @@ fn _english_score_xor_key_strided(list: data, int: start, int: stride, int: key_
    score
 }
 
-fn _single_byte_xor_key(list: data): int {
+fn _single_byte_xor_key(list data) int {
    mut best_key = 0
    mut best_score = -1000000
    mut k = 0
@@ -145,7 +148,7 @@ fn _single_byte_xor_key(list: data): int {
    best_key
 }
 
-fn single_byte_xor_bruteforce(list: data): list {
+fn single_byte_xor_bruteforce(list data) list {
    "Brute-force single-byte XOR key 0-255.
    Returns [best_key, plaintext_string, score]."
    mut best_key = 0
@@ -163,7 +166,7 @@ fn single_byte_xor_bruteforce(list: data): list {
    [best_key, best_plain, best_score]
 }
 
-fn _single_byte_xor_key_strided(list: data, int: start, int: stride): list {
+fn _single_byte_xor_key_strided(list data, int start, int stride) list {
    mut best_key = 0
    mut best_score = -1000000
    mut k = 0
@@ -178,7 +181,7 @@ fn _single_byte_xor_key_strided(list: data, int: start, int: stride): list {
    [best_key, best_score]
 }
 
-fn repeating_key_xor_keylength(list: ct, int: min_len=2, int: max_len=40): int {
+fn repeating_key_xor_keylength(list ct, int min_len=2, int max_len=40) int {
    "Estimate repeating-key XOR key length using normalized Hamming distance across 4 block pairs.
    Returns best key length as int."
    def n_blocks = 4
@@ -210,7 +213,7 @@ fn repeating_key_xor_keylength(list: ct, int: min_len=2, int: max_len=40): int {
    best_len
 }
 
-fn repeating_key_xor_crack(list: ct, int: key_len=0): list {
+fn repeating_key_xor_crack(list ct, int key_len=0) list {
    "Crack repeating-key XOR. Auto-detects key length if key_len=0.
    Returns [key_bytes, plaintext_string]."
    def kl = (key_len == 0) ? repeating_key_xor_keylength(ct) : key_len
@@ -226,7 +229,7 @@ fn repeating_key_xor_crack(list: ct, int: key_len=0): list {
    [key, pt_bytes.text]
 }
 
-fn multi_text_xor_keystream(list: ciphertexts): list {
+fn multi_text_xor_keystream(list ciphertexts) list {
    "Recover keystream bytes from multiple ciphertexts encrypted with the same key(multi-time pad).
    Uses per-position frequency analysis. Returns keystream as byte list."
    if(ciphertexts.len == 0){ return [] }
@@ -259,12 +262,12 @@ fn multi_text_xor_keystream(list: ciphertexts): list {
    keystream
 }
 
-fn xor_two_ciphertexts(list: ct1, list: ct2): list {
+fn xor_two_ciphertexts(list ct1, list ct2) list {
    "XOR two ciphertexts of possibly different lengths. Returns XOR of overlapping bytes."
    _xor_overlap(ct1, ct2)
 }
 
-fn crib_drag(list: ciphertext, list: crib): list {
+fn crib_drag(list ciphertext, list crib) list {
    "Slide a known plaintext 'crib' over a ciphertext XOR'd from a multi-time pad.
    At each position, XOR crib bytes with ciphertext to get candidate keystream bytes.
    Returns list of [position, candidate_keystream_bytes] for all positions."

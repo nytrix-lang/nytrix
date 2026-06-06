@@ -1,5 +1,8 @@
-;; Keywords: factorization classical
+;; Keywords: factorization classical math crypto number-theory
 ;; Integer-factorization routines for Dixon, quadratic-sieve, MPQS, SIQS, and GF(2) relation solving.
+;; References:
+;; - std.math.crypto.factorization
+;; - std.math.crypto
 module std.math.crypto.factorization.classical(dixon_factor, euler_factor, gf2_nullspace, gf2_nullspace_report, sparse_gf2_nullspace, sparse_gf2_nullspace_report, packed_gf2_nullspace, packed_gf2_nullspace_report, sparse_gf2_matvec_report, sparse_gf2_normal_matvec_report, packed_gf2_matvec_report, packed_gf2_normal_matvec_report, gf2_matrix_precondition_report, gf2_dependency_candidates, gf2_dependency_candidates_report, gf2_dependency_pipeline_report, block_lanczos_gf2_nullspace, block_lanczos_gf2_report, block_wiedemann_gf2_nullspace, block_wiedemann_gf2_report, qs_relation_filter_report, qs_multiplier_report, mpqs_multiplier_report, siqs_polynomial_report, siqs_cutoff_tune_report, siqs_relation_report, quadratic_sieve_factor, quadratic_sieve_factor_report, siqs_factor, siqs_factor_report, qs_large_prime_filter_report, qs_batch_cofactor_report, mpqs_sieve_parameter_report, mpqs_source_work_plan_report, mpqs_work_plan_report, mpqs_byte_sieve_report, mpqs_a_divisor_cycle_report, mpqs_source_factor, mpqs_source_factor_report, mpqs_factor, mpqs_factor_report)
 use std.math.nt
 use std.math.scalar as math
@@ -7,26 +10,26 @@ use std.math.matrix as matrix
 use std.math.bin (bit_count)
 use std.os (ticks)
 
-fn _z(any: x): any { is_bigint(x) ? x : Z(x) }
+fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
-fn _is_nontrivial_factor(any: g, any: n): bool {
+fn _is_nontrivial_factor(any g, any n) bool {
    def gz, nz = _z(g), _z(n)
    gz > 1 && gz < nz && nz % gz == 0
 }
 
-fn _elapsed_ms(any: t0): any { float(ticks() - t0) / 1000000.0 }
+fn _elapsed_ms(any t0) any { float(ticks() - t0) / 1000000.0 }
 
-fn _report(str: method, int: cap=8): dict {
+fn _report(str method, int cap=8) dict {
    mut out = dict(max(8, cap * 2))
    out["method"] = method
    out
 }
 
-fn _finish_report(dict: out, any: t0): dict {
+fn _finish_report(dict out, any t0) dict {
    out.set("elapsed_ms", _elapsed_ms(t0))
 }
 
-fn _set_fields(dict: out, list: fields): dict {
+fn _set_fields(dict out, list fields) dict {
    mut i = 0
    while(i < fields.len){
       def field = fields.get(i)
@@ -37,27 +40,27 @@ fn _set_fields(dict: out, list: fields): dict {
    out
 }
 
-fn _finish_report_with(dict: out, any: t0, list: fields): dict {
+fn _finish_report_with(dict out, any t0, list fields) dict {
    _finish_report(_set_fields(out, fields), t0)
 }
 
-fn _set_factor_status(dict: out, any: factor, bool: success): dict {
+fn _set_factor_status(dict out, any factor, bool success) dict {
    out.set("factor", factor).set("success", success)
 }
 
-fn _finish_factor_status(dict: out, any: t0, any: factor, bool: success): dict {
+fn _finish_factor_status(dict out, any t0, any factor, bool success) dict {
    _finish_report_with(out, t0, [["factor", factor], ["success", success]])
 }
 
-fn _report_with(str: method, any: t0, list: fields): dict {
+fn _report_with(str method, any t0, list fields) dict {
    _finish_report_with(_report(method, fields.len + 1), t0, fields)
 }
 
-fn _dict_with(int: cap, list: fields): dict {
+fn _dict_with(int cap, list fields) dict {
    _set_fields(dict(max(8, cap * 2)), fields)
 }
 
-fn _fields_extend(list: fields, list: more): list {
+fn _fields_extend(list fields, list more) list {
    mut i = 0
    while(i < more.len){
       fields = fields.append(more.get(i))
@@ -66,7 +69,7 @@ fn _fields_extend(list: fields, list: more): list {
    fields
 }
 
-fn _list_concat(list: a, list: b): list {
+fn _list_concat(list a, list b) list {
    mut out = []
    mut i = 0
    while(i < a.len){
@@ -82,9 +85,9 @@ fn _list_concat(list: a, list: b): list {
 }
 
 fn _qs_smooth_metric_fields(
-   int: candidate_count, int: smooth_tests, int: smooth_hits,
-   int: trial_prime_tests, int: trial_divisions, int: nonzero_exponent_terms,
-): list {
+   int candidate_count, int smooth_tests, int smooth_hits,
+   int trial_prime_tests, int trial_divisions, int nonzero_exponent_terms,
+) list {
    [
       ["candidate_count", candidate_count], ["smooth_tests", smooth_tests], ["smooth_hits", smooth_hits],
       ["smooth_misses", smooth_tests - smooth_hits], ["trial_division_prime_tests", trial_prime_tests], ["trial_divisions", trial_divisions],
@@ -93,30 +96,30 @@ fn _qs_smooth_metric_fields(
 }
 
 fn _qs_relation_collection_fields(
-   any: rel_t0, int: candidate_count, int: smooth_tests, int: smooth_hits,
-   int: trial_prime_tests, int: trial_divisions, int: nonzero_exponent_terms,
-): list {
+   any rel_t0, int candidate_count, int smooth_tests, int smooth_hits,
+   int trial_prime_tests, int trial_divisions, int nonzero_exponent_terms,
+) list {
    _fields_extend([["relation_collection_elapsed_ms", _elapsed_ms(rel_t0)]], _qs_smooth_metric_fields(candidate_count, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_exponent_terms))
 }
 
-fn _qs_smooth_metric_fields_from(dict: report, int: smooth_hits_default=0): list {
+fn _qs_smooth_metric_fields_from(dict report, int smooth_hits_default=0) list {
    _qs_smooth_metric_fields(int(report.get("candidate_count", 0)), int(report.get("smooth_tests", 0)), int(report.get("smooth_hits", smooth_hits_default)), int(report.get("trial_division_prime_tests", 0)), int(report.get("trial_divisions", 0)), int(report.get("nonzero_exponent_terms", 0)))
 }
 
-fn _dict_add_int(dict: out, str: key, any: value): dict {
+fn _dict_add_int(dict out, str key, any value) dict {
    out.set(key, int(out.get(key, 0)) + int(value))
 }
 
-fn _dict_int(dict: out, str: key, int: fallback=0): int {
+fn _dict_int(dict out, str key, int fallback=0) int {
    int(out.get(key, fallback))
 }
 
-fn _dict_max_int(dict: out, str: key, any: value, int: fallback=0): dict {
+fn _dict_max_int(dict out, str key, any value, int fallback=0) dict {
    def v = int(value)
    v > int(out.get(key, fallback)) ? out.set(key, v) : out
 }
 
-fn _dict_add_int_fields(dict: out, dict: source, list: specs): dict {
+fn _dict_add_int_fields(dict out, dict source, list specs) dict {
    mut i = 0
    while(i < specs.len){
       def spec = specs.get(i)
@@ -126,7 +129,7 @@ fn _dict_add_int_fields(dict: out, dict: source, list: specs): dict {
    out
 }
 
-fn _dict_max_int_fields(dict: out, dict: source, list: specs): dict {
+fn _dict_max_int_fields(dict out, dict source, list specs) dict {
    mut i = 0
    while(i < specs.len){
       def spec = specs.get(i)
@@ -136,7 +139,7 @@ fn _dict_max_int_fields(dict: out, dict: source, list: specs): dict {
    out
 }
 
-fn _mpqs_a_divisor_fields(dict: cycle, bool: enabled, int: polynomial_count, int: sieve_base_size, int: window_count, int: relation_count): list {
+fn _mpqs_a_divisor_fields(dict cycle, bool enabled, int polynomial_count, int sieve_base_size, int window_count, int relation_count) list {
    [
       ["a_divisor_cycling_enabled", enabled],
       ["a_divisor_cycle", cycle],
@@ -153,11 +156,11 @@ fn _mpqs_a_divisor_fields(dict: cycle, bool: enabled, int: polynomial_count, int
    ]
 }
 
-fn _mpqs_a_divisor_disabled_fields(): list {
+fn _mpqs_a_divisor_disabled_fields() list {
    _mpqs_a_divisor_fields(dict(), false, 0, 0, 0, 0)
 }
 
-fn _mpqs_byte_totals_add(dict: totals, dict: report): dict {
+fn _mpqs_byte_totals_add(dict totals, dict report) dict {
    totals = _dict_add_int_fields(totals, report, [
          ["byte_sieve_candidate_count", "candidate_count"],
          ["byte_sieve_survivor_count", "survivor_count"],
@@ -178,7 +181,7 @@ fn _mpqs_byte_totals_add(dict: totals, dict: report): dict {
    ])
 }
 
-fn _mpqs_byte_total_fields(dict: totals, list: window_reports, int: window_radius): list {
+fn _mpqs_byte_total_fields(dict totals, list window_reports, int window_radius) list {
    def candidates = _dict_int(totals, "byte_sieve_candidate_count")
    def survivors = _dict_int(totals, "byte_sieve_survivor_count")
    mut fields = [
@@ -216,7 +219,7 @@ fn _mpqs_byte_total_fields(dict: totals, list: window_reports, int: window_radiu
    ])
 }
 
-fn _mpqs_byte_disabled_fields(): list {
+fn _mpqs_byte_disabled_fields() list {
    [
       ["byte_sieve_collector_enabled", false],
       ["byte_sieve_collector", ""],
@@ -244,7 +247,7 @@ fn _mpqs_byte_disabled_fields(): list {
    ]
 }
 
-fn _mpqs_direct_byte_total_fields(dict: totals, list: window_reports, int: window_radius, int: max_score): list {
+fn _mpqs_direct_byte_total_fields(dict totals, list window_reports, int window_radius, int max_score) list {
    def candidates = _dict_int(totals, "byte_sieve_candidate_count")
    def survivors = _dict_int(totals, "byte_sieve_survivor_count")
    [
@@ -270,7 +273,7 @@ fn _mpqs_direct_byte_total_fields(dict: totals, list: window_reports, int: windo
    ]
 }
 
-fn _gf2_sparse_contains(list: row, int: col): bool {
+fn _gf2_sparse_contains(list row, int col) bool {
    mut i = 0
    while(i < row.len){
       if(int(row[i]) == col){ return true }
@@ -279,7 +282,7 @@ fn _gf2_sparse_contains(list: row, int: col): bool {
    false
 }
 
-fn _gf2_sparse_remove(list: row, int: col): list {
+fn _gf2_sparse_remove(list row, int col) list {
    mut out = []
    mut i = 0
    while(i < row.len){
@@ -290,7 +293,7 @@ fn _gf2_sparse_remove(list: row, int: col): list {
    out
 }
 
-fn _gf2_sparse_insert(list: row, int: col): list {
+fn _gf2_sparse_insert(list row, int col) list {
    mut out = []
    mut inserted = false
    mut i = 0
@@ -308,11 +311,11 @@ fn _gf2_sparse_insert(list: row, int: col): list {
    out
 }
 
-fn _gf2_sparse_toggle(list: row, int: col): list {
+fn _gf2_sparse_toggle(list row, int col) list {
    _gf2_sparse_contains(row, col) ? _gf2_sparse_remove(row, col) : _gf2_sparse_insert(row, col)
 }
 
-fn _gf2_sparse_is_clean(list: row, int: width): bool {
+fn _gf2_sparse_is_clean(list row, int width) bool {
    mut prev = -1
    mut i = 0
    while(i < row.len){
@@ -324,7 +327,7 @@ fn _gf2_sparse_is_clean(list: row, int: width): bool {
    true
 }
 
-fn _gf2_sparse_normalize(list: row, int: width): list {
+fn _gf2_sparse_normalize(list row, int width) list {
    if(_gf2_sparse_is_clean(row, width)){ return row }
    mut out = []
    mut i = 0
@@ -336,7 +339,7 @@ fn _gf2_sparse_normalize(list: row, int: width): list {
    out
 }
 
-fn _gf2_sparse_xor(list: a, list: b): list {
+fn _gf2_sparse_xor(list a, list b) list {
    mut out = list(a.len + b.len)
    __list_set_len(out, a.len + b.len)
    mut i, j, oi = 0, 0, 0
@@ -370,7 +373,7 @@ fn _gf2_sparse_xor(list: a, list: b): list {
    out
 }
 
-fn _gf2_sparse_to_dense(list: row, int: width): list {
+fn _gf2_sparse_to_dense(list row, int width) list {
    mut out = []
    mut i = 0
    while(i < width){
@@ -380,7 +383,7 @@ fn _gf2_sparse_to_dense(list: row, int: width): list {
    out
 }
 
-fn _gf2_sparse_from_dense_rows(list: rows): list {
+fn _gf2_sparse_from_dense_rows(list rows) list {
    mut out = list(rows.len)
    __list_set_len(out, rows.len)
    mut i = 0
@@ -398,7 +401,7 @@ fn _gf2_sparse_from_dense_rows(list: rows): list {
    out
 }
 
-fn _gf2_sparse_from_dense_rows_until(list: rows, int: max_entries, int: profile_prefix=0, int: width=0): dict {
+fn _gf2_sparse_from_dense_rows_until(list rows, int max_entries, int profile_prefix=0, int width=0) dict {
    mut out = list(rows.len)
    __list_set_len(out, rows.len)
    mut work_rows = profile_prefix > 0 ? list(max(0, rows.len - profile_prefix)) : []
@@ -434,7 +437,7 @@ fn _gf2_sparse_from_dense_rows_until(list: rows, int: max_entries, int: profile_
    _dict_with(10, [["rows", out], ["work_rows", profile_prefix > 0 ? work_rows : out], ["entries", entries], ["overflow", false], ["work_entries", work_entries], ["work_word_terms", work_word_terms]])
 }
 
-fn _gf2_sparse_entry_count(list: sparse_rows): int {
+fn _gf2_sparse_entry_count(list sparse_rows) int {
    mut total = 0
    mut i = 0
    while(i < sparse_rows.len){
@@ -444,7 +447,7 @@ fn _gf2_sparse_entry_count(list: sparse_rows): int {
    total
 }
 
-fn _gf2_sparse_tail_rows_report(list: sparse_rows, int: prefix): dict {
+fn _gf2_sparse_tail_rows_report(list sparse_rows, int prefix) dict {
    def start = max(0, min(prefix, sparse_rows.len))
    def n = sparse_rows.len - start
    mut rows = list(n)
@@ -460,35 +463,24 @@ fn _gf2_sparse_tail_rows_report(list: sparse_rows, int: prefix): dict {
    _dict_with(4, [["rows", rows], ["entries", entries]])
 }
 
-fn _gf2_drop_prefix_rows(list: rows, int: prefix): list {
-   mut out = []
-   mut i = prefix
-   if(i < 0){ i = 0 }
-   while(i < rows.len){
-      out = out.append(rows.get(i))
-      i += 1
-   }
-   out
-}
-
-fn _gf2_post_lanczos_prefix_rows(int: row_count, int: width, bool: use_sparse_kernel): int {
+fn _gf2_post_lanczos_prefix_rows(int row_count, int width, bool use_sparse_kernel) int {
    if(!use_sparse_kernel || row_count < 128 || width <= 0){ return 0 }
    def target = max(8, _gf2_word_bits() * 2)
    if(row_count <= target * 2){ return 0 }
    min(target, row_count / 3)
 }
 
-fn _gf2_sparse_matvec(list<list<int>>: sparse_rows, list<int>: vector): list {
+fn _gf2_sparse_matvec(list<list<int>> sparse_rows, list<int> vector) list {
    [_gf2_sparse_matvec_vec(sparse_rows, vector), _gf2_sparse_entry_count(sparse_rows)]
 }
 
-fn _gf2_sparse_matvec_vec(list<list<int>>: sparse_rows, list<int>: vector): list<int> {
+fn _gf2_sparse_matvec_vec(list<list<int>> sparse_rows, list<int> vector) list<int> {
    mut out = list(sparse_rows.len)
    __list_set_len(out, sparse_rows.len)
    _gf2_sparse_matvec_into(sparse_rows, vector, out)
 }
 
-fn _gf2_sparse_matvec_into(list<list<int>>: sparse_rows, list<int>: vector, list<int>: out): list<int> {
+fn _gf2_sparse_matvec_into(list<list<int>> sparse_rows, list<int> vector, list<int> out) list<int> {
    mut i = 0
    while(i < sparse_rows.len){
       def list<int>: row = sparse_rows[i]
@@ -505,7 +497,7 @@ fn _gf2_sparse_matvec_into(list<list<int>>: sparse_rows, list<int>: vector, list
    out
 }
 
-fn _gf2_sparse_matvec_is_zero(list<list<int>>: sparse_rows, list<int>: vector): bool {
+fn _gf2_sparse_matvec_is_zero(list<list<int>> sparse_rows, list<int> vector) bool {
    mut i = 0
    while(i < sparse_rows.len){
       def list<int>: row = sparse_rows[i]
@@ -521,7 +513,7 @@ fn _gf2_sparse_matvec_is_zero(list<list<int>>: sparse_rows, list<int>: vector): 
    true
 }
 
-fn _gf2_sparse_transpose_matvec(list<list<int>>: sparse_rows, list<int>: y, int: width): list {
+fn _gf2_sparse_transpose_matvec(list<list<int>> sparse_rows, list<int> y, int width) list {
    mut list<int>: out = _gf2_zero_vec(width)
    mut row_xor_ops = 0
    mut entry_xor_ops = 0
@@ -543,7 +535,7 @@ fn _gf2_sparse_transpose_matvec(list<list<int>>: sparse_rows, list<int>: y, int:
    [out, row_xor_ops, entry_xor_ops]
 }
 
-fn _gf2_sparse_transpose_matvec_into(list<list<int>>: sparse_rows, list<int>: y, list<int>: out, list<int>: counters): bool {
+fn _gf2_sparse_transpose_matvec_into(list<list<int>> sparse_rows, list<int> y, list<int> out, list<int> counters) bool {
    mut row_xor_ops = 0
    mut entry_xor_ops = 0
    mut nonzero_count = 0
@@ -574,7 +566,7 @@ fn _gf2_sparse_transpose_matvec_into(list<list<int>>: sparse_rows, list<int>: y,
    nonzero_count != 0
 }
 
-fn sparse_gf2_matvec_report(list: sparse_rows, list: vector, int: width=0): dict {
+fn sparse_gf2_matvec_report(list sparse_rows, list vector, int width=0) dict {
    "Return A*v over GF(2) from sparse row indices."
    def t0 = ticks()
    mut w = width
@@ -593,7 +585,7 @@ fn sparse_gf2_matvec_report(list: sparse_rows, list: vector, int: width=0): dict
    ])
 }
 
-fn sparse_gf2_normal_matvec_report(list: sparse_rows, list: vector, int: width=0): dict {
+fn sparse_gf2_normal_matvec_report(list sparse_rows, list vector, int width=0) dict {
    "Return A^T*A*v over GF(2) from sparse row indices."
    def t0 = ticks()
    mut w = width
@@ -615,7 +607,7 @@ fn sparse_gf2_normal_matvec_report(list: sparse_rows, list: vector, int: width=0
    ])
 }
 
-fn _gf2_sparse_width(list: sparse_rows, int: width): int {
+fn _gf2_sparse_width(list sparse_rows, int width) int {
    if(width > 0){ return width }
    mut max_col = -1
    mut i = 0
@@ -632,7 +624,7 @@ fn _gf2_sparse_width(list: sparse_rows, int: width): int {
    max_col + 1
 }
 
-fn _gf2_sparse_elim_state(): dict {
+fn _gf2_sparse_elim_state() dict {
    _dict_with(8, [
          ["pivots", []], ["pivot_rows", []], ["pivot_index", dict()],
          ["pivot_lookup_hits", 0], ["pivot_lookup_misses", 0],
@@ -640,7 +632,7 @@ fn _gf2_sparse_elim_state(): dict {
    ])
 }
 
-fn _gf2_sparse_back_eliminate(list: pivot_rows_in, list: row, int: pivot): dict {
+fn _gf2_sparse_back_eliminate(list pivot_rows_in, list row, int pivot) dict {
    mut pivot_rows = pivot_rows_in
    mut ops = 0
    mut k = 0
@@ -654,7 +646,7 @@ fn _gf2_sparse_back_eliminate(list: pivot_rows_in, list: row, int: pivot): dict 
    _dict_with(4, [["pivot_rows", pivot_rows], ["ops", ops]])
 }
 
-fn _gf2_sparse_insert_pivot(dict: state, list: row, int: pivot, str: pkey): dict {
+fn _gf2_sparse_insert_pivot(dict state, list row, int pivot, str pkey) dict {
    def back = _gf2_sparse_back_eliminate(state.get("pivot_rows", []), row, pivot)
    def pivots = state.get("pivots", []).append(pivot)
    def pivot_rows = back.get("pivot_rows", []).append(row)
@@ -668,7 +660,7 @@ fn _gf2_sparse_insert_pivot(dict: state, list: row, int: pivot, str: pkey): dict
    ])
 }
 
-fn _gf2_sparse_eliminate_row(dict: state_in, list: sparse_row, int: width): dict {
+fn _gf2_sparse_eliminate_row(dict state_in, list sparse_row, int width) dict {
    mut state = state_in
    mut row = _gf2_sparse_normalize(sparse_row, width)
    while(row.len > 0){
@@ -686,7 +678,7 @@ fn _gf2_sparse_eliminate_row(dict: state_in, list: sparse_row, int: width): dict
    state
 }
 
-fn _gf2_sparse_eliminate_rows(list: sparse_rows, int: width): dict {
+fn _gf2_sparse_eliminate_rows(list sparse_rows, int width) dict {
    mut state = _gf2_sparse_elim_state()
    mut i = 0
    while(i < sparse_rows.len){
@@ -696,7 +688,7 @@ fn _gf2_sparse_eliminate_rows(list: sparse_rows, int: width): dict {
    state
 }
 
-fn _gf2_sparse_basis_from_pivots(list: pivots, list: pivot_rows, dict: pivot_index, int: width): list {
+fn _gf2_sparse_basis_from_pivots(list pivots, list pivot_rows, dict pivot_index, int width) list {
    mut basis = []
    mut col = 0
    while(col < width){
@@ -714,7 +706,7 @@ fn _gf2_sparse_basis_from_pivots(list: pivots, list: pivot_rows, dict: pivot_ind
    basis
 }
 
-fn sparse_gf2_nullspace_report(list: sparse_rows, int: width=0): dict {
+fn sparse_gf2_nullspace_report(list sparse_rows, int width=0) dict {
    "Return right-nullspace diagnostics for a sparse GF(2) matrix."
    def t0 = ticks()
    def w = _gf2_sparse_width(sparse_rows, width)
@@ -734,12 +726,12 @@ fn sparse_gf2_nullspace_report(list: sparse_rows, int: width=0): dict {
    ])
 }
 
-fn sparse_gf2_nullspace(list: sparse_rows, int: width=0): list {
+fn sparse_gf2_nullspace(list sparse_rows, int width=0) list {
    "Return a dense basis for a sparse GF(2) right-nullspace."
    sparse_gf2_nullspace_report(sparse_rows, width).get("basis", [])
 }
 
-fn gf2_nullspace_report(list: rows): dict {
+fn gf2_nullspace_report(list rows) dict {
    "Return GF(2) nullspace/rank diagnostics for a binary matrix."
    def t0 = ticks()
    def nr = rows.len
@@ -768,18 +760,18 @@ fn gf2_nullspace_report(list: rows): dict {
    ])
 }
 
-fn gf2_nullspace(list: rows): list {
+fn gf2_nullspace(list rows) list {
    "Return a basis for the GF(2) right-nullspace of `rows`."
    gf2_nullspace_report(rows).get("basis", [])
 }
 
-fn _gf2_word_bits(): int { 30 }
+fn _gf2_word_bits() int { 30 }
 
-fn _gf2_word_count(int: width): int {
+fn _gf2_word_count(int width) int {
    width <= 0 ? 0 : ((width + _gf2_word_bits() - 1) / _gf2_word_bits())
 }
 
-fn _gf2_zero_words(int: words): list {
+fn _gf2_zero_words(int words) list {
    mut out = list(words)
    __list_set_len(out, words)
    mut i = 0
@@ -790,7 +782,7 @@ fn _gf2_zero_words(int: words): list {
    out
 }
 
-fn _gf2_pack_dense_row(list: row, int: width): list {
+fn _gf2_pack_dense_row(list row, int width) list {
    def wb = _gf2_word_bits()
    mut out = _gf2_zero_words(_gf2_word_count(width))
    mut i = 0
@@ -805,12 +797,12 @@ fn _gf2_pack_dense_row(list: row, int: width): list {
    out
 }
 
-fn _gf2_dense_vec_packed_words(list: row, int: width): list {
+fn _gf2_dense_vec_packed_words(list row, int width) list {
    def words = _gf2_pack_dense_row(row, width)
    [!_gf2_packed_is_zero(words), words.len, words]
 }
 
-fn _gf2_packed_words_hash(list: words): int {
+fn _gf2_packed_words_hash(list words) int {
    mut h = 2166136261
    mut i = 0
    while(i < words.len){
@@ -821,7 +813,7 @@ fn _gf2_packed_words_hash(list: words): int {
    h
 }
 
-fn _gf2_packed_words_equal(list: a, list: b): bool {
+fn _gf2_packed_words_equal(list a, list b) bool {
    if(a.len != b.len){ return false }
    mut i = 0
    while(i < a.len){
@@ -831,7 +823,7 @@ fn _gf2_packed_words_equal(list: a, list: b): bool {
    true
 }
 
-fn _gf2_seen_packed_words_add(dict: seen, list: words): list {
+fn _gf2_seen_packed_words_add(dict seen, list words) list {
    def key = _gf2_packed_words_hash(words)
    mut bucket = seen.get(key, [])
    mut i = 0
@@ -843,7 +835,7 @@ fn _gf2_seen_packed_words_add(dict: seen, list: words): list {
    [false, seen.set(key, bucket)]
 }
 
-fn _gf2_pack_sparse_row(list: row, int: width): list {
+fn _gf2_pack_sparse_row(list row, int width) list {
    def wb = _gf2_word_bits()
    mut out = _gf2_zero_words(_gf2_word_count(width))
    mut i = 0
@@ -858,14 +850,14 @@ fn _gf2_pack_sparse_row(list: row, int: width): list {
    out
 }
 
-fn _gf2_packed_bit(list: row, int: col): int {
+fn _gf2_packed_bit(list row, int col) int {
    if(col < 0){ return 0 }
    def wb, wi = _gf2_word_bits(), col / _gf2_word_bits()
    if(wi < 0 || wi >= row.len){ return 0 }
    (int(row[wi]) >> (col % wb)) & 1
 }
 
-fn _gf2_packed_xor_inplace(list: a, list: b, int: start_word=0): list {
+fn _gf2_packed_xor_inplace(list a, list b, int start_word=0) list {
    mut int: i = start_word < 0 ? 0 : start_word
    def int: n = min(a.len, b.len)
    while(i < n){
@@ -875,7 +867,7 @@ fn _gf2_packed_xor_inplace(list: a, list: b, int: start_word=0): list {
    a
 }
 
-fn _gf2_packed_is_zero(list: row): bool {
+fn _gf2_packed_is_zero(list row) bool {
    mut i = 0
    while(i < row.len){
       if(int(row[i]) != 0){ return false }
@@ -884,7 +876,7 @@ fn _gf2_packed_is_zero(list: row): bool {
    true
 }
 
-fn _gf2_packed_to_dense(list: row, int: width): list {
+fn _gf2_packed_to_dense(list row, int width) list {
    mut out = list(width)
    __list_set_len(out, width)
    mut i = 0
@@ -895,14 +887,14 @@ fn _gf2_packed_to_dense(list: row, int: width): list {
    out
 }
 
-fn _gf2_packed_set_bit(list: row, int: col): list {
+fn _gf2_packed_set_bit(list row, int col) list {
    if(col < 0){ return row }
    def wb, wi = _gf2_word_bits(), col / _gf2_word_bits()
    if(wi >= 0 && wi < row.len){ row[wi] = int(row[wi]) ^^ (1 << (col % wb)) }
    row
 }
 
-fn _gf2_copy_words(list: row): list {
+fn _gf2_copy_words(list row) list {
    mut out = list(row.len)
    __list_set_len(out, row.len)
    mut i = 0
@@ -913,7 +905,7 @@ fn _gf2_copy_words(list: row): list {
    out
 }
 
-fn _gf2_copy_vec(list<int>: row): list<int> {
+fn _gf2_copy_vec(list<int> row) list<int> {
    mut out = list(row.len)
    mut i = 0
    while(i < row.len){
@@ -923,7 +915,7 @@ fn _gf2_copy_vec(list<int>: row): list<int> {
    out
 }
 
-fn _gf2_pack_rows(list: rows, int: width=0, bool: sparse=false): list {
+fn _gf2_pack_rows(list rows, int width=0, bool sparse=false) list {
    mut nc = width
    if(nc <= 0 && rows.len > 0){
       if(sparse){
@@ -954,7 +946,7 @@ fn _gf2_pack_rows(list: rows, int: width=0, bool: sparse=false): list {
    [packed, nc]
 }
 
-fn _gf2_packed_dot_parity(list: row_words, list: vec_words): int {
+fn _gf2_packed_dot_parity(list row_words, list vec_words) int {
    mut parity = 0
    mut i = 0
    def limit = min(row_words.len, vec_words.len)
@@ -965,7 +957,7 @@ fn _gf2_packed_dot_parity(list: row_words, list: vec_words): int {
    parity & 1
 }
 
-fn _gf2_packed_matvec_words(list: packed_rows, list: vec_words): list {
+fn _gf2_packed_matvec_words(list packed_rows, list vec_words) list {
    mut out = list(packed_rows.len)
    __list_set_len(out, packed_rows.len)
    mut word_and_ops = 0
@@ -981,7 +973,7 @@ fn _gf2_packed_matvec_words(list: packed_rows, list: vec_words): list {
    [out, word_and_ops, popcount_ops]
 }
 
-fn _gf2_packed_matvec_is_zero(list: packed_rows, list: vec_words): list {
+fn _gf2_packed_matvec_is_zero(list packed_rows, list vec_words) list {
    mut word_and_ops = 0
    mut popcount_ops = 0
    mut i = 0
@@ -1002,7 +994,7 @@ fn _gf2_packed_matvec_is_zero(list: packed_rows, list: vec_words): list {
    [true, word_and_ops, popcount_ops]
 }
 
-fn _gf2_packed_transpose_matvec_words(list: packed_rows, list: y, int: width): list {
+fn _gf2_packed_transpose_matvec_words(list packed_rows, list y, int width) list {
    mut out_words = _gf2_zero_words(_gf2_word_count(width))
    mut row_xor_ops = 0
    mut word_xor_ops = 0
@@ -1024,7 +1016,7 @@ fn _gf2_packed_transpose_matvec_words(list: packed_rows, list: y, int: width): l
    [_gf2_packed_to_dense(out_words, width), row_xor_ops, word_xor_ops, out_words]
 }
 
-fn _gf2_packed_transpose_matvec_words_only(list: packed_rows, list: y, int: width): list {
+fn _gf2_packed_transpose_matvec_words_only(list packed_rows, list y, int width) list {
    mut out_words = _gf2_zero_words(_gf2_word_count(width))
    mut row_xor_ops = 0
    mut word_xor_ops = 0
@@ -1046,7 +1038,7 @@ fn _gf2_packed_transpose_matvec_words_only(list: packed_rows, list: y, int: widt
    [row_xor_ops, word_xor_ops, out_words]
 }
 
-fn packed_gf2_matvec_report(list: rows, list: vector, int: width=0, bool: sparse=false): dict {
+fn packed_gf2_matvec_report(list rows, list vector, int width=0, bool sparse=false) dict {
    "Return A*v over GF(2) using packed row words and report word/popcount counters."
    def t0 = ticks()
    def packed_info = _gf2_pack_rows(rows, width, sparse)
@@ -1065,7 +1057,7 @@ fn packed_gf2_matvec_report(list: rows, list: vector, int: width=0, bool: sparse
    ])
 }
 
-fn packed_gf2_normal_matvec_report(list: rows, list: vector, int: width=0, bool: sparse=false): dict {
+fn packed_gf2_normal_matvec_report(list rows, list vector, int width=0, bool sparse=false) dict {
    "Return A^T*A*v over GF(2) using packed row words."
    def t0 = ticks()
    def packed_info = _gf2_pack_rows(rows, width, sparse)
@@ -1087,7 +1079,7 @@ fn packed_gf2_normal_matvec_report(list: rows, list: vector, int: width=0, bool:
    ])
 }
 
-fn _gf2_columns_to_packed_rows(list: cols, int: row_count): list {
+fn _gf2_columns_to_packed_rows(list cols, int row_count) list {
    def width = cols.len
    def word_count = _gf2_word_count(width)
    def wb = _gf2_word_bits()
@@ -1111,12 +1103,12 @@ fn _gf2_columns_to_packed_rows(list: cols, int: row_count): list {
    rows
 }
 
-fn _gf2_packed_width(list: packed_rows, int: width): int {
+fn _gf2_packed_width(list packed_rows, int width) int {
    if(width > 0){ return width }
    packed_rows.len > 0 ? packed_rows.get(0).len * _gf2_word_bits() : 0
 }
 
-fn _gf2_copy_packed_rows(list: packed_rows): list {
+fn _gf2_copy_packed_rows(list packed_rows) list {
    mut packed = []
    mut i = 0
    while(i < packed_rows.len){
@@ -1126,7 +1118,7 @@ fn _gf2_copy_packed_rows(list: packed_rows): list {
    packed
 }
 
-fn _gf2_packed_find_pivot(list: packed, int: rank, int: col): list {
+fn _gf2_packed_find_pivot(list packed, int rank, int col) list {
    mut pr = -1
    mut scans = 0
    mut rix = rank
@@ -1138,7 +1130,7 @@ fn _gf2_packed_find_pivot(list: packed, int: rank, int: col): list {
    [pr, scans]
 }
 
-fn _gf2_packed_swap_rank(list: packed_in, int: rank, int: pivot_row): dict {
+fn _gf2_packed_swap_rank(list packed_in, int rank, int pivot_row) dict {
    mut packed = packed_in
    if(pivot_row != rank){
       def tmp = packed.get(rank)
@@ -1149,7 +1141,7 @@ fn _gf2_packed_swap_rank(list: packed_in, int: rank, int: pivot_row): dict {
    _dict_with(4, [["packed", packed], ["row_swaps", 0]])
 }
 
-fn _gf2_packed_eliminate_pivot(list: packed_in, int: rank, int: col, int: width): dict {
+fn _gf2_packed_eliminate_pivot(list packed_in, int rank, int col, int width) dict {
    mut packed = packed_in
    def start_word = col / _gf2_word_bits()
    mut xor_ops = 0
@@ -1166,7 +1158,7 @@ fn _gf2_packed_eliminate_pivot(list: packed_in, int: rank, int: col, int: width)
    _dict_with(6, [["packed", packed], ["xor_ops", xor_ops], ["word_xor_ops", word_xor_ops]])
 }
 
-fn _gf2_packed_eliminate_rows(list: packed_rows, int: width): dict {
+fn _gf2_packed_eliminate_rows(list packed_rows, int width) dict {
    mut packed = _gf2_copy_packed_rows(packed_rows)
    mut rank = 0
    mut pivots = []
@@ -1202,7 +1194,7 @@ fn _gf2_packed_eliminate_rows(list: packed_rows, int: width): dict {
    ])
 }
 
-fn _gf2_packed_basis_from_pivots(list: packed, list: pivots, dict: pivot_cols, int: width, int: max_basis): dict {
+fn _gf2_packed_basis_from_pivots(list packed, list pivots, dict pivot_cols, int width, int max_basis) dict {
    mut basis = []
    mut basis_packed = []
    mut col = 0
@@ -1221,7 +1213,7 @@ fn _gf2_packed_basis_from_pivots(list: packed, list: pivots, dict: pivot_cols, i
    _dict_with(4, [["basis", basis], ["basis_packed", basis_packed]])
 }
 
-fn _gf2_packed_nonzero_rows(list: packed): int {
+fn _gf2_packed_nonzero_rows(list packed) int {
    mut nonzero_rows = 0
    mut i = 0
    while(i < packed.len){
@@ -1231,7 +1223,7 @@ fn _gf2_packed_nonzero_rows(list: packed): int {
    nonzero_rows
 }
 
-fn _gf2_packed_rows_nullspace_report(list: packed_rows, int: width=0, int: max_basis=0, str: method="packed-gf2-elimination", any: started=nil): dict {
+fn _gf2_packed_rows_nullspace_report(list packed_rows, int width=0, int max_basis=0, str method="packed-gf2-elimination", any started=nil) dict {
    mut t0 = started
    if(t0 == nil){ t0 = ticks() }
    def nc = _gf2_packed_width(packed_rows, width)
@@ -1258,19 +1250,19 @@ fn _gf2_packed_rows_nullspace_report(list: packed_rows, int: width=0, int: max_b
    ])
 }
 
-fn packed_gf2_nullspace_report(list: rows, int: width=0, bool: sparse=false, int: max_basis=0): dict {
+fn packed_gf2_nullspace_report(list rows, int width=0, bool sparse=false, int max_basis=0) dict {
    "Return right-nullspace diagnostics using packed GF(2) row elimination."
    def t0 = ticks()
    def packed_info = _gf2_pack_rows(rows, width, sparse)
    _gf2_packed_rows_nullspace_report(packed_info.get(0), int(packed_info.get(1, width)), max_basis, "packed-gf2-elimination", t0)
 }
 
-fn packed_gf2_nullspace(list: rows, int: width=0, bool: sparse=false): list {
+fn packed_gf2_nullspace(list rows, int width=0, bool sparse=false) list {
    "Return a dense basis from packed_gf2_nullspace_report."
    packed_gf2_nullspace_report(rows, width, sparse).get("basis", [])
 }
 
-fn dixon_factor(any: n, int: max_base=256, int: max_scan=20000): any {
+fn dixon_factor(any n, int max_base=256, int max_scan=20000) any {
    "Dixon-style congruence scan over prime bases.
    Returns [p, q] or nil."
    def nz = _z(n)
@@ -1303,7 +1295,7 @@ fn dixon_factor(any: n, int: max_base=256, int: max_scan=20000): any {
    nil
 }
 
-fn euler_factor(any: n, any: max_a=nil): any {
+fn euler_factor(any n, any max_a=nil) any {
    "Euler factorization using two sum-of-squares representations.
    Returns [p, q] or nil."
    def nz = _z(n)
@@ -1340,7 +1332,7 @@ fn euler_factor(any: n, any: max_a=nil): any {
    nil
 }
 
-fn _qs_prime_base(int: bound): list {
+fn _qs_prime_base(int bound) list {
    mut out = []
    if(bound < 2){ return out }
    mut composite = list(bound + 1)
@@ -1367,7 +1359,7 @@ fn _qs_prime_base(int: bound): list {
    out
 }
 
-fn _qs_factor_base_result(any: factor, list: base, int: tested, int: residue_hits, int: modulus_divisors): dict {
+fn _qs_factor_base_result(any factor, list base, int tested, int residue_hits, int modulus_divisors) dict {
    {
       "factor": factor,
       "base": base,
@@ -1378,7 +1370,7 @@ fn _qs_factor_base_result(any: factor, list: base, int: tested, int: residue_hit
    }
 }
 
-fn _qs_factor_base_report(any: n, any: modulus, int: bound): dict {
+fn _qs_factor_base_report(any n, any modulus, int bound) dict {
    def nz, mz = _z(n), _z(modulus)
    def base0 = _qs_prime_base(bound)
    mut base = []
@@ -1411,7 +1403,7 @@ fn _qs_factor_base_report(any: n, any: modulus, int: bound): dict {
    _qs_factor_base_result(nil, base, tested, residue_hits, modulus_divisors)
 }
 
-fn _qs_sieve_score_min(list: base): int {
+fn _qs_sieve_score_min(list base) int {
    case base.len {
       0..23 -> 1
       24..31 -> 4
@@ -1419,7 +1411,7 @@ fn _qs_sieve_score_min(list: base): int {
    }
 }
 
-fn _siqs_a_exponents(dict: poly, list: base): list {
+fn _siqs_a_exponents(dict poly, list base) list {
    mut exps = list(base.len)
    mut i = 0
    while(i < base.len){
@@ -1444,7 +1436,7 @@ fn _siqs_a_exponents(dict: poly, list: base): list {
    exps
 }
 
-fn _siqs_apply_a_exponents(list: exps, list: a_exps): list {
+fn _siqs_apply_a_exponents(list exps, list a_exps) list {
    mut out = exps
    mut i = 0
    while(i < out.len && i < a_exps.len){
@@ -1455,7 +1447,7 @@ fn _siqs_apply_a_exponents(list: exps, list: a_exps): list {
    out
 }
 
-fn _siqs_poly_int_scan_allowed(any: A, any: B, any: C, int: radius): bool {
+fn _siqs_poly_int_scan_allowed(any A, any B, any C, int radius) bool {
    def r = Z(max(0, radius))
    def a = bigint_abs(_z(A))
    def b = bigint_abs(_z(B))
@@ -1465,13 +1457,13 @@ fn _siqs_poly_int_scan_allowed(any: A, any: B, any: C, int: radius): bool {
    bit_length(a) <= 60 && bit_length(b) <= 60 && bit_length(c) <= 60 && bit_length(q_bound) <= 60 && bit_length(x_bound) <= 60
 }
 
-fn _siqs_cutoff_candidates(int: default_cutoff): list {
+fn _siqs_cutoff_candidates(int default_cutoff) list {
    mut out = [default_cutoff]
    out = out.append(max(0, default_cutoff - 1))
    out.append(default_cutoff + 1)
 }
 
-fn _siqs_cutoff_measurement_raw(any: modulus, list: base, list: sqrt_roots, list: plist, int: cutoff, int: sample_polynomials, int: sample_radius): any {
+fn _siqs_cutoff_measurement_raw(any modulus, list base, list sqrt_roots, list plist, int cutoff, int sample_polynomials, int sample_radius) any {
    mut pi = 0
    while(pi < plist.len && pi < sample_polynomials){
       def poly = plist.get(pi)
@@ -1549,7 +1541,7 @@ fn _siqs_cutoff_measurement_raw(any: modulus, list: base, list: sqrt_roots, list
    nil
 }
 
-fn _siqs_cutoff_measurement(any: modulus, list: base, list: sqrt_roots, list: plist, int: cutoff, int: sample_polynomials, int: sample_radius): dict {
+fn _siqs_cutoff_measurement(any modulus, list base, list sqrt_roots, list plist, int cutoff, int sample_polynomials, int sample_radius) dict {
    def raw = _siqs_cutoff_measurement_raw(modulus, base, sqrt_roots, plist, cutoff, sample_polynomials, sample_radius)
    if(raw != nil){ return raw }
    def t0 = ticks()
@@ -1615,7 +1607,7 @@ fn _siqs_cutoff_measurement(any: modulus, list: base, list: sqrt_roots, list: pl
    ])
 }
 
-fn _siqs_cutoff_tune_from_polys(any: modulus, list: base, list: plist, int: default_cutoff, int: sieve_radius, bool: double_large_prime=false): dict {
+fn _siqs_cutoff_tune_from_polys(any modulus, list base, list plist, int default_cutoff, int sieve_radius, bool double_large_prime=false) dict {
    def t0 = ticks()
    mut sample_polys = min(3, plist.len)
    if(sample_polys < 1){ sample_polys = plist.len }
@@ -1663,7 +1655,7 @@ fn _siqs_cutoff_tune_from_polys(any: modulus, list: base, list: plist, int: defa
    ])
 }
 
-fn siqs_cutoff_tune_report(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256, bool: double_large_prime=false): dict {
+fn siqs_cutoff_tune_report(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256, bool double_large_prime=false) dict {
    "Measure SIQS sieve prefilter cutoffs on a small polynomial sample and report the selected threshold."
    def t0 = ticks()
    def nz = _z(n)
@@ -1680,14 +1672,14 @@ fn siqs_cutoff_tune_report(any: n, int: factor_base_bound=64, int: polynomial_co
    ])
 }
 
-fn _mpqs_sieve_score_min(list: base): int {
+fn _mpqs_sieve_score_min(list base) int {
    case base.len {
       0..47 -> _qs_sieve_score_min(base)
       _ -> 6
    }
 }
 
-fn _qs_zero_scores(int: n): list {
+fn _qs_zero_scores(int n) list {
    mut out = list(n)
    mut i = 0
    while(i < n){
@@ -1697,7 +1689,7 @@ fn _qs_zero_scores(int: n): list {
    out
 }
 
-fn _qs_sieve_add_root(list: scores, int: radius, int: p, int: root): list {
+fn _qs_sieve_add_root(list scores, int radius, int p, int root) list {
    if(p <= 0){ return scores }
    def size = radius * 2 + 1
    mut start_rem = (0 - radius) % p
@@ -1711,7 +1703,7 @@ fn _qs_sieve_add_root(list: scores, int: radius, int: p, int: root): list {
    scores
 }
 
-fn _qs_sieve_scores_siqs_with_roots(any: modulus, list: base, list: sqrt_roots, any: A, any: B, int: radius): dict {
+fn _qs_sieve_scores_siqs_with_roots(any modulus, list base, list sqrt_roots, any A, any B, int radius) dict {
    mut scores = _qs_zero_scores(radius * 2 + 1)
    mut marked_roots = 0
    mut skipped_noninvertible = 0
@@ -1745,7 +1737,7 @@ fn _qs_sieve_scores_siqs_with_roots(any: modulus, list: base, list: sqrt_roots, 
    {"scores": scores, "marked_roots": marked_roots, "skipped_noninvertible": skipped_noninvertible}
 }
 
-fn _qs_sieve_scores_siqs_raw_into(ptr: scores, ptr: root_filters, any: modulus, list: base, list: sqrt_roots, any: A, any: B, int: radius): dict {
+fn _qs_sieve_scores_siqs_raw_into(ptr scores, ptr root_filters, any modulus, list base, list sqrt_roots, any A, any B, int radius) dict {
    def size = radius * 2 + 1
    memset(scores, 0, size)
    if(root_filters){ memset(root_filters, 0, base.len * 32) }
@@ -1803,37 +1795,7 @@ fn _qs_sieve_scores_siqs_raw_into(ptr: scores, ptr: root_filters, any: modulus, 
    {"marked_roots": marked_roots, "skipped_noninvertible": skipped_noninvertible, "raw_scores": true}
 }
 
-fn _qs_sieve_scores_siqs(any: modulus, list: base, any: A, any: B, int: radius): dict {
-   _qs_sieve_scores_siqs_with_roots(modulus, base, _mpqs_sqrt_roots(modulus, base), A, B, radius)
-}
-
-fn _qs_sieve_scores_mpqs(any: modulus, list: base, any: center, int: radius): dict {
-   mut scores = _qs_zero_scores(radius * 2 + 1)
-   mut marked_roots = 0
-   mut i = 0
-   while(i < base.len){
-      def pz = _z(base[i])
-      def p = bigint_to_int(pz)
-      if(p > 2){
-         def r = tonelli_shanks(mod(modulus, pz), pz)
-         if(r != Z(-1)){
-            def cm = mod(center, pz)
-            def root1 = bigint_to_int(mod(r - cm, pz))
-            def root2 = bigint_to_int(mod(Z(0) - r - cm, pz))
-            scores = _qs_sieve_add_root(scores, radius, p, root1)
-            marked_roots += 1
-            if(root2 != root1){
-               scores = _qs_sieve_add_root(scores, radius, p, root2)
-               marked_roots += 1
-            }
-         }
-      }
-      i += 1
-   }
-   {"scores": scores, "marked_roots": marked_roots, "skipped_noninvertible": 0}
-}
-
-fn _mpqs_bucketed_prime_loop_report(list: base, int: sieve_len): dict {
+fn _mpqs_bucketed_prime_loop_report(list base, int sieve_len) dict {
    "Report MPQS sieve prime buckets by expected loop count."
    mut le_quarter = 0
    mut le_third = 0
@@ -1877,34 +1839,21 @@ fn _mpqs_bucketed_prime_loop_report(list: base, int: sieve_len): dict {
 }
 
 @inline
-fn _mpqs_raw_byte_sieve_start_rem(int: radius, int: p): int {
+fn _mpqs_raw_byte_sieve_start_rem(int radius, int p) int {
    mut start_rem = (0 - radius) % p
    if(start_rem < 0){ start_rem += p }
    start_rem
 }
 
 @inline
-fn _mpqs_raw_byte_sieve_root_pos(int: start_rem, int: p, int: root): int {
+fn _mpqs_raw_byte_sieve_root_pos(int start_rem, int p, int root) int {
    mut pos = root - start_rem
    if(pos < 0){ pos += p }
    pos
 }
 
-fn _mpqs_raw_byte_sieve_add_root(ptr: scores, int: size, int: radius, int: p, int: root): int {
-   if(p <= 0){ return 0 }
-   mut pos = _mpqs_raw_byte_sieve_root_pos(_mpqs_raw_byte_sieve_start_rem(radius, p), p, root)
-   mut writes = 0
-   while(pos < size){
-      def v = int(load8(scores, pos))
-      if(v < 255){ store8(scores, v + 1, pos) }
-      writes += 1
-      pos += p
-   }
-   writes
-}
-
 @inline
-fn _mpqs_raw_byte_sieve_add_pos(ptr: scores, int: size, int: p, int: pos): int {
+fn _mpqs_raw_byte_sieve_add_pos(ptr scores, int size, int p, int pos) int {
    if(p <= 0){ return 0 }
    mut writes = 0
    while(pos < size){
@@ -1917,10 +1866,10 @@ fn _mpqs_raw_byte_sieve_add_pos(ptr: scores, int: size, int: p, int: pos): int {
 }
 
 fn _mpqs_byte_sieve_tail_fields(
-   int: tiny_limit, int: tiny_prime_count, int: tiny_product, dict: buckets,
-   int: score_stores, int: prefill_byte_adds, int: bucket_byte_adds,
-   int: score_loads, int: sieve_len,
-): list {
+   int tiny_limit, int tiny_prime_count, int tiny_product, dict buckets,
+   int score_stores, int prefill_byte_adds, int bucket_byte_adds,
+   int score_loads, int sieve_len,
+) list {
    [
       ["tiny_prime_prefill", _dict_with(8, [
                ["limit", tiny_limit], ["tiny_prime_count", tiny_prime_count],
@@ -1942,28 +1891,7 @@ fn _mpqs_byte_sieve_tail_fields(
    ]
 }
 
-fn _mpqs_byte_sieve_add_roots(ptr: scratch, int: sieve_len, int: radius, int: p, int: root1, int: root2, int: tiny_limit, list: totals): list {
-   def tiny_product = int(totals[0])
-   def tiny_prime = tiny_product * p < tiny_limit
-   if(tiny_prime){
-      totals[0] = tiny_product * p
-      totals[1] = int(totals[1]) + 1
-   }
-   def start_rem = _mpqs_raw_byte_sieve_start_rem(radius, p)
-   def writes1 = _mpqs_raw_byte_sieve_add_pos(scratch, sieve_len, p, _mpqs_raw_byte_sieve_root_pos(start_rem, p, root1))
-   totals[2] = int(totals[2]) + 1
-   totals[3] = int(totals[3]) + writes1
-   if(tiny_prime){ totals[4] = int(totals[4]) + writes1 } else { totals[5] = int(totals[5]) + writes1 }
-   if(root2 != root1){
-      def writes2 = _mpqs_raw_byte_sieve_add_pos(scratch, sieve_len, p, _mpqs_raw_byte_sieve_root_pos(start_rem, p, root2))
-      totals[2] = int(totals[2]) + 1
-      totals[3] = int(totals[3]) + writes2
-      if(tiny_prime){ totals[4] = int(totals[4]) + writes2 } else { totals[5] = int(totals[5]) + writes2 }
-   }
-   totals
-}
-
-fn _mpqs_byte_sieve_add_roots_raw(ptr: scratch, int: sieve_len, int: radius, int: p, int: root1, int: root2, int: tiny_limit, ptr: totals): any {
+fn _mpqs_byte_sieve_add_roots_raw(ptr scratch, int sieve_len, int radius, int p, int root1, int root2, int tiny_limit, ptr totals) any {
    def tiny_product = load64_i(totals, 0)
    def tiny_prime = tiny_product * p < tiny_limit
    mut streams = load64_i(totals, 16)
@@ -2001,20 +1929,9 @@ fn _mpqs_byte_sieve_add_roots_raw(ptr: scratch, int: sieve_len, int: radius, int
 }
 
 @inline
-fn _mpqs_pack_survivor(int: pos, int: score): int { (pos << 8) | (score & 255) }
+fn _mpqs_pack_survivor(int pos, int score) int { (pos << 8) | (score & 255) }
 
-@inline
-fn _mpqs_survivor_offset(any: survivor, int: radius): int {
-   if(is_list(survivor)){ return int(survivor[0]) }
-   (int(survivor) >> 8) - radius
-}
-
-@inline
-fn _mpqs_survivor_score(any: survivor): int {
-   is_list(survivor) ? int(survivor[1]) : (int(survivor) & 255)
-}
-
-fn _mpqs_byte_sieve_survivor_scan(ptr: scratch, int: sieve_len, int: radius, int: threshold, any: center=nil, any: min_x=nil): list {
+fn _mpqs_byte_sieve_survivor_scan(ptr scratch, int sieve_len, int radius, int threshold, any center=nil, any min_x=nil) list {
    mut survivors = []
    mut candidate_count = 0
    mut skipped = 0
@@ -2055,7 +1972,7 @@ fn _mpqs_byte_sieve_survivor_scan(ptr: scratch, int: sieve_len, int: radius, int
    [survivors, candidate_count, skipped, max_score, sum_score, score_loads]
 }
 
-fn _mpqs_byte_sieve_survivor_stats(ptr: scratch, int: sieve_len, int: radius, int: threshold, any: center=nil, any: min_x=nil): dict {
+fn _mpqs_byte_sieve_survivor_stats(ptr scratch, int sieve_len, int radius, int threshold, any center=nil, any min_x=nil) dict {
    def scan = _mpqs_byte_sieve_survivor_scan(scratch, sieve_len, radius, threshold, center, min_x)
    _dict_with(10, [
          ["survivors", scan[0]], ["candidate_count", scan[1]],
@@ -2064,90 +1981,13 @@ fn _mpqs_byte_sieve_survivor_stats(ptr: scratch, int: sieve_len, int: radius, in
    ])
 }
 
-fn _mpqs_byte_sieve_window_into(ptr: scratch, any: modulus, list: base, list: sqrt_roots, any: center, int: radius, int: threshold, any: min_x): dict {
-   "Build one MPQS byte-sieve survivor window into a caller-owned byte buffer."
-   def sieve_len = radius * 2 + 1
-   memset(scratch, 0, sieve_len)
-   def tiny_limit = max(1, sieve_len / 16)
-   def buckets = _mpqs_bucketed_prime_loop_report(base, sieve_len)
-   mut skipped_noninvertible = 0
-   mut list<int>: root_filters = list(base.len * 4)
-   def base_ints = _qs_factor_base_ints(base)
-   def no_root = Z(-1)
-   with ptr: totals_raw = malloc(48){
-      if(!totals_raw){ panic("mpqs byte-sieve counter allocation failed") }
-      memset(totals_raw, 0, 48)
-      store64_i(totals_raw, 1, 0)
-   mut i = 0
-   while(i < base.len){
-      def k = i * 4
-      def pz = _z(base[i])
-      def p = base_ints[i]
-      if(p > 2){
-         def r = i < sqrt_roots.len ? sqrt_roots[i] : no_root
-         if(r == no_root){
-            skipped_noninvertible += 1
-            root_filters[k] = p
-            root_filters[k + 1] = 0
-            root_filters[k + 2] = 0
-            root_filters[k + 3] = 0
-         } else {
-            def cm = mod(center, pz)
-            def root1 = bigint_to_int(mod(r - cm, pz))
-            def root2 = bigint_to_int(mod(Z(0) - r - cm, pz))
-            root_filters[k] = p
-            root_filters[k + 1] = root1
-            root_filters[k + 2] = root2
-            root_filters[k + 3] = 1
-            _mpqs_byte_sieve_add_roots_raw(scratch, sieve_len, radius, p, root1, root2, tiny_limit, totals_raw)
-         }
-      } else {
-         root_filters[k] = p
-         root_filters[k + 1] = 0
-         root_filters[k + 2] = 0
-         root_filters[k + 3] = 0
-      }
-      i += 1
-   }
-   def scan = _mpqs_byte_sieve_survivor_scan(scratch, sieve_len, radius, threshold, center, min_x)
-   def survivors = scan[0]
-   def candidate_count = int(scan[1])
-   def skipped_count = int(scan[2])
-   def max_score = int(scan[3])
-   def sum_score = int(scan[4])
-   def score_loads = int(scan[5])
-   _dict_with(36, _fields_extend([
-            ["method", "mpqs-byte-sieve-window"],
-            ["collector", "mpqs-byte-block-survivor"],
-            ["byte_logbound", 128],
-            ["raw_byte_buffer", true],
-            ["score_list_materialized", false],
-            ["center", center],
-            ["radius", radius],
-            ["sieve_len", sieve_len],
-            ["score_threshold", threshold],
-            ["survivors", survivors],
-            ["root_filters", root_filters],
-            ["candidate_count", candidate_count],
-            ["survivor_count", survivors.len],
-            ["skipped_count", skipped_count],
-            ["trial_division_avoidance_count", skipped_count],
-            ["marked_roots", load64_i(totals_raw, 16)],
-            ["skipped_noninvertible", skipped_noninvertible],
-            ["max_score", max_score],
-            ["avg_score_x1000", candidate_count > 0 ? (sum_score * 1000) / candidate_count : 0],
-            ["survivor_rate_x1000", candidate_count > 0 ? (survivors.len * 1000) / candidate_count : 0],
-   ], _mpqs_byte_sieve_tail_fields(tiny_limit, load64_i(totals_raw, 8), load64_i(totals_raw, 0), buckets, load64_i(totals_raw, 24), load64_i(totals_raw, 32), load64_i(totals_raw, 40), score_loads, sieve_len)))
-   }
-}
-
-fn _mpqs_mod_int_norm(int: x, int: p): int {
+fn _mpqs_mod_int_norm(int x, int p) int {
    mut r = x % p
    if(r < 0){ r += p }
    r
 }
 
-fn _mpqs_inv_mod_int(int: a, int: m): int {
+fn _mpqs_inv_mod_int(int a, int m) int {
    mut t = 0
    mut new_t = 1
    mut r = m
@@ -2165,7 +2005,7 @@ fn _mpqs_inv_mod_int(int: a, int: m): int {
    _mpqs_mod_int_norm(t, m)
 }
 
-fn _mpqs_roots_ints(list: sqrt_roots): list<int> {
+fn _mpqs_roots_ints(list sqrt_roots) list<int> {
    mut list<int>: out = list(sqrt_roots.len)
    __list_set_len(out, sqrt_roots.len)
    mut i = 0
@@ -2176,7 +2016,7 @@ fn _mpqs_roots_ints(list: sqrt_roots): list<int> {
    out
 }
 
-fn _mpqs_start_mods(list<int>: base_ints, any: start, int: stride): list {
+fn _mpqs_start_mods(list<int> base_ints, any start, int stride) list {
    mut list<int>: center_mods = list(base_ints.len)
    mut list<int>: stride_mods = list(base_ints.len)
    __list_set_len(center_mods, base_ints.len)
@@ -2196,7 +2036,7 @@ fn _mpqs_start_mods(list<int>: base_ints, any: start, int: stride): list {
    [center_mods, stride_mods]
 }
 
-fn _mpqs_advance_center_mods(list<int>: center_mods, list<int>: stride_mods, list<int>: base_ints): any {
+fn _mpqs_advance_center_mods(list<int> center_mods, list<int> stride_mods, list<int> base_ints) any {
    mut i = 0
    while(i < center_mods.len){
       def p = base_ints[i]
@@ -2206,7 +2046,7 @@ fn _mpqs_advance_center_mods(list<int>: center_mods, list<int>: stride_mods, lis
    nil
 }
 
-fn _mpqs_byte_sieve_window_int_roots_into(ptr: scratch, list<int>: base_ints, list<int>: sqrt_roots_int, list<int>: center_mods, dict: buckets, any: center, int: radius, int: threshold, any: min_x): dict {
+fn _mpqs_byte_sieve_window_int_roots_into(ptr scratch, list<int> base_ints, list<int> sqrt_roots_int, list<int> center_mods, dict buckets, any center, int radius, int threshold, any min_x) dict {
    def sieve_len = radius * 2 + 1
    memset(scratch, 0, sieve_len)
    def tiny_limit = max(1, sieve_len / 16)
@@ -2278,7 +2118,7 @@ fn _mpqs_byte_sieve_window_int_roots_into(ptr: scratch, list<int>: base_ints, li
    }
 }
 
-fn _mpqs_raw_byte_sieve_score_window_int_roots(ptr: scratch, ptr: root_filters, list<int>: base_ints, list<int>: sqrt_roots_int, list<int>: center_mods, int: radius): any {
+fn _mpqs_raw_byte_sieve_score_window_int_roots(ptr scratch, ptr root_filters, list<int> base_ints, list<int> sqrt_roots_int, list<int> center_mods, int radius) any {
    def sieve_len = radius * 2 + 1
    memset(scratch, 0, sieve_len)
    mut i = 0
@@ -2315,7 +2155,7 @@ fn _mpqs_raw_byte_sieve_score_window_int_roots(ptr: scratch, ptr: root_filters, 
    nil
 }
 
-fn _mpqs_popcount_mask(int: mask): int {
+fn _mpqs_popcount_mask(int mask) int {
    mut x = mask
    mut c = 0
    while(x > 0){
@@ -2325,7 +2165,7 @@ fn _mpqs_popcount_mask(int: mask): int {
    c
 }
 
-fn _mpqs_list_has_z(list: xs, any: value): bool {
+fn _mpqs_list_has_z(list xs, any value) bool {
    def vz = _z(value)
    mut i = 0
    while(i < xs.len){
@@ -2335,7 +2175,7 @@ fn _mpqs_list_has_z(list: xs, any: value): bool {
    false
 }
 
-fn _mpqs_base_without_pool(list: base, list: pool): list {
+fn _mpqs_base_without_pool(list base, list pool) list {
    mut out = []
    mut i = 0
    while(i < base.len){
@@ -2346,7 +2186,7 @@ fn _mpqs_base_without_pool(list: base, list: pool): list {
    out
 }
 
-fn _mpqs_adiv_count_for_base(int: usable_count): int {
+fn _mpqs_adiv_count_for_base(int usable_count) int {
    if(usable_count < 5){ return max(1, usable_count) }
    if(usable_count < 18){ return 2 }
    if(usable_count < 48){ return 3 }
@@ -2354,16 +2194,16 @@ fn _mpqs_adiv_count_for_base(int: usable_count): int {
    5
 }
 
-fn _mpqs_source_start_bits(int: a_bits): int {
+fn _mpqs_source_start_bits(int a_bits) int {
    if(a_bits > 210){ return 15 }
    if(a_bits > 190){ return 13 }
    if(a_bits > 180){ return 12 }
    11
 }
 
-fn _mpqs_prime_bits(any: p): int { bit_length(_z(p)) }
+fn _mpqs_prime_bits(any p) int { bit_length(_z(p)) }
 
-fn _mpqs_has_prime_bits(list: usable, int: bits): bool {
+fn _mpqs_has_prime_bits(list usable, int bits) bool {
    mut i = 0
    while(i < usable.len){
       if(_mpqs_prime_bits(usable.get(i)) == bits){ return true }
@@ -2372,7 +2212,7 @@ fn _mpqs_has_prime_bits(list: usable, int: bits): bool {
    false
 }
 
-fn _mpqs_bit_bucket_counts(list: usable): dict {
+fn _mpqs_bit_bucket_counts(list usable) dict {
    mut counts = dict()
    mut i = 0
    while(i < usable.len){
@@ -2386,7 +2226,7 @@ fn _mpqs_bit_bucket_counts(list: usable): dict {
    counts
 }
 
-fn _mpqs_source_adjust_factor_bits(list: bits): list {
+fn _mpqs_source_adjust_factor_bits(list bits) list {
    def n = bits.len
    if(n < 8 || n >= 15){ return bits }
    if(int(bits.get(0, 0)) > int(bits.get(n - 1, 0))){
@@ -2407,7 +2247,7 @@ fn _mpqs_source_adjust_factor_bits(list: bits): list {
    bits
 }
 
-fn _mpqs_source_factor_bit_schedule(list: usable, int: a_bits): dict {
+fn _mpqs_source_factor_bit_schedule(list usable, int a_bits) dict {
    def start_bits = _mpqs_source_start_bits(a_bits)
    def counts = _mpqs_bit_bucket_counts(usable)
    mut chosen_bits = 0
@@ -2490,7 +2330,7 @@ fn _mpqs_source_factor_bit_schedule(list: usable, int: a_bits): dict {
    ])
 }
 
-fn _mpqs_poly_from_primes_with_signs(any: modulus, list: primes, int: sign_mask): any {
+fn _mpqs_poly_from_primes_with_signs(any modulus, list primes, int sign_mask) any {
    if(primes.len == 0){ return nil }
    mut A = Z(1)
    mut roots = []
@@ -2518,7 +2358,7 @@ fn _mpqs_poly_from_primes_with_signs(any: modulus, list: primes, int: sign_mask)
    ])
 }
 
-fn _mpqs_adiv_product_from_mask(list: pool, int: mask): any {
+fn _mpqs_adiv_product_from_mask(list pool, int mask) any {
    mut A = Z(1)
    mut i = 0
    while(i < pool.len){
@@ -2528,7 +2368,7 @@ fn _mpqs_adiv_product_from_mask(list: pool, int: mask): any {
    A
 }
 
-fn _mpqs_primes_from_mask(list: pool, int: mask): list {
+fn _mpqs_primes_from_mask(list pool, int mask) list {
    mut out = []
    mut i = 0
    while(i < pool.len){
@@ -2538,7 +2378,7 @@ fn _mpqs_primes_from_mask(list: pool, int: mask): list {
    out
 }
 
-fn _mpqs_a_divisor_target(any: modulus, list: base, int: window_radius): dict {
+fn _mpqs_a_divisor_target(any modulus, list base, int window_radius) dict {
    def usable = _siqs_residue_primes(modulus, base)
    def sieve_len = window_radius * 2 + 1
    mut target_A = isqrt(Z(8) * _z(modulus)) / Z(max(1, sieve_len))
@@ -2562,7 +2402,7 @@ fn _mpqs_a_divisor_target(any: modulus, list: base, int: window_radius): dict {
    ])
 }
 
-fn _mpqs_a_divisor_pool(list: usable, int: n_total, int: target_prime): dict {
+fn _mpqs_a_divisor_pool(list usable, int n_total, int target_prime) dict {
    mut best_idx = 0
    mut best_dist = 0
    mut ui = 0
@@ -2587,7 +2427,7 @@ fn _mpqs_a_divisor_pool(list: usable, int: n_total, int: target_prime): dict {
    _dict_with(4, [["pool_start", pool_start], ["pool", pool]])
 }
 
-fn _mpqs_pick_scheduled_prime(list: usable, int: bits, int: target_prime, dict: used): dict {
+fn _mpqs_pick_scheduled_prime(list usable, int bits, int target_prime, dict used) dict {
    mut best_idx = -1
    mut best_dist = 0
    mut i = 0
@@ -2606,7 +2446,7 @@ fn _mpqs_pick_scheduled_prime(list: usable, int: bits, int: target_prime, dict: 
    _dict_with(4, [["index", best_idx], ["distance", best_dist]])
 }
 
-fn _mpqs_a_divisor_pool_from_schedule(list: usable, int: n_total, int: target_prime, list: factor_bits): dict {
+fn _mpqs_a_divisor_pool_from_schedule(list usable, int n_total, int target_prime, list factor_bits) dict {
    def fallback = _mpqs_a_divisor_pool(usable, n_total, target_prime)
    if(factor_bits.len == 0){
       return _set_fields(fallback, [
@@ -2650,7 +2490,7 @@ fn _mpqs_a_divisor_pool_from_schedule(list: usable, int: n_total, int: target_pr
    ])
 }
 
-fn _mpqs_best_adiv_mask(list: pool, int: n_adiv, any: target_A, dict: seen_masks): dict {
+fn _mpqs_best_adiv_mask(list pool, int n_adiv, any target_A, dict seen_masks) dict {
    mut best_mask = 0
    mut best_score = 0.0
    def mask_limit = pool.len > 0 ? (1 << pool.len) : 0
@@ -2670,7 +2510,7 @@ fn _mpqs_best_adiv_mask(list: pool, int: n_adiv, any: target_A, dict: seen_masks
    _dict_with(4, [["mask", best_mask], ["score", best_score]])
 }
 
-fn _mpqs_append_sign_polys(list: polys_in, any: modulus, list: primes, int: best_mask, any: target_A, int: target_prime, any: best_score, int: max_polynomials): dict {
+fn _mpqs_append_sign_polys(list polys_in, any modulus, list primes, int best_mask, any target_A, int target_prime, any best_score, int max_polynomials) dict {
    mut polys = polys_in
    mut root_precomputes = 0
    mut inverse_precomputes = 0
@@ -2696,7 +2536,7 @@ fn _mpqs_append_sign_polys(list: polys_in, any: modulus, list: primes, int: best
    ])
 }
 
-fn _mpqs_build_adiv_polys(any: modulus, list: pool, int: n_adiv, any: target_A, int: target_prime, int: max_polynomials): dict {
+fn _mpqs_build_adiv_polys(any modulus, list pool, int n_adiv, any target_A, int target_prime, int max_polynomials) dict {
    mut polys = []
    mut seen_masks = dict()
    mut root_precomputes = 0
@@ -2721,7 +2561,7 @@ fn _mpqs_build_adiv_polys(any: modulus, list: pool, int: n_adiv, any: target_A, 
    ])
 }
 
-fn _mpqs_a_divisor_cycle_from_base(any: modulus, list: base, int: window_radius, int: max_polynomials): dict {
+fn _mpqs_a_divisor_cycle_from_base(any modulus, list base, int window_radius, int max_polynomials) dict {
    def t0 = ticks()
    def target = _mpqs_a_divisor_target(modulus, base, window_radius)
    def usable = target.get("usable", [])
@@ -2763,7 +2603,7 @@ fn _mpqs_a_divisor_cycle_from_base(any: modulus, list: base, int: window_radius,
    ])
 }
 
-fn mpqs_a_divisor_cycle_report(any: n, int: factor_base_bound=337, int: window_radius=4000, int: max_polynomials=8, int: multiplier=0): dict {
+fn mpqs_a_divisor_cycle_report(any n, int factor_base_bound=337, int window_radius=4000, int max_polynomials=8, int multiplier=0) dict {
    "Report source-style MPQS A-divisor selection, CRT root setup, and shared sieve base."
    def t0 = ticks()
    def nz = _z(n)
@@ -2790,7 +2630,7 @@ fn mpqs_a_divisor_cycle_report(any: n, int: factor_base_bound=337, int: window_r
    ])
 }
 
-fn _mpqs_poly_byte_sieve_window_into(ptr: scratch, list<int>: sieve_base_ints, list<int>: root_base_ints, list<int>: root_sqrt_roots_int, dict: buckets, any: A, any: B, int: radius, int: threshold): dict {
+fn _mpqs_poly_byte_sieve_window_into(ptr scratch, list<int> sieve_base_ints, list<int> root_base_ints, list<int> root_sqrt_roots_int, dict buckets, any A, any B, int radius, int threshold) dict {
    def sieve_len = radius * 2 + 1
    memset(scratch, 0, sieve_len)
    def tiny_limit = max(1, sieve_len / 16)
@@ -2887,7 +2727,7 @@ fn _mpqs_poly_byte_sieve_window_into(ptr: scratch, list<int>: sieve_base_ints, l
    }
 }
 
-fn _mpqs_byte_sieve_window_summary(dict: rep, int: window, int: relations_found): dict {
+fn _mpqs_byte_sieve_window_summary(dict rep, int window, int relations_found) dict {
    _dict_with(40, [
          ["window", window],
          ["method", rep.get("method", "")],
@@ -2921,7 +2761,7 @@ fn _mpqs_byte_sieve_window_summary(dict: rep, int: window, int: relations_found)
    ])
 }
 
-fn mpqs_byte_sieve_report(any: n, int: factor_base_bound=337, int: windows=3, int: window_radius=4000, int: multiplier=0): dict {
+fn mpqs_byte_sieve_report(any n, int factor_base_bound=337, int windows=3, int window_radius=4000, int multiplier=0) dict {
    "Report the MPQS byte-sieve survivor pipeline: tiny-prime prefill, bucketed root marking, and threshold survivors."
    def t0 = ticks()
    def nz = _z(n)
@@ -2986,7 +2826,7 @@ fn mpqs_byte_sieve_report(any: n, int: factor_base_bound=337, int: windows=3, in
    _finish_report_with(out, t0, _fields_extend(fields, _mpqs_direct_byte_total_fields(byte_totals, window_reports, window_radius, max_score)))
 }
 
-fn _qs_factor_over_base_profile(any: v, list: base): list {
+fn _qs_factor_over_base_profile(any v, list base) list {
    if(!is_bigint(v) || bit_length(v) <= 62){ return _qs_factor_over_base_profile_int(is_bigint(v) ? bigint_to_int(v) : int(v), base) }
    mut rem = _z(v)
    def z0 = Z(0)
@@ -3023,21 +2863,24 @@ fn _qs_factor_over_base_profile(any: v, list: base): list {
          exps[j] = 0
          j += 1
       }
-      mut nz = 0
-      while(idxs != nil && nz < idxs.len){
-         exps[int(idxs[nz])] = vals[nz]
-         nz += 1
+      if(idxs != nil){
+         mut nz = 0
+         def idxs_n = idxs.len
+         while(nz < idxs_n){
+            exps[int(idxs[nz])] = vals[nz]
+            nz += 1
+         }
       }
    }
    [rem == z1, exps, rem, prime_tests, divisions, idxs == nil ? 0 : idxs.len]
 }
 
-fn _qs_factor_over_base_profile_int(int: v, list: base): list {
+fn _qs_factor_over_base_profile_int(int v, list base) list {
    _qs_factor_over_base_profile_intbase(v, _qs_factor_base_ints(base))
 }
 
 @inline
-fn _qs_factor_over_base_profile_intbase(int: v, list<int>: base): list {
+fn _qs_factor_over_base_profile_intbase(int v, list<int> base) list {
    mut rem = v
    if(rem < 0){ rem = 0 - rem }
    mut prime_tests = 0
@@ -3067,9 +2910,11 @@ fn _qs_factor_over_base_profile_intbase(int: v, list<int>: base): list {
          mut e = 0
          if(rem2 != 1){
             def p = base[j]
-            while(p != 0 && rem2 % p == 0){
-               rem2 = rem2 / p
-               e += 1
+            if(p != 0){
+               while(rem2 % p == 0){
+                  rem2 = rem2 / p
+                  e += 1
+               }
             }
          }
          exps[j] = e
@@ -3080,7 +2925,7 @@ fn _qs_factor_over_base_profile_intbase(int: v, list<int>: base): list {
 }
 
 @inline
-fn _qs_factor_over_base_intbase_scan(int: v, list<int>: base, ptr: counters): int {
+fn _qs_factor_over_base_intbase_scan(int v, list<int> base, ptr counters) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3108,7 +2953,7 @@ fn _qs_factor_over_base_intbase_scan(int: v, list<int>: base, ptr: counters): in
 }
 
 @inline
-fn _siqs_relation_intbase(any: x, any: relation_value, int: qv, list<int>: base, list: a_exps, bool: include_detail=true): dict {
+fn _siqs_relation_intbase(any x, any relation_value, int qv, list<int> base, list a_exps, bool include_detail=true) dict {
    mut rem = qv
    if(rem < 0){ rem = 0 - rem }
    mut exps = list(base.len)
@@ -3134,12 +2979,12 @@ fn _siqs_relation_intbase(any: x, any: relation_value, int: qv, list<int>: base,
 }
 
 @inline
-fn _siqs_relation_intbase_for_mode(any: x, any: A, int: qv, list<int>: base, list: a_exps, bool: include_detail): dict {
+fn _siqs_relation_intbase_for_mode(any x, any A, int qv, list<int> base, list a_exps, bool include_detail) dict {
    if(include_detail){ return _siqs_relation_intbase(x, A * Z(qv), qv, base, a_exps, true) }
    _siqs_relation_intbase(x, nil, qv, base, a_exps, false)
 }
 
-fn _qs_factor_base_ints(list: base): list<int> {
+fn _qs_factor_base_ints(list base) list<int> {
    mut out = list(base.len)
    mut i = 0
    while(i < base.len){
@@ -3149,7 +2994,7 @@ fn _qs_factor_base_ints(list: base): list<int> {
    out
 }
 
-fn _mpqs_sqrt_roots(any: modulus, list: base): list {
+fn _mpqs_sqrt_roots(any modulus, list base) list {
    mut roots = list(base.len)
    def no_root = Z(-1)
    mut i = 0
@@ -3167,7 +3012,7 @@ fn _mpqs_sqrt_roots(any: modulus, list: base): list {
    roots
 }
 
-fn _mpqs_plain_root_filter(any: modulus, list: base, any: center): list {
+fn _mpqs_plain_root_filter(any modulus, list base, any center) list {
    mut roots = list(base.len * 4)
    mut i = 0
    while(i < base.len){
@@ -3199,7 +3044,7 @@ fn _mpqs_plain_root_filter(any: modulus, list: base, any: center): list {
    roots
 }
 
-fn _mpqs_root_filter_hit(list: roots, int: i, int: off): bool {
+fn _mpqs_root_filter_hit(list roots, int i, int off) bool {
    def k = i * 4
    if(k < 0 || k + 3 >= roots.len){ return true }
    if(int(roots[k + 3]) == 0){ return true }
@@ -3210,7 +3055,7 @@ fn _mpqs_root_filter_hit(list: roots, int: i, int: off): bool {
    om == int(roots[k + 1]) || om == int(roots[k + 2])
 }
 
-fn _qs_factor_over_base_profile_filtered(any: v, list: base, list: root_filters, int: off): list {
+fn _qs_factor_over_base_profile_filtered(any v, list base, list root_filters, int off) list {
    if(!is_bigint(v) || bit_length(v) <= 62){ return _qs_factor_over_base_profile_filtered_int(is_bigint(v) ? bigint_to_int(v) : int(v), base, root_filters, off) }
    mut rem = _z(v)
    def z0 = Z(0)
@@ -3249,17 +3094,20 @@ fn _qs_factor_over_base_profile_filtered(any: v, list: base, list: root_filters,
          exps[j] = 0
          j += 1
       }
-      mut nz = 0
-      while(idxs != nil && nz < idxs.len){
-         exps[int(idxs[nz])] = vals[nz]
-         nz += 1
+      if(idxs != nil){
+         mut nz = 0
+         def idxs_n = idxs.len
+         while(nz < idxs_n){
+            exps[int(idxs[nz])] = vals[nz]
+            nz += 1
+         }
       }
    }
    [rem == z1, exps, rem, prime_tests, divisions, idxs == nil ? 0 : idxs.len]
 }
 
 @inline
-fn _qs_factor_over_base_profile_filtered_int(int: v, list: base, list: root_filters, int: off): list {
+fn _qs_factor_over_base_profile_filtered_int(int v, list base, list root_filters, int off) list {
    mut rem = v
    if(rem < 0){ rem = 0 - rem }
    mut prime_tests = 0
@@ -3299,9 +3147,11 @@ fn _qs_factor_over_base_profile_filtered_int(int: v, list: base, list: root_filt
          if(rem2 != 1){
             def k = j * 4
             def p = int(root_filters[k])
-            while(p != 0 && rem2 % p == 0){
-               rem2 = rem2 / p
-               e += 1
+            if(p != 0){
+               while(rem2 % p == 0){
+                  rem2 = rem2 / p
+                  e += 1
+               }
             }
          }
          exps[j] = e
@@ -3312,99 +3162,7 @@ fn _qs_factor_over_base_profile_filtered_int(int: v, list: base, list: root_filt
 }
 
 @inline
-fn _qs_factor_over_base_profile_filtered_int_raw(int: v, list<int>: base, ptr: root_filters, int: off): list {
-   mut rem = v
-   if(rem < 0){ rem = 0 - rem }
-   mut prime_tests = 0
-   mut divisions = 0
-   mut nonzero_terms = 0
-   mut i = 0
-   while(i < base.len && rem != 1){
-      mut e = 0
-      def k = i * 32
-      def p = load64_i(root_filters, k)
-      if(p > rem){ break }
-      mut hit = true
-      if(load64_i(root_filters, k + 24) != 0){
-         mut om = off % p
-         if(om < 0){ om += p }
-         hit = om == load64_i(root_filters, k + 8) || om == load64_i(root_filters, k + 16)
-      }
-      if(hit){
-         while(rem != 1 && rem % p == 0){
-            rem = rem / p
-            e += 1
-            divisions += 1
-         }
-         prime_tests += 1
-      }
-      if(e > 0){ nonzero_terms += 1 }
-      i += 1
-   }
-   mut exps = []
-   if(rem == 1){
-      mut rem2 = v
-      if(rem2 < 0){ rem2 = 0 - rem2 }
-      mut j = 0
-      exps = list(base.len)
-      while(j < base.len){
-         mut e = 0
-         if(rem2 != 1){
-            def k = j * 32
-            def p = load64_i(root_filters, k)
-            while(p != 0 && rem2 % p == 0){
-               rem2 = rem2 / p
-               e += 1
-            }
-         }
-         exps[j] = e
-         j += 1
-      }
-   }
-   [rem == 1, exps, rem, prime_tests, divisions, nonzero_terms]
-}
-
-fn _qs_factor_over_base_filtered_int_raw_scan(int: v, int: base_len, ptr: root_filters, int: off, ptr: counters): int {
-   mut int: rem = v
-   if(rem < 0){ rem = 0 - rem }
-   mut int: prime_tests = 0
-   mut int: divisions = 0
-   mut int: nonzero_terms = 0
-   mut int: i = 0
-   def int: n = base_len
-   while(i < n && rem != 1){
-      def int: k = i * 32
-      def int: p = load64_i(root_filters, k)
-      if(p > rem){ break }
-      def int: has_roots = load64_i(root_filters, k + 24)
-      mut bool: hit = true
-      if(has_roots != 0){
-         def int: r1 = load64_i(root_filters, k + 8)
-         def int: r2 = load64_i(root_filters, k + 16)
-         mut int: om = off % p
-         if(om < 0){ om += p }
-         hit = om == r1 || om == r2
-      }
-      if(hit){
-         mut bool: divisible = rem % p == 0
-         if(divisible){ nonzero_terms += 1 }
-         while(divisible && rem != 1){
-            rem = rem / p
-            divisions += 1
-            divisible = rem != 1 && rem % p == 0
-         }
-         prime_tests += 1
-      }
-      i += 1
-   }
-   store64_i(counters, load64_i(counters, 0) + prime_tests, 0)
-   store64_i(counters, load64_i(counters, 8) + divisions, 8)
-   store64_i(counters, load64_i(counters, 16) + nonzero_terms, 16)
-   rem
-}
-
-@inline
-fn _qs_factor_over_base_filtered_int_raw_scan_limited(int: v, int: base_len, ptr: root_filters, int: off, int: hit_limit, ptr: counters): int {
+fn _qs_factor_over_base_filtered_int_raw_scan_limited(int v, int base_len, ptr root_filters, int off, int hit_limit, ptr counters) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3444,7 +3202,7 @@ fn _qs_factor_over_base_filtered_int_raw_scan_limited(int: v, int: base_len, ptr
 }
 
 @inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos(int: v, int: base_len, ptr: root_filters, int: off, ptr: counters): int {
+fn _qs_factor_over_base_filtered_int_raw_scan_pos(int v, int base_len, ptr root_filters, int off, ptr counters) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3483,54 +3241,7 @@ fn _qs_factor_over_base_filtered_int_raw_scan_pos(int: v, int: base_len, ptr: ro
 }
 
 @inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos_collect(int: v, int: base_len, ptr: root_filters, int: off, ptr: counters, ptr: idxs, ptr: vals): int {
-   mut int: rem = v
-   if(rem < 0){ rem = 0 - rem }
-   mut int: prime_tests = 0
-   mut int: divisions = 0
-   mut int: nonzero_terms = 0
-   mut int: i = 0
-   def int: n = base_len
-   while(i < n && rem != 1){
-      def int: k = i * 32
-      def int: p = load64_i(root_filters, k)
-      if(p > rem){ break }
-      def int: has_roots = load64_i(root_filters, k + 24)
-      mut bool: hit = true
-      if(has_roots != 0){
-         def int: r1 = load64_i(root_filters, k + 8)
-         def int: r2 = load64_i(root_filters, k + 16)
-         def int: om = off % p
-         hit = om == r1 || om == r2
-      }
-      if(hit){
-         mut int: e = 0
-         mut bool: divisible = rem % p == 0
-         while(divisible && rem != 1){
-            rem = rem / p
-            divisions += 1
-            e += 1
-            divisible = rem != 1 && rem % p == 0
-         }
-         if(e > 0){
-            def int: dst = nonzero_terms * 8
-            store64_i(idxs, i, dst)
-            store64_i(vals, e, dst)
-            nonzero_terms += 1
-         }
-         prime_tests += 1
-      }
-      i += 1
-   }
-   store64_i(counters, load64_i(counters, 0) + prime_tests, 0)
-   store64_i(counters, load64_i(counters, 8) + divisions, 8)
-   store64_i(counters, load64_i(counters, 16) + nonzero_terms, 16)
-   store64_i(counters, nonzero_terms, 24)
-   rem
-}
-
-@inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(int: v, int: base_len, ptr: root_filters, int: off, ptr: counters, ptr: idxs, ptr: vals): int {
+fn _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(int v, int base_len, ptr root_filters, int off, ptr counters, ptr idxs, ptr vals) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3577,7 +3288,7 @@ fn _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(int: v, int: base_le
 }
 
 @inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited(int: v, int: base_len, ptr: root_filters, int: off, int: hit_limit, ptr: counters): int {
+fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited(int v, int base_len, ptr root_filters, int off, int hit_limit, ptr counters) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3616,54 +3327,7 @@ fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited(int: v, int: base_len,
 }
 
 @inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect(int: v, int: base_len, ptr: root_filters, int: off, int: hit_limit, ptr: counters, ptr: idxs, ptr: vals): int {
-   mut int: rem = v
-   if(rem < 0){ rem = 0 - rem }
-   mut int: prime_tests = 0
-   mut int: divisions = 0
-   mut int: nonzero_terms = 0
-   mut int: i = 0
-   def int: n = base_len
-   while(i < n && rem != 1 && nonzero_terms < hit_limit){
-      def int: k = i * 32
-      def int: p = load64_i(root_filters, k)
-      if(p > rem){ break }
-      def int: has_roots = load64_i(root_filters, k + 24)
-      mut bool: hit = true
-      if(has_roots != 0){
-         def int: r1 = load64_i(root_filters, k + 8)
-         def int: r2 = load64_i(root_filters, k + 16)
-         def int: om = off % p
-         hit = om == r1 || om == r2
-      }
-      if(hit){
-         mut int: e = 0
-         mut bool: divisible = rem % p == 0
-         while(divisible && rem != 1){
-            rem = rem / p
-            divisions += 1
-            e += 1
-            divisible = rem != 1 && rem % p == 0
-         }
-         if(e > 0){
-            def int: dst = nonzero_terms * 8
-            store64_i(idxs, i, dst)
-            store64_i(vals, e, dst)
-            nonzero_terms += 1
-         }
-         prime_tests += 1
-      }
-      i += 1
-   }
-   store64_i(counters, load64_i(counters, 0) + prime_tests, 0)
-   store64_i(counters, load64_i(counters, 8) + divisions, 8)
-   store64_i(counters, load64_i(counters, 16) + nonzero_terms, 16)
-   store64_i(counters, nonzero_terms, 24)
-   rem
-}
-
-@inline
-fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(int: v, int: base_len, ptr: root_filters, int: off, int: hit_limit, ptr: counters, ptr: idxs, ptr: vals): int {
+fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(int v, int base_len, ptr root_filters, int off, int hit_limit, ptr counters, ptr idxs, ptr vals) int {
    mut int: rem = v
    if(rem < 0){ rem = 0 - rem }
    mut int: prime_tests = 0
@@ -3710,30 +3374,7 @@ fn _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(int: v, int:
 }
 
 @inline
-fn _qs_relation_int_raw(int: x, int: residue, list<int>: base, ptr: root_filters): dict {
-   mut rem = residue
-   if(rem < 0){ rem = 0 - rem }
-   mut exps = list(base.len)
-   mut j = 0
-   def n = base.len
-   while(j < n){
-      mut e = 0
-      if(rem != 1){
-         def k = j * 32
-         def p = load64_i(root_filters, k)
-         while(rem % p == 0){
-            rem = rem / p
-            e += 1
-         }
-      }
-      exps[j] = e
-      j += 1
-   }
-   {"x": x, "residue": residue, "exponents": exps}
-}
-
-@inline
-fn _qs_relation_int_raw_mpqs(int: x, int: residue, list<int>: base, ptr: root_filters): dict {
+fn _qs_relation_int_raw_mpqs(int x, int residue, list<int> base, ptr root_filters) dict {
    mut rem = residue
    if(rem < 0){ rem = 0 - rem }
    mut exps = list(base.len)
@@ -3756,7 +3397,7 @@ fn _qs_relation_int_raw_mpqs(int: x, int: residue, list<int>: base, ptr: root_fi
 }
 
 @inline
-fn _qs_relation_int_sparse_mpqs(int: x, int: base_len, ptr: idxs, ptr: vals, int: nonzero_terms): dict {
+fn _qs_relation_int_sparse_mpqs(int x, int base_len, ptr idxs, ptr vals, int nonzero_terms) dict {
    mut exps = list(base_len)
    mut j = 0
    while(j < base_len){
@@ -3772,7 +3413,7 @@ fn _qs_relation_int_sparse_mpqs(int: x, int: base_len, ptr: idxs, ptr: vals, int
    {"x": x, "exponents": exps}
 }
 
-fn _mpqs_root_filter_list_to_raw_shifted(ptr: raw, list: roots, int: count, int: radius): any {
+fn _mpqs_root_filter_list_to_raw_shifted(ptr raw, list roots, int count, int radius) any {
    mut i = 0
    while(i < count){
       def src = i * 4
@@ -3799,7 +3440,7 @@ fn _mpqs_root_filter_list_to_raw_shifted(ptr: raw, list: roots, int: count, int:
    nil
 }
 
-fn _mpqs_root_filter_list_to_raw_shifted32(ptr: raw, list: roots, int: count, int: radius): any {
+fn _mpqs_root_filter_list_to_raw_shifted32(ptr raw, list roots, int count, int radius) any {
    mut i = 0
    while(i < count){
       def src = i * 4
@@ -3826,7 +3467,7 @@ fn _mpqs_root_filter_list_to_raw_shifted32(ptr: raw, list: roots, int: count, in
    nil
 }
 
-fn _qs_factor_base_bigints(list: base): list {
+fn _qs_factor_base_bigints(list base) list {
    mut out = list(base.len)
    mut i = 0
    while(i < base.len){
@@ -3836,16 +3477,7 @@ fn _qs_factor_base_bigints(list: base): list {
    out
 }
 
-fn _qs_all_even(list: exps): bool {
-   mut i = 0
-   while(i < exps.len){
-      if(exps[i] % 2 != 0){ return false }
-      i += 1
-   }
-   true
-}
-
-fn _qs_relation(any: x, any: residue, list: exps): dict {
+fn _qs_relation(any x, any residue, list exps) dict {
    mut parity = list(exps.len)
    mut i = 0
    while(i < exps.len){
@@ -3856,9 +3488,9 @@ fn _qs_relation(any: x, any: residue, list: exps): dict {
 }
 
 @inline
-fn _qs_relation_compact(any: x, list: exps): dict { {"x": x, "exponents": exps} }
+fn _qs_relation_compact(any x, list exps) dict { {"x": x, "exponents": exps} }
 
-fn _qs_parity_weight(list: parity): int {
+fn _qs_parity_weight(list parity) int {
    mut w, i = 0, 0
    while(i < parity.len){
       if((int(parity[i]) & 1) != 0){ w += 1 }
@@ -3867,12 +3499,12 @@ fn _qs_parity_weight(list: parity): int {
    w
 }
 
-fn _qs_relation_parity(dict: rel): list {
+fn _qs_relation_parity(dict rel) list {
    def p = rel.get("parity", nil)
    p == nil ? rel.get("exponents", []) : p
 }
 
-fn _qs_zero_counts(int: width): list {
+fn _qs_zero_counts(int width) list {
    mut out = list(width)
    __list_set_len(out, width)
    mut i = 0
@@ -3883,7 +3515,7 @@ fn _qs_zero_counts(int: width): list {
    out
 }
 
-fn _qs_relation_width(list: relations, int: width): int {
+fn _qs_relation_width(list relations, int width) int {
    mut w = width
    if(w > 0){ return w }
    mut i = 0
@@ -3895,7 +3527,7 @@ fn _qs_relation_width(list: relations, int: width): int {
    w
 }
 
-fn _qs_unique_relation_report(list: relations): dict {
+fn _qs_unique_relation_report(list relations) dict {
    mut seen = dict()
    mut unique = list(relations.len)
    __list_set_len(unique, relations.len)
@@ -3923,7 +3555,7 @@ fn _qs_unique_relation_report(list: relations): dict {
    _dict_with(8, [["relations", unique], ["duplicate_x", duplicate_x], ["zero_parity", zero_parity], ["max_weight", max_weight]])
 }
 
-fn _qs_has_singleton_parity(list: parity, list: counts, int: width): bool {
+fn _qs_has_singleton_parity(list parity, list counts, int width) bool {
    mut j = 0
    def limit = min(width, parity.len)
    while(j < limit){
@@ -3933,7 +3565,7 @@ fn _qs_has_singleton_parity(list: parity, list: counts, int: width): bool {
    false
 }
 
-fn _qs_singleton_prune_round(list: kept, int: width): dict {
+fn _qs_singleton_prune_round(list kept, int width) dict {
    mut counts = _qs_zero_counts(width)
    mut parities = list(kept.len)
    __list_set_len(parities, kept.len)
@@ -3968,7 +3600,7 @@ fn _qs_singleton_prune_round(list: kept, int: width): dict {
    _dict_with(6, [["relations", next], ["dropped", dropped], ["changed", dropped > 0]])
 }
 
-fn _qs_prune_singletons(list: relations, int: width, bool: prune_singletons): dict {
+fn _qs_prune_singletons(list relations, int width, bool prune_singletons) dict {
    mut kept = relations
    mut rounds = 0
    mut dropped = 0
@@ -3985,7 +3617,7 @@ fn _qs_prune_singletons(list: relations, int: width, bool: prune_singletons): di
    {"relations": kept, "rounds": rounds, "dropped": dropped}
 }
 
-fn qs_relation_filter_report(list: relations, int: width=0, bool: prune_singletons=true): dict {
+fn qs_relation_filter_report(list relations, int width=0, bool prune_singletons=true) dict {
    "Filter QS/MPQS relations with duplicate-x removal and singleton-row pruning."
    def t0 = ticks()
    def w = _qs_relation_width(relations, width)
@@ -4007,7 +3639,7 @@ fn qs_relation_filter_report(list: relations, int: width=0, bool: prune_singleto
    ])
 }
 
-fn _qs_relation_large_primes(dict: rel): list {
+fn _qs_relation_large_primes(dict rel) list {
    mut raw = rel.get("large_primes", nil)
    if(raw == nil){ raw = rel.get("large_prime", nil) }
    mut out = []
@@ -4033,7 +3665,7 @@ fn _qs_relation_large_primes(dict: rel): list {
    out
 }
 
-fn _qs_sort_large_primes(list: lps): list {
+fn _qs_sort_large_primes(list lps) list {
    mut out = []
    mut i = 0
    while(i < lps.len){
@@ -4057,7 +3689,7 @@ fn _qs_sort_large_primes(list: lps): list {
    out
 }
 
-fn _qs_large_prime_tuple_key(list: lps): str {
+fn _qs_large_prime_tuple_key(list lps) str {
    def sorted = _qs_sort_large_primes(lps)
    mut key = ""
    mut i = 0
@@ -4069,7 +3701,7 @@ fn _qs_large_prime_tuple_key(list: lps): str {
    key
 }
 
-fn _qs_large_prime_relation_record(dict: rel, int: idx): dict {
+fn _qs_large_prime_relation_record(dict rel, int idx) dict {
    def lps = _qs_sort_large_primes(_qs_relation_large_primes(rel))
    _dict_with(8, [
          ["index", idx], ["relation", rel], ["large_primes", lps],
@@ -4079,9 +3711,9 @@ fn _qs_large_prime_relation_record(dict: rel, int: idx): dict {
    ])
 }
 
-fn _qs_lp_hist_set(dict: hist, int: k): dict { hist.set(to_str(k), int(hist.get(to_str(k), 0)) + 1) }
+fn _qs_lp_hist_set(dict hist, int k) dict { hist.set(to_str(k), int(hist.get(to_str(k), 0)) + 1) }
 
-fn _qs_lp_normalize_square_pairs(list: lps): dict {
+fn _qs_lp_normalize_square_pairs(list lps) dict {
    def sorted = _qs_sort_large_primes(lps)
    mut out = []
    mut square_pairs = 0
@@ -4098,7 +3730,7 @@ fn _qs_lp_normalize_square_pairs(list: lps): dict {
    _dict_with(4, [["large_primes", out], ["square_pairs", square_pairs]])
 }
 
-fn _qs_large_prime_acceptance_report(list: relations, int: max_large_primes=2, any: max_large_prime=0): dict {
+fn _qs_large_prime_acceptance_report(list relations, int max_large_primes=2, any max_large_prime=0) dict {
    mut accepted = []
    mut accepted_hist = dict()
    mut rejected_hist = dict()
@@ -4147,7 +3779,7 @@ fn _qs_large_prime_acceptance_report(list: relations, int: max_large_primes=2, a
    ])
 }
 
-fn _qs_lp_unique_records(list: relations): dict {
+fn _qs_lp_unique_records(list relations) dict {
    mut unique = []
    mut seen_x, seen_lp = dict(), dict()
    mut duplicate_x, duplicate_large_prime_tuples = 0, 0
@@ -4179,7 +3811,7 @@ fn _qs_lp_unique_records(list: relations): dict {
    {"records": unique, "duplicate_x": duplicate_x, "duplicate_large_prime_tuples": duplicate_large_prime_tuples, "full_relations": full_relations, "partial_relations": partial_relations, "max_large_primes_seen": max_lp_seen}
 }
 
-fn _qs_lp_singleton_prune(list: unique, bool: prune_singletons): dict {
+fn _qs_lp_singleton_prune(list unique, bool prune_singletons) dict {
    mut kept = unique
    mut singleton_rounds, singleton_dropped = 0, 0
    mut changed = prune_singletons
@@ -4224,7 +3856,7 @@ fn _qs_lp_singleton_prune(list: unique, bool: prune_singletons): dict {
    {"records": kept, "singleton_rounds": singleton_rounds, "singleton_dropped": singleton_dropped}
 }
 
-fn _qs_lp_vertices(list: records): list {
+fn _qs_lp_vertices(list records) list {
    mut seen, vertices = dict(), []
    mut i = 0
    while(i < records.len){
@@ -4243,7 +3875,7 @@ fn _qs_lp_vertices(list: records): list {
    vertices
 }
 
-fn _qs_lp_root(dict: parent, str: key): str {
+fn _qs_lp_root(dict parent, str key) str {
    mut p = to_str(parent.get(key, key))
    while(p != to_str(parent.get(p, p))){
       p = to_str(parent.get(p, p))
@@ -4251,7 +3883,7 @@ fn _qs_lp_root(dict: parent, str: key): str {
    p
 }
 
-fn _qs_lp_roots_same(list: roots): bool {
+fn _qs_lp_roots_same(list roots) bool {
    if(roots.len <= 1){ return true }
    def first = roots.get(0)
    mut i = 1
@@ -4262,7 +3894,7 @@ fn _qs_lp_roots_same(list: roots): bool {
    true
 }
 
-fn _qs_lp_union_roots(dict: parent, list: vertices, list: roots): dict {
+fn _qs_lp_union_roots(dict parent, list vertices, list roots) dict {
    if(roots.len == 0){ return parent }
    def first = roots.get(0)
    mut out = parent
@@ -4280,7 +3912,7 @@ fn _qs_lp_union_roots(dict: parent, list: vertices, list: roots): dict {
    out
 }
 
-fn _qs_lp_cycle_graph(list: kept): dict {
+fn _qs_lp_cycle_graph(list kept) dict {
    def vertices = _qs_lp_vertices(kept)
    mut parent = dict()
    mut i = 0
@@ -4323,7 +3955,7 @@ fn _qs_lp_cycle_graph(list: kept): dict {
    {"vertices": vertices.len, "edges": union_edges, "components": components, "cycles_estimate": max(0, union_edges - max(0, vertices.len - components)), "cycle_relation_count": cycle_relations.len, "cycle_length_histogram": cycle_hist, "cycle_relations": cycle_relations}
 }
 
-fn _qs_lp_surviving_relations(list: kept): dict {
+fn _qs_lp_surviving_relations(list kept) dict {
    mut surviving_relations, surviving_partial_relations = [], 0
    mut i = 0
    while(i < kept.len){
@@ -4335,7 +3967,7 @@ fn _qs_lp_surviving_relations(list: kept): dict {
    {"surviving_relations": surviving_relations, "surviving_partial_relations": surviving_partial_relations}
 }
 
-fn qs_large_prime_filter_report(list: relations, int: max_large_primes=2, bool: prune_singletons=true, any: max_large_prime=0): dict {
+fn qs_large_prime_filter_report(list relations, int max_large_primes=2, bool prune_singletons=true, any max_large_prime=0) dict {
    "Filter QS/SIQS/MPQS large-prime partial relations and report graph cycles."
    def t0 = ticks()
    def acceptance = _qs_large_prime_acceptance_report(relations, max_large_primes, max_large_prime)
@@ -4378,7 +4010,7 @@ fn qs_large_prime_filter_report(list: relations, int: max_large_primes=2, bool: 
    ]))
 }
 
-fn _qs_clean_prime_list(list: primes): list {
+fn _qs_clean_prime_list(list primes) list {
    mut out = []
    mut seen = dict()
    mut i = 0
@@ -4396,7 +4028,7 @@ fn _qs_clean_prime_list(list: primes): list {
    out
 }
 
-fn _qs_prime_product_report(list: primes): dict {
+fn _qs_prime_product_report(list primes) dict {
    mut prod = Z(1)
    mut minp = Z(0)
    mut maxp = Z(0)
@@ -4415,7 +4047,7 @@ fn _qs_prime_product_report(list: primes): dict {
    ])
 }
 
-fn _qs_relation_cofactor_values(dict: rel): list {
+fn _qs_relation_cofactor_values(dict rel) list {
    mut out = []
    def direct = rel.get("cofactors", nil)
    if(is_list(direct)){
@@ -4446,7 +4078,7 @@ fn _qs_relation_cofactor_values(dict: rel): list {
    out
 }
 
-fn _qs_batch_work_items(list: relations): list {
+fn _qs_batch_work_items(list relations) list {
    mut items = []
    mut i = 0
    while(i < relations.len){
@@ -4468,7 +4100,7 @@ fn _qs_batch_work_items(list: relations): list {
    items
 }
 
-fn _qs_batch_product_range(list: items, int: lo, int: hi): any {
+fn _qs_batch_product_range(list items, int lo, int hi) any {
    mut prod = Z(1)
    mut i = lo
    while(i <= hi && i < items.len){
@@ -4478,7 +4110,7 @@ fn _qs_batch_product_range(list: items, int: lo, int: hi): any {
    prod
 }
 
-fn _qs_batch_extract_smooth(any: c, any: g, list: primes): dict {
+fn _qs_batch_extract_smooth(any c, any g, list primes) dict {
    mut rem = _z(c)
    mut factors = []
    mut smooth = Z(1)
@@ -4504,7 +4136,7 @@ fn _qs_batch_extract_smooth(any: c, any: g, list: primes): dict {
    ])
 }
 
-fn _qs_batch_process_leaf(list: items, int: lo, int: hi, any: numerator, list: primes): dict {
+fn _qs_batch_process_leaf(list items, int lo, int hi, any numerator, list primes) dict {
    mut item_reports = []
    mut gcd_checks = 0
    mut full_smooth = 0
@@ -4546,7 +4178,7 @@ fn _qs_batch_process_leaf(list: items, int: lo, int: hi, any: numerator, list: p
    ])
 }
 
-fn _qs_batch_merge_tree_reports(dict: a, dict: b): dict {
+fn _qs_batch_merge_tree_reports(dict a, dict b) dict {
    _dict_with(20, [
          ["item_reports", a.get("item_reports", []) + b.get("item_reports", [])],
          ["tree_nodes", int(a.get("tree_nodes", 0)) + int(b.get("tree_nodes", 0))],
@@ -4566,7 +4198,7 @@ fn _qs_batch_merge_tree_reports(dict: a, dict: b): dict {
    ])
 }
 
-fn _qs_batch_remainder_tree(list: items, int: lo, int: hi, any: numerator, list: primes, int: leaf_bits, int: depth): dict {
+fn _qs_batch_remainder_tree(list items, int lo, int hi, any numerator, list primes, int leaf_bits, int depth) dict {
    if(lo > hi){
       return _dict_with(8, [["item_reports", []], ["tree_nodes", 0], ["max_depth", depth]])
    }
@@ -4605,7 +4237,7 @@ fn _qs_batch_remainder_tree(list: items, int: lo, int: hi, any: numerator, list:
    ])
 }
 
-fn qs_batch_cofactor_report(list: relations, list: primes, int: leaf_bits=1024): dict {
+fn qs_batch_cofactor_report(list relations, list primes, int leaf_bits=1024) dict {
    "Batch-factor QS/SIQS/MPQS relation cofactors with a product/remainder-tree GCD pass."
    def t0 = ticks()
    def clean_primes = _qs_clean_prime_list(primes)
@@ -4652,7 +4284,7 @@ fn qs_batch_cofactor_report(list: relations, list: primes, int: leaf_bits=1024):
    ])
 }
 
-fn _qs_congruence_factor(any: x, any: y, any: n): any {
+fn _qs_congruence_factor(any x, any y, any n) any {
    def nz = _z(n)
    def gx = gcd(bigint_abs(_z(x) - _z(y)), nz)
    if(_is_nontrivial_factor(gx, nz)){ return gx }
@@ -4661,49 +4293,7 @@ fn _qs_congruence_factor(any: x, any: y, any: n): any {
    nil
 }
 
-fn _qs_try_dependency_mod(any: original_n, any: modulus, list: base, list: relations, list: dependency): any {
-   def nz, mz = _z(original_n), _z(modulus)
-   mut parity = list(base.len)
-   mut sums = list(base.len)
-   mut i = 0
-   def base_len = base.len
-   while(i < base_len){
-      parity[i] = 0
-      sums[i] = 0
-      i += 1
-   }
-   mut X = Z(1)
-   i = 0
-   def rel_len = relations.len
-   def dep_len = dependency.len
-   while(i < rel_len){
-      if(i < dep_len && (int(dependency[i]) & 1) == 1){
-         def rel = relations[i]
-         X = mod(X * _z(rel.get("x")), mz)
-         def exps = rel.get("exponents")
-         mut j = 0
-         def exp_len = exps.len
-         while(j < exp_len){
-            def e = int(exps[j])
-            sums[j] = int(sums[j]) + e
-            parity[j] = (int(parity[j]) + e) & 1
-            j += 1
-         }
-      }
-      i += 1
-   }
-   if(!_qs_all_even(parity)){ return nil }
-   mut Y = Z(1)
-   i = 0
-   while(i < base_len){
-      def half = sums[i] / 2
-      if(half > 0){ Y = mod(Y * power_mod(_z(base[i]), Z(half), mz), mz) }
-      i += 1
-   }
-   _qs_congruence_factor(X, Y, nz)
-}
-
-fn _qs_try_verified_dependency_mod(any: original_n, any: modulus, list: base, list: relations, list: dependency): any {
+fn _qs_try_verified_dependency_mod(any original_n, any modulus, list base, list relations, list dependency) any {
    def nz, mz = _z(original_n), _z(modulus)
    mut sums = list(base.len)
    mut i = 0
@@ -4740,17 +4330,13 @@ fn _qs_try_verified_dependency_mod(any: original_n, any: modulus, list: base, li
    _qs_congruence_factor(X, Y, nz)
 }
 
-fn _qs_try_dependency(any: n, list: base, list: relations, list: dependency): any {
-   _qs_try_dependency_mod(n, n, base, relations, dependency)
-}
-
-fn _qs_multiplier_candidates(): list {
+fn _qs_multiplier_candidates() list {
    [1, 2, 3, 5, 6, 7, 10, 11, 13, 14, 15, 17, 19, 21, 22, 23,
       26, 29, 30, 31, 33, 34, 35, 37, 38, 39, 41, 42, 43, 46, 47,
    51, 53, 55, 57, 58, 59, 61, 62, 65, 66, 67, 69, 70, 71, 73]
 }
 
-fn _qs_prime_base_int(int: bound): list<int> {
+fn _qs_prime_base_int(int bound) list<int> {
    mut list<int>: out = list(0)
    if(bound < 2){ return out }
    mut composite = list(bound + 1)
@@ -4777,7 +4363,7 @@ fn _qs_prime_base_int(int: bound): list<int> {
    out
 }
 
-fn _qs_pow_mod_int(int: a, int: e, int: p): int {
+fn _qs_pow_mod_int(int a, int e, int p) int {
    mut base = a % p
    if(base < 0){ base += p }
    mut exp = e
@@ -4790,14 +4376,14 @@ fn _qs_pow_mod_int(int: a, int: e, int: p): int {
    acc
 }
 
-fn _qs_legendre_int(int: a, int: p): int {
+fn _qs_legendre_int(int a, int p) int {
    def r = a % p
    if(r == 0){ return 0 }
    def v = _qs_pow_mod_int(r, (p - 1) / 2, p)
    v == 1 ? 1 : (v == p - 1 ? -1 : 0)
 }
 
-fn _qs_multiplier_score_int(int: n_mod_8, list<int>: n_mod_primes, int: k, list<int>: score_primes, list: score_contribs): dict {
+fn _qs_multiplier_score_int(int n_mod_8, list<int> n_mod_primes, int k, list<int> score_primes, list score_contribs) dict {
    def ln2 = 0.6931471805599453
    mut score = 0.5 * math.log(float(k))
    def kn8 = (k * n_mod_8) % 8
@@ -4834,7 +4420,7 @@ fn _qs_multiplier_score_int(int: n_mod_8, list<int>: n_mod_primes, int: k, list<
    }
 }
 
-fn _qs_best_multiplier_fast(any: n, int: factor_base_bound): int {
+fn _qs_best_multiplier_fast(any n, int factor_base_bound) int {
    def nz = _z(n)
    def score_primes = _qs_prime_base_int(factor_base_bound)
    mut list<int>: n_mod_primes = list(score_primes.len)
@@ -4881,48 +4467,7 @@ fn _qs_best_multiplier_fast(any: n, int: factor_base_bound): int {
    best_k
 }
 
-fn _qs_multiplier_score(any: n, int: k, list: score_primes): dict {
-   def nz = _z(n)
-   def ln2 = 0.6931471805599453
-   mut score = 0.5 * math.log(float(k))
-   def kn8 = bigint_to_int(mod(Z(k) * mod(nz, Z(8)), Z(8)))
-   if(kn8 == 1){ score = score - 2.0 * ln2 }
-   elif(kn8 == 5){ score = score - ln2 }
-   elif(kn8 == 3 || kn8 == 7){ score = score - 0.5 * ln2 }
-   mut qr_hits = 0
-   mut div_hits = 0
-   mut tested = 0
-   mut i = 0
-   while(i < score_primes.len){
-      def p = _z(score_primes.get(i))
-      def pi = bigint_to_int(p)
-      if(pi > 2){
-         tested += 1
-         def knp = mod(Z(k) * mod(nz, p), p)
-         def contrib = math.log(float(pi)) / (float(pi) - 1.0)
-         if(knp == Z(0)){
-            score = score - contrib
-            div_hits += 1
-         } else {
-            if(legendre(knp, p) == 1){
-               score = score - 2.0 * contrib
-               qr_hits += 1
-            }
-         }
-      }
-      i += 1
-   }
-   {
-      "k": k,
-      "score": score,
-      "kn_mod_8": kn8,
-      "prime_tests": tested,
-      "quadratic_residue_hits": qr_hits,
-      "divisible_hits": div_hits,
-   }
-}
-
-fn qs_multiplier_report(any: n, int: factor_base_bound=64): dict {
+fn qs_multiplier_report(any n, int factor_base_bound=64) dict {
    "Score Knuth-Schroeppel multipliers for quadratic-sieve style relation collection."
    def t0 = ticks()
    def nz = _z(n)
@@ -4966,12 +4511,12 @@ fn qs_multiplier_report(any: n, int: factor_base_bound=64): dict {
    ])
 }
 
-fn mpqs_multiplier_report(any: n, int: factor_base_bound=64): dict {
+fn mpqs_multiplier_report(any n, int factor_base_bound=64) dict {
    "Alias for qs_multiplier_report used by MPQS callers."
    qs_multiplier_report(n, factor_base_bound)
 }
 
-fn _qs_multiplier_summary_report(any: n, int: factor_base_bound, int: best_multiplier): dict {
+fn _qs_multiplier_summary_report(any n, int factor_base_bound, int best_multiplier) dict {
    _dict_with(12, [
          ["method", "knuth-schroeppel-multiplier"],
          ["n", _z(n)],
@@ -4982,7 +4527,7 @@ fn _qs_multiplier_summary_report(any: n, int: factor_base_bound, int: best_multi
    ])
 }
 
-fn _siqs_residue_primes(any: modulus, list: base): list {
+fn _siqs_residue_primes(any modulus, list base) list {
    mut out = list(base.len)
    __list_set_len(out, base.len)
    mut count = 0
@@ -4999,7 +4544,7 @@ fn _siqs_residue_primes(any: modulus, list: base): list {
    out
 }
 
-fn _siqs_poly_from_primes(any: modulus, list: primes): any {
+fn _siqs_poly_from_primes(any modulus, list primes) any {
    if(primes.len == 0){ return nil }
    mut A = Z(1)
    mut roots = list(primes.len)
@@ -5029,7 +4574,7 @@ fn _siqs_poly_from_primes(any: modulus, list: primes): any {
    ])
 }
 
-fn _siqs_polynomial_report(any: n, int: factor_base_bound, int: polynomial_count, int: sieve_radius, bool: detailed_multiplier): dict {
+fn _siqs_polynomial_report(any n, int factor_base_bound, int polynomial_count, int sieve_radius, bool detailed_multiplier) dict {
    def t0 = ticks()
    def nz = _z(n)
    mut mult = dict()
@@ -5082,12 +4627,12 @@ fn _siqs_polynomial_report(any: n, int: factor_base_bound, int: polynomial_count
    ])
 }
 
-fn siqs_polynomial_report(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256): dict {
+fn siqs_polynomial_report(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256) dict {
    "Generate SIQS polynomial candidates Q(x)=(A*x+B)^2-kN with B^2 == kN mod A."
    _siqs_polynomial_report(n, factor_base_bound, polynomial_count, sieve_radius, true)
 }
 
-fn _siqs_relation_fields(dict: poly, int: pi, int: t, any: A, any: B, any: C, any: qv, any: relation_value, int: multiplier, int: score): list {
+fn _siqs_relation_fields(dict poly, int pi, int t, any A, any B, any C, any qv, any relation_value, int multiplier, int score) list {
    [
       ["poly_index", poly.get("index", pi)], ["t", t],
       ["A", A], ["B", B], ["C", C],
@@ -5095,7 +4640,7 @@ fn _siqs_relation_fields(dict: poly, int: pi, int: t, any: A, any: B, any: C, an
    ]
 }
 
-fn _siqs_poly_report_fields(dict: poly, int: pi, any: A, any: B, int: found, int: candidates, int: smooth_tests, int: prime_tests, int: divisions, int: skipped_negative, dict: score_report): list {
+fn _siqs_poly_report_fields(dict poly, int pi, any A, any B, int found, int candidates, int smooth_tests, int prime_tests, int divisions, int skipped_negative, dict score_report) list {
    [
       ["poly_index", poly.get("index", pi)], ["A", A], ["B", B],
       ["relations", found], ["candidates", candidates], ["smooth_tests", smooth_tests], ["smooth_hits", found],
@@ -5106,11 +4651,11 @@ fn _siqs_poly_report_fields(dict: poly, int: pi, any: A, any: B, int: found, int
 }
 
 fn _siqs_relation_final_fields(
-   any: rel_t0, int: candidate_count, int: smooth_tests, int: smooth_hits, int: trial_prime_tests,
-   int: trial_divisions, int: nonzero_exponent_terms, int: total_skipped_negative, int: score_min, int: default_score_min,
-   bool: tune_cutoff, dict: cutoff_report, int: sieve_marked_roots, int: sieve_noninvertible,
-   int: prefilter_tested, int: prefilter_skipped, int: fallback_tests, list: relations,
-): list {
+   any rel_t0, int candidate_count, int smooth_tests, int smooth_hits, int trial_prime_tests,
+   int trial_divisions, int nonzero_exponent_terms, int total_skipped_negative, int score_min, int default_score_min,
+   bool tune_cutoff, dict cutoff_report, int sieve_marked_roots, int sieve_noninvertible,
+   int prefilter_tested, int prefilter_skipped, int fallback_tests, list relations,
+) list {
    _fields_extend(
       _qs_relation_collection_fields(rel_t0, candidate_count, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_exponent_terms),
       [
@@ -5126,7 +4671,7 @@ fn _siqs_relation_final_fields(
    )
 }
 
-fn _siqs_cutoff_disabled(int: default_score_min): dict {
+fn _siqs_cutoff_disabled(int default_score_min) dict {
    _dict_with(8, [
          ["method", "siqs-adaptive-cutoff"], ["default_cutoff", default_score_min],
          ["selected_cutoff", default_score_min], ["changed", false],
@@ -5134,7 +4679,7 @@ fn _siqs_cutoff_disabled(int: default_score_min): dict {
    ])
 }
 
-fn _siqs_collect_state(): dict {
+fn _siqs_collect_state() dict {
    _dict_with(24, [
          ["candidate_count", 0], ["smooth_tests", 0], ["smooth_hits", 0],
          ["trial_prime_tests", 0], ["trial_divisions", 0], ["nonzero_exponent_terms", 0],
@@ -5143,121 +4688,101 @@ fn _siqs_collect_state(): dict {
    ])
 }
 
-fn _siqs_state_add_smooth(dict: state, dict: smooth): dict {
-   state = _dict_add_int(state, "smooth_tests", 1)
-   state = _dict_add_int(state, "trial_prime_tests", smooth.get(3, 0))
-   state = _dict_add_int(state, "trial_divisions", smooth.get(4, 0))
-   _dict_add_int(state, "nonzero_exponent_terms", smooth.get(5, 0))
-}
-
 fn _siqs_poly_scan_result(
-   list: relations, dict: state, dict: poly, int: pi, any: A, any: B, int: found,
-   int: poly_candidates, int: poly_smooth_tests, int: poly_trial_prime_tests, int: poly_trial_divisions,
-   int: skipped_negative, dict: score_report, bool: include_report,
-): dict {
+   list relations, dict state, dict poly, int pi, any A, any B, int found,
+   int poly_candidates, int poly_smooth_tests, int poly_trial_prime_tests, int poly_trial_divisions,
+   int skipped_negative, dict score_report, bool include_report,
+) dict {
    _dict_with(8, [
          ["relations", relations], ["state", state],
          ["poly_report", include_report ? _dict_with(14, _siqs_poly_report_fields(poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report)) : nil],
    ])
 }
 
-fn _siqs_collect_poly_pass_int(
-   list: relations_in, dict: state_in, dict: poly, int: pi, int: pass, any: A, any: B, any: C,
-   dict: score_report, list: base, list<int>: trial_base, int: sieve_radius, int: score_min, int: max_relations, int: multiplier,
-   bool: include_relation_details=true, bool: include_poly_report=true,
-): dict {
+fn _siqs_collect_poly_pass_int_raw_loop(
+   ptr scores, ptr root_filters, list relations_in, int relation_count, dict poly, any A,
+   int Ai, int Bi, int Ci, list base, list<int> trial_base, int sieve_radius,
+   int score_min, int max_relations, bool pass0, bool has_root_filters,
+   bool include_relation_details, ptr raw_counts
+) dict {
    mut relations = relations_in
-   mut state_candidate_count = int(state_in.get("candidate_count", 0))
-   mut state_smooth_tests = int(state_in.get("smooth_tests", 0))
-   mut state_smooth_hits = int(state_in.get("smooth_hits", 0))
-   mut state_trial_prime_tests = int(state_in.get("trial_prime_tests", 0))
-   mut state_trial_divisions = int(state_in.get("trial_divisions", 0))
-   mut state_nonzero_terms = int(state_in.get("nonzero_exponent_terms", 0))
-   mut state_skipped_negative = int(state_in.get("total_skipped_negative", 0))
-   mut state_prefilter_skipped = int(state_in.get("prefilter_skipped", 0))
-   mut state_prefilter_tested = int(state_in.get("prefilter_tested", 0))
-   mut state_fallback_tests = int(state_in.get("fallback_tests", 0))
-   mut state_marked_roots = int(state_in.get("sieve_marked_roots", 0))
-   mut state_noninvertible = int(state_in.get("sieve_noninvertible", 0))
-   if(pass == 0){
-      state_marked_roots += int(score_report.get("marked_roots", 0))
-      state_noninvertible += int(score_report.get("skipped_noninvertible", 0))
-   }
-   def scores = score_report.get("scores", [])
    mut a_exps = []
    mut a_exps_ready = false
-   def int: Ai = bigint_to_int(A)
-   def int: Bi = bigint_to_int(B)
-   def int: Ci = bigint_to_int(C)
    mut int: found = 0
    mut int: skipped_negative = 0
    mut int: poly_candidates = 0
    mut int: poly_smooth_tests = 0
-   mut int: poly_trial_prime_tests = 0
-   mut int: poly_trial_divisions = 0
+   mut int: candidate_count = 0
+   mut int: smooth_tests = 0
+   mut int: smooth_hits = 0
+   mut int: prefilter_skipped = 0
+   mut int: prefilter_tested = 0
+   mut int: fallback_tests = 0
    mut int: t = 0 - sieve_radius
    def int: twoA = 2 * Ai
    def int: twoB = 2 * Bi
    mut int: qv = Ai * t * t + twoB * t + Ci
    mut int: q_delta = twoA * t + Ai + twoB
-   with ptr: raw_counts = malloc(24){
-      if(!raw_counts){ return _siqs_poly_scan_result(relations, state_in, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0) }
-      memset(raw_counts, 0, 24)
-   while(t <= sieve_radius && relations.len < max_relations){
+   def int: trial_base_len = trial_base.len
+   while(t <= sieve_radius && relation_count < max_relations){
       def int: pos = t + sieve_radius
-      if(pass == 0){
-         state_candidate_count += 1
+      if(pass0){
+         candidate_count += 1
          poly_candidates += 1
       }
       if(qv > 0){
-         def int: score = int(scores[pos])
-         def bool: should_test = (pass == 0 && score >= score_min) || (pass == 1 && score < score_min)
+         def int: score = int(load8(scores, pos))
+         def should_test = pass0 ? score >= score_min : score < score_min
          if(should_test){
-            if(pass == 0){ state_prefilter_tested += 1 } else { state_fallback_tests += 1 }
-            state_smooth_tests += 1
+            if(pass0){ prefilter_tested += 1 } else { fallback_tests += 1 }
+            smooth_tests += 1
             poly_smooth_tests += 1
-            def rem_i = _qs_factor_over_base_intbase_scan(qv, trial_base, raw_counts)
+            mut rem_i = 0
+            if(has_root_filters){
+               if(pass0){
+                  rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos(qv, trial_base_len, root_filters, pos, raw_counts)
+               } else {
+                  rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited(qv, trial_base_len, root_filters, pos, score + 1, raw_counts)
+               }
+            } else {
+               rem_i = _qs_factor_over_base_intbase_scan(qv, trial_base, raw_counts)
+            }
             if(rem_i == 1){
-               state_smooth_hits += 1
+               smooth_hits += 1
                if(!a_exps_ready){
                   a_exps = _siqs_a_exponents(poly, base)
                   a_exps_ready = true
                }
                def int: x = Ai * t + Bi
-               relations = relations.append(_siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details))
+               relations[relation_count] = _siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details)
+               relation_count += 1
                found += 1
             }
-         } elif(pass == 0){
-            state_prefilter_skipped += 1
+         } elif(pass0){
+            prefilter_skipped += 1
          }
-      } elif(pass == 0){
+      } elif(pass0){
          skipped_negative += 1
-         state_skipped_negative += 1
       }
       qv += q_delta
       q_delta += twoA
       t += 1
    }
-   poly_trial_prime_tests += load64_i(raw_counts, 0)
-   poly_trial_divisions += load64_i(raw_counts, 8)
-   state_trial_prime_tests += poly_trial_prime_tests
-   state_trial_divisions += poly_trial_divisions
-   state_nonzero_terms += load64_i(raw_counts, 16)
-   def state = _set_fields(state_in, [
-         ["candidate_count", state_candidate_count], ["smooth_tests", state_smooth_tests], ["smooth_hits", state_smooth_hits],
-         ["trial_prime_tests", state_trial_prime_tests], ["trial_divisions", state_trial_divisions], ["nonzero_exponent_terms", state_nonzero_terms],
-         ["total_skipped_negative", state_skipped_negative], ["prefilter_skipped", state_prefilter_skipped], ["prefilter_tested", state_prefilter_tested],
-         ["fallback_tests", state_fallback_tests], ["sieve_marked_roots", state_marked_roots], ["sieve_noninvertible", state_noninvertible],
+   _dict_with(16, [
+         ["relations", relations], ["relation_count", relation_count],
+         ["found", found], ["skipped_negative", skipped_negative],
+         ["poly_candidates", poly_candidates], ["poly_smooth_tests", poly_smooth_tests],
+         ["candidate_count", candidate_count], ["smooth_tests", smooth_tests],
+         ["smooth_hits", smooth_hits], ["prefilter_skipped", prefilter_skipped],
+         ["prefilter_tested", prefilter_tested], ["fallback_tests", fallback_tests],
    ])
-   _siqs_poly_scan_result(relations, state, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0)
-   }
 }
 
 fn _siqs_collect_poly_pass_int_raw(
-   ptr: scores, ptr: root_filters, list: relations_in, dict: state_in, dict: poly, int: pi, int: pass, any: A, any: B, any: C,
-   dict: score_report, list: base, list<int>: trial_base, int: sieve_radius, int: score_min, int: max_relations, int: multiplier,
-   bool: include_relation_details=true, bool: include_poly_report=true,
-): dict {
+   ptr scores, ptr root_filters, list relations_in, dict state_in, dict poly, int pi, int pass, any A, any B, any C,
+   dict score_report, list base, list<int> trial_base, int sieve_radius, int score_min, int max_relations, int multiplier,
+   bool include_relation_details=true, bool include_poly_report=true,
+) dict {
    mut relation_count = relations_in.len
    mut relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut state_candidate_count = int(state_in.get("candidate_count", 0))
@@ -5276,8 +4801,6 @@ fn _siqs_collect_poly_pass_int_raw(
       state_marked_roots += int(score_report.get("marked_roots", 0))
       state_noninvertible += int(score_report.get("skipped_noninvertible", 0))
    }
-   mut a_exps = []
-   mut a_exps_ready = false
    def int: Ai = bigint_to_int(A)
    def int: Bi = bigint_to_int(B)
    def int: Ci = bigint_to_int(C)
@@ -5287,159 +4810,44 @@ fn _siqs_collect_poly_pass_int_raw(
    mut int: poly_smooth_tests = 0
    mut int: poly_trial_prime_tests = 0
    mut int: poly_trial_divisions = 0
-   mut int: t = 0 - sieve_radius
-   def int: twoA = 2 * Ai
-   def int: twoB = 2 * Bi
-   mut int: qv = Ai * t * t + twoB * t + Ci
-   mut int: q_delta = twoA * t + Ai + twoB
-   def int: trial_base_len = trial_base.len
    def bool: has_root_filters = root_filters ? true : false
    with ptr: raw_counts = malloc(24){
       if(!raw_counts){ return _siqs_poly_scan_result(relations_in, state_in, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0) }
       memset(raw_counts, 0, 24)
-   if(pass == 0 && has_root_filters){
-      while(t <= sieve_radius && relation_count < max_relations){
-         def int: pos = t + sieve_radius
-         state_candidate_count += 1
-         poly_candidates += 1
-         if(qv > 0){
-            def int: score = int(load8(scores, pos))
-            if(score >= score_min){
-               state_prefilter_tested += 1
-               state_smooth_tests += 1
-               poly_smooth_tests += 1
-               def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos(qv, trial_base_len, root_filters, pos, raw_counts)
-               if(rem_i == 1){
-                  state_smooth_hits += 1
-                  if(!a_exps_ready){
-                     a_exps = _siqs_a_exponents(poly, base)
-                     a_exps_ready = true
-                  }
-                  def int: x = Ai * t + Bi
-                  relations[relation_count] = _siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details)
-                  relation_count += 1
-                  found += 1
-               }
-            } else {
-               state_prefilter_skipped += 1
-            }
-         } else {
-            skipped_negative += 1
-            state_skipped_negative += 1
-         }
-         qv += q_delta
-         q_delta += twoA
-         t += 1
-      }
-   } elif(pass == 0){
-      while(t <= sieve_radius && relation_count < max_relations){
-         def int: pos = t + sieve_radius
-         state_candidate_count += 1
-         poly_candidates += 1
-         if(qv > 0){
-            def int: score = int(load8(scores, pos))
-            if(score >= score_min){
-               state_prefilter_tested += 1
-               state_smooth_tests += 1
-               poly_smooth_tests += 1
-               def rem_i = _qs_factor_over_base_intbase_scan(qv, trial_base, raw_counts)
-               if(rem_i == 1){
-                  state_smooth_hits += 1
-                  if(!a_exps_ready){
-                     a_exps = _siqs_a_exponents(poly, base)
-                     a_exps_ready = true
-                  }
-                  def int: x = Ai * t + Bi
-                  relations[relation_count] = _siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details)
-                  relation_count += 1
-                  found += 1
-               }
-            } else {
-               state_prefilter_skipped += 1
-            }
-         } else {
-            skipped_negative += 1
-            state_skipped_negative += 1
-         }
-         qv += q_delta
-         q_delta += twoA
-         t += 1
-      }
-   } elif(has_root_filters){
-      while(t <= sieve_radius && relation_count < max_relations){
-         def int: pos = t + sieve_radius
-         if(qv > 0){
-            def int: score = int(load8(scores, pos))
-            if(score < score_min){
-               state_fallback_tests += 1
-               state_smooth_tests += 1
-               poly_smooth_tests += 1
-               def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited(qv, trial_base_len, root_filters, pos, score + 1, raw_counts)
-               if(rem_i == 1){
-                  state_smooth_hits += 1
-                  if(!a_exps_ready){
-                     a_exps = _siqs_a_exponents(poly, base)
-                     a_exps_ready = true
-                  }
-                  def int: x = Ai * t + Bi
-                  relations[relation_count] = _siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details)
-                  relation_count += 1
-                  found += 1
-               }
-            }
-         }
-         qv += q_delta
-         q_delta += twoA
-         t += 1
-      }
-   } else {
-      while(t <= sieve_radius && relation_count < max_relations){
-         def int: pos = t + sieve_radius
-         if(qv > 0){
-            def int: score = int(load8(scores, pos))
-            if(score < score_min){
-               state_fallback_tests += 1
-               state_smooth_tests += 1
-               poly_smooth_tests += 1
-               def rem_i = _qs_factor_over_base_intbase_scan(qv, trial_base, raw_counts)
-               if(rem_i == 1){
-                  state_smooth_hits += 1
-                  if(!a_exps_ready){
-                     a_exps = _siqs_a_exponents(poly, base)
-                     a_exps_ready = true
-                  }
-                  def int: x = Ai * t + Bi
-                  relations[relation_count] = _siqs_relation_intbase_for_mode(x, A, qv, trial_base, a_exps, include_relation_details)
-                  relation_count += 1
-                  found += 1
-               }
-            }
-         }
-         qv += q_delta
-         q_delta += twoA
-         t += 1
-      }
-   }
-   poly_trial_prime_tests += load64_i(raw_counts, 0)
-   poly_trial_divisions += load64_i(raw_counts, 8)
-   state_trial_prime_tests += poly_trial_prime_tests
-   state_trial_divisions += poly_trial_divisions
-   state_nonzero_terms += load64_i(raw_counts, 16)
-   def state = _set_fields(state_in, [
-         ["candidate_count", state_candidate_count], ["smooth_tests", state_smooth_tests], ["smooth_hits", state_smooth_hits],
-         ["trial_prime_tests", state_trial_prime_tests], ["trial_divisions", state_trial_divisions], ["nonzero_exponent_terms", state_nonzero_terms],
-         ["total_skipped_negative", state_skipped_negative], ["prefilter_skipped", state_prefilter_skipped], ["prefilter_tested", state_prefilter_tested],
-         ["fallback_tests", state_fallback_tests], ["sieve_marked_roots", state_marked_roots], ["sieve_noninvertible", state_noninvertible],
-   ])
-   _siqs_poly_scan_result(_mpqs_relation_buffer_trim(relations, relation_count), state, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0)
+      def scan = _siqs_collect_poly_pass_int_raw_loop(scores, root_filters, relations, relation_count, poly, A, Ai, Bi, Ci, base, trial_base, sieve_radius, score_min, max_relations, pass == 0, has_root_filters, include_relation_details, raw_counts)
+      relations = scan.get("relations", relations)
+      relation_count = int(scan.get("relation_count", relation_count))
+      found = int(scan.get("found", 0))
+      skipped_negative = int(scan.get("skipped_negative", 0))
+      poly_candidates = int(scan.get("poly_candidates", 0))
+      poly_smooth_tests = int(scan.get("poly_smooth_tests", 0))
+      state_candidate_count += int(scan.get("candidate_count", 0))
+      state_smooth_tests += int(scan.get("smooth_tests", 0))
+      state_smooth_hits += int(scan.get("smooth_hits", 0))
+      state_skipped_negative += skipped_negative
+      state_prefilter_skipped += int(scan.get("prefilter_skipped", 0))
+      state_prefilter_tested += int(scan.get("prefilter_tested", 0))
+      state_fallback_tests += int(scan.get("fallback_tests", 0))
+      poly_trial_prime_tests += load64_i(raw_counts, 0)
+      poly_trial_divisions += load64_i(raw_counts, 8)
+      state_trial_prime_tests += poly_trial_prime_tests
+      state_trial_divisions += poly_trial_divisions
+      state_nonzero_terms += load64_i(raw_counts, 16)
+      def state = _set_fields(state_in, [
+            ["candidate_count", state_candidate_count], ["smooth_tests", state_smooth_tests], ["smooth_hits", state_smooth_hits],
+            ["trial_prime_tests", state_trial_prime_tests], ["trial_divisions", state_trial_divisions], ["nonzero_exponent_terms", state_nonzero_terms],
+            ["total_skipped_negative", state_skipped_negative], ["prefilter_skipped", state_prefilter_skipped], ["prefilter_tested", state_prefilter_tested],
+            ["fallback_tests", state_fallback_tests], ["sieve_marked_roots", state_marked_roots], ["sieve_noninvertible", state_noninvertible],
+      ])
+      _siqs_poly_scan_result(_mpqs_relation_buffer_trim(relations, relation_count), state, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0)
    }
 }
 
 fn _siqs_collect_poly_pass(
-   list: relations, dict: state, dict: poly, int: pi, int: pass, any: modulus, list: base,
-   list<int>: trial_base, list: sqrt_roots, int: sieve_radius, int: score_min, int: max_relations, int: multiplier,
-   bool: include_relation_details=true, bool: include_poly_report=true,
-): dict {
+   list relations, dict state, dict poly, int pi, int pass, any modulus, list base,
+   list<int> trial_base, list sqrt_roots, int sieve_radius, int score_min, int max_relations, int multiplier,
+   bool include_relation_details=true, bool include_poly_report=true,
+) dict {
    def A = _z(poly.get("A"))
    def B = _z(poly.get("B"))
    def C = _z(poly.get("C"))
@@ -5538,7 +4946,7 @@ fn _siqs_collect_poly_pass(
    _siqs_poly_scan_result(relations, state, poly, pi, A, B, found, poly_candidates, poly_smooth_tests, poly_trial_prime_tests, poly_trial_divisions, skipped_negative, score_report, include_poly_report && pass == 0)
 }
 
-fn _siqs_collect_relations(any: modulus, list: base, list: polys, int: sieve_radius, int: score_min, int: max_relations, int: multiplier, bool: include_relation_details=true, bool: include_poly_reports=true): dict {
+fn _siqs_collect_relations(any modulus, list base, list polys, int sieve_radius, int score_min, int max_relations, int multiplier, bool include_relation_details=true, bool include_poly_reports=true) dict {
    mut relations, poly_reports = [], []
    mut state = _siqs_collect_state()
    def trial_base = _qs_factor_base_ints(base)
@@ -5558,7 +4966,7 @@ fn _siqs_collect_relations(any: modulus, list: base, list: polys, int: sieve_rad
    state.set("relations", relations).set("poly_reports", poly_reports)
 }
 
-fn _siqs_relation_report(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256, int: max_relations=32, bool: tune_cutoff=true, bool: detailed=true): dict {
+fn _siqs_relation_report(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256, int max_relations=32, bool tune_cutoff=true, bool detailed=true) dict {
    "Collect smooth SIQS relations from generated polynomials Q(t)=(A*t+B)^2-kN."
    def t0 = ticks()
    def nz = _z(n)
@@ -5612,11 +5020,12 @@ fn _siqs_relation_report(any: n, int: factor_base_bound=64, int: polynomial_coun
    _finish_report_with(out, t0, fields)
 }
 
-fn siqs_relation_report(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256, int: max_relations=32, bool: tune_cutoff=true): dict {
+fn siqs_relation_report(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256, int max_relations=32, bool tune_cutoff=true) dict {
+   "Runs the siqs relation report operation."
    _siqs_relation_report(n, factor_base_bound, polynomial_count, sieve_radius, max_relations, tune_cutoff, true)
 }
 
-fn _siqs_factor_relation_fields(dict: rel_report, list: base, list: raw_relations, list: selected_relations): list {
+fn _siqs_factor_relation_fields(dict rel_report, list base, list raw_relations, list selected_relations) list {
    [
       ["multiplier", rel_report.get("multiplier", 1)],
       ["sieve_modulus", rel_report.get("sieve_modulus", rel_report.get("n", 0))],
@@ -5628,7 +5037,7 @@ fn _siqs_factor_relation_fields(dict: rel_report, list: base, list: raw_relation
    ]
 }
 
-fn _siqs_factor_sieve_fields(dict: rel_report): list {
+fn _siqs_factor_sieve_fields(dict rel_report) list {
    [
       ["sieve_prefilter_enabled", rel_report.get("sieve_prefilter_enabled", false)],
       ["sieve_score_min", rel_report.get("sieve_score_min", 0)],
@@ -5643,7 +5052,7 @@ fn _siqs_factor_sieve_fields(dict: rel_report): list {
    ]
 }
 
-fn _siqs_factor_solve_fields(dict: solved, dict: solve, list: selected_relations): list {
+fn _siqs_factor_solve_fields(dict solved, dict solve, list selected_relations) list {
    [
       ["selected_relation_count", selected_relations.len],
       ["linear_algebra_relation_count", solve.get("linear_algebra_relation_count", solve.get("relation_count", selected_relations.len))],
@@ -5657,7 +5066,7 @@ fn _siqs_factor_solve_fields(dict: solved, dict: solve, list: selected_relations
    ]
 }
 
-fn _qs_dependency_matrix(list: relations, int: width): list {
+fn _qs_dependency_matrix(list relations, int width) list {
    mut parities = list(relations.len)
    mut i = 0
    while(i < relations.len){
@@ -5680,7 +5089,7 @@ fn _qs_dependency_matrix(list: relations, int: width): list {
    rows
 }
 
-fn _qs_dependency_sparse_rows(list: relations, int: width): list {
+fn _qs_dependency_sparse_rows(list relations, int width) list {
    mut rows = list(width)
    __list_set_len(rows, width)
    mut j = 0
@@ -5704,7 +5113,7 @@ fn _qs_dependency_sparse_rows(list: relations, int: width): list {
    rows
 }
 
-fn _gf2_zero_vec(int: n): list {
+fn _gf2_zero_vec(int n) list {
    mut out = list(n)
    mut i = 0
    while(i < n){
@@ -5714,7 +5123,7 @@ fn _gf2_zero_vec(int: n): list {
    out
 }
 
-fn _gf2_xor_vec(list<int>: a, list<int>: b): list {
+fn _gf2_xor_vec(list<int> a, list<int> b) list {
    def n = a.len
    mut out = list(n)
    mut i = 0
@@ -5725,7 +5134,7 @@ fn _gf2_xor_vec(list<int>: a, list<int>: b): list {
    out
 }
 
-fn _gf2_vec_is_zero(list<int>: v): bool {
+fn _gf2_vec_is_zero(list<int> v) bool {
    def n = v.len
    mut i = 0
    while(i < n){
@@ -5735,7 +5144,7 @@ fn _gf2_vec_is_zero(list<int>: v): bool {
    true
 }
 
-fn _gf2_vec_weight(list<int>: v): int {
+fn _gf2_vec_weight(list<int> v) int {
    def n = v.len
    mut w, i = 0, 0
    while(i < n){
@@ -5745,7 +5154,7 @@ fn _gf2_vec_weight(list<int>: v): int {
    w
 }
 
-fn _gf2_vec_pivot(list<int>: v): int {
+fn _gf2_vec_pivot(list<int> v) int {
    def n = v.len
    mut i = 0
    while(i < n){
@@ -5755,13 +5164,13 @@ fn _gf2_vec_pivot(list<int>: v): int {
    -1
 }
 
-fn _gf2_dense_width(list: rows, int: width=0): int {
+fn _gf2_dense_width(list rows, int width=0) int {
    mut w = width
    if(w <= 0 && rows.len > 0){ w = rows.get(0).len }
    w
 }
 
-fn _gf2_append_all(list: a, list: b): list {
+fn _gf2_append_all(list a, list b) list {
    mut out = a
    mut i = 0
    while(i < b.len){
@@ -5771,17 +5180,7 @@ fn _gf2_append_all(list: a, list: b): list {
    out
 }
 
-fn _gf2_column_rows(list: rows, int: width, int: col): list {
-   mut out = []
-   mut i = 0
-   while(i < rows.len){
-      if((int(rows.get(i).get(col, 0)) & 1) != 0){ out = out.append(i) }
-      i += 1
-   }
-   out
-}
-
-fn _gf2_cycle_to_dependency(list: cycle, int: width): list {
+fn _gf2_cycle_to_dependency(list cycle, int width) list {
    mut out = _gf2_zero_vec(width)
    mut i = 0
    while(i < cycle.len){
@@ -5792,7 +5191,7 @@ fn _gf2_cycle_to_dependency(list: cycle, int: width): list {
    out
 }
 
-fn _gf2_precondition_row_counts2(list: active, list: col_rows, int: nrows): list {
+fn _gf2_precondition_row_counts2(list active, list col_rows, int nrows) list {
    mut counts = _gf2_zero_vec(nrows)
    mut j = 0
    while(j < col_rows.len){
@@ -5810,7 +5209,7 @@ fn _gf2_precondition_row_counts2(list: active, list: col_rows, int: nrows): list
    counts
 }
 
-fn _gf2_precondition_active_cols2(list: active): int {
+fn _gf2_precondition_active_cols2(list active) int {
    mut n, j = 0, 0
    while(j < active.len){
       if(bool(active[j])){ n += 1 }
@@ -5819,7 +5218,7 @@ fn _gf2_precondition_active_cols2(list: active): int {
    n
 }
 
-fn _gf2_precondition_find_other_col2(list: active, list: col_rows, int: row, int: skip): int {
+fn _gf2_precondition_find_other_col2(list active, list col_rows, int row, int skip) int {
    mut j = 0
    while(j < col_rows.len){
       if(j != skip && j < active.len && bool(active[j]) && _gf2_sparse_contains(col_rows[j], row)){ return j }
@@ -5828,7 +5227,7 @@ fn _gf2_precondition_find_other_col2(list: active, list: col_rows, int: row, int
    -1
 }
 
-fn _gf2_precondition_decrement_intersection_counts(list: counts, list: a, list: b): list {
+fn _gf2_precondition_decrement_intersection_counts(list counts, list a, list b) list {
    mut i, j = 0, 0
    while(i < a.len && j < b.len){
       def av = int(a[i])
@@ -5846,7 +5245,7 @@ fn _gf2_precondition_decrement_intersection_counts(list: counts, list: a, list: 
    counts
 }
 
-fn _gf2_precondition_active_rows2(list: active, list: col_rows, int: nrows): list {
+fn _gf2_precondition_active_rows2(list active, list col_rows, int nrows) list {
    def counts = _gf2_precondition_row_counts2(active, col_rows, nrows)
    mut active_count = 0
    mut i = 0
@@ -5868,7 +5267,7 @@ fn _gf2_precondition_active_rows2(list: active, list: col_rows, int: nrows): lis
    out
 }
 
-fn _gf2_precondition_initial_columns(list: rows, int: width): dict {
+fn _gf2_precondition_initial_columns(list rows, int width) dict {
    mut active = list(width)
    mut col_rows_all = list(width)
    mut col_cycles_all = list(width)
@@ -5899,7 +5298,7 @@ fn _gf2_precondition_initial_columns(list: rows, int: width): dict {
    {"active": active, "col_rows": col_rows_all, "col_cycles": col_cycles_all, "sparse_rows": sparse_rows, "input_nonzeros": input_nonzeros}
 }
 
-fn _gf2_precondition_nochange_state(list: rows, list: col_rows_all, list: col_cycles_all, int: width): dict {
+fn _gf2_precondition_nochange_state(list rows, list col_rows_all, list col_cycles_all, int width) dict {
    mut row_map = list(rows.len)
    mut col_map = list(width)
    __list_set_len(row_map, rows.len)
@@ -5917,7 +5316,7 @@ fn _gf2_precondition_nochange_state(list: rows, list: col_rows_all, list: col_cy
    {"row_map": row_map, "col_map": col_map, "col_cycles": col_cycles_all, "col_rows": col_rows_all, "reduced_rows": rows}
 }
 
-fn _gf2_precondition_quick_noop(list: rows, int: width, bool: prune_singletons, bool: collapse_cliques): bool {
+fn _gf2_precondition_quick_noop(list rows, int width, bool prune_singletons, bool collapse_cliques) bool {
    if(width <= 0){ return true }
    mut counts = _gf2_zero_vec(width)
    mut can_clique = false
@@ -5946,7 +5345,7 @@ fn _gf2_precondition_quick_noop(list: rows, int: width, bool: prune_singletons, 
    true
 }
 
-fn _gf2_precondition_prune_pass(list: active, list: col_rows_all, list: col_cycles_all, int: row_count, int: width, bool: prune_singletons): dict {
+fn _gf2_precondition_prune_pass(list active, list col_rows_all, list col_cycles_all, int row_count, int width, bool prune_singletons) dict {
    def row_counts = _gf2_precondition_row_counts2(active, col_rows_all, row_count)
    mut empty_columns_removed, singleton_columns_removed, immediate_dependencies, changed, j = 0, 0, [], false, 0
    while(j < active.len){
@@ -5973,7 +5372,7 @@ fn _gf2_precondition_prune_pass(list: active, list: col_rows_all, list: col_cycl
    {"changed": changed, "empty": empty_columns_removed, "singleton": singleton_columns_removed, "dependencies": immediate_dependencies}
 }
 
-fn _gf2_precondition_clique_pass(list: active, list: col_rows_all, list: col_cycles_all, int: row_count): dict {
+fn _gf2_precondition_clique_pass(list active, list col_rows_all, list col_cycles_all, int row_count) dict {
    mut changed, merged, clique_merges = false, true, 0
    def row_counts = _gf2_precondition_row_counts2(active, col_rows_all, row_count)
    while(merged){
@@ -6004,7 +5403,7 @@ fn _gf2_precondition_clique_pass(list: active, list: col_rows_all, list: col_cyc
    {"changed": changed, "merges": clique_merges}
 }
 
-fn _gf2_precondition_trim_heavy(list: active, list: col_rows_all, int: row_count, int: num_excess): int {
+fn _gf2_precondition_trim_heavy(list active, list col_rows_all, int row_count, int num_excess) int {
    mut keep_limit = _gf2_precondition_active_rows2(active, col_rows_all, row_count).len + max(0, num_excess)
    mut trimmed = 0
    while(_gf2_precondition_active_cols2(active) > keep_limit){
@@ -6024,7 +5423,7 @@ fn _gf2_precondition_trim_heavy(list: active, list: col_rows_all, int: row_count
    trimmed
 }
 
-fn _gf2_precondition_reduced_state(list: active, list: col_rows_all, list: col_cycles_all, int: row_count): dict {
+fn _gf2_precondition_reduced_state(list active, list col_rows_all, list col_cycles_all, int row_count) dict {
    def row_map = _gf2_precondition_active_rows2(active, col_rows_all, row_count)
    def active_cols = _gf2_precondition_active_cols2(active)
    mut col_map = list(active_cols)
@@ -6058,7 +5457,7 @@ fn _gf2_precondition_reduced_state(list: active, list: col_rows_all, list: col_c
    {"row_map": row_map, "col_map": col_map, "col_cycles": col_cycles, "col_rows": col_rows, "reduced_rows": reduced}
 }
 
-fn gf2_matrix_precondition_report(list: rows, int: width=0, int: num_excess=8, bool: prune_singletons=true, bool: trim_heavy=false, bool: collapse_cliques=false): dict {
+fn gf2_matrix_precondition_report(list rows, int width=0, int num_excess=8, bool prune_singletons=true, bool trim_heavy=false, bool collapse_cliques=false) dict {
    "Return a sparse GF(2) matrix preconditioning report for dependency solving."
    def t0 = ticks()
    def w = _gf2_dense_width(rows, width)
@@ -6103,33 +5502,7 @@ fn gf2_matrix_precondition_report(list: rows, int: width=0, int: num_excess=8, b
    ])
 }
 
-fn _gf2_matvec(list: rows, list: v, int: width=0): list {
-   def w = _gf2_dense_width(rows, width)
-   mut vbits = []
-   mut j = 0
-   while(j < w){
-      vbits = vbits.append(j < v.len ? (int(v[j]) & 1) : 0)
-      j += 1
-   }
-   mut out = []
-   def row_count = rows.len
-   mut i = 0
-   while(i < row_count){
-      def r = rows[i]
-      def rn = r.len
-      mut acc = 0
-      j = 0
-      while(j < w){
-         if(j < rn && int(vbits[j]) != 0){ acc = acc ^^ (int(r[j]) & 1) }
-         j += 1
-      }
-      out = out.append(acc & 1)
-      i += 1
-   }
-   out
-}
-
-fn _gf2_seed_vec(int: width, int: seed): list {
+fn _gf2_seed_vec(int width, int seed) list {
    mut out = _gf2_zero_vec(width)
    if(width <= 0){ return out }
    if(seed < width){
@@ -6147,7 +5520,7 @@ fn _gf2_seed_vec(int: width, int: seed): list {
    out
 }
 
-fn _gf2_columns_to_rows(list: cols, int: row_count): list {
+fn _gf2_columns_to_rows(list cols, int row_count) list {
    mut rows = list(row_count)
    __list_set_len(rows, row_count)
    mut r = 0
@@ -6166,7 +5539,7 @@ fn _gf2_columns_to_rows(list: cols, int: row_count): list {
    rows
 }
 
-fn _gf2_independent_basis_report(list: candidates, int: width=0): dict {
+fn _gf2_independent_basis_report(list candidates, int width=0) dict {
    def w = candidates.len > 0 ? _gf2_dense_width([candidates[0]], width) : width
    mut out = list(candidates.len)
    mut reduced_rows = list(candidates.len)
@@ -6216,7 +5589,7 @@ fn _gf2_independent_basis_report(list: candidates, int: width=0): dict {
    ])
 }
 
-fn _gf2_verified_basis_report(list: rows, list: candidates, int: width=0): dict {
+fn _gf2_verified_basis_report(list rows, list candidates, int width=0) dict {
    def w = _gf2_dense_width(rows, width)
    def packed_rows = _gf2_pack_rows(rows, w, false).get(0)
    mut verified = list(candidates.len)
@@ -6277,7 +5650,7 @@ fn _gf2_verified_basis_report(list: rows, list: candidates, int: width=0): dict 
    ])
 }
 
-fn _gf2_verified_sparse_basis_report(list: sparse_rows, list: candidates, int: width=0): dict {
+fn _gf2_verified_sparse_basis_report(list sparse_rows, list candidates, int width=0) dict {
    mut w = width
    if(w <= 0 && candidates.len > 0){ w = _gf2_dense_width([candidates.get(0)], width) }
    if(w <= 0){
@@ -6351,7 +5724,7 @@ fn _gf2_verified_sparse_basis_report(list: sparse_rows, list: candidates, int: w
    ])
 }
 
-fn _gf2_block_krylov_core_fields(str: vector_count_key, bool: use_sparse_kernel, list: rows, list: sparse_work_rows, int: w, int: bs, int: iters, bool: bounded_default_iters, int: vector_count, bool: image_packed_transpose, int: image_packed_row_words, int: sparse_entries, int: packed_row_word_ops): list {
+fn _gf2_block_krylov_core_fields(str vector_count_key, bool use_sparse_kernel, list rows, list sparse_work_rows, int w, int bs, int iters, bool bounded_default_iters, int vector_count, bool image_packed_transpose, int image_packed_row_words, int sparse_entries, int packed_row_word_ops) list {
    [
       ["rows", rows.len], ["cols", w], ["block_size", bs], ["max_iters", iters],
       ["bounded_default_iters", bounded_default_iters], [vector_count_key, vector_count],
@@ -6362,7 +5735,7 @@ fn _gf2_block_krylov_core_fields(str: vector_count_key, bool: use_sparse_kernel,
    ]
 }
 
-fn _gf2_block_krylov_post_lanczos_fields(bool: enabled, int: rows_saved, int: active_rows, int: saved_entries, int: active_entries, int: saved_row_words, int: saved_matrix_words, int: matvecs): list {
+fn _gf2_block_krylov_post_lanczos_fields(bool enabled, int rows_saved, int active_rows, int saved_entries, int active_entries, int saved_row_words, int saved_matrix_words, int matvecs) list {
    [
       ["post_lanczos_pack_enabled", enabled],
       ["post_lanczos_policy", enabled ? "dense-prefix-split" : "disabled"],
@@ -6375,13 +5748,13 @@ fn _gf2_block_krylov_post_lanczos_fields(bool: enabled, int: rows_saved, int: ac
 }
 
 fn _gf2_block_krylov_op_fields(
-   int: w, int: matvecs, int: normal_matvecs,
-   int: packed_word_and_ops, int: packed_popcount_ops,
-   int: packed_transpose_row_xor_ops, int: packed_transpose_word_xor_ops,
-   int: sparse_entry_dot_ops, int: sparse_transpose_row_xor_ops, int: sparse_transpose_entry_xor_ops,
-   int: packed_vector_pack_ops, int: packed_vector_decode_ops, int: packed_vector_repack_avoided,
-   int: sparse_vector_pack_ops_avoided, int: sparse_seen_key_pack_ops, int: sparse_seen_key_words,
-): list {
+   int w, int matvecs, int normal_matvecs,
+   int packed_word_and_ops, int packed_popcount_ops,
+   int packed_transpose_row_xor_ops, int packed_transpose_word_xor_ops,
+   int sparse_entry_dot_ops, int sparse_transpose_row_xor_ops, int sparse_transpose_entry_xor_ops,
+   int packed_vector_pack_ops, int packed_vector_decode_ops, int packed_vector_repack_avoided,
+   int sparse_vector_pack_ops_avoided, int sparse_seen_key_pack_ops, int sparse_seen_key_words,
+) list {
    [
       ["word_bits", _gf2_word_bits()], ["word_count", _gf2_word_count(w)],
       ["matvecs", matvecs], ["normal_matvecs", normal_matvecs],
@@ -6396,7 +5769,7 @@ fn _gf2_block_krylov_op_fields(
    ]
 }
 
-fn _gf2_block_krylov_solution_fields(list: deps, int: image_basis_limit, list: candidates, int: iterative_verified, dict: verified_report, int: exact_nullity, int: exact_rank, list: basis, list: weights, bool: complete, int: exact_added, dict: exact_closure_report, dict: image_la, dict: exact): list {
+fn _gf2_block_krylov_solution_fields(list deps, int image_basis_limit, list candidates, int iterative_verified, dict verified_report, int exact_nullity, int exact_rank, list basis, list weights, bool complete, int exact_added, dict exact_closure_report, dict image_la, dict exact) list {
    [
       ["dependency_count", deps.len], ["dependency_limit", image_basis_limit],
       ["candidate_count", candidates.len], ["iterative_verified_count", iterative_verified],
@@ -6411,7 +5784,7 @@ fn _gf2_block_krylov_solution_fields(list: deps, int: image_basis_limit, list: c
    ]
 }
 
-fn _gf2_block_krylov_candidates(bool: use_sparse_kernel, list: deps, int: vector_count, int: w, list: vectors, list: vectors_packed): dict {
+fn _gf2_block_krylov_candidates(bool use_sparse_kernel, list deps, int vector_count, int w, list vectors, list vectors_packed) dict {
    def dep_count = deps.len
    mut candidates = list(dep_count)
    __list_set_len(candidates, dep_count)
@@ -6466,7 +5839,7 @@ fn _gf2_block_krylov_candidates(bool: use_sparse_kernel, list: deps, int: vector
    ])
 }
 
-fn _gf2_block_krylov_image_report(bool: use_sparse_kernel, list: images, list: sparse_work_rows, list: rows, int: vector_count, int: image_basis_limit): dict {
+fn _gf2_block_krylov_image_report(bool use_sparse_kernel, list images, list sparse_work_rows, list rows, int vector_count, int image_basis_limit) dict {
    mut image_packed_transpose = false
    mut image_packed_row_words = 0
    mut image_la = dict()
@@ -6482,7 +5855,7 @@ fn _gf2_block_krylov_image_report(bool: use_sparse_kernel, list: images, list: s
    _dict_with(3, [["linear_algebra", image_la], ["packed_transpose", image_packed_transpose], ["packed_row_words", image_packed_row_words]])
 }
 
-fn _gf2_block_krylov_op_fields_from(int: w, dict: walk, int: extra_decode_ops): list {
+fn _gf2_block_krylov_op_fields_from(int w, dict walk, int extra_decode_ops) list {
    _gf2_block_krylov_op_fields(w,
       int(walk.get("matvecs", 0)),
       int(walk.get("normal_matvecs", 0)),
@@ -6502,7 +5875,7 @@ fn _gf2_block_krylov_op_fields_from(int: w, dict: walk, int: extra_decode_ops): 
    )
 }
 
-fn _gf2_block_krylov_solution_report(bool: use_sparse_kernel, list: rows, list: sparse_rows, int: w, list: deps, int: vector_count, list: vectors, list: vectors_packed, int: image_basis_limit, bool: complete, dict: image_la): dict {
+fn _gf2_block_krylov_solution_report(bool use_sparse_kernel, list rows, list sparse_rows, int w, list deps, int vector_count, list vectors, list vectors_packed, int image_basis_limit, bool complete, dict image_la) dict {
    def candidate_report = _gf2_block_krylov_candidates(use_sparse_kernel, deps, vector_count, w, vectors, vectors_packed)
    def candidates = candidate_report.get("candidates", [])
    def verified_report = use_sparse_kernel ? _gf2_verified_sparse_basis_report(sparse_rows, candidates, w) : _gf2_verified_basis_report(rows, candidates, w)
@@ -6543,7 +5916,7 @@ fn _gf2_block_krylov_solution_report(bool: use_sparse_kernel, list: rows, list: 
    ])
 }
 
-fn _gf2_block_krylov_walk_report(bool: use_sparse_kernel, bool: shifted_seed, list: packed_rows, list: sparse_work_rows, int: sparse_work_entries, int: w, int: bs, int: iters): dict {
+fn _gf2_block_krylov_walk_report(bool use_sparse_kernel, bool shifted_seed, list packed_rows, list sparse_work_rows, int sparse_work_entries, int w, int bs, int iters) dict {
    mut vectors = []
    def max_vectors = max(0, bs * max(0, iters))
    mut vectors_packed = list(max_vectors)
@@ -6656,7 +6029,7 @@ fn _gf2_block_krylov_walk_report(bool: use_sparse_kernel, bool: shifted_seed, li
    ])
 }
 
-fn _gf2_block_krylov_iteration_plan(int: width, int: block_size, int: max_iters, bool: complete): dict {
+fn _gf2_block_krylov_iteration_plan(int width, int block_size, int max_iters, bool complete) dict {
    mut bs = block_size
    if(bs <= 0){ bs = 8 }
    if(bs > max(1, width)){ bs = max(1, width) }
@@ -6674,7 +6047,7 @@ fn _gf2_block_krylov_iteration_plan(int: width, int: block_size, int: max_iters,
    _dict_with(4, [["block_size", bs], ["iters", iters], ["bounded_default_iters", bounded_default_iters]])
 }
 
-fn _gf2_block_krylov_setup(list: rows, int: width, int: block_size, int: max_iters, bool: complete): dict {
+fn _gf2_block_krylov_setup(list rows, int width, int block_size, int max_iters, bool complete) dict {
    def w = _gf2_dense_width(rows, width)
    def packed_row_word_ops = rows.len * _gf2_word_count(w)
    def possible_post_lanczos_rows_saved = _gf2_post_lanczos_prefix_rows(rows.len, w, true)
@@ -6709,7 +6082,7 @@ fn _gf2_block_krylov_setup(list: rows, int: width, int: block_size, int: max_ite
    ])
 }
 
-fn _gf2_block_krylov_report_fields(str: vector_count_key, list: rows, dict: setup, dict: walk, dict: image_report, dict: solution, int: vector_count): list {
+fn _gf2_block_krylov_report_fields(str vector_count_key, list rows, dict setup, dict walk, dict image_report, dict solution, int vector_count) list {
    def w = int(setup.get("width", 0))
    def bs = int(setup.get("block_size", 0))
    def iters = int(setup.get("iters", 0))
@@ -6737,7 +6110,7 @@ fn _gf2_block_krylov_report_fields(str: vector_count_key, list: rows, dict: setu
    _fields_extend(fields, solution.get("fields", []))
 }
 
-fn _gf2_block_krylov_report(str: method, str: vector_count_key, bool: shifted_seed, list: rows, int: width, int: block_size, int: max_iters, bool: complete): dict {
+fn _gf2_block_krylov_report(str method, str vector_count_key, bool shifted_seed, list rows, int width, int block_size, int max_iters, bool complete) dict {
    "Return verified GF(2) nullspace diagnostics using block normal Krylov projections."
    def t0 = ticks()
    def setup = _gf2_block_krylov_setup(rows, width, block_size, max_iters, complete)
@@ -6756,7 +6129,7 @@ fn _gf2_block_krylov_report(str: method, str: vector_count_key, bool: shifted_se
    _finish_report_with(_report(method, 26), t0, _gf2_block_krylov_report_fields(vector_count_key, rows, setup, walk, image_report, solution, vector_count))
 }
 
-fn _gf2_block_krylov_sparse_setup(list: sparse_rows, int: width, int: block_size, int: max_iters, bool: complete): dict {
+fn _gf2_block_krylov_sparse_setup(list sparse_rows, int width, int block_size, int max_iters, bool complete) dict {
    def w = width
    def sparse_entries = _gf2_sparse_entry_count(sparse_rows)
    def post_rows = _gf2_post_lanczos_prefix_rows(sparse_rows.len, w, true)
@@ -6783,7 +6156,7 @@ fn _gf2_block_krylov_sparse_setup(list: sparse_rows, int: width, int: block_size
    ])
 }
 
-fn _gf2_block_krylov_sparse_report(str: method, str: vector_count_key, bool: shifted_seed, list: sparse_rows, int: width, int: block_size, int: max_iters): dict {
+fn _gf2_block_krylov_sparse_report(str method, str vector_count_key, bool shifted_seed, list sparse_rows, int width, int block_size, int max_iters) dict {
    def t0 = ticks()
    def setup = _gf2_block_krylov_sparse_setup(sparse_rows, width, block_size, max_iters, false)
    def w = int(setup.get("width", 0))
@@ -6799,27 +6172,27 @@ fn _gf2_block_krylov_sparse_report(str: method, str: vector_count_key, bool: shi
    _finish_report_with(_report(method, 26), t0, _gf2_block_krylov_report_fields(vector_count_key, sparse_rows, setup, walk, image_report, solution, vector_count))
 }
 
-fn block_lanczos_gf2_report(list: rows, int: width=0, int: block_size=8, int: max_iters=0, bool: complete=true): dict {
+fn block_lanczos_gf2_report(list rows, int width=0, int block_size=8, int max_iters=0, bool complete=true) dict {
    "Return verified GF(2) nullspace diagnostics using block Krylov/Lanczos-style projections."
    _gf2_block_krylov_report("block-lanczos-gf2", "krylov_vectors", false, rows, width, block_size, max_iters, complete)
 }
 
-fn block_lanczos_gf2_nullspace(list: rows, int: width=0, int: block_size=8, int: max_iters=0, bool: complete=true): list {
+fn block_lanczos_gf2_nullspace(list rows, int width=0, int block_size=8, int max_iters=0, bool complete=true) list {
    "Return a verified GF(2) nullspace basis from block_lanczos_gf2_report."
    block_lanczos_gf2_report(rows, width, block_size, max_iters, complete).get("basis", [])
 }
 
-fn block_wiedemann_gf2_report(list: rows, int: width=0, int: block_size=8, int: max_iters=0, bool: complete=true): dict {
+fn block_wiedemann_gf2_report(list rows, int width=0, int block_size=8, int max_iters=0, bool complete=true) dict {
    "Return verified GF(2) nullspace diagnostics using Wiedemann-style normal Krylov sequences."
    _gf2_block_krylov_report("block-wiedemann-gf2", "sequence_vectors", true, rows, width, block_size, max_iters, complete)
 }
 
-fn block_wiedemann_gf2_nullspace(list: rows, int: width=0, int: block_size=8, int: max_iters=0, bool: complete=true): list {
+fn block_wiedemann_gf2_nullspace(list rows, int width=0, int block_size=8, int max_iters=0, bool complete=true) list {
    "Return a verified GF(2) nullspace basis from block_wiedemann_gf2_report."
    block_wiedemann_gf2_report(rows, width, block_size, max_iters, complete).get("basis", [])
 }
 
-fn _gf2_dependency_candidates(list: basis, int: width, int: max_count=4096): list {
+fn _gf2_dependency_candidates(list basis, int width, int max_count=4096) list {
    if(basis.len == 0){ return [] }
    if(basis.len > 14){ return basis }
    def limit = 1 << basis.len
@@ -6842,7 +6215,7 @@ fn _gf2_dependency_candidates(list: basis, int: width, int: max_count=4096): lis
    out
 }
 
-fn gf2_dependency_candidates_report(list: basis, int: width=0, int: max_count=4096, bool: include_weights=true): dict {
+fn gf2_dependency_candidates_report(list basis, int width=0, int max_count=4096, bool include_weights=true) dict {
    "Return all non-empty GF(2) combinations of a nullspace basis, capped for solver probes."
    def t0 = ticks()
    mut w = width
@@ -6870,12 +6243,12 @@ fn gf2_dependency_candidates_report(list: basis, int: width=0, int: max_count=40
    ])
 }
 
-fn gf2_dependency_candidates(list: basis, int: width=0, int: max_count=4096): list {
+fn gf2_dependency_candidates(list basis, int width=0, int max_count=4096) list {
    "Return dependency combinations from gf2_dependency_candidates_report."
    gf2_dependency_candidates_report(basis, width, max_count).get("candidates", [])
 }
 
-fn _gf2_xor_vec_into(list: out, list: rhs, int: width): any {
+fn _gf2_xor_vec_into(list out, list rhs, int width) any {
    mut i = 0
    while(i < width && i < out.len && i < rhs.len){
       out[i] = (int(out[i]) ^^ int(rhs[i])) & 1
@@ -6884,7 +6257,7 @@ fn _gf2_xor_vec_into(list: out, list: rhs, int: width): any {
    nil
 }
 
-fn _qs_try_dependency_candidates_mod_report(any: original_n, any: modulus, list: base, list: relations, list: basis, int: width, int: max_count=8192): dict {
+fn _qs_try_dependency_candidates_mod_report(any original_n, any modulus, list base, list relations, list basis, int width, int max_count=8192) dict {
    def t0 = ticks()
    mut w = width
    if(w <= 0 && basis.len > 0){ w = _gf2_dense_width([basis.get(0)], 0) }
@@ -6928,7 +6301,7 @@ fn _qs_try_dependency_candidates_mod_report(any: original_n, any: modulus, list:
    ])
 }
 
-fn _gf2_expand_precondition_dependency(list: dep, any: precondition, int: original_width): list {
+fn _gf2_expand_precondition_dependency(list dep, any precondition, int original_width) list {
    if(precondition == nil){ return dep }
    def cycles = precondition.get("col_cycles", [])
    if(cycles.len == 0){ return dep }
@@ -6949,7 +6322,7 @@ fn _gf2_expand_precondition_dependency(list: dep, any: precondition, int: origin
    out
 }
 
-fn _gf2_pipeline_precondition(list: rows, int: width, bool: enabled): dict {
+fn _gf2_pipeline_precondition(list rows, int width, bool enabled) dict {
    mut solve_matrix = rows
    mut solve_width = width
    mut precondition = nil
@@ -6979,13 +6352,13 @@ fn _gf2_pipeline_precondition(list: rows, int: width, bool: enabled): dict {
    ])
 }
 
-fn _gf2_pipeline_empty_linear_algebra(): dict {
+fn _gf2_pipeline_empty_linear_algebra() dict {
    _set_fields(_report("empty-gf2-linear-algebra", 8), [
          ["basis", []], ["verified_count", 0], ["matrix_kernel", ""],
    ])
 }
 
-fn _gf2_pipeline_linear_algebra(list: solve_matrix, int: solve_width, str: backend, int: block_size, int: max_iters): dict {
+fn _gf2_pipeline_linear_algebra(list solve_matrix, int solve_width, str backend, int block_size, int max_iters) dict {
    if(solve_width <= 0){ return _gf2_pipeline_empty_linear_algebra() }
    if(backend == "sparse"){
       return sparse_gf2_nullspace_report(_gf2_sparse_from_dense_rows(solve_matrix), solve_width)
@@ -6999,7 +6372,7 @@ fn _gf2_pipeline_linear_algebra(list: solve_matrix, int: solve_width, str: backe
    packed_gf2_nullspace_report(solve_matrix, solve_width, false)
 }
 
-fn _gf2_pipeline_expand_candidates(dict: lin, any: precondition, int: width, int: max_candidates): dict {
+fn _gf2_pipeline_expand_candidates(dict lin, any precondition, int width, int max_candidates) dict {
    mut expanded = []
    def immediate = precondition == nil ? [] : precondition.get("immediate_dependencies", [])
    mut i = 0
@@ -7020,14 +6393,14 @@ fn _gf2_pipeline_expand_candidates(dict: lin, any: precondition, int: width, int
    ])
 }
 
-fn _gf2_pipeline_verify(list: rows, int: width, list: expanded): dict {
+fn _gf2_pipeline_verify(list rows, int width, list expanded) dict {
    def sparse_rows = _gf2_sparse_from_dense_rows(rows)
    def sparse_entries = _gf2_sparse_entry_count(sparse_rows)
    def packed_row_word_ops = rows.len * _gf2_word_count(width)
    sparse_entries > 0 && sparse_entries <= packed_row_word_ops ? _gf2_verified_sparse_basis_report(sparse_rows, expanded, width) : _gf2_verified_basis_report(rows, expanded, width)
 }
 
-fn _gf2_pipeline_exact_closure(list: rows, int: width, list: basis_in, dict: verified, bool: complete): dict {
+fn _gf2_pipeline_exact_closure(list rows, int width, list basis_in, dict verified, bool complete) dict {
    mut basis = basis_in
    mut exact = dict()
    mut exact_added = 0
@@ -7047,7 +6420,7 @@ fn _gf2_pipeline_exact_closure(list: rows, int: width, list: basis_in, dict: ver
    ])
 }
 
-fn _gf2_pipeline_immediate_linear_algebra(dict: lin, list: basis, list: immediate, dict: verified, int: solve_width): dict {
+fn _gf2_pipeline_immediate_linear_algebra(dict lin, list basis, list immediate, dict verified, int solve_width) dict {
    if(solve_width <= 0 && immediate.len > 0){
       return _set_fields(_report("precondition-immediate-gf2", 12), [
             ["basis", basis],
@@ -7062,9 +6435,9 @@ fn _gf2_pipeline_immediate_linear_algebra(dict: lin, list: basis, list: immediat
 }
 
 fn _gf2_pipeline_fields(
-   str: backend, list: rows, int: width, dict: prepared, bool: precondition_enabled,
-   dict: lin, dict: expanded_report, dict: verified, dict: exact_report, bool: complete,
-): list {
+   str backend, list rows, int width, dict prepared, bool precondition_enabled,
+   dict lin, dict expanded_report, dict verified, dict exact_report, bool complete,
+) list {
    def basis = exact_report.get("basis", [])
    def exact_nullity = int(exact_report.get("exact_nullity", -1))
    [
@@ -7086,10 +6459,10 @@ fn _gf2_pipeline_fields(
 }
 
 fn gf2_dependency_pipeline_report(
-   list: rows, int: width=0, str: backend="lanczos",
-   bool: precondition_enabled=true, int: block_size=8, int: max_iters=0,
-   bool: complete=false, int: max_candidates=8192,
-): dict {
+   list rows, int width=0, str backend="lanczos",
+   bool precondition_enabled=true, int block_size=8, int max_iters=0,
+   bool complete=false, int max_candidates=8192,
+) dict {
    "Return verified original-column GF(2) dependencies with preconditioning and expansion reports."
    def t0 = ticks()
    def w = _gf2_dense_width(rows, width)
@@ -7110,7 +6483,7 @@ fn gf2_dependency_pipeline_report(
    _report_with("gf2-dependency-pipeline", t0, _gf2_pipeline_fields(backend, rows, w, prepared, precondition_enabled, lin, expanded_report, verified, exact_report, complete))
 }
 
-fn _gf2_dependency_sparse_pipeline_report(list: sparse_rows, int: width, str: backend="lanczos", int: block_size=8, int: max_iters=0, int: max_candidates=8192): dict {
+fn _gf2_dependency_sparse_pipeline_report(list sparse_rows, int width, str backend="lanczos", int block_size=8, int max_iters=0, int max_candidates=8192) dict {
    def t0 = ticks()
    mut lin = dict()
    if(backend == "wiedemann" || backend == "block-wiedemann"){
@@ -7144,7 +6517,7 @@ fn _gf2_dependency_sparse_pipeline_report(list: sparse_rows, int: width, str: ba
    ])
 }
 
-fn _qs_dependency_solve_report(any: original_n, any: modulus, list: base, list: relations, int: max_candidates=8192, str: backend="packed"): dict {
+fn _qs_dependency_solve_report(any original_n, any modulus, list base, list relations, int max_candidates=8192, str backend="packed") dict {
    def t0 = ticks()
    def use_precondition = backend == "lanczos" || backend == "block-lanczos"
    def sparse_initial = relations.len >= 128 && (backend == "lanczos" || backend == "block-lanczos" || backend == "wiedemann" || backend == "block-wiedemann")
@@ -7191,7 +6564,7 @@ fn _qs_dependency_solve_report(any: original_n, any: modulus, list: base, list: 
    ])
 }
 
-fn quadratic_sieve_factor_report(any: n, int: factor_base_bound=64, int: scan=20000, int: max_relations=18): dict {
+fn quadratic_sieve_factor_report(any n, int factor_base_bound=64, int scan=20000, int max_relations=18) dict {
    "Small quadratic-sieve report using smooth relations and GF(2) dependency solving."
    def t0 = ticks()
    def nz = _z(n)
@@ -7300,12 +6673,12 @@ fn quadratic_sieve_factor_report(any: n, int: factor_base_bound=64, int: scan=20
    ]))
 }
 
-fn quadratic_sieve_factor(any: n, int: factor_base_bound=64, int: scan=20000, int: max_relations=18): any {
+fn quadratic_sieve_factor(any n, int factor_base_bound=64, int scan=20000, int max_relations=18) any {
    "Return one non-trivial factor found by quadratic_sieve_factor_report, or nil."
    quadratic_sieve_factor_report(n, factor_base_bound, scan, max_relations).get("factor", nil)
 }
 
-fn siqs_factor_report(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256, int: max_relations=32, bool: tune_cutoff=true): dict {
+fn siqs_factor_report(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256, int max_relations=32, bool tune_cutoff=true) dict {
    "Self-initializing quadratic-sieve report using SIQS polynomial relation collection."
    def t0 = ticks()
    def nz = _z(n)
@@ -7334,22 +6707,12 @@ fn siqs_factor_report(any: n, int: factor_base_bound=64, int: polynomial_count=8
    _finish_report_with(out, t0, _fields_extend(fields, _siqs_factor_solve_fields(solved, solve, selected_relations)))
 }
 
-fn siqs_factor(any: n, int: factor_base_bound=64, int: polynomial_count=8, int: sieve_radius=256, int: max_relations=32): any {
+fn siqs_factor(any n, int factor_base_bound=64, int polynomial_count=8, int sieve_radius=256, int max_relations=32) any {
    "Return one factor from siqs_factor_report, or nil."
    siqs_factor_report(n, factor_base_bound, polynomial_count, sieve_radius, max_relations).get("factor", nil)
 }
 
-fn _qs_try_dependency_solve_report(any: n, any: modulus, list: base, list: relations, int: max_dependencies=8192): dict {
-   def filter_report = qs_relation_filter_report(relations, base.len, true)
-   def solved = _qs_dependency_solve_filtered_report(n, modulus, base, relations, filter_report, max_dependencies)
-   _set_fields(solved.get("solve"), [
-         ["trial_filter", filter_report],
-         ["trial_used_filter", solved.get("used_filter", false)],
-         ["trial_raw_solve", solved.get("raw_solve", nil)],
-   ])
-}
-
-fn _qs_dependency_solve_filtered_report(any: n, any: modulus, list: base, list: relations, dict: filter_report, int: max_dependencies=8192): dict {
+fn _qs_dependency_solve_filtered_report(any n, any modulus, list base, list relations, dict filter_report, int max_dependencies=8192) dict {
    def filtered_relations = filter_report.get("filtered_relations", [])
    def use_filtered = filtered_relations.len >= 2 && filtered_relations.len < relations.len
    mut solve = _qs_dependency_solve_report(n, modulus, base, use_filtered ? filtered_relations : relations, max_dependencies, "lanczos")
@@ -7369,13 +6732,13 @@ fn _qs_dependency_solve_filtered_report(any: n, any: modulus, list: base, list: 
    ])
 }
 
-fn _qs_square_relation_factor(any: x, any: residue, any: nz): any {
+fn _qs_square_relation_factor(any x, any residue, any nz) any {
    if(residue != 0){ return nil }
    def gx = gcd(x, nz)
    _is_nontrivial_factor(gx, nz) ? gx : nil
 }
 
-fn _mpqs_window_report(dict: byte_summary, int: w, any: center, int: window_radius, bool: adiv_enabled, list: adiv_polys, int: found, int: window_candidates, int: window_smooth_tests, int: window_trial_prime_tests, int: window_trial_divisions, dict: byte_report): dict {
+fn _mpqs_window_report(dict byte_summary, int w, any center, int window_radius, bool adiv_enabled, list adiv_polys, int found, int window_candidates, int window_smooth_tests, int window_trial_prime_tests, int window_trial_divisions, dict byte_report) dict {
    _set_fields(byte_summary, [
          ["window", w], ["center", center], ["radius", window_radius],
          ["poly_index", adiv_enabled ? adiv_polys.get(w % adiv_polys.len).get("index", -1) : -1],
@@ -7386,7 +6749,7 @@ fn _mpqs_window_report(dict: byte_summary, int: w, any: center, int: window_radi
    ])
 }
 
-fn _mpqs_early_dependency(any: solve=nil, bool: used=false, int: pass=-1, int: window=-1, int: relation_count=0): dict {
+fn _mpqs_early_dependency(any solve=nil, bool used=false, int pass=-1, int window=-1, int relation_count=0) dict {
    _dict_with(5, [
          ["solve", solve], ["used", used],
          ["pass", pass], ["window", window],
@@ -7394,7 +6757,7 @@ fn _mpqs_early_dependency(any: solve=nil, bool: used=false, int: pass=-1, int: w
    ])
 }
 
-fn _mpqs_window_solve_fields(list: solved_relations, dict: early_dependency, bool: early_dependency_used, dict: solve, dict: filter_report, bool: solved_with_filter, str: solve_relation_set, any: raw_solve, list: window_reports): list {
+fn _mpqs_window_solve_fields(list solved_relations, dict early_dependency, bool early_dependency_used, dict solve, dict filter_report, bool solved_with_filter, str solve_relation_set, any raw_solve, list window_reports) list {
    [
       ["selected_relation_count", solved_relations.len],
       ["early_dependency_solve_used", early_dependency_used],
@@ -7412,10 +6775,10 @@ fn _mpqs_window_solve_fields(list: solved_relations, dict: early_dependency, boo
 }
 
 fn _mpqs_collect_result(
-   any: factor, list: relations, int: found, int: smooth_tests, int: smooth_hits,
-   int: trial_prime_tests, int: trial_divisions, int: nonzero_terms,
-   int: prefilter_tested, int: fallback_tests, int: a_divisor_relations
-): dict {
+   any factor, list relations, int found, int smooth_tests, int smooth_hits,
+   int trial_prime_tests, int trial_divisions, int nonzero_terms,
+   int prefilter_tested, int fallback_tests, int a_divisor_relations
+) dict {
    _dict_with(14, [
          ["factor", factor], ["relations", relations], ["found", found],
          ["smooth_tests", smooth_tests], ["smooth_hits", smooth_hits],
@@ -7426,7 +6789,7 @@ fn _mpqs_collect_result(
    ])
 }
 
-fn _mpqs_relation_buffer(list: relations, int: max_relations): list {
+fn _mpqs_relation_buffer(list relations, int max_relations) list {
    def initial = relations.len
    def cap = max(initial, max_relations)
    mut out = list(cap)
@@ -7439,16 +6802,16 @@ fn _mpqs_relation_buffer(list: relations, int: max_relations): list {
    out
 }
 
-fn _mpqs_relation_buffer_trim(list: relations, int: relation_count): list {
+fn _mpqs_relation_buffer_trim(list relations, int relation_count) list {
    __list_set_len(relations, relation_count)
    relations
 }
 
 fn _mpqs_byte_window_choice(
-   ptr: scratch, any: modulus, list: base, list: base_sqrt_roots, list<int>: base_ints, list<int>: base_sqrt_roots_int,
-   list<int>: center_mods, dict: base_buckets, list<int>: adiv_sieve_base_ints, dict: adiv_buckets, list: adiv_polys, bool: adiv_enabled,
-   int: w, any: center, int: window_radius, int: score_min, any: start
-): list {
+   ptr scratch, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int,
+   list<int> center_mods, dict base_buckets, list<int> adiv_sieve_base_ints, dict adiv_buckets, list adiv_polys, bool adiv_enabled,
+   int w, any center, int window_radius, int score_min, any start
+) list {
    def poly = adiv_enabled ? adiv_polys.get(w % adiv_polys.len) : nil
    if(poly != nil){
       return [poly, _mpqs_poly_byte_sieve_window_into(scratch, adiv_sieve_base_ints, base_ints, base_sqrt_roots_int, adiv_buckets, poly.get("A"), poly.get("B"), window_radius, max(1, score_min - 2)), 1]
@@ -7456,7 +6819,7 @@ fn _mpqs_byte_window_choice(
    [nil, _mpqs_byte_sieve_window_int_roots_into(scratch, base_ints, base_sqrt_roots_int, center_mods, base_buckets, center, window_radius, score_min, start), 0]
 }
 
-fn _mpqs_collect_byte_window_relations(any: nz, any: modulus, list: factor_base, list<int>: trial_base, dict: byte_report, any: poly, int: w, any: center, int: max_relations, list: relations_in): dict {
+fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, list<int> trial_base, dict byte_report, any poly, int w, any center, int max_relations, list relations_in) dict {
    mut relation_count = relations_in.len
    mut relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
@@ -7497,20 +6860,66 @@ fn _mpqs_collect_byte_window_relations(any: nz, any: modulus, list: factor_base,
       def root_filter_bytes = max(32, factor_base.len * 16)
       def exp_scratch_bytes = max(8, trial_base_len * 16)
       with ptr: raw_root_filters = malloc(root_filter_bytes + 32 + exp_scratch_bytes){
-      if(raw_root_filters){
-         _mpqs_root_filter_list_to_raw_shifted32(raw_root_filters, root_filters, factor_base.len, radius)
-         def raw_counts = ptr_add(raw_root_filters, root_filter_bytes)
-         def raw_exp_idxs = ptr_add(raw_counts, 32)
-         def raw_exp_vals = ptr_add(raw_exp_idxs, trial_base_len * 8)
-         memset(raw_counts, 0, 32)
-         if(has_poly){
+         if(raw_root_filters){
+            _mpqs_root_filter_list_to_raw_shifted32(raw_root_filters, root_filters, factor_base.len, radius)
+            def raw_counts = ptr_add(raw_root_filters, root_filter_bytes)
+            def raw_exp_idxs = ptr_add(raw_counts, 32)
+            def raw_exp_vals = ptr_add(raw_exp_idxs, trial_base_len * 8)
+            memset(raw_counts, 0, 32)
+            if(has_poly){
+               mut ri = 0
+               while(ri < survivor_count && relation_count < max_relations){
+                  def survivor = int(survivors[ri])
+                  def pos = survivor >> 8
+                  def off = pos - radius
+                  def score = survivor & 255
+                  def x_i = poly_A_i * off + poly_B_i
+                  mut residue_i = (x_i * x_i) % modulus_i
+                  if(residue_i < 0){ residue_i += modulus_i }
+                  if(residue_i == 0){
+                     def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
+                     if(gx != nil){ return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
+                  } else {
+                     prefilter_tested += 1
+                     smooth_tests += 1
+                     mut rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(residue_i, trial_base_len, raw_root_filters, pos, raw_counts, raw_exp_idxs, raw_exp_vals)
+                     mut exps_i = nil
+                     if(rem_i != 1 && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min)){
+                        def smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
+                        trial_prime_tests += int(smooth[3])
+                        trial_divisions += int(smooth[4])
+                        nonzero_terms += int(smooth[5])
+                        if(smooth[0]){
+                           rem_i = 1
+                           exps_i = smooth[1]
+                        }
+                     }
+                     if(rem_i == 1){
+                        smooth_hits += 1
+                        if(exps_i == nil){
+                           relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
+                        } else {
+                           relations[relation_count] = _qs_relation_compact(x_i, exps_i)
+                        }
+                        relation_count += 1
+                        found += 1
+                        a_divisor_relations += 1
+                     }
+                  }
+                  ri += 1
+               }
+               trial_prime_tests += load64_i(raw_counts, 0)
+               trial_divisions += load64_i(raw_counts, 8)
+               nonzero_terms += load64_i(raw_counts, 16)
+               return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
+            }
             mut ri = 0
             while(ri < survivor_count && relation_count < max_relations){
                def survivor = int(survivors[ri])
                def pos = survivor >> 8
                def off = pos - radius
                def score = survivor & 255
-               def x_i = poly_A_i * off + poly_B_i
+               def x_i = center_i + off
                mut residue_i = (x_i * x_i) % modulus_i
                if(residue_i < 0){ residue_i += modulus_i }
                if(residue_i == 0){
@@ -7519,28 +6928,12 @@ fn _mpqs_collect_byte_window_relations(any: nz, any: modulus, list: factor_base,
                } else {
                   prefilter_tested += 1
                   smooth_tests += 1
-                  mut rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_collect32(residue_i, trial_base_len, raw_root_filters, pos, raw_counts, raw_exp_idxs, raw_exp_vals)
-                  mut exps_i = nil
-                  if(rem_i != 1 && a_divisor_relations == 0 && factor_base.len >= 50 && (!large_relation_target || score >= fallback_score_min)){
-                     def smooth = _qs_factor_over_base_profile_intbase(residue_i, trial_base)
-                     trial_prime_tests += int(smooth[3])
-                     trial_divisions += int(smooth[4])
-                     nonzero_terms += int(smooth[5])
-                     if(smooth[0]){
-                        rem_i = 1
-                        exps_i = smooth[1]
-                     }
-                  }
+                  def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(residue_i, trial_base_len, raw_root_filters, pos, score + 1, raw_counts, raw_exp_idxs, raw_exp_vals)
                   if(rem_i == 1){
                      smooth_hits += 1
-                     if(exps_i == nil){
-                        relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
-                     } else {
-                        relations[relation_count] = _qs_relation_compact(x_i, exps_i)
-                     }
+                     relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
                      relation_count += 1
                      found += 1
-                     a_divisor_relations += 1
                   }
                }
                ri += 1
@@ -7550,36 +6943,6 @@ fn _mpqs_collect_byte_window_relations(any: nz, any: modulus, list: factor_base,
             nonzero_terms += load64_i(raw_counts, 16)
             return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
          }
-         mut ri = 0
-         while(ri < survivor_count && relation_count < max_relations){
-            def survivor = int(survivors[ri])
-            def pos = survivor >> 8
-            def off = pos - radius
-            def score = survivor & 255
-            def x_i = center_i + off
-            mut residue_i = (x_i * x_i) % modulus_i
-            if(residue_i < 0){ residue_i += modulus_i }
-            if(residue_i == 0){
-               def gx = _qs_square_relation_factor(Z(x_i), Z(0), nz)
-               if(gx != nil){ return _mpqs_collect_result(gx, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations) }
-            } else {
-               prefilter_tested += 1
-               smooth_tests += 1
-               def rem_i = _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32(residue_i, trial_base_len, raw_root_filters, pos, score + 1, raw_counts, raw_exp_idxs, raw_exp_vals)
-               if(rem_i == 1){
-                  smooth_hits += 1
-                  relations[relation_count] = _qs_relation_int_sparse_mpqs(x_i, trial_base_len, raw_exp_idxs, raw_exp_vals, load64_i(raw_counts, 24))
-                  relation_count += 1
-                  found += 1
-               }
-            }
-            ri += 1
-         }
-         trial_prime_tests += load64_i(raw_counts, 0)
-         trial_divisions += load64_i(raw_counts, 8)
-         nonzero_terms += load64_i(raw_counts, 16)
-         return _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
-      }
       }
       mut fi = 0
       while(fi < survivor_count && relation_count < max_relations){
@@ -7730,7 +7093,7 @@ fn _mpqs_collect_byte_window_relations(any: nz, any: modulus, list: factor_base,
    _mpqs_collect_result(nil, _mpqs_relation_buffer_trim(relations, relation_count), found, smooth_tests, smooth_hits, trial_prime_tests, trial_divisions, nonzero_terms, prefilter_tested, 0, a_divisor_relations)
 }
 
-fn _mpqs_collect_fallback_window_relations(ptr: scratch, any: nz, any: modulus, list: base, list: base_sqrt_roots, list<int>: base_ints, list<int>: base_sqrt_roots_int, list<int>: center_mods, list: factor_base, list<int>: trial_base, any: center, any: start, int: window_radius, int: score_min, int: w, int: max_relations, list: relations_in): dict {
+fn _mpqs_collect_fallback_window_relations(ptr scratch, any nz, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int, list<int> center_mods, list factor_base, list<int> trial_base, any center, any start, int window_radius, int score_min, int w, int max_relations, list relations_in) dict {
    mut relation_count = relations_in.len
    mut relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
@@ -7818,7 +7181,7 @@ fn _mpqs_collect_fallback_window_relations(ptr: scratch, any: nz, any: modulus, 
    }
 }
 
-fn _mpqs_window_stats_add(dict: stats, dict: step): dict {
+fn _mpqs_window_stats_add(dict stats, dict step) dict {
    _dict_add_int_fields(stats, step, [
          ["candidate_count", "candidate_count"],
          ["smooth_tests", "smooth_tests"],
@@ -7836,12 +7199,12 @@ fn _mpqs_window_stats_add(dict: stats, dict: step): dict {
 }
 
 fn _mpqs_collect_window_step(
-   ptr: scratch, any: nz, any: modulus, list: base, list: base_sqrt_roots, list<int>: base_ints, list<int>: base_sqrt_roots_int,
-   list: factor_base, list<int>: trial_base, dict: base_buckets, list<int>: adiv_sieve_base_ints, dict: adiv_buckets, list: adiv_polys,
-   list<int>: center_mods,
-   bool: adiv_enabled, int: pass, int: w, any: center, any: start, int: window_radius,
-   int: score_min, int: max_relations, list: relations_in
-): dict {
+   ptr scratch, any nz, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int,
+   list factor_base, list<int> trial_base, dict base_buckets, list<int> adiv_sieve_base_ints, dict adiv_buckets, list adiv_polys,
+   list<int> center_mods,
+   bool adiv_enabled, int pass, int w, any center, any start, int window_radius,
+   int score_min, int max_relations, list relations_in
+) dict {
    mut relations = relations_in
    mut found, window_candidates, window_smooth_tests = 0, 0, 0
    mut window_trial_prime_tests, window_trial_divisions = 0, 0
@@ -7897,7 +7260,7 @@ fn _mpqs_collect_window_step(
    ])
 }
 
-fn _mpqs_maybe_early_dependency(any: nz, any: modulus, list: base, list: relations, dict: early_dependency, int: pass, int: w, int: found): dict {
+fn _mpqs_maybe_early_dependency(any nz, any modulus, list base, list relations, dict early_dependency, int pass, int w, int found) dict {
    if(bool(early_dependency.get("used", false)) || found <= 0 || relations.len < 2){ return early_dependency }
    if(base.len >= 64){
       def stride = base.len >= 512 ? 32 : (base.len >= 128 ? 16 : 8)
@@ -7909,11 +7272,11 @@ fn _mpqs_maybe_early_dependency(any: nz, any: modulus, list: base, list: relatio
 }
 
 fn _mpqs_window_finish_fields(
-   any: nz, any: modulus, list: base, dict: base_report, list: relations,
-   dict: adiv_cycle, bool: adiv_enabled, list: adiv_polys, list: adiv_sieve_base,
-   dict: stats, any: rel_t0, dict: byte_totals, list: byte_sieve_window_reports,
-   int: window_radius, dict: early_dependency, list: window_reports
-): list {
+   any nz, any modulus, list base, dict base_report, list relations,
+   dict adiv_cycle, bool adiv_enabled, list adiv_polys, list adiv_sieve_base,
+   dict stats, any rel_t0, dict byte_totals, list byte_sieve_window_reports,
+   int window_radius, dict early_dependency, list window_reports
+) list {
    def filter_report = qs_relation_filter_report(relations, base.len, true)
    def early_dependency_used = bool(early_dependency.get("used", false))
    mut solve, raw_solve = early_dependency.get("solve"), nil
@@ -7945,7 +7308,7 @@ fn _mpqs_window_finish_fields(
    _fields_extend(fields, _mpqs_window_solve_fields(solved_relations, early_dependency, early_dependency_used, solve, filter_report, solved_with_filter, solve_relation_set, raw_solve, window_reports))
 }
 
-fn _mpqs_attempt_collect_state(): dict {
+fn _mpqs_attempt_collect_state() dict {
    _dict_with(8, [
          ["relations", []],
          ["window_reports", []],
@@ -7957,7 +7320,7 @@ fn _mpqs_attempt_collect_state(): dict {
    ])
 }
 
-fn _mpqs_attempt_apply_step(dict: state, dict: step, int: pass, int: w, any: nz, any: modulus, list: base, int: windows): dict {
+fn _mpqs_attempt_apply_step(dict state, dict step, int pass, int w, any nz, any modulus, list base, int windows) dict {
    def gx = step.get("factor", nil)
    if(gx != nil){ return state.set("factor", gx).set("relations", step.get("relations", state.get("relations", []))) }
    mut relations = step.get("relations", state.get("relations", []))
@@ -7989,7 +7352,7 @@ fn _mpqs_attempt_apply_step(dict: state, dict: step, int: pass, int: w, any: nz,
    ])
 }
 
-fn _mpqs_attempt_finish_pass(dict: state, int: pass, int: windows, any: nz, any: modulus, list: base): dict {
+fn _mpqs_attempt_finish_pass(dict state, int pass, int windows, any nz, any modulus, list base) dict {
    def relations = state.get("relations", [])
    if(pass == 0 && relations.len >= 2){
       def early_dependency = _mpqs_maybe_early_dependency(nz, modulus, base, relations, state.get("early_dependency", _mpqs_early_dependency()), pass, windows - 1, 1)
@@ -7999,10 +7362,10 @@ fn _mpqs_attempt_finish_pass(dict: state, int: pass, int: windows, any: nz, any:
 }
 
 fn _mpqs_attempt_collect_pass(
-   dict: state, ptr: scratch, any: nz, any: modulus, list: base, list: base_sqrt_roots, list<int>: base_ints, list<int>: base_sqrt_roots_int,
-   list: factor_base, list<int>: trial_base, dict: base_buckets, list<int>: adiv_sieve_base_ints, dict: adiv_buckets, list: adiv_polys, bool: adiv_enabled, int: pass, any: start, int: windows,
-   int: window_radius, int: score_min, int: max_relations
-): dict {
+   dict state, ptr scratch, any nz, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int,
+   list factor_base, list<int> trial_base, dict base_buckets, list<int> adiv_sieve_base_ints, dict adiv_buckets, list adiv_polys, bool adiv_enabled, int pass, any start, int windows,
+   int window_radius, int score_min, int max_relations
+) dict {
    def stride = max(1, window_radius * 2 + 1)
    def start_mods = _mpqs_start_mods(base_ints, start, stride)
    mut list<int>: center_mods = start_mods[0]
@@ -8023,10 +7386,10 @@ fn _mpqs_attempt_collect_pass(
 }
 
 fn _mpqs_attempt_collect_windows(
-   ptr: scratch, any: nz, any: modulus, list: base, list: factor_base, list<int>: trial_base, list: adiv_sieve_base,
-   list: adiv_polys, bool: adiv_enabled, any: start, int: windows,
-   int: window_radius, int: max_relations
-): dict {
+   ptr scratch, any nz, any modulus, list base, list factor_base, list<int> trial_base, list adiv_sieve_base,
+   list adiv_polys, bool adiv_enabled, any start, int windows,
+   int window_radius, int max_relations
+) dict {
    def score_min = _mpqs_sieve_score_min(base)
    def base_sqrt_roots = _mpqs_sqrt_roots(modulus, base)
    def base_ints = _qs_factor_base_ints(base)
@@ -8041,7 +7404,7 @@ fn _mpqs_attempt_collect_windows(
    state
 }
 
-fn _mpqs_window_attempt_report(any: n, int: multiplier, int: factor_base_bound, int: windows, int: window_radius, int: max_relations): dict {
+fn _mpqs_window_attempt_report(any n, int multiplier, int factor_base_bound, int windows, int window_radius, int max_relations) dict {
    def t0 = ticks()
    def nz = _z(n)
    def modulus = nz * Z(multiplier)
@@ -8081,7 +7444,7 @@ fn _mpqs_window_attempt_report(any: n, int: multiplier, int: factor_base_bound, 
    _finish_report_with(out, t0, _mpqs_window_finish_fields(nz, modulus, base, base_report, collected.get("relations", []), adiv_cycle, adiv_enabled, adiv_polys, adiv_sieve_base, collected.get("stats", dict()), rel_t0, collected.get("byte_totals", dict()), collected.get("byte_sieve_window_reports", []), window_radius, collected.get("early_dependency", _mpqs_early_dependency()), collected.get("window_reports", [])))
 }
 
-fn _mpqs_attempt_policy_report(any: n, int: selected_multiplier, int: factor_base_bound, int: windows, int: window_radius, int: max_relations): dict {
+fn _mpqs_attempt_policy_report(any n, int selected_multiplier, int factor_base_bound, int windows, int window_radius, int max_relations) dict {
    def t0 = ticks()
    def nz = _z(n)
    def input_bits = bit_length(nz < Z(0) ? -nz : nz)
@@ -8133,7 +7496,7 @@ def _MPQS_SOURCE_PARAMETER_ROWS = [
    [465, 900000, 150, 50 * 65536], [490, 1100000, 150, 75 * 65536], [512, 1300000, 150, 100 * 65536],
 ]
 
-fn _mpqs_param_dict(list: row): dict {
+fn _mpqs_param_dict(list row) dict {
    def fb = int(row.get(1, 100))
    def large_mult = int(row.get(2, 40))
    def sieve_size = int(row.get(3, 65536))
@@ -8147,14 +7510,14 @@ fn _mpqs_param_dict(list: row): dict {
    ])
 }
 
-fn _mpqs_param_result(list: row, int: bits, bool: interpolated, any: bracket): dict { _set_fields(_mpqs_param_dict(row), [["input_bits", bits], ["interpolated", interpolated], ["source_bracket", bracket]]) }
+fn _mpqs_param_result(list row, int bits, bool interpolated, any bracket) dict { _set_fields(_mpqs_param_dict(row), [["input_bits", bits], ["interpolated", interpolated], ["source_bracket", bracket]]) }
 
-fn _mpqs_interp_int(int: lo, int: hi, int: ibits, int: lbits, int: hbits): int {
+fn _mpqs_interp_int(int lo, int hi, int ibits, int lbits, int hbits) int {
    def dist = max(1, hbits - lbits)
    int(((float(lo) * float(hbits - ibits)) + (float(hi) * float(ibits - lbits))) / float(dist) + 0.5)
 }
 
-fn _mpqs_sieve_params_for_bits(int: bits): dict {
+fn _mpqs_sieve_params_for_bits(int bits) dict {
    def rows = _MPQS_SOURCE_PARAMETER_ROWS
    if(bits <= int(rows.get(0).get(0))){ return _mpqs_param_result(rows.get(0), bits, false, "floor") }
    def last = rows.get(rows.len - 1)
@@ -8176,7 +7539,7 @@ fn _mpqs_sieve_params_for_bits(int: bits): dict {
    _mpqs_param_result(last, bits, false, "fallback")
 }
 
-fn mpqs_sieve_parameter_report(any: n, bool: input_is_bits=false): dict {
+fn mpqs_sieve_parameter_report(any n, bool input_is_bits=false) dict {
    "Return source-derived MPQS sieve parameters: factor-base size, large-prime multiplier, and sieve size."
    def t0 = ticks()
    def bits = input_is_bits ? int(n) : bit_length(_z(n) < Z(0) ? -_z(n) : _z(n))
@@ -8196,7 +7559,7 @@ fn mpqs_sieve_parameter_report(any: n, bool: input_is_bits=false): dict {
    ])
 }
 
-fn _mpqs_bound_for_target_base_count(any: n, any: modulus, int: target_count, int: max_prime_bound): dict {
+fn _mpqs_bound_for_target_base_count(any n, any modulus, int target_count, int max_prime_bound) dict {
    def t0 = ticks()
    def nz, mz = _z(n), _z(modulus)
    mut bound = 31
@@ -8220,7 +7583,7 @@ fn _mpqs_bound_for_target_base_count(any: n, any: modulus, int: target_count, in
    ])
 }
 
-fn mpqs_source_work_plan_report(any: n, int: max_factor_base_count=96, int: max_prime_bound=1201, int: max_windows=24, int: max_window_radius=32000, int: max_relations=256): dict {
+fn mpqs_source_work_plan_report(any n, int max_factor_base_count=96, int max_prime_bound=1201, int max_windows=24, int max_window_radius=32000, int max_relations=256) dict {
    "Return a bounded MPQS work plan derived from the source MPQS parameter table."
    def t0 = ticks()
    def nz = _z(n)
@@ -8266,7 +7629,7 @@ fn mpqs_source_work_plan_report(any: n, int: max_factor_base_count=96, int: max_
    ])
 }
 
-fn _mpqs_default_work_plan(int: bits): list {
+fn _mpqs_default_work_plan(int bits) list {
    case bits {
       _ if bits <= 16 -> [31, 3, 128, 20]
       _ if bits <= 28 -> [213, 3, 2000, 40]
@@ -8280,7 +7643,7 @@ fn _mpqs_default_work_plan(int: bits): list {
    }
 }
 
-fn mpqs_work_plan_report(any: n, int: factor_base_bound=64, int: windows=4, int: window_radius=256, int: max_relations=32): dict {
+fn mpqs_work_plan_report(any n, int factor_base_bound=64, int windows=4, int window_radius=256, int max_relations=32) dict {
    "Return the MPQS work plan used by default-size calls."
    def nz = _z(n)
    def bits = bit_length(nz < Z(0) ? -nz : nz)
@@ -8322,7 +7685,7 @@ fn mpqs_work_plan_report(any: n, int: factor_base_bound=64, int: windows=4, int:
    ])
 }
 
-fn _append_used_defaults(list: fields, any: used, list: specs): list {
+fn _append_used_defaults(list fields, any used, list specs) list {
    mut i = 0
    while(i < specs.len){
       def spec = specs.get(i)
@@ -8332,7 +7695,7 @@ fn _append_used_defaults(list: fields, any: used, list: specs): list {
    fields
 }
 
-fn _mpqs_used_attempt_fields(list: fields, any: used, any: nz): list {
+fn _mpqs_used_attempt_fields(list fields, any used, any nz) list {
    fields = fields.append(["sieve_modulus", used.get("sieve_modulus", nz)])
    fields = _append_used_defaults(fields, used, [
          ["factor_base", []], ["factor_base_size", 0], ["factor_base_report", dict()],
@@ -8359,8 +7722,8 @@ fn _mpqs_used_attempt_fields(list: fields, any: used, any: nz): list {
 }
 
 fn _mpqs_finish_attempt_report(
-   dict: out, any: t0, any: nz, int: selected_multiplier, dict: attempts, list: leading_fields
-): dict {
+   dict out, any t0, any nz, int selected_multiplier, dict attempts, list leading_fields
+) dict {
    def primary = attempts.get("primary_attempt", nil)
    def fallback = attempts.get("fallback_attempt", nil)
    def used = attempts.get("used_attempt", primary)
@@ -8381,7 +7744,7 @@ fn _mpqs_finish_attempt_report(
    _finish_report_with(out, t0, _mpqs_used_attempt_fields(fields, used, nz))
 }
 
-fn mpqs_source_factor_report(any: n, int: max_factor_base_count=96, int: max_prime_bound=1201, int: max_windows=24, int: max_window_radius=32000, int: max_relations=256): dict {
+fn mpqs_source_factor_report(any n, int max_factor_base_count=96, int max_prime_bound=1201, int max_windows=24, int max_window_radius=32000, int max_relations=256) dict {
    "Run MPQS using a bounded source-derived work plan."
    def t0 = ticks()
    def nz = _z(n)
@@ -8405,7 +7768,7 @@ fn mpqs_source_factor_report(any: n, int: max_factor_base_count=96, int: max_pri
    _mpqs_finish_attempt_report(out, t0, nz, selected_multiplier, attempts, [])
 }
 
-fn mpqs_factor_report(any: n, int: factor_base_bound=64, int: windows=4, int: window_radius=256, int: max_relations=32): dict {
+fn mpqs_factor_report(any n, int factor_base_bound=64, int windows=4, int window_radius=256, int max_relations=32) dict {
    "Multi-window quadratic-sieve report with multiplier scoring, window collection, and GF(2) dependencies."
    def t0 = ticks()
    def nz = _z(n)
@@ -8428,12 +7791,12 @@ fn mpqs_factor_report(any: n, int: factor_base_bound=64, int: windows=4, int: wi
    _mpqs_finish_attempt_report(out, t0, nz, selected_multiplier, attempts, [["multiplier_report", mult_report]])
 }
 
-fn mpqs_factor(any: n, int: factor_base_bound=64, int: windows=4, int: window_radius=256, int: max_relations=32): any {
+fn mpqs_factor(any n, int factor_base_bound=64, int windows=4, int window_radius=256, int max_relations=32) any {
    "Return one factor from mpqs_factor_report, or nil."
    mpqs_factor_report(n, factor_base_bound, windows, window_radius, max_relations).get("factor", nil)
 }
 
-fn mpqs_source_factor(any: n, int: max_factor_base_count=96, int: max_prime_bound=1201, int: max_windows=24, int: max_window_radius=32000, int: max_relations=256): any {
+fn mpqs_source_factor(any n, int max_factor_base_count=96, int max_prime_bound=1201, int max_windows=24, int max_window_radius=32000, int max_relations=256) any {
    "Return one factor from mpqs_source_factor_report, or nil."
    mpqs_source_factor_report(n, max_factor_base_count, max_prime_bound, max_windows, max_window_radius, max_relations).get("factor", nil)
 }

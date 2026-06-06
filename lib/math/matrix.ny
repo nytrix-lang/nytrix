@@ -1,6 +1,8 @@
-;; Keywords: matrix linear-algebra
+;; Keywords: matrix linear-algebra math
 ;; Matrix construction and linear-algebra operations over numeric and modular values.
 ;; Full implementation with operator overloading and crypto primitives
+;; References:
+;; - std.math
 module std.math.matrix(Matrix, is_matrix, mat_new, mat_get, mat_set, mat_mul, mat_det2,
    mat_print, mat_transpose, mat_identity, mat_add, mat_scale,
    mat4_zero, mat4_identity, mat4_get, mat4_set,
@@ -25,28 +27,28 @@ use std.core.str as str
 use std.math.big
 use std.math.integer (Z, gcd, mod, inverse_mod, xgcd)
 
-fn is_matrix(any: x): bool {
+fn is_matrix(any x) bool {
    "Check if x is a matrix."
    if(!is_ptr(x)){ return false }
    if(!is_list(x)){ return false }
    def n = x.len
    if(n < 3){ return false }
    def first = x.get(0)
-   is_int(first) ;; rows is an int
+   is_int(first)
 }
 
-fn _matrix_rows(any: m): int { m.get(0) }
+fn _matrix_rows(any m) int { m.get(0) }
 
-fn _matrix_cols(any: m): int { m.get(1) }
+fn _matrix_cols(any m) int { m.get(1) }
 
-fn _matrix_data(any: m): list { m.get(2) }
+fn _matrix_data(any m) list { m.get(2) }
 
-fn _matrix_get(any: m, int: i, int: j): any {
+fn _matrix_get(any m, int i, int j) any {
    def row = _matrix_data(m).get(i)
    row.get(j)
 }
 
-fn _matrix_set(any: m, int: i, int: j, any: val): any {
+fn _matrix_set(any m, int i, int j, any val) any {
    def data = _matrix_data(m)
    def row = data.get(i)
    def new_row = row.set(j, val)
@@ -54,9 +56,9 @@ fn _matrix_set(any: m, int: i, int: j, any: val): any {
    [_matrix_rows(m), _matrix_cols(m), new_data]
 }
 
-fn _matrix_make(int: rows, int: cols, any: data): list { [rows, cols, data] }
+fn _matrix_make(int rows, int cols, any data) list { [rows, cols, data] }
 
-fn mat_new(int: rows, int: cols, any: init_val): list {
+fn mat_new(int rows, int cols, any init_val) list {
    "Create a plain matrix filled with `init_val`."
    mut data = list(0)
    mut i = 0
@@ -73,17 +75,17 @@ fn mat_new(int: rows, int: cols, any: init_val): list {
    _matrix_make(rows, cols, data)
 }
 
-fn mat_get(any: mat, int: row, int: col): any {
+fn mat_get(any mat, int row, int col) any {
    "Get matrix element at `(row, col)`."
    _matrix_get(mat, row, col)
 }
 
-fn mat_set(any: mat, int: row, int: col, any: val): any {
+fn mat_set(any mat, int row, int col, any val) any {
    "Set matrix element at `(row, col)`."
    _matrix_set(mat, row, col, val)
 }
 
-fn Matrix(list: data): list {
+fn Matrix(list data) list {
    "Create matrix from list of lists."
    def rows = data.len
    if(rows == 0){ return [0, 0, list(0)] }
@@ -96,7 +98,7 @@ fn Matrix(list: data): list {
    _matrix_make(rows, cols, data)
 }
 
-fn matrix_zero(int: rows, int: cols): any {
+fn matrix_zero(int rows, int cols) any {
    "Create zero matrix."
    mut data = list(0)
    mut i = 0
@@ -113,7 +115,7 @@ fn matrix_zero(int: rows, int: cols): any {
    _matrix_make(rows, cols, data)
 }
 
-fn matrix_one(int: rows, int: cols): any {
+fn matrix_one(int rows, int cols) any {
    "Create matrix of all ones."
    mut data = list(0)
    mut i = 0
@@ -130,7 +132,7 @@ fn matrix_one(int: rows, int: cols): any {
    _matrix_make(rows, cols, data)
 }
 
-fn matrix_identity(int: n): any {
+fn matrix_identity(int n) any {
    "Create n x n identity matrix."
    mut data = list(0)
    mut i = 0
@@ -147,31 +149,31 @@ fn matrix_identity(int: n): any {
    _matrix_make(n, n, data)
 }
 
-fn mat_identity(int: n): any {
+fn mat_identity(int n) any {
    "Create an identity matrix."
    matrix_identity(n)
 }
 
-fn mat4_zero(): list {
+fn mat4_zero() list {
    "Returns a zero-initialized flat row-major 4x4 matrix."
    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 }
 
-fn mat4_identity(): list {
+fn mat4_identity() list {
    "Returns a flat row-major 4x4 identity matrix."
    mut m = mat4_zero()
    m[0] = 1.0 m[5] = 1.0 m[10] = 1.0 m[15] = 1.0
    m
 }
 
-fn _mat4_offset(list: m): int {
+fn _mat4_offset(list m) int {
    def n = m.len
    if(n >= 18 && m[0] == 4 && m[1] == 4){ return 2 }
    if(n >= 16){ return 0 }
    -1
 }
 
-fn mat4_get(list: m, int: r, int: c, f64: default=0.0): f64 {
+fn mat4_get(list m, int r, int c, f64 default=0.0) f64 {
    "Returns the flat row-major 4x4 matrix element at row `r`, column `c`, or `default` when out of bounds."
    if(r < 0 || r >= 4 || c < 0 || c >= 4){ return default }
    def off = _mat4_offset(m)
@@ -179,7 +181,7 @@ fn mat4_get(list: m, int: r, int: c, f64: default=0.0): f64 {
    m[off + r * 4 + c]
 }
 
-fn mat4_set(list: m, int: r, int: c, f64: v): list {
+fn mat4_set(list m, int r, int c, f64 v) list {
    "Stores `v` at row `r`, column `c` in a flat row-major 4x4 matrix and returns `m`."
    if(r < 0 || r >= 4 || c < 0 || c >= 4){ return m }
    def off = _mat4_offset(m)
@@ -188,7 +190,7 @@ fn mat4_set(list: m, int: r, int: c, f64: v): list {
    m
 }
 
-fn matrix_diagonal(list: diag): any {
+fn matrix_diagonal(list diag) any {
    "Create diagonal matrix from list."
    def n = diag.len
    mut data = list(0)
@@ -206,7 +208,7 @@ fn matrix_diagonal(list: diag): any {
    _matrix_make(n, n, data)
 }
 
-fn matrix_random(int: rows, int: cols, any: bound): any {
+fn matrix_random(int rows, int cols, any bound) any {
    "Create random matrix with entries in [0, bound)."
    def bound_big = (is_bigint(bound) ? bound : bigint(bound))
    mut data = list(0)
@@ -224,24 +226,24 @@ fn matrix_random(int: rows, int: cols, any: bound): any {
    _matrix_make(rows, cols, data)
 }
 
-fn __add(any: a, any: b): any {
+fn __add(any a, any b) any {
    if(!is_matrix(a) || !is_matrix(b)){ return nil }
    matrix_add(a, b)
 }
 
-fn __sub(any: a, any: b): any {
+fn __sub(any a, any b) any {
    if(!is_matrix(a) || !is_matrix(b)){ return nil }
    matrix_sub(a, b)
 }
 
-fn __mul(any: a, any: b): any {
+fn __mul(any a, any b) any {
    if(!is_matrix(a)){ return nil }
    if(is_bigint(b) || is_int(b)){ return matrix_scale(a, b) }
    if(is_matrix(b)){ return matrix_mul(a, b) }
    nil
 }
 
-fn __pow(any: a, any: b): any {
+fn __pow(any a, any b) any {
    if(!is_matrix(a)){ return nil }
    if(is_bigint(b)){
       def b_int = bigint_to_int(b)
@@ -255,12 +257,12 @@ fn __pow(any: a, any: b): any {
    nil
 }
 
-fn __neg(any: a): any {
+fn __neg(any a) any {
    if(!is_matrix(a)){ return nil }
    matrix_neg(a)
 }
 
-fn __eq(any: a, any: b): bool {
+fn __eq(any a, any b) bool {
    if(!is_matrix(a) || !is_matrix(b)){ return false }
    if(_matrix_rows(a) != _matrix_rows(b)){ return false }
    if(_matrix_cols(a) != _matrix_cols(b)){ return false }
@@ -276,9 +278,9 @@ fn __eq(any: a, any: b): bool {
    true
 }
 
-fn __neq(any: a, any: b): bool { !__eq(a, b) }
+fn __neq(any a, any b) bool { !__eq(a, b) }
 
-fn _matrix_str(any: a): any {
+fn _matrix_str(any a) any {
    if(!is_matrix(a)){ return nil }
    mut b = str.Builder(128)
    b = str.builder_append(b, "[")
@@ -301,14 +303,14 @@ fn _matrix_str(any: a): any {
    s
 }
 
-fn __str(any: a): any { _matrix_str(a) }
+fn __str(any a) any { _matrix_str(a) }
 
-fn __len(any: a): int {
+fn __len(any a) int {
    if(!is_matrix(a)){ return 0 }
    _matrix_rows(a)
 }
 
-fn matrix_add(any: a, any: b): any {
+fn matrix_add(any a, any b) any {
    "Add two matrices."
    if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ panic("matrix_add: dimension mismatch") }
    def rows = _matrix_rows(a)
@@ -329,12 +331,12 @@ fn matrix_add(any: a, any: b): any {
    _matrix_make(rows, cols, data)
 }
 
-fn mat_add(any: a, any: b): any {
+fn mat_add(any a, any b) any {
    "Add two matrices."
    matrix_add(a, b)
 }
 
-fn matrix_sub(any: a, any: b): any {
+fn matrix_sub(any a, any b) any {
    "Subtract two matrices."
    if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ panic("matrix_sub: dimension mismatch") }
    def rows = _matrix_rows(a)
@@ -355,7 +357,7 @@ fn matrix_sub(any: a, any: b): any {
    _matrix_make(rows, cols, data)
 }
 
-fn matrix_neg(any: m): any {
+fn matrix_neg(any m) any {
    "Negate matrix."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -374,7 +376,7 @@ fn matrix_neg(any: m): any {
    _matrix_make(rows, cols, data)
 }
 
-fn matrix_scale(any: m, any: c): any {
+fn matrix_scale(any m, any c) any {
    "Scale matrix by constant."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -394,12 +396,12 @@ fn matrix_scale(any: m, any: c): any {
    _matrix_make(rows, cols, data)
 }
 
-fn mat_scale(any: m, any: c): any {
+fn mat_scale(any m, any c) any {
    "Scale a matrix by a scalar."
    matrix_scale(m, c)
 }
 
-fn matrix_mul(any: a, any: b): any {
+fn matrix_mul(any a, any b) any {
    "Multiply two matrices."
    def rows_a = _matrix_rows(a)
    def cols_a = _matrix_cols(a)
@@ -428,12 +430,12 @@ fn matrix_mul(any: a, any: b): any {
    _matrix_make(rows_a, cols_b, data)
 }
 
-fn mat_mul(any: a, any: b): any {
+fn mat_mul(any a, any b) any {
    "Multiply two matrices."
    matrix_mul(a, b)
 }
 
-fn matrix_pow(any: m, int: n): any {
+fn matrix_pow(any m, int n) any {
    "Matrix power m^n using binary exponentiation."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -451,7 +453,7 @@ fn matrix_pow(any: m, int: n): any {
    result
 }
 
-fn matrix_transpose(any: m): list {
+fn matrix_transpose(any m) list {
    "Transpose matrix."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -470,12 +472,12 @@ fn matrix_transpose(any: m): list {
    _matrix_make(cols, rows, data)
 }
 
-fn mat_transpose(any: m): any {
+fn mat_transpose(any m) any {
    "Transpose a matrix."
    matrix_transpose(m)
 }
 
-fn matrix_trace(any: m): any {
+fn matrix_trace(any m) any {
    "Trace of square matrix(sum of diagonal)."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -489,7 +491,7 @@ fn matrix_trace(any: m): any {
    sum
 }
 
-fn matrix_det(any: m): any {
+fn matrix_det(any m) any {
    "Exact determinant using Bareiss fraction-free elimination."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -547,7 +549,7 @@ fn matrix_det(any: m): any {
    sign * a.get(rows - 1).get(rows - 1)
 }
 
-fn matrix_det_mod(any: m, any: modn): any {
+fn matrix_det_mod(any m, any modn) any {
    "Determinant modulo `modn` using modular Gaussian elimination.
    Notes:
    - Works in Z/modnZ, so it needs modular inverses for pivots.
@@ -609,18 +611,18 @@ fn matrix_det_mod(any: m, any: modn): any {
    det
 }
 
-fn mat_det2(any: m): any {
+fn mat_det2(any m) any {
    "Determinant of a 2x2 matrix."
    matrix_det(m)
 }
 
-fn mat_print(any: m): any {
+fn mat_print(any m) any {
    "Print matrix row by row."
    print(_matrix_str(m))
    m
 }
 
-fn matrix_rank(any: m): int {
+fn matrix_rank(any m) int {
    "Rank using Gaussian elimination."
    def lu_result = matrix_lu(m)
    def U = lu_result.get(1)
@@ -644,7 +646,7 @@ fn matrix_rank(any: m): int {
    rank
 }
 
-fn matrix_inverse(any: m): any {
+fn matrix_inverse(any m) any {
    "Matrix inverse using adjugate method."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -655,7 +657,7 @@ fn matrix_inverse(any: m): any {
    matrix_scale(adj, bigint_div(Z(1), det))
 }
 
-fn matrix_adjugate(any: m): any {
+fn matrix_adjugate(any m) any {
    "Adjugate(classical adjoint) matrix."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -685,7 +687,7 @@ fn matrix_adjugate(any: m): any {
    matrix_transpose(cofactor)
 }
 
-fn _matrix_minor(any: m, int: row, int: col): any {
+fn _matrix_minor(any m, int row, int col) any {
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
    mut sub_data = list(0)
@@ -712,7 +714,7 @@ fn _matrix_minor(any: m, int: row, int: col): any {
    matrix_det(sub)
 }
 
-fn _matrix_submatrix_det(any: m, list: row_idx, list: col_idx): any {
+fn _matrix_submatrix_det(any m, list row_idx, list col_idx) any {
    def k = row_idx.len
    mut data = []
    mut i = 0
@@ -729,7 +731,7 @@ fn _matrix_submatrix_det(any: m, list: row_idx, list: col_idx): any {
    matrix_det(Matrix(data))
 }
 
-fn _matrix_first_combination(int: k): list {
+fn _matrix_first_combination(int k) list {
    mut out = []
    mut i = 0
    while(i < k){
@@ -739,7 +741,7 @@ fn _matrix_first_combination(int: k): list {
    out
 }
 
-fn _matrix_next_combination(list: comb, int: n): any {
+fn _matrix_next_combination(list comb, int n) any {
    def k = comb.len
    mut out = clone(comb)
    mut i = k - 1
@@ -758,7 +760,7 @@ fn _matrix_next_combination(list: comb, int: n): any {
    nil
 }
 
-fn matrix_determinantal_divisor(any: m, int: k): any {
+fn matrix_determinantal_divisor(any m, int k) any {
    "Return the gcd of all k x k minors of an integer matrix.
    By convention the 0th determinantal divisor is 1. Returns 0 when all
    k-minors vanish or k is outside the matrix shape."
@@ -780,7 +782,7 @@ fn matrix_determinantal_divisor(any: m, int: k): any {
    g
 }
 
-fn matrix_smith_invariants(any: m): list {
+fn matrix_smith_invariants(any m) list {
    "Return nonzero Smith invariant factors of an integer matrix.
    This Sage-style surface computes determinantal divisors, so it is exact and
    dependency-free, but intended for small/medium crypto matrices rather than
@@ -802,12 +804,12 @@ fn matrix_smith_invariants(any: m): list {
    invs
 }
 
-fn matrix_elementary_divisors(any: m): list {
+fn matrix_elementary_divisors(any m) list {
    "Alias for `matrix_smith_invariants`."
    matrix_smith_invariants(m)
 }
 
-fn matrix_smith_form(any: m): list {
+fn matrix_smith_form(any m) list {
    "Return a diagonal Smith normal form matrix with the same shape as `m`.
    Transformation matrices are intentionally not returned yet."
    def rows = _matrix_rows(m)
@@ -828,12 +830,12 @@ fn matrix_smith_form(any: m): list {
    Matrix(data)
 }
 
-fn matrix_smith_normal_form(any: m): any {
+fn matrix_smith_normal_form(any m) any {
    "Alias for `matrix_smith_form`."
    matrix_smith_form(m)
 }
 
-fn _matrix_row_linear(list: a, list: b, any: ca, any: cb): list {
+fn _matrix_row_linear(list a, list b, any ca, any cb) list {
    def cols = a.len
    mut out = []
    mut j = 0
@@ -844,7 +846,7 @@ fn _matrix_row_linear(list: a, list: b, any: ca, any: cb): list {
    out
 }
 
-fn _matrix_floor_div_pos(any: a, any: b): any {
+fn _matrix_floor_div_pos(any a, any b) any {
    "Return floor(a / b) for positive integer b."
    def bb = Z(b)
    if(bb <= Z(0)){ panic("_matrix_floor_div_pos: divisor must be positive") }
@@ -853,7 +855,7 @@ fn _matrix_floor_div_pos(any: a, any: b): any {
    (aa - r) / bb
 }
 
-fn _matrix_hermite_form_impl(any: m): any {
+fn _matrix_hermite_form_impl(any m) any {
    "Return a row-style integer Hermite normal form.
    The result is row-unimodularly equivalent to `m`: pivot columns increase
    from top to bottom, pivots are positive, entries below pivots are zero, and
@@ -945,7 +947,7 @@ fn _matrix_hermite_form_impl(any: m): any {
    return out_matrix
 }
 
-fn matrix_hermite_form(any: m): list {
+fn matrix_hermite_form(any m) list {
    "Return a row-style integer Hermite normal form.
    The result is row-unimodularly equivalent to `m`: pivot columns increase
    from top to bottom, pivots are positive, entries below pivots are zero, and
@@ -958,27 +960,27 @@ fn matrix_hermite_form(any: m): list {
    return [rows, cols, raw]
 }
 
-fn matrix_hermite_normal_form(any: m): list {
+fn matrix_hermite_normal_form(any m) list {
    "Alias for `matrix_hermite_form`."
    return matrix_hermite_form(m)
 }
 
-fn matrix_hnf(any: m): list {
+fn matrix_hnf(any m) list {
    "Short Sage-style alias for `matrix_hermite_form`."
    return matrix_hermite_form(m)
 }
 
-fn matrix_hnf_transform(any: m): any {
+fn matrix_hnf_transform(any m) any {
    "Reserved transform-returning HNF surface. Returns [H, U] once unimodular transforms are implemented."
    panic("matrix_hnf_transform: unimodular transform matrix is not implemented")
 }
 
-fn matrix_snf_transform(any: m): any {
+fn matrix_snf_transform(any m) any {
    "Reserved transform-returning SNF surface. Returns [S, U, V] once unimodular transforms are implemented."
    panic("matrix_snf_transform: unimodular transform matrices are not implemented")
 }
 
-fn matrix_change_ring(any: m, any: ring): list {
+fn matrix_change_ring(any m, any ring) list {
    "Return a copy of matrix `m` with entries normalized into a target scalar ring.
    Supports integer normalization, GF(p), and Zmod(n)-style modular rings."
    def rows = _matrix_rows(m)
@@ -1016,7 +1018,7 @@ fn matrix_change_ring(any: m, any: ring): list {
    Matrix(data)
 }
 
-fn matrix_is_hermite_form(any: m): bool {
+fn matrix_is_hermite_form(any m) bool {
    "Return true when `m` satisfies the row Hermite normal form shape."
    mut src = m
    mut rows = 0
@@ -1064,7 +1066,7 @@ fn matrix_is_hermite_form(any: m): bool {
    true
 }
 
-fn matrix_lu(any: m): list {
+fn matrix_lu(any m) list {
    "LU decomposition with partial pivoting. Returns [L, U, swaps]."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -1143,15 +1145,15 @@ fn matrix_lu(any: m): list {
    [_matrix_make(rows, cols, L_data), _matrix_make(rows, cols, U_data), swaps]
 }
 
-fn _matrix_get_from_data(list: data, int: i, int: j): any { data.get(i).get(j) }
+fn _matrix_get_from_data(list data, int i, int j) any { data.get(i).get(j) }
 
-fn _matrix_modp(any: x, any: p): any {
+fn _matrix_modp(any x, any p) any {
    def r = x % p
    if(r < 0){ return r + p }
    r
 }
 
-fn _matrix_clone_mod_data(any: m, any: p): list {
+fn _matrix_clone_mod_data(any m, any p) list {
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
    mut out = []
@@ -1169,12 +1171,12 @@ fn _matrix_clone_mod_data(any: m, any: p): list {
    out
 }
 
-fn matrix_mod(any: m, any: p): any {
+fn matrix_mod(any m, any p) any {
    "Reduce every matrix entry modulo `p`."
    _matrix_make(_matrix_rows(m), _matrix_cols(m), _matrix_clone_mod_data(m, p))
 }
 
-fn matrix_eq_mod(any: a, any: b, any: p): bool {
+fn matrix_eq_mod(any a, any b, any p) bool {
    "Return true when matrices `a` and `b` are equal over Z/pZ."
    if(_matrix_rows(a) != _matrix_rows(b) || _matrix_cols(a) != _matrix_cols(b)){ return false }
    mut i = 0
@@ -1189,7 +1191,7 @@ fn matrix_eq_mod(any: a, any: b, any: p): bool {
    true
 }
 
-fn matrix_mul_mod(any: a, any: b, any: p): any {
+fn matrix_mul_mod(any a, any b, any p) any {
    "Multiply matrices over Z/pZ."
    def rows_a = _matrix_rows(a)
    def cols_a = _matrix_cols(a)
@@ -1217,7 +1219,7 @@ fn matrix_mul_mod(any: a, any: b, any: p): any {
    _matrix_make(rows_a, cols_b, data)
 }
 
-fn matrix_pow_mod(any: m, any: e, any: p): any {
+fn matrix_pow_mod(any m, any e, any p) any {
    "Raise a square matrix to exponent `e` over Z/pZ."
    def rows = _matrix_rows(m)
    def cols = _matrix_cols(m)
@@ -1234,7 +1236,7 @@ fn matrix_pow_mod(any: m, any: e, any: p): any {
    result
 }
 
-fn matrix_rref_mod(any: m, any: p): list {
+fn matrix_rref_mod(any m, any p) list {
    "Reduced row-echelon form over GF(p). Returns `[rref_matrix, pivot_columns]`.
    The modulus `p` must be prime, or at least every selected pivot must be invertible."
    if(p <= 1){ panic("matrix_rref_mod: modulus must be > 1") }
@@ -1289,17 +1291,17 @@ fn matrix_rref_mod(any: m, any: p): list {
    [_matrix_make(rows, cols, A), pivots]
 }
 
-fn matrix_rank_mod(any: m, any: p): int {
+fn matrix_rank_mod(any m, any p) int {
    "Rank of `m` over GF(p)."
    matrix_rref_mod(m, p).get(1).len
 }
 
-fn matrix_nullity_mod(any: m, any: p): int {
+fn matrix_nullity_mod(any m, any p) int {
    "Dimension of the right nullspace of `m` over GF(p)."
    _matrix_cols(m) - matrix_rank_mod(m, p)
 }
 
-fn matrix_nullspace_mod(any: m, any: p): list {
+fn matrix_nullspace_mod(any m, any p) list {
    "Basis for the right nullspace `{x | m*x = 0}` over GF(p)."
    def rr = matrix_rref_mod(m, p)
    def R = rr.get(0)
@@ -1340,22 +1342,22 @@ fn matrix_nullspace_mod(any: m, any: p): list {
    basis
 }
 
-fn matrix_right_kernel_mod(any: m, any: p): list {
+fn matrix_right_kernel_mod(any m, any p) list {
    "Alias for `matrix_nullspace_mod`."
    matrix_nullspace_mod(m, p)
 }
 
-fn matrix_kernel_mod(any: m, any: p): list {
+fn matrix_kernel_mod(any m, any p) list {
    "Alias for `matrix_nullspace_mod`."
    matrix_nullspace_mod(m, p)
 }
 
-fn matrix_left_kernel_mod(any: m, any: p): list {
+fn matrix_left_kernel_mod(any m, any p) list {
    "Basis for the left nullspace `{x | x*m = 0}` over GF(p)."
    matrix_nullspace_mod(matrix_transpose(m), p)
 }
 
-fn matrix_solve_mod(any: A, list: b, any: p): any {
+fn matrix_solve_mod(any A, list b, any p) any {
    "Solve `A*x = b` over GF(p).
    Returns one solution vector with free variables set to zero, or nil when the
    system is inconsistent. The modulus `p` must be prime, or at least every
@@ -1404,17 +1406,17 @@ fn matrix_solve_mod(any: A, list: b, any: p): any {
    x
 }
 
-fn matrix_solve_right_mod(any: A, list: b, any: p): any {
+fn matrix_solve_right_mod(any A, list b, any p) any {
    "Sage-style alias for solving `A*x = b` over GF(p)."
    matrix_solve_mod(A, b, p)
 }
 
-fn matrix_solve_left_mod(any: A, list: b, any: p): any {
+fn matrix_solve_left_mod(any A, list b, any p) any {
    "Solve `x*A = b` over GF(p)."
    matrix_solve_mod(matrix_transpose(A), b, p)
 }
 
-fn matrix_solve(any: A, list: b): list {
+fn matrix_solve(any A, list b) list {
    "Solve Ax = b using LU decomposition."
    def lu_result = matrix_lu(A)
    def L = lu_result.get(0)
@@ -1453,7 +1455,7 @@ fn matrix_solve(any: A, list: b): list {
    x
 }
 
-fn matrix_gauss_eliminate(any: A, list: b): list {
+fn matrix_gauss_eliminate(any A, list b) list {
    "Gaussian elimination to solve Ax = b. Returns [A', b']."
    def rows = _matrix_rows(A)
    def cols = _matrix_cols(A)
@@ -1520,25 +1522,38 @@ fn matrix_gauss_eliminate(any: A, list: b): list {
    [_matrix_make(rows, cols, A_data), b_vec]
 }
 
-fn _matrix_require(any: m, str: name): any {
+fn _matrix_require(any m, str name) any {
    if(!is_matrix(m)){ panic(name + ": expected Matrix") }
    m
 }
 
 impl list {
-   fn det(list: m): any { return matrix_det(_matrix_require(m, "matrix.det")) }
-   fn rank(list: m): int { return matrix_rank(_matrix_require(m, "matrix.rank")) }
-   fn trace(list: m): any { return matrix_trace(_matrix_require(m, "matrix.trace")) }
-   fn transpose(list: m): list { return matrix_transpose(_matrix_require(m, "matrix.transpose")) }
-   fn hnf(list: m): list { return matrix_hnf(_matrix_require(m, "matrix.hnf")) }
-   fn snf(list: m): list { return matrix_smith_form(_matrix_require(m, "matrix.snf")) }
-   fn hermite_form(list: m): list { return matrix_hermite_form(_matrix_require(m, "matrix.hermite_form")) }
-   fn smith_form(list: m): list { return matrix_smith_form(_matrix_require(m, "matrix.smith_form")) }
-   fn kernel_mod(list: m, any: p): list { return matrix_kernel_mod(_matrix_require(m, "matrix.kernel_mod"), p) }
-   fn right_kernel_mod(list: m, any: p): list { return matrix_right_kernel_mod(_matrix_require(m, "matrix.right_kernel_mod"), p) }
-   fn left_kernel_mod(list: m, any: p): list { return matrix_left_kernel_mod(_matrix_require(m, "matrix.left_kernel_mod"), p) }
-   fn solve_mod(list: m, list: b, any: p): any { return matrix_solve_mod(_matrix_require(m, "matrix.solve_mod"), b, p) }
-   fn change_ring(list: m, any: ring): list { return matrix_change_ring(_matrix_require(m, "matrix.change_ring"), ring) }
-   fn hnf_transform(list: m): any { return matrix_hnf_transform(_matrix_require(m, "matrix.hnf_transform")) }
-   fn snf_transform(list: m): any { return matrix_snf_transform(_matrix_require(m, "matrix.snf_transform")) }
+   fn det(list m) any { return matrix_det(_matrix_require(m, "matrix.det")) }
+   fn rank(list m) int { return matrix_rank(_matrix_require(m, "matrix.rank")) }
+   fn trace(list m) any { return matrix_trace(_matrix_require(m, "matrix.trace")) }
+   fn transpose(list m) list { return matrix_transpose(_matrix_require(m, "matrix.transpose")) }
+   fn hnf(list m) list { return matrix_hnf(_matrix_require(m, "matrix.hnf")) }
+   fn snf(list m) list { return matrix_smith_form(_matrix_require(m, "matrix.snf")) }
+   fn hermite_form(list m) list { return matrix_hermite_form(_matrix_require(m, "matrix.hermite_form")) }
+   fn smith_form(list m) list { return matrix_smith_form(_matrix_require(m, "matrix.smith_form")) }
+   fn kernel_mod(list m, any p) list { return matrix_kernel_mod(_matrix_require(m, "matrix.kernel_mod"), p) }
+   fn right_kernel_mod(list m, any p) list { return matrix_right_kernel_mod(_matrix_require(m, "matrix.right_kernel_mod"), p) }
+   fn left_kernel_mod(list m, any p) list { return matrix_left_kernel_mod(_matrix_require(m, "matrix.left_kernel_mod"), p) }
+   fn solve_mod(list m, list b, any p) any { return matrix_solve_mod(_matrix_require(m, "matrix.solve_mod"), b, p) }
+   fn change_ring(list m, any ring) list { return matrix_change_ring(_matrix_require(m, "matrix.change_ring"), ring) }
+   fn hnf_transform(list m) any { return matrix_hnf_transform(_matrix_require(m, "matrix.hnf_transform")) }
+   fn snf_transform(list m) any { return matrix_snf_transform(_matrix_require(m, "matrix.snf_transform")) }
+}
+
+#main {
+   def m = mat_new(2, 2, 0)
+   def m2 = mat_set(mat_set(m, 0, 1, 7), 1, 0, 5)
+   assert(mat_get(m2, 0, 1) == 7 && mat_get(m2, 1, 0) == 5, "matrix get/set")
+   assert(mat_det2(Matrix([[1, 2], [3, 4]])) == -2, "matrix det2")
+   mut direct = mat4_identity()
+   direct[1] = 2.0
+   direct[4] = 3.0
+   mat4_set(direct, 2, 3, 9.0)
+   assert(direct.len == 16 && mat4_get(direct, 0, 1) == 2.0 && mat4_get(direct, 1, 0) == 3.0 && direct[11] == 9.0, "matrix mat4 flat access")
+   print("✓ std.math.matrix self-test passed")
 }

@@ -1,154 +1,49 @@
-;; Keywords: image svg vector
+;; Keywords: image svg vector parse
 ;; Native SVG image loader for Nytrix using librsvg + cairo.
+;; References:
+;; - std.parse.img
+;; - std.parse
 module std.parse.img.svg(decode, load_path, available, last_error, backend_name)
 use std.core
-use std.core.mem
 use std.core.dict_mod as dict_mod
-use std.os (env, file_exists)
-use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call1, call1_void, call2, call2_void, call3)
 use std.core.str as str
-use std.math (abs)
+use std.math
+use std.os as os
 
-if(comptime{ __os_name() == "linux" || __os_name() == "macos" }){
-   #include <librsvg-2.0/librsvg/rsvg.h> as "rsvg_"
-   #include <cairo/cairo.h> as "cairo_"
-}
+def SVG_REF_PATH_DATA = "https://www.w3.org/TR/SVG/paths.html"
+def SVG_REF_SHAPES = "https://www.w3.org/TR/SVG/shapes.html"
+def SVG_REF_ARCS = "https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes"
 
-#windows {
-   fn rsvg_handle_new_from_data(..._args): any { 0 }
-   fn rsvg_handle_new_from_file(..._args): any { 0 }
-   fn rsvg_handle_get_dimensions(..._args): any { 0 }
-   fn rsvg_handle_render_cairo(..._args): int { 0 }
-   fn cairo_image_surface_create(..._args): any { 0 }
-   fn cairo_image_surface_get_stride(any: _surface): int { 0 }
-   fn cairo_image_surface_get_data(any: _surface): any { 0 }
-   fn cairo_surface_flush(any: _surface): any { 0 }
-   fn cairo_surface_destroy(any: _surface): any { 0 }
-   fn cairo_create(any: _surface): any { 0 }
-   fn cairo_destroy(any: _cr): any { 0 }
-   fn cairo_set_operator(any: _cr, any: _op): any { 0 }
-   fn cairo_paint(any: _cr): any { 0 }
-   fn cairo_scale(any: _cr, any: _sx, any: _sy): any { 0 }
-} #endif
-
-def _CAIRO_FORMAT_ARGB32 = 0
-def _CAIRO_OPERATOR_CLEAR = 0
-def _CAIRO_OPERATOR_OVER = 2
-def _RSVG_DIMENSION_DATA_SIZE = 24
-mut _svg_checked = false
-mut _svg_ok = false
 mut _svg_last_error = ""
-mut _svg_backend_name = ""
-mut _svg_lib_rsvg = 0
-mut _svg_lib_cairo = 0
-mut _svg_lib_glib = 0
-mut _svg_lib_gobject = 0
-mut _ptr_rsvg_handle_new_from_data = 0
-mut _ptr_rsvg_handle_new_from_file = 0
-mut _ptr_rsvg_handle_get_dimensions = 0
-mut _ptr_rsvg_handle_render_cairo = 0
-mut _ptr_cairo_image_surface_create = 0
-mut _ptr_cairo_image_surface_get_stride = 0
-mut _ptr_cairo_image_surface_get_data = 0
-mut _ptr_cairo_surface_flush = 0
-mut _ptr_cairo_surface_destroy = 0
-mut _ptr_cairo_create = 0
-mut _ptr_cairo_destroy = 0
-mut _ptr_g_error_free = 0
-mut _ptr_g_object_unref = 0
 
-fn _svg_set_error(any: msg): bool {
+fn _svg_set_error(any msg) bool {
    _svg_last_error = to_str(msg)
    false
 }
 
-fn last_error(): str {
-   "Returns the last SVG backend error."
+fn last_error() str {
+   "Returns the last native SVG decoder error."
    _svg_last_error
 }
 
-fn backend_name(): str {
-   "Returns the active SVG backend name, or empty string when unavailable."
-   _svg_backend_name
+fn backend_name() str {
+   "Returns the active SVG backend."
+   "native-ny-svg"
 }
 
-fn _svg_g_error_free(any: err): int {
-   if(err && _ptr_g_error_free){ call1_void(_ptr_g_error_free, err) }
-   0
-}
-
-fn _svg_g_object_unref(any: obj): int {
-   if(obj && _ptr_g_object_unref){ call1_void(_ptr_g_object_unref, obj) }
-   0
-}
-
-fn _svg_error_message(any: err_pp, str: fallback): str {
-   if(!err_pp){ return fallback }
-   def err = load64_h(err_pp, 0)
-   if(!err){ return fallback }
-   def msg_ptr = load64_h(err, 8)
-   def msg = msg_ptr ? str.cstr_to_str(msg_ptr) : fallback
-   _svg_g_error_free(err)
-   store64_h(err_pp, 0, 0)
-   msg.len > 0 ? msg : fallback
-}
-
-fn _svg_load_dyn(): bool {
-   if(_svg_checked){ return _svg_ok }
-   _svg_checked = true
-   _svg_ok = false
-   _svg_backend_name = ""
-   _svg_last_error = ""
-   if(!comptime{ __os_name() == "linux" || __os_name() == "macos" }){ return _svg_set_error("native SVG backend unsupported on this OS; install a supported backend for this platform") }
-   mut rsvg = 0
-   mut cairo = 0
-   mut glib = 0
-   mut gobj = 0
-   if(comptime{ __os_name() == "linux" }){
-      rsvg = dlopen_checked("librsvg-2.so.2", "rsvg_handle_new_from_data", RTLD_NOW() | RTLD_GLOBAL())
-      if(!rsvg){ rsvg = dlopen_checked("librsvg-2.so", "rsvg_handle_new_from_data", RTLD_NOW() | RTLD_GLOBAL()) }
-      cairo = dlopen_checked("libcairo.so.2", "cairo_image_surface_create", RTLD_NOW() | RTLD_GLOBAL())
-      if(!cairo){ cairo = dlopen_checked("libcairo.so", "cairo_image_surface_create", RTLD_NOW() | RTLD_GLOBAL()) }
-      glib = dlopen_checked("libglib-2.0.so.0", "g_error_free", RTLD_NOW() | RTLD_GLOBAL())
-      if(!glib){ glib = dlopen_checked("libglib-2.0.so", "g_error_free", RTLD_NOW() | RTLD_GLOBAL()) }
-      gobj = dlopen_checked("libgobject-2.0.so.0", "g_object_unref", RTLD_NOW() | RTLD_GLOBAL())
-      if(!gobj){ gobj = dlopen_checked("libgobject-2.0.so", "g_object_unref", RTLD_NOW() | RTLD_GLOBAL()) }
-   } else {
-      rsvg = dlopen_checked("librsvg-2.dylib", "rsvg_handle_new_from_data", RTLD_NOW() | RTLD_GLOBAL())
-      if(!rsvg){ rsvg = dlopen_checked("librsvg-2", "rsvg_handle_new_from_data", RTLD_NOW() | RTLD_GLOBAL()) }
-      cairo = dlopen_checked("libcairo.dylib", "cairo_image_surface_create", RTLD_NOW() | RTLD_GLOBAL())
-      if(!cairo){ cairo = dlopen_checked("cairo", "cairo_image_surface_create", RTLD_NOW() | RTLD_GLOBAL()) }
-      glib = dlopen_checked("libglib-2.0.dylib", "g_error_free", RTLD_NOW() | RTLD_GLOBAL())
-      if(!glib){ glib = dlopen_checked("glib-2.0", "g_error_free", RTLD_NOW() | RTLD_GLOBAL()) }
-      gobj = dlopen_checked("libgobject-2.0.dylib", "g_object_unref", RTLD_NOW() | RTLD_GLOBAL())
-      if(!gobj){ gobj = dlopen_checked("gobject-2.0", "g_object_unref", RTLD_NOW() | RTLD_GLOBAL()) }
-   }
-   if(!rsvg || !cairo || !glib || !gobj){ return _svg_set_error("missing native SVG libs: need librsvg + cairo + glib + gobject") }
-   _svg_lib_rsvg = rsvg
-   _svg_lib_cairo = cairo
-   _svg_lib_glib = glib
-   _svg_lib_gobject = gobj
-   _ptr_g_error_free = dlsym(glib, "g_error_free")
-   _ptr_g_object_unref = dlsym(gobj, "g_object_unref")
-   if(!_ptr_g_error_free || !_ptr_g_object_unref){ return _svg_set_error("native SVG backend incomplete: required librsvg/cairo/glib symbols not found") }
-   _svg_backend_name = "librsvg+cairo"
-   _svg_last_error = ""
-   _svg_ok = true
+fn available() bool {
+   "Returns whether the native Ny SVG backend is available."
    true
 }
 
-fn available(): bool {
-   "Returns whether the native SVG backend is available."
-   _svg_load_dyn()
-}
-
-fn _looks_like_svg(any: data): bool {
+fn _looks_like_svg(any data) bool {
    if(!is_str(data) || data.len < 4){ return false }
    mut i = 0
-   def limit = min(data.len - 3, 512)
+   def limit = min(data.len - 3, 768)
    while(i < limit){
       if(load8(data, i) == 60){
-         def c1, c2 = load8(data, i + 1) | 32, load8(data, i + 2) | 32
+         def c1 = load8(data, i + 1) | 32
+         def c2 = load8(data, i + 2) | 32
          def c3 = load8(data, i + 3) | 32
          if(c1 == 115 && c2 == 118 && c3 == 103){ return true }
       }
@@ -157,185 +52,1039 @@ fn _looks_like_svg(any: data): bool {
    false
 }
 
-fn _svg_decode_surface(any: surface, any: svg_handle, any: out_w, any: out_h, any: scale): any {
-   if(!surface){
-      _svg_g_object_unref(svg_handle)
-      return 0
+fn _svg_node(str name, any attrs=0) dict {
+   mut n = dict(4)
+   n["name"] = name
+   n["attr"] = is_dict(attrs) ? attrs : dict()
+   n["children"] = []
+   n
+}
+
+fn _is_space(int c) bool { c <= 32 }
+
+fn _is_digit(int c) bool { c >= 48 && c <= 57 }
+
+fn _is_alpha(int c) bool {
+   (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+}
+
+fn _is_path_cmd(int c) bool {
+   case c {
+      65, 67, 72, 76, 77, 81, 83, 84, 86, 90,
+      97, 99, 104, 108, 109, 113, 115, 116, 118, 122 -> true
+      _ -> false
    }
-   def stride = cairo_image_surface_get_stride(surface)
-   def src = cairo_image_surface_get_data(surface)
-   if(!src || stride <= 0){
-      cairo_surface_destroy(surface)
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("cairo image surface is invalid")
-      return 0
+}
+
+fn _skip_sep(str s, int p) int {
+   while(p < s.len){
+      def c = load8(s, p)
+      if(c <= 32 || c == 44){ p += 1 }
+      else { break }
    }
-   def w, h = int(out_w), int(out_h)
-   if(w <= 0 || h <= 0){
-      cairo_surface_destroy(surface)
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("invalid SVG target surface size")
-      return 0
-   }
-   def cr = cairo_create(surface)
-   if(!cr){
-      cairo_surface_destroy(surface)
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("cairo_create failed")
-      return 0
-   }
-   cairo_set_operator(cr, _CAIRO_OPERATOR_CLEAR)
-   cairo_paint(cr)
-   cairo_set_operator(cr, _CAIRO_OPERATOR_OVER)
-   if(abs(float(scale) - 1.0) > 0.000001){ cairo_scale(cr, float(scale), float(scale)) }
-   def ok = int(rsvg_handle_render_cairo(svg_handle, cr))
-   cairo_destroy(cr)
-   if(ok == 0){
-      cairo_surface_destroy(surface)
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("librsvg render failed")
-      return 0
-   }
-   cairo_surface_flush(surface)
-   def out_len = w * h * 4
-   def out_ptr = malloc(out_len + 32)
-   if(!out_ptr){
-      cairo_surface_destroy(surface)
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("out of memory converting SVG image")
-      return 0
-   }
-   mut y = 0
-   while(y < h){
-      def src_row = src + y * stride
-      def dst_row = out_ptr + y * w * 4
-      mut x = 0
-      while(x < w){
-         def px = src_row + x * 4
-         def b = load8(px, 0)
-         def g = load8(px, 1)
-         def r = load8(px, 2)
-         def a = load8(px, 3)
-         def dst = dst_row + x * 4
-         if(a <= 0){
-            store8(dst, 0, 0)
-            store8(dst, 0, 1)
-            store8(dst, 0, 2)
-            store8(dst, 0, 3)
-         } elif(a >= 255){
-            store8(dst, r, 0)
-            store8(dst, g, 1)
-            store8(dst, b, 2)
-            store8(dst, a, 3)
+   p
+}
+
+fn _skip_ws(str s, int p) int {
+   while(p < s.len && _is_space(load8(s, p))){ p += 1 }
+   p
+}
+
+fn _attr_key_stop(int c) bool {
+   c <= 32 || c == 47 || c == 61 || c == 62
+}
+
+fn _parse_tag_attrs(str s, int p) list {
+   mut attrs = dict(64)
+   while(p < s.len){
+      p = _skip_ws(s, p)
+      if(p >= s.len || load8(s, p) == 47 || load8(s, p) == 62){ break }
+      mut kb = Builder(32)
+      while(p < s.len){
+         def c = load8(s, p)
+         if(_attr_key_stop(c)){ break }
+         kb = builder_append(kb, chr(c))
+         p += 1
+      }
+      def key = builder_to_str(kb)
+      builder_free(kb)
+      p = _skip_ws(s, p)
+      if(p < s.len && load8(s, p) == 61){
+         p += 1
+         p = _skip_ws(s, p)
+         def quote = load8(s, p)
+         mut vb = Builder(64)
+         if(quote == 34 || quote == 39){
+            p += 1
+            while(p < s.len && load8(s, p) != quote){
+               vb = builder_append(vb, chr(load8(s, p)))
+               p += 1
+            }
+            if(p < s.len){ p += 1 }
          } else {
-            def rr = min(255, int((r * 255 + (a / 2)) / a))
-            def gg = min(255, int((g * 255 + (a / 2)) / a))
-            def bb = min(255, int((b * 255 + (a / 2)) / a))
-            store8(dst, rr, 0)
-            store8(dst, gg, 1)
-            store8(dst, bb, 2)
-            store8(dst, a, 3)
+            while(p < s.len){
+               def c = load8(s, p)
+               if(c <= 32 || c == 47 || c == 62){ break }
+               vb = builder_append(vb, chr(c))
+               p += 1
+            }
          }
+         def val = builder_to_str(vb)
+         builder_free(vb)
+         if(key.len > 0){ attrs[key] = val }
+      } else {
+         if(key.len > 0){ attrs[key] = true }
+      }
+   }
+   [attrs, p]
+}
+
+fn _parse_svg_tree(str data) any {
+   mut p = 0
+   mut root = 0
+   mut stack = []
+   while(p < data.len){
+      if(load8(data, p) != 60){
+         p += 1
+         continue
+      }
+      p += 1
+      if(p >= data.len){ break }
+      def c0 = load8(data, p)
+      if(c0 == 33 || c0 == 63){
+         while(p < data.len && load8(data, p) != 62){ p += 1 }
+         if(p < data.len){ p += 1 }
+         continue
+      }
+      if(c0 == 47){
+         while(p < data.len && load8(data, p) != 62){ p += 1 }
+         if(p < data.len){ p += 1 }
+         if(stack.len > 0){ stack.pop() }
+         continue
+      }
+      mut nb = Builder(24)
+      while(p < data.len){
+         def c = load8(data, p)
+         if(c <= 32 || c == 47 || c == 62){ break }
+         nb = builder_append(nb, chr(c))
+         p += 1
+      }
+      def name = builder_to_str(nb)
+      builder_free(nb)
+      def ar = _parse_tag_attrs(data, p)
+      def attrs = ar[0]
+      p = int(ar[1])
+      mut self_closing = false
+      p = _skip_ws(data, p)
+      if(p < data.len && load8(data, p) == 47){
+         self_closing = true
+         p += 1
+      }
+      if(p < data.len && load8(data, p) == 62){ p += 1 }
+      if(name.len == 0){ continue }
+      def node = _svg_node(name, attrs)
+      if(!root){ root = node }
+      if(stack.len > 0){
+         def parent = stack[stack.len - 1]
+         mut children = parent.get("children", [])
+         children = children.append(node)
+         parent["children"] = children
+      }
+      if(!self_closing){ stack = stack.append(node) }
+   }
+   root
+}
+
+fn _read_num(str s, int p) list {
+   p = _skip_sep(s, p)
+   def start = p
+   if(p < s.len && (load8(s, p) == 45 || load8(s, p) == 43)){ p += 1 }
+   mut any_digit = false
+   while(p < s.len && _is_digit(load8(s, p))){ any_digit = true p += 1 }
+   if(p < s.len && load8(s, p) == 46){
+      p += 1
+      while(p < s.len && _is_digit(load8(s, p))){ any_digit = true p += 1 }
+   }
+   if(any_digit && p < s.len && ((load8(s, p) | 32) == 101)){
+      def ep = p
+      p += 1
+      if(p < s.len && (load8(s, p) == 45 || load8(s, p) == 43)){ p += 1 }
+      mut ed = false
+      while(p < s.len && _is_digit(load8(s, p))){ ed = true p += 1 }
+      if(!ed){ p = ep }
+   }
+   if(!any_digit){ return [false, 0.0, start] }
+   [true, str.atof(str.str_slice(s, start, p)), p]
+}
+
+fn _number_list(any raw) list {
+   def s = to_str(raw)
+   mut xs = []
+   mut p = 0
+   while(p < s.len){
+      def r = _read_num(s, p)
+      if(r.get(0, false)){
+         xs = xs.append(float(r.get(1, 0.0)))
+         p = int(r.get(2, p + 1))
+      } else {
+         p += 1
+      }
+   }
+   xs
+}
+
+fn _num(any raw, f64 fallback=0.0) f64 {
+   def xs = _number_list(raw)
+   xs.len > 0 ? float(xs.get(0, fallback)) : fallback
+}
+
+fn _clamp01(f64 v) f64 {
+   if(v < 0.0){ return 0.0 }
+   if(v > 1.0){ return 1.0 }
+   v
+}
+
+fn _opacity(any raw, f64 fallback=1.0) f64 {
+   if(!raw){ return fallback }
+   def s = str.strip(to_str(raw))
+   if(s.len == 0){ return fallback }
+   def v = _num(s, fallback)
+   _clamp01(str.endswith(s, "%") ? (v / 100.0) : v)
+}
+
+fn _rgba(int r, int g, int b, f64 a=1.0, any is_none=false) dict {
+   mut d = dict(5)
+   d["r"] = max(0, min(255, r))
+   d["g"] = max(0, min(255, g))
+   d["b"] = max(0, min(255, b))
+   d["a"] = _clamp01(a)
+   d["none"] = is_none
+   d
+}
+
+fn _rgba_none() dict { _rgba(0, 0, 0, 0.0, true) }
+
+fn _hex_byte(str s, int off) int {
+   def hi = str.hex_val(load8(s, off))
+   def lo = str.hex_val(load8(s, off + 1))
+   if(hi < 0 || lo < 0){ return 0 }
+   (hi << 4) | lo
+}
+
+fn _parse_color(any raw, any inherited=0) dict {
+   if(!raw){ return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
+   mut s = str.lower(str.strip(to_str(raw)))
+   if(s.len == 0){ return is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0) }
+   if(s == "none"){ return _rgba_none() }
+   if(s == "transparent"){ return _rgba(0, 0, 0, 0.0) }
+   if(str.startswith(s, "url(")){ return is_dict(inherited) ? inherited : _rgba(242, 242, 242, 1.0) }
+   if(str.startswith(s, "#")){
+      s = str.str_slice(s, 1, s.len)
+      if(s.len == 3){
+         def r = str.hex_val(load8(s, 0))
+         def g = str.hex_val(load8(s, 1))
+         def b = str.hex_val(load8(s, 2))
+         return _rgba((r << 4) | r, (g << 4) | g, (b << 4) | b, 1.0)
+      }
+      if(s.len >= 6){ return _rgba(_hex_byte(s, 0), _hex_byte(s, 2), _hex_byte(s, 4), 1.0) }
+   }
+   if(str.startswith(s, "rgb")){
+      def xs = _number_list(s)
+      if(xs.len >= 3){ return _rgba(int(xs[0]), int(xs[1]), int(xs[2]), 1.0) }
+   }
+   case s {
+      "white" -> _rgba(255, 255, 255, 1.0)
+      "black" -> _rgba(0, 0, 0, 1.0)
+      "red" -> _rgba(255, 0, 0, 1.0)
+      "green" -> _rgba(0, 128, 0, 1.0)
+      "blue" -> _rgba(0, 0, 255, 1.0)
+      _ -> is_dict(inherited) ? inherited : _rgba(0, 0, 0, 1.0)
+   }
+}
+
+fn _color_alpha(dict c, f64 opacity=1.0) f64 {
+   if(bool(c.get("none", false))){ return 0.0 }
+   _clamp01(float(c.get("a", 1.0)) * opacity)
+}
+
+fn _style_lookup(str style, str key) any {
+   if(style.len == 0){ return 0 }
+   def parts = str.split(style, ";")
+   mut i = 0
+   while(i < parts.len){
+      def part = to_str(parts[i])
+      def colon = str.find(part, ":")
+      if(colon >= 0){
+         def k = str.lower(str.strip(str.str_slice(part, 0, colon)))
+         if(k == key){ return str.strip(str.str_slice(part, colon + 1, part.len)) }
+      }
+      i += 1
+   }
+   0
+}
+
+fn _attr(any attrs, str key, any fallback=0) any {
+   if(!is_dict(attrs)){ return fallback }
+   attrs.get(key, fallback)
+}
+
+fn _style_attr(any attrs, str key, any fallback=0) any {
+   if(!is_dict(attrs)){ return fallback }
+   def style_val = _style_lookup(to_str(attrs.get("style", "")), key)
+   if(style_val){ return style_val }
+   attrs.get(key, fallback)
+}
+
+fn _mat_identity() list { [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }
+
+fn _mat_mul(list a, list b) list {
+   [
+      float(a[0]) * float(b[0]) + float(a[2]) * float(b[1]),
+      float(a[1]) * float(b[0]) + float(a[3]) * float(b[1]),
+      float(a[0]) * float(b[2]) + float(a[2]) * float(b[3]),
+      float(a[1]) * float(b[2]) + float(a[3]) * float(b[3]),
+      float(a[0]) * float(b[4]) + float(a[2]) * float(b[5]) + float(a[4]),
+      float(a[1]) * float(b[4]) + float(a[3]) * float(b[5]) + float(a[5])
+   ]
+}
+
+fn _mat_apply(list m, f64 x, f64 y) list {
+   [float(m[0]) * x + float(m[2]) * y + float(m[4]), float(m[1]) * x + float(m[3]) * y + float(m[5])]
+}
+
+fn _mat_translate(f64 x, f64 y) list { [1.0, 0.0, 0.0, 1.0, x, y] }
+
+fn _mat_scale(f64 x, f64 y) list { [x, 0.0, 0.0, y, 0.0, 0.0] }
+
+fn _mat_rotate(f64 deg) list {
+   def r = deg * math.PI / 180.0
+   def c = math.cos(r)
+   def s = math.sin(r)
+   [c, s, -s, c, 0.0, 0.0]
+}
+
+fn _transform_matrix(any raw) list {
+   def s = to_str(raw)
+   mut p = 0
+   mut out = _mat_identity()
+   while(p < s.len){
+      while(p < s.len && !_is_alpha(load8(s, p))){ p += 1 }
+      def start = p
+      while(p < s.len && (_is_alpha(load8(s, p)) || load8(s, p) == 45)){ p += 1 }
+      if(start >= p){ break }
+      def name = str.lower(str.str_slice(s, start, p))
+      while(p < s.len && load8(s, p) != 40){ p += 1 }
+      if(p >= s.len){ break }
+      p += 1
+      def arg_start = p
+      mut depth = 1
+      while(p < s.len && depth > 0){
+         def c = load8(s, p)
+         if(c == 40){ depth += 1 }
+         elif(c == 41){ depth -= 1 }
+         if(depth > 0){ p += 1 }
+      }
+      def args = _number_list(str.str_slice(s, arg_start, p))
+      if(p < s.len && load8(s, p) == 41){ p += 1 }
+      mut local = _mat_identity()
+      if(name == "translate" && args.len >= 1){
+         local = _mat_translate(float(args[0]), args.len > 1 ? float(args[1]) : 0.0)
+      } elif(name == "scale" && args.len >= 1){
+         local = _mat_scale(float(args[0]), args.len > 1 ? float(args[1]) : float(args[0]))
+      } elif(name == "matrix" && args.len >= 6){
+         local = [float(args[0]), float(args[1]), float(args[2]), float(args[3]), float(args[4]), float(args[5])]
+      } elif(name == "rotate" && args.len >= 1){
+         local = _mat_rotate(float(args[0]))
+         if(args.len >= 3){
+            local = _mat_mul(_mat_translate(float(args[1]), float(args[2])), _mat_mul(local, _mat_translate(0.0 - float(args[1]), 0.0 - float(args[2]))))
+         }
+      }
+      out = _mat_mul(out, local)
+   }
+   out
+}
+
+fn _state_root(list transform) dict {
+   mut s = dict(8)
+   s["fill"] = _rgba(0, 0, 0, 1.0)
+   s["stroke"] = _rgba_none()
+   s["stroke_width"] = 1.0
+   s["opacity"] = 1.0
+   s["fill_rule"] = "nonzero"
+   s["transform"] = transform
+   s
+}
+
+fn _state_child(dict parent, any attrs) dict {
+   mut s = dict_mod.dict_clone(parent)
+   def opacity = float(parent.get("opacity", 1.0)) * _opacity(_style_attr(attrs, "opacity", 1.0), 1.0)
+   s["opacity"] = opacity
+   def fill_raw = _style_attr(attrs, "fill", 0)
+   if(fill_raw){ s["fill"] = _parse_color(fill_raw, parent.get("fill", 0)) }
+   def stroke_raw = _style_attr(attrs, "stroke", 0)
+   if(stroke_raw){ s["stroke"] = _parse_color(stroke_raw, parent.get("stroke", 0)) }
+   def fill_op = _style_attr(attrs, "fill-opacity", 0)
+   if(fill_op && is_dict(s["fill"])){
+      def fc = dict_mod.dict_clone(s["fill"])
+      fc["a"] = _clamp01(float(fc.get("a", 1.0)) * _opacity(fill_op, 1.0))
+      s["fill"] = fc
+   }
+   def stroke_op = _style_attr(attrs, "stroke-opacity", 0)
+   if(stroke_op && is_dict(s["stroke"])){
+      def sc = dict_mod.dict_clone(s["stroke"])
+      sc["a"] = _clamp01(float(sc.get("a", 1.0)) * _opacity(stroke_op, 1.0))
+      s["stroke"] = sc
+   }
+   def sw = _style_attr(attrs, "stroke-width", 0)
+   if(sw){ s["stroke_width"] = max(0.0, _num(sw, float(s.get("stroke_width", 1.0)))) }
+   def fr = _style_attr(attrs, "fill-rule", 0)
+   if(fr){ s["fill_rule"] = str.lower(str.strip(to_str(fr))) }
+   def tf = _style_attr(attrs, "transform", 0)
+   if(tf){ s["transform"] = _mat_mul(s.get("transform", _mat_identity()), _transform_matrix(tf)) }
+   s
+}
+
+fn _pt(f64 x, f64 y) list { [x, y] }
+
+fn _apply_path(list paths, list m) list {
+   mut out = []
+   mut i = 0
+   while(i < paths.len){
+      def path = paths[i]
+      mut p2 = []
+      mut j = 0
+      while(j < path.len){
+         def p = path[j]
+         p2 = p2.append(_mat_apply(m, float(p[0]), float(p[1])))
+         j += 1
+      }
+      if(p2.len > 0){ out = out.append(p2) }
+      i += 1
+   }
+   out
+}
+
+fn _append_cubic(list cur, f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2, f64 x3, f64 y3) list {
+   def rough = max(max(math.abs(x1 - x0) + math.abs(y1 - y0), math.abs(x2 - x1) + math.abs(y2 - y1)), math.abs(x3 - x2) + math.abs(y3 - y2))
+   mut seg = int(max(8.0, min(32.0, rough * 2.0)))
+   mut i = 1
+   while(i <= seg){
+      def t = float(i) / float(seg)
+      def mt = 1.0 - t
+      def x = mt * mt * mt * x0 + 3.0 * mt * mt * t * x1 + 3.0 * mt * t * t * x2 + t * t * t * x3
+      def y = mt * mt * mt * y0 + 3.0 * mt * mt * t * y1 + 3.0 * mt * t * t * y2 + t * t * t * y3
+      cur = cur.append(_pt(x, y))
+      i += 1
+   }
+   cur
+}
+
+fn _append_quad(list cur, f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2) list {
+   _append_cubic(cur, x0, y0, x0 + (2.0 / 3.0) * (x1 - x0), y0 + (2.0 / 3.0) * (y1 - y0), x2 + (2.0 / 3.0) * (x1 - x2), y2 + (2.0 / 3.0) * (y1 - y2), x2, y2)
+}
+
+fn _angle_between(f64 ux, f64 uy, f64 vx, f64 vy) f64 {
+   def dot = ux * vx + uy * vy
+   def det = ux * vy - uy * vx
+   math.atan2(det, dot)
+}
+
+fn _append_arc(list cur, f64 x0, f64 y0, f64 rx0, f64 ry0, f64 rot_deg, int large_arc, int sweep, f64 x, f64 y) list {
+   mut rx = math.abs(rx0)
+   mut ry = math.abs(ry0)
+   if(rx <= 0.000001 || ry <= 0.000001 || (math.abs(x - x0) < 0.000001 && math.abs(y - y0) < 0.000001)){
+      return cur.append(_pt(x, y))
+   }
+   def phi = rot_deg * math.PI / 180.0
+   def cos_phi = math.cos(phi)
+   def sin_phi = math.sin(phi)
+   def dx = (x0 - x) * 0.5
+   def dy = (y0 - y) * 0.5
+   def x1p = cos_phi * dx + sin_phi * dy
+   def y1p = 0.0 - sin_phi * dx + cos_phi * dy
+   def lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry)
+   if(lam > 1.0){
+      def s = math.sqrt(lam)
+      rx *= s
+      ry *= s
+   }
+   def rx2 = rx * rx
+   def ry2 = ry * ry
+   def x1p2 = x1p * x1p
+   def y1p2 = y1p * y1p
+   mut rad = (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2) / max(0.000001, rx2 * y1p2 + ry2 * x1p2)
+   if(rad < 0.0){ rad = 0.0 }
+   def sign = (large_arc == sweep) ? -1.0 : 1.0
+   def coef = sign * math.sqrt(rad)
+   def cxp = coef * (rx * y1p / ry)
+   def cyp = coef * (0.0 - ry * x1p / rx)
+   def cx = cos_phi * cxp - sin_phi * cyp + (x0 + x) * 0.5
+   def cy = sin_phi * cxp + cos_phi * cyp + (y0 + y) * 0.5
+   def ux = (x1p - cxp) / rx
+   def uy = (y1p - cyp) / ry
+   def vx = (0.0 - x1p - cxp) / rx
+   def vy = (0.0 - y1p - cyp) / ry
+   mut theta = _angle_between(1.0, 0.0, ux, uy)
+   mut delta = _angle_between(ux, uy, vx, vy)
+   if(sweep == 0 && delta > 0.0){ delta -= 2.0 * math.PI }
+   if(sweep != 0 && delta < 0.0){ delta += 2.0 * math.PI }
+   def seg = int(max(4.0, min(48.0, math.ceil(math.abs(delta) / (math.PI / 8.0)))))
+   mut i = 1
+   while(i <= seg){
+      def a = theta + delta * float(i) / float(seg)
+      def ca = math.cos(a)
+      def sa = math.sin(a)
+      cur = cur.append(_pt(cx + cos_phi * rx * ca - sin_phi * ry * sa, cy + sin_phi * rx * ca + cos_phi * ry * sa))
+      i += 1
+   }
+   cur
+}
+
+fn _path_finish(list paths, list cur) list {
+   cur.len > 0 ? paths.append(cur) : paths
+}
+
+fn _path_flatten(any raw) list {
+   def d = to_str(raw)
+   mut paths = []
+   mut cur = []
+   mut p = 0
+   mut cmd = 0
+   mut x = 0.0
+   mut y = 0.0
+   mut sx = 0.0
+   mut sy = 0.0
+   mut last_cx = 0.0
+   mut last_cy = 0.0
+   mut last_qx = 0.0
+   mut last_qy = 0.0
+   mut last_cmd = 0
+   while(p < d.len){
+      p = _skip_sep(d, p)
+      if(p >= d.len){ break }
+      if(_is_path_cmd(load8(d, p))){
+         cmd = load8(d, p)
+         p += 1
+      } elif(cmd == 0){
+         p += 1
+         continue
+      }
+      def rel = cmd >= 97 && cmd <= 122
+      def uc = rel ? (cmd - 32) : cmd
+      if(uc == 90){
+         if(cur.len > 0){ cur = cur.append(_pt(sx, sy)) paths = paths.append(cur) cur = [] x = sx y = sy }
+         last_cmd = uc
+         continue
+      }
+      if(uc == 77){
+         mut first = true
+         while(true){
+            def r1 = _read_num(d, p)
+            if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2]))
+            if(!r2[0]){ break }
+            p = int(r2[2])
+            mut nx = float(r1[1])
+            mut ny = float(r2[1])
+            if(rel){ nx += x ny += y }
+            if(first){
+               paths = _path_finish(paths, cur)
+               cur = [_pt(nx, ny)]
+               sx = nx
+               sy = ny
+               first = false
+            } else {
+               cur = cur.append(_pt(nx, ny))
+            }
+            x = nx
+            y = ny
+         }
+         last_cmd = 77
+      } elif(uc == 76){
+         while(true){
+            def r1 = _read_num(d, p)
+            if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2]))
+            if(!r2[0]){ break }
+            p = int(r2[2])
+            x = (rel ? x : 0.0) + float(r1[1])
+            y = (rel ? y : 0.0) + float(r2[1])
+            cur = cur.append(_pt(x, y))
+         }
+         last_cmd = 76
+      } elif(uc == 72){
+         while(true){
+            def r = _read_num(d, p)
+            if(!r[0]){ break }
+            p = int(r[2])
+            x = rel ? x + float(r[1]) : float(r[1])
+            cur = cur.append(_pt(x, y))
+         }
+         last_cmd = 72
+      } elif(uc == 86){
+         while(true){
+            def r = _read_num(d, p)
+            if(!r[0]){ break }
+            p = int(r[2])
+            y = rel ? y + float(r[1]) : float(r[1])
+            cur = cur.append(_pt(x, y))
+         }
+         last_cmd = 86
+      } elif(uc == 67){
+         while(true){
+            def r1 = _read_num(d, p) if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
+            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+            def r5 = _read_num(d, int(r4[2])) if(!r5[0]){ break }
+            def r6 = _read_num(d, int(r5[2])) if(!r6[0]){ break }
+            p = int(r6[2])
+            def x1 = (rel ? x : 0.0) + float(r1[1])
+            def y1 = (rel ? y : 0.0) + float(r2[1])
+            def x2 = (rel ? x : 0.0) + float(r3[1])
+            def y2 = (rel ? y : 0.0) + float(r4[1])
+            def x3 = (rel ? x : 0.0) + float(r5[1])
+            def y3 = (rel ? y : 0.0) + float(r6[1])
+            cur = _append_cubic(cur, x, y, x1, y1, x2, y2, x3, y3)
+            x = x3
+            y = y3
+            last_cx = x2
+            last_cy = y2
+         }
+         last_cmd = 67
+      } elif(uc == 83){
+         while(true){
+            def r1 = _read_num(d, p) if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
+            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+            p = int(r4[2])
+            def x1 = (last_cmd == 67 || last_cmd == 83) ? (2.0 * x - last_cx) : x
+            def y1 = (last_cmd == 67 || last_cmd == 83) ? (2.0 * y - last_cy) : y
+            def x2 = (rel ? x : 0.0) + float(r1[1])
+            def y2 = (rel ? y : 0.0) + float(r2[1])
+            def x3 = (rel ? x : 0.0) + float(r3[1])
+            def y3 = (rel ? y : 0.0) + float(r4[1])
+            cur = _append_cubic(cur, x, y, x1, y1, x2, y2, x3, y3)
+            x = x3
+            y = y3
+            last_cx = x2
+            last_cy = y2
+         }
+         last_cmd = 83
+      } elif(uc == 81){
+         while(true){
+            def r1 = _read_num(d, p) if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
+            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+            p = int(r4[2])
+            def x1 = (rel ? x : 0.0) + float(r1[1])
+            def y1 = (rel ? y : 0.0) + float(r2[1])
+            def x2 = (rel ? x : 0.0) + float(r3[1])
+            def y2 = (rel ? y : 0.0) + float(r4[1])
+            cur = _append_quad(cur, x, y, x1, y1, x2, y2)
+            x = x2
+            y = y2
+            last_qx = x1
+            last_qy = y1
+         }
+         last_cmd = 81
+      } elif(uc == 84){
+         while(true){
+            def r1 = _read_num(d, p) if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+            p = int(r2[2])
+            def x1 = (last_cmd == 81 || last_cmd == 84) ? (2.0 * x - last_qx) : x
+            def y1 = (last_cmd == 81 || last_cmd == 84) ? (2.0 * y - last_qy) : y
+            def x2 = (rel ? x : 0.0) + float(r1[1])
+            def y2 = (rel ? y : 0.0) + float(r2[1])
+            cur = _append_quad(cur, x, y, x1, y1, x2, y2)
+            x = x2
+            y = y2
+            last_qx = x1
+            last_qy = y1
+         }
+         last_cmd = 84
+      } elif(uc == 65){
+         while(true){
+            def r1 = _read_num(d, p) if(!r1[0]){ break }
+            def r2 = _read_num(d, int(r1[2])) if(!r2[0]){ break }
+            def r3 = _read_num(d, int(r2[2])) if(!r3[0]){ break }
+            def r4 = _read_num(d, int(r3[2])) if(!r4[0]){ break }
+            def r5 = _read_num(d, int(r4[2])) if(!r5[0]){ break }
+            def r6 = _read_num(d, int(r5[2])) if(!r6[0]){ break }
+            def r7 = _read_num(d, int(r6[2])) if(!r7[0]){ break }
+            p = int(r7[2])
+            def nx = (rel ? x : 0.0) + float(r6[1])
+            def ny = (rel ? y : 0.0) + float(r7[1])
+            cur = _append_arc(cur, x, y, float(r1[1]), float(r2[1]), float(r3[1]), int(r4[1]) != 0 ? 1 : 0, int(r5[1]) != 0 ? 1 : 0, nx, ny)
+            x = nx
+            y = ny
+         }
+         last_cmd = 65
+      } else {
+         p += 1
+      }
+   }
+   _path_finish(paths, cur)
+}
+
+fn _rect_path(f64 x, f64 y, f64 w, f64 h, f64 rx=0.0, f64 ry=0.0) list {
+   if(w <= 0.0 || h <= 0.0){ return [] }
+   rx = min(math.abs(rx), w * 0.5)
+   ry = min(math.abs(ry), h * 0.5)
+   if(rx <= 0.0 || ry <= 0.0){ return [[_pt(x, y), _pt(x + w, y), _pt(x + w, y + h), _pt(x, y + h), _pt(x, y)]] }
+   mut p = []
+   mut i = 0
+   while(i <= 6){
+      def a = -math.PI * 0.5 + float(i) * (math.PI * 0.5 / 6.0)
+      p = p.append(_pt(x + w - rx + math.cos(a) * rx, y + ry + math.sin(a) * ry))
+      i += 1
+   }
+   i = 0
+   while(i <= 6){
+      def a = float(i) * (math.PI * 0.5 / 6.0)
+      p = p.append(_pt(x + w - rx + math.cos(a) * rx, y + h - ry + math.sin(a) * ry))
+      i += 1
+   }
+   i = 0
+   while(i <= 6){
+      def a = math.PI * 0.5 + float(i) * (math.PI * 0.5 / 6.0)
+      p = p.append(_pt(x + rx + math.cos(a) * rx, y + h - ry + math.sin(a) * ry))
+      i += 1
+   }
+   i = 0
+   while(i <= 6){
+      def a = math.PI + float(i) * (math.PI * 0.5 / 6.0)
+      p = p.append(_pt(x + rx + math.cos(a) * rx, y + ry + math.sin(a) * ry))
+      i += 1
+   }
+   [p.append(p[0])]
+}
+
+fn _ellipse_path(f64 cx, f64 cy, f64 rx, f64 ry) list {
+   if(rx <= 0.0 || ry <= 0.0){ return [] }
+   mut p = []
+   mut i = 0
+   def n = 40
+   while(i <= n){
+      def a = float(i) * (2.0 * math.PI / float(n))
+      p = p.append(_pt(cx + math.cos(a) * rx, cy + math.sin(a) * ry))
+      i += 1
+   }
+   [p]
+}
+
+fn _points_path(any raw, bool close=false) list {
+   def xs = _number_list(raw)
+   mut p = []
+   mut i = 0
+   while(i + 1 < xs.len){
+      p = p.append(_pt(float(xs[i]), float(xs[i + 1])))
+      i += 2
+   }
+   if(close && p.len > 0){ p = p.append(p[0]) }
+   p.len > 0 ? [p] : []
+}
+
+fn _line_path(f64 x1, f64 y1, f64 x2, f64 y2) list { [[_pt(x1, y1), _pt(x2, y2)]] }
+
+fn _winding_at(list paths, f64 x, f64 y, bool evenodd=false) int {
+   mut winding = 0
+   mut i = 0
+   while(i < paths.len){
+      def path = paths[i]
+      mut j = 0
+      while(j + 1 < path.len){
+         def p0 = path[j]
+         def p1 = path[j + 1]
+         def x0 = float(p0[0])
+         def y0 = float(p0[1])
+         def x1 = float(p1[0])
+         def y1 = float(p1[1])
+         if(y0 <= y){
+            if(y1 > y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) > 0.0){ winding += 1 }
+         } elif(y1 <= y && ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) < 0.0){
+            winding -= 1
+         }
+         j += 1
+      }
+      i += 1
+   }
+   evenodd ? (math.abs(winding) % 2) : winding
+}
+
+fn _seg_dist2(f64 px, f64 py, f64 x0, f64 y0, f64 x1, f64 y1) f64 {
+   def dx = x1 - x0
+   def dy = y1 - y0
+   def len2 = dx * dx + dy * dy
+   mut t = len2 > 0.000001 ? ((px - x0) * dx + (py - y0) * dy) / len2 : 0.0
+   t = _clamp01(t)
+   def qx = x0 + dx * t
+   def qy = y0 + dy * t
+   def ex = px - qx
+   def ey = py - qy
+   ex * ex + ey * ey
+}
+
+fn _stroke_hit(list paths, f64 x, f64 y, f64 width) bool {
+   def r2 = (width * 0.5) * (width * 0.5)
+   mut i = 0
+   while(i < paths.len){
+      def path = paths[i]
+      mut j = 0
+      while(j + 1 < path.len){
+         def p0 = path[j]
+         def p1 = path[j + 1]
+         if(_seg_dist2(x, y, float(p0[0]), float(p0[1]), float(p1[0]), float(p1[1])) <= r2){ return true }
+         j += 1
+      }
+      i += 1
+   }
+   false
+}
+
+fn _path_bounds(list paths, f64 pad, int w, int h) list {
+   mut minx = 1000000000.0
+   mut miny = 1000000000.0
+   mut maxx = -1000000000.0
+   mut maxy = -1000000000.0
+   mut any_pt = false
+   mut i = 0
+   while(i < paths.len){
+      def path = paths[i]
+      mut j = 0
+      while(j < path.len){
+         def p = path[j]
+         def x = float(p[0])
+         def y = float(p[1])
+         if(x < minx){ minx = x }
+         if(y < miny){ miny = y }
+         if(x > maxx){ maxx = x }
+         if(y > maxy){ maxy = y }
+         any_pt = true
+         j += 1
+      }
+      i += 1
+   }
+   if(!any_pt){ return [0, 0, -1, -1] }
+   def x0 = max(0, int(math.floor(minx - pad)))
+   def y0 = max(0, int(math.floor(miny - pad)))
+   def x1 = min(w - 1, int(math.ceil(maxx + pad)))
+   def y1 = min(h - 1, int(math.ceil(maxy + pad)))
+   [x0, y0, x1, y1]
+}
+
+fn _blend(any out, int off, dict color, f64 alpha) any {
+   alpha = _clamp01(alpha)
+   if(alpha <= 0.0){ return 0 }
+   def sr = float(color.get("r", 0))
+   def sg = float(color.get("g", 0))
+   def sb = float(color.get("b", 0))
+   def dr = float(load8(out, off) & 255)
+   def dg = float(load8(out, off + 1) & 255)
+   def db = float(load8(out, off + 2) & 255)
+   def da = float(load8(out, off + 3) & 255) / 255.0
+   def oa = alpha + da * (1.0 - alpha)
+   if(oa <= 0.0){ return 0 }
+   def r = (sr * alpha + dr * da * (1.0 - alpha)) / oa
+   def g = (sg * alpha + dg * da * (1.0 - alpha)) / oa
+   def b = (sb * alpha + db * da * (1.0 - alpha)) / oa
+   store8(out, max(0, min(255, int(r + 0.5))), off)
+   store8(out, max(0, min(255, int(g + 0.5))), off + 1)
+   store8(out, max(0, min(255, int(b + 0.5))), off + 2)
+   store8(out, max(0, min(255, int(oa * 255.0 + 0.5))), off + 3)
+   0
+}
+
+fn _draw_paths(any out, int w, int h, list paths, dict color, f64 opacity, str mode, f64 stroke_width=1.0, str fill_rule="nonzero") any {
+   def ca = _color_alpha(color, opacity)
+   if(ca <= 0.0 || paths.len == 0){ return 0 }
+   def evenodd = fill_rule == "evenodd"
+   def pad = mode == "stroke" ? stroke_width * 0.5 + 1.0 : 1.0
+   def b = _path_bounds(paths, pad, w, h)
+   if(int(b[2]) < int(b[0]) || int(b[3]) < int(b[1])){ return 0 }
+   mut y = int(b[1])
+   while(y <= int(b[3])){
+      mut x = int(b[0])
+      while(x <= int(b[2])){
+         mut cov = 0
+         mut sy = 0
+         while(sy < 2){
+            mut sx = 0
+            while(sx < 2){
+               def px = float(x) + (float(sx) + 0.5) * 0.5
+               def py = float(y) + (float(sy) + 0.5) * 0.5
+               if(mode == "fill"){
+                  if(_winding_at(paths, px, py, evenodd) != 0){ cov += 1 }
+               } elif(_stroke_hit(paths, px, py, stroke_width)){
+                  cov += 1
+               }
+               sx += 1
+            }
+            sy += 1
+         }
+         if(cov > 0){ _blend(out, (y * w + x) * 4, color, ca * float(cov) * 0.25) }
          x += 1
       }
       y += 1
    }
-   cairo_surface_destroy(surface)
-   _svg_g_object_unref(svg_handle)
-   def rgba = init_str(out_ptr, out_len)
+   0
+}
+
+fn _collect_defs(any node, dict defs) any {
+   if(!is_dict(node)){ return 0 }
+   def attrs = node.get("attr", dict())
+   def id = to_str(attrs.get("id", ""))
+   if(id.len > 0){ defs[id] = node }
+   def children = node.get("children", [])
+   mut i = 0
+   while(i < children.len){
+      _collect_defs(children[i], defs)
+      i += 1
+   }
+   0
+}
+
+fn _node_paths(str name, any attrs) list {
+   if(name == "path"){ return _path_flatten(_attr(attrs, "d", "")) }
+   if(name == "rect"){
+      def x = _num(_attr(attrs, "x", 0.0), 0.0)
+      def y = _num(_attr(attrs, "y", 0.0), 0.0)
+      def w = _num(_attr(attrs, "width", 0.0), 0.0)
+      def h = _num(_attr(attrs, "height", 0.0), 0.0)
+      mut rx = _num(_attr(attrs, "rx", 0.0), 0.0)
+      mut ry = _num(_attr(attrs, "ry", rx), rx)
+      if(rx == 0.0 && ry > 0.0){ rx = ry }
+      return _rect_path(x, y, w, h, rx, ry)
+   }
+   if(name == "circle"){ return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0), _num(_attr(attrs, "r", 0.0), 0.0)) }
+   if(name == "ellipse"){ return _ellipse_path(_num(_attr(attrs, "cx", 0.0), 0.0), _num(_attr(attrs, "cy", 0.0), 0.0), _num(_attr(attrs, "rx", 0.0), 0.0), _num(_attr(attrs, "ry", 0.0), 0.0)) }
+   if(name == "polygon"){ return _points_path(_attr(attrs, "points", ""), true) }
+   if(name == "polyline"){ return _points_path(_attr(attrs, "points", ""), false) }
+   if(name == "line"){ return _line_path(_num(_attr(attrs, "x1", 0.0), 0.0), _num(_attr(attrs, "y1", 0.0), 0.0), _num(_attr(attrs, "x2", 0.0), 0.0), _num(_attr(attrs, "y2", 0.0), 0.0)) }
+   []
+}
+
+fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=0) any {
+   if(!is_dict(node) || depth > 16){ return 0 }
+   def name = str.lower(to_str(node.get("name", "")))
+   if(name == "defs" || name == "lineargradient" || name == "radialgradient" || name == "clippath" || name == "mask" || name == "style"){ return 0 }
+   def attrs = node.get("attr", dict())
+   if(to_str(_style_attr(attrs, "display", "")) == "none"){ return 0 }
+   def st = _state_child(state, attrs)
+   if(name == "use"){
+      mut href = to_str(attrs.get("xlink:href", attrs.get("href", "")))
+      if(str.startswith(href, "#")){ href = str.str_slice(href, 1, href.len) }
+      if(defs.contains(href)){
+         mut use_state = dict_mod.dict_clone(st)
+         def tx = _num(attrs.get("x", 0.0), 0.0)
+         def ty = _num(attrs.get("y", 0.0), 0.0)
+         if(tx != 0.0 || ty != 0.0){ use_state["transform"] = _mat_mul(use_state.get("transform", _mat_identity()), _mat_translate(tx, ty)) }
+         _draw_node(out, w, h, defs[href], use_state, defs, depth + 1)
+      }
+      return 0
+   }
+   def raw_paths = _node_paths(name, attrs)
+   if(raw_paths.len > 0){
+      def paths = _apply_path(raw_paths, st.get("transform", _mat_identity()))
+      def fill = st.get("fill", _rgba_none())
+      if(_color_alpha(fill, float(st.get("opacity", 1.0))) > 0.0 && name != "line" && name != "polyline"){
+         _draw_paths(out, w, h, paths, fill, float(st.get("opacity", 1.0)), "fill", 1.0, to_str(st.get("fill_rule", "nonzero")))
+      }
+      def stroke = st.get("stroke", _rgba_none())
+      if(_color_alpha(stroke, float(st.get("opacity", 1.0))) > 0.0){
+         def m = st.get("transform", _mat_identity())
+         def scale = max(math.sqrt(float(m[0]) * float(m[0]) + float(m[1]) * float(m[1])), math.sqrt(float(m[2]) * float(m[2]) + float(m[3]) * float(m[3])))
+         _draw_paths(out, w, h, paths, stroke, float(st.get("opacity", 1.0)), "stroke", max(0.5, float(st.get("stroke_width", 1.0)) * scale), "nonzero")
+      }
+   }
+   def children = node.get("children", [])
+   mut i = 0
+   while(i < children.len){
+      _draw_node(out, w, h, children[i], st, defs, depth + 1)
+      i += 1
+   }
+   0
+}
+
+fn _svg_min_raster() int {
+   mut target = 32.0
+   def raw = os.env("NY_SVG_MIN_RASTER")
+   if(raw){
+      target = _num(raw, target)
+      if(target < 16.0){ target = 16.0 } elif(target > 512.0){ target = 512.0 }
+   }
+   int(target + 0.5)
+}
+
+fn _viewport(any root) list {
+   def attrs = root.get("attr", dict())
+   def width = max(1.0, _num(attrs.get("width", 64.0), 64.0))
+   def height = max(1.0, _num(attrs.get("height", width), width))
+   def vb_raw = attrs.get("viewBox", attrs.get("viewbox", ""))
+   def vb = _number_list(vb_raw)
+   if(vb.len >= 4){ return [float(vb[0]), float(vb[1]), max(1.0, float(vb[2])), max(1.0, float(vb[3])), width, height] }
+   [0.0, 0.0, width, height, width, height]
+}
+
+fn _decode_root(any root) any {
+   if(!is_dict(root) || str.lower(to_str(root.get("name", ""))) != "svg"){
+      _svg_set_error("missing <svg> root")
+      return 0
+   }
+   def vp = _viewport(root)
+   def min_raster = _svg_min_raster()
+   def src_w = float(vp[4])
+   def src_h = float(vp[5])
+   def scale = float(min_raster) / max(src_w, src_h)
+   def out_w = max(1, int(src_w * scale + 0.5))
+   def out_h = max(1, int(src_h * scale + 0.5))
+   def ptr = malloc(out_w * out_h * 4 + 32)
+   if(!ptr){
+      _svg_set_error("out of memory allocating SVG raster")
+      return 0
+   }
+   memset(ptr, 0, out_w * out_h * 4)
+   mut defs = dict(32)
+   _collect_defs(root, defs)
+   def base = _mat_mul(_mat_scale(float(out_w) / float(vp[2]), float(out_h) / float(vp[3])), _mat_translate(0.0 - float(vp[0]), 0.0 - float(vp[1])))
+   _draw_node(ptr, out_w, out_h, root, _state_root(base), defs)
+   def rgba = init_str(ptr, out_w * out_h * 4)
    mut out = dict(4)
    out = dict_mod.dict_write(out, "data", rgba)
-   out = dict_mod.dict_write(out, "width", w)
-   out = dict_mod.dict_write(out, "height", h)
+   out = dict_mod.dict_write(out, "width", out_w)
+   out = dict_mod.dict_write(out, "height", out_h)
    out = dict_mod.dict_write(out, "channels", 4)
    _svg_last_error = ""
    out
 }
 
-fn _render_handle(any: svg_handle): any {
-   if(!svg_handle){ return 0 }
-   def dims = malloc(_RSVG_DIMENSION_DATA_SIZE)
-   if(!dims){
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("out of memory allocating SVG dimensions")
+fn decode(any data, any _source_path="") any {
+   "Decodes SVG bytes through the native Ny rasterizer."
+   if(!_looks_like_svg(data)){
+      _svg_set_error("input does not look like SVG")
       return 0
    }
-   memset(dims, 0, _RSVG_DIMENSION_DATA_SIZE)
-   rsvg_handle_get_dimensions(svg_handle, dims)
-   mut natural_w, natural_h = load32(dims, 0), load32(dims, 4)
-   free(dims)
-   if(natural_w <= 0 || natural_h <= 0){ natural_w, natural_h = 64, 64 }
-   if(natural_w > 32768 || natural_h > 32768){
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("SVG dimensions are too large")
+   def root = _parse_svg_tree(data)
+   if(!root){
+      _svg_set_error("SVG XML parse failed")
       return 0
    }
-   mut target_max = 64.0
-   def target_raw = env("NY_SVG_MIN_RASTER")
-   if(target_raw){
-      target_max = float(str.atof(to_str(target_raw)))
-      if(target_max < 16.0){ target_max = 16.0 } elif(target_max > 512.0){ target_max = 512.0 }
-   }
-   mut scale = 1.0
-   def max_dim = float(max(natural_w, natural_h))
-   if(max_dim > 0.0 && max_dim < target_max){ scale = target_max / max_dim }
-   mut w, h = int(float(natural_w) * scale + 0.5), int(float(natural_h) * scale + 0.5)
-   if(w <= 0){ w = 1 }
-   if(h <= 0){ h = 1 }
-   if(w > 32768 || h > 32768){
-      _svg_g_object_unref(svg_handle)
-      _svg_set_error("scaled SVG dimensions are too large")
-      return 0
-   }
-   def surface = cairo_image_surface_create(_CAIRO_FORMAT_ARGB32, w, h)
-   _svg_decode_surface(surface, svg_handle, w, h, scale)
+   _decode_root(root)
 }
 
-fn decode(any: data, any: _source_path=""): any {
-   "Decodes SVG bytes through the native librsvg + cairo backend."
-   if(!_looks_like_svg(data)){ return 0 }
-   if(!_svg_load_dyn()){ return 0 }
-   if(!is_str(data) || data.len == 0){
-      _svg_set_error("empty SVG payload")
-      return 0
-   }
-   def err_pp = malloc(8)
-   if(!err_pp){
-      _svg_set_error("out of memory allocating SVG error pointer")
-      return 0
-   }
-   store64_h(err_pp, 0, 0)
-   def svg_handle = rsvg_handle_new_from_data(data, data.len, err_pp)
-   if(!svg_handle){
-      def msg = _svg_error_message(err_pp, "librsvg failed to parse SVG data")
-      free(err_pp)
-      _svg_set_error(msg)
-      return 0
-   }
-   free(err_pp)
-   _render_handle(svg_handle)
-}
-
-fn load_path(any: path): any {
-   "Loads and decodes an SVG file directly through librsvg, preserving file-relative references."
-   if(!_svg_load_dyn()){ return 0 }
-   if(!is_str(path) || path.len == 0 || !file_exists(path)){
+fn load_path(any path) any {
+   "Loads and decodes an SVG file through the native Ny rasterizer."
+   if(!is_str(path) || path.len == 0 || !os.file_exists(path)){
       _svg_set_error("SVG path not found: " + to_str(path))
       return 0
    }
-   def err_pp = malloc(8)
-   if(!err_pp){
-      _svg_set_error("out of memory allocating SVG error pointer")
+   def r = os.file_read(path)
+   if(!is_ok(r)){
+      _svg_set_error("failed to read SVG path: " + to_str(path))
       return 0
    }
-   store64_h(err_pp, 0, 0)
-   def svg_handle = rsvg_handle_new_from_file(cstr(path), err_pp)
-   if(!svg_handle){
-      def msg = _svg_error_message(err_pp, "librsvg failed to open SVG file")
-      free(err_pp)
-      _svg_set_error(msg)
-      return 0
-   }
-   free(err_pp)
-   _render_handle(svg_handle)
+   decode(unwrap(r), path)
 }

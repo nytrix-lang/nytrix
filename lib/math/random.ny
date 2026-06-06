@@ -1,5 +1,7 @@
-;; Keywords: random rng pseudorandom
+;; Keywords: random rng pseudorandom math
 ;; Math Random for Nytrix
+;; References:
+;; - std.math
 module std.math.random(rand, seed, random, uniform, randint, randrange, choice, shuffle, sample, new, next, float, int)
 use std.core
 use std.math
@@ -8,18 +10,18 @@ use std.math.float
 use std.math.float as flt
 use std.math.simmd as simmd
 
-fn rand(): int {
+fn rand() int {
    "Return a random 63-bit positive integer using the global system RNG."
    def r = __rand64() & 0x7FFFFFFFFFFFFFFF
    from_int(r)
 }
 
-fn seed(int: n): any {
+fn seed(int n) any {
    "Sets the global random seed for the system PRNG to `n`."
    return __srand(n)
 }
 
-fn random(): any {
+fn random() any {
    "Return a random float in [0, 1) using the global system RNG."
    def int: scale = 0x20000000000000
    def int: r = rand()
@@ -28,12 +30,12 @@ fn random(): any {
    fdiv(flt.float(rem), flt.float(scale))
 }
 
-fn uniform(any: a, any: b): any {
+fn uniform(any a, any b) any {
    "Return a random float in [a, b] using the global system RNG."
    fadd(flt.float(a), fmul(random(), fsub(flt.float(b), flt.float(a))))
 }
 
-fn _rand_range(int: a, int: b, bool: inclusive): int {
+fn _rand_range(int a, int b, bool inclusive) int {
    if(a == b){ return a }
    def range = b - a + (inclusive ? 1 : 0)
    if(range <= 0){ return a }
@@ -43,17 +45,17 @@ fn _rand_range(int: a, int: b, bool: inclusive): int {
    return a + rem
 }
 
-fn randint(int: a, int: b): int {
+fn randint(int a, int b) int {
    "Return a random integer in [a, b] using the global system RNG."
    _rand_range(a, b, true)
 }
 
-fn randrange(int: a, int: b): int {
+fn randrange(int a, int b) int {
    "Return a random integer in [a, b) using the global system RNG."
    _rand_range(a, b, false)
 }
 
-fn choice(seq: xs): any {
+fn choice(seq xs) any {
    "Return a random element from a non-empty sequence xs using the global system RNG."
    mut n = xs.len
    if(n == 0){ return 0 }
@@ -63,7 +65,7 @@ fn choice(seq: xs): any {
    return xs.get(rem)
 }
 
-fn shuffle(list: xs): list {
+fn shuffle(list xs) list {
    "Shuffles the elements of list `xs` in-place using the Fisher-Yates algorithm."
    def n = xs.len
    if(n <= 1){ return xs }
@@ -81,7 +83,7 @@ fn shuffle(list: xs): list {
    return xs
 }
 
-fn sample(seq: xs, int: k): list {
+fn sample(seq xs, int k) list {
    "Returns a new list containing `k` unique elements randomly chosen from sequence `xs`."
    def n = xs.len
    if(k > n){ k = n }
@@ -98,9 +100,9 @@ fn sample(seq: xs, int: k): list {
    return res
 }
 
-fn _rotl32(int: x, int: k): int { simmd.rotl32(x, k) }
+fn _rotl32(int x, int k) int { simmd.rotl32(x, k) }
 
-fn new(int: seed_val): list {
+fn new(int seed_val) list {
    "Creates a new deterministic RNG context(Xoroshiro64). Uses a list for mutable state."
    mut s = (seed_val == 0) ? 0xDEADBEEF : seed_val
    mut s0 = s & 0xFFFFFFFF
@@ -109,7 +111,7 @@ fn new(int: seed_val): list {
    [s0, s1]
 }
 
-fn next(list: ctx): int {
+fn next(list ctx) int {
    "Advances state and returns a 32-bit random integer. Modifies ctx list in-place."
    mut s0, s1 = ctx.get(0), ctx.get(1)
    def res = (_rotl32((s0 * 0x9E3779BB) & 0xFFFFFFFF, 5) * 5) & 0xFFFFFFFF
@@ -119,12 +121,12 @@ fn next(list: ctx): int {
    res
 }
 
-fn float(list: ctx): any {
+fn float(list ctx) any {
    "Returns a random float in [0, 1)."
    fdiv(from_int(next(ctx)), 4294967296.0)
 }
 
-fn int(list: ctx, int: a, int: b): int {
+fn int(list ctx, int a, int b) int {
    "Returns a random integer in [a, b]."
    def range = b - a + 1
    if(range <= 0){ return a }
