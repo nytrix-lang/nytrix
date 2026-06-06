@@ -1,5 +1,8 @@
-;; Keywords: sound backend io input output stream
+;; Keywords: sound backend io input output stream os
 ;; Shared sound backend I/O contracts and sample-buffer transfer operations.
+;; References:
+;; - std.os.sound.backend
+;; - std.os
 module std.os.sound.backend.io(create, connect, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
 use std.core
 use std.core.dict_mod
@@ -10,19 +13,20 @@ use std.os.sound.backend.alsa as audio_alsa
 use std.os.sound.backend.pulse as audio_pulse
 use std.os.sound.backend.jack as audio_jack
 use std.os.sound.backend.winmm as audio_winmm
+use std.os.sound.backend.shared as shared
 
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
 
-fn _forced_backend(): str { common.env_lower("NY_AUDIO_BACKEND") }
+fn _forced_backend() str { common.env_lower("NY_AUDIO_BACKEND") }
 
-fn _set_backend(dict: ctx, int: id, str: name): dict {
+fn _set_backend(dict ctx, int id, str name) dict {
    ctx = ctx.set("backend", id)
    ctx = ctx.set("backend_name", name)
    ctx
 }
 
-fn _connect_backend(dict: ctx, str: backend): any {
+fn _connect_backend(dict ctx, str backend) any {
    mut id = 0
    mut name = ""
    mut new_ctx = 0
@@ -47,7 +51,7 @@ fn _connect_backend(dict: ctx, str: backend): any {
    0
 }
 
-fn _connect_linux_desktop(dict: ctx, bool: allow_jack=false): any {
+fn _connect_linux_desktop(dict ctx, bool allow_jack=false) any {
    mut nctx = _connect_backend(ctx, "pulse")
    if(nctx){ return nctx }
    nctx = _connect_backend(ctx, "alsa")
@@ -59,7 +63,7 @@ fn _connect_linux_desktop(dict: ctx, bool: allow_jack=false): any {
    0
 }
 
-fn _stream_backend(any: stream): any {
+fn _stream_backend(any stream) any {
    if(!stream){ return 0 }
    def device = stream.get("device")
    if(!device){ return 0 }
@@ -68,7 +72,7 @@ fn _stream_backend(any: stream): any {
    ctx.get("backend")
 }
 
-fn _stream_frame_bytes(dict: stream): int {
+fn _stream_frame_bytes(dict stream) int {
    def channels = stream.get("channels")
    def bps = stream.get("bits_per_sample", 16)
    mut sample_bytes = bps / 8
@@ -76,7 +80,7 @@ fn _stream_frame_bytes(dict: stream): int {
    channels * sample_bytes
 }
 
-fn create(): dict {
+fn create() dict {
    "Creates a new AudioIO context."
    mut ctx = dict(16)
    ctx = ctx.set("backend", 0)
@@ -85,7 +89,7 @@ fn create(): dict {
    ctx
 }
 
-fn connect(any: ctx): any {
+fn connect(any ctx) any {
    "Connects to the best available audio backend."
    if(!ctx){ return 0 }
    def forced = _forced_backend()
@@ -111,7 +115,7 @@ fn connect(any: ctx): any {
    ctx
 }
 
-fn disconnect(any: ctx): any {
+fn disconnect(any ctx) any {
    "Implements `disconnect`."
    if(!ctx){ return nil }
    def b = ctx.get("backend")
@@ -123,7 +127,7 @@ fn disconnect(any: ctx): any {
    ctx = ctx.set("backend_name", "none")
 }
 
-fn get_output_device_count(any: ctx): int {
+fn get_output_device_count(any ctx) int {
    "Gets output device count."
    if(!ctx){ return 0 }
    def devices = ctx.get("devices", 0)
@@ -133,7 +137,7 @@ fn get_output_device_count(any: ctx): int {
    n
 }
 
-fn get_output_device(any: ctx, int: index): any {
+fn get_output_device(any ctx, int index) any {
    "Gets output device."
    if(!ctx){ return 0 }
    def devices = ctx.get("devices", list())
@@ -141,12 +145,12 @@ fn get_output_device(any: ctx, int: index): any {
    devices.get(index)
 }
 
-fn get_default_output_device_index(any: ctx): int {
+fn get_default_output_device_index(any ctx) int {
    "Gets default output device index."
    0
 }
 
-fn outstream_create(any: device): dict {
+fn outstream_create(any device) dict {
    "Creates an output stream for a specific device."
    if(sound_debug.enabled()){ print("Sound: outstream_create: dev=" + to_str(device)) }
    mut stream = dict(16)
@@ -160,7 +164,7 @@ fn outstream_create(any: device): dict {
    stream
 }
 
-fn outstream_open(any: stream, int: format, int: sample_rate, int: channels, ?fnptr: callback): any {
+fn outstream_open(any stream, int format, int sample_rate, int channels, ?fnptr callback) any {
    "Implements `outstream_open`."
    if(sound_debug.enabled()){
       print("Sound: Entering outstream_open.")
@@ -187,7 +191,7 @@ fn outstream_open(any: stream, int: format, int: sample_rate, int: channels, ?fn
    0
 }
 
-fn outstream_start(any: stream): bool {
+fn outstream_start(any stream) bool {
    "Implements `outstream_start`."
    if(!stream){ return false }
    def b = _stream_backend(stream)
@@ -201,7 +205,7 @@ fn outstream_start(any: stream): bool {
    ok
 }
 
-fn outstream_stop(any: stream): any {
+fn outstream_stop(any stream) any {
    "Implements `outstream_stop`."
    if(!stream){ return nil }
    def b = _stream_backend(stream)
@@ -213,7 +217,7 @@ fn outstream_stop(any: stream): any {
    stream = stream.set("running", false)
 }
 
-fn outstream_write(any: stream, any: buf, int: bytes): bool {
+fn outstream_write(any stream, any buf, int bytes) bool {
    "Writes raw bytes to the output stream."
    if(!stream){ return false }
    def b = _stream_backend(stream)
@@ -237,7 +241,7 @@ fn outstream_write(any: stream, any: buf, int: bytes): bool {
    false
 }
 
-fn outstream_write_frames(any: stream, any: buf, int: frames): bool {
+fn outstream_write_frames(any stream, any buf, int frames) bool {
    "Writes frames to the output stream."
    if(!stream){ return false }
    def b = _stream_backend(stream)
@@ -254,13 +258,35 @@ fn outstream_write_frames(any: stream, any: buf, int: frames): bool {
    false
 }
 
-fn outstream_destroy(any: stream): any {
+fn outstream_destroy(any stream) any {
    "Implements `outstream_destroy`."
    outstream_stop(stream)
 }
 
-fn get_backend_name(any: ctx): str {
+fn get_backend_name(any ctx) str {
    "Gets backend name."
    if(!ctx){ return "none" }
    return ctx.get("backend_name", "none")
+}
+
+#main {
+   def ctx = create()
+   assert(is_dict(ctx) && get_backend_name(ctx) == "none", "sound backend io ctx")
+   assert(get_output_device_count(ctx) == 0 && get_default_output_device_index(ctx) == 0 && get_output_device(ctx, 0) == 0, "sound backend io empty devices")
+   def ctx2 = shared.append_output_device(ctx, "Probe Device", "probe")
+   assert(is_dict(ctx2) && get_output_device_count(ctx2) == 1, "sound backend io append device")
+   def dev = get_output_device(ctx2, 0)
+   assert(is_dict(dev) && dev.get("name", "") == "Probe Device", "sound backend io device")
+   def stream = outstream_create(dev)
+   assert(is_dict(stream) && stream.get("format", 0) == FORMAT_S16LE, "sound backend io stream")
+   assert(!outstream_open(stream, FORMAT_S16LE, 44100, 2, nil) && !outstream_start(stream), "sound backend io unopened stream")
+   def buf = malloc(32)
+   memset(buf, 0, 32)
+   assert(!outstream_write(stream, buf, 32) && !outstream_write_frames(stream, buf, 8), "sound backend io write without backend")
+   outstream_destroy(stream)
+   disconnect(ctx2)
+   free(buf)
+   assert(shared.init_output_device(create(), false, "No Device", "none") == 0, "sound backend io init false")
+   assert(is_dict(shared.init_output_device(create(), true, "Ready Device", "ready")), "sound backend io init true")
+   print("✓ std.os.sound.backend.io self-test passed")
 }

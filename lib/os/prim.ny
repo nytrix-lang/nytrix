@@ -1,20 +1,22 @@
-;; Keywords: prim primitives syscalls
+;; Keywords: prim primitives syscalls os
 ;; Core OS primitives used by other os submodules.
+;; References:
+;; - std.os
 module std.os.prim(pid, ppid, env, environ, os, arch, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM)
 use std.core
 use std.core.str as core_str
 
-fn pid(): int {
+fn pid() int {
    "Returns the process ID."
    __getpid()
 }
 
-fn ppid(): int {
+fn ppid() int {
    "Returns the parent process ID."
    __getppid()
 }
 
-fn env(str: key): any {
+fn env(str key) any {
    "Returns the value of environment variable `key`."
    def ep = __envp()
    if(!ep){ return 0 }
@@ -43,7 +45,7 @@ fn env(str: key): any {
    }
 }
 
-fn environ(): list {
+fn environ() list {
    "Returns a list of environment entries."
    def ep = __envp()
    if(!ep){ return list(8) }
@@ -63,12 +65,12 @@ fn environ(): list {
    }
 }
 
-fn os(): str {
+fn os() str {
    "Returns the operating system name."
    __os_name()
 }
 
-fn arch(): str {
+fn arch() str {
    "Returns the architecture name."
    __arch_name()
 }

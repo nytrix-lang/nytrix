@@ -1,5 +1,8 @@
-;; Keywords: sound mixer
+;; Keywords: sound mixer os
 ;; Sound mixer state and channel-level mixing operations.
+;; References:
+;; - std.os.sound
+;; - std.os
 module std.os.sound.mixer(mix_sounds, clamp_s16, load16_s)
 use std.core
 use std.math
@@ -15,11 +18,11 @@ def SAMPLE_FMT_S24 = 3
 def SAMPLE_FMT_S32 = 4
 def SAMPLE_FMT_F32 = 5
 
-fn _lock(any: mtx): any { if(mtx){ mutex_lock(mtx) } }
+fn _lock(any mtx) any { if(mtx){ mutex_lock(mtx) } }
 
-fn _unlock(any: mtx): any { if(mtx){ mutex_unlock(mtx) } }
+fn _unlock(any mtx) any { if(mtx){ mutex_unlock(mtx) } }
 
-fn _ensure_acc(any: frames): any {
+fn _ensure_acc(any frames) any {
    if(frames <= 0){ return 0 }
    if(_acc_buf != 0 && _acc_frames >= frames){ return _acc_buf }
    def bytes = frames * 2 * 4
@@ -29,7 +32,7 @@ fn _ensure_acc(any: frames): any {
    _acc_buf
 }
 
-fn _fmt_from_meta(any: bits, any: format_tag, any: sample_fmt): int {
+fn _fmt_from_meta(any bits, any format_tag, any sample_fmt) int {
    if(sample_fmt != 0){ return sample_fmt }
    if(format_tag == 3 && bits == 32){ return SAMPLE_FMT_F32 }
    if(bits == 16){ return SAMPLE_FMT_S16 }
@@ -39,7 +42,7 @@ fn _fmt_from_meta(any: bits, any: format_tag, any: sample_fmt): int {
    SAMPLE_FMT_S16
 }
 
-fn _load24_s(any: p, int: off): int {
+fn _load24_s(any p, int off) int {
    def b0, b1 = load8(p, off), load8(p, off + 1)
    def b2 = load8(p, off + 2)
    mut v = b0 | (b1 << 8) | (b2 << 16)
@@ -47,13 +50,13 @@ fn _load24_s(any: p, int: off): int {
    v
 }
 
-fn _load32_s(any: p, int: off): any {
+fn _load32_s(any p, int off) any {
    def v = load32(p, off)
    if(v > 2147483647){ return v - 4294967296 }
    v
 }
 
-fn _sample_at(any: p, any: frame_idx, any: channel_idx, any: channels, any: sample_fmt, any: bits): f64 {
+fn _sample_at(any p, any frame_idx, any channel_idx, any channels, any sample_fmt, any bits) f64 {
    def sb = _sample_bytes(sample_fmt, bits)
    def off = ((frame_idx * channels) + channel_idx) * sb
    if(sample_fmt == SAMPLE_FMT_U8){ return(load8(p, off) - 128) / 128.0 }
@@ -64,7 +67,7 @@ fn _sample_at(any: p, any: frame_idx, any: channel_idx, any: channels, any: samp
    load16_s(p, off) / 32768.0
 }
 
-fn _sample_bytes(any: fmt, any: bits): int {
+fn _sample_bytes(any fmt, any bits) int {
    if(fmt == SAMPLE_FMT_U8){ return 1 }
    if(fmt == SAMPLE_FMT_S16){ return 2 }
    if(fmt == SAMPLE_FMT_S24){ return 3 }
@@ -74,14 +77,14 @@ fn _sample_bytes(any: fmt, any: bits): int {
    b
 }
 
-fn _read_cursor(any: inst): int {
+fn _read_cursor(any inst) int {
    def raw = inst.get(1)
    __flt_to_int(raw + 0.0)
 }
 
-fn _write_cursor(any: inst, any: val): any { inst[1] = val + 0.0 }
+fn _write_cursor(any inst, any val) any { inst[1] = val + 0.0 }
 
-fn _mix_one_s16(any: acc, any: s_ptr, any: s_channels, any: total_frames, any: cursor_start, any: period_frames, any: looping, any: gain_l, any: gain_r, any: unit_gain): int {
+fn _mix_one_s16(any acc, any s_ptr, any s_channels, any total_frames, any cursor_start, any period_frames, any looping, any gain_l, any gain_r, any unit_gain) int {
    mut idx = cursor_start
    mut f = 0
    while(f < period_frames){
@@ -101,7 +104,7 @@ fn _mix_one_s16(any: acc, any: s_ptr, any: s_channels, any: total_frames, any: c
    idx
 }
 
-fn _mix_one_f32(any: acc, any: s_ptr, any: s_channels, any: total_frames, any: cursor_start, any: period_frames, any: looping, any: gain_l, any: gain_r): int {
+fn _mix_one_f32(any acc, any s_ptr, any s_channels, any total_frames, any cursor_start, any period_frames, any looping, any gain_l, any gain_r) int {
    mut idx = cursor_start
    mut f = 0
    while(f < period_frames){
@@ -120,7 +123,7 @@ fn _mix_one_f32(any: acc, any: s_ptr, any: s_channels, any: total_frames, any: c
    idx
 }
 
-fn _mix_one_generic(any: acc, any: s_ptr, any: s_channels, any: s_fmt, any: s_bits, any: total_frames, any: cursor_start, any: period_frames, any: looping, any: step, any: gain_l, any: gain_r): int {
+fn _mix_one_generic(any acc, any s_ptr, any s_channels, any s_fmt, any s_bits, any total_frames, any cursor_start, any period_frames, any looping, any step, any gain_l, any gain_r) int {
    mut current = cursor_start + 0.0
    def total_f = total_frames + 0.0
    mut f = 0
@@ -152,7 +155,7 @@ fn _mix_one_generic(any: acc, any: s_ptr, any: s_channels, any: s_fmt, any: s_bi
    __flt_to_int(current)
 }
 
-fn mix_sounds(any: mix_buf, any: buf_size, any: active_sounds, any: master_vol, any: mtx, any: out_rate=44100, any: out_format=1): list {
+fn mix_sounds(any mix_buf, any buf_size, any active_sounds, any master_vol, any mtx, any out_rate=44100, any out_format=1) list {
    "Implements `mix_sounds`."
    if(_debug == -1){ _debug = sound_debug.enabled() ? 1 : 0 }
    def frame_bytes = (out_format == 2) ? 8 : 4
@@ -242,20 +245,20 @@ fn mix_sounds(any: mix_buf, any: buf_size, any: active_sounds, any: master_vol, 
    new_actives
 }
 
-fn get_item(any: lst, int: idx, any: defval): any {
+fn get_item(any lst, int idx, any defval) any {
    "Gets item."
    if(is_list(lst) && lst.len > idx){ return lst.get(idx) }
    defval
 }
 
-fn clamp_s16(any: v): any {
+fn clamp_s16(any v) any {
    "Implements `clamp_s16`."
    if(v > 32767){ return 32767 }
    if(v < -32768){ return -32768 }
    v
 }
 
-fn load16_s(any: p, int: off): int {
+fn load16_s(any p, int off) int {
    "Implements `load16_s`."
    def v = load16(p, off)
    if(v > 32767){ return v - 65536 }

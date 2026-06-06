@@ -1,5 +1,7 @@
-;; Keywords: parallel threads scheduler work-stealing
+;; Keywords: parallel threads scheduler work-stealing os
 ;; Parallel CPU threading policy.
+;; References:
+;; - std.os
 module std.os.parallel(parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, hardware_threads, thread_budget, future, async, detach, future_wait, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS)
 use std.core
 use std.core.str
@@ -8,7 +10,7 @@ use std.os.info as osinfo
 use std.core.common as common
 use std.os.thread
 
-fn _normalize_parallel_mode(any: v): str {
+fn _normalize_parallel_mode(any v) str {
    if(!is_str(v)){ return "auto" }
    def s = lower(strip(v))
    case s {
@@ -17,7 +19,7 @@ fn _normalize_parallel_mode(any: v): str {
    }
 }
 
-fn _normalize_scheduler_policy(any: v): str {
+fn _normalize_scheduler_policy(any v) str {
    if(!is_str(v)){ return "auto" }
    def s = lower(strip(v))
    case s {
@@ -27,7 +29,7 @@ fn _normalize_scheduler_policy(any: v): str {
    }
 }
 
-fn _logical_cpu_guess(): int {
+fn _logical_cpu_guess() int {
    def n1 = common.parse_nonneg_int(env("NYTRIX_LOGICAL_CPUS"))
    if(n1 > 0){ return n1 }
    def n2 = common.parse_nonneg_int(env("NUMBER_OF_PROCESSORS"))
@@ -44,7 +46,7 @@ mut _parallel_threads_eff_cache = 0
 mut _parallel_min_work_eff_loaded = false
 mut _parallel_min_work_eff_cache = 0
 
-fn _effective_parallel_threads(): int {
+fn _effective_parallel_threads() int {
    if(_parallel_threads_eff_loaded){ return _parallel_threads_eff_cache }
    mut out = 2
    if(PARALLEL_THREADS > 0){ out = PARALLEL_THREADS }
@@ -57,7 +59,7 @@ fn _effective_parallel_threads(): int {
    out
 }
 
-fn _effective_parallel_min_work(): int {
+fn _effective_parallel_min_work() int {
    if(_parallel_min_work_eff_loaded){ return _parallel_min_work_eff_cache }
    mut out = 65536
    if(PARALLEL_MIN_WORK > 0){ out = PARALLEL_MIN_WORK }
@@ -76,25 +78,25 @@ def PARALLEL_THREADS = common.parse_nonneg_int(env("NYTRIX_PARALLEL_THREADS"))
 def PARALLEL_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_PARALLEL_MIN_WORK"))
 def SCHEDULER_POLICY = _normalize_scheduler_policy(strip(to_str(env("NYTRIX_THREAD_SCHEDULER"))))
 
-fn parallel_mode(): str {
+fn parallel_mode() str {
    "Returns the configured parallel mode: `off`, `auto`, or `threads`.
    Configure via compiler CLI flag `--parallel`."
    PARALLEL_MODE
 }
 
-fn parallel_threads(): int {
+fn parallel_threads() int {
    "Returns configured thread budget; `0` means runtime/default auto sizing.
    Configure via compiler CLI flag `--threads`."
    PARALLEL_THREADS
 }
 
-fn parallel_min_work(): int {
+fn parallel_min_work() int {
    "Returns minimum work threshold before selecting threaded parallel execution.
    Configure via compiler CLI flag `--parallel-min-work`."
    PARALLEL_MIN_WORK
 }
 
-fn _parallel_status_reason(str: mode, int: threads_eff, int: work_items, int: min_work_eff): str {
+fn _parallel_status_reason(str mode, int threads_eff, int work_items, int min_work_eff) str {
    case mode {
       "off" -> "parallel_mode_off"
       _ -> (threads_eff <= 1 ? "single_thread_budget" :
@@ -102,7 +104,7 @@ fn _parallel_status_reason(str: mode, int: threads_eff, int: work_items, int: mi
    }
 }
 
-fn parallel_status(int: work_items=0): dict {
+fn parallel_status(int work_items=0) dict {
    "Returns a threading decision map for `work_items`."
    def threads_eff = _effective_parallel_threads()
    def min_work_eff = _effective_parallel_min_work()
@@ -112,17 +114,17 @@ fn parallel_status(int: work_items=0): dict {
    "selected": reason == "eligible", "reason": reason}
 }
 
-fn parallel_should_threads(int: work_items=0): bool {
+fn parallel_should_threads(int work_items=0) bool {
    "Returns true when thread-parallel policy selects threaded execution."
    parallel_status(work_items).get("selected", false)
 }
 
-fn scheduler_policy(): str {
+fn scheduler_policy() str {
    "Returns the configured @thread scheduler policy: `auto`, `direct`, or `work-stealing`."
    SCHEDULER_POLICY
 }
 
-fn work_stealing_enabled(int: work_items=0): bool {
+fn work_stealing_enabled(int work_items=0) bool {
    "Returns true when the thread runner should use work-stealing queues for this workload."
    case scheduler_policy(){
       "off", "direct" -> false
@@ -131,14 +133,14 @@ fn work_stealing_enabled(int: work_items=0): bool {
    }
 }
 
-fn _active_scheduler_policy(str: configured, bool: stealing): str {
+fn _active_scheduler_policy(str configured, bool stealing) str {
    case configured {
       "auto" -> stealing ? "work-stealing" : "direct"
       _ -> configured
    }
 }
 
-fn scheduler_status(int: work_items=0): dict {
+fn scheduler_status(int work_items=0) dict {
    "Returns scheduler metadata used by high-level @thread and parallel helpers."
    def pst = parallel_status(work_items)
    def stealing = work_stealing_enabled(work_items)
@@ -147,14 +149,14 @@ fn scheduler_status(int: work_items=0): dict {
    "work_stealing": stealing, "runner": "@thread"})
 }
 
-fn hardware_threads(): int {
+fn hardware_threads() int {
    "Returns the effective logical CPU thread budget selected by std.os.parallel."
    def n = parallel_status(0).get("effective_threads", 1)
    if(n > 0){ return n }
    1
 }
 
-fn thread_budget(int: work_items=0, int: max_threads=0): int {
+fn thread_budget(int work_items=0, int max_threads=0) int {
    "Returns a bounded worker count for `work_items` and optional `max_threads`."
    def base = parallel_status(work_items).get("effective_threads", 1)
    def limited = (max_threads > 0 && max_threads < base) ? max_threads : base
@@ -162,27 +164,27 @@ fn thread_budget(int: work_items=0, int: max_threads=0): int {
    capped < 1 ? 1 : capped
 }
 
-fn future(fnptr: work, any: arg=0): any {
+fn future(fnptr work, any arg=0) any {
    "Starts `work(arg)` on a joinable worker thread."
    thread_spawn(work, arg)
 }
 
-fn async(fnptr: work, any: arg=0): any {
+fn async(fnptr work, any arg=0) any {
    "Alias for future(work, arg)."
    future(work, arg)
 }
 
-fn detach(fnptr: work, any: arg=0): any {
+fn detach(fnptr work, any arg=0) any {
    "Starts `work(arg)` on a detached worker thread."
    thread_launch(work, arg)
 }
 
-fn future_wait(any: thread_handle): any {
+fn future_wait(any thread_handle) any {
    "Waits for a future returned by `future` or `async`."
    thread_join(thread_handle)
 }
 
-fn chunk_ranges(int: count, int: workers): list {
+fn chunk_ranges(int count, int workers) list {
    "Returns `[start, stop]` ranges splitting `count` items over `workers` chunks."
    mut out = list()
    if(count <= 0){ return out }
@@ -199,24 +201,24 @@ fn chunk_ranges(int: count, int: workers): list {
    out
 }
 
-fn work_queue(int: id=0): dict {
+fn work_queue(int id=0) dict {
    "Creates a scheduler work queue."
    Queue().merge({"kind": "work-queue", "id": id})
 }
 
-fn work_queue_push(dict: q, any: task): dict {
+fn work_queue_push(dict q, any task) dict {
    "Pushes a task onto a scheduler work queue."
    queue_push(q, task)
 }
 
-fn work_queue_pop(dict: q): dict {
+fn work_queue_pop(dict q) dict {
    "Pops a task from the owner queue."
    mut r = queue_try_pop(q)
    r = r.set("from", q.get("id", 0))
    r
 }
 
-fn work_queue_steal(list: queues, int: victim=0): dict {
+fn work_queue_steal(list queues, int victim=0) dict {
    "Attempts to steal a task from another queue and returns `{ok, value, from}`."
    if(queues.len == 0){ return {"ok": false, "value": 0, "from": -1} }
    mut i = 0
@@ -232,7 +234,7 @@ fn work_queue_steal(list: queues, int: victim=0): dict {
    {"ok": false, "value": 0, "from": -1}
 }
 
-fn work_stealing_plan(int: work_items=0, int: max_threads=0): dict {
+fn work_stealing_plan(int work_items=0, int max_threads=0) dict {
    "Returns queue and chunk metadata for work-stealing thread execution."
    def workers = thread_budget(work_items, max_threads)
    def ranges = chunk_ranges(work_items, workers)
@@ -247,7 +249,7 @@ fn work_stealing_plan(int: work_items=0, int: max_threads=0): dict {
    "status": scheduler_status(work_items)}
 }
 
-fn _serial_map(list: xs, fnptr: f): list {
+fn _serial_map(list xs, fnptr f) list {
    mut out = list(xs.len)
    mut i = 0
    while(i < xs.len){
@@ -257,7 +259,7 @@ fn _serial_map(list: xs, fnptr: f): list {
    out
 }
 
-fn _serial_map_indexed(list: xs, fnptr: f): list {
+fn _serial_map_indexed(list xs, fnptr f) list {
    mut out = list(xs.len)
    mut i = 0
    while(i < xs.len){
@@ -267,7 +269,7 @@ fn _serial_map_indexed(list: xs, fnptr: f): list {
    out
 }
 
-fn _map_chunk(list: args): list {
+fn _map_chunk(list args) list {
    def f = args.get(0)
    def xs = args.get(1)
    def start = args.get(2)
@@ -281,7 +283,7 @@ fn _map_chunk(list: args): list {
    out
 }
 
-fn _map_indexed_chunk(list: args): list {
+fn _map_indexed_chunk(list args) list {
    def f = args.get(0)
    def xs = args.get(1)
    def start = args.get(2)
@@ -295,7 +297,7 @@ fn _map_indexed_chunk(list: args): list {
    out
 }
 
-fn _each_chunk(list: args): int {
+fn _each_chunk(list args) int {
    def f = args.get(0)
    def xs = args.get(1)
    def start = args.get(2)
@@ -308,7 +310,7 @@ fn _each_chunk(list: args): int {
    stop - start
 }
 
-fn _join_chunks(list: handles): list {
+fn _join_chunks(list handles) list {
    mut out = list()
    mut i = 0
    while(i < handles.len){
@@ -323,7 +325,7 @@ fn _join_chunks(list: handles): list {
    out
 }
 
-fn _spawn_chunks(list: xs, fnptr: f, list: ranges, fnptr: worker): list {
+fn _spawn_chunks(list xs, fnptr f, list ranges, fnptr worker) list {
    mut handles = list(ranges.len)
    mut i = 0
    while(i < ranges.len){
@@ -334,7 +336,7 @@ fn _spawn_chunks(list: xs, fnptr: f, list: ranges, fnptr: worker): list {
    handles
 }
 
-fn parallel_map(list: xs, fnptr: f, int: max_threads=0): list {
+fn parallel_map(list xs, fnptr f, int max_threads=0) list {
    "Maps `f(item)` over `xs`, using worker threads when std.os.parallel policy selects them."
    def n = xs.len
    if(n == 0){ return list() }
@@ -344,7 +346,7 @@ fn parallel_map(list: xs, fnptr: f, int: max_threads=0): list {
    _join_chunks(_spawn_chunks(xs, f, ranges, _map_chunk))
 }
 
-fn parallel_map_indexed(list: xs, fnptr: f, int: max_threads=0): list {
+fn parallel_map_indexed(list xs, fnptr f, int max_threads=0) list {
    "Maps `f(item, index)` over `xs`, preserving input order."
    def n = xs.len
    if(n == 0){ return list() }
@@ -354,7 +356,7 @@ fn parallel_map_indexed(list: xs, fnptr: f, int: max_threads=0): list {
    _join_chunks(_spawn_chunks(xs, f, ranges, _map_indexed_chunk))
 }
 
-fn parallel_each(list: xs, fnptr: f, int: max_threads=0): int {
+fn parallel_each(list xs, fnptr f, int max_threads=0) int {
    "Runs `f(item)` for each item and returns the number of processed items."
    def n = xs.len
    if(n == 0){ return 0 }
@@ -379,3 +381,31 @@ fn parallel_each(list: xs, fnptr: f, int: max_threads=0): int {
 }
 
 def HARDWARE_THREADS = hardware_threads()
+
+#main {
+   fn _parallel_self_inc(any x) any { x + 1 }
+   fn _parallel_self_add_index(any x, any i) any { x + i }
+   def mode = parallel_mode()
+   assert((mode == "off" || mode == "auto" || mode == "threads") && parallel_threads() >= 0 && parallel_min_work() >= 0 && hardware_threads() >= 1, "parallel config")
+   def st = parallel_status(4)
+   assert(is_dict(st) && st.get("work_items") == 4 && is_bool(st.get("selected")) && is_str(st.get("reason")), "parallel status")
+   def sched = scheduler_status(4)
+   assert(sched.get("runner") == "@thread" && is_bool(sched.get("work_stealing")) && chunk_ranges(10, 3) == [[0, 4], [4, 8], [8, 10]], "parallel scheduler")
+   assert(thread_budget(2, 8) == 2 && thread_budget(0, 0) >= 1, "parallel thread budget")
+   def q = work_queue(7)
+   assert(q.get("kind") == "work-queue" && q.get("id") == 7, "parallel work queue")
+   work_queue_push(q, "task")
+   def popped = work_queue_pop(q)
+   assert(popped.get("ok") && popped.get("value") == "task", "parallel work queue pop")
+   def plan = work_stealing_plan(8, 2)
+   assert(plan.get("workers") == 2 && plan.get("ranges") == [[0, 4], [4, 8]], "parallel work stealing plan")
+   def qs = plan.get("queues")
+   work_queue_push(qs.get(1), "stolen")
+   def stolen = work_queue_steal(qs, 0)
+   assert(stolen.get("ok") && stolen.get("value") == "stolen" && stolen.get("from") == 1, "parallel work steal")
+   def h = future(_parallel_self_inc, 41)
+   assert(future_wait(h) == 42, "parallel future")
+   def xs = [1, 2, 3, 4]
+   assert(parallel_map(xs, _parallel_self_inc, 2) == [2, 3, 4, 5] && parallel_map_indexed(xs, _parallel_self_add_index, 2) == [1, 3, 5, 7] && parallel_each(xs, _parallel_self_inc, 2) == 4, "parallel collection helpers")
+   print("✓ std.os.parallel self-test passed")
+}

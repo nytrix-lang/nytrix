@@ -1,11 +1,14 @@
-;; Keywords: assembly assembler disassembly disassembler capstone shellcode machine-code
+;; Keywords: assembly assembler disassembly disassembler capstone shellcode machine-code os
 ;; Assembly, disassembly, hexdump, and shellcode utilities backed by native disassembly tools.
+;; References:
+;; - std.os
 module std.os.disasm(assemble, asm_hex, disasm, disasm_lines, hexdump, unhex,
    normalize_arch, arch_family, split_operands, instruction_kind, branch_condition,
    arithmetic_operator, clean_operand, operand_kind, memory_operand_parts,
    operand_ny_expr, address_ny_expr, is_zero_register, is_zeroing_idiom, target_address,
    shell_sh, shellcode_sh, shellcode_execve, shellcode_exit, shellcode_write, shellcode_read,
-   assembler_available, capstone_available)
+assembler_available, capstone_available)
+
 use std.core
 use std.core.str
 use std.os (temp_dir, pid, file_write, file_read, file_remove)
@@ -15,12 +18,12 @@ use std.os.subprocess as sub
 #link "libcapstone.so"
 #include <capstone/capstone.h> as "cs_"
 extern "capstone" {
-   fn _cs_version(ptr: major, ptr: minor): i32 as "cs_version"
-   fn _cs_open(i32: arch, i32: mode, ptr: h): i32 as "cs_open"
-   fn _cs_close(ptr: h): i32 as "cs_close"
-   fn _cs_malloc(handle: h): ptr as "cs_malloc"
-   fn _cs_free(ptr: insn, u64: count) as "cs_free"
-   fn _cs_disasm_iter(handle: h, ptr: codep, ptr: sizep, ptr: addrp, ptr: insn): i32 as "cs_disasm_iter"
+   fn _cs_version(ptr major, ptr minor) i32 as "cs_version"
+   fn _cs_open(i32 arch, i32 mode, ptr h) i32 as "cs_open"
+   fn _cs_close(ptr h) i32 as "cs_close"
+   fn _cs_malloc(handle h) ptr as "cs_malloc"
+   fn _cs_free(ptr insn, u64 count) as "cs_free"
+   fn _cs_disasm_iter(handle h, ptr codep, ptr sizep, ptr addrp, ptr insn) i32 as "cs_disasm_iter"
 }
 
 def _CS_ARCH_ARM = 0
@@ -35,13 +38,13 @@ def _CS_MODE_RISCV32 = 1
 def _CS_MODE_RISCV64 = 2
 def _CS_MODE_RISCVC = 4
 
-fn assembler_available(): bool {
+fn assembler_available() bool {
    "Returns whether the external assembler toolchain is available."
    def r = sub.run_capture(["as", "--version"], [], nil, false)
    r.get("code", 1) == 0
 }
 
-fn capstone_available(): bool {
+fn capstone_available() bool {
    "Returns whether Capstone can be called through the native C API."
    def major = malloc(8)
    def minor = malloc(8)
@@ -55,18 +58,18 @@ fn capstone_available(): bool {
    _cs_version(major, minor) > 0
 }
 
-fn _tmp_base(): str {
+fn _tmp_base() str {
    temp_dir() + "/nyasm_" + to_str(pid()) + "_" + to_str(ticks())
 }
 
-fn _asm_flags(str: arch): list {
+fn _asm_flags(str arch) list {
    def a = lower(strip(arch))
    if(a == "x86" || a == "i386" || a == "x86_32"){ return ["--32"] }
    if(a == "x86_64" || a == "amd64" || a == ""){ return ["--64"] }
    []
 }
 
-fn _asm_prelude(str: arch, str: syntax): str {
+fn _asm_prelude(str arch, str syntax) str {
    def a = lower(strip(arch))
    def s = lower(strip(syntax))
    mut out = ""
@@ -76,7 +79,7 @@ fn _asm_prelude(str: arch, str: syntax): str {
    out + ".global _start\n_start:\n"
 }
 
-fn assemble(str: source, str: arch="x86_64", str: syntax="intel"): str {
+fn assemble(str source, str arch="x86_64", str syntax="intel") str {
    "Assembles `source` into raw `.text` bytes using GNU as and objcopy."
    def base = _tmp_base()
    def src = base + ".s"
@@ -101,7 +104,7 @@ fn assemble(str: source, str: arch="x86_64", str: syntax="intel"): str {
    unwrap(rr)
 }
 
-fn hexdump(any: data, str: sep=""): str {
+fn hexdump(any data, str sep="") str {
    "Returns lowercase hex for a byte string or byte list."
    mut out = ""
    if(is_str(data) || is_bytes(data)){
@@ -124,19 +127,19 @@ fn hexdump(any: data, str: sep=""): str {
    out
 }
 
-fn asm_hex(str: source, str: arch="x86_64", str: syntax="intel"): str {
+fn asm_hex(str source, str arch="x86_64", str syntax="intel") str {
    "Assembles source and returns raw bytes as hex."
    hexdump(assemble(source, arch, syntax))
 }
 
-fn _hex_val(int: c): int {
+fn _hex_val(int c) int {
    if(c >= 48 && c <= 57){ return c - 48 }
    if(c >= 65 && c <= 70){ return c - 55 }
    if(c >= 97 && c <= 102){ return c - 87 }
    -1
 }
 
-fn unhex(str: text): str {
+fn unhex(str text) str {
    "Converts a hex string into raw bytes. Whitespace, `0x`, `_`, `:`, and `-` are ignored."
    mut clean = ""
    mut i = 0
@@ -162,7 +165,7 @@ fn unhex(str: text): str {
    out
 }
 
-fn _bytestr(any: data): str {
+fn _bytestr(any data) str {
    if(is_str(data) || is_bytes(data)){ return data }
    if(is_list(data)){
       def base = malloc(max(1, data.len) + 16)
@@ -178,7 +181,7 @@ fn _bytestr(any: data): str {
    ""
 }
 
-fn _cs_arch_mode(str: arch): list {
+fn _cs_arch_mode(str arch) list {
    def a = normalize_arch(arch)
    if(a == "x86" || a == "i386" || a == "x86_32"){ return [_CS_ARCH_X86, _CS_MODE_32] }
    if(a == "x86_16" || a == "i8086"){ return [_CS_ARCH_X86, _CS_MODE_16] }
@@ -191,7 +194,7 @@ fn _cs_arch_mode(str: arch): list {
    [_CS_ARCH_X86, _CS_MODE_64]
 }
 
-fn normalize_arch(str: arch): str {
+fn normalize_arch(str arch) str {
    "Returns a canonical architecture name understood by the disassembler."
    def a = lower(strip(arch))
    case a {
@@ -206,7 +209,7 @@ fn normalize_arch(str: arch): str {
    }
 }
 
-fn arch_family(str: arch): str {
+fn arch_family(str arch) str {
    "Returns the instruction-family bucket used by analysis code."
    def a = normalize_arch(arch)
    if(a == "x86" || a == "x86_64" || a == "x86_16" || a == "i8086"){ return "x86" }
@@ -216,11 +219,11 @@ fn arch_family(str: arch): str {
    "unknown"
 }
 
-fn _is_riscv_branch(str: m): bool {
+fn _is_riscv_branch(str m) bool {
    m == "beq" || m == "bne" || m == "blt" || m == "bge" || m == "bltu" || m == "bgeu" || m == "bgt" || m == "ble" || m == "bgtu" || m == "bleu"
 }
 
-fn split_operands(str: ops): list {
+fn split_operands(str ops) list {
    "Splits an operand string on top-level commas while preserving memory expressions."
    mut out = []
    mut start = 0
@@ -240,11 +243,11 @@ fn split_operands(str: ops): list {
    out
 }
 
-fn _drop_prefix(str: s, str: p): str {
+fn _drop_prefix(str s, str p) str {
    startswith(s, p) ? strip(slice(s, p.len, s.len, 1)) : s
 }
 
-fn clean_operand(str: op): str {
+fn clean_operand(str op) str {
    "Removes common assembler decoration from one operand while preserving addressing text."
    mut s = strip(op)
    s = _drop_prefix(s, "byte ptr ")
@@ -257,13 +260,13 @@ fn clean_operand(str: op): str {
    s
 }
 
-fn _mem_term(str: raw): str {
+fn _mem_term(str raw) str {
    mut s = strip(raw)
    if(startswith(s, "#")){ s = strip(slice(s, 1, s.len, 1)) }
    s
 }
 
-fn _mem_expr_from_terms(list: terms): str {
+fn _mem_expr_from_terms(list terms) str {
    if(terms.len == 0){ return "" }
    mut expr = _mem_term(terms[0])
    mut i = 1
@@ -277,14 +280,14 @@ fn _mem_expr_from_terms(list: terms): str {
    expr
 }
 
-fn _plain_mem_base(str: raw): bool {
+fn _plain_mem_base(str raw) bool {
    def s = _mem_term(raw)
    if(s.len == 0){ return false }
    if(startswith(s, "0x") || startswith(s, "-0x") || str.ascii_is_digit(load8(s, 0))){ return false }
    str.find(s, "+") < 0 && str.find(s, "*") < 0 && str.find(s, "-") <= 0
 }
 
-fn memory_operand_parts(str: op): dict {
+fn memory_operand_parts(str op) dict {
    "Returns normalized memory-address pieces for `[base + off]` and `off(base)` operands."
    mut s = clean_operand(op)
    if(str.endswith(s, "!")){ s = strip(slice(s, 0, s.len - 1, 1)) }
@@ -318,7 +321,7 @@ fn memory_operand_parts(str: op): dict {
    dict()
 }
 
-fn operand_kind(str: op): str {
+fn operand_kind(str op) str {
    "Classifies one operand as `none`, `mem`, `imm`, `expr`, or `reg`."
    def s = clean_operand(op)
    if(s.len == 0){ return "none" }
@@ -328,7 +331,7 @@ fn operand_kind(str: op): str {
    "reg"
 }
 
-fn operand_ny_expr(str: op): str {
+fn operand_ny_expr(str op) str {
    "Returns a compact Ny-style expression for one decoded operand."
    def s = clean_operand(op)
    def mem = memory_operand_parts(s)
@@ -342,7 +345,7 @@ fn operand_ny_expr(str: op): str {
    str.str_replace(s, " ", "_")
 }
 
-fn address_ny_expr(str: op): str {
+fn address_ny_expr(str op) str {
    "Returns a Ny-style address expression for operands used as addresses, such as x86 `lea` sources."
    def n = operand_ny_expr(op)
    if(startswith(n, "mem(")){ return slice(n, 4, n.len - 1, 1) }
@@ -351,7 +354,7 @@ fn address_ny_expr(str: op): str {
    "&" + n
 }
 
-fn instruction_kind(str: arch, str: mnemonic): str {
+fn instruction_kind(str arch, str mnemonic) str {
    "Classifies a decoded instruction independent of the concrete ISA syntax."
    def fam = arch_family(arch)
    def m = lower(strip(mnemonic))
@@ -364,7 +367,7 @@ fn instruction_kind(str: arch, str: mnemonic): str {
       if(startswith(m, "mov") || startswith(m, "cmov") || startswith(m, "set") || m == "lea" || startswith(m, "xchg")){ return "assign" }
       if(startswith(m, "cmp") || startswith(m, "test")){ return "compare" }
       if(startswith(m, "add") || startswith(m, "sub") || startswith(m, "imul") || m == "mul" || startswith(m, "xor") || startswith(m, "and") || startswith(m, "or") || startswith(m, "inc") || startswith(m, "dec") || startswith(m, "neg") || m == "not" || startswith(m, "shl") || startswith(m, "shr") || startswith(m, "sar") || startswith(m, "rol") || startswith(m, "ror") ||
-         m == "cdq" || m == "cqo" || m == "idiv" || m == "div"){ return "arith" }
+      m == "cdq" || m == "cqo" || m == "idiv" || m == "div"){ return "arith" }
       return "insn"
    }
    if(fam == "aarch64" || fam == "arm"){
@@ -373,9 +376,9 @@ fn instruction_kind(str: arch, str: mnemonic): str {
       if(startswith(m, "b.") || m == "b" || m == "br" || m == "beq" || m == "bne" || m == "bgt" || m == "bge" || m == "blt" || m == "ble" || m == "bhi" || m == "bhs" || m == "blo" || m == "bls" || m == "bmi" || m == "bpl" || m == "cbz" || m == "cbnz" || m == "tbz" || m == "tbnz"){ return "branch" }
       if(m == "cmp" || m == "cmn" || m == "tst"){ return "compare" }
       if(startswith(m, "mov") || m == "adr" || m == "adrp" || startswith(m, "ldr") || startswith(m, "ldur") ||
-         startswith(m, "str") || startswith(m, "stur") || m == "ldp" || m == "stp" || m == "ldnp" || m == "stnp"){ return "assign" }
+      startswith(m, "str") || startswith(m, "stur") || m == "ldp" || m == "stp" || m == "ldnp" || m == "stnp"){ return "assign" }
       if(startswith(m, "add") || startswith(m, "sub") || startswith(m, "eor") || startswith(m, "orr") || startswith(m, "and") || startswith(m, "lsl") || startswith(m, "lsr") || startswith(m, "asr") ||
-         startswith(m, "mul") || m == "sdiv" || m == "udiv"){ return "arith" }
+      startswith(m, "mul") || m == "sdiv" || m == "udiv"){ return "arith" }
       return "insn"
    }
    if(fam == "riscv"){
@@ -384,12 +387,12 @@ fn instruction_kind(str: arch, str: mnemonic): str {
       if(_is_riscv_branch(m) || m == "j"){ return "branch" }
       if(startswith(m, "li") || startswith(m, "mv") || startswith(m, "ld") || startswith(m, "lw") || startswith(m, "lh") || startswith(m, "lb") || startswith(m, "sd") || startswith(m, "sw") || startswith(m, "sh") || startswith(m, "sb")){ return "assign" }
       if(startswith(m, "add") || startswith(m, "sub") || startswith(m, "xor") || startswith(m, "or") || startswith(m, "and") || startswith(m, "sll") || startswith(m, "srl") || startswith(m, "sra") ||
-         startswith(m, "mul") || startswith(m, "div") || startswith(m, "rem") || startswith(m, "slt")){ return "arith" }
+      startswith(m, "mul") || startswith(m, "div") || startswith(m, "rem") || startswith(m, "slt")){ return "arith" }
    }
    "insn"
 }
 
-fn arithmetic_operator(str: mnemonic): str {
+fn arithmetic_operator(str mnemonic) str {
    "Returns a compact operator token for common arithmetic/logical mnemonics."
    def m = lower(strip(mnemonic))
    if(startswith(m, "add")){ return "+" }
@@ -410,7 +413,7 @@ fn arithmetic_operator(str: mnemonic): str {
    m
 }
 
-fn is_zero_register(str: arch, str: reg): bool {
+fn is_zero_register(str arch, str reg) bool {
    "Returns true for ISA registers that always read as zero."
    def fam = arch_family(arch)
    def r = lower(strip(reg))
@@ -418,29 +421,29 @@ fn is_zero_register(str: arch, str: reg): bool {
    false
 }
 
-fn _same_operand(str: a, str: b): bool {
+fn _same_operand(str a, str b) bool {
    lower(strip(a)) == lower(strip(b))
 }
 
-fn is_zeroing_idiom(str: arch, str: mnemonic, str: operands): bool {
+fn is_zeroing_idiom(str arch, str mnemonic, str operands) bool {
    "Recognizes common register-zeroing idioms from decoded text."
    def fam = arch_family(arch)
    def m = lower(strip(mnemonic))
    def parts = split_operands(operands)
    if(parts.len < 2){ return false }
    if(fam == "x86"){
-      return (startswith(m, "xor") || startswith(m, "sub")) && _same_operand(parts[0], parts[1])
+      return(startswith(m, "xor") || startswith(m, "sub")) && _same_operand(parts[0], parts[1])
    }
    if(fam == "aarch64" || fam == "arm"){
-      return (startswith(m, "eor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
+      return(startswith(m, "eor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
    }
    if(fam == "riscv"){
-      return (startswith(m, "xor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
+      return(startswith(m, "xor") || startswith(m, "sub")) && parts.len > 2 && _same_operand(parts[1], parts[2])
    }
    false
 }
 
-fn branch_condition(str: arch, str: mnemonic): str {
+fn branch_condition(str arch, str mnemonic) str {
    "Returns a normalized condition name for a branch mnemonic."
    def fam = arch_family(arch)
    def m = lower(strip(mnemonic))
@@ -469,7 +472,7 @@ fn branch_condition(str: arch, str: mnemonic): str {
       if(m == "tbz"){ return "bit_zero" }
       if(m == "tbnz"){ return "bit_nonzero" }
       if(startswith(m, "b.")){
-         case slice(m, 2, m.len, 1) {
+         case slice(m, 2, m.len, 1){
             "eq" -> "eq"
             "ne" -> "ne"
             "gt" -> "gt"
@@ -516,12 +519,12 @@ fn branch_condition(str: arch, str: mnemonic): str {
    }
 }
 
-fn _target_text(any: row_or_operands): str {
+fn _target_text(any row_or_operands) str {
    if(is_list(row_or_operands) && row_or_operands.len > 2){ return to_str(row_or_operands[2]) }
    to_str(row_or_operands)
 }
 
-fn target_address(any: row_or_operands, str: arch=""): int {
+fn target_address(any row_or_operands, str arch="") int {
    "Returns a direct code target in an operand string or disassembly row."
    def ops = _target_text(row_or_operands)
    def row_base = is_list(row_or_operands) && row_or_operands.len > 0 ? int(row_or_operands[0]) : 0
@@ -566,7 +569,7 @@ fn target_address(any: row_or_operands, str: arch=""): int {
    0
 }
 
-fn _cstr_at(any: p, int: off, int: maxn): str {
+fn _cstr_at(any p, int off, int maxn) str {
    mut b = Builder(maxn + 1)
    mut i = 0
    while(i < maxn){
@@ -580,7 +583,7 @@ fn _cstr_at(any: p, int: off, int: maxn): str {
    out
 }
 
-fn _copy_to_ptr(str: data): ptr {
+fn _copy_to_ptr(str data) ptr {
    def p = malloc(data.len + 1)
    if(p == 0){ return 0 }
    mut i = 0
@@ -592,7 +595,7 @@ fn _copy_to_ptr(str: data): ptr {
    p
 }
 
-fn disasm_lines(any: code, str: arch="x86_64", int: address=0): list {
+fn disasm_lines(any code, str arch="x86_64", int address=0) list {
    "Disassembles raw bytes with Capstone and returns `[address, mnemonic, operands, size]` rows."
    def data = _bytestr(code)
    if(data.len == 0){ return [] }
@@ -630,7 +633,7 @@ fn disasm_lines(any: code, str: arch="x86_64", int: address=0): list {
    rows
 }
 
-fn disasm(any: code, str: arch="x86_64", int: address=0): str {
+fn disasm(any code, str arch="x86_64", int address=0) str {
    "Disassembles raw bytes with Capstone and returns printable text."
    def rows = disasm_lines(code, arch, address)
    mut b = Builder(128)
@@ -648,11 +651,11 @@ fn disasm(any: code, str: arch="x86_64", int: address=0): str {
    out
 }
 
-fn _asm_u64_hex(int: v): str {
+fn _asm_u64_hex(int v) str {
    "0x" + to_hex(v, 0)
 }
 
-fn _stack_string(str: s): str {
+fn _stack_string(str s) str {
    mut data = s
    if(data.len == 0 || load8(data, data.len - 1) != 0){ data = data + chr(0) }
    mut out = ""
@@ -673,17 +676,17 @@ fn _stack_string(str: s): str {
    out
 }
 
-fn shell_sh(): str {
+fn shell_sh() str {
    "Returns a tiny Linux/x86_64 `/bin/sh` execve assembly snippet."
    shellcode_execve("/bin/sh")
 }
 
-fn shellcode_sh(): str {
+fn shellcode_sh() str {
    "Alias for `shell_sh`."
    shell_sh()
 }
 
-fn shellcode_execve(str: path="/bin/sh"): str {
+fn shellcode_execve(str path="/bin/sh") str {
    "Returns Linux/x86_64 assembly for `execve(path, [path], NULL)`."
    "xor rdx, rdx\n" +
    _stack_string(path) +
@@ -695,12 +698,12 @@ fn shellcode_execve(str: path="/bin/sh"): str {
    "syscall"
 }
 
-fn shellcode_exit(int: code=0): str {
+fn shellcode_exit(int code=0) str {
    "Returns Linux/x86_64 assembly for `exit(code)`."
    "mov edi, " + to_str(code) + "\nmov eax, 60\nsyscall"
 }
 
-fn shellcode_write(int: fd, str: text): str {
+fn shellcode_write(int fd, str text) str {
    "Returns Linux/x86_64 assembly for `write(fd, text, len(text))`."
    _stack_string(text) +
    "mov rsi, rsp\n" +
@@ -710,7 +713,7 @@ fn shellcode_write(int: fd, str: text): str {
    "syscall"
 }
 
-fn shellcode_read(int: fd=0, int: count=4096): str {
+fn shellcode_read(int fd=0, int count=4096) str {
    "Returns Linux/x86_64 assembly for `read(fd, rsp-count, count)`. The buffer pointer remains in `rsi`."
    "sub rsp, " + to_str(max(1, count)) + "\n" +
    "mov rsi, rsp\n" +
@@ -718,4 +721,26 @@ fn shellcode_read(int: fd=0, int: count=4096): str {
    "mov edi, " + to_str(fd) + "\n" +
    "xor eax, eax\n" +
    "syscall"
+}
+
+#main {
+   assert(clean_operand("qword ptr [rip + 0x20]") == "[rip + 0x20]", "disasm clean operand")
+   assert(operand_kind("[rip + 0x20]") == "mem" && operand_kind("0x401000") == "imm" && operand_kind("rax + 4") == "expr", "disasm operand kind")
+   assert(operand_ny_expr("[rsp + 0x20]") == "mem(rsp + 0x20)" && address_ny_expr("[rsp + 0x20]") == "rsp + 0x20", "disasm x86 memory expr")
+   assert(operand_ny_expr("fs:[0x28]") == "mem_fs(0x28)" && operand_ny_expr("gs:[rax + 8]") == "mem_gs(rax + 8)", "disasm segment memory expr")
+   assert(operand_ny_expr("8(sp)") == "mem(sp + 8)" && address_ny_expr("8(sp)") == "sp + 8", "disasm riscv memory expr")
+   def rv = memory_operand_parts("8(sp)")
+   assert(rv.get("ok", false) && rv.get("base", "") == "sp" && rv.get("offset", "") == "8", "disasm riscv memory parts")
+   assert(operand_kind("[sp, #-0x10]!") == "mem" && operand_ny_expr("[sp, #-0x10]!") == "mem(sp - 0x10)", "disasm aarch64 writeback expr")
+   def arm = memory_operand_parts("[sp, #-0x10]!")
+   assert(arm.get("ok", false) && arm.get("base", "") == "sp" && arm.get("offset", "") == "-0x10", "disasm aarch64 memory parts")
+   assert(split_operands("rax, [rip + 0x20], {x0, x1}").len == 3, "disasm split operands")
+   assert(instruction_kind("x86_64", "cdq") == "arith" && instruction_kind("x86_64", "idiv") == "arith" && arithmetic_operator("idiv") == "/", "disasm x86 division")
+   assert(instruction_kind("x86_64", "imul") == "arith" && arithmetic_operator("imul") == "*", "disasm x86 multiply")
+   assert(instruction_kind("x86_64", "rol") == "arith" && arithmetic_operator("ror") == "ror", "disasm x86 rotate")
+   assert(instruction_kind("x86_64", "not") == "arith" && arithmetic_operator("not") == "~", "disasm x86 not")
+   assert(instruction_kind("x86_64", "neg") == "arith" && arithmetic_operator("neg") == "neg", "disasm x86 neg")
+   assert(instruction_kind("x86_64", "xchg") == "assign" && instruction_kind("aarch64", "stp") == "assign" && instruction_kind("aarch64", "ldp") == "assign", "disasm assign kind")
+   assert(arithmetic_operator("sdiv") == "/" && instruction_kind("riscv64", "rem") == "arith" && arithmetic_operator("rem") == "%", "disasm non-x86 arithmetic")
+   print("✓ std.os.disasm self-test passed")
 }
