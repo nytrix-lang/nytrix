@@ -5,7 +5,7 @@ forms.
 
 ## Conditionals
 
-```text
+```ny
 if(cond){ a } else { b }
 if(cond){ a } elif(other){ b } else { c }
 if cond { a } elif other { b } else { c }
@@ -22,13 +22,13 @@ statement, such as a final expression or a nested value-producing `if`.
 
 An `else` branch is required in expression position:
 
-```text
+```ny
 def label = if(code == 200){ "ok" } else { "error" }
 ```
 
 ## Loops
 
-```text
+```ny
 while(cond){ body }
 while(mut i = 0 i < n ++i){ body }
 for item in iterable { body }
@@ -55,7 +55,7 @@ assert(seen == ["t:0", "e:1", "s:2", "t:3"], "indexed loop")
 
 `case` is value dispatch.
 
-```text
+```ny
 case value {
    literal -> expr
    a, b, c -> expr
@@ -75,7 +75,7 @@ value.
 
 `match` is pattern dispatch.
 
-```text
+```ny
 match value {
    pattern -> expr
    Pattern(field: name) -> expr
@@ -89,7 +89,7 @@ payload fields.
 
 ## Try and catch
 
-```text
+```ny
 try { body } catch err { handler }
 try { body } catch(_) { handler }
 ```
@@ -99,7 +99,7 @@ library APIs may also return structured `Result` values instead of throwing.
 
 ## Defer
 
-```text
+```ny
 defer { cleanup }
 ```
 
@@ -110,7 +110,7 @@ during panic unwinding.
 
 ## Labels and goto
 
-```text
+```ny
 start:
 goto start
 ```
@@ -122,7 +122,7 @@ would skip binding initialization. Undefined labels are compile errors.
 
 ## With
 
-```text
+```ny
 with Type: name = value { body }
 ```
 

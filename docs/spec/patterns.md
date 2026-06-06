@@ -7,7 +7,7 @@ selected by a literal value, literal set, range, wildcard, or value shape.
 
 `case` performs value dispatch:
 
-```text
+```ny
 case byte {
    9, 10, 13 -> "space"
    32..126 -> "printable"
@@ -20,7 +20,7 @@ arms.
 
 `case` arms can be compact while staying explicit:
 
-```text
+```ny
 case int(b) {
    9, 10, 13 -> "control-space"
    32..126 -> "ascii"
@@ -34,7 +34,7 @@ enum-like values, and numeric ranges.
 This is a typical shape for byte classifiers:
 
 ```ny
-fn ascii_score(int: b): int {
+fn ascii_score(int b) int {
    case b {
       9, 10, 13 -> 1
       32..126 -> 10
@@ -50,7 +50,7 @@ functions.
 
 `match` is for shape-oriented dispatch:
 
-```text
+```ny
 match value {
    Shape.Circle(radius: r) -> r * r
    Shape.Rect(width: w, height: h) -> w * h
@@ -64,7 +64,7 @@ equality. Fallback arms are explicit.
 ADT patterns use the constructor name and named payload fields. Payload fields
 must bind to an identifier or `_`.
 
-```text
+```ny
 match shape {
    Shape.Circle(radius: r) if r > 0 -> r
    Shape.Circle(radius: _) -> 0
@@ -79,7 +79,7 @@ If every arm is a literal or range, `case` is the direct form.
 
 ## Wildcard
 
-```text
+```ny
 _ -> fallback
 ```
 
@@ -89,7 +89,7 @@ The wildcard arm matches values not handled by earlier arms. Put it last.
 
 Arms are checked in source order. Put specific arms before broad arms:
 
-```text
+```ny
 case code {
    404 -> "missing"
    400..499 -> "client-error"
@@ -107,7 +107,7 @@ Place special cases before a broad range that catches many values.
 Use an `if` block when the dispatch depends on several boolean conditions or
 requires multi-step setup:
 
-```text
+```ny
 if(x < 0){
    "negative"
 } else {
@@ -122,7 +122,7 @@ if(x < 0){
 
 Repeated classifiers can be represented as compile-time data:
 
-```text
+```ny
 case kind {
    "add", "sub", "mul", "div" -> "arithmetic"
    "and", "or", "xor" -> "bitwise"

@@ -7,53 +7,21 @@ most draw calls do not take a window handle.
 A minimal UI program creates one window, enters one frame loop, draws visible
 state inside that loop, and releases renderer resources after the loop exits.
 
-## First window
+## Project Files
 
-This opens a window, clears every frame, draws primitives and text, adapts the
-layout to resize events, and closes when the window requests shutdown.
-
-```ny
-use std.core
-use std.os.ui.render as gfx
-
-def win = gfx.init_window(960, 540, "Nytrix UI")
-if(!win){ panic("window init failed") }
-
-def font = gfx.font_load_first(["etc/assets/fonts/jetbrains.ttf"], 22)
-def bg = gfx.color_rgb(0.07, 0.08, 0.10)
-
-while(!gfx.window_should_close()){
-   def ui = gfx.begin_frame_layout(bg, 960.0, 540.0)
-   if(!ui){
-      continue
-   }
-
-   gfx.draw_rect(
-      float(ui.get("view_x", 0.0)),
-      float(ui.get("view_y", 0.0)),
-      float(ui.get("view_w", 960.0)),
-      float(ui.get("view_h", 540.0)),
-      bg
-   )
-   gfx.draw_rect(48.0, 48.0, 260.0, 120.0, gfx.color_rgb(0.10, 0.32, 0.72))
-   gfx.draw_rectangle_lines(48.0, 48.0, 260.0, 120.0, gfx.WHITE, 2.0)
-   gfx.draw_circle(420.0, 108.0, 54.0, gfx.ORANGE)
-   gfx.draw_line_2d(520.0, 72.0, 720.0, 164.0, gfx.GREEN, 4.0)
-   gfx.draw_text(font, "draw text, shapes, images, and meshes", 64.0, 92.0, gfx.WHITE)
-
-   gfx.end_frame()
-}
-
-gfx.close_window()
-```
+Use the focused project files when checking UI behavior. The engine viewer is
+the full renderer scene; the smaller projects isolate input, monitor/DPI, and
+terminal rendering.
 
 ## Frame loop
 
 | Step | API | Notes |
 | --- | --- | --- |
-| Create context | `gfx.init_window(width, height, title, flags=0, vsync=false, filter=false, msaa=1)` | Returns a window dict or `false`. |
-| Start frame | `gfx.begin_frame_clear(color)`, `gfx.begin_frame_layout(color, base_w, base_h)` | Starts drawing and clears the whole live framebuffer; `begin_frame_layout` also syncs a resize-aware 2D projection. |
-| Draw | `gfx.draw_*` | Coordinates are pixel-like by default; after `begin_frame_layout` they are in design space plus any extra visible area from resize. Colors are `[r, g, b, a]` floats or packed colors where supported. |
+| Create context | `gfx.init_window(width, height, title, flags=0, vsync=false, filter=false, msaa=1)` | Returns a window dict or `false`. Pass `"immediate"` or `"unlimited"` for uncapped Vulkan presentation when supported. |
+| Start frame | `gfx.begin_frame_clear(color)` | Starts drawing and clears the whole live framebuffer. |
+| Screen size | `gfx.framebuffer_size_f64()`, `gfx.set_ortho_2d(0, w, 0, h)` | Read live size and reset 2D screen coordinates each frame. |
+| Fit layout | `gfx.begin_frame_layout(color, base_w, base_h)` | Optional aspect-fit design-space projection. |
+| Draw | `gfx.draw_*` | Coordinates are screen-space after `set_ortho_2d`, or design-space after `begin_frame_layout`. Colors are `[r, g, b, a]` floats or packed colors where supported. |
 | Present | `gfx.end_frame()` | Submits the frame. |
 | Close check | `gfx.window_should_close()` | Polls events and returns true after close/escape/OS quit. |
 | Shutdown | `gfx.close_window()` | Releases renderer state and closes the active window. |
@@ -72,45 +40,27 @@ gfx.close_window()
 | Responsive layout | `begin_frame_layout`, `layout_fit`, `layout_x`, `layout_y`, `layout_size`, `layout_rect`, `framebuffer_size_f64` |
 | Timing and capture | `get_frame_time`, `get_time`, `renderer_frame_stats`, `snapshot`, `request_frame_capture`, `get_pixel` |
 
-`begin_frame_layout` returns `view_x`, `view_y`, `view_w`, and `view_h`.
-Draw a background over that rect when the content should fill every resized
-edge instead of only the original design rectangle.
+Choose one coordinate model per frame:
+
+- Use `begin_frame_clear`, `framebuffer_size_f64`, and `set_ortho_2d` when UI
+  should fill the live window pixels.
+- Use `begin_frame_layout(color, base_w, base_h)` when the app wants an
+  aspect-fit design space.
+
+`begin_frame_layout` returns `view_x`, `view_y`, `view_w`, and `view_h`. Draw a
+background over that rect when the fitted content should cover the resized
+window instead of only the original design rectangle.
 
 ## Input
 
-Keep the window returned by `init_window` when you need keyboard, mouse, or event
-state.
-
-```ny
-use std.core
-use std.os.ui.render as gfx
-use std.os.ui.window as window
-use std.os.ui.consts as key
-
-def win = gfx.init_window(800, 480, "Input")
-if(!win){ panic("window init failed") }
-
-mut accent = gfx.BLUE
-
-while(!gfx.window_should_close(win)){
-   if(window.key_pressed(win, key.KEY_SPACE)){
-      accent = gfx.ORANGE
-   }
-
-   def mouse = window.mouse_pos(win)
-   def down = window.mouse_down(win, 0) ; left mouse button
-
-   gfx.begin_frame_clear(gfx.BLACK)
-   gfx.draw_circle(float(mouse.get(0, 0)), float(mouse.get(1, 0)), down ? 30.0 : 18.0, accent)
-   gfx.end_frame()
-}
-
-gfx.close_window()
-```
+Keep the window returned by `init_window` when you need keyboard, mouse, or
+event state. Poll events once per frame, then read state from the same window.
+The window example above uses `window.key_pressed`, `window.cursor_pos`, and
+`window.mouse_down` inside the draw loop.
 
 For event-driven code, drain queued events inside the frame loop before drawing.
 
-```text
+```ny
 mut e = window.check_event(win)
 while(e){
    def typ = window.event_type(e)
@@ -122,30 +72,22 @@ while(e){
 }
 ```
 
-Gamepads use the same window facade for mapped controls and raw fallback.
+Focused UI project files:
 
-```ny
-use std.os.ui.window as window
-
-def pads = window.gamepads()
-if(pads.len > 0){
-   def jid = pads[0]
-   def name = window.gamepad_name(jid)
-   def left_x = window.gamepad_axis(jid, "LEFTX")
-   def jump = window.gamepad_button(jid, "A")
-   print(name, left_x, jump)
-}
-```
+- [engine.ny](../../etc/projects/ui/engine.ny) is the asset viewer used by `tmp/tools/run`.
+- [input.ny](../../etc/projects/ui/input.ny) switches between keyboard and active gamepad visualization.
+- [monitor.ny](../../etc/projects/ui/monitor.ny) shows monitor layout, window moves, framebuffer scale, DPI, and mouse coordinates.
+- [term.ny](../../etc/projects/ui/term.ny) shows terminal rendering.
 
 ## Text
 
 `draw_text` takes a font id. Passing `0` asks the renderer to use its default
 font; loading a known font gives predictable metrics.
 
-```text
+```ny
 def font = gfx.font_load_first([
-   "etc/assets/fonts/jetbrains.ttf",
-   "etc/assets/fonts/maplemono.ttf"
+   "etc/assets/fonts/monocraft.ttf",
+   "etc/assets/fonts/jetbrains.ttf"
 ], 18)
 
 def size = gfx.measure_text(font, "Status: ready")
@@ -159,7 +101,7 @@ Call `measure_text` before clipping, alignment, or right-aligned labels.
 Load textures once, draw them every frame, and destroy them when the renderer no
 longer needs them.
 
-```text
+```ny
 def logo = gfx.texture_load("logo.png")
 
 if(logo){
@@ -173,7 +115,7 @@ gfx.texture_destroy(logo)
 
 Switch into 3D mode for world-space draws, then switch back before 2D overlays.
 
-```text
+```ny
 def cam = gfx.camera_init([0.0, 1.5, 5.0], 0.0, -12.0, 16.0 / 9.0)
 
 gfx.begin_frame_clear(gfx.BLACK)
@@ -201,5 +143,5 @@ code.
 ## Related
 
 - [library.md](library.md) for the UI module map.
-- [examples.md](examples.md) for runnable programs.
+- [programs.md](programs.md#complete-project-examples) for runnable programs.
 - [troubleshooting.md](troubleshooting.md) for runtime and environment checks.

@@ -419,13 +419,6 @@ aside.active {
     outline: none;
 }
 
-.brand-home:hover .logo-mark,
-.brand-home:focus-visible .logo-mark,
-.brand:hover .logo-mark,
-.brand:focus-visible .logo-mark {
-    border-color: var(--accent-line);
-}
-
 .brand-home:hover .brand-text b,
 .brand-home:focus-visible .brand-text b,
 .brand:hover .brand-text b,
@@ -434,22 +427,19 @@ aside.active {
 }
 
 .logo-mark {
-    width: 30px;
-    height: 30px;
-    border: 1px solid var(--line2);
-    border-radius: var(--radius);
+    width: 32px;
+    height: 32px;
     display: grid;
     place-items: center;
     color: var(--ink);
-    background: #000;
     font: 900 12px var(--font-display);
     flex: 0 0 auto;
 }
 
 .logo-mark img {
     display: block;
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     object-fit: contain;
 }
 
@@ -735,7 +725,7 @@ main.aside-active {
 }
 
 #content {
-    width: min(1080px, 100%);
+    width: min(1400px, 100%);
     margin: 0 auto;
 }
 
@@ -748,30 +738,10 @@ main.aside-active {
 .header-top {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
 }
 
 .header-copy {
     min-width: 0;
-}
-
-.title-icon {
-    width: 31px;
-    height: 31px;
-    display: grid;
-    place-items: center;
-    flex: 0 0 auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--panel);
-    color: var(--accent);
-}
-
-.title-icon img {
-    display: block;
-    width: 23px;
-    height: 23px;
-    object-fit: contain;
 }
 
 .mod-label {
@@ -809,8 +779,8 @@ main.aside-active {
 
 .docs-hero {
     display: grid;
-    grid-template-columns: minmax(0, 1.18fr) minmax(320px, 430px);
-    gap: 14px;
+    grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr);
+    gap: 18px;
     align-items: center;
     padding: 18px;
     border: 1px solid var(--line);
@@ -822,6 +792,7 @@ main.aside-active {
     display: grid;
     gap: 8px;
     min-width: 0;
+    width: 100%;
     align-content: center;
 }
 
@@ -1321,11 +1292,26 @@ main.aside-active {
 }
 
 .module-summary,
-.module-doc-body,
-.module-ref-list {
+.module-doc-body {
     color: var(--muted);
     font: 450 13px/1.6 var(--font-text);
     white-space: pre-wrap;
+}
+
+.module-summary ul,
+.module-summary ol,
+.module-doc-body ul,
+.module-doc-body ol {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.module-summary li,
+.module-doc-body li {
+    margin: 3px 0;
+    white-space: normal;
 }
 
 .module-doc-section {
@@ -1340,7 +1326,31 @@ main.aside-active {
 }
 
 .module-ref-list {
-    padding-left: 18px;
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    color: var(--muted);
+    font: 450 13px/1.6 var(--font-text);
+    list-style: none;
+}
+
+.module-ref-list li {
+    position: relative;
+    margin: 0;
+    padding-left: 14px;
+}
+
+.module-ref-list li::before {
+    content: "";
+    position: absolute;
+    left: 1px;
+    top: 0.78em;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--muted);
+    opacity: 0.9;
 }
 
 .module-ref-list a {
@@ -1880,7 +1890,20 @@ pre code {
 .html-content ul,
 .html-content ol {
     margin: 8px 0 14px;
-    padding-left: 22px;
+    padding-left: 20px;
+    overflow-wrap: anywhere;
+}
+
+.markdown-content ul ul,
+.markdown-content ol ol,
+.markdown-content ul ol,
+.markdown-content ol ul,
+.html-content ul ul,
+.html-content ol ol,
+.html-content ul ol,
+.html-content ol ul {
+    margin-top: 6px;
+    margin-bottom: 6px;
 }
 
 .markdown-content li::marker,

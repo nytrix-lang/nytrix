@@ -5,7 +5,7 @@ source unit. Import resolution happens before normal execution.
 
 ## Forms
 
-```text
+```ny
 use std
 use std.core
 use std math as math
@@ -44,7 +44,7 @@ use explicit module imports, aliases, or item lists.
 There is no implicit global `std` object before import. This is not valid unless
 `std` or another alias is introduced by the current source:
 
-```text
+```ny
 std.math.abs(-3)
 ```
 
@@ -86,7 +86,7 @@ There are no semicolon terminators. `;` starts a comment.
 
 Installed package names can be imported like modules:
 
-```text
+```ny
 use package_name
 use package_name.submodule as sub
 ```

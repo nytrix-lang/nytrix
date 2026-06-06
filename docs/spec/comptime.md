@@ -5,7 +5,7 @@ templates, emitted declarations, and generated modules.
 
 ## Compile-time blocks
 
-```text
+```ny
 comptime { body }
 ```
 
@@ -19,14 +19,14 @@ Rules:
 - Does not run unrelated top-level user code.
 - Does not capture runtime globals.
 
-```text
+```ny
 use std.core
 
 def xs = comptime{ range(4).map(fn(i){ i + 1 }) }
 assert_eq(to_str(xs), "[1, 2, 3, 4]", "comptime imports")
 ```
 
-```text
+```ny
 use std
 
 def base = comptime{ 2^5 }
@@ -38,7 +38,7 @@ immutable compile-time value.
 
 ## Tables
 
-```text
+```ny
 comptime table Name {
    pattern -> value
    _ -> fallback
@@ -51,7 +51,7 @@ compiler can lower the shape.
 
 ## Match helpers
 
-```text
+```ny
 comptime match Name(key, fallback)
 ```
 
@@ -71,7 +71,7 @@ text pasted into the source file.
 
 ## Emit
 
-```text
+```ny
 comptime emit name(args)
 ```
 
@@ -81,7 +81,7 @@ comptime emit name(args)
 
 Compile-time assertions make safety checks part of compilation:
 
-```text
+```ny
 assert_compile((4 * 11) == 44, "folded arithmetic")
 assert_compile_range(i, 0, 3, "loop index range")
 assert_compile_index(xs, i, "list index bounds")
@@ -104,7 +104,7 @@ loads/stores require a byte offset proven to stay inside the allocation.
 
 ## Generated modules
 
-```text
+```ny
 module pkg.generated generated from Spec {
    native_prefix = "x"
    emit make_backend(Contract)
@@ -123,7 +123,7 @@ and emitted public surfaces remain explicit.
 
 Platform guards select source at compile time:
 
-```text
+```ny
 #linux { os_tag = "linux" }
 #elif macos { os_tag = "macos" }
 #elif windows { os_tag = "windows" }
@@ -150,7 +150,7 @@ the source checkout or active source root used by the compiler.
 `std.core.syntax` exposes the runtime/comptime syntax registry used by the
 extension tests:
 
-```text
+```ny
 use std.core.syntax as syntax
 
 mut reg = syntax.new_registry()
