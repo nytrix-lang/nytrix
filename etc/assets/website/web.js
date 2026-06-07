@@ -25,6 +25,13 @@ function manualRootUrl() {
     url.pathname = url.pathname.replace(/\/index\.html?$/i, "/");
   return url.href;
 }
+function feedUrl() {
+  try {
+    return new URL("feed.xml", manualRootUrl()).href;
+  } catch {
+    return "feed.xml";
+  }
+}
 function sameUrl(a, b) {
   try {
     return (
@@ -71,6 +78,7 @@ const cleanHTML = (html) =>
     ADD_ATTR: [
       "aria-expanded",
       "aria-hidden",
+      "aria-label",
       "aria-pressed",
       "class",
       "cx",
@@ -81,6 +89,7 @@ const cleanHTML = (html) =>
       "data-code-toggle",
       "data-copy",
       "data-copy-source",
+      "data-feed-copy",
       "data-doc-anchor",
       "data-doc-route",
       "data-internal-module",
@@ -103,6 +112,8 @@ const cleanHTML = (html) =>
       "stroke-linejoin",
       "stroke-width",
       "target",
+      "title",
+      "type",
       "viewBox",
       "width",
       "x",
@@ -386,6 +397,7 @@ const ICONS = {
   package: `<path d="m16.5 9.4-9-5.2"/><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`,
   play: `<circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4Z"/>`,
   route: `<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M6 16v-4a4 4 0 0 1 4-4h4"/>`,
+  rss: `<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>`,
   search: `<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>`,
   server: `<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01"/><path d="M7 17h.01"/>`,
   shield: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M9 12l2 2 4-4"/>`,
@@ -1904,6 +1916,19 @@ function renderModuleCard(mod) {
   );
 }
 
+const SOCIAL_LINKS = [
+  ["Discord", "https://discord.gg/XQDR6DZWb"],
+  ["Mastodon", "https://mastodon.social/@nytrix"],
+];
+
+function renderHeroUpdates() {
+  const socialLinks = SOCIAL_LINKS.map(
+    ([label, href]) =>
+      `<a class="hero-action" href="${esc(href)}" target="_blank" rel="me noopener noreferrer" title="Open ${esc(label)}">${icon("external", "ico ico-xs")}<span>${esc(label)}</span></a>`,
+  ).join("");
+  return `<div class="hero-updates" aria-label="Nytrix updates feed and social links"><a class="hero-action" href="feed.xml" data-feed-copy rel="noopener noreferrer" title="Copy RSS feed URL" aria-label="Copy RSS feed URL">${icon("rss", "ico ico-xs")}<span>RSS</span></a>${socialLinks}</div>`;
+}
+
 function renderDocsHome(overviewMod) {
   setPageTitle("Home");
   const docs = sortMarkdownDocs(
@@ -1938,7 +1963,7 @@ print(f"{scale=} {lens=} {sum=} tag={tag(sum)}")`;
     "Manual · API · source",
   );
   html += `<div class="docs-home">`;
-  html += `<section class="docs-hero"><div class="docs-hero-copy"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><h1>Think freely.</h1><p>Native. Explicit. Comptime. Cross-platform.</p><div class="hero-actions"><a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a></div><div class="quick-start-list">${quickStart.map(([name, label, command]) => `<div><b>${icon(name, "ico ico-xs")}<span>${esc(label)}</span></b><code>${esc(command)}</code></div>`).join("")}</div></div><div class="docs-hero-aside"><pre class="docs-example"><code class="language-ny">${highlight(sampleProgram)}</code></pre></div></section>`;
+  html += `<section class="docs-hero"><div class="docs-hero-copy"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><h1>Think freely.</h1><p>Native. Explicit. Comptime. Cross-platform.</p><div class="hero-actions"><a class="hero-action primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a>${renderHeroUpdates()}</div><div class="quick-start-list">${quickStart.map(([name, label, command]) => `<div><b>${icon(name, "ico ico-xs")}<span>${esc(label)}</span></b><code>${esc(command)}</code></div>`).join("")}</div></div><div class="docs-hero-aside"><pre class="docs-example"><code class="language-ny">${highlight(sampleProgram)}</code></pre></div></section>`;
   html += renderDocGroup(
     "Learn",
     learnDocs,
@@ -2669,6 +2694,13 @@ if (contentEl) {
     const routeBtn = e.target.closest("button[data-route-copy]");
     if (routeBtn) {
       copyText(routeBtn.dataset.routeCopy || "", routeBtn);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const feedCopyBtn = e.target.closest("[data-feed-copy]");
+    if (feedCopyBtn) {
+      copyText(feedUrl(), feedCopyBtn);
       e.preventDefault();
       e.stopPropagation();
       return;

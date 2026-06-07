@@ -98,7 +98,7 @@ Call `measure_text` before clipping, alignment, or right-aligned labels.
 
 ## Textures
 
-Load textures once, draw them every frame, and destroy them when the renderer no
+Load textures once, draw them per frame, and destroy them when the renderer no
 longer needs them.
 
 ```ny

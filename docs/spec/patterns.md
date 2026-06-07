@@ -75,7 +75,7 @@ match shape {
 The compiler checks duplicate variants, missing constructor fields, unknown
 payload fields, and non-exhaustive ADT matches.
 
-If every arm is a literal or range, `case` is the direct form.
+When arms use only literals or ranges, `case` is the direct form.
 
 ## Wildcard
 
@@ -142,8 +142,8 @@ Pattern bugs include:
 
 | Symptom | Likely cause |
 | --- | --- |
-| Fallback always runs | The tested value has a different type or spelling. |
-| Specific arm never runs | A broader earlier arm captured the value. |
+| Fallback catches the value | The tested value has a different type or spelling. |
+| Specific arm gets skipped | A broader earlier arm captured the value. |
 | Parser error near `->` | Missing braces, comma, or malformed range. |
 | Multi-step logic in one arm | Use `if` or a helper function inside the branch. |
 
