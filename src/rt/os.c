@@ -2313,7 +2313,11 @@ static bool rt_async_progress_task(rt_async_task *t, int block, int wait_ms) {
   }
   case RT_ASYNC_RECV: {
     int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_READ, block ? wait_ms : 0);
-    if (ready <= 0)
+    if (ready < 0) {
+      rt_async_complete(t, rt_tag_v(-1));
+      return true;
+    }
+    if (ready == 0)
       return false;
 #ifdef _WIN32
     int r = recv((SOCKET)t->fd, (char *)(uintptr_t)t->buf, (int)t->len, (int)t->flags);
@@ -2328,7 +2332,11 @@ static bool rt_async_progress_task(rt_async_task *t, int block, int wait_ms) {
   case RT_ASYNC_SEND:
   case RT_ASYNC_WRITE_ALL: {
     int ready = rt_async_fd_ready(t->fd, RT_ASYNC_EV_WRITE, block ? wait_ms : 0);
-    if (ready <= 0)
+    if (ready < 0) {
+      rt_async_complete(t, rt_tag_v(-1));
+      return true;
+    }
+    if (ready == 0)
       return false;
     const char *base = (const char *)(uintptr_t)t->buf;
     int64_t remaining = t->len - t->off;

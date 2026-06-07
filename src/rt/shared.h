@@ -713,6 +713,7 @@ static inline int64_t _rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val)
 void rt_cleanup_args(void);
 void rt_cleanup_small_strings(void);
 int64_t rt_set_args(int64_t argc, int64_t argv, int64_t envp);
+int64_t rt_set_args_raw(int argc, char **argv, char **envp);
 int _ny_aot_set_args(int argc, char **argv, char **envp);
 int64_t rt_malloc(int64_t n);
 int64_t rt_malloc_uninit(int64_t n);

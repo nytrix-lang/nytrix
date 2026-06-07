@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <setjmp.h>
@@ -222,14 +223,14 @@ int64_t rt_print_flush(void) {
     if (rt_write_stdout_console(rt_print_buf, (size_t)rt_print_pos) >= 0) {
       rt_print_pos = 0;
       fflush(stdout);
-      return 1;
+      return rt_tag_v(1);
     }
 #endif
     fwrite(rt_print_buf, 1, (size_t)rt_print_pos, stdout);
     rt_print_pos = 0;
   }
   fflush(stdout);
-  return 1;
+  return rt_tag_v(1);
 }
 
 static inline void rt_maybe_flush_line(void) {
@@ -369,7 +370,9 @@ int64_t rt_cstr_to_str(int64_t p_v) {
   int64_t raw = p_v;
   if (NY_NATIVE_IS(p_v))
     raw = (int64_t)(uintptr_t)NY_NATIVE_DECODE(p_v);
-  if (!raw)
+  else if (is_int(p_v))
+    raw = rt_untag_v(p_v);
+  if (!raw || (uintptr_t)raw <= NY_VALUE_PTR_MIN_ADDR)
     return 0;
   return rt_alloc_string((const char *)(uintptr_t)raw);
 }
@@ -616,6 +619,8 @@ int64_t rt_globals_set(int64_t p) {
 }
 
 int64_t rt_fix_fn_ptr(int64_t fn) {
+  if (!fn || !is_ptr(fn))
+    return fn;
 #if UINTPTR_MAX > 0xffffffff
   uint64_t raw = (uint64_t)fn;
   uint64_t hi = raw >> 32;
@@ -633,7 +638,7 @@ int64_t rt_fix_fn_ptr(int64_t fn) {
 }
 
 int64_t rt_push_defer(int64_t fn, int64_t env) {
-  fn = rt_fix_fn_ptr(fn);
+  fn = is_ptr(fn) ? rt_fix_fn_ptr(fn) : 0;
   vec_push(&g_defer_stack, ((defer_t){fn, env}));
   return 0;
 }
@@ -672,8 +677,8 @@ int64_t rt_clear_panic_env(void) {
   return 0;
 }
 
-int64_t rt_jmpbuf_size(void) { return (int64_t)sizeof(NY_JMP_BUF); }
-int64_t rt_jmpbuf_align(void) { return (int64_t)_Alignof(NY_JMP_BUF); }
+int64_t rt_jmpbuf_size(void) { return rt_tag_v((int64_t)sizeof(NY_JMP_BUF)); }
+int64_t rt_jmpbuf_align(void) { return rt_tag_v((int64_t)_Alignof(NY_JMP_BUF)); }
 int64_t rt_get_panic_val(void) { return g_panic_value; }
 
 int64_t rt_trace_loc(int64_t file, int64_t line, int64_t col) {
@@ -1003,12 +1008,12 @@ static void rt_ensure_argv_snapshot(void) {
   (void)rt_build_argv_snapshot(rt_native_argv_ptr, rt_native_argc_val);
 }
 
-int64_t rt_set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
+int64_t rt_set_args_raw(int argc, char **argv_ptr, char **envp_ptr) {
   rt_cleanup_args();
-  rt_argc_val = (argc << 1) | 1;
-  rt_native_argc_val = (int)argc;
-  rt_native_argv_ptr = (char **)argv_ptr;
-  rt_native_envp_ptr = (char **)envp_ptr;
+  rt_argc_val = ((int64_t)argc << 1) | 1;
+  rt_native_argc_val = argc;
+  rt_native_argv_ptr = argv_ptr;
+  rt_native_envp_ptr = envp_ptr;
   if (rt_build_argv_snapshot(rt_native_argv_ptr, rt_native_argc_val) != 0)
     return -1;
   char **old_envp = rt_native_envp_ptr;
@@ -1022,6 +1027,18 @@ int64_t rt_set_args(int64_t argc, int64_t argv_ptr, int64_t envp_ptr) {
   if (env_ok != 0)
     return -1;
   return 0;
+}
+
+int64_t rt_set_args(int64_t argc_v, int64_t argv_ptr_v, int64_t envp_ptr_v) {
+  int64_t argc = is_int(argc_v) ? rt_untag_v(argc_v) : argc_v;
+  int64_t argv_ptr = (is_int(argv_ptr_v) || NY_NATIVE_IS(argv_ptr_v)) ? rt_untag_v(argv_ptr_v) : argv_ptr_v;
+  int64_t envp_ptr = (is_int(envp_ptr_v) || NY_NATIVE_IS(envp_ptr_v)) ? rt_untag_v(envp_ptr_v) : envp_ptr_v;
+  if (argc < 0 || argc > INT_MAX)
+    return -1;
+  if ((argv_ptr && (uintptr_t)argv_ptr <= NY_VALUE_PTR_MIN_ADDR) ||
+      (envp_ptr && (uintptr_t)envp_ptr <= NY_VALUE_PTR_MIN_ADDR))
+    return -1;
+  return rt_set_args_raw((int)argc, (char **)(uintptr_t)argv_ptr, (char **)(uintptr_t)envp_ptr);
 }
 
 int _ny_aot_set_args(int argc, char **argv_ptr, char **envp_ptr) {
