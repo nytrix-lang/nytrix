@@ -40,6 +40,9 @@ while(mi < many.len){
 assert(many_sum == 50005000, "10k stackless tasks")
 assert(await aio.sleep_ms(1) == 0, "stackless sleep")
 assert(await aio.yield_now() == 0, "stackless yield")
+assert(await __async_wait_fd(-1, 1, 0) == -1, "__async_wait_fd invalid fd")
+assert(await __async_recv(-1, 0, 0, 0) == -1, "__async_recv invalid fd")
+assert(await __async_send(-1, "x", 1, 0) == -1, "__async_send invalid fd")
 def wait_lh = async fn() {
    await aio.yield_now()
    21

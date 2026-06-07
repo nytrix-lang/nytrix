@@ -45,4 +45,11 @@ fn test_scoping() {
 
 test_scoping()
 assert(log == "IS|ID|OS|", "Defer scoping behavior")
+
+assert(__pop_run_defer() == nil, "__pop_run_defer accepts empty stack")
+assert(__push_defer(nil, nil) == nil, "__push_defer accepts null callback")
+assert(__run_defers_to(0) == nil, "__run_defers_to drains null callback")
+assert(__push_defer(nil, nil) == nil, "__push_defer accepts second null callback")
+assert(__pop_run_defer() == nil, "__pop_run_defer drains null callback")
+
 print("✓ runtime defer tests passed")
