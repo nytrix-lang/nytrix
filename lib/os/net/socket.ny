@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.net
 ;; - std.os
-module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
+module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, _make_sockaddr, socket_connect, socket_bind, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
 use std.core
 use std.core.str
 use std.core.reflect

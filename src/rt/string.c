@@ -154,6 +154,8 @@ static int rt_str_builder_reserve(rt_string_builder_t *b, size_t need) {
 }
 
 int64_t rt_str_builder_append(int64_t builder_v, int64_t value) {
+  if (!is_ptr(builder_v))
+    return builder_v;
   rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
   if (!b)
     return 0;
@@ -174,6 +176,8 @@ int64_t rt_str_builder_append(int64_t builder_v, int64_t value) {
 }
 
 int64_t rt_str_builder_to_str(int64_t builder_v) {
+  if (!is_ptr(builder_v))
+    return rt_alloc_string_len("", 0);
   rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
   if (!b || !b->buf || b->len == 0)
     return rt_alloc_string_len("", 0);
@@ -181,6 +185,8 @@ int64_t rt_str_builder_to_str(int64_t builder_v) {
 }
 
 int64_t rt_str_builder_free(int64_t builder_v) {
+  if (!is_ptr(builder_v))
+    return 0;
   rt_string_builder_t *b = (rt_string_builder_t *)(uintptr_t)builder_v;
   if (!b)
     return 0;
