@@ -1164,7 +1164,8 @@ int64_t rt_bigint_clz(int64_t a) {
   }
   size_t bits = mpz_sizeinbase(ma, 2);
   mpz_clear(ma);
-  return rt_tag_v((int64_t)(64 - (bits % 64)));
+  size_t limb_bits = bits % 64;
+  return rt_tag_v((int64_t)(limb_bits ? 64 - limb_bits : 0));
 }
 int64_t rt_bigint_ctz(int64_t a) {
   mpz_t ma;

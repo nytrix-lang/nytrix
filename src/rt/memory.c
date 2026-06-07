@@ -374,7 +374,7 @@ int64_t rt_rc_count(int64_t ptr) {
 int64_t rt_drop_owned(int64_t ptr) { return rt_release_owned(ptr); }
 
 int64_t rt_drop_owned_slot(int64_t slot_ptr) {
-  if (!slot_ptr)
+  if (!is_ptr(slot_ptr))
     return 0;
   int64_t *slot = (int64_t *)(uintptr_t)slot_ptr;
   int64_t v = *slot;

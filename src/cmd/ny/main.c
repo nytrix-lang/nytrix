@@ -1423,21 +1423,21 @@ int main(int argc, char **argv, char **envp) {
   if (opt.input_file) {
     int s_argc = argc - opt.file_arg_idx;
     char **s_argv = &argv[opt.file_arg_idx];
-    rt_set_args((int64_t)s_argc, (int64_t)(uintptr_t)s_argv, (int64_t)(uintptr_t)runtime_envp);
+    rt_set_args_raw(s_argc, s_argv, runtime_envp);
   } else if (opt.command_string) {
     static char *eval_argv[] = {(char *)"nytrix", NULL};
-    rt_set_args(1, (int64_t)(uintptr_t)eval_argv, (int64_t)(uintptr_t)runtime_envp);
+    rt_set_args_raw(1, eval_argv, runtime_envp);
   } else if (opt.mode == NY_MODE_REPL) {
     if (opt.file_arg_idx > 0 && opt.file_arg_idx < argc) {
       int r_argc = argc - opt.file_arg_idx;
       char **r_argv = &argv[opt.file_arg_idx];
-      rt_set_args((int64_t)r_argc, (int64_t)(uintptr_t)r_argv, (int64_t)(uintptr_t)runtime_envp);
+      rt_set_args_raw(r_argc, r_argv, runtime_envp);
     } else {
       static char *repl_argv[] = {(char *)"nytrix", NULL};
-      rt_set_args(1, (int64_t)(uintptr_t)repl_argv, (int64_t)(uintptr_t)runtime_envp);
+      rt_set_args_raw(1, repl_argv, runtime_envp);
     }
   } else {
-    rt_set_args((int64_t)argc, (int64_t)(uintptr_t)argv, (int64_t)(uintptr_t)runtime_envp);
+    rt_set_args_raw(argc, argv, runtime_envp);
   }
   if (opt.timeout > 0) {
 #ifndef _WIN32
