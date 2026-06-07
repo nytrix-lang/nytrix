@@ -56,6 +56,13 @@ assert(qroots.len == 2, "bigint quadratic roots method")
 assert(bigint_xor(Z(255), Z(2)).str == "253", "bigint xor helper")
 assert((Z(8) + Z(13)).str == "21", "bigint operator sugar")
 assert(bigint_add(bigint_mul(Z(1), Z(16)), Z(5)).str == "21", "nt reexported bigint helpers")
+assert(__bigint_submul(Z(20), Z(3), Z(4)) == Z(8), "__bigint_submul direct")
+assert(__bigint_modinv(Z(3), Z(11)) == Z(4), "__bigint_modinv direct")
+assert(__bigint_modinv(Z(2), Z(4)) == Z(0), "__bigint_modinv no inverse")
+assert(__bigint_iroot(Z(27), 3) == Z(3), "__bigint_iroot direct")
+assert(__bigint_clz(Z(1)) == 63, "__bigint_clz single bit")
+assert(__bigint_clz(Z(2)^Z(63)) == 0, "__bigint_clz full top limb")
+assert(__bigint_ctz(Z(40)) == 3, "__bigint_ctz direct")
 
 ;; .long and byte conversion regressions
 static_assert([1, 2, 3].long == 0x010203, "static list .long")
