@@ -12,6 +12,7 @@ the generated `NYTRIX_VERSION` Git metadata surfaced by `ny --version`.
   helpers.
 - Added native editor icons, prototype textures, shared environment assets, and
   renderer shader resources under `etc/assets`.
+- Added RSS feed generation and Discord and Mastodon.
 
 ### Changed
 - Reworked the UI renderer and viewer modules around the `render/viewer` split,

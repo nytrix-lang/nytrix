@@ -73,7 +73,7 @@ body {
         linear-gradient(180deg, rgba(182, 160, 255, 0.007) 1px, transparent 1px),
         var(--bg);
     background-size: 48px 48px, 48px 48px, auto;
-    color: var(--ink);
+    color: var(--muted);
     display: flex;
     overflow: hidden;
     line-height: 1.42;
@@ -888,6 +888,7 @@ main.aside-active {
 .hero-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
     margin-top: 12px;
 }
@@ -1115,6 +1116,15 @@ main.aside-active {
     font-size: 11px;
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.hero-updates {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .docs-section-head {

@@ -1,6 +1,6 @@
 # Compile time
 
-Compile-time forms run during compilation and can produce tables, matches,
+Compile-time forms run during compilation and produce tables, matches,
 templates, emitted declarations, and generated modules.
 
 ## Compile-time blocks
@@ -36,6 +36,10 @@ def xs = comptime{ range(4).map(fn(i){ i + base }) }
 For runtime data, put the value inside the block or bind it first as an
 immutable compile-time value.
 
+`return expr` or a final value-producing expression sets the value of a
+compile-time block. A block with only declarations or non-value statements
+evaluates to `nil`.
+
 ## Tables
 
 ```ny
@@ -45,9 +49,12 @@ comptime table Name {
 }
 ```
 
-Compile-time tables make static dispatch explicit. They fit compact lookup
-surfaces, generated classifier logic, and branch-free native output where the
-compiler can lower the shape.
+Compile-time tables make static dispatch visible. Use them for lookup
+surfaces, generated classifier logic, and branch-free native output.
+
+The compiler also emits a legacy helper named from the table. For
+`comptime table KeyMap`, call `_key_map(key)` or `_key_map(key, fallback)`.
+Prefer `comptime match KeyMap(key, fallback)` in new code.
 
 ## Match helpers
 
@@ -73,30 +80,66 @@ text pasted into the source file.
 
 ```ny
 comptime emit name(args)
+for axis in comptime ["x", "y", "z"] {
+   emit make_axis_family(axis)
+}
 ```
 
 `emit` inserts generated declarations from a template or generator.
+Compile-time `for` iterates a compile-time list and lets the body emit
+declarations for each value.
+
+## Reflection loops
+
+```ny
+comptime fields(LayoutName) as f {
+   emit assert(__layout_offset("LayoutName", f.name) == f.offset, "field")
+}
+
+comptime exports(ModuleName) as name {
+   emit assert(name != "", "export name")
+}
+```
+
+`fields` exposes `f.name`, `f.offset`, `f.index`, and `f.type` for each layout
+field. `exports` exposes each exported module name as a string.
+
+## Diagnostic rules
+
+```ny
+comptime diagnostic rule bad_layout_store {
+   when call.name == "store_layout" && !is_literal(call.arg(1))
+   error "store_layout needs a string literal layout name"
+   fix "use store_layout(dst, \"LayoutName\", ...)"
+}
+```
+
+Diagnostic rules let compile-time code reject a known bad call pattern. The
+current rule surface supports call predicates such as `call.name`,
+`call.arg(N)`, and helpers such as `is_literal`.
 
 ## Compile-time proofs
 
-Compile-time assertions make safety checks part of compilation:
+Compile-time assertions move safety checks into compilation:
 
 ```ny
 assert_compile((4 * 11) == 44, "folded arithmetic")
+static_assert((3 * 7) == 21, "folded arithmetic")
 assert_compile_range(i, 0, 3, "loop index range")
 assert_compile_index(xs, i, "list index bounds")
 ```
 
-`assert_compile` fails compilation when the condition is known false.
+`static_assert` and `assert_compile` fail compilation when the condition is
+known false.
 `assert_compile_range` requires the compiler to prove an integer is within a
 closed range. `assert_compile_index` requires the compiler to prove that an
 index is in bounds for the container. `range_proven(value, lo, hi)` and
 `index_proven(container, index)` expose the same proof engine as compile-time
 booleans.
 
-These checks apply to safety boundaries such as parser tables, byte decoders,
-crypto code, native buffers, and loops where an out-of-range value would become
-a memory or correctness bug.
+Use these checks at safety boundaries: parser tables, byte decoders, crypto
+code, native buffers, and loops where an out-of-range value would break memory
+or correctness.
 
 `--safe-mode` uses the same proof engine for compiler-tracked raw memory
 accesses. If an allocation size is known, `load8`/`store8` and wider raw
@@ -116,8 +159,8 @@ declarations that become part of the module surface.
 
 ## Boundaries
 
-Compile-time work emits ordinary declarations. Generated names remain stable,
-and emitted public surfaces remain explicit.
+Compile-time work emits declarations. Generated names stay stable, and emitted
+public surfaces stay visible.
 
 ## Platform selection
 

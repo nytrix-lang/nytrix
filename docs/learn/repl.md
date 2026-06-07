@@ -130,5 +130,5 @@ hidden setup.
 ## Related
 
 - [tooling.md](tooling.md)
-- [diagnostics.md](diagnostics.md)
+- [troubleshooting.md](troubleshooting.md)
 - [programs.md](programs.md)

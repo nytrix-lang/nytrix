@@ -1,13 +1,12 @@
 # Nytrix documentation
 
-This directory has two layers:
+The docs split into two layers:
 
-- `learn/` explains how to get work done with the language and tools.
-- `spec/` records the exact rule that the parser, compiler, runtime, or
-  standard tooling is expected to follow.
+- `learn/` shows tasks and workflows.
+- `spec/` records rules for the parser, compiler, runtime, and tools.
 
-Use the generated reference for current signatures, exported names, module
-docstrings, and keyword search:
+Use the generated reference for signatures, exports, module docstrings, and
+keyword search:
 
 ```bash
 ny doc search json
@@ -17,24 +16,23 @@ ny doc get std.parse.data.json
 
 ## Start here
 
-The task determines the first page. `spec/` contains precise rules and
-diagnostic meanings.
+Start with the task. Use `spec/` when you need a rule or diagnostic meaning.
 
-| Question | Start here | Then use |
+| Task | Start here | Then use |
 | --- | --- | --- |
-| How do I run one file? | [learn/start.md](learn/start.md) | [learn/tooling.md](learn/tooling.md) |
-| How is source structured? | [learn/programs.md](learn/programs.md) | [spec/source.md](spec/source.md), [spec/modules.md](spec/modules.md) |
-| Which stdlib module owns this? | [learn/library.md](learn/library.md) | `ny doc search`, `ny doc get` |
-| Why did this fail? | [learn/diagnostics.md](learn/diagnostics.md) | [spec/errors.md](spec/errors.md), [learn/troubleshooting.md](learn/troubleshooting.md) |
-| How do safety checks work? | [learn/tooling.md](learn/tooling.md) | [spec/runtime.md](spec/runtime.md), [spec/types.md](spec/types.md) |
-| How do native/FFI boundaries work? | [learn/native.md](learn/native.md) | [spec/native.md](spec/native.md) |
-| How do I measure performance? | [learn/performance.md](learn/performance.md) | `ny perf compare` |
+| Run one file | [learn/start.md](learn/start.md) | [learn/tooling.md](learn/tooling.md) |
+| Understand source shape | [learn/programs.md](learn/programs.md) | [spec/source.md](spec/source.md), [spec/modules.md](spec/modules.md) |
+| Find a stdlib module | [learn/library.md](learn/library.md) | `ny doc search`, `ny doc get` |
+| Diagnose a failure | [learn/troubleshooting.md](learn/troubleshooting.md) | [spec/errors.md](spec/errors.md), `ny --diag-rich` |
+| Check safety rules | [learn/tooling.md](learn/tooling.md) | [spec/runtime.md](spec/runtime.md), [spec/types.md](spec/types.md) |
+| Cross a native boundary | [learn/native.md](learn/native.md) | [spec/native.md](spec/native.md) |
+| Measure performance | [learn/performance.md](learn/performance.md) | `ny perf compare` |
 
 ## Language
 
-Nytrix source files run directly. A file can also declare a `module` and export
-names for other files. Imports are explicit. Standard-library APIs live under
-their owning modules; `ny doc` confirms exact names and signatures.
+Nytrix runs source files. A file can declare a `module` and export names for
+other files. Imports name their modules. Standard-library APIs live under their
+owning modules; `ny doc` confirms names and signatures.
 
 Core surface: native binaries, typed bindings, ADTs/generics, async tasks,
 comptime tables/templates/checks, native layouts, C header imports, inline
@@ -63,7 +61,6 @@ diagnostics.
 
 | Page | Scope |
 | --- | --- |
-| [spec/language.md](spec/language.md) | Language structure and execution model. |
 | [spec/source.md](spec/source.md) | Source units, imports, modules, script execution. |
 | [spec/imports.md](spec/imports.md) | Import forms, aliases, selected names, resolution, package imports. |
 | [spec/modules.md](spec/modules.md) | Module declarations, export lists, grouped modules, generated modules. |
@@ -97,15 +94,14 @@ ny pkg repo list
 ny test
 ```
 
-Native `-o` builds use the default optimized native profile. JIT/REPL paths
-default to edit-latency settings. `-O3` and `--profile=peak` are explicit
-peak-speed measurement modes.
+Native `-o` builds use the optimized native profile. JIT and REPL paths favor
+edit latency. Use `-O3` and `--profile=peak` for peak-speed measurements.
 
 ## Conventions
 
-Fenced `ny` blocks are Nytrix source. The surrounding text names required
-local services, files, or packages. Shell commands use `bash`; manifests and
-wire formats use their own fences. Silent success means all assertions passed.
+Fenced `ny` blocks contain Nytrix source. Nearby text names required local
+services, files, or packages. Shell commands use `bash`; manifests and wire
+formats use their own fences. Silent success means all assertions passed.
 
 Examples use explicit imports and small assertions. Spec pages use exact forms
 and behavior tables. If an example depends on a local server, native library,

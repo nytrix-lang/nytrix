@@ -18,6 +18,12 @@ del name
 `def` creates an immutable binding. `mut` creates a mutable binding. Typed
 binding order is `Type: name`.
 
+`del name` sets an existing mutable binding to `nil` and clears the compiler's
+static facts for that binding. The binding remains readable. `del` rejects
+immutable `def` bindings. It is not a native free operation. Use the owning
+API's cleanup function, `with`, `release`, or `forget` for resources that need
+explicit lifetime handling.
+
 ## Function forms
 
 ```ny
@@ -31,12 +37,12 @@ fn(a, b){ body }
 Named functions bind a public or local function name. `fn(...) { ... }` creates
 an inline callable value.
 
-`lambda(...) { ... }` is accepted as a legacy spelling. The parser accepts the
-same parameter-list and return-type syntax as `fn(...) { ... }`; `fn` is the
-canonical spelling in new code.
+The parser accepts `lambda(...) { ... }` as a legacy spelling with the same
+parameter-list and return-type syntax as `fn(...) { ... }`. New code should use
+`fn`.
 
-Return types follow the parameter list without `:`. `->` is reserved for
-pattern/case arms, not function signatures.
+Return types follow the parameter list without `:`. The parser reserves `->`
+for pattern/case arms.
 
 ## Parameters
 
@@ -48,8 +54,8 @@ Type name = default
 ...rest
 ```
 
-Parameter types are part of the callable surface. Defaults are evaluated by the
-call path according to the function definition.
+Parameter types belong to the callable surface. The call path evaluates
+defaults according to the function definition.
 
 ## Blocks
 
@@ -64,8 +70,8 @@ that expression unless control exits earlier.
 
 ## Returns
 
-`return` exits the current function. Without explicit `return`, the final
-expression is the function result.
+`return` exits the current function. Without `return`, the final expression
+becomes the function result.
 
 ```ny
 fn clamp(number x, number lo, number hi) number {
@@ -78,8 +84,8 @@ fn clamp(number x, number lo, number hi) number {
 ## Attributes
 
 Function attributes attach compile-time metadata to the following function.
-The currently supported surface includes codegen hints, effects, async
-lowering, and ownership contracts.
+Nytrix supports codegen hints, effects, async lowering, and ownership
+contracts.
 
 ```ny
 @pure
@@ -105,9 +111,9 @@ lowering, and ownership contracts.
 fn work(){ 0 }
 ```
 
-`@pure` is shorthand for `@effects(none)`. Declared effect contracts are
-checked by the compiler: inferred `io`, `alloc`, `ffi`, or `thread` effects
-outside the declared mask are errors.
+`@pure` is shorthand for `@effects(none)`. The compiler checks declared effect
+contracts. It rejects inferred `io`, `alloc`, `ffi`, or `thread` effects
+outside the declared mask.
 
 `@async_effects` marks eligible `io`-effect functions for the stackless async
 lowering path after their effect contract passes.
@@ -138,7 +144,7 @@ def shout = fn(str x) str { x + "!" }
 ## Ownership contracts
 
 Ownership attributes document and enforce how arguments and returns move
-through a function when borrow checking is enabled.
+through a function under borrow checking.
 
 ```ny
 @borrows(x)
@@ -157,13 +163,11 @@ fn close_owned(x) int {
 }
 ```
 
-These attributes are checked by `ny --borrow-check`, `ny --strict`, and
-`ny --borrow-check --ownership-strict`. Without ownership checking, the
-compiler parses them and warns that they are not enforced. In strict mode,
-returning an owned
-tracked slot requires `@returns_owned`, returning a borrow of a local owner is
-rejected unless it is a declared parameter borrow, and moves/releases/mutations
-are rejected while live borrows exist.
+`ny --borrow-check`, `ny --strict`, and `ny --borrow-check --ownership-strict`
+check these attributes. Without ownership checking, the compiler parses them
+and warns that it will not enforce them. In strict mode, owned tracked returns
+need `@returns_owned`; local-owner borrows cannot escape unless they borrow a
+declared parameter; live borrows block moves, releases, and mutations.
 
 ## Docstrings
 
