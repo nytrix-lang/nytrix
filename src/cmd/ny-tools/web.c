@@ -17,6 +17,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #ifdef __linux__
 #include <linux/limits.h>
@@ -4092,6 +4093,8 @@ static void append_site_url(sb_t *out, const char *site, const char *rel) {
 typedef struct {
   char *route;
   char *title;
+  char *path;
+  time_t mtime;
 } ny_doc_meta_entry_t;
 
 typedef struct {
@@ -4101,10 +4104,11 @@ typedef struct {
 } ny_doc_meta_list_t;
 
 static void ny_doc_meta_list_push(ny_doc_meta_list_t *list, char *route,
-                                  char *title) {
+                                  char *title, char *path, time_t mtime) {
   if (!list || !route || !title) {
     free(route);
     free(title);
+    free(path);
     return;
   }
   if (list->len == list->cap) {
@@ -4114,12 +4118,13 @@ static void ny_doc_meta_list_push(ny_doc_meta_list_t *list, char *route,
     if (!next) {
       free(route);
       free(title);
+      free(path);
       return;
     }
     list->data = next;
     list->cap = next_cap;
   }
-  list->data[list->len++] = (ny_doc_meta_entry_t){route, title};
+  list->data[list->len++] = (ny_doc_meta_entry_t){route, title, path, mtime};
 }
 
 static void ny_doc_meta_collect_dir(const char *base_dir, const char *dir,
@@ -4153,7 +4158,10 @@ static void ny_doc_meta_collect_dir(const char *base_dir, const char *dir,
       } else if (docs_file_supported(path)) {
         char *route = doc_route_name(base_dir, path);
         char *title = doc_title_from_route(route);
-        ny_doc_meta_list_push(list, route, title);
+        char *doc_path = strdup(path);
+        struct stat st;
+        time_t mtime = stat(path, &st) == 0 ? st.st_mtime : 0;
+        ny_doc_meta_list_push(list, route, title, doc_path, mtime);
       }
     }
     free(names[i]);
@@ -4211,6 +4219,7 @@ static void ny_doc_meta_list_free(ny_doc_meta_list_t *list) {
   for (size_t i = 0; i < list->len; i++) {
     free(list->data[i].route);
     free(list->data[i].title);
+    free(list->data[i].path);
   }
   free(list->data);
   memset(list, 0, sizeof(*list));
@@ -4220,10 +4229,11 @@ static char *render_site_head(const char *site, const char *root) {
   const char *repo_url = "https://github.com/nytrix-lang/nytrix";
   ny_doc_meta_list_t docs = {0};
   ny_doc_meta_collect(root, &docs);
-  sb_t root_url = {0}, logo_url = {0}, out = {0};
+  sb_t root_url = {0}, logo_url = {0}, feed_url = {0}, out = {0};
   if (site && *site) {
     append_site_url(&root_url, site, "");
     append_site_url(&logo_url, site, "og.png");
+    append_site_url(&feed_url, site, "feed.xml");
     sb_add(&out, "    <link rel=\"canonical\" href=\"");
     sb_add_html_escaped(&out, root_url.data ? root_url.data : "");
     sb_add(&out, "\" />\n    <meta property=\"og:url\" content=\"");
@@ -4240,6 +4250,13 @@ static char *render_site_head(const char *site, const char *root) {
     sb_add_html_escaped(&out, logo_url.data ? logo_url.data : "");
     sb_add(&out, "\" />\n    <link rel=\"sitemap\" type=\"application/xml\" "
                  "href=\"sitemap.xml\" />\n");
+    sb_add(&out, "    <link rel=\"alternate\" type=\"application/rss+xml\" "
+                 "title=\"Nytrix RSS feed\" href=\"");
+    sb_add_html_escaped(&out, feed_url.data ? feed_url.data : "");
+    sb_add(&out, "\" />\n");
+  } else {
+    sb_add(&out, "    <link rel=\"alternate\" type=\"application/rss+xml\" "
+                 "title=\"Nytrix RSS feed\" href=\"feed.xml\" />\n");
   }
   append_doc_link_metadata(&out, site, &docs);
   const char *doc_url =
@@ -4259,6 +4276,11 @@ static char *render_site_head(const char *site, const char *root) {
                "local documentation search.\",\n"
                "                    \"url\": ");
   sb_add_json_str(&out, doc_url);
+  sb_add(&out, ",\n                    \"sameAs\": [");
+  sb_add_json_str(&out, "https://discord.gg/XQDR6DZWb");
+  sb_add(&out, ", ");
+  sb_add_json_str(&out, "https://mastodon.social/@nytrix");
+  sb_add(&out, "]");
   sb_add(
       &out,
       ",\n                    \"about\": [\"native programming language\", "
@@ -4323,6 +4345,7 @@ static char *render_site_head(const char *site, const char *root) {
   ny_doc_meta_list_free(&docs);
   free(root_url.data);
   free(logo_url.data);
+  free(feed_url.data);
   return out.data ? out.data : strdup("");
 }
 
@@ -4357,6 +4380,23 @@ static void sb_add_html_escapedn(sb_t *sb, const char *s, size_t n) {
     char tmp[2] = {s[i], 0};
     sb_add_html_escaped(sb, tmp);
   }
+}
+
+static void append_static_site_end_html(sb_t *html, const char *feed_href) {
+  sb_add(html,
+         "<footer class=\"site-end\" aria-label=\"Nytrix feeds and social "
+         "links\"><div class=\"site-end-head\"><h2>Updates</h2><p>Reader-ready "
+         "RSS for docs, release notes, and API changes.</p></div><nav "
+         "class=\"site-links\" aria-label=\"Nytrix social links\"><a "
+         "class=\"primary\" href=\"");
+  sb_add_html_escaped(html, feed_href && *feed_href ? feed_href : "feed.xml");
+  sb_add(html,
+         "\" rel=\"noopener noreferrer\" title=\"Open RSS feed\">RSS</a>"
+         "<a href=\"https://discord.gg/XQDR6DZWb\" target=\"_blank\" "
+         "rel=\"me noopener noreferrer\" title=\"Open Discord\">Discord</a>"
+         "<a href=\"https://mastodon.social/@nytrix\" target=\"_blank\" "
+         "rel=\"me noopener noreferrer\" title=\"Open Mastodon\">Mastodon</a>"
+         "</nav></footer>");
 }
 
 static int safe_route_path(char *out, size_t out_n, const char *route) {
@@ -4795,21 +4835,25 @@ static int write_static_doc_page(const char *out_dir, const char *site,
       !join_path(dir, sizeof(dir), out_dir, safe) || !mkdir_p(dir) ||
       !join_path(path, sizeof(path), dir, "index.html"))
     return 0;
-  sb_t canonical = {0}, app = {0}, html = {0};
+  sb_t canonical = {0}, app = {0}, feed = {0}, root_rel = {0}, html = {0};
   int has_site = site && *site;
   if (has_site) {
     append_site_url(&canonical, site, safe);
     if (canonical.len && canonical.data[canonical.len - 1] != '/')
       sb_add(&canonical, "/");
     append_site_url(&app, site, "#");
+    append_site_url(&feed, site, "feed.xml");
   } else {
     int depth = 1;
     for (const char *p = safe; *p; p++)
       if (*p == '/')
         depth++;
     for (int i = 0; i < depth; i++)
-      sb_add(&app, "../");
+      sb_add(&root_rel, "../");
+    sb_add(&app, root_rel.data ? root_rel.data : "");
     sb_add(&app, "index.html#");
+    sb_add(&feed, root_rel.data ? root_rel.data : "");
+    sb_add(&feed, "feed.xml");
   }
   sb_add(&app, route);
 
@@ -4830,6 +4874,10 @@ static int write_static_doc_page(const char *out_dir, const char *site,
     sb_add_html_escaped(&html, app.data ? app.data : "");
     sb_add(&html, "\">");
   }
+  sb_add(&html, "<link rel=\"alternate\" type=\"application/rss+xml\" "
+                "title=\"Nytrix RSS feed\" href=\"");
+  sb_add_html_escaped(&html, feed.data ? feed.data : "feed.xml");
+  sb_add(&html, "\">");
   sb_add(
       &html,
       "<style>:root{color-scheme:dark}body{margin:0;background:#000;color:#"
@@ -4858,17 +4906,30 @@ static int write_static_doc_page(const char *out_dir, const char *site,
       "td{border-top:0;color:#f5f5f6}"
       ".open{display:inline-flex;margin:0 0 24px;padding:6px 8px;border:1px "
       "solid #292832;border-radius:2px;color:#d6d3e6;background:#020203;"
-      "font:700 12px ui-monospace,monospace}</style></head><body><main><a "
+      "font:700 12px ui-monospace,monospace}.site-end{margin-top:26px;padding-"
+      "top:12px;border-top:1px solid #17171b}.site-end-head{display:flex;"
+      "align-items:end;justify-content:space-between;gap:10px;margin-bottom:"
+      "8px}.site-end h2{margin:0;border-left:0;padding-left:0;font-size:16px}"
+      ".site-end p{margin:0;color:#808087;font-size:12px}.site-links{display:"
+      "flex;flex-wrap:wrap;gap:6px}.site-links a{display:inline-flex;align-"
+      "items:center;min-height:24px;padding:3px 7px;border:1px solid #292832;"
+      "background:#020203;font:700 11px ui-monospace,monospace}.site-links "
+      "a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}</style></head>"
+      "<body><main><a "
       "class=\"open\" "
       "href=\"");
   sb_add_html_escaped(&html, app.data ? app.data : "");
   sb_add(&html, "\">Open Manual</a><article>");
   sb_add(&html, body_html ? body_html : "");
-  sb_add(&html, "</article></main></body></html>");
+  sb_add(&html, "</article>");
+  append_static_site_end_html(&html, feed.data ? feed.data : "feed.xml");
+  sb_add(&html, "</main></body></html>");
 
   int ok = write_file(path, html.data ? html.data : "");
   free(canonical.data);
   free(app.data);
+  free(feed.data);
+  free(root_rel.data);
   free(html.data);
   return ok;
 }
@@ -4888,6 +4949,187 @@ static void append_sitemap_url(sb_t *sitemap, const char *site, const char *rel,
   sb_add(sitemap, priority ? priority : "0.7");
   sb_add(sitemap, "</priority></url>\n");
   free(loc.data);
+}
+
+static void format_rss_date(time_t when, char *out, size_t out_n) {
+  if (!out || out_n == 0)
+    return;
+  if (when <= 0)
+    when = time(NULL);
+  struct tm tmv;
+#ifdef _WIN32
+  if (gmtime_s(&tmv, &when) != 0) {
+    snprintf(out, out_n, "Thu, 01 Jan 1970 00:00:00 GMT");
+    return;
+  }
+#else
+  if (!gmtime_r(&when, &tmv)) {
+    snprintf(out, out_n, "Thu, 01 Jan 1970 00:00:00 GMT");
+    return;
+  }
+#endif
+  if (!strftime(out, out_n, "%a, %d %b %Y %H:%M:%S GMT", &tmv))
+    snprintf(out, out_n, "Thu, 01 Jan 1970 00:00:00 GMT");
+}
+
+static int cmp_doc_meta_recent(const void *a, const void *b) {
+  const ny_doc_meta_entry_t *da = (const ny_doc_meta_entry_t *)a;
+  const ny_doc_meta_entry_t *db = (const ny_doc_meta_entry_t *)b;
+  if (da->mtime != db->mtime)
+    return da->mtime > db->mtime ? -1 : 1;
+  const char *ra = da->route ? da->route : "";
+  const char *rb = db->route ? db->route : "";
+  return strcmp(ra, rb);
+}
+
+static time_t doc_meta_latest_mtime(const ny_doc_meta_list_t *docs) {
+  time_t latest = 0;
+  if (!docs)
+    return time(NULL);
+  for (size_t i = 0; i < docs->len; i++) {
+    if (docs->data[i].mtime > latest)
+      latest = docs->data[i].mtime;
+  }
+  return latest > 0 ? latest : time(NULL);
+}
+
+static const char *doc_feed_category(const char *route) {
+  if (!route)
+    return "Documentation";
+  if (strncmp(route, "learn/", 6) == 0)
+    return "Learn";
+  if (strncmp(route, "spec/", 5) == 0)
+    return "Specification";
+  return "Project";
+}
+
+static char *rss_doc_fallback_summary(const ny_doc_meta_entry_t *doc) {
+  sb_t out = {0};
+  sb_add(&out, "Nytrix documentation page");
+  if (doc && doc->title && *doc->title) {
+    sb_add(&out, ": ");
+    sb_add(&out, doc->title);
+  }
+  sb_add(&out, ".");
+  return out.data ? out.data : strdup("Nytrix documentation page.");
+}
+
+static char *rss_doc_summary(const char *root, const ny_doc_meta_entry_t *doc) {
+  if (!doc || !doc->path)
+    return rss_doc_fallback_summary(doc);
+  if (path_has_suffix(doc->path, ".texi"))
+    return rss_doc_fallback_summary(doc);
+  char *txt = ny_read_file_raw(doc->path, NULL);
+  if (!txt)
+    return rss_doc_fallback_summary(doc);
+  char *expanded = prepare_markdown_doc_body(root, txt);
+  char *summary = markdown_summary(expanded ? expanded : txt);
+  free(expanded);
+  free(txt);
+  return summary ? summary : rss_doc_fallback_summary(doc);
+}
+
+static void append_rss_item(sb_t *rss, const char *title, const char *link,
+                            const char *description, const char *category,
+                            time_t pub_date) {
+  char date[64];
+  format_rss_date(pub_date, date, sizeof(date));
+  sb_add(rss, "    <item>\n      <title>");
+  sb_add_xml_escaped(rss, title ? title : "Nytrix");
+  sb_add(rss, "</title>\n      <link>");
+  sb_add_xml_escaped(rss, link ? link : "");
+  sb_add(rss, "</link>\n      <guid isPermaLink=\"true\">");
+  sb_add_xml_escaped(rss, link ? link : "");
+  sb_add(rss, "</guid>\n      <pubDate>");
+  sb_add_xml_escaped(rss, date);
+  sb_add(rss, "</pubDate>\n");
+  if (category && *category) {
+    sb_add(rss, "      <category>");
+    sb_add_xml_escaped(rss, category);
+    sb_add(rss, "</category>\n");
+  }
+  sb_add(rss, "      <description>");
+  sb_add_xml_escaped(rss, description ? description : "");
+  sb_add(rss, "</description>\n    </item>\n");
+}
+
+static void write_rss_feed(const char *out_dir, const char *site,
+                           const char *root) {
+  char path[PATH_MAX];
+  if (!join_path(path, sizeof(path), out_dir, "feed.xml"))
+    return;
+
+  ny_doc_meta_list_t docs = {0};
+  ny_doc_meta_collect(root, &docs);
+  if (docs.len > 1)
+    qsort(docs.data, docs.len, sizeof(*docs.data), cmp_doc_meta_recent);
+  time_t latest = doc_meta_latest_mtime(&docs);
+
+  sb_t rss = {0}, root_url = {0}, api_url = {0}, feed_url = {0};
+  if (site && *site)
+    append_site_url(&root_url, site, "");
+  else
+    sb_add(&root_url, ".");
+  append_site_url(&api_url, site, "api/");
+  append_site_url(&feed_url, site, "feed.xml");
+  if (!feed_url.data || !*feed_url.data)
+    sb_add(&feed_url, "feed.xml");
+
+  char latest_date[64];
+  format_rss_date(latest, latest_date, sizeof(latest_date));
+
+  sb_add(&rss, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+               "<rss version=\"2.0\" "
+               "xmlns:atom=\"http://www.w3.org/2005/Atom\">\n"
+               "  <channel>\n"
+               "    <title>Nytrix RSS feed</title>\n"
+               "    <link>");
+  sb_add_xml_escaped(&rss, root_url.data ? root_url.data : "");
+  sb_add(&rss, "</link>\n"
+               "    <description>Nytrix updates: documentation, release "
+               "notes, and API index changes.</description>\n"
+               "    <language>en</language>\n"
+               "    <generator>ny tools web</generator>\n"
+               "    <docs>https://www.rssboard.org/rss-specification</docs>\n"
+               "    <ttl>60</ttl>\n"
+               "    <lastBuildDate>");
+  sb_add_xml_escaped(&rss, latest_date);
+  sb_add(&rss, "</lastBuildDate>\n"
+               "    <pubDate>");
+  sb_add_xml_escaped(&rss, latest_date);
+  sb_add(&rss, "</pubDate>\n"
+               "    <atom:link href=\"");
+  sb_add_xml_escaped(&rss, feed_url.data ? feed_url.data : "feed.xml");
+  sb_add(&rss, "\" rel=\"self\" type=\"application/rss+xml\" />\n");
+  append_rss_item(&rss, "Nytrix Manual", root_url.data ? root_url.data : "",
+                  "Nytrix manual, specification, examples, and source-linked "
+                  "API reference.",
+                  "Documentation", latest);
+
+  for (size_t i = 0; i < docs.len; i++) {
+    sb_t page_url = {0};
+    append_doc_url(&page_url, site, docs.data[i].route);
+    char *summary = rss_doc_summary(root, &docs.data[i]);
+    append_rss_item(&rss, docs.data[i].title ? docs.data[i].title : "",
+                    page_url.data ? page_url.data : "",
+                    summary ? summary : "Nytrix documentation page.",
+                    doc_feed_category(docs.data[i].route),
+                    docs.data[i].mtime > 0 ? docs.data[i].mtime : latest);
+    free(page_url.data);
+    free(summary);
+  }
+  append_rss_item(&rss, "Nytrix Standard Library API",
+                  api_url.data ? api_url.data : "api/",
+                  "Source-linked map for the bundled standard library.", "API",
+                  latest);
+  sb_add(&rss, "  </channel>\n</rss>\n");
+
+  write_file(path, rss.data ? rss.data : "");
+  ny_doc_meta_list_free(&docs);
+  free(root_url.data);
+  free(api_url.data);
+  free(feed_url.data);
+  free(rss.data);
 }
 
 static void generate_static_docs_from_dir(const char *out_dir,
@@ -5009,7 +5251,7 @@ static void write_api_seo_index(const char *out_dir, const char *site,
       !join_path(path, sizeof(path), dir, "index.html") ||
       !join_path(txt_path, sizeof(txt_path), dir, "modules.txt"))
     return;
-  sb_t html = {0}, txt = {0};
+  sb_t html = {0}, txt = {0}, feed = {0};
   sb_add(&html, "<!doctype html><html lang=\"en\"><head><meta "
                 "charset=\"utf-8\"><meta name=\"viewport\" "
                 "content=\"width=device-width,initial-scale=1\"><meta "
@@ -5021,10 +5263,17 @@ static void write_api_seo_index(const char *out_dir, const char *site,
   sb_t api_url = {0};
   if (site && *site) {
     append_site_url(&api_url, site, "api/");
+    append_site_url(&feed, site, "feed.xml");
     sb_add(&html, "<link rel=\"canonical\" href=\"");
     sb_add_html_escaped(&html, api_url.data ? api_url.data : "");
     sb_add(&html, "\">");
+  } else {
+    sb_add(&feed, "../feed.xml");
   }
+  sb_add(&html, "<link rel=\"alternate\" type=\"application/rss+xml\" "
+                "title=\"Nytrix RSS feed\" href=\"");
+  sb_add_html_escaped(&html, feed.data ? feed.data : "../feed.xml");
+  sb_add(&html, "\">");
   sb_add(
       &html,
       "<style>:root{color-scheme:dark}body{margin:0;background:#000;color:#"
@@ -5041,6 +5290,14 @@ static void write_api_seo_index(const char *out_dir, const char *site,
       "12px}"
       "p{color:#808087}ul{columns:3;column-gap:28px;padding-left:18px}li{break-"
       "inside:avoid;margin:3px 0;color:#c6c6ca}"
+      ".site-end{margin-top:26px;padding-top:12px;border-top:1px solid "
+      "#17171b}.site-end-head{display:flex;align-items:end;justify-content:"
+      "space-between;gap:10px;margin-bottom:8px}.site-end h2{margin:0;font-"
+      "size:16px}.site-end p{margin:0;color:#808087;font-size:12px}.site-"
+      "links{display:flex;flex-wrap:wrap;gap:6px}.site-links a{display:inline-"
+      "flex;align-items:center;min-height:24px;padding:3px 7px;border:1px "
+      "solid #292832;background:#020203;font:700 11px ui-monospace,monospace}"
+      ".site-links a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}"
       "@media(max-width:800px){ul{columns:1}}</style></"
       "head><body><main><h1>Nytrix Standard Library "
       "API</h1><p>");
@@ -5085,13 +5342,16 @@ static void write_api_seo_index(const char *out_dir, const char *site,
     free(name);
   }
   free(names);
-  sb_add(&html, "</ul></main></body></html>");
+  sb_add(&html, "</ul>");
+  append_static_site_end_html(&html, feed.data ? feed.data : "../feed.xml");
+  sb_add(&html, "</main></body></html>");
   write_file(path, html.data ? html.data : "");
   write_file(txt_path, txt.data ? txt.data : "");
   append_sitemap_url(sitemap, site, "api/", "0.8");
   sb_add(plain, "- [Standard Library API](api/): source-linked map for the "
                 "bundled standard library.\n");
   free(api_url.data);
+  free(feed.data);
   free(html.data);
   free(txt.data);
 }
@@ -5124,6 +5384,14 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
   sb_add(&plain, "\n## API\n\n");
   write_api_seo_index(out_dir, site, docs_json, has_site ? &sitemap : NULL,
                       &plain, module_count, symbol_count);
+  sb_add(&plain,
+	         "\n## Feed and social\n\n"
+	         "- [RSS](feed.xml): reader-ready feed for documentation, "
+	         "release notes, and API index changes.\n"
+         "- [Discord](https://discord.gg/XQDR6DZWb)\n"
+         "- [Mastodon](https://mastodon.social/@nytrix)\n");
+  if (has_site)
+    append_sitemap_url(&sitemap, site, "feed.xml", "0.5");
   if (has_site)
     sb_add(&sitemap, "</urlset>\n");
 
@@ -5144,6 +5412,7 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
     write_file(path, robots.data ? robots.data : "");
   else if (!has_site && join_path(path, sizeof(path), out_dir, "robots.txt"))
     unlink(path);
+  write_rss_feed(out_dir, site, root);
   if (join_path(path, sizeof(path), out_dir, "manual.txt"))
     write_file(path, plain.data ? plain.data : "");
   if (join_path(path, sizeof(path), out_dir, "manual-full.txt"))
@@ -5157,6 +5426,9 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
     char tmp[64];
     snprintf(tmp, sizeof(tmp), "%d\nAPI index: source-linked\n", doc_count);
     sb_add(&site_txt, tmp);
+    sb_add(&site_txt, "RSS feed: feed.xml\n");
+    sb_add(&site_txt, "Discord: https://discord.gg/XQDR6DZWb\n");
+    sb_add(&site_txt, "Mastodon: https://mastodon.social/@nytrix\n");
     write_file(path, site_txt.data ? site_txt.data : "");
     free(site_txt.data);
   }

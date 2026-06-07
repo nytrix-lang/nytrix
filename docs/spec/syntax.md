@@ -25,6 +25,9 @@ nil  true  false
 [1, 2, 3]  {"a": 1, "b": 2}
 ```
 
+`list(n)` creates an empty list with reserved capacity `n`; it does not create
+`n` initialized elements.
+
 ## Source Structure
 
 ```ny
@@ -101,7 +104,13 @@ Common generic forms include `list<int>`, `dict<str, int>`, `set<str>`,
 ## Data Declarations
 
 ```ny
-struct Vec2 { f64: x f64: y }
+struct Vec2 { x: f64, y: f64 }
+
+enum Color {
+   Red,
+   Green,
+   Blue
+}
 
 enum Shape {
    Circle(int: radius),
@@ -132,6 +141,8 @@ while(cond){ body }
 while(mut i = 0 i < n ++i){ body }
 for value in expr { body }
 for value, index in expr { body }
+for(index in expr){ body }
+for(mut i = 0; i < n; ++i){ body }
 for value in lo..hi { body }
 match expr { arms }
 case expr { arms }
@@ -145,6 +156,8 @@ with Type: name = expr { body }
 
 ```ny
 a + b   a - b   a * b   a / b   a % b   a ^ b
+a = b   a += b  a -= b  a *= b  a /= b  a %= b
+++a      --a
 a == b  a != b  a < b   a <= b  a > b   a >= b
 a && b  a || b  !a
 &a      a & b   a | b   a ^^ b  ~a      a << b  a >> b
@@ -180,12 +193,15 @@ match value {
 extern "library" { fn symbol(Type arg) Type }
 extern { fn process_symbol(Type arg) Type }
 
-layout Name { Type: field, Type: field2 }
-layout Packed pack(1){ u8: tag, i32: value }
-layout record Row derive(default, eq, hash, debug_str) pack(4){ i32: id }
-layout shape Header derive(load, store, zero) pack(8){ str: sender }
+layout Name { field: Type, field2: Type }
+layout Packed pack(1){ tag: u8, value: i32 }
+layout record Row derive(default, eq, hash, debug_str) pack(4){ id: i32 }
+layout shape Header derive(load, store, zero) pack(8){ sender: str }
 layout guard Header: h = value else { fallback }
 ```
+
+Fields use `name: Type`. The parser still accepts the older primitive-only
+`Type: name` spelling, but docs and tests use `name: Type`.
 
 ## Attributes
 
@@ -214,6 +230,11 @@ comptime table Name { pattern -> value }
 comptime match Name(key, fallback)
 comptime template name(args) { declarations }
 comptime emit name(args)
+for name in comptime [values...] { emit template(name) }
+comptime fields(Layout) as f { emit ... }
+comptime exports(Module) as name { emit ... }
+comptime diagnostic rule name { when predicate error "message" fix "hint" }
+static_assert(cond, "message")
 assert_compile(cond, "message")
 assert_compile_range(value, lo, hi, "message")
 assert_compile_index(container, index, "message")
@@ -232,11 +253,19 @@ assert_compile_index(container, index, "message")
 embed("path")
 asm("template", "constraints", args...)
 llvm("ctpop.i64", value)
+argc()
+__os_name()
 __main()
+__tagof(value)
+__runtime_tag("name")
+__layout_size("Name")
+__layout_align("Name")
+__layout_offset("Name", "field")
 ```
 
 `embed` reads file content at compile time. `asm` lowers inline assembly for
-the active backend. `llvm` calls LLVM intrinsics.
+the active backend. `llvm` calls LLVM intrinsics. Prefer public wrappers such
+as `argc()` over double-underscore runtime helpers when one exists.
 
 ## Runnable Shape
 

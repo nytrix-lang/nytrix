@@ -270,6 +270,5 @@ validation. Use [performance.md](performance.md) for timing discipline.
 ## Related
 
 - [start.md](start.md)
-- [diagnostics.md](diagnostics.md)
 - [troubleshooting.md](troubleshooting.md)
 - [testing.md](testing.md)

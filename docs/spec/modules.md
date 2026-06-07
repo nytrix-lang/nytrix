@@ -56,7 +56,7 @@ module tools *
 Broad export fits small local modules and generated surfaces. Public library
 modules use explicit export lists when the public surface needs to stay clear.
 
-Broad export exposes every helper in the file. Use it for local code and
+Broad export exposes all helpers in the file. Use it for local code and
 generated tables; switch to an explicit list before the module becomes part of
 a public namespace.
 

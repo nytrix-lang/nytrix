@@ -913,7 +913,7 @@ static const lsp_builtin_t g_core_builtins[] = {
     {"len", "fn len(value)", "Returns the length of a list, string, dict, or compatible value.",
      LSP_SK_FUNCTION},
     {"dict", "fn dict(capacity=0)", "Creates a dictionary.", LSP_SK_FUNCTION},
-    {"list", "fn list(count=0)", "Creates a list.", LSP_SK_FUNCTION},
+    {"list", "fn list(cap=0)", "Creates an empty list with reserved capacity.", LSP_SK_FUNCTION},
     {"str", "fn str(value)", "Converts a value to a string.", LSP_SK_FUNCTION},
     {"int", "fn int(value)", "Converts a value to an integer.", LSP_SK_FUNCTION},
     {"float", "fn float(value)", "Converts a value to a float.", LSP_SK_FUNCTION},

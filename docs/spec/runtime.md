@@ -18,18 +18,18 @@ concurrency, cleanup, and effect metadata.
 
 ## Safety profile
 
-`--safe-mode` is the compile-time safety profile for Nytrix. It keeps the
-default type checks and adds ownership/borrow checking, RC/RAII cleanup,
-strict effect/alias policy, and stricter raw-memory diagnostics.
+`--safe-mode` gives Nytrix its compile-time safety profile. It keeps the
+default type checks and adds ownership/borrow checking, RC/RAII cleanup, strict
+effect/alias policy, and stricter raw-memory diagnostics.
 
 ```bash
 ny --safe-mode file.ny
 ny --mode=safe file.ny
 ```
 
-In this profile, owned raw allocations are scoped with `with ptr` or returned
-through an explicit ownership contract. Raw memory loads and stores
-against a compiler-tracked allocation require a proven byte range:
+In this profile, code scopes owned raw allocations with `with ptr` or returns
+them through an ownership contract. Raw memory loads and stores against a
+compiler-tracked allocation require a proven byte range:
 
 ```ny
 with ptr: p = malloc(8){
@@ -45,17 +45,18 @@ exceeds the allocation size, compilation fails.
 
 ## Managed and native boundaries
 
-Ordinary values are runtime-managed. Raw pointers, handles, layouts, and FFI
+The runtime manages ordinary values. Raw pointers, handles, layouts, and FFI
 strings cross into native memory and native lifetime rules.
 
 ## Heap policy
 
-The default heap path is the native runtime allocator with runtime-managed Ny
-objects. Standard library constructors return managed values; raw buffers,
-external handles, and pointers returned by native APIs still follow explicit
-native ownership rules.
+The default heap path uses the native runtime allocator for runtime-managed
+Nytrix objects. Standard library constructors such as strings, lists, dicts,
+sets, tuples, and ordinary result values return managed Nytrix objects. Raw
+buffers, external handles, FFI pointers, and memory returned by native APIs
+still follow the owning API's explicit native ownership rules.
 
-The nursery/tenured GC is opt-in with `-gc` or `--heap=gc`; the CLI sets the
+Enable the nursery/tenured GC with `-gc` or `--heap=gc`; the CLI sets the
 runtime `NYTRIX_GC` switch from that policy.
 
 ```bash
@@ -63,20 +64,21 @@ ny -gc file.ny
 NYTRIX_GC_NURSERY_SIZE=64M NYTRIX_GC_TENURED_SIZE=512M ny --heap=gc file.ny
 ```
 
-When GC is not enabled, the collector does not reserve nursery or tenured
-spaces. When enabled, the nursery, tenured space, and large-object threshold
-can be configured with `NYTRIX_GC_NURSERY_SIZE`, `NYTRIX_GC_TENURED_SIZE`, and
+With GC disabled, the collector reserves no nursery or tenured spaces. With GC
+enabled, configure the nursery, tenured space, and large-object threshold with
+`NYTRIX_GC_NURSERY_SIZE`, `NYTRIX_GC_TENURED_SIZE`, and
 `NYTRIX_GC_LOS_THRESHOLD`. Size values accept bytes, `K`, `M`, or `G`.
 
-Native allocations that escape the managed object model should be paired with
-the owning API's cleanup function, `with` scopes, or an explicit `release` /
-`forget` contract.
+GC mode changes allocation for managed Nytrix objects. Native handles and raw
+buffers still need cleanup. Pair native allocations that escape the managed
+object model with the owning API's cleanup function, `with` scopes, or a
+`release` / `forget` contract.
 
 ## Ownership
 
-Ownership contracts can be declared with attributes and checked by compiler or
-runtime modes. Resource APIs define whether a value is borrowed, owned,
-released, or intentionally forgotten.
+Declare ownership contracts with attributes. Compiler and runtime modes check
+them. Resource APIs define whether a value is borrowed, owned, released, or
+intentionally forgotten.
 
 ```ny
 def b = borrow(a)
@@ -90,7 +92,7 @@ forget(o)
 marks a value as owned. `release` consumes and drops an owned value. `forget`
 consumes an owned value without dropping it.
 
-Compiler checks are opt-in:
+Enable compiler checks:
 
 ```bash
 ny --borrow-check file.ny
@@ -100,6 +102,10 @@ ny --borrow-check --ownership-strict file.ny
 In strict ownership mode the compiler reports moves, releases, mutations, and
 reassignments while a borrow is live; use after move; double release; local
 borrow escapes; and owned returns without `@returns_owned`.
+
+With borrow checking disabled, the compiler still parses ownership attributes
+and keeps them as declaration metadata. Run `ny --borrow-check` or
+`ny --safe-mode` for files that rely on those contracts.
 
 Ownership function contracts are:
 
@@ -115,8 +121,8 @@ Ownership function contracts are:
 
 ## Scoped cleanup
 
-`defer` and `with` are the language-level cleanup forms. Library APIs can build
-resource-safe wrappers on top of them.
+`defer` and `with` provide language-level cleanup. Library APIs can build
+resource-safe wrappers on top.
 
 ```ny
 defer { cleanup() }
@@ -127,7 +133,7 @@ with Resource: r = open_resource() { use(r) }
 
 The runtime and standard library include stackless async tasks, OS threads,
 atomics, queues, channels, and network async helpers. Shared state uses
-explicit synchronization APIs from `std.core` and `std.os`.
+synchronization APIs from `std.core` and `std.os`.
 
 `async` starts a stackless task and `await` waits for its value:
 

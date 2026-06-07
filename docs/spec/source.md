@@ -10,8 +10,8 @@ public surface and the rules exposed to source, tools, diagnostics, and
 generated documentation. When behavior changes, the spec page for that area
 changes with it.
 
-Syntax pages record spellings. Topic pages define behavior. Learn pages show
-workflow and examples.
+This page is the spec overview. Syntax pages record spellings. Topic pages
+define behavior. Learn pages show workflow and examples.
 
 ## Spec conventions
 

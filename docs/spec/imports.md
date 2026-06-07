@@ -185,7 +185,7 @@ Import failures fall into these groups:
 | Diagnostic shape | Check |
 | --- | --- |
 | Module not found | Wrong package root, missing std bundle, or typo in path. |
-| Symbol not found | Module imported, but selected item is not exported. |
+| Symbol not found | The selected item is not exported by that module. |
 | Ambiguous short name | Use an alias and call `alias.name`. |
 | REPL differs from file | Previous REPL imports are hiding the real file state. |
 

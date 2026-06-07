@@ -30,7 +30,7 @@ Run:
 ny --color=never hello.ny
 ```
 
-Silent success means every assertion passed.
+Silent success means all assertions passed.
 
 ## Module
 

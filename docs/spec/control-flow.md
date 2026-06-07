@@ -13,18 +13,24 @@ if(def x = value x > 0){ a } else { b }
 def value = if(cond){ a } else { b }
 ```
 
-Parenthesized conditions and whitespace-separated conditions are both accepted.
+The parser accepts parenthesized conditions and whitespace-separated
+conditions.
 
-`if` is expression-shaped when its branches produce values. Branch types are
-merged according to the type rules for the surrounding context. In binding or
-expression position, each branch must currently contain one value-producing
-statement, such as a final expression or a nested value-producing `if`.
+Use `if` as an expression when its branches produce values. The compiler merges
+branch types against the surrounding context. In binding or expression
+position, each branch needs one value-producing statement, such as a final
+expression or a nested value-producing `if`.
 
-An `else` branch is required in expression position:
+Expression-position `if` needs an `else` branch:
 
 ```ny
 def label = if(code == 200){ "ok" } else { "error" }
 ```
+
+Conditions use truthiness. `nil`, `false`, `0`, empty strings, and empty
+containers are false. Non-zero numbers, non-empty strings, non-empty
+containers, pointers, handles, and callable values are true. Use an explicit
+comparison in code that should stay readable under `--strict-types`.
 
 ## Loops
 
@@ -33,15 +39,23 @@ while(cond){ body }
 while(mut i = 0 i < n ++i){ body }
 for item in iterable { body }
 for item, index in iterable { body }
+for(index in iterable){ body }
+for(mut i = 0; i < n; ++i){ body }
 for item in lo..hi { body }
 break
 continue
 ```
 
-`while` repeats while the condition is true. `for` iterates over iterable
-values such as lists, ranges, strings, and standard-library iterable helpers.
-The comma form binds the current value first and the zero-based index second.
-The `lo..hi` range expression is inclusive in source-level `for` loops.
+`while` repeats while the condition stays true. The parser accepts
+`while(init cond update)`. Prefer `for(init; cond; update)` for counter loops.
+
+`for` iterates over iterable values such as lists, ranges, strings, and
+standard-library iterable helpers. The comma form binds the current value first
+and the zero-based index second. The `lo..hi` range expression is inclusive in
+source-level `for` loops.
+
+The parenthesized `for(index in xs){ ... }` form binds the zero-based index.
+Use it when the body reads `xs[index]`.
 
 ```ny
 mut seen = []
@@ -55,6 +69,8 @@ assert(seen == ["t:0", "e:1", "s:2", "t:3"], "indexed loop")
 
 `case` is value dispatch.
 
+See [patterns.md](patterns.md) for full arm syntax and guards.
+
 ```ny
 case value {
    literal -> expr
@@ -65,15 +81,17 @@ case value {
 }
 ```
 
-`case` handles compact literal, set-of-literals, and range dispatch. Range
-arms are inclusive and use the same ordered comparisons as `>=` and `<=`;
-integers, floats, and strings are supported.
-`case` can be used in binding position when every selected arm produces a
-value.
+`case` handles literal, set-of-literals, and range dispatch. Range arms include
+both endpoints and use the same ordered comparisons as `>=` and `<=`. `case`
+supports integers, floats, and strings.
+
+Use `case` in binding position when each selected arm produces a value.
 
 ## Match
 
 `match` is pattern dispatch.
+
+See [patterns.md](patterns.md) for full arm syntax and guards.
 
 ```ny
 match value {
@@ -83,9 +101,8 @@ match value {
 }
 ```
 
-`match` handles dispatch that depends on value shape rather than only literal
-equality. ADT variants can be matched by qualified constructor name and named
-payload fields.
+`match` handles dispatch by value shape. Match ADT variants by qualified
+constructor name and named payload fields.
 
 ## Try and catch
 
@@ -94,8 +111,8 @@ try { body } catch err { handler }
 try { body } catch(_) { handler }
 ```
 
-`try` catches failures represented by the language/runtime path. Standard
-library APIs may also return structured `Result` values instead of throwing.
+`try` catches language/runtime failures. Standard-library APIs may return
+structured `Result` values instead.
 
 ## Defer
 
@@ -103,22 +120,27 @@ library APIs may also return structured `Result` values instead of throwing.
 defer { cleanup }
 ```
 
-`defer` schedules cleanup for the current scope. It is used for deterministic
-cleanup around files, handles, processes, and native resources.
-Multiple defers in one scope run in last-in-first-out order. Defers also run
-during panic unwinding.
+`defer` schedules cleanup for the current scope. Use it around files, handles,
+processes, and native resources. The runtime runs multiple defers in
+last-in-first-out order and also runs them during panic unwinding.
 
 ## Labels and goto
 
 ```ny
 start:
+if(done){ goto end }
 goto start
+end:
 ```
 
 Labels name a position inside the current function. `goto` jumps only to a
-label in that function. It can leave inner scopes, running pending `defer`
-cleanup on the way out, but it cannot jump into a deeper scope because that
-would skip binding initialization. Undefined labels are compile errors.
+label in that function. It can leave inner scopes; the runtime runs pending
+`defer` cleanup on the way out. It cannot jump into a deeper scope because
+that would skip binding initialization. The compiler rejects undefined labels.
+
+Use `goto` for small local state machines and cleanup exits where structured
+loops make the control path harder to see. Prefer `while`, `for`, `break`, and
+`continue` for ordinary iteration.
 
 ## With
 
@@ -126,10 +148,9 @@ would skip binding initialization. Undefined labels are compile errors.
 with Type: name = value { body }
 ```
 
-`with` binds a scoped value and runs the body with resource-style setup and
-cleanup semantics where the API supports them.
-Cleanup runs when the body falls through, returns, or unwinds through a panic.
-`with ptr` scopes raw allocations from `malloc`.
+`with` binds a scoped value and runs the body with API-defined setup and
+cleanup. The runtime runs cleanup when the body falls through, returns, or
+unwinds through a panic. `with ptr` scopes raw allocations from `malloc`.
 
 ## Related
 
