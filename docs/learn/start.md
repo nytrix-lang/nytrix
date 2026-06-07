@@ -1,8 +1,7 @@
 # Start
 
-Run one file and import one module before moving to package setup, native
-linking, docs search, or project layout. The checks below cover the compiler,
-standard library, and assertions with no extra setup beyond a working `ny`.
+Run one file and import one module before package setup, native linking, docs
+search, or project layout. These checks need only a working `ny`.
 
 ## Verify the tool
 
@@ -13,7 +12,7 @@ ny -c 'print(1 + 1)'
 
 The inline check prints `2`.
 
-From a source checkout, build and install only when `ny` is missing or stale:
+From a source checkout, build and install when `ny` is missing or stale:
 
 ```bash
 chmod +x make
@@ -23,9 +22,9 @@ chmod +x make
 ny --version
 ```
 
-`./make doctor` is read-only. It reports missing build tools, unwritable cache
-directories, optional qemu/wine runners, and UI display state before a build or
-runtime command hides the real cause.
+`./make doctor` reads the machine and changes nothing. It reports missing build
+tools, unwritable cache directories, optional qemu/wine runners, and UI display
+state before a build or runtime command hides the cause.
 
 ## First file
 
@@ -48,8 +47,7 @@ ny --color=never hello.ny
 ```
 
 No output means the assertion passed. A failure prints the assertion label and
-the source location. Keep assertion labels short and behavior-focused; they are
-what you search for when a check fails later.
+source location. Keep labels short; you will search for them later.
 
 ## Add one import
 
@@ -64,7 +62,7 @@ assert_eq(cfg.get("ports", [])[0], 8080, "first port")
 
 ## Search before guessing
 
-After the tool is built, `ny doc` is the local API index:
+After the build, `ny doc` gives you the local API index:
 
 ```bash
 ny doc search json
@@ -72,8 +70,24 @@ ny doc search --symbols recvuntil
 ny doc get std.parse.data.json
 ```
 
-Use `search` for names and topics. Use `get` once you know the module or
-symbol you want.
+Use `search` for names and topics. Use `get` after you know the module or
+symbol.
+
+## First List
+
+`list(n)` reserves capacity and creates zero elements.
+
+```ny
+mut xs = list(4)
+xs = xs.append("a")
+assert_eq(xs[0], "a", "first item")
+```
+
+Use a literal for initialized elements:
+
+```ny
+def ys = [0, 0, 0, 0]
+```
 
 ## Check the file
 
@@ -84,12 +98,11 @@ ny --strict-types hello.ny
 ny --borrow-check --ownership-strict hello.ny
 ```
 
-`fmt --check` verifies source layout. Compile-time type checks are on by
-default for typed code, generics, layouts, and native boundaries.
-`--strict-types` turns suspicious dynamic fallbacks into errors for files that
-should stay fully statically explainable. `--strict` keeps type checks on and
-adds ownership diagnostics. Borrow checking is most useful once a file owns
-resources, returns references, or wraps native handles.
+`fmt --check` verifies source layout. The compiler checks typed code, generics,
+layouts, and native boundaries by default. `--strict-types` rejects dynamic
+fallbacks in files that should stay statically explainable. `--strict` adds
+ownership diagnostics. Borrow checking helps once a file owns resources,
+returns references, or wraps native handles.
 
 ## Native Output And Cross Targets
 

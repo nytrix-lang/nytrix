@@ -55,24 +55,25 @@ invalid receiver/index access, can be captured by `try`/`catch`.
 
 ## Recoverable results
 
-Standard-library APIs can return structured result values for recoverable
-failure. Callers inspect the success/error shape before using the payload when
+Standard-library APIs can return `Result` values for recoverable failure.
+Callers inspect the success/error shape before using the payload when
 compile-time type checking requires refinement.
 
 ```ny
 use std.core
 
-fn operation() dict {
-   {"ok": true, "value": 42}
-}
+def r = ok(42)
+def e = err("missing")
 
-def r = operation()
-if(!r.get("ok", false)){ return r }
-def value = r.get("value", nil)
-assert_eq(value, 42, "result value")
+assert(is_ok(r), "ok result")
+assert(is_err(e), "err result")
+assert_eq(unwrap(r), 42, "unwrap")
+assert_eq(unwrap_or(e, 0), 0, "fallback")
 ```
 
-Exact field names belong to the API returning the result.
+Use `ok(value)` for success and `err(value)` for failure. `is_ok`, `is_err`,
+`unwrap`, and `unwrap_or` provide the common checks. Match arms can destructure
+`ok(v)` and `err(e)` when typed result refinement matters.
 
 ## Diagnostics
 
@@ -102,5 +103,4 @@ ny --diag-rich file.ny
 
 - [types.md](types.md) for compile-time type rules.
 - [syntax.md](syntax.md) for parser-level forms.
-- [diagnostics.md](../learn/diagnostics.md) for debugging workflow.
-- [troubleshooting.md](../learn/troubleshooting.md) for fixes by symptom.
+- [troubleshooting.md](../learn/troubleshooting.md) for debugging workflow and fixes by symptom.

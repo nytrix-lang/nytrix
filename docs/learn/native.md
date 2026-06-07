@@ -156,4 +156,4 @@ import path works. That confirms the names users import from the wrapper.
 
 - [native.md](../spec/native.md) for the exact language boundary.
 - [runtime.md](../spec/runtime.md) for ownership and cleanup forms.
-- [diagnostics.md](diagnostics.md) for native crash triage.
+- [troubleshooting.md](troubleshooting.md) for native crash triage.

@@ -14,7 +14,7 @@ representation.
 | Lists | `[1, 2, 3]` |
 | Dicts | `{"name": "ny"}` |
 | Sets | Set values from standard-library helpers. |
-| Tuples | Tuple values from tuple syntax or helpers. |
+| Tuples | `(1, 2, 3)` and `()`. |
 | Ranges | Range values used by iteration and `case`. |
 | Functions | Named functions and `fn(...) { ... }` values. |
 | Native values | Pointers, handles, layouts, extern values. |
@@ -40,19 +40,26 @@ f"{count + 1=}"
 
 ## Lists
 
-Lists are ordered mutable sequences. `list(n)` reserves capacity and does not
-create `n` initialized elements.
+Lists are ordered mutable sequences. `list(n)` creates an empty list with
+reserved capacity `n` and zero initialized elements.
 
 ```ny
 def xs = [1, 2, 3]
 mut out = list(16)
 out = out.append(4)
+add(out, 5)
 ```
 
-`append` returns the updated list. Assign the result back when you want to keep
-the new value.
+`append` returns the updated list. Assign the result back to keep the new
+value.
 
-Indexing an uninitialized reserved slot is not defined as a valid list element.
+`add(xs, value)` mutates lists and sets in place and returns the container.
+Code may use it as a statement when the binding already points at the mutable
+container. Prefer one style inside a function: receiver `append` with
+assignment, or free `add` for in-place mutation.
+
+Indexing a reserved-but-empty slot is not valid. Use `append`, a literal, or a
+standard-library helper that fills the list before reading by index.
 
 ## Indexing
 
@@ -61,14 +68,14 @@ Lists, tuples, strings, bytes, and ranges support integer indexing:
 ```ny
 xs[0]
 xs[-1]
+(4, 5, 6)[1]
 "abcd"[2]
 range(2, 8, 2)[-1]
 ```
 
-Negative indices count from the end. Out-of-range or non-integer indices panic
-and can be caught with `try`/`catch`. Dict indexing returns the stored value or
-the runtime default for a missing key; `get(key, fallback)` names the fallback
-explicitly.
+Negative indices count from the end. Out-of-range or non-integer indices panic;
+`try`/`catch` can catch that panic. Dict indexing returns the stored value or
+the runtime default for a missing key. `get(key, fallback)` names the fallback.
 
 ## Dicts
 
@@ -87,9 +94,8 @@ use key/value pairs, for example `{"key": value}`.
 
 ## Receiver methods
 
-Receiver methods are convenience forms over module helpers. Receiver
-availability is part of the module API, not a universal operation on every
-value.
+Receiver methods wrap module helpers. The module API owns receiver
+availability; values do not gain receiver methods on their own.
 
 When exact behavior matters, check the module page:
 
@@ -98,7 +104,7 @@ ny doc get std.core.str
 ny doc search --symbols append
 ```
 
-Runtime-tested receiver surfaces include:
+Runtime tests cover these receiver surfaces:
 
 - sequence properties such as `.len`;
 - string methods such as `.strip()`, `.upper()`, `.split()`, `.byte_at()`;
@@ -120,11 +126,14 @@ Standard sequence helpers include `sort`, `sorted`, `swapped`, `slice`,
 `keys`, `values`, and `items`. The exact exported names and receiver aliases
 belong to `std.core`, `std.core.str`, and `std.core.iter`.
 
+`sort(xs)` sorts `xs` in place and returns the same sorted list. `sorted(xs)`
+returns a sorted copy and leaves `xs` unchanged.
+
 ## Equality and representation
 
-Equality compares according to value kind. Debug text, display text, and
-serialization are separate concerns. Use explicit encoder/parser APIs when a
-stable external representation is required.
+Value kind controls equality. Debug text, display text, and serialization have
+separate APIs. Use encoder/parser APIs when you need a stable external
+representation.
 
 ## Related
 

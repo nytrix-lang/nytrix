@@ -14,16 +14,39 @@ a % b
 a ^ b
 ```
 
-Arithmetic operators apply to numeric values accepted by the active type and
-runtime path. Exact overflow, widening, and native-code behavior follows the
-value type and compiler mode in use.
+Arithmetic operators work on numeric values that the active type and runtime
+path accept. The value type and compiler mode choose overflow, widening, and
+native-code behavior.
 
 `^` is exponentiation. It is right-associative, so `2^3^2` parses as
 `2^(3^2)`.
 
-`+%` and `*%` are not Nytrix operators. Use `%` for remainder, ordinary
-arithmetic for the active integer semantics, or make overflow handling explicit
-at the value/type boundary.
+Nytrix has no `+%` or `*%` operators. Use `%` for remainder. Put overflow
+handling at the value/type boundary.
+
+## Assignment
+
+```ny
+name = expr
+name += expr
+name -= expr
+name *= expr
+name /= expr
+name %= expr
+++name
+--name
+```
+
+Plain assignment writes a mutable binding or settable target. Compound
+assignment reads the current value, applies the matching operator, and writes
+the result back through the same assignment path. The operator keeps its type,
+overflow, and native-boundary rules.
+
+Nytrix has no bitwise or shift compound assignment forms such as `&=` or
+`<<=`. Write the assignment out.
+
+`++name` and `--name` are prefix increment/decrement statement forms for
+mutable numeric targets. Use `name += 1` or `name -= 1` when that is clearer.
 
 ## Comparison
 
@@ -36,8 +59,8 @@ a > b
 a >= b
 ```
 
-Equality is defined by value kind. Ordering comparisons are for ordered values
-such as numeric and comparable text-like values supported by the runtime/API.
+Value kind defines equality. Ordering comparisons work on numeric values and
+text-like values that the runtime/API exposes as comparable.
 
 ## Logic
 
@@ -61,8 +84,8 @@ x << bits
 x >> bits
 ```
 
-Bitwise operators are integer-oriented. Use typed integer values when the
-width, sign, or native ABI result matters.
+Bitwise operators work on integers. Use typed integer values when width, sign,
+or native ABI result matters.
 
 `^^` is bitwise XOR. Use `bxor(a, b)` when a named helper is clearer.
 
@@ -75,7 +98,7 @@ to `borrow(value)`. See [runtime.md](runtime.md) for ownership checks.
 cond ? when_true : when_false
 ```
 
-The ternary form chooses between two expressions. `if` handles branches that
+The ternary form chooses between two expressions. Use `if` for branches that
 need multiple statements or cleanup.
 
 ## Coalescing and pipeline
@@ -87,9 +110,9 @@ value |> [index]
 value |> .member
 ```
 
-`??` selects a fallback when the left side is absent according to the language
-coalescing rule. `|>` pipes a value into the next expression form supported by
-the parser and compiler surface.
+`??` selects a fallback when the language coalescing rule treats the left side
+as absent. `|>` pipes a value into the next expression form that the parser and
+compiler support.
 
 ## Optional chaining
 
@@ -98,7 +121,7 @@ value?.member
 value?.member ?? fallback
 ```
 
-Optional member access returns `nil` when the receiver is `nil`; otherwise it
+Optional member access returns `nil` for a `nil` receiver. Otherwise, it
 performs the normal member lookup.
 
 ## Calls, indexing, and members
@@ -111,13 +134,12 @@ module.helper(value)
 ```
 
 Calls evaluate arguments and invoke a callable value or named function.
-Indexing applies to indexable values. Member and receiver forms are API
-surface; `value.member` exists only when the module documents that receiver
-shape.
+Indexing uses indexable values. Modules define member and receiver forms;
+`value.member` exists only when a module documents that receiver shape.
 
 ## Custom operators
 
-Custom operators are declared on a type with an `impl` block:
+Declare custom operators on a type with an `impl` block:
 
 ```ny
 impl Meter {
@@ -128,12 +150,12 @@ impl Meter {
 }
 ```
 
-The operator body is a named function. The declaration only connects the
-operator token to that function for the owner type.
+The operator body is a named function. The declaration connects the operator
+token to that function for the owner type.
 
 ## Precedence
 
-Parentheses define grouping explicitly:
+Parentheses define grouping:
 
 ```ny
 (a + b) * c
@@ -141,12 +163,11 @@ Parentheses define grouping explicitly:
 cond ? a : (b ?? fallback)
 ```
 
-The parser defines exact precedence. Parentheses are valid anywhere explicit
-grouping is required.
+The parser defines precedence. Use parentheses anywhere you need grouping.
 
 ## Related
 
 - [syntax.md](syntax.md) for source spelling.
 - [values.md](values.md) for equality and representation.
 - [types.md](types.md) for numeric and native type constraints.
-- [control-flow.md](control-flow.md) for `if`, `case`, and `match`.
+- [control-flow.md](control-flow.md) for `if`, loops, `case`, and `match`.

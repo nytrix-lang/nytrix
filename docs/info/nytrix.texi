@@ -220,7 +220,7 @@ language rules.
 
 @itemize @bullet
 @item @file{docs/README.md}
-@item @file{docs/spec/language.md}
+@item @file{docs/spec/source.md}
 @item @file{docs/spec/syntax.md}
 @item @file{docs/spec/native.md}
 @item @file{docs/spec/runtime.md}

@@ -36,7 +36,7 @@ mut str: name = "ny"
 fn add(int a, int b) int { a + b }
 ```
 
-Typed binding order is always `Type: name`.
+Typed binding order stays `Type: name`.
 
 ## Numeric casts
 
@@ -69,6 +69,25 @@ such as `nil != value`, `else` branches after a `nil` return, and logical
 
 ## Algebraic data types
 
+Simple enums bind integer constants. Values start at `0` and increase by one
+unless a variant sets an explicit value.
+
+```ny
+enum Color {
+   Red,
+   Green,
+   Blue
+}
+
+enum Status {
+   Ok = 0,
+   Error = 1,
+   Pending = 2
+}
+
+assert(Color.Red == 0, "enum value")
+```
+
 `enum` declares an algebraic data type. Variants can be payload-less or carry
 named payload fields.
 
@@ -96,7 +115,7 @@ fn area(Shape s) int {
 }
 ```
 
-Generic ADTs declare type parameters and can be used as typed bindings:
+Generic ADTs declare type parameters and work in typed bindings:
 
 ```ny
 enum Option<T> {
@@ -124,12 +143,12 @@ values. They are not interchangeable.
 
 ## Structs and layouts
 
-Use `struct` for ordinary Nytrix values and pass them as tagged values inside
-Nytrix code.
+Use `struct` for Nytrix values and pass them as tagged values inside Nytrix
+code.
 
 ```ny
 struct Box {
-   int: value
+   value: int
 }
 
 fn read(Box box) int {
@@ -137,25 +156,24 @@ fn read(Box box) int {
 }
 ```
 
-Use `layout` or `layout record` when the value must have a specific native ABI
-shape for FFI or raw memory work. Layout fields are part of the native boundary;
-ordinary structs are not layout-compatible unless you explicitly model that
-boundary.
+Use `layout` or `layout record` when the value needs a native ABI shape for FFI
+or raw memory work. Layout fields belong to the native boundary; ordinary
+structs need an explicit layout boundary before they become ABI compatible.
 
 Layout forms include packing, alignment, derived helpers, and guards:
 
 ```ny
 layout Packed pack(1){
-   u8: tag,
-   i32: value
+   tag: u8,
+   value: i32
 }
 
 layout record Row derive(default, eq, hash, debug_str) pack(4){
-   i32: id
+   id: i32
 }
 
 layout shape Header derive(load, store, zero) pack(8){
-   str: sender
+   sender: str
 }
 
 layout guard Header: h = value else {
@@ -164,8 +182,12 @@ layout guard Header: h = value else {
 ```
 
 `layout guard` checks boundary data and narrows the guarded binding to the
-layout pointer type. `LayoutName_from(value)` and generated `*_load_*` helpers
-are emitted for derived layout shapes where requested.
+layout pointer type. Derived layout shapes emit `LayoutName_from(value)` and
+`*_load_*` helpers when requested.
+
+Struct and layout fields use `name: Type`. The parser accepts the older
+primitive-only `Type: name` spelling for compatibility, but custom field types
+should use `name: Type`.
 
 ## Impl self and operators
 
@@ -202,6 +224,9 @@ Shape specs can be a string or a list of accepted strings. `require_shape` and
 `assert_shape` return the checked value or panic with expected and actual
 shapes.
 
+Shape strings validate and debug runtime values. Prefer typed bindings when
+the compiler should enforce the shape.
+
 ## Type groups
 
 The runtime type helpers can define aliases and groups:
@@ -214,14 +239,14 @@ ty.define_type_group("math_input", ["amount"])
 ty.extend_type_group("math_input", ["seq"])
 ```
 
-Groups are accepted by `is_type`, `require_type`, `assert_type`, and typed
-function annotations such as `number: x`.
+`is_type`, `require_type`, `assert_type`, and typed function annotations such
+as `number: x` accept groups.
 
 ## Compile-time checks
 
 Nytrix runs compile-time type checks by default for typed bindings, function
 arguments and returns, ADT payloads, generics, layouts, and native boundaries.
-That catches ordinary type mistakes without requiring ownership-style ceremony.
+That catches type mistakes without ownership ceremony.
 When an expression loses static evidence and falls back to dynamic `any`, the
 checker emits capped source warnings for the high-risk cases.
 
@@ -252,4 +277,4 @@ ny --no-strict-types old_probe.ny
 
 - [native.md](native.md) for FFI and ABI rules.
 - [errors.md](errors.md) for diagnostics and result refinement.
-- [diagnostics.md](../learn/diagnostics.md) for practical strict-type debugging.
+- [troubleshooting.md](../learn/troubleshooting.md) for practical strict-type debugging.

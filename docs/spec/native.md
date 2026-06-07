@@ -7,8 +7,8 @@ ownership, and ABI behavior.
 
 ```ny
 layout Name {
-   Type: field,
-   Type: field2
+   field: Type,
+   field2: Type
 }
 ```
 
@@ -95,6 +95,21 @@ load_layout(ptr, "Name", "field")
 Typed raw loads and stores include integer, float, bool, pointer, and handle
 forms such as `load8`, `load16`, `load32`, `load32_f32`, `load64_f64`,
 `load64_h`, `store8`, `store32`, and `store_layout`.
+
+Raw memory helpers use byte offsets. The public wrappers default the offset to
+zero:
+
+| Helper | Shape | Use |
+| --- | --- | --- |
+| `load8(p, i=0)` / `store8(p, v, i=0)` | byte | Raw bytes. |
+| `load16`, `load32`, `load64` | tagged int/value load | Nytrix scalar slots and raw integer data. |
+| `load64_i(p, i=0)` / `store64_i(p, v, i=0)` | `int` view | Typed integer reads and writes. |
+| `load64_h(p, i=0)` / `store64_h(p, v, i=0)` | handle view | Pointer or handle-sized native values. |
+| `load32_f32`, `load64_f64` | float view | Native float fields. |
+| `store32_f32`, `store64_f64` | float store | Native float fields. |
+
+The runtime intrinsics behind these wrappers use `(p, offset, value)` store
+order. User code should call the `std.core` wrappers above.
 
 `std.os.ffi.CStruct` is a dynamic descriptor form. It is intentionally flexible
 and slower than `layout`; compiled layout access resolves offsets directly.

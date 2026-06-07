@@ -311,7 +311,7 @@ RT_DEF("__le", rt_le, 2, "fn __le(a, b)", "Integer less than or equal.")
 RT_DEF("__gt", rt_gt, 2, "fn __gt(a, b)", "Integer greater than.")
 RT_DEF("__ge", rt_ge, 2, "fn __ge(a, b)", "Integer greater than or equal.")
 
-RT_DEF("__list_new", rt_list_new, 1, "fn __list_new(n)", "Allocates a list of n capacity/length.")
+RT_DEF("__list_new", rt_list_new, 1, "fn __list_new(n)", "Allocates an empty list with capacity n.")
 RT_DEF("__load_item", rt_load_item, 2, "fn __load_item(lst, i)", "Loads element i from list lst.")
 RT_DEF("__store_item", rt_store_item, 3, "fn __store_item(lst, i, v)",
        "Stores v at element i in list lst.")
