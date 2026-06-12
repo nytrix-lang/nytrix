@@ -46,12 +46,12 @@ def list: EDITOR_FONT_CANDIDATES = [
 
 def str: TERM_FONT_DEFAULT = "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 def list: TERM_FONT_CANDIDATES = [
-   "etc/assets/fonts/monocraft.ttf",
-   "etc/assets/fonts/jetbrains.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/MesloLGSNerdFontMono-Regular.ttf",
    "/usr/share/fonts/OTF/FiraMonoNerdFontMono-Regular.otf",
+   "etc/assets/fonts/jetbrains.ttf",
+   "etc/assets/fonts/monocraft.ttf",
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 

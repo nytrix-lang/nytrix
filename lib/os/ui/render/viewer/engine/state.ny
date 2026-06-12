@@ -7,7 +7,7 @@ module std.os.ui.render.viewer.engine.state *
 use std.core
 use std.os.ui.render.matrix as rmat
 
-mut int: APP_MSAA = 4
+mut int: APP_MSAA = 1
 mut bool: APP_VSYNC = false
 mut bool: APP_FILTER_LINEAR = false
 mut list: APP_BG = [0.002, 0.002, 0.005, 1.0]
@@ -105,6 +105,7 @@ mut list: _cli_post_load_cmds = []
 mut bool: _cli_scene_requested = false
 mut str: _cli_gui_layout = ""
 mut str: _cli_gui_shot = ""
+mut str: _cli_render_backend = ""
 mut bool: _cli_dump_requested = false
 mut bool: _cli_dump_all_requested = false
 mut bool: _cli_dump_missing_requested = false
@@ -247,6 +248,8 @@ mut bool: _scene_selection_rect = true
 mut bool: _scene_drag_active = false
 mut int: _scene_drag_mode = 0
 mut dict: _scene_drag_state = dict(0)
+mut int: _scene_drag_last_update_frame = -1
+mut int: _scene_drag_last_event_ns = 0
 mut int: _gizmo_mode = 0
 mut int: _gizmo_axis = 0
 mut bool: _gizmo_snap = false

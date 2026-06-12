@@ -1,10 +1,11 @@
 ;; Keywords: render shader os ui
-;; Reduced shader-source handler for Vulkan std.os.ui.render usage.
+;; Backend-neutral shader-source handler for std.os.ui.render usage.
 ;; References:
 ;; - std.os.ui.render
 ;; - std.os.ui.render.matrix
 module std.os.ui.render.shader(
-   SHADER_BACKEND_VK450, normalize_backend_name, select_shader_defs, select_shader_source,
+   SHADER_BACKEND_VK450, SHADER_BACKEND_GL120, SHADER_BACKEND_GL330, SHADER_BACKEND_GLES300,
+   normalize_backend_name, select_shader_defs, select_shader_source,
    parse_combined_shader, transpile_shader_defs, transpile_shader_source,
    shader_hash32, shader_sources, shader_watch
 )
@@ -16,13 +17,26 @@ use std.os (file_read, ticks)
 use std.os.path as ospath
 
 def SHADER_BACKEND_VK450 = "vkglsl450"
+def SHADER_BACKEND_GL120 = "glsl120"
+def SHADER_BACKEND_GL330 = "glsl330"
+def SHADER_BACKEND_GLES300 = "glsl300es"
 
 fn normalize_backend_name(any name) str {
-   "Normalizes backend aliases to Vulkan."
+   "Normalizes backend aliases to render shader targets."
    def n = lower(strip(to_str(name)))
    if(n == "vk" || n == "vulkan" || n == "glsl450" ||
       n == "vk450" || n == SHADER_BACKEND_VK450){
       return SHADER_BACKEND_VK450
+   }
+   if(n == "gl" || n == "opengl" || n == "gl120" || n == SHADER_BACKEND_GL120){
+      return SHADER_BACKEND_GL120
+   }
+   if(n == "gl330" || n == "opengl330" || n == "glsl330" || n == SHADER_BACKEND_GL330){
+      return SHADER_BACKEND_GL330
+   }
+   if(n == "webgl" || n == "webgl2" || n == "gles" || n == "gles300" ||
+      n == "glsl300es" || n == SHADER_BACKEND_GLES300){
+      return SHADER_BACKEND_GLES300
    }
    SHADER_BACKEND_VK450
 }
@@ -36,6 +50,7 @@ fn _strip_known_versions(str src) str {
    out = str_replace(out, "#version 450 core\n", "")
    out = str_replace(out, "#version 460\n", "")
    out = str_replace(out, "#version 460 core\n", "")
+   out = str_replace(out, "#version 300 es\n", "")
    out
 }
 
@@ -51,6 +66,32 @@ fn _fragment_to_vk450(str src) str {
       if(str_contains(out, "out vec4")){ out = str_replace(out, "out vec4", "layout(location = 0) out vec4") }
    }
    "#version 450\n" + out
+}
+
+fn _vertex_to_gl120(str src) str { "#version 120\n" + _strip_known_versions(src) }
+fn _fragment_to_gl120(str src) str { "#version 120\n" + _strip_known_versions(src) }
+
+fn _vertex_to_gl330(str src) str { "#version 330 core\n" + _strip_known_versions(src) }
+
+fn _fragment_to_gl330(str src) str {
+   mut out = _strip_known_versions(src)
+   if(str_contains(out, "gl_FragColor")){
+      out = str_replace(out, "gl_FragColor", "fragColor")
+      out = "out vec4 fragColor;\n" + out
+   }
+   "#version 330 core\n" + out
+}
+
+fn _vertex_to_gles300(str src) str { "#version 300 es\n" + _strip_known_versions(src) }
+
+fn _fragment_to_gles300(str src) str {
+   mut out = _strip_known_versions(src)
+   if(!str_contains(out, "precision ")){ out = "precision mediump float;\n" + out }
+   if(str_contains(out, "gl_FragColor")){
+      out = str_replace(out, "gl_FragColor", "fragColor")
+      out = "out vec4 fragColor;\n" + out
+   }
+   "#version 300 es\n" + out
 }
 
 fn _parse_marker(str line, str prefix) any {
@@ -91,11 +132,17 @@ fn parse_combined_shader(str combined_src) dict {
 }
 
 fn transpile_shader_defs(any defs) dict {
-   "Ensures defs include Vulkan-GLSL 450 variants."
+   "Ensures defs include Vulkan, OpenGL, and WebGL shader variants."
    if(!is_dict(defs)){ return dict(4) }
    mut out = dict_clone(defs)
    mut vs450 = out.get("vs_vkglsl450", 0)
    mut fs450 = out.get("fs_vkglsl450", 0)
+   mut vs120 = out.get("vs_glsl120", 0)
+   mut fs120 = out.get("fs_glsl120", 0)
+   mut vs330 = out.get("vs_glsl330", 0)
+   mut fs330 = out.get("fs_glsl330", 0)
+   mut vs300es = out.get("vs_glsl300es", 0)
+   mut fs300es = out.get("fs_glsl300es", 0)
    if(vs450){
       out = out.set("vs_vkglsl450", _vertex_to_vk450(vs450))
    } elif(!vs450){
@@ -107,6 +154,30 @@ fn transpile_shader_defs(any defs) dict {
    } elif(!fs450){
       def fs_any = out.get("fs_glsl330", out.get("fs_glsl120", 0))
       if(fs_any){ out = out.set("fs_vkglsl450", _fragment_to_vk450(fs_any)) }
+   }
+   if(vs120){ out = out.set("vs_glsl120", _vertex_to_gl120(vs120)) } else {
+      def vs_any120 = out.get("vs_glsl330", out.get("vs_vkglsl450", 0))
+      if(vs_any120){ out = out.set("vs_glsl120", _vertex_to_gl120(vs_any120)) }
+   }
+   if(fs120){ out = out.set("fs_glsl120", _fragment_to_gl120(fs120)) } else {
+      def fs_any120 = out.get("fs_glsl330", out.get("fs_vkglsl450", 0))
+      if(fs_any120){ out = out.set("fs_glsl120", _fragment_to_gl120(fs_any120)) }
+   }
+   if(vs330){ out = out.set("vs_glsl330", _vertex_to_gl330(vs330)) } else {
+      def vs_any330 = out.get("vs_glsl120", out.get("vs_vkglsl450", 0))
+      if(vs_any330){ out = out.set("vs_glsl330", _vertex_to_gl330(vs_any330)) }
+   }
+   if(fs330){ out = out.set("fs_glsl330", _fragment_to_gl330(fs330)) } else {
+      def fs_any330 = out.get("fs_glsl120", out.get("fs_vkglsl450", 0))
+      if(fs_any330){ out = out.set("fs_glsl330", _fragment_to_gl330(fs_any330)) }
+   }
+   if(vs300es){ out = out.set("vs_glsl300es", _vertex_to_gles300(vs300es)) } else {
+      def vs_any300es = out.get("vs_glsl330", out.get("vs_glsl120", out.get("vs_vkglsl450", 0)))
+      if(vs_any300es){ out = out.set("vs_glsl300es", _vertex_to_gles300(vs_any300es)) }
+   }
+   if(fs300es){ out = out.set("fs_glsl300es", _fragment_to_gles300(fs300es)) } else {
+      def fs_any300es = out.get("fs_glsl330", out.get("fs_glsl120", out.get("fs_vkglsl450", 0)))
+      if(fs_any300es){ out = out.set("fs_glsl300es", _fragment_to_gles300(fs_any300es)) }
    }
    out
 }
@@ -179,11 +250,13 @@ fn shader_watch(any state, any vert_rel, any frag_rel, any force=false, any poll
 
 fn select_shader_defs(any defs, str _backend="vkglsl450") dict {
    "Selects the appropriate shader variants for the specified backend."
+   def backend = normalize_backend_name(_backend)
    defs = transpile_shader_defs(defs)
+   def suffix = backend
    return {
-      "backend": SHADER_BACKEND_VK450,
-      "vs": defs.get("vs_vkglsl450", ""),
-      "fs": defs.get("fs_vkglsl450", ""),
+      "backend": backend,
+      "vs": defs.get("vs_" + suffix, ""),
+      "fs": defs.get("fs_" + suffix, ""),
       "defs": defs
    }
 }
@@ -196,6 +269,8 @@ fn select_shader_source(str combined_src, str backend="vkglsl450") dict {
 #main {
    def sel = select_shader_source("#vertex\nvoid main(){}\n#fragment\nvoid main(){}\n")
    assert(sel.get("backend", "") == SHADER_BACKEND_VK450 && sel.get("vs", "").contains("#version 450") && sel.get("fs", "").contains("#version 450"), "shader source selection")
+   def gl_sel = select_shader_source("#vertex glsl120\nvoid main(){}\n#fragment glsl120\nvoid main(){ gl_FragColor = vec4(1.0); }\n", "webgl2")
+   assert(gl_sel.get("backend", "") == SHADER_BACKEND_GLES300 && gl_sel.get("vs", "").contains("#version 300 es") && gl_sel.get("fs", "").contains("out vec4 fragColor"), "webgl shader source selection")
    assert(shader_hash32("abc") == shader_hash32("abc") && shader_hash32("abc") != shader_hash32("abd"), "shader hash")
    mut watch = dict(12)
    watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)

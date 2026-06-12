@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.os.ui.render.viewer.gui
 ;; - std.os.ui.render.matrix
-module std.os.ui.render.viewer.gizmo(compact_view, metrics, draw_box, draw_box_corners, draw_axes, project_point, hit_test, draw_overlay)
+module std.os.ui.render.viewer.gizmo(compact_view, metrics, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, draw_overlay)
 use std.core
 use std.math (PI, abs, clamp, cos, max, min, sin, sqrt)
 use std.os.ui.render.dump as ui_profile
@@ -60,7 +60,8 @@ fn draw_box_corners(minx, miny, minz, maxx, maxy, maxz, col, thickness, any corn
 }
 
 fn _draw_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compact) bool {
-   def ex, ey = px + ax * length, py + ay * length
+   def ex = px + ax * length
+   def ey = py + ay * length
    def ez = pz + az * length
    render.draw_line([px, py, pz], [ex, ey, ez], col, thickness)
    if(!compact){ render.draw_cube([ex, ey, ez], handle_size, col) }
@@ -69,7 +70,8 @@ fn _draw_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compa
 
 fn _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, size, compact) bool {
    if(compact){ return true }
-   def ex, ey = px + ax * length, py + ay * length
+   def ex = px + ax * length
+   def ey = py + ay * length
    def ez = pz + az * length
    def back = max(size * 1.8, length * 0.075)
    def side = back * 0.42
@@ -93,7 +95,8 @@ fn _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, size, compact)
 }
 
 fn _draw_move_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compact) bool {
-   def ex, ey = px + ax * length, py + ay * length
+   def ex = px + ax * length
+   def ey = py + ay * length
    def ez = pz + az * length
    render.draw_line([px, py, pz], [ex, ey, ez], col, thickness)
    _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compact)
@@ -141,13 +144,17 @@ fn _screen_norm(f64 dx, f64 dy) list {
 }
 
 fn _screen_dist2(f64 px, f64 py, f64 x0, f64 y0, f64 x1, f64 y1) f64 {
-   def vx, vy = x1 - x0, y1 - y0
-   def wx, wy = px - x0, py - y0
+   def vx = x1 - x0
+   def vy = y1 - y0
+   def wx = px - x0
+   def wy = py - y0
    def len2 = vx * vx + vy * vy
    if(len2 <= 0.000001){ return wx * wx + wy * wy }
    def t = clamp((wx * vx + wy * vy) / len2, 0.0, 1.0)
-   def cx, cy = x0 + vx * t, y0 + vy * t
-   def dx, dy = px - cx, py - cy
+   def cx = x0 + vx * t
+   def cy = y0 + vy * t
+   def dx = px - cx
+   def dy = py - cy
    dx * dx + dy * dy
 }
 
@@ -156,15 +163,49 @@ fn _hit_threshold(any win_w, any win_h) f64 {
 }
 
 fn _pick_axis_line(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py, f64 pz, f64 ax, f64 ay, f64 az, f64 length, int axis, f64 best_d2) dict {
-   def a = project_point(mvp, win_w, win_h, px, py, pz)
-   def b = project_point(mvp, win_w, win_h, px + ax * length, py + ay * length, pz + az * length)
-   if(!is_list(a) || !is_list(b)){ return {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
-   def x0, y0 = float(a.get(0, 0.0)), float(a.get(1, 0.0))
-   def x1, y1 = float(b.get(0, 0.0)), float(b.get(1, 0.0))
-   def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
-   if(d2 >= best_d2){ return {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
-   def n = _screen_norm(x1 - x0, y1 - y0)
-   {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0))}
+   mut steps = 12
+   mut i = 0
+   mut prev_p = project_point(mvp, win_w, win_h, px, py, pz)
+   mut prev_t = 0.0
+   mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0}
+   while(i < steps){
+      i += 1
+      def t = float(i) / float(steps)
+      def cur_p = project_point(mvp, win_w, win_h, px + ax * length * t, py + ay * length * t, pz + az * length * t)
+      if(is_list(prev_p) && is_list(cur_p)){
+         def x0 = float(prev_p.get(0, 0.0))
+         def y0 = float(prev_p.get(1, 0.0))
+         def x1 = float(cur_p.get(0, 0.0))
+         def y1 = float(cur_p.get(1, 0.0))
+         def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
+         if(d2 < float(out.get("dist2", best_d2))){
+            def n = _screen_norm(x1 - x0, y1 - y0)
+            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0))}
+         }
+      }
+      prev_p = cur_p
+      prev_t = t
+   }
+   out
+}
+
+fn axis_tangent(any mvp, any win_w, any win_h, f64 px, f64 py, f64 pz, f64 ax, f64 ay, f64 az, f64 length) list {
+   "Finds the screen-space tangent for a world-space axis."
+   mut steps = 12
+   mut i = 0
+   mut prev_p = project_point(mvp, win_w, win_h, px, py, pz)
+   mut prev_t = 0.0
+   while(i < steps){
+      i += 1
+      def t = float(i) / float(steps)
+      def cur_p = project_point(mvp, win_w, win_h, px + ax * length * t, py + ay * length * t, pz + az * length * t)
+      if(is_list(prev_p) && is_list(cur_p)){
+         return _screen_norm(float(cur_p.get(0, 0.0)) - float(prev_p.get(0, 0.0)), float(cur_p.get(1, 0.0)) - float(prev_p.get(1, 0.0)))
+      }
+      prev_p = cur_p
+      prev_t = t
+   }
+   [0.0, -1.0]
 }
 
 fn _ring_point(f64 px, f64 py, f64 pz, f64 r, int plane, f64 a) list {
@@ -200,13 +241,17 @@ fn _pick_ring(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py, f64
 
 fn metrics(bounds, mode) list {
    "Computes center, span, thickness, and handle sizes for gizmos."
-   def minx, miny = bounds.get(0, 0.0), bounds.get(1, 0.0)
+   def minx = bounds.get(0, 0.0)
+   def miny = bounds.get(1, 0.0)
    def minz = bounds.get(2, 0.0)
-   def maxx, maxy = bounds.get(3, 0.0), bounds.get(4, 0.0)
+   def maxx = bounds.get(3, 0.0)
+   def maxy = bounds.get(4, 0.0)
    def maxz = bounds.get(5, 0.0)
-   def px, py = (minx + maxx) * 0.5, (miny + maxy) * 0.5
+   def px = (minx + maxx) * 0.5
+   def py = (miny + maxy) * 0.5
    def pz = (minz + maxz) * 0.5
-   def span_x, span_y = max(0.001, maxx - minx), max(0.001, maxy - miny)
+   def span_x = max(0.001, maxx - minx)
+   def span_y = max(0.001, maxy - miny)
    def span_z = max(0.001, maxz - minz)
    def span = max(max(span_x, span_y), span_z)
    def axis_len = max(0.28, span * 0.52)
@@ -271,47 +316,85 @@ fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, an
    "Hit-tests the projected world gizmo. Returns mode, axis, and screen drag tangent."
    if(!is_list(bounds) || bounds.len < 6){ return {"hit": false, "axis": 0, "mode": int(mode)} }
    def m = metrics(bounds, mode)
-   def px, py = float(m.get(0, 0.0)), float(m.get(1, 0.0))
+   def px = float(m.get(0, 0.0))
+   def py = float(m.get(1, 0.0))
    def pz = float(m.get(2, 0.0))
    def axis_len = float(m.get(4, 1.0))
    def center = project_point(mvp, win_w, win_h, px, py, pz)
    if(!is_list(center)){ return {"hit": false, "axis": 0, "mode": int(mode)} }
-   def mx, my = float(mouse_x), float(mouse_y)
-   def cx, cy = float(center.get(0, 0.0)), float(center.get(1, 0.0))
+   def mx = float(mouse_x)
+   def my = float(mouse_y)
+   def cx = float(center.get(0, 0.0))
+   def cy = float(center.get(1, 0.0))
    def threshold = _hit_threshold(win_w, win_h)
-   def center_dx, center_dy = mx - cx, my - cy
-   def center_r = max(8.0, threshold * 0.72)
-   if(center_dx * center_dx + center_dy * center_dy <= center_r * center_r){
-      return {"hit": true, "axis": 0, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": 0.0, "dist2": 0.0}
-   }
+   
    mut best_d2 = threshold * threshold
    mut best = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0}
+
    if(int(mode) == 1){
       def ring_r = max(axis_len * 0.92, float(m.get(3, 1.0)) * 0.58)
-      def rx = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 0, 1, best_d2)
-      if(int(rx.get("axis", -1)) >= 0){ best = rx best_d2 = float(rx.get("dist2", best_d2)) }
       def ry = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 1, 2, best_d2)
-      if(int(ry.get("axis", -1)) >= 0){ best = ry best_d2 = float(ry.get("dist2", best_d2)) }
+      if(int(ry.get("axis", -1)) >= 0){
+         best = ry
+         best_d2 = float(ry.get("dist2", best_d2))
+      }
+      def rx = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 0, 1, best_d2)
+      if(int(rx.get("axis", -1)) >= 0){
+         best = rx
+         best_d2 = float(rx.get("dist2", best_d2))
+      }
       def rz = _pick_ring(mvp, win_w, win_h, mx, my, px, py, pz, ring_r, 2, 3, best_d2)
-      if(int(rz.get("axis", -1)) >= 0){ best = rz }
+      if(int(rz.get("axis", -1)) >= 0){
+         best = rz
+      }
    } else {
-      def ax = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 1.0, 0.0, 0.0, axis_len, 1, best_d2)
-      if(int(ax.get("axis", -1)) >= 0){ best = ax best_d2 = float(ax.get("dist2", best_d2)) }
       def ay = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 1.0, 0.0, axis_len, 2, best_d2)
-      if(int(ay.get("axis", -1)) >= 0){ best = ay best_d2 = float(ay.get("dist2", best_d2)) }
+      if(int(ay.get("axis", -1)) >= 0){
+         best = ay
+         best_d2 = float(ay.get("dist2", best_d2))
+      }
+      def ax = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 1.0, 0.0, 0.0, axis_len, 1, best_d2)
+      if(int(ax.get("axis", -1)) >= 0){
+         best = ax
+         best_d2 = float(ax.get("dist2", best_d2))
+      }
       def az = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 0.0, 1.0, axis_len, 3, best_d2)
-      if(int(az.get("axis", -1)) >= 0){ best = az best_d2 = float(az.get("dist2", best_d2)) }
+      if(int(az.get("axis", -1)) >= 0){
+         best = az
+         best_d2 = float(az.get("dist2", best_d2))
+      }
       if(int(mode) == 2){
-         def nx = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, -1.0, 0.0, 0.0, axis_len * 0.46, 1, best_d2)
-         if(int(nx.get("axis", -1)) >= 0){ best = nx best_d2 = float(nx.get("dist2", best_d2)) }
          def ny = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, -1.0, 0.0, axis_len * 0.46, 2, best_d2)
-         if(int(ny.get("axis", -1)) >= 0){ best = ny best_d2 = float(ny.get("dist2", best_d2)) }
+         if(int(ny.get("axis", -1)) >= 0){
+            best = ny
+            best_d2 = float(ny.get("dist2", best_d2))
+         }
+         def nx = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, -1.0, 0.0, 0.0, axis_len * 0.46, 1, best_d2)
+         if(int(nx.get("axis", -1)) >= 0){
+            best = nx
+            best_d2 = float(nx.get("dist2", best_d2))
+         }
          def nz = _pick_axis_line(mvp, win_w, win_h, mx, my, px, py, pz, 0.0, 0.0, -1.0, axis_len * 0.46, 3, best_d2)
-         if(int(nz.get("axis", -1)) >= 0){ best = nz }
+         if(int(nz.get("axis", -1)) >= 0){
+            best = nz
+         }
       }
    }
+
    def axis = int(best.get("axis", -1))
-   if(axis < 0){ return {"hit": false, "axis": 0, "mode": int(mode)} }
+   if(axis < 0){
+      def center_dx = mx - cx
+      def center_dy = my - cy
+      def center_r = max(8.0, threshold * 0.72)
+      if(center_dx * center_dx + center_dy * center_dy <= center_r * center_r){
+         return {"hit": true, "axis": 0, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": 0.0, "dist2": 0.0}
+      }
+      if(int(mode) != 1 && abs(mx - cx) < threshold * 1.5 && my < cy && my > cy - axis_len * 200.0){
+         return {"hit": true, "axis": 2, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": -1.0, "dist2": threshold}
+      }
+      return {"hit": false, "axis": 0, "mode": int(mode)}
+   }
+
    {
       "hit": true,
       "axis": axis,

@@ -415,6 +415,8 @@ RT_DEF("__tag_native", rt_tag_native, 1, "fn __tag_native(addr)",
        "Tags a raw function pointer as a native callable.")
 
 RT_DEF("__call0", rt_call0, 1, "fn __call0(fptr)", "Call fptr with 0 args.")
+RT_DEF("__call0_void", rt_call0_void, 1, "fn __call0_void(fptr)",
+       "Call fptr with no arguments and no return value.")
 RT_DEF("__call0_ptr", rt_call0_ptr, 1, "fn __call0_ptr(fptr)",
        "Call fptr with 0 args and return a native pointer handle.")
 RT_DEF("__call0_i32", rt_call0_i32, 1, "fn __call0_i32(fptr)",
@@ -428,12 +430,18 @@ RT_DEF("__call1_u32", rt_call1_u32, 2, "fn __call1_u32(fptr, a)",
        "Call fptr with one u32 argument and u32 return.")
 RT_DEF("__call1_u32_void", rt_call1_u32_void, 2, "fn __call1_u32_void(fptr, a)",
        "Call fptr with one u32 argument and no return value.")
+RT_DEF("__call1_void", rt_call1_void, 2, "fn __call1_void(fptr, a)",
+       "Call fptr with one argument and no return value.")
 RT_DEF("__call2", rt_call2, 3, "fn __call2(fptr, a, b)", "Call fptr with 2 args.")
+RT_DEF("__call2_void", rt_call2_void, 3, "fn __call2_void(fptr, a, b)",
+       "Call fptr with two arguments and no return value.")
 RT_DEF("__call2_ptr", rt_call2_ptr, 3, "fn __call2_ptr(fptr, a, b)",
        "Call fptr with 2 args and return a native pointer handle.")
 RT_DEF("__call2_ptr_u32", rt_call2_ptr_u32, 3, "fn __call2_ptr_u32(fptr, a, b)",
        "Call fptr(ptr, u32) and return a native pointer handle.")
 RT_DEF("__call3", rt_call3, 4, "fn __call3(fptr, a, b, c)", "Call fptr with 3 args.")
+RT_DEF("__call3_void", rt_call3_void, 4, "fn __call3_void(fptr, a, b, c)",
+       "Call fptr with three arguments and no return value.")
 RT_DEF("__call3_ptr", rt_call3_ptr, 4, "fn __call3_ptr(fptr, a, b, c)",
        "Call fptr with 3 args and return a native pointer handle.")
 RT_DEF("__call3_ptr_u64_ptr", rt_call3_ptr_u64_ptr, 4, "fn __call3_ptr_u64_ptr(fptr, a, b, c)",
@@ -443,6 +451,8 @@ RT_DEF("__call3_ptr_u32_ptr", rt_call3_ptr_u32_ptr, 4, "fn __call3_ptr_u32_ptr(f
 RT_DEF("__call3_ptr_ptr_u32", rt_call3_ptr_ptr_u32, 4, "fn __call3_ptr_ptr_u32(fptr, a, b, c)",
        "Call fptr(ptr, ptr, u32) and return a native pointer handle.")
 RT_DEF("__call4", rt_call4, 5, "fn __call4(fptr, a, b, c, d)", "Call fptr with 4 args.")
+RT_DEF("__call4_void", rt_call4_void, 5, "fn __call4_void(fptr, a, b, c, d)",
+       "Call fptr with four arguments and no return value.")
 RT_DEF("__call4_ptr", rt_call4_ptr, 5, "fn __call4_ptr(fptr, a, b, c, d)",
        "Call fptr with 4 args and return a native pointer handle.")
 RT_DEF("__call3_ptr_u64_ptr_i32", rt_call3_ptr_u64_ptr_i32, 4,
@@ -459,12 +469,20 @@ RT_DEF("__call4_ptr_u64_ptr_ptr_i32", rt_call4_ptr_u64_ptr_ptr_i32, 5,
 RT_DEF("__call4_ptr_ptr_ptr_u64_i32", rt_call4_ptr_ptr_ptr_u64_i32, 5,
        "fn __call4_ptr_ptr_ptr_u64_i32(fptr, a, b, c, d)",
        "Call fptr(ptr, ptr, ptr, u64) and return i32.")
+RT_DEF("__call1_f32_void", rt_call1_f32_void, 2, "fn __call1_f32_void(fptr, a)",
+       "Call fptr with 1 float arg.")
+RT_DEF("__call2_f32_void", rt_call2_f32_void, 3, "fn __call2_f32_void(fptr, a, b)",
+       "Call fptr with 2 float args.")
+RT_DEF("__call3_f32_void", rt_call3_f32_void, 4, "fn __call3_f32_void(fptr, a, b, c)",
+       "Call fptr with 3 float args.")
 RT_DEF("__call4_f32_void", rt_call4_f32_void, 5, "fn __call4_f32_void(fptr, a, b, c, d)",
        "Call fptr with 4 float args.")
 RT_DEF("__call4_ptr_ptr_ptr_ptr_void", rt_call4_ptr_ptr_ptr_ptr_void, 5,
        "fn __call4_ptr_ptr_ptr_ptr_void(fptr, a, b, c, d)",
        "Call fptr(ptr, ptr, ptr, ptr) and return no value.")
 RT_DEF("__call5", rt_call5, 6, "fn __call5(fptr, a, b, c, d, e)", "Call fptr with 5 args.")
+RT_DEF("__call5_void", rt_call5_void, 6, "fn __call5_void(fptr, a, b, c, d, e)",
+       "Call fptr with five arguments and no return value.")
 RT_DEF("__call5_ptr", rt_call5_ptr, 6, "fn __call5_ptr(fptr, a, b, c, d, e)",
        "Call fptr with 5 args and return a native pointer handle.")
 RT_DEF("__call5_ptr_ptr_ptr_u64_i32_i32", rt_call5_ptr_ptr_ptr_u64_i32_i32, 6,
@@ -472,8 +490,12 @@ RT_DEF("__call5_ptr_ptr_ptr_u64_i32_i32", rt_call5_ptr_ptr_ptr_u64_i32_i32, 6,
        "Call fptr(ptr, ptr, ptr, u64, i32) and return i32.")
 RT_DEF("__call6", rt_call6, 7, "fn __call6(fptr, a, b, c, d, e, f)", "Call fptr with 6 args.")
 RT_DEF("__call7", rt_call7, 8, "fn __call7(fptr, ...)", "Call fptr with 7 args.")
+RT_DEF("__call7_void", rt_call7_void, 8, "fn __call7_void(fptr, ...)",
+       "Call fptr with seven arguments and no return value.")
 RT_DEF("__call8", rt_call8, 9, "fn __call8(fptr, ...)", "Call fptr with 8 args.")
 RT_DEF("__call9", rt_call9, 10, "fn __call9(fptr, ...)", "Call fptr with 9 args.")
+RT_DEF("__call9_void", rt_call9_void, 10, "fn __call9_void(fptr, ...)",
+       "Call fptr with nine arguments and no return value.")
 RT_DEF("__call10", rt_call10, 11, "fn __call10(fptr, ...)", "Call fptr with 10 args.")
 RT_DEF("__call11", rt_call11, 12, "fn __call11(fptr, ...)", "Call fptr with 11 args.")
 RT_DEF("__call12", rt_call12, 13, "fn __call12(fptr, ...)", "Call fptr with 12 args.")

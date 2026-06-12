@@ -24,9 +24,7 @@ module std.os.ui.render.vk.vulkan(
    cmd_bind_descriptor_sets, create_pipeline_layout, destroy_pipeline_layout, create_graphics_pipelines,
    create_compute_pipelines, destroy_pipeline, create_shader_module, destroy_shader_module,
    vk_create_xcb_surface_khr, vk_create_xlib_surface_khr, vk_create_win32_surface_khr,
-   vk_create_wayland_surface_khr, vk_create_metal_surface_ext, vk_get_physical_device_surface_capabilities_khr,
-   vk_get_physical_device_surface_support_khr, vk_get_physical_device_surface_formats_khr,
-   vk_get_physical_device_surface_present_modes_khr, vk_get_physical_device_wayland_presentation_support_khr,
+   vk_create_wayland_surface_khr, vk_create_metal_surface_ext, vk_get_physical_device_wayland_presentation_support_khr,
    get_physical_device_surface_support_khr, get_physical_device_surface_formats_khr,
    get_physical_device_surface_present_modes_khr, get_physical_device_surface_capabilities_khr,
    destroy_surface_khr, allocate_memory, free_memory, bind_image_memory, get_image_memory_requirements,
@@ -293,9 +291,11 @@ fn _vk_native_proc_ptr(any p) any {
 
 fn _vk_get_instance_proc_addr_raw(any inst, any proc_name) any {
    if(!_pfn_vkGetInstanceProcAddr){
-      if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so.1", 1) }
-      if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so", 1) }
-      if(_lib_vulkan_loader){ _pfn_vkGetInstanceProcAddr = dlsym(_lib_vulkan_loader, "vkGetInstanceProcAddr") }
+      #linux {
+         if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so.1", 1) }
+         if(!_lib_vulkan_loader){ _lib_vulkan_loader = dlopen("libvulkan.so", 1) }
+         if(_lib_vulkan_loader){ _pfn_vkGetInstanceProcAddr = dlsym(_lib_vulkan_loader, "vkGetInstanceProcAddr") }
+      }
    }
    if(_pfn_vkGetInstanceProcAddr){ return __call2_ptr(_pfn_vkGetInstanceProcAddr, inst, proc_name) }
    vkGetInstanceProcAddr(inst, proc_name)
@@ -597,9 +597,6 @@ fn _vk_instance_proc_cached(any inst, str slot_name, str name) any {
 
 fn vk_result_code(any res) int {
    "Runs the result code operation."
-   if(res >= -13 && res <= 7){ return int(res) }
-   if(res <= -1000000000){ return int(res) }
-   if((res & 1) != 0){ return int(res >> 1) }
    int(res)
 }
 
@@ -816,6 +813,7 @@ def VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO = 37
 def VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO = 38
 def VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = 39
 def VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = 40
+def VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO = 41
 def VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO = 42
 def VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO = 43
 def VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER = 45
@@ -848,8 +846,8 @@ def VK_ACCESS_COLOR_ATTACHMENT_READ_BIT = 0x00000080
 def VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT = 0x00000100
 def VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT = 0x00000400
 def VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT = 0x00000800
-def VK_ACCESS_TRANSFER_READ_BIT = 0x00000001
-def VK_ACCESS_TRANSFER_WRITE_BIT = 0x00000002
+def VK_ACCESS_TRANSFER_READ_BIT = 0x00000800
+def VK_ACCESS_TRANSFER_WRITE_BIT = 0x00001000
 def VK_ACCESS_SHADER_READ_BIT = 0x00000020
 def VK_FORMAT_R8G8B8A8_UNORM = 37
 def VK_FORMAT_R8G8B8A8_SRGB = 43
@@ -1018,7 +1016,7 @@ fn VkImageViewCreateInfo(any img, int view_type, int fmt, any components_ptr, an
    store64_h(info, img, 24)
    store32(info, view_type, 32)
    store32(info, fmt, 36)
-   if(components_ptr){ memcpy(info + 56, components_ptr, 16) }
+   if(components_ptr){ memcpy(info + 40, components_ptr, 16) }
    if(subresource_ptr){ memcpy(info + 56, subresource_ptr, 20) } else {
       store32(info, 1, 56)
       store32(info, 0, 60)

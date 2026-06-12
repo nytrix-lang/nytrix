@@ -4,13 +4,19 @@
 ;; - std.os.ui.window.platform.opengl
 ;; - std.os.ui.window
 ;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl.glx(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_fb_config, get_visual)
+module std.os.ui.window.platform.opengl.glx(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_fb_config, get_visual, get_visual_depth)
 use std.core
 use std.core.mem (cstr)
 
 #linux {
    #link "libGL.so"
+   #link "libX11.so"
+   #include <X11/Xlib.h>
    #include <GL/glx.h>
+   fn XFree(any _data) any {
+      "Releases memory allocated by Xlib or GLX."
+      0
+   }
 } #endif
 #windows {
    fn glXChooseFBConfig(any _display, int _screen, any _attrs, any _count) any {
@@ -122,14 +128,30 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
    if(configs && count > 0){
       res = load64(configs, 0)
    }
-   free(count_ptr, attr_list)
+   if(configs){ XFree(configs) }
+   free(count_ptr)
+   free(attr_list)
    res
 }
 
 fn get_visual(any display, any fbconfig) any {
-   "Returns get visual."
+   "Returns the X11 Visual* for a GLX framebuffer config."
    if(!fbconfig){ return 0 }
-   glXGetVisualFromFBConfig(display, fbconfig)
+   def info = glXGetVisualFromFBConfig(display, fbconfig)
+   if(!info){ return 0 }
+   def visual = load64(info, 0)
+   XFree(info)
+   visual
+}
+
+fn get_visual_depth(any display, any fbconfig) int {
+   "Returns the X11 visual depth for a GLX framebuffer config."
+   if(!fbconfig){ return 0 }
+   def info = glXGetVisualFromFBConfig(display, fbconfig)
+   if(!info){ return 0 }
+   def depth = load32_h(info, 20)
+   XFree(info)
+   depth
 }
 
 fn get_fbconfig_attrib(any display, any config, any attr) int {
@@ -171,7 +193,15 @@ fn swap_buffers(any display, any win) bool {
 
 fn swap_interval(any interval) bool {
    "Runs the swap interval operation."
-   true
+   #linux {
+      def name_mesa = cstr("glXSwapIntervalMESA")
+      def proc_mesa = glXGetProcAddress(name_mesa)
+      if(proc_mesa){ __call1_ptr(proc_mesa, int(interval)) return true }
+      def name_sgi = cstr("glXSwapIntervalSGI")
+      def proc_sgi = glXGetProcAddress(name_sgi)
+      if(proc_sgi){ __call1_ptr(proc_sgi, int(interval)) return true }
+   }
+   false
 }
 
 fn get_proc_address(any name) any {

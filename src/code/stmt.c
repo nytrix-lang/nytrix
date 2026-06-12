@@ -7438,6 +7438,31 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
                       NY_LLVM_NAME(cg, "for_range_stop_excl"));
   }
 
+  /* String-append loop optimization: detect `out = out + piece` in the body and
+     lower to __str_builder_append instead of naive O(n^2) concat. */
+  stmt_str_append_loop_t str_append_range_loop = {0};
+  bool use_str_append_range = false;
+  if (ny_env_enabled_default_on("NYTRIX_STRING_APPEND_LOOP_BUILDER") &&
+      !stmt_loop_body_has_control_exit(s->as.fr.body)) {
+    const char *name = NULL;
+    bool ambiguous = false;
+    stmt_collect_str_append_candidate(cg, scopes, *depth, s->as.fr.body,
+                                      &name, &ambiguous);
+    if (name && !ambiguous &&
+        stmt_str_append_body_only_uses(cg, scopes, *depth, s->as.fr.body, name)) {
+      binding *b = stmt_lookup_binding_no_mark(scopes, *depth, name, strlen(name), 0);
+      if (b && b->is_mut && b->is_slot && b->value) {
+        const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
+        if (ny_type_is(bt, "str")) {
+          str_append_range_loop.name = name;
+          str_append_range_loop.slot = b->value;
+          str_append_range_loop.binding = b;
+          use_str_append_range = stmt_begin_str_append_loop(cg, &str_append_range_loop);
+        }
+      }
+    }
+  }
+
   LLVMBasicBlockRef pre = ny_cur_block(cg);
   LLVMValueRef f = LLVMGetBasicBlockParent(pre);
   LLVMBasicBlockRef cb = ny_bb_fn(f, "frc"), bb = ny_bb_fn(f, "frb"),
@@ -7481,8 +7506,20 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
       index_b->raw_int_value = idx_raw;
     }
   }
-
+  const char *prev_fast_str_name = cg->active_str_append_name;
+  LLVMValueRef prev_fast_str_builder = cg->active_str_append_builder;
+  bool prev_fast_str_used = cg->active_str_append_used;
+  if (use_str_append_range) {
+    cg->active_str_append_name = str_append_range_loop.name;
+    cg->active_str_append_builder = str_append_range_loop.builder;
+    cg->active_str_append_used = false;
+  }
   gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
+  if (use_str_append_range) {
+    cg->active_str_append_name = prev_fast_str_name;
+    cg->active_str_append_builder = prev_fast_str_builder;
+    cg->active_str_append_used = prev_fast_str_used;
+  }
   if (!ny_has_terminator(cg)) {
     emit_defers(cg, scopes, *depth, *depth);
     if (!ny_has_terminator(cg)) {
@@ -7508,6 +7545,8 @@ static bool stmt_try_emit_fast_range_for(codegen_t *cg, scope *scopes,
   LLVMAddIncoming(idx_raw, &next_idx, &lb, 1);
 
   ny_pos(cg, eb);
+  if (use_str_append_range)
+    stmt_finish_str_append_loop(cg, &str_append_range_loop);
   return true;
 }
 
@@ -7544,7 +7583,7 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
     LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
     scope_enter(scopes, depth, eb, lb);
     gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
-    if (!ny_has_terminator(cg)) {
+  if (!ny_has_terminator(cg)) {
       emit_defers(cg, scopes, *depth, *depth);
       if (!ny_has_terminator(cg)) {
         ny_dbg_loc(cg, s->tok);
@@ -7611,6 +7650,30 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   bool iter_binding_is_int =
       s->as.fr.iter_by_index ||
       stmt_iterable_yields_int(cg, scopes, *depth, s->as.fr.iterable);
+  /* String-append loop optimization for generic iterators */
+  stmt_str_append_loop_t str_append_iter_loop = {0};
+  bool use_str_append_iter = false;
+  if (ny_env_enabled_default_on("NYTRIX_STRING_APPEND_LOOP_BUILDER") &&
+      !stmt_loop_body_has_control_exit(s->as.fr.body)) {
+    const char *name = NULL;
+    bool ambiguous = false;
+    stmt_collect_str_append_candidate(cg, scopes, *depth, s->as.fr.body,
+                                      &name, &ambiguous);
+    if (name && !ambiguous &&
+        stmt_str_append_body_only_uses(cg, scopes, *depth, s->as.fr.body, name)) {
+      binding *b = stmt_lookup_binding_no_mark(scopes, *depth, name, strlen(name), 0);
+      if (b && b->is_mut && b->is_slot && b->value) {
+        const char *bt = b->decl_type_name ? b->decl_type_name : b->type_name;
+        if (ny_type_is(bt, "str")) {
+          str_append_iter_loop.name = name;
+          str_append_iter_loop.slot = b->value;
+          str_append_iter_loop.binding = b;
+          use_str_append_iter = stmt_begin_str_append_loop(cg, &str_append_iter_loop);
+        }
+      }
+    }
+  }
+
   LLVMMetadataRef dbg_scope = codegen_debug_push_block(cg, s->tok);
   scope_enter(scopes, depth, eb, lb);
   scope_bind(cg, scopes, *depth, s->as.fr.iter_var, iter_binding, s, false,
@@ -7631,7 +7694,20 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
       index_b->raw_int_value = ny_untag_int(cg, i_val);
     }
   }
+  const char *prev_iter_str_name = cg->active_str_append_name;
+  LLVMValueRef prev_iter_str_builder = cg->active_str_append_builder;
+  bool prev_iter_str_used = cg->active_str_append_used;
+  if (use_str_append_iter) {
+    cg->active_str_append_name = str_append_iter_loop.name;
+    cg->active_str_append_builder = str_append_iter_loop.builder;
+    cg->active_str_append_used = false;
+  }
   gen_stmt(cg, scopes, depth, s->as.fr.body, func_root, false);
+  if (use_str_append_iter) {
+    cg->active_str_append_name = prev_iter_str_name;
+    cg->active_str_append_builder = prev_iter_str_builder;
+    cg->active_str_append_used = prev_iter_str_used;
+  }
   if (!ny_has_terminator(cg)) {
     emit_defers(cg, scopes, *depth, *depth);
     if (!ny_has_terminator(cg)) {
@@ -7654,6 +7730,8 @@ static void gen_stmt_for(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
   LLVMAddIncoming(i_val, &i_next, &lb, 1);
 
   ny_pos(cg, eb);
+  if (use_str_append_iter)
+    stmt_finish_str_append_loop(cg, &str_append_iter_loop);
 }
 
 static void gen_stmt_try(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,

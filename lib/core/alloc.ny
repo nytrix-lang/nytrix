@@ -4,6 +4,7 @@
 ;; - std.core
 module std.core.alloc(bump_new, bump_alloc, bump_alloc_aligned, bump_reset, bump_capacity, bump_used, bump_available, bump_mark, bump_release, new_allocator, allocator_name, allocator_state, set_allocator_state, heap_allocator, bump_allocator, new_context, init_context, context, set_context, context_allocator, set_context_allocator, with_context, ctx_alloc, ctx_realloc, ctx_free, ctx_zalloc)
 use std.core
+use std.core.common (touch)
 
 @inline
 fn _ensure_bump_state(list state) list {
@@ -95,19 +96,19 @@ fn bump_reset(list state) int {
 }
 
 fn _heap_alloc(any state, any n) ptr {
-   if(state){ state = state }
+   touch(state)
    if(!is_int(n) || n <= 0){ return 0 }
    malloc(n)
 }
 
 fn _heap_realloc(any state, ptr p, any n) ptr {
-   if(state){ state = state }
+   touch(state)
    if(!is_int(n) || n <= 0){ return 0 }
    realloc(p, n)
 }
 
 fn _heap_free(any state, ptr p) int {
-   if(state){ state = state }
+   touch(state)
    free(p)
 }
 
@@ -122,7 +123,7 @@ fn _bump_ctx_realloc(any state, ptr p, any n) ptr {
 }
 
 fn _bump_ctx_free(any state, ptr p) int {
-   if(state || p){ return 0 }
+   touch(state, p)
    0
 }
 

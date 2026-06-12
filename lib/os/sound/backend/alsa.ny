@@ -11,38 +11,38 @@ use std.core.common as common
 use std.os.sound.diag as sound_debug
 use std.os.sound.backend.shared as backend_shared
 
+fn snd_pcm_open(..._args) int {
+   "Runs the snd pcm open operation."
+   -1
+}
+fn snd_pcm_set_params(..._args) int {
+   "Runs the snd pcm set params operation."
+   -1
+}
+fn snd_pcm_close(any _pcm) int {
+   "Runs the snd pcm close operation."
+   0
+}
+fn snd_pcm_prepare(any _pcm) int {
+   "Runs the snd pcm prepare operation."
+   -1
+}
+fn snd_pcm_drain(any _pcm) int {
+   "Runs the snd pcm drain operation."
+   0
+}
+fn snd_pcm_writei(..._args) int {
+   "Runs the snd pcm writei operation."
+   -1
+}
+fn snd_pcm_recover(..._args) int {
+   "Runs the snd pcm recover operation."
+   -1
+}
 #linux {
    #include <alsa/asoundlib.h> as "snd_"
-} #else {
-   fn snd_pcm_open(..._args) int {
-      "Runs the snd pcm open operation."
-      -1
-   }
-   fn snd_pcm_set_params(..._args) int {
-      "Runs the snd pcm set params operation."
-      -1
-   }
-   fn snd_pcm_close(any _pcm) int {
-      "Runs the snd pcm close operation."
-      0
-   }
-   fn snd_pcm_prepare(any _pcm) int {
-      "Runs the snd pcm prepare operation."
-      -1
-   }
-   fn snd_pcm_drain(any _pcm) int {
-      "Runs the snd pcm drain operation."
-      0
-   }
-   fn snd_pcm_writei(..._args) int {
-      "Runs the snd pcm writei operation."
-      -1
-   }
-   fn snd_pcm_recover(..._args) int {
-      "Runs the snd pcm recover operation."
-      -1
-   }
-} #endif
+}
+#endif
 def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2
 def SND_PCM_FORMAT_FLOAT_LE = 14

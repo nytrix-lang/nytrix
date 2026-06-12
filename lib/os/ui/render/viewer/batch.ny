@@ -8,7 +8,6 @@ use std.core
 use std.math as math
 use std.os.ui.render as gfx
 use std.os.ui.render.matrix as rmat
-use std.os.ui.render.vk as vkr
 
 def RECT_STRIDE = 20
 def TEX_STRIDE = 52
@@ -245,7 +244,7 @@ fn _put_quad(ptr p, int n, f64 x, f64 y, f64 w, f64 h, int color) int {
 fn release_static_checker(list cache) int {
    "Releases the buffers returned by `static_checker`."
    def sbuf = cache.get(0, 0)
-   if(is_dict(sbuf)){ vkr.destroy_static_buffer(sbuf) }
+   if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
    if(cache.get(6, 0)){ free(cache.get(6, 0)) }
    0
 }
@@ -298,7 +297,7 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
    mut mode = int(cache.get(8, 0))
    def need = int(math.max(2, (end_col - start_col + 1) * (end_row - start_row + 1)))
    if(changed || mode == 0){
-      if(is_dict(sbuf)){ vkr.destroy_static_buffer(sbuf) }
+      if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
       sbuf = 0
       count = 0
       def verts = malloc(need * 6 * VERTEX_STRIDE)
@@ -314,8 +313,11 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
             }
             row += 1
          }
-         sbuf = vkr.create_static_buffer(verts, count)
-         free(verts)
+         mut opts = dict(4)
+         opts["unlit"] = true
+         opts["vc_mode"] = 1
+         sbuf = gfx.mesh_create_static(verts, count, false, opts)
+         if(!is_dict(sbuf)){ free(verts) }
       }
       if(is_dict(sbuf)){
          mode = 1
@@ -331,9 +333,8 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
    }
    gfx.set_ortho_2d(world_left, world_left + sw, world_top, world_top + sh)
    if(mode == 1 && is_dict(sbuf)){
-      vkr.set_unlit(true)
-      vkr.set_vertex_color_mode(1)
-      vkr.draw_static_buffer_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), count, false, 1.0, 0, false)
+      gfx.set_unlit(true)
+      gfx.draw_mesh(sbuf, false, 1.0)
    } elif(buf && count > 0){
       gfx.draw_rects_fast_ptr(buf, count, RECT_STRIDE)
    }
@@ -380,8 +381,11 @@ fn rgba_mesh(any data, int w, int h, int channels=4, f64 scale=1.0, int alpha_mi
       }
       y += 1
    }
-   def sbuf = vkr.create_static_buffer(verts, n)
-   free(verts)
+   mut opts = dict(4)
+   opts["unlit"] = true
+   opts["vc_mode"] = 1
+   def sbuf = gfx.mesh_create_static(verts, n, false, opts)
+   if(!is_dict(sbuf)){ free(verts) }
    is_dict(sbuf) ? {"mesh": sbuf, "count": n, "w": w, "h": h, "scale": scale} : {}
 }
 
@@ -389,7 +393,7 @@ fn release_mesh(any mesh) int {
    "Releases a mesh returned by `rgba_mesh`."
    if(is_dict(mesh)){
       def sbuf = mesh.get("mesh", 0)
-      if(is_dict(sbuf)){ vkr.destroy_static_buffer(sbuf) }
+      if(is_dict(sbuf)){ gfx.mesh_destroy(sbuf) }
    }
    0
 }
@@ -405,9 +409,8 @@ fn draw_mesh(dict mesh, f64 cx, f64 cy, f64 rot_deg=0.0, bool flip_x=false) bool
    rmat.mat4_mul_into(_mesh_r, _mesh_s, _mesh_tmp)
    rmat.mat4_mul_into(_mesh_t, _mesh_tmp, _mesh_model)
    gfx.set_model_matrix(_mesh_model)
-   vkr.set_unlit(true)
-   vkr.set_vertex_color_mode(1)
-   def ok = vkr.draw_static_buffer_raw(sbuf.get("handle", 0), sbuf.get("offset", 0), count, false, 1.0, 0, false)
+   gfx.set_unlit(true)
+   def ok = gfx.draw_mesh(sbuf, false, 1.0)
    gfx.set_model_matrix(_mesh_ident)
    ok
 }

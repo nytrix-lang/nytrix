@@ -142,7 +142,13 @@ fn renderer_config(any vsync, any filter, any vert_spv_path, any frag_spv_path, 
    frag_spv_path: path to custom fragment shader .spv or empty for default
    msaa: number of MSAA samples(1, 2, 4, 8) (default 1)"
    _cfg_present_policy = is_str(vsync) ? text.lower(vsync) : ""
-   _cfg_vsync = _cfg_present_policy.len > 0 ? (_cfg_present_policy == "fifo" || _cfg_present_policy == "vsync") : !!vsync
+   if(_cfg_present_policy.len > 0){
+      _cfg_vsync = (_cfg_present_policy == "fifo" || _cfg_present_policy == "vsync")
+   } elif(ui_profile.env_present_cached("NY_UI_VSYNC")){
+      _cfg_vsync = ui_profile.env_truthy_cached("NY_UI_VSYNC")
+   } else {
+      _cfg_vsync = is_nil(vsync) ? true : !!vsync
+   }
    _cfg_filter = filter ? 1 : 0
    _cfg_vert_spv = vert_spv_path
    _cfg_frag_spv = frag_spv_path
@@ -179,6 +185,7 @@ mut _swapchain_image_views_count, _framebuffers_count, _command_buffers_count = 
 mut _image_available_semaphores_count, _render_finished_semaphores_count, _in_flight_fences_count = 0, 0, 0
 mut _scene_light_frame_mask = 0
 mut _trace_light_bind, _trace_light_detail, _trace_group, _trace_mat, _handles_valid = false, false, false, false, false
+mut _proc_trace_next_sample_frame_vk = 0
 mut _scene_light_tmp_slab = 0
 mut _current_emissive_tex_word, _current_base_tex_word = 0x80000000, 0x80000000
 mut _current_occlusion_tex_word, _current_normal_tex_word = 0x80000000, 0x80000000
@@ -994,12 +1001,12 @@ fn init(any win) bool {
          _clear_r, _clear_g, _clear_b, _clear_a = 0.0, 0.0, 0.0, 0.0
       }
    }
-   if(common.env_present("NYTRIX_VK_VERTEX_MB")){
-      def n = common.env_int_clamped("NYTRIX_VK_VERTEX_MB", 0, 0, 262144)
+   if(ui_profile.env_present_cached("NYTRIX_VK_VERTEX_MB")){
+      def n = ui_profile.env_int_cached("NYTRIX_VK_VERTEX_MB", 0, 0, 262144)
       if(n >= 8){ _vertex_capacity = n * 1024 * 1024 }
    }
-   if(common.env_present("NYTRIX_VK_STAGING_MB")){
-      def n = common.env_int_clamped("NYTRIX_VK_STAGING_MB", 0, 0, 262144)
+   if(ui_profile.env_present_cached("NYTRIX_VK_STAGING_MB")){
+      def n = ui_profile.env_int_cached("NYTRIX_VK_STAGING_MB", 0, 0, 262144)
       if(n >= 16){ _staging_capacity = n * 1024 * 1024 }
    }
    if(common.env_truthy("NYTRIX_VK_MARKERS")){ _vk_markers_enabled = true }
@@ -1307,8 +1314,9 @@ fn draw_parts_flat_range_no_restore(?ptr slab_ptr, int start_idx, int end_idx, i
 }
 
 fn draw_parts_flat_range_state_no_restore(?ptr slab_ptr, int start_idx, int end_idx, int pass_num) int {
-   "Draws packed parts after their material texture descriptors have been synced once."
-   _draw_parts_flat_range_impl(slab_ptr, start_idx, end_idx, pass_num, false, false)
+   "Draws packed parts using cached material state while still validating bindless texture slots."
+   def safe_sync = !common.env_truthy("NY_VK_MATERIAL_STATE_NO_SYNC")
+   _draw_parts_flat_range_impl(slab_ptr, start_idx, end_idx, pass_num, false, safe_sync)
 }
 
 fn draw_part_flat_no_restore(?ptr slab_ptr, int idx, int pass_num) int {
@@ -2136,6 +2144,24 @@ fn _pack_normal_tex_word_current(int normal_tex_id, int normal_uv_xf1) int {
    bor(band(normal_tex_id, 0xfffe0000), 0xffff)
 }
 
+fn _sync_current_material_texture_slots() any {
+   "Ensures every texture referenced by the current material has a valid bindless slot."
+   if(common.env_truthy("NY_VK_MATERIAL_STATE_NO_SYNC")){ return 0 }
+   if(_current_base_tex_id >= 0){ bindless_sync_texture_slot(_current_base_tex_id) }
+   def mr_word = band(bshr(_current_metallic_roughness_u32, 16), 0x7fff)
+   def mr_tid = mr_word > 0 ? mr_word - 1 : -1
+   if(mr_tid >= 0){ bindless_sync_texture_slot(mr_tid) }
+   def normal_tid = band(_current_normal_tex_id, 0xffff)
+   if(normal_tid < MAX_TEXTURES){ bindless_sync_texture_slot(normal_tid) }
+   if(_current_emissive_tex_id >= 0){ bindless_sync_texture_slot(_current_emissive_tex_id) }
+   if(_current_occlusion_tex_id >= 0){ bindless_sync_texture_slot(_current_occlusion_tex_id) }
+   if((_current_ext2_tex_word & 0x80000000) == 0){
+      def ext2_tid = band(_current_ext2_tex_word, 0xffff)
+      if(ext2_tid < MAX_TEXTURES){ bindless_sync_texture_slot(ext2_tid) }
+   }
+   0
+}
+
 fn set_ui_material(int base_tex_id = -1, int alpha_u32 = 0, int vc_mode = 12) any {
    "Sets the compact material state used by 2D UI, text, and terminal draws."
    def next_base_tex_id = _norm_i32(base_tex_id)
@@ -2569,6 +2595,7 @@ fn _set_material_from_part_slab_key_no_sync(?ptr p, int key) any {
    _current_base_tex_word = _pack_base_tex_word(_current_base_tex_id, _current_vc_mode)
    _current_occlusion_tex_word = _pack_occlusion_tex_word(_current_occlusion_tex_id, _current_occlusion_uv_set)
    _current_normal_tex_word = _pack_normal_tex_word_current(_current_normal_tex_id, _current_normal_uv_xf1)
+   _sync_current_material_texture_slots()
    _pc_dirty = true
    0
 }
@@ -3290,6 +3317,13 @@ fn _end_frame_internal(bool present) bool {
          _pump_host_messages_if_needed()
       }
    }
+   ;; Backend-local sleep fights the window-system present mode and makes camera,
+   ;; gizmo and FPS text cadence visibly uneven under compositors/WMs.  Keep it
+   ;; as an explicit diagnostic throttle only.
+   def frame_sleep_default = 0
+   def frame_sleep_ms = ui_profile.env_present_cached("NY_VK_FRAME_SLEEP_MS") ? ui_profile.env_int_cached("NY_VK_FRAME_SLEEP_MS", 0, 0, 64) : frame_sleep_default
+   if(frame_sleep_ms > 0){ msleep(frame_sleep_ms) }
+
    _last_frame_draw_calls = _frame_draw_calls
    _last_frame_dynamic_draw_calls = _frame_dynamic_draw_calls
    _last_frame_static_draw_calls = _frame_static_draw_calls
@@ -3311,6 +3345,23 @@ fn _end_frame_internal(bool present) bool {
    _last_frame_flush_cpu_us = _frame_flush_cpu_us
    _last_frame_sync_pc_cpu_us = _frame_sync_pc_cpu_us
    if(_deep_on){ _vk_deep_end_total_ms = ui_profile.elapsed_ms(_t_end_deep) }
+   if(ui_profile.trace_process_enabled()){
+      mut proc_every_frames = ui_profile.env_int_cached("NY_TRACE_PROC_EVERY_FRAMES", 120, 1, 1000000)
+      ;; Keep NY_TRACE=1 cheap even if the trace layer/cache resolves the proc
+      ;; cadence incorrectly.  The renderer gates before calling into /proc, so
+      ;; the sampler cannot become the allocation/perf problem.
+      if(!common.env_present("NY_TRACE_PROC_EVERY_FRAMES") && common.env_present("NY_TRACE")){
+         def tm = common.env_lower("NY_TRACE")
+         if(tm == "spam" || tm == "3"){ proc_every_frames = 1 }
+         elif(tm == "deep" || tm == "2" || tm == "full" || tm == "verbose"){ proc_every_frames = 30 }
+         else { proc_every_frames = 120 }
+      }
+      if(_total_frames <= 2 || proc_every_frames <= 1 || _proc_trace_next_sample_frame_vk <= 0 || _total_frames >= _proc_trace_next_sample_frame_vk){
+         if(ui_profile.trace_process_sample(_total_frames, "vk-end")){
+            _proc_trace_next_sample_frame_vk = _total_frames + proc_every_frames
+         }
+      }
+   }
    if(_deep_on && _vk_deep_should_emit(_total_frames)){
       ui_profile.print_text("[vk:end] frame=" + to_str(_total_frames) +
          " draws=" + to_str(_frame_draw_calls) +
@@ -3334,7 +3385,7 @@ fn _end_frame_internal(bool present) bool {
          " flush_special=" + to_str(_flush_reason_special) +
       " flush_full=" + to_str(_flush_reason_vertex_full))
    }
-   if(ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") && _total_frames < 8){
+   if(ui_profile.dump_trace_enabled() && _total_frames < 8){
       ui_profile.print_text("[vk:dump] frame=" + to_str(_total_frames) +
          " draws=" + to_str(_frame_draw_calls) +
          " dyn=" + to_str(_frame_dynamic_draw_calls) +
@@ -4840,6 +4891,7 @@ fn _create_image_views() bool {
       if(iv_res != 0){ return false }
       def view_h = load64_h(view_ptr, 0)
       _swapchain_image_views = _swapchain_image_views.append(view_h)
+      free(create_info) free(view_ptr)
       i += 1
    }
    true

@@ -7,7 +7,7 @@ use std.core.common as common
 use std.core.str as str
 use std.math (max, min)
 use std.math.crypto.encoding.base as b64
-use std.os (file_exists, file_read, file_write, ticks)
+use std.os (exit, file_exists, file_read, file_write, ticks)
 use std.os.args as cli
 use std.os.fs as osfs
 use std.os.path as ospath
@@ -39,6 +39,61 @@ use std.os.ui.render.viewer.widgets
 use std.os.ui.window
 use std.parse.img.svg as svg_img
 use std.parse.syntax
+
+
+fn _editor_color(str code, str text) str {
+   if(common.env_truthy("NO_COLOR")){ return text }
+   def esc = chr(27)
+   esc + "[" + code + "m" + text + esc + "[0m"
+}
+
+fn _editor_has_help_arg() bool {
+   mut i = 1
+   while(i < argc()){
+      def a = str.lower(str.strip(to_str(argv(i))))
+      if(a == "-h" || a == "--help" || a == "help"){ return true }
+      i += 1
+   }
+   false
+}
+
+fn _editor_help_line(str left, str right) any {
+   print("  " + _editor_color("1;36", left) + "  " + right)
+   0
+}
+
+fn _editor_print_help() any {
+   print(_editor_color("1;37", "Nytrix Editor"))
+   print(_editor_color("90", "UI/editor testbed with buffers, panes, terminal, LSP hooks, and renderer diagnostics"))
+   print("")
+   print(_editor_color("1;33", "Usage"))
+   print("  ./make ny etc/projects/ui/editor.ny " + _editor_color("36", "[options]") + " " + _editor_color("90", "[file-or-folder]") )
+   print("")
+   print(_editor_color("1;33", "Renderer"))
+   _editor_help_line("-gl, --gl", "use OpenGL")
+   _editor_help_line("-vk, --vk", "use Vulkan")
+   _editor_help_line("-auto", "auto-select renderer")
+   _editor_help_line("-mock, -cpu", "software/headless mock renderer")
+   print("")
+   print(_editor_color("1;33", "Debug"))
+   _editor_help_line("-v, --verbose", "bounded startup/input/render diagnostics")
+   _editor_help_line("-vv", "compact deep diagnostics/profiler summaries")
+   _editor_help_line("--trace-spam", "last-resort per-stage/per-glyph/per-frame tracing")
+   print("")
+   print(_editor_color("1;33", "Useful env"))
+   _editor_help_line("NY_EDITOR_FONT_SIZE=n", "body font size")
+   _editor_help_line("NY_EDITOR_DENSITY=x", "scale editor chrome density")
+   _editor_help_line("NY_EDITOR_INPUT_TRACE=1", "editor input trace")
+   _editor_help_line("NY_UI_HEADLESS=1", "headless/mock mode")
+   _editor_help_line("NY_VK_SAFE_TEXT=1", "force slow Vulkan text fallback for driver debugging")
+   _editor_help_line("NY_VK_FAST_TEXT=0", "disable Vulkan atlas fast text")
+   _editor_help_line("NY_VK_TEXTURE_TEXT=1", "debug Vulkan texture-atlas TTF path")
+   print("")
+   print(_editor_color("1;33", "Examples"))
+   print("  ./make ny etc/projects/ui/editor.ny -v -gl src/main.ny")
+   print("  ./make ny etc/projects/ui/editor.ny -vv -vk")
+   0
+}
 
 def START_W = 1220
 def START_H = 760
@@ -94,7 +149,14 @@ def DOCK_MIN_H = 40.0
 def EDIT_MIN_H = 28.0
 def PANE_MAX = 4096.0
 
+if(_editor_has_help_arg()){ _editor_print_help() exit(0) }
+
+ui_dump.apply_verbose_argv()
 if(common.env_truthy("NY_UI_HEADLESS")){ gfx.set_backend_type(gfx.BACKEND_MOCK) }
+else {
+   gfx.apply_backend_env()
+   gfx.apply_backend_argv()
+}
 def int: RENDER_BACKEND_MOCK = int(gfx.BACKEND_MOCK)
 def win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 1)
 
@@ -388,6 +450,7 @@ def int: FRAME_TRACE_LIMIT = int(common.env_int_clamped("NY_EDITOR_FRAME_TRACE_F
 def int: CACHE_SAVE_SECONDS = int(common.env_int_clamped("NY_EDITOR_CACHE_SAVE_SECONDS", 5, 1, 300))
 def int: PROJECT_OPEN_CACHE_LIMIT = int(common.env_int_clamped("NY_EDITOR_PROJECT_OPEN_CACHE_LIMIT", 1024, 0, 10000))
 def int: BEGIN_FAIL_LIMIT = int(common.env_int_clamped("NY_EDITOR_BEGIN_FAIL_LIMIT", 180, 1, 10000))
+def int: EVENT_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_MAX_EVENTS_PER_FRAME", 768, 32, 8192))
 def int: ESC_QUIT_WINDOW_NS = 900000000
 palette_state["cfg"] = command_cfg
 
@@ -4835,7 +4898,7 @@ fn _process_events(dict lay) int {
    mut scroll_count = 0
    mut have_motion = false
    mut motion_data = dict(8)
-   while(e){
+   while(e && ev_count < EVENT_FRAME_LIMIT){
       ev_count += 1
       def typ = window.event_type(e)
       def data = window.event_data(e)
@@ -4967,6 +5030,11 @@ fn _process_events(dict lay) int {
       }
       e = _next_event()
    }
+   if(e){
+      frame_events_seen = true
+      force_full_redraw = max(force_full_redraw, 1)
+      _status("input queue throttled; continuing next frame")
+   }
    if(have_motion){
       if(pal.is_open(palette_state)){
          def pi = _palette_row_hit(lay, float(motion_data.get("x", -1.0)), float(motion_data.get("y", -1.0)))
@@ -5041,8 +5109,89 @@ fn _syntax_lang(str filename) str {
    lang
 }
 
-fn _tokenize_line(str filename, str line) list {
-   case _syntax_lang(filename) {
+fn _syntax_alias(str raw) str {
+   def s = str.lower(str.strip(raw))
+   case s {
+      "ny", "nytrix" -> "nytrix"
+      "c", "h", "cpp", "c++", "hpp", "cc", "cxx" -> "c"
+      "py", "python" -> "python"
+      "js", "javascript", "jsx", "mjs", "cjs" -> "javascript"
+      "ts", "typescript", "tsx", "mts", "cts" -> "typescript"
+      "lua" -> "lua"
+      "sh", "shell", "bash", "zsh", "fish" -> "bash"
+      "cmake" -> "cmake"
+      "yaml", "yml" -> "yaml"
+      "xml" -> "xml"
+      "html", "htm" -> "html"
+      "md", "markdown", "mdx" -> "markdown"
+      "asm", "assembly", "s" -> "assembly"
+      "json" -> "json"
+      _ -> ""
+   }
+}
+
+fn _markdown_fence_marker(str line) int {
+   mut i = 0
+   while(i < line.len && i < 4 && load8(line, i) == 32){ i += 1 }
+   if(i > 3 || i + 2 >= line.len){ return 0 }
+   def marker = load8(line, i)
+   if(marker != 96 && marker != 126){ return 0 }
+   mut j = i
+   while(j < line.len && load8(line, j) == marker){ j += 1 }
+   if(j - i < 3){ return 0 }
+   marker
+}
+
+fn _markdown_fence_lang(str line) str {
+   def marker = _markdown_fence_marker(line)
+   if(marker == 0){ return "" }
+   mut i = 0
+   while(i < line.len && i < 4 && load8(line, i) == 32){ i += 1 }
+   mut j = i
+   while(j < line.len && load8(line, j) == marker){ j += 1 }
+   mut raw = str.strip(str.str_slice(line, j, line.len))
+   mut k = 0
+   while(k < raw.len){
+      def c = load8(raw, k)
+      if(c == 32 || c == 9){ break }
+      k += 1
+   }
+   if(k < raw.len){ raw = str.str_slice(raw, 0, k) }
+   _syntax_alias(raw)
+}
+
+fn _markdown_fenced_lang_at(int target_li) str {
+   if(target_li < 0){ return "" }
+   def lines = ed.current_lines(st)
+   mut open = false
+   mut marker = 0
+   mut lang = ""
+   mut i = 0
+   while(i <= target_li && i < lines.len){
+      def line = to_str(lines.get(i, ""))
+      def m = _markdown_fence_marker(line)
+      if(m != 0){
+         if(!open){
+            open = true
+            marker = m
+            lang = _markdown_fence_lang(line)
+         } elif(m == marker){
+            if(i == target_li){ return "" }
+            open = false
+            marker = 0
+            lang = ""
+         }
+         if(i == target_li){ return "" }
+      } elif(i == target_li && open){
+         return lang
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _tokenize_language(str lang, str line) list {
+   case lang {
       "nytrix" -> syntax.nytrix_tokenize(line, [])
       "c" -> syntax.c_tokenize(line, [])
       "python" -> syntax.python_tokenize(line, [])
@@ -5061,6 +5210,15 @@ fn _tokenize_line(str filename, str line) list {
    }
 }
 
+fn _tokenize_line(str filename, str line, int li=-1) list {
+   def lang = _syntax_lang(filename)
+   if(lang == "markdown"){
+      def fenced_lang = _markdown_fenced_lang_at(li)
+      if(fenced_lang.len > 0){ return _tokenize_language(fenced_lang, line) }
+   }
+   _tokenize_language(lang, line)
+}
+
 fn _syntax_key(str filename, int li, str line) str {
    filename + ":" + to_str(li) + ":" + to_str(line.len) + ":" + to_str(hash(line))
 }
@@ -5077,7 +5235,7 @@ fn _syntax_runs(str filename, str line, int li) list {
    }
    def key = _syntax_key(filename, li, line)
    if(syntax_run_cache.contains(key)){ return syntax_run_cache.get(key, []) }
-   def toks = _tokenize_line(filename, line)
+   def toks = _tokenize_line(filename, line, li)
    mut runs = []
    if(toks.len == 0){
       if(line.len > 0){ runs = runs.append([line, syntax.TOK_TEXT, 0.0]) }
@@ -6756,6 +6914,15 @@ if(TERMINAL_DUMP_PROBE){
 if(SYNTAX_PROBE){
    def probe = "fn main() int { return 1 + value_name }"
    assert(_syntax_runs_text(_syntax_runs("probe.ny", probe, 0)) == probe, "syntax highlight preserves full line")
+   def old_buffers = st.get("buffers", [])
+   def old_active = int(st.get("active", 0))
+   st["buffers"] = [ed.buffer("readme.md", "", "```ny\nfn main() int { return 1 }\n```")]
+   st["active"] = 0
+   def md_runs = _syntax_runs("readme.md", "fn main() int { return 1 }", 1)
+   assert(_syntax_runs_text(md_runs) == "fn main() int { return 1 }", "markdown ny fence preserves line")
+   assert(md_runs.len > 0 && int(md_runs.get(0, []).get(1, syntax.TOK_TEXT)) == syntax.TOK_KEYWORD, "markdown ny fence uses nytrix syntax")
+   st["buffers"] = old_buffers
+   st["active"] = old_active
    mut big = []
    mut bi = 0
    while(bi < BIG_FILE_LINES + 12){
@@ -6945,9 +7112,12 @@ while(!gfx.window_should_close(win)){
       if(BENCH_PROBE){
          frame_count += 1
          if(frame_count >= BENCH_FRAME_LIMIT){ window.set_should_close(win, true) }
-      } elif(begin_fail_count >= BEGIN_FAIL_LIMIT){
-         _status("renderer begin failed")
-         window.set_should_close(win, true)
+      } else {
+         _status("renderer begin failed on " + gfx.get_active_backend_name() + "; retrying")
+         if(begin_fail_count >= BEGIN_FAIL_LIMIT){
+            _status("renderer begin failed repeatedly; closing safely")
+            window.set_should_close(win, true)
+         }
       }
       ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
       continue

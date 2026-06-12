@@ -735,9 +735,11 @@ static void ny_setenv_keyval(const char *raw) {
   free(key);
 }
 
-static void ny_enable_ui_auto_dump_env(void) {
-  ny_setenv_force_many("NYTRIX_AUTO_DUMP", "1", "NYTRIX_AUTO_DUMP_IMMEDIATE", "1",
-                       "NYTRIX_AUTO_DUMP_EXIT", "1", "NYTRIX_FAST", "0", NULL);
+static void ny_enable_ui_auto_dump_env(bool immediate) {
+  ny_setenv_force_many("NYTRIX_AUTO_DUMP", "1", "NYTRIX_AUTO_DUMP_EXIT", "1",
+                       "NYTRIX_FAST", "0", NULL);
+  if (immediate)
+    ny_setenv_force("NYTRIX_AUTO_DUMP_IMMEDIATE", "1");
   ny_setenv_default_many("NYTRIX_AUTO_DUMP_MIN_ELAPSED_SEC", "0", "NY_PNG_ENCODE_LEVEL", "1",
                          NULL);
 }
@@ -1029,7 +1031,7 @@ static void ny_ui_bridge_resolve_defaults(ny_ui_bridge_state_t *st) {
 
 static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
   if (st->want_dump || st->frame_hash) {
-    ny_enable_ui_auto_dump_env();
+    ny_enable_ui_auto_dump_env(!st->frame_hash);
     if (st->dump_path && *st->dump_path) {
       ny_mkdir_p_parent(st->dump_path);
       ny_setenv_force("NYTRIX_AUTO_DUMP_PATH", st->dump_path);
@@ -1037,12 +1039,10 @@ static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
   }
   if (st->frame_hash) {
     ny_setenv_force("NY_UI_PRINT_FRAME_HASH", "1");
-    ny_setenv_default("NY_UI_STATIC_WORLD_FAST", "1");
+    ny_setenv_default("NY_UI_MSAA", "1");
     ny_setenv_default("NY_UI_FRAME_HASH_LOCK", "1");
     if (st->frame_hash_no_skybox)
       ny_setenv_force("NY_UI_PROOF_SKYBOX", "0");
-    else
-      ny_setenv_default("NY_UI_PROOF_SKYBOX", "1");
   }
   if (st->dump_dir && *st->dump_dir) {
     ny_mkdir_p(st->dump_dir);
