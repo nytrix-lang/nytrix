@@ -9,8 +9,9 @@ module std.os.ui.render.dump(
    gui_auto_dump_path, gui_auto_dump_delay, gui_auto_dump_exit_enabled, parse_skip_list,
    split_model_list, model_skipped, suite_field, suite_parse_line, suite_snapshot_path,
    suite_parse_text, suite_parse_env, suite_exit_enabled, gizmo_mode, framebuffer_hash_line,
+   set_framebuffer_hash_line,
    env_truthy_cached, env_present_cached, env_enabled_cached, env_toggle_cached, env_int_cached,
-   env_trim_cached, env_lower_cached, mode_truthy_cached, set_bool, set_bools, reset_env_cache,
+   env_trim_cached, env_lower_cached, mode_truthy_cached, set_bool, set_bools, set_str, apply_verbose_argv, reset_env_cache,
    debug_enabled, debug_verbose_enabled, debug_deep_enabled, gfx_frame_trace_enabled, enabled,
    trace_enabled, deep_enabled, gui_trace_enabled, dump_trace_enabled, text_immediate_enabled,
    text_group_batches_enabled, min_ms, now, elapsed_ns, elapsed_ms, ms_between, elapsed_s, format_tag,
@@ -20,6 +21,7 @@ module std.os.ui.render.dump(
    profile_dump_enabled, profile_dump_file, profile_dump_row, bench_force, bench_dump_set_path,
    bench_dump_file, bench_enabled, bench_reset, bench_record, bench_flush, counter_reset, counter_add,
    counter_value, counter_json_fields, frame_reset, frame_record, frame_samples, frame_avg, frame_fps,
+   trace_process_enabled, trace_process_sample,
    force_headless, force_surfaced_headless, force_frame_hash_lock, force_frame_print_every,
    batch_prefetch_enabled, batch_fast_env_enabled, frame_hash_lock_enabled, parity_lock_stats_enabled,
    dump_pose_enabled, parity_trace_enabled, editor_parity_trace_enabled, visible_skybox_default,
@@ -41,8 +43,7 @@ use std.os (file_read)
 use std.os.path as path
 use std.os.path as ospath
 use std.os.sys as ossys
-use std.os.ui.render (request_frame_capture, snapshot)
-use std.os.ui.render.vk as vkr
+use std.os.ui.render (request_frame_capture, read_framebuffer, snapshot)
 use std.os.ui.window
 use std.parse.img as img_mod
 
@@ -57,13 +58,111 @@ mut _fast_nosurface_bench_mode, _fast_surface_bench_mode, _sim_nosurface_bench_m
 mut _headless_visual_bench_mode, _crosshair_mode, _world_grid_mode = -1, -1, -2
 mut _frame_print_every_cache = -1
 mut _profile_dump_path, _bench_dump_path = "", ""
+mut _last_framebuffer_hash_line = ""
 mut _bench_frames, _bench_begin_ns, _bench_draw_ns, _bench_end_ns = 0, 0, 0, 0
 mut _frame_samples = 0
 mut _frame_update_ms, _frame_draw_ms, _frame_world_ms, _frame_ui_ms = 0.0, 0.0, 0.0, 0.0
 mut _frame_frame_ms, _frame_event_ms, _frame_gui_prep_ms, _frame_sim_ms = 0.0, 0.0, 0.0, 0.0
 mut _min_ms_cache = -1
+mut _proc_trace_last_ns, _proc_trace_last_rss, _proc_trace_peak_rss = 0, 0, 0
+mut _proc_trace_last_cpu_ticks, _proc_trace_last_frame = 0, -1000000000
+mut _proc_trace_next_frame = 0
+mut _verbose_argv_mode = -1
 
 fn _key(any name) str { to_str(name) }
+
+fn _ny_trace_raw() bool {
+   if(is_dict(_env_bool_cache) && _env_bool_cache.contains("NY_TRACE")){ return bool(_env_bool_cache.get("NY_TRACE", false)) }
+   if(is_dict(_env_str_cache) && _env_str_cache.contains("trim:NY_TRACE")){
+      def v = str.lower(str.strip(to_str(_env_str_cache.get("trim:NY_TRACE", ""))))
+      return !(v == "" || v == "0" || v == "false" || v == "no" || v == "off")
+   }
+   common.env_truthy("NY_TRACE")
+}
+
+fn _ny_trace_mode() str {
+   mut v = ""
+   if(is_dict(_env_str_cache) && _env_str_cache.contains("lower:NY_TRACE")){
+      v = str.lower(str.strip(to_str(_env_str_cache.get("lower:NY_TRACE", ""))))
+   } elif(common.env_present("NY_TRACE")){
+      v = common.env_lower("NY_TRACE")
+   } else {
+      return ""
+   }
+   if(v == "" || v == "1" || v == "true" || v == "yes" || v == "on"){ return "lite" }
+   v
+}
+
+fn _ny_trace_deep() bool {
+   def m = _ny_trace_mode()
+   common.env_truthy("NY_TRACE_DEEP") || m == "2" || m == "deep" || m == "full" || m == "verbose" || m == "spam"
+}
+
+fn _ny_trace_spam() bool {
+   def m = _ny_trace_mode()
+   common.env_truthy("NY_TRACE_SPAM") || m == "3" || m == "spam"
+}
+
+fn _ny_trace_perf() bool {
+   def m = _ny_trace_mode()
+   common.env_truthy("NY_TRACE_PERF") || m == "perf" || m == "bench" || m == "fast"
+}
+
+fn _ny_trace_value(str name) str {
+   def k = _key(name)
+   if(!_ny_trace_raw()){ return "" }
+   if(common.env_present(k)){ return "" }
+   def deep = _ny_trace_deep()
+   def spam = _ny_trace_spam()
+   def perf = _ny_trace_perf()
+
+   ;; NY_TRACE=1 is intentionally low-cost. It should not silently enable
+   ;; texture tracing, startup spam, profile dumps, or per-frame diagnostics.
+   ;; Expensive traces stay behind their explicit env vars or deep/spam modes.
+   if(k == "NY_UI_RENDER_BACKEND"){ return "vk" }
+   if(k == "NY_UI_VSYNC"){ return perf ? "0" : "1" }
+   if(k == "NY_VK_FRAME_SLEEP_MS"){ return "0" }
+   if(k == "NY_TEX_TRACE"){ return "0" }
+   if(k == "NY_UI_TEX_TRACE"){ return "0" }
+   if(k == "NY_UI_TEX_TRACE_SYNC_ALL"){ return spam ? "1" : "0" }
+   if(k == "NY_UI_STARTUP_TRACE"){ return "0" }
+   if(k == "NY_VK_PROFILE_DUMP"){ return "0" }
+   if(k == "NY_VK_PROFILE_EVERY"){ return perf ? "1000000" : "120" }
+   if(k == "NY_UI_SHADER_TRACE"){ return "0" }
+   if(k == "NYTRIX_VK_VERTEX_MB"){ return "16" }
+   if(k == "NYTRIX_VK_STAGING_MB"){ return "96" }
+   if(k == "NY_UI_KEEP_ENV_CPU_IMAGES"){ return "0" }
+   if(k == "NY_TRACE_PROC"){ return "0" }
+   if(k == "NY_TRACE_PROC_EVERY_MS"){ return "1000" }
+   if(k == "NY_TRACE_PROC_EVERY_FRAMES"){ return spam ? "1" : (deep ? "30" : "120") }
+   if(k == "NY_TRACE_PROC_SMAPS"){ return "0" }
+
+   ;; Deep mode: detailed frame flow, GUI dump state, and begin diagnostics.
+   if(deep && k == "NY_RENDER_DEBUG"){ return "1" }
+   if(deep && k == "NY_VK_BEGIN_TRACE"){ return "1" }
+   if(deep && k == "NY_UI_GUI_DUMP_TRACE"){ return "1" }
+   if(deep && k == "NY_UI_PROFILE"){ return "1" }
+   if(deep && k == "NY_UI_PROFILE_TRACE"){ return "1" }
+   if(deep && k == "NY_VK_PROFILE_TRACE"){ return "1" }
+   if(deep && k == "NY_GFX_FRAME_TRACE"){ return "1" }
+
+   ;; Spam mode: stage-by-stage Vulkan breadcrumbs.  This is very verbose.
+   if(spam && k == "NY_VK_STAGE_TRACE"){ return "1" }
+   if(spam && k == "NY_VK_DESCRIPTOR_TRACE"){ return "1" }
+
+   ""
+}
+
+fn _ny_trace_has_value(str name) bool {
+   _ny_trace_value(name).len > 0
+}
+
+fn _ny_trace_truthy(str name) bool {
+   def v = str.lower(str.strip(_ny_trace_value(name)))
+   if(v == "" || v == "0" || v == "false" || v == "no" || v == "off"){ return false }
+   true
+}
+
 
 fn _bool_cache() dict {
    if(!is_dict(_env_bool_cache)){ _env_bool_cache = dict(64) }
@@ -110,9 +209,93 @@ fn set_bools(any names, any value=true) int {
    n
 }
 
+
+fn set_str(any name, any value) bool {
+   "Overrides a cached string profile/env value for this process."
+   def k = _key(name)
+   def v = to_str(value)
+   _str_cache()
+   _bool_cache()
+   _env_str_cache["trim:" + k] = str.strip(v)
+   _env_str_cache["lower:" + k] = str.lower(str.strip(v))
+   _env_bool_cache["present:" + k] = true
+   true
+}
+
+fn _argv_verbose_level(any token) int {
+   def t = str.lower(str.strip(to_str(token)))
+   if(t == "-vv" || t == "--debug-deep" || t == "--trace-deep"){ return 2 }
+   if(t == "-vvv" || t == "--trace-spam" || t == "--debug-spam"){ return 3 }
+   if(t == "-v" || t == "--verbose" || t == "--debug" || t == "--trace" || t == "--trace-ui"){ return 1 }
+   0
+}
+
+fn _argv_verbose_token(any token) bool {
+   _argv_verbose_level(token) > 0
+}
+
+fn apply_verbose_argv(int start_index=1) bool {
+   "Enables bounded UI/render/input diagnostics from argv; -vv and --trace-spam increase verbosity."
+   mut i = int(max(0, start_index))
+   mut level = 0
+   while(i < argc()){
+      def lv = _argv_verbose_level(argv(i))
+      if(lv > level){ level = lv }
+      i += 1
+   }
+   if(level <= 0){ return false }
+   if(_verbose_argv_mode >= level){ return true }
+   _verbose_argv_mode = level
+   ;; Keep -v and -vv bounded.  Only --trace-spam/-vvv maps to NY_TRACE=spam;
+   ;; NY_TRACE=deep enables frame/stage breadcrumbs through _ny_trace_value(),
+   ;; which is too noisy for normal diagnostics.
+   set_str("NY_TRACE", level >= 3 ? "spam" : "verbose")
+   set_bool("NY_TRACE", true)
+
+   ;; Useful-by-default diagnostics: startup/backend choice, input events,
+   ;; renderer failures, font loading, and Vulkan initialization timing.
+   ;; Keep hot per-frame/per-stage/per-glyph logs out of -v and -vv; those
+   ;; are slow enough to change the behavior being debugged.
+   set_bools([
+      "NY_UI_TRACE", "NY_UI_STARTUP_TRACE", "NY_UI_INPUT_TRACE",
+      "NY_RENDER_DEBUG", "NY_VK_INIT_TRACE", "NY_FONT_LOAD_TRACE"
+   ], true)
+
+   if(level < 3){
+      ;; Explicitly suppress hot traces in useful/deep modes, even if a cached
+      ;; previous run asked for them.  Users can still request full spam with
+      ;; --trace-spam/-vvv or explicit env vars before startup.
+      set_bools([
+         "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
+         "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE", "NY_UI_TEX_TRACE",
+         "NY_TEX_TRACE", "NY_UI_GUI_DUMP_TRACE", "NY_TRACE_SPAM"
+      ], false)
+   }
+   if(level >= 2){
+      ;; Compact profiler summaries only.  No Vulkan stage breadcrumbs, no
+      ;; per-frame begin/end tracing, and no per-glyph logs.
+      set_bools(["NY_UI_PROFILE", "NY_VK_PROFILE_TRACE"], true)
+      set_str("NY_VK_PROFILE_EVERY", "120")
+   }
+   if(level >= 3){
+      ;; Last-resort spam mode: exact frame/stage breadcrumbs and hot draw logs.
+      set_bools([
+         "NY_DEBUG", "NY_DEBUG_VERBOSE", "NY_DEBUG_DEEP",
+         "NY_GFX_FRAME_TRACE", "NY_VK_BEGIN_TRACE", "NY_VK_STAGE_TRACE",
+         "NY_UI_GUI_DUMP_TRACE", "NY_GL_TEXT_TRACE", "NY_VK_DESCRIPTOR_TRACE",
+         "NY_UI_TEX_TRACE", "NY_TEX_TRACE", "NY_TRACE_SPAM"
+      ], true)
+   }
+   eprint_text(level >= 3 ? "[ui:verbose] enabled spam tracing by --trace-spam" :
+      (level >= 2 ? "[ui:verbose] enabled compact deep diagnostics by -vv" :
+      "[ui:verbose] enabled useful diagnostics by -v/--verbose"))
+   true
+}
+
 fn env_truthy_cached(any name) bool {
    "Returns a cached truthy environment flag."
    def k = _key(name)
+   if(_ny_trace_has_value(k)){ return _ny_trace_truthy(k) }
    _bool_cache()
    if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_truthy(k)
@@ -122,7 +305,9 @@ fn env_truthy_cached(any name) bool {
 
 fn env_present_cached(any name) bool {
    "Returns a cached environment-presence flag."
-   def k = "present:" + _key(name)
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){ return true }
+   def k = "present:" + raw
    _bool_cache()
    if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_present(_key(name))
@@ -132,7 +317,9 @@ fn env_present_cached(any name) bool {
 
 fn env_enabled_cached(any name) bool {
    "Returns a cached enabled environment flag."
-   def k = "enabled:" + _key(name)
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){ return _ny_trace_truthy(raw) }
+   def k = "enabled:" + raw
    _bool_cache()
    if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_enabled(_key(name))
@@ -142,7 +329,9 @@ fn env_enabled_cached(any name) bool {
 
 fn env_toggle_cached(any name, bool default_value=false) bool {
    "Returns a cached toggle environment flag with a default when unset."
-   def k = "toggle:" + _key(name) + ":" + to_str(bool(default_value))
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){ return _ny_trace_truthy(raw) }
+   def k = "toggle:" + raw + ":" + to_str(bool(default_value))
    _bool_cache()
    if(_env_bool_cache.contains(k)){ return bool(_env_bool_cache.get(k, false)) }
    def v = common.env_toggle(_key(name), bool(default_value))
@@ -152,7 +341,14 @@ fn env_toggle_cached(any name, bool default_value=false) bool {
 
 fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int max_value=2147483647) int {
    "Returns a cached clamped integer environment value."
-   def k = "int:" + _key(name) + ":" + to_str(int(default_value)) + ":" + to_str(int(min_value)) + ":" + to_str(int(max_value))
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){
+      def tv = int(_ny_trace_value(raw))
+      if(tv < int(min_value)){ return int(min_value) }
+      if(tv > int(max_value)){ return int(max_value) }
+      return tv
+   }
+   def k = "int:" + raw + ":" + to_str(int(default_value)) + ":" + to_str(int(min_value)) + ":" + to_str(int(max_value))
    _int_cache()
    if(_env_int_cache.contains(k)){ return int(_env_int_cache.get(k, default_value)) }
    def v = common.env_int_clamped(_key(name), int(default_value), int(min_value), int(max_value))
@@ -162,7 +358,9 @@ fn env_int_cached(any name, int default_value=0, int min_value=-2147483648, int 
 
 fn env_trim_cached(any name) str {
    "Returns a cached trimmed environment value."
-   def k = "trim:" + _key(name)
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){ return _ny_trace_value(raw) }
+   def k = "trim:" + raw
    _str_cache()
    if(_env_str_cache.contains(k)){ return to_str(_env_str_cache.get(k, "")) }
    def v = common.env_trim(_key(name))
@@ -172,7 +370,9 @@ fn env_trim_cached(any name) str {
 
 fn env_lower_cached(any name) str {
    "Returns a cached lower-cased environment value."
-   def k = "lower:" + _key(name)
+   def raw = _key(name)
+   if(_ny_trace_has_value(raw)){ return str.lower(_ny_trace_value(raw)) }
+   def k = "lower:" + raw
    _str_cache()
    if(_env_str_cache.contains(k)){ return to_str(_env_str_cache.get(k, "")) }
    def v = common.env_lower(_key(name))
@@ -270,7 +470,8 @@ fn force_surfaced_headless() bool {
 fn force_frame_hash_lock() bool {
    "Forces deterministic frame hash policy flags for this process."
    _frame_hash_lock_mode = 1
-   set_bools(["NY_UI_FRAME_HASH_LOCK", "NY_UI_STATIC_WORLD_FAST", "NY_UI_PROOF_SKYBOX"])
+   _parity_lock_stats_mode = 1
+   set_bools(["NY_UI_FRAME_HASH_LOCK", "NY_UI_PARITY_LOCK_STATS"])
    true
 }
 
@@ -300,6 +501,10 @@ fn frame_hash_lock_enabled() bool {
 
 fn parity_lock_stats_enabled() bool {
    "Returns true when parity lock stats are enabled."
+   if(frame_hash_lock_enabled()){
+      _parity_lock_stats_mode = 1
+      return true
+   }
    _parity_lock_stats_mode = mode_truthy_cached(_parity_lock_stats_mode, "NY_UI_PARITY_LOCK_STATS")
    _parity_lock_stats_mode == 1
 }
@@ -329,7 +534,15 @@ fn visible_skybox_default() bool {
    if(env_present_cached("NY_UI_SHOW_SKYBOX")){
       return env_enabled_cached("NY_UI_SHOW_SKYBOX")
    }
-   true
+   if(
+      env_present_cached("NY_UI_SKYBOX") ||
+      env_present_cached("NY_UI_SKYBOX_SOURCE") ||
+      env_present_cached("NY_UI_SKYBOX_PATH") ||
+      env_present_cached("NY_DEMO_SKYBOX")
+   ){
+      return true
+   }
+   false
 }
 
 fn startup_skybox_enabled() bool {
@@ -876,6 +1089,150 @@ fn frame_fps(str name="frame_ms") f64 {
    (1000.0 * float(_frame_samples)) / total
 }
 
+
+fn trace_process_enabled() bool {
+   "Returns true when NY_TRACE should emit in-process RSS/CPU samples."
+   ;; Explicit NY_TRACE_PROC=0 must win.  Do not let generic NY_TRACE/UI_TRACE
+   ;; silently re-enable the heavy /proc sampler in perf/debug runs.
+   if(env_present_cached("NY_TRACE_PROC")){ return env_truthy_cached("NY_TRACE_PROC") }
+   if(_ny_trace_perf()){ return false }
+   trace_enabled()
+}
+
+fn _proc_parse_first_int(str line) int {
+   mut i = 0
+   while(i < line.len){
+      def c = load8(line, i)
+      if(c >= 48 && c <= 57){ break }
+      i += 1
+   }
+   mut v = 0
+   while(i < line.len){
+      def c = load8(line, i)
+      if(c < 48 || c > 57){ break }
+      v = v * 10 + (c - 48)
+      i += 1
+   }
+   v
+}
+
+fn _proc_status_value(list lines, str key) int {
+   mut i = 0
+   while(i < lines.len){
+      def line = to_str(lines.get(i, ""))
+      if(str.startswith(line, key)){ return _proc_parse_first_int(line) }
+      i += 1
+   }
+   0
+}
+
+fn _proc_status_lines() list {
+   match file_read("/proc/self/status"){
+      ok(v) -> str.split(to_str(v), "\n")
+      err(_) -> list(0)
+   }
+}
+
+fn _proc_cpu_ticks() int {
+   match file_read("/proc/self/stat"){
+      ok(v) -> {
+         def raw = to_str(v)
+         def rp = str.find_last(raw, ")")
+         if(rp < 0){ return 0 }
+         def rest = str.str_slice(raw, rp + 2, raw.len)
+         def parts = str.split(rest, " ")
+         if(parts.len <= 12){ return 0 }
+         int(parts.get(11, "0")) + int(parts.get(12, "0"))
+      }
+      err(_) -> 0
+   }
+}
+
+fn _proc_fmt_kib(int kib) str {
+   def mb = float(kib) / 1024.0
+   if(mb >= 1024.0){ return to_str(mb / 1024.0) + "G" }
+   to_str(int(mb)) + "M"
+}
+
+fn _proc_smaps_extra(bool enabled) str {
+   if(!enabled){ return "" }
+   match file_read("/proc/self/smaps_rollup"){
+      ok(v) -> {
+         def lines = str.split(to_str(v), "\n")
+         def pss = _proc_status_value(lines, "Pss:")
+         def pc = _proc_status_value(lines, "Private_Clean:")
+         def pd = _proc_status_value(lines, "Private_Dirty:")
+         " pss=" + _proc_fmt_kib(pss) + " priv=" + _proc_fmt_kib(pc + pd)
+      }
+      err(_) -> ""
+   }
+}
+
+fn trace_process_sample(int frame=0, str label="") bool {
+   "Emits a bounded in-process RSS/CPU sample under NY_TRACE.  It is gated before any /proc read or string building."
+   if(!trace_process_enabled()){ return false }
+   mut every_frames = env_int_cached("NY_TRACE_PROC_EVERY_FRAMES", 120, 1, 1000000)
+
+   ;; If the user did not explicitly set a cadence, keep NY_TRACE=1 clean.
+   ;; This avoids the proc sampler becoming the allocation/perf problem it is
+   ;; trying to diagnose.
+   if(!common.env_present("NY_TRACE_PROC_EVERY_FRAMES")){
+      def tm = _ny_trace_mode()
+      if(tm == "spam" || tm == "3"){ every_frames = 1 }
+      elif(tm == "deep" || tm == "2" || tm == "full" || tm == "verbose"){ every_frames = 30 }
+      else { every_frames = 120 }
+   }
+
+   ;; Robust frame throttle.  Use a next-frame threshold, not modulo/division.
+   ;; It is stable across lowering paths and rejects before any /proc read.
+   if(frame > 2 && every_frames > 1){
+      if(_proc_trace_next_frame > 0 && frame < _proc_trace_next_frame){ return false }
+      _proc_trace_next_frame = frame + every_frames
+   }
+
+   def every_ms = env_int_cached("NY_TRACE_PROC_EVERY_MS", 1000, 50, 60000)
+   def now_ns = __ticks_ns()
+   if(frame <= 0 && _proc_trace_last_ns > 0 && now_ns - _proc_trace_last_ns < every_ms * 1000000){ return false }
+
+   def lines = _proc_status_lines()
+   if(lines.len <= 0){ return false }
+
+   def rss = _proc_status_value(lines, "VmRSS:")
+   def vsz = _proc_status_value(lines, "VmSize:")
+   def anon = _proc_status_value(lines, "RssAnon:")
+   def file = _proc_status_value(lines, "RssFile:") + _proc_status_value(lines, "RssShmem:")
+   def data = _proc_status_value(lines, "VmData:")
+   def threads = _proc_status_value(lines, "Threads:")
+   if(rss > _proc_trace_peak_rss){ _proc_trace_peak_rss = rss }
+
+   mut delta = 0
+   if(_proc_trace_last_rss > 0){ delta = rss - _proc_trace_last_rss }
+
+   def cpu_ticks = _proc_cpu_ticks()
+   mut cpu_pct = 0.0
+   if(_proc_trace_last_ns > 0 && _proc_trace_last_cpu_ticks > 0 && cpu_ticks >= _proc_trace_last_cpu_ticks){
+      def dt_ns = now_ns - _proc_trace_last_ns
+      if(dt_ns > 0){
+         ;; Linux USER_HZ is normally 100.  This is a debug estimate only.
+         cpu_pct = (float(cpu_ticks - _proc_trace_last_cpu_ticks) / 100.0) * 100000000000.0 / float(dt_ns)
+      }
+   }
+
+   _proc_trace_last_ns = now_ns
+   _proc_trace_last_rss = rss
+   _proc_trace_last_cpu_ticks = cpu_ticks
+   if(frame > 0){ _proc_trace_last_frame = frame }
+
+   def smaps = _proc_smaps_extra(env_truthy_cached("NY_TRACE_PROC_SMAPS"))
+   ;; Keep this one line small: it often runs while stdout is redirected.
+   print_text("[proc] f=" + to_str(frame) + " rss=" + _proc_fmt_kib(rss) +
+      " d=" + _proc_fmt_kib(delta) + " peak=" + _proc_fmt_kib(_proc_trace_peak_rss) +
+      " vsz=" + _proc_fmt_kib(vsz) + " anon=" + _proc_fmt_kib(anon) +
+      " file=" + _proc_fmt_kib(file) + " data=" + _proc_fmt_kib(data) +
+      " thr=" + to_str(threads) + " tag=" + to_str(label) + smaps)
+   true
+}
+
 mut _suite_exit_mode = -1
 mut _snapshot_once_seen = dict(32)
 
@@ -1027,16 +1384,24 @@ fn auto_dump_delay_frames(int fallback=8) int {
 
 fn auto_dump_pre_frame(bool done, int frame_count, int delay_frames=8) bool {
    "Requests framebuffer capture before the target auto-dump frame."
-   if(!auto_dump_enabled() || done || frame_count + 1 < delay_frames){ return false }
+   mut effective_delay = delay_frames
+   if(common.env_truthy("NYTRIX_AUTO_DUMP_EXIT") && effective_delay < 2){ effective_delay = 2 }
+   if(!auto_dump_enabled() || done || frame_count + 1 < effective_delay){ return false }
    request_frame_capture()
    true
 }
 
 fn auto_dump_post_frame(any win, bool done, int frame_count, int delay_frames=8, str dump_path="build/release/fb_dump.png") bool {
    "Writes a requested framebuffer dump after the target frame."
-   if(!auto_dump_enabled() || done || frame_count < delay_frames){ return done }
-   if(!snapshot(auto_dump_path(dump_path))){ return false }
-   if(common.env_truthy("NYTRIX_AUTO_DUMP_EXIT")){ window.set_should_close(win, true) }
+   def exit_after_dump = common.env_truthy("NYTRIX_AUTO_DUMP_EXIT")
+   mut effective_delay = delay_frames
+   if(exit_after_dump && effective_delay < 2){ effective_delay = 2 }
+   if(!auto_dump_enabled() || done || frame_count < effective_delay){ return done }
+   if(!snapshot(auto_dump_path(dump_path))){
+      if(exit_after_dump){ window.set_should_close(win, true) }
+      return false
+   }
+   if(exit_after_dump){ window.set_should_close(win, true) }
    true
 }
 
@@ -1133,18 +1498,37 @@ fn gizmo_mode(any name, any fallback) int {
 
 fn framebuffer_hash_line() str {
    "Returns a stable hash line for the current framebuffer."
-   def fb = vkr.read_framebuffer()
+   if(_last_framebuffer_hash_line.len > 0){
+      def cached = _last_framebuffer_hash_line
+      _last_framebuffer_hash_line = ""
+      return cached
+   }
+   def fb = read_framebuffer()
    if(!is_dict(fb)){ return "" }
    def data = fb.get("data", 0)
    def fb_w = int(fb.get("width", 0))
    def fb_h = int(fb.get("height", 0))
    def fb_bpp = int(fb.get("bpp", 4))
    def fb_len = fb_w * fb_h * fb_bpp
-   if(data == 0 || fb_len <= 0){ return "" }
+   if(data == 0 || fb_len <= 0){
+      if(data){ free(data) }
+      return ""
+   }
    def fb_bytes = bytes(fb_len)
-   if(!fb_bytes){ return "" }
+   if(!fb_bytes){
+      if(data){ free(data) }
+      return ""
+   }
    memcpy(fb_bytes, data, fb_len)
-   "FB_HASH: " + str.to_hex(hash.xxh32(fb_bytes, 0, 0, fb_len))
+   def line = "FB_HASH: " + str.to_hex(hash.xxh32(fb_bytes, 0, 0, fb_len))
+   if(data){ free(data) }
+   line
+}
+
+fn set_framebuffer_hash_line(any line) bool {
+   "Stores a one-shot framebuffer hash line from a completed snapshot."
+   _last_framebuffer_hash_line = to_str(line)
+   true
 }
 
 #main {

@@ -142,7 +142,7 @@ fn choose_config(any display, list attrs) any {
    def num_configs = zalloc(4)
    def config_ptr = zalloc(8)
    mut count = 0
-   while(attrs.get(count, -1) != -1){ count += 1 }
+   while(attrs.get(count, 0x3038) != 0x3038){ count += 1 }
    def attr_list = zalloc((count + 1) * 4)
    mut i = 0
    while(i < count){

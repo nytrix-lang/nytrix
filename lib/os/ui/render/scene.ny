@@ -43,25 +43,23 @@ use std.os.ui.render.matrix (
    mat4_rotate_x_into, mat4_rotate_y_into, mat4_rotate_z_into
 )
 
-use std.os.ui.render.vk as lib_vkr
-use std.os.ui.render.vk.utils as vk_utils
-use std.os.ui.render.vk.state (
-   _SCENE_LIGHT_MAX,
-   MAX_TEXTURES,
-   _VKR_OFF_TEX,
-   _VKR_OFF_C,
-   _VKR_OFF_X,
-   _VKR_OFF_Y,
-   _VKR_OFF_Z,
-   _VKR_OFF_NX,
-   _VKR_OFF_NY,
-   _VKR_OFF_NZ,
-   _VKR_OFF_TX,
-   _VKR_OFF_TY,
-   _VKR_OFF_TZ,
-   _VKR_OFF_TW,
-   _total_frames
-)
+use std.os.ui.render.utils as render_utils
+use std.os.ui.render.shared as render_shared
+
+def _SCENE_LIGHT_MAX = render_shared.SCENE_LIGHT_MAX
+def MAX_TEXTURES = render_shared.MAX_TEXTURES
+def _VKR_OFF_TEX = render_shared.OFF_TEX
+def _VKR_OFF_C = render_shared.OFF_C
+def _VKR_OFF_X = render_shared.OFF_X
+def _VKR_OFF_Y = render_shared.OFF_Y
+def _VKR_OFF_Z = render_shared.OFF_Z
+def _VKR_OFF_NX = render_shared.OFF_NX
+def _VKR_OFF_NY = render_shared.OFF_NY
+def _VKR_OFF_NZ = render_shared.OFF_NZ
+def _VKR_OFF_TX = render_shared.OFF_TX
+def _VKR_OFF_TY = render_shared.OFF_TY
+def _VKR_OFF_TZ = render_shared.OFF_TZ
+def _VKR_OFF_TW = render_shared.OFF_TW
 
 def _MESH_GPU_LINES = 1
 def _MESH_GPU_UNLIT = 2
@@ -78,11 +76,11 @@ fn _tex(dict tex, str key) int { int(tex.get(key, -1)) }
 fn upload_generated_texture(any im, int format=37, int filter=1, int wrap_s=10497, int wrap_t=33071, bool mip=true) int {
    "Uploads a generated RGBA environment image dict and returns a texture id."
    if(!im || !is_dict(im)){ return -1 }
-   def data = im.get("data", 0)
    def w = int(im.get("width", 0))
    def h = int(im.get("height", 0))
+   def data = im.get("data", 0)
    if(!data || w <= 0 || h <= 0){ return -1 }
-   lib_vkr.create_texture_ex(w, h, data, format, filter, wrap_s, wrap_t, mip, 0)
+   render.texture_upload_image_ex(im, "generated-env", format, mip, false, filter, wrap_s, wrap_t, "generated-env:" + to_str(w) + "x" + to_str(h), false)
 }
 
 fn first_ready(any ids) int {
@@ -405,7 +403,7 @@ mut _MAT_UV_XFORM_PREFIXES = [
    "thickness", "diffuse_transmission", "diffuse_transmission_color", "subsurface"
 ]
 
-mut _MAT_TEX_SLOT_REQS = [["base_color", "color", "color"], ["normal", "normal", "normal"], ["metallic_roughness", "metallic_roughness", "metallic_roughness"], ["occlusion", "occlusion", "occlusion"], ["emissive", "emissive", "emissive"], ["specular", "specular", "occlusion"], ["specular_color", "specular_color", "emissive"], ["clearcoat", "clearcoat", "occlusion"], ["clearcoat_normal", "clearcoat_normal", "normal"], ["clearcoat_roughness", "clearcoat_roughness", "metallic_roughness"], ["sheen_color", "sheen_color", "emissive"], ["sheen_roughness", "sheen_roughness", "metallic_roughness"], ["transmission", "transmission", "metallic_roughness"], ["thickness", "thickness", "occlusion"], ["iridescence", "iridescence", "occlusion"], ["iridescence_thickness", "iridescence_thickness", "metallic_roughness"], ["anisotropy", "anisotropy", "metallic_roughness"], ["diffuse_transmission", "diffuse_transmission", "metallic_roughness"], ["diffuse_transmission_color", "diffuse_transmission_color", "emissive"]]
+mut _MAT_TEX_SLOT_REQS = [["base_color", "base_color", "base_color"], ["normal", "normal", "normal"], ["metallic_roughness", "metallic_roughness", "metallic_roughness"], ["occlusion", "occlusion", "occlusion"], ["emissive", "emissive", "emissive"], ["specular", "specular", "occlusion"], ["specular_color", "specular_color", "emissive"], ["clearcoat", "clearcoat", "occlusion"], ["clearcoat_normal", "clearcoat_normal", "normal"], ["clearcoat_roughness", "clearcoat_roughness", "metallic_roughness"], ["sheen_color", "sheen_color", "emissive"], ["sheen_roughness", "sheen_roughness", "metallic_roughness"], ["transmission", "transmission", "metallic_roughness"], ["thickness", "thickness", "occlusion"], ["iridescence", "iridescence", "occlusion"], ["iridescence_thickness", "iridescence_thickness", "metallic_roughness"], ["anisotropy", "anisotropy", "metallic_roughness"], ["diffuse_transmission", "diffuse_transmission", "metallic_roughness"], ["diffuse_transmission_color", "diffuse_transmission_color", "emissive"]]
 mut _MAT_SPEC_TEX_SLOTS = [["base_color", false], ["normal", true], ["metallic_roughness", true], ["occlusion", true], ["emissive", true], ["clearcoat", true], ["clearcoat_roughness", true], ["clearcoat_normal", true], ["sheen_color", true], ["sheen_roughness", true], ["anisotropy", true], ["transmission", true], ["iridescence", true], ["iridescence_thickness", true], ["specular", true], ["specular_color", true], ["thickness", true], ["diffuse_transmission", true], ["diffuse_transmission_color", true], ["subsurface", true]]
 mut _MAT_SLOW_UV_STATE_FIELDS = [["base_uv_xf", "base_color"], ["normal_uv_xf", "normal"], ["mr_uv_xf", "metallic_roughness"], ["occ_uv_xf", "occlusion"], ["emit_uv_xf", "emissive"], ["spec_uv_xf", "specular"], ["spec_col_uv_xf", "specular_color"], ["thick_uv_xf", "thickness"], ["iri_uv_xf", "iridescence"], ["clearcoat_uv_xf", "clearcoat"], ["clearcoat_rough_uv_xf", "clearcoat_roughness"], ["clearcoat_normal_uv_xf", "clearcoat_normal"], ["sheen_color_uv_xf", "sheen_color"], ["sheen_rough_uv_xf", "sheen_roughness"], ["transmission_uv_xf", "transmission"], ["diffuse_transmission_uv_xf", "diffuse_transmission"], ["diffuse_transmission_color_uv_xf", "diffuse_transmission_color"], ["iri_thick_uv_xf", "iridescence_thickness"], ["anisotropy_uv_xf", "anisotropy"]]
 mut _MAT_OCCLUSION_AUX_SLOTS = [["specular_id", "specular_texcoord", "spec_uv_xf", 0x01000000], ["sheen_color_id", "sheen_color_texcoord", "sheen_color_uv_xf", 0x40000000], ["clearcoat_id", "clearcoat_texcoord", "clearcoat_uv_xf", 0x20000000], ["thickness_id", "thickness_texcoord", "thick_uv_xf", 0x04000000], ["iridescence_id", "iridescence_texcoord", "iri_uv_xf", 0x08000000]]
@@ -425,7 +423,7 @@ mut _MAT_FAST_VOLUME_ZERO_KEYS = [
 fn _stable_loaded_texture_id(any raw) int {
    def tid = int(raw)
    if(tid < _SCENE_MAX_TEXTURE_SLOTS){ return tid }
-   def stable = lib_vkr.last_created_texture_id()
+   def stable = render.texture_last_created_id()
    if(stable >= 0 && stable < _SCENE_MAX_TEXTURE_SLOTS){ return stable }
    return tid
 }
@@ -561,6 +559,7 @@ fn _scene_prof_skip(bool on, any stage, any reason) bool {
 
 fn _scene_prof_enabled() bool {
    ui_profile.env_enabled_cached("NY_SCENE_PROFILE_TRACE") ||
+   ui_profile.env_enabled_cached("NY_RENDER_PROFILE_TRACE") ||
    ui_profile.env_enabled_cached("NY_VK_PROFILE_TRACE") ||
    ui_profile.env_enabled_cached("NY_UI_PROFILE_TRACE")
 }
@@ -571,6 +570,7 @@ fn _gltf_mat_summary_enabled() bool {
 
 fn _scene_diag_enabled() bool {
    _gltf_debug_enabled() ||
+   ui_profile.env_enabled_cached("NY_RENDER_PROFILE_TRACE") ||
    ui_profile.env_enabled_cached("NY_VK_PROFILE_TRACE") ||
    ui_profile.env_enabled_cached("NY_UI_PROFILE_TRACE")
 }
@@ -740,10 +740,16 @@ fn _scene_anim_duration_from_accessors(any gltf_data) f64 {
 }
 
 fn _scene_first_anim_duration(any gltf_data, int anim_cnt) f64 {
+   "Returns the playback duration for the scene animation clock."
    if(anim_cnt <= 0){ return 0.0 }
-   def anim_info0 = gltf.gltf_animation_info(gltf_data, 0)
-   mut adur = is_dict(anim_info0) ? float(anim_info0.get("duration", 0.0)) : 0.0
-   if(!_scene_anim_duration_valid(adur)){ adur = 0.0 }
+   mut adur = 0.0
+   mut ai = 0
+   while(ai < anim_cnt){
+      def anim_info = gltf.gltf_animation_info(gltf_data, ai)
+      def dur = is_dict(anim_info) ? float(anim_info.get("duration", 0.0)) : 0.0
+      if(_scene_anim_duration_valid(dur) && dur > adur){ adur = dur }
+      ai += 1
+   }
    if(adur <= 0.0001){
       def raw_dur = _scene_anim_duration_from_source(gltf_data)
       if(raw_dur > adur){ adur = raw_dur }
@@ -820,7 +826,7 @@ fn _scene_apply_anim_morphs(dict scene, any gltf_data, dict overrides, any mat_r
       if(is_dict(rebuilt) && is_list(rebuilt.get("parts", 0))){
          def raw_parts = rebuilt.get("parts", parts)
          if(is_list(parts) && parts.len == raw_parts.len && parts.len > 0){
-            parts = vk_utils.gltf_sync_drawable_parts_from_raw(parts, raw_parts, false, false)
+            parts = render_utils.gltf_sync_drawable_parts_from_raw(parts, raw_parts, false, false)
          } else {
             parts = _scene_rebuild_drawable_parts_from_raw(raw_parts)
          }
@@ -840,12 +846,11 @@ fn _scene_apply_anim_part(dict part, any gltf_data, dict anim_mats, any vis_map,
    def node_idx = int(part.get("node_idx", -1))
    def skin_idx = int(part.get("skin_idx", -1))
    if(node_idx >= 0){
-      if(anim_mats.contains(node_idx)){
-         part["model"] = anim_mats.get(node_idx, part.get("model", 0))
-      }
+      def next_model = anim_mats.get(node_idx, anim_mats.get(to_str(node_idx), 0))
+      if(is_list(next_model)){ part["model"] = next_model }
       if(use_vis_map){ part["visible"] = vis_map.get(node_idx, true) ? true : false }
    }
-   if(is_list(ptr_overrides)&& ptr_overrides.len > 0){ part = vk_utils.gltf_anim_apply_material_pointer_overrides(part, ptr_overrides) }
+   if(is_list(ptr_overrides)&& ptr_overrides.len > 0){ part = render_utils.gltf_anim_apply_material_pointer_overrides(part, ptr_overrides) }
    if(skin_idx >= 0){
       part = gltf.gltf_apply_skinning(part, gltf_data, anim_mats, skin_mats_cache)
       if(common.env_truthy("NY_GLTF_SKIN_MODEL_IDENTITY")){
@@ -901,6 +906,38 @@ fn _scene_refresh_anim_lights(dict scene, any gltf_data, dict overrides) dict {
    scene
 }
 
+
+fn _scene_parts_keep_gltf_node_identity(any parts, any raw_parts) bool {
+   "Checks whether draw-ready rigid glTF parts still have the node ids needed for nested animation."
+   if(!is_list(parts) || !is_list(raw_parts)){ return false }
+   if(parts.len <= 0 || parts.len != raw_parts.len){ return false }
+   mut seen = dict(max(4, parts.len * 2))
+   mut ri = 0
+   while(ri < raw_parts.len){
+      def rp = raw_parts.get(ri, 0)
+      if(is_dict(rp)){
+         def rn = int(rp.get("node_idx", -1))
+         if(rn >= 0){ seen[rn] = int(seen.get(rn, 0)) + 1 }
+      }
+      ri += 1
+   }
+   if(seen.len <= 0){ return false }
+   mut matched = 0
+   mut pi = 0
+   while(pi < parts.len){
+      def p = parts.get(pi, 0)
+      if(!is_dict(p)){ return false }
+      def pn = int(p.get("node_idx", -1))
+      if(pn < 0){ return false }
+      def count = int(seen.get(pn, 0))
+      if(count <= 0){ return false }
+      seen[pn] = count - 1
+      matched += 1
+      pi += 1
+   }
+   matched == parts.len
+}
+
 fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    "Applies glTF animation overrides to part visibility and model matrices in-place."
    if(!is_dict(scene)){ return scene }
@@ -913,6 +950,19 @@ fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    mut anim_dur = float(scene.get("anim_duration", 0.0))
    if(!_scene_anim_duration_valid(anim_dur)){ anim_dur = 0.0 }
    def t = _scene_anim_sample_time(now_sec, anim_dur)
+   def was_playing = bool(scene.get("anim_playing", false))
+   def explicit_time = bool(scene.get("anim_time_override", false)) || now_sec > 0.0 || was_playing
+   scene["anim_idx"] = anim_idx
+   scene["anim_time"] = t
+   scene["anim_time_override"] = explicit_time
+   scene["anim_playing"] = was_playing || now_sec > 0.0
+   if(explicit_time){
+      scene["static_pose_gpu_ready"] = false
+      scene["parts_model_baked"] = false
+      scene["gpu_model_baked"] = false
+      def gpu_state_anim_pose = scene.get("gpu_draw_state", 0)
+      scene["gpu_draw_state"] = _scene_gpu_state_clear_model_flag(gpu_state_anim_pose)
+   }
    def overrides = _scene_anim_overrides(gltf_data, anim_count, anim_idx, t)
    if(!is_dict(overrides)){ return scene }
    scene = _scene_mark_fit_dirty_full(scene)
@@ -924,6 +974,27 @@ fn _scene_apply_gltf_animation(any scene, int anim_idx=0, f64 now_sec=0.0) any {
    def ptr_overrides = overrides.get("__pointers", [])
    def mat_records = scene.get("mat_records", [])
    mut parts = scene.get("parts", 0)
+   def raw_anim_parts = scene.get("anim_raw_parts", 0)
+   def rigid_node_anim = anim_count > 0 && skin_count <= 0 && morph_count_total <= 0 && is_list(raw_anim_parts) && raw_anim_parts.len > 0
+   if(rigid_node_anim){
+      ;; Rigid glTF animation is node-matrix animation.  Keep drawables aligned
+      ;; with the original unmerged glTF primitive list so each part keeps the
+      ;; node_idx needed for parent->child world transforms.  Do not rebuild the
+      ;; whole glTF mesh every frame; that is slow and can double-apply sampled
+      ;; matrices before the normal part animation pass below.
+      if(!_scene_parts_keep_gltf_node_identity(parts, raw_anim_parts)){
+         parts = _scene_rebuild_drawable_parts_from_raw(raw_anim_parts)
+      }
+      scene["parts"] = parts
+      scene["parts_count"] = is_list(parts) ? parts.len : 0
+      scene["static_pose_gpu_ready"] = false
+      scene["parts_model_baked"] = false
+      scene["gpu_model_baked"] = false
+      scene["gpu_parts"] = []
+      scene["gpu_parts_slab"] = 0
+      scene["gpu_parts_count"] = 0
+      scene["gpu_draw_state"] = _scene_gpu_state_clear_model_flag(scene.get("gpu_draw_state", 0))
+   }
    def morph_state = _scene_apply_anim_morphs(scene, gltf_data, overrides, mat_records, parts, morph_count_total)
    scene, gltf_data, parts = morph_state.get(0, scene), morph_state.get(1, gltf_data), morph_state.get(2, parts)
    if(!is_list(parts)){ return scene }
@@ -1894,6 +1965,10 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
    def px, py = float(x), float(y)
    def options = is_dict(opts) ? opts : dict(0)
    def start_sc = scene_edit_scale(scene)
+   mut sax = float(options.get("screen_axis_x", 0.0))
+   mut say = float(options.get("screen_axis_y", 0.0))
+   def sl = sqrt(sax * sax + say * say)
+   if(sl > 0.0001){ sax /= sl say /= sl } else { sax = 0.0 say = 0.0 }
    {
       "active": true,
       "ok": true,
@@ -1902,8 +1977,8 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
       "axis": int(options.get("axis", 0)),
       "precise": bool(options.get("precise", false)),
       "snap": bool(options.get("snap", false)),
-      "screen_axis_x": float(options.get("screen_axis_x", 0.0)),
-      "screen_axis_y": float(options.get("screen_axis_y", 0.0)),
+      "screen_axis_x": sax,
+      "screen_axis_y": say,
       "last_x": px,
       "last_y": py,
       "start_x": px,
@@ -1911,6 +1986,9 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
       "start_tx": scene_mesh_num(scene, "edit_tx", 0.0),
       "start_ty": scene_mesh_num(scene, "edit_ty", 0.0),
       "start_tz": scene_mesh_num(scene, "edit_tz", 0.0),
+      "cur_tx": scene_mesh_num(scene, "edit_tx", 0.0),
+      "cur_ty": scene_mesh_num(scene, "edit_ty", 0.0),
+      "cur_tz": scene_mesh_num(scene, "edit_tz", 0.0),
       "start_rx": scene_mesh_num(scene, "edit_rx", 0.0),
       "start_ry": scene_mesh_num(scene, "edit_ry", 0.0),
       "start_rz": scene_mesh_num(scene, "edit_rz", 0.0),
@@ -1921,15 +1999,37 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
    }
 }
 
-fn scene_drag_pixel_scale(any bounds) f64 {
+fn scene_drag_pixel_scale(any bounds, f64 cam_px=0.0, f64 cam_py=0.0, f64 cam_pz=0.0, f64 cam_fov=60.0) f64 {
    "Returns the world-space scale represented by one drag pixel."
    if(is_list(bounds) && bounds.len >= 6){
       def sx = _scene_absf(float(bounds.get(3, 0.0)) - float(bounds.get(0, 0.0)))
       def sy = _scene_absf(float(bounds.get(4, 0.0)) - float(bounds.get(1, 0.0)))
       def sz = _scene_absf(float(bounds.get(5, 0.0)) - float(bounds.get(2, 0.0)))
-      return max(max(max(sx, sy), sz), 1.0) * 0.0020
+      def span = max(max(max(sx, sy), sz), 1.0)
+      ;; The old linear span scale made large/fit glTF scenes jump by tens of
+      ;; units from a tiny mouse move (for example Y instantly landing around
+      ;; 74.5).  Use a sub-linear visible-span scale with a hard cap so gizmo
+      ;; motion remains predictable across tiny props and huge imported assets.
+      def base = clamp(sqrt(span) * 0.0030, 0.0015, 0.0350)
+      def cx = (float(bounds.get(0, 0.0)) + float(bounds.get(3, 0.0))) / 2.0
+      def cy = (float(bounds.get(1, 0.0)) + float(bounds.get(4, 0.0))) / 2.0
+      def cz = (float(bounds.get(2, 0.0)) + float(bounds.get(5, 0.0))) / 2.0
+      def dx = cx - cam_px
+      def dy = cy - cam_py
+      def dz = cz - cam_pz
+      mut safe_fov = float(cam_fov)
+      if(is_nan(safe_fov) || is_inf(safe_fov) || safe_fov < 15.0 || safe_fov > 120.0){ safe_fov = 60.0 }
+      def cam_dist = sqrt(dx * dx + dy * dy + dz * dz)
+      def fov_rad = safe_fov * (PI / 180.0)
+      def raw_ref = span / (2.0 * tan(fov_rad / 2.0) * 0.3)
+      def ref_dist = (is_nan(raw_ref) || is_inf(raw_ref) || raw_ref < 0.001) ? 1.0 : raw_ref
+      return base * clamp(max(cam_dist, ref_dist * 0.1) / ref_dist, 0.1, 10.0)
    }
    0.010
+}
+
+fn _scene_drag_clamp_pixels(any v, f64 limit=72.0) f64 {
+   float(v)
 }
 
 fn _scene_drag_snap(any value, any step) f64 {
@@ -1942,13 +2042,33 @@ fn _scene_drag_axis_delta(f64 dx, f64 dy) f64 {
    _scene_absf(dx) >= _scene_absf(dy) ? dx : (0.0 - dy)
 }
 
+fn _scene_drag_axis_fallback_delta(f64 dx, f64 dy, int axis) f64 {
+   ;; Emergency fallback only when no projected tangent / ray solve exists.  Y
+   ;; must not become dead; screen-up should raise world Y in the common editor
+   ;; view, while X/Z keep the old dominant-pixel behavior.
+   if(axis == 2){ return 0.0 - dy }
+   _scene_drag_axis_delta(dx, dy)
+}
+
 fn _scene_drag_projected_delta(f64 dx, f64 dy, any st) f64 {
    if(is_dict(st)){
       def ax = float(st.get("screen_axis_x", 0.0))
       def ay = float(st.get("screen_axis_y", 0.0))
-      if(_scene_absf(ax) + _scene_absf(ay) > 0.0001){ return dx * ax + dy * ay }
+      def len = sqrt(ax * ax + ay * ay)
+      if(len > 0.0001){ return dx * (ax / len) + dy * (ay / len) }
    }
    _scene_drag_axis_delta(dx, dy)
+}
+
+fn _scene_drag_projected_delta_for_axis(f64 dx, f64 dy, any st, int axis) f64 {
+   "Returns stable screen-space drag along the picked gizmo axis."
+   if(is_dict(st)){
+      def ax = float(st.get("screen_axis_x", 0.0))
+      def ay = float(st.get("screen_axis_y", 0.0))
+      def len = sqrt(ax * ax + ay * ay)
+      if(len > 0.0001){ return dx * (ax / len) + dy * (ay / len) }
+   }
+   _scene_drag_axis_fallback_delta(dx, dy, axis)
 }
 
 fn _scene_drag_snap_step(any bounds, f64 fallback=0.10) f64 {
@@ -1961,7 +2081,26 @@ fn _scene_drag_snap_step(any bounds, f64 fallback=0.10) f64 {
    fallback
 }
 
-fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=[]) dict {
+fn _scene_drag_camera_basis(any yaw_deg, any pitch_deg) dict {
+   def yaw = float(yaw_deg) * (PI / 180.0)
+   def pitch = float(pitch_deg) * (PI / 180.0)
+   def cp = cos(pitch)
+   def fx = sin(yaw) * cp
+   def fy = sin(pitch)
+   def fz = 0.0 - cos(yaw) * cp
+   def rx = cos(yaw)
+   def ry = 0.0
+   def rz = sin(yaw)
+   ;; camera-up = right x forward
+   mut ux = ry * fz - rz * fy
+   mut uy = rz * fx - rx * fz
+   mut uz = rx * fy - ry * fx
+   def ul = sqrt(ux * ux + uy * uy + uz * uz)
+   if(ul > 0.000001){ ux = ux / ul uy = uy / ul uz = uz / ul } else { ux = 0.0 uy = 1.0 uz = 0.0 }
+   {"right_x": rx, "right_y": ry, "right_z": rz, "up_x": ux, "up_y": uy, "up_z": uz, "fwd_x": fx, "fwd_y": fy, "fwd_z": fz}
+}
+
+fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=[], f64 cam_px=0.0, f64 cam_py=0.0, f64 cam_pz=0.0, f64 cam_fov=60.0, f64 pitch_deg=0.0) dict {
    "Applies a pointer drag to a scene edit transform."
    mut st = is_dict(state) ? state : dict(0)
    st["ok"] = false
@@ -1980,7 +2119,7 @@ fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=
    case int(st.get("mode", 0)){
       1 -> {
          def rot_step = PI / 12.0
-         def amt = _scene_drag_projected_delta(dx, dy, st) * 0.005
+         def amt = _scene_drag_projected_delta_for_axis(dx, dy, st, axis) * 0.005
          mut rx = float(st.get("start_rx", 0.0))
          mut ry = float(st.get("start_ry", 0.0))
          mut rz = float(st.get("start_rz", 0.0))
@@ -1996,7 +2135,7 @@ fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=
          scene["edit_rz"] = snap ? _scene_drag_snap(rz, rot_step) : rz
       }
       2 -> {
-         def scale_delta = (axis > 0) ? _scene_drag_projected_delta(dx, dy, st) : (dx - dy)
+         def scale_delta = (axis > 0) ? _scene_drag_projected_delta_for_axis(dx, dy, st, axis) : (dx - dy)
          def factor = exp(scale_delta * 0.0035)
          def scale_step = 0.10
          mut sx = clamp(float(st.get("start_sx", st.get("start_scale", 1.0))) * factor, 0.02, 50.0)
@@ -2023,20 +2162,40 @@ fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=
          scene["edit_scale"] = (sx + sy + sz) / 3.0
       }
       _ -> {
-         def yaw = float(yaw_deg) * (PI / 180.0)
-         def right_x, right_z = cos(yaw), sin(yaw)
-         def s = scene_drag_pixel_scale(bounds)
-         mut tx = float(st.get("start_tx", 0.0))
-         mut ty = float(st.get("start_ty", 0.0))
-         mut tz = float(st.get("start_tz", 0.0))
-         if(axis == 1){ tx += _scene_drag_projected_delta(dx, dy, st) * s }
-         elif(axis == 2){ ty += _scene_drag_projected_delta(dx, dy, st) * s }
-         elif(axis == 3){ tz += _scene_drag_projected_delta(dx, dy, st) * s }
+         def basis = _scene_drag_camera_basis(yaw_deg, pitch_deg)
+         def right_x, right_y = float(basis.get("right_x", 1.0)), float(basis.get("right_y", 0.0))
+         def right_z = float(basis.get("right_z", 0.0))
+         def up_x, up_y = float(basis.get("up_x", 0.0)), float(basis.get("up_y", 1.0))
+         def up_z = float(basis.get("up_z", 0.0))
+         def s = scene_drag_pixel_scale(bounds, cam_px, cam_py, cam_pz, cam_fov)
+         ;; Axis translation is camera-projection exact when the engine supplies
+         ;; a ray/axis solve.  This makes Y movement follow the actual projected
+         ;; green handle instead of a pixel-scale heuristic that can collapse or
+         ;; drift with camera pitch/FOV.
+         def axis_world_ok = bool(st.get("axis_world_delta_ok", false))
+         def axis_world_delta = float(st.get("axis_world_delta", 0.0))
+         def mdx = _scene_drag_clamp_pixels(frame_dx * mul)
+         def mdy = _scene_drag_clamp_pixels(frame_dy * mul)
+         mut tx = float(st.get("cur_tx", st.get("start_tx", 0.0)))
+         mut ty = float(st.get("cur_ty", st.get("start_ty", 0.0)))
+         mut tz = float(st.get("cur_tz", st.get("start_tz", 0.0)))
+         if(axis_world_ok && axis == 1){ tx = float(st.get("start_tx", 0.0)) + axis_world_delta }
+         elif(axis_world_ok && axis == 2){ ty = float(st.get("start_ty", 0.0)) + axis_world_delta }
+         elif(axis_world_ok && axis == 3){ tz = float(st.get("start_tz", 0.0)) + axis_world_delta }
+         elif(axis == 1){ tx += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
+         elif(axis == 2){ ty += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
+         elif(axis == 3){ tz += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
          else {
-            tx += dx * right_x * s
-            tz += dx * right_z * s
-            ty -= dy * s
+            ;; Free drag moves in the camera view plane: mouse-right is camera
+            ;; right and mouse-up is camera up.  It no longer forces vertical
+            ;; drag into global Y when the camera is pitched.
+            tx += (mdx * right_x - mdy * up_x) * s
+            ty += (mdx * right_y - mdy * up_y) * s
+            tz += (mdx * right_z - mdy * up_z) * s
          }
+         st["cur_tx"] = tx
+         st["cur_ty"] = ty
+         st["cur_tz"] = tz
          if(snap){
             def step = _scene_drag_snap_step(bounds)
             tx = _scene_drag_snap(tx, step)
@@ -2329,6 +2488,9 @@ fn _scene_static_pose_upload_parts(any parts) list {
 
 fn _scene_upload_static_pose_gpu(any mesh, bool prof_on=false) any {
    if(!is_dict(mesh)){ return mesh }
+   if(_scene_mesh_bool(mesh, "static_pose_gpu_ready", false) && mesh.get("gpu_parts_slab", 0) && int(mesh.get("gpu_parts_count", 0)) > 0){
+      return mesh
+   }
    if(!common.env_enabled("NY_GLTF_STATIC_POSE_GPU")){ return mesh }
    if(common.env_enabled("NY_GLTF_STATIC_POSE_GPU_OFF")){ return mesh }
    def deform_count =
@@ -2681,7 +2843,11 @@ mut _gltf_tex_resolve_cache = dict(256)
 
 fn _gltf_tex_use_mips() bool {
    if(_gltf_tex_mips_cache != -1){ return _gltf_tex_mips_cache == 1 }
-   _gltf_tex_mips_cache = common.cached_env_toggle(_gltf_tex_mips_cache, "NY_TEX_MIPS", true)
+   if(ui_profile.env_present_cached("NY_TEX_MIPS")){
+      _gltf_tex_mips_cache = ui_profile.env_toggle_cached("NY_TEX_MIPS", true) ? 1 : 0
+   } else {
+      _gltf_tex_mips_cache = common.cached_env_toggle(_gltf_tex_mips_cache, "NY_TEX_MIPS", true)
+   }
    _gltf_tex_mips_cache == 1
 }
 
@@ -2996,7 +3162,7 @@ fn _apply_mat_record_to_part(any part, any mat_records) any {
    def base_color_u32 = int(rec.get("base_color_u32", part_base_color_u32))
    def material_u32 = int(rec.get("material_u32", part_material_u32))
    def normal_tex_id = int(rec.get("normal", -1))
-   def normal_tex_word = int(rec.get("normal_tex_word", vk_utils.pack_normal_tex_word(normal_tex_id,
+   def normal_tex_word = int(rec.get("normal_tex_word", render_utils.pack_normal_tex_word(normal_tex_id,
             int(rec.get("normal_uv_set",
    0)))))
    def normal_uv_set = int(rec.get("normal_uv_set", 0))
@@ -3104,7 +3270,7 @@ fn _scene_pack_normal_word(any rec, f64 normal_scale, bool double_sided) int {
    def uv_set = int(rec.get("normal_uv_set", (band(current, 0x10000) != 0) ? 1 : 0))
    def clearcoat_only = band(current, 0x80000000) != 0
    def mirrored = band(current, 0x20000) != 0
-   vk_utils.pack_normal_tex_word(normal_id, uv_set, normal_scale, clearcoat_only, mirrored, double_sided)
+   render_utils.pack_normal_tex_word(normal_id, uv_set, normal_scale, clearcoat_only, mirrored, double_sided)
 }
 
 fn _scene_tweak_dict(any base_color, f64 metallic, f64 roughness) dict {
@@ -3170,7 +3336,7 @@ fn _scene_update_material_slab(any slab, int base_color_u32, int material_u32) b
 fn _scene_refresh_part_material_slab(any part) any {
    if(!is_dict(part)){ return part }
    mut out = part
-   def new_slab = vk_utils.pack_material_slab(out)
+   def new_slab = render_utils.pack_material_slab(out)
    if(new_slab){
       def old_slab = out.get("material_slab", 0)
       if(old_slab && old_slab != new_slab){ free(old_slab) }
@@ -3293,7 +3459,7 @@ fn scene_apply_material_tweak(any scene, int mat_idx, any base_color, f64 metall
    def base_color_u32 = _mat_pack_base_color_u32(base_rgba)
    def material_u32 = _scene_pack_material_word(metallic_v, roughness_v, int(rec.get("material_u32", 0x0000ff00)))
    def alpha_u32 = _scene_pack_alpha_word(alpha_mode, alpha_cutoff, occlusion_strength, alpha_word0)
-   def emissive_u32 = vk_utils.pack_emissive_u32(emissive_factor, emissive_strength)
+   def emissive_u32 = render_utils.pack_emissive_u32(emissive_factor, emissive_strength)
    def normal_tex_word = _scene_pack_normal_word(rec, normal_scale, double_sided)
    rec["base_color_u32"] = base_color_u32
    rec["material_u32"] = material_u32
@@ -3852,8 +4018,8 @@ fn _mat_info_req_load_base(dict req_map, any minfo, str base_path) dict {
    if(uri.len == 0){ return req_map }
    def filter = int(minfo.get("base_color_filter", -1))
    def sampler = minfo.get("base_color_sampler", 0)
-   def key = _mat_tex_req_key(base_path, "color", uri, filter, sampler)
-   return _mat_tex_req_load(req_map, key, uri, base_path, "color", filter, sampler)
+   def key = _mat_tex_req_key(base_path, "base_color", uri, filter, sampler)
+   return _mat_tex_req_load(req_map, key, uri, base_path, "base_color", filter, sampler)
 }
 
 fn _mat_info_load_base_tex(any tex_req_map, bool predecode_active, any minfo, str base_path) int {
@@ -3861,8 +4027,8 @@ fn _mat_info_load_base_tex(any tex_req_map, bool predecode_active, any minfo, st
    if(uri.len == 0){ return -1 }
    def filter = int(minfo.get("base_color_filter", -1))
    def sampler = minfo.get("base_color_sampler", 0)
-   if(predecode_active){ return _stable_loaded_texture_id(_mat_tex_req_get(tex_req_map, _mat_tex_req_key(base_path, "color", uri, filter, sampler))) }
-   return _stable_loaded_texture_id(_try_load_tex(uri, base_path, "color", filter, sampler))
+   if(predecode_active){ return _stable_loaded_texture_id(_mat_tex_req_get(tex_req_map, _mat_tex_req_key(base_path, "base_color", uri, filter, sampler))) }
+   return _stable_loaded_texture_id(_try_load_tex(uri, base_path, "base_color", filter, sampler))
 }
 
 fn _mat_pack_base_color_u32(any base_color_factor) int {
@@ -3891,7 +4057,7 @@ fn _build_material_records_fast_core_pbr(list material_infos, str base_path, boo
    }
    mut mat_records = list(0)
    mut loaded_tex_count = 0
-   def normal_tex_word_default = vk_utils.pack_normal_tex_word(-1, 0, 1.0, false)
+   def normal_tex_word_default = render_utils.pack_normal_tex_word(-1, 0, 1.0, false)
    mut mi = 0
    while(mi < mat_count){
       def minfo = material_infos.get(mi, 0)
@@ -4190,7 +4356,21 @@ fn _mat_slow_texture_state(dict st, any tex_req_map, bool predecode_active, str 
    mut out = st
    def spec = out.get("spec", dict(0))
    def tex_ids = _mat_tex_resolved_slots(tex_req_map, predecode_active, spec, base_path)
-   out["base_id"] = int(tex_ids.get("base_color", -1))
+   mut base_id = int(tex_ids.get("base_color", -1))
+   ;; Defensive fallback: the batch/predecode path is an optimization.  If it
+   ;; fails to materialize the base-color texture, retry the exact material URI
+   ;; directly before we build GPU records.  Otherwise textured glTFs can fall
+   ;; back to a gray baseColorFactor and look like the Avocado gray-stripe bug.
+   if(base_id < 0 && to_str(spec.get("base_color_uri", "")).len > 0){
+      base_id = _try_load_tex(
+         spec.get("base_color_uri", ""),
+         base_path,
+         "base_color",
+         int(spec.get("base_color_filter", -1)),
+         spec.get("base_color_sampler", 0)
+      )
+   }
+   out["base_id"] = base_id
    out["normal_id"] = int(tex_ids.get("normal", -1))
    out["met_rough_id"] = int(tex_ids.get("metallic_roughness", -1))
    out["occlusion_id"] = int(tex_ids.get("occlusion", -1))
@@ -4240,10 +4420,10 @@ fn _mat_slow_uv_state(dict st) dict {
 fn _mat_slow_bsdf_state(dict st) dict {
    mut out = st
    def spec = out.get("spec", dict(0))
-   out["bsdf0_u32"] = vk_utils.pack_bsdf0_u32(spec)
-   out["bsdf1_u32"] = vk_utils.pack_bsdf1_u32(spec)
-   mut bsdf2_u32 = vk_utils.pack_bsdf2_u32(spec)
-   out["bsdf3_u32"] = vk_utils.pack_bsdf3_u32(spec)
+   out["bsdf0_u32"] = render_utils.pack_bsdf0_u32(spec)
+   out["bsdf1_u32"] = render_utils.pack_bsdf1_u32(spec)
+   mut bsdf2_u32 = render_utils.pack_bsdf2_u32(spec)
+   out["bsdf3_u32"] = render_utils.pack_bsdf3_u32(spec)
    def dt_color_slot = _mat_diffuse_transmission_color_slot(spec, bsdf2_u32, int(out.get("sheen_color_id", -1)))
    bsdf2_u32 = int(dt_color_slot.get(0, bsdf2_u32))
    out["bsdf2_u32"] = bsdf2_u32
@@ -4365,7 +4545,7 @@ fn _mat_slow_finalize_core_record(dict st, bool has_minfo, dict spec, int normal
       "emissive": int(st.get("emissive_id", -1)),
       "emissive_factor": emissive_factor,
       "emissive_strength": emissive_strength,
-      "emissive_u32": vk_utils.pack_emissive_u32(emissive_factor, emissive_strength),
+      "emissive_u32": render_utils.pack_emissive_u32(emissive_factor, emissive_strength),
       "emissive_uv_set": emissive_uv_set,
       "alpha_u32": int(st.get("alpha_u32", 0)),
       "material_u32": gltf._pack_material_word(int(st.get("metallic_u8", 255)), int(st.get("rough_u8", 255)), _mat_mr_word(int(st.get("met_rough_id", -1)), int(st.get("met_rough_uv_set", 0))))
@@ -4391,9 +4571,9 @@ fn _mat_slow_record_add_bsdf_fields(dict rec, dict st, bool has_minfo, dict spec
    out["bsdf1_u32"] = int(st.get("bsdf1_u32", 0))
    out["bsdf2_u32"] = int(st.get("bsdf2_u32", 0))
    out["bsdf3_u32"] = int(st.get("bsdf3_u32", 0))
-   out["bsdf4_u32"] = has_minfo ? vk_utils.pack_bsdf4_u32(spec) : 0
-   out["bsdf5_u32"] = has_minfo ? vk_utils.pack_bsdf5_u32(spec) : 0
-   out["bsdf_ext_slab"] = has_minfo ? vk_utils.pack_bsdf_ext_slab(spec) : 0
+   out["bsdf4_u32"] = has_minfo ? render_utils.pack_bsdf4_u32(spec) : 0
+   out["bsdf5_u32"] = has_minfo ? render_utils.pack_bsdf5_u32(spec) : 0
+   out["bsdf_ext_slab"] = has_minfo ? render_utils.pack_bsdf_ext_slab(spec) : 0
    out["ext2_tex_word"] = has_minfo ? int(spec.get("ext2_tex_word", 0x80000000)) : 0x80000000
    out["vc_mode"] = has_minfo && spec.get("specular_glossiness", false) ? 2 : 0
    out
@@ -4402,7 +4582,7 @@ fn _mat_slow_record_add_bsdf_fields(dict rec, dict st, bool has_minfo, dict spec
 fn _mat_slow_finalize_record(dict st) dict {
    def has_minfo = bool(st.get("has_minfo", false))
    def spec = has_minfo ? st.get("spec", dict(0)) : dict(0)
-   def normal_tex_word = vk_utils.pack_normal_tex_word(
+   def normal_tex_word = render_utils.pack_normal_tex_word(
       int(st.get("normal_id", -1)),
       int(st.get("normal_uv_set", 0)),
       float(st.get("active_normal_scale", 1.0)),
@@ -4460,7 +4640,10 @@ fn build_material_records(list material_infos, str base_path) list {
    def stage_trace = _scene_stage_trace_enabled()
    def mat_count = material_infos.len
    _scene_stage(stage_trace, "materials.begin count=" + to_str(mat_count) + " base=" + base_path)
-   if(_mat_infos_fast_core_pbr_ok(material_infos)){
+   ;; Fast-core PBR is a load-time optimization.  Keep it opt-in for now because
+   ;; some glTF sample models (Avocado-style texture sets) need the full material
+   ;; path to keep base/normal/MR texture bindings identical across GL and VK.
+   if(common.env_truthy("NY_SCENE_FAST_CORE_PBR") && _mat_infos_fast_core_pbr_ok(material_infos)){
       def fast_records = _build_material_records_fast_core_pbr(material_infos, base_path, diag_on, stage_trace)
       _scene_stage(stage_trace, "materials.end count=" + to_str(fast_records.len) + " fast=core_pbr")
       return fast_records
@@ -4839,41 +5022,7 @@ fn _pack_scene_lights_slab(
 }
 
 fn _scene_gpu_part_pipeline(bool is_lines, bool is_points, bool unlit, bool nocull, bool flip_winding, bool wants_alpha_pipe, bool fast_lit, bool no_punctual_lights) any {
-   if(is_lines || is_points){ return 0 }
-   if(wants_alpha_pipe){
-      if(unlit){
-         if(flip_winding){
-            return nocull ? lib_vkr._get_mesh_alpha_unlit_nocull_flip_pipeline() : lib_vkr._get_mesh_alpha_unlit_flip_pipeline()
-         }
-         return nocull ? lib_vkr._get_mesh_alpha_unlit_nocull_pipeline() : lib_vkr._get_mesh_alpha_unlit_pipeline()
-      }
-      if(flip_winding){
-         return nocull ? lib_vkr._get_mesh_alpha_nocull_flip_pipeline() : lib_vkr._get_mesh_alpha_flip_pipeline()
-      }
-      return nocull ? lib_vkr._get_mesh_alpha_nocull_pipeline() : lib_vkr._get_mesh_alpha_pipeline()
-   }
-   if(unlit){
-      if(flip_winding){
-         return nocull ? lib_vkr._get_mesh_opaque_unlit_nocull_flip_pipeline() : lib_vkr._get_flip_unlit_pipeline()
-      }
-      return nocull ? lib_vkr._get_mesh_opaque_unlit_nocull_pipeline() : lib_vkr._get_mesh_opaque_unlit_pipeline()
-   }
-   if(fast_lit){
-      if(no_punctual_lights){
-         if(flip_winding){
-            return nocull ? lib_vkr._get_mesh_fast_env_opaque_nocull_flip_pipeline() : lib_vkr._get_mesh_fast_env_opaque_flip_pipeline()
-         }
-         return nocull ? lib_vkr._get_mesh_fast_env_opaque_nocull_pipeline() : lib_vkr._get_mesh_fast_env_opaque_pipeline()
-      }
-      if(flip_winding){
-         return nocull ? lib_vkr._get_mesh_fast_opaque_nocull_flip_pipeline() : lib_vkr._get_mesh_fast_opaque_flip_pipeline()
-      }
-      return nocull ? lib_vkr._get_mesh_fast_opaque_nocull_pipeline() : lib_vkr._get_mesh_fast_opaque_pipeline()
-   }
-   if(flip_winding){
-      return nocull ? lib_vkr._get_mesh_opaque_nocull_flip_pipeline() : lib_vkr._get_flip_pipeline()
-   }
-   nocull ? lib_vkr._get_mesh_opaque_nocull_pipeline() : lib_vkr._get_mesh_opaque_pipeline()
+   render.renderer_mesh_pipeline(is_lines, is_points, unlit, nocull, flip_winding, wants_alpha_pipe, fast_lit, no_punctual_lights)
 }
 
 fn _scene_store_gpu_part_header(any base, list rec, any pipe, bool is_lines, bool is_points) bool {
@@ -4923,35 +5072,42 @@ fn _scene_store_gpu_part_material(any base, list rec, bool unlit, bool is_points
    def rec_mat_idx = _scene_gpu_rec_mat_idx(rec)
    store32(base, rec_mat_idx >= 0 ? rec_mat_idx + 1 : 0, 128)
    store32(base, (unlit || is_points || is_lines) ? 1 : 0, 132)
-   store32(base, int(rec.get(12, 0xffffffff)), 136)
-   store32(base, int(rec.get(13, 0x0000ff00)), 140)
-   store32(base, int(rec.get(15, 0)), 144)
-   store32(base, int(rec.get(14, -1)), 148)
-   store32(base, int(rec.get(16, 0)), 152)
-   store32(base, int(rec.get(0, -1)), 156)
-   store32(base, int(rec.get(17, 0)), 160)
-   store32(base, int(rec.get(18, -1)), 164)
-   store32(base, int(rec.get(19, 0)), 168)
-   store32(base, int(rec.get(20, 0)), 172)
-   store32(base, int(rec.get(21, 0)), 176)
-   store32(base, int(rec.get(22, 0)), 180)
-   store32(base, int(rec.get(23, 0)), 184)
-   store32(base, int(rec.get(26, 0)), 188)
-   store32(base, int(rec.get(27, 0)), 192)
-   store32(base, int(rec.get(28, 0)), 196)
-   store32(base, int(rec.get(29, 0)), 200)
-   store32(base, int(rec.get(30, 0)), 204)
-   store32(base, int(rec.get(31, 0)), 208)
-   store32(base, int(rec.get(32, 0)), 212)
-   store32(base, int(rec.get(33, 0)), 216)
-   store32(base, int(rec.get(34, 0)), 220)
-   store32(base, int(rec.get(35, 0)), 224)
-   store32(base, int(rec.get(37, 1)), 228)
-   store32(base, int(rec.get(41, 0)), 232)
-   store32(base, int(rec.get(24, -1)), 236)
-   store32(base, int(rec.get(42, 0)), 240)
-   store32(base, int(rec.get(43, 0x80000000)), 244)
-   store32(base, int(rec.get(45, 0)), 248)
+
+   ;; Keep this layout byte-for-byte aligned with vk.renderer
+   ;; _set_material_from_part_slab(base + 136).  A previous version stored
+   ;; emissive_tex/emissive_u32 in the opposite order and placed bsdf4/bsdf5
+   ;; four bytes early, which made Vulkan read stale material words.  That
+   ;; showed up as glTF base-color textures becoming gray/striped even though
+   ;; mesh UVs and asset parsing were correct.
+   store32(base, int(rec.get(12, 0xffffffff)), 136)       ;; p+0   base_color_u32
+   store32(base, int(rec.get(13, 0x0000ff00)), 140)       ;; p+4   material_u32
+   store32(base, int(rec.get(15, 0)), 144)                ;; p+8   emissive_u32
+   store32(base, int(rec.get(14, -1)), 148)               ;; p+12  emissive_tex_id
+   store32(base, int(rec.get(16, 0)), 152)                ;; p+16  emissive_uv_set
+   store32(base, int(rec.get(0, -1)), 156)                ;; p+20  base_tex_id
+   store32(base, int(rec.get(17, 0)), 160)                ;; p+24  alpha_u32
+   store32(base, int(rec.get(18, -1)), 164)               ;; p+28  occlusion_tex_id
+   store32(base, int(rec.get(19, 0)), 168)                ;; p+32  occlusion_uv_set
+   store32(base, int(rec.get(20, 0)), 172)                ;; p+36  bsdf0_u32
+   store32(base, int(rec.get(21, 0)), 176)                ;; p+40  bsdf1_u32
+   store32(base, int(rec.get(22, 0)), 180)                ;; p+44  bsdf2_u32
+   store32(base, int(rec.get(23, 0)), 184)                ;; p+48  bsdf3_u32
+   store32(base, int(rec.get(26, 0)), 188)                ;; p+52  base_uv_xf0
+   store32(base, int(rec.get(27, 0)), 192)                ;; p+56  base_uv_xf1
+   store32(base, int(rec.get(28, 0)), 196)                ;; p+60  normal_uv_xf0
+   store32(base, int(rec.get(29, 0)), 200)                ;; p+64  normal_uv_xf1
+   store32(base, int(rec.get(30, 0)), 204)                ;; p+68  mr_uv_xf0
+   store32(base, int(rec.get(31, 0)), 208)                ;; p+72  mr_uv_xf1
+   store32(base, int(rec.get(32, 0)), 212)                ;; p+76  occlusion_uv_xf0
+   store32(base, int(rec.get(33, 0)), 216)                ;; p+80  occlusion_uv_xf1
+   store32(base, int(rec.get(34, 0)), 220)                ;; p+84  emissive_uv_xf0
+   store32(base, int(rec.get(35, 0)), 224)                ;; p+88  emissive_uv_xf1
+   store32(base, 0, 228)                                  ;; p+92  reserved
+   store32(base, int(rec.get(41, 0)), 232)                ;; p+96  bsdf4_u32
+   store32(base, int(rec.get(24, -1)), 236)               ;; p+100 normal_tex_word
+   store32(base, int(rec.get(42, 0)), 240)                ;; p+104 bsdf5_u32
+   store32(base, int(rec.get(43, 0x80000000)), 244)       ;; p+108 ext2_tex_word
+   store32(base, int(rec.get(45, 0)), 248)                ;; p+112 vc_mode
    true
 }
 
@@ -4966,6 +5122,8 @@ fn _scene_trace_gpu_part_slab(any base, list rec, int i, bool trace_slab) bool {
       " matKey=" + to_str(load32_h(base, 128)) +
       " slabTex=" + to_str(load32_h(base, 156)) +
       " slabMat=0x" + str.to_hex(load32_h(base, 140)) +
+      " slabBsdf4=0x" + str.to_hex(load32_h(base, 232)) +
+      " slabBsdf5=0x" + str.to_hex(load32_h(base, 240)) +
    " slabNormal=0x" + str.to_hex(load32_h(base, 236)))
    true
 }
@@ -4975,7 +5133,7 @@ fn _pack_scene_gpu_parts_slab(list parts, bool no_punctual_lights=false) any {
    def count = parts.len
    def slab = _scene_alloc_zero_slab(count, 256)
    if(!slab){ return 0 }
-   def trace_pipe = common.env_enabled("NY_VK_PIPELINE_TRACE")
+   def trace_pipe = common.env_enabled("NY_RENDER_PIPELINE_TRACE") || common.env_enabled("NY_VK_PIPELINE_TRACE")
    def trace_slab = common.env_enabled("NY_UI_SLAB_TRACE")
    mut trace_fast = 0
    mut trace_fast_env = 0
@@ -5123,7 +5281,7 @@ fn _scene_part_bool_for_merge(any part, str key) int {
 }
 
 fn _scene_part_normal_word(any part) int {
-   int(part.get("normal_tex_word", vk_utils.pack_normal_tex_word(int(part.get("normal_tex_id",
+   int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(int(part.get("normal_tex_id",
             -1)),
             int(part.get("normal_uv_set",
    0)))))
@@ -5342,7 +5500,7 @@ fn _scene_merge_part_summary(any part, f64 scene_area_like) str {
    " color=0x" + str.to_hex(int(part.get("base_color_u32", 0xffffffff))) +
    " material=0x" + str.to_hex(int(part.get("material_u32", 0x0000ff00))) +
    " normal=" + to_str(int(part.get("normal_tex_id", -1))) +
-   " normal_word=0x" + str.to_hex(int(part.get("normal_tex_word", vk_utils.pack_normal_tex_word(int(part.get("normal_tex_id", -1)), int(part.get("normal_uv_set", 0)))))) +
+   " normal_word=0x" + str.to_hex(int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(int(part.get("normal_tex_id", -1)), int(part.get("normal_uv_set", 0)))))) +
    " bsdf0=0x" + str.to_hex(int(part.get("bsdf0_u32", 0))) +
    " bsdf1=0x" + str.to_hex(int(part.get("bsdf1_u32", 0))) +
    " ext2=0x" + str.to_hex(int(part.get("ext2_tex_word", 0x80000000))) +
@@ -5645,7 +5803,7 @@ fn _scene_vertex_material_batch_candidate(any parts, f64 scene_area_like) bool {
    def first_opts = _scene_part_opts(first, scene_area_like)
    def first_flags = _scene_gpu_flags_from_part(first, first_opts)
    def first_alpha = int(first.get("alpha_u32", 0))
-   def first_normal_word = int(first.get("normal_tex_word", vk_utils.pack_normal_tex_word(-1, 0, 1.0, false)))
+   def first_normal_word = int(first.get("normal_tex_word", render_utils.pack_normal_tex_word(-1, 0, 1.0, false)))
    def first_flip = _scene_part_opt_bit(first, first_opts, "flip_winding")
    def first_double = _scene_part_opt_bit(first, first_opts, "double_sided")
    mut i = 0
@@ -5811,7 +5969,7 @@ fn _scene_gpu_record_for_part(
       part.get("double_sided", false)
       || (is_dict(part_opts) && part_opts.get("double_sided", false))
    ) ? 1 : 0
-   mut normal_tex_word = int(part.get("normal_tex_word", vk_utils.pack_normal_tex_word(normal_tex_id,
+   mut normal_tex_word = int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(normal_tex_id,
             int(part.get("normal_uv_set",
    0)))))
    if(double_sided != 0 && flip_winding != 0){ normal_tex_word = bor(normal_tex_word, 0x20000) }
@@ -6123,7 +6281,7 @@ fn _build_scene_render_parts(any gpu_parts) list {
             part["width"] = _scene_list_num_safe(rec, 1, 1.0)
             part["min"] = _scene_list_any_safe(rec, 38, [0.0, 0.0, 0.0])
             part["max"] = _scene_list_any_safe(rec, 39, [0.0, 0.0, 0.0])
-            def part_mat_slab = vk_utils.pack_material_slab(part)
+            def part_mat_slab = render_utils.pack_material_slab(part)
             if(part_mat_slab){
                mesh2["material_slab"] = part_mat_slab
                part["material_slab"] = part_mat_slab
@@ -6147,7 +6305,7 @@ fn _scene_attach_mesh_metadata(any mesh_in, any part_in, bool include_bounds=fal
    def opts = part.get("opts", 0)
    mesh["flip_winding"] = part.get("flip_winding", false) || (is_dict(opts) && opts.get("flip_winding", false))
    mesh["double_sided"] = part.get("double_sided", false) || (is_dict(opts) && opts.get("double_sided", false))
-   def part_mat_slab = vk_utils.pack_material_slab(part)
+   def part_mat_slab = render_utils.pack_material_slab(part)
    if(part_mat_slab){
       mesh["material_slab"] = part_mat_slab
       part["material_slab"] = part_mat_slab
@@ -6331,7 +6489,7 @@ fn _merge_scene_skinned_solid_parts(any parts, f64 scene_area_like) any {
 fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
    "Builds per-part meshes for grouped scene fallback drawing.
    Keeps original CPU vertex/index data alive so grouped fallback drawing uses
-   the exact source primitive topology and avoids the unstable Vulkan grouped
+   the exact source primitive topology and avoids unstable grouped GPU
    static-draw path."
    def diag_on = _scene_diag_enabled()
    mut out = []
@@ -6342,7 +6500,7 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
    mut expanded_indexed = 0
    mut expanded_failed = 0
    mut has_blend = false
-   def can_dynamic_indexed = lib_vkr._get_device() != 0
+   def can_dynamic_indexed = render.renderer_gpu_ready()
    def scene_area_like = _scene_parts_area_like(parts)
    def group_trace = _scene_group_trace_enabled()
    if(group_trace){ terminal.log("[cpu_parts] begin parts=" + to_str(is_list(parts) ? parts.len : -1) + " area=" + to_str(scene_area_like)) }
@@ -6406,7 +6564,7 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
             mut baked_ok = false
             if(bake_cpu_model){
                def idx_u32 = opts.get("index_type_u32", false)
-               def exp_ptr = vk_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
+               def exp_ptr = render_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
                if(exp_ptr){ expanded_indexed += 1 } else { expanded_failed += 1 }
                baked_ok = (exp_ptr != 0) ? _bake_vertex_buffer_model(exp_ptr, icnt, model_m) : false
                mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : 0
@@ -6418,7 +6576,7 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
                } else {
                   if(group_trace){ terminal.log("[cpu_parts] part=" + to_str(pi) + " expand_indexed") }
                   def idx_u32 = opts.get("index_type_u32", false)
-                  def exp_ptr = vk_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
+                  def exp_ptr = render_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
                   if(exp_ptr){ expanded_indexed += 1 } else { expanded_failed += 1 }
                   if(group_trace){ terminal.log("[cpu_parts] part=" + to_str(pi) + " mesh_cpu exp=" + to_str(bool(exp_ptr)) + " icnt=" + to_str(icnt)) }
                   mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : 0
@@ -6507,11 +6665,11 @@ fn _scene_tag_parts_scene_name(any src_parts, str scene_name) any {
 }
 
 fn _scene_grouped_upload_stage(any src_parts, bool deform_runtime_active, bool diag_on, bool stage_trace, bool prof_on) dict {
-   def have_vk_device = lib_vkr._get_device() != 0
+   def have_gpu_device = render.renderer_gpu_ready()
    def grouped_gpu_disabled = common.env_enabled("NY_GLTF_GROUPED_GPU_OFF")
    || common.env_enabled("NY_GLTF_DISABLE_GROUPED_GPU")
    def grouped_gpu_requested = !grouped_gpu_disabled
-   def force_cpu_group = !have_vk_device
+   def force_cpu_group = !have_gpu_device
    || deform_runtime_active
    || common.env_enabled("NY_GLTF_FORCE_CPU_GROUPED")
    || common.env_enabled("NY_GLTF_SAFE_VISIBLE")
@@ -7101,6 +7259,10 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
    mut scene_lights_pipeline_raw = _scene_limit_lights(gltf.gltf_scene_punctual_lights(gltf_data, scene_lights_pipeline_overrides), _SCENE_LIGHT_MAX)
    if(!is_list(scene_lights_pipeline_raw)){ scene_lights_pipeline_raw = [] }
    def scene_lights_pipeline_count = scene_lights_pipeline_raw.len
+   if(anim_cnt_pre > 0 || deform_runtime_active || morph_runtime_active){
+      mesh["anim_raw_parts"] = src_parts
+      mesh["anim_cpu_parts_ready"] = false
+   }
    def t_render0 = ticks()
    def runtime_deform_parts = morph_runtime_active || deform_runtime_active
    def render_stage = _scene_render_view_stage(src_parts, upload_stage, use_fit, sp_sc, fit_tx, fit_ty, fit_tz, sort_cam_x, sort_cam_y, sort_cam_z, runtime_deform_parts, scene_lights_pipeline_count, diag_on, prof_on)
@@ -7188,7 +7350,7 @@ fn destroy_scene(any scene) bool {
    "Destroys scene GPU resources without emitting user-facing log text."
    if(is_dict(scene)){
       scene_fast_reset()
-      lib_vkr.wait_idle()
+      render.renderer_wait_idle()
       mesh_group_destroy(scene)
    }
    true
@@ -7243,12 +7405,12 @@ fn scene_fast_reset(any group=0) bool {
 }
 
 fn _scene_fast_material_current() bool {
-   _scene_fast_material_bound && _scene_fast_material_frame == int(_total_frames)
+   _scene_fast_material_bound && _scene_fast_material_frame == render.renderer_frame_index()
 }
 
 fn _scene_fast_note_material_bound() bool {
    _scene_fast_material_bound = true
-   _scene_fast_material_frame = int(_total_frames)
+   _scene_fast_material_frame = render.renderer_frame_index()
    true
 }
 
@@ -7343,29 +7505,45 @@ fn _scene_fast_group_state_matches(any group) bool {
    to_int(slab) == to_int(_scene_fast_gpu_slab) && count == _scene_fast_gpu_count
 }
 
+fn _scene_fast_group_has_packed_state(any group) bool {
+   if(!is_dict(group)){ return false }
+   def gpu_state = group.get("gpu_draw_state", 0)
+   if(is_list(gpu_state) && gpu_state.len >= 7){
+      return bool(gpu_state.get(0, 0)) && int(gpu_state.get(1, 0)) > 0
+   }
+   bool(group.get("gpu_parts_slab", 0)) && int(group.get("gpu_parts_count", 0)) > 0
+}
+
 fn _scene_fast_refresh_cache(group, bool log_enabled=false) bool {
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] cache match check") }
    if(_scene_fast_group_state_matches(group)){ return true }
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] cache reset") }
    scene_fast_reset(group)
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] support check") }
    if(!_scene_fast_supported(group)){ return false }
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] read gpu state") }
    _scene_fast_read_gpu_state(group)
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] clamp") }
    _scene_fast_clamp_ranges()
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] flags") }
    _scene_fast_refresh_flags()
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] log state") }
    _scene_fast_log_state(log_enabled)
    true
 }
 
 fn _scene_fast_bind_state(any model_matrix) bool {
    if(!_scene_fast_lights_bound){
-      lib_vkr.set_scene_lights_slab(_scene_fast_gpu_light_slab, _scene_fast_gpu_light_count)
+      render.renderer_set_scene_lights_slab(_scene_fast_gpu_light_slab, _scene_fast_gpu_light_count)
       _scene_fast_lights_bound = true
    }
    if(_scene_fast_gpu_model_baked){
-      lib_vkr.set_mask(2)
+      render.renderer_set_mask(2)
       render.set_model_matrix(model_matrix)
       _scene_fast_mask_bound = false
    } else {
       if(!_scene_fast_mask_bound){
-         lib_vkr.set_mask(0)
+         render.renderer_set_mask(0)
          _scene_fast_mask_bound = true
       }
       render.set_model_matrix(model_matrix)
@@ -7376,9 +7554,9 @@ fn _scene_fast_bind_state(any model_matrix) bool {
 fn _scene_fast_draw_single_opaque() bool {
    mut ok = false
    if(_scene_fast_material_current()){
-      ok = lib_vkr.draw_part0_flat_state_no_restore(_scene_fast_gpu_slab) > 0
+      ok = render.renderer_draw_part0_flat_state_no_restore(_scene_fast_gpu_slab) > 0
    } else {
-      ok = lib_vkr.draw_part0_flat_no_restore(_scene_fast_gpu_slab) > 0
+      ok = render.renderer_draw_part0_flat_no_restore(_scene_fast_gpu_slab) > 0
       if(ok){ _scene_fast_note_material_bound() }
    }
    ok
@@ -7387,9 +7565,9 @@ fn _scene_fast_draw_single_opaque() bool {
 fn _scene_fast_draw_flat_range(int start_idx, int end_idx, any blend, bool use_material_state) int {
    if(end_idx <= start_idx){ return 0 }
    if(use_material_state){
-      return lib_vkr.draw_parts_flat_range_state_no_restore(_scene_fast_gpu_slab, start_idx, end_idx, blend)
+      return render.renderer_draw_parts_flat_range_state_no_restore(_scene_fast_gpu_slab, start_idx, end_idx, blend)
    }
-   lib_vkr.draw_parts_flat_range_no_restore(_scene_fast_gpu_slab, start_idx, end_idx, blend)
+   render.renderer_draw_parts_flat_range_no_restore(_scene_fast_gpu_slab, start_idx, end_idx, blend)
 }
 
 fn _scene_fast_draw_multi_static_ranges() bool {
@@ -7397,7 +7575,7 @@ fn _scene_fast_draw_multi_static_ranges() bool {
    def use_material_state = _scene_fast_material_current() && !_scene_fast_gpu_has_optical && !_scene_fast_gpu_has_blend
    drawn += _scene_fast_draw_flat_range(0, _scene_fast_gpu_optical_start, 0, use_material_state)
    if(_scene_fast_gpu_has_optical && _scene_fast_gpu_optical_start < _scene_fast_gpu_count){
-      lib_vkr.capture_scene_color_resume_pass()
+      render.renderer_capture_scene_color_resume_pass()
    }
    drawn += _scene_fast_draw_flat_range(_scene_fast_gpu_optical_start, _scene_fast_gpu_blend_start, 0, use_material_state)
    if(_scene_fast_gpu_has_blend && _scene_fast_gpu_blend_start < _scene_fast_gpu_count){
@@ -7405,33 +7583,66 @@ fn _scene_fast_draw_multi_static_ranges() bool {
    } elif(drawn <= 0 && _scene_fast_gpu_count > 0){
       drawn += _scene_fast_draw_flat_range(0, _scene_fast_gpu_count, 0, use_material_state)
    }
-   if(_scene_fast_gpu_has_optical){ lib_vkr.clear_scene_color_capture() }
+   if(_scene_fast_gpu_has_optical){ render.renderer_clear_scene_color_capture() }
    if(!use_material_state && drawn > 0 && !_scene_fast_gpu_has_optical && !_scene_fast_gpu_has_blend){
       _scene_fast_note_material_bound()
    }
    drawn > 0
 }
 
+fn _scene_fast_draw_generic(any group, any model_matrix) bool {
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] generic enter") }
+   render.set_model_matrix(model_matrix)
+   def ok = render.draw_mesh_group(group)
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] generic exit ok=" + to_str(ok)) }
+   ok
+}
+
+fn _scene_fast_group_deform_active(any group) bool {
+   if(!is_dict(group)){ return false }
+   def has_anim = int(group.get("anim_count", 0)) > 0 || int(group.get("skin_count", 0)) > 0 || int(group.get("morph_target_count", 0)) > 0
+   if(!has_anim){ return false }
+   bool(group.get("anim_playing", false)) || bool(group.get("anim_time_override", false))
+}
+
 fn scene_fast_draw(any group, any model_matrix, bool log_enabled=false) bool {
    "Draws a cached static GPU scene when compatible."
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] enter") }
    if(!is_dict(group)){ return false }
+   if(_scene_fast_group_deform_active(group)){ return _scene_fast_draw_generic(group, model_matrix) }
+   if(!render.renderer_packed_scene_supported()){
+      if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] packed unsupported") }
+      return _scene_fast_draw_generic(group, model_matrix)
+   }
+   if(!_scene_fast_group_has_packed_state(group)){
+      if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] no packed state") }
+      return _scene_fast_draw_generic(group, model_matrix)
+   }
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] refresh") }
    if(!_scene_fast_refresh_cache(group, log_enabled)){
       if(log_enabled){ ui_profile.print_text("[scene:fast] unsupported") }
-      return false
+      if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] refresh unsupported -> generic") }
+      return _scene_fast_draw_generic(group, model_matrix)
    }
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] ready=" + to_str(_scene_fast_gpu_ready) + " count=" + to_str(_scene_fast_gpu_count) + " slab=" + to_str(_scene_fast_gpu_slab)) }
    if(!_scene_fast_gpu_ready){
       if(log_enabled){
          ui_profile.print_text("[scene:fast] not-ready slab=" + to_str(_scene_fast_gpu_slab != 0) +
          " count=" + to_str(_scene_fast_gpu_count))
       }
-      return false
+      return _scene_fast_draw_generic(group, model_matrix)
    }
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] bind") }
    _scene_fast_bind_state(model_matrix)
-   _scene_fast_gpu_single_opaque ? _scene_fast_draw_single_opaque() : _scene_fast_draw_multi_static_ranges()
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] packed draw") }
+   def ok = _scene_fast_gpu_single_opaque ? _scene_fast_draw_single_opaque() : _scene_fast_draw_multi_static_ranges()
+   if(ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE")){ ui_profile.print_text("[scene:fast] packed ok=" + to_str(ok)) }
+   ok ? true : _scene_fast_draw_generic(group, model_matrix)
 }
 
 fn scene_fast_color_reuse_ready(any group) bool {
    "Reports whether the current cached scene can reuse the static color target."
+   if(_scene_fast_group_deform_active(group)){ return false }
    to_int(group) == to_int(_scene_fast_group)
    && _scene_fast_gpu_single_opaque
    && !_scene_fast_gpu_has_blend
@@ -7474,6 +7685,10 @@ fn scene_fast_color_reuse_ready(any group) bool {
    mut drag = scene_drag_begin_state(drag_scene, 10.0, 20.0, 0)
    drag = scene_drag_apply(drag_scene, drag, 30.0, 10.0, 0.0, [0, 0, 0, 10, 1, 1])
    assert(bool(drag.get("changed", false)) && float(drag_scene.get("edit_tx", 0.0)) > 0.0 && float(drag_scene.get("edit_ty", 0.0)) > 0.0, "scene drag translate")
+   mut huge_drag_scene = {"edit_tx": 0.0, "edit_ty": 0.0, "edit_tz": 0.0}
+   mut huge_drag = scene_drag_begin_state(huge_drag_scene, 0.0, 0.0, 0, {"axis": 2, "screen_axis_x": 0.0, "screen_axis_y": -1.0})
+   huge_drag = scene_drag_apply(huge_drag_scene, huge_drag, 0.0, -140.0, 0.0, [0, 0, 0, 100000, 1, 1])
+   assert(float(huge_drag_scene.get("edit_ty", 0.0)) > 0.0 && float(huge_drag_scene.get("edit_ty", 0.0)) < 5.0, "scene drag huge Y is stable")
    drag = scene_drag_begin_state(drag_scene, 0.0, 0.0, 2)
    drag = scene_drag_apply(drag_scene, drag, 10.0, -10.0, 0.0, [])
    assert(float(drag_scene.get("edit_scale", 1.0)) > 1.0, "scene drag scale")

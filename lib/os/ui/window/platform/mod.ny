@@ -5,7 +5,7 @@
 ;; - std.os.ui.window.consts
 module std.os.ui.window.platform(
    init, terminate, init_hint, init_allocator, init_vulkan_loader, get_version, get_version_string,
-   get_platform, get_error, set_error_callback, get_proc_address, get_instance_proc_address, get_time,
+   get_platform, get_error, set_error_callback, get_proc_address, get_instance_proc_address, make_context_current, get_time,
    set_time, get_timer_value, get_timer_frequency, wait_events, wait_events_timeout, create_window,
    destroy_window, should_close, set_should_close, set_title, get_window_title, set_window_title,
    set_window_icon, get_pos, set_pos, get_window_pos, set_window_pos, get_size, get_window_size,
@@ -87,7 +87,7 @@ use std.math as math
 use std.core.str as str
 use std.core.common as common
 use std.os.ui.render.dump as ui_profile
-use std.os.ui.window.event (make_event, event_type, event_window, event_window_id, event_data)
+use std.os.ui.window.event (is_event, make_event, event_type, event_window, event_window_id, event_data)
 use std.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR,
    EVENT_FLAGS_DATA_DROP_EVENTS, EVENT_FLAGS_MONITOR_EVENTS,
    EVENT_FLAGS_ALL,
@@ -479,16 +479,17 @@ fn create_window(str name, int x, int y, int w, int h, int flags) any {
    def client_api = band(flags, 0x80000) ? api.NO_API : hints.get(api.CLIENT_API, api.NO_API)
    mut visual = 0
    mut depth = 0
+   mut x11_display = 0
    if(b == "x11" && client_api != api.NO_API){
-      def dpy = x11_backend.open_display()
-      if(dpy){
-         def s = x11_backend.default_screen(dpy)
-         def info = opengl_backend.choose_visual(hints, dpy, s)
+      x11_display = x11_backend.open_display()
+      if(x11_display){
+         def s = x11_backend.default_screen(x11_display)
+         def info = opengl_backend.choose_visual(hints, x11_display, s)
          visual, depth = info.get(0), info.get(1)
       }
    }
    mut native = 0
-   if(b == "x11"){ native = x11_backend.create_basic_window(name, w, h, x, y, flags, 0, x11_class, x11_inst, visual, depth) }
+   if(b == "x11"){ native = x11_backend.create_basic_window(name, w, h, x, y, flags, 0, x11_class, x11_inst, visual, depth, x11_display) }
    elif(b == "wayland"){
       def wayland_globals = _get_platform_val("platform", dict(8)).get("wayland_globals", 0)
       native = wayland_backend.create_basic_window(wayland_globals, name, w, h, wl_app_id)
@@ -555,6 +556,18 @@ fn destroy_window(any win) any {
       return 0
    }
    def b = _select_backend_name()
+   def window_contexts = _get_platform_val("window_contexts", dict(8))
+   def ctx = window_contexts.get(handle, 0)
+   if(ctx){
+      if(_get_platform_val("current_win_context", 0) == handle){
+         opengl_backend.release_context_current()
+         _set_platform_val("current_win_context", 0)
+         _dbg_v("destroy_window: cleared current context")
+      }
+      opengl_backend.destroy_offscreen_context(ctx)
+      _set_platform_val("window_contexts", window_contexts.delete(handle))
+      _dbg_v("destroy_window: OpenGL context destroyed")
+   }
    if(b == "x11"){ x11_backend.destroy_basic_window(native) }
    elif(b == "wayland"){ wayland_backend.destroy_basic_window(native) }
    elif(b == "win32"){ win32_impl.destroy_basic_window(native) }
@@ -562,13 +575,6 @@ fn destroy_window(any win) any {
    _set_platform_val("native_windows", _get_platform_val("native_windows", dict(8)).delete(handle))
    _set_platform_val("should_close_flags", _get_platform_val("should_close_flags", dict(8)).delete(handle))
    _set_platform_val("window_attribs", _get_platform_val("window_attribs", dict(8)).delete(handle))
-   def window_contexts = _get_platform_val("window_contexts", dict(8))
-   def ctx = window_contexts.get(handle, 0)
-   if(ctx){
-      opengl_backend.destroy_offscreen_context(ctx)
-      _set_platform_val("window_contexts", window_contexts.delete(handle))
-      _dbg_v("destroy_window: OpenGL context destroyed")
-   }
    if(_get_platform_val("current_win_context", 0) == handle){
       _set_platform_val("current_win_context", 0)
       _dbg_v("destroy_window: cleared current context")
@@ -800,6 +806,19 @@ fn _display_from_native_windows(any windows) any {
    0
 }
 
+
+fn _native_queue_push(any q, any ne) list {
+   if(!is_list(q)){ q = [] }
+   if(is_event(ne) && event_type(ne) == EVENT_MOUSE_POS_CHANGED && q.len > 0){
+      def last = q.get(q.len - 1, [])
+      if(is_event(last) && event_type(last) == EVENT_MOUSE_POS_CHANGED){
+         q[q.len - 1] = ne
+         return q
+      }
+   }
+   q.append(ne)
+}
+
 fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=false) int {
    if(!is_list(evs) || evs.len <= 0){ return 0 }
    mut pending_events = _get_platform_val("pending_native_events", dict(8))
@@ -812,7 +831,7 @@ fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=
       if(!wid){ wid = fallback_handle }
       if(wid){
          def q = pending_events.get(wid, [])
-         pending_events[wid] = q.append(ne)
+         pending_events[wid] = _native_queue_push(q, ne)
          if(event_type(ne) == EVENT_QUIT){
             mut flags = _get_platform_val("should_close_flags", dict(8))
             flags[wid] = true
@@ -955,7 +974,7 @@ fn poll_events_for_window(any win) list {
          mut i = 0
          while(i < raw_n){
             def ne = _normalize_native_event(raw.get(i))
-            out = out.append(ne)
+            out = _native_queue_push(out, ne)
             if(have_window_callbacks){ _dispatch_event_callbacks(ne) }
             i += 1
          }
@@ -980,7 +999,7 @@ fn poll_events_for_window(any win) list {
       def raw_n = raw.len
       while(i < raw_n){
          def ne = _normalize_native_event(raw.get(i))
-         out = out.append(ne)
+         out = _native_queue_push(out, ne)
          if(have_window_callbacks){ _dispatch_event_callbacks(ne) }
          i += 1
       }
@@ -1004,7 +1023,7 @@ fn poll_events_for_window(any win) list {
       def raw_n = raw.len
       while(i < raw_n){
          def ne = _normalize_native_event(raw.get(i))
-         out = out.append(ne)
+         out = _native_queue_push(out, ne)
          if(have_window_callbacks){ _dispatch_event_callbacks(ne) }
          i += 1
       }

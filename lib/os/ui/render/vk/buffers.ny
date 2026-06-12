@@ -363,6 +363,7 @@ fn _find_memory_type(int type_filter, int properties) int {
 fn _copy_buffer(?handle src, ?handle dst, int size) bool { _copy_buffer_region(src, dst, 0, 0, size) }
 
 fn _ensure_upload_cb() any {
+   if(!_upload_alloc || !_upload_cb_ptr){ return 0 }
    if(_upload_cb != 0){
       reset_command_buffer(_upload_cb, 0)
       return _upload_cb
@@ -407,7 +408,7 @@ fn _submit_upload_cb(any cb) bool {
       _buf_trace("submit upload command buffer failed code=" + to_str(submit_res))
       return false
    }
-   def wait_res = wait_for_fences(_device, 1, _upload_fence_ptr, 1, 0xFFFFFFFFFFFFFFFF)
+   def wait_res = wait_for_fences(_device, 1, _upload_fence_ptr, 1, 5_000_000_000)  ;; 5 second timeout
    if(wait_res != 0){
       _buf_trace("wait upload fence failed code=" + to_str(wait_res))
       return false

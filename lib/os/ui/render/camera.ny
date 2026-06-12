@@ -355,9 +355,23 @@ fn simulate_frame_state(dict state) dict {
       look_dx, look_dy = dx, dy
       if(fps_mouse_look){
          look_dx, look_dy = clamp(look_dx, -48.0, 48.0), clamp(look_dy, -48.0, 48.0)
-         def smooth_alpha = clamp(float(state.get("look_smooth_alpha", 0.58)), 0.0, 1.0)
-         rmb_dx_smooth = rmb_dx_smooth + (look_dx - rmb_dx_smooth) * smooth_alpha
-         rmb_dy_smooth = rmb_dy_smooth + (look_dy - rmb_dy_smooth) * smooth_alpha
+         ;; Raw/captured mouse should be direct by default.  The old 0.58
+         ;; smoothing was frame-rate dependent and made Vulkan camera look jitter
+         ;; and laggy, especially when swap/present timing varied.
+         mut smooth_alpha = clamp(float(state.get("look_smooth_alpha", 1.0)), 0.0, 1.0)
+         ;; Make smoothing stable across 30/60/144Hz.  A fixed per-frame alpha
+         ;; changes feel with present timing and can show as jitter when Vulkan
+         ;; pacing varies.  Treat the configured alpha as the 60Hz response.
+         if(smooth_alpha > 0.0 && smooth_alpha < 0.999){
+            def frame_scale = clamp(dt * 60.0, 0.25, 4.0)
+            smooth_alpha = 1.0 - pow(1.0 - smooth_alpha, frame_scale)
+         }
+         if(smooth_alpha >= 0.999){
+            rmb_dx_smooth, rmb_dy_smooth = look_dx, look_dy
+         } else {
+            rmb_dx_smooth = rmb_dx_smooth + (look_dx - rmb_dx_smooth) * smooth_alpha
+            rmb_dy_smooth = rmb_dy_smooth + (look_dy - rmb_dy_smooth) * smooth_alpha
+         }
          look_dx, look_dy = rmb_dx_smooth, rmb_dy_smooth
       } elif(!bool(state.get("prep_gui", false))){
          look_dx, look_dy = clamp(look_dx, -60.0, 60.0), clamp(look_dy, -60.0, 60.0)

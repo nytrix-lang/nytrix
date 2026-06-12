@@ -170,13 +170,22 @@ fn app_window_extent_from_env(any headless=false) list {
 fn app_startup_render_config(any msaa, any vsync, any filter_linear) dict {
    "Returns startup renderer settings after env overrides."
    mut out = dict(3)
+   def trace_mode = common.env_lower("NY_TRACE")
+   def perf_mode = trace_mode == "perf" || trace_mode == "bench" || trace_mode == "fast" || common.env_truthy("NY_TRACE_PERF")
+
    mut samples = int(msaa)
+   if(perf_mode && !common.env_present("NY_UI_MSAA")){ samples = 1 }
    if(common.env_present("NY_UI_MSAA")){
       def v = common.env_int_clamped("NY_UI_MSAA", samples, 1, 8)
       samples = v <= 1 ? 1 : (v <= 2 ? 2 : (v <= 4 ? 4 : 8))
    }
+
+   mut use_vsync = bool(vsync)
+   if(perf_mode && !common.env_present("NY_UI_VSYNC")){ use_vsync = false }
+   use_vsync = common.env_toggle("NY_UI_VSYNC", use_vsync)
+
    out["msaa"] = samples
-   out["vsync"] = common.env_toggle("NY_UI_VSYNC", bool(vsync))
+   out["vsync"] = use_vsync
    out["filter_linear"] = common.env_toggle("NY_UI_FILTER_LINEAR", bool(filter_linear))
    out
 }

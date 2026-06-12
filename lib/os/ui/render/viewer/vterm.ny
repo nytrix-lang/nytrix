@@ -16,33 +16,14 @@ use std.math
 use std.parse.img.png as png_img
 use std.os.ui.window.consts
 use std.os.ui.render (
-   BACKEND_MOCK, _font_get, color_pack, draw_rect, draw_text,
-   draw_text_runs_flat_colors, font_prepare, get_active_backend, measure_text, set_unlit, texture_destroy
+   BACKEND_MOCK, _font_get, color_pack, draw_rect, draw_rect_fast,
+   draw_rect_tex_uv, draw_text, draw_text_runs_flat_colors, font_prepare,
+   get_active_backend, measure_text, reset_overlay_state, set_unlit,
+   texture_bind, texture_bind_default, texture_create_rgba, texture_destroy,
+   terminal_fast_text_supported, draw_terminal_line_fast_ptr, draw_text_glyph_fast,
+   font_fast_glyph_present, font_fast_glyph_texture
 )
 
-use std.os.ui.render.vk.draw (
-   draw_rect_fast as vkr_draw_rect_fast,
-   draw_rect_tex_uv as vkr_draw_rect_tex_uv
-)
-
-use std.os.ui.render.vk.font (
-   draw_terminal_line_ptr as vkr_draw_terminal_line_ptr,
-   __vkr_draw_text_glyph as vkr_draw_text_glyph,
-   _vkr_glyph_present as vkr_glyph_present
-)
-
-use std.os.ui.render.vk.renderer (
-   set_mask as vkr_set_mask,
-   set_unlit as vkr_set_unlit
-)
-
-use std.os.ui.render.vk.texture (
-   bind_default_texture as vkr_bind_default_texture,
-   bind_texture as vkr_bind_texture,
-   create_texture_ex as vkr_create_texture_ex
-)
-
-use std.os.ui.render.vk.state (_VKR_GLYPH_STRIDE, _VKR_VERT_STRIDE, _VKR_G_TEX, _current_tex_index)
 use std.os.ui.window as uiw
 use std.os.ui.window.input
 use std.core.common as common
@@ -1198,14 +1179,14 @@ fn _kg_draw_stripe(dict vt,
       def v1, v2 = (iy1 - fit_y) / fit_h, (iy2 - fit_y) / fit_h
       def dx, dy = box_x + ix1, box_y + iy1
       def dw, dh = ix2 - ix1, iy2 - iy1
-      vkr_draw_rect_tex_uv(dx, dy, dw, dh, tex, u1, v1, u2, v2, 1.0, 1.0, 1.0, 1.0)
+      draw_rect_tex_uv(dx, dy, dw, dh, tex, u1, v1, u2, v2, 1.0, 1.0, 1.0, 1.0)
       return 0
    }
    def u1, u2 = float(img_col_start - 1) / float(total_cols), float(img_col_end) / float(total_cols)
    def v1, v2 = float(img_row - 1) / float(total_rows), float(img_row) / float(total_rows)
    def dx, dy = float(screen_x_cell) * cw + _px, screen_y_pix
    def dw, dh = float(img_col_end - img_col_start + 1) * cw, ch
-   vkr_draw_rect_tex_uv(dx, dy, dw, dh, tex, u1, v1, u2, v2, 1.0, 1.0, 1.0, 1.0)
+   draw_rect_tex_uv(dx, dy, dw, dh, tex, u1, v1, u2, v2, 1.0, 1.0, 1.0, 1.0)
    0
 }
 
@@ -1351,7 +1332,7 @@ fn _kg_draw_visible_images(dict vt,
                         def fit_w = float(iw) * sc
                         def fit_h = float(ih) * sc
                         def fit_x, fit_y = 0.0, 0.0
-                        vkr_draw_rect_tex_uv(dx + fit_x,
+                        draw_rect_tex_uv(dx + fit_x,
                            dy + fit_y,
                            fit_w,
                            fit_h,
@@ -1365,7 +1346,7 @@ fn _kg_draw_visible_images(dict vt,
                            1.0,
                         1.0)
                      } else {
-                        vkr_draw_rect_tex_uv(dx, dy, dw, dh, tex, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+                        draw_rect_tex_uv(dx, dy, dw, dh, tex, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
                      }
                   }
                }
@@ -2417,7 +2398,7 @@ fn _kg_store_image_bytes(dict vt,
       w, h = data_w, data_h
       if(fmt == 32){
          if(bytes.len < w * h * 4){ return vt }
-         tex = vkr_create_texture_ex(w, h, bytes, 37)
+         tex = texture_create_rgba(w, h, bytes, 37)
       } else {
          if(bytes.len < w * h * 3){ return vt }
          def px = malloc(w * h * 4)
@@ -2433,7 +2414,7 @@ fn _kg_store_image_bytes(dict vt,
             i += 1
             o += 4
          }
-         tex = vkr_create_texture_ex(w, h, px, 37)
+         tex = texture_create_rgba(w, h, px, 37)
          free(px)
       }
    } else {
@@ -2445,7 +2426,7 @@ fn _kg_store_image_bytes(dict vt,
       w, h = img.get("width", 0), img.get("height", 0)
       def pixels = img.get("data", 0)
       if(w <= 0 || h <= 0 || !pixels){ return vt }
-      tex = vkr_create_texture_ex(w, h, pixels, 37)
+      tex = texture_create_rgba(w, h, pixels, 37)
    }
    if(!tex || tex <= 0){ return vt }
    mut ccols = cols
@@ -3245,21 +3226,21 @@ fn _vterm_draw_cursor(dict vt, any st, int co, int ro, any g, any gptr, any cw, 
    def c_off = (ccy * co + ccx) * 16
    def c_md = load32(g, c_off + 12)
    def cur_cw = ((c_md & ATTR_WIDE) != 0) ? (cw * 2.0) : cw
-   vkr_bind_default_texture()
+   texture_bind_default()
    if(cursor_style == 3){
       def uh = max(2.0, floor(ch * 0.12 + 0.5))
-      vkr_draw_rect_fast(rx, ry + ch - uh, cur_cw, uh, cur_bg)
+      draw_rect_fast(rx, ry + ch - uh, cur_cw, uh, cur_bg)
    } elif(cursor_style == 2){
       def bw = max(2.0, floor(cw * 0.12 + 0.5))
-      vkr_draw_rect_fast(rx, ry, bw, ch, cur_bg)
+      draw_rect_fast(rx, ry, bw, ch, cur_bg)
    } else {
-      vkr_draw_rect_fast(rx, ry, cur_cw, ch, cur_bg)
+      draw_rect_fast(rx, ry, cur_cw, ch, cur_bg)
    }
    def c_cp = load32(g, c_off)
    if(c_cp > 32 && cursor_style != 2){
-      if(glyph_tex >= 0){ vkr_bind_texture(glyph_tex) }
+      if(glyph_tex >= 0){ texture_bind(glyph_tex) }
       def by = floor(ry + gy_reg + ascent + 0.5)
-      vkr_draw_text_glyph(gptr, 0, rx, by, c_cp, cur_fg, _current_tex_index)
+      draw_text_glyph_fast(gptr, rx, by, c_cp, cur_fg)
    }
 }
 
@@ -3284,7 +3265,7 @@ fn _vterm_draw_background_line_ptr(any line_ptr, int co, f64 px, f64 ry, f64 cw,
             if(rbg2 == db || rbg2 != rbg){ break }
             run_len += 1
          }
-         vkr_draw_rect_fast(px + float(c) * cw, ry, cw * float(run_len), ch, rbg)
+         draw_rect_fast(px + float(c) * cw, ry, cw * float(run_len), ch, rbg)
          c += run_len
       } else {
          c += 1
@@ -3313,7 +3294,7 @@ fn _vterm_draw_selection_overlay(dict vt, any st, int co, int ro, any g, list hi
    mut s_row, s_col, e_row, e_col = ssy, ssx, sey, sex
    if(s_row > e_row || (s_row == e_row && s_col > e_col)){ s_row = sey s_col = sex e_row = ssy e_col = ssx }
    def sel_bg = _vterm_overlay_color(vt, "sel_bg", 0x70aa5544)
-   vkr_bind_default_texture()
+   texture_bind_default()
    mut r = -1
    while(r <= ro){
       def abs_r = (hist_len - scroll_off) + r
@@ -3348,7 +3329,7 @@ fn _vterm_draw_selection_overlay(dict vt, any st, int co, int ro, any g, list hi
                if(mixed2 != mixed){ break }
                run_len += 1
             }
-            vkr_draw_rect_fast(px + float(c) * cw, ry, float(run_len) * cw, ch, mixed)
+            draw_rect_fast(px + float(c) * cw, ry, float(run_len) * cw, ch, mixed)
             c += run_len
          }
       }
@@ -3368,14 +3349,14 @@ fn _vterm_draw_foregrounds(dict vt, int co, int ro, any g, list history, int his
       def ry = floor((float(r) + scroll_frac_r) * ch + py + 0.5)
       if(ry + ch < py || ry > py + wh){ r += 1 continue }
       def by = floor(ry + gy_reg + ascent + 0.5)
-      vkr_draw_terminal_line_ptr(line_ptr, co, px, by, cw, gptr, skip_mask, ATTR_REVERSE)
+      draw_terminal_line_fast_ptr(line_ptr, co, px, by, cw, gptr, skip_mask, ATTR_REVERSE)
       mut c = 0
       while(c < co){
          def off = c * 16
          def cp = load32(line_ptr, off)
-         if(cp >= 128){
+         if(cp > 32){
             def md = load32(line_ptr, off + 12)
-            if((md & skip_mask) == 0 && !vkr_glyph_present(gptr, cp)){
+            if((md & skip_mask) == 0 && !font_fast_glyph_present(gptr, cp)){
                def fg = ((md & ATTR_REVERSE) != 0) ? (load32(line_ptr, off + 8) | 0xFF000000) : (load32(line_ptr, off + 4) | 0xFF000000)
                draw_text(f_reg, _cp_to_str(cp, acache), floor(px + float(c) * cw + 0.5), ry + gy_reg, fg)
             }
@@ -3428,25 +3409,27 @@ fn draw(dict vt, any ww, any wh) any {
    def scroll_off = scroll_i
    set_unlit(true)
    def backend = get_active_backend()
-   if(backend != BACKEND_MOCK){ vkr_bind_default_texture() }
+   if(backend != BACKEND_MOCK){ texture_bind_default() }
    draw_rect(px, py, ww, wh, db)
-   if(backend == BACKEND_MOCK){
+   if(!terminal_fast_text_supported()){
       return _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db)
    }
    def gptr = (f_obj != 0) ? f_obj.get("fast_glyphs", 0) : 0
    if(!gptr){ return _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db) }
    def page0 = load64(gptr, 0)
    if(!page0){ return _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db) }
-   vkr_set_mask(0)
-   vkr_set_unlit(true)
-   def tid_def = load32(page0 + 63 * _VKR_GLYPH_STRIDE, _VKR_G_TEX)
-   vkr_bind_default_texture()
+   reset_overlay_state()
+   set_unlit(true)
+   def tid_def = font_fast_glyph_texture(gptr, 63)
+   if(tid_def < 0){ return _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db) }
+   texture_bind_default()
    _vterm_draw_backgrounds(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, db)
    _kg_draw_visible_images(vt, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh)
    _vterm_draw_selection_overlay(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, db)
-   vkr_bind_texture(tid_def)
+   ;; The Vulkan text backend binds/syncs atlas pages per vertex; avoid forcing
+   ;; one concrete texture before foregrounds, which can add a redundant flush.
    _vterm_draw_foregrounds(vt, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, gptr, f_reg, gy_reg, ascent)
-   vkr_bind_default_texture()
+   texture_bind_default()
    _vterm_draw_scrollbar(st, ro, hist_len, scroll_off, vis, ww, wh, px, py)
    if(scroll_i == 0){ _vterm_draw_cursor(vt, st, co, ro, g, gptr, cw, ch, px, py, scroll_frac_r, gy_reg, ascent, tid_def) }
    vt

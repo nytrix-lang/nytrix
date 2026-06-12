@@ -777,7 +777,7 @@ fn _mat4_mul(any a, any b) list {
             s = s + a.get(r * 4 + k, 0) * b.get(k * 4 + c, 0)
             k += 1
          }
-         out.append(s)
+         out = out.append(s)
          c += 1
       }
       r += 1
@@ -795,7 +795,7 @@ fn _mat4_mul_vec4(any m, any v) list {
          s = s + m.get(r * 4 + c, 0) * v.get(c, 0)
          c += 1
       }
-      out.append(s)
+      out = out.append(s)
       r += 1
    }
    return out
@@ -860,20 +860,18 @@ fn eq(any a, any b) bool {
    def ta, tb = __tagof(a), __tagof(b)
    if(!__is_int(ta)){ return false }
    if(!__is_int(tb)){ return false }
-   if(__eq(ta, _TAG_STR)){
-      if(__eq(tb, _TAG_STR)){ return false }
-      if(__eq(tb, _TAG_STR_CONST)){ return false }
-      return false
+
+   if(_is_str_tag(ta)){
+      if(!_is_str_tag(tb)){ return false }
+      return _str_eq(a, b)
    }
-   if(__eq(ta, _TAG_STR_CONST)){
-      if(__eq(tb, _TAG_STR)){ return false }
-      if(__eq(tb, _TAG_STR_CONST)){ return false }
-      return false
-   }
+
    def a_seq, b_seq = _is_seq_tag(ta), _is_seq_tag(tb)
    def a_list_tuple, b_list_tuple = _is_list_tuple_tag(ta), _is_list_tuple_tag(tb)
-   if(a_list_tuple){ if(b_list_tuple){ return false } }
+   if(a_list_tuple && !b_list_tuple){ return false }
+   if(!a_list_tuple && b_list_tuple){ return false }
    if(a_seq){ if(b_seq){ return _seq_eq(a, b) } }
+
    if(__eq(ta, _TAG_DICT)){
       if(__eq(tb, _TAG_DICT)){
          def av, bv = _is_vecdict(a), _is_vecdict(b)
@@ -992,17 +990,55 @@ fn repr(any x) str {
    _repr_depth(x, 0)
 }
 
+fn _hash_mix(int h, any v) int {
+   ((h ^^ hash(v)) * 16777619) & 2147483647
+}
+
 fn hash(any x) int {
-   "Returns a stable hash for primitive values. Currently supports integers, strings, and ranges."
+   "Returns a stable structural hash for primitive and collection values."
    if(__is_int(x)){ return x }
+   if(_is_str(x)){ return __str_hash(x) }
+   if(_is_float(x)){ return __flt_hash(x) }
+   if(_is_bigint(x)){ return __str_hash(__bigint_to_str(x)) }
    if(_is_range(x)){
-      mut h = 14695981039346656037
-      h = (h ^^ __load64_idx(x, 0)) * 1099511628211
-      h = (h ^^ __load64_idx(x, 8)) * 1099511628211
-      h = (h ^^ __load64_idx(x, 16)) * 1099511628211
+      mut h = 2166136261
+      h = _hash_mix(h, __load64_idx(x, 0))
+      h = _hash_mix(h, __load64_idx(x, 8))
+      h = _hash_mix(h, __load64_idx(x, 16))
       return h
    }
-   if(_is_str(x)){ return __str_hash(x) }
+   if(_is_list(x) || _is_tuple(x)){
+      mut h = 2166136261
+      mut i = 0
+      while(i < x.len){
+         h = _hash_mix(h, x.get(i))
+         i += 1
+      }
+      if(_is_tuple(x)){ h = _hash_mix(h, 0x5455504c) }
+      return h
+   }
+   if(_is_dict(x)){
+      mut h = 2166136261
+      def its = items(x)
+      mut i = 0
+      while(i < its.len){
+         def p = its.get(i)
+         h = _hash_mix(h, p.get(0))
+         h = _hash_mix(h, p.get(1))
+         i += 1
+      }
+      return h
+   }
+   if(_is_set(x)){
+      mut h = 2166136261
+      def its = items(x)
+      mut i = 0
+      while(i < its.len){
+         h = h ^^ hash(its.get(i))
+         i += 1
+      }
+      return h & 2147483647
+   }
    return 0
 }
 
@@ -1032,7 +1068,7 @@ fn items(any x) list {
       mut i = 0
       while(i < cap){
          def off = 16 + i * 24
-         if(__load64_idx(x, off + 16) == 1){ out.append(__load64_idx(x, off)) }
+         if(__load64_idx(x, off + 16) == 1){ out = out.append(__load64_idx(x, off)) }
          i += 1
       }
       return out
@@ -1283,12 +1319,10 @@ fn _set_impl(any obj, any key, any val) any {
       else { _type_error("set", "an integer index", key) }
       if(!__is_int(k)){ _type_error("set", "an integer index", key) }
       def n = obj.len
-      def cap = __load64_idx(obj, 8)
       if(__lt(k, 0)){ k = __add(k, n) }
-      if(__lt(k, 0) || __ge(k, cap)){ _index_error("set", k, cap) }
+      if(__lt(k, 0) || __ge(k, n)){ _index_error("set", k, n) }
       else {
          __store_item_fast(obj, k, val)
-         if(__ge(k, n)){ _set_seq_count(obj, __add(k, 1)) }
          return obj
       }
    }
@@ -1319,37 +1353,47 @@ fn set(any obj, any key, any val) any {
 
 @returns_owned
 fn slice(any obj, int start, int stop, int step=1) any {
-   "Generic **slice** operation for strings and lists."
+   "Generic **slice** operation for strings, lists, and tuples."
    if(_is_str(obj)){ return utf8_slice(obj, start, stop, step) }
-   elif(_is_list(obj)){
+   elif(_is_list(obj) || _is_tuple(obj)){
+      def want_tuple = _is_tuple(obj)
       def n = obj.len
       if(start < 0){ start = n + start }
       if(stop < 0){ stop = n + stop }
       if(step > 0){
          if(start < 0){ start = 0 }
          if(stop > n){ stop = n }
-         if(start >= stop){ return list(0) }
+         if(start >= stop){
+            mut empty = list(0)
+            if(want_tuple){ prim.list_as_tuple_raw(empty) }
+            return empty
+         }
       } else {
          if(start >= n){ start = n - 1 }
          if(stop < prim.sub(0, 1)){ stop = prim.sub(0, 1) }
-         if(start <= stop){ return list(0) }
+         if(start <= stop){
+            mut empty = list(0)
+            if(want_tuple){ prim.list_as_tuple_raw(empty) }
+            return empty
+         }
       }
       mut out = list(n)
       mut i = start
       if(step > 0){
          while(i < stop){
-            out.append(obj.get(i))
+            out = out.append(obj.get(i))
             i = i + step
          }
       } else {
          while(i > stop){
-            out.append(obj.get(i))
+            out = out.append(obj.get(i))
             i = i + step
          }
       }
+      if(want_tuple){ prim.list_as_tuple_raw(out) }
       return out
    }
-   else { _type_error("slice", "a string or list", obj) }
+   else { _type_error("slice", "a string, list, or tuple", obj) }
 }
 
 fn append(any lst, any v) any {
@@ -1374,13 +1418,16 @@ fn pop(any lst) any {
 
 @returns_owned
 fn _extend_str_owned(str lst, any other) str {
-   mut out = lst
-   mut i = 0
    def n = other.len
+   mut b = Builder(lst.len + n * 4 + 8)
+   b = builder_append(b, lst)
+   mut i = 0
    while(i < n){
-      out = out + other.get(i)
+      b = builder_append(b, other.get(i))
       i += 1
    }
+   def out = builder_to_str(b)
+   builder_free(b)
    return out
 }
 
@@ -1525,6 +1572,7 @@ fn to_str(any v) str {
    _reflect_check(len([1, 2, 3]) == 3 && len("hello") == 5, "reflect len")
    _reflect_check(contains([1, 2, 3], 2) && contains("hello world", "world"), "reflect contains")
    _reflect_check(eq([1, 2, 3], [1, 2, 3]) && !eq([1, 2, 3], [1, 2, 4]), "reflect list equality")
+   _reflect_check(eq((1, 2), (1, 2)) && eq((1, 2), [1, 2]), "reflect tuple/list sequence equality")
    mut d1 = dict(8)
    d1["a"] = 1
    d1["b"] = 2
@@ -1535,7 +1583,7 @@ fn to_str(any v) str {
    _reflect_check(to_str([1, 2, 3]) == "[1, 2, 3]", "reflect list to_str")
    _reflect_check(repr("hello") == "\"hello\"", "reflect string repr")
    _reflect_check(repr(["a", "b"]) == "[\"a\", \"b\"]", "reflect list repr")
-   _reflect_check(hash("hello") == hash("hello") && hash("hello") != hash("world"), "reflect hash")
+   _reflect_check(hash("hello") == hash("hello") && hash("hello") != hash("world") && hash([1, 2]) == hash([1, 2]), "reflect hash")
    def deep_list = [[[[[1]]]]]
    _reflect_check(repr(deep_list).contains("[...]") && to_str(deep_list).contains("[...]"), "reflect deep list rendering")
    def deep_dict = {"a": {"b": {"c": {"d": {"e": 1}}}}}
@@ -1543,6 +1591,7 @@ fn to_str(any v) str {
    def writable = [1, 2, 3]
    writable[1] = 9
    _reflect_check(writable.get(1) == 9, "reflect set_idx raw store")
+   _reflect_check(slice((1, 2, 3), 1, 3) == (2, 3), "reflect tuple slice")
    def v2 = Vector2([3, 4])
    def v3 = Vector3([1, 2, 3])
    def v4 = Vector4([5, 6, 7, 8])

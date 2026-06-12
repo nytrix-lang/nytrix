@@ -7,7 +7,6 @@ module std.os.ui.render.viewer.engine.overlay(init, prepare_pass, fps_skip_reuse
 use std.core
 use std.os.ui.render as gfx
 use std.os.ui.render.matrix as rmat
-use std.os.ui.render.vk as vkr
 
 mut _cached_fps = -1
 mut _cached_fps_str = ""
@@ -38,13 +37,9 @@ fn init() bool {
 fn prepare_pass(f64 win_w, f64 win_h, any model_matrix) bool {
    "Prepares renderer state for 2D overlay drawing."
    gfx.set_ortho_2d(0, win_w, win_h, 0)
-   vkr.use_custom_push_constants(false)
-   vkr.bind_pipeline(0)
+   gfx.reset_overlay_state()
    gfx.set_unlit(true)
    gfx.set_model_matrix(model_matrix)
-   vkr.set_material_packed(0xffffffff, 0, 0, -1, 0, -1, 0)
-   vkr.set_mask(0)
-   vkr.reset_scissor_rect()
    true
 }
 
@@ -64,8 +59,8 @@ fn draw_fps(int font, int fps_value, bool reuse_color=false) bool {
    }
    if(reuse_color && _refresh_frames <= 0){ return true }
    def col = (fv >= 100) ? _color_fps_g : ((fv >= 50) ? _color_fps_w : _color_fps_b)
-   vkr.draw_rect_fast(3.0, 3.0, 112.0, 21.0, _color_diag_bg)
-   vkr.draw_rect_fast(3.0, 3.0, 2.0, 21.0, _color_diag_bar)
+   gfx.draw_rect_fast(3.0, 3.0, 112.0, 21.0, _color_diag_bg)
+   gfx.draw_rect_fast(3.0, 3.0, 2.0, 21.0, _color_diag_bar)
    gfx.draw_text(font, _cached_fps_str, 5.0, 5.0, col)
    if(reuse_color && _refresh_frames > 0){ _refresh_frames -= 1 }
    true

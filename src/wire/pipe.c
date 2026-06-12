@@ -4262,12 +4262,12 @@ static bool ny_should_preserve_symbol(const codegen_t *cg, const char *name,
   if (dot) {
     if (!cg)
       return true;
-    size_t mod_len = (size_t)(dot - name);
     for (size_t i = 0; i < cg->link_allowed_modules.len; i++) {
       const char *use_name = cg->link_allowed_modules.data[i];
       if (!use_name)
         continue;
-      if (strncmp(name, use_name, mod_len) == 0 && use_name[mod_len] == '\0') {
+      size_t use_len = strlen(use_name);
+      if (strncmp(name, use_name, use_len) == 0 && name[use_len] == '.') {
         return true;
       }
     }

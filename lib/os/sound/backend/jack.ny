@@ -11,6 +11,75 @@ use std.os.time
 use std.core.common as common
 use std.os.sound.backend.shared as backend_shared
 
+fn _ny_jack_set_process_callback(..._args) i32 { -1 }
+fn jack_ringbuffer_free(any _rb) any {
+   "Runs the jack ringbuffer free operation."
+   0
+}
+fn jack_get_buffer_size(any _client) int {
+   "Runs the jack get buffer size operation."
+   0
+}
+fn jack_ringbuffer_create(any _bytes) any {
+   "Runs the jack ringbuffer create operation."
+   0
+}
+fn jack_get_ports(..._args) any {
+   "Runs the jack get ports operation."
+   0
+}
+fn jack_port_name(any _port) any {
+   "Runs the jack port name operation."
+   0
+}
+fn jack_connect(..._args) int {
+   "Runs the jack connect operation."
+   -1
+}
+fn jack_free(any _ptr) any {
+   "Runs the jack free operation."
+   0
+}
+fn jack_ringbuffer_read_space(any _rb) int {
+   "Runs the jack ringbuffer read space operation."
+   0
+}
+fn jack_ringbuffer_read(..._args) int {
+   "Runs the jack ringbuffer read operation."
+   0
+}
+fn jack_port_get_buffer(..._args) any {
+   "Runs the jack port get buffer operation."
+   0
+}
+fn jack_client_open(..._args) any {
+   "Runs the jack client open operation."
+   0
+}
+fn jack_client_close(any _client) int {
+   "Runs the jack client close operation."
+   0
+}
+fn jack_port_register(..._args) any {
+   "Runs the jack port register operation."
+   0
+}
+fn jack_activate(any _client) int {
+   "Runs the jack activate operation."
+   -1
+}
+fn jack_deactivate(any _client) int {
+   "Runs the jack deactivate operation."
+   0
+}
+fn jack_ringbuffer_write_space(any _rb) int {
+   "Runs the jack ringbuffer write space operation."
+   0
+}
+fn jack_ringbuffer_write(..._args) int {
+   "Runs the jack ringbuffer write operation."
+   0
+}
 #linux {
    #link "libjack.so"
    #include <jack/jack.h> as "jack_"
@@ -18,77 +87,8 @@ use std.os.sound.backend.shared as backend_shared
    extern "jack" {
       fn _ny_jack_set_process_callback(ptr client, fnptr cb, ptr arg) i32 as "jack_set_process_callback"
    }
-} #else {
-   fn _ny_jack_set_process_callback(..._args) i32 { -1 }
-   fn jack_ringbuffer_free(any _rb) any {
-      "Runs the jack ringbuffer free operation."
-      0
-   }
-   fn jack_get_buffer_size(any _client) int {
-      "Runs the jack get buffer size operation."
-      0
-   }
-   fn jack_ringbuffer_create(any _bytes) any {
-      "Runs the jack ringbuffer create operation."
-      0
-   }
-   fn jack_get_ports(..._args) any {
-      "Runs the jack get ports operation."
-      0
-   }
-   fn jack_port_name(any _port) any {
-      "Runs the jack port name operation."
-      0
-   }
-   fn jack_connect(..._args) int {
-      "Runs the jack connect operation."
-      -1
-   }
-   fn jack_free(any _ptr) any {
-      "Runs the jack free operation."
-      0
-   }
-   fn jack_ringbuffer_read_space(any _rb) int {
-      "Runs the jack ringbuffer read space operation."
-      0
-   }
-   fn jack_ringbuffer_read(..._args) int {
-      "Runs the jack ringbuffer read operation."
-      0
-   }
-   fn jack_port_get_buffer(..._args) any {
-      "Runs the jack port get buffer operation."
-      0
-   }
-   fn jack_client_open(..._args) any {
-      "Runs the jack client open operation."
-      0
-   }
-   fn jack_client_close(any _client) int {
-      "Runs the jack client close operation."
-      0
-   }
-   fn jack_port_register(..._args) any {
-      "Runs the jack port register operation."
-      0
-   }
-   fn jack_activate(any _client) int {
-      "Runs the jack activate operation."
-      -1
-   }
-   fn jack_deactivate(any _client) int {
-      "Runs the jack deactivate operation."
-      0
-   }
-   fn jack_ringbuffer_write_space(any _rb) int {
-      "Runs the jack ringbuffer write space operation."
-      0
-   }
-   fn jack_ringbuffer_write(..._args) int {
-      "Runs the jack ringbuffer write operation."
-      0
-   }
-} #endif
+}
+#endif
 def JACK_NO_START_SERVER = 0x01
 def JACK_PORT_IS_INPUT = 0x1
 def JACK_PORT_IS_OUTPUT = 0x2

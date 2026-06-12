@@ -56,30 +56,33 @@ fn _text_baseline_y(any y, any ascent) f64 {
 }
 
 fn _begin_text_batch(int base_tex_id=-1) any {
-   set_ui_material(base_tex_id, 2, 12)
+   ;; Text batches must stay in per-vertex texture mode.  btop/htop style TUIs
+   ;; mix box-drawing glyphs, ASCII and fallback pages; using one concrete
+   ;; base texture per page forced a material flush on almost every page switch.
+   ;;
+   ;; vc_mode=12 => vertex texture index + vertex color multiply.
+   ;; alpha=2 keeps atlas coverage/mask behavior.
+   set_ui_material(-1, 2, 12)
    set_mask(0)
    set_unlit(true)
    _ensure_default_triangle_pipeline()
    0
 }
 
-fn _set_text_page(int base_tex_id) any {
-   "Binds the active font-atlas page through the material path, so glyph sampling
-   never falls back to the default white texture."
-   if(base_tex_id < 0){ return 0 }
-   set_ui_material(-1, 2, 12)
-   set_unlit(true)
-   _ensure_default_triangle_pipeline()
-   bind_texture(base_tex_id)
-   if(_bindless_ds){
-      bindless_sync_texture_slot(base_tex_id)
-      _current_texture_id = base_tex_id
-      _current_tex_index = base_tex_id
-      if(_vertex_offset == _last_flush_offset){
-         _batch_texture_id = base_tex_id
-         _batch_tex_index = base_tex_id
-      }
-      return 0
+fn _set_text_page(int tex_id) any {
+   "Prepares an atlas page for vertex-indexed text without changing material.
+   The glyph page is carried per vertex through vTexIndex, so changing pages
+   must not flush the whole dynamic batch.  This keeps fullscreen terminal apps
+   from producing hundreds of tiny Vulkan draws when they mix ASCII and Unicode
+   box-drawing glyph pages."
+   if(tex_id < 0){ return 0 }
+   if(_bindless_ds){ bindless_sync_texture_slot(tex_id) }
+   else { bind_texture(tex_id) }
+   _current_texture_id = tex_id
+   _current_tex_index = tex_id
+   if(_vertex_offset == _last_flush_offset){
+      _batch_texture_id = tex_id
+      _batch_tex_index = tex_id
    }
    0
 }
@@ -89,11 +92,19 @@ mut _glyph_page_tex = -999999
 
 fn _ensure_glyph_text_page(int tex_id) any {
    if(tex_id < 0){ return 0 }
+   ;; Keep one stable text material for the whole terminal foreground pass.
+   ;; Only the per-vertex texture id changes between glyph pages.
+   if(_current_base_tex_id != -1 || _current_vc_mode != 12 || _current_alpha_u32 != 2){
+      _begin_text_batch(-1)
+   } else {
+      set_unlit(true)
+      set_mask(0)
+      _ensure_default_triangle_pipeline()
+   }
    if(_glyph_page_frame == _current_frame && _glyph_page_tex == tex_id &&
       _current_texture_id == tex_id && _current_tex_index == tex_id){
       return 0
    }
-   _begin_text_batch()
    _set_text_page(tex_id)
    _glyph_page_frame = _current_frame
    _glyph_page_tex = tex_id
@@ -246,10 +257,11 @@ fn _vkr_draw_text_fast_inner(str text, f64 x, f64 y, int color_u32, any glyphs_p
       def bw_check = load32_f32(g_off, 12)
       if(bw_check <= 0.0){ pen_x += load32_f32(g_off, 0) prev_gi = gi continue }
       def tid = load32(g_off, 36)
+      if(tid < 0){ pen_x += load32_f32(g_off, 0) prev_gi = gi continue }
       def is_color = load32(g_off, 44) != 0
       if(tid != page_tid_cur){
          _vertex_offset = v_off
-         _set_text_page(tid)
+         _ensure_glyph_text_page(tid)
          v_off = _vertex_offset
          page_tid_cur = tid
       }
@@ -290,6 +302,7 @@ fn _vkr_ascii_run_tid(str text, int n, any page0) int {
       def g_off = ptr_add(page0, cp * 48)
       if(load32(g_off, 40) == 0){ return -1 }
       def gt = load32(g_off, 36)
+      if(gt < 0){ return -1 }
       if(tid < 0){ tid = gt }
       elif(gt != tid){ return -1 }
       i += 1
@@ -300,7 +313,7 @@ fn _vkr_ascii_run_tid(str text, int n, any page0) int {
 @jit
 fn _vkr_draw_text_ascii_run(str text, int n, f64 pen_x, f64 pen_y, int color_u32, any page0, int tex_id) int {
    if(tex_id < 0 || !_check_flush(n * (_VKR_VERT_STRIDE * 6))){ return -1 }
-   if(_current_tex_index != tex_id){ _set_text_page(tex_id) }
+   if(_current_tex_index != tex_id){ _ensure_glyph_text_page(tex_id) }
    mut glyph_count = 0
    mut i = 0
    while(i < n){
@@ -409,10 +422,11 @@ fn _vkr_draw_text_runs_flat_inner(list runs, int color_u32, any glyphs_ptr, any 
             def bw_check = load32_f32(g_off, 12)
             if(bw_check <= 0.0){ pen_x += load32_f32(g_off, 0) continue }
             def tid = load32(g_off, 36)
+            if(tid < 0){ pen_x += load32_f32(g_off, 0) continue }
             def is_color = load32(g_off, 44) != 0
             if(tid != page_tid_cur){
                _vertex_offset = v_off
-               _set_text_page(tid)
+               _ensure_glyph_text_page(tid)
                v_off = _vertex_offset
                page_tid_cur = tid
             }
@@ -544,8 +558,8 @@ fn _vkr_glyph_get_off(any glyphs_ptr, int cp) any {
 @jit
 fn _vkr_glyph_present(any glyphs_ptr, int cp) bool {
    def off = _vkr_glyph_get_off(glyphs_ptr, cp)
-   if(!off){ return false }
-   load32(off, 40) != 0
+   if(!off || load32(off, 40) == 0){ return false }
+   int(load32(off, 36)) >= 0
 }
 
 @jit
@@ -614,9 +628,10 @@ fn __vkr_draw_text(int font_id, any text, any x, any y, any color, any glyphs_pt
       }
       if(!g_off){ if(page0){ g_off = ptr_add(page0, 63 * 48) } else { continue } }
       def tex_id = load32(g_off, 36)
+      if(tex_id < 0){ pen_x = pen_x + load32_f32(g_off, 0) prev_gi = gi continue }
       def is_color = load32(g_off, 44) != 0
       if(tex_id != page_tid_cur){
-         _set_text_page(tex_id)
+         _ensure_glyph_text_page(tex_id)
          page_tid_cur = tex_id
       }
       if(font_info == 0 && !out_info){
@@ -679,6 +694,7 @@ fn __vkr_draw_text_glyph(any g_ptr, any v, any x, any y, int cp, any color, any 
       if(page0){ g_off = ptr_add(page0, (63 & 255) * 48) } else { return 0 }
    }
    def tex_id = load32(g_off, 36)
+   if(tex_id < 0){ return 0 }
    _ensure_glyph_text_page(tex_id)
    def bw, bh = _text_safe_metric(load32_f32(g_off, 12)), _text_safe_metric(load32_f32(g_off, 16))
    if(bw <= 0.0 || bh <= 0.0){ return 0 }
@@ -700,10 +716,14 @@ fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, 
    if(!_check_flush(co * _VKR_VERT_STRIDE * 6)){ return 0 }
    def page0 = load64(glyphs_ptr, 0)
    def missing_glyph = page0 ? ptr_add(page0, 63 * 48) : 0
+   _begin_text_batch(-1)
    mut c = 0
    mut pen_x = px
    mut glyph_count = 0
-   mut page_tid_cur = _current_tex_index
+   ;; Force first visible glyph in each line to validate the text material.
+   ;; The caller may have only bound the texture object, while the shader still
+   ;; needs baseTexIndex/vc_mode set for atlas sampling.
+   mut page_tid_cur = -999999
    while(c < co){
       def off = c * 16
       mut cp = load32(line_ptr, off)
@@ -711,11 +731,12 @@ fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, 
          def md = load32(line_ptr, off + 12)
          if((md & skip_mask) == 0){
             mut g_off = (cp < 256 && page0) ? ptr_add(page0, (cp & 255) * 48) : _vkr_glyph_get_off(glyphs_ptr, cp)
-            if((!g_off || load32(g_off, 40) == 0) && cp < 128){
-               g_off = missing_glyph
-            }
+            ;; Do not draw a '?' box for missing terminal glyphs here.  The
+            ;; vterm foreground pass falls back through draw_text(), which can
+            ;; prime/upload the real glyph and avoids first-frame white blocks.
             if(g_off && load32(g_off, 40) != 0){
                def tex_id = load32(g_off, 36)
+               if(tex_id < 0){ c += 1 pen_x += cw continue }
                if(tex_id != page_tid_cur){
                   _ensure_glyph_text_page(tex_id)
                   page_tid_cur = tex_id
