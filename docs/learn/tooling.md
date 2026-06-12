@@ -137,6 +137,35 @@ ny --host-triple aarch64-linux-gnu \
    -o build/hello-aarch64 hello.ny
 ```
 
+## Wasm Runner
+
+Compile one Ny source file to WebAssembly:
+
+```bash
+./make wasm etc/projects/os/args.ny --out build/wasm/args.wasm
+```
+
+Build the browser runner:
+
+```bash
+./make web-demos
+```
+
+The output lands in `build/wasm/`. The runner is a small static browser shell:
+`index.html`, `web.css`, `wasm.js`, and `demos-data.js`. It can load a local
+`.wasm` file from the page, or load optional manifest entries from
+`etc/assets/website/wasm/demos.json`.
+
+Browser-facing Ny modules should export one of `ny_web_frame`, `ny_web_render`,
+`ny_web_main`, or `main`. The runner provides a compact host ABI:
+`ny_web_clear`, `ny_web_rect`, `ny_web_line`, `ny_web_text`, `ny_web_present`,
+input queries, and minimal OS/runtime stubs. Native window, sound, network, and
+filesystem APIs are not faked in the browser.
+
+Use `--out DIR` to choose a different output directory, `--no-ny-wasm` to copy
+only the static browser files, or `--require-ny-wasm` to fail unless every
+manifest Ny source emits wasm.
+
 ## Run Modes
 
 | Form | Behavior |

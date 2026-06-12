@@ -9,7 +9,6 @@ use std.os.fs as osfs
 use std.os.ui.render.dump as ui_profile
 use std.os.ui.render as render
 use std.os.ui.render.atlas as atlas
-use std.os.ui.render.vk.texture as vk_texture
 use std.os.ui.assets.viewer as assets
 use std.parse.img.svg as svg
 
@@ -28,9 +27,9 @@ fn clear_cache() int {
 fn stable_texture_id(candidate) int {
    "Normalizes a newly-uploaded texture id for renderer backends."
    mut tex_id = int(candidate)
-   def stable = int(vk_texture.last_created_texture_id())
+   def stable = int(render.texture_last_created_id())
    if(stable >= 0 && stable < 1024){ return stable }
-   def count = int(vk_texture.texture_count())
+   def count = int(render.texture_count())
    if((tex_id < 0 || tex_id >= 1024) && count > 0){
       def latest = count - 1
       if(latest >= 0 && latest < 1024){ return latest }
@@ -73,6 +72,7 @@ fn icon_tex(name) int {
 
 fn _icon_atlas() any {
    if(is_dict(_atlas)){ return _atlas }
+   atlas.atlas_set_backend(render.get_active_backend_name())
    _atlas = atlas.atlas_create(1024, 1024, render.FONT_FILTER_LINEAR, true)
    _atlas
 }

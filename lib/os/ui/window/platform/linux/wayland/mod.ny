@@ -1656,7 +1656,14 @@ fn set_cursor(any win, any cursor) any {
    def theme = _ensure_cursor_theme(globals)
    def surf  = _ensure_cursor_surface(globals)
    if(!theme || !surf){ return win }
-   def cur_shape = cursor.get("shape", 0)
+   mut cur_shape = cursor.get("shape", ARROW_CURSOR)
+   if(is_dict(cursor) && to_str(cursor.get("type", "standard")) == "custom"){
+      ;; Raw custom cursor upload requires wl_shm buffer plumbing.  Do not
+      ;; silently reinterpret custom cursor data as shape 0; use a stable arrow
+      ;; fallback and leave an explicit debug breadcrumb instead.
+      _dbgu("custom cursor requested; falling back to standard arrow cursor")
+      cur_shape = ARROW_CURSOR
+   }
    def wl_cur = _wl_cursor_for_shape(theme, cur_shape)
    if(!wl_cur){ return win }
    def image_count = load32(wl_cur, 0)
@@ -1954,6 +1961,7 @@ fn set_title(any win, str title) bool {
    def toplevel = _window_toplevel(win)
    if(!toplevel){ return false }
    xdg_toplevel_set_title(toplevel, title)
+   true
 }
 
 fn set_window_opacity(any win, f64 opacity) bool {
@@ -2279,10 +2287,12 @@ fn _pointer_apply_cursor(any data, any pointer, any serial, any win) any {
 fn _pointer_push_motion(any surface, any x, any y) bool {
    mut win = _windows.get(surface, 0)
    if(!win){ return false }
+   def prev_x = float(win.get("mouse_x", x))
+   def prev_y = float(win.get("mouse_y", y))
    win = win.set("mouse_x", x)
    win = win.set("mouse_y", y)
    _windows = _windows.set(surface, win)
-   def ev_data = {"x": x, "y": y, "mod": win.get("modifiers", 0)}
+   def ev_data = {"x": x, "y": y, "dx": float(x) - prev_x, "dy": float(y) - prev_y, "relative": false, "raw": false, "mod": win.get("modifiers", 0)}
    _push_event(win, EVENT_MOUSE_POS_CHANGED, ev_data)
    true
 }
@@ -2504,6 +2514,8 @@ fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utim
       "dx": fdx,
       "dy": fdy,
       "moved": (fdx != 0.0) || (fdy != 0.0),
+      "relative": true,
+      "raw": true,
       "mod": win.get("modifiers", 0)
    }
    _push_event(win, EVENT_MOUSE_POS_CHANGED, ev_data)

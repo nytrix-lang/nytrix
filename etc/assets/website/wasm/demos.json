@@ -1,0 +1,58 @@
+[
+  {
+    "id": "bench-fibonacci",
+    "title": "Bench Fibonacci",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/fibonacci.ny"
+  },
+  {
+    "id": "bench-intops",
+    "title": "Bench Intops",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/intops.ny"
+  },
+  {
+    "id": "bench-float",
+    "title": "Bench Float",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/float.ny"
+  },
+  {
+    "id": "bench-sieve",
+    "title": "Bench Sieve",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/sieve.ny"
+  },
+  {
+    "id": "bench-list",
+    "title": "Bench List",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/list.ny"
+  },
+  {
+    "id": "bench-mandelbrot",
+    "title": "Bench Mandelbrot",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/mandelbrot.ny"
+  },
+  {
+    "id": "bench-vector",
+    "title": "Bench Vector",
+    "area": "TEST",
+    "mode": "bench",
+    "source": "etc/tests/bench/vector.ny"
+  },
+  {
+    "id": "project-args",
+    "title": "Project Args",
+    "area": "PROJECT",
+    "mode": "os",
+    "source": "etc/projects/os/args.ny"
+  }
+]

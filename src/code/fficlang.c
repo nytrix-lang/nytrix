@@ -1540,17 +1540,21 @@ static enum CXChildVisitResult ffi_visitor(CXCursor cursor, CXCursor parent,
         ny_ffi_add_align_attr(ctx, f, idx, arg_layout->align);
       }
 
-      /* Dedup: if already registered (either from a prior extern fn or a
-         previous #include of a different header), skip to avoid conflicts.  */
+      /* Dedup: if already registered from a prior FFI source (extern or
+         another #include), skip to avoid conflicts. But if a Ny function
+         was registered first, allow the FFI override — the Ny stub acts
+         as a fallback when the header/library is not available. */
       bool already_known = false;
+      bool existing_is_ny_fn = false;
       for (int si = 0; si < (int)ctx->cg->fun_sigs.len; si++) {
         fun_sig *existing = &((fun_sig *)ctx->cg->fun_sigs.data)[si];
         if (existing->name && strcmp(existing->name, ny_name) == 0) {
           already_known = true;
+          existing_is_ny_fn = existing->stmt_t != NULL;
           break;
         }
       }
-      if (!already_known) {
+      if (!already_known || existing_is_ny_fn) {
         fun_sig sig;
         ny_fun_sig_init(&sig, ny_name, ft, f, NULL, num_params,
                         (bool)is_variadic, true);
@@ -1698,10 +1702,12 @@ void ny_ffi_clang_import(codegen_t *cg, const char *header_path,
         }
       }
       if (!found) {
-        token_t fake = {0};
-        ny_diag_error(fake, "FFI header not found: %s", header_path);
-        ny_diag_hint(
-            "check the path and ensure the header is installed on your system");
+        if (verbose_enabled >= 1) {
+          token_t fake = {0};
+          ny_diag_warning(fake, "FFI header not found (optional dep): %s",
+                          header_path);
+          ny_diag_hint("install the dev package or ignore if the library is not needed");
+        }
         return;
       }
     }

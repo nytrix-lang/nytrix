@@ -1197,7 +1197,7 @@ fn iconify_window(any win) bool {
 }
 
 fn _show_window_raw(any display, any window_handle, bool floating=false, any net_wm_state_atom=0, any above_atom=0) bool {
-   def trace = common.env_truthy("NY_UI_STARTUP_TRACE") || common.env_truthy("NY_UI_DEBUG_WINDOW")
+   def trace = ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") || ui_profile.env_truthy_cached("NY_UI_DEBUG_WINDOW")
    if(floating && net_wm_state_atom && above_atom){
       if(trace){ ui_profile.print_text("[x11:show] floating.before") }
       append_atom_property(display, window_handle, net_wm_state_atom, above_atom)
@@ -3776,7 +3776,7 @@ fn _translate_raw_motion_event(any win, any event_ptr, list events) list {
       win["virtual_cursor_y"] = next_y
       win["mouse_x"] = next_x
       win["mouse_y"] = next_y
-      def data_ev = {"x": next_x, "y": next_y, "dx": dx, "dy": dy, "moved": true, "mod": win.get("modifiers", 0)}
+      def data_ev = {"x": next_x, "y": next_y, "dx": dx, "dy": dy, "moved": true, "relative": true, "raw": true, "mod": win.get("modifiers", 0)}
       data_ev["mods"] = win.get("modifiers", 0)
       events = _push_translated_event(events, 7, win, data_ev)
    }
@@ -4120,7 +4120,7 @@ fn _translate_motion_event(
          win = _x11_sync_mouse_buttons_from_state(win, raw_state)
          def mods = translate_state(raw_state)
          def data = {
-            "x": virt_x, "y": virt_y, "dx": dx, "dy": dy, "moved": true, "mod": mods, "mods": mods,
+            "x": virt_x, "y": virt_y, "dx": dx, "dy": dy, "moved": true, "relative": true, "raw": false, "mod": mods, "mods": mods,
             "left_down": band(raw_state, Button1Mask) != 0,
             "middle_down": band(raw_state, Button2Mask) != 0,
             "right_down": band(raw_state, Button3Mask) != 0,
@@ -4155,6 +4155,8 @@ fn _translate_motion_event(
       "dx": float(x - prev_x),
       "dy": float(y - prev_y),
       "moved": true,
+      "relative": false,
+      "raw": false,
       "mod": mods,
       "mods": mods,
       "left_down": band(raw_state, Button1Mask) != 0,
@@ -4671,6 +4673,33 @@ fn translate_event(any win, any event_ptr) list {
    _translated_event_result(win, events)
 }
 
+
+fn _x11_append_event_coalesced(any out, any ev) list {
+   if(!is_list(out)){ out = [] }
+   if(ui_event.is_event(ev) && ui_event.event_type(ev) == EVENT_MOUSE_POS_CHANGED && out.len > 0){
+      ;; Keep the fallback list-shaped so the compiler does not infer `last` as int.
+      ;; `ui_event.event_type` intentionally accepts a concrete event list.
+      def last = out.get(out.len - 1, [])
+      if(ui_event.is_event(last) && ui_event.event_type(last) == EVENT_MOUSE_POS_CHANGED){
+         out[out.len - 1] = ev
+         return out
+      }
+   }
+   out.append(ev)
+}
+
+fn _x11_extend_events_coalesced(any out, any events) list {
+   if(!is_list(out)){ out = [] }
+   if(!is_list(events)){ return out }
+   mut i = 0
+   def n = events.len
+   while(i < n){
+      out = _x11_append_event_coalesced(out, events.get(i))
+      i += 1
+   }
+   out
+}
+
 fn poll_window_events(any win, int max_events=64) list {
    "Polls queued X11 events for `win` and returns `[updated_win, events]`."
    if(!win || !is_dict(win)){ return [win, []] }
@@ -4694,7 +4723,7 @@ fn poll_window_events(any win, int max_events=64) list {
       def next_win = translated.get(0, win)
       if(is_dict(next_win)){ win = next_win }
       def events = translated.get(1, [])
-      if(is_list(events) && events.len > 0){ out = out.extend(events) }
+      if(is_list(events) && events.len > 0){ out = _x11_extend_events_coalesced(out, events) }
       count += 1
       p = pending(display)
    }
@@ -4768,7 +4797,7 @@ fn poll_display_events(list windows, int max_events=256) list {
          def handle = next_win.get("handle", 0)
          if(handle){ updated[handle] = next_win }
       }
-      if(is_list(evs) && evs.len > 0){ out = out.extend(evs) }
+      if(is_list(evs) && evs.len > 0){ out = _x11_extend_events_coalesced(out, evs) }
    }
    free(event_buf)
    [updated, out]
@@ -5237,7 +5266,8 @@ fn create_basic_window(
    str class_name="Nytrix",
    str instance_name="nytrix",
    any provided_visual=0,
-   int provided_depth=0
+   int provided_depth=0,
+   any provided_display=0
 ) any {
    "Creates and maps a basic X11 top-level window using Ny-side logic."
    if(!available()){ return false }
@@ -5248,7 +5278,7 @@ fn create_basic_window(
          " provided_visual=0x" + str.to_hex(provided_visual) +
       " provided_depth=" + to_str(provided_depth))
    }
-   def display = open_display()
+   def display = provided_display ? provided_display : open_display()
    if(!display){ return false }
    mut im, ic = _open_input_method(display), 0
    def xkb = _xkb_setup(display)

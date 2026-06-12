@@ -5,22 +5,25 @@
 module std.os.ffi(RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL,
    dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,
    call0_void, call0_i32, call1_void, call1_u32_void, call2_void,
-   call3_void, call4_f32_void,
+   call3_void, call4_void, call5_void, call7_void, call9_void,
+   call1_f32_void, call2_f32_void, call3_f32_void, call4_f32_void,
    call0, call1, call1_i64, call1_u32, call2, call3, call4, call5,
    call0_ptr, call1_ptr, call2_ptr, call3_ptr, call4_ptr, call5_ptr,
    call2_ptr_u32, call3_ptr_u64_ptr, call3_ptr_u32_ptr,
    call3_ptr_ptr_u32, call4_ptr_ptr_ptr_ptr_void,
    call6, call7, call8, call9, call10, call11, call12, call13, call14, call15,
    ffi_call, bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all,
-   __call0, __call0_ptr, __call1, __call1_ptr, __call2, __call2_ptr,
-   __call3, __call3_ptr, __call4, __call4_ptr, __call5, __call5_ptr,
-   __call6, __call7, __call8, __call9, __call10, __call11, __call12,
+   __call0, __call0_void, __call0_ptr, __call1, __call1_ptr, __call1_void, __call2, __call2_ptr,
+   __call2_void, __call3, __call3_ptr, __call3_void, __call4, __call4_ptr, __call4_void, __call5, __call5_ptr,
+   __call5_void,
+   __call6, __call7, __call7_void, __call8, __call9, __call9_void, __call10, __call11, __call12,
    __call13, __call14, __call15,
    __call2_ptr_u32, __call3_ptr_u64_ptr, __call3_ptr_u32_ptr,
    __call3_ptr_ptr_u32, __call3_ptr_u64_ptr_i32,
    __call4_ptr_ptr_ptr_ptr_i32, __call4_ptr_ptr_ptr_u64_i32,
    __call4_ptr_u32_u64_ptr_i32, __call4_ptr_u64_ptr_ptr_i32,
-   __call5_ptr_ptr_ptr_u64_i32_i32, __call4_ptr_ptr_ptr_ptr_void,
+   __call5_ptr_ptr_ptr_u64_i32_i32, __call1_f32_void, __call2_f32_void,
+   __call3_f32_void, __call4_f32_void, __call4_ptr_ptr_ptr_ptr_void,
    CStruct, CType, cstr, cptr, u8, i8, u16, i16, u32, i32, u64, i64,
    f32, f64, ptr, handle, sizeof_struct, offsetof_struct, malloc, free,
 cstruct_set, cstruct_get, bind_lib, tag_native)
@@ -212,7 +215,7 @@ fn call15(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, 
 
 fn call0_void(any f) any {
    "Calls `f` with no arguments and ignores any return value."
-   __call0(f)
+   __call0_void(f)
 }
 
 fn call0_i32(any f) int {
@@ -222,7 +225,7 @@ fn call0_i32(any f) int {
 
 fn call1_void(any f, any a) any {
    "Calls `f` with one argument and ignores any return value."
-   __call1(f,a)
+   __call1_void(f,a)
 }
 
 fn call1_u32_void(any f, any a) any {
@@ -232,16 +235,51 @@ fn call1_u32_void(any f, any a) any {
 
 fn call2_void(any f, any a, any b) any {
    "Calls `f` with two arguments and ignores any return value."
-   __call2(f,a,b)
+   __call2_void(f,a,b)
 }
 
 fn call3_void(any f, any a, any b, any c) any {
    "Calls `f` with three arguments and ignores any return value."
-   __call3(f,a,b,c)
+   __call3_void(f,a,b,c)
+}
+
+fn call4_void(any f, any a, any b, any c, any d) any {
+   "Calls `f` with four arguments and ignores any return value."
+   __call4_void(f,a,b,c,d)
+}
+
+fn call5_void(any f, any a, any b, any c, any d, any e) any {
+   "Calls `f` with five arguments and ignores any return value."
+   __call5_void(f,a,b,c,d,e)
+}
+
+fn call7_void(any f, any a, any b, any c, any d, any e, any g, any h) any {
+   "Calls `f` with seven arguments and ignores any return value."
+   __call7_void(f,a,b,c,d,e,g,h)
+}
+
+fn call9_void(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j) any {
+   "Calls `f` with nine arguments and ignores any return value."
+   __call9_void(f,a,b,c,d,e,g,h,i,j)
+}
+
+fn call1_f32_void(any f, any a) any {
+   "Calls `f` with one 32-bit float argument and ignores any return value."
+   __call1_f32_void(f,a)
+}
+
+fn call2_f32_void(any f, any a, any b) any {
+   "Calls `f` with two 32-bit float arguments and ignores any return value."
+   __call2_f32_void(f,a,b)
+}
+
+fn call3_f32_void(any f, any a, any b, any c) any {
+   "Calls `f` with three 32-bit float arguments and ignores any return value."
+   __call3_f32_void(f,a,b,c)
 }
 
 fn call4_f32_void(any f, any a, any b, any c, any d) any {
-   "Calls `f` with four arguments where the fourth is a 32-bit float and ignores any return value."
+   "Calls `f` with four 32-bit float arguments and ignores any return value."
    __call4_f32_void(f,a,b,c,d)
 }
 

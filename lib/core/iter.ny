@@ -208,14 +208,14 @@ fn flatten(seq xss) list {
 
 @returns_owned
 fn filter_map(seq xs, fnptr fn1) list {
-   "Maps `xs` and keeps only truthy results."
+   "Maps `xs` and keeps every non-nil result. Return nil from the mapper to skip."
    def n = _iter_seq_len(xs, "filter_map")
    mut out = list(n)
    mut i = 0
    mut pos = 0
    while(i < n){
       def res = fn1(xs.get(i))
-      if(res){
+      if(res != nil){
          _list_set(out, pos, res)
          pos += 1
       }
@@ -384,7 +384,7 @@ fn range2(int start, int stop, int step=1) range {
    "Returns a range object from `start` to `stop` using `step`."
    mut st = step
    if(st == 0){ st = 1 }
-   mut obj = prim.range_new_raw(start, stop, st)
+    mut obj = primitives.range_new_raw(start, stop, st)
    if(!obj){ panic("range allocation failed") }
    obj
 }
@@ -419,10 +419,11 @@ fn map(seq xs, fnptr fn1) any {
    if(n == 0){ return _iter_empty_like(xs) }
    if(is_str(xs)){
       use std.core.str
+      def cp_n = utf8_len(xs)
       mut out = Builder(n * 2 + 8)
       mut i = 0
-      while(i < n){
-         out = builder_append(out, fn1(xs.get(i)))
+      while(i < cp_n){
+         out = builder_append(out, fn1(chr(ord_at(xs, i))))
          i += 1
       }
       def s = builder_to_str(out)
@@ -445,10 +446,11 @@ fn filter(seq xs, fnptr pred) any {
    if(n == 0){ return _iter_empty_like(xs) }
    if(is_str(xs)){
       use std.core.str
+      def cp_n = utf8_len(xs)
       mut out = Builder(n + 8)
       mut i = 0
-      while(i < n){
-         def v = xs.get(i)
+      while(i < cp_n){
+         def v = chr(ord_at(xs, i))
          if(pred(v)){ out = builder_append(out, v) }
          i += 1
       }
@@ -533,10 +535,11 @@ fn reverse(seq xs) any {
    }
    if(is_str(xs)){
       use std.core.str
+      def cp_n = utf8_len(xs)
       mut out = Builder(n + 8)
-      mut i = n - 1
+      mut i = cp_n - 1
       while(i >= 0){
-         out = builder_append(out, xs.get(i))
+         out = builder_append(out, chr(ord_at(xs, i)))
          i -= 1
       }
       def s = builder_to_str(out)
@@ -589,7 +592,8 @@ fn zip2(seq a, seq b) list {
    assert(find_if([10, 20, 30], fn(v) { v > 15 }) == 20, "iter find_if")
    assert(chain("ab", "cd") == "abcd", "iter chain str")
    assert(flatten([[1, 2], 3, [4]]) == [1, 2, 3, 4], "iter flatten")
-   assert(filter_map([1, 2, 3, 4], fn(v) { if((v % 2) == 0){ return v * 10 } 0 }) == [20, 40], "iter filter_map")
+    assert(filter_map([1, 2, 3, 4], fn(v) any { if((v % 2) == 0){ return v * 10 } nil }) == [20, 40], "iter filter_map")
+   assert(reverse("éa") == "aé", "iter reverse utf8")
    assert(compact([0, 1, "", "x", nil, 4]) == [1, "x", 4], "iter compact")
    assert(zip_with([1, 2], [10, 20], fn(a, b) { a + b }) == [11, 22], "iter zip_with")
    assert(cycle([1, 2], 2) == [1, 2, 1, 2], "iter cycle")

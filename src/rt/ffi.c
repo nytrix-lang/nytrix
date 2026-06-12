@@ -919,8 +919,34 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int
       a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 
-int64_t rt_call0_void(int64_t f) { return rt_call0(f); }
-int64_t rt_call1_void(int64_t f, int64_t a0) { return rt_call1(f, a0); }
+static inline int64_t rt_void_arg(int64_t a) {
+  int64_t v = rt_untag_v(a);
+  if (is_heap_ptr(v))
+    v = (int64_t)(uintptr_t)rt_untag_v(v);
+  return v;
+}
+
+int64_t rt_call0_void(int64_t f) {
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(void))NY_NATIVE_DECODE(f))();
+    return 1;
+  }
+  rt_call0(f);
+  return 1;
+}
+
+int64_t rt_call1_void(int64_t f, int64_t a0) {
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t))NY_NATIVE_DECODE(f))(rt_void_arg(a0));
+    return 1;
+  }
+  rt_call1(f, a0);
+  return 1;
+}
 int64_t rt_call1_u32_void(int64_t f, int64_t a0) {
   if (!f)
     return 1;
@@ -931,12 +957,37 @@ int64_t rt_call1_u32_void(int64_t f, int64_t a0) {
   }
   return rt_call1(f, a0);
 }
-int64_t rt_call2_void(int64_t f, int64_t a0, int64_t a1) { return rt_call2(f, a0, a1); }
+int64_t rt_call2_void(int64_t f, int64_t a0, int64_t a1) {
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t))NY_NATIVE_DECODE(f))(rt_void_arg(a0), rt_void_arg(a1));
+    return 1;
+  }
+  rt_call2(f, a0, a1);
+  return 1;
+}
 int64_t rt_call3_void(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
-  return rt_call3(f, a0, a1, a2);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(rt_void_arg(a0), rt_void_arg(a1),
+                                                               rt_void_arg(a2));
+    return 1;
+  }
+  rt_call3(f, a0, a1, a2);
+  return 1;
 }
 int64_t rt_call4_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
-  return rt_call4(f, a0, a1, a2, a3);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+        rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3));
+    return 1;
+  }
+  rt_call4(f, a0, a1, a2, a3);
+  return 1;
 }
 
 int64_t rt_call4_ptr_ptr_ptr_ptr_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3) {
@@ -954,28 +1005,89 @@ int64_t rt_call4_ptr_ptr_ptr_ptr_void(int64_t f, int64_t a0, int64_t a1, int64_t
   }
   return 1;
 }
+
 int64_t rt_call5_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4) {
-  return rt_call5(f, a0, a1, a2, a3, a4);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+        rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3), rt_void_arg(a4));
+    return 1;
+  }
+  rt_call5(f, a0, a1, a2, a3, a4);
+  return 1;
 }
 int64_t rt_call6_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
                       int64_t a5) {
-  return rt_call6(f, a0, a1, a2, a3, a4, a5);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+        rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3), rt_void_arg(a4),
+        rt_void_arg(a5));
+    return 1;
+  }
+  rt_call6(f, a0, a1, a2, a3, a4, a5);
+  return 1;
 }
 int64_t rt_call7_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
                       int64_t a5, int64_t a6) {
-  return rt_call7(f, a0, a1, a2, a3, a4, a5, a6);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+        rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3), rt_void_arg(a4),
+        rt_void_arg(a5), rt_void_arg(a6));
+    return 1;
+  }
+  rt_call7(f, a0, a1, a2, a3, a4, a5, a6);
+  return 1;
 }
 int64_t rt_call8_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
                       int64_t a5, int64_t a6, int64_t a7) {
-  return rt_call8(f, a0, a1, a2, a3, a4, a5, a6, a7);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))
+         NY_NATIVE_DECODE(f))(rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3),
+                              rt_void_arg(a4), rt_void_arg(a5), rt_void_arg(a6), rt_void_arg(a7));
+    return 1;
+  }
+  rt_call8(f, a0, a1, a2, a3, a4, a5, a6, a7);
+  return 1;
 }
 int64_t rt_call9_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
                       int64_t a5, int64_t a6, int64_t a7, int64_t a8) {
-  return rt_call9(f, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+  if (!f || (uintptr_t)(f) < 0x1000)
+    return 1;
+  if (NY_NATIVE_IS(f)) {
+    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))
+         NY_NATIVE_DECODE(f))(rt_void_arg(a0), rt_void_arg(a1), rt_void_arg(a2), rt_void_arg(a3),
+                              rt_void_arg(a4), rt_void_arg(a5), rt_void_arg(a6), rt_void_arg(a7),
+                              rt_void_arg(a8));
+    return 1;
+  }
+  rt_call9(f, a0, a1, a2, a3, a4, a5, a6, a7, a8);
+  return 1;
 }
 int64_t rt_call10_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4,
                        int64_t a5, int64_t a6, int64_t a7, int64_t a8, int64_t a9) {
   return rt_call10(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+}
+
+static inline void *rt_ffi_native_fn(int64_t f) {
+  if (!f)
+    return NULL;
+  if ((uintptr_t)f < 0x1000)
+    return NULL;
+  return NY_NATIVE_IS(f) ? NY_NATIVE_DECODE(f) : (void *)(uintptr_t)f;
+}
+
+static inline float rt_ffi_f32_arg(int64_t v) {
+  double d = 0.0;
+  int64_t bits = rt_flt_unbox_val(v);
+  memcpy(&d, &bits, 8);
+  return (float)d;
 }
 
 int64_t rt_call4f_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
@@ -994,27 +1106,36 @@ int64_t rt_call4f_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
   return 1;
 }
 
-int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
-  if (!f)
+int64_t rt_call1_f32_void(int64_t f, int64_t a) {
+  void *fn = rt_ffi_native_fn(f);
+  if (!fn)
     return 1;
-  double da, db, dc, dd;
-  int64_t ba = rt_flt_unbox_val(a);
-  int64_t bb = rt_flt_unbox_val(b);
-  int64_t bc = rt_flt_unbox_val(c);
-  int64_t bd = rt_flt_unbox_val(d);
-  memcpy(&da, &ba, 8);
-  memcpy(&db, &bb, 8);
-  memcpy(&dc, &bc, 8);
-  memcpy(&dd, &bd, 8);
-  float fa = (float)da;
-  float fb = (float)db;
-  float fc = (float)dc;
-  float fd = (float)dd;
-  if (NY_NATIVE_IS(f)) {
-    ((void (*)(float, float, float, float))NY_NATIVE_DECODE(f))(fa, fb, fc, fd);
-  } else {
-    ((void (*)(float, float, float, float))f)(fa, fb, fc, fd);
-  }
+  ((void (*)(float))fn)(rt_ffi_f32_arg(a));
+  return 1;
+}
+
+int64_t rt_call2_f32_void(int64_t f, int64_t a, int64_t b) {
+  void *fn = rt_ffi_native_fn(f);
+  if (!fn)
+    return 1;
+  ((void (*)(float, float))fn)(rt_ffi_f32_arg(a), rt_ffi_f32_arg(b));
+  return 1;
+}
+
+int64_t rt_call3_f32_void(int64_t f, int64_t a, int64_t b, int64_t c) {
+  void *fn = rt_ffi_native_fn(f);
+  if (!fn)
+    return 1;
+  ((void (*)(float, float, float))fn)(rt_ffi_f32_arg(a), rt_ffi_f32_arg(b), rt_ffi_f32_arg(c));
+  return 1;
+}
+
+int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c, int64_t d) {
+  void *fn = rt_ffi_native_fn(f);
+  if (!fn)
+    return 1;
+  ((void (*)(float, float, float, float))fn)(rt_ffi_f32_arg(a), rt_ffi_f32_arg(b),
+                                             rt_ffi_f32_arg(c), rt_ffi_f32_arg(d));
   return 1;
 }
 

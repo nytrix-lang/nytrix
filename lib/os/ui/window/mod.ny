@@ -2247,8 +2247,14 @@ fn swap_buffers(any win) any {
    }
 }
 
-fn make_current(any _win) any {
-   "Runs the make current operation."
+fn make_current(any win) any {
+   "Makes a window OpenGL context current, or releases it when win is false."
+   if(!win){ return ui_backend.make_context_current(0) }
+   win = _get_win(win)
+   if(!_is_window(win)){ return false }
+   def h = _get_handle(win)
+   if(!h){ return false }
+   ui_backend.make_context_current(h)
 }
 
 mut _blit_hook = 0

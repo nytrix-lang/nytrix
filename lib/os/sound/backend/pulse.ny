@@ -12,37 +12,37 @@ use std.core.common as common
 use std.os.sound.diag as sound_debug
 use std.os.sound.backend.shared as backend_shared
 
+fn pa_simple_new(..._args) any {
+   "Runs the pa simple new operation."
+   0
+}
+fn pa_strerror(any _err) any {
+   "Runs the pa strerror operation."
+   0
+}
+fn pa_simple_drain(..._args) int {
+   "Runs the pa simple drain operation."
+   -1
+}
+fn pa_simple_flush(..._args) int {
+   "Runs the pa simple flush operation."
+   -1
+}
+fn pa_simple_free(any _pa) any {
+   "Runs the pa simple free operation."
+   0
+}
+fn pa_simple_write(..._args) int {
+   "Runs the pa simple write operation."
+   -1
+}
 #linux {
    #link "libpulse-simple.so"
    #include <pulse/simple.h> as "pa_"
    #link "libpulse.so"
    #include <pulse/error.h> as "pa_"
-} #else {
-   fn pa_simple_new(..._args) any {
-      "Runs the pa simple new operation."
-      0
-   }
-   fn pa_strerror(any _err) any {
-      "Runs the pa strerror operation."
-      0
-   }
-   fn pa_simple_drain(..._args) int {
-      "Runs the pa simple drain operation."
-      -1
-   }
-   fn pa_simple_flush(..._args) int {
-      "Runs the pa simple flush operation."
-      -1
-   }
-   fn pa_simple_free(any _pa) any {
-      "Runs the pa simple free operation."
-      0
-   }
-   fn pa_simple_write(..._args) int {
-      "Runs the pa simple write operation."
-      -1
-   }
-} #endif
+}
+#endif
 
 fn _get_latency_ms() int { common.env_int_clamped("NY_AUDIO_LATENCY_MS", 40, 10, 500) }
 def PA_STREAM_PLAYBACK = 1

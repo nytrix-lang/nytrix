@@ -13,6 +13,8 @@ use std.os.ui.render.viewer.widgets
 use std.os.ui.render.viewer.window as view_window
 use std.os.ui.window
 
+gfx.apply_backend_env()
+gfx.apply_backend_argv()
 def win = gfx.init_window(960, 540, "Nytrix Monitor Detector", key.WINDOW_SCALE_TO_MONITOR | key.WINDOW_CENTER)
 
 if(!win){ panic("window init failed") }

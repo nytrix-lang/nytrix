@@ -28,6 +28,12 @@ use std.os.ui.window.platform.opengl.nsgl as nsgl
 } #endif
 mut _current_context = 0
 
+fn _dbg(any msg) bool {
+   if(!(common.env_truthy("NY_DEBUG") || common.env_truthy("NY_UI_DEBUG_WINDOW"))){ return false }
+   eprint("[window:opengl] " + to_str(msg))
+   true
+}
+
 fn _get_backend_name() str {
    def requested = common.env_lower("NY_UI_BACKEND")
    if(requested.len > 0){ return requested }
@@ -95,10 +101,24 @@ fn destroy_offscreen_context(any ctx) bool {
    "Destroys an offscreen OpenGL context."
    if(!ctx || !is_dict(ctx)){ return false }
    def typ = ctx.get("type", "")
+   if(typ == "egl"){
+      def dpy = ctx.get("display", 0)
+      def surf = ctx.get("surface", 0)
+      def gl_ctx = ctx.get("context", 0)
+      if(dpy && surf){ egl.destroy_surface(dpy, surf) }
+      if(dpy && gl_ctx){ egl.destroy_context(dpy, gl_ctx) }
+      return true
+   }
    if(typ == "egl_offscreen"){
       def dpy = ctx.get("display", 0)
       def gl_ctx = ctx.get("context", 0)
       if(gl_ctx && dpy){ egl.destroy_context(dpy, gl_ctx) }
+      return true
+   }
+   if(typ == "glx"){
+      def dpy = ctx.get("display", 0)
+      def gl_ctx = ctx.get("context", 0)
+      if(gl_ctx){ glx.destroy_context(dpy, gl_ctx) }
       return true
    }
    if(typ == "glx_offscreen"){
@@ -133,9 +153,21 @@ fn make_context_current(any ctx) bool {
       def gl_ctx = ctx.get("context", 0)
       if(dpy && gl_ctx){ return egl.make_current(dpy, 0, 0, gl_ctx) }
    }
+   if(typ == "egl"){
+      def dpy = ctx.get("display", 0)
+      def surf = ctx.get("surface", 0)
+      def gl_ctx = ctx.get("context", 0)
+      if(dpy && surf && gl_ctx){ return egl.make_current(dpy, surf, surf, gl_ctx) }
+   }
    if(typ == "glx_offscreen"){
       def gl_ctx = ctx.get("context", 0)
       if(gl_ctx){ return glx.make_current(0, 0, gl_ctx) }
+   }
+   if(typ == "glx"){
+      def dpy = ctx.get("display", 0)
+      def win = ctx.get("window", 0)
+      def gl_ctx = ctx.get("context", 0)
+      if(dpy && win && gl_ctx){ return glx.make_current(dpy, win, gl_ctx) }
    }
    if(typ == "nsgl_offscreen"){
       def gl_ctx = ctx.get("context", 0)
@@ -202,10 +234,20 @@ fn swap_buffers(any ctx) bool {
    "Runs the swap buffers operation."
    if(!ctx || !is_dict(ctx)){ return false }
    def typ = ctx.get("type", "")
+   if(typ == "egl"){
+      def dpy = ctx.get("display", 0)
+      def surf = ctx.get("surface", 0)
+      if(dpy && surf){ return egl.swap_buffers(dpy, surf) }
+   }
    if(typ == "egl_offscreen"){
       def dpy = ctx.get("display", 0)
       def surf = ctx.get("surface", 0)
       if(dpy && surf){ return egl.swap_buffers(dpy, surf) }
+   }
+   if(typ == "glx"){
+      def dpy = ctx.get("display", 0)
+      def win = ctx.get("window", 0)
+      if(dpy && win){ return glx.swap_buffers(dpy, win) }
    }
    if(typ == "glx_offscreen"){ return false }
    false
@@ -227,7 +269,7 @@ fn choose_visual(any hints, any display=0, any screen=0) list {
    def b = _get_backend_name()
    #linux {
       if(b == "x11"){
-         def attrs = [
+         mut attrs = [
             0x8002, 1,
             0x8010, 0x01,
             0x8011, 0x01,
@@ -239,10 +281,19 @@ fn choose_visual(any hints, any display=0, any screen=0) list {
             0x000d, hints.get(api.STENCIL_BITS, 8),
             0x0005, 1
          ]
+         def samples = int(hints.get(api.SAMPLES, 0))
+         if(samples > 1){
+            attrs = attrs.append(0x186A0)
+            attrs = attrs.append(1)
+            attrs = attrs.append(0x186A1)
+            attrs = attrs.append(samples)
+         }
          def config = glx.choose_fb_config(display, screen, attrs)
+         _dbg("choose_visual: display=0x" + to_hex(display) + " screen=" + to_str(screen) + " config=0x" + to_hex(config))
          if(!config){ return [0, 0] }
          def visual = glx.get_visual(display, config)
-         def depth = glx.get_fbconfig_attrib(display, config, 2)
+         def depth = glx.get_visual_depth(display, config)
+         _dbg("choose_visual: visual=0x" + to_hex(visual) + " depth=" + to_str(depth))
          return [visual, depth]
       }
    } #endif
@@ -258,14 +309,21 @@ fn create_context(any native, any hints) any {
          def w = native.get("handle", 0)
          def dpy = egl.init_display(d)
          if(!dpy){ return 0 }
-         def attrs = [
+         mut attrs = [
             0x3024, hints.get(api.RED_BITS, 8),
             0x3023, hints.get(api.GREEN_BITS, 8),
             0x3022, hints.get(api.BLUE_BITS, 8),
             0x3021, hints.get(api.ALPHA_BITS, 8),
             0x3025, hints.get(api.DEPTH_BITS, 24),
-            0x3038
          ]
+         def samples = int(hints.get(api.SAMPLES, 0))
+         if(samples > 1){
+            attrs = attrs.append(0x3032)
+            attrs = attrs.append(1)
+            attrs = attrs.append(0x3031)
+            attrs = attrs.append(samples)
+         }
+         attrs = attrs.append(0x3038)
          def config = egl.choose_config(dpy, attrs)
          if(!config){ return 0 }
          def surface = egl.create_surface(dpy, config, w)
@@ -277,7 +335,8 @@ fn create_context(any native, any hints) any {
       if(b == "x11"){
          def d, w = native.get("display", 0), native.get("handle", 0)
          def s = native.get("screen", 0)
-         def attrs = [
+         _dbg("create_context:x11 display=0x" + to_hex(d) + " window=0x" + to_hex(w) + " screen=" + to_str(s))
+         mut attrs = [
             0x8002, 1,
             0x8010, 0x01,
             0x8011, 0x01,
@@ -289,9 +348,18 @@ fn create_context(any native, any hints) any {
             0x000d, hints.get(api.STENCIL_BITS, 8),
             0x0005, 1
          ]
+         def samples = int(hints.get(api.SAMPLES, 0))
+         if(samples > 1){
+            attrs = attrs.append(0x186A0)
+            attrs = attrs.append(1)
+            attrs = attrs.append(0x186A1)
+            attrs = attrs.append(samples)
+         }
          def fbconfig = glx.choose_fb_config(d, s, attrs)
+         _dbg("create_context:x11 fbconfig=0x" + to_hex(fbconfig))
          if(!fbconfig){ return 0 }
          def ctx = glx.create_context(d, fbconfig, 0, true)
+         _dbg("create_context:x11 ctx=0x" + to_hex(ctx))
          if(!ctx){ return 0 }
          return {"type": "glx", "display": d, "window": w, "context": ctx}
       }

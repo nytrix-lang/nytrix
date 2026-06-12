@@ -1,5 +1,7 @@
 #!/usr/bin/env -S python3 -B
 from __future__ import annotations
+import base64
+import json
 import os
 import hashlib
 import platform
@@ -15,6 +17,8 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+os.environ["MESA_VK_IGNORE_CONFORMANCE_WARNING"] = "true"
+
 os.environ.setdefault("PYTHONPYCACHEPREFIX", str(Path(tempfile.gettempdir()) / "nytrix-pycache"))
 sys.pycache_prefix = os.environ["PYTHONPYCACHEPREFIX"]
 
@@ -468,8 +472,8 @@ def run_capture(cmd: list[str] | str, *, shell: bool = False) -> subprocess.Comp
     except FileNotFoundError as exc:
         return subprocess.CompletedProcess(cmd, 127, "", str(exc))
 
-def which(name: str) -> str:
-    return shutil.which(name) or ""
+def which(name: str, path: str | None = None) -> str:
+    return shutil.which(name, path=path) or ""
 
 def configure_macos_tool_path() -> None:
     if host_os() != "macos":
@@ -1660,13 +1664,43 @@ def cmake_configure_complete(bdir: Path) -> bool:
         or any(bdir.glob("*.sln"))
     )
 
+def _detect_vendor_lib_dir(build_root: Path) -> Path | None:
+    lib_dir = build_root / "vendor" / "lib" / "host"
+    if lib_dir.is_dir() and any(lib_dir.glob("*.so*")):
+        return lib_dir
+    return None
+
 def cmake_configure(build_root: Path, kind: str) -> Path:
     configure_macos_llvm_env()
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     cache = bdir / "CMakeCache.txt"
+    # Detect vendored LLVM early so -D flags include rpath-link and -rpath.
+    vendor_dir = _detect_vendor_lib_dir(build_root)
+    extra_ldflags: list[str] = []
+    if vendor_dir:
+        vendored_root = vendor_dir.parent.parent
+        vendored_llvm_config = vendored_root / "bin" / "llvm-config"
+        vendored_include = vendored_root / "include"
+        if vendored_llvm_config.exists():
+            if vendored_include.exists():
+                os.environ.setdefault("NYTRIX_LLVM_INCLUDE", str(vendored_include))
+                os.environ.setdefault("LLVM_CONFIG", str(vendored_llvm_config))
+                vendored_bin = vendored_root / "bin"
+                path = os.environ.get("PATH", "")
+                path_entries = path.split(":")
+                if str(vendored_bin) not in path_entries:
+                    os.environ["PATH"] = f"{vendored_bin}:{path}"
+                log("BUILD", f"cmake: vendored LLVM at {_rel_or_abs(vendored_llvm_config)}")
+            # rpath-link so the linker resolves transitive .so deps.
+            extra_ldflags.append(f"-Wl,-rpath-link,{vendor_dir}")
+            # rpath so the built binary finds libs at runtime without LD_LIBRARY_PATH.
+            extra_ldflags.append(f"-Wl,-rpath,'$ORIGIN/../vendor/lib/host'")
     host_cflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_CFLAGS") or "")
-    host_ldflags = cmake_flag_list(os.environ.get("NYTRIX_HOST_LDFLAGS") or "")
+    raw_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS") or ""
+    if extra_ldflags:
+        raw_ldflags = (raw_ldflags + " " + " ".join(extra_ldflags)).strip()
+    host_ldflags = cmake_flag_list(raw_ldflags)
     cache_matches_flags = True
     if cache.exists():
         cache_matches_flags = (
@@ -1696,7 +1730,12 @@ def cmake_configure(build_root: Path, kind: str) -> Path:
             cmd.append(f"-DCMAKE_CXX_COMPILER={cxx}")
     if which("ninja"):
         cmd += ["-G", "Ninja"]
-    run(cmd, quiet=QUIET_BOOTSTRAP)
+    cmake_env = None
+    if vendor_dir:
+        cmake_env = os.environ.copy()
+        old = cmake_env.get("LD_LIBRARY_PATH", "")
+        cmake_env["LD_LIBRARY_PATH"] = f"{vendor_dir}{':' + old if old else ''}"
+    run(cmd, quiet=QUIET_BOOTSTRAP, env=cmake_env)
     boot_ok(f"cmake ({kind}) configured")
     return bdir
 
@@ -2000,6 +2039,514 @@ CROSS_PRESETS = {
     "windows-x64": ("x86_64-w64-windows-gnu", "wine", ""),
     "windows-x86_64": ("x86_64-w64-windows-gnu", "wine", ""),
 }
+
+WEB_DEMO_ASSET_DIR = ROOT / "etc" / "assets" / "website" / "wasm"
+WEB_DEMO_STATIC_ASSETS = (
+    "index.html",
+    "web.css",
+    "wasm.js",
+)
+WEB_DEMO_SHARED_ASSETS = (
+    "logo.svg",
+    "favicon.svg",
+)
+
+def _demo_id_from_source(source: str) -> str:
+    path = Path(source)
+    parts = list(path.parts)
+    if len(parts) >= 3 and parts[0] == "etc" and parts[1] == "projects":
+        parts = parts[2:]
+    if parts and parts[-1].endswith(".ny"):
+        parts[-1] = parts[-1][:-3]
+    raw = "-".join(parts) or "demo"
+    out = []
+    last_dash = False
+    for ch in raw.lower():
+        ok = ch.isalnum()
+        if ok:
+            out.append(ch)
+            last_dash = False
+        elif not last_dash:
+            out.append("-")
+            last_dash = True
+    return ("".join(out).strip("-") or "demo")
+
+def _demo_title_from_source(source: str) -> str:
+    comment_title = _demo_comment_title(source)
+    if comment_title:
+        return comment_title
+    stem = Path(source).stem.replace("_", " ").replace("-", " ").strip()
+    words = [w for w in stem.split() if w]
+    return " ".join(w[:1].upper() + w[1:] for w in words) or "Demo"
+
+def _demo_area_from_source(source: str) -> str:
+    path = Path(source)
+    parts = list(path.parts)
+    if len(parts) >= 4 and parts[0] == "etc" and parts[1] == "projects":
+        return parts[2].upper()
+    return "projects"
+
+def _demo_keywords_from_source(source: str) -> list[str]:
+    path = ROOT / source
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    for raw in lines[:24]:
+        line = raw.strip()
+        low = line.lower()
+        if low.startswith(";; keywords:"):
+            tail = line.split(":", 1)[1].strip()
+            return [w.strip().lower() for w in tail.replace(",", " ").split() if w.strip()]
+        if line and not line.startswith("#!") and not line.startswith(";;"):
+            break
+    return []
+
+def _demo_comment_title(source: str) -> str:
+    path = ROOT / source
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    for raw in lines[:24]:
+        line = raw.strip()
+        low = line.lower()
+        if low.startswith(";; keywords:"):
+            continue
+        if line.startswith(";;"):
+            text = line[2:].strip()
+            if not text:
+                continue
+            if " - http" in text:
+                text = text.split(" - http", 1)[0].strip()
+            if len(text) <= 48:
+                return text.rstrip(".")
+        elif line and not line.startswith("#!"):
+            break
+    return ""
+
+def _demo_mode_from_source(source: str) -> str:
+    area = _demo_area_from_source(source).lower()
+    for kw in _demo_keywords_from_source(source):
+        if kw not in (area, "example", "demo", "nytrix"):
+            return kw
+    return area
+
+def _load_web_demo_manifest() -> list[dict[str, object]]:
+    path = WEB_DEMO_ASSET_DIR / "demos.json"
+    raw_items: list[dict[str, object]] = []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        data = []
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"web-demos: invalid {path.relative_to(ROOT)}: {exc}") from exc
+    if not isinstance(data, list):
+        raise SystemExit("web-demos: demos.json must contain a list")
+    for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise SystemExit(f"web-demos: manifest item {idx} is not an object")
+        raw_items.append(dict(item))
+    seen_ids: set[str] = set()
+    out: list[dict[str, object]] = []
+    for idx, item in enumerate(raw_items):
+        demo_id = str(item.get("id", "")).strip()
+        source = str(item.get("source", "")).strip().replace("\\", "/")
+        wasm = str(item.get("wasm", "")).strip().replace("\\", "/")
+        if not source and not wasm:
+            raise SystemExit(f"web-demos: manifest item {idx} needs source or wasm")
+        if not demo_id:
+            demo_id = _demo_id_from_source(source or wasm)
+        if demo_id in seen_ids:
+            raise SystemExit(f"web-demos: duplicate demo id {demo_id}")
+        seen_ids.add(demo_id)
+        item["id"] = demo_id
+        if source:
+            item["source"] = source
+        if wasm:
+            item["wasm"] = wasm
+        item["title"] = str(item.get("title", "")).strip() or (_demo_title_from_source(source) if source else Path(wasm).stem)
+        item["area"] = str(item.get("area", "")).strip() or (_demo_area_from_source(source) if source else "WASM")
+        item["mode"] = str(item.get("mode", "")).strip() or (_demo_mode_from_source(source) if source else "browser")
+        out.append(item)
+    return out
+
+def _parse_web_demo_args(args: list[str], build_root: Path) -> dict[str, object]:
+    out_dir = build_root / "wasm"
+    compile_ny_wasm = True
+    require_ny_wasm = True
+    clean = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-h", "--help"):
+            return {"help": True}
+        if a == "--out":
+            if i + 1 >= len(args):
+                raise SystemExit("web-demos: missing value for --out")
+            out_dir = Path(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--out="):
+            out_dir = Path(a.split("=", 1)[1])
+            i += 1
+            continue
+        if a == "--no-ny-wasm":
+            compile_ny_wasm = False
+            i += 1
+            continue
+        if a == "--require-ny-wasm":
+            require_ny_wasm = True
+            i += 1
+            continue
+        if a == "--clean":
+            clean = True
+            i += 1
+            continue
+        raise SystemExit(f"web-demos: unknown option {a}")
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
+    return {
+        "help": False,
+        "out": out_dir,
+        "compile_ny_wasm": compile_ny_wasm,
+        "require_ny_wasm": require_ny_wasm,
+        "clean": clean,
+    }
+
+def print_web_demos_help() -> None:
+    print(c("1;36", "Nytrix wasm runner"))
+    print("")
+    print("Usage:")
+    print("  ./make web-demos")
+    print("  ./make web-demos --out build/wasm")
+    print("")
+    print("Flags:")
+    print("  --out DIR         output directory")
+    print("  --no-ny-wasm      skip compiling manifest Ny sources")
+    print("  --require-ny-wasm fail unless every manifest source emits wasm")
+    print("  --clean           remove the output directory before writing")
+
+def _demo_wasm_name(demo_id: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in demo_id.strip())
+    return (safe or "demo") + ".wasm"
+
+def _tail_text(value: object, limit: int = 4000) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    return str(value)[-limit:]
+
+WASM_DEFAULT_EXPORTS = (
+    "_ny_top_entry",
+    "main",
+    "ny_web_init",
+    "ny_web_main",
+    "ny_web_frame",
+    "ny_web_render",
+)
+
+def _wasm_toolchain() -> tuple[str | None, str]:
+    clang = which("clang")
+    if not clang:
+        return None, "clang missing"
+    if "WebAssembly" not in _llvm_targets_built():
+        return None, "LLVM WebAssembly backend not built"
+    if not which("wasm-ld"):
+        return None, "wasm-ld missing"
+    return clang, ""
+
+def _ny_wasm_env(build_root: Path, kind: str) -> tuple[Path, Path, dict[str, str]]:
+    ny_bin = resolve_tool_bin(build_root, kind, "ny")
+    std_file = cmake_build_dir(build_root, kind) / "std.ny"
+    env = os.environ.copy()
+    env.setdefault("NYTRIX_ROOT", str(ROOT))
+    env["NYTRIX_STD_CACHE"] = "0"
+    env["NYTRIX_STD_BC_CACHE_AUTO"] = "0"
+    if std_file.exists():
+        env["NYTRIX_STD_PATH"] = str(std_file)
+        env["NYTRIX_BUILD_STD_PATH"] = str(std_file)
+    return ny_bin, std_file, env
+
+def _resolve_wasm_path(path: Path | str) -> Path:
+    p = Path(path)
+    if not p.is_absolute():
+        p = ROOT / p
+    return p
+
+def _compile_ny_to_wasm(
+    build_root: Path,
+    kind: str,
+    source: Path,
+    wasm: Path,
+    ir: Path,
+    exports: tuple[str, ...] = WASM_DEFAULT_EXPORTS,
+    allow_undefined: bool = True,
+    initial_memory: int = 16777216,
+    max_memory: int = 67108864,
+    opt: str = "-O2",
+    step_timeout: int = 120,
+) -> dict[str, object]:
+    clang, tool_err = _wasm_toolchain()
+    if tool_err:
+        return {"ok": False, "stage": "toolchain", "detail": tool_err}
+    try:
+        ny_bin, std_file, env = _ny_wasm_env(build_root, kind)
+    except SystemExit as exc:
+        return {"ok": False, "stage": "toolchain", "detail": str(exc)}
+    source = _resolve_wasm_path(source)
+    wasm = _resolve_wasm_path(wasm)
+    ir = _resolve_wasm_path(ir)
+    if not source.exists():
+        return {"ok": False, "stage": "source", "detail": f"missing source {source}"}
+    wasm.parent.mkdir(parents=True, exist_ok=True)
+    ir.parent.mkdir(parents=True, exist_ok=True)
+    ny_cmd = [
+        str(ny_bin),
+        "--host-triple=wasm32-unknown-unknown",
+        f"--emit-ir={ir}",
+        "-emit-only",
+        str(source),
+    ]
+    if std_file.exists():
+        ny_cmd.insert(1, f"--std-path={std_file}")
+    try:
+        ny_res = subprocess.run(ny_cmd, cwd=str(ROOT), env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "stage": "ny", "detail": "ny ir timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    if ny_res.returncode != 0 or not ir.exists():
+        return {"ok": False, "stage": "ny", "detail": "ny ir failed", "output": _tail_text(ny_res.stdout)}
+    clang_cmd = [
+        str(clang),
+        "--target=wasm32",
+        opt,
+        "-nostdlib",
+        "-Wl,--no-entry",
+        "-Wl,--export-memory",
+    ]
+    clang_cmd.extend(f"-Wl,--export-if-defined={name}" for name in exports if name)
+    if allow_undefined:
+        clang_cmd.append("-Wl,--allow-undefined")
+    clang_cmd.extend([
+        f"-Wl,--initial-memory={initial_memory}",
+        f"-Wl,--max-memory={max_memory}",
+        "-o",
+        str(wasm),
+        str(ir),
+    ])
+    try:
+        clang_res = subprocess.run(clang_cmd, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=step_timeout)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "stage": "clang", "detail": "wasm link timed out", "output": _tail_text(exc.stdout), "timeout": step_timeout}
+    if clang_res.returncode != 0 or not wasm.exists():
+        return {"ok": False, "stage": "clang", "detail": "wasm link failed", "output": _tail_text(clang_res.stdout)}
+    return {"ok": True, "source": str(source), "ir": str(ir), "wasm": str(wasm)}
+
+def _build_ny_demo_wasm(out_dir: Path, build_root: Path, kind: str, manifest: list[dict[str, object]]) -> tuple[int, int, str]:
+    wasm_dir = out_dir / "wasm"
+    ir_dir = out_dir / "ny-ir"
+    wasm_dir.mkdir(parents=True, exist_ok=True)
+    ir_dir.mkdir(parents=True, exist_ok=True)
+    report: list[dict[str, object]] = []
+    built = 0
+    failed = 0
+    step_timeout = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
+    for item in manifest:
+        demo_id = str(item.get("id", "demo"))
+        source = str(item.get("source", "")).strip()
+        if not source:
+            report.append({"id": demo_id, "ok": True, "wasm": str(item.get("wasm", "")), "source": ""})
+            continue
+        ir = ir_dir / (Path(_demo_wasm_name(demo_id)).with_suffix(".ll").name)
+        wasm = wasm_dir / _demo_wasm_name(demo_id)
+        res = _compile_ny_to_wasm(build_root, kind, Path(source), wasm, ir, step_timeout=step_timeout)
+        if not bool(res.get("ok", False)):
+            failed += 1
+            item["wasmStatus"] = str(res.get("detail", "wasm failed"))
+            report.append({
+                "id": demo_id,
+                "source": source,
+                "ok": False,
+                "stage": str(res.get("stage", "")),
+                "detail": str(res.get("detail", "")),
+                "output": _tail_text(res.get("output", "")),
+            })
+            continue
+        built += 1
+        item["wasm"] = "wasm/" + wasm.name
+        item["wasmBase64"] = base64.b64encode(wasm.read_bytes()).decode("ascii")
+        item["wasmKind"] = "ny"
+        item["wasmStatus"] = "ok"
+        report.append({"id": demo_id, "source": source, "ok": True, "wasm": item["wasm"]})
+    (out_dir / "ny-wasm-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return built, failed, f"{built}/{len([x for x in manifest if str(x.get('source', '')).strip()])} manifest Ny sources emitted wasm"
+
+def run_web_demos(build_root: Path, kind: str, args: list[str]) -> int:
+    cfg = _parse_web_demo_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print_web_demos_help()
+        return 0
+    out_dir = cfg["out"]
+    assert isinstance(out_dir, Path)
+    if bool(cfg.get("clean", False)):
+        shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _load_web_demo_manifest()
+    for stale_name in ("web-demos.css", "web_demos.css"):
+        stale = out_dir / stale_name
+        if stale.exists():
+            stale.unlink()
+    for name in WEB_DEMO_STATIC_ASSETS:
+        src = WEB_DEMO_ASSET_DIR / name
+        if not src.exists():
+            raise SystemExit(f"web-demos: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+    for name in WEB_DEMO_SHARED_ASSETS:
+        src = WEB_DEMO_ASSET_DIR.parent / name
+        if not src.exists():
+            raise SystemExit(f"web-demos: missing {src.relative_to(ROOT)}")
+        shutil.copy2(src, out_dir / name)
+    ny_built = 0
+    ny_failed = 0
+    ny_detail = "disabled"
+    if bool(cfg.get("compile_ny_wasm", True)):
+        ny_built, ny_failed, ny_detail = _build_ny_demo_wasm(out_dir, build_root, kind, manifest)
+    if ny_failed and bool(cfg.get("require_ny_wasm", False)):
+        raise SystemExit("web-demos: " + ny_detail)
+    (out_dir / "demos-data.js").write_text(
+        "window.NYTRIX_WEB_DEMOS = " + json.dumps(manifest, indent=2) + ";\n",
+        encoding="utf-8",
+    )
+    if bool(cfg.get("compile_ny_wasm", True)):
+        if ny_built:
+            ok("web runner ny wasm: " + ny_detail)
+        else:
+            log("WEB", "no manifest Ny sources compiled (" + ny_detail + ")")
+    ok("web runner: " + _rel_or_abs(out_dir / "index.html"))
+    print("Serve or open: " + _rel_or_abs(out_dir / "index.html"))
+    return 0
+
+def print_wasm_help() -> None:
+    print(c("1;36", "Nytrix wasm compiler"))
+    print("")
+    print("Usage:")
+    print("  ./make wasm path/to/app.ny")
+    print("  ./make wasm path/to/app.ny --out build/wasm/app.wasm")
+    print("")
+    print("Flags:")
+    print("  -o, --out FILE      output wasm file")
+    print("  --ir FILE           output LLVM IR file")
+    print("  --timeout SEC       per-stage timeout")
+    print("  --export NAME       export an extra symbol")
+    print("  --no-undefined      reject unresolved host imports at link time")
+
+def _parse_wasm_args(args: list[str], build_root: Path) -> dict[str, object]:
+    if not args or any(a in ("-h", "--help") for a in args):
+        return {"help": True}
+    source: Path | None = None
+    out_path: Path | None = None
+    ir_path: Path | None = None
+    exports = list(WASM_DEFAULT_EXPORTS)
+    allow_undefined = True
+    timeout_sec = int((os.environ.get("NYTRIX_WASM_STEP_TIMEOUT") or "120").strip() or "120")
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-o", "--out"):
+            if i + 1 >= len(args):
+                raise SystemExit("wasm: missing value for " + a)
+            out_path = Path(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--out="):
+            out_path = Path(a.split("=", 1)[1])
+            i += 1
+            continue
+        if a == "--ir":
+            if i + 1 >= len(args):
+                raise SystemExit("wasm: missing value for --ir")
+            ir_path = Path(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--ir="):
+            ir_path = Path(a.split("=", 1)[1])
+            i += 1
+            continue
+        if a == "--timeout":
+            if i + 1 >= len(args):
+                raise SystemExit("wasm: missing value for --timeout")
+            timeout_sec = int(float(args[i + 1]))
+            i += 2
+            continue
+        if a.startswith("--timeout="):
+            timeout_sec = int(float(a.split("=", 1)[1]))
+            i += 1
+            continue
+        if a == "--export":
+            if i + 1 >= len(args):
+                raise SystemExit("wasm: missing value for --export")
+            exports.extend(x.strip() for x in args[i + 1].split(",") if x.strip())
+            i += 2
+            continue
+        if a.startswith("--export="):
+            exports.extend(x.strip() for x in a.split("=", 1)[1].split(",") if x.strip())
+            i += 1
+            continue
+        if a == "--no-undefined":
+            allow_undefined = False
+            i += 1
+            continue
+        if a.startswith("-"):
+            raise SystemExit(f"wasm: unknown option {a}")
+        if source is not None:
+            raise SystemExit(f"wasm: unexpected extra argument {a}")
+        source = Path(a)
+        i += 1
+    if source is None:
+        raise SystemExit("wasm: missing Ny source")
+    src_abs = _resolve_wasm_path(source)
+    stem = src_abs.stem or "app"
+    if out_path is None:
+        out_path = build_root / "wasm" / (stem + ".wasm")
+    if out_path.suffix.lower() != ".wasm":
+        out_path = out_path / (stem + ".wasm")
+    if ir_path is None:
+        ir_path = build_root / "wasm-ir" / (stem + ".ll")
+    return {
+        "help": False,
+        "source": src_abs,
+        "out": _resolve_wasm_path(out_path),
+        "ir": _resolve_wasm_path(ir_path),
+        "exports": tuple(dict.fromkeys(exports)),
+        "allow_undefined": allow_undefined,
+        "timeout": max(1, timeout_sec),
+    }
+
+def run_wasm(build_root: Path, kind: str, args: list[str]) -> int:
+    cfg = _parse_wasm_args(args, build_root)
+    if bool(cfg.get("help", False)):
+        print_wasm_help()
+        return 0
+    res = _compile_ny_to_wasm(
+        build_root,
+        kind,
+        cfg["source"],  # type: ignore[arg-type]
+        cfg["out"],     # type: ignore[arg-type]
+        cfg["ir"],      # type: ignore[arg-type]
+        exports=cfg["exports"],  # type: ignore[arg-type]
+        allow_undefined=bool(cfg.get("allow_undefined", True)),
+        step_timeout=int(cfg.get("timeout", 120)),
+    )
+    if not bool(res.get("ok", False)):
+        detail = str(res.get("detail", "wasm failed"))
+        output = _tail_text(res.get("output", ""), 1600)
+        if output:
+            print(output)
+        raise SystemExit("wasm: " + detail)
+    ok("wasm: " + _rel_or_abs(Path(str(res["wasm"]))))
+    log("WASM", "ir: " + _rel_or_abs(Path(str(res["ir"]))))
+    return 0
 
 def _cross_slug(triple: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.+-]+", "-", triple).strip("-") or "target"
@@ -2474,6 +3021,23 @@ def _runner_names() -> list[str]:
 def _missing_runners() -> list[str]:
     return [name for name in _runner_names() if not _tool_path(name)]
 
+def _kill_process_group(pid: int) -> None:
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+def _system_path_excluding_vendor(build_root: Path) -> str:
+    vendor_bin = str(build_root / "vendor" / "bin")
+    return os.pathsep.join(
+        p for p in os.environ.get("PATH", "").split(os.pathsep)
+        if p and p != vendor_bin
+    ) or "/usr/bin:/bin"
+
 def _linux_soft_runner_packages(distro: str, like: str, missing: list[str]) -> list[str]:
     need_qemu = any(name.startswith("qemu-") for name in missing)
     need_wine = "wine" in missing
@@ -2752,6 +3316,32 @@ def run_make_doctor(build_root: Path, kind: str, args: list[str]) -> int:
         failures += _doctor_check(name, "missing" not in path, path, required=False)
     std_path = bdir / "std.ny"
     failures += _doctor_check("std.ny", std_path.exists(), _rel_or_abs(std_path), required=False)
+    print("")
+    print(c("1", "Vendored libs"))
+    vendor_lib = build_root / "vendor" / "lib" / "host"
+    if vendor_lib.is_dir() and any(vendor_lib.glob("*.so*")):
+        ldd = which("ldd")
+        missing_deps: list[str] = []
+        for so in sorted(vendor_lib.glob("*.so*")):
+            if not so.is_file() or so.is_symlink():
+                continue
+            if not ldd:
+                break
+            res = subprocess.run([ldd, str(so)], capture_output=True, text=True, timeout=30)
+            for line in res.stdout.splitlines():
+                if "not found" in line and "=>" in line:
+                    lib_name = line.split("=>")[0].strip()
+                    missing_deps.append(f"{so.name}: {lib_name}")
+        if ldd is None:
+            _doctor_check("vendor libs", True, "ldd not available, skip check", required=False)
+        elif missing_deps:
+            _doctor_check("vendor libs", False, f"{len(missing_deps)} unresolved", required=True)
+            for d in missing_deps[:8]:
+                print(f"  {c('33', 'warn'):<12} {'':<22} {d}")
+            if len(missing_deps) > 8:
+                print(f"  {c('33', 'warn'):<12} {'':<22} ... {len(missing_deps) - 8} more")
+        else:
+            _doctor_check("vendor libs", True, "all deps satisfied", required=False)
     print("")
     print(c("1", "Runners"))
     for name in _runner_names():
@@ -3166,10 +3756,14 @@ def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) ->
         return subprocess.run([afl, *afl_args], cwd=str(ROOT)).returncode
     raise SystemExit(f"make profile: unknown mode '{mode}'")
 
-def run_tool(build_root: Path, kind: str, name: str, args: list[str]) -> int:
+def run_tool(build_root: Path, kind: str, name: str, args: list[str], timeout: float | None = None) -> int:
     binp = resolve_tool_bin(build_root, kind, name)
     launch = tool_launch_path(binp)
     env = os.environ.copy()
+    vendor_dir = _detect_vendor_lib_dir(build_root)
+    if vendor_dir:
+        old = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{vendor_dir}{':' + old if old else ''}"
     interactive_repl = False
     if name == "ny":
         # Keep the pure REPL path minimal. Pointing interactive startup at the
@@ -3193,28 +3787,24 @@ def run_tool(build_root: Path, kind: str, name: str, args: list[str]) -> int:
                 os.execvpe(launch, [launch, *args], env)
             except OSError:
                 pass
-    proc = subprocess.Popen([launch, *args], cwd=str(ROOT), env=env)
+    # Use process groups so we can kill the entire tree on timeout/interrupt.
+    proc = subprocess.Popen([launch, *args], cwd=str(ROOT), env=env,
+                            preexec_fn=os.setsid if host_os() != "windows" else None)
     interrupted = False
     rc = 0
     try:
-        rc = proc.wait()
+        rc = proc.wait(timeout=timeout)
+        return rc
+    except subprocess.TimeoutExpired:
+        log("TOOL", f"timeout ({timeout}s): killing process group {proc.pid}")
+        _kill_process_group(proc.pid)
+        rc = 124
         return rc
     except KeyboardInterrupt:
         interrupted = True
-        try:
-            if proc.poll() is None:
-                proc.send_signal(signal.SIGINT)
-        except Exception:
-            pass
-        try:
-            rc = proc.wait(timeout=2.0)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            rc = 130
-        return rc if isinstance(rc, int) and rc != 0 else 130
+        _kill_process_group(proc.pid)
+        rc = 130
+        return rc
     finally:
         if interrupted or name == "ny" or rc == 130:
             restore_tty_visuals()
@@ -3248,8 +3838,9 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     exec_cache_mode = "on" if (exec_cache and not cold) else "off"
     std_cache_mode = "off" if cold else ("off" if os.environ.get("NYTRIX_STD_CACHE") == "0" else "on")
     log("TEST", f"make test: full matrix with jit/repl/native and benchmarks; result_cache {cache_mode}, exec_cache {exec_cache_mode}, std_cache {std_cache_mode} (set NYTRIX_TEST_EXEC_CACHE=1 to enable binary caches)")
-    step(f"run tests: bin=ny jobs={test_jobs} timeout=auto")
-    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra])
+    test_timeout_s = int(os.environ.get("NYTRIX_TEST_TIMEOUT") or "1800")  # 30 min default
+    step(f"run tests: bin=ny jobs={test_jobs} timeout={test_timeout_s}s")
+    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(test_timeout_s))
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
     if rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
@@ -3258,7 +3849,30 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return rc
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "fmt", "std", "std_bc", "test", "repl", "fuzz", "docs", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "docs", "web-demos", "wasm", "install", "uninstall", "clean", "debug", "tidy", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+
+    def looks_like_ny_source(arg: str) -> bool:
+        if not arg or arg == "--" or arg.startswith("-"):
+            return False
+        path = Path(arg) if Path(arg).is_absolute() else ROOT / arg
+        return arg.endswith(".ny") or path.exists()
+
+    def implicit_ny_invocation(raw: list[str]) -> bool:
+        # Allow fast direct usage:
+        #   ./make etc/projects/ui/term.ny -h
+        #   ./make -trace etc/projects/ui/term.ny -vk
+        # without treating -h as make's own help or rejecting the source path as
+        # an unknown make target. Stop as soon as an explicit make command appears.
+        for item in raw:
+            if item == "--":
+                continue
+            if item in ("help", *known):
+                return False
+            if looks_like_ny_source(item):
+                return True
+        return False
+
+    source_passthrough = implicit_ny_invocation(argv)
     cmds: list[str] = []
     extra: list[str] = []
     jobs = 0
@@ -3272,13 +3886,19 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
     while i < len(argv):
         a = argv[i]
         if a in ("-h", "--help"):
-            help_flag = True
+            if source_passthrough:
+                extra.append(a)
+            else:
+                help_flag = True
         elif a == "help":
             help_flag = True
         elif a == "--version":
             version = True
         elif a in ("-v", "--verbose"):
-            verbose = True
+            if source_passthrough:
+                extra.append(a)
+            else:
+                verbose = True
         elif a == "--bootstrap-logs":
             bootstrap_logs = True
         elif a == "--no-bootstrap-logs":
@@ -3306,7 +3926,7 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 jobs = int(v)
             except Exception:
                 raise SystemExit(f"make: invalid jobs value: {v}")
-        elif a in ("cross", "cross-run", "doctor", "profile"):
+        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web-demos", "wasm"):
             cmds.append(a)
             extra.extend(argv[i + 1 :])
             break
@@ -3323,8 +3943,11 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
         i += 1
 
     if not cmds:
-        if extra and not had_unknown_nonflag:
+        source_like = any(looks_like_ny_source(a) for a in extra)
+        if extra and (not had_unknown_nonflag or source_like):
             cmds = ["ny"]
+            if source_like:
+                help_flag = False
         elif not extra:
             cmds = ["all"]
         else:
@@ -3348,6 +3971,12 @@ def print_help() -> None:
         ("Build", (
             ("all", "configure and build ny, std, and tools"),
             ("bin", "build the ny executable only"),
+            ("static bin", "build/bundle portable compiler tools in build/static"),
+            ("bin-static", "alias for static bin"),
+            ("tar", "create build/dist/nytrix-source.tar.gz, or --with-binaries for nytrix-static"),
+            ("vendor", "bundle shared libs into build/vendor/ for portability"),
+            ("static libs", "refresh bundled shared libs for release/static"),
+            ("static check", "check whether an ELF is static or dynamic"),
             ("std/std_bc", "bundle stdlib source or bitcode"),
             ("install/uninstall", "install or remove ny and ny-lsp"),
             ("clean", "remove generated artifacts"),
@@ -3362,6 +3991,8 @@ def print_help() -> None:
         ("Run", (
             ("ny/repl/run", "launch the compiler, REPL, or cached -run flow"),
             ("docs", "build documentation portal"),
+            ("wasm", "compile a Ny source file to WebAssembly"),
+            ("web-demos", "build the browser WebGL/Wasm demo portal"),
         )),
         ("Inspect", (
             ("env", "print effective paths, tools, and overrides"),
@@ -3391,10 +4022,24 @@ def print_help() -> None:
     ):
         print(f"  {c('32', opt)}{' ' * max(1, 34 - len(opt))}{desc}")
     print("")
+    print(c("1", "Ny/runtime passthrough:"))
+    print(f"  {c('36', './make ny <file.ny> [ny flags] [program args]')}  run a Ny source")
+    print(f"  {c('36', './make <file.ny> [ny flags] [program args]')}     shorthand for ./make ny")
+    print(f"  {c('36', './make -trace ny <file.ny> ...')}              pass compiler flags before the source")
+    print(f"  {c('36', './make ny <file.ny> -v -gl')}                pass UI/app flags after the source")
+    print(f"  {c('36', './make ny <file.ny> -- [args]')}             force the rest to be program args")
+    print("")
     print(c("1", "Examples:"))
     print("  ./make doctor")
     print("  ./make doctor --install")
     print("  ./make targets")
+    print("  ./make ny etc/projects/ui/term.ny -h")
+    print("  ./make etc/projects/ui/term.ny -v -vk btop")
+    print("  ./make -trace ny etc/projects/ui/engine.ny -vk")
+    print("  ./make wasm etc/projects/os/args.ny --out build/wasm/args.wasm")
+    print("  ./make bin-static")
+    print("  ./make static libs build/static")
+    print("  ./make web-demos")
     print("  ./make cross-run linux-x64 etc/projects/os/args.ny -- one two")
 
 def _set_env_value(name: str, value: str | None) -> None:
@@ -3448,6 +4093,1129 @@ def configure_command_environment(
         return "ubsan"
     return base_kind
 
+def print_static_help() -> None:
+    print(c("1;36", "Nytrix static / portable build"))
+    print("")
+    print("Usage:")
+    print("  ./make static bin                   build compiler/tools and bundle runtime .so files")
+    print("  ./make bin-static                   alias for static bin")
+    print("  ./make tar                          build build/dist/nytrix-source.tar.gz")
+    print("  ./make tar --with-binaries          build runnable build/dist/nytrix-static.tar.gz")
+    print("  ./make static libs [path]           bundle shared libs beside build/release or path")
+    print("  ./make static check <binary>        check if ELF binary is static/dynamic")
+    print("  ./make static ny <file.ny> [flags]  compile Ny program with static link flags")
+    print("  ./make static <file.ny> [flags]     shorthand for static ny")
+    print("")
+    print("Output:")
+    print("  build/static/                       portable folder")
+    print("  build/static/lib/host/              bundled libLLVM/libclang/libz3/etc")
+    print("  build/release/lib/host/             same libs copied beside release build")
+    print("  build/static/env.sh                 convenience helpers; prefer ./run-ny")
+    print("")
+    print("Modes:")
+    print("  default/auto                        portable dynamic bundle; avoids fake full-static")
+    print("  NYTRIX_STATIC_MODE=full             force -static; falls back to portable bundle if it fails")
+    print("  NYTRIX_STATIC_MODE=mostly           use -static-libgcc/-static-libstdc++ only")
+    print("")
+    print("Env:")
+    print("  NYTRIX_STATIC_LDFLAGS               override compiler/tool link flags")
+    print("  NYTRIX_BUNDLE_NO_SYSTEM_LIBS=1      make a thin same-distro bundle; omit libc/loader")
+    print("  NYTRIX_STATIC_LIB_SEARCH_PATH=a:b   extra directories to find missing .so files")
+    print("  NYTRIX_GLIBC_FLOOR=2.38             max allowed GLIBC requirement for bundled .so files")
+    print("  NYTRIX_ALLOW_NEW_GLIBC_BUNDLE=1     allow packaging host-newer .so files anyway")
+
+def _elf_is_static(binary: Path) -> tuple[bool, str]:
+    try:
+        res = subprocess.run(["ldd", str(binary)], capture_output=True, text=True, timeout=5)
+        ldd_out = res.stdout.strip()
+        ldd_lower = ldd_out.lower()
+        if "not a dynamic executable" in ldd_lower or "statically linked" in ldd_lower:
+            return True, ldd_out
+        if ldd_out.startswith("\t") or "=>" in ldd_out:
+            needed = [
+                ln.strip().split()[0] for ln in ldd_out.splitlines()
+                if "=>" in ln and "not found" not in ln
+            ]
+            missing = [ln.split()[0] for ln in ldd_out.splitlines() if "not found" in ln]
+            missing_names = [m for m in missing if m and not m.startswith("\t")]
+            detail = f"dynamic linked: needed={','.join(needed) if needed else 'none'}"
+            if missing_names:
+                detail += f" missing={','.join(missing_names)}"
+            return False, detail
+        res2 = subprocess.run(["file", str(binary)], capture_output=True, text=True, timeout=5)
+        file_out = res2.stdout.strip()
+        if "statically linked" in file_out.lower():
+            return True, file_out
+        return False, file_out
+    except Exception as exc:
+        return False, str(exc)
+
+def _elf_needed_names(path: Path) -> list[str]:
+    try:
+        res = subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True, timeout=10)
+        names: list[str] = []
+        for ln in res.stdout.splitlines():
+            if "(NEEDED)" not in ln:
+                continue
+            m = re.search(r"\[(.*?)\]", ln)
+            if m:
+                names.append(m.group(1))
+        return list(dict.fromkeys(names))
+    except Exception:
+        return []
+
+def _is_system_runtime_lib(name: str) -> bool:
+    fname = name.rsplit("/", 1)[-1]
+    base = fname.split(".so", 1)[0]
+    if fname.startswith(("ld-linux", "ld-musl")):
+        return True
+    return base in {"libc", "libm", "libdl", "libpthread", "libutil", "librt", "libgcc_s", "libstdc++"}
+
+def _runtime_search_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    raw = os.environ.get("NYTRIX_STATIC_LIB_SEARCH_PATH") or os.environ.get("NYTRIX_BUNDLE_LIB_PATH") or ""
+    for part in raw.split(os.pathsep):
+        if part.strip():
+            dirs.append(Path(part).expanduser())
+    for tool in ("llvm-config-21", "llvm-config", "llvm-config-22", "llvm-config-20", "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16"):
+        t = which(tool)
+        if not t:
+            continue
+        res = run_capture([t, "--libdir"])
+        if res.returncode == 0:
+            val = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+            if val:
+                dirs.append(Path(val))
+    for d in (
+        "/usr/lib/llvm21/lib", "/usr/lib/llvm-21/lib", "/usr/lib/llvm22/lib", "/usr/lib/llvm-22/lib",
+        "/usr/lib", "/usr/lib64", "/lib", "/lib64", "/usr/local/lib", "/usr/local/lib64",
+        "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu",
+    ):
+        dirs.append(Path(d))
+    for pat in ("/usr/lib/llvm*/lib", "/usr/local/llvm*/lib", "/opt/llvm*/lib"):
+        try:
+            dirs.extend(Path("/").glob(pat.lstrip("/")))
+        except Exception:
+            pass
+    out: list[Path] = []
+    seen: set[str] = set()
+    for d in dirs:
+        try:
+            r = str(d.resolve())
+        except Exception:
+            r = str(d)
+        if r not in seen and d.exists() and d.is_dir():
+            seen.add(r)
+            out.append(d)
+    return out
+
+def _find_shared_lib(name: str, search_dirs: list[Path]) -> Path | None:
+    # Exact soname first.
+    for d in search_dirs:
+        p = d / name
+        if p.exists():
+            return p
+    # Then compatible prefix: libLLVM.so.21.1 -> libLLVM.so*, libz3.so.4.16 -> libz3.so*
+    stem = name.split(".so", 1)[0] + ".so"
+    candidates: list[Path] = []
+    for d in search_dirs:
+        try:
+            candidates.extend(d.glob(stem + "*"))
+        except Exception:
+            pass
+    # Prefer exact-ish versioned files over bare linker scripts/symlinks.
+    candidates = [c for c in candidates if c.exists()]
+    # If the requested soname has a major version, never fake it with a different major
+    # (libLLVM.so.19 copied as libLLVM.so.21.1 will load but then fail symbol versions).
+    req_major = ""
+    suf = name.split(".so", 1)[1] if ".so" in name else ""
+    if suf.startswith("."):
+        req_major = suf[1:].split(".", 1)[0]
+    filtered: list[Path] = []
+    for cnd in candidates:
+        if req_major:
+            names = [cnd.name]
+            try:
+                names.append(cnd.resolve().name)
+            except Exception:
+                pass
+            if not any(n == name or n.startswith(stem + "." + req_major) for n in names):
+                continue
+        filtered.append(cnd)
+    candidates = filtered
+    candidates.sort(key=lambda x: (0 if x.name == name else 1, -len(x.name)))
+    for cnd in candidates:
+        # Avoid text linker scripts where possible.
+        try:
+            f = subprocess.run(["file", "-b", str(cnd)], capture_output=True, text=True, timeout=5).stdout.lower()
+            if "ascii text" in f or "linker script" in f:
+                continue
+        except Exception:
+            pass
+        return cnd
+    return None
+
+def _copy_one_shared_lib(src: Path, dst_dir: Path, needed_name: str | None = None) -> Path | None:
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        real = src.resolve() if src.is_symlink() else src
+        name = needed_name or src.name
+        dst = dst_dir / name
+        if not dst.exists():
+            shutil.copy2(real, dst)
+        # Symlink the real name → needed name to avoid duplicate .so files (~90MB waste).
+        if real.name != name:
+            real_dst = dst_dir / real.name
+            if not real_dst.exists():
+                try:
+                    os.symlink(name, real_dst)
+                except Exception:
+                    shutil.copy2(real, real_dst)
+        return dst
+    except Exception as exc:
+        log("STATIC", f"failed to copy {src}: {exc}")
+        return None
+
+def _ldd_resolved(path: Path, lib_dir: Path) -> tuple[list[tuple[str, Path]], list[str]]:
+    env = os.environ.copy()
+    extra = str(lib_dir)
+    old = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = extra + (os.pathsep + old if old else "")
+    found: list[tuple[str, Path]] = []
+    missing: list[str] = []
+    try:
+        res = subprocess.run(["ldd", str(path)], capture_output=True, text=True, timeout=15, env=env)
+        for ln in (res.stdout + "\n" + res.stderr).splitlines():
+            parts = ln.strip().split()
+            if not parts:
+                continue
+            if len(parts) >= 4 and parts[1] == "=>" and parts[2] == "not" and parts[3] == "found":
+                missing.append(parts[0])
+            elif len(parts) >= 3 and parts[1] == "=>" and Path(parts[2]).exists():
+                found.append((parts[0], Path(parts[2])))
+            elif len(parts) >= 1 and parts[0].startswith("/") and Path(parts[0]).exists():
+                found.append((Path(parts[0]).name, Path(parts[0])))
+    except Exception:
+        pass
+    return found, list(dict.fromkeys(missing))
+
+def _patch_rpath_for_bundle(exe: Path, lib_dir: Path) -> bool:
+    # Off by default for full portable bundles. When glibc/libstdc++ are bundled,
+    # RPATH/LD_LIBRARY_PATH can make the host system loader load a mismatched
+    # bundled libc and crash. The robust outside-chroot path is run-ny, which
+    # invokes the bundled loader explicitly. Opt in only for thin/same-distro
+    # bundles.
+    if not _env_flag("NYTRIX_BUNDLE_PATCH_RPATH", False):
+        return False
+    patchelf = which("patchelf")
+    if not patchelf:
+        return False
+    try:
+        rel = os.path.relpath(lib_dir, exe.parent)
+        rpath = "$ORIGIN" if rel == "." else "$ORIGIN/" + rel.replace(os.sep, "/")
+        subprocess.run([patchelf, "--set-rpath", rpath, str(exe)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+def _write_bundle_env(bundle_dir: Path, lib_dir: Path) -> None:
+    try:
+        env_path = bundle_dir / "env.sh"
+        env_path.write_text(
+            "#!/usr/bin/env sh\n"
+            "# Source this for convenience helpers only. Do not LD_LIBRARY_PATH the bundled\n"
+            "# glibc into a different host loader; use ./run-ny instead.\n"
+            "_nytrix_here=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE:-$0}\")\" && pwd)\n"
+            "export NYTRIX_BUNDLE_ROOT=\"$_nytrix_here\"\n"
+            "export NYTRIX_ROOT=\"$_nytrix_here\"\n"
+            "if [ -f \"$_nytrix_here/src/rt/init.c\" ]; then export NYTRIX_RT_SRC=\"$_nytrix_here/src/rt/init.c\"; fi\n"
+            "if [ -z \"${CC:-}\" ]; then\n"
+            "  if command -v clang >/dev/null 2>&1; then export CC=clang;\n"
+            "  elif command -v cc >/dev/null 2>&1; then export CC=cc;\n"
+            "  elif command -v gcc >/dev/null 2>&1; then export CC=gcc; fi\n"
+            "fi\n"
+            "nytrix() { \"$_nytrix_here/run-ny\" \"$@\"; }\n"
+            "echo 'Nytrix bundle loaded: use nytrix <args> or ./run-ny <args>'\n",
+            encoding="utf-8",
+        )
+        env_path.chmod(0o755)
+    except Exception:
+        pass
+
+def _copy_static_runtime_libs(target_dir: Path, binary_path: Path) -> list[str]:
+    """Bundle dynamic dependencies for binary_path into target_dir.
+
+    Unlike the old ldd-only helper, this also resolves missing sonames such as
+    libLLVM.so.21.1/libclang.so.21.1/libz3.so.4.16 from LLVM and system lib dirs,
+    then walks transitive dependencies. For bin-static/static-bin portability it
+    copies the full host runtime by default too (glibc loader, libc, libm,
+    libstdc++, libgcc_s, etc). Set NYTRIX_BUNDLE_NO_SYSTEM_LIBS=1 only if you
+    intentionally want a thin bundle tied to the target machine's system libc.
+    """
+    copied: list[str] = []
+    copy_system = not _env_flag("NYTRIX_BUNDLE_NO_SYSTEM_LIBS", False)
+    search_dirs = [target_dir, *_runtime_search_dirs()]
+    queue: list[Path] = [binary_path]
+    seen_files: set[str] = set()
+    seen_missing: set[str] = set()
+    unresolved: set[str] = set()
+    while queue:
+        cur = queue.pop(0)
+        try:
+            key = str(cur.resolve())
+        except Exception:
+            key = str(cur)
+        if key in seen_files or not cur.exists():
+            continue
+        seen_files.add(key)
+        found, missing = _ldd_resolved(cur, target_dir)
+        for name, dep in found:
+            if not copy_system and _is_system_runtime_lib(name):
+                continue
+            dst = _copy_one_shared_lib(dep, target_dir, name)
+            if dst:
+                if dst.name not in copied:
+                    copied.append(dst.name)
+                queue.append(dst)
+        # readelf catches libs hidden by ldd failure and lets us search manually.
+        for name in [*missing, *_elf_needed_names(cur)]:
+            if not name or name in seen_missing:
+                continue
+            seen_missing.add(name)
+            if not copy_system and _is_system_runtime_lib(name):
+                continue
+            dep = _find_shared_lib(name, search_dirs)
+            if dep:
+                dst = _copy_one_shared_lib(dep, target_dir, name)
+                if dst:
+                    if dst.name not in copied:
+                        copied.append(dst.name)
+                    queue.append(dst)
+                    search_dirs.insert(0, target_dir)
+            else:
+                unresolved.add(name)
+    if unresolved:
+        log("STATIC", "unresolved shared libs: " + ", ".join(sorted(unresolved)))
+    return copied
+
+def _install_loader_compat_paths(bundle_dir: Path, lib_dir: Path) -> None:
+    """Make a dynamic binary usable as a tiny chroot root.
+
+    The executable interpreter is usually absolute, e.g. /lib64/ld-linux-x86-64.so.2.
+    RPATH/LD_LIBRARY_PATH are not consulted until that loader exists, so mirror the
+    bundled loader into lib64/. Also expose lib/host/*.so* through lib/*.so* symlinks
+    because plain `chroot build/static /ny` cannot source env.sh.
+    """
+    # Dynamic loader path required before the binary can even start.
+    loaders = list(lib_dir.glob("ld-linux*.so*")) + list(lib_dir.glob("ld-musl*.so*"))
+    for ld in loaders:
+        for sub in ("lib64", "lib"):
+            dst = bundle_dir / sub / ld.name
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                _copy2_if_different(ld, dst)
+                dst.chmod(0o755)
+            except Exception:
+                pass
+    # Chroot compatibility: default loader search paths include /lib and /lib64,
+    # but not /lib/host. Use symlinks to avoid duplicating a 150+MB LLVM .so.
+    for lib_subdir, rel_prefix in (("lib", Path("host")), ("usr/lib", Path("..") / ".." / "lib" / "host"), ("usr/lib64", Path("..") / ".." / "lib" / "host")):
+        root_lib = bundle_dir / lib_subdir
+        root_lib.mkdir(parents=True, exist_ok=True)
+        for so in lib_dir.glob("*.so*"):
+            if not so.is_file():
+                continue
+            dst = root_lib / so.name
+            try:
+                if _same_path(so, dst):
+                    continue
+                if dst.exists() or dst.is_symlink():
+                    dst.unlink()
+                os.symlink(rel_prefix / so.name, dst)
+            except Exception:
+                try:
+                    _copy2_if_different(so, dst)
+                except Exception:
+                    pass
+    # Convenience path inside chroot.
+    try:
+        usr_bin = bundle_dir / "usr" / "bin"
+        usr_bin.mkdir(parents=True, exist_ok=True)
+        dst = usr_bin / "ny"
+        if dst.exists() or dst.is_symlink():
+            dst.unlink()
+        os.symlink(Path("..") / ".." / "ny", dst)
+    except Exception:
+        pass
+
+def _write_bundle_launchers(bundle_dir: Path, lib_dir: Path) -> None:
+    """Write outside-chroot launchers that force the bundled loader/libs."""
+    try:
+        loaders = sorted(lib_dir.glob("ld-linux*.so*")) or sorted(lib_dir.glob("ld-musl*.so*"))
+        loader = loaders[0] if loaders else None
+        sh = bundle_dir / "run-ny"
+        if loader:
+            rel_loader = os.path.relpath(loader, bundle_dir).replace(os.sep, "/")
+            text = "#!/usr/bin/env sh\n"
+            text += "set -eu\n"
+            text += 'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            text += f'exec "$here/{rel_loader}" --library-path "$here/lib/host${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}" "$here/ny" "$@"\n'
+        else:
+            text = "#!/usr/bin/env sh\n"
+            text += 'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            text += 'export LD_LIBRARY_PATH="$here/lib/host${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+            text += 'exec "$here/ny" "$@"\n'
+        sh.write_text(text, encoding="utf-8")
+        sh.chmod(0o755)
+    except Exception:
+        pass
+
+def _bundle_dir_for_binary(binary_path: Path) -> list[str]:
+    lib_dir = binary_path.parent / "lib" / "host"
+    copied = _copy_static_runtime_libs(lib_dir, binary_path)
+    _patch_rpath_for_bundle(binary_path, lib_dir)
+    _write_bundle_env(binary_path.parent, lib_dir)
+    _install_loader_compat_paths(binary_path.parent, lib_dir)
+    _write_bundle_launchers(binary_path.parent, lib_dir)
+    return copied
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except Exception:
+        return False
+
+def _copy2_if_different(src: Path, dst: Path) -> bool:
+    if _same_path(src, dst):
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+def _copytree_replace(src: Path, dst: Path, ignore=None) -> None:
+    if not src.exists():
+        return
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst, ignore=ignore, symlinks=True)
+
+def _copy_release_file(src: Path, dst: Path) -> None:
+    if src.exists() and src.is_file():
+        _copy2_if_different(src, dst)
+
+def _make_tar_gz_fast(archive_base: Path, root_dir: Path, base_dir: str) -> Path:
+    tar_path = Path(str(archive_base) + ".tar.gz")
+    tar_bin = which("tar")
+    if tar_bin and host_os() != "windows":
+        attempts: list[tuple[list[str], dict[str, str] | None]] = [
+            ([tar_bin, "-C", str(root_dir), "-I", "gzip -1", "-cf", str(tar_path), base_dir], None),
+            ([tar_bin, "-C", str(root_dir), "-czf", str(tar_path), base_dir], {"GZIP": "-1"}),
+        ]
+        last_exc: Exception | None = None
+        for cmd, extra_env in attempts:
+            try:
+                tar_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            env = os.environ.copy()
+            if extra_env:
+                env.update(extra_env)
+            try:
+                subprocess.run(cmd, check=True, env=env)
+                return tar_path
+            except Exception as exc:
+                last_exc = exc
+                try:
+                    tar_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        if last_exc is not None:
+            log("TAR", f"system tar failed, falling back to Python archive: {last_exc}")
+    return Path(shutil.make_archive(str(archive_base), "gztar", root_dir=root_dir, base_dir=base_dir))
+
+def _write_ny_test_wrapper(path: Path, real_name: str = "ny-test.real") -> None:
+    if host_os() == "windows" or not path.exists() or not path.is_file():
+        return
+    real = path.with_name(real_name)
+    try:
+        try:
+            head = path.read_text(encoding="utf-8", errors="ignore")[:256]
+        except Exception:
+            head = ""
+        if "ny-test.real" in head and real.exists():
+            return
+        if real.exists():
+            real.unlink()
+        path.rename(real)
+        wrapper = """#!/usr/bin/env sh
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+for arg in "$@"; do
+  case "$arg" in
+    --bin|--bin=*) exec "$here/ny-test.real" "$@" ;;
+  esac
+done
+if [ -x "$here/ny" ]; then
+  exec "$here/ny-test.real" --bin "$here/ny" "$@"
+fi
+exec "$here/ny-test.real" "$@"
+"""
+        path.write_text(wrapper, encoding="utf-8")
+        path.chmod(0o755)
+        real.chmod(0o755)
+    except Exception:
+        pass
+
+def _parse_glibc_floor(raw: str | None = None) -> tuple[int, int]:
+    s = (raw or os.environ.get("NYTRIX_GLIBC_FLOOR") or "2.38").strip()
+    m = re.fullmatch(r"(\d+)\.(\d+)", s)
+    if not m:
+        raise SystemExit(f"make tar: invalid NYTRIX_GLIBC_FLOOR={s!r}; expected e.g. 2.38")
+    return int(m.group(1)), int(m.group(2))
+
+def _glibc_needed_versions(path: Path) -> list[tuple[int, int]]:
+    # Only count the ELF Version needs section. The Version definition section in
+    # libc.so itself lists provided versions and must not be treated as a host
+    # requirement.
+    if host_os() != "linux":
+        return []
+    readelf = which("readelf")
+    if not readelf:
+        return []
+    try:
+        res = subprocess.run([readelf, "--version-info", str(path)], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return []
+    text = (res.stdout or "") + (res.stderr or "")
+    needs = False
+    out: list[tuple[int, int]] = []
+    for line in text.splitlines():
+        if "Version needs section" in line:
+            needs = True
+            continue
+        if needs and "Version definition section" in line:
+            needs = False
+        if not needs:
+            continue
+        for maj, min_ in re.findall(r"GLIBC_(\d+)\.(\d+)", line):
+            out.append((int(maj), int(min_)))
+    return out
+
+def _check_static_bundle_glibc_floor(lib_dir: Path, context: str = "static") -> None:
+    if host_os() != "linux" or _env_flag("NYTRIX_ALLOW_NEW_GLIBC_BUNDLE", False):
+        return
+    # Vendor builds need the exact libs LLVM was linked against (libedit, etc).
+    # Skipping the floor check for vendor prevents link failures from missing SONAMEs.
+    if context == "vendor":
+        log("STATIC", "vendor context: skipping glibc floor prune (vendored LLVM needs host libs)")
+        return
+    floor = _parse_glibc_floor()
+    bad: list[str] = []
+    for p in sorted(lib_dir.glob("*.so*")):
+        if not p.is_file():
+            continue
+        versions = _glibc_needed_versions(p)
+        if not versions:
+            continue
+        req = max(versions)
+        if req > floor:
+            bad.append(str(p.name))
+    if bad:
+        for name in bad:
+            target = lib_dir / name
+            try:
+                target.unlink()
+            except Exception:
+                pass
+            # Also remove symlink variants (e.g. libedit.so.0 -> libedit.so.0.0.78)
+            for sibling in lib_dir.glob(f"{name}*"):
+                try:
+                    sibling.unlink()
+                except Exception:
+                    pass
+        # Clean up dangling symlinks in the bundle tree
+        bundle_root = lib_dir.parent.parent
+        for root, dirs, files in os.walk(str(bundle_root)):
+            root_p = Path(root)
+            for name in files:
+                p = root_p / name
+                if p.is_symlink() and not p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+        log("STATIC", f"pruned host-newer terminal libs: {', '.join(bad)}")
+        if context == "static":
+            log("STATIC", "run-ny will use target system libedit/ncurses when needed")
+        elif context == "vendor":
+            log("STATIC", "WARNING: libedit/ncurses pruned — vendored LLVM needs them. "
+                "If build fails with 'cannot find -ledit', install libedit-dev or set "
+                "NYTRIX_ALLOW_NEW_GLIBC_BUNDLE=1 to bundle the host's libedit.")
+
+def _stage_static_tools(src_dir: Path, out_dir: Path) -> int:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir = out_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    names = ["ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
+    copied = 0
+    for name in names:
+        src = src_dir / name
+        if not src.exists():
+            continue
+        dst_top = out_dir / name
+        dst_bin = bin_dir / name
+        _copy2_if_different(src, dst_top)
+        _copy2_if_different(src, dst_bin)
+        try:
+            dst_top.chmod(0o755)
+            dst_bin.chmod(0o755)
+        except Exception:
+            pass
+        copied += 1
+    for name in ("std.ny", "std.bc", "std_symbols.h"):
+        src = src_dir / name
+        if src.exists():
+            _copy2_if_different(src, out_dir / name)
+    # Bundle project runtime assets for moving the folder to another machine.
+    for name in ("src", "etc", "lib"):
+        src = ROOT / name
+        dst = out_dir / name
+        if src.exists() and src.is_dir():
+            if dst.exists():
+                # Preserve lib/host if present; refresh everything else.
+                if name == "lib" and (dst / "host").exists():
+                    host_tmp = out_dir / ".host.tmp"
+                    shutil.rmtree(host_tmp, ignore_errors=True)
+                    shutil.move(str(dst / "host"), str(host_tmp))
+                    shutil.rmtree(dst, ignore_errors=True)
+                    shutil.copytree(src, dst)
+                    shutil.move(str(host_tmp), str(dst / "host"))
+                else:
+                    shutil.rmtree(dst, ignore_errors=True)
+                    shutil.copytree(src, dst)
+            else:
+                shutil.copytree(src, dst)
+    for name in ("make", "CMakeLists.txt", ".clangd", "README.md", "LICENSE"):
+        src = ROOT / name
+        if src.exists():
+            shutil.copy2(src, out_dir / name)
+    _write_ny_test_wrapper(out_dir / "ny-test")
+    _write_ny_test_wrapper(out_dir / "bin" / "ny-test")
+    return copied
+
+def _bundle_static_outputs(build_root: Path, src_dir: Path) -> None:
+    static_dir = build_root / "static"
+    if src_dir.resolve() != static_dir.resolve():
+        n = _stage_static_tools(src_dir, static_dir)
+        if n == 0:
+            raise SystemExit(f"make static bin: no compiler/tools found in {src_dir}")
+    else:
+        _stage_static_tools(src_dir, static_dir)
+    all_copied: list[str] = []
+    for d in (static_dir, build_root / "release"):
+        if not d.exists() or not d.is_dir():
+            continue
+        for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+            exe = d / exe_name
+            if exe.exists():
+                all_copied.extend(_bundle_dir_for_binary(exe))
+        # Also patch/copy bin/ variants in the portable folder.
+        bindir = d / "bin"
+        if bindir.exists():
+            for exe in bindir.iterdir():
+                if exe.is_file() and os.access(exe, os.X_OK):
+                    lib_dir = d / "lib" / "host"
+                    _patch_rpath_for_bundle(exe, lib_dir)
+    readme = static_dir / "README_STATIC.txt"
+    readme.write_text(
+        "Nytrix portable compiler folder\n"
+        "\n"
+        "Outside a chroot, use the wrapper. It forces the bundled loader/libs:\n"
+        "  ./run-ny --help\n"
+        "  ./run-ny -ic 'print(\"hello\")'\n"
+        "  ./run-ny path/to/file.ny\n"
+        "\n"
+        "Convenience shell helper:\n"
+        "  . ./env.sh\n"
+        "  nytrix --help\n"
+        "\n"
+        "For chroot-style use:\n"
+        "  sudo chroot . /ny --help\n"
+        "  sudo chroot . /ny -ic 'print(\"hello\")'\n"
+        "\n"
+        "Plain ./ny is intentionally not the main portable entrypoint: if the host\n"
+        "loader is older/different, LD_LIBRARY_PATH/RPATH with bundled glibc can crash.\n"
+        "The glibc loader is mirrored into lib64/ and lib/host/*.so* is exposed\n"
+        "through lib/, usr/lib/, and usr/lib64/ symlinks for chroot use.\n"
+        "Bundled host libraries live in lib/host/.\n",
+        encoding="utf-8",
+    )
+    uniq = list(dict.fromkeys(all_copied))
+    if uniq:
+        log("STATIC", f"portable libs bundled: {', '.join(uniq)}")
+    _check_static_bundle_glibc_floor(static_dir / "lib" / "host")
+    ok(f"portable static folder ready: {_rel_or_abs(static_dir)}")
+
+def _check_static_libs_available() -> tuple[bool, list[str]]:
+    """Check whether truly static linking is possible by probing for .a files."""
+    missing: list[str] = []
+    # Check LLVM static libs
+    res = run_capture(["llvm-config", "--libdir"])
+    if res.returncode == 0:
+        llvm_libdir = Path(res.stdout.strip().splitlines()[0])
+        if not (llvm_libdir / "libLLVM-21.a").exists() and not (llvm_libdir / "libLLVM.a").exists():
+            missing.append("libLLVM-21.a (install llvm-*-dev/static or build LLVM with -DBUILD_SHARED_LIBS=OFF)")
+        for clang_lib in ("libclang.a", "libclang-c.a", "libclang-cpp.a"):
+            if (llvm_libdir / clang_lib).exists():
+                break
+        else:
+            missing.append("libclang.a / libclang-c.a (llvm/clang static libs not found)")
+    else:
+        missing.append("llvm-config not found")
+    # Check Z3
+    for p in ("/usr/lib/libz3.a", "/usr/local/lib/libz3.a"):
+        if Path(p).exists():
+            break
+    else:
+        for path in Path("/usr/lib").glob("libz3*.a"):
+            break
+        else:
+            missing.append("libz3.a (libz3-dev or build z3 from source)")
+    # Check GMP
+    for p in ("/usr/lib/libgmp.a", "/usr/local/lib/libgmp.a"):
+        if Path(p).exists():
+            break
+    else:
+        for path in Path("/usr/lib").glob("libgmp*.a"):
+            break
+        else:
+            missing.append("libgmp.a (libgmp-dev not providing static lib)")
+    ok = len(missing) == 0
+    return ok, missing
+
+def _llvm_ldflags_static() -> str | None:
+    """Check if llvm-config --link-static works, returns ldflags or None."""
+    for flag in ("--link-static", "--shared-mode"):
+        res = run_capture(["llvm-config", flag])
+        if res.returncode == 0 and "static" in res.stdout:
+            return "-static"
+    return None
+
+def run_make_static(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
+    global QUIET_BOOTSTRAP
+    if not args or args[0] in ("-h", "--help", "help"):
+        print_static_help()
+        return 0
+
+    sub = args[0]
+    rest = args[1:]
+
+    # static bin / static all -- build compiler/tools and make a portable folder.
+    if sub in ("bin", "all"):
+        old_ldflags = os.environ.get("NYTRIX_HOST_LDFLAGS")
+        old_cflags = os.environ.get("NYTRIX_HOST_CFLAGS")
+        old_quiet = QUIET_BOOTSTRAP
+        try:
+            static_mode = (os.environ.get("NYTRIX_STATIC_MODE") or "auto").strip().lower()
+            static_ldflags_raw = os.environ.get("NYTRIX_STATIC_LDFLAGS", "").strip()
+            static_cflags = os.environ.get("NYTRIX_STATIC_CFLAGS", "").strip()
+            full_requested = static_mode in ("full", "true", "1", "yes") or " -static" in f" {static_ldflags_raw} "
+            if static_ldflags_raw:
+                static_ldflags = static_ldflags_raw
+            elif full_requested:
+                static_ldflags = "-static -static-libgcc -static-libstdc++"
+            else:
+                # Practical default: LLVM/Clang/Z3 are usually only provided as .so.
+                # Produce a portable bundled folder instead of pretending full-static exists.
+                static_ldflags = "-static-libgcc -static-libstdc++"
+
+            os.environ["NYTRIX_HOST_LDFLAGS"] = static_ldflags
+            if static_cflags:
+                os.environ["NYTRIX_HOST_CFLAGS"] = static_cflags
+            QUIET_BOOTSTRAP = False
+            targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
+            boot_notice(f"static bin: ldflags=({static_ldflags})")
+            bdir = cmake_build_dir(build_root, "static")
+            try:
+                cmake_build(build_root, "static", targets, jobs)
+            except subprocess.CalledProcessError:
+                if not full_requested:
+                    raise
+                log("STATIC", "full static link failed; falling back to portable bundled dynamic build")
+                _set_env_value("NYTRIX_HOST_LDFLAGS", old_ldflags)
+                _set_env_value("NYTRIX_HOST_CFLAGS", old_cflags)
+                cmake_build(build_root, "release", targets, jobs)
+                bdir = cmake_build_dir(build_root, "release")
+            ny_exe = bdir / "ny"
+            if ny_exe.exists():
+                is_static, detail = _elf_is_static(ny_exe)
+                if is_static:
+                    ok(f"static bin: {_rel_or_abs(ny_exe)} is truly static")
+                else:
+                    log("STATIC", f"{_rel_or_abs(ny_exe)} is dynamic; bundling needed .so files")
+                    log("LDD", detail)
+            _bundle_static_outputs(build_root, bdir)
+            return 0
+        finally:
+            _set_env_value("NYTRIX_HOST_LDFLAGS", old_ldflags)
+            _set_env_value("NYTRIX_HOST_CFLAGS", old_cflags)
+            QUIET_BOOTSTRAP = old_quiet
+
+    # static check <binary> -- check if ELF is static
+    if sub == "check":
+        for target in rest:
+            p = Path(target) if Path(target).is_absolute() else ROOT / target
+            if not p.exists():
+                err(f"static check: not found: {p}")
+                continue
+            is_static, detail = _elf_is_static(p)
+            tag = "STATIC static" if is_static else "STATIC dynamic"
+            print(f"{c('32' if is_static else '33', tag)}: {_rel_or_abs(p)}")
+            log("LDD", detail)
+        return 0
+
+    # static libs [path] -- bundle shared libs beside a binary or build dir.
+    if sub == "libs":
+        search_items = [build_root / "release", build_root / "static"]
+        if rest:
+            search_items = [Path(p) if Path(p).is_absolute() else ROOT / p for p in rest]
+        total_copied: list[str] = []
+        for item in search_items:
+            if item.is_file():
+                total_copied.extend(_bundle_dir_for_binary(item))
+                continue
+            if not item.is_dir():
+                continue
+            for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+                exe_path = item / exe_name
+                if exe_path.exists():
+                    total_copied.extend(_bundle_dir_for_binary(exe_path))
+        uniq = list(dict.fromkeys(total_copied))
+        if uniq:
+            log("STATIC", f"bundled shared libs: {', '.join(uniq)}")
+        else:
+            log("STATIC", "no shared libs copied (already static, missing binary, or deps unavailable)")
+        return 0
+
+    # static ny <file.ny> [flags] -- compile with static linking
+    if sub == "ny":
+        ny_args = rest
+    else:
+        ny_args = [sub] + rest
+
+    # Ensure release compiler exists
+    if cmake_build_has_work(build_root, kind, ["ny"]):
+        old_quiet = QUIET_BOOTSTRAP
+        try:
+            QUIET_BOOTSTRAP = False
+            cmake_build(build_root, kind, ["ny"], jobs)
+        finally:
+            QUIET_BOOTSTRAP = old_quiet
+
+    static_ldflags = os.environ.get("NYTRIX_STATIC_LDFLAGS",
+                                     "-static -static-libgcc -static-libstdc++")
+    return run_tool(build_root, kind, "ny",
+                    ["--host-ldflags", static_ldflags, *ny_args])
+
+
+def _vendor_lib_dir(build_root: Path) -> Path:
+    return build_root / "vendor" / "lib" / "host"
+
+def _llvm_major_version_raw() -> str:
+    """Return the major version of the system LLVM (e.g. '22'), or empty string."""
+    for tool in ("llvm-config", "llvm-config-22", "llvm-config-21", "llvm-config-20",
+                  "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16"):
+        t = which(tool)
+        if not t:
+            continue
+        res = run_capture([t, "--version"])
+        if res.returncode == 0:
+            ver = res.stdout.strip().split(".")[0]
+            if ver.isdigit():
+                return ver
+    return ""
+
+def _detect_bundled_llvm_major(lib_dir: Path) -> str:
+    """Detect the LLVM major version from bundled .so filenames (e.g. '21' from libLLVM.so.21.1)."""
+    for f in lib_dir.glob("libLLVM.so.*"):
+        m = re.match(r"libLLVM\.so\.(\d+)", f.name)
+        if m:
+            return m.group(1)
+    return ""
+
+def _create_linker_symlinks(lib_dir: Path, llvm_major: str) -> None:
+    """Create linker-name symlinks for bundled .so files so -l flags resolve."""
+    # Map canonical file -> desired linker symlinks
+    symlinks: list[tuple[str, str]] = []
+    for f in lib_dir.iterdir():
+        if not f.is_file() or f.is_symlink():
+            continue
+        # libLLVM.so.21.1 -> libLLVM-21.so
+        m = re.match(r"libLLVM\.so\.(\d+)(?:\.\d+.*)?", f.name)
+        if m and m.group(1) == llvm_major:
+            target = f"libLLVM-{llvm_major}.so"
+            symlinks.append((target, f.name))
+            continue
+        # libclang.so.21.1 -> libclang.so
+        m = re.match(r"libclang\.so\.(\d+)(?:\.\d+.*)?", f.name)
+        if m and m.group(1) == llvm_major:
+            symlinks.append(("libclang.so", f.name))
+            continue
+        # Generic: for most libs, create unversioned symlink if SONAME is versioned.
+        # libz.so.1 -> libz.so, libzstd.so.1 -> libzstd.so, etc.
+        m = re.match(r"^((?:lib[\w-]+)\.so)\.\d", f.name)
+        if m:
+            base = m.group(1)
+            if not (lib_dir / base).exists() and base not in (n for n, _ in symlinks):
+                symlinks.append((base, f.name))
+    for link_name, target in symlinks:
+        link = lib_dir / link_name
+        if link.exists() or link.is_symlink():
+            continue
+        link.symlink_to(target)
+        log("VENDOR", f"  symlink {link_name} -> {target}")
+
+
+def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
+    if args and args[0] in ("-h", "--help", "help"):
+        print("usage: make vendor  -- bundle shared libs for build portability")
+        print()
+        print("  Copies .so files + LLVM/Clang headers needed to build ny")
+        print("  into build/vendor/ so ./make tar produces a portable package")
+        print("  that can compile from source without system LLVM dev headers.")
+        print()
+        print("  The release binary must exist first (run ./make bin first).")
+        return 0
+
+    os.chdir(str(ROOT))
+
+    # Find the release binary; build it if missing.
+    release_dir = build_root / "release"
+    ny_exe = release_dir / "ny"
+    if not ny_exe.exists():
+        boot_step("vendor: building release ny first")
+        cmake_build(build_root, kind, ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"], jobs)
+
+    vendor_dir = build_root / "vendor"
+    lib_dir = _vendor_lib_dir(build_root)
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    os.environ["NYTRIX_BUNDLE_NO_SYSTEM_LIBS"] = "1"
+    copied = _copy_static_runtime_libs(lib_dir, ny_exe)
+    _check_static_bundle_glibc_floor(lib_dir, "vendor")
+
+    # Report only what actually survived the glibc floor prune.
+    real_names: set[str] = set()
+    for f in lib_dir.glob("*.so*"):
+        if f.is_symlink() or not f.is_file():
+            continue
+        real_names.add(f.name)
+    actual = sorted(real_names)
+    if actual:
+        log("VENDOR", f"bundled {len(actual)} shared libs: {', '.join(actual)}")
+    else:
+        log("VENDOR", "no shared libs copied (already static link?)")
+
+    # ---- Detect bundled LLVM version from .so files ----
+    bundled_llvm_major = _detect_bundled_llvm_major(lib_dir)
+    if bundled_llvm_major:
+        log("VENDOR", f"detected bundled LLVM {bundled_llvm_major} from libLLVM.so.*")
+    else:
+        log("VENDOR", "no bundled LLVM .so found; skipping LLVM/Clang headers")
+
+    vendored_bin = vendor_dir / "bin"
+    vendored_include = vendor_dir / "include"
+
+    # Find the llvm-config matching the bundled LLVM version.
+    # Must use the SYSTEM llvm-config, not the vendored one (which doesn't have
+    # headers yet and reports $here/include as --includedir).
+    llvm_config_bin: str | None = None
+    if bundled_llvm_major:
+        system_path = _system_path_excluding_vendor(build_root)
+        for cand in (f"llvm-config-{bundled_llvm_major}", "llvm-config"):
+            cand_path = which(cand, path=system_path)
+            if cand_path and cand_path != str(vendored_bin / "llvm-config"):
+                llvm_config_bin = cand_path
+                break
+        if llvm_config_bin:
+            check_ver = run_capture([llvm_config_bin, "--version"]).stdout.strip().split(".")[0]
+            if check_ver != bundled_llvm_major:
+                log("VENDOR", f"  {llvm_config_bin} reports LLVM {check_ver}, bundled libs are {bundled_llvm_major} — skipping incompatible headers")
+                llvm_config_bin = None
+
+
+    if llvm_config_bin and bundled_llvm_major:
+        boot_step("vendor: bundling LLVM/Clang headers for self-contained build")
+        llvm_version = run_capture([llvm_config_bin, "--version"]).stdout.strip()
+        llvm_inc_raw = run_capture([llvm_config_bin, "--includedir"]).stdout.strip()
+        llvm_cflags_raw = run_capture([llvm_config_bin, "--cflags"]).stdout.strip()
+        llvm_libs_raw = run_capture([llvm_config_bin, "--libs", "all", "--system-libs"]).stdout.strip()
+        clang_resource = run_capture([llvm_config_bin, "--libdir"]).stdout.strip()
+
+        # Copy LLVM/Clang headers into vendor/include/.
+        for sub in ("llvm-c", "clang-c", "llvm", "clang"):
+            src = Path(llvm_inc_raw) / sub
+            dst = vendored_include / sub
+            if src.exists():
+                _copytree_replace(src, dst)
+
+        # Copy clang builtin includes.
+        for cand in (
+            Path(llvm_inc_raw).parent / "lib" / f"clang/{bundled_llvm_major}/include",
+            Path("/usr/lib") / f"clang/{bundled_llvm_major}/include",
+            Path("/usr/lib64") / f"clang/{bundled_llvm_major}/include",
+            Path("/usr/local/lib") / f"clang/{bundled_llvm_major}/include",
+            Path(clang_resource).parent / f"clang/{bundled_llvm_major}/include",
+        ):
+            if cand.exists() and any(cand.iterdir()):
+                _copytree_replace(cand, vendored_include / "clang-builtins")
+                break
+
+        # Generate vendored llvm-config script.
+        vendored_bin.mkdir(parents=True, exist_ok=True)
+        config_script = (
+            "#!/usr/bin/env sh\n"
+            "# Auto-generated by ./make vendor — do not edit\n"
+            f'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/..\n'
+            f'llvm_libs="{llvm_libs_raw}"\nllvm_cflags="{llvm_cflags_raw}"\n'
+            'case "${1:-}" in\n'
+            f'  --version) echo "{llvm_version}" ;;\n'
+            f'  --includedir) echo "$here/include" ;;\n'
+            '  --cflags)\n'
+            '    echo "$llvm_cflags" | sed "s|-I[^ ]*|-I$here/include|g"\n'
+            '    ;;\n'
+            '  --ldflags) echo "-L$here/lib/host" ;;\n'
+            '  --libs)\n'
+            f'    echo "$llvm_libs"\n    ;;\n'
+            f'  *) exit 1 ;;\nesac\n'
+        )
+        config_path = vendored_bin / "llvm-config"
+        config_path.write_text(config_script, encoding="utf-8")
+        config_path.chmod(0o755)
+        log("VENDOR", f"vendored llvm-config ({llvm_version}) + LLVM/Clang headers (bundled {bundled_llvm_major})")
+    else:
+        log("VENDOR", "no matching llvm-config for bundled LLVM; skipping LLVM/Clang headers")
+
+    # Create linker-name symlinks so -l flags resolve against bundled .so files.
+    _create_linker_symlinks(lib_dir, bundled_llvm_major)
+
+    # Write vendor env.sh.
+    env_path = vendor_dir / "env.sh"
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_lines = [
+        "#!/usr/bin/env sh",
+        "# Source this to use vendored shared libs + LLVM for building.",
+        '_nytrix_here=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE:-$0}")" && pwd)',
+        'export LD_LIBRARY_PATH="$_nytrix_here/lib/host${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"',
+    ]
+    if vendored_bin.exists() and (vendored_bin / "llvm-config").exists():
+        env_lines += [
+            'export PATH="$_nytrix_here/bin${PATH:+:$PATH}"',
+            'export LLVM_CONFIG="$_nytrix_here/bin/llvm-config"',
+            'export NYTRIX_LLVM_INCLUDE="$_nytrix_here/include"',
+        ]
+    env_lines += ["echo 'Nytrix vendor libs loaded'"]
+    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+    env_path.chmod(0o755)
+
+    ok(f"vendor ready: {_rel_or_abs(vendor_dir)}")
+    return 0
+
+
+def _tar_source_ignore(dir: str, names: list[str]):
+    ignored = {
+        ".git", ".cache", "tmp", "__pycache__", ".pytest_cache",
+        "CMakeFiles", "CMakeCache.txt", "compile_commands.json",
+    }
+    out = set()
+    for name in names:
+        if name in ignored:
+            out.add(name)
+        elif name.endswith((".o", ".a", ".pyc", ".pyo")):
+            out.add(name)
+    return out
+
+def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
+    with_binaries = "--with-binaries" in args or _env_flag("NYTRIX_TAR_WITH_BINARIES", False)
+    source_only = "--source" in args or "--source-only" in args
+    if source_only:
+        with_binaries = False
+    args = [a for a in args if a not in ("--with-binaries", "--source", "--source-only")]
+
+    if args and args[0] in ("-h", "--help", "help"):
+        print("usage: make tar [--source|--with-binaries]")
+        print()
+        print("  Default: creates build/dist/nytrix-source.tar.gz")
+        print("    source code + vendored build shared libs; user compiles with ./make bin")
+        print("  --with-binaries: creates build/dist/nytrix-static.tar.gz")
+        print("    includes build/static/ with ./run-ny and bundled runtime libs")
+        print("  NYTRIX_TAR_WITH_BINARIES=1 makes --with-binaries the default.")
+        return 0
+
+    dist_dir = build_root / "dist"
+    package_name = "nytrix-static" if with_binaries else "nytrix-source"
+    package_dir = dist_dir / package_name
+    shutil.rmtree(package_dir, ignore_errors=True)
+    package_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure vendor libs exist (build release + bundle if needed).
+    vendor_lib = _vendor_lib_dir(build_root)
+    if not vendor_lib.exists() or not any(vendor_lib.glob("*.so*")):
+        boot_step("tar: bundling vendored libs first")
+        run_make_vendor(build_root, kind, jobs, [])
+
+    # Copy vendored libs into build/vendor/ inside the package.
+    _copytree_replace(build_root / "vendor", package_dir / "build" / "vendor")
+
+    if with_binaries:
+        # Build and bundle static portable folder.
+        rc = run_make_static(build_root, kind, jobs, ["bin"])
+        if rc != 0:
+            return rc
+        _copytree_replace(build_root / "static", package_dir / "build" / "static")
+
+    # Source tree (runtime headers, stdlib source, etc).
+    for name in ("src", "lib", "etc"):
+        _copytree_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
+    for name in ("make", "CMakeLists.txt", ".clangd", "out.diff", "README.md", "LICENSE"):
+        _copy_release_file(ROOT / name, package_dir / name)
+
+    # Top-level convenience env. Keep it host-safe: never globally export
+    # LD_LIBRARY_PATH to bundled libs here. Static/binary packages run through
+    # build/static/run-ny, which pins the loader/library path only for Nytrix.
+    env = package_dir / "env.sh"
+    wl = ""
+    if with_binaries:
+        wl = (
+            'export NYTRIX_BUNDLE_ROOT="$_nytrix_here/build/static"\n'
+            'export PATH="$_nytrix_here/build/static:$_nytrix_here/build/static/bin:$PATH"\n'
+            'nytrix() { "$_nytrix_here/build/static/run-ny" "$@"; }\n'
+            'echo "Nytrix binary bundle loaded: use nytrix <args> or ./build/static/run-ny <args>"\n'
+        )
+    else:
+        wl = (
+            'echo "Nytrix source package loaded: run ./make bin, or ./make tar --with-binaries for a runnable bundle"\n'
+        )
+    env.write_text(
+        "#!/usr/bin/env sh\n"
+        "_nytrix_here=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE:-$0}\")\" && pwd)\n"
+        "export NYTRIX_ROOT=\"$_nytrix_here\"\n"
+        'if [ -f "$_nytrix_here/src/rt/init.c" ]; then export NYTRIX_RT_SRC="$_nytrix_here/src/rt/init.c"; fi\n'
+        'if [ -z "${CC:-}" ]; then\n'
+        '  if command -v clang >/dev/null 2>&1; then export CC=clang;\n'
+        '  elif command -v cc >/dev/null 2>&1; then export CC=cc;\n'
+        '  elif command -v gcc >/dev/null 2>&1; then export CC=gcc; fi\n'
+        "fi\n"
+        f"{wl}",
+        encoding="utf-8",
+    )
+    env.chmod(0o755)
+
+    archive_base = dist_dir / package_name
+    tar_path = _make_tar_gz_fast(archive_base, dist_dir, package_name)
+    ok(f"tar ready: {_rel_or_abs(tar_path)}")
+    return 0
+
 def main() -> int:
     global COLOR, QUIET_BOOTSTRAP
     cmds, extra, requested_jobs, verbose, want_help, want_version, debug_kind, cli_color_mode, cli_bootstrap_logs = parse(sys.argv[1:])
@@ -3464,7 +5232,7 @@ def main() -> int:
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor"}
-    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "test", "perf", "profile", "docs", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "cross", "cross-run", *inspect_cmds}
+    tool_style_cmds = {"fmt", "analyze", "check", "tidy", "test", "perf", "profile", "docs", "web-demos", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
         # Keep tool invocations clean by default (./make fmt/test/ny...) even if env
@@ -3481,7 +5249,22 @@ def main() -> int:
 
     if notice and not QUIET_BOOTSTRAP:
         log("BUILD", notice)
-    if not all(c in inspect_cmds for c in cmds):
+    # Auto-activate vendored LLVM if present — prevents apt update / missing-dep
+    # errors when the dist tar already bundles everything needed.
+    vendored_bin = build_root / "vendor" / "bin"
+    vendored_llvm_config = vendored_bin / "llvm-config"
+    if vendored_llvm_config.exists():
+        path = os.environ.get("PATH", "")
+        if str(vendored_bin) not in path.split(":"):
+            os.environ["PATH"] = f"{vendored_bin}:{path}"
+        os.environ.setdefault("LLVM_CONFIG", str(vendored_llvm_config))
+        vendored_include = build_root / "vendor" / "include"
+        if vendored_include.exists():
+            os.environ.setdefault("NYTRIX_LLVM_INCLUDE", str(vendored_include))
+        log("BUILD", "auto-activated vendored LLVM (python PATH/LLVM_CONFIG/NYTRIX_LLVM_INCLUDE)")
+
+    deps_free_cmds = {*inspect_cmds, "static", "bin-static", "tar", "vendor"}
+    if not all(c in deps_free_cmds for c in cmds):
         ensure_deps(force_optional_prompt=("deps" in cmds), require_git=("deps" in cmds))
     elif host_os() == "macos":
         configure_macos_tool_path()
@@ -3523,7 +5306,7 @@ def main() -> int:
 
         targets = ["ny"]
         if cmd in ("all", "bin"):
-            targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make"]
+            targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
         elif cmd in ("fmt", "analyze", "check", "tidy"):
             targets = ["ny-fmt"]
         elif cmd in ("test", "asan", "ubsan", "fuzz"):
@@ -3534,6 +5317,8 @@ def main() -> int:
             targets = ["ny"]
         elif cmd == "docs":
             targets = ["ny", "std", "ny-doc"]
+        elif cmd in ("web-demos", "wasm"):
+            targets = ["ny", "std"]
         elif cmd == "std":
             targets = ["std"]
         elif cmd == "std_bc":
@@ -3544,7 +5329,7 @@ def main() -> int:
                 targets.append("nytrixrt")
         elif cmd == "perf":
             targets = ["ny", "ny-perf"]
-        if cmd not in ("uninstall",):
+        if cmd not in ("uninstall", "static", "bin-static", "tar", "vendor"):
             if cmd in ("ny", "repl") and not cmake_build_has_work(build_root, active_kind, targets):
                 pass
             else:
@@ -3579,6 +5364,10 @@ def main() -> int:
             std_file = str(cmake_build_dir(build_root, active_kind) / "std.ny")
             out_dir = str(build_root / "docs")
             rc = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir, *extra])
+        elif cmd == "web-demos":
+            rc = run_web_demos(build_root, active_kind, extra)
+        elif cmd == "wasm":
+            rc = run_wasm(build_root, active_kind, extra)
         elif cmd == "install":
             rc = cmake_install(build_root, active_kind)
         elif cmd == "uninstall":
@@ -3609,6 +5398,14 @@ def main() -> int:
                 rc = cached_rc if cached_rc is not None else run_tool(build_root, active_kind, "ny", ny_fast_run_args(extra))
             else:
                 rc = run_tool(build_root, active_kind, "ny", ["-i"])
+        elif cmd == "static":
+            rc = run_make_static(build_root, kind, jobs, extra)
+        elif cmd == "bin-static":
+            rc = run_make_static(build_root, kind, jobs, ["bin", *extra])
+        elif cmd == "vendor":
+            rc = run_make_vendor(build_root, kind, jobs, extra)
+        elif cmd == "tar":
+            rc = run_make_tar(build_root, kind, jobs, extra)
         elif cmd == "cross":
             rc = run_cross(build_root, active_kind, extra, False)
         elif cmd == "cross-run":

@@ -61,7 +61,8 @@ fn _default_options() dict {
       "gui_shot": "", "gui_probe": false, "gui_layout": "",
       "dump_delay_frames": -1, "timeout_sec": -1.0,
       "profile": false, "profile_frame_trace": false, "render_trace": false,
-      "frame_trace": false, "frame_print_every": false, "profile_dir": ""
+      "frame_trace": false, "frame_print_every": false, "profile_dir": "",
+      "render_backend": "", "verbose": false, "help": false
    }
 }
 
@@ -89,7 +90,9 @@ fn _parse_mode_option(out, str key) bool {
 }
 
 fn _parse_switch_option(out, str key) bool {
-   if(key == "--dump"){
+   if(key == "-h" || key == "--help" || key == "help"){
+      out["help"] = true
+   } elif(key == "--dump"){
       out["dump_requested"] = true
    } elif(key == "--frame-hash" || key == "--fbhash"){
       out["dump_requested"] = true
@@ -107,6 +110,16 @@ fn _parse_switch_option(out, str key) bool {
       out["frame_print_every"] = true
    } elif(key == "--frame-trace"){
       out["frame_trace"] = true
+   } elif(key == "-vk" || key == "--vk" || key == "-vulkan" || key == "--vulkan"){
+      out["render_backend"] = "vk"
+   } elif(key == "-gl" || key == "--gl" || key == "-opengl" || key == "--opengl"){
+      out["render_backend"] = "gl"
+   } elif(key == "-webgl" || key == "--webgl"){
+      out["render_backend"] = "webgl"
+   } elif(key == "-mock" || key == "--mock" || key == "-cpu" || key == "--cpu" || key == "-software" || key == "--software"){
+      out["render_backend"] = "mock"
+   } elif(key == "-v" || key == "--verbose" || key == "-vv" || key == "-vvv" || key == "--debug" || key == "--debug-deep" || key == "-trace" || key == "--trace" || key == "-trace-ui" || key == "--trace-ui" || key == "--trace-spam"){
+      out["verbose"] = true
    } else {
       return false
    }
@@ -207,7 +220,16 @@ fn startup_plan(args, one_arg_cmds=[]) dict {
          continue
       }
       if(token_l == "-vulkan" || token_l == "--vulkan" ||
-         token_l == "-trace" || token_l == "--trace" ||
+         token_l == "-vk" || token_l == "--vk" ||
+         token_l == "-gl" || token_l == "--gl" ||
+         token_l == "-opengl" || token_l == "--opengl" ||
+         token_l == "-webgl" || token_l == "--webgl" ||
+         token_l == "-mock" || token_l == "--mock" ||
+         token_l == "-cpu" || token_l == "--cpu" ||
+         token_l == "-software" || token_l == "--software" ||
+         token_l == "-v" || token_l == "--verbose" || token_l == "-vv" || token_l == "-vvv" || token_l == "--debug" ||
+         token_l == "--debug-deep" || token_l == "-trace" || token_l == "--trace" || token_l == "-trace-ui" || token_l == "--trace-ui" ||
+         token_l == "--trace-spam" || token_l == "-h" || token_l == "--help" || token_l == "help" ||
          token_l == "-gltf-debug" || token_l == "--gltf-debug"){
          i += 1
          continue
@@ -233,11 +255,12 @@ fn startup_plan(args, one_arg_cmds=[]) dict {
 }
 
 #main {
-   def args = ["ny", "--headless-sim", "--timeout", "2.5", "--gui-shot", "probe", "load", "Avocado"]
+   def args = ["ny", "--headless-sim", "--gl", "--timeout", "2.5", "--gui-shot", "probe", "load", "Avocado"]
    def opt = parse_options(args)
    def plan = startup_plan(args, ["load"])
    assert(bool(opt.get("headless", false)) && bool(opt.get("sim", false)) && float(opt.get("timeout_sec", 0.0)) == 2.5, "viewer cli options")
    def actions = plan.get("actions", [])
+   assert(to_str(opt.get("render_backend", "")) == "gl", "viewer cli render backend")
    assert(to_str(opt.get("gui_shot", "")) == "probe" && bool(opt.get("gui_probe", false)) && to_str(plan.get("direct_scene", "")) == "Avocado", "viewer cli startup")
    assert(is_list(actions) && actions.len == 1 && actions.get(0, {}).get("kind", "") == "scene", "viewer cli action order")
    print("✓ std.os.ui.render.viewer.engine.cli self-test passed")

@@ -201,20 +201,7 @@ fn _ensure_sky_shader_binaries() bool {
 
 fn _write_tmp_text_file(any path, any content) bool {
    if(!path || !is_str(path)){ return false }
-   def fd_res = sys.sys_open(path, bor(bor(1, 64), 512), 420)
-   if(is_err(fd_res)){ return false }
-   def fd = unwrap(fd_res)
-   mut ok = true
-   if(content && is_str(content)){
-      def n = content.len
-      def wr = sys.sys_write(fd, content, n)
-      ok = is_ok(wr) && unwrap_or(wr, -1) == n
-   }
-   match sys.sys_close(fd){
-      ok(ignoredok) -> { ignoredok }
-      err(ignorederr) -> { ignorederr }
-   }
-   ok
+   file_write(str(path), content)
 }
 
 fn compile_glsl_to_spirv(str source, str stage_ext) any {
@@ -224,7 +211,10 @@ fn compile_glsl_to_spirv(str source, str stage_ext) any {
    if(!_write_tmp_text_file(tmp_src, source)){ return 0 }
    def rc = proc.run("glslc", ["glslc", f"-fshader-stage={stage_ext}", tmp_src, "-o", tmp_spv])
    match file_remove(tmp_src){ ok(ignoredok) -> { ignoredok } err(ignorederr) -> { ignorederr } }
-   if(rc != 0){ return 0 }
+   if(rc != 0){
+      ui_profile.print_line("vk:shader", "glslc failed rc=" + to_str(rc) + " stage=" + stage_ext + " (is glslc installed?)")
+      return 0
+   }
    def res = file_read(tmp_spv)
    match file_remove(tmp_spv){ ok(ignoredok2) -> { ignoredok2 } err(ignorederr2) -> { ignorederr2 } }
    if(is_err(res)){ return 0 }
@@ -241,8 +231,12 @@ fn create_shader_module_from_source(str source, str stage_ext) any {
    store64_h(ci, size, 24)
    store64_h(ci, spirv, 32)
    mut mod_ptr = _pipe_alloc(8)
-   if(create_shader_module(_device, ci, 0, mod_ptr) != 0){ return 0 }
-   load64(mod_ptr, 0)
+   def res = create_shader_module(_device, ci, 0, mod_ptr)
+   free(ci)
+   if(res != 0){ free(mod_ptr) return 0 }
+   def mod = load64(mod_ptr, 0)
+   free(mod_ptr)
+   mod
 }
 
 fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0, int blend_enable=_PIPE_BLEND_UI, int polygon_mode=_VK_POLYGON_FILL) any {
@@ -341,8 +335,8 @@ fn _mesh_pipeline_ready_basic() bool { _device && _pipeline_layout && _render_pa
 fn _ensure_unlit_nocull_pipeline() bool {
    if(_unlit_nocull_pipeline){ return _unlit_nocull_pipeline != 0 }
    if(!_mesh_pipeline_ready_basic()){ return false }
-   _unlit_pipeline = create_pipeline(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0)
-   _unlit_nocull_pipeline = _unlit_pipeline
+   _unlit_pipeline = create_pipeline(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 1, 1, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0)
+   _unlit_nocull_pipeline = create_pipeline(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0)
    _unlit_nocull_pipeline != 0
 }
 

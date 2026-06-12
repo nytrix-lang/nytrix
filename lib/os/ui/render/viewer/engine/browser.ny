@@ -67,14 +67,18 @@ fn _state_for_model(dict state, str model) dict {
 fn prepare_state(dict state, any names, any filtered_names, any filter_key, any selected_idx) dict {
    "Builds the derived browser state consumed by draw_body."
    def loaded_name = to_str(state.get("loaded_name", ""))
-   def selected_name = to_str(state.get("selected_name", ""))
+   mut selected_name = to_str(state.get("selected_name", ""))
+   if(selected_name.len == 0){ selected_name = loaded_name }
    state["names"] = is_list(names) ? names : []
    state["filtered_names"] = is_list(filtered_names) ? filtered_names : []
    state["shown_total"] = state["filtered_names"].len
    state["filter_key"] = to_str(filter_key)
+   state["selected_name"] = selected_name
    state["loaded_label"] = loaded_name.len > 0 ? loaded_name : "<none>"
    state["selected_label"] = selected_name.len > 0 ? selected_name : "<none>"
-   state["selected_idx"] = max(0, int(selected_idx))
+   def shown = to_str(filter_key).len > 0 ? state["filtered_names"] : state["names"]
+   def resolved_idx = selected_name.len > 0 ? viewer_catalog.model_index(shown, selected_name) : int(selected_idx)
+   state["selected_idx"] = max(0, resolved_idx)
    state
 }
 
@@ -100,6 +104,7 @@ fn _quick_pick(dict ctx, list pick_names, int selected_idx, int max_visible, str
    mut action = ""
    mut model = ""
    if(next_idx >= 0 && next_idx < pick_names.len && next_idx != selected_idx){
+      ;; Quick-pick changes selection only; the explicit Load button performs heavy scene IO.
       action = "select"
       model = to_str(pick_names.get(next_idx, selected_name))
    }
@@ -115,9 +120,17 @@ fn _summary_bar(list names, int shown_total, str filter_key, str loaded_label, s
    0
 }
 
-fn _toolbar(dict ctx) dict {
+fn _toolbar(dict ctx, dict state) dict {
    def idp = to_str(ctx.get("idp", "asset"))
    def show_paths = bool(ctx.get("show_paths", false))
+   def selected = to_str(state.get("selected_name", ""))
+   def loaded = to_str(state.get("loaded_name", ""))
+   if(selected.len > 0 && selected != loaded){
+      if(gui.button(idp + "_model_load_selected", "Load", 72.0)){
+         return _ctx_result(ctx, "load", selected)
+      }
+      gui.same_line()
+   }
    def next_show_paths = gui.checkbox(idp + "_model_paths", "Resolved paths", show_paths)
    ctx["show_paths"] = next_show_paths
    if(gui.icon_button(idp + "_model_unload", icons.icon_sprite("asset_unload"), "", 34.0, 30.0, false)){
@@ -144,6 +157,7 @@ fn _grid(dict ctx, str suffix, list names, f64 win_w, f64 list_h, bool compact, 
          "loaded_name": state.get("loaded_name", ""),
          "selected_name": state.get("selected_name", ""),
          "selected_idx": int(state.get("selected_idx", -1)),
+         "ensure_selected": bool(state.get("ensure_selected", false)),
          "parity_lock": bool(state.get("parity_lock", false)),
          "hide_detail": hide_detail,
          "file_list": file_list
@@ -153,8 +167,8 @@ fn _grid(dict ctx, str suffix, list names, f64 win_w, f64 list_h, bool compact, 
 }
 
 fn _standalone(dict ctx, f64 win_w, f64 win_h, list names, list filtered_names, int shown_total, str filter_key, str loaded_label, str selected_label, dict state) dict {
-   def list_h_limit = asset_catalog.asset_grid_view_h(win_h - 58.0, false, true)
-   mut list_h = viewer_catalog.grid_h(win_h - 42.0, false, true)
+   def list_h_limit = asset_catalog.asset_grid_view_h(max(120.0, win_h - 58.0), false, true)
+   mut list_h = viewer_catalog.grid_h(max(120.0, win_h - 42.0), false, true)
    if(filter_key.len > 0 && shown_total <= 12){
       list_h = viewer_catalog.grid_h(asset_catalog.asset_grid_fit_h(shown_total, win_w, list_h_limit, false, bool(ctx.get("show_paths", false))), false, true)
    }
@@ -167,13 +181,21 @@ fn _compact_catalog(dict ctx, f64 win_w, f64 win_h, list names, list filtered_na
    def filter_res = _filter_input(ctx, "_compact", win_w, 150.0)
    def nav = _keyboard_pick(ctx, pick_names, selected_idx, to_str(state.get("selected_name", "")))
    def nav_action = to_str(nav.get("action", ""))
-   def draw_state = (nav_action.len > 0) ? _state_for_model(state, to_str(nav.get("model", ""))) : state
-   def quick = _quick_pick(ctx, pick_names, selected_idx, 5, to_str(state.get("selected_name", "")))
-   if(to_str(quick.get("action", "")).len > 0 || bool(quick.get("stop", false))){
+   mut draw_state = (nav_action.len > 0) ? _state_for_model(state, to_str(nav.get("model", ""))) : state
+   if(nav_action.len > 0){ draw_state["ensure_selected"] = true }
+   def active_idx = max(0, viewer_catalog.model_index(pick_names, to_str(draw_state.get("selected_name", ""))))
+   def quick = _quick_pick(ctx, pick_names, active_idx, 5, to_str(draw_state.get("selected_name", "")))
+   def quick_action = to_str(quick.get("action", ""))
+   if(quick_action.len > 0){
+      draw_state = _state_for_model(draw_state, to_str(quick.get("model", "")))
+      draw_state["ensure_selected"] = true
+   }
+   if(bool(quick.get("stop", false))){
       return quick
    }
    gui.text_colored("Catalog " + to_str(shown_total) + " / " + to_str(names.len), [0.68, 0.68, 0.68, 1.0])
-   def grid_res = _grid(ctx, "compact", filtered_names, win_w, viewer_catalog.grid_h(win_h - 158.0, true, false, 36.0),
+   def compact_h = max(96.0, gui.remaining_h(4.0))
+   def grid_res = _grid(ctx, "compact", filtered_names, win_w, viewer_catalog.grid_h(compact_h, true, false, 4.0),
    true, draw_state)
    if(nav_action.len > 0){ return nav }
    if(to_str(grid_res.get("action", "")).len > 0){ return grid_res }
@@ -197,24 +219,35 @@ fn _full(dict ctx, f64 win_w, f64 win_h, list names, list filtered_names, int sh
    def selected_idx = max(0, int(state.get("selected_idx", 0)))
    def nav = _keyboard_pick(ctx, pick_names, selected_idx, to_str(state.get("selected_name", "")))
    def nav_action = to_str(nav.get("action", ""))
-   def draw_state = (nav_action.len > 0) ? _state_for_model(state, to_str(nav.get("model", ""))) : state
+   mut draw_state = (nav_action.len > 0) ? _state_for_model(state, to_str(nav.get("model", ""))) : state
+   if(nav_action.len > 0){ draw_state["ensure_selected"] = true }
    t_prof = ui_profile.mark_next(prof, "asset_full_pick_index", t_prof)
-   if(embedded && int(ctx.get("tab", 0)) != 2){
-      def list_h = max(1.0, gui.remaining_h(0.0))
+   if(embedded && int(ctx.get("tab", 0)) == 1){
+      def list_h = max(96.0, gui.remaining_h(4.0))
       def out = _grid(ctx, "files", filtered_names, win_w, list_h, true, draw_state, true, true)
       ui_profile.mark_done(prof, "asset_full_files", t_prof)
       if(nav_action.len > 0){ return nav }
       return out
    }
-   def quick = _quick_pick(ctx, pick_names, selected_idx, 8, to_str(state.get("selected_name", "")))
-   if(to_str(quick.get("action", "")).len > 0 || bool(quick.get("stop", false))){ return quick }
+   def active_idx = max(0, viewer_catalog.model_index(pick_names, to_str(draw_state.get("selected_name", ""))))
+   def quick = _quick_pick(ctx, pick_names, active_idx, 8, to_str(draw_state.get("selected_name", "")))
+   def quick_action = to_str(quick.get("action", ""))
+   if(quick_action.len > 0){
+      draw_state = _state_for_model(draw_state, to_str(quick.get("model", "")))
+      draw_state["ensure_selected"] = true
+   }
+   if(bool(quick.get("stop", false))){ return quick }
    t_prof = ui_profile.mark_next(prof, "asset_full_quick_pick", t_prof)
-   def tools = _toolbar(ctx)
+   def tools = _toolbar(ctx, draw_state)
    if(to_str(tools.get("action", "")).len > 0){ return tools }
    t_prof = ui_profile.mark_next(prof, "asset_full_toolbar", t_prof)
    def grid_compact = embedded ? true : false
-   def requested_h = embedded ? max(1.0, gui.remaining_h(0.0)) : (win_h - 166.0)
-   def out = _grid(ctx, "main", filtered_names, win_w, viewer_catalog.grid_h(requested_h, grid_compact, false, 44.0),
+   ;; Size against the actual remaining body height, not the full window height.
+   ;; Embedded sidebars should fill the whole vertical slot.  gui.remaining_h()
+   ;; can be conservative inside nested panels, leaving a dead black tail below
+   ;; the asset list.  Use the actual panel height budget instead.
+   def requested_h = embedded ? max(160.0, win_h - 150.0) : max(140.0, win_h - 166.0)
+   def out = _grid(ctx, "main", filtered_names, win_w, viewer_catalog.grid_h(requested_h, grid_compact, embedded, 4.0),
    grid_compact, draw_state, embedded && !bool(ctx.get("show_paths", false)))
    ui_profile.mark_done(prof, "asset_full_grid", t_prof)
    if(nav_action.len > 0){ return nav }
@@ -224,8 +257,14 @@ fn _full(dict ctx, f64 win_w, f64 win_h, list names, list filtered_names, int sh
 fn draw_body(dict state) dict {
    "Draws draw body."
    def idp = to_str(state.get("idp", "asset"))
-   def win_w = float(state.get("win_w", 520.0))
-   def win_h = float(state.get("win_h", 700.0))
+   def raw_w = float(state.get("win_w", 520.0))
+   def raw_h = float(state.get("win_h", 700.0))
+   ;; Width comes from the docking/layout parent.  Do not clamp by default or
+   ;; the asset panel will fight automatic tiling.  Developers can still force
+   ;; a cap with NY_ASSET_BROWSER_MAX_W when comparing layouts.
+   def max_w_override = float(ui_profile.env_int_cached("NY_ASSET_BROWSER_MAX_W", 0, 0, 4096))
+   def win_w = max(180.0, (max_w_override > 0.0) ? min(raw_w, max_w_override) : raw_w)
+   def win_h = max(180.0, raw_h)
    def standalone = bool(state.get("standalone", false))
    def compact = bool(state.get("compact", false))
    def names = state.get("names", [])

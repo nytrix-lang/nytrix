@@ -15,8 +15,16 @@ use std.math (max, min)
 use std.os.ui.render.viewer.editor.tools as tools
 use std.os.ui.render.viewer.vterm as vterm
 use std.os.ui.window.consts
+use std.os.ui.render (font_load, FONT_FILTER_NEAREST, FONT_FILTER_LINEAR)
 
 fn _fonts(any font) dict {
+   def path = common.env_trim("NY_EDITOR_TERM_FONT")
+   if(path.len > 0){
+      def mode = common.env_trim("NY_EDITOR_TERM_FONT_FILTER")
+      def filter = (mode == "nearest") ? FONT_FILTER_NEAREST : FONT_FILTER_LINEAR
+      def f = font_load(path, 15, filter)
+      if(f){ return {"regular": f, "bold": f, "italic": f, "emoji": f} }
+   }
    {"regular": font, "bold": font, "italic": font, "emoji": font}
 }
 

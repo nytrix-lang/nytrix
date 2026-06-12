@@ -23,6 +23,16 @@ Build a native executable:
 ny -o build/conway etc/projects/cli/conway.ny
 ```
 
+Build the browser wasm runner:
+
+```bash
+./make web-demos
+```
+
+The generated `build/wasm/index.html` is a compact WebGL-backed wasm runner.
+Load a `.wasm` file from the page, or add explicit browser-ready entries to
+`etc/assets/website/wasm/demos.json`.
+
 ## Focused Checks
 
 Runtime checks under `etc/tests/rt/` are the quickest way to inspect one
