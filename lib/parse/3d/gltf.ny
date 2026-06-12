@@ -2164,7 +2164,63 @@ fn _gltf_pick_primary_uv_props(any info, any texrec=0) list {
    [uv_set, _gltf_make_uv_xform(info, prefix)]
 }
 
-fn _gltf_resolve_image_uri(any gltf_data, any tex_info) str {
+fn _gltf_image_name_lower(any img, str resolved="") str {
+   mut name = str.lower(to_str(img.get("name", "")))
+   def uri = str.lower(to_str(img.get("uri", "")))
+   if(uri.len > 0){ name = name + " " + uri }
+   if(resolved.len > 0){ name = name + " " + str.lower(ospath.basename(resolved)) }
+   name
+}
+
+fn _gltf_name_has_any(str s, list needles) bool {
+   mut i = 0
+   while(i < needles.len){
+      if(str.find(s, to_str(needles.get(i, ""))) >= 0){ return true }
+      i += 1
+   }
+   false
+}
+
+fn _gltf_name_is_bad_for_slot(str slot, str name) bool {
+   if(slot == "base_color" || slot == "diffuse"){
+      return _gltf_name_has_any(name, ["normal", "nrm", "rough", "metal", "orm", "occlusion", "ao"])
+   }
+   if(slot == "normal"){ return _gltf_name_has_any(name, ["base", "color", "albedo", "diffuse", "rough", "metal", "orm", "occlusion", "ao"]) }
+   if(slot == "metallic_roughness"){ return _gltf_name_has_any(name, ["base", "color", "albedo", "diffuse", "normal", "nrm"]) }
+   if(slot == "occlusion"){ return _gltf_name_has_any(name, ["base", "color", "albedo", "diffuse", "normal", "nrm"]) }
+   false
+}
+
+fn _gltf_name_good_for_slot(str slot, str name) bool {
+   if(slot == "base_color" || slot == "diffuse"){
+      return _gltf_name_has_any(name, ["basecolor", "base_color", "base color", "albedo", "diffuse", "color"]) &&
+      !_gltf_name_has_any(name, ["normal", "nrm", "rough", "metal", "orm", "occlusion", "ao"])
+   }
+   if(slot == "normal"){ return _gltf_name_has_any(name, ["normal", "nrm"]) }
+   if(slot == "metallic_roughness"){ return _gltf_name_has_any(name, ["metallicroughness", "metallic_roughness", "roughnessmetallic", "roughness_metallic", "rough", "metal", "orm"]) }
+   if(slot == "occlusion"){ return _gltf_name_has_any(name, ["occlusion", "ao", "orm"]) }
+   false
+}
+
+fn _gltf_find_image_uri_by_slot(any gltf_data, str slot) str {
+   def g = gltf_data.get("gltf", 0)
+   if(!is_dict(g)){ return "" }
+   def images = g.get("images")
+   if(!is_list(images)){ return "" }
+   mut i = 0
+   while(i < images.len){
+      def img = images.get(i, 0)
+      if(is_dict(img)){
+         def resolved = _gltf_extract_embedded_image(gltf_data, i)
+         def name = _gltf_image_name_lower(img, resolved)
+         if(_gltf_name_good_for_slot(slot, name)){ return resolved }
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _gltf_resolve_image_uri(any gltf_data, any tex_info, str slot="") str {
    def g = gltf_data.get("gltf", 0)
    if(!is_dict(g) || !is_dict(tex_info)){ return "" }
    def textures = g.get("textures")
@@ -2173,18 +2229,38 @@ fn _gltf_resolve_image_uri(any gltf_data, any tex_info) str {
    def tex_idx = int(tex_info.get("index", -1))
    if(tex_idx < 0 || tex_idx >= textures.len){ return "" }
    def tex = textures.get(tex_idx)
+   if(!is_dict(tex)){ return "" }
    mut src_idx = int(tex.get("source", -1))
+
+   ;; Prefer the core glTF source when present. Compressed extension sources are
+   ;; alternatives and may be unsupported or point at ORM/normal payloads in some
+   ;; converted samples. Only use extension source when the core source is absent.
    if(src_idx < 0 && is_dict(tex.get("extensions", 0))){
       def exts = tex.get("extensions", 0)
-      def basisu = exts.get("KHR_texture_basisu", 0)
-      if(is_dict(basisu)){ src_idx = int(basisu.get("source", -1)) }
+      def webp = exts.get("EXT_texture_webp", 0)
+      if(is_dict(webp)){ src_idx = int(webp.get("source", -1)) }
       if(src_idx < 0){
-         def webp = exts.get("EXT_texture_webp", 0)
-         if(is_dict(webp)){ src_idx = int(webp.get("source", -1)) }
+         def basisu = exts.get("KHR_texture_basisu", 0)
+         if(is_dict(basisu)){ src_idx = int(basisu.get("source", -1)) }
       }
    }
    if(src_idx < 0 || src_idx >= images.len){ return "" }
-   _gltf_extract_embedded_image(gltf_data, src_idx)
+   def resolved = _gltf_extract_embedded_image(gltf_data, src_idx)
+
+   ;; Safety net for material slots: prefer a slot-named image whenever the
+   ;; chosen source is clearly wrong OR too generic to prove it belongs to this
+   ;; slot.  Some exporters/converted samples keep texture.source indexes but
+   ;; expose image names only through the image list; in that case a baseColor
+   ;; material can otherwise land on an ORM/roughness-looking grayscale map in VK.
+   if(slot.len > 0 && resolved.len > 0){
+      def img = images.get(src_idx, 0)
+      def name = is_dict(img) ? _gltf_image_name_lower(img, resolved) : str.lower(ospath.basename(resolved))
+      def alt = _gltf_find_image_uri_by_slot(gltf_data, slot)
+      if(alt.len > 0 && (_gltf_name_is_bad_for_slot(slot, name) || !_gltf_name_good_for_slot(slot, name))){
+         return alt
+      }
+   }
+   resolved
 }
 
 fn _gltf_texture_filter_from_sampler(any s) int {
@@ -2239,16 +2315,24 @@ fn _gltf_decode_mr_tex_id(int mr_word) int {
 }
 
 fn _gltf_tex_uri_uv(dict out, str prefix, any gltf_data, any tex_info) dict {
+   ;; glTF TextureInfo is an object.  Do not treat a missing texture as index 0:
+   ;; that binds image 0 into base/normal/MR/occlusion slots and makes VK sample
+   ;; the wrong material texture (classic gray/striped Avocado failure).
+   if(!is_dict(tex_info)){ return out }
    def sampler = _gltf_texture_sampler_info(gltf_data, tex_info)
-   out[prefix + "_uri"] = _gltf_resolve_image_uri(gltf_data, tex_info)
+   out[prefix + "_uri"] = _gltf_resolve_image_uri(gltf_data, tex_info, prefix)
    out[prefix + "_filter"] = _gltf_texture_filter_from_sampler(sampler)
    out[prefix + "_sampler"] = sampler
    _gltf_texture_uv_props(out, prefix, tex_info)
 }
 
 fn _gltf_tex_info(dict out, str prefix, any gltf_data, any tex_info) dict {
+   ;; Missing textureInfo must remain missing.  Earlier code accepted the default
+   ;; 0 and resolved texture/image 0, so absent normal/MR/occlusion/emissive maps
+   ;; could alias the base image and break material binding in Vulkan.
+   if(!is_dict(tex_info)){ return out }
    def sampler = _gltf_texture_sampler_info(gltf_data, tex_info)
-   out[prefix + "_uri"] = _gltf_resolve_image_uri(gltf_data, tex_info)
+   out[prefix + "_uri"] = _gltf_resolve_image_uri(gltf_data, tex_info, prefix)
    out[prefix + "_filter"] = _gltf_texture_filter_from_sampler(sampler)
    out[prefix + "_sampler"] = sampler
    out = _gltf_texture_uv_props(out, prefix, tex_info)
@@ -3730,7 +3814,11 @@ fn _gltf_indexed_prim_material_state(
    def has_uv1 = int(meta.get("uv1_cnt", 0)) > 0
    if(!has_uv1){ material_state = _gltf_indexed_part_material_force_uv0(material_state) }
    if(!has_uv1 && int(material_state.get("uv_set", 0)) != 0){ material_state["uv_set"] = 0 }
-   if(int(meta.get("c_acc_idx", -1)) >= 0 && int(meta.get("c_cnt", 0)) > 0){
+   ;; Vertex colors are optional in glTF. Keep them opt-in for the viewer until
+   ;; the attribute mapper is proven for every sample model. A bad COLOR_0 decode
+   ;; multiplies the base-color texture and shows up exactly like gray/striped
+   ;; Avocado materials in the Vulkan path.
+   if(common.env_truthy("NY_GLTF_VERTEX_COLORS") && int(meta.get("c_acc_idx", -1)) >= 0 && int(meta.get("c_cnt", 0)) > 0){
       material_state["prim_vc_mode"] = bor(int(material_state.get("prim_vc_mode", 0)), 4)
    }
    material_state
@@ -4293,20 +4381,40 @@ fn _gltf_lerp_vec(list a, list b, f64 t, int n) list {
 }
 
 fn _gltf_nlerp_quat(list a, list b, f64 t) list {
+   ;; glTF LINEAR rotation interpolation for quaternions should take the
+   ;; shortest arc and keep the result normalized.  This is used by both the
+   ;; generic and fast animation samplers.
    def ax, ay = 0.0 + a.get(0, 0.0), 0.0 + a.get(1, 0.0)
    def az, aw = 0.0 + a.get(2, 0.0), 0.0 + a.get(3, 1.0)
    mut bx, by = 0.0 + b.get(0, 0.0), 0.0 + b.get(1, 0.0)
    mut bz, bw = 0.0 + b.get(2, 0.0), 0.0 + b.get(3, 1.0)
-   def dot = ax * bx + ay * by + az * bz + aw * bw
+   mut dot = ax * bx + ay * by + az * bz + aw * bw
    if(dot < 0.0){
       bx, by = -bx, -by
       bz, bw = -bz, -bw
+      dot = 0.0 - dot
    }
-   def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
-   def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
-   def len2 = rx * rx + ry * ry + rz * rz + rw * rw
-   def inv_len = len2 > 0.000001 ? 1.0 / sqrt(len2) : 1.0
-   [rx * inv_len, ry * inv_len, rz * inv_len, rw * inv_len]
+   if(dot > 0.9995){
+      def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
+      def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
+      def len2 = rx * rx + ry * ry + rz * rz + rw * rw
+      def inv_len = len2 > 0.000001 ? 1.0 / sqrt(len2) : 1.0
+      return [rx * inv_len, ry * inv_len, rz * inv_len, rw * inv_len]
+   }
+   if(dot > 1.0){ dot = 1.0 }
+   def theta_0 = acos(dot)
+   def sin_theta_0 = sin(theta_0)
+   if(abs(sin_theta_0) <= 0.000001){ return [ax, ay, az, aw] }
+   def theta = theta_0 * t
+   def sin_theta = sin(theta)
+   def s0 = cos(theta) - dot * sin_theta / sin_theta_0
+   def s1 = sin_theta / sin_theta_0
+   [
+      ax * s0 + bx * s1,
+      ay * s0 + by * s1,
+      az * s0 + bz * s1,
+      aw * s0 + bw * s1
+   ]
 }
 
 fn _gltf_normalize_quat(any q) list {
@@ -4385,21 +4493,7 @@ fn _gltf_sample_channel(any data, dict sampler, dict input_res, dict output_res,
          def qa = _gltf_read_norm_i16_quat(ptr, alo)
          if(lo == hi || eq(interp, "STEP")){ return qa }
          def qb = _gltf_read_norm_i16_quat(ptr, ahi)
-         def qa0, qa1 = qa.get(0, 0.0), qa.get(1, 0.0)
-         def qa2, qa3 = qa.get(2, 0.0), qa.get(3, 1.0)
-         mut lbx, lby = qb.get(0, 0.0), qb.get(1, 0.0)
-         mut lbz, lbw = qb.get(2, 0.0), qb.get(3, 1.0)
-         def dot = qa0 * lbx + qa1 * lby + qa2 * lbz + qa3 * lbw
-         if(dot < 0.0){
-            lbx, lby = -lbx, -lby
-            lbz, lbw = -lbz, -lbw
-         }
-         def rx, ry = qa0 + (lbx - qa0) * t, qa1 + (lby - qa1) * t
-         def rz, rw = qa2 + (lbz - qa2) * t, qa3 + (lbw - qa3) * t
-         def len2 = rx * rx + ry * ry + rz * rz + rw * rw
-         if(len2 <= 0.000001){ return [0.0, 0.0, 0.0, 1.0] }
-         def inv_len = 1.0 / sqrt(len2)
-         return [rx * inv_len, ry * inv_len, rz * inv_len, rw * inv_len]
+         return _gltf_nlerp_quat(qa, qb, t)
       }
    }
    if(lo == hi){
@@ -4642,18 +4736,34 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
       def az, aw = f32le(out_ptr, lo_off + 8), f32le(out_ptr, lo_off + 12)
       mut bx, by = f32le(out_ptr, hi_off + 0), f32le(out_ptr, hi_off + 4)
       mut bz, bw = f32le(out_ptr, hi_off + 8), f32le(out_ptr, hi_off + 12)
-      def dot = ax * bx + ay * by + az * bz + aw * bw
-      if(dot < 0.0){ bx = -bx by = -by bz = -bz bw = -bw }
-      def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
-      def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
-      def len2 = rx * rx + ry * ry + rz * rz + rw * rw
-      if(len2 <= 0.000001){ return [0.0, 0.0, 0.0, 1.0] }
-      def inv_len = 1.0 / sqrt(len2)
+      mut dot = ax * bx + ay * by + az * bz + aw * bw
+      if(dot < 0.0){ bx = -bx by = -by bz = -bz bw = -bw dot = 0.0 - dot }
+      if(dot > 0.9995){
+         def rx, ry = ax + (bx - ax) * t, ay + (by - ay) * t
+         def rz, rw = az + (bz - az) * t, aw + (bw - aw) * t
+         def len2 = rx * rx + ry * ry + rz * rz + rw * rw
+         if(len2 <= 0.000001){ return [0.0, 0.0, 0.0, 1.0] }
+         def inv_len = 1.0 / sqrt(len2)
+         return [
+            _gltf_anim_clean_tiny(rx * inv_len),
+            _gltf_anim_clean_tiny(ry * inv_len),
+            _gltf_anim_clean_tiny(rz * inv_len),
+            _gltf_anim_clean_tiny(rw * inv_len)
+         ]
+      }
+      if(dot > 1.0){ dot = 1.0 }
+      def theta_0 = acos(dot)
+      def sin_theta_0 = sin(theta_0)
+      if(abs(sin_theta_0) <= 0.000001){ return [ax, ay, az, aw] }
+      def theta = theta_0 * t
+      def sin_theta = sin(theta)
+      def s0 = cos(theta) - dot * sin_theta / sin_theta_0
+      def s1 = sin_theta / sin_theta_0
       return [
-         _gltf_anim_clean_tiny(rx * inv_len),
-         _gltf_anim_clean_tiny(ry * inv_len),
-         _gltf_anim_clean_tiny(rz * inv_len),
-         _gltf_anim_clean_tiny(rw * inv_len)
+         _gltf_anim_clean_tiny(ax * s0 + bx * s1),
+         _gltf_anim_clean_tiny(ay * s0 + by * s1),
+         _gltf_anim_clean_tiny(az * s0 + bz * s1),
+         _gltf_anim_clean_tiny(aw * s0 + bw * s1)
       ]
    }
    def ax, ay = f32le(out_ptr, lo_off + 0), f32le(out_ptr, lo_off + 4)
@@ -4708,7 +4818,7 @@ fn _gltf_sample_animation_fast(any gltf_data, int anim_idx, f64 time_sec) any {
       elif(path_code == 3){ s_values[slot] = val }
       i += 1
    }
-   mut fast_node_overrides = list(nodes_n)
+   mut fast_node_overrides = []
    mut ni = 0
    while(ni < nodes_n){
       fast_node_overrides = fast_node_overrides.append(0)
@@ -4881,8 +4991,21 @@ fn gltf_sample_animation_merged(any gltf_data, f64 time_sec) any {
                if(is_dict(rec)){
                   def node_idx = int(rec.get("node", -1))
                   if(node_idx >= 0){
-                     merged[node_idx] = rec
-                     merged[to_str(node_idx)] = rec
+                     ;; Merge channels per node instead of replacing the whole
+                     ;; node override record. Multi-channel/multi-clip assets can
+                     ;; target translation, rotation, scale, visibility, and
+                     ;; weights independently for the same node.
+                     mut merged_rec = merged.get(node_idx, merged.get(to_str(node_idx), 0))
+                     if(!is_dict(merged_rec)){ merged_rec = {"node": node_idx, "node_key": to_str(node_idx)} }
+                     merged_rec["node"] = node_idx
+                     merged_rec["node_key"] = to_str(node_idx)
+                     if(rec.contains("T")){ merged_rec["T"] = rec.get("T") }
+                     if(rec.contains("R")){ merged_rec["R"] = rec.get("R") }
+                     if(rec.contains("S")){ merged_rec["S"] = rec.get("S") }
+                     if(rec.contains("W")){ merged_rec["W"] = rec.get("W") }
+                     if(rec.contains("VIS")){ merged_rec["VIS"] = rec.get("VIS") }
+                     merged[node_idx] = merged_rec
+                     merged[to_str(node_idx)] = merged_rec
                      mut merged_nodes = merged.get("__nodes", [])
                      mut found = false
                      mut mi = 0
@@ -4890,13 +5013,13 @@ fn gltf_sample_animation_merged(any gltf_data, f64 time_sec) any {
                      while(mi < merged_nodes_n){
                         def prev = merged_nodes[mi]
                         if(is_dict(prev) && int(prev.get("node", -1)) == node_idx){
-                           merged_nodes[mi] = rec
+                           merged_nodes[mi] = merged_rec
                            found = true
                            break
                         }
                         mi += 1
                      }
-                     if(!found){ merged_nodes = merged_nodes.append(rec) }
+                     if(!found){ merged_nodes = merged_nodes.append(merged_rec) }
                      merged["__nodes"] = merged_nodes
                   }
                }
@@ -5011,7 +5134,7 @@ fn _gltf_build_node_world_mats_animated_fast(list nodes, any base_local_mats, li
    def node = nodes[node_idx]
    if(!is_dict(node)){ return node_world_mats }
    mut anim_ov = is_list(fast_node_overrides) ? fast_node_overrides.get(node_idx, 0) : 0
-   if(!is_dict(anim_ov)){ anim_ov = overrides.get(int(node_idx), 0) }
+   if(!is_dict(anim_ov)){ anim_ov = overrides.get(int(node_idx), overrides.get(to_str(node_idx), 0)) }
    mut local_m = 0
    if(is_dict(anim_ov)){
       def t = anim_ov.get("T", node.get("translation", [0.0,0.0,0.0]))
@@ -5061,7 +5184,7 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    mut world_list = 0
    mut fast_node_overrides = 0
    if(fast_numeric){
-      world_list = list(nodes_n)
+      world_list = []
       mut wi = 0
       while(wi < nodes_n){
          world_list = world_list.append(0)

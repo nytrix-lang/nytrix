@@ -165,7 +165,7 @@ fn asset_grid_fit_h(any model_count, any win_w, any requested_h, any compact=fal
 
 fn asset_grid_view_h(any requested_h, any compact=false, any standalone=false) f64 {
    "Runs the grid view h operation."
-   def max_h = bool(standalone) ? 920.0 : (bool(compact) ? 520.0 : 320.0)
+   def max_h = bool(standalone) ? 2400.0 : (bool(compact) ? 520.0 : 320.0)
    clamp(float(requested_h), bool(compact) ? 160.0 : 220.0, max_h)
 }
 

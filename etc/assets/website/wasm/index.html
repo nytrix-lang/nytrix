@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nytrix Wasm Runner</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="web.css?v=20260611e">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="demo-rail">
+      <div class="brand">
+        <a class="brand-link" href="./" aria-label="Nytrix wasm runner home">
+          <div class="brand-mark" aria-hidden="true">
+            <img src="logo.svg" alt="" onerror="this.remove();this.parentElement.dataset.fallback='NY'">
+          </div>
+        </a>
+        <div class="brand-text">
+          <h1>Nytrix Wasm</h1>
+          <p>Browser runner</p>
+        </div>
+      </div>
+      <label class="file-loader">
+        <span>Local module</span>
+        <input id="wasmFile" type="file" accept=".wasm,application/wasm">
+      </label>
+      <div class="rail-title">Modules</div>
+      <div class="area-tabs" id="areaTabs" role="tablist" aria-label="Demo groups"></div>
+      <nav class="demo-list" id="demoList" aria-label="Wasm modules">
+        <div class="demo-items" id="demoItems"></div>
+        <div class="inspector">
+          <section class="panel runtime-panel">
+            <div class="panel-head">
+              <h3>Runtime</h3>
+              <div class="head-actions">
+                <button id="clearBtn" type="button" title="Clear output log">Clear</button>
+                <button id="resetBtn" type="button" title="Reload current module">Reset</button>
+              </div>
+            </div>
+            <div class="run-fields">
+              <label class="args-field">
+                <span>Args</span>
+                <input id="runArgs" type="text" spellcheck="false" placeholder="--size 20 --iters 8">
+              </label>
+              <div class="field-row">
+                <label>
+                  <span>Entry</span>
+                  <input id="runEntry" type="text" spellcheck="false" placeholder="auto">
+                </label>
+                <button id="runBtn" class="primary-btn" type="button">Run</button>
+              </div>
+              <div class="option-row">
+                <label title="Auto-run on load"><input id="autoRun" type="checkbox" checked> auto</label>
+                <label title="Mirror browser drawing only"><input id="mirrorOutput" type="checkbox" checked> frame</label>
+                <div class="status-wrap">
+                  <span class="status-pill" id="webglStatus">WebGL</span>
+                  <span class="status-pill" id="wasmStatus">Ny wasm</span>
+                </div>
+              </div>
+            </div>
+            <div class="log-wrap">
+              <pre id="outputLog"></pre>
+            </div>
+            <div class="control-grid" id="controlGrid"></div>
+          </section>
+        </div>
+      </nav>
+    </aside>
+
+    <main class="stage-wrap">
+      <header class="stage-top">
+        <div class="stage-title">
+          <div class="kicker" id="demoArea">Wasm</div>
+          <h2 id="demoTitle">No module loaded</h2>
+          <p id="demoSource">Build with ./make wasm, then load the .wasm here.</p>
+        </div>
+      </header>
+      <section class="stage" id="stagePane">
+        <canvas id="glCanvas" width="1280" height="720"></canvas>
+        <pre id="cliStageOutput" class="cli-stage-output" aria-live="polite"></pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="demos-data.js?v=20260611e"></script>
+  <script src="wasm.js?v=20260611e"></script>
+</body>
+</html>

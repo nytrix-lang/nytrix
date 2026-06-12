@@ -401,8 +401,10 @@ fn _tile_editor_shell_cfg(f64 ww, f64 wh, f64 gap, f64 left_ratio, f64 top_ratio
       def side_rows = split_rows(side, _right_stack_weights(right_stack_weights), g)
       return _tile_editor_shell_map(editor, center, side, center_rows, side_rows)
    }
-   mut left_w = clamp(root_w * float(left_ratio), compact ? 270.0 : 320.0, compact ? 390.0 : 480.0)
-   if(root_w < 980.0){ left_w = clamp(root_w * 0.28, 220.0, 280.0) }
+   def editor_left_max = float(ui_profile.env_int_cached("NY_EDITOR_LEFT_MAX_W", 360, 260, 520))
+   mut left_w = clamp(root_w * float(left_ratio), compact ? 250.0 : 280.0, compact ? min(360.0, editor_left_max) : min(400.0, editor_left_max))
+   if(root_w < 980.0){ left_w = clamp(root_w * 0.28, 220.0, min(280.0, editor_left_max)) }
+   if(root_w >= 980.0 && left_w > editor_left_max){ left_w = editor_left_max }
    def right_x = root_x + left_w + g
    mut right_w = max(1.0, root_w - left_w - g)
    def center_bias = _weight_or(bottom_weights, 0, 1.0)
@@ -773,22 +775,17 @@ fn _flush_text_runs() any {
 }
 
 fn warm_text_pipeline(int body_font=0, int title_font=0, int small_font=0) bool {
-   "Warms the queued GUI text flush path for interactive panels."
+   "Warms GUI font atlases for interactive panels without submitting visible text."
    if(!_enabled){ return false }
    if(body_font > 0){
       set_fonts(body_font, title_font, small_font)
    }
    _theme_refresh()
    _text_run_queue = []
-   _queue_text_ui(_font_body(), "Assets", 8.0, 8.0, _text_u32)
-   _queue_text_ui(_font_body(), "Quick Pick", 8.0, 26.0, _text_dim_u32)
-   _queue_text_ui(_font_body(), "Selected Model", 8.0, 44.0, _text_u32)
-   _queue_text_ui(_font_body(), "Renderer Counters", 8.0, 62.0, _text_dim_u32)
-   _queue_text_ui(_font_body(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 [](){}<>:/._-+*=%,", 8.0, 80.0, _text_dim_u32)
-   _queue_text_ui(_font_title_id(), "NYTRIX", 8.0, 84.0, _text_u32)
-   _queue_text_ui(_font_title_id(), "Editor", 8.0, 104.0, _text_dim_u32)
-   _queue_text_ui(_font_small_id(), "Load Unload Fit Refresh Filter Catalog Scene FPS ms", 8.0, 124.0, _text_dim_u32)
-   _flush_text_runs()
+   def sample = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 [](){}<>:/._-+*=%,"
+   if(_font_body() > 0){ font_prepare(_font_body(), sample) }
+   if(_font_title_id() > 0){ font_prepare(_font_title_id(), sample) }
+   if(_font_small_id() > 0){ font_prepare(_font_small_id(), sample) }
    true
 }
 
@@ -1071,14 +1068,29 @@ fn _apply_event_pointer_pos() any {
    _window_hovered = _top_window_id_at(_mouse_x, _mouse_y)
 }
 
+fn _pointer_view_xy(any x, any y) list {
+   if(!_win){ return [float(x), float(y)] }
+   def sz = uiw.size(_win)
+   def ww = max(1.0, float(sz.get(0, _fb_w > 0.0 ? _fb_w : 1.0)))
+   def wh = max(1.0, float(sz.get(1, _fb_h > 0.0 ? _fb_h : 1.0)))
+   def vw = max(1.0, _fb_w > 0.0 ? _fb_w : ww)
+   def vh = max(1.0, _fb_h > 0.0 ? _fb_h : wh)
+   [
+      clamp(float(x) * vw / ww, 0.0, vw),
+      clamp(float(y) * vh / wh, 0.0, vh)
+   ]
+}
+
 fn _capture_event_pointer_pos(dict data) any {
    if(data.contains("x") || data.contains("y")){
       _event_mouse_has_pos = true
-      _event_mouse_x, _event_mouse_y = float(data.get("x", _event_mouse_x)), float(data.get("y", _event_mouse_y))
+      def p = _pointer_view_xy(data.get("x", _event_mouse_x), data.get("y", _event_mouse_y))
+      _event_mouse_x, _event_mouse_y = float(p.get(0, _event_mouse_x)), float(p.get(1, _event_mouse_y))
    } elif(_win){
       def mp = uiw.cursor_pos(_win)
+      def p = _pointer_view_xy(mp.get(0, _mouse_x), mp.get(1, _mouse_y))
       _event_mouse_has_pos = true
-      _event_mouse_x, _event_mouse_y = float(mp.get(0, _mouse_x)), float(mp.get(1, _mouse_y))
+      _event_mouse_x, _event_mouse_y = float(p.get(0, _mouse_x)), float(p.get(1, _mouse_y))
    }
    _apply_event_pointer_pos()
 }
@@ -1105,7 +1117,8 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
       return 0
    }
    def mp = uiw.cursor_pos(win)
-   _mouse_x, _mouse_y = float(mp.get(0, 0.0)), float(mp.get(1, 0.0))
+   def vp = _pointer_view_xy(mp.get(0, 0.0), mp.get(1, 0.0))
+   _mouse_x, _mouse_y = float(vp.get(0, 0.0)), float(vp.get(1, 0.0))
    if(_event_mouse_has_pos){ _mouse_x, _mouse_y = _event_mouse_x, _event_mouse_y }
    def sampled_down0 = _event_mouse_down0_known ? _event_mouse_down0 : uiw.mouse_down(win, 0)
    def sampled_pressed0 = (_event_mouse_pressed0 || (sampled_down0 && !_mouse_down0_prev)) && sampled_down0

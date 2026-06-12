@@ -19,6 +19,8 @@ use std.os.ui.window
 def START_W = 1040
 def START_H = 620
 def START_FLAGS = consts.WINDOW_CENTER | consts.WINDOW_FOCUS_ON_SHOW
+render.apply_backend_env()
+render.apply_backend_argv()
 def win = render.init_window(START_W, START_H, "Nytrix Input", START_FLAGS, false, true, 1)
 
 if(!win){ panic("window init failed") }

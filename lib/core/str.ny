@@ -30,6 +30,13 @@ fn _env_present(str key) bool {
    false
 }
 
+mut _text_debug_flag = -1
+
+fn _text_debug_enabled() bool {
+   if(_text_debug_flag == -1){ _text_debug_flag = _env_present("NY_TEXT_DEBUG") ? 1 : 0 }
+   _text_debug_flag == 1
+}
+
 @inline
 fn _match_at(str s, str sub, int at) bool {
    mut j = 0
@@ -337,11 +344,20 @@ fn strip(any s) str {
 @returns_owned
 fn split(any s, any sep) list {
    "Splits string `s` by separator `sep` and returns a list of strings."
-   if(_env_present("NY_TEXT_DEBUG")){ print("Text: split s='" + s + "' sep='" + sep + "'") }
+   if(_text_debug_enabled()){ print("Text: split s='" + s + "' sep='" + sep + "'") }
    if(!is_str(s)){ return list(0) }
    if(!is_str(sep)){ return list(0) }
    mut sep_len = sep.len
-   if(sep_len == 0){ return list(0) }
+   if(sep_len == 0){
+      def chars = utf8_len(s)
+      mut out = list(chars)
+      mut ci = 0
+      while(ci < chars){
+         _list_push_reserved(out, chr(ord_at(s, ci)))
+         ci += 1
+      }
+      return out
+   }
    mut n = s.len
    mut parts = 1
    mut scan = 0
@@ -366,7 +382,7 @@ fn split(any s, any sep) list {
       }
    }
    _list_push_reserved(out, _substr(s, start, n))
-   if(_env_present("NY_TEXT_DEBUG")){ print("Text: split returning count=" + to_str(out.len)) }
+   if(_text_debug_enabled()){ print("Text: split returning count=" + to_str(out.len)) }
    return out
 }
 
@@ -514,14 +530,14 @@ fn join_words(list items, str sep=" ", int start=0) str {
    if(!is_list(items)){ return "" }
    mut n = items.len
    if(start >= n){ return "" }
-   mut out = ""
+   mut parts = list(n - start)
    mut i = start
    while(i < n){
       def part = to_str(items.get(i, ""))
-      if(part.len > 0){ out = (out.len > 0) ? (out + sep + part) : part }
+      if(part.len > 0){ _list_push_reserved(parts, part) }
       i += 1
    }
-   out
+   join(parts, sep)
 }
 
 @returns_owned
@@ -1189,5 +1205,7 @@ fn builder_free(any b) int {
    assert(__flt_is_nan(atof("nan")) && __flt_is_nan(atof("-NaN")), "str atof nan")
    assert(__flt_is_inf(atof("inf")) && __flt_is_inf(atof("+Infinity")) && atof("-inf") < 0.0, "str atof infinity")
    assert(atof("0.5") == 0.5 && atof("-12.25") == -12.25 && atof("1e3") == 1000.0, "str atof decimal")
+   assert(split("éa", "") == ["é", "a"], "str split empty sep utf8")
+   assert(join_words(["a", "", "b"], "-") == "a-b", "str join_words")
    print("✓ std.core.str self-test passed")
 }

@@ -11,7 +11,6 @@ use std.os.ui.assets.viewer as ui_assets
 use std.os.ui.render.dump as ui_profile
 use std.os.ui.render
 use std.os.ui.render.scene as render_scene
-use std.os.ui.render.vk.texture as demo_env
 use std.os.ui.render.viewer.term as terminal
 use std.os.ui.render.viewer.engine.state
 use std.parse.img as img
@@ -98,6 +97,11 @@ fn _reset_neutral_env_resources() {
    true
 }
 
+
+fn _env_keep_cpu_images() bool {
+   ui_profile.env_truthy_cached("NY_UI_KEEP_ENV_CPU_IMAGES")
+}
+
 fn _reset_skybox_resources() {
    _reset_skybox_texture_resources()
    _reset_compare_env_resources()
@@ -119,7 +123,7 @@ fn _load_skybox_source_tex(path, verbose) {
    if(str.endswith(str.lower(path), ".exr")){
       def exr_im = exr.load_path(path)
       if(exr_im && is_dict(exr_im)){
-         return texture_upload_image_ex(exr_im, path, 37, true, true, 1, 10497, 33071, "", true)
+         return texture_upload_image_ex(exr_im, path, 37, false, false, 1, 10497, 33071, "", true)
       }
       if(verbose){
          terminal.log("skybox exr decode failed: " + to_str(exr.last_error()))
@@ -137,14 +141,19 @@ fn _install_skybox_tex(tex, visible) {
 }
 
 fn _build_skybox_studio_env(env_w, env_h) {
-   def studio_im = demo_env.generate_studio_env_image(env_w, env_h)
+   def studio_im = generate_studio_env_image(env_w, env_h)
    if(studio_im && is_dict(studio_im)){
       def studio_tex = render_scene.upload_generated_texture(studio_im)
       if(studio_tex >= 0){
          compare_env_tex_id = studio_tex
          compare_env_spec_tex_id = studio_tex
       }
-      compare_env_im_hold = studio_im
+      if(_env_keep_cpu_images()){
+         compare_env_im_hold = studio_im
+      } else {
+         img.free(studio_im)
+         compare_env_im_hold = 0
+      }
    }
    true
 }
@@ -153,12 +162,17 @@ fn _build_compare_reflect_env(env_w, env_h) {
    if(!ui_profile.env_truthy_cached("NY_UI_ENABLE_COMPARE_REFLECT_SPEC")){
       return false
    }
-   def compare_spec_im = demo_env.generate_compare_reflect_env_image(env_w, env_h)
+   def compare_spec_im = generate_compare_reflect_env_image(env_w, env_h)
    if(compare_spec_im && is_dict(compare_spec_im)){
       def compare_spec_tex = render_scene.upload_generated_texture(compare_spec_im)
       if(compare_spec_tex >= 0){
          compare_reflect_spec_tex_id = compare_spec_tex
-         compare_reflect_env_im_hold = compare_spec_im
+         if(_env_keep_cpu_images()){
+            compare_reflect_env_im_hold = compare_spec_im
+         } else {
+            img.free(compare_spec_im)
+            compare_reflect_env_im_hold = 0
+         }
          return true
       }
       img.free(compare_spec_im)
@@ -167,27 +181,37 @@ fn _build_compare_reflect_env(env_w, env_h) {
 }
 
 fn _build_compare_visible_env(env_w, env_h) {
-   def compare_visible_im = demo_env.generate_compare_visible_env_image(env_w, env_h)
+   def compare_visible_im = generate_compare_visible_env_image(env_w, env_h)
    if(compare_visible_im && is_dict(compare_visible_im)){
       def compare_visible_tex = render_scene.upload_generated_texture(compare_visible_im)
       if(compare_visible_tex >= 0){
          compare_visible_env_tex_id = compare_visible_tex
       }
-      compare_visible_env_im_hold = compare_visible_im
+      if(_env_keep_cpu_images()){
+         compare_visible_env_im_hold = compare_visible_im
+      } else {
+         img.free(compare_visible_im)
+         compare_visible_env_im_hold = 0
+      }
       return compare_visible_tex >= 0
    }
    false
 }
 
 fn _build_neutral_env(env_w, env_h) {
-   def neutral_im = demo_env.generate_neutral_env_image(env_w, env_h)
+   def neutral_im = generate_neutral_env_image(env_w, env_h)
    if(neutral_im && is_dict(neutral_im)){
       def neutral_tex = render_scene.upload_generated_texture(neutral_im)
       if(neutral_tex >= 0){
          neutral_env_tex_id = neutral_tex
          neutral_env_spec_tex_id = neutral_tex
       }
-      neutral_env_im_hold = neutral_im
+      if(_env_keep_cpu_images()){
+         neutral_env_im_hold = neutral_im
+      } else {
+         img.free(neutral_im)
+         neutral_env_im_hold = 0
+      }
       return neutral_tex >= 0
    }
    false
@@ -214,7 +238,7 @@ fn build_generated_textures(studio=true, compare_visible=true, neutral=true, com
 
 fn load_skybox(visible=true, source="") {
    "Loads the viewer skybox and builds the derived environment textures."
-   def verbose = ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") || ui_profile.trace_enabled()
+   def verbose = ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE")
    def source_arg = ui_assets.skybox_source_arg(source)
    if(ui_assets.skybox_source_is_off(source_arg)){
       _reset_skybox_resources()
@@ -267,7 +291,7 @@ fn _load_fast_generated_skybox(visible=true) {
    mut im = compare_visible_env_im_hold && is_dict(compare_visible_env_im_hold) ? compare_visible_env_im_hold : 0
    def own_im = im ? false : true
    if(!im){
-      im = demo_env.generate_compare_visible_env_image(env_w, env_h)
+      im = generate_compare_visible_env_image(env_w, env_h)
    }
    def tex = render_scene.upload_generated_texture(im)
    if(tex < 0){
@@ -282,6 +306,11 @@ fn _load_fast_generated_skybox(visible=true) {
    if(skybox_im_hold && is_dict(skybox_im_hold)){
       img.free(skybox_im_hold)
    }
-   skybox_im_hold = own_im ? im : 0
+   if(_env_keep_cpu_images()){
+      skybox_im_hold = own_im ? im : 0
+   } else {
+      if(own_im && im && is_dict(im)){ img.free(im) }
+      skybox_im_hold = 0
+   }
    true
 }

@@ -120,12 +120,16 @@ fn _path_detail(catalog, name) str {
 
 fn grid_h(f64 requested_h, bool compact=false, bool standalone=false, f64 reserve=0.0) f64 {
    "Returns the visible asset-grid height for the current layout budget."
-   def wanted = asset_catalog.asset_grid_view_h(requested_h, compact, standalone)
-   def floor = bool(compact) ? 120.0 : 140.0
-   def budget = max(0.0, gui.remaining_h(reserve))
-   if(budget <= 1.0){ return max(1.0, min(wanted, float(requested_h))) }
-   if(budget < floor){ return budget }
-   min(wanted, budget)
+   ;; Do not cap embedded asset browsers to a fixed magic size.  The parent
+   ;; panel already computed the available body height, so use that dynamic
+   ;; budget and let the scroll area fill the vertical slot.
+   def floor = bool(compact) ? 96.0 : 120.0
+   def requested = max(1.0, float(requested_h))
+   def remaining = max(0.0, gui.remaining_h(reserve))
+   def budget = (remaining > 1.0) ? remaining : requested
+   def out = min(requested, budget)
+   if(out < floor){ return max(1.0, out) }
+   out
 }
 
 fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dict {
@@ -143,31 +147,34 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    def hide_detail = bool(options.get("hide_detail", false))
    def file_list = bool(options.get("file_list", false))
    def show_icons = bool(options.get("show_icons", bool(options.get("file_icons", true))))
+   def ensure_selected = bool(options.get("ensure_selected", false))
    def catalog = options.get("catalog", 0)
    def grid_w = asset_catalog.asset_grid_usable_w(win_w, compact)
-   def cols = file_list ? 1 : asset_catalog.asset_grid_cols(grid_w, compact)
+   def cols = max(1, file_list ? 1 : asset_catalog.asset_grid_cols(grid_w, compact))
    def tile_gap = file_list ? 0.0 : 8.0
    def detail_enabled = !hide_detail && !file_list
-   def tile_h = file_list ? 28.0 : (detail_enabled ? asset_catalog.asset_tile_h(show_paths) : (bool(compact) ? 34.0 : 40.0))
+   def tile_h = file_list ? 30.0 : (detail_enabled ? asset_catalog.asset_tile_h(show_paths) : (bool(compact) ? 36.0 : 42.0))
    def tile_w = bool(compact) ? grid_w : max(120.0, (grid_w - float(cols - 1) * tile_gap) / float(cols))
    def row_step = tile_h + (file_list ? 2.0 : gui.layout_gap())
    def total_items = items.len
    def total_rows = (total_items + cols - 1) / cols
    def scroll_id = to_str(idp) + "_" + to_str(suffix) + "_model_catalog"
-   def content_h = total_items <= 0 ? 58.0 : (float(total_rows) * row_step + 4.0)
+   def content_h = total_items <= 0 ? 58.0 : max(list_h + 1.0, float(total_rows) * row_step + 4.0)
    t_prof = ui_profile.mark_next(prof, "asset_grid_prep", t_prof)
    if(selected_idx < 0 && selected_name.len > 0){ selected_idx = model_index(items, selected_name) }
    gui.set_scroll_area_content_hint(scroll_id, content_h)
-   if(selected_idx >= 0 && selected_idx < total_items){
+   ;; Only auto-scroll after keyboard/navigation requests.  Doing this every frame
+   ;; fights the mouse wheel and makes the asset list snap back forever.
+   if(ensure_selected && selected_idx >= 0 && selected_idx < total_items){
       def row = selected_idx / max(1, cols)
       def top = float(row) * row_step
       gui.scroll_area_ensure_visible(scroll_id, top, top + tile_h, max(1.0, list_h - 8.0))
    }
    gui.begin_scroll_area(scroll_id, 0.0, list_h)
    t_prof = ui_profile.mark_next(prof, "asset_grid_begin_scroll", t_prof)
-   def range = asset_catalog.virtual_row_range(total_rows, row_step, gui.scroll_area_visible_h(), gui.scroll_area_scroll_y(), 1)
-   def first_row = int(range[0])
-   def last_row = int(range[1])
+   def range = asset_catalog.virtual_row_range(total_rows, row_step, gui.scroll_area_visible_h(), gui.scroll_area_scroll_y(), 2)
+   def first_row = min(total_rows, max(0, int(range[0])))
+   def last_row = min(total_rows, max(first_row + 1, int(range[1])))
    if(first_row > 0){ gui.spacer_px(float(first_row) * row_step) }
    t_prof = ui_profile.mark_next(prof, "asset_grid_range", t_prof,
    " rows=" + to_str(first_row) + ".." + to_str(last_row) + " cols=" + to_str(cols))

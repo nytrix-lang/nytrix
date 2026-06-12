@@ -1,19 +1,20 @@
 #!/usr/bin/env ny
 
-;; Keywords: platform probe ui app example term vulkan png font
+;; Keywords: platform probe ui app example term renderer png font
 ;; Terminal Emulator
 use std.core
 use std.os (exit)
 use std.os.args
 use std.os.path as ospath
 use std.os.time (ticks, msleep)
+use std.os.process as process
 use std.os.ui.window.consts
 use std.os.ui.render (
-   BACKEND_MOCK, BACKEND_VK,
+   BACKEND_MOCK,
    begin_frame_clear, close_window, end_frame,
-   get_active_backend, get_swapchain_image_count,
+   get_active_backend_name, get_swapchain_image_count,
    init_mock_surface, init_window,
-   request_frame_capture, set_backend_type, set_clear_color, set_win_size,
+   request_frame_capture, set_backend_type, apply_backend_env, apply_backend_argv, set_clear_color, set_win_size,
    snapshot
 )
 
@@ -63,6 +64,9 @@ mut _auto_dump_path = ""
 mut _redraw_frames = 0
 mut _left_button_was_down = false
 mut _last_left_down_ticks = 0
+mut _term_command_mode = false
+mut _draw_fail_count = 0
+mut _last_draw_fail_warn_ticks = 0
 
 fn _term_color(str code, str text) str {
    if(common.env_truthy("NO_COLOR")){ return text }
@@ -75,15 +79,153 @@ fn _term_diag(str label, any value) any {
    0
 }
 
+
+fn _term_has_help_arg() bool {
+   mut i = 1
+   while(i < argc()){
+      def a = str.lower(str.strip(to_str(argv(i))))
+      if(a == "-h" || a == "--help" || a == "help"){ return true }
+      i += 1
+   }
+   false
+}
+
+fn _term_help_line(str left, str right) any {
+   print("  " + _term_color("1;36", left) + "  " + right)
+   0
+}
+
+fn _term_print_help() any {
+   print(_term_color("1;37", "Nytrix Terminal"))
+   print(_term_color("90", "GPU terminal emulator / shell runner"))
+   print("")
+   print(_term_color("1;33", "Usage"))
+   print("  ./make ny etc/projects/ui/term.ny " + _term_color("36", "[options]") + " " + _term_color("90", "[shell command]") )
+   print("")
+   print(_term_color("1;33", "Renderer"))
+   _term_help_line("-gl, --gl", "use OpenGL")
+   _term_help_line("-vk, --vk", "use Vulkan")
+   _term_help_line("-auto", "auto-select renderer")
+   _term_help_line("-mock, -cpu", "software/headless mock renderer")
+   _term_help_line("--window", "force GUI terminal even for simple commands")
+   _term_help_line("--direct", "force direct host-terminal command passthrough")
+   print("")
+   print(_term_color("1;33", "Debug"))
+   _term_help_line("-v, --verbose", "bounded startup/input/render diagnostics")
+   _term_help_line("-vv", "compact deep diagnostics/profiler summaries")
+   _term_help_line("--trace-spam", "last-resort per-stage/per-glyph/per-frame tracing")
+   print("")
+   print(_term_color("1;33", "Useful env"))
+   _term_help_line("NY_TERM_FONT_REG=path", "regular font override")
+   _term_help_line("NY_TERM_EMOJI=0|1", "toggle emoji fallback")
+   _term_help_line("NY_TERM_UPDATE_BUDGET_MS=n", "PTY update budget per frame")
+   _term_help_line("NY_TERM_STAY_OPEN_ON_EXIT=1", "keep window open after shell exits")
+   _term_help_line("NY_TERM_DIRECT=0|1", "toggle direct passthrough for non-interactive commands")
+   _term_help_line("NY_UI_HEADLESS=1", "headless/mock surface mode")
+   _term_help_line("NY_VK_SAFE_TEXT=1", "force slow Vulkan text fallback for driver debugging")
+   _term_help_line("NY_VK_FAST_TEXT=0", "disable Vulkan atlas fast text")
+   _term_help_line("NY_VK_TEXTURE_TEXT=1", "debug Vulkan texture-atlas TTF path")
+   print("")
+   print(_term_color("1;33", "Examples"))
+   print("  ./make ny etc/projects/ui/term.ny -v -gl")
+   print("  ./make ny etc/projects/ui/term.ny -vk htop")
+   print("  ./make ny etc/projects/ui/term.ny id")
+   print("  ./make ny etc/projects/ui/term.ny --window id")
+   0
+}
+
+
+fn _term_force_window_arg() bool {
+   mut i = 1
+   while(i < argc()){
+      def a = str.lower(str.strip(to_str(argv(i))))
+      if(a == "--window" || a == "--gui" || a == "--term" || a == "--terminal" || a == "--no-direct"){ return true }
+      i += 1
+   }
+   common.env_truthy("NY_TERM_FORCE_WINDOW") || common.env_truthy("NY_TERM_GUI_COMMAND")
+}
+
+fn _term_force_direct_arg() bool {
+   mut i = 1
+   while(i < argc()){
+      def a = str.lower(str.strip(to_str(argv(i))))
+      if(a == "--direct" || a == "--run-direct" || a == "--host"){ return true }
+      i += 1
+   }
+   common.env_truthy("NY_TERM_DIRECT")
+}
+
+fn _term_command_line() str {
+   mut line = ""
+   mut passthrough = false
+   mut i = 1
+   while(i < argc()){
+      def arg = to_str(argv(i))
+      if(passthrough){
+         if(line.len > 0){ line = line + " " }
+         line = line + arg
+      } elif(arg == "--"){
+         passthrough = true
+      } elif(!_term_backend_flag(arg)){
+         if(line.len > 0){ line = line + " " }
+         line = line + arg
+      }
+      i += 1
+   }
+   str.strip(line)
+}
+
+fn _term_command_first_arg() str {
+   mut passthrough = false
+   mut i = 1
+   while(i < argc()){
+      def arg = to_str(argv(i))
+      if(passthrough){ return str.lower(str.strip(arg)) }
+      if(arg == "--"){
+         passthrough = true
+      } elif(!_term_backend_flag(arg)){
+         return str.lower(str.strip(arg))
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _term_interactive_command(str cmd) bool {
+   def c = str.lower(str.strip(cmd))
+   c == "" ||
+   c == "bash" || c == "zsh" || c == "fish" || c == "sh" || c == "tmux" || c == "screen" ||
+   c == "htop" || c == "btop" || c == "top" || c == "nvim" || c == "vim" || c == "vi" || c == "nano" ||
+   c == "less" || c == "more" || c == "man" || c == "ssh" || c == "ftp" || c == "sftp" ||
+   c == "python" || c == "python3" || c == "node" || c == "lua" || c == "ny"
+}
+
+fn _term_should_direct_command() bool {
+   def line = _term_command_line()
+   if(line.len == 0){ return false }
+   if(_term_force_window_arg()){ return false }
+   if(_term_force_direct_arg()){ return true }
+   if(common.env_present("NY_TERM_DIRECT")){ return common.env_truthy("NY_TERM_DIRECT") }
+   !_term_interactive_command(_term_command_first_arg())
+}
+
+fn _term_run_direct_command() int {
+   def line = _term_command_line()
+   if(line.len == 0){ return 0 }
+   mut sh = "/bin/sh"
+   #windows { sh = "cmd" } #endif
+   mut args = [sh, "-lc", line]
+   #windows { args = ["cmd", "/c", line] } #endif
+   process.run(sh, args)
+}
+
 fn _term_redraw_frames() int {
    if(common.env_present("NY_TERM_REDRAW_FRAMES")){
       return common.env_int_clamped("NY_TERM_REDRAW_FRAMES", 4, 2, 64)
    }
    mut frames = 4
-   if(get_active_backend() == BACKEND_VK){
-      def swap_images = get_swapchain_image_count()
-      if(swap_images > 0){ frames = min(max(3, swap_images + 1), 6) }
-   }
+   def swap_images = get_swapchain_image_count()
+   if(swap_images > 0){ frames = min(max(3, swap_images + 1), 6) }
    frames
 }
 
@@ -98,10 +240,18 @@ fn _request_redraw(int frames=4) any {
    0
 }
 
+fn _warn_draw_failure(str msg, any now_ticks) any {
+   if(now_ticks - _last_draw_fail_warn_ticks < 1000000000){ return 0 }
+   eprint(_term_color("33", "[term] warning: ") + msg)
+   _last_draw_fail_warn_ticks = now_ticks
+   0
+}
+
+
 fn _term_print_startup_failure(int flags) any {
    eprint(_term_color("1;37", "[term] graphics startup failed"))
    _term_diag("window backend", window.backend())
-   _term_diag("renderer", "vulkan")
+   _term_diag("renderer", get_active_backend_name())
    _term_diag("flags", "0x" + to_hex(flags))
    _term_diag("DISPLAY", common.value_or(common.env_trim("DISPLAY"), "<unset>"))
    _term_diag("WAYLAND_DISPLAY", common.value_or(common.env_trim("WAYLAND_DISPLAY"), "<unset>"))
@@ -177,7 +327,7 @@ fn _refresh_update_budget(any now_ticks) any {
 fn _refresh_runtime_flags(any now_ticks) any {
    if(now_ticks < _runtime_flags_reload_ticks){ return 0 }
    _esc_close_enabled = common.env_present("NY_TERM_ESC_CLOSE")
-   _stay_open_on_exit = common.env_truthy("NY_TERM_STAY_OPEN_ON_EXIT")
+   _stay_open_on_exit = common.env_present("NY_TERM_STAY_OPEN_ON_EXIT") ? common.env_truthy("NY_TERM_STAY_OPEN_ON_EXIT") : _term_command_mode
    _runtime_flags_reload_ticks = now_ticks + 1000000000
    0
 }
@@ -197,6 +347,9 @@ fn startup() {
    if(_headless_mode){
       platform.init_hint(platform.PLATFORM, platform.PLATFORM_NULL)
       set_backend_type(BACKEND_MOCK)
+   } else {
+      apply_backend_env()
+      apply_backend_argv()
    }
    def mode = window.primary_mode()
    def screen_w = mode.get(0, 1280)
@@ -260,6 +413,7 @@ fn _init_vt() {
    def launch = _term_launch_spec()
    def shell_path = launch.get("path", vterm.default_shell_path())
    def shell_args = launch.get("args", vterm.default_shell_args(common.env_truthy("NY_TERM_LOGIN")))
+   _term_command_mode = bool(launch.get("command", false))
    match vterm.open(vt, shell_path, shell_args){
       ok(next_vt) -> { vt = next_vt }
       err(e) -> {
@@ -282,17 +436,28 @@ fn _selftest_input() any {
 fn _term_launch_spec() dict {
    def login_pref = common.env_truthy("NY_TERM_LOGIN")
    def shell_path = vterm.default_shell_path()
-   if(argc() <= 1){ return {"path": shell_path, "args": vterm.default_shell_args(login_pref)} }
-   mut line = ""
-   mut i = 1
-   while(i < argc()){
-      if(i > 1){ line = line + " " }
-      line = line + to_str(argv(i))
-      i += 1
-   }
-   line = str.strip(line)
-   if(line.len == 0){ return {"path": shell_path, "args": vterm.default_shell_args(login_pref)} }
-   return {"path": shell_path, "args": ["-lc", line]}
+   def line = _term_command_line()
+   if(line.len == 0){ return {"path": shell_path, "args": vterm.default_shell_args(login_pref), "command": false} }
+   return {"path": shell_path, "args": ["-lc", line], "command": true}
+}
+
+fn _term_backend_flag(any arg) bool {
+   def a = str.lower(str.strip(to_str(arg)))
+   a == "-gl" || a == "--gl" ||
+   a == "-opengl" || a == "--opengl" ||
+   a == "-webgl" || a == "--webgl" ||
+   a == "-vk" || a == "--vk" ||
+   a == "-vulkan" || a == "--vulkan" ||
+   a == "-mock" || a == "--mock" ||
+   a == "-cpu" || a == "--cpu" ||
+   a == "-software" || a == "--software" ||
+   a == "-auto" || a == "--auto" || a == "--render-auto" ||
+   a == "-h" || a == "--help" || a == "help" ||
+   a == "-v" || a == "--verbose" || a == "-vv" || a == "-vvv" || a == "--debug" ||
+   a == "--debug-deep" || a == "-trace" || a == "--trace" ||
+   a == "-trace-ui" || a == "--trace-ui" || a == "--trace-spam" ||
+   a == "--window" || a == "--gui" || a == "--term" || a == "--terminal" || a == "--no-direct" ||
+   a == "--direct" || a == "--run-direct" || a == "--host"
 }
 
 fn _reload_fonts() {
@@ -458,7 +623,8 @@ fn update(now_ticks) {
    mut e = window.check_event(win)
    mut event_count = 0
    mut input_hot = false
-   while(e != 0){
+   def max_events = common.env_int_clamped("NY_TERM_MAX_EVENTS_PER_FRAME", 512, 32, 8192)
+   while(e != 0 && event_count < max_events){
       def typ = window.event_type(e)
       def data = window.event_data(e)
       if(typ == EVENT_WINDOW_RESIZED){
@@ -470,6 +636,7 @@ fn update(now_ticks) {
          if(_handle_app_key(k, md)){
             _request_redraw(_term_redraw_frames())
             e = window.check_event(win)
+            event_count += 1
             continue
          }
       }
@@ -491,6 +658,10 @@ fn update(now_ticks) {
       }
       e = window.check_event(win)
       event_count += 1
+   }
+   if(e != 0){
+      input_hot = true
+      _request_redraw(_term_redraw_frames())
    }
    if(_sync_lost_left_release()){
       event_count += 1
@@ -516,8 +687,11 @@ fn update(now_ticks) {
    }
    if(!vterm.is_running(vt)){
       if(!_shell_exit_reported){
-         print("[term] shell exited")
+         if(common.env_truthy("NY_TERM_REPORT_EXIT") || ui_dump.debug_verbose_enabled()){
+            eprint("[term] shell exited")
+         }
          _shell_exit_reported = true
+         _request_redraw(_term_redraw_frames())
       }
       if(!_stay_open_on_exit){
          window.set_should_close(win, true)
@@ -560,17 +734,21 @@ fn draw() {
    _sync_lost_left_release()
    if(vterm.selection_dragging(vt) && !window.mouse_down(win, 0)){ _hard_clear_vterm_selection() }
    if(!begin_frame_clear(_term_bg_color())){
+      _draw_fail_count += 1
       if(_headless_mode){
          _headless_begin_fail_count += 1
          if(_headless_begin_fail_count >= 30){
             print("[term] headless: begin_frame_clear failed repeatedly; forcing close")
             window.set_should_close(win, true)
          }
+      } else {
+         _warn_draw_failure("begin_frame_clear failed on backend=" + get_active_backend_name() + "; retrying instead of crashing", ticks())
       }
       msleep(1)
       return
    }
    _headless_begin_fail_count = 0
+   _draw_fail_count = 0
    set_ortho_2d(0.0, win_w, 0.0, win_h)
    vt = vterm.draw(vt, win_w, win_h)
    end_frame()
@@ -602,6 +780,9 @@ fn draw() {
    _needs_draw = _redraw_frames > 0 || vterm.needs_visual_refresh(vt, draw_now, _last_cursor_blink_phase)
    if(dump_enabled && !_auto_dump_done){ _needs_draw = true }
 }
+
+if(_term_has_help_arg()){ _term_print_help() exit(0) }
+if(_term_should_direct_command()){ exit(_term_run_direct_command()) }
 
 startup()
 def startup_ticks = ticks()

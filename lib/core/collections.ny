@@ -88,8 +88,8 @@ fn group_by(any xs, fnptr key_fn) dict {
 }
 
 fn default_get(dict d, any key, any default) any {
-   "Returns `d[key]`, installing `default` first when missing."
-   if(!d.contains(key)){ d = put(d, key, default) }
+   "Returns `d[key]`, installing `default` into `d` first when missing."
+   if(!d.contains(key)){ d[key] = default }
    d.get(key, default)
 }
 
@@ -114,6 +114,13 @@ fn queue(any xs=[]) dict {
 }
 
 fn _queue_items(dict q) list { q.get("items", list()) }
+
+fn _queue_apply(dict dst, dict src) dict {
+   "Copies queue storage fields from `src` back into `dst` for APIs that must mutate in place."
+   dst["items"] = src.get("items", list())
+   dst["head"] = src.get("head", 0)
+   dst
+}
 
 fn queue_len(dict q) int {
    "Returns the number of queued items."
@@ -169,16 +176,18 @@ fn queue_pop(dict q, any default=0) any {
    def items = _queue_items(q)
    def head = q.get("head", 0)
    def value = items.get(head, default)
-   q = q.set("head", head + 1)
-   _queue_compact(q)
+   q["head"] = head + 1
+   def updated = _queue_compact(q)
+   _queue_apply(q, updated)
    value
 }
 
 @returns_owned
 fn queue_try_pop(dict q) dict {
-   "Returns `{ok, value}` for a nonblocking queue pop."
-   if(queue_empty(q)){ return {"ok": false, "value": 0} }
-   {"ok": true, "value": queue_pop(q)}
+   "Returns `{ok, value, queue}` for a nonblocking queue pop."
+   if(queue_empty(q)){ return {"ok": false, "value": 0, "queue": q} }
+   def value = queue_pop(q)
+   {"ok": true, "value": value, "queue": q}
 }
 
 @returns_owned
@@ -223,7 +232,8 @@ fn chan_send(dict ch, any value) bool {
    if(chan_closed(ch)){ return false }
    def cap = ch.get("capacity", 0)
    if(cap > 0 && chan_len(ch) >= cap){ return false }
-   queue_push(ch, value)
+   def updated = queue_push(ch, value)
+   _queue_apply(ch, updated)
    true
 }
 
@@ -263,7 +273,7 @@ fn chan_close(dict ch) dict {
    mut q = Queue()
    q = queue_push(q, "a")
    q = queue_push(q, "b")
-   assert(queue_len(q) == 2 && queue_pop(q) == "a" && queue_try_pop(q).get("value") == "b", "collections queue")
+   assert(queue_len(q) == 2 && queue_pop(q) == "a" && queue_try_pop(q).get("value") == "b" && queue_empty(q), "collections queue")
    def ch = chan(1)
    assert(chan_send(ch, 42) && !chan_send(ch, 43) && chan_recv(ch) == 42, "collections channel send/recv")
    assert(chan_try_send(ch, "first") && !chan_try_send(ch, "second") && chan_recv(ch, "") == "first", "collections channel try send")

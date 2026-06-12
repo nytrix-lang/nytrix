@@ -254,7 +254,7 @@ fn group_by(any xs, fnptr key_fn) dict {
 }
 
 fn default_get(dict d, any key, any default) any {
-   "Returns `d[key]`, inserting `default` when absent."
+   "Returns `d[key]`, inserting `default` into `d` when absent."
    collections.default_get(d, key, default)
 }
 
@@ -284,7 +284,7 @@ fn queue_pop(dict q, any default=0) any {
 
 @returns_owned
 fn queue_try_pop(dict q) dict {
-   "Nonblocking queue pop returning `{ok, value}`."
+   "Nonblocking queue pop returning `{ok, value, queue}`."
    collections.queue_try_pop(q)
 }
 

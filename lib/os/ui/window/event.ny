@@ -6,6 +6,7 @@
 module std.os.ui.window.event(is_event, make_event, event_type, event_window, event_window_id, event_data, queue_push, queue_pop, queue_len)
 use std.core
 
+def _EVENT_MOUSE_POS_CHANGED = 7
 def _E_TAG = 0
 def _E_TYPE = 1
 def _E_WINDOW = 2
@@ -29,9 +30,9 @@ fn _event_get(any ev, i32 slot, any fallback=0) any {
 }
 
 @inline
-fn event_type(list ev) int {
+fn event_type(any ev) int {
    "Returns event type enum value."
-   if(!ev){ return _EVENT_NONE }
+   if(!is_event(ev)){ return _EVENT_NONE }
    int(ev.get(_E_TYPE, _EVENT_NONE))
 }
 
@@ -41,9 +42,9 @@ fn event_window(any ev) any {
 }
 
 @inline
-fn event_window_id(list ev) int {
+fn event_window_id(any ev) int {
    "Returns the event's associated window id."
-   if(!ev){ return 0 }
+   if(!is_event(ev)){ return 0 }
    int(ev.get(_E_WINDOW_ID, 0))
 }
 
@@ -52,9 +53,24 @@ fn event_data(any ev) any {
    _event_get(ev, _E_DATA, 0)
 }
 
+fn _queue_can_coalesce_tail_motion(any q, any ev) bool {
+   if(!is_list(q) || q.len <= 0 || !is_event(ev)){ return false }
+   if(event_type(ev) != _EVENT_MOUSE_POS_CHANGED){ return false }
+   def last = q.get(q.len - 1, [])
+   if(!is_event(last) || event_type(last) != _EVENT_MOUSE_POS_CHANGED){ return false }
+   def last_id = event_window_id(last)
+   def next_id = event_window_id(ev)
+   if(last_id != 0 && next_id != 0){ return last_id == next_id }
+   true
+}
+
 fn queue_push(any q, any ev) list {
-   "Appends event `ev` to queue `q` and returns queue."
+   "Appends an event to the queue and coalesces consecutive mouse-motion events."
    if(!is_list(q)){ q = [] }
+   if(_queue_can_coalesce_tail_motion(q, ev)){
+      q[q.len - 1] = ev
+      return q
+   }
    q.append(ev)
 }
 

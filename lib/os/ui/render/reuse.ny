@@ -13,7 +13,6 @@ module std.os.ui.render.reuse(
 use std.core
 use std.os.ui.render.dump as ui_profile
 use std.os.ui.render as gfx
-use std.os.ui.render.vk as vkr
 
 fn make() dict {
    "Creates frame-reuse controller state."
@@ -179,7 +178,6 @@ fn candidate(dict st, any opts) bool {
    if(!_enabled(opts)){ return false }
    if(!_opt_bool(opts, "gui_frame", false)){ return false }
    if(!_opt_bool(opts, "gui_visible", true)){ return false }
-   if(_opt_bool(opts, "terminal_open", false)){ return false }
    if(!_opt_bool(opts, "first_frame_done", true)){ return false }
    if(!_opt_bool(opts, "scene_active", true)){ return false }
    if(_opt_bool(opts, "bench_active", false) || _opt_bool(opts, "proof_dump", false)){ return false }
@@ -218,10 +216,13 @@ fn note_full_draw(dict st, any opts) dict {
 
 fn try_present(dict st, any opts) bool {
    "Attempts a present-only frame when reuse is allowed."
+   ;; OpenGL has no color-load resume path here; do not reset the reuse
+   ;; controller every frame. Just skip present-only reuse on GL.
+   if(gfx.get_active_backend_name() == "opengl"){ return false }
    if(!should_present(st, opts)){ return false }
-   vkr.set_next_frame_load_color(true)
+   gfx.set_next_frame_load_color(true)
    if(!gfx.begin_frame()){
-      vkr.set_next_frame_load_color(false)
+      gfx.set_next_frame_load_color(false)
       return false
    }
    if(!gfx.end_frame()){
