@@ -19,6 +19,7 @@ mut _best_jid_cached = -1
 mut _last_device_scan_ticks = 0
 def DEVICE_SCAN_INTERVAL_NS = 1000000000
 def DEVICE_SCAN_EMPTY_INTERVAL_NS = 250000000
+def INPUT_LOG_INTERVAL_NS = 250000000
 def _BTN_LABELS_GENERIC = ["A", "B", "X", "Y", "LB", "RB", "BACK", "START", "GUIDE", "L3", "R3", "UP", "RIGHT", "DOWN", "LEFT", "EX15", "EX16"]
 def _BTN_LABELS_SONY = ["X", "O", "SQ", "TRI", "L1", "R1", "SHARE", "OPT", "PS", "L3", "R3", "UP", "RIGHT", "DOWN", "LEFT", "TOUCH", "MIC"]
 def _BTN_CHIP_LABELS_GENERIC = ["A", "B", "X", "Y", "LB", "RB", "BK", "ST", "GD", "L3", "R3", "UP", "RGT", "DWN", "LFT", "15", "16"]

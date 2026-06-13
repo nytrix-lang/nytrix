@@ -14,19 +14,19 @@ use std.core.str as str
 use std.math (clamp, max, min)
 use std.os.ui.render as gfx
 
-def C_BG = gfx.color_rgb(0.000, 0.000, 0.000)
-def C_PANEL = gfx.color_rgb(0.040, 0.040, 0.040)
-def C_PANEL_ALT = gfx.color_rgb(0.075, 0.075, 0.075)
+def C_BG = gfx.color_hex("#000000")
+def C_PANEL = gfx.color_hex("#080808")
+def C_PANEL_ALT = gfx.color_hex("#131318")
 def C_BOX = C_PANEL_ALT
-def C_LINE = gfx.color_rgb(0.310, 0.310, 0.310)
-def C_TEXT = gfx.color_rgb(0.930, 0.930, 0.930)
-def C_MUTED = gfx.color_rgb(0.640, 0.640, 0.640)
-def C_DIM = gfx.color_rgb(0.260, 0.260, 0.260)
-def C_ACCENT = gfx.color_rgb(0.565, 0.360, 1.000)
-def C_ACCENT_HI = gfx.color_rgb(0.730, 0.610, 1.000)
-def C_KEY_IDLE = gfx.color_rgb(0.070, 0.070, 0.070)
-def C_KEY_HOVER = gfx.color_rgb(0.130, 0.090, 0.200)
-def C_KEY_DOWN = C_ACCENT
+def C_LINE = gfx.color_hex("#2b2634")
+def C_TEXT = gfx.color_hex("#f5f5f6")
+def C_MUTED = gfx.color_hex("#c6c6ca")
+def C_DIM = gfx.color_hex("#15151b")
+def C_ACCENT = gfx.color_hex("#9f86d9")
+def C_ACCENT_HI = gfx.color_hex("#bda9ec")
+def C_KEY_IDLE = gfx.color_hex("#121218")
+def C_KEY_HOVER = gfx.color_hex("#1b1624")
+def C_KEY_DOWN = gfx.color_hex("#332347")
 
 fn text_w(any font, any label, any font_lg=0, any font_md=0, f64 px=9.5) f64 {
    "Estimates text width for fixed-size UI layout."
@@ -87,9 +87,11 @@ fn panel(any font_sm, f64 x, f64 y, f64 w, f64 h, str title, any accent=C_ACCENT
 fn button(any font, str label, f64 x, f64 y, f64 w, f64 h, f64 mx, f64 my, bool click, any color=C_ACCENT) bool {
    "Draws a button and returns true on a clicked hover."
    def hover = hit(mx, my, x, y, w, h)
-   def fill = hover ? gfx.color_alpha(color, 0.95) : gfx.color_alpha(color, 0.74)
+   def down = hover && click
+   def fill = down ? C_KEY_DOWN : (hover ? C_KEY_HOVER : C_KEY_IDLE)
+   def border = down ? C_ACCENT_HI : (hover ? color : C_LINE)
    gfx.draw_rect(x, y, w, h, fill)
-   gfx.draw_rectangle_lines(x, y, w, h, hover ? C_TEXT : color, hover ? 2.5 : 1.25)
+   gfx.draw_rectangle_lines(x, y, w, h, border, down ? 3.0 : (hover ? 2.5 : 1.25))
    gfx.draw_text(font, label, x + w * 0.5 - text_w(font, label) * 0.5, y + 9.0, C_TEXT)
    hover && click
 }
@@ -110,11 +112,11 @@ fn text_box(any font_body, any font_small, str label, str value, f64 x, f64 y, f
 
 fn keycap(any font_md, f64 x, f64 y, f64 size, str label, bool pressed, any color=C_ACCENT) int {
    "Draws one fixed-size keyboard key."
-   def fill = pressed ? color : gfx.color_rgb(0.105, 0.105, 0.105)
-   def border = pressed ? C_TEXT : C_LINE
+   def fill = pressed ? C_KEY_DOWN : C_KEY_IDLE
+   def border = pressed ? C_ACCENT_HI : C_LINE
    gfx.draw_rect(x, y, size, size, fill)
    gfx.draw_rectangle_lines(x, y, size, size, border, pressed ? 3.0 : 1.5)
-   text_center(font_md, label, x + size * 0.5, y + size * 0.5 - text_h(font_md, 0, font_md) * 0.5, pressed ? gfx.BLACK : C_TEXT, 0, font_md)
+   text_center(font_md, label, x + size * 0.5, y + size * 0.5 - text_h(font_md, 0, font_md) * 0.5, C_TEXT, 0, font_md)
    0
 }
 
@@ -126,19 +128,19 @@ fn chip_w(any font_sm, any label) f64 {
 fn signal_chip(any font_sm, f64 x, f64 y, str label, bool active, any color=C_ACCENT) f64 {
    "Draws a status chip and returns its width."
    def w = chip_w(font_sm, label)
-   gfx.draw_rect(x, y, w, 24.0, active ? gfx.color_alpha(color, 0.85) : gfx.color_alpha(C_DIM, 0.35))
-   gfx.draw_rectangle_lines(x, y, w, 24.0, active ? color : C_LINE, 1.0)
-   text_center(font_sm, label, x + w * 0.5, y + 6.0, active ? gfx.BLACK : C_MUTED)
+   gfx.draw_rect(x, y, w, 24.0, active ? C_KEY_DOWN : gfx.color_alpha(C_DIM, 0.35))
+   gfx.draw_rectangle_lines(x, y, w, 24.0, active ? C_ACCENT_HI : C_LINE, 1.0)
+   text_center(font_sm, label, x + w * 0.5, y + 6.0, active ? C_TEXT : C_MUTED)
    w
 }
 
 fn sphere(f64 cx, f64 cy, f64 r, any color, bool active=false) int {
    "Draws a small lit circular control marker."
-   def halo = active ? 0.20 : 0.11
+   def halo = active ? 0.14 : 0.08
    gfx.draw_circle(cx, cy, r + 14.0, gfx.color_alpha(color, halo))
    gfx.draw_circle(cx, cy, r, color)
-   gfx.draw_circle(cx - r * 0.28, cy - r * 0.32, max(3.0, r * 0.34), gfx.color_alpha(C_TEXT, active ? 0.30 : 0.18))
-   gfx.draw_circle_lines(cx, cy, r + 18.0, gfx.color_alpha(color, active ? 0.44 : 0.28), 2.0)
+   gfx.draw_circle(cx - r * 0.28, cy - r * 0.32, max(3.0, r * 0.28), gfx.color_alpha(C_TEXT, active ? 0.20 : 0.12))
+   gfx.draw_circle_lines(cx, cy, r + 14.0, gfx.color_alpha(color, active ? 0.30 : 0.20), 1.5)
    0
 }
 

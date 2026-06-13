@@ -11,38 +11,47 @@ use std.core.common as common
 use std.os.sound.diag as sound_debug
 use std.os.sound.backend.shared as backend_shared
 
-fn snd_pcm_open(..._args) int {
-   "Runs the snd pcm open operation."
-   -1
-}
-fn snd_pcm_set_params(..._args) int {
-   "Runs the snd pcm set params operation."
-   -1
-}
-fn snd_pcm_close(any _pcm) int {
-   "Runs the snd pcm close operation."
-   0
-}
-fn snd_pcm_prepare(any _pcm) int {
-   "Runs the snd pcm prepare operation."
-   -1
-}
-fn snd_pcm_drain(any _pcm) int {
-   "Runs the snd pcm drain operation."
-   0
-}
-fn snd_pcm_writei(..._args) int {
-   "Runs the snd pcm writei operation."
-   -1
-}
-fn snd_pcm_recover(..._args) int {
-   "Runs the snd pcm recover operation."
-   -1
-}
 #linux {
-   #include <alsa/asoundlib.h> as "snd_"
-}
-#endif
+   #link "libasound.so"
+   extern "asound" {
+      fn snd_pcm_open(ptr pcmp, ptr name, i32 stream, i32 mode) i32
+      fn snd_pcm_set_params(ptr pcm, i32 format, i32 access, u32 channels, u32 rate, i32 soft_resample, u32 latency) i32
+      fn snd_pcm_close(ptr pcm) i32
+      fn snd_pcm_prepare(ptr pcm) i32
+      fn snd_pcm_drain(ptr pcm) i32
+      fn snd_pcm_writei(ptr pcm, ptr buffer, u64 size) i64
+      fn snd_pcm_recover(ptr pcm, i32 err, i32 silent) i32
+   }
+} #else {
+   fn snd_pcm_open(..._args) int {
+      "Runs the snd pcm open operation."
+      -1
+   }
+   fn snd_pcm_set_params(..._args) int {
+      "Runs the snd pcm set params operation."
+      -1
+   }
+   fn snd_pcm_close(any _pcm) int {
+      "Runs the snd pcm close operation."
+      0
+   }
+   fn snd_pcm_prepare(any _pcm) int {
+      "Runs the snd pcm prepare operation."
+      -1
+   }
+   fn snd_pcm_drain(any _pcm) int {
+      "Runs the snd pcm drain operation."
+      0
+   }
+   fn snd_pcm_writei(..._args) int {
+      "Runs the snd pcm writei operation."
+      -1
+   }
+   fn snd_pcm_recover(..._args) int {
+      "Runs the snd pcm recover operation."
+      -1
+   }
+} #endif
 def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2
 def SND_PCM_FORMAT_FLOAT_LE = 14

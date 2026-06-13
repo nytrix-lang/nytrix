@@ -2,9 +2,9 @@
 use std.core
 
 enum Option<T> {
-   Some(T: value),
+   Some(T value),
    None
 }
 
-def Option<int>: x = Option.Some(value: "hi")
+def Option<int>: x = Option.Some("hi")
 print(x)

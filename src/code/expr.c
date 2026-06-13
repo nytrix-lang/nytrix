@@ -5189,17 +5189,25 @@ static LLVMValueRef gen_adt_constructor_expr(codegen_t *cg, scope *scopes, size_
 
   for (size_t i = 0; i < arg_count; i++) {
     call_arg_t *arg = &args[i];
-    if (!arg->name) {
-      return expr_fail(cg, e->tok, "ADT constructor '%s.%s' requires named fields",
-                       owner->name, mem->name);
-    }
-    ssize_t idx = ny_enum_member_field_index(mem, arg->name);
-    if (idx < 0) {
-      return expr_fail(cg, e->tok, "unknown field '%s' for ADT variant '%s.%s'", arg->name,
-                       owner->name, mem->name);
+    ssize_t idx = -1;
+    const char *field_name = NULL;
+    if (arg->name) {
+      idx = ny_enum_member_field_index(mem, arg->name);
+      field_name = arg->name;
+      if (idx < 0) {
+        return expr_fail(cg, e->tok, "unknown field '%s' for ADT variant '%s.%s'", arg->name,
+                         owner->name, mem->name);
+      }
+    } else {
+      if (i >= mem->fields.len) {
+        return expr_fail(cg, e->tok, "too many positional fields for ADT variant '%s.%s'",
+                         owner->name, mem->name);
+      }
+      idx = (ssize_t)i;
+      field_name = mem->fields.data[idx].name;
     }
     if (seen_fields[idx]) {
-      return expr_fail(cg, e->tok, "duplicate field '%s' for ADT variant '%s.%s'", arg->name,
+      return expr_fail(cg, e->tok, "duplicate field '%s' for ADT variant '%s.%s'", field_name,
                        owner->name, mem->name);
     }
     seen_fields[idx] = true;

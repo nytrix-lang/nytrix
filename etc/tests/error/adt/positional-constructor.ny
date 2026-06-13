@@ -1,10 +1,10 @@
-;; expect: ADT constructor 'Shape.Circle' requires named fields
+;; expect: too many positional fields for ADT variant 'Shape.Circle'
 use std.core
 
 enum Shape {
-   Circle(int: radius),
+   Circle(int radius),
    Empty
 }
 
-def x = Shape.Circle(1)
+def x = Shape.Circle(1, 2)
 print(x)

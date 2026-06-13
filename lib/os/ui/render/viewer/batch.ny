@@ -218,14 +218,25 @@ fn checker(f64 world_left, f64 world_top, f64 sw, f64 sh, f64 cell, int color_a,
 @inline
 fn _put_vertex(ptr p, int n, f64 x, f64 y, f64 u, f64 v, int color, int tex) int {
    def o = p + n * VERTEX_STRIDE
+   ;; Keep the whole renderer vertex64 layout initialized. Leaving z/normal/uv2
+   ;; uninitialized makes rotated static sprites randomly clip or sample like a
+   ;; missing transparent texture on GL/VK, because static VBO uploads preserve
+   ;; the garbage bytes from malloc.
    store32_f32(o, x, 0)
    store32_f32(o, y, 4)
+   store32_f32(o, 0.0, 8)
    store32_f32(o, u, 12)
    store32_f32(o, v, 16)
    store32(o, color, 20)
+   store32_f32(o, 0.0, 24)
+   store32_f32(o, 0.0, 28)
    store32_f32(o, 1.0, 32)
    store32_f32(o, 1.0, 36)
+   store32_f32(o, 0.0, 40)
+   store32_f32(o, 0.0, 44)
    store32_f32(o, 1.0, 48)
+   store32_f32(o, 0.0, 52)
+   store32_f32(o, 0.0, 56)
    store32(o, tex, 60)
    0
 }
@@ -316,6 +327,7 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
          mut opts = dict(4)
          opts["unlit"] = true
          opts["vc_mode"] = 1
+         opts["no_cull"] = true
          sbuf = gfx.mesh_create_static(verts, count, false, opts)
          if(!is_dict(sbuf)){ free(verts) }
       }
@@ -384,6 +396,7 @@ fn rgba_mesh(any data, int w, int h, int channels=4, f64 scale=1.0, int alpha_mi
    mut opts = dict(4)
    opts["unlit"] = true
    opts["vc_mode"] = 1
+   opts["no_cull"] = true
    def sbuf = gfx.mesh_create_static(verts, n, false, opts)
    if(!is_dict(sbuf)){ free(verts) }
    is_dict(sbuf) ? {"mesh": sbuf, "count": n, "w": w, "h": h, "scale": scale} : {}

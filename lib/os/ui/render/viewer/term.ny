@@ -43,6 +43,7 @@ mut _font_ascent = 13.0
 mut _font_descent = 3.0
 mut _last_char_t = 0
 mut _last_char_c = 0
+mut _last_enter_submit_t = 0
 mut _char_cb_active = false
 mut _saved_cursor_mode = 0
 mut _saved_raw_mouse_motion = 0
@@ -471,6 +472,13 @@ fn draw(f64 ww, f64 wh, f64 phase=0.0) any {
    if(_history_view_rows > 0){ draw_text_batch(_font, _history_view_lines, pad_x, _history_view_y, _history_view_spacing, text_col) }
 }
 
+fn _enter_submit_once() any {
+   def now_t = ticks()
+   if(now_t - _last_enter_submit_t < 5000000){ return true }
+   _last_enter_submit_t = now_t
+   2
+}
+
 @jit
 fn handle_event(int typ, any data) any {
    "Processes input events for the terminal(keyboard and mouse scroll)."
@@ -484,7 +492,7 @@ fn handle_event(int typ, any data) any {
       _char_cb_active = true
       def c = data.get("char", 0)
       if(c <= 0){ return false }
-      if(c == 10 || c == 13){ return 2 }
+      if(c == 10 || c == 13){ return _enter_submit_once() }
       _scroll_off = 0
       return _inject(c)
    } elif(typ == EVENT_KEY_PRESSED){
@@ -531,7 +539,7 @@ fn handle_event(int typ, any data) any {
             return true
          }
       }
-      if(k == uin.KEY_ENTER || k == 257 || k == 335 || scancode == 36 || scancode == 104){ return 2 }
+      if(k == uin.KEY_ENTER || k == 257 || k == 335 || scancode == 36 || scancode == 104){ return _enter_submit_once() }
       elif(k == uin.KEY_BACKSPACE || k == 259){
          if(_cursor > 0){
             mut pl = 1
