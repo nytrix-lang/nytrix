@@ -2103,9 +2103,13 @@ static stmt_t *parse_enum(parser_t *p) {
       while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
         enum_field_t field = {0};
         field.type_name = parse_type_ref(p, "expected enum payload field type");
-        parser_expect(p, NY_T_COLON, "':' after enum payload field type", NULL);
+        /* Keep the old type-first form `Type: name`, but prefer the same
+         * spelling used by function parameters: `Type name`.
+         */
+        parser_match(p, NY_T_COLON);
         if (p->cur.kind != NY_T_IDENT) {
-          parser_error(p, p->cur, "expected enum payload field name", NULL);
+          parser_error(p, p->cur, "expected enum payload field name",
+                       "write enum payload fields as `Type name`, for example `Circle(int radius)`");
           break;
         }
         field.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);

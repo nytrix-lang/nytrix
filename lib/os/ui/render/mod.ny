@@ -1471,7 +1471,7 @@ fn _font_build_fallback_chain(int font_id) bool {
 fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
    if(!is_str(path) || path.len == 0){ return 0 }
    if(size < 4){ size = 4 }
-   def cache_key = path + ":" + to_str(size)
+   def cache_key = path + ":" + to_str(size) + ":" + to_str(filter)
    def cached_id = _font_cache_by_key.get(cache_key, 0)
    if(cached_id && _font_get(cached_id)){ return cached_id }
    mut f_info = _font_info(path)
@@ -3549,10 +3549,14 @@ fn begin_drawing() bool {
          w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
       }
       if(w > 0 && h > 0){
-         _active_win["w"] = w
-         _active_win["h"] = h
-         lib_uiw._save_win(_active_win)
-         set_win_size(w, h)
+         if(w != int(_active_win.get("w", 0)) || h != int(_active_win.get("h", 0))){
+            _active_win["w"] = w
+            _active_win["h"] = h
+            lib_uiw._save_win(_active_win)
+            set_win_size(w, h)
+         } else {
+            _last_win_w, _last_win_h = float(w), float(h)
+         }
       }
       return lib_glr.begin_frame(_active_win, w, h)
    }
@@ -3715,7 +3719,11 @@ fn set_win_size(int w, int h) bool {
    if(w > 0){ _last_win_w = float(w) }
    if(h > 0){ _last_win_h = float(h) }
    if(_backend == BACKEND_VK && w > 0 && h > 0){ if(int(lib_vkr.get_swapchain_width()) != int(w) || int(lib_vkr.get_swapchain_height()) != int(h)){ lib_vkr.notify_window_resize(int(w), int(h)) } }
-   elif(_backend == BACKEND_GL && w > 0 && h > 0){ lib_glr.notify_window_resize(int(w), int(h)) }
+   elif(_backend == BACKEND_GL && w > 0 && h > 0){
+      if(int(lib_glr.get_swapchain_width()) != int(w) || int(lib_glr.get_swapchain_height()) != int(h)){
+         lib_glr.notify_window_resize(int(w), int(h))
+      }
+   }
    true
 }
 

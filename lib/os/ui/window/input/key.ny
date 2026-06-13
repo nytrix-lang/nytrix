@@ -133,8 +133,6 @@ fn normalize_key(any key) i32 {
       16 -> KEY_LEFT_SHIFT
       17 -> KEY_LEFT_CONTROL
       18 -> KEY_LEFT_ALT
-      91 -> KEY_LEFT_SUPER
-      92 -> KEY_RIGHT_SUPER
       13, 0xFF0D, KEY_ENTER -> KEY_ENTER
       8, 0xFF08, KEY_BACKSPACE -> KEY_BACKSPACE
       9, 0xFF09, KEY_TAB -> KEY_TAB
@@ -162,7 +160,7 @@ fn mod_bit_for_key(any key) i32 {
       0xFFE1, 0xFFE2, 16, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT -> MOD_SHIFT
       0xFFE3, 0xFFE4, 17, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL -> MOD_CONTROL
       0xFFE9, 0xFFEA, 18, KEY_LEFT_ALT, KEY_RIGHT_ALT -> MOD_ALT
-      0xFFEB, 0xFFEC, 91, 92, KEY_LEFT_SUPER, KEY_RIGHT_SUPER -> MOD_SUPER
+      0xFFEB, 0xFFEC, KEY_LEFT_SUPER, KEY_RIGHT_SUPER -> MOD_SUPER
       0xFFE7, 0xFFE8 -> MOD_META
       _ -> 0
    }
@@ -228,6 +226,7 @@ fn parse_notation(str notation) list {
    def c_f13 = parse_notation("C-F13").get(0)
    assert(f1.get(0) == KEY_F1 && f12.get(0) == KEY_F12 && f13.get(0) == KEY_F13 && kp0.get(0) == KEY_KP_0, "input notation basics")
    assert(c_f13.get(0) == KEY_F13 && (c_f13.get(1) & MOD_CONTROL) != 0, "input notation modifiers")
+   assert(normalize_key("[") == KEY_LEFT_BRACKET && normalize_key("\\") == KEY_BACKSLASH && mod_bit_for_key("[") == 0 && mod_bit_for_key("\\") == 0, "input bracket/backslash are not super")
    mut ks = dict(4)
    ks = ks.set(KEY_LEFT_SHIFT, true)
    ks = ks.set(KEY_RIGHT_CONTROL, true)

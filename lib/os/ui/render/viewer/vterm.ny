@@ -2930,9 +2930,19 @@ fn _tstrhandle(dict vt, int kind, str buf) dict {
 }
 
 fn send_input(dict vt, str s) any {
-   "Sends send input."
+   "Sends terminal input, retrying short writes so paste/repeat bursts are not truncated."
    def m = vt.get("master_fd")
-   if(m >= 0 && s.len > 0){ _ = sys.sys_write(m, to_int(s), s.len) }
+   if(m < 0 || s.len <= 0){ return 0 }
+   mut off = 0
+   while(off < s.len){
+      match sys.sys_write(m, to_int(s) + off, s.len - off){
+         ok(w) -> {
+            if(w <= 0){ return 0 }
+            off += w
+         }
+         err(_e) -> { return 0 }
+      }
+   }
    0
 }
 
@@ -3853,8 +3863,13 @@ fn _vterm_arrow_suffix(int k) str {
    "D"
 }
 
-fn _vterm_handle_special_key(dict vt, any st, int hist_len, int scroll_off, int k, int md, bool appk) list {
+fn _vterm_handle_special_key(dict vt, any st, int hist_len, int scroll_off, int k, int md, int action, bool appk) list {
    if(k == 13 || k == KEY_ENTER || k == KEY_KP_ENTER){
+      ;; Enter is a command submit, not text. Native backends deliver held Enter
+      ;; as KEY_PRESSED action=2 repeat events; forwarding those floods the PTY
+      ;; with blank commands and lets frames expose half-drained prompt/newline
+      ;; output. Keep the first press, drop autorepeat.
+      if(action == 2){ return _vterm_key_hit(vt) }
       _vterm_follow_cursor(vt, st, scroll_off, hist_len)
       send_input(vt, "\r")
       return _vterm_key_hit(vt)
@@ -3990,7 +4005,7 @@ fn _vterm_handle_key_press(dict vt, any st, int co, list history, int hist_len, 
       def kitty = _vterm_handle_kitty_special(vt, k, md, flags, action)
       if(kitty.get(0)){ return kitty.get(1) }
    }
-   def special = _vterm_handle_special_key(vt, st, hist_len, scroll_off, k, md, appk)
+   def special = _vterm_handle_special_key(vt, st, hist_len, scroll_off, k, md, action, appk)
    if(special.get(0)){ return special.get(1) }
    def typed = _vterm_handle_printable_key(vt, st, hist_len, scroll_off, k, md, action)
    if(typed.get(0)){ return typed.get(1) }
