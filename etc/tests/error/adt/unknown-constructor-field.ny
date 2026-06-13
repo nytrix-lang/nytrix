@@ -2,7 +2,7 @@
 use std.core
 
 enum Shape {
-   Circle(int: radius),
+   Circle(int radius),
    Empty
 }
 

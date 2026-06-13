@@ -2,7 +2,7 @@
 use std.core
 
 enum Bad {
-   A(int: x, int: x),
+   A(int x, int x),
    B
 }
 

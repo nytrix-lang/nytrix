@@ -2,11 +2,11 @@
 use std.core
 
 enum Shape {
-   Circle(int: radius),
+   Circle(int radius),
    Empty
 }
 
-def s = Shape.Circle(radius: 1)
+def s = Shape.Circle(1)
 match s {
    Shape.Circle(diameter: d) -> d
    Shape.Empty -> 0

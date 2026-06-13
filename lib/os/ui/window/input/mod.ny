@@ -322,11 +322,15 @@ fn event_mouse_xy(any win, any data) list {
 }
 
 fn _view_scale(any win, any view_w, any view_h) list {
-   def vw = max(1.0, float(view_w))
-   def vh = max(1.0, float(view_h))
-   def sz = win ? window.size(win) : [vw, vh]
-   def logical_w = max(1.0, float(sz.get(0, vw)))
-   def logical_h = max(1.0, float(sz.get(1, vh)))
+   def req_w = float(view_w)
+   def req_h = float(view_h)
+   def fallback_w = max(1.0, req_w)
+   def fallback_h = max(1.0, req_h)
+   def sz = win ? window.size(win) : [fallback_w, fallback_h]
+   def logical_w = max(1.0, float(sz.get(0, fallback_w)))
+   def logical_h = max(1.0, float(sz.get(1, fallback_h)))
+   def vw = req_w > 0.0 ? req_w : logical_w
+   def vh = req_h > 0.0 ? req_h : logical_h
    [vw, vh, logical_w, logical_h, vw / logical_w, vh / logical_h]
 }
 

@@ -1906,6 +1906,8 @@ fn _check_native_state(any win) any {
    }
 }
 
+mut _event_poll_ns_by_handle = dict(8)
+
 @jit
 fn check_event(any win) any {
    "Polls for new events and returns the next one from the queue, or 0 if empty."
@@ -1946,25 +1948,30 @@ fn check_event(any win) any {
       if(cw.get("scroll_dy", 0.0) != 0.0){ cw["scroll_dy"] = 0.0 state_dirty = true }
       if(state_dirty){ _set_window_registry(handle, cw) }
       if(native_events){
-         def polled_events = ui_backend.poll_events_for_window(handle)
-         if(is_list(polled_events) && polled_events.len > 0){
-            mut q2 = cw.get("events", [])
-            mut head2 = int(cw.get("events_head", 0))
-            if(head2 >= q2.len){ q2 = [] head2 = 0 }
-            elif(head2 > 64 && head2 * 2 >= q2.len){
-               q2 = slice(q2, head2, q2.len, 1)
-               head2 = 0
+         def now_poll = ticks()
+         def last_poll = int(_event_poll_ns_by_handle.get(handle, 0))
+         if(last_poll <= 0 || now_poll - last_poll >= 500000){
+            _event_poll_ns_by_handle[handle] = now_poll
+            def polled_events = ui_backend.poll_events_for_window(handle)
+            if(is_list(polled_events) && polled_events.len > 0){
+               mut q2 = cw.get("events", [])
+               mut head2 = int(cw.get("events_head", 0))
+               if(head2 >= q2.len){ q2 = [] head2 = 0 }
+               elif(head2 > 64 && head2 * 2 >= q2.len){
+                  q2 = slice(q2, head2, q2.len, 1)
+                  head2 = 0
+               }
+               def polled_events_n = polled_events.len
+               mut i = 0
+               while(i < polled_events_n){
+                  def ne = polled_events.get(i)
+                  if(ev.is_event(ne)){ q2 = ev.queue_push(q2, ne) }
+                  i += 1
+               }
+               cw["events"] = q2
+               cw["events_head"] = head2
+               _set_window_registry(handle, cw)
             }
-            def polled_events_n = polled_events.len
-            mut i = 0
-            while(i < polled_events_n){
-               def ne = polled_events.get(i)
-               if(ev.is_event(ne)){ q2 = ev.queue_push(q2, ne) }
-               i += 1
-            }
-            cw["events"] = q2
-            cw["events_head"] = head2
-            _set_window_registry(handle, cw)
          }
       } else {
          update_input(win)
@@ -2302,7 +2309,9 @@ fn poll_events() bool {
       if(state_dirty){ _save_win(win) }
       update_input(win)
       if(native_events){
-         def queued_native_events = ui_backend.pump_window_events(_get_handle(win))
+         def poll_handle = _get_handle(win)
+         _event_poll_ns_by_handle[poll_handle] = ticks()
+         def queued_native_events = ui_backend.pump_window_events(poll_handle)
          if(is_list(queued_native_events) && queued_native_events.len > 0){
             def native_events_n = queued_native_events.len
             mut j = 0

@@ -4285,24 +4285,32 @@ static void match_bind_adt_pattern(codegen_t *cg, scope *scopes, size_t depth,
   ny_expr_call_args(pat, &args, &argc);
   for (size_t i = 0; i < argc; i++) {
     call_arg_t *arg = &args[i];
-    if (!arg->name) {
-      ny_diag_error(pat->tok, "ADT match pattern '%s.%s' requires named fields",
-                    owner->name, mem->name);
-      cg->had_error = 1;
-      continue;
-    }
-    ssize_t idx = ny_enum_member_field_index(mem, arg->name);
-    if (idx < 0) {
-      ny_diag_error(pat->tok, "unknown field '%s' in ADT match pattern '%s.%s'",
-                    arg->name, owner->name, mem->name);
-      cg->had_error = 1;
-      continue;
+    ssize_t idx = -1;
+    const char *field_name = NULL;
+    if (arg->name) {
+      idx = ny_enum_member_field_index(mem, arg->name);
+      field_name = arg->name;
+      if (idx < 0) {
+        ny_diag_error(pat->tok, "unknown field '%s' in ADT match pattern '%s.%s'",
+                      arg->name, owner->name, mem->name);
+        cg->had_error = 1;
+        continue;
+      }
+    } else {
+      if (i >= mem->fields.len) {
+        ny_diag_error(pat->tok, "too many positional fields in ADT match pattern '%s.%s'",
+                      owner->name, mem->name);
+        cg->had_error = 1;
+        continue;
+      }
+      idx = (ssize_t)i;
+      field_name = mem->fields.data[idx].name;
     }
     expr_t *bind = arg->val;
     if (!bind || bind->kind != NY_E_IDENT) {
       ny_diag_error(bind ? bind->tok : pat->tok,
                     "ADT match field '%s' must bind to an identifier or '_'",
-                    arg->name);
+                    field_name);
       cg->had_error = 1;
       continue;
     }

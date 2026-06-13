@@ -79,13 +79,14 @@ def int: _TEXT_COPY = -9002
 def int: _TEXT_CUT = -9003
 def int: _TEXT_PASTE = -9004
 mut _theme_dirty, _theme_ready = true, false
-mut _accent_rgba = [0.86, 0.86, 0.86, 0.96]
+mut _accent_rgba = [0.624, 0.525, 0.851, 0.96]
+mut _press_rgba = [0.200, 0.137, 0.278, 0.96]
 mut _window_bg_rgba = [0.000, 0.000, 0.000, 0.92]
-mut _window_body_rgba = [0.000, 0.000, 0.000, 0.90]
-mut _window_hdr_rgba = [0.000, 0.000, 0.000, 0.96]
-mut _panel_rgba = [0.000, 0.000, 0.000, 0.82]
-mut _panel_hover_rgba = [0.055, 0.055, 0.055, 0.86]
-mut _panel_active_rgba = [0.090, 0.090, 0.090, 0.94]
+mut _window_body_rgba = [0.031, 0.031, 0.031, 0.90]
+mut _window_hdr_rgba = [0.075, 0.075, 0.094, 0.96]
+mut _panel_rgba = [0.031, 0.031, 0.039, 0.84]
+mut _panel_hover_rgba = [0.106, 0.086, 0.141, 0.90]
+mut _panel_active_rgba = [0.161, 0.118, 0.220, 0.94]
 mut _popup_rgba = [0.000, 0.000, 0.000, 1.00]
 
 fn _ensure_text_caches() any {
@@ -104,14 +105,16 @@ fn _ui_text(any txt) str {
    is_str(s) ? s : ""
 }
 
-mut _border_rgba = [0.540, 0.540, 0.540, 0.54]
-mut _text_rgba = [0.940, 0.940, 0.940, 0.98]
-mut _text_dim_rgba = [0.660, 0.660, 0.660, 0.90]
-mut _ok_rgba = [0.780, 0.780, 0.780, 0.96]
-mut _warn_rgba = [0.860, 0.820, 0.700, 0.96]
-mut _danger_rgba = [0.940, 0.560, 0.560, 0.96]
+mut _border_rgba = [0.196, 0.169, 0.247, 0.66]
+mut _text_rgba = [0.961, 0.961, 0.965, 0.98]
+mut _text_dim_rgba = [0.776, 0.776, 0.792, 0.90]
+mut _ok_rgba = [0.624, 0.525, 0.851, 0.96]
+mut _warn_rgba = [0.776, 0.776, 0.792, 0.96]
+mut _danger_rgba = [0.200, 0.137, 0.278, 0.96]
 mut _accent_u32 = 0
 mut _accent_soft_u32 = 0
+mut _press_u32 = 0
+mut _press_soft_u32 = 0
 mut _window_bg_u32 = 0
 mut _window_body_u32 = 0
 mut _window_hdr_u32 = 0
@@ -449,13 +452,15 @@ fn tile_editor_shell_preset(str name, f64 ww, f64 wh, f64 gap=10.0) dict {
 fn _theme_refresh() any {
    if(!_theme_dirty && _theme_ready){ return 0 }
    _accent_u32 = _theme_pack(_accent_rgba)
+   _press_u32 = _theme_pack(_press_rgba)
+   _press_soft_u32 = color_pack(float(_press_rgba.get(0, 0.0)), float(_press_rgba.get(1, 0.0)), float(_press_rgba.get(2, 0.0)), 0.58)
    _accent_soft_u32 = color_pack(float(_accent_rgba.get(0,
       0.0)),
       float(_accent_rgba.get(1,
       0.0)),
       float(_accent_rgba.get(2,
       0.0)),
-   0.54)
+   0.24)
    _window_bg_u32 = _theme_pack(_window_bg_rgba)
    _window_body_u32 = _theme_pack(_window_body_rgba)
    _window_hdr_u32 = _theme_pack(_window_hdr_rgba)
@@ -464,7 +469,7 @@ fn _theme_refresh() any {
    _panel_active_u32 = _theme_pack(_panel_active_rgba)
    _popup_u32 = _theme_pack(_popup_rgba)
    _border_u32 = _theme_pack(_border_rgba)
-   _scroll_track_u32 = color_pack(0.000, 0.000, 0.000, 0.58)
+   _scroll_track_u32 = color_pack(0.031, 0.031, 0.031, 0.58)
    _scroll_thumb_u32 = color_pack(float(_accent_rgba.get(0,
       0.0)),
       float(_accent_rgba.get(1,
@@ -478,9 +483,9 @@ fn _theme_refresh() any {
       0.0)),
       float(_accent_rgba.get(2,
       0.0)),
-   0.76)
-   _grid_major_u32 = color_pack(0.34, 0.34, 0.34, 0.22)
-   _grid_minor_u32 = color_pack(0.14, 0.14, 0.14, 0.10)
+   0.62)
+   _grid_major_u32 = color_pack(0.298, 0.298, 0.322, 0.22)
+   _grid_minor_u32 = color_pack(0.114, 0.114, 0.141, 0.10)
    _text_u32 = _theme_pack(_text_rgba)
    _text_dim_u32 = _theme_pack(_text_dim_rgba)
    _ok_u32 = _theme_pack(_ok_rgba)
@@ -1983,9 +1988,9 @@ fn button(any id, any label, any w=0.0, any h=0.0) bool {
    def focused = _kbd_focus_id == full
    def clicked = inter.get(3, false) || _widget_key_activate(full)
    if(visible){
-      _gui_rect_fast(x, y, ww, hh, held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
-      if(focused || hovered){ _gui_rect_fast(x, y, ww, _sx(2.0), _accent_u32) }
-      _gui_rect_outline_fast(x, y, ww, hh, (hovered || focused) ? _accent_u32 : _border_u32)
+      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
+      if(focused || hovered || held){ _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
+      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : ((hovered || focused) ? _accent_u32 : _border_u32))
       _draw_centered_text(txt, x, y, ww, hh, _text_u32)
    }
    clicked
@@ -2009,9 +2014,9 @@ fn small_button(any id, any label, any w=0.0, any h=0.0) bool {
    def focused = _kbd_focus_id == full
    def clicked = inter.get(3, false) || _widget_key_activate(full)
    if(inter.get(0, false)){
-      _gui_rect_fast(x, y, ww, hh, held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
-      if(focused || hovered){ _gui_rect_fast(x, y, ww, _sx(2.0), _accent_u32) }
-      _gui_rect_outline_fast(x, y, ww, hh, (hovered || focused) ? _accent_u32 : _border_u32)
+      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
+      if(focused || hovered || held){ _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
+      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : ((hovered || focused) ? _accent_u32 : _border_u32))
       _draw_centered_text_ex(_font_small_id(), txt, x, y, ww, hh, _text_u32)
    }
    clicked
@@ -2084,9 +2089,9 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
          y,
          rwf,
          rhf,
-      selected ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
-      if(selected || focused || hovered){ _gui_rect_fast(x, y, rwf, _sx(2.0), _accent_u32) }
-      _gui_rect_outline_fast(x, y, rwf, rhf, (selected || focused) ? _accent_u32 : _border_u32)
+      selected ? _accent_soft_u32 : (held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
+      if(selected || focused || hovered || held){ _gui_rect_fast(x, y, rwf, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
+      _gui_rect_outline_fast(x, y, rwf, rhf, held ? _accent_u32 : ((selected || focused) ? _accent_u32 : _border_u32))
       def ix, iy = x + _item_pad_x(), y + max(0.0, (rhf - icon_sz) * 0.5)
       if(_tex_ref_id(tex_id) >= 0){ _gui_tex_ref_uv(ix, iy, icon_sz, icon_sz, tex_id, 1.0, 1.0, 1.0, 0.96) } else {
          _gui_rect_fast(ix + icon_sz * 0.25,
@@ -2096,7 +2101,7 @@ fn icon_button(any id, any tex_id, any label="", f64 w=0.0, f64 h=0.0, bool sele
          selected ? _accent_u32 : _text_dim_u32)
       }
       if(has_txt){
-         def text_col = (selected || focused || hovered) ? _text_u32 : _text_dim_u32
+         def text_col = held ? _text_u32 : ((selected || focused || hovered) ? _text_u32 : _text_dim_u32)
          def text_x = ix + icon_sz + _tiny_gap()
          def text_y = _text_center_y_for(_font_small_id(), y, rhf)
          def text_w = max(1.0, rwf - icon_sz - _item_pad_x() * 2.0 - _tiny_gap())

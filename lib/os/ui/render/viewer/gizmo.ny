@@ -167,7 +167,7 @@ fn _pick_axis_line(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py
    mut i = 0
    mut prev_p = project_point(mvp, win_w, win_h, px, py, pz)
    mut prev_t = 0.0
-   mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0}
+   mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0}
    while(i < steps){
       i += 1
       def t = float(i) / float(steps)
@@ -180,7 +180,10 @@ fn _pick_axis_line(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py
          def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
          if(d2 < float(out.get("dist2", best_d2))){
             def n = _screen_norm(x1 - x0, y1 - y0)
-            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0))}
+            def seg_px = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
+            def seg_world = abs(length * (t - prev_t))
+            def wpp = seg_px > 0.0001 ? seg_world / seg_px : 0.0
+            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0)), "screen_world_per_pixel": wpp}
          }
       }
       prev_p = cur_p
@@ -219,7 +222,7 @@ fn _pick_ring(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py, f64
    mut i = 1
    mut prev_world = _ring_point(px, py, pz, radius, plane, 0.0)
    mut prev = project_point(mvp, win_w, win_h, prev_world.get(0, px), prev_world.get(1, py), prev_world.get(2, pz))
-   mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0}
+   mut out = {"axis": -1, "dist2": best_d2, "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0}
    while(i <= steps){
       def a = (float(i) / float(steps)) * (PI * 2.0)
       def cur_world = _ring_point(px, py, pz, radius, plane, a)
@@ -230,7 +233,7 @@ fn _pick_ring(any mvp, any win_w, any win_h, f64 mx, f64 my, f64 px, f64 py, f64
          def d2 = _screen_dist2(mx, my, x0, y0, x1, y1)
          if(d2 < float(out.get("dist2", best_d2))){
             def n = _screen_norm(x1 - x0, y1 - y0)
-            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0))}
+            out = {"axis": axis, "dist2": d2, "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0)), "screen_world_per_pixel": 0.0}
          }
       }
       prev = cur
@@ -387,10 +390,10 @@ fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, an
       def center_dy = my - cy
       def center_r = max(8.0, threshold * 0.72)
       if(center_dx * center_dx + center_dy * center_dy <= center_r * center_r){
-         return {"hit": true, "axis": 0, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": 0.0, "dist2": 0.0}
+         return {"hit": true, "axis": 0, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": 0.0, "screen_world_per_pixel": 0.0, "dist2": 0.0}
       }
       if(int(mode) != 1 && abs(mx - cx) < threshold * 1.5 && my < cy && my > cy - axis_len * 200.0){
-         return {"hit": true, "axis": 2, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": -1.0, "dist2": threshold}
+         return {"hit": true, "axis": 2, "mode": int(mode), "screen_axis_x": 0.0, "screen_axis_y": -1.0, "screen_world_per_pixel": 0.0, "dist2": threshold}
       }
       return {"hit": false, "axis": 0, "mode": int(mode)}
    }
@@ -401,6 +404,7 @@ fn hit_test(any mvp, any win_w, any win_h, any bounds, any mode, any mouse_x, an
       "mode": int(mode),
       "screen_axis_x": float(best.get("screen_axis_x", 0.0)),
       "screen_axis_y": float(best.get("screen_axis_y", 0.0)),
+      "screen_world_per_pixel": float(best.get("screen_world_per_pixel", 0.0)),
       "dist2": float(best.get("dist2", 0.0))
    }
 }
