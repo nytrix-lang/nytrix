@@ -1053,6 +1053,7 @@ fn swap_buffers(any win) any {
    def ctx = window_contexts.get(handle, 0)
    if(ctx && (b == "x11" || b == "wayland")){ opengl_backend.swap_buffers(ctx) }
    if(b == "x11"){ x11_backend.flush(get_x11_display()) }
+   elif(b == "wayland"){ wayland_backend.flush(0) }
 }
 
 fn blit_software(any win, any buf, int w, int h) any {

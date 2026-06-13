@@ -2284,7 +2284,14 @@ fn _scene_editor_tools_enabled() bool {
 fn _event_mouse_xy_view(any data) list {
    "Returns mouse event coordinates in the active renderer framebuffer/view space."
    def scaled = uin.scale_event_xy(win, data, _win_w, _win_h)
-   uin.event_mouse_xy(win, scaled)
+   def out = uin.event_mouse_xy(win, scaled)
+   def _discard_evxy_trace = _app_input_trace(
+      "event_mouse_xy_view raw=(" + to_str(is_dict(data) ? data.get("x", 0.0) : 0.0) + "," + to_str(is_dict(data) ? data.get("y", 0.0) : 0.0) + ")" +
+      " scaled=(" + to_str(scaled.get("x", 0.0)) + "," + to_str(scaled.get("y", 0.0)) + ")" +
+      " out=(" + to_str(out.get(0, 0.0)) + "," + to_str(out.get(1, 0.0)) + ")" +
+      " win=(" + to_str(_win_w) + "," + to_str(_win_h) + ")"
+   )
+   out
 }
 
 fn _cursor_xy_view() list {
@@ -2332,21 +2339,32 @@ fn _scene_drag_begin(x, y, any pick=0) bool {
    _scene_selected = true
    _scene_selection_rect = true
    def drag_bounds = _scene_selection_bounds()
-   def drag_coord = _scene_world_gizmo_axis_drag_coord(_gizmo_axis, x, y, drag_bounds)
    _scene_drag_state = scene_engine.scene_drag_begin_state(active_scene, x, y, _gizmo_mode, {
          "axis": _gizmo_axis,
          "precise": _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT),
-         "snap": _gizmo_snap || _move_ctrl || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL),
+         "snap": _gizmo_snap || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL),
          "screen_axis_x": is_dict(pick) ? float(pick.get("screen_axis_x", 0.0)) : 0.0,
          "screen_axis_y": is_dict(pick) ? float(pick.get("screen_axis_y", 0.0)) : 0.0,
-         "axis_ray_ok": bool(drag_coord.get("ok", false)),
-         "axis_coord_start": float(drag_coord.get("coord", 0.0)),
+         "axis_world_per_pixel": is_dict(pick) ? float(pick.get("screen_world_per_pixel", 0.0)) : 0.0,
+         "axis_ray_ok": false,
+         "axis_coord_start": 0.0,
          "axis_world_delta_ok": false,
          "axis_world_delta": 0.0
    })
    _scene_drag_state["bounds"] = drag_bounds
    _scene_drag_active = bool(_scene_drag_state.get("active", false))
    _scene_drag_mode = int(_scene_drag_state.get("mode", _gizmo_mode))
+   def _discard_drag_begin_trace = _app_input_trace(
+      "drag begin x=" + to_str(x) + " y=" + to_str(y) +
+      " mode=" + to_str(_scene_drag_mode) +
+      " axis=" + to_str(_gizmo_axis) +
+      " pick_hit=" + to_str(is_dict(pick) ? bool(pick.get("hit", false)) : false) +
+      " screen_axis=(" + to_str(_scene_drag_state.get("screen_axis_x", 0.0)) + "," + to_str(_scene_drag_state.get("screen_axis_y", 0.0)) + ")" +
+      " axis_wpp=" + to_str(_scene_drag_state.get("axis_world_per_pixel", 0.0)) +
+      " axis_ray_ok=" + to_str(_scene_drag_state.get("axis_ray_ok", false)) +
+      " axis_coord_start=" + to_str(_scene_drag_state.get("axis_coord_start", 0.0)) +
+      " active=" + to_str(_scene_drag_active)
+   )
    _selection_overlay_clear_rects()
    _rmb_look_active = false
    _clear_mouse_look_state()
@@ -2363,20 +2381,24 @@ fn _scene_drag_update(x, y) bool {
    ;; free drag if hover/UI state changes mid-frame.
    if(int(_scene_drag_state.get("axis", 0)) <= 0 && _gizmo_axis > 0){ _scene_drag_state["axis"] = _gizmo_axis }
    def drag_axis = int(_scene_drag_state.get("axis", 0))
-   if(drag_axis > 0 && int(_scene_drag_state.get("mode", 0)) == 0){
-      def drag_coord_now = _scene_world_gizmo_axis_drag_coord(drag_axis, x, y, _scene_drag_state.get("bounds", _scene_selection_bounds()))
-      if(bool(_scene_drag_state.get("axis_ray_ok", false)) && bool(drag_coord_now.get("ok", false))){
-         _scene_drag_state["axis_world_delta_ok"] = true
-         _scene_drag_state["axis_world_delta"] = float(drag_coord_now.get("coord", 0.0)) - float(_scene_drag_state.get("axis_coord_start", 0.0))
-      } else {
-         _scene_drag_state["axis_world_delta_ok"] = false
-      }
-   } else {
-      _scene_drag_state["axis_world_delta_ok"] = false
-   }
+   ;; Keep translate drags continuous in screen space. The ray/axis closest-point
+   ;; solve can become ill-conditioned for shallow projected axes and then jumps
+   ;; between coarse world sections even though mouse coordinates are floats.
+   _scene_drag_state["axis_world_delta_ok"] = false
    _scene_drag_state["precise"] = _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT)
-   _scene_drag_state["snap"] = _gizmo_snap || _move_ctrl || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL)
+   _scene_drag_state["snap"] = _gizmo_snap || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL)
    _scene_drag_state = scene_engine.scene_drag_apply(active_scene, _scene_drag_state, x, y, _h_yaw, _scene_drag_state.get("bounds", _scene_selection_bounds()), _cam_px, _cam_py, _cam_pz, _cam_fov, _h_pch)
+   def _discard_drag_update_trace = _app_input_trace(
+      "drag update x=" + to_str(x) + " y=" + to_str(y) +
+      " axis=" + to_str(drag_axis) +
+      " mode=" + to_str(_scene_drag_state.get("mode", 0)) +
+      " ray_ok=" + to_str(_scene_drag_state.get("axis_ray_ok", false)) +
+      " world_ok=" + to_str(_scene_drag_state.get("axis_world_delta_ok", false)) +
+      " world_delta=" + to_str(_scene_drag_state.get("axis_world_delta", 0.0)) +
+      " ok=" + to_str(_scene_drag_state.get("ok", false)) +
+      " changed=" + to_str(_scene_drag_state.get("changed", false)) +
+      " edit_t=(" + to_str(active_scene.get("edit_tx", 0.0)) + "," + to_str(active_scene.get("edit_ty", 0.0)) + "," + to_str(active_scene.get("edit_tz", 0.0)) + ")"
+   )
    if(!bool(_scene_drag_state.get("ok", false))){ return false }
    if(bool(_scene_drag_state.get("changed", false))){
       _scene_selection_bounds_cache_clear()
@@ -4867,6 +4889,13 @@ fn _app_handle_mouse_pos(data, gui_on_event) {
       ;; cursor coordinates from captured look, which makes the gizmo jump or
       ;; jitter when the editor (F1) is open.
       if(is_dict(data) && bool(data.get("relative", false))){
+         def _discard_drag_rel_trace = _app_input_trace(
+            "drag dropped relative-event x=" + to_str(data.get("x", 0.0)) +
+            " y=" + to_str(data.get("y", 0.0)) +
+            " dx=" + to_str(data.get("dx", 0.0)) +
+            " dy=" + to_str(data.get("dy", 0.0)) +
+            " raw=" + to_str(data.get("raw", false))
+         )
          _clear_mouse_look_state()
          return
       }
@@ -5128,6 +5157,13 @@ fn _app_handle_scroll(data, gui_enabled_frame, gui_event_consumed=false) {
       return
    }
    if(_middle_mouse_scroll_suppressed()){
+      return
+   }
+   if(_scene_drag_active){
+      ;; A gizmo axis/translate drag is in progress.  Touchpads emit scroll
+      ;; events alongside two-finger drags, and letting those change camera
+      ;; FOV/zoom mid-drag shifts the view/projection used by the axis ray
+      ;; solve, which looks like the Y-axis drag also "scrolling"/zooming.
       return
    }
    def dy = float(data.get("dy", 0.0))

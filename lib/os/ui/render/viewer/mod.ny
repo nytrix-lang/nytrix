@@ -13,7 +13,7 @@ module std.os.ui.render.viewer(
    rect, panel, draw_axis_meter, draw_button_chip, draw_stage_frame,
    controller_fit_scale, draw_controller,
    C_BG, C_PANEL, C_PANEL_ALT, C_IDLE, C_TEXT, C_MUTED, C_SUBTLE, C_ACCENT,
-   C_ACCENT_SOFT, C_BLACK, C_MID, C_STICK, CONTROLLER_DRAW_SCALE,
+   C_ACCENT_SOFT, C_ACTIVE, C_ACTIVE_SOFT, C_BLACK, C_MID, C_STICK, CONTROLLER_DRAW_SCALE,
    term, vterm, gamepad, dock, keyboard, clipboard, widgets, assets, icons, gizmo, gui, editor,
    app, batch, bootstrap, idle, loop, runtime
 )
@@ -54,16 +54,30 @@ mut _text_run_count = 0
 mut _text_char_count = 0
 def C_BG = color_hex("#000000")
 def C_PANEL = color_hex("#080808")
-def C_PANEL_ALT = color_hex("#111111")
-def C_IDLE = color_hex("#1a1a1a")
-def C_TEXT = color_hex("#f2f2f2")
-def C_MUTED = color_hex("#b8b8b8")
-def C_SUBTLE = color_hex("#777777")
-def C_ACCENT = color_hex("#9b5cff")
-def C_ACCENT_SOFT = color_hex("#24133d")
+def C_PANEL_ALT = color_hex("#131318")
+def C_IDLE = color_hex("#15151b")
+def C_TEXT = color_hex("#f5f5f6")
+def C_MUTED = color_hex("#c6c6ca")
+def C_SUBTLE = color_hex("#808087")
+def C_ACCENT = color_hex("#9f86d9")
+def C_ACCENT_SOFT = color_hex("#181321")
+def C_ACTIVE = color_hex("#563d7c")
+def C_ACTIVE_SOFT = color_hex("#261b35")
+def C_ACTIVE_HI = color_hex("#bda9ec")
+def C_ACTIVE_RING = color_hex("#6e5a96")
 def C_BLACK = color_hex("#000000")
-def C_MID = color_hex("#6b4fb0")
-def C_STICK = color_hex("#101010")
+def C_MID = color_hex("#282531")
+def C_STICK = color_hex("#101014")
+;; Controller-only palette. Keep this isolated from generic GUI button colors.
+;; Important: face/menu/bumper/D-pad/stick/trigger all reuse this same palette.
+;; There are no per-button colors, so A/B/X/Y, menu buttons, and bumpers cannot drift
+;; into green/blue/red depending on the control identity or a shared GUI theme tweak.
+def C_PAD_IDLE = color_hex("#141319")
+def C_PAD_EDGE = color_hex("#272432")
+def C_PAD_DOWN = color_hex("#5d3f8c")
+def C_PAD_DOWN_EDGE = C_PAD_EDGE
+def C_PAD_AXIS = C_PAD_DOWN
+def C_PAD_MARK = C_PAD_DOWN
 def CONTROLLER_DRAW_SCALE = 0.86
 def FONT_CANDIDATES = assets.MONO_FONT_CANDIDATES
 def TERMINAL_FONT_DEFAULT = assets.TERM_FONT_DEFAULT
@@ -149,7 +163,21 @@ fn draw_text_right_fit(any label, any right_x, any y, any max_w, any color) int 
    0
 }
 
-fn _btn_color(any st, any button) int { gamepad.pad_button(st, button) ? C_ACCENT : C_IDLE }
+fn _pad_fill(bool down) any { down ? C_PAD_DOWN : C_PAD_IDLE }
+
+fn _pad_edge(bool down) any { down ? C_PAD_DOWN_EDGE : C_PAD_EDGE }
+
+fn _btn_color(any st, any button) any { _pad_fill(gamepad.pad_button(st, button)) }
+
+fn _btn_ring_color(any st, any button) any { _pad_edge(gamepad.pad_button(st, button)) }
+
+fn _trigger01(any value) f64 {
+   ;; Backends differ: some expose triggers as -1..1, others as 0..1.
+   ;; Treat exact/near zero as rest so a resting trigger does not draw a half-lit bar.
+   def v = clamp(float(value), -1.0, 1.0)
+   if(v <= -0.05){ return clamp((v + 1.0) * 0.5, 0.0, 1.0) }
+   clamp(v, 0.0, 1.0)
+}
 
 fn panel(any x, any y, any w, any h, any title, any accent=0) int {
    rect(x, y, w, h, C_PANEL)
@@ -162,7 +190,7 @@ fn panel(any x, any y, any w, any h, any title, any accent=0) int {
 fn draw_axis_meter(any label, any value, any x, any y, any w) int {
    def axis_i = gamepad.axis_i100(value)
    def mag_i = axis_i < 0 ? -axis_i : axis_i
-   def fill_col = mag_i > 4 ? C_ACCENT : C_SUBTLE
+   def fill_col = mag_i > 4 ? C_PAD_AXIS : C_SUBTLE
    def value_s = gamepad.fixed2(value)
    def value_w = text_w(value_s)
    def bar_x = x + 32.0
@@ -182,8 +210,8 @@ fn draw_axis_meter(any label, any value, any x, any y, any w) int {
 }
 
 fn draw_button_chip(any label, any active, any x, any y, any w) int {
-   rect(x, y, w, 22.0, active ? C_ACCENT_SOFT : C_IDLE)
-   rect(x, y, w, active ? 2.0 : 1.0, active ? C_ACCENT : C_SUBTLE)
+   rect(x, y, w, 22.0, active ? C_PAD_DOWN : C_IDLE)
+   rect(x, y, w, active ? 2.0 : 1.0, active ? C_PAD_DOWN_EDGE : C_SUBTLE)
    def shown = fit_text(label, max(0.0, w - 8.0))
    def tw = text_w(shown)
    def tx = x + ((w - tw) * 0.5)
@@ -218,27 +246,27 @@ fn _draw_pad_shell(f64 off_x, f64 off_y, f64 s, any st, f64 lt, f64 rt) int {
    def th = _gs(s, 70)
    _round_rect(tx_l, ty, tw, th, _gs(s, 5), C_IDLE)
    _round_rect(tx_r, ty, tw, th, _gs(s, 5), C_IDLE)
-   def lt_t = clamp((1.0 + lt) * 0.5, 0.0, 1.0)
-   def rt_t = clamp((1.0 + rt) * 0.5, 0.0, 1.0)
+   def lt_t = _trigger01(lt)
+   def rt_t = _trigger01(rt)
    def lt_h = th * lt_t
    def rt_h = th * rt_t
    if(lt_t > 0.01){
       def fill = lt_h < _gs(s, 4) ? _gs(s, 4) : lt_h
-      _round_rect(tx_l, ty + th - fill, tw, fill, _gs(s, 5), C_ACCENT)
+      _round_rect(tx_l, ty + th - fill, tw, fill, _gs(s, 5), C_PAD_DOWN)
    }
    if(rt_t > 0.01){
       def fill = rt_h < _gs(s, 4) ? _gs(s, 4) : rt_h
-      _round_rect(tx_r, ty + th - fill, tw, fill, _gs(s, 5), C_ACCENT)
+      _round_rect(tx_r, ty + th - fill, tw, fill, _gs(s, 5), C_PAD_DOWN)
    }
-   rect(tx_l - _gs(s, 2), ty + th - lt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_TEXT)
-   rect(tx_r - _gs(s, 2), ty + th - rt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_TEXT)
+   rect(tx_l - _gs(s, 2), ty + th - lt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_PAD_MARK)
+   rect(tx_r - _gs(s, 2), ty + th - rt_h, tw + _gs(s, 4), max(1.0, _gs(s, 2)), C_PAD_MARK)
    return 0
 }
 
 fn _draw_menu_cluster(f64 off_x, f64 off_y, f64 s, any st) int {
-   _disc(_gx(off_x, s, 365), _gy(off_y, s, 170), _gs(s, 12), C_MID)
-   _disc(_gx(off_x, s, 405), _gy(off_y, s, 170), _gs(s, 12), C_MID)
-   _disc(_gx(off_x, s, 445), _gy(off_y, s, 170), _gs(s, 12), C_MID)
+   _disc(_gx(off_x, s, 365), _gy(off_y, s, 170), _gs(s, 12), _btn_ring_color(st, win_native.GAMEPAD_BUTTON_BACK))
+   _disc(_gx(off_x, s, 405), _gy(off_y, s, 170), _gs(s, 12), _btn_ring_color(st, win_native.GAMEPAD_BUTTON_GUIDE))
+   _disc(_gx(off_x, s, 445), _gy(off_y, s, 170), _gs(s, 12), _btn_ring_color(st, win_native.GAMEPAD_BUTTON_START))
    _disc(_gx(off_x, s, 365), _gy(off_y, s, 170), _gs(s, 9), _btn_color(st, win_native.GAMEPAD_BUTTON_BACK))
    _disc(_gx(off_x, s, 405), _gy(off_y, s, 170), _gs(s, 9), _btn_color(st, win_native.GAMEPAD_BUTTON_GUIDE))
    _disc(_gx(off_x, s, 445), _gy(off_y, s, 170), _gs(s, 9), _btn_color(st, win_native.GAMEPAD_BUTTON_START))
@@ -246,8 +274,9 @@ fn _draw_menu_cluster(f64 off_x, f64 off_y, f64 s, any st) int {
 }
 
 fn _draw_face_button(f64 off_x, f64 off_y, f64 s, any st, int button, f64 cx, f64 cy) int {
-   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 17), C_MID)
-   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 14), _btn_color(st, button))
+   def down = gamepad.pad_button(st, button)
+   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 17), down ? C_PAD_DOWN_EDGE : C_PAD_EDGE)
+   _disc(_gx(off_x, s, cx), _gy(off_y, s, cy), _gs(s, 14), down ? C_PAD_DOWN : C_PAD_IDLE)
    return 0
 }
 
@@ -260,31 +289,31 @@ fn _draw_face_cluster(f64 off_x, f64 off_y, f64 s, any st) int {
 }
 
 fn _draw_dpad(f64 off_x, f64 off_y, f64 s, any st) int {
-   _round_rect(_gx(off_x, s, 245), _gy(off_y, s, 145), _gs(s, 28), _gs(s, 88), _gs(s, 4), C_MID)
-   _round_rect(_gx(off_x, s, 215), _gy(off_y, s, 174), _gs(s, 88), _gs(s, 29), _gs(s, 4), C_MID)
-   _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 147), _gs(s, 24), _gs(s, 84), _gs(s, 4), C_IDLE)
-   _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 84), _gs(s, 25), _gs(s, 4), C_IDLE)
+   _round_rect(_gx(off_x, s, 245), _gy(off_y, s, 145), _gs(s, 28), _gs(s, 88), _gs(s, 4), C_PAD_EDGE)
+   _round_rect(_gx(off_x, s, 215), _gy(off_y, s, 174), _gs(s, 88), _gs(s, 29), _gs(s, 4), C_PAD_EDGE)
+   _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 147), _gs(s, 24), _gs(s, 84), _gs(s, 4), C_PAD_IDLE)
+   _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 84), _gs(s, 25), _gs(s, 4), C_PAD_IDLE)
    def dc_x = _gx(off_x, s, 259)
    def dc_y = _gy(off_y, s, 188.5)
    if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_UP)){
-      _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 147), _gs(s, 24), _gs(s, 29), _gs(s, 4), C_ACCENT)
-      rect(_gx(off_x, s, 247), _gy(off_y, s, 158), _gs(s, 24), _gs(s, 18), C_ACCENT)
-      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], C_ACCENT)
+      _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 147), _gs(s, 24), _gs(s, 29), _gs(s, 4), C_PAD_DOWN)
+      rect(_gx(off_x, s, 247), _gy(off_y, s, 158), _gs(s, 24), _gs(s, 18), C_PAD_DOWN)
+      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], C_PAD_DOWN)
    }
    if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_DOWN)){
-      _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 30), _gs(s, 4), C_ACCENT)
-      rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 16), C_ACCENT)
-      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], C_ACCENT)
+      _round_rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 30), _gs(s, 4), C_PAD_DOWN)
+      rect(_gx(off_x, s, 247), _gy(off_y, s, 201), _gs(s, 24), _gs(s, 16), C_PAD_DOWN)
+      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], C_PAD_DOWN)
    }
    if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_LEFT)){
-      _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_ACCENT)
-      rect(_gx(off_x, s, 232), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_ACCENT)
-      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], C_ACCENT)
+      _round_rect(_gx(off_x, s, 217), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_PAD_DOWN)
+      rect(_gx(off_x, s, 232), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_PAD_DOWN)
+      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 201), 0.0], [_gx(off_x, s, 247), _gy(off_y, s, 176), 0.0], C_PAD_DOWN)
    }
    if(gamepad.pad_button(st, win_native.GAMEPAD_BUTTON_DPAD_RIGHT)){
-      _round_rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_ACCENT)
-      rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_ACCENT)
-      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], C_ACCENT)
+      _round_rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 30), _gs(s, 25), _gs(s, 4), C_PAD_DOWN)
+      rect(_gx(off_x, s, 271), _gy(off_y, s, 176), _gs(s, 15), _gs(s, 25), C_PAD_DOWN)
+      draw_triangle([dc_x, dc_y, 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 176), 0.0], [_gx(off_x, s, 271), _gy(off_y, s, 201), 0.0], C_PAD_DOWN)
    }
    return 0
 }
@@ -297,15 +326,15 @@ fn _draw_stick(f64 off_x, f64 off_y, f64 s, any st, f64 cx, f64 cy, f64 ax, f64 
    def travel = _gs(s, 30)
    def knob_x = center_x + sx * travel
    def knob_y = center_y + sy * travel
-   def knob = gamepad.pad_button(st, button) ? C_ACCENT : C_STICK
+   def knob = gamepad.pad_button(st, button) ? C_PAD_DOWN : C_STICK
    _disc(center_x, center_y, _gs(s, 42), C_BLACK)
-   _disc(center_x, center_y, _gs(s, 36), C_IDLE)
-   rect(center_x - travel, center_y - max(1.0, _gs(s, 1)), travel * 2.0, max(1.0, _gs(s, 2)), C_MID)
-   rect(center_x - max(1.0, _gs(s, 1)), center_y - travel, max(1.0, _gs(s, 2)), travel * 2.0, C_MID)
+   _disc(center_x, center_y, _gs(s, 36), C_PAD_IDLE)
+   rect(center_x - travel, center_y - max(1.0, _gs(s, 1)), travel * 2.0, max(1.0, _gs(s, 2)), C_PAD_EDGE)
+   rect(center_x - max(1.0, _gs(s, 1)), center_y - travel, max(1.0, _gs(s, 2)), travel * 2.0, C_PAD_EDGE)
    if(gamepad.axis_i100(sx) != 0 || gamepad.axis_i100(sy) != 0){
       def shaft_r = max(2.0, _gs(s, 4))
-      draw_line_2d(center_x, center_y, knob_x, knob_y, C_MID, shaft_r * 2.0)
-      _disc(center_x, center_y, shaft_r, C_MID)
+      draw_line_2d(center_x, center_y, knob_x, knob_y, C_PAD_EDGE, shaft_r * 2.0)
+      _disc(center_x, center_y, shaft_r, C_PAD_EDGE)
    }
    _disc(knob_x, knob_y, _gs(s, 25), knob)
    return 0
@@ -485,3 +514,4 @@ fn text_char_count() int {
    assert(terminal_cell_size(0, 16.0).get(1) >= 16.0, "viewer terminal cell size")
    print("✓ std.os.ui.render.viewer self-test passed")
 }
+

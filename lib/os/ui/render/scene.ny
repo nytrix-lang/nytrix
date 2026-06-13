@@ -1969,6 +1969,8 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
    mut say = float(options.get("screen_axis_y", 0.0))
    def sl = sqrt(sax * sax + say * say)
    if(sl > 0.0001){ sax /= sl say /= sl } else { sax = 0.0 say = 0.0 }
+   mut axis_wpp = float(options.get("axis_world_per_pixel", 0.0))
+   if(is_nan(axis_wpp) || is_inf(axis_wpp) || axis_wpp <= 0.000001){ axis_wpp = 0.0 }
    {
       "active": true,
       "ok": true,
@@ -1979,6 +1981,7 @@ fn scene_drag_begin_state(any scene, any x, any y, any mode=0, any opts=0) dict 
       "snap": bool(options.get("snap", false)),
       "screen_axis_x": sax,
       "screen_axis_y": say,
+      "axis_world_per_pixel": axis_wpp,
       "last_x": px,
       "last_y": py,
       "start_x": px,
@@ -2168,30 +2171,28 @@ fn scene_drag_apply(any scene, any state, any x, any y, any yaw_deg, any bounds=
          def up_x, up_y = float(basis.get("up_x", 0.0)), float(basis.get("up_y", 1.0))
          def up_z = float(basis.get("up_z", 0.0))
          def s = scene_drag_pixel_scale(bounds, cam_px, cam_py, cam_pz, cam_fov)
-         ;; Axis translation is camera-projection exact when the engine supplies
-         ;; a ray/axis solve.  This makes Y movement follow the actual projected
-         ;; green handle instead of a pixel-scale heuristic that can collapse or
-         ;; drift with camera pitch/FOV.
-         def axis_world_ok = bool(st.get("axis_world_delta_ok", false))
-         def axis_world_delta = float(st.get("axis_world_delta", 0.0))
-         def mdx = _scene_drag_clamp_pixels(frame_dx * mul)
-         def mdy = _scene_drag_clamp_pixels(frame_dy * mul)
-         mut tx = float(st.get("cur_tx", st.get("start_tx", 0.0)))
-         mut ty = float(st.get("cur_ty", st.get("start_ty", 0.0)))
-         mut tz = float(st.get("cur_tz", st.get("start_tz", 0.0)))
-         if(axis_world_ok && axis == 1){ tx = float(st.get("start_tx", 0.0)) + axis_world_delta }
-         elif(axis_world_ok && axis == 2){ ty = float(st.get("start_ty", 0.0)) + axis_world_delta }
-         elif(axis_world_ok && axis == 3){ tz = float(st.get("start_tz", 0.0)) + axis_world_delta }
-         elif(axis == 1){ tx += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
-         elif(axis == 2){ ty += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
-         elif(axis == 3){ tz += _scene_drag_projected_delta_for_axis(mdx, mdy, st, axis) * s }
+         ;; Translate from the drag start using continuous screen-space deltas.
+         ;; The previous ray/axis closest-point override could jump in visible
+         ;; sections for shallow axes because tiny mouse changes picked very
+         ;; different closest points on the infinite world axis.
+         def adx = _scene_drag_clamp_pixels(dx)
+         def ady = _scene_drag_clamp_pixels(dy)
+         mut axis_scale = float(st.get("axis_world_per_pixel", 0.0))
+         if(is_nan(axis_scale) || is_inf(axis_scale) || axis_scale <= 0.000001){ axis_scale = s * 3.0 }
+         else { axis_scale = clamp(axis_scale * 1.20, max(0.0001, s * 0.20), max(0.002, s * 64.0)) }
+         def axis_delta = _scene_drag_projected_delta_for_axis(adx, ady, st, axis) * axis_scale
+         mut tx = float(st.get("start_tx", 0.0))
+         mut ty = float(st.get("start_ty", 0.0))
+         mut tz = float(st.get("start_tz", 0.0))
+         if(axis == 1){ tx += axis_delta }
+         elif(axis == 2){ ty += axis_delta }
+         elif(axis == 3){ tz += axis_delta }
          else {
             ;; Free drag moves in the camera view plane: mouse-right is camera
-            ;; right and mouse-up is camera up.  It no longer forces vertical
-            ;; drag into global Y when the camera is pitched.
-            tx += (mdx * right_x - mdy * up_x) * s
-            ty += (mdx * right_y - mdy * up_y) * s
-            tz += (mdx * right_z - mdy * up_z) * s
+            ;; right and mouse-up is camera up.
+            tx += (adx * right_x - ady * up_x) * s
+            ty += (adx * right_y - ady * up_y) * s
+            tz += (adx * right_z - ady * up_z) * s
          }
          st["cur_tx"] = tx
          st["cur_ty"] = ty

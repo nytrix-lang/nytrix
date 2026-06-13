@@ -84,7 +84,15 @@ fn _scene_world_gizmo_axis_tangent(any axis) dict {
    }
    def b = _gizmo_selection_bounds()
    if(!is_list(b) || b.len < 6){ return {"ok": false, "axis": int(axis), "screen_axis_x": 0.0, "screen_axis_y": 0.0} }
-   viewer_gizmo.axis_tangent(M_VP, _win_w, _win_h, b, axis)
+   def m = viewer_gizmo.metrics(b, _gizmo_mode)
+   def v = _gizmo_axis_vec(int(axis))
+   def n = viewer_gizmo.axis_tangent(
+      M_VP, _win_w, _win_h,
+      float(m.get(0, 0.0)), float(m.get(1, 0.0)), float(m.get(2, 0.0)),
+      float(v.get(0, 0.0)), float(v.get(1, 0.0)), float(v.get(2, 0.0)),
+      float(m.get(4, 1.0))
+   )
+   {"ok": true, "axis": int(axis), "screen_axis_x": float(n.get(0, 0.0)), "screen_axis_y": float(n.get(1, 0.0))}
 }
 
 fn _gizmo_axis_vec(int axis) list {

@@ -26,6 +26,26 @@ ROOT = Path(__file__).resolve().parent
 QUIET_BOOTSTRAP = False
 LOADED_CONFIGS: list[Path] = []
 
+
+def _select_default_cc() -> str:
+    for name in ("clang", "cc", "gcc"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return ""
+
+
+def apply_builtin_env_defaults() -> None:
+    """Apply the old top-level env.sh defaults inside ./make itself."""
+    os.environ.setdefault("NYTRIX_ROOT", str(ROOT))
+    rt_init = ROOT / "src" / "rt" / "init.c"
+    if rt_init.exists():
+        os.environ.setdefault("NYTRIX_RT_SRC", str(rt_init))
+    if not os.environ.get("CC"):
+        cc = _select_default_cc()
+        if cc:
+            os.environ["CC"] = cc
+
 def _config_file_candidates() -> list[Path]:
     out: list[Path] = []
     explicit = (os.environ.get("NYTRIX_CONFIG") or os.environ.get("NY_CONFIG") or "").strip()
@@ -95,6 +115,7 @@ def load_default_config() -> None:
         os.environ.setdefault("NYTRIX_CONFIG_LOADED", ";".join(str(p) for p in LOADED_CONFIGS))
 
 load_default_config()
+apply_builtin_env_defaults()
 
 def has_shebang(path: Path) -> bool:
     try:
@@ -5180,37 +5201,8 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
     for name in ("make", "CMakeLists.txt", ".clangd", "out.diff", "README.md", "LICENSE"):
         _copy_release_file(ROOT / name, package_dir / name)
 
-    # Top-level convenience env. Keep it host-safe: never globally export
-    # LD_LIBRARY_PATH to bundled libs here. Static/binary packages run through
-    # build/static/run-ny, which pins the loader/library path only for Nytrix.
-    env = package_dir / "env.sh"
-    wl = ""
-    if with_binaries:
-        wl = (
-            'export NYTRIX_BUNDLE_ROOT="$_nytrix_here/build/static"\n'
-            'export PATH="$_nytrix_here/build/static:$_nytrix_here/build/static/bin:$PATH"\n'
-            'nytrix() { "$_nytrix_here/build/static/run-ny" "$@"; }\n'
-            'echo "Nytrix binary bundle loaded: use nytrix <args> or ./build/static/run-ny <args>"\n'
-        )
-    else:
-        wl = (
-            'echo "Nytrix source package loaded: run ./make bin, or ./make tar --with-binaries for a runnable bundle"\n'
-        )
-    env.write_text(
-        "#!/usr/bin/env sh\n"
-        "_nytrix_here=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE:-$0}\")\" && pwd)\n"
-        "export NYTRIX_ROOT=\"$_nytrix_here\"\n"
-        'if [ -f "$_nytrix_here/src/rt/init.c" ]; then export NYTRIX_RT_SRC="$_nytrix_here/src/rt/init.c"; fi\n'
-        'if [ -z "${CC:-}" ]; then\n'
-        '  if command -v clang >/dev/null 2>&1; then export CC=clang;\n'
-        '  elif command -v cc >/dev/null 2>&1; then export CC=cc;\n'
-        '  elif command -v gcc >/dev/null 2>&1; then export CC=gcc; fi\n'
-        "fi\n"
-        f"{wl}",
-        encoding="utf-8",
-    )
-    env.chmod(0o755)
-
+    # No top-level env.sh is emitted. ./make now installs the package-local
+    # NYTRIX_ROOT/NYTRIX_RT_SRC/CC defaults before running any command.
     archive_base = dist_dir / package_name
     tar_path = _make_tar_gz_fast(archive_base, dist_dir, package_name)
     ok(f"tar ready: {_rel_or_abs(tar_path)}")

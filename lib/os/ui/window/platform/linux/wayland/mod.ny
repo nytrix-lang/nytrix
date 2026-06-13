@@ -2505,8 +2505,8 @@ fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utim
    mut mx, my = float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))
    mx += fdx
    my += fdy
-   win = win.set("mouse_x", int(mx))
-   win = win.set("mouse_y", int(my))
+   win = win.set("mouse_x", mx)
+   win = win.set("mouse_y", my)
    _windows = _windows.set(surface, win)
    def ev_data = {
       "x": mx,
