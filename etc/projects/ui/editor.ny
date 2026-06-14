@@ -83,6 +83,8 @@ fn _editor_print_help() any {
    _editor_help_line("NY_EDITOR_FONT_SIZE=n", "body font size")
    _editor_help_line("NY_EDITOR_DENSITY=x", "scale editor chrome density")
    _editor_help_line("NY_EDITOR_INPUT_TRACE=1", "editor input trace")
+   _editor_help_line("NY_EDITOR_FAST_PRESENT=1", "use immediate present instead of the default stable vsync")
+   _editor_help_line("NY_UI_EDITOR_IDLE_REUSE=1", "enable present-only idle reuse for bench/debug")
    _editor_help_line("NY_UI_HEADLESS=1", "headless/mock mode")
    _editor_help_line("NY_VK_SAFE_TEXT=1", "force slow Vulkan text fallback for driver debugging")
    _editor_help_line("NY_VK_FAST_TEXT=0", "disable Vulkan atlas fast text")
@@ -97,7 +99,7 @@ fn _editor_print_help() any {
 def START_W = 1220
 def START_H = 760
 def START_FLAGS = key.WINDOW_CENTER | key.WINDOW_FOCUS_ON_SHOW | key.WINDOW_ALLOW_DND
-def EDITOR_PRESENT_MODE = common.env_truthy("NY_EDITOR_VSYNC") ? "fifo" : "immediate"
+def EDITOR_PRESENT_MODE = common.env_truthy("NY_EDITOR_FAST_PRESENT") ? "immediate" : "fifo"
 def UI_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf",
    "/usr/share/fonts/TTF/JetBrainsMonoNLNerdFontMono-Regular.ttf",
@@ -219,29 +221,29 @@ def PANEL_SPLIT_HIT = 4.0
 def CARET_BLINK_SEC = 0.22
 def PROBE_TEXT = "abc\ndef\nghi\njkl\nmno\npqr\nstu\nvwx\nyz0\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\nthirteen\nfourteen\nfifteen\nsixteen\nseventeen\neighteen\nnineteen\ntwenty\ntwenty-one\ntwenty-two\ntwenty-three\ntwenty-four\ntwenty-five\ntwenty-six\ntwenty-seven\ntwenty-eight\ntwenty-nine\nthirty\nthirty-one\nthirty-two\nthirty-three\nthirty-four\nthirty-five\nthirty-six\nthirty-seven\nthirty-eight\nthirty-nine\nforty"
 def C_BG = gfx.color_hex("#000000")
-def C_RAIL = gfx.color_hex("#000000")
-def C_PANE = gfx.color_hex("#050505")
-def C_PANE_2 = gfx.color_hex("#090909")
-def C_TEXT = gfx.color_hex("#eeeeee")
-def C_MUTED = gfx.color_hex("#b8b8b8")
-def C_DIM = gfx.color_hex("#777777")
-def C_LINE = gfx.color_hex("#151515")
-def C_LINE_2 = gfx.color_hex("#262626")
-def C_ACCENT = gfx.color_hex("#cfcfcf")
-def C_ACCENT_2 = gfx.color_hex("#e0e0e0")
-def C_CYAN = gfx.color_hex("#c8c8c8")
-def C_OK = gfx.color_hex("#d0d0d0")
-def C_CHIP = gfx.color_hex("#050505")
-def C_KEYWORD = gfx.color_hex("#e2e2e2")
-def C_TYPE = gfx.color_hex("#d6d6d6")
-def C_STRING = gfx.color_hex("#c8c8c8")
-def C_NUMBER = gfx.color_hex("#d0d0d0")
-def C_COMMENT = gfx.color_hex("#777777")
-def C_FUNC = gfx.color_hex("#dddddd")
-def C_OPERATOR = gfx.color_hex("#bdbdbd")
-def C_PROPERTY = gfx.color_hex("#d2d2d2")
-def C_WARN = gfx.color_hex("#a8a8a8")
-def C_SELECT = gfx.color_hex("#cfcfcf")
+def C_RAIL = gfx.color_hex("#020203")
+def C_PANE = gfx.color_hex("#060607")
+def C_PANE_2 = gfx.color_hex("#0b0b0d")
+def C_TEXT = gfx.color_hex("#f5f5f6")
+def C_MUTED = gfx.color_hex("#c6c6ca")
+def C_DIM = gfx.color_hex("#808087")
+def C_LINE = gfx.color_hex("#17171b")
+def C_LINE_2 = gfx.color_hex("#292832")
+def C_ACCENT = gfx.color_hex("#b6a0ff")
+def C_ACCENT_2 = gfx.color_hex("#d6d3e6")
+def C_CYAN = gfx.color_hex("#8ccfff")
+def C_OK = gfx.color_hex("#8bdc9a")
+def C_CHIP = gfx.color_hex("#050506")
+def C_KEYWORD = gfx.color_hex("#b6a0ff")
+def C_TYPE = gfx.color_hex("#bcaaff")
+def C_STRING = gfx.color_hex("#b4b8ff")
+def C_NUMBER = gfx.color_hex("#c9b6ff")
+def C_COMMENT = gfx.color_hex("#77717f")
+def C_FUNC = gfx.color_hex("#d1c2ff")
+def C_OPERATOR = gfx.color_hex("#c4bed2")
+def C_PROPERTY = gfx.color_hex("#ccbaff")
+def C_WARN = gfx.color_hex("#ff9580")
+def C_SELECT = gfx.color_hex("#b6a0ff")
 
 fn _pack(any c) int { gfx.color_pack(float(c.get(0, 1.0)), float(c.get(1, 1.0)), float(c.get(2, 1.0)), float(c.get(3, 1.0))) }
 
@@ -564,6 +566,7 @@ fn _editor_dynamic_ui_active() bool {
 
 fn _editor_reuse_opts(f64 sw, f64 sh) dict {
    def any: opts = {
+      "enabled": common.env_truthy("NY_UI_EDITOR_IDLE_REUSE"),
       "gui_frame": true,
       "win_w": int(sw),
       "win_h": int(sh),
@@ -573,7 +576,7 @@ fn _editor_reuse_opts(f64 sw, f64 sh) dict {
       "input_active": frame_events_seen,
       "dynamic_active": _editor_dynamic_ui_active(),
       "capture_active": TERMINAL_DUMP_PROBE || common.env_truthy("NYTRIX_AUTO_DUMP"),
-      "warmup": IDLE_REUSE_WARMUP,
+      "warmup": max(IDLE_REUSE_WARMUP, gfx.get_swapchain_image_count() + 2),
       "redraw_interval": IDLE_REUSE_INTERVAL
    }
    opts
@@ -929,7 +932,7 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    def w = float(lay.get("edit_w", 0.0))
    def h = float(lay.get("edit_h", 0.0))
    def pad = 12.0
-   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010101"))
+   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010102"))
    _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
    if tex > 0 && iw > 0.0 && ih > 0.0 {
       def f64: max_w = _clamp_f64(w * 0.46, 64.0, 1000000.0)
@@ -982,7 +985,7 @@ fn _draw_image_preview(dict lay, dict b) bool {
    def f64: draw_h = ih * scale
    def f64: ix = x + (w - draw_w) * 0.5
    def f64: iy = y + pad + (avail_h - draw_h) * 0.5
-   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010101"))
+   _fill_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, gfx.color_hex("#010102"))
    _stroke_rect(x + pad, y + pad, w - pad * 2.0, h - pad * 2.0, C_LINE_2, 1.0)
    _draw_tex_rect(tex, ix, iy, draw_w, draw_h, gfx.WHITE)
    def name = to_str(b.get("name", ospath.basename(path)))
@@ -995,7 +998,7 @@ fn _draw_image_preview(dict lay, dict b) bool {
 fn _git_color(str code) any {
    if code == "??" { return C_CYAN }
    if str.str_contains(code, "D") { return C_WARN }
-   if str.str_contains(code, "A") { return gfx.color_hex("#d0d0d0") }
+   if str.str_contains(code, "A") { return gfx.color_hex("#8bdc9a") }
    if str.str_contains(code, "R") { return C_ACCENT_2 }
    if str.str_contains(code, "M") { return C_WARN }
    C_DIM

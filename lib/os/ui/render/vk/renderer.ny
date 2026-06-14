@@ -1763,7 +1763,9 @@ fn begin_frame() bool {
       if !_vk_frame_scratch_ready() { ui_profile.print_text("[begin_frame] FAIL: frame scratch buffers unavailable after recreate") return _vk_begin_false("scratch_after_recreate") }
       if !_vk_frame_targets_ready(has_surface) { ui_profile.print_text("[begin_frame] FAIL: frame targets unavailable after recreate") return _vk_begin_false("targets_after_recreate") }
       if _deep_on { _vk_deep_begin_recreate_ms = ui_profile.elapsed_ms(_t_recreate) }
-      return _vk_begin_false("recreated")
+      ;; Continue into the same frame after a successful recreate. Returning
+      ;; false here made the caller skip drawing for one refresh, which looked
+      ;; like black bars or flicker during resize/load churn.
    }
    _vk_stage("begin.fence")
    _vk_stage("begin.fence.slab")
