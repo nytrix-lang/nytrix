@@ -53,29 +53,29 @@ mut _text_runs = []
 mut _text_run_count = 0
 mut _text_char_count = 0
 def C_BG = color_hex("#000000")
-def C_PANEL = color_hex("#050505")
-def C_PANEL_ALT = color_hex("#0a0a0a")
-def C_IDLE = color_hex("#111111")
-def C_TEXT = color_hex("#eeeeee")
-def C_MUTED = color_hex("#b8b8b8")
-def C_SUBTLE = color_hex("#777777")
-def C_ACCENT = color_hex("#d0d0d0")
-def C_ACCENT_SOFT = color_hex("#181818")
-def C_ACTIVE = color_hex("#323232")
-def C_ACTIVE_SOFT = color_hex("#1c1c1c")
-def C_ACTIVE_HI = color_hex("#f0f0f0")
-def C_ACTIVE_RING = color_hex("#999999")
+def C_PANEL = color_hex("#080808")
+def C_PANEL_ALT = color_hex("#131318")
+def C_IDLE = color_hex("#15151b")
+def C_TEXT = color_hex("#f5f5f6")
+def C_MUTED = color_hex("#c6c6ca")
+def C_SUBTLE = color_hex("#808087")
+def C_ACCENT = color_hex("#9f86d9")
+def C_ACCENT_SOFT = color_hex("#181321")
+def C_ACTIVE = color_hex("#563d7c")
+def C_ACTIVE_SOFT = color_hex("#261b35")
+def C_ACTIVE_HI = color_hex("#bda9ec")
+def C_ACTIVE_RING = color_hex("#6e5a96")
 def C_BLACK = color_hex("#000000")
-def C_MID = color_hex("#242424")
-def C_STICK = color_hex("#0d0d0d")
+def C_MID = color_hex("#282531")
+def C_STICK = color_hex("#101014")
 
 ;; Controller-only palette. Keep this isolated from generic GUI button colors.
 ;; Important: face/menu/bumper/D-pad/stick/trigger all reuse this same palette.
 ;; There are no per-button colors, so A/B/X/Y, menu buttons, and bumpers cannot drift
 ;; into green/blue/red depending on the control identity or a shared GUI theme tweak.
-def C_PAD_IDLE = color_hex("#121212")
-def C_PAD_EDGE = color_hex("#282828")
-def C_PAD_DOWN = color_hex("#404040")
+def C_PAD_IDLE = color_hex("#141319")
+def C_PAD_EDGE = color_hex("#272432")
+def C_PAD_DOWN = color_hex("#5d3f8c")
 def C_PAD_DOWN_EDGE = C_PAD_EDGE
 def C_PAD_AXIS = C_PAD_DOWN
 def C_PAD_MARK = C_PAD_DOWN
